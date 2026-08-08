@@ -3922,6 +3922,53 @@ app.post('/api/abastecimento/:id/divergencia', auth.requireAuth, async (req, res
   }
 });
 
+// pedir CORRECAO de um lancamento (pedido OU envio): quantidade errada,
+// envio fora do tempo, qualquer imprevisto - abre um Ticket pro Master na
+// Central e marca o card com o numero (as duas pontas podem pedir)
+app.post('/api/abastecimento/:id/pedir-correcao', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podePedirAbastecimento(req) && !podeEnviarAbastecimento(req)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    }
+    const reg = await abastecimentoCarrinho.getOne(req.params.id);
+    if (!reg || !['PEDIDO', 'ENVIO'].includes(reg.tipo)) return res.status(404).json({ error: 'Lançamento não encontrado.' });
+    if (reg.correcao && reg.correcao.numeroTicket) {
+      return res.status(400).json({ error: `Já existe um pedido de correção aberto pra esse lançamento (Ticket #${reg.correcao.numeroTicket}).` });
+    }
+    const motivo = String(req.body.motivo || '').trim().slice(0, 500);
+    if (!motivo) return res.status(400).json({ error: 'Descreva o que precisa ser corrigido.' });
+    const itensTxt = abastecimentoCarrinho.SABORES
+      .filter((s) => Number(reg.pizzas?.[s]) > 0).map((s) => `${reg.pizzas[s]} ${s}`)
+      .concat((reg.insumos || []).map((i) => i.insumoId ? `${i.nome} (${i.quantidade} ${i.embalagem === 'caixa' ? 'cx' : 'un'})` : i.descricao))
+      .join(', ') || '—';
+    const quando = new Date(reg.criadoEm).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const ticket = await solicitacoes.create({
+      tipo: 'suporte-ti',
+      unidade: "Domino's Carrinho Aeroporto Recife",
+      unidadeNome: 'Dom Car Aero Recife',
+      titulo: `Abastecimento: correção solicitada (${reg.tipo} de ${quando})`,
+      observacao: `Correção pedida por ${req.user.username || req.user.email}.\n\nLançamento: ${reg.tipo} de ${quando}, por ${reg.operadorNome || reg.criadoPorNome || '—'}${reg.operadorUsuario ? ' (@' + reg.operadorUsuario + ')' : ''}.\nItens: ${itensTxt}\n\nMotivo: ${motivo}`,
+      prioridade: 'alta',
+      criadoPorId: req.user.id,
+      criadoPorEmail: req.user.email,
+      direcionadoParaId: null,
+      direcionadoParaEmail: null,
+    });
+    broadcast('solicitacao-criada', ticket, 'solicitacoes');
+    push.notifySolicitacao(`Ticket #${ticket.numeroTicket} · Correção no Abastecimento`, motivo.slice(0, 120), ticket.id);
+    const registro = await abastecimentoCarrinho.registrarPedidoCorrecao(req.params.id, {
+      motivo,
+      numeroTicket: ticket.numeroTicket,
+      porEmail: req.user.email,
+      porNome: req.user.username || req.user.email,
+    });
+    broadcast('abastecimento-atualizado', { id: registro.id });
+    res.json({ registro, numeroTicket: ticket.numeroTicket });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ----- config (Master define os horarios do popup de contagem) -----
 app.get('/api/abastecimento-config', requireAnySection('abastecimento-carrinho', 'abastecimento-loja'), async (req, res) => {
   res.json(await abastecimentoCarrinho.getConfig());
