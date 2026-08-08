@@ -436,17 +436,25 @@
   </div>
 </div>
 
-<!-- pedir correcao de um lancamento (pedido/envio): vira Ticket pro Master -->
+<!-- pedir correcao de um lancamento (pedido/envio) - modelo do fechamento:
+     o solicitante propoe (ALTERAR quantidades ou REMOVER) com justificativa
+     e vai pra analise/aprovacao do Master -->
 <div class="overlay hidden" id="overlay-correcao" style="align-items:center;">
-  <div class="sheet-wrap" style="max-width:380px;">
+  <div class="sheet-wrap" style="max-width:400px;">
     <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharPedirCorrecao()">✕</span>
     <div class="sheet" style="border-radius:14px;">
       <h3>🛠 Pedir correção</h3>
       <div class="sub" id="correcao-resumo"></div>
-      <label>O que precisa ser corrigido?</label>
+      <div style="display:flex;gap:8px;margin:10px 0 12px;">
+        <button type="button" class="cat-toggle on" id="correcao-tab-alterar" onclick="correcaoAcao('alterar')">✏️ Alterar quantidades</button>
+        <button type="button" class="cat-toggle off" id="correcao-tab-remover" onclick="correcaoAcao('remover')">🗑 Remover lançamento</button>
+      </div>
+      <div id="correcao-itens" style="display:flex;flex-direction:column;gap:8px;"></div>
+      <div class="sub hidden" id="correcao-aviso-remover" style="color:var(--bad);margin-top:4px;">O lançamento inteiro será removido se o Master aprovar.</div>
+      <label style="margin-top:10px;">Justificativa</label>
       <textarea id="correcao-motivo" placeholder="ex: foi enviada quantidade errada / envio lançado fora do horário real / lançamento duplicado..."></textarea>
-      <div class="sub" style="margin-top:6px;">Isso abre um <b>Ticket na Central</b> pro Master analisar e corrigir — o card fica marcado com o número do ticket.</div>
-      <button type="button" class="btn-primary" id="btn-correcao-ok" onclick="enviarPedirCorrecao()">Enviar pro Master</button>
+      <div class="sub" style="margin-top:6px;">Vai pra <b>análise e aprovação do Master</b> (vira Ticket na Central). Nada muda até ele aprovar — o card fica marcado "em análise".</div>
+      <button type="button" class="btn-primary" id="btn-correcao-ok" onclick="enviarPedirCorrecao()">Enviar pra aprovação</button>
       <div class="msg hidden" id="msg-correcao"></div>
     </div>
   </div>
@@ -877,13 +885,25 @@ function insumoTexto(i){
   return `${escapeHtml(i.descricao)}${i.quantidade?` <span>· ${escapeHtml(i.quantidade)}</span>`:''}`;
 }
 
-// "pedir correção" no rodape de cada pedido/envio: quantidade errada,
-// envio fora do tempo, qualquer imprevisto - abre um Ticket pro Master.
-// Depois de aberto, o link vira o numero do ticket (1 correcao por card)
+// "pedir correção" no rodape de cada pedido/envio - modelo do fechamento:
+// o solicitante propoe (alterar quantidades ou remover) com justificativa e
+// vai pra aprovacao do Master, que decide direto no card
 function correcaoHtml(r){
   if(r.tipo==='CONTAGEM') return '';
-  if(r.correcao && r.correcao.numeroTicket){
-    return `<span class="badge" style="background:var(--warn-dim);color:var(--warn);" title="${escapeHtml(r.correcao.motivo||'')}">🛠 correção · Ticket #${r.correcao.numeroTicket}</span>`;
+  const c = r.correcao;
+  if(c && c.numeroTicket){
+    const st = c.status || 'pendente';
+    const dica = `${c.acao==='remover'?'Remover lançamento':'Alterar quantidades'} — ${c.motivo||''}`;
+    if(st==='pendente'){
+      let html = `<span class="badge" style="background:var(--warn-dim);color:var(--warn);" title="${escapeHtml(dica)}">🛠 em análise · Ticket #${c.numeroTicket}</span>`;
+      if(IS_MASTER){
+        html += ` <button type="button" class="cat-toggle on" onclick="decidirCorrecao('${r.id}', true)">✔ aprovar</button>`
+             + ` <button type="button" class="cat-toggle off" onclick="decidirCorrecao('${r.id}', false)">✖ recusar</button>`;
+      }
+      return html;
+    }
+    if(st==='aprovada') return `<span class="badge atendido" title="${escapeHtml(dica)}">✅ corrigido · Ticket #${c.numeroTicket}</span>`;
+    return `<span class="badge" style="background:var(--bad-dim);color:var(--bad);" title="${escapeHtml(dica)}">✖ correção recusada · Ticket #${c.numeroTicket}</span>`;
   }
   return `<span style="cursor:pointer;color:var(--accent);text-decoration:underline;" onclick="abrirPedirCorrecao('${r.id}')">🛠 pedir correção</span>`;
 }
@@ -1283,31 +1303,76 @@ async function confirmarEnvioRapido(){
   }
 }
 
-// ---------- pedir correcao (qualquer ponta) -> Ticket pro Master ----------
+// ---------- pedir correcao (qualquer ponta) -> analise do Master ----------
 let CORRECAO_REG_ID = null;
+let CORRECAO_ACAO = 'alterar';
 function abrirPedirCorrecao(id){
   const r = REGS.find(x=>x.id===id);
   if(!r) return;
   CORRECAO_REG_ID = id;
-  const itens = SABORES.filter(s=>Number(r.pizzas?.[s])>0).map(s=>`${r.pizzas[s]} ${SABOR_LABEL[s]}`)
-    .concat((r.insumos||[]).map(i=>i.insumoId ? `${i.nome} (${i.quantidade} ${i.embalagem==='caixa'?'cx':'un'})` : i.descricao));
   document.getElementById('correcao-resumo').textContent =
-    `${r.tipo==='PEDIDO'?'🛒 Pedido':'🚚 Envio'} de ${fmtHora(r.criadoEm)} · ${itens.join(', ')||'—'}`;
+    `${r.tipo==='PEDIDO'?'🛒 Pedido':'🚚 Envio'} de ${fmtHora(r.criadoEm)} · por ${r.operadorNome||r.criadoPorNome||'—'}`;
+  // itens do lancamento com a quantidade editavel (proposta) - 0 remove o item
+  let html = '';
+  SABORES.forEach(s=>{
+    const q = Number(r.pizzas?.[s])||0;
+    if(!q) return;
+    html += `<div style="display:flex;align-items:center;gap:8px;">
+      <span style="flex:1;font-size:13px;">${SABOR_LABEL[s]}</span>
+      <span style="font-family:var(--mono);font-size:10.5px;color:var(--muted);">lançado ${q}</span>
+      <input type="number" min="0" value="${q}" data-cor-pizza="${s}" style="width:70px;padding:7px 8px;">
+    </div>`;
+  });
+  (r.insumos||[]).forEach((ins,idx)=>{
+    const q = Number(ins.quantidade)||0;
+    if(!q) return;
+    html += `<div style="display:flex;align-items:center;gap:8px;">
+      <span style="flex:1;font-size:13px;">${escapeHtml(ins.nome||ins.descricao||'')} <span style="color:var(--muted);font-size:11px;">${ins.insumoId?`(${ins.embalagem==='caixa'?'cx':'un'})`:''}</span></span>
+      <span style="font-family:var(--mono);font-size:10.5px;color:var(--muted);">lançado ${q}</span>
+      <input type="number" min="0" value="${q}" data-cor-insumo="${idx}" style="width:70px;padding:7px 8px;">
+    </div>`;
+  });
+  document.getElementById('correcao-itens').innerHTML = html || '<div class="empty" style="padding:8px;">—</div>';
+  correcaoAcao('alterar');
   document.getElementById('correcao-motivo').value = '';
   document.getElementById('msg-correcao').classList.add('hidden');
   document.getElementById('overlay-correcao').classList.remove('hidden');
-  document.getElementById('correcao-motivo').focus();
+}
+// alternar entre propor ALTERACAO (inputs editaveis) e REMOCAO do lancamento
+function correcaoAcao(acao){
+  CORRECAO_ACAO = acao;
+  document.getElementById('correcao-tab-alterar').className = 'cat-toggle ' + (acao==='alterar'?'on':'off');
+  document.getElementById('correcao-tab-remover').className = 'cat-toggle ' + (acao==='remover'?'on':'off');
+  document.getElementById('correcao-itens').style.opacity = acao==='alterar' ? '' : '.35';
+  document.querySelectorAll('#correcao-itens input').forEach(inp=>{ inp.disabled = acao!=='alterar'; });
+  document.getElementById('correcao-aviso-remover').classList.toggle('hidden', acao!=='remover');
 }
 function fecharPedirCorrecao(){ document.getElementById('overlay-correcao').classList.add('hidden'); CORRECAO_REG_ID = null; }
 async function enviarPedirCorrecao(){
+  const r = REGS.find(x=>x.id===CORRECAO_REG_ID);
+  if(!r) return;
   const btn = document.getElementById('btn-correcao-ok');
   const msg = document.getElementById('msg-correcao');
   msg.classList.add('hidden');
   btn.disabled = true; btn.textContent = 'Enviando...';
   try{
-    const resp = await fetch(`/api/abastecimento/${CORRECAO_REG_ID}/pedir-correcao`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
-      motivo: document.getElementById('correcao-motivo').value,
-    }) });
+    const body = { acao: CORRECAO_ACAO, motivo: document.getElementById('correcao-motivo').value };
+    if(CORRECAO_ACAO==='alterar'){
+      // proposta: quantidades dos inputs por cima do que foi lancado
+      body.pizzas = { ...(r.pizzas||{}) };
+      document.querySelectorAll('#correcao-itens input[data-cor-pizza]').forEach(inp=>{
+        body.pizzas[inp.dataset.corPizza] = Number(inp.value)||0;
+      });
+      const qtdNova = {};
+      document.querySelectorAll('#correcao-itens input[data-cor-insumo]').forEach(inp=>{
+        qtdNova[inp.dataset.corInsumo] = Number(inp.value)||0;
+      });
+      body.insumos = (r.insumos||[]).map((ins,idx)=>({
+        ...(ins.insumoId ? { insumoId: ins.insumoId, embalagem: ins.embalagem } : { descricao: ins.descricao }),
+        quantidade: idx in qtdNova ? qtdNova[idx] : ins.quantidade,
+      })).filter(i=>Number(i.quantidade)>0);
+    }
+    const resp = await fetch(`/api/abastecimento/${CORRECAO_REG_ID}/pedir-correcao`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao pedir a correção.');
     fecharPedirCorrecao();
@@ -1315,8 +1380,23 @@ async function enviarPedirCorrecao(){
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
   }finally{
-    btn.disabled = false; btn.textContent = 'Enviar pro Master';
+    btn.disabled = false; btn.textContent = 'Enviar pra aprovação';
   }
+}
+
+// decisao do Master direto no card: aprovar aplica (altera/remove), recusar
+// so registra - o solicitante ve o resultado no proprio badge
+async function decidirCorrecao(id, aprovar){
+  const r = REGS.find(x=>x.id===id);
+  if(!r || !r.correcao) return;
+  const oQue = r.correcao.acao==='remover' ? 'REMOVER o lançamento inteiro' : 'ALTERAR as quantidades pra proposta enviada';
+  if(!confirm(`${aprovar?'Aprovar':'Recusar'} a correção do Ticket #${r.correcao.numeroTicket}?${aprovar?` Isso vai ${oQue}.`:''}\n\nJustificativa: ${r.correcao.motivo||'—'}`)) return;
+  try{
+    const resp = await fetch(`/api/abastecimento/${id}/correcao/decidir`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ aprovar }) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao decidir.');
+    await carregar();
+  }catch(err){ alert(err.message); }
 }
 
 // ---------- gestao de operadores (Master/Admin) ----------
