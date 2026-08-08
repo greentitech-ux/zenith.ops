@@ -250,14 +250,42 @@
   <div class="sheet-wrap">
     <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharCorrecao()">✕</span>
     <div class="sheet">
-    <h3>Pedir correção</h3>
+    <h3>🛠 Pedir correção</h3>
     <div class="sub" id="correcao-info"></div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <button type="button" class="btn-secundario" id="cor-tab-alterar" onclick="correcaoAba('alterar')">✏️ Alterar dados</button>
+      <button type="button" class="btn-secundario" id="cor-tab-excluir" onclick="correcaoAba('excluir')">🗑️ Remover (excluir)</button>
+    </div>
     <form id="form-correcao">
-      <div class="sub" style="color:var(--bad);">Esse check-in (dados, crianças, termo) será excluído se o Master aprovar. Depois de aprovado, não tem como desfazer.</div>
-      <label>Motivo</label>
-      <textarea id="cor-motivo" placeholder="explique o que aconteceu, o Master vai revisar antes de aprovar" required></textarea>
+      <div id="cor-bloco-alterar">
+        <label>Nome do responsável</label>
+        <input type="text" id="cor-nome">
+        <div class="grid2">
+          <div><label>Contato</label><input type="text" id="cor-contato"></div>
+          <div><label>Data</label><input type="date" id="cor-data"></div>
+        </div>
+        <div class="grid2">
+          <div><label>Tempo</label><select id="cor-tempo"></select></div>
+          <div><label>Horário previsto</label><input type="time" id="cor-previsto"></div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);margin-top:12px;">
+          <input type="checkbox" id="cor-ac" style="width:auto;" onchange="document.getElementById('cor-ac-quant-wrap').classList.toggle('hidden', !this.checked)"> Adulto cortesia (A.C.)
+        </label>
+        <div id="cor-ac-quant-wrap" class="hidden"><label>Quantos A.C.?</label><input type="number" id="cor-ac-quant" min="1" max="10" value="1"></div>
+        <label>Observação</label>
+        <textarea id="cor-observacao"></textarea>
+        <div class="secao-titulo">Crianças — altere, adicione ou remova</div>
+        <div id="cor-criancas"></div>
+        <button type="button" class="btn-secundario" style="margin-top:8px;" onclick="corAddCrianca()">➕ Adicionar criança</button>
+      </div>
+      <div id="cor-bloco-excluir" class="hidden">
+        <div class="sub" style="color:var(--bad);">O check-in inteiro (dados, crianças, termo) será excluído quando o pedido for aprovado. Depois de aprovado, não tem como desfazer.</div>
+      </div>
+      <label>Justificativa</label>
+      <textarea id="cor-motivo" placeholder="explique o que aconteceu" required></textarea>
+      <div class="sub" style="margin-top:8px;">Passa pela aprovação do Gerente da unidade ou do Master. Todo pedido vira um Ticket pro Master dar a palavra final.</div>
       <div class="msg hidden" id="msg-correcao"></div>
-      <button class="btn-primary" type="submit" style="width:100%;margin-top:14px;">Enviar pedido ao Master</button>
+      <button class="btn-primary" type="submit" style="width:100%;margin-top:14px;" id="btn-enviar-correcao">Enviar proposta de alteração</button>
     </form>
     </div>
   </div>
@@ -369,40 +397,103 @@ function edicaoPendentePara(checkinId){
   return EDICOES.find(e=>e.checkinId===checkinId && e.status==='PENDENTE');
 }
 
-// pedidos de correção de check-in (so o Master/Admin decide, mesmo fluxo
-// do fechamento de caixa e das entregas - ver server/parque.js)
+// pedidos de correção de check-in: o Gerente da unidade ou o Master/Admin
+// decide (mesma regra do check-out antecipado). A mudança aplica na hora,
+// mas a palavra final é do Master, no Ticket que todo pedido abre na
+// Central (prestação de contas de quem aprovou)
+function resumoPropostaCliente(p){
+  if(!p) return '';
+  const partes = [];
+  if(p.responsavel?.nome!==undefined) partes.push(`nome → ${p.responsavel.nome}`);
+  if(p.responsavel?.contato!==undefined) partes.push(`contato → ${p.responsavel.contato||'—'}`);
+  if(p.dataUtilizacao!==undefined) partes.push(`data → ${fmtData(p.dataUtilizacao)}`);
+  if(p.tempoMinutos!==undefined) partes.push(`tempo → ${p.tempoMinutos}min`);
+  if(p.horarioPrevisto!==undefined) partes.push(`previsto → ${(p.horarioPrevisto||'').slice(0,5)||'—'}`);
+  if(p.adultoCortesia!==undefined) partes.push(`A.C. → ${p.adultoCortesia?'x'+(p.quantAC||1):'não'}`);
+  if(p.criancas!==undefined) partes.push(`crianças → ${p.criancas.map(cr=>cr.nome).join(', ')}`);
+  if(p.observacao!==undefined) partes.push(`obs → ${p.observacao||'—'}`);
+  return partes.join('\n');
+}
+
 function renderEdicoes(){
   const pendentes = EDICOES.filter(e=>e.status==='PENDENTE');
-  const podeDecidir = IS_MASTER || IS_ADMIN;
-  document.getElementById('edicoes-panel').classList.toggle('hidden', !podeDecidir || pendentes.length===0);
-  document.getElementById('edicoes-lista').innerHTML = pendentes.map(p=>`
+  document.getElementById('edicoes-panel').classList.toggle('hidden', pendentes.length===0);
+  document.getElementById('edicoes-lista').innerHTML = pendentes.map(p=>{
+    const ehAlterar = p.tipoCorrecao==='alterar';
+    const podeDecidir = podeAprovarCheckout(p.unidade);
+    return `
     <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;">
-      <div style="font-size:12.5px;font-weight:600;">${escapeHtml(p.responsavelNome)} · ${escapeHtml(p.unidadeNome||p.unidade)} · ${fmtData(p.dataUtilizacao)}</div>
-      <div class="sub" style="margin:2px 0 6px;">excluir o check-in · pedido por ${escapeHtml(p.solicitadoPorEmail)} em ${new Date(p.criadoEm).toLocaleString('pt-BR',{timeZone:FUSO_BR})}</div>
+      <div style="font-size:12.5px;font-weight:600;">${escapeHtml(p.responsavelNome)} · ${escapeHtml(p.unidadeNome||p.unidade)} · ${fmtData(p.dataUtilizacao)}${p.numeroTicket?` · <span style="color:var(--accent);">Ticket #${p.numeroTicket}</span>`:''}</div>
+      <div class="sub" style="margin:2px 0 6px;">${ehAlterar?'✏️ alterar dados':'🗑️ excluir o check-in'} · pedido por ${escapeHtml(p.solicitadoPorEmail)} em ${new Date(p.criadoEm).toLocaleString('pt-BR',{timeZone:FUSO_BR})}</div>
+      ${ehAlterar?`<div style="font-size:12px;color:var(--warn);margin-bottom:6px;white-space:pre-wrap;">${escapeHtml(resumoPropostaCliente(p.proposta))}</div>`:''}
       <div style="font-size:12px;color:var(--text);margin-bottom:8px;white-space:pre-wrap;">${escapeHtml(p.motivo)}</div>
-      <div style="display:flex;gap:8px;">
+      ${podeDecidir?`<div style="display:flex;gap:8px;">
         <button type="button" class="btn-secundario" style="color:var(--ok);border-color:var(--ok-dim);" onclick="decidirEdicaoParque('${p.id}','APROVADO')">✓ Aprovar</button>
         <button type="button" class="btn-secundario" style="color:var(--bad);border-color:var(--bad-dim);" onclick="decidirEdicaoParque('${p.id}','REJEITADO')">✕ Rejeitar</button>
-      </div>
-    </div>
-  `).join('');
+      </div>`:`<div class="sub">aguardando o Gerente da unidade ou o Master decidir</div>`}
+    </div>`;
+  }).join('');
 }
 
 async function decidirEdicaoParque(id, status){
-  const pergunta = status==='APROVADO' ? 'Tem certeza que deseja aprovar? O check-in será excluído.' : 'Tem certeza que deseja rejeitar esse pedido?';
+  const p = EDICOES.find(e=>e.id===id);
+  const ehAlterar = p && p.tipoCorrecao==='alterar';
+  const pergunta = status==='APROVADO'
+    ? (ehAlterar ? 'Aprovar? A proposta será aplicada no check-in na hora.' : 'Tem certeza que deseja aprovar? O check-in será excluído.')
+    : 'Tem certeza que deseja rejeitar esse pedido?';
   if(!confirm(pergunta)) return;
   let motivoDecisao = '';
   if(status==='REJEITADO'){ motivoDecisao = prompt('Motivo da rejeição (opcional):') || ''; }
-  await fetch(`/api/parque/checkins/edicoes/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status, motivoDecisao}) });
+  const res = await fetch(`/api/parque/checkins/edicoes/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status, motivoDecisao}) });
+  if(!res.ok){ const data = await res.json().catch(()=>({})); alert(data.error||'erro ao decidir'); }
   await carregar();
+}
+
+let CORRECAO_ABA = 'alterar';
+function correcaoAba(aba){
+  CORRECAO_ABA = aba;
+  document.getElementById('cor-bloco-alterar').classList.toggle('hidden', aba!=='alterar');
+  document.getElementById('cor-bloco-excluir').classList.toggle('hidden', aba!=='excluir');
+  document.getElementById('cor-tab-alterar').style.borderColor = aba==='alterar' ? 'var(--accent)' : 'var(--line)';
+  document.getElementById('cor-tab-excluir').style.borderColor = aba==='excluir' ? 'var(--bad)' : 'var(--line)';
+  document.getElementById('btn-enviar-correcao').textContent = aba==='excluir' ? 'Pedir exclusão' : 'Enviar proposta de alteração';
+}
+
+function corAddCrianca(nome, nasc){
+  const div = document.createElement('div');
+  div.className = 'crianca-linha';
+  div.innerHTML = `<input type="text" placeholder="Nome da criança" class="cor-cr-nome">
+    <div class="crianca-linha-nasc">
+      <div><input type="date" class="cor-cr-nasc"></div>
+      <button type="button" class="btn-remover-crianca" title="Remover criança" onclick="this.closest('.crianca-linha').remove()">🗑</button>
+    </div>`;
+  div.querySelector('.cor-cr-nome').value = nome||'';
+  div.querySelector('.cor-cr-nasc').value = (nasc||'').slice(0,10);
+  document.getElementById('cor-criancas').appendChild(div);
 }
 
 function abrirCorrecao(id){
   CORRIGINDO_ID = id;
   const c = TODOS.find(x=>x.id===id);
   document.getElementById('correcao-info').textContent = `${c.responsavel?.nome||''} · ${c.unidadeNome||c.unidade} · ${fmtData(c.dataUtilizacao)}`;
+  // pré-preenche a proposta com o que está cadastrado hoje - a pessoa só
+  // mexe no que precisa corrigir
+  document.getElementById('cor-nome').value = c.responsavel?.nome || '';
+  document.getElementById('cor-contato').value = c.responsavel?.contato || '';
+  document.getElementById('cor-data').value = c.dataUtilizacao || '';
+  const sel = document.getElementById('cor-tempo');
+  sel.innerHTML = [30,60,90,120,150,180,210,240].map(t=>`<option value="${t}">${t} min</option>`).join('');
+  sel.value = String(c.tempoMinutos || 60);
+  document.getElementById('cor-previsto').value = (c.horarioPrevisto||'').slice(0,5);
+  document.getElementById('cor-ac').checked = !!c.adultoCortesia;
+  document.getElementById('cor-ac-quant-wrap').classList.toggle('hidden', !c.adultoCortesia);
+  document.getElementById('cor-ac-quant').value = c.quantAC || 1;
+  document.getElementById('cor-observacao').value = c.observacao || '';
+  document.getElementById('cor-criancas').innerHTML = '';
+  (c.criancas||[]).forEach(cr=>corAddCrianca(cr.nome, cr.dataNascimento));
   document.getElementById('cor-motivo').value = '';
   document.getElementById('msg-correcao').classList.add('hidden');
+  correcaoAba('alterar');
   document.getElementById('overlay-correcao').classList.remove('hidden');
 }
 function fecharCorrecao(){ document.getElementById('overlay-correcao').classList.add('hidden'); CORRIGINDO_ID=null; }
@@ -412,13 +503,30 @@ document.getElementById('form-correcao').addEventListener('submit', async (ev)=>
   const msg = document.getElementById('msg-correcao');
   msg.classList.add('hidden');
   try{
+    const body = { tipoCorrecao: CORRECAO_ABA, motivo: document.getElementById('cor-motivo').value };
+    if(CORRECAO_ABA==='alterar'){
+      body.proposta = {
+        responsavel: { nome: document.getElementById('cor-nome').value, contato: document.getElementById('cor-contato').value },
+        dataUtilizacao: document.getElementById('cor-data').value,
+        tempoMinutos: Number(document.getElementById('cor-tempo').value),
+        horarioPrevisto: document.getElementById('cor-previsto').value || null,
+        observacao: document.getElementById('cor-observacao').value,
+        adultoCortesia: document.getElementById('cor-ac').checked,
+        quantAC: Number(document.getElementById('cor-ac-quant').value)||1,
+        criancas: [...document.querySelectorAll('#cor-criancas .crianca-linha')].map(l=>({
+          nome: l.querySelector('.cor-cr-nome').value,
+          dataNascimento: l.querySelector('.cor-cr-nasc').value || null,
+        })),
+      };
+    }
     const res = await fetch(`/api/parque/checkins/${CORRIGINDO_ID}/solicitar-edicao`, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ motivo: document.getElementById('cor-motivo').value }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if(!res.ok) throw new Error(data.error||'erro ao enviar pedido');
     fecharCorrecao();
+    alert(`Pedido de correção enviado — Ticket #${data.numeroTicket}. O Gerente da unidade ou o Master vai revisar.`);
     await carregar();
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
@@ -549,7 +657,7 @@ function renderLista(lista){
           ${(c.checkoutEm && !c.checkoutAprovado)?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="retomarCheckout('${c.id}')">↩ Voltar (criança retornou)</button>`:''}
           ${(c.checkoutEm && !c.checkoutAprovado && podeAprovarCheckout(c.unidade))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="aprovarCheckout('${c.id}')">✓ Aprovar check-out</button>`:''}
           ${IS_MASTER?`<button type="button" class="link-btn" onclick="abrirMaster('${c.id}')">✎ Editar</button>`:''}
-          ${edicaoPendentePara(c.id)?`<span class="sub" style="color:var(--accent);">correção pendente</span>`:`<button type="button" class="link-btn" style="color:var(--bad);" onclick="abrirCorrecao('${c.id}')">🗑️ Pedir correção</button>`}
+          ${edicaoPendentePara(c.id)?`<span class="sub" style="color:var(--accent);">correção pendente</span>`:`<button type="button" class="link-btn" onclick="abrirCorrecao('${c.id}')">🛠 Pedir correção</button>`}
         </div>
       </div>`;
     }).join('');

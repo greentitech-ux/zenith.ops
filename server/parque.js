@@ -288,13 +288,60 @@ async function remover(id) {
   parqueCache.invalidar();
 }
 
-// pedido de exclusao (unico tipo de correcao por enquanto - o resto do
-// cadastro ja pode ser editado direto via atualizar()) - so aplica de
-// verdade quando o Master aprova em decidirEdicao()
-async function solicitarEdicao({ checkinId, motivo, solicitadoPorId, solicitadoPorEmail }) {
+// monta a proposta de alteracao com os mesmos criterios de atualizar() -
+// validar aqui (na hora do pedido) evita aprovar uma proposta que depois
+// falharia na aplicacao. Devolve so os campos que a proposta realmente muda
+function validarPropostaEdicao(proposta) {
+  if (!proposta || typeof proposta !== 'object') throw new Error('Preencha a proposta de alteração.');
+  const p = {};
+  if (proposta.responsavel && typeof proposta.responsavel === 'object') {
+    const r = {};
+    if (proposta.responsavel.nome !== undefined) {
+      const nome = String(proposta.responsavel.nome).trim().slice(0, 150);
+      if (!nome) throw new Error('Informe o nome do responsável.');
+      r.nome = nome;
+    }
+    if (proposta.responsavel.contato !== undefined) r.contato = String(proposta.responsavel.contato).trim().slice(0, 30);
+    if (Object.keys(r).length) p.responsavel = r;
+  }
+  if (proposta.dataUtilizacao !== undefined && proposta.dataUtilizacao !== null && proposta.dataUtilizacao !== '') {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(proposta.dataUtilizacao)) throw new Error('Data inválida.');
+    p.dataUtilizacao = proposta.dataUtilizacao;
+  }
+  if (proposta.tempoMinutos !== undefined && proposta.tempoMinutos !== null && proposta.tempoMinutos !== '') {
+    const tempo = Number(proposta.tempoMinutos);
+    if (!TEMPOS_VALIDOS.includes(tempo)) throw new Error('Escolha um tempo válido.');
+    p.tempoMinutos = tempo;
+  }
+  if (proposta.horarioPrevisto !== undefined) {
+    p.horarioPrevisto = proposta.horarioPrevisto ? validarHora(proposta.horarioPrevisto, 'o horário previsto') : null;
+  }
+  if (proposta.observacao !== undefined) p.observacao = String(proposta.observacao).slice(0, 300);
+  if (proposta.adultoCortesia !== undefined) {
+    p.adultoCortesia = proposta.adultoCortesia === true;
+    p.quantAC = p.adultoCortesia ? Math.max(0, Math.min(10, num(proposta.quantAC) || 1)) : 0;
+  }
+  if (proposta.criancas !== undefined) {
+    const criancasOk = sanitizarCriancas(proposta.criancas);
+    if (!criancasOk.length) throw new Error('Cadastre pelo menos uma criança.');
+    p.criancas = criancasOk;
+  }
+  if (!Object.keys(p).length) throw new Error('A proposta não altera nada.');
+  return p;
+}
+
+// pedido de correcao: 'alterar' (aplica a proposta de mudanca nos dados,
+// nas criancas etc.) ou 'excluir' (remove o registro inteiro). Nada muda
+// ate alguem aprovar em decidirEdicao() - quem decide e o Gerente da
+// unidade ou o Master/Admin (checado no index.js). Todo pedido tambem vira
+// um Ticket na Central pro Master dar a palavra final (prestacao de
+// contas), mesmo quando o Gerente ja aprovou pra agilizar
+async function solicitarEdicao({ checkinId, tipoCorrecao, proposta, motivo, numeroTicket, ticketId, solicitadoPorId, solicitadoPorEmail }) {
   const atual = await getOne(checkinId);
   if (!atual) throw new Error('Check-in não encontrado.');
   if (!motivo || !String(motivo).trim()) throw new Error('Descreva o motivo da correção.');
+  const tipo = tipoCorrecao === 'alterar' ? 'alterar' : 'excluir';
+  const propostaOk = tipo === 'alterar' ? validarPropostaEdicao(proposta) : null;
   const pendentes = await listarEdicoes();
   if (pendentes.some((p) => p.checkinId === checkinId && p.status === 'PENDENTE')) {
     throw new Error('Já existe um pedido de correção pendente para esse check-in.');
@@ -304,17 +351,21 @@ async function solicitarEdicao({ checkinId, motivo, solicitadoPorId, solicitadoP
   const pedido = {
     id: ref.id,
     checkinId,
-    tipoCorrecao: 'excluir',
+    tipoCorrecao: tipo,
+    proposta: propostaOk,
     unidade: atual.unidade,
     unidadeNome: atual.unidadeNome,
     responsavelNome: atual.responsavel?.nome || '',
     dataUtilizacao: atual.dataUtilizacao,
     motivo: String(motivo).trim(),
+    numeroTicket: numeroTicket || null,
+    ticketId: ticketId || null,
     status: 'PENDENTE',
     solicitadoPorId,
     solicitadoPorEmail,
     criadoEm: new Date().toISOString(),
     decididoPorEmail: null,
+    decididoPorGerente: false,
     decididoEm: null,
     motivoDecisao: null,
   };
@@ -330,7 +381,11 @@ async function listarEdicoesUncached() {
 const edicoesParqueCache = createCache(listarEdicoesUncached, 20 * 1000);
 const listarEdicoes = edicoesParqueCache.cached;
 
-async function decidirEdicao(id, status, { decididoPorEmail, motivoDecisao }) {
+// decididoPorGerente marca quando quem aprovou foi um Gerente da unidade
+// (nao Master/Admin) - a mudanca aplica na hora pra agilizar a operacao,
+// mas o Gerente presta contas: o Ticket do pedido fica com o Master pra
+// palavra final (ver rota de decisao no index.js)
+async function decidirEdicao(id, status, { decididoPorEmail, motivoDecisao, decididoPorGerente }) {
   if (!['APROVADO', 'REJEITADO'].includes(status)) throw new Error('Status inválido.');
   const ref = EDITS.doc(id);
   const doc = await ref.get();
@@ -341,15 +396,21 @@ async function decidirEdicao(id, status, { decididoPorEmail, motivoDecisao }) {
   await ref.update({
     status,
     decididoPorEmail,
+    decididoPorGerente: decididoPorGerente === true,
     motivoDecisao: motivoDecisao || null,
     decididoEm: new Date().toISOString(),
   });
   edicoesParqueCache.invalidar();
 
-  if (status === 'APROVADO' && pedido.tipoCorrecao === 'excluir') {
-    await remover(pedido.checkinId);
+  let checkinAtualizado = null;
+  if (status === 'APROVADO') {
+    if (pedido.tipoCorrecao === 'alterar') {
+      checkinAtualizado = await atualizar(pedido.checkinId, pedido.proposta || {});
+    } else {
+      await remover(pedido.checkinId);
+    }
   }
-  return { ...pedido, status };
+  return { ...pedido, status, decididoPorEmail, decididoPorGerente: decididoPorGerente === true, checkinAtualizado };
 }
 
 function soDigitos(v) {
@@ -505,7 +566,7 @@ async function buscarPorCpf(cpf) {
 
 module.exports = {
   TEMPOS_VALIDOS, criar, checkin, listAll, listByUnidades, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
-  solicitarEdicao, listarEdicoes, decidirEdicao,
+  solicitarEdicao, listarEdicoes, decidirEdicao, validarPropostaEdicao,
   checkout, aprovarCheckout, retomarCheckout, creditoPorCpf, usarCredito,
   invalidar: () => parqueCache.invalidar(),
 };

@@ -2635,9 +2635,32 @@ app.post('/api/parque/checkins/:id/retomar-checkout', requireAnySection('parque'
   }
 });
 
-// depois de enviado, um check-in nao pode mais ser excluido direto - so
-// mediante pedido de correcao (aprovado/rejeitado pelo Master), mesmo
-// fluxo do fechamento de caixa e das entregas
+// resumo legivel de um check-in do parque / de uma proposta de alteracao,
+// pro texto do Ticket de correcao (o Master le tudo na Central)
+function resumoCheckinParque(c) {
+  const criancas = (c.criancas || []).map((cr) => cr.nome).join(', ') || '—';
+  return `${c.responsavel?.nome || '—'} · ${reportUtil.fmtDataBR(c.dataUtilizacao)} · ${c.tempoMinutos}min · previsto ${(c.horarioPrevisto || '').slice(0, 5) || '—'} · A.C. ${c.adultoCortesia ? 'x' + (c.quantAC || 1) : 'não'} · crianças: ${criancas}${c.observacao ? ' · obs: ' + c.observacao : ''}`;
+}
+function resumoPropostaParque(p) {
+  const partes = [];
+  if (p.responsavel?.nome !== undefined) partes.push(`nome → ${p.responsavel.nome}`);
+  if (p.responsavel?.contato !== undefined) partes.push(`contato → ${p.responsavel.contato || '—'}`);
+  if (p.dataUtilizacao !== undefined) partes.push(`data → ${reportUtil.fmtDataBR(p.dataUtilizacao)}`);
+  if (p.tempoMinutos !== undefined) partes.push(`tempo → ${p.tempoMinutos}min`);
+  if (p.horarioPrevisto !== undefined) partes.push(`previsto → ${(p.horarioPrevisto || '').slice(0, 5) || '—'}`);
+  if (p.adultoCortesia !== undefined) partes.push(`A.C. → ${p.adultoCortesia ? 'x' + (p.quantAC || 1) : 'não'}`);
+  if (p.criancas !== undefined) partes.push(`crianças → ${p.criancas.map((cr) => cr.nome).join(', ')}`);
+  if (p.observacao !== undefined) partes.push(`obs → ${p.observacao || '—'}`);
+  return partes.join(' · ') || '—';
+}
+
+// depois de enviado, um check-in nao pode mais ser mexido direto - correcao
+// (alterar dados/criancas ou excluir) vira um pedido que o Gerente da
+// unidade ou o Master/Admin aprova, mesmo fluxo do fechamento de caixa e do
+// Abastecimento. Todo pedido tambem abre um Ticket na Central: mesmo quando
+// o Gerente aprova pra agilizar, ele presta contas e o Master da a palavra
+// final concluindo o ticket. Sem push - Master/Admin nao recebem
+// notificacao dessas correcoes, veem na Central quando abrirem
 app.post('/api/parque/checkins/:id/solicitar-edicao', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
   try {
     const atual = await parque.getOne(req.params.id);
@@ -2645,9 +2668,35 @@ app.post('/api/parque/checkins/:id/solicitar-edicao', requireAnySection('parque'
     if (!req.isMaster && !(req.permissions.unidades || []).includes(atual.unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
+    // valida tudo ANTES de abrir o ticket, pra nao criar ticket orfao se o
+    // pedido em si for recusado (proposta invalida, pendencia duplicada...)
+    const motivo = String(req.body.motivo || '').trim();
+    if (!motivo) return res.status(400).json({ error: 'Descreva o motivo da correção.' });
+    const jaPendente = (await parque.listarEdicoes()).some((p) => p.checkinId === req.params.id && p.status === 'PENDENTE');
+    if (jaPendente) return res.status(400).json({ error: 'Já existe um pedido de correção pendente para esse check-in.' });
+    const tipoCorrecao = req.body.tipoCorrecao === 'alterar' ? 'alterar' : 'excluir';
+    const proposta = tipoCorrecao === 'alterar' ? parque.validarPropostaEdicao(req.body.proposta) : null;
+    const propostaTxt = tipoCorrecao === 'excluir' ? 'EXCLUIR o check-in inteiro' : resumoPropostaParque(proposta);
+    const ticket = await solicitacoes.create({
+      tipo: 'suporte-ti',
+      unidade: atual.unidade,
+      unidadeNome: atual.unidadeNome || atual.unidade,
+      titulo: `Parque: correção solicitada (${atual.responsavel?.nome || 'check-in'} · ${reportUtil.fmtDataBR(atual.dataUtilizacao)})`,
+      observacao: `Correção pedida por ${req.user.username || req.user.email}.\n\nCadastrado: ${resumoCheckinParque(atual)}\nProposta: ${propostaTxt}\n\nJustificativa: ${motivo}\n\nO Gerente da unidade pode aprovar/rejeitar na tela do Parque pra agilizar; a palavra final (prestação de contas) é do Master, concluindo este ticket.`,
+      prioridade: 'alta',
+      criadoPorId: req.user.id,
+      criadoPorEmail: req.user.email,
+      direcionadoParaId: null,
+      direcionadoParaEmail: null,
+    });
+    broadcast('solicitacao-criada', ticket, 'solicitacoes');
     const pedido = await parque.solicitarEdicao({
       checkinId: req.params.id,
-      motivo: req.body.motivo,
+      tipoCorrecao,
+      proposta,
+      motivo,
+      numeroTicket: ticket.numeroTicket,
+      ticketId: ticket.id,
       solicitadoPorId: req.user.id,
       solicitadoPorEmail: req.user.email,
     });
@@ -2660,20 +2709,56 @@ app.post('/api/parque/checkins/:id/solicitar-edicao', requireAnySection('parque'
 
 app.get('/api/parque/checkins/edicoes', requireSection('parque'), async (req, res) => {
   const todas = await parque.listarEdicoes();
-  if (req.isMaster) return res.json(todas);
+  if (req.isMaster || req.isAdmin) return res.json(todas);
+  // Gerente ve os pedidos das unidades dele (pra poder decidir); os demais
+  // acompanham so os proprios pedidos
+  if (req.user && req.user.cargo === 'gerente') {
+    const unidades = req.permissions?.unidades || [];
+    return res.json(todas.filter((p) => unidades.includes(p.unidade) || p.solicitadoPorId === req.user.id));
+  }
   res.json(todas.filter((p) => p.solicitadoPorId === req.user.id));
 });
 
-app.patch('/api/parque/checkins/edicoes/:id', auth.requireMasterOrAdmin, async (req, res) => {
+// decidir a correcao: Gerente da PROPRIA unidade ou Master/Admin (mesma
+// regra do check-out antecipado - ver podeAprovarCheckoutParque). Aprovar
+// aplica a mudanca na hora (alterar aplica a proposta, excluir remove o
+// registro); quando quem decidiu foi o Gerente, a decisao fica registrada
+// no Ticket pro Master dar a palavra final (prestacao de contas)
+app.patch('/api/parque/checkins/edicoes/:id', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
   try {
+    const pedidoAtual = (await parque.listarEdicoes()).find((p) => p.id === req.params.id);
+    if (!pedidoAtual) return res.status(404).json({ error: 'Pedido não encontrado.' });
+    if (!podeAprovarCheckoutParque(req, pedidoAtual.unidade)) {
+      return res.status(403).json({ error: 'Só um Gerente da unidade (ou Master/Admin) pode decidir a correção.' });
+    }
+    const decididoPorGerente = !(req.isMaster || req.isAdmin);
     const pedido = await parque.decidirEdicao(req.params.id, req.body.status, {
       decididoPorEmail: req.user.email,
       motivoDecisao: req.body.motivoDecisao,
+      decididoPorGerente,
     });
     broadcast('parque-edicao-decidida', pedido, 'parque');
-    if (pedido.status === 'APROVADO') {
+    if (pedido.status === 'APROVADO' && pedido.tipoCorrecao === 'alterar' && pedido.checkinAtualizado) {
+      broadcast('parque-checkin-atualizado', pedido.checkinAtualizado, 'parque');
+      broadcast('parque-checkin-atualizado', pedido.checkinAtualizado, 'parque-checkin');
+    } else if (pedido.status === 'APROVADO' && pedido.tipoCorrecao !== 'alterar') {
       broadcast('parque-checkin-excluido', { id: pedido.checkinId }, 'parque');
       broadcast('parque-checkin-excluido', { id: pedido.checkinId }, 'parque-checkin');
+    }
+    // prestacao de contas no ticket: registra quem decidiu e o que mudou,
+    // pro Master revisar e concluir (nao notifica ninguem por push)
+    if (pedido.ticketId) {
+      try {
+        const t = await solicitacoes.getOne(pedido.ticketId);
+        if (t) {
+          const quando = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+          const quem = decididoPorGerente ? `Gerente ${req.user.username || req.user.email}` : (req.user.username || req.user.email);
+          const nota = `[Decisão] ${pedido.status} por ${quem} em ${quando}${req.body.motivoDecisao ? ' — ' + String(req.body.motivoDecisao).slice(0, 300) : ''}.${decididoPorGerente ? ' Aguardando a palavra final do Master (concluir este ticket).' : ''}`;
+          await solicitacoes.update(pedido.ticketId, { observacao: `${t.observacao || ''}\n\n${nota}` });
+        }
+      } catch (e) {
+        console.error('Falha ao registrar decisão no ticket do parque:', e.message);
+      }
     }
     res.json(pedido);
   } catch (err) {
@@ -5202,8 +5287,10 @@ app.use((err, req, res, next) => {
 
     // varredura do check-in automatico do Saltiverso: pra cada check-in do
     // dia com horarioPrevisto ja vencido e que ninguem confirmou na mao, o
-    // relogio comeca sozinho nesse horario e a equipe recebe um aviso (nao
-    // foi uma entrada fisica confirmada). Roda a cada 1 minuto.
+    // relogio comeca sozinho nesse horario. Esse e o fluxo NORMAL do parque
+    // (o botao manual so serve pra entrada ANTECIPADA - entra antes, sai
+    // antes), entao nao gera push/alerta nenhum: so o broadcast SSE pras
+    // telas abertas atualizarem a lista. Roda a cada 1 minuto.
     // fora do horario de funcionamento do parque (shopping fechado) nao
     // existe check-in pra iniciar - pular a varredura de madrugada corta
     // ~1/3 das consultas diarias ao Firestore desse job e deixa o servidor
@@ -5216,12 +5303,6 @@ app.use((err, req, res, next) => {
       for (const c of feitos) {
         broadcast('parque-checkin-automatico', c, 'parque');
         broadcast('parque-checkin-automatico', c, 'parque-checkin');
-        push.notifyParqueAutoCheckin(
-          'Check-in automático',
-          `${c.responsavel?.nome || 'Cliente'} · ${c.unidadeNome || c.unidade} · ${(c.timeInicial || '').slice(0, 5)} - ninguém confirmou a entrada, verifique.`,
-          `parque-auto-${c.id}`,
-          c.unidade,
-        ).catch((err) => console.error('Erro ao notificar check-in automático:', err.message));
       }
     };
     rodarAutoCheckinsParque().catch((err) => console.error('Erro na varredura de check-in automático:', err.message));
