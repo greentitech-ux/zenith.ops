@@ -190,6 +190,12 @@ async function validarOperador({ usuario, senha, papel }) {
   return operadorPublico(op);
 }
 
+// assinatura de acoes que valem pras DUAS pontas (ex: pedir correcao):
+// QUALQUER operador ativo autentica, sem exigir papel especifico
+async function validarOperadorQualquerPapel({ usuario, senha }) {
+  return operadorPublico(await autenticarOperador({ usuario, senha }));
+}
+
 // o PROPRIO operador troca seu papel (pede <-> envia) autenticando com a
 // propria senha - sem depender do Master pra mudar de ponta
 async function trocarPapelOperador({ usuario, senha, papel }) {
@@ -437,7 +443,7 @@ async function getOne(id) {
 // Ticket pro Master e fica PENDENTE ate ele aprovar/recusar. So na
 // aprovacao a proposta e aplicada de verdade. 1 correcao aberta por
 // lancamento, pra nao chover ticket repetido.
-async function registrarPedidoCorrecao(id, { acao, propostaPizzas, propostaInsumos, motivo, numeroTicket, porEmail, porNome }) {
+async function registrarPedidoCorrecao(id, { acao, propostaPizzas, propostaInsumos, motivo, numeroTicket, porEmail, porNome, operador }) {
   const atual = await getOne(id);
   if (!atual) throw new Error('Registro não encontrado.');
   if (atual.correcao && atual.correcao.numeroTicket && (atual.correcao.status || 'pendente') === 'pendente') {
@@ -457,6 +463,9 @@ async function registrarPedidoCorrecao(id, { acao, propostaPizzas, propostaInsum
     solicitadaEm: new Date().toISOString(),
     porEmail: porEmail || null,
     porNome: porNome || null,
+    // operador de balcao (qualquer ponta) que assinou o pedido de correcao
+    porOperadorUsuario: operador ? operador.usuario : null,
+    porOperadorNome: operador ? operador.nome : null,
   };
   await COLLECTION.doc(id).update({ correcao });
   cache.invalidar();
@@ -702,5 +711,5 @@ const listAll = cache.cached;
 module.exports = {
   TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, getConfig, salvarConfig,
   listarInsumos, criarInsumo, atualizarInsumo,
-  listarOperadores, criarOperador, atualizarOperador, removerOperador, desbloquearOperador, validarOperador, trocarPapelOperador,
+  listarOperadores, criarOperador, atualizarOperador, removerOperador, desbloquearOperador, validarOperador, validarOperadorQualquerPapel, trocarPapelOperador,
 };
