@@ -436,6 +436,22 @@
   </div>
 </div>
 
+<!-- pedir correcao de um lancamento (pedido/envio): vira Ticket pro Master -->
+<div class="overlay hidden" id="overlay-correcao" style="align-items:center;">
+  <div class="sheet-wrap" style="max-width:380px;">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharPedirCorrecao()">✕</span>
+    <div class="sheet" style="border-radius:14px;">
+      <h3>🛠 Pedir correção</h3>
+      <div class="sub" id="correcao-resumo"></div>
+      <label>O que precisa ser corrigido?</label>
+      <textarea id="correcao-motivo" placeholder="ex: foi enviada quantidade errada / envio lançado fora do horário real / lançamento duplicado..."></textarea>
+      <div class="sub" style="margin-top:6px;">Isso abre um <b>Ticket na Central</b> pro Master analisar e corrigir — o card fica marcado com o número do ticket.</div>
+      <button type="button" class="btn-primary" id="btn-correcao-ok" onclick="enviarPedirCorrecao()">Enviar pro Master</button>
+      <div class="msg hidden" id="msg-correcao"></div>
+    </div>
+  </div>
+</div>
+
 <!-- gestao de operadores (login local de balcao) - Master/Admin -->
 <div class="overlay hidden" id="overlay-operadores">
   <div class="sheet-wrap">
@@ -861,6 +877,17 @@ function insumoTexto(i){
   return `${escapeHtml(i.descricao)}${i.quantidade?` <span>· ${escapeHtml(i.quantidade)}</span>`:''}`;
 }
 
+// "pedir correção" no rodape de cada pedido/envio: quantidade errada,
+// envio fora do tempo, qualquer imprevisto - abre um Ticket pro Master.
+// Depois de aberto, o link vira o numero do ticket (1 correcao por card)
+function correcaoHtml(r){
+  if(r.tipo==='CONTAGEM') return '';
+  if(r.correcao && r.correcao.numeroTicket){
+    return `<span class="badge" style="background:var(--warn-dim);color:var(--warn);" title="${escapeHtml(r.correcao.motivo||'')}">🛠 correção · Ticket #${r.correcao.numeroTicket}</span>`;
+  }
+  return `<span style="cursor:pointer;color:var(--accent);text-decoration:underline;" onclick="abrirPedirCorrecao('${r.id}')">🛠 pedir correção</span>`;
+}
+
 function regCardHtml(r){
   const porId = {};
   REGS.forEach(x=>{ porId[x.id]=x; });
@@ -912,7 +939,7 @@ function regCardHtml(r){
       ${insumosHtml}
       ${r.observacao ? `<div class="reg-obs">${escapeHtml(r.observacao)}</div>` : ''}
       ${pendente(r) && TEM_ENVIO ? `<button type="button" class="btn-acao envio" style="margin-top:8px;padding:9px 10px;font-size:12.5px;min-width:0;width:100%;" onclick="envioRapido('${r.id}')">⚡ Envio rápido — mandar exatamente o que foi pedido</button>` : ''}
-      <div class="reg-quem"><span>por ${escapeHtml(r.operadorNome||r.criadoPorNome||r.criadoPorEmail||'—')}${r.operadorUsuario?` <span style="font-family:var(--mono);color:var(--accent);">@${escapeHtml(r.operadorUsuario)}</span>`:''}</span>${IS_MASTER?`<button type="button" class="btn-excluir" onclick="excluir('${r.id}')">🗑 excluir</button>`:''}</div>
+      <div class="reg-quem"><span>por ${escapeHtml(r.operadorNome||r.criadoPorNome||r.criadoPorEmail||'—')}${r.operadorUsuario?` <span style="font-family:var(--mono);color:var(--accent);">@${escapeHtml(r.operadorUsuario)}</span>`:''}</span><span style="display:flex;gap:10px;align-items:center;">${correcaoHtml(r)}${IS_MASTER?`<button type="button" class="btn-excluir" onclick="excluir('${r.id}')">🗑 excluir</button>`:''}</span></div>
     </div>`;
 }
 
@@ -1253,6 +1280,42 @@ async function confirmarEnvioRapido(){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
   }finally{
     btn.disabled = false; btn.textContent = txtBtn;
+  }
+}
+
+// ---------- pedir correcao (qualquer ponta) -> Ticket pro Master ----------
+let CORRECAO_REG_ID = null;
+function abrirPedirCorrecao(id){
+  const r = REGS.find(x=>x.id===id);
+  if(!r) return;
+  CORRECAO_REG_ID = id;
+  const itens = SABORES.filter(s=>Number(r.pizzas?.[s])>0).map(s=>`${r.pizzas[s]} ${SABOR_LABEL[s]}`)
+    .concat((r.insumos||[]).map(i=>i.insumoId ? `${i.nome} (${i.quantidade} ${i.embalagem==='caixa'?'cx':'un'})` : i.descricao));
+  document.getElementById('correcao-resumo').textContent =
+    `${r.tipo==='PEDIDO'?'🛒 Pedido':'🚚 Envio'} de ${fmtHora(r.criadoEm)} · ${itens.join(', ')||'—'}`;
+  document.getElementById('correcao-motivo').value = '';
+  document.getElementById('msg-correcao').classList.add('hidden');
+  document.getElementById('overlay-correcao').classList.remove('hidden');
+  document.getElementById('correcao-motivo').focus();
+}
+function fecharPedirCorrecao(){ document.getElementById('overlay-correcao').classList.add('hidden'); CORRECAO_REG_ID = null; }
+async function enviarPedirCorrecao(){
+  const btn = document.getElementById('btn-correcao-ok');
+  const msg = document.getElementById('msg-correcao');
+  msg.classList.add('hidden');
+  btn.disabled = true; btn.textContent = 'Enviando...';
+  try{
+    const resp = await fetch(`/api/abastecimento/${CORRECAO_REG_ID}/pedir-correcao`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      motivo: document.getElementById('correcao-motivo').value,
+    }) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao pedir a correção.');
+    fecharPedirCorrecao();
+    await carregar();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{
+    btn.disabled = false; btn.textContent = 'Enviar pro Master';
   }
 }
 

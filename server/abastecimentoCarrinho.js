@@ -431,6 +431,28 @@ async function getOne(id) {
   return doc.exists ? doc.data() : null;
 }
 
+// pedido de CORRECAO (qualquer lancamento, pedido ou envio): quantidade
+// errada, envio fora do tempo, qualquer imprevisto - vira um Ticket pro
+// Master na Central e o card fica marcado com o numero (1 correcao aberta
+// por lancamento, pra nao chover ticket repetido)
+async function registrarPedidoCorrecao(id, { motivo, numeroTicket, porEmail, porNome }) {
+  const atual = await getOne(id);
+  if (!atual) throw new Error('Registro não encontrado.');
+  if (atual.correcao && atual.correcao.numeroTicket) {
+    throw new Error(`Já existe um pedido de correção aberto pra esse lançamento (Ticket #${atual.correcao.numeroTicket}).`);
+  }
+  const correcao = {
+    motivo: String(motivo || '').trim().slice(0, 500),
+    numeroTicket: numeroTicket || null,
+    solicitadaEm: new Date().toISOString(),
+    porEmail: porEmail || null,
+    porNome: porNome || null,
+  };
+  await COLLECTION.doc(id).update({ correcao });
+  cache.invalidar();
+  return { ...atual, correcao };
+}
+
 // "Ja lancei": pedido retroativo ("ja recebi") cujo ENVIO ja tinha sido
 // registrado antes (ex: envio avulso na hora, so o pedido que faltou) - a
 // loja fecha o ciclo SEM criar outro envio, evitando duplicar o material
@@ -638,7 +660,7 @@ const cache = createCache(listAllUncached, 15 * 1000);
 const listAll = cache.cached;
 
 module.exports = {
-  TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, confirmarRecebimento, registrarDivergencia, getConfig, salvarConfig,
+  TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, getConfig, salvarConfig,
   listarInsumos, criarInsumo, atualizarInsumo,
   listarOperadores, criarOperador, atualizarOperador, removerOperador, desbloquearOperador, validarOperador, trocarPapelOperador,
 };
