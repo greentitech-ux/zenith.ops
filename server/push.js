@@ -130,21 +130,22 @@ async function notify(tx) {
     title: titleFor(tx),
     body: `${tx.nomeCliente || tx.cardHolder || 'Cliente'} · R$ ${(tx.valor || 0).toFixed(2)}${tx.motivo ? ' · ' + tx.motivo : ''}`,
     tag: tx.pspReference,
+    url: '/monitor.html',
   }, { unidade: tx.unidade, section: 'monitor' });
 }
 
 // alerta generico (ex: teste de cartao clonado) - nao depende de uma
 // transacao especifica normalizada
 async function notifyRaw(title, body, tag, unidade) {
-  await sendToAll({ title, body, tag }, { unidade, section: 'monitor' });
+  await sendToAll({ title, body, tag, url: '/monitor.html' }, { unidade, section: 'monitor' });
 }
 
 // solicitacao nova na Central (estorno, ajuste de fechamento, pagamento,
 // suporte de TI etc.) - vai so pra Master/Admin, que sao quem decide essas
 // filas (mesmo publico do toast+som ja existente no Painel)
-async function notifySolicitacao(title, body, tag) {
+async function notifySolicitacao(title, body, tag, url) {
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
-  const payload = JSON.stringify({ title, body, tag });
+  const payload = JSON.stringify({ title, body, tag, url: url || '/central-historico.html' });
   const subs = await loadSubs();
   for (const sub of subs) {
     if (!podeReceberSolicitacao(sub)) continue;
@@ -165,7 +166,7 @@ async function notifySolicitacao(title, body, tag) {
 // alarme e assunto do balcao, nao da gestao
 async function notifyAbastecimento(title, body, tag, secao) {
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
-  const payload = JSON.stringify({ title, body, tag });
+  const payload = JSON.stringify({ title, body, tag, url: '/abastecimento.html' });
   const subs = await loadSubs();
   for (const sub of subs) {
     const meta = sub.meta;
@@ -187,7 +188,7 @@ async function notifyAbastecimento(title, body, tag, secao) {
 // fisica ate o horario previsto - ver rodarAutoCheckins em parque.js)
 async function notifyParqueAutoCheckin(title, body, tag, unidade) {
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
-  const payload = JSON.stringify({ title, body, tag });
+  const payload = JSON.stringify({ title, body, tag, url: '/parque.html' });
   const subs = await loadSubs();
   for (const sub of subs) {
     if (!podeReceberParque(sub, unidade)) continue;
