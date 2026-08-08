@@ -105,7 +105,10 @@ function linhaParaCheckin(header, linha) {
       cpf: String(get(header, linha, 'CPF') || '').trim().slice(0, 20),
       contato: String(get(header, linha, 'Contato') || '').trim().slice(0, 30),
       email: String(get(header, linha, 'EmailCliente') || '').trim().slice(0, 150),
-      cep: String(get(header, linha, 'CEP') || '').trim().slice(0, 300),
+      // o AppSheet antigo guardava o endereco INTEIRO na coluna CEP -
+      // separa na importacao pra cada campo cair no lugar certo
+      cep: parque.separarCepEndereco(get(header, linha, 'CEP'), '').cep.slice(0, 20),
+      endereco: parque.separarCepEndereco(get(header, linha, 'CEP'), '').endereco.slice(0, 300),
       numero: String(get(header, linha, 'Numero') || '').trim().slice(0, 20),
       complemento: String(get(header, linha, 'Complemento') || '').trim().slice(0, 100),
     },

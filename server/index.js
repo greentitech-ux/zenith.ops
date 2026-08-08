@@ -3937,6 +3937,12 @@ app.post('/api/abastecimento/:id/pedir-correcao', auth.requireAuth, async (req, 
     }
     const motivo = String(req.body.motivo || '').trim().slice(0, 500);
     if (!motivo) return res.status(400).json({ error: 'Descreva a justificativa da correção.' });
+    // assinatura obrigatoria: QUALQUER operador de balcao (pede ou envia)
+    // autentica com usuario+senha pra confirmar o pedido de correcao
+    const operador = await abastecimentoCarrinho.validarOperadorQualquerPapel({
+      usuario: req.body.operadorUsuario,
+      senha: req.body.operadorSenha,
+    });
     const acao = req.body.acao === 'remover' ? 'remover' : 'alterar';
     const itensTxtDe = (pizzas, insumos) => abastecimentoCarrinho.SABORES
       .filter((s) => Number(pizzas?.[s]) > 0).map((s) => `${pizzas[s]} ${s}`)
@@ -3951,7 +3957,7 @@ app.post('/api/abastecimento/:id/pedir-correcao', auth.requireAuth, async (req, 
       unidade: "Domino's Carrinho Aeroporto Recife",
       unidadeNome: 'Dom Car Aero Recife',
       titulo: `Abastecimento: correção solicitada (${reg.tipo} de ${quando})`,
-      observacao: `Correção pedida por ${req.user.username || req.user.email}.\n\nLançamento: ${reg.tipo} de ${quando}, por ${reg.operadorNome || reg.criadoPorNome || '—'}${reg.operadorUsuario ? ' (@' + reg.operadorUsuario + ')' : ''}.\nLançado: ${enviadoTxt}\nProposta: ${propostaTxt}\n\nJustificativa: ${motivo}\n\nAprovar ou recusar direto no card, na tela do Abastecimento.`,
+      observacao: `Correção pedida pelo operador ${operador.nome || operador.usuario} (@${operador.usuario}), na sessão de ${req.user.username || req.user.email}.\n\nLançamento: ${reg.tipo} de ${quando}, por ${reg.operadorNome || reg.criadoPorNome || '—'}${reg.operadorUsuario ? ' (@' + reg.operadorUsuario + ')' : ''}.\nLançado: ${enviadoTxt}\nProposta: ${propostaTxt}\n\nJustificativa: ${motivo}\n\nAprovar ou recusar direto no card, na tela do Abastecimento.`,
       prioridade: 'alta',
       criadoPorId: req.user.id,
       criadoPorEmail: req.user.email,
@@ -3968,10 +3974,12 @@ app.post('/api/abastecimento/:id/pedir-correcao', auth.requireAuth, async (req, 
       numeroTicket: ticket.numeroTicket,
       porEmail: req.user.email,
       porNome: req.user.username || req.user.email,
+      operador,
     });
     broadcast('abastecimento-atualizado', { id: registro.id });
     res.json({ registro, numeroTicket: ticket.numeroTicket });
   } catch (err) {
+    if (err.operadorBloqueado) abrirTicketBloqueioOperador(err.operadorBloqueado, req);
     res.status(400).json({ error: err.message });
   }
 });

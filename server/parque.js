@@ -129,8 +129,10 @@ async function criar({
       cpf: String(responsavel.cpf || '').trim().slice(0, 20),
       contato: String(responsavel.contato).trim().slice(0, 30),
       email: String(responsavel.email || '').trim().slice(0, 150),
-      cep: String(responsavel.cep || '').trim().slice(0, 300),
-      endereco: String(responsavel.endereco || '').trim().slice(0, 300),
+      // separa CEP/endereco caso venha tudo junto no campo CEP (padrao do
+      // app antigo - ver separarCepEndereco)
+      cep: separarCepEndereco(responsavel.cep, responsavel.endereco).cep.slice(0, 20),
+      endereco: separarCepEndereco(responsavel.cep, responsavel.endereco).endereco.slice(0, 300),
       numero: String(responsavel.numero || '').trim().slice(0, 20),
       complemento: String(responsavel.complemento || '').trim().slice(0, 100),
     },
@@ -468,6 +470,22 @@ async function usarCredito(cpf, minutos) {
   return usar;
 }
 
+// o app antigo (AppSheet) guardava o ENDERECO INTEIRO no campo CEP
+// ("R. Três - Janga, Paulista - PE, 53439-520, Brasil") - separa: o codigo
+// vai pro CEP e o resto vira o endereco (sem o "Brasil" do final). CEP ja
+// limpo passa direto, e um endereco ja preenchido nunca e sobrescrito.
+function separarCepEndereco(cepBruto, enderecoAtual) {
+  const bruto = String(cepBruto || '').trim();
+  const endereco = String(enderecoAtual || '').trim();
+  if (!bruto || /^\d{5}-?\d{3}$/.test(bruto)) return { cep: bruto, endereco };
+  const m = bruto.match(/(\d{5})-?(\d{3})/);
+  const cep = m ? `${m[1]}-${m[2]}` : '';
+  const resto = bruto.replace(m ? m[0] : '', '')
+    .split(',').map((p) => p.trim()).filter((p) => p && !/^brasil\.?$/i.test(p))
+    .join(', ');
+  return { cep, endereco: endereco || resto };
+}
+
 // pra autopreenchimento do formulario de check-in: acha o cadastro mais
 // recente com o mesmo CPF (comparando so os digitos, ja que a planilha
 // importada tem CPF as vezes com pontuacao e as vezes sem)
@@ -478,11 +496,15 @@ async function buscarPorCpf(cpf) {
   const encontrados = todos.filter((c) => soDigitos(c.responsavel?.cpf) === alvo);
   if (!encontrados.length) return null;
   encontrados.sort((a, b) => (b.criadoEm || '').localeCompare(a.criadoEm || ''));
-  return encontrados[0];
+  // registros importados do app antigo podem ter o endereco inteiro dentro
+  // do CEP - normaliza aqui pra cada campo cair no lugar certo do formulario
+  const achado = encontrados[0];
+  const sep = separarCepEndereco(achado.responsavel?.cep, achado.responsavel?.endereco);
+  return { ...achado, responsavel: { ...achado.responsavel, ...sep } };
 }
 
 module.exports = {
-  TEMPOS_VALIDOS, criar, checkin, listAll, listByUnidades, getOne, atualizar, buscarPorCpf, rodarAutoCheckins,
+  TEMPOS_VALIDOS, criar, checkin, listAll, listByUnidades, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
   solicitarEdicao, listarEdicoes, decidirEdicao,
   checkout, aprovarCheckout, retomarCheckout, creditoPorCpf, usarCredito,
   invalidar: () => parqueCache.invalidar(),

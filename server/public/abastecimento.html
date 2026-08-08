@@ -453,6 +453,13 @@
       <div class="sub hidden" id="correcao-aviso-remover" style="color:var(--bad);margin-top:4px;">O lançamento inteiro será removido se o Master aprovar.</div>
       <label style="margin-top:10px;">Justificativa</label>
       <textarea id="correcao-motivo" placeholder="ex: foi enviada quantidade errada / envio lançado fora do horário real / lançamento duplicado..."></textarea>
+      <!-- assinatura: QUALQUER operador de balcao (pede ou envia) confirma
+           com usuario+senha, como todo lancamento -->
+      <label>Quem está pedindo? <span style="text-transform:none;letter-spacing:0;">(login do operador — qualquer ponta)</span></label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <input type="text" id="correcao-op-usuario" maxlength="4" autocomplete="off" list="dl-operadores" placeholder="usuário (4 letras)" style="text-transform:lowercase;">
+        <input type="password" id="correcao-op-senha" maxlength="4" inputmode="numeric" autocomplete="new-password" placeholder="senha (4 números)">
+      </div>
       <div class="sub" style="margin-top:6px;">Vai pra <b>análise e aprovação do Master</b> (vira Ticket na Central). Nada muda até ele aprovar — o card fica marcado "em análise".</div>
       <button type="button" class="btn-primary" id="btn-correcao-ok" onclick="enviarPedirCorrecao()">Enviar pra aprovação</button>
       <div class="msg hidden" id="msg-correcao"></div>
@@ -1335,6 +1342,9 @@ function abrirPedirCorrecao(id){
   document.getElementById('correcao-itens').innerHTML = html || '<div class="empty" style="padding:8px;">—</div>';
   correcaoAcao('alterar');
   document.getElementById('correcao-motivo').value = '';
+  // lembra so o USUARIO do ultimo operador (a senha nunca fica salva)
+  document.getElementById('correcao-op-usuario').value = localStorage.getItem('abastOperadorUsuario') || '';
+  document.getElementById('correcao-op-senha').value = '';
   document.getElementById('msg-correcao').classList.add('hidden');
   document.getElementById('overlay-correcao').classList.remove('hidden');
 }
@@ -1356,7 +1366,13 @@ async function enviarPedirCorrecao(){
   msg.classList.add('hidden');
   btn.disabled = true; btn.textContent = 'Enviando...';
   try{
-    const body = { acao: CORRECAO_ACAO, motivo: document.getElementById('correcao-motivo').value };
+    const operadorUsuario = document.getElementById('correcao-op-usuario').value.trim().toLowerCase();
+    const body = {
+      acao: CORRECAO_ACAO,
+      motivo: document.getElementById('correcao-motivo').value,
+      operadorUsuario,
+      operadorSenha: document.getElementById('correcao-op-senha').value.trim(),
+    };
     if(CORRECAO_ACAO==='alterar'){
       // proposta: quantidades dos inputs por cima do que foi lancado
       body.pizzas = { ...(r.pizzas||{}) };
@@ -1374,7 +1390,8 @@ async function enviarPedirCorrecao(){
     }
     const resp = await fetch(`/api/abastecimento/${CORRECAO_REG_ID}/pedir-correcao`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const data = await resp.json();
-    if(!resp.ok) throw new Error(data.error || 'Erro ao pedir a correção.');
+    if(!resp.ok){ document.getElementById('correcao-op-senha').value = ''; throw new Error(data.error || 'Erro ao pedir a correção.'); }
+    lembrarOperadorUsado(operadorUsuario);
     fecharPedirCorrecao();
     await carregar();
   }catch(err){
@@ -1666,10 +1683,10 @@ document.addEventListener('click', ()=>{ if(ALARME_AUDIO_CTX && ALARME_AUDIO_CTX
 
 // ENTER no campo de senha autentica/envia direto (balcao agil, sem mouse);
 // no usuario, ENTER pula pra senha
-[['f-op-senha', ()=>salvar()], ['pin-senha', ()=>confirmarEnvioRapido()], ['op-novo-senha', ()=>adicionarOperador()]].forEach(([id, fn])=>{
+[['f-op-senha', ()=>salvar()], ['pin-senha', ()=>confirmarEnvioRapido()], ['op-novo-senha', ()=>adicionarOperador()], ['correcao-op-senha', ()=>enviarPedirCorrecao()]].forEach(([id, fn])=>{
   document.getElementById(id).addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); fn(); } });
 });
-[['f-op-usuario','f-op-senha'], ['pin-usuario','pin-senha'], ['op-novo-usuario','op-novo-senha']].forEach(([de, para])=>{
+[['f-op-usuario','f-op-senha'], ['pin-usuario','pin-senha'], ['op-novo-usuario','op-novo-senha'], ['correcao-op-usuario','correcao-op-senha']].forEach(([de, para])=>{
   document.getElementById(de).addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); document.getElementById(para).focus(); } });
 });
 
