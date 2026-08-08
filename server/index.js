@@ -66,6 +66,20 @@ const upload = multer({
 
 const app = express();
 
+// cabecalhos de seguranca basicos em TODA resposta (sem dependencia nova):
+// - nosniff: navegador nao "adivinha" tipo de arquivo (evita executar
+//   upload malicioso como script)
+// - SAMEORIGIN: nenhum site externo pode embutir o app num iframe
+//   (clickjacking)
+// - Referrer-Policy: paginas com token na URL (downloads/SSE) nao vazam a
+//   URL completa pro destino quando alguem clica num link externo
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 // fuso horario usado em todos os timestamps "Exportado em ..." dos
 // relatorios (CSV/PDF) - sem isso, new Date().toLocaleString() usa o fuso
 // do servidor (normalmente UTC em hospedagem), saindo com 2-3h de diferenca
@@ -178,14 +192,41 @@ if (process.env.ADYEN_HMAC_KEYS) {
 const LEGACY_HMAC_KEY = process.env.ADYEN_HMAC_KEY || '';
 
 // ---------- login (sem token ainda) e portao de autenticacao pro resto da API ----------
+// freio de forca-bruta no login, por IP+conta: a conta comum ja bloqueia
+// sozinha com 3 senhas erradas, mas a MASTER nao (senao um atacante
+// derrubaria o dono de proposito) - este freio cobre exatamente esse caso.
+// 10 tentativas FALHAS em 15 min travam novas tentativas daquele IP pra
+// aquela conta; acerto zera. Em memoria - reinicio limpa, o que e ok:
+// forca-bruta precisa de milhares de tentativas seguidas.
+const LOGIN_FALHAS = new Map();
+const LOGIN_JANELA_MS = 15 * 60 * 1000;
+const LOGIN_MAX_FALHAS = 10;
+function chaveLogin(req) {
+  const ip = String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
+  const conta = String(req.body.identifier || req.body.email || '').trim().toLowerCase();
+  return `${ip}|${conta}`;
+}
 app.post('/api/auth/login', async (req, res) => {
+  const chave = chaveLogin(req);
+  const falhas = LOGIN_FALHAS.get(chave);
+  if (falhas && falhas.count >= LOGIN_MAX_FALHAS && Date.now() - falhas.desdeMs < LOGIN_JANELA_MS) {
+    return res.status(429).json({ error: 'Muitas tentativas de login. Aguarde 15 minutos e tente de novo.' });
+  }
   try {
     const result = await auth.login(req.body.identifier || req.body.email, req.body.password, {
       userAgent: req.headers['user-agent'],
       ip: req.headers['x-forwarded-for'] || req.ip,
     });
+    LOGIN_FALHAS.delete(chave);
     res.json(result);
   } catch (err) {
+    const atual = LOGIN_FALHAS.get(chave);
+    if (!atual || Date.now() - atual.desdeMs >= LOGIN_JANELA_MS) LOGIN_FALHAS.set(chave, { count: 1, desdeMs: Date.now() });
+    else atual.count += 1;
+    // faxina preguicosa pra o Map nao crescer sem limite
+    if (LOGIN_FALHAS.size > 2000) {
+      for (const [k, v] of LOGIN_FALHAS) { if (Date.now() - v.desdeMs >= LOGIN_JANELA_MS) LOGIN_FALHAS.delete(k); }
+    }
     res.status(401).json({ error: err.message });
   }
 });
@@ -4149,7 +4190,7 @@ app.post('/api/suporte-chat/iniciar', async (req, res) => {
   try {
     const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
-    push.notifySolicitacao('💬 Novo chat de suporte', `${chat.nome} · ${chat.contato}`, chat.id);
+    push.notifySolicitacao('💬 Novo chat de suporte', `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico.html');
     res.json({ id: chat.id, token: chat.token });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -4168,7 +4209,7 @@ app.post('/api/suporte-chat/:id/mensagem', async (req, res) => {
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     // notificacao no celular do time tambem em MENSAGEM nova (nao so na
     // abertura da conversa) - o atendente ve e responde de onde estiver
-    push.notifySolicitacao('💬 Nova mensagem no chat de suporte', `${chat.nome} · ${String(req.body.texto || '').slice(0, 80)}`, chat.id);
+    push.notifySolicitacao('💬 Nova mensagem no chat de suporte', `${chat.nome} · ${String(req.body.texto || '').slice(0, 80)}`, chat.id, '/tecnico.html');
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
