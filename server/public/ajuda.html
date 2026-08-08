@@ -503,6 +503,7 @@ const TOPICOS = [
       <li>Escolha a data, o tempo contratado (30 a 240 min) e o <b>horário previsto de entrada</b>.</li>
       <li>Marque <b>Adulto Cortesia (A.C.)</b> quando um adulto tem direito a acompanhar (ex: acompanhante de criança autista, ou outro motivo justificado) e informe a quantidade.</li>
       <li>Adicione cada criança que vai brincar (nome + data de nascimento) - o número de pulseiras é calculado pela quantidade de crianças.</li>
+      <li>Escolha a <b>forma de pagamento</b> (Dinheiro, Pix, Débito, Crédito ou Cortesia) - o <b>valor é calculado sozinho</b>: 30min = R$40 e 60min = R$50 por pulseira, e os demais tempos combinam esses blocos (90min = R$90, 120min = R$100, 150min = R$140...), multiplicado pela quantidade de crianças. Cortesia registra a entrada com valor zero.</li>
       <li>Clique em <b>Registrar check-in</b>.</li>
     </ol>
     <div class="dica"><b>Termo de responsabilidade obrigatório:</b> depois de registrar, clique em <b>Imprimir termo de responsabilidade</b> e peça a assinatura do responsável. A entrada no parque só deve ser liberada depois de marcar <b>Confirmar termo assinado</b> - até lá o check-in aparece como "aguardando assinatura".</div>
@@ -515,6 +516,7 @@ const TOPICOS = [
     <ul>
       <li>Cada check-in mostra o status: <b>aguardando assinatura</b> (termo ainda não confirmado), <b>liberado</b>, <b>check-out pendente de aprovação</b> ou <b>check-out aprovado</b>.</li>
       <li>Clique em <b>🖨️ Termo</b> pra reimprimir o termo de responsabilidade de qualquer check-in.</li>
+      <li><b>Financeiro:</b> Gerente da unidade e Master/Admin veem o painel <b>Financeiro</b> com o faturamento do período filtrado quebrado por forma de pagamento (Dinheiro, Pix, Débito, Crédito, Cortesia) e exportam o relatório financeiro em CSV/PDF (data, responsável, tempo, pulseiras, valor por pulseira, valor total, método). Entradas antigas, de antes do financeiro existir, aparecem como "sem método" com o valor recalculado pela tabela.</li>
       <li><b>🚪 Check-out</b>: para o relógio na hora (emergência), mas fica pendente até um Gerente da unidade (ou Master/Admin) aprovar em <b>✓ Aprovar check-out</b> - só aí o tempo que sobrou vira crédito pro CPF. Enquanto pendente, qualquer um pode desfazer em <b>↩ Voltar</b> se a criança voltar a brincar.</li>
       <li><b>🛠 Pedir correção</b>: qualquer pessoa com acesso pode pedir pra <b>alterar</b> um check-in (o formulário abre preenchido - mude dados, adicione/remova crianças) ou pra <b>excluir</b> o registro, sempre com justificativa. O pedido aparece no painel <b>Pedidos de correção</b> e quem decide é o <b>Gerente da unidade</b> ou o Master/Admin - aprovar aplica a mudança na hora. Todo pedido também vira um <b>Ticket</b> na Central: quando o Gerente aprova pra agilizar, a decisão fica registrada no ticket e o <b>Master dá a palavra final</b> concluindo ele (prestação de contas).</li>
     </ul>
@@ -532,7 +534,8 @@ const TOPICOS = [
     <h3>Registrar uma reserva</h3>
     <ol>
       <li>Informe a unidade, o cliente e a data do evento.</li>
-      <li>Informe o valor total e, se houver, o sinal e o restante (valor/forma/data de cada um).</li>
+      <li>Escolha o <b>pacote da tabela oficial</b>: Missão (🌙 Lunar · seg a qui 13h-16h / 🪐 Órbita · seg a qui 18h-21h e sex 13h-21h / ✨ Nebulosa · sáb, dom e feriados), horas (1H a 3H) e saltonautas (10/20/30/40) - o <b>valor total sai da tabela sozinho</b>. Sem pacote (venda antiga/avulsa), digite o valor manualmente.</li>
+      <li>Se houver, informe o sinal e o restante (valor/forma/data de cada um).</li>
       <li>Se a reserva for um acréscimo de pulantes de uma festa anterior, informe o código da venda original.</li>
       <li>Clique em <b>Registrar reserva</b> - um código único é gerado automaticamente.</li>
     </ol>

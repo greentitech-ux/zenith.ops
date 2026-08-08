@@ -195,6 +195,18 @@
   </div>
 </div>
 
+<div class="panel hidden" id="painel-financeiro">
+  <h2>Financeiro (período filtrado)</h2>
+  <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:8px;">
+    tabela por pulseira: 30min R$40 · 60min R$50 · demais combinam (90min R$90, 120min R$100...)
+  </div>
+  <div class="kpi-grid" id="fin-kpis" style="grid-template-columns:repeat(2,1fr);"></div>
+  <div class="filtros-acoes">
+    <a class="btn-secundario" id="link-fin-csv" href="#">⬇️ CSV financeiro</a>
+    <a class="btn-secundario" id="link-fin-pdf" href="#">⬇️ PDF financeiro</a>
+  </div>
+</div>
+
 <div class="panel">
   <h2>Quem está no parque agora</h2>
   <div id="lista-agora"><div class="empty">carregando...</div></div>
@@ -234,6 +246,15 @@
       </div>
       <label>Horário previsto de entrada</label>
       <input type="time" id="m-horario-previsto">
+      <label>Forma de pagamento</label>
+      <select id="m-metodo">
+        <option value="">— sem método —</option>
+        <option value="dinheiro">Dinheiro</option>
+        <option value="pix">Pix</option>
+        <option value="debito">Cartão de débito</option>
+        <option value="credito">Cartão de crédito</option>
+        <option value="cortesia">Cortesia (não cobra)</option>
+      </select>
       <label>Observação</label>
       <textarea id="m-observacao"></textarea>
       <label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);margin-top:12px;">
@@ -268,6 +289,15 @@
           <div><label>Tempo</label><select id="cor-tempo"></select></div>
           <div><label>Horário previsto</label><input type="time" id="cor-previsto"></div>
         </div>
+        <label>Forma de pagamento</label>
+        <select id="cor-metodo">
+          <option value="">— sem método —</option>
+          <option value="dinheiro">Dinheiro</option>
+          <option value="pix">Pix</option>
+          <option value="debito">Cartão de débito</option>
+          <option value="credito">Cartão de crédito</option>
+          <option value="cortesia">Cortesia (não cobra)</option>
+        </select>
         <label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);margin-top:12px;">
           <input type="checkbox" id="cor-ac" style="width:auto;" onchange="document.getElementById('cor-ac-quant-wrap').classList.toggle('hidden', !this.checked)"> Adulto cortesia (A.C.)
         </label>
@@ -485,6 +515,7 @@ function abrirCorrecao(id){
   sel.innerHTML = [30,60,90,120,150,180,210,240].map(t=>`<option value="${t}">${t} min</option>`).join('');
   sel.value = String(c.tempoMinutos || 60);
   document.getElementById('cor-previsto').value = (c.horarioPrevisto||'').slice(0,5);
+  document.getElementById('cor-metodo').value = c.metodoPagamento || '';
   document.getElementById('cor-ac').checked = !!c.adultoCortesia;
   document.getElementById('cor-ac-quant-wrap').classList.toggle('hidden', !c.adultoCortesia);
   document.getElementById('cor-ac-quant').value = c.quantAC || 1;
@@ -510,6 +541,7 @@ document.getElementById('form-correcao').addEventListener('submit', async (ev)=>
         dataUtilizacao: document.getElementById('cor-data').value,
         tempoMinutos: Number(document.getElementById('cor-tempo').value),
         horarioPrevisto: document.getElementById('cor-previsto').value || null,
+        metodoPagamento: document.getElementById('cor-metodo').value || null,
         observacao: document.getElementById('cor-observacao').value,
         adultoCortesia: document.getElementById('cor-ac').checked,
         quantAC: Number(document.getElementById('cor-ac-quant').value)||1,
@@ -647,7 +679,7 @@ function renderLista(lista){
           <span>${escapeHtml(c.responsavel?.nome||'')} · ${escapeHtml(c.unidadeNome||c.unidade)}</span>
           <span class="badge ${status.classe}">${status.texto}</span>
         </div>
-        <div class="sub">${horario} · ${c.pulseiras} pulseira(s)${c.adultoCortesia?' · A.C. x'+c.quantAC:''} · ${escapeHtml(c.responsavel?.contato||'')}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''}</div>
+        <div class="sub">${horario} · ${c.pulseiras} pulseira(s) · ${fmtReal(valorDoCheckin(c))}${c.metodoPagamento?' ('+(METODOS_LABEL[c.metodoPagamento]||c.metodoPagamento)+')':''}${c.adultoCortesia?' · A.C. x'+c.quantAC:''} · ${escapeHtml(c.responsavel?.contato||'')}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''}</div>
         <div class="criancas">${escapeHtml(criancas)}</div>
         <div>
           <a class="link-btn" href="/api/parque/checkins/${c.id}/termo.pdf?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">🖨️ Termo</a>
@@ -689,6 +721,41 @@ function renderKpis(lista){
   document.getElementById('kpi-aguardando').textContent = lista.filter(c=>!c.termoAssinado).length;
 }
 
+// financeiro das entradas (mesma conta do servidor - ver valorPorTempo/
+// valorDoCheckin em parque.js): registros de antes do financeiro existir
+// nao tem valor salvo, entao recalcula pela tabela; cortesia conta zero
+function valorPorTempo(t){ return Math.floor((Number(t)||0)/60)*50 + ((Number(t)||0)%60>=30?40:0); }
+function valorDoCheckin(c){
+  if(c.valor!=null) return c.valor;
+  if(c.metodoPagamento==='cortesia') return 0;
+  return valorPorTempo(c.tempoMinutos) * ((c.criancas||[]).length || c.pulseiras || 0);
+}
+function fmtReal(v){ return 'R$ ' + Number(v||0).toFixed(2).replace('.', ','); }
+const METODOS_LABEL = { dinheiro:'Dinheiro', pix:'Pix', debito:'Débito', credito:'Crédito', cortesia:'Cortesia' };
+
+// financeiro e assunto de gestao: Master/Admin e Gerente da unidade
+function podeVerFinanceiro(){
+  return IS_MASTER || IS_ADMIN || (ME && ME.cargo==='gerente');
+}
+
+function renderFinanceiro(lista){
+  if(!podeVerFinanceiro()){ document.getElementById('painel-financeiro').classList.add('hidden'); return; }
+  document.getElementById('painel-financeiro').classList.remove('hidden');
+  const porMetodo = {};
+  let total = 0;
+  lista.forEach(c=>{
+    const v = valorDoCheckin(c);
+    total += v;
+    const m = METODOS_LABEL[c.metodoPagamento] || 'sem método';
+    porMetodo[m] = (porMetodo[m]||0) + v;
+  });
+  const kpis = [[ 'faturamento no período', fmtReal(total) ]]
+    .concat(Object.entries(porMetodo).sort((a,b)=>b[1]-a[1]).map(([m,v])=>[m, fmtReal(v)]));
+  document.getElementById('fin-kpis').innerHTML = kpis.map(([lbl,val])=>
+    `<div class="kpi"><div class="val" style="font-size:16px;">${escapeHtml(val)}</div><div class="lbl">${escapeHtml(lbl)}</div></div>`
+  ).join('');
+}
+
 function atualizarLinksExport(){
   const unidade = document.getElementById('f-unidade').value;
   const de = document.getElementById('f-de').value;
@@ -699,11 +766,14 @@ function atualizarLinksExport(){
   if(ate) params.set('fim', ate);
   document.getElementById('link-csv').href = '/api/parque/relatorio.csv?'+params.toString();
   document.getElementById('link-pdf').href = '/api/parque/relatorio.pdf?'+params.toString();
+  document.getElementById('link-fin-csv').href = '/api/parque/financeiro.csv?'+params.toString();
+  document.getElementById('link-fin-pdf').href = '/api/parque/financeiro.pdf?'+params.toString();
 }
 
 function renderTudo(){
   const lista = checkinsFiltrados();
   renderKpis(lista);
+  renderFinanceiro(lista);
   renderLista(lista);
   renderAgora();
   atualizarLinksExport();
@@ -742,6 +812,7 @@ function abrirMaster(id){
   document.getElementById('m-hora').value = (c.timeInicial||'').slice(0,5);
   document.getElementById('m-tempo').value = c.tempoMinutos || 60;
   document.getElementById('m-horario-previsto').value = (c.horarioPrevisto||'').slice(0,5);
+  document.getElementById('m-metodo').value = c.metodoPagamento || '';
   document.getElementById('m-observacao').value = c.observacao || '';
   document.getElementById('m-termo').checked = !!c.termoAssinado;
   document.getElementById('msg-master').classList.add('hidden');
@@ -758,6 +829,7 @@ document.getElementById('form-master').addEventListener('submit', async (ev)=>{
       responsavel: { nome: document.getElementById('m-nome').value, contato: document.getElementById('m-contato').value },
       dataUtilizacao: document.getElementById('m-data').value,
       tempoMinutos: Number(document.getElementById('m-tempo').value),
+      metodoPagamento: document.getElementById('m-metodo').value || null,
       observacao: document.getElementById('m-observacao').value,
       termoAssinado: document.getElementById('m-termo').checked,
     };

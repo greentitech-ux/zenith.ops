@@ -20,6 +20,34 @@ const CREDITOS = db.collection('parqueCreditos');
 
 const TEMPOS_VALIDOS = [30, 60, 90, 120, 150, 180, 210, 240];
 
+// tabela de precos por pulseira (por crianca): 30min = R$40, 60min = R$50 e
+// os demais tempos combinam esses dois blocos (90 = 50+40 = R$90,
+// 120 = 50+50 = R$100, 150 = R$140, 180 = R$150...). Minutos extras de
+// credito (checkout antecipado anterior) nao entram na conta - esse tempo
+// ja foi pago na visita original
+const PRECO_MEIA_HORA = 40;
+const PRECO_HORA = 50;
+function valorPorTempo(tempoMinutos) {
+  const t = Number(tempoMinutos) || 0;
+  return Math.floor(t / 60) * PRECO_HORA + (t % 60 >= 30 ? PRECO_MEIA_HORA : 0);
+}
+
+// forma de pagamento registrada na entrada - alimenta o relatorio
+// financeiro. 'cortesia' zera o valor (entrada liberada sem cobranca)
+const METODOS_PAGAMENTO = ['dinheiro', 'pix', 'debito', 'credito', 'cortesia'];
+function sanitizarMetodoPagamento(m) {
+  return METODOS_PAGAMENTO.includes(m) ? m : null;
+}
+
+// valor total de um check-in ja gravado - registros antigos (de antes do
+// financeiro existir) nao tem `valor` salvo, entao recalcula pela tabela
+function valorDoCheckin(c) {
+  if (c.valor != null) return c.valor;
+  if (c.metodoPagamento === 'cortesia') return 0;
+  const qtd = (c.criancas || []).length || c.pulseiras || 0;
+  return valorPorTempo(c.tempoMinutos) * qtd;
+}
+
 function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -100,7 +128,7 @@ async function criar({
   unidade, unidadeNome, colaboradorId, colaboradorNome,
   responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto,
   observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras,
-  criadoPorId, criadoPorEmail,
+  metodoPagamento, criadoPorId, criadoPorEmail,
 }) {
   const { tempo, criancasOk } = validarPayload({ unidade, responsavel, dataUtilizacao, tempoMinutos, criancas });
   // minutosExtras: credito de tempo guardado de um checkout antecipado
@@ -149,6 +177,11 @@ async function criar({
     quantAC: adultoCortesia === true ? Math.max(0, Math.min(10, num(quantAC) || 1)) : 0,
     criancas: criancasOk,
     pulseiras: criancasOk.length,
+    // financeiro: valor pela tabela (por pulseira) + forma de pagamento -
+    // 'cortesia' registra a entrada com valor zero
+    metodoPagamento: sanitizarMetodoPagamento(metodoPagamento),
+    valorPulseira: valorPorTempo(tempo),
+    valor: sanitizarMetodoPagamento(metodoPagamento) === 'cortesia' ? 0 : valorPorTempo(tempo) * criancasOk.length,
     usou: usou !== false,
     termoAssinado: false,
     criadoPorId,
@@ -240,6 +273,15 @@ async function atualizar(id, patch) {
     merge.criancas = criancasOk;
     merge.pulseiras = criancasOk.length;
   }
+  if (patch.metodoPagamento !== undefined) merge.metodoPagamento = sanitizarMetodoPagamento(patch.metodoPagamento);
+  // o valor acompanha a tabela: recalcula sempre que tempo, criancas ou
+  // forma de pagamento mudarem (cortesia zera)
+  if (patch.tempoMinutos !== undefined || patch.criancas !== undefined || patch.metodoPagamento !== undefined) {
+    const metodoFinal = patch.metodoPagamento !== undefined ? merge.metodoPagamento : (atual.metodoPagamento || null);
+    const qtdCriancas = merge.criancas ? merge.criancas.length : (atual.criancas || []).length;
+    merge.valorPulseira = valorPorTempo(tempo);
+    merge.valor = metodoFinal === 'cortesia' ? 0 : merge.valorPulseira * qtdCriancas;
+  }
   if (patch.usou !== undefined) merge.usou = patch.usou === true;
   if (patch.termoAssinado !== undefined) merge.termoAssinado = patch.termoAssinado === true;
   if (patch.horarioPrevisto !== undefined) {
@@ -316,6 +358,7 @@ function validarPropostaEdicao(proposta) {
   if (proposta.horarioPrevisto !== undefined) {
     p.horarioPrevisto = proposta.horarioPrevisto ? validarHora(proposta.horarioPrevisto, 'o horário previsto') : null;
   }
+  if (proposta.metodoPagamento !== undefined) p.metodoPagamento = sanitizarMetodoPagamento(proposta.metodoPagamento);
   if (proposta.observacao !== undefined) p.observacao = String(proposta.observacao).slice(0, 300);
   if (proposta.adultoCortesia !== undefined) {
     p.adultoCortesia = proposta.adultoCortesia === true;
@@ -565,7 +608,8 @@ async function buscarPorCpf(cpf) {
 }
 
 module.exports = {
-  TEMPOS_VALIDOS, criar, checkin, listAll, listByUnidades, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
+  TEMPOS_VALIDOS, METODOS_PAGAMENTO, valorPorTempo, valorDoCheckin,
+  criar, checkin, listAll, listByUnidades, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
   solicitarEdicao, listarEdicoes, decidirEdicao, validarPropostaEdicao,
   checkout, aprovarCheckout, retomarCheckout, creditoPorCpf, usarCredito,
   invalidar: () => parqueCache.invalidar(),

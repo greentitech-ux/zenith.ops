@@ -222,6 +222,22 @@
     </div>
 
     <div class="secao">
+      <div class="secao-titulo">Pagamento</div>
+      <label>Forma de pagamento</label>
+      <select id="f-metodo" required>
+        <option value="">selecione...</option>
+        <option value="dinheiro">Dinheiro</option>
+        <option value="pix">Pix</option>
+        <option value="debito">Cartão de débito</option>
+        <option value="credito">Cartão de crédito</option>
+        <option value="cortesia">Cortesia (não cobra)</option>
+      </select>
+      <div class="resumo">
+        <div class="linha"><span id="valor-detalhe">—</span><b id="preview-valor">R$ 0,00</b></div>
+      </div>
+    </div>
+
+    <div class="secao">
       <label>Observação (opcional)</label>
       <textarea id="f-observacao"></textarea>
     </div>
@@ -270,6 +286,15 @@
           <div><label>Tempo</label><select id="cor-tempo"></select></div>
           <div><label>Horário previsto</label><input type="time" id="cor-previsto"></div>
         </div>
+        <label>Forma de pagamento</label>
+        <select id="cor-metodo">
+          <option value="">— sem método —</option>
+          <option value="dinheiro">Dinheiro</option>
+          <option value="pix">Pix</option>
+          <option value="debito">Cartão de débito</option>
+          <option value="credito">Cartão de crédito</option>
+          <option value="cortesia">Cortesia (não cobra)</option>
+        </select>
         <label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);margin-top:12px;">
           <input type="checkbox" id="cor-ac" style="width:auto;" onchange="document.getElementById('cor-ac-quant-wrap').classList.toggle('hidden', !this.checked)"> Adulto cortesia (A.C.)
         </label>
@@ -388,12 +413,31 @@ function isoLocalBR(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padS
 function hojeBrasilia(){ return isoLocalBR(agoraBrasilia()); }
 function horaCurtaBrasilia(d){ return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
 
+// tabela de precos por pulseira (mesma conta do servidor - ver
+// valorPorTempo em parque.js): 30min=R$40, 60min=R$50, demais combinam
+// (90=R$90, 120=R$100, 150=R$140...)
+function valorPorTempo(t){ return Math.floor(t/60)*50 + (t%60>=30?40:0); }
+function fmtReal(v){ return 'R$ ' + Number(v||0).toFixed(2).replace('.', ','); }
+
 function renderTempos(){
   document.getElementById('tempos').innerHTML = TEMPOS_VALIDOS.map(t=>
-    `<button type="button" class="toggle-btn ${t===TEMPO_SELECIONADO?'ativo':''}" data-tempo="${t}" onclick="selecionarTempo(${t})">${t}min</button>`
+    `<button type="button" class="toggle-btn ${t===TEMPO_SELECIONADO?'ativo':''}" data-tempo="${t}" onclick="selecionarTempo(${t})">${t}min · R$${valorPorTempo(t)}</button>`
   ).join('');
 }
-function selecionarTempo(t){ TEMPO_SELECIONADO = t; renderTempos(); }
+function selecionarTempo(t){ TEMPO_SELECIONADO = t; renderTempos(); atualizarPreviewValor(); }
+
+// valor da entrada = tabela do tempo x quantidade de criancas (pulseiras);
+// cortesia zera. Minutos de credito usados nao mudam o valor (ja pagos)
+function atualizarPreviewValor(){
+  const n = [...document.querySelectorAll('#lista-criancas .crianca-nome')].filter(i=>i.value.trim()).length;
+  const metodo = document.getElementById('f-metodo').value;
+  const unit = valorPorTempo(TEMPO_SELECIONADO);
+  const total = metodo==='cortesia' ? 0 : unit * n;
+  document.getElementById('valor-detalhe').textContent =
+    metodo==='cortesia' ? `cortesia · ${n} criança(s)` : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min)`;
+  document.getElementById('preview-valor').textContent = fmtReal(total);
+}
+document.getElementById('f-metodo').addEventListener('change', atualizarPreviewValor);
 
 // autopreenchimento por CPF: ao sair do campo, busca o cadastro mais
 // recente com esse CPF (de check-ins anteriores, inclusive os importados da
@@ -473,6 +517,7 @@ function adicionarCrianca(){
 function atualizarPreviewPulseiras(){
   const n = [...document.querySelectorAll('#lista-criancas .crianca-nome')].filter(i=>i.value.trim()).length;
   document.getElementById('preview-pulseiras').textContent = n || 0;
+  atualizarPreviewValor();
 }
 function coletarCriancas(){
   return [...document.querySelectorAll('#lista-criancas .crianca-linha')].map(div=>({
@@ -596,6 +641,7 @@ function abrirCorrecao(id){
   sel.innerHTML = TEMPOS_VALIDOS.map(t=>`<option value="${t}">${t} min</option>`).join('');
   sel.value = String(c.tempoMinutos || 60);
   document.getElementById('cor-previsto').value = (c.horarioPrevisto||'').slice(0,5);
+  document.getElementById('cor-metodo').value = c.metodoPagamento || '';
   document.getElementById('cor-ac').checked = !!c.adultoCortesia;
   document.getElementById('cor-ac-quant-wrap').classList.toggle('hidden', !c.adultoCortesia);
   document.getElementById('cor-ac-quant').value = c.quantAC || 1;
@@ -621,6 +667,7 @@ document.getElementById('form-correcao').addEventListener('submit', async (ev)=>
         dataUtilizacao: document.getElementById('cor-data').value,
         tempoMinutos: Number(document.getElementById('cor-tempo').value),
         horarioPrevisto: document.getElementById('cor-previsto').value || null,
+        metodoPagamento: document.getElementById('cor-metodo').value || null,
         observacao: document.getElementById('cor-observacao').value,
         adultoCortesia: document.getElementById('cor-ac').checked,
         quantAC: Number(document.getElementById('cor-ac-quant').value)||1,
@@ -713,6 +760,7 @@ function resetarForm(){
   CREDITO_ATUAL = null;
   USAR_CREDITO = false;
   document.getElementById('wrap-credito').classList.add('hidden');
+  atualizarPreviewValor();
 }
 
 document.getElementById('form-checkin').addEventListener('keydown', (ev)=>{
@@ -751,6 +799,7 @@ document.getElementById('form-checkin').addEventListener('submit', async (ev)=>{
       adultoCortesia: AC_ATIVO,
       quantAC: AC_ATIVO ? document.getElementById('f-quantAC').value : 0,
       criancas,
+      metodoPagamento: document.getElementById('f-metodo').value,
       usarCreditoMin: (USAR_CREDITO && CREDITO_ATUAL) ? CREDITO_ATUAL.minutosDisponiveis : 0,
     };
     const res = await fetch('/api/parque/checkins', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });

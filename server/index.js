@@ -2467,7 +2467,7 @@ app.get('/api/inventario/relatorio.:formato(csv|pdf)', requireSection('inventari
 // padrao entregas/entregas-lancamento) + uma secao de festas ----------
 app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, res) => {
   try {
-    const { unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, usarCreditoMin } = req.body;
+    const { unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, usarCreditoMin, metodoPagamento } = req.body;
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
@@ -2479,7 +2479,7 @@ app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, r
       minutosExtras = await parque.usarCredito(responsavel?.cpf, usarCreditoMin);
     }
     const registro = await parque.criar({
-      unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras,
+      unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras, metodoPagamento,
       colaboradorId: req.user.id, colaboradorNome: req.user.email,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
     });
@@ -2639,7 +2639,7 @@ app.post('/api/parque/checkins/:id/retomar-checkout', requireAnySection('parque'
 // pro texto do Ticket de correcao (o Master le tudo na Central)
 function resumoCheckinParque(c) {
   const criancas = (c.criancas || []).map((cr) => cr.nome).join(', ') || '—';
-  return `${c.responsavel?.nome || '—'} · ${reportUtil.fmtDataBR(c.dataUtilizacao)} · ${c.tempoMinutos}min · previsto ${(c.horarioPrevisto || '').slice(0, 5) || '—'} · A.C. ${c.adultoCortesia ? 'x' + (c.quantAC || 1) : 'não'} · crianças: ${criancas}${c.observacao ? ' · obs: ' + c.observacao : ''}`;
+  return `${c.responsavel?.nome || '—'} · ${reportUtil.fmtDataBR(c.dataUtilizacao)} · ${c.tempoMinutos}min · ${reportUtil.fmtMoneyBR(parque.valorDoCheckin(c))} (${c.metodoPagamento || 'sem método'}) · previsto ${(c.horarioPrevisto || '').slice(0, 5) || '—'} · A.C. ${c.adultoCortesia ? 'x' + (c.quantAC || 1) : 'não'} · crianças: ${criancas}${c.observacao ? ' · obs: ' + c.observacao : ''}`;
 }
 function resumoPropostaParque(p) {
   const partes = [];
@@ -2648,6 +2648,7 @@ function resumoPropostaParque(p) {
   if (p.dataUtilizacao !== undefined) partes.push(`data → ${reportUtil.fmtDataBR(p.dataUtilizacao)}`);
   if (p.tempoMinutos !== undefined) partes.push(`tempo → ${p.tempoMinutos}min`);
   if (p.horarioPrevisto !== undefined) partes.push(`previsto → ${(p.horarioPrevisto || '').slice(0, 5) || '—'}`);
+  if (p.metodoPagamento !== undefined) partes.push(`método → ${p.metodoPagamento || '—'}`);
   if (p.adultoCortesia !== undefined) partes.push(`A.C. → ${p.adultoCortesia ? 'x' + (p.quantAC || 1) : 'não'}`);
   if (p.criancas !== undefined) partes.push(`crianças → ${p.criancas.map((cr) => cr.nome).join(', ')}`);
   if (p.observacao !== undefined) partes.push(`obs → ${p.observacao || '—'}`);
@@ -2793,15 +2794,65 @@ app.get('/api/parque/relatorio.:formato(csv|pdf)', requireSection('parque'), asy
   reportUtil.writePDF(res, { titulo: 'Saltiverso - Check-ins do Parque', subtitulo: `Exportado em ${reportUtil.agoraBrasiliaFmt()} · ${linhas.length} check-in(s)`, colunas, linhas, nomeArquivo });
 });
 
+// relatorio FINANCEIRO das entradas do parque: cada registro com valor
+// (tabela por pulseira: 30min=R$40, 60min=R$50, demais combinam os blocos)
+// e a forma de pagamento. Financeiro e assunto de gestao: Master/Admin veem
+// tudo, Gerente ve as unidades dele; os demais nao acessam
+const METODOS_PARQUE_LABEL = { dinheiro: 'Dinheiro', pix: 'Pix', debito: 'Débito', credito: 'Crédito', cortesia: 'Cortesia' };
+app.get('/api/parque/financeiro.:formato(csv|pdf)', requireSection('parque'), async (req, res) => {
+  const ehGestor = req.isMaster || req.isAdmin || (req.user && req.user.cargo === 'gerente');
+  if (!ehGestor) return res.status(403).json({ error: 'Só o Gerente da unidade ou o Master/Admin acessam o financeiro.' });
+  let lista = (req.isMaster || req.isAdmin) ? await parque.listAll() : await parque.listByUnidades(req.permissions.unidades || []);
+  const { unidade, inicio, fim } = req.query;
+  lista = lista
+    .filter((c) => (!unidade || c.unidade === unidade) && (!inicio || c.dataUtilizacao >= inicio) && (!fim || c.dataUtilizacao <= fim))
+    .sort((a, b) => (b.dataUtilizacao + (b.timeInicial || '')).localeCompare(a.dataUtilizacao + (a.timeInicial || '')));
+  const colunas = [
+    { key: 'data', label: 'Data' }, { key: 'responsavel', label: 'Responsável' }, { key: 'tempo', label: 'Tempo' },
+    { key: 'pulseiras', label: 'Pulseiras' }, { key: 'valorPulseira', label: 'Valor/pulseira' }, { key: 'valor', label: 'Valor total' },
+    { key: 'metodo', label: 'Método' }, { key: 'checkin', label: 'Check-in' },
+  ];
+  const porMetodo = {};
+  let total = 0;
+  const linhas = lista.map((c) => {
+    const valor = parque.valorDoCheckin(c);
+    const metodo = METODOS_PARQUE_LABEL[c.metodoPagamento] || 'sem método';
+    total += valor;
+    porMetodo[metodo] = (porMetodo[metodo] || 0) + valor;
+    return {
+      data: reportUtil.fmtDataBR(c.dataUtilizacao),
+      responsavel: c.responsavel?.nome,
+      tempo: `${c.tempoMinutos}min`,
+      pulseiras: (c.criancas || []).length || c.pulseiras || 0,
+      valorPulseira: reportUtil.fmtMoneyBR(c.valorPulseira != null ? c.valorPulseira : parque.valorPorTempo(c.tempoMinutos)),
+      valor: reportUtil.fmtMoneyBR(valor),
+      metodo,
+      checkin: c.iniciado ? 'Feito' : 'Aguardando',
+    };
+  });
+  const resumoMetodos = Object.entries(porMetodo).map(([m, v]) => `${m} ${reportUtil.fmtMoneyBR(v)}`).join(' · ');
+  const nomeArquivo = reportUtil.nomeArquivoComData('parque-financeiro');
+  if (req.params.formato === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}.csv"`);
+    return res.send(reportUtil.toCSV(colunas, linhas));
+  }
+  reportUtil.writePDF(res, {
+    titulo: 'Saltiverso - Financeiro das Entradas',
+    subtitulo: `Exportado em ${reportUtil.agoraBrasiliaFmt()} · ${linhas.length} entrada(s) · Total ${reportUtil.fmtMoneyBR(total)}${resumoMetodos ? ' · ' + resumoMetodos : ''}`,
+    colunas, linhas, nomeArquivo,
+  });
+});
+
 // ---------- Saltiverso Patteo: reservas de festa ----------
 app.post('/api/festas', requireSection('festas'), async (req, res) => {
   try {
-    const { unidade, cliente, dataVenda, dataDeUso, horaInicio, horaFim, valorTotal, sinal, restante, observacao, referenciaVendaOriginal } = req.body;
+    const { unidade, cliente, dataVenda, dataDeUso, horaInicio, horaFim, missao, horas, saltonautas, valorTotal, sinal, restante, observacao, referenciaVendaOriginal } = req.body;
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
     const registro = await festas.criar({
-      unidade, cliente, dataVenda, dataDeUso, horaInicio, horaFim, valorTotal, sinal, restante, observacao, referenciaVendaOriginal,
+      unidade, cliente, dataVenda, dataDeUso, horaInicio, horaFim, missao, horas, saltonautas, valorTotal, sinal, restante, observacao, referenciaVendaOriginal,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
     });
     broadcast('festa-criada', registro, 'festas');
