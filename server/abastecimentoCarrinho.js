@@ -431,17 +431,27 @@ async function getOne(id) {
   return doc.exists ? doc.data() : null;
 }
 
-// pedido de CORRECAO (qualquer lancamento, pedido ou envio): quantidade
-// errada, envio fora do tempo, qualquer imprevisto - vira um Ticket pro
-// Master na Central e o card fica marcado com o numero (1 correcao aberta
-// por lancamento, pra nao chover ticket repetido)
-async function registrarPedidoCorrecao(id, { motivo, numeroTicket, porEmail, porNome }) {
+// pedido de CORRECAO (qualquer lancamento, pedido ou envio) - mesmo modelo
+// do fechamento de caixa: o solicitante propoe a mudanca (ALTERAR as
+// quantidades enviadas ou REMOVER o lancamento) com justificativa, vira um
+// Ticket pro Master e fica PENDENTE ate ele aprovar/recusar. So na
+// aprovacao a proposta e aplicada de verdade. 1 correcao aberta por
+// lancamento, pra nao chover ticket repetido.
+async function registrarPedidoCorrecao(id, { acao, propostaPizzas, propostaInsumos, motivo, numeroTicket, porEmail, porNome }) {
   const atual = await getOne(id);
   if (!atual) throw new Error('Registro não encontrado.');
-  if (atual.correcao && atual.correcao.numeroTicket) {
-    throw new Error(`Já existe um pedido de correção aberto pra esse lançamento (Ticket #${atual.correcao.numeroTicket}).`);
+  if (atual.correcao && atual.correcao.numeroTicket && (atual.correcao.status || 'pendente') === 'pendente') {
+    throw new Error(`Já existe um pedido de correção em análise pra esse lançamento (Ticket #${atual.correcao.numeroTicket}).`);
   }
+  const acaoLimpa = acao === 'remover' ? 'remover' : 'alterar';
   const correcao = {
+    acao: acaoLimpa,
+    status: 'pendente',
+    // proposta guardada CRUA e so aplicada na aprovacao (sanitizada la)
+    propostaPizzas: acaoLimpa === 'alterar' ? sanitizarPizzas(propostaPizzas) : null,
+    propostaInsumos: acaoLimpa === 'alterar'
+      ? (Array.isArray(propostaInsumos) ? propostaInsumos.slice(0, 40) : [])
+      : null,
     motivo: String(motivo || '').trim().slice(0, 500),
     numeroTicket: numeroTicket || null,
     solicitadaEm: new Date().toISOString(),
@@ -451,6 +461,36 @@ async function registrarPedidoCorrecao(id, { motivo, numeroTicket, porEmail, por
   await COLLECTION.doc(id).update({ correcao });
   cache.invalidar();
   return { ...atual, correcao };
+}
+
+// decisao do Master sobre a correcao pendente: aprovar aplica a proposta
+// (altera as quantidades ou remove o lancamento); recusar so registra
+async function decidirCorrecao(id, { aprovar, porEmail, porNome }) {
+  const atual = await getOne(id);
+  if (!atual) throw new Error('Registro não encontrado.');
+  const c = atual.correcao;
+  if (!c || !c.numeroTicket) throw new Error('Esse lançamento não tem pedido de correção.');
+  if ((c.status || 'pendente') !== 'pendente') throw new Error('Essa correção já foi decidida.');
+  const decisao = {
+    ...c,
+    status: aprovar ? 'aprovada' : 'recusada',
+    decididaEm: new Date().toISOString(),
+    decididaPorEmail: porEmail || null,
+    decididaPorNome: porNome || null,
+  };
+  if (aprovar && c.acao === 'remover') {
+    await COLLECTION.doc(id).delete();
+    cache.invalidar();
+    return { removido: true, registro: { ...atual, correcao: decisao } };
+  }
+  const merge = { correcao: decisao };
+  if (aprovar && c.acao === 'alterar') {
+    merge.pizzas = sanitizarPizzas(c.propostaPizzas);
+    merge.insumos = await resolverInsumos((c.propostaInsumos || []).filter((i) => Number(i.quantidade) > 0));
+  }
+  await COLLECTION.doc(id).update(merge);
+  cache.invalidar();
+  return { removido: false, registro: { ...atual, ...merge } };
 }
 
 // "Ja lancei": pedido retroativo ("ja recebi") cujo ENVIO ja tinha sido
@@ -660,7 +700,7 @@ const cache = createCache(listAllUncached, 15 * 1000);
 const listAll = cache.cached;
 
 module.exports = {
-  TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, getConfig, salvarConfig,
+  TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, getConfig, salvarConfig,
   listarInsumos, criarInsumo, atualizarInsumo,
   listarOperadores, criarOperador, atualizarOperador, removerOperador, desbloquearOperador, validarOperador, trocarPapelOperador,
 };

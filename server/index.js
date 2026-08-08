@@ -3932,22 +3932,26 @@ app.post('/api/abastecimento/:id/pedir-correcao', auth.requireAuth, async (req, 
     }
     const reg = await abastecimentoCarrinho.getOne(req.params.id);
     if (!reg || !['PEDIDO', 'ENVIO'].includes(reg.tipo)) return res.status(404).json({ error: 'Lançamento não encontrado.' });
-    if (reg.correcao && reg.correcao.numeroTicket) {
-      return res.status(400).json({ error: `Já existe um pedido de correção aberto pra esse lançamento (Ticket #${reg.correcao.numeroTicket}).` });
+    if (reg.correcao && reg.correcao.numeroTicket && (reg.correcao.status || 'pendente') === 'pendente') {
+      return res.status(400).json({ error: `Já existe um pedido de correção em análise pra esse lançamento (Ticket #${reg.correcao.numeroTicket}).` });
     }
     const motivo = String(req.body.motivo || '').trim().slice(0, 500);
-    if (!motivo) return res.status(400).json({ error: 'Descreva o que precisa ser corrigido.' });
-    const itensTxt = abastecimentoCarrinho.SABORES
-      .filter((s) => Number(reg.pizzas?.[s]) > 0).map((s) => `${reg.pizzas[s]} ${s}`)
-      .concat((reg.insumos || []).map((i) => i.insumoId ? `${i.nome} (${i.quantidade} ${i.embalagem === 'caixa' ? 'cx' : 'un'})` : i.descricao))
+    if (!motivo) return res.status(400).json({ error: 'Descreva a justificativa da correção.' });
+    const acao = req.body.acao === 'remover' ? 'remover' : 'alterar';
+    const itensTxtDe = (pizzas, insumos) => abastecimentoCarrinho.SABORES
+      .filter((s) => Number(pizzas?.[s]) > 0).map((s) => `${pizzas[s]} ${s}`)
+      .concat((insumos || []).filter((i) => Number(i.quantidade) > 0)
+        .map((i) => i.insumoId ? `${i.nome || i.insumoId} (${i.quantidade} ${i.embalagem === 'caixa' ? 'cx' : 'un'})` : `${i.descricao || ''} (${i.quantidade})`))
       .join(', ') || '—';
+    const enviadoTxt = itensTxtDe(reg.pizzas, reg.insumos);
+    const propostaTxt = acao === 'remover' ? 'REMOVER o lançamento inteiro' : itensTxtDe(req.body.pizzas, req.body.insumos);
     const quando = new Date(reg.criadoEm).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     const ticket = await solicitacoes.create({
       tipo: 'suporte-ti',
       unidade: "Domino's Carrinho Aeroporto Recife",
       unidadeNome: 'Dom Car Aero Recife',
       titulo: `Abastecimento: correção solicitada (${reg.tipo} de ${quando})`,
-      observacao: `Correção pedida por ${req.user.username || req.user.email}.\n\nLançamento: ${reg.tipo} de ${quando}, por ${reg.operadorNome || reg.criadoPorNome || '—'}${reg.operadorUsuario ? ' (@' + reg.operadorUsuario + ')' : ''}.\nItens: ${itensTxt}\n\nMotivo: ${motivo}`,
+      observacao: `Correção pedida por ${req.user.username || req.user.email}.\n\nLançamento: ${reg.tipo} de ${quando}, por ${reg.operadorNome || reg.criadoPorNome || '—'}${reg.operadorUsuario ? ' (@' + reg.operadorUsuario + ')' : ''}.\nLançado: ${enviadoTxt}\nProposta: ${propostaTxt}\n\nJustificativa: ${motivo}\n\nAprovar ou recusar direto no card, na tela do Abastecimento.`,
       prioridade: 'alta',
       criadoPorId: req.user.id,
       criadoPorEmail: req.user.email,
@@ -3955,8 +3959,11 @@ app.post('/api/abastecimento/:id/pedir-correcao', auth.requireAuth, async (req, 
       direcionadoParaEmail: null,
     });
     broadcast('solicitacao-criada', ticket, 'solicitacoes');
-    push.notifySolicitacao(`Ticket #${ticket.numeroTicket} · Correção no Abastecimento`, motivo.slice(0, 120), ticket.id);
+    push.notifySolicitacao(`Ticket #${ticket.numeroTicket} · Correção no Abastecimento`, `${acao === 'remover' ? 'Remover lançamento' : 'Alterar quantidades'} — ${motivo.slice(0, 100)}`, ticket.id);
     const registro = await abastecimentoCarrinho.registrarPedidoCorrecao(req.params.id, {
+      acao,
+      propostaPizzas: req.body.pizzas,
+      propostaInsumos: req.body.insumos,
       motivo,
       numeroTicket: ticket.numeroTicket,
       porEmail: req.user.email,
@@ -3964,6 +3971,22 @@ app.post('/api/abastecimento/:id/pedir-correcao', auth.requireAuth, async (req, 
     });
     broadcast('abastecimento-atualizado', { id: registro.id });
     res.json({ registro, numeroTicket: ticket.numeroTicket });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// decisao do Master: aprovar aplica a proposta (altera quantidades ou
+// remove o lancamento); recusar so registra a recusa no card
+app.post('/api/abastecimento/:id/correcao/decidir', auth.requireMaster, async (req, res) => {
+  try {
+    const resultado = await abastecimentoCarrinho.decidirCorrecao(req.params.id, {
+      aprovar: !!req.body.aprovar,
+      porEmail: req.user.email,
+      porNome: req.user.username || req.user.email,
+    });
+    broadcast('abastecimento-atualizado', { id: req.params.id });
+    res.json(resultado);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
