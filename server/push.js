@@ -60,18 +60,6 @@ function podeReceberSolicitacao(sub) {
   return !!meta && (meta.isMaster || meta.isAdmin);
 }
 
-// quem acompanha o parque (painel ou check-in), pra avisar de um check-in
-// automatico (ninguem confirmou a entrada fisica no horario previsto)
-function podeReceberParque(sub, unidade) {
-  const meta = sub.meta;
-  if (!meta) return false;
-  if (meta.isMaster) return true;
-  const secoes = meta.sections || [];
-  if (!secoes.includes('parque') && !secoes.includes('parque-checkin')) return false;
-  if (unidade && !(meta.unidades || []).includes(unidade)) return false;
-  return true;
-}
-
 async function removeSubscription(endpoint) {
   await COLLECTION.doc(subDocId(endpoint)).delete();
   invalidarSubs();
@@ -184,26 +172,6 @@ async function notifyAbastecimento(title, body, tag, secao) {
   }
 }
 
-// aviso de check-in automatico do parque (ninguem confirmou a entrada
-// fisica ate o horario previsto - ver rodarAutoCheckins em parque.js)
-async function notifyParqueAutoCheckin(title, body, tag, unidade) {
-  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
-  const payload = JSON.stringify({ title, body, tag, url: '/parque.html' });
-  const subs = await loadSubs();
-  for (const sub of subs) {
-    if (!podeReceberParque(sub, unidade)) continue;
-    try {
-      await webpush.sendNotification(sub, payload);
-    } catch (err) {
-      if (err.statusCode === 404 || err.statusCode === 410) {
-        await removeSubscription(sub.endpoint);
-      } else {
-        console.error('Erro ao enviar push (parque):', err.message);
-      }
-    }
-  }
-}
-
 module.exports = {
-  addSubscription, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento, notifyParqueAutoCheckin, PUBLIC_KEY,
+  addSubscription, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento, PUBLIC_KEY,
 };
