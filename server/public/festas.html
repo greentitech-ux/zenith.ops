@@ -72,7 +72,9 @@
   .badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;display:inline-block;white-space:nowrap;}
   .badge.pendente{background:var(--warn-dim);color:var(--warn);}
   .badge.pago{background:var(--ok-dim);color:var(--ok);}
+  .badge.pagamento-parcial{background:var(--accent-dim, rgba(56,139,253,.15));color:var(--accent);}
   .badge.cancelado{background:var(--bad-dim);color:var(--bad);}
+  .receb-linha{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:3px;}
   .link-btn{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0;font-family:var(--sans);margin-right:12px;margin-top:8px;}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;z-index:50;}
   .overlay.hidden{display:none!important;}
@@ -210,6 +212,7 @@
     <select id="f-status-filtro" style="max-width:180px;">
       <option value="">Todos os status</option>
       <option value="pendente">Pendente</option>
+      <option value="pagamento-parcial">Pagamento parcial</option>
       <option value="pago">Pago</option>
       <option value="cancelado">Cancelado</option>
     </select>
@@ -227,6 +230,32 @@
 
 </div>
 
+<!-- recebimento pos-venda (2 passos antifraude): reabrir -> lancar o
+     complemento. Nada do que ja foi lancado pode ser editado -->
+<div class="overlay hidden" id="overlay-receber">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharReceber()">✕</span>
+    <div class="sheet">
+    <h3>💰 Lançar recebimento</h3>
+    <div class="sub" id="receber-info"></div>
+    <div class="resumo" style="margin-top:8px;">
+      <div class="linha"><span>Total da festa</span><b id="r-total"></b></div>
+      <div class="linha"><span>Já recebido</span><b id="r-recebido"></b></div>
+      <div class="linha"><span>Restante devido</span><b id="r-devido" style="color:var(--warn);"></b></div>
+    </div>
+    <label>Valor recebido agora</label>
+    <input type="number" step="0.01" min="0.01" id="r-valor">
+    <label>Forma de pagamento</label>
+    <input type="text" id="r-forma" placeholder="pix, dinheiro, cartão...">
+    <label>Data do recebimento</label>
+    <input type="date" id="r-data">
+    <div class="sub" style="font-size:12px;color:var(--muted);margin-top:6px;">O lançamento é definitivo: entra no histórico da reserva e <b>não pode ser editado nem removido</b>. Se cobrir o restante, o status vira <b>pago</b>; senão, <b>pagamento parcial</b>.</div>
+    <div class="msg hidden" id="msg-receber"></div>
+    <button type="button" class="btn-primary" style="width:100%;margin-top:14px;" onclick="confirmarRecebimento()">Confirmar recebimento</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay hidden" id="overlay-editar">
   <div class="sheet-wrap">
     <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharEditar()">✕</span>
@@ -237,9 +266,11 @@
       <label>Status</label>
       <select id="e-status">
         <option value="pendente">Pendente</option>
+        <option value="pagamento-parcial">Pagamento parcial</option>
         <option value="pago">Pago</option>
         <option value="cancelado">Cancelado</option>
       </select>
+      <div class="sub" style="font-size:12px;color:var(--muted);margin-top:4px;">Quando a reserva tem recebimento lançado, o status financeiro é automático — "pago" só quando o dinheiro cobre o total.</div>
       <label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);margin-top:12px;">
         <input type="checkbox" id="e-utilizado" style="width:auto;"> Festa já utilizada
       </label>
@@ -320,6 +351,18 @@ const PARQUE_UNIDADES_NOMES = { 'Saltiverso Patteo': 'Saltiverso Patteo' };
 
 let ME = null;
 let IS_MASTER = false;
+let IS_ADMIN = false;
+let RECEBENDO_ID = null;
+
+// mesma conta do servidor (ver totalRecebido/restanteDevido em festas.js):
+// recebido = sinal da venda + recebimentos lancados depois
+function totalRecebido(f){ return (Number(f.sinal?.valor)||0) + (f.recebimentos||[]).reduce((s,r)=>s+(Number(r.valor)||0),0); }
+function restanteDevido(f){ return Math.max(0, (Number(f.valorTotal)||0) - totalRecebido(f)); }
+function podeReceber(unidade){
+  if(IS_MASTER || IS_ADMIN) return true;
+  return ME && ME.cargo==='gerente' && (ME.permissions?.unidades||[]).includes(unidade);
+}
+const STATUS_LABEL_FESTA = { pendente:'pendente', 'pagamento-parcial':'pagamento parcial', pago:'pago', cancelado:'cancelado' };
 let UNIDADES_NOMES = { ...PARQUE_UNIDADES_NOMES };
 let TODAS = [];
 let EDITANDO_ID = null;
@@ -389,17 +432,25 @@ function renderLista(){
     <div class="card">
       <div class="linha1">
         <span>${escapeHtml(f.cliente?.nome||'')} · ${escapeHtml(f.codigo)} · ${fmtData(f.dataDeUso)}</span>
-        <span class="badge ${f.status}">${f.status}</span>
+        <span class="badge ${f.status}">${STATUS_LABEL_FESTA[f.status]||f.status}</span>
       </div>
       <div class="sub">${escapeHtml(f.unidade)}${f.missao?` · ${{lunar:'🌙 Missão Lunar',orbita:'🪐 Missão Órbita',nebulosa:'✨ Missão Nebulosa'}[f.missao]||f.missao} ${f.horas}H · ${f.saltonautas} saltonautas`:''}${f.horaInicio?' · '+f.horaInicio+' às '+(f.horaFim||''):''}${f.utilizado?' · utilizada':''}${f.referenciaVendaOriginal?' · acréscimo do cód. '+escapeHtml(f.referenciaVendaOriginal):''}</div>
       <div class="valores">
         <span>Total <b>${fmtMoney(f.valorTotal)}</b></span>
         ${f.sinal?`<span>Sinal <b>${fmtMoney(f.sinal.valor)}</b> (${escapeHtml(f.sinal.forma||'—')})</span>`:''}
-        ${f.restante?`<span>Restante <b>${fmtMoney(f.restante.valor)}</b> (${escapeHtml(f.restante.forma||'—')})</span>`:''}
+        ${f.restante?`<span>Restante combinado <b>${fmtMoney(f.restante.valor)}</b> (${escapeHtml(f.restante.forma||'—')})</span>`:''}
+        ${(f.recebimentos&&f.recebimentos.length)||f.status==='pagamento-parcial'?`<span>Recebido <b style="color:var(--ok);">${fmtMoney(totalRecebido(f))}</b></span><span>Devido <b style="color:${restanteDevido(f)>0?'var(--warn)':'var(--ok)'};">${fmtMoney(restanteDevido(f))}</b></span>`:''}
       </div>
+      ${(f.recebimentos||[]).map(r=>`<div class="receb-linha">🔒 ${fmtMoney(r.valor)} (${escapeHtml(r.forma||'—')}) em ${fmtData(r.data)} · por ${escapeHtml(r.registradoPorEmail||'')}</div>`).join('')}
+      ${f.pagamentoAberto?'<div class="receb-linha" style="color:var(--warn);">🔓 recebimento reaberto — lance o complemento</div>':''}
       ${f.observacao?`<div class="sub" style="margin-top:6px;">${escapeHtml(f.observacao)}</div>`:''}
       <div>
         <button type="button" class="link-btn" onclick="abrirEditar('${f.id}')">✎ Editar status</button>
+        ${(podeReceber(f.unidade) && f.status!=='cancelado' && restanteDevido(f)>0)
+          ? (f.pagamentoAberto
+              ? `<button type="button" class="link-btn" style="color:var(--ok);" onclick="abrirReceber('${f.id}')">💰 Lançar recebimento</button>`
+              : `<button type="button" class="link-btn" style="color:var(--warn);" onclick="reabrirPagamento('${f.id}')">🔓 Reabrir p/ receber</button>`)
+          : ''}
         ${IS_MASTER?`<button type="button" class="link-btn" style="color:var(--bad);" onclick="excluirFesta('${f.id}')">✕ Excluir</button>`:''}
       </div>
     </div>`).join('');
@@ -418,6 +469,60 @@ async function excluirFesta(id){
   if(!confirm('Excluir essa reserva?')) return;
   await fetch(`/api/festas/${id}`, { method:'DELETE' });
   await carregar();
+}
+
+// ---------- recebimento pos-venda (Gerente da unidade ou Master/Admin) ----------
+async function reabrirPagamento(id){
+  const f = TODAS.find(x=>x.id===id);
+  if(!f) return;
+  if(!confirm(`Reabrir o recebimento de ${f.cliente?.nome||''} (${f.codigo})? A reabertura fica registrada no histórico e só permite LANÇAR o restante — nada do que já foi lançado pode ser mexido.`)) return;
+  try{
+    const res = await fetch(`/api/festas/${id}/reabrir-pagamento`, { method:'POST' });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error||'erro ao reabrir');
+    await carregar();
+  }catch(err){ alert(err.message); }
+}
+
+function abrirReceber(id){
+  const f = TODAS.find(x=>x.id===id);
+  if(!f) return;
+  RECEBENDO_ID = id;
+  document.getElementById('receber-info').textContent = `${f.cliente?.nome||''} · ${f.codigo} · ${fmtData(f.dataDeUso)}`;
+  document.getElementById('r-total').textContent = fmtMoney(f.valorTotal);
+  document.getElementById('r-recebido').textContent = fmtMoney(totalRecebido(f));
+  document.getElementById('r-devido').textContent = fmtMoney(restanteDevido(f));
+  document.getElementById('r-valor').value = restanteDevido(f).toFixed(2);
+  document.getElementById('r-forma').value = '';
+  document.getElementById('r-data').value = new Date().toISOString().slice(0,10);
+  document.getElementById('msg-receber').classList.add('hidden');
+  document.getElementById('overlay-receber').classList.remove('hidden');
+}
+function fecharReceber(){ document.getElementById('overlay-receber').classList.add('hidden'); RECEBENDO_ID=null; }
+
+async function confirmarRecebimento(){
+  if(!RECEBENDO_ID) return;
+  const msg = document.getElementById('msg-receber');
+  msg.classList.add('hidden');
+  try{
+    const res = await fetch(`/api/festas/${RECEBENDO_ID}/recebimentos`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        valor: Number(document.getElementById('r-valor').value),
+        forma: document.getElementById('r-forma').value,
+        data: document.getElementById('r-data').value,
+      }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error||'erro ao lançar recebimento');
+    fecharReceber();
+    alert(data.status==='pago'
+      ? 'Recebimento lançado — a reserva está totalmente PAGA. ✅'
+      : `Recebimento lançado. Ainda faltam ${fmtMoney(restanteDevido(data))} — status: pagamento parcial.`);
+    await carregar();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
 }
 
 function abrirEditar(id){
@@ -531,6 +636,7 @@ async function boot(){
   ME = await res.json();
   const isMaster = ME.role==='master';
   IS_MASTER = isMaster;
+  IS_ADMIN = !!ME.isAdmin;
   const secoes = isMaster ? ['monitor','disputas','cofre','fechamentos','lancamento','entregas','entregas-lancamento','ifood','solicitacoes','tecnico','inventario','parque','parque-checkin','festas'] : (ME.permissions?.sections||[]);
   document.getElementById('nav-monitor').classList.remove('hidden');
   document.getElementById('nav-lancamento').classList.remove('hidden');

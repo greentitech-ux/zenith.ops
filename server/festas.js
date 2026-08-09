@@ -8,7 +8,7 @@ const { createCache } = require('./liveCache');
 
 const COLLECTION = db.collection('festas');
 
-const STATUS_VALIDOS = ['pendente', 'pago', 'cancelado'];
+const STATUS_VALIDOS = ['pendente', 'pagamento-parcial', 'pago', 'cancelado'];
 
 // tabela oficial de venda de festas (trampolins + espaço festa), por
 // Missão x horas x saltonautas (quantidade de pulantes):
@@ -60,6 +60,29 @@ function sanitizarPagamento(p) {
   };
 }
 
+// quanto ja entrou de verdade nessa reserva: o sinal registrado na venda +
+// os recebimentos lancados depois (livro-razao imutavel - ver
+// registrarRecebimento). O campo "restante" e so o COMBINADO de como o
+// resto vai ser pago, nao conta como dinheiro recebido
+function totalRecebido(f) {
+  const sinal = num(f.sinal && f.sinal.valor);
+  const recebs = (f.recebimentos || []).reduce((s, r) => s + num(r.valor), 0);
+  return sinal + recebs;
+}
+function restanteDevido(f) {
+  return Math.max(0, num(f.valorTotal) - totalRecebido(f));
+}
+
+// status financeiro derivado do que realmente entrou - nunca digitado:
+// tudo recebido = pago; parte recebida = pagamento-parcial; nada = pendente
+function statusPorPagamento(f) {
+  const total = num(f.valorTotal);
+  const recebido = totalRecebido(f);
+  if (total > 0 && recebido >= total) return 'pago';
+  if (recebido > 0) return 'pagamento-parcial';
+  return 'pendente';
+}
+
 async function criar({
   unidade, cliente, dataVenda, dataDeUso, horaInicio, horaFim,
   missao, horas, saltonautas,
@@ -99,7 +122,15 @@ async function criar({
     valorTotal: total,
     sinal: sanitizarPagamento(sinal),
     restante: sanitizarPagamento(restante),
-    status: 'pendente',
+    // livro-razao dos pagamentos recebidos DEPOIS do fechamento inicial da
+    // venda - append-only: nada aqui pode ser editado nem removido (ver
+    // reabrirPagamento/registrarRecebimento)
+    recebimentos: [],
+    pagamentoAberto: false,
+    reaberturas: [],
+    // ja nasce refletindo o que entrou na venda: sinal cobrindo tudo =
+    // pago; sinal parcial = pagamento-parcial; sem sinal = pendente
+    status: statusPorPagamento({ valorTotal: total, sinal: sanitizarPagamento(sinal), recebimentos: [] }),
     utilizado: false,
     dataUtilizacao: null,
     observacao: String(observacao || '').slice(0, 500),
@@ -164,11 +195,25 @@ async function atualizar(id, patch) {
       merge.missao = null; merge.horas = null; merge.saltonautas = null;
     }
   }
+  // antifraude: depois que existe recebimento lancado, o financeiro da
+  // reserva (valor total, sinal, restante) fica travado - nada do que ja
+  // foi lancado pode ser mexido. Ajuste de valor a mais e um novo
+  // recebimento (reabrir + lancar), nunca edicao do historico
+  const temRecebimentos = (atual.recebimentos || []).length > 0;
+  if (temRecebimentos && (patch.valorTotal !== undefined || patch.sinal !== undefined || patch.restante !== undefined || merge.valorTotal !== undefined)) {
+    throw new Error('Essa reserva já tem recebimento lançado - os valores ficam travados. Use "Reabrir" pra lançar o restante.');
+  }
   if (patch.valorTotal !== undefined && merge.valorTotal === undefined) merge.valorTotal = num(patch.valorTotal);
   if (patch.sinal !== undefined) merge.sinal = sanitizarPagamento(patch.sinal);
   if (patch.restante !== undefined) merge.restante = sanitizarPagamento(patch.restante);
   if (patch.status !== undefined) {
     if (!STATUS_VALIDOS.includes(patch.status)) throw new Error('Status inválido.');
+    // antifraude: "pago" nao se marca na mao quando ainda falta dinheiro
+    // entrar - o status vira pago sozinho quando o ultimo recebimento cobre
+    // o total (cancelado/pendente continuam manuais)
+    if (patch.status === 'pago' && restanteDevido(atual) > 0 && (temRecebimentos || atual.pagamentoAberto)) {
+      throw new Error(`Ainda faltam R$ ${restanteDevido(atual).toFixed(2)} - lance o recebimento do restante pra fechar como pago.`);
+    }
     merge.status = patch.status;
   }
   if (patch.utilizado !== undefined) {
@@ -184,6 +229,61 @@ async function atualizar(id, patch) {
   return getOne(id);
 }
 
+// passo 1 do recebimento pos-venda (antifraude): a reserva fica fechada por
+// padrao - um Gerente da unidade ou Master/Admin (checado na rota) precisa
+// REABRIR pra liberar o lancamento do complemento. A reabertura fica
+// auditada (quem e quando) e nao permite editar nada do que ja foi lancado
+async function reabrirPagamento(id, { porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Reserva não encontrada.');
+  const atual = snap.data();
+  if (atual.status === 'cancelado') throw new Error('Reserva cancelada não recebe pagamento.');
+  if (restanteDevido(atual) <= 0) throw new Error('Essa reserva já está totalmente paga.');
+  if (atual.pagamentoAberto) throw new Error('O recebimento já está aberto pra essa reserva.');
+  await ref.update({
+    pagamentoAberto: true,
+    reaberturas: [...(atual.reaberturas || []), { porEmail, em: new Date().toISOString() }].slice(-30),
+    atualizadoEm: new Date().toISOString(),
+  });
+  festasCache.invalidar();
+  return getOne(id);
+}
+
+// passo 2: lanca o recebimento do complemento. Append-only: entra no
+// livro-razao `recebimentos` e nunca mais pode ser editado ou removido.
+// Nao deixa lancar mais do que o restante devido; fecha o pagamento de novo
+// e o status vira 'pago' (cobriu tudo) ou 'pagamento-parcial' (ainda falta)
+async function registrarRecebimento(id, { valor, forma, data, porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Reserva não encontrada.');
+  const atual = snap.data();
+  if (atual.status === 'cancelado') throw new Error('Reserva cancelada não recebe pagamento.');
+  if (!atual.pagamentoAberto) throw new Error('Reabra o recebimento primeiro (botão Reabrir) - a reserva fica travada depois do fechamento inicial.');
+  const v = num(valor);
+  const devido = restanteDevido(atual);
+  if (v <= 0) throw new Error('Informe o valor recebido.');
+  if (v > devido + 0.009) throw new Error(`O valor recebido não pode passar do restante devido (R$ ${devido.toFixed(2)}).`);
+  const recebimento = {
+    id: crypto.randomBytes(6).toString('hex'),
+    valor: v,
+    forma: String(forma || '').trim().slice(0, 40),
+    data: data || new Date().toISOString().slice(0, 10),
+    registradoPorEmail: porEmail,
+    registradoEm: new Date().toISOString(),
+  };
+  const depois = { ...atual, recebimentos: [...(atual.recebimentos || []), recebimento] };
+  await ref.update({
+    recebimentos: depois.recebimentos,
+    pagamentoAberto: false,
+    status: statusPorPagamento(depois),
+    atualizadoEm: new Date().toISOString(),
+  });
+  festasCache.invalidar();
+  return getOne(id);
+}
+
 async function remover(id) {
   const snap = await COLLECTION.doc(id).get();
   if (!snap.exists) throw new Error('Reserva não encontrada.');
@@ -191,4 +291,9 @@ async function remover(id) {
   festasCache.invalidar();
 }
 
-module.exports = { STATUS_VALIDOS, TABELA_FESTAS, valorFesta, criar, listAll, listByUnidades, getOne, atualizar, remover, invalidar: () => festasCache.invalidar() };
+module.exports = {
+  STATUS_VALIDOS, TABELA_FESTAS, valorFesta, totalRecebido, restanteDevido,
+  criar, listAll, listByUnidades, getOne, atualizar, remover,
+  reabrirPagamento, registrarRecebimento,
+  invalidar: () => festasCache.invalidar(),
+};
