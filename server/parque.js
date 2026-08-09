@@ -86,6 +86,19 @@ function paraMinutos(hora) {
   return h * 60 + m;
 }
 
+// horario previsto de entrada sempre em janelas de 30 em 30 minutos
+// (10:00, 10:30, 11:00...) - 10:31/10:40 nao existem na venda. O relogio
+// REAL continua livre: o botao de check-in inicia na hora exata em que o
+// grupo entrou (10:15, 10:22...) e o tempo contratado conta a partir dali
+function validarHorarioPrevisto(hora) {
+  const h = validarHora(hora, 'o horário previsto');
+  const mm = h.slice(3, 5);
+  if (mm !== '00' && mm !== '30') {
+    throw new Error('O horário previsto vai de 30 em 30 minutos (ex: 10:00, 10:30, 11:00).');
+  }
+  return h;
+}
+
 const FUSO_BR = 'America/Sao_Paulo';
 // hora atual em Brasilia, no formato HH:MM:SS - usada pelo botao de
 // check-in (o horario que realmente conta pra pulseira e o do check-in
@@ -161,7 +174,7 @@ async function criar({
   // desse horario, tudo bem, o relogio comeca no horario real do check-in
   // normalmente. Se ninguem fizer o check-in ate esse horario, o sistema
   // inicia sozinho NESSE horario e avisa a equipe (ver rodarAutoCheckins)
-  const previsto = horarioPrevisto ? validarHora(horarioPrevisto, 'o horário previsto') : null;
+  const previsto = horarioPrevisto ? validarHorarioPrevisto(horarioPrevisto) : null;
   const ref = COLLECTION.doc();
   const registro = {
     id: ref.id,
@@ -425,7 +438,7 @@ async function atualizar(id, patch) {
   if (patch.usou !== undefined) merge.usou = patch.usou === true;
   if (patch.termoAssinado !== undefined) merge.termoAssinado = patch.termoAssinado === true;
   if (patch.horarioPrevisto !== undefined) {
-    merge.horarioPrevisto = patch.horarioPrevisto ? validarHora(patch.horarioPrevisto, 'o horário previsto') : null;
+    merge.horarioPrevisto = patch.horarioPrevisto ? validarHorarioPrevisto(patch.horarioPrevisto) : null;
   }
 
   merge.atualizadoEm = new Date().toISOString();
@@ -496,7 +509,7 @@ function validarPropostaEdicao(proposta) {
     p.tempoMinutos = tempo;
   }
   if (proposta.horarioPrevisto !== undefined) {
-    p.horarioPrevisto = proposta.horarioPrevisto ? validarHora(proposta.horarioPrevisto, 'o horário previsto') : null;
+    p.horarioPrevisto = proposta.horarioPrevisto ? validarHorarioPrevisto(proposta.horarioPrevisto) : null;
   }
   if (proposta.metodoPagamento !== undefined) p.metodoPagamento = sanitizarMetodoPagamento(proposta.metodoPagamento);
   if (proposta.observacao !== undefined) p.observacao = String(proposta.observacao).slice(0, 300);
