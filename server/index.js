@@ -4193,6 +4193,45 @@ app.post('/api/abastecimento/:id/mensagem', auth.requireAuth, async (req, res) =
   }
 });
 
+// SO MASTER: encerra a conversa do pedido (some do seletor do chip pra
+// todo mundo e nao aceita mais mensagem - o historico continua no registro)
+app.post('/api/abastecimento/:id/conversa-encerrar', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  try {
+    const registro = await abastecimentoCarrinho.encerrarConversa(req.params.id, { porEmail: req.user.email });
+    broadcast('abastecimento-atualizado', { id: registro.id });
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// SO MASTER: baixa a conversa do pedido em PDF (registro/evidencia antes de
+// encerrar, ou de conversa ja encerrada)
+app.get('/api/abastecimento/:id/conversa.pdf', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  const reg = await abastecimentoCarrinho.getOne(req.params.id);
+  if (!reg || reg.tipo !== 'PEDIDO') return res.status(404).json({ error: 'Pedido não encontrado.' });
+  const mensagens = reg.mensagens || [];
+  reportUtil.writePDF(res, {
+    titulo: `Conversa do pedido · ${reportUtil.fmtDataHoraBR(reg.criadoEm)}`,
+    subtitulo: `Pedido de ${reg.criadoPorNome || '?'} · ${mensagens.length} mensagem(ns)`
+      + (reg.conversaEncerrada ? ` · conversa encerrada por ${reg.conversaEncerradaPorEmail || 'Master'} em ${reportUtil.fmtDataHoraBR(reg.conversaEncerradaEm)}` : '')
+      + ` · gerado em ${reportUtil.agoraBrasiliaFmt()}`,
+    colunas: [
+      { key: 'hora', label: 'Hora' },
+      { key: 'quem', label: 'Quem' },
+      { key: 'texto', label: 'Mensagem' },
+    ],
+    larguras: { hora: 100, quem: 170, texto: 480 },
+    linhas: mensagens.map((m) => ({
+      hora: reportUtil.fmtDataHoraBR(m.em),
+      quem: `${m.de === 'loja' ? 'Loja' : 'Carrinho'}${m.autorNome ? ' · ' + m.autorNome : ''}`,
+      texto: m.texto || '',
+    })),
+    semDadosMsg: 'Sem mensagens nessa conversa.',
+    nomeArquivo: reportUtil.nomeArquivoComData(`conversa-pedido-${(reg.criadoEm || '').slice(0, 10)}`),
+  });
+});
+
 // confirmacao de recebimento pelo carrinho: o envio nao finaliza sozinho -
 // quem recebe confere quantidades (falta diminui/zera; "a mais" que o
 // pedido exige confirmacao explicita)

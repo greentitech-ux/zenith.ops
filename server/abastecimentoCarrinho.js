@@ -564,6 +564,7 @@ async function adicionarMensagem(id, { de, texto, autorEmail, autorNome }) {
   const atual = await getOne(id);
   if (!atual) throw new Error('Registro não encontrado.');
   if (atual.tipo !== 'PEDIDO') throw new Error('A conversa fica no pedido.');
+  if (atual.conversaEncerrada) throw new Error('Essa conversa foi encerrada pelo Master.');
   const textoLimpo = String(texto || '').trim().slice(0, 500);
   if (!textoLimpo) throw new Error('Escreva a mensagem.');
   const mensagens = atual.mensagens || [];
@@ -576,6 +577,23 @@ async function adicionarMensagem(id, { de, texto, autorEmail, autorNome }) {
     em: new Date().toISOString(),
   };
   await COLLECTION.doc(id).update({ mensagens: [...mensagens, nova] });
+  cache.invalidar();
+  return getOne(id);
+}
+
+// encerramento da conversa pelo MASTER: a conversa some do seletor do chip
+// pra todo mundo e nao aceita mais mensagem (o historico continua salvo no
+// registro e pode ser baixado em PDF pela rota conversa.pdf antes/depois)
+async function encerrarConversa(id, { porEmail } = {}) {
+  const atual = await getOne(id);
+  if (!atual) throw new Error('Registro não encontrado.');
+  if (atual.tipo !== 'PEDIDO') throw new Error('A conversa fica no pedido.');
+  if (atual.conversaEncerrada) return atual;
+  await COLLECTION.doc(id).update({
+    conversaEncerrada: true,
+    conversaEncerradaEm: new Date().toISOString(),
+    conversaEncerradaPorEmail: porEmail || null,
+  });
   cache.invalidar();
   return getOne(id);
 }
@@ -709,7 +727,7 @@ const cache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = cache.cached;
 
 module.exports = {
-  TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, getConfig, salvarConfig,
+  TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, getConfig, salvarConfig,
   listarInsumos, criarInsumo, atualizarInsumo,
   listarOperadores, criarOperador, atualizarOperador, removerOperador, desbloquearOperador, validarOperador, validarOperadorQualquerPapel, trocarPapelOperador,
 };
