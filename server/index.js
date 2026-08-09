@@ -5499,8 +5499,11 @@ app.use((err, req, res, next) => {
     // de 05:00/18:00). Roda 1x no boot porque o historico vive em memoria -
     // sem essa carga inicial as telas de Fechamentos/Entregas ficariam
     // vazias a cada deploy/reinicio do Render. Depois disso, planilha so e
-    // lida quando o Master aciona o botao "Sincronizar" na tela - e a
-    // leitura manual e incremental (so as linhas novas, ver sheetsSync.js).
+    // lida quando o Master aciona o botao "Sincronizar" na tela. TODA
+    // leitura (boot incluso) e incremental: o ponto da ultima sincronizacao
+    // fica salvo no Storage e so as linhas novas desde ela sao lidas - a
+    // planilha inteira so no primeiro uso ou com { completa: true }
+    // (ver sheetsSync.js/criarPersistenciaEstado).
     sincronizarPlanilhasFechamento();
     sincronizarPlanilhaEntregas();
 
