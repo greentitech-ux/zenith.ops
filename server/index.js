@@ -398,6 +398,44 @@ app.post('/api/solicitacoes/decidir', upload.single('comprovante'), async (req, 
   }
 });
 
+// lado do VISITANTE do chat de suporte (widget de canto, ver suporte-chat.js) -
+// publico de proposito (Ajuda #212: "logado ou nao"), por isso fica ACIMA do
+// app.use('/api', auth.requireAuth) logo abaixo. acionarBeniboy() e uma
+// function declaration definida mais pra frente no arquivo, mas isso nao
+// importa aqui: hoisting cobre o modulo inteiro, e o corpo dessas rotas so
+// roda quando uma requisicao chega, muito depois do arquivo inteiro carregar
+app.post('/api/suporte-chat/iniciar', async (req, res) => {
+  try {
+    const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto, assunto: req.body.assunto });
+    broadcast('suporte-chat', { id: chat.id }, 'suporte');
+    push.notifySolicitacao('💬 Novo chat de suporte', `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico.html');
+    res.json({ id: chat.id, token: chat.token });
+    acionarBeniboy(chat.id);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/suporte-chat/:id', async (req, res) => {
+  const chat = await suporteChat.getPublico(req.params.id, req.query.token);
+  if (!chat) return res.sendStatus(404);
+  res.json(chat);
+});
+
+app.post('/api/suporte-chat/:id/mensagem', async (req, res) => {
+  try {
+    const chat = await suporteChat.adicionarMensagem(req.params.id, { de: 'visitante', texto: req.body.texto, token: req.body.token });
+    broadcast('suporte-chat', { id: chat.id }, 'suporte');
+    // notificacao no celular do time tambem em MENSAGEM nova (nao so na
+    // abertura da conversa) - o atendente ve e responde de onde estiver
+    push.notifySolicitacao('💬 Nova mensagem no chat de suporte', `${chat.nome} · ${String(req.body.texto || '').slice(0, 80)}`, chat.id, '/tecnico.html');
+    res.json({ ok: true });
+    acionarBeniboy(chat.id);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // tudo abaixo daqui exige um usuario logado (token JWT, via header ou
 // ?token= - o EventSource do SSE usa a query porque nao manda headers custom)
 app.use('/api', auth.requireAuth);
@@ -4579,38 +4617,6 @@ async function acionarBeniboy(chatId) {
     console.error('[suporteBot] falha no acionamento:', err.message);
   }
 }
-
-app.post('/api/suporte-chat/iniciar', async (req, res) => {
-  try {
-    const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto, assunto: req.body.assunto });
-    broadcast('suporte-chat', { id: chat.id }, 'suporte');
-    push.notifySolicitacao('💬 Novo chat de suporte', `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico.html');
-    res.json({ id: chat.id, token: chat.token });
-    acionarBeniboy(chat.id);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.get('/api/suporte-chat/:id', async (req, res) => {
-  const chat = await suporteChat.getPublico(req.params.id, req.query.token);
-  if (!chat) return res.sendStatus(404);
-  res.json(chat);
-});
-
-app.post('/api/suporte-chat/:id/mensagem', async (req, res) => {
-  try {
-    const chat = await suporteChat.adicionarMensagem(req.params.id, { de: 'visitante', texto: req.body.texto, token: req.body.token });
-    broadcast('suporte-chat', { id: chat.id }, 'suporte');
-    // notificacao no celular do time tambem em MENSAGEM nova (nao so na
-    // abertura da conversa) - o atendente ve e responde de onde estiver
-    push.notifySolicitacao('💬 Nova mensagem no chat de suporte', `${chat.nome} · ${String(req.body.texto || '').slice(0, 80)}`, chat.id, '/tecnico.html');
-    res.json({ ok: true });
-    acionarBeniboy(chat.id);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
 
 // ----- lado do atendimento -----
 app.get('/api/suporte-chats', auth.requireAuth, async (req, res) => {
