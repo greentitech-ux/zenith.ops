@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Regras de Entregas · Zenith Ops</title>
+<title>Protocolo de Rotas · Zenith Ops</title>
 <meta name="theme-color" content="#0b0d10">
 <style>
   :root{
@@ -107,7 +107,7 @@
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div>
         <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
-        <h1>Regras de Entregas</h1>
+        <h1>Protocolo de Rotas</h1>
         <div class="sub-intro">Cada unidade monta sua própria lista de campos de valor (Entrega, Retorno, Extra, Fora de Área, Encosta, Ajuda de Custo, Cooperativa, ou qualquer nome) - com taxa fixa ou variando por dia da semana, meta mínima com valor parcial, e opção de a loja remover aquele campo específico num lançamento (atraso, saiu antes, gerou prejuízo). Unidades sem regra ficam no modo "Plataforma" - a loja continua digitando o valor à mão (ex: pagamento definido pela GAMI/NEXT).</div>
       </div>
     </div>
@@ -124,35 +124,35 @@
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
 <nav class="nav-drawer hidden" id="nav-drawer">
   <div class="nav-drawer-titulo">Zenith Ops</div>
-  <a class="back" href="/painel.html">🏠 Painel</a>
+  <a class="back" href="/painel.html">🧭 Deck</a>
   <div class="nav-drawer-grupo">Operação diária</div>
-  <a class="back" href="/lancamento.html">🧾 Fechamento</a>
-  <a class="back" href="/entrega-lancamento.html">📦 Lançar entrega</a>
-  <a class="back" href="/fechamentos.html">💰 Fechamentos</a>
-  <a class="back" href="/entregas.html">🛵 Entregas</a>
-  <a class="back" href="/estoque.html">📦 Estoque</a>
-  <a class="back" id="nav-abastecimento" href="/abastecimento.html">🛒 Abastec. Carrinho</a>
+  <a class="back" href="/lancamento.html">🧾 Diário de Bordo (lançar)</a>
+  <a class="back" href="/entrega-lancamento.html">🛫 Despachar Expedição</a>
+  <a class="back" href="/fechamentos.html">📖 Diário de Bordo</a>
+  <a class="back" href="/entregas.html">🛫 Expedição</a>
+  <a class="back" href="/estoque.html">🛠 Hangar</a>
+  <a class="back" id="nav-abastecimento" href="/abastecimento.html">🌉 Ponte Aérea</a>
   <div class="nav-drawer-grupo">Monitoramento</div>
-  <a class="back" href="/">📈 Monitor</a>
-  <a class="back" href="/relatorios.html">📊 Relatórios</a>
+  <a class="back" href="/">📡 Radar</a>
+  <a class="back" href="/relatorios.html">⬛ Caixa-Preta</a>
   <a class="back" href="/ifood.html">🍔 iFood</a>
   <div class="nav-drawer-grupo" id="nav-grupo-saltiverso">Saltiverso</div>
-  <a class="back" id="nav-parque-checkin" href="/parque-checkin.html">🤸 Check-in Parque</a>
-  <a class="back" id="nav-parque" href="/parque.html">🤸 Parque (painel)</a>
+  <a class="back" id="nav-parque-checkin" href="/parque-checkin.html">🎫 Portão de Embarque</a>
+  <a class="back" id="nav-parque" href="/parque.html">🛝 Pista de Salto</a>
   <a class="back" id="nav-festas" href="/festas.html">🎉 Festas</a>
   <a class="back" id="nav-mensalistas" href="/mensalistas.html">📅 Mensalistas</a>
   <div class="nav-drawer-grupo">Solicitações</div>
-  <a class="back" href="/central.html">📋 Central</a>
-  <a class="back" href="/tecnico.html">🔧 Chamados TI</a>
-  <a class="back" id="nav-ativos-ti" href="/ativos-ti.html">🖥️ Ativos de TI</a>
-  <a class="back" href="/manutencao.html">🔧 Manutenção</a>
+  <a class="back" href="/central.html">🎯 Central de Comando</a>
+  <a class="back" href="/tecnico.html">🚨 Resgate</a>
+  <a class="back" id="nav-ativos-ti" href="/ativos-ti.html">🛡️ Arsenal</a>
+  <a class="back" href="/manutencao.html">🛠 Oficina</a>
   <div class="nav-drawer-grupo">Administração</div>
-  <a class="back" href="/usuarios.html">👤 Usuários</a>
-  <a class="back" href="/grupos.html">🏷️ Grupos</a>
-  <a class="back active" href="/entregas-regras.html">⚙️ Regras de Entregas</a>
-  <a class="back" href="/cofre.html">🔐 Cofre</a>
-  <a class="back" href="/ajuda.html">❓ Ajuda</a>
-  <a class="back" id="nav-reset-senha" href="/painel.html?resetSenha=1">🔑 Reset senha</a>
+  <a class="back" href="/usuarios.html">👥 Tripulação</a>
+  <a class="back" href="/grupos.html">🎖️ Esquadrões</a>
+  <a class="back active" href="/entregas-regras.html">📜 Protocolo de Rotas</a>
+  <a class="back" href="/cofre.html">🔐 Cofre-Forte</a>
+  <a class="back" href="/ajuda.html">📘 Manual de Bordo</a>
+  <a class="back" id="nav-reset-senha" href="/painel.html?resetSenha=1">🗝️ Chave Mestra</a>
   <div class="nav-drawer-sep"></div>
   <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
 </nav>
