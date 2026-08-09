@@ -97,6 +97,10 @@
   @media(min-width:440px){ .crianca-linha{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:end;} .crianca-linha-nasc{grid-column:2;} }
   .crianca-linha input{margin:0;}
   .btn-remover-crianca{background:none;border:1px solid var(--line);color:var(--bad);border-radius:8px;height:44px;width:38px;flex:none;cursor:pointer;font-size:14px;}
+  .ver-linha{padding:8px 0;border-top:1px solid var(--line);}
+  .ver-linha:first-child{border-top:none;}
+  .ver-linha .ver-lbl{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
+  .ver-linha .ver-val{font-size:13.5px;margin-top:2px;word-break:break-word;}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -335,6 +339,17 @@
   </div>
 </div>
 
+<div class="overlay hidden" id="overlay-ver">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharVer()">✕</span>
+    <div class="sheet">
+    <h3>👁 Ver check-in</h3>
+    <div class="sub" id="ver-info"></div>
+    <div id="ver-corpo"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
@@ -545,6 +560,45 @@ function abrirCorrecao(id){
   document.getElementById('overlay-correcao').classList.remove('hidden');
 }
 function fecharCorrecao(){ document.getElementById('overlay-correcao').classList.add('hidden'); CORRIGINDO_ID=null; }
+
+// ---------- Ver (somente leitura): mostra o check-in inteiro pra loja
+// conferir os dados antes de decidir se precisa Pedir correção - sem
+// nenhum campo editável, só texto ----------
+function verLinha(lbl, val){
+  return `<div class="ver-linha"><div class="ver-lbl">${escapeHtml(lbl)}</div><div class="ver-val">${val}</div></div>`;
+}
+function abrirVer(id){
+  const c = TODOS.find(x=>x.id===id);
+  if(!c) return;
+  document.getElementById('ver-info').textContent = `${c.unidadeNome||c.unidade} · ${fmtData(c.dataUtilizacao)}`;
+  const status = statusCheckin(c);
+  const horario = c.iniciado
+    ? `${(c.timeInicial||'').slice(0,5)} às ${(c.timeFinal||'').slice(0,5)}${c.autoCheckin?' · 🤖 automático':''}`
+    : `${c.tempoMinutos}min · previsto ${(c.horarioPrevisto||'').slice(0,5) || '—'}`;
+  const meiasCount = (c.criancas||[]).filter(x=>x.meia!==false).length + (c.meiasExtras||0);
+  const criancasHtml = (c.criancas||[]).length
+    ? (c.criancas||[]).map(cr=>`${escapeHtml(cr.nome||'—')}${cr.dataNascimento?' · nasc. '+fmtData((cr.dataNascimento||'').slice(0,10)):''} · ${cr.meia!==false?'🧦 com meia':'sem meia'}`).join('<br>')
+    : '—';
+  let html = '';
+  html += verLinha('Status', escapeHtml(status.texto));
+  html += verLinha('Responsável', escapeHtml(c.responsavel?.nome||'—'));
+  html += verLinha('Contato', escapeHtml(c.responsavel?.contato||'—'));
+  html += verLinha('Horário', escapeHtml(horario));
+  html += verLinha('Pulseira(s)', String(c.pulseiras||0));
+  html += verLinha('Meia(s)', String(meiasCount));
+  html += verLinha('Forma de pagamento', escapeHtml(c.metodoPagamento ? (METODOS_LABEL[c.metodoPagamento]||c.metodoPagamento) : '— sem método —'));
+  html += verLinha('Valor', escapeHtml(fmtReal(valorDoCheckin(c))));
+  if(c.adultoCortesia) html += verLinha('Adulto cortesia', `x${c.quantAC||1}`);
+  if(c.minutosAdicionados) html += verLinha('Minutos extras', `➕ ${c.minutosAdicionados}min`);
+  if(c.relancadoDe) html += verLinha('Relançado', '🔁 termo do dia reaproveitado');
+  if(c.checkoutAntecipado) html += verLinha('Check-out antecipado', `🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`);
+  html += verLinha('Termo assinado', c.termoAssinado ? '✅ sim' : '❌ ainda não');
+  html += verLinha('Observação', c.observacao ? escapeHtml(c.observacao) : '—');
+  html += verLinha('Criança(s)', criancasHtml);
+  document.getElementById('ver-corpo').innerHTML = html;
+  document.getElementById('overlay-ver').classList.remove('hidden');
+}
+function fecharVer(){ document.getElementById('overlay-ver').classList.add('hidden'); }
 
 document.getElementById('form-correcao').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
@@ -806,6 +860,7 @@ function renderLista(lista){
         <div class="criancas">${escapeHtml(criancas)}</div>
         ${cortesiaHtml(c)}
         <div>
+          <button type="button" class="link-btn" onclick="abrirVer('${c.id}')">👁 Ver</button>
           <a class="link-btn" href="/api/parque/checkins/${c.id}/termo.pdf?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">🖨️ Termo</a>
           ${!c.termoAssinado?`<button type="button" class="link-btn" onclick="marcarAssinadoId('${c.id}')">✔ Marcar assinado</button>`:''}
           ${(!c.iniciado && !(c.metodoPagamento==='cortesia' && ['PENDENTE','NEGADA'].includes(c.cortesiaStatus)))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="fazerCheckin('${c.id}')">▶ Fazer check-in</button>`:''}
