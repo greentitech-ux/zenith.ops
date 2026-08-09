@@ -570,6 +570,7 @@ const TOPICOS = [
       <li>Adicione cada criança (nome + nascimento). <b>Comportamento:</b> pulseiras = quantidade de crianças, calculado sozinho. Cada criança vem com <b>🧦 Par de meia · R$25</b> marcado por padrão (toda criança paga a meia antiderrapante) — <b>desmarque</b> quando a criança já chegou com a própria meia, e o valor cai na hora.</li>
       <li>Precisa de mais pares? Use <b>Meias extras</b> na seção Pagamento (R$25 cada, além das crianças).</li>
       <li>Escolha a <b>forma de pagamento</b>: Dinheiro, Pix, Débito, Crédito ou Cortesia. O resumo mostra o valor total ao vivo (tabela do tempo × crianças + meias; Cortesia zera).</li>
+      <li><b>Cortesia exige justificativa</b> (campo obrigatório) e entra num fluxo de aprovação antes de liberar a entrada — ver "🎗 Cortesia" abaixo.</li>
       <li>Clique em <b>Registrar check-in</b>. O cadastro entra na lista como "aguardando assinatura" — o relógio ainda NÃO começou.</li>
     </ol>
     <h3>2) Termo de responsabilidade (obrigatório)</h3>
@@ -583,6 +584,15 @@ const TOPICOS = [
       <li><b>Chegou antes?</b> Aperte <b>▶ Fazer check-in</b>: o relógio começa naquele momento exato (10:15, 10:22...) — entra antes e <b>sai antes</b> do horário inicialmente acordado, sempre contando só o tempo contratado. Ex: previsto 10:30 com 60min, mas entrou 9:50 → sai 10:50, não 11:30.</li>
       <li><b>⏰ Tempo esgotado:</b> quando o relógio de um grupo vence, o balcão e o painel do Parque mostram um <b>popup automático "Tempo esgotado — retirar do parque"</b> com o responsável, as crianças e os horários. <b>Comportamento:</b> o aviso aparece uma vez por grupo (feche em "OK, equipe avisada"); quem já fez check-out não entra no aviso.</li>
     </ul>
+    <h3>🎗 Cortesia (aprovação em duas alçadas)</h3>
+    <p>Cortesia é <b>renúncia de receita</b>, então nunca passa sozinha: o lançamento vira um <b>card de aprovação</b> com a justificativa registrada e segue um fluxo de alçada dupla com trilha de auditoria (quem decidiu, quando e por quê):</p>
+    <ol>
+      <li>O atendente registra a entrada como Cortesia com a <b>justificativa obrigatória</b>. O card nasce <b>pendente</b> e a entrada fica <b>bloqueada</b> (sem check-in manual nem automático).</li>
+      <li><b>Gerente da unidade aprova</b> → a entrada é liberada na hora (pra não travar o balcão), <b>mas o card continua aberto aguardando a palavra final do Master</b> — prestação de contas. Se o <b>Master aprovar direto</b>, o card já encerra.</li>
+      <li><b>Master dá a palavra final:</b> aprova (card encerrado) ou <b>rejeita a justificativa do Gerente</b> — aí o card é <b>atribuído ao Admin responsável (MV)</b>, que toma ciência da divergência e <b>encerra o card com um parecer registrado</b> (ex: cortesia mantida com advertência, desconto, etc.).</li>
+      <li>Se a cortesia for <b>negada</b> ainda pendente, a entrada segue bloqueada — troque a forma de pagamento pra liberar.</li>
+    </ol>
+    <div class="dica"><b>Comportamento:</b> cada decisão fica gravada no card (aprovador, data/hora e motivo) e aparece no balcão e no painel do Parque. Cortesias antigas, de antes desse fluxo existir, não são afetadas.</div>
     <h3>➕ Adicionar tempo (durante a vigência)</h3>
     <ol>
       <li>O grupo está dentro e quer ficar mais? No card, clique em <b>➕ Adicionar tempo</b>, escolha quanto (30 a 120min) e a forma de pagamento do acréscimo.</li>
