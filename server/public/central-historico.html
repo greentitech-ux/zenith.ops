@@ -219,7 +219,14 @@
 
 <div id="root" class="hidden">
 
-<div class="panel">
+<!-- secoes do Historico: Solicitacoes (kanban) e Fechamentos (os
+     lancamentos de caixa num lugar so, com Pedir correcao/edicao Master) -->
+<div id="secoes-central" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+  <button type="button" class="btn-secundario" id="sec-btn-solicitacoes" style="margin-top:0;" onclick="trocarSecaoCentral('solicitacoes')">🎫 Solicitações</button>
+  <button type="button" class="btn-secundario hidden" id="sec-btn-fechamentos" style="margin-top:0;" onclick="trocarSecaoCentral('fechamentos')">🧾 Fechamentos <span id="sec-fech-count" style="font-family:var(--mono);color:var(--muted);"></span></button>
+</div>
+
+<div class="panel" id="sec-solicitacoes">
   <h2 style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
     <span><span id="titulo-lista">Solicitações</span> <span class="sub" id="lista-count" style="font-family:var(--mono);color:var(--muted);"></span></span>
     <span style="display:flex;gap:6px;">
@@ -268,7 +275,8 @@
 <!-- movido de lancamento.html - a tela de lançamento e so pra lançar,
      acompanhar/corrigir o que ja foi lançado e papel do Histórico -->
 <div class="panel hidden" id="painel-meus-lancamentos">
-  <h2>Últimos fechamentos lançados</h2>
+  <h2>🧾 Fechamentos lançados</h2>
+  <div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:8px;">Todos os fechamentos de caixa num lugar só — acompanhe o que foi lançado e use <b>Pedir correção</b> pra consertar o que foi digitado errado ou ficou faltando.</div>
   <div id="lista-lancamentos"><div class="empty">carregando...</div></div>
 </div>
 
@@ -1672,6 +1680,10 @@ async function carregarFechamentos(){
   MEUS_FECHAMENTOS = meus.sort((a,b)=>(b.data||'').localeCompare(a.data||'')).slice(0,20);
   EDICOES_FECHAMENTO = edicoes;
   GRUPOS_KPI_FECHAMENTO = grupos;
+  // contador na aba: pedidos de correcao ainda pendentes (o que precisa de
+  // atencao), nao o total de lancamentos
+  const pendentes = edicoes.filter(e=>e.status==='PENDENTE').length;
+  document.getElementById('sec-fech-count').textContent = pendentes ? `(${pendentes} pendente${pendentes>1?'s':''})` : '';
   renderListaFechamentos();
 }
 
@@ -1969,11 +1981,30 @@ async function boot(){
   notificarPendentesNaoVistas();
   conectarStreamChat();
 
-  // painel "Últimos fechamentos lançados" - so pra quem tem a secao
-  // "lancamento" (mesma exigencia da rota /api/fechamentos/meus)
-  const podeLancamento = SECOES.includes('lancamento');
-  document.getElementById('painel-meus-lancamentos').classList.toggle('hidden', !podeLancamento);
-  if(podeLancamento) await carregarFechamentos();
+  // secao "Fechamentos" - so pra quem tem a secao "lancamento" (mesma
+  // exigencia da rota /api/fechamentos/meus). Lembra a ultima aba usada
+  PODE_LANCAMENTO = SECOES.includes('lancamento');
+  document.getElementById('sec-btn-fechamentos').classList.toggle('hidden', !PODE_LANCAMENTO);
+  const abaSalva = localStorage.getItem('centralSecao');
+  trocarSecaoCentral(PODE_LANCAMENTO && abaSalva === 'fechamentos' ? 'fechamentos' : 'solicitacoes');
+  if(PODE_LANCAMENTO) await carregarFechamentos();
+}
+
+// alterna entre as secoes do Historico: Solicitacoes (kanban) e
+// Fechamentos (lancamentos de caixa num lugar so)
+let PODE_LANCAMENTO = false;
+let SECAO_CENTRAL = 'solicitacoes';
+function trocarSecaoCentral(secao){
+  SECAO_CENTRAL = secao;
+  document.getElementById('sec-solicitacoes').classList.toggle('hidden', secao!=='solicitacoes');
+  document.getElementById('painel-meus-lancamentos').classList.toggle('hidden', secao!=='fechamentos' || !PODE_LANCAMENTO);
+  const btnSol = document.getElementById('sec-btn-solicitacoes');
+  const btnFech = document.getElementById('sec-btn-fechamentos');
+  btnSol.style.borderColor = secao==='solicitacoes' ? 'var(--accent)' : 'var(--line)';
+  btnSol.style.color = secao==='solicitacoes' ? 'var(--accent)' : '';
+  btnFech.style.borderColor = secao==='fechamentos' ? 'var(--accent)' : 'var(--line)';
+  btnFech.style.color = secao==='fechamentos' ? 'var(--accent)' : '';
+  localStorage.setItem('centralSecao', secao);
 }
 
 // notificacao de mensagem nova no canto superior direito - fica ate a pessoa
