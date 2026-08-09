@@ -489,14 +489,17 @@ function correcaoAba(aba){
   document.getElementById('btn-enviar-correcao').textContent = aba==='excluir' ? 'Pedir exclusão' : 'Enviar proposta de alteração';
 }
 
-function corAddCrianca(nome, nasc){
+function corAddCrianca(nome, nasc, meia){
   const div = document.createElement('div');
   div.className = 'crianca-linha';
   div.innerHTML = `<input type="text" placeholder="Nome da criança" class="cor-cr-nome">
     <div class="crianca-linha-nasc">
       <div><input type="date" class="cor-cr-nasc"></div>
       <button type="button" class="btn-remover-crianca" title="Remover criança" onclick="this.closest('.crianca-linha').remove()">🗑</button>
-    </div>`;
+    </div>
+    <label style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
+      <input type="checkbox" class="cor-cr-meia" style="width:auto;" ${meia===false?'':'checked'}> 🧦 Par de meia · R$25
+    </label>`;
   div.querySelector('.cor-cr-nome').value = nome||'';
   div.querySelector('.cor-cr-nasc').value = (nasc||'').slice(0,10);
   document.getElementById('cor-criancas').appendChild(div);
@@ -512,7 +515,7 @@ function abrirCorrecao(id){
   document.getElementById('cor-contato').value = c.responsavel?.contato || '';
   document.getElementById('cor-data').value = c.dataUtilizacao || '';
   const sel = document.getElementById('cor-tempo');
-  sel.innerHTML = [30,60,90,120,150,180,210,240].map(t=>`<option value="${t}">${t} min</option>`).join('');
+  sel.innerHTML = [30,60,90,120].map(t=>`<option value="${t}">${t} min</option>`).join('');
   sel.value = String(c.tempoMinutos || 60);
   document.getElementById('cor-previsto').value = (c.horarioPrevisto||'').slice(0,5);
   document.getElementById('cor-metodo').value = c.metodoPagamento || '';
@@ -521,7 +524,7 @@ function abrirCorrecao(id){
   document.getElementById('cor-ac-quant').value = c.quantAC || 1;
   document.getElementById('cor-observacao').value = c.observacao || '';
   document.getElementById('cor-criancas').innerHTML = '';
-  (c.criancas||[]).forEach(cr=>corAddCrianca(cr.nome, cr.dataNascimento));
+  (c.criancas||[]).forEach(cr=>corAddCrianca(cr.nome, cr.dataNascimento, cr.meia));
   document.getElementById('cor-motivo').value = '';
   document.getElementById('msg-correcao').classList.add('hidden');
   correcaoAba('alterar');
@@ -548,6 +551,7 @@ document.getElementById('form-correcao').addEventListener('submit', async (ev)=>
         criancas: [...document.querySelectorAll('#cor-criancas .crianca-linha')].map(l=>({
           nome: l.querySelector('.cor-cr-nome').value,
           dataNascimento: l.querySelector('.cor-cr-nasc').value || null,
+          meia: l.querySelector('.cor-cr-meia').checked,
         })),
       };
     }
@@ -679,7 +683,7 @@ function renderLista(lista){
           <span>${escapeHtml(c.responsavel?.nome||'')} · ${escapeHtml(c.unidadeNome||c.unidade)}</span>
           <span class="badge ${status.classe}">${status.texto}</span>
         </div>
-        <div class="sub">${horario} · ${c.pulseiras} pulseira(s) · ${fmtReal(valorDoCheckin(c))}${c.metodoPagamento?' ('+(METODOS_LABEL[c.metodoPagamento]||c.metodoPagamento)+')':''}${c.adultoCortesia?' · A.C. x'+c.quantAC:''} · ${escapeHtml(c.responsavel?.contato||'')}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''}</div>
+        <div class="sub">${horario} · ${c.pulseiras} pulseira(s)${c.valorMeias?` · 🧦 ${((c.criancas||[]).filter(x=>x.meia!==false).length + (c.meiasExtras||0))} meia(s)`:''}${c.minutosAdicionados?` · ➕ ${c.minutosAdicionados}min extras`:''}${c.relancadoDe?' · 🔁 relançado (termo do dia)':''} · ${fmtReal(valorDoCheckin(c))}${c.metodoPagamento?' ('+(METODOS_LABEL[c.metodoPagamento]||c.metodoPagamento)+')':''}${c.adultoCortesia?' · A.C. x'+c.quantAC:''} · ${escapeHtml(c.responsavel?.contato||'')}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''}</div>
         <div class="criancas">${escapeHtml(criancas)}</div>
         <div>
           <a class="link-btn" href="/api/parque/checkins/${c.id}/termo.pdf?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">🖨️ Termo</a>

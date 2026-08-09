@@ -2481,7 +2481,7 @@ app.get('/api/inventario/relatorio.:formato(csv|pdf)', requireSection('inventari
 // padrao entregas/entregas-lancamento) + uma secao de festas ----------
 app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, res) => {
   try {
-    const { unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, usarCreditoMin, metodoPagamento } = req.body;
+    const { unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, usarCreditoMin, metodoPagamento, meiasExtras } = req.body;
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
@@ -2493,7 +2493,7 @@ app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, r
       minutosExtras = await parque.usarCredito(responsavel?.cpf, usarCreditoMin);
     }
     const registro = await parque.criar({
-      unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras, metodoPagamento,
+      unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras, metodoPagamento, meiasExtras,
       colaboradorId: req.user.id, colaboradorNome: req.user.email,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
     });
@@ -2517,14 +2517,19 @@ app.get('/api/parque/checkins', requireAnySection('parque', 'parque-checkin'), a
 // parque.checkout) vale pra qualquer unidade, independente do check-in
 // anterior estar ou nao dentro do que esse usuario enxerga
 app.get('/api/parque/cliente-por-cpf', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
-  const [encontrado, credito] = await Promise.all([
+  const [encontrado, credito, visitaHojeBruta] = await Promise.all([
     parque.buscarPorCpf(req.query.cpf),
     parque.creditoPorCpf(req.query.cpf),
+    parque.visitaHojePorCpf(req.query.cpf),
   ]);
+  // visita de hoje (pro fluxo do Relançar) segue a mesma regra de unidade
+  // do cadastro: so aparece se esse usuario enxerga a unidade dela
+  const visitaHoje = (visitaHojeBruta && (req.isMaster || (req.permissions.unidades || []).includes(visitaHojeBruta.unidade)))
+    ? visitaHojeBruta : null;
   if (!encontrado || (!req.isMaster && !(req.permissions.unidades || []).includes(encontrado.unidade))) {
-    return res.json({ responsavel: null, credito });
+    return res.json({ responsavel: null, credito, visitaHoje });
   }
-  res.json({ responsavel: encontrado.responsavel, credito });
+  res.json({ responsavel: encontrado.responsavel, credito, visitaHoje });
 });
 
 // importacao unica (idempotente) dos dados historicos da planilha antiga -
@@ -2580,6 +2585,54 @@ app.post('/api/parque/checkins/:id/checkin', requireAnySection('parque', 'parque
     const registro = await parque.checkin(req.params.id);
     broadcast('parque-checkin-atualizado', registro, 'parque');
     broadcast('parque-checkin-atualizado', registro, 'parque-checkin');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// compra de tempo extra durante a vigencia: estende o timeFinal e soma o
+// valor do tempo adicional (tabela x criancas) - meias nao sao cobradas de
+// novo (ja estao com as do check-in original)
+app.post('/api/parque/checkins/:id/adicionar-tempo', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
+  try {
+    const atual = await parque.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Check-in não encontrado.' });
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(atual.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    const registro = await parque.adicionarTempo(req.params.id, {
+      minutos: req.body.minutos,
+      metodoPagamento: req.body.metodoPagamento,
+      porEmail: req.user.email,
+    });
+    broadcast('parque-checkin-atualizado', registro, 'parque');
+    broadcast('parque-checkin-atualizado', registro, 'parque-checkin');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// o tempo ja acabou mas ainda e o MESMO dia e a familia quer voltar: cria
+// uma nova compra copiando os dados/criancas e reaproveitando o Termo
+// assinado da compra anterior (sem meias - ja estao com elas)
+app.post('/api/parque/checkins/:id/relancar', requireSection('parque-checkin'), async (req, res) => {
+  try {
+    const origem = await parque.getOne(req.params.id);
+    if (!origem) return res.status(404).json({ error: 'Check-in não encontrado.' });
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(origem.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    const registro = await parque.relancar(req.params.id, {
+      tempoMinutos: req.body.tempoMinutos,
+      metodoPagamento: req.body.metodoPagamento,
+      horarioPrevisto: req.body.horarioPrevisto,
+      criadoPorId: req.user.id,
+      criadoPorEmail: req.user.email,
+    });
+    broadcast('parque-checkin-criado', registro, 'parque');
+    broadcast('parque-checkin-criado', registro, 'parque-checkin');
     res.json(registro);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2823,7 +2876,8 @@ app.get('/api/parque/financeiro.:formato(csv|pdf)', requireSection('parque'), as
     .sort((a, b) => (b.dataUtilizacao + (b.timeInicial || '')).localeCompare(a.dataUtilizacao + (a.timeInicial || '')));
   const colunas = [
     { key: 'data', label: 'Data' }, { key: 'responsavel', label: 'Responsável' }, { key: 'tempo', label: 'Tempo' },
-    { key: 'pulseiras', label: 'Pulseiras' }, { key: 'valorPulseira', label: 'Valor/pulseira' }, { key: 'valor', label: 'Valor total' },
+    { key: 'pulseiras', label: 'Pulseiras' }, { key: 'valorPulseira', label: 'Valor/pulseira' }, { key: 'meias', label: 'Meias' },
+    { key: 'valor', label: 'Valor total' },
     { key: 'metodo', label: 'Método' }, { key: 'checkin', label: 'Check-in' },
   ];
   const porMetodo = {};
@@ -2836,9 +2890,10 @@ app.get('/api/parque/financeiro.:formato(csv|pdf)', requireSection('parque'), as
     return {
       data: reportUtil.fmtDataBR(c.dataUtilizacao),
       responsavel: c.responsavel?.nome,
-      tempo: `${c.tempoMinutos}min`,
+      tempo: `${c.tempoMinutos}min${c.minutosAdicionados ? ` +${c.minutosAdicionados}min` : ''}`,
       pulseiras: (c.criancas || []).length || c.pulseiras || 0,
       valorPulseira: reportUtil.fmtMoneyBR(c.valorPulseira != null ? c.valorPulseira : parque.valorPorTempo(c.tempoMinutos)),
+      meias: c.valorMeias ? reportUtil.fmtMoneyBR(c.valorMeias) : '—',
       valor: reportUtil.fmtMoneyBR(valor),
       metodo,
       checkin: c.iniciado ? 'Feito' : 'Aguardando',
