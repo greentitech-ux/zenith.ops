@@ -40,6 +40,11 @@
     '  --warn:#8f6400; --warn-dim:#faeccb;',
     '  --bad:#c62f2f; --bad-dim:#fbe3e3;',
     '  --accent:#0d7ac2;',
+    // variaveis proprias do Abastecimento (balões/botões de PEDIDO x ENVIO
+    // da "Conversa do pedido") - sem isso o balão ficava escuro com texto
+    // escuro no tema claro (ilegivel, reportado em 2026-08-09)
+    '  --pedido:#c62828; --pedido-dim:#fde7e5;',
+    '  --envio:#175fb4; --envio-dim:#e4edfb;',
     '}',
     // paginas pintam o body com a var --bg, mas garante mesmo se alguma
     // tiver a cor no proprio body
