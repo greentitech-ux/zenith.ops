@@ -1016,11 +1016,17 @@ function insumosAtivos(){ return CATALOGO_INSUMOS.filter(i=>i.ativo!==false); }
 function insumoCadastro(id){ return CATALOGO_INSUMOS.find(i=>i.id===id) || null; }
 
 // ---------- formulario ----------
-// linha de insumo POR CATALOGO: escolhe o item, a embalagem (unidade sempre;
-// caixa so se o cadastro tiver qtd/caixa - que vem travada) e a quantidade
+// linha de insumo POR CATALOGO: escolhe o item, a embalagem (CAIXA como
+// padrao quando o cadastro tem qtd/caixa - e como os itens chegam; quem
+// quiser troca pra Unidade no seletor) e a quantidade
+function embalagemPadrao(insumoId){
+  const cad = insumoCadastro(insumoId);
+  return cad && cad.qtdPorCaixa ? 'caixa' : 'unidade';
+}
 function adicionarInsumo(insumoId, embalagem, quantidade){
   const primeiro = insumosAtivos()[0];
-  INSUMOS.push({ id: ++SEQ, insumoId: insumoId || (primeiro ? primeiro.id : ''), embalagem: embalagem || 'unidade', quantidade: quantidade || '' });
+  const idEfetivo = insumoId || (primeiro ? primeiro.id : '');
+  INSUMOS.push({ id: ++SEQ, insumoId: idEfetivo, embalagem: embalagem || embalagemPadrao(idEfetivo), quantidade: quantidade || '' });
   renderInsumos();
 }
 function removerInsumo(id){ INSUMOS = INSUMOS.filter(i=>i.id!==id); renderInsumos(); }
@@ -1028,8 +1034,8 @@ function mudarInsumo(id, insumoId){
   const it = INSUMOS.find(x=>x.id===id);
   if(!it) return;
   it.insumoId = insumoId;
-  const cad = insumoCadastro(insumoId);
-  if(it.embalagem==='caixa' && !(cad && cad.qtdPorCaixa)) it.embalagem = 'unidade';
+  // trocou o item: volta pro padrao do item novo (caixa, se tiver qtd/caixa)
+  it.embalagem = embalagemPadrao(insumoId);
   renderInsumos();
 }
 function mudarEmbalagem(id, embalagem){
