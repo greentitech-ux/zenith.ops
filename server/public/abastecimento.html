@@ -28,9 +28,12 @@
   h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;}
   h2{font-size:13.5px;font-weight:700;margin:0 0 4px;}
   .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
-  header{margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--line);}
-  .header-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;}
-  .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  /* cabecalho fixo: sticky mantem o espaco dele no fluxo da pagina (nada
+     fica escondido por tras) e trava no topo ao rolar. As margens negativas
+     compensam o padding do body pra faixa ir de ponta a ponta da coluna */
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-16px -12px 16px;padding:12px 12px;border-bottom:1px solid var(--line);}
+  .header-top{display:flex;justify-content:space-between;align-items:center;gap:8px;}
+  .header-nav{display:flex;align-items:center;gap:6px;flex:none;}
   a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
   a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
@@ -40,7 +43,7 @@
   .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
   .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
   .hidden{display:none!important;}
-  .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
   .hamburger-btn:hover{border-color:var(--accent);}
   .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
   .nav-drawer-overlay.hidden{display:none!important;}
@@ -174,18 +177,18 @@
 
 <header>
   <div class="header-top">
-    <div style="display:flex;align-items:flex-start;gap:10px;">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
-      <div>
+      <div style="min-width:0;">
         <div class="eyebrow">Zenith Ops · Dominos Aeroporto</div>
         <h1>🛒 Abastecimento do Carrinho</h1>
       </div>
     </div>
-  </div>
-  <div class="header-nav">
-    <button class="btn-notif" onclick="location.reload()" title="Atualizar página">🔄</button>
-    <div class="nav-divider"></div>
-    <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
+    <div class="header-nav">
+      <button class="btn-notif" onclick="location.reload()" title="Atualizar página">🔄</button>
+      <div class="nav-divider"></div>
+      <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
+    </div>
   </div>
 </header>
 
