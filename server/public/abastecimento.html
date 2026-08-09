@@ -457,7 +457,7 @@
   <div class="sheet-wrap" style="max-width:400px;">
     <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharPedirCorrecao()">✕</span>
     <div class="sheet" style="border-radius:14px;">
-      <h3>🛠 Pedir correção</h3>
+      <h3 id="correcao-titulo">🛠 Pedir correção</h3>
       <div class="sub" id="correcao-resumo"></div>
       <div style="display:flex;gap:8px;margin:10px 0 12px;">
         <button type="button" class="cat-toggle on" id="correcao-tab-alterar" onclick="correcaoAcao('alterar')">✏️ Alterar quantidades</button>
@@ -465,16 +465,21 @@
       </div>
       <div id="correcao-itens" style="display:flex;flex-direction:column;gap:8px;"></div>
       <div class="sub hidden" id="correcao-aviso-remover" style="color:var(--bad);margin-top:4px;">O lançamento inteiro será removido se o Master aprovar.</div>
-      <label style="margin-top:10px;">Justificativa</label>
-      <textarea id="correcao-motivo" placeholder="ex: foi enviada quantidade errada / envio lançado fora do horário real / lançamento duplicado..."></textarea>
-      <!-- assinatura: QUALQUER operador de balcao (pede ou envia) confirma
-           com usuario+senha, como todo lancamento -->
-      <label>Quem está pedindo? <span style="text-transform:none;letter-spacing:0;">(login do operador — qualquer ponta)</span></label>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-        <input type="text" id="correcao-op-usuario" maxlength="4" autocomplete="off" list="dl-operadores" placeholder="usuário (4 letras)" style="text-transform:lowercase;">
-        <input type="password" id="correcao-op-senha" maxlength="4" inputmode="numeric" autocomplete="new-password" placeholder="senha (4 números)">
+      <!-- bloco de justificativa+assinatura: so no fluxo de "pedir correção"
+           (Ticket pro Master decidir); a edicao DIRETA do Master (so
+           Contagem, ver botao ✏️ editar no card) pula tudo isso -->
+      <div id="correcao-bloco-solicitacao">
+        <label style="margin-top:10px;">Justificativa</label>
+        <textarea id="correcao-motivo" placeholder="ex: foi enviada quantidade errada / envio lançado fora do horário real / lançamento duplicado..."></textarea>
+        <!-- assinatura: QUALQUER operador de balcao (pede ou envia) confirma
+             com usuario+senha, como todo lancamento -->
+        <label>Quem está pedindo? <span style="text-transform:none;letter-spacing:0;">(login do operador — qualquer ponta)</span></label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <input type="text" id="correcao-op-usuario" maxlength="4" autocomplete="off" list="dl-operadores" placeholder="usuário (4 letras)" style="text-transform:lowercase;">
+          <input type="password" id="correcao-op-senha" maxlength="4" inputmode="numeric" autocomplete="new-password" placeholder="senha (4 números)">
+        </div>
+        <div class="sub" style="margin-top:6px;">Vai pra <b>análise e aprovação do Master</b> (vira Ticket na Central). Nada muda até ele aprovar — o card fica marcado "em análise".</div>
       </div>
-      <div class="sub" style="margin-top:6px;">Vai pra <b>análise e aprovação do Master</b> (vira Ticket na Central). Nada muda até ele aprovar — o card fica marcado "em análise".</div>
       <button type="button" class="btn-primary" id="btn-correcao-ok" onclick="enviarPedirCorrecao()">Enviar pra aprovação</button>
       <div class="msg hidden" id="msg-correcao"></div>
     </div>
@@ -910,7 +915,6 @@ function insumoTexto(i){
 // o solicitante propoe (alterar quantidades ou remover) com justificativa e
 // vai pra aprovacao do Master, que decide direto no card
 function correcaoHtml(r){
-  if(r.tipo==='CONTAGEM') return '';
   const c = r.correcao;
   if(c && c.numeroTicket){
     const st = c.status || 'pendente';
@@ -967,6 +971,11 @@ function regCardHtml(r){
   if(r.tipo==='PEDIDO' && (r.mensagens||[]).length){
     statusBadge += ` <span class="badge vinculo" style="cursor:pointer;" onclick="event.stopPropagation();abrirConversa('${r.id}')">💬 ${r.mensagens.length}</span>`;
   }
+  // Contagem editada direto pelo Master (sem ticket) - marca visivel de que
+  // o numero lancado originalmente foi corrigido, e por quem
+  if(r.editadoEm){
+    statusBadge += ` <span class="badge visto" title="Editado por ${escapeHtml(r.editadoPorNome||'Master')}">✏️ editado ${fmtHora(r.editadoEm)}</span>`;
+  }
   const insumosHtml = (r.insumos||[]).length
     ? `<div class="reg-insumos">${r.insumos.map(insumoTexto).join(' &nbsp;•&nbsp; ')}</div>`
     : '';
@@ -980,7 +989,7 @@ function regCardHtml(r){
       ${insumosHtml}
       ${r.observacao ? `<div class="reg-obs">${escapeHtml(r.observacao)}</div>` : ''}
       ${pendente(r) && TEM_ENVIO ? `<button type="button" class="btn-acao envio" style="margin-top:8px;padding:9px 10px;font-size:12.5px;min-width:0;width:100%;" onclick="envioRapido('${r.id}')">⚡ Envio rápido — mandar exatamente o que foi pedido</button>` : ''}
-      <div class="reg-quem"><span>por ${escapeHtml(r.operadorNome||r.criadoPorNome||r.criadoPorEmail||'—')}${r.operadorUsuario?` <span style="font-family:var(--mono);color:var(--accent);">@${escapeHtml(r.operadorUsuario)}</span>`:''}</span><span style="display:flex;gap:10px;align-items:center;">${correcaoHtml(r)}${IS_MASTER?`<button type="button" class="btn-excluir" onclick="excluir('${r.id}')">🗑 excluir</button>`:''}</span></div>
+      <div class="reg-quem"><span>por ${escapeHtml(r.operadorNome||r.criadoPorNome||r.criadoPorEmail||'—')}${r.operadorUsuario?` <span style="font-family:var(--mono);color:var(--accent);">@${escapeHtml(r.operadorUsuario)}</span>`:''}</span><span style="display:flex;gap:10px;align-items:center;">${correcaoHtml(r)}${IS_MASTER && r.tipo==='CONTAGEM' && (r.correcao||{}).status!=='pendente' ? `<span style="cursor:pointer;color:var(--accent);text-decoration:underline;" onclick="abrirPedirCorrecao('${r.id}', true)">✏️ editar</span>` : ''}${IS_MASTER?`<button type="button" class="btn-excluir" onclick="excluir('${r.id}')">🗑 excluir</button>`:''}</span></div>
     </div>`;
 }
 
@@ -1333,12 +1342,18 @@ async function confirmarEnvioRapido(){
 // ---------- pedir correcao (qualquer ponta) -> analise do Master ----------
 let CORRECAO_REG_ID = null;
 let CORRECAO_ACAO = 'alterar';
-function abrirPedirCorrecao(id){
+// edicao DIRETA do Master (so Contagem, botao ✏️ editar no card) - mesmo
+// modal do "pedir correção", mas sem motivo/assinatura/ticket: aplica na
+// hora via /editar-direto. CORRECAO_DIRETO controla o que o modal mostra.
+let CORRECAO_DIRETO = false;
+function abrirPedirCorrecao(id, direto){
   const r = REGS.find(x=>x.id===id);
   if(!r) return;
   CORRECAO_REG_ID = id;
+  CORRECAO_DIRETO = !!direto;
+  document.getElementById('correcao-titulo').textContent = CORRECAO_DIRETO ? '✏️ Editar contagem' : '🛠 Pedir correção';
   document.getElementById('correcao-resumo').textContent =
-    `${r.tipo==='PEDIDO'?'🛒 Pedido':'🚚 Envio'} de ${fmtHora(r.criadoEm)} · por ${r.operadorNome||r.criadoPorNome||'—'}`;
+    `${r.tipo==='PEDIDO'?'🛒 Pedido':(r.tipo==='CONTAGEM'?'📋 Contagem':'🚚 Envio')} de ${fmtHora(r.criadoEm)} · por ${r.operadorNome||r.criadoPorNome||'—'}`;
   // itens do lancamento com a quantidade editavel (proposta) - 0 remove o item
   let html = '';
   SABORES.forEach(s=>{
@@ -1360,6 +1375,12 @@ function abrirPedirCorrecao(id){
     </div>`;
   });
   document.getElementById('correcao-itens').innerHTML = html || '<div class="empty" style="padding:8px;">—</div>';
+  // edicao direta so ALTERA (remocao do lançamento continua sendo o 🗑
+  // excluir, que ja existe pro Master) - a aba "remover" fica escondida
+  // dentro de correcaoAcao() (chamada logo abaixo); aqui so o bloco de
+  // justificativa/assinatura, que so faz sentido no fluxo de ticket
+  document.getElementById('correcao-bloco-solicitacao').classList.toggle('hidden', CORRECAO_DIRETO);
+  document.getElementById('btn-correcao-ok').textContent = CORRECAO_DIRETO ? 'Salvar edição' : 'Enviar pra aprovação';
   correcaoAcao('alterar');
   document.getElementById('correcao-motivo').value = '';
   // lembra so o USUARIO do ultimo operador (a senha nunca fica salva)
@@ -1369,16 +1390,60 @@ function abrirPedirCorrecao(id){
   document.getElementById('overlay-correcao').classList.remove('hidden');
 }
 // alternar entre propor ALTERACAO (inputs editaveis) e REMOCAO do lancamento
+// - na edicao direta do Master so existe "alterar" (ver abrirPedirCorrecao)
 function correcaoAcao(acao){
+  if(CORRECAO_DIRETO) acao = 'alterar';
   CORRECAO_ACAO = acao;
   document.getElementById('correcao-tab-alterar').className = 'cat-toggle ' + (acao==='alterar'?'on':'off');
-  document.getElementById('correcao-tab-remover').className = 'cat-toggle ' + (acao==='remover'?'on':'off');
+  // className e reescrito aqui (nao classList.add) - a aba "remover" so
+  // existe no fluxo de ticket, entao o "hidden" da edicao direta e
+  // reaplicado sempre que o className e trocado, senao ele se perde
+  document.getElementById('correcao-tab-remover').className = 'cat-toggle ' + (acao==='remover'?'on':'off') + (CORRECAO_DIRETO?' hidden':'');
   document.getElementById('correcao-itens').style.opacity = acao==='alterar' ? '' : '.35';
   document.querySelectorAll('#correcao-itens input').forEach(inp=>{ inp.disabled = acao!=='alterar'; });
   document.getElementById('correcao-aviso-remover').classList.toggle('hidden', acao!=='remover');
 }
 function fecharPedirCorrecao(){ document.getElementById('overlay-correcao').classList.add('hidden'); CORRECAO_REG_ID = null; }
+// pizzas/insumos corrigidos a partir dos inputs do modal (compartilhado
+// pelos dois fluxos - pedir correção e edicao direta)
+function itensCorrigidosDosInputs(r){
+  const pizzas = { ...(r.pizzas||{}) };
+  document.querySelectorAll('#correcao-itens input[data-cor-pizza]').forEach(inp=>{
+    pizzas[inp.dataset.corPizza] = Number(inp.value)||0;
+  });
+  const qtdNova = {};
+  document.querySelectorAll('#correcao-itens input[data-cor-insumo]').forEach(inp=>{
+    qtdNova[inp.dataset.corInsumo] = Number(inp.value)||0;
+  });
+  const insumos = (r.insumos||[]).map((ins,idx)=>({
+    ...(ins.insumoId ? { insumoId: ins.insumoId, embalagem: ins.embalagem } : { descricao: ins.descricao }),
+    quantidade: idx in qtdNova ? qtdNova[idx] : ins.quantidade,
+  })).filter(i=>Number(i.quantidade)>0);
+  return { pizzas, insumos };
+}
+// edicao DIRETA do Master (so Contagem): aplica na hora, sem ticket
+async function salvarEdicaoDireta(){
+  const r = REGS.find(x=>x.id===CORRECAO_REG_ID);
+  if(!r) return;
+  const btn = document.getElementById('btn-correcao-ok');
+  const msg = document.getElementById('msg-correcao');
+  msg.classList.add('hidden');
+  btn.disabled = true; btn.textContent = 'Salvando...';
+  try{
+    const { pizzas, insumos } = itensCorrigidosDosInputs(r);
+    const resp = await fetch(`/api/abastecimento/${CORRECAO_REG_ID}/editar-direto`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pizzas, insumos }) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
+    fecharPedirCorrecao();
+    await carregar();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{
+    btn.disabled = false; btn.textContent = 'Salvar edição';
+  }
+}
 async function enviarPedirCorrecao(){
+  if(CORRECAO_DIRETO) return salvarEdicaoDireta();
   const r = REGS.find(x=>x.id===CORRECAO_REG_ID);
   if(!r) return;
   const btn = document.getElementById('btn-correcao-ok');
@@ -1395,18 +1460,7 @@ async function enviarPedirCorrecao(){
     };
     if(CORRECAO_ACAO==='alterar'){
       // proposta: quantidades dos inputs por cima do que foi lancado
-      body.pizzas = { ...(r.pizzas||{}) };
-      document.querySelectorAll('#correcao-itens input[data-cor-pizza]').forEach(inp=>{
-        body.pizzas[inp.dataset.corPizza] = Number(inp.value)||0;
-      });
-      const qtdNova = {};
-      document.querySelectorAll('#correcao-itens input[data-cor-insumo]').forEach(inp=>{
-        qtdNova[inp.dataset.corInsumo] = Number(inp.value)||0;
-      });
-      body.insumos = (r.insumos||[]).map((ins,idx)=>({
-        ...(ins.insumoId ? { insumoId: ins.insumoId, embalagem: ins.embalagem } : { descricao: ins.descricao }),
-        quantidade: idx in qtdNova ? qtdNova[idx] : ins.quantidade,
-      })).filter(i=>Number(i.quantidade)>0);
+      Object.assign(body, itensCorrigidosDosInputs(r));
     }
     const resp = await fetch(`/api/abastecimento/${CORRECAO_REG_ID}/pedir-correcao`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const data = await resp.json();

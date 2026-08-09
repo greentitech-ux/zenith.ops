@@ -4308,7 +4308,7 @@ app.post('/api/abastecimento/:id/pedir-correcao', auth.requireAuth, async (req, 
       return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
     }
     const reg = await abastecimentoCarrinho.getOne(req.params.id);
-    if (!reg || !['PEDIDO', 'ENVIO'].includes(reg.tipo)) return res.status(404).json({ error: 'Lançamento não encontrado.' });
+    if (!reg || !['PEDIDO', 'ENVIO', 'CONTAGEM'].includes(reg.tipo)) return res.status(404).json({ error: 'Lançamento não encontrado.' });
     if (reg.correcao && reg.correcao.numeroTicket && (reg.correcao.status || 'pendente') === 'pendente') {
       return res.status(400).json({ error: `Já existe um pedido de correção em análise pra esse lançamento (Ticket #${reg.correcao.numeroTicket}).` });
     }
@@ -4372,6 +4372,24 @@ app.post('/api/abastecimento/:id/correcao/decidir', auth.requireMaster, async (r
     });
     broadcast('abastecimento-atualizado', { id: req.params.id });
     res.json(resultado);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// SO MASTER: edicao direta da Contagem, sem ticket/analise (pedido/envio
+// continua so pelo fluxo normal de "pedir correção" acima)
+app.patch('/api/abastecimento/:id/editar-direto', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  try {
+    const registro = await abastecimentoCarrinho.editarDireto(req.params.id, {
+      pizzas: req.body.pizzas,
+      insumos: req.body.insumos,
+    }, {
+      editadoPorEmail: req.user.email,
+      editadoPorNome: req.user.username || req.user.email,
+    });
+    broadcast('abastecimento-atualizado', { id: registro.id });
+    res.json(registro);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

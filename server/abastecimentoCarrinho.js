@@ -502,6 +502,28 @@ async function decidirCorrecao(id, { aprovar, porEmail, porNome }) {
   return { removido: false, registro: { ...atual, ...merge } };
 }
 
+// edicao DIRETA do Master (sem ticket/analise) - hoje so pra CONTAGEM: e um
+// retrato do estoque no inicio do turno, sem fluxo pedido<->envio pra
+// atravessar, entao o Master pode corrigir na hora um erro de digitação.
+// Pedido/Envio continuam so pelo fluxo de "pedir correção" (fica o rastro
+// do pedido original pra loja/carrinho conferir o que mudou). Fica
+// registrado quem editou e quando, pra auditoria - sem virar Ticket.
+async function editarDireto(id, { pizzas, insumos }, { editadoPorEmail, editadoPorNome } = {}) {
+  const atual = await getOne(id);
+  if (!atual) throw new Error('Registro não encontrado.');
+  if (atual.tipo !== 'CONTAGEM') throw new Error('Edição direta é só pra Contagem - pedido/envio usa "pedir correção".');
+  const merge = {
+    pizzas: sanitizarPizzas(pizzas),
+    insumos: await resolverInsumos(insumos),
+    editadoEm: new Date().toISOString(),
+    editadoPorEmail: editadoPorEmail || null,
+    editadoPorNome: editadoPorNome || null,
+  };
+  await COLLECTION.doc(id).update(merge);
+  cache.invalidar();
+  return { ...atual, ...merge };
+}
+
 // "Ja lancei": pedido retroativo ("ja recebi") cujo ENVIO ja tinha sido
 // registrado antes (ex: envio avulso na hora, so o pedido que faltou) - a
 // loja fecha o ciclo SEM criar outro envio, evitando duplicar o material
@@ -761,7 +783,7 @@ async function arquivarAntigos() {
 }
 
 module.exports = {
-  TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, getConfig, salvarConfig, arquivarAntigos,
+  TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, editarDireto, getConfig, salvarConfig, arquivarAntigos,
   listarInsumos, criarInsumo, atualizarInsumo,
   listarOperadores, criarOperador, atualizarOperador, removerOperador, desbloquearOperador, validarOperador, validarOperadorQualquerPapel, trocarPapelOperador,
 };
