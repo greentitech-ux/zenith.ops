@@ -5566,6 +5566,16 @@ app.use((err, req, res, next) => {
       backup.rodarBackup().catch((err) => console.error('Erro no backup automático:', err.message));
     }, 24 * 60 * 60 * 1000);
 
+    // retencao do Abastecimento (decisao do Master 2026-08-09): registros
+    // com mais de N dias (30 por padrao; env ABASTECIMENTO_RETENCAO_DIAS)
+    // sao salvos em JSON no Storage e APAGADOS do Firestore - roda 1x/dia.
+    // Falha no upload = nada apagado (ver arquivarAntigos).
+    const rodarRetencaoAbastecimento = () => abastecimentoCarrinho.arquivarAntigos()
+      .then((r) => { if (r.arquivados) console.log(`Abastecimento: ${r.arquivados} registro(s) com mais de ${r.dias} dias arquivados em ${r.arquivo}`); })
+      .catch((err) => console.error('Erro na retenção do Abastecimento:', err.message));
+    rodarRetencaoAbastecimento();
+    setInterval(rodarRetencaoAbastecimento, 24 * 60 * 60 * 1000);
+
     // planilhas do Google Sheets (fechamentos + entregas): SEM sincronizacao
     // automatica - decisao do Master em 2026-08-09 (antes havia janelas fixas
     // de 05:00/18:00). Roda 1x no boot porque o historico vive em memoria -
