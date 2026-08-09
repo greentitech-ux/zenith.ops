@@ -419,6 +419,12 @@
   <div style="padding:10px 12px 0;">
     <select id="conversa-pedido" onchange="renderConversa()"></select>
   </div>
+  <!-- acoes SO do Master: salvar o historico em PDF e encerrar a conversa
+       (encerrada some do seletor pra todo mundo e nao aceita mais msg) -->
+  <div class="hidden" id="conversa-master-acoes" style="display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line);">
+    <button type="button" class="conversa-atalho" style="flex:1;text-align:center;" onclick="baixarConversaPdf()">📄 Salvar PDF</button>
+    <button type="button" class="conversa-atalho" style="flex:1;text-align:center;color:var(--bad);border-color:rgba(255,92,92,.5);" onclick="encerrarConversaMaster()">🔒 Encerrar conversa</button>
+  </div>
   <div class="conversa-corpo" id="conversa-corpo"></div>
   <div class="conversa-atalhos" id="conversa-atalhos"></div>
   <div class="conversa-rodape">
@@ -1802,8 +1808,10 @@ let CONVERSA_PEDIDO_ID = null;
 
 function pedidosComConversa(){
   // pedidos ativos primeiro (mais novo em cima); finalizados com mensagem
-  // continuam acessiveis pelo select
-  return REGS.filter(r=>r.tipo==='PEDIDO' && (pendente(r) || (r.mensagens||[]).length))
+  // continuam acessiveis pelo select - ate o Master ENCERRAR a conversa
+  // (encerrada sai da lista pra todo mundo; o historico fica no registro e
+  // o Master pode baixar o PDF pelo proprio painel antes de encerrar)
+  return REGS.filter(r=>r.tipo==='PEDIDO' && !r.conversaEncerrada && (pendente(r) || (r.mensagens||[]).length))
     .sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||''));
 }
 
@@ -1862,6 +1870,26 @@ function renderConversa(){
   }
   document.getElementById('conversa-atalhos').innerHTML = atalhos.join('');
   document.getElementById('conversa-input').disabled = !ativo && false;
+  document.getElementById('conversa-master-acoes').classList.toggle('hidden', !IS_MASTER);
+}
+
+// ---- acoes SO do Master na conversa ----
+function baixarConversaPdf(){
+  if(!CONVERSA_PEDIDO_ID) return;
+  window.location.href = `/api/abastecimento/${encodeURIComponent(CONVERSA_PEDIDO_ID)}/conversa.pdf?token=${encodeURIComponent(AUTH_TOKEN)}`;
+}
+async function encerrarConversaMaster(){
+  if(!CONVERSA_PEDIDO_ID) return;
+  if(!confirm('Encerrar essa conversa? Ela sai da lista pra todo mundo e não aceita mais mensagens (o histórico continua salvo; dá pra salvar o PDF antes).')) return;
+  try{
+    const resp = await fetch(`/api/abastecimento/${CONVERSA_PEDIDO_ID}/conversa-encerrar`, { method:'POST' });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao encerrar.');
+    await carregar();
+    const lista = pedidosComConversa();
+    if(!lista.length){ fecharConversa(); }
+    else { CONVERSA_PEDIDO_ID = lista[0].id; abrirConversa(); }
+  }catch(err){ alert(err.message); }
 }
 
 function atalhoConversa(tipo){
