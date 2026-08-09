@@ -15,8 +15,12 @@ const DURACAO_MS = 8 * 60 * 60 * 1000; // mesma janela do JWT (auth.js: expiresI
 const ONLINE_JANELA_MS = 5 * 60 * 1000; // atividade a menos de 5min = "online agora"
 const TOQUE_MIN_INTERVALO_MS = 60 * 1000; // nao regrava ultimaAtividadeEm a cada request
 
-async function criar({ userId, userAgent, ip }) {
+// duracaoMs opcional: usado pelos acessos com "sessaoLonga" (ver auth.js/
+// users.js) - conta compartilhada de loja/terminal que nao pode ficar
+// pedindo login de novo no meio do turno. Sem isso, cai no padrao de 8h.
+async function criar({ userId, userAgent, ip, duracaoMs }) {
   const agora = Date.now();
+  const duracao = Number(duracaoMs) > 0 ? Number(duracaoMs) : DURACAO_MS;
 
   // aproveita a escrita nova pra limpar as sessoes ja vencidas desse mesmo
   // usuario - assim a colecao nunca cresce sem limite
@@ -35,7 +39,7 @@ async function criar({ userId, userAgent, ip }) {
     ip: String(ip || '').slice(0, 100),
     criadoEm: new Date(agora).toISOString(),
     ultimaAtividadeEm: new Date(agora).toISOString(),
-    expiraEm: agora + DURACAO_MS,
+    expiraEm: agora + duracao,
   };
   await doc.set(registro);
   sessionsCache.invalidar();

@@ -1710,6 +1710,16 @@ app.put('/api/users/:id/catalogo-insumos', auth.requireMaster, async (req, res) 
   }
 });
 
+// "manter sempre conectado" (30 dias em vez de 8h) - login compartilhado de
+// loja/terminal. So vale a partir do proximo login (ver users.js).
+app.put('/api/users/:id/sessao-longa', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await users.updateSessaoLonga(req.params.id, req.body.sessaoLonga));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // tag "cadastrar Operadores" do Abastecimento: quem tem ve o botao 👥 e
 // cadastra logins locais de balcao (ativar/desativar/remover/desbloquear
 // continuam so do Master)

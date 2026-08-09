@@ -60,6 +60,13 @@ function emptyPermissions() {
 
 const MAX_TENTATIVAS = 3;
 
+// acesso com sessaoLonga=true (ver users.js, tela Usuarios) fica logado por
+// 30 dias em vez das 8h padrao - pensado pra conta compartilhada de loja/
+// terminal, onde ninguem quer redigitar senha no meio do turno.
+const DURACAO_SESSAO_LONGA_MS = 30 * 24 * 60 * 60 * 1000;
+const JWT_EXPIRES_PADRAO = '8h';
+const JWT_EXPIRES_LONGO = '30d';
+
 // minutos desde meia-noite, no horario de Brasilia - independente do fuso
 // configurado no SO do servidor (UTC na hospedagem). Mesmo principio do
 // agoraBrasilia() do frontend, so que devolve so a hora/minuto que interessa
@@ -153,9 +160,17 @@ async function login(identifier, password, contexto = {}) {
 
   // uma sessao por login - deixa saber "quantos locais" estao logados com
   // esse usuario e permite o Master encerrar um especifico (ver sessions.js)
-  const sessao = await sessions.criar({ userId: doc.id, userAgent: contexto.userAgent, ip: contexto.ip });
+  const sessaoLonga = !!user.sessaoLonga;
+  const sessao = await sessions.criar({
+    userId: doc.id,
+    userAgent: contexto.userAgent,
+    ip: contexto.ip,
+    duracaoMs: sessaoLonga ? DURACAO_SESSAO_LONGA_MS : undefined,
+  });
 
-  const token = jwt.sign({ sub: doc.id, role: user.role, sid: sessao.id }, JWT_SECRET, { expiresIn: '8h' });
+  const token = jwt.sign({ sub: doc.id, role: user.role, sid: sessao.id }, JWT_SECRET, {
+    expiresIn: sessaoLonga ? JWT_EXPIRES_LONGO : JWT_EXPIRES_PADRAO,
+  });
   return { token, user: toPublicUser(doc.id, user) };
 }
 

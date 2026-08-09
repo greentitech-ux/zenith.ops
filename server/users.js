@@ -204,6 +204,30 @@ async function updatePodeCatalogoEstoque(id, valor) {
   return toPublic(await ref.get());
 }
 
+// "manter sempre conectado": a sessao dessa conta passa a durar 30 dias em
+// vez das 8h padrao (ver auth.js/sessions.js). Pensado pra login
+// compartilhado de loja/terminal, onde ninguem quer redigitar senha no meio
+// do turno - so vale a partir do PROXIMO login (nao estende sessoes ja
+// abertas com esse acesso).
+//
+// Ao DESLIGAR, encerra na hora qualquer sessao ja aberta com esse acesso -
+// sem isso, uma sessao de ate 30 dias emitida antes continuaria valida
+// mesmo depois do Master desligar a opcao (ela so vale "pro proximo login"
+// pra abrir, mas sem isso nao vale pra fechar). Se o motivo de desligar foi
+// um terminal comprometido, o Master precisa que o corte seja imediato -
+// a pessoa so cai de novo (ja nas 8h padrao) no proximo login.
+async function updateSessaoLonga(id, valor) {
+  const ref = usersRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  if (snap.data().role === 'master') throw new Error('O acesso Master não precisa dessa opção.');
+  await ref.update({ sessaoLonga: !!valor });
+  if (!valor) await sessions.encerrarTodasDoUsuario(id);
+  invalidarUsuario(id);
+  usersCache.invalidar();
+  return toPublic(await ref.get());
+}
+
 // mesma ideia do Catalogo do Estoque, so que pro cadastro de INSUMOS do
 // Abastecimento do Carrinho (Dom Aeroporto): quem tem a permissao adiciona/
 // edita itens do catalogo (nome, quantidade por caixa, ativo) sem precisar
@@ -321,6 +345,7 @@ function toPublic(doc) {
     podeCatalogoEstoque: data.role === 'master' ? null : !!data.podeCatalogoEstoque,
     podeCatalogoInsumos: data.role === 'master' ? null : !!data.podeCatalogoInsumos,
     podeCadastrarOperadores: data.role === 'master' ? null : !!data.podeCadastrarOperadores,
+    sessaoLonga: data.role === 'master' ? null : !!data.sessaoLonga,
     cargo: data.role === 'master' ? null : data.cargo || null,
     createdAt: data.createdAt,
   };
@@ -339,6 +364,7 @@ module.exports = {
   updatePodeCatalogoEstoque,
   updatePodeCatalogoInsumos,
   updatePodeCadastrarOperadores,
+  updateSessaoLonga,
   updateCargo,
   updateUsername,
   updateUsernamesEmMassa,
