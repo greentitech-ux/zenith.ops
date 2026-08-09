@@ -1072,7 +1072,7 @@ function renderInsumos(){
       const cad = insumoCadastro(it.insumoId);
       return `
       <div style="display:flex;align-items:center;gap:8px;border-top:1px solid var(--line);padding:7px 0;">
-        <span style="flex:1;font-size:13px;">${escapeHtml(cad ? cad.nome : '')}</span>
+        <span style="flex:1;font-size:15px;">${escapeHtml(cad ? cad.nome : '')}</span>
         <input type="number" min="0" inputmode="numeric" value="${escapeHtml(it.quantidade)}" oninput="mudarQtdInsumo(${it.id}, this.value)" placeholder="qtde" style="width:84px;padding:7px 8px;">
       </div>`;
     }).join('');
