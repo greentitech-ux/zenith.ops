@@ -77,7 +77,7 @@ async function listarOperadoresUncached() {
   const snap = await OPERADORES.orderBy('usuario').get();
   return snap.docs.map((d) => d.data());
 }
-const operadoresCache = createCache(listarOperadoresUncached, 15 * 1000);
+const operadoresCache = createCache(listarOperadoresUncached, 5 * 60 * 1000);
 async function listarOperadores() {
   return (await operadoresCache.cached()).map(operadorPublico);
 }
@@ -253,7 +253,7 @@ async function listarInsumosUncached() {
   }
   return itens;
 }
-const catalogoCache = createCache(listarInsumosUncached, 30 * 1000);
+const catalogoCache = createCache(listarInsumosUncached, 5 * 60 * 1000);
 const listarInsumos = catalogoCache.cached;
 
 async function criarInsumo({ nome, qtdPorCaixa, criadoPorEmail }) {
@@ -705,7 +705,7 @@ async function listAllUncached() {
   const snap = await COLLECTION.orderBy('criadoEm', 'desc').get();
   return snap.docs.map((d) => d.data());
 }
-const cache = createCache(listAllUncached, 15 * 1000);
+const cache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = cache.cached;
 
 module.exports = {

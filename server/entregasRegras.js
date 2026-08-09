@@ -112,7 +112,7 @@ async function listAllUncached() {
   const snap = await COLLECTION.get();
   return snap.docs.map((d) => d.data());
 }
-const regrasCache = createCache(listAllUncached, 20 * 1000);
+const regrasCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = regrasCache.cached;
 
 async function getPara(unidade) {

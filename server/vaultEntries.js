@@ -20,7 +20,7 @@ async function listAllSubgroupsUncached() {
   entries.sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'));
   return entries;
 }
-const allSubgroupsCache = createCache(listAllSubgroupsUncached, 20 * 1000);
+const allSubgroupsCache = createCache(listAllSubgroupsUncached, 5 * 60 * 1000);
 
 async function listBySubgroups(subgroupIds) {
   // subgroupIds === null significa "todos os subgrupos" (Master)

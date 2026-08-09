@@ -124,7 +124,7 @@ async function listAllUncached() {
   const snap = await refundsRef.orderBy('criadoEm', 'desc').get();
   return snap.docs.map((d) => d.data());
 }
-const refundsCache = createCache(listAllUncached, 20 * 1000);
+const refundsCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = refundsCache.cached;
 
 

@@ -63,17 +63,17 @@ async function listAllUncached() {
   const snap = await COLLECTION.orderBy('data', 'desc').get();
   return snap.docs.map((d) => d.data());
 }
-const sangriasCache = createCache(listAllUncached, 20 * 1000);
+const sangriasCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = sangriasCache.cached;
 
 
-// Firestore "in" aceita no maximo 30 valores por consulta
+// filtra EM MEMORIA sobre o cache compartilhado - a query direta por
+// unidade (where in) nao passava pelo cache e virava uma leitura completa
+// no Firestore a cada chamada (ver o estouro de leituras de 2026-08-09)
 async function listByUnidades(unidades) {
   if (!unidades || !unidades.length) return [];
-  const lotes = [];
-  for (let i = 0; i < unidades.length; i += 30) lotes.push(unidades.slice(i, i + 30));
-  const resultados = await Promise.all(lotes.map((lote) => COLLECTION.where('unidade', 'in', lote).get()));
-  return resultados.flatMap((snap) => snap.docs.map((d) => d.data()));
+  const alvo = new Set(unidades);
+  return (await listAll()).filter((r) => alvo.has(r.unidade));
 }
 
 // formata a sangria como um "fechamento" mínimo (mesmo formato usado no

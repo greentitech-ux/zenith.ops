@@ -20,7 +20,7 @@ async function listAllUncached() {
   list.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   return list;
 }
-const subgroupsCache = createCache(listAllUncached, 20 * 1000);
+const subgroupsCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = subgroupsCache.cached;
 
 async function listByGroup(groupId) {
