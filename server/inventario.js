@@ -553,6 +553,94 @@ async function calcularDiferencas(unidade, dataInicio, dataFim) {
   };
 }
 
+// resumo do periodo pra aba Estoque. Diferente do motor diario das
+// Diferencas (que exige contagem em dias CONSECUTIVOS - uma loja que nao
+// conta todo dia nunca fecha a conta la), aqui o consumo e apurado entre
+// DUAS contagens quaisquer: a base (ultima contagem antes do inicio do
+// periodo; sem ela, a primeira contagem dentro do periodo) e a final
+// (ultima contagem dentro do periodo). Consumo por item presente nas duas
+// = base + entradas entre elas - final. Entradas/saidas/desperdicio do
+// periodo pedido sao mostrados mesmo sem contagem nenhuma.
+async function resumoPeriodo(unidade, dataInicio, dataFim) {
+  validarData(dataInicio);
+  validarData(dataFim);
+  if (dataFim < dataInicio) throw new Error('Data final não pode ser anterior à inicial.');
+
+  const [todasContagens, todosRecebimentos, todasSaidas, catalogo] = await Promise.all([
+    listContagens(), listRecebimentos(), listSaidas(), listCatalogo(unidade),
+  ]);
+  const contagens = todasContagens.filter((c) => c.unidade === unidade).sort((a, b) => a.data.localeCompare(b.data));
+  const noPeriodo = contagens.filter((c) => c.data >= dataInicio && c.data <= dataFim);
+  const base = [...contagens].reverse().find((c) => c.data < dataInicio) || noPeriodo[0] || null;
+  const final = [...noPeriodo].reverse().find((c) => !base || c.data > base.data) || null;
+
+  const recebimentosPeriodo = todosRecebimentos.filter((r) => r.unidade === unidade && r.data >= dataInicio && r.data <= dataFim);
+  const saidasPeriodo = todasSaidas.filter((s) => s.unidade === unidade && s.data >= dataInicio && s.data <= dataFim);
+
+  // custo por item: media dos recebimentos do periodo, senao o custo de
+  // referencia do catalogo (mesmo criterio das Diferencas)
+  const custoPorItem = new Map(catalogo.map((i) => [i.id, i.custoReferencia || 0]));
+  const somaCusto = new Map();
+  const qtdCusto = new Map();
+  recebimentosPeriodo.forEach((r) => {
+    somaCusto.set(r.itemId, (somaCusto.get(r.itemId) || 0) + r.valorUnitario * r.quantidade);
+    qtdCusto.set(r.itemId, (qtdCusto.get(r.itemId) || 0) + r.quantidade);
+  });
+  somaCusto.forEach((soma, itemId) => {
+    const qtd = qtdCusto.get(itemId);
+    if (qtd > 0) custoPorItem.set(itemId, soma / qtd);
+  });
+
+  const custoDe = (lista) => arred(lista.reduce((s, x) => s + x.quantidade * (custoPorItem.get(x.itemId) || 0), 0));
+  const custoVendaValor = custoDe(saidasPeriodo.filter((s) => s.tipo === 'VENDA'));
+  const custoDesperdicioValor = custoDe(saidasPeriodo.filter((s) => s.tipo === 'DESPERDICIO'));
+  const custoOutrasValor = custoDe(saidasPeriodo.filter((s) => s.tipo === 'OUTRA'));
+  const totalSaidasValor = arred(custoVendaValor + custoDesperdicioValor + custoOutrasValor);
+  const totalRecebidoValor = arred(recebimentosPeriodo.reduce((s, r) => s + r.valorTotal, 0));
+
+  // consumo real entre a contagem base e a final (itens presentes nas duas)
+  let consumoValor = null;
+  let faltaSobraValor = null;
+  let janela = null;
+  let consumoItens = 0;
+  if (base && final) {
+    janela = { de: base.data, ate: final.data };
+    const entradasJanela = todosRecebimentos.filter((r) => r.unidade === unidade && r.data > base.data && r.data <= final.data);
+    const saidasJanela = todasSaidas.filter((s) => s.unidade === unidade && s.data > base.data && s.data <= final.data);
+    let consumo = 0;
+    Object.keys(base.contagens || {}).forEach((itemId) => {
+      if (!Object.prototype.hasOwnProperty.call(final.contagens || {}, itemId)) return;
+      const entradas = entradasJanela.filter((r) => r.itemId === itemId).reduce((s, r) => s + r.quantidade, 0);
+      const qtdConsumida = (base.contagens[itemId] || 0) + entradas - (final.contagens[itemId] || 0);
+      consumo += qtdConsumida * (custoPorItem.get(itemId) || 0);
+      consumoItens += 1;
+    });
+    consumoValor = arred(consumo);
+    // o que sumiu alem do lancado (falta) ou sobrou (negativo = sobra)
+    faltaSobraValor = arred(consumoValor - custoDe(saidasJanela));
+  } else {
+    // sem duas contagens pra comparar, o consumo mostra so o que foi lancado
+    consumoValor = totalSaidasValor;
+  }
+
+  const itensSemCusto = catalogo.filter((i) => i.ativo !== false && !((custoPorItem.get(i.id) || 0) > 0)).length;
+
+  return {
+    resumo: {
+      totalRecebidoValor, custoVendaValor, custoDesperdicioValor, custoOutrasValor,
+      totalSaidasValor, consumoValor, faltaSobraValor,
+    },
+    janela, consumoItens,
+    avisos: {
+      qtdContagensPeriodo: noPeriodo.length,
+      temDuasContagens: !!(base && final),
+      qtdRecebimentos: recebimentosPeriodo.length,
+      qtdSaidas: saidasPeriodo.length,
+      itensSemCusto,
+    },
+  };
+}
+
 module.exports = {
   SETORES, TIPOS_ITEM, TIPOS_SAIDA,
   listSetores, criarSetor, listTipos, criarTipo,
@@ -560,5 +648,5 @@ module.exports = {
   listRecebimentos, criarRecebimento, removerRecebimento,
   listSaidas, criarSaida, removerSaida,
   upsertContagem, getContagem, listContagens,
-  calcularDiferencas,
+  calcularDiferencas, resumoPeriodo,
 };
