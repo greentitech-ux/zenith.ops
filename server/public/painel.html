@@ -96,6 +96,27 @@
   .pweekday.hoje .dia{color:var(--accent);}
   .pweekday .qtd{font-size:16px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums;color:var(--muted);}
   .pweekday .qtd.tem{color:var(--text);}
+  .pcal-nav{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+  .pcal-nav b{font-size:12.5px;text-transform:capitalize;}
+  .pcal-nav button{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:13px;line-height:1;}
+  .pcal-nav button:hover{border-color:var(--accent);}
+  .pcal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+  .pcal-head{font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;text-align:center;padding:2px 0;}
+  .pcal-dia{background:var(--panel2);border:1px solid var(--line);border-radius:6px;min-height:38px;padding:3px 4px;text-align:left;font-family:var(--mono);font-size:10.5px;color:var(--muted);position:relative;}
+  .pcal-dia.vazio{background:none;border-color:transparent;}
+  .pcal-dia.hoje{border-color:var(--accent);}
+  .pcal-dia.hoje .num{color:var(--accent);font-weight:700;}
+  .pcal-dia.tem{cursor:pointer;border-color:rgba(61,220,151,.45);}
+  .pcal-dia.tem:hover{border-color:var(--ok);}
+  .pcal-dia.sel{background:rgba(61,220,151,.12);border-color:var(--ok);}
+  .pcal-dia .fqtd{position:absolute;right:3px;bottom:2px;background:var(--ok-dim);color:var(--ok);border-radius:10px;font-size:9.5px;padding:0 5px;font-weight:700;}
+  .pcal-detalhe{margin-top:8px;display:flex;flex-direction:column;gap:6px;}
+  .pcal-festa{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;}
+  .pcal-festa .sub2{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px;}
+  .pcal-festa .st{font-family:var(--mono);font-size:9.5px;padding:1px 7px;border-radius:10px;margin-left:6px;}
+  .pcal-festa .st.pago{background:var(--ok-dim);color:var(--ok);}
+  .pcal-festa .st.pendente{background:var(--warn-dim);color:var(--warn);}
+  .pcal-festa .st.cancelado{background:var(--bad-dim);color:var(--bad);}
   .pweekday.hoje .qtd.tem{color:var(--accent);}
   .painel-loading{padding:60px 0;text-align:center;color:var(--muted);font-size:13px;}
   .notif-solicitacao-wrap{position:fixed;top:14px;right:14px;z-index:10000;display:flex;flex-direction:column;gap:10px;max-width:min(360px,calc(100vw - 28px));}
@@ -809,6 +830,75 @@ async function cardParque(){
   `);
 }
 
+// ---------- calendario de festas do Saltiverso (secao 'festas') ----------
+// mes inteiro com os dias de festa marcados; clicar num dia abre a lista
+// (cliente, pacote, horario, valor). Festa cancelada nao aparece
+let FESTAS_CAL = [];
+let FESTAS_CAL_ANO = 0;
+let FESTAS_CAL_MES = 0; // 0-11
+let FESTAS_CAL_DIA_SEL = null;
+const MESES_NOME = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+const MISSAO_LABEL_CAL = { lunar:'🌙 Lunar', orbita:'🪐 Órbita', nebulosa:'✨ Nebulosa' };
+
+async function cardFestasCalendario(){
+  FESTAS_CAL = await fetch('/api/festas').then(r=>r.json()).catch(()=>[]);
+  const hoje = hojeBrasilia();
+  FESTAS_CAL_ANO = Number(hoje.slice(0,4));
+  FESTAS_CAL_MES = Number(hoje.slice(5,7)) - 1;
+  FESTAS_CAL_DIA_SEL = null;
+  return pcardWrap('🎉','Festas (calendário)','/festas.html', `<div id="pcal-wrap">${renderCalFestas()}</div>`);
+}
+
+function festasDoDiaCal(iso){
+  return FESTAS_CAL
+    .filter(f=>f.dataDeUso===iso && f.status!=='cancelado')
+    .sort((a,b)=>(a.horaInicio||'').localeCompare(b.horaInicio||''));
+}
+
+function renderCalFestas(){
+  const hoje = hojeBrasilia();
+  const mesStr = String(FESTAS_CAL_MES+1).padStart(2,'0');
+  const primeiro = new Date(FESTAS_CAL_ANO, FESTAS_CAL_MES, 1);
+  const offset = (primeiro.getDay()+6)%7; // semana começa na segunda
+  const diasNoMes = new Date(FESTAS_CAL_ANO, FESTAS_CAL_MES+1, 0).getDate();
+  let celulas = DIAS_SEMANA_ABREV.map(d=>`<div class="pcal-head">${d}</div>`).join('');
+  for(let i=0;i<offset;i++) celulas += '<div class="pcal-dia vazio"></div>';
+  for(let dia=1;dia<=diasNoMes;dia++){
+    const iso = `${FESTAS_CAL_ANO}-${mesStr}-${String(dia).padStart(2,'0')}`;
+    const qtd = festasDoDiaCal(iso).length;
+    const cls = ['pcal-dia', iso===hoje?'hoje':'', qtd?'tem':'', iso===FESTAS_CAL_DIA_SEL?'sel':''].filter(Boolean).join(' ');
+    celulas += `<div class="${cls}"${qtd?` onclick="selDiaFestas('${iso}')" title="${qtd} festa(s) - toque pra ver"`:''}><span class="num">${dia}</span>${qtd?`<span class="fqtd">${qtd}</span>`:''}</div>`;
+  }
+  const totalMes = FESTAS_CAL.filter(f=>f.status!=='cancelado' && (f.dataDeUso||'').startsWith(`${FESTAS_CAL_ANO}-${mesStr}`)).length;
+  return `
+    <div class="pcal-nav">
+      <button type="button" onclick="mudarMesFestas(-1)" title="Mês anterior">‹</button>
+      <b>${MESES_NOME[FESTAS_CAL_MES]} ${FESTAS_CAL_ANO} · ${totalMes} festa(s)</b>
+      <button type="button" onclick="mudarMesFestas(1)" title="Próximo mês">›</button>
+    </div>
+    <div class="pcal">${celulas}</div>
+    <div class="pcal-detalhe" id="pcal-detalhe">${FESTAS_CAL_DIA_SEL?renderDetalheDiaFestas():''}</div>`;
+}
+
+function renderDetalheDiaFestas(){
+  return festasDoDiaCal(FESTAS_CAL_DIA_SEL).map(f=>`<div class="pcal-festa">
+    <b>${escapeHtml(f.cliente?.nome||'')}</b> · ${escapeHtml(f.codigo||'')}<span class="st ${f.status}">${f.status}</span>
+    <div class="sub2">${f.horaInicio?`${f.horaInicio} às ${f.horaFim||'—'}`:'horário a definir'}${f.missao?` · ${MISSAO_LABEL_CAL[f.missao]||f.missao} ${f.horas}H · ${f.saltonautas} saltonautas`:''} · Total ${fmtMoney(f.valorTotal)}</div>
+  </div>`).join('');
+}
+
+function mudarMesFestas(delta){
+  FESTAS_CAL_MES += delta;
+  if(FESTAS_CAL_MES<0){ FESTAS_CAL_MES=11; FESTAS_CAL_ANO--; }
+  if(FESTAS_CAL_MES>11){ FESTAS_CAL_MES=0; FESTAS_CAL_ANO++; }
+  FESTAS_CAL_DIA_SEL = null;
+  const w = document.getElementById('pcal-wrap'); if(w) w.innerHTML = renderCalFestas();
+}
+function selDiaFestas(iso){
+  FESTAS_CAL_DIA_SEL = FESTAS_CAL_DIA_SEL===iso ? null : iso; // clicar de novo fecha
+  const w = document.getElementById('pcal-wrap'); if(w) w.innerHTML = renderCalFestas();
+}
+
 // indicadores do Abastecimento do Carrinho (Dom Aeroporto): tempos e
 // ocorrencias saem DAQUI de proposito - a equipe do balcao nao ve esses
 // numeros na pagina de lancamento; so Master/Admin, no Painel
@@ -846,6 +936,7 @@ function dataBrasiliaAb(iso){
 // TI, Central, Manutenção, Estoque, Fechamentos, iFood (Entregas no fim)
 const CARDS_POR_SECAO = [
   { secao:'parque', build:cardParque },
+  { secao:'festas', build:cardFestasCalendario },
   { secao:'monitor', build:cardMonitor },
   // indicadores do Abastecimento: SO Master/Admin (a equipe do balcao nao
   // pode ver os tempos monitorados)
