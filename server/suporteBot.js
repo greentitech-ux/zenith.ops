@@ -18,6 +18,7 @@
 // - a conversa passou do limite de respostas do bot (baixa interacao).
 const suporteChat = require('./suporteChat');
 const solicitacoes = require('./solicitacoes');
+const store = require('./store');
 
 const MODELO = 'claude-opus-5';
 const MAX_TOKENS = 700;
@@ -43,8 +44,10 @@ function getCliente() {
 
 // conhecimento base (resumo da Ajuda) + regras de conduta. E o bloco ESTAVEL
 // do system - vai com cache_control pra nao pagar o prompt inteiro de novo a
-// cada mensagem da mesma conversa (so a lista de unidades varia, e raramente)
-function montarSystem(unidades) {
+// cada mensagem da mesma conversa (so a lista de unidades e o "logado"
+// variam, e raramente mudam no meio de uma mesma conversa)
+function montarSystem(unidades, logado) {
+  const temFerramentaPedido = !!(logado && logado.temMonitor);
   const texto = `Você é o Beniboy, atendente virtual do chat de suporte do Zenith Ops.
 
 O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Milky Moo, São Braz e o parque Saltiverso). Quem fala com você é um funcionário ou parceiro das lojas — pode estar deslogado.
@@ -67,14 +70,17 @@ O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, 
 ## Ferramentas
 - criar_ticket: abre uma solicitação na Central. Antes de criar, CONFIRME em uma única mensagem o resumo (tipo, unidade, o que é). Só crie depois do "sim" da pessoa. Depois de criar, informe o número do ticket.
 - consultar_ticket: andamento de um ticket pelo número.
-- chamar_atendente: acione quando a pessoa pedir um humano, quando você não souber resolver, ou quando o assunto for sensível. Avise que o time já foi chamado e responde ali mesmo na conversa.
+- chamar_atendente: acione quando a pessoa pedir um humano, quando você não souber resolver, ou quando o assunto for sensível. Avise que o time já foi chamado e responde ali mesmo na conversa.${temFerramentaPedido ? `
+- consultar_pedido: consulta o status de UM pedido específico no Monitor (aprovado, recusado, estornado, fraude suspeita). A busca já vem limitada às lojas que essa pessoa tem acesso - se não achar, pode ser de outra loja, não assuma fraude/erro. Nunca invente status; se a ferramenta não achar nada, diga isso e ofereça chamar_atendente.` : `
+- Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora (só quem está logado com permissão de Monitor). Use chamar_atendente.`}
 
 ## Unidades válidas pra ticket (use exatamente um destes nomes; se a pessoa falar parecido, escolha o mais próximo; se não der pra saber, pergunte)
-${unidades.map((u) => `- ${u}`).join('\n')}`;
+${unidades.map((u) => `- ${u}`).join('\n')}
+${logado ? `\n## Quem fala com você agora\nConta logada: ${logado.username}${logado.isMaster ? ' (Master)' : ''}. ${temFerramentaPedido ? 'Tem acesso ao Monitor - pode usar consultar_pedido.' : 'Sem acesso ao Monitor - não tente consultar pedido, use chamar_atendente se precisar.'}` : ''}`;
   return [{ type: 'text', text: texto, cache_control: { type: 'ephemeral' } }];
 }
 
-const TOOLS = [
+const TOOLS_BASE = [
   {
     name: 'criar_ticket',
     description: 'Cria uma solicitação (ticket) na Central do Zenith. Use somente depois que a pessoa confirmar o resumo do pedido.',
@@ -108,6 +114,25 @@ const TOOLS = [
     },
   },
 ];
+
+// so entra na lista de ferramentas quando chat.logado.temMonitor (ver
+// usuarioLogadoDoHeader em index.js) - visitante anonimo ou logado sem
+// permissao de Monitor nunca ve nem essa ferramenta oferecida ao modelo
+const TOOL_CONSULTAR_PEDIDO = {
+  name: 'consultar_pedido',
+  description: 'Consulta o status de um pedido/transação específico no Monitor (aprovado, recusado, estornado, fraude suspeita). Só disponível pra quem está logado com acesso ao Monitor - o resultado já vem limitado às lojas dessa pessoa.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      identificador: { type: 'string', description: 'O que a pessoa souber sobre o pedido: referência (pspReference/merchantReference), nome do cliente, ou os últimos 4 dígitos do cartão.' },
+    },
+    required: ['identificador'],
+  },
+};
+
+function montarTools(logado) {
+  return (logado && logado.temMonitor) ? [...TOOLS_BASE, TOOL_CONSULTAR_PEDIDO] : TOOLS_BASE;
+}
 
 // historico da conversa -> turns da API. Mensagens do visitante viram user;
 // as do bot viram assistant. Se um humano do time ja falou, o bot nem chega
@@ -166,6 +191,31 @@ async function executarTool(nome, input, chat, resultado) {
     resultado.motivoAtendente = String(input.motivo || '').trim();
     return 'Atendente humano chamado — o time foi notificado e vai responder nessa mesma conversa. Avise a pessoa e se despeça.';
   }
+  if (nome === 'consultar_pedido') {
+    // defesa em profundidade: mesmo que o modelo tentasse chamar essa tool
+    // fora do previsto, ela so entra em TOOLS quando chat.logado.temMonitor -
+    // aqui checa de novo antes de tocar em qualquer dado do Monitor
+    if (!chat.logado || !chat.logado.temMonitor) return 'Sem acesso ao Monitor pra essa consulta - chame um atendente.';
+    const query = String(input.identificador || '').trim().toLowerCase();
+    if (!query) return 'Peça pra pessoa informar a referência do pedido, o nome do cliente ou os 4 últimos dígitos do cartão.';
+    let pedidos = store.allOrders();
+    if (!chat.logado.isMaster) {
+      const permitidas = new Set(chat.logado.unidades || []);
+      pedidos = pedidos.filter((o) => o.unidade && permitidas.has(o.unidade));
+    }
+    const encontrados = pedidos
+      .filter((o) => String(o.pedidoId || '').toLowerCase().includes(query)
+        || String(o.cliente || '').toLowerCase().includes(query)
+        || String(o.last4 || '').includes(query))
+      .sort((a, b) => String(b.ultimaAtualizacao || '').localeCompare(String(a.ultimaAtualizacao || '')))
+      .slice(0, 5);
+    if (!encontrados.length) return 'Nenhum pedido encontrado com essa referência nas lojas que essa pessoa tem acesso (pode ser de outra loja, ou já saiu da retenção do Monitor).';
+    return JSON.stringify(encontrados.map((o) => ({
+      pedido: o.pedidoId, unidade: o.unidade, cliente: o.cliente, valor: o.valor,
+      status: o.statusAtual, metodo: o.metodo, cartaoFinal: o.last4,
+      aprovadoEm: o.dataCompra, estornadoEm: o.dataChargeback, fraudeSuspeita: !!o.fraudeSuspeita,
+    })));
+  }
   return `Ferramenta desconhecida: ${nome}`;
 }
 
@@ -189,10 +239,11 @@ async function responderConversa(chatId, { unidades = [] } = {}) {
 
     const resultado = { tickets: [], chamouAtendente: false, motivoAtendente: '' };
     const mensagens = montarMensagens(chat);
-    const system = montarSystem(unidades);
+    const system = montarSystem(unidades, chat.logado);
+    const tools = montarTools(chat.logado);
     let resp = await getCliente().messages.create({
       model: MODELO, max_tokens: MAX_TOKENS, system, messages: mensagens,
-      tools: TOOLS, output_config: { effort: 'low' },
+      tools, output_config: { effort: 'low' },
     });
 
     let rodadas = 0;
@@ -213,7 +264,7 @@ async function responderConversa(chatId, { unidades = [] } = {}) {
       mensagens.push({ role: 'user', content: results });
       resp = await getCliente().messages.create({
         model: MODELO, max_tokens: MAX_TOKENS, system, messages: mensagens,
-        tools: TOOLS, output_config: { effort: 'low' },
+        tools, output_config: { effort: 'low' },
       });
     }
 

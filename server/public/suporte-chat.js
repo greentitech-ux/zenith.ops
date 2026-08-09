@@ -232,8 +232,14 @@
     erroEl.classList.add('szc-hidden');
     b.disabled = true; b.textContent = 'Enviando...';
     try {
+      // manda o authToken de quem estiver logado (se estiver) - o backend
+      // decide sozinho o que fazer com isso (ex: liberar consulta de pedido
+      // pro Beniboy); rota publica, nunca exige esse header
+      const authToken = localStorage.getItem('authToken');
+      const headers = { 'Content-Type': 'application/json' };
+      if (authToken) headers.Authorization = 'Bearer ' + authToken;
       const r = await rawFetch('/api/suporte-chat/iniciar', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers,
         body: JSON.stringify({ nome, contato, texto, assunto }),
       });
       const data = await r.json();

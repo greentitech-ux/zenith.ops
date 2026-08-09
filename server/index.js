@@ -404,9 +404,30 @@ app.post('/api/solicitacoes/decidir', upload.single('comprovante'), async (req, 
 // function declaration definida mais pra frente no arquivo, mas isso nao
 // importa aqui: hoisting cobre o modulo inteiro, e o corpo dessas rotas so
 // roda quando uma requisicao chega, muito depois do arquivo inteiro carregar
+// se a pessoa que abriu o chat tem sessao valida (widget manda o mesmo
+// authToken do localStorage - ver suporte-chat.js), devolve um retrato
+// achatado da permissao dela: so o que o Beniboy precisa (suporteBot.js)
+// pra decidir se oferece "consultar_pedido" e ja filtrar pelas lojas certas -
+// nunca a permissao inteira. null pra visitante anonimo (widget publico).
+async function usuarioLogadoDoHeader(req) {
+  const header = req.headers.authorization || '';
+  const [scheme, token] = header.split(' ');
+  const user = scheme === 'Bearer' ? await auth.usuarioOpcionalDoToken(token) : null;
+  if (!user) return null;
+  const isMaster = user.role === 'master';
+  return {
+    id: user.id,
+    username: user.username || user.email,
+    isMaster,
+    unidades: isMaster ? null : (user.permissions?.unidades || []),
+    temMonitor: isMaster || (user.permissions?.sections || []).includes('monitor'),
+  };
+}
+
 app.post('/api/suporte-chat/iniciar', async (req, res) => {
   try {
-    const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto, assunto: req.body.assunto });
+    const logado = await usuarioLogadoDoHeader(req);
+    const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto, assunto: req.body.assunto, logado });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     push.notifySolicitacao('💬 Novo chat de suporte', `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico.html');
     res.json({ id: chat.id, token: chat.token });

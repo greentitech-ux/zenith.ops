@@ -217,6 +217,25 @@ function invalidarUsuario(id) {
   usuarioCache.invalidar(id);
 }
 
+// mesma verificacao do requireAuth, mas nunca derruba a requisicao - devolve
+// o usuario se o token for valido, ou null pra qualquer outro caso (sem
+// token, expirado, sessao encerrada, conta desativada). Usado por rotas
+// PUBLICAS que enxergam "mais" quando quem esta do outro lado por acaso
+// esta logado (ex: chat de suporte oferecendo consulta de pedido pra quem
+// tem conta), sem exigir login pra usar a rota em si
+async function usuarioOpcionalDoToken(token) {
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    const user = await getUserById(payload.sub);
+    if (!user || user.active === false) return null;
+    if (payload.sid && !(await sessions.existeEValida(payload.sid))) return null;
+    return user;
+  } catch (err) {
+    return null;
+  }
+}
+
 // exige um token valido (via header Authorization: Bearer, ou ?token= na
 // query - usado pelo EventSource do SSE, que nao manda headers custom) e
 // carrega o usuario/permissoes atual em req.user
@@ -297,6 +316,7 @@ module.exports = {
   verifyPassword,
   getUserById,
   toPublicUser,
+  usuarioOpcionalDoToken,
   requireAuth,
   requireMaster,
   requireMasterOrAdmin,

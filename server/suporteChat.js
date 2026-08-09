@@ -25,7 +25,14 @@ function limpar(texto, max) {
 // Soluções - o visitante escolhe ao abrir o chat, sem custo de token
 const ASSUNTOS = ['Computador/Sistema', 'Acesso/Senha', 'Financeiro/Estorno', 'Outro'];
 
-async function criar({ nome, contato, texto, assunto }) {
+// logado: snapshot de quem estava com sessao valida no momento em que ABRIU
+// a conversa (ver /api/suporte-chat/iniciar em index.js) - null pra visitante
+// anonimo. So guarda o minimo que o Beniboy precisa pra decidir se pode
+// oferecer a ferramenta de consulta de pedido (suporteBot.js): id/username
+// pra contexto, isMaster+unidades pra filtrar o que ele pode ver no Monitor,
+// e temMonitor (secao 'monitor' liberada) - sem isso guardado achatado aqui,
+// o bot teria que reconsultar o usuario a cada resposta
+async function criar({ nome, contato, texto, assunto, logado }) {
   const nomeLimpo = limpar(nome, 120);
   const contatoLimpo = limpar(contato, 120);
   const textoLimpo = limpar(texto, MAX_TEXTO);
@@ -48,6 +55,7 @@ async function criar({ nome, contato, texto, assunto }) {
     // true = o Beniboy (bot, ver suporteBot.js) saiu dessa conversa - ou
     // porque ele mesmo chamou um atendente humano, ou por decisao do time
     botDesativado: false,
+    logado: logado || null,
     chamadoId: null,
     atendidoPorEmail: null,
     criadoEm: agora,
