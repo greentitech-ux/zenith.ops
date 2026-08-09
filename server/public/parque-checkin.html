@@ -172,6 +172,13 @@
           <span>Esse CPF tem <b id="credito-min">0</b> min guardados de um check-out antecipado anterior. Usar agora (soma por cima do tempo escolhido)?</span>
         </label>
       </div>
+      <!-- relancar: o CPF ja teve visita HOJE e o tempo acabou - nova compra
+           reaproveitando o Termo assinado (valido so no mesmo dia) -->
+      <div class="hidden" id="wrap-relancar" style="background:var(--panel2);border:1px solid var(--warn);border-radius:8px;padding:10px 12px;margin-top:10px;">
+        <div style="font-size:12.5px;" id="relancar-info"></div>
+        <div class="sub" style="font-size:12px;color:var(--muted);margin-top:4px;">Deseja voltar a brincar? O Relançar cria uma nova compra com as mesmas crianças, <b>reaproveitando o Termo assinado de hoje</b> (não precisa assinar de novo) e <b>sem cobrar meias</b> — já estão com elas. Escolha o tempo e a forma de pagamento abaixo e clique em Relançar.</div>
+        <button type="button" class="btn-secundario" style="margin-top:8px;" id="btn-relancar" onclick="relancarVisita()">🔁 Relançar (mesmo dia, mesmo termo)</button>
+      </div>
       <label>Email (opcional)</label>
       <input type="email" id="f-email">
       <label>CEP</label>
@@ -232,7 +239,10 @@
         <option value="credito">Cartão de crédito</option>
         <option value="cortesia">Cortesia (não cobra)</option>
       </select>
+      <label>Meias extras <span style="text-transform:none;font-weight:400;">(pares além das crianças · R$25 cada)</span></label>
+      <input type="number" step="1" min="0" max="30" id="f-meias-extras" value="0" oninput="atualizarPreviewValor()">
       <div class="resumo">
+        <div class="linha"><span>Meias (R$25/par)</span><b id="preview-meias">R$ 0,00</b></div>
         <div class="linha"><span id="valor-detalhe">—</span><b id="preview-valor">R$ 0,00</b></div>
       </div>
     </div>
@@ -318,6 +328,32 @@
   </div>
 </div>
 
+<!-- adicionar tempo durante a vigencia: cobra so o tempo extra pela tabela
+     (x criancas), sem cobrar meias de novo -->
+<div class="overlay hidden" id="overlay-addtempo">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharAddTempo()">✕</span>
+    <div class="sheet">
+    <h3>➕ Adicionar tempo</h3>
+    <div class="sub" id="addtempo-info"></div>
+    <div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:8px;">O tempo é somado por cima do que já está valendo e o valor aumenta pela tabela (× crianças). <b>Meias não são cobradas de novo</b> — já estão com as do check-in original.</div>
+    <label>Quanto tempo adicionar</label>
+    <select id="at-tempo"></select>
+    <label>Forma de pagamento do acréscimo</label>
+    <select id="at-metodo">
+      <option value="dinheiro">Dinheiro</option>
+      <option value="pix">Pix</option>
+      <option value="debito">Cartão de débito</option>
+      <option value="credito">Cartão de crédito</option>
+      <option value="cortesia">Cortesia (não cobra)</option>
+    </select>
+    <div class="resumo"><div class="linha"><span>Acréscimo</span><b id="at-preview">R$ 0,00</b></div></div>
+    <div class="msg hidden" id="msg-addtempo"></div>
+    <button type="button" class="btn-primary" style="width:100%;margin-top:14px;" onclick="confirmarAddTempo()">Confirmar acréscimo</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
@@ -383,7 +419,10 @@ function initNavDrawerAccordion(){
 initNavDrawerAccordion();
 
 const PARQUE_UNIDADES_NOMES = { 'Saltiverso Patteo': 'Saltiverso Patteo' };
-const TEMPOS_VALIDOS = [30,60,90,120,150,180,210,240];
+// venda normal: 30 a 120 minutos. Quem quiser ficar mais usa o
+// "➕ Adicionar tempo" durante a vigencia (mesma lista de buckets)
+const TEMPOS_VALIDOS = [30,60,90,120];
+const PRECO_MEIA = 25;
 
 let ME = null;
 let IS_MASTER = false;
@@ -395,6 +434,8 @@ let AC_ATIVO = false;
 let ULTIMO_CRIADO_ID = null;
 let CREDITO_ATUAL = null; // {minutosDisponiveis,...} do CPF preenchido, se houver
 let USAR_CREDITO = false;
+let VISITA_HOJE = null;   // visita de HOJE do CPF preenchido (pro Relançar)
+let ADDTEMPO_ID = null;   // check-in alvo do overlay de adicionar tempo
 
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
@@ -426,15 +467,23 @@ function renderTempos(){
 }
 function selecionarTempo(t){ TEMPO_SELECIONADO = t; renderTempos(); atualizarPreviewValor(); }
 
-// valor da entrada = tabela do tempo x quantidade de criancas (pulseiras);
-// cortesia zera. Minutos de credito usados nao mudam o valor (ja pagos)
+// valor da entrada = tabela do tempo x quantidade de criancas (pulseiras)
+// + meias: R$25 por crianca com a meia marcada (padrao) + pares extras.
+// Cortesia zera. Minutos de credito usados nao mudam o valor (ja pagos)
+function contarMeias(){
+  return [...document.querySelectorAll('#lista-criancas .crianca-linha')]
+    .filter(l=>l.querySelector('.crianca-nome').value.trim() && l.querySelector('.crianca-meia').checked).length;
+}
 function atualizarPreviewValor(){
   const n = [...document.querySelectorAll('#lista-criancas .crianca-nome')].filter(i=>i.value.trim()).length;
   const metodo = document.getElementById('f-metodo').value;
   const unit = valorPorTempo(TEMPO_SELECIONADO);
-  const total = metodo==='cortesia' ? 0 : unit * n;
+  const meias = contarMeias() + Math.max(0, num(document.getElementById('f-meias-extras').value));
+  const valorMeias = metodo==='cortesia' ? 0 : PRECO_MEIA * meias;
+  const total = metodo==='cortesia' ? 0 : unit * n + valorMeias;
+  document.getElementById('preview-meias').textContent = `${meias} par(es) · ${fmtReal(valorMeias)}`;
   document.getElementById('valor-detalhe').textContent =
-    metodo==='cortesia' ? `cortesia · ${n} criança(s)` : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min)`;
+    metodo==='cortesia' ? `cortesia · ${n} criança(s)` : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min) + meias`;
   document.getElementById('preview-valor').textContent = fmtReal(total);
 }
 document.getElementById('f-metodo').addEventListener('change', atualizarPreviewValor);
@@ -449,7 +498,9 @@ document.getElementById('f-cpf').addEventListener('blur', async (ev) => {
   const cpf = ev.target.value.replace(/\D/g, '');
   CREDITO_ATUAL = null;
   USAR_CREDITO = false;
+  VISITA_HOJE = null;
   document.getElementById('wrap-credito').classList.add('hidden');
+  document.getElementById('wrap-relancar').classList.add('hidden');
   document.getElementById('usar-credito').checked = false;
   if (cpf.length < 8) return;
   try {
@@ -458,6 +509,15 @@ document.getElementById('f-cpf').addEventListener('blur', async (ev) => {
       CREDITO_ATUAL = dados.credito;
       document.getElementById('credito-min').textContent = dados.credito.minutosDisponiveis;
       document.getElementById('wrap-credito').classList.remove('hidden');
+    }
+    // ja teve visita hoje com o tempo esgotado? Oferece o Relançar (nova
+    // compra reaproveitando o termo do dia, sem meias)
+    if (dados && dados.visitaHoje && dados.visitaHoje.tempoEsgotado) {
+      VISITA_HOJE = dados.visitaHoje;
+      const v = dados.visitaHoje;
+      document.getElementById('relancar-info').innerHTML =
+        `⚠️ <b>${escapeHtml(v.responsavelNome)}</b> já utilizou o parque HOJE (${(v.timeInicial||'').slice(0,5)} às ${(v.timeFinal||'').slice(0,5)} · ${v.criancas} criança(s)) e o tempo acabou.`;
+      document.getElementById('wrap-relancar').classList.remove('hidden');
     }
     if (!dados || !dados.responsavel) return;
     const r = dados.responsavel;
@@ -508,6 +568,10 @@ function adicionarCrianca(){
       <div><label style="margin-top:0;">Nascimento</label><input type="date" class="crianca-nasc"></div>
       <button type="button" class="btn-remover-crianca" onclick="document.getElementById('${id}').remove(); atualizarPreviewPulseiras();" title="Remover">✕</button>
     </div>
+    <label class="crianca-meia-wrap" style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
+      <input type="checkbox" class="crianca-meia" checked style="width:auto;" onchange="atualizarPreviewValor()">
+      🧦 Par de meia · R$25 <span style="color:var(--muted);">(desmarque se a criança já tem a meia)</span>
+    </label>
   `;
   document.getElementById('lista-criancas').appendChild(div);
   div.querySelector('.crianca-nome').addEventListener('input', atualizarPreviewPulseiras);
@@ -523,6 +587,7 @@ function coletarCriancas(){
   return [...document.querySelectorAll('#lista-criancas .crianca-linha')].map(div=>({
     nome: div.querySelector('.crianca-nome').value.trim(),
     dataNascimento: div.querySelector('.crianca-nasc').value || null,
+    meia: div.querySelector('.crianca-meia').checked,
   })).filter(c=>c.nome);
 }
 
@@ -569,12 +634,13 @@ function renderLista(){
         <span>${escapeHtml(c.responsavel?.nome||'')} · ${escapeHtml(c.unidadeNome||c.unidade)} · ${fmtData(c.dataUtilizacao)}</span>
         <span class="badge ${status.classe}">${status.texto}</span>
       </div>
-      <div class="sub">${horario} · ${c.pulseiras} pulseira(s)${c.adultoCortesia?' · A.C. x'+c.quantAC:''}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''}</div>
+      <div class="sub">${horario} · ${c.pulseiras} pulseira(s)${c.valorMeias?` · 🧦 ${((c.criancas||[]).filter(x=>x.meia!==false).length + (c.meiasExtras||0))} meia(s)`:''}${c.minutosAdicionados?` · ➕ ${c.minutosAdicionados}min extras`:''}${c.relancadoDe?' · 🔁 relançado (termo do dia)':''}${c.adultoCortesia?' · A.C. x'+c.quantAC:''}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''}</div>
       <div class="criancas">${escapeHtml(criancas)}</div>
       <div style="margin-top:8px;">
         <a class="link-btn" href="/api/parque/checkins/${c.id}/termo.pdf?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">🖨️ Termo</a>
         ${!c.termoAssinado?`<button type="button" class="link-btn" onclick="marcarAssinadoId('${c.id}')">✔ Marcar assinado</button>`:''}
         ${!c.iniciado?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="fazerCheckin('${c.id}')">▶ Fazer check-in</button>`:''}
+        ${(c.iniciado && !c.checkoutEm && aindaTemTempoPraCheckout(c))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="abrirAddTempo('${c.id}')">➕ Adicionar tempo</button>`:''}
         ${(c.iniciado && !c.checkoutEm && aindaTemTempoPraCheckout(c))?`<button type="button" class="link-btn" style="color:var(--warn);" onclick="checkoutEmergencia('${c.id}')">🚪 Check-out</button>`:''}
         ${(c.checkoutEm && !c.checkoutAprovado)?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="retomarCheckout('${c.id}')">↩ Voltar (criança retornou)</button>`:''}
         ${(c.checkoutEm && !c.checkoutAprovado && podeAprovarCheckout(c.unidade))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="aprovarCheckout('${c.id}')">✓ Aprovar check-out</button>`:''}
@@ -615,14 +681,17 @@ function correcaoAba(aba){
   document.getElementById('btn-enviar-correcao').textContent = aba==='excluir' ? 'Pedir exclusão' : 'Enviar proposta de alteração';
 }
 
-function corAddCrianca(nome, nasc){
+function corAddCrianca(nome, nasc, meia){
   const div = document.createElement('div');
   div.className = 'crianca-linha';
   div.innerHTML = `<input type="text" placeholder="Nome da criança" class="cor-cr-nome">
     <div class="crianca-linha-nasc">
       <div><input type="date" class="cor-cr-nasc"></div>
       <button type="button" class="btn-remover-crianca" title="Remover criança" onclick="this.closest('.crianca-linha').remove()">🗑</button>
-    </div>`;
+    </div>
+    <label style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
+      <input type="checkbox" class="cor-cr-meia" style="width:auto;" ${meia===false?'':'checked'}> 🧦 Par de meia · R$25
+    </label>`;
   div.querySelector('.cor-cr-nome').value = nome||'';
   div.querySelector('.cor-cr-nasc').value = (nasc||'').slice(0,10);
   document.getElementById('cor-criancas').appendChild(div);
@@ -647,7 +716,7 @@ function abrirCorrecao(id){
   document.getElementById('cor-ac-quant').value = c.quantAC || 1;
   document.getElementById('cor-observacao').value = c.observacao || '';
   document.getElementById('cor-criancas').innerHTML = '';
-  (c.criancas||[]).forEach(cr=>corAddCrianca(cr.nome, cr.dataNascimento));
+  (c.criancas||[]).forEach(cr=>corAddCrianca(cr.nome, cr.dataNascimento, cr.meia));
   document.getElementById('cor-motivo').value = '';
   document.getElementById('msg-correcao').classList.add('hidden');
   correcaoAba('alterar');
@@ -674,6 +743,7 @@ document.getElementById('form-correcao').addEventListener('submit', async (ev)=>
         criancas: [...document.querySelectorAll('#cor-criancas .crianca-linha')].map(l=>({
           nome: l.querySelector('.cor-cr-nome').value,
           dataNascimento: l.querySelector('.cor-cr-nasc').value || null,
+          meia: l.querySelector('.cor-cr-meia').checked,
         })),
       };
     }
@@ -747,6 +817,87 @@ async function fazerCheckinUltimo(){
   atualizarPainelTermoVisibilidade();
 }
 
+// ---------- adicionar tempo durante a vigencia ----------
+function abrirAddTempo(id){
+  const c = CHECKINS.find(x=>x.id===id);
+  if(!c) return;
+  ADDTEMPO_ID = id;
+  document.getElementById('addtempo-info').textContent =
+    `${c.responsavel?.nome||''} · até ${(c.timeFinal||'').slice(0,5)} · ${(c.criancas||[]).length} criança(s)`;
+  const qtd = (c.criancas||[]).length || c.pulseiras || 0;
+  document.getElementById('at-tempo').innerHTML = TEMPOS_VALIDOS
+    .map(t=>`<option value="${t}">${t} min · ${fmtReal(valorPorTempo(t))} × ${qtd} criança(s) = ${fmtReal(valorPorTempo(t)*qtd)}</option>`).join('');
+  document.getElementById('at-metodo').value = c.metodoPagamento && c.metodoPagamento!=='cortesia' ? c.metodoPagamento : 'dinheiro';
+  document.getElementById('msg-addtempo').classList.add('hidden');
+  atualizarPreviewAddTempo();
+  document.getElementById('overlay-addtempo').classList.remove('hidden');
+}
+function fecharAddTempo(){ document.getElementById('overlay-addtempo').classList.add('hidden'); ADDTEMPO_ID=null; }
+function atualizarPreviewAddTempo(){
+  const c = CHECKINS.find(x=>x.id===ADDTEMPO_ID);
+  if(!c) return;
+  const qtd = (c.criancas||[]).length || c.pulseiras || 0;
+  const t = Number(document.getElementById('at-tempo').value)||0;
+  const cortesia = document.getElementById('at-metodo').value==='cortesia';
+  document.getElementById('at-preview').textContent = cortesia ? 'R$ 0,00 (cortesia)' : fmtReal(valorPorTempo(t)*qtd);
+}
+document.getElementById('at-tempo').addEventListener('change', atualizarPreviewAddTempo);
+document.getElementById('at-metodo').addEventListener('change', atualizarPreviewAddTempo);
+async function confirmarAddTempo(){
+  if(!ADDTEMPO_ID) return;
+  const msg = document.getElementById('msg-addtempo');
+  msg.classList.add('hidden');
+  try{
+    const res = await fetch(`/api/parque/checkins/${ADDTEMPO_ID}/adicionar-tempo`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ minutos: Number(document.getElementById('at-tempo').value), metodoPagamento: document.getElementById('at-metodo').value }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error||'erro ao adicionar tempo');
+    fecharAddTempo();
+    alert(`Tempo adicionado! Novo horário final: ${(data.timeFinal||'').slice(0,5)} · valor total ${fmtReal(data.valor)}.`);
+    await carregar();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+}
+
+// ---------- relancar (mesmo dia, mesmo termo) ----------
+async function relancarVisita(){
+  if(!VISITA_HOJE) return;
+  const metodo = document.getElementById('f-metodo').value;
+  if(!metodo){ alert('Escolha a forma de pagamento antes de relançar.'); return; }
+  if(!confirm(`Relançar a entrada de ${VISITA_HOJE.responsavelNome} com ${TEMPO_SELECIONADO}min? É uma nova cobrança (${fmtReal(metodo==='cortesia'?0:valorPorTempo(TEMPO_SELECIONADO)*VISITA_HOJE.criancas)}), sem meias, reaproveitando o Termo assinado de hoje.`)) return;
+  const btn = document.getElementById('btn-relancar');
+  btn.disabled = true;
+  try{
+    const res = await fetch(`/api/parque/checkins/${VISITA_HOJE.id}/relancar`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        tempoMinutos: TEMPO_SELECIONADO,
+        metodoPagamento: metodo,
+        horarioPrevisto: document.getElementById('f-horario-previsto').value,
+      }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error||'erro ao relançar');
+    ULTIMO_CRIADO_ID = data.id;
+    if(data.termoAssinado){
+      alert('Relançado! O Termo assinado de hoje foi reaproveitado — é só fazer o check-in quando o grupo entrar.');
+    }else{
+      alert('Relançado! A compra anterior não tinha o termo assinado, então esse novo segue o fluxo normal: imprimir e assinar o termo antes de entrar.');
+      document.getElementById('link-termo').href = `/api/parque/checkins/${data.id}/termo.pdf?token=${encodeURIComponent(AUTH_TOKEN)}`;
+      document.getElementById('painel-termo').classList.remove('hidden');
+    }
+    resetarForm();
+    await carregar();
+  }catch(err){
+    alert(err.message);
+  }finally{
+    btn.disabled = false;
+  }
+}
+
 function resetarForm(){
   document.getElementById('form-checkin').reset();
   document.getElementById('f-data').value = hojeBrasilia();
@@ -759,7 +910,10 @@ function resetarForm(){
   adicionarCrianca();
   CREDITO_ATUAL = null;
   USAR_CREDITO = false;
+  VISITA_HOJE = null;
   document.getElementById('wrap-credito').classList.add('hidden');
+  document.getElementById('wrap-relancar').classList.add('hidden');
+  document.getElementById('f-meias-extras').value = 0;
   atualizarPreviewValor();
 }
 
@@ -800,6 +954,7 @@ document.getElementById('form-checkin').addEventListener('submit', async (ev)=>{
       quantAC: AC_ATIVO ? document.getElementById('f-quantAC').value : 0,
       criancas,
       metodoPagamento: document.getElementById('f-metodo').value,
+      meiasExtras: Math.max(0, num(document.getElementById('f-meias-extras').value)),
       usarCreditoMin: (USAR_CREDITO && CREDITO_ATUAL) ? CREDITO_ATUAL.minutosDisponiveis : 0,
     };
     const res = await fetch('/api/parque/checkins', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });

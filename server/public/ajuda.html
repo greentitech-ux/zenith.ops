@@ -565,10 +565,11 @@ const TOPICOS = [
     <h3>1) Registrar uma entrada</h3>
     <ol>
       <li>Preencha nome, CPF e contato do responsável. <b>Comportamento:</b> ao sair do campo CPF, se a pessoa já veio antes, os dados preenchem sozinhos — e se aquele CPF tem <b>crédito de tempo</b> de uma visita anterior, o sistema oferece usar (soma por cima do tempo escolhido, sem cobrar de novo). O CEP preenche o endereço automaticamente.</li>
-      <li>Escolha a data, o <b>tempo contratado</b> (os botões já mostram o preço: 30min R$40 · 60min R$50 · 90min R$90 · 120min R$100 · 150min R$140 · 180min R$150 · 210min R$190 · 240min R$200) e o <b>horário previsto de entrada</b>.</li>
+      <li>Escolha a data, o <b>tempo contratado</b> (os botões já mostram o preço: 30min R$40 · 60min R$50 · 90min R$90 · 120min R$100 — a venda vai <b>só até 120min</b>; pra ficar mais tempo, use o <b>➕ Adicionar tempo</b> durante a vigência) e o <b>horário previsto de entrada</b>.</li>
       <li>Marque <b>Adulto Cortesia (A.C.)</b> quando um adulto acompanha sem pular (ex: acompanhante de criança autista) e informe quantos — A.C. não paga e não conta pulseira.</li>
-      <li>Adicione cada criança (nome + nascimento). <b>Comportamento:</b> pulseiras = quantidade de crianças, calculado sozinho.</li>
-      <li>Escolha a <b>forma de pagamento</b>: Dinheiro, Pix, Débito, Crédito ou Cortesia. O resumo mostra o valor total ao vivo (tabela do tempo × crianças; Cortesia zera).</li>
+      <li>Adicione cada criança (nome + nascimento). <b>Comportamento:</b> pulseiras = quantidade de crianças, calculado sozinho. Cada criança vem com <b>🧦 Par de meia · R$25</b> marcado por padrão (toda criança paga a meia antiderrapante) — <b>desmarque</b> quando a criança já chegou com a própria meia, e o valor cai na hora.</li>
+      <li>Precisa de mais pares? Use <b>Meias extras</b> na seção Pagamento (R$25 cada, além das crianças).</li>
+      <li>Escolha a <b>forma de pagamento</b>: Dinheiro, Pix, Débito, Crédito ou Cortesia. O resumo mostra o valor total ao vivo (tabela do tempo × crianças + meias; Cortesia zera).</li>
       <li>Clique em <b>Registrar check-in</b>. O cadastro entra na lista como "aguardando assinatura" — o relógio ainda NÃO começou.</li>
     </ol>
     <h3>2) Termo de responsabilidade (obrigatório)</h3>
@@ -581,6 +582,17 @@ const TOPICOS = [
       <li><b>Fluxo normal — automático:</b> ninguém precisa apertar nada. No <b>horário previsto</b>, o relógio começa sozinho e o card só ganha a marca <b>🤖 automático</b> pra registro (sem alerta ou notificação nenhuma).</li>
       <li><b>Chegou antes?</b> Aperte <b>▶ Fazer check-in</b>: o relógio começa naquele momento — entra antes e <b>sai antes</b> do horário inicialmente acordado.</li>
     </ul>
+    <h3>➕ Adicionar tempo (durante a vigência)</h3>
+    <ol>
+      <li>O grupo está dentro e quer ficar mais? No card, clique em <b>➕ Adicionar tempo</b>, escolha quanto (30 a 120min) e a forma de pagamento do acréscimo.</li>
+      <li><b>Comportamento:</b> o horário final estende na hora e o valor aumenta pela tabela do tempo adicionado (× crianças). <b>Meias NÃO são cobradas de novo</b> — as crianças já estão com as meias da entrada (compradas ou próprias).</li>
+    </ol>
+    <h3>🔁 Relançar (o tempo acabou, mesmo dia)</h3>
+    <ol>
+      <li>O tempo acabou mas a família quer voltar a brincar <b>no mesmo dia</b>? Digite o CPF do responsável no formulário — o sistema avisa: "já utilizou o parque HOJE... deseja voltar a brincar?".</li>
+      <li>Escolha o tempo e a forma de pagamento e clique em <b>🔁 Relançar</b>. É uma <b>nova compra</b> (paga de novo pela tabela), com as mesmas crianças.</li>
+      <li><b>Comportamento:</b> o <b>Termo de Responsabilidade assinado hoje é reaproveitado</b> — não precisa imprimir nem assinar de novo — e as <b>meias não entram na nova conta</b>. Isso vale <b>SÓ pra compras do mesmo dia</b>: em outro dia é um cadastro novo, com termo novo e meias de novo.</li>
+    </ol>
     <h3>4) Check-out antecipado (emergência)</h3>
     <ol>
       <li>A família precisa sair antes do tempo acabar? Clique em <b>🚪 Check-out</b> — o relógio para na hora e a criança sai do "quem está no parque agora".</li>
@@ -607,8 +619,8 @@ const TOPICOS = [
     <h3>💰 Financeiro (Gerente da unidade e Master/Admin)</h3>
     <ol>
       <li>O painel <b>Financeiro</b> mostra o faturamento do período filtrado, quebrado por forma de pagamento (Dinheiro, Pix, Débito, Crédito, Cortesia).</li>
-      <li>Cada card mostra o valor da entrada e o método. <b>Comportamento:</b> entradas antigas (de antes do financeiro existir) aparecem "sem método", com o valor recalculado pela tabela (30min R$40 · 60min R$50 · combinações).</li>
-      <li><b>⬇️ CSV/PDF financeiro:</b> relatório com data, responsável, tempo, pulseiras, valor por pulseira, valor total e método — o PDF traz o total geral e o resumo por método no cabeçalho.</li>
+      <li>Cada card mostra o valor da entrada (tempo × crianças + 🧦 meias + ➕ acréscimos de tempo) e o método. <b>Comportamento:</b> entradas antigas (de antes do financeiro existir) aparecem "sem método", com o valor recalculado pela tabela (30min R$40 · 60min R$50 · combinações) e sem cobrança de meia.</li>
+      <li><b>⬇️ CSV/PDF financeiro:</b> relatório com data, responsável, tempo (com os minutos adicionados), pulseiras, valor por pulseira, meias, valor total e método — o PDF traz o total geral e o resumo por método no cabeçalho.</li>
     </ol>
     <h3>✔ Decidir pedidos de correção</h3>
     <ol>

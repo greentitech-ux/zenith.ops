@@ -18,7 +18,11 @@ const EDITS = db.collection('parqueEdicoes');
 // registrarCredito()/creditoPorCpf()/usarCredito() mais abaixo
 const CREDITOS = db.collection('parqueCreditos');
 
-const TEMPOS_VALIDOS = [30, 60, 90, 120, 150, 180, 210, 240];
+// venda normal vai de 30 a 120 minutos - tempos maiores sairam da tabela;
+// quem quiser ficar mais usa o "adicionar tempo" durante a vigencia (ver
+// adicionarTempo abaixo). Registros antigos com 150-240 continuam validos,
+// so nao da mais pra vender/editar pra esses buckets
+const TEMPOS_VALIDOS = [30, 60, 90, 120];
 
 // tabela de precos por pulseira (por crianca): 30min = R$40, 60min = R$50 e
 // os demais tempos combinam esses dois blocos (90 = 50+40 = R$90,
@@ -30,6 +34,16 @@ const PRECO_HORA = 50;
 function valorPorTempo(tempoMinutos) {
   const t = Number(tempoMinutos) || 0;
   return Math.floor(t / 60) * PRECO_HORA + (t % 60 >= 30 ? PRECO_MEIA_HORA : 0);
+}
+
+// par de meia antiderrapante: R$25 por crianca. TODA crianca entra por
+// padrao com a meia cobrada (meia: true) - o atendente desmarca quando a
+// crianca ja chegou com a propria meia. Alem disso da pra vender pares
+// extras (meiasExtras) alem da quantidade de criancas
+const PRECO_MEIA = 25;
+function valorMeias(criancas, meiasExtras) {
+  const optantes = (criancas || []).filter((c) => c.meia !== false).length;
+  return PRECO_MEIA * (optantes + Math.max(0, num(meiasExtras)));
 }
 
 // forma de pagamento registrada na entrada - alimenta o relatorio
@@ -103,6 +117,9 @@ function sanitizarCriancas(lista) {
     .map((c) => ({
       nome: String((c && c.nome) || '').trim().slice(0, 120),
       dataNascimento: (c && c.dataNascimento) || null,
+      // meia: true por padrao (toda crianca paga o par de R$25) - so fica
+      // false quando o atendente desmarca porque a crianca ja tem a meia
+      meia: !(c && c.meia === false),
     }))
     .filter((c) => c.nome)
     .slice(0, 30);
@@ -128,7 +145,7 @@ async function criar({
   unidade, unidadeNome, colaboradorId, colaboradorNome,
   responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto,
   observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras,
-  metodoPagamento, criadoPorId, criadoPorEmail,
+  metodoPagamento, meiasExtras, criadoPorId, criadoPorEmail,
 }) {
   const { tempo, criancasOk } = validarPayload({ unidade, responsavel, dataUtilizacao, tempoMinutos, criancas });
   // minutosExtras: credito de tempo guardado de um checkout antecipado
@@ -177,11 +194,20 @@ async function criar({
     quantAC: adultoCortesia === true ? Math.max(0, Math.min(10, num(quantAC) || 1)) : 0,
     criancas: criancasOk,
     pulseiras: criancasOk.length,
-    // financeiro: valor pela tabela (por pulseira) + forma de pagamento -
-    // 'cortesia' registra a entrada com valor zero
+    // financeiro: valor pela tabela (por pulseira) + meias (R$25 por crianca
+    // optante + pares extras) + forma de pagamento - 'cortesia' registra a
+    // entrada com valor zero
     metodoPagamento: sanitizarMetodoPagamento(metodoPagamento),
     valorPulseira: valorPorTempo(tempo),
-    valor: sanitizarMetodoPagamento(metodoPagamento) === 'cortesia' ? 0 : valorPorTempo(tempo) * criancasOk.length,
+    meiasExtras: Math.max(0, Math.min(30, num(meiasExtras))),
+    valorMeias: valorMeias(criancasOk, Math.max(0, Math.min(30, num(meiasExtras)))),
+    valor: sanitizarMetodoPagamento(metodoPagamento) === 'cortesia'
+      ? 0
+      : valorPorTempo(tempo) * criancasOk.length + valorMeias(criancasOk, Math.max(0, Math.min(30, num(meiasExtras)))),
+    // tempo comprado DEPOIS da entrada, durante a vigencia (ver
+    // adicionarTempo) - nao muda o bucket contratado, soma por cima
+    minutosAdicionados: 0,
+    acrescimos: [],
     usou: usou !== false,
     termoAssinado: false,
     criadoPorId,
@@ -203,13 +229,120 @@ async function checkin(id) {
   const inicio = horaAgoraBrasilia();
   const merge = {
     timeInicial: inicio,
-    timeFinal: somarMinutos(inicio, atual.tempoMinutos + (atual.minutosExtras || 0)),
+    timeFinal: somarMinutos(inicio, atual.tempoMinutos + (atual.minutosExtras || 0) + (atual.minutosAdicionados || 0)),
     iniciado: true,
     checkinEm: new Date().toISOString(),
   };
   await ref.update(merge);
   parqueCache.invalidar();
   return getOne(id);
+}
+
+// compra de tempo extra DURANTE a vigencia: o grupo ja esta dentro e quer
+// ficar mais. Cobra so o tempo adicional pela tabela (x criancas) - as
+// meias NAO sao cobradas de novo (ja estao com as do check-in original,
+// compradas ou proprias). Estende o timeFinal na hora e registra o
+// acrescimo em separado pro financeiro
+async function adicionarTempo(id, { minutos, metodoPagamento, porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Check-in não encontrado.');
+  const atual = snap.data();
+  const min = Number(minutos);
+  if (!TEMPOS_VALIDOS.includes(min)) throw new Error('Escolha um tempo válido pra adicionar (30 a 120 min).');
+  if (!atual.iniciado || !atual.timeFinal) throw new Error('Esse check-in ainda não teve o check-in físico feito.');
+  if (atual.checkoutEm) throw new Error('Esse check-in já teve check-out.');
+  const hoje = hojeBrasiliaISO();
+  const agora = horaAgoraBrasilia();
+  const vigente = atual.dataUtilizacao === hoje && atual.timeFinal > agora;
+  if (!vigente) throw new Error('O tempo desse check-in já acabou. Use o Relançar (mesmo dia) pra uma nova entrada.');
+
+  const metodo = sanitizarMetodoPagamento(metodoPagamento) || atual.metodoPagamento || null;
+  const qtd = (atual.criancas || []).length || atual.pulseiras || 0;
+  const valorAcrescimo = metodo === 'cortesia' ? 0 : valorPorTempo(min) * qtd;
+  const acrescimo = {
+    minutos: min,
+    valor: valorAcrescimo,
+    metodoPagamento: metodo,
+    porEmail: porEmail || null,
+    em: new Date().toISOString(),
+  };
+  await ref.update({
+    minutosAdicionados: (atual.minutosAdicionados || 0) + min,
+    timeFinal: somarMinutos(atual.timeFinal, min),
+    acrescimos: [...(atual.acrescimos || []), acrescimo],
+    valor: (valorDoCheckin(atual) || 0) + valorAcrescimo,
+    atualizadoEm: new Date().toISOString(),
+  });
+  parqueCache.invalidar();
+  return getOne(id);
+}
+
+// o tempo ja ACABOU mas ainda e o mesmo dia e a familia quer voltar a
+// brincar: relanca tudo como uma NOVA compra (paga de novo pela tabela),
+// reaproveitando o Termo de Responsabilidade assinado na compra anterior -
+// valido SO pra compras no mesmo dia. As meias nao entram na nova conta:
+// as criancas ja estao com as meias da primeira entrada (compradas ou
+// proprias)
+async function relancar(idOrigem, { tempoMinutos, metodoPagamento, horarioPrevisto, criadoPorId, criadoPorEmail }) {
+  const origem = await getOne(idOrigem);
+  if (!origem) throw new Error('Check-in não encontrado.');
+  const hoje = hojeBrasiliaISO();
+  if (origem.dataUtilizacao !== hoje) {
+    throw new Error('O Relançar só vale pra visitas do MESMO dia. Pra outro dia é um cadastro novo, com termo novo.');
+  }
+  const novo = await criar({
+    unidade: origem.unidade,
+    unidadeNome: origem.unidadeNome,
+    responsavel: origem.responsavel,
+    dataUtilizacao: hoje,
+    tempoMinutos,
+    horarioPrevisto,
+    observacao: origem.observacao,
+    adultoCortesia: origem.adultoCortesia,
+    quantAC: origem.quantAC,
+    criancas: (origem.criancas || []).map((c) => ({ ...c, meia: false })),
+    meiasExtras: 0,
+    metodoPagamento,
+    colaboradorId: criadoPorId,
+    colaboradorNome: criadoPorEmail,
+    criadoPorId,
+    criadoPorEmail,
+  });
+  await COLLECTION.doc(novo.id).update({
+    relancadoDe: idOrigem,
+    // o termo so e reaproveitado se a compra original realmente teve o
+    // termo assinado - senao o novo registro segue o fluxo normal
+    termoAssinado: origem.termoAssinado === true,
+    termoReaproveitado: origem.termoAssinado === true,
+  });
+  parqueCache.invalidar();
+  return getOne(novo.id);
+}
+
+// pro fluxo do Relançar no balcao: o atendente digita o CPF e o sistema ja
+// avisa se esse responsavel teve visita HOJE (e se o tempo dela ja acabou)
+async function visitaHojePorCpf(cpf) {
+  const alvo = soDigitos(cpf);
+  if (!alvo) return null;
+  const hoje = hojeBrasiliaISO();
+  const todos = await listAll();
+  const deHoje = todos.filter((c) => c.dataUtilizacao === hoje && soDigitos(c.responsavel?.cpf) === alvo);
+  if (!deHoje.length) return null;
+  deHoje.sort((a, b) => (b.criadoEm || '').localeCompare(a.criadoEm || ''));
+  const v = deHoje[0];
+  const agora = horaAgoraBrasilia();
+  return {
+    id: v.id,
+    responsavelNome: v.responsavel?.nome || '',
+    unidade: v.unidade,
+    timeInicial: v.timeInicial,
+    timeFinal: v.timeFinal,
+    iniciado: !!v.iniciado,
+    criancas: (v.criancas || []).length,
+    termoAssinado: v.termoAssinado === true,
+    tempoEsgotado: !!(v.iniciado && v.timeFinal && v.timeFinal <= agora),
+  };
 }
 
 async function listAllUncached() {
@@ -260,7 +393,7 @@ async function atualizar(id, patch) {
   if (patch.minutosExtras !== undefined) merge.minutosExtras = extras;
   if (patch.timeInicial !== undefined || patch.tempoMinutos !== undefined || patch.minutosExtras !== undefined) {
     const inicioBase = merge.timeInicial || atual.timeInicial;
-    if (inicioBase) merge.timeFinal = somarMinutos(inicioBase, tempo + extras);
+    if (inicioBase) merge.timeFinal = somarMinutos(inicioBase, tempo + extras + (atual.minutosAdicionados || 0));
   }
   if (patch.observacao !== undefined) merge.observacao = String(patch.observacao).slice(0, 300);
   if (patch.adultoCortesia !== undefined) {
@@ -274,13 +407,20 @@ async function atualizar(id, patch) {
     merge.pulseiras = criancasOk.length;
   }
   if (patch.metodoPagamento !== undefined) merge.metodoPagamento = sanitizarMetodoPagamento(patch.metodoPagamento);
-  // o valor acompanha a tabela: recalcula sempre que tempo, criancas ou
-  // forma de pagamento mudarem (cortesia zera)
-  if (patch.tempoMinutos !== undefined || patch.criancas !== undefined || patch.metodoPagamento !== undefined) {
+  if (patch.meiasExtras !== undefined) merge.meiasExtras = Math.max(0, Math.min(30, num(patch.meiasExtras)));
+  // o valor acompanha a tabela: recalcula sempre que tempo, criancas, meias
+  // ou forma de pagamento mudarem (cortesia zera). Registros de antes das
+  // meias existirem (sem valorMeias salvo) continuam sem cobranca de meia -
+  // uma correcao de dados nao pode inflar um valor que ja foi pago
+  if (patch.tempoMinutos !== undefined || patch.criancas !== undefined || patch.metodoPagamento !== undefined || patch.meiasExtras !== undefined) {
     const metodoFinal = patch.metodoPagamento !== undefined ? merge.metodoPagamento : (atual.metodoPagamento || null);
-    const qtdCriancas = merge.criancas ? merge.criancas.length : (atual.criancas || []).length;
+    const criancasFinais = merge.criancas || atual.criancas || [];
+    const cobraMeias = atual.valorMeias != null || patch.meiasExtras !== undefined;
+    const meiasExtrasFinais = merge.meiasExtras !== undefined ? merge.meiasExtras : (atual.meiasExtras || 0);
     merge.valorPulseira = valorPorTempo(tempo);
-    merge.valor = metodoFinal === 'cortesia' ? 0 : merge.valorPulseira * qtdCriancas;
+    merge.valorMeias = cobraMeias ? valorMeias(criancasFinais, meiasExtrasFinais) : (atual.valorMeias || 0);
+    const somaAcrescimos = (atual.acrescimos || []).reduce((s, a) => s + (Number(a.valor) || 0), 0);
+    merge.valor = metodoFinal === 'cortesia' ? 0 : merge.valorPulseira * criancasFinais.length + merge.valorMeias + somaAcrescimos;
   }
   if (patch.usou !== undefined) merge.usou = patch.usou === true;
   if (patch.termoAssinado !== undefined) merge.termoAssinado = patch.termoAssinado === true;
@@ -310,7 +450,7 @@ async function rodarAutoCheckins() {
     if (c.horarioPrevisto > agora) continue;
     const merge = {
       timeInicial: c.horarioPrevisto,
-      timeFinal: somarMinutos(c.horarioPrevisto, c.tempoMinutos + (c.minutosExtras || 0)),
+      timeFinal: somarMinutos(c.horarioPrevisto, c.tempoMinutos + (c.minutosExtras || 0) + (c.minutosAdicionados || 0)),
       iniciado: true,
       autoCheckin: true,
       checkinEm: new Date().toISOString(),
@@ -608,8 +748,9 @@ async function buscarPorCpf(cpf) {
 }
 
 module.exports = {
-  TEMPOS_VALIDOS, METODOS_PAGAMENTO, valorPorTempo, valorDoCheckin,
+  TEMPOS_VALIDOS, METODOS_PAGAMENTO, PRECO_MEIA, valorPorTempo, valorDoCheckin,
   criar, checkin, listAll, listByUnidades, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
+  adicionarTempo, relancar, visitaHojePorCpf,
   solicitarEdicao, listarEdicoes, decidirEdicao, validarPropostaEdicao,
   checkout, aprovarCheckout, retomarCheckout, creditoPorCpf, usarCredito,
   invalidar: () => parqueCache.invalidar(),
