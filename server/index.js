@@ -5500,6 +5500,11 @@ app.use((err, req, res, next) => {
 
   app.listen(PORT, async () => {
     console.log(`Zenith Ops rodando em http://localhost:${PORT}`);
+    // status do atendente virtual do chat de suporte (ver suporteBot.js) -
+    // uma linha no log do Render pra conferir na hora se a env var pegou
+    console.log(suporteBot.ativo()
+      ? '🤖 Beniboy (chat de suporte) ATIVO - ANTHROPIC_API_KEY configurada.'
+      : '🤖 Beniboy (chat de suporte) desativado - configure a env var ANTHROPIC_API_KEY pra ligar.');
     console.log(`Webhook: POST http://localhost:${PORT}/webhooks/adyen`);
 
     const contas = Object.keys(HMAC_KEYS);
