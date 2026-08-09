@@ -152,9 +152,11 @@
 
   function renderConversa(chat) {
     const noFim = corpo.scrollTop + corpo.clientHeight >= corpo.scrollHeight - 30;
+    // m.bot = resposta do Beniboy (assistente automático) - identificado
+    // pra pessoa saber que ainda não é um humano falando
     corpo.innerHTML = (chat.mensagens || []).map((m) => `
       <div class="szc-msg ${m.de === 'visitante' ? 'visitante' : 'suporte'}">
-        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Você') : 'Suporte'}</span>${esc(m.texto)}
+        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Você') : (m.bot ? '🤖 Beniboy · assistente virtual' : 'Suporte')}</span>${esc(m.texto)}
       </div>`).join('') || '<div class="szc-aviso">Sem mensagens ainda.</div>';
     if (chat.status !== 'ABERTO') {
       corpo.insertAdjacentHTML('beforeend', `<div class="szc-fim">Conversa finalizada pelo Suporte. Precisa de mais ajuda?<br><button type="button" class="szc-link" id="szc-nova-conversa">Iniciar nova conversa</button></div>`);
@@ -243,7 +245,10 @@
     const msgs = chat.mensagens || [];
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].de === 'visitante') return msgs[i];
-      if (msgs[i].de === 'suporte') return null; // ja respondida
+      // resposta do Beniboy conta como "respondida" ENQUANTO ele esta na
+      // conversa; se ele chamou um atendente (botDesativado), a fala dele e
+      // ignorada e a conversa volta pra fila vermelha do time
+      if (msgs[i].de === 'suporte' && !(msgs[i].bot && chat.botDesativado)) return null; // ja respondida
     }
     return null;
   }
@@ -315,7 +320,7 @@
       </div>` +
       (chat.mensagens || []).map((m) => `
       <div class="szc-msg ${m.de === 'visitante' ? 'suporte' : 'visitante'}">
-        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Visitante') : 'Suporte' + (m.autorEmail ? ' · ' + esc(m.autorEmail) : '')}</span>${esc(m.texto)}
+        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Visitante') : (m.bot ? '🤖 Beniboy (bot)' : 'Suporte' + (m.autorEmail ? ' · ' + esc(m.autorEmail) : ''))}</span>${esc(m.texto)}
       </div>`).join('') + `
       <div style="display:flex;gap:6px;">
         <input type="text" class="szc-input" id="szc-atend-msg" placeholder="responder..." maxlength="1000" style="flex:1;">

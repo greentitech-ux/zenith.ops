@@ -43,6 +43,7 @@ const solicitacoes = require('./solicitacoes');
 const chamadosTI = require('./chamadosTI');
 const chamadosManutencao = require('./chamadosManutencao');
 const suporteChat = require('./suporteChat');
+const suporteBot = require('./suporteBot');
 const docsMaster = require('./docsMaster');
 const abastecimentoCarrinho = require('./abastecimentoCarrinho');
 const ativosTI = require('./ativosTI');
@@ -4482,12 +4483,38 @@ app.get('/api/ajuda/topicos-master', auth.requireMasterOrAdmin, (req, res) => {
 // o token e a chave dele pra ler/escrever depois. Lado do atendimento
 // (Master/Admin/secao "suporte"): lista, responde, gera chamado remoto
 // vinculado e finaliza - tudo na tela de Chamados TI.
+// Beniboy (suporteBot.js): responde a conversa em segundo plano quando
+// nenhum humano assumiu. Roda DEPOIS da resposta HTTP (fire-and-forget) -
+// o widget do visitante busca a conversa a cada 5s e a resposta do bot
+// aparece ali. Qualquer falha da API so cai no log: o time humano ja foi
+// notificado pelo push normal e atende como sempre.
+async function acionarBeniboy(chatId) {
+  if (!suporteBot.ativo()) return;
+  try {
+    const mapa = await construirUnidadesMapa();
+    const unidades = [...new Set(Object.values(mapa))].sort();
+    const r = await suporteBot.responderConversa(chatId, { unidades });
+    if (!r) return;
+    broadcast('suporte-chat', { id: chatId }, 'suporte');
+    for (const t of r.tickets || []) {
+      broadcast('solicitacao-criada', t, 'solicitacoes');
+      push.notifySolicitacao(`Ticket #${t.numeroTicket} · Nova solicitação (Beniboy · chat)`, `${t.titulo || ''} · ${t.unidadeNome || ''}`, t.id);
+    }
+    if (r.chamouAtendente) {
+      push.notifySolicitacao('💬 Beniboy pediu um atendente humano', `${r.chat?.nome || ''}${r.motivoAtendente ? ' · ' + r.motivoAtendente : ''}`.slice(0, 120), chatId, '/tecnico.html');
+    }
+  } catch (err) {
+    console.error('[suporteBot] falha no acionamento:', err.message);
+  }
+}
+
 app.post('/api/suporte-chat/iniciar', async (req, res) => {
   try {
     const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     push.notifySolicitacao('💬 Novo chat de suporte', `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico.html');
     res.json({ id: chat.id, token: chat.token });
+    acionarBeniboy(chat.id);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -4507,6 +4534,7 @@ app.post('/api/suporte-chat/:id/mensagem', async (req, res) => {
     // abertura da conversa) - o atendente ve e responde de onde estiver
     push.notifySolicitacao('💬 Nova mensagem no chat de suporte', `${chat.nome} · ${String(req.body.texto || '').slice(0, 80)}`, chat.id, '/tecnico.html');
     res.json({ ok: true });
+    acionarBeniboy(chat.id);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

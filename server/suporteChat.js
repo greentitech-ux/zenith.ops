@@ -39,6 +39,9 @@ async function criar({ nome, contato, texto }) {
     contato: contatoLimpo,
     status: 'ABERTO',
     mensagens: [{ de: 'visitante', texto: textoLimpo, em: agora }],
+    // true = o Beniboy (bot, ver suporteBot.js) saiu dessa conversa - ou
+    // porque ele mesmo chamou um atendente humano, ou por decisao do time
+    botDesativado: false,
     chamadoId: null,
     atendidoPorEmail: null,
     criadoEm: agora,
@@ -64,12 +67,15 @@ async function getPublico(id, token) {
     id: chat.id,
     nome: chat.nome,
     status: chat.status,
-    mensagens: (chat.mensagens || []).map((m) => ({ de: m.de, texto: m.texto, em: m.em })),
+    mensagens: (chat.mensagens || []).map((m) => ({ de: m.de, texto: m.texto, em: m.em, ...(m.bot ? { bot: true } : {}) })),
     criadoEm: chat.criadoEm,
   };
 }
 
-async function adicionarMensagem(id, { de, texto, autorEmail, token }) {
+// `bot: true` = mensagem do Beniboy (suporteBot.js): entra como 'suporte' na
+// conversa, mas NAO marca atendidoPorEmail - esse campo continua significando
+// "um humano assumiu" (e e o que faz o bot se calar)
+async function adicionarMensagem(id, { de, texto, autorEmail, token, bot }) {
   const chat = await getOne(id);
   if (!chat) throw new Error('Conversa não encontrada.');
   if (de === 'visitante' && chat.token !== token) throw new Error('Conversa não encontrada.');
@@ -78,9 +84,9 @@ async function adicionarMensagem(id, { de, texto, autorEmail, token }) {
   if (!textoLimpo) throw new Error('Escreva a mensagem.');
   if ((chat.mensagens || []).length >= MAX_MENSAGENS) throw new Error('Essa conversa ficou muito longa. Inicie uma nova.');
   const agora = new Date().toISOString();
-  const mensagens = [...(chat.mensagens || []), { de, texto: textoLimpo, em: agora, ...(de === 'suporte' ? { autorEmail: autorEmail || null } : {}) }];
+  const mensagens = [...(chat.mensagens || []), { de, texto: textoLimpo, em: agora, ...(de === 'suporte' ? { autorEmail: autorEmail || null } : {}), ...(bot ? { bot: true } : {}) }];
   const patch = { mensagens, atualizadoEm: agora };
-  if (de === 'suporte' && !chat.atendidoPorEmail) patch.atendidoPorEmail = autorEmail || null;
+  if (de === 'suporte' && !bot && !chat.atendidoPorEmail) patch.atendidoPorEmail = autorEmail || null;
   await COLLECTION.doc(id).update(patch);
   chatsCache.invalidar();
   return getOne(id);
@@ -100,6 +106,14 @@ async function finalizar(id, { autorEmail }) {
   return getOne(id);
 }
 
+// tira o bot da conversa em definitivo (chamado pela tool chamar_atendente
+// do proprio bot) - dali em diante so humano responde
+async function desativarBot(id) {
+  await COLLECTION.doc(id).update({ botDesativado: true, atualizadoEm: new Date().toISOString() });
+  chatsCache.invalidar();
+  return getOne(id);
+}
+
 async function vincularChamado(id, chamadoId) {
   await COLLECTION.doc(id).update({ chamadoId, atualizadoEm: new Date().toISOString() });
   chatsCache.invalidar();
@@ -113,4 +127,4 @@ async function listAllUncached() {
 const chatsCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = chatsCache.cached;
 
-module.exports = { criar, getOne, getPublico, adicionarMensagem, finalizar, vincularChamado, listAll };
+module.exports = { criar, getOne, getPublico, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll };
