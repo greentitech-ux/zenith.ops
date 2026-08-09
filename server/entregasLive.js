@@ -106,6 +106,27 @@ async function getOne(id) {
   return doc.exists ? doc.data() : null;
 }
 
+// nomes amigaveis + formatacao do resumo "de -> para" que acompanha o pedido
+// de correcao: quem aprova ve o que tinha e o que passara a ter, em vez do
+// nome cru do campo (contagens sem R$, valores em R$)
+const NOMES_CAMPOS_ENTREGA = {
+  entrega: 'Entregas', retorno: 'Retornos', extra: 'Extras', bonus: 'Bônus',
+  pos00hs: 'Pós 00hs', foraDeArea: 'Fora de área', ajudaCusto: 'Ajuda de custo',
+  valor: 'Valor', coopRecebe: 'Coop recebe', quantTotal: 'Quant. total',
+};
+const CAMPOS_MOEDA_ENTREGA = ['ajudaCusto', 'valor', 'coopRecebe'];
+function fmtValorEntrega(campo, valor) {
+  const n = num(valor);
+  if (!CAMPOS_MOEDA_ENTREGA.includes(campo)) return String(n);
+  return `${n < 0 ? '-' : ''}R$ ${Math.abs(n).toFixed(2).replace('.', ',')}`;
+}
+function montarResumoMudancasEntrega(pedido, atual) {
+  return Object.entries(pedido.mudancas || {}).map(([campo, valor]) => {
+    const anterior = atual[campo] != null ? fmtValorEntrega(campo, atual[campo]) : 'não tinha';
+    return `${NOMES_CAMPOS_ENTREGA[campo] || campo}: ${anterior} → ${fmtValorEntrega(campo, valor)}`;
+  });
+}
+
 async function solicitarEdicao({ entregaId, mudancas, motivo, solicitadoPorId, solicitadoPorEmail }) {
   const atual = await getOne(entregaId);
   if (!atual) throw new Error('Lançamento não encontrado.');
@@ -126,6 +147,7 @@ async function solicitarEdicao({ entregaId, mudancas, motivo, solicitadoPorId, s
     data: atual.data,
     entregador: atual.entregador,
     mudancas: camposValidos,
+    resumoMudancas: [],
     motivo: String(motivo).trim(),
     status: 'PENDENTE',
     solicitadoPorId,
@@ -135,6 +157,7 @@ async function solicitarEdicao({ entregaId, mudancas, motivo, solicitadoPorId, s
     decididoEm: null,
     motivoDecisao: null,
   };
+  pedido.resumoMudancas = montarResumoMudancasEntrega(pedido, atual);
   await ref.set(pedido);
   edicoesEntregaCache.invalidar();
   return pedido;
@@ -177,7 +200,17 @@ async function editarDireto({ entregaId, mudancas, motivo, editadoPorEmail }) {
 // (fechamentosLive.js): evita reler a colecao inteira a cada visita da tela
 async function listarEdicoesUncached() {
   const snap = await EDITS.orderBy('criadoEm', 'desc').get();
-  return snap.docs.map((d) => d.data());
+  const pedidos = snap.docs.map((d) => d.data());
+  // pedidos criados antes do resumo "de -> para" existir ganham o resumo na
+  // leitura, enquanto PENDENTES (o lançamento ainda tem os valores antigos)
+  for (const p of pedidos) {
+    if (p.status !== 'PENDENTE' || (p.resumoMudancas || []).length) continue;
+    try {
+      const atual = await getOne(p.entregaId);
+      if (atual) p.resumoMudancas = montarResumoMudancasEntrega(p, atual);
+    } catch (e) { /* sem resumo, o pedido segue mostrando so as mudancas cruas */ }
+  }
+  return pedidos;
 }
 const edicoesEntregaCache = createCache(listarEdicoesUncached, 20 * 1000);
 const listarEdicoes = edicoesEntregaCache.cached;
