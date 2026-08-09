@@ -55,10 +55,17 @@ function normalizarCard(tipo, r) {
         : r.tipoCorrecao === 'data'
           ? `corrigir a data para ${r.novaData}`
           : `corrigir ${camposCorrigidos.join(', ')}`;
+    // o ticket carrega o "de -> para" gravado na solicitacao (o que tinha e o
+    // que passara a ter, o que sera adicionado/removido) - pedidos antigos,
+    // sem resumoMudancas, seguem mostrando so o motivo
+    const observacao = [
+      `Motivo: ${r.motivo}`,
+      ...((r.resumoMudancas || []).length ? ['', 'O que muda:', ...r.resumoMudancas.map((l) => `• ${l}`)] : []),
+    ].join('\n');
     return {
       ...r,
       tipo, id: r.id, unidade: r.unidade, unidadeNome: r.unidadeNome, status: r.status, criadoEm: r.criadoEm,
-      titulo: `Ajuste de fechamento (${r.data}) - ${desc}`, observacao: r.motivo, anexos: r.anexos || [], valorEstimado: null,
+      titulo: `Ajuste de fechamento (${r.data}) - ${desc}`, observacao, anexos: r.anexos || [], valorEstimado: null,
       criadoPorId: r.solicitadoPorId, criadoPorEmail: r.solicitadoPorEmail,
       motivoDecisao: r.motivoDecisao, decididoPorEmail: r.decididoPorEmail, decididoEm: r.decididoEm,
       chamadoId: null, fechamentoId: r.fechamentoId,

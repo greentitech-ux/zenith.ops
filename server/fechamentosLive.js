@@ -27,6 +27,26 @@ function fmtMoneyQuebra(v) {
   return `${n < 0 ? '-' : ''}R$ ${Math.abs(n).toFixed(2).replace('.', ',')}`;
 }
 
+// nomes amigaveis pros campos fixos - usados no resumo "de -> para" que vai
+// dentro do ticket de Ajuste (quem decide precisa ver o que tinha e o que
+// passara a ter, sem abrir o fechamento do lado)
+const NOMES_CAMPOS_RESUMO = {
+  caixaInicial: 'Caixa inicial', caixaFinal: 'Caixa final', delivery: 'Delivery', carryout: 'Carryout',
+  pickup: 'Pickup', loja: 'Loja (salão)', adyen: 'Maquininhas (total)', adyenPos: 'Maquininha POS (pós meia-noite)',
+  ifood: 'Ifood', food99: '99Food', pix: 'Adyen', pixCnpj: 'Pix CNPJ', outros: 'Outros',
+  totalSaida: 'Total de saída', faturamento: 'Faturamento total', totalDeclarado: 'Total declarado',
+  quebra: 'Quebra de caixa', tc: 'TC', cancelados: 'Cancelados', entradaDinheiro: 'Entrada em dinheiro', deposito: 'Depósito',
+};
+const CAMPOS_SEM_MOEDA = ['tc', 'cancelados'];
+function fmtDataBRResumo(d) {
+  if (!d || !DATA_RE_SIMPLES.test(d)) return d || '—';
+  const [y, m, dd] = d.split('-');
+  return `${dd}/${m}/${y}`;
+}
+function fmtValorResumo(campo, valor) {
+  return CAMPOS_SEM_MOEDA.includes(campo) ? String(num(valor)) : fmtMoneyQuebra(num(valor));
+}
+
 
 function docId(unidade, data) {
   return `${unidade}__${data}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
@@ -332,6 +352,10 @@ async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, mudancasC
     mudancasCanais: {},
     mudancasFormas: {},
     mudancasKpis: {},
+    // resumo "de -> para" pronto pra leitura no ticket: o que tinha e o que
+    // passara a ter (ou o que sera adicionado/removido) - montado aqui,
+    // enquanto os valores atuais ainda estao na frente dos olhos
+    resumoMudancas: [],
     itemNovo: null,
     novaData: null,
     motivo: String(motivo).trim(),
@@ -360,10 +384,20 @@ async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, mudancasC
     const valor = num(itemNovo.valor);
     if (valor <= 0) throw new Error('Informe o valor do item.');
     pedido.itemNovo = { tipo: itemNovo.tipo, descricao: String(itemNovo.descricao || '').slice(0, 200), valor };
+    const rotuloItem = { maquininha: 'maquininha', maquininhaPos: 'maquininha POS', saida: 'saída de caixa' }[itemNovo.tipo];
+    const totalAlvo = itemNovo.tipo === 'saida' ? 'totalSaida' : (itemNovo.tipo === 'maquininhaPos' ? 'adyenPos' : 'adyen');
+    pedido.resumoMudancas = [
+      `Adicionar ${rotuloItem} "${pedido.itemNovo.descricao || '(sem descrição)'}": não tinha → ${fmtMoneyQuebra(valor)}`,
+      `${NOMES_CAMPOS_RESUMO[totalAlvo]}: ${fmtMoneyQuebra(num(atual[totalAlvo]))} → ${fmtMoneyQuebra(num(atual[totalAlvo]) + valor)}`,
+    ];
   } else if (pedido.tipoCorrecao === 'excluir') {
     // nada mais pra validar - so o motivo, ja exigido acima. A exclusao de
     // fato so acontece se o Master aprovar (ver decidirEdicao); ate la o
     // fechamento continua intacto e visivel normalmente
+    pedido.resumoMudancas = [
+      `EXCLUIR o lançamento inteiro de ${fmtDataBRResumo(atual.data)} (${atual.unidadeNome || atual.unidade})`,
+      `Será removido: Faturamento ${fmtMoneyQuebra(num(atual.faturamento))} · Declarado ${fmtMoneyQuebra(num(atual.totalDeclarado))} · Diferença ${fmtMoneyQuebra(num(atual.diferenca))}`,
+    ];
   } else if (pedido.tipoCorrecao === 'data') {
     // mudar a data efetivamente troca o ID do documento (ver docId), entao
     // precisa validar aqui que a data e valida, diferente da atual e que o
@@ -374,6 +408,9 @@ async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, mudancasC
     const colisao = await COLLECTION.doc(docId(atual.unidade, novaData)).get();
     if (colisao.exists) throw new Error('Já existe um fechamento lançado para essa unidade nessa data.');
     pedido.novaData = novaData;
+    pedido.resumoMudancas = [
+      `Data do lançamento: ${fmtDataBRResumo(atual.data)} → ${fmtDataBRResumo(novaData)}`,
+    ];
   } else {
     const camposValidos = {};
     Object.entries(mudancas || {}).forEach(([campo, valor]) => {
@@ -388,6 +425,33 @@ async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, mudancasC
       throw new Error('Nenhum campo válido para corrigir.');
     }
     pedido.mudancas = camposValidos;
+
+    // monta o "de -> para" de cada campo corrigido, com o valor atual do
+    // fechamento (o que tinha) e o proposto (o que passara a ter). Campos em
+    // branco aparecem como "não tinha" - mesmo efeito de 0, mas mais claro
+    // pra quem le o ticket
+    const grupo = await grupos.grupoDaUnidade(atual.unidade);
+    const labelExtra = (defs, campo) => ((defs || []).find((d) => d.campo === campo) || {}).label || campo;
+    const dePara = (anterior, novo, temAnterior) => `${temAnterior ? anterior : 'não tinha'} → ${novo}`;
+    const linhas = [];
+    Object.entries(camposValidos).forEach(([campo, valor]) => {
+      linhas.push(`${NOMES_CAMPOS_RESUMO[campo] || campo}: ${dePara(fmtValorResumo(campo, atual[campo]), fmtValorResumo(campo, valor), atual[campo] != null)}`);
+    });
+    Object.entries(pedido.mudancasCanais).forEach(([campo, valor]) => {
+      const anterior = (atual.canaisVendaExtras || {})[campo];
+      linhas.push(`${labelExtra(grupo?.canaisVendaExtras, campo)}: ${dePara(fmtMoneyQuebra(num(anterior)), fmtMoneyQuebra(num(valor)), anterior != null)}`);
+    });
+    Object.entries(pedido.mudancasFormas).forEach(([campo, valor]) => {
+      const anterior = (atual.formasPagamentoExtras || {})[campo];
+      linhas.push(`${labelExtra(grupo?.formasPagamentoExtras, campo)}: ${dePara(fmtMoneyQuebra(num(anterior)), fmtMoneyQuebra(num(valor)), anterior != null)}`);
+    });
+    Object.entries(pedido.mudancasKpis).forEach(([campo, valor]) => {
+      const anterior = (atual.kpisExtras || {})[campo];
+      const emMoeda = tiposKpi[campo] === 'moeda';
+      const fmt = (v) => (emMoeda ? fmtMoneyQuebra(num(v)) : String(v ?? ''));
+      linhas.push(`${labelExtra(grupo?.kpisExtras, campo)}: ${dePara(fmt(anterior), fmt(valor), anterior != null)}`);
+    });
+    pedido.resumoMudancas = linhas;
   }
 
   const ref = EDITS.doc();
