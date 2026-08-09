@@ -1460,11 +1460,42 @@ function renderOperadores(){
       ${IS_MASTER ? `<button type="button" class="btn-remover" title="remover operador" onclick="removerOperador('${o.id}','${escapeHtml(o.usuario)}')">🗑</button>` : ''}
     </div>`).join('') || '<div class="empty">Nenhum operador cadastrado.</div>';
 }
+// pedido de senha em modal proprio com campo MASCARADO (••••) - o prompt()
+// nativo mostrava a senha digitada na tela pra quem estivesse olhando.
+// Resolve com a string digitada ('' = OK em branco) ou null se cancelar.
+function pedirSenhaMascarada(mensagem, placeholder){
+  return new Promise((resolve)=>{
+    const overlay = document.createElement('div');
+    overlay.id = 'overlay-senha-mascarada';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:13000;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;width:100%;max-width:340px;display:flex;flex-direction:column;gap:10px;">
+        <div style="font-size:13px;white-space:pre-wrap;">${mensagem}</div>
+        <input type="password" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="${placeholder||'senha (4 números)'}"
+          style="width:100%;box-sizing:border-box;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:11px 10px;font-size:18px;letter-spacing:.35em;text-align:center;">
+        <div style="display:flex;gap:8px;">
+          <button type="button" data-acao="cancelar" style="flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:10px;font-size:13px;cursor:pointer;">Cancelar</button>
+          <button type="button" data-acao="ok" style="flex:1;background:var(--accent);border:none;color:#06202b;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;">OK</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('input');
+    const fechar = (valor)=>{ overlay.remove(); resolve(valor); };
+    overlay.querySelector('[data-acao=ok]').addEventListener('click', ()=>fechar(input.value));
+    overlay.querySelector('[data-acao=cancelar]').addEventListener('click', ()=>fechar(null));
+    overlay.addEventListener('click', (e)=>{ if(e.target===overlay) fechar(null); });
+    input.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter') fechar(input.value);
+      if(e.key==='Escape') fechar(null);
+    });
+    input.focus();
+  });
+}
 // troca de papel direto na lista, pra nao criar gargalo: o PROPRIO operador
 // autentica com a senha dele (mesma rota do balcao) - nao precisa do Master
 async function trocarPapelNaLista(usuario, novoPapel){
   const rotulo = novoPapel==='envio' ? '🚚 ENVIA (loja)' : '🛒 PEDE (carrinho)';
-  const senha = prompt(`Trocar @${usuario} pra ${rotulo}.\nDigite a SENHA do operador (4 números):`);
+  const senha = await pedirSenhaMascarada(`Trocar @${escapeHtml(usuario)} pra ${rotulo}.\nDigite a SENHA do operador (4 números):`);
   if(senha === null || senha === '') return;
   try{
     const resp = await fetch('/api/abastecimento-operadores/trocar-papel', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ usuario, senha, papel: novoPapel }) });
@@ -1526,7 +1557,7 @@ async function salvarOperador(id, patch){
 // desbloqueio do Master (o bloqueio gera um ticket avisando): a senha e
 // OPCIONAL - em branco mantem a mesma, preenchida (4 numeros) redefine
 async function desbloquearOperador(id){
-  const novaSenha = prompt('Desbloquear operador — nova senha (4 números), ou deixe VAZIO pra manter a mesma senha:');
+  const novaSenha = await pedirSenhaMascarada('Desbloquear operador — nova senha (4 números), ou deixe VAZIO pra manter a mesma senha:', 'nova senha (opcional)');
   if(novaSenha === null) return;
   try{
     const resp = await fetch(`/api/abastecimento-operadores/${id}/desbloquear`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ novaSenha }) });
