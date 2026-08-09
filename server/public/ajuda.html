@@ -219,6 +219,24 @@ initNavDrawerAccordion();
 // pelo menos uma dessas secoes liberadas; 'master' = so Master (e Admin, que
 // enxerga tudo que e pertinente ao Master aqui na Ajuda)
 const TOPICOS = [
+  { id:'primeiros-passos', icone:'🚀', secoes:null, titulo:'Primeiros passos (comece por aqui)', corpo:`
+    <p>O Zenith Ops é o sistema único da operação: fechamentos de caixa, entregas, estoque, monitor de pagamentos, solicitações/tickets, chamados de TI e manutenção, abastecimento do carrinho e o Saltiverso (parque, festas, mensalistas). Cada pessoa só enxerga as telas que o Master liberou pro acesso dela — se uma tela citada aqui não aparece pra você, é permissão, não defeito.</p>
+    <h3>O caminho básico de qualquer tarefa</h3>
+    <ol>
+      <li><b>Entre</b> com seu usuário (ou e-mail) e senha.</li>
+      <li>Você cai no <b>🏠 Painel</b>, o resumo geral. Toque no <b>☰</b> (canto superior esquerdo) pra abrir o menu com todas as suas telas, agrupadas: Operação diária, Monitoramento, Saltiverso, Solicitações e Administração.</li>
+      <li>Abra a tela da tarefa e siga o passo a passo do tópico dela aqui na Ajuda (use a <b>busca</b> lá em cima pra achar rápido: "estorno", "check-in", "correção"...).</li>
+    </ol>
+    <h3>Regras que valem pra TUDO no sistema</h3>
+    <ul>
+      <li><b>Nada se edita ou apaga direto depois de enviado.</b> Lançou errado (fechamento, entrega, check-in do parque, abastecimento...)? Use o <b>🛠 Pedir correção</b> daquela tela: você propõe a mudança com justificativa, e ela só acontece depois que alguém com poder de decisão aprovar. Tudo fica registrado.</li>
+      <li><b>Todo pedido vira um Ticket numerado</b> (#10000, #10001...) que pode ser acompanhado em Central → Histórico — o número é o mesmo em toda parte (card, detalhe, notificação).</li>
+      <li><b>Quem decide o quê:</b> o <span class="tagpill master">Master</span> pode tudo; quem tem a <span class="tagpill admin">⭐ tag Admin</span> aprova solicitações e gerencia; o <b>Gerente de unidade</b> decide o que é da unidade dele (ex: check-out e correções do parque); os demais operam as telas liberadas.</li>
+      <li><b>Exportação:</b> quase toda lista tem botões <b>⬇️ CSV</b> e <b>⬇️ PDF</b> no topo, respeitando os filtros aplicados.</li>
+      <li><b>Notificações:</b> ative o sino 🔔 no Painel pra receber avisos no celular (ver o tópico Notificações).</li>
+    </ul>
+    <div class="dica"><b>Travou em qualquer ponto?</b> O balãozinho 💬 no canto inferior de toda tela fala direto com o Suporte — funciona até sem login.</div>
+  `},
   { id:'login', icone:'🔑', secoes:null, titulo:'Como entrar no sistema', corpo:`
     <h3>Passo a passo</h3>
     <ol>
@@ -227,7 +245,8 @@ const TOPICOS = [
       <li>Clique em <b>Entrar</b>.</li>
     </ol>
     <div class="dica"><b>Esqueceu a senha?</b> Peça pro Master usar "Nova senha" na página Usuários - ele te passa uma senha temporária por fora do sistema (telefone/WhatsApp).</div>
-    <div class="dica"><b>Conta bloqueada?</b> Depois de 3 senhas erradas o acesso trava sozinho. O Master destrava trocando a senha.</div>
+    <div class="dica"><b>Conta bloqueada?</b> Depois de 3 senhas erradas o acesso trava sozinho — e um ticket "Login bloqueado" é aberto automaticamente na Central pro Master/Admin desbloquearem. O Master também destrava trocando a senha.</div>
+    <div class="dica"><b>Comportamento da sessão:</b> o login vale por 8 horas — depois disso o sistema pede pra entrar de novo. Se o seu acesso tem <b>horário permitido</b> configurado, fora dessa janela o sistema não deixa entrar.</div>
     <h3>Troca de senha obrigatória no primeiro acesso</h3>
     <p>Toda vez que o Master/Admin cria um acesso novo ou reseta sua senha, no login seguinte o sistema pede pra você definir uma senha nova antes de liberar o resto do app - a senha temporária só serve pra esse primeiro login.</p>
     <h3>🔑 Reset Senha (Master/Admin)</h3>
@@ -243,11 +262,15 @@ const TOPICOS = [
     <div class="dica"><b>Não consegue nem entrar?</b> É exatamente pra isso que o chat funciona sem login - use o balãozinho na tela de entrada.</div>
   `},
   { id:'painel', icone:'🏠', secoes:null, titulo:'Painel (visão geral)', corpo:`
-    <p>É a primeira tela depois do login: mostra um resumo rápido de cada área que você tem acesso (Monitor do dia, Fechamentos de ontem, Entregas de ontem, Central de Solicitações pendentes, Chamados de TI, iFood).</p>
+    <p>É a primeira tela depois do login: um cartão-resumo pra cada área que você tem acesso. Ninguém precisa "caçar" número — o Painel mostra o essencial e leva pra tela completa em um clique.</p>
+    <h3>Como usar</h3>
     <ol>
-      <li>Cada cartão mostra os números principais daquela área.</li>
-      <li>Clique em <b>Abrir →</b> no canto do cartão pra ir direto pra tela completa.</li>
+      <li>Leia os cartões: Monitor (vendas do dia, taxa de aprovação), Fechamentos e Entregas de ontem, Central (pendências), Chamados de TI, iFood, Saltiverso (entradas de hoje, festas, mensalistas ativos) e os indicadores do Abastecimento (só Master/Admin).</li>
+      <li>Clique em <b>Abrir →</b> no canto do cartão pra ir direto pra área.</li>
+      <li>Toque no <b>sino 🔔</b> no topo pra ativar as notificações no celular (ver o tópico Notificações).</li>
+      <li>O <b>☰</b> abre o menu completo — presente em todas as telas, sempre no mesmo lugar.</li>
     </ol>
+    <p><b>Comportamento:</b> os números atualizam ao abrir a tela; cartões de áreas sem permissão nem aparecem pra você.</p>
   `},
   { id:'notificacoes-push', icone:'🔔', secoes:null, titulo:'Notificações no celular', corpo:`
     <p>Além do aviso na tela quando o app está aberto, dá pra receber notificação de verdade no celular - com vibração e som, mesmo com a tela bloqueada ou o app fechado.</p>
@@ -262,18 +285,31 @@ const TOPICOS = [
     <ul>
       <li>Alertas de fraude suspeita, estorno e chargeback no Monitor.</li>
       <li>Solicitações novas na Central (estorno, ajuste de fechamento, compra, manutenção, suporte de TI, pagamento, nota) - só pra Master e <span class="tagpill admin">⭐ Admin</span>.</li>
+      <li>Pedidos e envios do <b>Abastecimento do Carrinho</b> - só pra quem opera a ponta (Master/Admin não recebem esses de propósito, o alarme é assunto do balcão).</li>
     </ul>
+    <div class="dica"><b>Tocar na notificação abre a tela certa:</b> ticket → Histórico da Central, abastecimento → tela do carrinho, chat de suporte → atendimento, alerta do Monitor → Monitor. Se o app já estiver aberto em alguma aba, ela é focada em vez de abrir outra.</div>
     <p>Se o sino avisar que "ainda não foi configurado", é porque o Master precisa configurar as chaves do servidor - fale com ele.</p>
   `},
   { id:'monitor', icone:'📈', secoes:['monitor'], titulo:'Monitor (transações Adyen)', corpo:`
-    <p>Mostra em tempo real as transações processadas pela Adyen: aprovadas, recusadas, chargebacks e alertas de possível fraude.</p>
-    <h3>O que dá pra fazer</h3>
-    <ul>
-      <li>Filtrar por loja, período e status.</li>
-      <li>Abrir o histórico de um cliente clicando no pedido.</li>
-      <li>Solicitar um estorno direto de um pedido (vai pra fila de aprovação da Central).</li>
-      <li>Exportar qualquer tabela em CSV ou PDF pelos botões no topo de cada uma.</li>
-    </ul>
+    <p>Mostra em tempo real as transações do cartão processadas pela Adyen: aprovadas, recusadas, estornos, chargebacks e alertas de possível fraude. A tela atualiza sozinha quando chega evento novo — não precisa recarregar.</p>
+    <h3>Filtrar e ler a tela</h3>
+    <ol>
+      <li>Use os filtros de loja, período e status no topo — valem pros KPIs e pras tabelas.</li>
+      <li>Os KPIs mostram volume aprovado, taxa de aprovação, chargebacks e suspeitas de fraude do período.</li>
+      <li>Recusas em sequência e pedidos repetidos aparecem agrupados em "threads", pra ler o padrão de uma vez em vez de linha por linha.</li>
+    </ol>
+    <h3>Ver o histórico de um cliente</h3>
+    <ol>
+      <li>Clique no pedido → abre o histórico completo daquele cliente/cartão (tentativas, aprovações, estornos, marcações).</li>
+    </ol>
+    <h3>Solicitar um estorno</h3>
+    <ol>
+      <li>Abra o pedido, clique em <b>Solicitar estorno</b> e informe o motivo.</li>
+      <li><b>Comportamento:</b> o estorno NÃO acontece na hora — vira um Ticket na fila da Central, e só depois que Master/Admin aprovarem ele é executado na Adyen. Acompanhe pelo Histórico (o card mostra aprovado/rejeitado e o comprovante).</li>
+    </ol>
+    <h3>Alertas de fraude</h3>
+    <p><b>Comportamento automático:</b> o sistema marca sozinho padrões suspeitos (várias tentativas seguidas, mesmo cartão/nome em pedidos diferentes, ataque em massa) e manda notificação. Pedido marcado como fraude sai dos KPIs de venda pra não inflar os números.</p>
+    <p>Qualquer tabela exporta em ⬇️ CSV/PDF pelos botões no topo dela.</p>
   `},
   { id:'fechamento', icone:'🧾', secoes:['lancamento'], titulo:'Lançar Fechamento do dia', corpo:`
     <h3>Passo a passo</h3>
@@ -288,26 +324,30 @@ const TOPICOS = [
     <div class="dica">Errou algo depois de já ter lançado? Não dá pra editar direto - abra <b>Central</b> → <b>Histórico</b> → <b>Pedir correção</b>. Dá pra corrigir um valor, corrigir a data do lançamento ou até pedir pra excluir o lançamento inteiro (se foi lançado errado do zero). Qualquer uma dessas opções entra na fila de aprovação do Master/Admin - nada muda antes de decidir.</div>
   `},
   { id:'fechamentos-painel', icone:'💰', secoes:['fechamentos'], titulo:'Acompanhar Fechamentos', corpo:`
-    <p>Painel de conferência com o histórico de todos os fechamentos lançados, comparativo por unidade e gráfico dos últimos 30 dias.</p>
+    <p>Painel de conferência dos fechamentos lançados: histórico completo, comparativo por unidade e gráficos.</p>
+    <h3>Como conferir o dia</h3>
     <ol>
-      <li>Use os filtros de período (com o atalho "Ontem") e de loja/grupo.</li>
-      <li>Veja o comparativo por unidade na tabela abaixo do gráfico.</li>
-      <li>Exporte em CSV ou PDF pelos botões da tabela.</li>
+      <li>Use o filtro de período — o atalho <b>Ontem</b> traz o D-1, que é a conferência mais comum — e escolha grupo/loja se quiser.</li>
+      <li>O gráfico mostra a evolução dos últimos 30 dias, e o comparativo período-a-período (semana/mês/trimestre) mostra a variação.</li>
+      <li>A tabela por unidade traz faturamento, formas de pagamento e os campos extras do grupo (KPIs, canais e formas próprios) — <b>as colunas mudam</b> conforme o grupo filtrado, porque cada franquia configura os seus.</li>
+      <li>Clique num lançamento pra abrir o detalhe completo (inclusive anexos de KPI).</li>
     </ol>
+    <p><b>Comportamento:</b> lançamento enviado não se edita por aqui — correções entram pelo <b>Pedir correção</b> (Central → Histórico) e só mudam os números depois de aprovadas pelo Master/Admin. Exportação em ⬇️ CSV/PDF nos botões da tabela.</p>
   `},
   { id:'entregas', icone:'🛵', secoes:['entregas','entregas-lancamento'], titulo:'Entregas', corpo:`
     <h3>Lançar uma entrega</h3>
     <ol>
-      <li>Abra <b>Lançar entrega</b>, escolha a loja e a data.</li>
-      <li>Preencha quantidade de corridas, valor e entregador.</li>
-      <li>Envie o lançamento.</li>
+      <li>Abra <b>Lançar entrega</b> no menu, escolha a loja e a data.</li>
+      <li>Preencha as corridas do dia: quantidade, valor e entregador.</li>
+      <li>Envie. <b>Comportamento:</b> o lançamento aparece na hora na página Entregas e a loja passa a contar como "já lançou" no painel do D-1.</li>
     </ol>
     <h3>Acompanhar (página Entregas)</h3>
     <ul>
       <li>Painel "Lançamento de ontem (D-1)" mostra quais lojas já lançaram e quais faltam.</li>
-      <li>Ticket Médio (TM) e tabela completa por unidade, com filtro de data no mesmo padrão de Fechamentos.</li>
-      <li>Exportação em CSV/PDF nas tabelas "Por entregador" e "Por unidade".</li>
+      <li>Ticket Médio (TM), Retorno e Fora de área, e a tabela completa por unidade e por entregador, com filtro de data no mesmo padrão de Fechamentos.</li>
+      <li>Exportação em ⬇️ CSV/PDF nas tabelas "Por entregador" e "Por unidade".</li>
     </ul>
+    <div class="dica"><b>Lançou errado?</b> Mesmo padrão do resto do sistema: não se edita direto — use o pedido de correção, que passa pela aprovação do Master/Admin antes de mudar qualquer número.</div>
   `},
   { id:'central', icone:'📋', secoes:['solicitacoes'], titulo:'Central de Solicitações', corpo:`
     <p>É onde qualquer loja pede Estorno, Ajuste de Fechamento, Compra, Manutenção, Suporte de TI, Pagamento (despesa) ou Solicitação de Nota - e onde Master/Admin aprovam ou rejeitam esses pedidos.</p>
@@ -358,11 +398,12 @@ const TOPICOS = [
   `},
   { id:'cofre', icone:'🔐', secoes:['cofre'], titulo:'Cofre de senhas', corpo:`
     <p>Guarda de forma organizada as senhas de sistemas usados pela operação, divididas por Grupo → Subgrupo.</p>
+    <h3>Consultar uma senha</h3>
     <ol>
       <li>Abra <b>Cofre</b> e navegue pelos grupos/subgrupos até achar o sistema.</li>
-      <li>Clique no ícone de olho pra revelar a senha, ou no de copiar pra copiar direto.</li>
+      <li>Clique no ícone de <b>olho 👁</b> pra revelar a senha na tela, ou no de <b>copiar</b> pra levar direto pra área de transferência.</li>
     </ol>
-    <div class="dica">Você só vê os subgrupos liberados pelo Master pro seu acesso.</div>
+    <p><b>Comportamento:</b> você só enxerga os subgrupos que o Master liberou pro seu acesso — se um sistema não aparece, é permissão. Criar/editar/excluir senhas e exportar o cofre inteiro (CSV/PDF) é só do Master.</p>
   `},
   { id:'estoque', icone:'📦', secoes:['inventario'], titulo:'Estoque (Inventário/CMV)', corpo:`
     <p>Controle de estoque físico da loja (insumos, bebidas, embalagens) por setor, com contagem diária, recebimento de mercadoria e cálculo de diferenças (CMV).</p>
@@ -433,18 +474,21 @@ const TOPICOS = [
     <div class="dica"><b>Master tem autonomia total:</b> pode editar título, descrição, <b>status</b>, data de execução e responsáveis, ou excluir o chamado inteiro, em qualquer momento do fluxo (botões <b>✎ Editar chamado</b> / <b>🗑 Excluir chamado</b> dentro do chamado).</div>
   `},
   { id:'relatorios', icone:'📊', secoes:['disputas'], titulo:'Relatórios de disputa', corpo:`
-    <p>Acompanhamento das disputas/chargebacks abertos pela operadora, com prazo de resposta e status.</p>
+    <p>Acompanhamento das disputas/chargebacks abertos pela operadora, com prazo de resposta e status de cada caso.</p>
     <ol>
       <li>Filtre por loja e período.</li>
-      <li>Exporte a lista em CSV ou PDF pelos botões no topo da tabela.</li>
+      <li>Confira o <b>prazo de resposta</b> de cada disputa — é ele que define a urgência de montar a defesa.</li>
+      <li>Exporte a lista em ⬇️ CSV/PDF pelos botões no topo da tabela.</li>
     </ol>
+    <p><b>Comportamento:</b> as disputas chegam sozinhas pela integração com a operadora — a tela é de acompanhamento, a defesa em si é feita no portal da operadora.</p>
   `},
   { id:'ifood', icone:'🍔', secoes:['ifood'], titulo:'iFood', corpo:`
-    <p>Painel de vendas feitas pelo iFood, separado do Monitor porque usa uma integração e regras diferentes da Adyen.</p>
-    <ul>
+    <p>Painel de vendas feitas pelo iFood, separado do Monitor porque usa uma integração e regras próprias.</p>
+    <ol>
       <li>Veja o resumo de vendas do dia e o histórico por período.</li>
-      <li>Exporte as tabelas em CSV/PDF pelos botões no topo.</li>
-    </ul>
+      <li>Exporte as tabelas em ⬇️ CSV/PDF pelos botões no topo.</li>
+    </ol>
+    <p><b>Comportamento:</b> os números vêm do relatório financeiro do iFood, que só consolida de vez em D+1/D+2 — o dia de hoje pode mudar até fechar. A sincronização é automática, não precisa apertar nada.</p>
   `},
   { id:'abastecimento', icone:'🛒', secoes:['abastecimento-carrinho'], titulo:'Abastecimento do Carrinho (Dom Aeroporto)', corpo:`
     <p>Controle do abastecimento entre a <b>loja</b> da Dominos Aeroporto e o <b>carrinho</b>: o carrinho pede, a loja envia — tudo registrado com hora e quem fez (substitui a planilha/AppSheet antigos, sem precisar de usuário e senha à parte: seu login do Zenith já identifica você).</p>
@@ -497,38 +541,78 @@ const TOPICOS = [
     <div class="dica"><b>⚠️ antiga:</b> quando a última vistoria de uma loja tem mais de 90 dias, o card mostra o aviso — hora de revisitar. As dúvidas do levantamento aparecem com ⚠️ na frente do item (ex: quantidade de câmeras a confirmar).</div>
   `},
   { id:'parque-checkin', icone:'🤸', secoes:['parque-checkin'], titulo:'Check-in do Parque (Saltiverso)', corpo:`
-    <h3>Passo a passo</h3>
+    <p>Tela de balcão do Saltiverso: registra a entrada (responsável + crianças), imprime o termo, controla o relógio do tempo contratado e o pagamento. O ciclo completo é: <b>registrar → termo assinado → relógio inicia (sozinho no horário, ou antes pelo botão) → (se precisar) check-out → correções sempre por aprovação</b>.</p>
+    <h3>1) Registrar uma entrada</h3>
     <ol>
-      <li>Preencha o nome, contato e endereço do responsável.</li>
-      <li>Escolha a data, o tempo contratado (30 a 240 min) e o <b>horário previsto de entrada</b>.</li>
-      <li>Marque <b>Adulto Cortesia (A.C.)</b> quando um adulto tem direito a acompanhar (ex: acompanhante de criança autista, ou outro motivo justificado) e informe a quantidade.</li>
-      <li>Adicione cada criança que vai brincar (nome + data de nascimento) - o número de pulseiras é calculado pela quantidade de crianças.</li>
-      <li>Escolha a <b>forma de pagamento</b> (Dinheiro, Pix, Débito, Crédito ou Cortesia) - o <b>valor é calculado sozinho</b>: 30min = R$40 e 60min = R$50 por pulseira, e os demais tempos combinam esses blocos (90min = R$90, 120min = R$100, 150min = R$140...), multiplicado pela quantidade de crianças. Cortesia registra a entrada com valor zero.</li>
-      <li>Clique em <b>Registrar check-in</b>.</li>
+      <li>Preencha nome, CPF e contato do responsável. <b>Comportamento:</b> ao sair do campo CPF, se a pessoa já veio antes, os dados preenchem sozinhos — e se aquele CPF tem <b>crédito de tempo</b> de uma visita anterior, o sistema oferece usar (soma por cima do tempo escolhido, sem cobrar de novo). O CEP preenche o endereço automaticamente.</li>
+      <li>Escolha a data, o <b>tempo contratado</b> (os botões já mostram o preço: 30min R$40 · 60min R$50 · 90min R$90 · 120min R$100 · 150min R$140 · 180min R$150 · 210min R$190 · 240min R$200) e o <b>horário previsto de entrada</b>.</li>
+      <li>Marque <b>Adulto Cortesia (A.C.)</b> quando um adulto acompanha sem pular (ex: acompanhante de criança autista) e informe quantos — A.C. não paga e não conta pulseira.</li>
+      <li>Adicione cada criança (nome + nascimento). <b>Comportamento:</b> pulseiras = quantidade de crianças, calculado sozinho.</li>
+      <li>Escolha a <b>forma de pagamento</b>: Dinheiro, Pix, Débito, Crédito ou Cortesia. O resumo mostra o valor total ao vivo (tabela do tempo × crianças; Cortesia zera).</li>
+      <li>Clique em <b>Registrar check-in</b>. O cadastro entra na lista como "aguardando assinatura" — o relógio ainda NÃO começou.</li>
     </ol>
-    <div class="dica"><b>Termo de responsabilidade obrigatório:</b> depois de registrar, clique em <b>Imprimir termo de responsabilidade</b> e peça a assinatura do responsável. A entrada no parque só deve ser liberada depois de marcar <b>Confirmar termo assinado</b> - até lá o check-in aparece como "aguardando assinatura".</div>
-    <div class="dica"><b>Check-in automático é o fluxo normal:</b> por padrão, o relógio começa sozinho no <b>horário previsto</b> - ninguém precisa apertar nada, e não sai nenhum alerta/notificação por isso (o card só ganha a marca <b>🤖 automático</b> pra registro). O botão <b>▶ Fazer check-in</b> serve pra <b>entrada antecipada</b>: se o grupo chegar antes do horário, o check-in manual inicia o relógio na hora - entra antes e sai antes do horário inicialmente acordado.</div>
-    <div class="dica"><b>Check-out antecipado (emergência):</b> se a família precisar sair antes do tempo contratado acabar, use o botão <b>🚪 Check-out</b> no card do check-in - o relógio para na hora. Mas o tempo que sobrar só vira crédito de verdade pro CPF quando um <b>Gerente da unidade</b> (ou Master/Admin) confirmar com <b>✓ Aprovar check-out</b>. Se a criança voltar a brincar antes disso, é só clicar em <b>↩ Voltar (criança retornou)</b> - o check-in é retomado com exatamente o tempo que sobrava, sem gerar nenhum crédito.</div>
-    <div class="dica"><b>Corrigir ou excluir não é direto:</b> depois de enviado, um cadastro só muda mediante <b>pedido de correção</b> (botão <b>🛠 Pedir correção</b>) - o formulário abre já preenchido com os dados atuais: mude o que precisar (nome, contato, data, tempo, horário previsto, A.C., observação e as crianças - dá pra alterar, adicionar e remover), ou use a aba <b>🗑️ Remover</b> pra pedir a exclusão do registro inteiro. Sempre com justificativa. Quem aprova é o <b>Gerente da unidade</b> ou o Master/Admin (em Parque - painel), e todo pedido também abre um <b>Ticket</b> na Central: mesmo quando o Gerente aprova pra agilizar, ele presta contas e o Master dá a palavra final concluindo o ticket.</div>
+    <h3>2) Termo de responsabilidade (obrigatório)</h3>
+    <ol>
+      <li>Clique em <b>🖨️ Imprimir termo de responsabilidade</b> e colha a assinatura do responsável.</li>
+      <li>Marque <b>Confirmar termo assinado</b>. <b>Comportamento:</b> só depois disso a entrada deve ser liberada; até lá o card fica "aguardando assinatura".</li>
+    </ol>
+    <h3>3) Início do tempo (o relógio)</h3>
+    <ul>
+      <li><b>Fluxo normal — automático:</b> ninguém precisa apertar nada. No <b>horário previsto</b>, o relógio começa sozinho e o card só ganha a marca <b>🤖 automático</b> pra registro (sem alerta ou notificação nenhuma).</li>
+      <li><b>Chegou antes?</b> Aperte <b>▶ Fazer check-in</b>: o relógio começa naquele momento — entra antes e <b>sai antes</b> do horário inicialmente acordado.</li>
+    </ul>
+    <h3>4) Check-out antecipado (emergência)</h3>
+    <ol>
+      <li>A família precisa sair antes do tempo acabar? Clique em <b>🚪 Check-out</b> — o relógio para na hora e a criança sai do "quem está no parque agora".</li>
+      <li><b>Comportamento:</b> o tempo que sobrou só vira <b>crédito pro CPF</b> quando um Gerente da unidade (ou Master/Admin) confirmar em <b>✓ Aprovar check-out</b>. Se a criança voltar a brincar antes da aprovação, <b>↩ Voltar (criança retornou)</b> retoma o relógio exatamente de onde parou, sem gerar crédito.</li>
+      <li>O crédito aprovado aparece sozinho na <b>próxima visita do mesmo CPF</b>, como minutos extras gratuitos.</li>
+    </ol>
+    <h3>5) Corrigir ou excluir um registro</h3>
+    <ol>
+      <li>No card, clique em <b>🛠 Pedir correção</b> — o formulário abre <b>já preenchido</b> com os dados atuais.</li>
+      <li>Aba <b>✏️ Alterar dados</b>: mude só o que precisar (nome, contato, data, tempo, horário previsto, forma de pagamento, A.C., observação e as crianças — dá pra alterar, ➕ adicionar e 🗑 remover). Aba <b>🗑️ Remover (excluir)</b>: pede a exclusão do registro inteiro.</li>
+      <li>Escreva a <b>justificativa</b> (obrigatória) e envie.</li>
+      <li><b>Comportamento:</b> NADA muda na hora. O pedido vai pro painel "Pedidos de correção" (Parque - painel) e abre um <b>Ticket</b> na Central. O <b>Gerente da unidade</b> ou o Master/Admin aprova (a mudança aplica na hora, com o valor recalculado pela tabela) ou rejeita — e o Master dá a palavra final concluindo o ticket (prestação de contas). Só 1 correção pendente por registro.</li>
+    </ol>
   `},
   { id:'parque', icone:'🤸', secoes:['parque'], titulo:'Parque - painel (Saltiverso)', corpo:`
-    <p>Lista todos os check-ins do parque, com filtro por unidade e período, exportação em CSV/PDF e o painel <b>"Quem está no parque agora"</b> (atualiza sozinho a cada 30s, e já não conta quem fez check-out antecipado).</p>
+    <p>Painel de gestão do Saltiverso: todos os check-ins, quem está no parque agora, pedidos de correção pra decidir, financeiro e exportações.</p>
+    <h3>Ler a tela</h3>
+    <ol>
+      <li><b>Filtros</b> de unidade e período no topo — valem pros KPIs, pra lista e pros relatórios exportados.</li>
+      <li><b>KPIs:</b> check-ins do período, crianças, adultos cortesia, aguardando check-in e aguardando termo.</li>
+      <li><b>Quem está no parque agora:</b> lista ao vivo (atualiza a cada 30s) com os minutos restantes de cada grupo — quem fez check-out antecipado já sai da lista.</li>
+      <li>Status de cada card, na ordem do ciclo: <b>aguardando check-in</b> → <b>aguardando assinatura</b> → <b>liberado</b> → (se houver) <b>check-out pendente</b> → <b>check-out aprovado</b>.</li>
+    </ol>
+    <h3>💰 Financeiro (Gerente da unidade e Master/Admin)</h3>
+    <ol>
+      <li>O painel <b>Financeiro</b> mostra o faturamento do período filtrado, quebrado por forma de pagamento (Dinheiro, Pix, Débito, Crédito, Cortesia).</li>
+      <li>Cada card mostra o valor da entrada e o método. <b>Comportamento:</b> entradas antigas (de antes do financeiro existir) aparecem "sem método", com o valor recalculado pela tabela (30min R$40 · 60min R$50 · combinações).</li>
+      <li><b>⬇️ CSV/PDF financeiro:</b> relatório com data, responsável, tempo, pulseiras, valor por pulseira, valor total e método — o PDF traz o total geral e o resumo por método no cabeçalho.</li>
+    </ol>
+    <h3>✔ Decidir pedidos de correção</h3>
+    <ol>
+      <li>O painel <b>Pedidos de correção</b> lista o que está pendente: quem pediu, o que muda (proposta resumida) ou se é exclusão, a justificativa e o nº do Ticket.</li>
+      <li><b>Gerente da unidade</b> ou Master/Admin clica <b>✓ Aprovar</b> (a mudança aplica na hora / o registro é excluído) ou <b>✕ Rejeitar</b> (nada muda; dá pra registrar o motivo).</li>
+      <li><b>Comportamento:</b> a decisão fica registrada no Ticket da Central; quando quem aprovou foi o Gerente, o <b>Master dá a palavra final</b> concluindo o ticket (prestação de contas). Quem não decide vê o pedido como "aguardando o Gerente da unidade ou o Master decidir".</li>
+    </ol>
+    <h3>Outras ações no card</h3>
     <ul>
-      <li>Cada check-in mostra o status: <b>aguardando assinatura</b> (termo ainda não confirmado), <b>liberado</b>, <b>check-out pendente de aprovação</b> ou <b>check-out aprovado</b>.</li>
-      <li>Clique em <b>🖨️ Termo</b> pra reimprimir o termo de responsabilidade de qualquer check-in.</li>
-      <li><b>Financeiro:</b> Gerente da unidade e Master/Admin veem o painel <b>Financeiro</b> com o faturamento do período filtrado quebrado por forma de pagamento (Dinheiro, Pix, Débito, Crédito, Cortesia) e exportam o relatório financeiro em CSV/PDF (data, responsável, tempo, pulseiras, valor por pulseira, valor total, método). Entradas antigas, de antes do financeiro existir, aparecem como "sem método" com o valor recalculado pela tabela.</li>
-      <li><b>🚪 Check-out</b>: para o relógio na hora (emergência), mas fica pendente até um Gerente da unidade (ou Master/Admin) aprovar em <b>✓ Aprovar check-out</b> - só aí o tempo que sobrou vira crédito pro CPF. Enquanto pendente, qualquer um pode desfazer em <b>↩ Voltar</b> se a criança voltar a brincar.</li>
-      <li><b>🛠 Pedir correção</b>: qualquer pessoa com acesso pode pedir pra <b>alterar</b> um check-in (o formulário abre preenchido - mude dados, adicione/remova crianças) ou pra <b>excluir</b> o registro, sempre com justificativa. O pedido aparece no painel <b>Pedidos de correção</b> e quem decide é o <b>Gerente da unidade</b> ou o Master/Admin - aprovar aplica a mudança na hora. Todo pedido também vira um <b>Ticket</b> na Central: quando o Gerente aprova pra agilizar, a decisão fica registrada no ticket e o <b>Master dá a palavra final</b> concluindo ele (prestação de contas).</li>
+      <li><b>🖨️ Termo</b> reimprime o termo de responsabilidade; <b>✔ Marcar assinado</b> confirma a assinatura.</li>
+      <li><b>▶ Fazer check-in</b> (entrada antecipada), <b>🚪 Check-out</b>, <b>↩ Voltar</b> e <b>✓ Aprovar check-out</b> — mesmo fluxo detalhado no tópico "Check-in do Parque".</li>
+      <li><b>✎ Editar</b> (só Master): altera direto, sem passar por pedido de correção.</li>
+      <li><b>📥 Importar da planilha</b> (só Master): traz os dados históricos do app antigo — pode rodar mais de uma vez sem duplicar.</li>
     </ul>
   `},
   { id:'mensalistas', icone:'📅', secoes:['parque'], titulo:'Mensalistas (Saltiverso)', corpo:`
-    <p>Página própria (menu <b>Saltiverso → Mensalistas</b>) pra cadastrar e listar passaportes mensais.</p>
-    <ul>
-      <li>Cadastre um mensalista com nome, CPF, contato e data de início - a validade de 30 dias é calculada automaticamente.</li>
-      <li>Adicione até 4 crianças que vão usar o plano.</li>
-      <li>O painel principal do Zenith Ops mostra a quantidade de mensalistas ativos no card do Saltiverso.</li>
-      <li>O Master pode excluir um mensalista.</li>
-    </ul>
+    <p>Passaporte mensal do Saltiverso, em página própria (menu <b>Saltiverso → Mensalistas</b>).</p>
+    <h3>Cadastrar um mensalista</h3>
+    <ol>
+      <li>Preencha nome, CPF, contato e a <b>data de início</b> do plano.</li>
+      <li>Adicione até 4 crianças que vão usar o passaporte.</li>
+      <li>Salve. <b>Comportamento:</b> a validade de 30 dias é calculada sozinha e a lista mostra se cada plano está ativo ou vencido; o Painel principal conta os mensalistas ativos no card do Saltiverso.</li>
+    </ol>
+    <p>Excluir um mensalista é só do Master.</p>
   `},
   { id:'festas', icone:'🎉', secoes:['festas'], titulo:'Festas (Saltiverso)', corpo:`
     <h3>Registrar uma reserva</h3>
@@ -537,9 +621,14 @@ const TOPICOS = [
       <li>Escolha o <b>pacote da tabela oficial</b>: Missão (🌙 Lunar · seg a qui 13h-16h / 🪐 Órbita · seg a qui 18h-21h e sex 13h-21h / ✨ Nebulosa · sáb, dom e feriados), horas (1H a 3H) e saltonautas (10/20/30/40) - o <b>valor total sai da tabela sozinho</b>. Sem pacote (venda antiga/avulsa), digite o valor manualmente.</li>
       <li>Se houver, informe o sinal e o restante (valor/forma/data de cada um).</li>
       <li>Se a reserva for um acréscimo de pulantes de uma festa anterior, informe o código da venda original.</li>
-      <li>Clique em <b>Registrar reserva</b> - um código único é gerado automaticamente.</li>
+      <li>Clique em <b>Registrar reserva</b>. <b>Comportamento:</b> um código único é gerado (ex: CA6063F) — é ele que identifica a festa por telefone e nos acréscimos futuros.</li>
     </ol>
-    <p>Na lista, clique em <b>✎ Editar status</b> pra marcar a reserva como paga, cancelada ou já utilizada.</p>
+    <h3>Depois de registrada</h3>
+    <ul>
+      <li>O card mostra código, pacote (Missão · horas · saltonautas), total, sinal e restante, agrupados pela data do evento.</li>
+      <li><b>✎ Editar status:</b> marque a reserva como <b>paga</b>, <b>cancelada</b> ou <b>já utilizada</b>. Trocar o pacote na edição recalcula o valor pela tabela.</li>
+      <li>Excluir uma reserva é só do Master. A lista exporta em ⬇️ CSV/PDF.</li>
+    </ul>
   `},
 ];
 
