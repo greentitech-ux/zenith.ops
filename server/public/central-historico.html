@@ -282,7 +282,12 @@
      acompanhar/corrigir o que ja foi lançado e papel do Histórico -->
 <div class="panel hidden" id="painel-meus-lancamentos">
   <h2>🧾 Fechamentos lançados</h2>
-  <div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:8px;">Todos os fechamentos de caixa num lugar só — acompanhe o que foi lançado e use <b>Pedir correção</b> pra consertar o que foi digitado errado ou ficou faltando.</div>
+  <div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:8px;">Fechamentos do dia, da <b>maior diferença negativa pra maior positiva</b> (o que precisa de atenção aparece primeiro). Use <b>Pedir correção</b> pra consertar o que foi digitado errado ou ficou faltando.</div>
+  <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:8px;">
+    <div><label>Dia</label><input type="date" id="fech-data" onchange="renderListaFechamentos()"></div>
+    <button type="button" class="export-btn" style="height:34px;" onclick="voltarHojeFechamentos()">Hoje</button>
+    <span class="sub" id="fech-dia-count" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);"></span>
+  </div>
   <div id="lista-lancamentos"><div class="empty">carregando...</div></div>
 </div>
 
@@ -1683,13 +1688,16 @@ async function carregarFechamentos(){
     fetch('/api/fechamentos/edicoes').then(r=>r.json()),
     fetch('/api/grupos').then(r=>r.json()).catch(()=>[]),
   ]);
-  MEUS_FECHAMENTOS = meus.sort((a,b)=>(b.data||'').localeCompare(a.data||'')).slice(0,20);
+  MEUS_FECHAMENTOS = meus;
   EDICOES_FECHAMENTO = edicoes;
   GRUPOS_KPI_FECHAMENTO = grupos;
   // contador na aba: pedidos de correcao ainda pendentes (o que precisa de
   // atencao), nao o total de lancamentos
   const pendentes = edicoes.filter(e=>e.status==='PENDENTE').length;
   document.getElementById('sec-fech-count').textContent = pendentes ? `(${pendentes} pendente${pendentes>1?'s':''})` : '';
+  // o filtro de dia sempre COMEÇA em hoje - da pra olhar outro dia, mas a
+  // cada abertura da tela volta pro dia corrente
+  if(!document.getElementById('fech-data').value) document.getElementById('fech-data').value = hojeBrasiliaCentral();
   renderListaFechamentos();
 }
 
@@ -1700,10 +1708,28 @@ function ultimaDecisaoFechamento(fechamentoId){
   return EDICOES_FECHAMENTO.filter(e=>e.fechamentoId===fechamentoId && e.status!=='PENDENTE').sort((a,b)=>(b.decididoEm||'').localeCompare(a.decididoEm||''))[0];
 }
 
+function hojeBrasiliaCentral(){
+  const partes = new Intl.DateTimeFormat('en-CA', { timeZone: FUSO_BR, year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(new Date());
+  const o = {}; partes.forEach(p=>{ if(p.type!=='literal') o[p.type]=p.value; });
+  return `${o.year}-${o.month}-${o.day}`;
+}
+function voltarHojeFechamentos(){
+  document.getElementById('fech-data').value = hojeBrasiliaCentral();
+  renderListaFechamentos();
+}
+
 function renderListaFechamentos(){
   const el = document.getElementById('lista-lancamentos');
-  if(!MEUS_FECHAMENTOS.length){ el.innerHTML = '<div class="empty">Nenhum fechamento lançado ainda.</div>'; return; }
-  el.innerHTML = MEUS_FECHAMENTOS.map(f=>{
+  // sempre um dia por vez (padrao: hoje), ordenado da maior diferenca
+  // NEGATIVA pra maior positiva - quem estourou o caixa aparece primeiro
+  const dia = document.getElementById('fech-data').value || hojeBrasiliaCentral();
+  const doDia = MEUS_FECHAMENTOS
+    .filter(f=>f.data===dia)
+    .sort((a,b)=>num(a.diferenca)-num(b.diferenca));
+  document.getElementById('fech-dia-count').textContent = doDia.length ? `${doDia.length} fechamento(s) em ${fmtData(dia)}` : '';
+  el.style.maxHeight = ''; el.style.overflowY = '';
+  if(!doDia.length){ el.innerHTML = `<div class="empty">Nenhum fechamento lançado em ${fmtData(dia)}.</div>`; return; }
+  el.innerHTML = doDia.map(f=>{
     const pendente = edicaoFechamentoPendente(f.id);
     const decidida = !pendente && ultimaDecisaoFechamento(f.id);
     return `
@@ -1724,6 +1750,17 @@ function renderListaFechamentos(){
         : (pendente?'':'<button type="button" class="link-btn" style="margin-top:8px;" onclick="abrirEdicaoFechamento(\''+f.id+'\')">Pedir correção</button>')}
     </div>`;
   }).join('');
+  // 8 fechamentos a mostra; o resto fica abaixo, acessivel pelo scroll da
+  // propria lista (altura medida nos cards reais, nao chutada). Com o painel
+  // escondido (aba Solicitações) offsetTop devolve 0, entao a medida so
+  // acontece com a aba visivel - trocarSecaoCentral re-renderiza ao entrar
+  const cards = el.querySelectorAll('.card');
+  const painelVisivel = !document.getElementById('painel-meus-lancamentos').classList.contains('hidden');
+  if(painelVisivel && cards.length > 8){
+    const oitavo = cards[7];
+    el.style.maxHeight = (oitavo.offsetTop + oitavo.offsetHeight - cards[0].offsetTop + 6) + 'px';
+    el.style.overflowY = 'auto';
+  }
 }
 
 function abrirEdicaoFechamento(id){
@@ -2006,6 +2043,8 @@ function trocarSecaoCentral(secao){
   document.getElementById('painel-meus-lancamentos').classList.toggle('hidden', secao!=='fechamentos' || !PODE_LANCAMENTO);
   document.getElementById('sec-btn-solicitacoes').classList.toggle('active', secao==='solicitacoes');
   document.getElementById('sec-btn-fechamentos').classList.toggle('active', secao==='fechamentos');
+  // re-renderiza com a aba visivel pra medida do scroll de 8 cards valer
+  if(secao==='fechamentos' && PODE_LANCAMENTO && MEUS_FECHAMENTOS.length) renderListaFechamentos();
   localStorage.setItem('centralSecao', secao);
 }
 
