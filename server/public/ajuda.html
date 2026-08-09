@@ -658,9 +658,21 @@ const TOPICOS = [
     <h3>Depois de registrada</h3>
     <ul>
       <li>O card mostra código, pacote (Missão · horas · saltonautas), total, sinal e restante, agrupados pela data do evento.</li>
-      <li><b>✎ Editar status:</b> marque a reserva como <b>paga</b>, <b>cancelada</b> ou <b>já utilizada</b>. Trocar o pacote na edição recalcula o valor pela tabela.</li>
-      <li>Excluir uma reserva é só do Master. A lista exporta em ⬇️ CSV/PDF.</li>
+      <li><b>Comportamento (status automático):</b> a reserva nasce refletindo o que entrou de dinheiro — sinal cobrindo o total = <b>pago</b>; sinal parcial = <b>pagamento parcial</b>; sem sinal = <b>pendente</b>.</li>
+      <li><b>✎ Editar status:</b> marque a reserva como <b>cancelada</b> ou <b>já utilizada</b>. Trocar o pacote na edição recalcula o valor pela tabela.</li>
+      <li>Excluir uma reserva é só do Master. A lista exporta em ⬇️ CSV/PDF (com as colunas Recebido e Restante devido).</li>
       <li><b>Paginação:</b> a lista mostra 10 reservas por página (dá pra trocar pra 20 no seletor ao lado do filtro de status), com os botões 1 · 2 · 3... e as setas ‹ › embaixo. O contador "mostrando X–Y de Z" diz onde você está; trocar o filtro ou o tamanho da página volta pra página 1. Os exports CSV/PDF continuam levando a lista COMPLETA, não só a página visível.</li>
+    </ul>
+    <h3>💰 Pagamento parcial e recebimento do restante (Gerente/Master)</h3>
+    <p>Muitas festas pagam em partes (sinal agora, resto depois). O recebimento do complemento segue um fluxo <b>antifraude em 2 passos</b>, disponível só pro <b>Gerente da unidade</b> (tag de cargo) e pro <b>Master/Admin</b>:</p>
+    <ol>
+      <li>No card da reserva, clique em <b>🔓 Reabrir p/ receber</b>. <b>Comportamento:</b> a reabertura fica registrada (quem e quando) e <b>não destrava nada do que já foi lançado</b> — só libera lançar o complemento.</li>
+      <li>Clique em <b>💰 Lançar recebimento</b>: o valor já vem preenchido com o restante devido (dá pra receber menos, nunca mais que o devido), informe a forma e a data e confirme.</li>
+      <li><b>Comportamento:</b> o lançamento entra no histórico da reserva com um 🔒 (valor, forma, data e quem lançou) e é <b>definitivo — não pode ser editado nem removido</b>. Se cobriu o restante, o status vira <b>pago</b> sozinho; se ainda falta, fica <b>pagamento parcial</b> e o card mostra Recebido × Devido.</li>
+    </ol>
+    <ul>
+      <li>Com recebimento lançado, o financeiro da reserva (total, sinal, restante) fica <b>travado</b> — e ninguém consegue marcar <b>pago</b> na mão enquanto falta dinheiro entrar: o status só fecha pelo recebimento.</li>
+      <li>Reserva <b>cancelada</b> não recebe pagamento, e reserva <b>totalmente paga</b> não reabre mais.</li>
     </ul>
     <h3>🗓️ Calendário no Painel</h3>
     <p>Quem tem acesso a Festas vê no <b>Painel</b> o card <b>🎉 Festas (calendário)</b>: o mês inteiro com os dias de festa marcados (com a quantidade em cada dia) e as setas ‹ › pra navegar entre os meses. <b>Comportamento:</b> toque num dia marcado pra abrir a lista das festas dele (cliente, código, pacote, horário e valor, em ordem de horário); toque de novo pra fechar. Festa cancelada não aparece no calendário.</p>

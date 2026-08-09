@@ -2961,15 +2961,59 @@ app.delete('/api/festas/:id', auth.requireMaster, async (req, res) => {
   }
 });
 
+// recebimento pos-venda das festas (pagamentos parciais): so Gerente da
+// PROPRIA unidade ou Master/Admin. Fluxo antifraude em 2 passos: reabrir
+// (auditado) -> lancar o complemento (append-only, nunca editavel); o
+// status vira 'pago' quando cobre o total, senao 'pagamento-parcial'
+function podeReceberFesta(req, unidade) {
+  if (req.isMaster || req.isAdmin) return true;
+  return req.user && req.user.cargo === 'gerente' && (req.permissions.unidades || []).includes(unidade);
+}
+
+app.post('/api/festas/:id/reabrir-pagamento', requireSection('festas'), async (req, res) => {
+  try {
+    const atual = await festas.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Reserva não encontrada.' });
+    if (!podeReceberFesta(req, atual.unidade)) {
+      return res.status(403).json({ error: 'Só o Gerente da unidade ou o Master/Admin pode reabrir o recebimento.' });
+    }
+    const registro = await festas.reabrirPagamento(req.params.id, { porEmail: req.user.email });
+    broadcast('festa-atualizada', registro, 'festas');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/festas/:id/recebimentos', requireSection('festas'), async (req, res) => {
+  try {
+    const atual = await festas.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Reserva não encontrada.' });
+    if (!podeReceberFesta(req, atual.unidade)) {
+      return res.status(403).json({ error: 'Só o Gerente da unidade ou o Master/Admin pode lançar recebimento.' });
+    }
+    const registro = await festas.registrarRecebimento(req.params.id, {
+      valor: req.body.valor, forma: req.body.forma, data: req.body.data, porEmail: req.user.email,
+    });
+    broadcast('festa-atualizada', registro, 'festas');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/festas/relatorio.:formato(csv|pdf)', requireSection('festas'), async (req, res) => {
   const lista = req.isMaster ? await festas.listAll() : await festas.listByUnidades(req.permissions.unidades || []);
   const colunas = [
     { key: 'codigo', label: 'Código' }, { key: 'unidade', label: 'Unidade' }, { key: 'cliente', label: 'Cliente' },
-    { key: 'dataDeUso', label: 'Data do evento' }, { key: 'valorTotal', label: 'Valor total' }, { key: 'status', label: 'Status' }, { key: 'utilizado', label: 'Utilizado' },
+    { key: 'dataDeUso', label: 'Data do evento' }, { key: 'valorTotal', label: 'Valor total' },
+    { key: 'recebido', label: 'Recebido' }, { key: 'devido', label: 'Restante devido' },
+    { key: 'status', label: 'Status' }, { key: 'utilizado', label: 'Utilizado' },
   ];
   const linhas = lista.map((f) => ({
     codigo: f.codigo, unidade: f.unidade, cliente: f.cliente?.nome,
     dataDeUso: reportUtil.fmtDataBR(f.dataDeUso), valorTotal: reportUtil.fmtMoneyBR(f.valorTotal),
+    recebido: reportUtil.fmtMoneyBR(festas.totalRecebido(f)), devido: reportUtil.fmtMoneyBR(festas.restanteDevido(f)),
     status: f.status, utilizado: f.utilizado ? 'Sim' : 'Não',
   }));
   const nomeArquivo = reportUtil.nomeArquivoComData('festas');
