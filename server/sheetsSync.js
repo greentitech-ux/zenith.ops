@@ -165,7 +165,15 @@ async function buscarLinhasNovas(spreadsheetId, aba, aPartirDaLinha) {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueRenderOption=FORMATTED_VALUE`;
   const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   const data = await resp.json();
-  if (!resp.ok) throw new Error(`Erro ao ler as linhas novas da aba "${aba}" (${spreadsheetId}): ${data.error?.message || resp.status}`);
+  if (!resp.ok) {
+    // a planilha nao cresceu desde a ultima leitura - a linha pedida ficou
+    // alem do fim real da aba, e o Sheets responde 400 "Range exceeds grid
+    // limits" em vez de devolver vazio. Isso e o caso normal (nada novo pra
+    // ler), nao um erro de verdade - so os outros erros (permissao, aba
+    // renomeada/excluida, etc.) devem seguir estourando
+    if (/exceeds grid limits/i.test(data.error?.message || '')) return [];
+    throw new Error(`Erro ao ler as linhas novas da aba "${aba}" (${spreadsheetId}): ${data.error?.message || resp.status}`);
+  }
   return data.values || [];
 }
 
