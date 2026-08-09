@@ -1860,21 +1860,22 @@ app.get('/api/relatorios/:nome', auth.requireMaster, async (req, res) => {
 // fechamentosData comeca com o snapshot estatico (fallback pro caso da 1a
 // sincronizacao ainda nao ter rodado, ou de a API do Sheets estar fora do
 // ar) e e substituido pelos dados frescos da planilha assim que
-// sincronizarPlanilhasFechamento roda com sucesso (no boot e a cada
-// SHEETS_SYNC_INTERVAL_MS).
+// sincronizarPlanilhasFechamento roda com sucesso (1x no boot; depois so
+// quando o Master aciona manualmente - sem sincronizacao automatica).
 let fechamentosData = require('./fechamentos-snapshot.json');
 let statusSincronizacaoPlanilhas = { ultimaEm: null, ultimoErro: null, sincronizando: false };
 
-async function sincronizarPlanilhasFechamento() {
+async function sincronizarPlanilhasFechamento({ completa = false } = {}) {
   if (statusSincronizacaoPlanilhas.sincronizando) return statusSincronizacaoPlanilhas;
   statusSincronizacaoPlanilhas.sincronizando = true;
   try {
-    const dados = await sheetsSync.sincronizar();
+    const dados = await sheetsSync.sincronizar({ completa });
     if (dados.length) {
       fechamentosData = dados;
       statusSincronizacaoPlanilhas.ultimaEm = new Date().toISOString();
       statusSincronizacaoPlanilhas.ultimoErro = null;
-      console.log(`Fechamentos: sincronizados ${dados.length} registros das planilhas do Google Sheets.`);
+      statusSincronizacaoPlanilhas.linhasNovas = dados.linhasNovas ?? null;
+      console.log(`Fechamentos: sincronizados ${dados.length} registros das planilhas do Google Sheets (${dados.linhasNovas ?? '?'} linha(s) nova(s) lida(s)).`);
     } else {
       statusSincronizacaoPlanilhas.ultimoErro = 'A sincronização rodou mas não retornou nenhuma linha - planilhas continuam com os dados anteriores.';
       console.warn(statusSincronizacaoPlanilhas.ultimoErro);
@@ -2067,9 +2068,11 @@ app.get('/api/fechamentos/sincronizacao', requireSection('fechamentos'), (req, r
 });
 
 // forca uma sincronizacao imediata com as planilhas - so o Master (evita
-// disparar chamadas extras na API do Google sem necessidade)
+// disparar chamadas extras na API do Google sem necessidade). Por padrao a
+// leitura e INCREMENTAL (so as linhas novas desde a ultima leitura); passe
+// { completa: true } pra reler a planilha inteira (pega linha antiga editada)
 app.post('/api/fechamentos/sincronizar-planilhas', auth.requireMaster, async (req, res) => {
-  const status = await sincronizarPlanilhasFechamento();
+  const status = await sincronizarPlanilhasFechamento({ completa: req.body?.completa === true });
   if (status.ultimoErro) return res.status(502).json(status);
   res.json(status);
 });
@@ -5064,16 +5067,17 @@ app.get('/api/chamados-manutencao/foto/:chamadoId/:campo/:index', requireSection
 let entregasHistoricoData = [];
 let statusSincronizacaoEntregas = { ultimaEm: null, ultimoErro: null, sincronizando: false };
 
-async function sincronizarPlanilhaEntregas() {
+async function sincronizarPlanilhaEntregas({ completa = false } = {}) {
   if (statusSincronizacaoEntregas.sincronizando) return statusSincronizacaoEntregas;
   statusSincronizacaoEntregas.sincronizando = true;
   try {
-    const dados = await entregasSync.sincronizar();
+    const dados = await entregasSync.sincronizar({ completa });
     if (dados.length) {
       entregasHistoricoData = dados;
       statusSincronizacaoEntregas.ultimaEm = new Date().toISOString();
       statusSincronizacaoEntregas.ultimoErro = null;
-      console.log(`Entregas: sincronizados ${dados.length} registros historicos da planilha do Google Sheets.`);
+      statusSincronizacaoEntregas.linhasNovas = dados.linhasNovas ?? null;
+      console.log(`Entregas: sincronizados ${dados.length} registros historicos da planilha do Google Sheets (${dados.linhasNovas ?? '?'} linha(s) nova(s) lida(s)).`);
     } else {
       statusSincronizacaoEntregas.ultimoErro = 'A sincronização rodou mas não retornou nenhuma linha - histórico continua com os dados anteriores.';
       console.warn(statusSincronizacaoEntregas.ultimoErro);
@@ -5091,9 +5095,11 @@ app.get('/api/entregas/sincronizacao', requireSection('entregas'), (req, res) =>
   res.json(statusSincronizacaoEntregas);
 });
 
-// forca uma sincronizacao imediata - so o Master (evita chamadas extras na API do Google sem necessidade)
+// forca uma sincronizacao imediata - so o Master (evita chamadas extras na
+// API do Google sem necessidade). Incremental por padrao; { completa: true }
+// rele a planilha inteira
 app.post('/api/entregas/sincronizar-planilha', auth.requireMaster, async (req, res) => {
-  const status = await sincronizarPlanilhaEntregas();
+  const status = await sincronizarPlanilhaEntregas({ completa: req.body?.completa === true });
   if (status.ultimoErro) return res.status(502).json(status);
   res.json(status);
 });
@@ -5488,32 +5494,15 @@ app.use((err, req, res, next) => {
       backup.rodarBackup().catch((err) => console.error('Erro no backup automático:', err.message));
     }, 24 * 60 * 60 * 1000);
 
-    // planilhas do Google Sheets (fechamentos + entregas): SEM intervalo
-    // continuo. Roda 1x no boot (o historico vive em memoria - sem isso as
-    // telas ficariam vazias a cada reinicio) e depois so nas janelas fixas
-    // de 05:00 e 18:00 de Brasilia. Se o servidor estiver dormindo no
-    // horario, a primeira checagem depois de acordar faz o catch-up da
-    // janela perdida. Fora isso, o Master sincroniza manualmente pela tela
-    // (botoes de "sincronizar planilha", que continuam funcionando igual).
+    // planilhas do Google Sheets (fechamentos + entregas): SEM sincronizacao
+    // automatica - decisao do Master em 2026-08-09 (antes havia janelas fixas
+    // de 05:00/18:00). Roda 1x no boot porque o historico vive em memoria -
+    // sem essa carga inicial as telas de Fechamentos/Entregas ficariam
+    // vazias a cada deploy/reinicio do Render. Depois disso, planilha so e
+    // lida quando o Master aciona o botao "Sincronizar" na tela - e a
+    // leitura manual e incremental (so as linhas novas, ver sheetsSync.js).
     sincronizarPlanilhasFechamento();
     sincronizarPlanilhaEntregas();
-    const SYNC_SLOTS_HORAS = [5, 18];
-    const msUltimoSlotSync = () => {
-      const partes = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
-      const o = {};
-      partes.forEach((p) => { if (p.type !== 'literal') o[p.type] = Number(p.value); });
-      const minutosAgora = (o.hour === 24 ? 0 : o.hour) * 60 + o.minute;
-      const passados = SYNC_SLOTS_HORAS.filter((h) => h * 60 <= minutosAgora);
-      const slotHora = passados.length ? Math.max(...passados) : Math.max(...SYNC_SLOTS_HORAS);
-      const minutosAtras = passados.length ? minutosAgora - slotHora * 60 : minutosAgora + (24 * 60 - slotHora * 60);
-      return Date.now() - minutosAtras * 60 * 1000;
-    };
-    const aindaNaoSincronizouNoSlot = (status) => !status.sincronizando
-      && (!status.ultimaEm || new Date(status.ultimaEm).getTime() < msUltimoSlotSync());
-    setInterval(() => {
-      if (aindaNaoSincronizouNoSlot(statusSincronizacaoPlanilhas)) sincronizarPlanilhasFechamento();
-      if (aindaNaoSincronizouNoSlot(statusSincronizacaoEntregas)) sincronizarPlanilhaEntregas();
-    }, 10 * 60 * 1000);
 
     // sincroniza as vendas do iFood (Sales API - so leitura, ver
     // server/ifoodClient.js): roda no start e depois periodicamente. Padrao

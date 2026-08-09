@@ -155,6 +155,19 @@ async function buscarAbaPorCandidatos(spreadsheetId, candidatos, colunasChave) {
   throw new Error(`Nenhuma aba da planilha ${spreadsheetId} tem as colunas esperadas (${colunasChave.join(', ')}) nem os nomes ${candidatos.map((c) => `"${c}"`).join('/')}.${ultimoErro ? ` Último erro: ${ultimoErro.message}` : ''}${listaAbas}`);
 }
 
+// leitura incremental: busca so as linhas a partir de uma posicao (1-based,
+// inclusive) - usado pela sincronizacao manual pra nao reler a planilha
+// inteira quando o comeco ja e conhecido (linha nova entra sempre no fim)
+async function buscarLinhasNovas(spreadsheetId, aba, aPartirDaLinha) {
+  const token = await getAccessToken();
+  const range = `${aba}!A${aPartirDaLinha}:ZZ`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueRenderOption=FORMATTED_VALUE`;
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(`Erro ao ler as linhas novas da aba "${aba}" (${spreadsheetId}): ${data.error?.message || resp.status}`);
+  return data.values || [];
+}
+
 async function buscarAba(spreadsheetId, aba) {
   const token = await getAccessToken();
   let { ok, data } = await buscarValoresAba(spreadsheetId, aba, token);
@@ -293,19 +306,49 @@ function mesclarLancamentosDoMesmoDia(fechamentos) {
 
 // le as duas planilhas (aba "BD") e devolve a lista combinada de fechamentos,
 // no mesmo formato do fechamentos-snapshot.json - ja com os lancamentos do
-// mesmo dia/loja mesclados (ver mesclarLancamentosDoMesmoDia)
-async function sincronizar() {
+// mesmo dia/loja mesclados (ver mesclarLancamentosDoMesmoDia).
+//
+// Leitura INCREMENTAL: a primeira leitura (boot, ou completa=true) traz a
+// planilha inteira e guarda em memoria o cabecalho, quantas linhas foram
+// lidas e as linhas ja convertidas. As sincronizacoes seguintes leem SO as
+// linhas novas (do fim da ultima leitura em diante - o AppSheet sempre
+// acrescenta no fim) e juntam ao que ja e conhecido. Linha ANTIGA editada na
+// planilha so entra numa sincronizacao completa (completa=true) - o normal
+// da operacao e so entrar linha nova.
+const estadoSyncFechamentos = new Map(); // id__aba -> { header, linhasLidas, brutos }
+
+async function sincronizar({ completa = false } = {}) {
   const resultado = [];
+  let linhasNovas = 0;
   for (const planilha of PLANILHAS) {
-    const valores = await buscarAba(planilha.id, planilha.aba);
-    if (!valores.length) continue;
-    const header = valores[0];
-    for (let i = 1; i < valores.length; i++) {
-      const fechamento = linhaParaFechamento(planilha.grupo, header, valores[i]);
-      if (fechamento) resultado.push(fechamento);
+    const chave = `${planilha.id}__${planilha.aba}`;
+    let estado = completa ? null : estadoSyncFechamentos.get(chave);
+    if (!estado) {
+      const valores = await buscarAba(planilha.id, planilha.aba);
+      if (!valores.length) { estadoSyncFechamentos.delete(chave); continue; }
+      const header = valores[0];
+      const brutos = [];
+      for (let i = 1; i < valores.length; i++) {
+        const fechamento = linhaParaFechamento(planilha.grupo, header, valores[i]);
+        if (fechamento) brutos.push(fechamento);
+      }
+      estado = { header, linhasLidas: valores.length, brutos };
+      estadoSyncFechamentos.set(chave, estado);
+      linhasNovas += valores.length - 1;
+    } else {
+      const novas = await buscarLinhasNovas(planilha.id, planilha.aba, estado.linhasLidas + 1);
+      for (const linha of novas) {
+        const fechamento = linhaParaFechamento(planilha.grupo, estado.header, linha);
+        if (fechamento) estado.brutos.push(fechamento);
+      }
+      estado.linhasLidas += novas.length;
+      linhasNovas += novas.length;
     }
+    resultado.push(...estado.brutos);
   }
-  return mesclarLancamentosDoMesmoDia(resultado);
+  const lista = mesclarLancamentosDoMesmoDia(resultado);
+  lista.linhasNovas = linhasNovas;
+  return lista;
 }
 
 // ---------- caminho inverso: manda o fechamento lançado ao vivo no app
@@ -510,6 +553,6 @@ async function enviarFechamentoArcfood(f) {
 }
 
 module.exports = {
-  sincronizar, parseMoneyBR, parseDataArcfood, parseDataBravo, getAccessToken, buscarAba, buscarAbaPorCandidatos, mesclarLancamentosDoMesmoDia,
+  sincronizar, parseMoneyBR, parseDataArcfood, parseDataBravo, getAccessToken, buscarAba, buscarLinhasNovas, buscarAbaPorCandidatos, mesclarLancamentosDoMesmoDia,
   enviarFechamentoArcfood,
 };

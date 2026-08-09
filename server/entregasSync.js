@@ -11,7 +11,7 @@
 // ser resgatada (histórico de versões da planilha ou export do próprio
 // AppSheet). As outras 5 abas de entrega têm Data+Mês preenchidos e já
 // entram nessa sincronização.
-const { buscarAba, parseMoneyBR } = require('./sheetsSync');
+const { buscarAba, buscarLinhasNovas, parseMoneyBR } = require('./sheetsSync');
 
 const SPREADSHEET_ID = process.env.SHEET_ID_ENTREGAS || '14qb8V0fCqgGFmHDISm4HIArAmDZ0QJN8uD7B6zRIYTk';
 const ABAS = (process.env.SHEET_ABAS_ENTREGAS || 'Garanhuns,Bessa,Caruaru,Tirol,MMTirol')
@@ -88,18 +88,43 @@ function linhaParaEntrega(aba, header, linha) {
 }
 
 // lê as abas configuradas e devolve a lista combinada de entregas históricas,
-// no mesmo formato usado pelos lançamentos ao vivo (entregasLive)
-async function sincronizar() {
+// no mesmo formato usado pelos lançamentos ao vivo (entregasLive).
+//
+// Leitura INCREMENTAL, mesmo esquema do sheetsSync.sincronizar: primeira
+// leitura (boot ou completa=true) traz a aba inteira e guarda o ponto onde
+// parou; as seguintes leem so as linhas novas do fim em diante. Linha antiga
+// editada so entra com completa=true.
+const estadoSyncEntregas = new Map(); // aba -> { header, linhasLidas, brutos }
+
+async function sincronizar({ completa = false } = {}) {
   const resultado = [];
+  let linhasNovas = 0;
   for (const aba of ABAS) {
-    const valores = await buscarAba(SPREADSHEET_ID, aba);
-    if (!valores.length) continue;
-    const header = valores[0];
-    for (let i = 1; i < valores.length; i++) {
-      const entrega = linhaParaEntrega(aba, header, valores[i]);
-      if (entrega) resultado.push(entrega);
+    let estado = completa ? null : estadoSyncEntregas.get(aba);
+    if (!estado) {
+      const valores = await buscarAba(SPREADSHEET_ID, aba);
+      if (!valores.length) { estadoSyncEntregas.delete(aba); continue; }
+      const header = valores[0];
+      const brutos = [];
+      for (let i = 1; i < valores.length; i++) {
+        const entrega = linhaParaEntrega(aba, header, valores[i]);
+        if (entrega) brutos.push(entrega);
+      }
+      estado = { header, linhasLidas: valores.length, brutos };
+      estadoSyncEntregas.set(aba, estado);
+      linhasNovas += valores.length - 1;
+    } else {
+      const novas = await buscarLinhasNovas(SPREADSHEET_ID, aba, estado.linhasLidas + 1);
+      for (const linha of novas) {
+        const entrega = linhaParaEntrega(aba, estado.header, linha);
+        if (entrega) estado.brutos.push(entrega);
+      }
+      estado.linhasLidas += novas.length;
+      linhasNovas += novas.length;
     }
+    resultado.push(...estado.brutos);
   }
+  resultado.linhasNovas = linhasNovas;
   return resultado;
 }
 
