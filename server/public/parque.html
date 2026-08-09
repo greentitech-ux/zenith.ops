@@ -227,6 +227,18 @@
 
 </div>
 
+<!-- tempo esgotado: aviso pra equipe retirar o grupo do parque -->
+<div class="overlay hidden" id="overlay-esgotado" style="z-index:60;">
+  <div class="sheet-wrap">
+    <div class="sheet" style="border:2px solid var(--warn);">
+    <h3 style="color:var(--warn);">⏰ Tempo esgotado — retirar do parque</h3>
+    <div class="sub" style="font-size:12.5px;margin-bottom:8px;">O tempo contratado desses grupos acabou. Chame no salão e confirme a saída (quem entrou antes do horário previsto também sai antes — o relógio conta a partir do check-in).</div>
+    <div id="esgotado-lista"></div>
+    <button type="button" class="btn-primary" style="width:100%;margin-top:14px;" onclick="fecharEsgotado()">OK, equipe avisada</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay hidden" id="overlay-master">
   <div class="sheet-wrap">
     <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharMaster()">✕</span>
@@ -245,7 +257,7 @@
         <div><label>Tempo (min)</label><input type="number" step="1" id="m-tempo"></div>
       </div>
       <label>Horário previsto de entrada</label>
-      <input type="time" id="m-horario-previsto">
+      <select id="m-horario-previsto"></select>
       <label>Forma de pagamento</label>
       <select id="m-metodo">
         <option value="">— sem método —</option>
@@ -287,7 +299,7 @@
         </div>
         <div class="grid2">
           <div><label>Tempo</label><select id="cor-tempo"></select></div>
-          <div><label>Horário previsto</label><input type="time" id="cor-previsto"></div>
+          <div><label>Horário previsto</label><select id="cor-previsto"></select></div>
         </div>
         <label>Forma de pagamento</label>
         <select id="cor-metodo">
@@ -517,7 +529,7 @@ function abrirCorrecao(id){
   const sel = document.getElementById('cor-tempo');
   sel.innerHTML = [30,60,90,120].map(t=>`<option value="${t}">${t} min</option>`).join('');
   sel.value = String(c.tempoMinutos || 60);
-  document.getElementById('cor-previsto').value = (c.horarioPrevisto||'').slice(0,5);
+  preencherSelectSlots('cor-previsto', (c.horarioPrevisto||'').slice(0,5));
   document.getElementById('cor-metodo').value = c.metodoPagamento || '';
   document.getElementById('cor-ac').checked = !!c.adultoCortesia;
   document.getElementById('cor-ac-quant-wrap').classList.toggle('hidden', !c.adultoCortesia);
@@ -569,6 +581,19 @@ document.getElementById('form-correcao').addEventListener('submit', async (ev)=>
   }
 });
 
+// horario previsto sempre em janelas de 30 em 30 minutos (mesma regra do
+// balcao/servidor) - o relogio real e o do check-in
+function slots30(){
+  const out = [];
+  for(let h=0;h<24;h++){ out.push(`${String(h).padStart(2,'0')}:00`, `${String(h).padStart(2,'0')}:30`); }
+  return out;
+}
+function preencherSelectSlots(id, valor){
+  const sel = document.getElementById(id);
+  sel.innerHTML = '<option value="">—</option>' + slots30().map(s=>`<option value="${s}">${s}</option>`).join('');
+  sel.value = (valor && slots30().includes(valor)) ? valor : '';
+}
+
 function checkinsFiltrados(){
   const unidade = document.getElementById('f-unidade').value;
   const de = document.getElementById('f-de').value;
@@ -581,10 +606,34 @@ function checkinsFiltrados(){
   }).sort((a,b)=> (b.dataUtilizacao+(b.timeInicial||'')).localeCompare(a.dataUtilizacao+(a.timeInicial||'')));
 }
 
+// popup de tempo esgotado: o relogio de um check-in de HOJE venceu e o
+// grupo ainda nao teve check-out - a equipe precisa retirar do parque.
+// Vale tambem pra quem entrou antes do horario previsto (o tempo conta a
+// partir do check-in, entao sai antes tambem). Avisa uma vez por sessao
+let TEMPO_AVISADOS = new Set();
+function verificarTemposEsgotados(){
+  const hoje = hojeBrasilia();
+  const agora = horaBrasilia(agoraBrasilia());
+  const esgotados = TODOS.filter(c=>
+    c.dataUtilizacao===hoje && c.iniciado && !c.checkoutEm && c.timeFinal &&
+    c.timeFinal <= agora && !TEMPO_AVISADOS.has(c.id));
+  if(!esgotados.length) return;
+  esgotados.forEach(c=>TEMPO_AVISADOS.add(c.id));
+  document.getElementById('esgotado-lista').innerHTML = esgotados.map(c=>`
+    <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;">
+      <b>${escapeHtml(c.responsavel?.nome||'')}</b> · ${c.criancas?.length||0} criança(s)
+      <div class="sub" style="font-family:var(--mono);font-size:11.5px;">entrou ${(c.timeInicial||'').slice(0,5)} · tempo até ${(c.timeFinal||'').slice(0,5)}${c.horarioPrevisto?` · previsto era ${(c.horarioPrevisto||'').slice(0,5)}`:''}</div>
+      <div class="sub" style="font-size:11.5px;">${escapeHtml((c.criancas||[]).map(cr=>cr.nome).join(', '))}</div>
+    </div>`).join('');
+  document.getElementById('overlay-esgotado').classList.remove('hidden');
+}
+function fecharEsgotado(){ document.getElementById('overlay-esgotado').classList.add('hidden'); }
+
 function renderAgora(){
   const hoje = hojeBrasilia();
   const agora = horaBrasilia(agoraBrasilia());
   const dentro = TODOS.filter(c=>c.iniciado && !c.checkoutEm && c.dataUtilizacao===hoje && c.timeInicial<=agora && c.timeFinal>=agora && c.termoAssinado);
+  verificarTemposEsgotados();
   const el = document.getElementById('lista-agora');
   if(!dentro.length){ el.innerHTML = '<div class="empty">Ninguém no parque agora.</div>'; return; }
   el.innerHTML = dentro.map(c=>{
@@ -815,7 +864,7 @@ function abrirMaster(id){
   document.getElementById('m-data').value = c.dataUtilizacao || '';
   document.getElementById('m-hora').value = (c.timeInicial||'').slice(0,5);
   document.getElementById('m-tempo').value = c.tempoMinutos || 60;
-  document.getElementById('m-horario-previsto').value = (c.horarioPrevisto||'').slice(0,5);
+  preencherSelectSlots('m-horario-previsto', (c.horarioPrevisto||'').slice(0,5));
   document.getElementById('m-metodo').value = c.metodoPagamento || '';
   document.getElementById('m-observacao').value = c.observacao || '';
   document.getElementById('m-termo').checked = !!c.termoAssinado;

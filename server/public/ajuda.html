@@ -565,7 +565,7 @@ const TOPICOS = [
     <h3>1) Registrar uma entrada</h3>
     <ol>
       <li>Preencha nome, CPF e contato do responsável. <b>Comportamento:</b> ao sair do campo CPF, se a pessoa já veio antes, os dados preenchem sozinhos — e se aquele CPF tem <b>crédito de tempo</b> de uma visita anterior, o sistema oferece usar (soma por cima do tempo escolhido, sem cobrar de novo). O CEP preenche o endereço automaticamente.</li>
-      <li>Escolha a data, o <b>tempo contratado</b> (os botões já mostram o preço: 30min R$40 · 60min R$50 · 90min R$90 · 120min R$100 — a venda vai <b>só até 120min</b>; pra ficar mais tempo, use o <b>➕ Adicionar tempo</b> durante a vigência) e o <b>horário previsto de entrada</b>.</li>
+      <li>Escolha a data, o <b>tempo contratado</b> (os botões já mostram o preço: 30min R$40 · 60min R$50 · 90min R$90 · 120min R$100 — a venda vai <b>só até 120min</b>; pra ficar mais tempo, use o <b>➕ Adicionar tempo</b> durante a vigência) e o <b>horário previsto de entrada</b> — sempre em <b>janelas de 30 em 30 minutos</b> (10:00 / 10:30 / 11:00; 10:31 e 10:40 não existem na venda).</li>
       <li>Marque <b>Adulto Cortesia (A.C.)</b> quando um adulto acompanha sem pular (ex: acompanhante de criança autista) e informe quantos — A.C. não paga e não conta pulseira.</li>
       <li>Adicione cada criança (nome + nascimento). <b>Comportamento:</b> pulseiras = quantidade de crianças, calculado sozinho. Cada criança vem com <b>🧦 Par de meia · R$25</b> marcado por padrão (toda criança paga a meia antiderrapante) — <b>desmarque</b> quando a criança já chegou com a própria meia, e o valor cai na hora.</li>
       <li>Precisa de mais pares? Use <b>Meias extras</b> na seção Pagamento (R$25 cada, além das crianças).</li>
@@ -580,7 +580,8 @@ const TOPICOS = [
     <h3>3) Início do tempo (o relógio)</h3>
     <ul>
       <li><b>Fluxo normal — automático:</b> ninguém precisa apertar nada. No <b>horário previsto</b>, o relógio começa sozinho e o card só ganha a marca <b>🤖 automático</b> pra registro (sem alerta ou notificação nenhuma).</li>
-      <li><b>Chegou antes?</b> Aperte <b>▶ Fazer check-in</b>: o relógio começa naquele momento — entra antes e <b>sai antes</b> do horário inicialmente acordado.</li>
+      <li><b>Chegou antes?</b> Aperte <b>▶ Fazer check-in</b>: o relógio começa naquele momento exato (10:15, 10:22...) — entra antes e <b>sai antes</b> do horário inicialmente acordado, sempre contando só o tempo contratado. Ex: previsto 10:30 com 60min, mas entrou 9:50 → sai 10:50, não 11:30.</li>
+      <li><b>⏰ Tempo esgotado:</b> quando o relógio de um grupo vence, o balcão e o painel do Parque mostram um <b>popup automático "Tempo esgotado — retirar do parque"</b> com o responsável, as crianças e os horários. <b>Comportamento:</b> o aviso aparece uma vez por grupo (feche em "OK, equipe avisada"); quem já fez check-out não entra no aviso.</li>
     </ul>
     <h3>➕ Adicionar tempo (durante a vigência)</h3>
     <ol>

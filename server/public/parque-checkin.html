@@ -198,9 +198,9 @@
       <label>Tempo contratado</label>
       <div class="toggle-grupo" id="tempos"></div>
       <label>Horário previsto de entrada</label>
-      <input type="time" id="f-horario-previsto" required>
+      <select id="f-horario-previsto" required></select>
       <div class="sub" style="font-family:var(--sans);color:var(--muted);font-size:12px;margin-top:-2px;">
-        Se a pessoa chegar antes, o check-in continua manual normalmente (botão <b>Fazer check-in</b>). Se ninguém fizer o check-in até esse horário, o sistema inicia sozinho e avisa a equipe.
+        Sempre em janelas de 30 em 30 minutos (10:00 / 10:30 / 11:00). Se a pessoa chegar antes, o botão <b>Fazer check-in</b> inicia o relógio na hora exata da entrada (ex: 10:15) — entra antes e <b>sai antes</b>, sempre contando o tempo contratado. Se ninguém fizer o check-in até o horário previsto, o sistema inicia sozinho.
       </div>
     </div>
 
@@ -294,7 +294,7 @@
         </div>
         <div class="grid2">
           <div><label>Tempo</label><select id="cor-tempo"></select></div>
-          <div><label>Horário previsto</label><input type="time" id="cor-previsto"></div>
+          <div><label>Horário previsto</label><select id="cor-previsto"></select></div>
         </div>
         <label>Forma de pagamento</label>
         <select id="cor-metodo">
@@ -324,6 +324,19 @@
       <div class="msg hidden" id="msg-correcao"></div>
       <button class="btn-primary" type="submit" style="width:100%;margin-top:14px;" id="btn-enviar-correcao">Enviar proposta de alteração</button>
     </form>
+    </div>
+  </div>
+</div>
+
+<!-- tempo esgotado: aviso pra equipe retirar o grupo do parque - dispara
+     sozinho quando o relogio de algum check-in do dia vence -->
+<div class="overlay hidden" id="overlay-esgotado" style="z-index:60;">
+  <div class="sheet-wrap">
+    <div class="sheet" style="border:2px solid var(--warn);">
+    <h3 style="color:var(--warn);">⏰ Tempo esgotado — retirar do parque</h3>
+    <div class="sub" style="font-size:12.5px;margin-bottom:8px;">O tempo contratado desses grupos acabou. Chame no salão e confirme a saída (quem entrou antes do horário previsto também sai antes — o relógio conta a partir do check-in).</div>
+    <div id="esgotado-lista"></div>
+    <button type="button" class="btn-primary" style="width:100%;margin-top:14px;" onclick="fecharEsgotado()">OK, equipe avisada</button>
     </div>
   </div>
 </div>
@@ -465,6 +478,26 @@ function renderTempos(){
     `<button type="button" class="toggle-btn ${t===TEMPO_SELECIONADO?'ativo':''}" data-tempo="${t}" onclick="selecionarTempo(${t})">${t}min · R$${valorPorTempo(t)}</button>`
   ).join('');
 }
+
+// horario previsto sempre em janelas de 30 em 30 minutos (10:00/10:30/
+// 11:00) - o relogio real e o do check-in, que pode ser 10:15 normalmente
+function slots30(){
+  const out = [];
+  for(let h=0;h<24;h++){ out.push(`${String(h).padStart(2,'0')}:00`, `${String(h).padStart(2,'0')}:30`); }
+  return out;
+}
+function proximoSlot30(){
+  const d = agoraBrasilia();
+  const m = d.getMinutes();
+  if(m===0) return `${String(d.getHours()).padStart(2,'0')}:00`;
+  if(m<=30) return `${String(d.getHours()).padStart(2,'0')}:30`;
+  return `${String((d.getHours()+1)%24).padStart(2,'0')}:00`;
+}
+function preencherSelectSlots(id, valor){
+  const sel = document.getElementById(id);
+  sel.innerHTML = slots30().map(s=>`<option value="${s}">${s}</option>`).join('');
+  if(valor) sel.value = slots30().includes(valor) ? valor : proximoSlot30();
+}
 function selecionarTempo(t){ TEMPO_SELECIONADO = t; renderTempos(); atualizarPreviewValor(); }
 
 // valor da entrada = tabela do tempo x quantidade de criancas (pulseiras)
@@ -595,7 +628,31 @@ async function carregar(){
   const lista = await fetch('/api/parque/checkins').then(r=>r.json()).catch(()=>[]);
   CHECKINS = lista.sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||'')).slice(0,30);
   renderLista();
+  verificarTemposEsgotados();
 }
+
+// popup de tempo esgotado: quando o relogio de um check-in de HOJE vence
+// (mesmo pra quem entrou antes do previsto - o tempo conta do check-in),
+// avisa a equipe pra retirar o grupo do parque. Cada grupo avisa uma vez
+// por sessao; some da conta quem ja fez check-out
+let TEMPO_AVISADOS = new Set();
+function verificarTemposEsgotados(){
+  const hoje = hojeBrasilia();
+  const agoraHM = horaCurtaBrasilia(agoraBrasilia());
+  const esgotados = CHECKINS.filter(c=>
+    c.dataUtilizacao===hoje && c.iniciado && !c.checkoutEm && c.timeFinal &&
+    c.timeFinal.slice(0,5) <= agoraHM && !TEMPO_AVISADOS.has(c.id));
+  if(!esgotados.length) return;
+  esgotados.forEach(c=>TEMPO_AVISADOS.add(c.id));
+  document.getElementById('esgotado-lista').innerHTML = esgotados.map(c=>`
+    <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;">
+      <b>${escapeHtml(c.responsavel?.nome||'')}</b> · ${c.pulseiras} criança(s)
+      <div class="sub" style="font-family:var(--mono);font-size:11.5px;">entrou ${(c.timeInicial||'').slice(0,5)} · tempo até ${(c.timeFinal||'').slice(0,5)}${c.horarioPrevisto?` · previsto era ${(c.horarioPrevisto||'').slice(0,5)}`:''}</div>
+      <div class="sub" style="font-size:11.5px;">${escapeHtml((c.criancas||[]).map(cr=>cr.nome).join(', '))}</div>
+    </div>`).join('');
+  document.getElementById('overlay-esgotado').classList.remove('hidden');
+}
+function fecharEsgotado(){ document.getElementById('overlay-esgotado').classList.add('hidden'); }
 
 function statusCheckin(c){
   if(!c.iniciado) return { classe:'pendente-checkin', texto:'aguardando check-in' };
@@ -709,7 +766,7 @@ function abrirCorrecao(id){
   const sel = document.getElementById('cor-tempo');
   sel.innerHTML = TEMPOS_VALIDOS.map(t=>`<option value="${t}">${t} min</option>`).join('');
   sel.value = String(c.tempoMinutos || 60);
-  document.getElementById('cor-previsto').value = (c.horarioPrevisto||'').slice(0,5);
+  preencherSelectSlots('cor-previsto', (c.horarioPrevisto||'').slice(0,5) || proximoSlot30());
   document.getElementById('cor-metodo').value = c.metodoPagamento || '';
   document.getElementById('cor-ac').checked = !!c.adultoCortesia;
   document.getElementById('cor-ac-quant-wrap').classList.toggle('hidden', !c.adultoCortesia);
@@ -901,7 +958,7 @@ async function relancarVisita(){
 function resetarForm(){
   document.getElementById('form-checkin').reset();
   document.getElementById('f-data').value = hojeBrasilia();
-  document.getElementById('f-horario-previsto').value = horaCurtaBrasilia(agoraBrasilia());
+  preencherSelectSlots('f-horario-previsto', proximoSlot30());
   document.getElementById('lista-criancas').innerHTML = '';
   TEMPO_SELECIONADO = 60;
   renderTempos();
@@ -1019,7 +1076,7 @@ async function boot(){
   setAC(false);
   document.getElementById('f-data').value = hojeBrasilia();
   document.getElementById('f-data').max = hojeBrasilia();
-  document.getElementById('f-horario-previsto').value = horaCurtaBrasilia(agoraBrasilia());
+  preencherSelectSlots('f-horario-previsto', proximoSlot30());
   adicionarCrianca();
 
   document.getElementById('root').classList.remove('hidden');
