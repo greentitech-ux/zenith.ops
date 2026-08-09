@@ -333,8 +333,25 @@ async function marcarCobrancaEnviada(id, { pagamentoId }) {
   return getOne(id);
 }
 
+// chamado que na verdade era de Suporte TI: a historia continua num chamado
+// de TI de verdade (mesmo Ticket #) e este aqui fecha como CANCELADO com o
+// vinculo registrado - nada some, o historico aponta pra onde foi
+async function marcarConvertidoParaTI(id, { chamadoTIId, porEmail }) {
+  const atual = await getOne(id);
+  if (!atual) throw new Error('Chamado não encontrado.');
+  await COLLECTION.doc(id).update({
+    status: 'CANCELADO',
+    convertidoParaTIId: chamadoTIId,
+    convertidoParaTIEm: new Date().toISOString(),
+    convertidoPorEmail: porEmail,
+    atualizadoEm: new Date().toISOString(),
+  });
+  chamadosCache.invalidar();
+  return getOne(id);
+}
+
 module.exports = {
   STATUSES, create, listAll, getOne, aceitar, recusar, iniciar, marcarEmEspera, retomar, concluir, atualizar, remover,
   garantirTicket, salvarOrcamentoPecas, salvarCobranca, marcarCobrancaEnviada,
-  adicionarEvidencia, removerEvidencia,
+  adicionarEvidencia, removerEvidencia, marcarConvertidoParaTI,
 };

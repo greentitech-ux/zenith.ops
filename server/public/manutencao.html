@@ -163,7 +163,7 @@
 
 <div id="root" class="hidden">
 <div class="panel">
-  <h2>Meus chamados <span class="sub" id="lista-count" style="font-family:var(--mono);color:var(--muted);"></span></h2>
+  <h2><span id="lista-titulo">Meus chamados</span> <span class="sub" id="lista-count" style="font-family:var(--mono);color:var(--muted);"></span></h2>
   <input type="search" id="busca-chamados" placeholder="🔍 pesquisar por palavra (título, loja, ticket #...)" style="margin:8px 0 4px;font-size:12.5px;" oninput="renderLista()">
   <div id="lista-cards"><div class="empty">carregando...</div></div>
 </div>
@@ -297,10 +297,24 @@
       </div>
     </div>
 
-    <!-- Master: autonomia total (editar/excluir), qualquer status -->
+    <!-- Master: autonomia total (editar/excluir/converter), qualquer status -->
     <div id="bloco-master" class="hidden bloco-sep">
       <button type="button" class="link-btn" onclick="abrirEditar()">✎ Editar chamado</button>
+      <button type="button" class="link-btn" id="btn-converter-ti" style="margin-left:16px;" onclick="abrirConverterTI()">🔀 Era Suporte TI</button>
       <button type="button" class="link-btn" style="color:var(--bad);margin-left:16px;" onclick="excluirChamado()">🗑 Excluir chamado</button>
+      <!-- chamado aberto como Manutencao mas que na verdade era de TI: vira um
+           chamado de Suporte TI com o MESMO Ticket # e este fecha apontando pra la -->
+      <div id="bloco-converter-ti" class="hidden" style="margin-top:10px;border:1px dashed var(--line);border-radius:10px;padding:10px;">
+        <div class="sub" style="margin-bottom:6px;">Esse chamado vai virar um chamado de <b>Suporte TI</b> com o mesmo Ticket #. O chamado de manutenção fecha como cancelado, com o histórico apontando pro novo.</div>
+        <label>Técnico de TI</label>
+        <select id="ct-tecnico"></select>
+        <label>Modalidade</label>
+        <select id="ct-modalidade">
+          <option value="presencial">Presencial (vai até a loja)</option>
+          <option value="remoto">Remoto (resolve à distância)</option>
+        </select>
+        <button type="button" class="btn-primary" onclick="converterParaTI()">Confirmar conversão pra Suporte TI</button>
+      </div>
       <div id="bloco-editar" class="hidden" style="margin-top:10px;">
         <label>Título</label>
         <input type="text" id="ed-titulo">
@@ -395,6 +409,8 @@ initNavDrawerAccordion();
 
 let ME = null;
 let IS_MASTER = false;
+let IS_ADMIN = false;
+let TECNICOS_TI = [];
 let CHAMADOS = [];
 let DETALHE_ATUAL = null;
 let PECAS = [];
@@ -427,10 +443,10 @@ function renderLista(){
     <div class="card" onclick="abrirDetalhe('${c.id}')">
       <div class="linha1">
         <span>${c.numeroTicket!=null?`<span style="font-family:var(--mono);color:var(--accent);">#${c.numeroTicket}</span> `:''}${escapeHtml(c.titulo)}</span>
-        <span class="badge ${c.status}">${STATUS_LABEL[c.status]||c.status}</span>
+        <span class="badge ${c.status}">${c.convertidoParaTIId?'🔀 Virou Suporte TI':(STATUS_LABEL[c.status]||c.status)}</span>
       </div>
       <div class="sub">${escapeHtml(c.unidadeNome||c.unidade)} · ${fmtDataHora(c.criadoEm)}</div>
-    </div>`).join('') : '<div class="empty">Nenhum chamado de manutenção atribuído a você ainda.</div>';
+    </div>`).join('') : `<div class="empty">${(IS_MASTER||IS_ADMIN)?'Nenhum chamado de manutenção registrado ainda.':'Nenhum chamado de manutenção atribuído a você ainda.'}</div>`;
 }
 
 async function carregarChamados(){
@@ -524,7 +540,7 @@ function abrirDetalhe(id){
   if(!c) return;
   DETALHE_ATUAL = c;
   document.getElementById('d-titulo').textContent = c.titulo;
-  document.getElementById('d-sub').innerHTML = `${c.numeroTicket!=null?`<span style="font-family:var(--mono);color:var(--accent);">Ticket #${c.numeroTicket}</span> · `:''}${escapeHtml(c.unidadeNome||c.unidade)} · ${fmtDataHora(c.criadoEm)}${c.cobranca&&c.cobranca.enviadaEm?' · 💰 cobrança enviada':''}`;
+  document.getElementById('d-sub').innerHTML = `${c.numeroTicket!=null?`<span style="font-family:var(--mono);color:var(--accent);">Ticket #${c.numeroTicket}</span> · `:''}${escapeHtml(c.unidadeNome||c.unidade)} · ${fmtDataHora(c.criadoEm)}${c.cobranca&&c.cobranca.enviadaEm?' · 💰 cobrança enviada':''}${c.convertidoParaTIId?` · <span style="color:var(--warn);">🔀 convertido pra Suporte TI em ${fmtDataHora(c.convertidoParaTIEm)}</span>`:''}`;
   document.getElementById('d-descricao').textContent = c.descricao || '';
   document.getElementById('d-responsaveis').textContent = 'Responsável(is): ' + (c.responsaveis||[]).map(r=>r.email).join(', ');
 
@@ -575,6 +591,9 @@ function abrirDetalhe(id){
 
   document.getElementById('bloco-master').classList.toggle('hidden', !IS_MASTER);
   document.getElementById('bloco-editar').classList.add('hidden');
+  document.getElementById('bloco-converter-ti').classList.add('hidden');
+  // ja convertido nao converte de novo - o servidor tambem barra
+  document.getElementById('btn-converter-ti').classList.toggle('hidden', !!c.convertidoParaTIId);
 
   // evidencias: quem enxerga o chamado registra
   document.getElementById('bloco-evidencias').classList.remove('hidden');
@@ -971,11 +990,43 @@ async function excluirChamado(){
   }
 }
 
+// ---------- conversao Manutencao -> Suporte TI (Master) ----------
+// pro caso do chamado ter nascido com o tipo errado: escolhe o tecnico de TI
+// e a modalidade, o Ticket # continua o mesmo
+function abrirConverterTI(){
+  const bloco = document.getElementById('bloco-converter-ti');
+  if(!bloco.classList.contains('hidden')){ bloco.classList.add('hidden'); return; }
+  if(!TECNICOS_TI.length){ erroDetalhe('Nenhum usuário com a seção Suporte TI encontrado pra receber o chamado.'); return; }
+  document.getElementById('ct-tecnico').innerHTML = TECNICOS_TI
+    .map(t=>`<option value="${t.id}" data-email="${escapeHtml(t.email)}">${escapeHtml(t.username||t.email)}</option>`).join('');
+  document.getElementById('bloco-editar').classList.add('hidden');
+  bloco.classList.remove('hidden');
+}
+async function converterParaTI(){
+  if(!DETALHE_ATUAL) return;
+  const sel = document.getElementById('ct-tecnico');
+  const opt = sel.options[sel.selectedIndex];
+  if(!opt){ erroDetalhe('Escolha o técnico de TI.'); return; }
+  if(!confirm('Converter esse chamado pra Suporte TI? O chamado de manutenção fecha como cancelado e a história continua no chamado de TI, com o mesmo Ticket #.')) return;
+  try{
+    const resp = await fetch(`/api/chamados-manutencao/${DETALHE_ATUAL.id}/converter-para-ti`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ tecnicoId: opt.value, tecnicoEmail: opt.dataset.email, modalidade: document.getElementById('ct-modalidade').value }),
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao converter.');
+    alert(`Convertido! Agora é um chamado de Suporte TI${data.chamadoTI&&data.chamadoTI.numeroTicket!=null?` (Ticket #${data.chamadoTI.numeroTicket})`:''} — acompanhe na tela de Chamados TI.`);
+    fecharDetalhe();
+    await carregarChamados();
+  }catch(err){ erroDetalhe(err.message); }
+}
+
 async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   ME = await res.json();
   IS_MASTER = ME.role==='master';
+  IS_ADMIN = !!ME.isAdmin;
   const secoes = IS_MASTER ? ['monitor','disputas','cofre','fechamentos','lancamento','sangria','entregas','entregas-lancamento','ifood','solicitacoes','tecnico','manutencao','inventario','parque','parque-checkin','festas'] : (ME.permissions?.sections||[]);
 
   document.getElementById('nav-monitor').classList.remove('hidden');
@@ -1009,8 +1060,12 @@ async function boot(){
     try{
       const todos = await fetch('/api/users').then(r=>r.json());
       PESSOAS_MANUTENCAO = todos.filter(u=>u.permissions && (u.permissions.sections||[]).includes('manutencao'));
-    }catch(e){ PESSOAS_MANUTENCAO = []; }
+      TECNICOS_TI = todos.filter(u=>u.permissions && (u.permissions.sections||[]).includes('tecnico'));
+    }catch(e){ PESSOAS_MANUTENCAO = []; TECNICOS_TI = []; }
   }
+
+  // Master/Admin enxergam a fila inteira, nao so o que foi atribuido a eles
+  if(IS_MASTER || IS_ADMIN) document.getElementById('lista-titulo').textContent = 'Todos os chamados';
 
   document.getElementById('root').classList.remove('hidden');
   await carregarChamados();

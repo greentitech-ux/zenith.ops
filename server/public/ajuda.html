@@ -470,8 +470,14 @@ const TOPICOS = [
   `},
   { id:'manutencao', icone:'🔧', secoes:['manutencao'], titulo:'Manutenção', corpo:`
     <p>Fila de chamados de manutenção - nasce automaticamente quando uma solicitação de Manutenção é aprovada na Central (quem aprova escolhe 1 ou mais responsáveis), ou pode ser criada direto pelo Master.</p>
+    <h3>👀 Quem vê o quê</h3>
     <ul>
+      <li><b>Master e <span class="tagpill admin">⭐ Admin</span> veem TODOS os chamados</b> da fila ("Todos os chamados"), mesmo sem estarem atribuídos.</li>
       <li>Cada responsável só vê os chamados em que foi escolhido. Se o chamado tem 2 responsáveis, os 2 enxergam.</li>
+      <li><b>Comportamento:</b> uma solicitação de Manutenção que ainda está <b>pendente na Central</b> (não foi aprovada) <b>ainda não existe como chamado</b> - ela aparece aqui só depois da aprovação (ou da criação direta pelo Master).</li>
+    </ul>
+    <h3>▶ Fluxo do responsável</h3>
+    <ul>
       <li>Ao abrir o chamado, escolha <b>✓ Aceitar o serviço</b> (informando a <b>Data da execução</b>) ou <b>✕ Recusar</b>.</li>
       <li>No dia da execução, chegando na loja, clique em <b>📍 Fazer check-in</b>.</li>
       <li>Se faltar peça ou precisar pausar, use <b>⏸ Em espera</b> - depois é só <b>▶ Retomar execução</b> pra continuar de onde parou.</li>
@@ -480,6 +486,12 @@ const TOPICOS = [
     <h3>🎫 Ticket #, chat e cobrança</h3>
     <p>Todo chamado tem um <b>Ticket #</b> (mesma numeração da Central) e um <b>💬 chat próprio</b> (texto + foto) — dá pra mandar observação/foto antes da ida da manutenção. Também dá pra registrar <b>🧾 orçamento de peças</b> e a <b>💰 cobrança</b> do serviço: valor + observação + <b>boleto anexado</b>, e o <b>📤 Enviar</b> gera um ticket de <b>Pagamento</b> na Central com a <b>mesma numeração</b> do chamado — os dois se juntam pelo número.</p>
     <div class="dica"><b>Master tem autonomia total:</b> pode editar título, descrição, <b>status</b>, data de execução e responsáveis, ou excluir o chamado inteiro, em qualquer momento do fluxo (botões <b>✎ Editar chamado</b> / <b>🗑 Excluir chamado</b> dentro do chamado).</div>
+    <h3>🔀 Era Suporte TI? Converta</h3>
+    <p>Se o chamado nasceu como Manutenção mas na verdade era um problema de TI, o Master abre o chamado e clica em <b>🔀 Era Suporte TI</b>: escolhe o <b>técnico de TI</b> e a <b>modalidade</b> (presencial/remoto) e confirma.</p>
+    <ul>
+      <li><b>Comportamento:</b> nasce um chamado de <b>Suporte TI</b> com o <b>mesmo Ticket #</b>, já atribuído ao técnico escolhido; o chamado de manutenção fecha como <b>Cancelado</b> com a marca <b>🔀 Virou Suporte TI</b> apontando pra conversão - nada some do histórico, os dois se juntam pelo número do ticket.</li>
+      <li>Um chamado já convertido não converte de novo.</li>
+    </ul>
   `},
   { id:'relatorios', icone:'📊', secoes:['disputas'], titulo:'Relatórios de disputa', corpo:`
     <p>Acompanhamento das disputas/chargebacks abertos pela operadora, com prazo de resposta e status de cada caso.</p>
