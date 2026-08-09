@@ -285,7 +285,7 @@
   <div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:8px;">Fechamentos do dia, da <b>maior diferença negativa pra maior positiva</b> (o que precisa de atenção aparece primeiro). Use <b>Pedir correção</b> pra consertar o que foi digitado errado ou ficou faltando.</div>
   <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:8px;">
     <div><label>Dia</label><input type="date" id="fech-data" onchange="renderListaFechamentos()"></div>
-    <button type="button" class="export-btn" style="height:34px;" onclick="voltarHojeFechamentos()">Hoje</button>
+    <button type="button" class="export-btn" style="height:34px;" onclick="irOntemFechamentos()">Ontem</button>
     <span class="sub" id="fech-dia-count" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);"></span>
   </div>
   <div id="lista-lancamentos"><div class="empty">carregando...</div></div>
@@ -1713,8 +1713,12 @@ function hojeBrasiliaCentral(){
   const o = {}; partes.forEach(p=>{ if(p.type!=='literal') o[p.type]=p.value; });
   return `${o.year}-${o.month}-${o.day}`;
 }
-function voltarHojeFechamentos(){
-  document.getElementById('fech-data').value = hojeBrasiliaCentral();
+// atalho pro dia anterior (a conferencia da manha e sempre do fechamento
+// de ontem) - o padrao ao abrir a tela continua sendo hoje
+function irOntemFechamentos(){
+  const d = new Date(hojeBrasiliaCentral() + 'T00:00:00');
+  d.setDate(d.getDate() - 1);
+  document.getElementById('fech-data').value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   renderListaFechamentos();
 }
 
