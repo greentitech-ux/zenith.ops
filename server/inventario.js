@@ -530,15 +530,24 @@ async function calcularDiferencas(unidade, dataInicio, dataFim) {
 
   const custoDesperdicio = arred(saidasPeriodo.filter((s) => s.tipo === 'DESPERDICIO').reduce((s, x) => s + x.quantidade * (custoPorItem.get(x.itemId) || 0), 0));
   const custoVenda = arred(saidasPeriodo.filter((s) => s.tipo === 'VENDA').reduce((s, x) => s + x.quantidade * (custoPorItem.get(x.itemId) || 0), 0));
+  const custoOutras = arred(saidasPeriodo.filter((s) => s.tipo === 'OUTRA').reduce((s, x) => s + x.quantidade * (custoPorItem.get(x.itemId) || 0), 0));
   const totalRecebidoValor = arred(recebimentosPeriodo.reduce((s, r) => s + r.valorTotal, 0));
   const totalDiferencaValor = arred(ofensores.reduce((s, x) => s + x.diferencaValor, 0));
   const totalFaltaValor = arred(ofensores.filter((x) => x.diferencaValor < 0).reduce((s, x) => s + x.diferencaValor, 0));
   const totalSobraValor = arred(ofensores.filter((x) => x.diferencaValor > 0).reduce((s, x) => s + x.diferencaValor, 0));
+  // consumo real do periodo: tudo que efetivamente saiu do estoque. Por
+  // item-dia com contagem, consumo = anterior + entradas - contagem final =
+  // saidas lancadas - diferenca; somando tudo, vira: saidas lancadas
+  // (venda + desperdicio + outras) + faltas apuradas - sobras. Sem contagem
+  // no periodo, o consumo mostra so as saidas lancadas
+  const totalSaidasValor = arred(custoVenda + custoDesperdicio + custoOutras);
+  const consumoValor = arred(totalSaidasValor - totalDiferencaValor);
 
   return {
     porDia, ofensores,
     resumo: {
       totalRecebidoValor, custoDesperdicioValor: custoDesperdicio, custoVendaValor: custoVenda,
+      custoOutrasValor: custoOutras, totalSaidasValor, consumoValor,
       totalDiferencaValor, totalFaltaValor, totalSobraValor,
     },
   };

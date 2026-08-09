@@ -232,10 +232,25 @@
     <button type="button" class="tab-btn" data-tab="saida" onclick="mudarAba('saida')">📤 Saída</button>
     <button type="button" class="tab-btn" data-tab="diferencas" onclick="mudarAba('diferencas')">📊 Diferenças</button>
     <button type="button" class="tab-btn hidden" id="tab-btn-catalogo" data-tab="catalogo" onclick="mudarAba('catalogo')">🗂️ Catálogo</button>
+    <button type="button" class="tab-btn" data-tab="estoque" onclick="mudarAba('estoque')">📦 Estoque</button>
   </div>
 </div>
 
-<div class="panel" id="painel-estoque-hoje">
+<!-- ---------- Estoque (visão geral): consumo por período + contagem de
+     hoje de todas as unidades - virou aba própria pra tela de Contagem
+     ficar só com a contagem ---------- -->
+<div class="panel tab-content hidden" id="tab-estoque">
+  <h2>📊 Análise do período</h2>
+  <div class="sub" style="margin-bottom:10px;">Escolha o período (de/até) pra ver, na unidade selecionada no topo: quanto <b>entrou</b> (compras), quanto <b>saiu</b>, o <b>desperdício lançado</b> e o <b>consumo</b> total.</div>
+  <div class="toolbar">
+    <div class="campo"><label>De</label><input type="date" id="e-inicio" onchange="carregarResumoEstoque()"></div>
+    <div class="campo"><label>Até</label><input type="date" id="e-fim" onchange="carregarResumoEstoque()"></div>
+  </div>
+  <div class="kpis" id="e-kpis"></div>
+  <div class="sub" id="e-nota"></div>
+</div>
+
+<div class="panel tab-content hidden" id="painel-estoque-hoje">
   <h2>📦 Contagem de hoje - todas as unidades</h2>
   <div class="sub" id="estoque-hoje-resumo" style="margin-bottom:10px;">Carregando...</div>
   <div class="toolbar" style="margin-bottom:8px;">
@@ -710,11 +725,14 @@ async function mudarAba(aba){
   document.getElementById('tab-saida-lista').classList.toggle('hidden', aba!=='saida');
   document.getElementById('tab-diferencas').classList.toggle('hidden', aba!=='diferencas');
   document.getElementById('tab-catalogo').classList.toggle('hidden', aba!=='catalogo');
+  document.getElementById('tab-estoque').classList.toggle('hidden', aba!=='estoque');
+  document.getElementById('painel-estoque-hoje').classList.toggle('hidden', aba!=='estoque');
   if(aba==='contagem' && !CONTAGEM_INICIADA) reiniciarContagem();
   if(aba==='recebimento') renderRecebimentos();
   if(aba==='saida') renderSaidas();
   if(aba==='diferencas') carregarDiferencas();
   if(aba==='catalogo'){ await carregarCatalogo(); renderCatalogo(); }
+  if(aba==='estoque') carregarResumoEstoque();
 }
 
 // catalogo e por loja - trocar a loja no seletor do topo exige buscar o
@@ -728,6 +746,40 @@ async function trocarUnidade(){
   else if(ABA_ATUAL==='saida') renderSaidas();
   else if(ABA_ATUAL==='diferencas') carregarDiferencas();
   else if(ABA_ATUAL==='catalogo') renderCatalogo();
+  else if(ABA_ATUAL==='estoque') carregarResumoEstoque();
+}
+
+// ---------- aba Estoque: analise de consumo por periodo ----------
+// reusa o motor das Diferencas (/api/inventario/diferencas), que ja cruza
+// contagens + recebimentos + saidas do periodo - aqui so muda a leitura:
+// quanto entrou, quanto saiu, desperdicio e o consumo total
+async function carregarResumoEstoque(){
+  const unidade = unidadeAtual();
+  const inicio = document.getElementById('e-inicio').value;
+  const fim = document.getElementById('e-fim').value;
+  const el = document.getElementById('e-kpis');
+  if(!unidade || !inicio || !fim){ el.innerHTML=''; return; }
+  el.innerHTML = '<div class="empty">calculando...</div>';
+  try{
+    const dados = await fetch(`/api/inventario/diferencas?unidade=${encodeURIComponent(unidade)}&inicio=${inicio}&fim=${fim}`).then(r=>r.json());
+    const r = dados.resumo || {};
+    const dif = r.totalDiferencaValor || 0;
+    const kpis = [
+      { rotulo:'📥 Entradas (compras)', valor: fmtMoney(r.totalRecebidoValor), classe:'' },
+      { rotulo:'🍽 Consumo do período', valor: fmtMoney(r.consumoValor), classe:'' },
+      { rotulo:'📤 Saídas lançadas', valor: fmtMoney(r.totalSaidasValor), classe:'' },
+      { rotulo:'🗑 Desperdício lançado', valor: fmtMoney(r.custoDesperdicioValor), classe: (r.custoDesperdicioValor||0)>0?'bad':'' },
+      { rotulo:'Vendas (custo estimado)', valor: fmtMoney(r.custoVendaValor), classe:'' },
+      { rotulo:'Falta − sobra (contagens)', valor: fmtMoney(-dif), classe: dif<0?'bad':(dif>0?'ok':'') },
+    ];
+    el.innerHTML = kpis.map(k=>`
+      <div class="kpi"><div class="rotulo">${k.rotulo}</div><div class="valor-kpi ${k.classe}">${k.valor}</div></div>
+    `).join('');
+    document.getElementById('e-nota').textContent =
+      'Consumo = saídas lançadas (venda + desperdício + outras) + faltas apuradas nas contagens − sobras. Sem contagem lançada no período, o consumo mostra só as saídas registradas.';
+  }catch(err){
+    el.innerHTML = '<div class="empty">Não foi possível calcular o período.</div>';
+  }
 }
 
 // ordem manual do item dentro do setor (drag-and-drop, ver
@@ -1517,6 +1569,10 @@ async function boot(){
   const hoje = hojeBrasilia();
   document.getElementById('c-data').value = hoje;
   document.getElementById('c-data').max = hoje;
+  // aba Estoque: periodo padrao = do dia 1º do mês até hoje
+  document.getElementById('e-inicio').value = hoje.slice(0,8)+'01';
+  document.getElementById('e-fim').value = hoje;
+  document.getElementById('e-fim').max = hoje;
   document.getElementById('r-data').value = hoje;
   document.getElementById('r-data').max = hoje;
   document.getElementById('s-data').value = hoje;
