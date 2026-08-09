@@ -102,6 +102,12 @@
   .item-linha .un{color:var(--muted);font-weight:400;font-size:11px;}
   .item-linha .ref{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:4px;}
   .item-linha input{padding:7px 8px;font-size:13px;}
+  .c-filtros{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 8px;}
+  .c-filtros input{flex:1;min-width:170px;}
+  .c-chip{font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:16px;padding:6px 12px;cursor:pointer;white-space:nowrap;}
+  .c-chip.ativo{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .btn-fav{background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:2px 4px;flex:none;color:var(--muted);}
+  .btn-fav.ativo{color:var(--warn);}
   .linha-contagem{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid #1a1f26;flex-wrap:wrap;}
   .linha-contagem:last-child{border-bottom:none;}
   .linha-contagem.arrastando{opacity:.55;background:var(--panel2);border-radius:6px;}
@@ -266,6 +272,16 @@
         <select id="c-setor" onchange="renderContagemSetor()"></select>
       </div>
       <div class="sub" id="c-progresso" style="padding-bottom:9px;"></div>
+    </div>
+    <div class="c-filtros">
+      <input type="text" id="c-busca" placeholder="🔎 Pesquisar item pelo nome..." oninput="CONTAGEM_BUSCA=this.value; renderContagemSetor();">
+    </div>
+    <div class="c-filtros" id="c-chips">
+      <button type="button" class="c-chip ativo" data-f="todos" onclick="setFiltroContagem('todos')">Todos</button>
+      <button type="button" class="c-chip" data-f="favoritos" onclick="setFiltroContagem('favoritos')">⭐ Favoritos</button>
+      <button type="button" class="c-chip" data-f="preenchidos" onclick="setFiltroContagem('preenchidos')">✔ Preenchidos</button>
+      <button type="button" class="c-chip" data-f="vazios" onclick="setFiltroContagem('vazios')">▢ Vazios</button>
+      <span class="sub" id="c-filtro-info"></span>
     </div>
     <div id="c-itens"></div>
     <button type="button" class="btn-add" onclick="abrirNovoItemContagem()">+ Adicionar item nesse setor</button>
@@ -780,30 +796,74 @@ async function iniciarContagem(){
     : '';
   document.getElementById('c-inicio').classList.add('hidden');
   document.getElementById('c-corpo').classList.remove('hidden');
+  // contagem nova começa com a lista completa: filtro/busca zerados
+  CONTAGEM_FILTRO = 'todos';
+  CONTAGEM_BUSCA = '';
+  document.getElementById('c-busca').value = '';
+  document.querySelectorAll('#c-chips .c-chip').forEach(b=>b.classList.toggle('ativo', b.dataset.f==='todos'));
   renderContagemSetor();
 }
 
 function setorAtualContagem(){ return document.getElementById('c-setor').value; }
 
+// filtros da lista de contagem: busca por nome + chips Todos/Favoritos/
+// Preenchidos/Vazios. Favoritos ficam salvos no navegador, por unidade
+// (marca de conveniencia de quem conta - nao mexe no catalogo compartilhado)
+let CONTAGEM_FILTRO = 'todos';
+let CONTAGEM_BUSCA = '';
+function chaveFavoritos(){ return 'estoqueFavoritos:' + unidadeAtual(); }
+function carregarFavoritos(){
+  try{ return new Set(JSON.parse(localStorage.getItem(chaveFavoritos())||'[]')); }catch(e){ return new Set(); }
+}
+let FAVORITOS_CONTAGEM = new Set();
+function toggleFavorito(id){
+  FAVORITOS_CONTAGEM = carregarFavoritos();
+  if(FAVORITOS_CONTAGEM.has(id)) FAVORITOS_CONTAGEM.delete(id); else FAVORITOS_CONTAGEM.add(id);
+  localStorage.setItem(chaveFavoritos(), JSON.stringify([...FAVORITOS_CONTAGEM]));
+  renderContagemSetor();
+}
+function setFiltroContagem(f){
+  CONTAGEM_FILTRO = f;
+  document.querySelectorAll('#c-chips .c-chip').forEach(b=>b.classList.toggle('ativo', b.dataset.f===f));
+  renderContagemSetor();
+}
+function itemPreenchido(id){
+  const v = CONTAGEM_VALORES[id];
+  return v !== '' && v != null;
+}
+
 function renderContagemSetor(){
   const setor = setorAtualContagem();
   const container = document.getElementById('c-itens');
-  if(!setor){ container.innerHTML = '<div class="empty">Nenhum item no catálogo ainda - adicione um item abaixo.</div>'; atualizarProgressoContagem(); return; }
-  const itens = CATALOGO.filter(i=>i.setor===setor && i.ativo!==false).sort(compararOrdemItem);
+  const info = document.getElementById('c-filtro-info');
+  if(!setor){ container.innerHTML = '<div class="empty">Nenhum item no catálogo ainda - adicione um item abaixo.</div>'; info.textContent=''; atualizarProgressoContagem(); return; }
+  FAVORITOS_CONTAGEM = carregarFavoritos();
+  const todosDoSetor = CATALOGO.filter(i=>i.setor===setor && i.ativo!==false).sort(compararOrdemItem);
+  const termo = (CONTAGEM_BUSCA||'').trim().toLowerCase();
+  let itens = todosDoSetor;
+  if(termo) itens = itens.filter(i=>i.nome.toLowerCase().includes(termo));
+  if(CONTAGEM_FILTRO==='favoritos') itens = itens.filter(i=>FAVORITOS_CONTAGEM.has(i.id));
+  if(CONTAGEM_FILTRO==='preenchidos') itens = itens.filter(i=>itemPreenchido(i.id));
+  if(CONTAGEM_FILTRO==='vazios') itens = itens.filter(i=>!itemPreenchido(i.id));
+  info.textContent = (termo || CONTAGEM_FILTRO!=='todos') ? `mostrando ${itens.length} de ${todosDoSetor.length}` : '';
   // reordenar (arrastar) muda a ordem do catalogo da loja atual - fica
   // restrito a quem tem a mesma permissao das outras acoes de "reorganizar
-  // catalogo" (editar/excluir item) - ver index.js
-  const podeArrastar = IS_MASTER || !!ME.podeCatalogoEstoque;
+  // catalogo" (editar/excluir item) - ver index.js. Com filtro/busca ativos
+  // a lista esta parcial, entao o arrastar fica desligado pra nao bagunçar
+  // a ordem real do setor
+  const podeArrastar = (IS_MASTER || !!ME.podeCatalogoEstoque) && !termo && CONTAGEM_FILTRO==='todos';
   container.innerHTML = itens.length ? itens.map(i=>{
     const valorAtual = CONTAGEM_VALORES[i.id];
     const valorOntem = CONTAGEM_ONTEM[i.id];
+    const fav = FAVORITOS_CONTAGEM.has(i.id);
     return `<div class="linha-contagem" data-item-id="${i.id}">
       ${podeArrastar ? '<span class="drag-handle" title="Arraste para reordenar">⠿</span>' : ''}
+      <button type="button" class="btn-fav ${fav?'ativo':''}" title="${fav?'Tirar dos favoritos':'Marcar como favorito'}" onclick="toggleFavorito('${i.id}')">${fav?'⭐':'☆'}</button>
       <div class="nome">${escapeHtml(i.nome)} <span class="un">${escapeHtml(i.unidadeMedida)}</span></div>
       <div class="ref">Ontem: ${valorOntem!=null ? valorOntem : '—'}</div>
       <input type="number" step="0.001" data-item-id="${i.id}" class="input-contagem" value="${valorAtual!=null?valorAtual:''}" placeholder="qtd" oninput="CONTAGEM_VALORES[this.dataset.itemId]=this.value; atualizarProgressoContagem();">
     </div>`;
-  }).join('') : '<div class="empty">Nenhum item nesse setor ainda - adicione um abaixo.</div>';
+  }).join('') : `<div class="empty">${todosDoSetor.length ? 'Nenhum item com esse filtro/busca nesse setor.' : 'Nenhum item nesse setor ainda - adicione um abaixo.'}</div>`;
   atualizarProgressoContagem();
   if(podeArrastar && itens.length>1) ativarDragReordenar(container, setor);
 }
