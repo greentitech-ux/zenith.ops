@@ -282,7 +282,8 @@
     <div class="sub" id="edicao-fechamento-info"></div>
     <label>O que você precisa pedir?</label>
     <select id="ef-tipo" onchange="atualizarTipoEdicaoFechamento()">
-      <option value="campo">Corrigir um valor</option>
+      <option value="campo">Corrigir um valor digitado</option>
+      <option value="item">Adicionar item que faltou (maquininha / saída)</option>
       <option value="data">Corrigir a data do lançamento</option>
       <option value="excluir">Excluir o lançamento inteiro</option>
     </select>
@@ -290,7 +291,20 @@
       <div id="ef-campo-wrap">
         <label>Qual valor está errado e qual o valor correto?</label>
         <select id="ef-campo"></select>
+        <div class="sub" style="font-size:11.5px;color:var(--muted);margin-top:4px;">A lista mostra só o que foi <b>digitado</b> no lançamento (inclusive os que ficaram em branco). Os totais automáticos (Maquininhas, Total de saída, Faturamento, Total declarado, Quebra) se recalculam sozinhos quando a correção é aprovada.</div>
         <input type="number" step="0.01" id="ef-valor" placeholder="valor correto" style="margin-top:8px;">
+      </div>
+      <div id="ef-item-wrap" class="hidden">
+        <label>Tipo do item esquecido</label>
+        <select id="ef-item-tipo">
+          <option value="maquininha">Maquininha</option>
+          <option value="maquininhaPos">Maquininha POS (pós meia-noite)</option>
+          <option value="saida">Saída de caixa</option>
+        </select>
+        <label>Descrição</label>
+        <input type="text" id="ef-item-desc" placeholder="ex: POS 03 / motoboy extra">
+        <label>Valor</label>
+        <input type="number" step="0.01" id="ef-item-valor" placeholder="valor do item">
       </div>
       <div id="ef-data-wrap" class="hidden">
         <label>Qual é a data correta?</label>
@@ -1615,6 +1629,31 @@ const NOMES_CAMPOS_FECHAMENTO = { caixaInicial:'Caixa inicial', caixaFinal:'Caix
 // já têm os próprios grids dinâmicos por grupo, ver abrirEditarMasterFechamento)
 const CAMPOS_NUMERICOS_MASTER_FECHAMENTO = CAMPOS_NUMERICOS_FECHAMENTO.filter(c=>!['delivery','carryout','pickup','loja','ifood','food99','pix','pixCnpj','outros','tc','cancelados'].includes(c));
 
+// pedir correcao (loja): so o que foi DIGITADO no lançamento entra na lista
+// - inclusive o que ficou em branco/zerado ("deixou de digitar"). As somas
+// automáticas (Maquininhas total, Total de saída, Faturamento, Total
+// declarado, Quebra) ficam de fora: elas se recalculam sozinhas quando a
+// correção é aprovada, então não fazem sentido como alvo de correção
+const CAMPOS_DIGITADOS_FECHAMENTO = ['caixaInicial','caixaFinal','delivery','carryout','pickup','loja','adyenPos','ifood','food99','pix','pixCnpj','outros','entradaDinheiro','deposito','tc','cancelados'];
+const CAMPOS_SEM_CIFRAO = ['tc','cancelados'];
+function atualCampoFmt(campo, valor){ return CAMPOS_SEM_CIFRAO.includes(campo) ? String(num(valor)) : fmtMoney(num(valor)); }
+function opcoesCorrecaoFechamento(f){
+  const g = grupoKpiDaUnidadeFechamento(f.unidade);
+  const fixos = CAMPOS_DIGITADOS_FECHAMENTO
+    .map(c=>`<option value="c:${c}">${NOMES_CAMPOS_FECHAMENTO[c]} (atual: ${atualCampoFmt(c, f[c])})</option>`).join('');
+  const canais = (g?.canaisVendaExtras||[])
+    .map(d=>`<option value="cv:${escapeHtml(d.campo)}">${escapeHtml(d.label||d.campo)} (atual: ${fmtMoney(num((f.canaisVendaExtras||{})[d.campo]))})</option>`).join('');
+  const formas = (g?.formasPagamentoExtras||[])
+    .map(d=>`<option value="fp:${escapeHtml(d.campo)}">${escapeHtml(d.label||d.campo)} (atual: ${fmtMoney(num((f.formasPagamentoExtras||{})[d.campo]))})</option>`).join('');
+  const kpis = (g?.kpisExtras||[])
+    .filter(k=>!['texto','arquivo'].includes(k.tipo||'quantidade'))
+    .map(k=>`<option value="kpi:${escapeHtml(k.campo)}">${escapeHtml(k.label||k.campo)} (atual: ${(k.tipo==='moeda')?fmtMoney(num((f.kpisExtras||{})[k.campo])):num((f.kpisExtras||{})[k.campo])})</option>`).join('');
+  return fixos
+    + (canais?`<optgroup label="Canais de venda (grupo)">${canais}</optgroup>`:'')
+    + (formas?`<optgroup label="Formas de pagamento (grupo)">${formas}</optgroup>`:'')
+    + (kpis?`<optgroup label="KPI's (grupo)">${kpis}</optgroup>`:'');
+}
+
 let MEUS_FECHAMENTOS = [];
 let EDICOES_FECHAMENTO = [];
 let EDITANDO_FECHAMENTO_ID = null;
@@ -1673,10 +1712,13 @@ function abrirEdicaoFechamento(id){
   EDITANDO_FECHAMENTO_ID = id;
   const f = MEUS_FECHAMENTOS.find(x=>x.id===id);
   document.getElementById('edicao-fechamento-info').textContent = `${f.unidadeNome||f.unidade} · ${fmtData(f.data)} — depois de lançado o fechamento não pode ser mudado direto; o pedido vai para aprovação do Master.`;
-  document.getElementById('ef-campo').innerHTML = CAMPOS_NUMERICOS_MASTER_FECHAMENTO.map(c=>`<option value="${c}">${NOMES_CAMPOS_FECHAMENTO[c]} (atual: ${fmtMoney(f[c])})</option>`).join('');
+  document.getElementById('ef-campo').innerHTML = opcoesCorrecaoFechamento(f);
   document.getElementById('ef-valor').value = '';
   document.getElementById('ef-nova-data').value = '';
   document.getElementById('ef-motivo').value = '';
+  document.getElementById('ef-item-tipo').value = 'maquininha';
+  document.getElementById('ef-item-desc').value = '';
+  document.getElementById('ef-item-valor').value = '';
   document.getElementById('ef-tipo').value = 'campo';
   atualizarTipoEdicaoFechamento();
   document.getElementById('msg-edicao-fechamento').classList.add('hidden');
@@ -1689,6 +1731,7 @@ function fecharEdicaoFechamento(){ document.getElementById('overlay-edicao-fecha
 function atualizarTipoEdicaoFechamento(){
   const tipo = document.getElementById('ef-tipo').value;
   document.getElementById('ef-campo-wrap').classList.toggle('hidden', tipo!=='campo');
+  document.getElementById('ef-item-wrap').classList.toggle('hidden', tipo!=='item');
   document.getElementById('ef-data-wrap').classList.toggle('hidden', tipo!=='data');
   document.getElementById('ef-excluir-wrap').classList.toggle('hidden', tipo!=='excluir');
 }
@@ -1708,10 +1751,22 @@ document.getElementById('form-edicao-fechamento').addEventListener('submit', asy
     const novaData = document.getElementById('ef-nova-data').value;
     if(!novaData){ msg.textContent = 'Informe a data correta.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
     body = { tipoCorrecao:'data', novaData, motivo };
+  } else if(tipo==='item'){
+    const valorItem = Number(document.getElementById('ef-item-valor').value);
+    if(!(valorItem > 0)){ msg.textContent = 'Informe o valor do item.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
+    body = { tipoCorrecao:'item', itemNovo: { tipo: document.getElementById('ef-item-tipo').value, descricao: document.getElementById('ef-item-desc').value, valor: valorItem }, motivo };
   } else {
-    const campo = document.getElementById('ef-campo').value;
+    // o value carrega o destino do campo: c: (fixo), cv:/fp:/kpi: (extras do grupo)
+    const sel = document.getElementById('ef-campo').value;
+    const sep = sel.indexOf(':');
+    const pref = sel.slice(0, sep);
+    const campo = sel.slice(sep + 1);
     const valor = document.getElementById('ef-valor').value;
-    body = { tipoCorrecao:'campo', mudancas: { [campo]: valor }, motivo };
+    body = { tipoCorrecao:'campo', motivo };
+    if(pref==='cv') body.mudancasCanais = { [campo]: valor };
+    else if(pref==='fp') body.mudancasFormas = { [campo]: valor };
+    else if(pref==='kpi') body.mudancasKpis = { [campo]: valor };
+    else body.mudancas = { [campo]: valor };
   }
 
   try{

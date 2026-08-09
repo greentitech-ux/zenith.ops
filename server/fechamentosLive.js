@@ -307,7 +307,7 @@ async function getOne(id) {
 // se precisar, o Master corrige o dia seguinte manualmente também.
 const TIPOS_ITEM_NOVO = ['maquininha', 'maquininhaPos', 'saida'];
 
-async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, itemNovo, novaData, motivo, anexos, solicitadoPorId, solicitadoPorEmail, direcionadoParaId, direcionadoParaEmail }) {
+async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, mudancasCanais, mudancasFormas, mudancasKpis, itemNovo, novaData, motivo, anexos, solicitadoPorId, solicitadoPorEmail, direcionadoParaId, direcionadoParaEmail }) {
   const atual = await getOne(fechamentoId);
   if (!atual) throw new Error('Fechamento não encontrado.');
   if (!motivo || !String(motivo).trim()) throw new Error('Descreva o motivo da correção.');
@@ -325,6 +325,13 @@ async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, itemNovo,
     data: atual.data,
     tipoCorrecao: ['item', 'excluir', 'data'].includes(tipoCorrecao) ? tipoCorrecao : 'campo',
     mudancas: {},
+    // patches dos mapas extras do grupo (canais de venda/formas de
+    // pagamento/KPIs definidos em grupos.html) - mesmo formato campo:valor
+    // do editarDireto, pra loja poder corrigir TUDO que digitou, nao so os
+    // campos fixos
+    mudancasCanais: {},
+    mudancasFormas: {},
+    mudancasKpis: {},
     itemNovo: null,
     novaData: null,
     motivo: String(motivo).trim(),
@@ -372,7 +379,14 @@ async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, itemNovo,
     Object.entries(mudancas || {}).forEach(([campo, valor]) => {
       if (CAMPOS_NUMERICOS.includes(campo)) camposValidos[campo] = num(valor);
     });
-    if (!Object.keys(camposValidos).length) throw new Error('Nenhum campo válido para corrigir.');
+    const tiposKpi = await tiposKpiDaUnidade(atual.unidade);
+    pedido.mudancasCanais = sanitizarPatchMapa(mudancasCanais);
+    pedido.mudancasFormas = sanitizarPatchMapa(mudancasFormas);
+    pedido.mudancasKpis = sanitizarPatchMapa(mudancasKpis, tiposKpi);
+    if (!Object.keys(camposValidos).length && !Object.keys(pedido.mudancasCanais).length
+      && !Object.keys(pedido.mudancasFormas).length && !Object.keys(pedido.mudancasKpis).length) {
+      throw new Error('Nenhum campo válido para corrigir.');
+    }
     pedido.mudancas = camposValidos;
   }
 
@@ -640,10 +654,22 @@ async function decidirEdicao(id, status, { decididoPorEmail, motivoDecisao }) {
       } else {
         novosValores = { ...pedido.mudancas };
         camposMudados = pedido.mudancas;
+        // patches dos mapas extras do grupo (canais/formas/KPIs) - mesmo
+        // merge do editarDireto: so os campos pedidos mudam, o resto fica
+        const canaisP = pedido.mudancasCanais || {};
+        const formasP = pedido.mudancasFormas || {};
+        const kpisP = pedido.mudancasKpis || {};
+        if (Object.keys(canaisP).length) novosValores.canaisVendaExtras = { ...(atual.canaisVendaExtras || {}), ...canaisP };
+        if (Object.keys(formasP).length) novosValores.formasPagamentoExtras = { ...(atual.formasPagamentoExtras || {}), ...formasP };
+        if (Object.keys(kpisP).length) novosValores.kpisExtras = { ...(atual.kpisExtras || {}), ...kpisP };
       }
 
       const valoresAnteriores = {};
       Object.keys(camposMudados).forEach((campo) => { valoresAnteriores[campo] = atual[campo]; });
+      ['mudancasCanais', 'mudancasFormas', 'mudancasKpis'].forEach((chave) => {
+        const mapaAtual = chave === 'mudancasCanais' ? atual.canaisVendaExtras : chave === 'mudancasFormas' ? atual.formasPagamentoExtras : atual.kpisExtras;
+        Object.keys(pedido[chave] || {}).forEach((campo) => { valoresAnteriores[campo] = (mapaAtual || {})[campo]; });
+      });
       const merged = { ...atual, ...novosValores };
       recomputarTotais(merged, camposMudados, await defsExtrasDaUnidade(atual.unidade));
       novosValores.faturamento = merged.faturamento;
@@ -655,7 +681,9 @@ async function decidirEdicao(id, status, { decididoPorEmail, motivoDecisao }) {
         por: decididoPorEmail,
         motivo: pedido.motivo,
         valoresAnteriores,
-        valoresNovos: pedido.tipoCorrecao === 'item' ? { itemNovo: pedido.itemNovo } : pedido.mudancas,
+        valoresNovos: pedido.tipoCorrecao === 'item'
+          ? { itemNovo: pedido.itemNovo }
+          : { ...pedido.mudancas, ...(pedido.mudancasCanais || {}), ...(pedido.mudancasFormas || {}), ...(pedido.mudancasKpis || {}) },
       }];
       await fechRef.update({ ...novosValores, historico, atualizadoEm: new Date().toISOString() });
       fechamentosCache.invalidar();
