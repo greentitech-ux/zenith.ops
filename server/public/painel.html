@@ -420,6 +420,7 @@ const ICONES_TIPO_CENTRAL = { estorno:'💳', 'ajuste-fechamento':'🧾', compra
 let ME_GLOBAL = null;
 let IS_MASTER_GLOBAL = false;
 let IS_ADMIN_GLOBAL = false;
+let SECOES_GLOBAL = [];
 
 // ---------- notificacao de solicitacao NOVA: toca som e fica na tela ate
 // QUALQUER Master/Admin sinalizar (marcar-visto) - mesma logica de
@@ -985,6 +986,7 @@ function salvarOrdemCards(){
 }
 // arrastar pela alça ⠿ (pointer events = funciona com dedo e mouse): o card
 // segue o ponteiro trocando de posicao ao vivo; soltou, a ordem e salva
+let PAINEL_ARRASTANDO = false;
 function initDragCards(){
   const grid = document.getElementById('painel-grid');
   let slotArrastado = null;
@@ -992,12 +994,14 @@ function initDragCards(){
     if(!slotArrastado) return;
     slotArrastado.classList.remove('arrastando');
     slotArrastado = null;
+    PAINEL_ARRASTANDO = false;
     salvarOrdemCards();
   };
   grid.querySelectorAll('.pcard-drag').forEach(alca=>{
     alca.addEventListener('pointerdown', (e)=>{
       slotArrastado = alca.closest('.pcard-slot');
       slotArrastado.classList.add('arrastando');
+      PAINEL_ARRASTANDO = true;
       alca.setPointerCapture(e.pointerId);
       e.preventDefault();
     });
@@ -1056,20 +1060,37 @@ async function boot(){
   document.getElementById('nav-reset-senha').classList.toggle('hidden', !(isMaster || IS_ADMIN_GLOBAL));
   if(new URLSearchParams(location.search).get('resetSenha') && (isMaster || IS_ADMIN_GLOBAL)) abrirResetSenha();
 
-  const aplicaveis = ordenarCards(CARDS_POR_SECAO.filter(c=>c.soMasterAdmin
-    ? (isMaster || IS_ADMIN_GLOBAL)
-    : (c.secoes||[c.secao]).some(s=>secoes.includes(s))));
+  SECOES_GLOBAL = secoes;
   document.getElementById('painel-loading').classList.add('hidden');
+  await renderizarCards();
+}
+
+// os cards sao um retrato do momento em que foram montados - cada um faz o
+// proprio fetch uma unica vez (ver cardMonitor/cardAbastecimento/etc acima).
+// Sem reatualizar, ficam presos no que a pessoa tinha quando a aba abriu,
+// cada vez mais desatualizados em relacao as telas de origem (Monitor e
+// Abastecimento, por exemplo, atualizam ao vivo via SSE) - por isso
+// reconstroi tudo de novo a cada 60s, e na hora quando a aba volta a ficar
+// visivel (deixou aberta minimizada/em outra aba por um tempo). Pula
+// enquanto a pessoa esta arrastando um card pra nao interromper o gesto.
+async function renderizarCards(){
+  if(PAINEL_ARRASTANDO) return;
+  const aplicaveis = ordenarCards(CARDS_POR_SECAO.filter(c=>c.soMasterAdmin
+    ? (IS_MASTER_GLOBAL || IS_ADMIN_GLOBAL)
+    : (c.secoes||[c.secao]).some(s=>SECOES_GLOBAL.includes(s))));
 
   if(!aplicaveis.length){
+    document.getElementById('painel-grid').classList.add('hidden');
     document.getElementById('painel-vazio').classList.remove('hidden');
     return;
   }
 
   const grid = document.getElementById('painel-grid');
   grid.classList.remove('hidden');
+  document.getElementById('painel-vazio').classList.add('hidden');
   // cada card falha isoladamente - um modulo fora do ar nao derruba o painel inteiro
   const resultados = await Promise.allSettled(aplicaveis.map(c=>c.build()));
+  if(PAINEL_ARRASTANDO) return; // pode ter comecado um arrasto enquanto os fetches rodavam
   grid.innerHTML = resultados.map((r,i)=>{
     let html;
     if(r.status==='fulfilled') html = r.value;
@@ -1086,6 +1107,8 @@ async function boot(){
 }
 
 boot();
+setInterval(()=>{ if(!document.hidden) renderizarCards(); }, 60000);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) renderizarCards(); });
 </script>
 <script src="/notif-central.js"></script>
 <script src="/suporte-chat.js"></script>
