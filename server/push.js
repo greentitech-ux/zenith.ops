@@ -212,7 +212,30 @@ async function notifyBeniboyEscalonamento(chat, motivo) {
   }
 }
 
+// alerta pra UMA pessoa especifica (userId), independente de secao/unidade -
+// usado pelo "vigia de pedido" do Beniboy (pedidoWatch.js): quando o status
+// de um pedido muda depois que o bot ja respondeu, so quem perguntou recebe
+// o aviso, mesmo com o Zenith fechado (SSE cobre com o app aberto - ver
+// broadcastParaUsuario em index.js; isso aqui cobre com o app fechado)
+async function notifyUsuario(userId, title, body, tag, url) {
+  if (!PUBLIC_KEY || !PRIVATE_KEY || !userId) return;
+  const payload = JSON.stringify({ title, body, tag, url: url || '/' });
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!sub.meta || sub.meta.userId !== userId) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (usuário):', err.message);
+      }
+    }
+  }
+}
+
 module.exports = {
   addSubscription, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
-  notifyBeniboyEscalonamento, PUBLIC_KEY,
+  notifyBeniboyEscalonamento, notifyUsuario, PUBLIC_KEY,
 };

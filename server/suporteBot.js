@@ -19,6 +19,7 @@
 const suporteChat = require('./suporteChat');
 const solicitacoes = require('./solicitacoes');
 const store = require('./store');
+const pedidoWatch = require('./pedidoWatch');
 
 const MODELO = 'claude-opus-5';
 const MAX_TOKENS = 700;
@@ -71,7 +72,7 @@ O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, 
 - criar_ticket: abre uma solicitação na Central. Antes de criar, CONFIRME em uma única mensagem o resumo (tipo, unidade, o que é). Só crie depois do "sim" da pessoa. Depois de criar, informe o número do ticket.
 - consultar_ticket: andamento de um ticket pelo número.
 - chamar_atendente: acione quando a pessoa pedir um humano, quando você não souber resolver, ou quando o assunto for sensível. Avise que o time já foi chamado e responde ali mesmo na conversa.${temFerramentaPedido ? `
-- consultar_pedido: consulta o status de UM pedido específico no Monitor (aprovado, recusado, estornado, fraude suspeita). A busca já vem limitada às lojas que essa pessoa tem acesso - se não achar, pode ser de outra loja, não assuma fraude/erro. Nunca invente status; se a ferramenta não achar nada, diga isso e ofereça chamar_atendente.` : `
+- consultar_pedido: consulta o status de UM pedido específico no Monitor (aprovado, recusado, estornado, fraude suspeita). Peça os 3 dados ANTES de chamar (uma pergunta por vez, o que faltar): o código da loja (IDPULSE, a mesma coluna "Unidade" do Fechamento), o nome do cliente e o valor do pedido. A busca já vem limitada às lojas que essa pessoa tem acesso - se não achar, pode ser de outra loja, não assuma fraude/erro. Nunca invente status; se a ferramenta não achar nada, diga isso e ofereça chamar_atendente. Se o status desse pedido mudar depois da sua resposta, a pessoa é avisada automaticamente - não precisa te perguntar de novo.` : `
 - Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora (só quem está logado com permissão de Monitor). Use chamar_atendente.`}
 
 ## Unidades válidas pra ticket (use exatamente um destes nomes; se a pessoa falar parecido, escolha o mais próximo; se não der pra saber, pergunte)
@@ -120,13 +121,15 @@ const TOOLS_BASE = [
 // permissao de Monitor nunca ve nem essa ferramenta oferecida ao modelo
 const TOOL_CONSULTAR_PEDIDO = {
   name: 'consultar_pedido',
-  description: 'Consulta o status de um pedido/transação específico no Monitor (aprovado, recusado, estornado, fraude suspeita). Só disponível pra quem está logado com acesso ao Monitor - o resultado já vem limitado às lojas dessa pessoa.',
+  description: 'Consulta o status de um pedido/transação específico no Monitor (aprovado, recusado, estornado, fraude suspeita). Só disponível pra quem está logado com acesso (Monitor ou tag de Gerente) - o resultado já vem limitado às lojas dessa pessoa. Exige os 3 dados: código da loja (IDPULSE), nome do cliente e valor.',
   input_schema: {
     type: 'object',
     properties: {
-      identificador: { type: 'string', description: 'O que a pessoa souber sobre o pedido: referência (pspReference/merchantReference), nome do cliente, ou os últimos 4 dígitos do cartão.' },
+      idPulse: { type: 'string', description: 'Código numérico da loja (IDPULSE), igual aparece na coluna "Unidade" do Fechamento - ex: 19888, 19798, 19911.' },
+      nomeCliente: { type: 'string', description: 'Nome do cliente do pedido, como a pessoa souber (pode ser parcial).' },
+      valor: { type: 'string', description: 'Valor do pedido em reais, como a pessoa informar (ex: "45,90").' },
     },
-    required: ['identificador'],
+    required: ['idPulse', 'nomeCliente', 'valor'],
   },
 };
 
@@ -154,7 +157,7 @@ function montarMensagens(chat) {
   return turnos;
 }
 
-async function executarTool(nome, input, chat, resultado) {
+async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdPulse) {
   if (nome === 'criar_ticket') {
     const tipo = TIPOS_TICKET.includes(input.tipo) ? input.tipo : null;
     if (!tipo) return 'Erro: tipo inválido.';
@@ -195,21 +198,36 @@ async function executarTool(nome, input, chat, resultado) {
     // defesa em profundidade: mesmo que o modelo tentasse chamar essa tool
     // fora do previsto, ela so entra em TOOLS quando chat.logado.temMonitor -
     // aqui checa de novo antes de tocar em qualquer dado do Monitor
-    if (!chat.logado || !chat.logado.temMonitor) return 'Sem acesso ao Monitor pra essa consulta - chame um atendente.';
-    const query = String(input.identificador || '').trim().toLowerCase();
-    if (!query) return 'Peça pra pessoa informar a referência do pedido, o nome do cliente ou os 4 últimos dígitos do cartão.';
-    let pedidos = store.allOrders();
+    if (!chat.logado || !chat.logado.temMonitor) return 'Sem acesso a essa consulta - chame um atendente.';
+    const idPulse = String(input.idPulse || '').trim();
+    const nomeCliente = String(input.nomeCliente || '').trim().toLowerCase();
+    const valorTexto = String(input.valor || '').trim();
+    if (!idPulse || !nomeCliente || !valorTexto) return 'Peça pra pessoa informar o código da loja (IDPULSE), o nome do cliente e o valor do pedido.';
+    const valorNum = parseFloat(valorTexto.replace(/[^\d,.-]/g, '').replace(',', '.'));
+
+    // resolve o IDPULSE (codigo do Fechamento) pros codigos correspondentes
+    // no espaco do Monitor (merchantAccountCode da Adyen) - sem resolver
+    // (config antiga, sem index.js repassando a funcao), usa o codigo cru
+    const candidatos = new Set(resolverUnidadesPorIdPulse ? resolverUnidadesPorIdPulse(idPulse) : [idPulse]);
+    let pedidos = store.allOrders().filter((o) => o.unidade && candidatos.has(o.unidade));
     if (!chat.logado.isMaster) {
       const permitidas = new Set(chat.logado.unidades || []);
-      pedidos = pedidos.filter((o) => o.unidade && permitidas.has(o.unidade));
+      pedidos = pedidos.filter((o) => permitidas.has(o.unidade));
+    }
+    pedidos = pedidos.filter((o) => String(o.cliente || '').toLowerCase().includes(nomeCliente));
+    if (!Number.isNaN(valorNum)) {
+      pedidos = pedidos.filter((o) => Math.abs((o.valor || 0) - valorNum) < 0.01);
     }
     const encontrados = pedidos
-      .filter((o) => String(o.pedidoId || '').toLowerCase().includes(query)
-        || String(o.cliente || '').toLowerCase().includes(query)
-        || String(o.last4 || '').includes(query))
       .sort((a, b) => String(b.ultimaAtualizacao || '').localeCompare(String(a.ultimaAtualizacao || '')))
       .slice(0, 5);
-    if (!encontrados.length) return 'Nenhum pedido encontrado com essa referência nas lojas que essa pessoa tem acesso (pode ser de outra loja, ou já saiu da retenção do Monitor).';
+    if (!encontrados.length) return 'Nenhum pedido encontrado com esses dados nas lojas que essa pessoa tem acesso (confira o código da loja, o nome e o valor - ou pode ser de outra loja, ou já saiu da retenção do Monitor).';
+    // registra o "retrato" do status visto agora - se mudar depois, a pessoa
+    // e avisada sozinha (SSE com o Zenith aberto + push com fechado), sem
+    // precisar voltar aqui perguntar de novo (ver pedidoWatch.js/index.js)
+    for (const o of encontrados) {
+      pedidoWatch.registrar({ pedidoId: o.pedidoId, userId: chat.logado.id, unidade: o.unidade, statusVisto: o.statusAtual, chatId: chat.id }).catch(() => {});
+    }
     return JSON.stringify(encontrados.map((o) => ({
       pedido: o.pedidoId, unidade: o.unidade, cliente: o.cliente, valor: o.valor,
       status: o.statusAtual, metodo: o.metodo, cartaoFinal: o.last4,
@@ -226,7 +244,7 @@ const emAndamento = new Set();
 // Gera (e grava) a resposta do bot pra conversa. Retorna null quando o bot
 // nao deve/nao consegue falar; senao { chat, tickets, chamouAtendente }.
 // `unidades` = nomes validos pra abertura de ticket (vem do index.js).
-async function responderConversa(chatId, { unidades = [] } = {}) {
+async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdPulse } = {}) {
   if (!ativo() || emAndamento.has(chatId)) return null;
   emAndamento.add(chatId);
   try {
@@ -255,7 +273,7 @@ async function responderConversa(chatId, { unidades = [] } = {}) {
         if (bloco.type !== 'tool_use') continue;
         let saida;
         try {
-          saida = await executarTool(bloco.name, bloco.input || {}, chat, resultado);
+          saida = await executarTool(bloco.name, bloco.input || {}, chat, resultado, resolverUnidadesPorIdPulse);
         } catch (err) {
           saida = `Erro ao executar: ${err.message}`;
         }

@@ -94,6 +94,18 @@
   @media (prefers-reduced-motion:reduce){
     .szc-alarme,.szc-alarme .szc-al-icone{animation:none;}
   }
+  /* popup de "pedido mudou de status" (Beniboy/pedidoWatch.js) - aparece em
+     CIMA de qualquer tela do Zenith que a pessoa estiver, independente do
+     chat estar aberto ou nao */
+  .szc-pedido-popup{position:fixed;top:16px;right:16px;z-index:99998;display:flex;flex-direction:column;gap:8px;max-width:320px;}
+  .szc-pp-card{background:#12161b;color:#e7ecf1;border:1px solid #5cc8ff;border-radius:12px;padding:12px 34px 12px 14px;
+    position:relative;box-shadow:0 10px 30px rgba(0,0,0,.5);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    animation:szc-pp-in .25s ease;}
+  .szc-pp-titulo{font-size:13px;font-weight:700;margin-bottom:4px;}
+  .szc-pp-corpo{font-size:12px;color:#cfeeff;line-height:1.4;}
+  .szc-pp-fechar{position:absolute;top:8px;right:8px;background:none;border:none;color:#7d8896;font-size:14px;cursor:pointer;}
+  @keyframes szc-pp-in{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:translateY(0);}}
+  @media (prefers-reduced-motion:reduce){ .szc-pp-card{animation:none;} }
   `;
 
   function el(html) {
@@ -566,32 +578,59 @@
     });
   }
 
+  // ---------- popup "pedido mudou de status" (pedidoWatch.js) - quem
+  // perguntou pro Beniboy o status de um pedido especifico e avisado sozinho
+  // se esse status mudar depois, em CIMA de qualquer tela do Zenith que
+  // estiver aberta (ver pedido-status-mudou no SSE em atendInit abaixo).
+  // Com o app fechado, o mesmo alerta chega por push (ver push.notifyUsuario) ----------
+  const pedidoPopupEl = el('<div class="szc-pedido-popup"></div>');
+  document.body.appendChild(pedidoPopupEl);
+  function mostrarPopupPedido(d) {
+    const card = el(`<div class="szc-pp-card">
+      <button type="button" class="szc-pp-fechar" title="Fechar">✕</button>
+      <div class="szc-pp-titulo">📦 Pedido ${esc(d.pedidoId || '')} mudou de status</div>
+      <div class="szc-pp-corpo">${esc(d.cliente || 'Cliente')} · R$ ${Number(d.valor || 0).toFixed(2)}<br>${esc(d.statusAnterior || '—')} → <b>${esc(d.statusAtual || '')}</b></div>
+    </div>`);
+    pedidoPopupEl.appendChild(card);
+    const remover = () => { if (card.parentNode) card.parentNode.removeChild(card); };
+    card.querySelector('.szc-pp-fechar').addEventListener('click', remover);
+    setTimeout(remover, 15000);
+  }
+
   async function atendInit() {
     const token = localStorage.getItem('authToken');
     if (!token) return;
     try {
       const r = await rawFetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
-      if (!r.ok) return;
-      const me = await r.json();
-      const secoes = (me.permissions && me.permissions.sections) || [];
-      if (!(me.role === 'master' || me.isAdmin || secoes.includes('suporte'))) return;
-      ATEND.ativo = true;
-      ATEND.ehMaster = me.role === 'master';
-      btn.title = 'Chats de suporte';
-      atualizarNomeFlutuante(); // atendimento nao mostra o nome do Beniboy
-      await atendCarregar();
-      // aba em segundo plano nao busca (ninguem esta olhando e a requisicao
-      // so gastaria servidor/Firestore a toa) - ao voltar pra aba, atualiza
-      // na hora. O SSE continua ligado, entao mensagem nova ainda chega.
-      ATEND.timer = setInterval(() => { if (!document.hidden) atendCarregar(); }, 25 * 1000);
-      document.addEventListener('visibilitychange', () => { if (!document.hidden && ATEND.ativo) atendCarregar(); });
-      // SSE: mensagem nova chega na hora (o poll fica de rede de seguranca)
-      try {
-        const es = new EventSource('/api/stream?token=' + encodeURIComponent(token));
+      if (r.ok) {
+        const me = await r.json();
+        const secoes = (me.permissions && me.permissions.sections) || [];
+        if (me.role === 'master' || me.isAdmin || secoes.includes('suporte')) {
+          ATEND.ativo = true;
+          ATEND.ehMaster = me.role === 'master';
+          btn.title = 'Chats de suporte';
+          atualizarNomeFlutuante(); // atendimento nao mostra o nome do Beniboy
+          await atendCarregar();
+          // aba em segundo plano nao busca (ninguem esta olhando e a requisicao
+          // so gastaria servidor/Firestore a toa) - ao voltar pra aba, atualiza
+          // na hora. O SSE continua ligado, entao mensagem nova ainda chega.
+          ATEND.timer = setInterval(() => { if (!document.hidden) atendCarregar(); }, 25 * 1000);
+          document.addEventListener('visibilitychange', () => { if (!document.hidden && ATEND.ativo) atendCarregar(); });
+        }
+      }
+    } catch (e) { /* segue como widget de visitante */ }
+    // SSE: aberto pra QUALQUER pessoa logada (nao so time de suporte) - alem
+    // da fila de atendimento (so quem atende), qualquer um que perguntou pro
+    // Beniboy o status de um pedido recebe o popup ao vivo em cima de
+    // qualquer tela, se o status mudar depois (pedidoWatch.js/index.js)
+    try {
+      const es = new EventSource('/api/stream?token=' + encodeURIComponent(token));
+      if (ATEND.ativo) {
         es.addEventListener('suporte-chat', () => { atendCarregar(); });
         es.addEventListener('beniboy-escalonamento', (e) => { dispararAlarmeBeniboy(JSON.parse(e.data)); });
-      } catch (e) { /* sem SSE, o poll resolve */ }
-    } catch (e) { /* segue como widget de visitante */ }
+      }
+      es.addEventListener('pedido-status-mudou', (e) => { mostrarPopupPedido(JSON.parse(e.data)); });
+    } catch (e) { /* sem SSE, sem alerta ao vivo aqui - o push cobre com o app fechado */ }
   }
   atendInit();
 })();

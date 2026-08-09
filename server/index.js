@@ -44,6 +44,7 @@ const chamadosTI = require('./chamadosTI');
 const chamadosManutencao = require('./chamadosManutencao');
 const suporteChat = require('./suporteChat');
 const suporteBot = require('./suporteBot');
+const pedidoWatch = require('./pedidoWatch');
 const docsMaster = require('./docsMaster');
 const abastecimentoCarrinho = require('./abastecimentoCarrinho');
 const ativosTI = require('./ativosTI');
@@ -420,7 +421,10 @@ async function usuarioLogadoDoHeader(req) {
     username: user.username || user.email,
     isMaster,
     unidades: isMaster ? null : (user.permissions?.unidades || []),
-    temMonitor: isMaster || (user.permissions?.sections || []).includes('monitor'),
+    // secao 'monitor' OU tag de cargo "Gerente" liberam sozinhas a ferramenta
+    // de consulta de pedido do Beniboy - qualquer uma das duas basta, pedido
+    // explicito do usuario ("Gerente libera sozinho")
+    temMonitor: isMaster || (user.permissions?.sections || []).includes('monitor') || user.cargo === 'gerente',
   };
 }
 
@@ -525,6 +529,18 @@ function broadcast(event, data, section) {
   }
 }
 
+// alerta pra UMA pessoa especifica, independente da tela do Zenith que ela
+// estiver com aberta (nao filtra por secao/unidade - se e pra ELA, e pra
+// ela em qualquer tela) - usado pelo vigia de pedido do Beniboy
+// (pedidoWatch.js). So cobre quem esta com o app ABERTO agora; pra quem
+// fechou, o alerta chega por push (ver push.notifyUsuario)
+function broadcastParaUsuario(userId, event, data) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const client of sseClients) {
+    if (client.userId === userId) client.res.write(payload);
+  }
+}
+
 app.get('/api/stream', (req, res) => {
   res.set({
     'Content-Type': 'text/event-stream',
@@ -535,6 +551,7 @@ app.get('/api/stream', (req, res) => {
   res.write(`event: hello\ndata: ${JSON.stringify({ bootId: BOOT_ID })}\n\n`);
   const client = {
     res,
+    userId: req.user.id,
     isMaster: req.isMaster,
     sections: req.isMaster ? null : new Set(req.permissions.sections || []),
     unidades: req.isMaster ? null : new Set(req.permissions.unidades || []),
@@ -765,6 +782,11 @@ app.post('/webhooks/adyen', async (req, res) => {
     const order = store.orderFor(tx.merchantReference || tx.originalReference || tx.pspReference);
     if (order && new Set(order.history.map((h) => h.status)).size > 1) {
       broadcast('order-changed', order, 'monitor');
+    }
+    // alguem pode estar de olho nesse pedido especifico (perguntou pro
+    // Beniboy no chat) - confere e alerta se o status mudou desde a resposta
+    if (order) {
+      verificarAlertaPedido(order).catch((err) => console.error('[pedidoWatch] falha ao verificar alerta:', err.message));
     }
 
     // avisa o dashboard pra atualizar a secao dedicada de chargebacks
@@ -1148,6 +1170,23 @@ function classificarUnidade(codigo) {
 function nomeCanonicoUnidade(codigo, fallback) {
   return UNIDADES_APELIDOS[codigo] || FECHAMENTO_UNIDADES_NOMES[codigo] || ENTREGAS_UNIDADES_NOMES[codigo]
     || ifoodClient.IFOOD_UNIDADES_NOMES[codigo] || fallback || codigo;
+}
+
+// resolve um "IDPULSE" (codigo numerico da loja, como aparece na coluna
+// Unidade do Fechamento - ex: 19888) pros codigos correspondentes no espaco
+// do Monitor (merchantAccountCode da Adyen - ex: "DOM___19888"/"Mooca", que
+// sao a MESMA loja em namespaces diferentes, ver comentario de
+// UNIDADES_APELIDOS acima). Usado pelo Beniboy (consultar_pedido) pra achar
+// o pedido pela loja que a pessoa informou, mesmo ela so conhecendo o codigo
+// do Fechamento. Sem apelido cadastrado pra esse codigo ainda (loja nova),
+// devolve o proprio codigo digitado como unica tentativa - nunca inventa
+// correspondencia pra loja que ainda nao esta em nenhuma tabela fixa.
+function resolverUnidadesPorIdPulse(idPulse) {
+  const bruto = String(idPulse || '').trim();
+  if (!bruto) return [];
+  const nome = UNIDADES_APELIDOS[bruto] || FECHAMENTO_UNIDADES_NOMES[bruto];
+  if (!nome) return [bruto];
+  return Object.keys(UNIDADES_APELIDOS).filter((codigo) => UNIDADES_APELIDOS[codigo] === nome);
 }
 
 // lista de unidades pra montar o seletor de permissoes na tela de Usuarios -
@@ -4619,7 +4658,7 @@ async function acionarBeniboy(chatId) {
   try {
     const mapa = await construirUnidadesMapa();
     const unidades = [...new Set(Object.values(mapa))].sort();
-    const r = await suporteBot.responderConversa(chatId, { unidades });
+    const r = await suporteBot.responderConversa(chatId, { unidades, resolverUnidadesPorIdPulse });
     if (!r) return;
     broadcast('suporte-chat', { id: chatId }, 'suporte');
     for (const t of r.tickets || []) {
@@ -4636,6 +4675,34 @@ async function acionarBeniboy(chatId) {
     }
   } catch (err) {
     console.error('[suporteBot] falha no acionamento:', err.message);
+  }
+}
+
+// confere se alguem esta de olho nesse pedido (vigia gravado pelo Beniboy em
+// pedidoWatch.js quando respondeu consultar_pedido) e, se o status mudou
+// desde aquela resposta, avisa a pessoa - SSE se o Zenith estiver aberto
+// agora (qualquer tela, ver broadcastParaUsuario) + push se estiver fechado
+// (pedido explicito do usuario: "precisa alcançar mesmo com o app fechado").
+// Chamado a cada evento do webhook da Adyen; alerta e de uso unico (dispara
+// e remove o vigia - nao repete a cada evento seguinte do mesmo pedido).
+async function verificarAlertaPedido(order) {
+  if (!order || !order.pedidoId) return;
+  const vigias = await pedidoWatch.listarPorPedido(order.pedidoId);
+  for (const vigia of vigias) {
+    if (vigia.statusVisto === order.statusAtual) continue;
+    const dados = {
+      pedidoId: order.pedidoId, unidade: order.unidade, cliente: order.cliente, valor: order.valor,
+      statusAnterior: vigia.statusVisto, statusAtual: order.statusAtual,
+    };
+    broadcastParaUsuario(vigia.userId, 'pedido-status-mudou', dados);
+    push.notifyUsuario(
+      vigia.userId,
+      `Pedido ${order.pedidoId} mudou de status`,
+      `${order.cliente || 'Cliente'} · R$ ${(order.valor || 0).toFixed(2)} · ${vigia.statusVisto || '—'} → ${order.statusAtual}`,
+      'pedido-' + order.pedidoId,
+      '/monitor.html'
+    ).catch((err) => console.error('[pedidoWatch] falha no push:', err.message));
+    await pedidoWatch.remover(order.pedidoId, vigia.userId);
   }
 }
 
