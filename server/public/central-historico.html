@@ -312,6 +312,8 @@
         <select id="ef-campo"></select>
         <div class="sub" style="font-size:11.5px;color:var(--muted);margin-top:4px;">A lista mostra só o que foi <b>digitado</b> no lançamento (inclusive os que ficaram em branco). Os totais automáticos (Maquininhas, Total de saída, Faturamento, Total declarado, Quebra) se recalculam sozinhos quando a correção é aprovada.</div>
         <input type="number" step="0.01" id="ef-valor" placeholder="valor correto" style="margin-top:8px;">
+        <div id="ef-lista-campos"></div>
+        <button type="button" class="link-btn" style="margin-top:6px;" onclick="adicionarCampoCorrecao()">+ Corrigir mais um campo no mesmo pedido</button>
       </div>
       <div id="ef-item-wrap" class="hidden">
         <label>Tipo do item esquecido</label>
@@ -1767,8 +1769,35 @@ function renderListaFechamentos(){
   }
 }
 
+// varios campos no MESMO pedido de correção: quem tem 2-3 valores errados
+// adiciona um por um na lista e envia um pedido só (antes cada campo exigia
+// um pedido separado - foi isso que gerou pedidos duplicados na fila)
+let EF_CAMPOS = [];
+function adicionarCampoCorrecao(){
+  const selEl = document.getElementById('ef-campo');
+  const valor = document.getElementById('ef-valor').value;
+  const msg = document.getElementById('msg-edicao-fechamento');
+  if(valor===''){ msg.textContent = 'Preencha o valor correto antes de adicionar outro campo.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
+  msg.classList.add('hidden');
+  const label = (selEl.selectedOptions[0]?.textContent || selEl.value).split(' (atual:')[0];
+  EF_CAMPOS = EF_CAMPOS.filter(c=>c.sel!==selEl.value); // mesmo campo de novo substitui
+  EF_CAMPOS.push({ sel: selEl.value, valor, label });
+  document.getElementById('ef-valor').value = '';
+  renderCamposCorrecao();
+}
+function removerCampoCorrecao(i){ EF_CAMPOS.splice(i,1); renderCamposCorrecao(); }
+function renderCamposCorrecao(){
+  document.getElementById('ef-lista-campos').innerHTML = EF_CAMPOS.map((c,i)=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12.5px;border:1px solid var(--line);border-radius:6px;padding:6px 8px;margin-top:6px;">
+      <span>${escapeHtml(c.label)} → <b>${escapeHtml(c.valor)}</b></span>
+      <span style="cursor:pointer;color:var(--bad);" title="Remover" onclick="removerCampoCorrecao(${i})">✕</span>
+    </div>`).join('');
+}
+
 function abrirEdicaoFechamento(id){
   EDITANDO_FECHAMENTO_ID = id;
+  EF_CAMPOS = [];
+  renderCamposCorrecao();
   const f = MEUS_FECHAMENTOS.find(x=>x.id===id);
   document.getElementById('edicao-fechamento-info').textContent = `${f.unidadeNome||f.unidade} · ${fmtData(f.data)} — depois de lançado o fechamento não pode ser mudado direto; o pedido vai para aprovação do Master.`;
   document.getElementById('ef-campo').innerHTML = opcoesCorrecaoFechamento(f);
@@ -1815,19 +1844,36 @@ document.getElementById('form-edicao-fechamento').addEventListener('submit', asy
     if(!(valorItem > 0)){ msg.textContent = 'Informe o valor do item.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
     body = { tipoCorrecao:'item', itemNovo: { tipo: document.getElementById('ef-item-tipo').value, descricao: document.getElementById('ef-item-desc').value, valor: valorItem }, motivo };
   } else {
-    // o value carrega o destino do campo: c: (fixo), cv:/fp:/kpi: (extras do grupo)
-    const sel = document.getElementById('ef-campo').value;
-    const sep = sel.indexOf(':');
-    const pref = sel.slice(0, sep);
-    const campo = sel.slice(sep + 1);
-    const valor = document.getElementById('ef-valor').value;
+    // junta a lista de campos adicionados + o par que esta preenchido nos
+    // selects (quem so tem 1 correcao nao precisa clicar em "adicionar")
+    const pares = [...EF_CAMPOS];
+    const selAtual = document.getElementById('ef-campo').value;
+    const valorAtual = document.getElementById('ef-valor').value;
+    if(valorAtual!==''){
+      const semDup = pares.filter(c=>c.sel!==selAtual);
+      semDup.push({ sel: selAtual, valor: valorAtual });
+      pares.length = 0; pares.push(...semDup);
+    }
+    if(!pares.length){ msg.textContent = 'Informe o valor correto de pelo menos um campo.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
     body = { tipoCorrecao:'campo', motivo };
-    if(pref==='cv') body.mudancasCanais = { [campo]: valor };
-    else if(pref==='fp') body.mudancasFormas = { [campo]: valor };
-    else if(pref==='kpi') body.mudancasKpis = { [campo]: valor };
-    else body.mudancas = { [campo]: valor };
+    for(const par of pares){
+      // o value carrega o destino do campo: c: (fixo), cv:/fp:/kpi: (extras do grupo)
+      const sep = par.sel.indexOf(':');
+      const pref = par.sel.slice(0, sep);
+      const campo = par.sel.slice(sep + 1);
+      if(pref==='cv') (body.mudancasCanais = body.mudancasCanais||{})[campo] = par.valor;
+      else if(pref==='fp') (body.mudancasFormas = body.mudancasFormas||{})[campo] = par.valor;
+      else if(pref==='kpi') (body.mudancasKpis = body.mudancasKpis||{})[campo] = par.valor;
+      else (body.mudancas = body.mudancas||{})[campo] = par.valor;
+    }
   }
 
+  // trava o botao enquanto o POST viaja - dois toques seguidos no celular
+  // estavam gerando pedidos duplicados na fila do Master
+  const btnEnviar = ev.target.querySelector('button[type=submit]');
+  btnEnviar.disabled = true;
+  const textoOriginal = btnEnviar.textContent;
+  btnEnviar.textContent = 'Enviando...';
   try{
     const res = await fetch(`/api/fechamentos/${EDITANDO_FECHAMENTO_ID}/solicitar-edicao`, {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -1838,7 +1884,10 @@ document.getElementById('form-edicao-fechamento').addEventListener('submit', asy
     fecharEdicaoFechamento();
     await carregarFechamentos();
   }catch(err){
-    msg.textContent = err.message; msg.className = 'msg err';
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{
+    btnEnviar.disabled = false;
+    btnEnviar.textContent = textoOriginal;
   }
 });
 

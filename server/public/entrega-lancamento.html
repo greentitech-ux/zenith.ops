@@ -549,6 +549,11 @@ document.getElementById('form-edicao').addEventListener('submit', async (ev)=>{
   const motivo = document.getElementById('e-motivo').value;
   const msg = document.getElementById('msg-edicao');
   msg.classList.add('hidden');
+  // trava o botao enquanto o POST viaja - toque duplo gerava pedido duplicado
+  const btnEnviar = ev.target.querySelector('button[type=submit]');
+  btnEnviar.disabled = true;
+  const textoOriginal = btnEnviar.textContent;
+  btnEnviar.textContent = 'Enviando...';
   try{
     const res = await fetch(`/api/entregas/${EDITANDO_ID}/solicitar-edicao`, {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -560,6 +565,9 @@ document.getElementById('form-edicao').addEventListener('submit', async (ev)=>{
     await carregar();
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err';
+  }finally{
+    btnEnviar.disabled = false;
+    btnEnviar.textContent = textoOriginal;
   }
 });
 
