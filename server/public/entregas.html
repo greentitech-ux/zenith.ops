@@ -359,14 +359,17 @@ async function carregarStatusSincronizacao(){
   }
 }
 
+// leitura INCREMENTAL: o servidor le so as linhas novas da planilha desde a
+// ultima leitura. Sem sincronizacao automatica - so quando o Master aciona
 async function sincronizarPlanilha(){
   const btn = document.getElementById('btn-sincronizar-planilha');
   btn.disabled = true; btn.textContent = '🔄 Sincronizando...';
   try{
-    const resp = await fetch('/api/entregas/sincronizar-planilha', { method:'POST' });
+    const resp = await fetch('/api/entregas/sincronizar-planilha', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
     const status = await resp.json();
     if(!resp.ok) throw new Error(status.ultimoErro || 'Erro ao sincronizar.');
     await carregar();
+    if(status.linhasNovas != null) alert(status.linhasNovas ? `Sincronizado: ${status.linhasNovas} linha(s) nova(s) lida(s) da planilha.` : 'Sincronizado: nenhuma linha nova na planilha desde a última leitura.');
   }catch(err){
     alert('Não foi possível sincronizar a planilha: ' + err.message);
   }finally{
