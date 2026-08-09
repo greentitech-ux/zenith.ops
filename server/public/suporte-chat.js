@@ -19,7 +19,7 @@
 
   const css = `
   .szc-btn{position:fixed;right:16px;bottom:16px;z-index:9000;width:52px;height:52px;border-radius:50%;
-    background:#eef5fb;color:#06202b;border:none;font-size:24px;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.45);
+    background:transparent;color:#06202b;border:none;font-size:24px;cursor:pointer;
     display:flex;align-items:center;justify-content:center;transition:transform .12s ease;}
   .szc-btn:hover{transform:scale(1.06);}
   .szc-panel{position:fixed;right:16px;bottom:78px;z-index:9001;width:320px;max-width:calc(100vw - 32px);
@@ -114,7 +114,7 @@
   // marcações de canto tipo mira) em vez do emoji 💬, com olhos piscando via
   // CSS acima
   const btn = el(`<button type="button" class="szc-btn" title="Falar com o Suporte" aria-label="Falar com o Suporte">
-    <svg viewBox="0 0 48 48" width="30" height="30" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <svg viewBox="0 0 48 48" width="40" height="40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <defs>
         <linearGradient id="szc-bot-shell" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="#f8fbfd"/>
@@ -129,25 +129,30 @@
           <stop offset="0%" stop-color="#eafcff"/>
           <stop offset="100%" stop-color="#2bb9e8"/>
         </radialGradient>
+        <filter id="szc-bot-shadow" x="-50%" y="-50%" width="200%" height="200%">
+          <feDropShadow dx="0" dy="2" stdDeviation="2.4" flood-color="#000" flood-opacity=".5"/>
+        </filter>
       </defs>
-      <rect class="szc-bot-arm-l" x="9" y="30" width="6" height="11" rx="3" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
-      <rect class="szc-bot-arm-r" x="33" y="30" width="6" height="11" rx="3" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
-      <path d="M14,29 C14,26 34,26 34,29 L36.5,43 C36.5,45.8 31,47 24,47 C17,47 11.5,45.8 11.5,43 Z"
-        fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
-      <circle cx="24" cy="36.5" r="3.1" fill="url(#szc-bot-chest)" stroke="#0a7ea3" stroke-width=".8"/>
-      <rect x="9.5" y="7" width="29" height="24" rx="11.5" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.6"/>
-      <circle cx="8" cy="19" r="2.3" fill="#3d99dd" stroke="#1c6ba8" stroke-width="1"/>
-      <circle cx="40" cy="19" r="2.3" fill="#3d99dd" stroke="#1c6ba8" stroke-width="1"/>
-      <rect x="14.5" y="12.5" width="19" height="14" rx="6" fill="#0c1e2c"/>
-      <g class="szc-bot-eyes">
-        <circle cx="20" cy="19.5" r="3.3" fill="url(#szc-bot-eye-glow)"/>
-        <circle cx="28" cy="19.5" r="3.3" fill="url(#szc-bot-eye-glow)"/>
-      </g>
-      <g stroke="#8fe9ff" stroke-width="1.1" stroke-linecap="round" fill="none" opacity=".85">
-        <path d="M16,14.5 v-1.5 h1.5"/>
-        <path d="M32,14.5 v-1.5 h-1.5"/>
-        <path d="M16,24.5 v1.5 h1.5"/>
-        <path d="M32,24.5 v1.5 h-1.5"/>
+      <g filter="url(#szc-bot-shadow)">
+        <rect class="szc-bot-arm-l" x="9" y="30" width="6" height="11" rx="3" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
+        <rect class="szc-bot-arm-r" x="33" y="30" width="6" height="11" rx="3" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
+        <path d="M14,29 C14,26 34,26 34,29 L36.5,43 C36.5,45.8 31,47 24,47 C17,47 11.5,45.8 11.5,43 Z"
+          fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
+        <circle cx="24" cy="36.5" r="3.1" fill="url(#szc-bot-chest)" stroke="#0a7ea3" stroke-width=".8"/>
+        <rect x="9.5" y="7" width="29" height="24" rx="11.5" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.6"/>
+        <circle cx="8" cy="19" r="2.3" fill="#3d99dd" stroke="#1c6ba8" stroke-width="1"/>
+        <circle cx="40" cy="19" r="2.3" fill="#3d99dd" stroke="#1c6ba8" stroke-width="1"/>
+        <rect x="14.5" y="12.5" width="19" height="14" rx="6" fill="#0c1e2c"/>
+        <g class="szc-bot-eyes">
+          <circle cx="20" cy="19.5" r="3.3" fill="url(#szc-bot-eye-glow)"/>
+          <circle cx="28" cy="19.5" r="3.3" fill="url(#szc-bot-eye-glow)"/>
+        </g>
+        <g stroke="#8fe9ff" stroke-width="1.1" stroke-linecap="round" fill="none" opacity=".85">
+          <path d="M16,14.5 v-1.5 h1.5"/>
+          <path d="M32,14.5 v-1.5 h-1.5"/>
+          <path d="M16,24.5 v1.5 h1.5"/>
+          <path d="M32,24.5 v1.5 h-1.5"/>
+        </g>
       </g>
     </svg>
   </button>`);
