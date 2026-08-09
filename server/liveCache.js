@@ -24,7 +24,13 @@ function createCache(fnOriginal, ttlMs = 20 * 1000) {
   async function cached(...args) {
     const agora = Date.now();
     if (cache.valor && agora < cache.expiraEm) return cache.valor;
-    if (cache.emAndamento) return cache.emAndamento;
+    // stale-while-revalidate: TTL venceu mas ainda temos o valor antigo?
+    // Devolve ELE na hora (a tela carrega sem esperar o Firestore) e deixa a
+    // releitura correr em segundo plano. Nao ha risco de dado errado ficar
+    // parado: toda escrita chama invalidar() (que zera o valor e forca
+    // leitura fresca no proximo acesso) e o SSE ja manda as telas
+    // recarregarem - o TTL so existe pra releitura de dado que NAO mudou.
+    if (cache.emAndamento) return cache.valor ? cache.valor : cache.emAndamento;
 
     // guarda a referencia do objeto atual - se invalidar() rodar enquanto
     // fnOriginal() ainda esta em voo (ex: um update no meio de uma leitura
@@ -43,6 +49,12 @@ function createCache(fnOriginal, ttlMs = 20 * 1000) {
         throw err;
       });
     cache.emAndamento = promessa;
+    if (cache.valor) {
+      // com valor antigo em maos, o erro da releitura em fundo nao pode
+      // virar unhandled rejection - fica pro log e tenta de novo depois
+      promessa.catch((err) => console.error('[liveCache] releitura em fundo falhou:', err.message));
+      return cache.valor;
+    }
     return promessa;
   }
 
