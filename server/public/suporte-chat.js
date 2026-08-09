@@ -200,6 +200,11 @@
     } catch (e) { return null; }
   }
 
+  // mesma lista fixa do backend (suporteChat.js ASSUNTOS) - so pra agrupar
+  // as conversas na Central de Soluções, escolhida pelo visitante (sem
+  // custo de IA pra classificar)
+  const ASSUNTOS = ['Computador/Sistema', 'Acesso/Senha', 'Financeiro/Estorno', 'Outro'];
+
   function renderFormInicial(prefill) {
     rodape.classList.add('szc-hidden');
     corpo.innerHTML = `
@@ -208,6 +213,8 @@
       <input type="text" class="szc-input" id="szc-nome" maxlength="120" value="${esc(prefill?.nome || '')}">
       <div class="szc-label">Contato (e-mail ou telefone)</div>
       <input type="text" class="szc-input" id="szc-contato" maxlength="120" value="${esc(prefill?.contato || '')}">
+      <div class="szc-label">Assunto</div>
+      <select class="szc-input" id="szc-assunto">${ASSUNTOS.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('')}</select>
       <div class="szc-label">Mensagem</div>
       <textarea class="szc-textarea" id="szc-texto" maxlength="1000" placeholder="ex: não consigo entrar no sistema"></textarea>
       <button type="button" class="szc-enviar" id="szc-iniciar">Iniciar conversa</button>
@@ -218,6 +225,7 @@
   async function iniciarConversa() {
     const nome = corpo.querySelector('#szc-nome').value;
     const contato = corpo.querySelector('#szc-contato').value;
+    const assunto = corpo.querySelector('#szc-assunto').value;
     const texto = corpo.querySelector('#szc-texto').value;
     const erroEl = corpo.querySelector('#szc-erro-inicial');
     const b = corpo.querySelector('#szc-iniciar');
@@ -226,7 +234,7 @@
     try {
       const r = await rawFetch('/api/suporte-chat/iniciar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nome, contato, texto }),
+        body: JSON.stringify({ nome, contato, texto, assunto }),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || 'Não foi possível iniciar a conversa.');

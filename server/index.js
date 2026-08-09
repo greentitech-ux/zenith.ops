@@ -4572,7 +4572,7 @@ async function acionarBeniboy(chatId) {
 
 app.post('/api/suporte-chat/iniciar', async (req, res) => {
   try {
-    const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto });
+    const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto, assunto: req.body.assunto });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     push.notifySolicitacao('💬 Novo chat de suporte', `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico.html');
     res.json({ id: chat.id, token: chat.token });
@@ -4660,6 +4660,84 @@ app.post('/api/suporte-chats/:id/gerar-chamado', auth.requireAuth, async (req, r
     broadcast('chamado-criado', { id: chamado.id }, 'tecnico');
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     res.json({ chamado });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- Central de Soluções: pagina agregadora que reune os 3 tipos de
+// chat (widget publico, chat de solicitacao, chat de chamado) numa lista so,
+// agrupada por assunto - nao recria envio/leitura, so resolve visibilidade e
+// agrupa em cima das rotas de chat que ja existem. Guard: a secao
+// 'central-solucoes' decide quem pode ABRIR a pagina; dentro dela, cada
+// conversa so aparece se o guard fino de origem (podeVerCard / secao
+// 'suporte') ja liberaria hoje - ninguem enxerga mais do que ja podia ----------
+
+// mesma resolucao de buscarCardCru, mas devolvendo o card INTEIRO (nao so os
+// campos de visibilidade) pra extrair titulo/tipo sem 2a leitura no Firestore
+async function buscarCardCompletoSolucoes(tipo, id) {
+  if (tipo === 'estorno') {
+    const r = await refunds.getOne(id);
+    return r && { ...r, criadoPorId: r.requestedById, chatLivre: false };
+  }
+  if (tipo === 'ajuste-fechamento') {
+    const r = await fechamentosLive.getEdicao(id);
+    return r && { ...r, criadoPorId: r.solicitadoPorId, chatLivre: false };
+  }
+  if (tipo === 'chamado-ti') {
+    const r = await chamadosTI.getOne(id);
+    return r && { ...r, direcionadoParaId: r.tecnicoId, atribuidosIds: [], chatLivre: true };
+  }
+  if (tipo === 'chamado-manutencao') {
+    const r = await chamadosManutencao.getOne(id);
+    return r && { ...r, direcionadoParaId: null, atribuidosIds: (r.responsaveis || []).map((x) => x.id), chatLivre: true };
+  }
+  const r = await solicitacoes.getOne(id);
+  return r && { ...r };
+}
+
+app.get('/api/central-solucoes', requireSection('central-solucoes'), async (req, res) => {
+  try {
+    const itens = [];
+    // widget publico - so pra quem atende suporte (mesmo guard de /api/suporte-chats)
+    if (ehTimeSuporte(req)) {
+      const chats = await suporteChat.listAll();
+      for (const chat of chats) {
+        const ultima = (chat.mensagens || [])[chat.mensagens.length - 1] || null;
+        itens.push({
+          origem: 'suporte',
+          tipo: 'suporte-chat',
+          id: chat.id,
+          assunto: chat.assunto || 'Suporte geral',
+          titulo: chat.nome,
+          status: chat.status,
+          total: (chat.mensagens || []).length,
+          ultimaMensagem: ultima && { texto: ultima.texto, em: ultima.em, de: ultima.de === 'visitante' ? chat.nome : 'Suporte' },
+          atualizadoEm: chat.atualizadoEm,
+        });
+      }
+    }
+    // chat de solicitacao/chamado - agrupado por card, so os que o usuario pode ver
+    const grupos = await centralChat.listAllGroupedByCard();
+    for (const g of grupos) {
+      const card = await buscarCardCompletoSolucoes(g.tipo, g.cardId);
+      if (!card || !podeVerCard(req, card)) continue;
+      const ehChamado = g.tipo === 'chamado-ti' || g.tipo === 'chamado-manutencao';
+      const assunto = ehChamado ? (card.titulo || 'Chamado') : (TIPOS_CENTRAL_LABEL[g.tipo] || g.tipo);
+      itens.push({
+        origem: 'central',
+        tipo: g.tipo,
+        id: g.cardId,
+        assunto,
+        titulo: card.titulo || assunto,
+        status: card.status || null,
+        total: g.total,
+        ultimaMensagem: { texto: g.ultimaMensagem.texto, em: g.ultimaMensagem.criadoEm, de: g.ultimaMensagem.autorUsername || g.ultimaMensagem.autorEmail },
+        atualizadoEm: g.ultimaMensagem.criadoEm,
+      });
+    }
+    itens.sort((a, b) => (b.atualizadoEm || '').localeCompare(a.atualizadoEm || ''));
+    res.json(itens);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

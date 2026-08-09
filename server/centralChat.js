@@ -77,4 +77,21 @@ async function reatribuirCard(tipoAntigo, idAntigo, tipoNovo, idNovo) {
   chatCache.invalidar();
 }
 
-module.exports = { listByCard, addMessage, getMessage, removeMessage, listAllCached, reatribuirCard };
+// agrupa por card (cardKey) e devolve so a ultima mensagem + contagem de cada
+// um - usado pela Central de Soluções pra montar a lista de conversas sem
+// carregar toda a coleção mensagem-a-mensagem
+async function listAllGroupedByCard() {
+  const todas = await listAllCached();
+  const porCard = new Map();
+  for (const m of todas) {
+    const atual = porCard.get(m.cardKey);
+    if (!atual || (m.criadoEm || '') > (atual.ultimaMensagem.criadoEm || '')) {
+      porCard.set(m.cardKey, { cardKey: m.cardKey, tipo: m.tipo, cardId: m.cardId, ultimaMensagem: m, total: (atual ? atual.total : 0) + 1 });
+    } else {
+      atual.total += 1;
+    }
+  }
+  return [...porCard.values()];
+}
+
+module.exports = { listByCard, addMessage, getMessage, removeMessage, listAllCached, listAllGroupedByCard, reatribuirCard };

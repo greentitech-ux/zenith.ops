@@ -35,6 +35,7 @@
     'nav-parque-checkin': ['parque-checkin'],
     'nav-mensalistas': ['parque'],
     'nav-festas': ['festas'],
+    'nav-central-solucoes': ['central-solucoes'],
   };
 
   function aplicar(me) {

@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Central de Soluções · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;overflow-x:hidden;}
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:16px;} h1{font-size:17px;} }
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;}
+  h2{font-size:13.5px;font-weight:700;margin:0 0 4px;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+  header{margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--line);}
+  .header-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;}
+  .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;transition:border-color .15s ease,color .15s ease,background .15s ease;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
+  .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,color .15s ease;}
+  .btn-notif:hover{border-color:var(--accent);color:var(--text);}
+  .btn-sair{color:var(--bad);}
+  .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
+  .hidden{display:none!important;}
+  .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer-titulo{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px 12px;}
+  .nav-drawer-grupo{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 4px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;}
+  .nav-drawer-grupo .ndg-seta{transition:transform .15s ease;font-size:9px;flex:none;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
+  .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+  .secao-titulo{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
+  .badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;display:inline-block;white-space:nowrap;}
+  .badge.ABERTO{background:var(--warn-dim);color:var(--warn);}
+  .badge.FINALIZADO{background:var(--ok-dim);color:var(--ok);}
+  .origem-badge{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;}
+  .link-btn{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0;font-family:var(--sans);}
+  .grupo-assunto{border-top:1px solid var(--line);margin-top:14px;padding-top:14px;}
+  .grupo-assunto:first-of-type{border-top:none;margin-top:0;padding-top:0;}
+  .grupo-cabeca{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;user-select:none;}
+  .grupo-cabeca b{font-size:13.5px;}
+  .grupo-cabeca .grupo-count{font-family:var(--mono);font-size:11px;color:var(--muted);}
+  .grupo-seta{transition:transform .15s ease;font-size:11px;color:var(--muted);flex:none;}
+  .grupo-corpo{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
+  .conv-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;transition:border-color .15s ease;}
+  .conv-item:hover{border-color:var(--accent);}
+  .conv-item .linha1{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:13px;font-weight:600;}
+  .conv-item .prev{font-size:12px;color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .conv-item .meta{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px;}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;z-index:50;}
+  .overlay.hidden{display:none!important;}
+  .sheet-wrap{position:relative;width:100%;max-width:640px;}
+  .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px 14px 0 0;padding:16px 14px 22px;width:100%;max-width:640px;max-height:88vh;overflow-y:auto;}
+  .sheet h3{margin:0 0 4px;font-size:14px;}
+  .sheet .sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px;}
+  .sheet-fechar-flutuante{position:absolute;top:-14px;right:-6px;width:32px;height:32px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);color:var(--muted);font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.5);cursor:pointer;z-index:5;}
+  .sheet-fechar-flutuante:hover{color:var(--text);border-color:var(--accent);}
+  .msg-item{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;}
+  .msg-item .m-cab{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:11px;color:var(--muted);}
+  .msg-item .m-texto{white-space:pre-wrap;margin-top:2px;}
+  input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  .btn-primary{background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .btn-primary:disabled{opacity:.5;cursor:default;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <div style="display:flex;align-items:flex-start;gap:10px;">
+      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <div>
+        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <h1>Central de Soluções</h1>
+      </div>
+    </div>
+  </div>
+  <div class="header-nav">
+    <button class="btn-notif" onclick="carregarLista()" title="Atualizar">🔄</button>
+    <div class="nav-divider"></div>
+    <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer">
+  <div class="nav-drawer-titulo">Zenith Ops</div>
+  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
+  <div class="nav-drawer-grupo">Solicitações</div>
+  <a class="back hidden" id="nav-solicitacoes" href="/central.html">📋 Central</a>
+  <a class="back hidden" id="nav-historico" href="/central-historico.html">📜 Histórico</a>
+  <a class="back hidden" id="nav-tecnico" href="/tecnico.html">🔧 Chamados TI</a>
+  <a class="back active" id="nav-central-solucoes-self" href="/central-solucoes.html">💬 Central de Soluções</a>
+  <div class="nav-drawer-sep"></div>
+  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
+</nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso à Central de Soluções. Fale com o administrador (Master).</div>
+
+<div id="root" class="hidden">
+  <div class="panel">
+    <h2 style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+      <span>Conversas por assunto <span class="sub" id="total-count" style="font-family:var(--mono);color:var(--muted);font-size:11px;"></span></span>
+    </h2>
+    <div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:4px;">Reúne o chat do balãozinho de suporte, o chat de cada solicitação/ticket e o chat de cada chamado técnico — tudo agrupado pelo assunto da conversa.</div>
+  </div>
+  <div id="grupos-wrap"></div>
+  <div class="empty hidden" id="lista-vazia">Nenhuma conversa por enquanto.</div>
+</div>
+
+<div class="overlay hidden" id="overlay-detalhe">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharDetalhe()">✕</span>
+    <div class="sheet">
+      <h3 id="d-titulo"></h3>
+      <div class="sub" id="d-sub"></div>
+      <div id="d-msgs" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px;"></div>
+      <div id="d-rodape" style="display:flex;gap:6px;">
+        <input type="text" id="d-texto" placeholder="Escrever uma resposta..." style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarResposta();}">
+        <button type="button" class="btn-primary" id="d-btn-enviar" onclick="enviarResposta()">Enviar</button>
+      </div>
+      <div id="d-finalizado" class="empty hidden" style="padding:14px 0 0;">Conversa finalizada.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
+function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const FUSO_BR = 'America/Recife';
+function fmtDataHora(iso){ if(!iso) return '—'; return new Date(iso).toLocaleString('pt-BR',{timeZone:FUSO_BR}); }
+
+let ME = null, IS_MASTER = false, IS_ADMIN = false;
+let ITENS = [];
+let GRUPOS_ABERTOS = new Set();
+let DETALHE_ATUAL = null; // { origem, tipo, id, assunto, titulo, status }
+
+const ORIGEM_LABEL = { suporte: '💬 Widget site', central: '🎫 Solicitação/Chamado' };
+
+function agruparPorAssunto(itens){
+  const mapa = new Map();
+  for(const it of itens){
+    if(!mapa.has(it.assunto)) mapa.set(it.assunto, []);
+    mapa.get(it.assunto).push(it);
+  }
+  return [...mapa.entries()]
+    .map(([assunto, lista]) => ({ assunto, lista: lista.sort((a,b)=>(b.atualizadoEm||'').localeCompare(a.atualizadoEm||'')) }))
+    .sort((a,b)=> (b.lista[0]?.atualizadoEm||'').localeCompare(a.lista[0]?.atualizadoEm||''));
+}
+
+function renderLista(){
+  const grupos = agruparPorAssunto(ITENS);
+  document.getElementById('total-count').textContent = ITENS.length ? `· ${ITENS.length} conversa(s)` : '';
+  document.getElementById('lista-vazia').classList.toggle('hidden', !!grupos.length);
+  const wrap = document.getElementById('grupos-wrap');
+  wrap.innerHTML = grupos.map(g=>{
+    const aberto = GRUPOS_ABERTOS.has(g.assunto) || GRUPOS_ABERTOS.size===0;
+    return `<div class="panel grupo-assunto" data-assunto="${escapeHtml(g.assunto)}">
+      <div class="grupo-cabeca" onclick="toggleGrupo('${escapeHtml(g.assunto).replace(/'/g,"\\'")}')">
+        <b>${escapeHtml(g.assunto)}</b>
+        <span style="display:flex;align-items:center;gap:8px;">
+          <span class="grupo-count">${g.lista.length}</span>
+          <span class="grupo-seta" style="${aberto?'':'transform:rotate(-90deg);'}">▾</span>
+        </span>
+      </div>
+      <div class="grupo-corpo ${aberto?'':'hidden'}">
+        ${g.lista.map(it=>`
+          <div class="conv-item" onclick='abrirDetalhe(${JSON.stringify(it).replace(/'/g,"&#39;")})'>
+            <div class="linha1">
+              <span>${escapeHtml(it.titulo || it.assunto)}</span>
+              <span style="display:flex;gap:6px;flex:none;">
+                ${it.status ? `<span class="badge ${escapeHtml(it.status)}">${escapeHtml(it.status)}</span>` : ''}
+                <span class="origem-badge">${ORIGEM_LABEL[it.origem]||it.origem}</span>
+              </span>
+            </div>
+            <div class="prev">${it.ultimaMensagem ? escapeHtml(it.ultimaMensagem.de||'') + ': ' + escapeHtml(it.ultimaMensagem.texto||'(imagem)') : 'Sem mensagens ainda.'}</div>
+            <div class="meta">${it.total} mensagem(ns) · ${fmtDataHora(it.atualizadoEm)}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleGrupo(assunto){
+  // primeira interacao: comeca com "todos abertos" (Set vazio); a partir
+  // dai passa a controlar individualmente cada assunto clicado
+  if(GRUPOS_ABERTOS.size===0){
+    GRUPOS_ABERTOS = new Set(agruparPorAssunto(ITENS).map(g=>g.assunto));
+  }
+  if(GRUPOS_ABERTOS.has(assunto)) GRUPOS_ABERTOS.delete(assunto);
+  else GRUPOS_ABERTOS.add(assunto);
+  renderLista();
+}
+
+async function carregarLista(){
+  try{
+    ITENS = await fetch('/api/central-solucoes').then(r=>r.json());
+    renderLista();
+  }catch(e){ /* rede fora - mantem lista anterior */ }
+}
+
+async function abrirDetalhe(item){
+  DETALHE_ATUAL = item;
+  document.getElementById('overlay-detalhe').classList.remove('hidden');
+  document.getElementById('d-titulo').textContent = item.titulo || item.assunto;
+  document.getElementById('d-sub').textContent = `${ORIGEM_LABEL[item.origem]||item.origem} · ${item.assunto}`;
+  document.getElementById('d-msgs').innerHTML = '<div class="empty">carregando...</div>';
+  document.getElementById('d-texto').value = '';
+  const finalizado = item.status === 'FINALIZADO';
+  document.getElementById('d-rodape').classList.toggle('hidden', finalizado);
+  document.getElementById('d-finalizado').classList.toggle('hidden', !finalizado);
+  await carregarMensagensDetalhe();
+}
+function fecharDetalhe(){ document.getElementById('overlay-detalhe').classList.add('hidden'); DETALHE_ATUAL = null; }
+
+async function carregarMensagensDetalhe(){
+  if(!DETALHE_ATUAL) return;
+  let msgs = [];
+  try{
+    if(DETALHE_ATUAL.origem === 'suporte'){
+      const chat = await fetch(`/api/suporte-chats`).then(r=>r.json()).then(lista=>lista.find(c=>c.id===DETALHE_ATUAL.id));
+      msgs = (chat && chat.mensagens || []).map(m=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot ? '🤖 Beniboy' : 'Suporte'), texto: m.texto, em: m.em }));
+    } else {
+      const lista = await fetch(`/api/central/${DETALHE_ATUAL.tipo}/${DETALHE_ATUAL.id}/chat`).then(r=>r.json());
+      msgs = lista.map(m=>({ de: m.autorUsername || m.autorEmail || '', texto: m.texto, em: m.criadoEm, imagemId: m.imagem ? m.id : null }));
+    }
+  }catch(e){ msgs = []; }
+  const el = document.getElementById('d-msgs');
+  el.innerHTML = msgs.length ? msgs.map(m=>`
+    <div class="msg-item">
+      <div class="m-cab"><span>${escapeHtml(m.de)}</span><span>${fmtDataHora(m.em)}</span></div>
+      ${m.texto ? `<div class="m-texto">${escapeHtml(m.texto)}</div>` : ''}
+      ${m.imagemId ? `<a href="/api/central/chat/foto/${m.imagemId}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank"><img src="/api/central/chat/foto/${m.imagemId}?token=${encodeURIComponent(AUTH_TOKEN)}" style="max-width:160px;max-height:160px;border-radius:6px;margin-top:4px;display:block;"></a>` : ''}
+    </div>`).join('') : '<div class="empty">Nenhuma mensagem ainda.</div>';
+  el.scrollTop = el.scrollHeight;
+}
+
+async function enviarResposta(){
+  if(!DETALHE_ATUAL) return;
+  const input = document.getElementById('d-texto');
+  const texto = input.value.trim();
+  if(!texto) return;
+  const btn = document.getElementById('d-btn-enviar');
+  btn.disabled = true;
+  try{
+    let resp;
+    if(DETALHE_ATUAL.origem === 'suporte'){
+      resp = await fetch(`/api/suporte-chats/${DETALHE_ATUAL.id}/responder`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }),
+      });
+    } else {
+      const fd = new FormData();
+      fd.append('texto', texto);
+      resp = await fetch(`/api/central/${DETALHE_ATUAL.tipo}/${DETALHE_ATUAL.id}/chat`, { method:'POST', body: fd });
+    }
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao enviar mensagem.');
+    input.value = '';
+    await carregarMensagensDetalhe();
+    await carregarLista();
+  }catch(err){ alert(err.message); }
+  finally{ btn.disabled = false; }
+}
+
+function initNavDrawerAccordion(){
+  const nav = document.getElementById('nav-drawer');
+  if(!nav || nav.dataset.ndgInit) return;
+  nav.dataset.ndgInit = '1';
+  [...nav.querySelectorAll(':scope > .nav-drawer-grupo')].forEach(g=>{
+    const nomeGrupo = g.textContent.trim();
+    const itens = [];
+    let el = g.nextElementSibling;
+    while(el && !el.classList.contains('nav-drawer-grupo') && !el.classList.contains('nav-drawer-sep')){
+      if(el.tagName==='A' || el.tagName==='BUTTON') itens.push(el);
+      el = el.nextElementSibling;
+    }
+    const wrap = document.createElement('div');
+    itens.forEach(it=>wrap.appendChild(it));
+    g.after(wrap);
+    const key = 'ndgAberto:' + nomeGrupo;
+    const temAtivo = itens.some(it=>it.classList.contains('active'));
+    const aberto = temAtivo || localStorage.getItem(key) === '1';
+    g.querySelector('.ndg-seta') && (g.querySelector('.ndg-seta').style.transform = aberto ? '' : 'rotate(-90deg)');
+    wrap.classList.toggle('hidden', !aberto);
+    g.addEventListener('click', ()=>{
+      const abrirAgora = wrap.classList.contains('hidden');
+      wrap.classList.toggle('hidden', !abrirAgora);
+      localStorage.setItem(key, abrirAgora ? '1' : '0');
+    });
+  });
+}
+initNavDrawerAccordion();
+
+function conectarStream(){
+  try{
+    const es = new EventSource('/api/stream?token='+encodeURIComponent(AUTH_TOKEN));
+    es.addEventListener('central-chat-nova', ()=>{ carregarLista(); if(DETALHE_ATUAL && DETALHE_ATUAL.origem==='central') carregarMensagensDetalhe(); });
+    es.addEventListener('central-chat-removida', ()=>{ carregarLista(); if(DETALHE_ATUAL && DETALHE_ATUAL.origem==='central') carregarMensagensDetalhe(); });
+    es.addEventListener('suporte-chat', ()=>{ carregarLista(); if(DETALHE_ATUAL && DETALHE_ATUAL.origem==='suporte') carregarMensagensDetalhe(); });
+  }catch(e){ /* sem SSE, so atualiza no reload/poll */ }
+}
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  ME = await res.json();
+  IS_MASTER = ME.role==='master';
+  IS_ADMIN = !!ME.isAdmin;
+  const secoes = (ME.permissions && ME.permissions.sections) || [];
+  document.getElementById('nav-solicitacoes').classList.remove('hidden');
+  document.getElementById('nav-historico').classList.remove('hidden');
+  document.getElementById('nav-tecnico').classList.remove('hidden');
+  if(!(IS_MASTER || IS_ADMIN || secoes.includes('central-solucoes'))){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('root').classList.remove('hidden');
+  await carregarLista();
+  conectarStream();
+  setInterval(()=>{ if(!document.hidden) carregarLista(); }, 60000);
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) carregarLista(); });
+}
+boot();
+</script>
+<script src="/nav-gate.js"></script>
+</body>
+</html>

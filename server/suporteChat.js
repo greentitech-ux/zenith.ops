@@ -21,10 +21,15 @@ function limpar(texto, max) {
   return String(texto || '').trim().slice(0, max);
 }
 
-async function criar({ nome, contato, texto }) {
+// lista curta e fixa (sem IA) so pra agrupar as conversas na Central de
+// Soluções - o visitante escolhe ao abrir o chat, sem custo de token
+const ASSUNTOS = ['Computador/Sistema', 'Acesso/Senha', 'Financeiro/Estorno', 'Outro'];
+
+async function criar({ nome, contato, texto, assunto }) {
   const nomeLimpo = limpar(nome, 120);
   const contatoLimpo = limpar(contato, 120);
   const textoLimpo = limpar(texto, MAX_TEXTO);
+  const assuntoLimpo = ASSUNTOS.includes(assunto) ? assunto : null;
   if (!nomeLimpo) throw new Error('Informe seu nome.');
   if (!contatoLimpo) throw new Error('Informe um contato (e-mail ou telefone).');
   if (!textoLimpo) throw new Error('Escreva sua mensagem.');
@@ -37,6 +42,7 @@ async function criar({ nome, contato, texto }) {
     token: crypto.randomBytes(24).toString('hex'),
     nome: nomeLimpo,
     contato: contatoLimpo,
+    assunto: assuntoLimpo,
     status: 'ABERTO',
     mensagens: [{ de: 'visitante', texto: textoLimpo, em: agora }],
     // true = o Beniboy (bot, ver suporteBot.js) saiu dessa conversa - ou
@@ -127,4 +133,4 @@ async function listAllUncached() {
 const chatsCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = chatsCache.cached;
 
-module.exports = { criar, getOne, getPublico, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll };
+module.exports = { criar, getOne, getPublico, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll, ASSUNTOS };
