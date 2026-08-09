@@ -213,10 +213,16 @@
       <option value="pago">Pago</option>
       <option value="cancelado">Cancelado</option>
     </select>
+    <select id="f-por-pagina" style="max-width:130px;">
+      <option value="10">10 linhas</option>
+      <option value="20">20 linhas</option>
+    </select>
     <a class="btn-secundario" id="link-csv" href="#">⬇️ CSV</a>
     <a class="btn-secundario" id="link-pdf" href="#">⬇️ PDF</a>
   </div>
-  <div id="lista-festas" style="margin-top:12px;"><div class="empty">carregando...</div></div>
+  <div class="sub" id="festas-mostrando" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:8px;"></div>
+  <div id="lista-festas" style="margin-top:8px;"><div class="empty">carregando...</div></div>
+  <div id="festas-paginacao" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:center;margin-top:12px;"></div>
 </div>
 
 </div>
@@ -335,13 +341,51 @@ async function carregar(){
   atualizarLinksExport();
 }
 
+// paginacao das reservas: 10 ou 20 linhas por pagina (seletor ao lado do
+// filtro de status), botoes 1-2-3... embaixo. Trocar filtro ou tamanho de
+// pagina volta pra pagina 1
+let FESTAS_PAGINA = 1;
+function irPaginaFestas(p){ FESTAS_PAGINA = p; renderLista(); }
+
+function renderPaginacaoFestas(paginaAtual, totalPaginas){
+  const el = document.getElementById('festas-paginacao');
+  if(totalPaginas<=1){ el.innerHTML=''; return; }
+  // janela compacta: primeira, vizinhas da atual e ultima; "…" no meio
+  const nums = [];
+  for(let p=1;p<=totalPaginas;p++){
+    if(p===1 || p===totalPaginas || Math.abs(p-paginaAtual)<=1) nums.push(p);
+    else if(nums[nums.length-1]!=='…') nums.push('…');
+  }
+  el.innerHTML =
+    `<button type="button" class="btn-secundario" style="padding:7px 11px;" ${paginaAtual===1?'disabled':''} onclick="irPaginaFestas(${paginaAtual-1})">‹</button>` +
+    nums.map(p=>p==='…'
+      ? '<span class="sub" style="padding:0 2px;">…</span>'
+      : `<button type="button" class="btn-secundario" style="padding:7px 12px;${p===paginaAtual?'color:var(--accent);border-color:var(--accent);font-weight:700;':''}" onclick="irPaginaFestas(${p})">${p}</button>`
+    ).join('') +
+    `<button type="button" class="btn-secundario" style="padding:7px 11px;" ${paginaAtual===totalPaginas?'disabled':''} onclick="irPaginaFestas(${paginaAtual+1})">›</button>`;
+}
+
 function renderLista(){
   const statusFiltro = document.getElementById('f-status-filtro').value;
   const lista = TODAS.filter(f=>!statusFiltro || f.status===statusFiltro)
     .sort((a,b)=>(b.dataDeUso||'').localeCompare(a.dataDeUso||''));
   const el = document.getElementById('lista-festas');
-  if(!lista.length){ el.innerHTML = '<div class="empty">Nenhuma reserva encontrada.</div>'; return; }
-  el.innerHTML = lista.map(f=>`
+  const mostrando = document.getElementById('festas-mostrando');
+  if(!lista.length){
+    el.innerHTML = '<div class="empty">Nenhuma reserva encontrada.</div>';
+    mostrando.textContent = '';
+    document.getElementById('festas-paginacao').innerHTML = '';
+    return;
+  }
+  const porPagina = Number(document.getElementById('f-por-pagina').value) || 10;
+  const totalPaginas = Math.ceil(lista.length / porPagina);
+  if(FESTAS_PAGINA > totalPaginas) FESTAS_PAGINA = totalPaginas;
+  if(FESTAS_PAGINA < 1) FESTAS_PAGINA = 1;
+  const inicio = (FESTAS_PAGINA-1) * porPagina;
+  const pagina = lista.slice(inicio, inicio + porPagina);
+  mostrando.textContent = `mostrando ${inicio+1}–${inicio+pagina.length} de ${lista.length} reserva(s)`;
+  renderPaginacaoFestas(FESTAS_PAGINA, totalPaginas);
+  el.innerHTML = pagina.map(f=>`
     <div class="card">
       <div class="linha1">
         <span>${escapeHtml(f.cliente?.nome||'')} · ${escapeHtml(f.codigo)} · ${fmtData(f.dataDeUso)}</span>
@@ -367,7 +411,8 @@ function atualizarLinksExport(){
   document.getElementById('link-pdf').href = '/api/festas/relatorio.pdf?'+params.toString();
 }
 
-document.getElementById('f-status-filtro').addEventListener('change', renderLista);
+document.getElementById('f-status-filtro').addEventListener('change', ()=>{ FESTAS_PAGINA = 1; renderLista(); });
+document.getElementById('f-por-pagina').addEventListener('change', ()=>{ FESTAS_PAGINA = 1; renderLista(); });
 
 async function excluirFesta(id){
   if(!confirm('Excluir essa reserva?')) return;
