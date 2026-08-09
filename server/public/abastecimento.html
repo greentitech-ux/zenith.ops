@@ -1346,16 +1346,46 @@ let CORRECAO_ACAO = 'alterar';
 // modal do "pedir correção", mas sem motivo/assinatura/ticket: aplica na
 // hora via /editar-direto. CORRECAO_DIRETO controla o que o modal mostra.
 let CORRECAO_DIRETO = false;
-function abrirPedirCorrecao(id, direto){
-  const r = REGS.find(x=>x.id===id);
-  if(!r) return;
-  CORRECAO_REG_ID = id;
-  CORRECAO_DIRETO = !!direto;
-  document.getElementById('correcao-titulo').textContent = CORRECAO_DIRETO ? '✏️ Editar contagem' : '🛠 Pedir correção';
-  document.getElementById('correcao-resumo').textContent =
-    `${r.tipo==='PEDIDO'?'🛒 Pedido':(r.tipo==='CONTAGEM'?'📋 Contagem':'🚚 Envio')} de ${fmtHora(r.criadoEm)} · por ${r.operadorNome||r.criadoPorNome||'—'}`;
-  // itens do lancamento com a quantidade editavel (proposta) - 0 remove o item
+// itens do modal de correção/edição.
+// CONTAGEM: a mesma logica do lançamento original - pizzas SEMPRE os 3
+// sabores + TODO o catálogo de insumos ATIVO (não só o que foi lançado),
+// pra dar pra corrigir o que ficou em branco na hora, ou incluir um insumo
+// que estava inativo no catálogo e virou ativo depois.
+// PEDIDO/ENVIO: continuam mostrando so o que foi de fato lançado (>0) - sao
+// itens escolhidos um a um (+ Adicionar insumo), nao um scan do catalogo
+// inteiro, entao listar tudo so encheria o modal de linha zerada a toa.
+function montarItensCorrecaoHtml(r){
   let html = '';
+  if(r.tipo==='CONTAGEM'){
+    SABORES.forEach(s=>{
+      const q = Number(r.pizzas?.[s])||0;
+      html += `<div style="display:flex;align-items:center;gap:8px;">
+        <span style="flex:1;font-size:13px;">${SABOR_LABEL[s]}</span>
+        <span style="font-family:var(--mono);font-size:10.5px;color:var(--muted);">lançado ${q}</span>
+        <input type="number" min="0" value="${q}" data-cor-pizza="${s}" style="width:70px;padding:7px 8px;">
+      </div>`;
+    });
+    insumosAtivos().forEach(cad=>{
+      const existente = (r.insumos||[]).find(i=>i.insumoId===cad.id);
+      const q = existente ? Number(existente.quantidade)||0 : 0;
+      html += `<div style="display:flex;align-items:center;gap:8px;">
+        <span style="flex:1;font-size:13px;">${escapeHtml(cad.nome)} <span style="color:var(--muted);font-size:11px;">(${existente&&existente.embalagem==='caixa'?'cx':'un'})</span></span>
+        <span style="font-family:var(--mono);font-size:10.5px;color:var(--muted);">lançado ${existente ? q : '—'}</span>
+        <input type="number" min="0" value="${q}" data-cor-insumo-id="${cad.id}" data-cor-insumo-emb="${existente ? existente.embalagem : 'unidade'}" style="width:70px;padding:7px 8px;">
+      </div>`;
+    });
+    (r.insumos||[]).forEach((ins,idx)=>{
+      if(ins.insumoId) return; // esses ja apareceram acima, pelo catalogo
+      const q = Number(ins.quantidade)||0;
+      if(!q) return;
+      html += `<div style="display:flex;align-items:center;gap:8px;">
+        <span style="flex:1;font-size:13px;">${escapeHtml(ins.descricao||'')}</span>
+        <span style="font-family:var(--mono);font-size:10.5px;color:var(--muted);">lançado ${q}</span>
+        <input type="number" min="0" value="${q}" data-cor-insumo="${idx}" style="width:70px;padding:7px 8px;">
+      </div>`;
+    });
+    return html;
+  }
   SABORES.forEach(s=>{
     const q = Number(r.pizzas?.[s])||0;
     if(!q) return;
@@ -1374,7 +1404,17 @@ function abrirPedirCorrecao(id, direto){
       <input type="number" min="0" value="${q}" data-cor-insumo="${idx}" style="width:70px;padding:7px 8px;">
     </div>`;
   });
-  document.getElementById('correcao-itens').innerHTML = html || '<div class="empty" style="padding:8px;">—</div>';
+  return html || '<div class="empty" style="padding:8px;">—</div>';
+}
+function abrirPedirCorrecao(id, direto){
+  const r = REGS.find(x=>x.id===id);
+  if(!r) return;
+  CORRECAO_REG_ID = id;
+  CORRECAO_DIRETO = !!direto;
+  document.getElementById('correcao-titulo').textContent = CORRECAO_DIRETO ? '✏️ Editar contagem' : '🛠 Pedir correção';
+  document.getElementById('correcao-resumo').textContent =
+    `${r.tipo==='PEDIDO'?'🛒 Pedido':(r.tipo==='CONTAGEM'?'📋 Contagem':'🚚 Envio')} de ${fmtHora(r.criadoEm)} · por ${r.operadorNome||r.criadoPorNome||'—'}`;
+  document.getElementById('correcao-itens').innerHTML = montarItensCorrecaoHtml(r);
   // edicao direta so ALTERA (remocao do lançamento continua sendo o 🗑
   // excluir, que ja existe pro Master) - a aba "remover" fica escondida
   // dentro de correcaoAcao() (chamada logo abaixo); aqui so o bloco de
@@ -1411,15 +1451,25 @@ function itensCorrigidosDosInputs(r){
   document.querySelectorAll('#correcao-itens input[data-cor-pizza]').forEach(inp=>{
     pizzas[inp.dataset.corPizza] = Number(inp.value)||0;
   });
-  const qtdNova = {};
-  document.querySelectorAll('#correcao-itens input[data-cor-insumo]').forEach(inp=>{
-    qtdNova[inp.dataset.corInsumo] = Number(inp.value)||0;
-  });
-  const insumos = (r.insumos||[]).map((ins,idx)=>({
-    ...(ins.insumoId ? { insumoId: ins.insumoId, embalagem: ins.embalagem } : { descricao: ins.descricao }),
-    quantidade: idx in qtdNova ? qtdNova[idx] : ins.quantidade,
-  })).filter(i=>Number(i.quantidade)>0);
-  return { pizzas, insumos };
+  // CONTAGEM: linhas do catalogo INTEIRO (ver montarItensCorrecaoHtml) -
+  // identificadas por insumoId, nao por indice em r.insumos (que so tem os
+  // itens que JA tinham valor)
+  const insumosCatalogo = [...document.querySelectorAll('#correcao-itens input[data-cor-insumo-id]')]
+    .map(inp=>({ insumoId: inp.dataset.corInsumoId, embalagem: inp.dataset.corInsumoEmb||'unidade', quantidade: Number(inp.value)||0 }))
+    .filter(i=>i.quantidade>0);
+  // PEDIDO/ENVIO (e os itens de texto livre da Contagem): linhas indexadas
+  // em r.insumos, exatamente como foram lançadas
+  const insumosIndexados = [...document.querySelectorAll('#correcao-itens input[data-cor-insumo]')]
+    .map(inp=>{
+      const ins = (r.insumos||[])[Number(inp.dataset.corInsumo)];
+      if(!ins) return null;
+      return {
+        ...(ins.insumoId ? { insumoId: ins.insumoId, embalagem: ins.embalagem } : { descricao: ins.descricao }),
+        quantidade: Number(inp.value)||0,
+      };
+    })
+    .filter(i=>i && Number(i.quantidade)>0);
+  return { pizzas, insumos: [...insumosCatalogo, ...insumosIndexados] };
 }
 // edicao DIRETA do Master (so Contagem): aplica na hora, sem ticket
 async function salvarEdicaoDireta(){
