@@ -428,6 +428,13 @@ const TOPICOS = [
     <p>Registra o que saiu do estoque sem ser contagem: <b>Venda</b>, <b>Desperdício</b> ou <b>Outra</b> saída.</p>
     <h3>Diferenças (CMV)</h3>
     <p>Compara o que a contagem deveria ter dado (contagem do dia anterior + recebimentos - saídas) com o que foi realmente contado. Diferença negativa = <b>falta</b> (sumiu mais do que o registrado); positiva = <b>sobra</b> (ex: chegou mercadoria e a nota não foi lançada no sistema).</p>
+    <h3>📦 Aba Estoque (análise por período)</h3>
+    <ol>
+      <li>Escolha o período <b>De/Até</b> (padrão: do dia 1º do mês até hoje) - a análise é da unidade selecionada no topo.</li>
+      <li>Os cartões mostram: <b>📥 Entradas</b> (compras do período, em R$), <b>🍽 Consumo do período</b>, <b>📤 Saídas lançadas</b>, <b>🗑 Desperdício lançado</b>, vendas (custo estimado) e falta − sobra apuradas nas contagens.</li>
+      <li><b>Comportamento:</b> Consumo = saídas lançadas (venda + desperdício + outras) + faltas das contagens − sobras. Sem contagem lançada no período, o consumo mostra só as saídas registradas - por isso a contagem diária é o que faz a conta fechar.</li>
+    </ol>
+    <p>O painel <b>"Contagem de hoje - todas as unidades"</b> (quem já contou, comparativo lado a lado) também fica nessa aba.</p>
     <h3>Catálogo</h3>
     <p>Lista de todos os itens cadastrados, com setor, tipo, unidade de medida e custo de referência. Dá pra ativar/desativar um item (sem apagar o histórico de contagens/recebimentos já feitos com ele) e editar setor/tipo/custo.</p>
     <div class="dica"><b>Quem pode organizar o Catálogo?</b> O <span class="tagpill master">Master</span> sempre pode. Pra liberar isso pra um gerente específico sem dar acesso Master completo, o Master ativa a permissão <span class="tagpill admin">📦 Catálogo do Estoque</span> pra quem escolher (veja o tópico Usuários). Cadastrar um item <b>novo</b> - por exemplo direto na Contagem - não precisa dessa permissão: qualquer um com acesso ao Estoque pode.</div>
