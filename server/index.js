@@ -4559,6 +4559,11 @@ async function acionarBeniboy(chatId) {
     }
     if (r.chamouAtendente) {
       push.notifySolicitacao('💬 Beniboy pediu um atendente humano', `${r.chat?.nome || ''}${r.motivoAtendente ? ' · ' + r.motivoAtendente : ''}`.slice(0, 120), chatId, '/tecnico.html');
+      // alarme critico: alem do push normal (Master/Admin), o Master recebe um
+      // alerta sonoro que insiste ate ser silenciado - push (celular fechado/
+      // outro app) + SSE (app aberto na hora, ver suporte-chat.js)
+      push.notifyBeniboyEscalonamento(r.chat, r.motivoAtendente);
+      broadcast('beniboy-escalonamento', { chatId, nome: r.chat?.nome || '', motivo: r.motivoAtendente || '' }, 'beniboy-master-only');
     }
   } catch (err) {
     console.error('[suporteBot] falha no acionamento:', err.message);

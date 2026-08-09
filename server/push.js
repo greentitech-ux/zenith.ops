@@ -60,6 +60,15 @@ function podeReceberSolicitacao(sub) {
   return !!meta && (meta.isMaster || meta.isAdmin);
 }
 
+// alerta critico do Beniboy (bot nao conseguiu resolver e chamou um
+// atendente): vai SO pro Master, nunca pro Admin - e um alarme sonoro que
+// segue tocando ate a pessoa silenciar (ver alerta-beniboy.html), entao so
+// faz sentido pra quem de fato precisa ser acordado por isso
+function podeReceberCritico(sub) {
+  const meta = sub.meta;
+  return !!meta && meta.isMaster;
+}
+
 async function removeSubscription(endpoint) {
   await COLLECTION.doc(subDocId(endpoint)).delete();
   invalidarSubs();
@@ -172,6 +181,38 @@ async function notifyAbastecimento(title, body, tag, secao) {
   }
 }
 
+// Beniboy nao conseguiu resolver sozinho e chamou um atendente: alarme
+// sonoro alto pro Master (so ele - ver podeReceberCritico), que continua
+// tocando ate silenciar na propria notificacao (alerta-beniboy.html), pra
+// nao passar batido mesmo com o celular em outro app
+async function notifyBeniboyEscalonamento(chat, motivo) {
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const chatId = chat && chat.id;
+  if (!chatId) return;
+  const params = new URLSearchParams({ chat: chatId, nome: (chat && chat.nome) || '', motivo: motivo || '' });
+  const payload = JSON.stringify({
+    title: '🚨 Beniboy precisa de você',
+    body: `${(chat && chat.nome) || 'Visitante'}${motivo ? ' · ' + motivo : ''}`.slice(0, 150),
+    tag: 'beniboy-' + chatId,
+    critical: true,
+    url: '/alerta-beniboy.html?' + params.toString(),
+  });
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload, { urgency: 'high' });
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (alerta Beniboy):', err.message);
+      }
+    }
+  }
+}
+
 module.exports = {
-  addSubscription, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento, PUBLIC_KEY,
+  addSubscription, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
+  notifyBeniboyEscalonamento, PUBLIC_KEY,
 };

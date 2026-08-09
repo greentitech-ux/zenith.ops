@@ -50,10 +50,14 @@
   .szc-erro{font-size:11.5px;color:#ff5c5c;}
   .szc-fim{background:#181d24;border:1px dashed #232a33;color:#7d8896;border-radius:8px;padding:8px;font-size:11.5px;text-align:center;}
   .szc-link{background:none;border:none;color:#5cc8ff;font-size:12px;cursor:pointer;padding:0;}
-  /* cabeça de robo (Beniboy) dentro do botao - olhos brilham e piscam */
+  /* cabeça de robo (Beniboy) dentro do botao - olhos brilham/piscam, bracos acenam */
   .szc-btn svg{overflow:visible;}
   .szc-bot-eyes{transform-box:fill-box;transform-origin:center;animation:szc-blink 4.6s ease-in-out infinite;}
   @keyframes szc-blink{0%,92%,100%{transform:scaleY(1);}95%{transform:scaleY(.15);}}
+  .szc-bot-arm-l{transform-box:fill-box;transform-origin:50% 8%;animation:szc-bot-arm-l 3.6s ease-in-out infinite;}
+  .szc-bot-arm-r{transform-box:fill-box;transform-origin:50% 8%;animation:szc-bot-arm-r 3.6s ease-in-out .3s infinite;}
+  @keyframes szc-bot-arm-l{0%,100%{transform:rotate(0deg);}50%{transform:rotate(-14deg);}}
+  @keyframes szc-bot-arm-r{0%,100%{transform:rotate(0deg);}50%{transform:rotate(14deg);}}
   /* nome do bot flutuando ao lado do botao - so aparece pro visitante (o
      atendimento usa o mesmo icone com outro sentido, ver atualizarNomeFlutuante) */
   .szc-bot-nome-wrap{position:fixed;right:74px;bottom:20px;z-index:8999;pointer-events:none;
@@ -66,11 +70,30 @@
   @keyframes szc-bn-in{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
   @keyframes szc-bn-float{0%,100%{transform:translateY(0);}50%{transform:translateY(-5px);}}
   @media (prefers-reduced-motion:reduce){
-    .szc-bot-eyes,.szc-bot-nome{animation:none;}
+    .szc-bot-eyes,.szc-bot-nome,.szc-bot-arm-l,.szc-bot-arm-r{animation:none;}
     .szc-bot-nome-wrap{animation:none;opacity:1;}
   }
   @media (max-width:480px){ .szc-panel{right:8px;bottom:72px;} .szc-btn{right:12px;bottom:12px;}
     .szc-bot-nome-wrap{right:70px;bottom:16px;} }
+  /* alarme critico: Beniboy chamou o Master porque nao conseguiu resolver
+     sozinho - tela cheia, vermelha, insistente ate silenciar */
+  .szc-alarme{position:fixed;inset:0;z-index:99999;background:linear-gradient(160deg,#3a0a0a,#7a1414);
+    color:#fff;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+    text-align:center;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    animation:szc-alarme-flash 1s ease-in-out infinite;}
+  .szc-alarme.szc-alarme-on{display:flex;}
+  .szc-alarme .szc-al-icone{font-size:56px;animation:szc-alarme-bounce .6s ease-in-out infinite;}
+  .szc-alarme .szc-al-titulo{font-size:20px;font-weight:800;}
+  .szc-alarme .szc-al-corpo{font-size:14px;color:#ffd9d9;max-width:320px;}
+  .szc-alarme .szc-al-botoes{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;justify-content:center;}
+  .szc-alarme button{border:none;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:700;cursor:pointer;}
+  .szc-al-atender{background:#fff;color:#7a1414;}
+  .szc-al-silenciar{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4)!important;}
+  @keyframes szc-alarme-flash{0%,100%{background:linear-gradient(160deg,#3a0a0a,#7a1414);}50%{background:linear-gradient(160deg,#7a1414,#b81f1f);}}
+  @keyframes szc-alarme-bounce{0%,100%{transform:scale(1);}50%{transform:scale(1.18);}}
+  @media (prefers-reduced-motion:reduce){
+    .szc-alarme,.szc-alarme .szc-al-icone{animation:none;}
+  }
   `;
 
   function el(html) {
@@ -107,13 +130,11 @@
           <stop offset="100%" stop-color="#2bb9e8"/>
         </radialGradient>
       </defs>
-      <rect x="9" y="30" width="6" height="11" rx="3" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
-      <rect x="33" y="30" width="6" height="11" rx="3" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
+      <rect class="szc-bot-arm-l" x="9" y="30" width="6" height="11" rx="3" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
+      <rect class="szc-bot-arm-r" x="33" y="30" width="6" height="11" rx="3" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
       <path d="M14,29 C14,26 34,26 34,29 L36.5,43 C36.5,45.8 31,47 24,47 C17,47 11.5,45.8 11.5,43 Z"
         fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
       <circle cx="24" cy="36.5" r="3.1" fill="url(#szc-bot-chest)" stroke="#0a7ea3" stroke-width=".8"/>
-      <ellipse cx="10.5" cy="6" rx="3.6" ry="5.2" transform="rotate(-24 10.5 6)" fill="#2f8ad1" stroke="#1c6ba8" stroke-width="1.1"/>
-      <ellipse cx="37.5" cy="6" rx="3.6" ry="5.2" transform="rotate(24 37.5 6)" fill="#2f8ad1" stroke="#1c6ba8" stroke-width="1.1"/>
       <rect x="9.5" y="7" width="29" height="24" rx="11.5" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.6"/>
       <circle cx="8" cy="19" r="2.3" fill="#3d99dd" stroke="#1c6ba8" stroke-width="1"/>
       <circle cx="40" cy="19" r="2.3" fill="#3d99dd" stroke="#1c6ba8" stroke-width="1"/>
@@ -450,6 +471,82 @@
     }
   });
 
+  // ---------- alarme critico: Beniboy chamou o Master porque nao conseguiu
+  // resolver sozinho. Toca uma sirene alta em loop + vibra o aparelho ate a
+  // pessoa silenciar - dispara tanto por SSE (app aberto em alguma pagina,
+  // ver atendInit abaixo) quanto pela notificacao push critica (celular
+  // fechado/outro app - ver sw.js), que acorda essa mesma tela se a pagina
+  // ja estiver aberta em segundo plano ----------
+  let alarmeAtivo = false;
+  let alarmeAudioCtx = null;
+  let alarmeSirenTimer = null;
+  let alarmeVibraTimer = null;
+  const alarmeEl = el(`<div class="szc-alarme" role="alertdialog" aria-label="Alerta do Beniboy">
+    <div class="szc-al-icone">🚨</div>
+    <div class="szc-al-titulo">Beniboy precisa de você</div>
+    <div class="szc-al-corpo" id="szc-al-corpo">O assistente não conseguiu resolver sozinho.</div>
+    <div class="szc-al-botoes">
+      <button type="button" class="szc-al-atender">🎧 Atender agora</button>
+      <button type="button" class="szc-al-silenciar">🔕 Silenciar</button>
+    </div>
+  </div>`);
+  document.body.appendChild(alarmeEl);
+
+  function tocarSirene() {
+    try {
+      alarmeAudioCtx = alarmeAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const tocarTom = (delay, freq) => {
+        const osc = alarmeAudioCtx.createOscillator();
+        const gain = alarmeAudioCtx.createGain();
+        osc.type = 'square'; osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, alarmeAudioCtx.currentTime + delay);
+        gain.gain.exponentialRampToValueAtTime(0.35, alarmeAudioCtx.currentTime + delay + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, alarmeAudioCtx.currentTime + delay + 0.42);
+        osc.connect(gain); gain.connect(alarmeAudioCtx.destination);
+        osc.start(alarmeAudioCtx.currentTime + delay);
+        osc.stop(alarmeAudioCtx.currentTime + delay + 0.45);
+      };
+      tocarTom(0, 1046);
+      tocarTom(0.45, 784);
+    } catch (e) { /* audio bloqueado antes de alguma interacao - a vibracao/tela seguem */ }
+  }
+
+  function dispararAlarmeBeniboy(info) {
+    if (!ATEND.ehMaster) return; // alarme e so pro Master (ver push.notifyBeniboyEscalonamento)
+    const corpo = info && (info.nome || info.motivo)
+      ? `${esc(info.nome || 'Visitante')}${info.motivo ? ' · ' + esc(info.motivo) : ''}`
+      : 'O assistente não conseguiu resolver sozinho.';
+    alarmeEl.querySelector('#szc-al-corpo').textContent = corpo;
+    if (alarmeAtivo) return; // ja tocando - so atualiza o texto
+    alarmeAtivo = true;
+    alarmeEl.classList.add('szc-alarme-on');
+    tocarSirene();
+    alarmeSirenTimer = setInterval(tocarSirene, 900);
+    if (navigator.vibrate) {
+      navigator.vibrate([400, 200, 400, 200, 400]);
+      alarmeVibraTimer = setInterval(() => navigator.vibrate([400, 200, 400, 200, 400]), 1600);
+    }
+  }
+  function pararAlarmeBeniboy() {
+    alarmeAtivo = false;
+    alarmeEl.classList.remove('szc-alarme-on');
+    if (alarmeSirenTimer) { clearInterval(alarmeSirenTimer); alarmeSirenTimer = null; }
+    if (alarmeVibraTimer) { clearInterval(alarmeVibraTimer); alarmeVibraTimer = null; }
+    if (navigator.vibrate) navigator.vibrate(0);
+  }
+  alarmeEl.querySelector('.szc-al-silenciar').addEventListener('click', pararAlarmeBeniboy);
+  alarmeEl.querySelector('.szc-al-atender').addEventListener('click', () => {
+    pararAlarmeBeniboy();
+    location.href = '/tecnico.html';
+  });
+  // notificacao push critica chegou com a pagina ja aberta (em qualquer aba)
+  // - o service worker avisa direto, sem esperar clique na notificacao
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'beniboy-alerta-critico') dispararAlarmeBeniboy(null);
+    });
+  }
+
   async function atendInit() {
     const token = localStorage.getItem('authToken');
     if (!token) return;
@@ -473,6 +570,7 @@
       try {
         const es = new EventSource('/api/stream?token=' + encodeURIComponent(token));
         es.addEventListener('suporte-chat', () => { atendCarregar(); });
+        es.addEventListener('beniboy-escalonamento', (e) => { dispararAlarmeBeniboy(JSON.parse(e.data)); });
       } catch (e) { /* sem SSE, o poll resolve */ }
     } catch (e) { /* segue como widget de visitante */ }
   }

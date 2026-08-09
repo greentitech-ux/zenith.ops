@@ -8,21 +8,35 @@ self.addEventListener('push', (event) => {
   } catch (e) {
     /* usa o padrao acima */
   }
+  // alerta critico do Beniboy (bot nao conseguiu resolver sozinho): vibracao
+  // bem mais insistente que o padrao, pra chamar atencao mesmo com o celular
+  // no bolso - o som alto/continuo de verdade acontece na pagina de alerta,
+  // que abre sozinha se tiver uma aba do app em primeiro plano
+  const vibrate = data.critical ? [400, 200, 400, 200, 400, 200, 400, 200, 400] : [200, 100, 200];
   event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
-      icon: '/icon-192.png',
-      badge: '/favicon-32.png',
-      tag: data.tag,
-      vibrate: [200, 100, 200],
-      silent: false,
-      renotify: true,
-      requireInteraction: true, // fica na tela ate a pessoa interagir, em vez de sumir sozinha em poucos segundos
-      // pra onde o clique leva (o servidor manda a tela certa de cada
-      // evento: ticket -> Historico da Central, abastecimento -> tela do
-      // carrinho, chat -> chats do tecnico, monitor -> Monitor...)
-      data: { url: data.url || '/' },
-    })
+    (async () => {
+      await self.registration.showNotification(data.title, {
+        body: data.body,
+        icon: '/icon-192.png',
+        badge: '/favicon-32.png',
+        tag: data.tag,
+        vibrate,
+        silent: false,
+        renotify: true,
+        requireInteraction: true, // fica na tela ate a pessoa interagir, em vez de sumir sozinha em poucos segundos
+        // pra onde o clique leva (o servidor manda a tela certa de cada
+        // evento: ticket -> Historico da Central, abastecimento -> tela do
+        // carrinho, chat -> chats do tecnico, monitor -> Monitor..., alerta
+        // critico do Beniboy -> pagina de alarme em tela cheia)
+        data: { url: data.url || '/', critical: !!data.critical },
+      });
+      if (data.critical) {
+        // app ja aberto em alguma aba: dispara o alarme sonoro na hora, sem
+        // esperar a pessoa clicar na notificacao
+        const list = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+        for (const c of list) c.postMessage({ type: 'beniboy-alerta-critico', url: data.url });
+      }
+    })()
   );
 });
 
