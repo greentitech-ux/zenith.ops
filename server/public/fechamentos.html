@@ -677,8 +677,10 @@ async function carregarEdicoes(){
     <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;">
       <div style="font-size:12.5px;font-weight:600;">${escapeHtml(p.unidadeNome||p.unidade)} · ${fmtData(p.data)}</div>
       <div class="sub" style="margin:2px 0 6px;">pedido por ${escapeHtml(p.solicitadoPorEmail)} em ${new Date(p.criadoEm).toLocaleString('pt-BR',{timeZone:FUSO_BR})}</div>
-      <div style="font-size:12px;margin-bottom:6px;">${Object.entries(p.mudancas).map(([campo,valor])=>`<div>${campo}: <b>${fmtMoney(valor)}</b></div>`).join('')}</div>
-      <div style="font-size:12px;color:var(--text);margin-bottom:8px;white-space:pre-wrap;">${escapeHtml(p.motivo)}</div>
+      <div style="font-size:12px;margin-bottom:6px;">${(p.resumoMudancas||[]).length
+        ? `<div class="sub" style="margin-bottom:2px;">O que muda:</div>${p.resumoMudancas.map(l=>`<div>• ${escapeHtml(l)}</div>`).join('')}`
+        : Object.entries(p.mudancas||{}).map(([campo,valor])=>`<div>${campo}: <b>${fmtMoney(valor)}</b></div>`).join('')}</div>
+      <div style="font-size:12px;color:var(--text);margin-bottom:8px;white-space:pre-wrap;">Motivo: ${escapeHtml(p.motivo)}</div>
       <div style="display:flex;gap:8px;">
         <button type="button" class="preset-btn" style="color:var(--ok);border-color:var(--ok-dim);" onclick="decidirEdicaoFechamento('${p.id}','APROVADO')">✓ Aprovar</button>
         <button type="button" class="preset-btn" style="color:var(--bad);border-color:var(--bad-dim);" onclick="decidirEdicaoFechamento('${p.id}','REJEITADO')">✕ Rejeitar</button>
