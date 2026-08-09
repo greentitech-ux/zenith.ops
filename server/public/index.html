@@ -48,16 +48,24 @@
       radial-gradient(ellipse 640px 380px at 50% 0%, rgba(255,183,94,.11), transparent 60%),
       radial-gradient(ellipse 520px 520px at 92% 100%, rgba(92,200,255,.08), transparent 65%);
   }
-  .dp-confete{position:absolute;z-index:0;border-radius:2px;opacity:.5;pointer-events:none;}
   .dp-hero{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;text-align:center;}
-  .dp-bot{position:relative;flex:none;}
-  .dp-flor{position:absolute;left:-6px;bottom:38px;font-size:20px;transform:rotate(-18deg);}
+  .dp-bot{position:relative;animation:dp-float 4s ease-in-out infinite;flex:none;}
+  @keyframes dp-float{0%,100%{transform:translateY(0);}50%{transform:translateY(-8px);}}
+  .dp-bot .dp-eyes{transform-box:fill-box;transform-origin:center;animation:dp-blink 4.6s ease-in-out infinite;}
+  @keyframes dp-blink{0%,92%,100%{transform:scaleY(1);}95%{transform:scaleY(.15);}}
+  .dp-bot .dp-arm-l{transform-box:fill-box;transform-origin:50% 8%;animation:dp-arml 3.6s ease-in-out infinite;}
+  .dp-bot .dp-arm-r{transform-box:fill-box;transform-origin:50% 8%;animation:dp-armr 3.6s ease-in-out .3s infinite;}
+  @keyframes dp-arml{0%,100%{transform:rotate(0deg);}50%{transform:rotate(-16deg);}}
+  @keyframes dp-armr{0%,100%{transform:rotate(0deg);}50%{transform:rotate(16deg);}}
   .dp-bubble{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:10px 16px;max-width:240px;text-align:left;}
   .dp-bubble b{font-size:14px;color:#ffd9a0;}
   .dp-bubble small{display:block;font-weight:500;color:var(--muted);font-size:11.5px;margin-top:3px;}
   .dp-footer{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:7px;}
   .dp-footer span{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:#5b6572;}
   .dp-footer img{height:44px;width:auto;opacity:.9;}
+  @media (prefers-reduced-motion:reduce){
+    .dp-bot,.dp-bot .dp-eyes,.dp-bot .dp-arm-l,.dp-bot .dp-arm-r{animation:none!important;}
+  }
   /* ===== FIM DIA DOS PAIS ===== */
 </style>
 <script src="/tema.js"></script>
@@ -65,19 +73,8 @@
 <body>
 
 <section id="auth-screen" class="auth-screen">
-  <!-- DIA DOS PAIS 2026 - decoracao temporaria (remover apos 16/08/2026): confete de fundo -->
-  <div class="dp-confete" style="left:8%;top:6%;width:7px;height:12px;background:#ffb75e;transform:rotate(18deg);"></div>
-  <div class="dp-confete" style="left:18%;top:14%;width:6px;height:10px;background:#5cc8ff;transform:rotate(-25deg);"></div>
-  <div class="dp-confete" style="left:30%;top:4%;width:8px;height:8px;border-radius:50%;background:#fff;"></div>
-  <div class="dp-confete" style="left:70%;top:10%;width:7px;height:12px;background:#ffb75e;transform:rotate(-30deg);"></div>
-  <div class="dp-confete" style="left:82%;top:5%;width:6px;height:10px;background:#5cc8ff;transform:rotate(20deg);"></div>
-  <div class="dp-confete" style="left:92%;top:16%;width:8px;height:8px;border-radius:50%;background:#fff;"></div>
-  <div class="dp-confete" style="left:50%;top:3%;width:6px;height:10px;background:#5cc8ff;transform:rotate(-12deg);"></div>
-  <div class="dp-confete" style="left:60%;top:12%;width:7px;height:12px;background:#ffb75e;transform:rotate(35deg);"></div>
-
   <div class="dp-hero">
     <div class="dp-bot">
-      <span class="dp-flor">🌷</span>
       <svg viewBox="0 0 220 260" width="96" height="112" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <defs>
           <linearGradient id="dp-shell" x1="0" y1="0" x2="0" y2="1">
