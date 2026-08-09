@@ -996,7 +996,7 @@ function abrirDetalhe(tipo, id){
   document.getElementById('d-tecnico-wrap').classList.toggle('hidden', !(podeDecidir && c.tipo==='suporte-ti' && !ehBloqueioLogin(c)));
   if(podeDecidir && c.tipo==='suporte-ti' && !ehBloqueioLogin(c)){
     document.getElementById('d-tecnico').innerHTML = TECNICOS.length
-      ? TECNICOS.map(t=>`<option value="${t.id}" data-email="${escapeHtml(t.email)}">${escapeHtml(nomeExibicao(t))}</option>`).join('')
+      ? TECNICOS.map(t=>`<option value="${t.id}" data-email="${escapeHtml(t.email)}" ${t.username==='suporte'?'selected':''}>${escapeHtml(nomeExibicao(t))}</option>`).join('')
       : '<option value="" disabled selected>nenhum técnico cadastrado</option>';
   }
   document.getElementById('d-manutencao-wrap').classList.toggle('hidden', !(podeDecidir && c.tipo==='manutencao'));
