@@ -92,6 +92,12 @@
   .foto-btn.tem-foto{border-color:var(--accent);color:var(--accent);}
   .export-btn{font-family:var(--mono);font-size:11px;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
   .export-btn:hover{color:var(--text);border-color:var(--accent);}
+  /* abas de secao (Solicitacoes/Fechamentos) - mesmo visual das abas do Estoque */
+  .sec-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;}
+  .sec-tab{font-family:var(--sans);font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:20px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;transition:border-color .15s ease,color .15s ease;}
+  .sec-tab:hover{color:var(--text);}
+  .sec-tab.active{color:#06202b;background:var(--accent);border-color:var(--accent);}
+  .sec-tab .sec-count{font-family:var(--mono);font-weight:400;opacity:.8;}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;z-index:50;}
   .overlay.hidden{display:none!important;}
   .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px 14px 0 0;padding:16px 14px 22px;width:100%;max-width:640px;max-height:88vh;overflow-y:auto;}
@@ -221,9 +227,9 @@
 
 <!-- secoes do Historico: Solicitacoes (kanban) e Fechamentos (os
      lancamentos de caixa num lugar so, com Pedir correcao/edicao Master) -->
-<div id="secoes-central" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-  <button type="button" class="btn-secundario" id="sec-btn-solicitacoes" style="margin-top:0;" onclick="trocarSecaoCentral('solicitacoes')">🎫 Solicitações</button>
-  <button type="button" class="btn-secundario hidden" id="sec-btn-fechamentos" style="margin-top:0;" onclick="trocarSecaoCentral('fechamentos')">🧾 Fechamentos <span id="sec-fech-count" style="font-family:var(--mono);color:var(--muted);"></span></button>
+<div id="secoes-central" class="sec-tabs">
+  <button type="button" class="sec-tab active" id="sec-btn-solicitacoes" onclick="trocarSecaoCentral('solicitacoes')">🎫 Solicitações</button>
+  <button type="button" class="sec-tab hidden" id="sec-btn-fechamentos" onclick="trocarSecaoCentral('fechamentos')">🧾 Fechamentos <span class="sec-count" id="sec-fech-count"></span></button>
 </div>
 
 <div class="panel" id="sec-solicitacoes">
@@ -1998,12 +2004,8 @@ function trocarSecaoCentral(secao){
   SECAO_CENTRAL = secao;
   document.getElementById('sec-solicitacoes').classList.toggle('hidden', secao!=='solicitacoes');
   document.getElementById('painel-meus-lancamentos').classList.toggle('hidden', secao!=='fechamentos' || !PODE_LANCAMENTO);
-  const btnSol = document.getElementById('sec-btn-solicitacoes');
-  const btnFech = document.getElementById('sec-btn-fechamentos');
-  btnSol.style.borderColor = secao==='solicitacoes' ? 'var(--accent)' : 'var(--line)';
-  btnSol.style.color = secao==='solicitacoes' ? 'var(--accent)' : '';
-  btnFech.style.borderColor = secao==='fechamentos' ? 'var(--accent)' : 'var(--line)';
-  btnFech.style.color = secao==='fechamentos' ? 'var(--accent)' : '';
+  document.getElementById('sec-btn-solicitacoes').classList.toggle('active', secao==='solicitacoes');
+  document.getElementById('sec-btn-fechamentos').classList.toggle('active', secao==='fechamentos');
   localStorage.setItem('centralSecao', secao);
 }
 
