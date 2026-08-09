@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Caixa-Preta · Zenith Ops</title>
+<title>Relatórios de disputa · Zenith Ops</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -91,7 +91,7 @@
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div>
         <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
-        <h1>Caixa-Preta (disputas)</h1>
+        <h1>Relatórios de disputa</h1>
       </div>
     </div>
   </div>
@@ -107,36 +107,36 @@
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
 <nav class="nav-drawer hidden" id="nav-drawer">
   <div class="nav-drawer-titulo">Zenith Ops</div>
-  <a class="back" id="nav-painel" href="/painel.html">🧭 Deck</a>
+  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
   <div class="nav-drawer-grupo">Operação diária</div>
-  <a class="back hidden" id="nav-lancamento" href="/lancamento.html">🧾 Diário de Bordo (lançar)</a>
-  <a class="back hidden" id="nav-entrega-lancamento" href="/entrega-lancamento.html">🛫 Despachar Expedição</a>
-  <a class="back hidden" id="nav-fechamentos" href="/fechamentos.html">📖 Diário de Bordo</a>
-  <a class="back hidden" id="nav-entregas" href="/entregas.html">🛫 Expedição</a>
-  <a class="back hidden" id="nav-inventario" href="/estoque.html">🛠 Hangar</a>
-  <a class="back" id="nav-abastecimento" href="/abastecimento.html">🌉 Ponte Aérea</a>
+  <a class="back hidden" id="nav-lancamento" href="/lancamento.html">🧾 Fechamento</a>
+  <a class="back hidden" id="nav-entrega-lancamento" href="/entrega-lancamento.html">📦 Lançar entrega</a>
+  <a class="back hidden" id="nav-fechamentos" href="/fechamentos.html">💰 Fechamentos</a>
+  <a class="back hidden" id="nav-entregas" href="/entregas.html">🛵 Entregas</a>
+  <a class="back hidden" id="nav-inventario" href="/estoque.html">📦 Estoque</a>
+  <a class="back" id="nav-abastecimento" href="/abastecimento.html">🛒 Abastec. Carrinho</a>
   <div class="nav-drawer-grupo">Monitoramento</div>
-  <a class="back hidden" id="nav-monitor" href="/monitor.html">📡 Radar</a>
-  <a class="back active" id="nav-relatorios-self" href="/relatorios.html">⬛ Caixa-Preta</a>
+  <a class="back hidden" id="nav-monitor" href="/monitor.html">📈 Monitor</a>
+  <a class="back active" id="nav-relatorios-self" href="/relatorios.html">📊 Relatórios</a>
   <a class="back hidden" id="nav-ifood" href="/ifood.html">🍔 iFood</a>
   <div class="nav-drawer-grupo" id="nav-grupo-saltiverso">Saltiverso</div>
-  <a class="back hidden" id="nav-parque-checkin" href="/parque-checkin.html">🎫 Portão de Embarque</a>
-  <a class="back hidden" id="nav-parque" href="/parque.html">🛝 Pista de Salto</a>
+  <a class="back hidden" id="nav-parque-checkin" href="/parque-checkin.html">🤸 Check-in Parque</a>
+  <a class="back hidden" id="nav-parque" href="/parque.html">🤸 Parque (painel)</a>
   <a class="back hidden" id="nav-festas" href="/festas.html">🎉 Festas</a>
   <a class="back hidden" id="nav-mensalistas" href="/mensalistas.html">📅 Mensalistas</a>
   <div class="nav-drawer-grupo">Solicitações</div>
-  <a class="back hidden" id="nav-solicitacoes" href="/central.html">🎯 Central de Comando</a>
-  <a class="back hidden" id="nav-historico" href="/central-historico.html">🗂 Registros</a>
-  <a class="back hidden" id="nav-tecnico" href="/tecnico.html">🚨 Resgate</a>
-  <a class="back" id="nav-ativos-ti" href="/ativos-ti.html">🛡️ Arsenal</a>
-  <a class="back hidden" id="nav-manutencao" href="/manutencao.html">🛠 Oficina</a>
+  <a class="back hidden" id="nav-solicitacoes" href="/central.html">📋 Central</a>
+  <a class="back hidden" id="nav-historico" href="/central-historico.html">📜 Histórico</a>
+  <a class="back hidden" id="nav-tecnico" href="/tecnico.html">🔧 Chamados TI</a>
+  <a class="back" id="nav-ativos-ti" href="/ativos-ti.html">🖥️ Ativos de TI</a>
+  <a class="back hidden" id="nav-manutencao" href="/manutencao.html">🔧 Manutenção</a>
   <div class="nav-drawer-grupo">Administração</div>
-  <a class="back hidden" id="nav-usuarios" href="/usuarios.html">👥 Tripulação</a>
-  <a class="back hidden" id="nav-grupos" href="/grupos.html">🎖️ Esquadrões</a>
-  <a class="back hidden" id="nav-entregas-regras" href="/entregas-regras.html">📜 Protocolo de Rotas</a>
-  <a class="back hidden" id="nav-cofre" href="/cofre.html">🔐 Cofre-Forte</a>
-  <a class="back" id="nav-ajuda" href="/ajuda.html">📘 Manual de Bordo</a>
-  <a class="back hidden" id="nav-reset-senha" href="/painel.html?resetSenha=1">🗝️ Chave Mestra</a>
+  <a class="back hidden" id="nav-usuarios" href="/usuarios.html">👤 Usuários</a>
+  <a class="back hidden" id="nav-grupos" href="/grupos.html">🏷️ Grupos</a>
+  <a class="back hidden" id="nav-entregas-regras" href="/entregas-regras.html">⚙️ Regras de Entregas</a>
+  <a class="back hidden" id="nav-cofre" href="/cofre.html">🔐 Cofre</a>
+  <a class="back" id="nav-ajuda" href="/ajuda.html">❓ Ajuda</a>
+  <a class="back hidden" id="nav-reset-senha" href="/painel.html?resetSenha=1">🔑 Reset senha</a>
   <div class="nav-drawer-sep"></div>
   <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
   <div class="nav-drawer-sep"></div>
