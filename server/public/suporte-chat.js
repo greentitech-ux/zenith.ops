@@ -1,6 +1,7 @@
 // suporte-chat.js
-// Widget flutuante de suporte (💬, canto inferior direito) presente em TODAS
-// as telas do Zenith Ops - inclusive login e paginas publicas. Funciona SEM
+// Widget flutuante de suporte (cabeça de robô - o Beniboy, canto inferior
+// direito) presente em TODAS as telas do Zenith Ops - inclusive login e
+// paginas publicas. Funciona SEM
 // estar logado: qualquer pessoa inicia uma conversa com o time de Suporte
 // (problema no computador, no sistema, de acesso...). A conversa fica salva
 // no navegador (id + token proprios em localStorage), entao a pessoa pode
@@ -49,7 +50,29 @@
   .szc-erro{font-size:11.5px;color:#ff5c5c;}
   .szc-fim{background:#181d24;border:1px dashed #232a33;color:#7d8896;border-radius:8px;padding:8px;font-size:11.5px;text-align:center;}
   .szc-link{background:none;border:none;color:#5cc8ff;font-size:12px;cursor:pointer;padding:0;}
-  @media (max-width:480px){ .szc-panel{right:8px;bottom:72px;} .szc-btn{right:12px;bottom:12px;} }
+  /* cabeça de robo (Beniboy) dentro do botao - antena pulsa, olhos piscam */
+  .szc-btn svg{overflow:visible;}
+  .szc-bot-eyes{transform-box:fill-box;transform-origin:center;animation:szc-blink 4.6s ease-in-out infinite;}
+  @keyframes szc-blink{0%,92%,100%{transform:scaleY(1);}95%{transform:scaleY(.15);}}
+  .szc-bot-antena{transform-box:fill-box;transform-origin:center;animation:szc-pulso 2.4s ease-in-out infinite;}
+  @keyframes szc-pulso{0%,100%{opacity:1;}50%{opacity:.45;}}
+  /* nome do bot flutuando ao lado do botao - so aparece pro visitante (o
+     atendimento usa o mesmo icone com outro sentido, ver atualizarNomeFlutuante) */
+  .szc-bot-nome-wrap{position:fixed;right:74px;bottom:20px;z-index:8999;pointer-events:none;
+    opacity:0;animation:szc-bn-in .35s ease .15s forwards;}
+  .szc-bot-nome-wrap.szc-hidden{display:none!important;}
+  .szc-bot-nome{display:inline-block;background:#181d24;color:#e7ecf1;border:1px solid #232a33;
+    padding:6px 13px;border-radius:999px;font-size:12.5px;font-weight:600;white-space:nowrap;
+    box-shadow:0 4px 14px rgba(0,0,0,.35);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    animation:szc-bn-float 3.2s ease-in-out infinite;}
+  @keyframes szc-bn-in{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes szc-bn-float{0%,100%{transform:translateY(0);}50%{transform:translateY(-5px);}}
+  @media (prefers-reduced-motion:reduce){
+    .szc-bot-eyes,.szc-bot-antena,.szc-bot-nome{animation:none;}
+    .szc-bot-nome-wrap{animation:none;opacity:1;}
+  }
+  @media (max-width:480px){ .szc-panel{right:8px;bottom:72px;} .szc-btn{right:12px;bottom:12px;}
+    .szc-bot-nome-wrap{right:70px;bottom:16px;} }
   `;
 
   function el(html) {
@@ -65,7 +88,24 @@
   style.textContent = css;
   document.head.appendChild(style);
 
-  const btn = el('<button type="button" class="szc-btn" title="Falar com o Suporte" aria-label="Falar com o Suporte">💬</button>');
+  // cabeça de robo (Beniboy) desenhada em SVG (currentColor - usa a mesma
+  // cor do botao) em vez do emoji 💬, pra ter uma "cara" propria e animada
+  // (antena pulsando, olhos piscando via CSS acima)
+  const btn = el(`<button type="button" class="szc-btn" title="Falar com o Suporte" aria-label="Falar com o Suporte">
+    <svg viewBox="0 0 48 48" width="27" height="27" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <line x1="24" y1="3" x2="24" y2="9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+      <circle class="szc-bot-antena" cx="24" cy="3" r="2.4" fill="currentColor"/>
+      <rect x="9" y="9" width="30" height="25" rx="8" fill="currentColor" opacity=".16"/>
+      <rect x="9" y="9" width="30" height="25" rx="8" stroke="currentColor" stroke-width="2.6"/>
+      <rect x="3.5" y="17.5" width="5" height="9" rx="2.5" fill="currentColor"/>
+      <rect x="39.5" y="17.5" width="5" height="9" rx="2.5" fill="currentColor"/>
+      <g class="szc-bot-eyes">
+        <rect x="16" y="18.5" width="6" height="7" rx="3" fill="currentColor"/>
+        <rect x="26" y="18.5" width="6" height="7" rx="3" fill="currentColor"/>
+      </g>
+      <rect x="18.5" y="28.5" width="11" height="2.4" rx="1.2" fill="currentColor"/>
+    </svg>
+  </button>`);
   const panel = el(`
     <div class="szc-panel szc-hidden" role="dialog" aria-label="Chat de suporte">
       <div class="szc-head">
@@ -214,13 +254,14 @@
   btn.addEventListener('click', () => {
     aberto = !aberto;
     panel.classList.toggle('szc-hidden', !aberto);
+    atualizarNomeFlutuante();
     if (!aberto) { pararPoll(); return; }
-    // MASTER: o mesmo icone 💬 abre o ATENDIMENTO (lista de conversas) em
+    // MASTER: o mesmo icone abre o ATENDIMENTO (lista de conversas) em
     // vez do formulario de visitante - so no Master
     if (ATEND.ehMaster) atendRenderLista();
     else carregarConversa();
   });
-  panel.querySelector('.szc-x').addEventListener('click', () => { aberto = false; panel.classList.add('szc-hidden'); pararPoll(); });
+  panel.querySelector('.szc-x').addEventListener('click', () => { aberto = false; panel.classList.add('szc-hidden'); pararPoll(); atualizarNomeFlutuante(); });
   panel.querySelector('#szc-enviar-msg').addEventListener('click', enviarMensagem);
   panel.querySelector('#szc-nova-msg').addEventListener('keydown', (e) => { if (e.key === 'Enter') enviarMensagem(); });
 
@@ -235,6 +276,17 @@
   const badge = el('<span style="position:absolute;top:-4px;right:-4px;background:#ff5c5c;color:#fff;font-size:10.5px;font-weight:700;border-radius:10px;padding:1px 6px;display:none;font-family:ui-monospace,monospace;">0</span>');
   btn.style.position = 'fixed';
   btn.appendChild(badge);
+
+  // nome do Beniboy flutuando do lado do botao - so faz sentido pro
+  // VISITANTE (quem vai falar com o bot); some quando a conversa esta
+  // aberta (o painel ja ocupa aquele canto) e nunca aparece pro atendimento,
+  // onde o mesmo icone vira "Chats de suporte" e o nome perderia o sentido
+  const nomeBotWrap = el('<div class="szc-bot-nome-wrap"><span class="szc-bot-nome">Beniboy</span></div>');
+  document.body.appendChild(nomeBotWrap);
+  function atualizarNomeFlutuante() {
+    nomeBotWrap.classList.toggle('szc-hidden', aberto || ATEND.ativo);
+  }
+  atualizarNomeFlutuante();
 
   function authHeaders() {
     const t = localStorage.getItem('authToken');
@@ -386,6 +438,7 @@
       ATEND.ativo = true;
       ATEND.ehMaster = me.role === 'master';
       btn.title = 'Chats de suporte';
+      atualizarNomeFlutuante(); // atendimento nao mostra o nome do Beniboy
       await atendCarregar();
       // aba em segundo plano nao busca (ninguem esta olhando e a requisicao
       // so gastaria servidor/Firestore a toa) - ao voltar pra aba, atualiza
