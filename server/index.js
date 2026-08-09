@@ -4665,8 +4665,41 @@ function ehResponsavelManutencao(chamado, userId) {
 
 app.get('/api/chamados-manutencao', requireSection('manutencao'), async (req, res) => {
   const todos = await chamadosManutencao.listAll();
-  if (req.isMaster) return res.json(todos);
+  // Master e Admin veem TODOS os chamados (sem depender de estarem na lista
+  // de responsaveis); quem executa ve so o que foi atribuido a ele
+  if (req.isMaster || req.isAdmin) return res.json(todos);
   res.json(todos.filter((c) => ehResponsavelManutencao(c, req.user.id)));
+});
+
+// o chamado nasceu como Manutenção mas na verdade era Suporte de TI:
+// converte pra um chamado de TI de verdade (MESMO Ticket #), escolhendo o
+// tecnico e a modalidade; o de manutencao fecha como CANCELADO apontando
+// pro novo - nada se perde, a numeracao junta os dois
+app.post('/api/chamados-manutencao/:id/converter-para-ti', auth.requireMaster, async (req, res) => {
+  try {
+    const chamado = await chamadosManutencao.getOne(req.params.id);
+    if (!chamado) return res.status(404).json({ error: 'Chamado não encontrado.' });
+    if (chamado.convertidoParaTIId) return res.status(400).json({ error: 'Esse chamado já foi convertido pra Suporte TI.' });
+    const novo = await chamadosTI.create({
+      unidade: chamado.unidade,
+      unidadeNome: chamado.unidadeNome,
+      titulo: chamado.titulo,
+      descricao: `${chamado.descricao || ''}\n\n[Convertido de um chamado de Manutenção pelo Master]`.trim(),
+      tecnicoId: req.body.tecnicoId,
+      tecnicoEmail: req.body.tecnicoEmail,
+      solicitacaoId: chamado.solicitacaoId || null,
+      criadoPorEmail: req.user.email,
+      modalidade: req.body.modalidade === 'remoto' ? 'remoto' : 'presencial',
+      prioridade: chamado.prioridade,
+      numeroTicket: chamado.numeroTicket != null ? chamado.numeroTicket : null,
+    });
+    const atualizado = await chamadosManutencao.marcarConvertidoParaTI(req.params.id, { chamadoTIId: novo.id, porEmail: req.user.email });
+    broadcast('chamado-manutencao-atualizado', { id: req.params.id }, 'manutencao');
+    broadcast('chamado-criado', { id: novo.id }, 'tecnico');
+    res.json({ chamado: atualizado, chamadoTI: novo });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.get('/api/chamados-manutencao/:id', auth.requireMaster, async (req, res) => {
