@@ -88,7 +88,7 @@ async function listUncached() {
   const snap = await COLLECTION.orderBy('nome', 'asc').get();
   return snap.docs.map((d) => d.data());
 }
-const gruposCache = createCache(listUncached, 20 * 1000);
+const gruposCache = createCache(listUncached, 5 * 60 * 1000);
 const list = gruposCache.cached;
 
 async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado }) {

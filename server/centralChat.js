@@ -63,7 +63,7 @@ async function listAllUncached() {
   const snap = await COLLECTION.get();
   return snap.docs.map((d) => d.data());
 }
-const chatCache = createCache(listAllUncached, 20 * 1000);
+const chatCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAllCached = chatCache.cached;
 
 // reatribui todas as mensagens de um card pra uma nova chave tipo:id - usado

@@ -78,7 +78,7 @@ async function listUncached() {
   const snap = await usersRef.orderBy('createdAt', 'asc').get();
   return snap.docs.map(toPublic);
 }
-const usersCache = createCache(listUncached, 20 * 1000);
+const usersCache = createCache(listUncached, 60 * 1000);
 const list = usersCache.cached;
 
 async function create({ email, password, permissions, username }) {

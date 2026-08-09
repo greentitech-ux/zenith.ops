@@ -156,7 +156,7 @@ async function listAllUncached() {
   const snap = await COLLECTION.orderBy('criadoEm', 'desc').get();
   return snap.docs.map((d) => d.data());
 }
-const solicitacoesCache = createCache(listAllUncached, 20 * 1000);
+const solicitacoesCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = solicitacoesCache.cached;
 
 async function getOne(id) {

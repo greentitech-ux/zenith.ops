@@ -28,7 +28,7 @@ async function listAllUncached() {
   const snap = await COLLECTION.orderBy('dataHora', 'desc').get();
   return snap.docs.map((d) => d.data());
 }
-const vendasCache = createCache(listAllUncached, 20 * 1000);
+const vendasCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAllCached = vendasCache.cached;
 
 module.exports = { upsert, listAllCached, invalidar: vendasCache.invalidar };

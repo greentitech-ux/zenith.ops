@@ -152,7 +152,7 @@ async function listAllUncached() {
   }
   return itens;
 }
-const cache = createCache(listAllUncached, 20 * 1000);
+const cache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = cache.cached;
 
 module.exports = { criar, remover, listAll };

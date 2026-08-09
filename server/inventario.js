@@ -63,7 +63,7 @@ async function getConfigUncached() {
   const doc = await CONFIG.get();
   return doc.exists ? doc.data() : { setoresExtras: [], tiposExtras: [] };
 }
-const configCache = createCache(getConfigUncached, 20 * 1000);
+const configCache = createCache(getConfigUncached, 5 * 60 * 1000);
 const getConfig = configCache.cached;
 
 async function listSetores() {
@@ -315,7 +315,7 @@ async function listRecebimentosUncached() {
   const snap = await RECEBIMENTOS.orderBy('data', 'desc').get();
   return snap.docs.map((d) => d.data());
 }
-const recebimentosCache = createCache(listRecebimentosUncached, 20 * 1000);
+const recebimentosCache = createCache(listRecebimentosUncached, 5 * 60 * 1000);
 const listRecebimentos = recebimentosCache.cached;
 
 async function removerRecebimento(id) {
@@ -353,7 +353,7 @@ async function listSaidasUncached() {
   const snap = await SAIDAS.orderBy('data', 'desc').get();
   return snap.docs.map((d) => d.data());
 }
-const saidasCache = createCache(listSaidasUncached, 20 * 1000);
+const saidasCache = createCache(listSaidasUncached, 5 * 60 * 1000);
 const listSaidas = saidasCache.cached;
 
 async function removerSaida(id) {
@@ -409,7 +409,7 @@ async function listContagensUncached() {
   const snap = await CONTAGENS.orderBy('data', 'desc').get();
   return snap.docs.map((d) => d.data());
 }
-const contagensCache = createCache(listContagensUncached, 20 * 1000);
+const contagensCache = createCache(listContagensUncached, 5 * 60 * 1000);
 const listContagens = contagensCache.cached;
 
 // ---------- motor de calculo: esperado x real ----------

@@ -110,7 +110,7 @@ async function listAllUncached() {
   const snap = await COLLECTION.orderBy('criadoEm', 'desc').get();
   return snap.docs.map((d) => d.data());
 }
-const chatsCache = createCache(listAllUncached, 15 * 1000);
+const chatsCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = chatsCache.cached;
 
 module.exports = { criar, getOne, getPublico, adicionarMensagem, finalizar, vincularChamado, listAll };

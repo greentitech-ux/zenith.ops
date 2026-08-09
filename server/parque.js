@@ -466,16 +466,22 @@ async function listAllUncached() {
   const snap = await COLLECTION.orderBy('dataUtilizacao', 'desc').get();
   return snap.docs.map((d) => d.data());
 }
-const parqueCache = createCache(listAllUncached, 20 * 1000);
+// TTL de 5 min: o balcao do parque consulta essa lista a cada 30s (relogio
+// regressivo + popup de tempo esgotado), e cada refresh do cache rele a
+// COLECAO INTEIRA (historico importado incluso). Com 20s de TTL isso virava
+// milhoes de leituras/dia no Firestore. Toda mutacao daqui invalida o cache
+// na hora (servidor de instancia unica), entao o TTL so limita releitura de
+// dado que NAO mudou - pode ser folgado sem atrasar nada nas telas
+const parqueCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = parqueCache.cached;
 
-// Firestore "in" aceita no maximo 30 valores por consulta
+// filtra EM MEMORIA sobre o cache compartilhado - antes era uma query direta
+// no Firestore (where unidade in ...) SEM cache, disparada a cada poll de
+// 30s do balcao: sozinha, foi a principal fonte do estouro de leituras
 async function listByUnidades(unidades) {
   if (!unidades || !unidades.length) return [];
-  const lotes = [];
-  for (let i = 0; i < unidades.length; i += 30) lotes.push(unidades.slice(i, i + 30));
-  const resultados = await Promise.all(lotes.map((lote) => COLLECTION.where('unidade', 'in', lote).get()));
-  return resultados.flatMap((snap) => snap.docs.map((d) => d.data()));
+  const alvo = new Set(unidades);
+  return (await listAll()).filter((c) => alvo.has(c.unidade));
 }
 
 async function getOne(id) {
@@ -569,7 +575,10 @@ async function atualizar(id, patch) {
 async function rodarAutoCheckins() {
   const hoje = hojeBrasiliaISO();
   const agora = horaAgoraBrasilia();
-  const snap = await COLLECTION.where('iniciado', '==', false).get();
+  // filtra o DIA ja na query: cadastro antigo que nunca iniciou ficava sendo
+  // relido a cada varredura (1x/min) pra sempre - com o filtro de data a
+  // leitura fica no tamanho do dia, nao do acumulado
+  const snap = await COLLECTION.where('iniciado', '==', false).where('dataUtilizacao', '==', hoje).get();
   const feitos = [];
   for (const doc of snap.docs) {
     const c = doc.data();
@@ -691,7 +700,7 @@ async function listarEdicoesUncached() {
   const snap = await EDITS.orderBy('criadoEm', 'desc').get();
   return snap.docs.map((d) => d.data());
 }
-const edicoesParqueCache = createCache(listarEdicoesUncached, 20 * 1000);
+const edicoesParqueCache = createCache(listarEdicoesUncached, 5 * 60 * 1000);
 const listarEdicoes = edicoesParqueCache.cached;
 
 // decididoPorGerente marca quando quem aprovou foi um Gerente da unidade
