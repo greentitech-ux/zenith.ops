@@ -3,7 +3,9 @@
 // consultas sincronas que o resto do app espera) e persiste cada transacao
 // como um documento na colecao "transactions", em segundo plano.
 
+const admin = require('firebase-admin');
 const db = require('./firestore');
+const { resolverBucket } = require('./storageBucket');
 const COLLECTION = db.collection('transactions');
 
 let cache = [];
@@ -12,9 +14,74 @@ function docId(tx) {
   return `${tx.pspReference}__${tx.eventCode}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
 }
 
+// ---------- snapshot em Storage: baratear a releitura no boot ----------
+// init() precisa da colecao INTEIRA em memoria pra app funcionar (nao da pra
+// so pular, diferente do backup.js) - mas reler tudo do Firestore a cada
+// reinicio do processo era a maior fonte de leitura da cota diaria, porque
+// cada deploy (varios por dia em dia de muito PR) reinicia o processo. A
+// saida: manter uma copia da colecao no Storage (upload e MUITO mais barato
+// que leitura do Firestore) e, no boot, carregar dali; so busca no Firestore
+// os documentos gravados DEPOIS desse snapshot (janela pequena = poucas
+// leituras), usando o carimbo _syncEm que addOrUpdate/setComentario gravam
+// em todo write. Sem snapshot ainda (1a vez rodando essa versao, ou Storage
+// fora do ar) cai pro comportamento antigo: le a colecao inteira.
+const SNAPSHOT_PATH = 'transactions-snapshot/latest.json';
+
+async function carregarSnapshot() {
+  try {
+    const bucket = await resolverBucket();
+    const [buf] = await bucket.file(SNAPSHOT_PATH).download();
+    const dump = JSON.parse(buf.toString('utf8'));
+    if (!dump || !Array.isArray(dump.transacoes) || !dump.savedAt) return null;
+    return dump;
+  } catch (err) {
+    return null; // sem snapshot ainda, ou Storage indisponivel
+  }
+}
+
+async function salvarSnapshot() {
+  try {
+    const bucket = await resolverBucket();
+    const dump = { savedAt: new Date().toISOString(), transacoes: cache };
+    await bucket.file(SNAPSHOT_PATH).save(JSON.stringify(dump), { contentType: 'application/json' });
+  } catch (err) {
+    console.error('Erro ao salvar snapshot de transações no Storage (próximo boot vai reler tudo do Firestore):', err.message);
+  }
+}
+
+// so os documentos gravados apos "desde" (Timestamp do Firestore) - usado pra
+// completar o gap entre o snapshot e agora sem reler a colecao inteira
+async function buscarGravadosApos(desde) {
+  const snap = await COLLECTION.where('_syncEm', '>', desde).get();
+  return snap.docs.map((d) => {
+    const { _syncEm, ...tx } = d.data();
+    return tx;
+  });
+}
+
 async function init() {
-  const snap = await COLLECTION.get();
-  cache = snap.docs.map((d) => d.data());
+  const snapshot = await carregarSnapshot();
+  if (snapshot) {
+    cache = snapshot.transacoes;
+    try {
+      const desde = admin.firestore.Timestamp.fromDate(new Date(snapshot.savedAt));
+      const novos = await buscarGravadosApos(desde);
+      for (const tx of novos) {
+        const idx = cache.findIndex((t) => t.pspReference === tx.pspReference && t.eventCode === tx.eventCode);
+        if (idx >= 0) cache[idx] = tx; else cache.push(tx);
+      }
+      console.log(`Boot: snapshot com ${snapshot.transacoes.length} transações (${snapshot.savedAt}) + ${novos.length} novas do Firestore.`);
+    } catch (err) {
+      console.error('Erro ao buscar transações novas após o snapshot - seguindo só com o snapshot:', err.message);
+    }
+  } else {
+    const snap = await COLLECTION.get();
+    cache = snap.docs.map((d) => d.data());
+    console.log(`Boot: sem snapshot em Storage - carregado ${cache.length} transações direto do Firestore.`);
+  }
+  // deixa o proximo boot mais barato - nao trava a subida do servidor
+  // esperando o upload, so loga se der errado
+  salvarSnapshot();
 }
 
 function load() {
@@ -59,6 +126,11 @@ async function pruneOld(cutoffMs) {
       for (const t of lote) batch.delete(COLLECTION.doc(docId(t)));
       await batch.commit();
     }
+    // sem isso, um boot que carregasse o snapshot antigo (de antes dessa
+    // limpeza) ressuscitaria em memoria transacoes que acabaram de ser
+    // apagadas do Firestore - a delta query (_syncEm) so pega gravacao/
+    // atualizacao, nao apagamento
+    salvarSnapshot();
   }
   return removed.length;
 }
@@ -84,7 +156,7 @@ function addOrUpdate(tx) {
     cache.push(merged);
   }
   COLLECTION.doc(docId(merged))
-    .set(merged, { merge: true })
+    .set({ ...merged, _syncEm: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
     .catch((err) => console.error('Erro ao salvar transacao no Firestore:', err.message));
   return merged;
 }
@@ -103,7 +175,7 @@ function setComentario(pspReference, eventCode, comentario) {
   const atualizado = { ...cache[idx], comentario, comentarioEm: new Date().toISOString() };
   cache[idx] = atualizado;
   COLLECTION.doc(docId(atualizado))
-    .set(atualizado, { merge: true })
+    .set({ ...atualizado, _syncEm: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
     .catch((err) => console.error('Erro ao salvar comentario no Firestore:', err.message));
   return atualizado;
 }
