@@ -11,7 +11,7 @@
 // ser resgatada (histórico de versões da planilha ou export do próprio
 // AppSheet). As outras 5 abas de entrega têm Data+Mês preenchidos e já
 // entram nessa sincronização.
-const { buscarAba, buscarLinhasNovas, parseMoneyBR } = require('./sheetsSync');
+const { buscarAba, buscarLinhasNovas, parseMoneyBR, criarPersistenciaEstado } = require('./sheetsSync');
 
 const SPREADSHEET_ID = process.env.SHEET_ID_ENTREGAS || '14qb8V0fCqgGFmHDISm4HIArAmDZ0QJN8uD7B6zRIYTk';
 const ABAS = (process.env.SHEET_ABAS_ENTREGAS || 'Garanhuns,Bessa,Caruaru,Tirol,MMTirol')
@@ -95,8 +95,12 @@ function linhaParaEntrega(aba, header, linha) {
 // parou; as seguintes leem so as linhas novas do fim em diante. Linha antiga
 // editada so entra com completa=true.
 const estadoSyncEntregas = new Map(); // aba -> { header, linhasLidas, brutos }
+// estado persistido no Storage, igual ao dos fechamentos: o ponto da ultima
+// leitura sobrevive a reinicio, e ate o boot le so as linhas novas
+const persistenciaEntregas = criarPersistenciaEstado('sync-estado/entregas.json', estadoSyncEntregas, 'entregasSync');
 
 async function sincronizar({ completa = false } = {}) {
+  if (!completa) await persistenciaEntregas.carregar();
   const resultado = [];
   let linhasNovas = 0;
   for (const aba of ABAS) {
@@ -124,6 +128,7 @@ async function sincronizar({ completa = false } = {}) {
     }
     resultado.push(...estado.brutos);
   }
+  if (linhasNovas > 0) await persistenciaEntregas.salvar();
   resultado.linhasNovas = linhasNovas;
   return resultado;
 }

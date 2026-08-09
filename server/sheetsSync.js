@@ -9,6 +9,7 @@
 
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const { resolverBucket } = require('./storageBucket');
 
 // escopo de leitura E escrita - a escrita e usada pelo caminho inverso
 // (enviarFechamentoArcfood), que manda o fechamento lançado ao vivo no app
@@ -317,7 +318,43 @@ function mesclarLancamentosDoMesmoDia(fechamentos) {
 // da operacao e so entrar linha nova.
 const estadoSyncFechamentos = new Map(); // id__aba -> { header, linhasLidas, brutos }
 
+// o estado incremental tambem e PERSISTIDO no Firebase Storage: assim o
+// "ponto da ultima leitura" sobrevive a deploy/reinicio do Render, e ate a
+// carga do boot le so as linhas novas desde a ultima sincronizacao - a
+// planilha inteira so e lida no primeiro uso (sem estado salvo) ou quando o
+// Master pede uma releitura completa. Falha no Storage nunca trava a
+// sincronizacao: sem estado salvo, cai na leitura completa de sempre.
+function criarPersistenciaEstado(arquivo, mapa, rotulo) {
+  let carregado = false;
+  return {
+    async carregar() {
+      if (carregado) return;
+      carregado = true;
+      try {
+        const bucket = await resolverBucket();
+        const [buf] = await bucket.file(arquivo).download();
+        Object.entries(JSON.parse(buf.toString())).forEach(([chave, estado]) => {
+          if (estado && Array.isArray(estado.header) && estado.linhasLidas > 0 && Array.isArray(estado.brutos)) {
+            mapa.set(chave, estado);
+          }
+        });
+        if (mapa.size) console.log(`${rotulo}: estado incremental restaurado do Storage (${mapa.size} planilha(s)/aba(s)).`);
+      } catch (e) { /* primeiro uso ou Storage indisponivel: leitura completa */ }
+    },
+    async salvar() {
+      try {
+        const bucket = await resolverBucket();
+        await bucket.file(arquivo).save(JSON.stringify(Object.fromEntries(mapa)), { contentType: 'application/json' });
+      } catch (e) {
+        console.warn(`${rotulo}: não deu pra salvar o estado incremental no Storage (${e.message}) - a próxima leitura pós-reinício será completa.`);
+      }
+    },
+  };
+}
+const persistenciaFechamentos = criarPersistenciaEstado('sync-estado/fechamentos.json', estadoSyncFechamentos, 'sheetsSync');
+
 async function sincronizar({ completa = false } = {}) {
+  if (!completa) await persistenciaFechamentos.carregar();
   const resultado = [];
   let linhasNovas = 0;
   for (const planilha of PLANILHAS) {
@@ -346,6 +383,7 @@ async function sincronizar({ completa = false } = {}) {
     }
     resultado.push(...estado.brutos);
   }
+  if (linhasNovas > 0) await persistenciaFechamentos.salvar();
   const lista = mesclarLancamentosDoMesmoDia(resultado);
   lista.linhasNovas = linhasNovas;
   return lista;
@@ -553,6 +591,6 @@ async function enviarFechamentoArcfood(f) {
 }
 
 module.exports = {
-  sincronizar, parseMoneyBR, parseDataArcfood, parseDataBravo, getAccessToken, buscarAba, buscarLinhasNovas, buscarAbaPorCandidatos, mesclarLancamentosDoMesmoDia,
+  sincronizar, parseMoneyBR, parseDataArcfood, parseDataBravo, getAccessToken, buscarAba, buscarLinhasNovas, buscarAbaPorCandidatos, mesclarLancamentosDoMesmoDia, criarPersistenciaEstado,
   enviarFechamentoArcfood,
 };
