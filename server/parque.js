@@ -53,6 +53,96 @@ function sanitizarMetodoPagamento(m) {
   return METODOS_PAGAMENTO.includes(m) ? m : null;
 }
 
+// ---------- cortesia: alcada dupla com escalonamento ----------
+// Cortesia e renuncia de receita, entao nunca passa sozinha: nasce como um
+// card PENDENTE com justificativa obrigatoria e segue o fluxo:
+//   PENDENTE -> Gerente da unidade aprova = APROVADA_GERENTE (entrada
+//     liberada pra agilizar o balcao, MAS o card continua aberto
+//     aguardando a palavra final do Master - prestacao de contas)
+//   PENDENTE -> Master aprova direto = CONCLUIDA (encerrada)
+//   APROVADA_GERENTE -> Master aprova = CONCLUIDA
+//   APROVADA_GERENTE -> Master REJEITA a justificativa = ESCALADA_ADMIN
+//     (o card e atribuido ao Admin responsavel - MV - pra tomar ciencia e
+//     decidir, encerrando o card com um parecer)
+//   PENDENTE -> negada (Gerente ou Master) = NEGADA (entrada bloqueada;
+//     troca a forma de pagamento pra liberar)
+// Cada passo grava quem decidiu, quando e o motivo - trilha de auditoria
+// completa. Registros antigos de cortesia (sem cortesiaStatus) nao entram
+// no fluxo.
+const ADMIN_CORTESIA = { username: 'mv', emailPrefixo: 'mv@grupobravoempresarial' };
+const ADMIN_CORTESIA_LABEL = 'MV (mv@grupobravoempresarial)';
+function ehAdminCortesia(user) {
+  const u = String((user && user.username) || '').toLowerCase();
+  const e = String((user && user.email) || '').toLowerCase();
+  return u === ADMIN_CORTESIA.username || e.startsWith(ADMIN_CORTESIA.emailPrefixo);
+}
+
+// bloqueia o check-in fisico enquanto a cortesia nao foi aprovada (ou foi
+// negada). Depois que o Gerente aprovou, a entrada esta liberada mesmo que
+// o card ainda esteja com o Master/Admin - a alcada seguinte e prestacao
+// de contas, nao trava a operacao
+function cortesiaBloqueiaEntrada(c) {
+  return c.metodoPagamento === 'cortesia' && !!c.cortesiaStatus
+    && ['PENDENTE', 'NEGADA'].includes(c.cortesiaStatus);
+}
+
+async function decidirCortesia(id, { nivel, aprovado, motivo, porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Check-in não encontrado.');
+  const atual = snap.data();
+  if (atual.metodoPagamento !== 'cortesia' || !atual.cortesiaStatus) {
+    throw new Error('Esse check-in não tem cortesia pra decidir.');
+  }
+  const agora = new Date().toISOString();
+  const motivoOk = String(motivo || '').trim().slice(0, 300);
+  let merge;
+  if (nivel === 'gerente') {
+    if (atual.cortesiaStatus !== 'PENDENTE') throw new Error('Essa cortesia já foi decidida.');
+    merge = aprovado
+      ? { cortesiaStatus: 'APROVADA_GERENTE', cortesiaAprovadaPorEmail: porEmail, cortesiaAprovadaEm: agora }
+      : { cortesiaStatus: 'NEGADA', cortesiaNegadaPorEmail: porEmail, cortesiaNegadaEm: agora, cortesiaMotivoNegativa: motivoOk || null };
+  } else {
+    if (!['PENDENTE', 'APROVADA_GERENTE'].includes(atual.cortesiaStatus)) throw new Error('Essa cortesia já foi concluída.');
+    if (aprovado) {
+      merge = { cortesiaStatus: 'CONCLUIDA', cortesiaMasterEmail: porEmail, cortesiaMasterEm: agora };
+    } else if (atual.cortesiaStatus === 'APROVADA_GERENTE') {
+      // a entrada JA foi liberada pela Gerente - rejeitar aqui nao desfaz a
+      // entrada, escala a prestacao de contas pro Admin responsavel decidir
+      if (!motivoOk) throw new Error('Explique por que a justificativa do Gerente foi rejeitada.');
+      merge = {
+        cortesiaStatus: 'ESCALADA_ADMIN', cortesiaMasterEmail: porEmail, cortesiaMasterEm: agora,
+        cortesiaMotivoRejeicao: motivoOk, cortesiaEscaladaPara: ADMIN_CORTESIA_LABEL,
+      };
+    } else {
+      merge = { cortesiaStatus: 'NEGADA', cortesiaNegadaPorEmail: porEmail, cortesiaNegadaEm: agora, cortesiaMotivoNegativa: motivoOk || null };
+    }
+  }
+  await ref.update({ ...merge, atualizadoEm: agora });
+  parqueCache.invalidar();
+  return getOne(id);
+}
+
+// palavra final do Admin responsavel (MV) num card escalado: toma ciencia
+// da divergencia Gerente x Master e encerra com um parecer registrado
+async function encerrarCortesia(id, { porEmail, parecer }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Check-in não encontrado.');
+  const atual = snap.data();
+  if (atual.cortesiaStatus !== 'ESCALADA_ADMIN') throw new Error('Essa cortesia não está escalada pro Admin.');
+  if (!String(parecer || '').trim()) throw new Error('Registre o parecer final (o que foi decidido).');
+  await ref.update({
+    cortesiaStatus: 'ENCERRADA',
+    cortesiaEncerradaPorEmail: porEmail,
+    cortesiaEncerradaEm: new Date().toISOString(),
+    cortesiaParecerFinal: String(parecer).trim().slice(0, 300),
+    atualizadoEm: new Date().toISOString(),
+  });
+  parqueCache.invalidar();
+  return getOne(id);
+}
+
 // valor total de um check-in ja gravado - registros antigos (de antes do
 // financeiro existir) nao tem `valor` salvo, entao recalcula pela tabela
 function valorDoCheckin(c) {
@@ -158,9 +248,15 @@ async function criar({
   unidade, unidadeNome, colaboradorId, colaboradorNome,
   responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto,
   observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras,
-  metodoPagamento, meiasExtras, criadoPorId, criadoPorEmail,
+  metodoPagamento, meiasExtras, motivoCortesia, criadoPorId, criadoPorEmail,
 }) {
   const { tempo, criancasOk } = validarPayload({ unidade, responsavel, dataUtilizacao, tempoMinutos, criancas });
+  // cortesia so nasce com justificativa - e o que alimenta o card de
+  // aprovacao (Gerente/Master) e a trilha de auditoria
+  const ehCortesia = sanitizarMetodoPagamento(metodoPagamento) === 'cortesia';
+  if (ehCortesia && !String(motivoCortesia || '').trim()) {
+    throw new Error('Cortesia exige justificativa: explique o motivo da entrada sem cobrança.');
+  }
   // minutosExtras: credito de tempo guardado de um checkout antecipado
   // anterior (ver checkout()/usarCredito() abaixo) - soma por cima do
   // tempo contratado normal, nao muda o "bucket" escolhido (TEMPOS_VALIDOS)
@@ -221,6 +317,9 @@ async function criar({
     // adicionarTempo) - nao muda o bucket contratado, soma por cima
     minutosAdicionados: 0,
     acrescimos: [],
+    // cortesia entra em fluxo de aprovacao (ver decidirCortesia acima)
+    cortesiaStatus: ehCortesia ? 'PENDENTE' : null,
+    motivoCortesia: ehCortesia ? String(motivoCortesia).trim().slice(0, 300) : null,
     usou: usou !== false,
     termoAssinado: false,
     criadoPorId,
@@ -239,6 +338,11 @@ async function checkin(id) {
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Check-in não encontrado.');
   const atual = snap.data();
+  if (cortesiaBloqueiaEntrada(atual)) {
+    throw new Error(atual.cortesiaStatus === 'NEGADA'
+      ? 'Cortesia negada - troque a forma de pagamento pra liberar a entrada.'
+      : 'Cortesia aguardando aprovação do Gerente da unidade ou do Master.');
+  }
   const inicio = horaAgoraBrasilia();
   const merge = {
     timeInicial: inicio,
@@ -419,7 +523,17 @@ async function atualizar(id, patch) {
     merge.criancas = criancasOk;
     merge.pulseiras = criancasOk.length;
   }
-  if (patch.metodoPagamento !== undefined) merge.metodoPagamento = sanitizarMetodoPagamento(patch.metodoPagamento);
+  if (patch.metodoPagamento !== undefined) {
+    merge.metodoPagamento = sanitizarMetodoPagamento(patch.metodoPagamento);
+    // virou cortesia numa correcao: entra no fluxo de aprovacao do zero;
+    // deixou de ser cortesia: o card morre junto
+    if (merge.metodoPagamento === 'cortesia' && atual.metodoPagamento !== 'cortesia') {
+      merge.cortesiaStatus = 'PENDENTE';
+      merge.motivoCortesia = String(patch.motivoCortesia || '').trim().slice(0, 300) || 'alterado pra cortesia via correção';
+    } else if (merge.metodoPagamento !== 'cortesia' && atual.metodoPagamento === 'cortesia') {
+      merge.cortesiaStatus = null;
+    }
+  }
   if (patch.meiasExtras !== undefined) merge.meiasExtras = Math.max(0, Math.min(30, num(patch.meiasExtras)));
   // o valor acompanha a tabela: recalcula sempre que tempo, criancas, meias
   // ou forma de pagamento mudarem (cortesia zera). Registros de antes das
@@ -461,6 +575,9 @@ async function rodarAutoCheckins() {
     const c = doc.data();
     if (!c.horarioPrevisto || c.dataUtilizacao !== hoje) continue;
     if (c.horarioPrevisto > agora) continue;
+    // cortesia sem aprovacao nao entra sozinha - o relogio so pode iniciar
+    // depois que o Gerente/Master liberar
+    if (cortesiaBloqueiaEntrada(c)) continue;
     const merge = {
       timeInicial: c.horarioPrevisto,
       timeFinal: somarMinutos(c.horarioPrevisto, c.tempoMinutos + (c.minutosExtras || 0) + (c.minutosAdicionados || 0)),
@@ -764,6 +881,7 @@ module.exports = {
   TEMPOS_VALIDOS, METODOS_PAGAMENTO, PRECO_MEIA, valorPorTempo, valorDoCheckin,
   criar, checkin, listAll, listByUnidades, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
   adicionarTempo, relancar, visitaHojePorCpf,
+  decidirCortesia, encerrarCortesia, ehAdminCortesia,
   solicitarEdicao, listarEdicoes, decidirEdicao, validarPropostaEdicao,
   checkout, aprovarCheckout, retomarCheckout, creditoPorCpf, usarCredito,
   invalidar: () => parqueCache.invalidar(),

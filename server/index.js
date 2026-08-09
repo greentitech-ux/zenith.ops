@@ -2481,7 +2481,7 @@ app.get('/api/inventario/relatorio.:formato(csv|pdf)', requireSection('inventari
 // padrao entregas/entregas-lancamento) + uma secao de festas ----------
 app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, res) => {
   try {
-    const { unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, usarCreditoMin, metodoPagamento, meiasExtras } = req.body;
+    const { unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, usarCreditoMin, metodoPagamento, meiasExtras, motivoCortesia } = req.body;
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
@@ -2493,7 +2493,7 @@ app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, r
       minutosExtras = await parque.usarCredito(responsavel?.cpf, usarCreditoMin);
     }
     const registro = await parque.criar({
-      unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras, metodoPagamento, meiasExtras,
+      unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras, metodoPagamento, meiasExtras, motivoCortesia,
       colaboradorId: req.user.id, colaboradorNome: req.user.email,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
     });
@@ -2583,6 +2583,47 @@ app.post('/api/parque/checkins/:id/checkin', requireAnySection('parque', 'parque
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
     const registro = await parque.checkin(req.params.id);
+    broadcast('parque-checkin-atualizado', registro, 'parque');
+    broadcast('parque-checkin-atualizado', registro, 'parque-checkin');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// cortesia (alcada dupla): Gerente da unidade aprova/nega no 1o nivel
+// (aprovacao libera a entrada mas o card segue aberto pro Master); o Master
+// da a palavra final - aprovando (encerra) ou rejeitando a justificativa
+// (escala pro Admin responsavel MV encerrar com parecer)
+app.post('/api/parque/checkins/:id/cortesia/decidir', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
+  try {
+    const atual = await parque.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Check-in não encontrado.' });
+    const ehGerente = req.user && req.user.cargo === 'gerente' && !req.isMaster
+      && (req.permissions?.unidades || []).includes(atual.unidade);
+    if (!req.isMaster && !ehGerente) {
+      return res.status(403).json({ error: 'Só o Gerente da unidade ou o Master decide uma cortesia.' });
+    }
+    const registro = await parque.decidirCortesia(req.params.id, {
+      nivel: req.isMaster ? 'master' : 'gerente',
+      aprovado: req.body.aprovado === true,
+      motivo: req.body.motivo,
+      porEmail: req.user.email,
+    });
+    broadcast('parque-checkin-atualizado', registro, 'parque');
+    broadcast('parque-checkin-atualizado', registro, 'parque-checkin');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/parque/checkins/:id/cortesia/encerrar', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
+  try {
+    if (!parque.ehAdminCortesia(req.user)) {
+      return res.status(403).json({ error: 'Só o Admin responsável (MV) encerra uma cortesia escalada.' });
+    }
+    const registro = await parque.encerrarCortesia(req.params.id, { porEmail: req.user.email, parecer: req.body.parecer });
     broadcast('parque-checkin-atualizado', registro, 'parque');
     broadcast('parque-checkin-atualizado', registro, 'parque-checkin');
     res.json(registro);

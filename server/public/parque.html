@@ -649,6 +649,8 @@ function renderAgora(){
 }
 
 function statusCheckin(c){
+  if(c.metodoPagamento==='cortesia' && c.cortesiaStatus==='PENDENTE') return { classe:'aguardando', texto:'🎗 cortesia aguardando aprovação' };
+  if(c.metodoPagamento==='cortesia' && c.cortesiaStatus==='NEGADA') return { classe:'aguardando', texto:'🎗 cortesia negada' };
   if(!c.iniciado) return { classe:'pendente-checkin', texto:'aguardando check-in' };
   if(c.checkoutEm && c.checkoutAprovado) return { classe:'dentro', texto:'check-out aprovado' };
   if(c.checkoutEm) return { classe:'aguardando', texto:'check-out pendente de aprovação' };
@@ -662,6 +664,72 @@ function statusCheckin(c){
 function podeAprovarCheckout(unidade){
   if(IS_MASTER || IS_ADMIN) return true;
   return ME && ME.cargo==='gerente' && (ME.permissions?.unidades||[]).includes(unidade);
+}
+
+// ---------- cortesia: card de aprovacao em alcada dupla ----------
+// Gerente da unidade decide o 1o nivel; Master da a palavra final; se o
+// Master rejeitar a justificativa, o card escala pro Admin MV encerrar
+function podeDecidirCortesiaGerente(unidade){
+  return ME && ME.cargo==='gerente' && !IS_MASTER && (ME.permissions?.unidades||[]).includes(unidade);
+}
+function ehAdminCortesiaLocal(){
+  const u = String(ME?.username||'').toLowerCase();
+  const e = String(ME?.email||'').toLowerCase();
+  return u==='mv' || e.startsWith('mv@grupobravoempresarial');
+}
+function cortesiaHtml(c){
+  if(c.metodoPagamento!=='cortesia' || !c.cortesiaStatus) return '';
+  const s = c.cortesiaStatus;
+  const linhas = {
+    PENDENTE: `🎗 <b>Cortesia aguardando aprovação</b> — motivo: ${escapeHtml(c.motivoCortesia||'—')}`,
+    APROVADA_GERENTE: `🎗 Cortesia aprovada pelo Gerente (${escapeHtml(c.cortesiaAprovadaPorEmail||'')}) · <b>aguardando palavra final do Master</b>`,
+    CONCLUIDA: `🎗 Cortesia aprovada — card encerrado pelo Master`,
+    NEGADA: `🎗 <b>Cortesia NEGADA</b> (${escapeHtml(c.cortesiaNegadaPorEmail||'')})${c.cortesiaMotivoNegativa?' — '+escapeHtml(c.cortesiaMotivoNegativa):''} · troque a forma de pagamento pra liberar`,
+    ESCALADA_ADMIN: `🎗 Justificativa rejeitada pelo Master${c.cortesiaMotivoRejeicao?' ('+escapeHtml(c.cortesiaMotivoRejeicao)+')':''} — <b>card atribuído ao Admin ${escapeHtml(c.cortesiaEscaladaPara||'MV')}</b> pra ciência e decisão final`,
+    ENCERRADA: `🎗 Cortesia encerrada pelo Admin (${escapeHtml(c.cortesiaEncerradaPorEmail||'')})${c.cortesiaParecerFinal?' — parecer: '+escapeHtml(c.cortesiaParecerFinal):''}`,
+  };
+  let botoes = '';
+  if(s==='PENDENTE' && (IS_MASTER || podeDecidirCortesiaGerente(c.unidade))){
+    botoes = `<button type="button" class="link-btn" style="color:var(--ok);" onclick="decidirCortesia('${c.id}', true)">✓ Aprovar cortesia</button>
+      <button type="button" class="link-btn" style="color:var(--bad);" onclick="decidirCortesia('${c.id}', false)">✕ Negar</button>`;
+  }
+  if(s==='APROVADA_GERENTE' && IS_MASTER){
+    botoes = `<button type="button" class="link-btn" style="color:var(--ok);" onclick="decidirCortesia('${c.id}', true)">✓ Palavra final: aprovar</button>
+      <button type="button" class="link-btn" style="color:var(--bad);" onclick="decidirCortesia('${c.id}', false)">✕ Rejeitar justificativa (escala pro Admin MV)</button>`;
+  }
+  if(s==='ESCALADA_ADMIN' && ehAdminCortesiaLocal()){
+    botoes = `<button type="button" class="link-btn" style="color:var(--warn);" onclick="encerrarCortesia('${c.id}')">🏁 Encerrar card com parecer</button>`;
+  }
+  return `<div class="sub" style="margin-top:6px;border:1px dashed var(--warn);border-radius:8px;padding:8px 10px;font-size:12px;">${linhas[s]||''}${botoes?'<div style="margin-top:4px;">'+botoes+'</div>':''}</div>`;
+}
+async function decidirCortesia(id, aprovado){
+  let motivo = '';
+  if(!aprovado){
+    motivo = prompt(IS_MASTER ? 'Por que a justificativa está sendo rejeitada/negada?' : 'Motivo da negativa (opcional):') ?? null;
+    if(motivo===null) return;
+  }else if(!confirm('Aprovar essa cortesia? A decisão fica registrada no histórico com seu usuário.')) return;
+  try{
+    const res = await fetch(`/api/parque/checkins/${id}/cortesia/decidir`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ aprovado, motivo }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error||'erro ao decidir cortesia');
+    await carregar();
+  }catch(err){ alert(err.message); }
+}
+async function encerrarCortesia(id){
+  const parecer = prompt('Parecer final (o que foi decidido sobre essa cortesia):');
+  if(parecer===null) return;
+  try{
+    const res = await fetch(`/api/parque/checkins/${id}/cortesia/encerrar`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ parecer }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error||'erro ao encerrar');
+    await carregar();
+  }catch(err){ alert(err.message); }
 }
 
 // sem tempo restante o check-out nao serve pra nada (nao ha o que pausar
@@ -734,10 +802,11 @@ function renderLista(lista){
         </div>
         <div class="sub">${horario} · ${c.pulseiras} pulseira(s)${c.valorMeias?` · 🧦 ${((c.criancas||[]).filter(x=>x.meia!==false).length + (c.meiasExtras||0))} meia(s)`:''}${c.minutosAdicionados?` · ➕ ${c.minutosAdicionados}min extras`:''}${c.relancadoDe?' · 🔁 relançado (termo do dia)':''} · ${fmtReal(valorDoCheckin(c))}${c.metodoPagamento?' ('+(METODOS_LABEL[c.metodoPagamento]||c.metodoPagamento)+')':''}${c.adultoCortesia?' · A.C. x'+c.quantAC:''} · ${escapeHtml(c.responsavel?.contato||'')}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''}</div>
         <div class="criancas">${escapeHtml(criancas)}</div>
+        ${cortesiaHtml(c)}
         <div>
           <a class="link-btn" href="/api/parque/checkins/${c.id}/termo.pdf?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">🖨️ Termo</a>
           ${!c.termoAssinado?`<button type="button" class="link-btn" onclick="marcarAssinadoId('${c.id}')">✔ Marcar assinado</button>`:''}
-          ${!c.iniciado?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="fazerCheckin('${c.id}')">▶ Fazer check-in</button>`:''}
+          ${(!c.iniciado && !(c.metodoPagamento==='cortesia' && ['PENDENTE','NEGADA'].includes(c.cortesiaStatus)))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="fazerCheckin('${c.id}')">▶ Fazer check-in</button>`:''}
           ${(c.iniciado && !c.checkoutEm && aindaTemTempoPraCheckout(c))?`<button type="button" class="link-btn" style="color:var(--warn);" onclick="checkoutEmergencia('${c.id}')">🚪 Check-out</button>`:''}
           ${(c.checkoutEm && !c.checkoutAprovado)?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="retomarCheckout('${c.id}')">↩ Voltar (criança retornou)</button>`:''}
           ${(c.checkoutEm && !c.checkoutAprovado && podeAprovarCheckout(c.unidade))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="aprovarCheckout('${c.id}')">✓ Aprovar check-out</button>`:''}
