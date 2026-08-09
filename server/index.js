@@ -5535,6 +5535,21 @@ app.use((err, req, res, next) => {
     sincronizarPlanilhasFechamento();
     sincronizarPlanilhaEntregas();
 
+    // pre-aquece em segundo plano os caches das colecoes mais acessadas
+    // (as que o Painel dispara ao abrir). Sem isso, o primeiro visitante
+    // depois de um deploy/reinicio paga a leitura completa de varias
+    // colecoes na frente dele - o "delay pra carregar" relatado em
+    // 2026-08-09. Com o stale-while-revalidate do liveCache, depois desta
+    // carga inicial nenhuma requisicao volta a esperar releitura de cache.
+    Promise.allSettled([
+      fechamentosLive.listAll(), entregasLive.listAll(), solicitacoes.listAll(),
+      parque.listAll(), festas.listAll(), mensalistas.listAll(),
+      chamadosTI.listAll(), sangrias.listAll(),
+    ]).then((r) => {
+      const falhas = r.filter((x) => x.status === 'rejected').length;
+      console.log(`Caches pré-aquecidos (${r.length - falhas}/${r.length} coleções).`);
+    });
+
     // sincroniza as vendas do iFood (Sales API - so leitura, ver
     // server/ifoodClient.js): roda no start e depois periodicamente. Padrao
     // bem mais espaçado que o Sheets Sync (1h) porque a Sales API e um
