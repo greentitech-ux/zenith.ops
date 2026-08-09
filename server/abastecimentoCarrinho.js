@@ -726,8 +726,42 @@ async function listAllUncached() {
 const cache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = cache.cached;
 
+// ---------- retencao: arquiva e apaga registros antigos ----------
+// Decisao do Master (2026-08-09): manter so os ultimos N dias "vivos" no
+// Firestore (padrao 30; ajustavel pela env var ABASTECIMENTO_RETENCAO_DIAS
+// no Render, sem mexer em codigo). O que passa do prazo e salvo em JSON no
+// Storage (abastecimento-arquivo/) ANTES de ser apagado - falhou o upload,
+// NADA e apagado. Roda 1x/dia junto do backup (ver boot no index.js).
+// Conversas (inclusive encerradas), recebimentos, divergencias etc. vao
+// juntos no arquivo - historico recuperavel, so fora do caminho quente.
+function diasRetencao() {
+  const v = parseInt(process.env.ABASTECIMENTO_RETENCAO_DIAS, 10);
+  return Number.isFinite(v) && v >= 7 ? v : 30; // minimo 7 por seguranca
+}
+
+async function arquivarAntigos() {
+  const dias = diasRetencao();
+  const corte = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString();
+  const snap = await COLLECTION.where('criadoEm', '<', corte).get();
+  const antigos = snap.docs.map((d) => d.data());
+  if (!antigos.length) return { arquivados: 0, dias };
+
+  // 1) salva o lote no Storage - e o pre-requisito pra poder apagar
+  const { resolverBucket } = require('./storageBucket');
+  const bucket = await resolverBucket();
+  const nome = `abastecimento-arquivo/registros-${corte.slice(0, 10)}-${Date.now()}.json`;
+  await bucket.file(nome).save(JSON.stringify({ geradoEm: new Date().toISOString(), retencaoDias: dias, corte, registros: antigos }));
+
+  // 2) so agora apaga do Firestore
+  for (const r of antigos) {
+    await COLLECTION.doc(r.id).delete();
+  }
+  cache.invalidar();
+  return { arquivados: antigos.length, dias, arquivo: nome };
+}
+
 module.exports = {
-  TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, getConfig, salvarConfig,
+  TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, getConfig, salvarConfig, arquivarAntigos,
   listarInsumos, criarInsumo, atualizarInsumo,
   listarOperadores, criarOperador, atualizarOperador, removerOperador, desbloquearOperador, validarOperador, validarOperadorQualquerPapel, trocarPapelOperador,
 };
