@@ -19,7 +19,7 @@
 
   const css = `
   .szc-btn{position:fixed;right:16px;bottom:16px;z-index:9000;width:52px;height:52px;border-radius:50%;
-    background:#5cc8ff;color:#06202b;border:none;font-size:24px;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.45);
+    background:#eef5fb;color:#06202b;border:none;font-size:24px;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.45);
     display:flex;align-items:center;justify-content:center;transition:transform .12s ease;}
   .szc-btn:hover{transform:scale(1.06);}
   .szc-panel{position:fixed;right:16px;bottom:78px;z-index:9001;width:320px;max-width:calc(100vw - 32px);
@@ -50,12 +50,10 @@
   .szc-erro{font-size:11.5px;color:#ff5c5c;}
   .szc-fim{background:#181d24;border:1px dashed #232a33;color:#7d8896;border-radius:8px;padding:8px;font-size:11.5px;text-align:center;}
   .szc-link{background:none;border:none;color:#5cc8ff;font-size:12px;cursor:pointer;padding:0;}
-  /* cabeça de robo (Beniboy) dentro do botao - antena pulsa, olhos piscam */
+  /* cabeça de robo (Beniboy) dentro do botao - olhos brilham e piscam */
   .szc-btn svg{overflow:visible;}
   .szc-bot-eyes{transform-box:fill-box;transform-origin:center;animation:szc-blink 4.6s ease-in-out infinite;}
   @keyframes szc-blink{0%,92%,100%{transform:scaleY(1);}95%{transform:scaleY(.15);}}
-  .szc-bot-antena{transform-box:fill-box;transform-origin:center;animation:szc-pulso 2.4s ease-in-out infinite;}
-  @keyframes szc-pulso{0%,100%{opacity:1;}50%{opacity:.45;}}
   /* nome do bot flutuando ao lado do botao - so aparece pro visitante (o
      atendimento usa o mesmo icone com outro sentido, ver atualizarNomeFlutuante) */
   .szc-bot-nome-wrap{position:fixed;right:74px;bottom:20px;z-index:8999;pointer-events:none;
@@ -68,7 +66,7 @@
   @keyframes szc-bn-in{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
   @keyframes szc-bn-float{0%,100%{transform:translateY(0);}50%{transform:translateY(-5px);}}
   @media (prefers-reduced-motion:reduce){
-    .szc-bot-eyes,.szc-bot-antena,.szc-bot-nome{animation:none;}
+    .szc-bot-eyes,.szc-bot-nome{animation:none;}
     .szc-bot-nome-wrap{animation:none;opacity:1;}
   }
   @media (max-width:480px){ .szc-panel{right:8px;bottom:72px;} .szc-btn{right:12px;bottom:12px;}
@@ -88,22 +86,48 @@
   style.textContent = css;
   document.head.appendChild(style);
 
-  // cabeça de robo (Beniboy) desenhada em SVG (currentColor - usa a mesma
-  // cor do botao) em vez do emoji 💬, pra ter uma "cara" propria e animada
-  // (antena pulsando, olhos piscando via CSS acima)
+  // cabeça de robo (Beniboy) desenhada em SVG multi-cor (casco branco/prata,
+  // orelhas e detalhes azuis, tela escura com olhos ciano brilhantes e
+  // marcações de canto tipo mira) em vez do emoji 💬, com olhos piscando via
+  // CSS acima
   const btn = el(`<button type="button" class="szc-btn" title="Falar com o Suporte" aria-label="Falar com o Suporte">
-    <svg viewBox="0 0 48 48" width="27" height="27" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <line x1="24" y1="3" x2="24" y2="9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
-      <circle class="szc-bot-antena" cx="24" cy="3" r="2.4" fill="currentColor"/>
-      <rect x="9" y="9" width="30" height="25" rx="8" fill="currentColor" opacity=".16"/>
-      <rect x="9" y="9" width="30" height="25" rx="8" stroke="currentColor" stroke-width="2.6"/>
-      <rect x="3.5" y="17.5" width="5" height="9" rx="2.5" fill="currentColor"/>
-      <rect x="39.5" y="17.5" width="5" height="9" rx="2.5" fill="currentColor"/>
+    <svg viewBox="0 0 48 48" width="30" height="30" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <linearGradient id="szc-bot-shell" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#f8fbfd"/>
+          <stop offset="100%" stop-color="#c7d7e2"/>
+        </linearGradient>
+        <radialGradient id="szc-bot-eye-glow" cx="35%" cy="30%" r="75%">
+          <stop offset="0%" stop-color="#e9feff"/>
+          <stop offset="45%" stop-color="#3ce0ff"/>
+          <stop offset="100%" stop-color="#0a9fce"/>
+        </radialGradient>
+        <radialGradient id="szc-bot-chest" cx="35%" cy="30%" r="75%">
+          <stop offset="0%" stop-color="#eafcff"/>
+          <stop offset="100%" stop-color="#2bb9e8"/>
+        </radialGradient>
+      </defs>
+      <rect x="9" y="30" width="6" height="11" rx="3" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
+      <rect x="33" y="30" width="6" height="11" rx="3" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
+      <path d="M14,29 C14,26 34,26 34,29 L36.5,43 C36.5,45.8 31,47 24,47 C17,47 11.5,45.8 11.5,43 Z"
+        fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
+      <circle cx="24" cy="36.5" r="3.1" fill="url(#szc-bot-chest)" stroke="#0a7ea3" stroke-width=".8"/>
+      <ellipse cx="10.5" cy="6" rx="3.6" ry="5.2" transform="rotate(-24 10.5 6)" fill="#2f8ad1" stroke="#1c6ba8" stroke-width="1.1"/>
+      <ellipse cx="37.5" cy="6" rx="3.6" ry="5.2" transform="rotate(24 37.5 6)" fill="#2f8ad1" stroke="#1c6ba8" stroke-width="1.1"/>
+      <rect x="9.5" y="7" width="29" height="24" rx="11.5" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.6"/>
+      <circle cx="8" cy="19" r="2.3" fill="#3d99dd" stroke="#1c6ba8" stroke-width="1"/>
+      <circle cx="40" cy="19" r="2.3" fill="#3d99dd" stroke="#1c6ba8" stroke-width="1"/>
+      <rect x="14.5" y="12.5" width="19" height="14" rx="6" fill="#0c1e2c"/>
       <g class="szc-bot-eyes">
-        <rect x="16" y="18.5" width="6" height="7" rx="3" fill="currentColor"/>
-        <rect x="26" y="18.5" width="6" height="7" rx="3" fill="currentColor"/>
+        <circle cx="20" cy="19.5" r="3.3" fill="url(#szc-bot-eye-glow)"/>
+        <circle cx="28" cy="19.5" r="3.3" fill="url(#szc-bot-eye-glow)"/>
       </g>
-      <rect x="18.5" y="28.5" width="11" height="2.4" rx="1.2" fill="currentColor"/>
+      <g stroke="#8fe9ff" stroke-width="1.1" stroke-linecap="round" fill="none" opacity=".85">
+        <path d="M16,14.5 v-1.5 h1.5"/>
+        <path d="M32,14.5 v-1.5 h-1.5"/>
+        <path d="M16,24.5 v1.5 h1.5"/>
+        <path d="M32,24.5 v1.5 h-1.5"/>
+      </g>
     </svg>
   </button>`);
   const panel = el(`
