@@ -41,13 +41,20 @@ function normalizarCard(tipo, r) {
     };
   }
   if (tipo === 'ajuste-fechamento') {
+    const rotuloItem = { maquininha: 'maquininha', maquininhaPos: 'maquininha POS', saida: 'saída' };
+    const camposCorrigidos = [
+      ...Object.keys(r.mudancas || {}),
+      ...Object.keys(r.mudancasCanais || {}),
+      ...Object.keys(r.mudancasFormas || {}),
+      ...Object.keys(r.mudancasKpis || {}),
+    ];
     const desc = r.tipoCorrecao === 'item'
-      ? `adicionar ${r.itemNovo?.tipo === 'maquininha' ? 'maquininha' : 'saída'} "${r.itemNovo?.descricao || ''}" (${fmtMoneyServer(r.itemNovo?.valor)})`
+      ? `adicionar ${rotuloItem[r.itemNovo?.tipo] || 'item'} "${r.itemNovo?.descricao || ''}" (${fmtMoneyServer(r.itemNovo?.valor)})`
       : r.tipoCorrecao === 'excluir'
         ? 'excluir o lançamento inteiro'
         : r.tipoCorrecao === 'data'
           ? `corrigir a data para ${r.novaData}`
-          : `corrigir ${Object.keys(r.mudancas || {}).join(', ')}`;
+          : `corrigir ${camposCorrigidos.join(', ')}`;
     return {
       ...r,
       tipo, id: r.id, unidade: r.unidade, unidadeNome: r.unidadeNome, status: r.status, criadoEm: r.criadoEm,
