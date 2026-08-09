@@ -665,16 +665,25 @@ function checkinsFiltrados(){
 // popup de tempo esgotado: o relogio de um check-in de HOJE venceu e o
 // grupo ainda nao teve check-out - a equipe precisa retirar do parque.
 // Vale tambem pra quem entrou antes do horario previsto (o tempo conta a
-// partir do check-in, entao sai antes tambem). Avisa uma vez por sessao
-let TEMPO_AVISADOS = new Set();
+// partir do check-in, entao sai antes tambem). Fica visivel so nos 10min
+// depois do fim do tempo - passou disso, some sozinho (nao fica cobrando
+// pra sempre se ninguem clicar OK). "OK, equipe avisada" dispensa quem
+// estiver na tela naquele momento, pro resto da sessao
+let TEMPO_DISPENSADOS = new Set();
+let ESGOTADOS_ATUAIS = [];
 function verificarTemposEsgotados(){
   const hoje = hojeBrasilia();
-  const agora = horaBrasilia(agoraBrasilia());
-  const esgotados = TODOS.filter(c=>
-    c.dataUtilizacao===hoje && c.iniciado && !c.checkoutEm && c.timeFinal &&
-    c.timeFinal <= agora && !TEMPO_AVISADOS.has(c.id));
-  if(!esgotados.length) return;
-  esgotados.forEach(c=>TEMPO_AVISADOS.add(c.id));
+  const agoraDate = agoraBrasilia();
+  const agora = horaBrasilia(agoraDate);
+  const agoraMin = agoraDate.getHours()*60 + agoraDate.getMinutes();
+  const esgotados = TODOS.filter(c=>{
+    if(c.dataUtilizacao!==hoje || !c.iniciado || c.checkoutEm || !c.timeFinal || TEMPO_DISPENSADOS.has(c.id)) return false;
+    if(c.timeFinal > agora) return false;
+    const [fh,fm] = c.timeFinal.split(':').map(Number);
+    return (agoraMin - (fh*60+fm)) <= 10;
+  });
+  ESGOTADOS_ATUAIS = esgotados.map(c=>c.id);
+  if(!esgotados.length){ document.getElementById('overlay-esgotado').classList.add('hidden'); return; }
   document.getElementById('esgotado-lista').innerHTML = esgotados.map(c=>`
     <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;">
       <b>${escapeHtml(c.responsavel?.nome||'')}</b> · ${c.criancas?.length||0} criança(s)
@@ -683,7 +692,10 @@ function verificarTemposEsgotados(){
     </div>`).join('');
   document.getElementById('overlay-esgotado').classList.remove('hidden');
 }
-function fecharEsgotado(){ document.getElementById('overlay-esgotado').classList.add('hidden'); }
+function fecharEsgotado(){
+  ESGOTADOS_ATUAIS.forEach(id=>TEMPO_DISPENSADOS.add(id));
+  document.getElementById('overlay-esgotado').classList.add('hidden');
+}
 
 function renderAgora(){
   const hoje = hojeBrasilia();

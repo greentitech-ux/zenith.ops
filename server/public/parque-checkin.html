@@ -645,17 +645,26 @@ async function carregar(){
 
 // popup de tempo esgotado: quando o relogio de um check-in de HOJE vence
 // (mesmo pra quem entrou antes do previsto - o tempo conta do check-in),
-// avisa a equipe pra retirar o grupo do parque. Cada grupo avisa uma vez
-// por sessao; some da conta quem ja fez check-out
-let TEMPO_AVISADOS = new Set();
+// avisa a equipe pra retirar o grupo do parque. Fica visivel so nos 10min
+// depois do fim do tempo - passou disso, some sozinho (nao fica cobrando
+// pra sempre se ninguem clicar OK). "OK, equipe avisada" dispensa quem
+// estiver na tela naquele momento, pro resto da sessao; some tambem quem
+// ja fez check-out
+let TEMPO_DISPENSADOS = new Set();
+let ESGOTADOS_ATUAIS = [];
 function verificarTemposEsgotados(){
   const hoje = hojeBrasilia();
-  const agoraHM = horaCurtaBrasilia(agoraBrasilia());
-  const esgotados = CHECKINS.filter(c=>
-    c.dataUtilizacao===hoje && c.iniciado && !c.checkoutEm && c.timeFinal &&
-    c.timeFinal.slice(0,5) <= agoraHM && !TEMPO_AVISADOS.has(c.id));
-  if(!esgotados.length) return;
-  esgotados.forEach(c=>TEMPO_AVISADOS.add(c.id));
+  const agoraDate = agoraBrasilia();
+  const agoraHM = horaCurtaBrasilia(agoraDate);
+  const agoraMin = agoraDate.getHours()*60 + agoraDate.getMinutes();
+  const esgotados = CHECKINS.filter(c=>{
+    if(c.dataUtilizacao!==hoje || !c.iniciado || c.checkoutEm || !c.timeFinal || TEMPO_DISPENSADOS.has(c.id)) return false;
+    if(c.timeFinal.slice(0,5) > agoraHM) return false;
+    const [fh,fm] = c.timeFinal.slice(0,5).split(':').map(Number);
+    return (agoraMin - (fh*60+fm)) <= 10;
+  });
+  ESGOTADOS_ATUAIS = esgotados.map(c=>c.id);
+  if(!esgotados.length){ document.getElementById('overlay-esgotado').classList.add('hidden'); return; }
   document.getElementById('esgotado-lista').innerHTML = esgotados.map(c=>`
     <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;">
       <b>${escapeHtml(c.responsavel?.nome||'')}</b> · ${c.pulseiras} criança(s)
@@ -664,7 +673,10 @@ function verificarTemposEsgotados(){
     </div>`).join('');
   document.getElementById('overlay-esgotado').classList.remove('hidden');
 }
-function fecharEsgotado(){ document.getElementById('overlay-esgotado').classList.add('hidden'); }
+function fecharEsgotado(){
+  ESGOTADOS_ATUAIS.forEach(id=>TEMPO_DISPENSADOS.add(id));
+  document.getElementById('overlay-esgotado').classList.add('hidden');
+}
 
 function statusCheckin(c){
   if(c.metodoPagamento==='cortesia' && c.cortesiaStatus==='PENDENTE') return { classe:'aguardando', texto:'🎗 cortesia aguardando aprovação' };
