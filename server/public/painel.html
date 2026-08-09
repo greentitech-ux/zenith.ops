@@ -57,6 +57,15 @@
   .hidden{display:none!important;}
   .empty{padding:40px;text-align:center;color:var(--muted);font-size:13px;}
   .painel-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;}
+  /* slot arrastavel de cada card - a alça ⠿ (topo, centro) reordena com o
+     dedo ou mouse e a ordem fica salva no navegador */
+  .pcard-slot{position:relative;}
+  .pcard-slot .pcard{height:100%;box-sizing:border-box;}
+  .pcard-drag{position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:2;background:none;border:none;
+    color:var(--muted);font-size:13px;line-height:1;padding:4px 18px;cursor:grab;touch-action:none;user-select:none;}
+  .pcard-drag:hover{color:var(--text);}
+  .pcard-slot.arrastando{opacity:.65;}
+  .pcard-slot.arrastando .pcard{outline:2px dashed var(--accent);}
   .pcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;}
   .pcard .pcard-top{display:flex;justify-content:space-between;align-items:center;gap:8px;}
   .pcard .pcard-top .titulo{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;}
@@ -934,24 +943,82 @@ function dataBrasiliaAb(iso){
 
 // ordem definida pelo Master: Saltiverso, Monitor, Abastecimento, Chamados
 // TI, Central, Manutenção, Estoque, Fechamentos, iFood (Entregas no fim)
+// `chave` identifica o card na ordem salva pelo proprio usuario (ver
+// ordenarCards/salvarOrdemCards) - nao mudar depois de publicado, senao a
+// ordem guardada no navegador de todo mundo "esquece" esse card
 const CARDS_POR_SECAO = [
-  { secao:'parque', build:cardParque },
-  { secao:'festas', build:cardFestasCalendario },
-  { secao:'monitor', build:cardMonitor },
+  { chave:'parque', secao:'parque', build:cardParque },
+  { chave:'festas', secao:'festas', build:cardFestasCalendario },
+  { chave:'monitor', secao:'monitor', build:cardMonitor },
   // indicadores do Abastecimento: SO Master/Admin (a equipe do balcao nao
   // pode ver os tempos monitorados)
-  { soMasterAdmin:true, build:cardAbastecimento },
-  { secao:'tecnico', build:cardChamados },
+  { chave:'abastecimento', soMasterAdmin:true, build:cardAbastecimento },
+  { chave:'tecnico', secao:'tecnico', build:cardChamados },
   // tecnico/manutencao tambem podem ter cards da Central atribuidos a eles
   // (ver "Atribuir responsável" em central-historico.html) - por isso o
   // card de Central tambem aparece pra eles, nao so quem tem 'solicitacoes'
-  { secoes:['solicitacoes','manutencao','tecnico'], build:cardCentral },
-  { secao:'manutencao', build:cardManutencao },
-  { secao:'inventario', build:cardEstoque },
-  { secao:'fechamentos', build:cardFechamentos },
-  { secao:'ifood', build:cardIfood },
-  { secao:'entregas', build:cardEntregas },
+  { chave:'central', secoes:['solicitacoes','manutencao','tecnico'], build:cardCentral },
+  { chave:'manutencao', secao:'manutencao', build:cardManutencao },
+  { chave:'estoque', secao:'inventario', build:cardEstoque },
+  { chave:'fechamentos', secao:'fechamentos', build:cardFechamentos },
+  { chave:'ifood', secao:'ifood', build:cardIfood },
+  { chave:'entregas', secao:'entregas', build:cardEntregas },
 ];
+
+// ---------- ordem dos cards escolhida pelo usuario ----------
+// salva por navegador (localStorage): cada pessoa organiza o proprio painel.
+// Card que nao esta na ordem salva (ex: modulo novo) entra no fim, mantendo
+// a posicao relativa padrao entre si.
+const LS_ORDEM_CARDS = 'painelOrdemCards';
+function ordenarCards(aplicaveis){
+  let salva = [];
+  try{ salva = JSON.parse(localStorage.getItem(LS_ORDEM_CARDS)) || []; }catch(e){}
+  return aplicaveis
+    .map((c,i)=>{ const pos = salva.indexOf(c.chave); return { c, ordem: pos>=0 ? pos : salva.length + i }; })
+    .sort((a,b)=>a.ordem-b.ordem)
+    .map(x=>x.c);
+}
+function salvarOrdemCards(){
+  const chaves = [...document.getElementById('painel-grid').children].map(el=>el.dataset.chave).filter(Boolean);
+  localStorage.setItem(LS_ORDEM_CARDS, JSON.stringify(chaves));
+}
+// arrastar pela alça ⠿ (pointer events = funciona com dedo e mouse): o card
+// segue o ponteiro trocando de posicao ao vivo; soltou, a ordem e salva
+function initDragCards(){
+  const grid = document.getElementById('painel-grid');
+  let slotArrastado = null;
+  const soltar = ()=>{
+    if(!slotArrastado) return;
+    slotArrastado.classList.remove('arrastando');
+    slotArrastado = null;
+    salvarOrdemCards();
+  };
+  grid.querySelectorAll('.pcard-drag').forEach(alca=>{
+    alca.addEventListener('pointerdown', (e)=>{
+      slotArrastado = alca.closest('.pcard-slot');
+      slotArrastado.classList.add('arrastando');
+      alca.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    alca.addEventListener('pointermove', (e)=>{
+      if(!slotArrastado) return;
+      // perto da borda da tela, rola a pagina junto (senao nao da pra levar
+      // um card pra longe no celular)
+      if(e.clientY < 80) window.scrollBy(0, -14);
+      else if(e.clientY > window.innerHeight - 80) window.scrollBy(0, 14);
+      const alvo = document.elementFromPoint(e.clientX, e.clientY)?.closest('.pcard-slot');
+      if(!alvo || alvo === slotArrastado || alvo.parentElement !== grid) return;
+      // desloca o card ALVO pro lado do arrastado (nunca reparenta o
+      // arrastado: mover o elemento com captura de ponteiro cancelaria a
+      // captura e o soltar/salvar nao aconteceria)
+      const slots = [...grid.children];
+      const de = slots.indexOf(slotArrastado), para = slots.indexOf(alvo);
+      grid.insertBefore(alvo, de < para ? slotArrastado : slotArrastado.nextSibling);
+    });
+    alca.addEventListener('pointerup', soltar);
+    alca.addEventListener('pointercancel', soltar);
+  });
+}
 
 async function boot(){
   const res = await fetch('/api/me');
@@ -988,9 +1055,9 @@ async function boot(){
   document.getElementById('nav-reset-senha').classList.toggle('hidden', !(isMaster || IS_ADMIN_GLOBAL));
   if(new URLSearchParams(location.search).get('resetSenha') && (isMaster || IS_ADMIN_GLOBAL)) abrirResetSenha();
 
-  const aplicaveis = CARDS_POR_SECAO.filter(c=>c.soMasterAdmin
+  const aplicaveis = ordenarCards(CARDS_POR_SECAO.filter(c=>c.soMasterAdmin
     ? (isMaster || IS_ADMIN_GLOBAL)
-    : (c.secoes||[c.secao]).some(s=>secoes.includes(s)));
+    : (c.secoes||[c.secao]).some(s=>secoes.includes(s))));
   document.getElementById('painel-loading').classList.add('hidden');
 
   if(!aplicaveis.length){
@@ -1003,10 +1070,18 @@ async function boot(){
   // cada card falha isoladamente - um modulo fora do ar nao derruba o painel inteiro
   const resultados = await Promise.allSettled(aplicaveis.map(c=>c.build()));
   grid.innerHTML = resultados.map((r,i)=>{
-    if(r.status==='fulfilled') return r.value;
-    console.error('Painel: erro ao carregar card', aplicaveis[i].secao, r.reason);
-    return pcardWrap('⚠️', aplicaveis[i].secao, '#', `<div class="pcard-erro">Não foi possível carregar esses dados agora.</div>`);
+    let html;
+    if(r.status==='fulfilled') html = r.value;
+    else {
+      console.error('Painel: erro ao carregar card', aplicaveis[i].chave, r.reason);
+      html = pcardWrap('⚠️', aplicaveis[i].chave, '#', `<div class="pcard-erro">Não foi possível carregar esses dados agora.</div>`);
+    }
+    return `<div class="pcard-slot" data-chave="${aplicaveis[i].chave}">
+      <button type="button" class="pcard-drag" title="Arraste pra reordenar os cards" aria-label="Mover card">⠿</button>
+      ${html}
+    </div>`;
   }).join('');
+  initDragCards();
 }
 
 boot();
