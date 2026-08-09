@@ -131,6 +131,11 @@ async function solicitarEdicao({ entregaId, mudancas, motivo, solicitadoPorId, s
   const atual = await getOne(entregaId);
   if (!atual) throw new Error('Lançamento não encontrado.');
   if (!motivo || !String(motivo).trim()) throw new Error('Descreva o motivo da correção.');
+
+  // 1 correcao pendente por lançamento - mesmo racional do guard de
+  // fechamentos: toque duplo no celular criava pedidos identicos na fila
+  const pendenteSnap = await EDITS.where('entregaId', '==', entregaId).where('status', '==', 'PENDENTE').get();
+  if (!pendenteSnap.empty) throw new Error('Já existe uma correção pendente pra esse lançamento. Aguarde a decisão do Master antes de pedir outra.');
   const camposValidos = {};
   Object.entries(mudancas || {}).forEach(([campo, valor]) => {
     if (CAMPOS_NUMERICOS.includes(campo)) camposValidos[campo] = num(valor);

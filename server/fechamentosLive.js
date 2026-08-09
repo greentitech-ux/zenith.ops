@@ -382,6 +382,15 @@ async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, mudancasC
   if (!atual) throw new Error('Fechamento não encontrado.');
   if (!motivo || !String(motivo).trim()) throw new Error('Descreva o motivo da correção.');
 
+  // 1 correcao pendente por fechamento: toque duplo no celular estava
+  // criando pedidos identicos na fila do Master (e agora um pedido so
+  // carrega quantos campos precisar - nao ha motivo pra fila dupla)
+  const pendenteSnap = await EDITS.where('fechamentoId', '==', fechamentoId).where('status', '==', 'PENDENTE').get();
+  if (!pendenteSnap.empty) {
+    const t = pendenteSnap.docs[0].data().numeroTicket;
+    throw new Error(`Já existe uma correção pendente pra esse lançamento${t ? ` (Ticket #${t})` : ''}. Aguarde a decisão do Master antes de pedir outra.`);
+  }
+
   const pedido = {
     id: null,
     // Ticket #10000 em diante, mesma sequencia global de refunds.js/
