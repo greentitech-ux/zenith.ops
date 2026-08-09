@@ -2421,6 +2421,20 @@ app.put('/api/inventario/contagens', requireSection('inventario'), async (req, r
   }
 });
 
+// resumo do periodo pra aba Estoque (entradas/consumo/saidas/desperdicio):
+// compara duas contagens quaisquer, sem exigir dias consecutivos - ver
+// inventario.js/resumoPeriodo
+app.get('/api/inventario/resumo-periodo', requireSection('inventario'), async (req, res) => {
+  try {
+    const { unidade, inicio, fim } = req.query;
+    if (!unidade || !inicio || !fim) return res.status(400).json({ error: 'Informe unidade, início e fim.' });
+    if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await inventario.resumoPeriodo(unidade, inicio, fim));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // motor de diferenca (esperado x real) + ranking de ofensores + CMV - ver
 // inventario.js/calcularDiferencas
 app.get('/api/inventario/diferencas', requireSection('inventario'), async (req, res) => {

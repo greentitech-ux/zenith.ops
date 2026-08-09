@@ -432,7 +432,7 @@ const TOPICOS = [
     <ol>
       <li>Escolha o período <b>De/Até</b> (padrão: do dia 1º do mês até hoje) - a análise é da unidade selecionada no topo.</li>
       <li>Os cartões mostram: <b>📥 Entradas</b> (compras do período, em R$), <b>🍽 Consumo do período</b>, <b>📤 Saídas lançadas</b>, <b>🗑 Desperdício lançado</b>, vendas (custo estimado) e falta − sobra apuradas nas contagens.</li>
-      <li><b>Comportamento:</b> Consumo = saídas lançadas (venda + desperdício + outras) + faltas das contagens − sobras. Sem contagem lançada no período, o consumo mostra só as saídas registradas - por isso a contagem diária é o que faz a conta fechar.</li>
+      <li><b>Comportamento:</b> o consumo é apurado entre <b>duas contagens quaisquer</b> (não precisa contar todo dia): contagem inicial + entradas − contagem final. A nota embaixo dos cartões diz exatamente quais contagens foram comparadas - e, quando algum número fica em R$ 0,00, explica o que falta (só existe 1 contagem ainda, nenhum recebimento/saída lançado no período, ou itens sem custo cadastrado no Catálogo).</li>
     </ol>
     <p>O painel <b>"Contagem de hoje - todas as unidades"</b> (quem já contou, comparativo lado a lado) também fica nessa aba.</p>
     <h3>Catálogo</h3>

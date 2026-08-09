@@ -750,9 +750,9 @@ async function trocarUnidade(){
 }
 
 // ---------- aba Estoque: analise de consumo por periodo ----------
-// reusa o motor das Diferencas (/api/inventario/diferencas), que ja cruza
-// contagens + recebimentos + saidas do periodo - aqui so muda a leitura:
-// quanto entrou, quanto saiu, desperdicio e o consumo total
+// usa /api/inventario/resumo-periodo: o consumo e apurado entre DUAS
+// contagens quaisquer (nao precisa contar todo dia), e a nota embaixo
+// explica exatamente o que esta faltando quando algum numero fica zerado
 async function carregarResumoEstoque(){
   const unidade = unidadeAtual();
   const inicio = document.getElementById('e-inicio').value;
@@ -761,22 +761,32 @@ async function carregarResumoEstoque(){
   if(!unidade || !inicio || !fim){ el.innerHTML=''; return; }
   el.innerHTML = '<div class="empty">calculando...</div>';
   try{
-    const dados = await fetch(`/api/inventario/diferencas?unidade=${encodeURIComponent(unidade)}&inicio=${inicio}&fim=${fim}`).then(r=>r.json());
+    const dados = await fetch(`/api/inventario/resumo-periodo?unidade=${encodeURIComponent(unidade)}&inicio=${inicio}&fim=${fim}`).then(r=>r.json());
     const r = dados.resumo || {};
-    const dif = r.totalDiferencaValor || 0;
+    const av = dados.avisos || {};
+    const fs = r.faltaSobraValor;
     const kpis = [
       { rotulo:'📥 Entradas (compras)', valor: fmtMoney(r.totalRecebidoValor), classe:'' },
       { rotulo:'🍽 Consumo do período', valor: fmtMoney(r.consumoValor), classe:'' },
       { rotulo:'📤 Saídas lançadas', valor: fmtMoney(r.totalSaidasValor), classe:'' },
       { rotulo:'🗑 Desperdício lançado', valor: fmtMoney(r.custoDesperdicioValor), classe: (r.custoDesperdicioValor||0)>0?'bad':'' },
       { rotulo:'Vendas (custo estimado)', valor: fmtMoney(r.custoVendaValor), classe:'' },
-      { rotulo:'Falta − sobra (contagens)', valor: fmtMoney(-dif), classe: dif<0?'bad':(dif>0?'ok':'') },
+      { rotulo:'Falta − sobra (contagens)', valor: fs==null ? '—' : fmtMoney(fs), classe: fs>0?'bad':(fs<0?'ok':'') },
     ];
     el.innerHTML = kpis.map(k=>`
       <div class="kpi"><div class="rotulo">${k.rotulo}</div><div class="valor-kpi ${k.classe}">${k.valor}</div></div>
     `).join('');
-    document.getElementById('e-nota').textContent =
-      'Consumo = saídas lançadas (venda + desperdício + outras) + faltas apuradas nas contagens − sobras. Sem contagem lançada no período, o consumo mostra só as saídas registradas.';
+    // nota dinamica: diz de onde os numeros vieram e o que falta lancar
+    const partes = [];
+    if(dados.janela){
+      partes.push(`Consumo apurado entre a contagem de ${fmtData(dados.janela.de)} e a de ${fmtData(dados.janela.ate)} (${dados.consumoItens} item(ns) presentes nas duas): contagem inicial + entradas − contagem final.`);
+    }else{
+      partes.push('⚠ Ainda não há DUAS contagens pra comparar (a conta do consumo precisa de uma contagem base e uma final) - por enquanto o consumo mostra só as saídas lançadas. Lance a próxima contagem que o cálculo fecha sozinho.');
+    }
+    if(!av.qtdRecebimentos) partes.push('Nenhum recebimento (compra) lançado no período - Entradas em R$ 0,00.');
+    if(!av.qtdSaidas) partes.push('Nenhuma saída (venda/desperdício/outra) lançada no período.');
+    if(av.itensSemCusto>0) partes.push(`⚠ ${av.itensSemCusto} item(ns) do catálogo sem custo cadastrado - o valor em R$ desses itens sai como zero. Informe o custo no Catálogo ou lance um recebimento com valor.`);
+    document.getElementById('e-nota').textContent = partes.join(' ');
   }catch(err){
     el.innerHTML = '<div class="empty">Não foi possível calcular o período.</div>';
   }
