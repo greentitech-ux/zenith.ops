@@ -1366,6 +1366,7 @@ function montarItensCorrecaoHtml(r){
         <input type="number" min="0" value="${q}" data-cor-pizza="${s}" style="width:70px;padding:7px 8px;">
       </div>`;
     });
+    const idsAtivos = new Set(insumosAtivos().map(cad=>cad.id));
     insumosAtivos().forEach(cad=>{
       const existente = (r.insumos||[]).find(i=>i.insumoId===cad.id);
       const q = existente ? Number(existente.quantidade)||0 : 0;
@@ -1376,7 +1377,13 @@ function montarItensCorrecaoHtml(r){
       </div>`;
     });
     (r.insumos||[]).forEach((ins,idx)=>{
-      if(ins.insumoId) return; // esses ja apareceram acima, pelo catalogo
+      // so pula quem ja apareceu no loop acima (catalogo ATIVO agora) - um
+      // insumoId que foi DESATIVADO no catalogo depois do lançamento nao
+      // esta em idsAtivos, entao cai aqui como fallback indexado (mesmo
+      // caminho dos itens de texto livre), senao a quantidade lançada some
+      // do formulario e o Salvar apaga esse item do registro (editarDireto/
+      // decidirCorrecao substituem o array "insumos" inteiro)
+      if(ins.insumoId && idsAtivos.has(ins.insumoId)) return;
       const q = Number(ins.quantidade)||0;
       if(!q) return;
       html += `<div style="display:flex;align-items:center;gap:8px;">

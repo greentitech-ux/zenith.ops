@@ -317,7 +317,14 @@ function sanitizarPizzas(pizzas) {
 // - totalUnidades = quantidade x qtdPorCaixa (caixa) ou quantidade (unidade).
 // Texto livre ({descricao, quantidade}) segue aceito so pra compatibilidade
 // com registros antigos/integracoes - a tela nova nao usa mais.
-async function resolverInsumos(lista) {
+// permitirInativo: usado pelos fluxos de CORREÇÃO (editarDireto/
+// decidirCorrecao) - um insumo que era ativo quando foi lançado e depois
+// foi desativado no catálogo continua um lançamento válido, so nao pode ser
+// ESCOLHIDO DE NOVO num lançamento novo (criar() abaixo usa o padrao
+// estrito). Sem essa distincao, corrigir um numero errado em QUALQUER outro
+// item do mesmo registro travava com "Insumo fora do catálogo", porque o
+// array inteiro de insumos e revalidado/substituido de uma vez.
+async function resolverInsumos(lista, { permitirInativo = false } = {}) {
   if (!Array.isArray(lista)) return [];
   const catalogo = await listarInsumos();
   const porId = new Map(catalogo.map((i) => [i.id, i]));
@@ -325,7 +332,7 @@ async function resolverInsumos(lista) {
   for (const item of lista.slice(0, 20)) {
     if (item && item.insumoId) {
       const cad = porId.get(item.insumoId);
-      if (!cad || cad.ativo === false) throw new Error('Insumo fora do catálogo. Atualize a página e tente de novo.');
+      if (!cad || (cad.ativo === false && !permitirInativo)) throw new Error('Insumo fora do catálogo. Atualize a página e tente de novo.');
       const quantidade = Number(item.quantidade);
       if (!Number.isFinite(quantidade) || quantidade <= 0) throw new Error(`Informe a quantidade de "${cad.nome}".`);
       const qtd = Math.round(quantidade);
@@ -495,7 +502,7 @@ async function decidirCorrecao(id, { aprovar, porEmail, porNome }) {
   const merge = { correcao: decisao };
   if (aprovar && c.acao === 'alterar') {
     merge.pizzas = sanitizarPizzas(c.propostaPizzas);
-    merge.insumos = await resolverInsumos((c.propostaInsumos || []).filter((i) => Number(i.quantidade) > 0));
+    merge.insumos = await resolverInsumos((c.propostaInsumos || []).filter((i) => Number(i.quantidade) > 0), { permitirInativo: true });
   }
   await COLLECTION.doc(id).update(merge);
   cache.invalidar();
@@ -514,7 +521,7 @@ async function editarDireto(id, { pizzas, insumos }, { editadoPorEmail, editadoP
   if (atual.tipo !== 'CONTAGEM') throw new Error('Edição direta é só pra Contagem - pedido/envio usa "pedir correção".');
   const merge = {
     pizzas: sanitizarPizzas(pizzas),
-    insumos: await resolverInsumos(insumos),
+    insumos: await resolverInsumos(insumos, { permitirInativo: true }),
     editadoEm: new Date().toISOString(),
     editadoPorEmail: editadoPorEmail || null,
     editadoPorNome: editadoPorNome || null,
