@@ -226,7 +226,7 @@
       <div class="szc-label">Contato (e-mail ou telefone)</div>
       <input type="text" class="szc-input" id="szc-contato" maxlength="120" value="${esc(prefill?.contato || '')}">
       <div class="szc-label">Assunto</div>
-      <select class="szc-input" id="szc-assunto">${ASSUNTOS.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('')}</select>
+      <select class="szc-input" id="szc-assunto">${ASSUNTOS.map((a) => `<option value="${esc(a)}" ${a === 'Acesso/Senha' ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select>
       <div class="szc-label">Mensagem</div>
       <textarea class="szc-textarea" id="szc-texto" maxlength="1000" placeholder="ex: não consigo entrar no sistema"></textarea>
       <button type="button" class="szc-enviar" id="szc-iniciar">Iniciar conversa</button>
