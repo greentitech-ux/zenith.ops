@@ -22,12 +22,12 @@
   }
   *{box-sizing:border-box;}
   html{overflow-x:hidden;}
-  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 22px;padding:28px 32px 16px;border-bottom:1px solid var(--line);}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 16px;padding:12px 32px 12px;border-bottom:1px solid var(--line);}
   body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;}
   h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .eyebrow{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:16px;} h1{font-size:17px;} .eyebrow{font-size:9px;} }
-  .header-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;}
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:12px;padding-bottom:12px;} h1{font-size:17px;} .eyebrow{font-size:8px;} }
+  .header-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
   .header-nav{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;}
   .nav-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
   @media(max-width:640px){ .header-nav{flex-direction:column;align-items:stretch;} .nav-actions{justify-content:flex-end;} }
@@ -124,7 +124,7 @@
 
 <header>
   <div class="header-top">
-    <div style="display:flex;align-items:flex-start;gap:10px;min-width:0;">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
         <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
