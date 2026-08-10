@@ -24,7 +24,13 @@
   }
   *{box-sizing:border-box;min-width:0;}
   html{overflow-x:hidden;}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:680px;margin-inline:auto;overflow-x:clip;overflow-y:clip;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:1100px;margin-inline:auto;overflow-x:clip;overflow-y:clip;}
+  /* abaixo de 680px o layout fica identico ao original mobile-first;
+     acima disso o body usa mais largura (resumo-grid/acoes-topo ja se
+     ajustam sozinhos por serem auto-fit/flex-wrap) */
+  @media(max-width:680px){
+    body{max-width:680px;}
+  }
   h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   h2{font-size:13.5px;font-weight:700;margin:0 0 4px;}
   .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -95,9 +101,18 @@
   .filtros-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
   .filtro-chip{font-family:var(--mono);font-size:10.5px;color:var(--muted);padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
   .filtro-chip.ativo{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  /* linha separada dos filtros de verdade - esses botoes nao filtram a
+     lista, abrem outro painel (cadastro/operadores); o rotulo deixa isso
+     visualmente claro em vez de parecerem mais um filtro */
+  .admin-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding-top:6px;border-top:1px dashed var(--line);}
+  .admin-chips-rotulo{font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap;margin-right:2px;}
 
   .dia-header{font-family:var(--mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px;display:flex;align-items:center;gap:8px;}
   .dia-header::after{content:'';flex:1;height:1px;background:var(--line);}
+  /* grupo "Pendentes" (so aparece em telas largas, ver renderLista) usa a
+     mesma cor de aviso do badge "aguardando" pra chamar atencao primeiro */
+  .dia-header.pendentes-header{color:var(--warn);}
+  .dia-header.pendentes-header::after{background:rgba(242,179,61,.35);}
   .reg-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-top:8px;border-left:3px solid var(--line);}
   .reg-card.PEDIDO{border-left-color:var(--pedido);}
   .reg-card.ENVIO{border-left-color:var(--envio);}
@@ -112,6 +127,12 @@
   .badge.aguardando{background:var(--warn-dim);color:var(--warn);}
   .badge.atendido{background:var(--ok-dim);color:var(--ok);}
   .badge.vinculo{background:var(--panel);color:var(--muted);border:1px solid var(--line);}
+  /* badges/links que sao acao (nao so status) precisam ser <button> de
+     verdade pro toque; essas duas classes so resetam o chrome nativo do
+     button, quem define cor/fundo continua sendo .badge.xxx ou o estilo
+     inline de cada caso */
+  .link-badge-btn{background:none;border:none;padding:0;margin:0;font:inherit;color:var(--accent);text-decoration:underline;cursor:pointer;}
+  button.badge{appearance:none;-webkit-appearance:none;border:none;margin:0;font-family:inherit;cursor:pointer;text-align:left;}
   .qtd-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;}
   .qtd-chip{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:8px;background:var(--panel);border:1px solid var(--line);}
   .qtd-chip b{font-size:13px;}
@@ -179,6 +200,12 @@
   .cat-toggle{font-family:var(--mono);font-size:10px;padding:6px 4px;border-radius:8px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
   .cat-toggle.on{color:var(--ok);border-color:rgba(61,220,151,.5);}
   .cat-toggle.off{color:var(--bad);border-color:rgba(255,92,92,.5);}
+  /* mesmo visual do .cat-toggle, mas com nome proprio pro seletor de aba
+     do modal de correcao (alterar/remover) - ali nao e um toggle on/off de
+     cadastro, e uma troca de aba, so reaproveitava o estilo por acidente */
+  .tab-switch{font-family:var(--mono);font-size:10px;padding:6px 4px;border-radius:8px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
+  .tab-switch.on{color:var(--ok);border-color:rgba(61,220,151,.5);}
+  .tab-switch.off{color:var(--bad);border-color:rgba(255,92,92,.5);}
   .btn-remover{background:var(--bad-dim);color:var(--bad);border:none;border-radius:6px;width:32px;height:36px;font-size:15px;cursor:pointer;flex:none;}
   .btn-add{margin-top:8px;background:var(--panel2);border:1px dashed var(--line);color:var(--accent);border-radius:8px;padding:8px 10px;font-size:12px;font-family:var(--sans);cursor:pointer;width:100%;}
   .btn-primary{width:100%;margin-top:16px;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);background:var(--accent);color:#06202b;}
@@ -265,15 +292,21 @@
 </div>
 
 <!-- botoes/filtros ACIMA do painel de Movimentacoes (responsivos, quebram
-     linha no celular) -->
+     linha no celular). Os filtros de verdade (que mudam o que aparece na
+     lista) ficam numa linha; os atalhos de administracao (que abrem outro
+     painel, nao filtram nada) ficam numa segunda linha separada, com um
+     rotulo proprio, pra nao parecerem a mesma coisa visualmente. -->
 <div class="filtros-chips" id="filtros-chips" style="margin-bottom:8px;">
   <button type="button" class="filtro-chip ativo" data-filtro="todos" onclick="filtrar('todos')">Todos</button>
   <button type="button" class="filtro-chip" data-filtro="pendentes" onclick="filtrar('pendentes')">⏳ Aguardando envio</button>
   <button type="button" class="filtro-chip" data-filtro="PEDIDO" onclick="filtrar('PEDIDO')">🛒 Pedidos</button>
   <button type="button" class="filtro-chip" data-filtro="ENVIO" onclick="filtrar('ENVIO')">🚚 Envios</button>
   <button type="button" class="filtro-chip" data-filtro="CONTAGEM" onclick="filtrar('CONTAGEM')">📋 Contagens</button>
-  <button type="button" class="filtro-chip hidden" id="btn-catalogo" onclick="abrirCatalogo()">⚙️ Cadastro de insumos</button>
-  <button type="button" class="filtro-chip hidden" id="btn-operadores" onclick="abrirOperadores()">👥 Operadores</button>
+</div>
+<div class="admin-chips hidden" id="admin-chips" style="margin-bottom:8px;">
+  <span class="admin-chips-rotulo">⚙️ Administração</span>
+  <button type="button" class="filtro-chip hidden" id="btn-catalogo" onclick="abrirCatalogo()">Cadastro de insumos</button>
+  <button type="button" class="filtro-chip hidden" id="btn-operadores" onclick="abrirOperadores()">Operadores</button>
 </div>
 
 <div class="panel">
@@ -480,8 +513,8 @@
       <h3 id="correcao-titulo">🛠 Pedir correção</h3>
       <div class="sub" id="correcao-resumo"></div>
       <div style="display:flex;gap:8px;margin:10px 0 12px;">
-        <button type="button" class="cat-toggle on" id="correcao-tab-alterar" onclick="correcaoAcao('alterar')">✏️ Alterar quantidades</button>
-        <button type="button" class="cat-toggle off" id="correcao-tab-remover" onclick="correcaoAcao('remover')">🗑 Remover lançamento</button>
+        <button type="button" class="tab-switch on" id="correcao-tab-alterar" onclick="correcaoAcao('alterar')">✏️ Alterar quantidades</button>
+        <button type="button" class="tab-switch off" id="correcao-tab-remover" onclick="correcaoAcao('remover')">🗑 Remover lançamento</button>
       </div>
       <div id="correcao-itens" style="display:flex;flex-direction:column;gap:8px;"></div>
       <div class="sub hidden" id="correcao-aviso-remover" style="color:var(--bad);margin-top:4px;">O lançamento inteiro será removido se o Master aprovar.</div>
@@ -559,6 +592,27 @@
   </div>
 </div>
 
+<!-- senha mascarada: usado por trocarPapelNaLista/desbloquearOperador/trocarSenhaOperador
+     pra pedir a senha de 4 numeros de um operador especifico, sem reaproveitar
+     os campos de login do balcao. Fica por ultimo no DOM de proposito: com
+     z-index empatado (.overlay = 50), quem vem depois no HTML fica por cima -
+     esse modal e sempre aberto por CIMA de outro overlay (operadores etc) e
+     precisa continuar ganhando esse empate, como no innerHTML dinamico antigo
+     (que sempre dava append no fim do body). -->
+<div class="overlay hidden" id="overlay-senha-mascarada" style="align-items:center;" onclick="if(event.target===this) smFechar(null)">
+  <div class="sheet-wrap" style="max-width:340px;">
+    <div class="sheet" style="border-radius:14px;display:flex;flex-direction:column;gap:10px;">
+      <div id="sm-mensagem" style="font-size:13px;white-space:pre-wrap;"></div>
+      <input type="password" id="sm-input" inputmode="numeric" maxlength="4" autocomplete="off"
+        style="width:100%;box-sizing:border-box;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:11px 10px;font-size:18px;letter-spacing:.35em;text-align:center;">
+      <div style="display:flex;gap:8px;">
+        <button type="button" style="flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:10px;font-size:13px;cursor:pointer;" onclick="smFechar(null)">Cancelar</button>
+        <button type="button" class="btn-primary" style="flex:1;margin-top:0;" onclick="smFechar(document.getElementById('sm-input').value)">OK</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
@@ -625,6 +679,11 @@ let TEM_ENVIO = false;    // lado da loja (secao abastecimento-loja)
 let SOU_OPERADOR_PONTA = false;
 let PODE_CATALOGO = false;
 let REGS = [];
+// mesmo breakpoint do CSS (680px) - acima disso o feed agrupa Pendentes
+// primeiro (renderLista); troca de largura (ex: girar o tablet) re-renderiza
+// a lista sozinha, sem precisar de F5
+const MQ_DESKTOP = window.matchMedia('(min-width:681px)');
+MQ_DESKTOP.addEventListener('change', ()=>renderLista());
 let CATALOGO_INSUMOS = [];
 let FILTRO = 'todos';
 let TIPO_FORM = 'PEDIDO';
@@ -951,7 +1010,7 @@ function correcaoHtml(r){
     if(st==='aprovada') return `<span class="badge atendido" title="${escapeHtml(dica)}">✅ corrigido · Ticket #${c.numeroTicket}</span>`;
     return `<span class="badge" style="background:var(--bad-dim);color:var(--bad);" title="${escapeHtml(dica)}">✖ correção recusada · Ticket #${c.numeroTicket}</span>`;
   }
-  return `<span style="cursor:pointer;color:var(--accent);text-decoration:underline;" onclick="abrirPedirCorrecao('${r.id}')">🛠 pedir correção</span>`;
+  return `<button type="button" class="link-badge-btn" onclick="abrirPedirCorrecao('${r.id}')">🛠 pedir correção</button>`;
 }
 
 function regCardHtml(r){
@@ -973,7 +1032,7 @@ function regCardHtml(r){
     // confirmar, o badge vira botao: abre o popup de recebimento na hora
     // (util se o material chegou antes do popup automatico aparecer)
     if(!r.recebidoEm) statusBadge += TEM_PEDIDO
-      ? ` <span class="badge aguardando" style="cursor:pointer;text-decoration:underline;" title="Toque pra confirmar o recebimento agora" onclick="abrirRecebimentoManual('${r.id}')">📦 aguardando confirmação do carrinho — confirmar</span>`
+      ? ` <button type="button" class="badge aguardando" style="text-decoration:underline;" title="Toque pra confirmar o recebimento agora" onclick="abrirRecebimentoManual('${r.id}')">📦 aguardando confirmação do carrinho — confirmar</button>`
       : ' <span class="badge aguardando">📦 aguardando confirmação do carrinho</span>';
     else if(r.recebimento && r.recebimento.divergencia) statusBadge += ` <span class="badge" style="background:var(--bad-dim);color:var(--bad);">🎫 em análise${r.recebimento.numeroTicket ? ' · Ticket #'+r.recebimento.numeroTicket : ''}</span>`;
     else if(r.recebimento && !r.recebimento.confere) statusBadge += ` <span class="badge" style="background:var(--bad-dim);color:var(--bad);">⚠️ recebido com falta ${fmtHora(r.recebidoEm)}</span>`;
@@ -990,7 +1049,7 @@ function regCardHtml(r){
     else if(r.vistoEm) statusBadge += ` <span class="badge visto">👁 visto pela loja ${fmtHora(r.vistoEm)}</span>`;
   }
   if(r.tipo==='PEDIDO' && (r.mensagens||[]).length){
-    statusBadge += ` <span class="badge vinculo" style="cursor:pointer;" onclick="event.stopPropagation();abrirConversa('${r.id}')">💬 ${r.mensagens.length}</span>`;
+    statusBadge += ` <button type="button" class="badge vinculo" onclick="event.stopPropagation();abrirConversa('${r.id}')">💬 ${r.mensagens.length}</button>`;
   }
   // Contagem editada direto pelo Master (sem ticket) - marca visivel de que
   // o numero lancado originalmente foi corrigido, e por quem
@@ -1017,10 +1076,18 @@ function regCardHtml(r){
       ${avariasHtml}
       ${r.observacao ? `<div class="reg-obs">${escapeHtml(r.observacao)}</div>` : ''}
       ${pendente(r) && TEM_ENVIO ? `<button type="button" class="btn-acao envio" style="margin-top:8px;padding:9px 10px;font-size:12.5px;min-width:0;width:100%;" onclick="envioRapido('${r.id}')">⚡ Envio rápido — mandar exatamente o que foi pedido</button>` : ''}
-      <div class="reg-quem"><span>por ${escapeHtml(r.operadorNome||r.criadoPorNome||r.criadoPorEmail||'—')}${r.operadorUsuario?` <span style="font-family:var(--mono);color:var(--accent);">@${escapeHtml(r.operadorUsuario)}</span>`:''}</span><span style="display:flex;gap:10px;align-items:center;">${correcaoHtml(r)}${IS_MASTER && r.tipo==='CONTAGEM' && (r.correcao||{}).status!=='pendente' ? `<span style="cursor:pointer;color:var(--accent);text-decoration:underline;" onclick="abrirPedirCorrecao('${r.id}', true)">✏️ editar</span>` : ''}${IS_MASTER?`<button type="button" class="btn-excluir" onclick="excluir('${r.id}')">🗑 excluir</button>`:''}</span></div>
+      <div class="reg-quem"><span>por ${escapeHtml(r.operadorNome||r.criadoPorNome||r.criadoPorEmail||'—')}${r.operadorUsuario?` <span style="font-family:var(--mono);color:var(--accent);">@${escapeHtml(r.operadorUsuario)}</span>`:''}</span><span style="display:flex;gap:10px;align-items:center;">${correcaoHtml(r)}${IS_MASTER && r.tipo==='CONTAGEM' && (r.correcao||{}).status!=='pendente' ? `<button type="button" class="link-badge-btn" onclick="abrirPedirCorrecao('${r.id}', true)">✏️ editar</button>` : ''}${IS_MASTER?`<button type="button" class="btn-excluir" onclick="excluir('${r.id}')">🗑 excluir</button>`:''}</span></div>
     </div>`;
 }
 
+// so agrupa em "Pendentes" quando tem largura sobrando (ver MQ_DESKTOP mais
+// abaixo) - no celular a lista continua exatamente cronologica, como sempre
+// foi. Usa os mesmos criterios que ja aparecem no badge de cada card
+// (pendente() e "falta recebidoEm"), so pra AGRUPAR - nao mexe no que cada
+// funcao retorna nem em como os cards sao montados.
+function regEhPendente(r){
+  return (r.tipo==='PEDIDO' && pendente(r)) || (r.tipo==='ENVIO' && !r.recebidoEm);
+}
 function renderLista(){
   const visiveis = REGS.filter(passaFiltro);
   document.getElementById('lista-count').textContent = visiveis.length;
@@ -1028,13 +1095,24 @@ function renderLista(){
     document.getElementById('lista-regs').innerHTML = '<div class="empty">Nenhuma movimentação nesse filtro.</div>';
     return;
   }
-  // agrupado por dia (mais recente primeiro), igual a lista do AppSheet
+  const desktop = MQ_DESKTOP.matches;
   let html = '';
+  let resto = visiveis;
+  if(desktop){
+    const pendentes = visiveis.filter(regEhPendente);
+    resto = visiveis.filter(r=>!regEhPendente(r));
+    if(pendentes.length){
+      html += `<div class="dia-header pendentes-header">⏳ Pendentes <span style="font-family:var(--mono);">[${pendentes.length}]</span></div>`;
+      html += pendentes.map(regCardHtml).join('');
+    }
+  }
+  // resto agrupado por dia (mais recente primeiro), igual a lista do
+  // AppSheet - no celular "resto" e' a lista inteira (sem grupo Pendentes)
   let diaAtual = null;
-  for(const r of visiveis){
+  for(const r of resto){
     const dia = dataBrasilia(r.criadoEm);
     if(dia!==diaAtual){
-      const doDia = visiveis.filter(x=>dataBrasilia(x.criadoEm)===dia).length;
+      const doDia = resto.filter(x=>dataBrasilia(x.criadoEm)===dia).length;
       html += `<div class="dia-header">${fmtDia(dia)} <span style="font-family:var(--mono);">[${doDia}]</span></div>`;
       diaAtual = dia;
     }
@@ -1520,11 +1598,11 @@ function abrirPedirCorrecao(id, direto){
 function correcaoAcao(acao){
   if(CORRECAO_DIRETO) acao = 'alterar';
   CORRECAO_ACAO = acao;
-  document.getElementById('correcao-tab-alterar').className = 'cat-toggle ' + (acao==='alterar'?'on':'off');
+  document.getElementById('correcao-tab-alterar').className = 'tab-switch ' + (acao==='alterar'?'on':'off');
   // className e reescrito aqui (nao classList.add) - a aba "remover" so
   // existe no fluxo de ticket, entao o "hidden" da edicao direta e
   // reaplicado sempre que o className e trocado, senao ele se perde
-  document.getElementById('correcao-tab-remover').className = 'cat-toggle ' + (acao==='remover'?'on':'off') + (CORRECAO_DIRETO?' hidden':'');
+  document.getElementById('correcao-tab-remover').className = 'tab-switch ' + (acao==='remover'?'on':'off') + (CORRECAO_DIRETO?' hidden':'');
   document.getElementById('correcao-itens').style.opacity = acao==='alterar' ? '' : '.35';
   document.querySelectorAll('#correcao-itens input').forEach(inp=>{ inp.disabled = acao!=='alterar'; });
   document.getElementById('correcao-aviso-remover').classList.toggle('hidden', acao!=='remover');
@@ -1660,33 +1738,26 @@ function renderOperadores(){
 // pedido de senha em modal proprio com campo MASCARADO (••••) - o prompt()
 // nativo mostrava a senha digitada na tela pra quem estivesse olhando.
 // Resolve com a string digitada ('' = OK em branco) ou null se cancelar.
+// Overlay estatico (#overlay-senha-mascarada, junto dos outros no HTML) em
+// vez de innerHTML dinamico - reusa o mesmo padrao .overlay/.sheet-wrap/.sheet
+// dos outros 9 modais da pagina.
+let SM_RESOLVE = null;
 function pedirSenhaMascarada(mensagem, placeholder){
   return new Promise((resolve)=>{
-    const overlay = document.createElement('div');
-    overlay.id = 'overlay-senha-mascarada';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:13000;display:flex;align-items:center;justify-content:center;padding:20px;';
-    overlay.innerHTML = `
-      <div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;width:100%;max-width:340px;display:flex;flex-direction:column;gap:10px;">
-        <div style="font-size:13px;white-space:pre-wrap;">${mensagem}</div>
-        <input type="password" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="${placeholder||'senha (4 números)'}"
-          style="width:100%;box-sizing:border-box;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:11px 10px;font-size:18px;letter-spacing:.35em;text-align:center;">
-        <div style="display:flex;gap:8px;">
-          <button type="button" data-acao="cancelar" style="flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:10px;font-size:13px;cursor:pointer;">Cancelar</button>
-          <button type="button" data-acao="ok" style="flex:1;background:var(--accent);border:none;color:#06202b;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;">OK</button>
-        </div>
-      </div>`;
-    document.body.appendChild(overlay);
-    const input = overlay.querySelector('input');
-    const fechar = (valor)=>{ overlay.remove(); resolve(valor); };
-    overlay.querySelector('[data-acao=ok]').addEventListener('click', ()=>fechar(input.value));
-    overlay.querySelector('[data-acao=cancelar]').addEventListener('click', ()=>fechar(null));
-    overlay.addEventListener('click', (e)=>{ if(e.target===overlay) fechar(null); });
-    input.addEventListener('keydown', (e)=>{
-      if(e.key==='Enter') fechar(input.value);
-      if(e.key==='Escape') fechar(null);
-    });
+    SM_RESOLVE = resolve;
+    document.getElementById('sm-mensagem').textContent = mensagem;
+    const input = document.getElementById('sm-input');
+    input.value = '';
+    input.placeholder = placeholder || 'senha (4 números)';
+    document.getElementById('overlay-senha-mascarada').classList.remove('hidden');
     input.focus();
   });
+}
+function smFechar(valor){
+  document.getElementById('overlay-senha-mascarada').classList.add('hidden');
+  const resolve = SM_RESOLVE;
+  SM_RESOLVE = null;
+  if(resolve) resolve(valor);
 }
 // troca de papel direto na lista, pra nao criar gargalo: o PROPRIO operador
 // autentica com a senha dele (mesma rota do balcao) - nao precisa do Master
@@ -1940,12 +2011,13 @@ document.addEventListener('click', ()=>{ if(ALARME_AUDIO_CTX && ALARME_AUDIO_CTX
 
 // ENTER no campo de senha autentica/envia direto (balcao agil, sem mouse);
 // no usuario, ENTER pula pra senha
-[['f-op-senha', ()=>salvar()], ['pin-senha', ()=>confirmarEnvioRapido()], ['op-novo-senha', ()=>adicionarOperador()], ['correcao-op-senha', ()=>enviarPedirCorrecao()]].forEach(([id, fn])=>{
+[['f-op-senha', ()=>salvar()], ['pin-senha', ()=>confirmarEnvioRapido()], ['op-novo-senha', ()=>adicionarOperador()], ['correcao-op-senha', ()=>enviarPedirCorrecao()], ['sm-input', ()=>smFechar(document.getElementById('sm-input').value)]].forEach(([id, fn])=>{
   document.getElementById(id).addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); fn(); } });
 });
 [['f-op-usuario','f-op-senha'], ['pin-usuario','pin-senha'], ['op-novo-usuario','op-novo-senha'], ['correcao-op-usuario','correcao-op-senha']].forEach(([de, para])=>{
   document.getElementById(de).addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); document.getElementById(para).focus(); } });
 });
+document.getElementById('sm-input').addEventListener('keydown', (e)=>{ if(e.key==='Escape') smFechar(null); });
 
 function fecharAlarme(){
   pararSomAlarme();
@@ -2251,8 +2323,10 @@ async function boot(){
   // cada ponta so ve o proprio botao de lancamento
   document.querySelector('.btn-acao.pedido').classList.toggle('hidden', !TEM_PEDIDO);
   document.querySelector('.acoes-topo .btn-acao.envio').classList.toggle('hidden', !TEM_ENVIO);
+  const podeOperadores = IS_MASTER || ME.isAdmin || ME.podeCadastrarOperadores;
   document.getElementById('btn-catalogo').classList.toggle('hidden', !PODE_CATALOGO);
-  document.getElementById('btn-operadores').classList.toggle('hidden', !(IS_MASTER || ME.isAdmin || ME.podeCadastrarOperadores));
+  document.getElementById('btn-operadores').classList.toggle('hidden', !podeOperadores);
+  document.getElementById('admin-chips').classList.toggle('hidden', !(PODE_CATALOGO || podeOperadores));
   document.getElementById('btn-contagem').classList.toggle('hidden', !TEM_PEDIDO);
   document.getElementById('root').classList.remove('hidden');
   await carregarConfig();
