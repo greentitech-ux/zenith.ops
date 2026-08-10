@@ -109,6 +109,10 @@
 
   .dia-header{font-family:var(--mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px;display:flex;align-items:center;gap:8px;}
   .dia-header::after{content:'';flex:1;height:1px;background:var(--line);}
+  /* paginacao do historico antigo (mais de 12h - ver renderLista/PAGINA_HISTORICO) */
+  .paginacao{display:flex;justify-content:center;flex-wrap:wrap;gap:6px;margin-top:14px;}
+  .pagina-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;min-width:32px;height:32px;padding:0 8px;font-size:12.5px;font-family:var(--mono);cursor:pointer;}
+  .pagina-btn.ativo{border-color:var(--accent);color:var(--accent);background:rgba(138,180,248,.12);font-weight:700;}
   /* grupo "Pendentes" (so aparece em telas largas, ver renderLista) usa a
      mesma cor de aviso do badge "aguardando" pra chamar atencao primeiro */
   .dia-header.pendentes-header{color:var(--warn);}
@@ -686,6 +690,18 @@ const MQ_DESKTOP = window.matchMedia('(min-width:681px)');
 MQ_DESKTOP.addEventListener('change', ()=>renderLista());
 let CATALOGO_INSUMOS = [];
 let FILTRO = 'todos';
+// historico de Movimentacoes (ver renderLista): "pagina 1" mostra so os
+// registros das ultimas JANELA_RECENTE_MS, comecando com REVELAR_INICIAL e
+// revelando mais REVELAR_INCREMENTO por clique em "ver mais" - o que passou
+// da janela recente vira paginas 2, 3, 4... em blocos de
+// ITENS_POR_PAGINA_ANTIGA. Troca de filtro reresolve pra pagina 1 (ver
+// filtrar())
+const JANELA_RECENTE_MS = 12*60*60*1000;
+const REVELAR_INICIAL = 6;
+const REVELAR_INCREMENTO = 10;
+const ITENS_POR_PAGINA_ANTIGA = 30;
+let PAGINA_HISTORICO = 1;
+let REVELADOS_RECENTES = REVELAR_INICIAL;
 let TIPO_FORM = 'PEDIDO';
 let INSUMOS = [];
 let AVARIAS = [];
@@ -966,6 +982,8 @@ function lembrarOperadorUsado(usuario){
 
 function filtrar(f){
   FILTRO = f;
+  PAGINA_HISTORICO = 1;
+  REVELADOS_RECENTES = REVELAR_INICIAL;
   document.querySelectorAll('#filtros-chips .filtro-chip').forEach(b=>b.classList.toggle('ativo', b.dataset.filtro===f));
   renderLista();
 }
@@ -1106,19 +1124,60 @@ function renderLista(){
       html += pendentes.map(regCardHtml).join('');
     }
   }
-  // resto agrupado por dia (mais recente primeiro), igual a lista do
-  // AppSheet - no celular "resto" e' a lista inteira (sem grupo Pendentes)
+  // resto (historico cronologico, igual a lista do AppSheet) - no celular
+  // "resto" e' a lista inteira (sem grupo Pendentes). Pagina 1 mostra so os
+  // registros das ultimas JANELA_RECENTE_MS, revelando aos poucos (ver
+  // REVELAR_INICIAL/REVELAR_INCREMENTO); o que passou dessa janela vira
+  // paginas 2, 3, 4... em blocos de ITENS_POR_PAGINA_ANTIGA
+  const agora = Date.now();
+  const recentes = resto.filter(r=>agora - new Date(r.criadoEm).getTime() <= JANELA_RECENTE_MS);
+  const antigos = resto.filter(r=>agora - new Date(r.criadoEm).getTime() > JANELA_RECENTE_MS);
+  const totalPaginas = 1 + Math.ceil(antigos.length / ITENS_POR_PAGINA_ANTIGA);
+  if(PAGINA_HISTORICO > totalPaginas) PAGINA_HISTORICO = totalPaginas;
+
+  let itensPagina, botaoRevelar = '';
+  if(PAGINA_HISTORICO===1){
+    itensPagina = recentes.slice(0, REVELADOS_RECENTES);
+    const faltam = recentes.length - itensPagina.length;
+    if(faltam>0){
+      botaoRevelar = `<button type="button" class="btn-add" onclick="revelarMaisRecentes()">▾ ver mais ${Math.min(REVELAR_INCREMENTO, faltam)} pedido(s)/envio(s) — faltam ${faltam}</button>`;
+    }
+  } else {
+    const inicio = (PAGINA_HISTORICO-2) * ITENS_POR_PAGINA_ANTIGA;
+    itensPagina = antigos.slice(inicio, inicio + ITENS_POR_PAGINA_ANTIGA);
+  }
+
   let diaAtual = null;
-  for(const r of resto){
+  for(const r of itensPagina){
     const dia = dataBrasilia(r.criadoEm);
     if(dia!==diaAtual){
-      const doDia = resto.filter(x=>dataBrasilia(x.criadoEm)===dia).length;
+      const doDia = itensPagina.filter(x=>dataBrasilia(x.criadoEm)===dia).length;
       html += `<div class="dia-header">${fmtDia(dia)} <span style="font-family:var(--mono);">[${doDia}]</span></div>`;
       diaAtual = dia;
     }
     html += regCardHtml(r);
   }
+  html += botaoRevelar;
+  if(totalPaginas>1) html += renderPaginacao(totalPaginas);
   document.getElementById('lista-regs').innerHTML = html;
+}
+
+function revelarMaisRecentes(){
+  REVELADOS_RECENTES += REVELAR_INCREMENTO;
+  renderLista();
+}
+function irParaPaginaHistorico(p){
+  PAGINA_HISTORICO = p;
+  if(p===1) REVELADOS_RECENTES = REVELAR_INICIAL;
+  renderLista();
+  document.getElementById('lista-regs').scrollIntoView({behavior:'smooth', block:'start'});
+}
+function renderPaginacao(totalPaginas){
+  let btns = '';
+  for(let p=1; p<=totalPaginas; p++){
+    btns += `<button type="button" class="pagina-btn ${p===PAGINA_HISTORICO?'ativo':''}" onclick="irParaPaginaHistorico(${p})">${p}</button>`;
+  }
+  return `<div class="paginacao">${btns}</div>`;
 }
 
 async function carregar(){
