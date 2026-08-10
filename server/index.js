@@ -1618,14 +1618,14 @@ app.get('/api/vault/export.pdf', auth.requireMaster, async (req, res) => {
 });
 
 // dispara (sem bloquear a resposta) o e-mail imediato pro MV quando um card
-// - de qualquer uma das 3 filas - nasce ou e redirecionado com
-// direcionadoParaEmail igual ao configurado em relatorioMV.MV_EMAIL. Usa
-// centralCards.normalizarCard() pra sempre montar o card no mesmo formato
-// que o e-mail espera, mesmo vindo de registros "crus" (refunds.js/
-// fechamentosLive.js tem nomes de campo diferentes de solicitacoes.js)
+// - de qualquer uma das 3 filas - nasce ou e redirecionado pro MV (por
+// e-mail OU pelo usuario de username "MV" - ver relatorioMV.ehDoMV, checado
+// dentro de notificarCardMV). Usa centralCards.normalizarCard() pra sempre
+// montar o card no mesmo formato que o e-mail espera, mesmo vindo de
+// registros "crus" (refunds.js/fechamentosLive.js tem nomes de campo
+// diferentes de solicitacoes.js)
 function notificarSeDirecionadoAoMV(tipo, registroCru) {
   const card = centralCards.normalizarCard(tipo, registroCru);
-  if (card.direcionadoParaEmail !== relatorioMV.MV_EMAIL) return;
   relatorioMV.notificarCardMV(card).catch((err) => console.error('Erro ao notificar card pro MV por e-mail:', err.message));
 }
 

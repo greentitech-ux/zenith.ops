@@ -3,8 +3,10 @@
 // Bravo) + aprovar/recusar direto no e-mail, sem precisar logar no Zenith.
 //
 // PARTE A (relatorio): reaproveita centralCards.listarTodos() - a mesma
-// fonte de dados do GET /api/central - filtrando por
-// direcionadoParaEmail===MV_EMAIL, agrupado por status.
+// fonte de dados do GET /api/central - filtrando por quem e "do MV" (ver
+// ehDoMV: direcionadoParaEmail===MV_EMAIL OU direcionadoParaId do usuario de
+// username "MV" - cobre ticket atribuido pelo usuario mesmo quando o e-mail
+// cadastrado dele nao bate 100% com MV_EMAIL), agrupado por status.
 //
 // PARTE B (decidir por e-mail): so pros tickets que nascem em solicitacoes.js
 // (compra/manutencao/suporte-ti/pagamento/nota) - Estorno e Ajuste de
@@ -21,9 +23,15 @@ const dns = require('dns').promises;
 const cron = require('node-cron');
 const centralCards = require('./centralCards');
 const solicitacoes = require('./solicitacoes');
+const users = require('./users');
+const { createCache } = require('./liveCache');
 
 const FUSO_BR = 'America/Sao_Paulo';
 const MV_EMAIL = process.env.RELATORIO_DIRECIONADO_EMAIL || 'mv@grupobravoempresarial.com';
+// destinatario do relatorio/notificacoes - se a env var RELATORIO_EMAIL_TO
+// estiver configurada no Render (Environment), ela sempre manda; esse
+// fallback so entra em cena se a env var estiver em branco/ausente
+const RELATORIO_EMAIL_TO_PADRAO = process.env.RELATORIO_EMAIL_TO || 'mv@grupobravoempresarial.com';
 // sem barra no final, pra concatenar direto nos links (/decidir...)
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 // unicos tipos com fluxo de decisao por e-mail (ver aviso de escopo acima)
@@ -51,14 +59,32 @@ function fmtDataHora(iso) {
   }).format(new Date(iso));
 }
 
+// id do usuario de username "MV" (cache curto - so pra nao bater no Firestore
+// a cada card processado). Fica null se nao existir esse usuario cadastrado.
+const mvUserIdCache = createCache(async () => {
+  const u = await users.findByIdentifier('MV');
+  return u ? u.id : null;
+}, 5 * 60 * 1000);
+
+// "e do MV" cobre os dois jeitos de um card ter sido direcionado pra ele:
+// pelo e-mail configurado (MV_EMAIL, o padrao) OU por ter sido atribuido
+// diretamente ao usuario de username "MV" (direcionadoParaId) - o e-mail
+// gravado no card e so um retrato de quando foi direcionado, entao um
+// usuario com e-mail diferente do MV_EMAIL mas username "mv" tambem conta
+function ehDoMV(card, mvUserId) {
+  if (!card) return false;
+  if (String(card.direcionadoParaEmail || '').trim().toLowerCase() === MV_EMAIL.toLowerCase()) return true;
+  return !!mvUserId && card.direcionadoParaId === mvUserId;
+}
+
 // junta os cards das 3 filas direcionados ao MV, agrupados por status - e
 // gera (renovando) o token de acao dos que ainda estao PENDENTE e tem tipo
 // com fluxo de decisao por e-mail (ver TIPOS_COM_ACAO_POR_EMAIL acima)
 async function montarDados() {
-  const todos = await centralCards.listarTodos();
+  const [todos, mvUserId] = await Promise.all([centralCards.listarTodos(), mvUserIdCache.cached()]);
   // CONVERTIDO = o ticket virou outro tipo/colecao (ver solicitacoes.js) -
   // quem continua a historia e o registro novo, esse aqui fica de fora
-  const doMV = todos.filter((c) => c.direcionadoParaEmail === MV_EMAIL && c.status !== 'CONVERTIDO');
+  const doMV = todos.filter((c) => ehDoMV(c, mvUserId) && c.status !== 'CONVERTIDO');
 
   for (const c of doMV) {
     if (c.status === 'PENDENTE' && TIPOS_COM_ACAO_POR_EMAIL.has(c.tipo)) {
@@ -230,9 +256,8 @@ async function enviarCardsPorEmail(cards, destinatario) {
 // Quem chama decide o que fazer com erro - normalmente so loga, nunca
 // derruba a acao que criou/redirecionou o card (ver index.js)
 async function notificarCardMV(card) {
-  if (!card || card.direcionadoParaEmail !== MV_EMAIL) return;
-  const to = process.env.RELATORIO_EMAIL_TO;
-  if (!to) throw new Error('RELATORIO_EMAIL_TO não configurado.');
+  if (!ehDoMV(card, await mvUserIdCache.cached())) return;
+  const to = RELATORIO_EMAIL_TO_PADRAO;
 
   const cardParaEnviar = { ...card };
   if (card.status === 'PENDENTE' && TIPOS_COM_ACAO_POR_EMAIL.has(card.tipo)) {
@@ -388,8 +413,7 @@ async function enviarComFallback(opcoesEmail) {
 }
 
 async function enviarRelatorio() {
-  const to = process.env.RELATORIO_EMAIL_TO;
-  if (!to) throw new Error('RELATORIO_EMAIL_TO não configurado.');
+  const to = RELATORIO_EMAIL_TO_PADRAO;
   const dados = await montarDados();
   await enviarComFallback({
     from: `Zenith Ops <${process.env.RELATORIO_EMAIL_USER}>`,
@@ -401,14 +425,23 @@ async function enviarRelatorio() {
 }
 
 // agenda o envio diario (cron.schedule ja roda em cima do timezone
-// informado, sem precisar converter hora local -> UTC na mao)
+// informado, sem precisar converter hora local -> UTC na mao). So de
+// segunda a sexta - sabado/domingo nao manda nada; como o relatorio e
+// sempre um RETRATO ATUAL (nao um "desde ontem"), o que ficou pendente no
+// fim de semana ja aparece sozinho no envio de segunda, sem logica extra.
+// O "1-5" no campo de dia-da-semana ja cobre isso, mas o guard abaixo
+// funciona como segunda trava - mesmo se RELATORIO_HORA vier configurado
+// pra rodar todo dia (ex: env var antiga "0 8 * * *"), sabado/domingo nunca
+// disparam o envio de verdade.
 function iniciarAgendamento() {
-  const horaCron = process.env.RELATORIO_HORA || '0 8 * * *';
+  const horaCron = process.env.RELATORIO_HORA || '0 8 * * 1-5';
   if (!cron.validate(horaCron)) {
     console.error(`RELATORIO_HORA inválido ("${horaCron}") - agendamento do relatório diário MV desativado.`);
     return;
   }
   cron.schedule(horaCron, () => {
+    const diaSemana = new Intl.DateTimeFormat('en-US', { timeZone: FUSO_BR, weekday: 'short' }).format(new Date());
+    if (diaSemana === 'Sat' || diaSemana === 'Sun') return; // fim de semana - nao manda
     enviarRelatorio().catch((err) => console.error('Erro ao enviar relatório diário MV:', err.message));
   }, { timezone: FUSO_BR });
 }
