@@ -130,13 +130,19 @@ async function removerOperador(id) {
   operadoresCache.invalidar();
 }
 
-// desbloqueio do Master (via ticket que o bloqueio gera): mesma dinamica do
-// login principal, mas a senha e OPCIONAL - em branco mantem a mesma senha,
-// preenchida (4 numeros) redefine
-async function desbloquearOperador(id, { novaSenha }) {
+// desbloqueio do Master (via ticket que o bloqueio gera) ou do Beniboy (chat
+// de suporte, ver suporteBot.js): mesma dinamica do login principal, mas a
+// senha e OPCIONAL - em branco mantem a mesma senha, preenchida (4 numeros)
+// redefine. viaBot marca `desbloqueadoPeloBotEm`: se o MESMO operador travar
+// de novo depois de um desbloqueio "mantendo a senha", o bot sabe que ja
+// tentou essa saida uma vez e muda de estrategia (reseta pra uma senha
+// numerica aleatoria direto, sem perguntar - ver suporteBot.js). Qualquer
+// desbloqueio que NAO seja viaBot (Master pelo ticket, ou o proprio bot
+// definindo senha nova) limpa essa marca - fica sempre um ciclo por vez.
+async function desbloquearOperador(id, { novaSenha, viaBot } = {}) {
   const snap = await OPERADORES.doc(id).get();
   if (!snap.exists) throw new Error('Operador não encontrado.');
-  const patch = { bloqueado: false, tentativasErradas: 0 };
+  const patch = { bloqueado: false, tentativasErradas: 0, desbloqueadoPeloBotEm: viaBot ? new Date().toISOString() : null };
   if (novaSenha != null && String(novaSenha).trim() !== '') {
     patch.senhaHash = await bcrypt.hash(validarSenhaOperador(novaSenha), 12);
   }
@@ -144,6 +150,18 @@ async function desbloquearOperador(id, { novaSenha }) {
   operadoresCache.invalidar();
   const atualizado = await OPERADORES.doc(id).get();
   return operadorPublico(atualizado.data());
+}
+
+// acha um operador pelo usuario (4 letras) - usado pelo Beniboy pra
+// localizar quem esta bloqueado a partir so do nome que a pessoa informou
+// no chat (ver suporteBot.js). Devolve a versao publica (sem senhaHash) -
+// o bot nunca precisa ler a senha atual, so troca/mantem ela
+async function buscarOperadorPorUsuario(usuario) {
+  const usuarioLimpo = String(usuario || '').trim().toLowerCase();
+  if (!usuarioLimpo) return null;
+  const todos = await operadoresCache.cached();
+  const op = todos.find((o) => o.usuario === usuarioLimpo);
+  return op ? operadorPublico(op) : null;
 }
 
 // autentica usuario+senha do operador com o mesmo bloqueio do login
@@ -792,5 +810,5 @@ async function arquivarAntigos() {
 module.exports = {
   TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, editarDireto, getConfig, salvarConfig, arquivarAntigos,
   listarInsumos, criarInsumo, atualizarInsumo,
-  listarOperadores, criarOperador, atualizarOperador, removerOperador, desbloquearOperador, validarOperador, validarOperadorQualquerPapel, trocarPapelOperador,
+  listarOperadores, criarOperador, atualizarOperador, removerOperador, desbloquearOperador, buscarOperadorPorUsuario, validarOperador, validarOperadorQualquerPapel, trocarPapelOperador,
 };
