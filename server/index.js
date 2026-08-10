@@ -464,7 +464,7 @@ async function usuarioLogadoDoHeader(req) {
     // secao 'monitor' OU tag de cargo "Gerente" liberam sozinhas a ferramenta
     // de consulta de pedido do Beniboy - qualquer uma das duas basta, pedido
     // explicito do usuario ("Gerente libera sozinho")
-    temMonitor: isMaster || (user.permissions?.sections || []).includes('monitor') || user.cargo === 'gerente',
+    temMonitor: isMaster || (user.permissions?.sections || []).includes('monitor') || users.ehCargoGerente(user.cargo),
     // time de suporte (Master/Admin/secao 'suporte') ajudando OUTRA pessoa a
     // desbloquear o login pelo chat - usado por desbloquear_login
     // (suporteBot.js) pra dispensar a checagem de "contato bate com o email"
@@ -2770,7 +2770,7 @@ app.post('/api/parque/checkins/:id/cortesia/decidir', requireAnySection('parque'
   try {
     const atual = await parque.getOne(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Check-in não encontrado.' });
-    const ehGerente = req.user && req.user.cargo === 'gerente' && !req.isMaster
+    const ehGerente = req.user && users.ehCargoGerente(req.user.cargo) && !req.isMaster
       && (req.permissions?.unidades || []).includes(atual.unidade);
     if (!req.isMaster && !ehGerente) {
       return res.status(403).json({ error: 'Só o Gerente da unidade ou o Master decide uma cortesia.' });
@@ -2876,7 +2876,7 @@ app.post('/api/parque/checkins/:id/checkout', requireAnySection('parque', 'parqu
 // que efetivamente gera o credito de tempo (ver parque.aprovarCheckout)
 function podeAprovarCheckoutParque(req, unidade) {
   if (req.isMaster || req.isAdmin) return true;
-  if (!req.user || req.user.cargo !== 'gerente') return false;
+  if (!req.user || !users.ehCargoGerente(req.user.cargo)) return false;
   return (req.permissions?.unidades || []).includes(unidade);
 }
 
@@ -2992,7 +2992,7 @@ app.get('/api/parque/checkins/edicoes', requireSection('parque'), async (req, re
   if (req.isMaster || req.isAdmin) return res.json(todas);
   // Gerente ve os pedidos das unidades dele (pra poder decidir); os demais
   // acompanham so os proprios pedidos
-  if (req.user && req.user.cargo === 'gerente') {
+  if (req.user && users.ehCargoGerente(req.user.cargo)) {
     const unidades = req.permissions?.unidades || [];
     return res.json(todas.filter((p) => unidades.includes(p.unidade) || p.solicitadoPorId === req.user.id));
   }
@@ -3079,7 +3079,7 @@ app.get('/api/parque/relatorio.:formato(csv|pdf)', requireSection('parque'), asy
 // tudo, Gerente ve as unidades dele; os demais nao acessam
 const METODOS_PARQUE_LABEL = { dinheiro: 'Dinheiro', pix: 'Pix', debito: 'Débito', credito: 'Crédito', cortesia: 'Cortesia' };
 app.get('/api/parque/financeiro.:formato(csv|pdf)', requireSection('parque'), async (req, res) => {
-  const ehGestor = req.isMaster || req.isAdmin || (req.user && req.user.cargo === 'gerente');
+  const ehGestor = req.isMaster || req.isAdmin || (req.user && users.ehCargoGerente(req.user.cargo));
   if (!ehGestor) return res.status(403).json({ error: 'Só o Gerente da unidade ou o Master/Admin acessam o financeiro.' });
   let lista = (req.isMaster || req.isAdmin) ? await parque.listAll() : await parque.listByUnidades(req.permissions.unidades || []);
   const { unidade, inicio, fim } = req.query;
@@ -3179,7 +3179,7 @@ app.delete('/api/festas/:id', auth.requireMaster, async (req, res) => {
 // status vira 'pago' quando cobre o total, senao 'pagamento-parcial'
 function podeReceberFesta(req, unidade) {
   if (req.isMaster || req.isAdmin) return true;
-  return req.user && req.user.cargo === 'gerente' && (req.permissions.unidades || []).includes(unidade);
+  return req.user && users.ehCargoGerente(req.user.cargo) && (req.permissions.unidades || []).includes(unidade);
 }
 
 app.post('/api/festas/:id/reabrir-pagamento', requireSection('festas'), async (req, res) => {

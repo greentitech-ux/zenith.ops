@@ -262,10 +262,17 @@ async function updatePodeCadastrarOperadores(id, valor) {
 // Parque, e a tag define a TELA INICIAL da pessoa ao entrar no app (ver
 // index.html): Loja -> Historico de Solicitacoes, Tecnico -> Chamados TI,
 // Manutencao -> Manutencao; sem tag -> Painel.
-const CARGOS_VALIDOS = ['loja', 'gerente', 'tecnico', 'suporte', 'manutencao'];
+const CARGOS_VALIDOS = ['loja', 'gerente', 'assistente-gerente', 'tecnico', 'suporte', 'manutencao', 'operador'];
+// Ass. Ger (assistente de Gerente) tem as MESMAS permissoes de aprovacao do
+// Gerente (check-out antecipado do Parque, decidir cortesia, alertas de
+// limite do PCD cortesia, etc.) - qualquer checagem de "e gerente" espalhada
+// pelo app deve tratar os dois cargos como equivalentes (ver ehCargoGerente)
+function ehCargoGerente(cargo) {
+  return cargo === 'gerente' || cargo === 'assistente-gerente';
+}
 async function updateCargo(id, cargo) {
   const limpo = cargo ? String(cargo).toLowerCase() : null;
-  if (limpo && !CARGOS_VALIDOS.includes(limpo)) throw new Error('Tag inválida. Use "loja", "gerente", "tecnico", "suporte" ou "manutencao".');
+  if (limpo && !CARGOS_VALIDOS.includes(limpo)) throw new Error('Tag inválida. Use "loja", "gerente", "assistente-gerente", "tecnico", "suporte", "manutencao" ou "operador".');
   const ref = usersRef.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Acesso não encontrado.');
@@ -377,6 +384,8 @@ function toPublic(doc) {
 module.exports = {
   VALID_SECTIONS,
   TIPOS_SOLICITACAO,
+  CARGOS_VALIDOS,
+  ehCargoGerente,
   findByIdentifier,
   list,
   create,

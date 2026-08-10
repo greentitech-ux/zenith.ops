@@ -364,7 +364,7 @@ function totalRecebido(f){ return (Number(f.sinal?.valor)||0) + (f.recebimentos|
 function restanteDevido(f){ return Math.max(0, (Number(f.valorTotal)||0) - totalRecebido(f)); }
 function podeReceber(unidade){
   if(IS_MASTER || IS_ADMIN) return true;
-  return ME && ME.cargo==='gerente' && (ME.permissions?.unidades||[]).includes(unidade);
+  return ME && (ME.cargo==='gerente' || ME.cargo==='assistente-gerente') && (ME.permissions?.unidades||[]).includes(unidade);
 }
 const STATUS_LABEL_FESTA = { pendente:'pendente', 'pagamento-parcial':'pagamento parcial', pago:'pago', cancelado:'cancelado' };
 let UNIDADES_NOMES = { ...PARQUE_UNIDADES_NOMES };

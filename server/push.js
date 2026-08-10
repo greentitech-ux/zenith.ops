@@ -3,6 +3,7 @@
 // estorno agendado, chargeback e fraude suspeita.
 const webpush = require('web-push');
 const db = require('./firestore');
+const { ehCargoGerente } = require('./users');
 
 const COLLECTION = db.collection('push_subscriptions');
 
@@ -243,7 +244,7 @@ function podeReceberPcdCortesia(sub, unidade) {
   const meta = sub.meta;
   if (!meta) return false;
   if (meta.isMaster) return true;
-  return meta.cargo === 'gerente' && (meta.unidades || []).includes(unidade);
+  return ehCargoGerente(meta.cargo) && (meta.unidades || []).includes(unidade);
 }
 async function notifyParquePcdCortesiaLimite({ unidade, unidadeNome, horaBucket, dataUtilizacao }) {
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;

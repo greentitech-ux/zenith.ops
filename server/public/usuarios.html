@@ -549,7 +549,7 @@ function caminhoSubgrupo(id){
 // junta num so bloco reaproveitado no formulario de criacao e no modal de
 // Permissoes, pra nao ter que criar o acesso "pelado" e so depois ir ate
 // Acoes marcar cada tag uma por uma ----------
-const CARGOS = [ ['','Sem cargo'], ['loja','🏬 Loja'], ['gerente','👔 Gerente'], ['tecnico','🔧 Técnico'], ['suporte','🎧 Suporte'], ['manutencao','🛠️ Manutenção'] ];
+const CARGOS = [ ['','Sem cargo'], ['loja','🏬 Loja'], ['gerente','👔 Gerente'], ['assistente-gerente','🧑‍💼 Ass. Ger'], ['tecnico','🔧 Técnico'], ['suporte','🎧 Suporte'], ['manutencao','🛠️ Manutenção'], ['operador','👷 Operador'] ];
 function tagsFieldsetHtml(prefixo, tags){
   tags = tags || { cargo:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, sessaoLonga:false };
   const cargoHtml = CARGOS.map(([v,l])=>{

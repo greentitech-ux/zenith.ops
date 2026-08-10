@@ -721,14 +721,14 @@ function statusCheckin(c){
 
 function podeAprovarCheckout(unidade){
   if(IS_MASTER || IS_ADMIN) return true;
-  return ME && ME.cargo==='gerente' && (ME.permissions?.unidades||[]).includes(unidade);
+  return ME && (ME.cargo==='gerente' || ME.cargo==='assistente-gerente') && (ME.permissions?.unidades||[]).includes(unidade);
 }
 
 // ---------- cortesia: card de aprovacao em alcada dupla ----------
 // Gerente da unidade decide o 1o nivel; Master da a palavra final; se o
 // Master rejeitar a justificativa, o card escala pro Admin MV encerrar
 function podeDecidirCortesiaGerente(unidade){
-  return ME && ME.cargo==='gerente' && !IS_MASTER && (ME.permissions?.unidades||[]).includes(unidade);
+  return ME && (ME.cargo==='gerente' || ME.cargo==='assistente-gerente') && !IS_MASTER && (ME.permissions?.unidades||[]).includes(unidade);
 }
 function ehAdminCortesiaLocal(){
   const u = String(ME?.username||'').toLowerCase();
