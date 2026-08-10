@@ -447,6 +447,9 @@ const PARQUE_UNIDADES_NOMES = { 'Saltiverso Patteo': 'Saltiverso Patteo' };
 // "➕ Adicionar tempo" durante a vigencia (mesma lista de buckets)
 const TEMPOS_VALIDOS = [30,60,90,120];
 const PRECO_MEIA = 25;
+// niver: 50% de desconto na entrada so da crianca aniversariante (mesma
+// regra do servidor - ver NIVER_DESCONTO em parque.js)
+const NIVER_DESCONTO = 0.5;
 // PCD30/PCD60: preco fixo por crianca (30/60min), fora da tabela normal.
 // PCD-cortesia (botao "5%CP"): entrada gratis de 60min, limitada a 2
 // criancas por hora-relogio por unidade (o backend recusa a 3a e avisa
@@ -546,17 +549,24 @@ function contarMeias(){
   return [...document.querySelectorAll('#lista-criancas .crianca-linha')]
     .filter(l=>l.querySelector('.crianca-nome').value.trim() && l.querySelector('.crianca-meia').checked).length;
 }
+function contarNiver(){
+  return [...document.querySelectorAll('#lista-criancas .crianca-linha')]
+    .filter(l=>l.querySelector('.crianca-nome').value.trim() && l.querySelector('.crianca-niver').checked).length;
+}
 function atualizarPreviewValor(){
   const n = [...document.querySelectorAll('#lista-criancas .crianca-nome')].filter(i=>i.value.trim()).length;
   const metodo = document.getElementById('f-metodo').value;
   const gratis = metodo==='cortesia' || CATEGORIA_SELECIONADA==='pcd-cortesia';
   const unit = valorUnitarioAtual();
+  const niver = contarNiver();
+  const valorEntradas = unit * n - unit * NIVER_DESCONTO * niver;
   const meias = contarMeias() + Math.max(0, num(document.getElementById('f-meias-extras').value));
   const valorMeias = gratis ? 0 : PRECO_MEIA * meias;
-  const total = gratis ? 0 : unit * n + valorMeias;
+  const total = gratis ? 0 : valorEntradas + valorMeias;
   document.getElementById('preview-meias').textContent = `${meias} par(es) · ${fmtReal(valorMeias)}`;
-  document.getElementById('valor-detalhe').textContent =
-    gratis ? `cortesia · ${n} criança(s)` : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min) + meias`;
+  document.getElementById('valor-detalhe').textContent = gratis
+    ? `cortesia · ${n} criança(s)`
+    : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min)${niver?` · 🎂 ${niver} niver(s) 50% off`:''} + meias`;
   document.getElementById('preview-valor').textContent = fmtReal(total);
 }
 document.getElementById('f-metodo').addEventListener('change', atualizarPreviewValor);
@@ -648,6 +658,10 @@ function adicionarCrianca(){
       <input type="checkbox" class="crianca-meia" style="width:auto;" onchange="atualizarPreviewValor()">
       🧦 Par de meia · R$25 <span style="color:var(--muted);">(marque se a criança precisa comprar o par de meia)</span>
     </label>
+    <label class="crianca-niver-wrap" style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
+      <input type="checkbox" class="crianca-niver" style="width:auto;" onchange="atualizarPreviewValor()">
+      🎂 Niver · 50% OFF <span style="color:var(--muted);">(marque se a criança é a aniversariante - metade do valor só da entrada dela)</span>
+    </label>
   `;
   document.getElementById('lista-criancas').appendChild(div);
   div.querySelector('.crianca-nome').addEventListener('input', atualizarPreviewPulseiras);
@@ -664,6 +678,7 @@ function coletarCriancas(){
     nome: div.querySelector('.crianca-nome').value.trim(),
     dataNascimento: div.querySelector('.crianca-nasc').value || null,
     meia: div.querySelector('.crianca-meia').checked,
+    niver: div.querySelector('.crianca-niver').checked,
   })).filter(c=>c.nome);
 }
 
@@ -862,7 +877,7 @@ function correcaoAba(aba){
   document.getElementById('btn-enviar-correcao').textContent = aba==='excluir' ? 'Pedir exclusão' : 'Enviar proposta de alteração';
 }
 
-function corAddCrianca(nome, nasc, meia){
+function corAddCrianca(nome, nasc, meia, niver){
   const div = document.createElement('div');
   div.className = 'crianca-linha';
   div.innerHTML = `<input type="text" placeholder="Nome da criança" class="cor-cr-nome">
@@ -872,6 +887,9 @@ function corAddCrianca(nome, nasc, meia){
     </div>
     <label style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
       <input type="checkbox" class="cor-cr-meia" style="width:auto;" ${meia===false?'':'checked'}> 🧦 Par de meia · R$25
+    </label>
+    <label style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
+      <input type="checkbox" class="cor-cr-niver" style="width:auto;" ${niver?'checked':''}> 🎂 Niver · 50% OFF
     </label>`;
   div.querySelector('.cor-cr-nome').value = nome||'';
   div.querySelector('.cor-cr-nasc').value = (nasc||'').slice(0,10);
@@ -897,7 +915,7 @@ function abrirCorrecao(id){
   document.getElementById('cor-ac-quant').value = c.quantAC || 1;
   document.getElementById('cor-observacao').value = c.observacao || '';
   document.getElementById('cor-criancas').innerHTML = '';
-  (c.criancas||[]).forEach(cr=>corAddCrianca(cr.nome, cr.dataNascimento, cr.meia));
+  (c.criancas||[]).forEach(cr=>corAddCrianca(cr.nome, cr.dataNascimento, cr.meia, cr.niver));
   document.getElementById('cor-motivo').value = '';
   document.getElementById('msg-correcao').classList.add('hidden');
   correcaoAba('alterar');
@@ -925,6 +943,7 @@ document.getElementById('form-correcao').addEventListener('submit', async (ev)=>
           nome: l.querySelector('.cor-cr-nome').value,
           dataNascimento: l.querySelector('.cor-cr-nasc').value || null,
           meia: l.querySelector('.cor-cr-meia').checked,
+          niver: l.querySelector('.cor-cr-niver').checked,
         })),
       };
     }

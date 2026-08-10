@@ -520,7 +520,7 @@ function correcaoAba(aba){
   document.getElementById('btn-enviar-correcao').textContent = aba==='excluir' ? 'Pedir exclusão' : 'Enviar proposta de alteração';
 }
 
-function corAddCrianca(nome, nasc, meia){
+function corAddCrianca(nome, nasc, meia, niver){
   const div = document.createElement('div');
   div.className = 'crianca-linha';
   div.innerHTML = `<input type="text" placeholder="Nome da criança" class="cor-cr-nome">
@@ -530,6 +530,9 @@ function corAddCrianca(nome, nasc, meia){
     </div>
     <label style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
       <input type="checkbox" class="cor-cr-meia" style="width:auto;" ${meia===false?'':'checked'}> 🧦 Par de meia · R$25
+    </label>
+    <label style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
+      <input type="checkbox" class="cor-cr-niver" style="width:auto;" ${niver?'checked':''}> 🎂 Niver · 50% OFF
     </label>`;
   div.querySelector('.cor-cr-nome').value = nome||'';
   div.querySelector('.cor-cr-nasc').value = (nasc||'').slice(0,10);
@@ -555,7 +558,7 @@ function abrirCorrecao(id){
   document.getElementById('cor-ac-quant').value = c.quantAC || 1;
   document.getElementById('cor-observacao').value = c.observacao || '';
   document.getElementById('cor-criancas').innerHTML = '';
-  (c.criancas||[]).forEach(cr=>corAddCrianca(cr.nome, cr.dataNascimento, cr.meia));
+  (c.criancas||[]).forEach(cr=>corAddCrianca(cr.nome, cr.dataNascimento, cr.meia, cr.niver));
   document.getElementById('cor-motivo').value = '';
   document.getElementById('msg-correcao').classList.add('hidden');
   correcaoAba('alterar');
@@ -579,7 +582,7 @@ function abrirVer(id){
     : `${c.tempoMinutos}min · previsto ${(c.horarioPrevisto||'').slice(0,5) || '—'}`;
   const meiasCount = (c.criancas||[]).filter(x=>x.meia!==false).length + (c.meiasExtras||0);
   const criancasHtml = (c.criancas||[]).length
-    ? (c.criancas||[]).map(cr=>`${escapeHtml(cr.nome||'—')}${cr.dataNascimento?' · nasc. '+fmtData((cr.dataNascimento||'').slice(0,10)):''} · ${cr.meia!==false?'🧦 com meia':'sem meia'}`).join('<br>')
+    ? (c.criancas||[]).map(cr=>`${escapeHtml(cr.nome||'—')}${cr.dataNascimento?' · nasc. '+fmtData((cr.dataNascimento||'').slice(0,10)):''} · ${cr.meia!==false?'🧦 com meia':'sem meia'}${cr.niver?' · 🎂 niver 50% off':''}`).join('<br>')
     : '—';
   let html = '';
   html += verLinha('Status', escapeHtml(status.texto));
@@ -622,6 +625,7 @@ document.getElementById('form-correcao').addEventListener('submit', async (ev)=>
           nome: l.querySelector('.cor-cr-nome').value,
           dataNascimento: l.querySelector('.cor-cr-nasc').value || null,
           meia: l.querySelector('.cor-cr-meia').checked,
+          niver: l.querySelector('.cor-cr-niver').checked,
         })),
       };
     }

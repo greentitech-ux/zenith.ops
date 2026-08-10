@@ -46,6 +46,14 @@ function valorMeias(criancas, meiasExtras) {
   return PRECO_MEIA * (optantes + Math.max(0, num(meiasExtras)));
 }
 
+// aniversariante: 50% de desconto na entrada SO daquela crianca (as demais
+// do mesmo check-in pagam normal) - marcado por criterio do atendente, sem
+// checagem contra dataNascimento. Nao afeta o par de meia.
+const NIVER_DESCONTO = 0.5;
+function valorEntradaCriancas(criancas, unitario) {
+  return (criancas || []).reduce((soma, c) => soma + (c.niver ? unitario * (1 - NIVER_DESCONTO) : unitario), 0);
+}
+
 // forma de pagamento registrada na entrada - alimenta o relatorio
 // financeiro. 'cortesia' zera o valor (entrada liberada sem cobranca)
 const METODOS_PAGAMENTO = ['dinheiro', 'pix', 'debito', 'credito', 'cortesia'];
@@ -243,6 +251,8 @@ function sanitizarCriancas(lista) {
       // meia: true por padrao (toda crianca paga o par de R$25) - so fica
       // false quando o atendente desmarca porque a crianca ja tem a meia
       meia: !(c && c.meia === false),
+      // niver: 50% de desconto so na entrada dessa crianca (ver NIVER_DESCONTO)
+      niver: !!(c && c.niver === true),
     }))
     .filter((c) => c.nome)
     .slice(0, 30);
@@ -358,7 +368,7 @@ async function criar({
       ? 0
       : sanitizarMetodoPagamento(metodoPagamento) === 'cortesia'
         ? 0
-        : (categoriaPcd ? valorUnitarioPcd(categoriaPcd) : valorPorTempo(tempo)) * criancasOk.length
+        : valorEntradaCriancas(criancasOk, categoriaPcd ? valorUnitarioPcd(categoriaPcd) : valorPorTempo(tempo))
           + valorMeias(criancasOk, Math.max(0, Math.min(30, num(meiasExtras)))),
     // tempo comprado DEPOIS da entrada, durante a vigencia (ver
     // adicionarTempo) - nao muda o bucket contratado, soma por cima
@@ -600,7 +610,7 @@ async function atualizar(id, patch) {
     merge.valorPulseira = valorPorTempo(tempo);
     merge.valorMeias = cobraMeias ? valorMeias(criancasFinais, meiasExtrasFinais) : (atual.valorMeias || 0);
     const somaAcrescimos = (atual.acrescimos || []).reduce((s, a) => s + (Number(a.valor) || 0), 0);
-    merge.valor = metodoFinal === 'cortesia' ? 0 : merge.valorPulseira * criancasFinais.length + merge.valorMeias + somaAcrescimos;
+    merge.valor = metodoFinal === 'cortesia' ? 0 : valorEntradaCriancas(criancasFinais, merge.valorPulseira) + merge.valorMeias + somaAcrescimos;
   }
   if (patch.usou !== undefined) merge.usou = patch.usou === true;
   if (patch.termoAssinado !== undefined) merge.termoAssinado = patch.termoAssinado === true;
