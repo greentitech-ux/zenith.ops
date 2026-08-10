@@ -97,10 +97,6 @@
   .filtro-chip{font-family:var(--mono);font-size:10.5px;color:var(--muted);padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
   .filtro-chip.ativo{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
   .btn-abrir-chamado{font-family:var(--sans);font-size:12px;font-weight:700;color:#06202b;background:var(--accent);border:none;border-radius:16px;padding:6px 12px;cursor:pointer;white-space:nowrap;}
-  .mod-toggle{display:flex;gap:6px;margin-top:2px;}
-  .mod-toggle button{flex:1;font-family:var(--sans);font-size:12.5px;padding:9px 8px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
-  .mod-toggle button.ativo-presencial{border-color:var(--accent);color:var(--accent);background:rgba(92,200,255,.08);font-weight:700;}
-  .mod-toggle button.ativo-remoto{border-color:#c9a2ff;color:#c9a2ff;background:rgba(201,162,255,.08);font-weight:700;}
   .check-linha{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;cursor:pointer;}
   .check-linha input{width:auto;}
   .link-btn{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0;font-family:var(--sans);}
@@ -188,8 +184,8 @@
   <div class="filtros-chips" id="filtros-chips">
     <button type="button" class="filtro-chip ativo" data-filtro="todos" onclick="filtrarChamados('todos')">Todos</button>
     <button type="button" class="filtro-chip" data-filtro="ativos" onclick="filtrarChamados('ativos')">⏳ Ativos</button>
-    <button type="button" class="filtro-chip" data-filtro="presencial" onclick="filtrarChamados('presencial')">🚗 Presencial</button>
-    <button type="button" class="filtro-chip" data-filtro="remoto" onclick="filtrarChamados('remoto')">🎧 Remoto</button>
+    <button type="button" class="filtro-chip" data-filtro="remoto" onclick="filtrarChamados('remoto')">🎧 Triagem (remoto)</button>
+    <button type="button" class="filtro-chip" data-filtro="presencial" onclick="filtrarChamados('presencial')">🚗 Escalados (presencial)</button>
     <button type="button" class="filtro-chip" data-filtro="concluidos" onclick="filtrarChamados('concluidos')">✓ Concluídos</button>
   </div>
   <input type="search" id="busca-chamados" placeholder="🔍 pesquisar por palavra (título, loja, ticket #, descrição...)" style="margin:8px 0 4px;font-size:12.5px;" oninput="renderLista()">
@@ -230,20 +226,16 @@
   </div>
 </div>
 
-<!-- abertura direta de chamado: Master/Admin (qualquer modalidade, escolhe o
-     responsavel) e time de Suporte (so remoto, no proprio nome). O check
-     "ja resolvido" registra a atuacao retroativa: abre e ja fecha -->
+<!-- abertura direta de chamado: SEMPRE nasce remoto (triagem) - Master/Admin
+     escolhe o responsavel, o time de Suporte abre no proprio nome. Escalar
+     pra presencial e depois, na triagem (ver bloco-escalar no detalhe). O
+     check "ja resolvido" registra a atuacao retroativa: abre e ja fecha -->
 <div class="overlay hidden" id="overlay-novo">
   <div class="sheet-wrap">
     <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharFormChamado()">✕</span>
     <div class="sheet">
       <h3>➕ Abrir chamado de TI</h3>
-      <div class="sub">registre toda atuação — mesmo as já resolvidas</div>
-      <label id="n-mod-label">Modalidade</label>
-      <div class="mod-toggle" id="n-mod-toggle">
-        <button type="button" id="n-mod-remoto" onclick="selecionarModalidade('remoto')">🎧 Remoto (Suporte)</button>
-        <button type="button" id="n-mod-presencial" onclick="selecionarModalidade('presencial')">🚗 Presencial (visita)</button>
-      </div>
+      <div class="sub">🎧 todo chamado nasce em triagem remota — registre toda atuação, mesmo as já resolvidas</div>
       <label>Unidade</label>
       <select id="n-unidade"></select>
       <label>Prioridade</label>
@@ -261,7 +253,7 @@
       <input type="text" id="n-titulo" placeholder="ex: impressora não imprime / liberação de acesso">
       <label>Descrição</label>
       <textarea id="n-descricao" placeholder="detalhe o problema ou o pedido"></textarea>
-      <label class="check-linha hidden" id="n-linha-resolvido"><input type="checkbox" id="n-ja-resolvido" onchange="document.getElementById('n-bloco-resolucao').classList.toggle('hidden', !this.checked)"> ✅ Já resolvido — abrir e fechar com o registro da atuação</label>
+      <label class="check-linha" id="n-linha-resolvido"><input type="checkbox" id="n-ja-resolvido" onchange="document.getElementById('n-bloco-resolucao').classList.toggle('hidden', !this.checked)"> ✅ Já resolvido — abrir e fechar com o registro da atuação</label>
       <div id="n-bloco-resolucao" class="hidden">
         <label>O que foi feito (registro da atuação)</label>
         <textarea id="n-resolucao" placeholder="descreva a atuação realizada"></textarea>
@@ -280,11 +272,21 @@
     <div class="sub" id="d-sub"></div>
     <div id="d-descricao" style="font-size:13px;white-space:pre-wrap;margin-bottom:10px;"></div>
 
-    <!-- REMOTO em aberto: concluir a distancia, sem check-in/assinatura -->
+    <!-- REMOTO em aberto (triagem): concluir a distancia, sem check-in/assinatura -->
     <div id="bloco-remoto" class="hidden">
       <label>O que foi feito (registro da atuação)</label>
       <textarea id="r-observacao" placeholder="descreva a atuação realizada"></textarea>
       <button type="button" class="btn-primary" id="btn-concluir-remoto" onclick="concluirRemoto()">🎧 Concluir atendimento remoto</button>
+    </div>
+
+    <!-- TRIAGEM: Master ou time de Suporte decide se precisa de visita -
+         unica porta pra um chamado sair do remoto (fora da edicao livre do
+         Master, mais abaixo) -->
+    <div id="bloco-escalar" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px;">
+      <label>🚗 Escalar pra atendimento presencial <span style="text-transform:none;letter-spacing:0;">(triagem: só quando não dá pra resolver a distância)</span></label>
+      <textarea id="esc-motivo" placeholder="por que esse chamado precisa de visita presencial?"></textarea>
+      <select id="esc-tecnico"><option value="">manter responsável atual</option></select>
+      <button type="button" class="btn-add" id="btn-escalar" onclick="escalarPresencial()">🚗 Escalar pra presencial</button>
     </div>
 
     <!-- ABERTO: fazer check-in -->
@@ -504,8 +506,8 @@ const PRIORIDADES_INFO = { critica:{label:'Crítica',ordem:0}, alta:{label:'Alta
 function modalidadeDe(c){ return c.modalidade==='remoto' ? 'remoto' : 'presencial'; }
 function chipModalidade(c){
   return modalidadeDe(c)==='remoto'
-    ? '<span class="badge mod-remoto">🎧 Remoto</span>'
-    : '<span class="badge mod-presencial">🚗 Presencial</span>';
+    ? '<span class="badge mod-remoto">🎧 Triagem (remoto)</span>'
+    : '<span class="badge mod-presencial">🚗 Escalado (presencial)</span>';
 }
 function chipPrioridade(c){
   const p = PRIORIDADES_INFO[c.prioridade] ? c.prioridade : null;
@@ -680,6 +682,17 @@ function abrirDetalhe(id){
   const podeConcluirRemoto = ehRemoto && (c.status==='ABERTO' || c.status==='INICIADO') && (c.tecnicoId===ME.id || IS_MASTER || ME.isAdmin);
   document.getElementById('bloco-remoto').classList.toggle('hidden', !podeConcluirRemoto);
   if(podeConcluirRemoto) document.getElementById('r-observacao').value = '';
+
+  // triagem: Master ou time de Suporte (mesmo grupo que atende os chats do
+  // site) decide se esse chamado remoto precisa de visita - independe de
+  // quem esta atribuido ao chamado
+  const podeEscalar = ehRemoto && c.status==='ABERTO' && PODE_ATENDER_CHATS;
+  document.getElementById('bloco-escalar').classList.toggle('hidden', !podeEscalar);
+  if(podeEscalar){
+    document.getElementById('esc-motivo').value = '';
+    carregarResponsaveisEscalar();
+  }
+
   document.getElementById('bloco-iniciar').classList.toggle('hidden', ehRemoto || c.status!=='ABERTO');
   document.getElementById('bloco-concluir').classList.toggle('hidden', ehRemoto || c.status!=='INICIADO');
   document.getElementById('bloco-concluido').classList.toggle('hidden', c.status!=='CONCLUIDO');
@@ -767,6 +780,38 @@ async function salvarDataExecucao(){
     await carregarChamados();
     DETALHE_ATUAL = CHAMADOS.find(x=>x.id===data.id) || data;
   }catch(err){ erroDetalhe(err.message); }
+}
+
+// ---------- triagem: escalar chamado remoto pra presencial ----------
+// mesmo pool de responsaveis usado na abertura direta (Central), filtrado
+// pela unidade do chamado - se a busca falhar, mantem o responsavel atual
+async function carregarResponsaveisEscalar(){
+  const sel = document.getElementById('esc-tecnico');
+  if(!DETALHE_ATUAL) return;
+  sel.innerHTML = '<option value="">manter responsável atual</option>';
+  try{
+    const lista = await fetch('/api/grupos/responsaveis?unidade='+encodeURIComponent(DETALHE_ATUAL.unidade)).then(r=>r.ok?r.json():[]);
+    sel.innerHTML += (lista||[]).map(p=>`<option value="${escapeHtml(p.id)}" data-email="${escapeHtml(p.email||'')}">${escapeHtml(p.username||p.email||p.id)}</option>`).join('');
+  }catch(e){ /* mantem so a opcao de manter o responsavel atual */ }
+}
+async function escalarPresencial(){
+  if(!DETALHE_ATUAL) return;
+  const motivo = document.getElementById('esc-motivo').value.trim();
+  if(!motivo){ erroDetalhe('Descreva por que esse chamado precisa de visita presencial.'); return; }
+  const sel = document.getElementById('esc-tecnico');
+  const opt = sel.options[sel.selectedIndex];
+  const btn = document.getElementById('btn-escalar');
+  btn.disabled = true;
+  try{
+    const resp = await fetch(`/api/chamados/${DETALHE_ATUAL.id}/escalar-presencial`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      motivo, tecnicoId: sel.value || null, tecnicoEmail: sel.value ? (opt?.dataset?.email || null) : null,
+    })});
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao escalar o chamado.');
+    await carregarChamados();
+    fecharDetalhe();
+  }catch(err){ erroDetalhe(err.message); }
+  finally{ btn.disabled = false; }
 }
 
 // ---------- edicao do Master ----------
@@ -1060,20 +1105,7 @@ const BRAVO_UNIDADES_NOMES = {
 };
 const UNIDADES_NOMES = { ...ARCFOOD_UNIDADES, ...BRAVO_UNIDADES_NOMES };
 
-let EH_GESTOR = false;        // Master/Admin: escolhe modalidade e responsavel
-let MODALIDADE_NOVA = 'remoto';
-
-function selecionarModalidade(mod){
-  MODALIDADE_NOVA = mod;
-  document.getElementById('n-mod-remoto').className = mod==='remoto' ? 'ativo-remoto' : '';
-  document.getElementById('n-mod-presencial').className = mod==='presencial' ? 'ativo-presencial' : '';
-  // "ja resolvido" (abrir e ja fechar) e exclusivo do remoto
-  document.getElementById('n-linha-resolvido').classList.toggle('hidden', mod!=='remoto');
-  if(mod!=='remoto'){
-    document.getElementById('n-ja-resolvido').checked = false;
-    document.getElementById('n-bloco-resolucao').classList.add('hidden');
-  }
-}
+let EH_GESTOR = false;        // Master/Admin: escolhe responsavel (modalidade e sempre remota na criação)
 
 async function abrirFormChamado(){
   document.getElementById('msg-novo').classList.add('hidden');
@@ -1082,10 +1114,6 @@ async function abrirFormChamado(){
   document.getElementById('n-resolucao').value = '';
   document.getElementById('n-ja-resolvido').checked = false;
   document.getElementById('n-bloco-resolucao').classList.add('hidden');
-  // suporte nao escolhe modalidade (sempre remoto) - esconde o seletor
-  document.getElementById('n-mod-toggle').style.display = EH_GESTOR ? '' : 'none';
-  document.getElementById('n-mod-label').style.display = EH_GESTOR ? '' : 'none';
-  selecionarModalidade('remoto');
   const unidades = IS_MASTER ? Object.keys(UNIDADES_NOMES) : ((ME.permissions?.unidades||[]).filter(u=>UNIDADES_NOMES[u]).length ? (ME.permissions?.unidades||[]).filter(u=>UNIDADES_NOMES[u]) : Object.keys(UNIDADES_NOMES));
   document.getElementById('n-unidade').innerHTML = unidades.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('');
   document.getElementById('n-bloco-tecnico').classList.toggle('hidden', !EH_GESTOR);
@@ -1121,7 +1149,6 @@ async function criarChamado(){
       unidadeNome: UNIDADES_NOMES[unidade] || unidade,
       titulo: document.getElementById('n-titulo').value,
       descricao: document.getElementById('n-descricao').value,
-      modalidade: MODALIDADE_NOVA,
       prioridade: document.getElementById('n-prioridade').value,
       jaResolvido: document.getElementById('n-ja-resolvido').checked,
       observacaoResolucao: document.getElementById('n-resolucao').value,

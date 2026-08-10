@@ -1,20 +1,27 @@
 // chamadosTI.js
-// Chamado de suporte tecnico (TI). Existem DUAS modalidades:
+// Chamado de suporte tecnico (TI). Modelo profissional de triagem (padrao de
+// service desk): TODO chamado nasce 'remoto' - sem excecao, seja vindo de uma
+// solicitacao aprovada, aberto direto ou convertido de Manutencao. So depois,
+// na triagem remota, o Master ou alguem com a secao "suporte" decide se da
+// pra resolver a distancia ou se precisa escalar pra visita (ver
+// escalarPresencial). Existem duas modalidades:
 //
-// - 'presencial': o tecnico vai ate a loja. Fluxo: ABERTO (aguardando o
-//   tecnico chegar) -> INICIADO (check-in na loja, com itens de "antes") ->
-//   CONCLUIDO (checkout: itens de "depois" + observacao + pecas + assinatura
-//   de quem recebeu na loja).
-// - 'remoto': atuacao a distancia pelo time de Suporte, sem visita. Fluxo:
-//   ABERTO -> CONCLUIDO direto (concluirRemoto: so a observacao do que foi
-//   feito, sem check-in/assinatura). Pode inclusive nascer JA CONCLUIDO
+// - 'remoto': atuacao a distancia pelo time de Suporte, sem visita - e onde
+//   TODO chamado comeca. Fluxo: ABERTO -> CONCLUIDO direto (concluirRemoto:
+//   so a observacao do que foi feito, sem check-in/assinatura) OU escalado
+//   pra 'presencial' (escalarPresencial). Pode inclusive nascer JA CONCLUIDO
 //   (jaResolvido na criacao) - e o registro retroativo de uma atuacao que o
 //   Suporte ja resolveu, pra manter o banco de evidencias alimentado.
+// - 'presencial': o tecnico vai ate a loja - so chega aqui via escalação
+//   (nunca na criacao). Fluxo: ABERTO (aguardando o tecnico chegar) ->
+//   INICIADO (check-in na loja, com itens de "antes") -> CONCLUIDO (checkout:
+//   itens de "depois" + observacao + pecas + assinatura de quem recebeu).
 //
 // Chamados antigos sem o campo `modalidade` sao presenciais (era a unica
-// modalidade que existia). Todo chamado tem `prioridade` + `slaPrazo` (ver
-// prioridades.js). Pode nascer vinculado a uma solicitacao de Suporte de TI
-// (ver solicitacoes.js) aprovada, ou ser aberto direto pelo Master/Suporte.
+// modalidade que existia antes desse modelo). Todo chamado tem `prioridade` +
+// `slaPrazo` (ver prioridades.js). Pode nascer vinculado a uma solicitacao de
+// Suporte de TI (ver solicitacoes.js) aprovada, ou ser aberto direto pelo
+// Master/Suporte.
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
 const prioridades = require('./prioridades');
@@ -58,7 +65,11 @@ async function create({ unidade, unidadeNome, titulo, descricao, tecnicoId, tecn
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!titulo || !String(titulo).trim()) throw new Error('Descreva o chamado.');
   if (!tecnicoId) throw new Error('Escolha o responsável pelo chamado.');
-  const mod = MODALIDADES.includes(modalidade) ? modalidade : 'presencial';
+  // todo chamado NASCE remoto (triagem) - so vira presencial por escalação
+  // (ver escalarPresencial), nunca na criação. O parametro `modalidade`
+  // continua aceito na assinatura só pra não quebrar chamadores antigos, mas
+  // é sempre ignorado aqui.
+  const mod = 'remoto';
   // "abrir e ja fechar" so faz sentido no remoto - presencial exige a visita
   // (check-in/checkout com evidencias e assinatura)
   if (jaResolvido && mod !== 'remoto') throw new Error('Só chamados remotos podem nascer já resolvidos.');
@@ -99,6 +110,10 @@ async function create({ unidade, unidadeNome, titulo, descricao, tecnicoId, tecn
     assinaturaNomeLoja: null,
     assinatura: null,
     resolvidoNaAbertura: !!jaResolvido,
+    // trilha de auditoria da triagem: quem escalou pra presencial, quando e
+    // por que (ver escalarPresencial) - vazio enquanto o chamado nao sai do
+    // remoto
+    escalacoes: [],
     // data de execucao: quando o tecnico (ou Master) diz que a visita/atuacao
     // vai acontecer. O SLA cobre a TRIAGEM (ate o chamado ser atribuido e
     // ganhar essa data); a partir daqui o combinado passa a ser essa data
@@ -225,6 +240,34 @@ async function editarMaster(id, { modalidade, status, prioridade }) {
   return getOne(id);
 }
 
+// TRIAGEM: Master ou alguem com a secao "suporte" decide, olhando um chamado
+// remoto em aberto, que precisa de visita - a UNICA porta pra um chamado
+// virar presencial (fora da edicao livre do Master em editarMaster). Exige
+// motivo (fica no historico) e pode trocar o tecnico de campo responsavel na
+// mesma acao. So sai de remoto+ABERTO - depois de concluido/cancelado, ou se
+// ja foi escalado, o ajuste fino continua sendo via editarMaster.
+async function escalarPresencial(id, { tecnicoId, tecnicoEmail, motivo, autorEmail }) {
+  const atual = await getOne(id);
+  if (!atual) throw new Error('Chamado não encontrado.');
+  if (modalidadeDe(atual) !== 'remoto') throw new Error('Esse chamado não está mais em triagem remota.');
+  if (atual.status !== 'ABERTO') throw new Error('Só dá pra escalar um chamado que ainda está aberto (aguardando triagem).');
+  const motivoLimpo = String(motivo || '').trim();
+  if (!motivoLimpo) throw new Error('Descreva por que esse chamado precisa de visita presencial.');
+  const patch = {
+    modalidade: 'presencial',
+    escalacoes: [...(atual.escalacoes || []), {
+      de: 'remoto', para: 'presencial', motivo: motivoLimpo.slice(0, 500), porEmail: autorEmail || null, em: new Date().toISOString(),
+    }],
+  };
+  if (tecnicoId) {
+    patch.tecnicoId = tecnicoId;
+    patch.tecnicoEmail = tecnicoEmail || null;
+  }
+  await COLLECTION.doc(id).update(patch);
+  chamadosCache.invalidar();
+  return getOne(id);
+}
+
 // data de execucao: o tecnico responsavel (ou Master/Admin) diz quando a
 // visita/atuacao vai acontecer - isso encerra a fase de triagem do SLA
 async function definirDataExecucao(id, { dataExecucao, tecnicoId, ehGestor }) {
@@ -334,6 +377,6 @@ async function reatribuir(id, { tecnicoId, tecnicoEmail }) {
 
 module.exports = {
   STATUSES, MODALIDADES, modalidadeDe, create, listAll, getOne, iniciar, concluir, concluirRemoto, cancelar, reatribuir,
-  garantirTicket, editarMaster, definirDataExecucao, salvarOrcamentoPecas, salvarCobranca, marcarCobrancaEnviada,
+  garantirTicket, editarMaster, escalarPresencial, definirDataExecucao, salvarOrcamentoPecas, salvarCobranca, marcarCobrancaEnviada,
   adicionarEvidencia, removerEvidencia,
 };

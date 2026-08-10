@@ -3679,10 +3679,9 @@ app.patch('/api/solicitacoes/:id/status', auth.requireMasterOrAdmin, async (req,
           unidadeNome: atual.unidadeNome,
           titulo: atual.titulo,
           descricao: atual.observacao,
-          // quem aprova escolhe a modalidade (padrao: presencial, o fluxo
-          // classico de visita); a prioridade herda a da solicitacao se o
-          // aprovador nao escolher outra
-          modalidade: req.body.modalidade,
+          // todo chamado nasce remoto (triagem) - ninguem escolhe modalidade
+          // na aprovacao; a prioridade herda a da solicitacao se o aprovador
+          // nao escolher outra (ver chamadosTI.escalarPresencial pra depois)
           prioridade: req.body.prioridade || atual.prioridade,
           tecnicoId,
           tecnicoEmail,
@@ -4139,21 +4138,21 @@ app.get('/api/chamados', requireAnySection('tecnico', 'suporte'), async (req, re
   res.json(todos.filter((c) => c.tecnicoId === req.user.id));
 });
 
-// abertura direta de chamado. Master/Admin abre qualquer modalidade e escolhe
-// o responsavel; o time de Suporte abre so REMOTO e sempre no proprio nome -
-// o objetivo e nunca perder registro de atuacao ("abrir e ja fechar" via
-// jaResolvido + observacaoResolucao)
+// abertura direta de chamado - SEMPRE nasce remoto (triagem), sem excecao;
+// Master/Admin escolhe o responsavel, o time de Suporte abre sempre no
+// proprio nome - o objetivo e nunca perder registro de atuacao ("abrir e ja
+// fechar" via jaResolvido + observacaoResolucao). Escalar pra presencial e um
+// passo separado, depois da triagem (ver POST /api/chamados/:id/escalar-presencial)
 app.post('/api/chamados', auth.requireAuth, async (req, res) => {
   try {
     if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
-    const { unidade, unidadeNome, titulo, descricao, tecnicoId, tecnicoEmail, modalidade, prioridade, jaResolvido, observacaoResolucao } = req.body;
+    const { unidade, unidadeNome, titulo, descricao, tecnicoId, tecnicoEmail, prioridade, jaResolvido, observacaoResolucao } = req.body;
     const ehGestor = req.isMaster || req.isAdmin;
     const chamado = await chamadosTI.create({
       unidade,
       unidadeNome,
       titulo,
       descricao,
-      modalidade: ehGestor ? modalidade : 'remoto',
       prioridade,
       jaResolvido,
       observacaoResolucao,
@@ -4982,6 +4981,26 @@ app.patch('/api/chamados/:id/editar', auth.requireMaster, async (req, res) => {
   }
 });
 
+// TRIAGEM: Master OU alguem com a secao "suporte" (mesmo criterio de quem
+// atende os chamados remotos/chats do site, ver ehTimeSuporte) decide que um
+// chamado remoto precisa de visita e escala pra presencial - unica porta pra
+// essa transicao fora da edicao livre do Master (editarMaster, acima)
+app.post('/api/chamados/:id/escalar-presencial', auth.requireAuth, async (req, res) => {
+  try {
+    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Só o Master ou o time de Suporte fazem a triagem.' });
+    const chamado = await chamadosTI.escalarPresencial(req.params.id, {
+      tecnicoId: req.body.tecnicoId || null,
+      tecnicoEmail: req.body.tecnicoEmail || null,
+      motivo: req.body.motivo,
+      autorEmail: req.user.email,
+    });
+    broadcast('chamado-atualizado', { id: chamado.id }, 'tecnico');
+    res.json(chamado);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // data de execucao: o tecnico responsavel (ou Master/Admin) diz quando vai
 // atuar - o SLA cobre so a TRIAGEM (atribuir + marcar essa data); a partir
 // daqui o combinado passa a ser a data marcada
@@ -5191,7 +5210,6 @@ app.post('/api/chamados-manutencao/:id/converter-para-ti', auth.requireMaster, a
       tecnicoEmail: req.body.tecnicoEmail,
       solicitacaoId: chamado.solicitacaoId || null,
       criadoPorEmail: req.user.email,
-      modalidade: req.body.modalidade === 'remoto' ? 'remoto' : 'presencial',
       prioridade: chamado.prioridade,
       numeroTicket: chamado.numeroTicket != null ? chamado.numeroTicket : null,
     });
