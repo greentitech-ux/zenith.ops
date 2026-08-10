@@ -347,6 +347,7 @@ async function boot(){
   document.getElementById('nav-solicitacoes').classList.remove('hidden');
   document.getElementById('nav-historico').classList.remove('hidden');
   document.getElementById('nav-tecnico').classList.remove('hidden');
+  document.getElementById('nav-beniboy').classList.remove('hidden');
   if(!(IS_MASTER || IS_ADMIN || secoes.includes('central-solucoes'))){
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;

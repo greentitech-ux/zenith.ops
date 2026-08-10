@@ -2157,7 +2157,7 @@ async function boot(){
   SOU_OPERADOR_PONTA = !IS_MASTER && !ME.isAdmin;
 
   // menu sempre visivel (politica do app) - so administracao continua restrita
-  ['nav-monitor','nav-lancamento','nav-fechamentos','nav-entregas','nav-entrega-lancamento','nav-cofre','nav-relatorios','nav-ifood','nav-parque','nav-mensalistas','nav-grupo-saltiverso','nav-solicitacoes','nav-historico','nav-tecnico','nav-manutencao','nav-inventario','nav-parque-checkin','nav-festas'].forEach(id=>{
+  ['nav-monitor','nav-lancamento','nav-fechamentos','nav-entregas','nav-entrega-lancamento','nav-cofre','nav-relatorios','nav-ifood','nav-parque','nav-mensalistas','nav-grupo-saltiverso','nav-solicitacoes','nav-historico','nav-tecnico','nav-manutencao','nav-inventario','nav-parque-checkin','nav-festas','nav-central-solucoes','nav-beniboy'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.classList.remove('hidden');
   });
