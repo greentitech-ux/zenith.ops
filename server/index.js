@@ -238,7 +238,13 @@ app.post('/api/auth/login', async (req, res) => {
 // da Adyen, por isso registradas antes do portao de autenticacao abaixo.
 // O pedido cai na mesma fila que a loja ja usa (refunds.js), com origem
 // "cliente" - o Master avalia em Central de Solicitações ou no Monitor. ----------
-app.get('/api/meta/unidades-publico', async (req, res) => {
+// lista {codigo, nome} pro formulario publico de estorno (estorno-cliente.html)
+// escolher a loja - um codigo por NOME (prefere o codigo do Fechamento
+// quando o mesmo nome aparece em mais de um espaco de codigo, ver
+// classificarUnidade). Extraida da rota pra tambem ser usada pelo resolver
+// do Beniboy (resolverUnidadePublica, ver acionarBeniboy) - mesma fonte,
+// nunca duas listas divergentes.
+async function listaUnidadesPublicas() {
   const mapa = await construirUnidadesMapa();
   const porNome = new Map();
   Object.entries(mapa).forEach(([codigo, nome]) => {
@@ -248,11 +254,43 @@ app.get('/api/meta/unidades-publico', async (req, res) => {
       porNome.set(nome, { codigo, nome, secao });
     }
   });
-  const lista = [...porNome.values()]
+  return [...porNome.values()]
     .map(({ codigo, nome }) => ({ codigo, nome }))
     .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
-  res.json(lista);
+}
+
+app.get('/api/meta/unidades-publico', async (req, res) => {
+  res.json(await listaUnidadesPublicas());
 });
+
+// dominio publico do app - usado pra montar links completos (clicaveis fora
+// do Zenith, ex: mandados pelo Beniboy no chat pro colaborador repassar pro
+// cliente por WhatsApp). Mesmo padrao ja usado em relatorioMV.js.
+const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
+
+// acha a loja que mais bate com o que o colaborador escreveu no chat (nome
+// solto, com ou sem acento/maiusculas - ex: "dom bessa", "Bessa") - usado
+// pelo Beniboy pra montar o link publico de estorno sem exigir que a pessoa
+// saiba o nome EXATO cadastrado. Match exato (sem acento) primeiro; senao,
+// junta os nomes que CONTEM o termo digitado - 1 so resultado -> acha, mais
+// de 1 -> pede pra pessoa escolher entre eles (nunca adivinha errado),
+// nenhum -> null.
+function normalizarBusca(s) {
+  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
+}
+async function resolverUnidadePublica(termo) {
+  const alvo = normalizarBusca(termo);
+  if (!alvo) return { encontrada: null, candidatas: [] };
+  const lista = await listaUnidadesPublicas();
+  const exata = lista.find((u) => normalizarBusca(u.nome) === alvo);
+  if (exata) return { encontrada: exata, candidatas: [] };
+  const candidatas = lista.filter((u) => normalizarBusca(u.nome).includes(alvo));
+  if (candidatas.length === 1) return { encontrada: candidatas[0], candidatas: [] };
+  return { encontrada: null, candidatas };
+}
+function linkEstornoCliente(codigo) {
+  return `${APP_BASE_URL}/estorno-cliente.html?unidade=${encodeURIComponent(codigo)}`;
+}
 
 app.post('/api/refund-requests/publico', upload.array('anexos', 5), async (req, res) => {
   try {
@@ -4680,7 +4718,7 @@ async function acionarBeniboy(chatId) {
   try {
     const mapa = await construirUnidadesMapa();
     const unidades = [...new Set(Object.values(mapa))].sort();
-    const r = await suporteBot.responderConversa(chatId, { unidades, resolverUnidadesPorIdPulse });
+    const r = await suporteBot.responderConversa(chatId, { unidades, resolverUnidadesPorIdPulse, resolverUnidadePublica, linkEstornoCliente });
     if (!r) return;
     broadcast('suporte-chat', { id: chatId }, 'suporte');
     for (const t of r.tickets || []) {

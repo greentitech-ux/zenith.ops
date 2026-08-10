@@ -69,6 +69,7 @@ O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, 
 
 ## O que você sabe do Zenith
 - Login bloqueado (3 senhas erradas seguidas): SEMPRE use desbloquear_login pra resolver na hora, nunca chame um atendente pra isso - vale tanto pro login principal do Zenith quanto pro login de operador do Abastecimento do Carrinho (balcão, 4 letras + 4 números). A pessoa volta a entrar com a MESMA senha de sempre; só se o mesmo acesso travar de novo é que entra uma senha nova (ver ferramenta abaixo).
+- Estorno pedido por um CLIENTE FINAL da loja (não por quem fala com você): quem fala com você é sempre um funcionário/parceiro pedindo em nome do cliente. NÃO abra ticket de estorno você mesmo (não dá, exige login com acesso ao Monitor) - em vez disso, pergunte em qual loja o cliente comprou e use gerar_link_estorno_cliente pra gerar o link público. A pessoa encaminha esse link pro cliente preencher sozinho (com o comprovante) - um atendente humano decide dali.
 - Acessos/permissões por tela (Fechamentos, Entregas, Estoque, Central, Chamados, Parque...) são liberados pelo Master na tela Usuários.
 - Central de Solicitações: pedidos de compra, manutenção, suporte de TI, pagamento (boleto/despesa) e nota fiscal viram tickets numerados (#10000 em diante) que o Master aprova ou rejeita. Depois de aprovado, o andamento aparece no ticket.
 - Fechamento de caixa: lançado em Lançar fechamento; erro em fechamento já enviado se corrige pelo botão "Pedir correção" no Histórico da Central (só 1 correção pendente por lançamento).
@@ -135,6 +136,17 @@ const TOOLS_BASE = [
       required: ['username'],
     },
   },
+  {
+    name: 'gerar_link_estorno_cliente',
+    description: 'Gera o link público (sem login) pro CLIENTE FINAL de uma loja preencher o próprio pedido de estorno, com foto do comprovante - o Master avalia depois. Use quando quem fala com você (funcionário/parceiro da loja) pede ajuda com um estorno de um cliente. Peça o nome da loja onde o cliente comprou ANTES de chamar. Se a ferramenta devolver uma lista de lojas parecidas, pergunte qual delas é a certa e chame de novo com o nome exato.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        unidade: { type: 'string', description: 'Nome da loja onde o cliente fez o pedido, do jeito que a pessoa falou (ex: "Dom Bessa", "Caruaru").' },
+      },
+      required: ['unidade'],
+    },
+  },
 ];
 
 // so entra na lista de ferramentas quando chat.logado.temMonitor (ver
@@ -178,7 +190,7 @@ function montarMensagens(chat) {
   return turnos;
 }
 
-async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdPulse) {
+async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdPulse, resolverUnidadePublica, linkEstornoCliente) {
   if (nome === 'criar_ticket') {
     const tipo = TIPOS_TICKET.includes(input.tipo) ? input.tipo : null;
     if (!tipo) return 'Erro: tipo inválido.';
@@ -277,6 +289,21 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     await abastecimentoCarrinho.desbloquearOperador(operador.id, { novaSenha: novaSenhaOperador });
     return `Esse login de operador já tinha travado antes. Resetei a senha - a nova senha de "${operador.usuario}" é "${novaSenhaOperador}" (4 números). Informe essa senha pra pessoa digitar no login do Abastecimento do Carrinho.`;
   }
+  if (nome === 'gerar_link_estorno_cliente') {
+    if (!resolverUnidadePublica || !linkEstornoCliente) return 'Sem acesso a essa ferramenta agora - chame um atendente.';
+    const termo = String(input.unidade || '').trim();
+    if (!termo) return 'Peça o nome da loja onde o cliente fez o pedido.';
+    const { encontrada, candidatas } = await resolverUnidadePublica(termo);
+    if (!encontrada && !candidatas.length) {
+      return `Não achei nenhuma loja parecida com "${termo}". Peça pra pessoa confirmar o nome certo (ex: "Dom Bessa", "Caruaru") ou chame um atendente.`;
+    }
+    if (!encontrada) {
+      const nomes = candidatas.slice(0, 8).map((u) => u.nome).join(', ');
+      return `Achei mais de uma loja parecida com "${termo}": ${nomes}. Pergunte qual delas é a certa e chame essa ferramenta de novo com o nome exato.`;
+    }
+    const link = linkEstornoCliente(encontrada.codigo);
+    return `Link gerado pra loja "${encontrada.nome}": ${link}\nInstrua a pessoa a encaminhar esse link pro CLIENTE (WhatsApp etc.) - o cliente preenche os dados do pedido e anexa o comprovante sozinho, sem precisar de acesso ao Zenith. Um atendente humano confere e decide dali. Não invente prazo nem promessa de aprovação.`;
+  }
   if (nome === 'consultar_pedido') {
     // defesa em profundidade: mesmo que o modelo tentasse chamar essa tool
     // fora do previsto, ela so entra em TOOLS quando chat.logado.temMonitor -
@@ -327,7 +354,7 @@ const emAndamento = new Set();
 // Gera (e grava) a resposta do bot pra conversa. Retorna null quando o bot
 // nao deve/nao consegue falar; senao { chat, tickets, chamouAtendente }.
 // `unidades` = nomes validos pra abertura de ticket (vem do index.js).
-async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdPulse } = {}) {
+async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdPulse, resolverUnidadePublica, linkEstornoCliente } = {}) {
   if (!ativo() || emAndamento.has(chatId)) return null;
   emAndamento.add(chatId);
   try {
@@ -356,7 +383,7 @@ async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdP
         if (bloco.type !== 'tool_use') continue;
         let saida;
         try {
-          saida = await executarTool(bloco.name, bloco.input || {}, chat, resultado, resolverUnidadesPorIdPulse);
+          saida = await executarTool(bloco.name, bloco.input || {}, chat, resultado, resolverUnidadesPorIdPulse, resolverUnidadePublica, linkEstornoCliente);
         } catch (err) {
           saida = `Erro ao executar: ${err.message}`;
         }
