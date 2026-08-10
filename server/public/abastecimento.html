@@ -24,10 +24,10 @@
   }
   *{box-sizing:border-box;min-width:0;}
   html{overflow-x:hidden;}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:680px;margin-inline:auto;overflow-x:hidden;}
-  h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:680px;margin-inline:auto;overflow-x:clip;overflow-y:clip;}
+  h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   h2{font-size:13.5px;font-weight:700;margin:0 0 4px;}
-  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   /* cabecalho fixo: sticky mantem o espaco dele no fluxo da pagina (nada
      fica escondido por tras) e trava no topo ao rolar. As margens negativas
      compensam o padding do body pra faixa ir de ponta a ponta da coluna */

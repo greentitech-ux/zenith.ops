@@ -23,10 +23,10 @@
   *{box-sizing:border-box;}
   html{overflow-x:hidden;}
   body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;}
-  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:16px;} h1{font-size:17px;} }
-  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;}
-  .eyebrow{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;}
-  header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:22px;flex-wrap:wrap;gap:12px;}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .eyebrow{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:16px;} h1{font-size:17px;} .eyebrow{font-size:9px;} }
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 22px;padding:28px 32px;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;}
   a.back,button.back{font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
   a.back.active{color:var(--bg);background:var(--accent);border-color:var(--accent);font-weight:600;}
@@ -90,9 +90,9 @@
 <body>
 
 <header>
-  <div style="display:flex;align-items:flex-start;gap:10px;">
+  <div style="display:flex;align-items:flex-start;gap:10px;min-width:0;">
     <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
-    <div>
+    <div style="min-width:0;">
       <div class="eyebrow">iFood · Solutions Ti Tech</div>
       <h1>Vendas iFood</h1>
       <div class="sub" id="header-info">carregando...</div>

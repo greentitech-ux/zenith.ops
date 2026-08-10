@@ -22,11 +22,11 @@
   }
   *{box-sizing:border-box;}
   html{overflow-x:hidden;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 22px;padding:28px 32px 16px;border-bottom:1px solid var(--line);}
   body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;}
-  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:16px;} h1{font-size:17px;} }
-  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;}
-  .eyebrow{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;}
-  header{margin-bottom:22px;padding-bottom:16px;border-bottom:1px solid var(--line);}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .eyebrow{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:16px;} h1{font-size:17px;} .eyebrow{font-size:9px;} }
   .header-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;}
   .header-nav{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;}
   .nav-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
@@ -149,19 +149,19 @@
 
 <header>
   <div class="header-top">
-    <div style="display:flex;align-items:flex-start;gap:10px;">
+    <div style="display:flex;align-items:flex-start;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
-      <div>
+      <div style="min-width:0;">
         <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
         <h1>Usuários e permissões</h1>
       </div>
     </div>
-  </div>
-  <div class="header-nav">
-    <div class="nav-actions">
-      <button class="btn-notif" onclick="location.reload()" title="Atualizar página">🔄</button>
-      <div class="nav-divider"></div>
-      <button class="btn-notif btn-sair" onclick="logout()" title="Sair" style="cursor:pointer;">🚪</button>
+    <div class="header-nav">
+      <div class="nav-actions">
+        <button class="btn-notif" onclick="location.reload()" title="Atualizar página">🔄</button>
+        <div class="nav-divider"></div>
+        <button class="btn-notif btn-sair" onclick="logout()" title="Sair" style="cursor:pointer;">🚪</button>
+      </div>
     </div>
   </div>
 </header>
