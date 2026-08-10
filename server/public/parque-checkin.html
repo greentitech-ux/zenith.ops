@@ -447,6 +447,11 @@ const PARQUE_UNIDADES_NOMES = { 'Saltiverso Patteo': 'Saltiverso Patteo' };
 // "➕ Adicionar tempo" durante a vigencia (mesma lista de buckets)
 const TEMPOS_VALIDOS = [30,60,90,120];
 const PRECO_MEIA = 25;
+// PCD30/PCD60: preco fixo por crianca (30/60min), fora da tabela normal.
+// PCD-cortesia (botao "5%CP"): entrada gratis de 60min, limitada a 2
+// criancas por hora-relogio por unidade (o backend recusa a 3a e avisa
+// Gerente+Master - ver criar() em parque.js)
+const PRECO_PCD = 32;
 
 let ME = null;
 let IS_MASTER = false;
@@ -454,6 +459,7 @@ let IS_ADMIN = false;
 let UNIDADES_NOMES = { ...PARQUE_UNIDADES_NOMES };
 let CHECKINS = [];
 let TEMPO_SELECIONADO = 60;
+let CATEGORIA_SELECIONADA = null; // null | 'pcd30' | 'pcd60' | 'pcd-cortesia'
 let AC_ATIVO = false;
 let ULTIMO_CRIADO_ID = null;
 let CREDITO_ATUAL = null; // {minutosDisponiveis,...} do CPF preenchido, se houver
@@ -484,10 +490,26 @@ function horaCurtaBrasilia(d){ return `${String(d.getHours()).padStart(2,'0')}:$
 function valorPorTempo(t){ return Math.floor(t/60)*50 + (t%60>=30?40:0); }
 function fmtReal(v){ return 'R$ ' + Number(v||0).toFixed(2).replace('.', ','); }
 
+// valor por crianca considerando a categoria PCD selecionada (mesma regra
+// do servidor - ver valorUnitarioPcd em parque.js)
+function valorUnitarioAtual(){
+  if(CATEGORIA_SELECIONADA==='pcd-cortesia') return 0;
+  if(CATEGORIA_SELECIONADA==='pcd30' || CATEGORIA_SELECIONADA==='pcd60') return PRECO_PCD;
+  return valorPorTempo(TEMPO_SELECIONADO);
+}
+
 function renderTempos(){
-  document.getElementById('tempos').innerHTML = TEMPOS_VALIDOS.map(t=>
-    `<button type="button" class="toggle-btn ${t===TEMPO_SELECIONADO?'ativo':''}" data-tempo="${t}" onclick="selecionarTempo(${t})">${t}min · R$${valorPorTempo(t)}</button>`
+  const normais = TEMPOS_VALIDOS.map(t=>
+    `<button type="button" class="toggle-btn ${!CATEGORIA_SELECIONADA && t===TEMPO_SELECIONADO?'ativo':''}" data-tempo="${t}" onclick="selecionarTempo(${t})">${t}min · R$${valorPorTempo(t)}</button>`
   ).join('');
+  const pcd = [
+    { cat:'pcd30', label:`PCD30 · R$${PRECO_PCD}` },
+    { cat:'pcd60', label:`PCD60 · R$${PRECO_PCD}` },
+    { cat:'pcd-cortesia', label:'5%CP' },
+  ].map(p=>
+    `<button type="button" class="toggle-btn ${CATEGORIA_SELECIONADA===p.cat?'ativo':''}" data-categoria="${p.cat}" onclick="selecionarCategoriaPcd('${p.cat}')">${p.label}</button>`
+  ).join('');
+  document.getElementById('tempos').innerHTML = normais + pcd;
 }
 
 // horario previsto sempre em janelas de 30 em 30 minutos (10:00/10:30/
@@ -509,7 +531,13 @@ function preencherSelectSlots(id, valor){
   sel.innerHTML = slots30().map(s=>`<option value="${s}">${s}</option>`).join('');
   if(valor) sel.value = slots30().includes(valor) ? valor : proximoSlot30();
 }
-function selecionarTempo(t){ TEMPO_SELECIONADO = t; renderTempos(); atualizarPreviewValor(); }
+function selecionarTempo(t){ TEMPO_SELECIONADO = t; CATEGORIA_SELECIONADA = null; renderTempos(); atualizarPreviewValor(); }
+function selecionarCategoriaPcd(cat){
+  CATEGORIA_SELECIONADA = cat;
+  TEMPO_SELECIONADO = (cat==='pcd30') ? 30 : 60;
+  renderTempos();
+  atualizarPreviewValor();
+}
 
 // valor da entrada = tabela do tempo x quantidade de criancas (pulseiras)
 // + meias: R$25 por crianca com a meia marcada (padrao) + pares extras.
@@ -521,13 +549,14 @@ function contarMeias(){
 function atualizarPreviewValor(){
   const n = [...document.querySelectorAll('#lista-criancas .crianca-nome')].filter(i=>i.value.trim()).length;
   const metodo = document.getElementById('f-metodo').value;
-  const unit = valorPorTempo(TEMPO_SELECIONADO);
+  const gratis = metodo==='cortesia' || CATEGORIA_SELECIONADA==='pcd-cortesia';
+  const unit = valorUnitarioAtual();
   const meias = contarMeias() + Math.max(0, num(document.getElementById('f-meias-extras').value));
-  const valorMeias = metodo==='cortesia' ? 0 : PRECO_MEIA * meias;
-  const total = metodo==='cortesia' ? 0 : unit * n + valorMeias;
+  const valorMeias = gratis ? 0 : PRECO_MEIA * meias;
+  const total = gratis ? 0 : unit * n + valorMeias;
   document.getElementById('preview-meias').textContent = `${meias} par(es) · ${fmtReal(valorMeias)}`;
   document.getElementById('valor-detalhe').textContent =
-    metodo==='cortesia' ? `cortesia · ${n} criança(s)` : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min) + meias`;
+    gratis ? `cortesia · ${n} criança(s)` : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min) + meias`;
   document.getElementById('preview-valor').textContent = fmtReal(total);
 }
 document.getElementById('f-metodo').addEventListener('change', atualizarPreviewValor);
@@ -1056,6 +1085,7 @@ function resetarForm(){
   preencherSelectSlots('f-horario-previsto', proximoSlot30());
   document.getElementById('lista-criancas').innerHTML = '';
   TEMPO_SELECIONADO = 60;
+  CATEGORIA_SELECIONADA = null;
   renderTempos();
   setAC(false);
   atualizarPreviewPulseiras();
@@ -1100,6 +1130,7 @@ document.getElementById('form-checkin').addEventListener('submit', async (ev)=>{
       },
       dataUtilizacao: document.getElementById('f-data').value,
       tempoMinutos: TEMPO_SELECIONADO,
+      categoriaTempo: CATEGORIA_SELECIONADA,
       horarioPrevisto: document.getElementById('f-horario-previsto').value,
       observacao: document.getElementById('f-observacao').value,
       adultoCortesia: AC_ATIVO,

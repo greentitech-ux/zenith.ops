@@ -235,7 +235,40 @@ async function notifyUsuario(userId, title, body, tag, url) {
   }
 }
 
+// PCD cortesia do parque bateu o limite de 2 criancas por hora-relogio (ver
+// criar() em parque.js): aviso SILENCIOSO, sem som/alarme especial - so pro
+// Master e pra Gerente DA UNIDADE onde aconteceu (precisa do campo `cargo`
+// no meta da inscricao - ver POST /api/push/subscribe em index.js)
+function podeReceberPcdCortesia(sub, unidade) {
+  const meta = sub.meta;
+  if (!meta) return false;
+  if (meta.isMaster) return true;
+  return meta.cargo === 'gerente' && (meta.unidades || []).includes(unidade);
+}
+async function notifyParquePcdCortesiaLimite({ unidade, unidadeNome, horaBucket, dataUtilizacao }) {
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify({
+    title: 'PCD cortesia · limite do horário atingido',
+    body: `${unidadeNome || unidade} · ${horaBucket}:00–${horaBucket}:59 · já foram usadas as 2 vagas de cortesia PCD.`,
+    tag: `parque-pcd-cortesia-${unidade}-${dataUtilizacao}-${horaBucket}`,
+    url: '/parque-checkin.html',
+  });
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberPcdCortesia(sub, unidade)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (PCD cortesia):', err.message);
+      }
+    }
+  }
+}
+
 module.exports = {
   addSubscription, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
-  notifyBeniboyEscalonamento, notifyUsuario, PUBLIC_KEY,
+  notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, PUBLIC_KEY,
 };

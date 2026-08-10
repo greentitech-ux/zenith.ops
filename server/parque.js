@@ -53,6 +53,26 @@ function sanitizarMetodoPagamento(m) {
   return METODOS_PAGAMENTO.includes(m) ? m : null;
 }
 
+// ---------- PCD: categoria de tempo/preco a parte da tabela normal ----------
+// pcd30/pcd60 cobram R$32 fixo por crianca (30/60min), independente da
+// tabela normal e da forma de pagamento. pcd-cortesia e entrada gratuita de
+// 60min, mas NAO passa pelo fluxo pesado de aprovacao Gerente/Master usado
+// pela cortesia normal (metodoPagamento==='cortesia') - e uma trava leve,
+// automatica: no maximo 2 criancas por hora-relogio (ex: 14:00-14:59) por
+// unidade. Na 3a tentativa a venda e recusada e dispara um aviso SILENCIOSO
+// (sem alarme/som) so pra Gerente da unidade + Master (ver push.js)
+const CATEGORIAS_PCD = ['pcd30', 'pcd60', 'pcd-cortesia'];
+const PRECO_PCD = 32;
+const PCD_CORTESIA_LIMITE_HORA = 2;
+function tempoDaCategoriaPcd(categoria) {
+  if (categoria === 'pcd30') return 30;
+  if (categoria === 'pcd60' || categoria === 'pcd-cortesia') return 60;
+  return null;
+}
+function valorUnitarioPcd(categoria) {
+  return categoria === 'pcd-cortesia' ? 0 : PRECO_PCD;
+}
+
 // ---------- cortesia: alcada dupla com escalonamento ----------
 // Cortesia e renuncia de receita, entao nunca passa sozinha: nasce como um
 // card PENDENTE com justificativa obrigatoria e segue o fluxo:
@@ -248,9 +268,11 @@ async function criar({
   unidade, unidadeNome, colaboradorId, colaboradorNome,
   responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto,
   observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras,
-  metodoPagamento, meiasExtras, motivoCortesia, criadoPorId, criadoPorEmail,
+  metodoPagamento, meiasExtras, motivoCortesia, categoriaTempo, criadoPorId, criadoPorEmail,
 }) {
-  const { tempo, criancasOk } = validarPayload({ unidade, responsavel, dataUtilizacao, tempoMinutos, criancas });
+  const categoriaPcd = CATEGORIAS_PCD.includes(categoriaTempo) ? categoriaTempo : null;
+  const tempoParaValidar = categoriaPcd ? tempoDaCategoriaPcd(categoriaPcd) : tempoMinutos;
+  const { tempo, criancasOk } = validarPayload({ unidade, responsavel, dataUtilizacao, tempoMinutos: tempoParaValidar, criancas });
   // cortesia so nasce com justificativa - e o que alimenta o card de
   // aprovacao (Gerente/Master) e a trilha de auditoria
   const ehCortesia = sanitizarMetodoPagamento(metodoPagamento) === 'cortesia';
@@ -271,6 +293,25 @@ async function criar({
   // normalmente. Se ninguem fizer o check-in ate esse horario, o sistema
   // inicia sozinho NESSE horario e avisa a equipe (ver rodarAutoCheckins)
   const previsto = horarioPrevisto ? validarHorarioPrevisto(horarioPrevisto) : null;
+
+  // PCD cortesia: no maximo 2 criancas por hora-relogio, por unidade - nao
+  // bloqueia via card de aprovacao, so recusa a venda e avisa Gerente+Master
+  if (categoriaPcd === 'pcd-cortesia') {
+    if (!previsto) throw new Error('Informe o horário previsto de entrada para aplicar a cortesia PCD.');
+    const horaBucket = previsto.slice(0, 2);
+    const existentes = await listAll();
+    const usadosNaHora = existentes
+      .filter((c) => c.unidade === unidade && c.dataUtilizacao === dataUtilizacao
+        && c.categoriaTempo === 'pcd-cortesia' && String(c.horarioPrevisto || '').slice(0, 2) === horaBucket)
+      .reduce((soma, c) => soma + (c.criancas || []).length, 0);
+    if (usadosNaHora + criancasOk.length > PCD_CORTESIA_LIMITE_HORA) {
+      require('./push').notifyParquePcdCortesiaLimite({
+        unidade, unidadeNome: unidadeNome || unidade, horaBucket, dataUtilizacao,
+      }).catch(() => {});
+      throw new Error(`As ${PCD_CORTESIA_LIMITE_HORA} vagas de cortesia PCD desse horário (${horaBucket}:00–${horaBucket}:59) já foram usadas.`);
+    }
+  }
+
   const ref = COLLECTION.doc();
   const registro = {
     id: ref.id,
@@ -307,12 +348,18 @@ async function criar({
     // optante + pares extras) + forma de pagamento - 'cortesia' registra a
     // entrada com valor zero
     metodoPagamento: sanitizarMetodoPagamento(metodoPagamento),
-    valorPulseira: valorPorTempo(tempo),
+    // categoriaTempo: pcd30/pcd60/pcd-cortesia (ver bloco PCD acima) - override
+    // de preco independente do metodoPagamento escolhido; null = tabela normal
+    categoriaTempo: categoriaPcd,
+    valorPulseira: categoriaPcd ? valorUnitarioPcd(categoriaPcd) : valorPorTempo(tempo),
     meiasExtras: Math.max(0, Math.min(30, num(meiasExtras))),
-    valorMeias: valorMeias(criancasOk, Math.max(0, Math.min(30, num(meiasExtras)))),
-    valor: sanitizarMetodoPagamento(metodoPagamento) === 'cortesia'
+    valorMeias: categoriaPcd === 'pcd-cortesia' ? 0 : valorMeias(criancasOk, Math.max(0, Math.min(30, num(meiasExtras)))),
+    valor: categoriaPcd === 'pcd-cortesia'
       ? 0
-      : valorPorTempo(tempo) * criancasOk.length + valorMeias(criancasOk, Math.max(0, Math.min(30, num(meiasExtras)))),
+      : sanitizarMetodoPagamento(metodoPagamento) === 'cortesia'
+        ? 0
+        : (categoriaPcd ? valorUnitarioPcd(categoriaPcd) : valorPorTempo(tempo)) * criancasOk.length
+          + valorMeias(criancasOk, Math.max(0, Math.min(30, num(meiasExtras)))),
     // tempo comprado DEPOIS da entrada, durante a vigencia (ver
     // adicionarTempo) - nao muda o bucket contratado, soma por cima
     minutosAdicionados: 0,
@@ -887,7 +934,7 @@ async function buscarPorCpf(cpf) {
 }
 
 module.exports = {
-  TEMPOS_VALIDOS, METODOS_PAGAMENTO, PRECO_MEIA, valorPorTempo, valorDoCheckin,
+  TEMPOS_VALIDOS, METODOS_PAGAMENTO, PRECO_MEIA, PRECO_PCD, valorPorTempo, valorDoCheckin,
   criar, checkin, listAll, listByUnidades, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
   adicionarTempo, relancar, visitaHojePorCpf,
   decidirCortesia, encerrarCortesia, ehAdminCortesia,

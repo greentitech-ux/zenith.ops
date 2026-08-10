@@ -1401,6 +1401,7 @@ app.post('/api/push/subscribe', async (req, res) => {
     isAdmin: req.isAdmin,
     unidades: req.isMaster ? null : (req.permissions.unidades || []),
     sections: req.isMaster ? null : (req.permissions.sections || []),
+    cargo: (req.user && req.user.cargo) || null,
   });
   res.json({ ok: true });
 });
@@ -2651,7 +2652,7 @@ app.get('/api/inventario/relatorio.:formato(csv|pdf)', requireSection('inventari
 // padrao entregas/entregas-lancamento) + uma secao de festas ----------
 app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, res) => {
   try {
-    const { unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, usarCreditoMin, metodoPagamento, meiasExtras, motivoCortesia } = req.body;
+    const { unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, usarCreditoMin, metodoPagamento, meiasExtras, motivoCortesia, categoriaTempo } = req.body;
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
@@ -2663,7 +2664,7 @@ app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, r
       minutosExtras = await parque.usarCredito(responsavel?.cpf, usarCreditoMin);
     }
     const registro = await parque.criar({
-      unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras, metodoPagamento, meiasExtras, motivoCortesia,
+      unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras, metodoPagamento, meiasExtras, motivoCortesia, categoriaTempo,
       colaboradorId: req.user.id, colaboradorNome: req.user.email,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
     });
