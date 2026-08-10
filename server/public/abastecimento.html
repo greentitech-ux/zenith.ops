@@ -493,7 +493,7 @@
     <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharOperadores()">✕</span>
     <div class="sheet">
       <h3>👥 Operadores (login local)</h3>
-      <div class="sub">usuário de 4 letras + senha de 4 números · papel define quem PEDE e quem ENVIA (o próprio operador troca na hora do lançamento, com a senha dele) · 3 senhas erradas bloqueiam e geram um ticket — só o Master desbloqueia (mantendo ou trocando a senha), ativa/desativa e remove</div>
+      <div class="sub">usuário de 4 letras + senha de 4 números · papel define quem PEDE e quem ENVIA (o próprio operador troca na hora do lançamento, com a senha dele) · 3 senhas erradas bloqueiam e geram um ticket — só o Master desbloqueia (mantendo ou trocando a senha), troca a senha a qualquer momento (🔒 senha), ativa/desativa e remove</div>
       <div id="op-lista"></div>
       <label style="margin-top:16px;">Cadastrar operador</label>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
@@ -1573,7 +1573,8 @@ function renderOperadores(){
           ? `<button type="button" class="cat-toggle off" onclick="desbloquearOperador('${o.id}')">🔓 desbloquear</button>`
           : '<span class="badge" style="background:var(--bad-dim);color:var(--bad);">bloqueado</span>')
         : (IS_MASTER
-          ? `<button type="button" class="cat-toggle ${o.ativo===false?'off':'on'}" onclick="salvarOperador('${o.id}', { ativo: ${o.ativo===false} })">${o.ativo===false?'inativo':'ativo'}</button>`
+          ? `<button type="button" class="cat-toggle ${o.ativo===false?'off':'on'}" onclick="salvarOperador('${o.id}', { ativo: ${o.ativo===false} })">${o.ativo===false?'inativo':'ativo'}</button>
+             <button type="button" class="cat-toggle off" title="trocar a senha desse operador" onclick="trocarSenhaOperador('${o.id}')">🔒 senha</button>`
           : `<span class="badge" style="${o.ativo===false?'background:var(--bad-dim);color:var(--bad);':'background:var(--ok-dim,rgba(61,220,151,.12));color:var(--ok,#3ddc97);'}">${o.ativo===false?'inativo':'ativo'}</span>`)}
       ${IS_MASTER ? `<button type="button" class="btn-remover" title="remover operador" onclick="removerOperador('${o.id}','${escapeHtml(o.usuario)}')">🗑</button>` : ''}
     </div>`).join('') || '<div class="empty">Nenhum operador cadastrado.</div>';
@@ -1681,6 +1682,21 @@ async function desbloquearOperador(id){
     const resp = await fetch(`/api/abastecimento-operadores/${id}/desbloquear`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ novaSenha }) });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao desbloquear.');
+    await carregarOperadores();
+    renderOperadores();
+  }catch(err){ erroOperadores(err.message); }
+}
+// troca a senha do operador mesmo sem estar bloqueado - mesma rota do
+// desbloqueio acima (ela so mexe na senha se vier preenchida, e sempre
+// "desbloqueia" - inofensivo aqui porque o operador ja nao esta bloqueado)
+async function trocarSenhaOperador(id){
+  const novaSenha = await pedirSenhaMascarada('Nova senha do operador (4 números):', 'nova senha');
+  if(novaSenha === null) return;
+  if(!/^[0-9]{4}$/.test(novaSenha)){ erroOperadores('Senha deve ter exatamente 4 números.'); return; }
+  try{
+    const resp = await fetch(`/api/abastecimento-operadores/${id}/desbloquear`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ novaSenha }) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao trocar a senha.');
     await carregarOperadores();
     renderOperadores();
   }catch(err){ erroOperadores(err.message); }
