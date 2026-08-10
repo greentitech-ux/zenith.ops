@@ -6,7 +6,7 @@
 // (problema no computador, no sistema, de acesso...). A conversa fica salva
 // no navegador (id + token proprios em localStorage), entao a pessoa pode
 // fechar e voltar depois. Logado, nome/contato ja vem preenchidos do /api/me.
-// O atendimento acontece na tela de Chamados TI (Suporte/Master/Admin).
+// O atendimento acontece na Central do Beniboy (Suporte/Master/Admin).
 (function () {
   if (window.__zenithSuporteChat) return;
   window.__zenithSuporteChat = true;
@@ -358,7 +358,7 @@
   // ================= LADO DO ATENDIMENTO (Master/Admin/tag Suporte) =========
   // - Mensagem nova de visitante: a caixa de dialogo ABRE SOZINHA em
   //   qualquer aba, com resposta inline. Fechou? O marcador e salvo e a
-  //   conversa continua na tela de Chamados TI (💬 Chats de suporte).
+  //   conversa continua na Central do Beniboy (💬 Chats de suporte).
   // - MASTER: o proprio icone 💬 vira a central de chats (lista + conversa).
   const ATEND = { ativo: false, ehMaster: false, chats: [], chatAberto: null, timer: null };
   const LS_ATEND_VISTO = 'szcAtendVisto:'; // + chatId -> "em" da ultima msg de visitante ja vista
@@ -434,7 +434,7 @@
     ATEND.chatAberto = null;
     rodape.classList.add('szc-hidden');
     const abertos = ATEND.chats.filter((c) => c.status === 'ABERTO');
-    corpo.innerHTML = '<div class="szc-aviso">💬 Chats de suporte — toque pra atender. A gestão completa fica em <b>Chamados TI</b>.</div>' + (abertos.map((c) => {
+    corpo.innerHTML = '<div class="szc-aviso">💬 Chats de suporte — toque pra atender. Histórico e finalização ficam na <b>Central do Beniboy</b>.</div>' + (abertos.map((c) => {
       const msgs = c.mensagens || [];
       const ultima = msgs[msgs.length - 1];
       const aguarda = !!ultimaMsgVisitante(c);
@@ -443,12 +443,12 @@
         <span style="display:block;font-size:11px;color:#7d8896;">${esc((ultima && ultima.texto || '').slice(0, 60))}</span>
       </button>`;
     }).join('') || '<div class="szc-fim">Nenhuma conversa aberta. 🎉</div>') +
-    '<button type="button" class="szc-link" id="szc-ir-tecnico" style="margin-top:4px;">abrir a tela de Chamados TI →</button>';
+    '<button type="button" class="szc-link" id="szc-ir-beniboy" style="margin-top:4px;">abrir histórico de conversas (Central do Beniboy) →</button>';
     corpo.querySelectorAll('[data-atend-chat]').forEach((b) => b.addEventListener('click', () => {
       const c = ATEND.chats.find((x) => x.id === b.dataset.atendChat);
       if (c) atendRenderConversa(c);
     }));
-    corpo.querySelector('#szc-ir-tecnico').addEventListener('click', () => { location.href = '/tecnico.html'; });
+    corpo.querySelector('#szc-ir-beniboy').addEventListener('click', () => { location.href = '/beniboy.html'; });
   }
 
   function atendRenderConversa(chat, manterScroll) {
@@ -582,7 +582,7 @@
   alarmeEl.querySelector('.szc-al-silenciar').addEventListener('click', pararAlarmeBeniboy);
   alarmeEl.querySelector('.szc-al-atender').addEventListener('click', () => {
     pararAlarmeBeniboy();
-    location.href = '/tecnico.html';
+    location.href = '/beniboy.html';
   });
   // notificacao push critica chegou com a pagina ja aberta (em qualquer aba)
   // - o service worker avisa direto, sem esperar clique na notificacao
