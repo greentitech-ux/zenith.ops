@@ -219,8 +219,14 @@
 
   function renderFormInicial(prefill) {
     rodape.classList.add('szc-hidden');
+    // window.__zenithLojaContexto: setado pela pagina de atendimento
+    // (?unidade=) - so pra CONFIRMAR pro cliente que a loja certa foi
+    // reconhecida (o dado em si ja vai junto no /iniciar, ver iniciarConversa)
+    const lojaTag = window.__zenithLojaContexto
+      ? `<div class="szc-aviso" style="color:#5cc8ff;">🏬 Loja: ${esc(window.__zenithLojaContexto)}</div>` : '';
     corpo.innerHTML = `
       <div class="szc-aviso">Conte pra gente o que está acontecendo — problema no computador, no sistema ou de acesso. Não precisa estar logado.</div>
+      ${lojaTag}
       <div class="szc-label">Seu nome</div>
       <input type="text" class="szc-input" id="szc-nome" maxlength="120" value="${esc(prefill?.nome || '')}">
       <div class="szc-label">Contato (e-mail ou telefone)</div>
@@ -252,7 +258,10 @@
       if (authToken) headers.Authorization = 'Bearer ' + authToken;
       const r = await rawFetch('/api/suporte-chat/iniciar', {
         method: 'POST', headers,
-        body: JSON.stringify({ nome, contato, texto, assunto }),
+        // lojaContexto: setado pela pagina de atendimento (atendimento.html,
+        // ?unidade=) ANTES de carregar esse script - o Beniboy ja sabe a
+        // loja sem precisar perguntar (ver window.__zenithLojaContexto)
+        body: JSON.stringify({ nome, contato, texto, assunto, lojaContexto: window.__zenithLojaContexto || null }),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || 'Não foi possível iniciar a conversa.');
@@ -633,4 +642,16 @@
     } catch (e) { /* sem SSE, sem alerta ao vivo aqui - o push cobre com o app fechado */ }
   }
   atendInit();
+
+  // pagina dedicada de atendimento (atendimento.html) marca esse flag ANTES
+  // de carregar esse script - abre a conversa direto, sem a pessoa precisar
+  // achar/clicar no balaozinho (a pagina toda existe so pra isso). ATEND.ehMaster
+  // fica false aqui (visitante nunca tem token de time de atendimento), entao
+  // sempre cai no fluxo normal de visitante (carregarConversa)
+  if (window.__zenithAbrirChatAuto && !aberto) {
+    aberto = true;
+    panel.classList.remove('szc-hidden');
+    atualizarNomeFlutuante();
+    carregarConversa();
+  }
 })();

@@ -59,7 +59,7 @@ function montarSystem(unidades, logado) {
   const temFerramentaPedido = !!(logado && logado.temMonitor);
   const texto = `Você é o Beniboy, atendente virtual do chat de suporte do Zenith Ops.
 
-O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Milky Moo, São Braz e o parque Saltiverso). Quem fala com você é um funcionário ou parceiro das lojas — pode estar deslogado.
+O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Milky Moo, São Braz e o parque Saltiverso). Quem fala com você pode ser um funcionário/parceiro das lojas OU o CLIENTE FINAL de uma loja (o comprador, ex: alguém que quer um estorno) - na maioria das vezes de estorno é o próprio cliente falando direto com você, não um funcionário repassando. Não assuma qual dos dois é sem contexto - se não estiver claro, pergunte. De qualquer forma, a pessoa pode estar deslogada.
 
 ## Estilo (obrigatório)
 - Respostas CURTAS e objetivas: 1 a 4 frases, sem enrolação, sem repetir o que a pessoa disse.
@@ -69,13 +69,13 @@ O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, 
 
 ## O que você sabe do Zenith
 - Login bloqueado (3 senhas erradas seguidas): SEMPRE use desbloquear_login pra resolver na hora, nunca chame um atendente pra isso - vale tanto pro login principal do Zenith quanto pro login de operador do Abastecimento do Carrinho (balcão, 4 letras + 4 números). A pessoa volta a entrar com a MESMA senha de sempre; só se o mesmo acesso travar de novo é que entra uma senha nova (ver ferramenta abaixo).
-- Estorno pedido por um CLIENTE FINAL da loja (não por quem fala com você): quem fala com você é sempre um funcionário/parceiro pedindo em nome do cliente. NÃO abra ticket de estorno você mesmo (não dá, exige login com acesso ao Monitor) - em vez disso, pergunte em qual loja o cliente comprou e use gerar_link_estorno_cliente pra gerar o link público. A pessoa encaminha esse link pro cliente preencher sozinho (com o comprovante) - um atendente humano decide dali.
+- Estorno: NÃO dá pra você abrir esse ticket direto (exige login com acesso ao Monitor) - em vez disso, pergunte em qual loja foi a compra (pule essa pergunta se já souber pela "loja" do início da conversa) e use gerar_link_estorno_cliente. Se quem fala com você É o cliente (o mais comum), mande o link JÁ NESSA CONVERSA pra ele clicar e preencher ali mesmo - não precisa de WhatsApp nem de mais ninguém no meio. Se for um funcionário pedindo em nome de um cliente que não está no chat, aí sim ele repassa o link pro cliente por onde for mais fácil (WhatsApp é uma opção, não a única).
 - Acessos/permissões por tela (Fechamentos, Entregas, Estoque, Central, Chamados, Parque...) são liberados pelo Master na tela Usuários.
 - Central de Solicitações: pedidos de compra, manutenção, suporte de TI, pagamento (boleto/despesa) e nota fiscal viram tickets numerados (#10000 em diante) que o Master aprova ou rejeita. Depois de aprovado, o andamento aparece no ticket.
 - Fechamento de caixa: lançado em Lançar fechamento; erro em fechamento já enviado se corrige pelo botão "Pedir correção" no Histórico da Central (só 1 correção pendente por lançamento).
 - Chamados de TI/Manutenção: nascem de tickets aprovados ou direto pelo time técnico; têm prioridade e prazo (SLA).
-- Chat de suporte (onde você está): a conversa fica salva no navegador da pessoa; o time humano vê tudo e pode assumir a qualquer momento.
-- Suporte humano por WhatsApp: (81) 99514-8654.
+- Chat de suporte (onde você está): a conversa fica salva no navegador da pessoa; o time humano vê tudo e pode assumir a qualquer momento. Esse chat é o canal PADRÃO de atendimento agora - resolva por aqui sempre que der.
+- Suporte humano por WhatsApp: (81) 99514-8654 - é o ÚLTIMO recurso, só quando não der pra resolver por aqui de nenhum jeito (ex: chamar_atendente escalar e a pessoa insistir em outro canal). Nunca ofereça WhatsApp como primeira opção.
 
 ## Ferramentas
 - criar_ticket: abre uma solicitação na Central. Antes de criar, CONFIRME em uma única mensagem o resumo (tipo, unidade, o que é). Só crie depois do "sim" da pessoa. Depois de criar, informe o número do ticket.
@@ -138,7 +138,7 @@ const TOOLS_BASE = [
   },
   {
     name: 'gerar_link_estorno_cliente',
-    description: 'Gera o link público (sem login) pro CLIENTE FINAL de uma loja preencher o próprio pedido de estorno, com foto do comprovante - o Master avalia depois. Use quando quem fala com você (funcionário/parceiro da loja) pede ajuda com um estorno de um cliente. Peça o nome da loja onde o cliente comprou ANTES de chamar. Se a ferramenta devolver uma lista de lojas parecidas, pergunte qual delas é a certa e chame de novo com o nome exato.',
+    description: 'Gera o link público (sem login) pra preencher um pedido de estorno com foto do comprovante - o Master avalia depois. Use sempre que alguém (o próprio cliente final, ou um funcionário em nome dele) precisar pedir um estorno. Peça o nome da loja da compra ANTES de chamar (pule se já souber pelo contexto da conversa). Se a ferramenta devolver uma lista de lojas parecidas, pergunte qual delas é a certa e chame de novo com o nome exato.',
     input_schema: {
       type: 'object',
       properties: {
@@ -175,7 +175,7 @@ function montarTools(logado) {
 // aqui (gate em responderConversa)
 function montarMensagens(chat) {
   const turnos = [];
-  const contexto = `(Início da conversa. Quem escreve: ${chat.nome || 'visitante'}${chat.contato ? ` · contato: ${chat.contato}` : ''})`;
+  const contexto = `(Início da conversa. Quem escreve: ${chat.nome || 'visitante'}${chat.contato ? ` · contato: ${chat.contato}` : ''}${chat.lojaContexto ? ` · loja: ${chat.lojaContexto} (já sabida pelo link/QR code que a pessoa usou - não precisa perguntar de novo)` : ''})`;
   for (const m of chat.mensagens || []) {
     const role = m.de === 'visitante' ? 'user' : 'assistant';
     const texto = String(m.texto || '').trim();
@@ -302,7 +302,7 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       return `Achei mais de uma loja parecida com "${termo}": ${nomes}. Pergunte qual delas é a certa e chame essa ferramenta de novo com o nome exato.`;
     }
     const link = linkEstornoCliente(encontrada.codigo);
-    return `Link gerado pra loja "${encontrada.nome}": ${link}\nInstrua a pessoa a encaminhar esse link pro CLIENTE (WhatsApp etc.) - o cliente preenche os dados do pedido e anexa o comprovante sozinho, sem precisar de acesso ao Zenith. Um atendente humano confere e decide dali. Não invente prazo nem promessa de aprovação.`;
+    return `Link gerado pra loja "${encontrada.nome}": ${link}\nSe quem está falando com você é o próprio cliente, mande esse link JÁ NESSA CONVERSA pra ele clicar e preencher ali mesmo (dados do pedido + foto do comprovante), sem precisar de WhatsApp nem de mais ninguém. Se for um funcionário pedindo em nome de um cliente que não está aqui, ele repassa o link pro cliente por onde for mais fácil. De qualquer forma, um atendente humano confere e decide depois - não invente prazo nem promessa de aprovação.`;
   }
   if (nome === 'consultar_pedido') {
     // defesa em profundidade: mesmo que o modelo tentasse chamar essa tool

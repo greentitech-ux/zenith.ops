@@ -32,11 +32,17 @@ const ASSUNTOS = ['Computador/Sistema', 'Acesso/Senha', 'Financeiro/Estorno', 'O
 // pra contexto, isMaster+unidades pra filtrar o que ele pode ver no Monitor,
 // e temMonitor (secao 'monitor' liberada) - sem isso guardado achatado aqui,
 // o bot teria que reconsultar o usuario a cada resposta
-async function criar({ nome, contato, texto, assunto, logado }) {
+// lojaContexto: nome da loja, quando a conversa comeca por um link/QR code
+// JA marcado com a unidade (ver atendimento.html, ?unidade=) - assim o
+// Beniboy ja sabe de qual loja e o cliente sem precisar perguntar. Fica so
+// no registro (nunca na mensagem visivel do visitante, ver montarMensagens
+// em suporteBot.js).
+async function criar({ nome, contato, texto, assunto, logado, lojaContexto }) {
   const nomeLimpo = limpar(nome, 120);
   const contatoLimpo = limpar(contato, 120);
   const textoLimpo = limpar(texto, MAX_TEXTO);
   const assuntoLimpo = ASSUNTOS.includes(assunto) ? assunto : null;
+  const lojaContextoLimpa = limpar(lojaContexto, 80);
   if (!nomeLimpo) throw new Error('Informe seu nome.');
   if (!contatoLimpo) throw new Error('Informe um contato (e-mail ou telefone).');
   if (!textoLimpo) throw new Error('Escreva sua mensagem.');
@@ -50,6 +56,7 @@ async function criar({ nome, contato, texto, assunto, logado }) {
     nome: nomeLimpo,
     contato: contatoLimpo,
     assunto: assuntoLimpo,
+    lojaContexto: lojaContextoLimpa || null,
     status: 'ABERTO',
     mensagens: [{ de: 'visitante', texto: textoLimpo, em: agora }],
     // true = o Beniboy (bot, ver suporteBot.js) saiu dessa conversa - ou

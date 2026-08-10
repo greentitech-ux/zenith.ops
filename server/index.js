@@ -137,6 +137,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/webhooks/adyen',
   '/estorno-cliente.html',
   '/solicitacao-publica.html',
+  '/atendimento.html',
   '/api/meta/unidades-publico',
   '/api/refund-requests/publico',
   '/api/solicitacoes/publico',
@@ -474,7 +475,7 @@ async function usuarioLogadoDoHeader(req) {
 app.post('/api/suporte-chat/iniciar', async (req, res) => {
   try {
     const logado = await usuarioLogadoDoHeader(req);
-    const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto, assunto: req.body.assunto, logado });
+    const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto, assunto: req.body.assunto, logado, lojaContexto: req.body.lojaContexto });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     push.notifySolicitacao('💬 Novo chat de suporte', `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico.html');
     res.json({ id: chat.id, token: chat.token });

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Fale com a gente · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --accent:#5cc8ff;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:24px 16px;text-align:center;overflow-x:hidden;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;}
+  .icone{font-size:52px;margin-bottom:6px;}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0 0 10px;}
+  p{font-size:13.5px;color:var(--muted);line-height:1.6;margin:0;max-width:340px;}
+  .dica{margin-top:22px;font-size:12px;color:var(--muted);}
+  .seta{display:inline-block;animation:szc-atend-bounce 1.4s ease-in-out infinite;}
+  @keyframes szc-atend-bounce{0%,100%{transform:translateY(0);}50%{transform:translateY(6px);}}
+  @media (prefers-reduced-motion:reduce){ .seta{animation:none;} }
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+<div class="icone">🤖</div>
+<h1>Fale com o Beniboy</h1>
+<p>Nosso assistente já abriu a conversa aqui embaixo - conte o que você precisa (estorno, dúvida sobre um pedido, qualquer outra coisa) que ele te ajuda na hora. Não precisa de WhatsApp nem de login.</p>
+<div class="dica"><span class="seta">↘</span> continue por ali</div>
+
+<script>
+// link/QR code de uma loja especifica vem com ?unidade=codigo (mesmo codigo
+// de /api/meta/unidades-publico e do link de estorno, ver index.js) - resolve
+// o nome bonito ANTES de carregar o widget, pra ele ja saber a loja sem
+// precisar perguntar pro cliente (ver window.__zenithLojaContexto em
+// suporte-chat.js) e a conversa ja abrir sozinha (window.__zenithAbrirChatAuto).
+// O script do widget so e injetado DEPOIS dessa resolucao terminar (em vez
+// de uma <script src> fixa) pra nunca correr o risco dele ler
+// __zenithLojaContexto antes da respota do fetch chegar.
+window.__zenithAbrirChatAuto = true;
+async function boot(){
+  const unidadeFixa = new URLSearchParams(location.search).get('unidade');
+  if(unidadeFixa){
+    try{
+      const unidades = await fetch('/api/meta/unidades-publico').then(r=>r.json());
+      const achada = unidades.find(u=>u.codigo===unidadeFixa);
+      if(achada) window.__zenithLojaContexto = achada.nome;
+    }catch(e){ /* segue sem contexto de loja - o Beniboy pergunta normal */ }
+  }
+  const s = document.createElement('script');
+  s.src = '/suporte-chat.js';
+  document.body.appendChild(s);
+}
+boot();
+</script>
+</body>
+</html>

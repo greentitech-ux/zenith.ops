@@ -204,8 +204,14 @@
       <!-- ESTORNO -->
       <div id="campos-estorno" class="hidden">
         <div class="link-cliente-box">
-          <div class="link-cliente-titulo">📱 Prefere que o cliente mesmo preencha?</div>
-          <div class="link-cliente-sub">Gera um link (com a loja selecionada acima já pré-preenchida) pra mandar pelo WhatsApp - o cliente preenche os dados e anexa o comprovante sozinho, sem precisar de acesso ao sistema.</div>
+          <div class="link-cliente-titulo">💬 Prefere que o cliente fale com o Beniboy?</div>
+          <div class="link-cliente-sub">Gera o link de atendimento (com a loja selecionada acima já reconhecida) - o cliente conversa direto com o assistente, que já entende o pedido e devolve o link do formulário na hora. Canal padrão agora - WhatsApp fica só pra último caso.</div>
+          <button type="button" class="btn-link-cliente" onclick="copiarLinkAtendimento()">💬 Copiar link de atendimento</button>
+          <div id="link-atendimento-msg" class="hidden"></div>
+        </div>
+        <div class="link-cliente-box">
+          <div class="link-cliente-titulo">📱 Prefere mandar o formulário direto?</div>
+          <div class="link-cliente-sub">Gera o link do formulário (com a loja selecionada acima já pré-preenchida) - o cliente preenche os dados e anexa o comprovante sozinho, sem precisar de acesso ao sistema.</div>
           <button type="button" class="btn-link-cliente" onclick="copiarLinkCliente()">🔗 Copiar link pro cliente</button>
           <div id="link-cliente-msg" class="hidden"></div>
         </div>
@@ -432,9 +438,25 @@ function iconeTipo(tipo){
   return { estorno:'💳', 'ajuste-fechamento':'🧾', compra:'🛒', manutencao:'🔧', 'suporte-ti':'💻', pagamento:'💸', nota:'📄' }[tipo] || '📋';
 }
 
+// monta o link da pagina de atendimento (server/public/atendimento.html) -
+// chat direto com o Beniboy, com a loja ja reconhecida (mesmo ?unidade= do
+// link de estorno abaixo) - canal PADRAO agora pro cliente, WhatsApp so
+// pra ultimo caso (pedido explicito do usuario)
+async function copiarLinkAtendimento(){
+  const unidade = document.getElementById('f-unidade').value;
+  const url = location.origin + '/atendimento.html' + (unidade ? ('?unidade=' + encodeURIComponent(unidade)) : '');
+  const msg = document.getElementById('link-atendimento-msg');
+  try{
+    await navigator.clipboard.writeText(url);
+    msg.textContent = (unidade ? '✅ Link copiado (loja já vem reconhecida): ' : '✅ Link copiado: ') + url;
+  }catch(e){
+    msg.textContent = 'Não deu pra copiar automático, mas aqui está o link: ' + url;
+  }
+  msg.classList.remove('hidden');
+}
 // monta o link do formulario publico de estorno (server/public/estorno-cliente.html)
-// com a loja ja selecionada no formulario interno, pra mandar pro cliente
-// preencher sozinho (WhatsApp etc) - ver tambem o ?unidade= lido la
+// com a loja ja selecionada no formulario interno - alternativa pra quem
+// prefere mandar o formulario direto em vez do chat (ver copiarLinkAtendimento acima)
 async function copiarLinkCliente(){
   const unidade = document.getElementById('f-unidade').value;
   const url = location.origin + '/estorno-cliente.html' + (unidade ? ('?unidade=' + encodeURIComponent(unidade)) : '');
