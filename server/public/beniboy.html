@@ -406,6 +406,7 @@ function abrirDetalhePorId(id){
   } else {
     acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">↩️ Reabrir</button>`);
   }
+  if(!chat.chamadoId) acoes.push(`<button type="button" class="btn-ghost" onclick="gerarChamadoRemoto('${chat.id}')">🎫 Gerar chamado remoto</button>`);
   document.getElementById('d-acoes').innerHTML = acoes.join('');
 
   const finalizado = chat.status === 'FINALIZADO';
@@ -442,6 +443,25 @@ async function enviarResposta(){
     abrirDetalhePorId(DETALHE_ATUAL.id);
   }catch(err){ alert(err.message); }
   finally{ btn.disabled = false; }
+}
+
+// vira chamado REMOTO vinculado, no nome de quem esta atendendo - registro
+// da atuacao no banco de evidencias mesmo quando o Beniboy/time resolve pelo
+// proprio chat. Usa a loja ja identificada na conversa (lojaContexto), se
+// houver - senao o chamado nasce como "Suporte remoto" (ver rota no index.js)
+async function gerarChamadoRemoto(id){
+  const chat = ITENS.find(c=>c.id===id);
+  if(!chat) return;
+  if(!confirm('Gerar um chamado remoto vinculado a essa conversa, atribuído a você?')) return;
+  try{
+    const resp = await fetch(`/api/suporte-chats/${id}/gerar-chamado`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ unidade: chat.lojaContexto || undefined }),
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao gerar chamado.');
+    await carregarLista();
+    if(DETALHE_ATUAL && DETALHE_ATUAL.id===id) abrirDetalhePorId(id);
+  }catch(err){ alert(err.message); }
 }
 
 async function carregarLista(){
