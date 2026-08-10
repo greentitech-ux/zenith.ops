@@ -58,13 +58,13 @@
   .badge.FINALIZADO{background:var(--ok-dim);color:var(--ok);}
   .origem-badge{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;}
   .link-btn{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0;font-family:var(--sans);}
-  .grupo-assunto{border-top:1px solid var(--line);margin-top:14px;padding-top:14px;}
-  .grupo-assunto:first-of-type{border-top:none;margin-top:0;padding-top:0;}
-  .grupo-cabeca{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;user-select:none;}
-  .grupo-cabeca b{font-size:13.5px;}
-  .grupo-cabeca .grupo-count{font-family:var(--mono);font-size:11px;color:var(--muted);}
-  .grupo-seta{transition:transform .15s ease;font-size:11px;color:var(--muted);flex:none;}
-  .grupo-corpo{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
+  .kanban-board{display:flex;gap:14px;overflow-x:auto;padding-bottom:6px;align-items:flex-start;}
+  .kanban-col{background:var(--panel);border:1px solid var(--line);border-radius:12px;flex:1 1 300px;min-width:270px;max-width:420px;display:flex;flex-direction:column;max-height:calc(100vh - 260px);min-height:220px;}
+  .kanban-col-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 12px 10px;border-bottom:1px solid var(--line);flex:none;}
+  .kanban-col-header b{font-size:13.5px;}
+  .kanban-count{font-family:var(--mono);color:var(--muted);font-size:11.5px;}
+  .kanban-cards{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:8px;}
+  @media(max-width:760px){ .kanban-col{min-width:82vw;max-height:none;} }
   .conv-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;transition:border-color .15s ease;}
   .conv-item:hover{border-color:var(--accent);}
   .conv-item .linha1{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:13px;font-weight:600;}
@@ -129,7 +129,7 @@
     </h2>
     <div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:4px;">Reúne o chat do balãozinho de suporte, o chat de cada solicitação/ticket e o chat de cada chamado técnico — tudo agrupado pelo assunto da conversa.</div>
   </div>
-  <div id="grupos-wrap"></div>
+  <div id="grupos-wrap" class="kanban-board"></div>
   <div class="empty hidden" id="lista-vazia">Nenhuma conversa por enquanto.</div>
 </div>
 
@@ -169,7 +169,6 @@ function fmtDataHora(iso){ if(!iso) return '—'; return new Date(iso).toLocaleS
 
 let ME = null, IS_MASTER = false, IS_ADMIN = false;
 let ITENS = [];
-let GRUPOS_ABERTOS = new Set();
 let DETALHE_ATUAL = null; // { origem, tipo, id, assunto, titulo, status }
 
 const ORIGEM_LABEL = { suporte: '💬 Widget site', central: '🎫 Solicitação/Chamado' };
@@ -191,16 +190,12 @@ function renderLista(){
   document.getElementById('lista-vazia').classList.toggle('hidden', !!grupos.length);
   const wrap = document.getElementById('grupos-wrap');
   wrap.innerHTML = grupos.map(g=>{
-    const aberto = GRUPOS_ABERTOS.has(g.assunto) || GRUPOS_ABERTOS.size===0;
-    return `<div class="panel grupo-assunto" data-assunto="${escapeHtml(g.assunto)}">
-      <div class="grupo-cabeca" onclick="toggleGrupo('${escapeHtml(g.assunto).replace(/'/g,"\\'")}')">
+    return `<div class="kanban-col" data-assunto="${escapeHtml(g.assunto)}">
+      <div class="kanban-col-header">
         <b>${escapeHtml(g.assunto)}</b>
-        <span style="display:flex;align-items:center;gap:8px;">
-          <span class="grupo-count">${g.lista.length}</span>
-          <span class="grupo-seta" style="${aberto?'':'transform:rotate(-90deg);'}">▾</span>
-        </span>
+        <span class="kanban-count">${g.lista.length}</span>
       </div>
-      <div class="grupo-corpo ${aberto?'':'hidden'}">
+      <div class="kanban-cards">
         ${g.lista.map(it=>`
           <div class="conv-item" onclick='abrirDetalhe(${JSON.stringify(it).replace(/'/g,"&#39;")})'>
             <div class="linha1">
@@ -212,21 +207,10 @@ function renderLista(){
             </div>
             <div class="prev">${it.ultimaMensagem ? escapeHtml(it.ultimaMensagem.de||'') + ': ' + escapeHtml(it.ultimaMensagem.texto||'(imagem)') : 'Sem mensagens ainda.'}</div>
             <div class="meta">${it.total} mensagem(ns) · ${fmtDataHora(it.atualizadoEm)}</div>
-          </div>`).join('')}
+          </div>`).join('') || '<div class="empty">Nenhuma conversa.</div>'}
       </div>
     </div>`;
   }).join('');
-}
-
-function toggleGrupo(assunto){
-  // primeira interacao: comeca com "todos abertos" (Set vazio); a partir
-  // dai passa a controlar individualmente cada assunto clicado
-  if(GRUPOS_ABERTOS.size===0){
-    GRUPOS_ABERTOS = new Set(agruparPorAssunto(ITENS).map(g=>g.assunto));
-  }
-  if(GRUPOS_ABERTOS.has(assunto)) GRUPOS_ABERTOS.delete(assunto);
-  else GRUPOS_ABERTOS.add(assunto);
-  renderLista();
 }
 
 async function carregarLista(){
