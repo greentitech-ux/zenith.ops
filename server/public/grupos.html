@@ -99,8 +99,8 @@
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
   .modal-actions button{font-family:var(--sans);font-size:12.5px;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;}
   .modal-actions button.primary{border:none;background:var(--accent);color:#06121a;font-weight:600;}
-  .linha-kpi{display:grid;grid-template-columns:1fr auto;gap:6px;align-items:center;margin-top:6px;}
-  .linha-kpi.com-tipo{grid-template-columns:1fr 170px auto;}
+  .linha-kpi{display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center;margin-top:6px;}
+  .linha-kpi.com-tipo{grid-template-columns:auto 1fr 170px auto;}
   .linha-kpi.com-opcoes{row-gap:6px;}
   .linha-kpi input,.linha-kpi select{padding:9px 10px;font-size:13px;}
   .linha-kpi select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:7px;}
@@ -108,6 +108,11 @@
   .linha-kpi-opcoes label{display:flex;align-items:center;gap:6px;}
   .linha-kpi-opcoes select{font-size:11px;padding:4px 7px;}
   .linha-kpi-opcoes input[type=checkbox]{width:auto;margin:0;}
+  .linha-kpi-soma-em{grid-column:1/-1;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);}
+  .linha-kpi-soma-em select{font-size:11px;padding:4px 7px;}
+  .linha-kpi-mover{display:flex;flex-direction:column;gap:2px;}
+  .btn-mover{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:5px;width:22px;height:17px;font-size:9px;line-height:1;cursor:pointer;padding:0;}
+  .btn-mover:disabled{opacity:.3;cursor:default;}
   .btn-remover{background:var(--bad-dim);color:var(--bad);border:none;border-radius:6px;width:34px;height:36px;font-size:15px;cursor:pointer;flex:none;}
   .btn-add{margin-top:8px;background:var(--panel2);border:1px dashed var(--line);color:var(--accent);border-radius:8px;padding:8px 10px;font-size:12px;font-family:var(--sans);cursor:pointer;width:100%;}
 </style>
@@ -399,6 +404,7 @@ const TIPOS_KPI = [
   ['quantidade', 'Quantidade (número)'],
   ['moeda', 'R$ (valor em reais)'],
   ['kg', 'Peso (Kg)'],
+  ['tempo', 'Tempo (min:seg)'],
   ['arquivo', 'Arquivo/Imagem (anexo)'],
   ['texto', 'Texto livre'],
 ];
@@ -417,7 +423,15 @@ const TIPOS_KPI = [
 // é um Canal de venda, mas já é forma de pagamento validada, então precisa
 // também somar no Total Declarado (senão sobra "falta no caixa" - o valor
 // aparece no Faturamento mas nunca é creditado no Total Declarado).
-function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, tambemInicial){
+// KPI's, por sua vez, ganham "Somar em" (nao somar/Faturamento/Total
+// Declarado) - so faz sentido pra tipo "moeda" (somar Quantidade/Kg/Tempo
+// num total em R$ corromperia o valor), entao o seletor fica desabilitado
+// pros outros tipos (ver atualizarSomaEmVisivel) - o backend tambem valida
+// isso de novo (grupos.js), nunca confia so na UI.
+// Toda linha (Canal/Forma/KPI) ganha ▲▼ pra reordenar - a ORDEM da lista e
+// literalmente a ordem das divs no container, sem campo novo: lerKpis() lê
+// na ordem do DOM, entao mover a div já move o item na lista salva.
+function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, tambemInicial, somaEmInicial){
   const container = document.getElementById(containerId);
   const ehKpi = containerId.includes('kpis');
   const ehCanal = containerId.includes('canais');
@@ -425,17 +439,50 @@ function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, t
   const div = document.createElement('div');
   div.className = 'linha-kpi' + (ehKpi ? ' com-tipo' : (ehCanal||ehForma) ? ' com-opcoes' : '');
   const datalistId = ehCanal ? 'datalist-canais' : ehForma ? 'datalist-formas' : 'datalist-kpis';
-  const seletorTipo = ehKpi ? `<select class="kpi-tipo-select">${TIPOS_KPI.map(([v,l])=>`<option value="${v}" ${(tipoInicial||'quantidade')===v?'selected':''}>${l}</option>`).join('')}</select>` : '';
+  const seletorTipo = ehKpi ? `<select class="kpi-tipo-select" onchange="atualizarSomaEmVisivel(this)">${TIPOS_KPI.map(([v,l])=>`<option value="${v}" ${(tipoInicial||'quantidade')===v?'selected':''}>${l}</option>`).join('')}</select>` : '';
   const outroTotal = ehCanal ? 'Total Declarado' : ehForma ? 'Faturamento' : '';
   const opcoes = (ehCanal||ehForma) ? `<div class="linha-kpi-opcoes">
       <label>Operação <select class="extra-operacao-select"><option value="soma" ${(operacaoInicial||'soma')==='soma'?'selected':''}>Soma</option><option value="subtrai" ${operacaoInicial==='subtrai'?'selected':''}>Subtrai</option></select></label>
       <label><input type="checkbox" class="extra-tambem-checkbox" ${tambemInicial?'checked':''}> também contar em ${outroTotal}</label>
     </div>` : '';
-  div.innerHTML = `<input type="text" value="${escapeHtml(valorInicial||'')}" list="${datalistId}" placeholder="ex: Taxa de entrega, LegTime, OTD... (ou escolha um já usado)">
+  const ehMoedaInicial = (tipoInicial||'quantidade')==='moeda';
+  const somaEmKpi = ehKpi ? `<label class="linha-kpi-soma-em">Somar em
+      <select class="kpi-soma-em-select" ${ehMoedaInicial ? '' : 'disabled'}>
+        <option value="nao" ${(somaEmInicial||'nao')==='nao'?'selected':''}>Não somar (só captar o dado)</option>
+        <option value="faturamento" ${somaEmInicial==='faturamento'?'selected':''}>Faturamento</option>
+        <option value="totalDeclarado" ${somaEmInicial==='totalDeclarado'?'selected':''}>Total Declarado</option>
+      </select>
+    </label>` : '';
+  div.innerHTML = `<div class="linha-kpi-mover">
+      <button type="button" class="btn-mover" onclick="moverLinhaKpi(this,-1)" title="Mover pra cima">▲</button>
+      <button type="button" class="btn-mover" onclick="moverLinhaKpi(this,1)" title="Mover pra baixo">▼</button>
+    </div>
+    <input type="text" value="${escapeHtml(valorInicial||'')}" list="${datalistId}" placeholder="ex: Taxa de entrega, LegTime, OTD... (ou escolha um já usado)">
     ${seletorTipo}
     <button type="button" class="btn-remover" onclick="this.closest('.linha-kpi').remove()">✕</button>
-    ${opcoes}`;
+    ${opcoes}
+    ${somaEmKpi}`;
   container.appendChild(div);
+}
+// troca a linha de posição com a vizinha (direcao -1 = sobe, +1 = desce) -
+// sem vizinha nessa direção (já é a primeira/última), não faz nada
+function moverLinhaKpi(btn, direcao){
+  const linha = btn.closest('.linha-kpi');
+  const vizinha = direcao < 0 ? linha.previousElementSibling : linha.nextElementSibling;
+  if(!vizinha) return;
+  if(direcao < 0) linha.parentElement.insertBefore(linha, vizinha);
+  else linha.parentElement.insertBefore(vizinha, linha);
+}
+// "Somar em" só faz sentido pra KPI tipo moeda - troca de tipo desabilita e
+// zera de volta pra "não somar", pra nunca deixar um Kg/Tempo/Texto
+// configurado pra somar num total em R$ por acidente
+function atualizarSomaEmVisivel(selectTipo){
+  const linha = selectTipo.closest('.linha-kpi');
+  const somaSelect = linha.querySelector('.kpi-soma-em-select');
+  if(!somaSelect) return;
+  const ehMoeda = selectTipo.value === 'moeda';
+  somaSelect.disabled = !ehMoeda;
+  if(!ehMoeda) somaSelect.value = 'nao';
 }
 // junta os labels ja usados em QUALQUER grupo existente, por tipo de campo,
 // pra alimentar o autocomplete (datalist) dos inputs acima
@@ -460,6 +507,8 @@ function lerKpis(containerId){
       if(ehKpi){
         const sel = linha.querySelector('.kpi-tipo-select');
         item.tipo = sel ? sel.value : 'quantidade';
+        const selSoma = linha.querySelector('.kpi-soma-em-select');
+        item.somaEm = selSoma ? selSoma.value : 'nao';
       }
       if(ehCanalOuForma){
         const selOp = linha.querySelector('.extra-operacao-select');
@@ -521,11 +570,13 @@ function nomeUnidade(codigo){
   return u ? u.nome : codigo;
 }
 
-const SUFIXO_TIPO_KPI = { quantidade:'#', moeda:'R$', kg:'Kg', arquivo:'📎', texto:'Abc' };
+const SUFIXO_TIPO_KPI = { quantidade:'#', moeda:'R$', kg:'Kg', tempo:'⏱', arquivo:'📎', texto:'Abc' };
+const LABEL_SOMA_EM = { faturamento: 'Faturamento', totalDeclarado: 'Total Declarado' };
 function tagsExtras(lista){
   return `<div class="tags">${(lista||[]).map(k=>{
     const sufixo = k.tipo ? ` <span style="opacity:.6;">· ${SUFIXO_TIPO_KPI[k.tipo]||k.tipo}</span>` : '';
-    return `<span class="tag kpi">${escapeHtml(k.label)}${sufixo}</span>`;
+    const soma = (k.somaEm && LABEL_SOMA_EM[k.somaEm]) ? ` <span style="opacity:.6;">→ ${LABEL_SOMA_EM[k.somaEm]}</span>` : '';
+    return `<span class="tag kpi">${escapeHtml(k.label)}${sufixo}${soma}</span>`;
   }).join('') || '<span style="color:var(--muted);">nenhum</span>'}</div>`;
 }
 function nomeResponsavel(id){
@@ -624,7 +675,7 @@ function abrirEdicaoGrupo(id){
   document.getElementById('e-formas').innerHTML = '';
   (g.formasPagamentoExtras||[]).forEach(k=>adicionarKpi('e-formas', k.label, null, k.operacao, k.tambemNoOutroTotal));
   document.getElementById('e-kpis').innerHTML = '';
-  (g.kpisExtras||[]).forEach(k=>adicionarKpi('e-kpis', k.label, k.tipo));
+  (g.kpisExtras||[]).forEach(k=>adicionarKpi('e-kpis', k.label, k.tipo, null, null, k.somaEm));
   responsaveisChecksHtml('e-responsaveis', new Set(g.responsaveis||[]));
   document.getElementById('grupo-err').classList.add('hidden');
   grupoOverlay.classList.add('show');

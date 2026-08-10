@@ -543,14 +543,17 @@ function atualizarResumo(){
   const g = (id)=>num(document.getElementById(id).value);
   const canaisDefs = defsExtrasAtual('canaisVendaExtras');
   const formasDefs = defsExtrasAtual('formasPagamentoExtras');
+  const kpisDefs = defsExtrasAtual('kpisExtras');
   const faturamento = +(
     somaExtrasComSinal('canal-extra-input', canaisDefs)
     + somaExtrasComSinal('forma-extra-input', formasDefs, {soCruzado:true})
+    + somaKpisEm(kpisDefs, 'faturamento')
   ).toFixed(2);
   const totalDeclarado = +(
     somaMaquinas + somaMaquinasPos + g('f-entradaDinheiro')
     + somaExtrasComSinal('forma-extra-input', formasDefs)
     + somaExtrasComSinal('canal-extra-input', canaisDefs, {soCruzado:true})
+    + somaKpisEm(kpisDefs, 'totalDeclarado')
   ).toFixed(2);
   document.getElementById('resumo-faturamento').textContent = fmtMoney(faturamento);
   document.getElementById('resumo-declarado').textContent = fmtMoney(totalDeclarado);
@@ -622,9 +625,10 @@ function somaExtrasComSinal(classe, defs, { soCruzado } = {}){
 }
 // KPI's tem unidade de medida por campo (ver grupos.html) - diferente de
 // Canais/Formas (sempre R$), o input muda de tipo conforme "tipo":
-// quantidade/moeda/kg viram number (so muda step), texto vira texto livre, e
-// arquivo vira upload de anexo (nao entra no mapa kpisExtras da leitura
-// normal - vai junto do FormData no submit, ver arquivosKpiSelecionados)
+// quantidade/moeda/kg viram number (so muda step), tempo vira texto min:seg
+// (convertido pra segundos na leitura, ver lerKpisExtras), texto vira texto
+// livre, e arquivo vira upload de anexo (nao entra no mapa kpisExtras da
+// leitura normal - vai junto do FormData no submit, ver arquivosKpiSelecionados)
 function renderKpisExtras(unidade){
   const grupo = grupoKpiDaUnidade(unidade);
   const campos = grupo ? (grupo.kpisExtras||[]) : [];
@@ -640,12 +644,56 @@ function renderKpisExtras(unidade){
     if(tipo === 'texto'){
       return `<div><label>${escapeHtml(k.label)}</label><input type="text" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input"></div>`;
     }
+    if(tipo === 'tempo'){
+      return `<div><label>${escapeHtml(k.label)} (min:seg)</label><input type="text" placeholder="mm:ss" pattern="[0-9]{1,4}:[0-5][0-9]" inputmode="numeric" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input kpi-extra-tempo"></div>`;
+    }
     const step = tipo === 'quantidade' ? '1' : (tipo === 'kg' ? '0.001' : '0.01');
     const sufixo = tipo === 'kg' ? ' (Kg)' : (tipo === 'moeda' ? ' (R$)' : '');
     return `<div><label>${escapeHtml(k.label)}${sufixo}</label><input type="number" step="${step}" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input"></div>`;
   }).join('');
+  // KPI moeda com "somar em" (ver grupos.html) precisa recalcular o preview
+  // de Faturamento/Total Declarado a cada digitação, igual Canais/Formas ja
+  // fazem (ver renderExtrasGrupo) - antes disso nao precisava, KPI nunca
+  // afetava nenhum total
+  container.querySelectorAll('.kpi-extra-input').forEach(el=>el.addEventListener('input', atualizarResumo));
 }
-function lerKpisExtras(){ return lerExtrasGrupo('kpi-extra-input'); }
+// mm:ss (ou h:mm:ss) -> total de segundos, pra gravar como numero (mesmo
+// mapa kpisExtras dos outros tipos - ver sanitizarMapaExtras em
+// fechamentosLive.js, que trata "tempo" igual quantidade/kg: um numero)
+function tempoParaSegundos(txt){
+  const partes = String(txt||'').trim().split(':').map(p=>parseInt(p,10));
+  if(partes.some(isNaN) || !partes.length) return 0;
+  let seg = 0;
+  partes.forEach(p=>{ seg = seg*60 + p; });
+  return seg;
+}
+// segundos -> "mm:ss", pra reexibir um valor ja salvo (ex: edição do Master)
+function segundosParaTempo(seg){
+  const s = Math.max(0, Math.round(num(seg)));
+  const m = Math.floor(s/60);
+  const r = s%60;
+  return `${m}:${String(r).padStart(2,'0')}`;
+}
+function lerKpisExtras(){
+  const out = lerExtrasGrupo('kpi-extra-input');
+  document.querySelectorAll('.kpi-extra-tempo').forEach(el=>{
+    out[el.dataset.extraCampo] = String(tempoParaSegundos(el.value));
+  });
+  return out;
+}
+// soma os KPI's (sempre tipo moeda - unico que pode ter somaEm != 'nao', ver
+// grupos.js) marcados pra somar em "destino" (Faturamento/Total Declarado) -
+// mesma logica de somaKpisEm em fechamentosLive.js, so pra bater o preview
+// em tela com o que o servidor vai calcular de verdade
+function somaKpisEm(kpisDefs, destino){
+  const porCampo = new Map((kpisDefs||[]).map(d=>[d.campo,d]));
+  let s = 0;
+  document.querySelectorAll('.kpi-extra-input').forEach(el=>{
+    const def = porCampo.get(el.dataset.extraCampo);
+    if(def && def.somaEm===destino) s += num(el.value);
+  });
+  return s;
+}
 function arquivosKpiSelecionados(){
   return [...document.querySelectorAll('.kpi-extra-arquivo')].filter(el=>el.files && el.files[0]);
 }
@@ -802,8 +850,9 @@ document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
     // tela so por completude do payload, nao por confiança nesse numero
     const canaisDefsSubmit = defsExtrasAtual('canaisVendaExtras');
     const formasDefsSubmit = defsExtrasAtual('formasPagamentoExtras');
-    campos.faturamento = somaExtrasComSinal('canal-extra-input', canaisDefsSubmit) + somaExtrasComSinal('forma-extra-input', formasDefsSubmit, {soCruzado:true});
-    campos.totalDeclarado = num(campos.adyen) + num(campos.adyenPos) + num(campos.entradaDinheiro) + somaExtrasComSinal('forma-extra-input', formasDefsSubmit) + somaExtrasComSinal('canal-extra-input', canaisDefsSubmit, {soCruzado:true});
+    const kpisDefsSubmit = defsExtrasAtual('kpisExtras');
+    campos.faturamento = somaExtrasComSinal('canal-extra-input', canaisDefsSubmit) + somaExtrasComSinal('forma-extra-input', formasDefsSubmit, {soCruzado:true}) + somaKpisEm(kpisDefsSubmit, 'faturamento');
+    campos.totalDeclarado = num(campos.adyen) + num(campos.adyenPos) + num(campos.entradaDinheiro) + somaExtrasComSinal('forma-extra-input', formasDefsSubmit) + somaExtrasComSinal('canal-extra-input', canaisDefsSubmit, {soCruzado:true}) + somaKpisEm(kpisDefsSubmit, 'totalDeclarado');
 
     const body = {
       unidade,

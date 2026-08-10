@@ -1636,6 +1636,9 @@ function renderKpisEdicaoFechamento(grupo, mapaAtual, fechamentoId){
     if(tipo === 'texto'){
       return `<div><label>${escapeHtml(k.label)}</label><input type="text" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="texto" class="ef-kpi-extra-input" value="${escapeHtml(atual||'')}"></div>`;
     }
+    if(tipo === 'tempo'){
+      return `<div><label>${escapeHtml(k.label)} (min:seg)</label><input type="text" placeholder="mm:ss" pattern="[0-9]{1,4}:[0-5][0-9]" inputmode="numeric" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="tempo" class="ef-kpi-extra-input" value="${segundosParaTempo(atual)}"></div>`;
+    }
     const step = tipo === 'quantidade' ? '1' : (tipo === 'kg' ? '0.001' : '0.01');
     return `<div><label>${escapeHtml(k.label)}</label><input type="number" step="${step}" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="${tipo}" class="ef-kpi-extra-input" value="${num(atual)}"></div>`;
   }).join('');
@@ -1775,6 +1778,22 @@ async function excluirSangria(){
   }
 }
 function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
+// KPI tipo "tempo" grava em SEGUNDOS (mesmo mapa kpisExtras dos outros
+// tipos, ver sanitizarMapaExtras em fechamentosLive.js) - o Master digita/vê
+// min:seg na edição direta (mm:ss <-> segundos)
+function tempoParaSegundos(txt){
+  const partes = String(txt||'').trim().split(':').map(p=>parseInt(p,10));
+  if(partes.some(isNaN) || !partes.length) return 0;
+  let seg = 0;
+  partes.forEach(p=>{ seg = seg*60 + p; });
+  return seg;
+}
+function segundosParaTempo(seg){
+  const s = Math.max(0, Math.round(num(seg)));
+  const m = Math.floor(s/60);
+  const r = s%60;
+  return `${m}:${String(r).padStart(2,'0')}`;
+}
 function fecharEdicaoFechamento(){
   document.getElementById('fech-overlay').classList.add('hidden');
   FECHAMENTO_EDITANDO_ID = null;
@@ -1811,7 +1830,9 @@ async function salvarEdicaoFechamento(){
   const mudancas = { gerente: document.getElementById('ef-gerente').value, observacao: document.getElementById('ef-observacao').value };
   CAMPOS_EDICAO_FECHAMENTO.forEach(c=>{ mudancas[c] = document.getElementById('ef-'+c).value; });
   const mudancasKpis = {};
-  document.querySelectorAll('.ef-kpi-extra-input').forEach(el=>{ mudancasKpis[el.dataset.kpiCampo] = el.value; });
+  document.querySelectorAll('.ef-kpi-extra-input').forEach(el=>{
+    mudancasKpis[el.dataset.kpiCampo] = el.dataset.kpiTipo === 'tempo' ? String(tempoParaSegundos(el.value)) : el.value;
+  });
   const mudancasCanais = {};
   document.querySelectorAll('.ef-canal-extra-input').forEach(el=>{ mudancasCanais[el.dataset.canalCampo] = el.value; });
   const mudancasFormas = {};

@@ -1659,6 +1659,22 @@ async function decidir(status){
 // do que já foi lançado é papel do Histórico) ----------
 function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function fmtData(d){ if(!d) return '—'; const [y,m,dd]=d.split('-'); return `${dd}/${m}/${y}`; }
+// KPI tipo "tempo" grava em SEGUNDOS (mesmo mapa kpisExtras dos outros
+// tipos, ver sanitizarMapaExtras em fechamentosLive.js) - o Master digita/vê
+// min:seg na edição direta (mm:ss <-> segundos)
+function tempoParaSegundos(txt){
+  const partes = String(txt||'').trim().split(':').map(p=>parseInt(p,10));
+  if(partes.some(isNaN) || !partes.length) return 0;
+  let seg = 0;
+  partes.forEach(p=>{ seg = seg*60 + p; });
+  return seg;
+}
+function segundosParaTempo(seg){
+  const s = Math.max(0, Math.round(num(seg)));
+  const m = Math.floor(s/60);
+  const r = s%60;
+  return `${m}:${String(r).padStart(2,'0')}`;
+}
 const CAMPOS_NUMERICOS_FECHAMENTO = ['caixaInicial','caixaFinal','delivery','carryout','pickup','loja','adyen','adyenPos','ifood','food99','pix','pixCnpj','outros','totalSaida','faturamento','totalDeclarado','quebra','tc','cancelados','entradaDinheiro','deposito'];
 const NOMES_CAMPOS_FECHAMENTO = { caixaInicial:'Caixa inicial', caixaFinal:'Caixa final', delivery:'Delivery', carryout:'Carryout', pickup:'Pickup', loja:'Loja (salão)', adyen:'Maquininhas (total)', adyenPos:'Maquininha POS 01 (pós meia-noite)', ifood:'Ifood', food99:'99Food', pix:'Adyen', pixCnpj:'Pix CNPJ', outros:'Outros', totalSaida:'Total de saída', faturamento:'Faturamento total', totalDeclarado:'Total declarado', quebra:'Quebra de caixa', tc:'TC', cancelados:'Cancelados', entradaDinheiro:'Entrada em dinheiro', deposito:'Depósito' };
 // so os campos fora de Canais de venda/Formas de pagamento/KPI's (esses 3
@@ -1681,8 +1697,13 @@ function opcoesCorrecaoFechamento(f){
     .map(d=>`<option value="cv:${escapeHtml(d.campo)}">${escapeHtml(d.label||d.campo)} (atual: ${fmtMoney(num((f.canaisVendaExtras||{})[d.campo]))})</option>`).join('');
   const formas = (g?.formasPagamentoExtras||[])
     .map(d=>`<option value="fp:${escapeHtml(d.campo)}">${escapeHtml(d.label||d.campo)} (atual: ${fmtMoney(num((f.formasPagamentoExtras||{})[d.campo]))})</option>`).join('');
+  // tempo tambem fica de fora daqui (junto com texto/arquivo): esse pedido
+  // usa 1 input numerico generico (#ef-valor) compartilhado por qualquer
+  // campo escolhido, e "mm:ss" nao cabe nele - correcao de tempo passa pela
+  // edicao direta do Master (abrirEditarMasterFechamento), que tem input
+  // proprio por campo
   const kpis = (g?.kpisExtras||[])
-    .filter(k=>!['texto','arquivo'].includes(k.tipo||'quantidade'))
+    .filter(k=>!['texto','arquivo','tempo'].includes(k.tipo||'quantidade'))
     .map(k=>`<option value="kpi:${escapeHtml(k.campo)}">${escapeHtml(k.label||k.campo)} (atual: ${(k.tipo==='moeda')?fmtMoney(num((f.kpisExtras||{})[k.campo])):num((f.kpisExtras||{})[k.campo])})</option>`).join('');
   return fixos
     + (canais?`<optgroup label="Canais de venda (grupo)">${canais}</optgroup>`:'')
@@ -1932,6 +1953,9 @@ function abrirEditarMasterFechamento(id){
     if(tipo === 'texto'){
       return `<div><label>${escapeHtml(k.label)}</label><input type="text" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="texto" class="mf-kpi-extra-input" value="${escapeHtml(atual||'')}"></div>`;
     }
+    if(tipo === 'tempo'){
+      return `<div><label>${escapeHtml(k.label)} (min:seg)</label><input type="text" placeholder="mm:ss" pattern="[0-9]{1,4}:[0-5][0-9]" inputmode="numeric" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="tempo" class="mf-kpi-extra-input" value="${segundosParaTempo(atual)}"></div>`;
+    }
     const step = tipo === 'quantidade' ? '1' : (tipo === 'kg' ? '0.001' : '0.01');
     return `<div><label>${escapeHtml(k.label)}</label><input type="number" step="${step}" inputmode="decimal" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="${tipo}" class="mf-kpi-extra-input" value="${num(atual)}"></div>`;
   }).join('');
@@ -1986,6 +2010,9 @@ document.getElementById('form-master-fechamento').addEventListener('submit', asy
     if(el.dataset.kpiTipo === 'texto'){
       const v = el.value;
       if(v !== String(atual||'')) mudancasKpis[campo] = v;
+    } else if(el.dataset.kpiTipo === 'tempo'){
+      const v = tempoParaSegundos(el.value);
+      if(v !== Math.round(num(atual))) mudancasKpis[campo] = v;
     } else {
       const v = num(el.value);
       if(v !== num(atual)) mudancasKpis[campo] = v;

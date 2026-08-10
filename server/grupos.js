@@ -30,8 +30,18 @@ function slugify(s) {
 // unidades de medida de um KPI extra - so faz sentido pra kpisExtras (Canais
 // de venda/Formas de pagamento sempre somam em R$, entao nem mostram esse
 // seletor em grupos.html). "quantidade" e o padrao pra KPI sem tipo definido
-// (grupo criado antes dessa feature).
-const TIPOS_KPI_VALIDOS = new Set(['quantidade', 'moeda', 'kg', 'arquivo', 'texto']);
+// (grupo criado antes dessa feature). "tempo" guarda o valor em SEGUNDOS
+// (o Master digita min:seg em grupos.html/lancamento.html, ja convertido
+// antes de chegar aqui - ver sanitizarMapaExtras em fechamentosLive.js).
+const TIPOS_KPI_VALIDOS = new Set(['quantidade', 'moeda', 'kg', 'tempo', 'arquivo', 'texto']);
+
+// pra ONDE um KPI extra soma, alem de so ficar registrado - "nao" (padrao,
+// mesmo comportamento de sempre: so capta o dado, nunca some em nada) ou um
+// dos totais do fechamento. So faz sentido pra KPI tipo "moeda" (somar
+// Quantidade/Kg/Tempo/Texto num total em R$ corromperia o valor) - quem
+// aplica essa regra de fato e recomputarTotais em fechamentosLive.js; aqui
+// so valida o valor gravado.
+const SOMA_EM_VALIDAS = new Set(['nao', 'faturamento', 'totalDeclarado']);
 
 // sinal de um campo extra (soma no proprio total, ou subtrai dele) - so faz
 // sentido pra canaisVendaExtras/formasPagamentoExtras (kpisExtras nao soma
@@ -49,6 +59,10 @@ const OPERACOES_VALIDAS = new Set(['soma', 'subtrai']);
 // gravado quando informado (canais/formas nunca mandam, entao continuam sem
 // esse campo no documento); "operacao"/"tambemNoOutroTotal" so fazem
 // sentido pra canais/formas (kpis nao mandam, entao tambem ficam de fora).
+// "somaEm" so faz sentido pra kpis tipo "moeda" - qualquer outro tipo (ou
+// ausencia de tipo) forca 'nao', mesmo que o cliente mande outra coisa
+// (defesa em profundidade - a UI em grupos.html ja desabilita esse seletor
+// pra tipo != moeda, mas o backend nao pode confiar so nisso).
 function sanitizarCamposExtras(lista) {
   if (!Array.isArray(lista)) return [];
   const usados = new Set();
@@ -66,6 +80,10 @@ function sanitizarCamposExtras(lista) {
       if (k?.tipo != null) item.tipo = TIPOS_KPI_VALIDOS.has(k.tipo) ? k.tipo : 'quantidade';
       if (k?.operacao != null) item.operacao = OPERACOES_VALIDAS.has(k.operacao) ? k.operacao : 'soma';
       if (k?.tambemNoOutroTotal != null) item.tambemNoOutroTotal = !!k.tambemNoOutroTotal;
+      if (k?.somaEm != null) {
+        const valido = SOMA_EM_VALIDAS.has(k.somaEm) ? k.somaEm : 'nao';
+        item.somaEm = item.tipo === 'moeda' ? valido : 'nao';
+      }
       return item;
     })
     .filter(Boolean)

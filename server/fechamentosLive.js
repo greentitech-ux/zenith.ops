@@ -91,12 +91,27 @@ function somaMapaComSinal(mapa, defs, { soDestinoCruzado } = {}) {
   }, 0);
 }
 
-// resolve as definições de canaisVendaExtras/formasPagamentoExtras do grupo
-// da unidade (sinal soma/subtrai e cruzamento entre os 2 totais, ver
-// grupos.js) - usa o grupo REAL da unidade, nao o id que o cliente mandou
+// resolve as definições de canaisVendaExtras/formasPagamentoExtras/kpisExtras
+// do grupo da unidade (sinal soma/subtrai e cruzamento entre os 2 totais pra
+// canais/formas; somaEm pra kpis, ver grupos.js) - usa o grupo REAL da
+// unidade, nao o id que o cliente mandou
 async function defsExtrasDaUnidade(unidade) {
   const grupo = await grupos.grupoDaUnidade(unidade);
-  return { canais: grupo?.canaisVendaExtras || [], formas: grupo?.formasPagamentoExtras || [] };
+  return { canais: grupo?.canaisVendaExtras || [], formas: grupo?.formasPagamentoExtras || [], kpis: grupo?.kpisExtras || [] };
+}
+
+// soma um mapa de kpisExtras que o Master marcou pra somar em "destino"
+// (Faturamento ou Total Declarado, ver somaEm em grupos.js) - so KPI tipo
+// moeda pode ter somaEm != 'nao' (grupos.js ja garante isso na gravacao),
+// entao nao precisa checar tipo aqui de novo. Sem cruzamento/sinal (isso e
+// so pra canais/formas, ver somaMapaComSinal) - um KPI soma OU nao soma.
+function somaKpisEm(mapaKpis, kpisDefs, destino) {
+  const porCampo = new Map((kpisDefs || []).map((d) => [d.campo, d]));
+  return Object.entries(mapaKpis || {}).reduce((s, [campo, valor]) => {
+    const def = porCampo.get(campo);
+    if (!def || def.somaEm !== destino) return s;
+    return s + num(valor);
+  }, 0);
 }
 
 // loja que vende depois da meia-noite na maquininha: esse valor (adyenPos,
@@ -125,17 +140,20 @@ async function ajustePosDoDiaAnterior(unidade, data) {
 // "explicitos" (opcional): campos que uma correcao mudou de proposito - se
 // for justamente faturamento/totalDeclarado, respeita o valor dado em vez
 // de recalcular por cima (escape hatch raro do Master, ver editarDireto)
-// "defsExtras" (opcional): {canais, formas} do grupo da unidade (ver
+// "defsExtras" (opcional): {canais, formas, kpis} do grupo da unidade (ver
 // defsExtrasDaUnidade) - sem isso, extras somam normal (sinal soma, sem
-// cruzamento), mesmo comportamento de antes dessa feature.
+// cruzamento) e kpis nao somam em nada, mesmo comportamento de antes dessa
+// feature.
 function recomputarTotais(r, explicitos, defsExtras) {
   const canaisDefs = defsExtras?.canais || [];
   const formasDefs = defsExtras?.formas || [];
+  const kpisDefs = defsExtras?.kpis || [];
   if (!explicitos || !Object.prototype.hasOwnProperty.call(explicitos, 'faturamento')) {
     r.faturamento = +(
       num(r.delivery) + num(r.carryout) + num(r.pickup) + num(r.loja)
       + somaMapaComSinal(r.canaisVendaExtras, canaisDefs)
       + somaMapaComSinal(r.formasPagamentoExtras, formasDefs, { soDestinoCruzado: true })
+      + somaKpisEm(r.kpisExtras, kpisDefs, 'faturamento')
     ).toFixed(2);
   }
   if (!explicitos || !Object.prototype.hasOwnProperty.call(explicitos, 'totalDeclarado')) {
@@ -144,6 +162,7 @@ function recomputarTotais(r, explicitos, defsExtras) {
       + num(r.ifood) + num(r.food99) + num(r.pix) + num(r.pixCnpj) + num(r.outros) + num(r.entradaDinheiro)
       + somaMapaComSinal(r.formasPagamentoExtras, formasDefs)
       + somaMapaComSinal(r.canaisVendaExtras, canaisDefs, { soDestinoCruzado: true })
+      + somaKpisEm(r.kpisExtras, kpisDefs, 'totalDeclarado')
     ).toFixed(2);
   }
   r.diferenca = +(r.totalDeclarado - r.faturamento).toFixed(2);
@@ -535,7 +554,12 @@ async function editarDireto({ fechamentoId, mudancas, mudancasKpis, mudancasCana
   const canaisExtrasNovo = Object.keys(canaisValidos).length ? { ...(atual.canaisVendaExtras || {}), ...canaisValidos } : atual.canaisVendaExtras;
   const formasExtrasNovo = Object.keys(formasValidos).length ? { ...(atual.formasPagamentoExtras || {}), ...formasValidos } : atual.formasPagamentoExtras;
 
-  const merged = { ...atual, ...camposValidos, canaisVendaExtras: canaisExtrasNovo, formasPagamentoExtras: formasExtrasNovo };
+  // kpisExtras precisa entrar no merged tambem - sem isso, uma correcao que
+  // muda so um KPI (ex: um KPI moeda com somaEm=faturamento) recomputava o
+  // total com o mapa ANTIGO (atual.kpisExtras, herdado do spread abaixo),
+  // ignorando a propria mudanca que acabou de ser aplicada. Passou
+  // despercebido ate agora porque kpisExtras nunca somava em nada.
+  const merged = { ...atual, ...camposValidos, kpisExtras: kpisExtrasNovo, canaisVendaExtras: canaisExtrasNovo, formasPagamentoExtras: formasExtrasNovo };
   recomputarTotais(merged, camposValidos, await defsExtrasDaUnidade(atual.unidade));
   const novosValores = { ...camposValidos, faturamento: merged.faturamento, totalDeclarado: merged.totalDeclarado, diferenca: merged.diferenca };
   if (Object.keys(kpisValidos).length) novosValores.kpisExtras = kpisExtrasNovo;
