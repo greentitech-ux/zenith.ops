@@ -35,6 +35,15 @@ const MAX_RODADAS_TOOLS = 5; // seguranca do loop de tool use
 // baixa interacao: depois disso o bot para de responder e o humano continua
 const MAX_RESPOSTAS_BOT = 8;
 
+// rede de seguranca: as vezes o modelo escreve na resposta final que "ja
+// chamou" um atendente sem de fato ter chamado a ferramenta chamar_atendente
+// nessa rodada (ver instrucao no prompt acima) - se isso acontecer, o alarme
+// (push + SSE, ver notifyBeniboyEscalonamento) nunca dispararia mesmo com a
+// pessoa esperando um humano que ninguem avisou. Detecta a frase e forca o
+// escalonamento de verdade, garantindo que a fala e a acao andem juntas.
+const ESCALACAO_VERBO_RE = /\b(chamei|chamado|acionei|acionado|notifiquei|notificado)\b/i;
+const ESCALACAO_ALVO_RE = /\b(atendente|humano|suporte|time)\b/i;
+
 // tipos que o bot pode abrir na Central (mesma lista do formulario publico -
 // estorno e ajuste de fechamento ficam de fora, tem fluxo proprio com login)
 const TIPOS_TICKET = ['compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota'];
@@ -65,6 +74,7 @@ O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, 
 - Respostas CURTAS e objetivas: 1 a 4 frases, sem enrolação, sem repetir o que a pessoa disse.
 - BAIXA interação: resolva no menor número de trocas possível. Se der pra agir já, aja; se faltar só 1 dado, pergunte só ele (uma pergunta por vez).
 - Português do Brasil, tom simpático e direto. Nada de listas longas nem textão.
+- NUNCA diga que "chamou", "chamei", "acionei" ou "notifiquei" um atendente/time humano sem ter chamado a ferramenta chamar_atendente NESSA MESMA resposta - isso dispara um alarme real pro time, então a frase e a ação têm que andar sempre juntas. Se ainda não chamou a ferramenta, chame agora ou fale só no futuro ("posso chamar um atendente", "vou chamar um atendente").
 - Nunca invente informação sobre o sistema. Se não souber ou o assunto for sensível (senha de outra pessoa, dados financeiros, urgência grave), use chamar_atendente.
 
 ## O que você sabe do Zenith
@@ -404,6 +414,16 @@ async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdP
     if (resp.stop_reason === 'refusal') return null; // sem resposta - fica pro humano
     const texto = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
     if (!texto) return null;
+
+    // rede de seguranca: o texto diz que ja chamou humano mas a ferramenta
+    // chamar_atendente nao rodou nessa resposta - forca o escalonamento pra
+    // o alarme (push+SSE) nunca deixar de disparar quando o bot promete isso
+    if (!resultado.chamouAtendente && ESCALACAO_VERBO_RE.test(texto) && ESCALACAO_ALVO_RE.test(texto)) {
+      await suporteChat.desativarBot(chatId);
+      resultado.chamouAtendente = true;
+      resultado.motivoAtendente = 'Bot disse ter chamado atendente sem usar a ferramenta (rede de segurança)';
+    }
+
     const atualizado = await suporteChat.adicionarMensagem(chatId, { de: 'suporte', texto, bot: true });
     return { chat: atualizado, ...resultado };
   } catch (err) {
