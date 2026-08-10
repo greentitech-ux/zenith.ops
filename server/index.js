@@ -2652,7 +2652,7 @@ app.get('/api/inventario/relatorio.:formato(csv|pdf)', requireSection('inventari
 // padrao entregas/entregas-lancamento) + uma secao de festas ----------
 app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, res) => {
   try {
-    const { unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, usarCreditoMin, metodoPagamento, meiasExtras, motivoCortesia, categoriaTempo } = req.body;
+    const { unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, usarCreditoMin, metodoPagamento, pagamentos, meiasExtras, motivoCortesia, categoriaTempo } = req.body;
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
@@ -2664,7 +2664,7 @@ app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, r
       minutosExtras = await parque.usarCredito(responsavel?.cpf, usarCreditoMin);
     }
     const registro = await parque.criar({
-      unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras, metodoPagamento, meiasExtras, motivoCortesia, categoriaTempo,
+      unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras, metodoPagamento, pagamentos, meiasExtras, motivoCortesia, categoriaTempo,
       colaboradorId: req.user.id, colaboradorNome: req.user.email,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
     });
@@ -3077,7 +3077,7 @@ app.get('/api/parque/relatorio.:formato(csv|pdf)', requireSection('parque'), asy
 // (tabela por pulseira: 30min=R$40, 60min=R$50, demais combinam os blocos)
 // e a forma de pagamento. Financeiro e assunto de gestao: Master/Admin veem
 // tudo, Gerente ve as unidades dele; os demais nao acessam
-const METODOS_PARQUE_LABEL = { dinheiro: 'Dinheiro', pix: 'Pix', debito: 'Débito', credito: 'Crédito', cortesia: 'Cortesia' };
+const METODOS_PARQUE_LABEL = { dinheiro: 'Dinheiro', pix: 'Pix', debito: 'Débito', credito: 'Crédito', cortesia: 'Cortesia', misto: 'Múltiplas formas' };
 app.get('/api/parque/financeiro.:formato(csv|pdf)', requireSection('parque'), async (req, res) => {
   const ehGestor = req.isMaster || req.isAdmin || (req.user && users.ehCargoGerente(req.user.cargo));
   if (!ehGestor) return res.status(403).json({ error: 'Só o Gerente da unidade ou o Master/Admin acessam o financeiro.' });
@@ -3096,9 +3096,22 @@ app.get('/api/parque/financeiro.:formato(csv|pdf)', requireSection('parque'), as
   let total = 0;
   const linhas = lista.map((c) => {
     const valor = parque.valorDoCheckin(c);
-    const metodo = METODOS_PARQUE_LABEL[c.metodoPagamento] || 'sem método';
+    // dividido entre mais de uma forma (ver pagamentos em parque.js): o
+    // resumo por metodo reflete o valor de CADA forma, nao o total inteiro
+    // debaixo de um rotulo generico - assim dinheiro x cartao bate certo
+    const temSplit = Array.isArray(c.pagamentos) && c.pagamentos.length > 0;
+    const metodo = temSplit
+      ? c.pagamentos.map((p) => METODOS_PARQUE_LABEL[p.forma] || p.forma).join(' + ')
+      : (METODOS_PARQUE_LABEL[c.metodoPagamento] || 'sem método');
     total += valor;
-    porMetodo[metodo] = (porMetodo[metodo] || 0) + valor;
+    if (temSplit) {
+      for (const p of c.pagamentos) {
+        const label = METODOS_PARQUE_LABEL[p.forma] || p.forma;
+        porMetodo[label] = (porMetodo[label] || 0) + p.valor;
+      }
+    } else {
+      porMetodo[metodo] = (porMetodo[metodo] || 0) + valor;
+    }
     return {
       data: reportUtil.fmtDataBR(c.dataUtilizacao),
       responsavel: c.responsavel?.nome,

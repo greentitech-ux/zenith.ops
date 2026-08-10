@@ -81,6 +81,10 @@
   @media(min-width:440px){ .crianca-linha{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:end;} .crianca-linha-nasc{grid-column:2;} }
   .crianca-linha input{margin:0;}
   .btn-remover-crianca{background:none;border:1px solid var(--line);color:var(--bad);border-radius:8px;height:44px;width:38px;flex:none;cursor:pointer;font-size:14px;}
+  .pagamento-linha{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px;}
+  .pagamento-linha-campos{display:flex;gap:6px;align-items:end;}
+  .pagamento-linha-campos>div{flex:1;min-width:0;}
+  .pagamento-linha input,.pagamento-linha select{margin:0;}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;z-index:50;}
   .overlay.hidden{display:none!important;}
   .sheet-wrap{position:relative;width:100%;max-width:640px;}
@@ -234,15 +238,10 @@
 
     <div class="secao">
       <div class="secao-titulo">Pagamento</div>
-      <label>Forma de pagamento</label>
-      <select id="f-metodo" required>
-        <option value="">selecione...</option>
-        <option value="dinheiro">Dinheiro</option>
-        <option value="pix">Pix</option>
-        <option value="debito">Cartão de débito</option>
-        <option value="credito">Cartão de crédito</option>
-        <option value="cortesia">Cortesia (não cobra)</option>
-      </select>
+      <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;">
+        <input type="checkbox" id="f-cortesia" style="width:auto;" onchange="toggleCortesia()">
+        🎁 Entrada cortesia (não cobra)
+      </label>
       <!-- cortesia e renuncia de receita: exige justificativa e vira um
            card de aprovacao do Gerente/Master antes de liberar a entrada -->
       <div id="wrap-motivo-cortesia" class="hidden" style="background:var(--panel2);border:1px solid var(--warn);border-radius:8px;padding:10px 12px;margin-top:10px;">
@@ -250,11 +249,17 @@
         <textarea id="f-motivo-cortesia" placeholder="por que essa entrada não será cobrada (ex: ação promocional autorizada, convidado da administração...)"></textarea>
         <div class="sub" style="font-size:12px;color:var(--muted);margin-top:4px;">A entrada só é liberada depois da aprovação do <b>Gerente da unidade</b> ou do <b>Master</b>. Quando o Gerente aprova, o card continua aberto pra palavra final do Master (prestação de contas).</div>
       </div>
-      <label>Meias extras <span style="text-transform:none;font-weight:400;">(pares além das crianças · R$25 cada)</span></label>
-      <input type="number" step="1" min="0" max="30" id="f-meias-extras" value="0" oninput="atualizarPreviewValor()">
-      <div class="resumo">
-        <div class="linha"><span>Meias (R$25/par)</span><b id="preview-meias">R$ 0,00</b></div>
-        <div class="linha"><span id="valor-detalhe">—</span><b id="preview-valor">R$ 0,00</b></div>
+      <div id="wrap-pagamentos">
+        <label>Meias extras <span style="text-transform:none;font-weight:400;">(pares além das crianças · R$25 cada)</span></label>
+        <input type="number" step="1" min="0" max="30" id="f-meias-extras" value="0" oninput="atualizarPreviewValor()">
+        <div class="resumo">
+          <div class="linha"><span>Meias (R$25/par)</span><b id="preview-meias">R$ 0,00</b></div>
+          <div class="linha"><span id="valor-detalhe">—</span><b id="preview-valor">R$ 0,00</b></div>
+        </div>
+        <label style="margin-top:10px;">Forma(s) de pagamento <span style="text-transform:none;font-weight:400;">(divida em mais de uma se precisar - ex: metade dinheiro, metade pix)</span></label>
+        <div id="lista-pagamentos"></div>
+        <button type="button" class="btn-secundario" id="btn-add-pagamento" onclick="adicionarPagamento()">+ Adicionar forma de pagamento</button>
+        <div class="sub" id="pagamento-resumo" style="font-size:12px;color:var(--muted);margin-top:6px;"></div>
       </div>
     </div>
 
@@ -571,26 +576,115 @@ function contarNiver(){
   return [...document.querySelectorAll('#lista-criancas .crianca-linha')]
     .filter(l=>l.querySelector('.crianca-nome').value.trim() && ehNiverAuto(l.querySelector('.crianca-nasc').value, dataUso)).length;
 }
-function atualizarPreviewValor(){
+// total da entrada (sem contar pagamentos ainda) - mesma conta usada pra
+// preencher o resumo E pra travar as formas de pagamento (ver abaixo)
+function calcularTotalAtual(){
+  const gratis = document.getElementById('f-cortesia').checked || CATEGORIA_SELECIONADA==='pcd-cortesia';
+  if(gratis) return 0;
   const n = [...document.querySelectorAll('#lista-criancas .crianca-nome')].filter(i=>i.value.trim()).length;
-  const metodo = document.getElementById('f-metodo').value;
-  const gratis = metodo==='cortesia' || CATEGORIA_SELECIONADA==='pcd-cortesia';
   const unit = valorUnitarioAtual();
   const niver = contarNiver();
   const valorEntradas = unit * n - unit * NIVER_DESCONTO * niver;
   const meias = contarMeias() + Math.max(0, num(document.getElementById('f-meias-extras').value));
+  return valorEntradas + PRECO_MEIA * meias;
+}
+function atualizarPreviewValor(){
+  const n = [...document.querySelectorAll('#lista-criancas .crianca-nome')].filter(i=>i.value.trim()).length;
+  const gratis = document.getElementById('f-cortesia').checked || CATEGORIA_SELECIONADA==='pcd-cortesia';
+  const unit = valorUnitarioAtual();
+  const niver = contarNiver();
+  const meias = contarMeias() + Math.max(0, num(document.getElementById('f-meias-extras').value));
   const valorMeias = gratis ? 0 : PRECO_MEIA * meias;
-  const total = gratis ? 0 : valorEntradas + valorMeias;
+  const total = calcularTotalAtual();
   document.getElementById('preview-meias').textContent = `${meias} par(es) · ${fmtReal(valorMeias)}`;
   document.getElementById('valor-detalhe').textContent = gratis
     ? `cortesia · ${n} criança(s)`
     : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min)${niver?` · 🎂 Niver 50% (${niver})`:''} + meias`;
   document.getElementById('preview-valor').textContent = fmtReal(total);
+  if(!gratis){
+    reconciliarPagamentos(total);
+    atualizarBotaoPagamento(total);
+  }
 }
-document.getElementById('f-metodo').addEventListener('change', atualizarPreviewValor);
-document.getElementById('f-metodo').addEventListener('change', ()=>{
-  document.getElementById('wrap-motivo-cortesia').classList.toggle('hidden', document.getElementById('f-metodo').value!=='cortesia');
-});
+function toggleCortesia(){
+  const cortesia = document.getElementById('f-cortesia').checked;
+  document.getElementById('wrap-motivo-cortesia').classList.toggle('hidden', !cortesia);
+  document.getElementById('wrap-pagamentos').classList.toggle('hidden', cortesia);
+  atualizarPreviewValor();
+}
+
+// ---------- formas de pagamento (divide o TOTAL entre 1 ou mais formas,
+// no estilo "+ Adicionar criança") ----------
+let PAGAMENTO_SEQ = 0;
+function somaPagamentos(){
+  return [...document.querySelectorAll('#lista-pagamentos .pagamento-valor')].reduce((s,i)=>s+Math.max(0,num(i.value)),0);
+}
+// nunca deixa o valor dessa linha estourar o que ainda falta do total
+function limitarValorPagamento(input){
+  const total = calcularTotalAtual();
+  const outros = somaPagamentos() - Math.max(0, num(input.value));
+  const maxPermitido = Math.max(0, total - outros);
+  if(num(input.value) > maxPermitido + 0.001) input.value = maxPermitido>0 ? maxPermitido.toFixed(2) : '';
+}
+// se o total cair (ex: removeu uma criança) e a soma ja lancada passar a
+// exceder o novo total, desconta o excesso das ultimas linhas primeiro
+function reconciliarPagamentos(total){
+  const inputs = [...document.querySelectorAll('#lista-pagamentos .pagamento-valor')];
+  let soma = inputs.reduce((s,i)=>s+Math.max(0,num(i.value)),0);
+  for(let idx=inputs.length-1; idx>=0 && soma>total+0.001; idx--){
+    const atual = Math.max(0,num(inputs[idx].value));
+    if(atual<=0) continue;
+    const excesso = Math.min(atual, soma-total);
+    const novo = atual-excesso;
+    inputs[idx].value = novo>0 ? novo.toFixed(2) : '';
+    soma -= excesso;
+  }
+}
+// enquanto a soma das formas ja adicionadas nao bater o TOTAL, deixa abrir
+// mais uma; assim que bater, esconde o botao - nao deixa sobrar forma de
+// pagamento sem valor nem passar do total
+function atualizarBotaoPagamento(total){
+  const soma = somaPagamentos();
+  const btn = document.getElementById('btn-add-pagamento');
+  const completo = total<=0 || soma >= total - 0.001;
+  btn.classList.toggle('hidden', completo);
+  const resumo = document.getElementById('pagamento-resumo');
+  const falta = Math.max(0, total-soma);
+  resumo.textContent = total<=0 ? '' : (falta>0.001 ? `falta alocar ${fmtReal(falta)} de ${fmtReal(total)}` : `✅ valor completo · ${fmtReal(total)}`);
+}
+function adicionarPagamento(){
+  const total = calcularTotalAtual();
+  if(total>0 && somaPagamentos() >= total-0.001) return;
+  PAGAMENTO_SEQ++;
+  const id = 'pagamento-'+PAGAMENTO_SEQ;
+  const div = document.createElement('div');
+  div.className = 'pagamento-linha';
+  div.id = id;
+  div.innerHTML = `
+    <div class="pagamento-linha-campos">
+      <div><label style="margin-top:0;">Forma</label>
+        <select class="pagamento-forma" required onchange="atualizarPreviewValor()">
+          <option value="">selecione...</option>
+          <option value="dinheiro">Dinheiro</option>
+          <option value="pix">Pix</option>
+          <option value="debito">Cartão de débito</option>
+          <option value="credito">Cartão de crédito</option>
+        </select>
+      </div>
+      <div><label style="margin-top:0;">Valor pago</label>
+        <input type="number" step="0.01" min="0" class="pagamento-valor" placeholder="0,00" oninput="limitarValorPagamento(this);atualizarPreviewValor()">
+      </div>
+      <button type="button" class="btn-remover-crianca" title="Remover" onclick="document.getElementById('${id}').remove();atualizarPreviewValor()">✕</button>
+    </div>`;
+  document.getElementById('lista-pagamentos').appendChild(div);
+  atualizarPreviewValor();
+}
+function coletarPagamentos(){
+  return [...document.querySelectorAll('#lista-pagamentos .pagamento-linha')].map(div=>({
+    forma: div.querySelector('.pagamento-forma').value,
+    valor: Math.max(0, num(div.querySelector('.pagamento-valor').value)),
+  })).filter(p=>p.forma && p.valor>0);
+}
 
 // autopreenchimento por CPF: ao sair do campo, busca o cadastro mais
 // recente com esse CPF (de check-ins anteriores, inclusive os importados da
@@ -1076,7 +1170,9 @@ async function confirmarAddTempo(){
 // ---------- relancar (mesmo dia, mesmo termo) ----------
 async function relancarVisita(){
   if(!VISITA_HOJE) return;
-  const metodo = document.getElementById('f-metodo').value;
+  // relancar e' uma cobrança nova e simples (sem meia, sem niver) - usa a
+  // 1a forma de pagamento da lista, sem dividir em varias
+  const metodo = document.getElementById('f-cortesia').checked ? 'cortesia' : (document.querySelector('#lista-pagamentos .pagamento-forma')?.value || '');
   if(!metodo){ alert('Escolha a forma de pagamento antes de relançar.'); return; }
   if(!confirm(`Relançar a entrada de ${VISITA_HOJE.responsavelNome} com ${TEMPO_SELECIONADO}min? É uma nova cobrança (${fmtReal(metodo==='cortesia'?0:valorPorTempo(TEMPO_SELECIONADO)*VISITA_HOJE.criancas)}), sem meias, reaproveitando o Termo assinado de hoje.`)) return;
   const btn = document.getElementById('btn-relancar');
@@ -1126,6 +1222,10 @@ function resetarForm(){
   document.getElementById('wrap-credito').classList.add('hidden');
   document.getElementById('wrap-relancar').classList.add('hidden');
   document.getElementById('f-meias-extras').value = 0;
+  document.getElementById('wrap-motivo-cortesia').classList.add('hidden');
+  document.getElementById('wrap-pagamentos').classList.remove('hidden');
+  document.getElementById('lista-pagamentos').innerHTML = '';
+  adicionarPagamento();
   atualizarPreviewValor();
 }
 
@@ -1139,6 +1239,14 @@ document.getElementById('form-checkin').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
   const criancas = coletarCriancas();
   if(!criancas.length){ alert('Cadastre pelo menos uma criança.'); return; }
+  const cortesia = document.getElementById('f-cortesia').checked;
+  const pagamentos = coletarPagamentos();
+  if(!cortesia){
+    const total = calcularTotalAtual();
+    const soma = pagamentos.reduce((s,p)=>s+p.valor,0);
+    if(!pagamentos.length){ alert('Informe pelo menos uma forma de pagamento.'); return; }
+    if(Math.abs(soma-total) > 0.01){ alert(`A soma das formas de pagamento (${fmtReal(soma)}) precisa bater com o valor total (${fmtReal(total)}).`); return; }
+  }
   const btn = document.getElementById('btn-enviar');
   const msg = document.getElementById('msg');
   msg.classList.add('hidden');
@@ -1166,7 +1274,8 @@ document.getElementById('form-checkin').addEventListener('submit', async (ev)=>{
       adultoCortesia: AC_ATIVO,
       quantAC: AC_ATIVO ? document.getElementById('f-quantAC').value : 0,
       criancas,
-      metodoPagamento: document.getElementById('f-metodo').value,
+      metodoPagamento: cortesia ? 'cortesia' : (pagamentos.length===1 ? pagamentos[0].forma : 'misto'),
+      pagamentos: cortesia ? [] : pagamentos,
       motivoCortesia: document.getElementById('f-motivo-cortesia').value,
       meiasExtras: Math.max(0, num(document.getElementById('f-meias-extras').value)),
       usarCreditoMin: (USAR_CREDITO && CREDITO_ATUAL) ? CREDITO_ATUAL.minutosDisponiveis : 0,
@@ -1238,6 +1347,7 @@ async function boot(){
   document.getElementById('f-data').max = hojeBrasilia();
   preencherSelectSlots('f-horario-previsto', proximoSlot30());
   adicionarCrianca();
+  adicionarPagamento();
 
   document.getElementById('root').classList.remove('hidden');
   await carregar();

@@ -78,10 +78,28 @@ function valorEntradaCriancas(criancas, unitario) {
 }
 
 // forma de pagamento registrada na entrada - alimenta o relatorio
-// financeiro. 'cortesia' zera o valor (entrada liberada sem cobranca)
-const METODOS_PAGAMENTO = ['dinheiro', 'pix', 'debito', 'credito', 'cortesia'];
+// financeiro. 'cortesia' zera o valor (entrada liberada sem cobranca).
+// 'misto' e' so um rotulo (ver metodoPagamento em criar()) pra quando a
+// entrada foi dividida entre mais de uma forma - ver pagamentos abaixo
+const METODOS_PAGAMENTO = ['dinheiro', 'pix', 'debito', 'credito', 'cortesia', 'misto'];
 function sanitizarMetodoPagamento(m) {
   return METODOS_PAGAMENTO.includes(m) ? m : null;
+}
+
+// divisao da entrada entre mais de uma forma de pagamento (ex: metade
+// dinheiro, metade pix) - cada entrada tem forma + valor; a soma tem que
+// bater exatamente com o valor total da entrada (ver validacao em criar()).
+// Cortesia nunca entra aqui - e' o metodoPagamento==='cortesia' de sempre.
+const FORMAS_PAGAMENTO_SPLIT = ['dinheiro', 'pix', 'debito', 'credito'];
+function sanitizarPagamentos(lista) {
+  if (!Array.isArray(lista)) return [];
+  return lista
+    .map((p) => ({
+      forma: FORMAS_PAGAMENTO_SPLIT.includes(p && p.forma) ? p.forma : null,
+      valor: Math.round(Math.max(0, num(p && p.valor)) * 100) / 100,
+    }))
+    .filter((p) => p.forma && p.valor > 0)
+    .slice(0, 10);
 }
 
 // ---------- PCD: categoria de tempo/preco a parte da tabela normal ----------
@@ -301,7 +319,7 @@ async function criar({
   unidade, unidadeNome, colaboradorId, colaboradorNome,
   responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto,
   observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras,
-  metodoPagamento, meiasExtras, motivoCortesia, categoriaTempo, criadoPorId, criadoPorEmail,
+  metodoPagamento, pagamentos, meiasExtras, motivoCortesia, categoriaTempo, criadoPorId, criadoPorEmail,
 }) {
   const categoriaPcd = CATEGORIAS_PCD.includes(categoriaTempo) ? categoriaTempo : null;
   const tempoParaValidar = categoriaPcd ? tempoDaCategoriaPcd(categoriaPcd) : tempoMinutos;
@@ -312,6 +330,24 @@ async function criar({
   const ehCortesia = sanitizarMetodoPagamento(metodoPagamento) === 'cortesia';
   if (ehCortesia && !String(motivoCortesia || '').trim()) {
     throw new Error('Cortesia exige justificativa: explique o motivo da entrada sem cobrança.');
+  }
+  const meiasExtrasOk = Math.max(0, Math.min(30, num(meiasExtras)));
+  const valorMeiasCalc = categoriaPcd === 'pcd-cortesia' ? 0 : valorMeias(criancasOk, meiasExtrasOk);
+  const valorUnitario = categoriaPcd ? valorUnitarioPcd(categoriaPcd) : valorPorTempo(tempo);
+  const valorFinal = (categoriaPcd === 'pcd-cortesia' || ehCortesia)
+    ? 0
+    : valorEntradaCriancas(criancasOk, valorUnitario) + valorMeiasCalc;
+  // divide o valor entre mais de uma forma de pagamento - servidor sempre
+  // revalida a soma (o front so ajuda o atendente a nao errar): tem que
+  // bater exatamente com valorFinal, nunca menos nem mais
+  let pagamentosOk = [];
+  if (valorFinal > 0) {
+    pagamentosOk = sanitizarPagamentos(pagamentos);
+    if (!pagamentosOk.length) throw new Error('Informe pelo menos uma forma de pagamento.');
+    const somaPagamentos = Math.round(pagamentosOk.reduce((s, p) => s + p.valor, 0) * 100) / 100;
+    if (Math.abs(somaPagamentos - valorFinal) > 0.01) {
+      throw new Error(`A soma das formas de pagamento (R$${somaPagamentos.toFixed(2)}) precisa bater com o valor total (R$${valorFinal.toFixed(2)}).`);
+    }
   }
   // minutosExtras: credito de tempo guardado de um checkout antecipado
   // anterior (ver checkout()/usarCredito() abaixo) - soma por cima do
@@ -382,18 +418,16 @@ async function criar({
     // optante + pares extras) + forma de pagamento - 'cortesia' registra a
     // entrada com valor zero
     metodoPagamento: sanitizarMetodoPagamento(metodoPagamento),
+    // divisao entre formas de pagamento (ver sanitizarPagamentos acima) -
+    // so fica vazio quando a entrada e' gratis (cortesia ou pcd-cortesia)
+    pagamentos: pagamentosOk,
     // categoriaTempo: pcd30/pcd60/pcd-cortesia (ver bloco PCD acima) - override
     // de preco independente do metodoPagamento escolhido; null = tabela normal
     categoriaTempo: categoriaPcd,
-    valorPulseira: categoriaPcd ? valorUnitarioPcd(categoriaPcd) : valorPorTempo(tempo),
-    meiasExtras: Math.max(0, Math.min(30, num(meiasExtras))),
-    valorMeias: categoriaPcd === 'pcd-cortesia' ? 0 : valorMeias(criancasOk, Math.max(0, Math.min(30, num(meiasExtras)))),
-    valor: categoriaPcd === 'pcd-cortesia'
-      ? 0
-      : sanitizarMetodoPagamento(metodoPagamento) === 'cortesia'
-        ? 0
-        : valorEntradaCriancas(criancasOk, categoriaPcd ? valorUnitarioPcd(categoriaPcd) : valorPorTempo(tempo))
-          + valorMeias(criancasOk, Math.max(0, Math.min(30, num(meiasExtras)))),
+    valorPulseira: valorUnitario,
+    meiasExtras: meiasExtrasOk,
+    valorMeias: valorMeiasCalc,
+    valor: valorFinal,
     // tempo comprado DEPOIS da entrada, durante a vigencia (ver
     // adicionarTempo) - nao muda o bucket contratado, soma por cima
     minutosAdicionados: 0,
