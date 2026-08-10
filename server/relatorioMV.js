@@ -3,10 +3,13 @@
 // Bravo) + aprovar/recusar direto no e-mail, sem precisar logar no Zenith.
 //
 // PARTE A (relatorio): reaproveita centralCards.listarTodos() - a mesma
-// fonte de dados do GET /api/central - filtrando por quem e "do MV" (ver
-// ehDoMV: direcionadoParaEmail===MV_EMAIL OU direcionadoParaId do usuario de
-// username "MV" - cobre ticket atribuido pelo usuario mesmo quando o e-mail
-// cadastrado dele nao bate 100% com MV_EMAIL), agrupado por status.
+// fonte de dados do GET /api/central - filtrando por quem e "do gatilho"
+// (ver ehDoMV: direcionadoParaEmail === e-mail ATUAL do usuario configurado
+// OU direcionadoParaId === id desse usuario - cobre ticket atribuido mesmo
+// quando o e-mail gravado no card nao bate 100% com o e-mail atual do
+// usuario), agrupado por status. O destinatario dos e-mails e QUEM esta
+// configurado (ver getConfig/salvarConfig, editavel em /email.html - pagina
+// "Email" do Master) - nao precisa mexer em env var nem redeploy pra trocar.
 //
 // PARTE B (decidir por e-mail): so pros tickets que nascem em solicitacoes.js
 // (compra/manutencao/suporte-ti/pagamento/nota) - Estorno e Ajuste de
@@ -21,17 +24,18 @@
 const nodemailer = require('nodemailer');
 const dns = require('dns').promises;
 const cron = require('node-cron');
+const db = require('./firestore');
 const centralCards = require('./centralCards');
 const solicitacoes = require('./solicitacoes');
 const users = require('./users');
 const { createCache } = require('./liveCache');
 
 const FUSO_BR = 'America/Sao_Paulo';
-const MV_EMAIL = process.env.RELATORIO_DIRECIONADO_EMAIL || 'mv@grupobravoempresarial.com';
-// destinatario do relatorio/notificacoes - se a env var RELATORIO_EMAIL_TO
-// estiver configurada no Render (Environment), ela sempre manda; esse
-// fallback so entra em cena se a env var estiver em branco/ausente
+// fallback quando NUNCA foi salva uma config pela pagina Email (primeiro
+// boot) OU quando a env var antiga ainda esta configurada - depois da
+// primeira gravacao em /email.html, quem manda e sempre o Firestore
 const RELATORIO_EMAIL_TO_PADRAO = process.env.RELATORIO_EMAIL_TO || 'mv@grupobravoempresarial.com';
+const USUARIO_GATILHO_PADRAO = 'MV';
 // sem barra no final, pra concatenar direto nos links (/decidir...)
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 // unicos tipos com fluxo de decisao por e-mail (ver aviso de escopo acima)
@@ -59,32 +63,71 @@ function fmtDataHora(iso) {
   }).format(new Date(iso));
 }
 
-// id do usuario de username "MV" (cache curto - so pra nao bater no Firestore
-// a cada card processado). Fica null se nao existir esse usuario cadastrado.
-const mvUserIdCache = createCache(async () => {
-  const u = await users.findByIdentifier('MV');
-  return u ? u.id : null;
+// config editavel em /email.html (pagina "Email" do Master) - QUEM recebe
+// os e-mails (emailDestino) e QUAL usuario dispara o envio (usuarioGatilho,
+// pelo username). Cache curto (5min) so pra nao bater no Firestore a cada
+// card processado; salvarConfig() invalida na hora, entao uma troca feita
+// na tela vale no proximo envio, nao precisa esperar o cache vencer.
+const CONFIG_DOC = db.collection('relatorioMVConfig').doc('config');
+const configCache = createCache(async () => {
+  const snap = await CONFIG_DOC.get();
+  const data = snap.exists ? snap.data() : {};
+  const emailDestino = String(data.emailDestino || '').trim() || RELATORIO_EMAIL_TO_PADRAO;
+  const usuarioGatilho = String(data.usuarioGatilho || '').trim() || USUARIO_GATILHO_PADRAO;
+  const alvo = await users.findByIdentifier(usuarioGatilho);
+  return {
+    emailDestino,
+    usuarioGatilho,
+    usuarioGatilhoEncontrado: !!alvo,
+    gatilhoUserId: alvo ? alvo.id : null,
+    gatilhoUserEmail: alvo && alvo.email ? String(alvo.email).trim().toLowerCase() : null,
+  };
 }, 5 * 60 * 1000);
+const getConfig = configCache.cached;
 
-// "e do MV" cobre os dois jeitos de um card ter sido direcionado pra ele:
-// pelo e-mail configurado (MV_EMAIL, o padrao) OU por ter sido atribuido
-// diretamente ao usuario de username "MV" (direcionadoParaId) - o e-mail
-// gravado no card e so um retrato de quando foi direcionado, entao um
-// usuario com e-mail diferente do MV_EMAIL mas username "mv" tambem conta
-function ehDoMV(card, mvUserId) {
-  if (!card) return false;
-  if (String(card.direcionadoParaEmail || '').trim().toLowerCase() === MV_EMAIL.toLowerCase()) return true;
-  return !!mvUserId && card.direcionadoParaId === mvUserId;
+function validarEmail(email) {
+  const limpo = String(email || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(limpo)) throw new Error('Informe um e-mail válido.');
+  return limpo;
+}
+
+// chamada pela rota POST /api/relatorio-config (Master, ver index.js) -
+// exige que o usuario gatilho realmente exista, senao a config salva
+// nunca casaria com nenhum ticket
+async function salvarConfig({ emailDestino, usuarioGatilho }) {
+  const emailLimpo = validarEmail(emailDestino);
+  const usuarioLimpo = String(usuarioGatilho || '').trim();
+  if (!usuarioLimpo) throw new Error('Informe o usuário que vai disparar os e-mails.');
+  const alvo = await users.findByIdentifier(usuarioLimpo);
+  if (!alvo) throw new Error(`Não encontrei nenhum usuário com "${usuarioLimpo}".`);
+  await CONFIG_DOC.set({
+    emailDestino: emailLimpo,
+    usuarioGatilho: alvo.username || usuarioLimpo,
+    atualizadoEm: new Date().toISOString(),
+  }, { merge: true });
+  configCache.invalidar();
+  return getConfig();
+}
+
+// "e do gatilho" cobre os dois jeitos de um card ter sido direcionado pro
+// usuario configurado: pelo e-mail ATUAL dele (gatilhoUserEmail) OU por ter
+// sido atribuido diretamente a ele (direcionadoParaId === gatilhoUserId) -
+// o e-mail gravado no card e so um retrato de quando foi direcionado, entao
+// um card antigo com e-mail diferente do atual do usuario tambem conta
+function ehDoMV(card, config) {
+  if (!card || !config) return false;
+  if (config.gatilhoUserEmail && String(card.direcionadoParaEmail || '').trim().toLowerCase() === config.gatilhoUserEmail) return true;
+  return !!config.gatilhoUserId && card.direcionadoParaId === config.gatilhoUserId;
 }
 
 // junta os cards das 3 filas direcionados ao MV, agrupados por status - e
 // gera (renovando) o token de acao dos que ainda estao PENDENTE e tem tipo
 // com fluxo de decisao por e-mail (ver TIPOS_COM_ACAO_POR_EMAIL acima)
 async function montarDados() {
-  const [todos, mvUserId] = await Promise.all([centralCards.listarTodos(), mvUserIdCache.cached()]);
+  const [todos, config] = await Promise.all([centralCards.listarTodos(), getConfig()]);
   // CONVERTIDO = o ticket virou outro tipo/colecao (ver solicitacoes.js) -
   // quem continua a historia e o registro novo, esse aqui fica de fora
-  const doMV = todos.filter((c) => ehDoMV(c, mvUserId) && c.status !== 'CONVERTIDO');
+  const doMV = todos.filter((c) => ehDoMV(c, config) && c.status !== 'CONVERTIDO');
 
   for (const c of doMV) {
     if (c.status === 'PENDENTE' && TIPOS_COM_ACAO_POR_EMAIL.has(c.tipo)) {
@@ -256,8 +299,9 @@ async function enviarCardsPorEmail(cards, destinatario) {
 // Quem chama decide o que fazer com erro - normalmente so loga, nunca
 // derruba a acao que criou/redirecionou o card (ver index.js)
 async function notificarCardMV(card) {
-  if (!ehDoMV(card, await mvUserIdCache.cached())) return;
-  const to = RELATORIO_EMAIL_TO_PADRAO;
+  const config = await getConfig();
+  if (!ehDoMV(card, config)) return;
+  const to = config.emailDestino;
 
   const cardParaEnviar = { ...card };
   if (card.status === 'PENDENTE' && TIPOS_COM_ACAO_POR_EMAIL.has(card.tipo)) {
@@ -413,8 +457,8 @@ async function enviarComFallback(opcoesEmail) {
 }
 
 async function enviarRelatorio() {
-  const to = RELATORIO_EMAIL_TO_PADRAO;
-  const dados = await montarDados();
+  const [config, dados] = await Promise.all([getConfig(), montarDados()]);
+  const to = config.emailDestino;
   await enviarComFallback({
     from: `Zenith Ops <${process.env.RELATORIO_EMAIL_USER}>`,
     to,
@@ -446,4 +490,4 @@ function iniciarAgendamento() {
   }, { timezone: FUSO_BR });
 }
 
-module.exports = { enviarRelatorio, iniciarAgendamento, montarDados, montarHtml, notificarCardMV, enviarCardsPorEmail, MV_EMAIL, TIPOS_COM_ACAO_POR_EMAIL };
+module.exports = { enviarRelatorio, iniciarAgendamento, montarDados, montarHtml, notificarCardMV, enviarCardsPorEmail, getConfig, salvarConfig, TIPOS_COM_ACAO_POR_EMAIL };

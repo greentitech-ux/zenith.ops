@@ -428,8 +428,9 @@ app.post('/api/solicitacoes/decidir', upload.single('comprovante'), async (req, 
       const path = await storage.salvarArquivo(registro.unidade || 'geral', req.file, 'solicitacoes');
       comprovante = { nome: req.file.originalname, path, tipo: req.file.mimetype || 'application/octet-stream' };
     }
+    const configRelatorio = await relatorioMV.getConfig();
     const atualizado = await solicitacoes.decidirPorToken(ticket, token, {
-      acao, motivoDecisao, comprovante, decididoPorEmail: relatorioMV.MV_EMAIL,
+      acao, motivoDecisao, comprovante, decididoPorEmail: configRelatorio.emailDestino,
     });
     broadcast('solicitacao-decidida', atualizado, 'solicitacoes');
     res.json({ ok: true, numeroTicket: atualizado.numeroTicket, status: atualizado.status });
@@ -3862,6 +3863,26 @@ app.get('/api/relatorio-mv/testar', auth.requireMaster, async (req, res) => {
   }
 });
 
+// configuração do relatório diário/notificações (ver /email.html) - QUEM
+// recebe (emailDestino) e QUAL usuário dispara o envio (usuarioGatilho,
+// pelo username) - editável na hora pelo Master, sem precisar mexer em env
+// var nem redeploy (ver relatorioMV.getConfig/salvarConfig)
+app.get('/api/relatorio-config', auth.requireMaster, async (req, res) => {
+  res.json(await relatorioMV.getConfig());
+});
+
+app.post('/api/relatorio-config', auth.requireMaster, async (req, res) => {
+  try {
+    const config = await relatorioMV.salvarConfig({
+      emailDestino: req.body.emailDestino,
+      usuarioGatilho: req.body.usuarioGatilho,
+    });
+    res.json(config);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // busca o card cru (de qualquer um dos 3 modulos) - usado no gate de acesso
 // do chat/anexos (dono do pedido, atribuido, ou Master)
 async function buscarCardCru(tipo, id) {
@@ -5985,13 +6006,16 @@ app.use((err, req, res, next) => {
     }, 60 * 1000);
 
     // relatorio diario do MV por e-mail (ver relatorioMV.js) - so agenda se
-    // as credenciais de envio estiverem configuradas; sem elas, o Master
-    // ainda pode disparar na hora por GET /api/relatorio-mv/testar (que ai
-    // sim avisa o erro de configuração)
-    if (process.env.RELATORIO_EMAIL_USER && process.env.RELATORIO_EMAIL_PASS && process.env.RELATORIO_EMAIL_TO) {
+    // as credenciais de ENVIO estiverem configuradas (quem manda, RELATORIO_
+    // EMAIL_USER/PASS); pra QUEM recebe ha sempre um valor (config editavel
+    // em /email.html, com fallback embutido no codigo), entao nao entra
+    // nessa checagem. Sem credenciais de envio, o Master ainda pode
+    // disparar na hora por GET /api/relatorio-mv/testar (que ai sim avisa o
+    // erro de configuração)
+    if (process.env.RELATORIO_EMAIL_USER && process.env.RELATORIO_EMAIL_PASS) {
       relatorioMV.iniciarAgendamento();
     } else {
-      console.warn('AVISO: RELATORIO_EMAIL_USER/RELATORIO_EMAIL_PASS/RELATORIO_EMAIL_TO não configurados - relatório diário do MV desativado.');
+      console.warn('AVISO: RELATORIO_EMAIL_USER/RELATORIO_EMAIL_PASS não configurados - relatório diário do MV desativado.');
     }
   });
 })();

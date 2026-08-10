@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>E-mail · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;overflow-x:hidden;}
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:16px;} h1{font-size:17px;} }
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;}
+  h2{font-size:14px;font-weight:700;margin:0 0 4px;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+  header{margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--line);}
+  .header-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;}
+  .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;transition:border-color .15s ease,color .15s ease,background .15s ease;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
+  .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,color .15s ease;}
+  .btn-notif:hover{border-color:var(--accent);color:var(--text);}
+  .btn-sair{color:var(--bad);}
+  .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
+  .hidden{display:none!important;}
+  .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer-titulo{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px 12px;}
+  .nav-drawer-grupo{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 4px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;}
+  .nav-drawer-grupo .ndg-seta{transition:transform .15s ease;font-size:9px;flex:none;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
+  .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px;max-width:520px;}
+  .sub{font-size:12px;color:var(--muted);margin-bottom:14px;}
+  label{display:block;font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:14px 0 6px;}
+  label:first-of-type{margin-top:0;}
+  input,select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
+  input:focus,select:focus{outline:none;border-color:var(--accent);}
+  .status-linha{font-size:12px;margin-top:8px;padding:8px 10px;border-radius:8px;display:flex;gap:6px;align-items:flex-start;}
+  .status-linha.ok{background:var(--ok-dim);color:var(--ok);}
+  .status-linha.bad{background:var(--bad-dim);color:var(--bad);}
+  .btn-primary{background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);margin-top:16px;}
+  .btn-primary:disabled{opacity:.5;cursor:default;}
+  .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 14px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:var(--sans);margin-top:10px;width:100%;}
+  .btn-ghost:hover{border-color:var(--accent);}
+  .msg{font-size:12.5px;padding:9px 12px;border-radius:8px;margin-top:12px;}
+  .msg.ok{background:var(--ok-dim);color:var(--ok);}
+  .msg.err{background:var(--bad-dim);color:var(--bad);}
+  .info-box{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:14px;line-height:1.5;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <div style="display:flex;align-items:flex-start;gap:10px;">
+      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <div>
+        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <h1>📧 E-mail</h1>
+      </div>
+    </div>
+  </div>
+  <div class="header-nav">
+    <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer">
+  <div class="nav-drawer-titulo">Zenith Ops</div>
+  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
+  <div class="nav-drawer-grupo">Administração</div>
+  <a class="back hidden" id="nav-usuarios" href="/usuarios.html">👤 Usuários</a>
+  <a class="back hidden" id="nav-grupos" href="/grupos.html">🏷️ Grupos</a>
+  <a class="back active" id="nav-email-self" href="/email.html">📧 E-mail</a>
+  <a class="back" id="nav-ajuda" href="/ajuda.html">❓ Ajuda</a>
+  <div class="nav-drawer-sep"></div>
+  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
+</nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso a essa página. Só o Master mexe nas configurações de e-mail.</div>
+
+<div id="root" class="hidden">
+  <div class="panel">
+    <h2>Relatório de solicitações por e-mail</h2>
+    <div class="sub">Todo dia útil às 8h (seg-sex), o Zenith manda um resumo dos tickets direcionados pro usuário abaixo - além de um aviso na hora sempre que um ticket novo é direcionado a ele. Mude os dois campos aqui quando quiser, sem precisar mexer em configuração nenhuma fora do app.</div>
+
+    <label>E-mail que vai receber os relatórios e avisos</label>
+    <input type="email" id="f-email" placeholder="ex: mv@grupobravoempresarial.com">
+
+    <label>Usuário cujos tickets disparam o envio</label>
+    <select id="f-usuario"></select>
+    <div id="status-usuario"></div>
+
+    <button type="button" class="btn-primary" id="btn-salvar" onclick="salvar()">💾 Salvar</button>
+    <div class="msg hidden" id="msg-salvar"></div>
+
+    <button type="button" class="btn-ghost" id="btn-testar" onclick="testarAgora()">📤 Enviar relatório de teste agora</button>
+    <div class="msg hidden" id="msg-testar"></div>
+
+    <div class="info-box">
+      Um ticket "é do usuário" de duas formas: quando ele foi diretamente atribuído a essa pessoa (campo "Direcionar para" na Central), ou quando o e-mail gravado no ticket bate com o e-mail atual dela - por isso trocar o e-mail aqui não quebra tickets antigos.
+    </div>
+  </div>
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
+function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+let USUARIOS = [];
+let CONFIG_ATUAL = null;
+
+async function carregarUsuarios(){
+  try{
+    USUARIOS = await fetch('/api/users').then(r=>r.ok?r.json():[]);
+  }catch(e){ USUARIOS = []; }
+  const sel = document.getElementById('f-usuario');
+  sel.innerHTML = USUARIOS.map(u=>`<option value="${escapeHtml(u.username||'')}">${escapeHtml(u.username||u.email||u.id)}${u.email?' · '+escapeHtml(u.email):''}</option>`).join('');
+}
+
+function atualizarStatusUsuario(){
+  const el = document.getElementById('status-usuario');
+  const valor = document.getElementById('f-usuario').value;
+  const achou = USUARIOS.find(u=>(u.username||'').toLowerCase()===valor.toLowerCase());
+  if(!valor){ el.innerHTML = ''; return; }
+  el.innerHTML = achou
+    ? `<div class="status-linha ok">✅ usuário encontrado${achou.email?' · '+escapeHtml(achou.email):''}</div>`
+    : `<div class="status-linha bad">⚠️ nenhum usuário com esse username - confira antes de salvar</div>`;
+}
+
+async function carregarConfig(){
+  CONFIG_ATUAL = await fetch('/api/relatorio-config').then(r=>r.json());
+  document.getElementById('f-email').value = CONFIG_ATUAL.emailDestino || '';
+  const sel = document.getElementById('f-usuario');
+  if(![...sel.options].some(o=>o.value.toLowerCase()===(CONFIG_ATUAL.usuarioGatilho||'').toLowerCase()) && CONFIG_ATUAL.usuarioGatilho){
+    sel.insertAdjacentHTML('afterbegin', `<option value="${escapeHtml(CONFIG_ATUAL.usuarioGatilho)}">${escapeHtml(CONFIG_ATUAL.usuarioGatilho)} (não encontrado na lista)</option>`);
+  }
+  sel.value = CONFIG_ATUAL.usuarioGatilho || '';
+  atualizarStatusUsuario();
+}
+
+async function salvar(){
+  const msg = document.getElementById('msg-salvar');
+  const btn = document.getElementById('btn-salvar');
+  msg.classList.add('hidden');
+  btn.disabled = true;
+  try{
+    const resp = await fetch('/api/relatorio-config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      emailDestino: document.getElementById('f-email').value,
+      usuarioGatilho: document.getElementById('f-usuario').value,
+    })});
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
+    CONFIG_ATUAL = data;
+    msg.textContent = '✅ Salvo! Já vale pro próximo relatório e para os avisos instantâneos.';
+    msg.className = 'msg ok';
+    msg.classList.remove('hidden');
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+async function testarAgora(){
+  const msg = document.getElementById('msg-testar');
+  const btn = document.getElementById('btn-testar');
+  msg.classList.add('hidden');
+  btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Enviando...';
+  try{
+    const resp = await fetch('/api/relatorio-mv/testar');
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao enviar.');
+    msg.textContent = `✅ Enviado! ${data.total} solicitação(ões) no relatório · ${data.pendentes} pendente(s), ${data.aprovados} aprovada(s), ${data.rejeitados} recusada(s).`;
+    msg.className = 'msg ok';
+    msg.classList.remove('hidden');
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{
+    btn.disabled = false; btn.textContent = txt;
+  }
+}
+
+document.getElementById('f-usuario').addEventListener('change', atualizarStatusUsuario);
+
+function initNavDrawerAccordion(){
+  const nav = document.getElementById('nav-drawer');
+  if(!nav || nav.dataset.ndgInit) return;
+  nav.dataset.ndgInit = '1';
+  [...nav.querySelectorAll(':scope > .nav-drawer-grupo')].forEach(g=>{
+    const nomeGrupo = g.textContent.trim();
+    const itens = [];
+    let el = g.nextElementSibling;
+    while(el && !el.classList.contains('nav-drawer-grupo') && !el.classList.contains('nav-drawer-sep')){
+      const prox = el.nextElementSibling;
+      itens.push(el);
+      el = prox;
+    }
+    if(!itens.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'ndg-wrap';
+    g.after(wrap);
+    itens.forEach(it=>wrap.appendChild(it));
+    g.innerHTML = `<span>${nomeGrupo}</span><span class="ndg-seta">▾</span>`;
+    const aberto = itens.some(it=>it.classList.contains('active')) || localStorage.getItem('ndgAberto:'+nomeGrupo) === '1';
+    g.querySelector('.ndg-seta').style.transform = aberto ? '' : 'rotate(-90deg)';
+    wrap.classList.toggle('hidden', !aberto);
+    g.addEventListener('click', ()=>{
+      const abrirAgora = wrap.classList.contains('hidden');
+      wrap.classList.toggle('hidden', !abrirAgora);
+      g.querySelector('.ndg-seta').style.transform = abrirAgora ? '' : 'rotate(-90deg)';
+      localStorage.setItem('ndgAberto:'+nomeGrupo, abrirAgora ? '1' : '0');
+    });
+  });
+}
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  const me = await res.json();
+  if(me.role !== 'master'){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('nav-usuarios').classList.remove('hidden');
+  document.getElementById('nav-grupos').classList.remove('hidden');
+  document.getElementById('root').classList.remove('hidden');
+  initNavDrawerAccordion();
+  await carregarUsuarios();
+  await carregarConfig();
+}
+boot();
+</script>
+<script src="/nav-gate.js"></script>
+</body>
+</html>
