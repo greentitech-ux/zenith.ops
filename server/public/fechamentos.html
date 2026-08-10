@@ -1437,19 +1437,19 @@ function intervaloEfetivoTabela(){
 }
 
 // colunas extras (Canais de venda / Formas de pagamento) que os grupos
-// definem em /grupos.html - a tabela so mostra a coluna se pelo menos um
-// fechamento do resultado atual de fato preencheu aquele campo, entao ela
-// sempre reflete o que cada loja realmente lança, sem colunas fantasmas
-// vazias pras lojas que nao usam aquele canal/forma
-function colunasExtras(rows, chave){
+// definem em /grupos.html - com grupo conhecido, mostra SEMPRE todos os
+// campos que o grupo cadastrou, na MESMA ordem de /grupos.html (inclusive
+// os que nenhum fechamento do período filtrado preencheu - aí a coluna
+// aparece com R$ 0,00 em vez de sumir). Sem grupo (fechamento antigo de
+// planilha, sem cadastro), cai no comportamento antigo: só mostra os
+// campos que as próprias linhas de fato têm.
+function colunasExtras(rows, chave, grupo){
+  if(grupo) return (grupo[chave]||[]).map(c=>({campo:c.campo, label:c.label}));
   const vistas = new Map(); // campo -> label
   rows.forEach(d=>{
     const mapa = d[chave] || {};
-    if(!Object.keys(mapa).length) return;
-    const grupo = grupoKpiDaUnidade(d.unidade);
-    const defs = grupo ? (grupo[chave]||[]) : [];
     Object.keys(mapa).forEach(campo=>{
-      if(!vistas.has(campo)) vistas.set(campo, (defs.find(k=>k.campo===campo)||{}).label || campo);
+      if(!vistas.has(campo)) vistas.set(campo, campo);
     });
   });
   return [...vistas.entries()].map(([campo,label])=>({campo,label}));
@@ -1472,14 +1472,16 @@ function colunasFixasUsadas(rows){
 }
 
 // monta UMA tabela de fechamentos a partir de um conjunto de linhas - as
-// colunas fixas e extras (canais/formas) sao calculadas so com essas linhas,
-// entao cada tabela mostra apenas os campos que aquele conjunto de fato
-// preenche (ver renderTabela: cada bloco so recebe linhas de UMA origem -
-// sistema OU planilha - pra essas colunas nunca se misturarem)
+// colunas extras (canais/formas) vem do grupo (todas, na ordem cadastrada -
+// ver colunasExtras); as colunas fixas continuam so aparecendo se alguma
+// linha de fato usa (schema antigo de planilha, sem grupo pra definir a
+// lista completa). Ver renderTabela: cada bloco so recebe linhas de UMA
+// origem - sistema OU planilha - pra essas colunas nunca se misturarem.
 function tabelaFechamentosHtml(rows){
+  const grupo = grupoKpiDaUnidade((rows[0]||{}).unidade);
   const colunasFixas = colunasFixasUsadas(rows);
-  const colunasCanais = colunasExtras(rows, 'canaisVendaExtras');
-  const colunasFormas = colunasExtras(rows, 'formasPagamentoExtras');
+  const colunasCanais = colunasExtras(rows, 'canaisVendaExtras', grupo);
+  const colunasFormas = colunasExtras(rows, 'formasPagamentoExtras', grupo);
 
   const thead =
     '<th>Data</th><th>Unid.</th><th>Gerente</th><th>Previsão (dia seguinte)</th><th>Faturamento</th><th>Total declarado</th><th>Diferença</th><th>Quebra</th>' +
