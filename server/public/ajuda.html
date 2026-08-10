@@ -129,6 +129,7 @@
   <a class="back" id="nav-ativos-ti" href="/ativos-ti.html">🖥️ Ativos de TI</a>
   <a class="back hidden" id="nav-manutencao" href="/manutencao.html">🔧 Manutenção</a>
   <a class="back hidden" id="nav-central-solucoes" href="/central-solucoes.html">💬 Central de Soluções</a>
+  <a class="back hidden" id="nav-beniboy" href="/beniboy.html">🐝 Central do Beniboy</a>
   <div class="nav-drawer-grupo">Administração</div>
   <a class="back hidden" id="nav-usuarios" href="/usuarios.html">👤 Usuários</a>
   <a class="back hidden" id="nav-grupos" href="/grupos.html">🏷️ Grupos</a>
@@ -473,6 +474,21 @@ const TOPICOS = [
     <p>Em qualquer modalidade (remoto ou presencial) dá pra registrar o <b>orçamento de peças</b> (peça + valor). A <b>cobrança</b> do atendimento é opcional — o chamado pode se resolver sem custo, ou ganhar valor depois (reembolso no remoto, valor do serviço no presencial): informe o valor, a observação e <b>anexe o boleto</b>; o botão <b>📤 Enviar</b> gera um ticket de <b>Pagamento</b> na Central com a <b>mesma numeração</b> do chamado — os dois tickets se juntam pelo número, então dá pra saber do que se trata cada pagamento.</p>
     <h3>⚙️ Edição do Master</h3>
     <p>O Master edita qualquer chamado: muda a modalidade (Presencial ⇄ Remoto), o status (ativo, concluído, cancelado ou reaberto) e a prioridade.</p>
+  `},
+  { id:'beniboy', icone:'🐝', secoes:['suporte'], titulo:'Central do Beniboy (atendimento em kanban)', corpo:`
+    <p>Toda conversa do chat de suporte (💬 balãozinho, incluindo as respondidas pelo assistente <b>Beniboy</b>) passa por um quadro <b>kanban</b> próprio - arraste um card entre as colunas (ou abra o card e use os botões, funciona igual no celular):</p>
+    <ul>
+      <li>🕓 <b>Pendente</b> - ninguém do time assumiu ainda (ou o Beniboy ainda está tentando resolver sozinho).</li>
+      <li>🙋 <b>Em atendimento</b> - um agente assumiu (botão "Assumir atendimento").</li>
+      <li>🔀 <b>Transferido</b> - foi passado pra outro nível (escolha N2 - outro agente, ou N3 - Master).</li>
+      <li>🎫 <b>Ticket criado</b> - a conversa virou uma solicitação/chamado na Central (o card mostra o número).</li>
+      <li>✅ <b>Resolvido</b> e ⛔ <b>Sem solução</b> - encerram a conversa (pede o motivo); dá pra reabrir movendo pra qualquer coluna aberta de novo.</li>
+    </ul>
+    <h3>Níveis N1/N2/N3</h3>
+    <p>Todo card nasce <b>N1</b> (só o Beniboy). Assumir ou transferir sobe pra <b>N2</b> (agente do time de Suporte) ou <b>N3</b> (Master) - o badge no card mostra o nível atual.</p>
+    <h3>🔓 Desbloqueios</h3>
+    <p>Toda vez que o Beniboy resolve um login bloqueado (Zenith ou operador do Abastecimento) sozinho, o card ganha a etiqueta <b>🔓 Desbloqueio</b> - use o filtro no topo da página pra ver só esses casos.</p>
+    <div class="dica">Quem acessa: Master/Admin e quem tem a seção <b>Suporte</b>. Responder, mover e ver o histórico de mensagens funciona direto dali - não precisa ir em Chamados TI pra isso (mas gerar chamado técnico continua lá).</div>
   `},
   { id:'manutencao', icone:'🔧', secoes:['manutencao'], titulo:'Manutenção', corpo:`
     <p>Fila de chamados de manutenção - nasce automaticamente quando uma solicitação de Manutenção é aprovada na Central (quem aprova escolhe 1 ou mais responsáveis), ou pode ser criada direto pelo Master.</p>

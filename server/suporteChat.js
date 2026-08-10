@@ -17,6 +17,18 @@ const COLLECTION = db.collection('suporteChats');
 const MAX_TEXTO = 1000;
 const MAX_MENSAGENS = 300;
 
+// funil de triagem do time (Central do Beniboy, ver beniboy.html) - campo
+// PROPRIO, independente de `status` (ABERTO/FINALIZADO, que so controla se o
+// visitante ainda pode escrever). PENDENTE e o ponto de partida de toda
+// conversa nova; RESOLVIDO/SEM_SOLUCAO sao terminais e finalizam a conversa
+// pro visitante tambem (ver atualizarStatusAtendimento).
+const STATUS_ATENDIMENTO = ['PENDENTE', 'EM_ATENDIMENTO', 'TRANSFERIDO', 'TICKET_CRIADO', 'RESOLVIDO', 'SEM_SOLUCAO'];
+const STATUS_TERMINAL = new Set(['RESOLVIDO', 'SEM_SOLUCAO']);
+// nivel do atendimento: 1 = Beniboy sozinho (bot), 2 = agente humano (secao
+// suporte), 3 = Master. Sobe conforme o card anda no funil; volta pra 1 so
+// quando o card volta pra PENDENTE (ninguem assumiu de novo)
+function nivelValido(n) { return [1, 2, 3].includes(Number(n)); }
+
 function limpar(texto, max) {
   return String(texto || '').trim().slice(0, max);
 }
@@ -65,6 +77,15 @@ async function criar({ nome, contato, texto, assunto, logado, lojaContexto }) {
     logado: logado || null,
     chamadoId: null,
     atendidoPorEmail: null,
+    // triagem da Central do Beniboy (ver beniboy.html/atualizarStatusAtendimento) -
+    // toda conversa nasce PENDENTE, nivel 1 (so o bot), sem responsavel
+    statusAtendimento: 'PENDENTE',
+    nivel: 1,
+    responsavel: null,
+    desbloqueio: false,
+    ticketsVinculados: [],
+    motivoSemSolucao: null,
+    historicoStatus: [{ statusAtendimento: 'PENDENTE', nivel: 1, por: null, em: agora }],
     criadoEm: agora,
     atualizadoEm: agora,
     finalizadoEm: null,
@@ -141,6 +162,83 @@ async function vincularChamado(id, chamadoId) {
   return getOne(id);
 }
 
+// move o card no funil da Central do Beniboy (beniboy.html) - chamada tanto
+// pelo drag-and-drop quanto pelos botoes de acao rapida. `autor` = snapshot
+// de quem esta mexendo ({id, nome, email}) ou null (evento automatico, ex:
+// bot vinculando ticket). RESOLVIDO/SEM_SOLUCAO finalizam a conversa pro
+// visitante tambem (mesmo efeito de finalizar()); sair de um estado terminal
+// de volta pra um estado aberto REABRE a conversa (visitante pode escrever
+// de novo) - card "esfriou" mas o time decidiu voltar a mexer nele.
+async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino, motivoSemSolucao, autor } = {}) {
+  if (!STATUS_ATENDIMENTO.includes(statusAtendimento)) throw new Error('Status de atendimento inválido.');
+  const chat = await getOne(id);
+  if (!chat) throw new Error('Conversa não encontrada.');
+  if (statusAtendimento === 'SEM_SOLUCAO' && !String(motivoSemSolucao || '').trim()) {
+    throw new Error('Explique por que essa conversa vai ser encerrada sem solução.');
+  }
+  if (statusAtendimento === 'TRANSFERIDO' && !nivelValido(nivelDestino)) {
+    throw new Error('Informe pra qual nível (N2 - agente ou N3 - Master) essa conversa vai ser transferida.');
+  }
+
+  let nivel = chat.nivel || 1;
+  let responsavel = chat.responsavel || null;
+  if (statusAtendimento === 'PENDENTE') {
+    nivel = 1;
+    responsavel = null;
+  } else {
+    nivel = nivelValido(nivelDestino) ? Number(nivelDestino) : Math.max(nivel, 2);
+    responsavel = autor || responsavel;
+  }
+
+  const agora = new Date().toISOString();
+  const patch = {
+    statusAtendimento,
+    nivel,
+    responsavel,
+    motivoSemSolucao: statusAtendimento === 'SEM_SOLUCAO' ? String(motivoSemSolucao).trim() : (statusAtendimento === chat.statusAtendimento ? chat.motivoSemSolucao : null),
+    atualizadoEm: agora,
+    historicoStatus: [...(chat.historicoStatus || []), { statusAtendimento, nivel, por: autor ? (autor.nome || autor.email || autor.id) : null, em: agora }].slice(-50),
+  };
+  if (STATUS_TERMINAL.has(statusAtendimento) && chat.status === 'ABERTO') {
+    patch.status = 'FINALIZADO';
+    patch.finalizadoEm = agora;
+    patch.atendidoPorEmail = chat.atendidoPorEmail || (autor && autor.email) || null;
+  } else if (!STATUS_TERMINAL.has(statusAtendimento) && chat.status === 'FINALIZADO') {
+    patch.status = 'ABERTO';
+    patch.finalizadoEm = null;
+  }
+  await COLLECTION.doc(id).update(patch);
+  chatsCache.invalidar();
+  return getOne(id);
+}
+
+// flag pra filtrar/etiquetar no kanban - setada quando o Beniboy usa a tool
+// desbloquear_login nessa conversa (ver suporteBot.js). So grava 1x.
+async function marcarDesbloqueio(id) {
+  const chat = await getOne(id);
+  if (!chat || chat.desbloqueio) return chat;
+  await COLLECTION.doc(id).update({ desbloqueio: true, atualizadoEm: new Date().toISOString() });
+  chatsCache.invalidar();
+  return getOne(id);
+}
+
+// registra um ticket (solicitacao da Central OU chamado tecnico) aberto a
+// partir dessa conversa - pode acontecer mais de uma vez na mesma conversa.
+// Avanca o card pro estagio TICKET_CRIADO automaticamente, a menos que ele ja
+// esteja num estagio terminal (RESOLVIDO/SEM_SOLUCAO) - nesse caso so registra
+// o ticket sem mexer no funil, pra nao reabrir um card que o time ja fechou.
+async function adicionarTicketVinculado(id, { tipo, ticketId, numero }) {
+  const chat = await getOne(id);
+  if (!chat) throw new Error('Conversa não encontrada.');
+  const ticketsVinculados = [...(chat.ticketsVinculados || []), { tipo, ticketId, numero, em: new Date().toISOString() }];
+  await COLLECTION.doc(id).update({ ticketsVinculados, atualizadoEm: new Date().toISOString() });
+  chatsCache.invalidar();
+  if (!STATUS_TERMINAL.has(chat.statusAtendimento)) {
+    return atualizarStatusAtendimento(id, { statusAtendimento: 'TICKET_CRIADO', nivelDestino: chat.nivel > 1 ? chat.nivel : 2, autor: null });
+  }
+  return getOne(id);
+}
+
 async function listAllUncached() {
   const snap = await COLLECTION.orderBy('criadoEm', 'desc').get();
   return snap.docs.map((d) => d.data());
@@ -148,4 +246,7 @@ async function listAllUncached() {
 const chatsCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = chatsCache.cached;
 
-module.exports = { criar, getOne, getPublico, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll, ASSUNTOS };
+module.exports = {
+  criar, getOne, getPublico, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll, ASSUNTOS,
+  atualizarStatusAtendimento, marcarDesbloqueio, adicionarTicketVinculado, STATUS_ATENDIMENTO,
+};

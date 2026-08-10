@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Central do Beniboy · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#5cc8ff; --accent-dim:#12374a;
+    --purple:#b388ff; --purple-dim:#2c2140;
+    --teal:#39c5bb; --teal-dim:#123632;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;overflow-x:hidden;}
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:16px;} h1{font-size:17px;} }
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;}
+  h2{font-size:13.5px;font-weight:700;margin:0 0 4px;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+  header{margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--line);}
+  .header-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;}
+  .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;transition:border-color .15s ease,color .15s ease,background .15s ease;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
+  .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,color .15s ease;}
+  .btn-notif:hover{border-color:var(--accent);color:var(--text);}
+  .btn-sair{color:var(--bad);}
+  .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
+  .hidden{display:none!important;}
+  .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer-titulo{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px 12px;}
+  .nav-drawer-grupo{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 4px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;}
+  .nav-drawer-grupo .ndg-seta{transition:transform .15s ease;font-size:9px;flex:none;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
+  .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+  input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  .btn-primary{background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .btn-primary:disabled{opacity:.5;cursor:default;}
+  .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
+  .btn-ghost:hover{border-color:var(--accent);}
+
+  /* barra de filtros */
+  .filtros{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .filtros input[type="text"]{max-width:240px;}
+  .chip{font-family:var(--mono);font-size:11px;padding:6px 12px;border-radius:20px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;white-space:nowrap;transition:border-color .15s ease,color .15s ease,background .15s ease;}
+  .chip.ativo{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:700;}
+
+  /* kanban */
+  .kanban-wrap{overflow-x:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch;}
+  .kanban{display:flex;gap:12px;align-items:flex-start;min-width:max-content;}
+  .kcol{width:270px;flex:none;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;max-height:calc(100vh - 230px);min-height:160px;}
+  .kcol.drop-hover{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
+  .kcol-head{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:2px 4px 10px;border-bottom:3px solid var(--col-cor,var(--line));margin-bottom:8px;flex:none;}
+  .kcol-titulo{font-size:12.5px;font-weight:700;display:flex;align-items:center;gap:6px;}
+  .kcol-count{font-family:var(--mono);font-size:10.5px;color:var(--muted);background:var(--panel2);border-radius:20px;padding:1px 8px;}
+  .kcol-corpo{overflow-y:auto;display:flex;flex-direction:column;gap:8px;flex:1 1 auto;min-height:40px;}
+  .kcol-vazio{font-size:11px;color:var(--muted);text-align:center;padding:16px 4px;}
+
+  .kcard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 10px;cursor:grab;transition:border-color .15s ease,opacity .15s ease;}
+  .kcard:hover{border-color:var(--accent);}
+  .kcard.arrastando{opacity:.35;}
+  .kcard-top{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:5px;}
+  .nivel-badge{font-family:var(--mono);font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:5px;}
+  .nivel-badge.nivel-1{background:var(--panel);color:var(--muted);border:1px solid var(--line);}
+  .nivel-badge.nivel-2{background:var(--accent-dim);color:var(--accent);}
+  .nivel-badge.nivel-3{background:var(--purple-dim);color:var(--purple);}
+  .tag-desbloqueio{font-family:var(--mono);font-size:9.5px;padding:1px 6px;border-radius:5px;background:var(--warn-dim);color:var(--warn);}
+  .tag-ticket{font-family:var(--mono);font-size:9.5px;padding:1px 6px;border-radius:5px;background:var(--teal-dim);color:var(--teal);}
+  .kcard-nome{font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .kcard-assunto{font-size:11px;color:var(--accent);margin-top:1px;}
+  .kcard-prev{font-size:11.5px;color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .kcard-meta{font-family:var(--mono);font-size:9.5px;color:var(--muted);margin-top:6px;display:flex;justify-content:space-between;gap:6px;}
+
+  /* detalhe */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;z-index:50;}
+  .overlay.hidden{display:none!important;}
+  .sheet-wrap{position:relative;width:100%;max-width:640px;}
+  .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px 14px 0 0;padding:16px 14px 22px;width:100%;max-width:640px;max-height:88vh;overflow-y:auto;}
+  .sheet h3{margin:0 0 4px;font-size:14px;}
+  .sheet .sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px;}
+  .sheet-fechar-flutuante{position:absolute;top:-14px;right:-6px;width:32px;height:32px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);color:var(--muted);font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.5);cursor:pointer;z-index:5;}
+  .sheet-fechar-flutuante:hover{color:var(--text);border-color:var(--accent);}
+  .msg-item{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;}
+  .msg-item .m-cab{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:11px;color:var(--muted);}
+  .msg-item .m-texto{white-space:pre-wrap;margin-top:2px;}
+  .d-acoes{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+  .d-tickets{font-size:11.5px;color:var(--muted);margin-bottom:8px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <div style="display:flex;align-items:flex-start;gap:10px;">
+      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <div>
+        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <h1>🐝 Central do Beniboy</h1>
+      </div>
+    </div>
+  </div>
+  <div class="header-nav">
+    <button class="btn-notif" onclick="carregarLista()" title="Atualizar">🔄</button>
+    <div class="nav-divider"></div>
+    <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer">
+  <div class="nav-drawer-titulo">Zenith Ops</div>
+  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
+  <div class="nav-drawer-grupo">Solicitações</div>
+  <a class="back hidden" id="nav-solicitacoes" href="/central.html">📋 Central</a>
+  <a class="back hidden" id="nav-historico" href="/central-historico.html">📜 Histórico</a>
+  <a class="back hidden" id="nav-tecnico" href="/tecnico.html">🔧 Chamados TI</a>
+  <a class="back hidden" id="nav-central-solucoes" href="/central-solucoes.html">💬 Central de Soluções</a>
+  <a class="back active" id="nav-beniboy-self" href="/beniboy.html">🐝 Central do Beniboy</a>
+  <div class="nav-drawer-sep"></div>
+  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
+</nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso à Central do Beniboy. Fale com o administrador (Master).</div>
+
+<div id="root" class="hidden">
+  <div class="panel">
+    <h2>Setor de atendimento do Beniboy <span class="sub" id="total-count" style="font-family:var(--mono);color:var(--muted);font-size:11px;font-weight:400;"></span></h2>
+    <div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:10px;">Toda conversa do chat de suporte (💬 balãozinho / Beniboy) passa por aqui. Arraste um card pra outra coluna pra mover, ou abra e use "Mover para" — o mesmo vale pra quem responde do celular. N1 = Beniboy sozinho, N2 = agente do time de Suporte, N3 = Master.</div>
+    <div class="filtros">
+      <input type="text" id="f-busca" placeholder="Buscar por nome, contato, assunto..." oninput="renderKanban()">
+      <button type="button" class="chip" id="chip-desbloqueio" onclick="toggleFiltroDesbloqueio()">🔓 Só desbloqueios</button>
+    </div>
+  </div>
+  <div class="kanban-wrap">
+    <div class="kanban" id="kanban-wrap"></div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="overlay-detalhe">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharDetalhe()">✕</span>
+    <div class="sheet">
+      <h3 id="d-titulo"></h3>
+      <div class="sub" id="d-sub"></div>
+      <div class="d-tickets hidden" id="d-tickets"></div>
+      <div class="d-acoes" id="d-acoes"></div>
+      <div id="d-msgs" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px;"></div>
+      <div id="d-rodape" style="display:flex;gap:6px;">
+        <input type="text" id="d-texto" placeholder="Escrever uma resposta..." style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarResposta();}">
+        <button type="button" class="btn-primary" id="d-btn-enviar" onclick="enviarResposta()">Enviar</button>
+      </div>
+      <div id="d-finalizado" class="empty hidden" style="padding:14px 0 0;">Conversa finalizada — mova pra uma coluna aberta se precisar reabrir.</div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="overlay-acao">
+  <div class="sheet-wrap" style="max-width:380px;">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharModalAcao()">✕</span>
+    <div class="sheet">
+      <h3 id="acao-titulo"></h3>
+      <div id="acao-corpo"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button type="button" class="btn-primary" style="flex:1;" onclick="confirmarModalAcao()">Confirmar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
+function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const FUSO_BR = 'America/Recife';
+function fmtDataHora(iso){ if(!iso) return '—'; return new Date(iso).toLocaleString('pt-BR',{timeZone:FUSO_BR}); }
+function tempoRelativo(iso){
+  if(!iso) return '—';
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const min = Math.round(diffMs/60000);
+  if(min < 1) return 'agora';
+  if(min < 60) return `há ${min} min`;
+  const h = Math.round(min/60);
+  if(h < 24) return `há ${h}h`;
+  return `há ${Math.round(h/24)}d`;
+}
+
+let ME = null, IS_MASTER = false, IS_ADMIN = false;
+let ITENS = [];
+let FILTRO_DESBLOQUEIO = false;
+let DETALHE_ATUAL = null;
+let DRAG_ID = null;
+let ACAO_PENDENTE = null; // {id, statusAlvo}
+
+// mesmos 6 valores de STATUS_ATENDIMENTO em suporteChat.js, na ordem do funil
+const COLUNAS = [
+  { key:'PENDENTE',       label:'Pendente',        icone:'🕓', cor:'var(--warn)' },
+  { key:'EM_ATENDIMENTO', label:'Em atendimento',  icone:'🙋', cor:'var(--accent)' },
+  { key:'TRANSFERIDO',    label:'Transferido',     icone:'🔀', cor:'var(--purple)' },
+  { key:'TICKET_CRIADO',  label:'Ticket criado',   icone:'🎫', cor:'var(--teal)' },
+  { key:'RESOLVIDO',      label:'Resolvido',       icone:'✅', cor:'var(--ok)' },
+  { key:'SEM_SOLUCAO',    label:'Sem solução',     icone:'⛔', cor:'var(--bad)' },
+];
+
+// conversas de antes dessa feature nao tem statusAtendimento gravado - melhor
+// esforco: se ja foi finalizada vira "Resolvido" (nao da pra saber se teve
+// solucao ou nao sem reprocessar tudo), senao cai em Pendente como qualquer
+// conversa nova. Mesma logica pro nivel (sem responsavel = so o bot mexeu).
+function statusDe(chat){ return chat.statusAtendimento || (chat.status==='FINALIZADO' ? 'RESOLVIDO' : 'PENDENTE'); }
+function nivelDe(chat){ return chat.nivel || (chat.atendidoPorEmail ? 2 : 1); }
+
+function ultimaMsg(chat){
+  const m = (chat.mensagens||[])[(chat.mensagens||[]).length-1];
+  if(!m) return null;
+  return { de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'🤖 Beniboy':'Suporte'), texto: m.texto, em: m.em };
+}
+
+function passaFiltro(chat){
+  if(FILTRO_DESBLOQUEIO && !chat.desbloqueio) return false;
+  const q = (document.getElementById('f-busca').value||'').trim().toLowerCase();
+  if(!q) return true;
+  const alvo = [chat.nome, chat.contato, chat.assunto, chat.lojaContexto].filter(Boolean).join(' ').toLowerCase();
+  return alvo.includes(q);
+}
+
+function toggleFiltroDesbloqueio(){
+  FILTRO_DESBLOQUEIO = !FILTRO_DESBLOQUEIO;
+  document.getElementById('chip-desbloqueio').classList.toggle('ativo', FILTRO_DESBLOQUEIO);
+  renderKanban();
+}
+
+function renderKanban(){
+  const visiveis = ITENS.filter(passaFiltro);
+  document.getElementById('total-count').textContent = ITENS.length ? `· ${visiveis.length} de ${ITENS.length} conversa(s)` : '';
+  const porColuna = new Map(COLUNAS.map(c=>[c.key, []]));
+  visiveis.forEach(chat=>{ (porColuna.get(statusDe(chat))||porColuna.get('PENDENTE')).push(chat); });
+  porColuna.forEach(lista=>lista.sort((a,b)=>(b.atualizadoEm||'').localeCompare(a.atualizadoEm||'')));
+
+  const wrap = document.getElementById('kanban-wrap');
+  wrap.innerHTML = COLUNAS.map(col=>{
+    const lista = porColuna.get(col.key) || [];
+    return `<div class="kcol" style="--col-cor:${col.cor};" data-status="${col.key}" ondragover="onColDragOver(event)" ondragleave="onColDragLeave(event)" ondrop="onColDrop(event,'${col.key}')">
+      <div class="kcol-head">
+        <span class="kcol-titulo">${col.icone} ${col.label}</span>
+        <span class="kcol-count">${lista.length}</span>
+      </div>
+      <div class="kcol-corpo">
+        ${lista.length ? lista.map(chat=>cardHtml(chat)).join('') : '<div class="kcol-vazio">Nenhuma conversa aqui.</div>'}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function cardHtml(chat){
+  const nivel = nivelDe(chat);
+  const um = ultimaMsg(chat);
+  const tickets = chat.ticketsVinculados || [];
+  const ultimoTicket = tickets[tickets.length-1];
+  return `<div class="kcard" draggable="true" data-id="${chat.id}" ondragstart="onDragStart(event)" ondragend="onDragEnd(event)" onclick="abrirDetalhePorId('${chat.id}')">
+    <div class="kcard-top">
+      <span class="nivel-badge nivel-${nivel}">N${nivel}</span>
+      ${chat.desbloqueio ? '<span class="tag-desbloqueio">🔓 Desbloqueio</span>' : ''}
+      ${ultimoTicket ? `<span class="tag-ticket">🎫 #${escapeHtml(ultimoTicket.numero)}${tickets.length>1?` +${tickets.length-1}`:''}</span>` : ''}
+    </div>
+    <div class="kcard-nome">${escapeHtml(chat.nome||'Visitante')}</div>
+    <div class="kcard-assunto">${escapeHtml(chat.assunto || 'Suporte geral')}</div>
+    <div class="kcard-prev">${um ? escapeHtml(um.de)+': '+escapeHtml(um.texto||'(sem texto)') : 'Sem mensagens.'}</div>
+    <div class="kcard-meta">
+      <span>${chat.responsavel ? '👤 '+escapeHtml(chat.responsavel.nome||chat.responsavel.email||'') : (nivel===1 ? '🤖 Beniboy' : '—')}</span>
+      <span>${tempoRelativo(chat.atualizadoEm)}</span>
+    </div>
+  </div>`;
+}
+
+// ---------- drag and drop ----------
+function onDragStart(ev){
+  DRAG_ID = ev.currentTarget.dataset.id;
+  ev.currentTarget.classList.add('arrastando');
+  ev.dataTransfer.effectAllowed = 'move';
+  try{ ev.dataTransfer.setData('text/plain', DRAG_ID); }catch(e){}
+}
+function onDragEnd(ev){ ev.currentTarget.classList.remove('arrastando'); }
+function onColDragOver(ev){ ev.preventDefault(); ev.currentTarget.classList.add('drop-hover'); }
+function onColDragLeave(ev){ ev.currentTarget.classList.remove('drop-hover'); }
+function onColDrop(ev, statusAlvo){
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('drop-hover');
+  const id = DRAG_ID || ev.dataTransfer.getData('text/plain');
+  DRAG_ID = null;
+  if(!id) return;
+  iniciarTransicao(id, statusAlvo);
+}
+
+// ---------- mover card (drag OU botao/select do detalhe) ----------
+// TRANSFERIDO e SEM_SOLUCAO pedem um dado a mais (nivel de destino / motivo)
+// antes de confirmar - os outros 4 statuses vao direto pra API.
+function iniciarTransicao(id, statusAlvo){
+  const chat = ITENS.find(c=>c.id===id);
+  if(chat && statusDe(chat)===statusAlvo) return;
+  if(statusAlvo==='TRANSFERIDO'){
+    ACAO_PENDENTE = { id, statusAlvo };
+    document.getElementById('acao-titulo').textContent = 'Transferir conversa';
+    document.getElementById('acao-corpo').innerHTML = `
+      <div class="sub" style="margin-bottom:8px;">Pra qual nível vai essa conversa?</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;"><input type="radio" name="nivel-transf" value="2" checked style="width:auto;"> N2 · outro agente (time de Suporte)</label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;"><input type="radio" name="nivel-transf" value="3" style="width:auto;"> N3 · Master</label>`;
+    document.getElementById('overlay-acao').classList.remove('hidden');
+    return;
+  }
+  if(statusAlvo==='SEM_SOLUCAO'){
+    ACAO_PENDENTE = { id, statusAlvo };
+    document.getElementById('acao-titulo').textContent = 'Encerrar sem solução';
+    document.getElementById('acao-corpo').innerHTML = `
+      <div class="sub" style="margin-bottom:8px;">Por que essa conversa não teve solução?</div>
+      <textarea id="acao-motivo" rows="3" placeholder="Ex: cliente não respondeu mais, pedido fora do prazo..."></textarea>`;
+    document.getElementById('overlay-acao').classList.remove('hidden');
+    return;
+  }
+  moverPara(id, statusAlvo, {});
+}
+function fecharModalAcao(){ document.getElementById('overlay-acao').classList.add('hidden'); ACAO_PENDENTE = null; }
+function confirmarModalAcao(){
+  if(!ACAO_PENDENTE) return;
+  const { id, statusAlvo } = ACAO_PENDENTE;
+  const extra = {};
+  if(statusAlvo==='TRANSFERIDO'){
+    const sel = document.querySelector('input[name="nivel-transf"]:checked');
+    extra.nivelDestino = sel ? Number(sel.value) : 2;
+  }
+  if(statusAlvo==='SEM_SOLUCAO'){
+    const motivo = (document.getElementById('acao-motivo').value||'').trim();
+    if(!motivo){ alert('Escreva o motivo.'); return; }
+    extra.motivo = motivo;
+  }
+  fecharModalAcao();
+  moverPara(id, statusAlvo, extra);
+}
+async function moverPara(id, statusAlvo, extra){
+  try{
+    const body = { statusAtendimento: statusAlvo };
+    if(extra.nivelDestino) body.nivelDestino = extra.nivelDestino;
+    if(extra.motivo) body.motivoSemSolucao = extra.motivo;
+    const resp = await fetch(`/api/suporte-chats/${id}/status`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao mover a conversa.');
+    await carregarLista();
+    if(DETALHE_ATUAL && DETALHE_ATUAL.id===id) abrirDetalhePorId(id);
+  }catch(err){ alert(err.message); }
+}
+
+// ---------- detalhe ----------
+function abrirDetalhePorId(id){
+  const chat = ITENS.find(c=>c.id===id);
+  if(!chat) return;
+  DETALHE_ATUAL = chat;
+  const statusAtual = statusDe(chat);
+  const nivel = nivelDe(chat);
+  const colInfo = COLUNAS.find(c=>c.key===statusAtual);
+  document.getElementById('overlay-detalhe').classList.remove('hidden');
+  document.getElementById('d-titulo').textContent = chat.nome || 'Visitante';
+  document.getElementById('d-sub').textContent = `${chat.contato||''} · ${chat.assunto||'Suporte geral'}${chat.lojaContexto?' · loja: '+chat.lojaContexto:''} · N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}`;
+
+  const tickets = chat.ticketsVinculados || [];
+  const dTickets = document.getElementById('d-tickets');
+  dTickets.classList.toggle('hidden', !tickets.length);
+  dTickets.textContent = tickets.length ? '🎫 Tickets dessa conversa: ' + tickets.map(t=>`#${t.numero}`).join(', ') : '';
+
+  const acoes = [];
+  if(statusAtual==='PENDENTE') acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">🙋 Assumir atendimento</button>`);
+  if(statusAtual!=='RESOLVIDO' && statusAtual!=='SEM_SOLUCAO'){
+    acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','TRANSFERIDO')">🔀 Transferir</button>`);
+    acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','RESOLVIDO')">✅ Marcar resolvido</button>`);
+    acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','SEM_SOLUCAO')">⛔ Sem solução</button>`);
+  } else {
+    acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">↩️ Reabrir</button>`);
+  }
+  document.getElementById('d-acoes').innerHTML = acoes.join('');
+
+  const finalizado = chat.status === 'FINALIZADO';
+  document.getElementById('d-rodape').classList.toggle('hidden', finalizado);
+  document.getElementById('d-finalizado').classList.toggle('hidden', !finalizado);
+  document.getElementById('d-texto').value = '';
+
+  const msgs = (chat.mensagens||[]).map(m=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'🤖 Beniboy':'Suporte'), texto: m.texto, em: m.em }));
+  const el = document.getElementById('d-msgs');
+  el.innerHTML = msgs.length ? msgs.map(m=>`
+    <div class="msg-item">
+      <div class="m-cab"><span>${escapeHtml(m.de)}</span><span>${fmtDataHora(m.em)}</span></div>
+      <div class="m-texto">${escapeHtml(m.texto)}</div>
+    </div>`).join('') : '<div class="empty">Nenhuma mensagem ainda.</div>';
+  el.scrollTop = el.scrollHeight;
+}
+function fecharDetalhe(){ document.getElementById('overlay-detalhe').classList.add('hidden'); DETALHE_ATUAL = null; }
+
+async function enviarResposta(){
+  if(!DETALHE_ATUAL) return;
+  const input = document.getElementById('d-texto');
+  const texto = input.value.trim();
+  if(!texto) return;
+  const btn = document.getElementById('d-btn-enviar');
+  btn.disabled = true;
+  try{
+    const resp = await fetch(`/api/suporte-chats/${DETALHE_ATUAL.id}/responder`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }),
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao enviar mensagem.');
+    input.value = '';
+    await carregarLista();
+    abrirDetalhePorId(DETALHE_ATUAL.id);
+  }catch(err){ alert(err.message); }
+  finally{ btn.disabled = false; }
+}
+
+async function carregarLista(){
+  try{
+    ITENS = await fetch('/api/suporte-chats').then(r=>r.json());
+    renderKanban();
+  }catch(e){ /* rede fora - mantem lista anterior */ }
+}
+
+function initNavDrawerAccordion(){
+  const nav = document.getElementById('nav-drawer');
+  if(!nav || nav.dataset.ndgInit) return;
+  nav.dataset.ndgInit = '1';
+  [...nav.querySelectorAll(':scope > .nav-drawer-grupo')].forEach(g=>{
+    const nomeGrupo = g.textContent.trim();
+    const itens = [];
+    let el = g.nextElementSibling;
+    while(el && !el.classList.contains('nav-drawer-grupo') && !el.classList.contains('nav-drawer-sep')){
+      if(el.tagName==='A' || el.tagName==='BUTTON') itens.push(el);
+      el = el.nextElementSibling;
+    }
+    const wrap = document.createElement('div');
+    itens.forEach(it=>wrap.appendChild(it));
+    g.after(wrap);
+    const key = 'ndgAberto:' + nomeGrupo;
+    const temAtivo = itens.some(it=>it.classList.contains('active'));
+    const aberto = temAtivo || localStorage.getItem(key) === '1';
+    g.querySelector('.ndg-seta') && (g.querySelector('.ndg-seta').style.transform = aberto ? '' : 'rotate(-90deg)');
+    wrap.classList.toggle('hidden', !aberto);
+    g.addEventListener('click', ()=>{
+      const abrirAgora = wrap.classList.contains('hidden');
+      wrap.classList.toggle('hidden', !abrirAgora);
+      localStorage.setItem(key, abrirAgora ? '1' : '0');
+    });
+  });
+}
+initNavDrawerAccordion();
+
+function conectarStream(){
+  try{
+    const es = new EventSource('/api/stream?token='+encodeURIComponent(AUTH_TOKEN));
+    es.addEventListener('suporte-chat', ()=>{
+      carregarLista().then(()=>{ if(DETALHE_ATUAL) abrirDetalhePorId(DETALHE_ATUAL.id); });
+    });
+  }catch(e){ /* sem SSE, so atualiza no reload/poll */ }
+}
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  ME = await res.json();
+  IS_MASTER = ME.role==='master';
+  IS_ADMIN = !!ME.isAdmin;
+  const secoes = (ME.permissions && ME.permissions.sections) || [];
+  document.getElementById('nav-solicitacoes').classList.remove('hidden');
+  document.getElementById('nav-historico').classList.remove('hidden');
+  document.getElementById('nav-tecnico').classList.remove('hidden');
+  document.getElementById('nav-central-solucoes').classList.remove('hidden');
+  if(!(IS_MASTER || IS_ADMIN || secoes.includes('suporte'))){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('root').classList.remove('hidden');
+  await carregarLista();
+  conectarStream();
+  setInterval(()=>{ if(!document.hidden) carregarLista(); }, 60000);
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) carregarLista(); });
+}
+boot();
+</script>
+<script src="/nav-gate.js"></script>
+</body>
+</html>

@@ -4822,9 +4822,32 @@ app.post('/api/suporte-chats/:id/gerar-chamado', auth.requireAuth, async (req, r
       criadoPorEmail: req.user.email,
     });
     await suporteChat.vincularChamado(chat.id, chamado.id);
+    await suporteChat.adicionarTicketVinculado(chat.id, { tipo: 'chamado-ti', ticketId: chamado.id, numero: chamado.numeroTicket });
     broadcast('chamado-criado', { id: chamado.id }, 'tecnico');
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     res.json({ chamado });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// move o card no funil da Central do Beniboy (beniboy.html) - drag-and-drop
+// e botoes de acao rapida chamam essa mesma rota. nivelDestino so e exigido
+// pro status TRANSFERIDO (2=agente humano, 3=Master); motivoSemSolucao so
+// pro status SEM_SOLUCAO. Mesmo guard de acesso do resto do atendimento.
+app.post('/api/suporte-chats/:id/status', auth.requireAuth, async (req, res) => {
+  try {
+    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    const autor = { id: req.user.id, email: req.user.email, nome: req.user.username || req.user.email };
+    const chat = await suporteChat.atualizarStatusAtendimento(req.params.id, {
+      statusAtendimento: req.body.statusAtendimento,
+      nivelDestino: req.body.nivelDestino,
+      motivoSemSolucao: req.body.motivoSemSolucao,
+      autor,
+    });
+    broadcast('suporte-chat', { id: chat.id }, 'suporte');
+    const { token, ...resto } = chat;
+    res.json(resto);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

@@ -208,6 +208,7 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       direcionadoParaId: null, direcionadoParaEmail: null,
     });
     resultado.tickets.push(registro);
+    await suporteChat.adicionarTicketVinculado(chat.id, { tipo: 'solicitacao', ticketId: registro.id, numero: registro.numeroTicket });
     return `Ticket #${registro.numeroTicket} criado com sucesso (tipo ${tipo}, unidade ${registro.unidadeNome}). Informe esse número à pessoa.`;
   }
   if (nome === 'consultar_ticket') {
@@ -230,6 +231,10 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
   if (nome === 'desbloquear_login') {
     const usuarioAlvo = String(input.username || '').trim();
     if (!usuarioAlvo) return 'Peça o nome de usuário (login curto) de quem está bloqueado.';
+    // etiqueta essa conversa como "Desbloqueio" na Central do Beniboy (ver
+    // beniboy.html) assim que a ferramenta e de fato chamada - independente
+    // do resultado (achou/nao achou/ja desbloqueado), o assunto ja e esse
+    await suporteChat.marcarDesbloqueio(chat.id);
     const alvo = await users.findByIdentifier(usuarioAlvo);
 
     if (alvo) {
