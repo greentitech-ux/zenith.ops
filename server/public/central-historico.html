@@ -422,6 +422,12 @@
         <div class="sub" style="margin:-2px 0 8px;">Escolha 1 ou mais - só quem for escolhido enxerga o chamado.</div>
         <div id="d-manutencao-pessoas"></div>
       </div>
+      <div id="d-bloqueio-wrap" class="hidden">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:400;">
+          <input type="checkbox" id="d-bloqueio-pedir-troca" style="width:auto;">
+          Pedir pra pessoa atualizar a senha no próximo login
+        </label>
+      </div>
       <label>Observação da decisão (opcional)</label>
       <textarea id="d-motivo-decisao"></textarea>
       <div style="display:flex;gap:8px;margin-top:10px;">
@@ -939,7 +945,7 @@ function abrirDetalhe(tipo, id){
 
   let corpo = c.ehOrcamento ? `<div style="color:#e0b84c;font-weight:600;">💰 É um orçamento — precisa de aprovação de um Admin ou Master.</div>` : '';
   if(ehBloqueioLogin(c) && c.status==='PENDENTE'){
-    corpo += `<div style="color:var(--accent);font-weight:600;">🔓 Ao aprovar, o acesso é desbloqueado e a senha é redefinida automaticamente para "inicial1" — a pessoa é obrigada a trocar no próximo login. Não precisa escolher técnico.</div>`;
+    corpo += `<div style="color:var(--accent);font-weight:600;">🔓 Ao aprovar, o acesso é desbloqueado com a MESMA senha de sempre — a pessoa não precisa trocar nada. Não precisa escolher técnico. Se quiser, marque abaixo pra também pedir uma senha nova.</div>`;
   }
   corpo += `<div><b>${escapeHtml(c.titulo)}</b></div>`;
   // prioridade + SLA do ticket; Master/Admin re-prioriza na triagem (recalcula
@@ -1005,6 +1011,8 @@ function abrirDetalhe(tipo, id){
       ? PESSOAS_MANUTENCAO.map(p=>`<label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);font-size:13px;margin-top:6px;"><input type="checkbox" value="${p.id}" data-email="${escapeHtml(p.email)}" style="width:auto;"> ${escapeHtml(nomeExibicao(p))}</label>`).join('')
       : '<div class="sub">nenhuma pessoa com acesso de manutenção cadastrada</div>';
   }
+  document.getElementById('d-bloqueio-wrap').classList.toggle('hidden', !(podeDecidir && ehBloqueioLogin(c)));
+  if(podeDecidir && ehBloqueioLogin(c)) document.getElementById('d-bloqueio-pedir-troca').checked = false;
   document.getElementById('d-motivo-decisao').value = '';
   document.getElementById('msg-detalhe').classList.add('hidden');
 
@@ -1607,6 +1615,7 @@ async function decidir(status){
   msg.classList.add('hidden');
   try{
     let resp;
+    let pedirTrocaSenha = false;
     const motivoDecisao = document.getElementById('d-motivo-decisao').value;
     if(c.tipo==='estorno'){
       resp = await fetch(`/api/refund-requests/${c.id}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status, motivoDecisao}) });
@@ -1620,6 +1629,10 @@ async function decidir(status){
         body.tecnicoId = sel.value;
         body.tecnicoEmail = sel.options[sel.selectedIndex].dataset.email;
       }
+      if(c.tipo==='suporte-ti' && status==='APROVADO' && ehBloqueioLogin(c)){
+        pedirTrocaSenha = document.getElementById('d-bloqueio-pedir-troca').checked;
+        body.pedirTrocaSenha = pedirTrocaSenha;
+      }
       if(c.tipo==='manutencao' && status==='APROVADO'){
         const marcados = [...document.querySelectorAll('#d-manutencao-pessoas input:checked')];
         if(!marcados.length) throw new Error('Escolha quem vai fazer a manutenção.');
@@ -1631,8 +1644,8 @@ async function decidir(status){
     if(!resp.ok) throw new Error(data.error || 'Erro ao decidir.');
     fecharDetalhe();
     await carregarCentral();
-    if(data.senhaPadrao){
-      alert(`🔓 Login desbloqueado! A senha desse acesso foi redefinida para "${data.senhaPadrao}" - avise a pessoa pra entrar com essa senha e trocar por uma própria em seguida.`);
+    if(data.desbloqueado){
+      alert('🔓 Login desbloqueado! A pessoa já pode entrar de novo com a mesma senha de sempre.' + (pedirTrocaSenha ? ' Ela vai ser obrigada a cadastrar uma senha nova no próximo login.' : ''));
     } else if(data.avisoSenha){
       alert(data.avisoSenha);
     }

@@ -23,11 +23,6 @@ const usersRef = db.collection('users');
 // PATCH /api/solicitacoes/:id/status) e disparar o desbloqueio automatico,
 // em vez do fluxo normal de Chamado de TI com tecnico
 const ROBO_BLOQUEIO_EMAIL = 'robô de bloqueio (login)';
-// senha padrao aplicada automaticamente quando o Master/Admin aprova um
-// ticket de "Login bloqueado" (ver index.js) - a pessoa entra com essa senha
-// e e obrigada a trocar por uma propria no primeiro login (mesmo fluxo de
-// precisaTrocarSenha usado em toda criacao/reset de acesso)
-const SENHA_PADRAO_DESBLOQUEIO = 'inicial1';
 
 // require tardio (nao no topo) so pra deixar bem explicito que e uma
 // dependencia "de efeito colateral" do login, nao do modulo em si -
@@ -46,7 +41,7 @@ function criarChamadoBloqueio(email, userId, unidadesUsuario) {
       unidade,
       unidadeNome,
       titulo: `Login bloqueado: ${email}`,
-      observacao: `Acesso bloqueado automaticamente após 3 tentativas de senha erradas seguidas.\n\nLogin: ${email}\nUnidade(s) vinculada(s): ${unidadeNome}\nBloqueado em: ${agora}\n\nAo aprovar este ticket, o acesso é desbloqueado e a senha é redefinida automaticamente para "${SENHA_PADRAO_DESBLOQUEIO}" - avise a pessoa pra entrar com essa senha e trocar por uma própria em seguida (obrigatório no primeiro login).`,
+      observacao: `Acesso bloqueado automaticamente após 3 tentativas de senha erradas seguidas.\n\nLogin: ${email}\nUnidade(s) vinculada(s): ${unidadeNome}\nBloqueado em: ${agora}\n\nAo aprovar este ticket, o acesso é desbloqueado com a MESMA senha de sempre (a pessoa não precisa trocar nada). Se quiser pedir pra ela cadastrar uma senha nova mesmo assim, marque a opção "pedir pra atualizar a senha" ao aprovar.`,
       criadoPorId: userId,
       criadoPorEmail: ROBO_BLOQUEIO_EMAIL,
     })
@@ -327,5 +322,4 @@ module.exports = {
   dentroDoHorarioPermitido,
   invalidarUsuario,
   ROBO_BLOQUEIO_EMAIL,
-  SENHA_PADRAO_DESBLOQUEIO,
 };

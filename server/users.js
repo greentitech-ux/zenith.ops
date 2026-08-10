@@ -282,11 +282,12 @@ async function resetPassword(id, password) {
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Acesso não encontrado.');
   const passwordHash = await bcrypt.hash(password, 12);
-  // o Master trocando a senha tambem desbloqueia o acesso (ex: apos 3
+  // o Master (ou o Beniboy, quando a pessoa nao lembra a senha - ver
+  // suporteBot.js) trocando a senha tambem desbloqueia o acesso (ex: apos 3
   // tentativas erradas) e pede pra trocar no proximo login, ja que essa
-  // senha nova foi avisada ao usuario por fora do app (telefone/whatsapp)
+  // senha nova foi avisada ao usuario por fora do app (telefone/whatsapp/chat)
   await ref.update({
-    passwordHash, locked: false, failedAttempts: 0, precisaTrocarSenha: true,
+    passwordHash, locked: false, failedAttempts: 0, precisaTrocarSenha: true, desbloqueadoPeloBotEm: null,
   });
   invalidarUsuario(id);
   usersCache.invalidar();
@@ -294,6 +295,28 @@ async function resetPassword(id, password) {
   // ja emitidos continuariam valendo ate as 8h expirarem sozinhas
   await sessions.encerrarTodasDoUsuario(id);
   return { ok: true };
+}
+
+// desbloqueio que NAO mexe na senha - a pessoa volta a usar a MESMA senha de
+// sempre, sem ser obrigada a trocar (mesma dinamica do operador do
+// Abastecimento do Carrinho, ver abastecimentoCarrinho.desbloquearOperador).
+// pedirTrocaSenha (opcional, ex: checkbox ao aprovar o ticket automatico de
+// bloqueio) e a UNICA forma de tambem forcar troca aqui - sem isso marcado,
+// desbloquear NUNCA vira "trocar senha" ou senha padrao tipo "inicial1".
+// viaBot marca `desbloqueadoPeloBotEm`: se o MESMO acesso travar de novo
+// depois disso, o Beniboy (suporteBot.js) sabe que ja tentou destravar com a
+// mesma senha uma vez e muda de estrategia (pergunta se a pessoa lembra a
+// senha antes de tentar de novo).
+async function desbloquear(id, { pedirTrocaSenha, viaBot } = {}) {
+  const ref = usersRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  const patch = { locked: false, failedAttempts: 0, desbloqueadoPeloBotEm: viaBot ? new Date().toISOString() : null };
+  if (pedirTrocaSenha) patch.precisaTrocarSenha = true;
+  await ref.update(patch);
+  invalidarUsuario(id);
+  usersCache.invalidar();
+  return toPublic(await ref.get());
 }
 
 // self-service: o proprio usuario troca a senha (fluxo voluntario, ou
@@ -369,6 +392,7 @@ module.exports = {
   updateUsername,
   updateUsernamesEmMassa,
   resetPassword,
+  desbloquear,
   alterarSenhaPropria,
   remove,
 };

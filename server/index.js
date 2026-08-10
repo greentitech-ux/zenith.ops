@@ -425,6 +425,11 @@ async function usuarioLogadoDoHeader(req) {
     // de consulta de pedido do Beniboy - qualquer uma das duas basta, pedido
     // explicito do usuario ("Gerente libera sozinho")
     temMonitor: isMaster || (user.permissions?.sections || []).includes('monitor') || user.cargo === 'gerente',
+    // time de suporte (Master/Admin/secao 'suporte') ajudando OUTRA pessoa a
+    // desbloquear o login pelo chat - usado por desbloquear_login
+    // (suporteBot.js) pra dispensar a checagem de "contato bate com o email"
+    // que protege o autoatendimento anonimo contra desbloquear conta alheia
+    ehTimeSuporte: isMaster || !!user.isAdmin || (user.permissions?.sections || []).includes('suporte'),
   };
 }
 
@@ -1841,6 +1846,19 @@ app.put('/api/users/:id/cargo', auth.requireMaster, async (req, res) => {
 app.post('/api/users/:id/reset-password', auth.requireMaster, async (req, res) => {
   try {
     res.json(await users.resetPassword(req.params.id, req.body.password));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// desbloqueio SEM mexer na senha - a pessoa volta a usar a MESMA senha de
+// sempre (mesma dinamica do "🔒 Nova senha", so que sem definir senha
+// nenhuma). pedirTrocaSenha (opcional) e a UNICA forma de tambem forcar
+// trocar no proximo login - continua entrando com a senha ATUAL pra isso,
+// nunca uma senha padrao tipo "inicial1"
+app.post('/api/users/:id/desbloquear', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await users.desbloquear(req.params.id, { pedirTrocaSenha: !!req.body.pedirTrocaSenha }));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -3584,8 +3602,9 @@ app.delete('/api/solicitacoes/:id/comprada', auth.requireMasterOrAdmin, async (r
 // o Chamado vinculado (precisa escolher o tecnico no corpo da requisicao) -
 // EXCETO se for um ticket automatico de "Login bloqueado" (ver
 // auth.criarChamadoBloqueio): aprovar esse tipo especifico nao despacha
-// tecnico nenhum, e uma acao direto na conta - desbloqueia e redefine a
-// senha pro padrao (SENHA_PADRAO_DESBLOQUEIO), forcando trocar no proximo login
+// tecnico nenhum, e uma acao direto na conta - desbloqueia SEM mexer na
+// senha (a pessoa volta a usar a mesma de sempre); so forca trocar no
+// proximo login se o Master marcar isso no corpo (pedirTrocaSenha)
 app.patch('/api/solicitacoes/:id/status', auth.requireMasterOrAdmin, async (req, res) => {
   try {
     const { status, motivoDecisao, tecnicoId, tecnicoEmail, responsaveis } = req.body;
@@ -3602,15 +3621,18 @@ app.patch('/api/solicitacoes/:id/status', auth.requireMasterOrAdmin, async (req,
     const registro = await solicitacoes.updateStatus(req.params.id, status, { motivoDecisao, decidedByEmail: req.user.email });
 
     let chamado = null;
-    let senhaPadrao = null;
+    let desbloqueado = null;
     let avisoSenha = null;
     if (status === 'APROVADO' && atual.tipo === 'suporte-ti') {
       if (ehBloqueioLogin) {
         try {
-          await users.resetPassword(atual.criadoPorId, auth.SENHA_PADRAO_DESBLOQUEIO);
-          senhaPadrao = auth.SENHA_PADRAO_DESBLOQUEIO;
+          // desbloqueia SEM mexer na senha - a pessoa volta a usar a MESMA de
+          // sempre; so se o Master marcar a opcao (checkbox no card do
+          // ticket) e que tambem forca trocar no proximo login
+          await users.desbloquear(atual.criadoPorId, { pedirTrocaSenha: !!req.body.pedirTrocaSenha });
+          desbloqueado = true;
         } catch (e) {
-          avisoSenha = `Ticket aprovado, mas não foi possível redefinir a senha automaticamente: ${e.message}`;
+          avisoSenha = `Ticket aprovado, mas não foi possível desbloquear o acesso automaticamente: ${e.message}`;
         }
       } else {
         chamado = await chamadosTI.create({
@@ -3647,7 +3669,7 @@ app.patch('/api/solicitacoes/:id/status', auth.requireMasterOrAdmin, async (req,
       broadcast('chamado-manutencao-criado', { id: chamado.id }, 'manutencao');
     }
     broadcast('solicitacao-decidida', registro, 'solicitacoes');
-    res.json({ ...registro, chamado, senhaPadrao, avisoSenha });
+    res.json({ ...registro, chamado, desbloqueado, avisoSenha });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

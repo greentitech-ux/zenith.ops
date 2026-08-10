@@ -20,6 +20,13 @@ const suporteChat = require('./suporteChat');
 const solicitacoes = require('./solicitacoes');
 const store = require('./store');
 const pedidoWatch = require('./pedidoWatch');
+const users = require('./users');
+
+// senha padrao que o Beniboy define quando a pessoa NAO lembra a senha atual
+// (2a vez que o mesmo acesso trava depois de ja ter sido desbloqueado por
+// ele) - literalmente os digitos de 1 a 8, pedido explicito do usuario;
+// obriga trocar por uma propria no primeiro login (ver users.resetPassword)
+const SENHA_PADRAO_BOT = '12345678';
 
 const MODELO = 'claude-opus-5';
 const MAX_TOKENS = 700;
@@ -60,7 +67,7 @@ O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, 
 - Nunca invente informação sobre o sistema. Se não souber ou o assunto for sensível (senha de outra pessoa, dados financeiros, urgência grave), use chamar_atendente.
 
 ## O que você sabe do Zenith
-- Login: usuário + senha próprios. 3 senhas erradas BLOQUEIAM a conta — só o Master desbloqueia. Esqueceu a senha? O Master reseta (peça pra pessoa procurar o gestor, ou abra um ticket de suporte-ti).
+- Login: usuário + senha próprios. 3 senhas erradas BLOQUEIAM a conta — use desbloquear_login pra destravar (a pessoa volta a entrar com a MESMA senha de sempre, sem trocar nada). Só se o mesmo acesso travar de novo depois disso é que entra a senha padrão (ver ferramenta abaixo).
 - Acessos/permissões por tela (Fechamentos, Entregas, Estoque, Central, Chamados, Parque...) são liberados pelo Master na tela Usuários.
 - Central de Solicitações: pedidos de compra, manutenção, suporte de TI, pagamento (boleto/despesa) e nota fiscal viram tickets numerados (#10000 em diante) que o Master aprova ou rejeita. Depois de aprovado, o andamento aparece no ticket.
 - Fechamento de caixa: lançado em Lançar fechamento; erro em fechamento já enviado se corrige pelo botão "Pedir correção" no Histórico da Central (só 1 correção pendente por lançamento).
@@ -71,7 +78,8 @@ O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, 
 ## Ferramentas
 - criar_ticket: abre uma solicitação na Central. Antes de criar, CONFIRME em uma única mensagem o resumo (tipo, unidade, o que é). Só crie depois do "sim" da pessoa. Depois de criar, informe o número do ticket.
 - consultar_ticket: andamento de um ticket pelo número.
-- chamar_atendente: acione quando a pessoa pedir um humano, quando você não souber resolver, ou quando o assunto for sensível. Avise que o time já foi chamado e responde ali mesmo na conversa.${temFerramentaPedido ? `
+- chamar_atendente: acione quando a pessoa pedir um humano, quando você não souber resolver, ou quando o assunto for sensível. Avise que o time já foi chamado e responde ali mesmo na conversa.
+- desbloquear_login: destrava um acesso bloqueado (3 senhas erradas). Peça o nome de usuário ANTES de chamar. Por padrão mantém a MESMA senha - nunca invente nem envie senha nenhuma nessa primeira chamada. Se a ferramenta disser que esse acesso já tinha travado antes e travou de novo, PERGUNTE "você lembra da sua senha atual?" e chame de novo com lembraSenha=true/false conforme a resposta - só com lembraSenha=false uma senha padrão é definida (e mesmo assim a pessoa é obrigada a cadastrar uma própria no próximo login).${temFerramentaPedido ? `
 - consultar_pedido: consulta o status de UM pedido específico no Monitor (aprovado, recusado, estornado, fraude suspeita). Peça os 3 dados ANTES de chamar (uma pergunta por vez, o que faltar): o código da loja (IDPULSE, a mesma coluna "Unidade" do Fechamento), o nome do cliente e o valor do pedido. A busca já vem limitada às lojas que essa pessoa tem acesso - se não achar, pode ser de outra loja, não assuma fraude/erro. Nunca invente status; se a ferramenta não achar nada, diga isso e ofereça chamar_atendente. Se o status desse pedido mudar depois da sua resposta, a pessoa é avisada automaticamente - não precisa te perguntar de novo.` : `
 - Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora (só quem está logado com permissão de Monitor). Use chamar_atendente.`}
 
@@ -112,6 +120,18 @@ const TOOLS_BASE = [
     input_schema: {
       type: 'object',
       properties: { motivo: { type: 'string', description: 'Resumo de 1 linha do que a pessoa precisa, pro atendente já chegar sabendo' } },
+    },
+  },
+  {
+    name: 'desbloquear_login',
+    description: 'Desbloqueia um login do Zenith Ops que travou após 3 senhas erradas - por padrão SEM mudar a senha (a pessoa volta a entrar com a mesma de sempre). Peça o nome de usuário antes de chamar. Se a ferramenta pedir, pergunte se a pessoa lembra a senha e chame de novo com lembraSenha preenchido.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        username: { type: 'string', description: 'Nome de usuário (login curto) de quem está bloqueado.' },
+        lembraSenha: { type: 'boolean', description: 'Só preencha quando a ferramenta avisar que esse acesso já foi desbloqueado antes e travou de novo: true se a pessoa lembra a senha atual, false se não lembra.' },
+      },
+      required: ['username'],
     },
   },
 ];
@@ -193,6 +213,43 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     resultado.chamouAtendente = true;
     resultado.motivoAtendente = String(input.motivo || '').trim();
     return 'Atendente humano chamado — o time foi notificado e vai responder nessa mesma conversa. Avise a pessoa e se despeça.';
+  }
+  if (nome === 'desbloquear_login') {
+    const usuarioAlvo = String(input.username || '').trim();
+    if (!usuarioAlvo) return 'Peça o nome de usuário (login curto) de quem está bloqueado.';
+    const alvo = await users.findByIdentifier(usuarioAlvo);
+    if (!alvo || alvo.role === 'master') return 'Não encontrei esse usuário (ou é o Master, que não desbloqueia por aqui) - chame um atendente.';
+
+    // confere identidade antes de mexer em QUALQUER acesso: quem esta no
+    // chat e do time (Master/Admin/secao suporte, ajudando outra pessoa) OU
+    // o contato informado no INICIO da conversa bate com o e-mail cadastrado
+    // desse acesso (autoatendimento). Sem essa checagem, qualquer visitante
+    // anonimo do widget publico poderia mexer no login de QUALQUER pessoa so
+    // sabendo o usuario dela.
+    const staffAjudando = !!(chat.logado && chat.logado.ehTimeSuporte);
+    const contatoBate = !!(chat.contato && alvo.email
+      && String(chat.contato).trim().toLowerCase() === String(alvo.email).trim().toLowerCase());
+    if (!staffAjudando && !contatoBate) {
+      return 'Não consigo confirmar que é o dono desse acesso (o contato informado no início da conversa não bate com o e-mail cadastrado) - chame um atendente.';
+    }
+
+    if (!alvo.locked) return `O acesso de "${alvo.username || alvo.email}" não está bloqueado agora.`;
+
+    if (!alvo.desbloqueadoPeloBotEm) {
+      await users.desbloquear(alvo.id, { viaBot: true });
+      return `Pronto! O acesso de "${alvo.username || alvo.email}" foi desbloqueado - a pessoa já pode entrar de novo com a MESMA senha de sempre, sem trocar nada.`;
+    }
+    // esse mesmo acesso ja tinha sido desbloqueado por mim antes e travou de
+    // novo - pode ser que a senha esteja mesmo errada
+    if (input.lembraSenha == null) {
+      return 'Esse acesso já foi desbloqueado uma vez e travou de novo. Pergunte pra pessoa: "Você lembra da sua senha atual?" e chame essa mesma ferramenta de novo com lembraSenha=true (se lembrar) ou lembraSenha=false (se não lembrar - aí eu defino uma senha padrão pra ela cadastrar uma própria).';
+    }
+    if (input.lembraSenha) {
+      await users.desbloquear(alvo.id, { viaBot: true });
+      return `Desbloqueado de novo, mesma senha de sempre. Se travar outra vez, é bem provável que a senha esteja errada mesmo - vale perguntar de novo se lembra.`;
+    }
+    await users.resetPassword(alvo.id, SENHA_PADRAO_BOT);
+    return `Prontinho! Defini a senha padrão "${SENHA_PADRAO_BOT}" pra esse acesso - a pessoa entra com ela e é OBRIGADA a cadastrar uma senha própria na hora. Avise a pessoa.`;
   }
   if (nome === 'consultar_pedido') {
     // defesa em profundidade: mesmo que o modelo tentasse chamar essa tool

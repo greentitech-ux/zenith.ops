@@ -914,7 +914,7 @@ function renderUsers(){
     tags.push(`<span class="badge ${u.online?'on':'off'}" style="cursor:pointer;" onclick="abrirSessoes('${u.id}')" title="${u.ultimaAtividadeEm ? 'Última atividade: '+formatarRelativo(u.ultimaAtividadeEm) : 'Nunca fez login'} - clique pra ver os locais">${u.online?'🟢':'⚪'} ${u.sessoesAtivas} ${u.sessoesAtivas===1?'local':'locais'}</span>`);
     const detalhe = isMaster
       ? `<div class="user-detail-linha">Master - acesso total, sem restrições.</div>`
-      : `<div class="user-detail-linha"><b>Status:</b> ${status.texto}${u.locked ? ' (após 3 tentativas de senha erradas - use "Nova senha" pra destravar)' : ''}</div>
+      : `<div class="user-detail-linha"><b>Status:</b> ${status.texto}${u.locked ? ' (após 3 tentativas de senha erradas - use "Desbloquear" pra destravar sem mudar a senha)' : ''}</div>
          <div class="user-detail-linha"><b>Seções:</b> ${tagList(perms.sections)}</div>
          <div class="user-detail-linha"><b>Unidades:</b> ${tagList(perms.unidades, c=>UNIDADES_NOMES[c]||c)}</div>
          <div class="user-detail-linha"><b>Cofre (subgrupos):</b> ${tagList(subgroupNames)}</div>
@@ -948,6 +948,7 @@ function abrirAcoes(id){
   document.getElementById('acoes-lista').innerHTML = `
     <button type="button" onclick="fecharAcoes();editarPermissoes('${u.id}')">🔑 Permissões e tags</button>
     <button type="button" onclick="fecharAcoes();abrirHorario('${u.id}')">🕐 Horário de acesso</button>
+    ${u.locked ? `<button type="button" onclick="fecharAcoes();desbloquearAcesso('${u.id}')">🔓 Desbloquear (mantém a senha)</button>` : ''}
     <button type="button" onclick="fecharAcoes();resetarSenha('${u.id}')">🔒 Nova senha</button>
     <button type="button" onclick="fecharAcoes();definirUsername('${u.id}', '${escapeHtml(u.username||'')}')">🆔 ${u.username?'Editar usuário':'Definir usuário'}</button>
     <div class="acoes-sep">Conta</div>
@@ -1123,6 +1124,19 @@ async function resetarSenha(id){
   const data = await res.json();
   if(!res.ok){ alert(data.error||'Erro ao trocar senha.'); return; }
   alert('Senha atualizada.');
+  await carregarUsuarios();
+}
+
+// desbloqueio SEM mexer na senha - a pessoa volta a usar a MESMA senha de
+// sempre (diferente de "Nova senha" acima, que define uma senha nova de
+// proposito). Só pede pra trocar no próximo login se confirmado no 2º passo.
+async function desbloquearAcesso(id){
+  if(!confirm('Desbloquear esse acesso? A pessoa volta a entrar com a MESMA senha de sempre - nada muda.')) return;
+  const pedirTrocaSenha = confirm('Também pedir pra pessoa cadastrar uma senha nova no próximo login?');
+  const res = await fetch('/api/users/'+id+'/desbloquear', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({pedirTrocaSenha})});
+  const data = await res.json();
+  if(!res.ok){ alert(data.error||'Erro ao desbloquear.'); return; }
+  alert('Acesso desbloqueado.');
   await carregarUsuarios();
 }
 
