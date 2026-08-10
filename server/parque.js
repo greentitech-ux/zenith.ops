@@ -801,15 +801,20 @@ async function checkout(id, { motivo } = {}) {
   if (!atual.iniciado) throw new Error('Esse check-in ainda não teve o check-in físico feito.');
   if (atual.checkoutEm) throw new Error('Esse check-in já teve o check-out registrado.');
   const agora = horaAgoraBrasilia();
-  const restanteMin = Math.max(0, paraMinutos(atual.timeFinal) - paraMinutos(agora));
+  // PCD cortesia (5%CP): o check-out so encerra a visita, nunca guarda o
+  // tempo que sobrou como credito (a entrada foi gratuita, nao ha "compra"
+  // pra reaproveitar depois) - por isso nao entra na fila de aprovacao do
+  // Gerente, ja fecha aprovado direto
+  const ehPcdCortesia = atual.categoriaTempo === 'pcd-cortesia';
+  const restanteMin = ehPcdCortesia ? 0 : Math.max(0, paraMinutos(atual.timeFinal) - paraMinutos(agora));
   const merge = {
     checkoutEm: new Date().toISOString(),
-    checkoutAntecipado: restanteMin > 0,
+    checkoutAntecipado: !ehPcdCortesia && restanteMin > 0,
     tempoRestanteMin: restanteMin,
     motivoCheckout: String(motivo || '').trim().slice(0, 300),
-    checkoutAprovado: false,
-    checkoutAprovadoPorEmail: null,
-    checkoutAprovadoEm: null,
+    checkoutAprovado: ehPcdCortesia,
+    checkoutAprovadoPorEmail: ehPcdCortesia ? 'sistema (PCD cortesia · sem crédito)' : null,
+    checkoutAprovadoEm: ehPcdCortesia ? new Date().toISOString() : null,
   };
   await ref.update(merge);
   parqueCache.invalidar();

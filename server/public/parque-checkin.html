@@ -645,8 +645,8 @@ function adicionarCrianca(){
       <button type="button" class="btn-remover-crianca" onclick="document.getElementById('${id}').remove(); atualizarPreviewPulseiras();" title="Remover">✕</button>
     </div>
     <label class="crianca-meia-wrap" style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
-      <input type="checkbox" class="crianca-meia" checked style="width:auto;" onchange="atualizarPreviewValor()">
-      🧦 Par de meia · R$25 <span style="color:var(--muted);">(desmarque se a criança já tem a meia)</span>
+      <input type="checkbox" class="crianca-meia" style="width:auto;" onchange="atualizarPreviewValor()">
+      🧦 Par de meia · R$25 <span style="color:var(--muted);">(marque se a criança precisa comprar o par de meia)</span>
     </label>
   `;
   document.getElementById('lista-criancas').appendChild(div);
