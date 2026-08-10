@@ -246,7 +246,34 @@ async function listAllUncached() {
 const chatsCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = chatsCache.cached;
 
+const OCIOSO_MS = 15 * 60 * 1000;
+
+// varredura periodica (ver index.js): encerra sozinha qualquer conversa
+// ABERTA sem nenhuma mensagem nova (de nenhum dos dois lados) ha mais de
+// OCIOSO_MS - evita conversa "morta" ficando pendurada pra sempre no funil.
+// Usa o mesmo caminho de encerramento com motivo (SEM_SOLUCAO) que o time
+// usa na mao, so que com autor null (evento automatico, aparece no
+// historicoStatus como tal).
+async function finalizarOciosos() {
+  const chats = await listAllUncached();
+  const agora = Date.now();
+  const finalizados = [];
+  for (const chat of chats) {
+    if (chat.status !== 'ABERTO') continue;
+    const mensagens = chat.mensagens || [];
+    const ultimaEm = mensagens.length ? mensagens[mensagens.length - 1].em : chat.criadoEm;
+    if (!ultimaEm || agora - new Date(ultimaEm).getTime() < OCIOSO_MS) continue;
+    const atualizado = await atualizarStatusAtendimento(chat.id, {
+      statusAtendimento: 'SEM_SOLUCAO',
+      motivoSemSolucao: 'Encerrado automaticamente por inatividade (sem novas mensagens por 15 minutos).',
+      autor: null,
+    });
+    finalizados.push(atualizado);
+  }
+  return finalizados;
+}
+
 module.exports = {
   criar, getOne, getPublico, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll, ASSUNTOS,
-  atualizarStatusAtendimento, marcarDesbloqueio, adicionarTicketVinculado, STATUS_ATENDIMENTO,
+  atualizarStatusAtendimento, marcarDesbloqueio, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
 };

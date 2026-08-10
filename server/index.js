@@ -6006,6 +6006,19 @@ app.use((err, req, res, next) => {
       rodarAutoCheckinsParque().catch((err) => console.error('Erro na varredura de check-in automático:', err.message));
     }, 60 * 1000);
 
+    // varredura do chat de suporte (Beniboy): conversa ABERTA sem nenhuma
+    // mensagem nova (visitante ou time) ha mais de 15min se encerra sozinha
+    // (SEM_SOLUCAO, ver suporteChat.finalizarOciosos) - evita conversa morta
+    // pendurada pra sempre no funil da Central do Beniboy. Roda a cada 5min.
+    const rodarFinalizacaoOciososSuporte = async () => {
+      const finalizados = await suporteChat.finalizarOciosos();
+      for (const chat of finalizados) broadcast('suporte-chat', { id: chat.id }, 'suporte');
+    };
+    rodarFinalizacaoOciososSuporte().catch((err) => console.error('Erro na varredura de chats ociosos do suporte:', err.message));
+    setInterval(() => {
+      rodarFinalizacaoOciososSuporte().catch((err) => console.error('Erro na varredura de chats ociosos do suporte:', err.message));
+    }, 5 * 60 * 1000);
+
     // relatorio diario do MV por e-mail (ver relatorioMV.js) - so agenda se
     // as credenciais de ENVIO estiverem configuradas (quem manda, RELATORIO_
     // EMAIL_USER/PASS); pra QUEM recebe ha sempre um valor (config editavel

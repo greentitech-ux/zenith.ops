@@ -41,7 +41,7 @@ const MAX_RESPOSTAS_BOT = 8;
 // (push + SSE, ver notifyBeniboyEscalonamento) nunca dispararia mesmo com a
 // pessoa esperando um humano que ninguem avisou. Detecta a frase e forca o
 // escalonamento de verdade, garantindo que a fala e a acao andem juntas.
-const ESCALACAO_VERBO_RE = /\b(chamei|chamado|acionei|acionado|notifiquei|notificado)\b/i;
+const ESCALACAO_VERBO_RE = /\b(chamei|chamado|chamando|chamaria|vou\s+chamar|acionei|acionado|acionando|acionaria|vou\s+acionar|notifiquei|notificado|notificando|notificaria|vou\s+notificar)\b/i;
 const ESCALACAO_ALVO_RE = /\b(atendente|humano|suporte|time)\b/i;
 
 // tipos que o bot pode abrir na Central (mesma lista do formulario publico -

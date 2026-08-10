@@ -43,7 +43,8 @@
   .szc-msg{max-width:85%;padding:8px 10px;border-radius:10px;font-size:12.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word;}
   .szc-msg.visitante{align-self:flex-end;background:#12303a;color:#cfeeff;border:1px solid rgba(92,200,255,.25);}
   .szc-msg.suporte{align-self:flex-start;background:#181d24;border:1px solid #232a33;}
-  .szc-msg .szc-quem{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:#7d8896;display:block;margin-bottom:2px;}
+  .szc-msg .szc-quem{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:#7d8896;display:block;}
+  .szc-msg .szc-quando{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;color:#5a6472;display:block;margin-bottom:4px;}
   .szc-rodape{padding:10px 12px;border-top:1px solid #232a33;display:flex;gap:6px;}
   .szc-rodape .szc-input{flex:1;}
   .szc-aviso{font-size:11.5px;color:#7d8896;text-align:center;}
@@ -115,6 +116,10 @@
   }
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  function fmtQuando(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Recife', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   }
 
   const style = document.createElement('style');
@@ -281,7 +286,7 @@
     // pra pessoa saber que ainda não é um humano falando
     corpo.innerHTML = (chat.mensagens || []).map((m) => `
       <div class="szc-msg ${m.de === 'visitante' ? 'visitante' : 'suporte'}">
-        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Você') : (m.bot ? '🤖 Beniboy · assistente virtual' : 'Suporte')}</span>${esc(m.texto)}
+        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Você') : (m.bot ? '🤖 Beniboy · assistente virtual' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}
       </div>`).join('') || '<div class="szc-aviso">Sem mensagens ainda.</div>';
     if (chat.status !== 'ABERTO') {
       corpo.insertAdjacentHTML('beforeend', `<div class="szc-fim">Conversa finalizada pelo Suporte. Precisa de mais ajuda?<br><button type="button" class="szc-link" id="szc-nova-conversa">Iniciar nova conversa</button></div>`);
@@ -457,7 +462,7 @@
       </div>` +
       (chat.mensagens || []).map((m) => `
       <div class="szc-msg ${m.de === 'visitante' ? 'suporte' : 'visitante'}">
-        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Visitante') : (m.bot ? '🤖 Beniboy (bot)' : 'Suporte' + (m.autorEmail ? ' · ' + esc(m.autorEmail) : ''))}</span>${esc(m.texto)}
+        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Visitante') : (m.bot ? '🤖 Beniboy (bot)' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}
       </div>`).join('') + `
       <div style="display:flex;gap:6px;">
         <input type="text" class="szc-input" id="szc-atend-msg" placeholder="responder..." maxlength="1000" style="flex:1;">
