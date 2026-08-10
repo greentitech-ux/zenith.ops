@@ -4111,6 +4111,25 @@ async function processarItensComFoto(itensMeta, arquivos, chamadoId, pastaStorag
   return itens;
 }
 
+// avarias da Contagem do Abastecimento: mesmo casamento por ordem de
+// processarItensComFoto (acima), mas preservando insumoId/quantidade/
+// observacao em vez de so descricao - a rota /api/abastecimento chama isso
+// antes de mandar a lista pra abastecimentoCarrinho.criar()
+async function processarAvariasComFoto(itensMeta, arquivos) {
+  const restantes = [...(arquivos || [])];
+  const itens = [];
+  for (const meta of (Array.isArray(itensMeta) ? itensMeta : [])) {
+    let foto = null;
+    if (meta && meta.temFoto && restantes.length) {
+      const file = restantes.shift();
+      const path = await storage.salvarArquivo('contagem', file, 'abastecimento-avarias');
+      foto = { nome: file.originalname, path, tipo: file.mimetype || 'application/octet-stream' };
+    }
+    itens.push({ insumoId: meta && meta.insumoId, quantidade: meta && meta.quantidade, observacao: meta && meta.observacao, foto });
+  }
+  return itens;
+}
+
 async function processarAssinatura(file, chamadoId, pastaStorage) {
   if (!file) return null;
   const path = await storage.salvarArquivo(chamadoId, file, pastaStorage);
@@ -4248,31 +4267,39 @@ async function abrirTicketBloqueioOperador(op, req) {
   }
 }
 
-app.post('/api/abastecimento', auth.requireAuth, async (req, res) => {
+// CONTAGEM manda AVARIAS com foto opcional por item -> vem multipart (campo
+// "payload" com o JSON + arquivos em "fotosAvarias"); PEDIDO/ENVIO continuam
+// JSON puro, sem avarias. upload.array() so mexe quando o content-type e
+// multipart - request JSON passa direto (req.body ja populado pelo
+// express.json de sempre), entao os dois formatos convivem na mesma rota.
+app.post('/api/abastecimento', auth.requireAuth, upload.array('fotosAvarias', 20), async (req, res) => {
   try {
+    const body = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
     // CONTAGEM e o inventario do turno do carrinho - mesma ponta de quem pede
-    if ((req.body.tipo === 'PEDIDO' || req.body.tipo === 'CONTAGEM') && !podePedirAbastecimento(req)) {
+    if ((body.tipo === 'PEDIDO' || body.tipo === 'CONTAGEM') && !podePedirAbastecimento(req)) {
       return res.status(403).json({ error: 'Você não tem a permissão de PEDIDO (lado do carrinho).' });
     }
-    if (req.body.tipo === 'ENVIO' && !podeEnviarAbastecimento(req)) {
+    if (body.tipo === 'ENVIO' && !podeEnviarAbastecimento(req)) {
       return res.status(403).json({ error: 'Você não tem a permissão de ENVIO (lado da loja).' });
     }
     // login LOCAL de operador (4 letras + 4 numeros, cadastrado na propria
     // pagina): obrigatorio em todo lancamento, e o papel do operador tem
     // que bater com o tipo - e a assinatura de QUEM fez, no balcao
     const operador = await abastecimentoCarrinho.validarOperador({
-      usuario: req.body.operadorUsuario,
-      senha: req.body.operadorSenha,
-      papel: req.body.tipo === 'ENVIO' ? 'envio' : 'pedido',
+      usuario: body.operadorUsuario,
+      senha: body.operadorSenha,
+      papel: body.tipo === 'ENVIO' ? 'envio' : 'pedido',
     });
+    const avarias = await processarAvariasComFoto(body.avarias, req.files);
     const registro = await abastecimentoCarrinho.criar({
       operador,
-      tipo: req.body.tipo,
-      pizzas: req.body.pizzas,
-      insumos: req.body.insumos,
-      observacao: req.body.observacao,
-      atendePedidoId: req.body.atendePedidoId,
-      jaRecebido: req.body.jaRecebido,
+      tipo: body.tipo,
+      pizzas: body.pizzas,
+      insumos: body.insumos,
+      avarias,
+      observacao: body.observacao,
+      atendePedidoId: body.atendePedidoId,
+      jaRecebido: body.jaRecebido,
       criadoPorId: req.user.id,
       criadoPorEmail: req.user.email,
       criadoPorNome: req.user.username || req.user.email,
@@ -4292,6 +4319,16 @@ app.post('/api/abastecimento', auth.requireAuth, async (req, res) => {
     if (err.operadorBloqueado) abrirTicketBloqueioOperador(err.operadorBloqueado, req);
     res.status(400).json({ error: err.message, papelErrado: !!err.papelErrado });
   }
+});
+
+// foto de uma avaria da Contagem - mesmo guard de leitura do GET /api/abastecimento
+app.get('/api/abastecimento/avaria-foto/:id/:index', auth.requireAuth, async (req, res) => {
+  if (!podePedirAbastecimento(req) && !podeEnviarAbastecimento(req)) return res.sendStatus(403);
+  const registro = await abastecimentoCarrinho.getOne(req.params.id);
+  if (!registro) return res.sendStatus(404);
+  const foto = (registro.avarias || [])[Number(req.params.index)]?.foto;
+  if (!foto) return res.sendStatus(404);
+  storage.streamArquivo(foto.path, foto.tipo, res);
 });
 
 // "Ja lancei" do pedido retroativo ("ja recebi"): a loja confirma que o

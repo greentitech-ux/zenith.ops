@@ -373,10 +373,41 @@ async function resolverInsumos(lista, { permitirInativo = false } = {}) {
   return resultado;
 }
 
-async function criar({ tipo, pizzas, insumos, observacao, atendePedidoId, jaRecebido, criadoPorId, criadoPorEmail, criadoPorNome, operador }) {
+// AVARIAS: registradas so durante a CONTAGEM (o que ja chega estragado/
+// danificado no inicio do turno) - cada item vem do MESMO catalogo dos
+// insumos (padroniza o nome), com quantidade e uma FOTO opcional (ja
+// processada pela rota antes de chegar aqui, ver processarAvariasComFoto em
+// index.js). Observacao e OBRIGATORIA por item: sem ela nao da pra saber o
+// que aconteceu com aquele item quando alguem for analisar depois.
+async function resolverAvarias(lista) {
+  if (!Array.isArray(lista)) return [];
+  const catalogo = await listarInsumos();
+  const porId = new Map(catalogo.map((i) => [i.id, i]));
+  const resultado = [];
+  for (const item of lista.slice(0, 20)) {
+    if (!item) continue;
+    const cad = porId.get(item.insumoId);
+    if (!cad) throw new Error('Avaria: escolha um insumo do catálogo.');
+    const quantidade = Number(item.quantidade);
+    if (!Number.isFinite(quantidade) || quantidade <= 0) throw new Error(`Avaria de "${cad.nome}": informe a quantidade.`);
+    const observacao = String(item.observacao || '').trim().slice(0, 500);
+    if (!observacao) throw new Error(`Avaria de "${cad.nome}": descreva o que aconteceu (observação obrigatória).`);
+    resultado.push({
+      insumoId: cad.id,
+      nome: cad.nome,
+      quantidade: Math.round(quantidade),
+      observacao,
+      foto: item.foto && item.foto.path ? { nome: item.foto.nome || '', path: item.foto.path, tipo: item.foto.tipo || 'application/octet-stream' } : null,
+    });
+  }
+  return resultado;
+}
+
+async function criar({ tipo, pizzas, insumos, avarias, observacao, atendePedidoId, jaRecebido, criadoPorId, criadoPorEmail, criadoPorNome, operador }) {
   if (!TIPOS.includes(tipo)) throw new Error('Tipo inválido (use PEDIDO ou ENVIO).');
   const pizzasLimpas = sanitizarPizzas(pizzas);
   const insumosLimpos = await resolverInsumos(insumos);
+  const avariasLimpas = tipo === 'CONTAGEM' ? await resolverAvarias(avarias) : [];
   const temPizza = SABORES.some((s) => pizzasLimpas[s] > 0);
   // CONTAGEM pode ser toda zerada (carrinho vazio no inicio do turno)
   if (tipo !== 'CONTAGEM' && !temPizza && !insumosLimpos.length) throw new Error('Informe ao menos uma pizza ou um insumo.');
@@ -400,6 +431,8 @@ async function criar({ tipo, pizzas, insumos, observacao, atendePedidoId, jaRece
     origem: tipo === 'ENVIO' ? 'LOJA' : 'CARRINHO',
     pizzas: pizzasLimpas,
     insumos: insumosLimpos,
+    // so populado em CONTAGEM - itens danificados encontrados no carrinho
+    avarias: avariasLimpas,
     observacao: String(observacao || '').trim().slice(0, 500),
     // ENVIO -> qual pedido ele atende (opcional); PEDIDO -> qual envio o
     // atendeu (preenchido quando o envio vinculado nasce)

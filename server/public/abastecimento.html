@@ -128,6 +128,14 @@
   .linha-item input,.linha-item select{padding:9px 8px;font-size:13px;}
   .insumo-total{grid-column:1 / -1;font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:-2px 0 2px 2px;}
   .badge.visto{background:#12303a;color:var(--accent);}
+  /* AVARIA da Contagem: item + qtde + foto opcional + observacao obrigatoria
+     logo abaixo - vai adicionando de 1 em 1, mesmo espirito dos insumos */
+  .linha-avaria{display:grid;grid-template-columns:minmax(120px,1.6fr) 68px 36px 32px;gap:6px;align-items:center;}
+  .linha-avaria input,.linha-avaria select{padding:9px 8px;font-size:13px;}
+  .bloco-avaria{border:1px dashed var(--line);border-radius:10px;padding:8px;margin-top:8px;}
+  .bloco-avaria textarea{margin-top:6px;min-height:44px;}
+  .foto-btn{flex:none;width:36px;height:36px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;}
+  .foto-btn.tem-foto{border-color:var(--accent);color:var(--accent);}
 
   /* ALARME de pedido novo (lado da loja): overlay acima de tudo, contagem
      regressiva de 5min - so some quando alguem aperta OK */
@@ -361,6 +369,15 @@
       <label>Insumos (bebidas, embalagens...)</label>
       <div id="f-insumos"></div>
       <button type="button" class="btn-add" id="btn-add-insumo" onclick="adicionarInsumo()">+ Adicionar insumo</button>
+      <!-- AVARIAS: so na Contagem - item danificado encontrado no carrinho,
+           adicionando de 1 em 1 (mesmo espirito dos insumos). Cada linha tem
+           o item, a quantidade e uma foto opcional; a observacao (o que
+           aconteceu) e OBRIGATORIA por item -->
+      <div id="f-bloco-avarias" class="hidden">
+        <label>⚠️ Avarias <span style="text-transform:none;letter-spacing:0;">(itens danificados encontrados na contagem)</span></label>
+        <div id="f-avarias"></div>
+        <button type="button" class="btn-add" id="btn-add-avaria" onclick="adicionarAvaria()">+ Adicionar avaria</button>
+      </div>
       <label>Observação</label>
       <textarea id="f-obs" placeholder="ex: urgência / 1 lata avariada"></textarea>
       <!-- lancamento atrasado: o material JA chegou fisicamente mas o pedido
@@ -611,6 +628,7 @@ let CATALOGO_INSUMOS = [];
 let FILTRO = 'todos';
 let TIPO_FORM = 'PEDIDO';
 let INSUMOS = [];
+let AVARIAS = [];
 let SEQ = 0;
 
 const SABORES = ['calabresa','pepperoni','mussarela'];
@@ -981,6 +999,12 @@ function regCardHtml(r){
   const insumosHtml = (r.insumos||[]).length
     ? `<div class="reg-insumos">${r.insumos.map(insumoTexto).join(' &nbsp;•&nbsp; ')}</div>`
     : '';
+  // avarias da Contagem: item + qtde + observacao, com link pra foto quando tiver
+  const avariasHtml = (r.avarias||[]).length
+    ? `<div class="reg-obs" style="border-left:2px solid var(--bad);padding-left:8px;">⚠️ <b>Avarias:</b><br>${r.avarias.map((a,i)=>
+        `${escapeHtml(a.nome)} (${a.quantidade}) — ${escapeHtml(a.observacao)}${a.foto?` · <a href="/api/abastecimento/avaria-foto/${r.id}/${i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">📷 foto</a>`:''}`
+      ).join('<br>')}</div>`
+    : '';
   return `
     <div class="reg-card ${r.tipo}">
       <div class="reg-linha1">
@@ -989,6 +1013,7 @@ function regCardHtml(r){
       </div>
       <div class="qtd-chips">${chipsQtd(r)}</div>
       ${insumosHtml}
+      ${avariasHtml}
       ${r.observacao ? `<div class="reg-obs">${escapeHtml(r.observacao)}</div>` : ''}
       ${pendente(r) && TEM_ENVIO ? `<button type="button" class="btn-acao envio" style="margin-top:8px;padding:9px 10px;font-size:12.5px;min-width:0;width:100%;" onclick="envioRapido('${r.id}')">⚡ Envio rápido — mandar exatamente o que foi pedido</button>` : ''}
       <div class="reg-quem"><span>por ${escapeHtml(r.operadorNome||r.criadoPorNome||r.criadoPorEmail||'—')}${r.operadorUsuario?` <span style="font-family:var(--mono);color:var(--accent);">@${escapeHtml(r.operadorUsuario)}</span>`:''}</span><span style="display:flex;gap:10px;align-items:center;">${correcaoHtml(r)}${IS_MASTER && r.tipo==='CONTAGEM' && (r.correcao||{}).status!=='pendente' ? `<span style="cursor:pointer;color:var(--accent);text-decoration:underline;" onclick="abrirPedirCorrecao('${r.id}', true)">✏️ editar</span>` : ''}${IS_MASTER?`<button type="button" class="btn-excluir" onclick="excluir('${r.id}')">🗑 excluir</button>`:''}</span></div>
@@ -1118,6 +1143,33 @@ function renderInsumos(){
   }).join('') || '<div style="color:var(--muted);font-size:12px;">Nenhum insumo adicionado.</div>';
 }
 
+// ---------- AVARIAS (so na Contagem): item do catalogo + qtde + foto
+// opcional + observacao obrigatoria, adicionando de 1 em 1 ----------
+function adicionarAvaria(){
+  const primeiro = insumosAtivos()[0];
+  AVARIAS.push({ id: ++SEQ, insumoId: primeiro ? primeiro.id : '', quantidade: '', file: null, observacao: '' });
+  renderAvarias();
+}
+function removerAvaria(id){ AVARIAS = AVARIAS.filter(a=>a.id!==id); renderAvarias(); }
+function mudarAvariaInsumo(id, insumoId){ const a = AVARIAS.find(x=>x.id===id); if(a) a.insumoId = insumoId; }
+function mudarAvariaQtd(id, quantidade){ const a = AVARIAS.find(x=>x.id===id); if(a) a.quantidade = quantidade; }
+function mudarAvariaObs(id, observacao){ const a = AVARIAS.find(x=>x.id===id); if(a) a.observacao = observacao; }
+function fotoAvaria(id, file){ const a = AVARIAS.find(x=>x.id===id); if(a){ a.file = file || null; renderAvarias(); } }
+function renderAvarias(){
+  document.getElementById('f-avarias').innerHTML = AVARIAS.map(a=>`
+    <div class="bloco-avaria">
+      <div class="linha-avaria">
+        <select onchange="mudarAvariaInsumo(${a.id}, this.value)">
+          ${insumosAtivos().map(c=>`<option value="${c.id}" ${c.id===a.insumoId?'selected':''}>${escapeHtml(c.nome)}</option>`).join('')}
+        </select>
+        <input type="number" min="1" inputmode="numeric" value="${escapeHtml(a.quantidade)}" oninput="mudarAvariaQtd(${a.id}, this.value)" placeholder="qtde">
+        <label class="foto-btn ${a.file?'tem-foto':''}" title="${a.file?escapeHtml(a.file.name):'anexar foto'}">${a.file?'✅':'📷'}<input type="file" accept="image/*" capture="environment" hidden onchange="fotoAvaria(${a.id}, this.files[0])"></label>
+        <button type="button" class="btn-remover" onclick="removerAvaria(${a.id})">✕</button>
+      </div>
+      <textarea oninput="mudarAvariaObs(${a.id}, this.value)" placeholder="descreva a avaria (obrigatório) - ex: lata amassada, vazando">${escapeHtml(a.observacao)}</textarea>
+    </div>`).join('') || '<div style="color:var(--muted);font-size:12px;">Nenhuma avaria registrada.</div>';
+}
+
 function abrirForm(tipo){
   TIPO_FORM = tipo;
   document.getElementById('f-titulo').textContent =
@@ -1136,6 +1188,10 @@ function abrirForm(tipo){
     : [];
   document.getElementById('btn-add-insumo').classList.toggle('hidden', tipo==='CONTAGEM');
   renderInsumos();
+  // avarias so existem na Contagem - reseta a lista toda vez que o form abre
+  AVARIAS = [];
+  document.getElementById('f-bloco-avarias').classList.toggle('hidden', tipo!=='CONTAGEM');
+  renderAvarias();
   // check "ja recebi" so faz sentido no PEDIDO (lancamento atrasado)
   document.getElementById('f-bloco-ja-recebido').classList.toggle('hidden', tipo!=='PEDIDO');
   document.getElementById('f-ja-recebido').checked = false;
@@ -1193,7 +1249,27 @@ async function salvar(){
       operadorUsuario: document.getElementById('f-op-usuario').value.trim().toLowerCase(),
       operadorSenha: document.getElementById('f-op-senha').value.trim(),
     };
-    const resp = await fetch('/api/abastecimento', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    let resp;
+    if(TIPO_FORM==='CONTAGEM'){
+      // linha totalmente vazia (adicionou e desistiu) e ignorada; linha com
+      // alguma coisa preenchida exige item+qtde+observacao antes de mandar
+      const avariasValidas = [];
+      for(const a of AVARIAS){
+        const cad = insumoCadastro(a.insumoId);
+        const tocou = a.quantidade || a.file || a.observacao.trim();
+        if(!tocou) continue;
+        if(!a.insumoId || !a.quantidade) throw new Error('Avaria: escolha o item e a quantidade.');
+        if(!a.observacao.trim()) throw new Error(`Avaria de "${cad?cad.nome:'item'}": descreva o que aconteceu (observação obrigatória).`);
+        avariasValidas.push(a);
+      }
+      body.avarias = avariasValidas.map(a=>({ insumoId: a.insumoId, quantidade: a.quantidade, observacao: a.observacao, temFoto: !!a.file }));
+      const fd = new FormData();
+      fd.append('payload', JSON.stringify(body));
+      avariasValidas.forEach(a=>{ if(a.file) fd.append('fotosAvarias', a.file); });
+      resp = await fetch('/api/abastecimento', { method:'POST', body: fd });
+    } else {
+      resp = await fetch('/api/abastecimento', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    }
     const data = await resp.json();
     if(!resp.ok){
       const senhaDigitada = body.operadorSenha;
