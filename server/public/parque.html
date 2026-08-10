@@ -520,7 +520,7 @@ function correcaoAba(aba){
   document.getElementById('btn-enviar-correcao').textContent = aba==='excluir' ? 'Pedir exclusão' : 'Enviar proposta de alteração';
 }
 
-function corAddCrianca(nome, nasc, meia, niver){
+function corAddCrianca(nome, nasc, meia){
   const div = document.createElement('div');
   div.className = 'crianca-linha';
   div.innerHTML = `<input type="text" placeholder="Nome da criança" class="cor-cr-nome">
@@ -531,9 +531,7 @@ function corAddCrianca(nome, nasc, meia, niver){
     <label style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
       <input type="checkbox" class="cor-cr-meia" style="width:auto;" ${meia===false?'':'checked'}> 🧦 Par de meia · R$25
     </label>
-    <label style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
-      <input type="checkbox" class="cor-cr-niver" style="width:auto;" ${niver?'checked':''}> 🎂 Niver · 50% OFF
-    </label>`;
+    <div class="sub" style="grid-column:1 / -1;font-size:11px;color:var(--muted);margin-top:2px;">🎂 O desconto de Niver (50%) é calculado sozinho pela data de nascimento x data de utilização - não precisa marcar nada aqui.</div>`;
   div.querySelector('.cor-cr-nome').value = nome||'';
   div.querySelector('.cor-cr-nasc').value = (nasc||'').slice(0,10);
   document.getElementById('cor-criancas').appendChild(div);
@@ -558,7 +556,7 @@ function abrirCorrecao(id){
   document.getElementById('cor-ac-quant').value = c.quantAC || 1;
   document.getElementById('cor-observacao').value = c.observacao || '';
   document.getElementById('cor-criancas').innerHTML = '';
-  (c.criancas||[]).forEach(cr=>corAddCrianca(cr.nome, cr.dataNascimento, cr.meia, cr.niver));
+  (c.criancas||[]).forEach(cr=>corAddCrianca(cr.nome, cr.dataNascimento, cr.meia));
   document.getElementById('cor-motivo').value = '';
   document.getElementById('msg-correcao').classList.add('hidden');
   correcaoAba('alterar');
@@ -625,7 +623,6 @@ document.getElementById('form-correcao').addEventListener('submit', async (ev)=>
           nome: l.querySelector('.cor-cr-nome').value,
           dataNascimento: l.querySelector('.cor-cr-nasc').value || null,
           meia: l.querySelector('.cor-cr-meia').checked,
-          niver: l.querySelector('.cor-cr-niver').checked,
         })),
       };
     }

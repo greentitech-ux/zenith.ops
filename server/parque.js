@@ -46,10 +46,33 @@ function valorMeias(criancas, meiasExtras) {
   return PRECO_MEIA * (optantes + Math.max(0, num(meiasExtras)));
 }
 
-// aniversariante: 50% de desconto na entrada SO daquela crianca (as demais
-// do mesmo check-in pagam normal) - marcado por criterio do atendente, sem
-// checagem contra dataNascimento. Nao afeta o par de meia.
+// aniversariante: 50% de desconto AUTOMATICO na entrada so daquela crianca
+// (as demais do mesmo check-in pagam normal) quando a data de utilizacao do
+// check-in (o dia que a entrada vale, nao a data em que foi comprada) cai
+// ate NIVER_JANELA_DIAS antes ou depois do aniversario da crianca (mes/dia
+// da dataNascimento - o ano nao importa). Nao precisa marcar nada, nao afeta
+// o par de meia, e NAO se aplica as categorias PCD (pcd30/pcd60/pcd-cortesia
+// = 5%CP), que ja tem preco fixo proprio - ver aplicarNiverAutomatico.
 const NIVER_DESCONTO = 0.5;
+const NIVER_JANELA_DIAS = 7;
+function ehNiver(dataNascimento, dataUtilizacao) {
+  if (!dataNascimento || !dataUtilizacao) return false;
+  const nasc = new Date(`${dataNascimento}T00:00:00`);
+  const uso = new Date(`${dataUtilizacao}T00:00:00`);
+  if (Number.isNaN(nasc.getTime()) || Number.isNaN(uso.getTime())) return false;
+  // compara contra o aniversario no ano anterior/atual/seguinte pra cobrir a
+  // virada do ano (ex: nasc 28/12, uso 02/01)
+  for (const deltaAno of [-1, 0, 1]) {
+    const aniversario = new Date(uso.getFullYear() + deltaAno, nasc.getMonth(), nasc.getDate());
+    const diffDias = Math.abs((uso - aniversario) / 86400000);
+    if (diffDias <= NIVER_JANELA_DIAS) return true;
+  }
+  return false;
+}
+// categoriaPcd presente = pcd30/pcd60/pcd-cortesia: niver nunca se aplica
+function aplicarNiverAutomatico(criancas, dataUtilizacao, categoriaPcd) {
+  return (criancas || []).map((c) => ({ ...c, niver: !categoriaPcd && ehNiver(c.dataNascimento, dataUtilizacao) }));
+}
 function valorEntradaCriancas(criancas, unitario) {
   return (criancas || []).reduce((soma, c) => soma + (c.niver ? unitario * (1 - NIVER_DESCONTO) : unitario), 0);
 }
@@ -251,8 +274,8 @@ function sanitizarCriancas(lista) {
       // meia: true por padrao (toda crianca paga o par de R$25) - so fica
       // false quando o atendente desmarca porque a crianca ja tem a meia
       meia: !(c && c.meia === false),
-      // niver: 50% de desconto so na entrada dessa crianca (ver NIVER_DESCONTO)
-      niver: !!(c && c.niver === true),
+      // niver NAO entra aqui - e' calculado automaticamente por data (ver
+      // aplicarNiverAutomatico), nunca aceito direto do cliente
     }))
     .filter((c) => c.nome)
     .slice(0, 30);
@@ -282,7 +305,8 @@ async function criar({
 }) {
   const categoriaPcd = CATEGORIAS_PCD.includes(categoriaTempo) ? categoriaTempo : null;
   const tempoParaValidar = categoriaPcd ? tempoDaCategoriaPcd(categoriaPcd) : tempoMinutos;
-  const { tempo, criancasOk } = validarPayload({ unidade, responsavel, dataUtilizacao, tempoMinutos: tempoParaValidar, criancas });
+  const { tempo, criancasOk: criancasSemNiver } = validarPayload({ unidade, responsavel, dataUtilizacao, tempoMinutos: tempoParaValidar, criancas });
+  const criancasOk = aplicarNiverAutomatico(criancasSemNiver, dataUtilizacao, categoriaPcd);
   // cortesia so nasce com justificativa - e o que alimenta o card de
   // aprovacao (Gerente/Master) e a trilha de auditoria
   const ehCortesia = sanitizarMetodoPagamento(metodoPagamento) === 'cortesia';
@@ -598,13 +622,18 @@ async function atualizar(id, patch) {
     }
   }
   if (patch.meiasExtras !== undefined) merge.meiasExtras = Math.max(0, Math.min(30, num(patch.meiasExtras)));
-  // o valor acompanha a tabela: recalcula sempre que tempo, criancas, meias
-  // ou forma de pagamento mudarem (cortesia zera). Registros de antes das
-  // meias existirem (sem valorMeias salvo) continuam sem cobranca de meia -
-  // uma correcao de dados nao pode inflar um valor que ja foi pago
-  if (patch.tempoMinutos !== undefined || patch.criancas !== undefined || patch.metodoPagamento !== undefined || patch.meiasExtras !== undefined) {
+  // o valor acompanha a tabela: recalcula sempre que tempo, criancas, meias,
+  // forma de pagamento OU a data de utilizacao mudarem (cortesia zera; a
+  // data entra porque o niver automatico depende dela - ver
+  // aplicarNiverAutomatico). Registros de antes das meias existirem (sem
+  // valorMeias salvo) continuam sem cobranca de meia - uma correcao de
+  // dados nao pode inflar um valor que ja foi pago. categoriaTempo (PCD) nao
+  // e editavel por correcao, entao usa sempre o que ja estava salvo.
+  if (patch.tempoMinutos !== undefined || patch.criancas !== undefined || patch.metodoPagamento !== undefined || patch.meiasExtras !== undefined || patch.dataUtilizacao !== undefined) {
     const metodoFinal = patch.metodoPagamento !== undefined ? merge.metodoPagamento : (atual.metodoPagamento || null);
-    const criancasFinais = merge.criancas || atual.criancas || [];
+    const dataUtilizacaoFinal = merge.dataUtilizacao !== undefined ? merge.dataUtilizacao : atual.dataUtilizacao;
+    const criancasFinais = aplicarNiverAutomatico(merge.criancas || atual.criancas || [], dataUtilizacaoFinal, atual.categoriaTempo);
+    merge.criancas = criancasFinais;
     const cobraMeias = atual.valorMeias != null || patch.meiasExtras !== undefined;
     const meiasExtrasFinais = merge.meiasExtras !== undefined ? merge.meiasExtras : (atual.meiasExtras || 0);
     merge.valorPulseira = valorPorTempo(tempo);

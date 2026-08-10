@@ -198,7 +198,7 @@
     <div class="secao">
       <div class="secao-titulo">Data e tempo</div>
       <label>Data de utilização</label>
-      <input type="date" id="f-data" required>
+      <input type="date" id="f-data" required onchange="atualizarPreviewValor()">
       <label>Tempo contratado</label>
       <div class="toggle-grupo" id="tempos"></div>
       <label>Horário previsto de entrada</label>
@@ -447,9 +447,25 @@ const PARQUE_UNIDADES_NOMES = { 'Saltiverso Patteo': 'Saltiverso Patteo' };
 // "➕ Adicionar tempo" durante a vigencia (mesma lista de buckets)
 const TEMPOS_VALIDOS = [30,60,90,120];
 const PRECO_MEIA = 25;
-// niver: 50% de desconto na entrada so da crianca aniversariante (mesma
-// regra do servidor - ver NIVER_DESCONTO em parque.js)
+// niver: 50% de desconto AUTOMATICO na entrada da crianca aniversariante
+// quando a data de utilizacao cai ate NIVER_JANELA_DIAS antes/depois do
+// aniversario (mes/dia da data de nascimento) - mesma regra do servidor
+// (ver ehNiver/aplicarNiverAutomatico em parque.js). Nunca se aplica com
+// categoria PCD selecionada (pcd30/pcd60/5%CP).
 const NIVER_DESCONTO = 0.5;
+const NIVER_JANELA_DIAS = 7;
+function ehNiverAuto(dataNascimento, dataUtilizacao){
+  if(!dataNascimento || !dataUtilizacao) return false;
+  const nasc = new Date(dataNascimento+'T00:00:00');
+  const uso = new Date(dataUtilizacao+'T00:00:00');
+  if(isNaN(nasc.getTime()) || isNaN(uso.getTime())) return false;
+  for(const deltaAno of [-1,0,1]){
+    const aniversario = new Date(uso.getFullYear()+deltaAno, nasc.getMonth(), nasc.getDate());
+    const diffDias = Math.abs((uso-aniversario)/86400000);
+    if(diffDias <= NIVER_JANELA_DIAS) return true;
+  }
+  return false;
+}
 // PCD30/PCD60: preco fixo por crianca (30/60min), fora da tabela normal.
 // PCD-cortesia (botao "5%CP"): entrada gratis de 60min, limitada a 2
 // criancas por hora-relogio por unidade (o backend recusa a 3a e avisa
@@ -550,8 +566,10 @@ function contarMeias(){
     .filter(l=>l.querySelector('.crianca-nome').value.trim() && l.querySelector('.crianca-meia').checked).length;
 }
 function contarNiver(){
+  if(CATEGORIA_SELECIONADA) return 0; // PCD30/PCD60/5%CP nunca tem niver
+  const dataUso = document.getElementById('f-data').value;
   return [...document.querySelectorAll('#lista-criancas .crianca-linha')]
-    .filter(l=>l.querySelector('.crianca-nome').value.trim() && l.querySelector('.crianca-niver').checked).length;
+    .filter(l=>l.querySelector('.crianca-nome').value.trim() && ehNiverAuto(l.querySelector('.crianca-nasc').value, dataUso)).length;
 }
 function atualizarPreviewValor(){
   const n = [...document.querySelectorAll('#lista-criancas .crianca-nome')].filter(i=>i.value.trim()).length;
@@ -566,7 +584,7 @@ function atualizarPreviewValor(){
   document.getElementById('preview-meias').textContent = `${meias} par(es) · ${fmtReal(valorMeias)}`;
   document.getElementById('valor-detalhe').textContent = gratis
     ? `cortesia · ${n} criança(s)`
-    : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min)${niver?` · 🎂 ${niver} niver(s) 50% off`:''} + meias`;
+    : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min)${niver?` · 🎂 Niver 50% (${niver})`:''} + meias`;
   document.getElementById('preview-valor').textContent = fmtReal(total);
 }
 document.getElementById('f-metodo').addEventListener('change', atualizarPreviewValor);
@@ -658,13 +676,10 @@ function adicionarCrianca(){
       <input type="checkbox" class="crianca-meia" style="width:auto;" onchange="atualizarPreviewValor()">
       🧦 Par de meia · R$25 <span style="color:var(--muted);">(marque se a criança precisa comprar o par de meia)</span>
     </label>
-    <label class="crianca-niver-wrap" style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
-      <input type="checkbox" class="crianca-niver" style="width:auto;" onchange="atualizarPreviewValor()">
-      🎂 Niver · 50% OFF <span style="color:var(--muted);">(marque se a criança é a aniversariante - metade do valor só da entrada dela)</span>
-    </label>
   `;
   document.getElementById('lista-criancas').appendChild(div);
   div.querySelector('.crianca-nome').addEventListener('input', atualizarPreviewPulseiras);
+  div.querySelector('.crianca-nasc').addEventListener('change', atualizarPreviewValor);
 }
 // escopado no #lista-criancas: o overlay de correção tem linhas de criança
 // próprias (.cor-cr-*) que não podem entrar na contagem do formulário
@@ -678,7 +693,6 @@ function coletarCriancas(){
     nome: div.querySelector('.crianca-nome').value.trim(),
     dataNascimento: div.querySelector('.crianca-nasc').value || null,
     meia: div.querySelector('.crianca-meia').checked,
-    niver: div.querySelector('.crianca-niver').checked,
   })).filter(c=>c.nome);
 }
 
@@ -877,7 +891,7 @@ function correcaoAba(aba){
   document.getElementById('btn-enviar-correcao').textContent = aba==='excluir' ? 'Pedir exclusão' : 'Enviar proposta de alteração';
 }
 
-function corAddCrianca(nome, nasc, meia, niver){
+function corAddCrianca(nome, nasc, meia){
   const div = document.createElement('div');
   div.className = 'crianca-linha';
   div.innerHTML = `<input type="text" placeholder="Nome da criança" class="cor-cr-nome">
@@ -888,9 +902,7 @@ function corAddCrianca(nome, nasc, meia, niver){
     <label style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
       <input type="checkbox" class="cor-cr-meia" style="width:auto;" ${meia===false?'':'checked'}> 🧦 Par de meia · R$25
     </label>
-    <label style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
-      <input type="checkbox" class="cor-cr-niver" style="width:auto;" ${niver?'checked':''}> 🎂 Niver · 50% OFF
-    </label>`;
+    <div class="sub" style="grid-column:1 / -1;font-size:11px;color:var(--muted);margin-top:2px;">🎂 O desconto de Niver (50%) é calculado sozinho pela data de nascimento x data de utilização - não precisa marcar nada aqui.</div>`;
   div.querySelector('.cor-cr-nome').value = nome||'';
   div.querySelector('.cor-cr-nasc').value = (nasc||'').slice(0,10);
   document.getElementById('cor-criancas').appendChild(div);
@@ -915,7 +927,7 @@ function abrirCorrecao(id){
   document.getElementById('cor-ac-quant').value = c.quantAC || 1;
   document.getElementById('cor-observacao').value = c.observacao || '';
   document.getElementById('cor-criancas').innerHTML = '';
-  (c.criancas||[]).forEach(cr=>corAddCrianca(cr.nome, cr.dataNascimento, cr.meia, cr.niver));
+  (c.criancas||[]).forEach(cr=>corAddCrianca(cr.nome, cr.dataNascimento, cr.meia));
   document.getElementById('cor-motivo').value = '';
   document.getElementById('msg-correcao').classList.add('hidden');
   correcaoAba('alterar');
@@ -943,7 +955,6 @@ document.getElementById('form-correcao').addEventListener('submit', async (ev)=>
           nome: l.querySelector('.cor-cr-nome').value,
           dataNascimento: l.querySelector('.cor-cr-nasc').value || null,
           meia: l.querySelector('.cor-cr-meia').checked,
-          niver: l.querySelector('.cor-cr-niver').checked,
         })),
       };
     }
