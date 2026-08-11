@@ -18,9 +18,10 @@
 // recusar (estorno pode chamar a API da Adyen; ajuste de fechamento reaplica
 // diffs no lancamento) e nao valeria o risco de fazer isso numa rota publica
 // sem login. Cada ticket PENDENTE ganha um token de uso unico (ver
-// solicitacoes.gerarTokenAcao) que e RENOVADO a cada envio do relatorio -
-// isso invalida sozinho o link de um e-mail de dias atras, sem precisar de
-// nenhuma limpeza a parte.
+// solicitacoes.gerarTokenAcao) que e RENOVADO a cada envio do relatorio - o
+// link de um e-mail de dias atras perde sozinho o poder de decidir (so o
+// mais recente decide), mas continua abrindo e mostrando o estado atual do
+// card em vez de um erro (ver solicitacoes.buscarEstadoPorToken).
 const nodemailer = require('nodemailer');
 const dns = require('dns').promises;
 const cron = require('node-cron');

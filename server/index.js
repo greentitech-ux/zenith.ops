@@ -405,8 +405,8 @@ app.post('/api/bot/solicitacoes', async (req, res) => {
 // funcionar (nunca a lista inteira do pedido nem dados de outras
 // solicitacoes), seguindo o mesmo cuidado do link publico de estorno. ----------
 app.get('/api/solicitacoes/decidir-info', async (req, res) => {
-  const registro = await solicitacoes.validarToken(req.query.ticket, req.query.token);
-  if (!registro) return res.status(404).json({ error: 'Link inválido, expirado ou já usado.' });
+  const registro = await solicitacoes.buscarEstadoPorToken(req.query.ticket, req.query.token);
+  if (!registro) return res.status(404).json({ error: 'Link inválido ou não encontrado.' });
   res.json({
     numeroTicket: registro.numeroTicket,
     tipo: registro.tipo,
@@ -415,6 +415,12 @@ app.get('/api/solicitacoes/decidir-info', async (req, res) => {
     valorEstimado: registro.valorEstimado,
     observacao: registro.observacao,
     criadoEm: registro.criadoEm,
+    status: registro.status,
+    execucaoStatus: registro.execucaoStatus,
+    decididoPorEmail: registro.decididoPorEmail,
+    decididoEm: registro.decididoEm,
+    motivoDecisao: registro.motivoDecisao,
+    podeDecidir: solicitacoes.podeDecidirComToken(registro, req.query.token),
   });
 });
 

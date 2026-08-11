@@ -51,6 +51,14 @@
   .sucesso p{font-size:13px;color:var(--muted);line-height:1.6;margin:0;}
   .erro-carregar{text-align:center;padding:36px 10px;color:var(--muted);}
   .erro-carregar .icone{font-size:34px;margin-bottom:10px;}
+  .status-badge{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:4px 10px;border-radius:99px;margin-top:8px;}
+  .status-badge.pendente{background:var(--warn-dim);color:var(--warn);}
+  .status-badge.aprovado{background:var(--ok-dim);color:var(--ok);}
+  .status-badge.rejeitado{background:var(--bad-dim);color:var(--bad);}
+  .status-badge.convertido{background:var(--panel2);color:var(--accent);}
+  .estado-linha{font-size:13px;color:#ccd3da;margin-top:12px;line-height:1.6;}
+  .estado-linha b{color:var(--text);}
+  .estado-aviso{font-size:12px;color:var(--muted);margin-top:14px;padding-top:12px;border-top:1px solid var(--line);}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -72,6 +80,15 @@
   <div class="icone" id="sucesso-icone">✅</div>
   <h2 id="sucesso-titulo">Decisão registrada!</h2>
   <p id="sucesso-texto"></p>
+</div>
+
+<div id="estado-atual" class="panel hidden">
+  <div class="ticket-titulo" id="e-titulo"></div>
+  <div class="ticket-meta" id="e-meta"></div>
+  <div id="e-badge"></div>
+  <div class="ticket-obs hidden" id="e-obs"></div>
+  <div id="e-decisao"></div>
+  <div class="estado-aviso" id="e-aviso"></div>
 </div>
 
 <form id="form-decidir" class="panel hidden">
@@ -106,6 +123,9 @@ function fmtMoney(v){ return v==null ? null : 'R$ ' + Number(v).toLocaleString('
 function fmtData(iso){ if(!iso) return ''; return new Date(iso).toLocaleString('pt-BR', { timeZone:'America/Sao_Paulo' }); }
 
 const TIPOS_LABEL = { compra:'Compra', manutencao:'Manutenção', 'suporte-ti':'Suporte de TI', pagamento:'Pagamento', nota:'Nota fiscal' };
+const STATUS_LABEL = { PENDENTE:'Pendente', APROVADO:'Aprovado', REJEITADO:'Recusado', CONVERTIDO:'Convertido' };
+const STATUS_CLASSE = { PENDENTE:'pendente', APROVADO:'aprovado', REJEITADO:'rejeitado', CONVERTIDO:'convertido' };
+const EXECUCAO_LABEL = { PENDENTE:'aguardando início', EM_ANDAMENTO:'em andamento', FINALIZADO:'finalizado' };
 
 function escolherAcao(acao){
   ACAO = acao;
@@ -125,9 +145,15 @@ async function carregar(){
   try{
     const resp = await fetch(`/api/solicitacoes/decidir-info?ticket=${encodeURIComponent(TICKET)}&token=${encodeURIComponent(TOKEN)}`);
     const data = await resp.json();
-    if(!resp.ok) throw new Error(data.error || 'Link inválido, expirado ou já usado.');
+    if(!resp.ok) throw new Error(data.error || 'Link inválido ou não encontrado.');
 
     document.getElementById('carregando').classList.add('hidden');
+
+    if(!data.podeDecidir){
+      mostrarEstadoAtual(data);
+      return;
+    }
+
     document.getElementById('form-decidir').classList.remove('hidden');
     document.getElementById('t-titulo').textContent = `#${data.numeroTicket} - ${data.titulo || ''}`;
     const meta = [TIPOS_LABEL[data.tipo] || data.tipo, data.unidadeNome, fmtData(data.criadoEm)].filter(Boolean).join(' · ');
@@ -141,6 +167,42 @@ async function carregar(){
   }catch(err){
     mostrarErro(err.message);
   }
+}
+
+function mostrarEstadoAtual(data){
+  document.getElementById('e-titulo').textContent = `#${data.numeroTicket} - ${data.titulo || ''}`;
+  const meta = [TIPOS_LABEL[data.tipo] || data.tipo, data.unidadeNome, fmtData(data.criadoEm)].filter(Boolean).join(' · ');
+  const valor = fmtMoney(data.valorEstimado);
+  document.getElementById('e-meta').textContent = meta + (valor ? ` · ${valor}` : '');
+
+  const status = data.status || 'PENDENTE';
+  document.getElementById('e-badge').innerHTML =
+    `<span class="status-badge ${STATUS_CLASSE[status] || ''}">${STATUS_LABEL[status] || status}</span>`;
+
+  if(data.observacao){
+    document.getElementById('e-obs').textContent = data.observacao;
+    document.getElementById('e-obs').classList.remove('hidden');
+  }
+
+  const decisaoEl = document.getElementById('e-decisao');
+  decisaoEl.innerHTML = '';
+  if(status === 'APROVADO' || status === 'REJEITADO'){
+    const linhas = [];
+    if(data.decididoPorEmail) linhas.push(`<b>Decidido por:</b> ${escapeHtml(data.decididoPorEmail)}`);
+    if(data.decididoEm) linhas.push(`<b>Em:</b> ${fmtData(data.decididoEm)}`);
+    if(data.motivoDecisao) linhas.push(`<b>Observação:</b> ${escapeHtml(data.motivoDecisao)}`);
+    if(status === 'APROVADO' && data.execucaoStatus) linhas.push(`<b>Execução:</b> ${EXECUCAO_LABEL[data.execucaoStatus] || data.execucaoStatus}`);
+    if(linhas.length) decisaoEl.innerHTML = linhas.map(l => `<div class="estado-linha">${l}</div>`).join('');
+  }
+
+  const avisoEl = document.getElementById('e-aviso');
+  if(status === 'PENDENTE'){
+    avisoEl.textContent = 'Esse link não pode mais ser usado pra decidir esse pedido (foi substituído por um envio mais recente). Peça um link atualizado ou decida direto no Zenith Ops.';
+  }else{
+    avisoEl.textContent = 'Esse pedido já foi decidido - o link só mostra o estado atual.';
+  }
+
+  document.getElementById('estado-atual').classList.remove('hidden');
 }
 
 function mostrarErro(msg){
