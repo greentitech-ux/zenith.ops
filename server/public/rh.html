@@ -265,6 +265,16 @@
       <button class="btn-primary" type="submit">Cadastrar</button>
     </form>
   </div>
+
+  <div class="panel hidden" id="painel-importar-lote">
+    <h2>📋 Importar em lote (backfill)</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">cola aqui uma tabela (colada direto do Excel/Sheets) com as colunas Unidade, Nome, Cargo, Etapa, Prazo - cada linha vira 1 colaborador já cadastrado como efetivado, na etapa e prazo de experiência informados. "Etapa" aceita "30" ou "60" (dias). "Prazo" no formato AAAA-MM-DD.</div>
+    <textarea id="lote-texto" rows="6" placeholder="Dom Tirol&#9;Fulano da Silva&#9;Operador de Loja I&#9;30&#9;2026-08-21"></textarea>
+    <button type="button" class="btn-secundario" style="margin-top:10px;" onclick="prevalidarLote()">🔍 Conferir</button>
+    <div id="lote-preview" style="margin-top:12px;"></div>
+    <div class="msg hidden" id="msg-lote"></div>
+    <button type="button" class="btn-primary hidden" id="btn-confirmar-lote" onclick="confirmarImportarLote()">Confirmar importação</button>
+  </div>
 </div>
 
 <!-- ---------- ABA: Acompanhamento de Teste ---------- -->
@@ -589,6 +599,9 @@ const UNIDADES_NOMES = {
   'Spoleto Shopping Recife': 'Spo Shop Recife',
   'Spoleto Shopping Tacaruna': 'Spo Shop Tacaruna',
   'São Braz IL': 'Sao Braz Ilha',
+  'Spo Shop Midway': 'Spo Shop Midway',
+  'Saltiverso Patteo': 'Saltiverso Patteo',
+  Administrativa: 'Administrativa',
 };
 
 // unidades cadastradas pelo Master em /grupos.html (runtime) - mescladas por
@@ -682,6 +695,77 @@ function cardAtivoHtml(f){
       ${IS_MASTER && f.status==='ativo' && f.tipoCadastro==='extra' ? `<button type="button" class="link-btn" onclick="converterEfetivado('${f.id}','${escapeHtml(f.nome).replace(/'/g,"\\'")}')">🔄 converter em efetivado</button>` : ''}
     </div>
   </div>`;
+}
+
+let LOTE_LINHAS_VALIDAS = [];
+
+// resolve o texto da coluna "Unidade" (copiado da tabela/aba Por Unidade)
+// pro codigo interno - aceita o nome de exibicao (ex: "Dom Caruaru"), o
+// codigo cru, e ignora sufixos tipo "(não cadastrada)" coladas junto
+function resolverUnidade(texto){
+  const limpo = String(texto||'').replace(/\(.*?\)/g,'').trim();
+  if(!limpo) return null;
+  if(UNIDADES_NOMES[limpo]) return limpo; // já é o código
+  const alvo = limpo.toLowerCase();
+  for(const [codigo,nome] of Object.entries(UNIDADES_NOMES)){
+    if(String(nome).toLowerCase()===alvo) return codigo;
+  }
+  return null;
+}
+
+function parseLote(texto){
+  return String(texto||'').split('\n').map(l=>l.trim()).filter(Boolean).map(linha=>{
+    const cols = linha.split('\t').map(c=>c.trim());
+    const [unidadeTxt, nome, cargoFuncao, etapaTxt, prazoTxt] = cols;
+    const erros = [];
+    const unidade = resolverUnidade(unidadeTxt);
+    if(!unidade) erros.push(`unidade "${unidadeTxt||''}" não reconhecida`);
+    if(!nome) erros.push('nome vazio');
+    const etapaMatch = String(etapaTxt||'').match(/30|60/);
+    const etapa = etapaMatch ? etapaMatch[0] : null;
+    if(!etapa) erros.push(`etapa "${etapaTxt||''}" inválida (use 30 ou 60)`);
+    const prazoEtapaAte = String(prazoTxt||'').trim();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(prazoEtapaAte)) erros.push(`prazo "${prazoTxt||''}" inválido (use AAAA-MM-DD)`);
+    return { linha, unidadeTxt, unidade, nome, cargoFuncao, etapa, prazoEtapaAte, erros };
+  });
+}
+
+function prevalidarLote(){
+  const linhas = parseLote(document.getElementById('lote-texto').value);
+  const el = document.getElementById('lote-preview');
+  document.getElementById('btn-confirmar-lote').classList.add('hidden');
+  document.getElementById('msg-lote').classList.add('hidden');
+  if(!linhas.length){ el.innerHTML = '<div class="empty">cole a tabela acima e clique em Conferir.</div>'; return; }
+  el.innerHTML = linhas.map(l=>{
+    if(l.erros.length) return `<div class="card"><div class="linha1"><span>${escapeHtml(l.nome||l.linha)}</span><span class="badge bad">erro</span></div><div class="sub">${escapeHtml(l.erros.join(' · '))}</div></div>`;
+    return `<div class="card"><div class="linha1"><span>${escapeHtml(l.nome)}</span><span class="badge ok">ok</span></div><div class="sub">${escapeHtml(UNIDADES_NOMES[l.unidade]||l.unidade)} · ${escapeHtml(l.cargoFuncao||'—')} · etapa ${l.etapa}d · prazo ${fmtData(l.prazoEtapaAte)}</div></div>`;
+  }).join('');
+  LOTE_LINHAS_VALIDAS = linhas.filter(l=>!l.erros.length);
+  if(LOTE_LINHAS_VALIDAS.length) document.getElementById('btn-confirmar-lote').classList.remove('hidden');
+}
+
+async function confirmarImportarLote(){
+  const msg = document.getElementById('msg-lote');
+  if(!LOTE_LINHAS_VALIDAS.length) return;
+  if(!confirm(`Importar ${LOTE_LINHAS_VALIDAS.length} pessoa(s)? Cada uma entra já como efetivado, na etapa/prazo informados.`)) return;
+  try{
+    const resp = await fetch('/api/rh/funcionarios/importar-lote', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      linhas: LOTE_LINHAS_VALIDAS.map(({unidade,nome,cargoFuncao,etapa,prazoEtapaAte})=>({unidade,nome,cargoFuncao,etapa,prazoEtapaAte})),
+    })});
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao importar.');
+    const falhas = data.filter(r=>!r.ok);
+    msg.textContent = falhas.length ? `Importado com ${data.length-falhas.length} ok e ${falhas.length} erro(s): ${falhas.map(f=>`${f.nome} (${f.erro})`).join(' · ')}` : `${data.length} pessoa(s) importada(s) com sucesso.`;
+    msg.className = falhas.length ? 'msg err' : 'msg ok';
+    msg.classList.remove('hidden');
+    document.getElementById('lote-texto').value = '';
+    document.getElementById('lote-preview').innerHTML = '';
+    document.getElementById('btn-confirmar-lote').classList.add('hidden');
+    LOTE_LINHAS_VALIDAS = [];
+    await carregar();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
 }
 
 async function converterEfetivado(id, nome){
@@ -1365,6 +1449,7 @@ async function boot(){
   // "Efetivado (direto)" so aparece pra quem tem a tag dedicada (ou
   // Master/Admin) - a loja (gerente comum) so cadastra Extra/Candidato
   document.getElementById('btn-tipo-efetivado').classList.toggle('hidden', !(isMaster || ME.isAdmin || ME.podeRhCadastrarEfetivado));
+  document.getElementById('painel-importar-lote').classList.toggle('hidden', !isMaster);
   // data de admissao/inicio do teste no modal de editar so o Master corrige
   document.getElementById('campo-ed-admissao').classList.toggle('hidden', !isMaster);
 
