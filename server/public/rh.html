@@ -121,7 +121,7 @@
   <a class="back hidden" id="nav-parque" href="/parque.html">🤸 Parque (painel)</a>
   <a class="back hidden" id="nav-festas" href="/festas.html">🎉 Festas</a>
   <a class="back hidden" id="nav-mensalistas" href="/mensalistas.html">📅 Mensalistas</a>
-  <div class="nav-drawer-grupo">RH</div>
+  <div class="nav-drawer-grupo">BigBrother</div>
   <a class="back active" id="nav-rh-self" href="/rh.html">🧑‍💼 RH</a>
   <div class="nav-drawer-grupo">Solicitações</div>
   <a class="back hidden" id="nav-solicitacoes" href="/central.html">📋 Central</a>
@@ -149,10 +149,15 @@
 
 <div id="root" class="hidden">
 
+<div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:0 0 8px;">👤 pessoas · 🧑‍💼 Colaboradores = quem foi efetivado (só eles entram em Atestados/Advertências) · 👷 Extras = avulso · ⏳ Em Teste = candidato no período de 5 dias</div>
 <div class="tabs">
-  <button type="button" class="tab-btn active" data-tab="ativos" onclick="trocarAba('ativos')">👥 Ativos</button>
+  <button type="button" class="tab-btn active" data-tab="colaboradores" onclick="trocarAba('colaboradores')">🧑‍💼 Colaboradores</button>
+  <button type="button" class="tab-btn" data-tab="extras" onclick="trocarAba('extras')">👷 Extras</button>
+  <button type="button" class="tab-btn" data-tab="teste" onclick="trocarAba('teste')">⏳ Em Teste</button>
+</div>
+<div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:12px 0 8px;">⚙️ processos</div>
+<div class="tabs">
   <button type="button" class="tab-btn" data-tab="cadastrar" onclick="trocarAba('cadastrar')">➕ Cadastrar</button>
-  <button type="button" class="tab-btn" data-tab="teste" onclick="trocarAba('teste')">⏳ Acompanh. de Teste</button>
   <button type="button" class="tab-btn" data-tab="checkins" onclick="trocarAba('checkins')">📸 Check-ins</button>
   <button type="button" class="tab-btn hidden" id="btn-aba-aprovacoes" data-tab="aprovacoes" onclick="trocarAba('aprovacoes')">⏳ Aprovações</button>
   <button type="button" class="tab-btn" data-tab="atestados" onclick="trocarAba('atestados')">🩺 Atestados</button>
@@ -161,25 +166,46 @@
 </div>
 
 <!-- ---------- ABA: Ficha de Funcionários Ativos ---------- -->
-<div class="painel-tab" id="tab-ativos">
+<div class="painel-tab" id="tab-colaboradores">
   <div class="panel">
-    <h2>Ficha de Funcionários Ativos</h2>
-    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">quem está cadastrado como atuando nas lojas agora</div>
+    <h2>🧑‍💼 Colaboradores</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">quem foi efetivado de verdade (direto ou aprovado no teste de 5 dias) - não inclui extra avulso nem candidato ainda em teste</div>
     <div class="grid2">
       <div>
         <label>Unidade</label>
-        <select id="at-filtro-unidade" onchange="renderAtivos()"><option value="">Todas as unidades</option></select>
+        <select id="co-filtro-unidade" onchange="renderColaboradores()"><option value="">Todas as unidades</option></select>
       </div>
       <div>
         <label>Status</label>
-        <select id="at-filtro-status" onchange="renderAtivos()">
+        <select id="co-filtro-status" onchange="renderColaboradores()">
           <option value="ativo">Ativos</option>
-          <option value="candidato">Candidatos em teste</option>
           <option value="todos">Todos (inclui desligados)</option>
         </select>
       </div>
     </div>
-    <div id="lista-ativos" style="margin-top:14px;"></div>
+    <div id="lista-colaboradores" style="margin-top:14px;"></div>
+  </div>
+</div>
+
+<!-- ---------- ABA: Extras (avulsos) ---------- -->
+<div class="painel-tab hidden" id="tab-extras">
+  <div class="panel">
+    <h2>👷 Extras (avulsos)</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">trabalho pontual, sem período de teste - não tem atestado nem advertência, só o cadastro básico</div>
+    <div class="grid2">
+      <div>
+        <label>Unidade</label>
+        <select id="ex-filtro-unidade" onchange="renderExtras()"><option value="">Todas as unidades</option></select>
+      </div>
+      <div>
+        <label>Status</label>
+        <select id="ex-filtro-status" onchange="renderExtras()">
+          <option value="ativo">Ativos</option>
+          <option value="todos">Todos (inclui desligados)</option>
+        </select>
+      </div>
+    </div>
+    <div id="lista-extras" style="margin-top:14px;"></div>
   </div>
 </div>
 
@@ -243,6 +269,7 @@
     <h2>📸 Check-in por foto</h2>
     <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">identifica quem apareceu num dia qualquer - o próprio extra escolhe o nome e tira uma foto num dispositivo fixo na entrada da loja (tablet/PC com webcam)</div>
     <a class="btn-secundario" href="/rh-checkin.html" target="_blank" rel="noopener">📸 Abrir tela de check-in (quiosque)</a>
+    <div class="msg hidden" id="nota-localizacao-master" style="margin-top:10px;background:var(--panel2);color:var(--muted);">📍 Só você (Master) vê o link de localização em cada check-in abaixo - aparece do lado da foto quando o dispositivo conseguiu captar.</div>
   </div>
   <div class="panel">
     <h2>🟢 Na loja agora</h2>
@@ -561,15 +588,28 @@ function cardAtivoHtml(f){
   </div>`;
 }
 
-function renderAtivos(){
-  const unidadeF = document.getElementById('at-filtro-unidade').value;
-  const statusF = document.getElementById('at-filtro-status').value;
-  let lista = TODOS.slice();
+function renderColaboradores(){
+  const unidadeF = document.getElementById('co-filtro-unidade').value;
+  const statusF = document.getElementById('co-filtro-status').value;
+  // colaborador = quem foi efetivado de verdade (direto ou aprovado no
+  // teste) - nunca extra, mesmo que o status dele seja "ativo" tambem
+  let lista = TODOS.filter(f=>f.tipoCadastro!=='extra' && f.status!=='candidato');
   if(unidadeF) lista = lista.filter(f=>f.unidade===unidadeF);
   if(statusF!=='todos') lista = lista.filter(f=>f.status===statusF);
   lista.sort((a,b)=>String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')));
-  const el = document.getElementById('lista-ativos');
-  el.innerHTML = lista.length ? lista.map(cardAtivoHtml).join('') : '<div class="empty">nenhum funcionário encontrado.</div>';
+  const el = document.getElementById('lista-colaboradores');
+  el.innerHTML = lista.length ? lista.map(cardAtivoHtml).join('') : '<div class="empty">nenhum colaborador encontrado.</div>';
+}
+
+function renderExtras(){
+  const unidadeF = document.getElementById('ex-filtro-unidade').value;
+  const statusF = document.getElementById('ex-filtro-status').value;
+  let lista = TODOS.filter(f=>f.tipoCadastro==='extra');
+  if(unidadeF) lista = lista.filter(f=>f.unidade===unidadeF);
+  if(statusF!=='todos') lista = lista.filter(f=>f.status===statusF);
+  lista.sort((a,b)=>String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')));
+  const el = document.getElementById('lista-extras');
+  el.innerHTML = lista.length ? lista.map(cardAtivoHtml).join('') : '<div class="empty">nenhum extra encontrado.</div>';
 }
 
 function renderTeste(){
@@ -840,7 +880,8 @@ function renderAniversariantes(){
 
 async function carregar(){
   TODOS = await fetch('/api/rh/funcionarios').then(r=>r.ok?r.json():[]).catch(()=>[]);
-  renderAtivos();
+  renderColaboradores();
+  renderExtras();
   renderTeste();
   renderAtestados();
 }
@@ -1024,7 +1065,8 @@ async function boot(){
   const unidades = (isMaster || ME.isAdmin || ME.podeRhTodasUnidades) ? Object.keys(UNIDADES_NOMES) : (ME.permissions?.unidades||[]).filter(u=>UNIDADES_NOMES[u]);
   const optsUnidades = unidades.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('');
   document.getElementById('c-unidade').innerHTML = optsUnidades || '<option value="" disabled selected>nenhuma unidade liberada</option>';
-  document.getElementById('at-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);
+  document.getElementById('co-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);
+  document.getElementById('ex-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);
   document.getElementById('ck-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);
   document.getElementById('ck-filtro-data').value = hojeBrasilia();
   document.getElementById('c-admissao').value = hojeBrasilia();
@@ -1040,6 +1082,7 @@ async function boot(){
   // (podeAprovarRh em index.js)
   PODE_APROVAR_RH = isMaster || ME.isAdmin || ME.podeRhTodasUnidades;
   document.getElementById('btn-aba-aprovacoes').classList.toggle('hidden', !PODE_APROVAR_RH);
+  document.getElementById('nota-localizacao-master').classList.toggle('hidden', !isMaster);
 
   document.getElementById('root').classList.remove('hidden');
   await carregar();
