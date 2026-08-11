@@ -413,6 +413,27 @@
   </div>
 </div>
 
+<!-- ajuste manual (Master) do estagio de experiencia - backfill de quem ja
+     estava em experiencia antes dessa feature existir no Zenith -->
+<div class="overlay hidden" id="overlay-ajuste-experiencia">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharAjusteExperiencia()">✕</span>
+    <div class="sheet">
+      <h3>🗓️ Ajustar experiência</h3>
+      <div class="sub" id="aexp-sub">Use os dados do relatório da folha (ex: Fortes Pessoal) - informe a etapa atual e o prazo (data de término) de cor, sem precisar calcular nada.</div>
+      <label>Etapa atual</label>
+      <select id="aexp-etapa">
+        <option value="30">30 dias (1ª etapa)</option>
+        <option value="60">60 dias (2ª etapa, prorrogação)</option>
+      </select>
+      <label>Prazo (data de término dessa etapa)</label>
+      <input type="date" id="aexp-prazo">
+      <div class="msg hidden" id="msg-ajuste-experiencia"></div>
+      <button class="btn-primary" type="button" onclick="salvarAjusteExperiencia()">Salvar</button>
+    </div>
+  </div>
+</div>
+
 <!-- registrar atestado -->
 <div class="overlay hidden" id="overlay-atestado">
   <div class="sheet-wrap">
@@ -545,6 +566,7 @@ let TODOS = [];
 let EDITANDO_ID = null;
 let DECIDINDO_ID = null;
 let DECIDINDO_EXPERIENCIA_ID = null;
+let AJUSTANDO_EXPERIENCIA_ID = null;
 let ATESTANDO_ID = null;
 let ADVERTINDO_ID = null;
 let ADVERTENCIA_ABERTA_ID = null;
@@ -614,6 +636,7 @@ function cardAtivoHtml(f){
       ${f.status==='ativo' && f.tipoCadastro!=='extra' && !f.emAtestado ? `<button type="button" class="link-btn" onclick="abrirAtestado('${f.id}')">🩺 registrar atestado</button>` : ''}
       ${f.emAtestado ? `<button type="button" class="link-btn" onclick="marcarRetorno('${f.id}')">✅ registrar retorno</button>` : ''}
       ${f.status==='ativo' && f.tipoCadastro!=='extra' ? `<button type="button" class="link-btn" onclick="abrirAdvertencia('${f.id}')">📋 solicitar advertência</button>` : ''}
+      ${IS_MASTER && f.status==='ativo' && f.tipoCadastro!=='extra' ? `<button type="button" class="link-btn" onclick="abrirAjusteExperiencia('${f.id}')">🗓️ ajustar experiência</button>` : ''}
     </div>
   </div>`;
 }
@@ -716,6 +739,32 @@ async function salvarDecisaoExperiencia(){
     if(!resp.ok) throw new Error(data.error || 'Erro ao salvar decisão.');
     await carregar();
     fecharDecisaoExperiencia();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+}
+
+function abrirAjusteExperiencia(id){
+  const f = TODOS.find(x=>x.id===id);
+  if(!f) return;
+  AJUSTANDO_EXPERIENCIA_ID = id;
+  document.getElementById('aexp-etapa').value = (f.experiencia && f.experiencia.etapa==='60') ? '60' : '30';
+  document.getElementById('aexp-prazo').value = (f.experiencia && f.experiencia.prazoEtapaAte) || '';
+  document.getElementById('msg-ajuste-experiencia').classList.add('hidden');
+  document.getElementById('overlay-ajuste-experiencia').classList.remove('hidden');
+}
+function fecharAjusteExperiencia(){ document.getElementById('overlay-ajuste-experiencia').classList.add('hidden'); AJUSTANDO_EXPERIENCIA_ID=null; }
+async function salvarAjusteExperiencia(){
+  const msg = document.getElementById('msg-ajuste-experiencia');
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${AJUSTANDO_EXPERIENCIA_ID}/experiencia`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      etapa: document.getElementById('aexp-etapa').value,
+      prazoEtapaAte: document.getElementById('aexp-prazo').value,
+    })});
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
+    await carregar();
+    fecharAjusteExperiencia();
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
   }
