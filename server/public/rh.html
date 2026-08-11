@@ -153,6 +153,7 @@
   <button type="button" class="tab-btn active" data-tab="ativos" onclick="trocarAba('ativos')">👥 Ativos</button>
   <button type="button" class="tab-btn" data-tab="cadastrar" onclick="trocarAba('cadastrar')">➕ Cadastrar</button>
   <button type="button" class="tab-btn" data-tab="teste" onclick="trocarAba('teste')">⏳ Acompanh. de Teste</button>
+  <button type="button" class="tab-btn" data-tab="checkins" onclick="trocarAba('checkins')">📸 Check-ins</button>
   <button type="button" class="tab-btn" data-tab="atestados" onclick="trocarAba('atestados')">🩺 Atestados</button>
   <button type="button" class="tab-btn" data-tab="aniver" onclick="trocarAba('aniver')">🎂 Aniversariantes</button>
 </div>
@@ -230,6 +231,33 @@
     <h2>Acompanhamento de Teste</h2>
     <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">quem está no período de experiência - no 5º dia sem decisão, o card fica em destaque e o gerente recebe um alerta</div>
     <div id="lista-teste"></div>
+  </div>
+</div>
+
+<!-- ---------- ABA: Check-ins (por foto) ---------- -->
+<div class="painel-tab hidden" id="tab-checkins">
+  <div class="panel">
+    <h2>📸 Check-in por foto</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">identifica quem apareceu num dia qualquer - o próprio extra escolhe o nome e tira uma foto num dispositivo fixo na entrada da loja (tablet/PC com webcam)</div>
+    <a class="btn-secundario" href="/rh-checkin.html" target="_blank" rel="noopener">📸 Abrir tela de check-in (quiosque)</a>
+  </div>
+  <div class="panel">
+    <h2>🟢 Na loja agora</h2>
+    <div id="lista-checkins-abertos"></div>
+  </div>
+  <div class="panel">
+    <h2>Histórico</h2>
+    <div class="grid2">
+      <div>
+        <label>Unidade</label>
+        <select id="ck-filtro-unidade" onchange="carregarCheckins()"><option value="">Todas as unidades</option></select>
+      </div>
+      <div>
+        <label>Data</label>
+        <input type="date" id="ck-filtro-data" onchange="carregarCheckins()">
+      </div>
+    </div>
+    <div id="lista-checkins-historico" style="margin-top:14px;"></div>
   </div>
 </div>
 
@@ -443,6 +471,7 @@ function trocarAba(nome){
   if(nome==='aniver') renderAniversariantes();
   if(nome==='teste') renderTeste();
   if(nome==='atestados') renderAtestados();
+  if(nome==='checkins') carregarCheckins();
 }
 
 function badgeTeste(f){
@@ -513,6 +542,37 @@ function renderAtestados(){
       </div>
     </div>`;
   }).join('') : '<div class="empty">ninguém de atestado agora.</div>';
+}
+
+function fmtHora(iso){ if(!iso) return ''; return new Date(iso).toLocaleTimeString('pt-BR', { timeZone: FUSO_BR, hour:'2-digit', minute:'2-digit' }); }
+
+async function carregarCheckins(){
+  const [abertos, historico] = await Promise.all([
+    fetch('/api/rh/checkins/abertos').then(r=>r.ok?r.json():[]).catch(()=>[]),
+    fetch(`/api/rh/checkins?data=${encodeURIComponent(document.getElementById('ck-filtro-data').value||hojeBrasilia())}`).then(r=>r.ok?r.json():[]).catch(()=>[]),
+  ]);
+  const unidadeF = document.getElementById('ck-filtro-unidade').value;
+
+  const elAbertos = document.getElementById('lista-checkins-abertos');
+  const abertosFiltrados = unidadeF ? abertos.filter(c=>c.unidade===unidadeF) : abertos;
+  elAbertos.innerHTML = abertosFiltrados.length ? abertosFiltrados.map(c=>`
+    <div class="card">
+      <div class="linha1"><span>${escapeHtml(c.funcionarioNome)}</span><span class="badge ok">na loja</span></div>
+      <div class="sub">${escapeHtml(UNIDADES_NOMES[c.unidade]||c.unidade)} · entrou às ${fmtHora(c.entrada.horario)}</div>
+    </div>`).join('') : '<div class="empty">ninguém na loja agora.</div>';
+
+  const elHist = document.getElementById('lista-checkins-historico');
+  const histFiltrado = (unidadeF ? historico.filter(c=>c.unidade===unidadeF) : historico)
+    .sort((a,b)=>String(b.entrada.horario||'').localeCompare(String(a.entrada.horario||'')));
+  elHist.innerHTML = histFiltrado.length ? histFiltrado.map(c=>{
+    const fotoEntrada = c.entrada?.foto ? `<a class="link-btn" href="/api/rh/checkins/${c.id}/foto/entrada?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📷 foto entrada</a>` : '';
+    const fotoSaida = c.saida?.foto ? `<a class="link-btn" href="/api/rh/checkins/${c.id}/foto/saida?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📷 foto saída</a>` : '';
+    return `<div class="card">
+      <div class="linha1"><span>${escapeHtml(c.funcionarioNome)}</span>${c.status==='aberto'?'<span class="badge ok">na loja</span>':'<span class="badge muted">encerrado</span>'}</div>
+      <div class="sub">${escapeHtml(UNIDADES_NOMES[c.unidade]||c.unidade)} · entrada ${fmtHora(c.entrada.horario)}${c.saida?' · saída '+fmtHora(c.saida.horario):''}</div>
+      <div class="acoes">${fotoEntrada}${fotoSaida}</div>
+    </div>`;
+  }).join('') : '<div class="empty">nenhum check-in nesse dia.</div>';
 }
 
 function renderAniversariantes(){
@@ -712,6 +772,8 @@ async function boot(){
   const optsUnidades = unidades.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('');
   document.getElementById('c-unidade').innerHTML = optsUnidades || '<option value="" disabled selected>nenhuma unidade liberada</option>';
   document.getElementById('at-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);
+  document.getElementById('ck-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);
+  document.getElementById('ck-filtro-data').value = hojeBrasilia();
   document.getElementById('c-admissao').value = hojeBrasilia();
 
   document.getElementById('root').classList.remove('hidden');

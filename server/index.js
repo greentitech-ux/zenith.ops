@@ -59,6 +59,7 @@ const saltiversoImport = require('./saltiversoImport');
 const centralCards = require('./centralCards');
 const relatorioMV = require('./relatorioMV');
 const rh = require('./rh');
+const rhCheckin = require('./rhCheckin');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -3387,6 +3388,75 @@ app.delete('/api/rh/funcionarios/:id', auth.requireMaster, async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// ---------- RH: check-in/check-out por foto (kiosk fixo na entrada da loja,
+// ver server/public/rh-checkin.html) - identifica quem apareceu num dia
+// qualquer sem depender da memoria do gerente ----------
+app.post('/api/rh/checkins', requireSection('rh'), upload.single('foto'), async (req, res) => {
+  try {
+    const { funcionarioId } = req.body;
+    const funcionario = await rh.getOne(funcionarioId);
+    if (!funcionario) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    if (!podeAcessarUnidadeRh(req, funcionario.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    let foto = null;
+    if (req.file) {
+      const path = await storage.salvarArquivo(funcionarioId, req.file, 'rh-checkins');
+      foto = { path, tipo: req.file.mimetype };
+    }
+    const registro = await rhCheckin.registrarEntrada({ funcionarioId, foto, registradoPorEmail: req.user.email });
+    broadcast('rh-checkin-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/rh/checkins/:id/saida', requireSection('rh'), upload.single('foto'), async (req, res) => {
+  try {
+    const atual = await rhCheckin.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Check-in não encontrado.' });
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    let foto = null;
+    if (req.file) {
+      const path = await storage.salvarArquivo(atual.funcionarioId, req.file, 'rh-checkins');
+      foto = { path, tipo: req.file.mimetype };
+    }
+    const registro = await rhCheckin.registrarSaida(req.params.id, { foto, registradoPorEmail: req.user.email });
+    broadcast('rh-checkin-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/rh/checkins', requireSection('rh'), async (req, res) => {
+  // Master/Admin/RH-todas-unidades: null = sem filtro de unidade (ver
+  // rhCheckin.listByUnidadesData)
+  const unidades = (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) ? null : (req.permissions.unidades || []);
+  res.json(await rhCheckin.listByUnidadesData(unidades, req.query.data));
+});
+
+app.get('/api/rh/checkins/abertos', requireSection('rh'), async (req, res) => {
+  if (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) {
+    return res.json(await rhCheckin.listAbertos(null));
+  }
+  res.json(await rhCheckin.listAbertos(req.permissions.unidades || []));
+});
+
+app.get('/api/rh/checkins/:id/foto/:tipo', requireSection('rh'), async (req, res) => {
+  const atual = await rhCheckin.getOne(req.params.id);
+  if (!atual) return res.sendStatus(404);
+  if (!podeAcessarUnidadeRh(req, atual.unidade)) {
+    return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  }
+  const bloco = req.params.tipo === 'saida' ? atual.saida : atual.entrada;
+  if (!bloco || !bloco.foto) return res.sendStatus(404);
+  storage.streamArquivo(bloco.foto.path, bloco.foto.tipo, res);
 });
 
 // ---------- Saltiverso Patteo: passaporte mensal (mensalistas) - reaproveita
