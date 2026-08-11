@@ -274,7 +274,33 @@ async function notifyParquePcdCortesiaLimite({ unidade, unidadeNome, horaBucket,
   }
 }
 
+// RH: funcionario em teste completou os dias limite (ver
+// rh.DIAS_TESTE_ALERTA) sem decisao - aviso pro Master e pro Gerente/
+// Ass.Gerente DA UNIDADE (mesmo criterio de podeReceberPcdCortesia)
+async function notifyRhTesteVencido(funcionario) {
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify({
+    title: '🧑‍💼 RH · decisão de teste pendente',
+    body: `${funcionario.nome} (${funcionario.unidade}) completou o período de teste - defina se segue.`,
+    tag: `rh-teste-${funcionario.id}`,
+    url: '/rh.html',
+  });
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberPcdCortesia(sub, funcionario.unidade)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (RH teste vencido):', err.message);
+      }
+    }
+  }
+}
+
 module.exports = {
   addSubscription, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
-  notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, PUBLIC_KEY,
+  notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyRhTesteVencido, PUBLIC_KEY,
 };

@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>RH · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:720px;margin-inline:auto;overflow-x:clip;overflow-y:clip;}
+  h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  h2{font-size:13.5px;font-weight:700;margin:0 0 4px;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin-left:-12px;margin-right:-12px;margin-top:-16px;padding-left:12px;padding-right:12px;padding-top:12px;padding-bottom:12px;display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .hidden{display:none!important;}
+  .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer-titulo{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px 12px;}
+  .nav-drawer-grupo{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 4px;}
+  .nav-drawer-grupo{cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;}
+  .nav-drawer-grupo .ndg-seta{transition:transform .15s ease;font-size:9px;flex:none;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
+  .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+  .secao-titulo{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
+  label{display:block;font-size:11.5px;color:var(--muted);margin:10px 0 4px;font-family:var(--mono);}
+  label:first-child{margin-top:0;}
+  input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  textarea{resize:vertical;min-height:56px;}
+  .grid2{display:grid;grid-template-columns:1fr;gap:0 10px;}
+  @media(min-width:440px){ .grid2{grid-template-columns:1fr 1fr;} }
+  .btn-primary{width:100%;margin-top:16px;background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .btn-secundario{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px 14px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:var(--sans);text-decoration:none;display:inline-flex;align-items:center;gap:4px;}
+  .msg{margin-top:10px;font-size:12.5px;padding:10px 12px;border-radius:8px;word-break:break-word;}
+  .msg.ok{background:var(--ok-dim);color:var(--ok);}
+  .msg.err{background:var(--bad-dim);color:var(--bad);}
+  .card{border-top:1px solid var(--line);padding:12px 0;}
+  .card:first-child{border-top:none;padding-top:0;}
+  .card .linha1{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:13px;font-weight:600;flex-wrap:wrap;}
+  .card .sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:2px;word-break:break-word;}
+  .card .acoes{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;}
+  .badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;display:inline-block;white-space:nowrap;}
+  .badge.ok{background:var(--ok-dim);color:var(--ok);}
+  .badge.warn{background:var(--warn-dim);color:var(--warn);}
+  .badge.bad{background:var(--bad-dim);color:var(--bad);}
+  .badge.muted{background:var(--panel2);color:var(--muted);}
+  .link-btn{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0;font-family:var(--sans);}
+  .tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
+  .tab-btn{background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:20px;padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+  .tab-btn.active{background:rgba(92,200,255,.12);border-color:var(--accent);color:var(--accent);}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;z-index:50;}
+  .overlay.hidden{display:none!important;}
+  .sheet-wrap{position:relative;width:100%;max-width:640px;}
+  .sheet-fechar-flutuante{position:absolute;top:-14px;right:-6px;width:32px;height:32px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);color:var(--muted);font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.5);cursor:pointer;z-index:5;}
+  .sheet-fechar-flutuante:hover{color:var(--text);border-color:var(--accent);}
+  .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px 14px 0 0;padding:16px 14px 22px;width:100%;max-width:640px;max-height:88vh;overflow-y:auto;}
+  .sheet h3{margin:0 0 4px;font-size:14px;}
+  .sheet .sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px;}
+  .aniver-card{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding:10px 0;}
+  .aniver-card:first-child{border-top:none;padding-top:0;}
+  .aniver-icone{font-size:20px;flex:none;}
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+    <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+    <div style="min-width:0;">
+      <div class="eyebrow">Zenith Ops · RH</div>
+      <h1>Recursos Humanos</h1>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;">
+    <button class="back" onclick="logout()">🚪 Sair</button>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer">
+  <div class="nav-drawer-titulo">Zenith Ops</div>
+  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
+  <div class="nav-drawer-grupo">Operação diária</div>
+  <a class="back hidden" id="nav-lancamento" href="/lancamento.html">🧾 Fechamento</a>
+  <a class="back hidden" id="nav-entrega-lancamento" href="/entrega-lancamento.html">📦 Lançar entrega</a>
+  <a class="back hidden" id="nav-fechamentos" href="/fechamentos.html">💰 Fechamentos</a>
+  <a class="back hidden" id="nav-entregas" href="/entregas.html">🛵 Entregas</a>
+  <a class="back hidden" id="nav-inventario" href="/estoque.html">📦 Estoque</a>
+  <a class="back" id="nav-abastecimento" href="/abastecimento.html">🛒 Abastec. Carrinho</a>
+  <div class="nav-drawer-grupo">Monitoramento</div>
+  <a class="back hidden" id="nav-monitor" href="/monitor.html">📈 Monitor</a>
+  <a class="back hidden" id="nav-relatorios" href="/relatorios.html">📊 Relatórios</a>
+  <a class="back hidden" id="nav-ifood" href="/ifood.html">🍔 iFood</a>
+  <div class="nav-drawer-grupo" id="nav-grupo-saltiverso">Saltiverso</div>
+  <a class="back hidden" id="nav-parque-checkin" href="/parque-checkin.html">🤸 Check-in Parque</a>
+  <a class="back hidden" id="nav-parque" href="/parque.html">🤸 Parque (painel)</a>
+  <a class="back hidden" id="nav-festas" href="/festas.html">🎉 Festas</a>
+  <a class="back hidden" id="nav-mensalistas" href="/mensalistas.html">📅 Mensalistas</a>
+  <div class="nav-drawer-grupo">RH</div>
+  <a class="back active" id="nav-rh-self" href="/rh.html">🧑‍💼 RH</a>
+  <div class="nav-drawer-grupo">Solicitações</div>
+  <a class="back hidden" id="nav-solicitacoes" href="/central.html">📋 Central</a>
+  <a class="back hidden" id="nav-historico" href="/central-historico.html">📜 Histórico</a>
+  <a class="back hidden" id="nav-tecnico" href="/tecnico.html">🔧 Chamados TI</a>
+  <a class="back" id="nav-ativos-ti" href="/ativos-ti.html">🖥️ Ativos de TI</a>
+  <a class="back hidden" id="nav-manutencao" href="/manutencao.html">🔧 Manutenção</a>
+  <a class="back hidden" id="nav-central-solucoes" href="/central-solucoes.html">💬 Central de Soluções</a>
+  <a class="back hidden" id="nav-beniboy" href="/beniboy.html">🐝 Central do Beniboy</a>
+  <div class="nav-drawer-grupo">Administração</div>
+  <a class="back hidden" id="nav-usuarios" href="/usuarios.html">👤 Usuários</a>
+  <a class="back hidden" id="nav-grupos" href="/grupos.html">🏷️ Grupos</a>
+  <a class="back hidden" id="nav-email" href="/email.html">✉️ Email</a>
+  <a class="back hidden" id="nav-entregas-regras" href="/entregas-regras.html">⚙️ Regras de Entregas</a>
+  <a class="back hidden" id="nav-cofre" href="/cofre.html">🔐 Cofre</a>
+  <a class="back" id="nav-ajuda" href="/ajuda.html">❓ Ajuda</a>
+  <a class="back hidden" id="nav-reset-senha" href="/painel.html?resetSenha=1">🔑 Reset senha</a>
+  <div class="nav-drawer-sep"></div>
+  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
+  <div class="nav-drawer-sep"></div>
+  <a class="back" href="https://wa.me/5581995148654" target="_blank" rel="noopener" style="color:var(--accent);">💬 Dúvidas? Suporte (81) 99514-8654</a>
+</nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso ao RH. Fale com o administrador (Master).</div>
+
+<div id="root" class="hidden">
+
+<div class="tabs">
+  <button type="button" class="tab-btn active" data-tab="ativos" onclick="trocarAba('ativos')">👥 Ativos</button>
+  <button type="button" class="tab-btn" data-tab="cadastrar" onclick="trocarAba('cadastrar')">➕ Cadastrar</button>
+  <button type="button" class="tab-btn" data-tab="teste" onclick="trocarAba('teste')">⏳ Acompanh. de Teste</button>
+  <button type="button" class="tab-btn" data-tab="aniver" onclick="trocarAba('aniver')">🎂 Aniversariantes</button>
+</div>
+
+<!-- ---------- ABA: Ficha de Funcionários Ativos ---------- -->
+<div class="painel-tab" id="tab-ativos">
+  <div class="panel">
+    <h2>Ficha de Funcionários Ativos</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">quem está cadastrado como atuando nas lojas agora</div>
+    <div class="grid2">
+      <div>
+        <label>Unidade</label>
+        <select id="at-filtro-unidade" onchange="renderAtivos()"><option value="">Todas as unidades</option></select>
+      </div>
+      <div>
+        <label>Status</label>
+        <select id="at-filtro-status" onchange="renderAtivos()">
+          <option value="ativo">Ativos</option>
+          <option value="todos">Todos (inclui desligados)</option>
+        </select>
+      </div>
+    </div>
+    <div id="lista-ativos" style="margin-top:14px;"></div>
+  </div>
+</div>
+
+<!-- ---------- ABA: Cadastrar (Extra/novo funcionário) ---------- -->
+<div class="painel-tab hidden" id="tab-cadastrar">
+  <div class="panel">
+    <h2>Cadastrar funcionário (1º dia de trabalho)</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">nome completo, contato e currículo (se houver) - assim o RH sabe exatamente quem está atuando em cada loja</div>
+    <form id="form-cadastrar">
+      <label>Unidade</label>
+      <select id="c-unidade" required></select>
+      <label>Nome completo</label>
+      <input type="text" id="c-nome" required maxlength="150">
+      <div class="grid2">
+        <div>
+          <label>Contato (telefone/WhatsApp)</label>
+          <input type="text" id="c-contato" maxlength="40">
+        </div>
+        <div>
+          <label>Cargo / função</label>
+          <input type="text" id="c-cargo" maxlength="60" placeholder="Ex: Atendente, Cozinha, Entregador">
+        </div>
+      </div>
+      <div class="grid2">
+        <div>
+          <label>Data de nascimento</label>
+          <input type="date" id="c-nascimento">
+        </div>
+        <div>
+          <label>Data de admissão</label>
+          <input type="date" id="c-admissao" required>
+        </div>
+      </div>
+      <label>Currículo (PDF, opcional)</label>
+      <input type="file" id="c-curriculo" accept="application/pdf">
+      <label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);margin-top:12px;">
+        <input type="checkbox" id="c-em-teste" checked style="width:auto;"> Em período de teste (gera alerta automático no 5º dia)
+      </label>
+      <div class="msg hidden" id="msg-cadastrar"></div>
+      <button class="btn-primary" type="submit">Cadastrar</button>
+    </form>
+  </div>
+</div>
+
+<!-- ---------- ABA: Acompanhamento de Teste ---------- -->
+<div class="painel-tab hidden" id="tab-teste">
+  <div class="panel">
+    <h2>Acompanhamento de Teste</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">quem está no período de experiência - no 5º dia sem decisão, o card fica em destaque e o gerente recebe um alerta</div>
+    <div id="lista-teste"></div>
+  </div>
+</div>
+
+<!-- ---------- ABA: Aniversariantes ---------- -->
+<div class="painel-tab hidden" id="tab-aniver">
+  <div class="panel">
+    <h2>🎂 Aniversariantes de hoje</h2>
+    <div id="lista-aniver-hoje"></div>
+  </div>
+  <div class="panel">
+    <h2>Aniversariantes do mês</h2>
+    <div id="lista-aniver-mes"></div>
+  </div>
+</div>
+
+</div>
+
+<!-- editar funcionário -->
+<div class="overlay hidden" id="overlay-editar">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharEditar()">✕</span>
+    <div class="sheet">
+      <h3>Editar funcionário</h3>
+      <div class="sub" id="ed-sub"></div>
+      <label>Nome completo</label>
+      <input type="text" id="ed-nome" maxlength="150">
+      <div class="grid2">
+        <div>
+          <label>Contato</label>
+          <input type="text" id="ed-contato" maxlength="40">
+        </div>
+        <div>
+          <label>Cargo / função</label>
+          <input type="text" id="ed-cargo" maxlength="60">
+        </div>
+      </div>
+      <label>Status</label>
+      <select id="ed-status">
+        <option value="ativo">Ativo</option>
+        <option value="inativo">Inativo (desligado)</option>
+      </select>
+      <div class="msg hidden" id="msg-editar"></div>
+      <button class="btn-primary" type="button" onclick="salvarEdicao()">Salvar alterações</button>
+    </div>
+  </div>
+</div>
+
+<!-- decisão do período de teste -->
+<div class="overlay hidden" id="overlay-decisao">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharDecisao()">✕</span>
+    <div class="sheet">
+      <h3>Registrar decisão do teste</h3>
+      <div class="sub" id="dec-sub"></div>
+      <label>Decisão</label>
+      <select id="dec-decisao">
+        <option value="efetivar">✅ Efetivar</option>
+        <option value="desligar">❌ Desligar</option>
+      </select>
+      <label>Observação (feedback)</label>
+      <textarea id="dec-observacao" maxlength="500" placeholder="Como foi o período de teste..."></textarea>
+      <div class="msg hidden" id="msg-decisao"></div>
+      <button class="btn-primary" type="button" onclick="salvarDecisao()">Salvar decisão</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
+function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+
+function initNavDrawerAccordion(){
+  const nav = document.getElementById('nav-drawer');
+  if(!nav || nav.dataset.ndgInit) return;
+  nav.dataset.ndgInit = '1';
+  [...nav.querySelectorAll(':scope > .nav-drawer-grupo')].forEach(g=>{
+    const nomeGrupo = g.textContent.trim();
+    const itens = [];
+    let el = g.nextElementSibling;
+    while(el && !el.classList.contains('nav-drawer-grupo') && !el.classList.contains('nav-drawer-sep')){
+      const prox = el.nextElementSibling;
+      itens.push(el);
+      el = prox;
+    }
+    if(!itens.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'ndg-wrap';
+    g.after(wrap);
+    itens.forEach(it=>wrap.appendChild(it));
+    g.innerHTML = `<span>${nomeGrupo}</span><span class="ndg-seta">▾</span>`;
+    const atualizarVazio = ()=>{
+      const temVisivel = itens.some(it=>!it.classList.contains('hidden'));
+      g.classList.toggle('hidden', !temVisivel);
+    };
+    atualizarVazio();
+    new MutationObserver(atualizarVazio).observe(wrap, { attributes:true, attributeFilter:['class'], subtree:true });
+    const key = 'ndgAberto:' + nomeGrupo;
+    const temAtivo = itens.some(it=>it.classList.contains('active'));
+    const aberto = temAtivo || localStorage.getItem(key) === '1';
+    g.querySelector('.ndg-seta').style.transform = aberto ? '' : 'rotate(-90deg)';
+    wrap.classList.toggle('hidden', !aberto);
+    g.addEventListener('click', ()=>{
+      const abrirAgora = wrap.classList.contains('hidden');
+      wrap.classList.toggle('hidden', !abrirAgora);
+      g.querySelector('.ndg-seta').style.transform = abrirAgora ? '' : 'rotate(-90deg)';
+      localStorage.setItem(key, abrirAgora ? '1' : '0');
+    });
+  });
+}
+initNavDrawerAccordion();
+
+// mesma lista de lojas ja usada em central.html/lancamento.html
+const UNIDADES_NOMES = {
+  "Domino's Carrinho Aeroporto Recife": 'Dom Car Aero Recife',
+  'Dominos Bessa': 'Dom Bessa',
+  'Dominos Campina Grande': 'Dom Campina Grande',
+  'Dominos Caruaru': 'Dom Caruaru',
+  'Dominos Garanhuns': 'Dom Garanhuns',
+  'Dominos Natal': 'Dom Natal',
+  'Dominos Praça Aeroporto Recife': 'Dom Praça Aero Recife',
+  'Dominos Tirol': 'Dom Tirol',
+  'Milky Moo Tirol': 'MilkyMoo Tirol',
+  'Spoleto Praça Aeroporto Recife': 'Spo Praça Aero Recife',
+  'Spoleto Shopping Recife': 'Spo Shop Recife',
+  'Spoleto Shopping Tacaruna': 'Spo Shop Tacaruna',
+  'São Braz IL': 'Sao Braz Ilha',
+};
+
+let ME = null;
+let IS_MASTER = false;
+let TODOS = [];
+let EDITANDO_ID = null;
+let DECIDINDO_ID = null;
+
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtData(d){ if(!d) return '—'; const [y,m,dd]=d.split('-'); return `${dd}/${m}/${y}`; }
+const FUSO_BR = 'America/Sao_Paulo';
+function hojeBrasilia(){ return new Date().toLocaleDateString('en-CA', { timeZone: FUSO_BR }); }
+function diasDesde(dataIso){
+  if(!dataIso) return 0;
+  const inicio = new Date(dataIso+'T00:00:00');
+  const hoje = new Date(hojeBrasilia()+'T00:00:00');
+  return Math.max(0, Math.round((hoje-inicio)/86400000));
+}
+
+function trocarAba(nome){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===nome));
+  document.querySelectorAll('.painel-tab').forEach(p=>p.classList.add('hidden'));
+  document.getElementById('tab-'+nome).classList.remove('hidden');
+  if(nome==='aniver') renderAniversariantes();
+  if(nome==='teste') renderTeste();
+}
+
+function badgeTeste(f){
+  if(!f.emTeste) return '';
+  const dias = diasDesde(f.dataAdmissao);
+  if(dias>=5) return `<span class="badge bad">teste · dia ${dias} · decidir</span>`;
+  return `<span class="badge warn">teste · dia ${dias}</span>`;
+}
+
+function cardAtivoHtml(f){
+  const badges = [
+    f.status==='inativo' ? '<span class="badge muted">desligado</span>' : '<span class="badge ok">ativo</span>',
+    badgeTeste(f),
+  ].filter(Boolean).join(' ');
+  return `<div class="card">
+    <div class="linha1"><span>${escapeHtml(f.nome)}</span>${badges}</div>
+    <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · admitido ${fmtData(f.dataAdmissao)}${f.contato?' · '+escapeHtml(f.contato):''}</div>
+    <div class="acoes">
+      <button type="button" class="link-btn" onclick="abrirEditar('${f.id}')">✏️ editar</button>
+      ${f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 currículo</a>` : ''}
+    </div>
+  </div>`;
+}
+
+function renderAtivos(){
+  const unidadeF = document.getElementById('at-filtro-unidade').value;
+  const statusF = document.getElementById('at-filtro-status').value;
+  let lista = TODOS.slice();
+  if(unidadeF) lista = lista.filter(f=>f.unidade===unidadeF);
+  if(statusF==='ativo') lista = lista.filter(f=>f.status==='ativo');
+  lista.sort((a,b)=>String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')));
+  const el = document.getElementById('lista-ativos');
+  el.innerHTML = lista.length ? lista.map(cardAtivoHtml).join('') : '<div class="empty">nenhum funcionário encontrado.</div>';
+}
+
+function renderTeste(){
+  const lista = TODOS.filter(f=>f.status==='ativo' && f.emTeste && !f.feedbackTeste)
+    .sort((a,b)=>diasDesde(b.dataAdmissao)-diasDesde(a.dataAdmissao));
+  const el = document.getElementById('lista-teste');
+  el.innerHTML = lista.length ? lista.map(f=>{
+    const dias = diasDesde(f.dataAdmissao);
+    const vencido = dias>=5;
+    return `<div class="card">
+      <div class="linha1"><span>${escapeHtml(f.nome)}</span>${vencido?'<span class="badge bad">decidir hoje</span>':`<span class="badge warn">dia ${dias}</span>`}</div>
+      <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · admitido ${fmtData(f.dataAdmissao)} (${dias} dia${dias===1?'':'s'})</div>
+      <div class="acoes">
+        <button type="button" class="btn-secundario" onclick="abrirDecisao('${f.id}')">📝 Registrar decisão</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty">ninguém em período de teste agora.</div>';
+}
+
+function renderAniversariantes(){
+  const hoje = hojeBrasilia();
+  const [, mesHoje, diaHoje] = hoje.split('-');
+  const ativos = TODOS.filter(f=>f.status==='ativo' && f.dataNascimento);
+  const hojeLista = ativos.filter(f=>{ const [,m,d]=f.dataNascimento.split('-'); return m===mesHoje && d===diaHoje; });
+  const mesLista = ativos.filter(f=>{ const [,m]=f.dataNascimento.split('-'); return m===mesHoje; })
+    .sort((a,b)=>a.dataNascimento.slice(5).localeCompare(b.dataNascimento.slice(5)));
+  const aniverCard = (f)=>`<div class="aniver-card"><span class="aniver-icone">🎂</span><div><div style="font-weight:600;font-size:13px;">${escapeHtml(f.nome)}</div><div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${fmtData(f.dataNascimento)}</div></div></div>`;
+  document.getElementById('lista-aniver-hoje').innerHTML = hojeLista.length ? hojeLista.map(aniverCard).join('') : '<div class="empty">ninguém faz aniversário hoje.</div>';
+  document.getElementById('lista-aniver-mes').innerHTML = mesLista.length ? mesLista.map(aniverCard).join('') : '<div class="empty">sem aniversariantes esse mês.</div>';
+}
+
+async function carregar(){
+  TODOS = await fetch('/api/rh/funcionarios').then(r=>r.ok?r.json():[]).catch(()=>[]);
+  renderAtivos();
+  renderTeste();
+}
+
+document.getElementById('form-cadastrar').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const msg = document.getElementById('msg-cadastrar');
+  msg.classList.add('hidden');
+  const btn = e.target.querySelector('button[type=submit]');
+  btn.disabled = true;
+  try{
+    const fd = new FormData();
+    fd.append('unidade', document.getElementById('c-unidade').value);
+    fd.append('nome', document.getElementById('c-nome').value);
+    fd.append('contato', document.getElementById('c-contato').value);
+    fd.append('cargoFuncao', document.getElementById('c-cargo').value);
+    fd.append('dataNascimento', document.getElementById('c-nascimento').value);
+    fd.append('dataAdmissao', document.getElementById('c-admissao').value);
+    fd.append('emTeste', document.getElementById('c-em-teste').checked ? 'true' : 'false');
+    const arq = document.getElementById('c-curriculo').files[0];
+    if(arq) fd.append('curriculo', arq);
+    const resp = await fetch('/api/rh/funcionarios', { method:'POST', body: fd });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao cadastrar.');
+    document.getElementById('form-cadastrar').reset();
+    document.getElementById('c-admissao').value = hojeBrasilia();
+    document.getElementById('c-em-teste').checked = true;
+    msg.textContent = `✅ ${data.nome} cadastrado(a) com sucesso.`; msg.className = 'msg ok';
+    await carregar();
+    trocarAba('ativos');
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err';
+  }finally{
+    msg.classList.remove('hidden');
+    btn.disabled = false;
+  }
+});
+
+function abrirEditar(id){
+  const f = TODOS.find(x=>x.id===id);
+  if(!f) return;
+  EDITANDO_ID = id;
+  document.getElementById('msg-editar').classList.add('hidden');
+  document.getElementById('ed-sub').textContent = `${UNIDADES_NOMES[f.unidade]||f.unidade} · admitido ${fmtData(f.dataAdmissao)}`;
+  document.getElementById('ed-nome').value = f.nome||'';
+  document.getElementById('ed-contato').value = f.contato||'';
+  document.getElementById('ed-cargo').value = f.cargoFuncao||'';
+  document.getElementById('ed-status').value = f.status||'ativo';
+  document.getElementById('overlay-editar').classList.remove('hidden');
+}
+function fecharEditar(){ document.getElementById('overlay-editar').classList.add('hidden'); EDITANDO_ID=null; }
+async function salvarEdicao(){
+  const msg = document.getElementById('msg-editar');
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${EDITANDO_ID}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      nome: document.getElementById('ed-nome').value,
+      contato: document.getElementById('ed-contato').value,
+      cargoFuncao: document.getElementById('ed-cargo').value,
+      status: document.getElementById('ed-status').value,
+    })});
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
+    await carregar();
+    fecharEditar();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+}
+
+function abrirDecisao(id){
+  const f = TODOS.find(x=>x.id===id);
+  if(!f) return;
+  DECIDINDO_ID = id;
+  document.getElementById('msg-decisao').classList.add('hidden');
+  document.getElementById('dec-sub').textContent = `${f.nome} · ${UNIDADES_NOMES[f.unidade]||f.unidade} · dia ${diasDesde(f.dataAdmissao)} de teste`;
+  document.getElementById('dec-decisao').value = 'efetivar';
+  document.getElementById('dec-observacao').value = '';
+  document.getElementById('overlay-decisao').classList.remove('hidden');
+}
+function fecharDecisao(){ document.getElementById('overlay-decisao').classList.add('hidden'); DECIDINDO_ID=null; }
+async function salvarDecisao(){
+  const msg = document.getElementById('msg-decisao');
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${DECIDINDO_ID}/decisao-teste`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      decisao: document.getElementById('dec-decisao').value,
+      observacao: document.getElementById('dec-observacao').value,
+    })});
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar decisão.');
+    await carregar();
+    fecharDecisao();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+}
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  ME = await res.json();
+  const isMaster = ME.role==='master';
+  IS_MASTER = isMaster;
+  const temAcesso = isMaster || ME.isAdmin || (ME.permissions?.sections||[]).includes('rh');
+
+  document.getElementById('nav-monitor').classList.remove('hidden');
+  document.getElementById('nav-lancamento').classList.remove('hidden');
+  document.getElementById('nav-entrega-lancamento').classList.remove('hidden');
+  document.getElementById('nav-fechamentos').classList.remove('hidden');
+  document.getElementById('nav-entregas').classList.remove('hidden');
+  document.getElementById('nav-cofre').classList.remove('hidden');
+  document.getElementById('nav-relatorios').classList.remove('hidden');
+  document.getElementById('nav-ifood').classList.remove('hidden');
+  document.getElementById('nav-solicitacoes').classList.remove('hidden');
+  document.getElementById('nav-historico').classList.remove('hidden');
+  document.getElementById('nav-tecnico').classList.remove('hidden');
+  document.getElementById('nav-manutencao').classList.remove('hidden');
+  document.getElementById('nav-inventario').classList.remove('hidden');
+  document.getElementById('nav-parque-checkin').classList.remove('hidden');
+  document.getElementById('nav-parque').classList.remove('hidden');
+  document.getElementById('nav-festas').classList.remove('hidden');
+  document.getElementById('nav-mensalistas').classList.remove('hidden');
+  document.getElementById('nav-grupo-saltiverso').classList.remove('hidden');
+  document.getElementById('nav-central-solucoes').classList.remove('hidden');
+  document.getElementById('nav-beniboy').classList.remove('hidden');
+  document.getElementById('nav-usuarios').classList.toggle('hidden', !isMaster);
+  document.getElementById('nav-grupos').classList.toggle('hidden', !isMaster);
+  document.getElementById('nav-email').classList.toggle('hidden', !isMaster);
+  document.getElementById('nav-entregas-regras').classList.toggle('hidden', !isMaster);
+  document.getElementById('nav-reset-senha').classList.toggle('hidden', !(isMaster || ME.isAdmin));
+
+  if(!temAcesso){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+
+  const unidades = isMaster ? Object.keys(UNIDADES_NOMES) : (ME.permissions?.unidades||[]).filter(u=>UNIDADES_NOMES[u]);
+  const optsUnidades = unidades.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('');
+  document.getElementById('c-unidade').innerHTML = optsUnidades || '<option value="" disabled selected>nenhuma unidade liberada</option>';
+  document.getElementById('at-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);
+  document.getElementById('c-admissao').value = hojeBrasilia();
+
+  document.getElementById('root').classList.remove('hidden');
+  await carregar();
+}
+
+boot();
+</script>
+<script src="/notif-central.js"></script>
+<script src="/suporte-chat.js"></script>
+<script src="/nav-gate.js"></script>
+</body>
+</html>

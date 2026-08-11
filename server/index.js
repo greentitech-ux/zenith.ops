@@ -58,6 +58,7 @@ const termoResponsabilidade = require('./termoResponsabilidade');
 const saltiversoImport = require('./saltiversoImport');
 const centralCards = require('./centralCards');
 const relatorioMV = require('./relatorioMV');
+const rh = require('./rh');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -3250,6 +3251,91 @@ app.get('/api/festas/relatorio.:formato(csv|pdf)', requireSection('festas'), asy
   reportUtil.writePDF(res, { titulo: 'Saltiverso - Reservas de Festa', subtitulo: `Exportado em ${reportUtil.agoraBrasiliaFmt()} · ${linhas.length} reserva(s)`, colunas, linhas, nomeArquivo });
 });
 
+// ---------- RH: ficha de funcionarios (extras e efetivos), independente de
+// login no Zenith - cadastro no 1o dia (nome/contato/curriculo), acompanha-
+// mento de teste com alerta automatico no 5o dia (ver rodarAlertaTesteRh
+// mais abaixo) e aniversariante do dia (calculado no front sobre a mesma
+// lista, ver rh.aniversariantesHoje) ----------
+app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'), async (req, res) => {
+  try {
+    const { unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, emTeste } = req.body;
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    let curriculo = null;
+    if (req.file) {
+      const path = await storage.salvarArquivo(unidade || 'geral', req.file, 'rh-curriculos');
+      curriculo = { path, nomeOriginal: req.file.originalname, tipo: req.file.mimetype };
+    }
+    const registro = await rh.criar({
+      unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao,
+      // multipart manda tudo como string - so false quando vier "false" explicito
+      emTeste: emTeste !== 'false' && emTeste !== false,
+      curriculo, cadastradoPorId: req.user.id, cadastradoPorEmail: req.user.email,
+    });
+    broadcast('rh-funcionario-criado', registro, 'rh');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/rh/funcionarios', requireSection('rh'), async (req, res) => {
+  if (req.isMaster) return res.json(await rh.listAll());
+  res.json(await rh.listByUnidades(req.permissions.unidades || []));
+});
+
+app.patch('/api/rh/funcionarios/:id', requireSection('rh'), async (req, res) => {
+  try {
+    const atual = await rh.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(atual.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    const registro = await rh.atualizar(req.params.id, req.body);
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/rh/funcionarios/:id/decisao-teste', requireSection('rh'), async (req, res) => {
+  try {
+    const atual = await rh.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(atual.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    const registro = await rh.registrarDecisaoTeste(req.params.id, {
+      decisao: req.body.decisao, observacao: req.body.observacao, porEmail: req.user.email,
+    });
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/rh/funcionarios/:id/curriculo', requireSection('rh'), async (req, res) => {
+  const atual = await rh.getOne(req.params.id);
+  if (!atual || !atual.curriculo) return res.sendStatus(404);
+  if (!req.isMaster && !(req.permissions.unidades || []).includes(atual.unidade)) {
+    return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  }
+  storage.streamArquivo(atual.curriculo.path, atual.curriculo.tipo, res);
+});
+
+app.delete('/api/rh/funcionarios/:id', auth.requireMaster, async (req, res) => {
+  try {
+    await rh.remover(req.params.id);
+    broadcast('rh-funcionario-excluido', { id: req.params.id }, 'rh');
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---------- Saltiverso Patteo: passaporte mensal (mensalistas) - reaproveita
 // a secao 'parque' (mesmo publico que ja gerencia o painel do parque) em vez
 // de criar uma quarta secao de permissao so pra isso ----------
@@ -6067,6 +6153,25 @@ app.use((err, req, res, next) => {
     setInterval(() => {
       reforcarAlarmesBeniboy().catch((err) => console.error('Erro no reforço do alarme do Beniboy:', err.message));
     }, 60 * 1000);
+
+    // RH: alerta do 5o dia de teste (ver rh.verificarTestesVencidos) - so
+    // roda dentro do horario comercial (evita acordar ninguem de madrugada);
+    // a checagem em si (alertaTesteEnviadoEm) garante que cada funcionario
+    // so gera 1 push, mesmo rodando de hora em hora
+    const rodarAlertaTesteRh = async () => {
+      const h = horaBrasilia();
+      if (h < 8 || h >= 20) return;
+      const vencidos = await rh.verificarTestesVencidos();
+      for (const f of vencidos) {
+        push.notifyRhTesteVencido(f);
+        broadcast('rh-teste-vencido', { id: f.id, unidade: f.unidade, nome: f.nome }, 'rh');
+        await rh.marcarAlertaTesteEnviado(f.id);
+      }
+    };
+    rodarAlertaTesteRh().catch((err) => console.error('Erro no alerta de teste do RH:', err.message));
+    setInterval(() => {
+      rodarAlertaTesteRh().catch((err) => console.error('Erro no alerta de teste do RH:', err.message));
+    }, 60 * 60 * 1000);
 
     // relatorio diario do MV por e-mail (ver relatorioMV.js) - so agenda se
     // as credenciais de ENVIO estiverem configuradas (quem manda, RELATORIO_

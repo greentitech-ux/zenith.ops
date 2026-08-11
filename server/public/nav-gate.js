@@ -36,6 +36,7 @@
     'nav-mensalistas': ['parque'],
     'nav-festas': ['festas'],
     'nav-central-solucoes': ['central-solucoes'],
+    'nav-rh': ['rh'],
     // mesmo criterio de acesso do atendimento do widget (ehTimeSuporte no
     // index.js): time de Suporte, alem de Master/Admin (que ja veem tudo)
     'nav-beniboy': ['suporte'],
