@@ -154,6 +154,7 @@
   <button type="button" class="tab-btn active" data-tab="colaboradores" onclick="trocarAba('colaboradores')">🧑‍💼 Colaboradores</button>
   <button type="button" class="tab-btn" data-tab="extras" onclick="trocarAba('extras')">👷 Extras</button>
   <button type="button" class="tab-btn" data-tab="teste" onclick="trocarAba('teste')">⏳ Em Teste</button>
+  <button type="button" class="tab-btn" data-tab="experiencia" onclick="trocarAba('experiencia')">🗓️ Em Experiência</button>
 </div>
 <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:12px 0 8px;">⚙️ processos</div>
 <div class="tabs">
@@ -260,6 +261,15 @@
     <h2>Acompanhamento de Teste</h2>
     <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">quem está no período de experiência - no 5º dia sem decisão, o card fica em destaque e o gerente recebe um alerta</div>
     <div id="lista-teste"></div>
+  </div>
+</div>
+
+<!-- ---------- ABA: Experiência formal (CLT, 30+60 dias) ---------- -->
+<div class="painel-tab hidden" id="tab-experiencia">
+  <div class="panel">
+    <h2>🗓️ Experiência formal (CLT)</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">todo colaborador efetivado entra numa 1ª etapa de 30 dias; se renovar, mais 60 (total 90) - avisos a partir de 5 dias antes do prazo, e no último dia o gerente da unidade também é avisado</div>
+    <div id="lista-experiencia"></div>
   </div>
 </div>
 
@@ -382,6 +392,23 @@
       <textarea id="dec-observacao" maxlength="500" placeholder="Como foi o período de teste..."></textarea>
       <div class="msg hidden" id="msg-decisao"></div>
       <button class="btn-primary" type="button" onclick="salvarDecisao()">Salvar decisão</button>
+    </div>
+  </div>
+</div>
+
+<!-- decisão da etapa de experiência (30/60 dias) -->
+<div class="overlay hidden" id="overlay-decisao-experiencia">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharDecisaoExperiencia()">✕</span>
+    <div class="sheet">
+      <h3>Registrar decisão da experiência</h3>
+      <div class="sub" id="dexp-sub"></div>
+      <label>Decisão</label>
+      <select id="dexp-decisao"></select>
+      <label>Observação (opcional)</label>
+      <textarea id="dexp-observacao" maxlength="500" placeholder="Anotações sobre a decisão..."></textarea>
+      <div class="msg hidden" id="msg-decisao-experiencia"></div>
+      <button class="btn-primary" type="button" onclick="salvarDecisaoExperiencia()">Salvar decisão</button>
     </div>
   </div>
 </div>
@@ -517,6 +544,7 @@ let PODE_APROVAR_RH = false;
 let TODOS = [];
 let EDITANDO_ID = null;
 let DECIDINDO_ID = null;
+let DECIDINDO_EXPERIENCIA_ID = null;
 let ATESTANDO_ID = null;
 let ADVERTINDO_ID = null;
 let ADVERTENCIA_ABERTA_ID = null;
@@ -556,6 +584,7 @@ function trocarAba(nome){
   document.getElementById('tab-'+nome).classList.remove('hidden');
   if(nome==='aniver') renderAniversariantes();
   if(nome==='teste') renderTeste();
+  if(nome==='experiencia') renderExperiencia();
   if(nome==='atestados') renderAtestados();
   if(nome==='checkins') carregarCheckins();
   if(nome==='aprovacoes') carregarAprovacoes();
@@ -574,6 +603,7 @@ function cardAtivoHtml(f){
     f.status==='candidato' ? '<span class="badge warn">candidato</span>' : (f.status==='inativo' ? '<span class="badge muted">desligado</span>' : '<span class="badge ok">ativo</span>'),
     badgeTeste(f),
     f.emAtestado ? '<span class="badge bad">🩺 atestado</span>' : '',
+    (f.experiencia && f.experiencia.etapa) ? `<span class="badge warn">🗓️ exp. ${f.experiencia.etapa} dias</span>` : '',
   ].filter(Boolean).join(' ');
   return `<div class="card">
     <div class="linha1"><span>${escapeHtml(f.nome)}</span>${badges}</div>
@@ -627,6 +657,68 @@ function renderTeste(){
       </div>
     </div>`;
   }).join('') : '<div class="empty">ninguém em período de teste agora.</div>';
+}
+
+function diasRestantesAte(dataIso){
+  if(!dataIso) return null;
+  const alvo = new Date(dataIso+'T00:00:00');
+  const hoje = new Date(hojeBrasilia()+'T00:00:00');
+  return Math.round((alvo-hoje)/86400000);
+}
+
+const DECISOES_EXPERIENCIA = {
+  '30': [['renovar','🔁 Renovar (+60 dias, total 90)'], ['efetivar','✅ Efetivar definitivo'], ['desligar','❌ Desligar']],
+  '60': [['efetivar','✅ Efetivar definitivo'], ['desligar','❌ Desligar']],
+};
+
+function renderExperiencia(){
+  const lista = TODOS.filter(f=>f.status==='ativo' && f.experiencia && f.experiencia.etapa)
+    .sort((a,b)=>diasRestantesAte(a.experiencia.prazoEtapaAte)-diasRestantesAte(b.experiencia.prazoEtapaAte));
+  const el = document.getElementById('lista-experiencia');
+  el.innerHTML = lista.length ? lista.map(f=>{
+    const restantes = diasRestantesAte(f.experiencia.prazoEtapaAte);
+    const etapaLabel = f.experiencia.etapa==='60' ? '60 dias (total 90)' : '30 dias';
+    let badge;
+    if(restantes<=0) badge = '<span class="badge bad">vence hoje</span>';
+    else if(restantes<=2) badge = `<span class="badge bad">${restantes} dia${restantes===1?'':'s'}</span>`;
+    else if(restantes<=5) badge = `<span class="badge warn">${restantes} dias</span>`;
+    else badge = `<span class="badge muted">${restantes} dias</span>`;
+    return `<div class="card">
+      <div class="linha1"><span>${escapeHtml(f.nome)}</span>${badge}</div>
+      <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · etapa de ${etapaLabel} · início ${fmtData(f.experiencia.inicioEtapa)} · prazo ${fmtData(f.experiencia.prazoEtapaAte)}</div>
+      <div class="acoes">
+        <button type="button" class="btn-secundario" onclick="abrirDecisaoExperiencia('${f.id}')">📝 Registrar decisão</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty">ninguém em período de experiência agora.</div>';
+}
+
+function abrirDecisaoExperiencia(id){
+  const f = TODOS.find(x=>x.id===id);
+  if(!f || !f.experiencia) return;
+  DECIDINDO_EXPERIENCIA_ID = id;
+  const etapa = f.experiencia.etapa;
+  document.getElementById('dexp-sub').textContent = `${f.nome} · etapa de ${etapa==='60'?'60 dias (total 90)':'30 dias'} · prazo ${fmtData(f.experiencia.prazoEtapaAte)}`;
+  document.getElementById('dexp-decisao').innerHTML = DECISOES_EXPERIENCIA[etapa].map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
+  document.getElementById('dexp-observacao').value = '';
+  document.getElementById('msg-decisao-experiencia').classList.add('hidden');
+  document.getElementById('overlay-decisao-experiencia').classList.remove('hidden');
+}
+function fecharDecisaoExperiencia(){ document.getElementById('overlay-decisao-experiencia').classList.add('hidden'); DECIDINDO_EXPERIENCIA_ID=null; }
+async function salvarDecisaoExperiencia(){
+  const msg = document.getElementById('msg-decisao-experiencia');
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${DECIDINDO_EXPERIENCIA_ID}/decisao-experiencia`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      decisao: document.getElementById('dexp-decisao').value,
+      observacao: document.getElementById('dexp-observacao').value,
+    })});
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar decisão.');
+    await carregar();
+    fecharDecisaoExperiencia();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
 }
 
 function renderAtestados(){
@@ -883,6 +975,7 @@ async function carregar(){
   renderColaboradores();
   renderExtras();
   renderTeste();
+  renderExperiencia();
   renderAtestados();
 }
 

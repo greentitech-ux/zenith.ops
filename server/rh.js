@@ -15,6 +15,12 @@
 // - Atestado: funcionario ativo pode ser marcado como afastado (emAtestado)
 //   sem contar como desligamento - da visibilidade de quantos estao de
 //   atestado agora (card do Painel) e guarda o historico de quando voltou.
+// - Experiencia formal (CLT): todo mundo que vira efetivado (direto ou
+//   promovido do teste de 5 dias) entra automaticamente numa 1a etapa de 30
+//   dias; ao vencer, decide se renova por mais 60 (total 90) ou efetiva/
+//   desliga direto. Alerta escalonado em D-5/D-3/D-2/D-0 (ver
+//   verificarAlertasExperiencia, chamado por job periodico em index.js) -
+//   D-0 tambem avisa o gerente da unidade, nao so RH/Master.
 // - Ficha de Funcionarios Ativos + Aniversariante do Dia (calculado sobre a
 //   mesma ficha, sem colecao propria).
 const db = require('./firestore');
@@ -29,6 +35,15 @@ const DECISOES_VALIDAS = ['efetivar', 'desligar'];
 // explicito do usuario ("no 5o dia")
 const DIAS_TESTE_ALERTA = 5;
 
+// experiencia formal (CLT) em 2 etapas: 30 dias, e se renovar, mais 60
+// (total ate 90) - pedido explicito do usuario
+const DIAS_EXPERIENCIA = { 30: 30, 60: 60 };
+const DECISOES_EXPERIENCIA_30 = ['renovar', 'efetivar', 'desligar'];
+const DECISOES_EXPERIENCIA_60 = ['efetivar', 'desligar'];
+// avisos escalonados conforme pedido do usuario: 5, 3, 2 dias antes e no
+// dia do vencimento (0) - so no 0 o gerente da unidade tambem e avisado
+const ALERTA_EXPERIENCIA_DIAS = [5, 3, 2, 0];
+
 function limpar(v, max) {
   return String(v || '').trim().slice(0, max);
 }
@@ -37,6 +52,16 @@ function validarDataOuNull(v, campo) {
   if (v == null || v === '') return null;
   if (!DATA_RE.test(v)) throw new Error(`${campo} inválida. Use o formato AAAA-MM-DD.`);
   return v;
+}
+
+function calcularPrazoExperiencia(inicioIso, etapa) {
+  const d = new Date(`${inicioIso}T00:00:00`);
+  d.setDate(d.getDate() + (DIAS_EXPERIENCIA[etapa] || 30));
+  return d.toISOString().slice(0, 10);
+}
+
+function iniciarExperiencia(inicioIso) {
+  return { etapa: '30', inicioEtapa: inicioIso, prazoEtapaAte: calcularPrazoExperiencia(inicioIso, '30'), alertasEnviados: [] };
 }
 
 // "efetivado" e restrito: so Master/Admin/quem tem a tag podeRhCadastrarEfetivado
@@ -62,6 +87,7 @@ async function criar({
 
   const ref = COLLECTION.doc();
   const agora = new Date().toISOString();
+  const dataAdmissaoOk = validarDataOuNull(dataAdmissao, 'Data de admissão') || agora.slice(0, 10);
   const registro = {
     id: ref.id,
     unidade,
@@ -69,7 +95,7 @@ async function criar({
     contato: limpar(contato, 40),
     cargoFuncao: limpar(cargoFuncao, 60),
     dataNascimento: validarDataOuNull(dataNascimento, 'Data de nascimento'),
-    dataAdmissao: validarDataOuNull(dataAdmissao, 'Data de admissão') || agora.slice(0, 10),
+    dataAdmissao: dataAdmissaoOk,
     curriculo: curriculo || null,
     tipoCadastro: tipo,
     emTeste,
@@ -80,6 +106,11 @@ async function criar({
     emAtestado: false,
     atestadoAtual: null,
     atestados: [],
+    // efetivado direto ja entra na 1a etapa da experiencia formal (30 dias);
+    // candidato so entra nisso quando efetivado no fim do teste de 5 dias
+    // (ver registrarDecisaoTeste) - extra nunca entra, nao tem esse vinculo
+    experiencia: tipo === 'efetivado' ? iniciarExperiencia(dataAdmissaoOk) : null,
+    historicoExperiencia: [],
     cadastradoPorId: cadastradoPorId || null,
     cadastradoPorEmail: cadastradoPorEmail || null,
     criadoEm: agora,
@@ -156,7 +187,53 @@ async function registrarDecisaoTeste(id, { decisao, observacao, porEmail }) {
   };
   if (decisao === 'efetivar') {
     merge.status = 'ativo';
+    // aprovado no teste de 5 dias -> entra na 1a etapa da experiencia
+    // formal de 30 dias, mesmo tratamento de quem foi cadastrado direto
+    // como efetivado
+    merge.experiencia = iniciarExperiencia(agora.slice(0, 10));
   } else {
+    merge.status = 'inativo';
+    merge.desligadoEm = agora;
+  }
+  await ref.update(merge);
+  rhCache.invalidar();
+  return getOne(id);
+}
+
+// registra a decisao da etapa atual de experiencia formal (30 ou 60 dias):
+// - "renovar" (so vale na etapa de 30): fecha a etapa e abre a de 60 (total
+//   90 dias corridos desde o inicio da 1a etapa)
+// - "efetivar": fecha a experiencia, o colaborador segue "ativo" normal
+// - "desligar": fecha a experiencia e desliga (status "inativo")
+async function registrarDecisaoExperiencia(id, { decisao, observacao, porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  const atual = snap.data();
+  if (!atual.experiencia || !atual.experiencia.etapa) throw new Error('Esse colaborador não está em período de experiência.');
+  const etapa = atual.experiencia.etapa;
+  const validas = etapa === '30' ? DECISOES_EXPERIENCIA_30 : DECISOES_EXPERIENCIA_60;
+  if (!validas.includes(decisao)) throw new Error(`Decisão inválida pra etapa de ${etapa} dias. Use: ${validas.join(', ')}.`);
+  const agora = new Date().toISOString();
+  const historicoEntry = {
+    etapa,
+    inicioEtapa: atual.experiencia.inicioEtapa,
+    prazoEtapaAte: atual.experiencia.prazoEtapaAte,
+    decisao,
+    observacao: limpar(observacao, 500),
+    porEmail: porEmail || null,
+    decididoEm: agora,
+  };
+  const merge = {
+    historicoExperiencia: [...(atual.historicoExperiencia || []), historicoEntry],
+    atualizadoEm: agora,
+  };
+  if (decisao === 'renovar') {
+    merge.experiencia = { etapa: '60', inicioEtapa: agora.slice(0, 10), prazoEtapaAte: calcularPrazoExperiencia(agora.slice(0, 10), '60'), alertasEnviados: [] };
+  } else if (decisao === 'efetivar') {
+    merge.experiencia = null;
+  } else {
+    merge.experiencia = null;
     merge.status = 'inativo';
     merge.desligadoEm = agora;
   }
@@ -249,6 +326,48 @@ async function marcarAlertaTesteEnviado(id) {
   rhCache.invalidar();
 }
 
+// dias corridos ATE uma data (negativo = ja passou) - inverso de diasDesde,
+// usado pro prazo de experiencia contar "quantos dias faltam"
+function diasRestantesAte(dataIso) {
+  if (!dataIso) return null;
+  const alvo = new Date(`${dataIso}T00:00:00`);
+  const hoje = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  hoje.setHours(0, 0, 0, 0);
+  return Math.round((alvo - hoje) / 86400000);
+}
+
+// quem esta numa etapa de experiencia (30 ou 60 dias) com algum limite de
+// aviso (5/3/2/0 dias antes do prazo) ja vencido e ainda nao notificado -
+// pode retornar mais de 1 pendencia por pessoa se o job ficou parado (ex:
+// servidor fora do ar) e mais de 1 limite foi ultrapassado de uma vez
+async function verificarAlertasExperiencia() {
+  const todos = await listAllUncached();
+  const pendencias = [];
+  for (const f of todos) {
+    if (f.status !== 'ativo' || !f.experiencia || !f.experiencia.etapa) continue;
+    const restantes = diasRestantesAte(f.experiencia.prazoEtapaAte);
+    if (restantes == null) continue;
+    const jaEnviados = f.experiencia.alertasEnviados || [];
+    for (const limite of ALERTA_EXPERIENCIA_DIAS) {
+      if (restantes <= limite && !jaEnviados.includes(limite)) {
+        pendencias.push({ funcionario: f, diasRestantes: restantes, limite });
+      }
+    }
+  }
+  return pendencias;
+}
+
+async function marcarAlertaExperienciaEnviado(id, limite) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return;
+  const atual = snap.data();
+  const jaEnviados = (atual.experiencia && atual.experiencia.alertasEnviados) || [];
+  if (jaEnviados.includes(limite)) return;
+  await ref.update({ 'experiencia.alertasEnviados': [...jaEnviados, limite] });
+  rhCache.invalidar();
+}
+
 // aniversariantes: so compara mes/dia (sem janela de tolerancia, ao
 // contrario do niver do Parque) - recebe a lista ja carregada pelo chamador
 // pra nao repetir leitura do Firestore
@@ -263,10 +382,11 @@ function aniversariantesHoje(lista, dataRef) {
 }
 
 module.exports = {
-  DIAS_TESTE_ALERTA, TIPOS_CADASTRO,
+  DIAS_TESTE_ALERTA, TIPOS_CADASTRO, ALERTA_EXPERIENCIA_DIAS,
   criar, listAll, listByUnidades, getOne, atualizar, remover,
   registrarDecisaoTeste, verificarTestesVencidos, marcarAlertaTesteEnviado,
   registrarAtestado, registrarRetornoAtestado,
-  diasDesde, aniversariantesHoje,
+  registrarDecisaoExperiencia, verificarAlertasExperiencia, marcarAlertaExperienciaEnviado,
+  diasDesde, diasRestantesAte, aniversariantesHoje,
   invalidar: () => rhCache.invalidar(),
 };
