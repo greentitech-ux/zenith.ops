@@ -434,6 +434,27 @@
   </div>
 </div>
 
+<!-- Master: editar horario ou excluir um check-in lancado errado -->
+<div class="overlay hidden" id="overlay-editar-checkin">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharEditarCheckin()">✕</span>
+    <div class="sheet">
+      <h3>✏️ Editar check-in</h3>
+      <div class="sub" id="cked-sub"></div>
+      <label>Data</label>
+      <input type="date" id="cked-data">
+      <label>Hora de entrada</label>
+      <input type="time" id="cked-hora-entrada">
+      <div id="cked-saida-wrap" class="hidden">
+        <label>Hora de saída</label>
+        <input type="time" id="cked-hora-saida">
+      </div>
+      <div class="msg hidden" id="msg-editar-checkin"></div>
+      <button class="btn-primary" type="button" onclick="salvarEditarCheckin()">Salvar</button>
+    </div>
+  </div>
+</div>
+
 <!-- registrar atestado -->
 <div class="overlay hidden" id="overlay-atestado">
   <div class="sheet-wrap">
@@ -573,6 +594,8 @@ let EDITANDO_ID = null;
 let DECIDINDO_ID = null;
 let DECIDINDO_EXPERIENCIA_ID = null;
 let AJUSTANDO_EXPERIENCIA_ID = null;
+let EDITANDO_CHECKIN_ID = null;
+let CHECKINS_CACHE = new Map(); // id -> registro, populado em carregarCheckins() - usado pra abrir o editor sem re-fetch
 let ATESTANDO_ID = null;
 let ADVERTINDO_ID = null;
 let ADVERTENCIA_ABERTA_ID = null;
@@ -802,6 +825,13 @@ async function carregarCheckins(){
   ]);
   const unidadeF = document.getElementById('ck-filtro-unidade').value;
 
+  CHECKINS_CACHE = new Map();
+  [...abertos, ...historico].forEach(c=>CHECKINS_CACHE.set(c.id, c));
+
+  const acoesMaster = (c) => IS_MASTER ? `
+      <button type="button" class="link-btn" onclick="abrirEditarCheckin('${c.id}')">✏️ editar</button>
+      <button type="button" class="link-btn" style="color:var(--bad);" onclick="excluirCheckin('${c.id}')">🗑️ excluir</button>` : '';
+
   const elAbertos = document.getElementById('lista-checkins-abertos');
   const abertosFiltrados = unidadeF ? abertos.filter(c=>c.unidade===unidadeF) : abertos;
   const linkLocalizacao = (loc, rotulo) => (IS_MASTER && loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng))
@@ -811,7 +841,7 @@ async function carregarCheckins(){
     <div class="card">
       <div class="linha1"><span>${escapeHtml(c.funcionarioNome)}</span><span class="badge ok">na loja</span></div>
       <div class="sub">${escapeHtml(UNIDADES_NOMES[c.unidade]||c.unidade)} · entrou às ${fmtHora(c.entrada.horario)}</div>
-      <div class="acoes">${linkLocalizacao(c.entrada?.localizacao, 'entrada')}</div>
+      <div class="acoes">${linkLocalizacao(c.entrada?.localizacao, 'entrada')}${acoesMaster(c)}</div>
     </div>`).join('') : '<div class="empty">ninguém na loja agora.</div>';
 
   const elHist = document.getElementById('lista-checkins-historico');
@@ -823,9 +853,54 @@ async function carregarCheckins(){
     return `<div class="card">
       <div class="linha1"><span>${escapeHtml(c.funcionarioNome)}</span>${c.status==='aberto'?'<span class="badge ok">na loja</span>':'<span class="badge muted">encerrado</span>'}</div>
       <div class="sub">${escapeHtml(UNIDADES_NOMES[c.unidade]||c.unidade)} · entrada ${fmtHora(c.entrada.horario)}${c.saida?' · saída '+fmtHora(c.saida.horario):''}</div>
-      <div class="acoes">${fotoEntrada}${fotoSaida}${linkLocalizacao(c.entrada?.localizacao, 'entrada')}${linkLocalizacao(c.saida?.localizacao, 'saída')}</div>
+      <div class="acoes">${fotoEntrada}${fotoSaida}${linkLocalizacao(c.entrada?.localizacao, 'entrada')}${linkLocalizacao(c.saida?.localizacao, 'saída')}${acoesMaster(c)}</div>
     </div>`;
   }).join('') : '<div class="empty">nenhum check-in nesse dia.</div>';
+}
+
+function abrirEditarCheckin(id){
+  const c = CHECKINS_CACHE.get(id);
+  if(!c) return;
+  EDITANDO_CHECKIN_ID = id;
+  document.getElementById('cked-sub').textContent = `${c.funcionarioNome} · ${UNIDADES_NOMES[c.unidade]||c.unidade}`;
+  document.getElementById('cked-data').value = c.data || hojeBrasilia();
+  document.getElementById('cked-hora-entrada').value = fmtHora(c.entrada.horario);
+  const temSaida = !!(c.saida && c.saida.horario);
+  document.getElementById('cked-saida-wrap').classList.toggle('hidden', !temSaida);
+  if(temSaida) document.getElementById('cked-hora-saida').value = fmtHora(c.saida.horario);
+  document.getElementById('msg-editar-checkin').classList.add('hidden');
+  document.getElementById('overlay-editar-checkin').classList.remove('hidden');
+}
+function fecharEditarCheckin(){ document.getElementById('overlay-editar-checkin').classList.add('hidden'); EDITANDO_CHECKIN_ID=null; }
+async function salvarEditarCheckin(){
+  const msg = document.getElementById('msg-editar-checkin');
+  try{
+    const c = CHECKINS_CACHE.get(EDITANDO_CHECKIN_ID);
+    const temSaida = !!(c && c.saida && c.saida.horario);
+    const body = {
+      entradaData: document.getElementById('cked-data').value,
+      entradaHora: document.getElementById('cked-hora-entrada').value,
+    };
+    if(temSaida){
+      body.saidaData = document.getElementById('cked-data').value;
+      body.saidaHora = document.getElementById('cked-hora-saida').value;
+    }
+    const resp = await fetch(`/api/rh/checkins/${EDITANDO_CHECKIN_ID}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
+    fecharEditarCheckin();
+    await carregarCheckins();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+}
+async function excluirCheckin(id){
+  const c = CHECKINS_CACHE.get(id);
+  if(!confirm(`Excluir o check-in de ${c ? c.funcionarioNome : 'essa pessoa'}? Essa ação não pode ser desfeita.`)) return;
+  const resp = await fetch(`/api/rh/checkins/${id}`, { method:'DELETE' });
+  const data = await resp.json();
+  if(!resp.ok){ alert(data.error || 'Erro ao excluir.'); return; }
+  await carregarCheckins();
 }
 
 function fmtDataHora(iso){ if(!iso) return '—'; return new Date(iso).toLocaleString('pt-BR', { timeZone: FUSO_BR, day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }); }
