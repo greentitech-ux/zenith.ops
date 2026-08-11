@@ -884,6 +884,16 @@ async function cardRH(){
   const exp60 = emExperiencia.filter(f=>f.experiencia.etapa==='60');
   const exp30Venc = exp30.filter(f=>diasRestantesRH(f.experiencia.prazoEtapaAte)<0).length;
   const exp60Venc = exp60.filter(f=>diasRestantesRH(f.experiencia.prazoEtapaAte)<0).length;
+  // "proximo vencimento" - menor numero de dias restantes entre quem ainda
+  // nao venceu (restantes>=0) nessa etapa; '—' quando ninguem tem prazo em
+  // aberto (etapa vazia ou todo mundo ja vencido)
+  const proximoVenc = (lista)=>{
+    const restantes = lista.map(f=>diasRestantesRH(f.experiencia.prazoEtapaAte)).filter(d=>d!=null && d>=0);
+    return restantes.length ? Math.min(...restantes) : null;
+  };
+  const proxVenc30 = proximoVenc(exp30);
+  const proxVenc60 = proximoVenc(exp60);
+  const fmtProx = (dias)=> dias==null ? '—' : (dias===0 ? 'hoje' : `${dias}d`);
   return pcardWrap('🧑‍💼','RH','/rh.html', `
     <div class="pstats">
       ${statRow('Ativos', ativos.length)}
@@ -893,9 +903,11 @@ async function cardRH(){
       ${statRow('Em atestado', emAtestado, emAtestado?'bad':'')}
       ${statRow('Aniversariantes hoje', aniverHoje, aniverHoje?'ok':'')}
       ${statRow('Exp. 30', exp30.length, exp30.length?'warn':'')}
-      ${statRow('Venc. (30 dias)', exp30Venc, exp30Venc?'bad':'')}
       ${statRow('Exp. 60 (total 90)', exp60.length, exp60.length?'warn':'')}
-      ${statRow('Vencido (60 dias)', exp60Venc, exp60Venc?'bad':'')}
+      ${statRow('Próx. venc. (30 dias)', fmtProx(proxVenc30), proxVenc30!=null&&proxVenc30<=2?'bad':(proxVenc30!=null&&proxVenc30<=5?'warn':''))}
+      ${statRow('Venc. (30 dias)', exp30Venc, exp30Venc?'bad':'')}
+      ${statRow('Próx. venc. (60 dias)', fmtProx(proxVenc60), proxVenc60!=null&&proxVenc60<=2?'bad':(proxVenc60!=null&&proxVenc60<=5?'warn':''))}
+      ${statRow('Venc. (60 dias)', exp60Venc, exp60Venc?'bad':'')}
     </div>
   `);
 }
