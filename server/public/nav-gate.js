@@ -1,10 +1,17 @@
 // nav-gate.js
-// Esconde do menu hamburguer o que o acesso NAO tem permissao de usar.
-// Master e Admin veem tudo; os demais so veem os links das secoes que
-// receberam na tela de Usuarios (+ Painel, Ajuda e Sair, que sao de todos).
-// Roda em toda pagina que tem o nav-drawer (incluido junto de
-// notif-central.js). So ESCONDE - nunca mostra: links master-only que a
-// propria pagina ja esconde (Usuarios, Grupos...) continuam como estao.
+// Fonte UNICA da verdade de visibilidade dos links de secao no menu
+// hamburguer (tudo que esta em REGRAS abaixo) - tanto pra MOSTRAR quanto
+// pra ESCONDER, pra Master/Admin (veem tudo) e pra todo mundo (secoes da
+// tela de Usuarios). Antes disso o script so ESCONDIA (assumia que cada
+// pagina ja tinha "mostrado" tudo no proprio boot(), e pulava de vez pra
+// Master/Admin) - um item novo esquecido em algum boot() ficava invisivel
+// pra sempre naquela pagina, mesmo pra quem tinha acesso (bug real: link
+// do RH so aparecia depois de passar pelo Painel, a unica pagina que
+// lembrou de mostra-lo). Agora todo id de REGRAS e decidido só por aqui,
+// nas duas direcoes, entao nenhuma pagina precisa mais tratar isso no
+// proprio boot() - so os links MASTER-ONLY (Usuarios, Grupos...), que nao
+// dependem de secao e continuam geridos por cada pagina.
+// Links fora de REGRAS (Painel, Ajuda, Sair, master-only) nao sao tocados.
 // Os cabecalhos de grupo do menu somem sozinhos quando todos os itens
 // ficam escondidos (ver initNavDrawerAccordion nas paginas).
 (function () {
@@ -43,12 +50,14 @@
   };
 
   function aplicar(me) {
-    if (!me || me.role === 'master' || me.isAdmin) return; // gestao ve tudo
+    if (!me) return;
+    const isGestao = me.role === 'master' || !!me.isAdmin; // gestao ve tudo que esta em REGRAS
     const secoes = (me.permissions && me.permissions.sections) || [];
     for (const [id, exigidas] of Object.entries(REGRAS)) {
       const el = document.getElementById(id);
       if (!el) continue;
-      if (!exigidas.some((s) => secoes.includes(s))) el.classList.add('hidden');
+      const liberado = isGestao || !exigidas || exigidas.some((s) => secoes.includes(s));
+      el.classList.toggle('hidden', !liberado);
     }
   }
 
