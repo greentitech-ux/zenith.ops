@@ -3252,12 +3252,12 @@ app.put('/api/festas/tabela', auth.requireMaster, async (req, res) => {
 
 app.post('/api/festas', requireSection('festas'), async (req, res) => {
   try {
-    const { unidade, cliente, dataVenda, dataDeUso, horaInicio, horaFim, missao, horas, saltonautas, valorTotal, sinal, restante, observacao, referenciaVendaOriginal } = req.body;
+    const { unidade, cliente, dataVenda, dataDeUso, horaInicio, horaFim, missao, horas, saltonautas, valorTotal, desconto, sinal, restante, observacao, referenciaVendaOriginal } = req.body;
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
     const registro = await festas.criar({
-      unidade, cliente, dataVenda, dataDeUso, horaInicio, horaFim, missao, horas, saltonautas, valorTotal, sinal, restante, observacao, referenciaVendaOriginal,
+      unidade, cliente, dataVenda, dataDeUso, horaInicio, horaFim, missao, horas, saltonautas, valorTotal, desconto, sinal, restante, observacao, referenciaVendaOriginal,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
     });
     broadcast('festa-criada', registro, 'festas');
