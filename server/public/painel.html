@@ -851,7 +851,10 @@ async function cardParque(){
 // conta usada em rh.html (ver rh.diasDesde/aniversariantesHoje no backend,
 // replicada aqui em JS puro pra nao precisar de rota extra)
 async function cardRH(){
-  const lista = await fetch('/api/rh/funcionarios').then(r=>r.json()).catch(()=>[]);
+  const [lista, abertos] = await Promise.all([
+    fetch('/api/rh/funcionarios').then(r=>r.json()).catch(()=>[]),
+    fetch('/api/rh/checkins/abertos').then(r=>r.ok?r.json():[]).catch(()=>[]),
+  ]);
   const hoje = hojeBrasilia();
   const diasDesdeRH = (dataIso)=>{
     if(!dataIso) return 0;
@@ -873,6 +876,7 @@ async function cardRH(){
   return pcardWrap('🧑‍💼','RH','/rh.html', `
     <div class="pstats">
       ${statRow('Ativos', ativos.length)}
+      ${statRow('Na loja agora', abertos.length, abertos.length?'ok':'')}
       ${statRow('Em teste', emTeste.length, emTeste.length?'warn':'')}
       ${statRow('Decisão pendente (5+ dias)', testeVencido, testeVencido?'bad':'')}
       ${statRow('Em atestado', emAtestado, emAtestado?'bad':'')}

@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Check-in RH · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 40px;max-width:520px;margin-inline:auto;}
+  h1{font-size:16px;font-weight:700;margin:0;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+  header{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--line);}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  .hidden{display:none!important;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;}
+  label{display:block;font-size:11.5px;color:var(--muted);margin:0 0 6px;font-family:var(--mono);}
+  select,input{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:12px;font-size:15px;font-family:var(--sans);}
+  select:focus,input:focus{outline:none;border-color:var(--accent);}
+  .busca{margin-bottom:12px;}
+  .lista-pessoas{display:flex;flex-direction:column;gap:8px;max-height:52vh;overflow-y:auto;}
+  .pessoa-btn{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;text-align:left;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:14px;font-size:15px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+  .pessoa-btn:hover{border-color:var(--accent);}
+  .pessoa-btn .sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);font-weight:400;margin-top:2px;}
+  .badge{font-family:var(--mono);font-size:10px;padding:3px 9px;border-radius:20px;white-space:nowrap;flex:none;}
+  .badge.aberto{background:var(--ok-dim);color:var(--ok);}
+  .badge.fechado{background:var(--panel2);color:var(--muted);border:1px solid var(--line);}
+  .confirma{text-align:center;padding:10px 4px;}
+  .confirma h2{font-size:19px;margin:0 0 4px;}
+  .confirma .sub{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-bottom:20px;}
+  .btn-acao{width:100%;padding:20px;border-radius:12px;border:none;font-size:17px;font-weight:700;cursor:pointer;font-family:var(--sans);margin-bottom:10px;}
+  .btn-acao.entrada{background:var(--accent);color:#06202b;}
+  .btn-acao.saida{background:var(--warn);color:#241a00;}
+  .btn-acao:disabled{opacity:.5;cursor:default;}
+  .btn-cancelar{width:100%;background:none;border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:12px;font-size:13px;cursor:pointer;font-family:var(--sans);}
+  .sucesso{text-align:center;padding:30px 10px;}
+  .sucesso .icone{font-size:44px;margin-bottom:10px;}
+  .sucesso h2{font-size:18px;margin:0 0 6px;}
+  .sucesso p{font-size:13px;color:var(--muted);margin:0;}
+  .msg{margin-top:12px;font-size:12.5px;padding:10px 12px;border-radius:8px;word-break:break-word;text-align:left;}
+  .msg.err{background:var(--bad-dim);color:var(--bad);}
+  .empty{padding:24px 10px;text-align:center;color:var(--muted);font-size:13px;}
+  .secao-titulo{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;}
+  .aberto-card{display:flex;justify-content:space-between;align-items:center;gap:8px;border-top:1px solid var(--line);padding:9px 0;font-size:13px;}
+  .aberto-card:first-child{border-top:none;padding-top:0;}
+  .aberto-card .hora{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="eyebrow">Zenith Ops · RH</div>
+    <h1>📸 Check-in</h1>
+  </div>
+  <div style="display:flex;gap:6px;">
+    <a class="back" href="/rh.html">← RH</a>
+    <button class="back" onclick="logout()">🚪 Sair</button>
+  </div>
+</header>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso ao RH. Fale com o administrador (Master).</div>
+
+<div id="root" class="hidden">
+
+<div class="panel hidden" id="painel-unidade">
+  <label>Unidade deste dispositivo</label>
+  <select id="sel-unidade" onchange="trocarUnidade()"></select>
+</div>
+
+<!-- tela 1: busca/lista de pessoas -->
+<div class="panel" id="tela-lista">
+  <input type="text" class="busca" id="busca" placeholder="🔎 Buscar pelo nome..." oninput="renderLista()">
+  <div class="lista-pessoas" id="lista-pessoas"></div>
+</div>
+
+<!-- tela 2: confirmar entrada/saida -->
+<div class="panel hidden" id="tela-confirma">
+  <div class="confirma">
+    <h2 id="cf-nome"></h2>
+    <div class="sub" id="cf-sub"></div>
+    <button type="button" class="btn-acao" id="cf-btn-acao" onclick="tirarFotoEEnviar()"></button>
+    <button type="button" class="btn-cancelar" onclick="voltarLista()">Cancelar</button>
+    <div class="msg err hidden" id="cf-msg"></div>
+  </div>
+</div>
+
+<!-- tela 3: sucesso -->
+<div class="panel hidden" id="tela-sucesso">
+  <div class="sucesso">
+    <div class="icone" id="suc-icone">✅</div>
+    <h2 id="suc-titulo"></h2>
+    <p id="suc-texto"></p>
+  </div>
+</div>
+
+<div class="panel" id="painel-abertos">
+  <div class="secao-titulo">🟢 Na loja agora</div>
+  <div id="lista-abertos"></div>
+</div>
+
+<input type="file" id="input-foto" accept="image/*" capture="user" class="hidden">
+
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+
+// mesma lista de lojas ja usada em rh.html/central.html/lancamento.html
+const UNIDADES_NOMES = {
+  "Domino's Carrinho Aeroporto Recife": 'Dom Car Aero Recife',
+  'Dominos Bessa': 'Dom Bessa',
+  'Dominos Campina Grande': 'Dom Campina Grande',
+  'Dominos Caruaru': 'Dom Caruaru',
+  'Dominos Garanhuns': 'Dom Garanhuns',
+  'Dominos Natal': 'Dom Natal',
+  'Dominos Praça Aeroporto Recife': 'Dom Praça Aero Recife',
+  'Dominos Tirol': 'Dom Tirol',
+  'Milky Moo Tirol': 'MilkyMoo Tirol',
+  'Spoleto Praça Aeroporto Recife': 'Spo Praça Aero Recife',
+  'Spoleto Shopping Recife': 'Spo Shop Recife',
+  'Spoleto Shopping Tacaruna': 'Spo Shop Tacaruna',
+  'São Braz IL': 'Sao Braz Ilha',
+};
+
+let ME = null;
+let UNIDADES_PERMITIDAS = [];
+let UNIDADE_ATUAL = null;
+let FUNCIONARIOS = [];
+let ABERTOS = [];
+let SELECIONADO = null; // funcionario escolhido na tela 1
+let CHECKIN_ABERTO_SELECIONADO = null; // se ja tem check-in aberto, vira check-out
+
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtHora(iso){ if(!iso) return ''; return new Date(iso).toLocaleTimeString('pt-BR', { timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit' }); }
+
+function mostrarTela(nome){
+  ['lista','confirma','sucesso'].forEach(t=>{
+    document.getElementById('tela-'+t).classList.toggle('hidden', t!==nome);
+  });
+}
+
+function renderLista(){
+  const termo = document.getElementById('busca').value.trim().toLowerCase();
+  const lista = FUNCIONARIOS
+    .filter(f=>f.unidade===UNIDADE_ATUAL && f.status==='ativo')
+    .filter(f=>!termo || f.nome.toLowerCase().includes(termo))
+    .sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR',{sensitivity:'base'}));
+  const el = document.getElementById('lista-pessoas');
+  if(!lista.length){
+    el.innerHTML = '<div class="empty">nenhum funcionário ativo encontrado nessa unidade.</div>';
+    return;
+  }
+  el.innerHTML = lista.map(f=>{
+    const aberto = ABERTOS.find(c=>c.funcionarioId===f.id);
+    return `<button type="button" class="pessoa-btn" onclick="selecionarPessoa('${f.id}')">
+      <span>${escapeHtml(f.nome)}${f.cargoFuncao?`<div class="sub">${escapeHtml(f.cargoFuncao)}</div>`:''}</span>
+      <span class="badge ${aberto?'aberto':'fechado'}">${aberto?'na loja':'fora'}</span>
+    </button>`;
+  }).join('');
+}
+
+function renderAbertos(){
+  const daUnidade = ABERTOS.filter(c=>c.unidade===UNIDADE_ATUAL);
+  const el = document.getElementById('lista-abertos');
+  el.innerHTML = daUnidade.length
+    ? daUnidade.map(c=>`<div class="aberto-card"><span>${escapeHtml(c.funcionarioNome)}</span><span class="hora">entrou ${fmtHora(c.entrada.horario)}</span></div>`).join('')
+    : '<div class="empty">ninguém na loja agora.</div>';
+}
+
+function selecionarPessoa(id){
+  SELECIONADO = FUNCIONARIOS.find(f=>f.id===id);
+  if(!SELECIONADO) return;
+  CHECKIN_ABERTO_SELECIONADO = ABERTOS.find(c=>c.funcionarioId===id) || null;
+  document.getElementById('cf-msg').classList.add('hidden');
+  document.getElementById('cf-nome').textContent = SELECIONADO.nome;
+  const btn = document.getElementById('cf-btn-acao');
+  if(CHECKIN_ABERTO_SELECIONADO){
+    document.getElementById('cf-sub').textContent = `entrou às ${fmtHora(CHECKIN_ABERTO_SELECIONADO.entrada.horario)} - registrar saída agora?`;
+    btn.textContent = '🚪 Fazer check-out';
+    btn.className = 'btn-acao saida';
+  }else{
+    document.getElementById('cf-sub').textContent = 'registrar entrada agora?';
+    btn.textContent = '✅ Fazer check-in';
+    btn.className = 'btn-acao entrada';
+  }
+  mostrarTela('confirma');
+}
+
+function voltarLista(){
+  SELECIONADO = null;
+  CHECKIN_ABERTO_SELECIONADO = null;
+  document.getElementById('busca').value = '';
+  mostrarTela('lista');
+  renderLista();
+}
+
+function tirarFotoEEnviar(){
+  const input = document.getElementById('input-foto');
+  input.value = '';
+  input.onchange = () => {
+    if(input.files[0]) enviarRegistro(input.files[0]);
+  };
+  input.click();
+}
+
+async function enviarRegistro(foto){
+  const btn = document.getElementById('cf-btn-acao');
+  const msg = document.getElementById('cf-msg');
+  msg.classList.add('hidden');
+  btn.disabled = true;
+  try{
+    const fd = new FormData();
+    fd.append('foto', foto);
+    let resp, ehEntrada;
+    if(CHECKIN_ABERTO_SELECIONADO){
+      ehEntrada = false;
+      resp = await fetch(`/api/rh/checkins/${CHECKIN_ABERTO_SELECIONADO.id}/saida`, { method:'POST', body: fd });
+    }else{
+      ehEntrada = true;
+      fd.append('funcionarioId', SELECIONADO.id);
+      resp = await fetch('/api/rh/checkins', { method:'POST', body: fd });
+    }
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao registrar.');
+    document.getElementById('suc-icone').textContent = ehEntrada ? '✅' : '🚪';
+    document.getElementById('suc-titulo').textContent = ehEntrada ? 'Check-in registrado!' : 'Check-out registrado!';
+    document.getElementById('suc-texto').textContent = `${SELECIONADO.nome} · ${fmtHora(new Date().toISOString())}`;
+    mostrarTela('sucesso');
+    await carregarAbertos();
+    setTimeout(()=>{ voltarLista(); }, 2500);
+  }catch(err){
+    msg.textContent = err.message; msg.classList.remove('hidden');
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+function trocarUnidade(){
+  UNIDADE_ATUAL = document.getElementById('sel-unidade').value;
+  localStorage.setItem('rhCheckinUnidade', UNIDADE_ATUAL);
+  voltarLista();
+  renderAbertos();
+}
+
+async function carregarFuncionarios(){
+  FUNCIONARIOS = await fetch('/api/rh/funcionarios').then(r=>r.ok?r.json():[]).catch(()=>[]);
+}
+async function carregarAbertos(){
+  ABERTOS = await fetch('/api/rh/checkins/abertos').then(r=>r.ok?r.json():[]).catch(()=>[]);
+  renderAbertos();
+  if(document.getElementById('tela-lista').classList.contains('hidden')===false) renderLista();
+}
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  ME = await res.json();
+  const isMaster = ME.role==='master';
+  const temAcesso = isMaster || ME.isAdmin || (ME.permissions?.sections||[]).includes('rh');
+  if(!temAcesso){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+
+  UNIDADES_PERMITIDAS = (isMaster || ME.isAdmin || ME.podeRhTodasUnidades)
+    ? Object.keys(UNIDADES_NOMES)
+    : (ME.permissions?.unidades||[]).filter(u=>UNIDADES_NOMES[u]);
+
+  if(!UNIDADES_PERMITIDAS.length){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    document.getElementById('sem-acesso').textContent = 'Nenhuma unidade liberada pra check-in.';
+    return;
+  }
+
+  const salvo = localStorage.getItem('rhCheckinUnidade');
+  UNIDADE_ATUAL = UNIDADES_PERMITIDAS.includes(salvo) ? salvo : UNIDADES_PERMITIDAS[0];
+
+  if(UNIDADES_PERMITIDAS.length > 1){
+    document.getElementById('painel-unidade').classList.remove('hidden');
+    document.getElementById('sel-unidade').innerHTML = UNIDADES_PERMITIDAS
+      .map(u=>`<option value="${escapeHtml(u)}" ${u===UNIDADE_ATUAL?'selected':''}>${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('');
+  }
+
+  document.getElementById('root').classList.remove('hidden');
+  await carregarFuncionarios();
+  await carregarAbertos();
+  renderLista();
+
+  // atualiza sozinho a cada 30s - kiosk fica aberto o dia todo, sem alguem
+  // dando refresh manual
+  setInterval(async ()=>{
+    if(document.getElementById('tela-lista').classList.contains('hidden')) return; // nao atualiza no meio de uma acao
+    await carregarFuncionarios();
+    await carregarAbertos();
+    renderLista();
+  }, 30000);
+}
+
+boot();
+</script>
+</body>
+</html>
