@@ -275,6 +275,7 @@
         <option value="pix">Pix</option>
         <option value="debito">Cartão de débito</option>
         <option value="credito">Cartão de crédito</option>
+        <option value="voucher">Voucher</option>
         <option value="cortesia">Cortesia (não cobra)</option>
       </select>
       <label>Observação</label>
@@ -318,6 +319,7 @@
           <option value="pix">Pix</option>
           <option value="debito">Cartão de débito</option>
           <option value="credito">Cartão de crédito</option>
+          <option value="voucher">Voucher</option>
           <option value="cortesia">Cortesia (não cobra)</option>
         </select>
         <label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);margin-top:12px;">
@@ -928,7 +930,7 @@ function valorDoCheckin(c){
   return valorPorTempo(c.tempoMinutos) * ((c.criancas||[]).length || c.pulseiras || 0);
 }
 function fmtReal(v){ return 'R$ ' + Number(v||0).toFixed(2).replace('.', ','); }
-const METODOS_LABEL = { dinheiro:'Dinheiro', pix:'Pix', debito:'Débito', credito:'Crédito', cortesia:'Cortesia' };
+const METODOS_LABEL = { dinheiro:'Dinheiro', pix:'Pix', debito:'Débito', credito:'Crédito', voucher:'Voucher', gratuidade:'Gratuidade', cortesia:'Cortesia' };
 
 // financeiro e assunto de gestao: Master/Admin e Gerente da unidade
 function podeVerFinanceiro(){
