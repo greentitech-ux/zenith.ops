@@ -18,9 +18,9 @@
 // - Experiencia formal (CLT): todo mundo que vira efetivado (direto ou
 //   promovido do teste de 5 dias) entra automaticamente numa 1a etapa de 30
 //   dias; ao vencer, decide se renova por mais 60 (total 90) ou efetiva/
-//   desliga direto. Alerta escalonado em D-5/D-3/D-2/D-0 (ver
+//   desliga direto. Alerta escalonado em D-5/D-3/D-2/D-1 (ver
 //   verificarAlertasExperiencia, chamado por job periodico em index.js) -
-//   D-0 tambem avisa o gerente da unidade, nao so RH/Master.
+//   D-1 tambem avisa o gerente da unidade, nao so RH/Master.
 // - Ficha de Funcionarios Ativos + Aniversariante do Dia (calculado sobre a
 //   mesma ficha, sem colecao propria).
 const db = require('./firestore');
@@ -40,9 +40,11 @@ const DIAS_TESTE_ALERTA = 5;
 const DIAS_EXPERIENCIA = { 30: 30, 60: 60 };
 const DECISOES_EXPERIENCIA_30 = ['renovar', 'efetivar', 'desligar'];
 const DECISOES_EXPERIENCIA_60 = ['efetivar', 'desligar'];
-// avisos escalonados conforme pedido do usuario: 5, 3, 2 dias antes e no
-// dia do vencimento (0) - so no 0 o gerente da unidade tambem e avisado
-const ALERTA_EXPERIENCIA_DIAS = [5, 3, 2, 0];
+// avisos escalonados conforme pedido do usuario: 5, 3, 2 e 1 dia antes do
+// vencimento - no ultimo (1) o gerente da unidade tambem e avisado, alem
+// de RH/Admin/Master; o dia do proprio vencimento (0) fica so como o prazo
+// em que a decisao e cobrada, sem alerta novo nele
+const ALERTA_EXPERIENCIA_DIAS = [5, 3, 2, 1];
 
 function limpar(v, max) {
   return String(v || '').trim().slice(0, max);
@@ -405,7 +407,7 @@ function diasRestantesAte(dataIso) {
 }
 
 // quem esta numa etapa de experiencia (30 ou 60 dias) com algum limite de
-// aviso (5/3/2/0 dias antes do prazo) ja vencido e ainda nao notificado -
+// aviso (5/3/2/1 dias antes do prazo) ja vencido e ainda nao notificado -
 // pode retornar mais de 1 pendencia por pessoa se o job ficou parado (ex:
 // servidor fora do ar) e mais de 1 limite foi ultrapassado de uma vez
 async function verificarAlertasExperiencia() {
