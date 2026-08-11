@@ -61,6 +61,7 @@ const relatorioMV = require('./relatorioMV');
 const rh = require('./rh');
 const rhCheckin = require('./rhCheckin');
 const rhAdvertencias = require('./rhAdvertencias');
+const unidadesExtras = require('./unidades');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -1266,6 +1267,9 @@ async function construirUnidadesMapa() {
   (await fechamentosLive.listAll()).forEach((f) => { if (f.unidade) mapa[f.unidade] = f.unidadeNome || mapa[f.unidade] || f.unidade; });
   entregasHistoricoData.forEach((e) => { if (e.unidade) mapa[e.unidade] = e.unidadeNome || mapa[e.unidade] || e.unidade; });
   (await entregasLive.listAll()).forEach((e) => { if (e.unidade) mapa[e.unidade] = e.unidadeNome || mapa[e.unidade] || e.unidade; });
+  // unidades cadastradas pelo Master em runtime (unidades.js) - loja nova ou
+  // unidade administrativa que ainda nao existe em nenhuma lista fixa
+  Object.entries(await unidadesExtras.mapa().catch(() => ({}))).forEach(([codigo, nome]) => { mapa[codigo] = mapa[codigo] || nome; });
   // ultimo passo, sempre - reaplica os mapas fixos por cima de tudo, pra
   // garantir o nome unificado mesmo se algum dado importado/lançado tenha
   // gravado um unidadeNome diferente (cru, com typo, ou desatualizado)
@@ -1287,15 +1291,72 @@ app.get('/api/admin/storage-diagnostico', auth.requireMaster, async (req, res) =
 
 app.get('/api/meta/unidades', auth.requireMaster, async (req, res) => {
   const mapa = await construirUnidadesMapa();
+  // as cadastradas em runtime ganham classificacao propria no checklist -
+  // classificarUnidade so conhece as listas fixas e jogaria elas em "Outras"
+  const codigosExtras = new Set((await unidadesExtras.listAll().catch(() => [])).map((u) => u.codigo));
   const SECAO_ORDEM = ['Fechamento', 'Entregas', 'Monitor / Disputas (Adyen)', 'iFood'];
   const lista = Object.entries(mapa)
-    .map(([codigo, nome]) => ({ codigo, nome, ...classificarUnidade(codigo) }))
+    .map(([codigo, nome]) => ({
+      codigo, nome,
+      ...(codigosExtras.has(codigo) ? { secao: 'Fechamento', grupo: 'Cadastradas no sistema' } : classificarUnidade(codigo)),
+    }))
     .sort((a, b) =>
       (SECAO_ORDEM.indexOf(a.secao) - SECAO_ORDEM.indexOf(b.secao)) ||
       String(a.grupo).localeCompare(String(b.grupo), 'pt-BR') ||
       a.nome.localeCompare(b.nome, 'pt-BR')
     );
   res.json(lista);
+});
+
+// ---------- unidades cadastradas pelo Master (unidades.js) ----------
+// mapa {codigo: nome} pra QUALQUER usuario logado - as paginas (RH, Central,
+// Lançamento...) mesclam isso por cima do UNIDADES_NOMES fixo delas no boot,
+// entao uma unidade nova cadastrada aqui aparece nos seletores sem deploy
+app.get('/api/meta/unidades-extras', async (req, res) => {
+  res.json(await unidadesExtras.mapa().catch(() => ({})));
+});
+
+// lista completa (com id/criadoPor) pra tela de gestao - so Master
+app.get('/api/meta/unidades-extras/lista', auth.requireMaster, async (req, res) => {
+  res.json(await unidadesExtras.listAll());
+});
+
+// codigos que ja existem nas listas fixas - um cadastro novo nao pode
+// reutiliza-los (duas fontes de verdade pro mesmo codigo)
+function codigosUnidadesFixas() {
+  return new Set([
+    ...Object.keys(FECHAMENTO_UNIDADES_NOMES),
+    ...Object.keys(ENTREGAS_UNIDADES_NOMES),
+    ...Object.keys(UNIDADES_APELIDOS),
+    ...Object.keys(ifoodClient.IFOOD_UNIDADES_NOMES),
+  ]);
+}
+
+app.post('/api/meta/unidades-extras', auth.requireMaster, async (req, res) => {
+  try {
+    const registro = await unidadesExtras.criar({
+      codigo: req.body.codigo, nome: req.body.nome, porEmail: req.user.email,
+    }, codigosUnidadesFixas());
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await unidadesExtras.atualizar(req.params.id, { nome: req.body.nome }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await unidadesExtras.remover(req.params.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // ---------- registros de disputa/monitoramento (secao "disputas") ----------
@@ -2206,7 +2267,9 @@ async function fechamentosFiltrados(req) {
 // fato preenchidos) - usado pelos dois formatos de relatorio abaixo
 async function montarRelatorioFechamentos(req) {
   const [fechamentos, listaGrupos] = await Promise.all([fechamentosFiltrados(req), grupos.list()]);
-  return fechamentosReport.prepararRelatorio(fechamentos, listaGrupos);
+  // colunas escondidas no seletor 🧩 Colunas da tela (fechamentos.html)
+  const ocultas = new Set(String(req.query.ocultas || '').split(',').filter(Boolean));
+  return fechamentosReport.prepararRelatorio(fechamentos, listaGrupos, ocultas);
 }
 
 // mesma agregacao por unidade do painel "Comparativo por unidade" da tela
@@ -3567,7 +3630,9 @@ app.get('/api/rh/checkins/:id/foto/:tipo', requireSection('rh'), async (req, res
 // Master) ve e decide; aprovar ja registra a entrada na hora
 app.get('/api/rh/checkins/pendentes-aprovacao', requireSection('rh'), async (req, res) => {
   if (!podeAprovarRh(req)) return res.json([]);
-  res.json(await rhCheckin.listPendentesAprovacao(null));
+  // sanitiza igual as outras rotas de check-in: localizacao so pro Master -
+  // Admin/RH-todas-unidades aprovam a pendencia, mas nao veem o GPS
+  res.json((await rhCheckin.listPendentesAprovacao(null)).map((c) => sanitizarCheckin(c, req.isMaster)));
 });
 
 app.post('/api/rh/checkins/pendentes-aprovacao/:id/aprovar', requireSection('rh'), async (req, res) => {

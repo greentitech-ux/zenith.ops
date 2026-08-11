@@ -69,15 +69,22 @@ function colunasExtrasUsadas(fechamentos, grupos, chave, prefixo) {
 }
 
 // monta colunas (na ordem da tela) + linhas ja com todos os valores
-// achatados por key - "grupos" e a lista de grupos.list() (pros labels)
-function prepararRelatorio(fechamentos, grupos) {
+// achatados por key - "grupos" e a lista de grupos.list() (pros labels).
+// "ocultas" (Set de keys, opcional) sao as colunas que o usuario escondeu
+// no seletor 🧩 Colunas de fechamentos.html (chegam via ?ocultas=) - mesmas
+// keys da tela, entao a escolha vale igual na tabela e no CSV/PDF;
+// Data/Unidade nunca saem (ancora de leitura do relatorio)
+function prepararRelatorio(fechamentos, grupos, ocultas) {
   const rows = [...fechamentos].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
   const fixasUsadas = CAMPOS_FIXOS
     .filter((c) => rows.some((f) => Math.abs(f[c.key] || 0) > 0.001))
     .map((c) => ({ ...c, moeda: true, largura: 58 }));
   const canais = colunasExtrasUsadas(rows, grupos, 'canaisVendaExtras', 'canal:');
   const formas = colunasExtrasUsadas(rows, grupos, 'formasPagamentoExtras', 'forma:');
-  const colunas = [...COLUNAS_BASE, ...fixasUsadas, ...canais, ...formas, COLUNA_OBSERVACAO];
+  let colunas = [...COLUNAS_BASE, ...fixasUsadas, ...canais, ...formas, COLUNA_OBSERVACAO];
+  if (ocultas && ocultas.size) {
+    colunas = colunas.filter((c) => c.key === 'data' || c.key === 'unidadeNome' || !ocultas.has(c.key));
+  }
 
   const linhas = rows.map((f) => {
     const linha = {

@@ -187,6 +187,22 @@
 
 <div id="root" class="hidden">
   <div class="panel">
+    <h2>🏪 Unidades cadastradas no sistema</h2>
+    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">Unidades novas (loja abrindo, escritório/administrativo...) que ainda não existem nas listas fixas. Depois de cadastrada aqui, a unidade aparece nos seletores do RH, Central, permissões de usuário e nas lojas dos grupos abaixo. O código é a identidade da unidade e não muda depois de criado - só o nome de exibição.</p>
+    <div id="unidades-extras-lista" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;"></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;">
+      <label style="flex:1;min-width:160px;font-size:11.5px;color:var(--muted);">Nome da unidade
+        <input type="text" id="ue-nome" placeholder="ex: Administrativa (Escritório)" style="width:100%;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;">
+      </label>
+      <label style="flex:1;min-width:160px;font-size:11.5px;color:var(--muted);">Código (opcional - padrão: o próprio nome)
+        <input type="text" id="ue-codigo" placeholder="ex: Administrativa" style="width:100%;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;">
+      </label>
+      <button type="button" class="primary" style="padding:8px 14px;" onclick="criarUnidadeExtra()">+ Cadastrar unidade</button>
+    </div>
+    <p class="err hidden" id="ue-err"></p>
+  </div>
+
+  <div class="panel">
     <h2 style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
       <span>Grupos cadastrados</span>
       <span style="display:flex;gap:4px;">
@@ -732,6 +748,60 @@ async function carregarGrupos(){
   atualizarDatalistsExtras();
 }
 
+// ---------- unidades cadastradas em runtime (unidades.js no backend) ----------
+async function carregarUnidadesExtras(){
+  const lista = await fetch('/api/meta/unidades-extras/lista').then(r=>r.json()).catch(()=>[]);
+  const el = document.getElementById('unidades-extras-lista');
+  el.innerHTML = lista.length ? lista.map(u=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:12.5px;">
+      <span style="flex:1;">${escapeHtml(u.nome)} <span style="color:var(--muted);font-size:11px;">· código: ${escapeHtml(u.codigo)}</span></span>
+      <button type="button" class="back" style="cursor:pointer;" onclick="renomearUnidadeExtra('${u.id}', '${escapeHtml(u.nome).replace(/'/g, '&#39;')}')">✏️ renomear</button>
+      <button type="button" class="back" style="cursor:pointer;color:var(--bad);" onclick="excluirUnidadeExtra('${u.id}', '${escapeHtml(u.nome).replace(/'/g, '&#39;')}')">🗑️</button>
+    </div>`).join('') :
+    '<span style="color:var(--muted);font-size:11.5px;">Nenhuma unidade cadastrada por aqui ainda - as fixas do sistema continuam valendo normalmente.</span>';
+}
+
+// recarrega tambem o checklist de lojas (a unidade nova precisa aparecer
+// nas opcoes de "Lojas desse grupo" imediatamente)
+async function recarregarUnidades(){
+  await carregarUnidadesExtras();
+  UNIDADES = await fetch('/api/meta/unidades').then(r=>r.json());
+  document.getElementById('c-unidades').innerHTML = unidadesChecksHtml('unidades', new Set());
+}
+
+async function criarUnidadeExtra(){
+  const err = document.getElementById('ue-err');
+  err.classList.add('hidden');
+  try{
+    const resp = await fetch('/api/meta/unidades-extras', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      nome: document.getElementById('ue-nome').value,
+      codigo: document.getElementById('ue-codigo').value,
+    })});
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao cadastrar.');
+    document.getElementById('ue-nome').value = '';
+    document.getElementById('ue-codigo').value = '';
+    await recarregarUnidades();
+  }catch(e){ err.textContent = e.message; err.classList.remove('hidden'); }
+}
+
+async function renomearUnidadeExtra(id, nomeAtual){
+  const nome = prompt('Novo nome da unidade:', nomeAtual);
+  if(!nome || nome===nomeAtual) return;
+  const resp = await fetch(`/api/meta/unidades-extras/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ nome }) });
+  const data = await resp.json();
+  if(!resp.ok){ alert(data.error || 'Erro ao renomear.'); return; }
+  await recarregarUnidades();
+}
+
+async function excluirUnidadeExtra(id, nome){
+  if(!confirm(`Excluir a unidade "${nome}"?\n\nCadastros já feitos com esse código (funcionários do RH, permissões...) continuam gravados - a unidade só some das opções de seleção.`)) return;
+  const resp = await fetch(`/api/meta/unidades-extras/${id}`, { method:'DELETE' });
+  const data = await resp.json();
+  if(!resp.ok){ alert(data.error || 'Erro ao excluir.'); return; }
+  await recarregarUnidades();
+}
+
 async function boot(){
   const meRes = await fetch('/api/me');
   if(!meRes.ok){ logout(); return; }
@@ -741,6 +811,7 @@ async function boot(){
 
   UNIDADES = await fetch('/api/meta/unidades').then(r=>r.json());
   document.getElementById('c-unidades').innerHTML = unidadesChecksHtml('unidades', new Set());
+  carregarUnidadesExtras();
 
   const todosUsuarios = await fetch('/api/users').then(r=>r.json());
   USUARIOS_MASTER_ADMIN = todosUsuarios.filter(u=>u.role==='master' || u.isAdmin);

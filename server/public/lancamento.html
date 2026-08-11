@@ -389,6 +389,12 @@ const BRAVO_UNIDADES_NOMES = {
 };
 const BRAVO_UNIDADES = Object.keys(BRAVO_UNIDADES_NOMES);
 const UNIDADES_NOMES = { ...ARCFOOD_UNIDADES, ...BRAVO_UNIDADES_NOMES };
+
+// unidades cadastradas pelo Master em /grupos.html (runtime) - mescladas por
+// cima da lista fixa acima, antes de montar qualquer seletor (ver boot)
+async function mesclarUnidadesExtras(){
+  try{ Object.assign(UNIDADES_NOMES, await (await fetch('/api/meta/unidades-extras')).json()); }catch(e){}
+}
 function grupoDaUnidade(u){ return ARCFOOD_UNIDADES[u] ? 'ARCFOOD' : 'BRAVO'; }
 
 const CAMPOS_NUMERICOS = ['caixaInicial','caixaFinal','delivery','carryout','pickup','loja','adyen','adyenPos','ifood','food99','pix','pixCnpj','outros','totalSaida','faturamento','totalDeclarado','quebra','tc','cancelados','entradaDinheiro','deposito'];
@@ -916,6 +922,7 @@ async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   ME = await res.json();
+  await mesclarUnidadesExtras();
   const isMaster = ME.role==='master';
   IS_MASTER = isMaster;
   const secoes = isMaster ? ['monitor','disputas','cofre','fechamentos','lancamento','sangria','entregas','entregas-lancamento','ifood','solicitacoes','tecnico','inventario','parque','parque-checkin','festas'] : (ME.permissions?.sections||[]);

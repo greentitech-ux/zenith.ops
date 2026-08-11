@@ -324,6 +324,7 @@
   <h2>
     <div class="title-group"><span>Fechamentos</span><span class="n" id="fechamentos-count"></span></div>
     <div style="display:flex;gap:8px;">
+      <button type="button" class="preset-btn" onclick="abrirSeletorColunas()" title="Escolher quais colunas aparecem na tabela e nos relatórios">🧩 Colunas</button>
       <button type="button" class="preset-btn" onclick="baixarRelatorioFechamentos('csv')">📄 Relatório CSV</button>
       <button type="button" class="preset-btn" onclick="baixarRelatorioFechamentos('pdf')">📄 Relatório PDF</button>
     </div>
@@ -353,6 +354,22 @@
 </div>
 
 </div><!-- /#root -->
+
+<!-- seletor de colunas da tabela de Fechamentos - a mesma escolha vale pros
+     relatorios CSV/PDF (vai por ?ocultas= pro backend) e fica salva neste
+     navegador (localStorage) -->
+<div class="fech-overlay hidden" id="colunas-overlay">
+  <div class="fech-modal" style="max-width:560px;">
+    <h3>🧩 Colunas da tabela e dos relatórios</h3>
+    <div class="sub">Desmarque o que não deve aparecer na tabela de Fechamentos nem nos relatórios CSV/PDF. Data e Unidade são sempre exibidas. A escolha fica salva neste navegador.</div>
+    <div id="colunas-lista" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;margin:12px 0;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button type="button" class="preset-btn" onclick="fecharSeletorColunas()">Cancelar</button>
+      <button type="button" class="preset-btn" onclick="restaurarColunas()" title="Voltar a mostrar todas as colunas">Mostrar todas</button>
+      <button type="button" class="preset-btn" onclick="salvarColunas()" style="color:var(--accent);">Salvar</button>
+    </div>
+  </div>
+</div>
 
 <div class="viz-tooltip" id="viz-tooltip"></div>
 
@@ -529,6 +546,12 @@ const BRAVO_UNIDADES_NOMES = {
   'São Braz IL': 'Sao Braz Ilha',
 };
 GRUPOS.BRAVO.forEach(u=>{ UNIDADES_NOMES[u] = BRAVO_UNIDADES_NOMES[u] || u; });
+
+// unidades cadastradas pelo Master em /grupos.html (runtime) - mescladas por
+// cima da lista fixa acima, antes de montar qualquer seletor (ver boot)
+async function mesclarUnidadesExtras(){
+  try{ Object.assign(UNIDADES_NOMES, await (await fetch('/api/meta/unidades-extras')).json()); }catch(e){}
+}
 
 // codigo IDPULSE conhecido de algumas unidades do Grupo Bravo (mesmos
 // numeros ja usados como apelido no Monitor/Adyen, ver UNIDADES_APELIDOS em
@@ -1483,44 +1506,89 @@ function colunasFixasUsadas(rows){
 // linha de fato usa (schema antigo de planilha, sem grupo pra definir a
 // lista completa). Ver renderTabela: cada bloco so recebe linhas de UMA
 // origem - sistema OU planilha - pra essas colunas nunca se misturarem.
+// colunas que o usuario escolheu ESCONDER (seletor 🧩 Colunas) - por key
+// canonica, a mesma usada no relatorio do backend (fechamentosReport.js),
+// entao a escolha vale igual na tela e no CSV/PDF. Salvo por navegador.
+let COLUNAS_OCULTAS = new Set();
+try{ COLUNAS_OCULTAS = new Set(JSON.parse(localStorage.getItem('fechColunasOcultas')||'[]')); }catch(e){}
+// Data e Unidade sao a ancora de leitura da tabela - nunca escondem
+function colVisivel(key){ return key==='data' || key==='unidadeNome' || !COLUNAS_OCULTAS.has(key); }
+
 function tabelaFechamentosHtml(rows){
   const grupo = grupoKpiDaUnidade((rows[0]||{}).unidade);
   const colunasFixas = colunasFixasUsadas(rows);
   const colunasCanais = colunasExtras(rows, 'canaisVendaExtras', grupo);
   const colunasFormas = colunasExtras(rows, 'formasPagamentoExtras', grupo);
 
-  const thead =
-    '<th>Data</th><th>Unid.</th><th>Gerente</th><th>Previsão (dia seguinte)</th><th>Faturamento</th><th>Total declarado</th><th>Diferença</th><th>Quebra</th>' +
-    colunasFixas.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('') +
-    colunasCanais.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('') +
-    colunasFormas.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('') +
-    '<th>Observação</th>' +
-    (IS_MASTER ? '<th>Ações</th>' : '');
+  // defs na mesma ordem de sempre - th e td saem do MESMO array, entao
+  // esconder/mostrar coluna nunca desalinha o cabecalho do corpo
+  // ("previsao" e a unica coluna so da tela, o relatorio nao a tem)
+  const defs = [
+    { key:'data', label:'Data', td:d=>`<td>${fmtData(d.data)}</td>` },
+    { key:'unidadeNome', label:'Unid.', td:d=>`<td>${escapeHtml(UNIDADES_NOMES[d.unidade]||d.unidade)}</td>` },
+    { key:'gerente', label:'Gerente', td:d=>`<td class="truncate" title="${escapeHtml(d.gerente||'')}">${escapeHtml(d.gerente||'—')}</td>` },
+    { key:'previsao', label:'Previsão (dia seguinte)', td:d=>{ const p = previsaoDiaSeguinte(d.unidade, d.data); return `<td class="valor" style="color:var(--accent);">${p==null ? '—' : fmtMoney(p)}</td>`; } },
+    { key:'faturamento', label:'Faturamento', td:d=>`<td class="valor">${fmtMoney(d.faturamento)}</td>` },
+    { key:'totalDeclarado', label:'Total declarado', td:d=>`<td class="valor">${fmtMoney(d.totalDeclarado)}</td>` },
+    { key:'diferenca', label:'Diferença', td:d=>{ const cor = d.diferenca<0?'var(--bad)':(d.diferenca>0?'var(--warn)':'var(--ok)'); return `<td class="valor" style="color:${cor}">${fmtMoney(d.diferenca)}</td>`; } },
+    { key:'quebra', label:'Quebra', td:d=>`<td class="valor">${fmtMoney(d.quebra)}</td>` },
+    ...colunasFixas.map(c=>({ key:c.campo, label:c.label, td:d=>`<td class="valor">${fmtMoney(d[c.campo])}</td>` })),
+    ...colunasCanais.map(c=>({ key:'canal:'+c.campo, label:c.label, td:d=>`<td class="valor">${fmtMoney((d.canaisVendaExtras||{})[c.campo]||0)}</td>` })),
+    ...colunasFormas.map(c=>({ key:'forma:'+c.campo, label:c.label, td:d=>`<td class="valor">${fmtMoney((d.formasPagamentoExtras||{})[c.campo]||0)}</td>` })),
+    { key:'observacao', label:'Observação', td:d=>`<td class="truncate" title="${escapeHtml(d.observacao||d.obsDif||'')}">${escapeHtml(d.observacao||d.obsDif||'—')}</td>` },
+  ].filter(c=>colVisivel(c.key));
 
-  const corpo = rows.map(d=>{
-    const cor = d.diferenca<0?'var(--bad)':(d.diferenca>0?'var(--warn)':'var(--ok)');
-    const previsao = previsaoDiaSeguinte(d.unidade, d.data);
-    return `<tr>
-      <td>${fmtData(d.data)}</td>
-      <td>${escapeHtml(UNIDADES_NOMES[d.unidade]||d.unidade)}</td>
-      <td class="truncate" title="${escapeHtml(d.gerente||'')}">${escapeHtml(d.gerente||'—')}</td>
-      <td class="valor" style="color:var(--accent);">${previsao==null ? '—' : fmtMoney(previsao)}</td>
-      <td class="valor">${fmtMoney(d.faturamento)}</td>
-      <td class="valor">${fmtMoney(d.totalDeclarado)}</td>
-      <td class="valor" style="color:${cor}">${fmtMoney(d.diferenca)}</td>
-      <td class="valor">${fmtMoney(d.quebra)}</td>
-      ${colunasFixas.map(c=>`<td class="valor">${fmtMoney(d[c.campo])}</td>`).join('')}
-      ${colunasCanais.map(c=>`<td class="valor">${fmtMoney((d.canaisVendaExtras||{})[c.campo]||0)}</td>`).join('')}
-      ${colunasFormas.map(c=>`<td class="valor">${fmtMoney((d.formasPagamentoExtras||{})[c.campo]||0)}</td>`).join('')}
-      <td class="truncate" title="${escapeHtml(d.observacao||d.obsDif||'')}">${escapeHtml(d.observacao||d.obsDif||'—')}</td>
-      ${IS_MASTER ? `<td>${d.criadoPorId ? `
+  const thead = defs.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('') + (IS_MASTER ? '<th>Ações</th>' : '');
+  const corpo = rows.map(d=>
+    `<tr>${defs.map(c=>c.td(d)).join('')}${IS_MASTER ? `<td>${d.criadoPorId ? `
         <button type="button" class="acao-btn" title="Editar" onclick="abrirEdicaoFechamento('${d.id}')">✏️</button>
         <button type="button" class="acao-btn excluir" title="Excluir" onclick="excluirFechamento('${d.id}')">🗑️</button>
-      ` : '<span class="sub" style="margin:0;" title="Não lançado pelo sistema - vem de importação/planilha, não pode ser editado aqui">—</span>'}</td>` : ''}
-    </tr>`;
-  }).join('');
+      ` : '<span class="sub" style="margin:0;" title="Não lançado pelo sistema - vem de importação/planilha, não pode ser editado aqui">—</span>'}</td>` : ''}</tr>`
+  ).join('');
 
   return `<div class="tablewrap"><table><thead><tr>${thead}</tr></thead><tbody>${corpo}</tbody></table></div>`;
+}
+
+// ---------- seletor 🧩 Colunas ----------
+// todas as colunas que PODEM existir (fixas + canais/formas de TODOS os
+// grupos cadastrados) - nao so as visiveis no filtro atual, pra escolha
+// nao "sumir" quando o periodo filtrado nao usa uma coluna
+function opcoesColunas(){
+  const vistos = new Map();
+  [
+    {key:'gerente', label:'Gerente'},
+    {key:'previsao', label:'Previsão (dia seguinte)'},
+    {key:'faturamento', label:'Faturamento'},
+    {key:'totalDeclarado', label:'Total declarado'},
+    {key:'diferenca', label:'Diferença'},
+    {key:'quebra', label:'Quebra'},
+    ...CAMPOS_FIXOS.map(c=>({key:c.campo, label:c.label})),
+  ].forEach(o=>vistos.set(o.key, o.label));
+  GRUPOS_KPI.forEach(g=>{
+    (g.canaisVendaExtras||[]).forEach(c=>{ if(!vistos.has('canal:'+c.campo)) vistos.set('canal:'+c.campo, c.label+' (canal)'); });
+    (g.formasPagamentoExtras||[]).forEach(c=>{ if(!vistos.has('forma:'+c.campo)) vistos.set('forma:'+c.campo, c.label+' (forma pgto.)'); });
+  });
+  vistos.set('observacao', 'Observação');
+  return [...vistos.entries()].map(([key,label])=>({key,label}));
+}
+
+function abrirSeletorColunas(){
+  document.getElementById('colunas-lista').innerHTML = opcoesColunas().map(o=>`
+    <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;">
+      <input type="checkbox" data-coluna="${escapeHtml(o.key)}" ${COLUNAS_OCULTAS.has(o.key)?'':'checked'} style="width:auto;margin:0;">
+      ${escapeHtml(o.label)}
+    </label>`).join('');
+  document.getElementById('colunas-overlay').classList.remove('hidden');
+}
+function fecharSeletorColunas(){ document.getElementById('colunas-overlay').classList.add('hidden'); }
+function restaurarColunas(){
+  document.querySelectorAll('#colunas-lista input[data-coluna]').forEach(cb=>{ cb.checked = true; });
+}
+function salvarColunas(){
+  COLUNAS_OCULTAS = new Set([...document.querySelectorAll('#colunas-lista input[data-coluna]')].filter(cb=>!cb.checked).map(cb=>cb.dataset.coluna));
+  localStorage.setItem('fechColunasOcultas', JSON.stringify([...COLUNAS_OCULTAS]));
+  fecharSeletorColunas();
+  renderTabela(filtrar());
 }
 
 function renderTabela(rows){
@@ -1938,6 +2006,8 @@ function baixarRelatorioFechamentos(formato){
   if(inicio) params.set('inicio', inicio);
   if(fim) params.set('fim', fim);
   if(unidades) params.set('unidades', unidades);
+  // mesmas colunas escondidas da tabela (seletor 🧩 Colunas) valem no relatorio
+  if(COLUNAS_OCULTAS.size) params.set('ocultas', [...COLUNAS_OCULTAS].join(','));
   window.location.href = `/api/fechamentos/relatorio.${formato}?${params.toString()}`;
 }
 
@@ -1951,6 +2021,7 @@ async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   const me = await res.json();
+  await mesclarUnidadesExtras();
   const isMaster = me.role==='master';
   IS_MASTER = isMaster;
   const secoes = isMaster ? ['monitor','disputas','cofre','fechamentos','lancamento','entregas','entregas-lancamento','ifood','solicitacoes','tecnico','inventario','parque','parque-checkin','festas'] : (me.permissions?.sections||[]);

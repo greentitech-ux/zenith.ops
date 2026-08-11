@@ -580,6 +580,12 @@ const BRAVO_UNIDADES_NOMES = {
 };
 const UNIDADES_NOMES = { ...ARCFOOD_UNIDADES, ...BRAVO_UNIDADES_NOMES };
 
+// unidades cadastradas pelo Master em /grupos.html (runtime) - mescladas por
+// cima da lista fixa acima, antes de montar qualquer seletor (ver boot)
+async function mesclarUnidadesExtras(){
+  try{ Object.assign(UNIDADES_NOMES, await (await fetch('/api/meta/unidades-extras')).json()); }catch(e){}
+}
+
 const TIPOS_INFO = {
   'estorno': { label:'Estorno', secaoNecessaria:'monitor' },
   'ajuste-fechamento': { label:'Ajuste de fechamento', secaoNecessaria:'lancamento' },
@@ -2064,6 +2070,7 @@ async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   ME = await res.json();
+  await mesclarUnidadesExtras();
   IS_MASTER = ME.role==='master';
   IS_ADMIN = !!ME.isAdmin;
   SECOES = IS_MASTER ? ['monitor','disputas','cofre','fechamentos','lancamento','sangria','entregas','entregas-lancamento','ifood','solicitacoes','tecnico','inventario','parque','parque-checkin','festas'] : (ME.permissions?.sections||[]);
