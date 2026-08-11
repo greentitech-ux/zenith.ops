@@ -529,6 +529,7 @@ app.get('/api/me', (req, res) => {
     podeCatalogoEstoque: req.podeCatalogoEstoque,
     podeCatalogoInsumos: req.podeCatalogoInsumos,
     podeCadastrarOperadores: req.podeCadastrarOperadores,
+    podeRhTodasUnidades: req.podeRhTodasUnidades,
     precisaTrocarSenha: !!req.user.precisaTrocarSenha,
   });
 });
@@ -1877,6 +1878,14 @@ app.put('/api/users/:id/sessao-longa', auth.requireMaster, async (req, res) => {
 app.put('/api/users/:id/cadastrar-operadores', auth.requireMaster, async (req, res) => {
   try {
     res.json(await users.updatePodeCadastrarOperadores(req.params.id, req.body.podeCadastrarOperadores));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/users/:id/rh-todas-unidades', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await users.updatePodeRhTodasUnidades(req.params.id, req.body.podeRhTodasUnidades));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -3262,11 +3271,12 @@ app.get('/api/festas/relatorio.:formato(csv|pdf)', requireSection('festas'), asy
 // mento de teste com alerta automatico no 5o dia (ver rodarAlertaTesteRh
 // mais abaixo) e aniversariante do dia (calculado no front sobre a mesma
 // lista, ver rh.aniversariantesHoje) ----------
-// Admin (alem de Master) tem visao corporativa cross-unidade, igual ja usado
-// em festas/parque - e o jeito de dar pro time de RH acesso a todas as
-// unidades do grupo sem precisar listar cada uma nas permissoes dele
+// Master, Admin (visao corporativa, igual ja usado em festas/parque) OU a
+// tag dedicada "RH (todas as unidades)" (podeRhTodasUnidades, atribuida pelo
+// Master em Usuarios sem precisar dar Admin pra pessoa) - e o jeito do time
+// de RH central cadastrar/decidir candidatos de qualquer unidade do grupo
 function podeAcessarUnidadeRh(req, unidade) {
-  return req.isMaster || req.isAdmin || (req.permissions.unidades || []).includes(unidade);
+  return req.isMaster || req.isAdmin || req.podeRhTodasUnidades || (req.permissions.unidades || []).includes(unidade);
 }
 
 app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'), async (req, res) => {
@@ -3292,7 +3302,7 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'
 });
 
 app.get('/api/rh/funcionarios', requireSection('rh'), async (req, res) => {
-  if (req.isMaster || req.isAdmin) return res.json(await rh.listAll());
+  if (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) return res.json(await rh.listAll());
   res.json(await rh.listByUnidades(req.permissions.unidades || []));
 });
 
