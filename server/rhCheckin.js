@@ -7,9 +7,21 @@
 // na saida, repete o processo pra fechar o check-in. A foto e o horario sao
 // o registro/prova de quem esteve na loja e quando - sem reconhecimento
 // facial nem nada automatico, so tira a duvida "quem apareceu hoje" com
-// prova visual e timestamp. Vale tanto pra quem ja e "ativo" quanto pra
-// candidato em teste de 5 dias (ver STATUS_PODE_CHECKIN) - so quem foi
-// desligado nao faz mais check-in.
+// prova visual e timestamp.
+//
+// So faz check-in aqui quem AINDA NAO tem vinculo formal - extra (avulso) e
+// candidato em teste de 5 dias (ver elegivelParaCheckin). Colaborador
+// efetivado (direto ou promovido do teste) NAO usa esse quiosque - ele bate
+// o ponto no sistema de ponto de verdade, fora do Zenith.
+//
+// Dois freios pedidos pelo usuario, resolvidos com uma pendencia de
+// aprovacao (status 'pendente_aprovacao') em vez de bloquear liso:
+// - extra so pode entrar ate 3x por semana - da 4a tentativa em diante, a
+//   entrada fica pendente ate o RH (tag "RH todas as unidades")/Admin/Master
+//   aprovar - aprovar ja registra a entrada na hora (ver aprovarPendencia).
+// - candidato que passou do 5o dia de teste sem decisao (efetivar/desligar)
+//   tambem cai em pendencia pra abrir uma NOVA entrada - se ja estiver com
+//   check-in aberto, o check-out continua liberado normalmente.
 //
 // Colecao propria (rhCheckins), separada de rhFuncionarios (rh.js), porque
 // cresce todo dia (um par entrada/saida por pessoa por dia), enquanto a
@@ -21,8 +33,24 @@ const rh = require('./rh');
 
 const COLLECTION = db.collection('rhCheckins');
 
+const LIMITE_CHECKINS_SEMANA_EXTRA = 3;
+
 function hojeBrasilia() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+}
+
+// segunda-feira da semana atual (Brasilia), formato YYYY-MM-DD - usado como
+// corte pra contar quantas entradas o extra ja fez "essa semana"
+function inicioSemanaBrasilia() {
+  const agora = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  const diaSemana = agora.getDay(); // 0=domingo .. 6=sabado
+  const diffSegunda = diaSemana === 0 ? 6 : diaSemana - 1;
+  agora.setDate(agora.getDate() - diffSegunda);
+  agora.setHours(0, 0, 0, 0);
+  const y = agora.getFullYear();
+  const m = String(agora.getMonth() + 1).padStart(2, '0');
+  const d = String(agora.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 async function listAllUncached() {
@@ -41,25 +69,43 @@ async function getOne(id) {
   return doc.exists ? doc.data() : null;
 }
 
-// quem pode fazer check-in: funcionario ativo OU candidato em teste de 5
-// dias (tambem precisa ser identificado no dia que aparece, mesmo antes de
-// ser efetivado) - so nao deixa quem ja foi desligado (inativo)
-const STATUS_PODE_CHECKIN = ['ativo', 'candidato'];
+// quem pode fazer check-in por aqui: extra "ativo" ou candidato ainda em
+// teste - efetivado (tipoCadastro 'efetivado', ou candidato que ja foi
+// aprovado e virou 'ativo') nao usa esse quiosque, ja bate ponto de verdade
+function elegivelParaCheckin(funcionario) {
+  if (!funcionario) return false;
+  if (funcionario.tipoCadastro === 'extra') return funcionario.status === 'ativo';
+  if (funcionario.tipoCadastro === 'candidato') return funcionario.status === 'candidato';
+  return false;
+}
 
 // registra a ENTRADA - so deixa 1 check-in aberto por vez por pessoa (se ja
 // tem um aberto, tem que fechar - checkout - antes de abrir outro). A
 // localizacao (se o navegador conseguiu, silenciosamente, sem UI propria
 // pedindo - so o prompt nativo do proprio navegador) fica guardada mas so e
-// exposta pro Master nas rotas de leitura (ver sanitizarLocalizacao em
-// index.js)
+// exposta pro Master nas rotas de leitura (ver sanitizarCheckin em index.js)
 async function registrarEntrada({ funcionarioId, foto, localizacao, registradoPorEmail }) {
   const funcionario = await rh.getOne(funcionarioId);
   if (!funcionario) throw new Error('Funcionário não encontrado.');
-  if (!STATUS_PODE_CHECKIN.includes(funcionario.status)) throw new Error('Só funcionários ativos ou em teste podem fazer check-in.');
+  if (!elegivelParaCheckin(funcionario)) throw new Error('Esse colaborador não faz check-in por aqui - já bate ponto no sistema próprio.');
 
   const todos = await listAll();
   const aberto = todos.find((c) => c.funcionarioId === funcionarioId && c.status === 'aberto');
   if (aberto) throw new Error(`${funcionario.nome} já tem um check-in em aberto - faça o check-out antes de um novo check-in.`);
+  const pendente = todos.find((c) => c.funcionarioId === funcionarioId && c.status === 'pendente_aprovacao');
+  if (pendente) throw new Error(`${funcionario.nome} já tem uma solicitação de check-in aguardando aprovação do RH.`);
+
+  let motivoPendencia = null;
+  if (funcionario.tipoCadastro === 'extra') {
+    const inicioSemana = inicioSemanaBrasilia();
+    const feitosNaSemana = todos.filter((c) => (
+      c.funcionarioId === funcionarioId && c.status !== 'pendente_aprovacao' && c.status !== 'recusado'
+      && c.entrada && c.entrada.horario >= `${inicioSemana}T00:00:00`
+    )).length;
+    if (feitosNaSemana >= LIMITE_CHECKINS_SEMANA_EXTRA) motivoPendencia = 'limite_semanal_extra';
+  } else if (funcionario.tipoCadastro === 'candidato') {
+    if (!funcionario.feedbackTeste && rh.diasDesde(funcionario.dataAdmissao) >= rh.DIAS_TESTE_ALERTA) motivoPendencia = 'teste_vencido_sem_decisao';
+  }
 
   const ref = COLLECTION.doc();
   const agora = new Date().toISOString();
@@ -71,7 +117,9 @@ async function registrarEntrada({ funcionarioId, foto, localizacao, registradoPo
     data: hojeBrasilia(),
     entrada: { horario: agora, foto: foto || null, localizacao: localizacao || null, registradoPorEmail: registradoPorEmail || null },
     saida: null,
-    status: 'aberto',
+    status: motivoPendencia ? 'pendente_aprovacao' : 'aberto',
+    motivoPendencia,
+    decisaoPendencia: null,
     criadoEm: agora,
     atualizadoEm: agora,
   };
@@ -80,7 +128,8 @@ async function registrarEntrada({ funcionarioId, foto, localizacao, registradoPo
   return registro;
 }
 
-// registra a SAIDA de um check-in aberto especifico
+// registra a SAIDA de um check-in aberto especifico - nao depende de tipo
+// nem status do funcionario (se ja tem entrada aberta, closeout sempre vale)
 async function registrarSaida(id, { foto, localizacao, registradoPorEmail }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
@@ -125,8 +174,56 @@ async function listAbertos(unidades) {
   return todos.filter((c) => alvo.has(c.unidade));
 }
 
+// pedidos de check-in aguardando aprovacao do RH/Admin/Master (extra que
+// passou do limite semanal, candidato com teste vencido sem decisao)
+async function listPendentesAprovacao(unidades) {
+  const todos = (await listAll()).filter((c) => c.status === 'pendente_aprovacao');
+  if (unidades == null) return todos;
+  if (!unidades.length) return [];
+  const alvo = new Set(unidades);
+  return todos.filter((c) => alvo.has(c.unidade));
+}
+
+// aprovar ja registra a entrada de verdade (vira "aberto"), com o horario
+// original da tentativa - a pessoa nao precisa voltar no quiosque
+async function aprovarPendencia(id, { porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Solicitação não encontrada.');
+  const atual = snap.data();
+  if (atual.status !== 'pendente_aprovacao') throw new Error('Essa solicitação já foi resolvida.');
+  const agora = new Date().toISOString();
+  const merge = {
+    status: 'aberto',
+    decisaoPendencia: { aprovado: true, porEmail: porEmail || null, decididoEm: agora },
+    atualizadoEm: agora,
+  };
+  await ref.update(merge);
+  checkinCache.invalidar();
+  return { ...atual, ...merge };
+}
+
+async function recusarPendencia(id, { porEmail, motivo }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Solicitação não encontrada.');
+  const atual = snap.data();
+  if (atual.status !== 'pendente_aprovacao') throw new Error('Essa solicitação já foi resolvida.');
+  const agora = new Date().toISOString();
+  const merge = {
+    status: 'recusado',
+    decisaoPendencia: { aprovado: false, motivo: motivo ? String(motivo).trim().slice(0, 300) : null, porEmail: porEmail || null, decididoEm: agora },
+    atualizadoEm: agora,
+  };
+  await ref.update(merge);
+  checkinCache.invalidar();
+  return { ...atual, ...merge };
+}
+
 module.exports = {
+  LIMITE_CHECKINS_SEMANA_EXTRA,
   registrarEntrada, registrarSaida, buscarAbertoDoFuncionario,
-  listByUnidadesData, listAbertos, getOne, hojeBrasilia,
+  listByUnidadesData, listAbertos, listPendentesAprovacao,
+  aprovarPendencia, recusarPendencia, getOne, hojeBrasilia,
   invalidar: () => checkinCache.invalidar(),
 };

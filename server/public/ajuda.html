@@ -747,13 +747,31 @@ const TOPICOS = [
     </ol>
     <p><b>Como o extra usa (fluxo do dia a dia):</b></p>
     <ol>
-      <li>Ao chegar, a pessoa procura o próprio nome na lista (aparecem funcionários <b>ativos</b> e <b>candidatos em teste de 5 dias</b> da unidade daquele dispositivo) e toca nele.</li>
+      <li>Ao chegar, a pessoa procura o próprio nome na lista (aparecem só <b>extras avulsos</b> e <b>candidatos ainda em teste de 5 dias</b> da unidade daquele dispositivo) e toca nele.</li>
       <li>Confirma <b>"✅ Fazer check-in"</b> e tira uma foto na hora (o navegador abre a câmera do dispositivo diretamente).</li>
       <li>No fim do turno, repete o processo: procura o próprio nome (agora aparece marcado como "na loja") e confirma <b>"🚪 Fazer check-out"</b>, tirando outra foto.</li>
     </ol>
+    <p><b>Colaborador efetivado não aparece nessa lista</b> - seja efetivado direto ou candidato que foi aprovado no teste, ele já bate o ponto no sistema de ponto de verdade, fora do Zenith. Esse quiosque é só pra quem ainda não tem vínculo formal.</p>
     <p><b>Sem reconhecimento facial:</b> o sistema não identifica ninguém automaticamente pela foto - a identificação é a própria pessoa escolhendo o nome dela na lista; a foto (com horário) é só o registro/prova visual de quem esteve na loja e quando, útil em caso de dúvida ou divergência. Cada pessoa só pode ter <b>1 check-in aberto por vez</b> - precisa fazer o check-out antes de abrir outro.</p>
     <p><b>Localização (só Master):</b> junto com a foto, o navegador captura a localização do dispositivo no momento do check-in/check-out (usando o próprio recurso de localização do navegador - se a pessoa recusar a permissão, o registro segue normalmente, só sem localização). Esse dado <b>não aparece pra ninguém além do Master</b> - nem Admin, nem RH, nem quem tem a tag "RH todas as unidades" vê o link de localização; pro resto do time o check-in aparece normal, só sem esse dado extra.</p>
     <p><b>Visão pra quem administra:</b> a aba <b>📸 Check-ins</b> em <code>/rh.html</code> mostra "🟢 Na loja agora" (quem já fez check-in mas ainda não fez check-out) e o histórico do dia (ou de qualquer data escolhida), com link pra ver as fotos de entrada e saída de cada check-in. O <b>Painel</b> também mostra a contagem de "Na loja agora" no card de RH.</p>
+    <h3>⏳ Aprovações (limite de check-in)</h3>
+    <p>Dois freios no check-in, resolvidos com uma pendência de aprovação em vez de travar liso - visível só pra quem tem a tag <b>🧑‍💼 RH (todas as unidades)</b>, Admin ou Master (nunca pro gerente comum da loja, que é justamente quem gerou a pendência):</p>
+    <ul>
+      <li><b>Extra além do limite semanal:</b> extra avulso só pode fazer check-in <b>3 vezes por semana</b> (segunda a domingo). Na 4ª tentativa, o check-in não é feito na hora - vira uma solicitação pendente, com <b>push de alerta</b> pro RH/Admin/Master.</li>
+      <li><b>Candidato com teste vencido:</b> se o candidato passar do 5º dia de teste <b>sem decisão registrada</b> (efetivar/desligar), uma nova entrada também cai em pendência - o check-out de quem já está com entrada aberta continua liberado normalmente, só a próxima entrada nova é que trava.</li>
+    </ul>
+    <p>Na aba <b>⏳ Aprovações</b>, cada pendência mostra o motivo e a foto tirada na tentativa - <b>✅ aprovar</b> já registra o check-in na hora (a pessoa não precisa voltar no quiosque); <b>❌ recusar</b> encerra o pedido (pode informar um motivo).</p>
+    <h3>📋 Advertências</h3>
+    <p>Vale só pra <b>colaborador efetivado</b> - extra e candidato em teste de 5 dias não têm essa opção. No card do colaborador (Ficha de Ativos), use <b>📋 solicitar advertência</b>: descreva o motivo e anexe fotos como evidência, se houver.</p>
+    <p><b>Fluxo completo, do pedido até a assinatura:</b></p>
+    <ol>
+      <li><b>Pendente:</b> o pedido fica aguardando aprovação do <b>RH (tag "todas as unidades")</b>, Admin ou Master - eles recebem um push. Podem <b>✅ aprovar</b> ou <b>❌ recusar</b> (com motivo opcional).</li>
+      <li><b>Aguardando documento (48h):</b> aprovado o pedido, abre um prazo de <b>48 horas</b> pro RH/Admin anexar o arquivo formal de advertência (PDF ou imagem) pro colaborador assinar. Passado o prazo sem anexar, o RH/Admin/Master recebe um <b>alerta de atraso</b>.</li>
+      <li><b>Aguardando assinatura:</b> documento anexado, quem solicitou (o gerente) já pode <b>baixar o documento</b>, imprimir e colher a assinatura do colaborador - depois <b>envia o documento assinado</b> de volta pelo mesmo card.</li>
+      <li><b>Concluída:</b> documento assinado recebido - fica arquivado no card (documento original + assinado), fluxo encerrado.</li>
+    </ol>
+    <p><b>Dúvidas no meio do processo:</b> cada advertência tem uma caixinha de <b>💬 mensagens</b> no detalhe do card, pra ida e volta entre quem pediu e o RH antes de decidir ou durante a preparação do documento.</p>
     <h3>🎂 Aniversariantes</h3>
     <p>Calculado sobre a mesma ficha (só quem está <b>ativo</b> e tem data de nascimento cadastrada): a aba mostra quem faz aniversário <b>hoje</b> e a lista de aniversariantes <b>do mês</b>. O <b>Painel</b> também mostra a contagem de aniversariantes de hoje no card de RH.</p>
   `},

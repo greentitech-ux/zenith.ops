@@ -311,7 +311,71 @@ async function notifyRhTesteVencido(funcionario) {
   }
 }
 
+// aprovacoes do RH (check-in de extra alem do limite semanal, candidato com
+// teste vencido, advertencia pendente/prazo vencido) - so pro time de RH de
+// verdade (tag "RH todas as unidades"), Admin e Master. NAO vai pro gerente
+// comum da loja - ele e justamente quem gerou a pendencia, aprovar teria
+// que ser de outra pessoa
+function podeReceberAprovacaoRh(sub) {
+  const meta = sub.meta;
+  if (!meta) return false;
+  return !!meta.isMaster || !!meta.isAdmin || !!meta.podeRhTodasUnidades;
+}
+async function notifyAprovacaoRh(title, body, tag) {
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify({ title, body, tag, url: '/rh.html' });
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberAprovacaoRh(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (aprovação RH):', err.message);
+      }
+    }
+  }
+}
+
+const MOTIVO_PENDENCIA_LABEL = {
+  limite_semanal_extra: 'já bateu o limite de 3 check-ins na semana',
+  teste_vencido_sem_decisao: 'teste de 5 dias vencido, sem decisão',
+};
+
+// extra alem do limite semanal OU candidato com teste vencido tentou fazer
+// check-in - fica pendente ate alguem aprovar (ver rhCheckin.js)
+async function notifyRhAprovacaoPendente(funcionarioNome, unidade, motivoPendencia) {
+  await notifyAprovacaoRh(
+    '🧑‍💼 RH · check-in aguardando aprovação',
+    `${funcionarioNome} (${unidade}) - ${MOTIVO_PENDENCIA_LABEL[motivoPendencia] || 'precisa de aprovação'}.`,
+    `rh-checkin-pendente-${funcionarioNome}-${unidade}-${Date.now()}`,
+  );
+}
+
+// pedido de advertencia novo - precisa de aprovacao do RH/Admin/Master antes
+// de seguir (ver rhAdvertencias.js)
+async function notifyRhAdvertenciaPendente(advertencia) {
+  await notifyAprovacaoRh(
+    '📋 RH · solicitação de advertência',
+    `${advertencia.funcionarioNome} (${advertencia.unidade}) - aguardando aprovação.`,
+    `rh-advertencia-pendente-${advertencia.id}`,
+  );
+}
+
+// advertencia aprovada e passou das 48h sem o RH anexar o documento pro
+// colaborador assinar (ver rodarAlertaAdvertenciaVencida em index.js)
+async function notifyRhAdvertenciaPrazoVencido(advertencia) {
+  await notifyAprovacaoRh(
+    '⏰ RH · advertência com prazo vencido',
+    `${advertencia.funcionarioNome} (${advertencia.unidade}) - passou das 48h sem anexar o documento.`,
+    `rh-advertencia-prazo-${advertencia.id}`,
+  );
+}
+
 module.exports = {
   addSubscription, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
-  notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyRhTesteVencido, PUBLIC_KEY,
+  notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyRhTesteVencido,
+  notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido, PUBLIC_KEY,
 };

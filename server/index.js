@@ -60,6 +60,7 @@ const centralCards = require('./centralCards');
 const relatorioMV = require('./relatorioMV');
 const rh = require('./rh');
 const rhCheckin = require('./rhCheckin');
+const rhAdvertencias = require('./rhAdvertencias');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -1409,6 +1410,7 @@ app.post('/api/push/subscribe', async (req, res) => {
     userId: req.user.id,
     isMaster: req.isMaster,
     isAdmin: req.isAdmin,
+    podeRhTodasUnidades: req.podeRhTodasUnidades,
     unidades: req.isMaster ? null : (req.permissions.unidades || []),
     sections: req.isMaster ? null : (req.permissions.sections || []),
     cargo: (req.user && req.user.cargo) || null,
@@ -3298,6 +3300,14 @@ function podeCadastrarEfetivado(req) {
   return req.isMaster || req.isAdmin || req.podeRhCadastrarEfetivado;
 }
 
+// aprovacao de pendencias do RH (check-in de extra alem do limite semanal,
+// candidato com teste vencido sem decisao, advertencia) -so o time de RH de
+// verdade (tag "RH todas as unidades"), Admin ou Master, NUNCA a loja comum
+// (que e justamente quem gerou/deixou passar a pendencia)
+function podeAprovarRh(req) {
+  return req.isMaster || req.isAdmin || req.podeRhTodasUnidades;
+}
+
 app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'), async (req, res) => {
   try {
     const { unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro } = req.body;
@@ -3460,6 +3470,9 @@ app.post('/api/rh/checkins', requireSection('rh'), upload.single('foto'), async 
     const localizacao = lerLocalizacaoDoBody(req.body);
     const registro = await rhCheckin.registrarEntrada({ funcionarioId, foto, localizacao, registradoPorEmail: req.user.email });
     broadcast('rh-checkin-atualizado', { id: registro.id, unidade: registro.unidade }, 'rh');
+    if (registro.status === 'pendente_aprovacao') {
+      push.notifyRhAprovacaoPendente(registro.funcionarioNome, registro.unidade, registro.motivoPendencia);
+    }
     res.json(sanitizarCheckin(registro, req.isMaster));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -3510,6 +3523,208 @@ app.get('/api/rh/checkins/:id/foto/:tipo', requireSection('rh'), async (req, res
   const bloco = req.params.tipo === 'saida' ? atual.saida : atual.entrada;
   if (!bloco || !bloco.foto) return res.sendStatus(404);
   storage.streamArquivo(bloco.foto.path, bloco.foto.tipo, res);
+});
+
+// pendencias de check-in (extra alem do limite semanal, candidato com teste
+// vencido sem decisao) - so quem pode aprovar (RH todas-unidades/Admin/
+// Master) ve e decide; aprovar ja registra a entrada na hora
+app.get('/api/rh/checkins/pendentes-aprovacao', requireSection('rh'), async (req, res) => {
+  if (!podeAprovarRh(req)) return res.json([]);
+  res.json(await rhCheckin.listPendentesAprovacao(null));
+});
+
+app.post('/api/rh/checkins/pendentes-aprovacao/:id/aprovar', requireSection('rh'), async (req, res) => {
+  try {
+    if (!podeAprovarRh(req)) return res.status(403).json({ error: 'Só o RH, o Admin ou o Master podem aprovar.' });
+    const registro = await rhCheckin.aprovarPendencia(req.params.id, { porEmail: req.user.email });
+    broadcast('rh-checkin-atualizado', { id: registro.id, unidade: registro.unidade }, 'rh');
+    res.json(sanitizarCheckin(registro, req.isMaster));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/rh/checkins/pendentes-aprovacao/:id/recusar', requireSection('rh'), async (req, res) => {
+  try {
+    if (!podeAprovarRh(req)) return res.status(403).json({ error: 'Só o RH, o Admin ou o Master podem recusar.' });
+    const registro = await rhCheckin.recusarPendencia(req.params.id, { porEmail: req.user.email, motivo: req.body.motivo });
+    broadcast('rh-checkin-atualizado', { id: registro.id, unidade: registro.unidade }, 'rh');
+    res.json(sanitizarCheckin(registro, req.isMaster));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- RH: solicitacao de advertencia disciplinar - so pra colaborador
+// EFETIVADO (extra e candidato em teste nao tem essa opcao). Fluxo:
+// pendente -> (RH/Admin/Master aprova) -> aguardando_documento (48h) ->
+// (RH anexa o arquivo) -> aguardando_assinatura -> (gerente sobe assinado)
+// -> concluida. Duvidas rolam no chat generico (centralChat.js, tipo
+// 'rh-advertencia') ----------
+function podeSolicitarAdvertencia(funcionario) {
+  return !!funcionario && funcionario.status === 'ativo' && funcionario.tipoCadastro !== 'extra';
+}
+
+app.post('/api/rh/advertencias', requireSection('rh'), upload.array('evidencias', 6), async (req, res) => {
+  try {
+    const { funcionarioId, motivo } = req.body;
+    const funcionario = await rh.getOne(funcionarioId);
+    if (!funcionario) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    if (!podeAcessarUnidadeRh(req, funcionario.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    if (!podeSolicitarAdvertencia(funcionario)) {
+      return res.status(400).json({ error: 'Advertência é só pra colaborador efetivado - não vale pra extra nem candidato em teste.' });
+    }
+    const evidencias = [];
+    for (const file of req.files || []) {
+      const path = await storage.salvarArquivo(funcionarioId, file, 'rh-advertencias-evidencias');
+      evidencias.push({ path, tipo: file.mimetype, nomeOriginal: file.originalname });
+    }
+    const registro = await rhAdvertencias.criar({
+      funcionarioId, funcionarioNome: funcionario.nome, unidade: funcionario.unidade, motivo, evidencias,
+      solicitadoPorId: req.user.id, solicitadoPorEmail: req.user.email,
+    });
+    broadcast('rh-advertencia-atualizada', { id: registro.id, unidade: registro.unidade }, 'rh');
+    push.notifyRhAdvertenciaPendente(registro);
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/rh/advertencias', requireSection('rh'), async (req, res) => {
+  if (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) return res.json(await rhAdvertencias.listAll());
+  res.json(await rhAdvertencias.listByUnidades(req.permissions.unidades || []));
+});
+
+app.post('/api/rh/advertencias/:id/decisao', requireSection('rh'), async (req, res) => {
+  try {
+    if (!podeAprovarRh(req)) return res.status(403).json({ error: 'Só o RH, o Admin ou o Master podem decidir.' });
+    const atual = await rhAdvertencias.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Solicitação não encontrada.' });
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    const registro = await rhAdvertencias.decidir(req.params.id, {
+      aprovado: !!req.body.aprovado, motivoRecusa: req.body.motivoRecusa, porEmail: req.user.email,
+    });
+    broadcast('rh-advertencia-atualizada', { id: registro.id, unidade: registro.unidade }, 'rh');
+    if (registro.solicitadoPorId) {
+      push.notifyUsuario(
+        registro.solicitadoPorId,
+        registro.status === 'aguardando_documento' ? '📋 RH · advertência aprovada' : '📋 RH · advertência recusada',
+        `${registro.funcionarioNome} - ${registro.status === 'aguardando_documento' ? 'aprovada, aguardando o documento do RH.' : 'a solicitação foi recusada.'}`,
+        `rh-advertencia-decisao-${registro.id}`,
+        '/rh.html',
+      );
+    }
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/rh/advertencias/:id/documento', requireSection('rh'), upload.single('arquivo'), async (req, res) => {
+  try {
+    if (!podeAprovarRh(req)) return res.status(403).json({ error: 'Só o RH, o Admin ou o Master podem anexar o documento.' });
+    const atual = await rhAdvertencias.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Solicitação não encontrada.' });
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'Anexe um arquivo.' });
+    const path = await storage.salvarArquivo(req.params.id, req.file, 'rh-advertencias-documento');
+    const registro = await rhAdvertencias.anexarDocumento(req.params.id, {
+      documento: { path, tipo: req.file.mimetype, nomeOriginal: req.file.originalname }, porEmail: req.user.email,
+    });
+    broadcast('rh-advertencia-atualizada', { id: registro.id, unidade: registro.unidade }, 'rh');
+    if (registro.solicitadoPorId) {
+      push.notifyUsuario(
+        registro.solicitadoPorId, '📋 RH · documento de advertência pronto',
+        `${registro.funcionarioNome} - baixe o documento e colha a assinatura do colaborador.`,
+        `rh-advertencia-documento-${registro.id}`, '/rh.html',
+      );
+    }
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/rh/advertencias/:id/documento', requireSection('rh'), async (req, res) => {
+  const atual = await rhAdvertencias.getOne(req.params.id);
+  if (!atual || !atual.documento) return res.sendStatus(404);
+  if (!podeAcessarUnidadeRh(req, atual.unidade)) {
+    return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  }
+  storage.streamArquivo(atual.documento.path, atual.documento.tipo, res);
+});
+
+app.post('/api/rh/advertencias/:id/assinado', requireSection('rh'), upload.single('arquivo'), async (req, res) => {
+  try {
+    const atual = await rhAdvertencias.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Solicitação não encontrada.' });
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'Anexe o arquivo assinado.' });
+    const path = await storage.salvarArquivo(req.params.id, req.file, 'rh-advertencias-assinado');
+    const registro = await rhAdvertencias.enviarAssinado(req.params.id, {
+      documento: { path, tipo: req.file.mimetype, nomeOriginal: req.file.originalname }, porEmail: req.user.email,
+    });
+    broadcast('rh-advertencia-atualizada', { id: registro.id, unidade: registro.unidade }, 'rh');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/rh/advertencias/:id/assinado', requireSection('rh'), async (req, res) => {
+  const atual = await rhAdvertencias.getOne(req.params.id);
+  if (!atual || !atual.documentoAssinado) return res.sendStatus(404);
+  if (!podeAcessarUnidadeRh(req, atual.unidade)) {
+    return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  }
+  storage.streamArquivo(atual.documentoAssinado.path, atual.documentoAssinado.tipo, res);
+});
+
+app.get('/api/rh/advertencias/:id/evidencia/:idx', requireSection('rh'), async (req, res) => {
+  const atual = await rhAdvertencias.getOne(req.params.id);
+  if (!atual) return res.sendStatus(404);
+  if (!podeAcessarUnidadeRh(req, atual.unidade)) {
+    return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  }
+  const evidencia = (atual.evidencias || [])[Number(req.params.idx)];
+  if (!evidencia) return res.sendStatus(404);
+  storage.streamArquivo(evidencia.path, evidencia.tipo, res);
+});
+
+app.get('/api/rh/advertencias/:id/mensagens', requireSection('rh'), async (req, res) => {
+  const atual = await rhAdvertencias.getOne(req.params.id);
+  if (!atual) return res.status(404).json({ error: 'Solicitação não encontrada.' });
+  if (!podeAcessarUnidadeRh(req, atual.unidade)) {
+    return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  }
+  res.json(await centralChat.listByCard('rh-advertencia', req.params.id));
+});
+
+app.post('/api/rh/advertencias/:id/mensagens', requireSection('rh'), async (req, res) => {
+  try {
+    const atual = await rhAdvertencias.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Solicitação não encontrada.' });
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    const mensagem = await centralChat.addMessage({
+      tipo: 'rh-advertencia', cardId: req.params.id, autorId: req.user.id,
+      autorEmail: req.user.email, autorUsername: req.user.username || null, texto: req.body.texto, imagem: null,
+    });
+    broadcast('rh-advertencia-chat', { id: req.params.id }, 'rh');
+    res.json(mensagem);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // ---------- Saltiverso Patteo: passaporte mensal (mensalistas) - reaproveita
@@ -6348,6 +6563,23 @@ app.use((err, req, res, next) => {
     setInterval(() => {
       rodarAlertaTesteRh().catch((err) => console.error('Erro no alerta de teste do RH:', err.message));
     }, 60 * 60 * 1000);
+
+    // RH: advertencia aprovada que passou das 48h sem o RH anexar o
+    // documento (ver rhAdvertencias.verificarPrazosVencidos) - roda o dia
+    // inteiro (nao so horario comercial, o prazo corre sem parar); o campo
+    // alertaPrazoVencidoEnviadoEm garante 1 unico push por solicitacao
+    const rodarAlertaAdvertenciaVencida = async () => {
+      const vencidas = await rhAdvertencias.verificarPrazosVencidos();
+      for (const a of vencidas) {
+        push.notifyRhAdvertenciaPrazoVencido(a);
+        broadcast('rh-advertencia-atualizada', { id: a.id, unidade: a.unidade }, 'rh');
+        await rhAdvertencias.marcarAlertaPrazoVencidoEnviado(a.id);
+      }
+    };
+    rodarAlertaAdvertenciaVencida().catch((err) => console.error('Erro no alerta de prazo de advertência:', err.message));
+    setInterval(() => {
+      rodarAlertaAdvertenciaVencida().catch((err) => console.error('Erro no alerta de prazo de advertência:', err.message));
+    }, 30 * 60 * 1000);
 
     // relatorio diario do MV por e-mail (ver relatorioMV.js) - so agenda se
     // as credenciais de ENVIO estiverem configuradas (quem manda, RELATORIO_

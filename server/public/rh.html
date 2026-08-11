@@ -154,7 +154,9 @@
   <button type="button" class="tab-btn" data-tab="cadastrar" onclick="trocarAba('cadastrar')">➕ Cadastrar</button>
   <button type="button" class="tab-btn" data-tab="teste" onclick="trocarAba('teste')">⏳ Acompanh. de Teste</button>
   <button type="button" class="tab-btn" data-tab="checkins" onclick="trocarAba('checkins')">📸 Check-ins</button>
+  <button type="button" class="tab-btn hidden" id="btn-aba-aprovacoes" data-tab="aprovacoes" onclick="trocarAba('aprovacoes')">⏳ Aprovações</button>
   <button type="button" class="tab-btn" data-tab="atestados" onclick="trocarAba('atestados')">🩺 Atestados</button>
+  <button type="button" class="tab-btn" data-tab="advertencias" onclick="trocarAba('advertencias')">📋 Advertências</button>
   <button type="button" class="tab-btn" data-tab="aniver" onclick="trocarAba('aniver')">🎂 Aniversariantes</button>
 </div>
 
@@ -262,12 +264,30 @@
   </div>
 </div>
 
+<!-- ---------- ABA: Aprovações (só RH todas-unidades/Admin/Master) ---------- -->
+<div class="painel-tab hidden" id="tab-aprovacoes">
+  <div class="panel">
+    <h2>⏳ Check-ins aguardando aprovação</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">extra que já bateu o limite de 3 check-ins na semana, ou candidato com teste vencido sem decisão - aprovar já registra a entrada na hora</div>
+    <div id="lista-aprovacoes"></div>
+  </div>
+</div>
+
 <!-- ---------- ABA: Atestados ---------- -->
 <div class="painel-tab hidden" id="tab-atestados">
   <div class="panel">
     <h2>🩺 Em atestado agora</h2>
     <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">funcionários afastados - registrado pelo gerente pra dar visibilidade da operação até a volta</div>
     <div id="lista-atestados"></div>
+  </div>
+</div>
+
+<!-- ---------- ABA: Advertências (só colaborador efetivado) ---------- -->
+<div class="painel-tab hidden" id="tab-advertencias">
+  <div class="panel">
+    <h2>📋 Solicitações de advertência</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">gerente pede com motivo + evidências; precisa de aprovação do RH/Admin/Master; depois de aprovada, o RH tem 48h pra anexar o documento pro colaborador assinar</div>
+    <div id="lista-advertencias"></div>
   </div>
 </div>
 
@@ -362,6 +382,34 @@
   </div>
 </div>
 
+<!-- solicitar advertencia -->
+<div class="overlay hidden" id="overlay-advertencia">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharAdvertencia()">✕</span>
+    <div class="sheet">
+      <h3>📋 Solicitar advertência</h3>
+      <div class="sub" id="adv-nome-sub"></div>
+      <label>Motivo</label>
+      <textarea id="adv-motivo" rows="4" placeholder="Descreva o que aconteceu..."></textarea>
+      <label>Evidências (fotos, opcional)</label>
+      <input type="file" id="adv-evidencias" accept="image/*" multiple>
+      <div class="msg hidden" id="msg-advertencia"></div>
+      <button class="btn-primary" type="button" onclick="enviarAdvertencia()">Enviar pedido</button>
+    </div>
+  </div>
+</div>
+
+<!-- detalhe da advertencia -->
+<div class="overlay hidden" id="overlay-advertencia-detalhe">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharDetalheAdvertencia()">✕</span>
+    <div class="sheet">
+      <h3>📋 Advertência</h3>
+      <div id="adv-detalhe-corpo"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
@@ -438,10 +486,13 @@ const UNIDADES_NOMES = {
 let ME = null;
 let IS_MASTER = false;
 let IS_ADMIN = false;
+let PODE_APROVAR_RH = false;
 let TODOS = [];
 let EDITANDO_ID = null;
 let DECIDINDO_ID = null;
 let ATESTANDO_ID = null;
+let ADVERTINDO_ID = null;
+let ADVERTENCIA_ABERTA_ID = null;
 let TIPO_CADASTRO = 'extra';
 
 function escolherTipoCadastro(tipo){
@@ -480,6 +531,8 @@ function trocarAba(nome){
   if(nome==='teste') renderTeste();
   if(nome==='atestados') renderAtestados();
   if(nome==='checkins') carregarCheckins();
+  if(nome==='aprovacoes') carregarAprovacoes();
+  if(nome==='advertencias') carregarAdvertencias();
 }
 
 function badgeTeste(f){
@@ -503,6 +556,7 @@ function cardAtivoHtml(f){
       ${f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 currículo</a>` : ''}
       ${f.status==='ativo' && f.tipoCadastro!=='extra' && !f.emAtestado ? `<button type="button" class="link-btn" onclick="abrirAtestado('${f.id}')">🩺 registrar atestado</button>` : ''}
       ${f.emAtestado ? `<button type="button" class="link-btn" onclick="marcarRetorno('${f.id}')">✅ registrar retorno</button>` : ''}
+      ${f.status==='ativo' && f.tipoCadastro!=='extra' ? `<button type="button" class="link-btn" onclick="abrirAdvertencia('${f.id}')">📋 solicitar advertência</button>` : ''}
     </div>
   </div>`;
 }
@@ -585,6 +639,191 @@ async function carregarCheckins(){
       <div class="acoes">${fotoEntrada}${fotoSaida}${linkLocalizacao(c.entrada?.localizacao, 'entrada')}${linkLocalizacao(c.saida?.localizacao, 'saída')}</div>
     </div>`;
   }).join('') : '<div class="empty">nenhum check-in nesse dia.</div>';
+}
+
+function fmtDataHora(iso){ if(!iso) return '—'; return new Date(iso).toLocaleString('pt-BR', { timeZone: FUSO_BR, day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }); }
+
+const MOTIVO_PENDENCIA_LABEL = {
+  limite_semanal_extra: 'já bateu o limite de 3 check-ins na semana',
+  teste_vencido_sem_decisao: 'teste de 5 dias vencido, sem decisão registrada',
+};
+
+async function carregarAprovacoes(){
+  const el = document.getElementById('lista-aprovacoes');
+  if(!PODE_APROVAR_RH){ el.innerHTML = '<div class="empty">só o RH, o Admin ou o Master podem ver e decidir essas solicitações.</div>'; return; }
+  const lista = await fetch('/api/rh/checkins/pendentes-aprovacao').then(r=>r.ok?r.json():[]).catch(()=>[]);
+  el.innerHTML = lista.length ? lista.map(c=>`
+    <div class="card">
+      <div class="linha1"><span>${escapeHtml(c.funcionarioNome)}</span><span class="badge warn">pendente</span></div>
+      <div class="sub">${escapeHtml(UNIDADES_NOMES[c.unidade]||c.unidade)} · tentou check-in às ${fmtHora(c.entrada.horario)} · ${escapeHtml(MOTIVO_PENDENCIA_LABEL[c.motivoPendencia]||'aguardando aprovação')}</div>
+      <div class="acoes">
+        ${c.entrada?.foto ? `<a class="link-btn" href="/api/rh/checkins/${c.id}/foto/entrada?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📷 ver foto</a>` : ''}
+        <button type="button" class="link-btn" onclick="aprovarCheckinPendente('${c.id}')">✅ aprovar</button>
+        <button type="button" class="link-btn" onclick="recusarCheckinPendente('${c.id}')">❌ recusar</button>
+      </div>
+    </div>`).join('') : '<div class="empty">nenhuma solicitação de check-in pendente.</div>';
+}
+async function aprovarCheckinPendente(id){
+  const resp = await fetch(`/api/rh/checkins/pendentes-aprovacao/${id}/aprovar`, { method:'POST' });
+  if(!resp.ok){ const d = await resp.json().catch(()=>({})); alert(d.error||'Erro ao aprovar.'); return; }
+  carregarAprovacoes();
+}
+async function recusarCheckinPendente(id){
+  const motivo = prompt('Motivo da recusa (opcional):') || '';
+  const resp = await fetch(`/api/rh/checkins/pendentes-aprovacao/${id}/recusar`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ motivo }) });
+  if(!resp.ok){ const d = await resp.json().catch(()=>({})); alert(d.error||'Erro ao recusar.'); return; }
+  carregarAprovacoes();
+}
+
+// ---------- Advertências ----------
+let ADVERTENCIAS = [];
+const ADV_STATUS_LABEL = {
+  pendente: 'aguardando aprovação',
+  recusada: 'recusada',
+  aguardando_documento: 'aprovada · RH prepara documento',
+  aguardando_assinatura: 'aguardando assinatura do colaborador',
+  concluida: 'concluída',
+};
+const ADV_STATUS_BADGE = {
+  pendente: 'warn', recusada: 'muted', aguardando_documento: 'warn', aguardando_assinatura: 'warn', concluida: 'ok',
+};
+
+function abrirAdvertencia(funcionarioId){
+  const f = TODOS.find(x=>x.id===funcionarioId);
+  if(!f) return;
+  ADVERTINDO_ID = funcionarioId;
+  document.getElementById('adv-nome-sub').textContent = `${f.nome} · ${UNIDADES_NOMES[f.unidade]||f.unidade}`;
+  document.getElementById('adv-motivo').value = '';
+  document.getElementById('adv-evidencias').value = '';
+  document.getElementById('msg-advertencia').classList.add('hidden');
+  document.getElementById('overlay-advertencia').classList.remove('hidden');
+}
+function fecharAdvertencia(){ document.getElementById('overlay-advertencia').classList.add('hidden'); ADVERTINDO_ID=null; }
+async function enviarAdvertencia(){
+  const msg = document.getElementById('msg-advertencia');
+  const motivo = document.getElementById('adv-motivo').value.trim();
+  if(!motivo){ msg.textContent='Descreva o motivo.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  const fd = new FormData();
+  fd.append('funcionarioId', ADVERTINDO_ID);
+  fd.append('motivo', motivo);
+  Array.from(document.getElementById('adv-evidencias').files||[]).forEach(f=>fd.append('evidencias', f));
+  try{
+    const resp = await fetch('/api/rh/advertencias', { method:'POST', body: fd });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao enviar.');
+    fecharAdvertencia();
+    trocarAba('advertencias');
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+}
+
+async function carregarAdvertencias(){
+  ADVERTENCIAS = await fetch('/api/rh/advertencias').then(r=>r.ok?r.json():[]).catch(()=>[]);
+  renderAdvertencias();
+}
+function renderAdvertencias(){
+  const el = document.getElementById('lista-advertencias');
+  const lista = ADVERTENCIAS.slice().sort((a,b)=>String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')));
+  el.innerHTML = lista.length ? lista.map(a=>`
+    <div class="card">
+      <div class="linha1"><span>${escapeHtml(a.funcionarioNome)}</span><span class="badge ${ADV_STATUS_BADGE[a.status]||'muted'}">${escapeHtml(ADV_STATUS_LABEL[a.status]||a.status)}</span></div>
+      <div class="sub">${escapeHtml(UNIDADES_NOMES[a.unidade]||a.unidade)} · pedido em ${fmtDataHora(a.criadoEm)} por ${escapeHtml(a.solicitadoPorEmail||'—')}${a.status==='aguardando_documento' ? ' · prazo do documento: '+fmtDataHora(a.prazoDocumentoAte) : ''}</div>
+      <div class="acoes"><button type="button" class="link-btn" onclick="abrirDetalheAdvertencia('${a.id}')">🔎 ver detalhes</button></div>
+    </div>`).join('') : '<div class="empty">nenhuma solicitação de advertência.</div>';
+}
+
+async function abrirDetalheAdvertencia(id){
+  ADVERTENCIA_ABERTA_ID = id;
+  document.getElementById('overlay-advertencia-detalhe').classList.remove('hidden');
+  await renderDetalheAdvertencia();
+}
+function fecharDetalheAdvertencia(){ document.getElementById('overlay-advertencia-detalhe').classList.add('hidden'); ADVERTENCIA_ABERTA_ID=null; }
+
+async function renderDetalheAdvertencia(){
+  const a = ADVERTENCIAS.find(x=>x.id===ADVERTENCIA_ABERTA_ID);
+  const corpo = document.getElementById('adv-detalhe-corpo');
+  if(!a){ corpo.innerHTML = '<div class="empty">solicitação não encontrada.</div>'; return; }
+
+  const evidencias = (a.evidencias||[]).map((_,i)=>`<a class="link-btn" href="/api/rh/advertencias/${a.id}/evidencia/${i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📷 evidência ${i+1}</a>`).join('');
+
+  let acoes = '';
+  if(a.status==='pendente' && PODE_APROVAR_RH){
+    acoes = `<button type="button" class="btn-primary" onclick="decidirAdvertencia(true)">✅ aprovar</button>
+      <button type="button" class="btn-secundario" onclick="decidirAdvertencia(false)">❌ recusar</button>`;
+  } else if(a.status==='aguardando_documento' && PODE_APROVAR_RH){
+    acoes = `<label>Anexar documento de advertência (PDF/imagem)</label>
+      <input type="file" id="adv-doc-file" accept=".pdf,image/*">
+      <button type="button" class="btn-primary" onclick="anexarDocumentoAdvertencia()">📎 anexar documento</button>`;
+  } else if(a.status==='aguardando_assinatura'){
+    acoes = `<a class="btn-secundario" href="/api/rh/advertencias/${a.id}/documento?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">⬇️ baixar documento pra assinatura</a>
+      <label style="margin-top:10px;">Enviar documento assinado</label>
+      <input type="file" id="adv-assinado-file" accept=".pdf,image/*">
+      <button type="button" class="btn-primary" onclick="enviarAssinadoAdvertencia()">📤 enviar assinado</button>`;
+  } else if(a.status==='concluida'){
+    acoes = `<a class="btn-secundario" href="/api/rh/advertencias/${a.id}/documento?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">⬇️ documento</a>
+      <a class="btn-secundario" href="/api/rh/advertencias/${a.id}/assinado?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">⬇️ assinado</a>`;
+  } else if(a.status==='recusada'){
+    acoes = `<div class="sub">recusada${a.decisao?.motivoRecusa ? ' · '+escapeHtml(a.decisao.motivoRecusa) : ''}</div>`;
+  }
+
+  corpo.innerHTML = `
+    <div class="sub" style="margin-bottom:10px;">${escapeHtml(a.funcionarioNome)} · ${escapeHtml(UNIDADES_NOMES[a.unidade]||a.unidade)} · <span class="badge ${ADV_STATUS_BADGE[a.status]||'muted'}">${escapeHtml(ADV_STATUS_LABEL[a.status]||a.status)}</span></div>
+    <div style="margin-bottom:10px;"><b>Motivo:</b> ${escapeHtml(a.motivo)}</div>
+    ${evidencias ? `<div class="acoes" style="margin-bottom:10px;">${evidencias}</div>` : ''}
+    <div id="adv-acoes">${acoes}</div>
+    <div class="msg hidden" id="msg-adv-detalhe"></div>
+    <hr style="border-color:var(--line);margin:14px 0;">
+    <div style="font-weight:600;font-size:13px;margin-bottom:8px;">💬 Mensagens</div>
+    <div id="adv-mensagens" style="margin-bottom:10px;"></div>
+    <textarea id="adv-nova-mensagem" rows="2" placeholder="Escreva uma mensagem..."></textarea>
+    <button type="button" class="link-btn" onclick="enviarMensagemAdvertencia()">Enviar mensagem</button>
+  `;
+  const mensagens = await fetch(`/api/rh/advertencias/${a.id}/mensagens`).then(r=>r.ok?r.json():[]).catch(()=>[]);
+  document.getElementById('adv-mensagens').innerHTML = mensagens.length ? mensagens.map(m=>`
+    <div class="sub" style="margin-bottom:6px;"><b>${escapeHtml(m.autorEmail||'—')}</b> · ${fmtDataHora(m.criadoEm)}<br>${escapeHtml(m.texto)}</div>
+  `).join('') : '<div class="empty">nenhuma mensagem ainda.</div>';
+}
+
+async function decidirAdvertencia(aprovado){
+  let motivoRecusa = '';
+  if(!aprovado){ motivoRecusa = prompt('Motivo da recusa (opcional):') || ''; }
+  const resp = await fetch(`/api/rh/advertencias/${ADVERTENCIA_ABERTA_ID}/decisao`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ aprovado, motivoRecusa }) });
+  const data = await resp.json();
+  if(!resp.ok){ alert(data.error||'Erro ao decidir.'); return; }
+  await carregarAdvertencias();
+  await renderDetalheAdvertencia();
+}
+async function anexarDocumentoAdvertencia(){
+  const input = document.getElementById('adv-doc-file');
+  if(!input.files[0]){ alert('Escolha um arquivo.'); return; }
+  const fd = new FormData();
+  fd.append('arquivo', input.files[0]);
+  const resp = await fetch(`/api/rh/advertencias/${ADVERTENCIA_ABERTA_ID}/documento`, { method:'POST', body: fd });
+  const data = await resp.json();
+  if(!resp.ok){ alert(data.error||'Erro ao anexar.'); return; }
+  await carregarAdvertencias();
+  await renderDetalheAdvertencia();
+}
+async function enviarAssinadoAdvertencia(){
+  const input = document.getElementById('adv-assinado-file');
+  if(!input.files[0]){ alert('Escolha um arquivo.'); return; }
+  const fd = new FormData();
+  fd.append('arquivo', input.files[0]);
+  const resp = await fetch(`/api/rh/advertencias/${ADVERTENCIA_ABERTA_ID}/assinado`, { method:'POST', body: fd });
+  const data = await resp.json();
+  if(!resp.ok){ alert(data.error||'Erro ao enviar.'); return; }
+  await carregarAdvertencias();
+  await renderDetalheAdvertencia();
+}
+async function enviarMensagemAdvertencia(){
+  const el = document.getElementById('adv-nova-mensagem');
+  const texto = el.value.trim();
+  if(!texto) return;
+  const resp = await fetch(`/api/rh/advertencias/${ADVERTENCIA_ABERTA_ID}/mensagens`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }) });
+  if(!resp.ok){ const d = await resp.json().catch(()=>({})); alert(d.error||'Erro ao enviar mensagem.'); return; }
+  el.value = '';
+  await renderDetalheAdvertencia();
 }
 
 function renderAniversariantes(){
@@ -795,6 +1034,12 @@ async function boot(){
   document.getElementById('btn-tipo-efetivado').classList.toggle('hidden', !(isMaster || ME.isAdmin || ME.podeRhCadastrarEfetivado));
   // data de admissao/inicio do teste no modal de editar so o Master corrige
   document.getElementById('campo-ed-admissao').classList.toggle('hidden', !isMaster);
+
+  // aba "Aprovacoes" (check-in de extra alem do limite semanal, candidato
+  // vencido) so pra quem pode de fato decidir - mesmo criterio do backend
+  // (podeAprovarRh em index.js)
+  PODE_APROVAR_RH = isMaster || ME.isAdmin || ME.podeRhTodasUnidades;
+  document.getElementById('btn-aba-aprovacoes').classList.toggle('hidden', !PODE_APROVAR_RH);
 
   document.getElementById('root').classList.remove('hidden');
   await carregar();

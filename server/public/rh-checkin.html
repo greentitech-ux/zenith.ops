@@ -170,7 +170,7 @@ function mostrarTela(nome){
 function renderLista(){
   const termo = document.getElementById('busca').value.trim().toLowerCase();
   const lista = FUNCIONARIOS
-    .filter(f=>f.unidade===UNIDADE_ATUAL && (f.status==='ativo' || f.status==='candidato'))
+    .filter(f=>f.unidade===UNIDADE_ATUAL && ((f.tipoCadastro==='extra' && f.status==='ativo') || (f.tipoCadastro==='candidato' && f.status==='candidato')))
     .filter(f=>!termo || f.nome.toLowerCase().includes(termo))
     .sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR',{sensitivity:'base'}));
   const el = document.getElementById('lista-pessoas');
@@ -270,9 +270,15 @@ async function enviarRegistro(foto){
     }
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao registrar.');
-    document.getElementById('suc-icone').textContent = ehEntrada ? '✅' : '🚪';
-    document.getElementById('suc-titulo').textContent = ehEntrada ? 'Check-in registrado!' : 'Check-out registrado!';
-    document.getElementById('suc-texto').textContent = `${SELECIONADO.nome} · ${fmtHora(new Date().toISOString())}`;
+    if(data.status==='pendente_aprovacao'){
+      document.getElementById('suc-icone').textContent = '⏳';
+      document.getElementById('suc-titulo').textContent = 'Aguardando aprovação';
+      document.getElementById('suc-texto').textContent = `${SELECIONADO.nome} - pedido enviado pro RH, aguarde a aprovação.`;
+    }else{
+      document.getElementById('suc-icone').textContent = ehEntrada ? '✅' : '🚪';
+      document.getElementById('suc-titulo').textContent = ehEntrada ? 'Check-in registrado!' : 'Check-out registrado!';
+      document.getElementById('suc-texto').textContent = `${SELECIONADO.nome} · ${fmtHora(new Date().toISOString())}`;
+    }
     mostrarTela('sucesso');
     await carregarAbertos();
     setTimeout(()=>{ voltarLista(); }, 2500);
