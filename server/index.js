@@ -3396,6 +3396,23 @@ app.post('/api/rh/funcionarios/:id/decisao-experiencia', requireSection('rh'), a
   }
 });
 
+// ajuste manual (Master) do estagio de experiencia - so pra backfill/
+// correcao (ex: colaborador que ja estava em experiencia antes dessa
+// feature existir no Zenith, vindo de relatorio externo da folha)
+app.post('/api/rh/funcionarios/:id/experiencia', auth.requireMaster, async (req, res) => {
+  try {
+    const atual = await rh.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    const registro = await rh.definirExperiencia(req.params.id, {
+      etapa: req.body.etapa, prazoEtapaAte: req.body.prazoEtapaAte, porEmail: req.user.email,
+    });
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/rh/funcionarios/:id/atestado', requireSection('rh'), async (req, res) => {
   try {
     const atual = await rh.getOne(req.params.id);

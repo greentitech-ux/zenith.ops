@@ -64,6 +64,17 @@ function iniciarExperiencia(inicioIso) {
   return { etapa: '30', inicioEtapa: inicioIso, prazoEtapaAte: calcularPrazoExperiencia(inicioIso, '30'), alertasEnviados: [] };
 }
 
+// inverso de calcularPrazoExperiencia - a partir do PRAZO (termino), calcula
+// o inicio da etapa. Usado no ajuste manual (definirExperiencia): quem esta
+// corrigindo ja sabe o termino de cor (vem do relatorio da folha de
+// pagamento/contabilidade) - pedir pra calcular o inicio de cabeca seria
+// entregar conta pro usuario fazer
+function calcularInicioAPartirDoPrazo(prazoIso, etapa) {
+  const d = new Date(`${prazoIso}T00:00:00`);
+  d.setDate(d.getDate() - (DIAS_EXPERIENCIA[etapa] || 30));
+  return d.toISOString().slice(0, 10);
+}
+
 // "efetivado" e restrito: so Master/Admin/quem tem a tag podeRhCadastrarEfetivado
 // pode usar (ver podeCadastrarEfetivado em index.js) - a loja (gerente comum,
 // so com a secao 'rh') cadastra Extra ou Candidato, nunca pula direto pra
@@ -242,6 +253,35 @@ async function registrarDecisaoExperiencia(id, { decisao, observacao, porEmail }
   return getOne(id);
 }
 
+// ajuste manual (Master) do estagio de experiencia - pra backfill de quem
+// ja estava em experiencia formal antes dessa feature existir no Zenith
+// (ex: importar de um relatorio da folha de pagamento) ou pra corrigir um
+// prazo lancado errado. Sobrescreve a experiencia atual direto, sem passar
+// pelo fluxo normal de decisao - fica registrado no historico com
+// tipo:'ajuste_manual' pra distinguir de uma decisao de verdade
+async function definirExperiencia(id, { etapa, prazoEtapaAte, porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  const atual = snap.data();
+  if (atual.status !== 'ativo' || atual.tipoCadastro === 'extra') throw new Error('Experiência formal é só pra colaborador efetivado.');
+  const etapaOk = etapa === '60' ? '60' : '30';
+  const prazoOk = validarDataOuNull(prazoEtapaAte, 'Prazo da etapa');
+  if (!prazoOk) throw new Error('Informe o prazo (data de término) dessa etapa.');
+  const agora = new Date().toISOString();
+  const inicioEtapa = calcularInicioAPartirDoPrazo(prazoOk, etapaOk);
+  const merge = {
+    experiencia: { etapa: etapaOk, inicioEtapa, prazoEtapaAte: prazoOk, alertasEnviados: [] },
+    historicoExperiencia: [...(atual.historicoExperiencia || []), {
+      tipo: 'ajuste_manual', etapa: etapaOk, inicioEtapa, prazoEtapaAte: prazoOk, porEmail: porEmail || null, decididoEm: agora,
+    }],
+    atualizadoEm: agora,
+  };
+  await ref.update(merge);
+  rhCache.invalidar();
+  return getOne(id);
+}
+
 async function remover(id) {
   const snap = await COLLECTION.doc(id).get();
   if (!snap.exists) throw new Error('Funcionário não encontrado.');
@@ -386,7 +426,7 @@ module.exports = {
   criar, listAll, listByUnidades, getOne, atualizar, remover,
   registrarDecisaoTeste, verificarTestesVencidos, marcarAlertaTesteEnviado,
   registrarAtestado, registrarRetornoAtestado,
-  registrarDecisaoExperiencia, verificarAlertasExperiencia, marcarAlertaExperienciaEnviado,
+  registrarDecisaoExperiencia, verificarAlertasExperiencia, marcarAlertaExperienciaEnviado, definirExperiencia,
   diasDesde, diasRestantesAte, aniversariantesHoje,
   invalidar: () => rhCache.invalidar(),
 };
