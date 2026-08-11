@@ -11,11 +11,15 @@ const COLLECTION = db.collection('festas');
 const STATUS_VALIDOS = ['pendente', 'pagamento-parcial', 'pago', 'cancelado'];
 
 // tabela oficial de venda de festas (trampolins + espaço festa), por
-// Missão x horas x saltonautas (quantidade de pulantes):
+// Missão x horas x saltonautas (quantidade de pulantes) - PADRAO usado so
+// como seed do 1o boot (nunca mais lido depois disso, ver getTabela). As
+// promocoes mudam com frequencia, entao a tabela de verdade vive no
+// Firestore e e editavel pelo Master direto em festas.html - ver
+// salvarTabela() e a rota PUT /api/festas/tabela em index.js
 //  - Missão Lunar:    seg a qui, 13h às 16h
 //  - Missão Órbita:   seg a qui 18h às 21h · sex 13h às 21h
 //  - Missão Nebulosa: sáb, dom e feriados
-const TABELA_FESTAS = {
+const TABELA_FESTAS_PADRAO = {
   lunar: {
     label: 'Missão Lunar', janela: 'seg a qui · 13h às 16h',
     precos: { 1: { 10: 599, 20: 999, 30: 1299, 40: 1699 }, 2: { 10: 999, 20: 1499, 30: 2099, 40: 2599 }, 3: { 10: 1299, 20: 2299, 30: 3099, 40: 3999 } },
@@ -29,9 +33,50 @@ const TABELA_FESTAS = {
     precos: { 1: { 10: 799, 20: 1199, 30: 1599, 40: 1999 }, 2: { 10: 1399, 20: 2299, 30: 3099, 40: 3999 }, 3: { 10: 1799, 20: 3099, 30: 4399, 40: 5699 } },
   },
 };
+const MISSOES_VALIDAS = Object.keys(TABELA_FESTAS_PADRAO);
+const HORAS_VALIDAS = [1, 2, 3];
+const SALTONAUTAS_VALIDOS = [10, 20, 30, 40];
 
-function valorFesta(missao, horas, saltonautas) {
-  const m = TABELA_FESTAS[missao];
+const TABELA_DOC = db.collection('festasConfig').doc('tabela');
+const tabelaCache = createCache(async () => {
+  const snap = await TABELA_DOC.get();
+  return snap.exists && snap.data().missoes ? snap.data().missoes : TABELA_FESTAS_PADRAO;
+}, 5 * 60 * 1000);
+const getTabela = tabelaCache.cached;
+
+function sanitizarMissaoConfig(m) {
+  const label = String(m?.label || '').trim().slice(0, 60);
+  const janela = String(m?.janela || '').trim().slice(0, 80);
+  if (!label) throw new Error('Cada Missão precisa de um nome.');
+  const precos = {};
+  for (const h of HORAS_VALIDAS) {
+    precos[h] = {};
+    for (const s of SALTONAUTAS_VALIDOS) {
+      const v = num(m?.precos?.[h]?.[s]);
+      if (v <= 0) throw new Error(`Preço inválido em "${label}" (${h}H · ${s} saltonautas).`);
+      precos[h][s] = v;
+    }
+  }
+  return { label, janela, precos };
+}
+
+// salva a tabela inteira de uma vez (Master, ver rota PUT /api/festas/tabela)
+// - as 3 Missões (lunar/orbita/nebulosa) sao fixas na estrutura, so o
+// conteudo (nome, janela de horario, precos) e editavel; simplifica a UI
+// (grid fixo em vez de adicionar/remover linhas) e evita quebrar reservas
+// ja lancadas que gravaram o CODIGO da missao (nao o label)
+async function salvarTabela(missoes) {
+  const nova = {};
+  for (const chave of MISSOES_VALIDAS) {
+    nova[chave] = sanitizarMissaoConfig(missoes?.[chave]);
+  }
+  await TABELA_DOC.set({ missoes: nova, atualizadoEm: new Date().toISOString() }, { merge: true });
+  tabelaCache.invalidar();
+  return getTabela();
+}
+
+function valorFesta(missao, horas, saltonautas, tabela) {
+  const m = tabela?.[missao];
   if (!m) return null;
   const porHora = m.precos[Number(horas)];
   if (!porHora) return null;
@@ -96,8 +141,9 @@ async function criar({
   // preenchidos, o valor total sai da tabela (fonte da verdade), ignorando
   // o que tiver sido digitado. Sem pacote (venda antiga/avulsa), o valor
   // digitado continua valendo
-  const missaoOk = TABELA_FESTAS[missao] ? missao : null;
-  const valorTabela = missaoOk ? valorFesta(missaoOk, horas, saltonautas) : null;
+  const tabela = await getTabela();
+  const missaoOk = tabela[missao] ? missao : null;
+  const valorTabela = missaoOk ? valorFesta(missaoOk, horas, saltonautas, tabela) : null;
   if (missaoOk && valorTabela == null) throw new Error('Escolha horas (1 a 3) e saltonautas (10/20/30/40) válidos pra Missão.');
   const total = valorTabela != null ? valorTabela : num(valorTotal);
   if (total < 0) throw new Error('Valor total inválido.');
@@ -182,11 +228,12 @@ async function atualizar(id, patch) {
   if (patch.horaFim !== undefined) merge.horaFim = patch.horaFim || null;
   // trocar o pacote (Missão/horas/saltonautas) recalcula o valor pela tabela
   if (patch.missao !== undefined || patch.horas !== undefined || patch.saltonautas !== undefined) {
-    const missaoNova = patch.missao !== undefined ? (TABELA_FESTAS[patch.missao] ? patch.missao : null) : atual.missao;
+    const tabela = await getTabela();
+    const missaoNova = patch.missao !== undefined ? (tabela[patch.missao] ? patch.missao : null) : atual.missao;
     const horasNovas = patch.horas !== undefined ? patch.horas : atual.horas;
     const saltoNovos = patch.saltonautas !== undefined ? patch.saltonautas : atual.saltonautas;
     if (missaoNova) {
-      const v = valorFesta(missaoNova, horasNovas, saltoNovos);
+      const v = valorFesta(missaoNova, horasNovas, saltoNovos, tabela);
       if (v == null) throw new Error('Escolha horas (1 a 3) e saltonautas (10/20/30/40) válidos pra Missão.');
       merge.missao = missaoNova;
       merge.horas = Number(horasNovas);
@@ -293,7 +340,8 @@ async function remover(id) {
 }
 
 module.exports = {
-  STATUS_VALIDOS, TABELA_FESTAS, valorFesta, totalRecebido, restanteDevido,
+  STATUS_VALIDOS, valorFesta, totalRecebido, restanteDevido,
+  getTabela, salvarTabela,
   criar, listAll, listByUnidades, getOne, atualizar, remover,
   reabrirPagamento, registrarRecebimento,
   invalidar: () => festasCache.invalidar(),

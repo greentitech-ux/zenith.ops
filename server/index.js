@@ -3233,6 +3233,23 @@ app.get('/api/parque/financeiro.:formato(csv|pdf)', requireSection('parque'), as
 });
 
 // ---------- Saltiverso Patteo: reservas de festa ----------
+// tabela oficial de preços (Missão x horas x saltonautas) - editável pelo
+// Master direto em festas.html, sem precisar de deploy toda vez que a
+// promoção muda (ver festas.getTabela/salvarTabela)
+app.get('/api/festas/tabela', requireSection('festas'), async (req, res) => {
+  res.json(await festas.getTabela());
+});
+
+app.put('/api/festas/tabela', auth.requireMaster, async (req, res) => {
+  try {
+    const tabela = await festas.salvarTabela(req.body.missoes);
+    broadcast('festas-tabela-atualizada', {}, 'festas');
+    res.json(tabela);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/festas', requireSection('festas'), async (req, res) => {
   try {
     const { unidade, cliente, dataVenda, dataDeUso, horaInicio, horaFim, missao, horas, saltonautas, valorTotal, sinal, restante, observacao, referenciaVendaOriginal } = req.body;
