@@ -873,6 +873,17 @@ async function cardRH(){
     const [, m, d] = f.dataNascimento.split('-');
     return m===mesHoje && d===diaHoje;
   }).length;
+  // experiencia formal (30/60 dias) - mesma conta de diasRestantesAte usada
+  // em rh.html (negativo = ja vencido, ver fix do badge "vence hoje")
+  const diasRestantesRH = (dataIso)=>{
+    if(!dataIso) return null;
+    return Math.round((new Date(dataIso+'T00:00:00') - new Date(hoje+'T00:00:00'))/86400000);
+  };
+  const emExperiencia = ativos.filter(f=>f.experiencia && f.experiencia.etapa);
+  const exp30 = emExperiencia.filter(f=>f.experiencia.etapa==='30');
+  const exp60 = emExperiencia.filter(f=>f.experiencia.etapa==='60');
+  const exp30Venc = exp30.filter(f=>diasRestantesRH(f.experiencia.prazoEtapaAte)<0).length;
+  const exp60Venc = exp60.filter(f=>diasRestantesRH(f.experiencia.prazoEtapaAte)<0).length;
   return pcardWrap('🧑‍💼','RH','/rh.html', `
     <div class="pstats">
       ${statRow('Ativos', ativos.length)}
@@ -881,6 +892,10 @@ async function cardRH(){
       ${statRow('Decisão pendente (5+ dias)', testeVencido, testeVencido?'bad':'')}
       ${statRow('Em atestado', emAtestado, emAtestado?'bad':'')}
       ${statRow('Aniversariantes hoje', aniverHoje, aniverHoje?'ok':'')}
+      ${statRow('Exp. 30', exp30.length, exp30.length?'warn':'')}
+      ${statRow('Venc. (30 dias)', exp30Venc, exp30Venc?'bad':'')}
+      ${statRow('Exp. 60 (total 90)', exp60.length, exp60.length?'warn':'')}
+      ${statRow('Vencido (60 dias)', exp60Venc, exp60Venc?'bad':'')}
     </div>
   `);
 }
