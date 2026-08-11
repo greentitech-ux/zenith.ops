@@ -531,6 +531,7 @@ app.get('/api/me', (req, res) => {
     podeCatalogoInsumos: req.podeCatalogoInsumos,
     podeCadastrarOperadores: req.podeCadastrarOperadores,
     podeRhTodasUnidades: req.podeRhTodasUnidades,
+    podeRhCadastrarEfetivado: req.podeRhCadastrarEfetivado,
     precisaTrocarSenha: !!req.user.precisaTrocarSenha,
   });
 });
@@ -1887,6 +1888,14 @@ app.put('/api/users/:id/cadastrar-operadores', auth.requireMaster, async (req, r
 app.put('/api/users/:id/rh-todas-unidades', auth.requireMaster, async (req, res) => {
   try {
     res.json(await users.updatePodeRhTodasUnidades(req.params.id, req.body.podeRhTodasUnidades));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/users/:id/rh-cadastrar-efetivado', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await users.updatePodeRhCadastrarEfetivado(req.params.id, req.body.podeRhCadastrarEfetivado));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -3280,11 +3289,23 @@ function podeAcessarUnidadeRh(req, unidade) {
   return req.isMaster || req.isAdmin || req.podeRhTodasUnidades || (req.permissions.unidades || []).includes(unidade);
 }
 
+// so Master/Admin ou quem tem a tag "RH: pode cadastrar efetivado direto"
+// (podeRhCadastrarEfetivado) pode cadastrar alguem ja como "efetivado" -
+// contratacao direta, sem passar pelo teste de 5 dias. A loja (gerente
+// comum, so com a secao 'rh') continua liberada pra Extra e Candidato
+// (teste), mas nao pode pular direto pra efetivado - so o RH de verdade
+function podeCadastrarEfetivado(req) {
+  return req.isMaster || req.isAdmin || req.podeRhCadastrarEfetivado;
+}
+
 app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'), async (req, res) => {
   try {
     const { unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro } = req.body;
     if (!podeAcessarUnidadeRh(req, unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    if (tipoCadastro === 'efetivado' && !podeCadastrarEfetivado(req)) {
+      return res.status(403).json({ error: 'Só o RH pode cadastrar alguém já efetivado direto. Cadastre como Extra ou Candidato (teste de 5 dias).' });
     }
     let curriculo = null;
     if (req.file) {
@@ -3314,7 +3335,13 @@ app.patch('/api/rh/funcionarios/:id', requireSection('rh'), async (req, res) => 
     if (!podeAcessarUnidadeRh(req, atual.unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
-    const registro = await rh.atualizar(req.params.id, req.body);
+    const patch = { ...req.body };
+    // data de admissao/inicio do teste so o Master corrige - pensado pra
+    // quando ninguem informou certinho no cadastro e a pessoa ja esta la ha
+    // um tempo; se vier de quem nao e Master, ignora silenciosamente em vez
+    // de rejeitar o resto do PATCH (o form manda tudo junto)
+    if (patch.dataAdmissao !== undefined && !req.isMaster) delete patch.dataAdmissao;
+    const registro = await rh.atualizar(req.params.id, patch);
     broadcast('rh-funcionario-atualizado', registro, 'rh');
     res.json(registro);
   } catch (err) {
@@ -3393,6 +3420,30 @@ app.delete('/api/rh/funcionarios/:id', auth.requireMaster, async (req, res) => {
 // ---------- RH: check-in/check-out por foto (kiosk fixo na entrada da loja,
 // ver server/public/rh-checkin.html) - identifica quem apareceu num dia
 // qualquer sem depender da memoria do gerente ----------
+
+// le lat/lng do body (manda junto com a foto no multipart) - o navegador
+// pega isso sozinho, sem nenhum campo/prompt proprio nosso pedindo (so o
+// prompt nativo do navegador na 1a vez); se a pessoa negar ou o dispositivo
+// nao tiver GPS, os campos simplesmente nao vem e o check-in segue normal
+function lerLocalizacaoDoBody(body) {
+  const lat = Number(body.lat);
+  const lng = Number(body.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const precisao = Number(body.precisao);
+  return { lat, lng, precisao: Number.isFinite(precisao) ? precisao : null };
+}
+
+// a localizacao so aparece pra quem e Master de verdade (nem Admin, nem RH
+// todas-unidades) - pedido explicito do usuario ("silenciosamente so pro
+// master"); pra todo mundo mais, some do JSON antes de responder
+function sanitizarCheckin(c, isMaster) {
+  if (isMaster || !c) return c;
+  const limpo = { ...c };
+  if (limpo.entrada) limpo.entrada = { ...limpo.entrada, localizacao: undefined };
+  if (limpo.saida) limpo.saida = { ...limpo.saida, localizacao: undefined };
+  return limpo;
+}
+
 app.post('/api/rh/checkins', requireSection('rh'), upload.single('foto'), async (req, res) => {
   try {
     const { funcionarioId } = req.body;
@@ -3406,9 +3457,10 @@ app.post('/api/rh/checkins', requireSection('rh'), upload.single('foto'), async 
       const path = await storage.salvarArquivo(funcionarioId, req.file, 'rh-checkins');
       foto = { path, tipo: req.file.mimetype };
     }
-    const registro = await rhCheckin.registrarEntrada({ funcionarioId, foto, registradoPorEmail: req.user.email });
-    broadcast('rh-checkin-atualizado', registro, 'rh');
-    res.json(registro);
+    const localizacao = lerLocalizacaoDoBody(req.body);
+    const registro = await rhCheckin.registrarEntrada({ funcionarioId, foto, localizacao, registradoPorEmail: req.user.email });
+    broadcast('rh-checkin-atualizado', { id: registro.id, unidade: registro.unidade }, 'rh');
+    res.json(sanitizarCheckin(registro, req.isMaster));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -3426,9 +3478,10 @@ app.post('/api/rh/checkins/:id/saida', requireSection('rh'), upload.single('foto
       const path = await storage.salvarArquivo(atual.funcionarioId, req.file, 'rh-checkins');
       foto = { path, tipo: req.file.mimetype };
     }
-    const registro = await rhCheckin.registrarSaida(req.params.id, { foto, registradoPorEmail: req.user.email });
-    broadcast('rh-checkin-atualizado', registro, 'rh');
-    res.json(registro);
+    const localizacao = lerLocalizacaoDoBody(req.body);
+    const registro = await rhCheckin.registrarSaida(req.params.id, { foto, localizacao, registradoPorEmail: req.user.email });
+    broadcast('rh-checkin-atualizado', { id: registro.id, unidade: registro.unidade }, 'rh');
+    res.json(sanitizarCheckin(registro, req.isMaster));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -3438,14 +3491,14 @@ app.get('/api/rh/checkins', requireSection('rh'), async (req, res) => {
   // Master/Admin/RH-todas-unidades: null = sem filtro de unidade (ver
   // rhCheckin.listByUnidadesData)
   const unidades = (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) ? null : (req.permissions.unidades || []);
-  res.json(await rhCheckin.listByUnidadesData(unidades, req.query.data));
+  const lista = await rhCheckin.listByUnidadesData(unidades, req.query.data);
+  res.json(lista.map((c) => sanitizarCheckin(c, req.isMaster)));
 });
 
 app.get('/api/rh/checkins/abertos', requireSection('rh'), async (req, res) => {
-  if (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) {
-    return res.json(await rhCheckin.listAbertos(null));
-  }
-  res.json(await rhCheckin.listAbertos(req.permissions.unidades || []));
+  const unidades = (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) ? null : (req.permissions.unidades || []);
+  const lista = await rhCheckin.listAbertos(unidades);
+  res.json(lista.map((c) => sanitizarCheckin(c, req.isMaster)));
 });
 
 app.get('/api/rh/checkins/:id/foto/:tipo', requireSection('rh'), async (req, res) => {

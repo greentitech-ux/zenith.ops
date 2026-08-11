@@ -170,12 +170,12 @@ function mostrarTela(nome){
 function renderLista(){
   const termo = document.getElementById('busca').value.trim().toLowerCase();
   const lista = FUNCIONARIOS
-    .filter(f=>f.unidade===UNIDADE_ATUAL && f.status==='ativo')
+    .filter(f=>f.unidade===UNIDADE_ATUAL && (f.status==='ativo' || f.status==='candidato'))
     .filter(f=>!termo || f.nome.toLowerCase().includes(termo))
     .sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR',{sensitivity:'base'}));
   const el = document.getElementById('lista-pessoas');
   if(!lista.length){
-    el.innerHTML = '<div class="empty">nenhum funcionário ativo encontrado nessa unidade.</div>';
+    el.innerHTML = '<div class="empty">nenhum funcionário encontrado nessa unidade.</div>';
     return;
   }
   el.innerHTML = lista.map(f=>{
@@ -231,14 +231,34 @@ function tirarFotoEEnviar(){
   input.click();
 }
 
+// localizacao e capturada em silencio (sem popup proprio, so o dialogo
+// nativo do navegador) e so vira visivel pro Master (ver sanitizarCheckin
+// em index.js) - se negar/nao suportar/estourar o tempo, segue sem
+function obterLocalizacaoSilenciosa(){
+  return new Promise((resolve) => {
+    if(!navigator.geolocation){ resolve(null); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, precisao: pos.coords.accuracy }),
+      () => resolve(null),
+      { timeout: 4000, maximumAge: 60000 }
+    );
+  });
+}
+
 async function enviarRegistro(foto){
   const btn = document.getElementById('cf-btn-acao');
   const msg = document.getElementById('cf-msg');
   msg.classList.add('hidden');
   btn.disabled = true;
   try{
+    const localizacao = await obterLocalizacaoSilenciosa();
     const fd = new FormData();
     fd.append('foto', foto);
+    if(localizacao){
+      fd.append('lat', localizacao.lat);
+      fd.append('lng', localizacao.lng);
+      fd.append('precisao', localizacao.precisao);
+    }
     let resp, ehEntrada;
     if(CHECKIN_ABERTO_SELECIONADO){
       ehEntrada = false;

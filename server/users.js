@@ -273,6 +273,21 @@ async function updatePodeRhTodasUnidades(id, valor) {
   return toPublic(await ref.get());
 }
 
+// tag "RH: pode cadastrar efetivado direto": sem essa tag, quem tem a secao
+// 'rh' (tipicamente o gerente da loja) so cadastra Extra ou Candidato (teste
+// de 5 dias) - nao pode pular direto pra "ja efetivado". Com a tag, cadastra
+// os 3 tipos - pensado pro time de RH de verdade, nao pra loja
+async function updatePodeRhCadastrarEfetivado(id, valor) {
+  const ref = usersRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  if (snap.data().role === 'master') throw new Error('O acesso Master já pode tudo, não precisa dessa permissão.');
+  await ref.update({ podeRhCadastrarEfetivado: !!valor });
+  invalidarUsuario(id);
+  usersCache.invalidar();
+  return toPublic(await ref.get());
+}
+
 // tag de cargo/funcao (Loja, Gerente, Tecnico, Manutencao). Alem de rotulo
 // na tela de Usuarios, algumas tem efeito real: Gerente aprova check-out do
 // Parque, e a tag define a TELA INICIAL da pessoa ao entrar no app (ver
@@ -392,6 +407,7 @@ function toPublic(doc) {
     podeCatalogoInsumos: data.role === 'master' ? null : !!data.podeCatalogoInsumos,
     podeCadastrarOperadores: data.role === 'master' ? null : !!data.podeCadastrarOperadores,
     podeRhTodasUnidades: data.role === 'master' ? null : !!data.podeRhTodasUnidades,
+    podeRhCadastrarEfetivado: data.role === 'master' ? null : !!data.podeRhCadastrarEfetivado,
     sessaoLonga: data.role === 'master' ? null : !!data.sessaoLonga,
     cargo: data.role === 'master' ? null : data.cargo || null,
     createdAt: data.createdAt,
@@ -414,6 +430,7 @@ module.exports = {
   updatePodeCatalogoInsumos,
   updatePodeCadastrarOperadores,
   updatePodeRhTodasUnidades,
+  updatePodeRhCadastrarEfetivado,
   updateSessaoLonga,
   updateCargo,
   updateUsername,

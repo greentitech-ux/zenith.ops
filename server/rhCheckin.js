@@ -7,7 +7,9 @@
 // na saida, repete o processo pra fechar o check-in. A foto e o horario sao
 // o registro/prova de quem esteve na loja e quando - sem reconhecimento
 // facial nem nada automatico, so tira a duvida "quem apareceu hoje" com
-// prova visual e timestamp.
+// prova visual e timestamp. Vale tanto pra quem ja e "ativo" quanto pra
+// candidato em teste de 5 dias (ver STATUS_PODE_CHECKIN) - so quem foi
+// desligado nao faz mais check-in.
 //
 // Colecao propria (rhCheckins), separada de rhFuncionarios (rh.js), porque
 // cresce todo dia (um par entrada/saida por pessoa por dia), enquanto a
@@ -39,12 +41,21 @@ async function getOne(id) {
   return doc.exists ? doc.data() : null;
 }
 
+// quem pode fazer check-in: funcionario ativo OU candidato em teste de 5
+// dias (tambem precisa ser identificado no dia que aparece, mesmo antes de
+// ser efetivado) - so nao deixa quem ja foi desligado (inativo)
+const STATUS_PODE_CHECKIN = ['ativo', 'candidato'];
+
 // registra a ENTRADA - so deixa 1 check-in aberto por vez por pessoa (se ja
-// tem um aberto, tem que fechar - checkout - antes de abrir outro)
-async function registrarEntrada({ funcionarioId, foto, registradoPorEmail }) {
+// tem um aberto, tem que fechar - checkout - antes de abrir outro). A
+// localizacao (se o navegador conseguiu, silenciosamente, sem UI propria
+// pedindo - so o prompt nativo do proprio navegador) fica guardada mas so e
+// exposta pro Master nas rotas de leitura (ver sanitizarLocalizacao em
+// index.js)
+async function registrarEntrada({ funcionarioId, foto, localizacao, registradoPorEmail }) {
   const funcionario = await rh.getOne(funcionarioId);
   if (!funcionario) throw new Error('Funcionário não encontrado.');
-  if (funcionario.status !== 'ativo') throw new Error('Só funcionários ativos podem fazer check-in.');
+  if (!STATUS_PODE_CHECKIN.includes(funcionario.status)) throw new Error('Só funcionários ativos ou em teste podem fazer check-in.');
 
   const todos = await listAll();
   const aberto = todos.find((c) => c.funcionarioId === funcionarioId && c.status === 'aberto');
@@ -58,7 +69,7 @@ async function registrarEntrada({ funcionarioId, foto, registradoPorEmail }) {
     funcionarioNome: funcionario.nome,
     unidade: funcionario.unidade,
     data: hojeBrasilia(),
-    entrada: { horario: agora, foto: foto || null, registradoPorEmail: registradoPorEmail || null },
+    entrada: { horario: agora, foto: foto || null, localizacao: localizacao || null, registradoPorEmail: registradoPorEmail || null },
     saida: null,
     status: 'aberto',
     criadoEm: agora,
@@ -70,7 +81,7 @@ async function registrarEntrada({ funcionarioId, foto, registradoPorEmail }) {
 }
 
 // registra a SAIDA de um check-in aberto especifico
-async function registrarSaida(id, { foto, registradoPorEmail }) {
+async function registrarSaida(id, { foto, localizacao, registradoPorEmail }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Check-in não encontrado.');
@@ -78,7 +89,7 @@ async function registrarSaida(id, { foto, registradoPorEmail }) {
   if (atual.status !== 'aberto') throw new Error('Esse check-in já foi encerrado.');
   const agora = new Date().toISOString();
   const merge = {
-    saida: { horario: agora, foto: foto || null, registradoPorEmail: registradoPorEmail || null },
+    saida: { horario: agora, foto: foto || null, localizacao: localizacao || null, registradoPorEmail: registradoPorEmail || null },
     status: 'fechado',
     atualizadoEm: agora,
   };

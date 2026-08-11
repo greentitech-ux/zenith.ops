@@ -39,7 +39,11 @@ function validarDataOuNull(v, campo) {
   return v;
 }
 
-const TIPOS_CADASTRO = ['extra', 'candidato'];
+// "efetivado" e restrito: so Master/Admin/quem tem a tag podeRhCadastrarEfetivado
+// pode usar (ver podeCadastrarEfetivado em index.js) - a loja (gerente comum,
+// so com a secao 'rh') cadastra Extra ou Candidato, nunca pula direto pra
+// "ja efetivado"
+const TIPOS_CADASTRO = ['extra', 'candidato', 'efetivado'];
 
 async function criar({
   unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro,
@@ -49,10 +53,10 @@ async function criar({
   const nomeOk = limpar(nome, 150);
   if (!nomeOk) throw new Error('Informe o nome completo.');
   const tipo = TIPOS_CADASTRO.includes(tipoCadastro) ? tipoCadastro : 'extra';
-  // extra (avulso) ja entra como ativo - so precisa de visibilidade, nao passa
-  // por decisao de contratacao. candidato (teste de 5 dias) so vira "ativo"
-  // quando efetivado (ver registrarDecisaoTeste) - ate la fica de fora da
-  // Ficha de Ativos, so aparece em Acompanhamento de Teste
+  // extra (avulso) e efetivado (contratacao direta) ja entram como ativo -
+  // nao passam por decisao de contratacao. candidato (teste de 5 dias) so
+  // vira "ativo" quando efetivado (ver registrarDecisaoTeste) - ate la fica
+  // de fora da Ficha de Ativos, so aparece em Acompanhamento de Teste
   const emTeste = tipo === 'candidato';
   const status = tipo === 'candidato' ? 'candidato' : 'ativo';
 
