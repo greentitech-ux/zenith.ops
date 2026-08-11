@@ -705,10 +705,10 @@ async function boot(){
     return;
   }
 
-  // Admin (alem de Master) tem visao corporativa cross-unidade - mesmo
-  // criterio do backend (podeAcessarUnidadeRh em index.js), pra dar pro
-  // time de RH acesso a todas as unidades do grupo direto no cadastro
-  const unidades = (isMaster || ME.isAdmin) ? Object.keys(UNIDADES_NOMES) : (ME.permissions?.unidades||[]).filter(u=>UNIDADES_NOMES[u]);
+  // Admin ou a tag dedicada "RH (todas as unidades)" - mesmo criterio do
+  // backend (podeAcessarUnidadeRh em index.js), pra dar pro time de RH
+  // acesso a todas as unidades do grupo direto no cadastro
+  const unidades = (isMaster || ME.isAdmin || ME.podeRhTodasUnidades) ? Object.keys(UNIDADES_NOMES) : (ME.permissions?.unidades||[]).filter(u=>UNIDADES_NOMES[u]);
   const optsUnidades = unidades.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('');
   document.getElementById('c-unidade').innerHTML = optsUnidades || '<option value="" disabled selected>nenhuma unidade liberada</option>';
   document.getElementById('at-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);

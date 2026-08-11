@@ -557,7 +557,7 @@ function caminhoSubgrupo(id){
 // Acoes marcar cada tag uma por uma ----------
 const CARGOS = [ ['','Sem cargo'], ['loja','🏬 Loja'], ['gerente','👔 Gerente'], ['assistente-gerente','🧑‍💼 Ass. Ger'], ['tecnico','🔧 Técnico'], ['suporte','🎧 Suporte'], ['manutencao','🛠️ Manutenção'], ['operador','👷 Operador'] ];
 function tagsFieldsetHtml(prefixo, tags){
-  tags = tags || { cargo:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, sessaoLonga:false };
+  tags = tags || { cargo:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, podeRhTodasUnidades:false, sessaoLonga:false };
   const cargoHtml = CARGOS.map(([v,l])=>{
     const marcado = (tags.cargo||'')===v;
     return `<label><input type="radio" name="${prefixo}-cargo" value="${v}" ${marcado?'checked':''}> ${l}</label>`;
@@ -571,6 +571,7 @@ function tagsFieldsetHtml(prefixo, tags){
       <label><input type="checkbox" id="${prefixo}-tag-catalogo-estoque" ${tags.podeCatalogoEstoque?'checked':''}> 📦 Catálogo do Estoque</label>
       <label><input type="checkbox" id="${prefixo}-tag-catalogo-insumos" ${tags.podeCatalogoInsumos?'checked':''}> 🥤 Insumos (Abastec. Carrinho)</label>
       <label><input type="checkbox" id="${prefixo}-tag-operadores" ${tags.podeCadastrarOperadores?'checked':''}> 👥 Operadores (Abastec. Carrinho)</label>
+      <label><input type="checkbox" id="${prefixo}-tag-rh-todas-unidades" ${tags.podeRhTodasUnidades?'checked':''}> 🧑‍💼 RH (todas as unidades)</label>
       <label><input type="checkbox" id="${prefixo}-tag-sessao-longa" ${tags.sessaoLonga?'checked':''}> 🔒 Manter sempre conectado (30 dias — login de loja/terminal)</label>
     </div>`;
 }
@@ -581,6 +582,7 @@ function lerTagsForm(prefixo){
     podeCatalogoEstoque: document.getElementById(prefixo+'-tag-catalogo-estoque').checked,
     podeCatalogoInsumos: document.getElementById(prefixo+'-tag-catalogo-insumos').checked,
     podeCadastrarOperadores: document.getElementById(prefixo+'-tag-operadores').checked,
+    podeRhTodasUnidades: document.getElementById(prefixo+'-tag-rh-todas-unidades').checked,
     sessaoLonga: document.getElementById(prefixo+'-tag-sessao-longa').checked,
   };
 }
@@ -591,6 +593,7 @@ async function salvarTagsUsuario(id, tags){
     fetch('/api/users/'+id+'/catalogo-estoque', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeCatalogoEstoque: tags.podeCatalogoEstoque})}),
     fetch('/api/users/'+id+'/catalogo-insumos', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeCatalogoInsumos: tags.podeCatalogoInsumos})}),
     fetch('/api/users/'+id+'/cadastrar-operadores', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeCadastrarOperadores: tags.podeCadastrarOperadores})}),
+    fetch('/api/users/'+id+'/rh-todas-unidades', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeRhTodasUnidades: tags.podeRhTodasUnidades})}),
     fetch('/api/users/'+id+'/sessao-longa', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({sessaoLonga: tags.sessaoLonga})}),
   ]);
   for(const r of respostas){
@@ -907,6 +910,7 @@ function passaBuscaUsuario(u){
     u.role==='master' ? 'master' : 'user',
     u.cargo, u.isAdmin?'admin':'', u.podeCatalogoEstoque?'catálogo estoque':'',
     u.podeCatalogoInsumos?'insumos':'', u.podeCadastrarOperadores?'operadores':'',
+    u.podeRhTodasUnidades?'rh todas unidades':'',
   ];
   const alvo = [u.email, u.username, ...tags, ...(perms.sections||[]), ...secoesLabels, ...(perms.unidades||[]), ...unidadesLabels]
     .filter(Boolean).join(' ').toLowerCase();
@@ -950,6 +954,7 @@ function renderUsers(){
     if (u.podeCatalogoEstoque) tags.push(`<span class="badge catalogo" title="Pode gerenciar o Catálogo do Estoque">📦 catálogo</span>`);
     if (u.podeCatalogoInsumos) tags.push(`<span class="badge catalogo" title="Pode gerenciar o cadastro de insumos do Abastecimento do Carrinho">🥤 insumos</span>`);
     if (u.podeCadastrarOperadores) tags.push(`<span class="badge catalogo" title="Pode cadastrar operadores (login local) do Abastecimento do Carrinho">👥 operadores</span>`);
+    if (u.podeRhTodasUnidades) tags.push(`<span class="badge catalogo" title="Vê e cadastra/decide RH de todas as unidades do grupo, não só das próprias permissões">🧑‍💼 RH todas unidades</span>`);
     if (u.sessaoLonga) tags.push(`<span class="badge catalogo" title="Sessão dura 30 dias em vez de 8h (login de loja/terminal)">🔒 sempre conectado</span>`);
     if (horario && horario.ativo) tags.push(`<span class="badge horario" title="Acesso liberado só nesse intervalo, todo dia">🕐 ${horario.inicio}–${horario.fim}</span>`);
     tags.push(`<span class="badge ${u.online?'on':'off'}" style="cursor:pointer;" onclick="abrirSessoes('${u.id}')" title="${u.ultimaAtividadeEm ? 'Última atividade: '+formatarRelativo(u.ultimaAtividadeEm) : 'Nunca fez login'} - clique pra ver os locais">${u.online?'🟢':'⚪'} ${u.sessoesAtivas} ${u.sessoesAtivas===1?'local':'locais'}</span>`);
@@ -1098,7 +1103,7 @@ function editarPermissoes(id){
   document.getElementById('p-unidades').innerHTML = unidadesChecksHtml(new Set(perms.unidades));
   document.getElementById('p-groups').innerHTML = subgroupChecksHtml(new Set(perms.vaultSubgroups));
   document.getElementById('p-tipos-solicitacao').innerHTML = checksHtml('tiposSolicitacao', TIPOS_SOLICITACAO, o=>o[0], o=>o[1], new Set(perms.tiposSolicitacao||[]));
-  document.getElementById('p-tags').innerHTML = tagsFieldsetHtml('p', { cargo: u.cargo||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, sessaoLonga: !!u.sessaoLonga });
+  document.getElementById('p-tags').innerHTML = tagsFieldsetHtml('p', { cargo: u.cargo||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeRhTodasUnidades: !!u.podeRhTodasUnidades, sessaoLonga: !!u.sessaoLonga });
   document.getElementById('perm-err').classList.add('hidden');
   permOverlay.classList.add('show');
 }
