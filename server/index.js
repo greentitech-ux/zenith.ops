@@ -2267,7 +2267,9 @@ async function fechamentosFiltrados(req) {
 // fato preenchidos) - usado pelos dois formatos de relatorio abaixo
 async function montarRelatorioFechamentos(req) {
   const [fechamentos, listaGrupos] = await Promise.all([fechamentosFiltrados(req), grupos.list()]);
-  return fechamentosReport.prepararRelatorio(fechamentos, listaGrupos);
+  // colunas escondidas no seletor 🧩 Colunas da tela (fechamentos.html)
+  const ocultas = new Set(String(req.query.ocultas || '').split(',').filter(Boolean));
+  return fechamentosReport.prepararRelatorio(fechamentos, listaGrupos, ocultas);
 }
 
 // mesma agregacao por unidade do painel "Comparativo por unidade" da tela
