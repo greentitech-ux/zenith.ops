@@ -62,12 +62,17 @@ function podeReceberSolicitacao(sub) {
 }
 
 // alerta critico do Beniboy (bot nao conseguiu resolver e chamou um
-// atendente): vai SO pro Master, nunca pro Admin - e um alarme sonoro que
-// segue tocando ate a pessoa silenciar (ver alerta-beniboy.html), entao so
-// faz sentido pra quem de fato precisa ser acordado por isso
+// atendente): vai pro Master e pra quem tem a secao/tag "suporte" - nunca
+// pro Admin sem essa tag - e um alarme sonoro que segue tocando ate a
+// pessoa silenciar (ver alerta-beniboy.html), entao so faz sentido pra
+// quem de fato precisa ser acordado por isso. Cobre TODOS os acessos
+// logados dessa pessoa (cada dispositivo tem sua propria inscricao push),
+// principalmente celular com o app fechado.
 function podeReceberCritico(sub) {
   const meta = sub.meta;
-  return !!meta && meta.isMaster;
+  if (!meta) return false;
+  if (meta.isMaster) return true;
+  return (meta.sections || []).includes('suporte');
 }
 
 async function removeSubscription(endpoint) {
@@ -183,7 +188,7 @@ async function notifyAbastecimento(title, body, tag, secao) {
 }
 
 // Beniboy nao conseguiu resolver sozinho e chamou um atendente: alarme
-// sonoro alto pro Master (so ele - ver podeReceberCritico), que continua
+// sonoro alto pro Master + tag Suporte (ver podeReceberCritico), que continua
 // tocando ate silenciar na propria notificacao (alerta-beniboy.html), pra
 // nao passar batido mesmo com o celular em outro app
 async function notifyBeniboyEscalonamento(chat, motivo) {

@@ -4799,11 +4799,15 @@ async function acionarBeniboy(chatId) {
     }
     if (r.chamouAtendente) {
       push.notifySolicitacao('💬 Beniboy pediu um atendente humano', `${r.chat?.nome || ''}${r.motivoAtendente ? ' · ' + r.motivoAtendente : ''}`.slice(0, 120), chatId, '/tecnico.html');
-      // alarme critico: alem do push normal (Master/Admin), o Master recebe um
-      // alerta sonoro que insiste ate ser silenciado - push (celular fechado/
-      // outro app) + SSE (app aberto na hora, ver suporte-chat.js)
+      // alarme critico: alem do push normal (Master/Admin), o Master + tag
+      // Suporte recebem um alerta sonoro que insiste ate ser silenciado -
+      // push em TODOS os acessos logados dessa pessoa (celular fechado/outro
+      // app, ver podeReceberCritico) + SSE (app aberto na hora, ver
+      // suporte-chat.js). Seção 'suporte' de verdade (ver VALID_SECTIONS em
+      // users.js): Master passa direto (bypass no broadcast()), quem tem
+      // essa seção recebe tambem, Admin sem a seção fica de fora.
       push.notifyBeniboyEscalonamento(r.chat, r.motivoAtendente);
-      broadcast('beniboy-escalonamento', { chatId, nome: r.chat?.nome || '', motivo: r.motivoAtendente || '' }, 'beniboy-master-only');
+      broadcast('beniboy-escalonamento', { chatId, nome: r.chat?.nome || '', motivo: r.motivoAtendente || '' }, 'suporte');
     }
   } catch (err) {
     console.error('[suporteBot] falha no acionamento:', err.message);
