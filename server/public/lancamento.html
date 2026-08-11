@@ -415,6 +415,16 @@ function agoraBrasilia(){
 }
 function isoLocalBR(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function hojeBrasilia(){ return isoLocalBR(agoraBrasilia()); }
+// "dia do fechamento": da 00h ate 12h a data continua sendo a de ONTEM (o
+// caixa que fecha de madrugada ainda pertence ao expediente do dia
+// anterior) - so a partir das 12h01 e que passa a ser a data de hoje,
+// valendo ate as 12h do dia seguinte de novo. So vale pro campo de data do
+// Fechamento (f-data) - Sangria/Depósito continua no dia civil normal.
+function dataFechamentoBrasilia(){
+  const agora = agoraBrasilia();
+  if(agora.getHours() < 12) agora.setDate(agora.getDate() - 1);
+  return isoLocalBR(agora);
+}
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
@@ -809,7 +819,7 @@ document.getElementById('form-sangria').addEventListener('submit', async (ev)=>{
 
 function resetarForm(){
   document.getElementById('form-lancar').reset();
-  document.getElementById('f-data').value = hojeBrasilia();
+  document.getElementById('f-data').value = dataFechamentoBrasilia();
   MAQUINAS = []; SAIDAS = [];
   adicionarMaquina();
   renderSaidas();
@@ -959,8 +969,8 @@ async function boot(){
     try{ GRUPOS_KPI = await fetch('/api/grupos').then(r=>r.json()); }catch(e){ GRUPOS_KPI = []; }
     const selUnidade = document.getElementById('f-unidade');
     selUnidade.innerHTML = opcoesUnidades(unidades);
-    document.getElementById('f-data').value = hojeBrasilia();
-    document.getElementById('f-data').max = hojeBrasilia();
+    document.getElementById('f-data').value = dataFechamentoBrasilia();
+    document.getElementById('f-data').max = dataFechamentoBrasilia();
     adicionarMaquina();
     renderSaidas();
     aplicarFranquia(selUnidade.value);

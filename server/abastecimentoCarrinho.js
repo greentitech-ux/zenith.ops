@@ -24,22 +24,49 @@ const TIPOS = ['PEDIDO', 'ENVIO', 'CONTAGEM'];
 const SABORES = ['calabresa', 'pepperoni', 'mussarela'];
 
 // ---------- config do abastecimento (Master) ----------
-// por enquanto so os HORARIOS em que o popup de contagem aparece pro lado
-// do carrinho (quem assume o turno lanca a contagem como primeira coisa)
+// os HORARIOS em que o popup de contagem aparece pro lado do carrinho (quem
+// assume o turno lanca a contagem como primeira coisa) + os TEMPOS dos 3
+// alarmes do fluxo (pedido/envio/recebimento, ver abastecimento.html):
+// - alertaPedidoMin: contagem regressiva do pedido novo ate a loja confirmar
+//   (marcar "Estamos preparando") - default 10min, igual sempre foi
+// - alertaEnvioMin: intervalo do lembrete recorrente pra loja enviar depois
+//   que ja marcou "em preparo" - default 5min
+// - alertaRecebimentoMin: tolerancia antes do carrinho ser cobrado a
+//   confirmar o que chegou (tanto a espera inicial quanto o "considerar
+//   depois") - default 7min
 const CONFIG_DOC = db.collection('abastecimentoConfig').doc('config');
+const ALERTA_MIN_DEFAULT = { alertaPedidoMin: 10, alertaEnvioMin: 5, alertaRecebimentoMin: 7 };
+const ALERTA_MIN_LIMITES = { min: 1, max: 60 };
+
+function sanitizarAlertaMin(v, padrao) {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return padrao;
+  return Math.min(ALERTA_MIN_LIMITES.max, Math.max(ALERTA_MIN_LIMITES.min, n));
+}
 
 async function getConfig() {
   const snap = await CONFIG_DOC.get();
   const data = snap.exists ? snap.data() : {};
-  return { horasContagem: Array.isArray(data.horasContagem) ? data.horasContagem : [] };
+  return {
+    horasContagem: Array.isArray(data.horasContagem) ? data.horasContagem : [],
+    alertaPedidoMin: sanitizarAlertaMin(data.alertaPedidoMin, ALERTA_MIN_DEFAULT.alertaPedidoMin),
+    alertaEnvioMin: sanitizarAlertaMin(data.alertaEnvioMin, ALERTA_MIN_DEFAULT.alertaEnvioMin),
+    alertaRecebimentoMin: sanitizarAlertaMin(data.alertaRecebimentoMin, ALERTA_MIN_DEFAULT.alertaRecebimentoMin),
+  };
 }
 
-async function salvarConfig({ horasContagem }) {
+async function salvarConfig({ horasContagem, alertaPedidoMin, alertaEnvioMin, alertaRecebimentoMin }) {
+  const atual = await getConfig();
   const limpas = (Array.isArray(horasContagem) ? horasContagem : [])
     .map((h) => String(h || '').trim())
     .filter((h) => /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(h))
     .slice(0, 6);
-  await CONFIG_DOC.set({ horasContagem: limpas }, { merge: true });
+  await CONFIG_DOC.set({
+    horasContagem: limpas,
+    alertaPedidoMin: alertaPedidoMin == null ? atual.alertaPedidoMin : sanitizarAlertaMin(alertaPedidoMin, atual.alertaPedidoMin),
+    alertaEnvioMin: alertaEnvioMin == null ? atual.alertaEnvioMin : sanitizarAlertaMin(alertaEnvioMin, atual.alertaEnvioMin),
+    alertaRecebimentoMin: alertaRecebimentoMin == null ? atual.alertaRecebimentoMin : sanitizarAlertaMin(alertaRecebimentoMin, atual.alertaRecebimentoMin),
+  }, { merge: true });
   return getConfig();
 }
 

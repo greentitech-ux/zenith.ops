@@ -76,8 +76,9 @@
   }
   @media (max-width:480px){ .szc-panel{right:8px;bottom:72px;} .szc-btn{right:12px;bottom:12px;}
     .szc-bot-nome-wrap{right:70px;bottom:16px;} }
-  /* alarme critico: Beniboy chamou o Master porque nao conseguiu resolver
-     sozinho - tela cheia, vermelha, insistente ate silenciar */
+  /* alarme critico: Beniboy chamou um atendente (Master + tag Suporte)
+     porque nao conseguiu resolver sozinho - tela cheia, vermelha,
+     insistente ate silenciar */
   .szc-alarme{position:fixed;inset:0;z-index:99999;background:linear-gradient(160deg,#3a0a0a,#7a1414);
     color:#fff;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;
     text-align:center;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
@@ -360,7 +361,7 @@
   //   qualquer aba, com resposta inline. Fechou? O marcador e salvo e a
   //   conversa continua na Central do Beniboy (💬 Chats de suporte).
   // - MASTER: o proprio icone 💬 vira a central de chats (lista + conversa).
-  const ATEND = { ativo: false, ehMaster: false, chats: [], chatAberto: null, timer: null };
+  const ATEND = { ativo: false, ehMaster: false, podeAlarme: false, chats: [], chatAberto: null, timer: null };
   const LS_ATEND_VISTO = 'szcAtendVisto:'; // + chatId -> "em" da ultima msg de visitante ja vista
 
   const badge = el('<span style="position:absolute;top:-4px;right:-4px;background:#ff5c5c;color:#fff;font-size:10.5px;font-weight:700;border-radius:10px;padding:1px 6px;display:none;font-family:ui-monospace,monospace;">0</span>');
@@ -516,12 +517,13 @@
     }
   });
 
-  // ---------- alarme critico: Beniboy chamou o Master porque nao conseguiu
-  // resolver sozinho. Toca uma sirene alta em loop + vibra o aparelho ate a
-  // pessoa silenciar - dispara tanto por SSE (app aberto em alguma pagina,
-  // ver atendInit abaixo) quanto pela notificacao push critica (celular
-  // fechado/outro app - ver sw.js), que acorda essa mesma tela se a pagina
-  // ja estiver aberta em segundo plano ----------
+  // ---------- alarme critico: Beniboy chamou um atendente (Master + tag
+  // Suporte) porque nao conseguiu resolver sozinho. Toca uma sirene alta em
+  // loop + vibra o aparelho ate a pessoa silenciar - dispara tanto por SSE
+  // (app aberto em alguma pagina, ver atendInit abaixo) quanto pela
+  // notificacao push critica (celular fechado/outro app - ver sw.js), que
+  // acorda essa mesma tela se a pagina ja estiver aberta em segundo
+  // plano ----------
   let alarmeAtivo = false;
   let alarmeAudioCtx = null;
   let alarmeSirenTimer = null;
@@ -557,7 +559,7 @@
   }
 
   function dispararAlarmeBeniboy(info) {
-    if (!ATEND.ehMaster) return; // alarme e so pro Master (ver push.notifyBeniboyEscalonamento)
+    if (!ATEND.podeAlarme) return; // alarme e pro Master + tag Suporte (ver push.notifyBeniboyEscalonamento)
     const corpo = info && (info.nome || info.motivo)
       ? `${esc(info.nome || 'Visitante')}${info.motivo ? ' · ' + esc(info.motivo) : ''}`
       : 'O assistente não conseguiu resolver sozinho.';
@@ -622,6 +624,9 @@
         if (me.role === 'master' || me.isAdmin || secoes.includes('suporte')) {
           ATEND.ativo = true;
           ATEND.ehMaster = me.role === 'master';
+          // alarme critico (Beniboy chamou humano): Master + tag Suporte -
+          // Admin sem a tag fica de fora de proposito (ver push.js podeReceberCritico)
+          ATEND.podeAlarme = me.role === 'master' || secoes.includes('suporte');
           btn.title = 'Chats de suporte';
           atualizarNomeFlutuante(); // atendimento nao mostra o nome do Beniboy
           await atendCarregar();
