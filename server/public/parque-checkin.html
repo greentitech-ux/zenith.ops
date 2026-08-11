@@ -252,8 +252,11 @@
         <div class="sub" style="font-size:12px;color:var(--muted);margin-top:4px;">A entrada só é liberada depois da aprovação do <b>Gerente da unidade</b> ou do <b>Master</b>. Quando o Gerente aprova, o card continua aberto pra palavra final do Master (prestação de contas).</div>
       </div>
       <div id="wrap-pagamentos">
-        <label>Meias extras <span style="text-transform:none;font-weight:400;">(pares além das crianças · R$25 cada)</span></label>
-        <input type="number" step="1" min="0" max="30" id="f-meias-extras" value="0" oninput="atualizarPreviewValor()">
+        <button type="button" class="link-btn" id="btn-add-meia-extra" style="margin-top:10px;" onclick="abrirMeiaExtra()">+ Add Meia Extra</button>
+        <div id="wrap-meia-extra" class="hidden">
+          <label style="margin-top:0;">Meias extras <span style="text-transform:none;font-weight:400;">(pares além das crianças · R$25 cada)</span></label>
+          <input type="number" step="1" min="0" max="30" id="f-meias-extras" value="0" oninput="atualizarPreviewValor()">
+        </div>
         <div class="resumo">
           <div class="linha"><span>Meias (R$25/par)</span><b id="preview-meias">R$ 0,00</b></div>
           <div class="linha"><span id="valor-detalhe">—</span><b id="preview-valor">R$ 0,00</b></div>
@@ -630,6 +633,17 @@ function toggleCortesia(){
   document.getElementById('wrap-motivo-cortesia').classList.toggle('hidden', !cortesia);
   document.getElementById('wrap-pagamentos').classList.toggle('hidden', cortesia);
   atualizarPreviewValor();
+}
+// campo pouco usado (maioria das entradas nao tem meia extra) - fica
+// escondido atras de um link, so abre quando alguem precisa mesmo
+function abrirMeiaExtra(){
+  document.getElementById('btn-add-meia-extra').classList.add('hidden');
+  document.getElementById('wrap-meia-extra').classList.remove('hidden');
+}
+function fecharMeiaExtra(){
+  document.getElementById('f-meias-extras').value = 0;
+  document.getElementById('wrap-meia-extra').classList.add('hidden');
+  document.getElementById('btn-add-meia-extra').classList.remove('hidden');
 }
 
 // ---------- formas de pagamento (divide o TOTAL entre 1 ou mais formas,
@@ -1249,7 +1263,7 @@ function resetarForm(){
   VISITA_HOJE = null;
   document.getElementById('wrap-credito').classList.add('hidden');
   document.getElementById('wrap-relancar').classList.add('hidden');
-  document.getElementById('f-meias-extras').value = 0;
+  fecharMeiaExtra();
   document.getElementById('wrap-motivo-cortesia').classList.add('hidden');
   document.getElementById('wrap-pagamentos').classList.remove('hidden');
   document.getElementById('lista-pagamentos').innerHTML = '';
