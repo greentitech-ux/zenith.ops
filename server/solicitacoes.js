@@ -184,17 +184,22 @@ async function updateStatus(id, status, { motivoDecisao, decidedByEmail }) {
 
 // gera (ou renova) o token de aprovar/recusar por e-mail sem login - so faz
 // sentido pra pedido ainda PENDENTE. Chamado pelo relatorioMV.js toda vez
-// que manda o relatorio diario; sobrescrever o token de um envio anterior
-// invalida os links daquele e-mail mais antigo sozinho, sem precisar de
-// nenhuma limpeza a parte
+// que manda o relatorio diario. O token anterior vai pro tokensHistorico
+// antes de ser sobrescrito - continua identificando o pedido pra CONSULTA
+// de estado (buscarEstadoPorToken), so deixa de servir pra AGIR (so o
+// tokenAcao atual autoriza decidirPorToken) - assim o link de um e-mail
+// mais antigo nao vira "invalido" na cara do gerente, so perde o poder de
+// decidir sozinho.
 async function gerarTokenAcao(id, { validadeDias = 3 } = {}) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
+  const dados = snap.data();
   if (!snap.exists) throw new Error('Solicitação não encontrada.');
-  if (snap.data().status !== 'PENDENTE') throw new Error('Só é possível gerar link de ação pra pedido ainda pendente.');
+  if (dados.status !== 'PENDENTE') throw new Error('Só é possível gerar link de ação pra pedido ainda pendente.');
   const tokenAcao = crypto.randomUUID();
   const tokenAcaoExpiraEm = new Date(Date.now() + validadeDias * 24 * 60 * 60 * 1000).toISOString();
-  await ref.update({ tokenAcao, tokenAcaoExpiraEm, tokenAcaoUsado: false });
+  const tokensHistorico = [...new Set([...(dados.tokensHistorico || []), dados.tokenAcao].filter(Boolean))].slice(-20);
+  await ref.update({ tokenAcao, tokenAcaoExpiraEm, tokenAcaoUsado: false, tokensHistorico });
   solicitacoesCache.invalidar();
   return { tokenAcao, tokenAcaoExpiraEm };
 }
@@ -203,7 +208,9 @@ async function gerarTokenAcao(id, { validadeDias = 3 } = {}) {
 // devolve o registro se o token bate, ainda esta dentro da validade, nao foi
 // usado ainda e o pedido continua PENDENTE; null em qualquer outro caso (sem
 // detalhar o motivo pro chamador, pra nao dar pista sobre tokens de outras
-// solicitacoes - ver aviso de seguranca no cabecalho do arquivo)
+// solicitacoes - ver aviso de seguranca no cabecalho do arquivo). So essa
+// funcao autoriza a ACAO (decidirPorToken) - pra exibir o estado atual do
+// card sem exigir que ainda de pra agir, ver buscarEstadoPorToken abaixo.
 async function validarToken(id, token) {
   if (!id || !token) return null;
   const registro = await getOne(id);
@@ -213,6 +220,37 @@ async function validarToken(id, token) {
   if (registro.tokenAcaoUsado) return null;
   if (!registro.tokenAcaoExpiraEm || new Date(registro.tokenAcaoExpiraEm).getTime() < Date.now()) return null;
   return registro;
+}
+
+// versao "so pra ler" do validarToken: ainda exige um token secreto que
+// realmente pertenceu a esse pedido em algum momento (prova que quem esta
+// olhando recebeu um dos e-mails de verdade), mas NAO exige mais que seja o
+// token atual, nem pedido pendente/nao usado/dentro do prazo - so quer
+// mostrar o ESTADO ATUAL do card em vez de um "link invalido" generico,
+// mesmo quando esse token especifico ja foi substituido por um envio
+// seguinte (ver tokensHistorico em gerarTokenAcao) ou o pedido ja foi
+// decidido. Quem autoriza AGIR de verdade continua sendo so validarToken
+// (token atual, sem uso, dentro do prazo).
+async function buscarEstadoPorToken(id, token) {
+  if (!id || !token) return null;
+  const registro = await getOne(id);
+  if (!registro) return null;
+  const conhecido = registro.tokenAcao === token || (registro.tokensHistorico || []).includes(token);
+  if (!conhecido) return null;
+  return registro;
+}
+
+// se o token recebido ainda autoriza uma decisao agora - mesmas 3 condicoes
+// de validarToken (status/uso/prazo), mais a exigencia de ser o token ATUAL
+// (nao um antigo do tokensHistorico, que so serve pra consulta) - reaproveita
+// o registro ja carregado por buscarEstadoPorToken (evita 2a leitura)
+function podeDecidirComToken(registro, token) {
+  if (!registro) return false;
+  if (registro.tokenAcao !== token) return false;
+  if (registro.status !== 'PENDENTE') return false;
+  if (registro.tokenAcaoUsado) return false;
+  if (!registro.tokenAcaoExpiraEm || new Date(registro.tokenAcaoExpiraEm).getTime() < Date.now()) return false;
+  return true;
 }
 
 // decide (aprova/recusa) via o link publico do e-mail - mesma logica de
@@ -436,4 +474,5 @@ module.exports = {
   TIPOS, STATUSES, EXECUCAO_STATUSES, create, listAll, getOne, updateStatus, vincularChamado, update, remove,
   marcarNotificacaoVista, marcarComprada, desmarcarComprada, redirecionar, mudarTipo, converterParaEstorno,
   atualizarExecucao, atualizarPrioridade, gerarTokenAcao, validarToken, decidirPorToken,
+  buscarEstadoPorToken, podeDecidirComToken,
 };
