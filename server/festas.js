@@ -5,6 +5,8 @@
 const crypto = require('crypto');
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
+const users = require('./users');
+const auth = require('./auth');
 
 const COLLECTION = db.collection('festas');
 
@@ -21,19 +23,18 @@ const STATUS_VALIDOS = ['pendente', 'pagamento-parcial', 'pago', 'cancelado'];
 //  - Missão Nebulosa: sáb, dom e feriados
 const TABELA_FESTAS_PADRAO = {
   lunar: {
-    label: 'Missão Lunar', janela: 'seg a qui · 13h às 16h',
+    label: 'Missão Lunar', janela: 'seg a qui · 13h às 16h', ativa: true,
     precos: { 1: { 10: 599, 20: 999, 30: 1299, 40: 1699 }, 2: { 10: 999, 20: 1499, 30: 2099, 40: 2599 }, 3: { 10: 1299, 20: 2299, 30: 3099, 40: 3999 } },
   },
   orbita: {
-    label: 'Missão Órbita', janela: 'seg a qui 18h às 21h · sex 13h às 21h',
+    label: 'Missão Órbita', janela: 'seg a qui 18h às 21h · sex 13h às 21h', ativa: true,
     precos: { 1: { 10: 699, 20: 1099, 30: 1499, 40: 1799 }, 2: { 10: 1099, 20: 1699, 30: 2299, 40: 2999 }, 3: { 10: 1399, 20: 2399, 30: 3399, 40: 4299 } },
   },
   nebulosa: {
-    label: 'Missão Nebulosa', janela: 'sáb, dom e feriados',
+    label: 'Missão Nebulosa', janela: 'sáb, dom e feriados', ativa: true,
     precos: { 1: { 10: 799, 20: 1199, 30: 1599, 40: 1999 }, 2: { 10: 1399, 20: 2299, 30: 3099, 40: 3999 }, 3: { 10: 1799, 20: 3099, 30: 4399, 40: 5699 } },
   },
 };
-const MISSOES_VALIDAS = Object.keys(TABELA_FESTAS_PADRAO);
 const HORAS_VALIDAS = [1, 2, 3];
 const SALTONAUTAS_VALIDOS = [10, 20, 30, 40];
 
@@ -43,6 +44,15 @@ const tabelaCache = createCache(async () => {
   return snap.exists && snap.data().missoes ? snap.data().missoes : TABELA_FESTAS_PADRAO;
 }, 5 * 60 * 1000);
 const getTabela = tabelaCache.cached;
+
+// codigo (chave no objeto missoes) e a identidade da Missao - reservas ja
+// lancadas gravam esse codigo direto (nao o label), entao precisa ser
+// estavel: so letras minusculas/numeros/hifen, sem acento/espaco
+function sanitizarCodigoMissao(codigo) {
+  const limpo = String(codigo || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+  if (limpo.length < 2 || limpo.length > 30) throw new Error(`Código de Missão inválido: "${codigo}" (use só letras minúsculas, números ou hífen - 2 a 30 caracteres).`);
+  return limpo;
+}
 
 function sanitizarMissaoConfig(m) {
   const label = String(m?.label || '').trim().slice(0, 60);
@@ -57,18 +67,26 @@ function sanitizarMissaoConfig(m) {
       precos[h][s] = v;
     }
   }
-  return { label, janela, precos };
+  // "ativa" controla so a visibilidade no seletor de NOVAS reservas
+  // (ver /api/festas/tabela + ocultarMissao em festas.html) - nunca apaga
+  // de verdade, entao reserva antiga que ja usou esse codigo nunca fica
+  // orfa e o Master pode reativar a qualquer momento
+  return { label, janela, precos, ativa: m?.ativa !== false };
 }
 
 // salva a tabela inteira de uma vez (Master, ver rota PUT /api/festas/tabela)
-// - as 3 Missões (lunar/orbita/nebulosa) sao fixas na estrutura, so o
-// conteudo (nome, janela de horario, precos) e editavel; simplifica a UI
-// (grid fixo em vez de adicionar/remover linhas) e evita quebrar reservas
-// ja lancadas que gravaram o CODIGO da missao (nao o label)
+// - Missoes sao identificadas pelo codigo (chave do objeto); o Master pode
+// criar quantas quiser (ver adicionarNovaMissao em festas.html) e ocultar
+// (nunca apagar de verdade) uma existente - merge:true no Firestore
+// preserva qualquer chave antiga que por acaso nao vier no payload
 async function salvarTabela(missoes) {
+  const entradas = Object.entries(missoes || {});
+  if (!entradas.length) throw new Error('Informe pelo menos uma Missão.');
   const nova = {};
-  for (const chave of MISSOES_VALIDAS) {
-    nova[chave] = sanitizarMissaoConfig(missoes?.[chave]);
+  for (const [codigoBruto, m] of entradas) {
+    const codigo = sanitizarCodigoMissao(codigoBruto);
+    if (nova[codigo]) throw new Error(`Código de Missão duplicado: "${codigo}".`);
+    nova[codigo] = sanitizarMissaoConfig(m);
   }
   await TABELA_DOC.set({ missoes: nova, atualizadoEm: new Date().toISOString() }, { merge: true });
   tabelaCache.invalidar();
@@ -88,10 +106,16 @@ function num(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-// codigo curto tipo "CA6063F" (mesmo estilo do app anterior) - nao precisa
-// ser criptograficamente forte, so legivel e facil de citar por telefone
+// codigo curto tipo "SVPA3F9K" (iniciais SVP - Saltiverso Patteo - + 5
+// caracteres aleatorios numeros/letras) - nao precisa ser criptografico,
+// so legivel e facil de citar por telefone. Sem O/0 e I/1 (ambiguos de
+// ouvir/ler em voz alta)
+const CODIGO_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 function gerarCodigo() {
-  return crypto.randomBytes(4).toString('hex').toUpperCase().slice(0, 7);
+  const bytes = crypto.randomBytes(5);
+  let sufixo = '';
+  for (let i = 0; i < 5; i += 1) sufixo += CODIGO_CHARSET[bytes[i] % CODIGO_CHARSET.length];
+  return `SVP${sufixo}`;
 }
 
 function sanitizarPagamento(p) {
@@ -118,6 +142,31 @@ function restanteDevido(f) {
   return Math.max(0, num(f.valorTotal) - totalRecebido(f));
 }
 
+// desconto simples: percentual sobre o valor total, mas NUNCA sem alcada -
+// exige login+senha de alguem com autoridade pra aprovar na hora (gerente/
+// assistente-gerente da loja, ou Admin/Master), igual um "PIN de gerente"
+// de PDV. Nunca guarda a senha, so quem autorizou e quando (ver criar())
+function podeAutorizarDesconto(user) {
+  if (!user || user.active === false || user.locked) return false;
+  return user.role === 'master' || !!user.isAdmin || user.cargo === 'gerente' || user.cargo === 'assistente-gerente';
+}
+
+async function autorizarDesconto(percentual, gerenteUsername, gerenteSenha) {
+  const pct = num(percentual);
+  if (pct <= 0 || pct > 90) throw new Error('Desconto deve ser um percentual entre 1 e 90.');
+  const usuarioAlvo = String(gerenteUsername || '').trim();
+  if (!usuarioAlvo || !String(gerenteSenha || '')) {
+    throw new Error('Desconto exige usuário e senha de quem autorizou (Gerente/Admin/Master).');
+  }
+  const alvo = await users.findByIdentifier(usuarioAlvo);
+  if (!alvo || !podeAutorizarDesconto(alvo)) {
+    throw new Error('Esse usuário não tem autorização pra liberar desconto.');
+  }
+  const senhaOk = await auth.verifyPassword(alvo.id, gerenteSenha);
+  if (!senhaOk) throw new Error('Senha incorreta.');
+  return { pct, autorizadoPorId: alvo.id, autorizadoPorUsername: alvo.username || usuarioAlvo, autorizadoPorEmail: alvo.email || null };
+}
+
 // status financeiro derivado do que realmente entrou - nunca digitado:
 // tudo recebido = pago; parte recebida = pagamento-parcial; nada = pendente
 function statusPorPagamento(f) {
@@ -131,7 +180,7 @@ function statusPorPagamento(f) {
 async function criar({
   unidade, cliente, dataVenda, dataDeUso, horaInicio, horaFim,
   missao, horas, saltonautas,
-  valorTotal, sinal, restante, observacao, referenciaVendaOriginal,
+  valorTotal, desconto, sinal, restante, observacao, referenciaVendaOriginal,
   criadoPorId, criadoPorEmail,
 }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
@@ -145,8 +194,23 @@ async function criar({
   const missaoOk = tabela[missao] ? missao : null;
   const valorTabela = missaoOk ? valorFesta(missaoOk, horas, saltonautas, tabela) : null;
   if (missaoOk && valorTabela == null) throw new Error('Escolha horas (1 a 3) e saltonautas (10/20/30/40) válidos pra Missão.');
-  const total = valorTabela != null ? valorTabela : num(valorTotal);
-  if (total < 0) throw new Error('Valor total inválido.');
+  const valorBase = valorTabela != null ? valorTabela : num(valorTotal);
+  if (valorBase < 0) throw new Error('Valor total inválido.');
+
+  // desconto simples (%) - sempre passa pela alcada (ver autorizarDesconto);
+  // o servidor recalcula o valor final, nunca confia no que o front mandou
+  let descontoOk = null;
+  let total = valorBase;
+  if (desconto && num(desconto.percentual) > 0) {
+    const { pct, autorizadoPorId, autorizadoPorUsername, autorizadoPorEmail } = await autorizarDesconto(desconto.percentual, desconto.gerenteUsername, desconto.gerenteSenha);
+    const valorDesconto = Math.round(valorBase * (pct / 100) * 100) / 100;
+    total = Math.max(0, valorBase - valorDesconto);
+    descontoOk = {
+      percentual: pct, valorBase, valorDesconto,
+      autorizadoPorId, autorizadoPorUsername, autorizadoPorEmail,
+      autorizadoEm: new Date().toISOString(),
+    };
+  }
 
   const ref = COLLECTION.doc();
   const registro = {
@@ -166,6 +230,7 @@ async function criar({
     horaInicio: horaInicio || null,
     horaFim: horaFim || null,
     valorTotal: total,
+    desconto: descontoOk,
     sinal: sanitizarPagamento(sinal),
     restante: sanitizarPagamento(restante),
     // livro-razao dos pagamentos recebidos DEPOIS do fechamento inicial da
