@@ -312,6 +312,42 @@ async function definirExperiencia(id, { etapa, prazoEtapaAte, porEmail }) {
   return getOne(id);
 }
 
+// importacao em lote (Master) - backfill de gente que ja trabalha na loja
+// ha tempo mas nunca foi cadastrada no RH; cada linha vira 1 funcionario
+// "efetivado" ja na etapa/prazo de experiencia informados (evita ter que
+// cadastrar e depois ajustar a experiencia pessoa por pessoa na UI)
+async function importarLote(linhas, { porEmail }) {
+  const resultados = [];
+  for (const linha of linhas || []) {
+    const { unidade, nome, cargoFuncao, etapa, prazoEtapaAte } = linha;
+    try {
+      const nomeOk = limpar(nome, 150);
+      if (!nomeOk) throw new Error('nome vazio.');
+      if (!unidade) throw new Error('unidade não reconhecida.');
+      const etapaOk = etapa === '60' ? '60' : etapa === '30' ? '30' : null;
+      if (!etapaOk) throw new Error('etapa inválida (use 30 ou 60).');
+      const prazoOk = validarDataOuNull(prazoEtapaAte, 'prazo');
+      if (!prazoOk) throw new Error('prazo inválido (use AAAA-MM-DD).');
+      const inicioEtapa = calcularInicioAPartirDoPrazo(prazoOk, etapaOk);
+      const registro = await criar({
+        unidade, nome: nomeOk, cargoFuncao, tipoCadastro: 'efetivado',
+        dataAdmissao: etapaOk === '30' ? inicioEtapa : null,
+        cadastradoPorEmail: porEmail,
+      });
+      const merge = {
+        experiencia: { etapa: etapaOk, inicioEtapa, prazoEtapaAte: prazoOk, alertasEnviados: [] },
+        historicoExperiencia: [{ tipo: 'importacao_lote', etapa: etapaOk, inicioEtapa, prazoEtapaAte: prazoOk, porEmail: porEmail || null, decididoEm: new Date().toISOString() }],
+      };
+      await COLLECTION.doc(registro.id).update(merge);
+      resultados.push({ ok: true, nome: nomeOk, id: registro.id });
+    } catch (err) {
+      resultados.push({ ok: false, nome: nome || '(sem nome)', erro: err.message });
+    }
+  }
+  rhCache.invalidar();
+  return resultados;
+}
+
 async function remover(id) {
   const snap = await COLLECTION.doc(id).get();
   if (!snap.exists) throw new Error('Funcionário não encontrado.');
@@ -457,6 +493,7 @@ module.exports = {
   registrarDecisaoTeste, verificarTestesVencidos, marcarAlertaTesteEnviado,
   registrarAtestado, registrarRetornoAtestado,
   registrarDecisaoExperiencia, verificarAlertasExperiencia, marcarAlertaExperienciaEnviado, definirExperiencia,
+  importarLote,
   diasDesde, diasRestantesAte, aniversariantesHoje,
   invalidar: () => rhCache.invalidar(),
 };

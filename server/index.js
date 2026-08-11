@@ -1148,6 +1148,9 @@ const FECHAMENTO_UNIDADES_NOMES = {
   // aparecerem no checklist de permissoes do Master antes do 1o lançamento
   'Spo Shop Midway': 'Spo Shop Midway',
   'Saltiverso Patteo': 'Saltiverso Patteo',
+  // unidade administrativa (RH, financeiro etc) - nao e loja, mas precisa
+  // aparecer nos mesmos seletores pra cobrir quem trabalha fora de loja
+  Administrativa: 'Administrativa',
 };
 
 // unidades do Inventario - por enquanto so as lojas Domino's (mesmos codigos
@@ -3391,6 +3394,22 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'
     });
     broadcast('rh-funcionario-criado', registro, 'rh');
     res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// backfill em lote (Master) - cadastra varias pessoas de uma vez ja como
+// efetivado, cada uma na etapa/prazo de experiencia informados; usado
+// quando um grupo de gente que ja trabalha ha tempo nunca foi cadastrada
+// no RH (ex: planilha de RH externa sendo migrada pro Zenith)
+app.post('/api/rh/funcionarios/importar-lote', auth.requireMaster, async (req, res) => {
+  try {
+    const linhas = Array.isArray(req.body.linhas) ? req.body.linhas : [];
+    if (!linhas.length) return res.status(400).json({ error: 'Nenhuma linha pra importar.' });
+    const resultados = await rh.importarLote(linhas, { porEmail: req.user.email });
+    resultados.forEach((r) => { if (r.ok) broadcast('rh-funcionario-criado', { id: r.id }, 'rh'); });
+    res.json(resultados);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
