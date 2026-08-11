@@ -530,6 +530,12 @@ const BRAVO_UNIDADES_NOMES = {
 };
 GRUPOS.BRAVO.forEach(u=>{ UNIDADES_NOMES[u] = BRAVO_UNIDADES_NOMES[u] || u; });
 
+// unidades cadastradas pelo Master em /grupos.html (runtime) - mescladas por
+// cima da lista fixa acima, antes de montar qualquer seletor (ver boot)
+async function mesclarUnidadesExtras(){
+  try{ Object.assign(UNIDADES_NOMES, await (await fetch('/api/meta/unidades-extras')).json()); }catch(e){}
+}
+
 // codigo IDPULSE conhecido de algumas unidades do Grupo Bravo (mesmos
 // numeros ja usados como apelido no Monitor/Adyen, ver UNIDADES_APELIDOS em
 // server/index.js) - so pra exibir algo realmente util do lado do nome
@@ -1951,6 +1957,7 @@ async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   const me = await res.json();
+  await mesclarUnidadesExtras();
   const isMaster = me.role==='master';
   IS_MASTER = isMaster;
   const secoes = isMaster ? ['monitor','disputas','cofre','fechamentos','lancamento','entregas','entregas-lancamento','ifood','solicitacoes','tecnico','inventario','parque','parque-checkin','festas'] : (me.permissions?.sections||[]);

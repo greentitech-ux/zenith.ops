@@ -558,6 +558,12 @@ const UNIDADES_NOMES = {
   'São Braz IL': 'Sao Braz Ilha',
 };
 
+// unidades cadastradas pelo Master em /grupos.html (runtime) - mescladas por
+// cima da lista fixa acima, antes de montar qualquer seletor
+async function mesclarUnidadesExtras(){
+  try{ Object.assign(UNIDADES_NOMES, await (await fetch('/api/meta/unidades-extras')).json()); }catch(e){}
+}
+
 let ME = null;
 let IS_MASTER = false;
 let IS_ADMIN = false;
@@ -1165,6 +1171,7 @@ async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   ME = await res.json();
+  await mesclarUnidadesExtras();
   const isMaster = ME.role==='master';
   IS_MASTER = isMaster;
   IS_ADMIN = !!ME.isAdmin;
