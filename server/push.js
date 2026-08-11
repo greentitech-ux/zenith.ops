@@ -374,8 +374,54 @@ async function notifyRhAdvertenciaPrazoVencido(advertencia) {
   );
 }
 
+// experiencia formal (CLT, 30+60 dias) perto do prazo - avisos "quietos"
+// (D-5/D-3/D-2) vao so pro time de RH de verdade (tag "RH todas as
+// unidades")/Admin/Master, igual as outras aprovacoes do RH; NAO pro
+// gerente da loja, pra nao gerar alarme falso cedo demais
+async function notifyExperienciaPrazo(funcionario, diasRestantes) {
+  const etapaLabel = funcionario.experiencia && funcionario.experiencia.etapa === '60' ? '60 dias (total 90)' : '30 dias';
+  const prazoTexto = diasRestantes <= 0 ? 'vence HOJE' : `vence em ${diasRestantes} dia${diasRestantes === 1 ? '' : 's'}`;
+  await notifyAprovacaoRh(
+    `🗓️ RH · experiência (${etapaLabel}) ${prazoTexto}`,
+    `${funcionario.nome} (${funcionario.unidade}) - registre a decisão antes do prazo.`,
+    `rh-experiencia-${funcionario.id}-${diasRestantes}`,
+  );
+}
+
+// so no ultimo dia (D-0) o gerente/ass.gerente DA UNIDADE tambem e avisado,
+// alem do RH/Admin/Master (ja cobertos por notifyExperienciaPrazo) - pedido
+// explicito do usuario ("no ultimo dia ai ate o gerente e notificado")
+function podeReceberAlertaExperienciaGerente(sub, unidade) {
+  const meta = sub.meta;
+  return !!meta && ehCargoGerente(meta.cargo) && (meta.unidades || []).includes(unidade);
+}
+async function notifyExperienciaPrazoGerente(funcionario) {
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const etapaLabel = funcionario.experiencia && funcionario.experiencia.etapa === '60' ? '60 dias (total 90)' : '30 dias';
+  const payload = JSON.stringify({
+    title: `🗓️ Experiência vence HOJE`,
+    body: `${funcionario.nome} - prazo da etapa de ${etapaLabel} vence hoje. Registre a decisão.`,
+    tag: `rh-experiencia-gerente-${funcionario.id}`,
+    url: '/rh.html',
+  });
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberAlertaExperienciaGerente(sub, funcionario.unidade)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (experiência - gerente):', err.message);
+      }
+    }
+  }
+}
+
 module.exports = {
   addSubscription, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
   notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyRhTesteVencido,
-  notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido, PUBLIC_KEY,
+  notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
+  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, PUBLIC_KEY,
 };

@@ -3376,6 +3376,26 @@ app.post('/api/rh/funcionarios/:id/decisao-teste', requireSection('rh'), async (
   }
 });
 
+// decisao da etapa de experiencia formal (CLT, 30 ou 60 dias) - renovar
+// (so na etapa de 30, abre a de 60)/efetivar/desligar (ver
+// registrarDecisaoExperiencia em rh.js)
+app.post('/api/rh/funcionarios/:id/decisao-experiencia', requireSection('rh'), async (req, res) => {
+  try {
+    const atual = await rh.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    const registro = await rh.registrarDecisaoExperiencia(req.params.id, {
+      decisao: req.body.decisao, observacao: req.body.observacao, porEmail: req.user.email,
+    });
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/rh/funcionarios/:id/atestado', requireSection('rh'), async (req, res) => {
   try {
     const atual = await rh.getOne(req.params.id);
@@ -6562,6 +6582,26 @@ app.use((err, req, res, next) => {
     rodarAlertaTesteRh().catch((err) => console.error('Erro no alerta de teste do RH:', err.message));
     setInterval(() => {
       rodarAlertaTesteRh().catch((err) => console.error('Erro no alerta de teste do RH:', err.message));
+    }, 60 * 60 * 1000);
+
+    // RH: experiencia formal (CLT, 30+60 dias) perto do prazo - avisos
+    // escalonados em D-5/D-3/D-2/D-0 (ver rh.verificarAlertasExperiencia);
+    // so no D-0 o gerente da unidade tambem e avisado, alem do RH/Admin/
+    // Master (ver notifyExperienciaPrazoGerente)
+    const rodarAlertaExperienciaRh = async () => {
+      const h = horaBrasilia();
+      if (h < 8 || h >= 20) return;
+      const pendencias = await rh.verificarAlertasExperiencia();
+      for (const { funcionario, diasRestantes, limite } of pendencias) {
+        push.notifyExperienciaPrazo(funcionario, diasRestantes);
+        if (limite === 0) push.notifyExperienciaPrazoGerente(funcionario);
+        broadcast('rh-funcionario-atualizado', { id: funcionario.id, unidade: funcionario.unidade }, 'rh');
+        await rh.marcarAlertaExperienciaEnviado(funcionario.id, limite);
+      }
+    };
+    rodarAlertaExperienciaRh().catch((err) => console.error('Erro no alerta de experiência do RH:', err.message));
+    setInterval(() => {
+      rodarAlertaExperienciaRh().catch((err) => console.error('Erro no alerta de experiência do RH:', err.message));
     }, 60 * 60 * 1000);
 
     // RH: advertencia aprovada que passou das 48h sem o RH anexar o
