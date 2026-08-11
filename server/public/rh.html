@@ -842,7 +842,8 @@ function renderExperiencia(){
     const restantes = diasRestantesAte(f.experiencia.prazoEtapaAte);
     const etapaLabel = f.experiencia.etapa==='60' ? '60 dias (total 90)' : '30 dias';
     let badge;
-    if(restantes<=0) badge = '<span class="badge bad">vence hoje</span>';
+    if(restantes<0) badge = `<span class="badge bad">vencido há ${-restantes} dia${restantes===-1?'':'s'}</span>`;
+    else if(restantes===0) badge = '<span class="badge bad">vence hoje</span>';
     else if(restantes<=2) badge = `<span class="badge bad">${restantes} dia${restantes===1?'':'s'}</span>`;
     else if(restantes<=5) badge = `<span class="badge warn">${restantes} dias</span>`;
     else badge = `<span class="badge muted">${restantes} dias</span>`;
@@ -869,7 +870,8 @@ function statusBadgeInfo(f){
   if(f.experiencia && f.experiencia.etapa){
     const restantes = diasRestantesAte(f.experiencia.prazoEtapaAte);
     const etapaLabel = f.experiencia.etapa==='60' ? '60d' : '30d';
-    if(restantes<=0) return { label:`experiência ${etapaLabel} · vence hoje`, cls:'bad' };
+    if(restantes<0) return { label:`experiência ${etapaLabel} · vencido há ${-restantes}d`, cls:'bad' };
+    if(restantes===0) return { label:`experiência ${etapaLabel} · vence hoje`, cls:'bad' };
     if(restantes<=2) return { label:`experiência ${etapaLabel} · ${restantes}d`, cls:'bad' };
     if(restantes<=5) return { label:`experiência ${etapaLabel} · ${restantes}d`, cls:'warn' };
     return { label:`experiência ${etapaLabel} · ${restantes}d`, cls:'muted' };
