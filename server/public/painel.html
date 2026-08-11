@@ -183,6 +183,8 @@
   <a class="back hidden" id="nav-parque" href="/parque.html">🤸 Parque (painel)</a>
   <a class="back hidden" id="nav-festas" href="/festas.html">🎉 Festas</a>
   <a class="back hidden" id="nav-mensalistas" href="/mensalistas.html">📅 Mensalistas</a>
+  <div class="nav-drawer-grupo">RH</div>
+  <a class="back hidden" id="nav-rh" href="/rh.html">🧑‍💼 RH</a>
   <div class="nav-drawer-grupo">Solicitações</div>
   <a class="back hidden" id="nav-solicitacoes" href="/central.html">📋 Central</a>
   <a class="back hidden" id="nav-historico" href="/central-historico.html">📜 Histórico</a>
@@ -843,6 +845,36 @@ async function cardParque(){
   `);
 }
 
+// ---------- card RH (secao 'rh') ----------
+// ativos/em teste/testes vencidos sem decisao/aniversariantes hoje - mesma
+// conta usada em rh.html (ver rh.diasDesde/aniversariantesHoje no backend,
+// replicada aqui em JS puro pra nao precisar de rota extra)
+async function cardRH(){
+  const lista = await fetch('/api/rh/funcionarios').then(r=>r.json()).catch(()=>[]);
+  const hoje = hojeBrasilia();
+  const diasDesdeRH = (dataIso)=>{
+    if(!dataIso) return 0;
+    return Math.max(0, Math.round((new Date(hoje+'T00:00:00') - new Date(dataIso+'T00:00:00'))/86400000));
+  };
+  const ativos = lista.filter(f=>f.status==='ativo');
+  const emTeste = ativos.filter(f=>f.emTeste && !f.feedbackTeste);
+  const testeVencido = emTeste.filter(f=>diasDesdeRH(f.dataAdmissao)>=5).length;
+  const [, mesHoje, diaHoje] = hoje.split('-');
+  const aniverHoje = ativos.filter(f=>{
+    if(!f.dataNascimento) return false;
+    const [, m, d] = f.dataNascimento.split('-');
+    return m===mesHoje && d===diaHoje;
+  }).length;
+  return pcardWrap('🧑‍💼','RH','/rh.html', `
+    <div class="pstats">
+      ${statRow('Ativos', ativos.length)}
+      ${statRow('Em teste', emTeste.length, emTeste.length?'warn':'')}
+      ${statRow('Decisão pendente (5+ dias)', testeVencido, testeVencido?'bad':'')}
+      ${statRow('Aniversariantes hoje', aniverHoje, aniverHoje?'ok':'')}
+    </div>
+  `);
+}
+
 // ---------- calendario de festas do Saltiverso (secao 'festas') ----------
 // mes inteiro com os dias de festa marcados; clicar num dia abre a lista
 // (cliente, pacote, horario, valor). Festa cancelada nao aparece
@@ -953,6 +985,7 @@ function dataBrasiliaAb(iso){
 const CARDS_POR_SECAO = [
   { chave:'parque', secao:'parque', build:cardParque },
   { chave:'festas', secao:'festas', build:cardFestasCalendario },
+  { chave:'rh', secao:'rh', build:cardRH },
   { chave:'monitor', secao:'monitor', build:cardMonitor },
   // indicadores do Abastecimento: SO Master/Admin (a equipe do balcao nao
   // pode ver os tempos monitorados)
@@ -1035,7 +1068,7 @@ async function boot(){
   ME_GLOBAL = ME;
   IS_MASTER_GLOBAL = isMaster;
   IS_ADMIN_GLOBAL = !!ME.isAdmin;
-  const secoes = isMaster ? ['monitor','disputas','cofre','fechamentos','lancamento','sangria','entregas','entregas-lancamento','ifood','solicitacoes','tecnico','manutencao','inventario','parque','parque-checkin','festas'] : (ME.permissions?.sections||[]);
+  const secoes = isMaster ? ['monitor','disputas','cofre','fechamentos','lancamento','sangria','entregas','entregas-lancamento','ifood','solicitacoes','tecnico','manutencao','inventario','parque','parque-checkin','festas','rh'] : (ME.permissions?.sections||[]);
   if(secoes.includes('solicitacoes')) iniciarNotificacoesCentral();
 
   document.getElementById('nav-monitor').classList.remove('hidden');
@@ -1059,6 +1092,7 @@ async function boot(){
   document.getElementById('nav-parque-checkin').classList.remove('hidden');
   document.getElementById('nav-festas').classList.remove('hidden');
   document.getElementById('nav-mensalistas').classList.remove('hidden');
+  document.getElementById('nav-rh').classList.remove('hidden');
   document.getElementById('nav-grupo-saltiverso').classList.remove('hidden');
   document.getElementById('nav-central-solucoes').classList.remove('hidden');
   document.getElementById('nav-beniboy').classList.remove('hidden');
