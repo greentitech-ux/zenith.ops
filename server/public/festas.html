@@ -84,6 +84,13 @@
   .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px 14px 0 0;padding:16px 14px 22px;width:100%;max-width:640px;max-height:88vh;overflow-y:auto;}
   .sheet h3{margin:0 0 4px;font-size:14px;}
   .sheet .sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px;}
+  .missao-tabela{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:14px;}
+  .missao-tabela:first-child{margin-top:0;}
+  .precos-grid{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px;}
+  .precos-grid th,.precos-grid td{padding:4px;text-align:center;}
+  .precos-grid th{font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:600;}
+  .precos-grid th:first-child,.precos-grid td:first-child{text-align:left;font-family:var(--mono);color:var(--muted);}
+  .precos-grid input{padding:6px 4px;font-size:12.5px;text-align:center;}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -172,13 +179,13 @@
       </div>
     </div>
     <div class="secao">
-      <div class="secao-titulo">Pacote (tabela oficial)</div>
+      <div class="secao-titulo" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <span>Pacote (tabela oficial)</span>
+        <button type="button" class="link-btn hidden" id="btn-editar-tabela" style="margin:0;" onclick="abrirEditarTabela()">⚙️ Editar tabela de preços</button>
+      </div>
       <label>Missão</label>
       <select id="f-missao">
         <option value="">— sem pacote (valor manual) —</option>
-        <option value="lunar">Missão Lunar · seg a qui, 13h às 16h</option>
-        <option value="orbita">Missão Órbita · seg a qui 18h às 21h · sex 13h às 21h</option>
-        <option value="nebulosa">Missão Nebulosa · sáb, dom e feriados</option>
       </select>
       <div class="grid3" id="wrap-pacote" style="display:none;">
         <div><label>Horas</label><select id="f-horas"><option value="1">1H</option><option value="2">2H</option><option value="3">3H</option></select></div>
@@ -284,6 +291,21 @@
       <textarea id="e-observacao"></textarea>
       <div class="msg hidden" id="msg-editar"></div>
       <button class="btn-primary" type="submit">Salvar alterações</button>
+    </form>
+    </div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="overlay-tabela">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharEditarTabela()">✕</span>
+    <div class="sheet">
+    <h3>Editar tabela de preços</h3>
+    <div class="sub">As promoções mudam com frequência — ajuste nome, horário e valores aqui, sem precisar de deploy. Vale pra reservas novas; as já registradas mantêm o valor gravado na hora da venda.</div>
+    <form id="form-tabela">
+      <div id="tabela-missoes"></div>
+      <div class="msg hidden" id="msg-tabela"></div>
+      <button class="btn-primary" type="submit">Salvar tabela</button>
     </form>
     </div>
   </div>
@@ -570,13 +592,24 @@ document.getElementById('form-festa').addEventListener('keydown', (ev)=>{
   ev.preventDefault();
 });
 
-// tabela oficial de venda de festas (mesma do servidor - ver TABELA_FESTAS
-// em festas.js): Missão x horas x saltonautas define o valor total sozinho
-const TABELA_FESTAS = {
-  lunar:    { 1:{10:599,20:999,30:1299,40:1699},  2:{10:999,20:1499,30:2099,40:2599},  3:{10:1299,20:2299,30:3099,40:3999} },
-  orbita:   { 1:{10:699,20:1099,30:1499,40:1799}, 2:{10:1099,20:1699,30:2299,40:2999}, 3:{10:1399,20:2399,30:3399,40:4299} },
-  nebulosa: { 1:{10:799,20:1199,30:1599,40:1999}, 2:{10:1399,20:2299,30:3099,40:3999}, 3:{10:1799,20:3099,30:4399,40:5699} },
-};
+// tabela oficial de venda de festas - vem do servidor (Master edita em
+// "Editar tabela de preços", ver abrirEditarTabela) em vez de ficar
+// hardcoded aqui: as promoções da Missão mudam com frequência e antes isso
+// exigia mexer em código + deploy toda vez
+const HORAS_TABELA = [1,2,3];
+const SALTONAUTAS_TABELA = [10,20,30,40];
+let TABELA_FESTAS = {};
+
+async function carregarTabela(){
+  TABELA_FESTAS = await fetch('/api/festas/tabela').then(r=>r.json()).catch(()=>({}));
+  const sel = document.getElementById('f-missao');
+  const atual = sel.value;
+  sel.innerHTML = '<option value="">— sem pacote (valor manual) —</option>' +
+    Object.entries(TABELA_FESTAS).map(([codigo,m])=>`<option value="${escapeHtml(codigo)}">${escapeHtml(m.label)}${m.janela?' · '+escapeHtml(m.janela):''}</option>`).join('');
+  sel.value = atual;
+  atualizarPacoteFesta();
+}
+
 function atualizarPacoteFesta(){
   const missao = document.getElementById('f-missao').value;
   const temPacote = !!missao;
@@ -586,11 +619,69 @@ function atualizarPacoteFesta(){
   if(!temPacote){ document.getElementById('f-valor-tabela').value = '—'; return; }
   const horas = document.getElementById('f-horas').value;
   const salto = document.getElementById('f-saltonautas').value;
-  const v = (TABELA_FESTAS[missao] && TABELA_FESTAS[missao][horas] && TABELA_FESTAS[missao][horas][salto]) || 0;
+  const m = TABELA_FESTAS[missao];
+  const v = (m && m.precos && m.precos[horas] && m.precos[horas][salto]) || 0;
   document.getElementById('f-valor-tabela').value = fmtMoney(v);
   campoTotal.value = v;
 }
 ['f-missao','f-horas','f-saltonautas'].forEach(id=>document.getElementById(id).addEventListener('change', atualizarPacoteFesta));
+
+function abrirEditarTabela(){
+  const wrap = document.getElementById('tabela-missoes');
+  wrap.innerHTML = Object.entries(TABELA_FESTAS).map(([codigo,m])=>`
+    <div class="missao-tabela">
+      <label>Nome</label>
+      <input type="text" id="t-${codigo}-label" value="${escapeHtml(m.label||'')}" maxlength="60" required>
+      <label>Horário / janela (texto livre, ex: "sáb, dom e feriados")</label>
+      <input type="text" id="t-${codigo}-janela" value="${escapeHtml(m.janela||'')}" maxlength="80">
+      <table class="precos-grid">
+        <thead><tr><th>Horas \\ Saltonautas</th>${SALTONAUTAS_TABELA.map(s=>`<th>${s}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${HORAS_TABELA.map(h=>`<tr><td>${h}H</td>${SALTONAUTAS_TABELA.map(s=>`<td><input type="number" min="0" step="1" id="t-${codigo}-${h}-${s}" value="${(m.precos&&m.precos[h]&&m.precos[h][s])||0}" required></td>`).join('')}</tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `).join('');
+  document.getElementById('msg-tabela').classList.add('hidden');
+  document.getElementById('overlay-tabela').classList.remove('hidden');
+}
+function fecharEditarTabela(){ document.getElementById('overlay-tabela').classList.add('hidden'); }
+
+document.getElementById('form-tabela').addEventListener('submit', async (ev)=>{
+  ev.preventDefault();
+  const msg = document.getElementById('msg-tabela');
+  const btn = ev.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+  try{
+    const missoes = {};
+    for(const codigo of Object.keys(TABELA_FESTAS)){
+      const precos = {};
+      for(const h of HORAS_TABELA){
+        precos[h] = {};
+        for(const s of SALTONAUTAS_TABELA){
+          precos[h][s] = document.getElementById(`t-${codigo}-${h}-${s}`).value;
+        }
+      }
+      missoes[codigo] = {
+        label: document.getElementById(`t-${codigo}-label`).value,
+        janela: document.getElementById(`t-${codigo}-janela`).value,
+        precos,
+      };
+    }
+    const res = await fetch('/api/festas/tabela', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ missoes }) });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error||'erro ao salvar tabela');
+    TABELA_FESTAS = data;
+    await carregarTabela();
+    msg.textContent = 'Tabela salva com sucesso.'; msg.className = 'msg ok';
+    msg.classList.remove('hidden');
+    setTimeout(fecharEditarTabela, 900);
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{
+    btn.disabled = false;
+  }
+});
 
 document.getElementById('form-festa').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
@@ -669,6 +760,7 @@ async function boot(){
   document.getElementById('nav-central-solucoes').classList.remove('hidden');
   document.getElementById('nav-beniboy').classList.remove('hidden');
   document.getElementById('nav-reset-senha').classList.toggle('hidden', !(isMaster || ME.isAdmin));
+  document.getElementById('btn-editar-tabela').classList.toggle('hidden', !isMaster);
 
   if(!secoes.includes('festas')){
     document.getElementById('sem-acesso').classList.remove('hidden');
@@ -684,6 +776,7 @@ async function boot(){
   document.getElementById('f-dataDeUso').min = hojeBrasilia();
 
   document.getElementById('root').classList.remove('hidden');
+  await carregarTabela();
   await carregar();
 }
 
