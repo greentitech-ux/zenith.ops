@@ -570,6 +570,22 @@
           <input type="text" id="cfg-horas-contagem" placeholder="08:00, 16:00" style="flex:1;">
           <button type="button" class="btn-add" style="margin-top:0;width:auto;padding:8px 14px;" onclick="salvarConfigContagem()">Salvar</button>
         </div>
+        <label style="margin-top:16px;">⏱️ Tempo dos alarmes (Master) <span style="text-transform:none;letter-spacing:0;">— em minutos</span></label>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+          <div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:3px;">🛒 Pedido novo</div>
+            <input type="number" min="1" max="60" inputmode="numeric" id="cfg-alerta-pedido">
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:3px;">🚚 Lembrete de envio</div>
+            <input type="number" min="1" max="60" inputmode="numeric" id="cfg-alerta-envio">
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:3px;">📦 Tolerância recebimento</div>
+            <input type="number" min="1" max="60" inputmode="numeric" id="cfg-alerta-recebimento">
+          </div>
+        </div>
+        <button type="button" class="btn-add" onclick="salvarConfigAlertas()">Salvar tempos dos alarmes</button>
       </div>
       <div class="msg hidden" id="msg-operadores"></div>
     </div>
@@ -762,12 +778,12 @@ function renderResumo(){
 let RECEB_ENVIO = null;
 let RECEB_EXTRAS = [];   // "a mais" vs o pedido, do envio na tela
 let RECEB_SNOOZE = {}; // envioId -> quando pode voltar
-// a loja acabou de enviar - da um respiro de 7 minutos pro material chegar
-// fisicamente no carrinho antes de cobrar a confirmacao de recebimento
-const SETE_MIN = 7*60*1000;
+// a loja acabou de enviar - da um respiro (ALERTA_RECEBIMENTO_MS, default
+// 7min, configuravel pelo Master) pro material chegar fisicamente no
+// carrinho antes de cobrar a confirmacao de recebimento
 function envioAguardandoConfirmacao(r){
   return r.tipo==='ENVIO' && !r.recebidoEm && (RECEB_SNOOZE[r.id]||0) <= Date.now()
-    && (Date.now() - new Date(r.criadoEm).getTime()) >= SETE_MIN;
+    && (Date.now() - new Date(r.criadoEm).getTime()) >= ALERTA_RECEBIMENTO_MS;
 }
 let RECEB_MANUAL = false; // aberto pelo toque no badge (nao fecha/troca sozinho)
 function verificarRecebimento(){
@@ -895,7 +911,7 @@ async function rcDivergencia(motivo){
 }
 function adiarRecebimento(){
   if(!RECEB_ENVIO) return;
-  RECEB_SNOOZE[RECEB_ENVIO.id] = Date.now() + CINCO_MIN;
+  RECEB_SNOOZE[RECEB_ENVIO.id] = Date.now() + ALERTA_RECEBIMENTO_MS;
   RECEB_ENVIO = null;
   document.getElementById('receb-overlay').classList.add('hidden');
   pararSomAlarme();
@@ -938,6 +954,18 @@ let CONTAGEM_SNOOZE = 0;
 async function carregarConfig(){
   try{ CONFIG_ABAST = await fetch('/api/abastecimento-config').then(r=>r.ok?r.json():{horasContagem:[]}); }
   catch(e){ CONFIG_ABAST = { horasContagem: [] }; }
+  aplicarTemposAlarme();
+}
+// tempos dos 3 alarmes (pedido/envio/recebimento) - editaveis so pelo Master
+// (ver bloco-config-alertas); ate carregar a config do servidor, usa os
+// mesmos defaults de sempre (10/5/7 min)
+let ALERTA_PEDIDO_MS = 10*60*1000;
+let ALERTA_ENVIO_MS = 5*60*1000;
+let ALERTA_RECEBIMENTO_MS = 7*60*1000;
+function aplicarTemposAlarme(){
+  ALERTA_PEDIDO_MS = (Number(CONFIG_ABAST.alertaPedidoMin)||10)*60*1000;
+  ALERTA_ENVIO_MS = (Number(CONFIG_ABAST.alertaEnvioMin)||5)*60*1000;
+  ALERTA_RECEBIMENTO_MS = (Number(CONFIG_ABAST.alertaRecebimentoMin)||7)*60*1000;
 }
 function contagemDevida(){
   const hoje = dataBrasilia(new Date().toISOString());
@@ -1847,6 +1875,9 @@ async function abrirOperadores(){
   document.getElementById('msg-operadores').classList.add('hidden');
   document.getElementById('bloco-config-contagem').classList.toggle('hidden', !IS_MASTER);
   document.getElementById('cfg-horas-contagem').value = (CONFIG_ABAST.horasContagem||[]).join(', ');
+  document.getElementById('cfg-alerta-pedido').value = CONFIG_ABAST.alertaPedidoMin||10;
+  document.getElementById('cfg-alerta-envio').value = CONFIG_ABAST.alertaEnvioMin||5;
+  document.getElementById('cfg-alerta-recebimento').value = CONFIG_ABAST.alertaRecebimentoMin||7;
   await carregarOperadores();
   renderOperadores();
   document.getElementById('overlay-operadores').classList.remove('hidden');
@@ -1921,9 +1952,9 @@ let ALARME_AUDIO_CTX = null;
 let ALARME_SOM_TIMER = null;
 
 const CINCO_MIN = 5*60*1000;
-// primeiro alerta apos o pedido LANCADO: 10 minutos regressivos pra loja
-// confirmar (os lembretes seguintes continuam de 5 em 5)
-const DEZ_MIN = 10*60*1000;
+// primeiro alerta apos o pedido LANCADO: regressivo (ALERTA_PEDIDO_MS,
+// default 10min, configuravel pelo Master) pra loja confirmar (os lembretes
+// seguintes de envio usam ALERTA_ENVIO_MS, default 5 em 5)
 function pedidoNaoVisto(r){ return pendente(r) && !r.vistoEm; }
 // escalonamento: apos o OK (visto), a loja tem 5min pra marcar SENDO
 // PREPARADO; estourou, vira alarme de PEDIDO ATRASADO
@@ -2013,9 +2044,9 @@ function atualizarTimerAlarme(){
     return;
   }
   el.classList.remove('hidden');
-  // 'novo': regressivo de 10:00 desde a criacao do pedido, pra apertar OK
+  // 'novo': regressivo desde a criacao do pedido (ALERTA_PEDIDO_MS), pra apertar OK
   const base = new Date(ALARME_PEDIDO.criadoEm).getTime();
-  const resta = Math.round((base + DEZ_MIN - Date.now())/1000);
+  const resta = Math.round((base + ALERTA_PEDIDO_MS - Date.now())/1000);
   if(resta >= 0){
     el.textContent = `${Math.floor(resta/60)}:${String(resta%60).padStart(2,'0')}`;
     el.className = 'alarme-timer ok';
@@ -2028,10 +2059,10 @@ function atualizarTimerAlarme(){
   }
 }
 
-// OK do lembrete: silencia por 5 minutos (volta sozinho se nao enviar)
+// OK do lembrete: silencia por ALERTA_ENVIO_MS (volta sozinho se nao enviar)
 function adiarLembrete(){
   if(!ALARME_PEDIDO) return;
-  LEMBRETE_SNOOZE[ALARME_PEDIDO.id] = Date.now() + CINCO_MIN;
+  LEMBRETE_SNOOZE[ALARME_PEDIDO.id] = Date.now() + ALERTA_ENVIO_MS;
   fecharAlarme();
   verificarAlarme();
 }
@@ -2320,6 +2351,25 @@ async function salvarConfigContagem(){
     msg.textContent = '🕐 Horários salvos: ' + (data.horasContagem.join(', ') || 'nenhum');
     msg.className = 'msg ok'; msg.classList.remove('hidden');
     verificarContagem();
+  }catch(err){ erroOperadores(err.message); }
+}
+
+async function salvarConfigAlertas(){
+  try{
+    const pedido = Number(document.getElementById('cfg-alerta-pedido').value);
+    const envio = Number(document.getElementById('cfg-alerta-envio').value);
+    const recebimento = Number(document.getElementById('cfg-alerta-recebimento').value);
+    const resp = await fetch('/api/abastecimento-config', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ alertaPedidoMin: pedido, alertaEnvioMin: envio, alertaRecebimentoMin: recebimento }) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar os tempos dos alarmes.');
+    CONFIG_ABAST = data;
+    aplicarTemposAlarme();
+    document.getElementById('cfg-alerta-pedido').value = data.alertaPedidoMin;
+    document.getElementById('cfg-alerta-envio').value = data.alertaEnvioMin;
+    document.getElementById('cfg-alerta-recebimento').value = data.alertaRecebimentoMin;
+    const msg = document.getElementById('msg-operadores');
+    msg.textContent = `⏱️ Tempos salvos: pedido ${data.alertaPedidoMin}min · envio ${data.alertaEnvioMin}min · recebimento ${data.alertaRecebimentoMin}min`;
+    msg.className = 'msg ok'; msg.classList.remove('hidden');
   }catch(err){ erroOperadores(err.message); }
 }
 

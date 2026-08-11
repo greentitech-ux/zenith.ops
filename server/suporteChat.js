@@ -246,6 +246,34 @@ async function listAllUncached() {
 const chatsCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = chatsCache.cached;
 
+// tempo entre re-alertas do alarme critico enquanto ninguem assume a
+// conversa (ver reforcarAlarmesBeniboy() em index.js) - pedido explicito do
+// usuario: o alarme disparava 1x quando o Beniboy chamava um atendente e
+// nunca mais, mesmo com a pessoa esperando sem resposta
+const REALERTA_MS = 3 * 60 * 1000;
+
+// candidatas a repetir o alarme critico: o Beniboy ja escalou (botDesativado)
+// e NINGUEM do time mexeu no card ainda (statusAtendimento continua
+// PENDENTE - sair do PENDENTE, mesmo sem mandar mensagem, ja conta como
+// "alguem assumiu" e silencia o reforco). So entram as que passaram
+// REALERTA_MS desde o ultimo alerta (ver marcarAlertaEnviado) - a varredura
+// de ociosos (15min sem nenhuma mensagem nova) acaba encerrando sozinha
+// quem ficou mesmo abandonada, entao o reforco nao roda pra sempre.
+async function listarParaReforcarAlarme() {
+  const chats = await listAllUncached();
+  const agora = Date.now();
+  return chats.filter((c) => {
+    if (c.status !== 'ABERTO' || !c.botDesativado || c.statusAtendimento !== 'PENDENTE') return false;
+    const desde = new Date(c.ultimoAlertaEm || c.atualizadoEm || c.criadoEm).getTime();
+    return agora - desde >= REALERTA_MS;
+  });
+}
+
+async function marcarAlertaEnviado(id) {
+  await COLLECTION.doc(id).update({ ultimoAlertaEm: new Date().toISOString() });
+  chatsCache.invalidar();
+}
+
 const OCIOSO_MS = 15 * 60 * 1000;
 
 // varredura periodica (ver index.js): encerra sozinha qualquer conversa
@@ -276,4 +304,5 @@ async function finalizarOciosos() {
 module.exports = {
   criar, getOne, getPublico, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll, ASSUNTOS,
   atualizarStatusAtendimento, marcarDesbloqueio, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
+  listarParaReforcarAlarme, marcarAlertaEnviado,
 };

@@ -4635,14 +4635,20 @@ app.patch('/api/abastecimento/:id/editar-direto', auth.requireAuth, auth.require
   }
 });
 
-// ----- config (Master define os horarios do popup de contagem) -----
+// ----- config (Master define os horarios do popup de contagem + os tempos
+// dos 3 alarmes do fluxo: pedido/envio/recebimento, ver abastecimentoCarrinho.js) -----
 app.get('/api/abastecimento-config', requireAnySection('abastecimento-carrinho', 'abastecimento-loja'), async (req, res) => {
   res.json(await abastecimentoCarrinho.getConfig());
 });
 
 app.put('/api/abastecimento-config', auth.requireMaster, async (req, res) => {
   try {
-    const config = await abastecimentoCarrinho.salvarConfig({ horasContagem: req.body.horasContagem });
+    const config = await abastecimentoCarrinho.salvarConfig({
+      horasContagem: req.body.horasContagem,
+      alertaPedidoMin: req.body.alertaPedidoMin,
+      alertaEnvioMin: req.body.alertaEnvioMin,
+      alertaRecebimentoMin: req.body.alertaRecebimentoMin,
+    });
     broadcast('abastecimento-atualizado', { config: true });
     res.json(config);
   } catch (err) {
@@ -4808,9 +4814,28 @@ async function acionarBeniboy(chatId) {
       // essa seção recebe tambem, Admin sem a seção fica de fora.
       push.notifyBeniboyEscalonamento(r.chat, r.motivoAtendente);
       broadcast('beniboy-escalonamento', { chatId, nome: r.chat?.nome || '', motivo: r.motivoAtendente || '' }, 'suporte');
+      // marca o instante desse 1o alerta - a varredura reforcarAlarmesBeniboy()
+      // usa isso pra saber quando repetir, ja que ninguem assumiu ainda
+      suporteChat.marcarAlertaEnviado(chatId).catch(() => {});
     }
   } catch (err) {
     console.error('[suporteBot] falha no acionamento:', err.message);
+  }
+}
+
+// reforca o alarme critico do Beniboy enquanto a conversa continuar sem
+// ninguem do time assumir (ver suporteChat.listarParaReforcarAlarme) - antes
+// disso o alarme so tocava 1x na escalacao e nunca mais, mesmo com a pessoa
+// esperando um humano que ninguem avisou de novo. Roda a cada 1min (ver
+// agendamento mais abaixo); a propria varredura de ociosos do suporte
+// (15min sem nenhuma mensagem nova) acaba fechando quem ficou mesmo
+// abandonado, entao isso nao fica reforcando pra sempre.
+async function reforcarAlarmesBeniboy() {
+  const pendentes = await suporteChat.listarParaReforcarAlarme();
+  for (const chat of pendentes) {
+    push.notifyBeniboyEscalonamento(chat, null);
+    broadcast('beniboy-escalonamento', { chatId: chat.id, nome: chat.nome || '', motivo: '' }, 'suporte');
+    await suporteChat.marcarAlertaEnviado(chat.id);
   }
 }
 
@@ -6035,6 +6060,13 @@ app.use((err, req, res, next) => {
     setInterval(() => {
       rodarFinalizacaoOciososSuporte().catch((err) => console.error('Erro na varredura de chats ociosos do suporte:', err.message));
     }, 5 * 60 * 1000);
+
+    // reforco do alarme critico do Beniboy (ver reforcarAlarmesBeniboy) -
+    // roda a cada 1min, so repete de fato quem passou de REALERTA_MS
+    // (3min) sem ninguem assumir
+    setInterval(() => {
+      reforcarAlarmesBeniboy().catch((err) => console.error('Erro no reforço do alarme do Beniboy:', err.message));
+    }, 60 * 1000);
 
     // relatorio diario do MV por e-mail (ver relatorioMV.js) - so agenda se
     // as credenciais de ENVIO estiverem configuradas (quem manda, RELATORIO_
