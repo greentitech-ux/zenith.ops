@@ -3630,7 +3630,9 @@ app.get('/api/rh/checkins/:id/foto/:tipo', requireSection('rh'), async (req, res
 // Master) ve e decide; aprovar ja registra a entrada na hora
 app.get('/api/rh/checkins/pendentes-aprovacao', requireSection('rh'), async (req, res) => {
   if (!podeAprovarRh(req)) return res.json([]);
-  res.json(await rhCheckin.listPendentesAprovacao(null));
+  // sanitiza igual as outras rotas de check-in: localizacao so pro Master -
+  // Admin/RH-todas-unidades aprovam a pendencia, mas nao veem o GPS
+  res.json((await rhCheckin.listPendentesAprovacao(null)).map((c) => sanitizarCheckin(c, req.isMaster)));
 });
 
 app.post('/api/rh/checkins/pendentes-aprovacao/:id/aprovar', requireSection('rh'), async (req, res) => {

@@ -54,8 +54,11 @@ function validarDataOuNull(v, campo) {
   return v;
 }
 
+// ancora no meio-dia de proposito: com T00:00:00 o toISOString() volta um
+// dia se o processo rodar num fuso a leste de UTC (hoje o servidor e UTC e
+// nao faz diferenca, mas soma de datas nao deve depender do fuso da maquina)
 function calcularPrazoExperiencia(inicioIso, etapa) {
-  const d = new Date(`${inicioIso}T00:00:00`);
+  const d = new Date(`${inicioIso}T12:00:00`);
   d.setDate(d.getDate() + (DIAS_EXPERIENCIA[etapa] || 30));
   return d.toISOString().slice(0, 10);
 }
@@ -70,7 +73,7 @@ function iniciarExperiencia(inicioIso) {
 // pagamento/contabilidade) - pedir pra calcular o inicio de cabeca seria
 // entregar conta pro usuario fazer
 function calcularInicioAPartirDoPrazo(prazoIso, etapa) {
-  const d = new Date(`${prazoIso}T00:00:00`);
+  const d = new Date(`${prazoIso}T12:00:00`); // meio-dia - mesmo motivo de calcularPrazoExperiencia
   d.setDate(d.getDate() - (DIAS_EXPERIENCIA[etapa] || 30));
   return d.toISOString().slice(0, 10);
 }
@@ -174,6 +177,13 @@ async function atualizar(id, patch) {
     if (!['candidato', 'ativo', 'inativo'].includes(patch.status)) throw new Error('Status inválido.');
     merge.status = patch.status;
     merge.desligadoEm = patch.status === 'inativo' ? new Date().toISOString() : null;
+    // desligado nao esta em teste nem em experiencia - sem essa limpeza o
+    // documento carregava esses estados pra sempre (e reativar a pessoa
+    // depois voltava com um teste/experiencia fantasma de meses atras)
+    if (patch.status === 'inativo') {
+      merge.emTeste = false;
+      merge.experiencia = null;
+    }
   }
 
   await ref.update(merge);
@@ -190,6 +200,10 @@ async function registrarDecisaoTeste(id, { decisao, observacao, porEmail }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  // decisao e uma so - sem essa guarda, decidir de novo sobrescreveria o
+  // feedback original em silencio (e um "efetivar" tardio reativaria quem
+  // ja foi desligado)
+  if (!snap.data().emTeste) throw new Error('Esse funcionário não está mais em período de teste.');
   const agora = new Date().toISOString();
   const merge = {
     emTeste: false,

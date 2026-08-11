@@ -98,9 +98,14 @@ async function registrarEntrada({ funcionarioId, foto, localizacao, registradoPo
   let motivoPendencia = null;
   if (funcionario.tipoCadastro === 'extra') {
     const inicioSemana = inicioSemanaBrasilia();
+    // entrada.horario e ISO em UTC; a segunda 00:00 de Brasilia e 03:00Z
+    // (offset fixo -03:00, Brasil nao tem mais horario de verao) - sem a
+    // conversao, a "semana" comecava 3h mais cedo e contava check-ins de
+    // domingo a noite como se fossem da semana nova
+    const corteUtc = new Date(`${inicioSemana}T00:00:00-03:00`).toISOString();
     const feitosNaSemana = todos.filter((c) => (
       c.funcionarioId === funcionarioId && c.status !== 'pendente_aprovacao' && c.status !== 'recusado'
-      && c.entrada && c.entrada.horario >= `${inicioSemana}T00:00:00`
+      && c.entrada && c.entrada.horario >= corteUtc
     )).length;
     if (feitosNaSemana >= LIMITE_CHECKINS_SEMANA_EXTRA) motivoPendencia = 'limite_semanal_extra';
   } else if (funcionario.tipoCadastro === 'candidato') {
