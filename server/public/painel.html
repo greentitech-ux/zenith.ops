@@ -858,8 +858,12 @@ async function cardRH(){
     return Math.max(0, Math.round((new Date(hoje+'T00:00:00') - new Date(dataIso+'T00:00:00'))/86400000));
   };
   const ativos = lista.filter(f=>f.status==='ativo');
-  const emTeste = ativos.filter(f=>f.emTeste && !f.feedbackTeste);
+  // candidatos em teste (status "candidato") ficam FORA de ativos ate serem
+  // efetivados - por isso o filtro de emTeste roda sobre a lista toda, nao
+  // so sobre ativos (ver mesmo ajuste em rh.html/renderTeste)
+  const emTeste = lista.filter(f=>f.status!=='inativo' && f.emTeste && !f.feedbackTeste);
   const testeVencido = emTeste.filter(f=>diasDesdeRH(f.dataAdmissao)>=5).length;
+  const emAtestado = lista.filter(f=>f.emAtestado).length;
   const [, mesHoje, diaHoje] = hoje.split('-');
   const aniverHoje = ativos.filter(f=>{
     if(!f.dataNascimento) return false;
@@ -871,6 +875,7 @@ async function cardRH(){
       ${statRow('Ativos', ativos.length)}
       ${statRow('Em teste', emTeste.length, emTeste.length?'warn':'')}
       ${statRow('Decisão pendente (5+ dias)', testeVencido, testeVencido?'bad':'')}
+      ${statRow('Em atestado', emAtestado, emAtestado?'bad':'')}
       ${statRow('Aniversariantes hoje', aniverHoje, aniverHoje?'ok':'')}
     </div>
   `);

@@ -153,6 +153,7 @@
   <button type="button" class="tab-btn active" data-tab="ativos" onclick="trocarAba('ativos')">👥 Ativos</button>
   <button type="button" class="tab-btn" data-tab="cadastrar" onclick="trocarAba('cadastrar')">➕ Cadastrar</button>
   <button type="button" class="tab-btn" data-tab="teste" onclick="trocarAba('teste')">⏳ Acompanh. de Teste</button>
+  <button type="button" class="tab-btn" data-tab="atestados" onclick="trocarAba('atestados')">🩺 Atestados</button>
   <button type="button" class="tab-btn" data-tab="aniver" onclick="trocarAba('aniver')">🎂 Aniversariantes</button>
 </div>
 
@@ -170,6 +171,7 @@
         <label>Status</label>
         <select id="at-filtro-status" onchange="renderAtivos()">
           <option value="ativo">Ativos</option>
+          <option value="candidato">Candidatos em teste</option>
           <option value="todos">Todos (inclui desligados)</option>
         </select>
       </div>
@@ -184,6 +186,12 @@
     <h2>Cadastrar funcionário (1º dia de trabalho)</h2>
     <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">nome completo, contato e currículo (se houver) - assim o RH sabe exatamente quem está atuando em cada loja</div>
     <form id="form-cadastrar">
+      <label>Tipo de cadastro</label>
+      <div class="tabs" style="margin-bottom:0;">
+        <button type="button" class="tab-btn active" data-tipo="extra" onclick="escolherTipoCadastro('extra')">👷 Extra (avulso)</button>
+        <button type="button" class="tab-btn" data-tipo="candidato" onclick="escolherTipoCadastro('candidato')">⏳ Candidato · teste de 5 dias</button>
+      </div>
+      <div class="sub" id="tipo-cadastro-explicacao" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:8px 0 0;">extra já entra direto na Ficha de Ativos - trabalho avulso, sem período de teste.</div>
       <label>Unidade</label>
       <select id="c-unidade" required></select>
       <label>Nome completo</label>
@@ -204,15 +212,12 @@
           <input type="date" id="c-nascimento">
         </div>
         <div>
-          <label>Data de admissão</label>
+          <label id="c-admissao-label">Data de admissão</label>
           <input type="date" id="c-admissao" required>
         </div>
       </div>
       <label>Currículo (PDF, opcional)</label>
       <input type="file" id="c-curriculo" accept="application/pdf">
-      <label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);margin-top:12px;">
-        <input type="checkbox" id="c-em-teste" checked style="width:auto;"> Em período de teste (gera alerta automático no 5º dia)
-      </label>
       <div class="msg hidden" id="msg-cadastrar"></div>
       <button class="btn-primary" type="submit">Cadastrar</button>
     </form>
@@ -225,6 +230,15 @@
     <h2>Acompanhamento de Teste</h2>
     <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">quem está no período de experiência - no 5º dia sem decisão, o card fica em destaque e o gerente recebe um alerta</div>
     <div id="lista-teste"></div>
+  </div>
+</div>
+
+<!-- ---------- ABA: Atestados ---------- -->
+<div class="painel-tab hidden" id="tab-atestados">
+  <div class="panel">
+    <h2>🩺 Em atestado agora</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">funcionários afastados - registrado pelo gerente pra dar visibilidade da operação até a volta</div>
+    <div id="lista-atestados"></div>
   </div>
 </div>
 
@@ -288,6 +302,29 @@
       <textarea id="dec-observacao" maxlength="500" placeholder="Como foi o período de teste..."></textarea>
       <div class="msg hidden" id="msg-decisao"></div>
       <button class="btn-primary" type="button" onclick="salvarDecisao()">Salvar decisão</button>
+    </div>
+  </div>
+</div>
+
+<!-- registrar atestado -->
+<div class="overlay hidden" id="overlay-atestado">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharAtestado()">✕</span>
+    <div class="sheet">
+      <h3>Registrar atestado</h3>
+      <div class="sub" id="at-sub"></div>
+      <div class="grid2">
+        <div>
+          <label>Início</label>
+          <input type="date" id="at-inicio">
+        </div>
+        <div>
+          <label>Previsão de retorno (opcional)</label>
+          <input type="date" id="at-previsao">
+        </div>
+      </div>
+      <div class="msg hidden" id="msg-atestado"></div>
+      <button class="btn-primary" type="button" onclick="salvarAtestado()">Registrar</button>
     </div>
   </div>
 </div>
@@ -367,9 +404,26 @@ const UNIDADES_NOMES = {
 
 let ME = null;
 let IS_MASTER = false;
+let IS_ADMIN = false;
 let TODOS = [];
 let EDITANDO_ID = null;
 let DECIDINDO_ID = null;
+let ATESTANDO_ID = null;
+let TIPO_CADASTRO = 'extra';
+
+function escolherTipoCadastro(tipo){
+  TIPO_CADASTRO = tipo;
+  document.querySelectorAll('#form-cadastrar .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tipo===tipo));
+  const explicacao = document.getElementById('tipo-cadastro-explicacao');
+  const labelAdmissao = document.getElementById('c-admissao-label');
+  if(tipo==='candidato'){
+    explicacao.textContent = 'candidato entra em período de teste de 5 dias - só vira funcionário ativo quando efetivado (aba Acompanh. de Teste).';
+    labelAdmissao.textContent = 'Data de início do teste';
+  }else{
+    explicacao.textContent = 'extra já entra direto na Ficha de Ativos - trabalho avulso, sem período de teste.';
+    labelAdmissao.textContent = 'Data de admissão';
+  }
+}
 
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtData(d){ if(!d) return '—'; const [y,m,dd]=d.split('-'); return `${dd}/${m}/${y}`; }
@@ -388,6 +442,7 @@ function trocarAba(nome){
   document.getElementById('tab-'+nome).classList.remove('hidden');
   if(nome==='aniver') renderAniversariantes();
   if(nome==='teste') renderTeste();
+  if(nome==='atestados') renderAtestados();
 }
 
 function badgeTeste(f){
@@ -399,8 +454,9 @@ function badgeTeste(f){
 
 function cardAtivoHtml(f){
   const badges = [
-    f.status==='inativo' ? '<span class="badge muted">desligado</span>' : '<span class="badge ok">ativo</span>',
+    f.status==='candidato' ? '<span class="badge warn">candidato</span>' : (f.status==='inativo' ? '<span class="badge muted">desligado</span>' : '<span class="badge ok">ativo</span>'),
     badgeTeste(f),
+    f.emAtestado ? '<span class="badge bad">🩺 atestado</span>' : '',
   ].filter(Boolean).join(' ');
   return `<div class="card">
     <div class="linha1"><span>${escapeHtml(f.nome)}</span>${badges}</div>
@@ -408,6 +464,8 @@ function cardAtivoHtml(f){
     <div class="acoes">
       <button type="button" class="link-btn" onclick="abrirEditar('${f.id}')">✏️ editar</button>
       ${f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 currículo</a>` : ''}
+      ${f.status==='ativo' && !f.emAtestado ? `<button type="button" class="link-btn" onclick="abrirAtestado('${f.id}')">🩺 registrar atestado</button>` : ''}
+      ${f.emAtestado ? `<button type="button" class="link-btn" onclick="marcarRetorno('${f.id}')">✅ registrar retorno</button>` : ''}
     </div>
   </div>`;
 }
@@ -417,14 +475,14 @@ function renderAtivos(){
   const statusF = document.getElementById('at-filtro-status').value;
   let lista = TODOS.slice();
   if(unidadeF) lista = lista.filter(f=>f.unidade===unidadeF);
-  if(statusF==='ativo') lista = lista.filter(f=>f.status==='ativo');
+  if(statusF!=='todos') lista = lista.filter(f=>f.status===statusF);
   lista.sort((a,b)=>String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')));
   const el = document.getElementById('lista-ativos');
   el.innerHTML = lista.length ? lista.map(cardAtivoHtml).join('') : '<div class="empty">nenhum funcionário encontrado.</div>';
 }
 
 function renderTeste(){
-  const lista = TODOS.filter(f=>f.status==='ativo' && f.emTeste && !f.feedbackTeste)
+  const lista = TODOS.filter(f=>f.status!=='inativo' && f.emTeste && !f.feedbackTeste)
     .sort((a,b)=>diasDesde(b.dataAdmissao)-diasDesde(a.dataAdmissao));
   const el = document.getElementById('lista-teste');
   el.innerHTML = lista.length ? lista.map(f=>{
@@ -438,6 +496,23 @@ function renderTeste(){
       </div>
     </div>`;
   }).join('') : '<div class="empty">ninguém em período de teste agora.</div>';
+}
+
+function renderAtestados(){
+  const lista = TODOS.filter(f=>f.emAtestado)
+    .sort((a,b)=>String((b.atestadoAtual||{}).inicio||'').localeCompare(String((a.atestadoAtual||{}).inicio||'')));
+  const el = document.getElementById('lista-atestados');
+  el.innerHTML = lista.length ? lista.map(f=>{
+    const at = f.atestadoAtual || {};
+    const dias = diasDesde(at.inicio);
+    return `<div class="card">
+      <div class="linha1"><span>${escapeHtml(f.nome)}</span><span class="badge bad">${dias} dia${dias===1?'':'s'} afastado</span></div>
+      <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · desde ${fmtData(at.inicio)}${at.previsaoRetorno?' · previsão de retorno '+fmtData(at.previsaoRetorno):''}</div>
+      <div class="acoes">
+        <button type="button" class="btn-secundario" onclick="marcarRetorno('${f.id}')">✅ Registrar retorno</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty">ninguém de atestado agora.</div>';
 }
 
 function renderAniversariantes(){
@@ -456,6 +531,7 @@ async function carregar(){
   TODOS = await fetch('/api/rh/funcionarios').then(r=>r.ok?r.json():[]).catch(()=>[]);
   renderAtivos();
   renderTeste();
+  renderAtestados();
 }
 
 document.getElementById('form-cadastrar').addEventListener('submit', async (e)=>{
@@ -472,18 +548,19 @@ document.getElementById('form-cadastrar').addEventListener('submit', async (e)=>
     fd.append('cargoFuncao', document.getElementById('c-cargo').value);
     fd.append('dataNascimento', document.getElementById('c-nascimento').value);
     fd.append('dataAdmissao', document.getElementById('c-admissao').value);
-    fd.append('emTeste', document.getElementById('c-em-teste').checked ? 'true' : 'false');
+    fd.append('tipoCadastro', TIPO_CADASTRO);
     const arq = document.getElementById('c-curriculo').files[0];
     if(arq) fd.append('curriculo', arq);
     const resp = await fetch('/api/rh/funcionarios', { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao cadastrar.');
+    const indoPraTeste = data.tipoCadastro === 'candidato';
     document.getElementById('form-cadastrar').reset();
     document.getElementById('c-admissao').value = hojeBrasilia();
-    document.getElementById('c-em-teste').checked = true;
+    escolherTipoCadastro('extra');
     msg.textContent = `✅ ${data.nome} cadastrado(a) com sucesso.`; msg.className = 'msg ok';
     await carregar();
-    trocarAba('ativos');
+    trocarAba(indoPraTeste ? 'teste' : 'ativos');
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err';
   }finally{
@@ -550,12 +627,51 @@ async function salvarDecisao(){
   }
 }
 
+function abrirAtestado(id){
+  const f = TODOS.find(x=>x.id===id);
+  if(!f) return;
+  ATESTANDO_ID = id;
+  document.getElementById('msg-atestado').classList.add('hidden');
+  document.getElementById('at-sub').textContent = `${f.nome} · ${UNIDADES_NOMES[f.unidade]||f.unidade}`;
+  document.getElementById('at-inicio').value = hojeBrasilia();
+  document.getElementById('at-previsao').value = '';
+  document.getElementById('overlay-atestado').classList.remove('hidden');
+}
+function fecharAtestado(){ document.getElementById('overlay-atestado').classList.add('hidden'); ATESTANDO_ID=null; }
+async function salvarAtestado(){
+  const msg = document.getElementById('msg-atestado');
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${ATESTANDO_ID}/atestado`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      inicio: document.getElementById('at-inicio').value,
+      previsaoRetorno: document.getElementById('at-previsao').value,
+    })});
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao registrar atestado.');
+    await carregar();
+    fecharAtestado();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+}
+async function marcarRetorno(id){
+  if(!confirm('Registrar o retorno desse funcionário?')) return;
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${id}/atestado/retorno`, { method:'POST' });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao registrar retorno.');
+    await carregar();
+  }catch(err){
+    alert(err.message);
+  }
+}
+
 async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   ME = await res.json();
   const isMaster = ME.role==='master';
   IS_MASTER = isMaster;
+  IS_ADMIN = !!ME.isAdmin;
   const temAcesso = isMaster || ME.isAdmin || (ME.permissions?.sections||[]).includes('rh');
 
   document.getElementById('nav-monitor').classList.remove('hidden');
@@ -589,7 +705,10 @@ async function boot(){
     return;
   }
 
-  const unidades = isMaster ? Object.keys(UNIDADES_NOMES) : (ME.permissions?.unidades||[]).filter(u=>UNIDADES_NOMES[u]);
+  // Admin (alem de Master) tem visao corporativa cross-unidade - mesmo
+  // criterio do backend (podeAcessarUnidadeRh em index.js), pra dar pro
+  // time de RH acesso a todas as unidades do grupo direto no cadastro
+  const unidades = (isMaster || ME.isAdmin) ? Object.keys(UNIDADES_NOMES) : (ME.permissions?.unidades||[]).filter(u=>UNIDADES_NOMES[u]);
   const optsUnidades = unidades.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('');
   document.getElementById('c-unidade').innerHTML = optsUnidades || '<option value="" disabled selected>nenhuma unidade liberada</option>';
   document.getElementById('at-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);

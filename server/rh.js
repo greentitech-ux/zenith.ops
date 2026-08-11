@@ -2,13 +2,19 @@
 // Modulo de RH: ficha de funcionarios (extras e efetivos) por loja, sem
 // exigir login no Zenith - a maioria de quem trabalha na loja (extra,
 // cozinha, entregador) nunca acessa o sistema, entao esse cadastro e
-// independente de users.js. Cobre 3 frentes pedidas pelo usuario:
-// - Cadastro no 1o dia (nome, contato, curriculo) - da visibilidade de
-//   quem esta de fato atuando nas lojas e permite cobrar gerente que nao
-//   cadastrar alguem.
+// independente de users.js. Cobre as frentes pedidas pelo usuario:
+// - Cadastro no 1o dia (nome, contato, curriculo), com 2 tipos (tipoCadastro):
+//   "extra" (avulso, ja entra direto como ativo - so precisa de visibilidade
+//   de quem esta atuando na loja) e "candidato" (vai pro teste de 5 dias -
+//   fica em status "candidato", FORA da Ficha de Ativos, ate a decisao).
 // - Acompanhamento de teste: quem esta em periodo de experiencia (emTeste)
-//   gera um alerta automatico pro gerente no 5o dia (ver
-//   verificarTestesVencidos, chamado por um job periodico em index.js).
+//   gera um alerta automatico no 5o dia (ver verificarTestesVencidos,
+//   chamado por um job periodico em index.js) - decisao "efetivar" promove
+//   o candidato pra status "ativo" (entra na Ficha de Ativos); "desligar"
+//   marca "inativo".
+// - Atestado: funcionario ativo pode ser marcado como afastado (emAtestado)
+//   sem contar como desligamento - da visibilidade de quantos estao de
+//   atestado agora (card do Painel) e guarda o historico de quando voltou.
 // - Ficha de Funcionarios Ativos + Aniversariante do Dia (calculado sobre a
 //   mesma ficha, sem colecao propria).
 const db = require('./firestore');
@@ -33,13 +39,22 @@ function validarDataOuNull(v, campo) {
   return v;
 }
 
+const TIPOS_CADASTRO = ['extra', 'candidato'];
+
 async function criar({
-  unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, emTeste,
+  unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro,
   curriculo, cadastradoPorId, cadastradoPorEmail,
 }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   const nomeOk = limpar(nome, 150);
   if (!nomeOk) throw new Error('Informe o nome completo.');
+  const tipo = TIPOS_CADASTRO.includes(tipoCadastro) ? tipoCadastro : 'extra';
+  // extra (avulso) ja entra como ativo - so precisa de visibilidade, nao passa
+  // por decisao de contratacao. candidato (teste de 5 dias) so vira "ativo"
+  // quando efetivado (ver registrarDecisaoTeste) - ate la fica de fora da
+  // Ficha de Ativos, so aparece em Acompanhamento de Teste
+  const emTeste = tipo === 'candidato';
+  const status = tipo === 'candidato' ? 'candidato' : 'ativo';
 
   const ref = COLLECTION.doc();
   const agora = new Date().toISOString();
@@ -52,11 +67,15 @@ async function criar({
     dataNascimento: validarDataOuNull(dataNascimento, 'Data de nascimento'),
     dataAdmissao: validarDataOuNull(dataAdmissao, 'Data de admissão') || agora.slice(0, 10),
     curriculo: curriculo || null,
-    emTeste: emTeste !== false,
-    status: 'ativo',
+    tipoCadastro: tipo,
+    emTeste,
+    status,
     feedbackTeste: null,
     alertaTesteEnviadoEm: null,
     desligadoEm: null,
+    emAtestado: false,
+    atestadoAtual: null,
+    atestados: [],
     cadastradoPorId: cadastradoPorId || null,
     cadastradoPorEmail: cadastradoPorEmail || null,
     criadoEm: agora,
@@ -106,7 +125,7 @@ async function atualizar(id, patch) {
   if (patch.curriculo !== undefined) merge.curriculo = patch.curriculo;
 
   if (patch.status !== undefined) {
-    if (!['ativo', 'inativo'].includes(patch.status)) throw new Error('Status inválido.');
+    if (!['candidato', 'ativo', 'inativo'].includes(patch.status)) throw new Error('Status inválido.');
     merge.status = patch.status;
     merge.desligadoEm = patch.status === 'inativo' ? new Date().toISOString() : null;
   }
@@ -117,8 +136,9 @@ async function atualizar(id, patch) {
 }
 
 // registra a decisao do periodo de teste (efetivar/desligar) - tira
-// emTeste (o card some da aba de Acompanhamento) e, se a decisao foi
-// desligar, marca o status como inativo direto (evita passo duplicado)
+// emTeste (o card some da aba de Acompanhamento) e muda o status: efetivar
+// promove o candidato pra "ativo" (agora entra na Ficha de Funcionarios
+// Ativos); desligar marca "inativo" direto (evita passo duplicado)
 async function registrarDecisaoTeste(id, { decisao, observacao, porEmail }) {
   if (!DECISOES_VALIDAS.includes(decisao)) throw new Error('Decisão inválida. Use "efetivar" ou "desligar".');
   const ref = COLLECTION.doc(id);
@@ -130,7 +150,9 @@ async function registrarDecisaoTeste(id, { decisao, observacao, porEmail }) {
     feedbackTeste: { decisao, observacao: limpar(observacao, 500), decididoPorEmail: porEmail || null, decididoEm: agora },
     atualizadoEm: agora,
   };
-  if (decisao === 'desligar') {
+  if (decisao === 'efetivar') {
+    merge.status = 'ativo';
+  } else {
     merge.status = 'inativo';
     merge.desligadoEm = agora;
   }
@@ -144,6 +166,54 @@ async function remover(id) {
   if (!snap.exists) throw new Error('Funcionário não encontrado.');
   await COLLECTION.doc(id).delete();
   rhCache.invalidar();
+}
+
+// atestado medico: o funcionario continua "ativo" (nao e desligamento), so
+// fica marcado como afastado - da visibilidade de quantas pessoas estao de
+// atestado agora (card do Painel) e guarda o historico pra quando ela voltar
+async function registrarAtestado(id, { inicio, previsaoRetorno, porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  const atual = snap.data();
+  if (atual.status !== 'ativo') throw new Error('Só é possível lançar atestado pra funcionário ativo.');
+  if (atual.emAtestado) throw new Error('Esse funcionário já está com atestado em aberto.');
+  const inicioOk = validarDataOuNull(inicio, 'Data de início') || new Date().toISOString().slice(0, 10);
+  const agora = new Date().toISOString();
+  await ref.update({
+    emAtestado: true,
+    atestadoAtual: {
+      inicio: inicioOk,
+      previsaoRetorno: validarDataOuNull(previsaoRetorno, 'Previsão de retorno'),
+      registradoPorEmail: porEmail || null,
+      registradoEm: agora,
+    },
+    atualizadoEm: agora,
+  });
+  rhCache.invalidar();
+  return getOne(id);
+}
+
+async function registrarRetornoAtestado(id, { porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  const atual = snap.data();
+  if (!atual.emAtestado || !atual.atestadoAtual) throw new Error('Esse funcionário não está de atestado.');
+  const agora = new Date().toISOString();
+  const registroFechado = {
+    ...atual.atestadoAtual,
+    retorno: agora.slice(0, 10),
+    marcadoRetornoPorEmail: porEmail || null,
+  };
+  await ref.update({
+    emAtestado: false,
+    atestadoAtual: null,
+    atestados: [...(atual.atestados || []), registroFechado],
+    atualizadoEm: agora,
+  });
+  rhCache.invalidar();
+  return getOne(id);
 }
 
 function diasDesde(dataIso) {
@@ -160,7 +230,7 @@ function diasDesde(dataIso) {
 async function verificarTestesVencidos() {
   const todos = await listAllUncached();
   return todos.filter((f) => (
-    f.status === 'ativo' && f.emTeste && !f.feedbackTeste && !f.alertaTesteEnviadoEm
+    f.status !== 'inativo' && f.emTeste && !f.feedbackTeste && !f.alertaTesteEnviadoEm
     && diasDesde(f.dataAdmissao) >= DIAS_TESTE_ALERTA
   ));
 }
@@ -184,9 +254,10 @@ function aniversariantesHoje(lista, dataRef) {
 }
 
 module.exports = {
-  DIAS_TESTE_ALERTA,
+  DIAS_TESTE_ALERTA, TIPOS_CADASTRO,
   criar, listAll, listByUnidades, getOne, atualizar, remover,
   registrarDecisaoTeste, verificarTestesVencidos, marcarAlertaTesteEnviado,
+  registrarAtestado, registrarRetornoAtestado,
   diasDesde, aniversariantesHoje,
   invalidar: () => rhCache.invalidar(),
 };

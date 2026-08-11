@@ -3262,10 +3262,17 @@ app.get('/api/festas/relatorio.:formato(csv|pdf)', requireSection('festas'), asy
 // mento de teste com alerta automatico no 5o dia (ver rodarAlertaTesteRh
 // mais abaixo) e aniversariante do dia (calculado no front sobre a mesma
 // lista, ver rh.aniversariantesHoje) ----------
+// Admin (alem de Master) tem visao corporativa cross-unidade, igual ja usado
+// em festas/parque - e o jeito de dar pro time de RH acesso a todas as
+// unidades do grupo sem precisar listar cada uma nas permissoes dele
+function podeAcessarUnidadeRh(req, unidade) {
+  return req.isMaster || req.isAdmin || (req.permissions.unidades || []).includes(unidade);
+}
+
 app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'), async (req, res) => {
   try {
-    const { unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, emTeste } = req.body;
-    if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
+    const { unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro } = req.body;
+    if (!podeAcessarUnidadeRh(req, unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
     let curriculo = null;
@@ -3274,9 +3281,7 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'
       curriculo = { path, nomeOriginal: req.file.originalname, tipo: req.file.mimetype };
     }
     const registro = await rh.criar({
-      unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao,
-      // multipart manda tudo como string - so false quando vier "false" explicito
-      emTeste: emTeste !== 'false' && emTeste !== false,
+      unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro,
       curriculo, cadastradoPorId: req.user.id, cadastradoPorEmail: req.user.email,
     });
     broadcast('rh-funcionario-criado', registro, 'rh');
@@ -3287,7 +3292,7 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'
 });
 
 app.get('/api/rh/funcionarios', requireSection('rh'), async (req, res) => {
-  if (req.isMaster) return res.json(await rh.listAll());
+  if (req.isMaster || req.isAdmin) return res.json(await rh.listAll());
   res.json(await rh.listByUnidades(req.permissions.unidades || []));
 });
 
@@ -3295,7 +3300,7 @@ app.patch('/api/rh/funcionarios/:id', requireSection('rh'), async (req, res) => 
   try {
     const atual = await rh.getOne(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
-    if (!req.isMaster && !(req.permissions.unidades || []).includes(atual.unidade)) {
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
     const registro = await rh.atualizar(req.params.id, req.body);
@@ -3310,7 +3315,7 @@ app.post('/api/rh/funcionarios/:id/decisao-teste', requireSection('rh'), async (
   try {
     const atual = await rh.getOne(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
-    if (!req.isMaster && !(req.permissions.unidades || []).includes(atual.unidade)) {
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
     const registro = await rh.registrarDecisaoTeste(req.params.id, {
@@ -3323,10 +3328,42 @@ app.post('/api/rh/funcionarios/:id/decisao-teste', requireSection('rh'), async (
   }
 });
 
+app.post('/api/rh/funcionarios/:id/atestado', requireSection('rh'), async (req, res) => {
+  try {
+    const atual = await rh.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    const registro = await rh.registrarAtestado(req.params.id, {
+      inicio: req.body.inicio, previsaoRetorno: req.body.previsaoRetorno, porEmail: req.user.email,
+    });
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/rh/funcionarios/:id/atestado/retorno', requireSection('rh'), async (req, res) => {
+  try {
+    const atual = await rh.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    const registro = await rh.registrarRetornoAtestado(req.params.id, { porEmail: req.user.email });
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/rh/funcionarios/:id/curriculo', requireSection('rh'), async (req, res) => {
   const atual = await rh.getOne(req.params.id);
   if (!atual || !atual.curriculo) return res.sendStatus(404);
-  if (!req.isMaster && !(req.permissions.unidades || []).includes(atual.unidade)) {
+  if (!podeAcessarUnidadeRh(req, atual.unidade)) {
     return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
   }
   storage.streamArquivo(atual.curriculo.path, atual.curriculo.tipo, res);
