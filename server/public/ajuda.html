@@ -717,12 +717,13 @@ const TOPICOS = [
     <p>Quem tem acesso a Festas vê no <b>Painel</b> o card <b>🎉 Festas (calendário)</b>: o mês inteiro com os dias de festa marcados (com a quantidade em cada dia) e as setas ‹ › pra navegar entre os meses. <b>Comportamento:</b> toque num dia marcado pra abrir a lista das festas dele (cliente, código, pacote, horário e valor, em ordem de horário); toque de novo pra fechar. Festa cancelada não aparece no calendário.</p>
   `},
   { id:'rh', icone:'🧑‍💼', secoes:['rh'], titulo:'RH (funcionários, teste, atestado e aniversariantes)', corpo:`
-    <p>Ficha de funcionários das lojas - independente de ter login no Zenith (a maioria de quem trabalha na loja não acessa o sistema). Quem tem a tag <b>RH</b> vê e cadastra só as unidades liberadas pra ele; <b>Master, Admin</b> e quem tem a tag extra <b>🧑‍💼 RH (todas as unidades)</b> (atribuída pelo Master em Usuários) têm visão de todas as unidades do grupo, inclusive no cadastro.</p>
+    <p>Ficha de funcionários das lojas - independente de ter login no Zenith (a maioria de quem trabalha na loja não acessa o sistema). Quem tem a tag <b>RH</b> vê e cadastra só as unidades liberadas pra ele; <b>Master, Admin</b> e quem tem a tag extra <b>🧑‍💼 RH (todas as unidades)</b> (atribuída pelo Master em Usuários) têm visão de todas as unidades do grupo, inclusive no cadastro. A tag extra <b>🧑‍💼 RH: pode cadastrar efetivado direto</b> (também em Usuários) libera cadastrar alguém já efetivado sem passar pelo teste de 5 dias.</p>
     <h3>Cadastrar (1º dia de trabalho)</h3>
     <p>Na aba <b>➕ Cadastrar</b>, primeiro escolha o <b>tipo de cadastro</b>:</p>
     <ul>
       <li><b>👷 Extra (avulso):</b> já entra direto na Ficha de Ativos - trabalho pontual, sem período de teste. Uso típico: gerente cadastrando quem está fazendo um extra na loja.</li>
       <li><b>⏳ Candidato · teste de 5 dias:</b> fica em período de experiência, <b>fora</b> da Ficha de Ativos até a decisão. Tanto o gerente quanto o próprio RH podem cadastrar - o RH pode escolher qualquer unidade do grupo.</li>
+      <li><b>🧑‍💼 Efetivado (direto):</b> pula o teste de 5 dias e já entra como colaborador contratado - <b>restrito</b> a Master, Admin e quem tem a tag extra <b>🧑‍💼 RH: pode cadastrar efetivado direto</b> (atribuída pelo Master em Usuários). A loja/gerente comum não vê essa opção - só pode cadastrar Extra ou Candidato, e continua podendo dar o feedback do teste de 5 dias (efetivar/desligar) normalmente.</li>
     </ul>
     <p>Preencha unidade, nome completo, contato, cargo/função, data de nascimento e a data de admissão/início (já vem com hoje), e anexe o <b>currículo em PDF</b> se houver.</p>
     <p><b>Por que cadastrar no 1º dia:</b> é assim que dá pra saber exatamente quem está atuando em cada loja - e cobrar o gerente que deixar alguém sem cadastrar.</p>
@@ -733,7 +734,7 @@ const TOPICOS = [
       <li><b>Desligar:</b> marca o cadastro como inativo direto (não vira ativo).</li>
     </ul>
     <h3>👥 Ficha de Funcionários Ativos</h3>
-    <p>Lista quem está efetivamente atuando, com filtro por unidade e por status (ativo / candidatos em teste / todos). Cada card mostra cargo, unidade, contato, data de admissão, e badges de teste/atestado quando aplicável. <b>✏️ editar</b> muda nome/contato/cargo/status (desligar = status inativo); <b>📄 currículo</b> baixa o PDF anexado.</p>
+    <p>Lista quem está efetivamente atuando, com filtro por unidade e por status (ativo / candidatos em teste / todos). Cada card mostra cargo, unidade, contato, data de admissão, e badges de teste/atestado quando aplicável. <b>✏️ editar</b> muda nome/contato/cargo/status (desligar = status inativo); <b>📄 currículo</b> baixa o PDF anexado. Só o <b>Master</b> vê e edita o campo <b>data de admissão/início do teste</b> no editar - útil pra corrigir quando a pessoa já estava na loja há um tempo e a data não foi informada certa no cadastro.</p>
     <h3>🩺 Atestados</h3>
     <p>No card de um funcionário <b>ativo</b>, use <b>🩺 registrar atestado</b> pra lançar o início do afastamento (com previsão de retorno opcional) - ele fica marcado com o badge <b>🩺 atestado</b> em Ativos e some da operação normal sem contar como desligamento. A aba <b>🩺 Atestados</b> reúne todo mundo afastado agora, com os dias corridos; quando a pessoa voltar, use <b>✅ registrar retorno</b> pra fechar o afastamento (fica no histórico). O <b>Painel</b> mostra a contagem de quem está de atestado no card de RH, pra dar visibilidade da operação.</p>
     <h3>📸 Check-in por foto (identificar quem apareceu)</h3>
@@ -746,11 +747,12 @@ const TOPICOS = [
     </ol>
     <p><b>Como o extra usa (fluxo do dia a dia):</b></p>
     <ol>
-      <li>Ao chegar, a pessoa procura o próprio nome na lista (só aparecem funcionários <b>ativos</b> da unidade daquele dispositivo) e toca nele.</li>
+      <li>Ao chegar, a pessoa procura o próprio nome na lista (aparecem funcionários <b>ativos</b> e <b>candidatos em teste de 5 dias</b> da unidade daquele dispositivo) e toca nele.</li>
       <li>Confirma <b>"✅ Fazer check-in"</b> e tira uma foto na hora (o navegador abre a câmera do dispositivo diretamente).</li>
       <li>No fim do turno, repete o processo: procura o próprio nome (agora aparece marcado como "na loja") e confirma <b>"🚪 Fazer check-out"</b>, tirando outra foto.</li>
     </ol>
     <p><b>Sem reconhecimento facial:</b> o sistema não identifica ninguém automaticamente pela foto - a identificação é a própria pessoa escolhendo o nome dela na lista; a foto (com horário) é só o registro/prova visual de quem esteve na loja e quando, útil em caso de dúvida ou divergência. Cada pessoa só pode ter <b>1 check-in aberto por vez</b> - precisa fazer o check-out antes de abrir outro.</p>
+    <p><b>Localização (só Master):</b> junto com a foto, o navegador captura a localização do dispositivo no momento do check-in/check-out (usando o próprio recurso de localização do navegador - se a pessoa recusar a permissão, o registro segue normalmente, só sem localização). Esse dado <b>não aparece pra ninguém além do Master</b> - nem Admin, nem RH, nem quem tem a tag "RH todas as unidades" vê o link de localização; pro resto do time o check-in aparece normal, só sem esse dado extra.</p>
     <p><b>Visão pra quem administra:</b> a aba <b>📸 Check-ins</b> em <code>/rh.html</code> mostra "🟢 Na loja agora" (quem já fez check-in mas ainda não fez check-out) e o histórico do dia (ou de qualquer data escolhida), com link pra ver as fotos de entrada e saída de cada check-in. O <b>Painel</b> também mostra a contagem de "Na loja agora" no card de RH.</p>
     <h3>🎂 Aniversariantes</h3>
     <p>Calculado sobre a mesma ficha (só quem está <b>ativo</b> e tem data de nascimento cadastrada): a aba mostra quem faz aniversário <b>hoje</b> e a lista de aniversariantes <b>do mês</b>. O <b>Painel</b> também mostra a contagem de aniversariantes de hoje no card de RH.</p>

@@ -191,6 +191,7 @@
       <div class="tabs" style="margin-bottom:0;">
         <button type="button" class="tab-btn active" data-tipo="extra" onclick="escolherTipoCadastro('extra')">👷 Extra (avulso)</button>
         <button type="button" class="tab-btn" data-tipo="candidato" onclick="escolherTipoCadastro('candidato')">⏳ Candidato · teste de 5 dias</button>
+        <button type="button" class="tab-btn hidden" id="btn-tipo-efetivado" data-tipo="efetivado" onclick="escolherTipoCadastro('efetivado')">🧑‍💼 Efetivado (direto)</button>
       </div>
       <div class="sub" id="tipo-cadastro-explicacao" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:8px 0 0;">extra já entra direto na Ficha de Ativos - trabalho avulso, sem período de teste.</div>
       <label>Unidade</label>
@@ -302,6 +303,10 @@
           <label>Cargo / função</label>
           <input type="text" id="ed-cargo" maxlength="60">
         </div>
+      </div>
+      <div id="campo-ed-admissao">
+        <label>Data de admissão / início do teste</label>
+        <input type="date" id="ed-admissao">
       </div>
       <label>Status</label>
       <select id="ed-status">
@@ -447,6 +452,9 @@ function escolherTipoCadastro(tipo){
   if(tipo==='candidato'){
     explicacao.textContent = 'candidato entra em período de teste de 5 dias - só vira funcionário ativo quando efetivado (aba Acompanh. de Teste).';
     labelAdmissao.textContent = 'Data de início do teste';
+  }else if(tipo==='efetivado'){
+    explicacao.textContent = 'efetivado já entra como colaborador contratado direto, sem passar pelo teste de 5 dias.';
+    labelAdmissao.textContent = 'Data de admissão';
   }else{
     explicacao.textContent = 'extra já entra direto na Ficha de Ativos - trabalho avulso, sem período de teste.';
     labelAdmissao.textContent = 'Data de admissão';
@@ -555,10 +563,14 @@ async function carregarCheckins(){
 
   const elAbertos = document.getElementById('lista-checkins-abertos');
   const abertosFiltrados = unidadeF ? abertos.filter(c=>c.unidade===unidadeF) : abertos;
+  const linkLocalizacao = (loc, rotulo) => (IS_MASTER && loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng))
+    ? `<a class="link-btn" href="https://www.google.com/maps?q=${loc.lat},${loc.lng}" target="_blank" rel="noopener">📍 local ${rotulo}</a>` : '';
+
   elAbertos.innerHTML = abertosFiltrados.length ? abertosFiltrados.map(c=>`
     <div class="card">
       <div class="linha1"><span>${escapeHtml(c.funcionarioNome)}</span><span class="badge ok">na loja</span></div>
       <div class="sub">${escapeHtml(UNIDADES_NOMES[c.unidade]||c.unidade)} · entrou às ${fmtHora(c.entrada.horario)}</div>
+      <div class="acoes">${linkLocalizacao(c.entrada?.localizacao, 'entrada')}</div>
     </div>`).join('') : '<div class="empty">ninguém na loja agora.</div>';
 
   const elHist = document.getElementById('lista-checkins-historico');
@@ -570,7 +582,7 @@ async function carregarCheckins(){
     return `<div class="card">
       <div class="linha1"><span>${escapeHtml(c.funcionarioNome)}</span>${c.status==='aberto'?'<span class="badge ok">na loja</span>':'<span class="badge muted">encerrado</span>'}</div>
       <div class="sub">${escapeHtml(UNIDADES_NOMES[c.unidade]||c.unidade)} · entrada ${fmtHora(c.entrada.horario)}${c.saida?' · saída '+fmtHora(c.saida.horario):''}</div>
-      <div class="acoes">${fotoEntrada}${fotoSaida}</div>
+      <div class="acoes">${fotoEntrada}${fotoSaida}${linkLocalizacao(c.entrada?.localizacao, 'entrada')}${linkLocalizacao(c.saida?.localizacao, 'saída')}</div>
     </div>`;
   }).join('') : '<div class="empty">nenhum check-in nesse dia.</div>';
 }
@@ -638,6 +650,7 @@ function abrirEditar(id){
   document.getElementById('ed-nome').value = f.nome||'';
   document.getElementById('ed-contato').value = f.contato||'';
   document.getElementById('ed-cargo').value = f.cargoFuncao||'';
+  document.getElementById('ed-admissao').value = f.dataAdmissao||'';
   document.getElementById('ed-status').value = f.status||'ativo';
   document.getElementById('overlay-editar').classList.remove('hidden');
 }
@@ -649,6 +662,7 @@ async function salvarEdicao(){
       nome: document.getElementById('ed-nome').value,
       contato: document.getElementById('ed-contato').value,
       cargoFuncao: document.getElementById('ed-cargo').value,
+      dataAdmissao: document.getElementById('ed-admissao').value,
       status: document.getElementById('ed-status').value,
     })});
     const data = await resp.json();
@@ -775,6 +789,12 @@ async function boot(){
   document.getElementById('ck-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);
   document.getElementById('ck-filtro-data').value = hojeBrasilia();
   document.getElementById('c-admissao').value = hojeBrasilia();
+
+  // "Efetivado (direto)" so aparece pra quem tem a tag dedicada (ou
+  // Master/Admin) - a loja (gerente comum) so cadastra Extra/Candidato
+  document.getElementById('btn-tipo-efetivado').classList.toggle('hidden', !(isMaster || ME.isAdmin || ME.podeRhCadastrarEfetivado));
+  // data de admissao/inicio do teste no modal de editar so o Master corrige
+  document.getElementById('campo-ed-admissao').classList.toggle('hidden', !isMaster);
 
   document.getElementById('root').classList.remove('hidden');
   await carregar();
