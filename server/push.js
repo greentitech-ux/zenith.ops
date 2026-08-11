@@ -274,9 +274,20 @@ async function notifyParquePcdCortesiaLimite({ unidade, unidadeNome, horaBucket,
   }
 }
 
+// RH: gerente/ass.gerente DA UNIDADE (mesmo criterio de podeReceberPcdCortesia)
+// OU qualquer um com a secao 'rh' - candidatos podem ter sido cadastrados
+// pelo proprio time de RH (cross-unidade, ver podeAcessarUnidadeRh em
+// index.js), entao o alerta do 5o dia tem que chegar neles tambem, nao so
+// no gerente da loja
+function podeReceberAlertaRh(sub, unidade) {
+  if (podeReceberPcdCortesia(sub, unidade)) return true;
+  const meta = sub.meta;
+  return !!meta && (meta.sections || []).includes('rh');
+}
+
 // RH: funcionario em teste completou os dias limite (ver
-// rh.DIAS_TESTE_ALERTA) sem decisao - aviso pro Master e pro Gerente/
-// Ass.Gerente DA UNIDADE (mesmo criterio de podeReceberPcdCortesia)
+// rh.DIAS_TESTE_ALERTA) sem decisao - aviso pro Master, Gerente/Ass.Gerente
+// DA UNIDADE e pro time de RH (ver podeReceberAlertaRh)
 async function notifyRhTesteVencido(funcionario) {
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const payload = JSON.stringify({
@@ -287,7 +298,7 @@ async function notifyRhTesteVencido(funcionario) {
   });
   const subs = await loadSubs();
   for (const sub of subs) {
-    if (!podeReceberPcdCortesia(sub, funcionario.unidade)) continue;
+    if (!podeReceberAlertaRh(sub, funcionario.unidade)) continue;
     try {
       await webpush.sendNotification(sub, payload);
     } catch (err) {
