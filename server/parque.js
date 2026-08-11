@@ -81,7 +81,7 @@ function valorEntradaCriancas(criancas, unitario) {
 // financeiro. 'cortesia' zera o valor (entrada liberada sem cobranca).
 // 'misto' e' so um rotulo (ver metodoPagamento em criar()) pra quando a
 // entrada foi dividida entre mais de uma forma - ver pagamentos abaixo
-const METODOS_PAGAMENTO = ['dinheiro', 'pix', 'debito', 'credito', 'cortesia', 'misto'];
+const METODOS_PAGAMENTO = ['dinheiro', 'pix', 'debito', 'credito', 'voucher', 'gratuidade', 'cortesia', 'misto'];
 function sanitizarMetodoPagamento(m) {
   return METODOS_PAGAMENTO.includes(m) ? m : null;
 }
@@ -90,7 +90,7 @@ function sanitizarMetodoPagamento(m) {
 // dinheiro, metade pix) - cada entrada tem forma + valor; a soma tem que
 // bater exatamente com o valor total da entrada (ver validacao em criar()).
 // Cortesia nunca entra aqui - e' o metodoPagamento==='cortesia' de sempre.
-const FORMAS_PAGAMENTO_SPLIT = ['dinheiro', 'pix', 'debito', 'credito'];
+const FORMAS_PAGAMENTO_SPLIT = ['dinheiro', 'pix', 'debito', 'credito', 'voucher'];
 function sanitizarPagamentos(lista) {
   if (!Array.isArray(lista)) return [];
   return lista
@@ -416,8 +416,11 @@ async function criar({
     pulseiras: criancasOk.length,
     // financeiro: valor pela tabela (por pulseira) + meias (R$25 por crianca
     // optante + pares extras) + forma de pagamento - 'cortesia' registra a
-    // entrada com valor zero
-    metodoPagamento: sanitizarMetodoPagamento(metodoPagamento),
+    // entrada com valor zero. PCD-cortesia (botao "5%CP") e' gratuidade
+    // automatica, sem alcada - forcado no servidor pra nunca virar 'misto'
+    // (sem pagamentos pra somar) nem se confundir com a cortesia normal
+    // (que exige aprovacao Gerente/Master, ver bloco acima)
+    metodoPagamento: categoriaPcd === 'pcd-cortesia' ? 'gratuidade' : sanitizarMetodoPagamento(metodoPagamento),
     // divisao entre formas de pagamento (ver sanitizarPagamentos acima) -
     // so fica vazio quando a entrada e' gratis (cortesia ou pcd-cortesia)
     pagamentos: pagamentosOk,

@@ -321,6 +321,7 @@
           <option value="pix">Pix</option>
           <option value="debito">Cartão de débito</option>
           <option value="credito">Cartão de crédito</option>
+          <option value="voucher">Voucher</option>
           <option value="cortesia">Cortesia (não cobra)</option>
         </select>
         <label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);margin-top:12px;">
@@ -376,6 +377,7 @@
       <option value="pix">Pix</option>
       <option value="debito">Cartão de débito</option>
       <option value="credito">Cartão de crédito</option>
+      <option value="voucher">Voucher</option>
       <option value="cortesia">Cortesia (não cobra)</option>
     </select>
     <div class="resumo"><div class="linha"><span>Acréscimo</span><b id="at-preview">R$ 0,00</b></div></div>
@@ -558,10 +560,24 @@ function preencherSelectSlots(id, valor){
   sel.innerHTML = slots30().map(s=>`<option value="${s}">${s}</option>`).join('');
   if(valor) sel.value = slots30().includes(valor) ? valor : proximoSlot30();
 }
-function selecionarTempo(t){ TEMPO_SELECIONADO = t; CATEGORIA_SELECIONADA = null; renderTempos(); atualizarPreviewValor(); }
+function selecionarTempo(t){
+  TEMPO_SELECIONADO = t; CATEGORIA_SELECIONADA = null;
+  document.getElementById('wrap-pagamentos').classList.toggle('hidden', document.getElementById('f-cortesia').checked);
+  renderTempos(); atualizarPreviewValor();
+}
 function selecionarCategoriaPcd(cat){
   CATEGORIA_SELECIONADA = cat;
   TEMPO_SELECIONADO = (cat==='pcd30') ? 30 : 60;
+  if(cat==='pcd-cortesia'){
+    // troca pra 5%CP com mais de 2 criancas ja cadastradas: remove as
+    // excedentes em vez de deixar o formulario num estado que o servidor
+    // vai recusar
+    const linhas = [...document.querySelectorAll('#lista-criancas .crianca-linha')];
+    linhas.slice(2).forEach(l=>l.remove());
+    document.getElementById('wrap-pagamentos').classList.add('hidden');
+  } else {
+    document.getElementById('wrap-pagamentos').classList.toggle('hidden', document.getElementById('f-cortesia').checked);
+  }
   renderTempos();
   atualizarPreviewValor();
 }
@@ -672,6 +688,7 @@ function adicionarPagamento(){
           <option value="pix">Pix</option>
           <option value="debito">Cartão de débito</option>
           <option value="credito">Cartão de crédito</option>
+          <option value="voucher">Voucher</option>
         </select>
       </div>
       <div><label style="margin-top:0;">Valor pago</label>
@@ -758,6 +775,14 @@ function setAC(ativo){
 
 let CRIANCA_SEQ = 0;
 function adicionarCrianca(){
+  // 5%CP (PCD-cortesia): no maximo 2 criancas por entrada - mesmo limite
+  // que o servidor aplica por hora-relogio (ver PCD_CORTESIA_LIMITE_HORA
+  // em parque.js), so que travado aqui na hora de montar o formulario, sem
+  // precisar esperar o erro do servidor depois de preencher tudo
+  if(CATEGORIA_SELECIONADA==='pcd-cortesia' && document.querySelectorAll('#lista-criancas .crianca-linha').length>=2){
+    alert('5%CP libera no máximo 2 crianças por entrada.');
+    return;
+  }
   CRIANCA_SEQ++;
   const id = 'crianca-' + CRIANCA_SEQ;
   const div = document.createElement('div');
@@ -1243,8 +1268,11 @@ document.getElementById('form-checkin').addEventListener('submit', async (ev)=>{
   const criancas = coletarCriancas();
   if(!criancas.length){ alert('Cadastre pelo menos uma criança.'); return; }
   const cortesia = document.getElementById('f-cortesia').checked;
+  // 5%CP (PCD-cortesia): entrada gratuita automatica, sem alcada - nao
+  // precisa de forma de pagamento nenhuma, igual a cortesia normal
+  const gratis = cortesia || CATEGORIA_SELECIONADA==='pcd-cortesia';
   const pagamentos = coletarPagamentos();
-  if(!cortesia){
+  if(!gratis){
     const total = calcularTotalAtual();
     const soma = pagamentos.reduce((s,p)=>s+p.valor,0);
     if(!pagamentos.length){ alert('Informe pelo menos uma forma de pagamento.'); return; }
@@ -1277,8 +1305,8 @@ document.getElementById('form-checkin').addEventListener('submit', async (ev)=>{
       adultoCortesia: AC_ATIVO,
       quantAC: AC_ATIVO ? document.getElementById('f-quantAC').value : 0,
       criancas,
-      metodoPagamento: cortesia ? 'cortesia' : (pagamentos.length===1 ? pagamentos[0].forma : 'misto'),
-      pagamentos: cortesia ? [] : pagamentos,
+      metodoPagamento: cortesia ? 'cortesia' : (CATEGORIA_SELECIONADA==='pcd-cortesia' ? 'gratuidade' : (pagamentos.length===1 ? pagamentos[0].forma : 'misto')),
+      pagamentos: gratis ? [] : pagamentos,
       motivoCortesia: document.getElementById('f-motivo-cortesia').value,
       meiasExtras: Math.max(0, num(document.getElementById('f-meias-extras').value)),
       usarCreditoMin: (USAR_CREDITO && CREDITO_ATUAL) ? CREDITO_ATUAL.minutosDisponiveis : 0,
