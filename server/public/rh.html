@@ -666,8 +666,22 @@ function cardAtivoHtml(f){
       ${f.emAtestado ? `<button type="button" class="link-btn" onclick="marcarRetorno('${f.id}')">✅ registrar retorno</button>` : ''}
       ${f.status==='ativo' && f.tipoCadastro!=='extra' ? `<button type="button" class="link-btn" onclick="abrirAdvertencia('${f.id}')">📋 solicitar advertência</button>` : ''}
       ${IS_MASTER && f.status==='ativo' && f.tipoCadastro!=='extra' ? `<button type="button" class="link-btn" onclick="abrirAjusteExperiencia('${f.id}')">🗓️ ajustar experiência</button>` : ''}
+      ${IS_MASTER && f.status==='ativo' && f.tipoCadastro==='extra' ? `<button type="button" class="link-btn" onclick="converterEfetivado('${f.id}','${escapeHtml(f.nome).replace(/'/g,"\\'")}')">🔄 converter em efetivado</button>` : ''}
     </div>
   </div>`;
+}
+
+async function converterEfetivado(id, nome){
+  if(!confirm(`Converter "${nome}" de Extra para Efetivado?\n\nA pessoa passa a contar como colaborador contratado e entra na 1ª etapa da experiência formal (30 dias) a partir de hoje.`)) return;
+  try{
+    const r = await fetch(`/api/rh/funcionarios/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipoCadastro: 'efetivado' }),
+    });
+    if(!r.ok){ const e = await r.json().catch(()=>({})); alert(e.error||'Erro ao converter.'); return; }
+    await carregar();
+  }catch(err){ alert('Erro ao converter: '+err.message); }
 }
 
 function renderColaboradores(){

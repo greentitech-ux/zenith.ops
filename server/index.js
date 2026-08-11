@@ -3414,6 +3414,9 @@ app.patch('/api/rh/funcionarios/:id', requireSection('rh'), async (req, res) => 
     // um tempo; se vier de quem nao e Master, ignora silenciosamente em vez
     // de rejeitar o resto do PATCH (o form manda tudo junto)
     if (patch.dataAdmissao !== undefined && !req.isMaster) delete patch.dataAdmissao;
+    // conversao extra->efetivado (corrige cadastro que esqueceu de trocar a
+    // aba) tambem so Master - mesmo criterio de quem pode cadastrar efetivado
+    if (patch.tipoCadastro !== undefined && !req.isMaster) delete patch.tipoCadastro;
     const registro = await rh.atualizar(req.params.id, patch);
     broadcast('rh-funcionario-atualizado', registro, 'rh');
     res.json(registro);

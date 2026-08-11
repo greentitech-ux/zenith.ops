@@ -186,6 +186,20 @@ async function atualizar(id, patch) {
     }
   }
 
+  // conversao de "extra" pra "efetivado" - so faz sentido nesse sentido (loja
+  // as vezes esquece de trocar a aba no cadastro e a pessoa entra como avulso
+  // quando na verdade e um contratado direto); ao converter, entra na 1a
+  // etapa da experiencia formal (30 dias) a partir de agora, do mesmo jeito
+  // que um cadastro "efetivado" direto entraria
+  if (patch.tipoCadastro !== undefined && patch.tipoCadastro !== snap.data().tipoCadastro) {
+    if (snap.data().tipoCadastro !== 'extra' || patch.tipoCadastro !== 'efetivado') {
+      throw new Error('Só é possível converter um cadastro "extra" em "efetivado".');
+    }
+    merge.tipoCadastro = 'efetivado';
+    const inicio = merge.dataAdmissao || snap.data().dataAdmissao || new Date().toISOString().slice(0, 10);
+    merge.experiencia = iniciarExperiencia(inicio);
+  }
+
   await ref.update(merge);
   rhCache.invalidar();
   return getOne(id);
