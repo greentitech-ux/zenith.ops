@@ -3600,6 +3600,39 @@ app.post('/api/rh/checkins/:id/saida', requireSection('rh'), upload.single('foto
   }
 });
 
+// Master corrige um check-in lançado errado (horário digitado errado no
+// kiosk) ou exclui um registro duplicado/indevido - nenhum dos dois passa
+// pela permissão comum de unidade, e de propósito: são as únicas ações
+// desse tipo no RH restritas ao Master puro (nem Admin, nem RH todas-
+// unidades), já que mexem em prova de ponto já registrada
+app.patch('/api/rh/checkins/:id', auth.requireMaster, async (req, res) => {
+  try {
+    const atual = await rhCheckin.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Check-in não encontrado.' });
+    const registro = await rhCheckin.editarHorarios(req.params.id, {
+      entradaData: req.body.entradaData, entradaHora: req.body.entradaHora,
+      saidaData: req.body.saidaData, saidaHora: req.body.saidaHora,
+      porEmail: req.user.email,
+    });
+    broadcast('rh-checkin-atualizado', { id: registro.id, unidade: registro.unidade }, 'rh');
+    res.json(sanitizarCheckin(registro, req.isMaster));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/rh/checkins/:id', auth.requireMaster, async (req, res) => {
+  try {
+    const atual = await rhCheckin.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Check-in não encontrado.' });
+    await rhCheckin.remover(req.params.id);
+    broadcast('rh-checkin-excluido', { id: req.params.id, unidade: atual.unidade }, 'rh');
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/rh/checkins', requireSection('rh'), async (req, res) => {
   // Master/Admin/RH-todas-unidades: null = sem filtro de unidade (ver
   // rhCheckin.listByUnidadesData)

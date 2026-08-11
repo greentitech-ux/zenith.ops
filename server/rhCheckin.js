@@ -208,6 +208,48 @@ async function aprovarPendencia(id, { porEmail }) {
   return { ...atual, ...merge };
 }
 
+// Master corrige um check-in registrado errado (kiosk digitou/gerou horario
+// errado, ou precisa lancar manualmente um caso que passou batido) - so mexe
+// no horario de entrada/saida, preserva foto/localizacao como estavam. Data
+// e hora vem SEPARADOS (nao datetime-local) e sao interpretados como
+// Horario de Brasilia (-03:00 fixo, Brasil nao tem mais horario de verao)
+// explicitamente, pro resultado nao depender do fuso do navegador de quem
+// esta editando
+const DATA_HORA_RE = { data: /^\d{4}-\d{2}-\d{2}$/, hora: /^\d{2}:\d{2}$/ };
+function horarioBrasiliaISO(data, hora) {
+  if (!DATA_HORA_RE.data.test(data) || !DATA_HORA_RE.hora.test(hora)) throw new Error('Data ou hora inválida.');
+  return new Date(`${data}T${hora}:00-03:00`).toISOString();
+}
+
+async function editarHorarios(id, { entradaData, entradaHora, saidaData, saidaHora, porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Check-in não encontrado.');
+  const atual = snap.data();
+  const merge = { atualizadoEm: new Date().toISOString() };
+  if (entradaData && entradaHora) {
+    merge.entrada = { ...atual.entrada, horario: horarioBrasiliaISO(entradaData, entradaHora), editadoPorEmail: porEmail || null };
+  }
+  // saida so pode ser editada se ja existir (nao cria um checkout que nao aconteceu)
+  if (atual.saida && saidaData && saidaHora) {
+    merge.saida = { ...atual.saida, horario: horarioBrasiliaISO(saidaData, saidaHora), editadoPorEmail: porEmail || null };
+  }
+  const entradaFinal = (merge.entrada || atual.entrada).horario;
+  const saidaFinal = (merge.saida || atual.saida || {}).horario;
+  if (saidaFinal && saidaFinal < entradaFinal) throw new Error('A saída não pode ser antes da entrada.');
+  await ref.update(merge);
+  checkinCache.invalidar();
+  return { ...atual, ...merge };
+}
+
+async function remover(id) {
+  const snap = await COLLECTION.doc(id).get();
+  if (!snap.exists) throw new Error('Check-in não encontrado.');
+  await COLLECTION.doc(id).delete();
+  checkinCache.invalidar();
+  return snap.data();
+}
+
 async function recusarPendencia(id, { porEmail, motivo }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
@@ -229,6 +271,6 @@ module.exports = {
   LIMITE_CHECKINS_SEMANA_EXTRA,
   registrarEntrada, registrarSaida, buscarAbertoDoFuncionario,
   listByUnidadesData, listAbertos, listPendentesAprovacao,
-  aprovarPendencia, recusarPendencia, getOne, hojeBrasilia,
+  aprovarPendencia, recusarPendencia, editarHorarios, remover, getOne, hojeBrasilia,
   invalidar: () => checkinCache.invalidar(),
 };
