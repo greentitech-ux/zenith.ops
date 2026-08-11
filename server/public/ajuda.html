@@ -123,7 +123,7 @@
   <a class="back hidden" id="nav-parque" href="/parque.html">🤸 Parque (painel)</a>
   <a class="back hidden" id="nav-festas" href="/festas.html">🎉 Festas</a>
   <a class="back hidden" id="nav-mensalistas" href="/mensalistas.html">📅 Mensalistas</a>
-  <div class="nav-drawer-grupo">RH</div>
+  <div class="nav-drawer-grupo">BigBrother</div>
   <a class="back hidden" id="nav-rh" href="/rh.html">🧑‍💼 RH</a>
   <div class="nav-drawer-grupo">Solicitações</div>
   <a class="back hidden" id="nav-solicitacoes" href="/central.html">📋 Central</a>
@@ -716,8 +716,14 @@ const TOPICOS = [
     <h3>🗓️ Calendário no Painel</h3>
     <p>Quem tem acesso a Festas vê no <b>Painel</b> o card <b>🎉 Festas (calendário)</b>: o mês inteiro com os dias de festa marcados (com a quantidade em cada dia) e as setas ‹ › pra navegar entre os meses. <b>Comportamento:</b> toque num dia marcado pra abrir a lista das festas dele (cliente, código, pacote, horário e valor, em ordem de horário); toque de novo pra fechar. Festa cancelada não aparece no calendário.</p>
   `},
-  { id:'rh', icone:'🧑‍💼', secoes:['rh'], titulo:'RH (funcionários, teste, atestado e aniversariantes)', corpo:`
-    <p>Ficha de funcionários das lojas - independente de ter login no Zenith (a maioria de quem trabalha na loja não acessa o sistema). Quem tem a tag <b>RH</b> vê e cadastra só as unidades liberadas pra ele; <b>Master, Admin</b> e quem tem a tag extra <b>🧑‍💼 RH (todas as unidades)</b> (atribuída pelo Master em Usuários) têm visão de todas as unidades do grupo, inclusive no cadastro. A tag extra <b>🧑‍💼 RH: pode cadastrar efetivado direto</b> (também em Usuários) libera cadastrar alguém já efetivado sem passar pelo teste de 5 dias.</p>
+  { id:'rh', icone:'🧑‍💼', secoes:['rh'], titulo:'BigBrother · RH (colaboradores, extras, teste, atestado e advertências)', corpo:`
+    <p>Ficha de funcionários das lojas - independente de ter login no Zenith (a maioria de quem trabalha na loja não acessa o sistema). No menu lateral esse módulo fica dentro do grupo <b>BigBrother</b>. Quem tem a tag <b>RH</b> vê e cadastra só as unidades liberadas pra ele; <b>Master, Admin</b> e quem tem a tag extra <b>🧑‍💼 RH (todas as unidades)</b> (atribuída pelo Master em Usuários) têm visão de todas as unidades do grupo, inclusive no cadastro. A tag extra <b>🧑‍💼 RH: pode cadastrar efetivado direto</b> (também em Usuários) libera cadastrar alguém já efetivado sem passar pelo teste de 5 dias.</p>
+    <p><b>3 categorias de pessoa, bem separadas em abas próprias</b> - nada de tudo misturado numa lista só:</p>
+    <ul>
+      <li><b>👷 Extras:</b> avulso, trabalho pontual - sem período de teste, sem atestado, sem advertência.</li>
+      <li><b>⏳ Em Teste:</b> candidato no período de experiência de 5 dias - fora da ficha de colaboradores até a decisão.</li>
+      <li><b>🧑‍💼 Colaboradores:</b> quem foi efetivado de verdade (direto ou aprovado no teste) - só esse grupo tem acesso a Atestados e Advertências, e é o único que <b>não</b> aparece no quiosque de check-in (já bate o ponto no sistema próprio).</li>
+    </ul>
     <h3>Cadastrar (1º dia de trabalho)</h3>
     <p>Na aba <b>➕ Cadastrar</b>, primeiro escolha o <b>tipo de cadastro</b>:</p>
     <ul>
@@ -727,14 +733,16 @@ const TOPICOS = [
     </ul>
     <p>Preencha unidade, nome completo, contato, cargo/função, data de nascimento e a data de admissão/início (já vem com hoje), e anexe o <b>currículo em PDF</b> se houver.</p>
     <p><b>Por que cadastrar no 1º dia:</b> é assim que dá pra saber exatamente quem está atuando em cada loja - e cobrar o gerente que deixar alguém sem cadastrar.</p>
-    <h3>⏳ Acompanhamento de Teste</h3>
+    <h3>⏳ Em Teste (acompanhamento)</h3>
     <p>A aba lista quem está em período de experiência (candidatos), com os dias corridos desde o início. <b>Comportamento automático:</b> no <b>5º dia</b>, o card fica em destaque vermelho ("decidir hoje") e o <b>Gerente/Ass.Gerente da unidade + Master/Admin + time de RH</b> recebem um <b>push de alerta</b> pra dar o feedback - o alerta só dispara 1 vez por pessoa. Clique em <b>📝 Registrar decisão</b>:</p>
     <ul>
       <li><b>Efetivar:</b> promove o candidato pra <b>ativo</b> - a partir daí ele aparece na Ficha de Funcionários Ativos.</li>
       <li><b>Desligar:</b> marca o cadastro como inativo direto (não vira ativo).</li>
     </ul>
-    <h3>👥 Ficha de Funcionários Ativos</h3>
-    <p>Lista quem está efetivamente atuando, com filtro por unidade e por status (ativo / candidatos em teste / todos). Cada card mostra cargo, unidade, contato, data de admissão, e badges de teste/atestado quando aplicável. <b>✏️ editar</b> muda nome/contato/cargo/status (desligar = status inativo); <b>📄 currículo</b> baixa o PDF anexado. Só o <b>Master</b> vê e edita o campo <b>data de admissão/início do teste</b> no editar - útil pra corrigir quando a pessoa já estava na loja há um tempo e a data não foi informada certa no cadastro.</p>
+    <h3>🧑‍💼 Colaboradores</h3>
+    <p>Lista <b>só quem foi efetivado de verdade</b> (direto ou aprovado no teste de 5 dias) - extra e candidato em teste não aparecem aqui, mesmo que estejam "ativos" no sistema. Filtro por unidade e status (ativo / todos, inclui desligado). Cada card mostra cargo, unidade, contato, data de admissão, e badges de teste/atestado quando aplicável. <b>✏️ editar</b> muda nome/contato/cargo/status (desligar = status inativo); <b>📄 currículo</b> baixa o PDF anexado. Só o <b>Master</b> vê e edita o campo <b>data de admissão/início do teste</b> no editar - útil pra corrigir quando a pessoa já estava na loja há um tempo e a data não foi informada certa no cadastro.</p>
+    <h3>👷 Extras</h3>
+    <p>Lista só quem foi cadastrado como <b>extra (avulso)</b> - mesmos filtros de unidade e status da aba Colaboradores. Card mostra as mesmas informações, mas sem os botões de atestado/advertência (não fazem sentido pra esse tipo de vínculo).</p>
     <h3>🩺 Atestados</h3>
     <p>Vale só pra quem foi <b>efetivado de verdade</b> - não aparece a opção pra <b>extra (avulso)</b> nem pra <b>candidato em teste de 5 dias</b>, já que eles não têm esse vínculo. No card de um funcionário efetivado, use <b>🩺 registrar atestado</b> pra lançar o início do afastamento (com previsão de retorno opcional) - ele fica marcado com o badge <b>🩺 atestado</b> em Ativos e some da operação normal sem contar como desligamento. A aba <b>🩺 Atestados</b> reúne todo mundo afastado agora, com os dias corridos; quando a pessoa voltar, use <b>✅ registrar retorno</b> pra fechar o afastamento (fica no histórico). O <b>Painel</b> mostra a contagem de quem está de atestado no card de RH, pra dar visibilidade da operação.</p>
     <h3>📸 Check-in por foto (identificar quem apareceu)</h3>
