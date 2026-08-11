@@ -388,9 +388,9 @@ async function notifyExperienciaPrazo(funcionario, diasRestantes) {
   );
 }
 
-// so no ultimo dia (D-0) o gerente/ass.gerente DA UNIDADE tambem e avisado,
-// alem do RH/Admin/Master (ja cobertos por notifyExperienciaPrazo) - pedido
-// explicito do usuario ("no ultimo dia ai ate o gerente e notificado")
+// so no ultimo alerta antes do prazo (D-1) o gerente/ass.gerente DA UNIDADE
+// tambem e avisado, alem do RH/Admin/Master (ja cobertos por
+// notifyExperienciaPrazo) - pedido explicito do usuario
 function podeReceberAlertaExperienciaGerente(sub, unidade) {
   const meta = sub.meta;
   return !!meta && ehCargoGerente(meta.cargo) && (meta.unidades || []).includes(unidade);

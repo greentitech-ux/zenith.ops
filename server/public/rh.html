@@ -151,7 +151,8 @@
 
 <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:0 0 8px;">👤 pessoas · 🧑‍💼 Colaboradores = quem foi efetivado (só eles entram em Atestados/Advertências) · 👷 Extras = avulso · ⏳ Em Teste = candidato no período de 5 dias</div>
 <div class="tabs">
-  <button type="button" class="tab-btn active" data-tab="colaboradores" onclick="trocarAba('colaboradores')">🧑‍💼 Colaboradores</button>
+  <button type="button" class="tab-btn active" data-tab="unidade" onclick="trocarAba('unidade')">👥 Por Unidade</button>
+  <button type="button" class="tab-btn" data-tab="colaboradores" onclick="trocarAba('colaboradores')">🧑‍💼 Colaboradores</button>
   <button type="button" class="tab-btn" data-tab="extras" onclick="trocarAba('extras')">👷 Extras</button>
   <button type="button" class="tab-btn" data-tab="teste" onclick="trocarAba('teste')">⏳ Em Teste</button>
   <button type="button" class="tab-btn" data-tab="experiencia" onclick="trocarAba('experiencia')">🗓️ Em Experiência</button>
@@ -166,8 +167,19 @@
   <button type="button" class="tab-btn" data-tab="aniver" onclick="trocarAba('aniver')">🎂 Aniversariantes</button>
 </div>
 
+<!-- ---------- ABA: Por Unidade (visão geral + status de cada pessoa) ---------- -->
+<div class="painel-tab" id="tab-unidade">
+  <div class="panel">
+    <h2>👥 Por Unidade</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">todo mundo cadastrado na unidade, num lugar só, com o status atual de cada um</div>
+    <label>Unidade</label>
+    <select id="un-filtro-unidade" onchange="renderPorUnidade()"></select>
+    <div id="lista-unidade" style="margin-top:14px;"></div>
+  </div>
+</div>
+
 <!-- ---------- ABA: Ficha de Funcionários Ativos ---------- -->
-<div class="painel-tab" id="tab-colaboradores">
+<div class="painel-tab hidden" id="tab-colaboradores">
   <div class="panel">
     <h2>🧑‍💼 Colaboradores</h2>
     <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">quem foi efetivado de verdade (direto ou aprovado no teste de 5 dias) - não inclui extra avulso nem candidato ainda em teste</div>
@@ -636,6 +648,7 @@ function trocarAba(nome){
   if(nome==='aniver') renderAniversariantes();
   if(nome==='teste') renderTeste();
   if(nome==='experiencia') renderExperiencia();
+  if(nome==='unidade') renderPorUnidade();
   if(nome==='atestados') renderAtestados();
   if(nome==='checkins') carregarCheckins();
   if(nome==='aprovacoes') carregarAprovacoes();
@@ -757,6 +770,44 @@ function renderExperiencia(){
       </div>
     </div>`;
   }).join('') : '<div class="empty">ninguém em período de experiência agora.</div>';
+}
+
+// status atual de 1 pessoa, num badge so - usado na aba "Por Unidade" pra
+// dar visibilidade de todo mundo (extra/teste/experiencia/colaborador) sem
+// precisar visitar as abas separadas
+function statusBadgeInfo(f){
+  if(f.status==='inativo') return { label:'desligado', cls:'muted' };
+  if(f.tipoCadastro==='candidato' && f.emTeste){
+    const dias = diasDesde(f.dataAdmissao);
+    return dias>=5 ? { label:`teste · dia ${dias} · decidir`, cls:'bad' } : { label:`teste · dia ${dias}`, cls:'warn' };
+  }
+  if(f.tipoCadastro==='extra') return { label:'extra', cls:'muted' };
+  if(f.experiencia && f.experiencia.etapa){
+    const restantes = diasRestantesAte(f.experiencia.prazoEtapaAte);
+    const etapaLabel = f.experiencia.etapa==='60' ? '60d' : '30d';
+    if(restantes<=0) return { label:`experiência ${etapaLabel} · vence hoje`, cls:'bad' };
+    if(restantes<=2) return { label:`experiência ${etapaLabel} · ${restantes}d`, cls:'bad' };
+    if(restantes<=5) return { label:`experiência ${etapaLabel} · ${restantes}d`, cls:'warn' };
+    return { label:`experiência ${etapaLabel} · ${restantes}d`, cls:'muted' };
+  }
+  return { label:'colaborador', cls:'ok' };
+}
+
+function renderPorUnidade(){
+  const sel = document.getElementById('un-filtro-unidade');
+  const unidade = sel.value;
+  const el = document.getElementById('lista-unidade');
+  if(!unidade){ el.innerHTML = '<div class="empty">selecione uma unidade.</div>'; return; }
+  let lista = TODOS.filter(f=>f.unidade===unidade);
+  lista.sort((a,b)=>String(a.nome||'').localeCompare(String(b.nome||''),'pt-BR'));
+  el.innerHTML = lista.length ? lista.map(f=>{
+    const info = statusBadgeInfo(f);
+    const atestado = f.emAtestado ? ' <span class="badge bad">🩺 atestado</span>' : '';
+    return `<div class="card">
+      <div class="linha1"><span>${escapeHtml(f.nome)}</span><span class="badge ${info.cls}">${escapeHtml(info.label)}</span>${atestado}</div>
+      <div class="sub">${escapeHtml(f.cargoFuncao||'—')} · admitido ${fmtData(f.dataAdmissao)}${f.contato?' · '+escapeHtml(f.contato):''}</div>
+    </div>`;
+  }).join('') : '<div class="empty">ninguém cadastrado nessa unidade ainda.</div>';
 }
 
 function abrirDecisaoExperiencia(id){
@@ -1116,6 +1167,7 @@ function renderAniversariantes(){
 
 async function carregar(){
   TODOS = await fetch('/api/rh/funcionarios').then(r=>r.ok?r.json():[]).catch(()=>[]);
+  renderPorUnidade();
   renderColaboradores();
   renderExtras();
   renderTeste();
@@ -1305,6 +1357,7 @@ async function boot(){
   document.getElementById('c-unidade').innerHTML = optsUnidades || '<option value="" disabled selected>nenhuma unidade liberada</option>';
   document.getElementById('co-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);
   document.getElementById('ex-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);
+  document.getElementById('un-filtro-unidade').innerHTML = optsUnidades || '<option value="" disabled selected>nenhuma unidade liberada</option>';
   document.getElementById('ck-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);
   document.getElementById('ck-filtro-data').value = hojeBrasilia();
   document.getElementById('c-admissao').value = hojeBrasilia();

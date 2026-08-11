@@ -6703,16 +6703,16 @@ app.use((err, req, res, next) => {
     }, 60 * 60 * 1000);
 
     // RH: experiencia formal (CLT, 30+60 dias) perto do prazo - avisos
-    // escalonados em D-5/D-3/D-2/D-0 (ver rh.verificarAlertasExperiencia);
-    // so no D-0 o gerente da unidade tambem e avisado, alem do RH/Admin/
-    // Master (ver notifyExperienciaPrazoGerente)
+    // escalonados em D-5/D-3/D-2/D-1 (ver rh.verificarAlertasExperiencia);
+    // so no D-1 (ultimo aviso antes do vencimento) o gerente da unidade
+    // tambem e avisado, alem do RH/Admin/Master (ver notifyExperienciaPrazoGerente)
     const rodarAlertaExperienciaRh = async () => {
       const h = horaBrasilia();
       if (h < 8 || h >= 20) return;
       const pendencias = await rh.verificarAlertasExperiencia();
       for (const { funcionario, diasRestantes, limite } of pendencias) {
         push.notifyExperienciaPrazo(funcionario, diasRestantes);
-        if (limite === 0) push.notifyExperienciaPrazoGerente(funcionario);
+        if (limite === 1) push.notifyExperienciaPrazoGerente(funcionario);
         broadcast('rh-funcionario-atualizado', { id: funcionario.id, unidade: funcionario.unidade }, 'rh');
         await rh.marcarAlertaExperienciaEnviado(funcionario.id, limite);
       }
