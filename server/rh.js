@@ -174,13 +174,18 @@ async function remover(id) {
 
 // atestado medico: o funcionario continua "ativo" (nao e desligamento), so
 // fica marcado como afastado - da visibilidade de quantas pessoas estao de
-// atestado agora (card do Painel) e guarda o historico pra quando ela voltar
+// atestado agora (card do Painel) e guarda o historico pra quando ela voltar.
+// So vale pra quem foi efetivado de verdade - extra (avulso) e candidato em
+// teste de 5 dias nao tem vinculo pra isso. "efetivado" aqui cobre tanto
+// quem foi cadastrado direto como efetivado quanto quem era candidato e foi
+// aprovado no teste (tipoCadastro continua "candidato", so o status muda pra
+// "ativo") - por isso o corte e por tipoCadastro !== 'extra', nao so status
 async function registrarAtestado(id, { inicio, previsaoRetorno, porEmail }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Funcionário não encontrado.');
   const atual = snap.data();
-  if (atual.status !== 'ativo') throw new Error('Só é possível lançar atestado pra funcionário ativo.');
+  if (atual.status !== 'ativo' || atual.tipoCadastro === 'extra') throw new Error('Atestado é só pra funcionário efetivado - não vale pra extra nem candidato em teste.');
   if (atual.emAtestado) throw new Error('Esse funcionário já está com atestado em aberto.');
   const inicioOk = validarDataOuNull(inicio, 'Data de início') || new Date().toISOString().slice(0, 10);
   const agora = new Date().toISOString();

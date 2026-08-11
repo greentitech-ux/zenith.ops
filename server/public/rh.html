@@ -501,7 +501,7 @@ function cardAtivoHtml(f){
     <div class="acoes">
       <button type="button" class="link-btn" onclick="abrirEditar('${f.id}')">✏️ editar</button>
       ${f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 currículo</a>` : ''}
-      ${f.status==='ativo' && !f.emAtestado ? `<button type="button" class="link-btn" onclick="abrirAtestado('${f.id}')">🩺 registrar atestado</button>` : ''}
+      ${f.status==='ativo' && f.tipoCadastro!=='extra' && !f.emAtestado ? `<button type="button" class="link-btn" onclick="abrirAtestado('${f.id}')">🩺 registrar atestado</button>` : ''}
       ${f.emAtestado ? `<button type="button" class="link-btn" onclick="marcarRetorno('${f.id}')">✅ registrar retorno</button>` : ''}
     </div>
   </div>`;
