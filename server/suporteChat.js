@@ -249,8 +249,9 @@ const listAll = chatsCache.cached;
 // tempo entre re-alertas do alarme critico enquanto ninguem assume a
 // conversa (ver reforcarAlarmesBeniboy() em index.js) - pedido explicito do
 // usuario: o alarme disparava 1x quando o Beniboy chamava um atendente e
-// nunca mais, mesmo com a pessoa esperando sem resposta
-const REALERTA_MS = 3 * 60 * 1000;
+// nunca mais, mesmo com a pessoa esperando sem resposta. Encurtado de 3min
+// pra 30s (2o pedido do usuario: o reforco demorava demais pra insistir)
+const REALERTA_MS = 30 * 1000;
 
 // candidatas a repetir o alarme critico: o Beniboy ja escalou (botDesativado)
 // e NINGUEM do time mexeu no card ainda (statusAtendimento continua

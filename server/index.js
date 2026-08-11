@@ -6696,11 +6696,13 @@ app.use((err, req, res, next) => {
     }, 5 * 60 * 1000);
 
     // reforco do alarme critico do Beniboy (ver reforcarAlarmesBeniboy) -
-    // roda a cada 1min, so repete de fato quem passou de REALERTA_MS
-    // (3min) sem ninguem assumir
+    // roda a cada 15s, so repete de fato quem passou de REALERTA_MS (30s)
+    // sem ninguem assumir. Varredura mais rapida que o proprio REALERTA_MS
+    // pra nao empilhar atraso em cima do atraso (senao o reforco "de 30s"
+    // virava de fato ~1min30 esperando o proximo tick de 1min)
     setInterval(() => {
       reforcarAlarmesBeniboy().catch((err) => console.error('Erro no reforço do alarme do Beniboy:', err.message));
-    }, 60 * 1000);
+    }, 15 * 1000);
 
     // RH: alerta do 5o dia de teste (ver rh.verificarTestesVencidos) - so
     // roda dentro do horario comercial (evita acordar ninguem de madrugada);
