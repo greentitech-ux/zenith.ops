@@ -205,10 +205,13 @@ async function updatePodeCatalogoEstoque(id, valor) {
 }
 
 // "manter sempre conectado": a sessao dessa conta passa a durar 30 dias em
-// vez das 8h padrao (ver auth.js/sessions.js). Pensado pra login
-// compartilhado de loja/terminal, onde ninguem quer redigitar senha no meio
-// do turno - so vale a partir do PROXIMO login (nao estende sessoes ja
-// abertas com esse acesso).
+// vez das 8h padrao (ver auth.js/sessions.js). Pensado originalmente pra
+// login compartilhado de loja/terminal, mas tambem vale pro Master (ex:
+// "solutions") que nao quer perder alerta do Beniboy por ter deslogado do
+// celular/computador no meio do dia - ao contrario das outras tags dessa
+// tela (que sao permissao, sem sentido pro Master que ja pode tudo), essa
+// e sobre DURACAO da sessao, entao nao ha motivo pra bloquear pro Master.
+// So vale a partir do PROXIMO login (nao estende sessoes ja abertas).
 //
 // Ao DESLIGAR, encerra na hora qualquer sessao ja aberta com esse acesso -
 // sem isso, uma sessao de ate 30 dias emitida antes continuaria valida
@@ -220,7 +223,6 @@ async function updateSessaoLonga(id, valor) {
   const ref = usersRef.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Acesso não encontrado.');
-  if (snap.data().role === 'master') throw new Error('O acesso Master não precisa dessa opção.');
   await ref.update({ sessaoLonga: !!valor });
   if (!valor) await sessions.encerrarTodasDoUsuario(id);
   invalidarUsuario(id);
@@ -408,7 +410,7 @@ function toPublic(doc) {
     podeCadastrarOperadores: data.role === 'master' ? null : !!data.podeCadastrarOperadores,
     podeRhTodasUnidades: data.role === 'master' ? null : !!data.podeRhTodasUnidades,
     podeRhCadastrarEfetivado: data.role === 'master' ? null : !!data.podeRhCadastrarEfetivado,
-    sessaoLonga: data.role === 'master' ? null : !!data.sessaoLonga,
+    sessaoLonga: !!data.sessaoLonga,
     cargo: data.role === 'master' ? null : data.cargo || null,
     createdAt: data.createdAt,
   };
