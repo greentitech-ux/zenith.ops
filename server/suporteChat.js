@@ -258,7 +258,7 @@ const REALERTA_MS = 30 * 1000;
 // PENDENTE - sair do PENDENTE, mesmo sem mandar mensagem, ja conta como
 // "alguem assumiu" e silencia o reforco). So entram as que passaram
 // REALERTA_MS desde o ultimo alerta (ver marcarAlertaEnviado) - a varredura
-// de ociosos (15min sem nenhuma mensagem nova) acaba encerrando sozinha
+// de ociosos (40min sem nenhuma mensagem nova) acaba encerrando sozinha
 // quem ficou mesmo abandonada, entao o reforco nao roda pra sempre.
 async function listarParaReforcarAlarme() {
   const chats = await listAllUncached();
@@ -275,7 +275,7 @@ async function marcarAlertaEnviado(id) {
   chatsCache.invalidar();
 }
 
-const OCIOSO_MS = 15 * 60 * 1000;
+const OCIOSO_MS = 40 * 60 * 1000;
 
 // varredura periodica (ver index.js): encerra sozinha qualquer conversa
 // ABERTA sem nenhuma mensagem nova (de nenhum dos dois lados) ha mais de
@@ -294,7 +294,7 @@ async function finalizarOciosos() {
     if (!ultimaEm || agora - new Date(ultimaEm).getTime() < OCIOSO_MS) continue;
     const atualizado = await atualizarStatusAtendimento(chat.id, {
       statusAtendimento: 'SEM_SOLUCAO',
-      motivoSemSolucao: 'Encerrado automaticamente por inatividade (sem novas mensagens por 15 minutos).',
+      motivoSemSolucao: 'Encerrado automaticamente por inatividade (sem novas mensagens por 40 minutos).',
       autor: null,
     });
     finalizados.push(atualizado);

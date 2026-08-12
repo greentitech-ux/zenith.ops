@@ -5704,7 +5704,7 @@ async function acionarBeniboy(chatId) {
 // disso o alarme so tocava 1x na escalacao e nunca mais, mesmo com a pessoa
 // esperando um humano que ninguem avisou de novo. Roda a cada 1min (ver
 // agendamento mais abaixo); a propria varredura de ociosos do suporte
-// (15min sem nenhuma mensagem nova) acaba fechando quem ficou mesmo
+// (40min sem nenhuma mensagem nova) acaba fechando quem ficou mesmo
 // abandonado, entao isso nao fica reforcando pra sempre.
 async function reforcarAlarmesBeniboy() {
   const pendentes = await suporteChat.listarParaReforcarAlarme();
@@ -6925,7 +6925,7 @@ app.use((err, req, res, next) => {
     }, 60 * 1000);
 
     // varredura do chat de suporte (Beniboy): conversa ABERTA sem nenhuma
-    // mensagem nova (visitante ou time) ha mais de 15min se encerra sozinha
+    // mensagem nova (visitante ou time) ha mais de 40min se encerra sozinha
     // (SEM_SOLUCAO, ver suporteChat.finalizarOciosos) - evita conversa morta
     // pendurada pra sempre no funil da Central do Beniboy. Roda a cada 5min.
     const rodarFinalizacaoOciososSuporte = async () => {
