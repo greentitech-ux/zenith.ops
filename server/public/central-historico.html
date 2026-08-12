@@ -203,6 +203,8 @@
   <a class="back hidden" id="nav-parque" href="/parque.html">🤸 Parque (painel)</a>
   <a class="back hidden" id="nav-festas" href="/festas.html">🎉 Festas</a>
   <a class="back hidden" id="nav-mensalistas" href="/mensalistas.html">📅 Mensalistas</a>
+  <a class="back hidden" id="nav-saltiverso-vendas" href="/saltiverso-vendas.html">🥤 Bebidas & Meias</a>
+  <a class="back hidden" id="nav-saltiverso-fechamento" href="/saltiverso-fechamento.html">🧾 Fechamento do balcão</a>
   <div class="nav-drawer-grupo">BigBrother</div>
   <a class="back hidden" id="nav-rh" href="/rh.html">🧑‍💼 RH</a>
   <div class="nav-drawer-grupo">Solicitações</div>
@@ -598,6 +600,10 @@ const TIPOS_INFO = {
   // passa do limite - nao entra em TIPOS_GERAIS (nao troca de tipo/converte,
   // mesmo criterio do Ajuste de fechamento: preso a um fechamentoId)
   'quebra-caixa': { label:'Quebra de caixa', secaoNecessaria:'lancamento' },
+  // nasce sozinho (inventario.js) quando uma contagem de estoque apura falta
+  // acima do limite - mesmo criterio de quebra-caixa (nao entra em
+  // TIPOS_GERAIS, nao troca de tipo/converte)
+  'desvio-estoque': { label:'Desvio de estoque', secaoNecessaria:'inventario' },
 };
 // os 5 tipos gerais que trocam de tipo entre si (mudarTipo) ou viram Estorno
 // (converterParaEstorno) - Estorno tambem pode virar um desses 5 (converter,
@@ -680,7 +686,7 @@ function ehBloqueioLogin(c){
 }
 
 function iconeTipo(tipo){
-  return { estorno:'💳', 'ajuste-fechamento':'🧾', compra:'🛒', manutencao:'🔧', 'suporte-ti':'💻', pagamento:'💸', nota:'📄', 'quebra-caixa':'⚠️' }[tipo] || '📋';
+  return { estorno:'💳', 'ajuste-fechamento':'🧾', compra:'🛒', manutencao:'🔧', 'suporte-ti':'💻', pagamento:'💸', nota:'📄', 'quebra-caixa':'⚠️', 'desvio-estoque':'📦⚠️' }[tipo] || '📋';
 }
 
 // badge de vencimento pra demanda de pagamento - vermelho se ja venceu e
@@ -962,7 +968,7 @@ function abrirDetalhe(tipo, id){
   // prioridade + SLA do ticket; Master/Admin re-prioriza na triagem (recalcula
   // o prazo a partir da criacao - rota PATCH /api/solicitacoes/:id/prioridade,
   // que so existe pros tipos da colecao de solicitacoes)
-  const podePriorizar = (IS_MASTER || IS_ADMIN) && (TIPOS_GERAIS.includes(c.tipo) || c.tipo==='quebra-caixa') && c.status!=='CONVERTIDO';
+  const podePriorizar = (IS_MASTER || IS_ADMIN) && (TIPOS_GERAIS.includes(c.tipo) || c.tipo==='quebra-caixa' || c.tipo==='desvio-estoque') && c.status!=='CONVERTIDO';
   if(c.prioridade || podePriorizar){
     corpo += `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
       ${chipPrioridade(c)}${chipSla(c)}

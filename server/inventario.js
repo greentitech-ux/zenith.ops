@@ -13,6 +13,7 @@
 const db = require('./firestore');
 const { createCache, createKeyedCache } = require('./liveCache');
 const CATALOGO_SEED = require('./inventarioCatalogoSeed.json');
+const solicitacoes = require('./solicitacoes');
 
 const CATALOGO = db.collection('inventarioCatalogo');
 const RECEBIMENTOS = db.collection('inventarioRecebimentos');
@@ -32,8 +33,17 @@ const SETORES = {
   mesa_de_corte: 'Mesa de Corte',
   comissariado: 'Comissariado',
 };
-const TIPOS_ITEM = ['COMIDA', 'BEBIDA', 'EMBALAGEM'];
+// 'MEIA': par de meia antiderrapante vendido avulso (ex: balcão do
+// Saltiverso - ver saltiversoVendas.js) - item de retalho, nao de insumo de
+// cozinha, mas cabe no mesmo catalogo generico
+const TIPOS_ITEM = ['COMIDA', 'BEBIDA', 'EMBALAGEM', 'MEIA'];
 const TIPOS_SAIDA = ['VENDA', 'DESPERDICIO', 'OUTRA'];
+// limite (em R$, valor absoluto das FALTAS apuradas numa contagem) acima do
+// qual a contagem dispara um ticket automatico de possivel desvio - ver
+// upsertContagem/criarCardDesvioEstoque abaixo. Mesmo espirito do
+// LIMITE_QUEBRA_CAIXA de fechamentosLive.js, mas limite proprio (escalas de
+// perda bem diferentes entre loja de comida e balcao de bebida)
+const LIMITE_DESVIO_ESTOQUE = 30;
 
 function num(v) {
   const n = Number(v);
@@ -124,7 +134,7 @@ async function obterItemUnidade(id) {
   return snap.exists ? snap.data().unidade : null;
 }
 
-async function criarItem({ unidade, nome, setor, tipo, unidadeMedida, custoReferencia, quantidadePadrao, pesoEmbalagemG }) {
+async function criarItem({ unidade, nome, setor, tipo, unidadeMedida, custoReferencia, quantidadePadrao, pesoEmbalagemG, precoVenda }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   nome = String(nome || '').trim();
   if (!nome) throw new Error('Nome do item é obrigatório.');
@@ -153,6 +163,11 @@ async function criarItem({ unidade, nome, setor, tipo, unidadeMedida, custoRefer
     // embalagem/pacote, usado pra converter embalagens recebidas em peso
     quantidadePadrao: quantidadePadrao != null && quantidadePadrao !== '' ? num(quantidadePadrao) : null,
     pesoEmbalagemG: pesoEmbalagemG != null && pesoEmbalagemG !== '' ? num(pesoEmbalagemG) : null,
+    // preco de venda ao cliente (balcao/retalho) - diferente de
+    // custoReferencia (custo interno). So faz sentido pra item vendido direto
+    // (ex: bebida/meia do Saltiverso, ver saltiversoVendas.js) - itens de
+    // insumo de cozinha (Domino's) simplesmente nunca preenchem isso
+    precoVenda: precoVenda != null && precoVenda !== '' ? num(precoVenda) : null,
     ordem: proximaOrdem,
     ativo: true,
     createdAt: new Date().toISOString(),
@@ -184,7 +199,7 @@ async function reordenarItens(unidade, setor, ids) {
   return (await listCatalogo(unidade)).filter((i) => i.setor === setor);
 }
 
-async function atualizarItem(id, { nome, setor, tipo, unidadeMedida, custoReferencia, ativo, quantidadePadrao, pesoEmbalagemG }) {
+async function atualizarItem(id, { nome, setor, tipo, unidadeMedida, custoReferencia, ativo, quantidadePadrao, pesoEmbalagemG, precoVenda }) {
   const ref = CATALOGO.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Item não encontrado.');
@@ -209,6 +224,7 @@ async function atualizarItem(id, { nome, setor, tipo, unidadeMedida, custoRefere
   if (ativo != null) patch.ativo = !!ativo;
   if (quantidadePadrao !== undefined) patch.quantidadePadrao = quantidadePadrao != null && quantidadePadrao !== '' ? num(quantidadePadrao) : null;
   if (pesoEmbalagemG !== undefined) patch.pesoEmbalagemG = pesoEmbalagemG != null && pesoEmbalagemG !== '' ? num(pesoEmbalagemG) : null;
+  if (precoVenda !== undefined) patch.precoVenda = precoVenda != null && precoVenda !== '' ? num(precoVenda) : null;
   await ref.update(patch);
   catalogoCache.invalidar(atual.unidade);
   return (await ref.get()).data();
@@ -327,7 +343,12 @@ async function removerRecebimento(id) {
 }
 
 // ---------- saída (venda / desperdício / outra) ----------
-async function criarSaida({ unidade, unidadeNome, itemId, tipo, quantidade, motivo, data, criadoPorId, criadoPorEmail }) {
+// valorUnitario/vendaId: preenchidos so quando a saida nasce de uma venda de
+// balcao (ver saltiversoVendas.js) - da rastreabilidade (qual venda gerou
+// essa saida) e guarda o preco praticado, sem afetar em nada o motor de
+// diferencas (que usa custoReferencia/media de recebimentos, nao esses
+// campos). Saidas manuais (DESPERDICIO/OUTRA) simplesmente nao preenchem
+async function criarSaida({ unidade, unidadeNome, itemId, tipo, quantidade, motivo, data, valorUnitario, vendaId, criadoPorId, criadoPorEmail }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!itemId) throw new Error('Selecione o item.');
   if (!TIPOS_SAIDA.includes(tipo)) throw new Error('Tipo de saída inválido.');
@@ -342,6 +363,8 @@ async function criarSaida({ unidade, unidadeNome, itemId, tipo, quantidade, moti
     id: ref.id, unidade, unidadeNome: unidadeNome || unidade,
     itemId, itemNome: item.nome, setor: item.setor,
     tipo, quantidade: qtd, motivo: String(motivo || '').trim().slice(0, 300) || null,
+    valorUnitario: valorUnitario != null && valorUnitario !== '' ? num(valorUnitario) : null,
+    vendaId: vendaId || null,
     data: dataValida, criadoPorId, criadoPorEmail, criadoEm: new Date().toISOString(),
   };
   await ref.set(registro);
@@ -397,7 +420,58 @@ async function upsertContagem({ unidade, unidadeNome, data, contagens, criadoPor
   };
   await ref.set(registro);
   contagensCache.invalidar();
+
+  // anti-desvio: confere SO o dia que acabou de ser contado (nao o periodo
+  // inteiro) - se a falta apurada (soma das diferencas negativas em R$)
+  // passar do limite, dispara um ticket automatico. Fire-and-log: uma falha
+  // aqui nunca desfaz a contagem que acabou de ser salva (mesmo padrao do
+  // "quebra de caixa" em fechamentosLive.js)
+  try {
+    await verificarDesvioEstoque(registro);
+  } catch (err) {
+    console.error('[inventario] falha ao verificar desvio de estoque', err);
+  }
+
   return registro;
+}
+
+// roda calcularDiferencas so pro dia da contagem recem-salva; se a soma das
+// faltas (R$) passar de LIMITE_DESVIO_ESTOQUE, cria um ticket indireto
+// (undirected) na Central - mesmo padrao do criarCardQuebraCaixa de
+// fechamentosLive.js. Nao reenvia se ja existir um ticket PENDENTE pra essa
+// mesma unidade+data (idempotente, util tambem pro backfill futuro)
+async function verificarDesvioEstoque(contagem) {
+  const { unidade, unidadeNome, data, criadoPorId, criadoPorEmail } = contagem;
+  const { ofensores } = await calcularDiferencas(unidade, data, data);
+  const faltas = ofensores.filter((o) => o.diferencaValor < 0);
+  const totalFaltaValor = arred(faltas.reduce((s, o) => s + o.diferencaValor, 0));
+  if (Math.abs(totalFaltaValor) <= LIMITE_DESVIO_ESTOQUE) return null;
+
+  // idempotente: reaproveita o campo generico `fechamentoId` (existe em
+  // qualquer solicitacao, nao so em fechamentos) pra guardar a chave da
+  // contagem (unidade__data) - rodar de novo pro mesmo dia nao duplica
+  const chave = docIdContagem(unidade, data);
+  const jaExiste = (await solicitacoes.listAll())
+    .some((s) => s.tipo === 'desvio-estoque' && s.fechamentoId === chave);
+  if (jaExiste) return null;
+
+  const lista = faltas
+    .slice(0, 15)
+    .map((o) => `${o.itemNome}: falta ${Math.abs(o.diferencaQtd)} ${o.unidadeMedida} (R$${Math.abs(o.diferencaValor).toFixed(2)})`)
+    .join('\n');
+  return solicitacoes.create({
+    tipo: 'desvio-estoque',
+    unidade,
+    unidadeNome: unidadeNome || unidade,
+    titulo: `Possível desvio de estoque — ${unidadeNome || unidade} (${data})`,
+    valorEstimado: Math.abs(totalFaltaValor),
+    observacao: `Contagem de ${data} apurou falta de R$${Math.abs(totalFaltaValor).toFixed(2)} no total.\n\n${lista}`,
+    fechamentoId: chave,
+    criadoPorId: criadoPorId || null,
+    criadoPorEmail: criadoPorEmail || null,
+    direcionadoParaId: null,
+    direcionadoParaEmail: null,
+  });
 }
 
 async function getContagem(unidade, data) {
@@ -642,7 +716,7 @@ async function resumoPeriodo(unidade, dataInicio, dataFim) {
 }
 
 module.exports = {
-  SETORES, TIPOS_ITEM, TIPOS_SAIDA,
+  SETORES, TIPOS_ITEM, TIPOS_SAIDA, LIMITE_DESVIO_ESTOQUE,
   listSetores, criarSetor, listTipos, criarTipo,
   listCatalogo, criarItem, atualizarItem, removerItem, seedCatalogoPadrao, reordenarItens, obterItemUnidade,
   listRecebimentos, criarRecebimento, removerRecebimento,

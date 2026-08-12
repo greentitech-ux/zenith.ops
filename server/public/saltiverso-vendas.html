@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Bebidas & Meias · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:760px;margin-inline:auto;overflow-x:clip;overflow-y:clip;}
+  h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  h2{font-size:13.5px;font-weight:700;margin:0 0 4px;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin-left:-12px;margin-right:-12px;margin-top:-16px;padding-left:12px;padding-right:12px;padding-top:12px;padding-bottom:12px;display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .hidden{display:none!important;}
+  .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer-titulo{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px 12px;}
+  .nav-drawer-grupo{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 4px;}
+  .nav-drawer-grupo{cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;}
+  .nav-drawer-grupo .ndg-seta{transition:transform .15s ease;font-size:9px;flex:none;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
+  .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+  label{display:block;font-size:11.5px;color:var(--muted);margin:10px 0 4px;font-family:var(--mono);}
+  label:first-child{margin-top:0;}
+  input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  .btn-primary{background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:11px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .btn-primary:disabled{opacity:.5;cursor:not-allowed;}
+  .btn-secundario{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+  .link-btn{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0;font-family:var(--sans);margin-right:12px;margin-top:8px;}
+  .grid2{display:grid;grid-template-columns:1fr;gap:0 10px;}
+  @media(min-width:440px){ .grid2{grid-template-columns:1fr 1fr;} }
+  .grid3{display:grid;grid-template-columns:1fr;gap:0 8px;}
+  @media(min-width:520px){ .grid3{grid-template-columns:2fr 1fr 1fr;} }
+  .msg{margin-top:10px;font-size:12.5px;padding:10px 12px;border-radius:8px;word-break:break-word;}
+  .msg.ok{background:var(--ok-dim);color:var(--ok);}
+  .msg.err{background:var(--bad-dim);color:var(--bad);}
+  .secao-titulo{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:14px 0 8px;}
+  .item-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;}
+  .item-btn{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 10px;text-align:center;cursor:pointer;color:var(--text);font-family:var(--sans);}
+  .item-btn:hover{border-color:var(--accent);}
+  .item-btn .nome{font-size:13px;font-weight:600;display:block;}
+  .item-btn .preco{font-family:var(--mono);font-size:12px;color:var(--accent);display:block;margin-top:4px;}
+  .carrinho-linha{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line);}
+  .carrinho-linha:first-child{border-top:none;}
+  .carrinho-linha .nome{flex:1;font-size:13px;}
+  .carrinho-linha .qtd-ctrl{display:flex;align-items:center;gap:6px;}
+  .qtd-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;width:26px;height:26px;font-size:14px;cursor:pointer;}
+  .carrinho-linha .subtotal{font-family:var(--mono);font-size:12.5px;min-width:64px;text-align:right;}
+  .pagamento-linha{margin-top:8px;}
+  .pagamento-linha-campos{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;}
+  .btn-remover{background:none;border:1px solid var(--line);color:var(--bad);border-radius:8px;height:42px;width:38px;flex:none;cursor:pointer;font-size:14px;}
+  .resumo{background:var(--panel2);border-radius:8px;padding:10px 12px;margin-top:10px;}
+  .resumo .linha{display:flex;justify-content:space-between;font-size:13px;padding:3px 0;}
+  .card{border-top:1px solid var(--line);padding:10px 0;}
+  .card:first-child{border-top:none;padding-top:0;}
+  .card .linha1{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:13px;font-weight:600;flex-wrap:wrap;}
+  .card .sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:2px;word-break:break-word;}
+  .badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;display:inline-block;white-space:nowrap;}
+  .badge.cancelada{background:var(--bad-dim);color:var(--bad);}
+  .catalogo-linha{display:flex;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);}
+  .catalogo-linha:first-child{border-top:none;}
+  .catalogo-linha .nome{flex:1;font-size:13px;}
+  .catalogo-linha input.preco-edit{width:80px;padding:6px 8px;font-size:12.5px;}
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+    <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+    <div style="min-width:0;">
+      <div class="eyebrow">Zenith Ops · Saltiverso Patteo</div>
+      <h1>Bebidas & Meias</h1>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;">
+    <button class="back" onclick="logout()">🚪 Sair</button>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer">
+  <div class="nav-drawer-titulo">Zenith Ops</div>
+  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
+  <div class="nav-drawer-grupo">Operação diária</div>
+  <a class="back hidden" id="nav-lancamento" href="/lancamento.html">🧾 Fechamento</a>
+  <a class="back hidden" id="nav-entrega-lancamento" href="/entrega-lancamento.html">📦 Lançar entrega</a>
+  <a class="back hidden" id="nav-fechamentos" href="/fechamentos.html">💰 Fechamentos</a>
+  <a class="back hidden" id="nav-entregas" href="/entregas.html">🛵 Entregas</a>
+  <a class="back hidden" id="nav-inventario" href="/estoque.html">📦 Estoque</a>
+  <a class="back" id="nav-abastecimento" href="/abastecimento.html">🛒 Abastec. Carrinho</a>
+  <div class="nav-drawer-grupo">Monitoramento</div>
+  <a class="back hidden" id="nav-monitor" href="/monitor.html">📈 Monitor</a>
+  <a class="back hidden" id="nav-relatorios" href="/relatorios.html">📊 Relatórios</a>
+  <a class="back hidden" id="nav-ifood" href="/ifood.html">🍔 iFood</a>
+  <div class="nav-drawer-grupo" id="nav-grupo-saltiverso">Saltiverso</div>
+  <a class="back hidden" id="nav-parque-checkin" href="/parque-checkin.html">🤸 Check-in Parque</a>
+  <a class="back hidden" id="nav-parque" href="/parque.html">🤸 Parque (painel)</a>
+  <a class="back hidden" id="nav-mensalistas" href="/mensalistas.html">📅 Mensalistas</a>
+  <a class="back hidden" id="nav-festas" href="/festas.html">🎉 Festas</a>
+  <a class="back hidden active" id="nav-saltiverso-vendas" href="/saltiverso-vendas.html">🥤 Bebidas & Meias</a>
+  <a class="back hidden" id="nav-saltiverso-fechamento" href="/saltiverso-fechamento.html">🧾 Fechamento do balcão</a>
+  <div class="nav-drawer-grupo">BigBrother</div>
+  <a class="back hidden" id="nav-rh" href="/rh.html">🧑‍💼 RH</a>
+  <div class="nav-drawer-grupo">Solicitações</div>
+  <a class="back hidden" id="nav-solicitacoes" href="/central.html">📋 Central</a>
+  <a class="back hidden" id="nav-historico" href="/central-historico.html">📜 Histórico</a>
+  <a class="back hidden" id="nav-tecnico" href="/tecnico.html">🔧 Chamados TI</a>
+  <a class="back" id="nav-ativos-ti" href="/ativos-ti.html">🖥️ Ativos de TI</a>
+  <a class="back hidden" id="nav-manutencao" href="/manutencao.html">🔧 Manutenção</a>
+  <a class="back hidden" id="nav-central-solucoes" href="/central-solucoes.html">💬 Central de Soluções</a>
+  <a class="back hidden" id="nav-beniboy" href="/beniboy.html">🐝 Central do Beniboy</a>
+  <div class="nav-drawer-grupo">Administração</div>
+  <a class="back hidden" id="nav-usuarios" href="/usuarios.html">👤 Usuários</a>
+  <a class="back hidden" id="nav-grupos" href="/grupos.html">🏷️ Grupos</a>
+  <a class="back hidden" id="nav-email" href="/email.html">✉️ Email</a>
+  <a class="back hidden" id="nav-entregas-regras" href="/entregas-regras.html">⚙️ Regras de Entregas</a>
+  <a class="back hidden" id="nav-cofre" href="/cofre.html">🔐 Cofre</a>
+  <a class="back" id="nav-ajuda" href="/ajuda.html">❓ Ajuda</a>
+  <a class="back hidden" id="nav-reset-senha" href="/painel.html?resetSenha=1">🔑 Reset senha</a>
+  <div class="nav-drawer-sep"></div>
+  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
+  <div class="nav-drawer-sep"></div>
+  <a class="back" href="https://wa.me/5581995148654" target="_blank" rel="noopener" style="color:var(--accent);">💬 Dúvidas? Suporte (81) 99514-8654</a>
+</nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso ao balcão do Saltiverso. Fale com o administrador (Master).</div>
+
+<div id="root" class="hidden">
+
+<div class="panel">
+  <label>Unidade</label>
+  <select id="sv-unidade" onchange="carregarCatalogo()"></select>
+</div>
+
+<div class="panel">
+  <h2>Catálogo</h2>
+  <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">Toque num item pra adicionar ao carrinho.</div>
+  <div class="item-grid" id="catalogo-grid"><div class="empty">carregando...</div></div>
+</div>
+
+<div class="panel">
+  <h2>Carrinho</h2>
+  <div id="carrinho-lista"><div class="empty">Carrinho vazio.</div></div>
+  <div class="resumo" id="carrinho-resumo" style="display:none;">
+    <div class="linha"><span>Total</span><b id="carrinho-total">R$ 0,00</b></div>
+  </div>
+
+  <div id="wrap-pagamentos" class="hidden">
+    <label style="margin-top:14px;">Forma(s) de pagamento</label>
+    <div id="lista-pagamentos"></div>
+    <button type="button" class="btn-secundario" id="btn-add-pagamento" onclick="adicionarPagamento()">+ Adicionar forma de pagamento</button>
+    <div class="sub" id="pagamento-resumo" style="font-size:12px;color:var(--muted);margin-top:6px;"></div>
+  </div>
+
+  <div class="msg hidden" id="msg-venda"></div>
+  <button class="btn-primary" style="width:100%;margin-top:14px;" id="btn-confirmar-venda" onclick="confirmarVenda()" disabled>Confirmar venda</button>
+</div>
+
+<div class="panel">
+  <h2>Vendas de hoje</h2>
+  <div id="lista-vendas"><div class="empty">carregando...</div></div>
+</div>
+
+<div class="panel hidden" id="painel-catalogo">
+  <h2>Gerenciar catálogo (bebidas/meias)</h2>
+  <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">Só Master/quem tem a permissão de Catálogo de Estoque vê essa seção. Recebimento, contagem e diferenças ficam na página <a href="/estoque.html" style="color:var(--accent);">Estoque</a>.</div>
+  <form id="form-novo-item">
+    <div class="grid3">
+      <div><label style="margin-top:0;">Nome</label><input type="text" id="ci-nome" required maxlength="120"></div>
+      <div><label style="margin-top:0;">Tipo</label><select id="ci-tipo"><option value="BEBIDA">Bebida</option><option value="MEIA">Meia</option></select></div>
+      <div><label style="margin-top:0;">Preço (R$)</label><input type="number" min="0.01" step="0.01" id="ci-preco" required></div>
+    </div>
+    <div class="msg hidden" id="msg-catalogo"></div>
+    <button class="btn-secundario" type="submit" style="margin-top:10px;">+ Adicionar item</button>
+  </form>
+  <div id="lista-catalogo-gerenciar" style="margin-top:6px;"></div>
+</div>
+
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
+function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+
+function initNavDrawerAccordion(){
+  const nav = document.getElementById('nav-drawer');
+  if(!nav || nav.dataset.ndgInit) return;
+  nav.dataset.ndgInit = '1';
+  [...nav.querySelectorAll(':scope > .nav-drawer-grupo')].forEach(g=>{
+    const nomeGrupo = g.textContent.trim();
+    const itens = [];
+    let el = g.nextElementSibling;
+    while(el && !el.classList.contains('nav-drawer-grupo') && !el.classList.contains('nav-drawer-sep')){
+      const prox = el.nextElementSibling;
+      itens.push(el);
+      el = prox;
+    }
+    if(!itens.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'ndg-wrap';
+    g.after(wrap);
+    itens.forEach(it=>wrap.appendChild(it));
+    g.innerHTML = `<span>${nomeGrupo}</span><span class="ndg-seta">▾</span>`;
+    const atualizarVazio = ()=>{
+      const temVisivel = itens.some(it=>!it.classList.contains('hidden'));
+      g.classList.toggle('hidden', !temVisivel);
+    };
+    atualizarVazio();
+    new MutationObserver(atualizarVazio).observe(wrap, { attributes:true, attributeFilter:['class'], subtree:true });
+    const key = 'ndgAberto:' + nomeGrupo;
+    const temAtivo = itens.some(it=>it.classList.contains('active'));
+    const ndgSalvo = localStorage.getItem(key);
+    const aberto = temAtivo || ndgSalvo === '1' || ndgSalvo === null;
+    g.querySelector('.ndg-seta').style.transform = aberto ? '' : 'rotate(-90deg)';
+    wrap.classList.toggle('hidden', !aberto);
+    g.addEventListener('click', ()=>{
+      const abrirAgora = wrap.classList.contains('hidden');
+      wrap.classList.toggle('hidden', !abrirAgora);
+      g.querySelector('.ndg-seta').style.transform = abrirAgora ? '' : 'rotate(-90deg)';
+      localStorage.setItem(key, abrirAgora ? '1' : '0');
+    });
+  });
+}
+initNavDrawerAccordion();
+
+const PARQUE_UNIDADES_NOMES = { 'Saltiverso Patteo': 'Saltiverso Patteo' };
+const SETOR_SALTIVERSO_NOME = 'Balcão Saltiverso';
+const FORMAS_PAGAMENTO = ['dinheiro','pix','debito','credito','voucher'];
+
+let ME = null;
+let IS_MASTER = false;
+let PODE_CATALOGO = false;
+let UNIDADES_NOMES = { ...PARQUE_UNIDADES_NOMES };
+let CATALOGO = [];
+let CARRINHO = []; // [{itemId, nome, precoUnitario, quantidade}]
+let PAGAMENTO_SEQ = 0;
+let SETOR_SALTIVERSO_CODIGO = null;
+
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
+function fmtReal(v){ return 'R$ ' + Number(v||0).toFixed(2).replace('.', ','); }
+const FUSO_BR = 'America/Sao_Paulo';
+function agoraBrasilia(){
+  const partes = new Intl.DateTimeFormat('en-US', {
+    timeZone:FUSO_BR, year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false,
+  }).formatToParts(new Date());
+  const o = {}; partes.forEach(p=>{ if(p.type!=='literal') o[p.type]=p.value; });
+  const hora = o.hour==='24' ? '00' : o.hour;
+  return new Date(`${o.year}-${o.month}-${o.day}T${hora}:${o.minute}:${o.second}`);
+}
+function isoLocalBR(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function hojeBrasilia(){ return isoLocalBR(agoraBrasilia()); }
+function horaCurtaBrasilia(iso){ const d = new Date(iso); return isNaN(d.getTime()) ? '' : `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+
+function unidadeAtual(){ return document.getElementById('sv-unidade').value; }
+
+// ---------- catálogo (só bebida/meia) ----------
+async function carregarCatalogo(){
+  const unidade = unidadeAtual();
+  if(!unidade) return;
+  CATALOGO = await fetch(`/api/saltiverso/catalogo?unidade=${encodeURIComponent(unidade)}`).then(r=>r.json()).catch(()=>[]);
+  renderCatalogoGrid();
+  if(PODE_CATALOGO) renderCatalogoGerenciar();
+}
+function renderCatalogoGrid(){
+  const el = document.getElementById('catalogo-grid');
+  if(!CATALOGO.length){ el.innerHTML = '<div class="empty">Nenhum item cadastrado ainda.</div>'; return; }
+  el.innerHTML = CATALOGO.map(i=>`
+    <button type="button" class="item-btn" onclick="adicionarAoCarrinho('${i.id}')">
+      <span class="nome">${escapeHtml(i.nome)}</span>
+      <span class="preco">${i.precoVenda>0 ? fmtReal(i.precoVenda) : 'sem preço'}</span>
+    </button>`).join('');
+}
+
+// ---------- carrinho ----------
+function adicionarAoCarrinho(itemId){
+  const item = CATALOGO.find(i=>i.id===itemId);
+  if(!item || !(item.precoVenda>0)){ alert('Esse item não tem preço de venda cadastrado.'); return; }
+  const linha = CARRINHO.find(l=>l.itemId===itemId);
+  if(linha) linha.quantidade += 1;
+  else CARRINHO.push({ itemId, nome: item.nome, precoUnitario: item.precoVenda, quantidade: 1 });
+  renderCarrinho();
+}
+function alterarQtdCarrinho(itemId, delta){
+  const linha = CARRINHO.find(l=>l.itemId===itemId);
+  if(!linha) return;
+  linha.quantidade += delta;
+  if(linha.quantidade <= 0) CARRINHO = CARRINHO.filter(l=>l.itemId!==itemId);
+  renderCarrinho();
+}
+function calcularTotalCarrinho(){
+  return CARRINHO.reduce((s,l)=>s+l.quantidade*l.precoUnitario, 0);
+}
+function renderCarrinho(){
+  const el = document.getElementById('carrinho-lista');
+  const resumo = document.getElementById('carrinho-resumo');
+  const wrapPag = document.getElementById('wrap-pagamentos');
+  const btn = document.getElementById('btn-confirmar-venda');
+  if(!CARRINHO.length){
+    el.innerHTML = '<div class="empty">Carrinho vazio.</div>';
+    resumo.style.display = 'none';
+    wrapPag.classList.add('hidden');
+    document.getElementById('lista-pagamentos').innerHTML = '';
+    btn.disabled = true;
+    return;
+  }
+  el.innerHTML = CARRINHO.map(l=>`
+    <div class="carrinho-linha">
+      <span class="nome">${escapeHtml(l.nome)}</span>
+      <div class="qtd-ctrl">
+        <button type="button" class="qtd-btn" onclick="alterarQtdCarrinho('${l.itemId}',-1)">−</button>
+        <span>${l.quantidade}</span>
+        <button type="button" class="qtd-btn" onclick="alterarQtdCarrinho('${l.itemId}',1)">+</button>
+      </div>
+      <span class="subtotal">${fmtReal(l.quantidade*l.precoUnitario)}</span>
+    </div>`).join('');
+  const total = calcularTotalCarrinho();
+  resumo.style.display = '';
+  document.getElementById('carrinho-total').textContent = fmtReal(total);
+  wrapPag.classList.remove('hidden');
+  reconciliarPagamentos(total);
+  atualizarBotaoPagamento(total);
+  btn.disabled = false;
+}
+
+// ---------- pagamento (mesmo padrão do check-in do parque: divide em mais
+// de uma forma, nunca deixa passar do total) ----------
+function somaPagamentos(){
+  return [...document.querySelectorAll('#lista-pagamentos .pagamento-valor')].reduce((s,i)=>s+Math.max(0,num(i.value)),0);
+}
+function limitarValorPagamento(input){
+  const total = calcularTotalCarrinho();
+  const outros = somaPagamentos() - Math.max(0, num(input.value));
+  const maxPermitido = Math.max(0, total - outros);
+  if(num(input.value) > maxPermitido + 0.001) input.value = maxPermitido>0 ? maxPermitido.toFixed(2) : '';
+}
+function reconciliarPagamentos(total){
+  const inputs = [...document.querySelectorAll('#lista-pagamentos .pagamento-valor')];
+  let soma = inputs.reduce((s,i)=>s+Math.max(0,num(i.value)),0);
+  for(let idx=inputs.length-1; idx>=0 && soma>total+0.001; idx--){
+    const atual = Math.max(0,num(inputs[idx].value));
+    if(atual<=0) continue;
+    const excesso = Math.min(atual, soma-total);
+    const novo = atual-excesso;
+    inputs[idx].value = novo>0 ? novo.toFixed(2) : '';
+    soma -= excesso;
+  }
+}
+function atualizarBotaoPagamento(total){
+  const soma = somaPagamentos();
+  const btn = document.getElementById('btn-add-pagamento');
+  const completo = total<=0 || soma >= total - 0.001;
+  btn.classList.toggle('hidden', completo);
+  const resumo = document.getElementById('pagamento-resumo');
+  const falta = Math.max(0, total-soma);
+  resumo.textContent = total<=0 ? '' : (falta>0.001 ? `falta alocar ${fmtReal(falta)} de ${fmtReal(total)}` : `✅ valor completo · ${fmtReal(total)}`);
+}
+function adicionarPagamento(){
+  const total = calcularTotalCarrinho();
+  if(total>0 && somaPagamentos() >= total-0.001) return;
+  PAGAMENTO_SEQ++;
+  const id = 'sv-pagamento-'+PAGAMENTO_SEQ;
+  const div = document.createElement('div');
+  div.className = 'pagamento-linha';
+  div.id = id;
+  div.innerHTML = `
+    <div class="pagamento-linha-campos">
+      <div><label style="margin-top:0;">Forma</label>
+        <select class="pagamento-forma" required>
+          <option value="">selecione...</option>
+          <option value="dinheiro">Dinheiro</option>
+          <option value="pix">Pix</option>
+          <option value="debito">Cartão de débito</option>
+          <option value="credito">Cartão de crédito</option>
+          <option value="voucher">Voucher</option>
+        </select>
+      </div>
+      <div><label style="margin-top:0;">Valor pago</label>
+        <input type="number" step="0.01" min="0" class="pagamento-valor" placeholder="0,00" oninput="limitarValorPagamento(this);atualizarBotaoPagamento(calcularTotalCarrinho())">
+      </div>
+      <button type="button" class="btn-remover" title="Remover" onclick="document.getElementById('${id}').remove();atualizarBotaoPagamento(calcularTotalCarrinho())">✕</button>
+    </div>`;
+  document.getElementById('lista-pagamentos').appendChild(div);
+  atualizarBotaoPagamento(total);
+}
+function coletarPagamentos(){
+  return [...document.querySelectorAll('#lista-pagamentos .pagamento-linha')].map(div=>({
+    forma: div.querySelector('.pagamento-forma').value,
+    valor: num(div.querySelector('.pagamento-valor').value),
+  })).filter(p=>p.forma && p.valor>0);
+}
+
+async function confirmarVenda(){
+  const msg = document.getElementById('msg-venda');
+  msg.classList.add('hidden');
+  const btn = document.getElementById('btn-confirmar-venda');
+  btn.disabled = true;
+  try{
+    const total = calcularTotalCarrinho();
+    const pagamentos = coletarPagamentos();
+    const somaPg = pagamentos.reduce((s,p)=>s+p.valor,0);
+    if(Math.abs(somaPg-total)>0.01) throw new Error('A soma das formas de pagamento precisa bater com o total.');
+    const body = {
+      unidade: unidadeAtual(),
+      unidadeNome: UNIDADES_NOMES[unidadeAtual()] || unidadeAtual(),
+      itens: CARRINHO.map(l=>({ itemId: l.itemId, quantidade: l.quantidade })),
+      pagamentos,
+    };
+    const resp = await fetch('/api/saltiverso/vendas', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error||'Erro ao registrar venda.');
+    CARRINHO = [];
+    renderCarrinho();
+    msg.textContent = `Venda registrada: ${fmtReal(data.total)}.`; msg.className = 'msg ok'; msg.classList.remove('hidden');
+    await carregarVendasDoDia();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{
+    btn.disabled = CARRINHO.length===0;
+  }
+}
+
+// ---------- vendas de hoje ----------
+async function carregarVendasDoDia(){
+  const unidade = unidadeAtual();
+  if(!unidade) return;
+  const vendas = await fetch(`/api/saltiverso/vendas?unidade=${encodeURIComponent(unidade)}&data=${hojeBrasilia()}`).then(r=>r.json()).catch(()=>[]);
+  const el = document.getElementById('lista-vendas');
+  if(!vendas.length){ el.innerHTML = '<div class="empty">Nenhuma venda hoje ainda.</div>'; return; }
+  const ordenadas = [...vendas].sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||''));
+  el.innerHTML = ordenadas.map(v=>{
+    const itens = (v.itens||[]).map(i=>`${i.quantidade}× ${escapeHtml(i.nome)}`).join(', ');
+    const formas = (v.pagamentos||[]).map(p=>`${p.forma} ${fmtReal(p.valor)}`).join(' + ');
+    return `
+    <div class="card">
+      <div class="linha1">
+        <span>${horaCurtaBrasilia(v.criadoEm)} · ${itens}</span>
+        <span>${v.cancelada?'<span class="badge cancelada">cancelada</span>':fmtReal(v.total)}</span>
+      </div>
+      <div class="sub">${formas}${v.criadoPorEmail?' · '+escapeHtml(v.criadoPorEmail):''}</div>
+      ${(IS_MASTER && !v.cancelada) ? `<button type="button" class="link-btn" style="color:var(--bad);" onclick="cancelarVenda('${v.id}')">✕ Cancelar venda</button>` : ''}
+    </div>`;
+  }).join('');
+}
+async function cancelarVenda(id){
+  if(!confirm('Cancelar essa venda? Isso reverte a saída dela no estoque.')) return;
+  const resp = await fetch(`/api/saltiverso/vendas/${id}`, { method:'DELETE' });
+  const data = await resp.json();
+  if(!resp.ok){ alert(data.error||'Erro ao cancelar.'); return; }
+  await carregarVendasDoDia();
+}
+
+// ---------- gerenciar catálogo (Master/podeCatalogoEstoque) ----------
+async function garantirSetorSaltiverso(){
+  if(SETOR_SALTIVERSO_CODIGO) return SETOR_SALTIVERSO_CODIGO;
+  const setores = await fetch('/api/inventario/setores').then(r=>r.json()).catch(()=>[]);
+  let setor = setores.find(s=>s.nome===SETOR_SALTIVERSO_NOME);
+  if(!setor){
+    try{
+      const resp = await fetch('/api/inventario/setores', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ nome: SETOR_SALTIVERSO_NOME }) });
+      if(resp.ok) setor = await resp.json();
+    }catch(e){}
+  }
+  SETOR_SALTIVERSO_CODIGO = setor ? setor.codigo : (setores[0] && setores[0].codigo);
+  return SETOR_SALTIVERSO_CODIGO;
+}
+function renderCatalogoGerenciar(){
+  const el = document.getElementById('lista-catalogo-gerenciar');
+  if(!CATALOGO.length){ el.innerHTML = '<div class="empty">Nenhum item cadastrado ainda.</div>'; return; }
+  el.innerHTML = CATALOGO.map(i=>`
+    <div class="catalogo-linha">
+      <span class="nome">${escapeHtml(i.nome)} <span style="color:var(--muted);">(${i.tipo})</span></span>
+      <input type="number" min="0.01" step="0.01" class="preco-edit" value="${i.precoVenda||''}" onchange="salvarPrecoItem('${i.id}', this.value)">
+      <button type="button" class="link-btn" style="color:var(--bad);margin:0;" onclick="removerItemCatalogo('${i.id}')">✕</button>
+    </div>`).join('');
+}
+async function salvarPrecoItem(id, valor){
+  try{
+    const resp = await fetch(`/api/inventario/catalogo/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ precoVenda: num(valor) }) });
+    if(!resp.ok){ const data = await resp.json(); throw new Error(data.error); }
+    await carregarCatalogo();
+  }catch(err){ alert(err.message||'Erro ao salvar preço.'); }
+}
+async function removerItemCatalogo(id){
+  if(!confirm('Remover esse item do catálogo? Isso não apaga vendas/saídas já feitas com ele.')) return;
+  await fetch(`/api/inventario/catalogo/${id}`, { method:'DELETE' });
+  await carregarCatalogo();
+}
+document.getElementById('form-novo-item').addEventListener('submit', async (ev)=>{
+  ev.preventDefault();
+  const msg = document.getElementById('msg-catalogo');
+  msg.classList.add('hidden');
+  try{
+    const setor = await garantirSetorSaltiverso();
+    if(!setor) throw new Error('Não foi possível preparar o setor do catálogo.');
+    const body = {
+      unidade: unidadeAtual(),
+      nome: document.getElementById('ci-nome').value,
+      setor,
+      tipo: document.getElementById('ci-tipo').value,
+      unidadeMedida: 'UN',
+      precoVenda: document.getElementById('ci-preco').value,
+    };
+    const resp = await fetch('/api/inventario/catalogo', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error||'Erro ao cadastrar item.');
+    document.getElementById('form-novo-item').reset();
+    msg.textContent = 'Item cadastrado.'; msg.className = 'msg ok'; msg.classList.remove('hidden');
+    await carregarCatalogo();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+});
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  ME = await res.json();
+  IS_MASTER = ME.role==='master';
+  PODE_CATALOGO = IS_MASTER || !!ME.podeCatalogoEstoque;
+  const secoes = IS_MASTER ? ['parque-loja'] : (ME.permissions?.sections||[]);
+
+  if(!secoes.includes('parque-loja')){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+
+  const unidades = IS_MASTER ? Object.keys(PARQUE_UNIDADES_NOMES) : (ME.permissions?.unidades||[]).filter(u=>PARQUE_UNIDADES_NOMES[u]);
+  document.getElementById('sv-unidade').innerHTML = unidades.length
+    ? unidades.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('')
+    : '<option value="" disabled selected>nenhuma unidade liberada</option>';
+
+  document.getElementById('painel-catalogo').classList.toggle('hidden', !PODE_CATALOGO);
+
+  document.getElementById('root').classList.remove('hidden');
+  await carregarCatalogo();
+  await carregarVendasDoDia();
+}
+
+boot();
+</script>
+<script src="/notif-central.js"></script>
+<script src="/suporte-chat.js"></script>
+<script src="/nav-gate.js"></script>
+</body>
+</html>
