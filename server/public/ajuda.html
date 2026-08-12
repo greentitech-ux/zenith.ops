@@ -722,17 +722,24 @@ const TOPICOS = [
     <ul>
       <li><b>👷 Extras:</b> avulso, trabalho pontual - sem período de teste, sem atestado, sem advertência.</li>
       <li><b>⏳ Em Teste:</b> candidato no período de experiência de 5 dias - fora da ficha de colaboradores até a decisão.</li>
-      <li><b>🧑‍💼 Colaboradores:</b> quem foi efetivado de verdade (direto ou aprovado no teste) - só esse grupo tem acesso a Atestados e Advertências, e é o único que <b>não</b> aparece no quiosque de check-in (já bate o ponto no sistema próprio).</li>
+      <li><b>🧑‍💼 Colaboradores:</b> quem foi efetivado de verdade (direto ou aprovado no teste) - só esse grupo tem acesso a Atestados e Advertências. Não aparece no quiosque físico de check-in (<code>/rh-checkin.html</code>) - em vez disso, bate o ponto pelo próprio <b>link de auto-atendimento</b> (ver abaixo).</li>
     </ul>
     <h3>Cadastrar (1º dia de trabalho)</h3>
     <p>Na aba <b>➕ Cadastrar</b>, primeiro escolha o <b>tipo de cadastro</b>:</p>
     <ul>
       <li><b>👷 Extra (avulso):</b> já entra direto na Ficha de Ativos - trabalho pontual, sem período de teste. Uso típico: gerente cadastrando quem está fazendo um extra na loja.</li>
       <li><b>⏳ Candidato · teste de 5 dias:</b> fica em período de experiência, <b>fora</b> da Ficha de Ativos até a decisão. Tanto o gerente quanto o próprio RH podem cadastrar - o RH pode escolher qualquer unidade do grupo.</li>
-      <li><b>🧑‍💼 Efetivado (direto):</b> pula o teste de 5 dias e já entra como colaborador contratado - <b>restrito</b> a Master, Admin e quem tem a tag extra <b>🧑‍💼 RH: pode cadastrar efetivado direto</b> (atribuída pelo Master em Usuários). A loja/gerente comum não vê essa opção - só pode cadastrar Extra ou Candidato, e continua podendo dar o feedback do teste de 5 dias (efetivar/desligar) normalmente.</li>
+      <li><b>🧑‍💼 Efetivado (direto):</b> pula o teste de 5 dias e já entra como colaborador contratado - <b>restrito</b> a Master, Admin e quem tem a tag extra <b>🧑‍💼 RH: pode cadastrar efetivado direto</b> (atribuída pelo Master em Usuários). A loja/gerente comum não vê essa opção - só pode cadastrar Extra ou Candidato, e continua podendo dar o feedback do teste de 5 dias (efetivar/desligar) normalmente. Ao cadastrar um efetivado tem o checkbox <b>"Contratação sem período de experiência"</b> - marque quando a contratação já é definitiva, sem passar pela experiência formal de 30+60 dias (ver seção <b>🗓️ Em Experiência</b> abaixo).</li>
     </ul>
     <p>Preencha unidade, nome completo, contato, cargo/função, data de nascimento e a data de admissão/início (já vem com hoje), e anexe o <b>currículo em PDF</b> se houver.</p>
     <p><b>Por que cadastrar no 1º dia:</b> é assim que dá pra saber exatamente quem está atuando em cada loja - e cobrar o gerente que deixar alguém sem cadastrar.</p>
+    <h3>🔗 Link de auto-atendimento</h3>
+    <p>Pra facilitar o 1º dia, cada pessoa cadastrada (extra, candidato ou efetivado) ganha um <b>link próprio e permanente</b> - em qualquer card, use <b>🔗 link de auto-atendimento</b> pra copiar a URL e mandar pro celular da pessoa (WhatsApp, SMS, o que for). Sem precisar de login no Zenith, ela mesma:</p>
+    <ul>
+      <li><b>Preenche/corrige os próprios dados</b> - nome, contato, cargo/função, data de nascimento e currículo (PDF).</li>
+      <li><b>Bate o ponto todo dia</b> - um botão só, que vira "✅ Fazer check-in" ou "🚪 Fazer check-out" conforme o estado atual, com foto e localização (mesma regra de privacidade do quiosque: localização só aparece pro Master).</li>
+    </ul>
+    <p>Se o link vazar ou for parar em grupo errado, use <b>🔄 gerar novo link</b> no card - o link antigo para de funcionar na hora e um novo é copiado pra você mandar. Cadastro <b>desligado</b> (status inativo) perde o acesso ao próprio link automaticamente.</p>
     <h3>⏳ Em Teste (acompanhamento)</h3>
     <p>A aba lista quem está em período de experiência (candidatos), com os dias corridos desde o início. <b>Comportamento automático:</b> no <b>5º dia</b>, o card fica em destaque vermelho ("decidir hoje") e o <b>Gerente/Ass.Gerente da unidade + Master/Admin + time de RH</b> recebem um <b>push de alerta</b> pra dar o feedback - o alerta só dispara 1 vez por pessoa. Clique em <b>📝 Registrar decisão</b>:</p>
     <ul>
@@ -744,7 +751,7 @@ const TOPICOS = [
     <h3>👷 Extras</h3>
     <p>Lista só quem foi cadastrado como <b>extra (avulso)</b> - mesmos filtros de unidade e status da aba Colaboradores. Card mostra as mesmas informações, mas sem os botões de atestado/advertência (não fazem sentido pra esse tipo de vínculo).</p>
     <h3>🗓️ Em Experiência (contrato CLT, 30+60 dias)</h3>
-    <p>Distinto do teste informal de 5 dias: é o <b>contrato de experiência formal</b>, com prazo legal. <b>Todo colaborador que vira efetivado</b> - direto ou aprovado no teste de 5 dias - entra automaticamente na <b>1ª etapa de 30 dias</b>, contando a partir da efetivação. A aba <b>🗓️ Em Experiência</b> lista quem está numa etapa ativa, ordenado pelo prazo mais próximo, com badge colorido (cinza → amarelo a partir de 5 dias → vermelho nos últimos 2 dias/vencendo hoje).</p>
+    <p>Distinto do teste informal de 5 dias: é o <b>contrato de experiência formal</b>, com prazo legal. <b>Todo colaborador que vira efetivado</b> - direto ou aprovado no teste de 5 dias - entra automaticamente na etapa certa pra idade da admissão: se a <b>data de admissão</b> tiver menos de 30 dias, entra na <b>1ª etapa de 30 dias</b> contando dessa data; se já tiver entre 30 e 89 dias, entra <b>direto na etapa de 60 dias</b> (início em admissão+30, prazo em admissão+90) - sem cobrar um prazo que já teria passado; se a admissão já tiver 90 dias ou mais, não entra em experiência automática (a janela toda já passou). Quem marcou o checkbox <b>"Contratação sem período de experiência"</b> no cadastro nunca entra nessa aba. A aba <b>🗓️ Em Experiência</b> lista quem está numa etapa ativa, ordenado pelo prazo mais próximo, com badge colorido (cinza → amarelo a partir de 5 dias → vermelho nos últimos 2 dias/vencendo hoje).</p>
     <p><b>Avisos escalonados</b> - push automático em <b>5, 3 e 2 dias antes do prazo</b>, e <b>no dia do vencimento</b>: os 3 primeiros avisos vão só pro time de RH (tag "RH todas as unidades")/Admin/Master; no <b>último dia</b>, o <b>Gerente/Ass.Gerente da unidade</b> também é avisado, pra ninguém perder o prazo.</p>
     <p>Clique em <b>📝 Registrar decisão</b> - as opções mudam conforme a etapa:</p>
     <ul>

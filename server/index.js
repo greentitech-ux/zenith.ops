@@ -150,13 +150,16 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/solicitacoes/decidir-info',
   '/api/solicitacoes/decidir',
   '/suporte-chat.js',
+  '/rh-colaborador.html',
 ]);
 // o chat de suporte do site tem rotas com id dinamico (/api/suporte-chat/:id
 // e /api/suporte-chat/:id/mensagem) - liberadas por prefixo. So o lado
 // PUBLICO (singular "suporte-chat/"); o lado do atendimento e
-// /api/suporte-chats (plural), que continua atras do login normal
+// /api/suporte-chats (plural), que continua atras do login normal. O link de
+// auto-atendimento do RH (rh-colaborador.html) tambem e por prefixo, ja que
+// o token vai na propria rota (/api/rh/publico/:token/...)
 function rotaPublicaSemDashboard(path) {
-  return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/');
+  return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/');
 }
 if (DASHBOARD_USER && DASHBOARD_PASSWORD) {
   app.use((req, res, next) => {
@@ -511,6 +514,94 @@ app.post('/api/suporte-chat/:id/mensagem', async (req, res) => {
     push.notifySolicitacao('💬 Nova mensagem no chat de suporte', `${chat.nome} · ${String(req.body.texto || '').slice(0, 80)}`, chat.id, '/tecnico.html');
     res.json({ ok: true });
     acionarBeniboy(chat.id);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- RH: link de auto-atendimento (rh-colaborador.html) - o proprio
+// colaborador preenche os dados e bate ponto por foto pelo celular, sem
+// login no Zenith (pedido do usuario: "link onde sera enviado ao colaborador
+// pra ele preencher os dados e fazer o check-in todos os dias"). O token
+// (rh.buscarPorToken) e o unico "login" desse fluxo - por isso essas rotas
+// ficam ACIMA do app.use('/api', auth.requireAuth) logo abaixo, junto dos
+// outros fluxos publicos (chat de suporte, decidir, etc) ----------
+
+// vista "segura" do funcionario pro proprio link - so o que a pessoa
+// preenche/ve de si mesma, nunca campo administrativo (experiencia,
+// linkToken, quem cadastrou, historico...)
+function funcionarioPublico(f) {
+  if (!f) return null;
+  return {
+    id: f.id, nome: f.nome, contato: f.contato, cargoFuncao: f.cargoFuncao,
+    dataNascimento: f.dataNascimento, unidade: f.unidade, status: f.status,
+    temCurriculo: !!f.curriculo,
+  };
+}
+
+app.get('/api/rh/publico/:token', async (req, res) => {
+  const funcionario = await rh.buscarPorToken(req.params.token);
+  if (!funcionario) return res.status(404).json({ error: 'Link inválido.' });
+  const aberto = await rhCheckin.buscarAbertoDoFuncionario(funcionario.id);
+  res.json({ ...funcionarioPublico(funcionario), checkinAberto: aberto ? { id: aberto.id, entrada: aberto.entrada.horario } : null });
+});
+
+app.put('/api/rh/publico/:token', upload.single('curriculo'), async (req, res) => {
+  try {
+    const funcionario = await rh.buscarPorToken(req.params.token);
+    if (!funcionario) return res.status(404).json({ error: 'Link inválido.' });
+    let curriculo;
+    if (req.file) {
+      const path = await storage.salvarArquivo(funcionario.unidade || 'geral', req.file, 'rh-curriculos');
+      curriculo = { path, nomeOriginal: req.file.originalname, tipo: req.file.mimetype };
+    }
+    const registro = await rh.atualizarPorToken(req.params.token, {
+      nome: req.body.nome, contato: req.body.contato, cargoFuncao: req.body.cargoFuncao,
+      dataNascimento: req.body.dataNascimento, curriculo,
+    });
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(funcionarioPublico(registro));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/rh/publico/:token/checkin', upload.single('foto'), async (req, res) => {
+  try {
+    const funcionario = await rh.buscarPorToken(req.params.token);
+    if (!funcionario) return res.status(404).json({ error: 'Link inválido.' });
+    let foto = null;
+    if (req.file) {
+      const path = await storage.salvarArquivo(funcionario.id, req.file, 'rh-checkins');
+      foto = { path, tipo: req.file.mimetype };
+    }
+    const localizacao = lerLocalizacaoDoBody(req.body);
+    const registro = await rhCheckin.registrarEntrada({ funcionarioId: funcionario.id, foto, localizacao, registradoPorEmail: null });
+    broadcast('rh-checkin-atualizado', { id: registro.id, unidade: registro.unidade }, 'rh');
+    if (registro.status === 'pendente_aprovacao') {
+      push.notifyRhAprovacaoPendente(registro.funcionarioNome, registro.unidade, registro.motivoPendencia);
+    }
+    res.json({ id: registro.id, status: registro.status, entrada: registro.entrada.horario });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/rh/publico/:token/checkin/saida', upload.single('foto'), async (req, res) => {
+  try {
+    const funcionario = await rh.buscarPorToken(req.params.token);
+    if (!funcionario) return res.status(404).json({ error: 'Link inválido.' });
+    const aberto = await rhCheckin.buscarAbertoDoFuncionario(funcionario.id);
+    if (!aberto) return res.status(400).json({ error: 'Você não tem check-in em aberto.' });
+    let foto = null;
+    if (req.file) {
+      const path = await storage.salvarArquivo(funcionario.id, req.file, 'rh-checkins');
+      foto = { path, tipo: req.file.mimetype };
+    }
+    const localizacao = lerLocalizacaoDoBody(req.body);
+    const registro = await rhCheckin.registrarSaida(aberto.id, { foto, localizacao, registradoPorEmail: null });
+    broadcast('rh-checkin-atualizado', { id: registro.id, unidade: registro.unidade }, 'rh');
+    res.json({ id: registro.id, status: registro.status, saida: registro.saida.horario });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -3394,6 +3485,8 @@ function podeAprovarRh(req) {
 app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'), async (req, res) => {
   try {
     const { unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro } = req.body;
+    // "1" ou "true" vindo de multipart/form-data (checkbox HTML manda string)
+    const semExperiencia = req.body.semExperiencia === 'true' || req.body.semExperiencia === '1' || req.body.semExperiencia === true;
     if (!podeAcessarUnidadeRh(req, unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
@@ -3406,7 +3499,7 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'
       curriculo = { path, nomeOriginal: req.file.originalname, tipo: req.file.mimetype };
     }
     const registro = await rh.criar({
-      unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro,
+      unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro, semExperiencia,
       curriculo, cadastradoPorId: req.user.id, cadastradoPorEmail: req.user.email,
     });
     broadcast('rh-funcionario-criado', registro, 'rh');
@@ -3455,6 +3548,23 @@ app.patch('/api/rh/funcionarios/:id', requireSection('rh'), async (req, res) => 
     if (patch.tipoCadastro !== undefined && !req.isMaster) delete patch.tipoCadastro;
     const registro = await rh.atualizar(req.params.id, patch);
     broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// regenera o token do link de auto-atendimento (rh-colaborador.html) - pra
+// usar se o link vazar/for parar em grupo errado: quem tinha o link antigo
+// perde o acesso na hora, o gerente manda o novo pro colaborador
+app.post('/api/rh/funcionarios/:id/regenerar-link', requireSection('rh'), async (req, res) => {
+  try {
+    const atual = await rh.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    const registro = await rh.regenerarLink(req.params.id);
     res.json(registro);
   } catch (err) {
     res.status(400).json({ error: err.message });

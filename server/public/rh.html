@@ -271,6 +271,11 @@
       </div>
       <label>Currículo (PDF, opcional)</label>
       <input type="file" id="c-curriculo" accept="application/pdf">
+      <label style="display:flex;align-items:center;gap:6px;margin-top:12px;" class="hidden" id="wrap-sem-experiencia">
+        <input type="checkbox" id="c-sem-experiencia" style="width:auto;margin:0;">
+        <span style="font-family:var(--sans);color:var(--text);">Contratação sem período de experiência</span>
+      </label>
+      <div class="sub hidden" id="sub-sem-experiencia" style="margin-top:-4px;">marca quando a contratação já é definitiva, sem passar pela experiência formal de 30+60 dias - não entra em "Experiência formal (CLT)" nem gera alerta de prazo.</div>
       <div class="msg hidden" id="msg-cadastrar"></div>
       <button class="btn-primary" type="submit">Cadastrar</button>
     </form>
@@ -641,11 +646,16 @@ function escolherTipoCadastro(tipo){
   document.querySelectorAll('#form-cadastrar .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tipo===tipo));
   const explicacao = document.getElementById('tipo-cadastro-explicacao');
   const labelAdmissao = document.getElementById('c-admissao-label');
+  // "sem experiencia" so faz sentido pra efetivado - extra/candidato nao tem
+  // experiencia formal de qualquer jeito (ver calcularExperienciaInicial em rh.js)
+  document.getElementById('wrap-sem-experiencia').classList.toggle('hidden', tipo!=='efetivado');
+  document.getElementById('sub-sem-experiencia').classList.toggle('hidden', tipo!=='efetivado');
+  if(tipo!=='efetivado') document.getElementById('c-sem-experiencia').checked = false;
   if(tipo==='candidato'){
     explicacao.textContent = 'candidato entra em período de teste de 5 dias - só vira funcionário ativo quando efetivado (aba Acompanh. de Teste).';
     labelAdmissao.textContent = 'Data de início do teste';
   }else if(tipo==='efetivado'){
-    explicacao.textContent = 'efetivado já entra como colaborador contratado direto, sem passar pelo teste de 5 dias.';
+    explicacao.textContent = 'efetivado já entra como colaborador contratado direto, sem passar pelo teste de 5 dias. Se a admissão já foi há mais de 30 dias, a experiência entra direto na etapa certa (30 ou 60 dias) - sem cobrar um prazo que já passou.';
     labelAdmissao.textContent = 'Data de admissão';
   }else{
     explicacao.textContent = 'extra já entra direto na Ficha de Ativos - trabalho avulso, sem período de teste.';
@@ -698,6 +708,8 @@ function cardAtivoHtml(f){
     <div class="acoes">
       <button type="button" class="link-btn" onclick="abrirEditar('${f.id}')">✏️ editar</button>
       ${f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 currículo</a>` : ''}
+      ${f.status!=='inativo' ? `<button type="button" class="link-btn" onclick="copiarLinkColaborador('${f.id}')">🔗 link de auto-atendimento</button>` : ''}
+      ${f.status!=='inativo' ? `<button type="button" class="link-btn" onclick="gerarNovoLinkColaborador('${f.id}')">🔄 gerar novo link</button>` : ''}
       ${f.status==='ativo' && f.tipoCadastro!=='extra' && !f.emAtestado ? `<button type="button" class="link-btn" onclick="abrirAtestado('${f.id}')">🩺 registrar atestado</button>` : ''}
       ${f.emAtestado ? `<button type="button" class="link-btn" onclick="marcarRetorno('${f.id}')">✅ registrar retorno</button>` : ''}
       ${f.status==='ativo' && f.tipoCadastro!=='extra' ? `<button type="button" class="link-btn" onclick="abrirAdvertencia('${f.id}')">📋 solicitar advertência</button>` : ''}
@@ -1273,6 +1285,35 @@ async function carregar(){
   renderAtestados();
 }
 
+// link de auto-atendimento (rh-colaborador.html) - o proprio colaborador
+// preenche os dados e bate ponto pelo celular, sem login no Zenith
+async function copiarLinkColaborador(id){
+  const f = TODOS.find(x=>x.id===id);
+  if(!f || !f.linkToken) return;
+  const url = `${location.origin}/rh-colaborador.html?token=${f.linkToken}`;
+  try{
+    await navigator.clipboard.writeText(url);
+    alert(`Link copiado! Manda pro ${f.nome} preencher os dados e bater ponto:\n\n${url}`);
+  }catch(e){
+    prompt('Copie o link abaixo:', url);
+  }
+}
+
+// invalida o link atual e gera outro - quem tinha o link antigo perde o
+// acesso na hora (uso: link vazou, foi parar em grupo errado etc)
+async function gerarNovoLinkColaborador(id){
+  if(!confirm('Gerar um link novo? O link antigo deixa de funcionar na hora.')) return;
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${id}/regenerar-link`, { method:'POST' });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error||'Erro ao gerar link.');
+    await carregar();
+    copiarLinkColaborador(id);
+  }catch(err){
+    alert(err.message);
+  }
+}
+
 document.getElementById('form-cadastrar').addEventListener('submit', async (e)=>{
   e.preventDefault();
   const msg = document.getElementById('msg-cadastrar');
@@ -1288,6 +1329,7 @@ document.getElementById('form-cadastrar').addEventListener('submit', async (e)=>
     fd.append('dataNascimento', document.getElementById('c-nascimento').value);
     fd.append('dataAdmissao', document.getElementById('c-admissao').value);
     fd.append('tipoCadastro', TIPO_CADASTRO);
+    if(TIPO_CADASTRO==='efetivado') fd.append('semExperiencia', document.getElementById('c-sem-experiencia').checked);
     const arq = document.getElementById('c-curriculo').files[0];
     if(arq) fd.append('curriculo', arq);
     const resp = await fetch('/api/rh/funcionarios', { method:'POST', body: fd });
