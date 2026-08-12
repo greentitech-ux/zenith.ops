@@ -964,7 +964,8 @@ function renderUsers(){
     if (horario && horario.ativo) tags.push(`<span class="badge horario" title="Acesso liberado só nesse intervalo, todo dia">🕐 ${horario.inicio}–${horario.fim}</span>`);
     tags.push(`<span class="badge ${u.online?'on':'off'}" style="cursor:pointer;" onclick="abrirSessoes('${u.id}')" title="${u.ultimaAtividadeEm ? 'Última atividade: '+formatarRelativo(u.ultimaAtividadeEm) : 'Nunca fez login'} - clique pra ver os locais">${u.online?'🟢':'⚪'} ${u.sessoesAtivas} ${u.sessoesAtivas===1?'local':'locais'}</span>`);
     const detalhe = isMaster
-      ? `<div class="user-detail-linha">Master - acesso total, sem restrições.</div>`
+      ? `<div class="user-detail-linha">Master - acesso total, sem restrições.</div>
+         <div class="user-detail-linha"><button type="button" class="link-btn" onclick="alternarSessaoLongaMaster('${u.id}', ${!u.sessaoLonga})">${u.sessaoLonga ? '🔓 desativar "sempre conectado"' : '🔒 manter sempre conectado (30 dias, não desloga sozinho)'}</button></div>`
       : `<div class="user-detail-linha"><b>Status:</b> ${status.texto}${u.locked ? ' (após 3 tentativas de senha erradas - use "Desbloquear" pra destravar sem mudar a senha)' : ''}</div>
          <div class="user-detail-linha"><b>Seções:</b> ${tagList(perms.sections)}</div>
          <div class="user-detail-linha"><b>Unidades:</b> ${tagList(perms.unidades, c=>UNIDADES_NOMES[c]||c)}</div>
@@ -980,7 +981,7 @@ function renderUsers(){
           <span class="tags">${tags.join('')}</span>
         </div>
       </div>
-      ${isMaster ? '' : `<button type="button" class="btn-acoes" onclick="abrirAcoes('${u.id}')">⚙️ Ações</button>`}
+      ${isMaster ? `<button type="button" class="btn-acoes" onclick="toggleDetalheUsuario('${u.id}')" title="Sessão sempre conectada">⚙️ Ações</button>` : `<button type="button" class="btn-acoes" onclick="abrirAcoes('${u.id}')">⚙️ Ações</button>`}
     </div>
     <div class="user-detail hidden" id="detalhe-${u.id}">${detalhe}</div>`;
   }).join('') || `<div style="color:var(--muted);text-align:center;padding:20px;">${USERS.length ? 'Nenhum acesso encontrado com esse filtro.' : 'Nenhum acesso criado ainda.'}</div>`;
@@ -1203,6 +1204,16 @@ async function definirUsername(id, atual){
 async function alternarAtivo(id, active){
   await fetch('/api/users/'+id+'/active', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({active})});
   await carregarUsuarios();
+}
+
+// mesma tag "sessão longa" usada pra login de loja/terminal, agora liberada
+// tambem pro Master - so vale a partir do proximo login (ver users.js)
+async function alternarSessaoLongaMaster(id, sessaoLonga){
+  await fetch('/api/users/'+id+'/sessao-longa', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({sessaoLonga})});
+  await carregarUsuarios();
+  alert(sessaoLonga
+    ? 'Ativado. Vale a partir do PRÓXIMO login desse acesso - a sessão atual continua com o prazo de antes.'
+    : 'Desativado - qualquer sessão aberta desse acesso foi encerrada na hora.');
 }
 
 async function aplicarUsernamesEmMassa(){
