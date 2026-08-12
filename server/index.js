@@ -2835,6 +2835,25 @@ app.get('/api/inventario/relatorio.:formato(csv|pdf)', requireSection('inventari
 // ---------- Saltiverso Patteo (parque de trampolins): controle de entrada
 // (check-ins) e reservas de festa. Duas secoes de checkin/painel (mesmo
 // padrao entregas/entregas-lancamento) + uma secao de festas ----------
+
+// tabela de precos (tempos contratados, PCD, desconto de aniversariante) -
+// mesmo padrao de /api/festas/tabela: GET liberado pra quem opera o
+// check-in, PUT (editar) so Master, ja que mexe direto no financeiro
+app.get('/api/parque/tabela', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
+  res.json(await parque.getConfigPrecos());
+});
+
+app.put('/api/parque/tabela', auth.requireMaster, async (req, res) => {
+  try {
+    const tabela = await parque.salvarConfigPrecos(req.body);
+    broadcast('parque-tabela-atualizada', {}, 'parque');
+    broadcast('parque-tabela-atualizada', {}, 'parque-checkin');
+    res.json(tabela);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, res) => {
   try {
     const { unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, usarCreditoMin, metodoPagamento, pagamentos, meiasExtras, motivoCortesia, categoriaTempo } = req.body;

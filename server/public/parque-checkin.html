@@ -205,7 +205,10 @@
       <div class="secao-titulo">Data e tempo</div>
       <label>Data de utilização</label>
       <input type="date" id="f-data" required onchange="atualizarPreviewValor()">
-      <label>Tempo contratado</label>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+        <label style="margin:0;">Tempo contratado</label>
+        <button type="button" class="link-btn hidden" id="btn-editar-tabela-parque" style="margin:0;" onclick="abrirEditarTabelaParque()">⚙️ Editar tabela de preços</button>
+      </div>
       <div class="toggle-grupo" id="tempos"></div>
       <label>Horário previsto de entrada</label>
       <select id="f-horario-previsto" required></select>
@@ -390,6 +393,37 @@
   </div>
 </div>
 
+<div class="overlay hidden" id="overlay-tabela-parque">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharEditarTabelaParque()">✕</span>
+    <div class="sheet">
+    <h3>Editar tabela de preços</h3>
+    <div class="sub">Tempos contratados, PCD e desconto de aniversariante - sem precisar de deploy. Vale pra entradas novas; as já registradas mantêm o valor gravado na hora da venda.</div>
+    <form id="form-tabela-parque">
+      <label>Tempos contratados</label>
+      <div id="tp-tempos"></div>
+      <button type="button" class="link-btn" style="margin-top:2px;" onclick="adicionarNovoTempo()">+ Novo tempo</button>
+
+      <label style="margin-top:16px;">PCD</label>
+      <div id="tp-pcd"></div>
+
+      <label style="margin-top:16px;">5%CP (PCD-cortesia · entrada gratuita)</label>
+      <div class="grid2">
+        <div><label>Nome do botão</label><input type="text" id="tp-cortesia-label" maxlength="30" required></div>
+        <div><label>Minutos</label><input type="number" min="1" step="1" id="tp-cortesia-minutos" required></div>
+      </div>
+
+      <label style="margin-top:16px;">Desconto de aniversariante (%)</label>
+      <input type="number" min="0" max="100" step="1" id="tp-niver-desconto" required>
+      <div class="sub" style="margin-top:-2px;">Aplicado automaticamente na entrada da criança que faz aniversário na semana (não vale pra PCD).</div>
+
+      <div class="msg hidden" id="msg-tabela-parque"></div>
+      <button class="btn-primary" type="submit">Salvar tabela</button>
+    </form>
+    </div>
+  </div>
+</div>
+
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
@@ -456,16 +490,25 @@ function initNavDrawerAccordion(){
 initNavDrawerAccordion();
 
 const PARQUE_UNIDADES_NOMES = { 'Saltiverso Patteo': 'Saltiverso Patteo' };
-// venda normal: 30 a 120 minutos. Quem quiser ficar mais usa o
-// "➕ Adicionar tempo" durante a vigencia (mesma lista de buckets)
-const TEMPOS_VALIDOS = [30,60,90,120];
+// tabela de precos (tempos contratados, PCD, desconto de aniversariante) -
+// vem do servidor (editavel pelo Master, ver "⚙️ Editar tabela de preços"),
+// carregada em carregarTabelaPrecos(). Os valores abaixo sao so o fallback
+// antes da 1a carga (mesmo seed usado em parque.js)
+let TABELA_PRECOS = {
+  tempos: [{minutos:30,label:'30min',preco:40},{minutos:60,label:'60min',preco:50},{minutos:90,label:'90min',preco:90},{minutos:120,label:'120min',preco:100}],
+  pcd: [{chave:'pcd30',label:'PCD30',minutos:30,preco:32},{chave:'pcd60',label:'PCD60',minutos:60,preco:32}],
+  pcdCortesiaLabel: '5%CP', pcdCortesiaMinutos: 60,
+  niverDesconto: 50,
+};
+// lista "achatada" de minutos validos - derivada de TABELA_PRECOS.tempos,
+// recalculada em carregarTabelaPrecos()/renderTempos()
+let TEMPOS_VALIDOS = TABELA_PRECOS.tempos.map(t=>t.minutos);
 const PRECO_MEIA = 25;
-// niver: 50% de desconto AUTOMATICO na entrada da crianca aniversariante
-// quando a data de utilizacao cai ate NIVER_JANELA_DIAS antes/depois do
-// aniversario (mes/dia da data de nascimento) - mesma regra do servidor
-// (ver ehNiver/aplicarNiverAutomatico em parque.js). Nunca se aplica com
-// categoria PCD selecionada (pcd30/pcd60/5%CP).
-const NIVER_DESCONTO = 0.5;
+// niver: desconto AUTOMATICO (percentual, editavel na tabela) na entrada da
+// crianca aniversariante quando a data de utilizacao cai ate
+// NIVER_JANELA_DIAS antes/depois do aniversario (mes/dia da data de
+// nascimento) - mesma regra do servidor (ver ehNiver/aplicarNiverAutomatico
+// em parque.js). Nunca se aplica com categoria PCD selecionada.
 const NIVER_JANELA_DIAS = 7;
 function ehNiverAuto(dataNascimento, dataUtilizacao){
   if(!dataNascimento || !dataUtilizacao) return false;
@@ -479,11 +522,19 @@ function ehNiverAuto(dataNascimento, dataUtilizacao){
   }
   return false;
 }
-// PCD30/PCD60: preco fixo por crianca (30/60min), fora da tabela normal.
-// PCD-cortesia (botao "5%CP"): entrada gratis de 60min, limitada a 2
-// criancas por hora-relogio por unidade (o backend recusa a 3a e avisa
-// Gerente+Master - ver criar() em parque.js)
-const PRECO_PCD = 32;
+// PCD30/PCD60: preco fixo por crianca (editavel, ver TABELA_PRECOS.pcd),
+// fora da tabela normal de tempos. PCD-cortesia (botao "5%CP"): entrada
+// gratis, limitada a 2 criancas por hora-relogio por unidade (o backend
+// recusa a 3a e avisa Gerente+Master - ver criar() em parque.js)
+function precoPcd(cat){
+  const entrada = TABELA_PRECOS.pcd.find(p=>p.chave===cat);
+  return entrada ? entrada.preco : 32;
+}
+function minutosPcd(cat){
+  if(cat==='pcd-cortesia') return TABELA_PRECOS.pcdCortesiaMinutos || 60;
+  const entrada = TABELA_PRECOS.pcd.find(p=>p.chave===cat);
+  return entrada ? entrada.minutos : (cat==='pcd30' ? 30 : 60);
+}
 
 let ME = null;
 let IS_MASTER = false;
@@ -516,33 +567,129 @@ function isoLocalBR(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padS
 function hojeBrasilia(){ return isoLocalBR(agoraBrasilia()); }
 function horaCurtaBrasilia(d){ return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
 
-// tabela de precos por pulseira (mesma conta do servidor - ver
-// valorPorTempo em parque.js): 30min=R$40, 60min=R$50, demais combinam
-// (90=R$90, 120=R$100, 150=R$140...)
-function valorPorTempo(t){ return Math.floor(t/60)*50 + (t%60>=30?40:0); }
+// preco por pulseira - primeiro tenta a tabela ATUAL (editavel, ver
+// TABELA_PRECOS.tempos); minutos fora dela (visita antiga com bucket que
+// saiu de linha) cai no calculo aditivo antigo, mesmo fallback do servidor
+// (ver valorPorTempo em parque.js)
+function valorPorTempo(t){
+  const entrada = TABELA_PRECOS.tempos.find(e=>e.minutos===t);
+  if(entrada) return entrada.preco;
+  return Math.floor(t/60)*50 + (t%60>=30?40:0);
+}
 function fmtReal(v){ return 'R$ ' + Number(v||0).toFixed(2).replace('.', ','); }
 
 // valor por crianca considerando a categoria PCD selecionada (mesma regra
 // do servidor - ver valorUnitarioPcd em parque.js)
 function valorUnitarioAtual(){
   if(CATEGORIA_SELECIONADA==='pcd-cortesia') return 0;
-  if(CATEGORIA_SELECIONADA==='pcd30' || CATEGORIA_SELECIONADA==='pcd60') return PRECO_PCD;
+  if(CATEGORIA_SELECIONADA==='pcd30' || CATEGORIA_SELECIONADA==='pcd60') return precoPcd(CATEGORIA_SELECIONADA);
   return valorPorTempo(TEMPO_SELECIONADO);
 }
 
 function renderTempos(){
-  const normais = TEMPOS_VALIDOS.map(t=>
-    `<button type="button" class="toggle-btn ${!CATEGORIA_SELECIONADA && t===TEMPO_SELECIONADO?'ativo':''}" data-tempo="${t}" onclick="selecionarTempo(${t})">${t}min · R$${valorPorTempo(t)}</button>`
+  const normais = TABELA_PRECOS.tempos.map(t=>
+    `<button type="button" class="toggle-btn ${!CATEGORIA_SELECIONADA && t.minutos===TEMPO_SELECIONADO?'ativo':''}" data-tempo="${t.minutos}" onclick="selecionarTempo(${t.minutos})">${escapeHtml(t.label)} · R$${t.preco}</button>`
   ).join('');
   const pcd = [
-    { cat:'pcd30', label:`PCD30 · R$${PRECO_PCD}` },
-    { cat:'pcd60', label:`PCD60 · R$${PRECO_PCD}` },
-    { cat:'pcd-cortesia', label:'5%CP' },
+    { cat:'pcd30', label:`${TABELA_PRECOS.pcd.find(p=>p.chave==='pcd30').label} · R$${precoPcd('pcd30')}` },
+    { cat:'pcd60', label:`${TABELA_PRECOS.pcd.find(p=>p.chave==='pcd60').label} · R$${precoPcd('pcd60')}` },
+    { cat:'pcd-cortesia', label: TABELA_PRECOS.pcdCortesiaLabel },
   ].map(p=>
-    `<button type="button" class="toggle-btn ${CATEGORIA_SELECIONADA===p.cat?'ativo':''}" data-categoria="${p.cat}" onclick="selecionarCategoriaPcd('${p.cat}')">${p.label}</button>`
+    `<button type="button" class="toggle-btn ${CATEGORIA_SELECIONADA===p.cat?'ativo':''}" data-categoria="${p.cat}" onclick="selecionarCategoriaPcd('${p.cat}')">${escapeHtml(p.label)}</button>`
   ).join('');
   document.getElementById('tempos').innerHTML = normais + pcd;
 }
+
+// busca a tabela editavel (tempos/PCD/desconto de aniversariante) no
+// servidor - chamada no boot e depois de salvar uma edicao (ver
+// "⚙️ Editar tabela de preços")
+async function carregarTabelaPrecos(){
+  try{
+    const data = await fetch('/api/parque/tabela').then(r=>r.json());
+    if(data && Array.isArray(data.tempos) && data.tempos.length) TABELA_PRECOS = data;
+  }catch(e){}
+  TEMPOS_VALIDOS = TABELA_PRECOS.tempos.map(t=>t.minutos);
+}
+
+// ---------- editar tabela de preços (só Master) - tempos contratados, PCD e
+// desconto de aniversariante, tudo editavel sem precisar de deploy ----------
+let TABELA_TEMPOS_EDIT = []; // copia de trabalho enquanto o modal esta aberto
+function linhaTempoHtml(t, idx){
+  const podeRemover = TABELA_TEMPOS_EDIT.length > 1;
+  return `<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;flex-wrap:wrap;">
+    <div style="flex:2;min-width:110px;"><label style="margin:0 0 4px;">Nome</label><input type="text" class="tp-tempo-label" maxlength="20" value="${escapeHtml(t.label)}" required></div>
+    <div style="flex:1;min-width:80px;"><label style="margin:0 0 4px;">Minutos</label><input type="number" min="1" step="1" class="tp-tempo-minutos" value="${t.minutos}" required></div>
+    <div style="flex:1;min-width:90px;"><label style="margin:0 0 4px;">Preço (R$)</label><input type="number" min="0.01" step="0.01" class="tp-tempo-preco" value="${t.preco}" required></div>
+    ${podeRemover ? `<button type="button" class="link-btn" style="color:var(--bad);margin-bottom:12px;" onclick="removerTempo(${idx})">✕</button>` : ''}
+  </div>`;
+}
+function renderTabelaTemposForm(){
+  document.getElementById('tp-tempos').innerHTML = TABELA_TEMPOS_EDIT.map((t,idx)=>linhaTempoHtml(t,idx)).join('');
+}
+function adicionarNovoTempo(){
+  TABELA_TEMPOS_EDIT.push({ minutos: 0, label: '', preco: 0 });
+  renderTabelaTemposForm();
+}
+function removerTempo(idx){
+  TABELA_TEMPOS_EDIT.splice(idx,1);
+  renderTabelaTemposForm();
+}
+function linhaPcdHtml(p){
+  return `<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;flex-wrap:wrap;">
+    <div style="flex:2;min-width:110px;"><label style="margin:0 0 4px;">Nome</label><input type="text" class="tp-pcd-label" data-chave="${p.chave}" maxlength="20" value="${escapeHtml(p.label)}" required></div>
+    <div style="flex:1;min-width:80px;"><label style="margin:0 0 4px;">Minutos</label><input type="number" min="1" step="1" class="tp-pcd-minutos" data-chave="${p.chave}" value="${p.minutos}" required></div>
+    <div style="flex:1;min-width:90px;"><label style="margin:0 0 4px;">Preço (R$)</label><input type="number" min="0.01" step="0.01" class="tp-pcd-preco" data-chave="${p.chave}" value="${p.preco}" required></div>
+  </div>`;
+}
+
+async function abrirEditarTabelaParque(){
+  await carregarTabelaPrecos();
+  TABELA_TEMPOS_EDIT = TABELA_PRECOS.tempos.map(t=>({...t}));
+  renderTabelaTemposForm();
+  document.getElementById('tp-pcd').innerHTML = TABELA_PRECOS.pcd.map(linhaPcdHtml).join('');
+  document.getElementById('tp-cortesia-label').value = TABELA_PRECOS.pcdCortesiaLabel;
+  document.getElementById('tp-cortesia-minutos').value = TABELA_PRECOS.pcdCortesiaMinutos;
+  document.getElementById('tp-niver-desconto').value = TABELA_PRECOS.niverDesconto;
+  document.getElementById('msg-tabela-parque').classList.add('hidden');
+  document.getElementById('overlay-tabela-parque').classList.remove('hidden');
+}
+function fecharEditarTabelaParque(){ document.getElementById('overlay-tabela-parque').classList.add('hidden'); }
+
+document.getElementById('form-tabela-parque').addEventListener('submit', async (ev)=>{
+  ev.preventDefault();
+  const msg = document.getElementById('msg-tabela-parque');
+  const btn = ev.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+  try{
+    const labels = [...document.querySelectorAll('#tp-tempos .tp-tempo-label')];
+    const minutosEls = [...document.querySelectorAll('#tp-tempos .tp-tempo-minutos')];
+    const precoEls = [...document.querySelectorAll('#tp-tempos .tp-tempo-preco')];
+    const tempos = labels.map((el,i)=>({ label: el.value, minutos: Number(minutosEls[i].value), preco: Number(precoEls[i].value) }));
+    const pcd = ['pcd30','pcd60'].map(chave=>({
+      chave,
+      label: document.querySelector(`.tp-pcd-label[data-chave="${chave}"]`).value,
+      minutos: Number(document.querySelector(`.tp-pcd-minutos[data-chave="${chave}"]`).value),
+      preco: Number(document.querySelector(`.tp-pcd-preco[data-chave="${chave}"]`).value),
+    }));
+    const body = {
+      tempos, pcd,
+      pcdCortesiaLabel: document.getElementById('tp-cortesia-label').value,
+      pcdCortesiaMinutos: Number(document.getElementById('tp-cortesia-minutos').value),
+      niverDesconto: Number(document.getElementById('tp-niver-desconto').value),
+    };
+    const resp = await fetch('/api/parque/tabela', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error||'Erro ao salvar tabela.');
+    await carregarTabelaPrecos();
+    renderTempos();
+    msg.textContent = 'Tabela salva com sucesso.'; msg.className = 'msg ok'; msg.classList.remove('hidden');
+    setTimeout(fecharEditarTabelaParque, 900);
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{
+    btn.disabled = false;
+  }
+});
 
 // horario previsto sempre em janelas de 30 em 30 minutos (10:00/10:30/
 // 11:00) - o relogio real e o do check-in, que pode ser 10:15 normalmente
@@ -570,7 +717,7 @@ function selecionarTempo(t){
 }
 function selecionarCategoriaPcd(cat){
   CATEGORIA_SELECIONADA = cat;
-  TEMPO_SELECIONADO = (cat==='pcd30') ? 30 : 60;
+  TEMPO_SELECIONADO = minutosPcd(cat);
   if(cat==='pcd-cortesia'){
     // troca pra 5%CP com mais de 2 criancas ja cadastradas: remove as
     // excedentes em vez de deixar o formulario num estado que o servidor
@@ -606,7 +753,7 @@ function calcularTotalAtual(){
   const n = [...document.querySelectorAll('#lista-criancas .crianca-nome')].filter(i=>i.value.trim()).length;
   const unit = valorUnitarioAtual();
   const niver = contarNiver();
-  const valorEntradas = unit * n - unit * NIVER_DESCONTO * niver;
+  const valorEntradas = unit * n - unit * (TABELA_PRECOS.niverDesconto/100) * niver;
   const meias = contarMeias() + Math.max(0, num(document.getElementById('f-meias-extras').value));
   return valorEntradas + PRECO_MEIA * meias;
 }
@@ -621,7 +768,7 @@ function atualizarPreviewValor(){
   document.getElementById('preview-meias').textContent = `${meias} par(es) · ${fmtReal(valorMeias)}`;
   document.getElementById('valor-detalhe').textContent = gratis
     ? `cortesia · ${n} criança(s)`
-    : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min)${niver?` · 🎂 Niver 50% (${niver})`:''} + meias`;
+    : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min)${niver?` · 🎂 Niver ${TABELA_PRECOS.niverDesconto}% (${niver})`:''} + meias`;
   document.getElementById('preview-valor').textContent = fmtReal(total);
   if(!gratis){
     reconciliarPagamentos(total);
@@ -1386,6 +1533,8 @@ async function boot(){
     ? unidades.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('')
     : '<option value="" disabled selected>nenhuma unidade liberada</option>';
 
+  document.getElementById('btn-editar-tabela-parque').classList.toggle('hidden', !isMaster);
+  await carregarTabelaPrecos();
   renderTempos();
   setAC(false);
   document.getElementById('f-data').value = hojeBrasilia();
