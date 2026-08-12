@@ -183,6 +183,8 @@
   <a class="back hidden" id="nav-parque" href="/parque.html">🤸 Parque (painel)</a>
   <a class="back hidden" id="nav-festas" href="/festas.html">🎉 Festas</a>
   <a class="back hidden" id="nav-mensalistas" href="/mensalistas.html">📅 Mensalistas</a>
+  <a class="back hidden" id="nav-saltiverso-vendas" href="/saltiverso-vendas.html">🥤 Bebidas & Meias</a>
+  <a class="back hidden" id="nav-saltiverso-fechamento" href="/saltiverso-fechamento.html">🧾 Fechamento do balcão</a>
   <div class="nav-drawer-grupo">BigBrother</div>
   <a class="back hidden" id="nav-rh" href="/rh.html">🧑‍💼 RH</a>
   <div class="nav-drawer-grupo">Solicitações</div>
@@ -420,8 +422,8 @@ function ontemBrasilia(){
   return `${o.year}-${o.month}-${o.day}`;
 }
 
-const TIPOS_CENTRAL_LABEL = { estorno:'Estorno', 'ajuste-fechamento':'Correção de fechamento', compra:'Compra', manutencao:'Manutenção', 'suporte-ti':'Suporte de TI', pagamento:'Pagamento', nota:'Nota fiscal', 'quebra-caixa':'Quebra de caixa' };
-const ICONES_TIPO_CENTRAL = { estorno:'💳', 'ajuste-fechamento':'🧾', compra:'🛒', manutencao:'🔧', 'suporte-ti':'💻', pagamento:'💸', nota:'📄', 'quebra-caixa':'⚠️' };
+const TIPOS_CENTRAL_LABEL = { estorno:'Estorno', 'ajuste-fechamento':'Correção de fechamento', compra:'Compra', manutencao:'Manutenção', 'suporte-ti':'Suporte de TI', pagamento:'Pagamento', nota:'Nota fiscal', 'quebra-caixa':'Quebra de caixa', 'desvio-estoque':'Desvio de estoque' };
+const ICONES_TIPO_CENTRAL = { estorno:'💳', 'ajuste-fechamento':'🧾', compra:'🛒', manutencao:'🔧', 'suporte-ti':'💻', pagamento:'💸', nota:'📄', 'quebra-caixa':'⚠️', 'desvio-estoque':'📦⚠️' };
 let ME_GLOBAL = null;
 let IS_MASTER_GLOBAL = false;
 let IS_ADMIN_GLOBAL = false;
@@ -846,6 +848,26 @@ async function cardParque(){
   `);
 }
 
+// ---------- card Bebidas/Meias & Fechamento do balcão (secao 'parque-loja') ----------
+async function cardSaltiversoLoja(){
+  const unidade = 'Saltiverso Patteo';
+  const hoje = hojeBrasilia();
+  const [vendas, fechamento] = await Promise.all([
+    fetch(`/api/saltiverso/vendas?unidade=${encodeURIComponent(unidade)}&data=${hoje}`).then(r=>r.json()).catch(()=>[]),
+    fetch(`/api/saltiverso/fechamento?unidade=${encodeURIComponent(unidade)}&data=${hoje}`).then(r=>r.json()).catch(()=>null),
+  ]);
+  const validas = (vendas||[]).filter(v=>!v.cancelada);
+  const totalVendido = validas.reduce((s,v)=>s+(Number(v.total)||0),0);
+  const fechado = !!(fechamento && fechamento.fechado);
+  return pcardWrap('🥤','Bebidas & Meias (hoje)','/saltiverso-vendas.html', `
+    <div class="pstats">
+      ${statRow('Vendas hoje', validas.length)}
+      ${statRow('Total vendido', 'R$ '+totalVendido.toFixed(2).replace('.',','))}
+      ${statRow('Fechamento do dia', fechado ? 'lançado' : 'pendente', fechado ? 'ok' : 'warn')}
+    </div>
+  `);
+}
+
 // ---------- card RH (secao 'rh') ----------
 // ativos/em teste/testes vencidos sem decisao/aniversariantes hoje - mesma
 // conta usada em rh.html (ver rh.diasDesde/aniversariantesHoje no backend,
@@ -1021,6 +1043,7 @@ function dataBrasiliaAb(iso){
 // ordem guardada no navegador de todo mundo "esquece" esse card
 const CARDS_POR_SECAO = [
   { chave:'parque', secao:'parque', build:cardParque },
+  { chave:'parque-loja', secao:'parque-loja', build:cardSaltiversoLoja },
   { chave:'festas', secao:'festas', build:cardFestasCalendario },
   { chave:'rh', secao:'rh', build:cardRH },
   { chave:'monitor', secao:'monitor', build:cardMonitor },

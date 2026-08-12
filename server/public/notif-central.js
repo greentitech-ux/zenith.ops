@@ -63,8 +63,8 @@
   const tocarSomSolicitacao = () => tocarBeep([[0, 880], [0.18, 1160]]);
   const tocarSomFraude = () => tocarBeep([[0, 660], [0.16, 660], [0.32, 880]]);
 
-  const ICONES_TIPO = { estorno: '💳', 'ajuste-fechamento': '🧾', compra: '🛒', manutencao: '🔧', 'suporte-ti': '💻', pagamento: '💸', nota: '📄', 'quebra-caixa': '⚠️' };
-  const LABELS_TIPO = { estorno: 'Estorno', 'ajuste-fechamento': 'Ajuste de fechamento', compra: 'Compra', manutencao: 'Manutenção', 'suporte-ti': 'Suporte TI', pagamento: 'Pagamento', nota: 'Nota fiscal', 'quebra-caixa': 'Quebra de caixa' };
+  const ICONES_TIPO = { estorno: '💳', 'ajuste-fechamento': '🧾', compra: '🛒', manutencao: '🔧', 'suporte-ti': '💻', pagamento: '💸', nota: '📄', 'quebra-caixa': '⚠️', 'desvio-estoque': '📦⚠️' };
+  const LABELS_TIPO = { estorno: 'Estorno', 'ajuste-fechamento': 'Ajuste de fechamento', compra: 'Compra', manutencao: 'Manutenção', 'suporte-ti': 'Suporte TI', pagamento: 'Pagamento', nota: 'Nota fiscal', 'quebra-caixa': 'Quebra de caixa', 'desvio-estoque': 'Desvio de estoque' };
 
   function mostrarNotificacaoSolicitacao(card) {
     if (card.notificacaoVista) return;

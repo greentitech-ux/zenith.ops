@@ -56,6 +56,8 @@ const festas = require('./festas');
 const mensalistas = require('./mensalistas');
 const termoResponsabilidade = require('./termoResponsabilidade');
 const saltiversoImport = require('./saltiversoImport');
+const saltiversoVendas = require('./saltiversoVendas');
+const saltiversoFechamento = require('./saltiversoFechamento');
 const centralCards = require('./centralCards');
 const relatorioMV = require('./relatorioMV');
 const rh = require('./rh');
@@ -1257,6 +1259,10 @@ const INVENTARIO_UNIDADES_NOMES = {
   'Dominos Garanhuns': 'Dom Garanhuns',
   'Dominos Praça Aeroporto Recife': 'Dom Praça Aero Recife',
   'Dominos Tirol': 'Dom Tirol',
+  // Saltiverso: catalogo de bebidas/meias vendidas no balcao (ver
+  // saltiversoVendas.js/saltiverso-vendas.html) - mesma chave=valor usada em
+  // FECHAMENTO_UNIDADES_NOMES pra essa unidade
+  'Saltiverso Patteo': 'Saltiverso Patteo',
 };
 
 // unidades do app de entregas (motoboys) - nomes como aparecem nas planilhas
@@ -4028,6 +4034,96 @@ app.post('/api/rh/advertencias/:id/mensagens', requireSection('rh'), async (req,
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// ---------- Saltiverso Patteo: venda de bebidas/meias no balcão + fechamento
+// de caixa dedicado - secao propria 'parque-loja' (cobre balcao E
+// fechamento, mesma pessoa normalmente faz os dois). Gerenciar catalogo
+// (adicionar bebida/meia, editar preco) usa as rotas /api/inventario/catalogo*
+// que ja existem, so precisa da secao 'inventario' (+ podeCatalogoEstoque
+// pra quem nao e Master) - ver podeUnidadeInventario acima ----------
+app.get('/api/saltiverso/catalogo', requireSection('parque-loja'), async (req, res) => {
+  try {
+    const unidade = req.query.unidade;
+    if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const catalogo = await inventario.listCatalogo(unidade);
+    res.json(catalogo.filter((i) => i.ativo !== false && ['BEBIDA', 'MEIA'].includes(i.tipo)));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/saltiverso/vendas', requireSection('parque-loja'), async (req, res) => {
+  try {
+    const { unidade, unidadeNome, itens, pagamentos } = req.body;
+    if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const venda = await saltiversoVendas.criarVenda({
+      unidade, unidadeNome, itens, pagamentos,
+      criadoPorId: req.user.id, criadoPorEmail: req.user.email,
+    });
+    broadcast('saltiverso-venda-criada', venda, 'parque-loja');
+    res.json(venda);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/saltiverso/vendas', requireSection('parque-loja'), async (req, res) => {
+  const { unidade, data } = req.query;
+  if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  res.json(await saltiversoVendas.listVendasDoDia(unidade, data));
+});
+
+app.delete('/api/saltiverso/vendas/:id', auth.requireMaster, async (req, res) => {
+  try {
+    const venda = await saltiversoVendas.cancelarVenda(req.params.id, { porId: req.user.id, porEmail: req.user.email });
+    broadcast('saltiverso-venda-cancelada', venda, 'parque-loja');
+    res.json(venda);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/saltiverso/fechamento', requireSection('parque-loja'), async (req, res) => {
+  try {
+    const { unidade, data } = req.query;
+    if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await saltiversoFechamento.previewOuFechado(unidade, data));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/saltiverso/fechamento', requireSection('parque-loja'), async (req, res) => {
+  try {
+    const { unidade, unidadeNome, data, totalDeclarado, observacao } = req.body;
+    if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const fechamento = await saltiversoFechamento.fecharDia({
+      unidade, unidadeNome, data, totalDeclarado, observacao,
+      criadoPorId: req.user.id, criadoPorEmail: req.user.email,
+    });
+    broadcast('saltiverso-fechamento-criado', fechamento, 'parque-loja');
+    res.json(fechamento);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/saltiverso/fechamento/:id', auth.requireMaster, async (req, res) => {
+  try {
+    const { totalDeclarado, observacao } = req.body;
+    const fechamento = await saltiversoFechamento.corrigirFechamento(req.params.id, { totalDeclarado, observacao }, { porId: req.user.id, porEmail: req.user.email });
+    broadcast('saltiverso-fechamento-corrigido', fechamento, 'parque-loja');
+    res.json(fechamento);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/saltiverso/fechamentos', requireSection('parque-loja'), async (req, res) => {
+  const { unidade, dataInicio, dataFim } = req.query;
+  if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  res.json(await saltiversoFechamento.listFechamentos(unidade, dataInicio, dataFim));
 });
 
 // ---------- Saltiverso Patteo: passaporte mensal (mensalistas) - reaproveita

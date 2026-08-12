@@ -763,6 +763,31 @@ async function listByUnidades(unidades) {
   return (await listAll()).filter((c) => alvo.has(c.unidade));
 }
 
+// soma o faturamento do parque num dia: total (ja inclui acrescimos de tempo
+// extra, ver adicionarTempo - o `valor` do check-in ja soma tudo) + o
+// breakdown por forma de pagamento, juntando o `pagamentos[]` de cada
+// check-in (split da entrada) com o `metodoPagamento` de cada acrescimo (nao
+// e dividido, e' uma forma so por acrescimo). Cortesia (valor 0) nao
+// contribui em nada, entao nem precisa de tratamento especial. Usado pelo
+// fechamento dedicado do Saltiverso - ver saltiversoFechamento.js
+async function resumoDoDia(unidade, data) {
+  const checkins = (await listAll()).filter((c) => c.unidade === unidade && c.dataUtilizacao === data);
+  const porForma = {};
+  FORMAS_PAGAMENTO_SPLIT.forEach((f) => { porForma[f] = 0; });
+  let total = 0;
+  checkins.forEach((c) => {
+    total += num(c.valor);
+    (c.pagamentos || []).forEach((p) => {
+      if (porForma[p.forma] != null) porForma[p.forma] += num(p.valor);
+    });
+    (c.acrescimos || []).forEach((a) => {
+      if (a.metodoPagamento && porForma[a.metodoPagamento] != null) porForma[a.metodoPagamento] += num(a.valor);
+    });
+  });
+  Object.keys(porForma).forEach((f) => { porForma[f] = Math.round(porForma[f] * 100) / 100; });
+  return { total: Math.round(total * 100) / 100, porForma };
+}
+
 async function getOne(id) {
   const doc = await COLLECTION.doc(id).get();
   return doc.exists ? doc.data() : null;
@@ -1181,9 +1206,9 @@ async function buscarPorCpf(cpf) {
 }
 
 module.exports = {
-  METODOS_PAGAMENTO, PRECO_MEIA, valorPorTempo, valorDoCheckin,
+  METODOS_PAGAMENTO, FORMAS_PAGAMENTO_SPLIT, PRECO_MEIA, valorPorTempo, valorDoCheckin,
   getConfigPrecos, salvarConfigPrecos,
-  criar, checkin, listAll, listByUnidades, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
+  criar, checkin, listAll, listByUnidades, resumoDoDia, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
   adicionarTempo, relancar, visitaHojePorCpf,
   decidirCortesia, encerrarCortesia, ehAdminCortesia,
   solicitarEdicao, listarEdicoes, decidirEdicao, validarPropostaEdicao,

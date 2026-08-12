@@ -42,6 +42,8 @@
     'nav-parque-checkin': ['parque-checkin'],
     'nav-mensalistas': ['parque'],
     'nav-festas': ['festas'],
+    'nav-saltiverso-vendas': ['parque-loja'],
+    'nav-saltiverso-fechamento': ['parque-loja'],
     'nav-central-solucoes': ['central-solucoes'],
     'nav-rh': ['rh'],
     // mesmo criterio de acesso do atendimento do widget (ehTimeSuporte no

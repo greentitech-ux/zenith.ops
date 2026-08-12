@@ -22,7 +22,11 @@ const COLLECTION = db.collection('solicitacoes');
 // fechamento e lançado com diferença (declarado x faturado) maior que
 // fechamentosLive.LIMITE_QUEBRA_CAIXA, pra alguem justificar/aprovar (ver
 // fechamentosLive.create())
-const TIPOS = ['compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota', 'quebra-caixa'];
+// 'desvio-estoque': mesmo espirito de 'quebra-caixa' (nao e criado
+// manualmente) - nasce sozinho quando uma contagem de estoque (ver
+// inventario.upsertContagem) apura falta acima de
+// inventario.LIMITE_DESVIO_ESTOQUE, pra alguem investigar/justificar
+const TIPOS = ['compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota', 'quebra-caixa', 'desvio-estoque'];
 // 'CONVERTIDO': o ticket saiu desse tipo/colecao e virou um Estorno (ver
 // converterParaEstorno) - o registro fica de historico, quem continua a
 // historia e o novo registro em refunds.js (convertidoParaId)
