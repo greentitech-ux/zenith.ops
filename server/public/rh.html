@@ -715,6 +715,7 @@ function cardAtivoHtml(f){
       ${f.status==='ativo' && f.tipoCadastro!=='extra' ? `<button type="button" class="link-btn" onclick="abrirAdvertencia('${f.id}')">📋 solicitar advertência</button>` : ''}
       ${IS_MASTER && f.status==='ativo' && f.tipoCadastro!=='extra' ? `<button type="button" class="link-btn" onclick="abrirAjusteExperiencia('${f.id}')">🗓️ ajustar experiência</button>` : ''}
       ${IS_MASTER && f.status==='ativo' && f.tipoCadastro==='extra' ? `<button type="button" class="link-btn" onclick="converterEfetivado('${f.id}','${escapeHtml(f.nome).replace(/'/g,"\\'")}')">🔄 converter em efetivado</button>` : ''}
+      ${IS_MASTER ? `<button type="button" class="link-btn" style="color:var(--bad);" onclick="excluirFuncionario('${f.id}','${escapeHtml(f.nome).replace(/'/g,"\\'")}')">🗑️ excluir</button>` : ''}
     </div>
   </div>`;
 }
@@ -1309,6 +1310,21 @@ async function gerarNovoLinkColaborador(id){
     if(!resp.ok) throw new Error(data.error||'Erro ao gerar link.');
     await carregar();
     copiarLinkColaborador(id);
+  }catch(err){
+    alert(err.message);
+  }
+}
+
+// exclusao definitiva do cadastro - so Master (rota ja e requireMaster no
+// backend); apaga o registro inteiro, ao contrario de "desligar" (status
+// inativo), que preserva o historico. Uso: cadastro duplicado/errado
+async function excluirFuncionario(id, nome){
+  if(!confirm(`Excluir DEFINITIVAMENTE o cadastro de ${nome}? Essa ação não pode ser desfeita - se for só um desligamento, use "editar" > status inativo em vez disso.`)) return;
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${id}`, { method:'DELETE' });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error||'Erro ao excluir.');
+    await carregar();
   }catch(err){
     alert(err.message);
   }
