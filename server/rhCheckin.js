@@ -69,14 +69,15 @@ async function getOne(id) {
   return doc.exists ? doc.data() : null;
 }
 
-// quem pode fazer check-in por aqui: extra "ativo" ou candidato ainda em
-// teste - efetivado (tipoCadastro 'efetivado', ou candidato que ja foi
-// aprovado e virou 'ativo') nao usa esse quiosque, ja bate ponto de verdade
+// quem pode fazer check-in por aqui: extra "ativo", efetivado "ativo" (via
+// link de auto-atendimento, ver rh-colaborador.html) ou candidato ainda em
+// teste. So candidato tem status proprio ('candidato'); extra e efetivado
+// caem no mesmo criterio (status 'ativo'), diferenciados so pelo limite
+// semanal de 3x que continua exclusivo do extra (ver registrarEntrada)
 function elegivelParaCheckin(funcionario) {
   if (!funcionario) return false;
-  if (funcionario.tipoCadastro === 'extra') return funcionario.status === 'ativo';
   if (funcionario.tipoCadastro === 'candidato') return funcionario.status === 'candidato';
-  return false;
+  return funcionario.status === 'ativo';
 }
 
 // registra a ENTRADA - so deixa 1 check-in aberto por vez por pessoa (se ja

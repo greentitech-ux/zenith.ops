@@ -23,6 +23,7 @@
 //   D-1 tambem avisa o gerente da unidade, nao so RH/Master.
 // - Ficha de Funcionarios Ativos + Aniversariante do Dia (calculado sobre a
 //   mesma ficha, sem colecao propria).
+const crypto = require('crypto');
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
 
@@ -69,6 +70,31 @@ function iniciarExperiencia(inicioIso) {
   return { etapa: '30', inicioEtapa: inicioIso, prazoEtapaAte: calcularPrazoExperiencia(inicioIso, '30'), alertasEnviados: [] };
 }
 
+// coloca a experiencia formal na etapa CERTA pra quando a admissao ja nao e
+// hoje (contratacao direta de alguem que ja esta trabalhando ha alguns dias,
+// ou backfill) - sem isso, todo mundo sempre entrava na etapa 30 com prazo
+// admissao+30, que podia nascer ja vencido se a admissao fosse antiga:
+// - menos de 30 dias corridos desde a admissao: etapa 30 normal, prazo
+//   admissao+30 (continua a contagem de onde ela esta, nao reinicia)
+// - de 30 a 89 dias: ja passou da 1a etapa - entra direto na etapa 60, com
+//   inicio em admissao+30 e prazo em admissao+90 (30 + 60 = janela total da
+//   experiencia formal), como se tivesse sido renovada no prazo certo
+// - 90 dias ou mais: a janela toda (90 dias) ja passou antes do cadastro -
+//   nao da pra cobrar um prazo que ja passou, entao fica sem experiencia
+//   automatica (usar definirExperiencia se precisar registrar manualmente)
+// semExperiencia (checkbox do cadastro) sempre vence: contratacao direta sem
+// passar pelo periodo de experiencia
+function calcularExperienciaInicial(dataAdmissaoIso, semExperiencia) {
+  if (semExperiencia) return null;
+  const dias = diasDesde(dataAdmissaoIso);
+  if (dias < 30) return iniciarExperiencia(dataAdmissaoIso);
+  if (dias < 90) {
+    const inicioEtapa60 = calcularPrazoExperiencia(dataAdmissaoIso, '30');
+    return { etapa: '60', inicioEtapa: inicioEtapa60, prazoEtapaAte: calcularPrazoExperiencia(inicioEtapa60, '60'), alertasEnviados: [] };
+  }
+  return null;
+}
+
 // inverso de calcularPrazoExperiencia - a partir do PRAZO (termino), calcula
 // o inicio da etapa. Usado no ajuste manual (definirExperiencia): quem esta
 // corrigindo ja sabe o termino de cor (vem do relatorio da folha de
@@ -87,7 +113,7 @@ function calcularInicioAPartirDoPrazo(prazoIso, etapa) {
 const TIPOS_CADASTRO = ['extra', 'candidato', 'efetivado'];
 
 async function criar({
-  unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro,
+  unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro, semExperiencia,
   curriculo, cadastradoPorId, cadastradoPorEmail,
 }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
@@ -100,6 +126,7 @@ async function criar({
   // de fora da Ficha de Ativos, so aparece em Acompanhamento de Teste
   const emTeste = tipo === 'candidato';
   const status = tipo === 'candidato' ? 'candidato' : 'ativo';
+  const semExperienciaOk = !!semExperiencia;
 
   const ref = COLLECTION.doc();
   const agora = new Date().toISOString();
@@ -122,11 +149,21 @@ async function criar({
     emAtestado: false,
     atestadoAtual: null,
     atestados: [],
-    // efetivado direto ja entra na 1a etapa da experiencia formal (30 dias);
-    // candidato so entra nisso quando efetivado no fim do teste de 5 dias
-    // (ver registrarDecisaoTeste) - extra nunca entra, nao tem esse vinculo
-    experiencia: tipo === 'efetivado' ? iniciarExperiencia(dataAdmissaoOk) : null,
+    // efetivado direto ja entra na experiencia formal, na etapa certa pra
+    // idade da admissao (calcularExperienciaInicial); candidato so entra
+    // nisso quando efetivado no fim do teste de 5 dias (ver
+    // registrarDecisaoTeste) - extra nunca entra, nao tem esse vinculo.
+    // semExperiencia (checkbox do cadastro) pula tudo isso - contratacao
+    // direta sem periodo de experiencia
+    semExperiencia: semExperienciaOk,
+    experiencia: tipo === 'efetivado' ? calcularExperienciaInicial(dataAdmissaoOk, semExperienciaOk) : null,
     historicoExperiencia: [],
+    // token permanente do link de auto-atendimento (rh-colaborador.html) -
+    // a pessoa preenche os proprios dados e bate ponto sem precisar de login
+    // no Zenith (ver buscarPorToken/atualizarPorToken); nao expira sozinho,
+    // so quem tem acesso a unidade pode regenerar (ver regenerarLink) se
+    // o link vazar
+    linkToken: crypto.randomBytes(24).toString('hex'),
     cadastradoPorId: cadastradoPorId || null,
     cadastradoPorEmail: cadastradoPorEmail || null,
     criadoEm: agora,
@@ -156,6 +193,16 @@ async function listByUnidades(unidades) {
 async function getOne(id) {
   const doc = await COLLECTION.doc(id).get();
   return doc.exists ? doc.data() : null;
+}
+
+// resolve o funcionario a partir do token do link de auto-atendimento
+// (rh-colaborador.html) - filtra em memoria sobre o cache compartilhado,
+// mesmo padrao das outras buscas desse modulo; nao expoe MOTIVO nenhum de
+// falha (token errado e funcionario inexistente devolvem a mesma coisa: null)
+async function buscarPorToken(token) {
+  if (!token) return null;
+  const todos = await listAll();
+  return todos.find((f) => f.linkToken === token) || null;
 }
 
 async function atualizar(id, patch) {
@@ -190,21 +237,74 @@ async function atualizar(id, patch) {
 
   // conversao de "extra" pra "efetivado" - so faz sentido nesse sentido (loja
   // as vezes esquece de trocar a aba no cadastro e a pessoa entra como avulso
-  // quando na verdade e um contratado direto); ao converter, entra na 1a
-  // etapa da experiencia formal (30 dias) a partir de agora, do mesmo jeito
-  // que um cadastro "efetivado" direto entraria
+  // quando na verdade e um contratado direto); ao converter, entra na
+  // experiencia formal na etapa certa pra idade da admissao (mesma regra de
+  // calcularExperienciaInicial usada no cadastro direto)
   if (patch.tipoCadastro !== undefined && patch.tipoCadastro !== snap.data().tipoCadastro) {
     if (snap.data().tipoCadastro !== 'extra' || patch.tipoCadastro !== 'efetivado') {
       throw new Error('Só é possível converter um cadastro "extra" em "efetivado".');
     }
     merge.tipoCadastro = 'efetivado';
     const inicio = merge.dataAdmissao || snap.data().dataAdmissao || new Date().toISOString().slice(0, 10);
-    merge.experiencia = iniciarExperiencia(inicio);
+    const semExp = patch.semExperiencia !== undefined ? !!patch.semExperiencia : !!snap.data().semExperiencia;
+    merge.semExperiencia = semExp;
+    merge.experiencia = calcularExperienciaInicial(inicio, semExp);
+  }
+
+  // ajuste isolado do checkbox "sem período de experiência" (sem trocar
+  // tipoCadastro) - o gerente marcou errado no cadastro e o Master corrige
+  // depois; recalcula a experiencia na hora, pra nao deixar uma etapa antiga
+  // pendurada quando a pessoa vira "sem experiencia" (ou vice-versa)
+  if (patch.semExperiencia !== undefined && merge.tipoCadastro === undefined) {
+    const semExp = !!patch.semExperiencia;
+    merge.semExperiencia = semExp;
+    const atual = snap.data();
+    if (atual.tipoCadastro === 'efetivado' && atual.status === 'ativo' && patch.status !== 'inativo') {
+      const admissaoFinal = merge.dataAdmissao || atual.dataAdmissao;
+      merge.experiencia = calcularExperienciaInicial(admissaoFinal, semExp);
+    }
   }
 
   await ref.update(merge);
   rhCache.invalidar();
   return getOne(id);
+}
+
+// gera um token novo pro link de auto-atendimento, invalidando o antigo -
+// usado se o link vazar (a pessoa perdeu o celular, mandou pro grupo errado
+// etc): quem tinha o link velho perde o acesso, o gerente manda o novo
+async function regenerarLink(id) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  const linkToken = crypto.randomBytes(24).toString('hex');
+  await ref.update({ linkToken, atualizadoEm: new Date().toISOString() });
+  rhCache.invalidar();
+  return getOne(id);
+}
+
+// versao "self-service" de atualizar() pro link publico: so deixa a propria
+// pessoa mexer nos dados dela mesma (nome/contato/cargo/nascimento/
+// curriculo) - nunca unidade, status, tipoCadastro, experiencia ou qualquer
+// outro campo interno/administrativo. Bloqueia quem ja foi desligado (nao
+// faz sentido continuar editando cadastro depois de sair)
+async function atualizarPorToken(token, { nome, contato, cargoFuncao, dataNascimento, curriculo }) {
+  const atual = await buscarPorToken(token);
+  if (!atual) throw new Error('Link inválido.');
+  if (atual.status === 'inativo') throw new Error('Esse cadastro está inativo - fale com seu gerente.');
+  const merge = { atualizadoEm: new Date().toISOString() };
+  if (nome !== undefined) {
+    const nomeOk = limpar(nome, 150);
+    if (!nomeOk) throw new Error('Informe o nome completo.');
+    merge.nome = nomeOk;
+  }
+  if (contato !== undefined) merge.contato = limpar(contato, 40);
+  if (cargoFuncao !== undefined) merge.cargoFuncao = limpar(cargoFuncao, 60);
+  if (dataNascimento !== undefined) merge.dataNascimento = validarDataOuNull(dataNascimento, 'Data de nascimento');
+  if (curriculo !== undefined) merge.curriculo = curriculo;
+  await COLLECTION.doc(atual.id).update(merge);
+  rhCache.invalidar();
+  return getOne(atual.id);
 }
 
 // registra a decisao do periodo de teste (efetivar/desligar) - tira
@@ -490,6 +590,7 @@ function aniversariantesHoje(lista, dataRef) {
 module.exports = {
   DIAS_TESTE_ALERTA, TIPOS_CADASTRO, ALERTA_EXPERIENCIA_DIAS,
   criar, listAll, listByUnidades, getOne, atualizar, remover,
+  buscarPorToken, regenerarLink, atualizarPorToken,
   registrarDecisaoTeste, verificarTestesVencidos, marcarAlertaTesteEnviado,
   registrarAtestado, registrarRetornoAtestado,
   registrarDecisaoExperiencia, verificarAlertasExperiencia, marcarAlertaExperienciaEnviado, definirExperiencia,
