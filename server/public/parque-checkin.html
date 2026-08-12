@@ -412,10 +412,19 @@
         <div><label>Nome do botão</label><input type="text" id="tp-cortesia-label" maxlength="30" required></div>
         <div><label>Minutos</label><input type="number" min="1" step="1" id="tp-cortesia-minutos" required></div>
       </div>
+      <label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);margin-top:6px;">
+        <input type="checkbox" id="tp-cortesia-oculto" style="width:auto;"> Ocultar esse botão (some da tela de check-in, sem apagar a configuração)
+      </label>
 
-      <label style="margin-top:16px;">Desconto de aniversariante (%)</label>
-      <input type="number" min="0" max="100" step="1" id="tp-niver-desconto" required>
-      <div class="sub" style="margin-top:-2px;">Aplicado automaticamente na entrada da criança que faz aniversário na semana (não vale pra PCD).</div>
+      <label style="margin-top:16px;">Aniversariante — desconto automático</label>
+      <div class="sub" style="margin-top:-2px;">Preencha só UM dos dois campos abaixo: "valor cheio" cobra esse valor fixo da criança aniversariante; "desconto" aplica o percentual em cima do preço normal. Vale só pra 60min por padrão (marque a caixa pra também valer em 30min). Não se aplica a PCD.</div>
+      <div class="grid2" style="margin-top:6px;">
+        <div><label>Valor cheio (R$)</label><input type="number" min="0" step="0.01" id="tp-niver-valor-cheio" placeholder="ex: 25,00"></div>
+        <div><label>Desconto (%)</label><input type="number" min="0" max="100" step="1" id="tp-niver-desconto" placeholder="ex: 50"></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);margin-top:6px;">
+        <input type="checkbox" id="tp-niver-30" style="width:auto;"> Também aplicar em 30min (por padrão só vale em 60min)
+      </label>
 
       <div class="msg hidden" id="msg-tabela-parque"></div>
       <button class="btn-primary" type="submit">Salvar tabela</button>
@@ -495,14 +504,18 @@ const PARQUE_UNIDADES_NOMES = { 'Saltiverso Patteo': 'Saltiverso Patteo' };
 // carregada em carregarTabelaPrecos(). Os valores abaixo sao so o fallback
 // antes da 1a carga (mesmo seed usado em parque.js)
 let TABELA_PRECOS = {
-  tempos: [{minutos:30,label:'30min',preco:40},{minutos:60,label:'60min',preco:50},{minutos:90,label:'90min',preco:90},{minutos:120,label:'120min',preco:100}],
-  pcd: [{chave:'pcd30',label:'PCD30',minutos:30,preco:32},{chave:'pcd60',label:'PCD60',minutos:60,preco:32}],
-  pcdCortesiaLabel: '5%CP', pcdCortesiaMinutos: 60,
-  niverDesconto: 50,
+  tempos: [{minutos:30,label:'30min',preco:40,visivel:true},{minutos:60,label:'60min',preco:50,visivel:true},{minutos:90,label:'90min',preco:90,visivel:true},{minutos:120,label:'120min',preco:100,visivel:true}],
+  pcd: [{chave:'pcd30',label:'PCD30',minutos:30,preco:32,visivel:true},{chave:'pcd60',label:'PCD60',minutos:60,preco:32,visivel:true}],
+  pcdCortesiaLabel: '5%CP', pcdCortesiaMinutos: 60, pcdCortesiaVisivel: true,
+  niverDesconto: 50, niverValorCheio: 0, niverAplicar30: false,
 };
-// lista "achatada" de minutos validos - derivada de TABELA_PRECOS.tempos,
-// recalculada em carregarTabelaPrecos()/renderTempos()
-let TEMPOS_VALIDOS = TABELA_PRECOS.tempos.map(t=>t.minutos);
+// listas de minutos derivadas de TABELA_PRECOS.tempos, recalculadas em
+// carregarTabelaPrecos(). TEMPOS_VALIDOS: so os visiveis (compra nova - venda
+// no check-in e "adicionar tempo"). TEMPOS_TODOS: visiveis + ocultos (usado
+// so no select de Correção, que edita entrada ja existente e pode ter usado
+// um tempo que foi ocultado depois)
+let TEMPOS_VALIDOS = TABELA_PRECOS.tempos.filter(t=>t.visivel!==false).map(t=>t.minutos);
+let TEMPOS_TODOS = TABELA_PRECOS.tempos.map(t=>t.minutos);
 const PRECO_MEIA = 25;
 // niver: desconto AUTOMATICO (percentual, editavel na tabela) na entrada da
 // crianca aniversariante quando a data de utilizacao cai ate
@@ -586,18 +599,26 @@ function valorUnitarioAtual(){
   return valorPorTempo(TEMPO_SELECIONADO);
 }
 
+// so mostra botao VISIVEL (Master pode ocultar sem apagar a config, ver
+// "Editar tabela de preços") - se o tempo/categoria selecionado sumiu
+// (foi ocultado agora), cai pro primeiro tempo visivel disponivel
 function renderTempos(){
-  const normais = TABELA_PRECOS.tempos.map(t=>
+  const temposVisiveis = TABELA_PRECOS.tempos.filter(t=>t.visivel!==false);
+  if(!CATEGORIA_SELECIONADA && !temposVisiveis.some(t=>t.minutos===TEMPO_SELECIONADO) && temposVisiveis.length){
+    TEMPO_SELECIONADO = temposVisiveis[0].minutos;
+  }
+  const normais = temposVisiveis.map(t=>
     `<button type="button" class="toggle-btn ${!CATEGORIA_SELECIONADA && t.minutos===TEMPO_SELECIONADO?'ativo':''}" data-tempo="${t.minutos}" onclick="selecionarTempo(${t.minutos})">${escapeHtml(t.label)} · R$${t.preco}</button>`
   ).join('');
   const pcd = [
-    { cat:'pcd30', label:`${TABELA_PRECOS.pcd.find(p=>p.chave==='pcd30').label} · R$${precoPcd('pcd30')}` },
-    { cat:'pcd60', label:`${TABELA_PRECOS.pcd.find(p=>p.chave==='pcd60').label} · R$${precoPcd('pcd60')}` },
-    { cat:'pcd-cortesia', label: TABELA_PRECOS.pcdCortesiaLabel },
-  ].map(p=>
-    `<button type="button" class="toggle-btn ${CATEGORIA_SELECIONADA===p.cat?'ativo':''}" data-categoria="${p.cat}" onclick="selecionarCategoriaPcd('${p.cat}')">${escapeHtml(p.label)}</button>`
+    { cat:'pcd30', item: TABELA_PRECOS.pcd.find(p=>p.chave==='pcd30') },
+    { cat:'pcd60', item: TABELA_PRECOS.pcd.find(p=>p.chave==='pcd60') },
+  ].filter(p=>p.item && p.item.visivel!==false).map(p=>
+    `<button type="button" class="toggle-btn ${CATEGORIA_SELECIONADA===p.cat?'ativo':''}" data-categoria="${p.cat}" onclick="selecionarCategoriaPcd('${p.cat}')">${escapeHtml(p.item.label)} · R$${p.item.preco}</button>`
   ).join('');
-  document.getElementById('tempos').innerHTML = normais + pcd;
+  const cortesia = TABELA_PRECOS.pcdCortesiaVisivel===false ? '' :
+    `<button type="button" class="toggle-btn ${CATEGORIA_SELECIONADA==='pcd-cortesia'?'ativo':''}" data-categoria="pcd-cortesia" onclick="selecionarCategoriaPcd('pcd-cortesia')">${escapeHtml(TABELA_PRECOS.pcdCortesiaLabel)}</button>`;
+  document.getElementById('tempos').innerHTML = normais + pcd + cortesia;
 }
 
 // busca a tabela editavel (tempos/PCD/desconto de aniversariante) no
@@ -608,7 +629,8 @@ async function carregarTabelaPrecos(){
     const data = await fetch('/api/parque/tabela').then(r=>r.json());
     if(data && Array.isArray(data.tempos) && data.tempos.length) TABELA_PRECOS = data;
   }catch(e){}
-  TEMPOS_VALIDOS = TABELA_PRECOS.tempos.map(t=>t.minutos);
+  TEMPOS_VALIDOS = TABELA_PRECOS.tempos.filter(t=>t.visivel!==false).map(t=>t.minutos);
+  TEMPOS_TODOS = TABELA_PRECOS.tempos.map(t=>t.minutos);
 }
 
 // ---------- editar tabela de preços (só Master) - tempos contratados, PCD e
@@ -616,18 +638,21 @@ async function carregarTabelaPrecos(){
 let TABELA_TEMPOS_EDIT = []; // copia de trabalho enquanto o modal esta aberto
 function linhaTempoHtml(t, idx){
   const podeRemover = TABELA_TEMPOS_EDIT.length > 1;
-  return `<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;flex-wrap:wrap;">
+  return `<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:6px;flex-wrap:wrap;">
     <div style="flex:2;min-width:110px;"><label style="margin:0 0 4px;">Nome</label><input type="text" class="tp-tempo-label" maxlength="20" value="${escapeHtml(t.label)}" required></div>
     <div style="flex:1;min-width:80px;"><label style="margin:0 0 4px;">Minutos</label><input type="number" min="1" step="1" class="tp-tempo-minutos" value="${t.minutos}" required></div>
     <div style="flex:1;min-width:90px;"><label style="margin:0 0 4px;">Preço (R$)</label><input type="number" min="0.01" step="0.01" class="tp-tempo-preco" value="${t.preco}" required></div>
     ${podeRemover ? `<button type="button" class="link-btn" style="color:var(--bad);margin-bottom:12px;" onclick="removerTempo(${idx})">✕</button>` : ''}
-  </div>`;
+  </div>
+  <label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--muted);font-size:12.5px;margin:0 0 12px;">
+    <input type="checkbox" class="tp-tempo-oculto" style="width:auto;" ${t.visivel===false?'checked':''}> Ocultar esse botão
+  </label>`;
 }
 function renderTabelaTemposForm(){
   document.getElementById('tp-tempos').innerHTML = TABELA_TEMPOS_EDIT.map((t,idx)=>linhaTempoHtml(t,idx)).join('');
 }
 function adicionarNovoTempo(){
-  TABELA_TEMPOS_EDIT.push({ minutos: 0, label: '', preco: 0 });
+  TABELA_TEMPOS_EDIT.push({ minutos: 0, label: '', preco: 0, visivel: true });
   renderTabelaTemposForm();
 }
 function removerTempo(idx){
@@ -635,11 +660,14 @@ function removerTempo(idx){
   renderTabelaTemposForm();
 }
 function linhaPcdHtml(p){
-  return `<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;flex-wrap:wrap;">
+  return `<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:6px;flex-wrap:wrap;">
     <div style="flex:2;min-width:110px;"><label style="margin:0 0 4px;">Nome</label><input type="text" class="tp-pcd-label" data-chave="${p.chave}" maxlength="20" value="${escapeHtml(p.label)}" required></div>
     <div style="flex:1;min-width:80px;"><label style="margin:0 0 4px;">Minutos</label><input type="number" min="1" step="1" class="tp-pcd-minutos" data-chave="${p.chave}" value="${p.minutos}" required></div>
     <div style="flex:1;min-width:90px;"><label style="margin:0 0 4px;">Preço (R$)</label><input type="number" min="0.01" step="0.01" class="tp-pcd-preco" data-chave="${p.chave}" value="${p.preco}" required></div>
-  </div>`;
+  </div>
+  <label style="display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--muted);font-size:12.5px;margin:0 0 12px;">
+    <input type="checkbox" class="tp-pcd-oculto" data-chave="${p.chave}" style="width:auto;" ${p.visivel===false?'checked':''}> Ocultar esse botão
+  </label>`;
 }
 
 async function abrirEditarTabelaParque(){
@@ -649,7 +677,10 @@ async function abrirEditarTabelaParque(){
   document.getElementById('tp-pcd').innerHTML = TABELA_PRECOS.pcd.map(linhaPcdHtml).join('');
   document.getElementById('tp-cortesia-label').value = TABELA_PRECOS.pcdCortesiaLabel;
   document.getElementById('tp-cortesia-minutos').value = TABELA_PRECOS.pcdCortesiaMinutos;
-  document.getElementById('tp-niver-desconto').value = TABELA_PRECOS.niverDesconto;
+  document.getElementById('tp-cortesia-oculto').checked = TABELA_PRECOS.pcdCortesiaVisivel === false;
+  document.getElementById('tp-niver-valor-cheio').value = TABELA_PRECOS.niverValorCheio > 0 ? TABELA_PRECOS.niverValorCheio : '';
+  document.getElementById('tp-niver-desconto').value = TABELA_PRECOS.niverDesconto > 0 ? TABELA_PRECOS.niverDesconto : '';
+  document.getElementById('tp-niver-30').checked = TABELA_PRECOS.niverAplicar30 === true;
   document.getElementById('msg-tabela-parque').classList.add('hidden');
   document.getElementById('overlay-tabela-parque').classList.remove('hidden');
 }
@@ -664,18 +695,23 @@ document.getElementById('form-tabela-parque').addEventListener('submit', async (
     const labels = [...document.querySelectorAll('#tp-tempos .tp-tempo-label')];
     const minutosEls = [...document.querySelectorAll('#tp-tempos .tp-tempo-minutos')];
     const precoEls = [...document.querySelectorAll('#tp-tempos .tp-tempo-preco')];
-    const tempos = labels.map((el,i)=>({ label: el.value, minutos: Number(minutosEls[i].value), preco: Number(precoEls[i].value) }));
+    const ocultoEls = [...document.querySelectorAll('#tp-tempos .tp-tempo-oculto')];
+    const tempos = labels.map((el,i)=>({ label: el.value, minutos: Number(minutosEls[i].value), preco: Number(precoEls[i].value), visivel: !ocultoEls[i].checked }));
     const pcd = ['pcd30','pcd60'].map(chave=>({
       chave,
       label: document.querySelector(`.tp-pcd-label[data-chave="${chave}"]`).value,
       minutos: Number(document.querySelector(`.tp-pcd-minutos[data-chave="${chave}"]`).value),
       preco: Number(document.querySelector(`.tp-pcd-preco[data-chave="${chave}"]`).value),
+      visivel: !document.querySelector(`.tp-pcd-oculto[data-chave="${chave}"]`).checked,
     }));
     const body = {
       tempos, pcd,
       pcdCortesiaLabel: document.getElementById('tp-cortesia-label').value,
       pcdCortesiaMinutos: Number(document.getElementById('tp-cortesia-minutos').value),
-      niverDesconto: Number(document.getElementById('tp-niver-desconto').value),
+      pcdCortesiaVisivel: !document.getElementById('tp-cortesia-oculto').checked,
+      niverValorCheio: Number(document.getElementById('tp-niver-valor-cheio').value) || 0,
+      niverDesconto: Number(document.getElementById('tp-niver-desconto').value) || 0,
+      niverAplicar30: document.getElementById('tp-niver-30').checked,
     };
     const resp = await fetch('/api/parque/tabela', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const data = await resp.json();
@@ -739,11 +775,26 @@ function contarMeias(){
   return [...document.querySelectorAll('#lista-criancas .crianca-linha')]
     .filter(l=>l.querySelector('.crianca-nome').value.trim() && l.querySelector('.crianca-meia').checked).length;
 }
+// niver so vale pro tempo contratado de 60min por padrao; 30min so entra se
+// TABELA_PRECOS.niverAplicar30 estiver marcado (Master configura na tabela).
+// 90/120min nunca tem niver - mesma regra do servidor (ver valorEntradaCriancas
+// em parque.js)
+function niverElegivelTempo(){
+  return TEMPO_SELECIONADO===60 || (TEMPO_SELECIONADO===30 && TABELA_PRECOS.niverAplicar30===true);
+}
 function contarNiver(){
   if(CATEGORIA_SELECIONADA) return 0; // PCD30/PCD60/5%CP nunca tem niver
+  if(!niverElegivelTempo()) return 0;
   const dataUso = document.getElementById('f-data').value;
   return [...document.querySelectorAll('#lista-criancas .crianca-linha')]
     .filter(l=>l.querySelector('.crianca-nome').value.trim() && ehNiverAuto(l.querySelector('.crianca-nasc').value, dataUso)).length;
+}
+// valor cobrado por crianca aniversariante elegivel: OU valor cheio fixo
+// (TABELA_PRECOS.niverValorCheio, quando > 0) OU desconto percentual sobre o
+// preco normal - nunca os dois (ver validacao em salvarConfigPrecos)
+function valorNiverPorCrianca(unit){
+  if(TABELA_PRECOS.niverValorCheio > 0) return TABELA_PRECOS.niverValorCheio;
+  return unit * (1 - (TABELA_PRECOS.niverDesconto||0)/100);
 }
 // total da entrada (sem contar pagamentos ainda) - mesma conta usada pra
 // preencher o resumo E pra travar as formas de pagamento (ver abaixo)
@@ -753,7 +804,7 @@ function calcularTotalAtual(){
   const n = [...document.querySelectorAll('#lista-criancas .crianca-nome')].filter(i=>i.value.trim()).length;
   const unit = valorUnitarioAtual();
   const niver = contarNiver();
-  const valorEntradas = unit * n - unit * (TABELA_PRECOS.niverDesconto/100) * niver;
+  const valorEntradas = unit * (n - niver) + valorNiverPorCrianca(unit) * niver;
   const meias = contarMeias() + Math.max(0, num(document.getElementById('f-meias-extras').value));
   return valorEntradas + PRECO_MEIA * meias;
 }
@@ -765,10 +816,11 @@ function atualizarPreviewValor(){
   const meias = contarMeias() + Math.max(0, num(document.getElementById('f-meias-extras').value));
   const valorMeias = gratis ? 0 : PRECO_MEIA * meias;
   const total = calcularTotalAtual();
+  const niverLabel = TABELA_PRECOS.niverValorCheio > 0 ? `R$${TABELA_PRECOS.niverValorCheio}` : `${TABELA_PRECOS.niverDesconto}% off`;
   document.getElementById('preview-meias').textContent = `${meias} par(es) · ${fmtReal(valorMeias)}`;
   document.getElementById('valor-detalhe').textContent = gratis
     ? `cortesia · ${n} criança(s)`
-    : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min)${niver?` · 🎂 Niver ${TABELA_PRECOS.niverDesconto}% (${niver})`:''} + meias`;
+    : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min)${niver?` · 🎂 Niver ${niverLabel} (${niver})`:''} + meias`;
   document.getElementById('preview-valor').textContent = fmtReal(total);
   if(!gratis){
     reconciliarPagamentos(total);
@@ -1201,7 +1253,13 @@ function abrirCorrecao(id){
   document.getElementById('cor-contato').value = c.responsavel?.contato || '';
   document.getElementById('cor-data').value = c.dataUtilizacao || '';
   const sel = document.getElementById('cor-tempo');
-  sel.innerHTML = TEMPOS_VALIDOS.map(t=>`<option value="${t}">${t} min</option>`).join('');
+  // correção edita uma entrada JA EXISTENTE - usa TEMPOS_TODOS (inclui
+  // ocultos) pra nao perder o tempo atual do check-in caso tenha sido
+  // ocultado depois da venda (ver TEMPOS_VALIDOS vs TEMPOS_TODOS)
+  sel.innerHTML = TEMPOS_TODOS.map(t=>{
+    const oculto = !TABELA_PRECOS.tempos.some(e=>e.minutos===t && e.visivel!==false);
+    return `<option value="${t}">${t} min${oculto?' (oculto)':''}</option>`;
+  }).join('');
   sel.value = String(c.tempoMinutos || 60);
   preencherSelectSlots('cor-previsto', (c.horarioPrevisto||'').slice(0,5) || proximoSlot30());
   document.getElementById('cor-metodo').value = c.metodoPagamento || '';
