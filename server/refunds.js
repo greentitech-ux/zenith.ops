@@ -30,6 +30,7 @@ async function create({
   pedidoId, unidade, unidadeNome, observacao, origem,
   motivoEstorno, motivoOutro, valorVenda, formaPagamento, bandeira, ultimos4,
   dataVenda, horaVenda, valorEstornar, nomeCliente, telefoneCliente, anexos,
+  pixChave, pixNomeTitular, pixBanco, observacaoCliente,
   requestedById, requestedByEmail, direcionadoParaId, direcionadoParaEmail,
   numeroTicket, convertidoDeTipo, convertidoDeId,
 }) {
@@ -87,6 +88,15 @@ async function create({
     valorEstornar: valorEstornar != null && valorEstornar !== '' ? Number(valorEstornar) || 0 : null,
     nomeCliente: nomeCliente ? String(nomeCliente).trim().slice(0, 120) : null,
     telefoneCliente: telefoneCliente ? String(telefoneCliente).trim().slice(0, 30) : null,
+    // dados pra devolver o dinheiro via Pix (alternativa ao estorno na propria
+    // maquininha) - preenchidos pelo cliente no formulario publico, opcional
+    pixChave: pixChave ? String(pixChave).trim().slice(0, 140) : null,
+    pixNomeTitular: pixNomeTitular ? String(pixNomeTitular).trim().slice(0, 120) : null,
+    pixBanco: pixBanco ? String(pixBanco).trim().slice(0, 80) : null,
+    // observacao livre do cliente (distinta de `observacao`, que pra origem
+    // 'cliente' e reconstruida em centralCards.js como o resumo formatado
+    // pro time - aqui fica preservado so o texto que o cliente escreveu)
+    observacaoCliente: observacaoCliente ? String(observacaoCliente).trim().slice(0, 1000) : null,
     anexos: Array.isArray(anexos) ? anexos : [],
     status: 'PENDENTE',
     requestedById: requestedById || null,
@@ -152,7 +162,7 @@ async function updateStatus(id, status, { motivoDecisao, decidedByEmail }) {
 // edicao direta pelo Master - poder de corrigir qualquer campo do pedido de
 // estorno (dado errado digitado pelo cliente, unidade errada, etc.),
 // independente do status. So mexe no que vier em `campos`.
-const CAMPOS_TEXTO = ['pedidoId', 'unidade', 'unidadeNome', 'observacao', 'motivoEstorno', 'motivoOutro', 'formaPagamento', 'bandeira', 'ultimos4', 'dataVenda', 'horaVenda', 'nomeCliente', 'telefoneCliente'];
+const CAMPOS_TEXTO = ['pedidoId', 'unidade', 'unidadeNome', 'observacao', 'motivoEstorno', 'motivoOutro', 'formaPagamento', 'bandeira', 'ultimos4', 'dataVenda', 'horaVenda', 'nomeCliente', 'telefoneCliente', 'pixChave', 'pixNomeTitular', 'pixBanco', 'observacaoCliente'];
 const CAMPOS_NUMERICOS = ['valorVenda', 'valorEstornar'];
 async function update(id, campos) {
   const ref = refundsRef.doc(id);

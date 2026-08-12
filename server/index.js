@@ -308,6 +308,7 @@ app.post('/api/refund-requests/publico', upload.array('anexos', 5), async (req, 
     const {
       unidade, motivoEstorno, motivoOutro, valorVenda, formaPagamento, bandeira, ultimos4,
       dataVenda, horaVenda, valorEstornar, nomeCliente, telefoneCliente,
+      pixChave, pixNomeTitular, pixBanco, observacao: observacaoCliente,
     } = payload;
 
     const mapa = await construirUnidadesMapa();
@@ -322,6 +323,7 @@ app.post('/api/refund-requests/publico', upload.array('anexos', 5), async (req, 
     const registro = await refunds.create({
       origem: 'cliente', unidade, unidadeNome, motivoEstorno, motivoOutro, valorVenda, formaPagamento,
       bandeira, ultimos4, dataVenda, horaVenda, valorEstornar, nomeCliente, telefoneCliente, anexos,
+      pixChave, pixNomeTitular, pixBanco, observacaoCliente,
     });
     broadcast('refund-requested', registro, 'monitor');
     push.notifySolicitacao(`Ticket #${registro.numeroTicket} · Pedido de estorno (cliente)`, `${unidadeNome} · R$ ${(Number(valorEstornar) || 0).toFixed(2)}`, registro.id);

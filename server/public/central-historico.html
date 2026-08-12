@@ -1470,6 +1470,14 @@ function campoEdicaoHtml(c){
           <div><label>Nome do cliente</label><input type="text" id="ed-nomeCliente" value="${escapeHtml(c.nomeCliente||'')}"></div>
           <div><label>Telefone do cliente</label><input type="text" id="ed-telefoneCliente" value="${escapeHtml(c.telefoneCliente||'')}"></div>
         </div>
+        <label>Chave Pix (pra devolução)</label>
+        <input type="text" id="ed-pixChave" value="${escapeHtml(c.pixChave||'')}">
+        <div class="grid2">
+          <div><label>Nome do titular</label><input type="text" id="ed-pixNomeTitular" value="${escapeHtml(c.pixNomeTitular||'')}"></div>
+          <div><label>Banco</label><input type="text" id="ed-pixBanco" value="${escapeHtml(c.pixBanco||'')}"></div>
+        </div>
+        <label>Observação</label>
+        <textarea id="ed-observacaoCliente">${escapeHtml(c.observacaoCliente||'')}</textarea>
         ${botoesEdicaoHtml()}
       `;
     }
@@ -1573,6 +1581,10 @@ async function salvarEdicaoCard(){
         horaVenda: document.getElementById('ed-horaVenda').value,
         nomeCliente: document.getElementById('ed-nomeCliente').value,
         telefoneCliente: document.getElementById('ed-telefoneCliente').value,
+        pixChave: document.getElementById('ed-pixChave').value,
+        pixNomeTitular: document.getElementById('ed-pixNomeTitular').value,
+        pixBanco: document.getElementById('ed-pixBanco').value,
+        observacaoCliente: document.getElementById('ed-observacaoCliente').value,
       } : {
         pedidoId: document.getElementById('ed-pedidoId').value,
         observacao: document.getElementById('ed-observacao').value,
