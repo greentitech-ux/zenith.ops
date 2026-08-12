@@ -70,7 +70,7 @@
   /* kanban */
   .kanban-wrap{overflow-x:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch;}
   .kanban{display:flex;gap:12px;align-items:flex-start;min-width:max-content;}
-  .kcol{width:270px;flex:none;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;max-height:calc(100vh - 230px);min-height:160px;}
+  .kcol{width:270px;flex:none;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;max-height:min(calc(100vh - 230px), 520px);min-height:160px;}
   .kcol.drop-hover{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
   .kcol-head{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:2px 4px 10px;border-bottom:3px solid var(--col-cor,var(--line));margin-bottom:8px;flex:none;}
   .kcol-titulo{font-size:12.5px;font-weight:700;display:flex;align-items:center;gap:6px;}
@@ -402,9 +402,16 @@ function abrirDetalhePorId(id){
   if(!chat) return;
   if(!PAINEIS_ABERTOS.includes(id)) PAINEIS_ABERTOS.push(id);
   renderPaineis();
+  // rola so a FAIXA horizontal de paineis pra trazer o novo painel a vista -
+  // scrollIntoView() rola a pagina inteira (todos os ancestrais roláveis),
+  // o que empurrava o kanban pra fora da tela quando o painel nasce la
+  // embaixo, fora do viewport. Mexendo direto no scrollLeft da faixa isso
+  // nao acontece: so a faixa de conversas se move, o resto da pagina fica
+  // parado.
   requestAnimationFrame(()=>{
+    const wrap = document.getElementById('paineis-wrap');
     const el = document.querySelector(`.painel-conversa[data-painel-id="${CSS.escape(id)}"]`);
-    if(el) el.scrollIntoView({ behavior:'smooth', inline:'end', block:'nearest' });
+    if(wrap && el) wrap.scrollLeft = el.offsetLeft + el.offsetWidth - wrap.clientWidth;
   });
 }
 function fecharPainel(id){
