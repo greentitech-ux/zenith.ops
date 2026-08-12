@@ -23,6 +23,12 @@ const COLUNAS_ENTRADAS = ['NomeCliente', 'DataUtilizacao', 'TimeInicial', 'NomeU
 const ABAS_FESTAS = ['BDFestas', 'Vendas de Festa'];
 const COLUNAS_FESTAS = ['Codigo', 'DataDeUso', 'ValorTotal'];
 const UNIDADE_PADRAO = 'Saltiverso Patteo';
+// tempos "classicos" da planilha antiga (30/60/90/120) - fixo aqui e nao
+// importado de parque.js de proposito: a tabela de precos do parque agora e
+// editavel pelo Master (ver parque.js/getConfigPrecos), mas essa importacao
+// e sobre dados HISTORICOS da planilha, entao usa sempre os buckets
+// classicos como referencia, independente do que estiver configurado hoje
+const TEMPOS_CLASSICOS = [30, 60, 90, 120];
 
 function get(header, linha, nome) {
   const i = header.indexOf(nome);

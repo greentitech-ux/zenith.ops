@@ -18,21 +18,105 @@ const EDITS = db.collection('parqueEdicoes');
 // registrarCredito()/creditoPorCpf()/usarCredito() mais abaixo
 const CREDITOS = db.collection('parqueCreditos');
 
-// venda normal vai de 30 a 120 minutos - tempos maiores sairam da tabela;
-// quem quiser ficar mais usa o "adicionar tempo" durante a vigencia (ver
-// adicionarTempo abaixo). Registros antigos com 150-240 continuam validos,
-// so nao da mais pra vender/editar pra esses buckets
-const TEMPOS_VALIDOS = [30, 60, 90, 120];
-
-// tabela de precos por pulseira (por crianca): 30min = R$40, 60min = R$50 e
-// os demais tempos combinam esses dois blocos (90 = 50+40 = R$90,
-// 120 = 50+50 = R$100, 150 = R$140, 180 = R$150...). Minutos extras de
-// credito (checkout antecipado anterior) nao entram na conta - esse tempo
-// ja foi pago na visita original
+// venda normal vai de 30 a 120 minutos por padrao - tempos maiores sairam da
+// tabela; quem quiser ficar mais usa o "adicionar tempo" durante a vigencia
+// (ver adicionarTempo abaixo). Registros antigos com 150-240 continuam
+// validos, so nao da mais pra vender/editar pra esses buckets.
+//
+// A LISTA de tempos (quantos botoes, quais minutos, nome e preco de cada um)
+// e' editavel pelo Master em "Editar tabela de precos" (ver
+// getConfigPrecos/salvarConfigPrecos abaixo) - os valores fixos aqui embaixo
+// sao so o SEED do 1o boot (antes de existir configuracao salva) e o
+// FALLBACK usado por valorDoCheckin() pra recalcular visitas antigas que nao
+// tem `valor` gravado (tempoMinutos fora da tabela atual, ex: 150-240min) -
+// nesses dois casos nao faz sentido usar o preco de HOJE pra algo que foi
+// vendido antes da tabela existir
 const PRECO_MEIA_HORA = 40;
 const PRECO_HORA = 50;
-function valorPorTempo(tempoMinutos) {
+const TEMPOS_PADRAO = [
+  { minutos: 30, label: '30min', preco: 40 },
+  { minutos: 60, label: '60min', preco: 50 },
+  { minutos: 90, label: '90min', preco: 90 },
+  { minutos: 120, label: '120min', preco: 100 },
+];
+const PCD_PADRAO = [
+  { chave: 'pcd30', label: 'PCD30', minutos: 30, preco: 32 },
+  { chave: 'pcd60', label: 'PCD60', minutos: 60, preco: 32 },
+];
+const PCD_CORTESIA_LABEL_PADRAO = '5%CP';
+const PCD_CORTESIA_MINUTOS_PADRAO = 60;
+// desconto de aniversariante em PERCENTUAL (0-100), nao em fracao - mesmo
+// padrao de "10 = 10%" ja usado no desconto simples de festas.js
+const NIVER_DESCONTO_PADRAO = 50;
+
+const PRECO_CONFIG_DOC = db.collection('parqueConfig').doc('tabela');
+const precoConfigCache = createCache(async () => {
+  const snap = await PRECO_CONFIG_DOC.get();
+  const data = snap.exists ? snap.data() : {};
+  return {
+    tempos: Array.isArray(data.tempos) && data.tempos.length ? data.tempos : TEMPOS_PADRAO,
+    pcd: Array.isArray(data.pcd) && data.pcd.length === 2 ? data.pcd : PCD_PADRAO,
+    pcdCortesiaLabel: data.pcdCortesiaLabel || PCD_CORTESIA_LABEL_PADRAO,
+    pcdCortesiaMinutos: Number.isFinite(data.pcdCortesiaMinutos) && data.pcdCortesiaMinutos > 0 ? data.pcdCortesiaMinutos : PCD_CORTESIA_MINUTOS_PADRAO,
+    niverDesconto: Number.isFinite(data.niverDesconto) ? data.niverDesconto : NIVER_DESCONTO_PADRAO,
+  };
+}, 5 * 60 * 1000);
+const getConfigPrecos = precoConfigCache.cached;
+
+function sanitizarTempos(lista) {
+  const candidatos = (Array.isArray(lista) ? lista : []).map((t) => ({
+    minutos: Math.round(num(t && t.minutos)),
+    label: String((t && t.label) || '').trim().slice(0, 30),
+    preco: Math.round(num(t && t.preco) * 100) / 100,
+  }));
+  const vistos = new Set();
+  const validos = [];
+  for (const t of candidatos.sort((a, b) => a.minutos - b.minutos)) {
+    if (t.minutos <= 0 || !t.label || t.preco <= 0 || vistos.has(t.minutos)) continue;
+    vistos.add(t.minutos);
+    validos.push(t);
+  }
+  if (validos.length < 1) throw new Error('Informe pelo menos um tempo contratado.');
+  if (validos.length > 8) throw new Error('No máximo 8 tempos contratados.');
+  return validos;
+}
+
+// so 2 categorias PCD (pcd30/pcd60) - chave fixa (identifica o "bucket" nas
+// visitas ja salvas), label/minutos/preco editaveis pelo Master
+function sanitizarPcd(lista) {
+  const arr = Array.isArray(lista) ? lista : [];
+  return PCD_PADRAO.map((padrao) => {
+    const item = arr.find((p) => p && p.chave === padrao.chave) || {};
+    const label = String(item.label || '').trim().slice(0, 30) || padrao.label;
+    const minutos = Math.round(num(item.minutos)) || padrao.minutos;
+    const preco = Math.round(num(item.preco) * 100) / 100;
+    if (preco <= 0) throw new Error(`Preço inválido em "${label}".`);
+    return { chave: padrao.chave, label, minutos, preco };
+  });
+}
+
+async function salvarConfigPrecos({ tempos, pcd, pcdCortesiaLabel, pcdCortesiaMinutos, niverDesconto } = {}) {
+  const temposOk = sanitizarTempos(tempos);
+  const pcdOk = sanitizarPcd(pcd);
+  const cortesiaLabelOk = String(pcdCortesiaLabel || '').trim().slice(0, 30) || PCD_CORTESIA_LABEL_PADRAO;
+  const cortesiaMinutosOk = Math.round(num(pcdCortesiaMinutos)) || PCD_CORTESIA_MINUTOS_PADRAO;
+  const descontoOk = Math.max(0, Math.min(100, num(niverDesconto)));
+  await PRECO_CONFIG_DOC.set({
+    tempos: temposOk, pcd: pcdOk, pcdCortesiaLabel: cortesiaLabelOk, pcdCortesiaMinutos: cortesiaMinutosOk,
+    niverDesconto: descontoOk, atualizadoEm: new Date().toISOString(),
+  }, { merge: true });
+  precoConfigCache.invalidar();
+  return getConfigPrecos();
+}
+
+// tempoMinutos > preco: primeiro tenta a tabela ATUAL (editavel); sem tabela
+// (ou minutos fora dela - visita antiga com bucket que saiu de linha), cai
+// no calculo aditivo antigo (30min=R$40, 60min=R$50, 90=50+40...) - so pra
+// nao reprecificar pelo valor de HOJE algo vendido antes da tabela existir
+function valorPorTempo(tempoMinutos, tabela) {
   const t = Number(tempoMinutos) || 0;
+  const entrada = tabela && Array.isArray(tabela.tempos) ? tabela.tempos.find((e) => e.minutos === t) : null;
+  if (entrada) return entrada.preco;
   return Math.floor(t / 60) * PRECO_HORA + (t % 60 >= 30 ? PRECO_MEIA_HORA : 0);
 }
 
@@ -46,14 +130,15 @@ function valorMeias(criancas, meiasExtras) {
   return PRECO_MEIA * (optantes + Math.max(0, num(meiasExtras)));
 }
 
-// aniversariante: 50% de desconto AUTOMATICO na entrada so daquela crianca
-// (as demais do mesmo check-in pagam normal) quando a data de utilizacao do
+// aniversariante: desconto AUTOMATICO na entrada so daquela crianca (as
+// demais do mesmo check-in pagam normal) quando a data de utilizacao do
 // check-in (o dia que a entrada vale, nao a data em que foi comprada) cai
 // ate NIVER_JANELA_DIAS antes ou depois do aniversario da crianca (mes/dia
 // da dataNascimento - o ano nao importa). Nao precisa marcar nada, nao afeta
 // o par de meia, e NAO se aplica as categorias PCD (pcd30/pcd60/pcd-cortesia
 // = 5%CP), que ja tem preco fixo proprio - ver aplicarNiverAutomatico.
-const NIVER_DESCONTO = 0.5;
+// O PERCENTUAL do desconto (antes fixo em 50%) e' editavel pelo Master no
+// mesmo lugar da tabela de tempos/PCD - ver niverDesconto em getConfigPrecos
 const NIVER_JANELA_DIAS = 7;
 function ehNiver(dataNascimento, dataUtilizacao) {
   if (!dataNascimento || !dataUtilizacao) return false;
@@ -73,8 +158,11 @@ function ehNiver(dataNascimento, dataUtilizacao) {
 function aplicarNiverAutomatico(criancas, dataUtilizacao, categoriaPcd) {
   return (criancas || []).map((c) => ({ ...c, niver: !categoriaPcd && ehNiver(c.dataNascimento, dataUtilizacao) }));
 }
-function valorEntradaCriancas(criancas, unitario) {
-  return (criancas || []).reduce((soma, c) => soma + (c.niver ? unitario * (1 - NIVER_DESCONTO) : unitario), 0);
+// descontoPercentual vem de tabela.niverDesconto (0-100) - default 50 se nao
+// for passado, pra qualquer chamador antigo que por acaso nao tenha a tabela
+function valorEntradaCriancas(criancas, unitario, descontoPercentual) {
+  const desconto = Math.max(0, Math.min(100, Number.isFinite(descontoPercentual) ? descontoPercentual : NIVER_DESCONTO_PADRAO)) / 100;
+  return (criancas || []).reduce((soma, c) => soma + (c.niver ? unitario * (1 - desconto) : unitario), 0);
 }
 
 // forma de pagamento registrada na entrada - alimenta o relatorio
@@ -103,23 +191,26 @@ function sanitizarPagamentos(lista) {
 }
 
 // ---------- PCD: categoria de tempo/preco a parte da tabela normal ----------
-// pcd30/pcd60 cobram R$32 fixo por crianca (30/60min), independente da
-// tabela normal e da forma de pagamento. pcd-cortesia e entrada gratuita de
-// 60min, mas NAO passa pelo fluxo pesado de aprovacao Gerente/Master usado
-// pela cortesia normal (metodoPagamento==='cortesia') - e uma trava leve,
-// automatica: no maximo 2 criancas por hora-relogio (ex: 14:00-14:59) por
-// unidade. Na 3a tentativa a venda e recusada e dispara um aviso SILENCIOSO
-// (sem alarme/som) so pra Gerente da unidade + Master (ver push.js)
+// pcd30/pcd60 cobram preco fixo por crianca (editavel, ver getConfigPrecos),
+// independente da tabela normal de tempos e da forma de pagamento.
+// pcd-cortesia (5%CP) e entrada gratuita, mas NAO passa pelo fluxo pesado de
+// aprovacao Gerente/Master usado pela cortesia normal (metodoPagamento===
+// 'cortesia') - e uma trava leve, automatica: no maximo 2 criancas por
+// hora-relogio (ex: 14:00-14:59) por unidade. Na 3a tentativa a venda e
+// recusada e dispara um aviso SILENCIOSO (sem alarme/som) so pra Gerente da
+// unidade + Master (ver push.js)
 const CATEGORIAS_PCD = ['pcd30', 'pcd60', 'pcd-cortesia'];
-const PRECO_PCD = 32;
 const PCD_CORTESIA_LIMITE_HORA = 2;
-function tempoDaCategoriaPcd(categoria) {
-  if (categoria === 'pcd30') return 30;
-  if (categoria === 'pcd60' || categoria === 'pcd-cortesia') return 60;
-  return null;
+function tempoDaCategoriaPcd(categoria, tabela) {
+  if (categoria === 'pcd-cortesia') return (tabela && tabela.pcdCortesiaMinutos) || PCD_CORTESIA_MINUTOS_PADRAO;
+  const entrada = tabela && Array.isArray(tabela.pcd) ? tabela.pcd.find((e) => e.chave === categoria) : null;
+  if (entrada) return entrada.minutos;
+  return categoria === 'pcd30' ? 30 : (categoria === 'pcd60' ? 60 : null);
 }
-function valorUnitarioPcd(categoria) {
-  return categoria === 'pcd-cortesia' ? 0 : PRECO_PCD;
+function valorUnitarioPcd(categoria, tabela) {
+  if (categoria === 'pcd-cortesia') return 0;
+  const entrada = tabela && Array.isArray(tabela.pcd) ? tabela.pcd.find((e) => e.chave === categoria) : null;
+  return entrada ? entrada.preco : PCD_PADRAO.find((e) => e.chave === categoria).preco;
 }
 
 // ---------- cortesia: alcada dupla com escalonamento ----------
@@ -299,17 +390,24 @@ function sanitizarCriancas(lista) {
     .slice(0, 30);
 }
 
+// lista de minutos validos pra venda/edicao "normal" (fora das categorias
+// PCD, que tem tempoDaCategoriaPcd proprio) - vem da tabela editavel, ver
+// getConfigPrecos
+function temposValidos(tabela) {
+  return (tabela && Array.isArray(tabela.tempos) ? tabela.tempos : TEMPOS_PADRAO).map((t) => t.minutos);
+}
+
 // timeInicial NAO faz mais parte do cadastro - a compra/cadastro de acesso
 // costuma acontecer bem antes da pessoa efetivamente entrar (minutos ou ate
 // horas depois), entao o horario que realmente conta e definido no momento
 // do check-in (ver funcao checkin() abaixo), nao aqui
-function validarPayload({ unidade, responsavel, dataUtilizacao, tempoMinutos, criancas }) {
+function validarPayload({ unidade, responsavel, dataUtilizacao, tempoMinutos, criancas }, tabela) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!responsavel || !String(responsavel.nome || '').trim()) throw new Error('Informe o nome do responsável.');
   if (!responsavel.contato || !String(responsavel.contato).trim()) throw new Error('Informe o contato do responsável.');
   if (!dataUtilizacao || !/^\d{4}-\d{2}-\d{2}$/.test(dataUtilizacao)) throw new Error('Data de utilização inválida.');
   const tempo = Number(tempoMinutos);
-  if (!TEMPOS_VALIDOS.includes(tempo)) throw new Error('Escolha um tempo válido.');
+  if (!temposValidos(tabela).includes(tempo)) throw new Error('Escolha um tempo válido.');
   const criancasOk = sanitizarCriancas(criancas);
   if (!criancasOk.length) throw new Error('Cadastre pelo menos uma criança.');
   return { tempo, criancasOk };
@@ -321,9 +419,10 @@ async function criar({
   observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras,
   metodoPagamento, pagamentos, meiasExtras, motivoCortesia, categoriaTempo, criadoPorId, criadoPorEmail,
 }) {
+  const tabela = await getConfigPrecos();
   const categoriaPcd = CATEGORIAS_PCD.includes(categoriaTempo) ? categoriaTempo : null;
-  const tempoParaValidar = categoriaPcd ? tempoDaCategoriaPcd(categoriaPcd) : tempoMinutos;
-  const { tempo, criancasOk: criancasSemNiver } = validarPayload({ unidade, responsavel, dataUtilizacao, tempoMinutos: tempoParaValidar, criancas });
+  const tempoParaValidar = categoriaPcd ? tempoDaCategoriaPcd(categoriaPcd, tabela) : tempoMinutos;
+  const { tempo, criancasOk: criancasSemNiver } = validarPayload({ unidade, responsavel, dataUtilizacao, tempoMinutos: tempoParaValidar, criancas }, tabela);
   const criancasOk = aplicarNiverAutomatico(criancasSemNiver, dataUtilizacao, categoriaPcd);
   // cortesia so nasce com justificativa - e o que alimenta o card de
   // aprovacao (Gerente/Master) e a trilha de auditoria
@@ -333,10 +432,10 @@ async function criar({
   }
   const meiasExtrasOk = Math.max(0, Math.min(30, num(meiasExtras)));
   const valorMeiasCalc = categoriaPcd === 'pcd-cortesia' ? 0 : valorMeias(criancasOk, meiasExtrasOk);
-  const valorUnitario = categoriaPcd ? valorUnitarioPcd(categoriaPcd) : valorPorTempo(tempo);
+  const valorUnitario = categoriaPcd ? valorUnitarioPcd(categoriaPcd, tabela) : valorPorTempo(tempo, tabela);
   const valorFinal = (categoriaPcd === 'pcd-cortesia' || ehCortesia)
     ? 0
-    : valorEntradaCriancas(criancasOk, valorUnitario) + valorMeiasCalc;
+    : valorEntradaCriancas(criancasOk, valorUnitario, tabela.niverDesconto) + valorMeiasCalc;
   // divide o valor entre mais de uma forma de pagamento - servidor sempre
   // revalida a soma (o front so ajuda o atendente a nao errar): tem que
   // bater exatamente com valorFinal, nunca menos nem mais
@@ -351,7 +450,7 @@ async function criar({
   }
   // minutosExtras: credito de tempo guardado de um checkout antecipado
   // anterior (ver checkout()/usarCredito() abaixo) - soma por cima do
-  // tempo contratado normal, nao muda o "bucket" escolhido (TEMPOS_VALIDOS)
+  // tempo contratado normal, nao muda o "bucket" escolhido (temposValidos)
   const extras = Math.max(0, Math.min(240, num(minutosExtras)));
   // timeInicial e opcional na criacao (usado so pela importacao da planilha
   // antiga, que ja tem o horario real de visitas que ja aconteceram) - no
@@ -483,8 +582,9 @@ async function adicionarTempo(id, { minutos, metodoPagamento, porEmail }) {
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Check-in não encontrado.');
   const atual = snap.data();
+  const tabela = await getConfigPrecos();
   const min = Number(minutos);
-  if (!TEMPOS_VALIDOS.includes(min)) throw new Error('Escolha um tempo válido pra adicionar (30 a 120 min).');
+  if (!temposValidos(tabela).includes(min)) throw new Error('Escolha um tempo válido pra adicionar.');
   if (!atual.iniciado || !atual.timeFinal) throw new Error('Esse check-in ainda não teve o check-in físico feito.');
   if (atual.checkoutEm) throw new Error('Esse check-in já teve check-out.');
   const hoje = hojeBrasiliaISO();
@@ -494,7 +594,7 @@ async function adicionarTempo(id, { minutos, metodoPagamento, porEmail }) {
 
   const metodo = sanitizarMetodoPagamento(metodoPagamento) || atual.metodoPagamento || null;
   const qtd = (atual.criancas || []).length || atual.pulseiras || 0;
-  const valorAcrescimo = metodo === 'cortesia' ? 0 : valorPorTempo(min) * qtd;
+  const valorAcrescimo = metodo === 'cortesia' ? 0 : valorPorTempo(min, tabela) * qtd;
   const acrescimo = {
     minutos: min,
     valor: valorAcrescimo,
@@ -612,6 +712,7 @@ async function atualizar(id, patch) {
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Check-in não encontrado.');
   const atual = snap.data();
+  const tabela = await getConfigPrecos();
   const merge = {};
 
   if (patch.responsavel) {
@@ -623,7 +724,7 @@ async function atualizar(id, patch) {
   }
   const tempo = patch.tempoMinutos !== undefined ? Number(patch.tempoMinutos) : atual.tempoMinutos;
   if (patch.tempoMinutos !== undefined) {
-    if (!TEMPOS_VALIDOS.includes(tempo)) throw new Error('Escolha um tempo válido.');
+    if (!temposValidos(tabela).includes(tempo)) throw new Error('Escolha um tempo válido.');
     merge.tempoMinutos = tempo;
   }
   if (patch.timeInicial !== undefined) {
@@ -673,10 +774,10 @@ async function atualizar(id, patch) {
     merge.criancas = criancasFinais;
     const cobraMeias = atual.valorMeias != null || patch.meiasExtras !== undefined;
     const meiasExtrasFinais = merge.meiasExtras !== undefined ? merge.meiasExtras : (atual.meiasExtras || 0);
-    merge.valorPulseira = valorPorTempo(tempo);
+    merge.valorPulseira = valorPorTempo(tempo, tabela);
     merge.valorMeias = cobraMeias ? valorMeias(criancasFinais, meiasExtrasFinais) : (atual.valorMeias || 0);
     const somaAcrescimos = (atual.acrescimos || []).reduce((s, a) => s + (Number(a.valor) || 0), 0);
-    merge.valor = metodoFinal === 'cortesia' ? 0 : valorEntradaCriancas(criancasFinais, merge.valorPulseira) + merge.valorMeias + somaAcrescimos;
+    merge.valor = metodoFinal === 'cortesia' ? 0 : valorEntradaCriancas(criancasFinais, merge.valorPulseira, tabela.niverDesconto) + merge.valorMeias + somaAcrescimos;
   }
   if (patch.usou !== undefined) merge.usou = patch.usou === true;
   if (patch.termoAssinado !== undefined) merge.termoAssinado = patch.termoAssinado === true;
@@ -735,7 +836,7 @@ async function remover(id) {
 // monta a proposta de alteracao com os mesmos criterios de atualizar() -
 // validar aqui (na hora do pedido) evita aprovar uma proposta que depois
 // falharia na aplicacao. Devolve so os campos que a proposta realmente muda
-function validarPropostaEdicao(proposta) {
+function validarPropostaEdicao(proposta, tabela) {
   if (!proposta || typeof proposta !== 'object') throw new Error('Preencha a proposta de alteração.');
   const p = {};
   if (proposta.responsavel && typeof proposta.responsavel === 'object') {
@@ -754,7 +855,7 @@ function validarPropostaEdicao(proposta) {
   }
   if (proposta.tempoMinutos !== undefined && proposta.tempoMinutos !== null && proposta.tempoMinutos !== '') {
     const tempo = Number(proposta.tempoMinutos);
-    if (!TEMPOS_VALIDOS.includes(tempo)) throw new Error('Escolha um tempo válido.');
+    if (!temposValidos(tabela).includes(tempo)) throw new Error('Escolha um tempo válido.');
     p.tempoMinutos = tempo;
   }
   if (proposta.horarioPrevisto !== undefined) {
@@ -786,7 +887,7 @@ async function solicitarEdicao({ checkinId, tipoCorrecao, proposta, motivo, nume
   if (!atual) throw new Error('Check-in não encontrado.');
   if (!motivo || !String(motivo).trim()) throw new Error('Descreva o motivo da correção.');
   const tipo = tipoCorrecao === 'alterar' ? 'alterar' : 'excluir';
-  const propostaOk = tipo === 'alterar' ? validarPropostaEdicao(proposta) : null;
+  const propostaOk = tipo === 'alterar' ? validarPropostaEdicao(proposta, await getConfigPrecos()) : null;
   const pendentes = await listarEdicoes();
   if (pendentes.some((p) => p.checkinId === checkinId && p.status === 'PENDENTE')) {
     throw new Error('Já existe um pedido de correção pendente para esse check-in.');
@@ -1015,7 +1116,8 @@ async function buscarPorCpf(cpf) {
 }
 
 module.exports = {
-  TEMPOS_VALIDOS, METODOS_PAGAMENTO, PRECO_MEIA, PRECO_PCD, valorPorTempo, valorDoCheckin,
+  METODOS_PAGAMENTO, PRECO_MEIA, valorPorTempo, valorDoCheckin,
+  getConfigPrecos, salvarConfigPrecos,
   criar, checkin, listAll, listByUnidades, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
   adicionarTempo, relancar, visitaHojePorCpf,
   decidirCortesia, encerrarCortesia, ehAdminCortesia,
