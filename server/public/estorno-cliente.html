@@ -167,6 +167,23 @@
     <input type="tel" id="telefoneCliente" placeholder="(11) 99999-9999">
   </div>
 
+  <div class="secao">
+    <div class="secao-titulo">Dados para receber o estorno via Pix</div>
+    <div class="ajuda">Preencha se preferir receber o valor direto via Pix, em vez do estorno na maquininha (opcional).</div>
+    <label>Chave Pix</label>
+    <input type="text" id="pixChave" placeholder="CPF, e-mail, telefone ou chave aleatória">
+    <label>Nome do titular da conta</label>
+    <input type="text" id="pixNomeTitular">
+    <label>Banco</label>
+    <input type="text" id="pixBanco" placeholder="Ex: Nubank, Banco do Brasil...">
+  </div>
+
+  <div class="secao">
+    <div class="secao-titulo">Observação</div>
+    <label>Alguma informação adicional?</label>
+    <textarea id="observacao" placeholder="Opcional"></textarea>
+  </div>
+
   <button type="submit" class="btn-primary" id="btn-enviar">Enviar pedido</button>
   <div id="msg" class="msg hidden"></div>
 </form>
@@ -275,6 +292,10 @@ document.getElementById('form-estorno').addEventListener('submit', async (e)=>{
     horaVenda: document.getElementById('horaVenda').value,
     nomeCliente: document.getElementById('nomeCliente').value,
     telefoneCliente: document.getElementById('telefoneCliente').value,
+    pixChave: document.getElementById('pixChave').value,
+    pixNomeTitular: document.getElementById('pixNomeTitular').value,
+    pixBanco: document.getElementById('pixBanco').value,
+    observacao: document.getElementById('observacao').value,
   };
 
   const fd = new FormData();

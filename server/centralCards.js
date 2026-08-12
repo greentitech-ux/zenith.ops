@@ -28,6 +28,10 @@ function normalizarCard(tipo, r) {
         `Forma de pagamento: ${r.formaPagamento}${r.bandeira ? ' · ' + r.bandeira : ''}${r.ultimos4 ? ' final ' + r.ultimos4 : ''}`,
         `Venda em ${r.dataVenda}${r.horaVenda ? ' às ' + r.horaVenda : ''}`,
         r.telefoneCliente ? `Telefone do cliente: ${r.telefoneCliente}` : null,
+        (r.pixChave || r.pixNomeTitular || r.pixBanco)
+          ? `Pix para devolução: ${r.pixChave || '(chave não informada)'}${r.pixNomeTitular ? ' · ' + r.pixNomeTitular : ''}${r.pixBanco ? ' · ' + r.pixBanco : ''}`
+          : null,
+        r.observacaoCliente ? `Observação: ${r.observacaoCliente}` : null,
       ].filter(Boolean);
       observacao = linhas.join('\n');
     }
