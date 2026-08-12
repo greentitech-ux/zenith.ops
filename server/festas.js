@@ -36,12 +36,21 @@ const TABELA_FESTAS_PADRAO = {
   },
 };
 const HORAS_VALIDAS = [1, 2, 3];
-const SALTONAUTAS_VALIDOS = [10, 20, 30, 40];
+// colunas de saltonautas (quantidade de pulantes) da tabela de precos -
+// PADRAO usado so no seed do 1o boot; depois disso quem manda e o array
+// gravado em Firestore (saltonautasColunas), editavel pelo Master em
+// "Editar tabela de precos" - tanto os VALORES quanto a QUANTIDADE de
+// colunas podem mudar (ex: 10/15/25/30/40), nao so os precos
+const SALTONAUTAS_PADRAO = [10, 20, 30, 40];
 
 const TABELA_DOC = db.collection('festasConfig').doc('tabela');
 const tabelaCache = createCache(async () => {
   const snap = await TABELA_DOC.get();
-  return snap.exists && snap.data().missoes ? snap.data().missoes : TABELA_FESTAS_PADRAO;
+  const data = snap.exists ? snap.data() : {};
+  return {
+    missoes: data.missoes || TABELA_FESTAS_PADRAO,
+    saltonautasColunas: Array.isArray(data.saltonautasColunas) && data.saltonautasColunas.length ? data.saltonautasColunas : SALTONAUTAS_PADRAO,
+  };
 }, 5 * 60 * 1000);
 const getTabela = tabelaCache.cached;
 
@@ -54,14 +63,25 @@ function sanitizarCodigoMissao(codigo) {
   return limpo;
 }
 
-function sanitizarMissaoConfig(m) {
+// colunas de saltonautas: numeros inteiros positivos, unicos, 2 a 8
+// colunas (menos de 2 nao faz sentido de tabela; mais de 8 vira ilegivel
+// no grid). Ordenado crescente pra ficar previsivel na UI
+function sanitizarSaltonautasColunas(lista) {
+  const nums = (Array.isArray(lista) ? lista : []).map((v) => Math.round(num(v))).filter((v) => v > 0);
+  const unicos = [...new Set(nums)].sort((a, b) => a - b);
+  if (unicos.length < 2) throw new Error('Informe pelo menos 2 colunas de saltonautas.');
+  if (unicos.length > 8) throw new Error('No máximo 8 colunas de saltonautas.');
+  return unicos;
+}
+
+function sanitizarMissaoConfig(m, saltonautasColunas) {
   const label = String(m?.label || '').trim().slice(0, 60);
   const janela = String(m?.janela || '').trim().slice(0, 80);
   if (!label) throw new Error('Cada Missão precisa de um nome.');
   const precos = {};
   for (const h of HORAS_VALIDAS) {
     precos[h] = {};
-    for (const s of SALTONAUTAS_VALIDOS) {
+    for (const s of saltonautasColunas) {
       const v = num(m?.precos?.[h]?.[s]);
       if (v <= 0) throw new Error(`Preço inválido em "${label}" (${h}H · ${s} saltonautas).`);
       precos[h][s] = v;
@@ -78,17 +98,20 @@ function sanitizarMissaoConfig(m) {
 // - Missoes sao identificadas pelo codigo (chave do objeto); o Master pode
 // criar quantas quiser (ver adicionarNovaMissao em festas.html) e ocultar
 // (nunca apagar de verdade) uma existente - merge:true no Firestore
-// preserva qualquer chave antiga que por acaso nao vier no payload
-async function salvarTabela(missoes) {
+// preserva qualquer chave antiga que por acaso nao vier no payload. As
+// colunas de saltonautas tambem sao editaveis (valores E quantidade) -
+// trocar a lista aqui muda o "cardapio" de precos de TODAS as Missoes
+async function salvarTabela({ missoes, saltonautasColunas } = {}) {
+  const colunas = sanitizarSaltonautasColunas(saltonautasColunas);
   const entradas = Object.entries(missoes || {});
   if (!entradas.length) throw new Error('Informe pelo menos uma Missão.');
   const nova = {};
   for (const [codigoBruto, m] of entradas) {
     const codigo = sanitizarCodigoMissao(codigoBruto);
     if (nova[codigo]) throw new Error(`Código de Missão duplicado: "${codigo}".`);
-    nova[codigo] = sanitizarMissaoConfig(m);
+    nova[codigo] = sanitizarMissaoConfig(m, colunas);
   }
-  await TABELA_DOC.set({ missoes: nova, atualizadoEm: new Date().toISOString() }, { merge: true });
+  await TABELA_DOC.set({ missoes: nova, saltonautasColunas: colunas, atualizadoEm: new Date().toISOString() }, { merge: true });
   tabelaCache.invalidar();
   return getTabela();
 }
@@ -191,9 +214,9 @@ async function criar({
   // o que tiver sido digitado. Sem pacote (venda antiga/avulsa), o valor
   // digitado continua valendo
   const tabela = await getTabela();
-  const missaoOk = tabela[missao] ? missao : null;
-  const valorTabela = missaoOk ? valorFesta(missaoOk, horas, saltonautas, tabela) : null;
-  if (missaoOk && valorTabela == null) throw new Error('Escolha horas (1 a 3) e saltonautas (10/20/30/40) válidos pra Missão.');
+  const missaoOk = tabela.missoes[missao] ? missao : null;
+  const valorTabela = missaoOk ? valorFesta(missaoOk, horas, saltonautas, tabela.missoes) : null;
+  if (missaoOk && valorTabela == null) throw new Error(`Escolha horas (1 a 3) e saltonautas (${tabela.saltonautasColunas.join('/')}) válidos pra Missão.`);
   const valorBase = valorTabela != null ? valorTabela : num(valorTotal);
   if (valorBase < 0) throw new Error('Valor total inválido.');
 
@@ -294,12 +317,12 @@ async function atualizar(id, patch) {
   // trocar o pacote (Missão/horas/saltonautas) recalcula o valor pela tabela
   if (patch.missao !== undefined || patch.horas !== undefined || patch.saltonautas !== undefined) {
     const tabela = await getTabela();
-    const missaoNova = patch.missao !== undefined ? (tabela[patch.missao] ? patch.missao : null) : atual.missao;
+    const missaoNova = patch.missao !== undefined ? (tabela.missoes[patch.missao] ? patch.missao : null) : atual.missao;
     const horasNovas = patch.horas !== undefined ? patch.horas : atual.horas;
     const saltoNovos = patch.saltonautas !== undefined ? patch.saltonautas : atual.saltonautas;
     if (missaoNova) {
-      const v = valorFesta(missaoNova, horasNovas, saltoNovos, tabela);
-      if (v == null) throw new Error('Escolha horas (1 a 3) e saltonautas (10/20/30/40) válidos pra Missão.');
+      const v = valorFesta(missaoNova, horasNovas, saltoNovos, tabela.missoes);
+      if (v == null) throw new Error(`Escolha horas (1 a 3) e saltonautas (${tabela.saltonautasColunas.join('/')}) válidos pra Missão.`);
       merge.missao = missaoNova;
       merge.horas = Number(horasNovas);
       merge.saltonautas = Number(saltoNovos);
