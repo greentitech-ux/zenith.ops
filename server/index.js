@@ -3242,7 +3242,7 @@ app.get('/api/festas/tabela', requireSection('festas'), async (req, res) => {
 
 app.put('/api/festas/tabela', auth.requireMaster, async (req, res) => {
   try {
-    const tabela = await festas.salvarTabela(req.body.missoes);
+    const tabela = await festas.salvarTabela(req.body);
     broadcast('festas-tabela-atualizada', {}, 'festas');
     res.json(tabela);
   } catch (err) {

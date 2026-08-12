@@ -189,7 +189,7 @@
       </select>
       <div class="grid3" id="wrap-pacote" style="display:none;">
         <div><label>Horas</label><select id="f-horas"><option value="1">1H</option><option value="2">2H</option><option value="3">3H</option></select></div>
-        <div><label>Saltonautas</label><select id="f-saltonautas"><option value="10">10</option><option value="20">20</option><option value="30">30</option><option value="40">40</option></select></div>
+        <div><label>Saltonautas</label><select id="f-saltonautas"></select></div>
         <div><label>Valor da tabela</label><input type="text" id="f-valor-tabela" readonly value="—"></div>
       </div>
     </div>
@@ -340,6 +340,14 @@
     <h3>Editar tabela de preços</h3>
     <div class="sub">As promoções mudam com frequência — ajuste nome, horário e valores aqui, sem precisar de deploy. Vale pra reservas novas; as já registradas mantêm o valor gravado na hora da venda.</div>
     <form id="form-tabela">
+      <div class="missao-tabela">
+        <label>Colunas de saltonautas (separe por vírgula — pode ter quantas quiser, ex: 10, 15, 25, 30, 40)</label>
+        <div class="linha1" style="align-items:center;">
+          <input type="text" id="t-saltonautas-colunas" style="flex:1;">
+          <button type="button" class="link-btn" style="margin:0;" onclick="atualizarColunasSaltonautas()">Atualizar colunas</button>
+        </div>
+        <div class="sub">Muda as colunas de todas as Missões abaixo. Preços já preenchidos de colunas que continuarem na lista são mantidos; colunas novas começam zeradas.</div>
+      </div>
       <div id="tabela-missoes"></div>
       <button type="button" class="btn-secundario" onclick="adicionarNovaMissao()" style="margin-top:6px;">+ Nova Missão</button>
       <div class="msg hidden" id="msg-tabela"></div>
@@ -636,11 +644,20 @@ document.getElementById('form-festa').addEventListener('keydown', (ev)=>{
 // hardcoded aqui: as promoções da Missão mudam com frequência e antes isso
 // exigia mexer em código + deploy toda vez
 const HORAS_TABELA = [1,2,3];
-const SALTONAUTAS_TABELA = [10,20,30,40];
+// colunas de saltonautas - vem do servidor (editavel pelo Master, ver
+// "Editar tabela de preços"); valor abaixo e so o fallback antes da
+// primeira carga
+let SALTONAUTAS_TABELA = [10,20,30,40];
 let TABELA_FESTAS = {};
 
 async function carregarTabela(){
-  TABELA_FESTAS = await fetch('/api/festas/tabela').then(r=>r.json()).catch(()=>({}));
+  const data = await fetch('/api/festas/tabela').then(r=>r.json()).catch(()=>({missoes:{},saltonautasColunas:SALTONAUTAS_TABELA}));
+  TABELA_FESTAS = data.missoes || {};
+  SALTONAUTAS_TABELA = (data.saltonautasColunas && data.saltonautasColunas.length) ? data.saltonautasColunas : SALTONAUTAS_TABELA;
+  const selSalto = document.getElementById('f-saltonautas');
+  const saltoAtual = selSalto.value;
+  selSalto.innerHTML = SALTONAUTAS_TABELA.map(s=>`<option value="${s}">${s}</option>`).join('');
+  selSalto.value = SALTONAUTAS_TABELA.includes(Number(saltoAtual)) ? saltoAtual : SALTONAUTAS_TABELA[0];
   const sel = document.getElementById('f-missao');
   const atual = sel.value;
   // "ativa" oculta do seletor de NOVAS reservas (ver ocultarMissao) mas
@@ -799,8 +816,21 @@ function removerNovaMissao(chave){
   renderMissoesTabela();
 }
 
+function atualizarColunasSaltonautas(){
+  const msg = document.getElementById('msg-tabela');
+  const bruto = document.getElementById('t-saltonautas-colunas').value;
+  const nums = [...new Set(bruto.split(',').map(v=>parseInt(v.trim(),10)).filter(v=>Number.isFinite(v)&&v>0))].sort((a,b)=>a-b);
+  if(nums.length < 2){ msg.textContent = 'Informe pelo menos 2 colunas de saltonautas.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
+  if(nums.length > 8){ msg.textContent = 'No máximo 8 colunas de saltonautas.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
+  SALTONAUTAS_TABELA = nums;
+  document.getElementById('t-saltonautas-colunas').value = nums.join(', ');
+  msg.classList.add('hidden');
+  renderMissoesTabela();
+}
+
 function abrirEditarTabela(){
   TABELA_NOVOS = [];
+  document.getElementById('t-saltonautas-colunas').value = SALTONAUTAS_TABELA.join(', ');
   renderMissoesTabela();
   document.getElementById('msg-tabela').classList.add('hidden');
   document.getElementById('overlay-tabela').classList.remove('hidden');
@@ -837,10 +867,9 @@ document.getElementById('form-tabela').addEventListener('submit', async (ev)=>{
       if(missoes[codigo]) throw new Error(`Código de Missão duplicado: "${codigo}".`);
       missoes[codigo] = lerBlocoMissao(`novo-${chave}`);
     }
-    const res = await fetch('/api/festas/tabela', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ missoes }) });
+    const res = await fetch('/api/festas/tabela', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ missoes, saltonautasColunas: SALTONAUTAS_TABELA }) });
     const data = await res.json();
     if(!res.ok) throw new Error(data.error||'erro ao salvar tabela');
-    TABELA_FESTAS = data;
     TABELA_NOVOS = [];
     await carregarTabela();
     renderMissoesTabela();
