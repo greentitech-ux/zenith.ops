@@ -107,6 +107,25 @@
   .msg-item .m-texto{white-space:pre-wrap;margin-top:2px;}
   .d-acoes{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
   .d-tickets{font-size:11.5px;color:var(--muted);margin-bottom:8px;}
+
+  /* paineis de conversa abertos - ficam ABAIXO do kanban (nao mais em modal
+     por cima da tela), lado a lado, dentro da propria faixa de scroll
+     horizontal deles - mesmo mecanismo do .kanban-wrap acima, pra dar pra
+     ter mais de uma conversa aberta ao mesmo tempo e so rolar pro lado */
+  .paineis-outer{margin-top:14px;}
+  .paineis-outer.hidden{display:none!important;}
+  .paineis-cab{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;}
+  .paineis-titulo{font-size:12.5px;font-weight:700;}
+  .paineis-count{font-family:var(--mono);font-size:10.5px;color:var(--muted);font-weight:400;margin-left:4px;}
+  .paineis-wrap{overflow-x:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch;}
+  .paineis{display:flex;gap:12px;align-items:flex-start;min-width:max-content;}
+  .painel-conversa{width:380px;flex:none;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 12px 14px;display:flex;flex-direction:column;max-height:560px;}
+  .painel-topo{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px;}
+  .painel-conversa h3{margin:0 0 4px;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .painel-conversa .sub{font-size:11px;color:var(--muted);font-family:var(--mono);}
+  .painel-fechar{background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:50%;width:26px;height:26px;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none;}
+  .painel-fechar:hover{color:var(--text);border-color:var(--accent);}
+  @media(max-width:640px){ .painel-conversa{width:300px;} }
 </style>
 </head>
 <body>
@@ -158,22 +177,14 @@
   <div class="kanban-wrap">
     <div class="kanban" id="kanban-wrap"></div>
   </div>
-</div>
 
-<div class="overlay hidden" id="overlay-detalhe">
-  <div class="sheet-wrap">
-    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharDetalhe()">✕</span>
-    <div class="sheet">
-      <h3 id="d-titulo"></h3>
-      <div class="sub" id="d-sub"></div>
-      <div class="d-tickets hidden" id="d-tickets"></div>
-      <div class="d-acoes" id="d-acoes"></div>
-      <div id="d-msgs" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px;"></div>
-      <div id="d-rodape" style="display:flex;gap:6px;">
-        <input type="text" id="d-texto" placeholder="Escrever uma resposta..." style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarResposta();}">
-        <button type="button" class="btn-primary" id="d-btn-enviar" onclick="enviarResposta()">Enviar</button>
-      </div>
-      <div id="d-finalizado" class="empty hidden" style="padding:14px 0 0;">Conversa finalizada — mova pra uma coluna aberta se precisar reabrir.</div>
+  <div class="paineis-outer hidden" id="paineis-outer">
+    <div class="paineis-cab">
+      <span class="paineis-titulo">💬 Conversas abertas<span class="paineis-count" id="paineis-count"></span></span>
+      <button type="button" class="btn-ghost" onclick="fecharTodosPaineis()">Fechar todas</button>
+    </div>
+    <div class="paineis-wrap">
+      <div class="paineis" id="paineis-wrap"></div>
     </div>
   </div>
 </div>
@@ -222,7 +233,7 @@ function tempoRelativo(iso){
 let ME = null, IS_MASTER = false, IS_ADMIN = false;
 let ITENS = [];
 let FILTRO_DESBLOQUEIO = false;
-let DETALHE_ATUAL = null;
+let PAINEIS_ABERTOS = []; // ids das conversas abertas agora, na ordem em que foram abertas - mais de uma ao mesmo tempo, ver renderPaineis()
 let DRAG_ID = null;
 let ACAO_PENDENTE = null; // {id, statusAlvo}
 
@@ -378,26 +389,35 @@ async function moverPara(id, statusAlvo, extra){
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao mover a conversa.');
     await carregarLista();
-    if(DETALHE_ATUAL && DETALHE_ATUAL.id===id) abrirDetalhePorId(id);
   }catch(err){ alert(err.message); }
 }
 
-// ---------- detalhe ----------
+// ---------- paineis de conversa (multi) ----------
+// clicar num card ABRE (soma a lista de abertas, nao substitui) - da pra ter
+// varias conversas abertas ao mesmo tempo, cada uma no seu paine, lado a
+// lado abaixo do kanban (ver .paineis-wrap) - antes so dava pra ver uma por
+// vez porque isso virava um overlay unico em cima da tela inteira.
 function abrirDetalhePorId(id){
   const chat = ITENS.find(c=>c.id===id);
   if(!chat) return;
-  DETALHE_ATUAL = chat;
+  if(!PAINEIS_ABERTOS.includes(id)) PAINEIS_ABERTOS.push(id);
+  renderPaineis();
+  requestAnimationFrame(()=>{
+    const el = document.querySelector(`.painel-conversa[data-painel-id="${CSS.escape(id)}"]`);
+    if(el) el.scrollIntoView({ behavior:'smooth', inline:'end', block:'nearest' });
+  });
+}
+function fecharPainel(id){
+  PAINEIS_ABERTOS = PAINEIS_ABERTOS.filter(x=>x!==id);
+  renderPaineis();
+}
+function fecharTodosPaineis(){ PAINEIS_ABERTOS = []; renderPaineis(); }
+
+function painelHtml(chat){
   const statusAtual = statusDe(chat);
   const nivel = nivelDe(chat);
   const colInfo = COLUNAS.find(c=>c.key===statusAtual);
-  document.getElementById('overlay-detalhe').classList.remove('hidden');
-  document.getElementById('d-titulo').textContent = chat.nome || 'Visitante';
-  document.getElementById('d-sub').textContent = `${chat.contato||''} · ${chat.assunto||'Suporte geral'}${chat.lojaContexto?' · loja: '+chat.lojaContexto:''} · N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}`;
-
   const tickets = chat.ticketsVinculados || [];
-  const dTickets = document.getElementById('d-tickets');
-  dTickets.classList.toggle('hidden', !tickets.length);
-  dTickets.textContent = tickets.length ? '🎫 Tickets dessa conversa: ' + tickets.map(t=>`#${t.numero}`).join(', ') : '';
 
   const acoes = [];
   if(statusAtual==='PENDENTE') acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">🙋 Assumir atendimento</button>`);
@@ -409,42 +429,67 @@ function abrirDetalhePorId(id){
     acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">↩️ Reabrir</button>`);
   }
   if(!chat.chamadoId) acoes.push(`<button type="button" class="btn-ghost" onclick="gerarChamadoRemoto('${chat.id}')">🎫 Gerar chamado remoto</button>`);
-  document.getElementById('d-acoes').innerHTML = acoes.join('');
-
-  const finalizado = chat.status === 'FINALIZADO';
-  document.getElementById('d-rodape').classList.toggle('hidden', finalizado);
-  document.getElementById('d-finalizado').classList.toggle('hidden', !finalizado);
-  document.getElementById('d-texto').value = '';
 
   const msgs = (chat.mensagens||[]).map(m=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'🤖 Beniboy':'Suporte'), texto: m.texto, em: m.em }));
-  const el = document.getElementById('d-msgs');
-  el.innerHTML = msgs.length ? msgs.map(m=>`
-    <div class="msg-item">
-      <div class="m-cab"><span>${escapeHtml(m.de)}</span><span>${fmtDataHora(m.em)}</span></div>
-      <div class="m-texto">${escapeHtml(m.texto)}</div>
-    </div>`).join('') : '<div class="empty">Nenhuma mensagem ainda.</div>';
-  el.scrollTop = el.scrollHeight;
-}
-function fecharDetalhe(){ document.getElementById('overlay-detalhe').classList.add('hidden'); DETALHE_ATUAL = null; }
+  const msgsHtml = msgs.length ? msgs.map(m=>`
+      <div class="msg-item">
+        <div class="m-cab"><span>${escapeHtml(m.de)}</span><span>${fmtDataHora(m.em)}</span></div>
+        <div class="m-texto">${escapeHtml(m.texto)}</div>
+      </div>`).join('') : '<div class="empty">Nenhuma mensagem ainda.</div>';
 
-async function enviarResposta(){
-  if(!DETALHE_ATUAL) return;
-  const input = document.getElementById('d-texto');
+  const finalizado = chat.status === 'FINALIZADO';
+  const idAttr = escapeHtml(chat.id);
+
+  return `<div class="painel-conversa" data-painel-id="${idAttr}">
+    <div class="painel-topo">
+      <div style="min-width:0;">
+        <h3>${escapeHtml(chat.nome || 'Visitante')}</h3>
+        <div class="sub">${escapeHtml(chat.contato||'')} · ${escapeHtml(chat.assunto||'Suporte geral')}${chat.lojaContexto?' · loja: '+escapeHtml(chat.lojaContexto):''} · N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}</div>
+      </div>
+      <span class="painel-fechar" title="Fechar" onclick="fecharPainel('${idAttr}')">✕</span>
+    </div>
+    ${tickets.length ? `<div class="d-tickets">🎫 Tickets dessa conversa: ${tickets.map(t=>`#${escapeHtml(t.numero)}`).join(', ')}</div>` : ''}
+    <div class="d-acoes">${acoes.join('')}</div>
+    <div class="painel-msgs" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">${msgsHtml}</div>
+    ${finalizado
+      ? '<div class="empty" style="padding:14px 0 0;">Conversa finalizada — mova pra uma coluna aberta se precisar reabrir.</div>'
+      : `<div style="display:flex;gap:6px;">
+          <input type="text" id="d-texto-${idAttr}" placeholder="Escrever uma resposta..." style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarResposta('${idAttr}');}">
+          <button type="button" class="btn-primary" onclick="enviarResposta('${idAttr}')">Enviar</button>
+        </div>`}
+  </div>`;
+}
+
+function renderPaineis(){
+  // remove da lista qualquer conversa que sumiu (filtro, etc.)
+  PAINEIS_ABERTOS = PAINEIS_ABERTOS.filter(id=>ITENS.some(c=>c.id===id));
+  const outer = document.getElementById('paineis-outer');
+  const wrap = document.getElementById('paineis-wrap');
+  outer.classList.toggle('hidden', !PAINEIS_ABERTOS.length);
+  document.getElementById('paineis-count').textContent = PAINEIS_ABERTOS.length ? ` · ${PAINEIS_ABERTOS.length}` : '';
+  if(!PAINEIS_ABERTOS.length){ wrap.innerHTML = ''; return; }
+  wrap.innerHTML = PAINEIS_ABERTOS.map(id=>painelHtml(ITENS.find(c=>c.id===id))).join('');
+  wrap.querySelectorAll('.painel-msgs').forEach(el=>{ el.scrollTop = el.scrollHeight; });
+}
+
+async function enviarResposta(id){
+  const input = document.getElementById(`d-texto-${id}`);
+  if(!input) return;
   const texto = input.value.trim();
   if(!texto) return;
-  const btn = document.getElementById('d-btn-enviar');
-  btn.disabled = true;
+  input.disabled = true;
   try{
-    const resp = await fetch(`/api/suporte-chats/${DETALHE_ATUAL.id}/responder`, {
+    const resp = await fetch(`/api/suporte-chats/${id}/responder`, {
       method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }),
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar mensagem.');
-    input.value = '';
     await carregarLista();
-    abrirDetalhePorId(DETALHE_ATUAL.id);
-  }catch(err){ alert(err.message); }
-  finally{ btn.disabled = false; }
+  }catch(err){
+    alert(err.message);
+    const el = document.getElementById(`d-texto-${id}`);
+    if(el) el.disabled = false;
+  }
 }
 
 // vira chamado REMOTO vinculado, no nome de quem esta atendendo - registro
@@ -462,7 +507,6 @@ async function gerarChamadoRemoto(id){
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao gerar chamado.');
     await carregarLista();
-    if(DETALHE_ATUAL && DETALHE_ATUAL.id===id) abrirDetalhePorId(id);
   }catch(err){ alert(err.message); }
 }
 
@@ -470,6 +514,7 @@ async function carregarLista(){
   try{
     ITENS = await fetch('/api/suporte-chats').then(r=>r.json());
     renderKanban();
+    renderPaineis();
   }catch(e){ /* rede fora - mantem lista anterior */ }
 }
 
@@ -507,7 +552,7 @@ function conectarStream(){
   try{
     const es = new EventSource('/api/stream?token='+encodeURIComponent(AUTH_TOKEN));
     es.addEventListener('suporte-chat', ()=>{
-      carregarLista().then(()=>{ if(DETALHE_ATUAL) abrirDetalhePorId(DETALHE_ATUAL.id); });
+      carregarLista();
     });
   }catch(e){ /* sem SSE, so atualiza no reload/poll */ }
 }
@@ -535,6 +580,7 @@ async function boot(){
 }
 boot();
 </script>
+<script src="/notif-central.js"></script>
 <script src="/nav-gate.js"></script>
 </body>
 </html>
