@@ -164,8 +164,14 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
 // /api/suporte-chats (plural), que continua atras do login normal. O link de
 // auto-atendimento do RH (rh-colaborador.html) tambem e por prefixo, ja que
 // o token vai na propria rota (/api/rh/publico/:token/...)
+// link de acao de ticket (ver ticket-publico.html) - so os sub-caminhos que
+// terminam em "-publico"/"publico" ficam liberados; /api/central/:tipo/:id/chat
+// (sem sufixo) continua atras do login normal, entao o regex precisa ser
+// especifico pra nao vazar essa rota autenticada por engano
+const ROTA_TICKET_PUBLICO_RE = /^\/api\/central\/[^/]+\/[^/]+\/(publico|chat-publico|decidir-publico|execucao-publico|anexo-publico\/\d+)$/;
 function rotaPublicaSemDashboard(path) {
-  return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/');
+  return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/')
+    || ROTA_TICKET_PUBLICO_RE.test(path);
 }
 if (DASHBOARD_USER && DASHBOARD_PASSWORD) {
   app.use((req, res, next) => {
@@ -455,6 +461,147 @@ app.post('/api/solicitacoes/decidir', upload.single('comprovante'), async (req, 
     });
     broadcast('solicitacao-decidida', atualizado, 'solicitacoes');
     res.json({ ok: true, numeroTicket: atualizado.numeroTicket, status: atualizado.status });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- link de acao "compartilhavel" pra QUALQUER ticket da Central
+// (Estorno + os 5 tipos gerais) - gerado sob demanda pelo botao "Enviar
+// link" (central-historico.html), NAO pelo relatorio diario. Diferente do
+// tokenAcao/decidir-info acima (uso unico, so decide, so solicitacoes.js):
+// esse fica valido enquanto o ticket nao chegar num estado terminal (ver
+// podeAgirComLink em refunds.js/solicitacoes.js), cobre decidir E, depois de
+// aprovado, avancar a execucao, e devolve o detalhe COMPLETO (anexos+chat) -
+// ver ticket-publico.html. Ficam ACIMA do app.use('/api', auth.requireAuth)
+// (mesmo motivo do decidir-info/decidir acima). ----------
+function moduloTicket(tipo) {
+  return tipo === 'estorno' ? refunds : solicitacoes;
+}
+
+function payloadPublicoTicket(tipo, r) {
+  const base = {
+    numeroTicket: r.numeroTicket,
+    tipo,
+    unidadeNome: r.unidadeNome || r.unidade,
+    status: r.status,
+    execucaoStatus: r.execucaoStatus,
+    execucaoPorNome: r.execucaoPorNome || null,
+    criadoEm: r.criadoEm,
+    motivoDecisao: r.motivoDecisao,
+    decididoPorEmail: r.decididoPorEmail || r.decidedByEmail || null,
+    decididoEm: r.decididoEm || r.decidedEm || null,
+    anexos: (r.anexos || []).map((a, i) => ({ nome: a.nome, index: i })),
+    podeDecidir: r.status === 'PENDENTE',
+    podeAtualizarExecucao: r.status === 'APROVADO' && r.execucaoStatus !== 'FINALIZADO',
+  };
+  if (tipo === 'estorno') {
+    return {
+      ...base,
+      titulo: `Estorno${r.nomeCliente ? ' · ' + r.nomeCliente : ''}`,
+      observacao: r.observacao,
+      motivoEstorno: r.motivoEstorno,
+      motivoOutro: r.motivoOutro,
+      valorVenda: r.valorVenda,
+      formaPagamento: r.formaPagamento,
+      bandeira: r.bandeira,
+      ultimos4: r.ultimos4,
+      dataVenda: r.dataVenda,
+      horaVenda: r.horaVenda,
+      valorEstornar: r.valorEstornar,
+      nomeCliente: r.nomeCliente,
+      telefoneCliente: r.telefoneCliente,
+      pixChave: r.pixChave,
+      pixNomeTitular: r.pixNomeTitular,
+      pixBanco: r.pixBanco,
+      observacaoCliente: r.observacaoCliente,
+    };
+  }
+  return {
+    ...base,
+    titulo: r.titulo,
+    valorEstimado: r.valorEstimado,
+    observacao: r.observacao,
+    itens: r.itens,
+    ehOrcamento: r.ehOrcamento,
+    fornecedor: r.fornecedor,
+    vencimento: r.vencimento,
+  };
+}
+
+app.get('/api/central/:tipo/:id/publico', async (req, res) => {
+  const registro = await moduloTicket(req.params.tipo).buscarPorLinkAcao(req.params.id, req.query.link);
+  if (!registro) return res.status(404).json({ error: 'Link inválido ou revogado.' });
+  res.json(payloadPublicoTicket(req.params.tipo, registro));
+});
+
+app.get('/api/central/:tipo/:id/anexo-publico/:index', async (req, res) => {
+  const registro = await moduloTicket(req.params.tipo).buscarPorLinkAcao(req.params.id, req.query.link);
+  if (!registro) return res.sendStatus(404);
+  const anexo = registro.anexos && registro.anexos[Number(req.params.index)];
+  if (!anexo) return res.sendStatus(404);
+  storage.streamArquivo(anexo.path, anexo.tipo, res);
+});
+
+app.get('/api/central/:tipo/:id/chat-publico', async (req, res) => {
+  const registro = await moduloTicket(req.params.tipo).buscarPorLinkAcao(req.params.id, req.query.link);
+  if (!registro) return res.status(404).json({ error: 'Link inválido ou revogado.' });
+  res.json(await centralChat.listByCard(req.params.tipo, req.params.id));
+});
+
+app.post('/api/central/:tipo/:id/chat-publico', upload.single('imagem'), async (req, res) => {
+  try {
+    const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
+    const registro = await moduloTicket(req.params.tipo).buscarPorLinkAcao(req.params.id, payload.link);
+    if (!registro) return res.status(404).json({ error: 'Link inválido ou revogado.' });
+    const autorNome = String(payload.autorNome || '').trim().slice(0, 80) || 'Visitante';
+    let imagem = null;
+    if (req.file) {
+      const path = await storage.salvarArquivo(req.params.id, req.file, 'central-chat');
+      imagem = { nome: req.file.originalname, path, tipo: req.file.mimetype || 'application/octet-stream' };
+    }
+    const mensagem = await centralChat.addMessage({
+      tipo: req.params.tipo,
+      cardId: req.params.id,
+      autorId: null,
+      autorEmail: null,
+      autorUsername: `${autorNome} · externo`,
+      texto: payload.texto,
+      imagem,
+    });
+    broadcast('central-chat-nova', mensagem, 'solicitacoes');
+    res.json(mensagem);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/central/:tipo/:id/decidir-publico', upload.single('comprovante'), async (req, res) => {
+  try {
+    const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
+    const modulo = moduloTicket(req.params.tipo);
+    let comprovante = null;
+    if (req.file) {
+      const registroAtual = await modulo.getOne(req.params.id);
+      const path = await storage.salvarArquivo((registroAtual && registroAtual.unidade) || 'geral', req.file, 'solicitacoes');
+      comprovante = { nome: req.file.originalname, path, tipo: req.file.mimetype || 'application/octet-stream' };
+    }
+    const atualizado = await modulo.decidirComLink(req.params.id, payload.link, {
+      acao: payload.acao, motivoDecisao: payload.motivoDecisao, comprovante, autorNome: payload.autorNome,
+    });
+    broadcast(req.params.tipo === 'estorno' ? 'refund-request-changed' : 'solicitacao-decidida', atualizado, req.params.tipo === 'estorno' ? 'monitor' : 'solicitacoes');
+    res.json({ ok: true, status: atualizado.status });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/central/:tipo/:id/execucao-publico', async (req, res) => {
+  try {
+    const modulo = moduloTicket(req.params.tipo);
+    const atualizado = await modulo.atualizarExecucaoComLink(req.params.id, req.body.link, req.body.execucaoStatus, { autorNome: req.body.autorNome });
+    broadcast(req.params.tipo === 'estorno' ? 'refund-request-changed' : 'solicitacao-decidida', atualizado, req.params.tipo === 'estorno' ? 'monitor' : 'solicitacoes');
+    res.json({ ok: true, execucaoStatus: atualizado.execucaoStatus });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -4741,9 +4888,45 @@ app.patch('/api/solicitacoes/:id/execucao', auth.requireMasterOrAdmin, async (re
     const atual = await solicitacoes.getOne(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Solicitação não encontrada.' });
     if (tipoBloqueado(req, atual.tipo)) return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
-    const registro = await solicitacoes.atualizarExecucao(req.params.id, req.body.execucaoStatus);
+    const registro = await solicitacoes.atualizarExecucao(req.params.id, req.body.execucaoStatus, { porNome: req.user.email });
     broadcast('solicitacao-decidida', registro, 'solicitacoes');
     res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// mesma logica pro Estorno (antes so os 5 tipos gerais tinham andamento de
+// execucao) - ver refunds.atualizarExecucao/EXECUCAO_STATUSES
+app.patch('/api/refund-requests/:id/execucao', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    if (tipoBloqueado(req, 'estorno')) return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
+    const registro = await refunds.atualizarExecucao(req.params.id, req.body.execucaoStatus, { porNome: req.user.email });
+    broadcast('refund-request-changed', registro, 'monitor');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// gera/revoga o link de acao compartilhavel (ver moduloTicket/gerarLinkAcao
+// acima) - mesmo publico de quem decide/executa um ticket em app
+app.post('/api/central/:tipo/:id/gerar-link', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    if (tipoBloqueado(req, req.params.tipo)) return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
+    const { linkAcao } = await moduloTicket(req.params.tipo).gerarLinkAcao(req.params.id);
+    const url = `${APP_BASE_URL}/ticket-publico.html?tipo=${encodeURIComponent(req.params.tipo)}&ticket=${encodeURIComponent(req.params.id)}&link=${encodeURIComponent(linkAcao)}`;
+    res.json({ url });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/central/:tipo/:id/revogar-link', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    if (tipoBloqueado(req, req.params.tipo)) return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
+    await moduloTicket(req.params.tipo).revogarLinkAcao(req.params.id);
+    res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
