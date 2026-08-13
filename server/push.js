@@ -439,16 +439,21 @@ async function notifyExperienciaPrazoGerente(funcionario) {
   }
 }
 
-// loja parou de mandar heartbeat (ver rodarVarreduraLojaStatus em index.js) -
-// mesmo publico do alerta critico do Beniboy (Master + tag Suporte), ja que
-// e quem cuida de infra/conectividade das lojas; alarme "alto" (critical),
-// no espirito de alerta de RMM (Atera etc) que o usuario pediu
-async function notifyLojaOffline(unidadeNome, codigo) {
+// um computador da loja parou de mandar heartbeat (ver
+// rodarVarreduraLojaStatus em index.js) - mesmo publico do alerta critico do
+// Beniboy (Master + tag Suporte), ja que e quem cuida de infra/conectividade
+// das lojas; alarme "alto" (critical), no espirito de alerta de RMM (Atera
+// etc) que o usuario pediu. tag inclui o posto (nao so a unidade) porque
+// agora uma loja pode ter varios computadores caindo/voltando de forma
+// independente - com tag so por unidade, o segundo aviso substituiria o
+// primeiro em vez de aparecer como notificacao separada
+async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto) {
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const payload = JSON.stringify({
     title: '🔴 Loja sem conexão',
-    body: `${unidadeNome || codigo} parou de responder - verifique a internet/computador da loja.`,
-    tag: 'loja-status-' + codigo,
+    body: `${prefixo}${unidadeNome || codigo} parou de responder - verifique a internet/computador da loja.`,
+    tag: `loja-status-${codigo}-${posto || 'principal'}`,
     critical: true,
     url: '/loja-status.html',
   });
@@ -467,14 +472,15 @@ async function notifyLojaOffline(unidadeNome, codigo) {
   }
 }
 
-// loja voltou a responder depois de ter caido - aviso tranquilo (sem
-// alarme), mesmo publico do alerta de queda
-async function notifyLojaVoltou(unidadeNome, codigo) {
+// computador da loja voltou a responder depois de ter caido - aviso
+// tranquilo (sem alarme), mesmo publico do alerta de queda
+async function notifyLojaVoltou(unidadeNome, codigo, computadorNome, posto) {
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const payload = JSON.stringify({
     title: '🟢 Loja reconectou',
-    body: `${unidadeNome || codigo} voltou a responder.`,
-    tag: 'loja-status-' + codigo,
+    body: `${prefixo}${unidadeNome || codigo} voltou a responder.`,
+    tag: `loja-status-${codigo}-${posto || 'principal'}`,
     url: '/loja-status.html',
   });
   const subs = await loadSubs();
