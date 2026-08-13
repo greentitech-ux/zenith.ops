@@ -159,10 +159,9 @@ async function criar({
     experiencia: tipo === 'efetivado' ? calcularExperienciaInicial(dataAdmissaoOk, semExperienciaOk) : null,
     historicoExperiencia: [],
     // token permanente do link de auto-atendimento (rh-colaborador.html) -
-    // a pessoa preenche os proprios dados e bate ponto sem precisar de login
-    // no Zenith (ver buscarPorToken/atualizarPorToken); nao expira sozinho,
-    // so quem tem acesso a unidade pode regenerar (ver regenerarLink) se
-    // o link vazar
+    // a pessoa bate ponto sem precisar de login no Zenith (ver
+    // buscarPorToken); nao expira sozinho, so quem tem acesso a unidade
+    // pode regenerar (ver regenerarLink) se o link vazar
     linkToken: crypto.randomBytes(24).toString('hex'),
     cadastradoPorId: cadastradoPorId || null,
     cadastradoPorEmail: cadastradoPorEmail || null,
@@ -281,30 +280,6 @@ async function regenerarLink(id) {
   await ref.update({ linkToken, atualizadoEm: new Date().toISOString() });
   rhCache.invalidar();
   return getOne(id);
-}
-
-// versao "self-service" de atualizar() pro link publico: so deixa a propria
-// pessoa mexer nos dados dela mesma (nome/contato/cargo/nascimento/
-// curriculo) - nunca unidade, status, tipoCadastro, experiencia ou qualquer
-// outro campo interno/administrativo. Bloqueia quem ja foi desligado (nao
-// faz sentido continuar editando cadastro depois de sair)
-async function atualizarPorToken(token, { nome, contato, cargoFuncao, dataNascimento, curriculo }) {
-  const atual = await buscarPorToken(token);
-  if (!atual) throw new Error('Link inválido.');
-  if (atual.status === 'inativo') throw new Error('Esse cadastro está inativo - fale com seu gerente.');
-  const merge = { atualizadoEm: new Date().toISOString() };
-  if (nome !== undefined) {
-    const nomeOk = limpar(nome, 150);
-    if (!nomeOk) throw new Error('Informe o nome completo.');
-    merge.nome = nomeOk;
-  }
-  if (contato !== undefined) merge.contato = limpar(contato, 40);
-  if (cargoFuncao !== undefined) merge.cargoFuncao = limpar(cargoFuncao, 60);
-  if (dataNascimento !== undefined) merge.dataNascimento = validarDataOuNull(dataNascimento, 'Data de nascimento');
-  if (curriculo !== undefined) merge.curriculo = curriculo;
-  await COLLECTION.doc(atual.id).update(merge);
-  rhCache.invalidar();
-  return getOne(atual.id);
 }
 
 // registra a decisao do periodo de teste (efetivar/desligar) - tira
@@ -590,7 +565,7 @@ function aniversariantesHoje(lista, dataRef) {
 module.exports = {
   DIAS_TESTE_ALERTA, TIPOS_CADASTRO, ALERTA_EXPERIENCIA_DIAS,
   criar, listAll, listByUnidades, getOne, atualizar, remover,
-  buscarPorToken, regenerarLink, atualizarPorToken,
+  buscarPorToken, regenerarLink,
   registrarDecisaoTeste, verificarTestesVencidos, marcarAlertaTesteEnviado,
   registrarAtestado, registrarRetornoAtestado,
   registrarDecisaoExperiencia, verificarAlertasExperiencia, marcarAlertaExperienciaEnviado, definirExperiencia,

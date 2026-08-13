@@ -552,26 +552,6 @@ app.get('/api/rh/publico/:token', async (req, res) => {
   res.json({ ...funcionarioPublico(funcionario), checkinAberto: aberto ? { id: aberto.id, entrada: aberto.entrada.horario } : null });
 });
 
-app.put('/api/rh/publico/:token', upload.single('curriculo'), async (req, res) => {
-  try {
-    const funcionario = await rh.buscarPorToken(req.params.token);
-    if (!funcionario) return res.status(404).json({ error: 'Link inválido.' });
-    let curriculo;
-    if (req.file) {
-      const path = await storage.salvarArquivo(funcionario.unidade || 'geral', req.file, 'rh-curriculos');
-      curriculo = { path, nomeOriginal: req.file.originalname, tipo: req.file.mimetype };
-    }
-    const registro = await rh.atualizarPorToken(req.params.token, {
-      nome: req.body.nome, contato: req.body.contato, cargoFuncao: req.body.cargoFuncao,
-      dataNascimento: req.body.dataNascimento, curriculo,
-    });
-    broadcast('rh-funcionario-atualizado', registro, 'rh');
-    res.json(funcionarioPublico(registro));
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
 app.post('/api/rh/publico/:token/checkin', upload.single('foto'), async (req, res) => {
   try {
     const funcionario = await rh.buscarPorToken(req.params.token);

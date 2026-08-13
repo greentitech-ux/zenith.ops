@@ -32,9 +32,6 @@
   label:first-child{margin-top:0;}
   select,input{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:12px;font-size:15px;font-family:var(--sans);}
   select:focus,input:focus{outline:none;border-color:var(--accent);}
-  .link-btn{background:none;border:none;color:var(--accent);font-family:var(--mono);font-size:11.5px;cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:3px;}
-  .btn-primary{width:100%;padding:14px;border-radius:10px;border:none;background:var(--accent);color:#06202b;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--sans);margin-top:14px;}
-  .btn-primary:disabled{opacity:.5;cursor:default;}
   .btn-acao{width:100%;padding:20px;border-radius:12px;border:none;font-size:17px;font-weight:700;cursor:pointer;font-family:var(--sans);}
   .btn-acao.entrada{background:var(--accent);color:#06202b;}
   .btn-acao.saida{background:var(--warn);color:#241a00;}
@@ -92,26 +89,6 @@
   </div>
 </div>
 
-<!-- Meus dados -->
-<div class="panel">
-  <button type="button" class="link-btn" id="btn-toggle-dados" onclick="toggleDados()">✏️ Editar meus dados</button>
-  <form id="form-dados" class="hidden" onsubmit="return false;">
-    <label>Nome completo</label>
-    <input type="text" id="d-nome" maxlength="150" required>
-    <label>Contato (telefone/WhatsApp)</label>
-    <input type="text" id="d-contato" maxlength="40">
-    <label>Cargo / função</label>
-    <input type="text" id="d-cargo" maxlength="60">
-    <label>Data de nascimento</label>
-    <input type="date" id="d-nascimento">
-    <label>Currículo (PDF, opcional)</label>
-    <input type="file" id="d-curriculo" accept="application/pdf">
-    <div class="sub" id="d-curriculo-atual"></div>
-    <button type="button" class="btn-primary" onclick="salvarDados()">Salvar meus dados</button>
-    <div class="msg hidden" id="dados-msg"></div>
-  </form>
-</div>
-
 </div>
 
 <input type="file" id="input-foto" accept="image/*" capture="user" class="hidden">
@@ -123,12 +100,6 @@ function fmtHora(iso){ if(!iso) return ''; return new Date(iso).toLocaleTimeStri
 const TOKEN = new URLSearchParams(location.search).get('token');
 let FUNCIONARIO = null;
 let CHECKIN_ABERTO = null;
-
-function toggleDados(){
-  const form = document.getElementById('form-dados');
-  form.classList.toggle('hidden');
-  document.getElementById('btn-toggle-dados').textContent = form.classList.contains('hidden') ? '✏️ Editar meus dados' : '✕ Fechar edição';
-}
 
 function renderPonto(){
   document.getElementById('ponto-nome').textContent = FUNCIONARIO.nome;
@@ -146,14 +117,6 @@ function renderPonto(){
     btn.textContent = '✅ Fazer check-in';
     btn.className = 'btn-acao entrada';
   }
-}
-
-function preencherFormDados(){
-  document.getElementById('d-nome').value = FUNCIONARIO.nome || '';
-  document.getElementById('d-contato').value = FUNCIONARIO.contato || '';
-  document.getElementById('d-cargo').value = FUNCIONARIO.cargoFuncao || '';
-  document.getElementById('d-nascimento').value = FUNCIONARIO.dataNascimento || '';
-  document.getElementById('d-curriculo-atual').textContent = FUNCIONARIO.temCurriculo ? '📎 já tem um currículo salvo - escolha outro arquivo só se quiser substituir.' : '';
 }
 
 function obterLocalizacaoSilenciosa(){
@@ -218,32 +181,6 @@ async function enviarPonto(foto){
   }
 }
 
-async function salvarDados(){
-  const msg = document.getElementById('dados-msg');
-  msg.classList.add('hidden');
-  const nome = document.getElementById('d-nome').value.trim();
-  if(!nome){ msg.textContent = 'Informe o nome completo.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
-  try{
-    const fd = new FormData();
-    fd.append('nome', nome);
-    fd.append('contato', document.getElementById('d-contato').value);
-    fd.append('cargoFuncao', document.getElementById('d-cargo').value);
-    fd.append('dataNascimento', document.getElementById('d-nascimento').value);
-    const arquivo = document.getElementById('d-curriculo').files[0];
-    if(arquivo) fd.append('curriculo', arquivo);
-    const resp = await fetch(`/api/rh/publico/${TOKEN}`, { method:'PUT', body: fd });
-    const data = await resp.json();
-    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
-    FUNCIONARIO = data;
-    document.getElementById('d-curriculo').value = '';
-    preencherFormDados();
-    renderPonto();
-    msg.textContent = 'Dados salvos com sucesso.'; msg.className = 'msg ok'; msg.classList.remove('hidden');
-  }catch(err){
-    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
-  }
-}
-
 async function carregarEstado(){
   const resp = await fetch(`/api/rh/publico/${TOKEN}`);
   if(!resp.ok){ document.getElementById('nao-encontrado').classList.remove('hidden'); return false; }
@@ -265,7 +202,6 @@ async function boot(){
   }
   document.getElementById('root').classList.remove('hidden');
   renderPonto();
-  preencherFormDados();
 }
 
 boot();
