@@ -184,6 +184,7 @@
   <div class="panel">
     <h2>👥 Por Unidade</h2>
     <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">todo mundo cadastrado na unidade, num lugar só, com o status atual de cada um</div>
+    <button type="button" class="btn-secundario hidden" id="btn-mesclar-duplicados" style="margin-bottom:10px;" onclick="mesclarDuplicados()">🧹 Mesclar cadastros duplicados</button>
     <label>Unidade</label>
     <select id="un-filtro-unidade" onchange="renderPorUnidade()"></select>
     <div id="lista-unidade" style="margin-top:14px;"></div>
@@ -939,6 +940,21 @@ function statusBadgeInfo(f){
   return { label:'colaborador', cls:'ok' };
 }
 
+async function mesclarDuplicados(){
+  if(!confirm('Procurar e remover cadastros duplicados (mesmo nome, mesma loja)?\n\nQuando achar duplicidade, mantém quem já tem check-in fechado (entrada + saída) e remove o(s) outro(s) - inclusive os check-ins deles.')) return;
+  try{
+    const resp = await fetch('/api/rh/funcionarios/mesclar-duplicados', { method:'POST' });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao mesclar.');
+    if(!data.length){ alert('Nenhum cadastro duplicado encontrado.'); return; }
+    const linhas = data.map(r=>`${r.nome} (${UNIDADES_NOMES[r.unidade]||r.unidade}): removido${r.removidos.length>1?'s':''} ${r.removidos.length} cadastro(s) duplicado(s)`);
+    alert(`Mesclagem concluída:\n\n${linhas.join('\n')}`);
+    await carregar();
+  }catch(err){
+    alert(err.message);
+  }
+}
+
 function renderPorUnidade(){
   const sel = document.getElementById('un-filtro-unidade');
   const unidade = sel.value;
@@ -1565,6 +1581,7 @@ async function boot(){
   // Master/Admin) - a loja (gerente comum) so cadastra Extra/Candidato
   document.getElementById('btn-tipo-efetivado').classList.toggle('hidden', !(isMaster || ME.isAdmin || ME.podeRhCadastrarEfetivado));
   document.getElementById('painel-importar-lote').classList.toggle('hidden', !isMaster);
+  document.getElementById('btn-mesclar-duplicados').classList.toggle('hidden', !isMaster);
   // data de admissao/inicio do teste no modal de editar so o Master corrige
   document.getElementById('campo-ed-admissao').classList.toggle('hidden', !isMaster);
 
