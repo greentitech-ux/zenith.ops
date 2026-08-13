@@ -438,6 +438,52 @@ async function importarLote(linhas, { porEmail }) {
   return resultados;
 }
 
+// limpeza pontual dos cadastros duplicados que existiam ANTES da trava em
+// criar() (ver normalizarNome ali) - agrupa quem esta ativo por loja+nome e,
+// pra cada grupo com mais de 1 ficha, mantem so uma: prioridade pra quem tem
+// check-in FECHADO (entrada+saida completas - sinal de que e o cadastro que
+// realmente foi usado no dia a dia); empate ou ninguem com check-in fechado,
+// mantem o mais antigo (criadoEm). Os outros sao removidos junto com todos
+// os check-ins deles (senao ficariam check-ins orfaos, principalmente um
+// "aberto" que nunca mais fecharia por ninguem)
+async function mesclarDuplicados(rhCheckin) {
+  const todos = await listAll();
+  const grupos = new Map();
+  for (const f of todos) {
+    if (f.status === 'inativo') continue;
+    const chave = `${f.unidade}|${normalizarNome(f.nome)}`;
+    if (!grupos.has(chave)) grupos.set(chave, []);
+    grupos.get(chave).push(f);
+  }
+  const relatorio = [];
+  for (const lista of grupos.values()) {
+    if (lista.length < 2) continue;
+    const comCheckins = await Promise.all(lista.map(async (funcionario) => ({
+      funcionario,
+      checkins: rhCheckin ? await rhCheckin.listPorFuncionario(funcionario.id) : [],
+    })));
+    comCheckins.sort((a, b) => {
+      const aFechado = a.checkins.some((c) => c.status === 'fechado') ? 1 : 0;
+      const bFechado = b.checkins.some((c) => c.status === 'fechado') ? 1 : 0;
+      if (aFechado !== bFechado) return bFechado - aFechado;
+      return String(a.funcionario.criadoEm).localeCompare(String(b.funcionario.criadoEm));
+    });
+    const [manter, ...remover] = comCheckins;
+    for (const { funcionario, checkins } of remover) {
+      for (const c of checkins) await rhCheckin.remover(c.id);
+      await COLLECTION.doc(funcionario.id).delete();
+    }
+    relatorio.push({
+      unidade: manter.funcionario.unidade,
+      nome: manter.funcionario.nome,
+      mantidoId: manter.funcionario.id,
+      removidos: remover.map((r) => ({ id: r.funcionario.id, checkinsRemovidos: r.checkins.length })),
+    });
+  }
+  if (relatorio.length) rhCache.invalidar();
+  return relatorio;
+}
+
 async function remover(id) {
   const snap = await COLLECTION.doc(id).get();
   if (!snap.exists) throw new Error('Funcionário não encontrado.');
@@ -579,7 +625,7 @@ function aniversariantesHoje(lista, dataRef) {
 
 module.exports = {
   DIAS_TESTE_ALERTA, TIPOS_CADASTRO, ALERTA_EXPERIENCIA_DIAS,
-  criar, listAll, listByUnidades, getOne, atualizar, remover,
+  criar, listAll, listByUnidades, getOne, atualizar, remover, mesclarDuplicados,
   buscarPorToken, regenerarLink,
   registrarDecisaoTeste, verificarTestesVencidos, marcarAlertaTesteEnviado,
   registrarAtestado, registrarRetornoAtestado,

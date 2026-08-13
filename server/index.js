@@ -3566,6 +3566,20 @@ app.post('/api/rh/funcionarios/importar-lote', auth.requireMaster, async (req, r
   }
 });
 
+// limpeza pontual de cadastros duplicados (mesmo nome, mesma loja) que
+// existiam antes da trava em rh.criar() - idempotente, sem duplicados
+// sobrando nao faz nada; ver rh.mesclarDuplicados pro criterio de qual ficha
+// fica (a que tem check-in fechado) e qual sai
+app.post('/api/rh/funcionarios/mesclar-duplicados', auth.requireMaster, async (req, res) => {
+  try {
+    const relatorio = await rh.mesclarDuplicados(rhCheckin);
+    if (relatorio.length) broadcast('rh-funcionario-atualizado', {}, 'rh');
+    res.json(relatorio);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/rh/funcionarios', requireSection('rh'), async (req, res) => {
   if (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) return res.json(await rh.listAll());
   res.json(await rh.listByUnidades(req.permissions.unidades || []));

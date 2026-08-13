@@ -158,6 +158,13 @@ async function buscarAbertoDoFuncionario(funcionarioId) {
   return todos.find((c) => c.funcionarioId === funcionarioId && c.status === 'aberto') || null;
 }
 
+// todos os check-ins (qualquer status/data) de 1 funcionario - usado pelo
+// mesclarDuplicados de rh.js pra decidir qual cadastro duplicado manter (o
+// que tem check-in fechado) e limpar os check-ins do que vai ser removido
+async function listPorFuncionario(funcionarioId) {
+  return (await listAll()).filter((c) => c.funcionarioId === funcionarioId);
+}
+
 // mesmo padrao de filtro em memoria sobre o cache compartilhado usado em
 // rh.js/festas.js/parque.js - unidades null = sem filtro (Master/Admin/RH
 // todas unidades ja resolvem isso em index.js antes de chamar)
@@ -290,7 +297,7 @@ async function resumoSemana(unidades) {
 
 module.exports = {
   LIMITE_CHECKINS_SEMANA_EXTRA,
-  registrarEntrada, registrarSaida, buscarAbertoDoFuncionario,
+  registrarEntrada, registrarSaida, buscarAbertoDoFuncionario, listPorFuncionario,
   listByUnidadesData, listAbertos, listPendentesAprovacao, resumoSemana,
   aprovarPendencia, recusarPendencia, editarHorarios, remover, getOne, hojeBrasilia,
   invalidar: () => checkinCache.invalidar(),
