@@ -10,6 +10,7 @@
 //   maquininha - mesmos campos do Google Forms que a empresa ja usava.
 // De qualquer origem, o Master acompanha a mesma fila e Aprova (e executa o
 // estorno na Adyen por fora) ou Rejeita (com um motivo).
+const crypto = require('crypto');
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
 const ticketCounter = require('./ticketCounter');
@@ -24,6 +25,11 @@ const STATUSES = ['PENDENTE', 'APROVADO', 'REJEITADO', 'CONVERTIDO'];
 // (ver converterParaEstorno em solicitacoes.js) - os dados ja foram
 // validados na criacao do ticket original, entao pula a validacao normal
 const ORIGENS = ['interno', 'cliente', 'conversao'];
+
+// andamento da EXECUCAO de verdade (o estorno em si na Adyen/Pix), depois que
+// o pedido ja foi Aprovado - mesmo conceito/valores de
+// solicitacoes.EXECUCAO_STATUSES, so faz sentido com status==='APROVADO'
+const EXECUCAO_STATUSES = ['PENDENTE', 'EM_ANDAMENTO', 'FINALIZADO'];
 
 
 async function create({
@@ -115,6 +121,20 @@ async function create({
     decidedByEmail: null,
     criadoEm: agora,
     decidedEm: null,
+    // andamento da execucao, so preenchido (e so relevante) apos Aprovado -
+    // ver EXECUCAO_STATUSES/atualizarExecucao
+    execucaoStatus: null,
+    execucaoPorNome: null,
+    // link de acao pra alguem de fora resolver esse ticket (aprovar/rejeitar
+    // OU avancar a execucao, dependendo do estado atual) sem precisar de
+    // login - ver gerarLinkAcao/decidirComLink/atualizarExecucaoComLink e
+    // ticket-publico.html. Diferente do tokenAcao de solicitacoes.js (que e
+    // de uso unico, so pra decidir, e alimentado pelo relatorio por e-mail):
+    // esse fica valido enquanto o ticket nao chegar num estado terminal, pra
+    // o MESMO link servir a decisao e, depois, a execucao.
+    linkAcao: null,
+    linkAcaoGeradoEm: null,
+    linkAcaoRevogado: false,
   };
   await doc.set(registro);
   refundsCache.invalidar();
@@ -148,14 +168,111 @@ async function updateStatus(id, status, { motivoDecisao, decidedByEmail }) {
   const ref = refundsRef.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Solicitação não encontrada.');
-  await ref.update({
+  const patch = {
     status,
     motivoDecisao: motivoDecisao || '',
     decidedByEmail,
     decidedEm: new Date().toISOString(),
-  });
+  };
+  // aprovar comeca o andamento de execucao em Pendente (ver EXECUCAO_STATUSES)
+  if (status === 'APROVADO') patch.execucaoStatus = 'PENDENTE';
+  await ref.update(patch);
   refundsCache.invalidar();
   return getOne(id);
+}
+
+// atualiza o andamento de execucao (Pendente/Em andamento/Finalizado) de um
+// estorno ja Aprovado - mesmo espirito de solicitacoes.atualizarExecucao.
+// porNome e opcional (quem mexeu - e-mail de quem esta logado, ou o nome que
+// a pessoa digitou no link publico, ver atualizarExecucaoComLink)
+async function atualizarExecucao(id, execucaoStatus, { porNome } = {}) {
+  if (!EXECUCAO_STATUSES.includes(execucaoStatus)) throw new Error('Status de execução inválido.');
+  const ref = refundsRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Solicitação não encontrada.');
+  if (snap.data().status !== 'APROVADO') throw new Error('Só é possível atualizar o andamento de um estorno já aprovado.');
+  const patch = { execucaoStatus };
+  if (porNome) patch.execucaoPorNome = porNome;
+  await ref.update(patch);
+  refundsCache.invalidar();
+  return getOne(id);
+}
+
+// true se o ticket ainda tem alguma acao pendente (decidir OU avancar a
+// execucao) - usado tanto pra saber se vale a pena gerar/manter um link de
+// acao quanto pra decidir, na pagina publica, se mostra botoes ou so o
+// estado final somente-leitura
+function podeAgirComLink(registro) {
+  if (!registro) return false;
+  if (registro.status === 'PENDENTE') return true;
+  if (registro.status === 'APROVADO') return registro.execucaoStatus !== 'FINALIZADO';
+  return false; // REJEITADO/CONVERTIDO - nada mais a fazer
+}
+
+// gera (ou renova) o link de acao pra alguem de fora resolver esse ticket
+// sem login (ver ticket-publico.html) - ao contrario do tokenAcao de
+// solicitacoes.js, nao exige status PENDENTE (so nao deixa gerar um link
+// pra um ticket que ja nao tem mais nada a fazer) e NAO e de uso unico: o
+// mesmo link continua valido depois de aprovar, pra a mesma pessoa (ou
+// outra) avancar a execucao em seguida.
+async function gerarLinkAcao(id) {
+  const registro = await getOne(id);
+  if (!registro) throw new Error('Solicitação não encontrada.');
+  if (!podeAgirComLink(registro)) throw new Error('Esse ticket já foi resolvido, não há mais nada a fazer por link.');
+  const linkAcao = crypto.randomBytes(24).toString('hex');
+  await refundsRef.doc(id).update({ linkAcao, linkAcaoGeradoEm: new Date().toISOString(), linkAcaoRevogado: false });
+  refundsCache.invalidar();
+  return { linkAcao };
+}
+
+// invalida o link atual (ex: vazou, ou foi mandado pra pessoa errada) - gerar
+// de novo com gerarLinkAcao cria outro token, o antigo para de funcionar na
+// hora
+async function revogarLinkAcao(id) {
+  await refundsRef.doc(id).update({ linkAcaoRevogado: true });
+  refundsCache.invalidar();
+  return getOne(id);
+}
+
+// confere o link recebido em ticket-publico.html - devolve o registro se
+// bater e nao tiver sido revogado, null em qualquer outro caso (mesmo
+// espirito de rh.buscarPorToken: nao distingue o motivo pro chamador)
+async function buscarPorLinkAcao(id, link) {
+  if (!id || !link) return null;
+  const registro = await getOne(id);
+  if (!registro) return null;
+  if (!registro.linkAcao || registro.linkAcao !== link || registro.linkAcaoRevogado) return null;
+  return registro;
+}
+
+// decide (aprova/recusa) via o link de acao - mesma logica de updateStatus,
+// so que autorizando pelo link em vez de sessao, e aceitando um nome livre
+// (quem abriu o link pode nao ter conta no Zenith)
+async function decidirComLink(id, link, { acao, motivoDecisao, comprovante, autorNome }) {
+  const registro = await buscarPorLinkAcao(id, link);
+  if (!registro) throw new Error('Link inválido ou revogado.');
+  if (registro.status !== 'PENDENTE') throw new Error('Esse ticket já foi decidido.');
+  if (!['aprovar', 'recusar'].includes(acao)) throw new Error('Ação inválida.');
+  const status = acao === 'aprovar' ? 'APROVADO' : 'REJEITADO';
+  const patch = {
+    status,
+    motivoDecisao: motivoDecisao || '',
+    decidedByEmail: autorNome || registro.direcionadoParaEmail || 'via link',
+    decidedEm: new Date().toISOString(),
+  };
+  if (status === 'APROVADO') patch.execucaoStatus = 'PENDENTE';
+  if (comprovante) patch.anexos = [...(registro.anexos || []), comprovante];
+  await refundsRef.doc(id).update(patch);
+  refundsCache.invalidar();
+  return getOne(id);
+}
+
+// avanca a execucao via o link de acao - mesma validacao de decidirComLink
+async function atualizarExecucaoComLink(id, link, execucaoStatus, { autorNome }) {
+  const registro = await buscarPorLinkAcao(id, link);
+  if (!registro) throw new Error('Link inválido ou revogado.');
+  if (registro.status !== 'APROVADO') throw new Error('Esse ticket ainda não foi aprovado.');
+  return atualizarExecucao(id, execucaoStatus, { porNome: autorNome || 'via link' });
 }
 
 
@@ -250,6 +367,7 @@ async function converterParaSolicitacao(id, novoTipo, dadosExtras, porEmail) {
 }
 
 module.exports = {
-  STATUSES, create, listAll, getOne, updateStatus, update, remove, marcarNotificacaoVista, redirecionar,
-  converterParaSolicitacao,
+  STATUSES, EXECUCAO_STATUSES, create, listAll, getOne, updateStatus, update, remove, marcarNotificacaoVista,
+  redirecionar, converterParaSolicitacao, atualizarExecucao, podeAgirComLink, gerarLinkAcao, revogarLinkAcao,
+  buscarPorLinkAcao, decidirComLink, atualizarExecucaoComLink,
 };

@@ -215,6 +215,7 @@
   <a class="back hidden" id="nav-manutencao" href="/manutencao.html">🔧 Manutenção</a>
   <a class="back hidden" id="nav-central-solucoes" href="/central-solucoes.html">💬 Central de Soluções</a>
   <a class="back hidden" id="nav-beniboy" href="/beniboy.html">🐝 Central do Beniboy</a>
+  <a class="back hidden" id="nav-loja-status" href="/loja-status.html">📡 Status das Lojas</a>
   <div class="nav-drawer-grupo">Administração</div>
   <a class="back hidden" id="nav-usuarios" href="/usuarios.html">👤 Usuários</a>
   <a class="back hidden" id="nav-grupos" href="/grupos.html">🏷️ Grupos</a>
@@ -396,6 +397,9 @@
     <div id="d-master-crud" class="hidden" style="display:flex;gap:14px;margin-top:10px;">
       <button type="button" class="link-btn" id="btn-editar-card" onclick="abrirEdicaoCard()">✏️ Editar</button>
       <button type="button" class="link-btn" style="color:var(--bad);" onclick="excluirCard()">🗑️ Excluir</button>
+    </div>
+    <div id="d-enviar-link" class="hidden" style="margin-top:10px;">
+      <button type="button" class="link-btn" onclick="enviarLinkTicket()">🔗 Enviar link</button>
     </div>
     <div id="d-tecnico-reatribuir" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px;">
       <div class="secao-titulo">🔧 Atribuir Técnico</div>
@@ -1038,6 +1042,13 @@ function abrirDetalhe(tipo, id){
   document.getElementById('d-master-crud').classList.toggle('hidden', !IS_MASTER);
   document.getElementById('btn-editar-card').classList.toggle('hidden', c.tipo==='ajuste-fechamento');
 
+  // link pra outra pessoa resolver esse ticket (aprovar/rejeitar OU avancar a
+  // execucao, dependendo do estado) - so pros tipos que tem esse mecanismo no
+  // backend (estorno + os 5 tipos gerais, ver moduloTicket em index.js)
+  const podeAgirComLink = c.status==='PENDENTE' || (c.status==='APROVADO' && c.execucaoStatus!=='FINALIZADO');
+  const temLinkAcao = c.tipo==='estorno' || TIPOS_GERAIS.includes(c.tipo);
+  document.getElementById('d-enviar-link').classList.toggle('hidden', !((IS_MASTER||IS_ADMIN) && temLinkAcao && podeAgirComLink));
+
   // atribuir responsavel decide quem ENXERGA o card (ver todosCardsCentral em
   // index.js) - por isso so o Master pode mexer, igual ele pediu
   document.getElementById('btn-atribuir-responsavel').classList.toggle('hidden', !IS_MASTER);
@@ -1078,7 +1089,7 @@ const ANDAMENTO_INFO = {
 };
 function renderAndamento(c){
   const wrap = document.getElementById('d-andamento');
-  const podeVer = TIPOS_GERAIS.includes(c.tipo) && c.status==='APROVADO';
+  const podeVer = (TIPOS_GERAIS.includes(c.tipo) || c.tipo==='estorno') && c.status==='APROVADO';
   wrap.classList.toggle('hidden', !podeVer);
   if(!podeVer) return;
   const atual = c.execucaoStatus || 'PENDENTE';
@@ -1099,7 +1110,8 @@ async function salvarAndamento(novoStatus){
   const c = DETALHE_ATUAL;
   if(!c) return;
   try{
-    const resp = await fetch(`/api/solicitacoes/${c.id}/execucao`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ execucaoStatus: novoStatus }) });
+    const rota = c.tipo==='estorno' ? `/api/refund-requests/${c.id}/execucao` : `/api/solicitacoes/${c.id}/execucao`;
+    const resp = await fetch(rota, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ execucaoStatus: novoStatus }) });
     const atualizado = await resp.json();
     if(!resp.ok) throw new Error(atualizado.error || 'Erro ao atualizar andamento.');
     DETALHE_ATUAL = { ...DETALHE_ATUAL, ...atualizado };
@@ -1632,6 +1644,27 @@ async function excluirCard(){
     await carregarCentral();
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+}
+
+// gera o link publico pra outra pessoa resolver esse ticket sem precisar de
+// conta no Zenith (ver ticket-publico.html / moduloTicket em index.js) -
+// mostra num prompt pra copiar/colar (o navegador nao deixa a gente copiar
+// pra area de transferencia sem clique explicito em alguns contextos, entao
+// o prompt ja seleciona o texto sozinho, so precisa Ctrl+C)
+async function enviarLinkTicket(){
+  const c = DETALHE_ATUAL;
+  if(!c) return;
+  try{
+    const resp = await fetch(`/api/central/${c.tipo}/${c.id}/gerar-link`, { method:'POST' });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao gerar o link.');
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      try{ await navigator.clipboard.writeText(data.url); }catch(e){ /* segue pro prompt mesmo assim */ }
+    }
+    prompt('Link gerado (já copiado, se o navegador permitiu) - envie pra quem vai resolver esse ticket:', data.url);
+  }catch(err){
+    alert(err.message);
   }
 }
 

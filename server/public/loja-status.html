@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Status das Lojas · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;overflow-x:clip;overflow-y:clip;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 16px;padding:12px 32px 12px;border-bottom:1px solid var(--line);}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:12px;padding-bottom:12px;} h1{font-size:17px;} .eyebrow{font-size:8px;} }
+  h2{font-size:14px;font-weight:700;margin:0 0 4px;}
+  .header-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+  .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;transition:border-color .15s ease,color .15s ease,background .15s ease;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,color .15s ease;}
+  .btn-notif:hover{border-color:var(--accent);color:var(--text);}
+  .btn-sair{color:var(--bad);}
+  .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
+  .hidden{display:none!important;}
+  .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer-titulo{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px 12px;}
+  .nav-drawer-grupo{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 4px;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
+  .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px;}
+  .info-box{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:16px;line-height:1.5;}
+  .tablewrap{overflow-x:auto;}
+  table{width:100%;min-width:720px;border-collapse:collapse;font-size:12.5px;}
+  thead th{text-align:left;font-family:var(--mono);font-weight:500;color:var(--muted);text-transform:uppercase;font-size:9.5px;letter-spacing:.02em;padding:8px 10px;border-bottom:1px solid var(--line);}
+  tbody td{padding:9px 10px;border-bottom:1px solid #1a1f26;vertical-align:middle;}
+  .status-badge{font-family:var(--mono);font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;}
+  .status-badge.online{background:var(--ok-dim);color:var(--ok);}
+  .status-badge.offline{background:var(--bad-dim);color:var(--bad);}
+  .status-badge.nunca{background:var(--panel2);color:var(--muted);}
+  .anydesk-linha{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+  .anydesk-linha input{width:120px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;font-family:var(--mono);}
+  .anydesk-linha input:focus{outline:none;border-color:var(--accent);}
+  .btn-mini{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 9px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
+  .btn-mini:hover{border-color:var(--accent);}
+  .btn-mini.ok{color:var(--ok);}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
+  .overlay.hidden{display:none!important;}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:420px;}
+  .modal h3{margin:0 0 4px;font-size:15px;}
+  .modal .sub{font-size:11.5px;color:var(--muted);margin-bottom:14px;}
+  textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:var(--sans);resize:vertical;min-height:80px;}
+  textarea:focus{outline:none;border-color:var(--accent);}
+  .modal-acoes{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;}
+  .btn-primary{background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .btn-primary:disabled{opacity:.5;cursor:default;}
+  .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+  .msg{font-size:12px;padding:8px 10px;border-radius:8px;margin-top:10px;}
+  .msg.ok{background:var(--ok-dim);color:var(--ok);}
+  .msg.err{background:var(--bad-dim);color:var(--bad);}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <div style="min-width:0;">
+        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <h1>📡 Status das Lojas</h1>
+      </div>
+    </div>
+    <div class="header-nav">
+      <button class="btn-notif" onclick="carregar()" title="Atualizar">🔄</button>
+      <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
+    </div>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer">
+  <div class="nav-drawer-titulo">Zenith Ops</div>
+  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
+  <div class="nav-drawer-grupo">Solicitações</div>
+  <a class="back hidden" id="nav-solicitacoes" href="/central.html">📋 Central</a>
+  <a class="back hidden" id="nav-historico" href="/central-historico.html">📜 Histórico</a>
+  <a class="back hidden" id="nav-tecnico" href="/tecnico.html">🔧 Chamados TI</a>
+  <a class="back hidden" id="nav-central-solucoes" href="/central-solucoes.html">💬 Central de Soluções</a>
+  <a class="back hidden" id="nav-beniboy" href="/beniboy.html">🐝 Central do Beniboy</a>
+  <a class="back active" id="nav-loja-status-self" href="/loja-status.html">📡 Status das Lojas</a>
+  <div class="nav-drawer-sep"></div>
+  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
+</nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso a essa página. Fale com o administrador (Master).</div>
+
+<div id="root" class="hidden">
+  <div class="info-box">
+    Cada loja aparece "online" enquanto uma aba do <b>atendimento.html?unidade=&lt;código&gt;</b> (o mesmo link/QR code que a loja já usa pra falar com o Beniboy) estiver aberta - ela avisa o Zenith a cada ~25s. Se uma loja ficar mais de ~90s em silêncio, o Master e o time de Suporte recebem um alerta automático (push + aviso aqui). Cadastre o ID do AnyDesk de cada loja abaixo pra ter acesso remoto rápido - a licença já é sua, o Zenith só guarda o atalho.
+  </div>
+  <div class="panel">
+    <h2>Unidades</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Unidade</th><th>Status</th><th>Último sinal</th><th>AnyDesk</th><th></th></tr></thead>
+        <tbody id="linhas"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="msg-overlay">
+  <div class="modal">
+    <h3>💬 Mandar mensagem</h3>
+    <div class="sub" id="msg-modal-loja"></div>
+    <textarea id="msg-texto" maxlength="500" placeholder="Ex: precisamos que reiniciem o roteador, ou qualquer aviso pra tela dessa loja"></textarea>
+    <div class="msg hidden" id="msg-modal-status"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn-ghost" onclick="fecharModalMensagem()">Cancelar</button>
+      <button type="button" class="btn-primary" id="msg-modal-enviar" onclick="enviarMensagemLoja()">Enviar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
+function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+let LINHAS = [];
+
+function tempoRelativo(ms){
+  if(!ms) return 'nunca';
+  const s = Math.floor((Date.now()-ms)/1000);
+  if(s < 60) return 'agora mesmo';
+  if(s < 3600) return `há ${Math.floor(s/60)}min`;
+  if(s < 86400) return `há ${Math.floor(s/3600)}h`;
+  return `há ${Math.floor(s/86400)}d`;
+}
+
+function render(){
+  const tbody = document.getElementById('linhas');
+  if(!LINHAS.length){ tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">Nenhuma unidade cadastrada.</td></tr>'; return; }
+  tbody.innerHTML = LINHAS.map(l => {
+    const badge = !l.ultimoHeartbeatEm
+      ? '<span class="status-badge nunca">⚪ nunca conectou</span>'
+      : l.online
+        ? '<span class="status-badge online">🟢 online</span>'
+        : '<span class="status-badge offline">🔴 offline</span>';
+    return `<tr>
+      <td><b>${escapeHtml(l.nome)}</b><div style="font-family:var(--mono);font-size:10px;color:var(--muted);">${escapeHtml(l.codigo)}</div></td>
+      <td>${badge}</td>
+      <td>${escapeHtml(tempoRelativo(l.ultimoHeartbeatEm))}</td>
+      <td>
+        <div class="anydesk-linha">
+          <input type="text" value="${escapeHtml(l.anydeskId || '')}" placeholder="ID" id="ad-${escapeHtml(l.codigo)}" maxlength="40">
+          <button type="button" class="btn-mini" onclick="salvarAnydesk('${escapeHtml(l.codigo)}')">💾</button>
+          ${l.anydeskId ? `<a class="btn-mini" href="anydesk:${escapeHtml(l.anydeskId)}" title="Abrir no AnyDesk">🖥️</a>` : ''}
+        </div>
+      </td>
+      <td><button type="button" class="btn-mini" onclick="abrirModalMensagem('${escapeHtml(l.codigo)}','${escapeHtml(l.nome)}')">💬 Mensagem</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function carregar(){
+  try{
+    const [unidades, status] = await Promise.all([
+      fetch('/api/meta/unidades-publico').then(r=>r.json()),
+      fetch('/api/loja-status').then(r=>r.ok?r.json():[]),
+    ]);
+    const porCodigo = {};
+    status.forEach(s => { porCodigo[s.codigo] = s; });
+    LINHAS = unidades.map(u => ({
+      codigo: u.codigo, nome: u.nome,
+      online: false, ultimoHeartbeatEm: null, anydeskId: null,
+      ...(porCodigo[u.codigo] || {}),
+    })).sort((a,b) => {
+      const rank = (r) => (r.ultimoHeartbeatEm && !r.online) ? 0 : (r.online ? 1 : 2);
+      return rank(a) - rank(b) || a.nome.localeCompare(b.nome, 'pt-BR');
+    });
+    render();
+  }catch(e){ /* mantem a ultima lista carregada na tela */ }
+}
+
+async function salvarAnydesk(codigo){
+  const input = document.getElementById('ad-' + codigo);
+  try{
+    const resp = await fetch('/api/loja-status/' + encodeURIComponent(codigo) + '/anydesk', {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ anydeskId: input.value }),
+    });
+    if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao salvar.');
+    await carregar();
+  }catch(e){ alert(e.message); }
+}
+
+let MSG_CODIGO = null;
+function abrirModalMensagem(codigo, nome){
+  MSG_CODIGO = codigo;
+  document.getElementById('msg-modal-loja').textContent = nome;
+  document.getElementById('msg-texto').value = '';
+  document.getElementById('msg-modal-status').classList.add('hidden');
+  document.getElementById('msg-overlay').classList.remove('hidden');
+}
+function fecharModalMensagem(){ document.getElementById('msg-overlay').classList.add('hidden'); MSG_CODIGO = null; }
+async function enviarMensagemLoja(){
+  const texto = document.getElementById('msg-texto').value.trim();
+  const status = document.getElementById('msg-modal-status');
+  status.classList.add('hidden');
+  if(!texto || !MSG_CODIGO) return;
+  const btn = document.getElementById('msg-modal-enviar');
+  btn.disabled = true;
+  try{
+    const resp = await fetch('/api/loja-status/' + encodeURIComponent(MSG_CODIGO) + '/mensagem', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ texto }),
+    });
+    if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao enviar.');
+    status.textContent = '✅ Enviada! Vai aparecer na tela da loja assim que ela atualizar (até ~25s se estiver online agora).';
+    status.className = 'msg ok';
+    status.classList.remove('hidden');
+    setTimeout(fecharModalMensagem, 2200);
+  }catch(e){
+    status.textContent = e.message; status.className = 'msg err'; status.classList.remove('hidden');
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+function conectarStream(){
+  try{
+    const es = new EventSource('/api/stream?token=' + encodeURIComponent(AUTH_TOKEN));
+    es.addEventListener('loja-status-mudou', () => { carregar(); });
+  }catch(e){ /* sem SSE, so atualiza no poll */ }
+}
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  const me = await res.json();
+  const secoes = (me.permissions && me.permissions.sections) || [];
+  document.getElementById('nav-solicitacoes').classList.remove('hidden');
+  document.getElementById('nav-historico').classList.remove('hidden');
+  document.getElementById('nav-tecnico').classList.remove('hidden');
+  document.getElementById('nav-central-solucoes').classList.remove('hidden');
+  document.getElementById('nav-beniboy').classList.remove('hidden');
+  if(!(me.role === 'master' || me.isAdmin || secoes.includes('suporte'))){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('root').classList.remove('hidden');
+  await carregar();
+  conectarStream();
+  setInterval(() => { if(!document.hidden) carregar(); }, 30000);
+  document.addEventListener('visibilitychange', () => { if(!document.hidden) carregar(); });
+}
+boot();
+</script>
+<script src="/nav-gate.js"></script>
+</body>
+</html>

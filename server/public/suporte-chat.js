@@ -613,6 +613,23 @@
     setTimeout(remover, 15000);
   }
 
+  // ---------- popup "mensagem direta" (Master/Suporte -> voce) - mesmo
+  // container/estilo do popup de pedido acima, so pra avisos avulsos que o
+  // Master/Suporte manda proativamente (ver POST /api/mensagens/enviar).
+  // Fica em cima de QUALQUER tela do Zenith, igual ao de pedido; com o app
+  // fechado o mesmo aviso chega por push (push.notifyUsuario) ----------
+  function mostrarPopupMensagem(d) {
+    const card = el(`<div class="szc-pp-card">
+      <button type="button" class="szc-pp-fechar" title="Fechar">✕</button>
+      <div class="szc-pp-titulo">💬 Mensagem de ${esc(d.deEmail || 'Suporte')}</div>
+      <div class="szc-pp-corpo">${esc(d.texto || '')}</div>
+    </div>`);
+    pedidoPopupEl.appendChild(card);
+    const remover = () => { if (card.parentNode) card.parentNode.removeChild(card); };
+    card.querySelector('.szc-pp-fechar').addEventListener('click', remover);
+    setTimeout(remover, 20000);
+  }
+
   async function atendInit() {
     const token = localStorage.getItem('authToken');
     if (!token) return;
@@ -649,6 +666,7 @@
         es.addEventListener('beniboy-escalonamento', (e) => { dispararAlarmeBeniboy(JSON.parse(e.data)); });
       }
       es.addEventListener('pedido-status-mudou', (e) => { mostrarPopupPedido(JSON.parse(e.data)); });
+      es.addEventListener('mensagem-direta', (e) => { mostrarPopupMensagem(JSON.parse(e.data)); });
     } catch (e) { /* sem SSE, sem alerta ao vivo aqui - o push cobre com o app fechado */ }
   }
   atendInit();

@@ -141,6 +141,19 @@ async function create({ tipo, unidade, unidadeNome, titulo, valorEstimado, obser
     tokenAcao: null,
     tokenAcaoExpiraEm: null,
     tokenAcaoUsado: false,
+    // quem mexeu no andamento de execucao mais recentemente (e-mail de quem
+    // esta logado, ou o nome digitado no link publico - ver atualizarExecucao)
+    execucaoPorNome: null,
+    // link de acao pra alguem de fora resolver esse ticket (aprovar/rejeitar
+    // OU avancar a execucao, dependendo do estado atual) sem precisar de
+    // login - ver gerarLinkAcao/decidirComLink/atualizarExecucaoComLink e
+    // ticket-publico.html. Mecanismo PARALELO ao tokenAcao acima (que
+    // continua servindo so o e-mail do relatorio diario, uso unico, so pra
+    // decidir): esse fica valido enquanto o ticket nao chegar num estado
+    // terminal, pra o MESMO link servir a decisao e, depois, a execucao.
+    linkAcao: null,
+    linkAcaoGeradoEm: null,
+    linkAcaoRevogado: false,
   };
   await doc.set(registro);
   solicitacoesCache.invalidar();
@@ -285,15 +298,86 @@ async function decidirPorToken(id, token, { acao, motivoDecisao, comprovante, de
 // atualiza o andamento de execucao (Pendente/Em andamento/Finalizado) de um
 // ticket ja Aprovado - Master/Admin acompanham a execucao de verdade depois
 // da decisao (ex: tecnico ainda nao foi, esta indo, ja resolveu)
-async function atualizarExecucao(id, execucaoStatus) {
+async function atualizarExecucao(id, execucaoStatus, { porNome } = {}) {
   if (!EXECUCAO_STATUSES.includes(execucaoStatus)) throw new Error('Status de execução inválido.');
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Solicitação não encontrada.');
   if (snap.data().status !== 'APROVADO') throw new Error('Só é possível atualizar o andamento de um ticket já aprovado.');
-  await ref.update({ execucaoStatus });
+  const patch = { execucaoStatus };
+  if (porNome) patch.execucaoPorNome = porNome;
+  await ref.update(patch);
   solicitacoesCache.invalidar();
   return getOne(id);
+}
+
+// true se o ticket ainda tem alguma acao pendente (decidir OU avancar a
+// execucao) - mesmo espirito de refunds.podeAgirComLink
+function podeAgirComLink(registro) {
+  if (!registro) return false;
+  if (registro.status === 'PENDENTE') return true;
+  if (registro.status === 'APROVADO') return registro.execucaoStatus !== 'FINALIZADO';
+  return false; // REJEITADO/CONVERTIDO - nada mais a fazer
+}
+
+// gera (ou renova) o link de acao pra alguem de fora resolver esse ticket
+// sem login (ver ticket-publico.html) - mecanismo PARALELO ao tokenAcao
+// (que continua so pro e-mail do relatorio diario): nao exige PENDENTE, nao
+// e de uso unico, fica valido ate o ticket chegar num estado terminal -
+// mesmo link serve pra decidir e, depois, pra avancar a execucao.
+async function gerarLinkAcao(id) {
+  const registro = await getOne(id);
+  if (!registro) throw new Error('Solicitação não encontrada.');
+  if (!podeAgirComLink(registro)) throw new Error('Esse ticket já foi resolvido, não há mais nada a fazer por link.');
+  const linkAcao = crypto.randomBytes(24).toString('hex');
+  await COLLECTION.doc(id).update({ linkAcao, linkAcaoGeradoEm: new Date().toISOString(), linkAcaoRevogado: false });
+  solicitacoesCache.invalidar();
+  return { linkAcao };
+}
+
+async function revogarLinkAcao(id) {
+  await COLLECTION.doc(id).update({ linkAcaoRevogado: true });
+  solicitacoesCache.invalidar();
+  return getOne(id);
+}
+
+// confere o link recebido em ticket-publico.html - mesmo espirito de
+// refunds.buscarPorLinkAcao (nao distingue o motivo de falha pro chamador)
+async function buscarPorLinkAcao(id, link) {
+  if (!id || !link) return null;
+  const registro = await getOne(id);
+  if (!registro) return null;
+  if (!registro.linkAcao || registro.linkAcao !== link || registro.linkAcaoRevogado) return null;
+  return registro;
+}
+
+// decide (aprova/recusa) via o link de acao - mesma logica de updateStatus,
+// autorizando pelo link em vez de sessao/tokenAcao
+async function decidirComLink(id, link, { acao, motivoDecisao, comprovante, autorNome }) {
+  const registro = await buscarPorLinkAcao(id, link);
+  if (!registro) throw new Error('Link inválido ou revogado.');
+  if (registro.status !== 'PENDENTE') throw new Error('Esse ticket já foi decidido.');
+  if (!['aprovar', 'recusar'].includes(acao)) throw new Error('Ação inválida.');
+  const status = acao === 'aprovar' ? 'APROVADO' : 'REJEITADO';
+  const patch = {
+    status,
+    motivoDecisao: motivoDecisao || null,
+    decididoPorEmail: autorNome || registro.direcionadoParaEmail || 'via link',
+    decididoEm: new Date().toISOString(),
+  };
+  if (status === 'APROVADO') patch.execucaoStatus = 'PENDENTE';
+  if (comprovante) patch.anexos = [...(registro.anexos || []), comprovante];
+  await COLLECTION.doc(id).update(patch);
+  solicitacoesCache.invalidar();
+  return getOne(id);
+}
+
+// avanca a execucao via o link de acao - mesma validacao de decidirComLink
+async function atualizarExecucaoComLink(id, link, execucaoStatus, { autorNome }) {
+  const registro = await buscarPorLinkAcao(id, link);
+  if (!registro) throw new Error('Link inválido ou revogado.');
+  if (registro.status !== 'APROVADO') throw new Error('Esse ticket ainda não foi aprovado.');
+  return atualizarExecucao(id, execucaoStatus, { porNome: autorNome || 'via link' });
 }
 
 // Master/Admin re-prioriza um ticket na triagem - o prazo de SLA e
@@ -478,5 +562,6 @@ module.exports = {
   TIPOS, STATUSES, EXECUCAO_STATUSES, create, listAll, getOne, updateStatus, vincularChamado, update, remove,
   marcarNotificacaoVista, marcarComprada, desmarcarComprada, redirecionar, mudarTipo, converterParaEstorno,
   atualizarExecucao, atualizarPrioridade, gerarTokenAcao, validarToken, decidirPorToken,
-  buscarEstadoPorToken, podeDecidirComToken,
+  buscarEstadoPorToken, podeDecidirComToken, podeAgirComLink, gerarLinkAcao, revogarLinkAcao,
+  buscarPorLinkAcao, decidirComLink, atualizarExecucaoComLink,
 };

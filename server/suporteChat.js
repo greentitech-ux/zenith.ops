@@ -260,11 +260,22 @@ const REALERTA_MS = 30 * 1000;
 // REALERTA_MS desde o ultimo alerta (ver marcarAlertaEnviado) - a varredura
 // de ociosos (40min sem nenhuma mensagem nova) acaba encerrando sozinha
 // quem ficou mesmo abandonada, entao o reforco nao roda pra sempre.
+// consulta filtrada (nao listAllUncached()) de proposito: esse job roda a
+// cada 15s o dia inteiro (ver reforcarAlarmesBeniboy em index.js) - baixar a
+// colecao INTEIRA (todo o historico de chats ja finalizados) a cada 15s
+// custava uma leitura por documento existente, a cada tick, pra sempre.
+// Filtrando os 3 campos direto no Firestore (todos com "==", nao precisa de
+// indice composto), so vem os poucos chats que realmente podem estar
+// esperando reforco - normalmente 0 a poucos, nao o historico inteiro.
 async function listarParaReforcarAlarme() {
-  const chats = await listAllUncached();
+  const snap = await COLLECTION
+    .where('status', '==', 'ABERTO')
+    .where('botDesativado', '==', true)
+    .where('statusAtendimento', '==', 'PENDENTE')
+    .get();
+  const chats = snap.docs.map((d) => d.data());
   const agora = Date.now();
   return chats.filter((c) => {
-    if (c.status !== 'ABERTO' || !c.botDesativado || c.statusAtendimento !== 'PENDENTE') return false;
     const desde = new Date(c.ultimoAlertaEm || c.atualizadoEm || c.criadoEm).getTime();
     return agora - desde >= REALERTA_MS;
   });
@@ -283,8 +294,12 @@ const OCIOSO_MS = 40 * 60 * 1000;
 // Usa o mesmo caminho de encerramento com motivo (SEM_SOLUCAO) que o time
 // usa na mao, so que com autor null (evento automatico, aparece no
 // historicoStatus como tal).
+// mesmo motivo do listarParaReforcarAlarme() acima: so os chats ABERTOS
+// podem estar ociosos, entao filtrar isso direto no Firestore evita reler o
+// historico inteiro (chats ja FINALIZADO) a cada 5min, pra sempre
 async function finalizarOciosos() {
-  const chats = await listAllUncached();
+  const snap = await COLLECTION.where('status', '==', 'ABERTO').get();
+  const chats = snap.docs.map((d) => d.data());
   const agora = Date.now();
   const finalizados = [];
   for (const chat of chats) {

@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Resolver ticket · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:560px;margin-inline:auto;overflow-x:hidden;}
+  h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;}
+  h3{font-size:12px;font-weight:700;margin:0 0 10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-family:var(--mono);}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+  header{margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--line);}
+  .hidden{display:none!important;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px;}
+  .ticket-titulo{font-size:15px;font-weight:700;}
+  .ticket-meta{font-size:12.5px;color:var(--muted);margin-top:4px;}
+  .campo-linha{font-size:13px;margin-top:8px;line-height:1.5;color:#ccd3da;}
+  .campo-linha b{color:var(--text);}
+  .ticket-obs{font-size:13px;margin-top:12px;white-space:pre-wrap;line-height:1.5;color:#ccd3da;}
+  label{display:block;font-size:11.5px;color:var(--muted);margin:14px 0 4px;font-family:var(--mono);}
+  label:first-of-type{margin-top:0;}
+  input,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
+  input:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  textarea{resize:vertical;min-height:56px;}
+  .acoes{display:flex;gap:10px;margin-top:6px;}
+  .acao-btn{flex:1;padding:12px;border-radius:8px;border:2px solid var(--line);background:var(--panel2);color:var(--text);font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .acao-btn.aprovar.active,.acao-btn.andamento.active{border-color:var(--ok);background:var(--ok-dim);color:var(--ok);}
+  .acao-btn.recusar.active{border-color:var(--bad);background:var(--bad-dim);color:var(--bad);}
+  .acao-btn.finalizado.active{border-color:var(--accent);background:rgba(92,200,255,.12);color:var(--accent);}
+  .btn-primary{width:100%;margin-top:18px;background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .btn-primary:disabled{opacity:.5;cursor:default;}
+  .btn-primary.recusar{background:var(--bad);color:#fff;}
+  .btn-ghost{width:100%;margin-top:10px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+  .msg{margin-top:10px;font-size:12.5px;padding:10px 12px;border-radius:8px;word-break:break-word;}
+  .msg.ok{background:var(--ok-dim);color:var(--ok);}
+  .msg.err{background:var(--bad-dim);color:var(--bad);}
+  .sucesso{text-align:center;padding:36px 10px;}
+  .sucesso .icone{font-size:40px;margin-bottom:10px;}
+  .sucesso h2{font-size:16px;margin:0 0 8px;}
+  .sucesso p{font-size:13px;color:var(--muted);line-height:1.6;margin:0;}
+  .erro-carregar{text-align:center;padding:36px 10px;color:var(--muted);}
+  .erro-carregar .icone{font-size:34px;margin-bottom:10px;}
+  .status-badge{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:4px 10px;border-radius:99px;margin-top:8px;}
+  .status-badge.pendente{background:var(--warn-dim);color:var(--warn);}
+  .status-badge.aprovado{background:var(--ok-dim);color:var(--ok);}
+  .status-badge.rejeitado{background:var(--bad-dim);color:var(--bad);}
+  .status-badge.convertido{background:var(--panel2);color:var(--accent);}
+  .status-badge.finalizado{background:rgba(92,200,255,.12);color:var(--accent);}
+  .anexo-link{display:block;font-size:12.5px;color:var(--accent);text-decoration:none;margin-top:6px;}
+  .anexo-link:hover{text-decoration:underline;}
+  .chat-msg{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;}
+  .chat-msg .cm-autor{font-size:11px;color:var(--muted);margin-bottom:2px;display:flex;justify-content:space-between;gap:8px;}
+  .chat-msg.externo{border-color:var(--accent);}
+  .chat-msg .cm-texto{white-space:pre-wrap;}
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+  <h1>Resolver ticket</h1>
+</header>
+
+<div id="carregando" class="panel" style="text-align:center;color:var(--muted);">Carregando...</div>
+
+<div id="erro-carregar" class="panel erro-carregar hidden">
+  <div class="icone">⚠️</div>
+  <p id="erro-carregar-texto">Link inválido ou revogado.</p>
+</div>
+
+<div id="sucesso" class="panel sucesso hidden">
+  <div class="icone" id="sucesso-icone">✅</div>
+  <h2 id="sucesso-titulo">Registrado!</h2>
+  <p id="sucesso-texto"></p>
+  <button type="button" class="btn-ghost" onclick="location.reload()">Ver estado atual</button>
+</div>
+
+<div id="conteudo" class="hidden">
+  <div class="panel" id="detalhe"></div>
+
+  <div class="panel hidden" id="painel-decidir">
+    <label>Seu nome</label>
+    <input type="text" id="autor-nome" placeholder="Como podemos te chamar" maxlength="80">
+    <label>Ação</label>
+    <div class="acoes">
+      <button type="button" class="acao-btn aprovar" id="btn-acao-aprovar" onclick="escolherAcao('aprovar')">✓ Aprovar</button>
+      <button type="button" class="acao-btn recusar" id="btn-acao-recusar" onclick="escolherAcao('recusar')">✗ Recusar</button>
+    </div>
+    <label>Comprovante (opcional)</label>
+    <input type="file" id="comprovante" accept="image/*,application/pdf" capture="environment">
+    <label>Observação (opcional)</label>
+    <textarea id="motivoDecisao" placeholder="algum detalhe da decisão"></textarea>
+    <div class="msg hidden" id="msg-decidir"></div>
+    <button type="button" class="btn-primary" id="btn-enviar-decidir" disabled onclick="enviarDecisao()">Escolha uma ação acima</button>
+  </div>
+
+  <div class="panel hidden" id="painel-execucao">
+    <label>Seu nome</label>
+    <input type="text" id="autor-nome-exec" placeholder="Como podemos te chamar" maxlength="80">
+    <label>Andamento</label>
+    <div class="acoes">
+      <button type="button" class="acao-btn andamento" id="btn-exec-andamento" onclick="escolherExecucao('EM_ANDAMENTO')">🔧 Em andamento</button>
+      <button type="button" class="acao-btn finalizado" id="btn-exec-finalizado" onclick="escolherExecucao('FINALIZADO')">✅ Finalizado</button>
+    </div>
+    <div class="msg hidden" id="msg-execucao"></div>
+    <button type="button" class="btn-primary" id="btn-enviar-execucao" disabled onclick="enviarExecucao()">Escolha o andamento acima</button>
+  </div>
+
+  <div class="panel" id="painel-chat">
+    <h3>💬 Chat</h3>
+    <div id="chat-lista" style="display:flex;flex-direction:column;gap:8px;max-height:320px;overflow-y:auto;margin-bottom:4px;"></div>
+    <label>Seu nome</label>
+    <input type="text" id="chat-nome" placeholder="Como podemos te chamar" maxlength="80">
+    <label>Mensagem</label>
+    <textarea id="chat-texto" placeholder="Escreva aqui..."></textarea>
+    <button type="button" class="btn-primary" id="chat-enviar" onclick="enviarChat()">Enviar mensagem</button>
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const TIPO = params.get('tipo') || 'estorno';
+const TICKET = params.get('ticket');
+const LINK = params.get('link');
+const NOME_KEY = 'ticketPublicoNome';
+
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtMoney(v){ return v==null ? null : 'R$ ' + Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtData(iso){ if(!iso) return ''; return new Date(iso).toLocaleString('pt-BR', { timeZone:'America/Sao_Paulo' }); }
+
+const TIPOS_LABEL = { estorno:'Estorno', compra:'Compra', manutencao:'Manutenção', 'suporte-ti':'Suporte de TI', pagamento:'Pagamento', nota:'Nota fiscal' };
+const STATUS_LABEL = { PENDENTE:'Pendente', APROVADO:'Aprovado', REJEITADO:'Recusado', CONVERTIDO:'Convertido' };
+const STATUS_CLASSE = { PENDENTE:'pendente', APROVADO:'aprovado', REJEITADO:'rejeitado', CONVERTIDO:'convertido' };
+const EXECUCAO_LABEL = { PENDENTE:'aguardando início', EM_ANDAMENTO:'em andamento', FINALIZADO:'finalizado' };
+
+function nomeSalvo(){ return localStorage.getItem(NOME_KEY) || ''; }
+function salvarNome(v){ if(v && v.trim()) localStorage.setItem(NOME_KEY, v.trim().slice(0,80)); }
+
+let DATA = null;
+
+function apiUrl(sufixo){
+  return `/api/central/${encodeURIComponent(TIPO)}/${encodeURIComponent(TICKET)}/${sufixo}?link=${encodeURIComponent(LINK)}`;
+}
+
+function renderDetalhe(d){
+  const linhas = [];
+  linhas.push(`<div class="ticket-titulo">#${d.numeroTicket} · ${escapeHtml(TIPOS_LABEL[d.tipo] || d.tipo)}</div>`);
+  const meta = [d.unidadeNome, fmtData(d.criadoEm)].filter(Boolean).join(' · ');
+  linhas.push(`<div class="ticket-meta">${escapeHtml(meta)}</div>`);
+  linhas.push(`<span class="status-badge ${STATUS_CLASSE[d.status] || ''}">${STATUS_LABEL[d.status] || d.status}</span>`);
+  if(d.status === 'APROVADO' && d.execucaoStatus){
+    const cls = d.execucaoStatus === 'FINALIZADO' ? 'finalizado' : 'pendente';
+    linhas.push(`<span class="status-badge ${cls}" style="margin-left:6px;">Execução: ${EXECUCAO_LABEL[d.execucaoStatus] || d.execucaoStatus}</span>`);
+  }
+
+  if(d.tipo === 'estorno'){
+    if(d.nomeCliente) linhas.push(`<div class="campo-linha"><b>Cliente:</b> ${escapeHtml(d.nomeCliente)}${d.telefoneCliente ? ' · '+escapeHtml(d.telefoneCliente) : ''}</div>`);
+    const motivo = d.motivoEstorno === 'Outro' ? d.motivoOutro : d.motivoEstorno;
+    if(motivo) linhas.push(`<div class="campo-linha"><b>Motivo:</b> ${escapeHtml(motivo)}</div>`);
+    if(d.valorVenda != null) linhas.push(`<div class="campo-linha"><b>Valor da venda:</b> ${fmtMoney(d.valorVenda)}${d.valorEstornar != null ? ' · <b>A estornar:</b> '+fmtMoney(d.valorEstornar) : ''}</div>`);
+    if(d.formaPagamento) linhas.push(`<div class="campo-linha"><b>Forma de pagamento:</b> ${escapeHtml(d.formaPagamento)}${d.bandeira ? ' · '+escapeHtml(d.bandeira) : ''}${d.ultimos4 ? ' final '+escapeHtml(d.ultimos4) : ''}</div>`);
+    if(d.dataVenda) linhas.push(`<div class="campo-linha"><b>Venda em:</b> ${escapeHtml(d.dataVenda)}${d.horaVenda ? ' às '+escapeHtml(d.horaVenda) : ''}</div>`);
+    if(d.pixChave) linhas.push(`<div class="campo-linha"><b>Pix para devolução:</b> ${escapeHtml(d.pixChave)}${d.pixNomeTitular ? ' · '+escapeHtml(d.pixNomeTitular) : ''}${d.pixBanco ? ' · '+escapeHtml(d.pixBanco) : ''}</div>`);
+    if(d.observacaoCliente) linhas.push(`<div class="ticket-obs">${escapeHtml(d.observacaoCliente)}</div>`);
+    if(d.observacao) linhas.push(`<div class="ticket-obs">${escapeHtml(d.observacao)}</div>`);
+  }else{
+    linhas.push(`<div class="campo-linha"><b>${escapeHtml(d.titulo || '')}</b></div>`);
+    if(d.valorEstimado != null) linhas.push(`<div class="campo-linha"><b>Valor estimado:</b> ${fmtMoney(d.valorEstimado)}${d.ehOrcamento ? ' (orçamento)' : ''}</div>`);
+    if(d.fornecedor) linhas.push(`<div class="campo-linha"><b>Fornecedor:</b> ${escapeHtml(d.fornecedor)}${d.vencimento ? ' · vence '+escapeHtml(d.vencimento) : ''}</div>`);
+    if(Array.isArray(d.itens) && d.itens.length) linhas.push(`<div class="campo-linha"><b>Itens:</b> ${d.itens.map(i=>escapeHtml(i.descricao)+(i.quantidade?' ('+i.quantidade+')':'')).join(', ')}</div>`);
+    if(d.observacao) linhas.push(`<div class="ticket-obs">${escapeHtml(d.observacao)}</div>`);
+  }
+
+  if(d.status === 'APROVADO' || d.status === 'REJEITADO'){
+    if(d.decididoPorEmail) linhas.push(`<div class="campo-linha"><b>Decidido por:</b> ${escapeHtml(d.decididoPorEmail)}${d.decididoEm ? ' em '+fmtData(d.decididoEm) : ''}</div>`);
+    if(d.motivoDecisao) linhas.push(`<div class="campo-linha"><b>Observação da decisão:</b> ${escapeHtml(d.motivoDecisao)}</div>`);
+  }
+  if(d.execucaoPorNome) linhas.push(`<div class="campo-linha"><b>Execução atualizada por:</b> ${escapeHtml(d.execucaoPorNome)}</div>`);
+
+  if(Array.isArray(d.anexos) && d.anexos.length){
+    linhas.push('<div style="margin-top:10px;">' + d.anexos.map(a =>
+      `<a class="anexo-link" href="${apiUrl('anexo-publico/'+a.index)}" target="_blank" rel="noopener">📎 ${escapeHtml(a.nome || 'anexo')}</a>`
+    ).join('') + '</div>');
+  }
+
+  document.getElementById('detalhe').innerHTML = linhas.join('');
+}
+
+function escolherAcao(acao){
+  document.getElementById('painel-decidir').dataset.acao = acao;
+  document.getElementById('btn-acao-aprovar').classList.toggle('active', acao==='aprovar');
+  document.getElementById('btn-acao-recusar').classList.toggle('active', acao==='recusar');
+  const btn = document.getElementById('btn-enviar-decidir');
+  btn.disabled = false;
+  btn.textContent = acao==='aprovar' ? '✓ Confirmar aprovação' : '✗ Confirmar recusa';
+  btn.className = 'btn-primary' + (acao==='recusar' ? ' recusar' : '');
+}
+
+function escolherExecucao(status){
+  document.getElementById('painel-execucao').dataset.status = status;
+  document.getElementById('btn-exec-andamento').classList.toggle('active', status==='EM_ANDAMENTO');
+  document.getElementById('btn-exec-finalizado').classList.toggle('active', status==='FINALIZADO');
+  const btn = document.getElementById('btn-enviar-execucao');
+  btn.disabled = false;
+  btn.textContent = status==='FINALIZADO' ? '✅ Confirmar finalização' : '🔧 Confirmar em andamento';
+}
+
+async function carregar(){
+  if(!TICKET || !LINK){ mostrarErro('Link incompleto.'); return; }
+  try{
+    const resp = await fetch(apiUrl('publico'));
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Link inválido ou revogado.');
+    DATA = data;
+    document.getElementById('carregando').classList.add('hidden');
+    document.getElementById('conteudo').classList.remove('hidden');
+    renderDetalhe(data);
+    document.getElementById('autor-nome').value = nomeSalvo();
+    document.getElementById('autor-nome-exec').value = nomeSalvo();
+    document.getElementById('chat-nome').value = nomeSalvo();
+    document.getElementById('painel-decidir').classList.toggle('hidden', !data.podeDecidir);
+    document.getElementById('painel-execucao').classList.toggle('hidden', !(!data.podeDecidir && data.podeAtualizarExecucao));
+    await carregarChat();
+    setInterval(carregarChat, 15000);
+  }catch(err){
+    mostrarErro(err.message);
+  }
+}
+
+function mostrarErro(msg){
+  document.getElementById('carregando').classList.add('hidden');
+  document.getElementById('erro-carregar-texto').textContent = msg;
+  document.getElementById('erro-carregar').classList.remove('hidden');
+}
+
+async function enviarDecisao(){
+  const acao = document.getElementById('painel-decidir').dataset.acao;
+  if(!acao) return;
+  const nome = document.getElementById('autor-nome').value.trim();
+  salvarNome(nome);
+  const btn = document.getElementById('btn-enviar-decidir');
+  const msgEl = document.getElementById('msg-decidir');
+  msgEl.classList.add('hidden');
+  btn.disabled = true;
+  const textoOriginal = btn.textContent;
+  btn.textContent = 'Enviando...';
+  try{
+    const fd = new FormData();
+    fd.append('payload', JSON.stringify({
+      link: LINK, acao, autorNome: nome || null,
+      motivoDecisao: document.getElementById('motivoDecisao').value,
+    }));
+    const arquivo = document.getElementById('comprovante').files[0];
+    if(arquivo) fd.append('comprovante', arquivo);
+    const resp = await fetch(`/api/central/${encodeURIComponent(TIPO)}/${encodeURIComponent(TICKET)}/decidir-publico`, { method:'POST', body: fd });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Não foi possível registrar a decisão.');
+    document.getElementById('painel-decidir').classList.add('hidden');
+    document.getElementById('sucesso-icone').textContent = acao==='aprovar' ? '✅' : '🚫';
+    document.getElementById('sucesso-titulo').textContent = acao==='aprovar' ? 'Aprovado!' : 'Recusado!';
+    document.getElementById('sucesso-texto').textContent = `Ticket #${DATA.numeroTicket} marcado como ${data.status}.`;
+    document.getElementById('sucesso').classList.remove('hidden');
+  }catch(err){
+    msgEl.textContent = err.message; msgEl.className = 'msg err'; msgEl.classList.remove('hidden');
+    btn.disabled = false; btn.textContent = textoOriginal;
+  }
+}
+
+async function enviarExecucao(){
+  const status = document.getElementById('painel-execucao').dataset.status;
+  if(!status) return;
+  const nome = document.getElementById('autor-nome-exec').value.trim();
+  salvarNome(nome);
+  const btn = document.getElementById('btn-enviar-execucao');
+  const msgEl = document.getElementById('msg-execucao');
+  msgEl.classList.add('hidden');
+  btn.disabled = true;
+  const textoOriginal = btn.textContent;
+  btn.textContent = 'Enviando...';
+  try{
+    const resp = await fetch(`/api/central/${encodeURIComponent(TIPO)}/${encodeURIComponent(TICKET)}/execucao-publico`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ link: LINK, execucaoStatus: status, autorNome: nome || null }),
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Não foi possível atualizar.');
+    document.getElementById('painel-execucao').classList.add('hidden');
+    document.getElementById('sucesso-icone').textContent = status==='FINALIZADO' ? '✅' : '🔧';
+    document.getElementById('sucesso-titulo').textContent = status==='FINALIZADO' ? 'Finalizado!' : 'Em andamento!';
+    document.getElementById('sucesso-texto').textContent = `Ticket #${DATA.numeroTicket} atualizado.`;
+    document.getElementById('sucesso').classList.remove('hidden');
+  }catch(err){
+    msgEl.textContent = err.message; msgEl.className = 'msg err'; msgEl.classList.remove('hidden');
+    btn.disabled = false; btn.textContent = textoOriginal;
+  }
+}
+
+async function carregarChat(){
+  try{
+    const resp = await fetch(apiUrl('chat-publico'));
+    if(!resp.ok) return;
+    const mensagens = await resp.json();
+    document.getElementById('chat-lista').innerHTML = mensagens.map(m => {
+      const externo = (m.autorUsername || '').includes('· externo');
+      return `<div class="chat-msg ${externo ? 'externo' : ''}">
+        <div class="cm-autor"><span>${escapeHtml(m.autorUsername || m.autorEmail || 'Suporte')}</span><span>${fmtData(m.criadoEm)}</span></div>
+        <div class="cm-texto">${escapeHtml(m.texto || '')}</div>
+      </div>`;
+    }).join('') || '<div style="font-size:12.5px;color:var(--muted);">Nenhuma mensagem ainda.</div>';
+  }catch(e){ /* mantem a ultima lista carregada */ }
+}
+
+async function enviarChat(){
+  const texto = document.getElementById('chat-texto').value.trim();
+  if(!texto) return;
+  const nome = document.getElementById('chat-nome').value.trim();
+  salvarNome(nome);
+  const btn = document.getElementById('chat-enviar');
+  btn.disabled = true;
+  try{
+    const resp = await fetch(`/api/central/${encodeURIComponent(TIPO)}/${encodeURIComponent(TICKET)}/chat-publico`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ link: LINK, texto, autorNome: nome || 'Visitante' }),
+    });
+    if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao enviar.');
+    document.getElementById('chat-texto').value = '';
+    await carregarChat();
+  }catch(err){
+    alert(err.message);
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+carregar();
+</script>
+</body>
+</html>

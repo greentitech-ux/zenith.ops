@@ -41,6 +41,15 @@
 <p>Nosso assistente já abriu a conversa aqui embaixo - conte o que você precisa (estorno, dúvida sobre um pedido, qualquer outra coisa) que ele te ajuda na hora. Não precisa de WhatsApp nem de login.</p>
 <div class="dica"><span class="seta">↘</span> continue por ali</div>
 
+<div id="mensagemBanner" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;align-items:center;justify-content:center;padding:24px;">
+  <div style="background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px;max-width:420px;text-align:center;">
+    <div style="font-size:38px;margin-bottom:10px;">📣</div>
+    <div id="mensagemBannerDe" style="font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.05em;text-transform:uppercase;margin-bottom:8px;"></div>
+    <div id="mensagemBannerTexto" style="font-size:16px;line-height:1.5;margin-bottom:22px;"></div>
+    <button id="mensagemBannerOk" style="background:var(--accent);color:#0b0d10;border:none;border-radius:10px;padding:10px 22px;font-size:14px;font-weight:700;cursor:pointer;">Ok, entendi</button>
+  </div>
+</div>
+
 <script>
 // link/QR code de uma loja especifica vem com ?unidade=codigo (mesmo codigo
 // de /api/meta/unidades-publico e do link de estorno, ver index.js) - resolve
@@ -51,6 +60,36 @@
 // de uma <script src> fixa) pra nunca correr o risco dele ler
 // __zenithLojaContexto antes da respota do fetch chegar.
 window.__zenithAbrirChatAuto = true;
+
+// heartbeat de presenca da loja (ver lojaStatus.js/index.js): so faz sentido
+// quando o link tem ?unidade= (quiosque fixo de uma loja - link solto sem
+// unidade e visitante avulso, nao tela permanente pra monitorar). Enquanto
+// essa aba ficar aberta, o servidor sabe que a loja esta "viva"; silencio
+// prolongado dispara o alerta de loja offline pro Master/Suporte. A resposta
+// tambem carrega mensagem que o Master/Suporte tenha mandado pra essa loja
+// (ver POST /api/loja-status/:codigo/mensagem) - entrega de uso unico.
+function mostrarMensagemBanner(msg){
+  document.getElementById('mensagemBannerDe').textContent = 'Mensagem de ' + (msg.deEmail || 'Suporte');
+  document.getElementById('mensagemBannerTexto').textContent = msg.texto || '';
+  document.getElementById('mensagemBanner').style.display = 'flex';
+}
+document.getElementById('mensagemBannerOk').addEventListener('click', () => {
+  document.getElementById('mensagemBanner').style.display = 'none';
+});
+async function heartbeat(codigo){
+  try{
+    const r = await fetch('/api/loja-status/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unidade: codigo }),
+    });
+    if(r.ok){
+      const d = await r.json();
+      if(d.mensagemPendente) mostrarMensagemBanner(d.mensagemPendente);
+    }
+  }catch(e){ /* sem rede agora - a proxima tentativa em 25s tenta de novo */ }
+}
+
 async function boot(){
   const unidadeFixa = new URLSearchParams(location.search).get('unidade');
   if(unidadeFixa){
@@ -59,6 +98,8 @@ async function boot(){
       const achada = unidades.find(u=>u.codigo===unidadeFixa);
       if(achada) window.__zenithLojaContexto = achada.nome;
     }catch(e){ /* segue sem contexto de loja - o Beniboy pergunta normal */ }
+    heartbeat(unidadeFixa);
+    setInterval(() => heartbeat(unidadeFixa), 25 * 1000);
   }
   const s = document.createElement('script');
   s.src = '/suporte-chat.js';
