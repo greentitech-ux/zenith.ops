@@ -51,10 +51,6 @@
   .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px;}
   .info-box{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:16px;line-height:1.5;}
-  .tablewrap{overflow-x:auto;}
-  table{width:100%;min-width:720px;border-collapse:collapse;font-size:12.5px;}
-  thead th{text-align:left;font-family:var(--mono);font-weight:500;color:var(--muted);text-transform:uppercase;font-size:9.5px;letter-spacing:.02em;padding:8px 10px;border-bottom:1px solid var(--line);}
-  tbody td{padding:9px 10px;border-bottom:1px solid #1a1f26;vertical-align:middle;}
   .status-badge{font-family:var(--mono);font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;}
   .status-badge.online{background:var(--ok-dim);color:var(--ok);}
   .status-badge.offline{background:var(--bad-dim);color:var(--bad);}
@@ -65,6 +61,18 @@
   .btn-mini{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 9px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
   .btn-mini:hover{border-color:var(--accent);}
   .btn-mini.ok{color:var(--ok);}
+  .unidade-card{margin-bottom:14px;}
+  .unidade-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:6px;}
+  .unidade-head h2{margin:0;}
+  .unidade-codigo{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px;}
+  .comp-row{border-top:1px solid var(--line);padding:10px 0;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;}
+  .comp-row:first-child{border-top:none;padding-top:0;}
+  .comp-nome{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;min-width:130px;flex:1 1 130px;}
+  .comp-nome .icon-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0;}
+  .comp-nome .icon-btn:hover{color:var(--accent);}
+  .comp-sinal{font-family:var(--mono);font-size:10.5px;color:var(--muted);white-space:nowrap;}
+  .comp-acoes{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto;}
+  .empty-computadores{padding:8px 0;color:var(--muted);font-size:12.5px;}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
   .overlay.hidden{display:none!important;}
   .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:420px;}
@@ -118,28 +126,34 @@
 
 <div id="root" class="hidden">
   <div class="info-box">
-    Cada loja aparece "online" enquanto uma aba do <b>atendimento.html?unidade=&lt;código&gt;</b> (o mesmo link/QR code que a loja já usa pra falar com o Beniboy) estiver aberta - ela avisa o Zenith a cada ~25s. Se uma loja ficar mais de ~90s em silêncio, o Master e o time de Suporte recebem um alerta automático (push + aviso aqui). Cadastre o ID do AnyDesk de cada loja abaixo pra ter acesso remoto rápido - a licença já é sua, o Zenith só guarda o atalho.
+    Cada unidade pode ter <b>vários computadores</b> cadastrados (um por caixa, PDV, balcão etc) - clique em "➕ Computador" pra gerar um link/QR code próprio pra cada um. Um computador aparece "online" enquanto a aba do link dele (<b>atendimento.html?unidade=&lt;código&gt;&amp;posto=&lt;id&gt;</b>) estiver aberta - ela avisa o Zenith a cada ~25s. Se um computador ficar mais de ~90s em silêncio, o Master e o time de Suporte recebem um alerta automático (push + aviso aqui), já dizendo qual computador foi. Cadastre o ID do AnyDesk de cada computador pra ter acesso remoto rápido - a licença já é sua, o Zenith só guarda o atalho.
   </div>
-  <div class="panel">
-    <h2>Unidades</h2>
-    <div class="tablewrap">
-      <table>
-        <thead><tr><th>Unidade</th><th>Status</th><th>Último sinal</th><th>AnyDesk</th><th></th></tr></thead>
-        <tbody id="linhas"></tbody>
-      </table>
-    </div>
-  </div>
+  <div id="lista-unidades"></div>
 </div>
 
 <div class="overlay hidden" id="msg-overlay">
   <div class="modal">
     <h3>💬 Mandar mensagem</h3>
     <div class="sub" id="msg-modal-loja"></div>
-    <textarea id="msg-texto" maxlength="500" placeholder="Ex: precisamos que reiniciem o roteador, ou qualquer aviso pra tela dessa loja"></textarea>
+    <textarea id="msg-texto" maxlength="500" placeholder="Ex: precisamos que reiniciem o roteador, ou qualquer aviso pra tela desse computador"></textarea>
     <div class="msg hidden" id="msg-modal-status"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharModalMensagem()">Cancelar</button>
       <button type="button" class="btn-primary" id="msg-modal-enviar" onclick="enviarMensagemLoja()">Enviar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="novo-comp-overlay">
+  <div class="modal">
+    <h3>🖥️ Novo computador</h3>
+    <div class="sub" id="novo-comp-unidade"></div>
+    <label style="display:block;font-size:11.5px;color:var(--muted);margin:0 0 6px;font-family:var(--mono);">Nome do computador</label>
+    <input type="text" id="novo-comp-nome" placeholder="Ex: Caixa 1, PDV Entrega, Balcão" maxlength="60" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:var(--sans);box-sizing:border-box;">
+    <div class="msg hidden" id="novo-comp-status"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn-ghost" onclick="fecharModalNovoComputador()">Cancelar</button>
+      <button type="button" class="btn-primary" id="novo-comp-salvar" onclick="salvarNovoComputador()">Cadastrar</button>
     </div>
   </div>
 </div>
@@ -160,7 +174,8 @@ function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hi
 function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-let LINHAS = [];
+let UNIDADES = [];
+let COMPUTADORES = [];
 
 function tempoRelativo(ms){
   if(!ms) return 'nunca';
@@ -171,28 +186,57 @@ function tempoRelativo(ms){
   return `há ${Math.floor(s/86400)}d`;
 }
 
+function statusBadgeHtml(c){
+  if(!c.ultimoHeartbeatEm) return '<span class="status-badge nunca">⚪ nunca conectou</span>';
+  return c.online ? '<span class="status-badge online">🟢 online</span>' : '<span class="status-badge offline">🔴 offline</span>';
+}
+
+function compRowHtml(codigo, c){
+  const nomeOk = escapeHtml(c.nome || '(sem nome)');
+  const nomeEscapadoJs = (c.nome||'').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+  return `<div class="comp-row">
+    <div class="comp-nome"><span>${nomeOk}</span><button type="button" class="icon-btn" title="Renomear" onclick="renomearComputadorPrompt('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeEscapadoJs}')">✏️</button></div>
+    <div>${statusBadgeHtml(c)}</div>
+    <div class="comp-sinal">${escapeHtml(tempoRelativo(c.ultimoHeartbeatEm))}</div>
+    <div class="anydesk-linha">
+      <input type="text" value="${escapeHtml(c.anydeskId || '')}" placeholder="ID" id="ad-${escapeHtml(codigo)}-${escapeHtml(c.posto)}" maxlength="40">
+      <button type="button" class="btn-mini" onclick="salvarAnydesk('${escapeHtml(codigo)}','${escapeHtml(c.posto)}')">💾</button>
+      ${c.anydeskId ? `<a class="btn-mini" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk">🖥️</a>` : ''}
+    </div>
+    <div class="comp-acoes">
+      <button type="button" class="btn-mini" onclick="abrirModalMensagem('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeEscapadoJs}')">💬 Mensagem</button>
+      <button type="button" class="btn-mini" onclick="copiarLinkComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}')">🔗 Link</button>
+      <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeEscapadoJs}')">🗑️</button>
+    </div>
+  </div>`;
+}
+
 function render(){
-  const tbody = document.getElementById('linhas');
-  if(!LINHAS.length){ tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">Nenhuma unidade cadastrada.</td></tr>'; return; }
-  tbody.innerHTML = LINHAS.map(l => {
-    const badge = !l.ultimoHeartbeatEm
-      ? '<span class="status-badge nunca">⚪ nunca conectou</span>'
-      : l.online
-        ? '<span class="status-badge online">🟢 online</span>'
-        : '<span class="status-badge offline">🔴 offline</span>';
-    return `<tr>
-      <td><b>${escapeHtml(l.nome)}</b><div style="font-family:var(--mono);font-size:10px;color:var(--muted);">${escapeHtml(l.codigo)}</div></td>
-      <td>${badge}</td>
-      <td>${escapeHtml(tempoRelativo(l.ultimoHeartbeatEm))}</td>
-      <td>
-        <div class="anydesk-linha">
-          <input type="text" value="${escapeHtml(l.anydeskId || '')}" placeholder="ID" id="ad-${escapeHtml(l.codigo)}" maxlength="40">
-          <button type="button" class="btn-mini" onclick="salvarAnydesk('${escapeHtml(l.codigo)}')">💾</button>
-          ${l.anydeskId ? `<a class="btn-mini" href="anydesk:${escapeHtml(l.anydeskId)}" title="Abrir no AnyDesk">🖥️</a>` : ''}
-        </div>
-      </td>
-      <td><button type="button" class="btn-mini" onclick="abrirModalMensagem('${escapeHtml(l.codigo)}','${escapeHtml(l.nome)}')">💬 Mensagem</button></td>
-    </tr>`;
+  const root = document.getElementById('lista-unidades');
+  if(!UNIDADES.length){ root.innerHTML = '<div class="empty">Nenhuma unidade cadastrada.</div>'; return; }
+  const porCodigo = {};
+  COMPUTADORES.forEach(c => { (porCodigo[c.codigo] = porCodigo[c.codigo] || []).push(c); });
+  const rankUnidade = (codigo) => {
+    const cs = porCodigo[codigo] || [];
+    if(cs.some(c => c.ultimoHeartbeatEm && !c.online)) return 0;
+    if(cs.some(c => c.online)) return 1;
+    return 2;
+  };
+  const unidadesOrdenadas = UNIDADES.slice().sort((a,b) => rankUnidade(a.codigo) - rankUnidade(b.codigo) || a.nome.localeCompare(b.nome, 'pt-BR'));
+  root.innerHTML = unidadesOrdenadas.map(u => {
+    const lista = (porCodigo[u.codigo] || []).slice().sort((a,b) => {
+      const rank = (c) => (c.ultimoHeartbeatEm && !c.online) ? 0 : (c.online ? 1 : 2);
+      return rank(a) - rank(b) || (a.nome||'').localeCompare(b.nome||'', 'pt-BR');
+    });
+    const linhas = lista.length ? lista.map(c => compRowHtml(u.codigo, c)).join('') : '<div class="empty-computadores">nenhum computador cadastrado ainda.</div>';
+    const nomeEscapadoJs = u.nome.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    return `<div class="panel unidade-card">
+      <div class="unidade-head">
+        <div><h2>${escapeHtml(u.nome)}</h2><div class="unidade-codigo">${escapeHtml(u.codigo)}</div></div>
+        <button type="button" class="btn-mini" onclick="abrirModalNovoComputador('${escapeHtml(u.codigo)}','${nomeEscapadoJs}')">➕ Computador</button>
+      </div>
+      <div class="computadores-lista">${linhas}</div>
+    </div>`;
   }).join('');
 }
 
@@ -202,24 +246,16 @@ async function carregar(){
       fetch('/api/meta/unidades-publico').then(r=>r.json()),
       fetch('/api/loja-status').then(r=>r.ok?r.json():[]),
     ]);
-    const porCodigo = {};
-    status.forEach(s => { porCodigo[s.codigo] = s; });
-    LINHAS = unidades.map(u => ({
-      codigo: u.codigo, nome: u.nome,
-      online: false, ultimoHeartbeatEm: null, anydeskId: null,
-      ...(porCodigo[u.codigo] || {}),
-    })).sort((a,b) => {
-      const rank = (r) => (r.ultimoHeartbeatEm && !r.online) ? 0 : (r.online ? 1 : 2);
-      return rank(a) - rank(b) || a.nome.localeCompare(b.nome, 'pt-BR');
-    });
+    UNIDADES = unidades;
+    COMPUTADORES = status;
     render();
   }catch(e){ /* mantem a ultima lista carregada na tela */ }
 }
 
-async function salvarAnydesk(codigo){
-  const input = document.getElementById('ad-' + codigo);
+async function salvarAnydesk(codigo, posto){
+  const input = document.getElementById(`ad-${codigo}-${posto}`);
   try{
-    const resp = await fetch('/api/loja-status/' + encodeURIComponent(codigo) + '/anydesk', {
+    const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/anydesk`, {
       method: 'PUT', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ anydeskId: input.value }),
     });
@@ -228,29 +264,104 @@ async function salvarAnydesk(codigo){
   }catch(e){ alert(e.message); }
 }
 
+// mesmo padrao ja usado em central-historico.html pro link publico de
+// ticket: tenta copiar pra area de transferencia (nem todo navegador libera
+// sem clique explicito) e sempre mostra o prompt com o texto pronto pra
+// Ctrl+C, como fallback garantido
+function mostrarLinkGerado(url){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).catch(()=>{});
+  }
+  prompt('Link gerado (já copiado, se o navegador permitiu) - abra esse link no computador que você quer monitorar:', url);
+}
+
+let NOVO_COMP_CODIGO = null;
+function abrirModalNovoComputador(codigo, nomeUnidade){
+  NOVO_COMP_CODIGO = codigo;
+  document.getElementById('novo-comp-unidade').textContent = nomeUnidade;
+  document.getElementById('novo-comp-nome').value = '';
+  document.getElementById('novo-comp-status').classList.add('hidden');
+  document.getElementById('novo-comp-overlay').classList.remove('hidden');
+}
+function fecharModalNovoComputador(){ document.getElementById('novo-comp-overlay').classList.add('hidden'); NOVO_COMP_CODIGO = null; }
+async function salvarNovoComputador(){
+  const nome = document.getElementById('novo-comp-nome').value.trim();
+  const status = document.getElementById('novo-comp-status');
+  status.classList.add('hidden');
+  if(!nome || !NOVO_COMP_CODIGO) return;
+  const btn = document.getElementById('novo-comp-salvar');
+  btn.disabled = true;
+  try{
+    const resp = await fetch(`/api/loja-status/${encodeURIComponent(NOVO_COMP_CODIGO)}/computadores`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ nome }),
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao cadastrar.');
+    fecharModalNovoComputador();
+    await carregar();
+    mostrarLinkGerado(data.url);
+  }catch(e){
+    status.textContent = e.message; status.className = 'msg err'; status.classList.remove('hidden');
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+function copiarLinkComputador(codigo, posto){
+  const url = `${location.origin}/atendimento.html?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
+  mostrarLinkGerado(url);
+}
+
+async function renomearComputadorPrompt(codigo, posto, nomeAtual){
+  const nome = prompt('Novo nome do computador:', nomeAtual || '');
+  if(nome === null) return;
+  const nomeOk = nome.trim();
+  if(!nomeOk) return;
+  try{
+    const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}`, {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ nome: nomeOk }),
+    });
+    if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao renomear.');
+    await carregar();
+  }catch(e){ alert(e.message); }
+}
+
+async function removerComputador(codigo, posto, nome){
+  if(!confirm(`Remover o computador "${nome || posto}"? O AnyDesk cadastrado some e o link atual desse computador para de funcionar.`)) return;
+  try{
+    const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}`, { method: 'DELETE' });
+    if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao remover.');
+    await carregar();
+  }catch(e){ alert(e.message); }
+}
+
 let MSG_CODIGO = null;
-function abrirModalMensagem(codigo, nome){
+let MSG_POSTO = null;
+function abrirModalMensagem(codigo, posto, nomeComputador){
   MSG_CODIGO = codigo;
-  document.getElementById('msg-modal-loja').textContent = nome;
+  MSG_POSTO = posto;
+  document.getElementById('msg-modal-loja').textContent = nomeComputador || 'Computador';
   document.getElementById('msg-texto').value = '';
   document.getElementById('msg-modal-status').classList.add('hidden');
   document.getElementById('msg-overlay').classList.remove('hidden');
 }
-function fecharModalMensagem(){ document.getElementById('msg-overlay').classList.add('hidden'); MSG_CODIGO = null; }
+function fecharModalMensagem(){ document.getElementById('msg-overlay').classList.add('hidden'); MSG_CODIGO = null; MSG_POSTO = null; }
 async function enviarMensagemLoja(){
   const texto = document.getElementById('msg-texto').value.trim();
   const status = document.getElementById('msg-modal-status');
   status.classList.add('hidden');
-  if(!texto || !MSG_CODIGO) return;
+  if(!texto || !MSG_CODIGO || !MSG_POSTO) return;
   const btn = document.getElementById('msg-modal-enviar');
   btn.disabled = true;
   try{
-    const resp = await fetch('/api/loja-status/' + encodeURIComponent(MSG_CODIGO) + '/mensagem', {
+    const resp = await fetch(`/api/loja-status/${encodeURIComponent(MSG_CODIGO)}/computadores/${encodeURIComponent(MSG_POSTO)}/mensagem`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ texto }),
     });
     if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao enviar.');
-    status.textContent = '✅ Enviada! Vai aparecer na tela da loja assim que ela atualizar (até ~25s se estiver online agora).';
+    status.textContent = '✅ Enviada! Vai aparecer na tela desse computador assim que ele atualizar (até ~25s se estiver online agora).';
     status.className = 'msg ok';
     status.classList.remove('hidden');
     setTimeout(fecharModalMensagem, 2200);

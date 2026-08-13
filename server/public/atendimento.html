@@ -61,13 +61,18 @@
 // __zenithLojaContexto antes da respota do fetch chegar.
 window.__zenithAbrirChatAuto = true;
 
-// heartbeat de presenca da loja (ver lojaStatus.js/index.js): so faz sentido
-// quando o link tem ?unidade= (quiosque fixo de uma loja - link solto sem
-// unidade e visitante avulso, nao tela permanente pra monitorar). Enquanto
-// essa aba ficar aberta, o servidor sabe que a loja esta "viva"; silencio
-// prolongado dispara o alerta de loja offline pro Master/Suporte. A resposta
-// tambem carrega mensagem que o Master/Suporte tenha mandado pra essa loja
-// (ver POST /api/loja-status/:codigo/mensagem) - entrega de uso unico.
+// heartbeat de presenca do computador (ver lojaStatus.js/index.js): so faz
+// sentido quando o link tem ?unidade= (quiosque fixo de uma loja - link
+// solto sem unidade e visitante avulso, nao tela permanente pra monitorar).
+// ?posto= identifica QUAL computador da loja essa aba representa (a loja
+// pode ter varios, cada um com seu proprio link/QR - ver "+ Computador" em
+// loja-status.html); sem posto (link antigo, de antes dessa unidade ter mais
+// de 1 computador cadastrado) cai no computador "principal" da unidade.
+// Enquanto essa aba ficar aberta, o servidor sabe que esse computador esta
+// "vivo"; silencio prolongado dispara o alerta de loja offline pro Master/
+// Suporte. A resposta tambem carrega mensagem que o Master/Suporte tenha
+// mandado pra esse computador especifico (ver POST /api/loja-status/:codigo/
+// computadores/:posto/mensagem) - entrega de uso unico.
 function mostrarMensagemBanner(msg){
   document.getElementById('mensagemBannerDe').textContent = 'Mensagem de ' + (msg.deEmail || 'Suporte');
   document.getElementById('mensagemBannerTexto').textContent = msg.texto || '';
@@ -76,12 +81,12 @@ function mostrarMensagemBanner(msg){
 document.getElementById('mensagemBannerOk').addEventListener('click', () => {
   document.getElementById('mensagemBanner').style.display = 'none';
 });
-async function heartbeat(codigo){
+async function heartbeat(codigo, posto){
   try{
     const r = await fetch('/api/loja-status/heartbeat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unidade: codigo }),
+      body: JSON.stringify({ unidade: codigo, posto: posto || undefined }),
     });
     if(r.ok){
       const d = await r.json();
@@ -92,14 +97,15 @@ async function heartbeat(codigo){
 
 async function boot(){
   const unidadeFixa = new URLSearchParams(location.search).get('unidade');
+  const postoFixo = new URLSearchParams(location.search).get('posto');
   if(unidadeFixa){
     try{
       const unidades = await fetch('/api/meta/unidades-publico').then(r=>r.json());
       const achada = unidades.find(u=>u.codigo===unidadeFixa);
       if(achada) window.__zenithLojaContexto = achada.nome;
     }catch(e){ /* segue sem contexto de loja - o Beniboy pergunta normal */ }
-    heartbeat(unidadeFixa);
-    setInterval(() => heartbeat(unidadeFixa), 25 * 1000);
+    heartbeat(unidadeFixa, postoFixo);
+    setInterval(() => heartbeat(unidadeFixa, postoFixo), 25 * 1000);
   }
   const s = document.createElement('script');
   s.src = '/suporte-chat.js';

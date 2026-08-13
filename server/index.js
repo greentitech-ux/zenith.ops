@@ -682,7 +682,7 @@ app.post('/api/suporte-chat/:id/mensagem', async (req, res) => {
 // POST /api/loja-status/:codigo/mensagem mais abaixo), de uso unico ----------
 app.post('/api/loja-status/heartbeat', async (req, res) => {
   try {
-    const { mensagemPendente } = await lojaStatus.heartbeat(req.body.unidade);
+    const { mensagemPendente } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto);
     res.json({ ok: true, mensagemPendente });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1642,23 +1642,55 @@ app.delete('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res)
 });
 
 // ---------- status de conectividade das lojas (lojaStatus.js) - tela
-// loja-status.html (secao "suporte", mesmo publico do Beniboy/tecnico) ----------
+// loja-status.html (secao "suporte", mesmo publico do Beniboy/tecnico).
+// Cada unidade pode ter varios computadores cadastrados - a lista devolvida
+// aqui e achatada (1 item por computador), a tela agrupa por unidade pra
+// exibir. "nome" no item e o nome do COMPUTADOR (ver lojaStatus.js); o nome
+// de exibicao da unidade vai em "unidadeNome" pra nao colidir ----------
 app.get('/api/loja-status', requireSection('suporte'), async (req, res) => {
   const [status, mapa] = await Promise.all([lojaStatus.listar(), construirUnidadesMapa()]);
-  res.json(status.map((s) => ({ ...s, nome: mapa[s.codigo] || s.codigo })));
+  res.json(status.map((s) => ({ ...s, unidadeNome: mapa[s.codigo] || s.codigo })));
 });
 
-app.put('/api/loja-status/:codigo/anydesk', requireSection('suporte'), async (req, res) => {
+// cadastra um novo computador pra uma unidade - devolve o link/QR pronto
+// (atendimento.html?unidade=X&posto=Y) pra colar/salvar naquele computador
+app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), async (req, res) => {
   try {
-    res.json(await lojaStatus.definirAnydeskId(req.params.codigo, req.body.anydeskId));
+    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome);
+    const url = `${APP_BASE_URL}/atendimento.html?unidade=${encodeURIComponent(req.params.codigo)}&posto=${encodeURIComponent(registro.posto)}`;
+    res.json({ ...registro, url });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-app.post('/api/loja-status/:codigo/mensagem', requireSection('suporte'), async (req, res) => {
+app.put('/api/loja-status/:codigo/computadores/:posto', requireSection('suporte'), async (req, res) => {
   try {
-    res.json(await lojaStatus.enviarMensagem(req.params.codigo, req.body.texto, req.user.email));
+    res.json(await lojaStatus.renomearComputador(req.params.codigo, req.params.posto, req.body.nome));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/loja-status/:codigo/computadores/:posto', requireSection('suporte'), async (req, res) => {
+  try {
+    res.json(await lojaStatus.removerComputador(req.params.codigo, req.params.posto));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/loja-status/:codigo/computadores/:posto/anydesk', requireSection('suporte'), async (req, res) => {
+  try {
+    res.json(await lojaStatus.definirAnydeskId(req.params.codigo, req.params.posto, req.body.anydeskId));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/loja-status/:codigo/computadores/:posto/mensagem', requireSection('suporte'), async (req, res) => {
+  try {
+    res.json(await lojaStatus.enviarMensagem(req.params.codigo, req.params.posto, req.body.texto, req.user.email));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -7287,9 +7319,9 @@ app.use((err, req, res, next) => {
       const mapa = await construirUnidadesMapa();
       for (const t of transicoes) {
         const nome = mapa[t.codigo] || t.codigo;
-        broadcast('loja-status-mudou', { codigo: t.codigo, nome, tipo: t.tipo }, 'suporte');
-        if (t.tipo === 'offline') push.notifyLojaOffline(nome, t.codigo).catch((err) => console.error('Erro no push de loja offline:', err.message));
-        else push.notifyLojaVoltou(nome, t.codigo).catch((err) => console.error('Erro no push de loja online:', err.message));
+        broadcast('loja-status-mudou', { codigo: t.codigo, posto: t.posto, nome, computadorNome: t.nome, tipo: t.tipo }, 'suporte');
+        if (t.tipo === 'offline') push.notifyLojaOffline(nome, t.codigo, t.nome, t.posto).catch((err) => console.error('Erro no push de loja offline:', err.message));
+        else push.notifyLojaVoltou(nome, t.codigo, t.nome, t.posto).catch((err) => console.error('Erro no push de loja online:', err.message));
       }
     };
     setInterval(() => {
