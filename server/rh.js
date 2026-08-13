@@ -51,6 +51,12 @@ function limpar(v, max) {
   return String(v || '').trim().slice(0, max);
 }
 
+// nome "achatado" so pra comparar (case/espacos nao contam) - usado pra
+// travar cadastro duplicado da mesma pessoa na mesma loja
+function normalizarNome(v) {
+  return String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 function validarDataOuNull(v, campo) {
   if (v == null || v === '') return null;
   if (!DATA_RE.test(v)) throw new Error(`${campo} inválida. Use o formato AAAA-MM-DD.`);
@@ -119,6 +125,15 @@ async function criar({
   if (!unidade) throw new Error('Unidade é obrigatória.');
   const nomeOk = limpar(nome, 150);
   if (!nomeOk) throw new Error('Informe o nome completo.');
+  // trava cadastro duplicado (2 cliques no botao, ou reenvio do mesmo
+  // formulario) - mesmo nome (sem diferenciar espaco/maiuscula) numa ficha
+  // ainda ativa na MESMA loja nao entra de novo; alguem desligado pode ser
+  // recadastrado sem problema (nao e mais o "mesmo" cadastro em uso)
+  const nomeNormalizado = normalizarNome(nomeOk);
+  const jaExiste = (await listAll()).some((f) => (
+    f.unidade === unidade && f.status !== 'inativo' && normalizarNome(f.nome) === nomeNormalizado
+  ));
+  if (jaExiste) throw new Error(`"${nomeOk}" já está cadastrado nessa loja - confira na lista antes de cadastrar de novo.`);
   const tipo = TIPOS_CADASTRO.includes(tipoCadastro) ? tipoCadastro : 'extra';
   // extra (avulso) e efetivado (contratacao direta) ja entram como ativo -
   // nao passam por decisao de contratacao. candidato (teste de 5 dias) so

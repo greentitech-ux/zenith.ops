@@ -802,6 +802,8 @@ async function confirmarImportarLote(){
   const msg = document.getElementById('msg-lote');
   if(!LOTE_LINHAS_VALIDAS.length) return;
   if(!confirm(`Importar ${LOTE_LINHAS_VALIDAS.length} pessoa(s)? Cada uma entra já como efetivado, na etapa/prazo informados.`)) return;
+  const btn = document.getElementById('btn-confirmar-lote');
+  btn.disabled = true;
   try{
     const resp = await fetch('/api/rh/funcionarios/importar-lote', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
       linhas: LOTE_LINHAS_VALIDAS.map(({unidade,nome,cargoFuncao,etapa,prazoEtapaAte})=>({unidade,nome,cargoFuncao,etapa,prazoEtapaAte})),
@@ -814,11 +816,13 @@ async function confirmarImportarLote(){
     msg.classList.remove('hidden');
     document.getElementById('lote-texto').value = '';
     document.getElementById('lote-preview').innerHTML = '';
-    document.getElementById('btn-confirmar-lote').classList.add('hidden');
+    btn.classList.add('hidden');
     LOTE_LINHAS_VALIDAS = [];
     await carregar();
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{
+    btn.disabled = false;
   }
 }
 
