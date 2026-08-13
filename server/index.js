@@ -153,6 +153,8 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/solicitacoes/decidir',
   '/suporte-chat.js',
   '/rh-colaborador.html',
+  '/rh-cadastro.html',
+  '/api/rh/cadastro-publico',
 ]);
 // o chat de suporte do site tem rotas com id dinamico (/api/suporte-chat/:id
 // e /api/suporte-chat/:id/mensagem) - liberadas por prefixo. So o lado
@@ -606,6 +608,38 @@ app.post('/api/rh/publico/:token/checkin/saida', upload.single('foto'), async (r
     const registro = await rhCheckin.registrarSaida(aberto.id, { foto, localizacao, registradoPorEmail: null });
     broadcast('rh-checkin-atualizado', { id: registro.id, unidade: registro.unidade }, 'rh');
     res.json({ id: registro.id, status: registro.status, saida: registro.saida.horario });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- auto-cadastro do PROPRIO colaborador no 1o dia de trabalho
+// (server/public/rh-cadastro.html) - RH/gerente gera o link (com unidade e
+// tipo ja travados, ver copiarLinkCadastroRh em rh.html) e manda pro novo
+// contratado preencher os proprios dados, sem precisar login nem digitar
+// nada por ele. So libera 'extra'/'candidato' (nunca 'efetivado' - contratacao
+// direta continua exigindo Master/Admin/tag, ver podeCadastrarEfetivado) e
+// nunca aceita semExperiencia, pelo mesmo motivo: essas duas coisas so fazem
+// sentido decididas por quem tem acesso ao Zenith, nao por quem preenche um
+// link publico. Devolve o linkToken de auto-atendimento (rh-colaborador.html)
+// que rh.criar() ja gera sozinho, pra pessoa poder bater ponto na hora. ----------
+app.post('/api/rh/cadastro-publico', upload.single('curriculo'), async (req, res) => {
+  try {
+    const { unidade, nome, contato, cargoFuncao, dataNascimento } = req.body;
+    const tipoCadastro = req.body.tipoCadastro === 'candidato' ? 'candidato' : 'extra';
+    const mapa = await construirUnidadesMapa();
+    if (!unidade || !mapa[unidade]) return res.status(400).json({ error: 'Loja inválida.' });
+    let curriculo = null;
+    if (req.file) {
+      const path = await storage.salvarArquivo(unidade, req.file, 'rh-curriculos');
+      curriculo = { path, nomeOriginal: req.file.originalname, tipo: req.file.mimetype };
+    }
+    const registro = await rh.criar({
+      unidade, nome, contato, cargoFuncao, dataNascimento, tipoCadastro,
+      curriculo, cadastradoPorId: null, cadastradoPorEmail: 'Auto-cadastro (link público)',
+    });
+    broadcast('rh-funcionario-criado', registro, 'rh');
+    res.json({ id: registro.id, nome: registro.nome, linkToken: registro.linkToken });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

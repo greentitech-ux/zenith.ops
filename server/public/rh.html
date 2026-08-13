@@ -239,6 +239,8 @@
   <div class="panel">
     <h2>Cadastrar funcionário (1º dia de trabalho)</h2>
     <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">nome completo, contato e currículo (se houver) - assim o RH sabe exatamente quem está atuando em cada loja</div>
+    <button type="button" class="btn-secundario" id="btn-link-cadastro-rh" style="margin-bottom:12px;" onclick="copiarLinkCadastroRh()">🔗 Copiar link pro próprio colaborador se cadastrar</button>
+    <div id="link-cadastro-rh-msg" class="msg hidden" style="margin-bottom:12px;"></div>
     <form id="form-cadastrar">
       <label>Tipo de cadastro</label>
       <div class="tabs" style="margin-bottom:0;">
@@ -646,6 +648,11 @@ let TIPO_CADASTRO = 'extra';
 function escolherTipoCadastro(tipo){
   TIPO_CADASTRO = tipo;
   document.querySelectorAll('#form-cadastrar .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tipo===tipo));
+  // link publico de auto-cadastro (rh-cadastro.html) so cobre Extra/Candidato
+  // - Efetivado direto exige login com a permissao certa (podeCadastrarEfetivado),
+  // entao nao faz sentido oferecer o link pra esse tipo
+  document.getElementById('btn-link-cadastro-rh').classList.toggle('hidden', tipo==='efetivado');
+  document.getElementById('link-cadastro-rh-msg').classList.add('hidden');
   const explicacao = document.getElementById('tipo-cadastro-explicacao');
   const labelAdmissao = document.getElementById('c-admissao-label');
   // "sem experiencia" so faz sentido pra efetivado - extra/candidato nao tem
@@ -663,6 +670,26 @@ function escolherTipoCadastro(tipo){
     explicacao.textContent = 'extra já entra direto na Ficha de Ativos - trabalho avulso, sem período de teste.';
     labelAdmissao.textContent = 'Data de admissão';
   }
+}
+
+// monta o link do formulario publico de auto-cadastro (rh-cadastro.html) com
+// a loja e o tipo JA selecionados no formulario acima travados na URL - o
+// novo contratado so preenche os proprios dados, sem escolher loja nem tipo
+// (essas duas decisoes continuam sendo de quem manda o link)
+async function copiarLinkCadastroRh(){
+  const unidade = document.getElementById('c-unidade').value;
+  const msg = document.getElementById('link-cadastro-rh-msg');
+  if(!unidade){ msg.textContent = 'Escolha a loja antes de gerar o link.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
+  const params = new URLSearchParams({ unidade, tipo: TIPO_CADASTRO });
+  const url = location.origin + '/rh-cadastro.html?' + params.toString();
+  try{
+    await navigator.clipboard.writeText(url);
+    msg.textContent = '✅ Link copiado (loja e tipo já vêm travados): ' + url;
+  }catch(e){
+    msg.textContent = 'Não deu pra copiar automático, mas aqui está o link: ' + url;
+  }
+  msg.className = 'msg ok';
+  msg.classList.remove('hidden');
 }
 
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
