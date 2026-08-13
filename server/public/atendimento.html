@@ -81,12 +81,21 @@ function mostrarMensagemBanner(msg){
 document.getElementById('mensagemBannerOk').addEventListener('click', () => {
   document.getElementById('mensagemBanner').style.display = 'none';
 });
+// abertoDesde fica em sessionStorage: sobrevive a reload da pagina mas
+// reseta se a aba fechar - e "ha quanto tempo essa aba esta aberta sem
+// fechar", o mais perto que da pra chegar de uptime sem instalar um agente
+// de verdade na maquina (ver loja-status.html)
+function abertoDesde(){
+  let v = sessionStorage.getItem('zenithAbertoDesde');
+  if(!v){ v = String(Date.now()); sessionStorage.setItem('zenithAbertoDesde', v); }
+  return Number(v);
+}
 async function heartbeat(codigo, posto){
   try{
     const r = await fetch('/api/loja-status/heartbeat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unidade: codigo, posto: posto || undefined }),
+      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesde() }),
     });
     if(r.ok){
       const d = await r.json();

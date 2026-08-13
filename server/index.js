@@ -682,7 +682,13 @@ app.post('/api/suporte-chat/:id/mensagem', async (req, res) => {
 // POST /api/loja-status/:codigo/mensagem mais abaixo), de uso unico ----------
 app.post('/api/loja-status/heartbeat', async (req, res) => {
   try {
-    const { mensagemPendente } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto);
+    // ip vem sempre do servidor (nunca do body que o cliente manda) - mesmo
+    // padrao do freio de forca-bruta do login, ja que esse endpoint tambem e
+    // publico e o client-side nao tem como saber o proprio IP publico
+    const ip = String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim() || null;
+    const { mensagemPendente } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
+      ip, userAgent: req.body.userAgent, abertoDesde: req.body.abertoDesde,
+    });
     res.json({ ok: true, mensagemPendente });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1652,12 +1658,21 @@ app.get('/api/loja-status', requireSection('suporte'), async (req, res) => {
   res.json(status.map((s) => ({ ...s, unidadeNome: mapa[s.codigo] || s.codigo })));
 });
 
-// cadastra um novo computador pra uma unidade - devolve o link/QR pronto
-// (atendimento.html?unidade=X&posto=Y) pra colar/salvar naquele computador
+// tipo 'interno' (computador de escritorio/servidor, so pro monitoramento)
+// aponta pra tela normal de login do Zenith; 'atendimento' (o default,
+// tablet/quiosque na entrada da loja) aponta pro chat publico do Beniboy -
+// ver comentario de TIPOS_COMPUTADOR em lojaStatus.js
+function urlComputador(codigo, posto, tipo) {
+  const base = tipo === 'interno' ? '/' : '/atendimento.html';
+  return `${APP_BASE_URL}${base}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
+}
+
+// cadastra um novo computador pra uma unidade - devolve o link/QR pronto pra
+// colar/salvar naquele computador
 app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), async (req, res) => {
   try {
-    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome);
-    const url = `${APP_BASE_URL}/atendimento.html?unidade=${encodeURIComponent(req.params.codigo)}&posto=${encodeURIComponent(registro.posto)}`;
+    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo);
+    const url = urlComputador(req.params.codigo, registro.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1666,7 +1681,9 @@ app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), asy
 
 app.put('/api/loja-status/:codigo/computadores/:posto', requireSection('suporte'), async (req, res) => {
   try {
-    res.json(await lojaStatus.renomearComputador(req.params.codigo, req.params.posto, req.body.nome));
+    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo);
+    const url = urlComputador(req.params.codigo, req.params.posto, registro.tipo);
+    res.json({ ...registro, url });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

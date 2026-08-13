@@ -73,6 +73,12 @@
   .comp-sinal{font-family:var(--mono);font-size:10.5px;color:var(--muted);white-space:nowrap;}
   .comp-acoes{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto;}
   .empty-computadores{padding:8px 0;color:var(--muted);font-size:12.5px;}
+  .tipo-badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;background:var(--panel2);color:var(--muted);white-space:nowrap;border:1px solid var(--line);}
+  .comp-info{width:100%;font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:-2px;}
+  .radio-tipo{display:flex;flex-direction:column;gap:8px;margin-top:6px;}
+  .radio-tipo label{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:var(--text);font-family:var(--sans);cursor:pointer;font-weight:400;margin:0;}
+  .radio-tipo input{width:auto;margin:2px 0 0;flex:none;}
+  .radio-tipo small{display:block;color:var(--muted);font-size:11px;font-weight:400;margin-top:1px;}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
   .overlay.hidden{display:none!important;}
   .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:420px;}
@@ -126,7 +132,7 @@
 
 <div id="root" class="hidden">
   <div class="info-box">
-    Cada unidade pode ter <b>vários computadores</b> cadastrados (um por caixa, PDV, balcão etc) - clique em "➕ Computador" pra gerar um link/QR code próprio pra cada um. Um computador aparece "online" enquanto a aba do link dele (<b>atendimento.html?unidade=&lt;código&gt;&amp;posto=&lt;id&gt;</b>) estiver aberta - ela avisa o Zenith a cada ~25s. Se um computador ficar mais de ~90s em silêncio, o Master e o time de Suporte recebem um alerta automático (push + aviso aqui), já dizendo qual computador foi. Cadastre o ID do AnyDesk de cada computador pra ter acesso remoto rápido - a licença já é sua, o Zenith só guarda o atalho.
+    Cada unidade pode ter <b>vários computadores</b> cadastrados (um por caixa, PDV, balcão, servidor etc) - clique em "➕ Computador" pra gerar um link/QR code próprio pra cada um. Escolha o tipo: <b>🤖 atendimento</b> mostra o chat do Beniboy (pra tablet/quiosque que o cliente usa) e <b>🔒 interno</b> mostra a tela normal de login do Zenith (pra servidor/PC de escritório que só precisa ficar monitorado - dá pra "instalar" a página como app e fixar na barra de tarefas, assim ela não fecha por engano). Um computador aparece "online" enquanto essa aba estiver aberta - ela avisa o Zenith a cada ~25s, junto com IP, dispositivo e há quanto tempo a aba está aberta sem fechar (o mais perto que dá de "uptime" sem instalar um agente de verdade na máquina). Se ficar mais de ~90s em silêncio, o Master e o time de Suporte recebem um alerta automático já dizendo qual computador foi. Cadastre o ID do AnyDesk de cada computador pra ter acesso remoto rápido - a licença já é sua, o Zenith só guarda o atalho.
   </div>
   <div id="lista-unidades"></div>
 </div>
@@ -150,10 +156,34 @@
     <div class="sub" id="novo-comp-unidade"></div>
     <label style="display:block;font-size:11.5px;color:var(--muted);margin:0 0 6px;font-family:var(--mono);">Nome do computador</label>
     <input type="text" id="novo-comp-nome" placeholder="Ex: Caixa 1, PDV Entrega, Balcão" maxlength="60" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:var(--sans);box-sizing:border-box;">
+    <label style="display:block;font-size:11.5px;color:var(--muted);margin:14px 0 0;font-family:var(--mono);">O que o link desse computador mostra</label>
+    <div class="radio-tipo">
+      <label><input type="radio" name="novo-comp-tipo" value="atendimento" checked><span><b>🤖 Atendimento ao cliente</b><small>chat do Beniboy - pra tablet/quiosque na entrada da loja</small></span></label>
+      <label><input type="radio" name="novo-comp-tipo" value="interno"><span><b>🔒 Computador interno</b><small>tela normal de login do Zenith - pra servidor/PC de escritório, só pro monitoramento</small></span></label>
+    </div>
     <div class="msg hidden" id="novo-comp-status"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharModalNovoComputador()">Cancelar</button>
       <button type="button" class="btn-primary" id="novo-comp-salvar" onclick="salvarNovoComputador()">Cadastrar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="editar-comp-overlay">
+  <div class="modal">
+    <h3>✏️ Editar computador</h3>
+    <div class="sub" id="editar-comp-unidade"></div>
+    <label style="display:block;font-size:11.5px;color:var(--muted);margin:0 0 6px;font-family:var(--mono);">Nome do computador</label>
+    <input type="text" id="editar-comp-nome" maxlength="60" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:var(--sans);box-sizing:border-box;">
+    <label style="display:block;font-size:11.5px;color:var(--muted);margin:14px 0 0;font-family:var(--mono);">O que o link desse computador mostra</label>
+    <div class="radio-tipo">
+      <label><input type="radio" name="editar-comp-tipo" value="atendimento"><span><b>🤖 Atendimento ao cliente</b><small>chat do Beniboy - pra tablet/quiosque na entrada da loja</small></span></label>
+      <label><input type="radio" name="editar-comp-tipo" value="interno"><span><b>🔒 Computador interno</b><small>tela normal de login do Zenith - pra servidor/PC de escritório, só pro monitoramento</small></span></label>
+    </div>
+    <div class="msg hidden" id="editar-comp-status"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn-ghost" onclick="fecharModalEditarComputador()">Cancelar</button>
+      <button type="button" class="btn-primary" id="editar-comp-salvar" onclick="salvarEdicaoComputador()">Salvar</button>
     </div>
   </div>
 </div>
@@ -191,11 +221,33 @@ function statusBadgeHtml(c){
   return c.online ? '<span class="status-badge online">🟢 online</span>' : '<span class="status-badge offline">🔴 offline</span>';
 }
 
+const TIPO_COMPUTADOR_LABEL = { atendimento: '🤖 atendimento', interno: '🔒 interno' };
+
+// parse leve do user-agent - so pra dar um resumo legivel (SO + navegador),
+// sem depender de biblioteca nenhuma
+function resumoDispositivo(ua){
+  if(!ua) return null;
+  let so = null;
+  if(/Windows NT/.test(ua)) so = 'Windows';
+  else if(/Mac OS X/.test(ua)) so = 'macOS';
+  else if(/Android/.test(ua)) so = 'Android';
+  else if(/iPhone|iPad/.test(ua)) so = 'iOS';
+  else if(/Linux/.test(ua)) so = 'Linux';
+  const m = ua.match(/(Edg|Chrome|Firefox|Safari)\/([\d.]+)/);
+  const nav = m ? `${m[1]==='Edg'?'Edge':m[1]} ${m[2].split('.')[0]}` : null;
+  return [so, nav].filter(Boolean).join(' · ') || null;
+}
+
 function compRowHtml(codigo, c){
   const nomeOk = escapeHtml(c.nome || '(sem nome)');
   const nomeEscapadoJs = (c.nome||'').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+  const infoBits = [];
+  if(c.ip) infoBits.push(`IP ${escapeHtml(c.ip)}`);
+  const disp = resumoDispositivo(c.userAgent);
+  if(disp) infoBits.push(escapeHtml(disp));
+  if(c.abertoDesde) infoBits.push(`aba aberta ${escapeHtml(tempoRelativo(c.abertoDesde))}`);
   return `<div class="comp-row">
-    <div class="comp-nome"><span>${nomeOk}</span><button type="button" class="icon-btn" title="Renomear" onclick="renomearComputadorPrompt('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeEscapadoJs}')">✏️</button></div>
+    <div class="comp-nome"><span>${nomeOk}</span><span class="tipo-badge">${TIPO_COMPUTADOR_LABEL[c.tipo]||TIPO_COMPUTADOR_LABEL.atendimento}</span><button type="button" class="icon-btn" title="Editar" onclick="abrirModalEditarComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeEscapadoJs}','${c.tipo||'atendimento'}')">✏️</button></div>
     <div>${statusBadgeHtml(c)}</div>
     <div class="comp-sinal">${escapeHtml(tempoRelativo(c.ultimoHeartbeatEm))}</div>
     <div class="anydesk-linha">
@@ -205,9 +257,10 @@ function compRowHtml(codigo, c){
     </div>
     <div class="comp-acoes">
       <button type="button" class="btn-mini" onclick="abrirModalMensagem('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeEscapadoJs}')">💬 Mensagem</button>
-      <button type="button" class="btn-mini" onclick="copiarLinkComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}')">🔗 Link</button>
+      <button type="button" class="btn-mini" onclick="copiarLinkComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${c.tipo||'atendimento'}')">🔗 Link</button>
       <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeEscapadoJs}')">🗑️</button>
     </div>
+    ${infoBits.length ? `<div class="comp-info">${infoBits.join(' · ')}</div>` : ''}
   </div>`;
 }
 
@@ -272,7 +325,12 @@ function mostrarLinkGerado(url){
   if(navigator.clipboard && navigator.clipboard.writeText){
     navigator.clipboard.writeText(url).catch(()=>{});
   }
-  prompt('Link gerado (já copiado, se o navegador permitiu) - abra esse link no computador que você quer monitorar:', url);
+  // dica de fixar como app: o botao "Instalar app" do navegador ignora a
+  // query string (abre sempre a URL fixa do manifest.json, sem unidade/
+  // posto) - "Criar atalho" com "Abrir como janela" marcado preserva a URL
+  // completa e e o que realmente fixa ESSE link especifico na barra de
+  // tarefas/area de trabalho
+  prompt('Link gerado (já copiado, se o navegador permitiu) - abra esse link no computador que você quer monitorar. Pra deixar sempre aberto: no menu ⋮ do Chrome/Edge, use "Mais ferramentas → Criar atalho" (marque "Abrir como janela") e fixe na barra de tarefas - NÃO use o botão "Instalar app", ele ignora esse link específico.', url);
 }
 
 let NOVO_COMP_CODIGO = null;
@@ -280,12 +338,14 @@ function abrirModalNovoComputador(codigo, nomeUnidade){
   NOVO_COMP_CODIGO = codigo;
   document.getElementById('novo-comp-unidade').textContent = nomeUnidade;
   document.getElementById('novo-comp-nome').value = '';
+  document.querySelectorAll('input[name="novo-comp-tipo"]').forEach(r => { r.checked = (r.value === 'atendimento'); });
   document.getElementById('novo-comp-status').classList.add('hidden');
   document.getElementById('novo-comp-overlay').classList.remove('hidden');
 }
 function fecharModalNovoComputador(){ document.getElementById('novo-comp-overlay').classList.add('hidden'); NOVO_COMP_CODIGO = null; }
 async function salvarNovoComputador(){
   const nome = document.getElementById('novo-comp-nome').value.trim();
+  const tipo = document.querySelector('input[name="novo-comp-tipo"]:checked').value;
   const status = document.getElementById('novo-comp-status');
   status.classList.add('hidden');
   if(!nome || !NOVO_COMP_CODIGO) return;
@@ -294,7 +354,7 @@ async function salvarNovoComputador(){
   try{
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(NOVO_COMP_CODIGO)}/computadores`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ nome }),
+      body: JSON.stringify({ nome, tipo }),
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao cadastrar.');
@@ -308,24 +368,46 @@ async function salvarNovoComputador(){
   }
 }
 
-function copiarLinkComputador(codigo, posto){
-  const url = `${location.origin}/atendimento.html?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
+function copiarLinkComputador(codigo, posto, tipo){
+  const base = tipo === 'interno' ? '' : 'atendimento.html';
+  const url = `${location.origin}/${base}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
   mostrarLinkGerado(url);
 }
 
-async function renomearComputadorPrompt(codigo, posto, nomeAtual){
-  const nome = prompt('Novo nome do computador:', nomeAtual || '');
-  if(nome === null) return;
-  const nomeOk = nome.trim();
-  if(!nomeOk) return;
+let EDITAR_COMP_CODIGO = null;
+let EDITAR_COMP_POSTO = null;
+function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual){
+  EDITAR_COMP_CODIGO = codigo;
+  EDITAR_COMP_POSTO = posto;
+  document.getElementById('editar-comp-unidade').textContent = nomeAtual || posto;
+  document.getElementById('editar-comp-nome').value = nomeAtual || '';
+  document.querySelectorAll('input[name="editar-comp-tipo"]').forEach(r => { r.checked = (r.value === (tipoAtual || 'atendimento')); });
+  document.getElementById('editar-comp-status').classList.add('hidden');
+  document.getElementById('editar-comp-overlay').classList.remove('hidden');
+}
+function fecharModalEditarComputador(){ document.getElementById('editar-comp-overlay').classList.add('hidden'); EDITAR_COMP_CODIGO = null; EDITAR_COMP_POSTO = null; }
+async function salvarEdicaoComputador(){
+  const nome = document.getElementById('editar-comp-nome').value.trim();
+  const tipo = document.querySelector('input[name="editar-comp-tipo"]:checked').value;
+  const status = document.getElementById('editar-comp-status');
+  status.classList.add('hidden');
+  if(!nome || !EDITAR_COMP_CODIGO || !EDITAR_COMP_POSTO) return;
+  const btn = document.getElementById('editar-comp-salvar');
+  btn.disabled = true;
   try{
-    const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}`, {
+    const resp = await fetch(`/api/loja-status/${encodeURIComponent(EDITAR_COMP_CODIGO)}/computadores/${encodeURIComponent(EDITAR_COMP_POSTO)}`, {
       method: 'PUT', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ nome: nomeOk }),
+      body: JSON.stringify({ nome, tipo }),
     });
-    if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao renomear.');
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
+    fecharModalEditarComputador();
     await carregar();
-  }catch(e){ alert(e.message); }
+  }catch(e){
+    status.textContent = e.message; status.className = 'msg err'; status.classList.remove('hidden');
+  }finally{
+    btn.disabled = false;
+  }
 }
 
 async function removerComputador(codigo, posto, nome){

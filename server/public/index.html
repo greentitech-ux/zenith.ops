@@ -166,6 +166,18 @@
   </div>
 </div>
 
+<!-- mensagem que o Master/Suporte mandou pro computador "interno" que fica
+     nesta tela (ver ?unidade=&posto= e heartbeat de presenca no script
+     abaixo) - so aparece quando alguem manda uma pela loja-status.html -->
+<div id="mensagemBanner" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;align-items:center;justify-content:center;padding:24px;">
+  <div style="background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px;max-width:420px;text-align:center;">
+    <div style="font-size:38px;margin-bottom:10px;">📣</div>
+    <div id="mensagemBannerDe" style="font-family:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:var(--accent);letter-spacing:.05em;text-transform:uppercase;margin-bottom:8px;"></div>
+    <div id="mensagemBannerTexto" style="font-size:16px;line-height:1.5;margin-bottom:22px;"></div>
+    <button id="mensagemBannerOk" style="background:var(--accent);color:#0b0d10;border:none;border-radius:10px;padding:10px 22px;font-size:14px;font-weight:700;cursor:pointer;">Ok, entendi</button>
+  </div>
+</div>
+
 <script>
 // "/" e so o portao de entrada da aplicacao: se ja tem sessao valida, manda
 // direto pro Painel (pagina padrao de pouso, ver painel.html); sem sessao,
@@ -280,6 +292,50 @@ function fecharPopupSuporte(){
   document.getElementById('auth-password').focus();
 }
 document.getElementById('popup-suporte').addEventListener('click', (e)=>{ if(e.target.id==='popup-suporte') fecharPopupSuporte(); });
+
+// heartbeat de presenca do computador (ver lojaStatus.js/index.js) - so
+// ativa quando o link tem ?unidade=&posto=. Computador "interno" cadastrado
+// em loja-status.html (servidor, PC de escritorio etc) aponta pra ESSA tela
+// de login normal, em vez de pra atendimento.html (chat pro cliente) - nao
+// faz sentido nenhum mostrar o chat de atendimento numa maquina que nao e
+// quiosque de loja. abertoDesde fica em sessionStorage: sobrevive a reload
+// da pagina mas reseta se a aba fechar - e "ha quanto tempo essa aba esta
+// aberta sem fechar", o mais perto que da pra chegar de uptime sem instalar
+// um agente de verdade na maquina (que e exatamente o que essa ferramenta
+// foi feita pra evitar)
+function abertoDesdeLoja(){
+  let v = sessionStorage.getItem('zenithAbertoDesde');
+  if(!v){ v = String(Date.now()); sessionStorage.setItem('zenithAbertoDesde', v); }
+  return Number(v);
+}
+function mostrarMensagemBannerLoja(msg){
+  document.getElementById('mensagemBannerDe').textContent = 'Mensagem de ' + (msg.deEmail || 'Suporte');
+  document.getElementById('mensagemBannerTexto').textContent = msg.texto || '';
+  document.getElementById('mensagemBanner').style.display = 'flex';
+}
+document.getElementById('mensagemBannerOk').addEventListener('click', () => {
+  document.getElementById('mensagemBanner').style.display = 'none';
+});
+async function heartbeatLoja(codigo, posto){
+  try{
+    const r = await fetch('/api/loja-status/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesdeLoja() }),
+    });
+    if(r.ok){
+      const d = await r.json();
+      if(d.mensagemPendente) mostrarMensagemBannerLoja(d.mensagemPendente);
+    }
+  }catch(e){ /* sem rede agora - a proxima tentativa em 25s tenta de novo */ }
+}
+(function iniciarHeartbeatLoja(){
+  const unidade = new URLSearchParams(location.search).get('unidade');
+  if(!unidade) return;
+  const posto = new URLSearchParams(location.search).get('posto');
+  heartbeatLoja(unidade, posto);
+  setInterval(() => heartbeatLoja(unidade, posto), 25 * 1000);
+})();
 
 boot();
 </script>
