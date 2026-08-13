@@ -295,10 +295,31 @@ async function resumoSemana(unidades) {
   return { checkoutsSemana, totalCheckinsExtras };
 }
 
+// quantos check-ins (aberto/fechado, nunca pendencia/recusado) cada pessoa
+// tem - semana (Brasilia) e total historico. Usado pro numero individual nos
+// cards de "Por Unidade" (semana) e "Extras" (total), separado do resumo
+// global de resumoSemana()
+async function contagemPorFuncionario(unidades) {
+  const todos = await listAll();
+  const alvo = unidades == null ? null : new Set(unidades);
+  const filtrados = todos.filter((c) => (
+    (!alvo || alvo.has(c.unidade)) && (c.status === 'aberto' || c.status === 'fechado')
+  ));
+  const inicioSemana = inicioSemanaBrasilia();
+  const corteUtc = new Date(`${inicioSemana}T00:00:00-03:00`).toISOString();
+  const mapa = {};
+  for (const c of filtrados) {
+    if (!mapa[c.funcionarioId]) mapa[c.funcionarioId] = { semana: 0, total: 0 };
+    mapa[c.funcionarioId].total += 1;
+    if (c.entrada && c.entrada.horario >= corteUtc) mapa[c.funcionarioId].semana += 1;
+  }
+  return mapa;
+}
+
 module.exports = {
   LIMITE_CHECKINS_SEMANA_EXTRA,
   registrarEntrada, registrarSaida, buscarAbertoDoFuncionario, listPorFuncionario,
-  listByUnidadesData, listAbertos, listPendentesAprovacao, resumoSemana,
+  listByUnidadesData, listAbertos, listPendentesAprovacao, resumoSemana, contagemPorFuncionario,
   aprovarPendencia, recusarPendencia, editarHorarios, remover, getOne, hojeBrasilia,
   invalidar: () => checkinCache.invalidar(),
 };

@@ -637,6 +637,7 @@ let IS_MASTER = false;
 let IS_ADMIN = false;
 let PODE_APROVAR_RH = false;
 let TODOS = [];
+let CONTAGEM_CHECKINS = {}; // funcionarioId -> { semana, total }
 let EDITANDO_ID = null;
 let DECIDINDO_ID = null;
 let DECIDINDO_EXPERIENCIA_ID = null;
@@ -734,9 +735,11 @@ function cardAtivoHtml(f){
     f.emAtestado ? '<span class="badge bad">🩺 atestado</span>' : '',
     (f.experiencia && f.experiencia.etapa) ? `<span class="badge warn">🗓️ exp. ${f.experiencia.etapa} dias</span>` : '',
   ].filter(Boolean).join(' ');
+  const totalCheckins = (CONTAGEM_CHECKINS[f.id]||{}).total || 0;
   return `<div class="card">
     <div class="linha1"><span>${escapeHtml(f.nome)}</span>${badges}</div>
     <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · admitido ${fmtData(f.dataAdmissao)}${f.contato?' · '+escapeHtml(f.contato):''}</div>
+    <div class="sub">📸 ${totalCheckins} check-in${totalCheckins===1?'':'s'} no total</div>
     <div class="acoes">
       <button type="button" class="link-btn" onclick="abrirEditar('${f.id}')">✏️ editar</button>
       ${f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 currículo</a>` : ''}
@@ -965,9 +968,11 @@ function renderPorUnidade(){
   el.innerHTML = lista.length ? lista.map(f=>{
     const info = statusBadgeInfo(f);
     const atestado = f.emAtestado ? ' <span class="badge bad">🩺 atestado</span>' : '';
+    const semana = (CONTAGEM_CHECKINS[f.id]||{}).semana || 0;
     return `<div class="card">
       <div class="linha1"><span>${escapeHtml(f.nome)}</span><span class="badge ${info.cls}">${escapeHtml(info.label)}</span>${atestado}</div>
       <div class="sub">${escapeHtml(f.cargoFuncao||'—')} · admitido ${fmtData(f.dataAdmissao)}${f.contato?' · '+escapeHtml(f.contato):''}</div>
+      <div class="sub">📸 ${semana} check-in${semana===1?'':'s'} essa semana</div>
     </div>`;
   }).join('') : '<div class="empty">ninguém cadastrado nessa unidade ainda.</div>';
 }
@@ -1046,10 +1051,11 @@ function renderAtestados(){
 function fmtHora(iso){ if(!iso) return ''; return new Date(iso).toLocaleTimeString('pt-BR', { timeZone: FUSO_BR, hour:'2-digit', minute:'2-digit' }); }
 
 async function carregarCheckins(){
-  const [abertos, historico, resumo] = await Promise.all([
+  const [abertos, historico, resumo, contagem] = await Promise.all([
     fetch('/api/rh/checkins/abertos').then(r=>r.ok?r.json():[]).catch(()=>[]),
     fetch(`/api/rh/checkins?data=${encodeURIComponent(document.getElementById('ck-filtro-data').value||hojeBrasilia())}`).then(r=>r.ok?r.json():[]).catch(()=>[]),
     fetch('/api/rh/checkins/resumo').then(r=>r.ok?r.json():null).catch(()=>null),
+    fetch('/api/rh/checkins/contagem-por-funcionario').then(r=>r.ok?r.json():{}).catch(()=>({})),
   ]);
   const unidadeF = document.getElementById('ck-filtro-unidade').value;
 
@@ -1060,6 +1066,14 @@ async function carregarCheckins(){
   document.getElementById('checkins-resumo-semana').textContent = resumo ? `🚪 ${resumo.checkoutsSemana} check-out${resumo.checkoutsSemana===1?'':'s'} essa semana` : '';
   const badgeExtras = document.getElementById('extras-checkin-total');
   if(badgeExtras) badgeExtras.textContent = resumo ? `(${resumo.totalCheckinsExtras})` : '';
+
+  // numero individual por pessoa (semana em "Por Unidade", total em
+  // "Colaboradores"/"Extras") - reaproveita esse mesmo ciclo de carregamento
+  // pra ficar sempre atualizado apos editar/excluir/aprovar um check-in
+  CONTAGEM_CHECKINS = contagem;
+  renderPorUnidade();
+  renderColaboradores();
+  renderExtras();
 
   const acoesMaster = (c) => IS_MASTER ? `
       <button type="button" class="link-btn" onclick="abrirEditarCheckin('${c.id}')">✏️ editar</button>
