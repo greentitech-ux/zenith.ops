@@ -140,6 +140,7 @@
       </div>
     </div>
     <div class="header-nav">
+      <button class="btn-notif" onclick="abrirMensagemDireta()" title="Mandar mensagem direta pra alguém">💬</button>
       <button class="btn-notif" onclick="carregarLista()" title="Atualizar">🔄</button>
       <div class="nav-divider"></div>
       <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
@@ -159,6 +160,7 @@
   <a class="back hidden" id="nav-tecnico" href="/tecnico.html">🔧 Chamados TI</a>
   <a class="back hidden" id="nav-central-solucoes" href="/central-solucoes.html">💬 Central de Soluções</a>
   <a class="back active" id="nav-beniboy-self" href="/beniboy.html">🐝 Central do Beniboy</a>
+  <a class="back hidden" id="nav-loja-status" href="/loja-status.html">📡 Status das Lojas</a>
   <div class="nav-drawer-sep"></div>
   <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
 </nav>
@@ -197,6 +199,22 @@
       <div id="acao-corpo"></div>
       <div style="display:flex;gap:8px;margin-top:14px;">
         <button type="button" class="btn-primary" style="flex:1;" onclick="confirmarModalAcao()">Confirmar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="overlay-mensagem-direta">
+  <div class="sheet-wrap" style="max-width:420px;">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharMensagemDireta()">✕</span>
+    <div class="sheet">
+      <h3>💬 Mensagem direta</h3>
+      <div class="sub">Avisa alguém logado - aparece na hora se ela estiver com o Zenith aberto, ou por notificação se estiver com o app fechado.</div>
+      <select id="md-usuario" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;margin-bottom:10px;"></select>
+      <textarea id="md-texto" maxlength="500" placeholder="Escreva o aviso..." style="width:100%;min-height:90px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
+      <div id="md-status" style="font-size:12px;padding:8px 10px;border-radius:8px;margin-top:10px;display:none;"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button type="button" class="btn-primary" id="md-enviar" style="flex:1;" onclick="enviarMensagemDireta()">Enviar</button>
       </div>
     </div>
   </div>
@@ -364,6 +382,52 @@ function iniciarTransicao(id, statusAlvo){
   moverPara(id, statusAlvo, {});
 }
 function fecharModalAcao(){ document.getElementById('overlay-acao').classList.add('hidden'); ACAO_PENDENTE = null; }
+
+// ---------- mensagem direta pra alguem logado (nao so responder quem chama
+// no chat) - ver POST /api/mensagens/enviar ----------
+let USUARIOS_MENSAGEM = null;
+async function abrirMensagemDireta(){
+  const sel = document.getElementById('md-usuario');
+  if(!USUARIOS_MENSAGEM){
+    sel.innerHTML = '<option>Carregando...</option>';
+    try{
+      USUARIOS_MENSAGEM = await fetch('/api/mensagens/usuarios-alvo').then(r=>r.ok?r.json():[]);
+    }catch(e){ USUARIOS_MENSAGEM = []; }
+    sel.innerHTML = USUARIOS_MENSAGEM
+      .sort((a,b)=>(a.username||a.email).localeCompare(b.username||b.email,'pt-BR'))
+      .map(u=>`<option value="${u.id}">${(u.username||u.email)}${u.username?' · '+u.email:''}</option>`).join('');
+  }
+  document.getElementById('md-texto').value = '';
+  document.getElementById('md-status').style.display = 'none';
+  document.getElementById('overlay-mensagem-direta').classList.remove('hidden');
+}
+function fecharMensagemDireta(){ document.getElementById('overlay-mensagem-direta').classList.add('hidden'); }
+async function enviarMensagemDireta(){
+  const userId = document.getElementById('md-usuario').value;
+  const texto = document.getElementById('md-texto').value.trim();
+  const status = document.getElementById('md-status');
+  status.style.display = 'none';
+  if(!userId || !texto) return;
+  const btn = document.getElementById('md-enviar');
+  btn.disabled = true;
+  try{
+    const resp = await fetch('/api/mensagens/enviar', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ userId, texto }),
+    });
+    if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao enviar.');
+    status.textContent = '✅ Enviada!';
+    status.style.background = 'var(--ok-dim)'; status.style.color = 'var(--ok)';
+    status.style.display = 'block';
+    setTimeout(fecharMensagemDireta, 1400);
+  }catch(e){
+    status.textContent = e.message;
+    status.style.background = 'var(--bad-dim)'; status.style.color = 'var(--bad)';
+    status.style.display = 'block';
+  }finally{
+    btn.disabled = false;
+  }
+}
 function confirmarModalAcao(){
   if(!ACAO_PENDENTE) return;
   const { id, statusAlvo } = ACAO_PENDENTE;

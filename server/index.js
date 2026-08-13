@@ -64,6 +64,7 @@ const rh = require('./rh');
 const rhCheckin = require('./rhCheckin');
 const rhAdvertencias = require('./rhAdvertencias');
 const unidadesExtras = require('./unidades');
+const lojaStatus = require('./lojaStatus');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -155,6 +156,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/rh-colaborador.html',
   '/rh-cadastro.html',
   '/api/rh/cadastro-publico',
+  '/api/loja-status/heartbeat',
 ]);
 // o chat de suporte do site tem rotas com id dinamico (/api/suporte-chat/:id
 // e /api/suporte-chat/:id/mensagem) - liberadas por prefixo. So o lado
@@ -520,6 +522,21 @@ app.post('/api/suporte-chat/:id/mensagem', async (req, res) => {
     push.notifySolicitacao('💬 Nova mensagem no chat de suporte', `${chat.nome} · ${String(req.body.texto || '').slice(0, 80)}`, chat.id, '/tecnico.html');
     res.json({ ok: true });
     acionarBeniboy(chat.id);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- heartbeat de presenca das lojas (ver lojaStatus.js) - a tela
+// publica atendimento.html em modo quiosque manda isso periodicamente;
+// precisa ficar publica (sem login) pelo mesmo motivo do chat de suporte:
+// e a propria tela da loja quem chama, sem sessao de usuario. A resposta
+// carrega a mensagem pendente (se o Master/Suporte mandou uma - ver
+// POST /api/loja-status/:codigo/mensagem mais abaixo), de uso unico ----------
+app.post('/api/loja-status/heartbeat', async (req, res) => {
+  try {
+    const { mensagemPendente } = await lojaStatus.heartbeat(req.body.unidade);
+    res.json({ ok: true, mensagemPendente });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -1470,6 +1487,29 @@ app.patch('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res) 
 app.delete('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res) => {
   try {
     res.json(await unidadesExtras.remover(req.params.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- status de conectividade das lojas (lojaStatus.js) - tela
+// loja-status.html (secao "suporte", mesmo publico do Beniboy/tecnico) ----------
+app.get('/api/loja-status', requireSection('suporte'), async (req, res) => {
+  const [status, mapa] = await Promise.all([lojaStatus.listar(), construirUnidadesMapa()]);
+  res.json(status.map((s) => ({ ...s, nome: mapa[s.codigo] || s.codigo })));
+});
+
+app.put('/api/loja-status/:codigo/anydesk', requireSection('suporte'), async (req, res) => {
+  try {
+    res.json(await lojaStatus.definirAnydeskId(req.params.codigo, req.body.anydeskId));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/loja-status/:codigo/mensagem', requireSection('suporte'), async (req, res) => {
+  try {
+    res.json(await lojaStatus.enviarMensagem(req.params.codigo, req.body.texto, req.user.email));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -5785,6 +5825,30 @@ async function verificarAlertaPedido(order) {
   }
 }
 
+// ---------- mensagem direta (Master/Suporte -> usuario logado) - pedido do
+// usuario: poder AVISAR proativamente um funcionario, nao so responder quem
+// chama no chat de suporte. Reusa a mesma entrega dupla do vigia de pedido
+// acima (broadcastParaUsuario p/ quem esta com o Zenith aberto, qualquer
+// tela, + push.notifyUsuario p/ quem fechou o app) ----------
+app.get('/api/mensagens/usuarios-alvo', auth.requireAuth, async (req, res) => {
+  if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+  const lista = await users.list();
+  res.json(lista
+    .filter((u) => u.active)
+    .map((u) => ({ id: u.id, email: u.email, username: u.username, unidades: (u.permissions && u.permissions.unidades) || null })));
+});
+
+app.post('/api/mensagens/enviar', auth.requireAuth, async (req, res) => {
+  if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+  const texto = String(req.body.texto || '').trim().slice(0, 500);
+  const userId = String(req.body.userId || '').trim();
+  if (!userId || !texto) return res.status(400).json({ error: 'Selecione o usuário e escreva a mensagem.' });
+  broadcastParaUsuario(userId, 'mensagem-direta', { texto, deEmail: req.user.email, em: Date.now() });
+  push.notifyUsuario(userId, `Mensagem de ${req.user.email}`, texto, 'mensagem-direta-' + Date.now(), '/painel.html')
+    .catch((err) => console.error('Erro no push de mensagem direta:', err.message));
+  res.json({ ok: true });
+});
+
 // ----- lado do atendimento -----
 app.get('/api/suporte-chats', auth.requireAuth, async (req, res) => {
   if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
@@ -6978,6 +7042,26 @@ app.use((err, req, res, next) => {
     setInterval(() => {
       rodarFinalizacaoOciososSuporte().catch((err) => console.error('Erro na varredura de chats ociosos do suporte:', err.message));
     }, 5 * 60 * 1000);
+
+    // varredura de conectividade das lojas (ver lojaStatus.varrerAlertas) -
+    // quiosque (atendimento.html) parou de mandar heartbeat -> avisa Master/
+    // Suporte (push+SSE), no espirito de alerta de RMM (Atera etc) que o
+    // usuario pediu. Roda a cada 1min - o limiar de 90s ja da folga suficiente
+    // pra nao confundir jitter de rede com queda de verdade.
+    const rodarVarreduraLojaStatus = async () => {
+      const transicoes = await lojaStatus.varrerAlertas();
+      if (!transicoes.length) return;
+      const mapa = await construirUnidadesMapa();
+      for (const t of transicoes) {
+        const nome = mapa[t.codigo] || t.codigo;
+        broadcast('loja-status-mudou', { codigo: t.codigo, nome, tipo: t.tipo }, 'suporte');
+        if (t.tipo === 'offline') push.notifyLojaOffline(nome, t.codigo).catch((err) => console.error('Erro no push de loja offline:', err.message));
+        else push.notifyLojaVoltou(nome, t.codigo).catch((err) => console.error('Erro no push de loja online:', err.message));
+      }
+    };
+    setInterval(() => {
+      rodarVarreduraLojaStatus().catch((err) => console.error('Erro na varredura de conectividade das lojas:', err.message));
+    }, 60 * 1000);
 
     // reforco do alarme critico do Beniboy (ver reforcarAlarmesBeniboy) -
     // roda a cada 15s, so repete de fato quem passou de REALERTA_MS (30s)

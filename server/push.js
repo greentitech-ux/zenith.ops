@@ -419,9 +419,62 @@ async function notifyExperienciaPrazoGerente(funcionario) {
   }
 }
 
+// loja parou de mandar heartbeat (ver rodarVarreduraLojaStatus em index.js) -
+// mesmo publico do alerta critico do Beniboy (Master + tag Suporte), ja que
+// e quem cuida de infra/conectividade das lojas; alarme "alto" (critical),
+// no espirito de alerta de RMM (Atera etc) que o usuario pediu
+async function notifyLojaOffline(unidadeNome, codigo) {
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify({
+    title: '🔴 Loja sem conexão',
+    body: `${unidadeNome || codigo} parou de responder - verifique a internet/computador da loja.`,
+    tag: 'loja-status-' + codigo,
+    critical: true,
+    url: '/loja-status.html',
+  });
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload, { urgency: 'high' });
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (loja offline):', err.message);
+      }
+    }
+  }
+}
+
+// loja voltou a responder depois de ter caido - aviso tranquilo (sem
+// alarme), mesmo publico do alerta de queda
+async function notifyLojaVoltou(unidadeNome, codigo) {
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify({
+    title: '🟢 Loja reconectou',
+    body: `${unidadeNome || codigo} voltou a responder.`,
+    tag: 'loja-status-' + codigo,
+    url: '/loja-status.html',
+  });
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (loja voltou):', err.message);
+      }
+    }
+  }
+}
+
 module.exports = {
   addSubscription, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
   notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
-  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, PUBLIC_KEY,
+  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, PUBLIC_KEY,
 };

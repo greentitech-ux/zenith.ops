@@ -349,6 +349,19 @@
   </div>
 </div>
 
+<div class="overlay" id="mensagem-direta-overlay">
+  <div class="modal" style="max-width:400px;">
+    <h3 style="margin:0;">💬 Mensagem direta</h3>
+    <div id="mensagem-direta-destino" style="font-size:11.5px;color:var(--muted);margin:4px 0 12px;"></div>
+    <textarea id="mensagem-direta-texto" maxlength="500" placeholder="Escreva o aviso que vai aparecer pra essa pessoa, em qualquer tela do Zenith que ela estiver (ou por notificação, se estiver com o app fechado)" style="width:100%;min-height:90px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
+    <div id="mensagem-direta-status" style="font-size:12px;padding:8px 10px;border-radius:8px;margin-top:10px;display:none;"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+      <button type="button" class="back" style="cursor:pointer;" onclick="fecharMensagemDireta()">Cancelar</button>
+      <button type="button" class="primary" id="mensagem-direta-enviar" onclick="enviarMensagemDireta()">Enviar</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="sessoes-overlay">
   <div class="modal" style="max-width:440px;">
     <h3 id="sessoes-titulo" style="margin:0;word-break:break-all;">Locais logados</h3>
@@ -1000,6 +1013,7 @@ function abrirAcoes(id){
   if(!u) return;
   document.getElementById('acoes-titulo').textContent = u.email;
   document.getElementById('acoes-lista').innerHTML = `
+    <button type="button" onclick="fecharAcoes();abrirMensagemDireta('${u.id}','${escapeHtml(u.email)}')">💬 Mandar mensagem</button>
     <button type="button" onclick="fecharAcoes();editarPermissoes('${u.id}')">🔑 Permissões e tags</button>
     <button type="button" onclick="fecharAcoes();abrirHorario('${u.id}')">🕐 Horário de acesso</button>
     ${u.locked ? `<button type="button" onclick="fecharAcoes();desbloquearAcesso('${u.id}')">🔓 Desbloquear (mantém a senha)</button>` : ''}
@@ -1012,6 +1026,47 @@ function abrirAcoes(id){
   document.getElementById('acoes-overlay').classList.add('show');
 }
 function fecharAcoes(){ document.getElementById('acoes-overlay').classList.remove('show'); }
+
+// ---------- mensagem direta pra uma pessoa - pedido do usuario: poder
+// AVISAR proativamente um funcionario (nao so responder quem chama no chat
+// de suporte). Entrega em cima de qualquer tela do Zenith se ela estiver
+// logada agora, e por notificacao push se estiver com o app fechado
+// (ver POST /api/mensagens/enviar) ----------
+let MENSAGEM_DIRETA_ID = null;
+function abrirMensagemDireta(id, email){
+  MENSAGEM_DIRETA_ID = id;
+  document.getElementById('mensagem-direta-destino').textContent = 'Para: ' + email;
+  document.getElementById('mensagem-direta-texto').value = '';
+  document.getElementById('mensagem-direta-status').style.display = 'none';
+  document.getElementById('mensagem-direta-overlay').classList.add('show');
+}
+function fecharMensagemDireta(){ document.getElementById('mensagem-direta-overlay').classList.remove('show'); MENSAGEM_DIRETA_ID = null; }
+async function enviarMensagemDireta(){
+  const texto = document.getElementById('mensagem-direta-texto').value.trim();
+  const status = document.getElementById('mensagem-direta-status');
+  status.style.display = 'none';
+  if(!texto || !MENSAGEM_DIRETA_ID) return;
+  const btn = document.getElementById('mensagem-direta-enviar');
+  btn.disabled = true;
+  try{
+    const resp = await fetch('/api/mensagens/enviar', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ userId: MENSAGEM_DIRETA_ID, texto }),
+    });
+    if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao enviar.');
+    status.textContent = '✅ Enviada!';
+    status.style.background = 'var(--ok-dim,#1c3a2e)'; status.style.color = 'var(--ok,#3ddc97)';
+    status.style.display = 'block';
+    setTimeout(fecharMensagemDireta, 1400);
+  }catch(e){
+    status.textContent = e.message;
+    status.style.background = 'var(--bad-dim,#3a1616)'; status.style.color = 'var(--bad,#ff5c5c)';
+    status.style.display = 'block';
+  }finally{
+    btn.disabled = false;
+  }
+}
+document.getElementById('mensagem-direta-overlay').addEventListener('click', (e)=>{ if(e.target.id==='mensagem-direta-overlay') fecharMensagemDireta(); });
 document.getElementById('acoes-overlay').addEventListener('click', (e)=>{ if(e.target.id==='acoes-overlay') fecharAcoes(); });
 
 // ---------- "quantos locais estao logados com esse usuario" - clique na

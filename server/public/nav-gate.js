@@ -49,6 +49,9 @@
     // mesmo criterio de acesso do atendimento do widget (ehTimeSuporte no
     // index.js): time de Suporte, alem de Master/Admin (que ja veem tudo)
     'nav-beniboy': ['suporte'],
+    // conectividade das lojas (heartbeat do quiosque atendimento.html) -
+    // mesmo publico do Beniboy, ja que e quem cuida da infra das lojas
+    'nav-loja-status': ['suporte'],
   };
 
   function aplicar(me) {
