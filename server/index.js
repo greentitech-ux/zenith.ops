@@ -3856,6 +3856,13 @@ app.get('/api/rh/checkins/resumo', requireSection('rh'), async (req, res) => {
   res.json(await rhCheckin.resumoSemana(unidades));
 });
 
+// contador individual (semana + total) por pessoa - usado nos cards de "Por
+// Unidade" e "Extras", separado do resumo global acima
+app.get('/api/rh/checkins/contagem-por-funcionario', requireSection('rh'), async (req, res) => {
+  const unidades = (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) ? null : (req.permissions.unidades || []);
+  res.json(await rhCheckin.contagemPorFuncionario(unidades));
+});
+
 app.get('/api/rh/checkins/:id/foto/:tipo', requireSection('rh'), async (req, res) => {
   const atual = await rhCheckin.getOne(req.params.id);
   if (!atual) return res.sendStatus(404);
