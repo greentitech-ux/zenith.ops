@@ -271,7 +271,7 @@
           <input type="date" id="c-nascimento">
         </div>
         <div>
-          <label id="c-admissao-label">Data de admissão</label>
+          <label id="c-admissao-label">Data Início Extra</label>
           <input type="date" id="c-admissao" required>
         </div>
       </div>
@@ -667,13 +667,13 @@ function escolherTipoCadastro(tipo){
   if(tipo!=='efetivado') document.getElementById('c-sem-experiencia').checked = false;
   if(tipo==='candidato'){
     explicacao.textContent = 'candidato entra em período de teste de 5 dias - só vira funcionário ativo quando efetivado (aba Acompanh. de Teste).';
-    labelAdmissao.textContent = 'Data de início do teste';
+    labelAdmissao.textContent = 'Data Início Teste';
   }else if(tipo==='efetivado'){
     explicacao.textContent = 'efetivado já entra como colaborador contratado direto, sem passar pelo teste de 5 dias. Se a admissão já foi há mais de 30 dias, a experiência entra direto na etapa certa (30 ou 60 dias) - sem cobrar um prazo que já passou.';
-    labelAdmissao.textContent = 'Data de admissão';
+    labelAdmissao.textContent = 'Data Início Experiência';
   }else{
     explicacao.textContent = 'extra já entra direto na Ficha de Ativos - trabalho avulso, sem período de teste.';
-    labelAdmissao.textContent = 'Data de admissão';
+    labelAdmissao.textContent = 'Data Início Extra';
   }
 }
 
