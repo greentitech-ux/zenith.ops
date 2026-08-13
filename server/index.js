@@ -3973,8 +3973,9 @@ app.delete('/api/rh/funcionarios/:id', auth.requireMaster, async (req, res) => {
 
 // le lat/lng do body (manda junto com a foto no multipart) - o navegador
 // pega isso sozinho, sem nenhum campo/prompt proprio nosso pedindo (so o
-// prompt nativo do navegador na 1a vez); se a pessoa negar ou o dispositivo
-// nao tiver GPS, os campos simplesmente nao vem e o check-in segue normal
+// prompt nativo do navegador). Foto e localizacao sao obrigatorias (pedido
+// explicito do usuario) - se os campos nao vierem, rhCheckin.registrarEntrada/
+// registrarSaida rejeita o check-in/check-out (ver validacao la)
 function lerLocalizacaoDoBody(body) {
   const lat = Number(body.lat);
   const lng = Number(body.lng);

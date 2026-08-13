@@ -81,14 +81,16 @@ function elegivelParaCheckin(funcionario) {
 }
 
 // registra a ENTRADA - so deixa 1 check-in aberto por vez por pessoa (se ja
-// tem um aberto, tem que fechar - checkout - antes de abrir outro). A
-// localizacao (se o navegador conseguiu, silenciosamente, sem UI propria
-// pedindo - so o prompt nativo do proprio navegador) fica guardada mas so e
-// exposta pro Master nas rotas de leitura (ver sanitizarCheckin em index.js)
+// tem um aberto, tem que fechar - checkout - antes de abrir outro). Foto e
+// localizacao sao obrigatorias (pedido explicito do usuario) - a localizacao
+// fica guardada mas so e exposta pro Master nas rotas de leitura (ver
+// sanitizarCheckin em index.js)
 async function registrarEntrada({ funcionarioId, foto, localizacao, registradoPorEmail }) {
   const funcionario = await rh.getOne(funcionarioId);
   if (!funcionario) throw new Error('Funcionário não encontrado.');
   if (!elegivelParaCheckin(funcionario)) throw new Error('Esse colaborador não faz check-in por aqui - já bate ponto no sistema próprio.');
+  if (!foto) throw new Error('Tire a foto pra registrar o check-in (obrigatório).');
+  if (!localizacao) throw new Error('Não foi possível obter sua localização - permita o acesso e tente de novo (obrigatório).');
 
   const todos = await listAll();
   const aberto = todos.find((c) => c.funcionarioId === funcionarioId && c.status === 'aberto');
@@ -135,13 +137,16 @@ async function registrarEntrada({ funcionarioId, foto, localizacao, registradoPo
 }
 
 // registra a SAIDA de um check-in aberto especifico - nao depende de tipo
-// nem status do funcionario (se ja tem entrada aberta, closeout sempre vale)
+// nem status do funcionario (se ja tem entrada aberta, closeout sempre vale).
+// Foto e localizacao sao obrigatorias, igual na entrada
 async function registrarSaida(id, { foto, localizacao, registradoPorEmail }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Check-in não encontrado.');
   const atual = snap.data();
   if (atual.status !== 'aberto') throw new Error('Esse check-in já foi encerrado.');
+  if (!foto) throw new Error('Tire a foto pra registrar o check-out (obrigatório).');
+  if (!localizacao) throw new Error('Não foi possível obter sua localização - permita o acesso e tente de novo (obrigatório).');
   const agora = new Date().toISOString();
   const merge = {
     saida: { horario: agora, foto: foto || null, localizacao: localizacao || null, registradoPorEmail: registradoPorEmail || null },
