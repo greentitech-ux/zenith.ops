@@ -165,7 +165,7 @@
 <div class="tabs">
   <button type="button" class="tab-btn active" data-tab="unidade" onclick="trocarAba('unidade')">👥 Por Unidade</button>
   <button type="button" class="tab-btn" data-tab="colaboradores" onclick="trocarAba('colaboradores')">🧑‍💼 Colaboradores</button>
-  <button type="button" class="tab-btn" data-tab="extras" onclick="trocarAba('extras')">👷 Extras</button>
+  <button type="button" class="tab-btn" data-tab="extras" onclick="trocarAba('extras')">👷 Extras <span id="extras-checkin-total"></span></button>
   <button type="button" class="tab-btn" data-tab="teste" onclick="trocarAba('teste')">⏳ Em Teste</button>
   <button type="button" class="tab-btn" data-tab="experiencia" onclick="trocarAba('experiencia')">🗓️ Em Experiência</button>
 </div>
@@ -323,11 +323,13 @@
     <div class="msg hidden" id="nota-localizacao-master" style="margin-top:10px;background:var(--panel2);color:var(--muted);">📍 Só você (Master) vê o link de localização em cada check-in abaixo - aparece do lado da foto quando o dispositivo conseguiu captar.</div>
   </div>
   <div class="panel">
-    <h2>🟢 Na loja agora</h2>
+    <h2>🟢 Na loja agora <span id="checkins-total-abertos"></span></h2>
+    <div class="sub" id="checkins-resumo-semana" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:-4px 0 10px;"></div>
     <div id="lista-checkins-abertos"></div>
   </div>
   <div class="panel">
-    <h2>Histórico</h2>
+    <h2>✅ Concluídos (entrada + saída)</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">quem já fez check-out - entrada e saída no mesmo card. Quem ainda está na loja aparece só no card acima, sem repetir aqui.</div>
     <div class="grid2">
       <div>
         <label>Unidade</label>
@@ -1024,14 +1026,20 @@ function renderAtestados(){
 function fmtHora(iso){ if(!iso) return ''; return new Date(iso).toLocaleTimeString('pt-BR', { timeZone: FUSO_BR, hour:'2-digit', minute:'2-digit' }); }
 
 async function carregarCheckins(){
-  const [abertos, historico] = await Promise.all([
+  const [abertos, historico, resumo] = await Promise.all([
     fetch('/api/rh/checkins/abertos').then(r=>r.ok?r.json():[]).catch(()=>[]),
     fetch(`/api/rh/checkins?data=${encodeURIComponent(document.getElementById('ck-filtro-data').value||hojeBrasilia())}`).then(r=>r.ok?r.json():[]).catch(()=>[]),
+    fetch('/api/rh/checkins/resumo').then(r=>r.ok?r.json():null).catch(()=>null),
   ]);
   const unidadeF = document.getElementById('ck-filtro-unidade').value;
 
   CHECKINS_CACHE = new Map();
   [...abertos, ...historico].forEach(c=>CHECKINS_CACHE.set(c.id, c));
+
+  document.getElementById('checkins-total-abertos').textContent = abertos.length ? `· ${abertos.length}` : '';
+  document.getElementById('checkins-resumo-semana').textContent = resumo ? `🚪 ${resumo.checkoutsSemana} check-out${resumo.checkoutsSemana===1?'':'s'} essa semana` : '';
+  const badgeExtras = document.getElementById('extras-checkin-total');
+  if(badgeExtras) badgeExtras.textContent = resumo ? `(${resumo.totalCheckinsExtras})` : '';
 
   const acoesMaster = (c) => IS_MASTER ? `
       <button type="button" class="link-btn" onclick="abrirEditarCheckin('${c.id}')">✏️ editar</button>
@@ -1050,17 +1058,19 @@ async function carregarCheckins(){
     </div>`).join('') : '<div class="empty">ninguém na loja agora.</div>';
 
   const elHist = document.getElementById('lista-checkins-historico');
-  const histFiltrado = (unidadeF ? historico.filter(c=>c.unidade===unidadeF) : historico)
+  // so 'fechado' (entrada+saida no mesmo card) - quem ainda esta 'aberto' ja
+  // aparece no card "Na loja agora" acima, sem precisar repetir aqui
+  const histFiltrado = historico.filter(c=>c.status==='fechado' && (!unidadeF || c.unidade===unidadeF))
     .sort((a,b)=>String(b.entrada.horario||'').localeCompare(String(a.entrada.horario||'')));
   elHist.innerHTML = histFiltrado.length ? histFiltrado.map(c=>{
     const fotoEntrada = c.entrada?.foto ? `<a class="link-btn" href="/api/rh/checkins/${c.id}/foto/entrada?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📷 foto entrada</a>` : '';
     const fotoSaida = c.saida?.foto ? `<a class="link-btn" href="/api/rh/checkins/${c.id}/foto/saida?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📷 foto saída</a>` : '';
     return `<div class="card">
-      <div class="linha1"><span>${escapeHtml(c.funcionarioNome)}</span>${c.status==='aberto'?'<span class="badge ok">na loja</span>':'<span class="badge muted">encerrado</span>'}</div>
-      <div class="sub">${escapeHtml(UNIDADES_NOMES[c.unidade]||c.unidade)} · entrada ${fmtHora(c.entrada.horario)}${c.saida?' · saída '+fmtHora(c.saida.horario):''}</div>
+      <div class="linha1"><span>${escapeHtml(c.funcionarioNome)}</span><span class="badge muted">encerrado</span></div>
+      <div class="sub">${escapeHtml(UNIDADES_NOMES[c.unidade]||c.unidade)} · entrada ${fmtHora(c.entrada.horario)} · saída ${fmtHora(c.saida.horario)}</div>
       <div class="acoes">${fotoEntrada}${fotoSaida}${linkLocalizacao(c.entrada?.localizacao, 'entrada')}${linkLocalizacao(c.saida?.localizacao, 'saída')}${acoesMaster(c)}</div>
     </div>`;
-  }).join('') : '<div class="empty">nenhum check-in nesse dia.</div>';
+  }).join('') : '<div class="empty">nenhum check-in concluído nesse dia.</div>';
 }
 
 function abrirEditarCheckin(id){
@@ -1563,6 +1573,7 @@ async function boot(){
 
   document.getElementById('root').classList.remove('hidden');
   await carregar();
+  carregarCheckins();
 }
 
 boot();

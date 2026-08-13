@@ -268,10 +268,30 @@ async function recusarPendencia(id, { porEmail, motivo }) {
   return { ...atual, ...merge };
 }
 
+// numeros de apoio pro topo do painel: quantos check-outs ja fecharam essa
+// semana (Brasilia) e quantos check-ins (entrada aberta ou ja fechada) sao de
+// extra - usado no contador da aba Extras. So conta o que ja e "check-in de
+// verdade" (aberto/fechado), nunca pendencia/recusado
+async function resumoSemana(unidades) {
+  const [todos, funcionarios] = await Promise.all([listAll(), rh.listAll()]);
+  const extrasIds = new Set(funcionarios.filter((f) => f.tipoCadastro === 'extra').map((f) => f.id));
+  const alvo = unidades == null ? null : new Set(unidades);
+  const filtrados = todos.filter((c) => !alvo || alvo.has(c.unidade));
+  const inicioSemana = inicioSemanaBrasilia();
+  const corteUtc = new Date(`${inicioSemana}T00:00:00-03:00`).toISOString();
+  const checkoutsSemana = filtrados.filter((c) => (
+    c.status === 'fechado' && c.saida && c.saida.horario >= corteUtc
+  )).length;
+  const totalCheckinsExtras = filtrados.filter((c) => (
+    (c.status === 'aberto' || c.status === 'fechado') && extrasIds.has(c.funcionarioId)
+  )).length;
+  return { checkoutsSemana, totalCheckinsExtras };
+}
+
 module.exports = {
   LIMITE_CHECKINS_SEMANA_EXTRA,
   registrarEntrada, registrarSaida, buscarAbertoDoFuncionario,
-  listByUnidadesData, listAbertos, listPendentesAprovacao,
+  listByUnidadesData, listAbertos, listPendentesAprovacao, resumoSemana,
   aprovarPendencia, recusarPendencia, editarHorarios, remover, getOne, hojeBrasilia,
   invalidar: () => checkinCache.invalidar(),
 };
