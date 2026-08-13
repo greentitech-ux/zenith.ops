@@ -23,11 +23,23 @@
 // que o Master/Suporte quer empurrar pra ele - a mesma resposta do heartbeat
 // entrega essa mensagem na proxima vez que o quiosque perguntar (nao existe
 // canal de push pra visitante anonimo, so o polling do proprio heartbeat).
+//
+// "tipo" decide QUAL tela o link/QR daquele computador abre (ver
+// POST /api/loja-status/:codigo/computadores em index.js): 'atendimento'
+// mostra o chat publico do Beniboy (pro cliente falar com a loja, ver
+// atendimento.html) - o caso original, pensado pra tablet/quiosque na
+// entrada; 'interno' mostra a tela normal de login do Zenith (index.html) -
+// pra computador de escritorio/servidor que so precisa ficar "vivo" pro
+// monitoramento, sem sentido nenhum em exibir o chat de atendimento ao
+// cliente. Os dois mandam heartbeat do mesmo jeito.
 const crypto = require('crypto');
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
 
 const COLLECTION = db.collection('lojaStatus');
+
+const TIPOS_COMPUTADOR = ['atendimento', 'interno'];
+function tipoValido(tipo) { return TIPOS_COMPUTADOR.includes(tipo) ? tipo : 'atendimento'; }
 
 // heartbeat a cada ~25s (ver atendimento.html) - 90s da margem pra 2
 // heartbeats perdidos por jitter de rede antes de considerar offline
@@ -52,7 +64,7 @@ async function migrarLegado(docs) {
   for (const doc of legados) {
     const atual = doc.data();
     await COLLECTION.doc(docIdFor(atual.codigo, 'principal')).set({
-      ...atual, posto: 'principal', nome: atual.nome || 'Computador 1',
+      ...atual, posto: 'principal', nome: atual.nome || 'Computador 1', tipo: tipoValido(atual.tipo),
     }, { merge: true });
     await doc.ref.delete();
   }
@@ -72,22 +84,38 @@ const cache = createCache(listUncached, 10 * 1000);
 // pendente (se houver), ja limpando ela na mesma escrita - entrega "de uso
 // unico", igual ao padrao forcarChat que o widget de suporte ja usa pro
 // auto-abrir. posto ausente (link antigo, de antes dessa mudanca, ainda nao
-// atualizado no navegador da loja) cai no computador "principal" da unidade
-async function heartbeat(codigo, posto) {
+// atualizado no navegador da loja) cai no computador "principal" da unidade.
+//
+// info = { ip, userAgent, abertoDesde } - dados de diagnostico capturados a
+// cada heartbeat (pedido explicito do usuario: "puxar o maximo de
+// informacao do computador"). ip vem do servidor (ver index.js, cabecalho
+// x-forwarded-for), nunca do cliente. userAgent/abertoDesde vem do proprio
+// navegador (atendimento.html/index.html) - abertoDesde e o timestamp de
+// quando ESSA ABA foi carregada pela primeira vez (guardado em
+// sessionStorage no cliente, sobrevive a reloads mas reseta se a aba fechar)
+// - e o mais perto que da pra chegar de "ha quanto tempo esta ligado" sem
+// instalar um agente de verdade na maquina, que e exatamente o que essa
+// ferramenta foi feita pra evitar
+async function heartbeat(codigo, posto, info) {
   const id = docIdFor(codigo, posto || 'principal');
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   const atual = snap.exists ? snap.data() : null;
   const mensagemPendente = (atual && atual.mensagemPendente) || null;
+  const dados = info || {};
   await ref.set({
     codigo,
     posto: posto || 'principal',
     nome: (atual && atual.nome) || null,
+    tipo: tipoValido((atual && atual.tipo) || 'atendimento'),
     ultimoHeartbeatEm: Date.now(),
     anydeskId: (atual && atual.anydeskId) || null,
     avisadoOffline: (atual && atual.avisadoOffline) || false,
     offlineDesde: (atual && atual.offlineDesde) || null,
     mensagemPendente: null,
+    ip: dados.ip || (atual && atual.ip) || null,
+    userAgent: dados.userAgent || (atual && atual.userAgent) || null,
+    abertoDesde: dados.abertoDesde || (atual && atual.abertoDesde) || null,
   }, { merge: true });
   cache.invalidar();
   return { mensagemPendente };
@@ -106,32 +134,36 @@ async function listar() {
 }
 
 // Master cadastra um novo computador pra uma unidade - gera um id curto e
-// estavel (nunca muda, mesmo se o nome for editado depois) que vira parte do
-// link/QR code fixado naquele computador (ver POST /api/loja-status/:codigo/
-// computadores em index.js, que devolve a URL pronta)
-async function cadastrarComputador(codigo, nome) {
+// estavel (nunca muda, mesmo se o nome/tipo forem editados depois) que vira
+// parte do link/QR code fixado naquele computador (ver POST /api/loja-status/
+// :codigo/computadores em index.js, que devolve a URL pronta)
+async function cadastrarComputador(codigo, nome, tipo) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador (ex: Caixa 1, PDV Entrega).');
   const posto = crypto.randomBytes(4).toString('hex');
   const id = docIdFor(codigo, posto);
   const registro = {
-    codigo, posto, nome: nomeOk, anydeskId: null,
+    codigo, posto, nome: nomeOk, tipo: tipoValido(tipo), anydeskId: null,
     ultimoHeartbeatEm: null, avisadoOffline: false, offlineDesde: null, mensagemPendente: null,
+    ip: null, userAgent: null, abertoDesde: null,
   };
   await COLLECTION.doc(id).set(registro);
   cache.invalidar();
   return registro;
 }
 
-async function renomearComputador(codigo, posto, nome) {
+// edita nome e/ou tipo de um computador ja cadastrado - o "posto" (id do
+// link/QR) nunca muda, so o que aparece na tela e qual tela o link abre
+async function editarComputador(codigo, posto, nome, tipo) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador.');
   const id = docIdFor(codigo, posto);
   const snap = await COLLECTION.doc(id).get();
   if (!snap.exists) throw new Error('Computador não encontrado.');
-  await COLLECTION.doc(id).update({ nome: nomeOk });
+  const registro = { nome: nomeOk, tipo: tipoValido(tipo) };
+  await COLLECTION.doc(id).update(registro);
   cache.invalidar();
-  return { codigo, posto, nome: nomeOk };
+  return { codigo, posto, ...registro };
 }
 
 async function removerComputador(codigo, posto) {
@@ -191,6 +223,6 @@ async function varrerAlertas() {
 }
 
 module.exports = {
-  heartbeat, listar, cadastrarComputador, renomearComputador, removerComputador,
-  definirAnydeskId, enviarMensagem, varrerAlertas,
+  heartbeat, listar, cadastrarComputador, editarComputador, removerComputador,
+  definirAnydeskId, enviarMensagem, varrerAlertas, TIPOS_COMPUTADOR,
 };
