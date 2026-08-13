@@ -119,13 +119,16 @@ function renderPonto(){
   }
 }
 
-function obterLocalizacaoSilenciosa(){
-  return new Promise((resolve) => {
-    if(!navigator.geolocation){ resolve(null); return; }
+// localizacao e obrigatoria (pedido explicito do usuario, junto com a foto)
+// - se negar/nao suportar/estourar o tempo, rejeita a promise pra bloquear
+// o registro
+function obterLocalizacao(){
+  return new Promise((resolve, reject) => {
+    if(!navigator.geolocation){ reject(new Error('Esse dispositivo não suporta localização - não é possível bater ponto por aqui.')); return; }
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, precisao: pos.coords.accuracy }),
-      () => resolve(null),
-      { timeout: 4000, maximumAge: 60000 }
+      () => reject(new Error('Não foi possível obter a localização - permita o acesso à localização e tente de novo.')),
+      { timeout: 8000, maximumAge: 60000 }
     );
   });
 }
@@ -145,14 +148,12 @@ async function enviarPonto(foto){
   msg.classList.add('hidden');
   btn.disabled = true;
   try{
-    const localizacao = await obterLocalizacaoSilenciosa();
+    const localizacao = await obterLocalizacao();
     const fd = new FormData();
     fd.append('foto', foto);
-    if(localizacao){
-      fd.append('lat', localizacao.lat);
-      fd.append('lng', localizacao.lng);
-      fd.append('precisao', localizacao.precisao);
-    }
+    fd.append('lat', localizacao.lat);
+    fd.append('lng', localizacao.lng);
+    fd.append('precisao', localizacao.precisao);
     const ehEntrada = !CHECKIN_ABERTO;
     const url = ehEntrada ? `/api/rh/publico/${TOKEN}/checkin` : `/api/rh/publico/${TOKEN}/checkin/saida`;
     const resp = await fetch(url, { method:'POST', body: fd });

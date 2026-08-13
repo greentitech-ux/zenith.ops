@@ -120,11 +120,15 @@ const TIPOS_CADASTRO = ['extra', 'candidato', 'efetivado'];
 
 async function criar({
   unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro, semExperiencia,
-  curriculo, cadastradoPorId, cadastradoPorEmail,
+  curriculo, cadastradoPorId, cadastradoPorEmail, precisaAprovacao, exigirCurriculo = true,
 }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   const nomeOk = limpar(nome, 150);
   if (!nomeOk) throw new Error('Informe o nome completo.');
+  // curriculo obrigatorio no cadastro novo (pedido explicito do usuario) -
+  // exceto na importacao em lote (importarLote), que e backfill de gente que
+  // ja trabalha ha tempo, sem anexo pra exigir retroativamente
+  if (exigirCurriculo && !curriculo) throw new Error('Anexe o currículo (obrigatório).');
   // trava cadastro duplicado (2 cliques no botao, ou reenvio do mesmo
   // formulario) - mesmo nome (sem diferenciar espaco/maiuscula) numa ficha
   // ainda ativa na MESMA loja nao entra de novo; alguem desligado pode ser
@@ -139,8 +143,13 @@ async function criar({
   // nao passam por decisao de contratacao. candidato (teste de 5 dias) so
   // vira "ativo" quando efetivado (ver registrarDecisaoTeste) - ate la fica
   // de fora da Ficha de Ativos, so aparece em Acompanhamento de Teste
-  const emTeste = tipo === 'candidato';
-  const status = tipo === 'candidato' ? 'candidato' : 'ativo';
+  // precisaAprovacao (calculado por quem chama, ver index.js): cadastro feito
+  // por quem NAO e Master/Admin/RH fica "pendente_aprovacao" ate o RH/Admin/
+  // Master decidir (ver aprovarCadastro/reprovarCadastro) - so entao segue
+  // pro status que teria desde o inicio (ativo ou candidato+emTeste)
+  const aguardandoAprovacao = !!precisaAprovacao;
+  const emTeste = !aguardandoAprovacao && tipo === 'candidato';
+  const status = aguardandoAprovacao ? 'pendente_aprovacao' : (tipo === 'candidato' ? 'candidato' : 'ativo');
   const semExperienciaOk = !!semExperiencia;
 
   const ref = COLLECTION.doc();
@@ -180,12 +189,62 @@ async function criar({
     linkToken: crypto.randomBytes(24).toString('hex'),
     cadastradoPorId: cadastradoPorId || null,
     cadastradoPorEmail: cadastradoPorEmail || null,
+    // preenchido so quando o cadastro passou pelo gate de aprovacao (ver
+    // aprovarCadastro/reprovarCadastro) - null pra quem nunca precisou
+    aprovacaoCadastro: null,
     criadoEm: agora,
     atualizadoEm: agora,
   };
   await ref.set(registro);
   rhCache.invalidar();
   return registro;
+}
+
+// cadastros feitos pela loja ou pelo link publico, ainda aguardando o RH/
+// Admin/Master decidir (ver POST /api/rh/funcionarios em index.js pra saber
+// quando um cadastro entra nesse estado) - usado na aba Aprovacoes
+async function listPendentesAprovacaoCadastro() {
+  return (await listAll()).filter((f) => f.status === 'pendente_aprovacao');
+}
+
+// aprova um cadastro pendente - promove pro status que o tipo de cadastro ja
+// preveria desde o inicio (candidato entra no teste de 5 dias, extra/
+// efetivado ja fica ativo), exatamente como se nao tivesse passado pelo gate
+async function aprovarCadastro(id, { porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  const atual = snap.data();
+  if (atual.status !== 'pendente_aprovacao') throw new Error('Esse cadastro já foi decidido.');
+  const agora = new Date().toISOString();
+  await ref.update({
+    status: atual.tipoCadastro === 'candidato' ? 'candidato' : 'ativo',
+    emTeste: atual.tipoCadastro === 'candidato',
+    aprovacaoCadastro: { aprovado: true, porEmail: porEmail || null, decididoEm: agora },
+    atualizadoEm: agora,
+  });
+  rhCache.invalidar();
+  return getOne(id);
+}
+
+// reprova - entra direto como inativo (nunca chega a ficar ativo/em teste),
+// pedido explicito do usuario
+async function reprovarCadastro(id, { porEmail, motivo }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  const atual = snap.data();
+  if (atual.status !== 'pendente_aprovacao') throw new Error('Esse cadastro já foi decidido.');
+  const agora = new Date().toISOString();
+  await ref.update({
+    status: 'inativo',
+    emTeste: false,
+    desligadoEm: agora,
+    aprovacaoCadastro: { aprovado: false, motivo: limpar(motivo, 500), porEmail: porEmail || null, decididoEm: agora },
+    atualizadoEm: agora,
+  });
+  rhCache.invalidar();
+  return getOne(id);
 }
 
 async function listAllUncached() {
@@ -422,7 +481,7 @@ async function importarLote(linhas, { porEmail }) {
       const registro = await criar({
         unidade, nome: nomeOk, cargoFuncao, tipoCadastro: 'efetivado',
         dataAdmissao: etapaOk === '30' ? inicioEtapa : null,
-        cadastradoPorEmail: porEmail,
+        cadastradoPorEmail: porEmail, exigirCurriculo: false,
       });
       const merge = {
         experiencia: { etapa: etapaOk, inicioEtapa, prazoEtapaAte: prazoOk, alertasEnviados: [] },
@@ -627,6 +686,7 @@ module.exports = {
   DIAS_TESTE_ALERTA, TIPOS_CADASTRO, ALERTA_EXPERIENCIA_DIAS,
   criar, listAll, listByUnidades, getOne, atualizar, remover, mesclarDuplicados,
   buscarPorToken, regenerarLink,
+  listPendentesAprovacaoCadastro, aprovarCadastro, reprovarCadastro,
   registrarDecisaoTeste, verificarTestesVencidos, marcarAlertaTesteEnviado,
   registrarAtestado, registrarRetornoAtestado,
   registrarDecisaoExperiencia, verificarAlertasExperiencia, marcarAlertaExperienciaEnviado, definirExperiencia,
