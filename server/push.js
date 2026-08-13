@@ -364,6 +364,26 @@ async function notifyRhAdvertenciaPendente(advertencia) {
   );
 }
 
+// cadastro novo (feito pela unidade ou pelo link publico) precisa de
+// aprovacao do RH/Admin/Master antes de virar ativo/candidato (ver rh.js
+// criar()/aprovarCadastro/reprovarCadastro)
+async function notifyRhCadastroPendente(funcionarioNome, unidade) {
+  await notifyAprovacaoRh(
+    '🧑‍💼 RH · cadastro aguardando aprovação',
+    `${funcionarioNome} (${unidade}) - novo cadastro aguardando aprovação.`,
+    `rh-cadastro-pendente-${funcionarioNome}-${unidade}-${Date.now()}`,
+  );
+}
+
+// cadastro reprovado - fica Inativo, RH/Admin/Master sao avisados
+async function notifyRhCadastroReprovado(funcionarioNome, unidade, motivo) {
+  await notifyAprovacaoRh(
+    '❌ RH · cadastro reprovado',
+    `${funcionarioNome} (${unidade}) foi reprovado${motivo ? ` - ${motivo}` : ''}.`,
+    `rh-cadastro-reprovado-${funcionarioNome}-${unidade}-${Date.now()}`,
+  );
+}
+
 // advertencia aprovada e passou das 48h sem o RH anexar o documento pro
 // colaborador assinar (ver rodarAlertaAdvertenciaVencida em index.js)
 async function notifyRhAdvertenciaPrazoVencido(advertencia) {
@@ -476,5 +496,6 @@ module.exports = {
   addSubscription, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
   notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
+  notifyRhCadastroPendente, notifyRhCadastroReprovado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, PUBLIC_KEY,
 };

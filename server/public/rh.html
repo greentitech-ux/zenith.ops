@@ -61,6 +61,7 @@
   .card{border-top:1px solid var(--line);padding:12px 0;}
   .card:first-child{border-top:none;padding-top:0;}
   .card .linha1{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:13px;font-weight:600;flex-wrap:wrap;}
+  .nome-clicavel{cursor:pointer;color:var(--accent);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px;}
   .card .sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:2px;word-break:break-word;}
   .card .acoes{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;}
   .badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;display:inline-block;white-space:nowrap;}
@@ -275,8 +276,8 @@
           <input type="date" id="c-admissao" required>
         </div>
       </div>
-      <label>Currículo (PDF, opcional)</label>
-      <input type="file" id="c-curriculo" accept="application/pdf">
+      <label>Currículo (PDF, obrigatório)</label>
+      <input type="file" id="c-curriculo" accept="application/pdf" required>
       <label style="display:flex;align-items:center;gap:6px;margin-top:12px;" class="hidden" id="wrap-sem-experiencia">
         <input type="checkbox" id="c-sem-experiencia" style="width:auto;margin:0;">
         <span style="font-family:var(--sans);color:var(--text);">Contratação sem período de experiência</span>
@@ -348,6 +349,11 @@
 
 <!-- ---------- ABA: Aprovações (só RH todas-unidades/Admin/Master) ---------- -->
 <div class="painel-tab hidden" id="tab-aprovacoes">
+  <div class="panel">
+    <h2>🧑‍💼 Cadastros aguardando aprovação</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">cadastros feitos pela unidade ou pelo link público - aprovado segue como ativo/candidato (teste de 5 dias); reprovado entra como inativo</div>
+    <div id="lista-aprovacoes-cadastro"></div>
+  </div>
   <div class="panel">
     <h2>⏳ Check-ins aguardando aprovação</h2>
     <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">extra que já bateu o limite de 3 check-ins na semana, ou candidato com teste vencido sem decisão - aprovar já registra a entrada na hora</div>
@@ -551,6 +557,17 @@
   </div>
 </div>
 
+<!-- detalhe completo do cadastro (nome clicavel) -->
+<div class="overlay hidden" id="overlay-funcionario-detalhe">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharDetalheFuncionario()">✕</span>
+    <div class="sheet">
+      <h3>🧑‍💼 Dados do cadastro</h3>
+      <div id="func-detalhe-corpo"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
@@ -718,7 +735,7 @@ function trocarAba(nome){
   if(nome==='unidade') renderPorUnidade();
   if(nome==='atestados') renderAtestados();
   if(nome==='checkins') carregarCheckins();
-  if(nome==='aprovacoes') carregarAprovacoes();
+  if(nome==='aprovacoes') { carregarAprovacoesCadastro(); carregarAprovacoes(); }
   if(nome==='advertencias') carregarAdvertencias();
 }
 
@@ -738,7 +755,7 @@ function cardAtivoHtml(f){
   ].filter(Boolean).join(' ');
   const totalCheckins = (CONTAGEM_CHECKINS[f.id]||{}).total || 0;
   return `<div class="card">
-    <div class="linha1"><span>${escapeHtml(f.nome)}</span>${badges}</div>
+    <div class="linha1"><span class="nome-clicavel" onclick="abrirDetalheFuncionario('${f.id}')">${escapeHtml(f.nome)}</span>${badges}</div>
     <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · admitido ${fmtData(f.dataAdmissao)}${f.contato?' · '+escapeHtml(f.contato):''}</div>
     <div class="sub">📸 ${totalCheckins} check-in${totalCheckins===1?'':'s'} no total</div>
     <div class="acoes">
@@ -876,7 +893,7 @@ function renderTeste(){
     const dias = diasDesde(f.dataAdmissao);
     const vencido = dias>=5;
     return `<div class="card">
-      <div class="linha1"><span>${escapeHtml(f.nome)}</span>${vencido?'<span class="badge bad">decidir hoje</span>':`<span class="badge warn">dia ${dias}</span>`}</div>
+      <div class="linha1"><span class="nome-clicavel" onclick="abrirDetalheFuncionario('${f.id}')">${escapeHtml(f.nome)}</span>${vencido?'<span class="badge bad">decidir hoje</span>':`<span class="badge warn">dia ${dias}</span>`}</div>
       <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · admitido ${fmtData(f.dataAdmissao)} (${dias} dia${dias===1?'':'s'})</div>
       <div class="acoes">
         <button type="button" class="btn-secundario" onclick="abrirDecisao('${f.id}')">📝 Registrar decisão</button>
@@ -1160,6 +1177,37 @@ const MOTIVO_PENDENCIA_LABEL = {
   teste_vencido_sem_decisao: 'teste de 5 dias vencido, sem decisão registrada',
 };
 
+const TIPO_CADASTRO_LABEL_APROVACAO = { extra: 'Extra', candidato: 'Candidato (teste 5 dias)', efetivado: 'Efetivado' };
+
+async function carregarAprovacoesCadastro(){
+  const el = document.getElementById('lista-aprovacoes-cadastro');
+  if(!PODE_APROVAR_RH){ el.innerHTML = '<div class="empty">só o RH, o Admin ou o Master podem ver e decidir esses cadastros.</div>'; return; }
+  const lista = await fetch('/api/rh/funcionarios/pendentes-aprovacao-cadastro').then(r=>r.ok?r.json():[]).catch(()=>[]);
+  el.innerHTML = lista.length ? lista.map(f=>`
+    <div class="card">
+      <div class="linha1"><span class="nome-clicavel" onclick="abrirDetalheFuncionario('${f.id}')">${escapeHtml(f.nome)}</span><span class="badge warn">pendente</span></div>
+      <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(TIPO_CADASTRO_LABEL_APROVACAO[f.tipoCadastro]||f.tipoCadastro)} · cadastrado em ${fmtDataHora(f.criadoEm)} por ${escapeHtml(f.cadastradoPorEmail||'—')}</div>
+      <div class="acoes">
+        <button type="button" class="link-btn" onclick="abrirDetalheFuncionario('${f.id}')">🔎 ver dados</button>
+        <button type="button" class="link-btn" onclick="aprovarCadastroPendente('${f.id}')">✅ aprovado</button>
+        <button type="button" class="link-btn" onclick="reprovarCadastroPendente('${f.id}')">❌ reprovado</button>
+      </div>
+    </div>`).join('') : '<div class="empty">nenhum cadastro pendente de aprovação.</div>';
+}
+async function aprovarCadastroPendente(id){
+  const resp = await fetch(`/api/rh/funcionarios/${id}/aprovar-cadastro`, { method:'POST' });
+  if(!resp.ok){ const d = await resp.json().catch(()=>({})); alert(d.error||'Erro ao aprovar.'); return; }
+  carregarAprovacoesCadastro();
+  carregar();
+}
+async function reprovarCadastroPendente(id){
+  const motivo = prompt('Motivo da reprovação (opcional):') || '';
+  const resp = await fetch(`/api/rh/funcionarios/${id}/reprovar-cadastro`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ motivo }) });
+  if(!resp.ok){ const d = await resp.json().catch(()=>({})); alert(d.error||'Erro ao reprovar.'); return; }
+  carregarAprovacoesCadastro();
+  carregar();
+}
+
 async function carregarAprovacoes(){
   const el = document.getElementById('lista-aprovacoes');
   if(!PODE_APROVAR_RH){ el.innerHTML = '<div class="empty">só o RH, o Admin ou o Master podem ver e decidir essas solicitações.</div>'; return; }
@@ -1338,6 +1386,39 @@ async function enviarMensagemAdvertencia(){
   await renderDetalheAdvertencia();
 }
 
+const STATUS_FUNCIONARIO_LABEL = {
+  pendente_aprovacao: 'aguardando aprovação', ativo: 'ativo', candidato: 'candidato (teste 5 dias)', inativo: 'desligado/reprovado',
+};
+
+function abrirDetalheFuncionario(id){
+  const f = TODOS.find(x=>x.id===id);
+  document.getElementById('overlay-funcionario-detalhe').classList.remove('hidden');
+  const corpo = document.getElementById('func-detalhe-corpo');
+  if(!f){ corpo.innerHTML = '<div class="empty">cadastro não encontrado.</div>'; return; }
+  const linhas = [
+    ['Unidade', UNIDADES_NOMES[f.unidade]||f.unidade],
+    ['Tipo de cadastro', TIPO_CADASTRO_LABEL_APROVACAO[f.tipoCadastro]||f.tipoCadastro],
+    ['Status', STATUS_FUNCIONARIO_LABEL[f.status]||f.status],
+    ['Cargo/função', f.cargoFuncao||'—'],
+    ['Contato', f.contato||'—'],
+    ['Data de nascimento', fmtData(f.dataNascimento)],
+    ['Data de admissão', fmtData(f.dataAdmissao)],
+    ['Cadastrado por', f.cadastradoPorEmail||'—'],
+    ['Cadastrado em', fmtDataHora(f.criadoEm)],
+  ];
+  if(f.aprovacaoCadastro){
+    linhas.push(['Decisão do cadastro', `${f.aprovacaoCadastro.aprovado?'✅ aprovado':'❌ reprovado'} por ${f.aprovacaoCadastro.porEmail||'—'} em ${fmtDataHora(f.aprovacaoCadastro.decididoEm)}${f.aprovacaoCadastro.motivo?' · '+f.aprovacaoCadastro.motivo:''}`]);
+  }
+  const tabela = linhas.map(([k,v])=>`<div class="sub" style="margin-bottom:6px;"><b>${escapeHtml(k)}:</b> ${escapeHtml(String(v))}</div>`).join('');
+  const curriculo = f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 ver currículo anexado</a>` : '<div class="sub">sem currículo anexado.</div>';
+  corpo.innerHTML = `
+    <div style="font-weight:600;font-size:14px;margin-bottom:10px;">${escapeHtml(f.nome)}</div>
+    ${tabela}
+    <div style="margin-top:10px;">${curriculo}</div>
+  `;
+}
+function fecharDetalheFuncionario(){ document.getElementById('overlay-funcionario-detalhe').classList.add('hidden'); }
+
 function renderAniversariantes(){
   const hoje = hojeBrasilia();
   const [, mesHoje, diaHoje] = hoje.split('-');
@@ -1408,6 +1489,8 @@ document.getElementById('form-cadastrar').addEventListener('submit', async (e)=>
   e.preventDefault();
   const msg = document.getElementById('msg-cadastrar');
   msg.classList.add('hidden');
+  const arq = document.getElementById('c-curriculo').files[0];
+  if(!arq){ msg.textContent = 'Anexe o currículo (obrigatório).'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
   const btn = e.target.querySelector('button[type=submit]');
   btn.disabled = true;
   try{
@@ -1420,8 +1503,7 @@ document.getElementById('form-cadastrar').addEventListener('submit', async (e)=>
     fd.append('dataAdmissao', document.getElementById('c-admissao').value);
     fd.append('tipoCadastro', TIPO_CADASTRO);
     if(TIPO_CADASTRO==='efetivado') fd.append('semExperiencia', document.getElementById('c-sem-experiencia').checked);
-    const arq = document.getElementById('c-curriculo').files[0];
-    if(arq) fd.append('curriculo', arq);
+    fd.append('curriculo', arq);
     const resp = await fetch('/api/rh/funcionarios', { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao cadastrar.');

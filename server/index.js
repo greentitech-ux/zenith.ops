@@ -781,8 +781,10 @@ app.post('/api/rh/cadastro-publico', upload.single('curriculo'), async (req, res
     const registro = await rh.criar({
       unidade, nome, contato, cargoFuncao, dataNascimento, tipoCadastro,
       curriculo, cadastradoPorId: null, cadastradoPorEmail: 'Auto-cadastro (link público)',
+      precisaAprovacao: true,
     });
     broadcast('rh-funcionario-criado', registro, 'rh');
+    push.notifyRhCadastroPendente(registro.nome, registro.unidade);
     res.json({ id: registro.id, nome: registro.nome, linkToken: registro.linkToken });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -3710,6 +3712,18 @@ function podeAprovarRh(req) {
   return req.isMaster || req.isAdmin || req.podeRhTodasUnidades;
 }
 
+// cadastro feito por quem NAO e Master/Admin/RH de verdade (secao 'rh') fica
+// "pendente_aprovacao" ate alguem que pode aprovar decidir (ver
+// podeAprovarRh). Hoje, como a rota interna abaixo ja exige a secao 'rh',
+// isso so acontece de fato pelo link publico (cadastradoPorId null, sem
+// usuario logado) - mas calculamos de forma generica pensando que a tag
+// 'rh' vai ficar restrita a quem trabalha no RH de verdade, e o gerente da
+// loja vai passar a usar so o link publico
+function precisaAprovacaoCadastro(req) {
+  if (!req || !req.user) return true;
+  return !(req.isMaster || req.isAdmin || auth.hasSection(req, 'rh'));
+}
+
 app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'), async (req, res) => {
   try {
     const { unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro } = req.body;
@@ -3729,8 +3743,12 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'
     const registro = await rh.criar({
       unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro, semExperiencia,
       curriculo, cadastradoPorId: req.user.id, cadastradoPorEmail: req.user.email,
+      precisaAprovacao: precisaAprovacaoCadastro(req),
     });
     broadcast('rh-funcionario-criado', registro, 'rh');
+    if (registro.status === 'pendente_aprovacao') {
+      push.notifyRhCadastroPendente(registro.nome, registro.unidade);
+    }
     res.json(registro);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -3807,6 +3825,37 @@ app.post('/api/rh/funcionarios/:id/regenerar-link', requireSection('rh'), async 
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
     const registro = await rh.regenerarLink(req.params.id);
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// cadastros feitos pela loja ou pelo link publico que ficaram
+// "pendente_aprovacao" (ver precisaAprovacaoCadastro acima) - so quem pode
+// aprovar (RH todas-unidades/Admin/Master) ve e decide
+app.get('/api/rh/funcionarios/pendentes-aprovacao-cadastro', requireSection('rh'), async (req, res) => {
+  if (!podeAprovarRh(req)) return res.json([]);
+  res.json(await rh.listPendentesAprovacaoCadastro());
+});
+
+app.post('/api/rh/funcionarios/:id/aprovar-cadastro', requireSection('rh'), async (req, res) => {
+  try {
+    if (!podeAprovarRh(req)) return res.status(403).json({ error: 'Só o RH, o Admin ou o Master podem aprovar.' });
+    const registro = await rh.aprovarCadastro(req.params.id, { porEmail: req.user.email });
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/rh/funcionarios/:id/reprovar-cadastro', requireSection('rh'), async (req, res) => {
+  try {
+    if (!podeAprovarRh(req)) return res.status(403).json({ error: 'Só o RH, o Admin ou o Master podem recusar.' });
+    const registro = await rh.reprovarCadastro(req.params.id, { porEmail: req.user.email, motivo: req.body.motivo });
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    push.notifyRhCadastroReprovado(registro.nome, registro.unidade, registro.aprovacaoCadastro && registro.aprovacaoCadastro.motivo);
     res.json(registro);
   } catch (err) {
     res.status(400).json({ error: err.message });

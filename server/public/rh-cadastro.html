@@ -101,8 +101,8 @@
   <label>Data de nascimento</label>
   <input type="date" id="nascimento">
 
-  <label>Currículo (PDF, opcional)</label>
-  <input type="file" id="curriculo" accept="application/pdf">
+  <label>Currículo (PDF, obrigatório)</label>
+  <input type="file" id="curriculo" accept="application/pdf" required>
 
   <button type="submit" class="btn-primary" id="btn-enviar">Enviar cadastro</button>
   <div id="msg" class="msg hidden"></div>
@@ -158,6 +158,8 @@ document.getElementById('form-cadastro').addEventListener('submit', async (e)=>{
   e.preventDefault();
   const msg = document.getElementById('msg');
   msg.classList.add('hidden');
+  const arquivo = document.getElementById('curriculo').files[0];
+  if(!arquivo){ msg.textContent = 'Anexe o currículo (obrigatório).'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
   const btn = document.getElementById('btn-enviar');
   btn.disabled = true; btn.textContent = 'Enviando...';
   try{
@@ -168,13 +170,12 @@ document.getElementById('form-cadastro').addEventListener('submit', async (e)=>{
     fd.append('contato', document.getElementById('contato').value);
     fd.append('cargoFuncao', document.getElementById('cargo').value);
     fd.append('dataNascimento', document.getElementById('nascimento').value);
-    const arquivo = document.getElementById('curriculo').files[0];
-    if(arquivo) fd.append('curriculo', arquivo);
+    fd.append('curriculo', arquivo);
     const resp = await fetch('/api/rh/cadastro-publico', { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar o cadastro.');
     LINK_TOKEN = data.linkToken;
-    document.getElementById('suc-texto').textContent = `${data.nome}, seu cadastro foi registrado com sucesso.`;
+    document.getElementById('suc-texto').textContent = `${data.nome}, seu cadastro foi registrado e está aguardando aprovação do RH.`;
     document.getElementById('form-cadastro').classList.add('hidden');
     document.getElementById('sucesso').classList.remove('hidden');
     window.scrollTo({ top: 0, behavior: 'smooth' });
