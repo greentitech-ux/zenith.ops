@@ -81,32 +81,46 @@ async function listUncached() {
 const usersCache = createCache(listUncached, 60 * 1000);
 const list = usersCache.cached;
 
+// checagem + gravacao dentro da MESMA transacao do Firestore - sem isso,
+// dois POST /api/users quase simultaneos (duplo clique no botao "Criar
+// acesso", ou um clique seguido de Enter antes da resposta voltar - o
+// botao nao ficava desabilitado durante a requisicao) podem os dois ler
+// "email livre" e cada um criar um acesso, resultando em 2+ acessos
+// identicos pro mesmo email (foi exatamente isso que aconteceu de
+// verdade). O botao no front agora trava durante a chamada (ver
+// usuarios.html) - isso aqui e a segunda camada, pra cobrir qualquer outra
+// forma de disparar 2 chamadas ao mesmo tempo (rede lenta com retry, etc)
 async function create({ email, password, permissions, username }) {
   email = String(email || '').trim().toLowerCase();
   if (!email || !password) throw new Error('Email e senha são obrigatórios.');
   if (password.length < 8) throw new Error('A senha deve ter pelo menos 8 caracteres.');
-
-  const existing = await usersRef.where('email', '==', email).limit(1).get();
-  if (!existing.empty) throw new Error('Já existe um acesso com esse email.');
-
   const usernameOk = sanitizeUsername(username);
-  await garantirUsernameLivre(usernameOk, null);
-
   const passwordHash = await bcrypt.hash(password, 12);
-  const doc = await usersRef.add({
-    email,
-    username: usernameOk || null,
-    passwordHash,
-    role: 'user',
-    active: true,
-    // senha definida pelo Master na hora de criar o acesso - pede pra
-    // trocar no primeiro login, ja que ele avisa a senha por fora do app
-    precisaTrocarSenha: true,
-    permissions: sanitizePermissions(permissions),
-    createdAt: new Date().toISOString(),
+
+  const novoId = await db.runTransaction(async (tx) => {
+    const existing = await tx.get(usersRef.where('email', '==', email).limit(1));
+    if (!existing.empty) throw new Error('Já existe um acesso com esse email.');
+    if (usernameOk) {
+      const existingUsername = await tx.get(usersRef.where('username', '==', usernameOk).limit(1));
+      if (!existingUsername.empty) throw new Error('Já existe um acesso com esse usuário.');
+    }
+    const ref = usersRef.doc();
+    tx.set(ref, {
+      email,
+      username: usernameOk || null,
+      passwordHash,
+      role: 'user',
+      active: true,
+      // senha definida pelo Master na hora de criar o acesso - pede pra
+      // trocar no primeiro login, ja que ele avisa a senha por fora do app
+      precisaTrocarSenha: true,
+      permissions: sanitizePermissions(permissions),
+      createdAt: new Date().toISOString(),
+    });
+    return ref.id;
   });
   usersCache.invalidar();
-  return toPublic(await doc.get());
+  return toPublic(await usersRef.doc(novoId).get());
 }
 
 // acesso "QA Master": mesmo role 'master' de sempre (100% das rotas que
@@ -117,31 +131,38 @@ async function create({ email, password, permissions, username }) {
 // qaAprovacoes.js). Pensado pra treino/teste em produção sem risco de
 // alguem (ou um bot) apagar/reconfigurar algo real sem um Master de
 // verdade revisar antes.
+// mesma protecao contra dupla-criacao do create() acima (checagem +
+// gravacao numa unica transacao)
 async function createQaMaster({ email, password, username }) {
   email = String(email || '').trim().toLowerCase();
   if (!email || !password) throw new Error('Email e senha são obrigatórios.');
   if (password.length < 8) throw new Error('A senha deve ter pelo menos 8 caracteres.');
-
-  const existing = await usersRef.where('email', '==', email).limit(1).get();
-  if (!existing.empty) throw new Error('Já existe um acesso com esse email.');
-
   const usernameOk = sanitizeUsername(username);
-  await garantirUsernameLivre(usernameOk, null);
-
   const passwordHash = await bcrypt.hash(password, 12);
-  const doc = await usersRef.add({
-    email,
-    username: usernameOk || null,
-    passwordHash,
-    role: 'master',
-    qaMaster: true,
-    active: true,
-    precisaTrocarSenha: true,
-    permissions: sanitizePermissions(null),
-    createdAt: new Date().toISOString(),
+
+  const novoId = await db.runTransaction(async (tx) => {
+    const existing = await tx.get(usersRef.where('email', '==', email).limit(1));
+    if (!existing.empty) throw new Error('Já existe um acesso com esse email.');
+    if (usernameOk) {
+      const existingUsername = await tx.get(usersRef.where('username', '==', usernameOk).limit(1));
+      if (!existingUsername.empty) throw new Error('Já existe um acesso com esse usuário.');
+    }
+    const ref = usersRef.doc();
+    tx.set(ref, {
+      email,
+      username: usernameOk || null,
+      passwordHash,
+      role: 'master',
+      qaMaster: true,
+      active: true,
+      precisaTrocarSenha: true,
+      permissions: sanitizePermissions(null),
+      createdAt: new Date().toISOString(),
+    });
+    return ref.id;
   });
   usersCache.invalidar();
-  return toPublic(await doc.get());
+  return toPublic(await usersRef.doc(novoId).get());
 }
 
 // tag "QA User": acesso comum (role 'user', com as permissoes normais que o
