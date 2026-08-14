@@ -451,7 +451,7 @@ function equipTileHtml(codigo, c){
     <div class="equip-tile-head">
       <span class="status-dot ${status}"></span>
       <span class="equip-tile-nome" title="${nomeOk}">${nomeOk}</span>
-      <button type="button" class="icon-btn" title="Editar" onclick="abrirModalEditarComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeJs}','${c.tipo||'atendimento'}','${escapeJs(c.anydeskId||'')}')">✏️</button>
+      <button type="button" class="icon-btn" title="Editar" onclick="abrirModalEditarComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}','${c.tipo||'atendimento'}','${escapeJs(c.anydeskId||'')}')">✏️</button>
     </div>
     <div class="equip-tile-sub">
       <span class="equip-tile-unidade">${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}</span>
@@ -461,10 +461,10 @@ function equipTileHtml(codigo, c){
     ${infoBits.length ? `<div class="equip-tile-info">${infoBits.join('<br>')}</div>` : ''}
     <div class="equip-tile-acoes">
       ${c.anydeskId ? `<a class="btn-mini ok" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk">🖥️ AnyDesk</a>` : ''}
-      <button type="button" class="btn-mini" onclick="abrirModalMensagem('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeJs}')">💬</button>
-      <button type="button" class="btn-mini" onclick="copiarLinkComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${c.tipo||'atendimento'}')">🔗</button>
-      <button type="button" class="btn-mini" title="Baixar NOCZenith (reabre sozinho + reporta IP local)" onclick="baixarVigia('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${c.tipo||'atendimento'}')">🛡️</button>
-      <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeJs}')">🗑️</button>
+      <button type="button" class="btn-mini" onclick="abrirModalMensagem('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">💬</button>
+      <button type="button" class="btn-mini" onclick="copiarLinkComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🔗</button>
+      <button type="button" class="btn-mini" title="Baixar NOCZenith (reabre sozinho + reporta IP local)" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️</button>
+      <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️</button>
     </div>
   </div>`;
 }
