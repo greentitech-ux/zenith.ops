@@ -80,6 +80,12 @@
   .pcard .pcard-top .titulo{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;}
   .pcard .pcard-link{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-decoration:none;white-space:nowrap;}
   .pcard .pcard-link:hover{text-decoration:underline;}
+  /* quando a pessoa arrasta o card pra um tamanho maior que o conteudo
+     precisa, o corpo cresce (flex:1) e centraliza o que tem dentro no
+     espaco disponivel, em vez de deixar tudo colado no topo com uma sobra
+     em branco embaixo - min-height:0 evita que o flex trave no tamanho
+     natural do conteudo e ignore o crescimento */
+  .pcard-body{flex:1;display:flex;flex-direction:column;justify-content:center;gap:12px;min-height:0;}
   .pstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:10px;}
   .pstat.wide{grid-column:1 / -1;}
   .pstat .lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-family:var(--mono);}
@@ -527,7 +533,7 @@ function statRow(label, valor, classe, wide){
 function pcardWrap(icone, titulo, link, corpoHtml){
   return `<div class="pcard">
     <div class="pcard-top"><div class="titulo">${icone} ${escapeHtml(titulo)}</div><a class="pcard-link" href="${link}">Abrir →</a></div>
-    ${corpoHtml}
+    <div class="pcard-body">${corpoHtml}</div>
   </div>`;
 }
 
