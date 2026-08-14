@@ -1330,6 +1330,11 @@ function mostrarTooltip(x,y,html){
   tt.style.top = Math.max(y-10, 10)+'px';
 }
 function esconderTooltip(){ document.getElementById('viz-tooltip').classList.remove('show'); }
+// toque fora de uma barra fecha o tooltip - so existe mouseleave pra
+// mouse, no toque (celular) precisa desse fechamento manual
+document.addEventListener('click', (evt)=>{
+  if(!evt.target.closest('.hit-row')) esconderTooltip();
+});
 
 // grafico de barras horizontais - top ofensores por |diferenca em R$|, na
 // mesma paleta ja usada em fechamentos.html (--ok=sobra, --bad=falta)
@@ -1354,7 +1359,7 @@ function renderOfensoresChart(ofensores){
     const cor = o.diferencaValor<0 ? 'var(--bad)' : 'var(--ok)';
     rotulos += `<text x="${padL-8}" y="${(cy+3.5).toFixed(1)}" text-anchor="end">${escapeHtml(o.itemNome.length>24?o.itemNome.slice(0,23)+'…':o.itemNome)}</text>`;
     barras += `<rect class="bar" data-i="${i}" x="${padL}" y="${(cy-8).toFixed(1)}" width="${largura.toFixed(1)}" height="16" rx="3" fill="${cor}"/>`;
-    barras += `<text x="${(padL+largura+6).toFixed(1)}" y="${(cy+3.5).toFixed(1)}" fill="${cor}" style="font-weight:600;">${fmtMoney(o.diferencaValor)}</text>`;
+    barras += `<text x="${(padL+largura+6).toFixed(1)}" y="${(cy+3.5).toFixed(1)}" fill="${cor}" style="font-weight:600;">${o.diferencaQtd}</text>`;
     hits += `<rect class="hit-row" data-i="${i}" x="0" y="${y}" width="${W}" height="${rowH}"/>`;
   });
 
@@ -1362,7 +1367,7 @@ function renderOfensoresChart(ofensores){
 
   svg.querySelectorAll('.hit-row').forEach(row=>{
     const i = Number(row.dataset.i);
-    row.addEventListener('mousemove', (evt)=>{
+    const exibirTooltip = (evt)=>{
       svg.querySelectorAll('rect.bar').forEach(b=>b.classList.toggle('dim', Number(b.dataset.i)!==i));
       const o = top[i];
       const cor = o.diferencaValor<0 ? '#ff5c5c' : '#3ddc97';
@@ -1370,7 +1375,11 @@ function renderOfensoresChart(ofensores){
         <div class="tt-row"><span class="tt-key"><i style="background:${cor}"></i>${o.diferencaValor<0?'Falta':'Sobra'}</span><span class="tt-val">${fmtMoney(o.diferencaValor)}</span></div>
         <div class="tt-row"><span class="tt-key">Quantidade</span><span class="tt-val">${o.diferencaQtd}</span></div>`;
       mostrarTooltip(evt.clientX, evt.clientY, html);
-    });
+    };
+    row.addEventListener('mousemove', exibirTooltip);
+    // toque no celular nao dispara mousemove - o clique/toque mostra o mesmo
+    // tooltip (valor + quantidade), pra funcionar sem precisar de mouse
+    row.addEventListener('click', exibirTooltip);
     row.addEventListener('mouseleave', ()=>{ svg.querySelectorAll('rect.bar').forEach(b=>b.classList.remove('dim')); esconderTooltip(); });
   });
 }
