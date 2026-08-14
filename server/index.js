@@ -191,10 +191,14 @@ const ROTA_LOJA_ACESSO_REMOTO_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^
 // (Verificar-Atualizacao), por isso publica igual as outras: a maquina
 // (ou o navegador sem precisar mandar cookie/token) e quem chama
 const ROTA_LOJA_VIGIA_SCRIPT_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/vigia\.ps1$/;
+// NOCZenith reporta o que a pessoa digitou na janela de chat flutuante
+// (ver vigiaScript.js) - mesmo motivo publico das outras: quem chama e a
+// maquina, sem sessao de usuario
+const ROTA_LOJA_CHAT_RESPONDER_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/chat-responder$/;
 function rotaPublicaSemDashboard(path) {
   return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/')
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
-    || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path);
+    || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path);
 }
 if (DASHBOARD_USER && DASHBOARD_PASSWORD) {
   app.use((req, res, next) => {
@@ -709,10 +713,10 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
     // padrao do freio de forca-bruta do login, ja que esse endpoint tambem e
     // publico e o client-side nao tem como saber o proprio IP publico
     const ip = String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim() || null;
-    const { mensagemPendente } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
+    const { mensagemPendente, comandoPendente, chatMensagens } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
       ip, userAgent: req.body.userAgent, abertoDesde: req.body.abertoDesde,
     });
-    res.json({ ok: true, mensagemPendente });
+    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -738,6 +742,19 @@ app.post('/api/loja-status/:codigo/computadores/:posto/ip-local', async (req, re
 app.post('/api/loja-status/:codigo/computadores/:posto/comando-resultado', async (req, res) => {
   try {
     res.json(await lojaStatus.marcarComandoExecutado(req.body.comandoId, { resultado: req.body.resultado, erro: req.body.erro }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- resposta digitada na janela de chat flutuante do NOCZenith
+// (ver vigiaScript.js) - mesma logica publica do ip-local/comando-resultado:
+// quem chama e a maquina, sem sessao de usuario. So entra na thread
+// (lojaStatus.responderChat) - o Master ve no modal de mensagem de
+// loja-status.html no proximo poll ----------
+app.post('/api/loja-status/:codigo/computadores/:posto/chat-responder', async (req, res) => {
+  try {
+    res.json(await lojaStatus.responderChat(req.params.codigo, req.params.posto, req.body.texto));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

@@ -132,8 +132,13 @@ async function heartbeat(codigo, posto, info) {
   if (atual && atual.tipo === 'interno' && atual.comandoPendenteId) {
     comandoPendente = await entregarComandoPendente(codigo, posto || 'principal');
   }
+  // thread de chat (ver enviarMensagem/responderChat) - manda sempre a
+  // lista inteira (capada, pequena), o NOCZenith que guarda localmente
+  // qual "em" ja mostrou pra so empurrar as mensagens novas na janela
+  // flutuante (so tipo 'interno' processa isso hoje - ver vigiaScript.js)
+  const chatMensagens = (atual && atual.chatMensagens) || [];
   cache.invalidar();
-  return { mensagemPendente, comandoPendente };
+  return { mensagemPendente, comandoPendente, chatMensagens };
 }
 
 function comOnline(doc) {
@@ -309,8 +314,31 @@ async function marcarComandoExecutado(comandoId, dados) {
   return { ...comando, ...patch };
 }
 
+// tamanho maximo da thread guardada por computador - so o suficiente pra
+// dar contexto na janela de chat, sem o documento crescer sem limite
+const CHAT_MAX_MENSAGENS = 30;
+
+// acrescenta uma entrada na thread de chat desse computador (mantendo so
+// as ultimas CHAT_MAX_MENSAGENS) - usado tanto pelo lado do Master
+// (enviarMensagem) quanto pela resposta digitada na janela flutuante do
+// NOCZenith (responderChat)
+async function adicionarNoChat(codigo, posto, entrada) {
+  const id = docIdFor(codigo, posto);
+  const snap = await COLLECTION.doc(id).get();
+  const atual = snap.exists ? snap.data() : null;
+  const thread = [...((atual && atual.chatMensagens) || []), entrada].slice(-CHAT_MAX_MENSAGENS);
+  await COLLECTION.doc(id).set({ codigo, posto, chatMensagens: thread }, { merge: true });
+  cache.invalidar();
+  return thread;
+}
+
 // fica esperando pro proximo heartbeat DESSE computador entregar (ver
-// heartbeat() acima) - nao exige o computador estar online agora
+// heartbeat() acima) - nao exige o computador estar online agora. Alem do
+// aviso "de uso unico" (mensagemPendente, ja existia - o banner que
+// atendimento.html mostra), agora tambem entra na thread de chat
+// (chatMensagens) - pedido explicito do usuario: uma caixa de dialogo
+// flutuante estilo Splashtop na tela do computador ('interno' - ver
+// vigiaScript.js), com ida e volta de verdade, nao so um aviso de uma via
 async function enviarMensagem(codigo, posto, texto, deEmail) {
   const id = docIdFor(codigo, posto);
   const textoLimpo = String(texto || '').trim().slice(0, 500);
@@ -319,8 +347,19 @@ async function enviarMensagem(codigo, posto, texto, deEmail) {
     codigo, posto,
     mensagemPendente: { texto: textoLimpo, deEmail: deEmail || null, em: Date.now() },
   }, { merge: true });
-  cache.invalidar();
+  await adicionarNoChat(codigo, posto, { de: 'master', texto: textoLimpo, deEmail: deEmail || null, em: Date.now() });
   return { codigo, posto, texto: textoLimpo };
+}
+
+// o NOCZenith reporta o que a pessoa digitou na janela flutuante de chat
+// (ver rota publica .../chat-responder em index.js - sem sessao, quem
+// chama e a maquina) - so entra na thread, o Master ve no mesmo modal de
+// mensagem em loja-status.html no proximo poll (30s)
+async function responderChat(codigo, posto, texto) {
+  const textoLimpo = String(texto || '').trim().slice(0, 500);
+  if (!textoLimpo) throw new Error('Mensagem vazia.');
+  const thread = await adicionarNoChat(codigo, posto, { de: 'computador', texto: textoLimpo, em: Date.now() });
+  return { codigo, posto, texto: textoLimpo, chatMensagens: thread };
 }
 
 // varredura periodica (ver rodarVarreduraLojaStatus em index.js): detecta
@@ -350,5 +389,5 @@ async function varrerAlertas() {
 module.exports = {
   heartbeat, listar, cadastrarComputador, editarComputador, removerComputador,
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR,
-  enfileirarComando, marcarComandoExecutado, registrarAcessoRemoto,
+  enfileirarComando, marcarComandoExecutado, registrarAcessoRemoto, responderChat,
 };

@@ -134,6 +134,16 @@
   .msg{font-size:12px;padding:8px 10px;border-radius:8px;margin-top:10px;}
   .msg.ok{background:var(--ok-dim);color:var(--ok);}
   .msg.err{background:var(--bad-dim);color:var(--bad);}
+  /* thread do chat com o NOCZenith (janela flutuante estilo Splashtop que
+     aparece no computador 'interno') - mostra a ida e volta dentro do
+     mesmo modal de mensagem, sem precisar de tela separada */
+  .chat-thread{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;margin-bottom:12px;padding-right:2px;}
+  .chat-thread:empty{display:none;}
+  .chat-bolha{max-width:82%;padding:7px 10px;border-radius:10px;font-size:12.5px;line-height:1.4;word-break:break-word;}
+  .chat-bolha .chat-hora{display:block;font-family:var(--mono);font-size:9.5px;color:var(--muted);margin-top:2px;}
+  .chat-bolha.de-master{align-self:flex-end;background:var(--accent);color:#06202e;border-bottom-right-radius:3px;}
+  .chat-bolha.de-master .chat-hora{color:#06202e;opacity:.65;}
+  .chat-bolha.de-computador{align-self:flex-start;background:var(--panel2);border:1px solid var(--line);border-bottom-left-radius:3px;}
 
   /* ---- NOC Zenith: painel do agente (Master-only) ---- */
   .agente-titulo{display:flex;align-items:center;gap:8px;margin:32px 0 4px;padding-top:20px;border-top:1px solid var(--line);}
@@ -300,8 +310,9 @@
 
 <div class="overlay hidden" id="msg-overlay">
   <div class="modal">
-    <h3>💬 Mandar mensagem</h3>
+    <h3>💬 Mensagem</h3>
     <div class="sub" id="msg-modal-loja"></div>
+    <div class="chat-thread" id="msg-modal-thread"></div>
     <textarea id="msg-texto" maxlength="500" placeholder="Ex: precisamos que reiniciem o roteador, ou qualquer aviso pra tela desse computador"></textarea>
     <div class="msg hidden" id="msg-modal-status"></div>
     <div class="modal-acoes">
@@ -572,6 +583,7 @@ function render(){
   }
   grid.innerHTML = lista.map(c => equipTileHtml(c.codigo, c)).join('');
   atualizarDetalheSeAberto();
+  atualizarChatModalSeAberto();
 }
 
 function atualizarTickerCarga(){
@@ -750,15 +762,38 @@ async function removerComputador(codigo, posto, nome){
 
 let MSG_CODIGO = null;
 let MSG_POSTO = null;
+// desenha a thread de chat (chatMensagens - ver lojaStatus.js) dentro do
+// modal de mensagem. So computador tipo 'interno' responde de verdade (a
+// janela flutuante do NOCZenith - ver vigiaScript.js), mas a thread mostra
+// qualquer coisa que ja tenha sido trocada, independente do tipo
+function renderChatThread(c){
+  const el = document.getElementById('msg-modal-thread');
+  const lista = (c && c.chatMensagens) || [];
+  el.innerHTML = lista.map(m => {
+    const hora = m.em ? new Date(m.em).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) : '';
+    const quem = m.de === 'computador' ? 'de-computador' : 'de-master';
+    return `<div class="chat-bolha ${quem}">${escapeHtml(m.texto||'')}<span class="chat-hora">${escapeHtml(hora)}</span></div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
 function abrirModalMensagem(codigo, posto, nomeComputador){
   MSG_CODIGO = codigo;
   MSG_POSTO = posto;
   document.getElementById('msg-modal-loja').textContent = nomeComputador || 'Computador';
   document.getElementById('msg-texto').value = '';
   document.getElementById('msg-modal-status').classList.add('hidden');
+  const c = COMPUTADORES.find(x => x.codigo===codigo && x.posto===posto);
+  renderChatThread(c);
   document.getElementById('msg-overlay').classList.remove('hidden');
 }
 function fecharModalMensagem(){ document.getElementById('msg-overlay').classList.add('hidden'); MSG_CODIGO = null; MSG_POSTO = null; }
+// chamado no fim de render() - mantem a thread viva enquanto o modal
+// estiver aberto, igual o detalhe do computador (atualizarDetalheSeAberto)
+function atualizarChatModalSeAberto(){
+  if(!MSG_CODIGO || !MSG_POSTO) return;
+  const c = COMPUTADORES.find(x => x.codigo===MSG_CODIGO && x.posto===MSG_POSTO);
+  if(c) renderChatThread(c);
+}
 async function enviarMensagemLoja(){
   const texto = document.getElementById('msg-texto').value.trim();
   const status = document.getElementById('msg-modal-status');
@@ -772,10 +807,12 @@ async function enviarMensagemLoja(){
       body: JSON.stringify({ texto }),
     });
     if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao enviar.');
+    document.getElementById('msg-texto').value = '';
     status.textContent = '✅ Enviada! Vai aparecer na tela desse computador assim que ele atualizar (até ~25s se estiver online agora).';
     status.className = 'msg ok';
     status.classList.remove('hidden');
-    setTimeout(fecharModalMensagem, 2200);
+    setTimeout(() => status.classList.add('hidden'), 3000);
+    await carregar();
   }catch(e){
     status.textContent = e.message; status.className = 'msg err'; status.classList.remove('hidden');
   }finally{
