@@ -702,7 +702,7 @@ async function baixarVigia(codigo, posto, tipo){
     a.click();
     a.remove();
     URL.revokeObjectURL(a.href);
-    alert(`Script "NOCZenith-${posto}.ps1" baixado.\n\nComo instalar:\n1) Salve numa pasta fixa (ex: Documentos\\NOCZenith)\n2) Clique com o botão direito nele > "Executar com o PowerShell"\n\nPronto - ele se instala sozinho e já começa a rodar (e a partir de agora se atualiza sozinho quando eu mudar algo nele). As instruções completas (inclusive o que fazer se der erro de permissão) estão nos comentários no topo do próprio arquivo.`);
+    alert(`Script "NOCZenith-${posto}.ps1" baixado.\n\nComo instalar:\n1) Salve numa pasta fixa (ex: Documentos\\NOCZenith)\n2) Clique com o botão direito nele > "Executar com o PowerShell"\n\nPronto - ele se instala sozinho e já começa a rodar (e a partir de agora se atualiza sozinho quando eu mudar algo nele). As instruções completas (inclusive o que fazer se der erro de permissão) estão nos comentários no topo do próprio arquivo.\n\nSe não ficar online: abra "NOCZenith.log" na MESMA pasta onde salvou o .ps1 - ele registra cada tentativa de contato com o servidor e qualquer erro (rede, comando, etc).\n\nImportante pra computador tipo "servidor"/escritório: a tarefa agendada roda no PRÓXIMO LOGIN desse usuário - se a sessão for encerrada (logoff) depois de instalar, o NOCZenith para até alguém logar de novo nessa conta. Deixe a sessão só bloqueada/desconectada (nunca "Sair"), ou reabra a sessão pra ele voltar a rodar.`);
   }catch(e){
     alert(e.message);
   }
