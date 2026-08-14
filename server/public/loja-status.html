@@ -102,6 +102,9 @@
   .equip-tile-status.offline{color:var(--bad);}
   .equip-tile-status.nunca{color:var(--muted);}
   .equip-tile-info{font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.7;}
+  .equip-tile-info b{color:var(--text);}
+  .btn-copiar-ip{background:none;border:none;color:var(--accent);cursor:pointer;font-size:10px;padding:0 2px;vertical-align:middle;}
+  .btn-copiar-ip:hover{color:var(--text);}
   .equip-tile-acoes{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:6px;}
   .btn-mini{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
   .btn-mini:hover{border-color:var(--accent);}
@@ -333,7 +336,11 @@ function equipTileHtml(codigo, c){
   const status = statusDe(c);
   const statusTexto = status==='nunca' ? 'nunca conectou' : (status==='online' ? 'online' : `offline · ${tempoRelativo(c.ultimoHeartbeatEm)}`);
   const infoBits = [];
-  if(c.ip) infoBits.push(`🌐 ${escapeHtml(c.ip)}`);
+  // ip = publico (visto pelo servidor via x-forwarded-for); ipLocal = da
+  // rede da loja, reportado pelo script de vigia (ver baixarVigia) - e o
+  // que serve pra acesso remoto no dia a dia (pedido explicito do usuario)
+  if(c.ipLocal) infoBits.push(`🏠 IP local: <b>${escapeHtml(c.ipLocal)}</b> <button type="button" class="btn-copiar-ip" title="Copiar IP local" onclick="event.stopPropagation();copiarIpLocal('${escapeJs(c.ipLocal)}')">📋</button>`);
+  if(c.ip) infoBits.push(`🌐 IP público: ${escapeHtml(c.ip)}`);
   const disp = resumoDispositivo(c.userAgent);
   if(disp) infoBits.push(`💻 ${escapeHtml(disp)}`);
   if(c.abertoDesde) infoBits.push(`⏱️ aberto ${escapeHtml(tempoRelativo(c.abertoDesde))}`);
@@ -356,6 +363,7 @@ function equipTileHtml(codigo, c){
       ${c.anydeskId ? `<a class="btn-mini ok" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk">🖥️ AnyDesk</a>` : ''}
       <button type="button" class="btn-mini" onclick="abrirModalMensagem('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeJs}')">💬</button>
       <button type="button" class="btn-mini" onclick="copiarLinkComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${c.tipo||'atendimento'}')">🔗</button>
+      <button type="button" class="btn-mini" title="Baixar script de vigia (reabre sozinho + reporta IP local)" onclick="baixarVigia('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${c.tipo||'atendimento'}')">🛡️</button>
       <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeJs}')">🗑️</button>
     </div>
   </div>`;
@@ -517,6 +525,111 @@ function copiarLinkComputador(codigo, posto, tipo){
   const base = tipo === 'interno' ? '' : 'atendimento.html';
   const url = `${location.origin}/${base}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
   mostrarLinkGerado(url);
+}
+
+function copiarIpLocal(ip){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(ip).catch(()=>{});
+  }
+  alert(`IP local copiado: ${ip}`);
+}
+
+// gera um script de "vigia" pra rodar nativo no Windows daquele computador,
+// fora do navegador - pedido explicito do usuario: (1) o monitoramento nao
+// pode depender so da aba ficar aberta (se alguem fechar por engano, o
+// vigia reabre sozinho), e (2) precisa do IP da rede LOCAL da maquina pra
+// acesso remoto no dia a dia (o IP publico que o heartbeat ja capturava nao
+// serve pra isso). E so um script (nao um agente instalado de verdade) -
+// mais simples de distribuir, mas depende do Windows permitir rodar
+// PowerShell (ver instrucoes no proprio arquivo baixado)
+function baixarVigia(codigo, posto, tipo){
+  const base = tipo === 'interno' ? '' : 'atendimento.html';
+  const urlMonitorar = `${location.origin}/${base}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
+  const urlReportarIp = `${location.origin}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/ip-local`;
+  const nomeTarefa = 'ZenithVigia_' + posto;
+  const linhas = [
+    '# Vigia do Zenith Ops - ' + codigo + ' / ' + posto,
+    '#',
+    '# O que isso faz, rodando escondido em segundo plano:',
+    '# 1) Reabre a tela de monitoramento sozinho se alguem fechar ela sem querer.',
+    '# 2) Manda pro Zenith o IP da rede LOCAL desse computador (pra acesso',
+    '#    remoto no dia a dia - aparece em Status das Lojas, no card desse',
+    '#    computador).',
+    '#',
+    '# COMO INSTALAR (um passo so):',
+    '# 1) Salve esse arquivo numa pasta fixa e definitiva (ex: Documentos\\ZenithVigia)',
+    '#    - nao mova depois, o agendamento vai apontar pra esse caminho.',
+    '# 2) Clique com o botao DIREITO no arquivo > "Executar com o PowerShell".',
+    '#    Uma janela preta abre rapido, instala e some sozinha.',
+    '#',
+    '# Se aparecer um erro falando de "execution policy" / "nao pode ser',
+    '# carregado": abra o PowerShell normal (menu Iniciar > digite PowerShell),',
+    '# rode uma vez so: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force',
+    '# e tente o passo 2 de novo.',
+    '',
+    'param([switch]$Loop)',
+    '',
+    '$TituloJanela = "Zenith Ops"',
+    '$UrlMonitorar = "' + urlMonitorar + '"',
+    '$UrlReportarIp = "' + urlReportarIp + '"',
+    '$IntervaloSegundos = 120',
+    '$NomeTarefa = "' + nomeTarefa + '"',
+    '',
+    'function Reabrir-Monitor {',
+    '  $candidatos = @(',
+    '    "$env:ProgramFiles\\Google\\Chrome\\Application\\chrome.exe",',
+    '    "${env:ProgramFiles(x86)}\\Google\\Chrome\\Application\\chrome.exe",',
+    '    "$env:ProgramFiles\\Microsoft\\Edge\\Application\\msedge.exe",',
+    '    "${env:ProgramFiles(x86)}\\Microsoft\\Edge\\Application\\msedge.exe"',
+    '  )',
+    '  $navegador = $candidatos | Where-Object { Test-Path $_ } | Select-Object -First 1',
+    '  if ($navegador) {',
+    '    Start-Process -FilePath $navegador -ArgumentList "--app=$UrlMonitorar" -WindowStyle Minimized',
+    '  } else {',
+    '    Start-Process $UrlMonitorar',
+    '  }',
+    '}',
+    '',
+    'function Rodar-Loop {',
+    '  while ($true) {',
+    '    $aberto = Get-Process | Where-Object { $_.MainWindowTitle -match [regex]::Escape($TituloJanela) } | Select-Object -First 1',
+    '    if (-not $aberto) { Reabrir-Monitor }',
+    '    try {',
+    '      $ip = (Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred -ErrorAction SilentlyContinue |',
+    '        Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |',
+    '        Select-Object -First 1 -ExpandProperty IPAddress)',
+    '      if ($ip) {',
+    '        Invoke-RestMethod -Uri $UrlReportarIp -Method Post -ContentType "application/json" -Body (@{ ip = $ip } | ConvertTo-Json) -ErrorAction SilentlyContinue | Out-Null',
+    '      }',
+    '    } catch {}',
+    '    Start-Sleep -Seconds $IntervaloSegundos',
+    '  }',
+    '}',
+    '',
+    'if ($Loop) {',
+    '  Rodar-Loop',
+    '} else {',
+    '  $caminho = $PSCommandPath',
+    '  $acao = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$caminho`" -Loop"',
+    '  $gatilho = New-ScheduledTaskTrigger -AtLogOn',
+    '  Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho -Force | Out-Null',
+    '  Write-Host "Instalado! O vigia vai rodar sozinho a partir do proximo login."',
+    '  Write-Host "Iniciando agora tambem, nessa sessao..."',
+    '  Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$caminho`" -Loop"',
+    '  Read-Host "Pronto! Pode fechar essa janela (aperte Enter)"',
+    '}',
+    '',
+  ];
+  const conteudo = linhas.join('\n');
+  const blob = new Blob([conteudo], {type:'text/plain;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `vigia-${posto}.ps1`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+  alert(`Script "vigia-${posto}.ps1" baixado.\n\nComo instalar:\n1) Salve numa pasta fixa (ex: Documentos\\ZenithVigia)\n2) Clique com o botão direito nele > "Executar com o PowerShell"\n\nPronto - ele se instala sozinho e já começa a rodar. As instruções completas (inclusive o que fazer se der erro de permissão) estão nos comentários no topo do próprio arquivo.`);
 }
 
 let EDITAR_COMP_CODIGO = null;

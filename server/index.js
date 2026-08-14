@@ -170,9 +170,14 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
 // (sem sufixo) continua atras do login normal, entao o regex precisa ser
 // especifico pra nao vazar essa rota autenticada por engano
 const ROTA_TICKET_PUBLICO_RE = /^\/api\/central\/[^/]+\/[^/]+\/(publico|chat-publico|decidir-publico|execucao-publico|anexo-publico\/\d+)$/;
+// script de vigia (roda fora do navegador, direto no Windows - ver
+// loja-status.html "Baixar vigia") reportando o IP da rede local: mesmo
+// motivo do heartbeat, precisa ser publica (a maquina nao tem sessao de
+// usuario logado)
+const ROTA_LOJA_IP_LOCAL_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/ip-local$/;
 function rotaPublicaSemDashboard(path) {
   return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/')
-    || ROTA_TICKET_PUBLICO_RE.test(path);
+    || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path);
 }
 if (DASHBOARD_USER && DASHBOARD_PASSWORD) {
   app.use((req, res, next) => {
@@ -691,6 +696,20 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       ip, userAgent: req.body.userAgent, abertoDesde: req.body.abertoDesde,
     });
     res.json({ ok: true, mensagemPendente });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- IP local reportado pelo script de vigia (ver lojaStatus.js
+// atualizarIpLocal + loja-status.html "Baixar vigia") - roda nativo no
+// Windows, fora do navegador, por isso precisa ficar publica igual o
+// heartbeat. Diferente do heartbeat, o IP vem do PROPRIO corpo da
+// requisicao (nao de x-forwarded-for): e o IP da rede local da maquina, que
+// o servidor nunca teria como enxergar sozinho ----------
+app.post('/api/loja-status/:codigo/computadores/:posto/ip-local', async (req, res) => {
+  try {
+    res.json(await lojaStatus.atualizarIpLocal(req.params.codigo, req.params.posto, req.body.ip));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

@@ -145,7 +145,7 @@ async function cadastrarComputador(codigo, nome, tipo) {
   const registro = {
     codigo, posto, nome: nomeOk, tipo: tipoValido(tipo), anydeskId: null,
     ultimoHeartbeatEm: null, avisadoOffline: false, offlineDesde: null, mensagemPendente: null,
-    ip: null, userAgent: null, abertoDesde: null,
+    ip: null, userAgent: null, abertoDesde: null, ipLocal: null, ipLocalEm: null,
   };
   await COLLECTION.doc(id).set(registro);
   cache.invalidar();
@@ -182,6 +182,23 @@ async function definirAnydeskId(codigo, posto, anydeskId) {
   await COLLECTION.doc(id).set({ codigo, posto, anydeskId: limpo || null }, { merge: true });
   cache.invalidar();
   return { codigo, posto, anydeskId: limpo || null };
+}
+
+// o script de vigia (roda nativo no Windows, fora do navegador - ver
+// loja-status.html "Baixar vigia") reporta o IP da rede LOCAL da maquina
+// direto pro servidor, sem depender de nenhuma aba estar aberta (pedido
+// explicito do usuario: precisa do IP local pra acesso remoto no dia a dia,
+// o IP publico que o heartbeat ja capturava nao serve pra isso). De
+// proposito NAO mexe em ultimoHeartbeatEm/avisadoOffline: o vigia estar
+// rodando nao prova que a tela de monitoramento esta aberta, entao nao pode
+// mascarar uma loja de verdade offline pro alerta de suporte
+async function atualizarIpLocal(codigo, posto, ip) {
+  const id = docIdFor(codigo, posto);
+  const limpo = String(ip || '').trim().slice(0, 45);
+  if (!limpo) throw new Error('IP inválido.');
+  await COLLECTION.doc(id).set({ codigo, posto, ipLocal: limpo, ipLocalEm: Date.now() }, { merge: true });
+  cache.invalidar();
+  return { codigo, posto, ipLocal: limpo };
 }
 
 // fica esperando pro proximo heartbeat DESSE computador entregar (ver
@@ -224,5 +241,5 @@ async function varrerAlertas() {
 
 module.exports = {
   heartbeat, listar, cadastrarComputador, editarComputador, removerComputador,
-  definirAnydeskId, enviarMensagem, varrerAlertas, TIPOS_COMPUTADOR,
+  definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR,
 };
