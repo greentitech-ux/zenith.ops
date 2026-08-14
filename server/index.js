@@ -5386,6 +5386,7 @@ app.post('/api/relatorio-config', auth.requireMaster, async (req, res) => {
   try {
     const config = await relatorioMV.salvarConfig({
       emailDestino: req.body.emailDestino,
+      emailCopia: req.body.emailCopia,
       usuarioGatilho: req.body.usuarioGatilho,
     });
     res.json(config);

@@ -106,10 +106,14 @@
 <div id="root" class="hidden">
   <div class="panel">
     <h2>Relatório de solicitações por e-mail</h2>
-    <div class="sub">Todo dia útil às 8h (seg-sex), o Zenith manda um resumo dos tickets direcionados pro usuário abaixo - além de um aviso na hora sempre que um ticket novo é direcionado a ele. Mude os dois campos aqui quando quiser, sem precisar mexer em configuração nenhuma fora do app.</div>
+    <div class="sub">Todo dia útil às 8h (seg-sex), o Zenith manda um resumo dos tickets direcionados pro usuário abaixo - além de um aviso na hora sempre que um ticket novo é direcionado a ele. Mude os campos aqui quando quiser, sem precisar mexer em configuração nenhuma fora do app.</div>
 
     <label>E-mail que vai receber os relatórios e avisos</label>
     <input type="email" id="f-email" placeholder="ex: mv@grupobravoempresarial.com">
+
+    <label>Em cópia (CC) - opcional</label>
+    <input type="text" id="f-copia" placeholder="ex: gerencia@empresa.com, financeiro@empresa.com">
+    <div class="sub" style="margin-top:-2px;">Vale só pro relatório diário das 8h - separe vários e-mails por vírgula. Deixe em branco pra não mandar cópia nenhuma.</div>
 
     <label>Usuário cujos tickets disparam o envio</label>
     <select id="f-usuario"></select>
@@ -167,6 +171,7 @@ function atualizarStatusUsuario(){
 async function carregarConfig(){
   CONFIG_ATUAL = await fetch('/api/relatorio-config').then(r=>r.json());
   document.getElementById('f-email').value = CONFIG_ATUAL.emailDestino || '';
+  document.getElementById('f-copia').value = CONFIG_ATUAL.emailCopia || '';
   const sel = document.getElementById('f-usuario');
   if(![...sel.options].some(o=>o.value.toLowerCase()===(CONFIG_ATUAL.usuarioGatilho||'').toLowerCase()) && CONFIG_ATUAL.usuarioGatilho){
     sel.insertAdjacentHTML('afterbegin', `<option value="${escapeHtml(CONFIG_ATUAL.usuarioGatilho)}">${escapeHtml(CONFIG_ATUAL.usuarioGatilho)} (não encontrado na lista)</option>`);
@@ -183,6 +188,7 @@ async function salvar(){
   try{
     const resp = await fetch('/api/relatorio-config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
       emailDestino: document.getElementById('f-email').value,
+      emailCopia: document.getElementById('f-copia').value,
       usuarioGatilho: document.getElementById('f-usuario').value,
     })});
     const data = await resp.json();

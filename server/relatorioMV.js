@@ -74,10 +74,12 @@ const configCache = createCache(async () => {
   const snap = await CONFIG_DOC.get();
   const data = snap.exists ? snap.data() : {};
   const emailDestino = String(data.emailDestino || '').trim() || RELATORIO_EMAIL_TO_PADRAO;
+  const emailCopia = String(data.emailCopia || '').trim();
   const usuarioGatilho = String(data.usuarioGatilho || '').trim() || USUARIO_GATILHO_PADRAO;
   const alvo = await users.findByIdentifier(usuarioGatilho);
   return {
     emailDestino,
+    emailCopia,
     usuarioGatilho,
     usuarioGatilhoEncontrado: !!alvo,
     gatilhoUserId: alvo ? alvo.id : null,
@@ -92,17 +94,28 @@ function validarEmail(email) {
   return limpo;
 }
 
+// campo opcional - vazio = sem copia nenhuma. Aceita mais de um endereco
+// separado por virgula (mesmo formato que o header "Cc:" e o nodemailer ja
+// esperam), cada um validado igual ao destino principal
+function validarEmailCopia(valor) {
+  const limpo = String(valor || '').trim();
+  if (!limpo) return '';
+  return limpo.split(',').map((e) => validarEmail(e)).join(', ');
+}
+
 // chamada pela rota POST /api/relatorio-config (Master, ver index.js) -
 // exige que o usuario gatilho realmente exista, senao a config salva
 // nunca casaria com nenhum ticket
-async function salvarConfig({ emailDestino, usuarioGatilho }) {
+async function salvarConfig({ emailDestino, emailCopia, usuarioGatilho }) {
   const emailLimpo = validarEmail(emailDestino);
+  const copiaLimpa = validarEmailCopia(emailCopia);
   const usuarioLimpo = String(usuarioGatilho || '').trim();
   if (!usuarioLimpo) throw new Error('Informe o usuário que vai disparar os e-mails.');
   const alvo = await users.findByIdentifier(usuarioLimpo);
   if (!alvo) throw new Error(`Não encontrei nenhum usuário com "${usuarioLimpo}".`);
   await CONFIG_DOC.set({
     emailDestino: emailLimpo,
+    emailCopia: copiaLimpa,
     usuarioGatilho: alvo.username || usuarioLimpo,
     atualizadoEm: new Date().toISOString(),
   }, { merge: true });
@@ -370,10 +383,11 @@ function encodeHeaderUtf8(texto) {
   return /^[\x20-\x7e]*$/.test(texto) ? texto : `=?UTF-8?B?${Buffer.from(texto, 'utf8').toString('base64')}?=`;
 }
 
-async function enviarViaGmailApi({ from, to, subject, html }) {
+async function enviarViaGmailApi({ from, to, cc, subject, html }) {
   const mime = [
     `From: ${from}`,
     `To: ${to}`,
+    ...(cc ? [`Cc: ${cc}`] : []),
     `Subject: ${encodeHeaderUtf8(subject)}`,
     'MIME-Version: 1.0',
     'Content-Type: text/html; charset=utf-8',
@@ -463,6 +477,7 @@ async function enviarRelatorio() {
   await enviarComFallback({
     from: `Zenith Ops <${process.env.RELATORIO_EMAIL_USER}>`,
     to,
+    cc: config.emailCopia || undefined,
     subject: `Relatório de Solicitações - MV - ${dataHojeBR()}`,
     html: montarHtml(dados),
   });
