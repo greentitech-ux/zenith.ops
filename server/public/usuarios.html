@@ -143,8 +143,17 @@
   .accordion-body{padding:10px 12px;border-top:1px solid var(--line);}
   .accordion-body.hidden{display:none;}
   .ajuda-fieldset{font-size:10.5px;color:var(--muted);margin:-2px 0 8px;}
-  .az-list{display:block;}
-  .az-list label{display:flex;width:100%;white-space:normal;}
+  /* uma opção por linha, checkbox sempre fixo no topo-esquerda (align-items:
+     flex-start, não "center") - com "center" o checkbox flutuava no meio de
+     cada rótulo, e como o texto quebra em 2-3 linhas em telas estreitas, a
+     altura de cada linha varia e os checkboxes saiam tortos, em escada. O
+     texto vai num <span> próprio (flex:1, min-width:0) em vez de nó de
+     texto solto - layout previsível em qualquer largura de tela */
+  .az-list{display:flex;flex-direction:column;gap:1px;}
+  .az-list label{display:flex;align-items:flex-start;gap:9px;width:100%;padding:5px 4px;border-radius:6px;text-align:left;}
+  .az-list label:hover{background:var(--panel2);}
+  .az-list label input[type=checkbox]{flex:none;width:15px;height:15px;margin-top:2px;}
+  .az-list label span{flex:1;min-width:0;white-space:normal;line-height:1.4;overflow-wrap:break-word;}
   .az-letra{width:100%;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--accent);margin:8px 0 3px;padding-bottom:2px;border-bottom:1px solid var(--line);}
   .az-letra:first-child{margin-top:0;}
   .az-sufixo{color:var(--muted);font-weight:400;}
@@ -579,7 +588,7 @@ function accordionChecklist({ id, titulo, name, itens, checkedSet, ajuda }){
     }
     const checked = checkedSet.has(it.value) ? 'checked' : '';
     const sufixo = it.sufixoTexto ? ` <small class="az-sufixo">${escapeHtml(it.sufixoTexto)}</small>` : '';
-    return `${cabecalho}<label><input type="checkbox" ${name?`name="${name}"`:''} value="${escapeHtml(String(it.value))}" ${checked}> ${escapeHtml(it.label)}${sufixo}</label>`;
+    return `${cabecalho}<label><input type="checkbox" ${name?`name="${name}"`:''} value="${escapeHtml(String(it.value))}" ${checked}><span>${escapeHtml(it.label)}${sufixo}</span></label>`;
   }).join('');
   const corpo = linhas || `<span style="color:var(--muted);font-size:11.5px;">Nenhuma opção disponível ainda.</span>`;
   const n = checkedSet.size;
