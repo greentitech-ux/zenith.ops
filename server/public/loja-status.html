@@ -22,14 +22,15 @@
   }
   *{box-sizing:border-box;min-width:0;}
   html{overflow-x:hidden;}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;overflow-x:clip;overflow-y:clip;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;overflow-x:clip;}
   header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 16px;padding:12px 32px 12px;border-bottom:1px solid var(--line);}
   h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:12px;padding-bottom:12px;} h1{font-size:17px;} .eyebrow{font-size:8px;} }
   h2{font-size:14px;font-weight:700;margin:0 0 4px;}
   .header-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
-  .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  .ultima-atualizacao{font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap;}
   a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;transition:border-color .15s ease,color .15s ease,background .15s ease;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
   a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
@@ -49,47 +50,73 @@
   .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
   .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
   .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
-  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px;}
-  .info-box{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:16px;line-height:1.5;}
-  .status-badge{font-family:var(--mono);font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;}
-  .status-badge.online{background:var(--ok-dim);color:var(--ok);}
-  .status-badge.offline{background:var(--bad-dim);color:var(--bad);}
-  .status-badge.nunca{background:var(--panel2);color:var(--muted);}
-  .anydesk-linha{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
-  .anydesk-linha input{width:120px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;font-family:var(--mono);}
-  .anydesk-linha input:focus{outline:none;border-color:var(--accent);}
-  .btn-mini{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 9px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
+  .info-box{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:18px;line-height:1.5;}
+
+  /* ---- KPIs ---- */
+  .kpi-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px;}
+  .kpi-card{flex:1 1 140px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;cursor:pointer;transition:border-color .15s ease,background .15s ease;text-align:left;font-family:inherit;color:inherit;}
+  .kpi-card:hover{border-color:var(--accent);}
+  .kpi-card.ativo{border-color:var(--accent);background:rgba(92,200,255,.07);}
+  .kpi-num{font-size:26px;font-weight:800;line-height:1;font-family:var(--mono);}
+  .kpi-label{font-size:10.5px;color:var(--muted);margin-top:6px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.04em;}
+  .kpi-card.kpi-online .kpi-num{color:var(--ok);}
+  .kpi-card.kpi-offline .kpi-num{color:var(--bad);}
+  .kpi-card.kpi-nunca .kpi-num{color:var(--muted);}
+
+  /* ---- filtros ---- */
+  .filtro-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px;}
+  .filtro-bar input[type=text]{flex:1 1 220px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:13px;font-family:var(--sans);}
+  .filtro-bar input[type=text]:focus{outline:none;border-color:var(--accent);}
+  .filtro-bar select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:12.5px;font-family:var(--sans);}
+  .btn-primary{background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
+  .btn-primary:disabled{opacity:.5;cursor:default;}
+  .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+
+  /* ---- grid de equipamentos ---- */
+  .equip-grid{display:flex;flex-wrap:wrap;gap:14px;justify-content:flex-start;align-content:flex-start;}
+  .equip-tile{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:12px;padding:14px;width:272px;min-width:220px;min-height:184px;resize:both;overflow:auto;display:flex;flex-direction:column;gap:8px;transition:border-color .15s ease;}
+  .equip-tile.status-online{border-left-color:var(--ok);}
+  .equip-tile.status-offline{border-left-color:var(--bad);}
+  .equip-tile.status-nunca{border-left-color:var(--line);}
+  .equip-tile-head{display:flex;align-items:center;gap:7px;}
+  .status-dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block;}
+  .status-dot.online{background:var(--ok);animation:pulse-online 2s infinite;}
+  .status-dot.offline{background:var(--bad);}
+  .status-dot.nunca{background:var(--muted);}
+  @keyframes pulse-online{0%{box-shadow:0 0 0 0 rgba(61,220,151,.5);}70%{box-shadow:0 0 0 6px rgba(61,220,151,0);}100%{box-shadow:0 0 0 0 rgba(61,220,151,0);}}
+  @media(prefers-reduced-motion:reduce){ .status-dot.online{animation:none;} }
+  .equip-tile-nome{font-size:13.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0;}
+  .equip-tile-nome .icon-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0;flex:none;}
+  .equip-tile-nome .icon-btn:hover{color:var(--accent);}
+  .equip-tile-sub{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .equip-tile-unidade{font-family:var(--mono);font-size:10.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .tipo-badge{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:20px;background:var(--panel2);color:var(--muted);white-space:nowrap;border:1px solid var(--line);flex:none;}
+  .equip-tile-status{font-family:var(--mono);font-size:10.5px;font-weight:700;}
+  .equip-tile-status.online{color:var(--ok);}
+  .equip-tile-status.offline{color:var(--bad);}
+  .equip-tile-status.nunca{color:var(--muted);}
+  .equip-tile-info{font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.7;}
+  .equip-tile-acoes{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:6px;}
+  .btn-mini{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 8px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
   .btn-mini:hover{border-color:var(--accent);}
   .btn-mini.ok{color:var(--ok);}
-  .unidade-card{margin-bottom:14px;}
-  .unidade-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:6px;}
-  .unidade-head h2{margin:0;}
-  .unidade-codigo{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px;}
-  .comp-row{border-top:1px solid var(--line);padding:10px 0;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;}
-  .comp-row:first-child{border-top:none;padding-top:0;}
-  .comp-nome{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;min-width:130px;flex:1 1 130px;}
-  .comp-nome .icon-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0;}
-  .comp-nome .icon-btn:hover{color:var(--accent);}
-  .comp-sinal{font-family:var(--mono);font-size:10.5px;color:var(--muted);white-space:nowrap;}
-  .comp-acoes{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto;}
-  .empty-computadores{padding:8px 0;color:var(--muted);font-size:12.5px;}
-  .tipo-badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;background:var(--panel2);color:var(--muted);white-space:nowrap;border:1px solid var(--line);}
-  .comp-info{width:100%;font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:-2px;}
+
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
+  .overlay.hidden{display:none!important;}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto;}
+  .modal h3{margin:0 0 4px;font-size:15px;}
+  .modal .sub{font-size:11.5px;color:var(--muted);margin-bottom:14px;}
+  .modal label{display:block;font-size:11.5px;color:var(--muted);margin:14px 0 6px;font-family:var(--mono);}
+  .modal label:first-of-type{margin-top:0;}
+  .modal input[type=text],.modal select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:var(--sans);box-sizing:border-box;}
+  .modal input:focus,.modal select:focus{outline:none;border-color:var(--accent);}
+  textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:var(--sans);resize:vertical;min-height:80px;}
+  textarea:focus{outline:none;border-color:var(--accent);}
+  .modal-acoes{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;}
   .radio-tipo{display:flex;flex-direction:column;gap:8px;margin-top:6px;}
   .radio-tipo label{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:var(--text);font-family:var(--sans);cursor:pointer;font-weight:400;margin:0;}
   .radio-tipo input{width:auto;margin:2px 0 0;flex:none;}
   .radio-tipo small{display:block;color:var(--muted);font-size:11px;font-weight:400;margin-top:1px;}
-  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
-  .overlay.hidden{display:none!important;}
-  .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:420px;}
-  .modal h3{margin:0 0 4px;font-size:15px;}
-  .modal .sub{font-size:11.5px;color:var(--muted);margin-bottom:14px;}
-  textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:var(--sans);resize:vertical;min-height:80px;}
-  textarea:focus{outline:none;border-color:var(--accent);}
-  .modal-acoes{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;}
-  .btn-primary{background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);}
-  .btn-primary:disabled{opacity:.5;cursor:default;}
-  .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);}
   .msg{font-size:12px;padding:8px 10px;border-radius:8px;margin-top:10px;}
   .msg.ok{background:var(--ok-dim);color:var(--ok);}
   .msg.err{background:var(--bad-dim);color:var(--bad);}
@@ -107,6 +134,7 @@
       </div>
     </div>
     <div class="header-nav">
+      <span class="ultima-atualizacao" id="ultima-atualizacao"></span>
       <button class="btn-notif" onclick="carregar()" title="Atualizar">🔄</button>
       <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
     </div>
@@ -132,9 +160,37 @@
 
 <div id="root" class="hidden">
   <div class="info-box">
-    Cada unidade pode ter <b>vários computadores</b> cadastrados (um por caixa, PDV, balcão, servidor etc) - clique em "➕ Computador" pra gerar um link/QR code próprio pra cada um. Escolha o tipo: <b>🤖 atendimento</b> mostra o chat do Beniboy (pra tablet/quiosque que o cliente usa) e <b>🔒 interno</b> mostra a tela normal de login do Zenith (pra servidor/PC de escritório que só precisa ficar monitorado - dá pra "instalar" a página como app e fixar na barra de tarefas, assim ela não fecha por engano). Um computador aparece "online" enquanto essa aba estiver aberta - ela avisa o Zenith a cada ~25s, junto com IP, dispositivo e há quanto tempo a aba está aberta sem fechar (o mais perto que dá de "uptime" sem instalar um agente de verdade na máquina). Se ficar mais de ~90s em silêncio, o Master e o time de Suporte recebem um alerta automático já dizendo qual computador foi. Cadastre o ID do AnyDesk de cada computador pra ter acesso remoto rápido - a licença já é sua, o Zenith só guarda o atalho.
+    Cada unidade pode ter <b>vários computadores</b> cadastrados (um por caixa, PDV, balcão, servidor etc). Escolha o tipo ao cadastrar: <b>🤖 atendimento</b> mostra o chat do Beniboy (pro tablet/quiosque que o cliente usa) e <b>🔒 interno</b> mostra a tela normal de login do Zenith (pro servidor/PC de escritório que só precisa ficar monitorado). Um computador aparece "online" enquanto essa aba estiver aberta - ela avisa o Zenith a cada ~25s, junto com IP, dispositivo e há quanto tempo está aberta sem fechar. Se ficar mais de ~90s em silêncio, o Master e o time de Suporte recebem um alerta automático. Arraste o canto de qualquer card pra redimensionar do seu jeito - o tamanho fica salvo nesse navegador.
   </div>
-  <div id="lista-unidades"></div>
+
+  <div class="kpi-row">
+    <button type="button" class="kpi-card" id="kpi-total" onclick="setFiltroStatus('')">
+      <div class="kpi-num" id="kpi-num-total">0</div>
+      <div class="kpi-label">Total</div>
+    </button>
+    <button type="button" class="kpi-card kpi-online" id="kpi-online" onclick="setFiltroStatus('online')">
+      <div class="kpi-num" id="kpi-num-online">0</div>
+      <div class="kpi-label">🟢 Online</div>
+    </button>
+    <button type="button" class="kpi-card kpi-offline" id="kpi-offline" onclick="setFiltroStatus('offline')">
+      <div class="kpi-num" id="kpi-num-offline">0</div>
+      <div class="kpi-label">🔴 Offline</div>
+    </button>
+    <button type="button" class="kpi-card kpi-nunca" id="kpi-nunca" onclick="setFiltroStatus('nunca')">
+      <div class="kpi-num" id="kpi-num-nunca">0</div>
+      <div class="kpi-label">⚪ Nunca conectou</div>
+    </button>
+  </div>
+
+  <div class="filtro-bar">
+    <input type="text" id="filtro-texto" placeholder="🔎 Buscar por computador ou unidade..." oninput="onFiltroTexto()">
+    <select id="filtro-unidade" onchange="onFiltroUnidade()">
+      <option value="">Todas as unidades</option>
+    </select>
+    <button type="button" class="btn-primary" onclick="abrirModalNovoComputador()">➕ Computador</button>
+  </div>
+
+  <div id="grid-equip" class="equip-grid"></div>
 </div>
 
 <div class="overlay hidden" id="msg-overlay">
@@ -153,10 +209,11 @@
 <div class="overlay hidden" id="novo-comp-overlay">
   <div class="modal">
     <h3>🖥️ Novo computador</h3>
-    <div class="sub" id="novo-comp-unidade"></div>
-    <label style="display:block;font-size:11.5px;color:var(--muted);margin:0 0 6px;font-family:var(--mono);">Nome do computador</label>
-    <input type="text" id="novo-comp-nome" placeholder="Ex: Caixa 1, PDV Entrega, Balcão" maxlength="60" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:var(--sans);box-sizing:border-box;">
-    <label style="display:block;font-size:11.5px;color:var(--muted);margin:14px 0 0;font-family:var(--mono);">O que o link desse computador mostra</label>
+    <label>Unidade</label>
+    <select id="novo-comp-unidade-select"></select>
+    <label>Nome do computador</label>
+    <input type="text" id="novo-comp-nome" placeholder="Ex: Caixa 1, PDV Entrega, Balcão" maxlength="60">
+    <label>O que o link desse computador mostra</label>
     <div class="radio-tipo">
       <label><input type="radio" name="novo-comp-tipo" value="atendimento" checked><span><b>🤖 Atendimento ao cliente</b><small>chat do Beniboy - pra tablet/quiosque na entrada da loja</small></span></label>
       <label><input type="radio" name="novo-comp-tipo" value="interno"><span><b>🔒 Computador interno</b><small>tela normal de login do Zenith - pra servidor/PC de escritório, só pro monitoramento</small></span></label>
@@ -173,9 +230,11 @@
   <div class="modal">
     <h3>✏️ Editar computador</h3>
     <div class="sub" id="editar-comp-unidade"></div>
-    <label style="display:block;font-size:11.5px;color:var(--muted);margin:0 0 6px;font-family:var(--mono);">Nome do computador</label>
-    <input type="text" id="editar-comp-nome" maxlength="60" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:var(--sans);box-sizing:border-box;">
-    <label style="display:block;font-size:11.5px;color:var(--muted);margin:14px 0 0;font-family:var(--mono);">O que o link desse computador mostra</label>
+    <label>Nome do computador</label>
+    <input type="text" id="editar-comp-nome" maxlength="60">
+    <label>ID do AnyDesk (opcional)</label>
+    <input type="text" id="editar-comp-anydesk" maxlength="40" placeholder="Ex: 123 456 789">
+    <label>O que o link desse computador mostra</label>
     <div class="radio-tipo">
       <label><input type="radio" name="editar-comp-tipo" value="atendimento"><span><b>🤖 Atendimento ao cliente</b><small>chat do Beniboy - pra tablet/quiosque na entrada da loja</small></span></label>
       <label><input type="radio" name="editar-comp-tipo" value="interno"><span><b>🔒 Computador interno</b><small>tela normal de login do Zenith - pra servidor/PC de escritório, só pro monitoramento</small></span></label>
@@ -203,22 +262,33 @@ function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
 function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
 function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// usado dentro de onclick="...('${escapeJs(x)}')" (atributo com aspas
+// duplas, argumento em aspas simples) - escapa barra invertida e aspas
+// simples pra nao quebrar a string JS, e aspas duplas pra nao quebrar o
+// proprio atributo HTML se o nome/anydeskId tiver uma
+function escapeJs(s){ return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
 
 let UNIDADES = [];
+let UNIDADES_NOMES = {};
 let COMPUTADORES = [];
+let ULTIMA_CARGA_EM = null;
+let FILTRO_TEXTO = '';
+let FILTRO_UNIDADE = '';
+let FILTRO_STATUS = ''; // '' | 'online' | 'offline' | 'nunca'
 
 function tempoRelativo(ms){
   if(!ms) return 'nunca';
   const s = Math.floor((Date.now()-ms)/1000);
-  if(s < 60) return 'agora mesmo';
+  if(s < 5) return 'agora mesmo';
+  if(s < 60) return `há ${s}s`;
   if(s < 3600) return `há ${Math.floor(s/60)}min`;
   if(s < 86400) return `há ${Math.floor(s/3600)}h`;
   return `há ${Math.floor(s/86400)}d`;
 }
 
-function statusBadgeHtml(c){
-  if(!c.ultimoHeartbeatEm) return '<span class="status-badge nunca">⚪ nunca conectou</span>';
-  return c.online ? '<span class="status-badge online">🟢 online</span>' : '<span class="status-badge offline">🔴 offline</span>';
+function statusDe(c){
+  if(!c.ultimoHeartbeatEm) return 'nunca';
+  return c.online ? 'online' : 'offline';
 }
 
 const TIPO_COMPUTADOR_LABEL = { atendimento: '🤖 atendimento', interno: '🔒 interno' };
@@ -238,59 +308,115 @@ function resumoDispositivo(ua){
   return [so, nav].filter(Boolean).join(' · ') || null;
 }
 
-function compRowHtml(codigo, c){
+// tamanho de cada card (arrastado pelo canto) fica salvo no navegador, por
+// computador - assim o layout que a pessoa montou sobrevive a reload/poll
+function chaveTamanho(codigo, posto){ return `zenithEquipSize:${codigo}:${posto}`; }
+function tamanhoSalvo(codigo, posto){
+  try{ return JSON.parse(localStorage.getItem(chaveTamanho(codigo, posto)) || 'null'); }catch(e){ return null; }
+}
+function salvarTamanho(codigo, posto, w, h){
+  try{ localStorage.setItem(chaveTamanho(codigo, posto), JSON.stringify({ w, h })); }catch(e){ /* ignora (ex: storage cheio) */ }
+}
+
+function equipTileHtml(codigo, c){
   const nomeOk = escapeHtml(c.nome || '(sem nome)');
-  const nomeEscapadoJs = (c.nome||'').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+  const nomeJs = escapeJs(c.nome||'');
+  const status = statusDe(c);
+  const statusTexto = status==='nunca' ? 'nunca conectou' : (status==='online' ? 'online' : `offline · ${tempoRelativo(c.ultimoHeartbeatEm)}`);
   const infoBits = [];
-  if(c.ip) infoBits.push(`IP ${escapeHtml(c.ip)}`);
+  if(c.ip) infoBits.push(`🌐 ${escapeHtml(c.ip)}`);
   const disp = resumoDispositivo(c.userAgent);
-  if(disp) infoBits.push(escapeHtml(disp));
-  if(c.abertoDesde) infoBits.push(`aba aberta ${escapeHtml(tempoRelativo(c.abertoDesde))}`);
-  return `<div class="comp-row">
-    <div class="comp-nome"><span>${nomeOk}</span><span class="tipo-badge">${TIPO_COMPUTADOR_LABEL[c.tipo]||TIPO_COMPUTADOR_LABEL.atendimento}</span><button type="button" class="icon-btn" title="Editar" onclick="abrirModalEditarComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeEscapadoJs}','${c.tipo||'atendimento'}')">✏️</button></div>
-    <div>${statusBadgeHtml(c)}</div>
-    <div class="comp-sinal">${escapeHtml(tempoRelativo(c.ultimoHeartbeatEm))}</div>
-    <div class="anydesk-linha">
-      <input type="text" value="${escapeHtml(c.anydeskId || '')}" placeholder="ID" id="ad-${escapeHtml(codigo)}-${escapeHtml(c.posto)}" maxlength="40">
-      <button type="button" class="btn-mini" onclick="salvarAnydesk('${escapeHtml(codigo)}','${escapeHtml(c.posto)}')">💾</button>
-      ${c.anydeskId ? `<a class="btn-mini" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk">🖥️</a>` : ''}
+  if(disp) infoBits.push(`💻 ${escapeHtml(disp)}`);
+  if(c.abertoDesde) infoBits.push(`⏱️ aberto ${escapeHtml(tempoRelativo(c.abertoDesde))}`);
+  if(status!=='nunca') infoBits.push(`📶 sinal ${escapeHtml(tempoRelativo(c.ultimoHeartbeatEm))}`);
+  const salvo = tamanhoSalvo(codigo, c.posto);
+  const styleTamanho = salvo ? ` style="width:${Math.max(220,salvo.w)}px;height:${Math.max(184,salvo.h)}px;"` : '';
+  return `<div class="equip-tile status-${status}" data-codigo="${escapeHtml(codigo)}" data-posto="${escapeHtml(c.posto)}"${styleTamanho}>
+    <div class="equip-tile-head">
+      <span class="status-dot ${status}"></span>
+      <span class="equip-tile-nome" title="${nomeOk}">${nomeOk}</span>
+      <button type="button" class="icon-btn" title="Editar" onclick="abrirModalEditarComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeJs}','${c.tipo||'atendimento'}','${escapeJs(c.anydeskId||'')}')">✏️</button>
     </div>
-    <div class="comp-acoes">
-      <button type="button" class="btn-mini" onclick="abrirModalMensagem('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeEscapadoJs}')">💬 Mensagem</button>
-      <button type="button" class="btn-mini" onclick="copiarLinkComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${c.tipo||'atendimento'}')">🔗 Link</button>
-      <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeEscapadoJs}')">🗑️</button>
+    <div class="equip-tile-sub">
+      <span class="equip-tile-unidade">${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}</span>
+      <span class="tipo-badge">${TIPO_COMPUTADOR_LABEL[c.tipo]||TIPO_COMPUTADOR_LABEL.atendimento}</span>
     </div>
-    ${infoBits.length ? `<div class="comp-info">${infoBits.join(' · ')}</div>` : ''}
+    <div class="equip-tile-status ${status}">${statusTexto}</div>
+    ${infoBits.length ? `<div class="equip-tile-info">${infoBits.join('<br>')}</div>` : ''}
+    <div class="equip-tile-acoes">
+      ${c.anydeskId ? `<a class="btn-mini ok" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk">🖥️ AnyDesk</a>` : ''}
+      <button type="button" class="btn-mini" onclick="abrirModalMensagem('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeJs}')">💬</button>
+      <button type="button" class="btn-mini" onclick="copiarLinkComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${c.tipo||'atendimento'}')">🔗</button>
+      <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeJs}')">🗑️</button>
+    </div>
   </div>`;
 }
 
-function render(){
-  const root = document.getElementById('lista-unidades');
-  if(!UNIDADES.length){ root.innerHTML = '<div class="empty">Nenhuma unidade cadastrada.</div>'; return; }
-  const porCodigo = {};
-  COMPUTADORES.forEach(c => { (porCodigo[c.codigo] = porCodigo[c.codigo] || []).push(c); });
-  const rankUnidade = (codigo) => {
-    const cs = porCodigo[codigo] || [];
-    if(cs.some(c => c.ultimoHeartbeatEm && !c.online)) return 0;
-    if(cs.some(c => c.online)) return 1;
-    return 2;
-  };
-  const unidadesOrdenadas = UNIDADES.slice().sort((a,b) => rankUnidade(a.codigo) - rankUnidade(b.codigo) || a.nome.localeCompare(b.nome, 'pt-BR'));
-  root.innerHTML = unidadesOrdenadas.map(u => {
-    const lista = (porCodigo[u.codigo] || []).slice().sort((a,b) => {
-      const rank = (c) => (c.ultimoHeartbeatEm && !c.online) ? 0 : (c.online ? 1 : 2);
-      return rank(a) - rank(b) || (a.nome||'').localeCompare(b.nome||'', 'pt-BR');
+function setFiltroStatus(v){
+  FILTRO_STATUS = (FILTRO_STATUS === v) ? '' : v;
+  render();
+}
+function onFiltroTexto(){ FILTRO_TEXTO = document.getElementById('filtro-texto').value.trim().toLowerCase(); render(); }
+function onFiltroUnidade(){ FILTRO_UNIDADE = document.getElementById('filtro-unidade').value; render(); }
+
+function renderKpis(){
+  const total = COMPUTADORES.length;
+  const online = COMPUTADORES.filter(c => statusDe(c)==='online').length;
+  const offline = COMPUTADORES.filter(c => statusDe(c)==='offline').length;
+  const nunca = COMPUTADORES.filter(c => statusDe(c)==='nunca').length;
+  document.getElementById('kpi-num-total').textContent = total;
+  document.getElementById('kpi-num-online').textContent = online;
+  document.getElementById('kpi-num-offline').textContent = offline;
+  document.getElementById('kpi-num-nunca').textContent = nunca;
+  ['total','online','offline','nunca'].forEach(k => {
+    document.getElementById('kpi-'+k).classList.toggle('ativo', FILTRO_STATUS === (k==='total' ? '' : k));
+  });
+}
+
+// reconecta o ResizeObserver em cada card depois de todo re-render (o
+// innerHTML e substituido, entao os observers antigos morrem junto dos nos
+// removidos) - salva o tamanho arrastado pra sobreviver a atualizacao/poll
+function observarTamanhos(){
+  document.querySelectorAll('.equip-tile').forEach(el => {
+    const codigo = el.dataset.codigo, posto = el.dataset.posto;
+    let primeiro = true;
+    const obs = new ResizeObserver(entries => {
+      if(primeiro){ primeiro = false; return; } // ignora o disparo inicial (so o tamanho ja aplicado)
+      const box = entries[0].contentRect;
+      salvarTamanho(codigo, posto, Math.round(el.offsetWidth), Math.round(el.offsetHeight));
     });
-    const linhas = lista.length ? lista.map(c => compRowHtml(u.codigo, c)).join('') : '<div class="empty-computadores">nenhum computador cadastrado ainda.</div>';
-    const nomeEscapadoJs = u.nome.replace(/'/g,"\\'").replace(/"/g,'&quot;');
-    return `<div class="panel unidade-card">
-      <div class="unidade-head">
-        <div><h2>${escapeHtml(u.nome)}</h2><div class="unidade-codigo">${escapeHtml(u.codigo)}</div></div>
-        <button type="button" class="btn-mini" onclick="abrirModalNovoComputador('${escapeHtml(u.codigo)}','${nomeEscapadoJs}')">➕ Computador</button>
-      </div>
-      <div class="computadores-lista">${linhas}</div>
-    </div>`;
-  }).join('');
+    obs.observe(el);
+  });
+}
+
+function render(){
+  renderKpis();
+  const grid = document.getElementById('grid-equip');
+  let lista = COMPUTADORES.slice();
+  if(FILTRO_UNIDADE) lista = lista.filter(c => c.codigo === FILTRO_UNIDADE);
+  if(FILTRO_STATUS) lista = lista.filter(c => statusDe(c) === FILTRO_STATUS);
+  if(FILTRO_TEXTO){
+    lista = lista.filter(c => {
+      const alvo = `${c.nome||''} ${UNIDADES_NOMES[c.codigo]||c.codigo}`.toLowerCase();
+      return alvo.includes(FILTRO_TEXTO);
+    });
+  }
+  lista.sort((a,b) => {
+    const rank = (c) => (statusDe(c)==='offline') ? 0 : (statusDe(c)==='online' ? 1 : 2);
+    return rank(a) - rank(b) || (a.nome||'').localeCompare(b.nome||'', 'pt-BR');
+  });
+  if(!lista.length){
+    grid.innerHTML = `<div class="empty" style="width:100%;">${COMPUTADORES.length ? 'nenhum computador encontrado com esse filtro.' : 'nenhum computador cadastrado ainda - clique em "➕ Computador" pra começar.'}</div>`;
+    return;
+  }
+  grid.innerHTML = lista.map(c => equipTileHtml(c.codigo, c)).join('');
+  observarTamanhos();
+}
+
+function atualizarTickerCarga(){
+  const el = document.getElementById('ultima-atualizacao');
+  if(!ULTIMA_CARGA_EM){ el.textContent = ''; return; }
+  el.textContent = 'atualizado ' + tempoRelativo(ULTIMA_CARGA_EM);
 }
 
 async function carregar(){
@@ -300,21 +426,22 @@ async function carregar(){
       fetch('/api/loja-status').then(r=>r.ok?r.json():[]),
     ]);
     UNIDADES = unidades;
+    UNIDADES_NOMES = {};
+    unidades.forEach(u => { UNIDADES_NOMES[u.codigo] = u.nome; });
     COMPUTADORES = status;
+    ULTIMA_CARGA_EM = Date.now();
+    atualizarTickerCarga();
+    popularSelectUnidades();
     render();
   }catch(e){ /* mantem a ultima lista carregada na tela */ }
 }
 
-async function salvarAnydesk(codigo, posto){
-  const input = document.getElementById(`ad-${codigo}-${posto}`);
-  try{
-    const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/anydesk`, {
-      method: 'PUT', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ anydeskId: input.value }),
-    });
-    if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao salvar.');
-    await carregar();
-  }catch(e){ alert(e.message); }
+function popularSelectUnidades(){
+  const filtro = document.getElementById('filtro-unidade');
+  const valorAtual = filtro.value;
+  const unidadesOrdenadas = UNIDADES.slice().sort((a,b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  filtro.innerHTML = '<option value="">Todas as unidades</option>' + unidadesOrdenadas.map(u => `<option value="${escapeHtml(u.codigo)}">${escapeHtml(u.nome)}</option>`).join('');
+  filtro.value = valorAtual;
 }
 
 // mesmo padrao ja usado em central-historico.html pro link publico de
@@ -333,26 +460,28 @@ function mostrarLinkGerado(url){
   prompt('Link gerado (já copiado, se o navegador permitiu) - abra esse link no computador que você quer monitorar. Pra deixar sempre aberto: no menu ⋮ do Chrome/Edge, use "Mais ferramentas → Criar atalho" (marque "Abrir como janela") e fixe na barra de tarefas - NÃO use o botão "Instalar app", ele ignora esse link específico.', url);
 }
 
-let NOVO_COMP_CODIGO = null;
-function abrirModalNovoComputador(codigo, nomeUnidade){
-  NOVO_COMP_CODIGO = codigo;
-  document.getElementById('novo-comp-unidade').textContent = nomeUnidade;
+function abrirModalNovoComputador(){
+  const select = document.getElementById('novo-comp-unidade-select');
+  const unidadesOrdenadas = UNIDADES.slice().sort((a,b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  select.innerHTML = unidadesOrdenadas.map(u => `<option value="${escapeHtml(u.codigo)}">${escapeHtml(u.nome)}</option>`).join('');
+  if(FILTRO_UNIDADE) select.value = FILTRO_UNIDADE;
   document.getElementById('novo-comp-nome').value = '';
   document.querySelectorAll('input[name="novo-comp-tipo"]').forEach(r => { r.checked = (r.value === 'atendimento'); });
   document.getElementById('novo-comp-status').classList.add('hidden');
   document.getElementById('novo-comp-overlay').classList.remove('hidden');
 }
-function fecharModalNovoComputador(){ document.getElementById('novo-comp-overlay').classList.add('hidden'); NOVO_COMP_CODIGO = null; }
+function fecharModalNovoComputador(){ document.getElementById('novo-comp-overlay').classList.add('hidden'); }
 async function salvarNovoComputador(){
+  const codigo = document.getElementById('novo-comp-unidade-select').value;
   const nome = document.getElementById('novo-comp-nome').value.trim();
   const tipo = document.querySelector('input[name="novo-comp-tipo"]:checked').value;
   const status = document.getElementById('novo-comp-status');
   status.classList.add('hidden');
-  if(!nome || !NOVO_COMP_CODIGO) return;
+  if(!nome || !codigo) return;
   const btn = document.getElementById('novo-comp-salvar');
   btn.disabled = true;
   try{
-    const resp = await fetch(`/api/loja-status/${encodeURIComponent(NOVO_COMP_CODIGO)}/computadores`, {
+    const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ nome, tipo }),
     });
@@ -376,11 +505,12 @@ function copiarLinkComputador(codigo, posto, tipo){
 
 let EDITAR_COMP_CODIGO = null;
 let EDITAR_COMP_POSTO = null;
-function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual){
+function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydeskAtual){
   EDITAR_COMP_CODIGO = codigo;
   EDITAR_COMP_POSTO = posto;
-  document.getElementById('editar-comp-unidade').textContent = nomeAtual || posto;
+  document.getElementById('editar-comp-unidade').textContent = `${nomeAtual || posto} · ${UNIDADES_NOMES[codigo] || codigo}`;
   document.getElementById('editar-comp-nome').value = nomeAtual || '';
+  document.getElementById('editar-comp-anydesk').value = anydeskAtual || '';
   document.querySelectorAll('input[name="editar-comp-tipo"]').forEach(r => { r.checked = (r.value === (tipoAtual || 'atendimento')); });
   document.getElementById('editar-comp-status').classList.add('hidden');
   document.getElementById('editar-comp-overlay').classList.remove('hidden');
@@ -389,6 +519,7 @@ function fecharModalEditarComputador(){ document.getElementById('editar-comp-ove
 async function salvarEdicaoComputador(){
   const nome = document.getElementById('editar-comp-nome').value.trim();
   const tipo = document.querySelector('input[name="editar-comp-tipo"]:checked').value;
+  const anydeskId = document.getElementById('editar-comp-anydesk').value.trim();
   const status = document.getElementById('editar-comp-status');
   status.classList.add('hidden');
   if(!nome || !EDITAR_COMP_CODIGO || !EDITAR_COMP_POSTO) return;
@@ -401,6 +532,11 @@ async function salvarEdicaoComputador(){
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
+    const respAd = await fetch(`/api/loja-status/${encodeURIComponent(EDITAR_COMP_CODIGO)}/computadores/${encodeURIComponent(EDITAR_COMP_POSTO)}/anydesk`, {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ anydeskId }),
+    });
+    if(!respAd.ok) throw new Error((await respAd.json()).error || 'Erro ao salvar o AnyDesk.');
     fecharModalEditarComputador();
     await carregar();
   }catch(e){
@@ -479,6 +615,7 @@ async function boot(){
   await carregar();
   conectarStream();
   setInterval(() => { if(!document.hidden) carregar(); }, 30000);
+  setInterval(atualizarTickerCarga, 15000);
   document.addEventListener('visibilitychange', () => { if(!document.hidden) carregar(); });
 }
 boot();
