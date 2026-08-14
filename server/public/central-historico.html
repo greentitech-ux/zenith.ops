@@ -887,10 +887,11 @@ function rejeitadoHoje(c){ return dataBrasilia(c.decididoEm||c.criadoEm) === hoj
 // misturava tudo que ja tinha decisao tomada - agora só mostra o que
 // ainda precisa de acao)
 function contagemTriagem(lista){
+  const elegiveis = lista.filter(passaTriagem);
   return {
-    P: lista.filter(c=>c.status==='PENDENTE').length,
-    A: lista.filter(c=>c.status==='APROVADO' && aprovadoAguardandoInicio(c)).length,
-    R: lista.filter(c=>c.status==='REJEITADO' && rejeitadoHoje(c)).length,
+    P: elegiveis.filter(c=>c.status==='PENDENTE').length,
+    A: elegiveis.filter(c=>c.status==='APROVADO').length,
+    R: elegiveis.filter(c=>c.status==='REJEITADO').length,
   };
 }
 function renderFiltroTipoRow(base){
@@ -925,8 +926,13 @@ function toggleFiltroTipoMulti(tipo){
 // so se foi decidido hoje. Quando um tipo especifico esta selecionado, a
 // aba daquele assunto mostra o quadro inteiro sem esse filtro (e onde o
 // historico completo - em andamento, finalizado, rejeitados antigos - fica
-// disponivel, conforme pedido do usuario)
+// disponivel, conforme pedido do usuario).
+// Login bloqueado e Quebra de caixa NUNCA entram na Triagem, seja qual for
+// o status - pedido explicito do usuario: esses dois so aparecem na aba do
+// proprio assunto (Suporte de TI e Quebra de caixa), nunca misturados na
+// fila geral.
 function passaTriagem(c){
+  if(c.tipo==='quebra-caixa' || ehBloqueioLogin(c)) return false;
   if(c.status==='PENDENTE') return true;
   if(c.status==='APROVADO') return aprovadoAguardandoInicio(c);
   if(c.status==='REJEITADO') return rejeitadoHoje(c);
