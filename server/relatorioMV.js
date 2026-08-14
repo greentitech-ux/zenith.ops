@@ -28,6 +28,7 @@ const cron = require('node-cron');
 const db = require('./firestore');
 const centralCards = require('./centralCards');
 const solicitacoes = require('./solicitacoes');
+const refunds = require('./refunds');
 const users = require('./users');
 const { createCache } = require('./liveCache');
 
@@ -70,15 +71,29 @@ function fmtDataHora(iso) {
 // card processado; salvarConfig() invalida na hora, entao uma troca feita
 // na tela vale no proximo envio, nao precisa esperar o cache vencer.
 const CONFIG_DOC = db.collection('relatorioMVConfig').doc('config');
+// horario/dias default (usado so ate o Master salvar algo diferente pela
+// tela Email) - equivalente ao antigo hardcode '0 8 * * 1-5'. diasSemana usa
+// a mesma convencao do campo dow do cron: 0=domingo ... 6=sabado
+const HORA_ENVIO_PADRAO = '08:00';
+const DIAS_SEMANA_PADRAO = [1, 2, 3, 4, 5]; // seg-sex
+
 const configCache = createCache(async () => {
   const snap = await CONFIG_DOC.get();
   const data = snap.exists ? snap.data() : {};
   const emailDestino = String(data.emailDestino || '').trim() || RELATORIO_EMAIL_TO_PADRAO;
+  const emailCopia = String(data.emailCopia || '').trim();
   const usuarioGatilho = String(data.usuarioGatilho || '').trim() || USUARIO_GATILHO_PADRAO;
+  const horaEnvio = /^([01]\d|2[0-3]):([0-5]\d)$/.test(data.horaEnvio) ? data.horaEnvio : HORA_ENVIO_PADRAO;
+  const diasSemana = Array.isArray(data.diasSemana) && data.diasSemana.length
+    ? data.diasSemana.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+    : DIAS_SEMANA_PADRAO;
   const alvo = await users.findByIdentifier(usuarioGatilho);
   return {
     emailDestino,
+    emailCopia,
     usuarioGatilho,
+    horaEnvio,
+    diasSemana: diasSemana.length ? diasSemana : DIAS_SEMANA_PADRAO,
     usuarioGatilhoEncontrado: !!alvo,
     gatilhoUserId: alvo ? alvo.id : null,
     gatilhoUserEmail: alvo && alvo.email ? String(alvo.email).trim().toLowerCase() : null,
@@ -86,28 +101,60 @@ const configCache = createCache(async () => {
 }, 5 * 60 * 1000);
 const getConfig = configCache.cached;
 
+// "HH:MM" - o <input type=time> do email.html ja manda nesse formato
+function validarHoraEnvio(valor) {
+  const limpo = String(valor || '').trim();
+  if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(limpo)) throw new Error('Informe um horário válido (HH:MM).');
+  return limpo;
+}
+
+// array de inteiros 0-6 (0=domingo), pelo menos 1 dia marcado
+function validarDiasSemana(valor) {
+  const lista = Array.isArray(valor) ? valor.map((d) => Number(d)) : [];
+  const dias = [...new Set(lista.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
+  if (!dias.length) throw new Error('Marque pelo menos um dia da semana.');
+  return dias;
+}
+
 function validarEmail(email) {
   const limpo = String(email || '').trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(limpo)) throw new Error('Informe um e-mail válido.');
   return limpo;
 }
 
+// campo opcional - vazio = sem copia nenhuma. Aceita mais de um endereco
+// separado por virgula (mesmo formato que o header "Cc:" e o nodemailer ja
+// esperam), cada um validado igual ao destino principal
+function validarEmailCopia(valor) {
+  const limpo = String(valor || '').trim();
+  if (!limpo) return '';
+  return limpo.split(',').map((e) => validarEmail(e)).join(', ');
+}
+
 // chamada pela rota POST /api/relatorio-config (Master, ver index.js) -
 // exige que o usuario gatilho realmente exista, senao a config salva
 // nunca casaria com nenhum ticket
-async function salvarConfig({ emailDestino, usuarioGatilho }) {
+async function salvarConfig({ emailDestino, emailCopia, usuarioGatilho, horaEnvio, diasSemana }) {
   const emailLimpo = validarEmail(emailDestino);
+  const copiaLimpa = validarEmailCopia(emailCopia);
   const usuarioLimpo = String(usuarioGatilho || '').trim();
   if (!usuarioLimpo) throw new Error('Informe o usuário que vai disparar os e-mails.');
   const alvo = await users.findByIdentifier(usuarioLimpo);
   if (!alvo) throw new Error(`Não encontrei nenhum usuário com "${usuarioLimpo}".`);
+  const horaLimpa = validarHoraEnvio(horaEnvio);
+  const diasLimpos = validarDiasSemana(diasSemana);
   await CONFIG_DOC.set({
     emailDestino: emailLimpo,
+    emailCopia: copiaLimpa,
     usuarioGatilho: alvo.username || usuarioLimpo,
+    horaEnvio: horaLimpa,
+    diasSemana: diasLimpos,
     atualizadoEm: new Date().toISOString(),
   }, { merge: true });
   configCache.invalidar();
-  return getConfig();
+  const configNova = await getConfig();
+  agendar(configNova); // aplica o novo horario/dias na hora, sem precisar reiniciar o servidor
+  return configNova;
 }
 
 // "e do gatilho" cobre os dois jeitos de um card ter sido direcionado pro
@@ -121,26 +168,53 @@ function ehDoMV(card, config) {
   return !!config.gatilhoUserId && card.direcionadoParaId === config.gatilhoUserId;
 }
 
-// junta os cards das 3 filas direcionados ao MV, agrupados por status - e
-// gera (renovando) o token de acao dos que ainda estao PENDENTE e tem tipo
-// com fluxo de decisao por e-mail (ver TIPOS_COM_ACAO_POR_EMAIL acima)
+// modulo que sabe gerar o link publico (ticket-publico.html) pra cada tipo -
+// mesmo mapeamento do moduloTicket() em index.js. Ajuste de fechamento e
+// Quebra de caixa ficam de fora (esse mecanismo nao existe pra eles ainda)
+function moduloLinkAcao(tipo) {
+  if (tipo === 'estorno') return refunds;
+  if (TIPOS_COM_ACAO_POR_EMAIL.has(tipo)) return solicitacoes;
+  return null;
+}
+
+// prepara UM card pro e-mail: token de decisao de uso unico (so PENDENTE,
+// so tipos com fluxo de decisao por e-mail - ver aviso de escopo no topo do
+// arquivo) e o link publico de "ver ticket completo" (ticket-publico.html,
+// mesmo mecanismo do botao "Enviar link" na Central - fica valido ate o
+// ticket chegar num estado terminal, por isso PENDENTE e APROVADO ganham
+// link e REJEITADO/FINALIZADO normalmente nao). Usado nos 3 fluxos de envio
+// (relatorio diario, aviso instantaneo, envio manual) pra nao duplicar essa
+// logica em cada um
+async function prepararCardParaEmail(card) {
+  const copia = { ...card, tokenAcao: null };
+  if (card.status === 'PENDENTE' && TIPOS_COM_ACAO_POR_EMAIL.has(card.tipo)) {
+    const { tokenAcao } = await solicitacoes.gerarTokenAcao(card.id);
+    copia.tokenAcao = tokenAcao;
+  }
+  const modulo = moduloLinkAcao(card.tipo);
+  if (modulo) {
+    try {
+      const { linkAcao } = await modulo.gerarLinkAcao(card.id);
+      copia.linkAcaoUrl = `${APP_BASE_URL}/ticket-publico.html?tipo=${encodeURIComponent(card.tipo)}&ticket=${encodeURIComponent(card.id)}&link=${encodeURIComponent(linkAcao)}`;
+    } catch (e) { /* ticket em estado terminal - sem link possivel, card fica sem o "ver completo" mesmo */ }
+  }
+  return copia;
+}
+
+// junta os cards das 3 filas direcionados ao MV, agrupados por status
 async function montarDados() {
   const [todos, config] = await Promise.all([centralCards.listarTodos(), getConfig()]);
   // CONVERTIDO = o ticket virou outro tipo/colecao (ver solicitacoes.js) -
   // quem continua a historia e o registro novo, esse aqui fica de fora
   const doMV = todos.filter((c) => ehDoMV(c, config) && c.status !== 'CONVERTIDO');
 
-  for (const c of doMV) {
-    if (c.status === 'PENDENTE' && TIPOS_COM_ACAO_POR_EMAIL.has(c.tipo)) {
-      const { tokenAcao } = await solicitacoes.gerarTokenAcao(c.id);
-      c.tokenAcao = tokenAcao;
-    }
-  }
+  const preparados = [];
+  for (const c of doMV) preparados.push(await prepararCardParaEmail(c));
 
   const grupos = { PENDENTE: [], APROVADO: [], REJEITADO: [] };
-  doMV.forEach((c) => { (grupos[c.status] || (grupos[c.status] = [])).push(c); });
+  preparados.forEach((c) => { (grupos[c.status] || (grupos[c.status] = [])).push(c); });
   Object.values(grupos).forEach((lista) => lista.sort((a, b) => (b.criadoEm || '').localeCompare(a.criadoEm || '')));
-  return { grupos, total: doMV.length };
+  return { grupos, total: preparados.length };
 }
 
 function linkDecisao(card, acao) {
@@ -153,6 +227,13 @@ function htmlBotoesAcao(card) {
   const btn = (texto, cor, acao) =>
     `<a href="${linkDecisao(card, acao)}" style="display:inline-block;padding:8px 18px;margin:8px 8px 0 0;border-radius:6px;background:${cor};color:#fff;text-decoration:none;font-family:Arial,sans-serif;font-size:13px;font-weight:bold;">${texto}</a>`;
   return `<div>${btn('✓ Aprovar', '#1a7f37', 'aprovar')}${btn('✗ Recusar', '#c62828', 'recusar')}</div>`;
+}
+
+// link pro card completo (anexos, chat, historico - ver ticket-publico.html)
+// so aparece quando prepararCardParaEmail conseguiu gerar (card.linkAcaoUrl)
+function htmlLinkCompleto(card) {
+  if (!card.linkAcaoUrl) return '';
+  return `<div style="margin-top:10px;"><a href="${card.linkAcaoUrl}" style="color:#1a56db;font-size:12.5px;text-decoration:none;">🔗 Ver ticket completo</a></div>`;
 }
 
 // pill colorida do status no topo de cada card
@@ -189,7 +270,7 @@ function htmlCard(card) {
   linhas.push(htmlItens(card));
   if (card.observacao) linhas.push(`<div style="font-size:12.5px;color:#5b6470;margin-top:8px;white-space:pre-wrap;border-left:3px solid #e6e9ee;padding-left:10px;">${escapeHtml(card.observacao)}</div>`);
   if (card.motivoDecisao) linhas.push(`<div style="font-size:12px;color:#8a93a2;margin-top:6px;">Motivo da decisão: ${escapeHtml(card.motivoDecisao)}</div>`);
-  return `<div style="border:1px solid #e6e9ee;border-radius:10px;padding:14px 16px;margin-top:12px;background:#fff;">${linhas.join('')}${htmlBotoesAcao(card)}</div>`;
+  return `<div style="border:1px solid #e6e9ee;border-radius:10px;padding:14px 16px;margin-top:12px;background:#fff;">${linhas.join('')}${htmlBotoesAcao(card)}${htmlLinkCompleto(card)}</div>`;
 }
 
 function htmlSecao(status, lista) {
@@ -273,14 +354,7 @@ async function enviarCardsPorEmail(cards, destinatario) {
   if (!destinatario) throw new Error('Informe o e-mail de destino.');
   if (!cards || !cards.length) throw new Error('Nenhum ticket selecionado.');
   const cardsParaEnvio = [];
-  for (const c of cards) {
-    const copia = { ...c, tokenAcao: null };
-    if (c.status === 'PENDENTE' && TIPOS_COM_ACAO_POR_EMAIL.has(c.tipo)) {
-      const { tokenAcao } = await solicitacoes.gerarTokenAcao(c.id);
-      copia.tokenAcao = tokenAcao;
-    }
-    cardsParaEnvio.push(copia);
-  }
+  for (const c of cards) cardsParaEnvio.push(await prepararCardParaEmail(c));
   const titulo = cards.length === 1
     ? `Ticket #${cards[0].numeroTicket ?? '—'} · ${cards[0].titulo || ''}`
     : `${cards.length} tickets · Zenith Ops`;
@@ -304,11 +378,7 @@ async function notificarCardMV(card) {
   if (!ehDoMV(card, config)) return;
   const to = config.emailDestino;
 
-  const cardParaEnviar = { ...card };
-  if (card.status === 'PENDENTE' && TIPOS_COM_ACAO_POR_EMAIL.has(card.tipo)) {
-    const { tokenAcao } = await solicitacoes.gerarTokenAcao(card.id);
-    cardParaEnviar.tokenAcao = tokenAcao;
-  }
+  const cardParaEnviar = await prepararCardParaEmail(card);
 
   const titulo = `Nova solicitação · MV`;
   await enviarComFallback({
@@ -370,10 +440,11 @@ function encodeHeaderUtf8(texto) {
   return /^[\x20-\x7e]*$/.test(texto) ? texto : `=?UTF-8?B?${Buffer.from(texto, 'utf8').toString('base64')}?=`;
 }
 
-async function enviarViaGmailApi({ from, to, subject, html }) {
+async function enviarViaGmailApi({ from, to, cc, subject, html }) {
   const mime = [
     `From: ${from}`,
     `To: ${to}`,
+    ...(cc ? [`Cc: ${cc}`] : []),
     `Subject: ${encodeHeaderUtf8(subject)}`,
     'MIME-Version: 1.0',
     'Content-Type: text/html; charset=utf-8',
@@ -463,32 +534,45 @@ async function enviarRelatorio() {
   await enviarComFallback({
     from: `Zenith Ops <${process.env.RELATORIO_EMAIL_USER}>`,
     to,
+    cc: config.emailCopia || undefined,
     subject: `Relatório de Solicitações - MV - ${dataHojeBR()}`,
     html: montarHtml(dados),
   });
   return { total: dados.total, pendentes: dados.grupos.PENDENTE.length, aprovados: dados.grupos.APROVADO.length, rejeitados: dados.grupos.REJEITADO.length };
 }
 
+// mesma montagem do relatorio (montarDados+montarHtml) mas SEM mandar e-mail -
+// usado pelo botao "Pre-visualizar agora" em /email.html pra conferir o
+// conteudo na hora, sem precisar mandar de verdade e ir checar a caixa de
+// entrada. Continua gerando tokenAcao/linkAcao de verdade pros cards (mesmo
+// efeito colateral que o envio real ja tem), entao o preview mostra links que
+// realmente funcionam se clicados
+async function previewHtml() {
+  const dados = await montarDados();
+  return { html: montarHtml(dados), total: dados.total, pendentes: dados.grupos.PENDENTE.length, aprovados: dados.grupos.APROVADO.length, rejeitados: dados.grupos.REJEITADO.length };
+}
+
 // agenda o envio diario (cron.schedule ja roda em cima do timezone
-// informado, sem precisar converter hora local -> UTC na mao). So de
-// segunda a sexta - sabado/domingo nao manda nada; como o relatorio e
-// sempre um RETRATO ATUAL (nao um "desde ontem"), o que ficou pendente no
-// fim de semana ja aparece sozinho no envio de segunda, sem logica extra.
-// O "1-5" no campo de dia-da-semana ja cobre isso, mas o guard abaixo
-// funciona como segunda trava - mesmo se RELATORIO_HORA vier configurado
-// pra rodar todo dia (ex: env var antiga "0 8 * * *"), sabado/domingo nunca
-// disparam o envio de verdade.
-function iniciarAgendamento() {
-  const horaCron = process.env.RELATORIO_HORA || '0 8 * * 1-5';
-  if (!cron.validate(horaCron)) {
-    console.error(`RELATORIO_HORA inválido ("${horaCron}") - agendamento do relatório diário MV desativado.`);
+// informado, sem precisar converter hora local -> UTC na mao). Horario e
+// dias da semana agora vem do Firestore (editaveis em /email.html, sem
+// redeploy) em vez de fixos no codigo/env var - guarda a tarefa atual pra
+// poder parar e recriar toda vez que a config mudar (ver salvarConfig)
+let tarefaAtual = null;
+function agendar(config) {
+  if (tarefaAtual) { tarefaAtual.stop(); tarefaAtual = null; }
+  const [hora, minuto] = config.horaEnvio.split(':');
+  const cronExpressao = `${Number(minuto)} ${Number(hora)} * * ${config.diasSemana.join(',')}`;
+  if (!cron.validate(cronExpressao)) {
+    console.error(`Agendamento do relatório diário MV inválido ("${cronExpressao}") - desativado até a próxima config válida.`);
     return;
   }
-  cron.schedule(horaCron, () => {
-    const diaSemana = new Intl.DateTimeFormat('en-US', { timeZone: FUSO_BR, weekday: 'short' }).format(new Date());
-    if (diaSemana === 'Sat' || diaSemana === 'Sun') return; // fim de semana - nao manda
+  tarefaAtual = cron.schedule(cronExpressao, () => {
     enviarRelatorio().catch((err) => console.error('Erro ao enviar relatório diário MV:', err.message));
   }, { timezone: FUSO_BR });
 }
 
-module.exports = { enviarRelatorio, iniciarAgendamento, montarDados, montarHtml, notificarCardMV, enviarCardsPorEmail, getConfig, salvarConfig, TIPOS_COM_ACAO_POR_EMAIL };
+async function iniciarAgendamento() {
+  agendar(await getConfig());
+}
+
+module.exports = { enviarRelatorio, previewHtml, iniciarAgendamento, montarDados, montarHtml, notificarCardMV, enviarCardsPorEmail, getConfig, salvarConfig, TIPOS_COM_ACAO_POR_EMAIL };

@@ -5374,6 +5374,17 @@ app.get('/api/relatorio-mv/testar', auth.requireMaster, async (req, res) => {
   }
 });
 
+// pre-visualiza o relatorio (mesmo conteudo que seria enviado agora) SEM
+// mandar e-mail nenhum - forma rapida do Master conferir sem precisar ir na
+// caixa de entrada (ver relatorioMV.previewHtml)
+app.get('/api/relatorio-mv/preview', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await relatorioMV.previewHtml());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // configuração do relatório diário/notificações (ver /email.html) - QUEM
 // recebe (emailDestino) e QUAL usuário dispara o envio (usuarioGatilho,
 // pelo username) - editável na hora pelo Master, sem precisar mexer em env
@@ -5386,7 +5397,10 @@ app.post('/api/relatorio-config', auth.requireMaster, async (req, res) => {
   try {
     const config = await relatorioMV.salvarConfig({
       emailDestino: req.body.emailDestino,
+      emailCopia: req.body.emailCopia,
       usuarioGatilho: req.body.usuarioGatilho,
+      horaEnvio: req.body.horaEnvio,
+      diasSemana: req.body.diasSemana,
     });
     res.json(config);
   } catch (err) {
@@ -7675,7 +7689,7 @@ app.use((err, req, res, next) => {
     // disparar na hora por GET /api/relatorio-mv/testar (que ai sim avisa o
     // erro de configuração)
     if (process.env.RELATORIO_EMAIL_USER && process.env.RELATORIO_EMAIL_PASS) {
-      relatorioMV.iniciarAgendamento();
+      relatorioMV.iniciarAgendamento().catch((err) => console.error('Erro ao agendar relatório diário MV:', err.message));
     } else {
       console.warn('AVISO: RELATORIO_EMAIL_USER/RELATORIO_EMAIL_PASS não configurados - relatório diário do MV desativado.');
     }
