@@ -1093,10 +1093,11 @@ function salvarOrdemCards(){
 // tamanho de cada card (arrastado pelo canto, resize:both) fica salvo por
 // navegador - mesmo padrao do Status das Lojas (loja-status.html), so que
 // aqui a chave e o tipo do card (unico por pessoa) em vez de codigo+posto.
-// "V2" pq a v1 tinha um bug de layout (align-items:stretch cortava o card
-// com scroll por padrao) que podia ter salvo altura errada/pequena demais -
-// troca de chave garante que ninguem fique preso nesse tamanho ruim
-function chaveTamanhoPainel(chave){ return `zenithPainelSizeV2:${chave}`; }
+// "V3": v1 tinha bug de layout (stretch cortava o card com scroll por
+// padrao); v2 corrigiu o CSS mas ainda podia salvar um tamanho errado
+// (ver observarTamanhosPainel abaixo) - cada bump de versao evita que
+// alguem fique preso num tamanho ruim salvo antes do fix
+function chaveTamanhoPainel(chave){ return `zenithPainelSizeV3:${chave}`; }
 function tamanhoSalvoPainel(chave){
   try{ return JSON.parse(localStorage.getItem(chaveTamanhoPainel(chave)) || 'null'); }catch(e){ return null; }
 }
@@ -1105,15 +1106,20 @@ function salvarTamanhoPainel(chave, w, h){
 }
 // reconecta o ResizeObserver em cada card depois de todo re-render (o
 // innerHTML e substituido, entao os observers antigos morrem junto dos nos
-// removidos) - ignora o primeiro disparo (so o tamanho ja aplicado no
-// render, nao um resize de verdade) pra nao regravar o mesmo valor a toa
+// removidos). So grava depois do tamanho ficar "parado" 500ms (debounce) em
+// vez de so ignorar o 1o disparo: logo apos o render o layout ainda podia
+// se ajustar (fonte carregando, reflow) e um 2o evento gravava um tamanho
+// errado/pequeno demais pra sempre - com debounce so o tamanho final e
+// gravado, seja logo apos renderizar ou depois de um arrasto de verdade
 function observarTamanhosPainel(){
   document.querySelectorAll('#painel-grid .pcard-slot').forEach(el => {
     const chave = el.dataset.chave;
-    let primeiro = true;
+    let timer = null;
     const obs = new ResizeObserver(() => {
-      if(primeiro){ primeiro = false; return; }
-      salvarTamanhoPainel(chave, Math.round(el.offsetWidth), Math.round(el.offsetHeight));
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        salvarTamanhoPainel(chave, Math.round(el.offsetWidth), Math.round(el.offsetHeight));
+      }, 500);
     });
     obs.observe(el);
   });
