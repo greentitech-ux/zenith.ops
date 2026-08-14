@@ -55,7 +55,7 @@ function sanitizarItens(lista) {
     .filter((item) => item.descricao);
 }
 
-async function create({ tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, anexos, ehOrcamento, fornecedor, vencimento, criadoPorId, criadoPorEmail, direcionadoParaId, direcionadoParaEmail, numeroTicket, convertidoDeTipo, convertidoDeId, fechamentoId, prioridade }) {
+async function create({ tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, anexos, ehOrcamento, fornecedor, vencimento, criadoPorId, criadoPorEmail, direcionadoParaId, direcionadoParaEmail, numeroTicket, convertidoDeTipo, convertidoDeId, fechamentoId, prioridade, teste }) {
   if (!TIPOS.includes(tipo)) throw new Error('Tipo de solicitação inválido.');
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!titulo || !String(titulo).trim()) throw new Error('Descreva o que está sendo pedido.');
@@ -85,6 +85,11 @@ async function create({ tipo, unidade, unidadeNome, titulo, valorEstimado, obser
     convertidoParaTipo: null,
     convertidoParaId: null,
     tipo,
+    // marca visivel de "isso e teste" (ver users.js: qaMaster/qaUser) - o
+    // acesso QA sempre grava aqui pra quem for atender/aprovar na Central
+    // saber na hora que aquele ticket nao e um caso real, sem precisar
+    // adivinhar pelo nome de quem criou
+    teste: !!teste,
     unidade,
     unidadeNome: unidadeNome || unidade,
     titulo: String(titulo).trim().slice(0, 200),
@@ -547,6 +552,7 @@ async function converterParaEstorno(id, dadosEstorno, porEmail) {
     numeroTicket: atual.numeroTicket,
     convertidoDeTipo: atual.tipo,
     convertidoDeId: atual.id,
+    teste: atual.teste,
   });
   await ref.update({
     status: 'CONVERTIDO',

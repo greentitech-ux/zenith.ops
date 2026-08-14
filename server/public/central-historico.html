@@ -742,6 +742,7 @@ function kcardHtml(c){
       <div class="linha1">
         <span class="tipo-badge" style="background:#1a2230;color:var(--muted);">#${c.numeroTicket ?? '—'}</span>
         <span class="tipo-badge">${iconeTipo(c.tipo)} ${TIPOS_INFO[c.tipo]?.label||c.tipo}</span>
+        ${c.teste ? '<span class="tipo-badge" style="background:#3d0f0f;color:#ff8080;">🧪 TESTE</span>' : ''}
         ${c.status==='CONVERTIDO' ? '<span class="tipo-badge" style="background:#12303a;color:var(--accent);">🔀 convertido</span>' : ''}
         ${c.ehOrcamento ? '<span class="tipo-badge" style="background:#3d2f0f;color:#e0b84c;">💰 orçamento</span>' : ''}
         ${c.comprada ? '<span class="tipo-badge" style="background:#0f2f22;color:var(--ok);">✅ comprada</span>' : ''}
@@ -2128,8 +2129,9 @@ async function boot(){
 
   // tiposSolicitacao (mesma restricao usada em central.html pra criar) - se
   // nao tem a secao necessaria OU nao esta na lista de tipos permitidos,
-  // a aba desse tipo nem aparece na Central (vazio = sem restricao de tipo)
-  const tiposPermitidos = IS_MASTER ? null : (ME.permissions?.tiposSolicitacao||[]);
+  // a aba desse tipo nem aparece na Central (vazio = sem restricao de tipo).
+  // QA User sempre ve todos os tipos (tudo que criar sai marcado TESTE)
+  const tiposPermitidos = (IS_MASTER || ME.isQaUser) ? null : (ME.permissions?.tiposSolicitacao||[]);
   TIPOS_DISPONIVEIS = Object.keys(TIPOS_INFO).filter(tipo =>
     (!TIPOS_INFO[tipo].secaoNecessaria || SECOES.includes(TIPOS_INFO[tipo].secaoNecessaria)) &&
     (!tiposPermitidos || !tiposPermitidos.length || tiposPermitidos.includes(tipo))

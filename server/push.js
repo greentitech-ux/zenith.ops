@@ -61,6 +61,40 @@ function podeReceberSolicitacao(sub) {
   return !!meta && (meta.isMaster || meta.isAdmin);
 }
 
+// so Master DE VERDADE (nao QA Master) - e quem decide a fila de aprovacao
+// (ver qaAprovacoes.js/interceptarQaMaster em index.js). Admin fica de fora:
+// so o Master aprova/rejeita essas acoes sensiveis.
+function podeReceberAprovacaoQa(sub) {
+  const meta = sub.meta;
+  return !!meta && meta.isMaster && !meta.isQaMaster;
+}
+
+// avisa os Masters de verdade que um acesso QA Master tentou uma acao
+// sensivel (exclusao/configuracao global) e ela esta parada esperando
+// aprovacao (ver EXECUTORES_QA em index.js)
+async function notifyQaAprovacaoPendente(resumo, criadoPorEmail) {
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify({
+    title: '🧪 QA Master pediu autorização',
+    body: `${criadoPorEmail || ''} · ${resumo || ''}`,
+    tag: 'qa-aprovacao',
+    url: '/usuarios.html',
+  });
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberAprovacaoQa(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (aprovação QA):', err.message);
+      }
+    }
+  }
+}
+
 // alerta critico do Beniboy (bot nao conseguiu resolver e chamou um
 // atendente): vai pro Master e pra quem tem a secao/tag "suporte" - nunca
 // pro Admin sem essa tag - e um alarme sonoro que segue tocando ate a
@@ -503,5 +537,6 @@ module.exports = {
   notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado,
-  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, PUBLIC_KEY,
+  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou,
+  notifyQaAprovacaoPendente, PUBLIC_KEY,
 };
