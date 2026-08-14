@@ -56,10 +56,13 @@
   .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
   .hidden{display:none!important;}
   .empty{padding:40px;text-align:center;color:var(--muted);font-size:13px;}
-  .painel-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;}
+  .painel-grid{display:flex;flex-wrap:wrap;gap:14px;justify-content:flex-start;align-content:flex-start;}
   /* slot arrastavel de cada card - a alça ⠿ (topo, centro) reordena com o
-     dedo ou mouse e a ordem fica salva no navegador */
-  .pcard-slot{position:relative;}
+     dedo ou mouse e a ordem fica salva no navegador. Arrastando o canto
+     inferior direito (resize:both, mesmo padrao do Status das Lojas) muda o
+     tamanho - o proprio card cresce junto (height:100%) e o tamanho fica
+     salvo por navegador (ver salvarTamanhoPainel) */
+  .pcard-slot{position:relative;width:360px;min-width:280px;min-height:160px;resize:both;overflow:auto;}
   .pcard-slot .pcard{height:100%;box-sizing:border-box;}
   .pcard-drag{position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:2;background:none;border:none;
     color:var(--muted);font-size:13px;line-height:1;padding:4px 18px;cursor:grab;touch-action:none;user-select:none;}
@@ -1080,6 +1083,32 @@ function salvarOrdemCards(){
   const chaves = [...document.getElementById('painel-grid').children].map(el=>el.dataset.chave).filter(Boolean);
   localStorage.setItem(LS_ORDEM_CARDS, JSON.stringify(chaves));
 }
+
+// tamanho de cada card (arrastado pelo canto, resize:both) fica salvo por
+// navegador - mesmo padrao do Status das Lojas (loja-status.html), so que
+// aqui a chave e o tipo do card (unico por pessoa) em vez de codigo+posto
+function chaveTamanhoPainel(chave){ return `zenithPainelSize:${chave}`; }
+function tamanhoSalvoPainel(chave){
+  try{ return JSON.parse(localStorage.getItem(chaveTamanhoPainel(chave)) || 'null'); }catch(e){ return null; }
+}
+function salvarTamanhoPainel(chave, w, h){
+  try{ localStorage.setItem(chaveTamanhoPainel(chave), JSON.stringify({ w, h })); }catch(e){ /* ignora (ex: storage cheio) */ }
+}
+// reconecta o ResizeObserver em cada card depois de todo re-render (o
+// innerHTML e substituido, entao os observers antigos morrem junto dos nos
+// removidos) - ignora o primeiro disparo (so o tamanho ja aplicado no
+// render, nao um resize de verdade) pra nao regravar o mesmo valor a toa
+function observarTamanhosPainel(){
+  document.querySelectorAll('#painel-grid .pcard-slot').forEach(el => {
+    const chave = el.dataset.chave;
+    let primeiro = true;
+    const obs = new ResizeObserver(() => {
+      if(primeiro){ primeiro = false; return; }
+      salvarTamanhoPainel(chave, Math.round(el.offsetWidth), Math.round(el.offsetHeight));
+    });
+    obs.observe(el);
+  });
+}
 // arrastar pela alça ⠿ (pointer events = funciona com dedo e mouse): o card
 // segue o ponteiro trocando de posicao ao vivo; soltou, a ordem e salva
 let PAINEL_ARRASTANDO = false;
@@ -1198,12 +1227,15 @@ async function renderizarCards(){
       console.error('Painel: erro ao carregar card', aplicaveis[i].chave, r.reason);
       html = pcardWrap('⚠️', aplicaveis[i].chave, '#', `<div class="pcard-erro">Não foi possível carregar esses dados agora.</div>`);
     }
-    return `<div class="pcard-slot" data-chave="${aplicaveis[i].chave}">
+    const salvo = tamanhoSalvoPainel(aplicaveis[i].chave);
+    const styleTamanho = salvo ? ` style="width:${Math.max(280,salvo.w)}px;height:${Math.max(160,salvo.h)}px;"` : '';
+    return `<div class="pcard-slot" data-chave="${aplicaveis[i].chave}"${styleTamanho}>
       <button type="button" class="pcard-drag" title="Arraste pra reordenar os cards" aria-label="Mover card">⠿</button>
       ${html}
     </div>`;
   }).join('');
   initDragCards();
+  observarTamanhosPainel();
 }
 
 boot();
