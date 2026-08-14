@@ -22,6 +22,8 @@ const store = require('./store');
 const pedidoWatch = require('./pedidoWatch');
 const users = require('./users');
 const abastecimentoCarrinho = require('./abastecimentoCarrinho');
+const agenteAcoes = require('./agenteAcoes');
+const qaAprovacoes = require('./qaAprovacoes');
 
 // senha padrao que o Beniboy define quando a pessoa NAO lembra a senha atual
 // (2a vez que o mesmo acesso trava depois de ja ter sido desbloqueado por
@@ -64,8 +66,26 @@ function getCliente() {
 // do system - vai com cache_control pra nao pagar o prompt inteiro de novo a
 // cada mensagem da mesma conversa (so a lista de unidades e o "logado"
 // variam, e raramente mudam no meio de uma mesma conversa)
-function montarSystem(unidades, logado) {
+// bloco NOC Zenith do prompt - so pra Master de verdade (mais restrito que
+// os outros blocos condicionais, dado o poder da ferramenta). Busca o
+// catalogo (Master-editavel, ver agenteAcoes.js) e o texto livre de
+// contexto/orientacao ("ensinar como resolver", pedido explicito do
+// usuario) toda vez - e o mesmo espirito do "logado" variar por conversa
+async function montarBlocoAgente(logado) {
+  if (!logado || !logado.isMaster) return '';
+  const [acoes, contexto] = await Promise.all([agenteAcoes.listarAtivas(), agenteAcoes.obterContexto()]);
+  const listaAcoes = acoes.length
+    ? acoes.map((a) => `- [${a.id}] ${a.nome}: ${a.descricao} (${a.requerAprovacao ? 'precisa de aprovação do Master' : 'executa direto, sem aprovação'})`).join('\n')
+    : '(nenhuma ação cadastrada ainda)';
+  return `\n\n## NOC Zenith - ações que você pode executar (ferramenta executar_acao_agente)
+Catálogo de ações cadastradas pelo Master (use o [id] exato ao chamar a ferramenta):
+${listaAcoes}
+${contexto.texto ? `\nOrientação de como resolver (definida pelo Master):\n${contexto.texto}` : ''}`;
+}
+
+async function montarSystem(unidades, logado) {
   const temFerramentaPedido = !!(logado && logado.temMonitor);
+  const blocoAgente = await montarBlocoAgente(logado);
   const texto = `Você é o Beniboy, atendente virtual do chat de suporte do Zenith Ops.
 
 O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Milky Moo, São Braz e o parque Saltiverso). Quem fala com você pode ser um funcionário/parceiro das lojas OU o CLIENTE FINAL de uma loja (o comprador, ex: alguém que quer um estorno) - na maioria das vezes de estorno é o próprio cliente falando direto com você, não um funcionário repassando. Não assuma qual dos dois é sem contexto - se não estiver claro, pergunte. De qualquer forma, a pessoa pode estar deslogada.
@@ -93,11 +113,12 @@ O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, 
 - chamar_atendente: acione quando a pessoa pedir um humano, quando você não souber resolver, ou quando o assunto for sensível. Avise que o time já foi chamado e responde ali mesmo na conversa.
 - desbloquear_login: destrava um acesso bloqueado (3 senhas erradas) - login principal do Zenith OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão mantém a MESMA senha - nunca invente nem envie senha nenhuma nessa primeira chamada. Se travar de novo: no login principal, PERGUNTE "você lembra da sua senha atual?" antes de chamar de novo com lembraSenha=true/false (só com false uma senha padrão é definida, e a pessoa é obrigada a cadastrar uma própria no próximo login); no operador do Abastecimento, a ferramenta já reseta pra uma senha nova sozinha - é só repassar a senha que ela devolver.${temFerramentaPedido ? `
 - consultar_pedido: consulta o status de UM pedido específico no Monitor (aprovado, recusado, estornado, fraude suspeita). Peça os 3 dados ANTES de chamar (uma pergunta por vez, o que faltar): o código da loja (IDPULSE, a mesma coluna "Unidade" do Fechamento), o nome do cliente e o valor do pedido. A busca já vem limitada às lojas que essa pessoa tem acesso - se não achar, pode ser de outra loja, não assuma fraude/erro. Nunca invente status; se a ferramenta não achar nada, diga isso e ofereça chamar_atendente. Se o status desse pedido mudar depois da sua resposta, a pessoa é avisada automaticamente - não precisa te perguntar de novo.` : `
-- Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora (só quem está logado com permissão de Monitor). Use chamar_atendente.`}
+- Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora (só quem está logado com permissão de Monitor). Use chamar_atendente.`}${(logado && logado.isMaster) ? `
+- executar_acao_agente: executa uma ação do catálogo NOC Zenith (veja a lista mais abaixo). Use SÓ pra ações que estão nessa lista - nunca invente uma ação nem tente rodar algo fora do catálogo. Se a ação precisar de aprovação, avise que mandou pro Master aprovar; se não precisar, informe o resultado direto.` : ''}
 
 ## Unidades válidas pra ticket (use exatamente um destes nomes; se a pessoa falar parecido, escolha o mais próximo; se não der pra saber, pergunte)
 ${unidades.map((u) => `- ${u}`).join('\n')}
-${logado ? `\n## Quem fala com você agora\nConta logada: ${logado.username}${logado.isMaster ? ' (Master)' : ''}. ${temFerramentaPedido ? 'Tem acesso ao Monitor - pode usar consultar_pedido.' : 'Sem acesso ao Monitor - não tente consultar pedido, use chamar_atendente se precisar.'}` : ''}`;
+${logado ? `\n## Quem fala com você agora\nConta logada: ${logado.username}${logado.isMaster ? ' (Master)' : ''}. ${temFerramentaPedido ? 'Tem acesso ao Monitor - pode usar consultar_pedido.' : 'Sem acesso ao Monitor - não tente consultar pedido, use chamar_atendente se precisar.'}` : ''}${blocoAgente}`;
   return [{ type: 'text', text: texto, cache_control: { type: 'ephemeral' } }];
 }
 
@@ -176,8 +197,27 @@ const TOOL_CONSULTAR_PEDIDO = {
   },
 };
 
+// so entra na lista quando logado.isMaster (mais restrito que o
+// consultar_pedido acima - essa ferramenta pode chegar a executar coisas de
+// verdade, ver EXECUTORES_ACAO_SISTEMA/comando_maquina em agenteAcoes.js)
+const TOOL_EXECUTAR_ACAO_AGENTE = {
+  name: 'executar_acao_agente',
+  description: 'Executa uma ação cadastrada no catálogo NOC Zenith (lista completa vem no prompt, com o [id] de cada uma). Use só pra ações que estão literalmente nessa lista - nunca invente uma ação. Se a ação precisar de "codigo"/"posto" (comando de máquina), pergunte qual computador antes de chamar.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      acaoId: { type: 'string', description: 'O [id] exato da ação, copiado da lista do prompt.' },
+      parametros: { type: 'object', description: 'Dados que essa ação específica precisa (ver a descrição dela no prompt) - ex: codigo/posto pra comando de máquina, ou email/username/permissions pra criar um usuário do Zenith.' },
+      resumo: { type: 'string', description: 'Resumo de 1 linha do que vai ser feito, pro card de aprovação (se precisar) ou pro registro do que foi executado.' },
+    },
+    required: ['acaoId', 'resumo'],
+  },
+};
+
 function montarTools(logado) {
-  return (logado && logado.temMonitor) ? [...TOOLS_BASE, TOOL_CONSULTAR_PEDIDO] : TOOLS_BASE;
+  const tools = (logado && logado.temMonitor) ? [...TOOLS_BASE, TOOL_CONSULTAR_PEDIDO] : [...TOOLS_BASE];
+  if (logado && logado.isMaster) tools.push(TOOL_EXECUTAR_ACAO_AGENTE);
+  return tools;
 }
 
 // historico da conversa -> turns da API. Mensagens do visitante viram user;
@@ -359,6 +399,31 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       aprovadoEm: o.dataCompra, estornadoEm: o.dataChargeback, fraudeSuspeita: !!o.fraudeSuspeita,
     })));
   }
+  if (nome === 'executar_acao_agente') {
+    // defesa em profundidade: mesmo espirito do recheck de consultar_pedido
+    // - so entra em TOOLS quando logado.isMaster, mas confere de novo aqui
+    // antes de tocar em qualquer execucao real
+    if (!chat.logado || !chat.logado.isMaster) return 'Sem acesso a essa ferramenta - chame um atendente.';
+    const acao = await agenteAcoes.obter(input.acaoId);
+    if (!acao || !acao.ativo) return 'Essa ação não existe (ou foi desativada) no catálogo NOC Zenith - confira o [id] certo.';
+    const resumo = String(input.resumo || acao.nome).slice(0, 300);
+    if (acao.requerAprovacao) {
+      await qaAprovacoes.criar({
+        tipo: 'agente.executarAcao',
+        resumo,
+        payload: { acaoId: input.acaoId, parametros: input.parametros || {} },
+        criadoPorId: null,
+        criadoPorEmail: 'Beniboy (agente)',
+      });
+      return `Ação "${acao.nome}" preparada e enviada pra aprovação do Master (fica visível em NOC Zenith).`;
+    }
+    try {
+      const resultadoAcao = await agenteAcoes.executarAcaoDoAgente(input.acaoId, input.parametros || {});
+      return `Ação "${acao.nome}" executada: ${resultadoAcao}`;
+    } catch (err) {
+      return `Erro ao executar "${acao.nome}": ${err.message}`;
+    }
+  }
   return `Ferramenta desconhecida: ${nome}`;
 }
 
@@ -382,7 +447,7 @@ async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdP
 
     const resultado = { tickets: [], chamouAtendente: false, motivoAtendente: '' };
     const mensagens = montarMensagens(chat);
-    const system = montarSystem(unidades, chat.logado);
+    const system = await montarSystem(unidades, chat.logado);
     const tools = montarTools(chat.logado);
     let resp = await getCliente().messages.create({
       model: MODELO, max_tokens: MAX_TOKENS, system, messages: mensagens,

@@ -66,6 +66,7 @@ const rhAdvertencias = require('./rhAdvertencias');
 const unidadesExtras = require('./unidades');
 const lojaStatus = require('./lojaStatus');
 const qaAprovacoes = require('./qaAprovacoes');
+const agenteAcoes = require('./agenteAcoes');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -175,9 +176,13 @@ const ROTA_TICKET_PUBLICO_RE = /^\/api\/central\/[^/]+\/[^/]+\/(publico|chat-pub
 // motivo do heartbeat, precisa ser publica (a maquina nao tem sessao de
 // usuario logado)
 const ROTA_LOJA_IP_LOCAL_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/ip-local$/;
+// NOCZenith reporta o resultado de um comando do agente (ver
+// agenteAcoes.js/lojaStatus.js enfileirarComando) - mesmo motivo publico
+// do ip-local: quem chama e a maquina, sem sessao de usuario
+const ROTA_LOJA_COMANDO_RESULTADO_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/comando-resultado$/;
 function rotaPublicaSemDashboard(path) {
   return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/')
-    || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path);
+    || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path);
 }
 if (DASHBOARD_USER && DASHBOARD_PASSWORD) {
   app.use((req, res, next) => {
@@ -710,6 +715,17 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
 app.post('/api/loja-status/:codigo/computadores/:posto/ip-local', async (req, res) => {
   try {
     res.json(await lojaStatus.atualizarIpLocal(req.params.codigo, req.params.posto, req.body.ip));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- resultado de comando do agente reportado pelo NOCZenith (ver
+// agenteAcoes.js/lojaStatus.js enfileirarComando+marcarComandoExecutado) -
+// mesma logica publica do ip-local: quem chama e a maquina, sem sessao ----------
+app.post('/api/loja-status/:codigo/computadores/:posto/comando-resultado', async (req, res) => {
+  try {
+    res.json(await lojaStatus.marcarComandoExecutado(req.body.comandoId, { resultado: req.body.resultado, erro: req.body.erro }));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -2303,6 +2319,14 @@ const EXECUTORES_QA = {
   'vaultSubgroups.criar': (p) => vaultSubgroups.create(p.groupId, p.name),
   'vaultSubgroups.editar': (p) => vaultSubgroups.rename(p.id, p.name),
   'vaultSubgroups.excluir': (p) => vaultSubgroups.remove(p.id),
+  // NOC Zenith (ver agenteAcoes.js): unico executor cujo comportamento e
+  // dinamico - re-le o catalogo (Master-editavel) no momento da aprovacao
+  // em vez de chamar uma funcao fixa como os demais
+  'agente.executarAcao': (p) => agenteAcoes.executarAcaoDoAgente(p.acaoId, p.parametros),
+  'agente.acoes.criar': (p) => agenteAcoes.criar(p),
+  'agente.acoes.editar': (p) => agenteAcoes.atualizar(p.id, p.dados, p.atualizadoPorEmail),
+  'agente.acoes.excluir': (p) => agenteAcoes.remover(p.id),
+  'agente.contexto.editar': (p) => agenteAcoes.salvarContexto(p.texto, p.atualizadoPorEmail),
 };
 
 // chamar no topo de cada rota sensível, ANTES de executar a ação de
@@ -2359,6 +2383,54 @@ app.post('/api/qa-aprovacoes/:id/rejeitar', requireMasterDeVerdade, async (req, 
     if (!pendente) return res.status(404).json({ error: 'Solicitação não encontrada.' });
     const atualizado = await qaAprovacoes.marcarDecidido(req.params.id, { status: 'rejeitado', decididoPorEmail: req.user.email, motivoRejeicao: req.body.motivo || null });
     res.json(atualizado);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- NOC Zenith: catálogo de ações do agente + contexto (ver
+// agenteAcoes.js) - painel dentro de loja-status.html. Master-only (mais
+// restrito que o resto da página, que é 'suporte'); se for QA Master,
+// desvia pra aprovação igual a qualquer outra configuração global ----------
+app.get('/api/agente/acoes', auth.requireMaster, async (req, res) => {
+  res.json(await agenteAcoes.listar());
+});
+
+app.post('/api/agente/acoes', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'agente.acoes.criar', `Nova ação do agente: ${req.body?.nome || ''}`, { ...req.body, criadoPorEmail: req.user.email })) return;
+    res.json(await agenteAcoes.criar({ ...req.body, criadoPorEmail: req.user.email }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/agente/acoes/:id', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'agente.acoes.editar', `Editar ação do agente: ${req.body?.nome || ''}`, { id: req.params.id, dados: req.body, atualizadoPorEmail: req.user.email })) return;
+    res.json(await agenteAcoes.atualizar(req.params.id, req.body, req.user.email));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/agente/acoes/:id', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'agente.acoes.excluir', 'Excluir ação do agente', { id: req.params.id })) return;
+    res.json(await agenteAcoes.remover(req.params.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/agente/contexto', auth.requireMaster, async (req, res) => {
+  res.json(await agenteAcoes.obterContexto());
+});
+
+app.put('/api/agente/contexto', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'agente.contexto.editar', 'Editar contexto do agente', { texto: req.body?.texto, atualizadoPorEmail: req.user.email })) return;
+    res.json(await agenteAcoes.salvarContexto(req.body?.texto, req.user.email));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

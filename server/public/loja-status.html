@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Status das Lojas · Zenith Ops</title>
+<title>NOC Zenith · Zenith Ops</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -129,6 +129,27 @@
   .msg{font-size:12px;padding:8px 10px;border-radius:8px;margin-top:10px;}
   .msg.ok{background:var(--ok-dim);color:var(--ok);}
   .msg.err{background:var(--bad-dim);color:var(--bad);}
+
+  /* ---- NOC Zenith: painel do agente (Master-only) ---- */
+  .agente-titulo{display:flex;align-items:center;gap:8px;margin:32px 0 4px;padding-top:20px;border-top:1px solid var(--line);}
+  .agente-titulo h2{font-size:16px;}
+  .agente-sub{font-size:12px;color:var(--muted);margin-bottom:18px;line-height:1.5;}
+  .agente-secao{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px;}
+  .agente-secao-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
+  .agente-acao-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:8px;}
+  .agente-acao-item.agente-acao-inativa{opacity:.55;}
+  .agente-acao-topo{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;}
+  .agente-acao-nome{font-size:13px;font-weight:700;}
+  .agente-acao-badges{display:flex;gap:6px;flex-wrap:wrap;}
+  .agente-acao-desc{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.4;}
+  .agente-acao-acoes{display:flex;gap:8px;margin-top:10px;}
+  .qa-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:8px;}
+  .qa-item .qa-resumo{font-size:13px;font-weight:600;}
+  .qa-item .qa-meta{font-size:11px;color:var(--muted);margin-top:4px;}
+  .qa-item .qa-acoes{display:flex;gap:8px;margin-top:10px;}
+  .qa-item .qa-erro{font-size:11.5px;color:var(--bad);margin-top:6px;}
+  .check-linha{display:flex;align-items:center;gap:8px;font-family:var(--sans);font-size:12.5px;color:var(--text);margin:14px 0 0;cursor:pointer;}
+  .check-linha input{width:auto;flex:none;margin:0;}
 </style>
 </head>
 <body>
@@ -139,7 +160,7 @@
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
         <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
-        <h1>📡 Status das Lojas</h1>
+        <h1>📡 NOC Zenith</h1>
       </div>
     </div>
     <div class="header-nav">
@@ -160,7 +181,7 @@
   <a class="back hidden" id="nav-tecnico" href="/tecnico.html">🔧 Chamados TI</a>
   <a class="back hidden" id="nav-central-solucoes" href="/central-solucoes.html">💬 Central de Soluções</a>
   <a class="back hidden" id="nav-beniboy" href="/beniboy.html">🐝 Central do Beniboy</a>
-  <a class="back active" id="nav-loja-status-self" href="/loja-status.html">📡 Status das Lojas</a>
+  <a class="back active" id="nav-loja-status-self" href="/loja-status.html">📡 NOC Zenith</a>
   <div class="nav-drawer-sep"></div>
   <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
 </nav>
@@ -200,6 +221,75 @@
   </div>
 
   <div id="grid-equip" class="equip-grid"></div>
+</div>
+
+<div id="agente-root" class="hidden">
+  <div class="agente-titulo">
+    <h2>🤖 Beniboy — Ações do Agente</h2>
+  </div>
+  <div class="agente-sub">
+    Só o acesso Master vê essa parte. Cadastre aqui o que o Beniboy pode fazer sozinho (o comando exato ou a ação de sistema - ele nunca escreve o comando, só escolhe entre o que está cadastrado) e ensine como ele deve se comportar no campo de contexto abaixo. Por padrão toda ação enviada por ele passa por aprovação; desmarque "precisa de aprovação" só nas que forem óbvias o bastante pra rodar direto.
+  </div>
+
+  <div class="agente-secao">
+    <div class="agente-secao-head">
+      <h3>📋 Catálogo de ações</h3>
+      <button type="button" class="btn-primary" onclick="abrirModalNovaAcao()">➕ Nova ação</button>
+    </div>
+    <div id="agente-acoes-lista"></div>
+  </div>
+
+  <div class="agente-secao">
+    <h3>🧠 Contexto — como ele deve resolver</h3>
+    <div class="agente-sub" style="margin-bottom:8px;">Texto livre, sem estrutura fixa. Ex: passos que ele deve seguir antes de acionar você, o que perguntar primeiro, quando pode resolver sozinho vs quando é melhor só te chamar.</div>
+    <textarea id="agente-contexto-texto" maxlength="6000" style="min-height:160px;" placeholder="Ex: quando pedirem reset de senha, confirme o nome completo e a unidade antes de qualquer coisa. Cadastro de usuário novo sempre passa por aprovação, mesmo que pareça simples..."></textarea>
+    <div class="msg hidden" id="agente-contexto-status"></div>
+    <div class="modal-acoes" style="margin-top:10px;">
+      <button type="button" class="btn-primary" onclick="salvarContextoAgente()">Salvar contexto</button>
+    </div>
+  </div>
+
+  <div class="agente-secao">
+    <h3>⏳ Aprovações pendentes do agente</h3>
+    <div id="agente-aprovacoes-lista"></div>
+  </div>
+
+  <div class="agente-secao">
+    <h3>📜 Histórico</h3>
+    <div id="agente-historico-lista"></div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="acao-overlay">
+  <div class="modal">
+    <h3 id="acao-modal-titulo">🤖 Nova ação</h3>
+    <label>Nome</label>
+    <input type="text" id="acao-nome" maxlength="80" placeholder="Ex: Reiniciar spooler de impressão">
+    <label>Quando/por que usar (é o que o Beniboy lê pra decidir)</label>
+    <textarea id="acao-descricao" maxlength="600" placeholder="Ex: use quando o cliente disser que a impressora não imprime nada"></textarea>
+    <label>O que essa ação faz</label>
+    <div class="radio-tipo">
+      <label><input type="radio" name="acao-tipo" value="comando_maquina" checked onchange="onMudaTipoAcao()"><span><b>💻 Rodar comando no computador</b><small>PowerShell fixo, roda via NOCZenith num computador tipo interno</small></span></label>
+      <label><input type="radio" name="acao-tipo" value="acao_sistema" onchange="onMudaTipoAcao()"><span><b>⚙️ Ação de sistema</b><small>uma função pronta do Zenith - hoje só "criar usuário"</small></span></label>
+    </div>
+    <div id="acao-campo-comando">
+      <label>Comando PowerShell</label>
+      <textarea id="acao-comando" maxlength="4000" style="font-family:var(--mono);min-height:110px;" placeholder="Ex: Restart-Service -Name Spooler -Force"></textarea>
+    </div>
+    <div id="acao-campo-sistema" class="hidden">
+      <label>Ação de sistema</label>
+      <select id="acao-executor-sistema">
+        <option value="criar_usuario_zenith">Criar usuário do Zenith</option>
+      </select>
+    </div>
+    <label class="check-linha"><input type="checkbox" id="acao-requer-aprovacao" checked> Precisa de aprovação do Master antes de executar</label>
+    <label class="check-linha" id="acao-ativo-wrap"><input type="checkbox" id="acao-ativo" checked> Ativa (o Beniboy pode usar agora)</label>
+    <div class="msg hidden" id="acao-modal-status"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn-ghost" onclick="fecharModalAcao()">Cancelar</button>
+      <button type="button" class="btn-primary" id="acao-modal-salvar" onclick="salvarAcao()">Salvar</button>
+    </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="msg-overlay">
@@ -372,7 +462,7 @@ function equipTileHtml(codigo, c){
       ${c.anydeskId ? `<a class="btn-mini ok" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk">🖥️ AnyDesk</a>` : ''}
       <button type="button" class="btn-mini" onclick="abrirModalMensagem('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeJs}')">💬</button>
       <button type="button" class="btn-mini" onclick="copiarLinkComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${c.tipo||'atendimento'}')">🔗</button>
-      <button type="button" class="btn-mini" title="Baixar script de vigia (reabre sozinho + reporta IP local)" onclick="baixarVigia('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${c.tipo||'atendimento'}')">🛡️</button>
+      <button type="button" class="btn-mini" title="Baixar NOCZenith (reabre sozinho + reporta IP local)" onclick="baixarVigia('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${c.tipo||'atendimento'}')">🛡️</button>
       <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerComputador('${escapeHtml(codigo)}','${escapeHtml(c.posto)}','${nomeJs}')">🗑️</button>
     </div>
   </div>`;
@@ -568,14 +658,14 @@ function baixarVigia(codigo, posto, tipo){
   const urlMonitorar = `${location.origin}/${paginaDoTipo(tipo)}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
   const urlReportarIp = `${location.origin}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/ip-local`;
   const urlHeartbeat = `${location.origin}/api/loja-status/heartbeat`;
-  const nomeTarefa = 'ZenithVigia_' + posto;
+  const nomeTarefa = 'NOCZenith_' + posto;
   const cabecalhoInterno = [
     '# O que isso faz, rodando escondido em segundo plano: manda direto pro',
     '# Zenith o sinal de que esse computador esta ligado e conectado (aparece',
     '# online em Status das Lojas) - sem precisar manter nenhuma janela aberta.',
     '# Continua podendo abrir o app fixado na barra de tarefas quando quiser,',
     '# pra fazer login/usar o Zenith normal - isso nao tem nenhum conflito com',
-    '# o vigia rodando por baixo.',
+    '# o NOCZenith rodando por baixo.',
   ];
   const cabecalhoOutros = [
     '# O que isso faz, rodando escondido em segundo plano:',
@@ -585,12 +675,12 @@ function baixarVigia(codigo, posto, tipo){
     '#    computador).',
   ];
   const linhasComuns = [
-    '# Vigia do Zenith Ops - ' + codigo + ' / ' + posto,
+    '# NOCZenith - ' + codigo + ' / ' + posto,
     '#',
     ...(ehInterno ? cabecalhoInterno : cabecalhoOutros),
     '#',
     '# COMO INSTALAR (um passo so):',
-    '# 1) Salve esse arquivo numa pasta fixa e definitiva (ex: Documentos\\ZenithVigia)',
+    '# 1) Salve esse arquivo numa pasta fixa e definitiva (ex: Documentos\\NOCZenith)',
     '#    - nao mova depois, o agendamento vai apontar pra esse caminho.',
     '# 2) Clique com o botao DIREITO no arquivo > "Executar com o PowerShell".',
     '#    Uma janela preta abre rapido, instala e some sozinha.',
@@ -613,7 +703,7 @@ function baixarVigia(codigo, posto, tipo){
     'function Rodar-Loop {',
     '  while ($true) {',
     '    try {',
-    '      $corpo = @{ unidade = "' + codigo + '"; posto = "' + posto + '"; userAgent = "ZenithVigia/1.0 (Windows NT; PowerShell)"; abertoDesde = $InicioScript } | ConvertTo-Json',
+    '      $corpo = @{ unidade = "' + codigo + '"; posto = "' + posto + '"; userAgent = "NOCZenith/1.0 (Windows NT; PowerShell)"; abertoDesde = $InicioScript } | ConvertTo-Json',
     '      Invoke-RestMethod -Uri $UrlHeartbeat -Method Post -ContentType "application/json" -Body $corpo -ErrorAction SilentlyContinue | Out-Null',
     '    } catch {}',
     '    Start-Sleep -Seconds $IntervaloSegundos',
@@ -667,7 +757,7 @@ function baixarVigia(codigo, posto, tipo){
     '  $acao = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$caminho`" -Loop"',
     '  $gatilho = New-ScheduledTaskTrigger -AtLogOn',
     '  Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho -Force | Out-Null',
-    '  Write-Host "Instalado! O vigia vai rodar sozinho a partir do proximo login."',
+    '  Write-Host "Instalado! O NOCZenith vai rodar sozinho a partir do proximo login."',
     '  Write-Host "Iniciando agora tambem, nessa sessao..."',
     '  Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$caminho`" -Loop"',
     '  Read-Host "Pronto! Pode fechar essa janela (aperte Enter)"',
@@ -679,12 +769,12 @@ function baixarVigia(codigo, posto, tipo){
   const blob = new Blob([conteudo], {type:'text/plain;charset=utf-8'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `vigia-${posto}.ps1`;
+  a.download = `NOCZenith-${posto}.ps1`;
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(a.href);
-  alert(`Script "vigia-${posto}.ps1" baixado.\n\nComo instalar:\n1) Salve numa pasta fixa (ex: Documentos\\ZenithVigia)\n2) Clique com o botão direito nele > "Executar com o PowerShell"\n\nPronto - ele se instala sozinho e já começa a rodar. As instruções completas (inclusive o que fazer se der erro de permissão) estão nos comentários no topo do próprio arquivo.`);
+  alert(`Script "NOCZenith-${posto}.ps1" baixado.\n\nComo instalar:\n1) Salve numa pasta fixa (ex: Documentos\\NOCZenith)\n2) Clique com o botão direito nele > "Executar com o PowerShell"\n\nPronto - ele se instala sozinho e já começa a rodar. As instruções completas (inclusive o que fazer se der erro de permissão) estão nos comentários no topo do próprio arquivo.`);
 }
 
 let EDITAR_COMP_CODIGO = null;
@@ -781,6 +871,213 @@ function conectarStream(){
   }catch(e){ /* sem SSE, so atualiza no poll */ }
 }
 
+// ---------- NOC Zenith: painel do agente (ver agenteAcoes.js/suporteBot.js) - Master-only ----------
+function formatarRelativo(iso){
+  if(!iso) return '-';
+  const ms = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(ms/60000);
+  if(min < 1) return 'agora mesmo';
+  if(min < 60) return `há ${min} min`;
+  const h = Math.floor(min/60);
+  if(h < 24) return `há ${h}h`;
+  return `há ${Math.floor(h/24)}d`;
+}
+
+let AGENTE_ACOES = [];
+let AGENTE_APROVACOES = [];
+let EDITANDO_ACAO_ID = null;
+
+async function carregarAgente(){
+  await Promise.all([carregarAgenteAcoes(), carregarAgenteContexto(), carregarAgenteAprovacoes()]);
+}
+
+async function carregarAgenteAcoes(){
+  const res = await fetch('/api/agente/acoes');
+  if(!res.ok) return;
+  AGENTE_ACOES = await res.json();
+  renderAgenteAcoes();
+}
+function renderAgenteAcoes(){
+  const lista = document.getElementById('agente-acoes-lista');
+  if(!AGENTE_ACOES.length){ lista.innerHTML = '<p style="color:var(--muted);font-size:12.5px;">Nenhuma ação cadastrada ainda - clique em "Nova ação" pra ensinar o Beniboy.</p>'; return; }
+  lista.innerHTML = AGENTE_ACOES.map(a => `
+    <div class="agente-acao-item${a.ativo?'':' agente-acao-inativa'}">
+      <div class="agente-acao-topo">
+        <div class="agente-acao-nome">${a.tipo==='comando_maquina'?'💻':'⚙️'} ${escapeHtml(a.nome)}</div>
+        <div class="agente-acao-badges">
+          ${a.requerAprovacao ? '<span class="tipo-badge">requer aprovação</span>' : '<span class="tipo-badge" style="color:var(--ok);border-color:var(--ok);">executa direto</span>'}
+          ${a.ativo ? '' : '<span class="tipo-badge" style="color:var(--bad);border-color:var(--bad);">inativa</span>'}
+        </div>
+      </div>
+      <div class="agente-acao-desc">${escapeHtml(a.descricao)}</div>
+      <div class="agente-acao-acoes">
+        <button type="button" class="btn-mini" onclick="abrirModalEditarAcao('${escapeJs(a.id)}')">✏️ Editar</button>
+        <button type="button" class="btn-mini" style="color:var(--bad);" onclick="excluirAcao('${escapeJs(a.id)}')">🗑️ Excluir</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function onMudaTipoAcao(){
+  const tipo = document.querySelector('input[name=acao-tipo]:checked').value;
+  document.getElementById('acao-campo-comando').classList.toggle('hidden', tipo !== 'comando_maquina');
+  document.getElementById('acao-campo-sistema').classList.toggle('hidden', tipo !== 'acao_sistema');
+}
+function abrirModalNovaAcao(){
+  EDITANDO_ACAO_ID = null;
+  document.getElementById('acao-modal-titulo').textContent = '🤖 Nova ação';
+  document.getElementById('acao-nome').value = '';
+  document.getElementById('acao-descricao').value = '';
+  document.querySelector('input[name=acao-tipo][value=comando_maquina]').checked = true;
+  document.getElementById('acao-comando').value = '';
+  document.getElementById('acao-executor-sistema').value = 'criar_usuario_zenith';
+  document.getElementById('acao-requer-aprovacao').checked = true;
+  document.getElementById('acao-ativo').checked = true;
+  document.getElementById('acao-ativo-wrap').classList.add('hidden');
+  document.getElementById('acao-modal-status').classList.add('hidden');
+  onMudaTipoAcao();
+  document.getElementById('acao-overlay').classList.remove('hidden');
+}
+function abrirModalEditarAcao(id){
+  const a = AGENTE_ACOES.find(x => x.id === id);
+  if(!a) return;
+  EDITANDO_ACAO_ID = id;
+  document.getElementById('acao-modal-titulo').textContent = '✏️ Editar ação';
+  document.getElementById('acao-nome').value = a.nome;
+  document.getElementById('acao-descricao').value = a.descricao;
+  document.querySelector(`input[name=acao-tipo][value=${a.tipo}]`).checked = true;
+  document.getElementById('acao-comando').value = a.comando || '';
+  document.getElementById('acao-executor-sistema').value = a.executorSistema || 'criar_usuario_zenith';
+  document.getElementById('acao-requer-aprovacao').checked = a.requerAprovacao !== false;
+  document.getElementById('acao-ativo').checked = a.ativo !== false;
+  document.getElementById('acao-ativo-wrap').classList.remove('hidden');
+  document.getElementById('acao-modal-status').classList.add('hidden');
+  onMudaTipoAcao();
+  document.getElementById('acao-overlay').classList.remove('hidden');
+}
+function fecharModalAcao(){ document.getElementById('acao-overlay').classList.add('hidden'); }
+async function salvarAcao(){
+  const statusEl = document.getElementById('acao-modal-status');
+  statusEl.classList.add('hidden');
+  const tipo = document.querySelector('input[name=acao-tipo]:checked').value;
+  const payload = {
+    nome: document.getElementById('acao-nome').value,
+    descricao: document.getElementById('acao-descricao').value,
+    tipo,
+    comando: document.getElementById('acao-comando').value,
+    executorSistema: document.getElementById('acao-executor-sistema').value,
+    requerAprovacao: document.getElementById('acao-requer-aprovacao').checked,
+    ativo: document.getElementById('acao-ativo').checked,
+  };
+  const btn = document.getElementById('acao-modal-salvar');
+  btn.disabled = true;
+  try{
+    const url = EDITANDO_ACAO_ID ? '/api/agente/acoes/'+EDITANDO_ACAO_ID : '/api/agente/acoes';
+    const method = EDITANDO_ACAO_ID ? 'PUT' : 'POST';
+    const res = await fetch(url, {method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || 'Erro ao salvar.');
+    fecharModalAcao();
+    if(data.pendenteAprovacao){
+      alert('Enviado pra aprovação de outro Master.');
+      await carregarAgenteAprovacoes();
+    }else{
+      await carregarAgenteAcoes();
+    }
+  }catch(err){
+    statusEl.textContent = err.message;
+    statusEl.className = 'msg err';
+    statusEl.classList.remove('hidden');
+  }finally{
+    btn.disabled = false;
+  }
+}
+async function excluirAcao(id){
+  if(!confirm('Excluir essa ação? O Beniboy não vai mais poder usá-la.')) return;
+  const res = await fetch('/api/agente/acoes/'+id, {method:'DELETE'});
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok){ alert(data.error || 'Erro ao excluir.'); return; }
+  if(data.pendenteAprovacao){ alert('Pedido de exclusão enviado pra aprovação de outro Master.'); await carregarAgenteAprovacoes(); return; }
+  await carregarAgenteAcoes();
+}
+
+async function carregarAgenteContexto(){
+  const res = await fetch('/api/agente/contexto');
+  if(!res.ok) return;
+  const contexto = await res.json();
+  document.getElementById('agente-contexto-texto').value = contexto.texto || '';
+}
+async function salvarContextoAgente(){
+  const statusEl = document.getElementById('agente-contexto-status');
+  statusEl.classList.add('hidden');
+  const texto = document.getElementById('agente-contexto-texto').value;
+  try{
+    const res = await fetch('/api/agente/contexto', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({texto})});
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || 'Erro ao salvar.');
+    statusEl.className = 'msg ok';
+    statusEl.textContent = data.pendenteAprovacao ? 'Enviado pra aprovação de outro Master.' : 'Contexto salvo.';
+    if(!data.pendenteAprovacao) await carregarAgenteContexto();
+  }catch(err){
+    statusEl.className = 'msg err';
+    statusEl.textContent = err.message;
+  }
+  statusEl.classList.remove('hidden');
+}
+
+// mesmo padrao de carregarAprovacoesQa/renderAprovacoesQa em usuarios.html,
+// so que filtrando pro que e do agente (tipo comeca com 'agente.') - a
+// aprovacao continua aparecendo tambem em usuarios.html, nao tira de la
+async function carregarAgenteAprovacoes(){
+  const res = await fetch('/api/qa-aprovacoes');
+  if(!res.ok) return; // 403 se quem esta logado for QA Master
+  AGENTE_APROVACOES = (await res.json()).filter(a => a.tipo && a.tipo.startsWith('agente.'));
+  renderAgenteAprovacoes();
+  renderAgenteHistorico();
+}
+function renderAgenteAprovacoes(){
+  const lista = document.getElementById('agente-aprovacoes-lista');
+  const pendentes = AGENTE_APROVACOES.filter(a => a.status==='pendente' || a.status==='erro');
+  if(!pendentes.length){ lista.innerHTML = '<p style="color:var(--muted);font-size:12.5px;">Nenhuma ação do agente esperando aprovação agora.</p>'; return; }
+  lista.innerHTML = pendentes.map(a => `
+    <div class="qa-item">
+      <div class="qa-resumo">${escapeHtml(a.resumo||a.tipo)}</div>
+      <div class="qa-meta">${escapeHtml(a.criadoPorEmail||'')} · ${formatarRelativo(a.criadoEm)}</div>
+      ${a.status==='erro' ? `<div class="qa-erro">⚠️ Aprovado antes, mas falhou ao executar: ${escapeHtml(a.erroExecucao||'')} - pode tentar aprovar de novo.</div>` : ''}
+      <div class="qa-acoes">
+        <button type="button" class="btn-primary" style="padding:6px 12px;font-size:12px;" onclick="aprovarAgenteQa('${a.id}')">✅ Aprovar</button>
+        <button type="button" class="btn-mini" style="color:var(--bad);" onclick="rejeitarAgenteQa('${a.id}')">❌ Rejeitar</button>
+      </div>
+    </div>
+  `).join('');
+}
+function renderAgenteHistorico(){
+  const lista = document.getElementById('agente-historico-lista');
+  const decididos = AGENTE_APROVACOES
+    .filter(a => a.status==='aprovado' || a.status==='rejeitado')
+    .sort((a,b) => new Date(b.decididoEm||b.criadoEm) - new Date(a.decididoEm||a.criadoEm));
+  if(!decididos.length){ lista.innerHTML = '<p style="color:var(--muted);font-size:12.5px;">Nada no histórico ainda.</p>'; return; }
+  lista.innerHTML = decididos.slice(0, 30).map(a => `
+    <div class="qa-item">
+      <div class="qa-resumo">${a.status==='aprovado'?'✅':'❌'} ${escapeHtml(a.resumo||a.tipo)}</div>
+      <div class="qa-meta">${escapeHtml(a.criadoPorEmail||'')} · decidido por ${escapeHtml(a.decididoPorEmail||'-')} · ${formatarRelativo(a.decididoEm||a.criadoEm)}</div>
+      ${a.motivoRejeicao ? `<div class="qa-meta">Motivo: ${escapeHtml(a.motivoRejeicao)}</div>` : ''}
+    </div>
+  `).join('');
+}
+async function aprovarAgenteQa(id){
+  const res = await fetch('/api/qa-aprovacoes/'+id+'/aprovar', {method:'POST'});
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) alert(data.error || 'Erro ao aprovar.');
+  await carregarAgenteAprovacoes();
+}
+async function rejeitarAgenteQa(id){
+  const motivo = prompt('Motivo da rejeição (opcional):') || '';
+  const res = await fetch('/api/qa-aprovacoes/'+id+'/rejeitar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({motivo})});
+  if(!res.ok){ const data = await res.json().catch(()=>({})); alert(data.error || 'Erro ao rejeitar.'); return; }
+  await carregarAgenteAprovacoes();
+}
+
 async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
@@ -797,6 +1094,10 @@ async function boot(){
   }
   document.getElementById('root').classList.remove('hidden');
   await carregar();
+  if(me.role === 'master'){
+    document.getElementById('agente-root').classList.remove('hidden');
+    await carregarAgente();
+  }
   conectarStream();
   setInterval(() => { if(!document.hidden) carregar(); }, 30000);
   setInterval(atualizarTickerCarga, 15000);

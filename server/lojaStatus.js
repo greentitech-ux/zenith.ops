@@ -39,6 +39,12 @@ const db = require('./firestore');
 const { createCache } = require('./liveCache');
 
 const COLLECTION = db.collection('lojaStatus');
+// fila de comandos do agente (ver agenteAcoes.js) - histórico completo de
+// cada comando enviado a um computador tipo 'interno', com resultado. O
+// doc do computador guarda só o ponteiro pro comando em aberto
+// (comandoPendenteId) - evita precisar de índice composto no Firestore pra
+// achar o comando certo: já sabemos o id exato na hora do heartbeat
+const COMANDOS_COLLECTION = db.collection('lojaStatusComandos');
 
 const TIPOS_COMPUTADOR = ['atendimento', 'interno', 'abastecimento'];
 function tipoValido(tipo) { return TIPOS_COMPUTADOR.includes(tipo) ? tipo : 'atendimento'; }
@@ -119,8 +125,15 @@ async function heartbeat(codigo, posto, info) {
     userAgent: dados.userAgent || (atual && atual.userAgent) || null,
     abertoDesde: dados.abertoDesde || (atual && atual.abertoDesde) || null,
   }, { merge: true });
+  // só computador 'interno' processa comando do agente (ver
+  // agenteAcoes.js) - é o único tipo onde a tela nao é a propria
+  // funcionalidade, entao roda o NOCZenith sem gerenciar janela nenhuma
+  let comandoPendente = null;
+  if (atual && atual.tipo === 'interno' && atual.comandoPendenteId) {
+    comandoPendente = await entregarComandoPendente(codigo, posto || 'principal');
+  }
   cache.invalidar();
-  return { mensagemPendente };
+  return { mensagemPendente, comandoPendente };
 }
 
 function comOnline(doc) {
@@ -148,6 +161,7 @@ async function cadastrarComputador(codigo, nome, tipo) {
     codigo, posto, nome: nomeOk, tipo: tipoValido(tipo), anydeskId: null,
     ultimoHeartbeatEm: null, avisadoOffline: false, offlineDesde: null, mensagemPendente: null,
     ip: null, userAgent: null, abertoDesde: null, ipLocal: null, ipLocalEm: null,
+    comandoPendenteId: null,
   };
   await COLLECTION.doc(id).set(registro);
   cache.invalidar();
@@ -203,6 +217,77 @@ async function atualizarIpLocal(codigo, posto, ip) {
   return { codigo, posto, ipLocal: limpo };
 }
 
+// enfileira um comando (ver agenteAcoes.js executarAcaoDoAgente) pro
+// computador buscar no proximo heartbeat. So aceita computador tipo
+// 'interno' (unico que processa comando - ver heartbeat() acima) e so um
+// comando pendente/entregue por vez (evita perder o rastro de um
+// resultado se um segundo comando chegasse por cima)
+async function enfileirarComando(codigo, posto, comando, opcoes) {
+  const id = docIdFor(codigo, posto);
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Computador não encontrado.');
+  const atual = snap.data();
+  if (atual.tipo !== 'interno') throw new Error('Só computadores tipo "interno" processam comandos do agente.');
+  if (atual.comandoPendenteId) throw new Error('Já existe um comando pendente/entregue pra esse computador - aguarde terminar antes de mandar outro.');
+  const op = opcoes || {};
+  const comandoRef = COMANDOS_COLLECTION.doc();
+  const registro = {
+    id: comandoRef.id, codigo, posto, comando,
+    origem: op.origem || 'agente', acaoId: op.acaoId || null, aprovacaoId: op.aprovacaoId || null,
+    status: 'pendente', criadoEm: new Date().toISOString(),
+    entregueEm: null, executadoEm: null, resultado: null, erro: null,
+  };
+  await comandoRef.set(registro);
+  await ref.set({ comandoPendenteId: comandoRef.id }, { merge: true });
+  cache.invalidar();
+  return registro;
+}
+
+// chamado de dentro do heartbeat() - transacao sobre 1 documento so (nao
+// precisa de indice composto: o comandoPendenteId ja diz exatamente qual
+// comando buscar). Marca 'entregue' e devolve o texto do comando pro
+// NOCZenith rodar; se ja tiver sido entregue antes (heartbeat duplicado),
+// nao entrega de novo
+async function entregarComandoPendente(codigo, posto) {
+  const id = docIdFor(codigo, posto);
+  const ref = COLLECTION.doc(id);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return null;
+    const comandoPendenteId = snap.data().comandoPendenteId;
+    if (!comandoPendenteId) return null;
+    const comandoRef = COMANDOS_COLLECTION.doc(comandoPendenteId);
+    const comandoSnap = await tx.get(comandoRef);
+    if (!comandoSnap.exists) { tx.update(ref, { comandoPendenteId: null }); return null; }
+    const comando = comandoSnap.data();
+    if (comando.status !== 'pendente') return null;
+    tx.update(comandoRef, { status: 'entregue', entregueEm: new Date().toISOString() });
+    return { comandoId: comando.id, comando: comando.comando };
+  });
+}
+
+// o NOCZenith reporta o resultado (ver rota publica .../comando-resultado
+// em index.js) - fecha o ciclo e libera o computador pra aceitar um novo
+// comando
+async function marcarComandoExecutado(comandoId, dados) {
+  const d = dados || {};
+  const comandoRef = COMANDOS_COLLECTION.doc(comandoId);
+  const snap = await comandoRef.get();
+  if (!snap.exists) throw new Error('Comando não encontrado.');
+  const comando = snap.data();
+  const patch = {
+    status: d.erro ? 'erro' : 'executado',
+    executadoEm: new Date().toISOString(),
+    resultado: d.resultado || null,
+    erro: d.erro || null,
+  };
+  await comandoRef.update(patch);
+  await COLLECTION.doc(docIdFor(comando.codigo, comando.posto)).set({ comandoPendenteId: null }, { merge: true });
+  cache.invalidar();
+  return { ...comando, ...patch };
+}
+
 // fica esperando pro proximo heartbeat DESSE computador entregar (ver
 // heartbeat() acima) - nao exige o computador estar online agora
 async function enviarMensagem(codigo, posto, texto, deEmail) {
@@ -244,4 +329,5 @@ async function varrerAlertas() {
 module.exports = {
   heartbeat, listar, cadastrarComputador, editarComputador, removerComputador,
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR,
+  enfileirarComando, marcarComandoExecutado,
 };
