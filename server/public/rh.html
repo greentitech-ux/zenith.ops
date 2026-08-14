@@ -759,7 +759,7 @@ function cardAtivoHtml(f){
     <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · desde ${fmtData(f.dataAdmissao)}${f.contato?' · '+escapeHtml(f.contato):''}</div>
     <div class="sub">📸 ${totalCheckins} check-in${totalCheckins===1?'':'s'} no total</div>
     <div class="acoes">
-      <button type="button" class="link-btn" onclick="abrirEditar('${f.id}')">✏️ editar</button>
+      ${IS_MASTER ? `<button type="button" class="link-btn" onclick="abrirEditar('${f.id}')">✏️ editar</button>` : ''}
       ${f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 currículo</a>` : ''}
       ${f.status!=='inativo' ? `<button type="button" class="link-btn" onclick="copiarLinkColaborador('${f.id}')">🔗 link de auto-atendimento</button>` : ''}
       ${f.status!=='inativo' ? `<button type="button" class="link-btn" onclick="gerarNovoLinkColaborador('${f.id}')">🔄 gerar novo link</button>` : ''}

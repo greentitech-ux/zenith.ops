@@ -570,31 +570,25 @@ function letraChave(texto){
   return limpo || String(texto||'');
 }
 // itens: [{value, label, sufixoTexto?}]. Acima de 10 itens, ordena
-// alfabeticamente e insere um cabeçalho de letra antes do primeiro item de
-// cada uma, dentro de uma área com scroll (~10 linhas visíveis por vez).
-// Listas curtas continuam na ordem que vieram, sem letra nem scroll - não
-// tem o que rolar.
+// alfabeticamente e habilita scroll (~10 linhas visíveis por vez). Listas
+// curtas continuam na ordem que vieram, sem scroll - não tem o que rolar.
+// (O cabeçalho de letra A/B/C fica só na lista de Acessos Cadastrados -
+// ver renderUsers - pra não poluir o formulário com divisórias.)
 function accordionChecklist({ id, titulo, name, itens, checkedSet, ajuda }){
-  const comLetra = itens.length > 10;
-  const ordenados = comLetra
+  const comScroll = itens.length > 10;
+  const ordenados = comScroll
     ? [...itens].sort((a,b)=> letraChave(a.label).localeCompare(letraChave(b.label),'pt-BR',{sensitivity:'base'}))
     : itens;
-  let letraAtual = '';
   const linhas = ordenados.map(it=>{
-    let cabecalho = '';
-    if(comLetra){
-      const letra = (letraChave(it.label)[0]||'#').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-      if(letra !== letraAtual){ letraAtual = letra; cabecalho = `<div class="az-letra">${escapeHtml(letra)}</div>`; }
-    }
     const checked = checkedSet.has(it.value) ? 'checked' : '';
     const sufixo = it.sufixoTexto ? ` <small class="az-sufixo">${escapeHtml(it.sufixoTexto)}</small>` : '';
-    return `${cabecalho}<label><input type="checkbox" ${name?`name="${name}"`:''} value="${escapeHtml(String(it.value))}" ${checked}><span>${escapeHtml(it.label)}${sufixo}</span></label>`;
+    return `<label><input type="checkbox" ${name?`name="${name}"`:''} value="${escapeHtml(String(it.value))}" ${checked}><span>${escapeHtml(it.label)}${sufixo}</span></label>`;
   }).join('');
   const corpo = linhas || `<span style="color:var(--muted);font-size:11.5px;">Nenhuma opção disponível ainda.</span>`;
   const n = checkedSet.size;
   const headerExtra = `<span class="accordion-badge">${n ? n+' selecionad'+(n===1?'a':'as') : ''}</span>` +
     `<span class="legend-actions" onclick="event.stopPropagation()"><button type="button" onclick="marcarTodos('${id}',true)">Marcar todos</button><button type="button" onclick="marcarTodos('${id}',false)">Desmarcar todos</button></span>`;
-  const inner = `${ajuda ? `<div class="ajuda-fieldset">${ajuda}</div>` : ''}<div class="checks az-list ${comLetra?'az-scroll':''}" id="${id}">${corpo}</div>`;
+  const inner = `${ajuda ? `<div class="ajuda-fieldset">${ajuda}</div>` : ''}<div class="checks az-list ${comScroll?'az-scroll':''}" id="${id}">${corpo}</div>`;
   return accordionWrap(titulo, headerExtra, inner);
 }
 // monta as 5 categorias (Seções/Unidades/Cofre/Tipo de solicitação/Tags) de
@@ -1044,7 +1038,14 @@ function renderUsers(){
   const ordenados = FILTRO_USERS_STATUS ? apósBusca.filter(u=>statusUsuario(u)===FILTRO_USERS_STATUS) : apósBusca;
   document.getElementById('users-contagem').textContent =
     `Mostrando ${ordenados.length} de ${USERS.length} acesso${USERS.length===1?'':'s'}`;
+  // agrupa por letra inicial do email (mesmo critério de letraChave usado
+  // nos checklists de permissão) - cabeçalho A/B/C só aqui na lista geral,
+  // não mais nos formulários de cadastro/edição de permissão
+  let letraAtual = '';
   container.innerHTML = ordenados.map(u=>{
+    const letra = (letraChave(u.email)[0]||'#').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    let cabecalhoLetra = '';
+    if(letra !== letraAtual){ letraAtual = letra; cabecalhoLetra = `<div class="az-letra">${escapeHtml(letra)}</div>`; }
     const perms = u.permissions || {sections:[],unidades:[],vaultSubgroups:[],tiposSolicitacao:[]};
     const subgroupNames = (perms.vaultSubgroups||[]).map(caminhoSubgrupo);
     const isMaster = u.role==='master';
@@ -1075,7 +1076,7 @@ function renderUsers(){
          <div class="user-detail-linha"><b>Unidades:</b> ${tagList(perms.unidades, c=>UNIDADES_NOMES[c]||c)}</div>
          <div class="user-detail-linha"><b>Cofre (subgrupos):</b> ${tagList(subgroupNames)}</div>
          <div class="user-detail-linha"><b>Tipos (Central):</b> ${(perms.tiposSolicitacao||[]).length ? tagList(perms.tiposSolicitacao, t=>(TIPOS_SOLICITACAO.find(o=>o[0]===t)||[t,t])[1]) : '<span style="color:var(--muted);">todos</span>'}</div>`;
-    return `
+    return `${cabecalhoLetra}
     <div class="user-row">
       <span class="user-status-dot ${status.cor}" title="${status.texto}"></span>
       <div class="user-info">
