@@ -6,9 +6,8 @@
 const PDFDocument = require('pdfkit');
 
 // ---------- identidade da operadora do parque - troque so aqui quando o
-// nome/CNPJ/endereco oficial for confirmado (o usuario avisou que
-// "WOW PARK PATTEO" nao e mais o nome correto, o certo vem depois) ----------
-const EMPRESA_NOME = 'WOW PARK PATTEO LTDA';
+// nome/CNPJ/endereco oficial mudar de novo ----------
+const EMPRESA_NOME = 'Saltiverso';
 const EMPRESA_CNPJ = '54.673.305/0001-93';
 const EMPRESA_ENDERECO = 'Shopping Patteo Olinda';
 const EMPRESA_CIDADE = 'Olinda';
