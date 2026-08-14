@@ -73,7 +73,13 @@
   .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);}
 
   /* ---- grid de equipamentos ---- */
-  .equip-grid{display:flex;flex-wrap:wrap;gap:14px;justify-content:flex-start;align-content:flex-start;}
+  /* align-items:flex-start e essencial: o padrao da flexbox e "stretch"
+     (esticar todo item pra altura da linha), que em item com overflow:auto
+     trava a altura no tamanho hipotetico da linha em vez do conteudo real -
+     cortando o card (botoes de acao, texto) com scroll forcado por padrao.
+     Com flex-start cada card fica do tamanho do proprio conteudo; scroll so
+     aparece se a pessoa arrastar o card de proposito pra um tamanho menor */
+  .equip-grid{display:flex;flex-wrap:wrap;gap:14px;justify-content:flex-start;align-content:flex-start;align-items:flex-start;}
   .equip-tile{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:12px;padding:14px;width:272px;min-width:220px;min-height:184px;resize:both;overflow:auto;display:flex;flex-direction:column;gap:8px;transition:border-color .15s ease;}
   .equip-tile.status-online{border-left-color:var(--ok);}
   .equip-tile.status-offline{border-left-color:var(--bad);}
@@ -309,8 +315,11 @@ function resumoDispositivo(ua){
 }
 
 // tamanho de cada card (arrastado pelo canto) fica salvo no navegador, por
-// computador - assim o layout que a pessoa montou sobrevive a reload/poll
-function chaveTamanho(codigo, posto){ return `zenithEquipSize:${codigo}:${posto}`; }
+// computador - assim o layout que a pessoa montou sobrevive a reload/poll.
+// "V2" pq a v1 tinha um bug de layout (align-items:stretch cortava o card
+// com scroll por padrao) que podia ter salvo altura errada/pequena demais -
+// troca de chave garante que ninguem fique preso nesse tamanho ruim
+function chaveTamanho(codigo, posto){ return `zenithEquipSizeV2:${codigo}:${posto}`; }
 function tamanhoSalvo(codigo, posto){
   try{ return JSON.parse(localStorage.getItem(chaveTamanho(codigo, posto)) || 'null'); }catch(e){ return null; }
 }
@@ -375,15 +384,22 @@ function renderKpis(){
 
 // reconecta o ResizeObserver em cada card depois de todo re-render (o
 // innerHTML e substituido, entao os observers antigos morrem junto dos nos
-// removidos) - salva o tamanho arrastado pra sobreviver a atualizacao/poll
+// removidos) - salva o tamanho arrastado pra sobreviver a atualizacao/poll.
+// So grava depois do tamanho ficar "parado" 500ms (debounce) em vez de so
+// ignorar o 1o disparo: layout ainda se ajustando logo apos o render (fonte
+// carregando, reflow) podia disparar um 2o evento com um tamanho errado/
+// pequeno demais e esse ficava salvo pra sempre - com debounce, so o
+// tamanho final (depois de parar de mudar) e gravado, seja logo apos
+// renderizar ou depois de um arrasto de verdade da pessoa
 function observarTamanhos(){
   document.querySelectorAll('.equip-tile').forEach(el => {
     const codigo = el.dataset.codigo, posto = el.dataset.posto;
-    let primeiro = true;
-    const obs = new ResizeObserver(entries => {
-      if(primeiro){ primeiro = false; return; } // ignora o disparo inicial (so o tamanho ja aplicado)
-      const box = entries[0].contentRect;
-      salvarTamanho(codigo, posto, Math.round(el.offsetWidth), Math.round(el.offsetHeight));
+    let timer = null;
+    const obs = new ResizeObserver(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        salvarTamanho(codigo, posto, Math.round(el.offsetWidth), Math.round(el.offsetHeight));
+      }, 500);
     });
     obs.observe(el);
   });
