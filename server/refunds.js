@@ -38,7 +38,7 @@ async function create({
   dataVenda, horaVenda, valorEstornar, nomeCliente, telefoneCliente, anexos,
   pixChave, pixNomeTitular, pixBanco, observacaoCliente,
   requestedById, requestedByEmail, direcionadoParaId, direcionadoParaEmail,
-  numeroTicket, convertidoDeTipo, convertidoDeId,
+  numeroTicket, convertidoDeTipo, convertidoDeId, teste,
 }) {
   origem = ORIGENS.includes(origem) ? origem : 'interno';
 
@@ -78,6 +78,10 @@ async function create({
     // continua a historia do ticket
     convertidoParaTipo: null,
     convertidoParaId: null,
+    // marca visivel de "isso e teste" (ver users.js: qaMaster/qaUser) - o
+    // acesso QA sempre grava aqui pra quem for atender/aprovar na Central
+    // saber na hora que aquele ticket nao e um caso real
+    teste: !!teste,
     origem,
     pedidoId: pedidoId || null,
     unidade: unidade || null,
@@ -355,6 +359,7 @@ async function converterParaSolicitacao(id, novoTipo, dadosExtras, porEmail) {
     numeroTicket: atual.numeroTicket,
     convertidoDeTipo: 'estorno',
     convertidoDeId: atual.id,
+    teste: atual.teste,
   });
   await ref.update({
     status: 'CONVERTIDO',

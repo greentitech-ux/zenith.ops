@@ -71,6 +71,13 @@
   .badge.horario{background:#132029;color:var(--accent);border:1px solid var(--line);}
   .badge.admin{background:#2a1a3d;color:#c299ff;border:1px solid var(--line);}
   .badge.catalogo{background:#132a1a;color:#5fd68a;border:1px solid var(--line);}
+  .badge.qa{background:#3d0f0f;color:#ff8080;border:1px solid var(--line);}
+  .qa-badge{position:absolute;top:-4px;right:-4px;background:var(--bad);color:#fff;font-family:var(--mono);font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;line-height:1;}
+  .qa-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:8px;}
+  .qa-item .qa-resumo{font-size:13px;font-weight:600;}
+  .qa-item .qa-meta{font-size:11px;color:var(--muted);margin-top:4px;}
+  .qa-item .qa-acoes{display:flex;gap:8px;margin-top:10px;}
+  .qa-item .qa-erro{font-size:11.5px;color:var(--bad);margin-top:6px;}
   .badge.loja{background:#12303a;color:var(--accent);border:1px solid var(--line);}
   .badge.gerente{background:#0f2f22;color:var(--ok);border:1px solid var(--line);}
   .badge.tecnico{background:#1e2733;color:#8ab4f8;border:1px solid var(--line);}
@@ -160,6 +167,7 @@
     </div>
     <div class="header-nav">
       <div class="nav-actions">
+        <button class="btn-notif hidden" id="btn-qa-aprovacoes" onclick="abrirAprovacoesQa()" title="Ações de QA Master esperando aprovação" style="cursor:pointer;position:relative;">🧪<span id="qa-aprovacoes-badge" class="qa-badge hidden">0</span></button>
         <button class="btn-notif" onclick="location.reload()" title="Atualizar página">🔄</button>
         <div class="nav-divider"></div>
         <button class="btn-notif btn-sair" onclick="logout()" title="Sair" style="cursor:pointer;">🚪</button>
@@ -216,7 +224,10 @@
 
 <div id="root" class="hidden">
   <div class="panel">
-    <h2>Criar novo acesso</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+      <h2 style="margin:0;">Criar novo acesso</h2>
+      <button type="button" class="back" style="cursor:pointer;" onclick="abrirCriarQaMaster()">🧪 Criar acesso QA Master</button>
+    </div>
     <form class="create" id="create-form">
       <label>Email<input type="email" id="c-email" required></label>
       <label>Usuário (login curto, opcional - ex: "jn")<input type="text" id="c-username" pattern="[a-z0-9._-]{2,30}" title="Só letras minúsculas, números, ponto, hífen ou underline (2 a 30 caracteres)"></label>
@@ -370,6 +381,30 @@
   </div>
 </div>
 
+<div class="overlay" id="qa-aprovacoes-overlay">
+  <div class="modal" style="max-width:520px;">
+    <h3 style="margin:0;">🧪 Ações de QA Master esperando aprovação</h3>
+    <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;">Um acesso QA Master tem 100% de acesso, mas exclusões e configuração global (Usuários/Grupos/Unidades/Cofre) ficam paradas aqui até você aprovar ou rejeitar.</p>
+    <div id="qa-aprovacoes-lista" style="margin-top:12px;"></div>
+    <button type="button" class="back" style="margin-top:6px;cursor:pointer;" onclick="fecharAprovacoesQa()">Fechar</button>
+  </div>
+</div>
+
+<div class="overlay" id="qa-master-overlay">
+  <form class="modal" id="qa-master-form" style="max-width:380px;">
+    <h3 style="margin:0;">🧪 Criar acesso QA Master</h3>
+    <p style="font-size:11.5px;color:var(--muted);margin:6px 0 12px;">Acesso 100% Master, mas exclusões e configuração global (Usuários/Grupos/Unidades/Cofre) sempre vão pra fila de aprovação - nunca executam direto.</p>
+    <label>Email<input type="email" id="qm-email" required></label>
+    <label>Usuário (login curto, opcional)<input type="text" id="qm-username" pattern="[a-z0-9._-]{2,30}" title="Só letras minúsculas, números, ponto, hífen ou underline (2 a 30 caracteres)"></label>
+    <label>Senha temporária (mín. 8 caracteres)<input type="text" id="qm-password" required minlength="8"></label>
+    <p class="err hidden" id="qa-master-err"></p>
+    <div class="modal-actions">
+      <button type="button" id="qa-master-cancel">Cancelar</button>
+      <button type="submit" class="primary">Criar</button>
+    </div>
+  </form>
+</div>
+
 <div class="overlay" id="perm-overlay">
   <form class="modal" id="perm-form">
     <h3 id="perm-title">Editar permissões</h3>
@@ -507,6 +542,8 @@ let VAULT_GROUPS = [];
 let VAULT_SUBGROUPS = [];
 let USERS = [];
 let EDITING_USER = null;
+let ME_IS_QA_MASTER = false;
+let QA_APROVACOES = [];
 
 function checksHtml(name, options, valueFn, labelFn, checkedSet){
   return options.map(opt=>{
@@ -572,7 +609,7 @@ function caminhoSubgrupo(id){
 // Acoes marcar cada tag uma por uma ----------
 const CARGOS = [ ['','Sem cargo'], ['loja','🏬 Loja'], ['gerente','👔 Gerente'], ['assistente-gerente','🧑‍💼 Ass. Ger'], ['tecnico','🔧 Técnico'], ['suporte','🎧 Suporte'], ['manutencao','🛠️ Manutenção'], ['operador','👷 Operador'] ];
 function tagsFieldsetHtml(prefixo, tags){
-  tags = tags || { cargo:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, podeRhTodasUnidades:false, podeRhCadastrarEfetivado:false, sessaoLonga:false };
+  tags = tags || { cargo:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, podeRhTodasUnidades:false, podeRhCadastrarEfetivado:false, sessaoLonga:false, qaUser:false };
   const cargoHtml = CARGOS.map(([v,l])=>{
     const marcado = (tags.cargo||'')===v;
     return `<label><input type="radio" name="${prefixo}-cargo" value="${v}" ${marcado?'checked':''}> ${l}</label>`;
@@ -589,6 +626,7 @@ function tagsFieldsetHtml(prefixo, tags){
       <label><input type="checkbox" id="${prefixo}-tag-rh-todas-unidades" ${tags.podeRhTodasUnidades?'checked':''}> 🧑‍💼 RH (todas as unidades)</label>
       <label><input type="checkbox" id="${prefixo}-tag-rh-cadastrar-efetivado" ${tags.podeRhCadastrarEfetivado?'checked':''}> 🧑‍💼 RH: pode cadastrar efetivado direto</label>
       <label><input type="checkbox" id="${prefixo}-tag-sessao-longa" ${tags.sessaoLonga?'checked':''}> 🔒 Manter sempre conectado (30 dias — login de loja/terminal)</label>
+      <label title="Sempre vê/cria todos os tipos de solicitação na Central, e tudo que criar sai marcado TESTE"><input type="checkbox" id="${prefixo}-tag-qa-user" ${tags.qaUser?'checked':''}> 🧪 QA User (testes na Central, marca TESTE)</label>
     </div>`;
 }
 function lerTagsForm(prefixo){
@@ -601,8 +639,13 @@ function lerTagsForm(prefixo){
     podeRhTodasUnidades: document.getElementById(prefixo+'-tag-rh-todas-unidades').checked,
     podeRhCadastrarEfetivado: document.getElementById(prefixo+'-tag-rh-cadastrar-efetivado').checked,
     sessaoLonga: document.getElementById(prefixo+'-tag-sessao-longa').checked,
+    qaUser: document.getElementById(prefixo+'-tag-qa-user').checked,
   };
 }
+// devolve true se alguma das tags foi desviada pra fila de aprovação QA (ver
+// desviarSeQaMaster em index.js) em vez de aplicada na hora - quem chama usa
+// isso pra avisar a pessoa, já que um 202 conta como "ok" pro fetch mas não
+// significa que a mudança já valeu
 async function salvarTagsUsuario(id, tags){
   const respostas = await Promise.all([
     fetch('/api/users/'+id+'/cargo', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cargo: tags.cargo})}),
@@ -613,10 +656,14 @@ async function salvarTagsUsuario(id, tags){
     fetch('/api/users/'+id+'/rh-todas-unidades', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeRhTodasUnidades: tags.podeRhTodasUnidades})}),
     fetch('/api/users/'+id+'/rh-cadastrar-efetivado', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeRhCadastrarEfetivado: tags.podeRhCadastrarEfetivado})}),
     fetch('/api/users/'+id+'/sessao-longa', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({sessaoLonga: tags.sessaoLonga})}),
+    fetch('/api/users/'+id+'/qa-user', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({qaUser: tags.qaUser})}),
   ]);
+  let algumPendente = false;
   for(const r of respostas){
+    if(r.status===202){ algumPendente = true; continue; }
     if(!r.ok){ const d = await r.json().catch(()=>({})); throw new Error(d.error || 'Erro ao salvar as tags.'); }
   }
+  return algumPendente;
 }
 
 async function boot(){
@@ -625,6 +672,13 @@ async function boot(){
   const me = await meRes.json();
   if(me.role!=='master'){ document.getElementById('sem-acesso').classList.remove('hidden'); return; }
   document.getElementById('root').classList.remove('hidden');
+  // QA Master não pode aprovar/rejeitar a própria fila (ver requireMasterDeVerdade
+  // em index.js) - o botão só faz sentido pra um Master de verdade
+  ME_IS_QA_MASTER = !!me.isQaMaster;
+  if(!ME_IS_QA_MASTER){
+    document.getElementById('btn-qa-aprovacoes').classList.remove('hidden');
+    carregarAprovacoesQa();
+  }
 
   const [unidades, groups, subgroups] = await Promise.all([
     fetch('/api/meta/unidades').then(r=>r.json()),
@@ -968,6 +1022,8 @@ function renderUsers(){
       ? { cor:'bad', texto:'bloqueado' }
       : (u.active ? { cor:'ok', texto:'ativo' } : { cor:'off', texto:'desativado' });
     const tags = [`<span class="badge ${u.role}">${u.role}</span>`];
+    if (u.qaMaster) tags.push(`<span class="badge qa" title="Master de teste - 100% do acesso, mas exclusões e configuração global (Usuários/Grupos/Unidades/Cofre) ficam paradas esperando um Master de verdade aprovar">🧪 QA Master</span>`);
+    if (u.qaUser) tags.push(`<span class="badge qa" title="Sempre vê/cria todos os tipos de solicitação na Central; tudo que criar sai marcado TESTE">🧪 QA User</span>`);
     if (u.cargo) tags.push(`<span class="badge ${u.cargo}" title="Tag de cargo - também define a tela inicial da pessoa ao entrar no app">${({loja:'🏬 loja', gerente:'👔 gerente', tecnico:'🔧 técnico', suporte:'🎧 suporte', manutencao:'🛠️ manutenção'})[u.cargo]||u.cargo}</span>`);
     if (u.isAdmin) tags.push(`<span class="badge admin" title="Pode aprovar/rejeitar solicitações da Central, junto com o Master">⭐ admin</span>`);
     if (u.podeCatalogoEstoque) tags.push(`<span class="badge catalogo" title="Pode gerenciar o Catálogo do Estoque">📦 catálogo</span>`);
@@ -979,7 +1035,7 @@ function renderUsers(){
     if (horario && horario.ativo) tags.push(`<span class="badge horario" title="Acesso liberado só nesse intervalo, todo dia">🕐 ${horario.inicio}–${horario.fim}</span>`);
     tags.push(`<span class="badge ${u.online?'on':'off'}" style="cursor:pointer;" onclick="abrirSessoes('${u.id}')" title="${u.ultimaAtividadeEm ? 'Última atividade: '+formatarRelativo(u.ultimaAtividadeEm) : 'Nunca fez login'} - clique pra ver os locais">${u.online?'🟢':'⚪'} ${u.sessoesAtivas} ${u.sessoesAtivas===1?'local':'locais'}</span>`);
     const detalhe = isMaster
-      ? `<div class="user-detail-linha">Master - acesso total, sem restrições.</div>
+      ? `<div class="user-detail-linha">${u.qaMaster ? '🧪 QA Master - 100% do acesso de um Master, mas exclusões e configuração global (Usuários/Grupos/Unidades/Cofre) ficam paradas esperando um Master de verdade aprovar (ver "🧪 Aprovações QA" no topo).' : 'Master - acesso total, sem restrições.'}</div>
          <div class="user-detail-linha"><button type="button" class="link-btn" onclick="alternarSessaoLongaMaster('${u.id}', ${!u.sessaoLonga})">${u.sessaoLonga ? '🔓 desativar "sempre conectado"' : '🔒 manter sempre conectado (30 dias, não desloga sozinho)'}</button></div>`
       : `<div class="user-detail-linha"><b>Status:</b> ${status.texto}${u.locked ? ' (após 3 tentativas de senha erradas - use "Desbloquear" pra destravar sem mudar a senha)' : ''}</div>
          <div class="user-detail-linha"><b>Seções:</b> ${tagList(perms.sections)}</div>
@@ -1124,6 +1180,81 @@ async function encerrarSessao(userId, sessionId){
   await carregarUsuarios();
 }
 
+// ---------- Fila de aprovação QA Master (ver qaAprovacoes.js/index.js) ----------
+async function carregarAprovacoesQa(){
+  const res = await fetch('/api/qa-aprovacoes');
+  if(!res.ok) return; // 403 se por acaso quem esta logado for QA Master
+  QA_APROVACOES = await res.json();
+  const pendentes = QA_APROVACOES.filter(a=>a.status==='pendente');
+  const badge = document.getElementById('qa-aprovacoes-badge');
+  if(pendentes.length){ badge.textContent = pendentes.length; badge.classList.remove('hidden'); }
+  else badge.classList.add('hidden');
+  renderAprovacoesQa();
+}
+function renderAprovacoesQa(){
+  const lista = document.getElementById('qa-aprovacoes-lista');
+  const pendentes = QA_APROVACOES.filter(a=>a.status==='pendente'||a.status==='erro');
+  if(!pendentes.length){ lista.innerHTML = '<p style="color:var(--muted);font-size:12.5px;text-align:center;padding:16px 0;">Nenhuma ação esperando aprovação agora.</p>'; return; }
+  lista.innerHTML = pendentes.map(a=>`
+    <div class="qa-item">
+      <div class="qa-resumo">${escapeHtml(a.resumo||a.tipo)}</div>
+      <div class="qa-meta">${escapeHtml(a.criadoPorEmail||'')} · ${formatarRelativo(a.criadoEm)}</div>
+      ${a.status==='erro' ? `<div class="qa-erro">⚠️ Aprovado antes, mas falhou ao executar: ${escapeHtml(a.erroExecucao||'')} - pode tentar aprovar de novo.</div>` : ''}
+      <div class="qa-acoes">
+        <button type="button" class="primary" style="padding:6px 12px;font-size:12px;" onclick="aprovarQa('${a.id}')">✅ Aprovar</button>
+        <button type="button" class="danger" style="padding:6px 12px;font-size:12px;" onclick="rejeitarQa('${a.id}')">❌ Rejeitar</button>
+      </div>
+    </div>
+  `).join('');
+}
+function abrirAprovacoesQa(){ document.getElementById('qa-aprovacoes-overlay').classList.add('show'); carregarAprovacoesQa(); }
+function fecharAprovacoesQa(){ document.getElementById('qa-aprovacoes-overlay').classList.remove('show'); }
+document.getElementById('qa-aprovacoes-overlay').addEventListener('click', (e)=>{ if(e.target.id==='qa-aprovacoes-overlay') fecharAprovacoesQa(); });
+async function aprovarQa(id){
+  const res = await fetch('/api/qa-aprovacoes/'+id+'/aprovar', {method:'POST'});
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok){ alert(data.error||'Erro ao aprovar.'); }
+  await carregarAprovacoesQa();
+  await carregarUsuarios();
+}
+async function rejeitarQa(id){
+  const motivo = prompt('Motivo da rejeição (opcional):') || '';
+  const res = await fetch('/api/qa-aprovacoes/'+id+'/rejeitar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({motivo})});
+  if(!res.ok){ const data = await res.json().catch(()=>({})); alert(data.error||'Erro ao rejeitar.'); return; }
+  await carregarAprovacoesQa();
+}
+
+// ---------- Criar acesso QA Master ----------
+function abrirCriarQaMaster(){
+  document.getElementById('qa-master-form').reset();
+  document.getElementById('qa-master-err').classList.add('hidden');
+  document.getElementById('qa-master-overlay').classList.add('show');
+}
+function fecharCriarQaMaster(){ document.getElementById('qa-master-overlay').classList.remove('show'); }
+document.getElementById('qa-master-cancel').addEventListener('click', fecharCriarQaMaster);
+document.getElementById('qa-master-overlay').addEventListener('click', (e)=>{ if(e.target.id==='qa-master-overlay') fecharCriarQaMaster(); });
+document.getElementById('qa-master-form').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const errEl = document.getElementById('qa-master-err');
+  errEl.classList.add('hidden');
+  const payload = {
+    email: document.getElementById('qm-email').value,
+    username: document.getElementById('qm-username').value,
+    password: document.getElementById('qm-password').value,
+  };
+  try{
+    const res = await fetch('/api/users/qa-master', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || 'Erro ao criar acesso.');
+    fecharCriarQaMaster();
+    if(data.pendenteAprovacao){ alert('Pedido de criação enviado pra aprovação de outro Master.'); await carregarAprovacoesQa(); }
+    else await carregarUsuarios();
+  }catch(err){
+    errEl.textContent = err.message;
+    errEl.classList.remove('hidden');
+  }
+});
+
 document.getElementById('create-form').addEventListener('submit', async (e)=>{
   e.preventDefault();
   const errEl = document.getElementById('create-err');
@@ -1144,13 +1275,15 @@ document.getElementById('create-form').addEventListener('submit', async (e)=>{
     const res = await fetch('/api/users', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
     const data = await res.json();
     if(!res.ok) throw new Error(data.error || 'Erro ao criar acesso.');
-    await salvarTagsUsuario(data.id, tags);
+    let pendente = !!data.pendenteAprovacao;
+    if(!pendente) pendente = await salvarTagsUsuario(data.id, tags);
     document.getElementById('create-form').reset();
     document.getElementById('c-sections').innerHTML = checksHtml('sections', SECTIONS, o=>o[0], o=>o[1], new Set());
     document.getElementById('c-unidades').innerHTML = unidadesChecksHtml(new Set());
     document.getElementById('c-groups').innerHTML = subgroupChecksHtml(new Set());
     document.getElementById('c-tipos-solicitacao').innerHTML = checksHtml('tiposSolicitacao', TIPOS_SOLICITACAO, o=>o[0], o=>o[1], new Set());
     document.getElementById('c-tags').innerHTML = tagsFieldsetHtml('c', null);
+    if(pendente){ alert('Esse acesso é QA Master: a criação/tags foram enviadas pra aprovação de outro Master (ver 🧪 no topo).'); await carregarAprovacoesQa(); }
     await carregarUsuarios();
   }catch(err){ errEl.textContent = err.message; errEl.classList.remove('hidden'); }
 });
@@ -1220,11 +1353,23 @@ document.getElementById('perm-form').addEventListener('submit', async (e)=>{
     const res = await fetch('/api/users/'+EDITING_USER+'/permissions', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({permissions})});
     const data = await res.json();
     if(!res.ok) throw new Error(data.error || 'Erro ao salvar.');
-    await salvarTagsUsuario(EDITING_USER, lerTagsForm('p'));
+    let pendente = res.status===202;
+    const pendenteTags = await salvarTagsUsuario(EDITING_USER, lerTagsForm('p'));
+    pendente = pendente || pendenteTags;
     permOverlay.classList.remove('show');
+    if(pendente){ alert('Esse acesso é QA Master: as mudanças foram enviadas pra aprovação de outro Master (ver 🧪 no topo).'); await carregarAprovacoesQa(); }
     await carregarUsuarios();
   }catch(err){ errEl.textContent = err.message; errEl.classList.remove('hidden'); }
 });
+
+// alerta padrão quando a ação foi desviada pra fila de aprovação QA em vez
+// de aplicada na hora (ver desviarSeQaMaster em index.js - responde 202)
+function avisarSePendenteQa(res){
+  if(res.status!==202) return false;
+  alert('Esse acesso é QA Master: essa ação foi enviada pra aprovação de outro Master (ver 🧪 no topo).');
+  carregarAprovacoesQa();
+  return true;
+}
 
 async function resetarSenha(id){
   const nova = prompt('Nova senha temporária (mín. 8 caracteres) - isso também desbloqueia o acesso, se estiver bloqueado:');
@@ -1232,7 +1377,7 @@ async function resetarSenha(id){
   const res = await fetch('/api/users/'+id+'/reset-password', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password:nova})});
   const data = await res.json();
   if(!res.ok){ alert(data.error||'Erro ao trocar senha.'); return; }
-  alert('Senha atualizada.');
+  if(!avisarSePendenteQa(res)) alert('Senha atualizada.');
   await carregarUsuarios();
 }
 
@@ -1245,7 +1390,7 @@ async function desbloquearAcesso(id){
   const res = await fetch('/api/users/'+id+'/desbloquear', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({pedirTrocaSenha})});
   const data = await res.json();
   if(!res.ok){ alert(data.error||'Erro ao desbloquear.'); return; }
-  alert('Acesso desbloqueado.');
+  if(!avisarSePendenteQa(res)) alert('Acesso desbloqueado.');
   await carregarUsuarios();
 }
 
@@ -1255,11 +1400,13 @@ async function definirUsername(id, atual){
   const res = await fetch('/api/users/'+id+'/username', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username:novo})});
   const data = await res.json();
   if(!res.ok){ alert(data.error||'Erro ao definir o usuário.'); return; }
+  avisarSePendenteQa(res);
   await carregarUsuarios();
 }
 
 async function alternarAtivo(id, active){
-  await fetch('/api/users/'+id+'/active', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({active})});
+  const res = await fetch('/api/users/'+id+'/active', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({active})});
+  avisarSePendenteQa(res);
   await carregarUsuarios();
 }
 
@@ -1285,6 +1432,7 @@ async function aplicarUsernamesEmMassa(){
   const res = await fetch('/api/users/usernames-em-massa', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({itens})});
   const data = await res.json();
   if(!res.ok){ resultadoEl.innerHTML = `<p class="err">${data.error||'Erro ao aplicar em massa.'}</p>`; return; }
+  if(res.status===202){ resultadoEl.innerHTML = `<p style="color:var(--muted);font-size:12px;">Esse acesso é QA Master: enviado pra aprovação de outro Master (ver 🧪 no topo).</p>`; carregarAprovacoesQa(); return; }
   resultadoEl.innerHTML = `<div class="tablewrap"><table style="min-width:360px;"><thead><tr><th>Email</th><th>Usuário</th><th>Resultado</th></tr></thead><tbody>${
     data.map(r=>`<tr><td>${escapeHtml(r.email)}</td><td>${escapeHtml(r.username||'')}</td><td>${r.ok?'<span class="badge on">ok</span>':`<span class="badge off" title="${escapeHtml(r.erro||'')}">${escapeHtml(r.erro||'erro')}</span>`}</td></tr>`).join('')
   }</tbody></table></div>`;
@@ -1293,7 +1441,8 @@ async function aplicarUsernamesEmMassa(){
 
 async function excluirUsuario(id, email){
   if(!confirm(`Excluir o acesso de ${email}?`)) return;
-  await fetch('/api/users/'+id, {method:'DELETE'});
+  const res = await fetch('/api/users/'+id, {method:'DELETE'});
+  avisarSePendenteQa(res);
   await carregarUsuarios();
 }
 

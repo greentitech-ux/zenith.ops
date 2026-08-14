@@ -65,6 +65,7 @@ const rhCheckin = require('./rhCheckin');
 const rhAdvertencias = require('./rhAdvertencias');
 const unidadesExtras = require('./unidades');
 const lojaStatus = require('./lojaStatus');
+const qaAprovacoes = require('./qaAprovacoes');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -816,6 +817,8 @@ app.get('/api/me', (req, res) => {
     podeRhTodasUnidades: req.podeRhTodasUnidades,
     podeRhCadastrarEfetivado: req.podeRhCadastrarEfetivado,
     precisaTrocarSenha: !!req.user.precisaTrocarSenha,
+    isQaMaster: req.isQaMaster,
+    isQaUser: req.isQaUser,
   });
 });
 
@@ -1622,10 +1625,9 @@ function codigosUnidadesFixas() {
 
 app.post('/api/meta/unidades-extras', auth.requireMaster, async (req, res) => {
   try {
-    const registro = await unidadesExtras.criar({
-      codigo: req.body.codigo, nome: req.body.nome, porEmail: req.user.email,
-    }, codigosUnidadesFixas());
-    res.json(registro);
+    const dados = { codigo: req.body.codigo, nome: req.body.nome, porEmail: req.user.email };
+    if (await desviarSeQaMaster(req, res, 'unidadesExtras.criar', `Cadastrar unidade: ${req.body?.nome || req.body?.codigo || ''}`, { dados })) return;
+    res.json(await unidadesExtras.criar(dados, codigosUnidadesFixas()));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -1633,6 +1635,7 @@ app.post('/api/meta/unidades-extras', auth.requireMaster, async (req, res) => {
 
 app.patch('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'unidadesExtras.editar', `Editar unidade ${req.params.id}`, { id: req.params.id, nome: req.body.nome })) return;
     res.json(await unidadesExtras.atualizar(req.params.id, { nome: req.body.nome }));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1641,6 +1644,7 @@ app.patch('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res) 
 
 app.delete('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'unidadesExtras.excluir', `Excluir unidade ${req.params.id}`, { id: req.params.id })) return;
     res.json(await unidadesExtras.remover(req.params.id));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1825,6 +1829,7 @@ app.post('/api/push/subscribe', async (req, res) => {
     userId: req.user.id,
     isMaster: req.isMaster,
     isAdmin: req.isAdmin,
+    isQaMaster: req.isQaMaster,
     podeRhTodasUnidades: req.podeRhTodasUnidades,
     unidades: req.isMaster ? null : (req.permissions.unidades || []),
     sections: req.isMaster ? null : (req.permissions.sections || []),
@@ -1856,7 +1861,12 @@ function subgruposPermitidos(req) {
 // Master marca tipos especificos e que a Central passa a mostrar so esses
 // (ex: um Admin que so cuida de Suporte de TI nao precisa ver Estorno/Compra)
 function tiposSolicitacaoPermitidos(req) {
-  if (req.isMaster) return null;
+  // QA User sempre ve/cria todos os tipos, independente do que o Master
+  // tenha restringido pra ele (pedido explicito: "autorização pra criar
+  // todos os tipos de solicitações") - tudo que ele criar sai marcado
+  // "TESTE" (ver solicitacoes.create/refunds.create), entao liberar o tipo
+  // aqui nao expoe nada real, so testa o fluxo inteiro
+  if (req.isMaster || req.isQaUser) return null;
   const tipos = (req.permissions.tiposSolicitacao || []);
   return tipos.length ? new Set(tipos) : null;
 }
@@ -1874,6 +1884,7 @@ app.get('/api/vault/groups', requireSection('cofre'), async (req, res) => {
 
 app.post('/api/vault/groups', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'vaultGroups.criar', `Criar grupo do Cofre: ${req.body?.name || ''}`, { name: req.body.name })) return;
     res.json(await vaultGroups.create(req.body.name));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1882,6 +1893,7 @@ app.post('/api/vault/groups', auth.requireMaster, async (req, res) => {
 
 app.put('/api/vault/groups/:id', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'vaultGroups.editar', `Editar grupo do Cofre ${req.params.id}`, { id: req.params.id, name: req.body.name })) return;
     res.json(await vaultGroups.rename(req.params.id, req.body.name));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1890,6 +1902,7 @@ app.put('/api/vault/groups/:id', auth.requireMaster, async (req, res) => {
 
 app.delete('/api/vault/groups/:id', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'vaultGroups.excluir', `Excluir grupo do Cofre ${req.params.id}`, { id: req.params.id })) return;
     await vaultGroups.remove(req.params.id);
     res.json({ ok: true });
   } catch (err) {
@@ -1908,6 +1921,7 @@ app.get('/api/vault/subgroups', requireSection('cofre'), async (req, res) => {
 
 app.post('/api/vault/subgroups', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'vaultSubgroups.criar', `Criar subgrupo do Cofre: ${req.body?.name || ''}`, { groupId: req.body.groupId, name: req.body.name })) return;
     res.json(await vaultSubgroups.create(req.body.groupId, req.body.name));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1916,6 +1930,7 @@ app.post('/api/vault/subgroups', auth.requireMaster, async (req, res) => {
 
 app.put('/api/vault/subgroups/:id', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'vaultSubgroups.editar', `Editar subgrupo do Cofre ${req.params.id}`, { id: req.params.id, name: req.body.name })) return;
     res.json(await vaultSubgroups.rename(req.params.id, req.body.name));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1924,6 +1939,7 @@ app.put('/api/vault/subgroups/:id', auth.requireMaster, async (req, res) => {
 
 app.delete('/api/vault/subgroups/:id', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'vaultSubgroups.excluir', `Excluir subgrupo do Cofre ${req.params.id}`, { id: req.params.id })) return;
     await vaultSubgroups.remove(req.params.id);
     res.json({ ok: true });
   } catch (err) {
@@ -2076,6 +2092,7 @@ app.post('/api/refund-requests', requireSection('monitor'), async (req, res) => 
       requestedByEmail: req.user.email,
       direcionadoParaId,
       direcionadoParaEmail,
+      teste: req.isQaMaster || req.isQaUser,
     });
     broadcast('refund-requested', registro, 'monitor');
     broadcast('refund-requested', registro, 'solicitacoes');
@@ -2225,9 +2242,126 @@ app.get('/api/users/relatorio.:formato(csv|pdf)', auth.requireMaster, async (req
   reportUtil.writePDF(res, { titulo: 'Usuários · Acessos Cadastrados', subtitulo: `Exportado em ${reportUtil.agoraBrasiliaFmt()} · ${linhas.length} acesso(s)`, colunas, linhas, nomeArquivo: reportUtil.nomeArquivoComData('usuarios-acessos') });
 });
 
+// ---------- QA Master: fila de aprovação (ver qaAprovacoes.js) ----------
+// QA Master (users.js: qaMaster) tem 100% do acesso de um Master de
+// verdade - todas as rotas abaixo continuam abertas pra ele (auth.requireMaster
+// deixa passar igual). A UNICA diferenca e nas rotas "sensiveis" (exclusões +
+// configuração global: Usuários/Grupos/Unidades/estrutura do Cofre) - em vez
+// de executar a ação na hora, ela fica PARADA aqui até um Master de verdade
+// aprovar. EXECUTORES_QA é o catálogo de "o que fazer de verdade quando
+// aprovar", indexado pelo mesmo `tipo` gravado na hora de desviar - assim a
+// ação sobrevive até um restart do servidor (fica só o tipo+payload
+// salvos, nunca uma função/closure).
+const EXECUTORES_QA = {
+  'usuarios.criar': (p) => users.create(p),
+  'usuarios.criarQaMaster': (p) => users.createQaMaster(p),
+  'usuarios.permissoes': (p) => users.updatePermissions(p.id, p.permissions),
+  'usuarios.ativo': (p) => users.setActive(p.id, p.active),
+  'usuarios.horario': (p) => users.updateHorarioPermitido(p.id, p.horarioPermitido),
+  'usuarios.isAdmin': (p) => users.updateIsAdmin(p.id, p.isAdmin),
+  'usuarios.qaUser': (p) => users.updateQaUser(p.id, p.qaUser),
+  'usuarios.catalogoEstoque': (p) => users.updatePodeCatalogoEstoque(p.id, p.valor),
+  'usuarios.catalogoInsumos': (p) => users.updatePodeCatalogoInsumos(p.id, p.valor),
+  'usuarios.sessaoLonga': (p) => users.updateSessaoLonga(p.id, p.valor),
+  'usuarios.cadastrarOperadores': (p) => users.updatePodeCadastrarOperadores(p.id, p.valor),
+  'usuarios.rhTodasUnidades': (p) => users.updatePodeRhTodasUnidades(p.id, p.valor),
+  'usuarios.rhCadastrarEfetivado': (p) => users.updatePodeRhCadastrarEfetivado(p.id, p.valor),
+  'usuarios.cargo': (p) => users.updateCargo(p.id, p.cargo),
+  'usuarios.resetSenha': (p) => users.resetPassword(p.id, p.password),
+  'usuarios.desbloquear': (p) => users.desbloquear(p.id, { pedirTrocaSenha: p.pedirTrocaSenha }),
+  'usuarios.username': (p) => users.updateUsername(p.id, p.username),
+  'usuarios.usernamesEmMassa': (p) => users.updateUsernamesEmMassa(p.itens),
+  'usuarios.excluir': (p) => users.remove(p.id),
+  'grupos.criar': (p) => grupos.create(p),
+  'grupos.editar': (p) => grupos.update(p.id, p.dados),
+  'grupos.excluir': (p) => grupos.remove(p.id),
+  'unidadesExtras.criar': (p) => unidadesExtras.criar(p.dados, codigosUnidadesFixas()),
+  'unidadesExtras.editar': (p) => unidadesExtras.atualizar(p.id, { nome: p.nome }),
+  'unidadesExtras.excluir': (p) => unidadesExtras.remover(p.id),
+  'vaultGroups.criar': (p) => vaultGroups.create(p.name),
+  'vaultGroups.editar': (p) => vaultGroups.rename(p.id, p.name),
+  'vaultGroups.excluir': (p) => vaultGroups.remove(p.id),
+  'vaultSubgroups.criar': (p) => vaultSubgroups.create(p.groupId, p.name),
+  'vaultSubgroups.editar': (p) => vaultSubgroups.rename(p.id, p.name),
+  'vaultSubgroups.excluir': (p) => vaultSubgroups.remove(p.id),
+};
+
+// chamar no topo de cada rota sensível, ANTES de executar a ação de
+// verdade: se quem está pedindo é QA Master, desvia pra fila de aprovação
+// (responde a requisição e devolve true - a rota deve dar `return` na
+// sequência); Master de verdade (ou qualquer outro papel que a rota já
+// permita) segue direto, devolve false e a rota continua normal
+async function desviarSeQaMaster(req, res, tipo, resumo, payload) {
+  if (!req.isQaMaster) return false;
+  const pendente = await qaAprovacoes.criar({
+    tipo, resumo, payload, criadoPorId: req.user.id, criadoPorEmail: req.user.email,
+  });
+  push.notifyQaAprovacaoPendente(resumo, req.user.email).catch((e) => console.error('Falha ao notificar aprovação QA pendente:', e.message));
+  res.status(202).json({ pendenteAprovacao: true, id: pendente.id, resumo });
+  return true;
+}
+
+// só Master de verdade decide (QA Master não pode aprovar/rejeitar a
+// própria fila - senão a "proteção" seria só decorativa)
+function requireMasterDeVerdade(req, res, next) {
+  if (!req.isMaster) return res.status(403).json({ error: 'Apenas o acesso Master pode fazer isso.' });
+  if (req.isQaMaster) return res.status(403).json({ error: 'QA Master não pode aprovar/rejeitar essas solicitações - peça pra um Master de verdade revisar.' });
+  next();
+}
+
+app.get('/api/qa-aprovacoes', requireMasterDeVerdade, async (req, res) => {
+  res.json(await qaAprovacoes.listar());
+});
+
+app.post('/api/qa-aprovacoes/:id/aprovar', requireMasterDeVerdade, async (req, res) => {
+  try {
+    const pendente = await qaAprovacoes.obter(req.params.id);
+    if (!pendente) return res.status(404).json({ error: 'Solicitação não encontrada.' });
+    if (pendente.status === 'aprovado') return res.status(400).json({ error: 'Essa ação já foi aprovada e executada.' });
+    if (pendente.status === 'rejeitado') return res.status(400).json({ error: 'Essa ação já foi rejeitada.' });
+    const executor = EXECUTORES_QA[pendente.tipo];
+    if (!executor) return res.status(500).json({ error: `Tipo de ação desconhecido: ${pendente.tipo}` });
+    try {
+      await executor(pendente.payload || {});
+    } catch (execErr) {
+      await qaAprovacoes.marcarDecidido(req.params.id, { status: 'erro', decididoPorEmail: req.user.email, erroExecucao: execErr.message });
+      return res.status(400).json({ error: `Aprovado, mas a ação falhou ao executar: ${execErr.message}` });
+    }
+    const atualizado = await qaAprovacoes.marcarDecidido(req.params.id, { status: 'aprovado', decididoPorEmail: req.user.email });
+    res.json(atualizado);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/qa-aprovacoes/:id/rejeitar', requireMasterDeVerdade, async (req, res) => {
+  try {
+    const pendente = await qaAprovacoes.obter(req.params.id);
+    if (!pendente) return res.status(404).json({ error: 'Solicitação não encontrada.' });
+    const atualizado = await qaAprovacoes.marcarDecidido(req.params.id, { status: 'rejeitado', decididoPorEmail: req.user.email, motivoRejeicao: req.body.motivo || null });
+    res.json(atualizado);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/users', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.criar', `Criar acesso: ${req.body?.email || ''}`, req.body)) return;
     res.json(await users.create(req.body));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// cria um acesso QA Master - role 'master' de verdade (100% de acesso, ver
+// users.createQaMaster), so que com a flag qaMaster que desvia as acoes
+// sensiveis pra fila de aprovacao (ver EXECUTORES_QA acima). So um Master de
+// verdade cria (um QA Master tentando criar outro tambem cai na fila)
+app.post('/api/users/qa-master', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.criarQaMaster', `Criar acesso QA Master: ${req.body?.email || ''}`, req.body)) return;
+    res.json(await users.createQaMaster(req.body));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -2235,6 +2369,7 @@ app.post('/api/users', auth.requireMaster, async (req, res) => {
 
 app.put('/api/users/:id/permissions', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.permissoes', `Editar permissões do acesso ${req.params.id}`, { id: req.params.id, permissions: req.body.permissions })) return;
     res.json(await users.updatePermissions(req.params.id, req.body.permissions));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2243,6 +2378,7 @@ app.put('/api/users/:id/permissions', auth.requireMaster, async (req, res) => {
 
 app.put('/api/users/:id/active', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.ativo', `${req.body.active ? 'Ativar' : 'Desativar'} acesso ${req.params.id}`, { id: req.params.id, active: req.body.active })) return;
     res.json(await users.setActive(req.params.id, req.body.active));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2251,6 +2387,7 @@ app.put('/api/users/:id/active', auth.requireMaster, async (req, res) => {
 
 app.put('/api/users/:id/horario-permitido', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.horario', `Editar horário permitido do acesso ${req.params.id}`, { id: req.params.id, horarioPermitido: req.body.horarioPermitido })) return;
     res.json(await users.updateHorarioPermitido(req.params.id, req.body.horarioPermitido));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2259,7 +2396,20 @@ app.put('/api/users/:id/horario-permitido', auth.requireMaster, async (req, res)
 
 app.put('/api/users/:id/is-admin', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.isAdmin', `${req.body.isAdmin ? 'Dar' : 'Tirar'} Admin do acesso ${req.params.id}`, { id: req.params.id, isAdmin: req.body.isAdmin })) return;
     res.json(await users.updateIsAdmin(req.params.id, req.body.isAdmin));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// tag "QA User": acesso comum que sempre ve/cria todos os tipos de
+// solicitacao na Central e tem tudo que criar marcado "TESTE" (ver
+// users.updateQaUser/tiposSolicitacaoPermitidos)
+app.put('/api/users/:id/qa-user', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.qaUser', `${req.body.qaUser ? 'Ativar' : 'Desativar'} tag QA User no acesso ${req.params.id}`, { id: req.params.id, qaUser: req.body.qaUser })) return;
+    res.json(await users.updateQaUser(req.params.id, req.body.qaUser));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -2267,6 +2417,7 @@ app.put('/api/users/:id/is-admin', auth.requireMaster, async (req, res) => {
 
 app.put('/api/users/:id/catalogo-estoque', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.catalogoEstoque', `Editar permissão de Catálogo do Estoque do acesso ${req.params.id}`, { id: req.params.id, valor: req.body.podeCatalogoEstoque })) return;
     res.json(await users.updatePodeCatalogoEstoque(req.params.id, req.body.podeCatalogoEstoque));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2275,6 +2426,7 @@ app.put('/api/users/:id/catalogo-estoque', auth.requireMaster, async (req, res) 
 
 app.put('/api/users/:id/catalogo-insumos', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.catalogoInsumos', `Editar permissão de Catálogo de Insumos do acesso ${req.params.id}`, { id: req.params.id, valor: req.body.podeCatalogoInsumos })) return;
     res.json(await users.updatePodeCatalogoInsumos(req.params.id, req.body.podeCatalogoInsumos));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2285,6 +2437,7 @@ app.put('/api/users/:id/catalogo-insumos', auth.requireMaster, async (req, res) 
 // loja/terminal. So vale a partir do proximo login (ver users.js).
 app.put('/api/users/:id/sessao-longa', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.sessaoLonga', `Editar "sempre conectado" do acesso ${req.params.id}`, { id: req.params.id, valor: req.body.sessaoLonga })) return;
     res.json(await users.updateSessaoLonga(req.params.id, req.body.sessaoLonga));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2296,6 +2449,7 @@ app.put('/api/users/:id/sessao-longa', auth.requireMaster, async (req, res) => {
 // continuam so do Master)
 app.put('/api/users/:id/cadastrar-operadores', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.cadastrarOperadores', `Editar permissão de cadastrar Operadores do acesso ${req.params.id}`, { id: req.params.id, valor: req.body.podeCadastrarOperadores })) return;
     res.json(await users.updatePodeCadastrarOperadores(req.params.id, req.body.podeCadastrarOperadores));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2304,6 +2458,7 @@ app.put('/api/users/:id/cadastrar-operadores', auth.requireMaster, async (req, r
 
 app.put('/api/users/:id/rh-todas-unidades', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.rhTodasUnidades', `Editar permissão RH (todas as unidades) do acesso ${req.params.id}`, { id: req.params.id, valor: req.body.podeRhTodasUnidades })) return;
     res.json(await users.updatePodeRhTodasUnidades(req.params.id, req.body.podeRhTodasUnidades));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2312,6 +2467,7 @@ app.put('/api/users/:id/rh-todas-unidades', auth.requireMaster, async (req, res)
 
 app.put('/api/users/:id/rh-cadastrar-efetivado', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.rhCadastrarEfetivado', `Editar permissão RH (cadastrar efetivado) do acesso ${req.params.id}`, { id: req.params.id, valor: req.body.podeRhCadastrarEfetivado })) return;
     res.json(await users.updatePodeRhCadastrarEfetivado(req.params.id, req.body.podeRhCadastrarEfetivado));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2321,6 +2477,7 @@ app.put('/api/users/:id/rh-cadastrar-efetivado', auth.requireMaster, async (req,
 // tag de cargo (Loja/Gerente) - rotulo de organizacao, nao muda permissao
 app.put('/api/users/:id/cargo', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.cargo', `Editar cargo do acesso ${req.params.id}`, { id: req.params.id, cargo: req.body.cargo })) return;
     res.json(await users.updateCargo(req.params.id, req.body.cargo));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2329,6 +2486,7 @@ app.put('/api/users/:id/cargo', auth.requireMaster, async (req, res) => {
 
 app.post('/api/users/:id/reset-password', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.resetSenha', `Resetar senha do acesso ${req.params.id}`, { id: req.params.id, password: req.body.password })) return;
     res.json(await users.resetPassword(req.params.id, req.body.password));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2342,6 +2500,7 @@ app.post('/api/users/:id/reset-password', auth.requireMaster, async (req, res) =
 // nunca uma senha padrao tipo "inicial1"
 app.post('/api/users/:id/desbloquear', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.desbloquear', `Desbloquear acesso ${req.params.id}`, { id: req.params.id, pedirTrocaSenha: !!req.body.pedirTrocaSenha })) return;
     res.json(await users.desbloquear(req.params.id, { pedirTrocaSenha: !!req.body.pedirTrocaSenha }));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2366,6 +2525,7 @@ app.post('/api/users/reset-senha-rapido', auth.requireMasterOrAdmin, async (req,
 
 app.put('/api/users/:id/username', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.username', `Editar usuário (login) do acesso ${req.params.id}`, { id: req.params.id, username: req.body.username })) return;
     res.json(await users.updateUsername(req.params.id, req.body.username));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2376,6 +2536,7 @@ app.put('/api/users/:id/username', auth.requireMaster, async (req, res) => {
 // planilha) e o backend aplica linha a linha, sem parar no primeiro erro
 app.post('/api/users/usernames-em-massa', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.usernamesEmMassa', `Atualização em massa de usuários (${(req.body.itens || []).length} linha(s))`, { itens: req.body.itens })) return;
     res.json(await users.updateUsernamesEmMassa(req.body.itens));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2384,6 +2545,7 @@ app.post('/api/users/usernames-em-massa', auth.requireMaster, async (req, res) =
 
 app.delete('/api/users/:id', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.excluir', `Excluir acesso ${req.params.id}`, { id: req.params.id })) return;
     await users.remove(req.params.id);
     res.json({ ok: true });
   } catch (err) {
@@ -2835,6 +2997,7 @@ app.get('/api/grupos/relatorio.:formato(csv|pdf)', requireAnySection('lancamento
 
 app.post('/api/grupos', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'grupos.criar', `Criar grupo: ${req.body?.nome || ''}`, req.body)) return;
     res.json(await grupos.create(req.body));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2843,6 +3006,7 @@ app.post('/api/grupos', auth.requireMaster, async (req, res) => {
 
 app.put('/api/grupos/:id', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'grupos.editar', `Editar grupo ${req.params.id}`, { id: req.params.id, dados: req.body })) return;
     res.json(await grupos.update(req.params.id, req.body));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2851,6 +3015,7 @@ app.put('/api/grupos/:id', auth.requireMaster, async (req, res) => {
 
 app.delete('/api/grupos/:id', auth.requireMaster, async (req, res) => {
   try {
+    if (await desviarSeQaMaster(req, res, 'grupos.excluir', `Excluir grupo ${req.params.id}`, { id: req.params.id })) return;
     await grupos.remove(req.params.id);
     res.json({ ok: true });
   } catch (err) {
@@ -4793,6 +4958,7 @@ app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anex
       direcionadoParaId,
       direcionadoParaEmail,
       prioridade,
+      teste: req.isQaMaster || req.isQaUser,
     });
     broadcast('solicitacao-criada', registro, 'solicitacoes');
     push.notifySolicitacao(`Ticket #${registro.numeroTicket} · Nova solicitação`, `${req.user.email} · ${registro.titulo || tipo || ''}`, registro.id);

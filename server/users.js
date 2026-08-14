@@ -109,6 +109,58 @@ async function create({ email, password, permissions, username }) {
   return toPublic(await doc.get());
 }
 
+// acesso "QA Master": mesmo role 'master' de sempre (100% das rotas que
+// checam req.isMaster tratam esse acesso IGUAL a um Master de verdade, sem
+// precisar tocar em nenhuma delas) - a UNICA diferenca e a flag qaMaster,
+// que index.js usa pra desviar acoes sensiveis (exclusoes/configuracao
+// global) pra fila de aprovacao em vez de executar na hora (ver
+// qaAprovacoes.js). Pensado pra treino/teste em produção sem risco de
+// alguem (ou um bot) apagar/reconfigurar algo real sem um Master de
+// verdade revisar antes.
+async function createQaMaster({ email, password, username }) {
+  email = String(email || '').trim().toLowerCase();
+  if (!email || !password) throw new Error('Email e senha são obrigatórios.');
+  if (password.length < 8) throw new Error('A senha deve ter pelo menos 8 caracteres.');
+
+  const existing = await usersRef.where('email', '==', email).limit(1).get();
+  if (!existing.empty) throw new Error('Já existe um acesso com esse email.');
+
+  const usernameOk = sanitizeUsername(username);
+  await garantirUsernameLivre(usernameOk, null);
+
+  const passwordHash = await bcrypt.hash(password, 12);
+  const doc = await usersRef.add({
+    email,
+    username: usernameOk || null,
+    passwordHash,
+    role: 'master',
+    qaMaster: true,
+    active: true,
+    precisaTrocarSenha: true,
+    permissions: sanitizePermissions(null),
+    createdAt: new Date().toISOString(),
+  });
+  usersCache.invalidar();
+  return toPublic(await doc.get());
+}
+
+// tag "QA User": acesso comum (role 'user', com as permissoes normais que o
+// Master configurar) que ganha 2 coisas extras (ver index.js/central.html):
+// sempre ve/cria TODOS os tipos de solicitacao na Central, independente de
+// tiposSolicitacao configurado pra ele, e toda solicitacao que criar entra
+// marcada "TESTE" - pra quem for atender/aprovar saber na hora que aquilo
+// nao e um caso real
+async function updateQaUser(id, valor) {
+  const ref = usersRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  if (snap.data().role === 'master') throw new Error('Acesso Master usa a tag QA Master, não QA User.');
+  await ref.update({ qaUser: !!valor });
+  invalidarUsuario(id);
+  usersCache.invalidar();
+  return toPublic(await ref.get());
+}
+
 async function updateUsername(id, username) {
   const ref = usersRef.doc(id);
   const snap = await ref.get();
@@ -412,6 +464,8 @@ function toPublic(doc) {
     podeRhCadastrarEfetivado: data.role === 'master' ? null : !!data.podeRhCadastrarEfetivado,
     sessaoLonga: !!data.sessaoLonga,
     cargo: data.role === 'master' ? null : data.cargo || null,
+    qaMaster: data.role === 'master' ? !!data.qaMaster : null,
+    qaUser: data.role === 'master' ? null : !!data.qaUser,
     createdAt: data.createdAt,
   };
 }
@@ -424,6 +478,8 @@ module.exports = {
   findByIdentifier,
   list,
   create,
+  createQaMaster,
+  updateQaUser,
   updatePermissions,
   setActive,
   updateHorarioPermitido,

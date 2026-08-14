@@ -187,6 +187,8 @@ function toPublicUser(id, user) {
     precisaTrocarSenha: !!user.precisaTrocarSenha,
     // a tag de cargo define a tela inicial da pessoa (ver index.html)
     cargo: user.role === 'master' ? null : user.cargo || null,
+    qaMaster: user.role === 'master' ? !!user.qaMaster : null,
+    qaUser: user.role === 'master' ? null : !!user.qaUser,
   };
 }
 
@@ -261,6 +263,14 @@ function requireAuth(req, res, next) {
       req.sid = payload.sid || null;
       req.isMaster = user.role === 'master';
       req.isAdmin = !!user.isAdmin;
+      // QA Master: mesmo req.isMaster=true de um Master de verdade (100% de
+      // acesso, nenhuma checagem existente muda) - so essa flag extra, que
+      // index.js usa pra desviar acoes sensiveis pra fila de aprovacao (ver
+      // qaAprovacoes.js/interceptarQaMaster). QA User: acesso comum com 2
+      // efeitos na Central de Solicitacoes (bypass de tiposSolicitacao +
+      // marca "TESTE" no que criar, ver index.js/solicitacoes.js/refunds.js)
+      req.isQaMaster = req.isMaster && !!user.qaMaster;
+      req.isQaUser = !req.isMaster && !!user.qaUser;
       req.podeCatalogoEstoque = !!user.podeCatalogoEstoque;
       req.podeCatalogoInsumos = !!user.podeCatalogoInsumos;
       req.podeCadastrarOperadores = !!user.podeCadastrarOperadores;
