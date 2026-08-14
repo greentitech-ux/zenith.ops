@@ -30,15 +30,17 @@
 // atendimento.html) - o caso original, pensado pra tablet/quiosque na
 // entrada; 'interno' mostra a tela normal de login do Zenith (index.html) -
 // pra computador de escritorio/servidor que so precisa ficar "vivo" pro
-// monitoramento, sem sentido nenhum em exibir o chat de atendimento ao
-// cliente. Os dois mandam heartbeat do mesmo jeito.
+// monitoramento; 'abastecimento' mostra a tela do Abastecimento Carrinho
+// (abastecimento.html, Dom Aeroporto) - pro tablet do carrinho/loja que
+// fica ligado o dia todo nessa tela e nao na de atendimento/login. Os tres
+// mandam heartbeat do mesmo jeito.
 const crypto = require('crypto');
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
 
 const COLLECTION = db.collection('lojaStatus');
 
-const TIPOS_COMPUTADOR = ['atendimento', 'interno'];
+const TIPOS_COMPUTADOR = ['atendimento', 'interno', 'abastecimento'];
 function tipoValido(tipo) { return TIPOS_COMPUTADOR.includes(tipo) ? tipo : 'atendimento'; }
 
 // heartbeat a cada ~25s (ver atendimento.html) - 90s da margem pra 2

@@ -650,6 +650,47 @@ window.fetch = (url, opts = {}) => {
   return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
 };
 function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+
+// heartbeat de presenca do computador (ver lojaStatus.js/index.js), mesmo
+// mecanismo do atendimento.html - esse tablet (carrinho/loja do
+// Abastecimento) costuma ficar ligado nessa tela o dia todo, entao ele
+// tambem precisa avisar o Zenith que esta "vivo" pra aparecer online em
+// Status das Lojas. Independe do login do Zenith (AUTH_TOKEN) - roda mesmo
+// antes de qualquer fetch autenticado. Mesmo truque do localStorage que
+// atendimento.html/index.html usam: o icone fixado (Windows/Android "Instalar
+// app") pode reabrir sem a query string (?unidade=&posto=), entao a unidade/
+// posto certos ficam salvos na primeira vez que a pagina abrir com a URL
+// completa, e usados de fallback dai em diante
+function abertoDesde(){
+  let v = sessionStorage.getItem('zenithAbertoDesde');
+  if(!v){ v = String(Date.now()); sessionStorage.setItem('zenithAbertoDesde', v); }
+  return Number(v);
+}
+async function heartbeatLoja(codigo, posto){
+  try{
+    await _rawFetch('/api/loja-status/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesde() }),
+    });
+  }catch(e){ /* sem rede agora - a proxima tentativa em 25s tenta de novo */ }
+}
+(function iniciarHeartbeatLoja(){
+  const params = new URLSearchParams(location.search);
+  let unidade = params.get('unidade');
+  let posto = params.get('posto');
+  if(unidade){
+    try{ localStorage.setItem('zenithMonitorFixo', JSON.stringify({unidade, posto: posto||null})); }catch(e){}
+  }else{
+    try{
+      const salvo = JSON.parse(localStorage.getItem('zenithMonitorFixo')||'null');
+      if(salvo && salvo.unidade){ unidade = salvo.unidade; posto = salvo.posto; }
+    }catch(e){}
+  }
+  if(!unidade) return;
+  heartbeatLoja(unidade, posto);
+  setInterval(() => heartbeatLoja(unidade, posto), 25 * 1000);
+})();
 function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
 function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
 

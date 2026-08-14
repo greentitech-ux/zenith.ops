@@ -226,6 +226,7 @@
     <div class="radio-tipo">
       <label><input type="radio" name="novo-comp-tipo" value="atendimento" checked><span><b>🤖 Atendimento ao cliente</b><small>chat do Beniboy - pra tablet/quiosque na entrada da loja</small></span></label>
       <label><input type="radio" name="novo-comp-tipo" value="interno"><span><b>🔒 Computador interno</b><small>tela normal de login do Zenith - pra servidor/PC de escritório, só pro monitoramento</small></span></label>
+      <label><input type="radio" name="novo-comp-tipo" value="abastecimento"><span><b>🛒 Abastecimento Carrinho</b><small>tela do Abastecimento (Dom Aeroporto) - pro tablet do carrinho/loja, com monitoramento</small></span></label>
     </div>
     <div class="msg hidden" id="novo-comp-status"></div>
     <div class="modal-acoes">
@@ -247,6 +248,7 @@
     <div class="radio-tipo">
       <label><input type="radio" name="editar-comp-tipo" value="atendimento"><span><b>🤖 Atendimento ao cliente</b><small>chat do Beniboy - pra tablet/quiosque na entrada da loja</small></span></label>
       <label><input type="radio" name="editar-comp-tipo" value="interno"><span><b>🔒 Computador interno</b><small>tela normal de login do Zenith - pra servidor/PC de escritório, só pro monitoramento</small></span></label>
+      <label><input type="radio" name="editar-comp-tipo" value="abastecimento"><span><b>🛒 Abastecimento Carrinho</b><small>tela do Abastecimento (Dom Aeroporto) - pro tablet do carrinho/loja, com monitoramento</small></span></label>
     </div>
     <div class="msg hidden" id="editar-comp-status"></div>
     <div class="modal-acoes">
@@ -300,7 +302,14 @@ function statusDe(c){
   return c.online ? 'online' : 'offline';
 }
 
-const TIPO_COMPUTADOR_LABEL = { atendimento: '🤖 atendimento', interno: '🔒 interno' };
+const TIPO_COMPUTADOR_LABEL = { atendimento: '🤖 atendimento', interno: '🔒 interno', abastecimento: '🛒 abastecimento' };
+// qual pagina cada tipo de computador abre - usado no link gerado
+// (copiarLinkComputador) e no script de vigia (baixarVigia)
+function paginaDoTipo(tipo){
+  if(tipo === 'interno') return '';
+  if(tipo === 'abastecimento') return 'abastecimento.html';
+  return 'atendimento.html';
+}
 
 // parse leve do user-agent - so pra dar um resumo legivel (SO + navegador),
 // sem depender de biblioteca nenhuma
@@ -522,8 +531,7 @@ async function salvarNovoComputador(){
 }
 
 function copiarLinkComputador(codigo, posto, tipo){
-  const base = tipo === 'interno' ? '' : 'atendimento.html';
-  const url = `${location.origin}/${base}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
+  const url = `${location.origin}/${paginaDoTipo(tipo)}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
   mostrarLinkGerado(url);
 }
 
@@ -543,8 +551,7 @@ function copiarIpLocal(ip){
 // mais simples de distribuir, mas depende do Windows permitir rodar
 // PowerShell (ver instrucoes no proprio arquivo baixado)
 function baixarVigia(codigo, posto, tipo){
-  const base = tipo === 'interno' ? '' : 'atendimento.html';
-  const urlMonitorar = `${location.origin}/${base}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
+  const urlMonitorar = `${location.origin}/${paginaDoTipo(tipo)}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
   const urlReportarIp = `${location.origin}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/ip-local`;
   const nomeTarefa = 'ZenithVigia_' + posto;
   const linhas = [
