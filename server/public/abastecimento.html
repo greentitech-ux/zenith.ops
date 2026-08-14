@@ -555,8 +555,7 @@
     <div class="sheet">
       <h3>👥 Operadores (login local)</h3>
       <div class="sub">usuário de 4 letras + senha de 4 números · papel define quem PEDE e quem ENVIA (o próprio operador troca na hora do lançamento, com a senha dele) · 3 senhas erradas bloqueiam e geram um ticket — só o Master desbloqueia (mantendo ou trocando a senha), troca a senha a qualquer momento (🔒 senha), ativa/desativa e remove</div>
-      <div id="op-lista"></div>
-      <label style="margin-top:16px;">Cadastrar operador</label>
+      <label>Cadastrar operador</label>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
         <input type="text" id="op-novo-usuario" maxlength="4" autocomplete="off" placeholder="usuário (4 letras)" style="text-transform:lowercase;">
         <input type="password" id="op-novo-senha" maxlength="4" inputmode="numeric" autocomplete="new-password" placeholder="senha (4 números)">
@@ -569,6 +568,7 @@
         </select>
       </div>
       <button type="button" class="btn-add" onclick="adicionarOperador()">＋ Cadastrar operador</button>
+      <div id="op-lista" style="margin-top:16px;"></div>
       <div id="bloco-config-contagem" class="hidden">
         <label style="margin-top:16px;">🕐 Horários do popup de Contagem (Master) <span style="text-transform:none;letter-spacing:0;">— separados por vírgula, ex: 08:00, 16:00</span></label>
         <div style="display:flex;gap:6px;">
