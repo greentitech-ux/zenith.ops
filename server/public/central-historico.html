@@ -110,6 +110,12 @@
   .kanban-col-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 12px 10px;border-bottom:1px solid var(--line);flex:none;}
   .kanban-col-header .badge{font-size:11px;}
   .kanban-count{font-family:var(--mono);color:var(--muted);font-size:11.5px;}
+  /* hint ao lado do badge da coluna (ex: "aguardando início", "hoje") - so
+     aparece no modo Triagem, explica por que a contagem ficou menor que o
+     total real daquele status (ver renderKanban) */
+  .kanban-col-hint{font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:5px;}
+  .triagem-nota{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:10px;}
+  .triagem-nota b{color:var(--text);}
   .kanban-cards{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:8px;}
   .kcard{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;transition:border-color .15s ease;}
   .kcard:hover{border-color:var(--accent);}
@@ -271,17 +277,18 @@
     </select></div>
   </div>
   <button type="button" class="link-btn" style="margin:-4px 0 10px;" onclick="limparFiltrosExtra()">Limpar filtros de loja/grupo/data</button>
+  <div class="triagem-nota hidden" id="triagem-nota">📥 <b>Triagem</b> — só o que ainda precisa de uma decisão ou nem foi iniciado. Em andamento, finalizado e o histórico completo de rejeitados ficam na aba de cada assunto, aqui em cima.</div>
   <div class="kanban-board" id="kanban-board">
     <div class="kanban-col" data-status="PENDENTE">
-      <div class="kanban-col-header"><span class="badge PENDENTE">Pendente</span><span class="kanban-count" id="kcount-PENDENTE">0</span></div>
+      <div class="kanban-col-header"><span><span class="badge PENDENTE">Pendente</span><span class="kanban-col-hint" id="khint-PENDENTE"></span></span><span class="kanban-count" id="kcount-PENDENTE">0</span></div>
       <div class="kanban-cards" id="kcards-PENDENTE"></div>
     </div>
     <div class="kanban-col" data-status="APROVADO">
-      <div class="kanban-col-header"><span class="badge APROVADO">Aprovado</span><span class="kanban-count" id="kcount-APROVADO">0</span></div>
+      <div class="kanban-col-header"><span><span class="badge APROVADO">Aprovado</span><span class="kanban-col-hint" id="khint-APROVADO"></span></span><span class="kanban-count" id="kcount-APROVADO">0</span></div>
       <div class="kanban-cards" id="kcards-APROVADO"></div>
     </div>
     <div class="kanban-col" data-status="REJEITADO">
-      <div class="kanban-col-header"><span class="badge REJEITADO">Rejeitado</span><span class="kanban-count" id="kcount-REJEITADO">0</span></div>
+      <div class="kanban-col-header"><span><span class="badge REJEITADO">Rejeitado</span><span class="kanban-col-hint" id="khint-REJEITADO"></span></span><span class="kanban-count" id="kcount-REJEITADO">0</span></div>
       <div class="kanban-cards" id="kcards-REJEITADO"></div>
     </div>
   </div>
@@ -858,6 +865,34 @@ function contagemStatus(lista){
     R: lista.filter(c=>c.status==='REJEITADO').length,
   };
 }
+// data de hoje em Brasilia, mesmo formato de dataBrasilia() - usada pra
+// saber se um rejeitado e "de hoje" (ver rejeitadoHoje)
+function hojeBR(){ return dataBrasilia(new Date().toISOString()); }
+// um APROVADO so conta como "aguardando inicio" (ainda precisa de alguem
+// pegar pra fazer) - uma vez que o andamento vira Em Andamento ou
+// Finalizado, o card sai da Triagem e so aparece na aba do proprio assunto.
+// 'ajuste-fechamento' e especial: aprovar ja aplica a edicao na hora (ver
+// fechamentosLive.decidirEdicao), nao existe fase de execucao separada -
+// entao pra esse tipo, aprovado = pronto, nunca fica esperando na Triagem
+function aprovadoAguardandoInicio(c){
+  if(c.tipo==='ajuste-fechamento') return false;
+  return (c.execucaoStatus||'PENDENTE')==='PENDENTE';
+}
+// um REJEITADO so conta na Triagem se foi decidido hoje - o historico
+// completo (de qualquer data) continua disponivel na aba do assunto
+function rejeitadoHoje(c){ return dataBrasilia(c.decididoEm||c.criadoEm) === hojeBR(); }
+// contagem que aparece no botao "Triagem" (tipo='') - precisa bater com o
+// que realmente aparece nas colunas quando ele esta selecionado (pedido
+// explicito do usuario: a fila de Triagem virou um "tumulto" porque
+// misturava tudo que ja tinha decisao tomada - agora só mostra o que
+// ainda precisa de acao)
+function contagemTriagem(lista){
+  return {
+    P: lista.filter(c=>c.status==='PENDENTE').length,
+    A: lista.filter(c=>c.status==='APROVADO' && aprovadoAguardandoInicio(c)).length,
+    R: lista.filter(c=>c.status==='REJEITADO' && rejeitadoHoje(c)).length,
+  };
+}
 function renderFiltroTipoRow(base){
   const botaoHtml = (tipo, label, contagem) => {
     const ativo = tipo ? FILTRO_TIPOS.has(tipo) : FILTRO_TIPOS.size===0;
@@ -869,7 +904,7 @@ function renderFiltroTipoRow(base){
     </button>`;
   };
   document.getElementById('tipo-filtro-row').innerHTML =
-    botaoHtml('', 'Todas', contagemStatus(base)) +
+    botaoHtml('', '📥 Triagem', contagemTriagem(base)) +
     TIPOS_DISPONIVEIS.map(tipo=>botaoHtml(tipo, TIPOS_INFO[tipo].label, contagemStatus(base.filter(c=>c.tipo===tipo)))).join('');
 }
 // clique no corpo do botao: comportamento de sempre - so aquele tipo
@@ -885,6 +920,19 @@ function toggleFiltroTipoMulti(tipo){
   renderKanban();
 }
 
+// se um card deve aparecer no modo Triagem (nenhum tipo selecionado) -
+// PENDENTE sempre entra; APROVADO so se ainda nao foi iniciado; REJEITADO
+// so se foi decidido hoje. Quando um tipo especifico esta selecionado, a
+// aba daquele assunto mostra o quadro inteiro sem esse filtro (e onde o
+// historico completo - em andamento, finalizado, rejeitados antigos - fica
+// disponivel, conforme pedido do usuario)
+function passaTriagem(c){
+  if(c.status==='PENDENTE') return true;
+  if(c.status==='APROVADO') return aprovadoAguardandoInicio(c);
+  if(c.status==='REJEITADO') return rejeitadoHoje(c);
+  return false; // CONVERTIDO etc nunca aparece em nenhuma coluna
+}
+
 function renderKanban(){
   let base = CARDS;
   if(FILTRO_UNIDADE) base = base.filter(c=>c.unidade===FILTRO_UNIDADE);
@@ -893,11 +941,16 @@ function renderKanban(){
   if(FILTRO_DATA_ATE) base = base.filter(c=>dataBrasilia(c.criadoEm) <= FILTRO_DATA_ATE);
   base = base.filter(passaBusca);
   renderFiltroTipoRow(base);
+  const emTriagem = FILTRO_TIPOS.size===0;
   let filtradas = FILTRO_TIPOS.size ? base.filter(c=>FILTRO_TIPOS.has(c.tipo)) : base;
   if(FILTRO_PRIORIDADE==='estourado') filtradas = filtradas.filter(slaEstourado);
   else if(FILTRO_PRIORIDADE) filtradas = filtradas.filter(c=>(c.prioridade||'media')===FILTRO_PRIORIDADE);
-  document.getElementById('lista-count').textContent = filtradas.length;
-  CHAVES_VISIVEIS = filtradas.map(c=>c.tipo+'::'+c.id);
+  const visiveis = emTriagem ? filtradas.filter(passaTriagem) : filtradas;
+  document.getElementById('lista-count').textContent = visiveis.length;
+  document.getElementById('triagem-nota').classList.toggle('hidden', !emTriagem);
+  document.getElementById('khint-APROVADO').textContent = emTriagem ? '· aguardando início' : '';
+  document.getElementById('khint-REJEITADO').textContent = emTriagem ? '· hoje' : '';
+  CHAVES_VISIVEIS = visiveis.map(c=>c.tipo+'::'+c.id);
 
   STATUS_COLUNAS.forEach(status=>{
     // dentro de cada coluna, o andamento manda na ordem: Pendente em cima,
@@ -907,14 +960,14 @@ function renderKanban(){
     // andamento manda primeiro (Finalizado sempre embaixo); dentro do mesmo
     // andamento, prioridade mais urgente em cima; empatou, prazo de SLA mais
     // apertado primeiro (fila de atendimento de verdade)
-    const doColuna = filtradas.filter(c=>c.status===status)
+    const doColuna = visiveis.filter(c=>c.status===status)
       .sort((a,b)=> (ordemAndamento(a)-ordemAndamento(b))
         || (ordemPrioridade(a)-ordemPrioridade(b))
         || String(a.slaPrazo||a.criadoEm||'').localeCompare(String(b.slaPrazo||b.criadoEm||'')));
     document.getElementById('kcount-'+status).textContent = doColuna.length;
     document.getElementById('kcards-'+status).innerHTML = doColuna.length
       ? doColuna.map(kcardHtml).join('')
-      : '<div class="kanban-empty">Nenhuma aqui.</div>';
+      : `<div class="kanban-empty">${emTriagem && status!=='PENDENTE' ? 'Nada aguardando aqui — tudo em dia! 🎉' : 'Nenhuma aqui.'}</div>`;
   });
   atualizarBarraSelecao();
 }
