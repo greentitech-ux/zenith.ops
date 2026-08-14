@@ -6,7 +6,7 @@
 //
 // As colunas sao montadas do MESMO jeito da tabela da tela (ver
 // tabelaFechamentosHtml/colunasExtras em fechamentos.html): alem das fixas
-// (Data/Unidade/Gerente/Faturamento/Total declarado/Diferenca/Quebra/
+// (Data/Unidade/Responsavel/Faturamento/Total declarado/Diferenca/Quebra/
 // Observacao), os campos do schema antigo (Adyen/Ifood/99Food/Pix/Loja) e
 // os Canais de venda/Formas de pagamento definidos por grupo em /grupos.html
 // SO entram se pelo menos um fechamento do resultado de fato preencheu
@@ -33,7 +33,7 @@ function fmtMoney(v) {
 const COLUNAS_BASE = [
   { key: 'data', label: 'Data', largura: 58 },
   { key: 'unidadeNome', label: 'Unidade', largura: 58 },
-  { key: 'gerente', label: 'Gerente', largura: 46 },
+  { key: 'gerente', label: 'Responsável', largura: 46 },
   { key: 'faturamento', label: 'Faturamento', moeda: true, largura: 64 },
   { key: 'totalDeclarado', label: 'Total declarado', moeda: true, largura: 64 },
   { key: 'diferenca', label: 'Diferença', moeda: true, largura: 58 },
