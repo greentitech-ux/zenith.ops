@@ -5388,6 +5388,8 @@ app.post('/api/relatorio-config', auth.requireMaster, async (req, res) => {
       emailDestino: req.body.emailDestino,
       emailCopia: req.body.emailCopia,
       usuarioGatilho: req.body.usuarioGatilho,
+      horaEnvio: req.body.horaEnvio,
+      diasSemana: req.body.diasSemana,
     });
     res.json(config);
   } catch (err) {
@@ -7676,7 +7678,7 @@ app.use((err, req, res, next) => {
     // disparar na hora por GET /api/relatorio-mv/testar (que ai sim avisa o
     // erro de configuração)
     if (process.env.RELATORIO_EMAIL_USER && process.env.RELATORIO_EMAIL_PASS) {
-      relatorioMV.iniciarAgendamento();
+      relatorioMV.iniciarAgendamento().catch((err) => console.error('Erro ao agendar relatório diário MV:', err.message));
     } else {
       console.warn('AVISO: RELATORIO_EMAIL_USER/RELATORIO_EMAIL_PASS não configurados - relatório diário do MV desativado.');
     }

@@ -70,23 +70,50 @@ function fmtDataHora(iso) {
 // card processado; salvarConfig() invalida na hora, entao uma troca feita
 // na tela vale no proximo envio, nao precisa esperar o cache vencer.
 const CONFIG_DOC = db.collection('relatorioMVConfig').doc('config');
+// horario/dias default (usado so ate o Master salvar algo diferente pela
+// tela Email) - equivalente ao antigo hardcode '0 8 * * 1-5'. diasSemana usa
+// a mesma convencao do campo dow do cron: 0=domingo ... 6=sabado
+const HORA_ENVIO_PADRAO = '08:00';
+const DIAS_SEMANA_PADRAO = [1, 2, 3, 4, 5]; // seg-sex
+
 const configCache = createCache(async () => {
   const snap = await CONFIG_DOC.get();
   const data = snap.exists ? snap.data() : {};
   const emailDestino = String(data.emailDestino || '').trim() || RELATORIO_EMAIL_TO_PADRAO;
   const emailCopia = String(data.emailCopia || '').trim();
   const usuarioGatilho = String(data.usuarioGatilho || '').trim() || USUARIO_GATILHO_PADRAO;
+  const horaEnvio = /^([01]\d|2[0-3]):([0-5]\d)$/.test(data.horaEnvio) ? data.horaEnvio : HORA_ENVIO_PADRAO;
+  const diasSemana = Array.isArray(data.diasSemana) && data.diasSemana.length
+    ? data.diasSemana.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+    : DIAS_SEMANA_PADRAO;
   const alvo = await users.findByIdentifier(usuarioGatilho);
   return {
     emailDestino,
     emailCopia,
     usuarioGatilho,
+    horaEnvio,
+    diasSemana: diasSemana.length ? diasSemana : DIAS_SEMANA_PADRAO,
     usuarioGatilhoEncontrado: !!alvo,
     gatilhoUserId: alvo ? alvo.id : null,
     gatilhoUserEmail: alvo && alvo.email ? String(alvo.email).trim().toLowerCase() : null,
   };
 }, 5 * 60 * 1000);
 const getConfig = configCache.cached;
+
+// "HH:MM" - o <input type=time> do email.html ja manda nesse formato
+function validarHoraEnvio(valor) {
+  const limpo = String(valor || '').trim();
+  if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(limpo)) throw new Error('Informe um horário válido (HH:MM).');
+  return limpo;
+}
+
+// array de inteiros 0-6 (0=domingo), pelo menos 1 dia marcado
+function validarDiasSemana(valor) {
+  const lista = Array.isArray(valor) ? valor.map((d) => Number(d)) : [];
+  const dias = [...new Set(lista.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
+  if (!dias.length) throw new Error('Marque pelo menos um dia da semana.');
+  return dias;
+}
 
 function validarEmail(email) {
   const limpo = String(email || '').trim();
@@ -106,21 +133,27 @@ function validarEmailCopia(valor) {
 // chamada pela rota POST /api/relatorio-config (Master, ver index.js) -
 // exige que o usuario gatilho realmente exista, senao a config salva
 // nunca casaria com nenhum ticket
-async function salvarConfig({ emailDestino, emailCopia, usuarioGatilho }) {
+async function salvarConfig({ emailDestino, emailCopia, usuarioGatilho, horaEnvio, diasSemana }) {
   const emailLimpo = validarEmail(emailDestino);
   const copiaLimpa = validarEmailCopia(emailCopia);
   const usuarioLimpo = String(usuarioGatilho || '').trim();
   if (!usuarioLimpo) throw new Error('Informe o usuário que vai disparar os e-mails.');
   const alvo = await users.findByIdentifier(usuarioLimpo);
   if (!alvo) throw new Error(`Não encontrei nenhum usuário com "${usuarioLimpo}".`);
+  const horaLimpa = validarHoraEnvio(horaEnvio);
+  const diasLimpos = validarDiasSemana(diasSemana);
   await CONFIG_DOC.set({
     emailDestino: emailLimpo,
     emailCopia: copiaLimpa,
     usuarioGatilho: alvo.username || usuarioLimpo,
+    horaEnvio: horaLimpa,
+    diasSemana: diasLimpos,
     atualizadoEm: new Date().toISOString(),
   }, { merge: true });
   configCache.invalidar();
-  return getConfig();
+  const configNova = await getConfig();
+  agendar(configNova); // aplica o novo horario/dias na hora, sem precisar reiniciar o servidor
+  return configNova;
 }
 
 // "e do gatilho" cobre os dois jeitos de um card ter sido direcionado pro
@@ -485,25 +518,26 @@ async function enviarRelatorio() {
 }
 
 // agenda o envio diario (cron.schedule ja roda em cima do timezone
-// informado, sem precisar converter hora local -> UTC na mao). So de
-// segunda a sexta - sabado/domingo nao manda nada; como o relatorio e
-// sempre um RETRATO ATUAL (nao um "desde ontem"), o que ficou pendente no
-// fim de semana ja aparece sozinho no envio de segunda, sem logica extra.
-// O "1-5" no campo de dia-da-semana ja cobre isso, mas o guard abaixo
-// funciona como segunda trava - mesmo se RELATORIO_HORA vier configurado
-// pra rodar todo dia (ex: env var antiga "0 8 * * *"), sabado/domingo nunca
-// disparam o envio de verdade.
-function iniciarAgendamento() {
-  const horaCron = process.env.RELATORIO_HORA || '0 8 * * 1-5';
-  if (!cron.validate(horaCron)) {
-    console.error(`RELATORIO_HORA inválido ("${horaCron}") - agendamento do relatório diário MV desativado.`);
+// informado, sem precisar converter hora local -> UTC na mao). Horario e
+// dias da semana agora vem do Firestore (editaveis em /email.html, sem
+// redeploy) em vez de fixos no codigo/env var - guarda a tarefa atual pra
+// poder parar e recriar toda vez que a config mudar (ver salvarConfig)
+let tarefaAtual = null;
+function agendar(config) {
+  if (tarefaAtual) { tarefaAtual.stop(); tarefaAtual = null; }
+  const [hora, minuto] = config.horaEnvio.split(':');
+  const cronExpressao = `${Number(minuto)} ${Number(hora)} * * ${config.diasSemana.join(',')}`;
+  if (!cron.validate(cronExpressao)) {
+    console.error(`Agendamento do relatório diário MV inválido ("${cronExpressao}") - desativado até a próxima config válida.`);
     return;
   }
-  cron.schedule(horaCron, () => {
-    const diaSemana = new Intl.DateTimeFormat('en-US', { timeZone: FUSO_BR, weekday: 'short' }).format(new Date());
-    if (diaSemana === 'Sat' || diaSemana === 'Sun') return; // fim de semana - nao manda
+  tarefaAtual = cron.schedule(cronExpressao, () => {
     enviarRelatorio().catch((err) => console.error('Erro ao enviar relatório diário MV:', err.message));
   }, { timezone: FUSO_BR });
+}
+
+async function iniciarAgendamento() {
+  agendar(await getConfig());
 }
 
 module.exports = { enviarRelatorio, iniciarAgendamento, montarDados, montarHtml, notificarCardMV, enviarCardsPorEmail, getConfig, salvarConfig, TIPOS_COM_ACAO_POR_EMAIL };
