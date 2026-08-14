@@ -104,9 +104,25 @@ async function heartbeat(codigo, posto){
   }catch(e){ /* sem rede agora - a proxima tentativa em 25s tenta de novo */ }
 }
 
+// o icone fixado (Windows: "Criar atalho"/instalar como app) as vezes volta
+// a abrir a URL pelada (sem ?unidade=&posto=) em vez da URL exata gerada -
+// o manifest.json tem start_url fixo ("/"), entao o navegador/SO as vezes
+// ignora a query string ao reabrir o icone. Em vez de depender disso, essa
+// aba GRAVA (localStorage, sobrevive a fechar/reabrir) qual unidade/posto
+// monitorar na PRIMEIRA vez que abrir com a URL certa - daí em diante, mesmo
+// se o icone reabrir a URL pelada, o quiosque continua identificado certo
 async function boot(){
-  const unidadeFixa = new URLSearchParams(location.search).get('unidade');
-  const postoFixo = new URLSearchParams(location.search).get('posto');
+  const params = new URLSearchParams(location.search);
+  let unidadeFixa = params.get('unidade');
+  let postoFixo = params.get('posto');
+  if(unidadeFixa){
+    try{ localStorage.setItem('zenithMonitorFixo', JSON.stringify({unidade: unidadeFixa, posto: postoFixo||null})); }catch(e){}
+  }else{
+    try{
+      const salvo = JSON.parse(localStorage.getItem('zenithMonitorFixo')||'null');
+      if(salvo && salvo.unidade){ unidadeFixa = salvo.unidade; postoFixo = salvo.posto; }
+    }catch(e){}
+  }
   if(unidadeFixa){
     try{
       const unidades = await fetch('/api/meta/unidades-publico').then(r=>r.json());
