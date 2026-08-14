@@ -329,13 +329,32 @@ async function heartbeatLoja(codigo, posto){
     }
   }catch(e){ /* sem rede agora - a proxima tentativa em 25s tenta de novo */ }
 }
-(function iniciarHeartbeatLoja(){
-  const unidade = new URLSearchParams(location.search).get('unidade');
+// o icone fixado (Windows: "Criar atalho"/instalar como app) as vezes volta
+// a abrir a URL pelada (sem ?unidade=&posto=) em vez da URL exata que foi
+// gerada - o manifest.json tem start_url fixo ("/"), entao o proprio
+// navegador/SO as vezes ignora a query string ao reabrir o icone, mesmo
+// tendo sido configurado certo. Em vez de depender disso, o proprio
+// navegador GRAVA (localStorage, sobrevive a fechar/reabrir) qual unidade/
+// posto ele deve monitorar na PRIMEIRA vez que abrir com a URL certa - daí
+// em diante, mesmo se o icone reabrir a URL pelada, o monitoramento
+// continua vindo do que foi salvo nesse mesmo computador/perfil do Chrome
+function iniciarHeartbeatLoja(){
+  const params = new URLSearchParams(location.search);
+  let unidade = params.get('unidade');
+  let posto = params.get('posto');
+  if(unidade){
+    try{ localStorage.setItem('zenithMonitorFixo', JSON.stringify({unidade, posto: posto||null})); }catch(e){}
+  }else{
+    try{
+      const salvo = JSON.parse(localStorage.getItem('zenithMonitorFixo')||'null');
+      if(salvo && salvo.unidade){ unidade = salvo.unidade; posto = salvo.posto; }
+    }catch(e){}
+  }
   if(!unidade) return;
-  const posto = new URLSearchParams(location.search).get('posto');
   heartbeatLoja(unidade, posto);
   setInterval(() => heartbeatLoja(unidade, posto), 25 * 1000);
-})();
+}
+iniciarHeartbeatLoja();
 
 boot();
 </script>
