@@ -759,7 +759,7 @@ async function toggleEstoqueUnidade(codigo){
   chips.innerHTML = renderEstoqueChips();
   det.innerHTML = '<div class="pcard-vazio">Carregando...</div>';
   const contagem = ESTOQUE_CONTAGENS_CACHE[codigo];
-  if(!contagem){ det.innerHTML = '<div class="pcard-vazio">Essa unidade ainda não fez a contagem hoje.</div>'; return; }
+  if(!contagem){ det.innerHTML = '<div class="pcard-vazio">Essa unidade não fez a contagem ontem.</div>'; return; }
   try{
     if(!ESTOQUE_CATALOGO_CACHE[codigo]){
       ESTOQUE_CATALOGO_CACHE[codigo] = await fetch(`/api/inventario/catalogo?unidade=${encodeURIComponent(codigo)}`).then(r=>r.json());
@@ -779,11 +779,16 @@ async function toggleEstoqueUnidade(codigo){
   </table></div>`;
 }
 
+// D-1 (ontem) igual Fechamentos/Entregas: a maioria das lojas fecha perto da
+// meia-noite e faz a contagem nesse fechamento - "hoje" logo apos virar o
+// dia sempre viria vazio (ninguem contou o dia que acabou de comecar ainda),
+// entao o card mostraria 0 de N por um bom tempo mesmo com tudo em dia.
+// Ontem e sempre o ultimo dia com contagem de verdade pra conferir.
 async function cardEstoque(){
-  const hoje = hojeBrasilia();
+  const ontem = ontemBrasilia();
   const [roster, contagensDoDia] = await Promise.all([
     fetch('/api/inventario/unidades').then(r=>r.json()),
-    fetch(`/api/inventario/contagens-do-dia?data=${hoje}`).then(r=>r.json()),
+    fetch(`/api/inventario/contagens-do-dia?data=${ontem}`).then(r=>r.json()),
   ]);
   ESTOQUE_ROSTER_CACHE = [...roster].sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
   ESTOQUE_CONTAGENS_CACHE = {};
@@ -791,7 +796,7 @@ async function cardEstoque(){
   ESTOQUE_CATALOGO_CACHE = {};
   ESTOQUE_ABERTA = null;
   const contaram = ESTOQUE_ROSTER_CACHE.filter(u=>ESTOQUE_CONTAGENS_CACHE[u.codigo]);
-  return pcardWrap('📦','Estoque (hoje)','/estoque.html', `
+  return pcardWrap('📦','Estoque (ontem)','/estoque.html', `
     <div class="pstats">${statRow('Unidades com contagem', `${contaram.length} de ${ESTOQUE_ROSTER_CACHE.length}`)}</div>
     <div class="pestoque-chips" id="estoque-chips">${renderEstoqueChips()}</div>
     <div id="estoque-detalhe"></div>
