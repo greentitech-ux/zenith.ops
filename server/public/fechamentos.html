@@ -390,7 +390,7 @@
     </div>
 
     <div class="secao-titulo">Responsável</div>
-    <label>Gerente</label>
+    <label>Nome</label>
     <input type="text" id="ef-gerente">
 
     <div class="secao-titulo">Caixa</div>
@@ -1529,7 +1529,7 @@ function tabelaFechamentosHtml(rows){
   const defs = [
     { key:'data', label:'Data', td:d=>`<td>${fmtData(d.data)}</td>` },
     { key:'unidadeNome', label:'Unid.', td:d=>`<td>${escapeHtml(UNIDADES_NOMES[d.unidade]||d.unidade)}</td>` },
-    { key:'gerente', label:'Gerente', td:d=>`<td class="truncate" title="${escapeHtml(d.gerente||'')}">${escapeHtml(d.gerente||'—')}</td>` },
+    { key:'gerente', label:'Responsável', td:d=>`<td class="truncate" title="${escapeHtml(d.gerente||'')}">${escapeHtml(d.gerente||'—')}</td>` },
     { key:'previsao', label:'Previsão (dia seguinte)', td:d=>{ const p = previsaoDiaSeguinte(d.unidade, d.data); return `<td class="valor" style="color:var(--accent);">${p==null ? '—' : fmtMoney(p)}</td>`; } },
     { key:'faturamento', label:'Faturamento', td:d=>`<td class="valor">${fmtMoney(d.faturamento)}</td>` },
     { key:'totalDeclarado', label:'Total declarado', td:d=>`<td class="valor">${fmtMoney(d.totalDeclarado)}</td>` },
@@ -1559,7 +1559,7 @@ function tabelaFechamentosHtml(rows){
 function opcoesColunas(){
   const vistos = new Map();
   [
-    {key:'gerente', label:'Gerente'},
+    {key:'gerente', label:'Responsável'},
     {key:'previsao', label:'Previsão (dia seguinte)'},
     {key:'faturamento', label:'Faturamento'},
     {key:'totalDeclarado', label:'Total declarado'},
