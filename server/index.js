@@ -5374,6 +5374,17 @@ app.get('/api/relatorio-mv/testar', auth.requireMaster, async (req, res) => {
   }
 });
 
+// pre-visualiza o relatorio (mesmo conteudo que seria enviado agora) SEM
+// mandar e-mail nenhum - forma rapida do Master conferir sem precisar ir na
+// caixa de entrada (ver relatorioMV.previewHtml)
+app.get('/api/relatorio-mv/preview', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await relatorioMV.previewHtml());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // configuração do relatório diário/notificações (ver /email.html) - QUEM
 // recebe (emailDestino) e QUAL usuário dispara o envio (usuarioGatilho,
 // pelo username) - editável na hora pelo Master, sem precisar mexer em env

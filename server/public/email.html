@@ -73,6 +73,12 @@
   .dias-semana input{width:auto;margin:0;}
   .horario-linha{display:flex;gap:10px;}
   .horario-linha input{max-width:140px;}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .modal-overlay.hidden{display:none!important;}
+  .modal-preview{background:#fff;border-radius:10px;width:min(700px,100%);max-height:90vh;display:flex;flex-direction:column;overflow:hidden;}
+  .modal-preview-topo{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line);}
+  .modal-preview-topo span{font-family:var(--mono);font-size:11.5px;color:var(--text);}
+  #preview-iframe{border:none;width:100%;flex:1;min-height:60vh;background:#fff;}
 </style>
 </head>
 <body>
@@ -143,12 +149,25 @@
     <button type="button" class="btn-primary" id="btn-salvar" onclick="salvar()">💾 Salvar</button>
     <div class="msg hidden" id="msg-salvar"></div>
 
+    <button type="button" class="btn-ghost" id="btn-preview" onclick="previsualizar()">👁️ Pré-visualizar agora</button>
+    <div class="msg hidden" id="msg-preview"></div>
+
     <button type="button" class="btn-ghost" id="btn-testar" onclick="testarAgora()">📤 Enviar relatório de teste agora</button>
     <div class="msg hidden" id="msg-testar"></div>
 
     <div class="info-box">
       Um ticket "é do usuário" de duas formas: quando ele foi diretamente atribuído a essa pessoa (campo "Direcionar para" na Central), ou quando o e-mail gravado no ticket bate com o e-mail atual dela - por isso trocar o e-mail aqui não quebra tickets antigos.
     </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="preview-overlay" onclick="if(event.target===this) fecharPreview()">
+  <div class="modal-preview">
+    <div class="modal-preview-topo">
+      <span id="preview-titulo">Pré-visualização</span>
+      <button type="button" class="back" onclick="fecharPreview()">✕ Fechar</button>
+    </div>
+    <iframe id="preview-iframe" title="Pré-visualização do relatório"></iframe>
   </div>
 </div>
 
@@ -263,6 +282,29 @@ async function testarAgora(){
   }finally{
     btn.disabled = false; btn.textContent = txt;
   }
+}
+
+async function previsualizar(){
+  const msg = document.getElementById('msg-preview');
+  const btn = document.getElementById('btn-preview');
+  msg.classList.add('hidden');
+  btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Gerando...';
+  try{
+    const resp = await fetch('/api/relatorio-mv/preview');
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao gerar pré-visualização.');
+    document.getElementById('preview-titulo').textContent = `${data.total} solicitação(ões) · ${data.pendentes} pendente(s), ${data.aprovados} aprovada(s), ${data.rejeitados} recusada(s)`;
+    document.getElementById('preview-iframe').srcdoc = data.html;
+    document.getElementById('preview-overlay').classList.remove('hidden');
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{
+    btn.disabled = false; btn.textContent = txt;
+  }
+}
+function fecharPreview(){
+  document.getElementById('preview-overlay').classList.add('hidden');
+  document.getElementById('preview-iframe').srcdoc = '';
 }
 
 document.getElementById('f-usuario').addEventListener('change', atualizarStatusUsuario);
