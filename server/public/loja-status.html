@@ -670,210 +670,30 @@ function copiarIpLocal(ip){
   alert(`IP local copiado: ${ip}`);
 }
 
-// gera um script de "vigia" pra rodar nativo no Windows daquele computador,
-// fora do navegador - pedido explicito do usuario: (1) o monitoramento nao
-// pode depender so da aba ficar aberta (se alguem fechar por engano, o
-// vigia reabre sozinho), (2) precisa do IP da rede LOCAL da maquina pra
-// acesso remoto no dia a dia (o IP publico que o heartbeat ja capturava nao
-// serve pra isso), e (3) precisa avisar SO o Master quando alguem se
-// conecta na maquina por qualquer ferramenta de acesso remoto (AnyDesk,
-// TeamViewer, DWService ou outra - ver Verificar-AcessoRemoto mais abaixo).
-// E so um script (nao um agente instalado de verdade) - mais simples de
-// distribuir, mas depende do Windows permitir rodar PowerShell (ver
-// instrucoes no proprio arquivo baixado)
-//
-// tipo 'interno' (servidor/PC de escritorio SEM funcao nenhuma pra alguem
-// usar - so existe pra ficar "vivo" pro monitoramento) e um caso especial:
-// nao tem sentido nenhum manter uma janela de navegador aberta so pra mandar
-// heartbeat, entao o vigia manda o heartbeat DE VERDADE direto (o mesmo que
-// index.html mandaria), sem gerenciar janela nenhuma - o computador fica
-// "online" so com o vigia rodando, nao precisa nunca abrir o app (que
-// continua livre pra ser aberto manualmente a qualquer momento, sem conflito
-// nenhum com o vigia). Pros outros tipos (atendimento/abastecimento) a
-// pagina aberta E a propria funcionalidade (chat do cliente / tela de
-// trabalho do operador) - o vigia so reabre se fechar e reporta o IP local
-// separado, sem tocar no heartbeat "de verdade" (esse continua vindo da
-// pagina, que e o sinal que realmente importa nesses casos)
-function baixarVigia(codigo, posto, tipo){
-  const ehInterno = tipo === 'interno';
-  const urlMonitorar = `${location.origin}/${paginaDoTipo(tipo)}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
-  const urlReportarIp = `${location.origin}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/ip-local`;
-  const urlHeartbeat = `${location.origin}/api/loja-status/heartbeat`;
-  const urlAcessoRemoto = `${location.origin}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/acesso-remoto`;
-  const nomeTarefa = 'NOCZenith_' + posto;
-  const cabecalhoInterno = [
-    '# O que isso faz, rodando escondido em segundo plano: manda direto pro',
-    '# Zenith o sinal de que esse computador esta ligado e conectado (aparece',
-    '# online em Status das Lojas) - sem precisar manter nenhuma janela aberta.',
-    '# Continua podendo abrir o app fixado na barra de tarefas quando quiser,',
-    '# pra fazer login/usar o Zenith normal - isso nao tem nenhum conflito com',
-    '# o NOCZenith rodando por baixo. Tambem avisa SO o Master (nao aparece pro',
-    '# resto do time) quando alguem se conecta nessa maquina por AnyDesk,',
-    '# TeamViewer, DWService ou qualquer outra ferramenta de acesso remoto.',
-  ];
-  const cabecalhoOutros = [
-    '# O que isso faz, rodando escondido em segundo plano:',
-    '# 1) Reabre a tela de monitoramento sozinho se alguem fechar ela sem querer.',
-    '# 2) Manda pro Zenith o IP da rede LOCAL desse computador (pra acesso',
-    '#    remoto no dia a dia - aparece em Status das Lojas, no card desse',
-    '#    computador).',
-    '# 3) Avisa SO o Master (nao aparece pro resto do time) quando alguem se',
-    '#    conecta nessa maquina por AnyDesk, TeamViewer, DWService ou',
-    '#    qualquer outra ferramenta de acesso remoto.',
-  ];
-  const linhasComuns = [
-    '# NOCZenith - ' + codigo + ' / ' + posto,
-    '#',
-    ...(ehInterno ? cabecalhoInterno : cabecalhoOutros),
-    '#',
-    '# COMO INSTALAR (um passo so):',
-    '# 1) Salve esse arquivo numa pasta fixa e definitiva (ex: Documentos\\NOCZenith)',
-    '#    - nao mova depois, o agendamento vai apontar pra esse caminho.',
-    '# 2) Clique com o botao DIREITO no arquivo > "Executar com o PowerShell".',
-    '#    Uma janela preta abre rapido, instala e some sozinha.',
-    '#',
-    '# Se aparecer um erro falando de "execution policy" / "nao pode ser',
-    '# carregado": abra o PowerShell normal (menu Iniciar > digite PowerShell),',
-    '# rode uma vez so: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force',
-    '# e tente o passo 2 de novo.',
-    '',
-    'param([switch]$Loop)',
-    '',
-    '$NomeTarefa = "' + nomeTarefa + '"',
-    '$InicioScript = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
-    '',
-    '# ---- deteccao de acesso remoto (AnyDesk, TeamViewer, DWService, RustDesk,',
-    '# UltraViewer, VNC, Splashtop, LogMeIn, GoToAssist, Chrome Remote Desktop -',
-    '# ou qualquer outra que rode como processo do Windows). So alerta quando',
-    '# uma conexao NOVA aparece (guarda as ja avisadas em $JaAvisados, esquece',
-    '# quando a conexao cai - se reconectar depois, avisa de novo). Best-effort:',
-    '# depende da ferramenta manter uma conexao TCP estabelecida direta com',
-    '# quem esta controlando - cobre os casos comuns, mas nao e garantia',
-    '# absoluta pra toda ferramenta que existe.',
-    '$UrlAcessoRemoto = "' + urlAcessoRemoto + '"',
-    '$ProcessosAcessoRemoto = @(',
-    '  "AnyDesk", "TeamViewer", "TeamViewer_Service", "dwagent", "dwagsvc",',
-    '  "rustdesk", "UltraViewer_Desktop", "UltraViewer_Service", "remoting_host",',
-    '  "Supremo", "LogMeIn", "LMIGuardianSvc", "vncserver", "winvnc", "tvnserver",',
-    '  "SRServer", "SRManager", "g2mcomm", "g2svc"',
-    ')',
-    '$JaAvisados = New-Object System.Collections.Generic.HashSet[string]',
-    '',
-    'function Verificar-AcessoRemoto {',
-    '  $vistosAgora = New-Object System.Collections.Generic.HashSet[string]',
-    '  foreach ($nomeProc in $ProcessosAcessoRemoto) {',
-    '    $procs = Get-Process -Name $nomeProc -ErrorAction SilentlyContinue',
-    '    foreach ($p in $procs) {',
-    '      $conexoes = Get-NetTCPConnection -State Established -OwningProcess $p.Id -ErrorAction SilentlyContinue',
-    '      foreach ($c in $conexoes) {',
-    '        if ($c.RemoteAddress -eq "127.0.0.1" -or $c.RemoteAddress -eq "::1") { continue }',
-    '        $chave = "$nomeProc|$($c.RemoteAddress)|$($c.RemotePort)"',
-    '        [void]$vistosAgora.Add($chave)',
-    '        if (-not $JaAvisados.Contains($chave)) {',
-    '          try {',
-    '            $detalhe = "$nomeProc ($($c.RemoteAddress):$($c.RemotePort))"',
-    '            $corpoAlerta = @{ detalhe = $detalhe } | ConvertTo-Json',
-    '            Invoke-RestMethod -Uri $UrlAcessoRemoto -Method Post -ContentType "application/json" -Body $corpoAlerta -ErrorAction SilentlyContinue | Out-Null',
-    '          } catch {}',
-    '        }',
-    '      }',
-    '    }',
-    '  }',
-    '  $script:JaAvisados = $vistosAgora',
-    '}',
-    '',
-  ];
-  const linhasLoopInterno = [
-    '$UrlHeartbeat = "' + urlHeartbeat + '"',
-    '$IntervaloSegundos = 25',
-    '',
-    'function Rodar-Loop {',
-    '  while ($true) {',
-    '    try {',
-    '      $corpo = @{ unidade = "' + codigo + '"; posto = "' + posto + '"; userAgent = "NOCZenith/1.0 (Windows NT; PowerShell)"; abertoDesde = $InicioScript } | ConvertTo-Json',
-    '      Invoke-RestMethod -Uri $UrlHeartbeat -Method Post -ContentType "application/json" -Body $corpo -ErrorAction SilentlyContinue | Out-Null',
-    '    } catch {}',
-    '    try { Verificar-AcessoRemoto } catch {}',
-    '    Start-Sleep -Seconds $IntervaloSegundos',
-    '  }',
-    '}',
-    '',
-  ];
-  const linhasLoopOutros = [
-    '$TituloJanela = "Zenith Ops"',
-    '$UrlMonitorar = "' + urlMonitorar + '"',
-    '$UrlReportarIp = "' + urlReportarIp + '"',
-    '$IntervaloSegundos = 20',
-    // a checagem de acesso remoto roda TODO tick (20s); reabrir a janela e
-    // reportar o IP local continuam no ritmo de antes (120s = 6 ticks) - so
-    // trocou o "relogio" do loop pra dar mais rapidez no alerta de acesso
-    // remoto sem mudar a frequencia das outras duas tarefas
-    '$TicksParaVerificacaoPesada = 6',
-    '',
-    'function Reabrir-Monitor {',
-    '  $candidatos = @(',
-    '    "$env:ProgramFiles\\Google\\Chrome\\Application\\chrome.exe",',
-    '    "${env:ProgramFiles(x86)}\\Google\\Chrome\\Application\\chrome.exe",',
-    '    "$env:ProgramFiles\\Microsoft\\Edge\\Application\\msedge.exe",',
-    '    "${env:ProgramFiles(x86)}\\Microsoft\\Edge\\Application\\msedge.exe"',
-    '  )',
-    '  $navegador = $candidatos | Where-Object { Test-Path $_ } | Select-Object -First 1',
-    '  if ($navegador) {',
-    '    Start-Process -FilePath $navegador -ArgumentList "--app=$UrlMonitorar" -WindowStyle Minimized',
-    '  } else {',
-    '    Start-Process $UrlMonitorar',
-    '  }',
-    '}',
-    '',
-    'function Rodar-Loop {',
-    '  $contador = 0',
-    '  while ($true) {',
-    '    try { Verificar-AcessoRemoto } catch {}',
-    '    $contador++',
-    '    if ($contador -ge $TicksParaVerificacaoPesada) {',
-    '      $contador = 0',
-    '      $aberto = Get-Process | Where-Object { $_.MainWindowTitle -match [regex]::Escape($TituloJanela) } | Select-Object -First 1',
-    '      if (-not $aberto) { Reabrir-Monitor }',
-    '      try {',
-    '        $ip = (Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred -ErrorAction SilentlyContinue |',
-    '          Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |',
-    '          Select-Object -First 1 -ExpandProperty IPAddress)',
-    '        if ($ip) {',
-    '          Invoke-RestMethod -Uri $UrlReportarIp -Method Post -ContentType "application/json" -Body (@{ ip = $ip } | ConvertTo-Json) -ErrorAction SilentlyContinue | Out-Null',
-    '        }',
-    '      } catch {}',
-    '    }',
-    '    Start-Sleep -Seconds $IntervaloSegundos',
-    '  }',
-    '}',
-    '',
-  ];
-  const linhasFinal = [
-    'if ($Loop) {',
-    '  Rodar-Loop',
-    '} else {',
-    '  $caminho = $PSCommandPath',
-    '  $acao = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$caminho`" -Loop"',
-    '  $gatilho = New-ScheduledTaskTrigger -AtLogOn',
-    '  Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho -Force | Out-Null',
-    '  Write-Host "Instalado! O NOCZenith vai rodar sozinho a partir do proximo login."',
-    '  Write-Host "Iniciando agora tambem, nessa sessao..."',
-    '  Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$caminho`" -Loop"',
-    '  Read-Host "Pronto! Pode fechar essa janela (aperte Enter)"',
-    '}',
-    '',
-  ];
-  const linhas = [...linhasComuns, ...(ehInterno ? linhasLoopInterno : linhasLoopOutros), ...linhasFinal];
-  const conteudo = linhas.join('\n');
-  const blob = new Blob([conteudo], {type:'text/plain;charset=utf-8'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `NOCZenith-${posto}.ps1`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(a.href);
-  alert(`Script "NOCZenith-${posto}.ps1" baixado.\n\nComo instalar:\n1) Salve numa pasta fixa (ex: Documentos\\NOCZenith)\n2) Clique com o botão direito nele > "Executar com o PowerShell"\n\nPronto - ele se instala sozinho e já começa a rodar. As instruções completas (inclusive o que fazer se der erro de permissão) estão nos comentários no topo do próprio arquivo.`);
+// baixa o script de "vigia" (NOCZenith) pra rodar nativo no Windows daquele
+// computador, fora do navegador. O CONTEUDO em si e montado no servidor
+// (ver server/vigiaScript.js) - fonte unica, ja que o proprio script
+// RODANDO tambem busca esse mesmo endpoint pra se autoatualizar sozinho
+// quando sai uma versao nova (sem precisar reinstalar na mao - so quem ja
+// tinha instalado ANTES dessa funcionalidade existir e que precisa baixar
+// e instalar uma vez manualmente pra "entrar" no ciclo de autoatualizacao).
+async function baixarVigia(codigo, posto, tipo){
+  try{
+    const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/vigia.ps1?tipo=${encodeURIComponent(tipo)}`);
+    if(!resp.ok) throw new Error('Erro ao gerar o script.');
+    const conteudo = await resp.text();
+    const blob = new Blob([conteudo], {type:'text/plain;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `NOCZenith-${posto}.ps1`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+    alert(`Script "NOCZenith-${posto}.ps1" baixado.\n\nComo instalar:\n1) Salve numa pasta fixa (ex: Documentos\\NOCZenith)\n2) Clique com o botão direito nele > "Executar com o PowerShell"\n\nPronto - ele se instala sozinho e já começa a rodar (e a partir de agora se atualiza sozinho quando eu mudar algo nele). As instruções completas (inclusive o que fazer se der erro de permissão) estão nos comentários no topo do próprio arquivo.`);
+  }catch(e){
+    alert(e.message);
+  }
 }
 
 let EDITAR_COMP_CODIGO = null;
