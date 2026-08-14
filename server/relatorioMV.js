@@ -4,10 +4,10 @@
 //
 // PARTE A (relatorio): reaproveita centralCards.listarTodos() - a mesma
 // fonte de dados do GET /api/central - filtrando por quem e "do gatilho"
-// (ver ehDoMV: direcionadoParaEmail === e-mail ATUAL do usuario configurado
-// OU direcionadoParaId === id desse usuario - cobre ticket atribuido mesmo
-// quando o e-mail gravado no card nao bate 100% com o e-mail atual do
-// usuario), agrupado por status. O destinatario dos e-mails e QUEM esta
+// (ver ehDoMV: mesmo criterio de podeVerCard() em index.js - direcionadoPara
+// OU dentro de atribuidosIds/atribuidosEmails, que e o campo que o botao
+// "Atribuir Responsavel" preenche quando o ticket tem mais de uma pessoa
+// responsavel), agrupado por status. O destinatario dos e-mails e QUEM esta
 // configurado (ver getConfig/salvarConfig, editavel em /email.html - pagina
 // "Email" do Master) - nao precisa mexer em env var nem redeploy pra trocar.
 //
@@ -157,15 +157,24 @@ async function salvarConfig({ emailDestino, emailCopia, usuarioGatilho, horaEnvi
   return configNova;
 }
 
-// "e do gatilho" cobre os dois jeitos de um card ter sido direcionado pro
-// usuario configurado: pelo e-mail ATUAL dele (gatilhoUserEmail) OU por ter
-// sido atribuido diretamente a ele (direcionadoParaId === gatilhoUserId) -
-// o e-mail gravado no card e so um retrato de quando foi direcionado, entao
-// um card antigo com e-mail diferente do atual do usuario tambem conta
+// "e do gatilho" usa o MESMO criterio de podeVerCard() em index.js (quem
+// enxerga o card na Central), senao o relatorio ficaria mais restrito que a
+// propria tela: direcionadoParaEmail/Id (campo de 1 pessoa so, preenchido na
+// criacao ou pelo botao "Direcionar para") OU dentro de atribuidosIds/
+// atribuidosEmails (array, preenchido pelo botao "Atribuir Responsavel" -
+// pode ter mais de uma pessoa, e o usuario configurado pode nao ser o
+// primeiro da lista). O e-mail gravado no card e so um retrato de quando foi
+// direcionado, entao compara pelo e-mail ATUAL do usuario (gatilhoUserEmail)
+// - um card antigo com e-mail diferente do atual do usuario tambem conta
 function ehDoMV(card, config) {
   if (!card || !config) return false;
-  if (config.gatilhoUserEmail && String(card.direcionadoParaEmail || '').trim().toLowerCase() === config.gatilhoUserEmail) return true;
-  return !!config.gatilhoUserId && card.direcionadoParaId === config.gatilhoUserId;
+  const emailAtual = config.gatilhoUserEmail;
+  const idAtual = config.gatilhoUserId;
+  if (emailAtual && String(card.direcionadoParaEmail || '').trim().toLowerCase() === emailAtual) return true;
+  if (idAtual && card.direcionadoParaId === idAtual) return true;
+  if (idAtual && Array.isArray(card.atribuidosIds) && card.atribuidosIds.includes(idAtual)) return true;
+  if (emailAtual && Array.isArray(card.atribuidosEmails) && card.atribuidosEmails.some((e) => String(e || '').trim().toLowerCase() === emailAtual)) return true;
+  return false;
 }
 
 // modulo que sabe gerar o link publico (ticket-publico.html) pra cada tipo -
