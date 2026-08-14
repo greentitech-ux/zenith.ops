@@ -96,11 +96,6 @@
   .acoes-lista .acoes-sep{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:8px 0 0;}
   .checks .group-heading{width:100%;font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:6px;}
   .checks .group-heading:first-child{margin-top:0;}
-  .unidades-secao{margin-top:14px;}
-  .unidades-secao:first-child{margin-top:0;}
-  .unidades-secao-titulo{font-family:var(--mono);font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--line);}
-  .unidades-grupo-titulo{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 4px;}
-  .unidades-grupo-titulo:first-of-type{margin-top:0;}
   .tags{display:flex;flex-wrap:wrap;gap:4px;max-width:280px;}
   .tag{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);color:var(--text);white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis;}
   .tag-mais{cursor:pointer;color:var(--accent);border-color:var(--accent);flex:none;}
@@ -113,8 +108,6 @@
   form.create{display:flex;flex-direction:column;gap:10px;max-width:520px;}
   form.create label{font-size:11.5px;color:var(--muted);}
   form.create input{width:100%;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;}
-  fieldset{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0;}
-  legend{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;padding:0 6px;max-width:100%;overflow-wrap:break-word;}
   .checks{display:flex;flex-wrap:wrap;gap:10px;}
   .checks label{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text);white-space:nowrap;}
   .checks input{width:auto;margin:0;}
@@ -132,6 +125,30 @@
   .legend-actions{display:inline-flex;gap:6px;margin-left:8px;text-transform:none;}
   .legend-actions button{font-family:var(--sans);font-size:10.5px;padding:2px 8px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
   .legend-actions button:hover{border-color:var(--accent);color:var(--text);}
+  /* categorias de permissão (Seções/Unidades/Cofre/Tipo de solicitação/Tags)
+     dentro de "Criar novo acesso" e "Permissões e tags" - colapsadas por
+     padrão (clique no título abre), pra não jogar uma parede de checkbox
+     na cara de quem só quer editar uma coisa. Dentro de cada uma, listas
+     longas (Unidades, Cofre) ficam em ordem alfabética com a letra acima
+     do primeiro nome de cada grupo, mostrando só ~10 linhas por vez - o
+     resto rola (ver accordionChecklist/toggleAccordionCat) */
+  .accordion-cat{border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+  .accordion-cat + .accordion-cat{margin-top:8px;}
+  .accordion-head{display:flex;align-items:center;gap:6px;width:100%;padding:9px 12px;background:var(--panel2);border:none;cursor:pointer;text-align:left;font-family:var(--sans);color:var(--text);}
+  .accordion-seta{display:inline-block;font-size:10px;color:var(--muted);transition:transform .15s ease;flex:none;}
+  .accordion-head.aberto .accordion-seta{transform:rotate(90deg);}
+  .accordion-head b{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;font-weight:600;letter-spacing:.02em;}
+  .accordion-badge{font-family:var(--mono);font-size:10px;color:var(--accent);}
+  .accordion-head .legend-actions{margin-left:auto;}
+  .accordion-body{padding:10px 12px;border-top:1px solid var(--line);}
+  .accordion-body.hidden{display:none;}
+  .ajuda-fieldset{font-size:10.5px;color:var(--muted);margin:-2px 0 8px;}
+  .az-list{display:block;}
+  .az-list label{display:flex;width:100%;white-space:normal;}
+  .az-letra{width:100%;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--accent);margin:8px 0 3px;padding-bottom:2px;border-bottom:1px solid var(--line);}
+  .az-letra:first-child{margin-top:0;}
+  .az-sufixo{color:var(--muted);font-weight:400;}
+  .az-scroll{max-height:270px;overflow-y:auto;padding-right:4px;}
 
   .users-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
   .users-toolbar input[type=search]{flex:1;min-width:200px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;}
@@ -237,36 +254,14 @@
       <label>Usuário (login curto, opcional - ex: "jn")<input type="text" id="c-username" pattern="[a-z0-9._-]{2,30}" title="Só letras minúsculas, números, ponto, hífen ou underline (2 a 30 caracteres)"></label>
       <label>Senha temporária (mín. 8 caracteres)<input type="text" id="c-password" required minlength="8"></label>
 
-      <fieldset>
-        <legend>Seções <span class="legend-actions"><button type="button" onclick="marcarTodos('c-sections',true)">Marcar todos</button><button type="button" onclick="marcarTodos('c-sections',false)">Desmarcar todos</button></span></legend>
-        <div class="checks" id="c-sections"></div>
-      </fieldset>
-
-      <fieldset>
-        <legend>Unidades <span class="legend-actions"><button type="button" onclick="marcarTodos('c-unidades',true)">Marcar todos</button><button type="button" onclick="marcarTodos('c-unidades',false)">Desmarcar todos</button></span></legend>
-        <div style="font-size:10.5px;color:var(--muted);margin:-4px 0 8px;">vale pra monitor, disputas, fechamentos, lançamento, sangria/depósito e entregas. Chamados de TI e Manutenção não dependem de unidade (marca todas automaticamente - a pessoa vê os chamados atribuídos a ela em qualquer loja).</div>
-        <div id="c-unidades"></div>
-      </fieldset>
-
-      <fieldset>
-        <legend>Cofre (subgrupos) <span class="legend-actions"><button type="button" onclick="marcarTodos('c-groups',true)">Marcar todos</button><button type="button" onclick="marcarTodos('c-groups',false)">Desmarcar todos</button></span></legend>
-        <div class="checks" id="c-groups"></div>
-      </fieldset>
-
-      <fieldset>
-        <legend>Tipos de solicitação (Central) <span class="legend-actions"><button type="button" onclick="marcarTodos('c-tipos-solicitacao',true)">Marcar todos</button><button type="button" onclick="marcarTodos('c-tipos-solicitacao',false)">Desmarcar todos</button></span></legend>
-        <div style="font-size:10.5px;color:var(--muted);margin:-4px 0 8px;">vale pra quem tem a seção Central de Solicitações. Nenhum marcado = vê todos os tipos (padrão). Marcando algum, só esses ficam visíveis (ex: liberar só Suporte de TI pra um Admin).</div>
-        <div class="checks" id="c-tipos-solicitacao"></div>
-      </fieldset>
-
-      <fieldset>
-        <legend>Tags</legend>
-        <div style="font-size:10.5px;color:var(--muted);margin:-4px 0 8px;">Já cria o acesso com essas tags marcadas - dá pra ajustar depois em Ações → Permissões e tags.</div>
-        <div id="c-tags"></div>
-      </fieldset>
+      <div id="c-sections-wrap"></div>
+      <div id="c-unidades-wrap"></div>
+      <div id="c-groups-wrap"></div>
+      <div id="c-tipos-solicitacao-wrap"></div>
+      <div id="c-tags-wrap"></div>
 
       <p class="err hidden" id="create-err"></p>
-      <button type="submit" class="primary">Criar acesso</button>
+      <button type="submit" class="primary" id="create-submit-btn">Criar acesso</button>
     </form>
   </div>
 
@@ -405,7 +400,7 @@
     <p class="err hidden" id="qa-master-err"></p>
     <div class="modal-actions">
       <button type="button" id="qa-master-cancel">Cancelar</button>
-      <button type="submit" class="primary">Criar</button>
+      <button type="submit" class="primary" id="qa-master-submit-btn">Criar</button>
     </div>
   </form>
 </div>
@@ -413,27 +408,11 @@
 <div class="overlay" id="perm-overlay">
   <form class="modal" id="perm-form">
     <h3 id="perm-title">Editar permissões</h3>
-    <fieldset>
-      <legend>Seções <span class="legend-actions"><button type="button" onclick="marcarTodos('p-sections',true)">Marcar todos</button><button type="button" onclick="marcarTodos('p-sections',false)">Desmarcar todos</button></span></legend>
-      <div class="checks" id="p-sections"></div>
-    </fieldset>
-    <fieldset style="margin-top:10px;">
-      <legend>Unidades <span class="legend-actions"><button type="button" onclick="marcarTodos('p-unidades',true)">Marcar todos</button><button type="button" onclick="marcarTodos('p-unidades',false)">Desmarcar todos</button></span></legend>
-      <div id="p-unidades"></div>
-    </fieldset>
-    <fieldset style="margin-top:10px;">
-      <legend>Cofre (subgrupos) <span class="legend-actions"><button type="button" onclick="marcarTodos('p-groups',true)">Marcar todos</button><button type="button" onclick="marcarTodos('p-groups',false)">Desmarcar todos</button></span></legend>
-      <div class="checks" id="p-groups"></div>
-    </fieldset>
-    <fieldset style="margin-top:10px;">
-      <legend>Tipos de solicitação (Central) <span class="legend-actions"><button type="button" onclick="marcarTodos('p-tipos-solicitacao',true)">Marcar todos</button><button type="button" onclick="marcarTodos('p-tipos-solicitacao',false)">Desmarcar todos</button></span></legend>
-      <div style="font-size:10.5px;color:var(--muted);margin:-4px 0 8px;">Nenhum marcado = vê todos os tipos (padrão). Marcando algum, só esses ficam visíveis na Central.</div>
-      <div class="checks" id="p-tipos-solicitacao"></div>
-    </fieldset>
-    <fieldset style="margin-top:10px;">
-      <legend>Tags</legend>
-      <div id="p-tags"></div>
-    </fieldset>
+    <div id="p-sections-wrap"></div>
+    <div id="p-unidades-wrap" style="margin-top:8px;"></div>
+    <div id="p-groups-wrap" style="margin-top:8px;"></div>
+    <div id="p-tipos-solicitacao-wrap" style="margin-top:8px;"></div>
+    <div id="p-tags-wrap" style="margin-top:8px;"></div>
     <p class="err hidden" id="perm-err"></p>
     <div class="modal-actions">
       <button type="button" id="perm-cancel">Cancelar</button>
@@ -550,50 +529,94 @@ let EDITING_USER = null;
 let ME_IS_QA_MASTER = false;
 let QA_APROVACOES = [];
 
-function checksHtml(name, options, valueFn, labelFn, checkedSet){
-  return options.map(opt=>{
-    const value = valueFn(opt), label = labelFn(opt);
-    const checked = checkedSet.has(value) ? 'checked' : '';
-    return `<label><input type="checkbox" name="${name}" value="${value}" ${checked}> ${label}</label>`;
-  }).join('') || `<span style="color:var(--muted);font-size:11.5px;">Nenhuma opção disponível ainda.</span>`;
+// ---------- categorias de permissão em acordeão (Seções/Unidades/Cofre/
+// Tipo de solicitação/Tags) - pedido explícito do usuário: ficava tudo
+// aberto de uma vez ("parede de checkbox"). Agora cada categoria começa
+// fechada (clique no título abre), com "Marcar todos"/"Desmarcar todos"
+// sempre visíveis no cabeçalho. Listas longas (Unidades, Cofre, Seções)
+// ficam em ordem alfabética com a letra acima do primeiro nome de cada
+// grupo, mostrando só ~10 linhas por vez - o resto rola no scroll vertical
+// (ver accordionChecklist). readChecked/marcarTodos continuam iguais: o
+// id do container de checkboxes não mudou, só o que fica em volta dele. ----------
+function toggleAccordionCat(headEl){
+  headEl.classList.toggle('aberto');
+  headEl.nextElementSibling.classList.toggle('hidden');
 }
-// subgrupos do cofre agrupados visualmente pelo grupo pai (ex: GBE > DOM_BESSA)
-function subgroupChecksHtml(checkedSet){
-  const html = VAULT_GROUPS.map(g=>{
-    const filhos = VAULT_SUBGROUPS.filter(s=>s.groupId===g.id);
-    if(!filhos.length) return '';
-    const itens = filhos.map(s=>{
-      const checked = checkedSet.has(s.id) ? 'checked' : '';
-      return `<label><input type="checkbox" value="${s.id}" ${checked}> ${escapeHtml(s.name)}</label>`;
-    }).join('');
-    return `<div class="group-heading">${escapeHtml(g.name)}</div>${itens}`;
+function accordionWrap(titulo, headerExtra, innerHtml){
+  return `
+  <div class="accordion-cat">
+    <div class="accordion-head" onclick="toggleAccordionCat(this)">
+      <span class="accordion-seta">▸</span>
+      <b>${titulo}</b>
+      ${headerExtra||''}
+    </div>
+    <div class="accordion-body hidden">${innerHtml}</div>
+  </div>`;
+}
+// tira emoji/pontuação/espaços do início do rótulo antes de comparar/
+// agrupar por letra - vários rótulos começam com emoji (ex: "💳 Estorno"),
+// que senão viraria a "letra" do grupo em vez do E de verdade
+function letraChave(texto){
+  const limpo = String(texto||'').replace(/^[^\p{L}\p{N}]+/u, '').trim();
+  return limpo || String(texto||'');
+}
+// itens: [{value, label, sufixoTexto?}]. Acima de 10 itens, ordena
+// alfabeticamente e insere um cabeçalho de letra antes do primeiro item de
+// cada uma, dentro de uma área com scroll (~10 linhas visíveis por vez).
+// Listas curtas continuam na ordem que vieram, sem letra nem scroll - não
+// tem o que rolar.
+function accordionChecklist({ id, titulo, name, itens, checkedSet, ajuda }){
+  const comLetra = itens.length > 10;
+  const ordenados = comLetra
+    ? [...itens].sort((a,b)=> letraChave(a.label).localeCompare(letraChave(b.label),'pt-BR',{sensitivity:'base'}))
+    : itens;
+  let letraAtual = '';
+  const linhas = ordenados.map(it=>{
+    let cabecalho = '';
+    if(comLetra){
+      const letra = (letraChave(it.label)[0]||'#').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+      if(letra !== letraAtual){ letraAtual = letra; cabecalho = `<div class="az-letra">${escapeHtml(letra)}</div>`; }
+    }
+    const checked = checkedSet.has(it.value) ? 'checked' : '';
+    const sufixo = it.sufixoTexto ? ` <small class="az-sufixo">${escapeHtml(it.sufixoTexto)}</small>` : '';
+    return `${cabecalho}<label><input type="checkbox" ${name?`name="${name}"`:''} value="${escapeHtml(String(it.value))}" ${checked}> ${escapeHtml(it.label)}${sufixo}</label>`;
   }).join('');
-  return html || `<span style="color:var(--muted);font-size:11.5px;">Nenhum subgrupo criado ainda no Cofre.</span>`;
+  const corpo = linhas || `<span style="color:var(--muted);font-size:11.5px;">Nenhuma opção disponível ainda.</span>`;
+  const n = checkedSet.size;
+  const headerExtra = `<span class="accordion-badge">${n ? n+' selecionad'+(n===1?'a':'as') : ''}</span>` +
+    `<span class="legend-actions" onclick="event.stopPropagation()"><button type="button" onclick="marcarTodos('${id}',true)">Marcar todos</button><button type="button" onclick="marcarTodos('${id}',false)">Desmarcar todos</button></span>`;
+  const inner = `${ajuda ? `<div class="ajuda-fieldset">${ajuda}</div>` : ''}<div class="checks az-list ${comLetra?'az-scroll':''}" id="${id}">${corpo}</div>`;
+  return accordionWrap(titulo, headerExtra, inner);
 }
-// unidades agrupadas por Seção (Fechamento/Entregas/Monitor-Adyen) e, dentro
-// de cada seção, por Grupo (ARCFOOD/Grupo Bravo) - a mesma loja física pode
-// ter mais de um código (um por sistema, ver server/index.js) e por isso
-// pode aparecer mais de uma vez, mas assim fica claro o porquê de cada uma
-function unidadesChecksHtml(checkedSet){
-  if(!UNIDADES.length) return `<span style="color:var(--muted);font-size:11.5px;">Nenhuma opção disponível ainda.</span>`;
-  const porSecao = new Map();
-  UNIDADES.forEach(u=>{
-    if(!porSecao.has(u.secao)) porSecao.set(u.secao, new Map());
-    const porGrupo = porSecao.get(u.secao);
-    const grupo = u.grupo || '—';
-    if(!porGrupo.has(grupo)) porGrupo.set(grupo, []);
-    porGrupo.get(grupo).push(u);
+// monta as 5 categorias (Seções/Unidades/Cofre/Tipo de solicitação/Tags) de
+// uma vez, tanto pro form de criação (prefixo "c") quanto pro modal de
+// permissões (prefixo "p") - cada `perms`/`tagsAtuais` null = tudo
+// desmarcado (formulário de criação em branco)
+function renderCategoriasPermissao(prefixo, perms, tagsAtuais){
+  perms = perms || { sections:[], unidades:[], vaultSubgroups:[], tiposSolicitacao:[] };
+  document.getElementById(`${prefixo}-sections-wrap`).innerHTML = accordionChecklist({
+    id: `${prefixo}-sections`, titulo: 'Seções', name: 'sections',
+    itens: SECTIONS.map(([v,l])=>({ value:v, label:l })),
+    checkedSet: new Set(perms.sections),
   });
-  return [...porSecao.entries()].map(([secao, porGrupo])=>{
-    const blocos = [...porGrupo.entries()].map(([grupo, itens])=>{
-      const itensHtml = itens.map(u=>{
-        const checked = checkedSet.has(u.codigo) ? 'checked' : '';
-        return `<label><input type="checkbox" name="unidades" value="${escapeHtml(u.codigo)}" ${checked}> ${escapeHtml(u.nome)}</label>`;
-      }).join('');
-      return `<div class="unidades-grupo-titulo">${escapeHtml(grupo)}</div><div class="checks">${itensHtml}</div>`;
-    }).join('');
-    return `<div class="unidades-secao"><div class="unidades-secao-titulo">${escapeHtml(secao)}</div>${blocos}</div>`;
-  }).join('');
+  document.getElementById(`${prefixo}-unidades-wrap`).innerHTML = accordionChecklist({
+    id: `${prefixo}-unidades`, titulo: 'Unidades', name: 'unidades',
+    itens: UNIDADES.map(u=>({ value:u.codigo, label:u.nome, sufixoTexto:(u.secao||'')+(u.grupo&&u.grupo!=='—'?' · '+u.grupo:'') })),
+    checkedSet: new Set(perms.unidades),
+    ajuda: 'vale pra monitor, disputas, fechamentos, lançamento, sangria/depósito e entregas. Chamados de TI e Manutenção não dependem de unidade (marca todas automaticamente - a pessoa vê os chamados atribuídos a ela em qualquer loja).',
+  });
+  document.getElementById(`${prefixo}-groups-wrap`).innerHTML = accordionChecklist({
+    id: `${prefixo}-groups`, titulo: 'Cofre (subgrupos)', name: null,
+    itens: VAULT_SUBGROUPS.map(s=>({ value:s.id, label:s.name, sufixoTexto:(VAULT_GROUPS.find(g=>g.id===s.groupId)||{}).name||'' })),
+    checkedSet: new Set(perms.vaultSubgroups),
+  });
+  document.getElementById(`${prefixo}-tipos-solicitacao-wrap`).innerHTML = accordionChecklist({
+    id: `${prefixo}-tipos-solicitacao`, titulo: 'Tipos de solicitação (Central)', name: 'tiposSolicitacao',
+    itens: TIPOS_SOLICITACAO.map(([v,l])=>({ value:v, label:l })),
+    checkedSet: new Set(perms.tiposSolicitacao||[]),
+    ajuda: 'Nenhum marcado = vê todos os tipos (padrão). Marcando algum, só esses ficam visíveis na Central.',
+  });
+  document.getElementById(`${prefixo}-tags-wrap`).innerHTML = accordionWrap('Tags', '', tagsFieldsetHtml(prefixo, tagsAtuais));
 }
 function readChecked(container){
   return [...container.querySelectorAll('input[type=checkbox]:checked')].map(i=>i.value);
@@ -693,11 +716,7 @@ async function boot(){
   UNIDADES = unidades; VAULT_GROUPS = groups; VAULT_SUBGROUPS = subgroups;
   UNIDADES.forEach(u=>{ UNIDADES_NOMES[u.codigo] = u.nome; });
 
-  document.getElementById('c-sections').innerHTML = checksHtml('sections', SECTIONS, o=>o[0], o=>o[1], new Set());
-  document.getElementById('c-unidades').innerHTML = unidadesChecksHtml(new Set());
-  document.getElementById('c-groups').innerHTML = subgroupChecksHtml(new Set());
-  document.getElementById('c-tipos-solicitacao').innerHTML = checksHtml('tiposSolicitacao', TIPOS_SOLICITACAO, o=>o[0], o=>o[1], new Set());
-  document.getElementById('c-tags').innerHTML = tagsFieldsetHtml('c', null);
+  renderCategoriasPermissao('c', null, null);
 
   await carregarUsuarios();
   await carregarBackups();
@@ -1247,6 +1266,11 @@ document.getElementById('qa-master-form').addEventListener('submit', async (e)=>
     username: document.getElementById('qm-username').value,
     password: document.getElementById('qm-password').value,
   };
+  // trava o botao enquanto a requisicao esta em voo - sem isso, um duplo
+  // clique (ou um clique + Enter em seguida) dispara duas chamadas
+  // POST /api/users/qa-master quase simultaneas e cria dois acessos iguais
+  const btn = document.getElementById('qa-master-submit-btn');
+  btn.disabled = true;
   try{
     const res = await fetch('/api/users/qa-master', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
     const data = await res.json();
@@ -1257,6 +1281,8 @@ document.getElementById('qa-master-form').addEventListener('submit', async (e)=>
   }catch(err){
     errEl.textContent = err.message;
     errEl.classList.remove('hidden');
+  }finally{
+    btn.disabled = false;
   }
 });
 
@@ -1276,6 +1302,15 @@ document.getElementById('create-form').addEventListener('submit', async (e)=>{
     },
   };
   const tags = lerTagsForm('c');
+  // trava o botao enquanto a requisicao esta em voo - era o buraco que
+  // deixava um duplo clique (ou clique + Enter logo em seguida, antes da
+  // resposta voltar) disparar dois POST /api/users quase ao mesmo tempo. O
+  // backend confere email duplicado ANTES de gravar, mas essa checagem nao
+  // e atomica: as duas chamadas podem ler "nao existe" e criar 2 (ou mais)
+  // acessos identicos - foi exatamente o que aconteceu (ver users.create,
+  // agora tambem protegido por transacao como segunda camada)
+  const btn = document.getElementById('create-submit-btn');
+  btn.disabled = true;
   try{
     const res = await fetch('/api/users', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
     const data = await res.json();
@@ -1283,14 +1318,11 @@ document.getElementById('create-form').addEventListener('submit', async (e)=>{
     let pendente = !!data.pendenteAprovacao;
     if(!pendente) pendente = await salvarTagsUsuario(data.id, tags);
     document.getElementById('create-form').reset();
-    document.getElementById('c-sections').innerHTML = checksHtml('sections', SECTIONS, o=>o[0], o=>o[1], new Set());
-    document.getElementById('c-unidades').innerHTML = unidadesChecksHtml(new Set());
-    document.getElementById('c-groups').innerHTML = subgroupChecksHtml(new Set());
-    document.getElementById('c-tipos-solicitacao').innerHTML = checksHtml('tiposSolicitacao', TIPOS_SOLICITACAO, o=>o[0], o=>o[1], new Set());
-    document.getElementById('c-tags').innerHTML = tagsFieldsetHtml('c', null);
+    renderCategoriasPermissao('c', null, null);
     if(pendente){ alert('Esse acesso é QA Master: a criação/tags foram enviadas pra aprovação de outro Master (ver 🧪 no topo).'); await carregarAprovacoesQa(); }
     await carregarUsuarios();
   }catch(err){ errEl.textContent = err.message; errEl.classList.remove('hidden'); }
+  finally{ btn.disabled = false; }
 });
 
 const permOverlay = document.getElementById('perm-overlay');
@@ -1300,11 +1332,7 @@ function editarPermissoes(id){
   EDITING_USER = id;
   document.getElementById('perm-title').textContent = 'Permissões de ' + u.email;
   const perms = u.permissions || {sections:[],unidades:[],vaultSubgroups:[],tiposSolicitacao:[]};
-  document.getElementById('p-sections').innerHTML = checksHtml('sections', SECTIONS, o=>o[0], o=>o[1], new Set(perms.sections));
-  document.getElementById('p-unidades').innerHTML = unidadesChecksHtml(new Set(perms.unidades));
-  document.getElementById('p-groups').innerHTML = subgroupChecksHtml(new Set(perms.vaultSubgroups));
-  document.getElementById('p-tipos-solicitacao').innerHTML = checksHtml('tiposSolicitacao', TIPOS_SOLICITACAO, o=>o[0], o=>o[1], new Set(perms.tiposSolicitacao||[]));
-  document.getElementById('p-tags').innerHTML = tagsFieldsetHtml('p', { cargo: u.cargo||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeRhTodasUnidades: !!u.podeRhTodasUnidades, podeRhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado, sessaoLonga: !!u.sessaoLonga });
+  renderCategoriasPermissao('p', perms, { cargo: u.cargo||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeRhTodasUnidades: !!u.podeRhTodasUnidades, podeRhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado, sessaoLonga: !!u.sessaoLonga });
   document.getElementById('perm-err').classList.add('hidden');
   permOverlay.classList.add('show');
 }
