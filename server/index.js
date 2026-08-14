@@ -180,9 +180,14 @@ const ROTA_LOJA_IP_LOCAL_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/
 // agenteAcoes.js/lojaStatus.js enfileirarComando) - mesmo motivo publico
 // do ip-local: quem chama e a maquina, sem sessao de usuario
 const ROTA_LOJA_COMANDO_RESULTADO_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/comando-resultado$/;
+// NOCZenith reporta uma conexao de acesso remoto detectada (AnyDesk,
+// TeamViewer, DWService etc - ver loja-status.html "Baixar vigia") - mesmo
+// motivo publico do ip-local: quem chama e a maquina, sem sessao de usuario
+const ROTA_LOJA_ACESSO_REMOTO_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/acesso-remoto$/;
 function rotaPublicaSemDashboard(path) {
   return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/')
-    || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path);
+    || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
+    || ROTA_LOJA_ACESSO_REMOTO_RE.test(path);
 }
 if (DASHBOARD_USER && DASHBOARD_PASSWORD) {
   app.use((req, res, next) => {
@@ -726,6 +731,24 @@ app.post('/api/loja-status/:codigo/computadores/:posto/ip-local', async (req, re
 app.post('/api/loja-status/:codigo/computadores/:posto/comando-resultado', async (req, res) => {
   try {
     res.json(await lojaStatus.marcarComandoExecutado(req.body.comandoId, { resultado: req.body.resultado, erro: req.body.erro }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- acesso remoto (AnyDesk/TeamViewer/DWService/etc) detectado pelo
+// NOCZenith no computador onde esta instalado (ver lojaStatus.js
+// registrarAcessoRemoto + loja-status.html "Baixar vigia") - publica pelo
+// mesmo motivo do ip-local (quem chama e a maquina, sem sessao de usuario).
+// Push vai SO pro Master (ver push.notifyAcessoRemotoDetectado) - e um
+// alerta de seguranca, nao um aviso operacional pro time de suporte ----------
+app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (req, res) => {
+  try {
+    const registro = await lojaStatus.registrarAcessoRemoto(req.params.codigo, req.params.posto, req.body.detalhe);
+    const mapa = await construirUnidadesMapa();
+    push.notifyAcessoRemotoDetectado(mapa[req.params.codigo] || req.params.codigo, req.params.codigo, registro.nome, req.params.posto, req.body.detalhe)
+      .catch((err) => console.error('Erro no push de acesso remoto:', err.message));
+    res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

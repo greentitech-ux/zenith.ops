@@ -217,6 +217,27 @@ async function atualizarIpLocal(codigo, posto, ip) {
   return { codigo, posto, ipLocal: limpo };
 }
 
+// o vigia detecta (via processos/conexoes de rede conhecidas - AnyDesk,
+// TeamViewer, DWService ou qualquer outra ferramenta de acesso remoto - ver
+// loja-status.html "Baixar vigia") quando alguem se conecta no computador e
+// reporta aqui. Guarda so o ULTIMO evento (pra mostrar no detalhe do card em
+// /loja-status.html) - quem realmente avisa cada conexao nova e o push pro
+// Master (ver POST .../acesso-remoto em index.js + push.notifyAcessoRemotoDetectado),
+// disparado toda vez que essa funcao roda, nao so na primeira. "detalhe" e
+// texto livre tipo "AnyDesk (203.0.113.5:7070)", montado pelo proprio script
+async function registrarAcessoRemoto(codigo, posto, detalhe) {
+  const id = docIdFor(codigo, posto);
+  const limpo = String(detalhe || '').trim().slice(0, 200);
+  if (!limpo) throw new Error('Detalhe do acesso remoto é obrigatório.');
+  const snap = await COLLECTION.doc(id).get();
+  const atual = snap.exists ? snap.data() : null;
+  await COLLECTION.doc(id).set({
+    codigo, posto, ultimoAcessoRemotoEm: Date.now(), ultimoAcessoRemotoDetalhe: limpo,
+  }, { merge: true });
+  cache.invalidar();
+  return { codigo, posto, nome: atual && atual.nome, ultimoAcessoRemotoDetalhe: limpo };
+}
+
 // enfileira um comando (ver agenteAcoes.js executarAcaoDoAgente) pro
 // computador buscar no proximo heartbeat. So aceita computador tipo
 // 'interno' (unico que processa comando - ver heartbeat() acima) e so um
@@ -329,5 +350,5 @@ async function varrerAlertas() {
 module.exports = {
   heartbeat, listar, cadastrarComputador, editarComputador, removerComputador,
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR,
-  enfileirarComando, marcarComandoExecutado,
+  enfileirarComando, marcarComandoExecutado, registrarAcessoRemoto,
 };
