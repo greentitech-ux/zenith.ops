@@ -756,7 +756,7 @@ function cardAtivoHtml(f){
   const totalCheckins = (CONTAGEM_CHECKINS[f.id]||{}).total || 0;
   return `<div class="card">
     <div class="linha1"><span class="nome-clicavel" onclick="abrirDetalheFuncionario('${f.id}')">${escapeHtml(f.nome)}</span>${badges}</div>
-    <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · admitido ${fmtData(f.dataAdmissao)}${f.contato?' · '+escapeHtml(f.contato):''}</div>
+    <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · desde ${fmtData(f.dataAdmissao)}${f.contato?' · '+escapeHtml(f.contato):''}</div>
     <div class="sub">📸 ${totalCheckins} check-in${totalCheckins===1?'':'s'} no total</div>
     <div class="acoes">
       <button type="button" class="link-btn" onclick="abrirEditar('${f.id}')">✏️ editar</button>
@@ -894,7 +894,7 @@ function renderTeste(){
     const vencido = dias>=5;
     return `<div class="card">
       <div class="linha1"><span class="nome-clicavel" onclick="abrirDetalheFuncionario('${f.id}')">${escapeHtml(f.nome)}</span>${vencido?'<span class="badge bad">decidir hoje</span>':`<span class="badge warn">dia ${dias}</span>`}</div>
-      <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · admitido ${fmtData(f.dataAdmissao)} (${dias} dia${dias===1?'':'s'})</div>
+      <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · desde ${fmtData(f.dataAdmissao)} (${dias} dia${dias===1?'':'s'})</div>
       <div class="acoes">
         <button type="button" class="btn-secundario" onclick="abrirDecisao('${f.id}')">📝 Registrar decisão</button>
       </div>
@@ -989,7 +989,7 @@ function renderPorUnidade(){
     const semana = (CONTAGEM_CHECKINS[f.id]||{}).semana || 0;
     return `<div class="card">
       <div class="linha1"><span>${escapeHtml(f.nome)}</span><span class="badge ${info.cls}">${escapeHtml(info.label)}</span>${atestado}</div>
-      <div class="sub">${escapeHtml(f.cargoFuncao||'—')} · admitido ${fmtData(f.dataAdmissao)}${f.contato?' · '+escapeHtml(f.contato):''}</div>
+      <div class="sub">${escapeHtml(f.cargoFuncao||'—')} · desde ${fmtData(f.dataAdmissao)}${f.contato?' · '+escapeHtml(f.contato):''}</div>
       <div class="sub">📸 ${semana} check-in${semana===1?'':'s'} essa semana</div>
     </div>`;
   }).join('') : '<div class="empty">ninguém cadastrado nessa unidade ainda.</div>';
@@ -1527,7 +1527,7 @@ function abrirEditar(id){
   if(!f) return;
   EDITANDO_ID = id;
   document.getElementById('msg-editar').classList.add('hidden');
-  document.getElementById('ed-sub').textContent = `${UNIDADES_NOMES[f.unidade]||f.unidade} · admitido ${fmtData(f.dataAdmissao)}`;
+  document.getElementById('ed-sub').textContent = `${UNIDADES_NOMES[f.unidade]||f.unidade} · desde ${fmtData(f.dataAdmissao)}`;
   document.getElementById('ed-nome').value = f.nome||'';
   document.getElementById('ed-contato').value = f.contato||'';
   document.getElementById('ed-cargo').value = f.cargoFuncao||'';
