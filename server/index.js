@@ -4157,7 +4157,7 @@ app.get('/api/rh/funcionarios', requireSection('rh'), async (req, res) => {
   res.json(await rh.listByUnidades(req.permissions.unidades || []));
 });
 
-app.patch('/api/rh/funcionarios/:id', requireSection('rh'), async (req, res) => {
+app.patch('/api/rh/funcionarios/:id', auth.requireMaster, async (req, res) => {
   try {
     const atual = await rh.getOne(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
@@ -4165,14 +4165,6 @@ app.patch('/api/rh/funcionarios/:id', requireSection('rh'), async (req, res) => 
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
     const patch = { ...req.body };
-    // data de admissao/inicio do teste so o Master corrige - pensado pra
-    // quando ninguem informou certinho no cadastro e a pessoa ja esta la ha
-    // um tempo; se vier de quem nao e Master, ignora silenciosamente em vez
-    // de rejeitar o resto do PATCH (o form manda tudo junto)
-    if (patch.dataAdmissao !== undefined && !req.isMaster) delete patch.dataAdmissao;
-    // conversao extra->efetivado (corrige cadastro que esqueceu de trocar a
-    // aba) tambem so Master - mesmo criterio de quem pode cadastrar efetivado
-    if (patch.tipoCadastro !== undefined && !req.isMaster) delete patch.tipoCadastro;
     const registro = await rh.atualizar(req.params.id, patch);
     broadcast('rh-funcionario-atualizado', registro, 'rh');
     res.json(registro);
