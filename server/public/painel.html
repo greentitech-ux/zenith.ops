@@ -56,12 +56,18 @@
   .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
   .hidden{display:none!important;}
   .empty{padding:40px;text-align:center;color:var(--muted);font-size:13px;}
-  .painel-grid{display:flex;flex-wrap:wrap;gap:14px;justify-content:flex-start;align-content:flex-start;}
+  .painel-grid{display:flex;flex-wrap:wrap;gap:14px;justify-content:flex-start;align-content:flex-start;align-items:flex-start;}
   /* slot arrastavel de cada card - a alça ⠿ (topo, centro) reordena com o
      dedo ou mouse e a ordem fica salva no navegador. Arrastando o canto
      inferior direito (resize:both, mesmo padrao do Status das Lojas) muda o
      tamanho - o proprio card cresce junto (height:100%) e o tamanho fica
-     salvo por navegador (ver salvarTamanhoPainel) */
+     salvo por navegador (ver salvarTamanhoPainel). align-items:flex-start no
+     pai e essencial: o padrao de flexbox e "stretch" (esticar todo item pra
+     altura da linha), que em item com overflow:auto trava a altura no
+     tamanho hipotetico da linha em vez do conteudo real - cortando o card
+     com scroll forcado por padrao. Com flex-start cada card fica do
+     tamanho do proprio conteudo (mosaico responsivo); so aparece scroll se
+     a pessoa arrastar o card pra um tamanho menor que o conteudo de proposito */
   .pcard-slot{position:relative;width:360px;min-width:280px;min-height:160px;resize:both;overflow:auto;}
   .pcard-slot .pcard{height:100%;box-sizing:border-box;}
   .pcard-drag{position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:2;background:none;border:none;
@@ -1086,8 +1092,11 @@ function salvarOrdemCards(){
 
 // tamanho de cada card (arrastado pelo canto, resize:both) fica salvo por
 // navegador - mesmo padrao do Status das Lojas (loja-status.html), so que
-// aqui a chave e o tipo do card (unico por pessoa) em vez de codigo+posto
-function chaveTamanhoPainel(chave){ return `zenithPainelSize:${chave}`; }
+// aqui a chave e o tipo do card (unico por pessoa) em vez de codigo+posto.
+// "V2" pq a v1 tinha um bug de layout (align-items:stretch cortava o card
+// com scroll por padrao) que podia ter salvo altura errada/pequena demais -
+// troca de chave garante que ninguem fique preso nesse tamanho ruim
+function chaveTamanhoPainel(chave){ return `zenithPainelSizeV2:${chave}`; }
 function tamanhoSalvoPainel(chave){
   try{ return JSON.parse(localStorage.getItem(chaveTamanhoPainel(chave)) || 'null'); }catch(e){ return null; }
 }
