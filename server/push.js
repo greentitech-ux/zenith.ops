@@ -532,11 +532,51 @@ async function notifyLojaVoltou(unidadeNome, codigo, computadorNome, posto) {
   }
 }
 
+// diferente do alerta de loja offline (Master + Suporte), acesso remoto
+// detectado no computador so vai pro Master de verdade - e um alerta de
+// seguranca (quem entrou na maquina), nao um aviso operacional de infra
+function podeReceberAcessoRemoto(sub) {
+  const meta = sub.meta;
+  return !!meta && meta.isMaster;
+}
+
+// o vigia (NOCZenith) detectou alguem conectado por acesso remoto (AnyDesk,
+// TeamViewer, DWService ou qualquer outro - ver lojaStatus.js
+// registrarAcessoRemoto) no computador onde esta instalado. Tag inclui um
+// timestamp (nao so codigo/posto): cada conexao e um evento de seguranca
+// proprio, entao uma nova NAO deve substituir/esconder um aviso anterior
+// ainda nao visto (diferente do offline/online, onde so o estado mais
+// recente importa)
+async function notifyAcessoRemotoDetectado(unidadeNome, codigo, computadorNome, posto, detalhe) {
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const payload = JSON.stringify({
+    title: '🛑 Acesso remoto detectado',
+    body: `${prefixo}${unidadeNome || codigo} · ${detalhe || 'conexão de acesso remoto'}`,
+    tag: `acesso-remoto-${codigo}-${posto || 'principal'}-${Date.now()}`,
+    critical: true,
+    url: '/loja-status.html',
+  });
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberAcessoRemoto(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload, { urgency: 'high' });
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (acesso remoto):', err.message);
+      }
+    }
+  }
+}
+
 module.exports = {
   addSubscription, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
   notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou,
-  notifyQaAprovacaoPendente, PUBLIC_KEY,
+  notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, PUBLIC_KEY,
 };
