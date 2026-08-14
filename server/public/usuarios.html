@@ -58,6 +58,9 @@
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:16px;}
   @media(max-width:640px){ .panel{padding:14px;} }
   .panel h2{font-size:13px;margin:0 0 14px;}
+  .panels-lado-a-lado{display:flex;gap:16px;align-items:flex-start;}
+  .panels-lado-a-lado > .panel{flex:1 1 0;min-width:0;}
+  @media(max-width:1000px){ .panels-lado-a-lado{flex-direction:column;} }
   .tablewrap{overflow-x:auto;}
   table{width:100%;min-width:640px;border-collapse:collapse;font-size:12.5px;}
   thead th{text-align:left;font-family:var(--mono);font-weight:500;color:var(--muted);text-transform:uppercase;font-size:9.5px;letter-spacing:.02em;padding:8px 10px;border-bottom:1px solid var(--line);}
@@ -223,6 +226,7 @@
 <div id="sem-acesso" class="empty hidden">Só o acesso Master pode gerenciar usuários.</div>
 
 <div id="root" class="hidden">
+  <div class="panels-lado-a-lado">
   <div class="panel">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
       <h2 style="margin:0;">Criar novo acesso</h2>
@@ -280,6 +284,7 @@
     </div>
     <div class="users-contagem" id="users-contagem"></div>
     <div class="users-list" id="users-list"></div>
+  </div>
   </div>
 
   <div class="panel">
