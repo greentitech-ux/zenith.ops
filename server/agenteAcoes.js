@@ -124,7 +124,7 @@ async function obterContexto() {
 
 async function salvarContexto(texto, atualizadoPorEmail) {
   const registro = {
-    texto: String(texto || '').slice(0, 6000),
+    texto: String(texto || '').slice(0, 12000),
     atualizadoEm: new Date().toISOString(),
     atualizadoPorEmail: atualizadoPorEmail || null,
   };

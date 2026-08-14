@@ -66,26 +66,37 @@ function getCliente() {
 // do system - vai com cache_control pra nao pagar o prompt inteiro de novo a
 // cada mensagem da mesma conversa (so a lista de unidades e o "logado"
 // variam, e raramente mudam no meio de uma mesma conversa)
+// texto livre de conhecimento/orientacao (editado pelo Master no painel NOC
+// Zenith, ver agenteAcoes.js) - pedido explicito do usuario: "ensine tudo a
+// ele pra que ele possa ensinar as pessoas que procurarem ajuda". SEM gate
+// de logado/isMaster de proposito: só EDITAR o texto é Master-only (rota
+// PUT /api/agente/contexto), mas o CONTEUDO precisa chegar em QUALQUER
+// conversa - cliente final deslogado incluido - senao nunca ajuda ninguem
+// alem do proprio Master conversando com o bot
+async function montarBlocoConhecimento() {
+  const contexto = await agenteAcoes.obterContexto();
+  return contexto.texto ? `\n\n## Conhecimento adicional (definido pelo Master)\n${contexto.texto}` : '';
+}
+
 // bloco NOC Zenith do prompt - so pra Master de verdade (mais restrito que
-// os outros blocos condicionais, dado o poder da ferramenta). Busca o
-// catalogo (Master-editavel, ver agenteAcoes.js) e o texto livre de
-// contexto/orientacao ("ensinar como resolver", pedido explicito do
-// usuario) toda vez - e o mesmo espirito do "logado" variar por conversa
+// os outros blocos condicionais, dado o poder da ferramenta). Só o CATALOGO
+// de acoes executaveis fica aqui (o texto de conhecimento saiu pra
+// montarBlocoConhecimento acima, que e universal) - busca fresco toda vez,
+// mesmo espirito do "logado" variar por conversa
 async function montarBlocoAgente(logado) {
   if (!logado || !logado.isMaster) return '';
-  const [acoes, contexto] = await Promise.all([agenteAcoes.listarAtivas(), agenteAcoes.obterContexto()]);
+  const acoes = await agenteAcoes.listarAtivas();
   const listaAcoes = acoes.length
     ? acoes.map((a) => `- [${a.id}] ${a.nome}: ${a.descricao} (${a.requerAprovacao ? 'precisa de aprovação do Master' : 'executa direto, sem aprovação'})`).join('\n')
     : '(nenhuma ação cadastrada ainda)';
   return `\n\n## NOC Zenith - ações que você pode executar (ferramenta executar_acao_agente)
 Catálogo de ações cadastradas pelo Master (use o [id] exato ao chamar a ferramenta):
-${listaAcoes}
-${contexto.texto ? `\nOrientação de como resolver (definida pelo Master):\n${contexto.texto}` : ''}`;
+${listaAcoes}`;
 }
 
 async function montarSystem(unidades, logado) {
   const temFerramentaPedido = !!(logado && logado.temMonitor);
-  const blocoAgente = await montarBlocoAgente(logado);
+  const [blocoConhecimento, blocoAgente] = await Promise.all([montarBlocoConhecimento(), montarBlocoAgente(logado)]);
   const texto = `Você é o Beniboy, atendente virtual do chat de suporte do Zenith Ops.
 
 O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Milky Moo, São Braz e o parque Saltiverso). Quem fala com você pode ser um funcionário/parceiro das lojas OU o CLIENTE FINAL de uma loja (o comprador, ex: alguém que quer um estorno) - na maioria das vezes de estorno é o próprio cliente falando direto com você, não um funcionário repassando. Não assuma qual dos dois é sem contexto - se não estiver claro, pergunte. De qualquer forma, a pessoa pode estar deslogada.
@@ -118,7 +129,7 @@ O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, 
 
 ## Unidades válidas pra ticket (use exatamente um destes nomes; se a pessoa falar parecido, escolha o mais próximo; se não der pra saber, pergunte)
 ${unidades.map((u) => `- ${u}`).join('\n')}
-${logado ? `\n## Quem fala com você agora\nConta logada: ${logado.username}${logado.isMaster ? ' (Master)' : ''}. ${temFerramentaPedido ? 'Tem acesso ao Monitor - pode usar consultar_pedido.' : 'Sem acesso ao Monitor - não tente consultar pedido, use chamar_atendente se precisar.'}` : ''}${blocoAgente}`;
+${logado ? `\n## Quem fala com você agora\nConta logada: ${logado.username}${logado.isMaster ? ' (Master)' : ''}. ${temFerramentaPedido ? 'Tem acesso ao Monitor - pode usar consultar_pedido.' : 'Sem acesso ao Monitor - não tente consultar pedido, use chamar_atendente se precisar.'}` : ''}${blocoConhecimento}${blocoAgente}`;
   return [{ type: 'text', text: texto, cache_control: { type: 'ephemeral' } }];
 }
 
