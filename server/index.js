@@ -67,6 +67,7 @@ const unidadesExtras = require('./unidades');
 const lojaStatus = require('./lojaStatus');
 const qaAprovacoes = require('./qaAprovacoes');
 const agenteAcoes = require('./agenteAcoes');
+const vigiaScript = require('./vigiaScript');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -159,6 +160,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/rh-cadastro.html',
   '/api/rh/cadastro-publico',
   '/api/loja-status/heartbeat',
+  '/api/loja-status/vigia-versao',
 ]);
 // o chat de suporte do site tem rotas com id dinamico (/api/suporte-chat/:id
 // e /api/suporte-chat/:id/mensagem) - liberadas por prefixo. So o lado
@@ -184,10 +186,15 @@ const ROTA_LOJA_COMANDO_RESULTADO_RE = /^\/api\/loja-status\/[^/]+\/computadores
 // TeamViewer, DWService etc - ver loja-status.html "Baixar vigia") - mesmo
 // motivo publico do ip-local: quem chama e a maquina, sem sessao de usuario
 const ROTA_LOJA_ACESSO_REMOTO_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/acesso-remoto$/;
+// o proprio conteudo do NOCZenith (ver vigiaScript.js) - usada tanto pelo
+// botao "Baixar NOCZenith" quanto pela autoatualizacao do script ja rodando
+// (Verificar-Atualizacao), por isso publica igual as outras: a maquina
+// (ou o navegador sem precisar mandar cookie/token) e quem chama
+const ROTA_LOJA_VIGIA_SCRIPT_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/vigia\.ps1$/;
 function rotaPublicaSemDashboard(path) {
   return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/')
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
-    || ROTA_LOJA_ACESSO_REMOTO_RE.test(path);
+    || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path);
 }
 if (DASHBOARD_USER && DASHBOARD_PASSWORD) {
   app.use((req, res, next) => {
@@ -752,6 +759,21 @@ app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (re
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// ---------- versao/conteudo do NOCZenith (ver vigiaScript.js) - a versao e
+// o que a autoatualizacao (Verificar-Atualizacao, dentro do proprio script)
+// confere periodicamente pra saber se precisa baixar de novo; o .ps1 e o
+// mesmo conteudo tanto pro botao "Baixar NOCZenith" quanto pra
+// autoatualizacao baixar e sobrescrever o proprio arquivo ----------
+app.get('/api/loja-status/vigia-versao', (req, res) => {
+  res.json({ versao: vigiaScript.VERSAO_VIGIA });
+});
+
+app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', (req, res) => {
+  const tipo = lojaStatus.TIPOS_COMPUTADOR.includes(req.query.tipo) ? req.query.tipo : 'atendimento';
+  const conteudo = vigiaScript.montarScriptVigia({ codigo: req.params.codigo, posto: req.params.posto, tipo });
+  res.type('text/plain').send(conteudo);
 });
 
 // ---------- RH: link de auto-atendimento (rh-colaborador.html) - o proprio
