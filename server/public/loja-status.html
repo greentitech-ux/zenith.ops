@@ -228,7 +228,7 @@
     <h2>🤖 Beniboy — Ações do Agente</h2>
   </div>
   <div class="agente-sub">
-    Só o acesso Master vê essa parte. Cadastre aqui o que o Beniboy pode fazer sozinho (o comando exato ou a ação de sistema - ele nunca escreve o comando, só escolhe entre o que está cadastrado) e ensine como ele deve se comportar no campo de contexto abaixo. Por padrão toda ação enviada por ele passa por aprovação; desmarque "precisa de aprovação" só nas que forem óbvias o bastante pra rodar direto.
+    Só o acesso Master EDITA essa parte - mas o que você escreve aqui vale pra TODAS as conversas do Beniboy (cliente final, funcionário, Master, com ou sem login), não só as suas. Cadastre também o que ele pode fazer sozinho no computador (o comando exato ou a ação de sistema - ele nunca escreve o comando, só escolhe entre o que está cadastrado). Por padrão toda ação enviada por ele passa por aprovação; desmarque "precisa de aprovação" só nas que forem óbvias o bastante pra rodar direto.
   </div>
 
   <div class="agente-secao">
@@ -240,9 +240,10 @@
   </div>
 
   <div class="agente-secao">
-    <h3>🧠 Contexto — como ele deve resolver</h3>
-    <div class="agente-sub" style="margin-bottom:8px;">Texto livre, sem estrutura fixa. Ex: passos que ele deve seguir antes de acionar você, o que perguntar primeiro, quando pode resolver sozinho vs quando é melhor só te chamar.</div>
-    <textarea id="agente-contexto-texto" maxlength="6000" style="min-height:160px;" placeholder="Ex: quando pedirem reset de senha, confirme o nome completo e a unidade antes de qualquer coisa. Cadastro de usuário novo sempre passa por aprovação, mesmo que pareça simples..."></textarea>
+    <h3>🧠 Conhecimento e orientação (vale pra qualquer pessoa que falar com ele)</h3>
+    <div class="agente-sub" style="margin-bottom:8px;">Texto livre, sem estrutura fixa - ensine tudo que achar útil: o que o Zenith faz, como resolver cada tipo de pedido, dados pra ele repassar (endereço de loja, telefone), o que nunca revelar pra cliente final, quando resolver sozinho vs quando só te chamar.</div>
+    <textarea id="agente-contexto-texto" maxlength="12000" style="min-height:220px;" placeholder="Ex: quando pedirem reset de senha, confirme o nome completo e a unidade antes de qualquer coisa. Cadastro de usuário novo sempre passa por aprovação, mesmo que pareça simples..." oninput="atualizarContadorContexto()"></textarea>
+    <div id="agente-contexto-contador" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);text-align:right;margin-top:4px;">0 / 12000</div>
     <div class="msg hidden" id="agente-contexto-status"></div>
     <div class="modal-acoes" style="margin-top:10px;">
       <button type="button" class="btn-primary" onclick="salvarContextoAgente()">Salvar contexto</button>
@@ -1006,6 +1007,13 @@ async function carregarAgenteContexto(){
   if(!res.ok) return;
   const contexto = await res.json();
   document.getElementById('agente-contexto-texto').value = contexto.texto || '';
+  atualizarContadorContexto();
+}
+function atualizarContadorContexto(){
+  const el = document.getElementById('agente-contexto-texto');
+  const contador = document.getElementById('agente-contexto-contador');
+  contador.textContent = el.value.length + ' / ' + el.maxLength;
+  contador.style.color = el.value.length >= el.maxLength ? 'var(--bad)' : 'var(--muted)';
 }
 async function salvarContextoAgente(){
   const statusEl = document.getElementById('agente-contexto-status');
