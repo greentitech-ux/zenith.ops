@@ -864,9 +864,15 @@ app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (re
   try {
     const token = req.headers['x-noc-token'] || req.body.token || null;
     const registro = await lojaStatus.registrarAcessoRemoto(req.params.codigo, req.params.posto, req.body.detalhe, token);
-    const mapa = await construirUnidadesMapa();
-    push.notifyAcessoRemotoDetectado(mapa[req.params.codigo] || req.params.codigo, req.params.codigo, registro.nome, req.params.posto, req.body.detalhe)
-      .catch((err) => console.error('Erro no push de acesso remoto:', err.message));
+    // push do acesso remoto e OPT-IN (default desligado): as ferramentas que a
+    // TI usa (AnyDesk/TeamViewer/DWService) mantem conexao 24h e enchiam o
+    // Master de alerta falso. O evento fica registrado no historico do
+    // computador de qualquer jeito; o push so sai se o Master ligar.
+    if (await lojaStatus.pushAcessoRemotoAtivo()) {
+      const mapa = await construirUnidadesMapa();
+      push.notifyAcessoRemotoDetectado(mapa[req.params.codigo] || req.params.codigo, req.params.codigo, registro.nome, req.params.posto, req.body.detalhe)
+        .catch((err) => console.error('Erro no push de acesso remoto:', err.message));
+    }
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2668,6 +2674,20 @@ app.post('/api/agente/acoes/:id/executar-massa', auth.requireMaster, async (req,
       }
     }
     res.json({ total: internos.length, enfileirados, pulados });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// config do NOC (Master): hoje so o toggle do push de acesso remoto
+app.get('/api/loja-status/config', auth.requireMaster, async (req, res) => {
+  res.json(await lojaStatus.getConfig());
+});
+app.put('/api/loja-status/config', auth.requireMaster, async (req, res) => {
+  try {
+    const patch = {};
+    if (req.body.pushAcessoRemoto !== undefined) patch.pushAcessoRemoto = req.body.pushAcessoRemoto === true;
+    res.json(await lojaStatus.setConfig(patch));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

@@ -123,6 +123,7 @@
   .ev-dot{width:7px;height:7px;border-radius:50%;flex:none;}
   .ev-dot.ok{background:var(--ok);}
   .ev-dot.bad{background:var(--bad);}
+  .ev-dot.warn{background:var(--warn);}
   .tipo-badge{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:20px;background:var(--panel2);color:var(--muted);white-space:nowrap;border:1px solid var(--line);flex:none;}
   .equip-tile-status{font-family:var(--mono);font-size:10px;font-weight:700;}
   .equip-tile-status.online{color:var(--ok);}
@@ -270,6 +271,7 @@
     <select id="filtro-unidade" onchange="onFiltroUnidade()">
       <option value="">Todas as unidades</option>
     </select>
+    <button type="button" class="btn-secundario hidden" id="btn-push-ar" onclick="togglePushAcessoRemoto()" title="Ligar/desligar o alerta no celular quando o vigia detecta acesso remoto (AnyDesk/TeamViewer/etc). Fica sempre no histórico do computador.">🔔 Alerta acesso remoto: …</button>
     <button type="button" class="btn-primary" onclick="abrirModalNovoComputador()">➕ Computador</button>
   </div>
 
@@ -604,6 +606,9 @@ function atualizarConteudoDetalhe(codigo, c){
     const linhas = eventos.slice(0,20).map(ev=>{
       if(ev.tipo==='offline'){
         return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Caiu</b> · ${fmtDataHora(ev.em)}</div>`;
+      }
+      if(ev.tipo==='acesso-remoto'){
+        return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Acesso remoto</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
       }
       const fora = ev.duracaoMs!=null ? ` · ficou fora ${fmtDuracao(ev.duracaoMs)}` : '';
       return `<div class="ev-linha"><span class="ev-dot ok"></span><b>Voltou</b> · ${fmtDataHora(ev.em)}${fora}</div>`;
@@ -1320,6 +1325,8 @@ async function boot(){
   await carregar();
   if(me.role === 'master'){
     document.getElementById('agente-root').classList.remove('hidden');
+    document.getElementById('btn-push-ar').classList.remove('hidden');
+    carregarConfigPushAr();
     await carregarAgente();
   }
   conectarStream();
@@ -1327,6 +1334,28 @@ async function boot(){
   setInterval(atualizarTickerCarga, 15000);
   document.addEventListener('visibilitychange', () => { if(!document.hidden) carregar(); });
 }
+// toggle do push de acesso remoto (Master). Default desligado - o evento fica
+// sempre no historico do computador; o push so vai pro celular se ligar.
+let PUSH_AR = false;
+function pintarBtnPushAr(){
+  const b = document.getElementById('btn-push-ar');
+  b.textContent = PUSH_AR ? '🔔 Alerta acesso remoto: LIGADO' : '🔕 Alerta acesso remoto: desligado';
+  b.style.color = PUSH_AR ? 'var(--ok)' : 'var(--muted)';
+}
+async function carregarConfigPushAr(){
+  try{ const c = await fetch('/api/loja-status/config').then(r=>r.ok?r.json():{}); PUSH_AR = c.pushAcessoRemoto === true; }
+  catch(e){ PUSH_AR = false; }
+  pintarBtnPushAr();
+}
+async function togglePushAcessoRemoto(){
+  const novo = !PUSH_AR;
+  if(novo && !confirm('Ligar o alerta de acesso remoto no celular?\n\nComo a TI usa AnyDesk/TeamViewer/DWService (que ficam conectados o tempo todo), isso pode gerar bastante notificação. O evento continua no histórico do computador de qualquer jeito.')) return;
+  try{
+    const c = await fetch('/api/loja-status/config', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pushAcessoRemoto: novo }) }).then(r=>r.json());
+    PUSH_AR = c.pushAcessoRemoto === true; pintarBtnPushAr();
+  }catch(e){ alert('Erro ao salvar.'); }
+}
+
 boot();
 </script>
 <script src="/nav-gate.js"></script>
