@@ -444,9 +444,15 @@
           <input type="text" id="ed-cargo" maxlength="60">
         </div>
       </div>
-      <div id="campo-ed-admissao">
-        <label>Data de admissão / início do teste</label>
-        <input type="date" id="ed-admissao">
+      <div class="grid2">
+        <div>
+          <label>Data de nascimento 🎂</label>
+          <input type="date" id="ed-nascimento">
+        </div>
+        <div id="campo-ed-admissao">
+          <label>Data de admissão / início do teste</label>
+          <input type="date" id="ed-admissao">
+        </div>
       </div>
       <label>Status</label>
       <select id="ed-status">
@@ -1831,6 +1837,7 @@ function abrirEditar(id){
   document.getElementById('ed-nome').value = f.nome||'';
   document.getElementById('ed-contato').value = f.contato||'';
   document.getElementById('ed-cargo').value = f.cargoFuncao||'';
+  document.getElementById('ed-nascimento').value = f.dataNascimento||'';
   document.getElementById('ed-admissao').value = f.dataAdmissao||'';
   document.getElementById('ed-status').value = f.status||'ativo';
   document.getElementById('ed-aso-data').value = f.dataExamePeriodico||'';
@@ -1850,6 +1857,7 @@ async function salvarEdicao(){
       nome: document.getElementById('ed-nome').value,
       contato: document.getElementById('ed-contato').value,
       cargoFuncao: document.getElementById('ed-cargo').value,
+      dataNascimento: document.getElementById('ed-nascimento').value || null,
       dataAdmissao: document.getElementById('ed-admissao').value,
       status: document.getElementById('ed-status').value,
       dataExamePeriodico: document.getElementById('ed-aso-data').value || null,
