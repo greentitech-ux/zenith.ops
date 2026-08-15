@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 6;
+const VERSAO_VIGIA = 7;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -47,6 +47,16 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
   // posto, que sao publicos, autorizavam tudo). O `|| ''` e so defensivo -
   // a rota vigia.ps1 sempre passa um token (garantirAgentToken)
   const tokenSeguro = String(agentToken || '').replace(/[^a-f0-9]/gi, '');
+  // codigo entra CRU em varias strings PowerShell de aspas duplas (titulo da
+  // janela, log, corpo do heartbeat). Dentro de "..." o PowerShell interpola
+  // $(...)/$var e trata " como fim da string - entao um codigo com esses
+  // caracteres viraria injecao/quebra no script que um admin baixa e roda.
+  // Nenhum codigo de unidade legitimo tem `, " ou $ (tem acento, espaco e ate
+  // apostrofo, que sao inofensivos em aspas duplas) - entao remover SO esses e
+  // as quebras de linha fecha a brecha sem estragar nenhuma unidade real. As
+  // URLs continuam usando encodeURIComponent(codigo real), cuja saida ja nao
+  // tem ", $ nem crase (fica segura nas aspas duplas por conta propria).
+  const codigoTextoPS = String(codigo).replace(/[`"$\r\n]/g, '');
   const urlMonitorar = `${APP_BASE_URL}/${paginaDoTipo(tipo)}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
   const urlReportarIp = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/ip-local`;
   const urlHeartbeat = `${APP_BASE_URL}/api/loja-status/heartbeat`;
@@ -82,7 +92,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '# 4) Se atualiza sozinho quando sai uma versao nova (sem precisar reinstalar).',
   ];
   const linhasComuns = [
-    '# NOCZenith - ' + codigo + ' / ' + posto,
+    '# NOCZenith - ' + codigoTextoPS + ' / ' + posto,
     '#',
     ...(ehInterno ? cabecalhoInterno : cabecalhoOutros),
     '#',
@@ -236,7 +246,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '  $rs.Open()',
     '  $rs.SessionStateProxy.SetVariable("FilaChatEntrada", $global:FilaChatEntrada)',
     '  $rs.SessionStateProxy.SetVariable("FilaChatSaida", $global:FilaChatSaida)',
-    '  $rs.SessionStateProxy.SetVariable("TituloJanelaChat", "Zenith Ops - ' + codigo + ' / ' + posto + '")',
+    '  $rs.SessionStateProxy.SetVariable("TituloJanelaChat", "Zenith Ops - ' + codigoTextoPS + ' / ' + posto + '")',
     '  # passa o caminho do log pra DENTRO da thread da janela - sem isso, se o',
     '  # WinForms falhar (maquina sem sessao grafica, .NET incompleto), a janela',
     '  # morria em silencio total e nao dava pra saber por que o chat nao abria',
@@ -355,7 +365,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '}',
     '',
     'function Rodar-Loop {',
-    '  Escrever-Log "NOCZenith iniciado (interno) - versao $VersaoScript - ' + codigo + '/' + posto + '"',
+    '  Escrever-Log "NOCZenith iniciado (interno) - versao $VersaoScript - ' + codigoTextoPS + '/' + posto + '"',
     '  try { Iniciar-JanelaChat } catch { Escrever-Log "Falha ao abrir janela de chat: $($_.Exception.Message)" }',
     '  $contador = 0',
     '  $FalhasSeguidasHeartbeat = 0',
@@ -369,7 +379,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '  while ($true) {',
     '    $resp = $null',
     '    try {',
-    '      $corpo = @{ unidade = "' + codigo + '"; posto = "' + posto + '"; userAgent = "NOCZenith/1.0 (Windows NT; PowerShell)"; abertoDesde = $InicioScript } | ConvertTo-Json',
+    '      $corpo = @{ unidade = "' + codigoTextoPS + '"; posto = "' + posto + '"; userAgent = "NOCZenith/1.0 (Windows NT; PowerShell)"; abertoDesde = $InicioScript } | ConvertTo-Json',
     '      $resp = Invoke-RestMethod -Uri $UrlHeartbeat -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $corpo',
     '      if ($FalhasSeguidasHeartbeat -gt 0) { Escrever-Log "Heartbeat voltou a funcionar (depois de $FalhasSeguidasHeartbeat falha(s) seguida(s))." }',
     '      $FalhasSeguidasHeartbeat = 0',
@@ -463,7 +473,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '}',
     '',
     'function Rodar-Loop {',
-    '  Escrever-Log "NOCZenith iniciado (' + tipo + ') - versao $VersaoScript - ' + codigo + '/' + posto + '"',
+    '  Escrever-Log "NOCZenith iniciado (' + tipo + ') - versao $VersaoScript - ' + codigoTextoPS + '/' + posto + '"',
     '  $contador = 0',
     '  while ($true) {',
     '    try { Verificar-AcessoRemoto } catch { Escrever-Log "Falha ao checar acesso remoto: $($_.Exception.Message)" }',
@@ -542,7 +552,13 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
 // como tarefa agendada apontando pra essa mesma pasta fixa.
 function montarComandoInstalacao({ codigo, posto, tipo, agentToken }) {
   const token = String(agentToken || '').replace(/[^a-f0-9]/gi, '');
-  const url = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/vigia.ps1?tipo=${encodeURIComponent(tipo)}`;
+  // encodeURIComponent NAO escapa o apostrofo ('), e a URL entra dentro de uma
+  // string PowerShell de ASPAS SIMPLES ('...') abaixo - entao um codigo com
+  // apostrofo (ex: "Domino's Carrinho...") fecharia a string ali e quebraria/
+  // injetaria o comando. Trocar ' por %27 (que o servidor decodifica de volta)
+  // mantem a URL correta e blindada dentro das aspas simples.
+  const enc = (s) => encodeURIComponent(s).replace(/'/g, '%27');
+  const url = `${APP_BASE_URL}/api/loja-status/${enc(codigo)}/computadores/${enc(posto)}/vigia.ps1?tipo=${enc(tipo)}`;
   // o script real (baixa direto pra pasta fixa - sem Mark of the Web, entao o
   // Controle de Aplicativo Inteligente nao bloqueia - e roda de la)
   const script = [
