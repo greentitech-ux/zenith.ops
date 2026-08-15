@@ -6975,6 +6975,30 @@ app.post('/api/chamados/:id/escalar-presencial', auth.requireAuth, async (req, r
   }
 });
 
+// reclassificar: esse chamado foi aberto no tipo errado (ex: o Beniboy
+// classificou como Suporte-TI, mas era Nota Fiscal). Muda o tipo da
+// solicitacao vinculada (mudarTipo -> reatribui o card na Central) e encerra
+// o chamado de TI, movendo o ticket pra fila certa com o MESMO numero.
+const TIPOS_RECLASSIFICAR = { compra: 'Compra', manutencao: 'Manutenção', pagamento: 'Pagamento', nota: 'Nota Fiscal', 'suporte-ti': 'Suporte de TI' };
+app.post('/api/chamados/:id/reclassificar', auth.requireAuth, async (req, res) => {
+  try {
+    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Só o Master ou o time de Suporte reclassificam um chamado.' });
+    const chamado = await chamadosTI.getOne(req.params.id);
+    if (!chamado) return res.status(404).json({ error: 'Chamado não encontrado.' });
+    const novoTipo = String(req.body.novoTipo || '').trim();
+    if (!TIPOS_RECLASSIFICAR[novoTipo]) return res.status(400).json({ error: 'Tipo de destino inválido.' });
+    if (!chamado.solicitacaoId) return res.status(400).json({ error: 'Esse chamado não tem uma solicitação vinculada para reclassificar.' });
+    if (chamado.status === 'CANCELADO' || chamado.status === 'CONCLUIDO') return res.status(400).json({ error: 'Esse chamado já foi encerrado.' });
+    const sol = await solicitacoes.mudarTipo(chamado.solicitacaoId, novoTipo, req.user.email);
+    await chamadosTI.cancelar(chamado.id, { motivo: `Reclassificado como ${TIPOS_RECLASSIFICAR[novoTipo]} — movido para a Central` });
+    broadcast('chamado-atualizado', { id: chamado.id }, 'tecnico');
+    broadcast('solicitacao-criada', sol, 'solicitacoes');
+    res.json({ ok: true, solicitacao: sol });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // data de execucao: o tecnico responsavel (ou Master/Admin) diz quando vai
 // atuar - o SLA cobre so a TRIAGEM (atribuir + marcar essa data); a partir
 // daqui o combinado passa a ser a data marcada

@@ -339,6 +339,23 @@
       <button type="button" class="btn-add" id="btn-escalar" onclick="escalarPresencial()">🚗 Escalar pra presencial</button>
     </div>
 
+    <!-- reclassificar: chamado aberto no tipo errado (ex: Beniboy marcou como
+         Suporte-TI, mas era Nota Fiscal) - move o ticket pra fila certa da
+         Central com o mesmo numero e encerra este chamado -->
+    <div id="bloco-reclassificar" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px;">
+      <label>🔀 Mudar tipo de solicitação <span style="text-transform:none;letter-spacing:0;">(se este chamado não é de TI — ex: Nota Fiscal, Pagamento)</span></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <select id="rec-tipo" style="flex:1;min-width:150px;margin:0;">
+          <option value="nota">📄 Nota Fiscal</option>
+          <option value="pagamento">💰 Pagamento</option>
+          <option value="compra">🛒 Compra</option>
+          <option value="manutencao">🔧 Manutenção</option>
+        </select>
+        <button type="button" class="btn-add" style="margin-top:0;width:auto;padding:8px 14px;white-space:nowrap;" onclick="reclassificarChamado()">🔀 Mudar tipo</button>
+      </div>
+      <div class="sub" style="margin-top:6px;color:var(--muted);">o ticket sai da fila do TI e vai pra Central no tipo escolhido, com o mesmo número. este chamado é encerrado.</div>
+    </div>
+
     <!-- REMOTO em aberto: concluir a distancia, sem check-in/assinatura -
          acao que FECHA o chamado, por isso vem por ultimo, depois de
          execucao/evidencias/orcamento/cobranca ja preenchidos -->
@@ -679,6 +696,11 @@ function abrirDetalhe(id){
     carregarResponsaveisEscalar();
   }
 
+  // reclassificar: so faz sentido em chamado ativo, vindo de uma solicitacao
+  // (tem solicitacaoId), e so Master/Suporte reclassificam
+  const podeReclassificar = PODE_ATENDER_CHATS && !!c.solicitacaoId && (c.status==='ABERTO' || c.status==='INICIADO');
+  document.getElementById('bloco-reclassificar').classList.toggle('hidden', !podeReclassificar);
+
   document.getElementById('bloco-iniciar').classList.toggle('hidden', ehRemoto || c.status!=='ABERTO');
   document.getElementById('bloco-concluir').classList.toggle('hidden', ehRemoto || c.status!=='INICIADO');
   document.getElementById('bloco-concluido').classList.toggle('hidden', c.status!=='CONCLUIDO');
@@ -780,6 +802,21 @@ async function carregarResponsaveisEscalar(){
     sel.innerHTML += (lista||[]).map(p=>`<option value="${escapeHtml(p.id)}" data-email="${escapeHtml(p.email||'')}">${escapeHtml(p.username||p.email||p.id)}</option>`).join('');
   }catch(e){ /* mantem so a opcao de manter o responsavel atual */ }
 }
+async function reclassificarChamado(){
+  if(!DETALHE_ATUAL) return;
+  const sel = document.getElementById('rec-tipo');
+  const label = sel.options[sel.selectedIndex].textContent.trim();
+  if(!confirm(`Mudar este chamado para "${label}"?\n\nEle sai da fila do TI e vai pra Central nesse tipo, com o mesmo número. Este chamado será encerrado.`)) return;
+  try{
+    const resp = await fetch(`/api/chamados/${DETALHE_ATUAL.id}/reclassificar`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ novoTipo: sel.value }) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao mudar o tipo.');
+    await carregarChamados();
+    fecharDetalhe();
+    alert(`Pronto! O ticket foi movido para a Central como "${label}".`);
+  }catch(err){ erroDetalhe(err.message); }
+}
+
 async function escalarPresencial(){
   if(!DETALHE_ATUAL) return;
   const motivo = document.getElementById('esc-motivo').value.trim();
