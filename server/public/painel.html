@@ -75,7 +75,9 @@
   .pcard-drag:hover{color:var(--text);}
   .pcard-slot.arrastando{opacity:.65;}
   .pcard-slot.arrastando .pcard{outline:2px dashed var(--accent);}
-  .pcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;}
+  .pcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;
+    transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease;}
+  .pcard-slot:not(.arrastando) .pcard:hover{border-color:var(--accent);box-shadow:0 6px 22px rgba(0,0,0,.35);transform:translateY(-2px);}
   .pcard .pcard-top{display:flex;justify-content:space-between;align-items:center;gap:8px;}
   .pcard .pcard-top .titulo{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;}
   .pcard .pcard-link{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-decoration:none;white-space:nowrap;}
@@ -143,6 +145,33 @@
   .pcal-festa .st.cancelado{background:var(--bad-dim);color:var(--bad);}
   .pweekday.hoje .qtd.tem{color:var(--accent);}
   .painel-loading{padding:60px 0;text-align:center;color:var(--muted);font-size:13px;}
+  /* faixa de saudação - nome + data por extenso à esquerda, relógio + contagem
+     de áreas à direita. Um respiro visual antes do mosaico e um jeito rápido de
+     a pessoa se situar (quem sou, que dia é hoje, quantas áreas tenho) */
+  .painel-saudacao{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
+    background:linear-gradient(135deg,var(--panel) 0%,var(--panel2) 100%);border:1px solid var(--line);
+    border-radius:14px;padding:18px 22px;margin-bottom:16px;}
+  .painel-saudacao .ps-ola{font-size:20px;font-weight:700;letter-spacing:-.01em;}
+  .painel-saudacao .ps-ola b{color:var(--accent);}
+  .painel-saudacao .ps-data{font-size:12.5px;color:var(--muted);margin-top:3px;text-transform:capitalize;}
+  .painel-saudacao .ps-dir{display:flex;align-items:center;gap:20px;}
+  .painel-saudacao .ps-relogio{font-family:var(--mono);font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1;}
+  .painel-saudacao .ps-areas{font-size:11px;color:var(--muted);font-family:var(--mono);text-align:right;line-height:1.4;}
+  .painel-saudacao .ps-areas b{color:var(--text);font-size:18px;display:block;}
+  /* skeleton de carregamento - cartões fantasma com brilho passando, no lugar
+     do "carregando..." solto. Passa a sensação de que o conteúdo já vem vindo */
+  .painel-skeleton{display:flex;flex-wrap:wrap;gap:14px;}
+  .painel-skeleton .pskel{width:360px;height:170px;border-radius:12px;
+    background:linear-gradient(100deg,var(--panel) 30%,var(--panel2) 50%,var(--panel) 70%);
+    background-size:200% 100%;animation:pskel-brilho 1.3s ease-in-out infinite;}
+  @keyframes pskel-brilho{0%{background-position:150% 0;}100%{background-position:-50% 0;}}
+  @media(max-width:640px){
+    .painel-saudacao{padding:14px 16px;}
+    .painel-saudacao .ps-ola{font-size:17px;}
+    .painel-saudacao .ps-relogio{font-size:21px;}
+    .painel-skeleton .pskel{width:100%;height:150px;}
+    .pcard-slot{width:100%;min-width:0;}
+  }
   .notif-solicitacao-wrap{position:fixed;top:14px;right:14px;z-index:10000;display:flex;flex-direction:column;gap:10px;max-width:min(360px,calc(100vw - 28px));}
   .notif-solicitacao{background:var(--panel);border:2px solid var(--warn);border-radius:12px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,.55);animation:notif-in .18s ease,notif-pulse 1.6s ease-in-out infinite;}
   .notif-solicitacao .ns-titulo{font-size:13px;font-weight:700;}
@@ -225,7 +254,25 @@
   <a class="back" href="https://wa.me/5581995148654" target="_blank" rel="noopener" style="color:var(--accent);">💬 Dúvidas? Suporte (81) 99514-8654</a>
 </nav>
 
-<div id="painel-loading" class="painel-loading">carregando...</div>
+<!-- faixa de saudação: nome + data por extenso + relógio + contagem de áreas.
+     Preenchida em boot()/atualizarSaudacao() - dá contexto e um respiro visual
+     antes do mosaico de cards -->
+<div id="painel-saudacao" class="painel-saudacao hidden">
+  <div class="ps-esq">
+    <div class="ps-ola" id="ps-ola">Olá</div>
+    <div class="ps-data" id="ps-data"></div>
+  </div>
+  <div class="ps-dir">
+    <div class="ps-relogio" id="ps-relogio">--:--</div>
+    <div class="ps-areas" id="ps-areas"></div>
+  </div>
+</div>
+
+<!-- skeleton de carregamento: cartões fantasma com brilho, no lugar do texto
+     "carregando..." - dá a sensação de que o conteúdo já está a caminho -->
+<div id="painel-loading" class="painel-skeleton">
+  <div class="pskel"></div><div class="pskel"></div><div class="pskel"></div><div class="pskel"></div>
+</div>
 <div id="painel-grid" class="painel-grid hidden"></div>
 <div id="painel-vazio" class="empty hidden">Você ainda não tem nenhuma área liberada. Fale com o administrador (Master).</div>
 
@@ -1216,8 +1263,42 @@ async function boot(){
   if(new URLSearchParams(location.search).get('resetSenha') && (isMaster || IS_ADMIN_GLOBAL)) abrirResetSenha();
 
   SECOES_GLOBAL = secoes;
+  montarSaudacao();
   document.getElementById('painel-loading').classList.add('hidden');
   await renderizarCards();
+}
+
+// preenche e revela a faixa de saudacao: primeiro nome, data por extenso,
+// relogio ao vivo e quantas areas a pessoa tem liberadas. O relogio segue o
+// fuso de Recife (mesmo das lojas), independente do relogio do dispositivo
+function montarSaudacao(){
+  const nome = (ME_GLOBAL?.username || ME_GLOBAL?.nome || '').trim();
+  const primeiro = nome ? nome.split(/\s+/)[0] : '';
+  const hora = new Date().getHours();
+  const cumprimento = hora < 12 ? 'Bom dia' : (hora < 18 ? 'Boa tarde' : 'Boa noite');
+  document.getElementById('ps-ola').innerHTML = primeiro
+    ? `${cumprimento}, <b>${primeiro}</b>` : `${cumprimento}`;
+
+  const qtd = CARDS_POR_SECAO.filter(c=>c.soMasterAdmin
+    ? (IS_MASTER_GLOBAL || IS_ADMIN_GLOBAL)
+    : (c.secoes||[c.secao]).some(s=>SECOES_GLOBAL.includes(s))).length;
+  document.getElementById('ps-areas').innerHTML = qtd
+    ? `<b>${qtd}</b>${qtd===1?'área liberada':'áreas liberadas'}` : '';
+
+  const opcoesData = { weekday:'long', day:'numeric', month:'long', timeZone:'America/Recife' };
+  document.getElementById('ps-data').textContent =
+    new Date().toLocaleDateString('pt-BR', opcoesData);
+
+  tickRelogioSaudacao();
+  clearInterval(window.__relogioSaudacao);
+  window.__relogioSaudacao = setInterval(tickRelogioSaudacao, 1000);
+  document.getElementById('painel-saudacao').classList.remove('hidden');
+}
+function tickRelogioSaudacao(){
+  const el = document.getElementById('ps-relogio');
+  if(!el) return;
+  el.textContent = new Date().toLocaleTimeString('pt-BR',
+    { hour:'2-digit', minute:'2-digit', timeZone:'America/Recife' });
 }
 
 // os cards sao um retrato do momento em que foram montados - cada um faz o
