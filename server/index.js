@@ -6475,10 +6475,10 @@ app.get('/api/suporte-chats', auth.requireAuth, async (req, res) => {
 });
 
 // PDF da conversa pro lado do atendimento (mesmo conteudo da rota publica
-// acima, so que autenticada - o time tambem pode querer anexar a
-// conversa a um chamado/e-mail)
-app.get('/api/suporte-chats/:id/pdf', auth.requireAuth, async (req, res) => {
-  if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+// acima, so que autenticada) - so Master, pedido explicito do usuario (o
+// resto do time de suporte continua respondendo normalmente, so não gera
+// o PDF)
+app.get('/api/suporte-chats/:id/pdf', auth.requireMaster, async (req, res) => {
   const chat = await suporteChat.getOne(req.params.id);
   if (!chat) return res.sendStatus(404);
   suporteChatPDF.gerarChatPDF(res, chat);

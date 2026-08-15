@@ -509,16 +509,22 @@
         <input type="text" class="szc-input" id="szc-atend-msg" placeholder="responder..." maxlength="1000" style="flex:1;">
         <button type="button" class="szc-enviar" id="szc-atend-enviar">➤</button>
       </div>
-      <button type="button" class="szc-link" id="szc-atend-pdf" style="margin-top:4px;">📄 baixar PDF da conversa</button>`;
+      ${ATEND.ehMaster ? `<button type="button" class="szc-link" id="szc-atend-pdf" style="margin-top:4px;">📄 baixar PDF da conversa</button>` : ''}`;
     atendMarcarVisto(chat);
     atendAtualizarBadge();
     corpo.querySelector('#szc-atend-voltar').addEventListener('click', () => {
       if (ATEND.ehMaster) atendRenderLista();
       else { aberto = false; panel.classList.add('szc-hidden'); }
     });
-    corpo.querySelector('#szc-atend-pdf').addEventListener('click', () => {
-      baixarPdf(`/api/suporte-chats/${encodeURIComponent(chat.id)}/pdf`, authHeaders());
-    });
+    // botao de PDF so existe no DOM quando ATEND.ehMaster (rota tambem e
+    // Master-only no backend - pedido explicito do usuario: "so o master
+    // pode gerar o pdf")
+    const btnPdf = corpo.querySelector('#szc-atend-pdf');
+    if (btnPdf) {
+      btnPdf.addEventListener('click', () => {
+        baixarPdf(`/api/suporte-chats/${encodeURIComponent(chat.id)}/pdf`, authHeaders());
+      });
+    }
     const input = corpo.querySelector('#szc-atend-msg');
     const enviar = async () => {
       const texto = input.value.trim();
