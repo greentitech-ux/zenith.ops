@@ -644,6 +644,23 @@ async function tentarEntrar(){
 let DATA = [];
 
 function fmtMoney(v){ return 'R$ ' + (v||0).toFixed(2).replace('.',','); }
+// escapa texto pra ir dentro de innerHTML/atributo com segurança - vários
+// campos (nome do cliente, nome no cartão, motivo/observação da Adyen) vêm
+// de fora e o cliente/fraudador digita o que quiser; sem isso, um "nome"
+// tipo <img src=x onerror=...> executaria script no navegador de quem abre
+// o Monitor (XSS armazenado). Usar SEMPRE que interpolar dado externo em HTML.
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// escapa pra um valor que vai DENTRO de uma string JS (aspas simples) que por
+// sua vez está dentro de um atributo HTML entre aspas duplas (ex: onclick="...
+// funcao('AQUI')..."). Só escapar a aspa simples (como era antes) deixava um
+// nome com aspa dupla FECHAR o atributo e injetar um onmouseover=... - por
+// isso escapa também a aspa dupla (como &quot;, que não fecha o atributo) e a
+// barra invertida/quebra de linha (senão viram escape JS quebrado)
+function jsAttr(s){
+  return String(s==null?'':s)
+    .replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\r?\n/g,'\\n')
+    .replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 const FUSO_BR = 'America/Sao_Paulo';
 function fmtDT(iso){ if(!iso) return '—'; const d=new Date(iso); return d.toLocaleDateString('pt-BR',{timeZone:FUSO_BR})+' '+d.toLocaleTimeString('pt-BR',{timeZone:FUSO_BR,hour:'2-digit',minute:'2-digit'}); }
 // Date "falso" cujos getters locais (getFullYear/getMonth/getDate/getHours...)
@@ -749,9 +766,9 @@ function renderRefundPanel(){
     const obs = ehCliente ? `${r.motivoEstorno||''}${r.motivoOutro?(' - '+r.motivoOutro):''} · valor a estornar ${fmtMoney(r.valorEstornar)}` : (r.observacao||'');
     return `
     <div class="refund-item">
-      <div class="t1">${titulo}</div>
-      <div class="t2">${sub}</div>
-      <div class="obs">${obs.replace(/</g,'&lt;')}</div>
+      <div class="t1">${esc(titulo)}</div>
+      <div class="t2">${esc(sub)}</div>
+      <div class="obs">${esc(obs)}</div>
       <div class="acts">
         <button type="button" class="aprovar" onclick="decidirEstorno('${r.id}','APROVADO')">✓ Aprovar</button>
         <button type="button" class="rejeitar" onclick="decidirEstorno('${r.id}','REJEITADO')">✕ Rejeitar</button>
@@ -877,10 +894,10 @@ function renderChargebacks(){
     <div class="alert ${novo?'item-novo':''}">
       <div class="sev high"></div>
       <div class="body" style="flex:1;">
-        <div class="t1">${novo?'<span class="flag novo">NOVO</span> ':''}•• ${o.last4||'????'} · ${o.unidade||'—'} · ${fmtDT(o.dataCompra)} · ${fmtMoney(o.valor)} · ${o.cliente||'cliente desconhecido'}${o.fraudeSuspeita?' <span class="flag">FRAUDE?</span>':''}</div>
-        <div class="t2">Pedido ${o.pedidoId} · <span style="color:${prazo.cor}">${prazo.texto}</span>${marcadorDisputa(o.pedidoId)}</div>
+        <div class="t1">${novo?'<span class="flag novo">NOVO</span> ':''}•• ${esc(o.last4||'????')} · ${esc(o.unidade||'—')} · ${fmtDT(o.dataCompra)} · ${fmtMoney(o.valor)} · ${esc(o.cliente||'cliente desconhecido')}${o.fraudeSuspeita?' <span class="flag">FRAUDE?</span>':''}</div>
+        <div class="t2">Pedido ${esc(o.pedidoId)} · <span style="color:${prazo.cor}">${prazo.texto}</span>${marcadorDisputa(o.pedidoId)}</div>
         <div style="margin-top:8px;">
-          <button type="button" class="btn-disputa" onclick="abrirDisputa('${String(o.pedidoId).replace(/'/g,"\\'")}','${(o.unidade||'').replace(/'/g,"\\'")}')">📎 Registrar disputa</button>
+          <button type="button" class="btn-disputa" onclick="abrirDisputa('${jsAttr(o.pedidoId)}','${jsAttr(o.unidade||'')}')">📎 Registrar disputa</button>
         </div>
       </div>
     </div>
@@ -901,10 +918,10 @@ function lblDisputa(s){ return String(s||'').replace(/_/g,' '); }
 function renderAnexo(disputeId, index, anexo){
   const url = `/api/disputes/anexo/${disputeId}/${index}`;
   const tipo = anexo.tipo || '';
-  if(tipo.startsWith('image/')) return `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${anexo.nome||'evidência'}"></a>`;
+  if(tipo.startsWith('image/')) return `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${esc(anexo.nome||'evidência')}"></a>`;
   if(tipo.startsWith('video/')) return `<video src="${url}" controls style="max-width:220px;max-height:140px;border-radius:6px;border:1px solid var(--line);"></video>`;
   if(tipo.startsWith('audio/')) return `<audio src="${url}" controls style="max-width:240px;"></audio>`;
-  return `<a href="${url}" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent);">📄 ${anexo.nome||'arquivo'}</a>`;
+  return `<a href="${url}" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent);">📄 ${esc(anexo.nome||'arquivo')}</a>`;
 }
 
 async function abrirDisputa(pedidoId, unidade){
@@ -927,8 +944,8 @@ async function carregarHistoricoDisputas(pedidoId){
         <span class="badge ${d.status}">${lblDisputa(d.status)}</span>
         <span style="color:var(--muted);font-family:var(--mono);">${fmtDT(d.criadoEm)}</span>
       </div>
-      ${(d.nomeContato||d.telefoneContato)?`<div class="notas">${d.nomeContato||'—'}${d.telefoneContato?(' · '+d.telefoneContato):''}</div>`:''}
-      ${d.notas?`<div class="notas">${d.notas}</div>`:''}
+      ${(d.nomeContato||d.telefoneContato)?`<div class="notas">${esc(d.nomeContato||'—')}${d.telefoneContato?(' · '+esc(d.telefoneContato)):''}</div>`:''}
+      ${d.notas?`<div class="notas">${esc(d.notas)}</div>`:''}
       <div class="imgs">
         ${(d.anexos||[]).map((a,i)=>renderAnexo(d.id,i,a)).join('')}
       </div>
@@ -1163,12 +1180,12 @@ function renderOrdersChanged(){
     return `
     <div class="order-row ${novo?'item-novo':''}">
       <div class="top">
-        <span>${novo?'<span class="flag novo">NOVO</span> ':''}${o.unidade||'—'}</span>
+        <span>${novo?'<span class="flag novo">NOVO</span> ':''}${esc(o.unidade||'—')}</span>
         <span class="valor">${fmtMoney(o.valor)}</span>
       </div>
-      <div class="id">${o.metodo||'?'} · ${o.cliente||'cliente desconhecido'} · ${o.last4?('•• '+o.last4):'—'}${o.fraudeSuspeita?' <span class="flag">FRAUDE?</span>':''}${marcadorDisputa(o.pedidoId)}</div>
+      <div class="id">${esc(o.metodo||'?')} · ${esc(o.cliente||'cliente desconhecido')} · ${o.last4?('•• '+esc(o.last4)):'—'}${o.fraudeSuspeita?' <span class="flag">FRAUDE?</span>':''}${marcadorDisputa(o.pedidoId)}</div>
       <div class="timeline">
-        ${o.history.map((h,i)=>`${i>0?'<span class="arrow">→</span>':''}<span class="step"><span class="badge ${h.status}">${h.status}</span><span class="ts">${fmtDT(h.dataHora)}</span></span>`).join('')}
+        ${o.history.map((h,i)=>`${i>0?'<span class="arrow">→</span>':''}<span class="step"><span class="badge ${esc(h.status)}">${esc(h.status)}</span><span class="ts">${fmtDT(h.dataHora)}</span></span>`).join('')}
       </div>
     </div>
   `;}).join('') : '<div class="empty">Nenhum pedido mudou de status ainda.</div>';
@@ -1270,22 +1287,22 @@ function renderAlertsAgrupados(alerts){
     const novo = ehNovo('tx:'+maisRecente.psp);
     if(list.length===1){
       const a = maisRecente;
-      return `<div class="alert ${novo?'item-novo':''}"><div class="sev ${a.sev}"></div><div class="body"><div class="t1">${novo?'<span class="flag novo">NOVO</span> ':''}${a.t1}</div><div class="t2">${a.t2} · ${fmtDT(a.dt)}</div></div></div>`;
+      return `<div class="alert ${novo?'item-novo':''}"><div class="sev ${a.sev}"></div><div class="body"><div class="t1">${novo?'<span class="flag novo">NOVO</span> ':''}${esc(a.t1)}</div><div class="t2">${esc(a.t2)} · ${fmtDT(a.dt)}</div></div></div>`;
     }
     const sevAlta = list.some(a=>a.sev==='high');
     const expandido = ALERTAS_GRUPOS_EXPANDIDOS.has(chave);
     const detalhes = list.map(a=>`
         <div style="border-top:1px solid var(--line);padding-top:6px;margin-top:6px;">
-          <div class="t1" style="font-size:12px;">${a.t1}</div>
-          <div class="t2">${a.t2} · ${fmtDT(a.dt)}</div>
+          <div class="t1" style="font-size:12px;">${esc(a.t1)}</div>
+          <div class="t2">${esc(a.t2)} · ${fmtDT(a.dt)}</div>
         </div>`).join('');
     return `<div class="alert ${novo?'item-novo':''}">
       <div class="sev ${sevAlta?'high':'med'}"></div>
       <div class="body" style="flex:1;">
-        <div class="t1">${novo?'<span class="flag novo">NOVO</span> ':''}${maisRecente.nome||'cliente'} · <span style="color:var(--muted);">${list.length} alertas</span></div>
-        <div class="t2">${maisRecente.t1} · ${fmtDT(maisRecente.dt)}</div>
+        <div class="t1">${novo?'<span class="flag novo">NOVO</span> ':''}${esc(maisRecente.nome||'cliente')} · <span style="color:var(--muted);">${list.length} alertas</span></div>
+        <div class="t2">${esc(maisRecente.t1)} · ${fmtDT(maisRecente.dt)}</div>
         <div style="margin-top:6px;">
-          <button type="button" class="btn-disputa" onclick="toggleGrupoAlerta('${chave.replace(/'/g,"\\'")}')">${expandido?'▾ Ocultar':'▸ Ver'} os ${list.length} alertas</button>
+          <button type="button" class="btn-disputa" onclick="toggleGrupoAlerta('${jsAttr(chave)}')">${expandido?'▾ Ocultar':'▸ Ver'} os ${list.length} alertas</button>
         </div>
         ${expandido?detalhes:''}
       </div>
@@ -1325,7 +1342,7 @@ function renderAlerts(rows){
   document.getElementById('repetidos-count').textContent = repetidos.length;
   document.getElementById('repetidos').innerHTML = repetidos.length ? repetidos.map(a=>{
     const novo = ehNovo('tx:'+a.psp);
-    return `<div class="alert ${novo?'item-novo':''}"><div class="sev ${a.sev}"></div><div class="body"><div class="t1">${novo?'<span class="flag novo">NOVO</span> ':''}${a.t1}</div><div class="t2">${a.t2} · ${fmtDT(a.dt)}</div></div></div>`;
+    return `<div class="alert ${novo?'item-novo':''}"><div class="sev ${a.sev}"></div><div class="body"><div class="t1">${novo?'<span class="flag novo">NOVO</span> ':''}${esc(a.t1)}</div><div class="t2">${esc(a.t2)} · ${fmtDT(a.dt)}</div></div></div>`;
   }).join('') : '<div class="empty">Nenhum pedido repetido no momento.</div>';
 }
 
@@ -1592,10 +1609,10 @@ function renderFraudeMonitor(){
       <div class="alert">
         <div class="sev ${alta?'high':'med'}"></div>
         <div class="body" style="flex:1;">
-          <div class="t1">${badge} ${m.clienteNome||'cliente desconhecido'} · ${m.unidade||'—'} · ${fmtMoney(m.valor)}</div>
-          <div class="t2">Pedido ${m.pedidoId} · marcado por ${m.atualizadoPorEmail||m.criadoPorEmail||'—'} em ${fmtDT(m.atualizadoEm)}${m.motivo?(' · '+m.motivo):''}</div>
+          <div class="t1">${badge} ${esc(m.clienteNome||'cliente desconhecido')} · ${esc(m.unidade||'—')} · ${fmtMoney(m.valor)}</div>
+          <div class="t2">Pedido ${esc(m.pedidoId)} · marcado por ${esc(m.atualizadoPorEmail||m.criadoPorEmail||'—')} em ${fmtDT(m.atualizadoEm)}${m.motivo?(' · '+esc(m.motivo)):''}</div>
           <div style="margin-top:8px;">
-            <button type="button" class="btn-disputa" onclick="removerMarcaFraude('${String(m.pedidoId).replace(/'/g,"\\'")}')">✕ Remover</button>
+            <button type="button" class="btn-disputa" onclick="removerMarcaFraude('${jsAttr(m.pedidoId)}')">✕ Remover</button>
           </div>
         </div>
       </div>`;
@@ -1606,18 +1623,18 @@ function renderFraudeMonitor(){
     const expandido = FRAUDE_GRUPOS_EXPANDIDOS.has(chave);
     const detalhes = marcas.map(m=>`
         <div style="border-top:1px solid var(--line);padding-top:8px;margin-top:8px;">
-          <div class="t2">Pedido ${m.pedidoId} · ${m.unidade||'—'} · ${fmtMoney(m.valor)} · ${fmtDT(m.atualizadoEm)}${m.motivo?(' · '+m.motivo):''}</div>
-          <button type="button" class="btn-disputa" style="margin-top:4px;" onclick="removerMarcaFraude('${String(m.pedidoId).replace(/'/g,"\\'")}')">✕ Remover</button>
+          <div class="t2">Pedido ${esc(m.pedidoId)} · ${esc(m.unidade||'—')} · ${fmtMoney(m.valor)} · ${fmtDT(m.atualizadoEm)}${m.motivo?(' · '+esc(m.motivo)):''}</div>
+          <button type="button" class="btn-disputa" style="margin-top:4px;" onclick="removerMarcaFraude('${jsAttr(m.pedidoId)}')">✕ Remover</button>
         </div>`).join('');
 
     return `
     <div class="alert">
       <div class="sev ${alta?'high':'med'}"></div>
       <div class="body" style="flex:1;">
-        <div class="t1">${badge} ${maisRecente.clienteNome||'cliente desconhecido'} · ${unidades||'—'} · <span style="color:var(--muted);">${marcas.length} tentativas</span></div>
-        <div class="t2">Pedido mais recente ${maisRecente.pedidoId} · ${fmtDT(maisRecente.atualizadoEm)} · valor total envolvido ${fmtMoney(valorTotal)}</div>
+        <div class="t1">${badge} ${esc(maisRecente.clienteNome||'cliente desconhecido')} · ${esc(unidades||'—')} · <span style="color:var(--muted);">${marcas.length} tentativas</span></div>
+        <div class="t2">Pedido mais recente ${esc(maisRecente.pedidoId)} · ${fmtDT(maisRecente.atualizadoEm)} · valor total envolvido ${fmtMoney(valorTotal)}</div>
         <div style="margin-top:8px;">
-          <button type="button" class="btn-disputa" onclick="toggleGrupoFraude('${chave.replace(/'/g,"\\'")}')">${expandido?'▾ Ocultar':'▸ Ver'} os ${marcas.length} pedidos</button>
+          <button type="button" class="btn-disputa" onclick="toggleGrupoFraude('${jsAttr(chave)}')">${expandido?'▾ Ocultar':'▸ Ver'} os ${marcas.length} pedidos</button>
         </div>
         ${expandido?detalhes:''}
       </div>
@@ -1815,19 +1832,19 @@ function removerOfferClosedSuperado(pedidos){
             const pspEnc = encodeURIComponent(d.pspReference), eventEnc = encodeURIComponent(d.eventCode);
             const editandoEsteComentario = COMENTARIO_EM_EDICAO && COMENTARIO_EM_EDICAO.pspRefEnc===pspEnc && COMENTARIO_EM_EDICAO.eventCodeEnc===eventEnc;
             const comentarioHtml = !podeComentar ? '' : editandoEsteComentario
-              ? `<div class="tx-comentario-edit" onclick="event.stopPropagation()"><input type="text" id="comentario-input" value="${(d.comentario||'').replace(/"/g,'&quot;')}" placeholder="Comentário..." onkeydown="comentarioKeydown(event,'${pspEnc}','${eventEnc}')"><button type="button" onclick="salvarComentario('${pspEnc}','${eventEnc}')">✓</button><button type="button" onclick="cancelarEdicaoComentario()">✕</button></div>`
-              : `<div class="tx-comentario" onclick="event.stopPropagation(); iniciarEdicaoComentario('${pspEnc}','${eventEnc}')">${d.comentario?('💬 '+d.comentario):'+ comentário'}</div>`;
+              ? `<div class="tx-comentario-edit" onclick="event.stopPropagation()"><input type="text" id="comentario-input" value="${esc(d.comentario||'')}" placeholder="Comentário..." onkeydown="comentarioKeydown(event,'${pspEnc}','${eventEnc}')"><button type="button" onclick="salvarComentario('${pspEnc}','${eventEnc}')">✓</button><button type="button" onclick="cancelarEdicaoComentario()">✕</button></div>`
+              : `<div class="tx-comentario" onclick="event.stopPropagation(); iniciarEdicaoComentario('${pspEnc}','${eventEnc}')">${d.comentario?('💬 '+esc(d.comentario)):'+ comentário'}</div>`;
             const refundReq = d.status==='APROVADO' ? REFUND_MARKERS[orderKeyOf(d)] : null;
             // Solicitar estorno fica sob a coluna Final do Cartão
             const estornoHtml = d.status!=='APROVADO' ? '' : refundReq
-              ? `<div class="tx-status-info" title="${(refundReq.observacao||'').replace(/"/g,'&quot;')}">💸 Estorno: ${refundReq.status}</div>`
-              : `<div class="tx-comentario" onclick="event.stopPropagation(); abrirEstorno('${String(orderKeyOf(d)).replace(/'/g,"\\'")}','${(d.unidade||'').replace(/'/g,"\\'")}')">💸 Solicitar estorno</div>`;
+              ? `<div class="tx-status-info" title="${esc(refundReq.observacao||'')}">💸 Estorno: ${esc(refundReq.status)}</div>`
+              : `<div class="tx-comentario" onclick="event.stopPropagation(); abrirEstorno('${jsAttr(orderKeyOf(d))}','${jsAttr(d.unidade||'')}')">💸 Solicitar estorno</div>`;
             // acoes de marcar/desmarcar suspeita ou fraude - imediatas, 1 clique,
             // sem precisar abrir nenhum modal
-            const pedidoIdEsc = String(orderKeyOf(d)).replace(/'/g,"\\'");
-            const unidadeEsc = (d.unidade||'').replace(/'/g,"\\'");
-            const chaveClienteEsc = (chaveCliente||'').replace(/'/g,"\\'");
-            const nomeClienteEsc = (d.nomeCliente||d.cardHolder||'').replace(/'/g,"\\'");
+            const pedidoIdEsc = jsAttr(orderKeyOf(d));
+            const unidadeEsc = jsAttr(d.unidade||'');
+            const chaveClienteEsc = jsAttr(chaveCliente||'');
+            const nomeClienteEsc = jsAttr(d.nomeCliente||d.cardHolder||'');
             // Suspeito e Fraude ficam lado a lado, sob a coluna Data/Hora
             const fraudeRemoverHtml = infoFraude && infoFraude.direto
               ? `<div class="tx-comentario" onclick="event.stopPropagation(); removerMarcaFraude('${pedidoIdEsc}')">✕ remover marcação</div>`
@@ -1844,22 +1861,22 @@ function removerOfferClosedSuperado(pedidos){
             // so faz sentido pra quem nao foi aprovado
             const observacao = (d.status!=='APROVADO' && d.motivo) ? d.motivo : '—';
             return `
-                <tr class="${novo?'row-novo ':''}${REPEATED_PSPS.has(d.pspReference)?'row-alerta ':''}${statusCls}" onclick="showClient('${clientKeyOf(d).replace(/'/g,"\\'")}','${String(orderKeyOf(d)).replace(/'/g,"\\'")}','${(d.unidade||'').replace(/'/g,"\\'")}')">
+                <tr class="${novo?'row-novo ':''}${REPEATED_PSPS.has(d.pspReference)?'row-alerta ':''}${statusCls}" onclick="showClient('${jsAttr(clientKeyOf(d))}','${jsAttr(orderKeyOf(d))}','${jsAttr(d.unidade||'')}')">
                       <td>${fmtDT(d.dataHora)}${fraudeRemoverHtml}${fraudeAcoesHtml}</td>
                             <td class="valor">${soNumero(d.unidade)}</td>
-                                  <td title="${d.nomeCliente||''}">${d.nomeCliente||'—'}${comentarioHtml}</td>
-                                        <td class="statuscell" title="${d.status}">${novo?'<span class="flag novo">NOVO</span>':''}<span class="badge ${d.status}">${d.status}</span>${fraudeBadge}${d.fraudeSuspeita?'<span class="flag">FRAUDE?</span>':''}${REPEATED_PSPS.has(d.pspReference)?'<span class="flag">REPETIDO?</span>':''}${marcadorDisputa(orderKeyOf(d))}</td>
-                                              <td class="truncate" title="${d.cardHolder||''}">${d.cardHolder||'—'}</td>
-                                                    <td>${d.metodo||'—'}</td>
+                                  <td title="${esc(d.nomeCliente||'')}">${esc(d.nomeCliente||'—')}${comentarioHtml}</td>
+                                        <td class="statuscell" title="${esc(d.status)}">${novo?'<span class="flag novo">NOVO</span>':''}<span class="badge ${esc(d.status)}">${esc(d.status)}</span>${fraudeBadge}${d.fraudeSuspeita?'<span class="flag">FRAUDE?</span>':''}${REPEATED_PSPS.has(d.pspReference)?'<span class="flag">REPETIDO?</span>':''}${marcadorDisputa(orderKeyOf(d))}</td>
+                                              <td class="truncate" title="${esc(d.cardHolder||'')}">${esc(d.cardHolder||'—')}</td>
+                                                    <td>${esc(d.metodo||'—')}</td>
                                                           <td class="valor">${fmtMoney(d.valor)}</td>
-                                                                <td>${d.last4?('•• '+d.last4):'—'}${estornoHtml}</td>
+                                                                <td>${d.last4?('•• '+esc(d.last4)):'—'}${estornoHtml}</td>
                                                                       <td class="valor">${c?c.total:'—'}</td>
                                                                             <td class="valor">${c?c.aprovadas:'—'}</td>
                                                                                   <td class="valor">${c?c.recusadas:'—'}</td>
                                                                                         <td class="valor">${c?c.estornadas:'—'}</td>
                                                                                               <td class="valor">${c?c.fraude:'—'}</td>
-                                                                                                    <td class="truncate" title="${d.bancoEmissor||''}">${d.bancoEmissor||'—'}</td>
-                                                                                                          <td class="truncate" title="${observacao}">${observacao}</td>
+                                                                                                    <td class="truncate" title="${esc(d.bancoEmissor||'')}">${esc(d.bancoEmissor||'—')}</td>
+                                                                                                          <td class="truncate" title="${esc(observacao)}">${esc(observacao)}</td>
                                                                                                               </tr>
                                                                                                                 `;
       }
@@ -1876,7 +1893,7 @@ function removerOfferClosedSuperado(pedidos){
               const expandido = THREADS_RECUSADAS_EXPANDIDAS.has(idKey);
               const restante = ordenado.slice(1);
               const linhaToggle = `<tr class="thread-toggle"><td colspan="15" style="padding:6px 10px;background:var(--panel2);">
-                <button type="button" class="btn-disputa" onclick="event.stopPropagation(); toggleThreadRecusadas('${idKey.replace(/'/g,"\\'")}')">${expandido?'▾ Ocultar':'▸ Ver'} as ${ordenado.length} tentativas recusadas de ${d.nomeCliente||d.cardHolder||'cliente'}</button>
+                <button type="button" class="btn-disputa" onclick="event.stopPropagation(); toggleThreadRecusadas('${jsAttr(idKey)}')">${expandido?'▾ Ocultar':'▸ Ver'} as ${ordenado.length} tentativas recusadas de ${esc(d.nomeCliente||d.cardHolder||'cliente')}</button>
               </td></tr>`;
               return linhaTransacao(d) + linhaToggle + (expandido ? restante.map(o=>linhaTransacao(o)).join('') : '');
             }
@@ -1918,7 +1935,7 @@ function mostrarPopupFraude(){
   const tx = FILA_POPUP_FRAUDE[0];
   if(!tx) return;
   document.getElementById('fraude-popup-info').innerHTML =
-    `${tx.nomeCliente||tx.cardHolder||'Cliente desconhecido'} · ${tx.unidade||'—'} · ${fmtMoney(tx.valor)}${tx.last4?(' · •• '+tx.last4):''}${tx.motivo?('<br><span style="color:var(--muted);font-size:12px;">'+tx.motivo+'</span>'):''}`;
+    `${esc(tx.nomeCliente||tx.cardHolder||'Cliente desconhecido')} · ${esc(tx.unidade||'—')} · ${fmtMoney(tx.valor)}${tx.last4?(' · •• '+esc(tx.last4)):''}${tx.motivo?('<br><span style="color:var(--muted);font-size:12px;">'+esc(tx.motivo)+'</span>'):''}`;
   document.getElementById('fraude-popup-overlay').classList.add('show');
   tocarAlerta();
   let restante = 10;
