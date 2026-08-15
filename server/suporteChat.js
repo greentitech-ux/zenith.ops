@@ -11,6 +11,7 @@
 const crypto = require('crypto');
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
+const ticketCounter = require('./ticketCounter');
 
 const COLLECTION = db.collection('suporteChats');
 
@@ -61,8 +62,16 @@ async function criar({ nome, contato, texto, assunto, logado, lojaContexto }) {
 
   const doc = COLLECTION.doc();
   const agora = new Date().toISOString();
+  // toda conversa ja nasce com um protocolo (mesma sequencia global #10000+
+  // de refunds.js/solicitacoes.js/chamadosTI.js) - pedido explicito do
+  // usuario: "cada chat ja tera seu proprio ticket que sera informado a
+  // quem entrar em contato", ja que a conversa pode virar um chamado de
+  // verdade depois (ver gerar-chamado em index.js), mas precisa de um
+  // numero pra referenciar desde o primeiro contato, nao so quando/se virar
+  const numeroTicket = await ticketCounter.proximoTicket();
   const registro = {
     id: doc.id,
+    numeroTicket,
     // chave do visitante - quem tem o token le/escreve nessa conversa
     token: crypto.randomBytes(24).toString('hex'),
     nome: nomeLimpo,
@@ -107,11 +116,23 @@ async function getPublico(id, token) {
   if (!chat || !token || chat.token !== token) return null;
   return {
     id: chat.id,
+    numeroTicket: chat.numeroTicket,
     nome: chat.nome,
+    contato: chat.contato,
+    assunto: chat.assunto,
     status: chat.status,
     mensagens: (chat.mensagens || []).map((m) => ({ de: m.de, texto: m.texto, em: m.em, ...(m.bot ? { bot: true } : {}) })),
     criadoEm: chat.criadoEm,
   };
+}
+
+// mesma checagem de token da visao publica (getPublico), mas devolvendo o
+// registro cru - usado só pra montar o PDF (server/suporteChatPDF.js), que
+// precisa do texto puro (mensagens ja vem sem o "de" trocado por rotulo)
+async function getComToken(id, token) {
+  const chat = await getOne(id);
+  if (!chat || !token || chat.token !== token) return null;
+  return chat;
 }
 
 // `bot: true` = mensagem do Beniboy (suporteBot.js): entra como 'suporte' na
@@ -318,7 +339,7 @@ async function finalizarOciosos() {
 }
 
 module.exports = {
-  criar, getOne, getPublico, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll, ASSUNTOS,
+  criar, getOne, getPublico, getComToken, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll, ASSUNTOS,
   atualizarStatusAtendimento, marcarDesbloqueio, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
   listarParaReforcarAlarme, marcarAlertaEnviado,
 };

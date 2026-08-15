@@ -325,7 +325,7 @@ function cardHtml(chat){
       ${chat.desbloqueio ? '<span class="tag-desbloqueio">🔓 Desbloqueio</span>' : ''}
       ${ultimoTicket ? `<span class="tag-ticket">🎫 #${escapeHtml(ultimoTicket.numero)}${tickets.length>1?` +${tickets.length-1}`:''}</span>` : ''}
     </div>
-    <div class="kcard-nome">${escapeHtml(chat.nome||'Visitante')}</div>
+    <div class="kcard-nome">${escapeHtml(chat.nome||'Visitante')}${chat.numeroTicket ? ` <span style="font-weight:400;opacity:.65;">· #${escapeHtml(chat.numeroTicket)}</span>` : ''}</div>
     <div class="kcard-assunto">${escapeHtml(chat.assunto || 'Suporte geral')}</div>
     <div class="kcard-prev">${um ? escapeHtml(um.de)+': '+escapeHtml(um.texto||'(sem texto)') : 'Sem mensagens.'}</div>
     <div class="kcard-meta">
@@ -500,6 +500,7 @@ function painelHtml(chat){
     acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">↩️ Reabrir</button>`);
   }
   if(!chat.chamadoId) acoes.push(`<button type="button" class="btn-ghost" onclick="gerarChamadoRemoto('${chat.id}')">🎫 Gerar chamado remoto</button>`);
+  acoes.push(`<button type="button" class="btn-ghost" onclick="baixarPdfConversa('${chat.id}')">📄 Baixar PDF</button>`);
 
   const msgs = (chat.mensagens||[]).map(m=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'🤖 Beniboy':'Suporte'), texto: m.texto, em: m.em }));
   const msgsHtml = msgs.length ? msgs.map(m=>`
@@ -515,7 +516,7 @@ function painelHtml(chat){
     <div class="painel-topo">
       <div style="min-width:0;">
         <h3>${escapeHtml(chat.nome || 'Visitante')}</h3>
-        <div class="sub">${escapeHtml(chat.contato||'')} · ${escapeHtml(chat.assunto||'Suporte geral')}${chat.lojaContexto?' · loja: '+escapeHtml(chat.lojaContexto):''} · N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}</div>
+        <div class="sub">${chat.numeroTicket?'Protocolo #'+escapeHtml(chat.numeroTicket)+' · ':''}${escapeHtml(chat.contato||'')} · ${escapeHtml(chat.assunto||'Suporte geral')}${chat.lojaContexto?' · loja: '+escapeHtml(chat.lojaContexto):''} · N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}</div>
       </div>
       <span class="painel-fechar" title="Fechar" onclick="fecharPainel('${idAttr}')">✕</span>
     </div>
@@ -579,6 +580,24 @@ async function gerarChamadoRemoto(id){
     if(!resp.ok) throw new Error(data.error || 'Erro ao gerar chamado.');
     await carregarLista();
   }catch(err){ alert(err.message); }
+}
+
+// baixa o PDF da conversa (rota autenticada - window.fetch ja injeta o
+// Authorization automaticamente, ver patch no topo do arquivo) - pedido
+// explicito do usuario: "preciso ter um botao de gerar pdf da conversa"
+async function baixarPdfConversa(id){
+  try{
+    const resp = await fetch(`/api/suporte-chats/${id}/pdf`);
+    if(!resp.ok){ alert('Não foi possível gerar o PDF.'); return; }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'conversa-suporte.pdf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+  }catch(e){ alert('Erro ao gerar o PDF.'); }
 }
 
 async function carregarLista(){

@@ -122,6 +122,23 @@
     if (!iso) return '';
     return new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Recife', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   }
+  // baixa o PDF da conversa (rota publica pro visitante, autenticada pro
+  // atendimento - ver botoes "Baixar PDF" abaixo) - pedido explicito do
+  // usuario: "preciso ter um botao de gerar pdf da conversa"
+  async function baixarPdf(url, headers) {
+    try {
+      const r = await rawFetch(url, headers ? { headers } : undefined);
+      if (!r.ok) { alert('Não foi possível gerar o PDF.'); return; }
+      const blob = await r.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'conversa-suporte.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch (e) { alert('Erro ao gerar o PDF.'); }
+  }
 
   const style = document.createElement('style');
   style.textContent = css;
@@ -283,12 +300,25 @@
 
   function renderConversa(chat) {
     const noFim = corpo.scrollTop + corpo.clientHeight >= corpo.scrollHeight - 30;
+    // protocolo (mesma numeracao global dos tickets) - a pessoa ja recebe
+    // um numero pra referenciar desde o 1o contato, viraz ou nao um chamado
+    // de verdade depois (pedido explicito do usuario)
+    const protocoloTag = chat.numeroTicket
+      ? `<div class="szc-aviso" style="color:#5cc8ff;">🎫 Protocolo #${chat.numeroTicket} · <button type="button" class="szc-link" id="szc-pdf">📄 baixar PDF da conversa</button></div>`
+      : '';
     // m.bot = resposta do Beniboy (assistente automático) - identificado
     // pra pessoa saber que ainda não é um humano falando
-    corpo.innerHTML = (chat.mensagens || []).map((m) => `
+    corpo.innerHTML = protocoloTag + ((chat.mensagens || []).map((m) => `
       <div class="szc-msg ${m.de === 'visitante' ? 'visitante' : 'suporte'}">
         <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Você') : (m.bot ? '🤖 Beniboy · assistente virtual' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}
-      </div>`).join('') || '<div class="szc-aviso">Sem mensagens ainda.</div>';
+      </div>`).join('') || '<div class="szc-aviso">Sem mensagens ainda.</div>');
+    const pdfBtn = corpo.querySelector('#szc-pdf');
+    if (pdfBtn) {
+      pdfBtn.addEventListener('click', () => {
+        const salvo = chatSalvo();
+        if (salvo) baixarPdf(`/api/suporte-chat/${encodeURIComponent(salvo.id)}/pdf?token=${encodeURIComponent(salvo.token)}`);
+      });
+    }
     if (chat.status !== 'ABERTO') {
       corpo.insertAdjacentHTML('beforeend', `<div class="szc-fim">Conversa finalizada pelo Suporte. Precisa de mais ajuda?<br><button type="button" class="szc-link" id="szc-nova-conversa">Iniciar nova conversa</button></div>`);
       corpo.querySelector('#szc-nova-conversa').addEventListener('click', async () => {
@@ -408,10 +438,12 @@
       const fila = atendAguardando();
       badge.textContent = fila.length;
       badge.style.display = fila.length ? 'block' : 'none';
-      // conversa aberta no momento: atualiza ao vivo
+      // conversa aberta no momento: atualiza ao vivo (so a thread de
+      // mensagens - ver atendAtualizarThreadAoVivo - pra nao apagar o que
+      // o atendente esteja digitando na caixa de resposta)
       if (aberto && ATEND.chatAberto) {
         const atual = ATEND.chats.find((c) => c.id === ATEND.chatAberto);
-        if (atual) atendRenderConversa(atual, true);
+        if (atual) atendAtualizarThreadAoVivo(atual);
       }
       // popup automatico: mensagem de visitante mais nova que o marcador
       const nova = fila.find((c) => {
@@ -440,7 +472,7 @@
       const ultima = msgs[msgs.length - 1];
       const aguarda = !!ultimaMsgVisitante(c);
       return `<button type="button" class="szc-input" style="text-align:left;cursor:pointer;${aguarda ? 'border-color:#ff5c5c;' : ''}" data-atend-chat="${esc(c.id)}">
-        <b style="font-size:12.5px;">${aguarda ? '🔴 ' : ''}${esc(c.nome)}</b>
+        <b style="font-size:12.5px;">${aguarda ? '🔴 ' : ''}${esc(c.nome)}${c.numeroTicket ? ' · #' + c.numeroTicket : ''}</b>
         <span style="display:block;font-size:11px;color:#7d8896;">${esc((ultima && ultima.texto || '').slice(0, 60))}</span>
       </button>`;
     }).join('') || '<div class="szc-fim">Nenhuma conversa aberta. 🎉</div>') +
@@ -452,6 +484,17 @@
     corpo.querySelector('#szc-ir-beniboy').addEventListener('click', () => { location.href = '/beniboy.html'; });
   }
 
+  function montarThreadHtml(chat) {
+    return (chat.mensagens || []).map((m) => `
+      <div class="szc-msg ${m.de === 'visitante' ? 'suporte' : 'visitante'}">
+        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Visitante') : (m.bot ? '🤖 Beniboy (bot)' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}
+      </div>`).join('');
+  }
+
+  // render COMPLETO - usado so ao ABRIR uma conversa (clique na lista, popup
+  // automatico, ou depois de mandar uma resposta). Recria o input de resposta
+  // do zero, o que e esperado nesses casos (nada estava sendo digitado ainda,
+  // ou acabou de ser enviado)
   function atendRenderConversa(chat, manterScroll) {
     ATEND.chatAberto = chat.id;
     rodape.classList.add('szc-hidden');
@@ -459,21 +502,22 @@
     corpo.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
         <button type="button" class="szc-link" id="szc-atend-voltar">← conversas</button>
-        <span style="font-size:11px;color:#7d8896;">${esc(chat.nome)} · ${esc(chat.contato || '')}</span>
-      </div>` +
-      (chat.mensagens || []).map((m) => `
-      <div class="szc-msg ${m.de === 'visitante' ? 'suporte' : 'visitante'}">
-        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Visitante') : (m.bot ? '🤖 Beniboy (bot)' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}
-      </div>`).join('') + `
+        <span style="font-size:11px;color:#7d8896;">${esc(chat.nome)} · ${esc(chat.contato || '')}${chat.numeroTicket ? ' · Protocolo #' + chat.numeroTicket : ''}</span>
+      </div>
+      <div id="szc-atend-thread">${montarThreadHtml(chat)}</div>
       <div style="display:flex;gap:6px;">
         <input type="text" class="szc-input" id="szc-atend-msg" placeholder="responder..." maxlength="1000" style="flex:1;">
         <button type="button" class="szc-enviar" id="szc-atend-enviar">➤</button>
-      </div>`;
+      </div>
+      <button type="button" class="szc-link" id="szc-atend-pdf" style="margin-top:4px;">📄 baixar PDF da conversa</button>`;
     atendMarcarVisto(chat);
     atendAtualizarBadge();
     corpo.querySelector('#szc-atend-voltar').addEventListener('click', () => {
       if (ATEND.ehMaster) atendRenderLista();
       else { aberto = false; panel.classList.add('szc-hidden'); }
+    });
+    corpo.querySelector('#szc-atend-pdf').addEventListener('click', () => {
+      baixarPdf(`/api/suporte-chats/${encodeURIComponent(chat.id)}/pdf`, authHeaders());
     });
     const input = corpo.querySelector('#szc-atend-msg');
     const enviar = async () => {
@@ -499,6 +543,22 @@
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); enviar(); } });
     if (noFim) corpo.scrollTop = corpo.scrollHeight;
     input.focus();
+  }
+
+  // atualizacao AO VIVO da MESMA conversa ja aberta (poll/SSE trazendo
+  // mensagem nova enquanto o atendente esta olhando) - troca SO a thread de
+  // mensagens (#szc-atend-thread), nunca recria o input de resposta. Bug
+  // reportado pelo usuario: antes disso, todo re-render (a cada mensagem
+  // nova em QUALQUER conversa, nao so a aberta) recriava o input inteiro,
+  // apagando o que a pessoa estava digitando no meio da resposta.
+  function atendAtualizarThreadAoVivo(chat) {
+    const threadEl = corpo.querySelector('#szc-atend-thread');
+    if (!threadEl) { atendRenderConversa(chat, true); return; } // painel nao esta na estrutura esperada - refaz do zero
+    const noFim = corpo.scrollTop + corpo.clientHeight >= corpo.scrollHeight - 30;
+    threadEl.innerHTML = montarThreadHtml(chat);
+    atendMarcarVisto(chat);
+    atendAtualizarBadge();
+    if (noFim) corpo.scrollTop = corpo.scrollHeight;
   }
 
   function atendAtualizarBadge() {

@@ -43,6 +43,7 @@ const solicitacoes = require('./solicitacoes');
 const chamadosTI = require('./chamadosTI');
 const chamadosManutencao = require('./chamadosManutencao');
 const suporteChat = require('./suporteChat');
+const suporteChatPDF = require('./suporteChatPDF');
 const suporteBot = require('./suporteBot');
 const pedidoWatch = require('./pedidoWatch');
 const docsMaster = require('./docsMaster');
@@ -673,8 +674,8 @@ app.post('/api/suporte-chat/iniciar', async (req, res) => {
     const logado = await usuarioLogadoDoHeader(req);
     const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto, assunto: req.body.assunto, logado, lojaContexto: req.body.lojaContexto });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
-    push.notifySolicitacao('💬 Novo chat de suporte', `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico.html');
-    res.json({ id: chat.id, token: chat.token });
+    push.notifySolicitacao(`💬 Ticket #${chat.numeroTicket} · Novo chat de suporte`, `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico.html');
+    res.json({ id: chat.id, token: chat.token, numeroTicket: chat.numeroTicket });
     acionarBeniboy(chat.id);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -693,12 +694,21 @@ app.post('/api/suporte-chat/:id/mensagem', async (req, res) => {
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     // notificacao no celular do time tambem em MENSAGEM nova (nao so na
     // abertura da conversa) - o atendente ve e responde de onde estiver
-    push.notifySolicitacao('💬 Nova mensagem no chat de suporte', `${chat.nome} · ${String(req.body.texto || '').slice(0, 80)}`, chat.id, '/tecnico.html');
+    push.notifySolicitacao(`💬 Ticket #${chat.numeroTicket} · Nova mensagem no chat de suporte`, `${chat.nome} · ${String(req.body.texto || '').slice(0, 80)}`, chat.id, '/tecnico.html');
     res.json({ ok: true });
     acionarBeniboy(chat.id);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// PDF da conversa pro proprio visitante (pedido explicito: "botao de gerar
+// pdf da conversa") - publica igual as outras rotas de /api/suporte-chat/,
+// protegida pelo mesmo token da conversa (ver suporteChat.getComToken)
+app.get('/api/suporte-chat/:id/pdf', async (req, res) => {
+  const chat = await suporteChat.getComToken(req.params.id, req.query.token);
+  if (!chat) return res.sendStatus(404);
+  suporteChatPDF.gerarChatPDF(res, chat);
 });
 
 // ---------- heartbeat de presenca das lojas (ver lojaStatus.js) - a tela
@@ -6462,6 +6472,16 @@ app.get('/api/suporte-chats', auth.requireAuth, async (req, res) => {
   const todos = await suporteChat.listAll();
   // token do visitante nunca sai pro atendimento - nao precisa
   res.json(todos.map(({ token, ...resto }) => resto));
+});
+
+// PDF da conversa pro lado do atendimento (mesmo conteudo da rota publica
+// acima, so que autenticada - o time tambem pode querer anexar a
+// conversa a um chamado/e-mail)
+app.get('/api/suporte-chats/:id/pdf', auth.requireAuth, async (req, res) => {
+  if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+  const chat = await suporteChat.getOne(req.params.id);
+  if (!chat) return res.sendStatus(404);
+  suporteChatPDF.gerarChatPDF(res, chat);
 });
 
 app.post('/api/suporte-chats/:id/responder', auth.requireAuth, async (req, res) => {
