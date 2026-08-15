@@ -115,6 +115,9 @@
   .equip-tile-nome .icon-btn:hover{color:var(--accent);}
   .equip-tile-sub{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
   .equip-tile-unidade{font-family:var(--mono);font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .equip-tile-ip{font-family:var(--mono);font-size:10.5px;color:var(--text);margin-top:4px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85;}
+  .equip-tile-ip:hover{opacity:1;color:var(--accent);}
+  .equip-tile-ip-copy{opacity:.6;font-size:9.5px;}
   .tipo-badge{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:20px;background:var(--panel2);color:var(--muted);white-space:nowrap;border:1px solid var(--line);flex:none;}
   .equip-tile-status{font-family:var(--mono);font-size:10px;font-weight:700;}
   .equip-tile-status.online{color:var(--ok);}
@@ -518,6 +521,7 @@ function equipTileHtml(codigo, c){
     </div>
     <div class="equip-tile-unidade" title="${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}">${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}</div>
     <div class="equip-tile-status ${status}">${statusTexto}</div>
+    ${c.ipLocal ? `<div class="equip-tile-ip" title="Copiar IP local" onclick="event.stopPropagation();copiarIpLocal('${escapeJs(c.ipLocal)}')">🏠 ${escapeHtml(c.ipLocal)} <span class="equip-tile-ip-copy">📋</span></div>` : ''}
   </div>`;
 }
 
