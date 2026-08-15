@@ -468,11 +468,31 @@ async function definirExperiencia(id, { etapa, prazoEtapaAte, porEmail }) {
 async function importarLote(linhas, { porEmail }) {
   const resultados = [];
   for (const linha of linhas || []) {
-    const { unidade, nome, cargoFuncao, etapa, prazoEtapaAte } = linha;
+    const { unidade, nome, cargoFuncao, etapa, prazoEtapaAte, dataAdmissao, dataNascimento } = linha;
     try {
       const nomeOk = limpar(nome, 150);
       if (!nomeOk) throw new Error('nome vazio.');
       if (!unidade) throw new Error('unidade não reconhecida.');
+
+      // modo "backfill simples" (sem etapa): a pessoa entra como efetivado JA
+      // definitivo (semExperiencia) - NAO passa pela Experiencia formal de
+      // 30+60 dias nem gera alerta de prazo. E o caminho pra cadastrar quem ja
+      // trabalha ha tempo (a maior parte de um backfill de quadro existente).
+      // admissao, nascimento e cargo sao opcionais - o que faltar fica em
+      // branco (admissao cai no default de hoje, ver criar()).
+      if (!etapa) {
+        const registro = await criar({
+          unidade, nome: nomeOk, cargoFuncao,
+          dataAdmissao: dataAdmissao || null,
+          dataNascimento: dataNascimento || null,
+          tipoCadastro: 'efetivado', semExperiencia: true,
+          cadastradoPorEmail: porEmail, exigirCurriculo: false,
+        });
+        resultados.push({ ok: true, nome: nomeOk, id: registro.id });
+        continue;
+      }
+
+      // modo "em experiencia": entra na etapa/prazo informados (30 ou 60 dias)
       const etapaOk = etapa === '60' ? '60' : etapa === '30' ? '30' : null;
       if (!etapaOk) throw new Error('etapa inválida (use 30 ou 60).');
       const prazoOk = validarDataOuNull(prazoEtapaAte, 'prazo');
@@ -480,7 +500,8 @@ async function importarLote(linhas, { porEmail }) {
       const inicioEtapa = calcularInicioAPartirDoPrazo(prazoOk, etapaOk);
       const registro = await criar({
         unidade, nome: nomeOk, cargoFuncao, tipoCadastro: 'efetivado',
-        dataAdmissao: etapaOk === '30' ? inicioEtapa : null,
+        dataAdmissao: etapaOk === '30' ? inicioEtapa : (dataAdmissao || null),
+        dataNascimento: dataNascimento || null,
         cadastradoPorEmail: porEmail, exigirCurriculo: false,
       });
       const merge = {
