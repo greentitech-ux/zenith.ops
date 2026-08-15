@@ -17,6 +17,12 @@ const saltiversoVendas = require('./saltiversoVendas');
 const solicitacoes = require('./solicitacoes');
 
 const COLLECTION = db.collection('saltiversoFechamentos');
+// caixas individuais: cada operador (login) fecha O SEU proprio caixa. Depois
+// todos juntos "fecham o dia" (consolidacao). Colecao separada do doc do dia.
+const CAIXAS = db.collection('saltiversoCaixas');
+// pedidos de alteracao de um caixa JA lancado (trava anti-fraude): depois de
+// lancado, o valor so muda por aqui, com aprovacao do Master
+const CAIXA_EDICOES = db.collection('saltiversoCaixaEdicoes');
 
 // mesmo valor de LIMITE_QUEBRA_CAIXA (fechamentosLive.js), mas constante
 // PROPRIA - escalas de faturamento bem diferentes entre loja de comida e
@@ -96,19 +102,191 @@ async function criarCardQuebra(registro) {
   });
 }
 
-async function fecharDia({ unidade, unidadeNome, data, totalDeclarado, observacao, criadoPorId, criadoPorEmail }) {
+// ---------------------------------------------------------------------------
+// Caixas individuais por operador (login). Modelo: cada operador fecha o SEU
+// caixa; quem vendeu no dia (parque/bebida-meia carregam criadoPorId) e
+// obrigado a fechar; depois todos juntos "fecham o dia" (consolidacao).
+// ---------------------------------------------------------------------------
+function caixaDocId(unidade, data, operadorId) {
+  return `${unidade}__${data}__${operadorId}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+}
+
+// faturado ATRIBUIDO a cada operador (quem lancou a entrada/venda) - base do
+// modelo por operador e da regra "quem vendeu tem que fechar o proprio caixa"
+async function faturadoPorOperador(unidade, data) {
+  const [checkins, vendas] = await Promise.all([
+    parque.listAll(),
+    saltiversoVendas.listVendasDoDia(unidade, data),
+  ]);
+  const doDia = checkins.filter((c) => c.unidade === unidade && c.dataUtilizacao === data);
+  const vendasOk = vendas.filter((v) => !v.cancelada);
+  const map = new Map();
+  const get = (id, email) => {
+    const key = id || email || 'sem-operador';
+    if (!map.has(key)) map.set(key, { operadorId: id || null, operadorEmail: email || null, total: 0, porFormaRaw: {} });
+    return map.get(key);
+  };
+  doDia.forEach((c) => {
+    const o = get(c.criadoPorId, c.criadoPorEmail);
+    o.total += num(c.valor);
+    (c.pagamentos || []).forEach((p) => { o.porFormaRaw[p.forma] = num(o.porFormaRaw[p.forma]) + num(p.valor); });
+    (c.acrescimos || []).forEach((a) => { if (a.metodoPagamento) o.porFormaRaw[a.metodoPagamento] = num(o.porFormaRaw[a.metodoPagamento]) + num(a.valor); });
+  });
+  vendasOk.forEach((v) => {
+    const o = get(v.criadoPorId, v.criadoPorEmail);
+    o.total += num(v.total);
+    (v.pagamentos || []).forEach((p) => { o.porFormaRaw[p.forma] = num(o.porFormaRaw[p.forma]) + num(p.valor); });
+  });
+  return [...map.values()].map((o) => ({
+    operadorId: o.operadorId, operadorEmail: o.operadorEmail,
+    faturado: arred(o.total),
+    faturadoPorForma: bucketsDoResumo({ porForma: o.porFormaRaw }),
+  }));
+}
+
+async function listCaixasUncached() {
+  const snap = await CAIXAS.get();
+  return snap.docs.map((d) => d.data());
+}
+const caixasCache = createCache(listCaixasUncached, 5 * 60 * 1000);
+async function listCaixasDoDia(unidade, data) {
+  const all = await caixasCache.cached();
+  return all.filter((c) => c.unidade === unidade && c.data === data).sort((a, b) => String(a.lancadoEm).localeCompare(String(b.lancadoEm)));
+}
+async function getCaixa(id) {
+  const doc = await CAIXAS.doc(id).get();
+  return doc.exists ? doc.data() : null;
+}
+
+// o operador logado fecha O SEU caixa (declara o que contou). Trava depois:
+// pra mudar, so via solicitarAlteracaoCaixa (aprovacao do Master)
+async function lancarCaixa({ unidade, unidadeNome, data, declarado, observacao, operadorId, operadorEmail, operadorNome }) {
+  if (!unidade) throw new Error('Unidade é obrigatória.');
+  if (!data || !DATA_RE.test(data)) throw new Error('Data inválida.');
+  if (!operadorId) throw new Error('Operador não identificado (faça login no Zenith).');
+  if (await getOne(docId(unidade, data))) throw new Error('O dia já foi fechado. Peça uma alteração ao Master.');
+  const id = caixaDocId(unidade, data, operadorId);
+  if ((await CAIXAS.doc(id).get()).exists) throw new Error('Você já fechou o seu caixa hoje. Para mudar valores, peça uma alteração.');
+  const declaradoOk = sanitizarTotalDeclarado(declarado);
+  const soma = arred(BUCKETS.reduce((s, b) => s + declaradoOk[b], 0));
+  const faturados = await faturadoPorOperador(unidade, data);
+  const meu = faturados.find((f) => f.operadorId === operadorId) || { faturado: 0, faturadoPorForma: sanitizarTotalDeclarado({}) };
+  const agora = new Date().toISOString();
+  const registro = {
+    id, unidade, unidadeNome: unidadeNome || unidade, data,
+    operadorId, operadorEmail: operadorEmail || null, operadorNome: operadorNome || operadorEmail || null,
+    declarado: declaradoOk, somaDeclarado: soma,
+    faturadoOperador: meu.faturado, faturadoOperadorPorForma: meu.faturadoPorForma,
+    diferencaOperador: arred(soma - meu.faturado),
+    observacao: observacao ? String(observacao).trim().slice(0, 500) : null,
+    status: 'lancado', historico: [],
+    lancadoEm: agora, atualizadoEm: agora,
+  };
+  await CAIXAS.doc(id).set(registro);
+  caixasCache.invalidar();
+  return registro;
+}
+
+// estado do dia pra tela: faturado ao vivo, caixas ja fechados, operadores
+// que venderam e ainda nao fecharam (pendentes) e o doc do dia se ja fechou
+async function estadoDoDia(unidade, data) {
+  if (!unidade) throw new Error('Unidade é obrigatória.');
+  if (!data || !DATA_RE.test(data)) throw new Error('Data inválida.');
+  const [dia, caixas, faturadoGeral, faturadosOper] = await Promise.all([
+    getOne(docId(unidade, data)),
+    listCaixasDoDia(unidade, data),
+    calcularFaturado(unidade, data),
+    faturadoPorOperador(unidade, data),
+  ]);
+  const idsComCaixa = new Set(caixas.map((c) => c.operadorId));
+  const pendentes = faturadosOper
+    .filter((f) => f.operadorId && f.faturado > 0 && !idsComCaixa.has(f.operadorId))
+    .map((f) => ({ operadorId: f.operadorId, operadorEmail: f.operadorEmail, faturado: f.faturado }));
+  const somaCaixas = arred(caixas.reduce((s, c) => s + c.somaDeclarado, 0));
+  return {
+    unidade, data,
+    faturado: faturadoGeral.faturado, faturadoPorForma: faturadoGeral.faturadoPorForma, detalhe: faturadoGeral.detalhe,
+    caixas, pendentes, somaCaixas,
+    diferencaPrevia: arred(somaCaixas - faturadoGeral.faturado),
+    fechamento: dia || null,
+  };
+}
+
+// trava anti-fraude: caixa lancado so muda por pedido de alteracao aprovado
+// pelo Master. So vale ANTES do dia fechar (depois, o Master corrige o dia).
+async function solicitarAlteracaoCaixa(caixaId, { declarado, motivo, solicitadoPorId, solicitadoPorEmail }) {
+  const caixa = await getCaixa(caixaId);
+  if (!caixa) throw new Error('Caixa não encontrado.');
+  if (await getOne(docId(caixa.unidade, caixa.data))) throw new Error('O dia já foi fechado — a alteração agora é feita pelo Master no fechamento do dia.');
+  const novo = sanitizarTotalDeclarado(declarado);
+  const id = `${caixaId}__${Date.now()}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+  const registro = {
+    id, caixaId, unidade: caixa.unidade, unidadeNome: caixa.unidadeNome, data: caixa.data,
+    operadorEmail: caixa.operadorEmail, operadorNome: caixa.operadorNome,
+    antes: caixa.declarado, novo,
+    motivo: motivo ? String(motivo).trim().slice(0, 500) : null,
+    status: 'PENDENTE',
+    solicitadoPorId: solicitadoPorId || null, solicitadoPorEmail: solicitadoPorEmail || null,
+    criadoEm: new Date().toISOString(), decididoEm: null, decididoPorEmail: null,
+  };
+  await CAIXA_EDICOES.doc(id).set(registro);
+  return registro;
+}
+
+async function listAlteracoesPendentes(unidade) {
+  const snap = await CAIXA_EDICOES.where('status', '==', 'PENDENTE').get();
+  return snap.docs.map((d) => d.data()).filter((e) => !unidade || e.unidade === unidade)
+    .sort((a, b) => String(b.criadoEm).localeCompare(String(a.criadoEm)));
+}
+
+// Master aprova/rejeita. Ao aprovar, aplica o novo declarado no caixa (guarda
+// o antes no historico) e recalcula a diferenca do operador.
+async function decidirAlteracaoCaixa(edicaoId, { aprovado, porId, porEmail }) {
+  const ref = CAIXA_EDICOES.doc(edicaoId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Pedido de alteração não encontrado.');
+  const ped = snap.data();
+  if (ped.status !== 'PENDENTE') throw new Error('Esse pedido já foi decidido.');
+  const agora = new Date().toISOString();
+  if (aprovado) {
+    const caixa = await getCaixa(ped.caixaId);
+    if (!caixa) throw new Error('Caixa não encontrado.');
+    const soma = arred(BUCKETS.reduce((s, b) => s + num(ped.novo[b]), 0));
+    await CAIXAS.doc(caixa.id).update({
+      declarado: ped.novo, somaDeclarado: soma,
+      diferencaOperador: arred(soma - num(caixa.faturadoOperador)),
+      historico: [...(caixa.historico || []), { antes: caixa.declarado, em: agora, porEmail: porEmail || null, motivo: ped.motivo }],
+      atualizadoEm: agora,
+    });
+    caixasCache.invalidar();
+  }
+  await ref.update({ status: aprovado ? 'APROVADO' : 'REJEITADO', decididoEm: agora, decididoPorId: porId || null, decididoPorEmail: porEmail || null });
+  return { ...ped, status: aprovado ? 'APROVADO' : 'REJEITADO' };
+}
+
+// "fechar o dia": consolida os caixas individuais. Bloqueia se ainda ha
+// operador que vendeu e nao fechou o proprio caixa (regra anti-fraude).
+async function fecharDia({ unidade, unidadeNome, data, observacao, criadoPorId, criadoPorEmail }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!data || !DATA_RE.test(data)) throw new Error('Data inválida.');
   const id = docId(unidade, data);
   const ref = COLLECTION.doc(id);
-  const existente = await ref.get();
-  if (existente.exists) {
+  if ((await ref.get()).exists) {
     throw new Error('Esse dia já foi fechado para essa unidade. Peça uma correção em vez de fechar de novo.');
   }
+  const estado = await estadoDoDia(unidade, data);
+  if (estado.pendentes.length) {
+    const nomes = estado.pendentes.map((p) => p.operadorEmail || p.operadorId).join(', ');
+    throw new Error(`Não dá pra fechar o dia: ${estado.pendentes.length} operador(es) venderam e não fecharam o caixa (${nomes}). Todos precisam fechar primeiro.`);
+  }
+  if (!estado.caixas.length) throw new Error('Nenhum caixa foi fechado ainda hoje.');
 
-  const { faturado, faturadoPorForma, detalhe } = await calcularFaturado(unidade, data);
-  const totalDeclaradoOk = sanitizarTotalDeclarado(totalDeclarado);
-  const somaTotalDeclarado = arred(BUCKETS.reduce((s, b) => s + totalDeclaradoOk[b], 0));
+  const faturado = estado.faturado;
+  const faturadoPorForma = estado.faturadoPorForma;
+  const detalhe = estado.detalhe;
+  const totalDeclaradoOk = {};
+  BUCKETS.forEach((b) => { totalDeclaradoOk[b] = arred(estado.caixas.reduce((s, c) => s + num(c.declarado[b]), 0)); });
+  const somaTotalDeclarado = estado.somaCaixas;
   const diferenca = arred(somaTotalDeclarado - faturado);
 
   const agora = new Date().toISOString();
@@ -116,6 +294,8 @@ async function fecharDia({ unidade, unidadeNome, data, totalDeclarado, observaca
     id, unidade, unidadeNome: unidadeNome || unidade, data,
     faturado, faturadoPorForma, detalhe,
     totalDeclarado: totalDeclaradoOk, somaTotalDeclarado, diferenca,
+    // fotografia dos caixas que compuseram o dia (quem declarou o que)
+    caixas: estado.caixas.map((c) => ({ operadorId: c.operadorId, operadorNome: c.operadorNome, operadorEmail: c.operadorEmail, declarado: c.declarado, somaDeclarado: c.somaDeclarado, faturadoOperador: c.faturadoOperador, diferencaOperador: c.diferencaOperador })),
     observacao: observacao ? String(observacao).trim().slice(0, 500) : null,
     historico: [],
     criadoPorId, criadoPorEmail, criadoEm: agora, atualizadoEm: agora,
@@ -219,4 +399,7 @@ async function listFechamentos(unidade, dataInicio, dataFim) {
 module.exports = {
   LIMITE_QUEBRA_SALTIVERSO,
   calcularFaturado, fecharDia, corrigirFechamento, getOne, previewOuFechado, listFechamentos,
+  // caixas individuais por operador
+  faturadoPorOperador, lancarCaixa, listCaixasDoDia, getCaixa, estadoDoDia,
+  solicitarAlteracaoCaixa, listAlteracoesPendentes, decidirAlteracaoCaixa,
 };
