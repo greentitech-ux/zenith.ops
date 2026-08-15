@@ -338,6 +338,21 @@
   </div>
 </div>
 
+<div class="overlay hidden" id="rodar-acao-overlay">
+  <div class="modal">
+    <h3>▶️ Rodar ação num computador</h3>
+    <div class="sub" id="rodar-acao-nome" style="margin-bottom:8px;"></div>
+    <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">Só computadores tipo <b>interno</b> rodam comando. O comando entra na fila e executa no próximo contato do NOCZenith (a cada ~25s). O resultado aparece no detalhe do computador.</div>
+    <label>Computador</label>
+    <select id="rodar-acao-comp"></select>
+    <div class="msg hidden" id="rodar-acao-status"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn-ghost" onclick="fecharRodarAcao()">Cancelar</button>
+      <button type="button" class="btn-primary" id="rodar-acao-btn" onclick="rodarAcaoConfirmar()">▶️ Rodar aqui</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay hidden" id="msg-overlay">
   <div class="modal">
     <h3>💬 Mensagem</h3>
@@ -967,11 +982,47 @@ function renderAgenteAcoes(){
       </div>
       <div class="agente-acao-desc">${escapeHtml(a.descricao)}</div>
       <div class="agente-acao-acoes">
+        ${a.tipo==='comando_maquina' && a.ativo ? `<button type="button" class="btn-mini ok" onclick="abrirRodarAcao('${escapeJs(a.id)}','${escapeJs(a.nome)}')">▶️ Rodar</button>` : ''}
         <button type="button" class="btn-mini" onclick="abrirModalEditarAcao('${escapeJs(a.id)}')">✏️ Editar</button>
         <button type="button" class="btn-mini" style="color:var(--bad);" onclick="excluirAcao('${escapeJs(a.id)}')">🗑️ Excluir</button>
       </div>
     </div>
   `).join('');
+}
+
+// ---- Rodar uma acao 'comando_maquina' num computador escolhido ----
+let RODAR_ACAO_ID = null;
+function abrirRodarAcao(id, nome){
+  RODAR_ACAO_ID = id;
+  document.getElementById('rodar-acao-nome').innerHTML = `💻 <b>${escapeHtml(nome)}</b>`;
+  const internos = COMPUTADORES.filter(c => c.tipo==='interno')
+    .sort((a,b)=>(UNIDADES_NOMES[a.codigo]||a.codigo).localeCompare(UNIDADES_NOMES[b.codigo]||b.codigo,'pt-BR'));
+  const sel = document.getElementById('rodar-acao-comp');
+  sel.innerHTML = internos.length
+    ? internos.map(c=>`<option value="${escapeHtml(c.codigo)}|${escapeHtml(c.posto)}">${escapeHtml(c.nome||'(sem nome)')} · ${escapeHtml(UNIDADES_NOMES[c.codigo]||c.codigo)} ${statusDe(c)==='online'?'🟢':'🔴'}</option>`).join('')
+    : '<option value="" disabled selected>nenhum computador tipo interno cadastrado</option>';
+  const st = document.getElementById('rodar-acao-status'); st.classList.add('hidden');
+  document.getElementById('rodar-acao-btn').disabled = !internos.length;
+  document.getElementById('rodar-acao-overlay').classList.remove('hidden');
+}
+function fecharRodarAcao(){ document.getElementById('rodar-acao-overlay').classList.add('hidden'); RODAR_ACAO_ID = null; }
+async function rodarAcaoConfirmar(){
+  const val = document.getElementById('rodar-acao-comp').value;
+  if(!val || !RODAR_ACAO_ID) return;
+  const [codigo, posto] = val.split('|');
+  const st = document.getElementById('rodar-acao-status');
+  const btn = document.getElementById('rodar-acao-btn');
+  st.classList.add('hidden'); btn.disabled = true;
+  try{
+    const res = await fetch(`/api/agente/acoes/${encodeURIComponent(RODAR_ACAO_ID)}/executar`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ codigo, posto }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || 'Erro ao enfileirar o comando.');
+    st.textContent = data.mensagem || 'Comando enfileirado. Executa no próximo contato do NOCZenith (~25s).';
+    st.className = 'msg ok'; st.classList.remove('hidden');
+  }catch(err){ st.textContent = err.message; st.className = 'msg err'; st.classList.remove('hidden'); }
+  finally{ btn.disabled = false; }
 }
 
 function onMudaTipoAcao(){

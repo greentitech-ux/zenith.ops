@@ -2629,6 +2629,23 @@ app.delete('/api/agente/acoes/:id', auth.requireMaster, async (req, res) => {
   }
 });
 
+// dispara uma acao 'comando_maquina' JA cadastrada num computador escolhido
+// (Master clica ▶ Rodar no NOC). Enfileira o comando pro NOCZenith daquele
+// computador interno. QA Master cai na fila de aprovacao (mesmo gate das
+// outras acoes sensiveis).
+app.post('/api/agente/acoes/:id/executar', auth.requireMaster, async (req, res) => {
+  try {
+    const { codigo, posto } = req.body;
+    if (!codigo || !posto) return res.status(400).json({ error: 'Informe o computador (codigo e posto).' });
+    const params = { acaoId: req.params.id, parametros: { codigo, posto } };
+    if (await desviarSeQaMaster(req, res, 'agente.executarAcao', `Rodar ação do agente no computador ${codigo}/${posto}`, params)) return;
+    const mensagem = await agenteAcoes.executarAcaoDoAgente(req.params.id, { codigo, posto });
+    res.json({ mensagem });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/agente/contexto', auth.requireMaster, async (req, res) => {
   res.json(await agenteAcoes.obterContexto());
 });
