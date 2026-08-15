@@ -351,6 +351,13 @@
     <label>Computador</label>
     <select id="rodar-acao-comp"></select>
     <div class="msg hidden" id="rodar-acao-status"></div>
+    <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px;">
+      <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:6px;">Rodar em massa (1 comando por máquina; pula quem já tem comando na fila; offline roda ao voltar):</div>
+      <div class="modal-acoes" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="btn-mini" id="rodar-massa-unidade" onclick="rodarAcaoMassa('unidade')">📍 Toda a unidade</button>
+        <button type="button" class="btn-mini" style="color:var(--bad);" id="rodar-massa-todas" onclick="rodarAcaoMassa('todas')">🌎 Todas as internas</button>
+      </div>
+    </div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharRodarAcao()">Cancelar</button>
       <button type="button" class="btn-primary" id="rodar-acao-btn" onclick="rodarAcaoConfirmar()">▶️ Rodar aqui</button>
@@ -1036,6 +1043,39 @@ function onMudaUnidadeRodar(){
     : '<option value="" disabled selected>nenhum computador nessa unidade</option>';
 }
 function fecharRodarAcao(){ document.getElementById('rodar-acao-overlay').classList.add('hidden'); RODAR_ACAO_ID = null; }
+async function rodarAcaoMassa(escopo){
+  if(!RODAR_ACAO_ID) return;
+  const cod = document.getElementById('rodar-acao-unidade').value;
+  const nomeUni = UNIDADES_NOMES[cod] || cod;
+  const alvo = escopo==='unidade'
+    ? RODAR_INTERNOS.filter(c=>c.codigo===cod)
+    : RODAR_INTERNOS;
+  if(!alvo.length){ alert('Nenhum computador interno nesse escopo.'); return; }
+  const onde = escopo==='unidade' ? `a unidade "${nomeUni}"` : 'TODAS as unidades';
+  if(!confirm(`Rodar essa ação em ${onde}?\n\nVai enfileirar o comando em ${alvo.length} computador(es) interno. Não dá pra desfazer depois que cada máquina executar.`)) return;
+  const st = document.getElementById('rodar-acao-status');
+  st.textContent = 'enfileirando...'; st.className = 'msg'; st.classList.remove('hidden');
+  document.getElementById('rodar-massa-unidade').disabled = true;
+  document.getElementById('rodar-massa-todas').disabled = true;
+  try{
+    const body = escopo==='unidade' ? { unidade: cod } : {};
+    const res = await fetch(`/api/agente/acoes/${encodeURIComponent(RODAR_ACAO_ID)}/executar-massa`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || 'Erro ao rodar em massa.');
+    let msg = `✅ Enfileirado em ${data.enfileirados}/${data.total} máquina(s).`;
+    if(data.pulados && data.pulados.length){
+      msg += ` Pulados ${data.pulados.length}: ` + data.pulados.slice(0,5).map(p=>escapeHtml(p.nome)).join(', ') + (data.pulados.length>5?'…':'');
+    }
+    st.innerHTML = msg; st.className = 'msg ok'; st.classList.remove('hidden');
+  }catch(err){ st.textContent = err.message; st.className='msg err'; st.classList.remove('hidden'); }
+  finally{
+    document.getElementById('rodar-massa-unidade').disabled = false;
+    document.getElementById('rodar-massa-todas').disabled = false;
+  }
+}
+
 async function rodarAcaoConfirmar(){
   const val = document.getElementById('rodar-acao-comp').value;
   if(!val || !RODAR_ACAO_ID) return;

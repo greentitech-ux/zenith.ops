@@ -2646,6 +2646,33 @@ app.post('/api/agente/acoes/:id/executar', auth.requireMaster, async (req, res) 
   }
 });
 
+// dispara a acao 'comando_maquina' em MASSA: em todos os computadores tipo
+// interno (opcionalmente so de uma unidade). Enfileira 1 comando por maquina;
+// pula quem ja tem um comando pendente (a fila so guarda um por vez) - devolve
+// o resumo (quantos entraram, quais pulados e por que). Offline tambem entra
+// na fila e roda quando a maquina voltar.
+app.post('/api/agente/acoes/:id/executar-massa', auth.requireMaster, async (req, res) => {
+  try {
+    const todos = await lojaStatus.listar();
+    let internos = todos.filter((c) => c.tipo === 'interno');
+    if (req.body.unidade) internos = internos.filter((c) => c.codigo === req.body.unidade);
+    if (!internos.length) return res.status(400).json({ error: 'Nenhum computador interno encontrado nesse escopo.' });
+    const pulados = [];
+    let enfileirados = 0;
+    for (const c of internos) {
+      try {
+        await agenteAcoes.executarAcaoDoAgente(req.params.id, { codigo: c.codigo, posto: c.posto });
+        enfileirados += 1;
+      } catch (err) {
+        pulados.push({ nome: c.nome || `${c.codigo}/${c.posto}`, motivo: err.message });
+      }
+    }
+    res.json({ total: internos.length, enfileirados, pulados });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/agente/contexto', auth.requireMaster, async (req, res) => {
   res.json(await agenteAcoes.obterContexto());
 });
