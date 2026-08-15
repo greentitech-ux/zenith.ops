@@ -60,19 +60,16 @@
   .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
   .hidden{display:none!important;}
   .empty{padding:40px;text-align:center;color:var(--muted);font-size:13px;}
-  .painel-grid{display:flex;flex-wrap:wrap;gap:14px;justify-content:flex-start;align-content:flex-start;align-items:flex-start;}
-  /* slot arrastavel de cada card - a alça ⠿ (topo, centro) reordena com o
-     dedo ou mouse e a ordem fica salva no navegador. Arrastando o canto
-     inferior direito (resize:both, mesmo padrao do Status das Lojas) muda o
-     tamanho - o proprio card cresce junto (height:100%) e o tamanho fica
-     salvo por navegador (ver salvarTamanhoPainel). align-items:flex-start no
-     pai e essencial: o padrao de flexbox e "stretch" (esticar todo item pra
-     altura da linha), que em item com overflow:auto trava a altura no
-     tamanho hipotetico da linha em vez do conteudo real - cortando o card
-     com scroll forcado por padrao. Com flex-start cada card fica do
-     tamanho do proprio conteudo (mosaico responsivo); so aparece scroll se
-     a pessoa arrastar o card pra um tamanho menor que o conteudo de proposito */
-  .pcard-slot{position:relative;width:360px;min-width:280px;min-height:160px;resize:both;overflow:auto;}
+  /* grid responsivo de verdade: colunas iguais que se ajustam a largura da
+     tela (auto-fill + minmax). Cada card ocupa 1 coluna com largura uniforme -
+     acabou o mosaico irregular do flex com largura fixa. align-items:start
+     deixa cada card com a altura do proprio conteudo (nao estica a linha).
+     A alça ⠿ (topo, centro) reordena com dedo/mouse; a ordem fica salva no
+     navegador. Cards de conteudo largo (calendario, tabela, muitos KPIs)
+     ganham .wide e ocupam 2 colunas. */
+  .painel-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;align-items:start;}
+  .pcard-slot{position:relative;min-width:0;}
+  .pcard-slot.wide{grid-column:span 2;}
   .pcard-slot .pcard{height:100%;box-sizing:border-box;}
   .pcard-drag{position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:2;background:none;border:none;
     color:var(--muted);font-size:13px;line-height:1;padding:4px 18px;cursor:grab;touch-action:none;user-select:none;}
@@ -164,17 +161,18 @@
   .painel-saudacao .ps-areas b{color:var(--text);font-size:18px;display:block;}
   /* skeleton de carregamento - cartões fantasma com brilho passando, no lugar
      do "carregando..." solto. Passa a sensação de que o conteúdo já vem vindo */
-  .painel-skeleton{display:flex;flex-wrap:wrap;gap:14px;}
-  .painel-skeleton .pskel{width:360px;height:170px;border-radius:12px;
+  .painel-skeleton{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;}
+  .painel-skeleton .pskel{height:170px;border-radius:12px;
     background:linear-gradient(100deg,var(--panel) 30%,var(--panel2) 50%,var(--panel) 70%);
     background-size:200% 100%;animation:pskel-brilho 1.3s ease-in-out infinite;}
   @keyframes pskel-brilho{0%{background-position:150% 0;}100%{background-position:-50% 0;}}
+  /* telas estreitas: 1 coluna e cards largos deixam de ocupar 2 colunas */
+  @media(max-width:700px){ .pcard-slot.wide{grid-column:auto;} }
   @media(max-width:640px){
     .painel-saudacao{padding:14px 16px;}
     .painel-saudacao .ps-ola{font-size:17px;}
     .painel-saudacao .ps-relogio{font-size:21px;}
-    .painel-skeleton .pskel{width:100%;height:150px;}
-    .pcard-slot{width:100%;min-width:0;}
+    .painel-skeleton .pskel{height:150px;}
   }
   .notif-solicitacao-wrap{position:fixed;top:14px;right:14px;z-index:10000;display:flex;flex-direction:column;gap:10px;max-width:min(360px,calc(100vw - 28px));}
   .notif-solicitacao{background:var(--panel);border:2px solid var(--warn);border-radius:12px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,.55);animation:notif-in .18s ease,notif-pulse 1.6s ease-in-out infinite;}
@@ -1155,40 +1153,14 @@ function salvarOrdemCards(){
   localStorage.setItem(LS_ORDEM_CARDS, JSON.stringify(chaves));
 }
 
-// tamanho de cada card (arrastado pelo canto, resize:both) fica salvo por
-// navegador - mesmo padrao do Status das Lojas (loja-status.html), so que
-// aqui a chave e o tipo do card (unico por pessoa) em vez de codigo+posto.
-// "V3": v1 tinha bug de layout (stretch cortava o card com scroll por
-// padrao); v2 corrigiu o CSS mas ainda podia salvar um tamanho errado
-// (ver observarTamanhosPainel abaixo) - cada bump de versao evita que
-// alguem fique preso num tamanho ruim salvo antes do fix
-function chaveTamanhoPainel(chave){ return `zenithPainelSizeV3:${chave}`; }
-function tamanhoSalvoPainel(chave){
-  try{ return JSON.parse(localStorage.getItem(chaveTamanhoPainel(chave)) || 'null'); }catch(e){ return null; }
-}
-function salvarTamanhoPainel(chave, w, h){
-  try{ localStorage.setItem(chaveTamanhoPainel(chave), JSON.stringify({ w, h })); }catch(e){ /* ignora (ex: storage cheio) */ }
-}
-// reconecta o ResizeObserver em cada card depois de todo re-render (o
-// innerHTML e substituido, entao os observers antigos morrem junto dos nos
-// removidos). So grava depois do tamanho ficar "parado" 500ms (debounce) em
-// vez de so ignorar o 1o disparo: logo apos o render o layout ainda podia
-// se ajustar (fonte carregando, reflow) e um 2o evento gravava um tamanho
-// errado/pequeno demais pra sempre - com debounce so o tamanho final e
-// gravado, seja logo apos renderizar ou depois de um arrasto de verdade
-function observarTamanhosPainel(){
-  document.querySelectorAll('#painel-grid .pcard-slot').forEach(el => {
-    const chave = el.dataset.chave;
-    let timer = null;
-    const obs = new ResizeObserver(() => {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        salvarTamanhoPainel(chave, Math.round(el.offsetWidth), Math.round(el.offsetHeight));
-      }, 500);
-    });
-    obs.observe(el);
-  });
-}
+// todos os cards tem a MESMA largura (1 coluna do grid) - assim o mosaico fica
+// sempre preenchido, sem buracos/vazios que um card "largo" deixaria ao
+// terminar a linha. O tamanho nao e mais arrastavel por card: o resize:both
+// por card era o que gerava o desalinhamento; agora a largura vem do grid
+// responsivo (colunas iguais) e a altura, do proprio conteudo. A classe .wide
+// (2 colunas) continua no CSS, disponivel se algum card novo precisar - basta
+// adicionar a chave dele aqui.
+const CHAVES_WIDE = new Set();
 // arrastar pela alça ⠿ (pointer events = funciona com dedo e mouse): o card
 // segue o ponteiro trocando de posicao ao vivo; soltou, a ordem e salva
 let PAINEL_ARRASTANDO = false;
@@ -1341,15 +1313,13 @@ async function renderizarCards(){
       console.error('Painel: erro ao carregar card', aplicaveis[i].chave, r.reason);
       html = pcardWrap('⚠️', aplicaveis[i].chave, '#', `<div class="pcard-erro">Não foi possível carregar esses dados agora.</div>`);
     }
-    const salvo = tamanhoSalvoPainel(aplicaveis[i].chave);
-    const styleTamanho = salvo ? ` style="width:${Math.max(280,salvo.w)}px;height:${Math.max(160,salvo.h)}px;"` : '';
-    return `<div class="pcard-slot" data-chave="${aplicaveis[i].chave}"${styleTamanho}>
+    const cls = CHAVES_WIDE.has(aplicaveis[i].chave) ? 'pcard-slot wide' : 'pcard-slot';
+    return `<div class="${cls}" data-chave="${aplicaveis[i].chave}">
       <button type="button" class="pcard-drag" title="Arraste pra reordenar os cards" aria-label="Mover card">⠿</button>
       ${html}
     </div>`;
   }).join('');
   initDragCards();
-  observarTamanhosPainel();
 }
 
 boot();
