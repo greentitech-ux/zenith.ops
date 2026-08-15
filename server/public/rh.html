@@ -1607,31 +1607,111 @@ const STATUS_FUNCIONARIO_LABEL = {
   pendente_aprovacao: 'aguardando aprovação', ativo: 'ativo', candidato: 'candidato (teste 5 dias)', inativo: 'desligado/reprovado',
 };
 
-function abrirDetalheFuncionario(id){
-  const f = TODOS.find(x=>x.id===id);
+// ficha 360: o colaborador é o centro de tudo. essa ficha junta num lugar só
+// o que as abas espalham (dados, situação legal, documentos, atestados,
+// advertências, check-ins) - todas as abas são recortes desse mesmo registro.
+async function abrirDetalheFuncionario(id){
   document.getElementById('overlay-funcionario-detalhe').classList.remove('hidden');
   const corpo = document.getElementById('func-detalhe-corpo');
+  const f = TODOS.find(x=>x.id===id);
   if(!f){ corpo.innerHTML = '<div class="empty">cadastro não encontrado.</div>'; return; }
-  const linhas = [
-    ['Unidade', UNIDADES_NOMES[f.unidade]||f.unidade],
-    ['Tipo de cadastro', TIPO_CADASTRO_LABEL_APROVACAO[f.tipoCadastro]||f.tipoCadastro],
-    ['Status', STATUS_FUNCIONARIO_LABEL[f.status]||f.status],
-    ['Cargo/função', f.cargoFuncao||'—'],
-    ['Contato', f.contato||'—'],
-    ['Data de nascimento', fmtData(f.dataNascimento)],
-    ['Data de admissão', fmtData(f.dataAdmissao)],
-    ['Cadastrado por', f.cadastradoPorEmail||'—'],
-    ['Cadastrado em', fmtDataHora(f.criadoEm)],
+  corpo.innerHTML = '<div class="empty">carregando ficha…</div>';
+  // advertências desse colaborador (carrega a lista uma vez se ainda não veio)
+  if(!ADVERTENCIAS.length){ try{ ADVERTENCIAS = await fetch('/api/rh/advertencias').then(r=>r.ok?r.json():[]); }catch(e){} }
+  const advs = ADVERTENCIAS.filter(a=>a.funcionarioId===f.id).sort((a,b)=>String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')));
+
+  const secao = (titulo, conteudo) => `<div style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px;"><div style="font-weight:600;font-size:12px;margin-bottom:8px;">${titulo}</div>${conteudo}</div>`;
+  const linha = (k,v) => `<div class="sub" style="margin-bottom:5px;"><b>${escapeHtml(k)}:</b> ${v}</div>`;
+  const esc = s => escapeHtml(String(s==null?'—':s));
+
+  // ---- cabeçalho + selos (mesmos do card) ----
+  const badges = [
+    f.status==='candidato' ? '<span class="badge warn">candidato</span>' : (f.status==='inativo' ? '<span class="badge muted">desligado</span>' : '<span class="badge ok">ativo</span>'),
+    badgeTeste(f),
+    f.emAtestado ? '<span class="badge bad">🩺 atestado</span>' : '',
+    (f.experiencia && f.experiencia.etapa) ? `<span class="badge warn">🗓️ exp. ${f.experiencia.etapa} dias</span>` : '',
+    asoBadgeCli(f),
+  ].filter(Boolean).join(' ');
+
+  // ---- dados básicos ----
+  const dados = [
+    linha('Unidade', esc(UNIDADES_NOMES[f.unidade]||f.unidade)),
+    linha('Tipo de cadastro', esc(TIPO_CADASTRO_LABEL_APROVACAO[f.tipoCadastro]||f.tipoCadastro)),
+    linha('Status', esc(STATUS_FUNCIONARIO_LABEL[f.status]||f.status)),
+    linha('Cargo/função', esc(f.cargoFuncao)),
+    linha('Contato', esc(f.contato)),
+    linha('Nascimento', `${fmtData(f.dataNascimento)}${f.dataNascimento?` 🎂 ${escapeHtml(MESES_NOMES[Number(f.dataNascimento.slice(5,7))-1]||'')}`:''}`),
+    linha('Admissão', `${fmtData(f.dataAdmissao)}${tempoCasaTextoCli(f.dataAdmissao)?` · ⏱️ ${tempoCasaTextoCli(f.dataAdmissao)} de casa`:''}`),
   ];
-  if(f.aprovacaoCadastro){
-    linhas.push(['Decisão do cadastro', `${f.aprovacaoCadastro.aprovado?'✅ aprovado':'❌ reprovado'} por ${f.aprovacaoCadastro.porEmail||'—'} em ${fmtDataHora(f.aprovacaoCadastro.decididoEm)}${f.aprovacaoCadastro.motivo?' · '+f.aprovacaoCadastro.motivo:''}`]);
+  if(f.status==='inativo' && f.desligadoEm){
+    dados.push(linha('Desligamento', `🚪 ${fmtData(f.desligadoEm.slice(0,10))}${f.motivoDesligamento?' · '+esc(f.motivoDesligamento):''}`));
   }
-  const tabela = linhas.map(([k,v])=>`<div class="sub" style="margin-bottom:6px;"><b>${escapeHtml(k)}:</b> ${escapeHtml(String(v))}</div>`).join('');
-  const curriculo = f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 ver currículo anexado</a>` : '<div class="sub">sem currículo anexado.</div>';
+
+  // ---- situação legal (ASO, férias, experiência) ----
+  const legalItens = [];
+  // ASO
+  if(f.dataExamePeriodico){
+    const venc=new Date(f.dataExamePeriodico+'T00:00:00'); venc.setMonth(venc.getMonth()+(f.periodicidadeExameMeses||12));
+    const dias=Math.round((venc-new Date(new Date().toDateString()))/86400000);
+    const cor = dias<0?'var(--bad)':(dias<=30?'var(--warn)':'var(--ok)');
+    legalItens.push(linha('Exame periódico (ASO)', `último ${fmtData(f.dataExamePeriodico)} · próximo <b style="color:${cor}">${fmtData(venc.toISOString().slice(0,10))}</b> ${dias<0?`(${-dias}d em atraso)`:`(faltam ${dias}d)`}`));
+  } else if(f.status==='ativo' && f.tipoCadastro!=='extra'){
+    legalItens.push(linha('Exame periódico (ASO)', '<span style="color:var(--muted)">não registrado — pendente</span>'));
+  }
+  // férias (base aquisitiva + 11 meses de concessão antes da dobra)
+  const baseFer = f.dataUltimasFerias || f.dataAdmissao;
+  if(f.status==='ativo' && f.tipoCadastro!=='extra' && baseFer){
+    const limite=new Date(baseFer+'T00:00:00'); limite.setMonth(limite.getMonth()+23); // 12 aquisitivo + 11 concessivo
+    const dias=Math.round((limite-new Date(new Date().toDateString()))/86400000);
+    const cor = dias<0?'var(--bad)':(dias<=60?'var(--warn)':'var(--ok)');
+    legalItens.push(linha('Férias', `base ${fmtData(baseFer)}${f.dataUltimasFerias?'':' (admissão)'} · conceder até <b style="color:${cor}">${fmtData(limite.toISOString().slice(0,10))}</b> ${dias<0?`(${-dias}d em atraso)`:`(faltam ${dias}d)`}`));
+  }
+  // experiência
+  if(f.experiencia && f.experiencia.etapa){
+    legalItens.push(linha('Experiência', `etapa ${f.experiencia.etapa==='60'?'60 dias (total 90)':'30 dias'} · prazo ${fmtData(f.experiencia.prazoEtapaAte)}`));
+  }
+
+  // ---- documentos ----
+  const docs = f.documentos||[];
+  const docsHtml = docs.length ? docs.map((d,i)=>`<div class="sub" style="margin-bottom:4px;">📎 ${esc(DOC_LABELS[d.tipo]||d.tipo)} · <a class="link-btn" href="/api/rh/funcionarios/${f.id}/documentos/${i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">abrir</a></div>`).join('')
+    : '<div class="sub" style="color:var(--muted)">nenhum documento anexado.</div>';
+  const faltando = ['rg_cpf','ctps','aso_admissional','contrato'].filter(t=>!docs.some(d=>d.tipo===t));
+  const docsFaltHtml = (f.status==='ativo' && f.tipoCadastro!=='extra' && faltando.length) ? `<div class="sub" style="color:var(--warn);margin-top:4px;">⚠️ obrigatórios faltando: ${faltando.map(t=>esc(DOC_LABELS[t])).join(', ')}</div>` : '';
+
+  // ---- atestados (atual + histórico) ----
+  const atestHtml = [];
+  if(f.emAtestado && f.atestadoAtual){
+    const at=f.atestadoAtual; const dd=diasDesde(at.inicio);
+    atestHtml.push(`<div class="sub" style="color:var(--bad);margin-bottom:4px;">🩺 <b>de atestado agora</b> · ${dd} dia${dd===1?'':'s'} · desde ${fmtData(at.inicio)}${at.previsaoRetorno?' · previsão '+fmtData(at.previsaoRetorno):''}</div>`);
+  }
+  (f.atestados||[]).slice().reverse().forEach(at=>{
+    atestHtml.push(`<div class="sub" style="margin-bottom:4px;">✅ ${fmtData(at.inicio)}${at.retorno?' → retorno '+fmtData(at.retorno):''}</div>`);
+  });
+  const atestFinal = atestHtml.length ? atestHtml.join('') : '<div class="sub" style="color:var(--muted)">sem atestados registrados.</div>';
+
+  // ---- advertências ----
+  const advsHtml = advs.length ? advs.map(a=>`<div class="sub" style="margin-bottom:4px;">📋 <span class="badge ${ADV_STATUS_BADGE[a.status]||'muted'}">${esc(ADV_STATUS_LABEL[a.status]||a.status)}</span> · ${fmtDataHora(a.criadoEm)} · <button type="button" class="link-btn" onclick="fecharDetalheFuncionario();abrirDetalheAdvertencia('${a.id}')">ver</button></div>`).join('')
+    : '<div class="sub" style="color:var(--muted)">nenhuma advertência.</div>';
+
+  // ---- check-ins ----
+  const ck = CONTAGEM_CHECKINS[f.id]||{};
+  const ckHtml = `<div class="sub">📸 ${ck.total||0} check-in${ck.total===1?'':'s'} no total · ${ck.semana||0} nesta semana</div>`;
+
+  const curriculo = f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 ver currículo</a>` : '<div class="sub" style="color:var(--muted)">sem currículo anexado.</div>';
+
+  const acoes = IS_MASTER ? `<div class="acoes" style="margin-top:12px;"><button type="button" class="btn-secundario" onclick="fecharDetalheFuncionario();abrirEditar('${f.id}')">✏️ editar cadastro</button></div>` : '';
+
   corpo.innerHTML = `
-    <div style="font-weight:600;font-size:14px;margin-bottom:10px;">${escapeHtml(f.nome)}</div>
-    ${tabela}
-    <div style="margin-top:10px;">${curriculo}</div>
+    <div style="font-weight:600;font-size:15px;">${escapeHtml(f.nome)}</div>
+    <div style="margin:6px 0 2px;">${badges}</div>
+    ${secao('👤 Dados', dados.join(''))}
+    ${legalItens.length ? secao('⚖️ Situação legal', legalItens.join('')) : ''}
+    ${secao('📎 Documentos', docsHtml + docsFaltHtml)}
+    ${secao('🩺 Atestados', atestFinal)}
+    ${secao('📋 Advertências', advsHtml)}
+    ${secao('📸 Check-ins', ckHtml)}
+    ${secao('📄 Currículo', curriculo)}
+    ${acoes}
   `;
 }
 function fecharDetalheFuncionario(){ document.getElementById('overlay-funcionario-detalhe').classList.add('hidden'); }
