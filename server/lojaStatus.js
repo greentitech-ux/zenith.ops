@@ -49,6 +49,35 @@ const COMANDOS_COLLECTION = db.collection('lojaStatusComandos');
 const TIPOS_COMPUTADOR = ['atendimento', 'interno', 'abastecimento'];
 function tipoValido(tipo) { return TIPOS_COMPUTADOR.includes(tipo) ? tipo : 'atendimento'; }
 
+// segredo por computador (agentToken) - fecha a brecha de que o canal do
+// NOCZenith (entrega de comando, resultado, chat, IP, alerta de acesso
+// remoto) so dependia de codigo+posto, que sao identificadores PUBLICOS
+// (ficam no QR/link colado na maquina). Sem isso, qualquer um que soubesse
+// codigo+posto conseguia: (1) roubar E consumir o comando PowerShell que o
+// Master enfileirou (o heartbeat entrega e marca 'entregue' na mesma
+// chamada), (2) forjar o resultado de um comando, (3) injetar alerta/chat/IP
+// falso. O token vai assado no proprio .ps1 (gerado so pra Master logado ou
+// pra um agente que ja tem o token - ver rota vigia.ps1 em index.js) e volta
+// em todo request do agente no cabecalho X-NOC-Token.
+function gerarAgentToken() { return crypto.randomBytes(24).toString('hex'); }
+
+// comparacao em tempo constante (evita timing attack) - so bate se os dois
+// existem e tem o mesmo tamanho
+function tokensBatem(a, b) {
+  const ba = Buffer.from(String(a || ''), 'utf8');
+  const bb = Buffer.from(String(b || ''), 'utf8');
+  if (!ba.length || ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+// nunca deixa o agentToken (segredo) sair numa vista de leitura - o painel
+// (loja-status.html) so precisa do resto
+function semSegredo(doc) {
+  if (!doc) return doc;
+  const { agentToken, ...resto } = doc;
+  return resto;
+}
+
 // heartbeat a cada ~25s (ver atendimento.html) - 90s da margem pra 2
 // heartbeats perdidos por jitter de rede antes de considerar offline
 const LIMIAR_OFFLINE_MS = 90 * 1000;
@@ -104,13 +133,17 @@ const cache = createCache(listUncached, 10 * 1000);
 // - e o mais perto que da pra chegar de "ha quanto tempo esta ligado" sem
 // instalar um agente de verdade na maquina, que e exatamente o que essa
 // ferramenta foi feita pra evitar
-async function heartbeat(codigo, posto, info) {
+async function heartbeat(codigo, posto, info, token) {
   const id = docIdFor(codigo, posto || 'principal');
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   const atual = snap.exists ? snap.data() : null;
   const mensagemPendente = (atual && atual.mensagemPendente) || null;
   const dados = info || {};
+  // presenca (online/offline, IP, userAgent) continua SEM exigir token - e
+  // telemetria de baixo risco e nao pode deixar maquina legada (que ainda
+  // nao atualizou o NOCZenith, entao nao manda token) sumir do painel. Ja o
+  // comando e a thread de chat (dados sensiveis) so saem com token valido.
   await ref.set({
     codigo,
     posto: posto || 'principal',
@@ -125,18 +158,25 @@ async function heartbeat(codigo, posto, info) {
     userAgent: dados.userAgent || (atual && atual.userAgent) || null,
     abertoDesde: dados.abertoDesde || (atual && atual.abertoDesde) || null,
   }, { merge: true });
-  // só computador 'interno' processa comando do agente (ver
-  // agenteAcoes.js) - é o único tipo onde a tela nao é a propria
-  // funcionalidade, entao roda o NOCZenith sem gerenciar janela nenhuma
+  // token confere? (maquina legada sem token cadastrado nunca passa aqui -
+  // recebe comando/chat vazios ate reinstalar o NOCZenith com o token assado)
+  const tokenOk = !!(atual && atual.agentToken && tokensBatem(token, atual.agentToken));
+  // só computador 'interno' processa comando do agente (ver agenteAcoes.js)
+  // - é o único tipo onde a tela nao é a propria funcionalidade, entao roda
+  // o NOCZenith sem gerenciar janela nenhuma - E só entrega o comando pra
+  // quem provou o token (senao um terceiro que soubesse codigo+posto roubava
+  // o comando PowerShell do Master e ainda o consumia, deixando a maquina de
+  // verdade sem receber)
   let comandoPendente = null;
-  if (atual && atual.tipo === 'interno' && atual.comandoPendenteId) {
+  if (tokenOk && atual.tipo === 'interno' && atual.comandoPendenteId) {
     comandoPendente = await entregarComandoPendente(codigo, posto || 'principal');
   }
   // thread de chat (ver enviarMensagem/responderChat) - manda sempre a
   // lista inteira (capada, pequena), o NOCZenith que guarda localmente
   // qual "em" ja mostrou pra so empurrar as mensagens novas na janela
-  // flutuante (so tipo 'interno' processa isso hoje - ver vigiaScript.js)
-  const chatMensagens = (atual && atual.chatMensagens) || [];
+  // flutuante (so tipo 'interno' processa isso hoje - ver vigiaScript.js).
+  // So sai com token valido (a conversa pode ter dado sensivel)
+  const chatMensagens = tokenOk ? ((atual && atual.chatMensagens) || []) : [];
   cache.invalidar();
   return { mensagemPendente, comandoPendente, chatMensagens };
 }
@@ -150,7 +190,30 @@ function comOnline(doc) {
 // (index.js/loja-status.html) agrupa por codigo pra exibir por unidade
 async function listar() {
   const docs = await cache.cached();
-  return docs.map(comOnline);
+  return docs.map(comOnline).map(semSegredo);
+}
+
+// get-or-create do segredo do computador - chamado ao gerar o .ps1 (ver rota
+// vigia.ps1 em index.js), pra que o token va assado no script daquele posto.
+// Idempotente: uma vez criado, sempre devolve o mesmo. Nao invalida o cache
+// a toa quando ja existe
+async function garantirAgentToken(codigo, posto) {
+  const id = docIdFor(codigo, posto);
+  const snap = await COLLECTION.doc(id).get();
+  if (!snap.exists) throw new Error('Computador não encontrado.');
+  const atual = snap.data();
+  if (atual.agentToken) return atual.agentToken;
+  const token = gerarAgentToken();
+  await COLLECTION.doc(id).set({ agentToken: token }, { merge: true });
+  cache.invalidar();
+  return token;
+}
+
+// token atual do computador (ou null se legado/inexistente) - usado pela rota
+// vigia.ps1 pra decidir se um download sem sessao de Master pode prosseguir
+async function tokenDoComputador(codigo, posto) {
+  const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
+  return snap.exists ? (snap.data().agentToken || null) : null;
 }
 
 // Master cadastra um novo computador pra uma unidade - gera um id curto e
@@ -167,10 +230,13 @@ async function cadastrarComputador(codigo, nome, tipo) {
     ultimoHeartbeatEm: null, avisadoOffline: false, offlineDesde: null, mensagemPendente: null,
     ip: null, userAgent: null, abertoDesde: null, ipLocal: null, ipLocalEm: null,
     comandoPendenteId: null,
+    // segredo do agente - vai assado no .ps1 desse computador (ver
+    // garantirAgentToken/vigiaScript.js), nunca sai numa vista de leitura
+    agentToken: gerarAgentToken(),
   };
   await COLLECTION.doc(id).set(registro);
   cache.invalidar();
-  return registro;
+  return semSegredo(registro);
 }
 
 // edita nome e/ou tipo de um computador ja cadastrado - o "posto" (id do
@@ -213,10 +279,22 @@ async function definirAnydeskId(codigo, posto, anydeskId) {
 // proposito NAO mexe em ultimoHeartbeatEm/avisadoOffline: o vigia estar
 // rodando nao prova que a tela de monitoramento esta aberta, entao nao pode
 // mascarar uma loja de verdade offline pro alerta de suporte
-async function atualizarIpLocal(codigo, posto, ip) {
+// so aceita a escrita do agente autenticado quando o computador ja tem token
+// (NOCZenith atualizado) - impede terceiro que saiba codigo+posto de
+// envenenar o IP/alerta/chat mostrado pro Master. Computador legado (sem
+// token) segue aceito por compatibilidade, ate reinstalar
+function exigirTokenSeTiver(atual, token) {
+  if (atual && atual.agentToken && !tokensBatem(token, atual.agentToken)) {
+    throw new Error('Token do agente inválido.');
+  }
+}
+
+async function atualizarIpLocal(codigo, posto, ip, token) {
   const id = docIdFor(codigo, posto);
   const limpo = String(ip || '').trim().slice(0, 45);
   if (!limpo) throw new Error('IP inválido.');
+  const snap = await COLLECTION.doc(id).get();
+  exigirTokenSeTiver(snap.exists ? snap.data() : null, token);
   await COLLECTION.doc(id).set({ codigo, posto, ipLocal: limpo, ipLocalEm: Date.now() }, { merge: true });
   cache.invalidar();
   return { codigo, posto, ipLocal: limpo };
@@ -230,12 +308,13 @@ async function atualizarIpLocal(codigo, posto, ip) {
 // Master (ver POST .../acesso-remoto em index.js + push.notifyAcessoRemotoDetectado),
 // disparado toda vez que essa funcao roda, nao so na primeira. "detalhe" e
 // texto livre tipo "AnyDesk (203.0.113.5:7070)", montado pelo proprio script
-async function registrarAcessoRemoto(codigo, posto, detalhe) {
+async function registrarAcessoRemoto(codigo, posto, detalhe, token) {
   const id = docIdFor(codigo, posto);
   const limpo = String(detalhe || '').trim().slice(0, 200);
   if (!limpo) throw new Error('Detalhe do acesso remoto é obrigatório.');
   const snap = await COLLECTION.doc(id).get();
   const atual = snap.exists ? snap.data() : null;
+  exigirTokenSeTiver(atual, token);
   await COLLECTION.doc(id).set({
     codigo, posto, ultimoAcessoRemotoEm: Date.now(), ultimoAcessoRemotoDetalhe: limpo,
   }, { merge: true });
@@ -255,6 +334,11 @@ async function enfileirarComando(codigo, posto, comando, opcoes) {
   if (!snap.exists) throw new Error('Computador não encontrado.');
   const atual = snap.data();
   if (atual.tipo !== 'interno') throw new Error('Só computadores tipo "interno" processam comandos do agente.');
+  // comando só sai pra computador que tem o token cadastrado (NOCZenith
+  // atualizado) - assim a entrega e a confirmacao andam autenticadas de ponta
+  // a ponta. Maquina legada precisa reinstalar o NOCZenith uma vez pra
+  // "entrar" no canal seguro antes de aceitar comando
+  if (!atual.agentToken) throw new Error('Esse computador precisa reinstalar o NOCZenith (baixar de novo) pra habilitar comandos com segurança.');
   if (atual.comandoPendenteId) throw new Error('Já existe um comando pendente/entregue pra esse computador - aguarde terminar antes de mandar outro.');
   const op = opcoes || {};
   const comandoRef = COMANDOS_COLLECTION.doc();
@@ -296,12 +380,23 @@ async function entregarComandoPendente(codigo, posto) {
 // o NOCZenith reporta o resultado (ver rota publica .../comando-resultado
 // em index.js) - fecha o ciclo e libera o computador pra aceitar um novo
 // comando
-async function marcarComandoExecutado(comandoId, dados) {
+async function marcarComandoExecutado(comandoId, dados, contexto) {
   const d = dados || {};
+  const ctx = contexto || {};
   const comandoRef = COMANDOS_COLLECTION.doc(comandoId);
   const snap = await comandoRef.get();
   if (!snap.exists) throw new Error('Comando não encontrado.');
   const comando = snap.data();
+  // o resultado tem que vir DO computador certo (codigo/posto do comando) e
+  // com o token dele - senao qualquer um que adivinhasse um comandoId forjava
+  // o resultado (marcava 'executado' com saida falsa, escondendo se rodou de
+  // verdade). A rota passa codigo/posto da URL + token do cabecalho
+  if (ctx.codigo != null && (ctx.codigo !== comando.codigo || ctx.posto !== comando.posto)) {
+    throw new Error('Comando não pertence a esse computador.');
+  }
+  const compSnap = await COLLECTION.doc(docIdFor(comando.codigo, comando.posto)).get();
+  const agentToken = compSnap.exists ? compSnap.data().agentToken : null;
+  if (agentToken && !tokensBatem(ctx.token, agentToken)) throw new Error('Token do agente inválido.');
   const patch = {
     status: d.erro ? 'erro' : 'executado',
     executadoEm: new Date().toISOString(),
@@ -355,9 +450,11 @@ async function enviarMensagem(codigo, posto, texto, deEmail) {
 // (ver rota publica .../chat-responder em index.js - sem sessao, quem
 // chama e a maquina) - so entra na thread, o Master ve no mesmo modal de
 // mensagem em loja-status.html no proximo poll (30s)
-async function responderChat(codigo, posto, texto) {
+async function responderChat(codigo, posto, texto, token) {
   const textoLimpo = String(texto || '').trim().slice(0, 500);
   if (!textoLimpo) throw new Error('Mensagem vazia.');
+  const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
+  exigirTokenSeTiver(snap.exists ? snap.data() : null, token);
   const thread = await adicionarNoChat(codigo, posto, { de: 'computador', texto: textoLimpo, em: Date.now() });
   return { codigo, posto, texto: textoLimpo, chatMensagens: thread };
 }
@@ -390,4 +487,5 @@ module.exports = {
   heartbeat, listar, cadastrarComputador, editarComputador, removerComputador,
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR,
   enfileirarComando, marcarComandoExecutado, registrarAcessoRemoto, responderChat,
+  garantirAgentToken, tokenDoComputador,
 };

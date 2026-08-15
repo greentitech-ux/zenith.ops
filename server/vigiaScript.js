@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 3;
+const VERSAO_VIGIA = 4;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -38,8 +38,15 @@ function paginaDoTipo(tipo) {
 // cadencia bem mais espacada (~1h), (2) checam se existe uma versao nova
 // do proprio script esperando (ver Verificar-Atualizacao) - se sim, baixa
 // o conteudo novo, sobrescreve o proprio arquivo e reinicia sozinho.
-function montarScriptVigia({ codigo, posto, tipo }) {
+function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
   const ehInterno = tipo === 'interno';
+  // segredo desse computador (ver lojaStatus.js) - vai assado no script e
+  // volta no cabecalho X-NOC-Token em todo request pro servidor, provando
+  // que quem fala e a maquina certa. Sem ele, o backend nao entrega comando/
+  // chat nem aceita resultado/IP/alerta (fecha a brecha de que so codigo+
+  // posto, que sao publicos, autorizavam tudo). O `|| ''` e so defensivo -
+  // a rota vigia.ps1 sempre passa um token (garantirAgentToken)
+  const tokenSeguro = String(agentToken || '').replace(/[^a-f0-9]/gi, '');
   const urlMonitorar = `${APP_BASE_URL}/${paginaDoTipo(tipo)}?unidade=${encodeURIComponent(codigo)}&posto=${encodeURIComponent(posto)}`;
   const urlReportarIp = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/ip-local`;
   const urlHeartbeat = `${APP_BASE_URL}/api/loja-status/heartbeat`;
@@ -95,6 +102,12 @@ function montarScriptVigia({ codigo, posto, tipo }) {
     '$NomeTarefa = "' + nomeTarefa + '"',
     '$InicioScript = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
     '',
+    '# segredo desse computador - autentica todo request pro Zenith (cabecalho',
+    '# X-NOC-Token). Nao compartilhe esse arquivo: quem tiver esse token fala',
+    '# como essa maquina. O NOCZenith se atualiza sozinho carregando o token.',
+    '$AgentToken = "' + tokenSeguro + '"',
+    '$CabecalhosAgente = @{ "X-NOC-Token" = $AgentToken }',
+    '',
     '# ---- log local (arquivo texto do lado do .ps1) - sem isso, todo erro',
     '# ficava mudo (-ErrorAction SilentlyContinue + catch {} em toda chamada de',
     '# rede, de proposito, pra nunca derrubar o loop) e nao tinha como saber,',
@@ -145,7 +158,7 @@ function montarScriptVigia({ codigo, posto, tipo }) {
     '          try {',
     '            $detalhe = "$nomeProc ($($c.RemoteAddress):$($c.RemotePort))"',
     '            $corpoAlerta = @{ detalhe = $detalhe } | ConvertTo-Json',
-    '            Invoke-RestMethod -Uri $UrlAcessoRemoto -Method Post -ContentType "application/json" -Body $corpoAlerta -ErrorAction SilentlyContinue | Out-Null',
+    '            Invoke-RestMethod -Uri $UrlAcessoRemoto -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $corpoAlerta -ErrorAction SilentlyContinue | Out-Null',
     '          } catch {}',
     '        }',
     '      }',
@@ -171,7 +184,7 @@ function montarScriptVigia({ codigo, posto, tipo }) {
     '    $respVersao = Invoke-RestMethod -Uri $UrlVersao -Method Get',
     '    if ($respVersao -and $respVersao.versao -and ([int]$respVersao.versao -gt $VersaoScript)) {',
     '      Escrever-Log "Versao nova disponivel ($($respVersao.versao), essa copia e $VersaoScript) - baixando..."',
-    '      $novoConteudo = Invoke-RestMethod -Uri $UrlScriptProprio -Method Get',
+    '      $novoConteudo = Invoke-RestMethod -Uri $UrlScriptProprio -Method Get -Headers $CabecalhosAgente',
     '      if ($novoConteudo -and ($novoConteudo -is [string]) -and $novoConteudo.StartsWith("# NOCZenith")) {',
     '        Set-Content -Path $PSCommandPath -Value $novoConteudo -Encoding UTF8 -Force',
     '        Escrever-Log "Atualizado para versao $($respVersao.versao) - reiniciando."',
@@ -336,7 +349,7 @@ function montarScriptVigia({ codigo, posto, tipo }) {
     '    $resp = $null',
     '    try {',
     '      $corpo = @{ unidade = "' + codigo + '"; posto = "' + posto + '"; userAgent = "NOCZenith/1.0 (Windows NT; PowerShell)"; abertoDesde = $InicioScript } | ConvertTo-Json',
-    '      $resp = Invoke-RestMethod -Uri $UrlHeartbeat -Method Post -ContentType "application/json" -Body $corpo',
+    '      $resp = Invoke-RestMethod -Uri $UrlHeartbeat -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $corpo',
     '      if ($FalhasSeguidasHeartbeat -gt 0) { Escrever-Log "Heartbeat voltou a funcionar (depois de $FalhasSeguidasHeartbeat falha(s) seguida(s))." }',
     '      $FalhasSeguidasHeartbeat = 0',
     '    } catch {',
@@ -354,13 +367,13 @@ function montarScriptVigia({ codigo, posto, tipo }) {
     '          $sb = [scriptblock]::Create($resp.comandoPendente.comando)',
     '          $saidaComando = (& $sb 2>&1 | Out-String)',
     '          $corpoOk = @{ comandoId = $resp.comandoPendente.comandoId; resultado = $saidaComando } | ConvertTo-Json',
-    '          Invoke-RestMethod -Uri $UrlComandoResultado -Method Post -ContentType "application/json" -Body $corpoOk -ErrorAction SilentlyContinue | Out-Null',
+    '          Invoke-RestMethod -Uri $UrlComandoResultado -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $corpoOk -ErrorAction SilentlyContinue | Out-Null',
     '          Escrever-Log "Comando executado (id=$($resp.comandoPendente.comandoId))"',
     '        } catch {',
     '          Escrever-Log "Comando falhou (id=$($resp.comandoPendente.comandoId)): $($_.Exception.Message)"',
     '          try {',
     '            $corpoErro = @{ comandoId = $resp.comandoPendente.comandoId; erro = $_.Exception.Message } | ConvertTo-Json',
-    '            Invoke-RestMethod -Uri $UrlComandoResultado -Method Post -ContentType "application/json" -Body $corpoErro -ErrorAction SilentlyContinue | Out-Null',
+    '            Invoke-RestMethod -Uri $UrlComandoResultado -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $corpoErro -ErrorAction SilentlyContinue | Out-Null',
     '          } catch {}',
     '        }',
     '      }',
@@ -376,7 +389,7 @@ function montarScriptVigia({ codigo, posto, tipo }) {
     '      while ($global:FilaChatSaida.Count -gt 0) {',
     '        $textoParaEnviar = $global:FilaChatSaida.Dequeue()',
     '        $corpoChat = @{ texto = $textoParaEnviar } | ConvertTo-Json',
-    '        Invoke-RestMethod -Uri $UrlChatResponder -Method Post -ContentType "application/json" -Body $corpoChat | Out-Null',
+    '        Invoke-RestMethod -Uri $UrlChatResponder -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $corpoChat | Out-Null',
     '        Escrever-Log "Resposta enviada pela janela de chat."',
     '      }',
     '    } catch {',
@@ -433,7 +446,7 @@ function montarScriptVigia({ codigo, posto, tipo }) {
     '          Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |',
     '          Select-Object -First 1 -ExpandProperty IPAddress)',
     '        if ($ip) {',
-    '          Invoke-RestMethod -Uri $UrlReportarIp -Method Post -ContentType "application/json" -Body (@{ ip = $ip } | ConvertTo-Json) | Out-Null',
+    '          Invoke-RestMethod -Uri $UrlReportarIp -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body (@{ ip = $ip } | ConvertTo-Json) | Out-Null',
     '        }',
     '      } catch {',
     '        Escrever-Log "Falha ao reportar IP local: $($_.Exception.Message)"',
