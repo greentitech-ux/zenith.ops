@@ -763,7 +763,7 @@ function cortesiaHtml(c){
   if(c.metodoPagamento!=='cortesia' || !c.cortesiaStatus) return '';
   const s = c.cortesiaStatus;
   const linhas = {
-    PENDENTE: `🎗 <b>Cortesia aguardando aprovação</b> — motivo: ${escapeHtml(c.motivoCortesia||'—')}`,
+    PENDENTE: `🎗 <b>Cortesia aguardando aprovação</b> — motivo: ${escapeHtml(c.motivoCortesia||'—')}${c.criadoPorEmail?`<br>👤 solicitado por <b>${escapeHtml(c.criadoPorNome||c.criadoPorEmail)}</b>`:''}`,
     APROVADA_GERENTE: `🎗 Cortesia aprovada pelo Gerente (${escapeHtml(c.cortesiaAprovadaPorEmail||'')}) · <b>aguardando palavra final do Master</b>`,
     CONCLUIDA: `🎗 Cortesia aprovada — card encerrado pelo Master`,
     NEGADA: `🎗 <b>Cortesia NEGADA</b> (${escapeHtml(c.cortesiaNegadaPorEmail||'')})${c.cortesiaMotivoNegativa?' — '+escapeHtml(c.cortesiaMotivoNegativa):''} · troque a forma de pagamento pra liberar`,
@@ -797,6 +797,15 @@ async function decidirCortesia(id, aprovado){
     });
     const data = await res.json();
     if(!res.ok) throw new Error(data.error||'erro ao decidir cortesia');
+    await carregar();
+  }catch(err){ alert(err.message); }
+}
+async function excluirCheckin(id){
+  if(!confirm('Excluir esse check-in de vez? Essa ação NÃO pode ser desfeita.')) return;
+  try{
+    const res = await fetch(`/api/parque/checkins/${id}`, { method:'DELETE' });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error||'erro ao excluir');
     await carregar();
   }catch(err){ alert(err.message); }
 }
@@ -895,6 +904,7 @@ function renderLista(lista){
           ${(c.checkoutEm && !c.checkoutAprovado && podeAprovarCheckout(c.unidade))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="aprovarCheckout('${c.id}')">✓ Aprovar check-out</button>`:''}
           ${IS_MASTER?`<button type="button" class="link-btn" onclick="abrirMaster('${c.id}')">✎ Editar</button>`:''}
           ${edicaoPendentePara(c.id)?`<span class="sub" style="color:var(--accent);">correção pendente</span>`:`<button type="button" class="link-btn" onclick="abrirCorrecao('${c.id}')">🛠 Pedir correção</button>`}
+          ${IS_MASTER?`<button type="button" class="link-btn" style="color:var(--bad);" onclick="excluirCheckin('${c.id}')">🗑️ Excluir</button>`:''}
         </div>
       </div>`;
     }).join('');
