@@ -235,6 +235,10 @@ let ORDERS_BY_ID = {};
 let FILTRO = 'TODOS';
 
 function fmtMoney(v){ return 'R$ ' + (v||0).toFixed(2).replace('.',','); }
+// escapa dado externo antes de ir pra innerHTML - nome do cliente/cartão vem
+// da Adyen (o cliente digita) e observação/contato vêm de formulário; sem
+// isso, um "nome" com <img onerror=...> executaria script aqui (XSS)
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 const FUSO_BR = 'America/Sao_Paulo';
 function fmtDT(iso){ if(!iso) return '—'; const d=new Date(iso); return d.toLocaleDateString('pt-BR',{timeZone:FUSO_BR})+' '+d.toLocaleTimeString('pt-BR',{timeZone:FUSO_BR,hour:'2-digit',minute:'2-digit'}); }
 
@@ -250,10 +254,10 @@ function prazoInfo(prazoISO){
 function renderAnexo(disputeId, index, anexo){
   const url = `/api/disputes/anexo/${disputeId}/${index}`;
   const tipo = anexo.tipo || '';
-  if(tipo.startsWith('image/')) return `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${anexo.nome||'evidência'}"></a>`;
+  if(tipo.startsWith('image/')) return `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${esc(anexo.nome||'evidência')}"></a>`;
   if(tipo.startsWith('video/')) return `<video src="${url}" controls style="max-width:220px;max-height:140px;border-radius:6px;border:1px solid var(--line);"></video>`;
   if(tipo.startsWith('audio/')) return `<audio src="${url}" controls style="max-width:240px;"></audio>`;
-  return `<a href="${url}" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent);">📄 ${anexo.nome||'arquivo'}</a>`;
+  return `<a href="${url}" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent);">📄 ${esc(anexo.nome||'arquivo')}</a>`;
 }
 
 async function carregar(){
@@ -306,8 +310,8 @@ function render(){
     <div class="card">
       <div class="top">
         <div>
-          <div class="titulo">${o.cliente||'cliente desconhecido'} ${o.last4?('· •• '+o.last4):''}</div>
-          <div class="sub">Pedido ${pedidoId} · ${o.unidade||'—'} · ${o.metodo||'?'}${o.statusAtual?(' · status atual: '+o.statusAtual):''}</div>
+          <div class="titulo">${esc(o.cliente||'cliente desconhecido')} ${o.last4?('· •• '+esc(o.last4)):''}</div>
+          <div class="sub">Pedido ${esc(pedidoId)} · ${esc(o.unidade||'—')} · ${esc(o.metodo||'?')}${o.statusAtual?(' · status atual: '+esc(o.statusAtual)):''}</div>
           ${o.prazoDefesa?`<div class="prazo" style="color:${prazo.cor}">${prazo.texto}</div>`:''}
         </div>
         <div class="valor">${fmtMoney(o.valor)}</div>
@@ -321,8 +325,8 @@ function render(){
               <option value="__REMOVER__">Remover</option>
             </select>
           </div>
-          ${(d.nomeContato||d.telefoneContato)?`<div class="notas">${d.nomeContato||'—'}${d.telefoneContato?(' · '+d.telefoneContato):''}</div>`:''}
-          ${d.notas?`<div class="notas">${d.notas}</div>`:''}
+          ${(d.nomeContato||d.telefoneContato)?`<div class="notas">${esc(d.nomeContato||'—')}${d.telefoneContato?(' · '+esc(d.telefoneContato)):''}</div>`:''}
+          ${d.notas?`<div class="notas">${esc(d.notas)}</div>`:''}
           <div class="imgs">
             ${(d.anexos||[]).map((a,i)=>renderAnexo(d.id,i,a)).join('')}
           </div>
