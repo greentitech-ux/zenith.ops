@@ -917,6 +917,26 @@ app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', async (req, re
   }
 });
 
+// comando de UMA LINHA pra colar no PowerShell da loja (botao "Copiar comando"
+// na tela NOC Zenith) - baixa e instala o NOCZenith contornando o Controle de
+// Aplicativo Inteligente do Windows 11 (ver montarComandoInstalacao). O comando
+// leva o X-NOC-Token do computador, entao so quem gerencia (Master/Admin/Suporte)
+// pode gera-lo. auth.requireAuth explicito porque esta antes do gate global.
+app.get('/api/loja-status/:codigo/computadores/:posto/comando-instalacao', auth.requireAuth, async (req, res) => {
+  try {
+    const secoes = (req.user.permissions && req.user.permissions.sections) || [];
+    if (!(req.isMaster || req.isAdmin || secoes.includes('suporte'))) {
+      return res.status(403).json({ error: 'Sem permissão pra gerar o comando de instalação.' });
+    }
+    const tipo = lojaStatus.TIPOS_COMPUTADOR.includes(req.query.tipo) ? req.query.tipo : 'atendimento';
+    const { codigo, posto } = req.params;
+    const agentToken = await lojaStatus.garantirAgentToken(codigo, posto);
+    res.json({ comando: vigiaScript.montarComandoInstalacao({ codigo, posto, tipo, agentToken }) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---------- RH: link de auto-atendimento (rh-colaborador.html) - o proprio
 // colaborador preenche os dados e bate ponto por foto pelo celular, sem
 // login no Zenith (pedido do usuario: "link onde sera enviado ao colaborador

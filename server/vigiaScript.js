@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 5;
+const VERSAO_VIGIA = 6;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -86,16 +86,23 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '#',
     ...(ehInterno ? cabecalhoInterno : cabecalhoOutros),
     '#',
-    '# COMO INSTALAR (um passo so):',
-    '# 1) Salve esse arquivo numa pasta fixa e definitiva (ex: Documentos\\NOCZenith)',
-    '#    - nao mova depois, o agendamento vai apontar pra esse caminho.',
-    '# 2) Clique com o botao DIREITO no arquivo > "Executar com o PowerShell".',
-    '#    Uma janela preta abre rapido, instala e some sozinha.',
+    '# COMO INSTALAR:',
+    '# Jeito 1 (recomendado, sem bloqueio do Windows): na tela NOC Zenith, no',
+    '#   Zenith, clique em "Copiar comando" desse computador, cole no PowerShell',
+    '#   da loja e aperte Enter. Pronto.',
     '#',
-    '# Se aparecer um erro falando de "execution policy" / "nao pode ser',
-    '# carregado": abra o PowerShell normal (menu Iniciar > digite PowerShell),',
-    '# rode uma vez so: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force',
-    '# e tente o passo 2 de novo.',
+    '# Jeito 2 (a partir deste arquivo baixado): o Windows 11 (Controle de',
+    '#   Aplicativo Inteligente) bloqueia .ps1 baixado da internet. Pra liberar:',
+    '#   1) Abra o PowerShell (menu Iniciar > digite PowerShell).',
+    '#   2) Cole, trocando pelo caminho onde salvou (mantenha as aspas):',
+    '#        Unblock-File "C:\\...\\NOCZenith.ps1"',
+    '#      (tira o selo de "veio da internet" que causa o bloqueio)',
+    '#   3) Cole:',
+    '#        powershell -ExecutionPolicy Bypass -File "C:\\...\\NOCZenith.ps1"',
+    '#',
+    '# Depois de instalar, o NOCZenith se COPIA sozinho pra uma pasta fixa',
+    '# (%LOCALAPPDATA%\\NOCZenith) e passa a rodar de la - entao o arquivo que',
+    '# voce baixou pode ser APAGADO. Ele tambem se atualiza sozinho dai pra frente.',
     '',
     'param([switch]$Loop)',
     '',
@@ -486,20 +493,37 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     'if ($Loop) {',
     '  Rodar-Loop',
     '} else {',
-    '  $caminho = $PSCommandPath',
-    '  $acao = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$caminho`" -Loop"',
+    '  # instala numa pasta fixa e protegida (%LOCALAPPDATA%\\NOCZenith): assim o',
+    '  # arquivo baixado pode ser apagado e o agendamento nunca aponta pra um',
+    '  # caminho que alguem vai mover/limpar (ex: Downloads). Se ja estiver',
+    '  # rodando dessa pasta (reinstalacao), nao copia de novo.',
+    '  $PastaFixa = Join-Path $env:LOCALAPPDATA "NOCZenith"',
+    '  $Destino = Join-Path $PastaFixa "NOCZenith.ps1"',
+    '  try {',
+    '    if (-not (Test-Path $PastaFixa)) { New-Item -ItemType Directory -Path $PastaFixa -Force | Out-Null }',
+    '    if ($PSCommandPath -and ($PSCommandPath -ne $Destino) -and (Test-Path $PSCommandPath)) {',
+    '      Copy-Item -Path $PSCommandPath -Destination $Destino -Force',
+    '      Unblock-File -Path $Destino -ErrorAction SilentlyContinue',
+    '    }',
+    '  } catch {',
+    '    Write-Host "Aviso: nao consegui usar a pasta fixa ($($_.Exception.Message)). Instalando do lugar atual."',
+    '    $Destino = $PSCommandPath',
+    '  }',
+    '  $acao = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Destino`" -Loop"',
     '  $gatilho = New-ScheduledTaskTrigger -AtLogOn',
     '  try {',
     '    Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho -Force | Out-Null',
-    '    Escrever-Log "Instalado - tarefa agendada \'$NomeTarefa\' criada (roda no proximo login desse usuario)."',
+    '    Escrever-Log "Instalado em $Destino - tarefa agendada \'$NomeTarefa\' criada (roda no proximo login desse usuario)."',
     '    Write-Host "Instalado! O NOCZenith vai rodar sozinho a partir do proximo login."',
+    '    Write-Host "Ele agora roda de: $Destino"',
+    '    Write-Host "Pode APAGAR o arquivo que voce baixou - nao precisa mais dele."',
     '  } catch {',
     '    Escrever-Log "FALHA ao registrar a tarefa agendada: $($_.Exception.Message)"',
     '    Write-Host "ERRO ao instalar a tarefa agendada: $($_.Exception.Message)"',
     '    Write-Host "Rode o PowerShell como Administrador e tente de novo."',
     '  }',
     '  Write-Host "Iniciando agora tambem, nessa sessao..."',
-    '  Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$caminho`" -Loop"',
+    '  Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Destino`" -Loop"',
     '  Read-Host "Pronto! Pode fechar essa janela (aperte Enter)"',
     '}',
     '',
@@ -508,4 +532,18 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
   return [...linhasComuns, ...(ehInterno ? linhasLoopInterno : linhasLoopOutros), ...linhasFinal].join('\n');
 }
 
-module.exports = { montarScriptVigia, VERSAO_VIGIA };
+// comando de UMA LINHA pra colar no PowerShell da loja (botao "Copiar comando"
+// na tela NOC Zenith). Baixa o script DIRETO pra pasta fixa
+// (%LOCALAPPDATA%\NOCZenith) via Invoke-RestMethod - arquivo baixado assim NAO
+// recebe o "Mark of the Web", entao o Controle de Aplicativo Inteligente do
+// Windows 11 NAO bloqueia (que e o que trava o clique-direito num .ps1 baixado
+// pelo navegador). O X-NOC-Token autentica na rota mesmo em reinstalacao (quando
+// o computador ja tem segredo). Depois roda o arquivo (& $f), que se instala
+// como tarefa agendada apontando pra essa mesma pasta fixa.
+function montarComandoInstalacao({ codigo, posto, tipo, agentToken }) {
+  const token = String(agentToken || '').replace(/[^a-f0-9]/gi, '');
+  const url = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/vigia.ps1?tipo=${encodeURIComponent(tipo)}`;
+  return `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop';$d=Join-Path $env:LOCALAPPDATA 'NOCZenith';New-Item -ItemType Directory -Path $d -Force|Out-Null;$f=Join-Path $d 'NOCZenith.ps1';Invoke-RestMethod -Uri '${url}' -Headers @{'X-NOC-Token'='${token}'} -OutFile $f;Unblock-File -Path $f -ErrorAction SilentlyContinue;& $f"`;
+}
+
+module.exports = { montarScriptVigia, montarComandoInstalacao, VERSAO_VIGIA };
