@@ -108,12 +108,9 @@ async function resumoPorUsuario() {
 }
 
 async function encerrar(sessionId) {
-  console.log('DEBUG encerrar() chamando delete pra', sessionId.slice(0,8));
   await COLLECTION.doc(sessionId).delete();
-  console.log('DEBUG encerrar() delete concluido, chamando invalidar()');
   ultimoToqueEmMemoria.delete(sessionId);
   sessionsCache.invalidar();
-  console.log('DEBUG encerrar() invalidar() concluido');
 }
 
 // chamado quando a senha e trocada/reset ou o acesso e desativado - sem isso
