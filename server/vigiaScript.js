@@ -543,7 +543,24 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
 function montarComandoInstalacao({ codigo, posto, tipo, agentToken }) {
   const token = String(agentToken || '').replace(/[^a-f0-9]/gi, '');
   const url = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/vigia.ps1?tipo=${encodeURIComponent(tipo)}`;
-  return `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop';$d=Join-Path $env:LOCALAPPDATA 'NOCZenith';New-Item -ItemType Directory -Path $d -Force|Out-Null;$f=Join-Path $d 'NOCZenith.ps1';Invoke-RestMethod -Uri '${url}' -Headers @{'X-NOC-Token'='${token}'} -OutFile $f;Unblock-File -Path $f -ErrorAction SilentlyContinue;& $f"`;
+  // o script real (baixa direto pra pasta fixa - sem Mark of the Web, entao o
+  // Controle de Aplicativo Inteligente nao bloqueia - e roda de la)
+  const script = [
+    "$ErrorActionPreference='Stop'",
+    "$d=Join-Path $env:LOCALAPPDATA 'NOCZenith'",
+    'New-Item -ItemType Directory -Path $d -Force|Out-Null',
+    "$f=Join-Path $d 'NOCZenith.ps1'",
+    `Invoke-RestMethod -Uri '${url}' -Headers @{'X-NOC-Token'='${token}'} -OutFile $f`,
+    'Unblock-File -Path $f -ErrorAction SilentlyContinue',
+    '& $f',
+  ].join(';');
+  // -EncodedCommand (Base64 de UTF-16LE): o comando vira uma string opaca, sem
+  // nenhum $ ou aspas soltos. Sem isso, colar `powershell -Command "...$f..."`
+  // DENTRO de outro PowerShell fazia o shell de fora expandir $d/$f (que nao
+  // existem la) e o comando chegava com -OutFile/-Path/& vazios (erro real da
+  // loja). Assim cola e roda igual no PowerShell, no CMD ou no Executar.
+  const b64 = Buffer.from(script, 'utf16le').toString('base64');
+  return `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64}`;
 }
 
 module.exports = { montarScriptVigia, montarComandoInstalacao, VERSAO_VIGIA };
