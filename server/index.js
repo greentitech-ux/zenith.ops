@@ -4506,6 +4506,23 @@ app.patch('/api/rh/checkins/:id', auth.requireMaster, async (req, res) => {
   }
 });
 
+// Master encerra manualmente um check-in que ficou aberto - pedido explicito
+// do usuario: "o master precisa ter como realizar o encerramento pois eles
+// podem esquecer... para não deixar aberto o master fecha". Sem foto/
+// localizacao (o Master pode estar fechando de longe, sem a pessoa por
+// perto), fica marcado como encerrado pelo Master (ver encerrarManual)
+app.post('/api/rh/checkins/:id/encerrar', auth.requireMaster, async (req, res) => {
+  try {
+    const atual = await rhCheckin.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Check-in não encontrado.' });
+    const registro = await rhCheckin.encerrarManual(req.params.id, { porEmail: req.user.email });
+    broadcast('rh-checkin-atualizado', { id: registro.id, unidade: registro.unidade }, 'rh');
+    res.json(sanitizarCheckin(registro, req.isMaster));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.delete('/api/rh/checkins/:id', auth.requireMaster, async (req, res) => {
   try {
     const atual = await rhCheckin.getOne(req.params.id);

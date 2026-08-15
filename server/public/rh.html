@@ -1096,6 +1096,10 @@ async function carregarCheckins(){
   const acoesMaster = (c) => IS_MASTER ? `
       <button type="button" class="link-btn" onclick="abrirEditarCheckin('${c.id}')">✏️ editar</button>
       <button type="button" class="link-btn" style="color:var(--bad);" onclick="excluirCheckin('${c.id}')">🗑️ excluir</button>` : '';
+  // so pra quem ainda esta com check-in ABERTO - pedido explicito do
+  // usuario: "o master precisa ter como realizar o encerramento pois eles
+  // podem esquecer... para não deixar aberto o master fecha"
+  const acaoEncerrar = (c) => IS_MASTER ? `<button type="button" class="link-btn" style="color:var(--warn);" onclick="encerrarCheckin('${c.id}')">🔒 encerrar</button>` : '';
 
   const elAbertos = document.getElementById('lista-checkins-abertos');
   const abertosFiltrados = unidadeF ? abertos.filter(c=>c.unidade===unidadeF) : abertos;
@@ -1106,7 +1110,7 @@ async function carregarCheckins(){
     <div class="card">
       <div class="linha1"><span>${escapeHtml(c.funcionarioNome)}</span><span class="badge ok">na loja</span></div>
       <div class="sub">${escapeHtml(UNIDADES_NOMES[c.unidade]||c.unidade)} · entrou às ${fmtHora(c.entrada.horario)}</div>
-      <div class="acoes">${linkLocalizacao(c.entrada?.localizacao, 'entrada')}${acoesMaster(c)}</div>
+      <div class="acoes">${linkLocalizacao(c.entrada?.localizacao, 'entrada')}${acaoEncerrar(c)}${acoesMaster(c)}</div>
     </div>`).join('') : '<div class="empty">ninguém na loja agora.</div>';
 
   const elHist = document.getElementById('lista-checkins-historico');
@@ -1167,6 +1171,17 @@ async function excluirCheckin(id){
   const resp = await fetch(`/api/rh/checkins/${id}`, { method:'DELETE' });
   const data = await resp.json();
   if(!resp.ok){ alert(data.error || 'Erro ao excluir.'); return; }
+  await carregarCheckins();
+}
+// Master fecha um check-in que a pessoa esqueceu de encerrar - sem foto/
+// localização (registro fica marcado como encerrado pelo Master, ver
+// rhCheckin.encerrarManual); horário registrado é o de agora
+async function encerrarCheckin(id){
+  const c = CHECKINS_CACHE.get(id);
+  if(!confirm(`Encerrar agora o check-in de ${c ? c.funcionarioNome : 'essa pessoa'}? Use isso quando a pessoa esqueceu de fazer o check-out. O horário de saída registrado será o de agora - se precisar ajustar, use "editar" depois.`)) return;
+  const resp = await fetch(`/api/rh/checkins/${id}/encerrar`, { method:'POST' });
+  const data = await resp.json();
+  if(!resp.ok){ alert(data.error || 'Erro ao encerrar.'); return; }
   await carregarCheckins();
 }
 
