@@ -521,6 +521,12 @@ function painelHtml(chat){
   const finalizado = chat.status === 'FINALIZADO';
   const idAttr = escapeHtml(chat.id);
   const alertasSeg = IS_MASTER ? (chat.alertasSeguranca || []) : [];
+  // notas/relatorios internos que o Beniboy registrou nessa conversa (ver
+  // registrar_nota_interna/encerrar_atendimento em suporteBot.js) - so o time
+  // ve, nunca o visitante. Aberto por padrao quando ha alguma PENDENTE, pra o
+  // agente que assume ja bater o olho no que ficou faltando
+  const notasInt = chat.notasInternas || [];
+  const temPendente = notasInt.some(n=>n.situacao==='PENDENTE');
 
   return `<div class="painel-conversa" data-painel-id="${idAttr}">
     <div class="painel-topo">
@@ -542,6 +548,12 @@ function painelHtml(chat){
         IP: ${escapeHtml(a.ip||'—')}${a.referer?' · ref: '+escapeHtml(a.referer):''}<br>
         ${escapeHtml(a.userAgent||'')}
         ${a.detalheExtra ? `<code>${escapeHtml(a.detalheExtra)}</code>` : ''}
+      </div>`).join('')}</details></div>` : ''}
+    ${notasInt.length ? `<div class="d-alerta-seguranca"><details ${temPendente?'open':''}><summary>📝 ${notasInt.length} nota(s) do Beniboy${temPendente?' · há pendência':''}</summary>${notasInt.map(n=>`
+      <div class="d-alerta-item">
+        ${n.situacao ? `<b>${n.situacao==='PENDENTE'?'⏳ Pendente':'✅ Resolvido'}</b> · ` : ''}${fmtDataHora(n.em)}<br>
+        ${escapeHtml(n.resumo||'')}
+        ${n.pendencia ? `<br><b>Falta:</b> ${escapeHtml(n.pendencia)}` : ''}
       </div>`).join('')}</details></div>` : ''}
     <div class="d-acoes">${acoes.join('')}</div>
     <div class="painel-msgs" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">${msgsHtml}</div>

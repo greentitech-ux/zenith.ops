@@ -121,7 +121,9 @@ O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, 
 ## Ferramentas
 - criar_ticket: abre uma solicitação na Central. Antes de criar, CONFIRME em uma única mensagem o resumo (tipo, unidade, o que é). Só crie depois do "sim" da pessoa. Depois de criar, informe o número do ticket.
 - consultar_ticket: andamento de um ticket pelo número.
-- chamar_atendente: acione quando a pessoa pedir um humano, quando você não souber resolver, ou quando o assunto for sensível. Avise que o time já foi chamado e responde ali mesmo na conversa.
+- chamar_atendente: acione quando a pessoa pedir um humano, quando você não souber resolver, ou quando o assunto for sensível. ANTES de chamar, use registrar_nota_interna com um resumo (situacao PENDENTE) pra o humano já chegar sabendo. Avise que o time já foi chamado e responde ali mesmo na conversa.
+- registrar_nota_interna: deixa um resumo interno do atendimento (só o time vê, nunca a pessoa). Use principalmente ANTES de chamar_atendente (o que ficou pendente) e sempre que valer registrar o que foi feito. Não fala com a pessoa nem encerra a conversa.
+- encerrar_atendimento: encerra a conversa como RESOLVIDA. Use SÓ quando a pessoa confirmar, com clareza, que resolveu / não precisa de mais nada - nunca pra passar pra um humano (isso é chamar_atendente) nem com algo ainda pendente. Depois de chamar, mande UMA mensagem curta de despedida; a conversa fecha em seguida.
 - desbloquear_login: destrava um acesso bloqueado (3 senhas erradas) - login principal do Zenith OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão mantém a MESMA senha - nunca invente nem envie senha nenhuma nessa primeira chamada. Se travar de novo: no login principal, PERGUNTE "você lembra da sua senha atual?" antes de chamar de novo com lembraSenha=true/false (só com false uma senha padrão é definida, e a pessoa é obrigada a cadastrar uma própria no próximo login); no operador do Abastecimento, a ferramenta já reseta pra uma senha nova sozinha - é só repassar a senha que ela devolver.${temFerramentaPedido ? `
 - consultar_pedido: consulta o status de UM pedido específico no Monitor (aprovado, recusado, estornado, fraude suspeita). Peça os 3 dados ANTES de chamar (uma pergunta por vez, o que faltar): o código da loja (IDPULSE, a mesma coluna "Unidade" do Fechamento), o nome do cliente e o valor do pedido. A busca já vem limitada às lojas que essa pessoa tem acesso - se não achar, pode ser de outra loja, não assuma fraude/erro. Nunca invente status; se a ferramenta não achar nada, diga isso e ofereça chamar_atendente. Se o status desse pedido mudar depois da sua resposta, a pessoa é avisada automaticamente - não precisa te perguntar de novo.` : `
 - Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora (só quem está logado com permissão de Monitor). Use chamar_atendente.`}${(logado && logado.isMaster) ? `
@@ -187,6 +189,30 @@ const TOOLS_BASE = [
         unidade: { type: 'string', description: 'Nome da loja onde o cliente fez o pedido, do jeito que a pessoa falou (ex: "Dom Bessa", "Caruaru").' },
       },
       required: ['unidade'],
+    },
+  },
+  {
+    name: 'registrar_nota_interna',
+    description: 'Registra um resumo/nota interna sobre esse atendimento, visível SÓ pro time (nunca pro visitante). Use pra deixar registrado o que a pessoa precisava e o que foi feito - principalmente ANTES de chamar um atendente (chamar_atendente), pra o humano já chegar sabendo, e o que ficou pendente. Não fala com a pessoa nem encerra nada; é só o registro interno.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        resumo: { type: 'string', description: 'O que a pessoa precisava e o que foi feito até aqui, em 1 a 4 frases. Inclua perfil (cliente ou colaborador), loja/marca e tipo do problema quando souber.' },
+        situacao: { type: 'string', enum: ['RESOLVIDO', 'PENDENTE'], description: 'RESOLVIDO se você resolveu; PENDENTE se ainda falta algo (ex: um humano precisa continuar).' },
+        pendencia: { type: 'string', description: 'Só quando PENDENTE: o que exatamente falta fazer, pro time saber o próximo passo.' },
+      },
+      required: ['resumo', 'situacao'],
+    },
+  },
+  {
+    name: 'encerrar_atendimento',
+    description: 'Encerra a conversa marcando como RESOLVIDA. Use SÓ quando a pessoa confirmar, de forma clara, que o problema foi resolvido / que não precisa de mais nada. NÃO use pra passar pra um humano (isso é chamar_atendente) nem quando ainda há algo pendente. Depois de chamar, mande UMA mensagem curta de despedida - a conversa fecha logo em seguida e a pessoa não consegue mais escrever nela.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        resumo: { type: 'string', description: 'Resumo de 1 a 2 frases do que a pessoa precisava e como foi resolvido - vira o relatório interno de encerramento (só o time vê).' },
+      },
+      required: ['resumo'],
     },
   },
 ];
@@ -415,6 +441,23 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       aprovadoEm: o.dataCompra, estornadoEm: o.dataChargeback, fraudeSuspeita: !!o.fraudeSuspeita,
     })));
   }
+  if (nome === 'registrar_nota_interna') {
+    const resumo = String(input.resumo || '').trim();
+    if (!resumo) return 'Escreva o resumo da nota interna.';
+    await suporteChat.registrarNotaInterna(chat.id, {
+      resumo, situacao: input.situacao, pendencia: input.pendencia,
+    });
+    return 'Nota interna registrada no atendimento (só o time vê). Continue normalmente com a pessoa.';
+  }
+  if (nome === 'encerrar_atendimento') {
+    // NAO finaliza aqui: se marcasse RESOLVIDO agora, a conversa viraria
+    // FINALIZADO e o adicionarMensagem() do fim do responderConversa
+    // (que exige status ABERTO) jogaria fora a mensagem de despedida do bot.
+    // Entao so sinaliza - o encerramento de fato acontece DEPOIS da despedida
+    // ser postada (ver responderConversa).
+    resultado.encerrar = { resumo: String(input.resumo || '').trim() };
+    return 'Ok - a conversa vai ser marcada como resolvida assim que você responder. Mande agora uma única mensagem curta de despedida (a pessoa não vai mais conseguir escrever depois disso).';
+  }
   if (nome === 'executar_acao_agente') {
     // defesa em profundidade: mesmo espirito do recheck de consultar_pedido
     // - so entra em TOOLS quando logado.isMaster, mas confere de novo aqui
@@ -461,7 +504,7 @@ async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdP
     if (!msgs.length || msgs[msgs.length - 1].de !== 'visitante') return null; // nada novo pra responder
     if (msgs.filter((m) => m.bot).length >= MAX_RESPOSTAS_BOT) return null; // baixa interacao: passou do limite, fica pro humano
 
-    const resultado = { tickets: [], chamouAtendente: false, motivoAtendente: '' };
+    const resultado = { tickets: [], chamouAtendente: false, motivoAtendente: '', encerrar: null };
     const mensagens = montarMensagens(chat);
     const system = await montarSystem(unidades, chat.logado);
     const tools = montarTools(chat.logado);
@@ -505,7 +548,27 @@ async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdP
       resultado.motivoAtendente = 'Bot disse ter chamado atendente sem usar a ferramenta (rede de segurança)';
     }
 
-    const atualizado = await suporteChat.adicionarMensagem(chatId, { de: 'suporte', texto, bot: true });
+    let atualizado = await suporteChat.adicionarMensagem(chatId, { de: 'suporte', texto, bot: true });
+
+    // encerramento pedido pela tool encerrar_atendimento: so agora, DEPOIS da
+    // despedida ja ter sido postada acima. Registra o resumo como nota interna
+    // (relatorio de encerramento) e marca RESOLVIDO no funil (o que tambem
+    // finaliza a conversa pro visitante). nivelDestino:1 mantem o card no
+    // nivel do bot (ele resolveu sozinho); autor sintetico deixa claro no
+    // historicoStatus que foi o Beniboy. Erro aqui nao quebra a resposta - a
+    // mensagem ja foi entregue; no pior caso a varredura de ociosos encerra.
+    if (resultado.encerrar) {
+      try {
+        if (resultado.encerrar.resumo) {
+          await suporteChat.registrarNotaInterna(chatId, { resumo: resultado.encerrar.resumo, situacao: 'RESOLVIDO' });
+        }
+        atualizado = await suporteChat.atualizarStatusAtendimento(chatId, {
+          statusAtendimento: 'RESOLVIDO', nivelDestino: 1, autor: { nome: 'Beniboy (bot)' },
+        });
+      } catch (e) {
+        console.error('[suporteBot] falha ao encerrar conversa:', e.message);
+      }
+    }
     return { chat: atualizado, ...resultado };
   } catch (err) {
     // erro de API (rede, cota, chave...) NUNCA quebra o chat - o time humano

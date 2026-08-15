@@ -255,6 +255,30 @@ async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino,
   return getOne(id);
 }
 
+// nota/relatorio interno do Beniboy sobre o atendimento (Fluxo 4 do prompt:
+// "registre um resumo detalhado usando a acao de registrar nota interna") -
+// fica SO no lado do atendimento (Central do Beniboy/beniboy.html), NUNCA
+// aparece pro visitante (getPublico nao projeta esse campo). Capado como os
+// alertasSeguranca, pra nunca crescer sem limite numa conversa longa.
+const MAX_NOTAS_INTERNAS = 20;
+async function registrarNotaInterna(id, { resumo, situacao, pendencia } = {}) {
+  const chat = await getOne(id);
+  if (!chat) throw new Error('Conversa não encontrada.');
+  const resumoLimpo = limpar(resumo, 1200);
+  if (!resumoLimpo) throw new Error('Escreva o resumo da nota interna.');
+  const nota = {
+    resumo: resumoLimpo,
+    situacao: ['RESOLVIDO', 'PENDENTE'].includes(situacao) ? situacao : null,
+    pendencia: limpar(pendencia, 600) || null,
+    por: 'Beniboy (bot)',
+    em: new Date().toISOString(),
+  };
+  const notasInternas = [...(chat.notasInternas || []), nota].slice(-MAX_NOTAS_INTERNAS);
+  await COLLECTION.doc(id).update({ notasInternas, atualizadoEm: new Date().toISOString() });
+  chatsCache.invalidar();
+  return getOne(id);
+}
+
 // flag pra filtrar/etiquetar no kanban - setada quando o Beniboy usa a tool
 // desbloquear_login nessa conversa (ver suporteBot.js). So grava 1x.
 async function marcarDesbloqueio(id) {
@@ -363,5 +387,5 @@ async function finalizarOciosos() {
 module.exports = {
   criar, getOne, getPublico, getComToken, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll, ASSUNTOS,
   atualizarStatusAtendimento, marcarDesbloqueio, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
-  listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca,
+  listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna,
 };
