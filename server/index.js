@@ -4962,11 +4962,58 @@ app.delete('/api/saltiverso/vendas/:id', auth.requireMaster, async (req, res) =>
   }
 });
 
+// estado do dia: faturado ao vivo + caixas fechados + operadores pendentes +
+// doc do dia (se ja fechou). Base da nova tela de fechamento por caixa.
 app.get('/api/saltiverso/fechamento', requireSection('parque-loja'), async (req, res) => {
   try {
     const { unidade, data } = req.query;
     if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
-    res.json(await saltiversoFechamento.previewOuFechado(unidade, data));
+    res.json(await saltiversoFechamento.estadoDoDia(unidade, data));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// o operador logado fecha O SEU caixa (declara o que contou)
+app.post('/api/saltiverso/fechamento/caixa', requireSection('parque-loja'), async (req, res) => {
+  try {
+    const { unidade, unidadeNome, data, declarado, observacao } = req.body;
+    if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const caixa = await saltiversoFechamento.lancarCaixa({
+      unidade, unidadeNome, data, declarado, observacao,
+      operadorId: req.user.id, operadorEmail: req.user.email, operadorNome: req.user.username || req.user.email,
+    });
+    broadcast('saltiverso-caixa-lancado', caixa, 'parque-loja');
+    res.json(caixa);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// pedir alteracao de um caixa ja lancado (trava anti-fraude) - vai pra
+// aprovacao do Master
+app.post('/api/saltiverso/fechamento/caixa/:id/solicitar-alteracao', requireSection('parque-loja'), async (req, res) => {
+  try {
+    const pedido = await saltiversoFechamento.solicitarAlteracaoCaixa(req.params.id, {
+      declarado: req.body.declarado, motivo: req.body.motivo,
+      solicitadoPorId: req.user.id, solicitadoPorEmail: req.user.email,
+    });
+    broadcast('saltiverso-caixa-alteracao', pedido, 'parque-loja');
+    res.json(pedido);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/saltiverso/fechamento/alteracoes', auth.requireMasterOrAdmin, async (req, res) => {
+  res.json(await saltiversoFechamento.listAlteracoesPendentes(req.query.unidade));
+});
+
+app.post('/api/saltiverso/fechamento/alteracoes/:id/decidir', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    const r = await saltiversoFechamento.decidirAlteracaoCaixa(req.params.id, { aprovado: !!req.body.aprovado, porId: req.user.id, porEmail: req.user.email });
+    broadcast('saltiverso-caixa-alteracao-decidida', r, 'parque-loja');
+    res.json(r);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -4974,10 +5021,10 @@ app.get('/api/saltiverso/fechamento', requireSection('parque-loja'), async (req,
 
 app.post('/api/saltiverso/fechamento', requireSection('parque-loja'), async (req, res) => {
   try {
-    const { unidade, unidadeNome, data, totalDeclarado, observacao } = req.body;
+    const { unidade, unidadeNome, data, observacao } = req.body;
     if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     const fechamento = await saltiversoFechamento.fecharDia({
-      unidade, unidadeNome, data, totalDeclarado, observacao,
+      unidade, unidadeNome, data, observacao,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
     });
     broadcast('saltiverso-fechamento-criado', fechamento, 'parque-loja');

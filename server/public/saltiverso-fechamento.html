@@ -156,24 +156,31 @@
   <div class="resumo" id="faturado-resumo"><div class="empty">carregando...</div></div>
 </div>
 
-<div class="panel" id="painel-fechar">
-  <h2 id="titulo-fechar">Fechar o caixa</h2>
-  <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">Confira os comprovantes físicos (maquininha/dinheiro/Pix) e digite o total de cada um.</div>
-  <form id="form-fechar">
-    <div class="grid4">
-      <div><label style="margin-top:0;">Maquininha</label><input type="number" min="0" step="0.01" id="td-maquininha" oninput="atualizarPreviewDiferenca()"></div>
-      <div><label style="margin-top:0;">Dinheiro</label><input type="number" min="0" step="0.01" id="td-dinheiro" oninput="atualizarPreviewDiferenca()"></div>
-      <div><label style="margin-top:0;">Pix</label><input type="number" min="0" step="0.01" id="td-pix" oninput="atualizarPreviewDiferenca()"></div>
-      <div><label style="margin-top:0;">Outros</label><input type="number" min="0" step="0.01" id="td-outros" oninput="atualizarPreviewDiferenca()"></div>
-    </div>
-    <label>Observação (opcional)</label>
-    <textarea id="fc-observacao"></textarea>
-    <div class="resumo">
-      <div class="linha total"><span>Diferença (declarado − faturado)</span><b id="diferenca-preview" class="diferenca">R$ 0,00</b></div>
-    </div>
-    <div class="msg hidden" id="msg-fechar"></div>
-    <button class="btn-primary" type="submit" style="width:100%;margin-top:12px;" id="btn-fechar">Fechar o dia</button>
-  </form>
+<!-- MEU caixa: o operador logado fecha o proprio caixa -->
+<div class="panel" id="painel-meu-caixa">
+  <h2>🧑 Meu caixa</h2>
+  <div id="meu-caixa-corpo"><div class="empty">carregando...</div></div>
+</div>
+
+<!-- Caixas do dia (todos os operadores que ja fecharam) -->
+<div class="panel" id="painel-caixas">
+  <h2>💼 Caixas do dia</h2>
+  <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">cada operador fecha o próprio caixa. quem vendeu e ainda não fechou aparece como pendente e trava o fecha-dia.</div>
+  <div id="lista-caixas"><div class="empty">carregando...</div></div>
+</div>
+
+<!-- Fechar o dia (consolidacao) -->
+<div class="panel" id="painel-fechar-dia">
+  <h2>🔒 Fechar o dia</h2>
+  <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">soma de todos os caixas × faturado do dia. só libera quando todos os operadores que venderam fecharam o caixa.</div>
+  <div id="fechar-dia-corpo"><div class="empty">carregando...</div></div>
+</div>
+
+<!-- Aprovações de alteração (Master/Admin) -->
+<div class="panel hidden" id="painel-aprovacoes">
+  <h2>✅ Pedidos de alteração de caixa</h2>
+  <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">caixa já lançado só muda com sua aprovação (anti-fraude).</div>
+  <div id="lista-aprovacoes"><div class="empty">carregando...</div></div>
 </div>
 
 <div class="panel">
@@ -248,6 +255,7 @@ const BUCKET_LABEL = { maquininha:'Maquininha', dinheiro:'Dinheiro', pix:'Pix', 
 
 let ME = null;
 let IS_MASTER = false;
+let PODE_APROVAR = false;
 let UNIDADES_NOMES = { ...PARQUE_UNIDADES_NOMES };
 let ATUAL = null; // preview ou fechamento ja lancado (GET /api/saltiverso/fechamento)
 
@@ -285,16 +293,16 @@ function renderFaturadoResumo(faturado, faturadoPorForma, detalhe){
   `;
 }
 
-function somaTotalDeclaradoForm(){
-  return BUCKETS.reduce((s,b)=>s+Math.max(0,num(document.getElementById('td-'+b).value)), 0);
+// baldes de input reutilizaveis (um form de caixa por vez)
+function inputsBucketsHtml(prefixo, valores){
+  return `<div class="grid4">
+    ${BUCKETS.map(b=>`<div><label style="margin-top:0;">${BUCKET_LABEL[b]}</label><input type="number" min="0" step="0.01" id="${prefixo}-${b}" value="${valores?(num(valores[b])||''):''}"></div>`).join('')}
+  </div>`;
 }
-function atualizarPreviewDiferenca(){
-  if(!ATUAL) return;
-  const diferenca = somaTotalDeclaradoForm() - num(ATUAL.faturado);
-  const el = document.getElementById('diferenca-preview');
-  el.textContent = fmtReal(diferenca);
-  el.className = 'diferenca ' + (Math.abs(diferenca) <= 10 ? 'ok' : 'bad');
+function lerBuckets(prefixo){
+  const o = {}; BUCKETS.forEach(b=>{ o[b] = num(document.getElementById(`${prefixo}-${b}`).value); }); return o;
 }
+function somaBuckets(o){ return BUCKETS.reduce((s,b)=>s+num(o[b]),0); }
 
 async function carregarTudo(){
   const unidade = unidadeAtual();
@@ -304,62 +312,161 @@ async function carregarTudo(){
   try{
     ATUAL = await fetch(`/api/saltiverso/fechamento?unidade=${encodeURIComponent(unidade)}&data=${data}`).then(r=>r.json());
   }catch(e){ ATUAL = null; }
-  if(!ATUAL){ document.getElementById('faturado-resumo').innerHTML = '<div class="empty">erro ao carregar.</div>'; return; }
+  if(!ATUAL || ATUAL.error){ document.getElementById('faturado-resumo').innerHTML = `<div class="empty">${ATUAL&&ATUAL.error?escapeHtml(ATUAL.error):'erro ao carregar.'}</div>`; return; }
   renderFaturadoResumo(ATUAL.faturado, ATUAL.faturadoPorForma, ATUAL.detalhe);
-
-  const painelFechar = document.getElementById('painel-fechar');
-  const titulo = document.getElementById('titulo-fechar');
-  const btn = document.getElementById('btn-fechar');
-  if(ATUAL.fechado){
-    titulo.textContent = IS_MASTER ? 'Fechamento já lançado (corrigir)' : 'Fechamento já lançado';
-    BUCKETS.forEach(b=>{ document.getElementById('td-'+b).value = (ATUAL.totalDeclarado||{})[b] || ''; });
-    document.getElementById('fc-observacao').value = ATUAL.observacao || '';
-    btn.textContent = 'Salvar correção';
-    btn.disabled = !IS_MASTER;
-    BUCKETS.forEach(b=>{ document.getElementById('td-'+b).disabled = !IS_MASTER; });
-    document.getElementById('fc-observacao').disabled = !IS_MASTER;
-  }else{
-    titulo.textContent = 'Fechar o caixa';
-    BUCKETS.forEach(b=>{ document.getElementById('td-'+b).value = ''; document.getElementById('td-'+b).disabled = false; });
-    document.getElementById('fc-observacao').value = ''; document.getElementById('fc-observacao').disabled = false;
-    btn.textContent = 'Fechar o dia';
-    btn.disabled = false;
-  }
-  atualizarPreviewDiferenca();
-  painelFechar.classList.toggle('hidden', ATUAL.fechado && !IS_MASTER);
+  renderMeuCaixa();
+  renderCaixasDoDia();
+  renderFecharDia();
+  if(PODE_APROVAR) carregarAprovacoes();
   await carregarHistorico();
 }
 
-document.getElementById('form-fechar').addEventListener('submit', async (ev)=>{
-  ev.preventDefault();
+const diaFechado = () => ATUAL && ATUAL.fechamento;
+function meuCaixa(){ return (ATUAL.caixas||[]).find(c=>c.operadorId===ME.id); }
+
+function renderMeuCaixa(){
+  const el = document.getElementById('meu-caixa-corpo');
+  if(diaFechado()){ el.innerHTML = '<div class="sub">o dia já foi fechado. correções agora são feitas pelo Master no fechamento do dia.</div>'; return; }
+  const meu = meuCaixa();
+  if(meu){
+    // ja fechou: mostra travado + solicitar alteracao
+    const linhas = BUCKETS.map(b=>`<div class="linha"><span>${BUCKET_LABEL[b]}</span><b>${fmtReal(meu.declarado[b])}</b></div>`).join('');
+    el.innerHTML = `
+      <div class="resumo">${linhas}<div class="linha total"><span>Total do seu caixa</span><b>${fmtReal(meu.somaDeclarado)}</b></div></div>
+      <div class="sub" style="margin-top:8px;">✅ você fechou seu caixa. os valores estão travados — para mudar, peça uma alteração.</div>
+      <button type="button" class="btn-secundario" style="margin-top:10px;" onclick="abrirAlteracao()">✏️ Solicitar alteração</button>
+      <div id="form-alteracao" class="hidden" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
+        ${inputsBucketsHtml('alt', meu.declarado)}
+        <label>Motivo da alteração</label>
+        <textarea id="alt-motivo" placeholder="por que precisa mudar?"></textarea>
+        <div class="msg hidden" id="msg-alt"></div>
+        <button type="button" class="btn-primary" style="width:100%;margin-top:8px;" onclick="enviarAlteracao('${meu.id}')">Enviar pedido ao Master</button>
+      </div>`;
+  }else{
+    // ainda nao fechou: form de lancar
+    el.innerHTML = `
+      <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">confira os comprovantes físicos (maquininha/dinheiro/Pix) e digite o total de cada um. depois de fechar, trava.</div>
+      ${inputsBucketsHtml('td')}
+      <label>Observação (opcional)</label>
+      <textarea id="fc-observacao"></textarea>
+      <div class="msg hidden" id="msg-fechar"></div>
+      <button type="button" class="btn-primary" style="width:100%;margin-top:12px;" onclick="fecharMeuCaixa()">🔒 Fechar meu caixa</button>`;
+  }
+}
+function abrirAlteracao(){ document.getElementById('form-alteracao').classList.toggle('hidden'); }
+
+async function fecharMeuCaixa(){
   const msg = document.getElementById('msg-fechar');
   msg.classList.add('hidden');
-  const btn = document.getElementById('btn-fechar');
-  btn.disabled = true;
   try{
-    const totalDeclarado = {};
-    BUCKETS.forEach(b=>{ totalDeclarado[b] = num(document.getElementById('td-'+b).value); });
-    const observacao = document.getElementById('fc-observacao').value;
-    let resp;
-    if(ATUAL && ATUAL.fechado){
-      resp = await fetch(`/api/saltiverso/fechamento/${ATUAL.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ totalDeclarado, observacao }) });
-    }else{
-      resp = await fetch('/api/saltiverso/fechamento', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
-        unidade: unidadeAtual(), unidadeNome: UNIDADES_NOMES[unidadeAtual()] || unidadeAtual(),
-        data: dataAtual(), totalDeclarado, observacao,
-      }) });
-    }
+    const declarado = lerBuckets('td');
+    const resp = await fetch('/api/saltiverso/fechamento/caixa', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      unidade: unidadeAtual(), unidadeNome: UNIDADES_NOMES[unidadeAtual()] || unidadeAtual(),
+      data: dataAtual(), declarado, observacao: document.getElementById('fc-observacao').value,
+    }) });
     const data = await resp.json();
-    if(!resp.ok) throw new Error(data.error||'Erro ao salvar fechamento.');
-    msg.textContent = data.cardQuebraCaixa ? 'Fechamento salvo — diferença grande, um ticket de Quebra de caixa foi aberto na Central.' : 'Fechamento salvo.';
-    msg.className = 'msg ok'; msg.classList.remove('hidden');
+    if(!resp.ok) throw new Error(data.error||'Erro ao fechar o caixa.');
     await carregarTudo();
-  }catch(err){
-    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
-  }finally{
-    btn.disabled = false;
+  }catch(err){ msg.textContent = err.message; msg.className='msg err'; msg.classList.remove('hidden'); }
+}
+
+async function enviarAlteracao(caixaId){
+  const msg = document.getElementById('msg-alt');
+  msg.classList.add('hidden');
+  const motivo = document.getElementById('alt-motivo').value.trim();
+  if(!motivo){ msg.textContent='Descreva o motivo.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  try{
+    const resp = await fetch(`/api/saltiverso/fechamento/caixa/${caixaId}/solicitar-alteracao`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ declarado: lerBuckets('alt'), motivo }) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error||'Erro ao enviar.');
+    msg.textContent='Pedido enviado ao Master.'; msg.className='msg ok'; msg.classList.remove('hidden');
+  }catch(err){ msg.textContent = err.message; msg.className='msg err'; msg.classList.remove('hidden'); }
+}
+
+function renderCaixasDoDia(){
+  const el = document.getElementById('lista-caixas');
+  const caixas = ATUAL.caixas || [];
+  const pendentes = ATUAL.pendentes || [];
+  let html = caixas.map(c=>{
+    const okDif = Math.abs(num(c.diferencaOperador)) <= 10;
+    return `<div class="card"><div class="linha1"><span>🧑 ${escapeHtml(c.operadorNome||c.operadorEmail||'operador')}</span><b>${fmtReal(c.somaDeclarado)}</b></div>
+      <div class="sub">faturado dele ${fmtReal(c.faturadoOperador)} · <span class="${okDif?'':'diferenca bad'}">dif. ${fmtReal(c.diferencaOperador)}</span></div></div>`;
+  }).join('');
+  if(pendentes.length){
+    html += pendentes.map(p=>`<div class="card" style="border-left:3px solid var(--warn,#e0a800);"><div class="linha1"><span>⏳ ${escapeHtml(p.operadorEmail||p.operadorId)}</span><span class="badge bad">não fechou</span></div><div class="sub">vendeu ${fmtReal(p.faturado)} e ainda não fechou o caixa</div></div>`).join('');
   }
-});
+  el.innerHTML = html || '<div class="empty">nenhum caixa fechado ainda hoje.</div>';
+}
+
+function renderFecharDia(){
+  const el = document.getElementById('fechar-dia-corpo');
+  if(diaFechado()){
+    const f = ATUAL.fechamento; const okDif = Math.abs(num(f.diferenca)) <= 10;
+    el.innerHTML = `<div class="resumo">
+      <div class="linha"><span>Soma dos caixas</span><b>${fmtReal(f.somaTotalDeclarado)}</b></div>
+      <div class="linha"><span>Faturado do dia</span><b>${fmtReal(f.faturado)}</b></div>
+      <div class="linha total"><span>Diferença</span><b class="diferenca ${okDif?'ok':'bad'}">${fmtReal(f.diferenca)}</b></div>
+    </div><div class="sub" style="margin-top:8px;">🔒 dia fechado por ${escapeHtml(f.criadoPorEmail||'—')}.</div>`;
+    return;
+  }
+  const pendentes = ATUAL.pendentes || [];
+  const soma = num(ATUAL.somaCaixas), dif = num(ATUAL.diferencaPrevia);
+  el.innerHTML = `<div class="resumo">
+    <div class="linha"><span>Soma dos caixas (${(ATUAL.caixas||[]).length})</span><b>${fmtReal(soma)}</b></div>
+    <div class="linha"><span>Faturado do dia</span><b>${fmtReal(ATUAL.faturado)}</b></div>
+    <div class="linha total"><span>Diferença prévia</span><b class="diferenca ${Math.abs(dif)<=10?'ok':'bad'}">${fmtReal(dif)}</b></div>
+  </div>
+  ${pendentes.length ? `<div class="msg err" style="margin-top:10px;">⚠️ ${pendentes.length} operador(es) venderam e não fecharam o caixa. Todos precisam fechar antes de fechar o dia.</div>` : ''}
+  <label style="margin-top:10px;">Observação do dia (opcional)</label>
+  <textarea id="dia-observacao"></textarea>
+  <div class="msg hidden" id="msg-dia"></div>
+  <button type="button" class="btn-primary" style="width:100%;margin-top:10px;" onclick="fecharODia()" ${pendentes.length||!(ATUAL.caixas||[]).length?'disabled':''}>🔒 Fechar o dia</button>`;
+}
+
+async function fecharODia(){
+  const msg = document.getElementById('msg-dia');
+  msg.classList.add('hidden');
+  if(!confirm('Fechar o dia? Isso consolida todos os caixas e trava o dia.')) return;
+  try{
+    const resp = await fetch('/api/saltiverso/fechamento', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      unidade: unidadeAtual(), unidadeNome: UNIDADES_NOMES[unidadeAtual()] || unidadeAtual(),
+      data: dataAtual(), observacao: document.getElementById('dia-observacao').value,
+    }) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error||'Erro ao fechar o dia.');
+    await carregarTudo();
+    alert(data.cardQuebraCaixa ? 'Dia fechado — diferença grande, abri um ticket de Quebra de caixa na Central.' : 'Dia fechado com sucesso.');
+  }catch(err){ msg.textContent = err.message; msg.className='msg err'; msg.classList.remove('hidden'); }
+}
+
+async function carregarAprovacoes(){
+  const el = document.getElementById('lista-aprovacoes');
+  const lista = await fetch(`/api/saltiverso/fechamento/alteracoes?unidade=${encodeURIComponent(unidadeAtual())}`).then(r=>r.ok?r.json():[]).catch(()=>[]);
+  document.getElementById('painel-aprovacoes').classList.toggle('hidden', !lista.length);
+  if(!lista.length){ el.innerHTML=''; return; }
+  el.innerHTML = lista.map(p=>{
+    const antes = BUCKETS.map(b=>`${BUCKET_LABEL[b]} ${fmtReal(p.antes[b])}`).join(' · ');
+    const novo = BUCKETS.map(b=>`${BUCKET_LABEL[b]} ${fmtReal(p.novo[b])}`).join(' · ');
+    return `<div class="card">
+      <div class="linha1"><span>🧑 ${escapeHtml(p.operadorNome||p.operadorEmail||'operador')} · ${fmtData(p.data)}</span></div>
+      <div class="sub">de: ${antes}</div>
+      <div class="sub">para: ${novo}</div>
+      ${p.motivo?`<div class="sub">motivo: ${escapeHtml(p.motivo)}</div>`:''}
+      <div class="acoes" style="margin-top:8px;">
+        <button type="button" class="btn-primary" style="padding:6px 12px;" onclick="decidirAlteracao('${p.id}',true)">✅ Aprovar</button>
+        <button type="button" class="btn-secundario" style="padding:6px 12px;" onclick="decidirAlteracao('${p.id}',false)">❌ Rejeitar</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function decidirAlteracao(id, aprovado){
+  try{
+    const resp = await fetch(`/api/saltiverso/fechamento/alteracoes/${id}/decidir`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ aprovado }) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error||'Erro ao decidir.');
+    await carregarTudo();
+  }catch(err){ alert(err.message); }
+}
 
 async function carregarHistorico(){
   const unidade = unidadeAtual();
@@ -385,6 +492,7 @@ async function boot(){
   if(!res.ok){ logout(); return; }
   ME = await res.json();
   IS_MASTER = ME.role==='master';
+  PODE_APROVAR = IS_MASTER || !!ME.isAdmin;
   const secoes = IS_MASTER ? ['parque-loja'] : (ME.permissions?.sections||[]);
 
   if(!secoes.includes('parque-loja')){
