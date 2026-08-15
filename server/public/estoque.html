@@ -241,6 +241,7 @@
     <button type="button" class="tab-btn" data-tab="recebimento" onclick="mudarAba('recebimento')">📥 Recebimento</button>
     <button type="button" class="tab-btn" data-tab="saida" onclick="mudarAba('saida')">📤 Saída</button>
     <button type="button" class="tab-btn" data-tab="diferencas" onclick="mudarAba('diferencas')">📊 Diferenças</button>
+    <button type="button" class="tab-btn" data-tab="historico" onclick="mudarAba('historico')">🗓️ Histórico</button>
     <button type="button" class="tab-btn hidden" id="tab-btn-catalogo" data-tab="catalogo" onclick="mudarAba('catalogo')">🗂️ Catálogo</button>
     <button type="button" class="tab-btn" data-tab="estoque" onclick="mudarAba('estoque')">📦 Estoque</button>
   </div>
@@ -425,6 +426,26 @@
       <thead><tr><th>Setor</th><th>Item</th><th>Entradas</th><th>Vendas</th><th>Desperdício</th><th>Diferença (qtd)</th><th>Diferença (R$)</th></tr></thead>
       <tbody id="d-body"></tbody>
     </table>
+  </div>
+</div>
+
+<!-- ---------- Histórico de contagens (planilha: itens x dias) ---------- -->
+<div class="panel tab-content hidden" id="tab-historico">
+  <h2>Histórico de contagens</h2>
+  <div class="sub" style="margin-top:4px;margin-bottom:10px;max-width:680px;">
+    Cada dia contado vira uma coluna. Abaixo da contagem, a <b>saída</b> do dia = contagem do dia anterior − contagem do dia (o que saiu do estoque entre as duas contagens). É uma leitura só das contagens — não desconta recebimento (pra isso use a aba Diferenças).
+  </div>
+  <div class="toolbar" style="margin-top:6px;">
+    <div class="presets" id="h-presets"></div>
+    <div class="daterange">
+      <input type="date" id="h-inicio" onchange="limparPresetHist();carregarHistorico();">
+      <span class="sep">até</span>
+      <input type="date" id="h-fim" onchange="limparPresetHist();carregarHistorico();">
+    </div>
+    <select id="h-setor" onchange="renderHistorico()" style="margin-left:auto;"><option value="">Todos os setores</option></select>
+  </div>
+  <div class="tablewrap" style="margin-top:14px;overflow-x:auto;">
+    <table id="h-tabela"><thead id="h-head"></thead><tbody id="h-body"></tbody></table>
   </div>
 </div>
 
@@ -738,6 +759,7 @@ async function mudarAba(aba){
   document.getElementById('tab-saida').classList.toggle('hidden', aba!=='saida');
   document.getElementById('tab-saida-lista').classList.toggle('hidden', aba!=='saida');
   document.getElementById('tab-diferencas').classList.toggle('hidden', aba!=='diferencas');
+  document.getElementById('tab-historico').classList.toggle('hidden', aba!=='historico');
   document.getElementById('tab-catalogo').classList.toggle('hidden', aba!=='catalogo');
   document.getElementById('tab-estoque').classList.toggle('hidden', aba!=='estoque');
   document.getElementById('painel-estoque-hoje').classList.toggle('hidden', aba!=='estoque');
@@ -745,6 +767,7 @@ async function mudarAba(aba){
   if(aba==='recebimento') renderRecebimentos();
   if(aba==='saida') renderSaidas();
   if(aba==='diferencas') carregarDiferencas();
+  if(aba==='historico') iniciarHistorico();
   if(aba==='catalogo'){ await carregarCatalogo(); renderCatalogo(); }
   if(aba==='estoque') carregarResumoEstoque();
 }
@@ -759,6 +782,7 @@ async function trocarUnidade(){
   else if(ABA_ATUAL==='recebimento') renderRecebimentos();
   else if(ABA_ATUAL==='saida') renderSaidas();
   else if(ABA_ATUAL==='diferencas') carregarDiferencas();
+  else if(ABA_ATUAL==='historico') carregarHistorico();
   else if(ABA_ATUAL==='catalogo') renderCatalogo();
   else if(ABA_ATUAL==='estoque') carregarResumoEstoque();
 }
@@ -1285,6 +1309,82 @@ function aplicarPresetDif(tipo){
   carregarDiferencas();
 }
 function limparPresetAtivo(){ PRESET_ATIVO = null; renderPresetsDif(); }
+
+// ---------- Histórico de contagens (planilha itens x dias) ----------
+let HIST_PRESET = null;
+let HISTORICO_ATUAL = null;
+let HIST_INICIADO = false;
+function fmtNum(v){ if(v==null) return '—'; const n=Number(v); return (Number.isInteger(n)?String(n):n.toFixed(3).replace(/\.?0+$/,'')).replace('.',','); }
+function fmtDataCurta(d){ if(!d) return ''; const [,m,dd]=d.split('-'); return `${dd}/${m}`; }
+function renderPresetsHist(){
+  document.getElementById('h-presets').innerHTML = Object.entries(ROTULOS_PRESET).map(([tipo,rotulo])=>
+    `<button type="button" class="preset-btn ${HIST_PRESET===tipo?'active':''}" onclick="aplicarPresetHist('${tipo}')">${rotulo}</button>`
+  ).join('');
+}
+function aplicarPresetHist(tipo){
+  HIST_PRESET = tipo;
+  const {inicio,fim} = calcularPreset(tipo, hojeBrasilia());
+  document.getElementById('h-inicio').value = inicio;
+  document.getElementById('h-fim').value = fim;
+  renderPresetsHist();
+  carregarHistorico();
+}
+function limparPresetHist(){ HIST_PRESET = null; renderPresetsHist(); }
+function iniciarHistorico(){
+  if(!HIST_INICIADO){
+    HIST_INICIADO = true;
+    // setores no filtro
+    document.getElementById('h-setor').innerHTML = '<option value="">Todos os setores</option>' +
+      ORDEM_SETORES.map(s=>`<option value="${s}">${escapeHtml(SETORES[s])}</option>`).join('');
+    aplicarPresetHist('semana'); // padrao: última semana
+    return;
+  }
+  carregarHistorico();
+}
+async function carregarHistorico(){
+  const unidade = unidadeAtual();
+  const inicio = document.getElementById('h-inicio').value;
+  const fim = document.getElementById('h-fim').value;
+  if(!unidade || !inicio || !fim) return;
+  document.getElementById('h-body').innerHTML = '<tr><td class="sub" style="padding:16px;">carregando...</td></tr>';
+  try{
+    HISTORICO_ATUAL = await fetch(`/api/inventario/historico-contagens?unidade=${encodeURIComponent(unidade)}&inicio=${inicio}&fim=${fim}`).then(r=>r.json());
+  }catch(e){ HISTORICO_ATUAL = null; }
+  renderHistorico();
+}
+function renderHistorico(){
+  const head = document.getElementById('h-head');
+  const body = document.getElementById('h-body');
+  if(!HISTORICO_ATUAL || HISTORICO_ATUAL.error){ head.innerHTML=''; body.innerHTML = `<tr><td class="sub" style="padding:16px;">${HISTORICO_ATUAL&&HISTORICO_ATUAL.error?escapeHtml(HISTORICO_ATUAL.error):'erro ao carregar.'}</td></tr>`; return; }
+  const { datas, itens } = HISTORICO_ATUAL;
+  const setorFiltro = document.getElementById('h-setor').value;
+  const lista = setorFiltro ? itens.filter(i=>i.setor===setorFiltro) : itens;
+  if(!datas.length){ head.innerHTML=''; body.innerHTML = '<tr><td class="sub" style="padding:16px;">nenhuma contagem nesse período.</td></tr>'; return; }
+  // cabeçalho: Item + uma coluna por dia + Saída total
+  head.innerHTML = `<tr><th style="text-align:left;position:sticky;left:0;background:var(--panel);">Item</th>${
+    datas.map(d=>`<th style="text-align:center;">${fmtDataCurta(d)}</th>`).join('')
+  }<th style="text-align:center;">Saída total</th></tr>`;
+  if(!lista.length){ body.innerHTML = '<tr><td class="sub" style="padding:16px;">nenhum item nesse setor.</td></tr>'; return; }
+  body.innerHTML = lista.map(item=>{
+    let saidaTotal = 0, temSaida = false;
+    const celulas = datas.map(d=>{
+      const v = item.valores[d];
+      if(!v) return `<td style="text-align:center;color:var(--muted);">·</td>`;
+      let saidaHtml = '';
+      if(v.saida!=null){
+        temSaida = true; saidaTotal += v.saida;
+        const cor = v.saida>0 ? 'var(--ok)' : (v.saida<0 ? 'var(--bad)' : 'var(--muted)');
+        saidaHtml = `<div style="font-size:10.5px;font-family:var(--mono);color:${cor};" title="saída do dia">${v.saida>0?'▼':(v.saida<0?'▲':'')} ${fmtNum(v.saida)}</div>`;
+      }
+      return `<td style="text-align:center;"><div style="font-weight:600;">${fmtNum(v.contagem)}</div>${saidaHtml}</td>`;
+    }).join('');
+    return `<tr>
+      <td style="text-align:left;position:sticky;left:0;background:var(--panel);"><b>${escapeHtml(item.nome)}</b> <span class="sub" style="font-size:10px;">${escapeHtml(item.unidadeMedida||'')}</span></td>
+      ${celulas}
+      <td style="text-align:center;font-family:var(--mono);font-weight:700;">${temSaida?fmtNum(Math.round(saidaTotal*1000)/1000):'—'}</td>
+    </tr>`;
+  }).join('');
+}
 
 let DIFERENCAS_ATUAL = null;
 async function carregarDiferencas(){

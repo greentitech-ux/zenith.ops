@@ -3526,6 +3526,18 @@ app.get('/api/inventario/diferencas', requireSection('inventario'), async (req, 
   }
 });
 
+// visao historica das contagens (planilha: itens x dias, contagem + saida)
+app.get('/api/inventario/historico-contagens', requireSection('inventario'), async (req, res) => {
+  try {
+    const { unidade, inicio, fim } = req.query;
+    if (!unidade || !inicio || !fim) return res.status(400).json({ error: 'Informe unidade, início e fim.' });
+    if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    res.json(await inventario.historicoContagens(unidade, inicio, fim));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/inventario/relatorio.:formato(csv|pdf)', requireSection('inventario'), async (req, res) => {
   try {
     const { unidade, inicio, fim } = req.query;
