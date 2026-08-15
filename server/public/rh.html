@@ -908,7 +908,7 @@ function prevalidarLote(){
 async function confirmarImportarLote(){
   const msg = document.getElementById('msg-lote');
   if(!LOTE_LINHAS_VALIDAS.length) return;
-  if(!confirm(`Importar ${LOTE_LINHAS_VALIDAS.length} pessoa(s)? Cada uma entra como efetivado.`)) return;
+  if(!confirm(`Importar ${LOTE_LINHAS_VALIDAS.length} pessoa(s)? Quem ainda não existe entra como efetivado; quem já existe tem os dados (nascimento/admissão/cargo) atualizados.`)) return;
   const btn = document.getElementById('btn-confirmar-lote');
   btn.disabled = true;
   try{
@@ -920,7 +920,10 @@ async function confirmarImportarLote(){
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao importar.');
     const falhas = data.filter(r=>!r.ok);
-    msg.textContent = falhas.length ? `Importado com ${data.length-falhas.length} ok e ${falhas.length} erro(s): ${falhas.map(f=>`${f.nome} (${f.erro})`).join(' · ')}` : `${data.length} pessoa(s) importada(s) com sucesso.`;
+    const criados = data.filter(r=>r.ok && r.acao==='criado').length;
+    const atualizados = data.filter(r=>r.ok && r.acao==='atualizado').length;
+    const resumoOk = [criados?`${criados} novo(s)`:null, atualizados?`${atualizados} atualizado(s)`:null].filter(Boolean).join(' · ') || `${data.length-falhas.length} ok`;
+    msg.textContent = falhas.length ? `${resumoOk}. ${falhas.length} erro(s): ${falhas.map(f=>`${f.nome} (${f.erro})`).join(' · ')}` : `${resumoOk} com sucesso.`;
     msg.className = falhas.length ? 'msg err' : 'msg ok';
     msg.classList.remove('hidden');
     document.getElementById('lote-texto').value = '';
