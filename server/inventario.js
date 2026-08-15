@@ -715,6 +715,58 @@ async function resumoPeriodo(unidade, dataInicio, dataFim) {
   };
 }
 
+// visao historica das contagens em formato planilha: pra cada item, a
+// contagem de cada dia contado no periodo e a "saida" do dia = contagem
+// ANTERIOR do item - contagem do dia (o que saiu do estoque entre as duas
+// contagens). E uma leitura simples SO das contagens - nao desconta
+// recebimento (pra isso existe a aba Diferencas). A "anterior" e a ultima
+// contagem existente daquele item antes do dia, mesmo que nao seja o dia
+// calendario imediatamente anterior (loja que nao conta todo dia).
+async function historicoContagens(unidade, dataInicio, dataFim) {
+  validarData(dataInicio);
+  validarData(dataFim);
+  if (dataFim < dataInicio) throw new Error('Data final não pode ser anterior à inicial.');
+  const [todasContagens, catalogo] = await Promise.all([listContagens(), listCatalogo(unidade)]);
+  const catalogoPorId = new Map(catalogo.map((i) => [i.id, i]));
+
+  // todas as contagens da unidade ATE dataFim (asc) - inclui as de antes do
+  // periodo, pra achar a "anterior" da primeira coluna
+  const contagensUnidade = todasContagens
+    .filter((c) => c.unidade === unidade && c.data <= dataFim)
+    .sort((a, b) => a.data.localeCompare(b.data));
+
+  // colunas = so as datas que tem contagem dentro do periodo
+  const datas = contagensUnidade.filter((c) => c.data >= dataInicio).map((c) => c.data);
+  const dentroPeriodo = new Set(datas);
+
+  const ultimoValor = new Map(); // itemId -> qtd da contagem anterior
+  const itensMap = new Map();    // itemId -> { itemId, nome, unidadeMedida, setor, valores }
+  contagensUnidade.forEach((c) => {
+    const mapa = c.contagens || {};
+    Object.keys(mapa).forEach((itemId) => {
+      const qtd = mapa[itemId];
+      const anterior = ultimoValor.has(itemId) ? ultimoValor.get(itemId) : null;
+      if (dentroPeriodo.has(c.data)) {
+        const item = catalogoPorId.get(itemId);
+        if (!itensMap.has(itemId)) itensMap.set(itemId, {
+          itemId, nome: item ? item.nome : itemId,
+          unidadeMedida: item ? item.unidadeMedida : 'UN',
+          setor: item ? item.setor : null, valores: {},
+        });
+        itensMap.get(itemId).valores[c.data] = {
+          contagem: qtd,
+          saida: anterior != null ? arred(anterior - qtd, 3) : null,
+        };
+      }
+      ultimoValor.set(itemId, qtd);
+    });
+  });
+
+  const itens = [...itensMap.values()].sort((a, b) =>
+    String(a.setor || '').localeCompare(String(b.setor || ''), 'pt-BR') || a.nome.localeCompare(b.nome, 'pt-BR'));
+  return { datas, itens };
+}
+
 module.exports = {
   SETORES, TIPOS_ITEM, TIPOS_SAIDA, LIMITE_DESVIO_ESTOQUE,
   listSetores, criarSetor, listTipos, criarTipo,
@@ -722,5 +774,5 @@ module.exports = {
   listRecebimentos, criarRecebimento, removerRecebimento,
   listSaidas, criarSaida, removerSaida,
   upsertContagem, getContagem, listContagens,
-  calcularDiferencas, resumoPeriodo,
+  calcularDiferencas, resumoPeriodo, historicoContagens,
 };
