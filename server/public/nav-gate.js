@@ -66,15 +66,60 @@
     }
   }
 
+  // marca o link da pagina atual como ativo comparando o pathname do href de
+  // cada item com a URL aberta - antes cada pagina marcava na mao (class
+  // "active" fixa no HTML), o que dava furo/inconsistencia (pagina que
+  // esquecia de marcar nao destacava nada). Aqui fica sempre certo e igual
+  // em todas as telas, sem depender de cada pagina lembrar.
+  function marcarAtivo() {
+    const atual = location.pathname;
+    const itens = document.querySelectorAll('#nav-drawer a.back[href]');
+    // limpa qualquer "active" fixo no HTML antes de marcar - assim sobra
+    // exatamente UM item destacado (o da URL atual), mesmo em pagina que
+    // tenha marcado o link errado por copia de template
+    itens.forEach((a) => a.classList.remove('active'));
+    itens.forEach((a) => {
+      let p;
+      try { p = new URL(a.getAttribute('href'), location.origin).pathname; } catch (e) { return; }
+      if (p === atual) a.classList.add('active');
+    });
+  }
+
+  // visual do menu injetado de um lugar so (vale pra todas as paginas):
+  // realce da aba atual com barrinha lateral, hover nos itens e nos titulos
+  // de grupo. So estetica - nao muda estrutura nem comportamento.
+  function injetarEstilo() {
+    if (document.getElementById('nav-drawer-estilo')) return;
+    const st = document.createElement('style');
+    st.id = 'nav-drawer-estilo';
+    st.textContent =
+      '#nav-drawer a.back{position:relative;transition:background .12s ease,color .12s ease;}'
+      + '#nav-drawer a.back:hover{background:var(--panel2,#181d24);color:var(--text,#e7ecf1);}'
+      + '#nav-drawer a.back.active{background:rgba(92,200,255,.12);color:var(--accent,#5cc8ff);border-color:transparent;font-weight:600;}'
+      + '#nav-drawer a.back.active::before{content:"";position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:var(--accent,#5cc8ff);}'
+      + '#nav-drawer .nav-drawer-grupo{transition:color .12s ease;}'
+      + '#nav-drawer .nav-drawer-grupo:hover{color:var(--text,#e7ecf1);}';
+    document.head.appendChild(st);
+  }
+
+  function quandoPronto(fn) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn, { once: true });
+    else fn();
+  }
+
+  // visual e realce da aba nao dependem da API - aplica na hora
+  quandoPronto(() => { injetarEstilo(); marcarAtivo(); });
+
   fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } })
     .then((r) => (r.ok ? r.json() : null))
     .then((me) => {
       if (!me) return;
       aplicar(me);
+      marcarAtivo();
       // reaplica depois do boot da pagina (alguns boots dao remove('hidden')
       // em links do menu sem olhar permissao)
-      setTimeout(() => aplicar(me), 800);
-      setTimeout(() => aplicar(me), 2500);
+      setTimeout(() => { aplicar(me); marcarAtivo(); }, 800);
+      setTimeout(() => { aplicar(me); marcarAtivo(); }, 2500);
     })
     .catch(() => { /* API fora do ar - menu fica como esta */ });
 })();
