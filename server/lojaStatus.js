@@ -45,6 +45,30 @@ const COLLECTION = db.collection('lojaStatus');
 // (comandoPendenteId) - evita precisar de índice composto no Firestore pra
 // achar o comando certo: já sabemos o id exato na hora do heartbeat
 const COMANDOS_COLLECTION = db.collection('lojaStatusComandos');
+const CONFIG_DOC = db.collection('lojaStatusConfig').doc('geral');
+
+// config do NOC. Hoje so o toggle do PUSH de acesso remoto: DESLIGADO por
+// padrao (o alerta virava spam do proprio acesso remoto da equipe -
+// AnyDesk/TeamViewer/DWService que a TI usa; o evento continua sendo gravado
+// no historico de atividades de cada computador, so nao empurra pro celular)
+let configCache = null;
+let configCacheEm = 0;
+async function getConfig() {
+  if (configCache && (Date.now() - configCacheEm) < 30 * 1000) return configCache;
+  const snap = await CONFIG_DOC.get();
+  configCache = snap.exists ? snap.data() : {};
+  configCacheEm = Date.now();
+  return configCache;
+}
+async function setConfig(patch) {
+  await CONFIG_DOC.set(patch, { merge: true });
+  configCache = null;
+  return getConfig();
+}
+async function pushAcessoRemotoAtivo() {
+  const c = await getConfig();
+  return c.pushAcessoRemoto === true; // default false
+}
 
 const TIPOS_COMPUTADOR = ['atendimento', 'interno', 'abastecimento'];
 function tipoValido(tipo) { return TIPOS_COMPUTADOR.includes(tipo) ? tipo : 'atendimento'; }
@@ -319,9 +343,17 @@ async function registrarAcessoRemoto(codigo, posto, detalhe, token) {
   const snap = await COLLECTION.doc(id).get();
   const atual = snap.exists ? snap.data() : null;
   exigirTokenSeTiver(atual, token);
-  await COLLECTION.doc(id).set({
-    codigo, posto, ultimoAcessoRemotoEm: Date.now(), ultimoAcessoRemotoDetalhe: limpo,
-  }, { merge: true });
+  const agora = Date.now();
+  // registra no historico de atividades do computador (aparece no detalhe),
+  // pra ficar auditavel mesmo com o push desligado. Nao repete o mesmo detalhe
+  // se ja foi o ultimo evento em menos de 10min (evita encher com o mesmo
+  // batimento de nuvem da ferramenta)
+  const eventosAtuais = (atual && atual.eventos) || [];
+  const ultimo = eventosAtuais[eventosAtuais.length - 1];
+  const repetido = ultimo && ultimo.tipo === 'acesso-remoto' && ultimo.detalhe === limpo && (agora - ultimo.em) < 10 * 60 * 1000;
+  const patch = { codigo, posto, ultimoAcessoRemotoEm: agora, ultimoAcessoRemotoDetalhe: limpo };
+  if (!repetido) patch.eventos = [...eventosAtuais, { tipo: 'acesso-remoto', em: agora, detalhe: limpo }].slice(-EVENTOS_MAX);
+  await COLLECTION.doc(id).set(patch, { merge: true });
   cache.invalidar();
   return { codigo, posto, nome: atual && atual.nome, ultimoAcessoRemotoDetalhe: limpo };
 }
@@ -509,6 +541,7 @@ async function varrerAlertas() {
 module.exports = {
   heartbeat, listar, cadastrarComputador, editarComputador, removerComputador,
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR,
+  getConfig, setConfig, pushAcessoRemotoAtivo,
   enfileirarComando, marcarComandoExecutado, registrarAcessoRemoto, responderChat,
   garantirAgentToken, tokenDoComputador,
 };
