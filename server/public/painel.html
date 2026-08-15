@@ -22,17 +22,21 @@
   }
   *{box-sizing:border-box;}
   html{overflow-x:hidden;}
-  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 16px;padding:12px 32px 12px;border-bottom:1px solid var(--line);}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 16px;padding:8px 32px 8px;border-bottom:1px solid var(--line);}
   body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;overflow-x:clip;overflow-y:clip;}
   h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .eyebrow{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:12px;padding-bottom:12px;} h1{font-size:17px;} .eyebrow{font-size:8px;} }
+  .eyebrow{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:7px;padding-bottom:7px;} h1{font-size:16px;} .eyebrow{font-size:8px;} }
   h2{font-size:14px;font-weight:700;margin:0;}
   .sub-intro{font-size:12.5px;color:var(--muted);margin-top:6px;}
-  .header-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
-  .header-nav{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;}
-  .nav-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
-  @media(max-width:640px){ .header-nav{flex-direction:column;align-items:stretch;} .nav-actions{justify-content:flex-end;} }
+  /* header numa LINHA SÓ: hambúrguer + título (flexível, encolhe com reticências)
+     à esquerda, ícones de ação encostados à direita. Antes o .header-nav
+     tinha margin-top e flex-wrap, o que no celular jogava os ícones pra uma
+     segunda linha (barra mais alta) - agora fica tudo na mesma linha do "Painel" */
+  .header-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:nowrap;}
+  .header-nav{display:flex;align-items:center;gap:10px;margin-top:0;flex:none;}
+  .nav-actions{display:flex;gap:6px;flex-wrap:nowrap;align-items:center;}
+  @media(max-width:640px){ .header-nav{flex-direction:row;align-items:center;} .nav-actions{justify-content:flex-end;} }
   a.back,button.back{font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;transition:border-color .15s ease,color .15s ease,background .15s ease;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
   a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
