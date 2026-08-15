@@ -492,6 +492,24 @@
   </div>
 </div>
 
+<!-- desligamento -->
+<div class="overlay hidden" id="overlay-desligar">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharDesligar()">✕</span>
+    <div class="sheet">
+      <h3>🚪 Desligar colaborador</h3>
+      <div class="sub" id="desl-sub"></div>
+      <label>Data do desligamento</label>
+      <input type="date" id="desl-data">
+      <div class="sub" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin:4px 0 0;">deixe em branco pra usar a data de hoje</div>
+      <label>Motivo (opcional)</label>
+      <input type="text" id="desl-motivo" maxlength="300" placeholder="ex: pedido de demissão, fim de contrato...">
+      <div class="msg hidden" id="msg-desligar"></div>
+      <button class="btn-primary" type="button" style="background:var(--warn);" onclick="confirmarDesligar()">Confirmar desligamento</button>
+    </div>
+  </div>
+</div>
+
 <!-- decisão do período de teste -->
 <div class="overlay hidden" id="overlay-decisao">
   <div class="sheet-wrap">
@@ -1821,15 +1839,28 @@ async function removerDocumentoRh(id, index){
 }
 
 // ---------- desligar / reativar ----------
-async function desligarFuncionario(id, nome){
-  const motivo = prompt(`Desligar ${nome}?\n\nInforme o motivo (opcional):`);
-  if(motivo===null) return; // cancelou
+let DESLIGANDO_ID = null;
+function desligarFuncionario(id, nome){
+  DESLIGANDO_ID = id;
+  document.getElementById('desl-sub').textContent = nome;
+  document.getElementById('desl-data').value = hojeBrasilia();
+  document.getElementById('desl-motivo').value = '';
+  document.getElementById('msg-desligar').classList.add('hidden');
+  document.getElementById('overlay-desligar').classList.remove('hidden');
+}
+function fecharDesligar(){ document.getElementById('overlay-desligar').classList.add('hidden'); DESLIGANDO_ID=null; }
+async function confirmarDesligar(){
+  const msg = document.getElementById('msg-desligar');
   try{
-    const resp = await fetch(`/api/rh/funcionarios/${id}/desligar`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ motivo }) });
+    const resp = await fetch(`/api/rh/funcionarios/${DESLIGANDO_ID}/desligar`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      motivo: document.getElementById('desl-motivo').value,
+      data: document.getElementById('desl-data').value || null,
+    }) });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao desligar.');
     await carregar();
-  }catch(err){ alert(err.message); }
+    fecharDesligar();
+  }catch(err){ msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden'); }
 }
 async function reativarFuncionario(id, nome){
   if(!confirm(`Reativar ${nome}? Ele volta como ativo.`)) return;

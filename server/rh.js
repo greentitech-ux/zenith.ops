@@ -795,14 +795,19 @@ function ehColaboradorVinculado(f) {
 // desliga o colaborador (não apaga - vira ex-colaborador com data e motivo,
 // pra manter histórico e sair dos alertas). Reaproveita a limpeza de
 // teste/experiência do atualizar(status:'inativo')
-async function desligar(id, { motivo, porEmail } = {}) {
+async function desligar(id, { motivo, data, porEmail } = {}) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Funcionário não encontrado.');
   if (snap.data().status === 'inativo') throw new Error('Esse colaborador já está desligado.');
+  // data do desligamento: informada pelo RH (YYYY-MM-DD, gravada ao meio-dia
+  // pra nao virar o dia por fuso) ou, se vazia, o momento atual
+  const dataDesligamento = validarDataOuNull(data, 'Data do desligamento')
+    ? `${validarDataOuNull(data, 'Data do desligamento')}T12:00:00.000Z`
+    : new Date().toISOString();
   await ref.update({
     status: 'inativo',
-    desligadoEm: new Date().toISOString(),
+    desligadoEm: dataDesligamento,
     motivoDesligamento: limpar(motivo, 300) || null,
     desligadoPorEmail: porEmail || null,
     emTeste: false,
