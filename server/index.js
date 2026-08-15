@@ -4457,7 +4457,7 @@ app.post('/api/rh/funcionarios/:id/desligar', requireSection('rh'), async (req, 
     const atual = await rh.getOne(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
     if (!podeAcessarUnidadeRh(req, atual.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
-    const registro = await rh.desligar(req.params.id, { motivo: req.body.motivo, porEmail: req.user.email });
+    const registro = await rh.desligar(req.params.id, { motivo: req.body.motivo, data: req.body.data, porEmail: req.user.email });
     broadcast('rh-funcionario-atualizado', registro, 'rh');
     res.json(registro);
   } catch (err) { res.status(400).json({ error: err.message }); }
