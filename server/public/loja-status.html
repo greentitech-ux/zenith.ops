@@ -343,6 +343,8 @@
     <h3>▶️ Rodar ação num computador</h3>
     <div class="sub" id="rodar-acao-nome" style="margin-bottom:8px;"></div>
     <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">Só computadores tipo <b>interno</b> rodam comando. O comando entra na fila e executa no próximo contato do NOCZenith (a cada ~25s). O resultado aparece no detalhe do computador.</div>
+    <label>Unidade</label>
+    <select id="rodar-acao-unidade" onchange="onMudaUnidadeRodar()"></select>
     <label>Computador</label>
     <select id="rodar-acao-comp"></select>
     <div class="msg hidden" id="rodar-acao-status"></div>
@@ -992,18 +994,34 @@ function renderAgenteAcoes(){
 
 // ---- Rodar uma acao 'comando_maquina' num computador escolhido ----
 let RODAR_ACAO_ID = null;
+let RODAR_INTERNOS = [];
 function abrirRodarAcao(id, nome){
   RODAR_ACAO_ID = id;
   document.getElementById('rodar-acao-nome').innerHTML = `💻 <b>${escapeHtml(nome)}</b>`;
-  const internos = COMPUTADORES.filter(c => c.tipo==='interno')
-    .sort((a,b)=>(UNIDADES_NOMES[a.codigo]||a.codigo).localeCompare(UNIDADES_NOMES[b.codigo]||b.codigo,'pt-BR'));
-  const sel = document.getElementById('rodar-acao-comp');
-  sel.innerHTML = internos.length
-    ? internos.map(c=>`<option value="${escapeHtml(c.codigo)}|${escapeHtml(c.posto)}">${escapeHtml(c.nome||'(sem nome)')} · ${escapeHtml(UNIDADES_NOMES[c.codigo]||c.codigo)} ${statusDe(c)==='online'?'🟢':'🔴'}</option>`).join('')
-    : '<option value="" disabled selected>nenhum computador tipo interno cadastrado</option>';
+  RODAR_INTERNOS = COMPUTADORES.filter(c => c.tipo==='interno');
+  // 1) unidades (distintas) que tem computador interno, em ordem alfabetica
+  const codigos = [...new Set(RODAR_INTERNOS.map(c=>c.codigo))]
+    .sort((a,b)=>(UNIDADES_NOMES[a]||a).localeCompare(UNIDADES_NOMES[b]||b,'pt-BR'));
+  const selUni = document.getElementById('rodar-acao-unidade');
+  selUni.innerHTML = codigos.length
+    ? codigos.map(cod=>{
+        const qtd = RODAR_INTERNOS.filter(c=>c.codigo===cod).length;
+        return `<option value="${escapeHtml(cod)}">${escapeHtml(UNIDADES_NOMES[cod]||cod)} (${qtd})</option>`;
+      }).join('')
+    : '<option value="" disabled selected>nenhuma unidade com computador interno</option>';
+  onMudaUnidadeRodar(); // 2) preenche os computadores da primeira unidade
   const st = document.getElementById('rodar-acao-status'); st.classList.add('hidden');
-  document.getElementById('rodar-acao-btn').disabled = !internos.length;
+  document.getElementById('rodar-acao-btn').disabled = !codigos.length;
   document.getElementById('rodar-acao-overlay').classList.remove('hidden');
+}
+function onMudaUnidadeRodar(){
+  const cod = document.getElementById('rodar-acao-unidade').value;
+  const doUni = RODAR_INTERNOS.filter(c=>c.codigo===cod)
+    .sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  const sel = document.getElementById('rodar-acao-comp');
+  sel.innerHTML = doUni.length
+    ? doUni.map(c=>`<option value="${escapeHtml(c.codigo)}|${escapeHtml(c.posto)}">${escapeHtml(c.nome||'(sem nome)')} ${statusDe(c)==='online'?'🟢 online':'🔴 offline'}</option>`).join('')
+    : '<option value="" disabled selected>nenhum computador nessa unidade</option>';
 }
 function fecharRodarAcao(){ document.getElementById('rodar-acao-overlay').classList.add('hidden'); RODAR_ACAO_ID = null; }
 async function rodarAcaoConfirmar(){
