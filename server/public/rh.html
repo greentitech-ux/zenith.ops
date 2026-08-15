@@ -430,6 +430,8 @@
     <div class="sheet">
       <h3>Editar funcionário</h3>
       <div class="sub" id="ed-sub"></div>
+      <label>Unidade</label>
+      <select id="ed-unidade"></select>
       <label>Nome completo</label>
       <input type="text" id="ed-nome" maxlength="150">
       <div class="grid2">
@@ -1750,6 +1752,13 @@ function abrirEditar(id){
   EDITANDO_ID = id;
   document.getElementById('msg-editar').classList.add('hidden');
   document.getElementById('ed-sub').textContent = `${UNIDADES_NOMES[f.unidade]||f.unidade} · desde ${fmtData(f.dataAdmissao)}`;
+  // unidade: lista as unidades conhecidas + garante a atual (mesmo se for uma
+  // legada tipo "Dominos Natal" que ja nao existe mais) pra dar pra trocar
+  const selUn = document.getElementById('ed-unidade');
+  const codigos = Object.keys(UNIDADES_NOMES);
+  if(f.unidade && !codigos.includes(f.unidade)) codigos.unshift(f.unidade);
+  selUn.innerHTML = codigos.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('');
+  selUn.value = f.unidade || '';
   document.getElementById('ed-nome').value = f.nome||'';
   document.getElementById('ed-contato').value = f.contato||'';
   document.getElementById('ed-cargo').value = f.cargoFuncao||'';
@@ -1769,6 +1778,7 @@ async function salvarEdicao(){
   try{
     const per = document.getElementById('ed-aso-periodicidade').value;
     const resp = await fetch(`/api/rh/funcionarios/${EDITANDO_ID}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      unidade: document.getElementById('ed-unidade').value,
       nome: document.getElementById('ed-nome').value,
       contato: document.getElementById('ed-contato').value,
       cargoFuncao: document.getElementById('ed-cargo').value,

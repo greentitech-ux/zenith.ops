@@ -306,6 +306,9 @@ async function atualizar(id, patch) {
   }
   if (patch.contato !== undefined) merge.contato = limpar(patch.contato, 40);
   if (patch.cargoFuncao !== undefined) merge.cargoFuncao = limpar(patch.cargoFuncao, 60);
+  // trocar de unidade (ex: consolidar loja antiga "Dominos Natal" -> "Dominos
+  // Tirol", que sao a mesma). so o Master edita (rota requireMaster).
+  if (patch.unidade !== undefined && String(patch.unidade).trim()) merge.unidade = String(patch.unidade).trim();
   if (patch.dataNascimento !== undefined) merge.dataNascimento = validarDataOuNull(patch.dataNascimento, 'Data de nascimento');
   if (patch.dataAdmissao !== undefined) merge.dataAdmissao = validarDataOuNull(patch.dataAdmissao, 'Data de admissão');
   if (patch.curriculo !== undefined) merge.curriculo = patch.curriculo;
