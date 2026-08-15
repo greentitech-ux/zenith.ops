@@ -78,6 +78,26 @@
      editar, mensagem, link, baixar vigia, remover) fica no modal de detalhe
      (ver abrirDetalheComputador), pra caber muito mais card por tela */
   .equip-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(184px,1fr));gap:10px;}
+  /* Painel Por unidade */
+  .uni-panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:18px;}
+  .uni-panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:12px;font-weight:700;font-size:14px;}
+  .uni-panel-sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);font-weight:400;text-transform:uppercase;letter-spacing:.04em;}
+  .uni-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;}
+  .uni-card{background:var(--bg,#0f1115);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;text-align:left;font-family:inherit;color:inherit;transition:border-color .15s ease,background .15s ease;}
+  .uni-card:hover{border-color:var(--accent);}
+  .uni-card.ativo{border-color:var(--accent);background:rgba(92,200,255,.07);}
+  .uni-card-nome{font-weight:700;font-size:12.5px;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .uni-card-stats{display:flex;gap:12px;align-items:baseline;font-family:var(--mono);font-size:12px;}
+  .uni-stat{display:flex;align-items:center;gap:4px;}
+  .uni-stat b{font-size:15px;font-weight:800;}
+  .uni-stat.on b{color:var(--ok);}
+  .uni-stat.off b{color:var(--bad);}
+  .uni-stat.nv b{color:var(--muted);}
+  .uni-bar{display:flex;height:5px;border-radius:3px;overflow:hidden;margin-top:8px;background:var(--line);}
+  .uni-bar span{display:block;height:100%;}
+  .uni-bar .b-on{background:var(--ok);}
+  .uni-bar .b-off{background:var(--bad);}
+  .uni-bar .b-nv{background:var(--muted);opacity:.5;}
   .equip-tile{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:10px;padding:10px 11px;display:flex;flex-direction:column;gap:5px;cursor:pointer;transition:border-color .15s ease,background .15s ease;}
   .equip-tile:hover{border-color:var(--accent);background:var(--panel2);}
   .equip-tile.status-online{border-left-color:var(--ok);}
@@ -225,6 +245,16 @@
       <div class="kpi-num" id="kpi-num-nunca">0</div>
       <div class="kpi-label">⚪ Nunca conectou</div>
     </button>
+  </div>
+
+  <!-- Painel por unidade: cada unidade com quantos computadores online/offline.
+       Clicar numa unidade filtra a grade de baixo por ela. -->
+  <div class="uni-panel">
+    <div class="uni-panel-head">
+      <span>📍 Por unidade</span>
+      <span class="uni-panel-sub" id="uni-panel-sub"></span>
+    </div>
+    <div id="grid-unidades" class="uni-grid"></div>
   </div>
 
   <div class="filtro-bar">
@@ -562,8 +592,56 @@ function renderKpis(){
   });
 }
 
+// painel Por unidade: agrupa os computadores por unidade e conta online/
+// offline/nunca. Clicar numa unidade liga/desliga o filtro por ela (mesmo
+// FILTRO_UNIDADE do select), pra a grade de baixo mostrar so os dela.
+function renderUnidades(){
+  const grid = document.getElementById('grid-unidades');
+  const sub = document.getElementById('uni-panel-sub');
+  const porUni = {};
+  COMPUTADORES.forEach(c => {
+    const cod = c.codigo;
+    if(!porUni[cod]) porUni[cod] = { online:0, offline:0, nunca:0, total:0 };
+    porUni[cod][statusDe(c)]++;
+    porUni[cod].total++;
+  });
+  const codigos = Object.keys(porUni).sort((a,b) =>
+    (porUni[b].offline - porUni[a].offline) // mais offline primeiro (chama atencao)
+    || (UNIDADES_NOMES[a]||a).localeCompare(UNIDADES_NOMES[b]||b, 'pt-BR'));
+  sub.textContent = `${codigos.length} unidade${codigos.length===1?'':'s'}`;
+  if(!codigos.length){ grid.innerHTML = '<div class="empty" style="width:100%;">nenhuma unidade com computador cadastrado.</div>'; return; }
+  grid.innerHTML = codigos.map(cod => {
+    const s = porUni[cod];
+    const nome = escapeHtml(UNIDADES_NOMES[cod] || cod);
+    const larg = (n) => s.total ? (n/s.total*100).toFixed(1)+'%' : '0%';
+    const ativo = FILTRO_UNIDADE === cod ? ' ativo' : '';
+    return `<button type="button" class="uni-card${ativo}" onclick="toggleFiltroUnidade('${escapeJs(cod)}')" title="Filtrar a grade por ${nome}">
+      <div class="uni-card-nome" title="${nome}">${nome}</div>
+      <div class="uni-card-stats">
+        <span class="uni-stat on">🟢 <b>${s.online}</b></span>
+        <span class="uni-stat off">🔴 <b>${s.offline}</b></span>
+        ${s.nunca ? `<span class="uni-stat nv">⚪ <b>${s.nunca}</b></span>` : ''}
+      </div>
+      <div class="uni-bar">
+        ${s.online?`<span class="b-on" style="width:${larg(s.online)}"></span>`:''}
+        ${s.offline?`<span class="b-off" style="width:${larg(s.offline)}"></span>`:''}
+        ${s.nunca?`<span class="b-nv" style="width:${larg(s.nunca)}"></span>`:''}
+      </div>
+    </button>`;
+  }).join('');
+}
+
+// clicar na unidade liga/desliga o filtro (e mantem o select sincronizado)
+function toggleFiltroUnidade(cod){
+  FILTRO_UNIDADE = (FILTRO_UNIDADE === cod) ? '' : cod;
+  const sel = document.getElementById('filtro-unidade');
+  if(sel) sel.value = FILTRO_UNIDADE;
+  render();
+}
+
 function render(){
   renderKpis();
+  renderUnidades();
   const grid = document.getElementById('grid-equip');
   let lista = COMPUTADORES.slice();
   if(FILTRO_UNIDADE) lista = lista.filter(c => c.codigo === FILTRO_UNIDADE);
