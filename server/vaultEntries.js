@@ -22,11 +22,20 @@ async function listAllSubgroupsUncached() {
 }
 const allSubgroupsCache = createCache(listAllSubgroupsUncached, 5 * 60 * 1000);
 
+// o operador 'in' do Firestore aceita no maximo 30 valores por consulta - um
+// usuario (ou um grupo, na exportacao) com mais subgrupos que isso estourava
+// a query inteira com INVALID_ARGUMENT. Quebra em lotes de 30 e junta.
+const LIMITE_IN = 30;
+
 async function listBySubgroups(subgroupIds) {
   // subgroupIds === null significa "todos os subgrupos" (Master)
   if (subgroupIds === null) return allSubgroupsCache.cached();
-  const snap = await entriesRef.where('subgroupId', 'in', subgroupIds.length ? subgroupIds : ['__none__']).get();
-  const entries = snap.docs.map(toEntry);
+  const ids = subgroupIds.filter(Boolean);
+  if (!ids.length) return [];
+  const lotes = [];
+  for (let i = 0; i < ids.length; i += LIMITE_IN) lotes.push(ids.slice(i, i + LIMITE_IN));
+  const snaps = await Promise.all(lotes.map((lote) => entriesRef.where('subgroupId', 'in', lote).get()));
+  const entries = snaps.flatMap((snap) => snap.docs.map(toEntry));
   entries.sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'));
   return entries;
 }
