@@ -81,6 +81,10 @@ function semSegredo(doc) {
 // heartbeat a cada ~25s (ver atendimento.html) - 90s da margem pra 2
 // heartbeats perdidos por jitter de rede antes de considerar offline
 const LIMIAR_OFFLINE_MS = 90 * 1000;
+// registro de atividades por computador: guarda as ultimas N transicoes
+// online<->offline (ver varrerAlertas), pra auditar quedas de conexao sem
+// depender de print. Capado pra o documento nao crescer sem limite.
+const EVENTOS_MAX = 60;
 
 function docIdFor(codigo, posto) {
   const limpoCodigo = String(codigo || '').trim().replace(/\//g, '_').slice(0, 200);
@@ -481,10 +485,20 @@ async function varrerAlertas() {
     if (!doc.ultimoHeartbeatEm) continue;
     const online = (Date.now() - doc.ultimoHeartbeatEm) < LIMIAR_OFFLINE_MS;
     if (!online && !doc.avisadoOffline) {
-      await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({ avisadoOffline: true, offlineDesde: Date.now() });
+      // 'em' = ultimo heartbeat real (quando de fato silenciou), nao a hora da
+      // deteccao - fica mais fiel no registro
+      const evento = { tipo: 'offline', em: doc.ultimoHeartbeatEm };
+      await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({
+        avisadoOffline: true, offlineDesde: Date.now(),
+        eventos: [...(doc.eventos || []), evento].slice(-EVENTOS_MAX),
+      });
       transicoes.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'offline' });
     } else if (online && doc.avisadoOffline) {
-      await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({ avisadoOffline: false, offlineDesde: null });
+      const evento = { tipo: 'online', em: Date.now(), duracaoMs: doc.offlineDesde ? (Date.now() - doc.offlineDesde) : null };
+      await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({
+        avisadoOffline: false, offlineDesde: null,
+        eventos: [...(doc.eventos || []), evento].slice(-EVENTOS_MAX),
+      });
       transicoes.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'online' });
     }
   }
