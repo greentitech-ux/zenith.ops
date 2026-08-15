@@ -530,7 +530,12 @@ function painelHtml(chat){
       </div>
       <span class="painel-fechar" title="Fechar" onclick="fecharPainel('${idAttr}')">✕</span>
     </div>
-    ${tickets.length ? `<div class="d-tickets">🎫 Tickets dessa conversa: ${tickets.map(t=>`#${escapeHtml(t.numero)}`).join(', ')}</div>` : ''}
+    ${tickets.length ? `<div class="d-tickets">🎫 Tickets dessa conversa: ${tickets.map(t=>{
+      // chamado-ti abre no técnico, o resto (solicitacao) na Central -
+      // clicavel leva direto pro ticket (pedido explicito do usuario)
+      const destino = t.tipo === 'chamado-ti' ? '/tecnico.html' : '/central-historico.html';
+      return `<a href="${destino}?ticket=${encodeURIComponent(t.numero)}" target="_blank" rel="noopener" style="color:var(--accent);">#${escapeHtml(t.numero)}</a>`;
+    }).join(', ')}</div>` : ''}
     ${alertasSeg.length ? `<div class="d-alerta-seguranca"><details><summary>🛡️ ${alertasSeg.length} alerta(s) de segurança nessa conversa</summary>${alertasSeg.map(a=>`
       <div class="d-alerta-item">
         <b>${escapeHtml(a.motivo||'')}</b> · ${fmtDataHora(a.em)}<br>

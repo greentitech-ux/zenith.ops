@@ -1202,6 +1202,14 @@ async function boot(){
   document.getElementById('root').classList.remove('hidden');
   await carregarChamados();
   iniciarStreamChamados();
+  // link "Tickets dessa conversa" da Central do Beniboy (?ticket=NUMERO) -
+  // abre o detalhe direto, sem precisar procurar na lista (pedido explicito
+  // do usuario: "o numero do ticket... ser clicável e direcionar até o ticket")
+  const numeroTicketAbrir = new URLSearchParams(location.search).get('ticket');
+  if (numeroTicketAbrir) {
+    const alvo = CHAMADOS.find(c => String(c.numeroTicket) === numeroTicketAbrir);
+    if (alvo) abrirDetalhe(alvo.id);
+  }
 }
 
 // ao vivo: quando um chamado e criado/atualizado (ex: Master te atribui um
