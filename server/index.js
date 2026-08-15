@@ -3393,6 +3393,16 @@ function podeUnidadeInventario(req, unidade) {
   return req.isMaster || (req.permissions.unidades || []).includes(unidade);
 }
 
+// fechamento de caixa do Saltiverso (por operador, ver saltiversoFechamento.js):
+// so Gerente/Ass.Gerente DA UNIDADE ou Master/Admin veem quanto cada caixa
+// faturou e a lista de todos os caixas do dia. O operador comum so enxerga o
+// PROPRIO caixa e nunca o faturado (nem o dele) - senao da pra descobrir o
+// faturado pela diferenca que ele mesmo calcularia (declarado - diferenca).
+function podeVerFaturadoSaltiverso(req, unidade) {
+  if (req.isMaster || req.isAdmin) return true;
+  return !!(req.user && users.ehCargoGerente(req.user.cargo) && (req.permissions.unidades || []).includes(unidade));
+}
+
 app.get('/api/inventario/unidades', requireSection('inventario'), (req, res) => {
   const unidades = req.isMaster
     ? Object.keys(INVENTARIO_UNIDADES_NOMES)
@@ -5053,19 +5063,40 @@ app.delete('/api/saltiverso/vendas/:id', auth.requireMaster, async (req, res) =>
   }
 });
 
+// versao reduzida do estado do dia pro operador comum: NUNCA inclui faturado
+// (nem o dele, nem o geral) nem a lista dos outros caixas - so o status do
+// PROPRIO caixa (declarado que ele mesmo digitou + resultado categorico
+// ok/sobrando/faltando) e se o dia ja fechou (sem valores).
+function estadoDoDiaParaOperador(estado, operadorId) {
+  const meu = (estado.caixas || []).find((c) => c.operadorId === operadorId) || null;
+  return {
+    unidade: estado.unidade, data: estado.data,
+    meuCaixa: meu ? {
+      id: meu.id, declarado: meu.declarado, somaDeclarado: meu.somaDeclarado,
+      resultado: meu.resultado, observacao: meu.observacao, lancadoEm: meu.lancadoEm,
+    } : null,
+    diaFechado: !!estado.fechamento,
+  };
+}
+
 // estado do dia: faturado ao vivo + caixas fechados + operadores pendentes +
-// doc do dia (se ja fechou). Base da nova tela de fechamento por caixa.
+// doc do dia (se ja fechou). So Gerente/Master ve isso completo - o operador
+// comum recebe uma versao reduzida (ver estadoDoDiaParaOperador acima).
 app.get('/api/saltiverso/fechamento', requireSection('parque-loja'), async (req, res) => {
   try {
     const { unidade, data } = req.query;
     if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
-    res.json(await saltiversoFechamento.estadoDoDia(unidade, data));
+    const estado = await saltiversoFechamento.estadoDoDia(unidade, data);
+    res.json(podeVerFaturadoSaltiverso(req, unidade) ? estado : estadoDoDiaParaOperador(estado, req.user.id));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-// o operador logado fecha O SEU caixa (declara o que contou)
+// o operador logado fecha O SEU caixa (declara o que contou, as cegas - nunca
+// viu o faturado antes de digitar). A resposta tambem e podada pra quem nao
+// e Gerente/Master: nada de faturadoOperador/diferencaOperador, so o
+// resultado categorico (o mesmo motivo do estadoDoDiaParaOperador acima).
 app.post('/api/saltiverso/fechamento/caixa', requireSection('parque-loja'), async (req, res) => {
   try {
     const { unidade, unidadeNome, data, declarado, observacao } = req.body;
@@ -5075,7 +5106,8 @@ app.post('/api/saltiverso/fechamento/caixa', requireSection('parque-loja'), asyn
       operadorId: req.user.id, operadorEmail: req.user.email, operadorNome: req.user.username || req.user.email,
     });
     broadcast('saltiverso-caixa-lancado', caixa, 'parque-loja');
-    res.json(caixa);
+    if (podeVerFaturadoSaltiverso(req, unidade)) return res.json(caixa);
+    res.json({ id: caixa.id, declarado: caixa.declarado, somaDeclarado: caixa.somaDeclarado, resultado: caixa.resultado, observacao: caixa.observacao, lancadoEm: caixa.lancadoEm });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -5114,6 +5146,7 @@ app.post('/api/saltiverso/fechamento', requireSection('parque-loja'), async (req
   try {
     const { unidade, unidadeNome, data, observacao } = req.body;
     if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    if (!podeVerFaturadoSaltiverso(req, unidade)) return res.status(403).json({ error: 'Apenas gerente ou master pode fechar o dia.' });
     const fechamento = await saltiversoFechamento.fecharDia({
       unidade, unidadeNome, data, observacao,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
