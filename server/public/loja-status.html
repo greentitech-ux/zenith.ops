@@ -509,7 +509,8 @@ function atualizarConteudoDetalhe(codigo, c){
     ${c.anydeskId ? `<a class="btn-mini ok" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk">🖥️ AnyDesk</a>` : ''}
     <button type="button" class="btn-mini" onclick="abrirModalMensagem('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">💬 Mensagem</button>
     <button type="button" class="btn-mini" onclick="copiarLinkComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🔗 Link</button>
-    <button type="button" class="btn-mini" title="Baixar NOCZenith (reabre sozinho + reporta IP local)" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️ Baixar</button>
+    <button type="button" class="btn-mini ok" title="Copiar o comando de instalação pra colar no PowerShell da loja (contorna o bloqueio do Windows)" onclick="copiarComandoVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">📋 Copiar comando</button>
+    <button type="button" class="btn-mini" title="Baixar o arquivo NOCZenith.ps1 (jeito manual)" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️ Baixar</button>
     <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️ Remover</button>
   `;
   document.getElementById('detalhe-comp-editar').onclick = () => {
@@ -689,6 +690,27 @@ function copiarIpLocal(ip){
 // quando sai uma versao nova (sem precisar reinstalar na mao - so quem ja
 // tinha instalado ANTES dessa funcionalidade existir e que precisa baixar
 // e instalar uma vez manualmente pra "entrar" no ciclo de autoatualizacao).
+// jeito recomendado: gera um comando de UMA LINHA (com o token do computador)
+// pra colar no PowerShell da loja. Baixa e instala contornando o Controle de
+// Aplicativo Inteligente do Windows 11 (que bloqueia .ps1 baixado pelo
+// navegador). Ver montarComandoInstalacao/rota comando-instalacao no servidor.
+async function copiarComandoVigia(codigo, posto, tipo){
+  try{
+    const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/comando-instalacao?tipo=${encodeURIComponent(tipo)}`);
+    if(!resp.ok) throw new Error('Erro ao gerar o comando.');
+    const { comando } = await resp.json();
+    let copiou = false;
+    try { await navigator.clipboard.writeText(comando); copiou = true; } catch(e){ /* clipboard bloqueado (http/permissão) - mostra pra copiar na mão */ }
+    if(copiou){
+      alert(`Comando de instalação copiado! ✅\n\nNo computador da loja:\n1) Abra o PowerShell (menu Iniciar > digite PowerShell)\n2) Cole (Ctrl+V) e aperte Enter\n\nPronto - ele baixa, instala numa pasta fixa e já começa a rodar. Não precisa clicar em nada nem baixar arquivo, e nada fica "solto" pra apagar depois.\n\nComputador tipo servidor/escritório: a tarefa roda no PRÓXIMO LOGIN do usuário - deixe a sessão bloqueada/desconectada (nunca "Sair").`);
+    } else {
+      prompt('Copie este comando e cole no PowerShell da loja (Ctrl+C):', comando);
+    }
+  }catch(e){
+    alert(e.message);
+  }
+}
+
 async function baixarVigia(codigo, posto, tipo){
   try{
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/vigia.ps1?tipo=${encodeURIComponent(tipo)}`);
@@ -702,7 +724,7 @@ async function baixarVigia(codigo, posto, tipo){
     a.click();
     a.remove();
     URL.revokeObjectURL(a.href);
-    alert(`Script "NOCZenith-${posto}.ps1" baixado.\n\nComo instalar:\n1) Salve numa pasta fixa (ex: Documentos\\NOCZenith)\n2) Clique com o botão direito nele > "Executar com o PowerShell"\n\nPronto - ele se instala sozinho e já começa a rodar (e a partir de agora se atualiza sozinho quando eu mudar algo nele). As instruções completas (inclusive o que fazer se der erro de permissão) estão nos comentários no topo do próprio arquivo.\n\nSe não ficar online: abra "NOCZenith.log" na MESMA pasta onde salvou o .ps1 - ele registra cada tentativa de contato com o servidor e qualquer erro (rede, comando, etc).\n\nImportante pra computador tipo "servidor"/escritório: a tarefa agendada roda no PRÓXIMO LOGIN desse usuário - se a sessão for encerrada (logoff) depois de instalar, o NOCZenith para até alguém logar de novo nessa conta. Deixe a sessão só bloqueada/desconectada (nunca "Sair"), ou reabra a sessão pra ele voltar a rodar.`);
+    alert(`Script "NOCZenith-${posto}.ps1" baixado.\n\n⚠️ O Windows 11 bloqueia .ps1 baixado (Controle de Aplicativo Inteligente). Se o clique-direito "Executar com o PowerShell" der o aviso de bloqueio, o jeito mais fácil é usar o botão "📋 Copiar comando".\n\nComo instalar por aqui mesmo:\n1) Salve numa pasta qualquer.\n2) Abra o PowerShell e rode (troque pelo caminho onde salvou, com aspas):\n     Unblock-File "C:\\...\\NOCZenith-${posto}.ps1"\n   (tira o selo de "veio da internet" que causa o bloqueio)\n3) Rode:\n     powershell -ExecutionPolicy Bypass -File "C:\\...\\NOCZenith-${posto}.ps1"\n\nEle se instala numa pasta fixa protegida e passa a rodar de lá - então DEPOIS de instalar você PODE APAGAR o arquivo que baixou. Dali pra frente ele se atualiza sozinho.\n\nComputador tipo servidor/escritório: a tarefa roda no PRÓXIMO LOGIN do usuário - deixe a sessão bloqueada/desconectada (nunca "Sair").`);
   }catch(e){
     alert(e.message);
   }
