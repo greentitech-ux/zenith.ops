@@ -87,7 +87,12 @@ function formatarCelula(key, valor) {
 
 function toCSV(linhas) {
   const escape = (v) => {
-    const s = String(v ?? '');
+    let s = String(v ?? '');
+    // neutraliza injecao de formula: uma celula que comeca com = + - @ (ou
+    // tab/CR) e executada como formula pelo Excel/Sheets ao abrir o CSV, e
+    // parte desses valores vem de fora (nome digitado pelo cliente, descricao
+    // de ticket) - prefixa com apostrofo pra forcar leitura como texto puro
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
   const out = [COLUNAS.map((c) => escape(c.label)).join(',')];
