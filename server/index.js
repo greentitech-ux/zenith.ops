@@ -6639,6 +6639,11 @@ app.post('/api/suporte-chats/:id/gerar-chamado', auth.requireAuth, async (req, r
       tecnicoId: req.user.id,
       tecnicoEmail: req.user.email,
       criadoPorEmail: req.user.email,
+      // o chamado herda o MESMO numero do protocolo da conversa (nao tira um
+      // novo da sequencia) - pedido explicito do usuario: "o numero do
+      // ticket sempre sera o mesmo do protocolo... o proximo ticket tem que
+      // ser na sequencia, nunca repetir"
+      numeroTicket: chat.numeroTicket,
     });
     await suporteChat.vincularChamado(chat.id, chamado.id);
     await suporteChat.adicionarTicketVinculado(chat.id, { tipo: 'chamado-ti', ticketId: chamado.id, numero: chamado.numeroTicket });

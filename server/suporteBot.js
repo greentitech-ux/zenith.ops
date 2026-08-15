@@ -267,6 +267,11 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       criadoPorId: null,
       criadoPorEmail: `Beniboy (chat de suporte)${quem ? ' — ' + quem : ''}`,
       direcionadoParaId: null, direcionadoParaEmail: null,
+      // o ticket herda o MESMO numero do protocolo dessa conversa, em vez de
+      // tirar um novo da sequencia - pedido explicito do usuario: "o numero
+      // do ticket sempre sera o mesmo do protocolo... o proximo ticket tem
+      // que ser na sequencia, nunca repetir"
+      numeroTicket: chat.numeroTicket,
     });
     resultado.tickets.push(registro);
     await suporteChat.adicionarTicketVinculado(chat.id, { tipo: 'solicitacao', ticketId: registro.id, numero: registro.numeroTicket });
