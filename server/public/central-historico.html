@@ -2245,6 +2245,14 @@ async function boot(){
   await carregarCentral();
   notificarPendentesNaoVistas();
   conectarStreamChat();
+  // link "Tickets dessa conversa" da Central do Beniboy (?ticket=NUMERO) -
+  // abre o detalhe direto, sem precisar procurar na lista (pedido explicito
+  // do usuario: "o numero do ticket... ser clicável e direcionar até o ticket")
+  const numeroTicketAbrir = new URLSearchParams(location.search).get('ticket');
+  if (numeroTicketAbrir) {
+    const alvo = CARDS.find(c => String(c.numeroTicket) === numeroTicketAbrir);
+    if (alvo) abrirDetalhe(alvo.tipo, alvo.id);
+  }
 
   // secao "Fechamentos" - so pra quem tem a secao "lancamento" (mesma
   // exigencia da rota /api/fechamentos/meus). Lembra a ultima aba usada

@@ -6639,6 +6639,11 @@ app.post('/api/suporte-chats/:id/gerar-chamado', auth.requireAuth, async (req, r
       tecnicoId: req.user.id,
       tecnicoEmail: req.user.email,
       criadoPorEmail: req.user.email,
+      // o chamado herda o MESMO numero do protocolo da conversa (nao tira um
+      // novo da sequencia) - pedido explicito do usuario: "o numero do
+      // ticket sempre sera o mesmo do protocolo... o proximo ticket tem que
+      // ser na sequencia, nunca repetir"
+      numeroTicket: chat.numeroTicket,
     });
     await suporteChat.vincularChamado(chat.id, chamado.id);
     await suporteChat.adicionarTicketVinculado(chat.id, { tipo: 'chamado-ti', ticketId: chamado.id, numero: chamado.numeroTicket });
@@ -6658,12 +6663,23 @@ app.post('/api/suporte-chats/:id/status', auth.requireAuth, async (req, res) => 
   try {
     if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
     const autor = { id: req.user.id, email: req.user.email, nome: req.user.username || req.user.email };
-    const chat = await suporteChat.atualizarStatusAtendimento(req.params.id, {
+    const antes = await suporteChat.getOne(req.params.id);
+    let chat = await suporteChat.atualizarStatusAtendimento(req.params.id, {
       statusAtendimento: req.body.statusAtendimento,
       nivelDestino: req.body.nivelDestino,
       motivoSemSolucao: req.body.motivoSemSolucao,
       autor,
     });
+    // 1a vez que alguem assume a conversa (PENDENTE -> EM_ATENDIMENTO): avisa
+    // o numero do ticket pro visitante - pedido explicito do usuario: "o
+    // numero do ticket é informado assim que o setor inicia o atendimento"
+    if (antes && antes.statusAtendimento === 'PENDENTE' && req.body.statusAtendimento === 'EM_ATENDIMENTO' && chat.numeroTicket) {
+      chat = await suporteChat.adicionarMensagem(req.params.id, {
+        de: 'suporte',
+        texto: `Olá! Iremos agilizar seu atendimento. O número do seu ticket, caso precise, é #${chat.numeroTicket}.`,
+        autorEmail: autor.email,
+      });
+    }
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     const { token, ...resto } = chat;
     res.json(resto);
