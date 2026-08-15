@@ -150,7 +150,7 @@
   </div>
 </div>
 
-<div class="panel">
+<div class="panel" id="painel-faturado">
   <h2>Faturado (automático)</h2>
   <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);">Soma do que já está registrado no sistema pro dia: entradas do parque + vendas de bebida/meia.</div>
   <div class="resumo" id="faturado-resumo"><div class="empty">carregando...</div></div>
@@ -280,6 +280,23 @@ function diasAtras(n){ const d = agoraBrasilia(); d.setDate(d.getDate()-n); retu
 function unidadeAtual(){ return document.getElementById('fc-unidade').value; }
 function dataAtual(){ return document.getElementById('fc-data').value; }
 
+// so gerente/ass.gerente da unidade (ou master/admin) enxergam quanto o
+// caixa faturou e a lista de todos os caixas - espelha podeVerFaturadoSaltiverso
+// no backend, que ja poda a resposta pra quem nao se enquadra aqui
+function podeVerFaturado(){
+  if(!ME) return false;
+  if(IS_MASTER || ME.isAdmin) return true;
+  const cargo = ME.cargo;
+  const ehGerente = cargo === 'gerente' || cargo === 'assistente-gerente';
+  return ehGerente && (ME.permissions?.unidades||[]).includes(unidadeAtual());
+}
+
+const RESULTADO_INFO = {
+  ok: { texto:'✅ Caixa fechado', cls:'ok' },
+  sobrando: { texto:'⚠️ Caixa sobrando', cls:'err' },
+  faltando: { texto:'⚠️ Caixa faltando', cls:'err' },
+};
+
 function renderFaturadoResumo(faturado, faturadoPorForma, detalhe){
   const el = document.getElementById('faturado-resumo');
   const linhasBucket = BUCKETS.map(b=>`<div class="linha"><span>${BUCKET_LABEL[b]}</span><b>${fmtReal((faturadoPorForma||{})[b])}</b></div>`).join('');
@@ -313,26 +330,41 @@ async function carregarTudo(){
     ATUAL = await fetch(`/api/saltiverso/fechamento?unidade=${encodeURIComponent(unidade)}&data=${data}`).then(r=>r.json());
   }catch(e){ ATUAL = null; }
   if(!ATUAL || ATUAL.error){ document.getElementById('faturado-resumo').innerHTML = `<div class="empty">${ATUAL&&ATUAL.error?escapeHtml(ATUAL.error):'erro ao carregar.'}</div>`; return; }
-  renderFaturadoResumo(ATUAL.faturado, ATUAL.faturadoPorForma, ATUAL.detalhe);
+  const podeVer = podeVerFaturado();
+  document.getElementById('painel-faturado').classList.toggle('hidden', !podeVer);
+  document.getElementById('painel-caixas').classList.toggle('hidden', !podeVer);
+  document.getElementById('painel-fechar-dia').classList.toggle('hidden', !podeVer);
+  if(podeVer){
+    renderFaturadoResumo(ATUAL.faturado, ATUAL.faturadoPorForma, ATUAL.detalhe);
+    renderCaixasDoDia();
+    renderFecharDia();
+  }
   renderMeuCaixa();
-  renderCaixasDoDia();
-  renderFecharDia();
   if(PODE_APROVAR) carregarAprovacoes();
   await carregarHistorico();
 }
 
-const diaFechado = () => ATUAL && ATUAL.fechamento;
-function meuCaixa(){ return (ATUAL.caixas||[]).find(c=>c.operadorId===ME.id); }
+// resposta do backend ja vem podada pra quem nao pode ver faturado (ver
+// estadoDoDiaParaOperador no index.js): sem "caixas"/"fechamento", so
+// "meuCaixa"/"diaFechado" - as duas formas sao tratadas aqui
+const diaFechado = () => ATUAL && (ATUAL.fechamento || ATUAL.diaFechado);
+function meuCaixa(){ return ATUAL.caixas ? (ATUAL.caixas||[]).find(c=>c.operadorId===ME.id) : (ATUAL.meuCaixa||null); }
 
 function renderMeuCaixa(){
   const el = document.getElementById('meu-caixa-corpo');
   if(diaFechado()){ el.innerHTML = '<div class="sub">o dia já foi fechado. correções agora são feitas pelo Master no fechamento do dia.</div>'; return; }
   const meu = meuCaixa();
   if(meu){
-    // ja fechou: mostra travado + solicitar alteracao
+    // ja fechou: mostra travado + solicitar alteracao. o resultado (ok/
+    // sobrando/faltando) e sempre categorico aqui - nunca o valor exato da
+    // diferenca nem o faturado, pra quem nao e gerente/master (ver
+    // resultadoCategoria em saltiversoFechamento.js)
     const linhas = BUCKETS.map(b=>`<div class="linha"><span>${BUCKET_LABEL[b]}</span><b>${fmtReal(meu.declarado[b])}</b></div>`).join('');
+    const ri = RESULTADO_INFO[meu.resultado];
+    const badge = ri ? `<div class="msg ${ri.cls}" style="margin-top:8px;">${ri.texto}</div>` : '';
     el.innerHTML = `
       <div class="resumo">${linhas}<div class="linha total"><span>Total do seu caixa</span><b>${fmtReal(meu.somaDeclarado)}</b></div></div>
+      ${badge}
       <div class="sub" style="margin-top:8px;">✅ você fechou seu caixa. os valores estão travados — para mudar, peça uma alteração.</div>
       <button type="button" class="btn-secundario" style="margin-top:10px;" onclick="abrirAlteracao()">✏️ Solicitar alteração</button>
       <div id="form-alteracao" class="hidden" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">

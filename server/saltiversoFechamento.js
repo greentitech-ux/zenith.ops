@@ -80,6 +80,13 @@ async function calcularFaturado(unidade, data) {
   };
 }
 
+// versao categorica da diferenca - 'ok' | 'sobrando' | 'faltando' - pra
+// devolver ao operador comum sem revelar o valor exato (ver lancarCaixa)
+function resultadoCategoria(diferenca) {
+  if (Math.abs(diferenca) <= LIMITE_QUEBRA_SALTIVERSO) return 'ok';
+  return diferenca > 0 ? 'sobrando' : 'faltando';
+}
+
 function sanitizarTotalDeclarado(obj) {
   const out = {};
   BUCKETS.forEach((b) => { out[b] = arred(Math.max(0, num(obj && obj[b]))); });
@@ -171,13 +178,19 @@ async function lancarCaixa({ unidade, unidadeNome, data, declarado, observacao, 
   const soma = arred(BUCKETS.reduce((s, b) => s + declaradoOk[b], 0));
   const faturados = await faturadoPorOperador(unidade, data);
   const meu = faturados.find((f) => f.operadorId === operadorId) || { faturado: 0, faturadoPorForma: sanitizarTotalDeclarado({}) };
+  const diferenca = arred(soma - meu.faturado);
   const agora = new Date().toISOString();
   const registro = {
     id, unidade, unidadeNome: unidadeNome || unidade, data,
     operadorId, operadorEmail: operadorEmail || null, operadorNome: operadorNome || operadorEmail || null,
     declarado: declaradoOk, somaDeclarado: soma,
     faturadoOperador: meu.faturado, faturadoOperadorPorForma: meu.faturadoPorForma,
-    diferencaOperador: arred(soma - meu.faturado),
+    diferencaOperador: diferenca,
+    // resultado CATEGORICO (ok/sobrando/faltando) - é o único jeito que o
+    // operador comum recebe de volta o "deu certo?" sem saber o faturado por
+    // tras (se ele visse a diferenca exata, daria pra calcular faturado =
+    // declarado - diferenca, o mesmo dado que a gente esconde dele)
+    resultado: resultadoCategoria(diferenca),
     observacao: observacao ? String(observacao).trim().slice(0, 500) : null,
     status: 'lancado', historico: [],
     lancadoEm: agora, atualizadoEm: agora,
@@ -252,9 +265,10 @@ async function decidirAlteracaoCaixa(edicaoId, { aprovado, porId, porEmail }) {
     const caixa = await getCaixa(ped.caixaId);
     if (!caixa) throw new Error('Caixa não encontrado.');
     const soma = arred(BUCKETS.reduce((s, b) => s + num(ped.novo[b]), 0));
+    const novaDiferenca = arred(soma - num(caixa.faturadoOperador));
     await CAIXAS.doc(caixa.id).update({
       declarado: ped.novo, somaDeclarado: soma,
-      diferencaOperador: arred(soma - num(caixa.faturadoOperador)),
+      diferencaOperador: novaDiferenca, resultado: resultadoCategoria(novaDiferenca),
       historico: [...(caixa.historico || []), { antes: caixa.declarado, em: agora, porEmail: porEmail || null, motivo: ped.motivo }],
       atualizadoEm: agora,
     });
