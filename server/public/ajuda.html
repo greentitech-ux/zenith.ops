@@ -209,11 +209,12 @@ function initNavDrawerAccordion(){
     atualizarVazio();
     new MutationObserver(atualizarVazio).observe(wrap, { attributes:true, attributeFilter:['class'], subtree:true });
     const key = 'ndgAberto:' + nomeGrupo;
-    // sempre começa ABERTO ao carregar a página. Antes, fechar um grupo uma
-    // vez gravava no navegador e ele ficava fechado em TODAS as telas - era a
-    // origem da "gambiarra" de abrir outra página só pra achar o item. Dá pra
-    // recolher dentro da mesma página; ao navegar, volta tudo aberto.
-    const aberto = true;
+    // começa aberto SÓ o grupo da página atual (pra você ver onde está) e o
+    // de Solicitações (o mais usado); os outros começam recolhidos pra deixar
+    // o menu curto. Nada persiste entre páginas - ao navegar, o padrão volta
+    // (fim da "gambiarra" de abrir outra tela só pra achar o item).
+    const temAtual = itens.some((it)=>{ const h = it.getAttribute && it.getAttribute('href'); if(!h) return false; try { return new URL(h, location.origin).pathname === location.pathname; } catch(e){ return false; } });
+    const aberto = temAtual || nomeGrupo === 'Solicitações';
     g.querySelector('.ndg-seta').style.transform = aberto ? '' : 'rotate(-90deg)';
     wrap.classList.toggle('hidden', !aberto);
     g.addEventListener('click', ()=>{
