@@ -289,9 +289,16 @@
   </div>
 
   <div class="panel hidden" id="painel-importar-lote">
-    <h2>📋 Importar em lote (backfill)</h2>
-    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">cola aqui uma tabela (colada direto do Excel/Sheets) com as colunas Unidade, Nome, Cargo, Etapa, Prazo - cada linha vira 1 colaborador já cadastrado como efetivado, na etapa e prazo de experiência informados. "Etapa" aceita "30" ou "60" (dias). "Prazo" no formato AAAA-MM-DD.</div>
-    <textarea id="lote-texto" rows="6" placeholder="Dom Tirol&#9;Fulano da Silva&#9;Operador de Loja I&#9;30&#9;2026-08-21"></textarea>
+    <h2>📋 Importar em lote</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:12px;">Cadastre vários colaboradores de uma vez, colando direto do Excel/Sheets (uma pessoa por linha; as colunas vêm separadas por TAB automaticamente ao colar). O nome da unidade pode vir do relatório contábil (ex.: "SÃO BRAZ", "CARUARU", "AEROPORTO") — o sistema reconhece e converte pro nome da unidade no Zenith.</div>
+
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:6px;">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="radio" name="lote-modo" value="efetivado" checked onchange="trocarModoLote()" style="width:auto;"> Já efetivados (backfill)</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="radio" name="lote-modo" value="experiencia" onchange="trocarModoLote()" style="width:auto;"> Em experiência (30/60 dias)</label>
+    </div>
+    <div class="sub" id="lote-modo-desc" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:8px;"></div>
+
+    <textarea id="lote-texto" rows="8" placeholder=""></textarea>
     <button type="button" class="btn-secundario" style="margin-top:10px;" onclick="prevalidarLote()">🔍 Conferir</button>
     <div id="lote-preview" style="margin-top:12px;"></div>
     <div class="msg hidden" id="msg-lote"></div>
@@ -634,7 +641,6 @@ const UNIDADES_NOMES = {
   'Dominos Campina Grande': 'Dom Campina Grande',
   'Dominos Caruaru': 'Dom Caruaru',
   'Dominos Garanhuns': 'Dom Garanhuns',
-  'Dominos Natal': 'Dom Natal',
   'Dominos Praça Aeroporto Recife': 'Dom Praça Aero Recife',
   'Dominos Tirol': 'Dom Tirol',
   'Milky Moo Tirol': 'MilkyMoo Tirol',
@@ -778,34 +784,98 @@ function cardAtivoHtml(f){
 
 let LOTE_LINHAS_VALIDAS = [];
 
-// resolve o texto da coluna "Unidade" (copiado da tabela/aba Por Unidade)
-// pro codigo interno - aceita o nome de exibicao (ex: "Dom Caruaru"), o
-// codigo cru, e ignora sufixos tipo "(não cadastrada)" coladas junto
+// apelidos de unidade que aparecem em fontes externas (ex: o relatorio de
+// empregados do escritorio contabil, que usa "SÃO BRAZ", "CARUARU"...) ->
+// mapeados pro codigo interno do Zenith. NATAL e AEROPORTO ficam DE FORA de
+// proposito: sao ambiguos (Dominos Tirol x Natal; Praça x Carrinho x Spoleto),
+// entao o importador marca como "não reconhecida" e o Master troca pelo nome
+// certo antes de importar, em vez de a gente adivinhar errado.
+const UNIDADE_APELIDOS = {
+  'sao braz':'São Braz IL','são braz':'São Braz IL',
+  'caruaru':'Dominos Caruaru',
+  'shopping recife':'Spoleto Shopping Recife','shop recife':'Spoleto Shopping Recife',
+  'tacaruna':'Spoleto Shopping Tacaruna','shopping tacaruna':'Spoleto Shopping Tacaruna',
+  'garanhuns':'Dominos Garanhuns',
+  // Natal = a loja Domino's do Tirol (nome unico/definitivo no Zenith - antes
+  // havia duplicidade "Dominos Natal"/"Dominos Tirol", agora so Tirol)
+  'natal':'Dominos Tirol','dominos natal':'Dominos Tirol','dom natal':'Dominos Tirol','tirol':'Dominos Tirol',
+  'milky moo':'Milky Moo Tirol','milky moo natal':'Milky Moo Tirol','milky moo tirol':'Milky Moo Tirol',
+  'administrativa':'Administrativa','administrativo':'Administrativa',
+  'bessa':'Dominos Bessa',
+  'campina grande':'Dominos Campina Grande','dominos campina grande':'Dominos Campina Grande',
+  'saltiverso':'Saltiverso Patteo',
+};
+
+// resolve o texto da coluna "Unidade" (copiado da tabela/aba Por Unidade, ou
+// de um relatorio externo) pro codigo interno - aceita o nome de exibicao
+// (ex: "Dom Caruaru"), o codigo cru, um apelido conhecido (UNIDADE_APELIDOS),
+// ignora sufixos tipo "(não cadastrada)" e um prefixo numerico tipo "001 - "
 function resolverUnidade(texto){
-  const limpo = String(texto||'').replace(/\(.*?\)/g,'').trim();
+  let limpo = String(texto||'').replace(/\(.*?\)/g,'').trim();
   if(!limpo) return null;
+  limpo = limpo.replace(/^\d{1,3}\s*-\s*/,'').trim(); // tira "001 - " do relatorio
   if(UNIDADES_NOMES[limpo]) return limpo; // já é o código
   const alvo = limpo.toLowerCase();
   for(const [codigo,nome] of Object.entries(UNIDADES_NOMES)){
     if(String(nome).toLowerCase()===alvo) return codigo;
   }
+  if(UNIDADE_APELIDOS[alvo]) return UNIDADE_APELIDOS[alvo];
   return null;
 }
 
+// aceita data em AAAA-MM-DD ou DD/MM/AAAA -> devolve AAAA-MM-DD (ou '' se vazio/invalido)
+function normalizarDataLote(txt){
+  const s = String(txt||'').trim();
+  if(!s) return '';
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if(m) return `${m[3]}-${m[2]}-${m[1]}`;
+  return null; // formato invalido (sinaliza erro no preview)
+}
+
+function loteModo(){ const el=document.querySelector('input[name="lote-modo"]:checked'); return el?el.value:'efetivado'; }
+
+// troca a descricao/placeholder conforme o modo e limpa o preview anterior
+function trocarModoLote(){
+  const modo = loteModo();
+  const ta = document.getElementById('lote-texto');
+  const desc = document.getElementById('lote-modo-desc');
+  if(modo==='experiencia'){
+    desc.textContent = 'Colunas: Unidade · Nome · Cargo (opcional) · Etapa (30 ou 60) · Prazo (AAAA-MM-DD ou DD/MM/AAAA). Cada pessoa entra na Experiência formal, com o prazo informado.';
+    ta.placeholder = 'Dom Tirol\tFulano da Silva\tOperador de Loja I\t30\t21/08/2026';
+  } else {
+    desc.textContent = 'Colunas: Unidade · Nome · Cargo (opcional) · Admissão (opcional, DD/MM/AAAA). Cada pessoa entra como efetivada e já definitiva — sem período de experiência.';
+    ta.placeholder = 'SÃO BRAZ\tAlmir Oliveira da Silva\tOperador de Loja\t20/09/2021';
+  }
+  document.getElementById('lote-preview').innerHTML='';
+  document.getElementById('btn-confirmar-lote').classList.add('hidden');
+  document.getElementById('msg-lote').classList.add('hidden');
+}
+
 function parseLote(texto){
-  return String(texto||'').split('\n').map(l=>l.trim()).filter(Boolean).map(linha=>{
+  const modo = loteModo();
+  return String(texto||'').split('\n').map(l=>l.replace(/\s+$/,'')).filter(l=>l.trim()).map(linha=>{
     const cols = linha.split('\t').map(c=>c.trim());
-    const [unidadeTxt, nome, cargoFuncao, etapaTxt, prazoTxt] = cols;
     const erros = [];
+    const unidadeTxt = cols[0]||'';
+    const nome = cols[1]||'';
+    const cargoFuncao = cols[2]||'';
     const unidade = resolverUnidade(unidadeTxt);
     if(!unidade) erros.push(`unidade "${unidadeTxt||''}" não reconhecida`);
     if(!nome) erros.push('nome vazio');
-    const etapaMatch = String(etapaTxt||'').match(/30|60/);
-    const etapa = etapaMatch ? etapaMatch[0] : null;
-    if(!etapa) erros.push(`etapa "${etapaTxt||''}" inválida (use 30 ou 60)`);
-    const prazoEtapaAte = String(prazoTxt||'').trim();
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(prazoEtapaAte)) erros.push(`prazo "${prazoTxt||''}" inválido (use AAAA-MM-DD)`);
-    return { linha, unidadeTxt, unidade, nome, cargoFuncao, etapa, prazoEtapaAte, erros };
+    const reg = { linha, modo, unidadeTxt, unidade, nome, cargoFuncao, erros };
+    if(modo==='experiencia'){
+      const etapaMatch = String(cols[3]||'').match(/30|60/);
+      reg.etapa = etapaMatch ? etapaMatch[0] : null;
+      if(!reg.etapa) erros.push(`etapa "${cols[3]||''}" inválida (use 30 ou 60)`);
+      reg.prazoEtapaAte = normalizarDataLote(cols[4]);
+      if(!reg.prazoEtapaAte) erros.push(`prazo "${cols[4]||''}" inválido (use AAAA-MM-DD ou DD/MM/AAAA)`);
+    } else {
+      const adm = normalizarDataLote(cols[3]);
+      if(adm===null) erros.push(`admissão "${cols[3]||''}" inválida (use DD/MM/AAAA)`);
+      reg.dataAdmissao = adm || '';
+    }
+    return reg;
   });
 }
 
@@ -817,7 +887,10 @@ function prevalidarLote(){
   if(!linhas.length){ el.innerHTML = '<div class="empty">cole a tabela acima e clique em Conferir.</div>'; return; }
   el.innerHTML = linhas.map(l=>{
     if(l.erros.length) return `<div class="card"><div class="linha1"><span>${escapeHtml(l.nome||l.linha)}</span><span class="badge bad">erro</span></div><div class="sub">${escapeHtml(l.erros.join(' · '))}</div></div>`;
-    return `<div class="card"><div class="linha1"><span>${escapeHtml(l.nome)}</span><span class="badge ok">ok</span></div><div class="sub">${escapeHtml(UNIDADES_NOMES[l.unidade]||l.unidade)} · ${escapeHtml(l.cargoFuncao||'—')} · etapa ${l.etapa}d · prazo ${fmtData(l.prazoEtapaAte)}</div></div>`;
+    const detalhe = l.modo==='experiencia'
+      ? `etapa ${l.etapa}d · prazo ${fmtData(l.prazoEtapaAte)}`
+      : (l.dataAdmissao ? `admissão ${fmtData(l.dataAdmissao)}` : 'sem experiência');
+    return `<div class="card"><div class="linha1"><span>${escapeHtml(l.nome)}</span><span class="badge ok">ok</span></div><div class="sub">${escapeHtml(UNIDADES_NOMES[l.unidade]||l.unidade)} · ${escapeHtml(l.cargoFuncao||'—')} · ${detalhe}</div></div>`;
   }).join('');
   LOTE_LINHAS_VALIDAS = linhas.filter(l=>!l.erros.length);
   if(LOTE_LINHAS_VALIDAS.length) document.getElementById('btn-confirmar-lote').classList.remove('hidden');
@@ -826,12 +899,14 @@ function prevalidarLote(){
 async function confirmarImportarLote(){
   const msg = document.getElementById('msg-lote');
   if(!LOTE_LINHAS_VALIDAS.length) return;
-  if(!confirm(`Importar ${LOTE_LINHAS_VALIDAS.length} pessoa(s)? Cada uma entra já como efetivado, na etapa/prazo informados.`)) return;
+  if(!confirm(`Importar ${LOTE_LINHAS_VALIDAS.length} pessoa(s)? Cada uma entra como efetivado.`)) return;
   const btn = document.getElementById('btn-confirmar-lote');
   btn.disabled = true;
   try{
     const resp = await fetch('/api/rh/funcionarios/importar-lote', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
-      linhas: LOTE_LINHAS_VALIDAS.map(({unidade,nome,cargoFuncao,etapa,prazoEtapaAte})=>({unidade,nome,cargoFuncao,etapa,prazoEtapaAte})),
+      linhas: LOTE_LINHAS_VALIDAS.map(l => l.modo==='experiencia'
+        ? { unidade:l.unidade, nome:l.nome, cargoFuncao:l.cargoFuncao, etapa:l.etapa, prazoEtapaAte:l.prazoEtapaAte }
+        : { unidade:l.unidade, nome:l.nome, cargoFuncao:l.cargoFuncao, dataAdmissao:l.dataAdmissao||null }),
     })});
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao importar.');
@@ -1696,6 +1771,7 @@ async function boot(){
   // Master/Admin) - a loja (gerente comum) so cadastra Extra/Candidato
   document.getElementById('btn-tipo-efetivado').classList.toggle('hidden', !(isMaster || ME.isAdmin || ME.podeRhCadastrarEfetivado));
   document.getElementById('painel-importar-lote').classList.toggle('hidden', !isMaster);
+  if(isMaster) trocarModoLote(); // ajusta descrição/placeholder do modo inicial
   document.getElementById('btn-mesclar-duplicados').classList.toggle('hidden', !isMaster);
   // data de admissao/inicio do teste no modal de editar so o Master corrige
   document.getElementById('campo-ed-admissao').classList.toggle('hidden', !isMaster);
