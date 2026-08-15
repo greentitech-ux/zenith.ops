@@ -1209,7 +1209,7 @@ module.exports = {
   METODOS_PAGAMENTO, FORMAS_PAGAMENTO_SPLIT, PRECO_MEIA, valorPorTempo, valorDoCheckin,
   getConfigPrecos, salvarConfigPrecos,
   criar, checkin, listAll, listByUnidades, resumoDoDia, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
-  adicionarTempo, relancar, visitaHojePorCpf,
+  adicionarTempo, relancar, visitaHojePorCpf, remover,
   decidirCortesia, encerrarCortesia, ehAdminCortesia,
   solicitarEdicao, listarEdicoes, decidirEdicao, validarPropostaEdicao,
   checkout, aprovarCheckout, retomarCheckout, creditoPorCpf, usarCredito,

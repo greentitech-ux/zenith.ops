@@ -3745,6 +3745,21 @@ app.patch('/api/parque/checkins/:id', requireAnySection('parque', 'parque-checki
   }
 });
 
+// exclui um check-in de vez (Master). O resto do time usa "Pedir correção"
+// (que passa por aprovacao); a exclusao direta e so do Master.
+app.delete('/api/parque/checkins/:id', auth.requireMaster, async (req, res) => {
+  try {
+    const atual = await parque.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Check-in não encontrado.' });
+    await parque.remover(req.params.id);
+    broadcast('parque-checkin-atualizado', { id: req.params.id, removido: true }, 'parque');
+    broadcast('parque-checkin-atualizado', { id: req.params.id, removido: true }, 'parque-checkin');
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // aciona o relogio: o horario que conta pra pulseira/tempo contratado e o
 // do check-in fisico, nao o do cadastro/pagamento (que pode ter acontecido
 // minutos ou horas antes)
