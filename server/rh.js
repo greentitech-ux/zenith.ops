@@ -481,6 +481,29 @@ async function importarLote(linhas, { porEmail }) {
       // admissao, nascimento e cargo sao opcionais - o que faltar fica em
       // branco (admissao cai no default de hoje, ver criar()).
       if (!etapa) {
+        // upsert: se a pessoa JA existe (mesma unidade + mesmo nome, ficha
+        // ativa), ATUALIZA os dados que vieram (nascimento/admissao/cargo) em
+        // vez de dar erro de duplicado. E o fluxo real de backfill: o quadro
+        // costuma ter sido importado antes so com nome+unidade, e agora estamos
+        // preenchendo os campos que faltavam. So sobrescreve o campo quando o
+        // arquivo traz um valor (nao apaga o que ja tinha); nome nunca e tocado.
+        const nomeNorm = normalizarNome(nomeOk);
+        const existente = (await listAll()).find((f) => (
+          f.unidade === unidade && f.status !== 'inativo' && normalizarNome(f.nome) === nomeNorm
+        ));
+        if (existente) {
+          const patch = {};
+          if (dataNascimento) patch.dataNascimento = dataNascimento;
+          if (dataAdmissao) patch.dataAdmissao = dataAdmissao;
+          if (cargoFuncao) patch.cargoFuncao = cargoFuncao;
+          if (Object.keys(patch).length) {
+            await atualizar(existente.id, patch);
+            resultados.push({ ok: true, nome: nomeOk, id: existente.id, acao: 'atualizado' });
+          } else {
+            resultados.push({ ok: true, nome: nomeOk, id: existente.id, acao: 'sem_mudanca' });
+          }
+          continue;
+        }
         const registro = await criar({
           unidade, nome: nomeOk, cargoFuncao,
           dataAdmissao: dataAdmissao || null,
@@ -488,7 +511,7 @@ async function importarLote(linhas, { porEmail }) {
           tipoCadastro: 'efetivado', semExperiencia: true,
           cadastradoPorEmail: porEmail, exigirCurriculo: false,
         });
-        resultados.push({ ok: true, nome: nomeOk, id: registro.id });
+        resultados.push({ ok: true, nome: nomeOk, id: registro.id, acao: 'criado' });
         continue;
       }
 
