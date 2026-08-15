@@ -550,6 +550,14 @@ function atualizarConteudoDetalhe(codigo, c){
   // DWService/etc - ver Verificar-AcessoRemoto em baixarVigia) - so o Master
   // recebe o push na hora, mas fica registrado aqui pra qualquer um ver
   if(c.ultimoAcessoRemotoEm) infoBits.push(`🛑 acesso remoto: <b>${escapeHtml(c.ultimoAcessoRemotoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoAcessoRemotoEm))}`);
+  // resultado do ultimo comando enfileirado (ver botao ▶ Rodar acao) - saida
+  // ou erro que o NOCZenith devolveu
+  if(c.ultimoComandoEm){
+    const saida = c.ultimoComandoErro
+      ? `<span style="color:var(--bad);">erro: ${escapeHtml(c.ultimoComandoErro)}</span>`
+      : `<span style="color:var(--ok);white-space:pre-wrap;">${escapeHtml((c.ultimoComandoResultado||'(sem saída)')).slice(0,600)}</span>`;
+    infoBits.push(`🖥️ último comando · ${escapeHtml(tempoRelativo(c.ultimoComandoEm))}<br><span style="font-size:11px;">${saida}</span>`);
+  }
   document.getElementById('detalhe-comp-info').innerHTML = infoBits.length ? infoBits.join('<br>') : '<span style="color:var(--muted);">sem mais informações.</span>';
 
   document.getElementById('detalhe-comp-acoes').innerHTML = `
