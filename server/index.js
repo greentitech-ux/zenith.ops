@@ -44,6 +44,7 @@ const chamadosTI = require('./chamadosTI');
 const chamadosManutencao = require('./chamadosManutencao');
 const suporteChat = require('./suporteChat');
 const suporteChatPDF = require('./suporteChatPDF');
+const segurancaChat = require('./segurancaChat');
 const suporteBot = require('./suporteBot');
 const pedidoWatch = require('./pedidoWatch');
 const docsMaster = require('./docsMaster');
@@ -75,6 +76,15 @@ const upload = multer({
   // anexos de disputa incluem foto/print (pequenos), mas tambem video e audio
   // de ligacao (maiores) - ate 8 arquivos de 50MB cada por registro
   limits: { fileSize: 50 * 1024 * 1024, files: 8 },
+});
+
+// anexo do chat de suporte (widget publico, sem login) - so imagem/PDF (ver
+// segurancaChat.validarAnexo), 1 arquivo por mensagem, limite bem mais baixo
+// que o `upload` generico acima de proposito: e a unica rota de upload do
+// app aberta pra qualquer visitante anonimo da internet
+const uploadChatAnexo = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 1 },
 });
 
 const app = express();
@@ -669,6 +679,33 @@ async function usuarioLogadoDoHeader(req) {
   };
 }
 
+// forense minima de quem mandou uma mensagem/anexo suspeito no chat publico -
+// pedido explicito do usuario: "tentar pegar o máximo de informação do
+// acesso que tentou infiltrar malicioso". So o que da pra tirar de um
+// request HTTP comum (sem exigir nada do navegador da pessoa)
+function contextoSeguranca(req) {
+  return {
+    ip: String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim(),
+    userAgent: req.headers['user-agent'] || '',
+    referer: req.headers.referer || req.headers.referrer || '',
+    em: new Date().toISOString(),
+  };
+}
+
+// registra + avisa o Master AGORA (alarme critico, ver dispararAlarmeBeniboy
+// em suporte-chat.js e push.notifySegurancaChat) de uma tentativa suspeita
+// (texto tipo comando/script, ou upload bloqueado - ver segurancaChat.js).
+// Fire-and-forget de proposito (mesmo padrao das outras notificacoes desse
+// arquivo) - nunca atrasa nem derruba a resposta da rota que chamou
+async function alertarSegurancaChat(req, chat, motivo, detalheExtra) {
+  const alerta = { motivo, detalheExtra: detalheExtra ? String(detalheExtra).slice(0, 300) : null, ...contextoSeguranca(req) };
+  try {
+    await suporteChat.registrarAlertaSeguranca(chat.id, alerta);
+  } catch (e) { console.error('Erro ao registrar alerta de segurança do chat:', e.message); }
+  broadcast('chat-seguranca-alerta', { id: chat.id, nome: chat.nome, motivo, numeroTicket: chat.numeroTicket }, 'suporte');
+  push.notifySegurancaChat(chat, motivo).catch((err) => console.error('Erro no push de alerta de segurança:', err.message));
+}
+
 app.post('/api/suporte-chat/iniciar', async (req, res) => {
   try {
     const logado = await usuarioLogadoDoHeader(req);
@@ -688,18 +725,56 @@ app.get('/api/suporte-chat/:id', async (req, res) => {
   res.json(chat);
 });
 
-app.post('/api/suporte-chat/:id/mensagem', async (req, res) => {
+// upload.single deixa passar mesmo sem arquivo nenhum (so multipart/
+// form-data em vez de JSON) - o widget sempre manda assim agora (ver
+// suporte-chat.js), tenha foto ou nao, pra usar o MESMO caminho dos dois casos
+app.post('/api/suporte-chat/:id/mensagem', uploadChatAnexo.single('anexo'), async (req, res) => {
   try {
-    const chat = await suporteChat.adicionarMensagem(req.params.id, { de: 'visitante', texto: req.body.texto, token: req.body.token });
+    const texto = req.body.texto || '';
+    let anexo = null;
+    if (req.file) {
+      const validacao = segurancaChat.validarAnexo(req.file);
+      if (!validacao.ok) {
+        // upload bloqueado - so alerta se o id+token realmente batem com uma
+        // conversa existente (evita virar um jeito facil de spammar alerta
+        // pro Master so testando ids aleatorios)
+        const chatAtual = await suporteChat.getComToken(req.params.id, req.body.token);
+        if (chatAtual) {
+          await alertarSegurancaChat(req, chatAtual, `Upload bloqueado: ${validacao.motivo}`, `arquivo: ${req.file.originalname} (${req.file.mimetype}, ${req.file.size} bytes)`);
+        }
+        return res.status(400).json({ error: validacao.motivo });
+      }
+      const path = await storage.salvarArquivo(req.params.id, req.file, 'suporte-chat');
+      anexo = { nome: req.file.originalname, path, tipo: req.file.mimetype || 'application/octet-stream', tamanho: req.file.size };
+    }
+    const chat = await suporteChat.adicionarMensagem(req.params.id, { de: 'visitante', texto, token: req.body.token, anexo });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     // notificacao no celular do time tambem em MENSAGEM nova (nao so na
     // abertura da conversa) - o atendente ve e responde de onde estiver
-    push.notifySolicitacao(`💬 Ticket #${chat.numeroTicket} · Nova mensagem no chat de suporte`, `${chat.nome} · ${String(req.body.texto || '').slice(0, 80)}`, chat.id, '/tecnico.html');
+    push.notifySolicitacao(`💬 Ticket #${chat.numeroTicket} · Nova mensagem no chat de suporte`, `${chat.nome} · ${texto.slice(0, 80) || (anexo ? '📎 ' + anexo.nome : '')}`, chat.id, '/tecnico.html');
+    // fecha a brecha de seguranca pedida pelo usuario: texto tipo comando/
+    // script no chat publico (sem login) NUNCA e executado pelo Beniboy (ele
+    // so gera texto - ver suporteBot.js), mas mandar isso e sinal forte de
+    // alguem tentando manipular o atendimento/bot - alerta o Master na hora
+    // com o maximo de contexto do acesso (ver alertarSegurancaChat acima)
+    const motivoSuspeito = segurancaChat.detectarConteudoSuspeito(texto);
+    if (motivoSuspeito) alertarSegurancaChat(req, chat, motivoSuspeito, texto);
     res.json({ ok: true });
     acionarBeniboy(chat.id);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// download do anexo de uma mensagem do chat - pro proprio visitante, mesmo
+// token da conversa. Enderecado pelo INDICE da mensagem no array (mensagens
+// so sao acrescentadas, nunca reordenadas/removidas - indice e estavel)
+app.get('/api/suporte-chat/:id/anexo/:indice', async (req, res) => {
+  const chat = await suporteChat.getComToken(req.params.id, req.query.token);
+  if (!chat) return res.sendStatus(404);
+  const msg = (chat.mensagens || [])[Number(req.params.indice)];
+  if (!msg || !msg.anexo) return res.sendStatus(404);
+  storage.streamArquivo(msg.anexo.path, msg.anexo.tipo, res);
 });
 
 // PDF da conversa pro proprio visitante (pedido explicito: "botao de gerar
@@ -6484,10 +6559,28 @@ app.get('/api/suporte-chats/:id/pdf', auth.requireMaster, async (req, res) => {
   suporteChatPDF.gerarChatPDF(res, chat);
 });
 
-app.post('/api/suporte-chats/:id/responder', auth.requireAuth, async (req, res) => {
+// anexo de uma mensagem, lado do atendimento (mesmo gate das outras rotas de
+// /api/suporte-chats)
+app.get('/api/suporte-chats/:id/anexo/:indice', auth.requireAuth, async (req, res) => {
+  if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+  const chat = await suporteChat.getOne(req.params.id);
+  if (!chat) return res.sendStatus(404);
+  const msg = (chat.mensagens || [])[Number(req.params.indice)];
+  if (!msg || !msg.anexo) return res.sendStatus(404);
+  storage.streamArquivo(msg.anexo.path, msg.anexo.tipo, res);
+});
+
+app.post('/api/suporte-chats/:id/responder', auth.requireAuth, uploadChatAnexo.single('anexo'), async (req, res) => {
   try {
     if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
-    const chat = await suporteChat.adicionarMensagem(req.params.id, { de: 'suporte', texto: req.body.texto, autorEmail: req.user.email });
+    let anexo = null;
+    if (req.file) {
+      const validacao = segurancaChat.validarAnexo(req.file);
+      if (!validacao.ok) return res.status(400).json({ error: validacao.motivo });
+      const path = await storage.salvarArquivo(req.params.id, req.file, 'suporte-chat');
+      anexo = { nome: req.file.originalname, path, tipo: req.file.mimetype || 'application/octet-stream', tamanho: req.file.size };
+    }
+    const chat = await suporteChat.adicionarMensagem(req.params.id, { de: 'suporte', texto: req.body.texto, autorEmail: req.user.email, anexo });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     const { token, ...resto } = chat;
     res.json(resto);

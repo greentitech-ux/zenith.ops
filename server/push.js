@@ -102,6 +102,15 @@ async function notifyQaAprovacaoPendente(resumo, criadoPorEmail) {
 // quem de fato precisa ser acordado por isso. Cobre TODOS os acessos
 // logados dessa pessoa (cada dispositivo tem sua propria inscricao push),
 // principalmente celular com o app fechado.
+// alerta de seguranca do chat de suporte (texto tipo comando/script, ou
+// arquivo perigoso bloqueado no upload - ver segurancaChat.js) - SO
+// Master, mais restrito que o alarme geral do Beniboy acima (que tambem
+// vai pra tag "suporte"): e um incidente de seguranca, nao uma fila de
+// atendimento, e a decisao (ex: bloquear IP no provedor) e do Master
+function podeReceberAlertaSeguranca(sub) {
+  return !!(sub.meta && sub.meta.isMaster);
+}
+
 function podeReceberCritico(sub) {
   const meta = sub.meta;
   if (!meta) return false;
@@ -247,6 +256,39 @@ async function notifyBeniboyEscalonamento(chat, motivo) {
         await removeSubscription(sub.endpoint);
       } else {
         console.error('Erro ao enviar push (alerta Beniboy):', err.message);
+      }
+    }
+  }
+}
+
+// alerta de seguranca do chat de suporte: texto tipo comando/script, ou
+// arquivo perigoso bloqueado no upload (ver segurancaChat.js/index.js) - SO
+// Master (podeReceberAlertaSeguranca acima). Reusa a mesma pagina de alarme
+// do Beniboy (alerta-beniboy.html), com tipo=seguranca na URL pra ela trocar
+// o texto/destino - nao e o Beniboy pedindo ajuda, e uma tentativa de
+// invasao, e a decisao (ex: bloquear IP no provedor) e humana, do Master
+async function notifySegurancaChat(chat, detalhe) {
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const chatId = chat && chat.id;
+  if (!chatId) return;
+  const params = new URLSearchParams({ tipo: 'seguranca', chat: chatId, nome: (chat && chat.nome) || '', motivo: detalhe || '' });
+  const payload = JSON.stringify({
+    title: '🛡️ Alerta de segurança — chat de suporte',
+    body: `${(chat && chat.nome) || 'Visitante'}${detalhe ? ' · ' + detalhe : ''}`.slice(0, 150),
+    tag: 'seguranca-' + chatId + '-' + Date.now(),
+    critical: true,
+    url: '/alerta-beniboy.html?' + params.toString(),
+  });
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberAlertaSeguranca(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload, { urgency: 'high' });
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (alerta segurança):', err.message);
       }
     }
   }
@@ -578,5 +620,5 @@ module.exports = {
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou,
-  notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, PUBLIC_KEY,
+  notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, PUBLIC_KEY,
 };

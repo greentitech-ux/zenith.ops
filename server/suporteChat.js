@@ -80,6 +80,10 @@ async function criar({ nome, contato, texto, assunto, logado, lojaContexto }) {
     lojaContexto: lojaContextoLimpa || null,
     status: 'ABERTO',
     mensagens: [{ de: 'visitante', texto: textoLimpo, em: agora }],
+    // registro interno de tentativas suspeitas nessa conversa (texto tipo
+    // comando/script, ou arquivo bloqueado no upload - ver segurancaChat.js)
+    // - nunca sai na visao publica (getPublico), so no atendimento
+    alertasSeguranca: [],
     // true = o Beniboy (bot, ver suporteBot.js) saiu dessa conversa - ou
     // porque ele mesmo chamou um atendente humano, ou por decisao do time
     botDesativado: false,
@@ -121,7 +125,7 @@ async function getPublico(id, token) {
     contato: chat.contato,
     assunto: chat.assunto,
     status: chat.status,
-    mensagens: (chat.mensagens || []).map((m) => ({ de: m.de, texto: m.texto, em: m.em, ...(m.bot ? { bot: true } : {}) })),
+    mensagens: (chat.mensagens || []).map((m) => ({ de: m.de, texto: m.texto, em: m.em, ...(m.bot ? { bot: true } : {}), ...(m.anexo ? { anexo: m.anexo } : {}) })),
     criadoEm: chat.criadoEm,
   };
 }
@@ -138,19 +142,37 @@ async function getComToken(id, token) {
 // `bot: true` = mensagem do Beniboy (suporteBot.js): entra como 'suporte' na
 // conversa, mas NAO marca atendidoPorEmail - esse campo continua significando
 // "um humano assumiu" (e e o que faz o bot se calar)
-async function adicionarMensagem(id, { de, texto, autorEmail, token, bot }) {
+// `anexo`: { nome, path, tipo, tamanho } (ver storage.js/segurancaChat.js em
+// index.js) - pedido explicito do usuario: "precisa permitir enviar foto e
+// anexos no chat". Mensagem com anexo pode ir sem texto (so a foto)
+async function adicionarMensagem(id, { de, texto, autorEmail, token, bot, anexo }) {
   const chat = await getOne(id);
   if (!chat) throw new Error('Conversa não encontrada.');
   if (de === 'visitante' && chat.token !== token) throw new Error('Conversa não encontrada.');
   if (chat.status !== 'ABERTO') throw new Error('Essa conversa já foi finalizada. Inicie uma nova.');
   const textoLimpo = limpar(texto, MAX_TEXTO);
-  if (!textoLimpo) throw new Error('Escreva a mensagem.');
+  if (!textoLimpo && !anexo) throw new Error('Escreva a mensagem ou anexe um arquivo.');
   if ((chat.mensagens || []).length >= MAX_MENSAGENS) throw new Error('Essa conversa ficou muito longa. Inicie uma nova.');
   const agora = new Date().toISOString();
-  const mensagens = [...(chat.mensagens || []), { de, texto: textoLimpo, em: agora, ...(de === 'suporte' ? { autorEmail: autorEmail || null } : {}), ...(bot ? { bot: true } : {}) }];
+  const mensagens = [...(chat.mensagens || []), { de, texto: textoLimpo, em: agora, ...(de === 'suporte' ? { autorEmail: autorEmail || null } : {}), ...(bot ? { bot: true } : {}), ...(anexo ? { anexo } : {}) }];
   const patch = { mensagens, atualizadoEm: agora };
   if (de === 'suporte' && !bot && !chat.atendidoPorEmail) patch.atendidoPorEmail = autorEmail || null;
   await COLLECTION.doc(id).update(patch);
+  chatsCache.invalidar();
+  return getOne(id);
+}
+
+// registra uma tentativa suspeita (texto tipo comando/script, ou arquivo
+// bloqueado - ver segurancaChat.js em index.js) - fica so no lado do
+// atendimento, nunca aparece pro visitante. Capado (mesmo espirito de
+// historicoStatus) pra nunca crescer sem limite numa conversa hostil
+// mandando varias tentativas seguidas
+const MAX_ALERTAS_SEGURANCA = 30;
+async function registrarAlertaSeguranca(id, alerta) {
+  const chat = await getOne(id);
+  if (!chat) throw new Error('Conversa não encontrada.');
+  const alertasSeguranca = [...(chat.alertasSeguranca || []), alerta].slice(-MAX_ALERTAS_SEGURANCA);
+  await COLLECTION.doc(id).update({ alertasSeguranca });
   chatsCache.invalidar();
   return getOne(id);
 }
@@ -341,5 +363,5 @@ async function finalizarOciosos() {
 module.exports = {
   criar, getOne, getPublico, getComToken, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll, ASSUNTOS,
   atualizarStatusAtendimento, marcarDesbloqueio, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
-  listarParaReforcarAlarme, marcarAlertaEnviado,
+  listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca,
 };

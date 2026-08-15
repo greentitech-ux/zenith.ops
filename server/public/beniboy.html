@@ -107,6 +107,15 @@
   .msg-item .m-texto{white-space:pre-wrap;margin-top:2px;}
   .d-acoes{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
   .d-tickets{font-size:11.5px;color:var(--muted);margin-bottom:8px;}
+  /* alertas de seguranca dessa conversa (texto tipo comando/script ou upload
+     bloqueado - ver segurancaChat.js/index.js) - so Master ve, pedido
+     explicito do usuario: "fechar as brechas de seguranca [...] tentar pegar
+     o máximo de informação do acesso que tentou infiltrar malicioso" */
+  .d-alerta-seguranca{background:rgba(255,92,92,.1);border:1px solid rgba(255,92,92,.4);border-radius:8px;
+    padding:8px 10px;margin-bottom:8px;font-size:12px;color:#ff8a8a;}
+  .d-alerta-seguranca summary{cursor:pointer;font-weight:600;}
+  .d-alerta-item{margin-top:6px;padding-top:6px;border-top:1px dashed rgba(255,92,92,.3);font-size:11.5px;color:var(--muted);}
+  .d-alerta-item code{display:block;margin-top:3px;white-space:pre-wrap;word-break:break-word;color:#ff8a8a;}
 
   /* paineis de conversa abertos - ficam ABAIXO do kanban (nao mais em modal
      por cima da tela), lado a lado, dentro da propria faixa de scroll
@@ -511,6 +520,7 @@ function painelHtml(chat){
 
   const finalizado = chat.status === 'FINALIZADO';
   const idAttr = escapeHtml(chat.id);
+  const alertasSeg = IS_MASTER ? (chat.alertasSeguranca || []) : [];
 
   return `<div class="painel-conversa" data-painel-id="${idAttr}">
     <div class="painel-topo">
@@ -521,6 +531,13 @@ function painelHtml(chat){
       <span class="painel-fechar" title="Fechar" onclick="fecharPainel('${idAttr}')">✕</span>
     </div>
     ${tickets.length ? `<div class="d-tickets">🎫 Tickets dessa conversa: ${tickets.map(t=>`#${escapeHtml(t.numero)}`).join(', ')}</div>` : ''}
+    ${alertasSeg.length ? `<div class="d-alerta-seguranca"><details><summary>🛡️ ${alertasSeg.length} alerta(s) de segurança nessa conversa</summary>${alertasSeg.map(a=>`
+      <div class="d-alerta-item">
+        <b>${escapeHtml(a.motivo||'')}</b> · ${fmtDataHora(a.em)}<br>
+        IP: ${escapeHtml(a.ip||'—')}${a.referer?' · ref: '+escapeHtml(a.referer):''}<br>
+        ${escapeHtml(a.userAgent||'')}
+        ${a.detalheExtra ? `<code>${escapeHtml(a.detalheExtra)}</code>` : ''}
+      </div>`).join('')}</details></div>` : ''}
     <div class="d-acoes">${acoes.join('')}</div>
     <div class="painel-msgs" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">${msgsHtml}</div>
     ${finalizado

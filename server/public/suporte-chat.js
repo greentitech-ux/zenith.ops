@@ -51,6 +51,14 @@
   .szc-erro{font-size:11.5px;color:#ff5c5c;}
   .szc-fim{background:#181d24;border:1px dashed #232a33;color:#7d8896;border-radius:8px;padding:8px;font-size:11.5px;text-align:center;}
   .szc-link{background:none;border:none;color:#5cc8ff;font-size:12px;cursor:pointer;padding:0;}
+  /* anexo (foto/PDF) no chat - pedido explicito do usuario: "precisa
+     permitir enviar foto e anexos no chat" */
+  .szc-anexo-btn{display:flex;align-items:center;justify-content:center;width:36px;flex-shrink:0;
+    cursor:pointer;font-size:17px;color:#7d8896;border-radius:8px;}
+  .szc-anexo-btn:hover{color:#5cc8ff;}
+  .szc-anexo-btn.szc-anexo-tem{color:#5cc8ff;}
+  .szc-msg img.szc-anexo-img{max-width:180px;max-height:180px;border-radius:8px;border:1px solid #232a33;margin-top:4px;display:block;}
+  .szc-msg a.szc-anexo-arq{display:inline-block;margin-top:4px;color:#5cc8ff;font-size:12px;}
   /* cabeça de robo (Beniboy) dentro do botao - olhos brilham/piscam, bracos acenam */
   .szc-btn svg{overflow:visible;}
   .szc-bot-eyes{transform-box:fill-box;transform-origin:center;animation:szc-blink 4.6s ease-in-out infinite;}
@@ -140,6 +148,33 @@
     } catch (e) { alert('Erro ao gerar o PDF.'); }
   }
 
+  // anexo de uma mensagem (foto/PDF - pedido explicito do usuario: "precisa
+  // permitir enviar foto e anexos no chat"). Imagem aparece embutida
+  // (clicavel, abre em tamanho real); outros tipos (so PDF, ver
+  // segurancaChat.js) viram um link de download
+  function anexoHtml(anexo, url) {
+    if (!anexo) return '';
+    const ehImagem = /^image\//.test(anexo.tipo || '');
+    if (ehImagem) {
+      return `<a href="${url}" target="_blank" rel="noopener"><img class="szc-anexo-img" src="${url}" alt="${esc(anexo.nome || 'anexo')}"></a>`;
+    }
+    return `<a class="szc-anexo-arq" href="${url}" target="_blank" rel="noopener">📎 ${esc(anexo.nome || 'arquivo')}</a>`;
+  }
+  // alterna o icone do botao de anexo (📎 -> ✅) conforme um arquivo foi
+  // escolhido ou nao - mesmo padrao ja usado em outras telas do Zenith
+  // (ex: tecnico.html)
+  function ligarBotaoAnexo(inputEl, iconeEl) {
+    inputEl.addEventListener('change', () => {
+      iconeEl.textContent = inputEl.files[0] ? '✅' : '📎';
+      iconeEl.parentElement.classList.toggle('szc-anexo-tem', !!inputEl.files[0]);
+    });
+  }
+  function limparAnexo(inputEl, iconeEl) {
+    inputEl.value = '';
+    iconeEl.textContent = '📎';
+    iconeEl.parentElement.classList.remove('szc-anexo-tem');
+  }
+
   const style = document.createElement('style');
   style.textContent = css;
   document.head.appendChild(style);
@@ -199,6 +234,10 @@
       </div>
       <div class="szc-corpo" id="szc-corpo"></div>
       <div class="szc-rodape szc-hidden" id="szc-rodape">
+        <label class="szc-anexo-btn" id="szc-anexo-label" title="Anexar foto ou PDF">
+          <span id="szc-anexo-icone">📎</span>
+          <input type="file" id="szc-nova-anexo" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden>
+        </label>
         <input type="text" class="szc-input" id="szc-nova-msg" placeholder="escreva sua mensagem..." maxlength="1000">
         <button type="button" class="szc-enviar" id="szc-enviar-msg">➤</button>
       </div>
@@ -208,6 +247,7 @@
 
   const corpo = panel.querySelector('#szc-corpo');
   const rodape = panel.querySelector('#szc-rodape');
+  ligarBotaoAnexo(panel.querySelector('#szc-nova-anexo'), panel.querySelector('#szc-anexo-icone'));
 
   // as rotas do chat sao publicas e nunca respondem 401, entao da pra usar o
   // fetch da pagina mesmo (nas telas logadas ele so acrescenta o Authorization,
@@ -300,6 +340,7 @@
 
   function renderConversa(chat) {
     const noFim = corpo.scrollTop + corpo.clientHeight >= corpo.scrollHeight - 30;
+    const salvo = chatSalvo();
     // protocolo (mesma numeracao global dos tickets) - a pessoa ja recebe
     // um numero pra referenciar desde o 1o contato, viraz ou nao um chamado
     // de verdade depois (pedido explicito do usuario)
@@ -308,10 +349,13 @@
       : '';
     // m.bot = resposta do Beniboy (assistente automático) - identificado
     // pra pessoa saber que ainda não é um humano falando
-    corpo.innerHTML = protocoloTag + ((chat.mensagens || []).map((m) => `
+    corpo.innerHTML = protocoloTag + ((chat.mensagens || []).map((m, i) => {
+      const anexoUrl = m.anexo && salvo ? `/api/suporte-chat/${encodeURIComponent(salvo.id)}/anexo/${i}?token=${encodeURIComponent(salvo.token)}` : '';
+      return `
       <div class="szc-msg ${m.de === 'visitante' ? 'visitante' : 'suporte'}">
-        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Você') : (m.bot ? '🤖 Beniboy · assistente virtual' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}
-      </div>`).join('') || '<div class="szc-aviso">Sem mensagens ainda.</div>');
+        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Você') : (m.bot ? '🤖 Beniboy · assistente virtual' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}${anexoHtml(m.anexo, anexoUrl)}
+      </div>`;
+    }).join('') || '<div class="szc-aviso">Sem mensagens ainda.</div>');
     const pdfBtn = corpo.querySelector('#szc-pdf');
     if (pdfBtn) {
       pdfBtn.addEventListener('click', () => {
@@ -351,16 +395,27 @@
     const salvo = chatSalvo();
     if (!salvo) return;
     const input = panel.querySelector('#szc-nova-msg');
+    const anexoInput = panel.querySelector('#szc-nova-anexo');
+    const iconeAnexo = panel.querySelector('#szc-anexo-icone');
     const texto = input.value.trim();
-    if (!texto) return;
+    const arquivo = anexoInput.files[0];
+    if (!texto && !arquivo) return;
     const b = panel.querySelector('#szc-enviar-msg');
     b.disabled = true;
     try {
-      const r = await rawFetch(`/api/suporte-chat/${encodeURIComponent(salvo.id)}/mensagem`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: salvo.token, texto }),
-      });
-      if (r.ok) { input.value = ''; await carregarConversa(); }
+      const fd = new FormData();
+      fd.append('token', salvo.token);
+      fd.append('texto', texto);
+      if (arquivo) fd.append('anexo', arquivo);
+      const r = await rawFetch(`/api/suporte-chat/${encodeURIComponent(salvo.id)}/mensagem`, { method: 'POST', body: fd });
+      if (r.ok) {
+        input.value = '';
+        limparAnexo(anexoInput, iconeAnexo);
+        await carregarConversa();
+      } else {
+        const data = await r.json().catch(() => ({}));
+        if (data.error) alert(data.error);
+      }
     } finally { b.disabled = false; }
   }
 
@@ -485,10 +540,13 @@
   }
 
   function montarThreadHtml(chat) {
-    return (chat.mensagens || []).map((m) => `
+    return (chat.mensagens || []).map((m, i) => {
+      const anexoUrl = m.anexo ? `/api/suporte-chats/${encodeURIComponent(chat.id)}/anexo/${i}?token=${encodeURIComponent(localStorage.getItem('authToken') || '')}` : '';
+      return `
       <div class="szc-msg ${m.de === 'visitante' ? 'suporte' : 'visitante'}">
-        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Visitante') : (m.bot ? '🤖 Beniboy (bot)' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}
-      </div>`).join('');
+        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Visitante') : (m.bot ? '🤖 Beniboy (bot)' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}${anexoHtml(m.anexo, anexoUrl)}
+      </div>`;
+    }).join('');
   }
 
   // render COMPLETO - usado so ao ABRIR uma conversa (clique na lista, popup
@@ -506,10 +564,15 @@
       </div>
       <div id="szc-atend-thread">${montarThreadHtml(chat)}</div>
       <div style="display:flex;gap:6px;">
+        <label class="szc-anexo-btn" id="szc-atend-anexo-label" title="Anexar foto ou PDF">
+          <span id="szc-atend-anexo-icone">📎</span>
+          <input type="file" id="szc-atend-anexo" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden>
+        </label>
         <input type="text" class="szc-input" id="szc-atend-msg" placeholder="responder..." maxlength="1000" style="flex:1;">
         <button type="button" class="szc-enviar" id="szc-atend-enviar">➤</button>
       </div>
       ${ATEND.ehMaster ? `<button type="button" class="szc-link" id="szc-atend-pdf" style="margin-top:4px;">📄 baixar PDF da conversa</button>` : ''}`;
+    ligarBotaoAnexo(corpo.querySelector('#szc-atend-anexo'), corpo.querySelector('#szc-atend-anexo-icone'));
     atendMarcarVisto(chat);
     atendAtualizarBadge();
     corpo.querySelector('#szc-atend-voltar').addEventListener('click', () => {
@@ -526,15 +589,19 @@
       });
     }
     const input = corpo.querySelector('#szc-atend-msg');
+    const anexoInput = corpo.querySelector('#szc-atend-anexo');
     const enviar = async () => {
       const texto = input.value.trim();
-      if (!texto) return;
+      const arquivo = anexoInput.files[0];
+      if (!texto && !arquivo) return;
       const b = corpo.querySelector('#szc-atend-enviar');
       b.disabled = true;
       try {
+        const fd = new FormData();
+        fd.append('texto', texto);
+        if (arquivo) fd.append('anexo', arquivo);
         const r = await rawFetch(`/api/suporte-chats/${encodeURIComponent(chat.id)}/responder`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify({ texto }),
+          method: 'POST', headers: authHeaders(), body: fd,
         });
         if (r.ok) {
           const atualizado = await r.json();
@@ -730,6 +797,15 @@
       if (ATEND.ativo) {
         es.addEventListener('suporte-chat', () => { atendCarregar(); });
         es.addEventListener('beniboy-escalonamento', (e) => { dispararAlarmeBeniboy(JSON.parse(e.data)); });
+        // alerta de seguranca (texto tipo comando/script ou upload bloqueado
+        // no chat publico - ver segurancaChat.js/index.js) - SO Master, mais
+        // restrito que o alarme critico acima (Master + tag Suporte). Reusa
+        // o mesmo alarme visual/sonoro, so muda o motivo mostrado
+        es.addEventListener('chat-seguranca-alerta', (e) => {
+          if (!ATEND.ehMaster) return;
+          const d = JSON.parse(e.data);
+          dispararAlarmeBeniboy({ nome: d.nome, motivo: '🛡️ ' + (d.motivo || 'Atividade suspeita detectada no chat') });
+        });
       }
       es.addEventListener('pedido-status-mudou', (e) => { mostrarPopupPedido(JSON.parse(e.data)); });
       es.addEventListener('mensagem-direta', (e) => { mostrarPopupMensagem(JSON.parse(e.data)); });
