@@ -101,6 +101,15 @@
   .ver-linha:first-child{border-top:none;}
   .ver-linha .ver-lbl{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
   .ver-linha .ver-val{font-size:13.5px;margin-top:2px;word-break:break-word;}
+  .dif-box{margin-bottom:6px;font-size:12.5px;}
+  .dif-muda{padding:2px 0;}
+  .dif-campo{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+  .dif-antes{color:var(--bad);opacity:.8;}
+  .dif-seta{color:var(--muted);margin:0 2px;}
+  .dif-depois{color:var(--ok);}
+  .dif-iguais{margin-top:4px;font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+  .dif-nada{font-size:12px;color:var(--muted);}
+  .dif-linha{font-size:12px;color:var(--warn);}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -178,6 +187,8 @@
     <div><label>Até</label><input type="date" id="f-ate"></div>
   </div>
   <div class="filtros-acoes">
+    <button type="button" class="btn-secundario" onclick="aplicarPresetData('hoje')">📅 Hoje</button>
+    <button type="button" class="btn-secundario" onclick="aplicarPresetData('ontem')">📅 Ontem</button>
     <button type="button" class="btn-primary" onclick="renderTudo()">Aplicar</button>
     <a class="btn-secundario" id="link-csv" href="#">⬇️ CSV</a>
     <a class="btn-secundario" id="link-pdf" href="#">⬇️ PDF</a>
@@ -452,6 +463,14 @@ function agoraBrasilia(){
 }
 function isoLocalBR(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function hojeBrasilia(){ return isoLocalBR(agoraBrasilia()); }
+function aplicarPresetData(tipo){
+  const d = agoraBrasilia();
+  if(tipo==='ontem') d.setDate(d.getDate()-1);
+  const iso = isoLocalBR(d);
+  document.getElementById('f-de').value = iso;
+  document.getElementById('f-ate').value = iso;
+  renderTudo();
+}
 function horaBrasilia(d){ return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`; }
 
 async function carregar(){
@@ -473,18 +492,42 @@ function edicaoPendentePara(checkinId){
 // decide (mesma regra do check-out antecipado). A mudança aplica na hora,
 // mas a palavra final é do Master, no Ticket que todo pedido abre na
 // Central (prestação de contas de quem aprovou)
-function resumoPropostaCliente(p){
+// resumo do pedido de correção DESTACANDO o que muda: compara a proposta com
+// o check-in atual (TODOS) e mostra "campo: ANTES → DEPOIS" só nos que
+// mudaram; os que ficam iguais vão numa linha discreta embaixo. Se o check-in
+// atual não estiver na lista carregada (ex: fora do filtro), cai no modo
+// simples (lista tudo o que a proposta traz).
+function resumoDiffProposta(pedido){
+  const p = pedido.proposta;
   if(!p) return '';
-  const partes = [];
-  if(p.responsavel?.nome!==undefined) partes.push(`nome → ${p.responsavel.nome}`);
-  if(p.responsavel?.contato!==undefined) partes.push(`contato → ${p.responsavel.contato||'—'}`);
-  if(p.dataUtilizacao!==undefined) partes.push(`data → ${fmtData(p.dataUtilizacao)}`);
-  if(p.tempoMinutos!==undefined) partes.push(`tempo → ${p.tempoMinutos}min`);
-  if(p.horarioPrevisto!==undefined) partes.push(`previsto → ${(p.horarioPrevisto||'').slice(0,5)||'—'}`);
-  if(p.adultoCortesia!==undefined) partes.push(`A.C. → ${p.adultoCortesia?'x'+(p.quantAC||1):'não'}`);
-  if(p.criancas!==undefined) partes.push(`crianças → ${p.criancas.map(cr=>cr.nome).join(', ')}`);
-  if(p.observacao!==undefined) partes.push(`obs → ${p.observacao||'—'}`);
-  return partes.join('\n');
+  const atual = TODOS.find(c=>c.id===pedido.checkinId) || null;
+  const ac = (c)=> c && c.adultoCortesia ? 'x'+(c.quantAC||1) : 'não';
+  const criancasTxt = (c)=> (c && c.criancas ? c.criancas.map(cr=>cr.nome).join(', ') : '');
+  const campos = [
+    { k:'nome', label:'nome', novo: p.responsavel?.nome, velho: atual?.responsavel?.nome },
+    { k:'contato', label:'contato', novo: p.responsavel?.contato, velho: atual?.responsavel?.contato },
+    { k:'data', label:'data', novo: p.dataUtilizacao!==undefined?fmtData(p.dataUtilizacao):undefined, velho: atual?fmtData(atual.dataUtilizacao):undefined },
+    { k:'tempo', label:'tempo', novo: p.tempoMinutos!==undefined?p.tempoMinutos+'min':undefined, velho: atual?(atual.tempoMinutos+'min'):undefined },
+    { k:'previsto', label:'previsto', novo: p.horarioPrevisto!==undefined?((p.horarioPrevisto||'').slice(0,5)||'—'):undefined, velho: atual?((atual.horarioPrevisto||'').slice(0,5)||'—'):undefined },
+    { k:'ac', label:'A.C.', novo: p.adultoCortesia!==undefined?ac(p):undefined, velho: atual?ac(atual):undefined },
+    { k:'criancas', label:'crianças', novo: p.criancas!==undefined?criancasTxt(p):undefined, velho: atual?criancasTxt(atual):undefined },
+    { k:'obs', label:'obs', novo: p.observacao!==undefined?(p.observacao||'—'):undefined, velho: atual?(atual.observacao||'—'):undefined },
+  ].filter(c=>c.novo!==undefined);
+
+  const norm = (v)=> String(v==null?'':v).trim();
+  const mudou = [], igual = [];
+  campos.forEach(c=>{ (atual && norm(c.velho)===norm(c.novo) ? igual : mudou).push(c); });
+
+  // sem o atual pra comparar: modo simples (tudo o que veio na proposta)
+  if(!atual){
+    return `<div class="dif-linha">${campos.map(c=>`<span class="dif-campo">${escapeHtml(c.label)}</span> → <b>${escapeHtml(c.novo)}</b>`).join('<br>')}</div>`;
+  }
+  if(!mudou.length){
+    return `<div class="dif-nada">nenhum campo mudou em relação ao check-in atual.</div>`;
+  }
+  let html = mudou.map(c=>`<div class="dif-muda"><span class="dif-campo">${escapeHtml(c.label)}</span> <s class="dif-antes">${escapeHtml(c.velho||'—')}</s> <span class="dif-seta">→</span> <b class="dif-depois">${escapeHtml(c.novo)}</b></div>`).join('');
+  if(igual.length) html += `<div class="dif-iguais">sem alteração: ${igual.map(c=>escapeHtml(c.label)).join(', ')}</div>`;
+  return html;
 }
 
 function renderEdicoes(){
@@ -497,7 +540,7 @@ function renderEdicoes(){
     <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;">
       <div style="font-size:12.5px;font-weight:600;">${escapeHtml(p.responsavelNome)} · ${escapeHtml(p.unidadeNome||p.unidade)} · ${fmtData(p.dataUtilizacao)}${p.numeroTicket?` · <span style="color:var(--accent);">Ticket #${p.numeroTicket}</span>`:''}</div>
       <div class="sub" style="margin:2px 0 6px;">${ehAlterar?'✏️ alterar dados':'🗑️ excluir o check-in'} · pedido por ${escapeHtml(p.solicitadoPorEmail)} em ${new Date(p.criadoEm).toLocaleString('pt-BR',{timeZone:FUSO_BR})}</div>
-      ${ehAlterar?`<div style="font-size:12px;color:var(--warn);margin-bottom:6px;white-space:pre-wrap;">${escapeHtml(resumoPropostaCliente(p.proposta))}</div>`:''}
+      ${ehAlterar?`<div class="dif-box">${resumoDiffProposta(p)}</div>`:''}
       <div style="font-size:12px;color:var(--text);margin-bottom:8px;white-space:pre-wrap;">${escapeHtml(p.motivo)}</div>
       ${podeDecidir?`<div style="display:flex;gap:8px;">
         <button type="button" class="btn-secundario" style="color:var(--ok);border-color:var(--ok-dim);" onclick="decidirEdicaoParque('${p.id}','APROVADO')">✓ Aprovar</button>
