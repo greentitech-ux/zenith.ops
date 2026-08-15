@@ -245,60 +245,11 @@
     <div class="sub" id="d-sub"></div>
     <div id="d-descricao" style="font-size:13px;white-space:pre-wrap;margin-bottom:10px;"></div>
 
-    <!-- REMOTO em aberto (triagem): concluir a distancia, sem check-in/assinatura -->
-    <div id="bloco-remoto" class="hidden">
-      <label>O que foi feito (registro da atuação)</label>
-      <textarea id="r-observacao" placeholder="descreva a atuação realizada"></textarea>
-      <button type="button" class="btn-primary" id="btn-concluir-remoto" onclick="concluirRemoto()">🎧 Concluir atendimento remoto</button>
-    </div>
-
-    <!-- TRIAGEM: Master ou time de Suporte decide se precisa de visita -
-         unica porta pra um chamado sair do remoto (fora da edicao livre do
-         Master, mais abaixo) -->
-    <div id="bloco-escalar" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px;">
-      <label>🚗 Escalar pra atendimento presencial <span style="text-transform:none;letter-spacing:0;">(triagem: só quando não dá pra resolver a distância)</span></label>
-      <textarea id="esc-motivo" placeholder="por que esse chamado precisa de visita presencial?"></textarea>
-      <select id="esc-tecnico"><option value="">manter responsável atual</option></select>
-      <button type="button" class="btn-add" id="btn-escalar" onclick="escalarPresencial()">🚗 Escalar pra presencial</button>
-    </div>
-
-    <!-- ABERTO: fazer check-in -->
-    <div id="bloco-iniciar" class="hidden">
-      <label>Itens de como está antes de mexer (descrição + foto)</label>
-      <div id="lista-itens-antes"></div>
-      <button type="button" class="btn-add" onclick="adicionarItemAntes()">+ Adicionar item</button>
-      <button type="button" class="btn-primary" id="btn-iniciar" onclick="iniciarChamado()">📍 Fazer check-in / Iniciar chamado</button>
-    </div>
-
-    <!-- INICIADO: concluir -->
-    <div id="bloco-concluir" class="hidden">
-      <div class="sub" id="c-iniciado-em"></div>
-      <label>Peças compradas (se precisou)</label>
-      <div id="lista-pecas"></div>
-      <button type="button" class="btn-add" onclick="adicionarPeca()">+ Adicionar peça</button>
-      <label>Observação (o que foi feito)</label>
-      <textarea id="c-observacao" placeholder="descreva o serviço realizado"></textarea>
-      <label>Itens de como ficou depois (descrição + foto)</label>
-      <div id="lista-itens-depois"></div>
-      <button type="button" class="btn-add" onclick="adicionarItemDepois()">+ Adicionar item</button>
-      <label>Assinatura de quem recebeu o serviço na loja</label>
-      <input type="text" id="c-assinatura-nome" placeholder="nome de quem está assinando">
-      <canvas id="c-assinatura-canvas" class="assinatura-canvas" width="560" height="180"></canvas>
-      <button type="button" class="btn-add" onclick="limparAssinatura('c-assinatura-canvas')">🗑 Limpar assinatura</button>
-      <button type="button" class="btn-primary" id="btn-concluir" onclick="concluirChamado()">✓ Concluir chamado</button>
-    </div>
-
-    <!-- CONCLUIDO: so leitura -->
-    <div id="bloco-concluido" class="hidden">
-      <div><b>Observação:</b> <span id="v-observacao"></span></div>
-      <div id="v-pecas" style="margin-top:8px;"></div>
-      <div class="sub" style="margin-top:10px;">Itens antes</div>
-      <div id="v-itens-antes"></div>
-      <div class="sub" style="margin-top:10px;">Itens depois</div>
-      <div id="v-itens-depois"></div>
-      <div class="sub" style="margin-top:10px;">Assinatura de quem recebeu na loja</div>
-      <div id="v-assinatura"></div>
-    </div>
+    <!-- ordem pensada pro fluxo real do chamado: primeiro classifica/decide
+         (edição Master, triagem), depois documenta o que está sendo feito
+         (execução, evidências, orçamento, cobrança), e só por último a ação
+         que fecha o chamado (concluir remoto/check-in/concluir presencial) -
+         pedido explicito do usuario: "precisa ter uma ordem lógica" -->
 
     <!-- data de execucao: o tec (ou Master/Admin) diz quando vai atuar -
          encerra a fase de triagem do SLA -->
@@ -375,6 +326,64 @@
           <button type="button" class="btn-primary" style="flex:1;margin-top:10px;" id="btn-enviar-cobranca" onclick="salvarCobranca(true)">📤 Enviar — gerar ticket de Pagamento</button>
         </div>
       </div>
+    </div>
+
+    <!-- TRIAGEM: Master ou time de Suporte decide se precisa de visita -
+         unica porta pra um chamado sair do remoto (fora da edicao livre do
+         Master, mais acima). Fica logo antes das acoes que fecham o
+         chamado, ja que e a ultima decisao antes de concluir ou escalar -->
+    <div id="bloco-escalar" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px;">
+      <label>🚗 Escalar pra atendimento presencial <span style="text-transform:none;letter-spacing:0;">(triagem: só quando não dá pra resolver a distância)</span></label>
+      <textarea id="esc-motivo" placeholder="por que esse chamado precisa de visita presencial?"></textarea>
+      <select id="esc-tecnico"><option value="">manter responsável atual</option></select>
+      <button type="button" class="btn-add" id="btn-escalar" onclick="escalarPresencial()">🚗 Escalar pra presencial</button>
+    </div>
+
+    <!-- REMOTO em aberto: concluir a distancia, sem check-in/assinatura -
+         acao que FECHA o chamado, por isso vem por ultimo, depois de
+         execucao/evidencias/orcamento/cobranca ja preenchidos -->
+    <div id="bloco-remoto" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px;">
+      <label>O que foi feito (registro da atuação)</label>
+      <textarea id="r-observacao" placeholder="descreva a atuação realizada"></textarea>
+      <button type="button" class="btn-primary" id="btn-concluir-remoto" onclick="concluirRemoto()">🎧 Concluir atendimento remoto</button>
+    </div>
+
+    <!-- ABERTO: fazer check-in -->
+    <div id="bloco-iniciar" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px;">
+      <label>Itens de como está antes de mexer (descrição + foto)</label>
+      <div id="lista-itens-antes"></div>
+      <button type="button" class="btn-add" onclick="adicionarItemAntes()">+ Adicionar item</button>
+      <button type="button" class="btn-primary" id="btn-iniciar" onclick="iniciarChamado()">📍 Fazer check-in / Iniciar chamado</button>
+    </div>
+
+    <!-- INICIADO: concluir -->
+    <div id="bloco-concluir" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px;">
+      <div class="sub" id="c-iniciado-em"></div>
+      <label>Peças compradas (se precisou)</label>
+      <div id="lista-pecas"></div>
+      <button type="button" class="btn-add" onclick="adicionarPeca()">+ Adicionar peça</button>
+      <label>Observação (o que foi feito)</label>
+      <textarea id="c-observacao" placeholder="descreva o serviço realizado"></textarea>
+      <label>Itens de como ficou depois (descrição + foto)</label>
+      <div id="lista-itens-depois"></div>
+      <button type="button" class="btn-add" onclick="adicionarItemDepois()">+ Adicionar item</button>
+      <label>Assinatura de quem recebeu o serviço na loja</label>
+      <input type="text" id="c-assinatura-nome" placeholder="nome de quem está assinando">
+      <canvas id="c-assinatura-canvas" class="assinatura-canvas" width="560" height="180"></canvas>
+      <button type="button" class="btn-add" onclick="limparAssinatura('c-assinatura-canvas')">🗑 Limpar assinatura</button>
+      <button type="button" class="btn-primary" id="btn-concluir" onclick="concluirChamado()">✓ Concluir chamado</button>
+    </div>
+
+    <!-- CONCLUIDO: so leitura -->
+    <div id="bloco-concluido" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px;">
+      <div><b>Observação:</b> <span id="v-observacao"></span></div>
+      <div id="v-pecas" style="margin-top:8px;"></div>
+      <div class="sub" style="margin-top:10px;">Itens antes</div>
+      <div id="v-itens-antes"></div>
+      <div class="sub" style="margin-top:10px;">Itens depois</div>
+      <div id="v-itens-depois"></div>
+      <div class="sub" style="margin-top:10px;">Assinatura de quem recebeu na loja</div>
+      <div id="v-assinatura"></div>
     </div>
 
     <!-- chat do chamado: quem ve o kanban conversa (texto + foto) - ex:
