@@ -8,7 +8,8 @@ const PDFDocument = require('pdfkit');
 // ---------- identidade da operadora do parque - troque so aqui quando o
 // nome/CNPJ/endereco oficial mudar de novo ----------
 const EMPRESA_NOME = 'Saltiverso Patteo';
-const EMPRESA_CNPJ = '54.673.305/0001-93';
+const EMPRESA_NOME_MAIUSCULO = EMPRESA_NOME.toUpperCase();
+const EMPRESA_CNPJ = '66.644.523/0001-89';
 const EMPRESA_ENDERECO = 'Shopping Patteo Olinda';
 const EMPRESA_CIDADE = 'Olinda';
 
@@ -27,11 +28,33 @@ function dataPorExtenso(d) {
   return `${EMPRESA_CIDADE}, ${d.getDate()} de ${MESES_PT[d.getMonth()]} de ${d.getFullYear()}.`;
 }
 
-// substitui as mencoes ao nome da operadora no texto legal pelo valor atual
-// de EMPRESA_NOME - assim trocar o nome/CNPJ/endereco no topo do arquivo
-// atualiza tudo (cabecalho, corpo do termo, assinatura) de uma vez so
-function textoComEmpresa() {
-  return TEXTO_TERMO.split('WOW PARK').join(EMPRESA_NOME);
+// divide o texto legal nos pontos onde "WOW PARK" aparecia - cada posicao
+// vira um trecho de negrito/maiusculo (EMPRESA_NOME_MAIUSCULO) quando
+// renderizado (ver renderTextoComEmpresa) - assim trocar o nome/CNPJ/
+// endereco no topo do arquivo atualiza tudo (cabecalho, corpo do termo,
+// assinatura) de uma vez so, mantendo o destaque visual pedido pelo usuario
+function partesDoTermo() {
+  return TEXTO_TERMO.split('WOW PARK');
+}
+
+// desenha o paragrafo do termo com o nome da operadora em negrito/maiusculo
+// no meio do texto corrido - usa o recurso "continued" do pdfkit pra
+// encadear trechos com fontes diferentes dentro do MESMO paragrafo
+// justificado (senao cada trecho quebraria linha/paragrafo por conta propria)
+function renderTextoComEmpresa(doc, x, largura) {
+  const partes = partesDoTermo();
+  doc.fontSize(10).fillColor('#333');
+  partes.forEach((parte, i) => {
+    const primeira = i === 0;
+    const ultima = i === partes.length - 1;
+    doc.font('Helvetica').text(parte, ...(primeira ? [x, doc.y] : []), {
+      width: largura, align: 'justify', lineGap: 3, continued: !ultima,
+    });
+    if (!ultima) {
+      doc.font('Helvetica-Bold').text(EMPRESA_NOME_MAIUSCULO, { continued: true });
+    }
+  });
+  doc.font('Helvetica');
 }
 
 // texto oficial fornecido pelo usuario (contrato "PASSAPORTE MENSAL PATTEO
@@ -49,7 +72,9 @@ function gerarTermoPDF(res, checkin) {
   const x = doc.page.margins.left;
   const largura = doc.page.width - doc.page.margins.left - doc.page.margins.right;
 
-  doc.fontSize(8).fillColor('#5b6470').text(`${EMPRESA_NOME} · CNPJ ${EMPRESA_CNPJ} · ${EMPRESA_ENDERECO}`, x, doc.y, { characterSpacing: 0.5 });
+  doc.fontSize(8).fillColor('#5b6470');
+  doc.font('Helvetica-Bold').text(EMPRESA_NOME_MAIUSCULO, x, doc.y, { continued: true, characterSpacing: 0.5 });
+  doc.font('Helvetica').text(` · CNPJ ${EMPRESA_CNPJ} · ${EMPRESA_ENDERECO}`, { characterSpacing: 0.5 });
   doc.moveDown(0.3);
   doc.fontSize(17).fillColor('#111').text('Termo de Ciência e Responsabilidade', x, doc.y);
   doc.fontSize(10).fillColor('#666').text('Acesso ao espaço de trampolins/jump', x, doc.y);
@@ -88,7 +113,7 @@ function gerarTermoPDF(res, checkin) {
   doc.rect(x, doc.y, largura, 1).fill('#dde3ea');
   doc.moveDown(0.8);
 
-  doc.fontSize(10).fillColor('#333').text(textoComEmpresa(), x, doc.y, { width: largura, align: 'justify', lineGap: 3 });
+  renderTextoComEmpresa(doc, x, largura);
 
   doc.moveDown(1.5);
   doc.fontSize(10).fillColor('#333').text(dataPorExtenso(new Date()), x, doc.y);
@@ -97,8 +122,9 @@ function gerarTermoPDF(res, checkin) {
   const yAssinatura = doc.y;
   doc.moveTo(x, yAssinatura).lineTo(x + 240, yAssinatura).strokeColor('#333').lineWidth(1).stroke();
   doc.moveTo(x + 300, yAssinatura).lineTo(x + largura, yAssinatura).strokeColor('#333').lineWidth(1).stroke();
-  doc.fontSize(9).fillColor('#666').text('Contratante (responsável)', x, yAssinatura + 4);
-  doc.fontSize(9).fillColor('#666').text(EMPRESA_NOME, x + 300, yAssinatura + 4);
+  doc.font('Helvetica').fontSize(9).fillColor('#666').text('Contratante (responsável)', x, yAssinatura + 4);
+  doc.font('Helvetica-Bold').fontSize(9).fillColor('#666').text(EMPRESA_NOME_MAIUSCULO, x + 300, yAssinatura + 4);
+  doc.font('Helvetica');
 
   doc.end();
 }
