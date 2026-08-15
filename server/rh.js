@@ -121,6 +121,7 @@ const TIPOS_CADASTRO = ['extra', 'candidato', 'efetivado'];
 async function criar({
   unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro, semExperiencia,
   curriculo, cadastradoPorId, cadastradoPorEmail, precisaAprovacao, exigirCurriculo = true,
+  dataExamePeriodico, periodicidadeExameMeses, dataUltimasFerias,
 }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   const nomeOk = limpar(nome, 150);
@@ -164,6 +165,20 @@ async function criar({
     dataNascimento: validarDataOuNull(dataNascimento, 'Data de nascimento'),
     dataAdmissao: dataAdmissaoOk,
     curriculo: curriculo || null,
+    // saude ocupacional (ASO) e ferias - base dos alertas trabalhistas
+    // (evitar multa por exame periodico vencido / ferias nao concedidas no
+    // prazo legal). dataExamePeriodico = data do ULTIMO ASO; o proximo vence
+    // em +periodicidade (12 meses por padrao, NR-7). dataUltimasFerias =
+    // inicio do ultimo periodo de ferias concedido (null = nunca saiu, conta
+    // a partir da admissao)
+    dataExamePeriodico: validarDataOuNull(dataExamePeriodico, 'Data do exame periódico'),
+    periodicidadeExameMeses: Number(periodicidadeExameMeses) > 0 ? Math.round(Number(periodicidadeExameMeses)) : 12,
+    dataUltimasFerias: validarDataOuNull(dataUltimasFerias, 'Data das últimas férias'),
+    // anexos digitalizados (RG, CPF, CTPS, ASO, contrato...) - ver storage.js;
+    // cada item: { tipo, nome, path, mime, tamanho, em, porEmail }
+    documentos: [],
+    // motivo do desligamento (preenchido em desligar()) - fica no historico
+    motivoDesligamento: null,
     tipoCadastro: tipo,
     emTeste,
     status,
@@ -294,6 +309,9 @@ async function atualizar(id, patch) {
   if (patch.dataNascimento !== undefined) merge.dataNascimento = validarDataOuNull(patch.dataNascimento, 'Data de nascimento');
   if (patch.dataAdmissao !== undefined) merge.dataAdmissao = validarDataOuNull(patch.dataAdmissao, 'Data de admissão');
   if (patch.curriculo !== undefined) merge.curriculo = patch.curriculo;
+  if (patch.dataExamePeriodico !== undefined) merge.dataExamePeriodico = validarDataOuNull(patch.dataExamePeriodico, 'Data do exame periódico');
+  if (patch.periodicidadeExameMeses !== undefined) merge.periodicidadeExameMeses = Number(patch.periodicidadeExameMeses) > 0 ? Math.round(Number(patch.periodicidadeExameMeses)) : 12;
+  if (patch.dataUltimasFerias !== undefined) merge.dataUltimasFerias = validarDataOuNull(patch.dataUltimasFerias, 'Data das últimas férias');
 
   if (patch.status !== undefined) {
     if (!['candidato', 'ativo', 'inativo'].includes(patch.status)) throw new Error('Status inválido.');
@@ -726,9 +744,243 @@ function aniversariantesHoje(lista, dataRef) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// MÉTRICAS E ALERTAS TRABALHISTAS (base do Painel de RH e da Central de
+// Alertas) - tudo derivado dos dados já cadastrados, sem escrita.
+// ---------------------------------------------------------------------------
+
+// tipos de documento que a ficha pode guardar; os OBRIGATORIOS entram no
+// alerta "documento faltando" (documentação trabalhista mínima). Lista simples
+// e editável aqui.
+const DOCUMENTOS_TIPOS = ['rg_cpf', 'ctps', 'aso_admissional', 'contrato', 'comprovante_residencia', 'exame_periodico', 'outro'];
+const DOCUMENTOS_OBRIGATORIOS = ['rg_cpf', 'ctps', 'aso_admissional', 'contrato'];
+const DOCUMENTOS_LABEL = {
+  rg_cpf: 'RG/CPF', ctps: 'CTPS', aso_admissional: 'ASO admissional', contrato: 'Contrato',
+  comprovante_residencia: 'Comprovante de residência', exame_periodico: 'Exame periódico (ASO)', outro: 'Outro',
+};
+
+function adicionarMeses(dataIso, meses) {
+  if (!dataIso) return null;
+  const d = new Date(`${dataIso}T00:00:00`);
+  d.setMonth(d.getMonth() + Number(meses || 0));
+  return d.toISOString().slice(0, 10);
+}
+
+// tempo de casa em MESES cheios desde a admissão (0 se sem data)
+function tempoDeCasaMeses(dataAdmissaoIso) {
+  if (!dataAdmissaoIso) return 0;
+  const adm = new Date(`${dataAdmissaoIso}T00:00:00`);
+  const hoje = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  let m = (hoje.getFullYear() - adm.getFullYear()) * 12 + (hoje.getMonth() - adm.getMonth());
+  if (hoje.getDate() < adm.getDate()) m -= 1;
+  return Math.max(0, m);
+}
+
+// texto amigável do tempo de casa (ex: "2 anos e 3 meses")
+function tempoDeCasaTexto(meses) {
+  const anos = Math.floor(meses / 12);
+  const m = meses % 12;
+  const p = [];
+  if (anos) p.push(`${anos} ano${anos > 1 ? 's' : ''}`);
+  if (m) p.push(`${m} ${m > 1 ? 'meses' : 'mês'}`);
+  return p.join(' e ') || 'menos de 1 mês';
+}
+
+// só quem "conta" como colaborador vinculado (efetivado ativo) - base de
+// métricas e alertas legais; extra avulso e candidato em teste ficam de fora
+function ehColaboradorVinculado(f) {
+  return f && f.status === 'ativo' && f.tipoCadastro !== 'extra';
+}
+
+// desliga o colaborador (não apaga - vira ex-colaborador com data e motivo,
+// pra manter histórico e sair dos alertas). Reaproveita a limpeza de
+// teste/experiência do atualizar(status:'inativo')
+async function desligar(id, { motivo, porEmail } = {}) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  if (snap.data().status === 'inativo') throw new Error('Esse colaborador já está desligado.');
+  await ref.update({
+    status: 'inativo',
+    desligadoEm: new Date().toISOString(),
+    motivoDesligamento: limpar(motivo, 300) || null,
+    desligadoPorEmail: porEmail || null,
+    emTeste: false,
+    experiencia: null,
+    emAtestado: false,
+    atestadoAtual: null,
+    atualizadoEm: new Date().toISOString(),
+  });
+  rhCache.invalidar();
+  return getOne(id);
+}
+
+async function reativar(id) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  await ref.update({ status: 'ativo', desligadoEm: null, motivoDesligamento: null, atualizadoEm: new Date().toISOString() });
+  rhCache.invalidar();
+  return getOne(id);
+}
+
+// registra o exame periódico (ASO) feito hoje/na data informada - o próximo
+// vencimento passa a contar a partir dela
+async function registrarExamePeriodico(id, { data, periodicidadeMeses } = {}) {
+  const patch = { dataExamePeriodico: data || new Date().toISOString().slice(0, 10) };
+  if (periodicidadeMeses !== undefined) patch.periodicidadeExameMeses = periodicidadeMeses;
+  return atualizar(id, patch);
+}
+
+async function adicionarDocumento(id, { tipo, anexo, porEmail } = {}) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  if (!anexo || !anexo.path) throw new Error('Anexo inválido.');
+  const tipoOk = DOCUMENTOS_TIPOS.includes(tipo) ? tipo : 'outro';
+  const doc = {
+    tipo: tipoOk, nome: limpar(anexo.nome, 160) || DOCUMENTOS_LABEL[tipoOk],
+    path: anexo.path, mime: anexo.mime || anexo.tipo || null, tamanho: anexo.tamanho || null,
+    em: new Date().toISOString(), porEmail: porEmail || null,
+  };
+  const documentos = [...(snap.data().documentos || []), doc];
+  await ref.update({ documentos, atualizadoEm: new Date().toISOString() });
+  rhCache.invalidar();
+  return getOne(id);
+}
+
+async function removerDocumento(id, index) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  const documentos = [...(snap.data().documentos || [])];
+  const i = Number(index);
+  if (i < 0 || i >= documentos.length) throw new Error('Documento não encontrado.');
+  const [removido] = documentos.splice(i, 1);
+  await ref.update({ documentos, atualizadoEm: new Date().toISOString() });
+  rhCache.invalidar();
+  return { removido, funcionario: await getOne(id) };
+}
+
+// calcula, pra UM colaborador, os vencimentos legais (ASO e férias) - usado
+// tanto no alerta quanto pra exibir na ficha
+function situacaoLegal(f) {
+  const asoVenc = f.dataExamePeriodico ? adicionarMeses(f.dataExamePeriodico, f.periodicidadeExameMeses || 12) : null;
+  const asoDias = asoVenc ? diasRestantesAte(asoVenc) : null;
+  // férias: período aquisitivo (12m) + concessivo (12m) a partir do último
+  // período concedido (ou da admissão, se nunca saiu de férias) = 24 meses
+  // pra conceder sem cair na dobra (art. 137 CLT)
+  const baseFerias = f.dataUltimasFerias || f.dataAdmissao || null;
+  const feriasVenc = baseFerias ? adicionarMeses(baseFerias, 24) : null;
+  const feriasDias = feriasVenc ? diasRestantesAte(feriasVenc) : null;
+  const docsPresentes = new Set((f.documentos || []).map((d) => d.tipo));
+  const docsFaltando = DOCUMENTOS_OBRIGATORIOS.filter((t) => !docsPresentes.has(t));
+  return { asoVenc, asoDias, feriasVenc, feriasDias, docsFaltando };
+}
+
+// central de alertas trabalhistas: varre os colaboradores vinculados e devolve
+// tudo que pode gerar multa/passivo se atrasar. gravidade 'grave' = já vencido
+// (risco imediato); 'alerta' = vencendo em breve; 'info' = pendência cadastral
+function alertasTrabalhistas() {
+  return listAll().then((todos) => {
+    const alertas = [];
+    const push = (f, o) => alertas.push({
+      funcionarioId: f.id, nome: f.nome, unidade: f.unidade, cargoFuncao: f.cargoFuncao || null, ...o,
+    });
+    for (const f of todos) {
+      if (!ehColaboradorVinculado(f)) continue;
+      const s = situacaoLegal(f);
+      // exame periódico (ASO)
+      if (!f.dataExamePeriodico) {
+        push(f, { tipo: 'aso', gravidade: 'info', titulo: 'Exame periódico (ASO) não registrado', detalhe: 'Sem data do último ASO na ficha.', dias: null, vencimento: null });
+      } else if (s.asoDias < 0) {
+        push(f, { tipo: 'aso', gravidade: 'grave', titulo: 'Exame periódico (ASO) VENCIDO', detalhe: `Venceu há ${Math.abs(s.asoDias)} dia(s).`, dias: s.asoDias, vencimento: s.asoVenc });
+      } else if (s.asoDias <= 30) {
+        push(f, { tipo: 'aso', gravidade: 'alerta', titulo: 'Exame periódico (ASO) vencendo', detalhe: `Vence em ${s.asoDias} dia(s).`, dias: s.asoDias, vencimento: s.asoVenc });
+      }
+      // férias (só faz sentido depois de ~12 meses de casa)
+      if (s.feriasDias != null && tempoDeCasaMeses(f.dataAdmissao) >= 11) {
+        if (s.feriasDias < 0) {
+          push(f, { tipo: 'ferias', gravidade: 'grave', titulo: 'Férias VENCIDAS (risco de dobra)', detalhe: `Prazo de concessão passou há ${Math.abs(s.feriasDias)} dia(s).`, dias: s.feriasDias, vencimento: s.feriasVenc });
+        } else if (s.feriasDias <= 60) {
+          push(f, { tipo: 'ferias', gravidade: 'alerta', titulo: 'Férias vencendo', detalhe: `Precisa conceder em até ${s.feriasDias} dia(s).`, dias: s.feriasDias, vencimento: s.feriasVenc });
+        }
+      }
+      // experiência (30/90 dias) - mesmo prazo que já dispara push
+      if (f.experiencia && f.experiencia.etapa && f.experiencia.prazoEtapaAte) {
+        const d = diasRestantesAte(f.experiencia.prazoEtapaAte);
+        if (d != null && d <= 5) {
+          push(f, { tipo: 'experiencia', gravidade: d < 0 ? 'grave' : 'alerta', titulo: `Experiência (${f.experiencia.etapa} dias) ${d < 0 ? 'vencida' : 'vencendo'}`, detalhe: d < 0 ? `Prazo passou há ${Math.abs(d)} dia(s) - renovar ou efetivar.` : `Decidir em ${d} dia(s).`, dias: d, vencimento: f.experiencia.prazoEtapaAte });
+        }
+      }
+      // documentos obrigatórios faltando
+      if (s.docsFaltando.length) {
+        push(f, { tipo: 'documento', gravidade: 'info', titulo: 'Documento obrigatório faltando', detalhe: s.docsFaltando.map((t) => DOCUMENTOS_LABEL[t]).join(', '), dias: null, vencimento: null });
+      }
+    }
+    // grave primeiro, depois alerta, depois info; dentro de cada, o mais
+    // "estourado"/urgente antes (dias menor)
+    const ordemGrav = { grave: 0, alerta: 1, info: 2 };
+    alertas.sort((a, b) => (ordemGrav[a.gravidade] - ordemGrav[b.gravidade]) || ((a.dias == null ? 9999 : a.dias) - (b.dias == null ? 9999 : b.dias)));
+    return alertas;
+  });
+}
+
+// painel de métricas do RH - tudo num retorno só pro front montar os cards
+async function metricas() {
+  const todos = await listAll();
+  const vinculados = todos.filter(ehColaboradorVinculado);
+  const hojeCA = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  const mesAtual = hojeCA.slice(5, 7);
+
+  // por unidade (só vinculados)
+  const porUnidadeMap = new Map();
+  for (const f of vinculados) porUnidadeMap.set(f.unidade, (porUnidadeMap.get(f.unidade) || 0) + 1);
+  const porUnidade = [...porUnidadeMap.entries()].map(([unidade, total]) => ({ unidade, total })).sort((a, b) => b.total - a.total);
+
+  // tempo de casa
+  const comTempo = vinculados
+    .map((f) => ({ id: f.id, nome: f.nome, unidade: f.unidade, cargoFuncao: f.cargoFuncao || null, dataAdmissao: f.dataAdmissao || null, meses: tempoDeCasaMeses(f.dataAdmissao), tempoTexto: tempoDeCasaTexto(tempoDeCasaMeses(f.dataAdmissao)) }))
+    .filter((x) => x.dataAdmissao);
+  const ordenadoDesc = [...comTempo].sort((a, b) => b.meses - a.meses);
+  const tempoMedioMeses = comTempo.length ? Math.round(comTempo.reduce((s, x) => s + x.meses, 0) / comTempo.length) : 0;
+
+  // aniversariantes do mês
+  const aniversariantesMes = vinculados
+    .filter((f) => f.dataNascimento && f.dataNascimento.slice(5, 7) === mesAtual)
+    .map((f) => ({ id: f.id, nome: f.nome, unidade: f.unidade, dataNascimento: f.dataNascimento, dia: f.dataNascimento.slice(8, 10) }))
+    .sort((a, b) => a.dia.localeCompare(b.dia));
+
+  const alertas = await alertasTrabalhistas();
+  const alertasResumo = alertas.reduce((acc, a) => { acc[a.gravidade] = (acc[a.gravidade] || 0) + 1; acc.total += 1; return acc; }, { total: 0, grave: 0, alerta: 0, info: 0 });
+
+  return {
+    totais: {
+      ativos: vinculados.length,
+      extras: todos.filter((f) => f.tipoCadastro === 'extra' && f.status !== 'inativo').length,
+      emTeste: todos.filter((f) => f.emTeste && f.status !== 'inativo').length,
+      inativos: todos.filter((f) => f.status === 'inativo').length,
+      emAtestado: vinculados.filter((f) => f.emAtestado).length,
+      unidades: porUnidade.length,
+    },
+    porUnidade,
+    unidadeMaisGente: porUnidade[0] || null,
+    unidadeMenosGente: porUnidade.length ? porUnidade[porUnidade.length - 1] : null,
+    tempoMedioMeses,
+    tempoMedioTexto: tempoDeCasaTexto(tempoMedioMeses),
+    maisAntigos: ordenadoDesc.slice(0, 8),
+    maisNovos: ordenadoDesc.slice(-8).reverse(),
+    aniversariantesMes,
+    alertasResumo,
+  };
+}
+
 module.exports = {
   DIAS_TESTE_ALERTA, TIPOS_CADASTRO, ALERTA_EXPERIENCIA_DIAS,
+  DOCUMENTOS_TIPOS, DOCUMENTOS_OBRIGATORIOS, DOCUMENTOS_LABEL,
   criar, listAll, listByUnidades, getOne, atualizar, remover, mesclarDuplicados,
+  desligar, reativar, registrarExamePeriodico, adicionarDocumento, removerDocumento,
+  situacaoLegal, tempoDeCasaMeses, tempoDeCasaTexto, alertasTrabalhistas, metricas,
   buscarPorToken, regenerarLink,
   listPendentesAprovacaoCadastro, aprovarCadastro, reprovarCadastro,
   registrarDecisaoTeste, verificarTestesVencidos, marcarAlertaTesteEnviado,

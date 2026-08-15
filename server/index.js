@@ -4451,6 +4451,85 @@ app.post('/api/rh/funcionarios/:id/atestado/retorno', requireSection('rh'), asyn
   }
 });
 
+// ---------- desligamento (vira ex-colaborador com data + motivo; não apaga) ----------
+app.post('/api/rh/funcionarios/:id/desligar', requireSection('rh'), async (req, res) => {
+  try {
+    const atual = await rh.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const registro = await rh.desligar(req.params.id, { motivo: req.body.motivo, porEmail: req.user.email });
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/rh/funcionarios/:id/reativar', auth.requireMaster, async (req, res) => {
+  try {
+    const registro = await rh.reativar(req.params.id);
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// ---------- exame periódico (ASO): "fiz hoje" reinicia o vencimento ----------
+app.post('/api/rh/funcionarios/:id/exame-periodico', requireSection('rh'), async (req, res) => {
+  try {
+    const atual = await rh.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const registro = await rh.registrarExamePeriodico(req.params.id, { data: req.body.data, periodicidadeMeses: req.body.periodicidadeMeses });
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// ---------- documentos anexados (RG/CPF, CTPS, ASO, contrato...) ----------
+app.post('/api/rh/funcionarios/:id/documentos', requireSection('rh'), upload.single('documento'), async (req, res) => {
+  try {
+    const atual = await rh.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    if (!req.file) return res.status(400).json({ error: 'Anexe um arquivo.' });
+    const path = await storage.salvarArquivo(atual.id, req.file, 'rh-documentos');
+    const registro = await rh.adicionarDocumento(req.params.id, {
+      tipo: req.body.tipo,
+      anexo: { nome: req.file.originalname, path, mime: req.file.mimetype, tamanho: req.file.size },
+      porEmail: req.user.email,
+    });
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.get('/api/rh/funcionarios/:id/documentos/:index', requireSection('rh'), async (req, res) => {
+  const atual = await rh.getOne(req.params.id);
+  if (!atual) return res.sendStatus(404);
+  if (!podeAcessarUnidadeRh(req, atual.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  const doc = (atual.documentos || [])[Number(req.params.index)];
+  if (!doc) return res.sendStatus(404);
+  storage.streamArquivo(doc.path, doc.mime, res);
+});
+
+app.delete('/api/rh/funcionarios/:id/documentos/:index', auth.requireMaster, async (req, res) => {
+  try {
+    const { funcionario } = await rh.removerDocumento(req.params.id, req.params.index);
+    broadcast('rh-funcionario-atualizado', funcionario, 'rh');
+    res.json(funcionario);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// ---------- painel de métricas + central de alertas trabalhistas (gestão:
+// RH todas-unidades / Admin / Master) ----------
+app.get('/api/rh/metricas', requireSection('rh'), async (req, res) => {
+  if (!podeAprovarRh(req)) return res.status(403).json({ error: 'Só o RH (todas as unidades), Admin ou Master veem o painel.' });
+  res.json(await rh.metricas());
+});
+
+app.get('/api/rh/alertas', requireSection('rh'), async (req, res) => {
+  if (!podeAprovarRh(req)) return res.status(403).json({ error: 'Só o RH (todas as unidades), Admin ou Master veem os alertas.' });
+  res.json(await rh.alertasTrabalhistas());
+});
+
 app.get('/api/rh/funcionarios/:id/curriculo', requireSection('rh'), async (req, res) => {
   const atual = await rh.getOne(req.params.id);
   if (!atual || !atual.curriculo) return res.sendStatus(404);
