@@ -32,8 +32,8 @@
 </style>
 </head>
 <body>
-  <div class="icone">🚨</div>
-  <h1>Beniboy precisa de você</h1>
+  <div class="icone" id="icone">🚨</div>
+  <h1 id="titulo">Beniboy precisa de você</h1>
   <div class="corpo" id="corpo">O assistente não conseguiu resolver sozinho.</div>
   <div class="aviso-mudo hidden" id="aviso-mudo">Toque em qualquer lugar pra ativar o som do alerta.</div>
   <div class="botoes">
@@ -44,9 +44,17 @@
   const params = new URLSearchParams(location.search);
   const nome = params.get('nome') || '';
   const motivo = params.get('motivo') || '';
+  // tipo=seguranca: mesma tela/sirene de alarme, mas pra uma tentativa de
+  // invasao no chat de suporte (ver push.notifySegurancaChat), nao pro
+  // Beniboy pedindo ajuda - texto e destino do "Atender agora" mudam
+  const ehSeguranca = params.get('tipo') === 'seguranca';
+  if (ehSeguranca) {
+    document.getElementById('icone').textContent = '🛡️';
+    document.getElementById('titulo').textContent = 'Alerta de segurança no chat';
+  }
   document.getElementById('corpo').textContent = (nome || motivo)
     ? `${nome || 'Visitante'}${motivo ? ' · ' + motivo : ''}`
-    : 'O assistente não conseguiu resolver sozinho.';
+    : (ehSeguranca ? 'Atividade suspeita detectada no chat de suporte.' : 'O assistente não conseguiu resolver sozinho.');
 
   let ativo = true;
   let audioCtx = null;
@@ -96,7 +104,7 @@
   document.getElementById('btn-silenciar').addEventListener('click', pararAlarme);
   document.getElementById('btn-atender').addEventListener('click', () => {
     pararAlarme();
-    location.href = '/tecnico.html';
+    location.href = ehSeguranca ? '/beniboy.html' : '/tecnico.html';
   });
 </script>
 </body>

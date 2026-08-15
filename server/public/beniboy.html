@@ -107,6 +107,15 @@
   .msg-item .m-texto{white-space:pre-wrap;margin-top:2px;}
   .d-acoes{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
   .d-tickets{font-size:11.5px;color:var(--muted);margin-bottom:8px;}
+  /* alertas de seguranca dessa conversa (texto tipo comando/script ou upload
+     bloqueado - ver segurancaChat.js/index.js) - so Master ve, pedido
+     explicito do usuario: "fechar as brechas de seguranca [...] tentar pegar
+     o máximo de informação do acesso que tentou infiltrar malicioso" */
+  .d-alerta-seguranca{background:rgba(255,92,92,.1);border:1px solid rgba(255,92,92,.4);border-radius:8px;
+    padding:8px 10px;margin-bottom:8px;font-size:12px;color:#ff8a8a;}
+  .d-alerta-seguranca summary{cursor:pointer;font-weight:600;}
+  .d-alerta-item{margin-top:6px;padding-top:6px;border-top:1px dashed rgba(255,92,92,.3);font-size:11.5px;color:var(--muted);}
+  .d-alerta-item code{display:block;margin-top:3px;white-space:pre-wrap;word-break:break-word;color:#ff8a8a;}
 
   /* paineis de conversa abertos - ficam ABAIXO do kanban (nao mais em modal
      por cima da tela), lado a lado, dentro da propria faixa de scroll
@@ -325,7 +334,7 @@ function cardHtml(chat){
       ${chat.desbloqueio ? '<span class="tag-desbloqueio">🔓 Desbloqueio</span>' : ''}
       ${ultimoTicket ? `<span class="tag-ticket">🎫 #${escapeHtml(ultimoTicket.numero)}${tickets.length>1?` +${tickets.length-1}`:''}</span>` : ''}
     </div>
-    <div class="kcard-nome">${escapeHtml(chat.nome||'Visitante')}</div>
+    <div class="kcard-nome">${escapeHtml(chat.nome||'Visitante')}${chat.numeroTicket ? ` <span style="font-weight:400;opacity:.65;">· #${escapeHtml(chat.numeroTicket)}</span>` : ''}</div>
     <div class="kcard-assunto">${escapeHtml(chat.assunto || 'Suporte geral')}</div>
     <div class="kcard-prev">${um ? escapeHtml(um.de)+': '+escapeHtml(um.texto||'(sem texto)') : 'Sem mensagens.'}</div>
     <div class="kcard-meta">
@@ -500,6 +509,7 @@ function painelHtml(chat){
     acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">↩️ Reabrir</button>`);
   }
   if(!chat.chamadoId) acoes.push(`<button type="button" class="btn-ghost" onclick="gerarChamadoRemoto('${chat.id}')">🎫 Gerar chamado remoto</button>`);
+  if(IS_MASTER) acoes.push(`<button type="button" class="btn-ghost" onclick="baixarPdfConversa('${chat.id}')">📄 Baixar PDF</button>`);
 
   const msgs = (chat.mensagens||[]).map(m=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'🤖 Beniboy':'Suporte'), texto: m.texto, em: m.em }));
   const msgsHtml = msgs.length ? msgs.map(m=>`
@@ -510,16 +520,24 @@ function painelHtml(chat){
 
   const finalizado = chat.status === 'FINALIZADO';
   const idAttr = escapeHtml(chat.id);
+  const alertasSeg = IS_MASTER ? (chat.alertasSeguranca || []) : [];
 
   return `<div class="painel-conversa" data-painel-id="${idAttr}">
     <div class="painel-topo">
       <div style="min-width:0;">
         <h3>${escapeHtml(chat.nome || 'Visitante')}</h3>
-        <div class="sub">${escapeHtml(chat.contato||'')} · ${escapeHtml(chat.assunto||'Suporte geral')}${chat.lojaContexto?' · loja: '+escapeHtml(chat.lojaContexto):''} · N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}</div>
+        <div class="sub">${chat.numeroTicket?'Protocolo #'+escapeHtml(chat.numeroTicket)+' · ':''}${escapeHtml(chat.contato||'')} · ${escapeHtml(chat.assunto||'Suporte geral')}${chat.lojaContexto?' · loja: '+escapeHtml(chat.lojaContexto):''} · N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}</div>
       </div>
       <span class="painel-fechar" title="Fechar" onclick="fecharPainel('${idAttr}')">✕</span>
     </div>
     ${tickets.length ? `<div class="d-tickets">🎫 Tickets dessa conversa: ${tickets.map(t=>`#${escapeHtml(t.numero)}`).join(', ')}</div>` : ''}
+    ${alertasSeg.length ? `<div class="d-alerta-seguranca"><details><summary>🛡️ ${alertasSeg.length} alerta(s) de segurança nessa conversa</summary>${alertasSeg.map(a=>`
+      <div class="d-alerta-item">
+        <b>${escapeHtml(a.motivo||'')}</b> · ${fmtDataHora(a.em)}<br>
+        IP: ${escapeHtml(a.ip||'—')}${a.referer?' · ref: '+escapeHtml(a.referer):''}<br>
+        ${escapeHtml(a.userAgent||'')}
+        ${a.detalheExtra ? `<code>${escapeHtml(a.detalheExtra)}</code>` : ''}
+      </div>`).join('')}</details></div>` : ''}
     <div class="d-acoes">${acoes.join('')}</div>
     <div class="painel-msgs" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">${msgsHtml}</div>
     ${finalizado
@@ -579,6 +597,24 @@ async function gerarChamadoRemoto(id){
     if(!resp.ok) throw new Error(data.error || 'Erro ao gerar chamado.');
     await carregarLista();
   }catch(err){ alert(err.message); }
+}
+
+// baixa o PDF da conversa (rota autenticada - window.fetch ja injeta o
+// Authorization automaticamente, ver patch no topo do arquivo) - pedido
+// explicito do usuario: "preciso ter um botao de gerar pdf da conversa"
+async function baixarPdfConversa(id){
+  try{
+    const resp = await fetch(`/api/suporte-chats/${id}/pdf`);
+    if(!resp.ok){ alert('Não foi possível gerar o PDF.'); return; }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'conversa-suporte.pdf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+  }catch(e){ alert('Erro ao gerar o PDF.'); }
 }
 
 async function carregarLista(){

@@ -51,6 +51,14 @@
   .szc-erro{font-size:11.5px;color:#ff5c5c;}
   .szc-fim{background:#181d24;border:1px dashed #232a33;color:#7d8896;border-radius:8px;padding:8px;font-size:11.5px;text-align:center;}
   .szc-link{background:none;border:none;color:#5cc8ff;font-size:12px;cursor:pointer;padding:0;}
+  /* anexo (foto/PDF) no chat - pedido explicito do usuario: "precisa
+     permitir enviar foto e anexos no chat" */
+  .szc-anexo-btn{display:flex;align-items:center;justify-content:center;width:36px;flex-shrink:0;
+    cursor:pointer;font-size:17px;color:#7d8896;border-radius:8px;}
+  .szc-anexo-btn:hover{color:#5cc8ff;}
+  .szc-anexo-btn.szc-anexo-tem{color:#5cc8ff;}
+  .szc-msg img.szc-anexo-img{max-width:180px;max-height:180px;border-radius:8px;border:1px solid #232a33;margin-top:4px;display:block;}
+  .szc-msg a.szc-anexo-arq{display:inline-block;margin-top:4px;color:#5cc8ff;font-size:12px;}
   /* cabeça de robo (Beniboy) dentro do botao - olhos brilham/piscam, bracos acenam */
   .szc-btn svg{overflow:visible;}
   .szc-bot-eyes{transform-box:fill-box;transform-origin:center;animation:szc-blink 4.6s ease-in-out infinite;}
@@ -122,6 +130,50 @@
     if (!iso) return '';
     return new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Recife', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   }
+  // baixa o PDF da conversa (rota publica pro visitante, autenticada pro
+  // atendimento - ver botoes "Baixar PDF" abaixo) - pedido explicito do
+  // usuario: "preciso ter um botao de gerar pdf da conversa"
+  async function baixarPdf(url, headers) {
+    try {
+      const r = await rawFetch(url, headers ? { headers } : undefined);
+      if (!r.ok) { alert('Não foi possível gerar o PDF.'); return; }
+      const blob = await r.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'conversa-suporte.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch (e) { alert('Erro ao gerar o PDF.'); }
+  }
+
+  // anexo de uma mensagem (foto/PDF - pedido explicito do usuario: "precisa
+  // permitir enviar foto e anexos no chat"). Imagem aparece embutida
+  // (clicavel, abre em tamanho real); outros tipos (so PDF, ver
+  // segurancaChat.js) viram um link de download
+  function anexoHtml(anexo, url) {
+    if (!anexo) return '';
+    const ehImagem = /^image\//.test(anexo.tipo || '');
+    if (ehImagem) {
+      return `<a href="${url}" target="_blank" rel="noopener"><img class="szc-anexo-img" src="${url}" alt="${esc(anexo.nome || 'anexo')}"></a>`;
+    }
+    return `<a class="szc-anexo-arq" href="${url}" target="_blank" rel="noopener">📎 ${esc(anexo.nome || 'arquivo')}</a>`;
+  }
+  // alterna o icone do botao de anexo (📎 -> ✅) conforme um arquivo foi
+  // escolhido ou nao - mesmo padrao ja usado em outras telas do Zenith
+  // (ex: tecnico.html)
+  function ligarBotaoAnexo(inputEl, iconeEl) {
+    inputEl.addEventListener('change', () => {
+      iconeEl.textContent = inputEl.files[0] ? '✅' : '📎';
+      iconeEl.parentElement.classList.toggle('szc-anexo-tem', !!inputEl.files[0]);
+    });
+  }
+  function limparAnexo(inputEl, iconeEl) {
+    inputEl.value = '';
+    iconeEl.textContent = '📎';
+    iconeEl.parentElement.classList.remove('szc-anexo-tem');
+  }
 
   const style = document.createElement('style');
   style.textContent = css;
@@ -182,6 +234,10 @@
       </div>
       <div class="szc-corpo" id="szc-corpo"></div>
       <div class="szc-rodape szc-hidden" id="szc-rodape">
+        <label class="szc-anexo-btn" id="szc-anexo-label" title="Anexar foto ou PDF">
+          <span id="szc-anexo-icone">📎</span>
+          <input type="file" id="szc-nova-anexo" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden>
+        </label>
         <input type="text" class="szc-input" id="szc-nova-msg" placeholder="escreva sua mensagem..." maxlength="1000">
         <button type="button" class="szc-enviar" id="szc-enviar-msg">➤</button>
       </div>
@@ -191,6 +247,7 @@
 
   const corpo = panel.querySelector('#szc-corpo');
   const rodape = panel.querySelector('#szc-rodape');
+  ligarBotaoAnexo(panel.querySelector('#szc-nova-anexo'), panel.querySelector('#szc-anexo-icone'));
 
   // as rotas do chat sao publicas e nunca respondem 401, entao da pra usar o
   // fetch da pagina mesmo (nas telas logadas ele so acrescenta o Authorization,
@@ -283,12 +340,29 @@
 
   function renderConversa(chat) {
     const noFim = corpo.scrollTop + corpo.clientHeight >= corpo.scrollHeight - 30;
+    const salvo = chatSalvo();
+    // protocolo (mesma numeracao global dos tickets) - a pessoa ja recebe
+    // um numero pra referenciar desde o 1o contato, viraz ou nao um chamado
+    // de verdade depois (pedido explicito do usuario)
+    const protocoloTag = chat.numeroTicket
+      ? `<div class="szc-aviso" style="color:#5cc8ff;">🎫 Protocolo #${chat.numeroTicket} · <button type="button" class="szc-link" id="szc-pdf">📄 baixar PDF da conversa</button></div>`
+      : '';
     // m.bot = resposta do Beniboy (assistente automático) - identificado
     // pra pessoa saber que ainda não é um humano falando
-    corpo.innerHTML = (chat.mensagens || []).map((m) => `
+    corpo.innerHTML = protocoloTag + ((chat.mensagens || []).map((m, i) => {
+      const anexoUrl = m.anexo && salvo ? `/api/suporte-chat/${encodeURIComponent(salvo.id)}/anexo/${i}?token=${encodeURIComponent(salvo.token)}` : '';
+      return `
       <div class="szc-msg ${m.de === 'visitante' ? 'visitante' : 'suporte'}">
-        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Você') : (m.bot ? '🤖 Beniboy · assistente virtual' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}
-      </div>`).join('') || '<div class="szc-aviso">Sem mensagens ainda.</div>';
+        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Você') : (m.bot ? '🤖 Beniboy · assistente virtual' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}${anexoHtml(m.anexo, anexoUrl)}
+      </div>`;
+    }).join('') || '<div class="szc-aviso">Sem mensagens ainda.</div>');
+    const pdfBtn = corpo.querySelector('#szc-pdf');
+    if (pdfBtn) {
+      pdfBtn.addEventListener('click', () => {
+        const salvo = chatSalvo();
+        if (salvo) baixarPdf(`/api/suporte-chat/${encodeURIComponent(salvo.id)}/pdf?token=${encodeURIComponent(salvo.token)}`);
+      });
+    }
     if (chat.status !== 'ABERTO') {
       corpo.insertAdjacentHTML('beforeend', `<div class="szc-fim">Conversa finalizada pelo Suporte. Precisa de mais ajuda?<br><button type="button" class="szc-link" id="szc-nova-conversa">Iniciar nova conversa</button></div>`);
       corpo.querySelector('#szc-nova-conversa').addEventListener('click', async () => {
@@ -321,16 +395,27 @@
     const salvo = chatSalvo();
     if (!salvo) return;
     const input = panel.querySelector('#szc-nova-msg');
+    const anexoInput = panel.querySelector('#szc-nova-anexo');
+    const iconeAnexo = panel.querySelector('#szc-anexo-icone');
     const texto = input.value.trim();
-    if (!texto) return;
+    const arquivo = anexoInput.files[0];
+    if (!texto && !arquivo) return;
     const b = panel.querySelector('#szc-enviar-msg');
     b.disabled = true;
     try {
-      const r = await rawFetch(`/api/suporte-chat/${encodeURIComponent(salvo.id)}/mensagem`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: salvo.token, texto }),
-      });
-      if (r.ok) { input.value = ''; await carregarConversa(); }
+      const fd = new FormData();
+      fd.append('token', salvo.token);
+      fd.append('texto', texto);
+      if (arquivo) fd.append('anexo', arquivo);
+      const r = await rawFetch(`/api/suporte-chat/${encodeURIComponent(salvo.id)}/mensagem`, { method: 'POST', body: fd });
+      if (r.ok) {
+        input.value = '';
+        limparAnexo(anexoInput, iconeAnexo);
+        await carregarConversa();
+      } else {
+        const data = await r.json().catch(() => ({}));
+        if (data.error) alert(data.error);
+      }
     } finally { b.disabled = false; }
   }
 
@@ -408,10 +493,12 @@
       const fila = atendAguardando();
       badge.textContent = fila.length;
       badge.style.display = fila.length ? 'block' : 'none';
-      // conversa aberta no momento: atualiza ao vivo
+      // conversa aberta no momento: atualiza ao vivo (so a thread de
+      // mensagens - ver atendAtualizarThreadAoVivo - pra nao apagar o que
+      // o atendente esteja digitando na caixa de resposta)
       if (aberto && ATEND.chatAberto) {
         const atual = ATEND.chats.find((c) => c.id === ATEND.chatAberto);
-        if (atual) atendRenderConversa(atual, true);
+        if (atual) atendAtualizarThreadAoVivo(atual);
       }
       // popup automatico: mensagem de visitante mais nova que o marcador
       const nova = fila.find((c) => {
@@ -440,7 +527,7 @@
       const ultima = msgs[msgs.length - 1];
       const aguarda = !!ultimaMsgVisitante(c);
       return `<button type="button" class="szc-input" style="text-align:left;cursor:pointer;${aguarda ? 'border-color:#ff5c5c;' : ''}" data-atend-chat="${esc(c.id)}">
-        <b style="font-size:12.5px;">${aguarda ? '🔴 ' : ''}${esc(c.nome)}</b>
+        <b style="font-size:12.5px;">${aguarda ? '🔴 ' : ''}${esc(c.nome)}${c.numeroTicket ? ' · #' + c.numeroTicket : ''}</b>
         <span style="display:block;font-size:11px;color:#7d8896;">${esc((ultima && ultima.texto || '').slice(0, 60))}</span>
       </button>`;
     }).join('') || '<div class="szc-fim">Nenhuma conversa aberta. 🎉</div>') +
@@ -452,6 +539,20 @@
     corpo.querySelector('#szc-ir-beniboy').addEventListener('click', () => { location.href = '/beniboy.html'; });
   }
 
+  function montarThreadHtml(chat) {
+    return (chat.mensagens || []).map((m, i) => {
+      const anexoUrl = m.anexo ? `/api/suporte-chats/${encodeURIComponent(chat.id)}/anexo/${i}?token=${encodeURIComponent(localStorage.getItem('authToken') || '')}` : '';
+      return `
+      <div class="szc-msg ${m.de === 'visitante' ? 'suporte' : 'visitante'}">
+        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Visitante') : (m.bot ? '🤖 Beniboy (bot)' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}${anexoHtml(m.anexo, anexoUrl)}
+      </div>`;
+    }).join('');
+  }
+
+  // render COMPLETO - usado so ao ABRIR uma conversa (clique na lista, popup
+  // automatico, ou depois de mandar uma resposta). Recria o input de resposta
+  // do zero, o que e esperado nesses casos (nada estava sendo digitado ainda,
+  // ou acabou de ser enviado)
   function atendRenderConversa(chat, manterScroll) {
     ATEND.chatAberto = chat.id;
     rodape.classList.add('szc-hidden');
@@ -459,32 +560,48 @@
     corpo.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
         <button type="button" class="szc-link" id="szc-atend-voltar">← conversas</button>
-        <span style="font-size:11px;color:#7d8896;">${esc(chat.nome)} · ${esc(chat.contato || '')}</span>
-      </div>` +
-      (chat.mensagens || []).map((m) => `
-      <div class="szc-msg ${m.de === 'visitante' ? 'suporte' : 'visitante'}">
-        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Visitante') : (m.bot ? '🤖 Beniboy (bot)' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}
-      </div>`).join('') + `
+        <span style="font-size:11px;color:#7d8896;">${esc(chat.nome)} · ${esc(chat.contato || '')}${chat.numeroTicket ? ' · Protocolo #' + chat.numeroTicket : ''}</span>
+      </div>
+      <div id="szc-atend-thread">${montarThreadHtml(chat)}</div>
       <div style="display:flex;gap:6px;">
+        <label class="szc-anexo-btn" id="szc-atend-anexo-label" title="Anexar foto ou PDF">
+          <span id="szc-atend-anexo-icone">📎</span>
+          <input type="file" id="szc-atend-anexo" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden>
+        </label>
         <input type="text" class="szc-input" id="szc-atend-msg" placeholder="responder..." maxlength="1000" style="flex:1;">
         <button type="button" class="szc-enviar" id="szc-atend-enviar">➤</button>
-      </div>`;
+      </div>
+      ${ATEND.ehMaster ? `<button type="button" class="szc-link" id="szc-atend-pdf" style="margin-top:4px;">📄 baixar PDF da conversa</button>` : ''}`;
+    ligarBotaoAnexo(corpo.querySelector('#szc-atend-anexo'), corpo.querySelector('#szc-atend-anexo-icone'));
     atendMarcarVisto(chat);
     atendAtualizarBadge();
     corpo.querySelector('#szc-atend-voltar').addEventListener('click', () => {
       if (ATEND.ehMaster) atendRenderLista();
       else { aberto = false; panel.classList.add('szc-hidden'); }
     });
+    // botao de PDF so existe no DOM quando ATEND.ehMaster (rota tambem e
+    // Master-only no backend - pedido explicito do usuario: "so o master
+    // pode gerar o pdf")
+    const btnPdf = corpo.querySelector('#szc-atend-pdf');
+    if (btnPdf) {
+      btnPdf.addEventListener('click', () => {
+        baixarPdf(`/api/suporte-chats/${encodeURIComponent(chat.id)}/pdf`, authHeaders());
+      });
+    }
     const input = corpo.querySelector('#szc-atend-msg');
+    const anexoInput = corpo.querySelector('#szc-atend-anexo');
     const enviar = async () => {
       const texto = input.value.trim();
-      if (!texto) return;
+      const arquivo = anexoInput.files[0];
+      if (!texto && !arquivo) return;
       const b = corpo.querySelector('#szc-atend-enviar');
       b.disabled = true;
       try {
+        const fd = new FormData();
+        fd.append('texto', texto);
+        if (arquivo) fd.append('anexo', arquivo);
         const r = await rawFetch(`/api/suporte-chats/${encodeURIComponent(chat.id)}/responder`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify({ texto }),
+          method: 'POST', headers: authHeaders(), body: fd,
         });
         if (r.ok) {
           const atualizado = await r.json();
@@ -499,6 +616,22 @@
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); enviar(); } });
     if (noFim) corpo.scrollTop = corpo.scrollHeight;
     input.focus();
+  }
+
+  // atualizacao AO VIVO da MESMA conversa ja aberta (poll/SSE trazendo
+  // mensagem nova enquanto o atendente esta olhando) - troca SO a thread de
+  // mensagens (#szc-atend-thread), nunca recria o input de resposta. Bug
+  // reportado pelo usuario: antes disso, todo re-render (a cada mensagem
+  // nova em QUALQUER conversa, nao so a aberta) recriava o input inteiro,
+  // apagando o que a pessoa estava digitando no meio da resposta.
+  function atendAtualizarThreadAoVivo(chat) {
+    const threadEl = corpo.querySelector('#szc-atend-thread');
+    if (!threadEl) { atendRenderConversa(chat, true); return; } // painel nao esta na estrutura esperada - refaz do zero
+    const noFim = corpo.scrollTop + corpo.clientHeight >= corpo.scrollHeight - 30;
+    threadEl.innerHTML = montarThreadHtml(chat);
+    atendMarcarVisto(chat);
+    atendAtualizarBadge();
+    if (noFim) corpo.scrollTop = corpo.scrollHeight;
   }
 
   function atendAtualizarBadge() {
@@ -664,6 +797,15 @@
       if (ATEND.ativo) {
         es.addEventListener('suporte-chat', () => { atendCarregar(); });
         es.addEventListener('beniboy-escalonamento', (e) => { dispararAlarmeBeniboy(JSON.parse(e.data)); });
+        // alerta de seguranca (texto tipo comando/script ou upload bloqueado
+        // no chat publico - ver segurancaChat.js/index.js) - SO Master, mais
+        // restrito que o alarme critico acima (Master + tag Suporte). Reusa
+        // o mesmo alarme visual/sonoro, so muda o motivo mostrado
+        es.addEventListener('chat-seguranca-alerta', (e) => {
+          if (!ATEND.ehMaster) return;
+          const d = JSON.parse(e.data);
+          dispararAlarmeBeniboy({ nome: d.nome, motivo: '🛡️ ' + (d.motivo || 'Atividade suspeita detectada no chat') });
+        });
       }
       es.addEventListener('pedido-status-mudou', (e) => { mostrarPopupPedido(JSON.parse(e.data)); });
       es.addEventListener('mensagem-direta', (e) => { mostrarPopupMensagem(JSON.parse(e.data)); });
