@@ -165,6 +165,8 @@
 
 <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:0 0 8px;">👤 pessoas · 🧑‍💼 Colaboradores = quem foi efetivado (só eles entram em Atestados/Advertências) · 👷 Extras = avulso · ⏳ Em Teste = candidato no período de 5 dias</div>
 <div class="tabs">
+  <button type="button" class="tab-btn hidden" id="btn-aba-painel" data-tab="painel" onclick="trocarAba('painel')">📊 Painel</button>
+  <button type="button" class="tab-btn hidden" id="btn-aba-alertas" data-tab="alertas" onclick="trocarAba('alertas')">⚖️ Alertas <span id="alertas-total"></span></button>
   <button type="button" class="tab-btn active" data-tab="unidade" onclick="trocarAba('unidade')">👥 Por Unidade</button>
   <button type="button" class="tab-btn" data-tab="colaboradores" onclick="trocarAba('colaboradores')">🧑‍💼 Colaboradores</button>
   <button type="button" class="tab-btn" data-tab="extras" onclick="trocarAba('extras')">👷 Extras <span id="extras-checkin-total"></span></button>
@@ -179,6 +181,24 @@
   <button type="button" class="tab-btn" data-tab="atestados" onclick="trocarAba('atestados')">🩺 Atestados</button>
   <button type="button" class="tab-btn" data-tab="advertencias" onclick="trocarAba('advertencias')">📋 Advertências</button>
   <button type="button" class="tab-btn" data-tab="aniver" onclick="trocarAba('aniver')">🎂 Aniversariantes</button>
+</div>
+
+<!-- ---------- ABA: Painel (métricas gerais) ---------- -->
+<div class="painel-tab hidden" id="tab-painel">
+  <div class="panel">
+    <h2>📊 Painel de RH</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">visão geral do quadro de pessoal do grupo - números, tempo de casa e destaques</div>
+    <div id="painel-metricas"><div class="empty">carregando…</div></div>
+  </div>
+</div>
+
+<!-- ---------- ABA: Alertas trabalhistas ---------- -->
+<div class="painel-tab hidden" id="tab-alertas">
+  <div class="panel">
+    <h2>⚖️ Alertas trabalhistas</h2>
+    <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:10px;">prazos legais que, se estourarem, expõem a empresa a multa/passivo na Justiça do Trabalho - exame periódico (ASO/NR-7), férias (CLT art. 137), fim de experiência e documentação obrigatória</div>
+    <div id="alertas-lista"><div class="empty">carregando…</div></div>
+  </div>
 </div>
 
 <!-- ---------- ABA: Por Unidade (visão geral + status de cada pessoa) ---------- -->
@@ -428,8 +448,43 @@
         <option value="ativo">Ativo</option>
         <option value="inativo">Inativo (desligado)</option>
       </select>
+
+      <div style="border-top:1px solid var(--linha,#2a2a2a);margin:16px 0 4px;padding-top:12px;">
+        <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:8px;">⚖️ prazos legais - alimentam os Alertas trabalhistas</div>
+      </div>
+      <div class="grid2">
+        <div>
+          <label>Último exame periódico (ASO)</label>
+          <input type="date" id="ed-aso-data">
+        </div>
+        <div>
+          <label>Periodicidade do ASO (meses)</label>
+          <input type="number" id="ed-aso-periodicidade" min="1" max="60" placeholder="12">
+        </div>
+      </div>
+      <label>Início do último período aquisitivo de férias</label>
+      <input type="date" id="ed-ferias-data">
+      <div class="sub" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin:4px 0 0;">deixe em branco pra usar a data de admissão. o prazo pra conceder férias vence 11 meses após o fim do período aquisitivo (antes da dobra do art. 137 da CLT).</div>
+
       <div class="msg hidden" id="msg-editar"></div>
       <button class="btn-primary" type="button" onclick="salvarEdicao()">Salvar alterações</button>
+
+      <div id="ed-docs-bloco" style="border-top:1px solid var(--linha,#2a2a2a);margin-top:18px;padding-top:14px;">
+        <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:8px;">📎 documentos anexados</div>
+        <div id="ed-docs-lista" style="margin-bottom:10px;"></div>
+        <div class="grid2">
+          <div>
+            <label>Tipo de documento</label>
+            <select id="ed-doc-tipo"></select>
+          </div>
+          <div>
+            <label>Arquivo</label>
+            <input type="file" id="ed-doc-arquivo">
+          </div>
+        </div>
+        <div class="msg hidden" id="msg-doc"></div>
+        <button class="btn-secundario" type="button" onclick="anexarDocumento()">📎 Anexar documento</button>
+      </div>
     </div>
   </div>
 </div>
@@ -746,6 +801,8 @@ function trocarAba(nome){
   if(nome==='checkins') carregarCheckins();
   if(nome==='aprovacoes') { carregarAprovacoesCadastro(); carregarAprovacoes(); }
   if(nome==='advertencias') carregarAdvertencias();
+  if(nome==='painel') renderPainelMetricas();
+  if(nome==='alertas') renderAlertas();
 }
 
 function badgeTeste(f){
@@ -755,18 +812,48 @@ function badgeTeste(f){
   return `<span class="badge warn">teste · dia ${dias}</span>`;
 }
 
+// tempo de casa e situação do ASO calculados no cliente (espelham rh.js) só
+// pra montar os selos/subtítulo do card sem uma ida extra ao servidor
+function mesesDeCasaCli(adm){
+  if(!adm) return null;
+  const a=new Date(adm+'T00:00:00'), h=new Date(); h.setHours(0,0,0,0);
+  let m=(h.getFullYear()-a.getFullYear())*12+(h.getMonth()-a.getMonth());
+  if(h.getDate()<a.getDate()) m--;
+  return Math.max(0,m);
+}
+function tempoCasaTextoCli(adm){
+  const m=mesesDeCasaCli(adm); if(m==null) return '';
+  const anos=Math.floor(m/12), mm=m%12, p=[];
+  if(anos) p.push(anos+(anos>1?' anos':' ano'));
+  if(mm) p.push(mm+(mm>1?' meses':' mês'));
+  return p.join(' e ')||'menos de 1 mês';
+}
+function asoBadgeCli(f){
+  if(f.status!=='ativo'||f.tipoCadastro==='extra') return '';
+  if(!f.dataExamePeriodico) return '<span class="badge muted" title="Sem exame periódico (ASO) registrado">ASO n/d</span>';
+  const venc=new Date(f.dataExamePeriodico+'T00:00:00'); venc.setMonth(venc.getMonth()+(f.periodicidadeExameMeses||12));
+  const hoje=new Date(); hoje.setHours(0,0,0,0);
+  const dias=Math.round((venc-hoje)/86400000);
+  if(dias<0) return '<span class="badge bad">ASO vencido</span>';
+  if(dias<=30) return `<span class="badge warn">ASO vence em ${dias}d</span>`;
+  return '';
+}
+
 function cardAtivoHtml(f){
   const badges = [
     f.status==='candidato' ? '<span class="badge warn">candidato</span>' : (f.status==='inativo' ? '<span class="badge muted">desligado</span>' : '<span class="badge ok">ativo</span>'),
     badgeTeste(f),
     f.emAtestado ? '<span class="badge bad">🩺 atestado</span>' : '',
     (f.experiencia && f.experiencia.etapa) ? `<span class="badge warn">🗓️ exp. ${f.experiencia.etapa} dias</span>` : '',
+    asoBadgeCli(f),
   ].filter(Boolean).join(' ');
   const totalCheckins = (CONTAGEM_CHECKINS[f.id]||{}).total || 0;
+  const tempo = tempoCasaTextoCli(f.dataAdmissao);
+  const nEsc = escapeHtml(f.nome).replace(/'/g,"\\'");
   return `<div class="card">
     <div class="linha1"><span class="nome-clicavel" onclick="abrirDetalheFuncionario('${f.id}')">${escapeHtml(f.nome)}</span>${badges}</div>
-    <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · desde ${fmtData(f.dataAdmissao)}${f.contato?' · '+escapeHtml(f.contato):''}</div>
-    <div class="sub">📸 ${totalCheckins} check-in${totalCheckins===1?'':'s'} no total</div>
+    <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · desde ${fmtData(f.dataAdmissao)}${tempo?` · ⏱️ ${tempo} de casa`:''}${f.contato?' · '+escapeHtml(f.contato):''}</div>
+    <div class="sub">📸 ${totalCheckins} check-in${totalCheckins===1?'':'s'} no total${f.status==='inativo'&&f.desligadoEm?` · 🚪 desligado em ${fmtData(f.desligadoEm.slice(0,10))}${f.motivoDesligamento?' ('+escapeHtml(f.motivoDesligamento)+')':''}`:''}</div>
     <div class="acoes">
       ${IS_MASTER ? `<button type="button" class="link-btn" onclick="abrirEditar('${f.id}')">✏️ editar</button>` : ''}
       ${f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 currículo</a>` : ''}
@@ -776,8 +863,10 @@ function cardAtivoHtml(f){
       ${f.emAtestado ? `<button type="button" class="link-btn" onclick="marcarRetorno('${f.id}')">✅ registrar retorno</button>` : ''}
       ${f.status==='ativo' && f.tipoCadastro!=='extra' ? `<button type="button" class="link-btn" onclick="abrirAdvertencia('${f.id}')">📋 solicitar advertência</button>` : ''}
       ${IS_MASTER && f.status==='ativo' && f.tipoCadastro!=='extra' ? `<button type="button" class="link-btn" onclick="abrirAjusteExperiencia('${f.id}')">🗓️ ajustar experiência</button>` : ''}
-      ${IS_MASTER && f.status==='ativo' && f.tipoCadastro==='extra' ? `<button type="button" class="link-btn" onclick="converterEfetivado('${f.id}','${escapeHtml(f.nome).replace(/'/g,"\\'")}')">🔄 converter em efetivado</button>` : ''}
-      ${IS_MASTER ? `<button type="button" class="link-btn" style="color:var(--bad);" onclick="excluirFuncionario('${f.id}','${escapeHtml(f.nome).replace(/'/g,"\\'")}')">🗑️ excluir</button>` : ''}
+      ${IS_MASTER && f.status==='ativo' && f.tipoCadastro==='extra' ? `<button type="button" class="link-btn" onclick="converterEfetivado('${f.id}','${nEsc}')">🔄 converter em efetivado</button>` : ''}
+      ${f.status!=='inativo' ? `<button type="button" class="link-btn" style="color:var(--warn);" onclick="desligarFuncionario('${f.id}','${nEsc}')">🚪 desligar</button>` : ''}
+      ${IS_MASTER && f.status==='inativo' ? `<button type="button" class="link-btn" style="color:var(--ok);" onclick="reativarFuncionario('${f.id}','${nEsc}')">↩️ reativar</button>` : ''}
+      ${IS_MASTER ? `<button type="button" class="link-btn" style="color:var(--bad);" onclick="excluirFuncionario('${f.id}','${nEsc}')">🗑️ excluir</button>` : ''}
     </div>
   </div>`;
 }
@@ -1638,18 +1727,28 @@ function abrirEditar(id){
   document.getElementById('ed-cargo').value = f.cargoFuncao||'';
   document.getElementById('ed-admissao').value = f.dataAdmissao||'';
   document.getElementById('ed-status').value = f.status||'ativo';
+  document.getElementById('ed-aso-data').value = f.dataExamePeriodico||'';
+  document.getElementById('ed-aso-periodicidade').value = f.periodicidadeExameMeses||'';
+  document.getElementById('ed-ferias-data').value = f.dataUltimasFerias||'';
+  document.getElementById('ed-doc-arquivo').value = '';
+  document.getElementById('msg-doc').classList.add('hidden');
+  renderDocsNoModal(f);
   document.getElementById('overlay-editar').classList.remove('hidden');
 }
 function fecharEditar(){ document.getElementById('overlay-editar').classList.add('hidden'); EDITANDO_ID=null; }
 async function salvarEdicao(){
   const msg = document.getElementById('msg-editar');
   try{
+    const per = document.getElementById('ed-aso-periodicidade').value;
     const resp = await fetch(`/api/rh/funcionarios/${EDITANDO_ID}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
       nome: document.getElementById('ed-nome').value,
       contato: document.getElementById('ed-contato').value,
       cargoFuncao: document.getElementById('ed-cargo').value,
       dataAdmissao: document.getElementById('ed-admissao').value,
       status: document.getElementById('ed-status').value,
+      dataExamePeriodico: document.getElementById('ed-aso-data').value || null,
+      periodicidadeExameMeses: per ? Number(per) : undefined,
+      dataUltimasFerias: document.getElementById('ed-ferias-data').value || null,
     })});
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
@@ -1658,6 +1757,165 @@ async function salvarEdicao(){
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
   }
+}
+
+// rótulos dos tipos de documento - espelham DOCUMENTOS_LABEL de rh.js
+const DOC_LABELS = {
+  rg_cpf:'RG/CPF', ctps:'CTPS', aso_admissional:'ASO admissional', contrato:'Contrato',
+  comprovante_residencia:'Comprovante de residência', exame_periodico:'Exame periódico (ASO)', outro:'Outro',
+};
+function renderDocsNoModal(f){
+  const sel = document.getElementById('ed-doc-tipo');
+  if(sel && !sel.options.length){
+    sel.innerHTML = Object.entries(DOC_LABELS).map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
+  }
+  const box = document.getElementById('ed-docs-lista');
+  const docs = f.documentos || [];
+  if(!docs.length){ box.innerHTML = '<div class="sub" style="color:var(--muted);">nenhum documento anexado ainda.</div>'; return; }
+  box.innerHTML = docs.map((d,i)=>`<div class="linha1" style="justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--linha,#2a2a2a);">
+    <span>📎 ${escapeHtml(DOC_LABELS[d.tipo]||d.tipo)} <span class="sub" style="color:var(--muted);">· ${escapeHtml(d.nome||'')}</span></span>
+    <span style="white-space:nowrap;">
+      <a class="link-btn" href="/api/rh/funcionarios/${f.id}/documentos/${i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">abrir</a>
+      ${IS_MASTER?`<button type="button" class="link-btn" style="color:var(--bad);" onclick="removerDocumentoRh('${f.id}',${i})">remover</button>`:''}
+    </span>
+  </div>`).join('');
+}
+async function anexarDocumento(){
+  const msg = document.getElementById('msg-doc');
+  const arq = document.getElementById('ed-doc-arquivo').files[0];
+  if(!arq){ msg.textContent='Escolha um arquivo.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  const fd = new FormData();
+  fd.append('documento', arq);
+  fd.append('tipo', document.getElementById('ed-doc-tipo').value);
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${EDITANDO_ID}/documentos`, { method:'POST', body: fd });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao anexar.');
+    await carregar();
+    const atual = TODOS.find(x=>x.id===EDITANDO_ID) || data;
+    document.getElementById('ed-doc-arquivo').value='';
+    renderDocsNoModal(atual);
+    msg.textContent='Documento anexado.'; msg.className='msg ok'; msg.classList.remove('hidden');
+  }catch(err){ msg.textContent=err.message; msg.className='msg err'; msg.classList.remove('hidden'); }
+}
+async function removerDocumentoRh(id, index){
+  if(!confirm('Remover este documento?')) return;
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${id}/documentos/${index}`, { method:'DELETE' });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao remover.');
+    await carregar();
+    const atual = TODOS.find(x=>x.id===id) || data;
+    renderDocsNoModal(atual);
+  }catch(err){ alert(err.message); }
+}
+
+// ---------- desligar / reativar ----------
+async function desligarFuncionario(id, nome){
+  const motivo = prompt(`Desligar ${nome}?\n\nInforme o motivo (opcional):`);
+  if(motivo===null) return; // cancelou
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${id}/desligar`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ motivo }) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao desligar.');
+    await carregar();
+  }catch(err){ alert(err.message); }
+}
+async function reativarFuncionario(id, nome){
+  if(!confirm(`Reativar ${nome}? Ele volta como ativo.`)) return;
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${id}/reativar`, { method:'POST' });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao reativar.');
+    await carregar();
+  }catch(err){ alert(err.message); }
+}
+
+// ---------- Painel de métricas ----------
+async function renderPainelMetricas(){
+  const box = document.getElementById('painel-metricas');
+  box.innerHTML = '<div class="empty">carregando…</div>';
+  try{
+    const resp = await fetch('/api/rh/metricas');
+    const m = await resp.json();
+    if(!resp.ok) throw new Error(m.error || 'Erro ao carregar métricas.');
+    const t = m.totais || {};
+    const kpi = (rot,val,cor)=>`<div class="card" style="text-align:center;min-width:0;"><div style="font-size:24px;font-weight:700;${cor?`color:${cor};`:''}">${val}</div><div class="sub" style="color:var(--muted);">${rot}</div></div>`;
+    const nomeUn = u => escapeHtml(UNIDADES_NOMES[u]||u);
+    const listaPessoas = arr => (arr&&arr.length) ? arr.map(p=>`<div class="linha1" style="justify-content:space-between;gap:8px;padding:3px 0;"><span>${escapeHtml(p.nome)}</span><span class="sub" style="color:var(--muted);white-space:nowrap;">${nomeUn(p.unidade)} · ${escapeHtml(p.tempoTexto||'')}</span></div>`).join('') : '<div class="sub" style="color:var(--muted);">—</div>';
+    let html = `<div class="grid-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-bottom:16px;">
+      ${kpi('Colaboradores', t.ativos||0)}
+      ${kpi('Extras', t.extras||0)}
+      ${kpi('Em teste', t.emTeste||0)}
+      ${kpi('Em atestado', t.emAtestado||0, 'var(--bad)')}
+      ${kpi('Desligados', t.inativos||0, 'var(--muted)')}
+      ${kpi('Unidades', t.unidades||0)}
+    </div>`;
+    if(m.alertasResumo){
+      const a = m.alertasResumo;
+      html += `<div class="card" style="margin-bottom:16px;">
+        <div class="linha1" style="justify-content:space-between;"><b>⚖️ Alertas trabalhistas</b><button type="button" class="link-btn" onclick="trocarAba('alertas')">ver detalhes →</button></div>
+        <div class="sub" style="margin-top:6px;">🔴 ${a.grave||0} grave(s) · 🟡 ${a.alerta||0} alerta(s) · 🔵 ${a.info||0} informativo(s)</div>
+      </div>`;
+    }
+    html += `<div class="grid2" style="align-items:start;">
+      <div class="card"><b>⏱️ Tempo médio de casa</b><div style="font-size:20px;font-weight:700;margin-top:4px;">${escapeHtml(m.tempoMedioTexto||'—')}</div></div>
+      <div class="card"><b>🏢 Unidades</b>
+        <div class="sub" style="margin-top:4px;">${m.unidadeMaisGente?`▲ mais gente: <b>${nomeUn(m.unidadeMaisGente.unidade)}</b> (${m.unidadeMaisGente.total})`:''}</div>
+        <div class="sub">${m.unidadeMenosGente?`▼ menos gente: <b>${nomeUn(m.unidadeMenosGente.unidade)}</b> (${m.unidadeMenosGente.total})`:''}</div>
+      </div>
+    </div>`;
+    html += `<div class="grid2" style="align-items:start;margin-top:14px;">
+      <div class="card"><b>🎖️ Mais antigos de casa</b><div style="margin-top:6px;">${listaPessoas(m.maisAntigos)}</div></div>
+      <div class="card"><b>🌱 Mais novos de casa</b><div style="margin-top:6px;">${listaPessoas(m.maisNovos)}</div></div>
+    </div>`;
+    if(m.porUnidade && m.porUnidade.length){
+      html += `<div class="card" style="margin-top:14px;"><b>👥 Colaboradores por unidade</b><div style="margin-top:6px;">`+
+        m.porUnidade.map(u=>`<div class="linha1" style="justify-content:space-between;padding:3px 0;"><span>${nomeUn(u.unidade)}</span><b>${u.total}</b></div>`).join('')+`</div></div>`;
+    }
+    if(m.aniversariantesMes && m.aniversariantesMes.length){
+      html += `<div class="card" style="margin-top:14px;"><b>🎂 Aniversariantes do mês</b><div style="margin-top:6px;">`+
+        m.aniversariantesMes.map(p=>`<div class="linha1" style="justify-content:space-between;padding:3px 0;"><span>${escapeHtml(p.nome)}</span><span class="sub" style="color:var(--muted);">${escapeHtml(p.dia||'')}</span></div>`).join('')+`</div></div>`;
+    }
+    box.innerHTML = html;
+  }catch(err){ box.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`; }
+}
+
+// só o contadorzinho na aba, carregado no boot (sem renderizar a lista toda)
+async function carregarBadgeAlertas(){
+  try{
+    const resp = await fetch('/api/rh/alertas');
+    if(!resp.ok) return;
+    const lista = await resp.json();
+    const badge = document.getElementById('alertas-total');
+    const graves = lista.filter(a=>a.gravidade==='grave').length;
+    if(badge) badge.textContent = lista.length ? `(${lista.length}${graves?` · ${graves}🔴`:''})` : '';
+  }catch(e){}
+}
+
+// ---------- Central de Alertas trabalhistas ----------
+async function renderAlertas(){
+  const box = document.getElementById('alertas-lista');
+  box.innerHTML = '<div class="empty">carregando…</div>';
+  try{
+    const resp = await fetch('/api/rh/alertas');
+    const lista = await resp.json();
+    if(!resp.ok) throw new Error(lista.error || 'Erro ao carregar alertas.');
+    const badgeTot = document.getElementById('alertas-total');
+    const graves = lista.filter(a=>a.gravidade==='grave').length;
+    if(badgeTot) badgeTot.textContent = lista.length ? `(${lista.length}${graves?` · ${graves}🔴`:''})` : '';
+    if(!lista.length){ box.innerHTML = '<div class="empty">✅ nenhum prazo legal pendente. tudo em dia!</div>'; return; }
+    const cor = { grave:'var(--bad)', alerta:'var(--warn)', info:'var(--muted)' };
+    const icone = { grave:'🔴', alerta:'🟡', info:'🔵' };
+    const nomeUn = u => escapeHtml(UNIDADES_NOMES[u]||u);
+    box.innerHTML = lista.map(a=>`<div class="card" style="border-left:3px solid ${cor[a.gravidade]||'var(--muted)'};">
+      <div class="linha1" style="justify-content:space-between;gap:8px;">
+        <span><span class="nome-clicavel" onclick="abrirDetalheFuncionario('${a.funcionarioId}')">${escapeHtml(a.nome)}</span> <span class="sub" style="color:var(--muted);">· ${nomeUn(a.unidade)}${a.cargoFuncao?' · '+escapeHtml(a.cargoFuncao):''}</span></span>
+        <span style="white-space:nowrap;">${icone[a.gravidade]||''}</span>
+      </div>
+      <div class="sub" style="margin-top:4px;"><b>${escapeHtml(a.titulo)}</b> — ${escapeHtml(a.detalhe||'')}${a.vencimento?` · vence ${fmtData(a.vencimento)}`:''}${(a.dias!=null)?` · ${a.dias<0?`${-a.dias} dia(s) em atraso`:`faltam ${a.dias} dia(s)`}`:''}</div>
+    </div>`).join('');
+  }catch(err){ box.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`; }
 }
 
 function abrirDecisao(id){
@@ -1793,6 +2051,13 @@ async function boot(){
   // (podeAprovarRh em index.js)
   PODE_APROVAR_RH = isMaster || ME.isAdmin || ME.podeRhTodasUnidades;
   document.getElementById('btn-aba-aprovacoes').classList.toggle('hidden', !PODE_APROVAR_RH);
+  // Painel de métricas + Central de Alertas trabalhistas: mesmo gate do
+  // backend (podeAprovarRh) - visão do grupo todo é de gestão
+  document.getElementById('btn-aba-painel').classList.toggle('hidden', !PODE_APROVAR_RH);
+  document.getElementById('btn-aba-alertas').classList.toggle('hidden', !PODE_APROVAR_RH);
+  // seção de anexo de documentos no modal de edição só faz sentido pra quem edita (Master)
+  document.getElementById('ed-docs-bloco').classList.toggle('hidden', !isMaster);
+  if(PODE_APROVAR_RH) carregarBadgeAlertas();
   document.getElementById('nota-localizacao-master').classList.toggle('hidden', !isMaster);
 
   document.getElementById('root').classList.remove('hidden');
