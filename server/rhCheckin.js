@@ -158,6 +158,27 @@ async function registrarSaida(id, { foto, localizacao, registradoPorEmail }) {
   return { ...atual, ...merge };
 }
 
+// Master encerra um check-in aberto que a pessoa esqueceu de fechar - sem
+// foto/localizacao (ninguem tirou a foto na hora, e o Master pode estar
+// mexendo de longe), fica marcado como fechado pelo Master pra distinguir de
+// um check-out normal feito pela propria pessoa
+async function encerrarManual(id, { porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Check-in não encontrado.');
+  const atual = snap.data();
+  if (atual.status !== 'aberto') throw new Error('Esse check-in já foi encerrado.');
+  const agora = new Date().toISOString();
+  const merge = {
+    saida: { horario: agora, foto: null, localizacao: null, registradoPorEmail: porEmail || null, encerradoPeloMaster: true },
+    status: 'fechado',
+    atualizadoEm: agora,
+  };
+  await ref.update(merge);
+  checkinCache.invalidar();
+  return { ...atual, ...merge };
+}
+
 async function buscarAbertoDoFuncionario(funcionarioId) {
   const todos = await listAll();
   return todos.find((c) => c.funcionarioId === funcionarioId && c.status === 'aberto') || null;
@@ -325,6 +346,6 @@ module.exports = {
   LIMITE_CHECKINS_SEMANA_EXTRA,
   registrarEntrada, registrarSaida, buscarAbertoDoFuncionario, listPorFuncionario,
   listByUnidadesData, listAbertos, listPendentesAprovacao, resumoSemana, contagemPorFuncionario,
-  aprovarPendencia, recusarPendencia, editarHorarios, remover, getOne, hojeBrasilia,
+  aprovarPendencia, recusarPendencia, editarHorarios, encerrarManual, remover, getOne, hojeBrasilia,
   invalidar: () => checkinCache.invalidar(),
 };
