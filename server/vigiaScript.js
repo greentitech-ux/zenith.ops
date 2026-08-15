@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 7;
+const VERSAO_VIGIA = 8;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -145,19 +145,24 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '}',
     '',
     '# ---- deteccao de acesso remoto (AnyDesk, TeamViewer, DWService, RustDesk,',
-    '# UltraViewer, VNC, Splashtop, LogMeIn, GoToAssist, Chrome Remote Desktop -',
-    '# ou qualquer outra que rode como processo do Windows). So alerta quando',
-    '# uma conexao NOVA aparece (guarda as ja avisadas em $JaAvisados, esquece',
-    '# quando a conexao cai - se reconectar depois, avisa de novo). Best-effort:',
-    '# depende da ferramenta manter uma conexao TCP estabelecida direta com',
-    '# quem esta controlando - cobre os casos comuns, mas nao e garantia',
+    '# UltraViewer, VNC, Chrome Remote Desktop - ou qualquer outra que rode como',
+    '# processo do Windows). Dedup POR PROCESSO: enquanto o processo tem conexao',
+    '# estabelecida, alerta so UMA vez (esquece quando o processo some/cai a',
+    '# conexao; se reaparecer depois, avisa de novo). Importante: NAO deduplica',
+    '# por IP - ferramentas de nuvem (Splashtop/LogMeIn/GoToMyPC) ficam ligadas',
+    '# 24h e a nuvem delas (AWS:443) troca de IP toda hora; dedup por IP fazia',
+    '# cada troca virar um "acesso novo" e enchia o Master de alertas falsos. Por',
+    '# isso essas 3 (que so mantem batimento de nuvem, sem indicar sessao real)',
+    '# ficam FORA da lista. Best-effort: cobre os casos comuns, nao e garantia',
     '# absoluta pra toda ferramenta que existe.',
     '$UrlAcessoRemoto = "' + urlAcessoRemoto + '"',
+    '# ferramentas de nuvem sempre-ligadas (Splashtop SRServer/SRManager, LogMeIn',
+    '# LMIGuardianSvc, GoToMyPC g2mcomm/g2svc) foram REMOVIDAS de proposito: o',
+    '# batimento 24h delas nao indica sessao de verdade e so gerava alerta falso.',
     '$ProcessosAcessoRemoto = @(',
     '  "AnyDesk", "TeamViewer", "TeamViewer_Service", "dwagent", "dwagsvc",',
     '  "rustdesk", "UltraViewer_Desktop", "UltraViewer_Service", "remoting_host",',
-    '  "Supremo", "LogMeIn", "LMIGuardianSvc", "vncserver", "winvnc", "tvnserver",',
-    '  "SRServer", "SRManager", "g2mcomm", "g2svc"',
+    '  "Supremo", "vncserver", "winvnc", "tvnserver"',
     ')',
     '$JaAvisados = New-Object System.Collections.Generic.HashSet[string]',
     '',
@@ -169,8 +174,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '      $conexoes = Get-NetTCPConnection -State Established -OwningProcess $p.Id -ErrorAction SilentlyContinue',
     '      foreach ($c in $conexoes) {',
     '        if ($c.RemoteAddress -eq "127.0.0.1" -or $c.RemoteAddress -eq "::1") { continue }',
-    '        $chave = "$nomeProc|$($c.RemoteAddress)|$($c.RemotePort)"',
-    '        [void]$vistosAgora.Add($chave)',
+    '        $chave = "$nomeProc"',
+    '        # $vistosAgora.Add devolve $false se a chave ja estava la: garante 1',
+    '        # alerta por processo por tick (mesmo com varias conexoes abertas)',
+    '        if (-not $vistosAgora.Add($chave)) { continue }',
     '        if (-not $JaAvisados.Contains($chave)) {',
     '          try {',
     '            $detalhe = "$nomeProc ($($c.RemoteAddress):$($c.RemotePort))"',
