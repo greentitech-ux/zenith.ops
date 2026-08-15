@@ -413,8 +413,11 @@
     <div id="lista-aniver-hoje"></div>
   </div>
   <div class="panel">
-    <h2>Aniversariantes do mês</h2>
-    <div id="lista-aniver-mes"></div>
+    <div class="linha1" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
+      <h2 style="margin:0;">🎂 Aniversariantes do mês</h2>
+      <select id="aniver-mes" onchange="renderAniversariantes()" style="width:auto;min-width:140px;"></select>
+    </div>
+    <div id="lista-aniver-mes" style="margin-top:12px;"></div>
   </div>
 </div>
 
@@ -1613,16 +1616,23 @@ function abrirDetalheFuncionario(id){
 }
 function fecharDetalheFuncionario(){ document.getElementById('overlay-funcionario-detalhe').classList.add('hidden'); }
 
+const MESES_NOMES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 function renderAniversariantes(){
   const hoje = hojeBrasilia();
   const [, mesHoje, diaHoje] = hoje.split('-');
+  const sel = document.getElementById('aniver-mes');
+  if(sel && !sel.options.length){
+    sel.innerHTML = MESES_NOMES.map((n,i)=>`<option value="${String(i+1).padStart(2,'0')}">${n}</option>`).join('');
+    sel.value = mesHoje; // começa no mês atual
+  }
+  const mesSel = (sel && sel.value) ? sel.value : mesHoje;
   const ativos = TODOS.filter(f=>f.status==='ativo' && f.dataNascimento);
   const hojeLista = ativos.filter(f=>{ const [,m,d]=f.dataNascimento.split('-'); return m===mesHoje && d===diaHoje; });
-  const mesLista = ativos.filter(f=>{ const [,m]=f.dataNascimento.split('-'); return m===mesHoje; })
+  const mesLista = ativos.filter(f=>{ const [,m]=f.dataNascimento.split('-'); return m===mesSel; })
     .sort((a,b)=>a.dataNascimento.slice(5).localeCompare(b.dataNascimento.slice(5)));
   const aniverCard = (f)=>`<div class="aniver-card"><span class="aniver-icone">🎂</span><div><div style="font-weight:600;font-size:13px;">${escapeHtml(f.nome)}</div><div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${fmtData(f.dataNascimento)}</div></div></div>`;
   document.getElementById('lista-aniver-hoje').innerHTML = hojeLista.length ? hojeLista.map(aniverCard).join('') : '<div class="empty">ninguém faz aniversário hoje.</div>';
-  document.getElementById('lista-aniver-mes').innerHTML = mesLista.length ? mesLista.map(aniverCard).join('') : '<div class="empty">sem aniversariantes esse mês.</div>';
+  document.getElementById('lista-aniver-mes').innerHTML = mesLista.length ? mesLista.map(aniverCard).join('') : `<div class="empty">sem aniversariantes em ${MESES_NOMES[Number(mesSel)-1]}.</div>`;
 }
 
 async function carregar(){
