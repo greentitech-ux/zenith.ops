@@ -475,20 +475,9 @@
       <button class="btn-primary" type="button" onclick="salvarEdicao()">Salvar alterações</button>
 
       <div id="ed-docs-bloco" style="border-top:1px solid var(--linha,#2a2a2a);margin-top:18px;padding-top:14px;">
-        <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:8px;">📎 documentos anexados</div>
-        <div id="ed-docs-lista" style="margin-bottom:10px;"></div>
-        <div class="grid2">
-          <div>
-            <label>Tipo de documento</label>
-            <select id="ed-doc-tipo"></select>
-          </div>
-          <div>
-            <label>Arquivo</label>
-            <input type="file" id="ed-doc-arquivo">
-          </div>
-        </div>
+        <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:8px;">📎 documentos — um anexo por tipo (obrigatórios marcados com *)</div>
         <div class="msg hidden" id="msg-doc"></div>
-        <button class="btn-secundario" type="button" onclick="anexarDocumento()">📎 Anexar documento</button>
+        <div id="ed-docs-lista"></div>
       </div>
     </div>
   </div>
@@ -1847,7 +1836,6 @@ function abrirEditar(id){
   document.getElementById('ed-aso-data').value = f.dataExamePeriodico||'';
   document.getElementById('ed-aso-periodicidade').value = f.periodicidadeExameMeses||'';
   document.getElementById('ed-ferias-data').value = f.dataUltimasFerias||'';
-  document.getElementById('ed-doc-arquivo').value = '';
   document.getElementById('msg-doc').classList.add('hidden');
   renderDocsNoModal(f);
   document.getElementById('overlay-editar').classList.remove('hidden');
@@ -1882,38 +1870,54 @@ const DOC_LABELS = {
   rg_cpf:'RG/CPF', ctps:'CTPS', aso_admissional:'ASO admissional', contrato:'Contrato',
   comprovante_residencia:'Comprovante de residência', exame_periodico:'Exame periódico (ASO)', outro:'Outro',
 };
+const DOCS_OBRIGATORIOS = ['rg_cpf','ctps','aso_admissional','contrato'];
+// um "slot" por tipo de documento: mostra o que ja esta anexado daquele tipo
+// (abrir/remover) e um campo pra anexar mais um daquele tipo. bem mais claro
+// que o antigo tipo+arquivo unico.
 function renderDocsNoModal(f){
-  const sel = document.getElementById('ed-doc-tipo');
-  if(sel && !sel.options.length){
-    sel.innerHTML = Object.entries(DOC_LABELS).map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
-  }
   const box = document.getElementById('ed-docs-lista');
   const docs = f.documentos || [];
-  if(!docs.length){ box.innerHTML = '<div class="sub" style="color:var(--muted);">nenhum documento anexado ainda.</div>'; return; }
-  box.innerHTML = docs.map((d,i)=>`<div class="linha1" style="justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--linha,#2a2a2a);">
-    <span>📎 ${escapeHtml(DOC_LABELS[d.tipo]||d.tipo)} <span class="sub" style="color:var(--muted);">· ${escapeHtml(d.nome||'')}</span></span>
-    <span style="white-space:nowrap;">
-      <a class="link-btn" href="/api/rh/funcionarios/${f.id}/documentos/${i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">abrir</a>
-      ${IS_MASTER?`<button type="button" class="link-btn" style="color:var(--bad);" onclick="removerDocumentoRh('${f.id}',${i})">remover</button>`:''}
-    </span>
-  </div>`).join('');
+  // indexa cada doc guardando o indice original no array (usado no remover/abrir)
+  const porTipo = {};
+  docs.forEach((d,i)=>{ (porTipo[d.tipo] = porTipo[d.tipo] || []).push({ ...d, _i:i }); });
+  box.innerHTML = Object.entries(DOC_LABELS).map(([tipo,label])=>{
+    const obrig = DOCS_OBRIGATORIOS.includes(tipo);
+    const anexados = porTipo[tipo] || [];
+    const temAlgum = anexados.length > 0;
+    const anexadosHtml = anexados.map(d=>`<div class="linha1" style="justify-content:space-between;gap:8px;padding:2px 0;">
+        <span class="sub" style="color:var(--ok);">✅ ${escapeHtml(d.nome||'arquivo')}</span>
+        <span style="white-space:nowrap;">
+          <a class="link-btn" href="/api/rh/funcionarios/${f.id}/documentos/${d._i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">abrir</a>
+          ${IS_MASTER?`<button type="button" class="link-btn" style="color:var(--bad);" onclick="removerDocumentoRh('${f.id}',${d._i})">remover</button>`:''}
+        </span>
+      </div>`).join('');
+    const faltaObrig = obrig && !temAlgum;
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--linha,#2a2a2a);">
+      <div class="linha1" style="gap:6px;"><b style="font-size:12.5px;">${escapeHtml(label)}${obrig?' <span style="color:var(--bad)">*</span>':''}</b>${faltaObrig?'<span class="badge warn" style="font-size:9px;">falta</span>':''}</div>
+      ${anexadosHtml}
+      <div class="linha1" style="gap:8px;margin-top:5px;flex-wrap:wrap;">
+        <input type="file" id="ed-doc-file-${tipo}" style="flex:1;min-width:180px;">
+        <button type="button" class="btn-secundario" style="padding:6px 12px;" onclick="anexarDocumentoTipo('${tipo}')">📎 ${temAlgum?'anexar outro':'anexar'}</button>
+      </div>
+    </div>`;
+  }).join('');
 }
-async function anexarDocumento(){
+async function anexarDocumentoTipo(tipo){
   const msg = document.getElementById('msg-doc');
-  const arq = document.getElementById('ed-doc-arquivo').files[0];
-  if(!arq){ msg.textContent='Escolha um arquivo.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  const input = document.getElementById('ed-doc-file-'+tipo);
+  const arq = input && input.files[0];
+  if(!arq){ msg.textContent=`Escolha um arquivo para ${DOC_LABELS[tipo]||tipo}.`; msg.className='msg err'; msg.classList.remove('hidden'); return; }
   const fd = new FormData();
   fd.append('documento', arq);
-  fd.append('tipo', document.getElementById('ed-doc-tipo').value);
+  fd.append('tipo', tipo);
   try{
     const resp = await fetch(`/api/rh/funcionarios/${EDITANDO_ID}/documentos`, { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao anexar.');
     await carregar();
     const atual = TODOS.find(x=>x.id===EDITANDO_ID) || data;
-    document.getElementById('ed-doc-arquivo').value='';
     renderDocsNoModal(atual);
-    msg.textContent='Documento anexado.'; msg.className='msg ok'; msg.classList.remove('hidden');
+    msg.textContent=`${DOC_LABELS[tipo]||tipo} anexado.`; msg.className='msg ok'; msg.classList.remove('hidden');
   }catch(err){ msg.textContent=err.message; msg.className='msg err'; msg.classList.remove('hidden'); }
 }
 async function removerDocumentoRh(id, index){
