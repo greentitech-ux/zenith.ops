@@ -404,7 +404,16 @@ async function marcarComandoExecutado(comandoId, dados, contexto) {
     erro: d.erro || null,
   };
   await comandoRef.update(patch);
-  await COLLECTION.doc(docIdFor(comando.codigo, comando.posto)).set({ comandoPendenteId: null }, { merge: true });
+  // carimba o ultimo resultado no doc do computador (alem de liberar a fila),
+  // pra aparecer no detalhe do computador no NOC - quem mandou o comando ve o
+  // que voltou sem precisar entrar na maquina
+  await COLLECTION.doc(docIdFor(comando.codigo, comando.posto)).set({
+    comandoPendenteId: null,
+    ultimoComandoEm: patch.executadoEm,
+    ultimoComandoTexto: String(comando.comando || '').slice(0, 200),
+    ultimoComandoResultado: patch.resultado ? String(patch.resultado).slice(0, 2000) : null,
+    ultimoComandoErro: patch.erro ? String(patch.erro).slice(0, 500) : null,
+  }, { merge: true });
   cache.invalidar();
   return { ...comando, ...patch };
 }
