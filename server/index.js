@@ -798,9 +798,13 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
     // padrao do freio de forca-bruta do login, ja que esse endpoint tambem e
     // publico e o client-side nao tem como saber o proprio IP publico
     const ip = String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim() || null;
+    // token do agente vem no cabecalho (NOCZenith atualizado) - so ele libera
+    // a entrega do comando/chat (ver lojaStatus.heartbeat); presenca/IP nao
+    // dependem dele, pra maquina legada nao sumir do painel
+    const token = req.headers['x-noc-token'] || req.body.token || null;
     const { mensagemPendente, comandoPendente, chatMensagens } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
       ip, userAgent: req.body.userAgent, abertoDesde: req.body.abertoDesde,
-    });
+    }, token);
     res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -815,7 +819,8 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
 // o servidor nunca teria como enxergar sozinho ----------
 app.post('/api/loja-status/:codigo/computadores/:posto/ip-local', async (req, res) => {
   try {
-    res.json(await lojaStatus.atualizarIpLocal(req.params.codigo, req.params.posto, req.body.ip));
+    const token = req.headers['x-noc-token'] || req.body.token || null;
+    res.json(await lojaStatus.atualizarIpLocal(req.params.codigo, req.params.posto, req.body.ip, token));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -826,7 +831,10 @@ app.post('/api/loja-status/:codigo/computadores/:posto/ip-local', async (req, re
 // mesma logica publica do ip-local: quem chama e a maquina, sem sessao ----------
 app.post('/api/loja-status/:codigo/computadores/:posto/comando-resultado', async (req, res) => {
   try {
-    res.json(await lojaStatus.marcarComandoExecutado(req.body.comandoId, { resultado: req.body.resultado, erro: req.body.erro }));
+    const token = req.headers['x-noc-token'] || req.body.token || null;
+    res.json(await lojaStatus.marcarComandoExecutado(req.body.comandoId, { resultado: req.body.resultado, erro: req.body.erro }, {
+      codigo: req.params.codigo, posto: req.params.posto, token,
+    }));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -839,7 +847,8 @@ app.post('/api/loja-status/:codigo/computadores/:posto/comando-resultado', async
 // loja-status.html no proximo poll ----------
 app.post('/api/loja-status/:codigo/computadores/:posto/chat-responder', async (req, res) => {
   try {
-    res.json(await lojaStatus.responderChat(req.params.codigo, req.params.posto, req.body.texto));
+    const token = req.headers['x-noc-token'] || req.body.token || null;
+    res.json(await lojaStatus.responderChat(req.params.codigo, req.params.posto, req.body.texto, token));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -853,7 +862,8 @@ app.post('/api/loja-status/:codigo/computadores/:posto/chat-responder', async (r
 // alerta de seguranca, nao um aviso operacional pro time de suporte ----------
 app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (req, res) => {
   try {
-    const registro = await lojaStatus.registrarAcessoRemoto(req.params.codigo, req.params.posto, req.body.detalhe);
+    const token = req.headers['x-noc-token'] || req.body.token || null;
+    const registro = await lojaStatus.registrarAcessoRemoto(req.params.codigo, req.params.posto, req.body.detalhe, token);
     const mapa = await construirUnidadesMapa();
     push.notifyAcessoRemotoDetectado(mapa[req.params.codigo] || req.params.codigo, req.params.codigo, registro.nome, req.params.posto, req.body.detalhe)
       .catch((err) => console.error('Erro no push de acesso remoto:', err.message));
@@ -872,10 +882,39 @@ app.get('/api/loja-status/vigia-versao', (req, res) => {
   res.json({ versao: vigiaScript.VERSAO_VIGIA });
 });
 
-app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', (req, res) => {
-  const tipo = lojaStatus.TIPOS_COMPUTADOR.includes(req.query.tipo) ? req.query.tipo : 'atendimento';
-  const conteudo = vigiaScript.montarScriptVigia({ codigo: req.params.codigo, posto: req.params.posto, tipo });
-  res.type('text/plain').send(conteudo);
+// o .ps1 CARREGA o segredo do computador (agentToken) assado dentro dele -
+// entao nao pode mais ser 100% publico como era. Libera pra: (1) sessao de
+// Master/Suporte (o botao "Baixar NOCZenith" manda o Bearer), OU (2) um
+// agente que ja tem o token daquele computador (a autoatualizacao manda no
+// cabecalho X-NOC-Token) - prova que e a maquina certa se atualizando. Um
+// computador ainda SEM token (nunca baixou o script novo) tambem passa, so
+// pra migracao (mesma exposicao que ja existia antes desse hardening); no
+// primeiro download o token e gerado e a partir dai o script fica travado
+app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', async (req, res) => {
+  try {
+    const tipo = lojaStatus.TIPOS_COMPUTADOR.includes(req.query.tipo) ? req.query.tipo : 'atendimento';
+    const { codigo, posto } = req.params;
+    const tokenReq = req.headers['x-noc-token'] || null;
+    const tokenAtual = await lojaStatus.tokenDoComputador(codigo, posto);
+    let liberado = false;
+    if (!tokenAtual) {
+      liberado = true; // legado/migracao: computador ainda sem segredo
+    } else if (tokenReq && tokenReq === tokenAtual) {
+      liberado = true; // autoatualizacao do proprio agente (prova o token)
+    } else {
+      // sessao de Master/Suporte (download manual pela loja-status.html)
+      const [scheme, bearer] = String(req.headers.authorization || '').split(' ');
+      const user = scheme === 'Bearer' ? await auth.usuarioOpcionalDoToken(bearer) : null;
+      const secoes = (user && user.permissions && user.permissions.sections) || [];
+      liberado = !!user && (user.role === 'master' || user.isAdmin || secoes.includes('suporte'));
+    }
+    if (!liberado) return res.status(403).type('text/plain').send('# Acesso negado. Baixe o NOCZenith pela tela NOC Zenith (logado como Master/Suporte).');
+    const agentToken = await lojaStatus.garantirAgentToken(codigo, posto);
+    const conteudo = vigiaScript.montarScriptVigia({ codigo, posto, tipo, agentToken });
+    res.type('text/plain').send(conteudo);
+  } catch (err) {
+    res.status(400).type('text/plain').send('# Erro ao gerar o script: ' + err.message);
+  }
 });
 
 // ---------- RH: link de auto-atendimento (rh-colaborador.html) - o proprio
