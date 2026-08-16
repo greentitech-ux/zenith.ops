@@ -474,6 +474,7 @@ async function criar({
   responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto,
   observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras,
   metodoPagamento, pagamentos, meiasExtras, motivoCortesia, categoriaTempo, criadoPorId, criadoPorEmail,
+  termoAssinado,
 }) {
   const tabela = await getConfigPrecos();
   const categoriaPcd = CATEGORIAS_PCD.includes(categoriaTempo) ? categoriaTempo : null;
@@ -599,7 +600,13 @@ async function criar({
     cortesiaStatus: ehCortesia ? 'PENDENTE' : null,
     motivoCortesia: ehCortesia ? String(motivoCortesia).trim().slice(0, 300) : null,
     usou: usou !== false,
-    termoAssinado: false,
+    // O termo agora e assinado ANTES de efetivar a venda (o atendente
+    // imprime pela previa, colhe a assinatura e clica em "Aplicar" - ver
+    // parque-checkin.html). Quando isso acontece a venda ja nasce com o
+    // termo assinado. Continua aceitando false pro caminho antigo, em que
+    // o termo era impresso depois e marcado pelo botao "Confirmar termo
+    // assinado" - os dois convivem.
+    termoAssinado: termoAssinado === true,
     criadoPorId,
     criadoPorEmail,
     criadoEm: new Date().toISOString(),

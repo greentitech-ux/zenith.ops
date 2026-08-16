@@ -4030,6 +4030,35 @@ app.post('/api/parque/importar-planilha', auth.requireMaster, async (req, res) =
   }
 });
 
+// Previa do termo, a partir do que ESTA NO FORMULARIO - nao cria nada, nao
+// grava nada. Existe porque o termo passou a ser assinado ANTES de efetivar
+// a venda: o atendente preenche responsavel/criancas, imprime por aqui,
+// colhe a assinatura e so entao libera o pagamento. O gerarTermoPDF ja
+// aceitava um objeto qualquer, entao nao precisou mudar nada nele.
+app.post('/api/parque/termo-previa.pdf', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const resp = b.responsavel || {};
+    if (!String(resp.nome || '').trim()) return res.status(400).json({ error: 'Preencha o nome do responsável antes de imprimir o termo.' });
+    const criancas = Array.isArray(b.criancas) ? b.criancas.slice(0, 40) : [];
+    if (!criancas.length) return res.status(400).json({ error: 'Adicione pelo menos uma criança antes de imprimir o termo.' });
+    // monta um checkin "de mentira" so pro PDF - mesma forma que o salvo,
+    // sem id e sem passar pelo Firestore
+    termoResponsabilidade.gerarTermoPDF(res, {
+      unidadeNome: b.unidadeNome || b.unidade || '',
+      unidade: b.unidade || '',
+      responsavel: resp,
+      criancas,
+      dataUtilizacao: b.dataUtilizacao || null,
+      tempoMinutos: b.tempoMinutos || null,
+      criadoEm: new Date().toISOString(),
+      previa: true,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/parque/checkins/:id/termo.pdf', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
   const checkin = await parque.getOne(req.params.id);
   if (!checkin) return res.sendStatus(404);
