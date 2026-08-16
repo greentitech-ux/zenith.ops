@@ -450,7 +450,7 @@
           <input type="date" id="ed-nascimento">
         </div>
         <div id="campo-ed-admissao">
-          <label>Data de admissão / início do teste</label>
+          <label id="ed-admissao-label">Data de admissão</label>
           <input type="date" id="ed-admissao">
         </div>
       </div>
@@ -769,7 +769,7 @@ function escolherTipoCadastro(tipo){
     labelAdmissao.textContent = 'Data Início Teste';
   }else if(tipo==='efetivado'){
     explicacao.textContent = 'efetivado já entra como colaborador contratado direto, sem passar pelo teste de 5 dias. Se a admissão já foi há mais de 30 dias, a experiência entra direto na etapa certa (30 ou 60 dias) - sem cobrar um prazo que já passou.';
-    labelAdmissao.textContent = 'Data Início Experiência';
+    labelAdmissao.textContent = 'Data Admissão';
   }else{
     explicacao.textContent = 'extra já entra direto na Ficha de Ativos - trabalho avulso, sem período de teste.';
     labelAdmissao.textContent = 'Data Início Extra';
@@ -1391,6 +1391,16 @@ const MOTIVO_PENDENCIA_LABEL = {
 
 const TIPO_CADASTRO_LABEL_APROVACAO = { extra: 'Extra', candidato: 'Candidato (teste 5 dias)', efetivado: 'Efetivado' };
 
+// so quem foi EFETIVADO de verdade tem "Admissão" (data legal de
+// contratação) - extra e candidato (teste) ainda nao foram admitidos, entao
+// o campo chama "Início" pra nao dar a entender que ja houve contratação
+// formal. Assim que a pessoa e convertida pra efetivado (converterEfetivado),
+// o rotulo muda sozinho pra "Admissão" e a mesma data passa a valer como
+// data de admissão
+function labelDataAdmissaoOuInicio(tipoCadastro){
+  return tipoCadastro === 'efetivado' ? 'Admissão' : 'Início';
+}
+
 async function carregarAprovacoesCadastro(){
   const el = document.getElementById('lista-aprovacoes-cadastro');
   if(!PODE_APROVAR_RH){ el.innerHTML = '<div class="empty">só o RH, o Admin ou o Master podem ver e decidir esses cadastros.</div>'; return; }
@@ -1636,7 +1646,7 @@ async function abrirDetalheFuncionario(id){
     linha('Cargo/função', esc(f.cargoFuncao)),
     linha('Contato', esc(f.contato)),
     linha('Nascimento', `${fmtData(f.dataNascimento)}${f.dataNascimento?` 🎂 ${escapeHtml(MESES_NOMES[Number(f.dataNascimento.slice(5,7))-1]||'')}`:''}`),
-    linha('Admissão', `${fmtData(f.dataAdmissao)}${tempoCasaTextoCli(f.dataAdmissao)?` · ⏱️ ${tempoCasaTextoCli(f.dataAdmissao)} de casa`:''}`),
+    linha(labelDataAdmissaoOuInicio(f.tipoCadastro), `${fmtData(f.dataAdmissao)}${tempoCasaTextoCli(f.dataAdmissao)?` · ⏱️ ${tempoCasaTextoCli(f.dataAdmissao)} de casa`:''}`),
   ];
   if(f.status==='inativo' && f.desligadoEm){
     dados.push(linha('Desligamento', `🚪 ${fmtData(f.desligadoEm.slice(0,10))}${f.motivoDesligamento?' · '+esc(f.motivoDesligamento):''}`));
@@ -1827,6 +1837,7 @@ function abrirEditar(id){
   EDITANDO_ID = id;
   document.getElementById('msg-editar').classList.add('hidden');
   document.getElementById('ed-sub').textContent = `${UNIDADES_NOMES[f.unidade]||f.unidade} · desde ${fmtData(f.dataAdmissao)}`;
+  document.getElementById('ed-admissao-label').textContent = 'Data de ' + labelDataAdmissaoOuInicio(f.tipoCadastro).toLowerCase();
   // unidade: lista as unidades conhecidas + garante a atual (mesmo se for uma
   // legada tipo "Dominos Natal" que ja nao existe mais) pra dar pra trocar
   const selUn = document.getElementById('ed-unidade');
