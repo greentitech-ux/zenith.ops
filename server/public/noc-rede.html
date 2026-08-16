@@ -170,6 +170,21 @@
 <div class="tt hidden" id="tt"></div>
 
 <script>
+// MESMO wrapper de autenticação das outras telas. Sem ele, todo fetch sai sem
+// o Bearer token, /api/me volta 401, a página conclui "não é master" e mostra
+// "Você não tem acesso" pra quem TEM acesso - foi exatamente o que aconteceu
+// quando esta página nasceu sem essa parte.
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+
 const CORES = ['var(--serie-1)','var(--serie-2)','var(--serie-3)','var(--serie-4)'];
 const LIMITE_LENTO = 1000;
 let DADOS = null;
