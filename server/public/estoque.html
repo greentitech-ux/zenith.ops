@@ -1321,39 +1321,48 @@ function renderItensRevisaoNota(){
         <input type="checkbox" id="rn-usar-${i}" checked style="margin-top:10px;">
         <div style="flex:1;min-width:220px;">
           <div class="sub" style="margin-bottom:4px;">Como veio na nota: "${escapeHtml(it.produtoTexto||'')}"</div>
-          ${it.conversaoAplicada ? `<div class="sub" style="color:var(--warn);margin-bottom:4px;">📐 Convertido de embalagem: ${escapeHtml(it.conversaoAplicada)} - confira</div>` : ''}
           <label>Item do catálogo</label>
-          <select id="rn-item-${i}"><option value="">— selecione —</option>${opcoesItensAgrupadas()}</select>
+          <select id="rn-item-${i}" onchange="ajustarCamposCaixaNota(${i})"><option value="">— selecione —</option>${opcoesItensAgrupadas()}</select>
           <div style="margin:4px 0;"><span class="tx-comentario" style="cursor:pointer;" onclick="abrirNovoItemDaNota(${i})">Não achou na lista? + Cadastrar esse item no catálogo</span></div>
           <div class="grid2" style="margin-top:6px;">
-            <div><label>Quantidade</label><input type="number" step="0.001" id="rn-qtd-${i}" value="${it.quantidade!=null?it.quantidade:''}"></div>
-            <div><label>Valor unitário (R$)</label><input type="number" step="0.01" id="rn-valorunit-${i}" value="${it.valorUnitario!=null?it.valorUnitario:''}"></div>
+            <div><label>Quantidade de caixas/pacotes</label><input type="number" step="0.001" id="rn-caixas-${i}" value="${it.quantidadeCaixas!=null?it.quantidadeCaixas:''}" oninput="atualizarResumoNota(${i})"></div>
+            <div><label id="rn-porcaixa-label-${i}">Quantidade por caixa</label><input type="number" step="0.001" id="rn-porcaixa-${i}" value="${it.porCaixaSugerido!=null?it.porCaixaSugerido:''}" placeholder="1" oninput="atualizarResumoNota(${i})"></div>
           </div>
           <label>Valor total (R$)</label>
-          <input type="number" step="0.01" id="rn-valortotal-${i}" value="${it.valorTotal!=null?it.valorTotal:''}">
-          <div style="margin-top:6px;">
-            <span class="tx-comentario" style="cursor:pointer;" onclick="document.getElementById('rn-mult-wrap-${i}').classList.toggle('hidden')">Veio em pacote/caixa com várias unidades e a quantidade acima está errada? Ajustar</span>
-            <div class="hidden" id="rn-mult-wrap-${i}" style="margin-top:6px;">
-              <label>Quantas unidades tem em cada pacote/caixa dessa linha?</label>
-              <input type="number" step="1" min="1" id="rn-mult-${i}" placeholder="ex: 50" oninput="recalcularMultiplicadorNota(${i})">
-              <div class="sub">Multiplica a quantidade da nota (${it.quantidade!=null?it.quantidade:'?'}) por esse número e recalcula o valor unitário - o valor total não muda.</div>
-            </div>
-          </div>
+          <input type="number" step="0.01" id="rn-valortotal-${i}" value="${it.valorTotal!=null?it.valorTotal:''}" oninput="atualizarResumoNota(${i})">
+          <div class="sub" id="rn-resumo-${i}" style="margin-top:6px;"></div>
         </div>
       </div>
     </div>`).join('') : '<div class="sub">Não encontrei itens nessa nota.</div>';
   itens.forEach((it,i)=>{
     if(it.itemId) document.getElementById(`rn-item-${i}`).value = it.itemId;
+    ajustarCamposCaixaNota(i);
   });
 }
-function recalcularMultiplicadorNota(i){
-  const base = RASCUNHO_NOTA && RASCUNHO_NOTA.itens[i];
-  if(!base) return;
-  const mult = num(document.getElementById(`rn-mult-${i}`).value) || 1;
-  const novaQtd = (base.quantidade||0) * mult;
-  document.getElementById(`rn-qtd-${i}`).value = novaQtd || '';
-  const valorTotalAtual = num(document.getElementById(`rn-valortotal-${i}`).value) || base.valorTotal || 0;
-  if(valorTotalAtual>0 && novaQtd>0) document.getElementById(`rn-valorunit-${i}`).value = (valorTotalAtual/novaQtd).toFixed(4);
+// atualiza o rotulo "Quantidade por caixa" conforme o item escolhido (peso em
+// gramas pra item KG/G, contagem de unidades pros demais) e recalcula o
+// resumo - chamada ao trocar o item e uma vez no render inicial de cada linha
+function ajustarCamposCaixaNota(i){
+  const item = CATALOGO.find(c=>c.id===document.getElementById(`rn-item-${i}`).value);
+  document.getElementById(`rn-porcaixa-label-${i}`).textContent = item
+    ? (unidadeUsaPeso(item.unidadeMedida) ? 'Peso por caixa (gramas)' : 'Quantidade por caixa (unidades)')
+    : 'Quantidade por caixa';
+  atualizarResumoNota(i);
+}
+// mostra o total calculado (caixas × por-caixa) e o valor unitário resultante
+// - so informativo, quem manda pro backend e confirmarRecebimentosDaNota
+function atualizarResumoNota(i){
+  const caixas = num(document.getElementById(`rn-caixas-${i}`).value);
+  const porCaixa = num(document.getElementById(`rn-porcaixa-${i}`).value) || 1;
+  const valorTotal = num(document.getElementById(`rn-valortotal-${i}`).value);
+  const item = CATALOGO.find(c=>c.id===document.getElementById(`rn-item-${i}`).value);
+  const usaPeso = item && unidadeUsaPeso(item.unidadeMedida);
+  const qtdBruta = caixas>0 ? caixas*porCaixa : 0;
+  const qtdFinal = usaPeso && item.unidadeMedida==='KG' ? qtdBruta/1000 : qtdBruta;
+  const resumo = document.getElementById(`rn-resumo-${i}`);
+  resumo.textContent = (qtdFinal>0 && valorTotal>0)
+    ? `= ${Number(qtdFinal.toFixed(3))} ${item?item.unidadeMedida:''} · valor unitário R$ ${(valorTotal/qtdFinal).toFixed(4)}`
+    : '';
 }
 function cancelarRevisaoNota(){
   RASCUNHO_NOTA = null;
@@ -1373,28 +1382,32 @@ async function confirmarRecebimentosDaNota(){
     msg.textContent = 'Preencha a data e o fornecedor da nota.'; msg.className = 'msg err'; msg.classList.remove('hidden');
     return;
   }
-  const selecionados = itens.map((it,i)=>({
-    usar: document.getElementById(`rn-usar-${i}`).checked,
-    itemId: document.getElementById(`rn-item-${i}`).value,
-    quantidade: document.getElementById(`rn-qtd-${i}`).value,
-    valorUnitario: document.getElementById(`rn-valorunit-${i}`).value,
-    valorTotal: document.getElementById(`rn-valortotal-${i}`).value,
-  })).filter(it=>it.usar);
+  const selecionados = itens.map((it,i)=>{
+    const itemId = document.getElementById(`rn-item-${i}`).value;
+    return {
+      usar: document.getElementById(`rn-usar-${i}`).checked,
+      itemId,
+      item: CATALOGO.find(c=>c.id===itemId),
+      caixas: num(document.getElementById(`rn-caixas-${i}`).value),
+      porCaixa: num(document.getElementById(`rn-porcaixa-${i}`).value) || 1,
+      valorTotal: num(document.getElementById(`rn-valortotal-${i}`).value),
+    };
+  }).filter(it=>it.usar);
   if(!selecionados.length){
     msg.textContent = 'Marque pelo menos um item para lançar.'; msg.className = 'msg err'; msg.classList.remove('hidden');
     return;
   }
   for(const it of selecionados){
-    if(!it.itemId){
+    if(!it.itemId || !it.item){
       msg.textContent = 'Escolha o item do catálogo pra cada linha marcada.'; msg.className = 'msg err'; msg.classList.remove('hidden');
       return;
     }
-    if(num(it.quantidade)<=0){
-      msg.textContent = 'Informe a quantidade de cada linha marcada.'; msg.className = 'msg err'; msg.classList.remove('hidden');
+    if(it.caixas<=0){
+      msg.textContent = 'Informe a quantidade de caixas/pacotes de cada linha marcada.'; msg.className = 'msg err'; msg.classList.remove('hidden');
       return;
     }
-    if(num(it.valorUnitario)<=0 && num(it.valorTotal)<=0){
-      msg.textContent = 'Informe o valor unitário ou total de cada linha marcada.'; msg.className = 'msg err'; msg.classList.remove('hidden');
+    if(it.valorTotal<=0){
+      msg.textContent = 'Informe o valor total de cada linha marcada.'; msg.className = 'msg err'; msg.classList.remove('hidden');
       return;
     }
   }
@@ -1404,14 +1417,19 @@ async function confirmarRecebimentosDaNota(){
   msg.classList.add('hidden');
   try{
     for(const it of selecionados){
+      // o valor unitario nunca e digitado - o backend calcula sozinho a
+      // partir do valorTotal e da quantidade (direta ou por embalagem, ver
+      // criarRecebimento em inventario.js), igual ja acontece no
+      // lancamento manual
+      const usaPeso = unidadeUsaPeso(it.item.unidadeMedida);
       const body = {
         unidade, unidadeNome,
         itemId: it.itemId,
         fornecedor,
-        quantidade: it.quantidade,
-        quantidadeEmbalagens: null,
-        pesoEmbalagem: null,
-        valorUnitario: it.valorUnitario,
+        quantidade: usaPeso ? null : (it.caixas*it.porCaixa),
+        quantidadeEmbalagens: usaPeso ? it.caixas : null,
+        pesoEmbalagem: usaPeso ? it.porCaixa : null,
+        valorUnitario: null,
         valorTotal: it.valorTotal,
         data,
         notaFiscal,
@@ -1803,8 +1821,9 @@ document.getElementById('form-item').addEventListener('submit', async (ev)=>{
     renderCatalogo();
     popularSelectsItem();
     if(ITEM_ORIGEM==='nota' && NOTA_ITEM_INDEX!=null){
-      const sel = document.getElementById(`rn-item-${NOTA_ITEM_INDEX}`);
-      if(sel){ sel.innerHTML = '<option value="">— selecione —</option>'+opcoesItensAgrupadas(); sel.value = data.id; }
+      const idx = NOTA_ITEM_INDEX;
+      const sel = document.getElementById(`rn-item-${idx}`);
+      if(sel){ sel.innerHTML = '<option value="">— selecione —</option>'+opcoesItensAgrupadas(); sel.value = data.id; ajustarCamposCaixaNota(idx); }
       NOTA_ITEM_INDEX = null;
     }
     if(ITEM_ORIGEM==='contagem' && CONTAGEM_INICIADA){
