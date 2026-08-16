@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Central de Alertas · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;overflow-x:clip;overflow-y:clip;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 16px;padding:12px 32px 12px;border-bottom:1px solid var(--line);}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:12px;padding-bottom:12px;} h1{font-size:17px;} .eyebrow{font-size:8px;} }
+  h2{font-size:14px;font-weight:700;margin:0 0 4px;}
+  .header-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+  .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;transition:border-color .15s ease,color .15s ease,background .15s ease;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
+  .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,color .15s ease;}
+  .btn-notif:hover{border-color:var(--accent);color:var(--text);}
+  .btn-sair{color:var(--bad);}
+  .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
+  .hidden{display:none!important;}
+  .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer-titulo{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px 12px;}
+  .nav-drawer-grupo{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 4px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;}
+  .nav-drawer-grupo .ndg-seta{transition:transform .15s ease;font-size:9px;flex:none;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
+  .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .filtros{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+  .filtro-btn{font-family:var(--mono);font-size:11px;padding:6px 12px;border-radius:16px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;white-space:nowrap;}
+  .filtro-btn.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);}
+  .lista{display:flex;flex-direction:column;gap:8px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;align-items:flex-start;gap:12px;}
+  .card.critico{border-color:var(--bad);}
+  .card.atendido{opacity:.55;}
+  .card .icone{font-size:22px;flex:none;margin-top:1px;}
+  .card .corpo{flex:1;min-width:0;}
+  .card .titulo-linha{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .card .titulo{font-weight:700;font-size:13.5px;}
+  .badge{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em;}
+  .badge.critico{background:var(--bad-dim);color:var(--bad);}
+  .badge.ok{background:var(--ok-dim);color:var(--ok);}
+  .resumo{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.4;}
+  .meta{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:6px;}
+  .card-acoes{display:flex;flex-direction:column;gap:6px;flex:none;}
+  .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
+  .btn-ghost:hover{border-color:var(--accent);}
+  .btn-ghost.ok{color:var(--ok);}
+  .btn-ghost.ok:hover{border-color:var(--ok);}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <div style="min-width:0;">
+        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <h1>🚨 Central de Alertas</h1>
+      </div>
+    </div>
+    <div class="header-nav">
+      <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
+    </div>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer">
+  <div class="nav-drawer-titulo">Zenith Ops</div>
+  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
+  <a class="back active" id="nav-central-alertas-self" href="/central-alertas.html">🚨 Central de Alertas</a>
+  <a class="back" id="nav-ajuda" href="/ajuda.html">❓ Ajuda</a>
+  <div class="nav-drawer-sep"></div>
+  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
+</nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso a essa página. A Central de Alertas é só do Master.</div>
+
+<div id="root" class="hidden">
+  <div class="filtros">
+    <button type="button" class="filtro-btn active" data-filtro="pendentes" onclick="mudarFiltro('pendentes')">🔴 Pendentes</button>
+    <button type="button" class="filtro-btn" data-filtro="todos" onclick="mudarFiltro('todos')">Todos</button>
+  </div>
+  <div class="lista" id="lista"><div class="empty">Carregando...</div></div>
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
+function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// tipo -> icone/rotulo pra exibicao - cada categoria de alerta do sistema
+// (ver alertasCentral.registrar em push.js) tem sua propria identidade
+// visual, exatamente o que o usuario pediu: "faca um alerta para cada
+// situacao", nao um "Beniboy" generico pra tudo
+const TIPOS = {
+  'qa-aprovacao': { icone: '🧪', rotulo: 'Aprovação QA' },
+  'fraude': { icone: '🚩', rotulo: 'Fraude suspeita' },
+  'monitor': { icone: '💳', rotulo: 'Monitor de transações' },
+  'solicitacao': { icone: '📋', rotulo: 'Nova solicitação' },
+  'beniboy': { icone: '🤖', rotulo: 'Beniboy precisa de humano' },
+  'noc-loja-offline-conversa': { icone: '🔴', rotulo: 'NOC · conversa travada (loja offline)' },
+  'seguranca': { icone: '🛡️', rotulo: 'Segurança do chat' },
+  'parque-pcd': { icone: '🎡', rotulo: 'Parque · limite PCD/cortesia' },
+  'rh-teste-vencido': { icone: '🧑‍💼', rotulo: 'RH · teste vencido' },
+  'rh-checkin-pendente': { icone: '🧑‍💼', rotulo: 'RH · check-in pendente' },
+  'rh-advertencia-pendente': { icone: '🧑‍💼', rotulo: 'RH · advertência pendente' },
+  'rh-cadastro-pendente': { icone: '🧑‍💼', rotulo: 'RH · cadastro pendente' },
+  'rh-cadastro-reprovado': { icone: '🧑‍💼', rotulo: 'RH · cadastro reprovado' },
+  'rh-advertencia-prazo': { icone: '🧑‍💼', rotulo: 'RH · prazo de advertência' },
+  'rh-experiencia-prazo': { icone: '🧑‍💼', rotulo: 'RH · prazo de experiência' },
+  'rh-experiencia-gerente': { icone: '🧑‍💼', rotulo: 'RH · experiência (gerente)' },
+  'noc-offline': { icone: '🔴', rotulo: 'NOC Zenith · loja offline' },
+  'noc-online': { icone: '🟢', rotulo: 'NOC Zenith · loja reconectou' },
+  'noc-acesso-remoto': { icone: '🛑', rotulo: 'NOC Zenith · acesso remoto detectado' },
+};
+function infoTipo(tipo){ return TIPOS[tipo] || { icone: '🔔', rotulo: tipo || 'Alerta' }; }
+
+function formatarHorario(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+
+let FILTRO = 'pendentes';
+function mudarFiltro(f){
+  FILTRO = f;
+  document.querySelectorAll('.filtro-btn').forEach(b=>b.classList.toggle('active', b.dataset.filtro===f));
+  render();
+}
+
+let ALERTAS = [];
+
+function render(){
+  const lista = document.getElementById('lista');
+  const itens = FILTRO === 'pendentes' ? ALERTAS.filter(a=>!a.atendidoEm) : ALERTAS;
+  if(!itens.length){
+    lista.innerHTML = `<div class="empty">${FILTRO==='pendentes' ? 'Nenhum alerta pendente. 🎉' : 'Nenhum alerta registrado ainda.'}</div>`;
+    return;
+  }
+  lista.innerHTML = itens.map(a=>{
+    const info = infoTipo(a.tipo);
+    const atendido = !!a.atendidoEm;
+    return `<div class="card ${a.critico ? 'critico' : ''} ${atendido ? 'atendido' : ''}">
+      <div class="icone">${info.icone}</div>
+      <div class="corpo">
+        <div class="titulo-linha">
+          <span class="titulo">${escapeHtml(a.titulo || info.rotulo)}</span>
+          ${a.critico ? '<span class="badge critico">Crítico</span>' : ''}
+          ${atendido ? '<span class="badge ok">Atendido</span>' : ''}
+        </div>
+        ${a.resumo ? `<div class="resumo">${escapeHtml(a.resumo)}</div>` : ''}
+        <div class="meta">${info.rotulo} · ${formatarHorario(a.criadoEm)}${atendido ? ' · atendido por ' + escapeHtml(a.atendidoPorEmail || '') + ' às ' + formatarHorario(a.atendidoEm) : ''}</div>
+      </div>
+      <div class="card-acoes">
+        ${a.url ? `<button type="button" class="btn-ghost" onclick="irPara('${a.id}','${encodeURIComponent(a.url)}')">↗️ Abrir</button>` : ''}
+        ${!atendido ? `<button type="button" class="btn-ghost ok" onclick="atender('${a.id}')">✅ Atender</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function irPara(id, urlEnc){
+  await atender(id, true);
+  location.href = decodeURIComponent(urlEnc);
+}
+
+async function atender(id, semRecarregar){
+  try{
+    const resp = await fetch(`/api/alertas-central/${id}/atender`, { method:'POST' });
+    if(!resp.ok) return;
+    const atualizado = await resp.json();
+    const idx = ALERTAS.findIndex(a=>a.id===id);
+    if(idx>=0) ALERTAS[idx] = atualizado;
+    if(!semRecarregar) render();
+  }catch(e){ /* silencioso - proxima carga corrige */ }
+}
+
+async function carregar(){
+  ALERTAS = await fetch('/api/alertas-central').then(r=>r.json());
+  render();
+}
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  const me = await res.json();
+  if(me.role !== 'master'){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('root').classList.remove('hidden');
+  await carregar();
+  setInterval(()=>{ if(!document.hidden) carregar(); }, 15000);
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) carregar(); });
+}
+boot();
+</script>
+<script src="/suporte-chat.js"></script>
+<script src="/notif-central.js"></script>
+<script src="/nav-gate.js"></script>
+</body>
+</html>

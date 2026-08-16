@@ -4,6 +4,7 @@
 const webpush = require('web-push');
 const db = require('./firestore');
 const { ehCargoGerente } = require('./users');
+const alertasCentral = require('./alertasCentral');
 
 const COLLECTION = db.collection('push_subscriptions');
 
@@ -94,13 +95,16 @@ function podeReceberAprovacaoQa(sub) {
 // sensivel (exclusao/configuracao global) e ela esta parada esperando
 // aprovacao (ver EXECUTORES_QA em index.js)
 async function notifyQaAprovacaoPendente(resumo, criadoPorEmail) {
-  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
-  const payload = JSON.stringify({
+  const dados = {
     title: '🧪 QA Master pediu autorização',
     body: `${criadoPorEmail || ''} · ${resumo || ''}`,
     tag: 'qa-aprovacao',
+    critical: true,
     url: '/usuarios.html',
-  });
+  };
+  await alertasCentral.registrar({ tipo: 'qa-aprovacao', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
   const subs = await loadSubs();
   for (const sub of subs) {
     if (!podeReceberAprovacaoQa(sub)) continue;
@@ -193,17 +197,20 @@ async function sendToAll(data, { unidade, section } = {}) {
 
 async function notify(tx) {
   if (!isAlertable(tx)) return;
-  await sendToAll({
-    title: titleFor(tx),
-    body: `${tx.nomeCliente || tx.cardHolder || 'Cliente'} · R$ ${(tx.valor || 0).toFixed(2)}${tx.motivo ? ' · ' + tx.motivo : ''}`,
-    tag: tx.pspReference,
-    url: '/monitor.html',
-  }, { unidade: tx.unidade, section: 'monitor' });
+  const title = titleFor(tx);
+  const body = `${tx.nomeCliente || tx.cardHolder || 'Cliente'} · R$ ${(tx.valor || 0).toFixed(2)}${tx.motivo ? ' · ' + tx.motivo : ''}`;
+  // fraude suspeita toca o alarme cheio (mesmo criterio de urgencia dos
+  // outros "critico") - estorno/chargeback comum fica so no push normal,
+  // senao toda operação de rotina (varias por dia) viraria sirene
+  const critico = !!tx.fraudeSuspeita;
+  await alertasCentral.registrar({ tipo: critico ? 'fraude' : 'monitor', titulo: title, resumo: body, url: '/monitor.html', critico });
+  await sendToAll({ title, body, tag: tx.pspReference, critical: critico, url: '/monitor.html' }, { unidade: tx.unidade, section: 'monitor' });
 }
 
 // alerta generico (ex: teste de cartao clonado) - nao depende de uma
 // transacao especifica normalizada
 async function notifyRaw(title, body, tag, unidade) {
+  await alertasCentral.registrar({ tipo: 'monitor', titulo: title, resumo: body, url: '/monitor.html' });
   await sendToAll({ title, body, tag, url: '/monitor.html' }, { unidade, section: 'monitor' });
 }
 
@@ -211,8 +218,10 @@ async function notifyRaw(title, body, tag, unidade) {
 // suporte de TI etc.) - vai so pra Master/Admin, que sao quem decide essas
 // filas (mesmo publico do toast+som ja existente no Painel)
 async function notifySolicitacao(title, body, tag, url) {
+  const destino = url || '/central-historico.html';
+  await alertasCentral.registrar({ tipo: 'solicitacao', titulo: title, resumo: body, url: destino });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
-  const payload = JSON.stringify({ title, body, tag, url: url || '/central-historico.html' });
+  const payload = JSON.stringify({ title, body, tag, url: destino });
   const subs = await loadSubs();
   for (const sub of subs) {
     if (!podeReceberSolicitacao(sub)) continue;
@@ -264,12 +273,15 @@ async function notifyAbastecimento(title, body, tag, secao) {
 // explicando a causa real, e manda pro NOC Zenith em vez da tela de
 // atendimento (nao ha nada pra "atender" ali - o problema e' conectividade)
 async function notifyBeniboyEscalonamento(chat, motivo, opts) {
-  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const chatId = chat && chat.id;
   if (!chatId) return;
   const lojaOffline = !!(opts && opts.lojaOffline);
+  // chat vai junto na URL do alarme (alerta-beniboy.html) e o "Atender agora"
+  // de lá manda pra /beniboy.html?chat=<id>, que abre essa conversa
+  // especifica direto (ver abrirDetalhePorId em beniboy.html) - em vez de
+  // so cair no kanban geral e a pessoa ter que procurar qual conversa era
   const params = new URLSearchParams({ chat: chatId, nome: (chat && chat.nome) || '', motivo: motivo || '' });
-  const payload = JSON.stringify(lojaOffline ? {
+  const dados = lojaOffline ? {
     title: '🔴 Loja sem conexão · conversa travada',
     body: `${(chat && chat.lojaContexto) || 'A loja'} está sem internet/computador desligado - a conversa com ${(chat && chat.nome) || 'o visitante'} parou por causa disso, não porque o Beniboy não resolveu.`.slice(0, 150),
     tag: 'beniboy-' + chatId,
@@ -280,7 +292,10 @@ async function notifyBeniboyEscalonamento(chat, motivo, opts) {
     tag: 'beniboy-' + chatId,
     critical: true,
     url: '/alerta-beniboy.html?' + params.toString(),
-  });
+  };
+  await alertasCentral.registrar({ tipo: lojaOffline ? 'noc-loja-offline-conversa' : 'beniboy', titulo: dados.title, resumo: dados.body, url: dados.url, critico: !lojaOffline });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
   const subs = await loadSubs();
   for (const sub of subs) {
     if (!podeReceberCritico(sub)) continue;
@@ -303,17 +318,19 @@ async function notifyBeniboyEscalonamento(chat, motivo, opts) {
 // o texto/destino - nao e o Beniboy pedindo ajuda, e uma tentativa de
 // invasao, e a decisao (ex: bloquear IP no provedor) e humana, do Master
 async function notifySegurancaChat(chat, detalhe) {
-  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const chatId = chat && chat.id;
   if (!chatId) return;
   const params = new URLSearchParams({ tipo: 'seguranca', chat: chatId, nome: (chat && chat.nome) || '', motivo: detalhe || '' });
-  const payload = JSON.stringify({
+  const dados = {
     title: '🛡️ Alerta de segurança — chat de suporte',
     body: `${(chat && chat.nome) || 'Visitante'}${detalhe ? ' · ' + detalhe : ''}`.slice(0, 150),
     tag: 'seguranca-' + chatId + '-' + Date.now(),
     critical: true,
     url: '/alerta-beniboy.html?' + params.toString(),
-  });
+  };
+  await alertasCentral.registrar({ tipo: 'seguranca', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
   const subs = await loadSubs();
   for (const sub of subs) {
     if (!podeReceberAlertaSeguranca(sub)) continue;
@@ -363,13 +380,15 @@ function podeReceberPcdCortesia(sub, unidade) {
   return ehCargoGerente(meta.cargo) && (meta.unidades || []).includes(unidade);
 }
 async function notifyParquePcdCortesiaLimite({ unidade, unidadeNome, horaBucket, dataUtilizacao }) {
-  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
-  const payload = JSON.stringify({
+  const dados = {
     title: 'PCD cortesia · limite do horário atingido',
     body: `${unidadeNome || unidade} · ${horaBucket}:00–${horaBucket}:59 · já foram usadas as 2 vagas de cortesia PCD.`,
     tag: `parque-pcd-cortesia-${unidade}-${dataUtilizacao}-${horaBucket}`,
     url: '/parque-checkin.html',
-  });
+  };
+  await alertasCentral.registrar({ tipo: 'parque-pcd', titulo: dados.title, resumo: dados.body, url: dados.url });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
   const subs = await loadSubs();
   for (const sub of subs) {
     if (!podeReceberPcdCortesia(sub, unidade)) continue;
@@ -400,13 +419,16 @@ function podeReceberAlertaRh(sub, unidade) {
 // rh.DIAS_TESTE_ALERTA) sem decisao - aviso pro Master, Gerente/Ass.Gerente
 // DA UNIDADE e pro time de RH (ver podeReceberAlertaRh)
 async function notifyRhTesteVencido(funcionario) {
-  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
-  const payload = JSON.stringify({
+  const dados = {
     title: '🧑‍💼 RH · decisão de teste pendente',
     body: `${funcionario.nome} (${funcionario.unidade}) completou o período de teste - defina se segue.`,
     tag: `rh-teste-${funcionario.id}`,
+    critical: true,
     url: '/rh.html',
-  });
+  };
+  await alertasCentral.registrar({ tipo: 'rh-teste-vencido', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
   const subs = await loadSubs();
   for (const sub of subs) {
     if (!podeReceberAlertaRh(sub, funcionario.unidade)) continue;
@@ -432,9 +454,11 @@ function podeReceberAprovacaoRh(sub) {
   if (!meta) return false;
   return !!meta.isMaster || !!meta.isAdmin || !!meta.podeRhTodasUnidades;
 }
-async function notifyAprovacaoRh(title, body, tag) {
+async function notifyAprovacaoRh(title, body, tag, tipo, critico) {
+  const dados = { title, body, tag, url: '/rh.html', critical: !!critico };
+  await alertasCentral.registrar({ tipo: tipo || 'rh', titulo: title, resumo: body, url: '/rh.html', critico: !!critico });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
-  const payload = JSON.stringify({ title, body, tag, url: '/rh.html' });
+  const payload = JSON.stringify(dados);
   const subs = await loadSubs();
   for (const sub of subs) {
     if (!podeReceberAprovacaoRh(sub)) continue;
@@ -462,6 +486,7 @@ async function notifyRhAprovacaoPendente(funcionarioNome, unidade, motivoPendenc
     '🧑‍💼 RH · check-in aguardando aprovação',
     `${funcionarioNome} (${unidade}) - ${MOTIVO_PENDENCIA_LABEL[motivoPendencia] || 'precisa de aprovação'}.`,
     `rh-checkin-pendente-${funcionarioNome}-${unidade}-${Date.now()}`,
+    'rh-checkin-pendente', true,
   );
 }
 
@@ -472,6 +497,7 @@ async function notifyRhAdvertenciaPendente(advertencia) {
     '📋 RH · solicitação de advertência',
     `${advertencia.funcionarioNome} (${advertencia.unidade}) - aguardando aprovação.`,
     `rh-advertencia-pendente-${advertencia.id}`,
+    'rh-advertencia-pendente', true,
   );
 }
 
@@ -483,6 +509,7 @@ async function notifyRhCadastroPendente(funcionarioNome, unidade) {
     '🧑‍💼 RH · cadastro aguardando aprovação',
     `${funcionarioNome} (${unidade}) - novo cadastro aguardando aprovação.`,
     `rh-cadastro-pendente-${funcionarioNome}-${unidade}-${Date.now()}`,
+    'rh-cadastro-pendente', true,
   );
 }
 
@@ -492,6 +519,7 @@ async function notifyRhCadastroReprovado(funcionarioNome, unidade, motivo) {
     '❌ RH · cadastro reprovado',
     `${funcionarioNome} (${unidade}) foi reprovado${motivo ? ` - ${motivo}` : ''}.`,
     `rh-cadastro-reprovado-${funcionarioNome}-${unidade}-${Date.now()}`,
+    'rh-cadastro-reprovado', false,
   );
 }
 
@@ -502,6 +530,7 @@ async function notifyRhAdvertenciaPrazoVencido(advertencia) {
     '⏰ RH · advertência com prazo vencido',
     `${advertencia.funcionarioNome} (${advertencia.unidade}) - passou das 48h sem anexar o documento.`,
     `rh-advertencia-prazo-${advertencia.id}`,
+    'rh-advertencia-prazo', true,
   );
 }
 
@@ -516,6 +545,7 @@ async function notifyExperienciaPrazo(funcionario, diasRestantes) {
     `🗓️ RH · experiência (${etapaLabel}) ${prazoTexto}`,
     `${funcionario.nome} (${funcionario.unidade}) - registre a decisão antes do prazo.`,
     `rh-experiencia-${funcionario.id}-${diasRestantes}`,
+    'rh-experiencia-prazo', diasRestantes <= 1,
   );
 }
 
@@ -527,14 +557,16 @@ function podeReceberAlertaExperienciaGerente(sub, unidade) {
   return !!meta && ehCargoGerente(meta.cargo) && (meta.unidades || []).includes(unidade);
 }
 async function notifyExperienciaPrazoGerente(funcionario) {
-  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const etapaLabel = funcionario.experiencia && funcionario.experiencia.etapa === '60' ? '60 dias (total 90)' : '30 dias';
-  const payload = JSON.stringify({
+  const dados = {
     title: `🗓️ Experiência vence HOJE`,
     body: `${funcionario.nome} - prazo da etapa de ${etapaLabel} vence hoje. Registre a decisão.`,
     tag: `rh-experiencia-gerente-${funcionario.id}`,
     url: '/rh.html',
-  });
+  };
+  await alertasCentral.registrar({ tipo: 'rh-experiencia-gerente', titulo: dados.title, resumo: dados.body, url: dados.url });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
   const subs = await loadSubs();
   for (const sub of subs) {
     if (!podeReceberAlertaExperienciaGerente(sub, funcionario.unidade)) continue;
@@ -559,15 +591,17 @@ async function notifyExperienciaPrazoGerente(funcionario) {
 // independente - com tag so por unidade, o segundo aviso substituiria o
 // primeiro em vez de aparecer como notificacao separada
 async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto) {
-  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
-  const payload = JSON.stringify({
+  const dados = {
     title: '🔴 Loja sem conexão',
     body: `${prefixo}${unidadeNome || codigo} parou de responder - verifique a internet/computador da loja.`,
     tag: `loja-status-${codigo}-${posto || 'principal'}`,
     critical: true,
     url: '/loja-status.html',
-  });
+  };
+  await alertasCentral.registrar({ tipo: 'noc-offline', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
   const subs = await loadSubs();
   for (const sub of subs) {
     if (!podeReceberCritico(sub)) continue;
@@ -586,14 +620,16 @@ async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto) {
 // computador da loja voltou a responder depois de ter caido - aviso
 // tranquilo (sem alarme), mesmo publico do alerta de queda
 async function notifyLojaVoltou(unidadeNome, codigo, computadorNome, posto) {
-  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
-  const payload = JSON.stringify({
+  const dados = {
     title: '🟢 Loja reconectou',
     body: `${prefixo}${unidadeNome || codigo} voltou a responder.`,
     tag: `loja-status-${codigo}-${posto || 'principal'}`,
     url: '/loja-status.html',
-  });
+  };
+  await alertasCentral.registrar({ tipo: 'noc-online', titulo: dados.title, resumo: dados.body, url: dados.url });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
   const subs = await loadSubs();
   for (const sub of subs) {
     if (!podeReceberCritico(sub)) continue;
@@ -625,15 +661,17 @@ function podeReceberAcessoRemoto(sub) {
 // ainda nao visto (diferente do offline/online, onde so o estado mais
 // recente importa)
 async function notifyAcessoRemotoDetectado(unidadeNome, codigo, computadorNome, posto, detalhe) {
-  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
-  const payload = JSON.stringify({
+  const dados = {
     title: '🛑 Acesso remoto detectado',
     body: `${prefixo}${unidadeNome || codigo} · ${detalhe || 'conexão de acesso remoto'}`,
     tag: `acesso-remoto-${codigo}-${posto || 'principal'}-${Date.now()}`,
     critical: true,
     url: '/loja-status.html',
-  });
+  };
+  await alertasCentral.registrar({ tipo: 'noc-acesso-remoto', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
   const subs = await loadSubs();
   for (const sub of subs) {
     if (!podeReceberAcessoRemoto(sub)) continue;

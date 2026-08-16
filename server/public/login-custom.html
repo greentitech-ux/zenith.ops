@@ -111,6 +111,7 @@
   <a class="back hidden" id="nav-rh" href="/rh.html">🧑‍💼 RH</a>
   <a class="back hidden" id="nav-email" href="/email.html">📧 E-mail</a>
   <a class="back active" id="nav-login-custom-self" href="/login-custom.html">🎨 Tela de Login</a>
+  <a class="back hidden" id="nav-central-alertas" href="/central-alertas.html">🚨 Central de Alertas</a>
   <a class="back" id="nav-ajuda" href="/ajuda.html">❓ Ajuda</a>
   <div class="nav-drawer-sep"></div>
   <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
@@ -316,6 +317,7 @@ async function boot(){
   document.getElementById('nav-usuarios').classList.remove('hidden');
   document.getElementById('nav-grupos').classList.remove('hidden');
   document.getElementById('nav-email').classList.remove('hidden');
+  document.getElementById('nav-central-alertas').classList.remove('hidden');
   document.getElementById('root').classList.remove('hidden');
   initNavDrawerAccordion();
   await carregarConfig();
