@@ -1984,6 +1984,54 @@ app.get('/api/loja-status', requireSection('suporte'), async (req, res) => {
   res.json(status.map((s) => ({ ...s, unidadeNome: mapa[s.codigo] || s.codigo })));
 });
 
+// ---------- Monitor: alertar a propria loja sobre um pedido especifico -
+// pedido explicito do usuario ("clico a linha do pagamento e escolho quais
+// computadores, ou todos, pra dar o alerta"). Diferente do alerta de fraude
+// de push.js (que avisa o TIME por push), isso avisa os COMPUTADORES da
+// loja direto na tela deles, reusando o mesmo canal de mensagem do NOC
+// Zenith (lojaStatus.enviarMensagem -> mensagemPendente -> banner no
+// proximo heartbeat, ver atendimento.html). Gate so por 'monitor' (nao
+// 'suporte') - quem ve o Monitor tem que poder mandar esse alerta, mesmo
+// sem acesso ao NOC Zenith.
+//
+// "unidade" aqui e o merchantAccountCode da Adyen (ex: "DOM19940"), mas o
+// computador foi cadastrado com o codigo que listaUnidadesPublicas()
+// escolheu pra loja (prefere o codigo de Fechamento quando existe - ver
+// UNIDADES_APELIDOS). nomeCanonicoUnidade() resolve os dois lados pro
+// MESMO nome fixo, entao comparar os nomes canonicos (em vez dos codigos
+// crus) acha os computadores certos mesmo quando os codigos nao batem.
+app.get('/api/monitor/loja-computadores', requireSection('monitor'), async (req, res) => {
+  const unidade = String(req.query.unidade || '').trim();
+  if (!unidade) return res.status(400).json({ error: 'Informe a unidade.' });
+  const nomeAlvo = nomeCanonicoUnidade(unidade, unidade);
+  const todos = await lojaStatus.listar();
+  const computadores = todos
+    .filter((c) => nomeCanonicoUnidade(c.codigo, c.codigo) === nomeAlvo)
+    .map((c) => ({ codigo: c.codigo, posto: c.posto, nome: c.nome, tipo: c.tipo, online: c.online }));
+  res.json({ unidadeNome: nomeAlvo, computadores });
+});
+
+app.post('/api/monitor/alertar-loja', requireSection('monitor'), async (req, res) => {
+  try {
+    const unidade = String(req.body.unidade || '').trim();
+    const postos = Array.isArray(req.body.postos) ? req.body.postos : [];
+    if (!unidade) return res.status(400).json({ error: 'Informe a unidade.' });
+    if (!postos.length) return res.status(400).json({ error: 'Selecione ao menos um computador.' });
+    const nomeAlvo = nomeCanonicoUnidade(unidade, unidade);
+    const todos = await lojaStatus.listar();
+    const alvo = todos.filter((c) => nomeCanonicoUnidade(c.codigo, c.codigo) === nomeAlvo && postos.includes(c.posto));
+    if (!alvo.length) return res.status(404).json({ error: 'Nenhum computador encontrado pra essa loja.' });
+    const cliente = String(req.body.cliente || 'Cliente').slice(0, 80);
+    const valor = Number(req.body.valor || 0);
+    const pedidoId = String(req.body.pedidoId || '').slice(0, 60);
+    const texto = `🚨 CONFIRA ESSE PEDIDO: ${cliente} · R$ ${valor.toFixed(2)}${pedidoId ? ' · #' + pedidoId : ''} - o Monitor pediu pra verificar agora.`;
+    await Promise.all(alvo.map((c) => lojaStatus.enviarMensagem(c.codigo, c.posto, texto, req.user.email)));
+    res.json({ ok: true, avisados: alvo.length });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // tipo 'interno' (computador de escritorio/servidor, so pro monitoramento)
 // aponta pra tela normal de login do Zenith; 'atendimento' (o default,
 // tablet/quiosque na entrada da loja) aponta pro chat publico do Beniboy -

@@ -480,6 +480,18 @@
   </div>
 </div>
 
+<div class="overlay" id="alerta-loja-overlay">
+  <div class="modal" style="width:min(420px,92vw);border-color:#5c1e1e;">
+    <h3 style="color:var(--bad);">🚨 Alertar a loja</h3>
+    <div id="alerta-loja-pedido-info" style="font-size:12px;color:var(--muted);margin:4px 0 12px;"></div>
+    <div id="alerta-loja-lista" style="display:flex;flex-direction:column;gap:2px;max-height:280px;overflow-y:auto;"></div>
+    <p id="alerta-loja-erro" class="hidden" style="color:var(--bad);font-size:11.5px;margin-top:8px;"></p>
+    <p id="alerta-loja-ok" class="hidden" style="color:var(--ok);font-size:11.5px;margin-top:8px;"></p>
+    <button type="button" id="alerta-loja-enviar" onclick="enviarAlertaLoja()" style="width:100%;margin-top:12px;padding:9px;border-radius:6px;border:1px solid #5c1e1e;background:var(--panel2);color:var(--bad);cursor:pointer;font-family:var(--sans);font-size:12.5px;font-weight:600;">Enviar alerta</button>
+    <button class="close" onclick="document.getElementById('alerta-loja-overlay').classList.remove('show')">Fechar</button>
+  </div>
+</div>
+
 </div><!-- /#app-root -->
 
 <script>
@@ -1478,6 +1490,7 @@ async function showClient(key, pedidoId, unidade){
     <div class="row"><span>Fraude suspeita</span><b style="color:var(--bad)">${stats.fraude}</b></div>
     <div class="row"><span>Taxa de aprovação</span><b>${stats.taxaAprovacao}%</b></div>
     ${CURRENT_MODAL_PEDIDO ? `<button type="button" class="close" style="margin-top:10px;background:var(--panel2);border-color:#1e4a63;color:var(--accent);" onclick="abrirDisputaDoModal()">📎 Registrar observação / disputa deste pedido</button>` : ''}
+    ${CURRENT_MODAL_PEDIDO ? `<button type="button" class="close" style="margin-top:8px;background:var(--panel2);border-color:#5c1e1e;color:var(--bad);" onclick="abrirAlertaLojaDoModal()">🚨 Alertar a loja pra conferir esse pedido</button>` : ''}
   `;
   document.getElementById('overlay').classList.add('show');
 }
@@ -1487,6 +1500,81 @@ function abrirDisputaDoModal(){
   const { pedidoId, unidade } = CURRENT_MODAL_PEDIDO;
   document.getElementById('overlay').classList.remove('show');
   abrirDisputa(pedidoId, unidade);
+}
+
+// ---- alertar a loja (computadores da unidade) sobre um pedido especifico -
+// mesmo espirito do alerta de fraude, so que em vez de avisar o TIME por
+// push, avisa os proprios COMPUTADORES da loja (banner de tela cheia no
+// proximo heartbeat, ver lojaStatus.js/atendimento.html) - pedido explicito
+// do usuario: escolher quais computadores (ou todos) recebem o alerta ----
+let ALERTA_LOJA_PEDIDO = null; // {pedidoId, unidade, cliente, valor}
+function abrirAlertaLojaDoModal(){
+  if(!CURRENT_MODAL_PEDIDO) return;
+  const { pedidoId, unidade } = CURRENT_MODAL_PEDIDO;
+  document.getElementById('overlay').classList.remove('show');
+  abrirAlertaLoja(pedidoId, unidade);
+}
+async function abrirAlertaLoja(pedidoId, unidade){
+  const pedido = DATA.find(d=>String(orderKeyOf(d))===String(pedidoId));
+  const cliente = primeiroUltimoNome(pedido?.nomeCliente || pedido?.cardHolder || 'Cliente desconhecido');
+  const valor = Number(pedido?.valor || 0);
+  ALERTA_LOJA_PEDIDO = { pedidoId, unidade, cliente, valor };
+  document.getElementById('alerta-loja-pedido-info').textContent = `${unidade||''} · ${cliente} · ${fmtMoney(valor)}`;
+  const lista = document.getElementById('alerta-loja-lista');
+  const btn = document.getElementById('alerta-loja-enviar');
+  lista.innerHTML = '<div class="empty">Carregando computadores...</div>';
+  document.getElementById('alerta-loja-erro').classList.add('hidden');
+  document.getElementById('alerta-loja-ok').classList.add('hidden');
+  btn.disabled = true;
+  document.getElementById('alerta-loja-overlay').classList.add('show');
+  try{
+    const dados = await fetch('/api/monitor/loja-computadores?unidade='+encodeURIComponent(unidade||'')).then(r=>r.json());
+    const computadores = dados.computadores || [];
+    if(!computadores.length){
+      lista.innerHTML = '<div class="empty">Nenhum computador do NOC Zenith cadastrado pra essa loja ainda.</div>';
+      return;
+    }
+    lista.innerHTML = `
+      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:2px;cursor:pointer;">
+        <input type="checkbox" id="alerta-loja-todos" onchange="document.querySelectorAll('.alerta-loja-item').forEach(c=>c.checked=this.checked)">
+        Selecionar todos (${computadores.length})
+      </label>
+      ${computadores.map(c=>`
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:4px 0;cursor:pointer;">
+          <input type="checkbox" class="alerta-loja-item" value="${esc(c.posto)}">
+          <span style="flex:1;">${esc(c.nome||c.posto)}</span>
+          <span style="font-family:var(--mono);font-size:10px;color:${c.online?'var(--ok)':'var(--muted)'};">${c.online?'● online':'○ offline'}</span>
+        </label>
+      `).join('')}
+    `;
+    btn.disabled = false;
+  }catch(e){
+    lista.innerHTML = '<div class="empty">Erro ao carregar computadores dessa loja.</div>';
+  }
+}
+async function enviarAlertaLoja(){
+  if(!ALERTA_LOJA_PEDIDO) return;
+  const postos = [...document.querySelectorAll('.alerta-loja-item:checked')].map(c=>c.value);
+  const erro = document.getElementById('alerta-loja-erro');
+  const ok = document.getElementById('alerta-loja-ok');
+  erro.classList.add('hidden'); ok.classList.add('hidden');
+  if(!postos.length){ erro.textContent = 'Selecione ao menos um computador.'; erro.classList.remove('hidden'); return; }
+  const btn = document.getElementById('alerta-loja-enviar');
+  btn.disabled = true; btn.textContent = 'Enviando...';
+  try{
+    const resp = await fetch('/api/monitor/alertar-loja', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      unidade: ALERTA_LOJA_PEDIDO.unidade, pedidoId: ALERTA_LOJA_PEDIDO.pedidoId,
+      cliente: ALERTA_LOJA_PEDIDO.cliente, valor: ALERTA_LOJA_PEDIDO.valor, postos,
+    })});
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao enviar o alerta.');
+    ok.textContent = `✅ Alerta enviado pra ${data.avisados} computador(es).`;
+    ok.classList.remove('hidden');
+  }catch(e){
+    erro.textContent = e.message; erro.classList.remove('hidden');
+  }finally{
+    btn.disabled = false; btn.textContent = 'Enviar alerta';
+  }
 }
 
 // comentario manual num estorno (ex: "estornei eu mesmo pelo painel da
