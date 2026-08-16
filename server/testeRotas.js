@@ -128,10 +128,25 @@ setTimeout(async () => {
     pizzas: { calabresa: 4, pepperoni: 2, mussarela: 0 }, insumos: [], operadorNome: 'Ana',
   });
 
+  // um computador com medicao de link, pro diagnostico de rede ter o que
+  // devolver (ver redeDiagnostico.js)
+  const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+  DOCS.set('lojaStatus/AERO__ATM01', {
+    codigo: 'AERO', posto: 'ATM01', nome: 'AEROCar-ATM01', tipo: 'interno',
+    ultimoHeartbeatEm: Date.now(), eventos: [],
+    redeDia: {
+      dia: hoje, amostras: 40, somaLatencia: 40 * 900, maxLatencia: 4200, lentas: 12, falhas: 3,
+      somaGateway: 40 * 120, amostrasGateway: 40, somaPerdaGateway: 40 * 9,
+      somaWan: 40 * 45, amostrasWan: 40, somaPerdaWan: 0,
+      somaSinal: 0, amostrasSinal: 0, minSinal: null, conexao: 'cabo',
+    },
+  });
+
   const casos = [
     ['/api/abastecimento/sugestao-envio', 'sugestão de pré-envio'],
     ['/api/abastecimento/fluxo?inicio=2026-08-10&fim=2026-08-16', 'fluxo dia a dia'],
     ['/api/abastecimento/capacidades', 'capacidades'],
+    ['/api/loja-status/rede', 'diagnóstico de rede'],
   ];
   let ruins = 0;
   for (const [rota, nome] of casos) {

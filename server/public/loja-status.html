@@ -39,6 +39,42 @@
   .btn-sair{color:var(--bad);}
   .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
   .hidden{display:none!important;}
+  /* ---- diagnostico de rede (ver redeDiagnostico.js) ---- */
+  #rede-root{margin-top:28px;padding-top:20px;border-top:1px solid var(--line);}
+  .rede-titulo{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+  .rede-sub{font-size:11.5px;color:var(--muted);line-height:1.55;margin:2px 0 14px;max-width:75ch;}
+  .rede-sub b{color:var(--text);font-weight:600;}
+  .rede-resumo{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+  .rede-chip{font-family:var(--mono);font-size:10.5px;padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:var(--panel);color:var(--muted);}
+  .rede-chip b{font-size:13px;display:block;color:var(--text);}
+  .rede-chip.critico b{color:var(--bad);} .rede-chip.instavel b{color:var(--warn);} .rede-chip.bom b{color:var(--ok);}
+  .rede-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:8px;border-left:3px solid var(--line);}
+  .rede-card.critico{border-left-color:var(--bad);}
+  .rede-card.instavel{border-left-color:var(--warn);}
+  .rede-card.aceitavel{border-left-color:var(--accent);}
+  .rede-card.bom{border-left-color:var(--ok);}
+  .rede-card-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .rede-nome{font-weight:600;font-size:13px;}
+  .rede-unidade{font-size:11px;color:var(--muted);}
+  .rede-nota{margin-left:auto;font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:14px;white-space:nowrap;}
+  .rede-nota.critico{background:var(--bad-dim);color:var(--bad);}
+  .rede-nota.instavel{background:var(--warn-dim);color:var(--warn);}
+  .rede-nota.aceitavel{background:rgba(92,200,255,.14);color:var(--accent);}
+  .rede-nota.bom{background:var(--ok-dim);color:var(--ok);}
+  .rede-nota.sem-dados{background:var(--panel2);color:var(--muted);}
+  .rede-metricas{display:flex;gap:14px;flex-wrap:wrap;margin-top:9px;font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+  .rede-metricas span b{color:var(--text);font-weight:600;}
+  .rede-metricas span.alerta b{color:var(--warn);}
+  .rede-metricas span.ruim b{color:var(--bad);}
+  .rede-veredito{margin-top:10px;padding:9px 11px;border-radius:8px;background:var(--panel2);font-size:11.5px;line-height:1.55;}
+  .rede-veredito-titulo{font-weight:600;margin-bottom:2px;}
+  .rede-veredito.lan .rede-veredito-titulo,.rede-veredito.wifi .rede-veredito-titulo{color:var(--warn);}
+  .rede-veredito.wan .rede-veredito-titulo,.rede-veredito.ambos .rede-veredito-titulo{color:var(--bad);}
+  .rede-veredito.ok .rede-veredito-titulo{color:var(--ok);}
+  .rede-veredito-detalhe{color:var(--muted);}
+  .rede-penal{margin-top:7px;font-size:10.5px;color:var(--muted);}
+  .rede-vazio{font-size:12px;color:var(--muted);padding:14px 0;}
+  @media(max-width:640px){ .rede-nota{margin-left:0;} .rede-metricas{gap:10px;} }
   .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
   .hamburger-btn:hover{border-color:var(--accent);}
   .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
@@ -280,6 +316,22 @@
     </div>
     <div id="grid-fantasmas" class="equip-grid"></div>
   </div>
+</div>
+
+<!-- Diagnóstico de link (ver redeDiagnostico.js). Fica FORA de #root porque
+     responde a outra pergunta: a grade acima mostra quem está no ar agora,
+     essa lista mostra a QUALIDADE do link ao longo do dia - inclusive de
+     quem está online e mesmo assim sofrendo -->
+<div id="rede-root" class="hidden">
+  <div class="rede-titulo">
+    <h2>📶 Diagnóstico de rede</h2>
+    <button type="button" class="btn-notif" onclick="carregarRede()" title="Atualizar">🔄</button>
+  </div>
+  <div class="rede-sub">
+    Medido pelo próprio batimento que cada computador já manda a cada 25s — pior link primeiro. Onde o NOCZenith está instalado, o teste separa a <b>rede interna</b> (até o roteador da loja) do <b>link da operadora</b>, que é o que decide para quem abrir chamado. Nos computadores que reportam só pelo navegador aparece apenas a latência do sistema.
+  </div>
+  <div class="rede-resumo" id="rede-resumo"></div>
+  <div id="rede-lista"></div>
 </div>
 
 <div id="agente-root" class="hidden">
@@ -853,6 +905,90 @@ async function carregar(){
   }catch(e){ /* mantem a ultima lista carregada na tela */ }
 }
 
+// ---- diagnostico de rede (ver redeDiagnostico.js no servidor) ------------
+// A grade de cima responde "quem esta no ar agora". Isso aqui responde outra
+// coisa: "o link de quem esta ruim" - inclusive de computador que aparece
+// online e mesmo assim faz o operador esperar.
+async function carregarRede(){
+  try{
+    const r = await fetch('/api/loja-status/rede');
+    if(!r.ok) return;
+    renderRede(await r.json());
+  }catch(e){ /* mantem o que ja estava na tela */ }
+}
+
+const msTexto = (ms) => {
+  if(!ms) return '0min';
+  const min = Math.round(ms / 60000);
+  if(min < 60) return min + 'min';
+  return Math.floor(min/60) + 'h' + String(min%60).padStart(2,'0');
+};
+
+function renderRede(dados){
+  const lista = (dados && dados.computadores) || [];
+  const medidos = lista.filter(c => c.nota !== null);
+  const conta = (cl) => medidos.filter(c => c.classe === cl).length;
+
+  document.getElementById('rede-resumo').innerHTML = medidos.length
+    ? [
+        `<span class="rede-chip critico"><b>${conta('critico')}</b>crítico</span>`,
+        `<span class="rede-chip instavel"><b>${conta('instavel')}</b>instável</span>`,
+        `<span class="rede-chip"><b>${conta('aceitavel')}</b>aceitável</span>`,
+        `<span class="rede-chip bom"><b>${conta('bom')}</b>bom</span>`,
+        `<span class="rede-chip"><b>${lista.length - medidos.length}</b>sem medição</span>`,
+      ].join('')
+    : '';
+
+  if(!lista.length){
+    document.getElementById('rede-lista').innerHTML = '<div class="rede-vazio">Nenhum computador cadastrado ainda.</div>';
+    return;
+  }
+  if(!medidos.length){
+    document.getElementById('rede-lista').innerHTML = '<div class="rede-vazio">Nenhuma medição chegou ainda. Os computadores passam a reportar sozinhos assim que o NOCZenith se atualizar (leva até ~1h) ou assim que a tela da loja recarregar.</div>';
+    return;
+  }
+
+  document.getElementById('rede-lista').innerHTML = lista.map(c => {
+    const r = c.resumo || {};
+    const m = [];
+    // classe de cor por metrica: o que está fora da faixa se destaca sozinho,
+    // sem precisar comparar numero a numero na leitura
+    const met = (rotulo, valor, nivel) => m.push(`<span class="${nivel||''}">${rotulo} <b>${valor}</b></span>`);
+    if(r.latenciaMedia !== null && r.latenciaMedia !== undefined){
+      met('latência', r.latenciaMedia + 'ms', r.latenciaMedia > 1000 ? 'ruim' : (r.latenciaMedia > 300 ? 'alerta' : ''));
+    }
+    if(r.latenciaMax) met('pico', r.latenciaMax + 'ms', r.latenciaMax > 3000 ? 'alerta' : '');
+    if(r.pctFalha) met('batimentos perdidos', r.pctFalha + '%', r.pctFalha > 2 ? 'ruim' : 'alerta');
+    if(r.gatewayMedia !== null && r.gatewayMedia !== undefined){
+      met('roteador', r.gatewayMedia + 'ms', r.gatewayMedia > 30 ? 'alerta' : '');
+    }
+    if(r.wanMedia !== null && r.wanMedia !== undefined){
+      met('internet', r.wanMedia + 'ms' + (r.wanPerda ? ` (${r.wanPerda}% perda)` : ''), (r.wanMedia > 120 || r.wanPerda > 2) ? 'ruim' : '');
+    }
+    if(r.conexao) met('conexão', r.conexao === 'wifi' ? ('wi-fi' + (r.sinalWifiMin !== null && r.sinalWifiMin !== undefined ? ` ${r.sinalWifiMin}%` : '')) : 'cabo',
+      (r.conexao === 'wifi' && r.sinalWifiMin < 60) ? 'alerta' : '');
+    if(c.quedasNoDia) met('quedas hoje', c.quedasNoDia + ' (' + msTexto(c.msForaNoDia) + ' fora)', c.quedasNoDia > 2 ? 'ruim' : 'alerta');
+    if(r.amostras) met('amostras', r.amostras, '');
+
+    const v = c.veredito || {};
+    const penal = (c.penalidades || []).slice(0, 3);
+    return `
+      <div class="rede-card ${escapeHtml(c.classe)}">
+        <div class="rede-card-head">
+          <span class="rede-nome">${escapeHtml(c.nome || c.posto)}</span>
+          <span class="rede-unidade">${escapeHtml(c.unidadeNome || c.codigo)}</span>
+          <span class="rede-nota ${escapeHtml(c.classe)}">${c.nota === null ? 'sem medição' : c.nota + '/100 · ' + escapeHtml(c.rotulo)}</span>
+        </div>
+        ${m.length ? `<div class="rede-metricas">${m.join('')}</div>` : ''}
+        <div class="rede-veredito ${escapeHtml(v.culpa || '')}">
+          <div class="rede-veredito-titulo">${escapeHtml(v.titulo || '')}</div>
+          <div class="rede-veredito-detalhe">${escapeHtml(v.detalhe || '')}</div>
+        </div>
+        ${penal.length ? `<div class="rede-penal">Puxando a nota: ${penal.map(p => escapeHtml(p.motivo)).join(' · ')}</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
 function popularSelectUnidades(){
   const filtro = document.getElementById('filtro-unidade');
   const valorAtual = filtro.value;
@@ -1422,7 +1558,9 @@ async function boot(){
     return;
   }
   document.getElementById('root').classList.remove('hidden');
+  document.getElementById('rede-root').classList.remove('hidden');
   await carregar();
+  carregarRede();
   // deep link vindo de outra tela (ex: painel de conversa do Beniboy, quando
   // a loja já foi identificada e tem computador com acesso remoto) - filtra
   // a grade direto pra essa unidade, sem precisar procurar na mão
@@ -1436,6 +1574,9 @@ async function boot(){
   }
   conectarStream();
   setInterval(() => { if(!document.hidden) carregar(); }, 30000);
+  // a rede muda numa escala de minutos (e o acumulado e do dia inteiro),
+  // entao nao precisa do mesmo ritmo da grade de presenca
+  setInterval(() => { if(!document.hidden) carregarRede(); }, 120000);
   setInterval(atualizarTickerCarga, 15000);
   document.addEventListener('visibilitychange', () => { if(!document.hidden) carregar(); });
 }

@@ -672,14 +672,25 @@ function abertoDesde(){
   if(!v){ v = String(Date.now()); sessionStorage.setItem('zenithAbertoDesde', v); }
   return Number(v);
 }
+// medicao de link (ver redeDiagnostico.js no servidor): o tempo do proprio
+// heartbeat ja e a latencia real de ponta a ponta. So fica conhecida depois
+// da resposta, entao cada beat leva a medida do beat anterior.
+let _redeUltimaLatencia = null;
+let _redeFalhasSeguidas = 0;
 async function heartbeatLoja(codigo, posto){
+  const t0 = Date.now();
   try{
+    const rede = { falhasSeguidas: _redeFalhasSeguidas };
+    if(_redeUltimaLatencia !== null) rede.latenciaMs = _redeUltimaLatencia;
+    _redeUltimaLatencia = null; // cada medicao vai uma vez so
     await _rawFetch('/api/loja-status/heartbeat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesde() }),
+      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesde(), rede }),
     });
-  }catch(e){ /* sem rede agora - a proxima tentativa em 25s tenta de novo */ }
+    _redeUltimaLatencia = Date.now() - t0;
+    _redeFalhasSeguidas = 0;
+  }catch(e){ _redeFalhasSeguidas++; /* sem rede agora - a proxima tentativa em 25s tenta de novo */ }
 }
 (function iniciarHeartbeatLoja(){
   const params = new URLSearchParams(location.search);
