@@ -57,6 +57,7 @@ Regras:
 - Quantidade é sempre o número escrito na nota, sem converter unidade.
 - Só preencha itemIdSugerido quando tiver bastante certeza de que é o mesmo produto do catálogo (nome parecido, mesma unidade) - errar a sugestão é pior que deixar null, porque quem confere só repara num erro sutil, mas um campo vazio ela preenche na hora olhando a nota.
 - Datas sempre em AAAA-MM-DD.
+- IMPORTANTE: os números na nota estão em formato brasileiro (ponto separa milhar, vírgula separa decimal - ex: "1.234,56"). Converta todo campo numérico (quantidade, valorUnitario, valorTotal) para o padrão JSON: só ponto decimal, sem separador de milhar, sem vírgula (ex: 1234.56). Nunca escreva um número com vírgula no JSON - isso quebra o formato.
 - Se a imagem não for uma nota fiscal/comprovante de recebimento, devolva {"erro": "descrição curta do que você viu"} em vez do formato acima.`;
 }
 
@@ -73,7 +74,7 @@ async function lerNota({ buffer, mimeType, catalogo }) {
     : { type: 'image', source: { type: 'base64', media_type: mimeType, data: buffer.toString('base64') } };
   const resp = await getCliente().messages.create({
     model: MODELO,
-    max_tokens: 3000,
+    max_tokens: 8000,
     messages: [{ role: 'user', content: [bloco, { type: 'text', text: montarPrompt(catalogo) }] }],
   });
   const texto = (resp.content || []).map((b) => b.text || '').join('');
@@ -81,6 +82,11 @@ async function lerNota({ buffer, mimeType, catalogo }) {
   try {
     dados = extrairJson(texto);
   } catch (e) {
+    // guarda o texto bruto no log do servidor - sem isso, um erro de
+    // formatação do modelo (ex: numero com virgula, corte por max_tokens)
+    // fica impossivel de diagnosticar so pela mensagem generica que o
+    // gerente ve na tela
+    console.error('inventarioNotaOcr: falha ao parsear JSON da nota. stop_reason=%s texto=%s', resp.stop_reason, texto.slice(0, 2000));
     throw new Error('Não consegui entender essa nota. Tente uma foto mais nítida, com a nota inteira enquadrada.');
   }
   if (dados.erro) throw new Error(dados.erro);
