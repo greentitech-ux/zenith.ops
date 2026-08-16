@@ -6976,6 +6976,51 @@ app.delete('/api/abastecimento/:id', auth.requireMaster, async (req, res) => {
   }
 });
 
+// ---------- comparativo Abastecimento x Fechamento (so Master): quanto de
+// cada sabor de pizza foi ENVIADO pro carrinho ontem (abastecimentoCarrinho)
+// x quanto ficou registrado nos KPIs Extras do Fechamento (grupos.js) da
+// mesma unidade+dia - pedido explicito do usuario, pra flagar diferenca sem
+// precisar cruzar as duas telas na mao. Casa o KPI pelo nome (campo/label
+// normalizado) porque kpisExtras e livre - o Master cadastra o rotulo em
+// grupos.html, o "campo" (slug) so sai daqui ----------
+app.get('/api/abastecimento/comparativo-fechamento', auth.requireMaster, async (req, res) => {
+  try {
+    const unidade = "Domino's Carrinho Aeroporto Recife";
+    const data = ontemBrasiliaISO();
+    const regs = await abastecimentoCarrinho.listAll();
+    const enviado = {};
+    abastecimentoCarrinho.SABORES.forEach((s) => { enviado[s] = 0; });
+    regs.forEach((r) => {
+      if (r.tipo !== 'ENVIO') return;
+      const dia = new Date(r.criadoEm).toLocaleDateString('sv-SE', { timeZone: FUSO_BR });
+      if (dia !== data) return;
+      abastecimentoCarrinho.SABORES.forEach((s) => { enviado[s] += Number(r.pizzas && r.pizzas[s]) || 0; });
+    });
+
+    const fechamentos = await fechamentosLive.listByUnidades([unidade]);
+    const fechamento = fechamentos.find((f) => f.data === data) || null;
+    const grupo = await grupos.grupoDaUnidade(unidade);
+    const kpisDef = (grupo && grupo.kpisExtras) || [];
+    const normalizar = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+    const comparativo = abastecimentoCarrinho.SABORES.map((sabor) => {
+      const def = kpisDef.find((k) => normalizar(k.campo).includes(sabor) || normalizar(k.label).includes(sabor));
+      const registrado = (fechamento && def) ? (Number(fechamento.kpisExtras && fechamento.kpisExtras[def.campo]) || 0) : null;
+      return {
+        sabor,
+        enviado: enviado[sabor],
+        registrado,
+        diferenca: registrado != null ? registrado - enviado[sabor] : null,
+        kpiEncontrado: !!def,
+      };
+    });
+
+    res.json({ unidade, data, temFechamento: !!fechamento, comparativo });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // topicos da Ajuda exclusivos de Master/Admin - servidos pelo backend de
 // proposito (ver docsMaster.js): conteudo que so a gestao pode conhecer nao
 // viaja pro navegador de quem nao e Master/Admin
