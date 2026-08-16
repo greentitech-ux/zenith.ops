@@ -68,6 +68,16 @@
      navegador. Cards de conteudo largo (calendario, tabela, muitos KPIs)
      ganham .wide e ocupam 2 colunas. */
   .painel-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;align-items:start;}
+  /* "masonry" via grid-row-end:span calculado em JS (aplicarMasonry) - cada
+     .pcard-slot ganha o numero de trilhas de PGRID_ROW_UNIT que cobre a
+     altura real do seu conteudo, e grid-auto-flow:dense deixa o navegador
+     encaixar os proximos cards nos buracos que sobram do lado de um card
+     mais alto, em vez de empurrar tudo pra baixo dele (ver comentario perto
+     de aplicarMasonry() - pedido do usuario: "2 container possa esta ao
+     lado de um maior"). So entra depois da 1a medicao (classe .masonry) -
+     medir DEPOIS de trocar pra linhas fixas de 8px daria altura errada
+     (a caixa ja estaria espremida no tamanho da trilha) */
+  .painel-grid.masonry{grid-auto-rows:8px;grid-auto-flow:dense;}
   .pcard-slot{position:relative;min-width:0;}
   .pcard-slot.wide{grid-column:span 2;}
   .pcard-slot.full{grid-column:1 / -1;}
@@ -1324,6 +1334,39 @@ const CHAVES_WIDE = new Set();
 // Full-width evita esse descompasso de altura: os chips ganham a largura
 // inteira da tela pra se organizar, e nenhum card fica "esperando" ao lado
 const CHAVES_FULL = new Set(['noc']);
+
+// "masonry": mede a altura NATURAL de cada card (grid normal, sem a classe
+// .masonry) e so DEPOIS liga o modo de linhas fixas de PGRID_ROW_UNIT px +
+// grid-auto-flow:dense, com o grid-row-end certo pra cada um (ver CSS de
+// .painel-grid.masonry). Sem isso um card curto do lado de um alto deixa
+// buraco vazio embaixo dele - align-items:start nao estica pra preencher -
+// pedido do usuario pra cards menores encaixarem do lado de um maior, em
+// vez de ficar aquele espaco em branco. Medir DEPOIS de ligar as linhas
+// fixas daria altura errada (a caixa ja estaria espremida no tamanho da
+// trilha) - por isso solta o span/classe antes de medir e so reaplica no final
+const PGRID_ROW_UNIT = 8;
+function aplicarMasonry(){
+  const grid = document.getElementById('painel-grid');
+  if(!grid || grid.classList.contains('hidden')) return;
+  const slots = [...grid.children].filter(el=>el.classList.contains('pcard-slot'));
+  if(!slots.length) return;
+  grid.classList.remove('masonry');
+  slots.forEach(s=>{ s.style.gridRowEnd = ''; });
+  void grid.offsetHeight; // forca o navegador a recalcular o layout "normal" antes de medir
+  const gapPx = parseFloat(getComputedStyle(grid).rowGap) || 16;
+  const spans = slots.map(s => Math.max(1, Math.ceil((s.getBoundingClientRect().height + gapPx) / (PGRID_ROW_UNIT + gapPx))));
+  grid.classList.add('masonry');
+  slots.forEach((s,i)=>{ s.style.gridRowEnd = `span ${spans[i]}`; });
+}
+// telas estreitas mudam de N colunas pra 1 (ou vice-versa) ao redimensionar/
+// girar o celular - cada card reflow o texto e muda de altura, entao os
+// spans calculados ficam desatualizados sem remedir
+let painelMasonryResizeTimer = null;
+window.addEventListener('resize', ()=>{
+  clearTimeout(painelMasonryResizeTimer);
+  painelMasonryResizeTimer = setTimeout(aplicarMasonry, 150);
+});
+
 // arrastar pela alça ⠿ (pointer events = funciona com dedo e mouse): o card
 // segue o ponteiro trocando de posicao ao vivo; soltou, a ordem e salva
 let PAINEL_ARRASTANDO = false;
@@ -1485,6 +1528,7 @@ async function renderizarCards(){
     </div>`;
   }).join('');
   initDragCards();
+  aplicarMasonry();
 }
 
 boot();
