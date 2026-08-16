@@ -183,6 +183,13 @@ function estimarCapacidades(ciclos, capacidadesManuais = {}) {
 // ---------------------------------------------------------------
 // sugestao de envio, logo depois da contagem
 // ---------------------------------------------------------------
+// SO INSUMOS. As pizzas (calabresa/pepperoni/mussarela) ficam de fora de
+// proposito: elas nao sao mandadas de uma vez pra encher o carrinho - vao
+// FRACIONADAS ao longo do dia, conforme o pedido do carrinho. "Encher ate a
+// capacidade" e uma conta que so faz sentido pro que e reposto em bloco
+// (bebida, copo, bobina...). Pizza continua aparecendo normalmente no fluxo
+// e no dia a dia - o que muda e so a sugestao de pre-envio.
+//
 // A pergunta da ponta: "contei, e agora?". A conta e simples de proposito,
 // pra qualquer pessoa do turno conferir de cabeca:
 //
@@ -224,10 +231,12 @@ function sugerirEnvio(regs, { capacidadesManuais = {}, ciclos = null } = {}) {
     return itens.get(it.chave);
   };
 
-  itensDe(ultima).forEach((it) => { slot(it).contado += it.qtd; });
+  const soInsumo = (lista) => lista.filter((it) => it.tipo === 'insumo');
+
+  soInsumo(itensDe(ultima)).forEach((it) => { slot(it).contado += it.qtd; });
   posteriores.forEach((e) => {
     const chegou = !!e.recebidoEm;
-    entradasDe(e).forEach((it) => {
+    soInsumo(entradasDe(e)).forEach((it) => {
       const alvo = slot(it);
       if (chegou) alvo.chegouDepois += it.qtd;
       else alvo.aCaminho += it.qtd;
@@ -242,7 +251,7 @@ function sugerirEnvio(regs, { capacidadesManuais = {}, ciclos = null } = {}) {
       aBordo,
       sugestao: i.capacidade == null ? null : Math.max(0, i.capacidade - aBordo),
     };
-  }).sort((a, b) => (a.tipo === b.tipo ? a.nome.localeCompare(b.nome, 'pt-BR') : (a.tipo === 'pizza' ? -1 : 1)));
+  }).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 
   return {
     temBase: true,

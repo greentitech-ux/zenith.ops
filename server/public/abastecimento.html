@@ -1317,7 +1317,8 @@ function renderSugestao(){
   const c = s.contagem;
   document.getElementById('sug-sub').innerHTML =
     `base: contagem de ${fmtHora(c.em)}${c.por?' · '+escapeHtml(c.por):''}`
-    + (c.enviosDepois ? `<br>${c.enviosDepois} envio(s) depois dela já descontado(s)` : '');
+    + (c.enviosDepois ? `<br>${c.enviosDepois} envio(s) depois dela já descontado(s)` : '')
+    + '<br>só insumos — pizza vai por pedido, fracionada no dia';
 
   document.getElementById('sug-itens').innerHTML = s.itens.map(it=>{
     const semBase = it.capacidade == null;
@@ -1391,19 +1392,19 @@ function usarSugestao(tipo){
   const atende = document.getElementById('f-atende');
   if(tipo==='ENVIO' && atende) atende.value = '';
   // abrirForm limpa os campos, entao o preenchimento vem depois dele
+  // pizza NÃO entra no pré-envio (vai fracionada, por pedido): zera os 3
+  // campos pra não levar junto o que abrirForm tinha preenchido a partir de
+  // um pedido pendente - o pré-envio é só reposição de insumo
+  ['f-calabresa','f-pepperoni','f-mussarela'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.value = '';
+  });
   itens.forEach(({it, qtd})=>{
-    if(it.chave.startsWith('pizza:')){
-      // pizza SEMPRE é escrita, inclusive com 0: os 3 sabores são campos
-      // fixos do formulário, e deixar um deles com o resto de um preenchi-
-      // mento anterior mandaria pizza que ninguém pediu
-      const el = document.getElementById('f-' + it.chave.slice(6));
-      if(el) el.value = qtd > 0 ? qtd : '';
-    }else if(qtd > 0){
-      const id = it.chave.slice(7);
-      // a sugestao e sempre em UNIDADE (a conta do backend normaliza caixa
-      // em unidade) - quem quiser lancar em caixa troca no seletor
-      if(insumoCadastro(id)) adicionarInsumo(id, 'unidade', qtd);
-    }
+    if(qtd <= 0) return;
+    const id = it.chave.replace(/^insumo:/, '');
+    // a sugestao e sempre em UNIDADE (a conta do backend normaliza caixa
+    // em unidade) - quem quiser lancar em caixa troca no seletor
+    if(insumoCadastro(id)) adicionarInsumo(id, 'unidade', qtd);
   });
   renderInsumos();
   const obs = document.getElementById('f-obs');

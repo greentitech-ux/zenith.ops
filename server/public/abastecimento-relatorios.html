@@ -347,6 +347,7 @@
   <div class="sub" style="margin:-4px 0 10px;">
     É o que define o <b>pré-envio</b> sugerido depois de cada contagem (sugestão = capacidade − o que já está no carrinho).
     Em branco, vale a <b>estimativa</b> pelo histórico: o maior volume que o carrinho já segurou num turno.
+    Pizza não entra aqui — ela vai fracionada ao longo do dia, por pedido.
   </div>
   <div id="cap-itens"></div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">
@@ -552,13 +553,17 @@ function renderDias(d){
 
 // ---------- capacidade (cadastro do Master) ----------
 let CAP_ITENS = [];
-function renderCapacidades(itens){
+function renderCapacidades(lista){
+  // pizza fica de fora: o pré-envio é só de insumo (pizza vai fracionada,
+  // por pedido), então cadastrar capacidade de pizza não mudaria nada -
+  // seria um campo que só engana quem preenche
+  const itens = (lista || []).filter(i=>i.tipo !== 'pizza');
   CAP_ITENS = itens;
   const painel = document.getElementById('painel-capacidade');
   if(!itens.length){ painel.classList.add('hidden'); return; }
   painel.classList.remove('hidden');
   document.getElementById('cap-itens').innerHTML = itens.map(i=>{
-    const un = i.tipo==='pizza' ? '' : ' un';
+    const un = ' un';
     const base = i.capacidadeEstimada == null
       ? 'sem histórico suficiente pra estimar'
       : `estimado ${i.capacidadeEstimada}${un} · ${i.amostras} turno(s) · maior já visto ${i.maiorPico}${un}${i.consumoTipico!=null?` · consumo típico ${i.consumoTipico}${un}/turno`:''}`;
