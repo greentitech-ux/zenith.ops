@@ -379,6 +379,36 @@ function podeReceberPcdCortesia(sub, unidade) {
   if (meta.isMaster) return true;
   return ehCargoGerente(meta.cargo) && (meta.unidades || []).includes(unidade);
 }
+// Termo impresso e a venda nunca fechou. Vai pro Master e pro Gerente da
+// unidade (mesmo publico do alerta de PCD-cortesia) - e dinheiro que pode
+// ter entrado sem ser lancado, entao nao pode depender de alguem lembrar
+// de abrir o painel.
+async function notifyParqueTermoPendente({ unidade, unidadeNome, responsavelNome, valorPrevisto, horas, emitidoPorEmail, id }) {
+  const valor = Number(valorPrevisto) || 0;
+  const dados = {
+    title: '🧾 Termo emitido sem venda',
+    body: `${unidadeNome || unidade} · ${responsavelNome || 'sem nome'} · aberto há ${horas}h`
+      + `${valor ? ` · previsto R$ ${valor.toFixed(2)}` : ''} · emitido por ${emitidoPorEmail || '—'}`,
+    // tag com o id da emissao: cada atendimento avisa uma vez so, e um
+    // aviso novo nao substitui o anterior na bandeja
+    tag: `parque-termo-pendente-${id}`,
+    url: '/parque.html',
+  };
+  await alertasCentral.registrar({ tipo: 'parque-termo', titulo: dados.title, resumo: dados.body, url: dados.url });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberPcdCortesia(sub, unidade)) continue; // Master + Gerente da unidade
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+      else console.error('Erro no push de termo pendente:', err.message);
+    }
+  }
+}
+
 async function notifyParquePcdCortesiaLimite({ unidade, unidadeNome, horaBucket, dataUtilizacao }) {
   const dados = {
     title: 'PCD cortesia · limite do horário atingido',
@@ -689,7 +719,7 @@ async function notifyAcessoRemotoDetectado(unidadeNome, codigo, computadorNome, 
 
 module.exports = {
   addSubscription, migrarSubscricao, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
-  notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyRhTesteVencido,
+  notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou,
