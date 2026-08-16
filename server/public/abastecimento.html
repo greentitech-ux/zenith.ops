@@ -287,9 +287,10 @@
     <div class="sug-sub" id="sug-sub"></div>
     <div id="sug-corpo">
       <div id="sug-itens"></div>
+      <!-- só "usar no envio": o painel é da loja, e o operador dela tem
+           papel 'envio' - um PEDIDO daqui seria recusado na assinatura -->
       <div class="sug-acoes" id="sug-acoes">
         <button type="button" class="btn-acao envio" onclick="usarSugestao('ENVIO')">🚚 Usar no envio</button>
-        <button type="button" class="btn-acao pedido" onclick="usarSugestao('PEDIDO')">🛒 Usar no pedido</button>
       </div>
       <div class="sug-nota" id="sug-nota"></div>
     </div>
@@ -1291,6 +1292,10 @@ let SUG_BASE = null;      // id da contagem que gerou a sugestao na tela
 let SUG_RECOLHIDO = localStorage.getItem('abastSugRecolhida') === '1';
 
 async function carregarSugestao(){
+  // pré-envio é ferramenta de QUEM ENVIA (loja). O carrinho conta e pede;
+  // separar o que vai é decisão da loja. Sem esse corte, o lado do carrinho
+  // levava um 403 a cada evento do SSE. A rota tem o mesmo gate.
+  if(!TEM_ENVIO){ SUGESTAO = null; renderSugestao(); return; }
   try{
     const r = await fetch('/api/abastecimento/sugestao-envio');
     SUGESTAO = r.ok ? await r.json() : null;
@@ -2618,8 +2623,11 @@ async function boot(){
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;
   }
-  // cada ponta so ve o proprio botao de lancamento
-  document.querySelector('.btn-acao.pedido').classList.toggle('hidden', !TEM_PEDIDO);
+  // cada ponta so ve o proprio botao de lancamento. Os dois seletores sao
+  // ESCOPADOS na .acoes-topo: o painel de pre-envio vem antes dela no DOM e
+  // tambem usa .btn-acao, entao um querySelector solto pegaria o botao
+  // errado e deixaria "Novo pedido" visivel pra quem so envia
+  document.querySelector('.acoes-topo .btn-acao.pedido').classList.toggle('hidden', !TEM_PEDIDO);
   document.querySelector('.acoes-topo .btn-acao.envio').classList.toggle('hidden', !TEM_ENVIO);
   const podeOperadores = IS_MASTER || ME.isAdmin || ME.podeCadastrarOperadores;
   document.getElementById('btn-catalogo').classList.toggle('hidden', !PODE_CATALOGO);

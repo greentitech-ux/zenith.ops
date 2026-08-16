@@ -7206,13 +7206,15 @@ app.get('/api/abastecimento/fluxo', auth.requireMaster, async (req, res) => {
 });
 
 // SUGESTAO DE ENVIO (pre-envio): quanto falta pra encher o carrinho depois
-// da ultima contagem. MESMO gate de leitura do GET /api/abastecimento (as
-// duas pontas precisam ver: o carrinho pra pedir, a loja pra mandar).
+// da ultima contagem. Gate mais estreito que o do GET /api/abastecimento de
+// proposito: e ferramenta de QUEM ENVIA (loja) - o carrinho conta e pede, a
+// loja e que decide o que separar. Master/Admin passam (fazem as duas
+// pontas, ver podeEnviarAbastecimento).
 // E so uma sugestao: quem lanca ajusta na tela.
 app.get('/api/abastecimento/sugestao-envio', auth.requireAuth, async (req, res) => {
   try {
-    if (!podePedirAbastecimento(req) && !podeEnviarAbastecimento(req)) {
-      return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    if (!podeEnviarAbastecimento(req)) {
+      return res.status(403).json({ error: 'O pré-envio é da loja (quem envia).' });
     }
     const [regs, config] = await Promise.all([abastecimentoCarrinho.listAll(), abastecimentoCarrinho.getConfig()]);
     res.json(abastecimentoPrevisao.sugerirEnvio(regs, { capacidadesManuais: config.capacidades }));
