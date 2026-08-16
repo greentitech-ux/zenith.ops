@@ -1124,7 +1124,7 @@ function renderRecebimentos(){
       <td class="valor">${r.quantidade}</td>
       <td class="valor">${fmtMoney(r.valorUnitario)}</td>
       <td class="valor">${fmtMoney(r.valorTotal)}</td>
-      <td>${IS_MASTER ? `<button type="button" class="acao-btn excluir" onclick="excluirRecebimento('${r.id}')">🗑️</button>` : ''}</td>
+      <td>${r.notaFiscalArquivo ? `<a href="/api/inventario/recebimentos/${r.id}/nota" target="_blank" class="acao-btn" title="Ver nota fiscal anexada">📎</a>` : ''}${IS_MASTER ? `<button type="button" class="acao-btn excluir" onclick="excluirRecebimento('${r.id}')">🗑️</button>` : ''}</td>
     </tr>`).join('') : '<tr><td colspan="7" class="empty">Nenhum recebimento lançado ainda pra essa unidade.</td></tr>';
 }
 async function excluirRecebimento(id){
@@ -1433,6 +1433,7 @@ async function confirmarRecebimentosDaNota(){
         valorTotal: it.valorTotal,
         data,
         notaFiscal,
+        notaFiscalArquivo: RASCUNHO_NOTA.notaArquivo || null,
       };
       const res = await fetch('/api/inventario/recebimentos', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
       const respData = await res.json();
