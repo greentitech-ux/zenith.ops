@@ -298,10 +298,15 @@
 
 <!-- comparativo Abastecimento x Fechamento - so Master (ver
      /api/abastecimento/comparativo-fechamento em index.js): confere se o
-     que foi ENVIADO ontem por sabor bate com o que ficou registrado nos
-     KPIs Extras do Fechamento do mesmo dia -->
+     que foi ENVIADO por sabor bate com o que ficou registrado nos KPIs
+     Extras do Fechamento do mesmo dia - data escolhida no seletor abaixo ---------- -->
 <div class="panel hidden" id="painel-comparativo-fechamento">
-  <h2>🔍 Comparativo com o Fechamento <span style="font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:400;">ontem · só Master</span></h2>
+  <h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <span>🔍 Comparativo com o Fechamento <span style="font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:400;">só Master</span></span>
+      <input type="date" id="comparativo-data" onchange="carregarComparativoFechamento(this.value)" style="font-family:var(--mono);font-size:12px;padding:4px 8px;border-radius:6px;background:var(--panel2,#181d24);color:var(--text);border:1px solid var(--line);">
+    </div>
+  </h2>
   <div class="sub" id="comparativo-sub" style="margin:-4px 0 10px;"></div>
   <div class="resumo-grid" id="comparativo-grid"></div>
 </div>
@@ -829,14 +834,19 @@ function renderResumo(){
     </div>`;
 }
 
-// comparativo com o Fechamento (so Master) - quanto foi ENVIADO ontem por
-// sabor x quanto ficou registrado nos KPIs Extras do Fechamento do mesmo dia
-// (ver /api/abastecimento/comparativo-fechamento em index.js)
-async function carregarComparativoFechamento(){
+// comparativo com o Fechamento (so Master) - quanto foi ENVIADO por sabor x
+// quanto ficou registrado nos KPIs Extras do Fechamento do mesmo dia (ver
+// /api/abastecimento/comparativo-fechamento em index.js) - "data" opcional
+// (YYYY-MM-DD) deixa consultar outro dia; sem ela o backend usa ontem
+async function carregarComparativoFechamento(data){
   const painel = document.getElementById('painel-comparativo-fechamento');
+  const inputData = document.getElementById('comparativo-data');
+  inputData.max = dataBrasilia(new Date().toISOString());
   try{
-    const dados = await fetch('/api/abastecimento/comparativo-fechamento').then(r=>{ if(!r.ok) throw new Error('Erro ao carregar comparativo.'); return r.json(); });
+    const url = '/api/abastecimento/comparativo-fechamento' + (data ? '?data='+encodeURIComponent(data) : '');
+    const dados = await fetch(url).then(r=>{ if(!r.ok) throw new Error('Erro ao carregar comparativo.'); return r.json(); });
     painel.classList.remove('hidden');
+    inputData.value = dados.data;
     const [y,m,d] = dados.data.split('-');
     if(!dados.temFechamento){
       document.getElementById('comparativo-sub').textContent = `Ainda não tem fechamento lançado pra ${d}/${m} - comparação aparece assim que lançar.`;
