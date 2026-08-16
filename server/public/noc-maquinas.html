@@ -135,6 +135,23 @@
 </div>
 
 <script>
+// O token do login mora no localStorage e TEM que ir em toda chamada de
+// /api/ - sem isso o servidor responde 401 e a pagina mostrava "Você não
+// tem acesso a esta página" pra todo mundo, Master inclusive: nao era
+// permissao faltando, era requisicao sem credencial. Mesmo bloco das
+// outras paginas (ver loja-status.html).
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+
 let DADOS = null;
 let FILTRO = 'todos';   // todos | critico | atencao | reiniciar | ok
 let BUSCA = '';
