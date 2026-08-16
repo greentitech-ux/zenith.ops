@@ -836,6 +836,7 @@ function toggleNocUnidade(codigo){
     NOC_ABERTA = null;
     chips.innerHTML = renderNocChips();
     det.innerHTML = '';
+    aplicarMasonry(); // card encolheu de volta - remede a altura, senao o slot fica grande demais
     return;
   }
   NOC_ABERTA = codigo;
@@ -865,6 +866,7 @@ function toggleNocUnidade(codigo){
       </tr>`;
     }).join('')
   }</tbody></table></div>` : '<div class="pcard-vazio">Sem computador cadastrado nessa unidade.</div>';
+  aplicarMasonry(); // a tabela que acabou de abrir mudou a altura do card - sem isso o slot do masonry fica com o tamanho de ANTES de abrir, e a tabela nova fica encoberta pelo card vizinho
 }
 
 function painelCopiarIpLocal(ip){
@@ -976,18 +978,20 @@ async function toggleEstoqueUnidade(codigo){
     ESTOQUE_ABERTA = null;
     chips.innerHTML = renderEstoqueChips();
     det.innerHTML = '';
+    aplicarMasonry(); // card encolheu de volta - remede a altura, senao o slot fica grande demais
     return;
   }
   ESTOQUE_ABERTA = codigo;
   chips.innerHTML = renderEstoqueChips();
   det.innerHTML = '<div class="pcard-vazio">Carregando...</div>';
+  aplicarMasonry();
   const contagem = ESTOQUE_CONTAGENS_CACHE[codigo];
-  if(!contagem){ det.innerHTML = '<div class="pcard-vazio">Essa unidade não fez a contagem ontem.</div>'; return; }
+  if(!contagem){ det.innerHTML = '<div class="pcard-vazio">Essa unidade não fez a contagem ontem.</div>'; aplicarMasonry(); return; }
   try{
     if(!ESTOQUE_CATALOGO_CACHE[codigo]){
       ESTOQUE_CATALOGO_CACHE[codigo] = await fetch(`/api/inventario/catalogo?unidade=${encodeURIComponent(codigo)}`).then(r=>r.json());
     }
-  }catch(err){ det.innerHTML = '<div class="pcard-erro">Não foi possível carregar o catálogo dessa unidade.</div>'; return; }
+  }catch(err){ det.innerHTML = '<div class="pcard-erro">Não foi possível carregar o catálogo dessa unidade.</div>'; aplicarMasonry(); return; }
   if(ESTOQUE_ABERTA!==codigo) return; // usuario trocou de unidade enquanto carregava
   const catalogoPorId = {};
   ESTOQUE_CATALOGO_CACHE[codigo].forEach(i=>{ catalogoPorId[i.id]=i; });
@@ -995,11 +999,12 @@ async function toggleEstoqueUnidade(codigo){
     .map(([itemId,qtd])=>({ item: catalogoPorId[itemId], qtd }))
     .filter(l=>l.item)
     .sort((a,b)=>(a.item.setor||'').localeCompare(b.item.setor||'','pt-BR') || a.item.nome.localeCompare(b.item.nome,'pt-BR'));
-  if(!linhas.length){ det.innerHTML = '<div class="pcard-vazio">Sem itens contados.</div>'; return; }
+  if(!linhas.length){ det.innerHTML = '<div class="pcard-vazio">Sem itens contados.</div>'; aplicarMasonry(); return; }
   det.innerHTML = `<div class="pestoque-tabela-wrap"><table class="pestoque-tabela">
     <thead><tr><th>Setor</th><th>Item</th><th>Quantidade</th></tr></thead>
     <tbody>${linhas.map(l=>`<tr><td>${escapeHtml(l.item.setor||'')}</td><td>${escapeHtml(l.item.nome)}</td><td>${l.qtd} ${escapeHtml(l.item.unidadeMedida||'')}</td></tr>`).join('')}</tbody>
   </table></div>`;
+  aplicarMasonry(); // a tabela que acabou de abrir mudou a altura do card - sem isso o slot do masonry fica com o tamanho de ANTES de abrir
 }
 
 // D-1 (ontem) igual Fechamentos/Entregas: a maioria das lojas fecha perto da
@@ -1235,10 +1240,12 @@ function mudarMesFestas(delta){
   if(FESTAS_CAL_MES>11){ FESTAS_CAL_MES=0; FESTAS_CAL_ANO++; }
   FESTAS_CAL_DIA_SEL = null;
   const w = document.getElementById('pcal-wrap'); if(w) w.innerHTML = renderCalFestas();
+  aplicarMasonry(); // altura do card muda (fecha o detalhe do dia) - sem isso o slot do masonry fica errado
 }
 function selDiaFestas(iso){
   FESTAS_CAL_DIA_SEL = FESTAS_CAL_DIA_SEL===iso ? null : iso; // clicar de novo fecha
   const w = document.getElementById('pcal-wrap'); if(w) w.innerHTML = renderCalFestas();
+  aplicarMasonry(); // detalhe do dia abriu/fechou - card mudou de altura, remede o slot do masonry
 }
 
 // indicadores do Abastecimento do Carrinho (Dom Aeroporto): tempos e
