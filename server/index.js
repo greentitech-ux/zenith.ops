@@ -49,6 +49,7 @@ const suporteBot = require('./suporteBot');
 const pedidoWatch = require('./pedidoWatch');
 const docsMaster = require('./docsMaster');
 const abastecimentoCarrinho = require('./abastecimentoCarrinho');
+const abastecimentoPrevisao = require('./abastecimentoPrevisao');
 const ativosTI = require('./ativosTI');
 const centralChat = require('./centralChat');
 const grupos = require('./grupos');
@@ -2668,6 +2669,7 @@ const EXECUTORES_QA = {
   'agente.acoes.editar': (p) => agenteAcoes.atualizar(p.id, p.dados, p.atualizadoPorEmail),
   'agente.acoes.excluir': (p) => agenteAcoes.remover(p.id),
   'agente.contexto.editar': (p) => agenteAcoes.salvarContexto(p.texto, p.atualizadoPorEmail),
+  'abastecimento.capacidades': (p) => abastecimentoCarrinho.salvarCapacidades(p.capacidades),
 };
 
 // chamar no topo de cada rota sensível, ANTES de executar a ação de
@@ -7167,8 +7169,19 @@ app.get('/api/abastecimento/fluxo', auth.requireMaster, async (req, res) => {
     const diasNoPeriodo = Math.round((new Date(`${fim}T00:00:00`) - new Date(`${inicio}T00:00:00`)) / 86400000) + 1;
     const diasComContagem = new Set(contagens.map((c) => diaDe(c.criadoEm))).size;
 
+    // A conta acima fecha o PERIODO inteiro (primeira x ultima contagem).
+    // Como a operacao conta 2x por dia (inicio do turno da manha e da
+    // madrugada), cada par de contagens consecutivas ja e um ciclo fechado -
+    // da pra abrir o mesmo periodo turno a turno e dia a dia sem estimar
+    // nada. Ver abastecimentoPrevisao.js.
+    const ciclos = abastecimentoPrevisao.montarCiclos(noPeriodo);
+    const capacidades = abastecimentoPrevisao.estimarCapacidades(ciclos, (await abastecimentoCarrinho.getConfig()).capacidades);
+
     res.json({
       periodo: { inicio, fim, diasNoPeriodo },
+      dias: abastecimentoPrevisao.resumoPorDia(noPeriodo, { inicio, fim, ciclos }),
+      ciclos,
+      capacidades: [...capacidades.values()],
       reconciliavel,
       // sem as duas contagens a conta nao fecha - a tela avisa em vez de
       // mostrar um "consumo" que na verdade e chute
@@ -7187,6 +7200,45 @@ app.get('/api/abastecimento/fluxo', auth.requireMaster, async (req, res) => {
         avariasTotal: avariasDetalhe.reduce((s, a) => s + a.quantidade, 0),
       },
     });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// SUGESTAO DE ENVIO (pre-envio): quanto falta pra encher o carrinho depois
+// da ultima contagem. Fica no MESMO gate de leitura do abastecimento (as
+// duas pontas precisam ver: o carrinho pra pedir, a loja pra mandar) - ver
+// podeVerAbastecimento. E so uma sugestao: quem lanca ajusta na tela.
+app.get('/api/abastecimento/sugestao-envio', auth.requireAuth, async (req, res) => {
+  if (!podeVerAbastecimento(req)) return res.status(403).json({ error: 'Sem acesso ao Abastecimento do Carrinho.' });
+  try {
+    const [regs, config] = await Promise.all([abastecimentoCarrinho.listAll(), abastecimentoCarrinho.getConfig()]);
+    res.json(abastecimentoPrevisao.sugerirEnvio(regs, { capacidadesManuais: config.capacidades }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// capacidade do carrinho por item (o que cabe nas 2 geladeiras). Cadastro
+// do Master; sem cadastro, a sugestao usa a capacidade ESTIMADA pelo
+// historico. O GET devolve as duas coisas juntas pra tela mostrar a
+// estimativa como sugestao de preenchimento do campo.
+app.get('/api/abastecimento/capacidades', auth.requireMaster, async (req, res) => {
+  try {
+    const [regs, config] = await Promise.all([abastecimentoCarrinho.listAll(), abastecimentoCarrinho.getConfig()]);
+    const estimadas = abastecimentoPrevisao.estimarCapacidades(abastecimentoPrevisao.montarCiclos(regs), config.capacidades);
+    res.json({ cadastradas: config.capacidades, itens: [...estimadas.values()] });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/abastecimento/capacidades', auth.requireMaster, async (req, res) => {
+  if (await desviarSeQaMaster(req, res, 'abastecimento.capacidades', 'Capacidade do carrinho por item', { capacidades: req.body?.capacidades })) return;
+  try {
+    const config = await abastecimentoCarrinho.salvarCapacidades(req.body?.capacidades);
+    broadcast('abastecimento-atualizado', { capacidades: true });
+    res.json({ ok: true, capacidades: config.capacidades });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
