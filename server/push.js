@@ -620,6 +620,38 @@ async function notifyExperienciaPrazoGerente(funcionario) {
 // agora uma loja pode ter varios computadores caindo/voltando de forma
 // independente - com tag so por unidade, o segundo aviso substituiria o
 // primeiro em vez de aparecer como notificacao separada
+// HD de um computador piorou (SMART reprovando, setor realocado, disco
+// enchendo - ver nocMaquina.js). Mesmo publico do alerta de loja offline
+// (Master + Suporte), mas NAO e critico: e um aviso pra AGENDAR a troca,
+// com semanas de antecedencia. Marcar como critico aqui faria o alarme alto
+// tocar de madrugada por um disco que vai durar mais um mes.
+async function notifyDiscoAlerta(unidadeNome, codigo, computadorNome, posto, nivel, motivos) {
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const lista = (motivos || []).slice(0, 3).join(' · ') || 'verifique o disco';
+  const dados = {
+    title: nivel === 'critico' ? '💽 HD em estado crítico' : '💽 HD pedindo atenção',
+    body: `${prefixo}${unidadeNome || codigo}: ${lista}`,
+    tag: `noc-disco-${codigo}-${posto || 'principal'}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-disco', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (alerta de disco):', err.message);
+      }
+    }
+  }
+}
+
 async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto) {
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const dados = {
@@ -722,6 +754,6 @@ module.exports = {
   notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado,
-  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou,
+  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta,
   notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, PUBLIC_KEY,
 };

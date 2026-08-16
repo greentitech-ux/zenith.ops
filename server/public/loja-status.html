@@ -540,8 +540,13 @@ let FILTRO_TEXTO = '';
 let FILTRO_UNIDADE = '';
 let FILTRO_STATUS = ''; // '' | 'online' | 'offline' | 'nunca'
 
-function tempoRelativo(ms){
-  if(!ms) return 'nunca';
+function tempoRelativo(quando){
+  if(!quando) return 'nunca';
+  // a maioria dos carimbos aqui e Date.now() (numero), mas alguns campos sao
+  // gravados como ISO (ultimoComandoEm). Sem isso, o ISO virava NaN e a tela
+  // mostrava "há NaNd"
+  const ms = typeof quando === 'number' ? quando : Date.parse(quando);
+  if(!Number.isFinite(ms)) return '—';
   const s = Math.floor((Date.now()-ms)/1000);
   if(s < 5) return 'agora mesmo';
   if(s < 60) return `há ${s}s`;
@@ -657,6 +662,30 @@ function atualizarConteudoDetalhe(codigo, c){
       : `<span style="color:var(--ok);white-space:pre-wrap;">${escapeHtml((c.ultimoComandoResultado||'(sem saída)')).slice(0,600)}</span>`;
     infoBits.push(`🖥️ último comando · ${escapeHtml(tempoRelativo(c.ultimoComandoEm))}<br><span style="font-size:11px;">${saida}</span>`);
   }
+  // saude do HD (SMART/espaco) e varredura da rede local - ver nocMaquina.js.
+  // O agente mede a cada ~6h/~1h; enquanto nao mediu, a linha simplesmente
+  // nao aparece (melhor vazio do que "0 aparelhos" mentindo)
+  if(c.disco){
+    const cor = c.discoNivel==='critico' ? 'var(--bad)' : (c.discoNivel==='atencao' ? 'var(--warn,#e0a800)' : 'var(--ok)');
+    const rotulo = c.discoNivel==='critico' ? 'crítico' : (c.discoNivel==='atencao' ? 'atenção' : 'ok');
+    const discos = (c.disco.discos||[]).map(d=>{
+      const partes = [d.tipo, d.tamanhoGb?`${d.tamanhoGb} GB`:null, d.temperaturaC?`${d.temperaturaC}°C`:null,
+        d.horasLigado?`${Math.round(d.horasLigado/8760*10)/10} anos ligado`:null].filter(Boolean).join(' · ');
+      return `<span style="font-size:11px;">• ${escapeHtml(d.modelo||'disco')}${partes?` — ${escapeHtml(partes)}`:''}</span>`;
+    }).join('<br>');
+    const volumes = (c.disco.volumes||[]).map(v=>
+      `<span style="font-size:11px;">• ${escapeHtml(v.letra)} ${v.livreGb} GB livres de ${v.totalGb} GB (${v.livrePct}%)</span>`).join('<br>');
+    const motivos = (c.discoMotivos||[]).length
+      ? `<br><span style="font-size:11px;color:${cor};">⚠️ ${escapeHtml(c.discoMotivos.join(' · '))}</span>` : '';
+    infoBits.push(`💽 disco: <b style="color:${cor};">${rotulo}</b> · medido ${escapeHtml(tempoRelativo(c.disco.em))}`
+      + (discos?`<br>${discos}`:'') + (volumes?`<br>${volumes}`:'') + motivos);
+  }
+  if(c.dispositivos && c.dispositivos.length){
+    const lista = c.dispositivos.slice(0,12).map(d=>`${escapeHtml(d.ip)} <span style="color:var(--muted);">${escapeHtml(d.mac)}</span>`).join('<br>');
+    const resto = c.dispositivos.length > 12 ? `<br><span style="color:var(--muted);font-size:11px;">+${c.dispositivos.length-12} outros</span>` : '';
+    infoBits.push(`📡 <b>${c.dispositivos.length}</b> aparelho(s) na rede da loja · varrido ${escapeHtml(tempoRelativo(c.dispositivosEm))}`
+      + `<br><span style="font-size:11px;">${lista}${resto}</span>`);
+  }
   document.getElementById('detalhe-comp-info').innerHTML = infoBits.length ? infoBits.join('<br>') : '<span style="color:var(--muted);">sem mais informações.</span>';
 
   // Registro de atividades: as ultimas quedas/retornos de conexao (mais recente
@@ -673,6 +702,12 @@ function atualizarConteudoDetalhe(codigo, c){
       }
       if(ev.tipo==='acesso-remoto'){
         return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Acesso remoto</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+      }
+      if(ev.tipo==='disco'){
+        return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Disco piorou</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+      }
+      if(ev.tipo==='dispositivo-novo'){
+        return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Aparelho novo na rede</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
       }
       const fora = ev.duracaoMs!=null ? ` · ficou fora ${fmtDuracao(ev.duracaoMs)}` : '';
       return `<div class="ev-linha"><span class="ev-dot ok"></span><b>Voltou</b> · ${fmtDataHora(ev.em)}${fora}</div>`;
