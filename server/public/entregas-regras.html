@@ -123,45 +123,7 @@
 <div class="sub-intro" style="margin:0 0 16px;">Cada unidade monta sua própria lista de campos de valor (Entrega, Retorno, Extra, Fora de Área, Encosta, Ajuda de Custo, Cooperativa, ou qualquer nome) - com taxa fixa ou variando por dia da semana, meta mínima com valor parcial, e opção de a loja remover aquele campo específico num lançamento (atraso, saiu antes, gerou prejuízo). Unidades sem regra ficam no modo "Plataforma" - a loja continua digitando o valor à mão (ex: pagamento definido pela GAMI/NEXT).</div>
 
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
-<nav class="nav-drawer hidden" id="nav-drawer">
-  <div class="nav-drawer-titulo">Zenith Ops</div>
-  <a class="back" href="/painel.html">🏠 Painel</a>
-  <div class="nav-drawer-grupo">Operação diária</div>
-  <a class="back" href="/lancamento.html">🧾 Fechamento</a>
-  <a class="back" href="/entrega-lancamento.html">📦 Lançar entrega</a>
-  <a class="back" href="/fechamentos.html">💰 Fechamentos</a>
-  <a class="back" href="/entregas.html">🛵 Entregas</a>
-  <a class="back" href="/estoque.html">📦 Estoque</a>
-  <a class="back" id="nav-abastecimento" href="/abastecimento.html">🛒 Abastec. Carrinho</a>
-  <div class="nav-drawer-grupo">Monitoramento</div>
-  <a class="back" href="/">📈 Monitor</a>
-  <a class="back" href="/relatorios.html">📊 Relatórios</a>
-  <a class="back" href="/ifood.html">🍔 iFood</a>
-  <div class="nav-drawer-grupo" id="nav-grupo-saltiverso">Saltiverso</div>
-  <a class="back" id="nav-parque-checkin" href="/parque-checkin.html">🤸 Check-in Parque</a>
-  <a class="back" id="nav-parque" href="/parque.html">🤸 Parque (painel)</a>
-  <a class="back" id="nav-festas" href="/festas.html">🎉 Festas</a>
-  <a class="back" id="nav-mensalistas" href="/mensalistas.html">📅 Mensalistas</a>
-  <a class="back hidden" id="nav-saltiverso-vendas" href="/saltiverso-vendas.html">🥤 Bebidas & Meias</a>
-  <a class="back hidden" id="nav-saltiverso-fechamento" href="/saltiverso-fechamento.html">🧾 Fechamento do balcão</a>
-  <div class="nav-drawer-grupo">BigBrother</div>
-  <a class="back hidden" id="nav-rh" href="/rh.html">🧑‍💼 RH</a>
-  <div class="nav-drawer-grupo">Solicitações</div>
-  <a class="back" href="/central.html">📋 Central</a>
-  <a class="back" href="/tecnico.html">🔧 Chamados TI</a>
-  <a class="back" id="nav-ativos-ti" href="/ativos-ti.html">🖥️ Ativos de TI</a>
-  <a class="back" href="/manutencao.html">🔧 Manutenção</a>
-  <a class="back" href="/central-solucoes.html">💬 Central de Soluções</a>
-  <div class="nav-drawer-grupo">Administração</div>
-  <a class="back" href="/usuarios.html">👤 Usuários</a>
-  <a class="back" href="/grupos.html">🏷️ Grupos</a>
-  <a class="back active" href="/entregas-regras.html">⚙️ Regras de Entregas</a>
-  <a class="back" href="/cofre.html">🔐 Cofre</a>
-  <a class="back" href="/ajuda.html">❓ Ajuda</a>
-  <a class="back" id="nav-reset-senha" href="/painel.html?resetSenha=1">🔑 Reset senha</a>
-  <div class="nav-drawer-sep"></div>
-  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
-</nav>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
 
 <div id="sem-acesso" class="empty hidden">Só o acesso Master pode gerenciar as regras de Entregas.</div>
 
@@ -218,8 +180,8 @@ window.fetch = (url, opts = {}) => {
   return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
 };
 function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
-function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
-function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+function abrirMenu(){}
+function fecharMenu(){}
 
 // grupos do menu (Operacao diaria/Monitoramento/Solicitacoes/Administracao)
 // viram dropdown: clicar no titulo do grupo expande/recolhe os itens dele.
@@ -454,6 +416,6 @@ boot();
 </script>
 <script src="/notif-central.js"></script>
 <script src="/suporte-chat.js"></script>
-<script src="/nav-gate.js"></script>
+<script src="/nav-menu.js"></script>
 </body>
 </html>

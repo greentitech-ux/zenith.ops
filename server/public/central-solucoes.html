@@ -107,21 +107,7 @@
 </header>
 
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
-<nav class="nav-drawer hidden" id="nav-drawer">
-  <div class="nav-drawer-titulo">Zenith Ops</div>
-  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
-  <div class="nav-drawer-grupo">BigBrother</div>
-  <a class="back hidden" id="nav-rh" href="/rh.html">🧑‍💼 RH</a>
-  <div class="nav-drawer-grupo">Solicitações</div>
-  <a class="back hidden" id="nav-solicitacoes" href="/central.html">📋 Central</a>
-  <a class="back hidden" id="nav-historico" href="/central-historico.html">📜 Histórico</a>
-  <a class="back hidden" id="nav-tecnico" href="/tecnico.html">🔧 Chamados TI</a>
-  <a class="back active" id="nav-central-solucoes-self" href="/central-solucoes.html">💬 Central de Soluções</a>
-  <a class="back hidden" id="nav-beniboy" href="/beniboy.html">🐝 Central do Beniboy</a>
-  <a class="back hidden" id="nav-loja-status" href="/loja-status.html">📡 NOC Zenith</a>
-  <div class="nav-drawer-sep"></div>
-  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
-</nav>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
 
 <div id="sem-acesso" class="empty hidden">Você não tem acesso à Central de Soluções. Fale com o administrador (Master).</div>
 
@@ -164,8 +150,8 @@ window.fetch = (url, opts = {}) => {
   return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
 };
 function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
-function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
-function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+function abrirMenu(){}
+function fecharMenu(){}
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 const FUSO_BR = 'America/Recife';
 function fmtDataHora(iso){ if(!iso) return '—'; return new Date(iso).toLocaleString('pt-BR',{timeZone:FUSO_BR}); }
@@ -335,10 +321,6 @@ async function boot(){
   IS_MASTER = ME.role==='master';
   IS_ADMIN = !!ME.isAdmin;
   const secoes = (ME.permissions && ME.permissions.sections) || [];
-  document.getElementById('nav-solicitacoes').classList.remove('hidden');
-  document.getElementById('nav-historico').classList.remove('hidden');
-  document.getElementById('nav-tecnico').classList.remove('hidden');
-  document.getElementById('nav-beniboy').classList.remove('hidden');
   if(!(IS_MASTER || IS_ADMIN || secoes.includes('central-solucoes'))){
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;
@@ -351,6 +333,6 @@ async function boot(){
 }
 boot();
 </script>
-<script src="/nav-gate.js"></script>
+<script src="/nav-menu.js"></script>
 </body>
 </html>
