@@ -8605,22 +8605,56 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
+// Teto de tempo pro aquecimento antes de abrir a porta (ver aquecerBoot).
+const BOOT_AQUECIMENTO_MS = Number(process.env.BOOT_AQUECIMENTO_MS || 20000);
+
+// Roda uma tarefa de boot que NUNCA rejeita: erro vira log e a subida
+// continua. E o mesmo espirito dos try/catch que existiam aqui antes - se o
+// Firestore estiver fora do ar (cota estourada, RESOURCE_EXHAUSTED), o app
+// sobe com o cache vazio em vez de nao subir; quando o Firestore normalizar,
+// as proximas leituras/gravacoes voltam sozinhas, sem redeploy manual.
+function tarefaDeBoot(tarefa, oQue) {
+  return Promise.resolve()
+    .then(tarefa) // o .then tambem captura throw SINCRONO dentro da tarefa
+    .catch((err) => {
+      console.error(`Boot: ${oQue} falhou (app sobe mesmo assim):`, err.message);
+    });
+}
+
+// Espera o aquecimento por no maximo `ms`. Se estourar, devolve o controle
+// (a porta abre) e o aquecimento SEGUE rodando em segundo plano - quando
+// terminar, o cache fica quente sozinho.
+//
+// POR QUE ISSO EXISTE: o app so chamava app.listen() DEPOIS de esperar
+// store.init() + auth.ensureMaster(), sem limite de tempo nenhum. As duas
+// fazem chamada de rede (snapshot no Storage, colecao no Firestore). O
+// try/catch que envolvia as duas pega ERRO, mas nao pega LENTIDAO: uma
+// chamada que nunca volta nao lanca excecao - ela so nao volta. Resultado:
+// a porta nunca abria, e o Render derrubava o deploy por timeout depois de
+// 15 minutos esperando o bind (deploy 889769f, 16/08/2026 11:03->11:18).
+// Ficar de pe com cache frio e melhor que nao ficar de pe.
+function aquecerBoot(promessa, ms) {
+  let alarme;
+  const limite = new Promise((resolve) => {
+    alarme = setTimeout(() => {
+      console.warn(`Boot: aquecimento passou de ${ms}ms - abrindo a porta e terminando em segundo plano.`);
+      resolve();
+    }, ms);
+  });
+  // limpa o timer quando o aquecimento termina antes, pra ele nao segurar o
+  // event loop à toa. `promessa` vem de tarefaDeBoot e nunca rejeita, entao
+  // esta corrida nao deixa rejeicao orfa pra tras (que no Node >=15 derruba
+  // o processo - seria um remedio pior que a doenca).
+  promessa.then(() => clearTimeout(alarme));
+  return Promise.race([promessa, limite]);
+}
+
 (async () => {
-  try {
-    await store.init(); // carrega o historico do Firestore antes de aceitar trafego
-  } catch (err) {
-    // se o Firestore estiver temporariamente indisponivel (ex: cota
-    // estourada, RESOURCE_EXHAUSTED) o app ainda sobe com o cache vazio
-    // (em vez de nao subir de jeito nenhum) - assim que o Firestore
-    // normalizar, as proximas leituras/gravacoes voltam a funcionar
-    // sozinhas, sem precisar de um redeploy manual.
-    console.error('Falha ao carregar historico do Firestore no boot (app sobe mesmo assim, com cache vazio):', err.message);
-  }
-  try {
-    await auth.ensureMaster(); // garante que existe um acesso Master pra logar
-  } catch (err) {
-    console.error('Falha ao garantir usuario Master no boot:', err.message);
-  }
+  const aquecimento = (async () => {
+    await tarefaDeBoot(() => store.init(), 'carregar histórico do Firestore');
+    await tarefaDeBoot(() => auth.ensureMaster(), 'garantir usuário Master');
+  })();
+  await aquecerBoot(aquecimento, BOOT_AQUECIMENTO_MS);
 
   app.listen(PORT, async () => {
     console.log(`Zenith Ops rodando em http://localhost:${PORT}`);
