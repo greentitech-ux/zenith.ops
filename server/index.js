@@ -3979,7 +3979,19 @@ app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, r
       unidade, unidadeNome, responsavel, dataUtilizacao, tempoMinutos, timeInicial, horarioPrevisto, observacao, adultoCortesia, quantAC, criancas, usou, minutosExtras, metodoPagamento, pagamentos, meiasExtras, motivoCortesia, categoriaTempo,
       colaboradorId: req.user.id, colaboradorNome: req.user.email,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
+      termoAssinado: req.body.termoAssinado,
     });
+    // a venda fechou: tira a emissão do termo da lista de pendentes. Falha
+    // aqui não desfaz a venda (ela vale), só deixa a emissão pendente - que
+    // é o lado seguro do erro: sobra pendência pro gerente conferir, em vez
+    // de sumir com o rastro.
+    if (req.body.emissaoTermoId) {
+      try {
+        await parque.finalizarEmissaoTermo(req.body.emissaoTermoId, registro.id);
+      } catch (err) {
+        console.error('Check-in criado, mas falhou baixar a emissão do termo:', err.message);
+      }
+    }
     broadcast('parque-checkin-criado', registro, 'parque');
     broadcast('parque-checkin-criado', registro, 'parque-checkin');
     res.json(registro);
@@ -4042,6 +4054,24 @@ app.post('/api/parque/termo-previa.pdf', requireAnySection('parque', 'parque-che
     if (!String(resp.nome || '').trim()) return res.status(400).json({ error: 'Preencha o nome do responsável antes de imprimir o termo.' });
     const criancas = Array.isArray(b.criancas) ? b.criancas.slice(0, 40) : [];
     if (!criancas.length) return res.status(400).json({ error: 'Adicione pelo menos uma criança antes de imprimir o termo.' });
+    // GRAVA A EMISSAO ANTES DE MANDAR O PDF. É o que fecha a brecha: se o
+    // atendente imprimir e sumir sem finalizar, a pendencia ja esta no
+    // banco e aparece pro gerente. Fechar o navegador nao desfaz.
+    const emissao = await parque.criarEmissaoTermo({
+      unidade: b.unidade,
+      unidadeNome: b.unidadeNome || b.unidade,
+      responsavel: resp,
+      criancas,
+      dataUtilizacao: b.dataUtilizacao,
+      tempoMinutos: b.tempoMinutos,
+      valorPrevisto: b.valorPrevisto,
+      emitidoPorId: req.user.id,
+      emitidoPorEmail: req.user.email,
+    });
+    // o corpo e um PDF, entao o id volta por header (o front le pra saber
+    // qual emissao finalizar/cancelar depois)
+    res.setHeader('X-Emissao-Id', emissao.id);
+    res.setHeader('Access-Control-Expose-Headers', 'X-Emissao-Id');
     // monta um checkin "de mentira" so pro PDF - mesma forma que o salvo,
     // sem id e sem passar pelo Firestore
     termoResponsabilidade.gerarTermoPDF(res, {
@@ -4054,6 +4084,34 @@ app.post('/api/parque/termo-previa.pdf', requireAnySection('parque', 'parque-che
       criadoEm: new Date().toISOString(),
       previa: true,
     });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Termos emitidos e nao resolvidos: cada linha é um atendimento em que o
+// termo saiu e a venda nunca fechou. É a lista que o gerente confere.
+app.get('/api/parque/termo-emissoes', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
+  try {
+    res.json(await parque.listarEmissoesTermo({
+      unidades: req.isMaster ? null : (req.permissions.unidades || []),
+      apenasPendentes: req.query.todas !== '1',
+      dias: Math.min(90, Math.max(1, Number(req.query.dias) || 7)),
+    }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Cancelar = assumir que o termo saiu e a venda NAO aconteceu. Exige
+// motivo; o registro fica com quem cancelou e quando. Nao apaga nada.
+app.post('/api/parque/termo-emissoes/:id/cancelar', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
+  try {
+    res.json(await parque.cancelarEmissaoTermo(req.params.id, {
+      motivo: req.body && req.body.motivo,
+      canceladoPorId: req.user.id,
+      canceladoPorEmail: req.user.email,
+    }));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
