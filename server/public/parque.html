@@ -187,6 +187,20 @@
   </div>
 </div>
 
+<!-- Controle de caixa: termo emitido = atendimento que existiu. Se não
+     virou venda, ou está em aberto agora, ou foi cancelado com motivo. As
+     duas coisas precisam de olho humano - é isso que transforma o registro
+     em controle. -->
+<div class="panel" id="painel-termos">
+  <h2>🧾 Termos emitidos sem venda</h2>
+  <div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+    Cada termo impresso vira um registro. Aqui ficam os que <b>não viraram venda</b>: os em aberto agora e os cancelados dos últimos 7 dias.
+    Termo emitido significa que o cliente estava no balcão — um em aberto é dinheiro que pode ter entrado sem ser lançado.
+  </div>
+  <div id="termos-resumo" style="margin-bottom:10px;"></div>
+  <div id="lista-termos"><div class="empty">carregando...</div></div>
+</div>
+
 <div class="panel">
   <h2>Quem está no parque agora</h2>
   <div id="lista-agora"><div class="empty">carregando...</div></div>
@@ -438,6 +452,73 @@ async function carregar(){
   EDICOES = edicoes;
   renderTudo();
   renderEdicoes();
+  carregarTermos();
+}
+
+// ---------- termos emitidos que não viraram venda ----------
+function horasDesde(iso){
+  const ms = Date.now() - new Date(iso).getTime();
+  return ms / 3600000;
+}
+function fmtQuando(iso){
+  try{ return new Date(iso).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }); }
+  catch(e){ return iso || ''; }
+}
+
+async function carregarTermos(){
+  const lista = document.getElementById('lista-termos');
+  const resumo = document.getElementById('termos-resumo');
+  if(!lista) return;
+  let itens = [];
+  try{
+    // todas=1 traz também as resolvidas, pra separar pendentes de canceladas
+    itens = await fetch('/api/parque/termo-emissoes?todas=1&dias=7').then(r=>r.ok?r.json():[]);
+  }catch(e){ lista.innerHTML = '<div class="empty">não foi possível carregar</div>'; return; }
+
+  const pendentes = itens.filter(e=>e.status==='PENDENTE');
+  const canceladas = itens.filter(e=>e.status==='CANCELADA');
+
+  // quem cancela muito é padrão que merece ser visto - "o cliente desistiu"
+  // 8 vezes no mesmo dia não é azar
+  const porPessoa = {};
+  canceladas.forEach(e=>{ const k = e.canceladoPorEmail || e.emitidoPorEmail || '—'; porPessoa[k] = (porPessoa[k]||0)+1; });
+  const ranking = Object.entries(porPessoa).sort((a,b)=>b[1]-a[1]);
+
+  resumo.innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <span class="badge" style="background:${pendentes.length?'rgba(255,183,94,.18)':'var(--panel2)'};color:${pendentes.length?'var(--warn)':'var(--muted)'};">
+        ${pendentes.length} em aberto
+      </span>
+      <span class="badge" style="background:var(--panel2);color:var(--muted);">${canceladas.length} cancelado(s) em 7 dias</span>
+      ${ranking.length && ranking[0][1] >= 3 ? `<span class="badge" style="background:rgba(255,92,92,.15);color:var(--bad);">⚠ ${escapeHtml(ranking[0][0])}: ${ranking[0][1]} cancelamentos</span>` : ''}
+    </div>`;
+
+  if(!itens.length){ lista.innerHTML = '<div class="empty">nenhum termo sem venda nos últimos 7 dias 👍</div>'; return; }
+
+  const linha = (e)=>{
+    const pend = e.status==='PENDENTE';
+    const h = horasDesde(e.emitidoEm);
+    // em aberto há mais de 1h é o caso que interessa: o cliente não fica
+    // uma hora esperando no balcão
+    const critico = pend && h > 1;
+    return `<div style="border-left:3px solid ${pend?(critico?'var(--bad)':'var(--warn)'):'var(--line)'};background:var(--panel2);border-radius:8px;padding:9px 11px;margin-bottom:7px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+        <b>${escapeHtml(e.responsavelNome||'(sem nome)')}</b>
+        <span class="badge" style="background:${pend?'rgba(255,183,94,.18)':'var(--panel2)'};color:${pend?'var(--warn)':'var(--muted)'};">
+          ${pend ? (critico?`⚠ em aberto há ${h.toFixed(1)}h`:'em aberto') : 'cancelado'}
+        </span>
+      </div>
+      <div class="sub" style="font-size:12px;color:var(--muted);margin-top:3px;">
+        ${escapeHtml(e.unidadeNome||e.unidade||'')} · ${e.qtdCriancas||0} criança(s)${e.tempoMinutos?` · ${e.tempoMinutos}min`:''}${e.valorPrevisto?` · previsto R$ ${Number(e.valorPrevisto).toFixed(2)}`:''}
+      </div>
+      <div class="sub" style="font-size:12px;color:var(--muted);">
+        emitido ${fmtQuando(e.emitidoEm)} por ${escapeHtml(e.emitidoPorEmail||'—')}
+      </div>
+      ${e.status==='CANCELADA' ? `<div class="sub" style="font-size:12px;margin-top:3px;">✖ cancelado por ${escapeHtml(e.canceladoPorEmail||'—')} — <i>${escapeHtml(e.motivoCancelamento||'')}</i></div>` : ''}
+    </div>`;
+  };
+  // pendentes primeiro: é o que exige ação agora
+  lista.innerHTML = pendentes.map(linha).join('') + canceladas.map(linha).join('');
 }
 
 function edicaoPendentePara(checkinId){
