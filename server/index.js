@@ -3777,6 +3777,25 @@ app.get('/api/inventario/historico-contagens', requireSection('inventario'), asy
   }
 });
 
+// ocorrencias de possivel desvio de estoque (ver inventario.verificarDesvioEstoque)
+// - fica so na aba Estoque/Ocorrências, restrito ao Master (nao vira ticket
+// na Central de Solicitações)
+app.get('/api/inventario/desvios', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await inventario.listDesvios());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/inventario/desvios/:id/resolver', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await inventario.resolverDesvio(req.params.id, { resolvidoPorEmail: req.user.email, resolucaoObs: req.body.resolucaoObs }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/inventario/relatorio.:formato(csv|pdf)', requireSection('inventario'), async (req, res) => {
   try {
     const { unidade, inicio, fim } = req.query;

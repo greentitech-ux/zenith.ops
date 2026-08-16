@@ -253,6 +253,7 @@
     <button type="button" class="tab-btn" data-tab="historico" onclick="mudarAba('historico')">🗓️ Histórico</button>
     <button type="button" class="tab-btn hidden" id="tab-btn-catalogo" data-tab="catalogo" onclick="mudarAba('catalogo')">🗂️ Catálogo</button>
     <button type="button" class="tab-btn" data-tab="estoque" onclick="mudarAba('estoque')">📦 Estoque</button>
+    <button type="button" class="tab-btn hidden" id="tab-btn-ocorrencias" data-tab="ocorrencias" onclick="mudarAba('ocorrencias')">🚨 Ocorrências</button>
   </div>
 </div>
 
@@ -498,6 +499,21 @@
     <table>
       <thead><tr><th>Nome</th><th>Setor</th><th>Tipo</th><th>Unid.</th><th>Custo ref.</th><th>Status</th><th></th></tr></thead>
       <tbody id="catalogo-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ---------- Ocorrências (possível desvio de estoque) - so Master, todas
+     as unidades juntas, nao vira ticket na Central de Solicitações ---------- -->
+<div class="panel tab-content hidden" id="tab-ocorrencias">
+  <h2>Ocorrências — possível desvio de estoque</h2>
+  <div class="sub" style="margin-top:4px;margin-bottom:10px;max-width:680px;">
+    Toda contagem que apura falta acima do limite configurado vira uma ocorrência aqui - fica só nesta aba (não vira ticket na Central de Solicitações), visível só pro Master.
+  </div>
+  <div class="tablewrap" style="margin-top:6px;">
+    <table>
+      <thead><tr><th>Unidade</th><th>Data</th><th>Falta apurada</th><th>Status</th><th></th></tr></thead>
+      <tbody id="ocorrencias-body"></tbody>
     </table>
   </div>
 </div>
@@ -797,6 +813,7 @@ async function mudarAba(aba){
   document.getElementById('tab-catalogo').classList.toggle('hidden', aba!=='catalogo');
   document.getElementById('tab-estoque').classList.toggle('hidden', aba!=='estoque');
   document.getElementById('painel-estoque-hoje').classList.toggle('hidden', aba!=='estoque');
+  document.getElementById('tab-ocorrencias').classList.toggle('hidden', aba!=='ocorrencias');
   if(aba==='contagem' && !CONTAGEM_INICIADA) reiniciarContagem();
   if(aba==='recebimento') renderRecebimentos();
   if(aba==='saida') renderSaidas();
@@ -804,6 +821,7 @@ async function mudarAba(aba){
   if(aba==='historico') iniciarHistorico();
   if(aba==='catalogo'){ await carregarCatalogo(); renderCatalogo(); }
   if(aba==='estoque') carregarResumoEstoque();
+  if(aba==='ocorrencias') carregarOcorrencias();
 }
 
 // catalogo e por loja - trocar a loja no seletor do topo exige buscar o
@@ -1853,6 +1871,55 @@ async function carregarCatalogo(){
   CATALOGO = unidade ? await fetch('/api/inventario/catalogo?unidade='+encodeURIComponent(unidade)).then(r=>r.json()) : [];
 }
 
+// ---------- Ocorrências (possível desvio de estoque) - so Master, todas as
+// unidades juntas (nao filtra pela loja selecionada no topo) ----------
+let OCORRENCIAS = [];
+async function carregarOcorrencias(){
+  const tbody = document.getElementById('ocorrencias-body');
+  tbody.innerHTML = '<tr><td colspan="5">Carregando…</td></tr>';
+  try{
+    OCORRENCIAS = await fetch('/api/inventario/desvios').then(r=>{ if(!r.ok) throw new Error('Erro ao carregar.'); return r.json(); });
+    renderOcorrencias();
+  }catch(err){
+    tbody.innerHTML = `<tr><td colspan="5">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+function renderOcorrencias(){
+  const tbody = document.getElementById('ocorrencias-body');
+  if(!OCORRENCIAS.length){ tbody.innerHTML = '<tr><td colspan="5">Nenhuma ocorrência registrada.</td></tr>'; return; }
+  tbody.innerHTML = OCORRENCIAS.map(o => `
+    <tr>
+      <td>${escapeHtml(o.unidadeNome||o.unidade)}</td>
+      <td>${fmtData(o.data)}</td>
+      <td>R$ ${Number(o.valorEstimado||0).toFixed(2)}</td>
+      <td>${o.status==='resolvido' ? '✅ Resolvido' : '🔴 Pendente'}</td>
+      <td>
+        <button type="button" class="acao-btn" onclick="verObservacaoDesvio('${o.id}')" title="Ver detalhes">🔍</button>
+        ${o.status!=='resolvido' ? `<button type="button" class="acao-btn" onclick="resolverOcorrenciaUI('${o.id}')" title="Marcar como resolvido">✅</button>` : ''}
+      </td>
+    </tr>`).join('');
+}
+function verObservacaoDesvio(id){
+  const o = OCORRENCIAS.find(x=>x.id===id);
+  if(!o) return;
+  const partes = [o.observacao||''];
+  if(o.status==='resolvido'){
+    partes.push(`\n— Resolvido por ${o.resolvidoPorEmail||'?'} em ${o.resolvidoEm?new Date(o.resolvidoEm).toLocaleString('pt-BR'):'?'}${o.resolucaoObs?('\n'+o.resolucaoObs):''}`);
+  }
+  alert(partes.join('\n'));
+}
+async function resolverOcorrenciaUI(id){
+  const nota = prompt('Observação sobre a resolução (opcional):') || '';
+  try{
+    const res = await fetch(`/api/inventario/desvios/${id}/resolver`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ resolucaoObs: nota }),
+    });
+    if(!res.ok){ const d = await res.json(); throw new Error(d.error||'Erro ao resolver.'); }
+    await carregarOcorrencias();
+  }catch(err){ alert(err.message); }
+}
+
 // ---------- setores/tipos (Master pode adicionar novos, ver inventario.js) ----------
 async function carregarSetoresTipos(){
   const [setores, tipos] = await Promise.all([
@@ -1930,6 +1997,7 @@ async function boot(){
   const podeCatalogo = isMaster || !!ME.podeCatalogoEstoque;
   document.getElementById('tab-btn-catalogo').classList.toggle('hidden', !podeCatalogo);
   document.getElementById('btn-catalogo-seed').classList.toggle('hidden', !isMaster);
+  document.getElementById('tab-btn-ocorrencias').classList.toggle('hidden', !isMaster);
 
   const hoje = hojeBrasilia();
   document.getElementById('c-data').value = hoje;

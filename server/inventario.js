@@ -13,12 +13,15 @@
 const db = require('./firestore');
 const { createCache, createKeyedCache } = require('./liveCache');
 const CATALOGO_SEED = require('./inventarioCatalogoSeed.json');
-const solicitacoes = require('./solicitacoes');
 
 const CATALOGO = db.collection('inventarioCatalogo');
 const RECEBIMENTOS = db.collection('inventarioRecebimentos');
 const SAIDAS = db.collection('inventarioSaidas');
 const CONTAGENS = db.collection('inventarioContagens');
+// ocorrencias de possivel desvio (ver verificarDesvioEstoque) - fica so
+// aqui no modulo de Inventario (nao vira ticket na Central de Solicitacoes)
+// pra so o Master acompanhar, direto na tela de Estoque
+const DESVIOS = db.collection('inventarioDesvios');
 // setores/tipos extras cadastrados pelo Master (ver criarSetor/criarTipo) -
 // os fixos abaixo continuam existindo (o catálogo padrão da rede usa esses
 // códigos), mas dá pra somar novos sem precisar mexer no código
@@ -441,10 +444,10 @@ async function upsertContagem({ unidade, unidadeNome, data, contagens, criadoPor
 }
 
 // roda calcularDiferencas so pro dia da contagem recem-salva; se a soma das
-// faltas (R$) passar de LIMITE_DESVIO_ESTOQUE, cria um ticket indireto
-// (undirected) na Central - mesmo padrao do criarCardQuebraCaixa de
-// fechamentosLive.js. Nao reenvia se ja existir um ticket PENDENTE pra essa
-// mesma unidade+data (idempotente, util tambem pro backfill futuro)
+// faltas (R$) passar de LIMITE_DESVIO_ESTOQUE, registra uma ocorrencia -
+// fica so na aba Estoque/Ocorrências (Master), nao vira ticket na Central de
+// Solicitacoes. Idempotente: docId = unidade__data, entao rodar de novo pro
+// mesmo dia nao duplica (util tambem pro backfill futuro)
 async function verificarDesvioEstoque(contagem) {
   const { unidade, unidadeNome, data, criadoPorId, criadoPorEmail } = contagem;
   const { ofensores } = await calcularDiferencas(unidade, data, data);
@@ -452,31 +455,56 @@ async function verificarDesvioEstoque(contagem) {
   const totalFaltaValor = arred(faltas.reduce((s, o) => s + o.diferencaValor, 0));
   if (Math.abs(totalFaltaValor) <= LIMITE_DESVIO_ESTOQUE) return null;
 
-  // idempotente: reaproveita o campo generico `fechamentoId` (existe em
-  // qualquer solicitacao, nao so em fechamentos) pra guardar a chave da
-  // contagem (unidade__data) - rodar de novo pro mesmo dia nao duplica
-  const chave = docIdContagem(unidade, data);
-  const jaExiste = (await solicitacoes.listAll())
-    .some((s) => s.tipo === 'desvio-estoque' && s.fechamentoId === chave);
-  if (jaExiste) return null;
+  const id = docIdContagem(unidade, data);
+  const ref = DESVIOS.doc(id);
+  const existente = await ref.get();
+  if (existente.exists) return null;
 
   const lista = faltas
     .slice(0, 15)
     .map((o) => `${o.itemNome}: falta ${Math.abs(o.diferencaQtd)} ${o.unidadeMedida} (R$${Math.abs(o.diferencaValor).toFixed(2)})`)
     .join('\n');
-  return solicitacoes.create({
-    tipo: 'desvio-estoque',
+  const registro = {
+    id,
     unidade,
     unidadeNome: unidadeNome || unidade,
+    data,
     titulo: `Possível desvio de estoque — ${unidadeNome || unidade} (${data})`,
     valorEstimado: Math.abs(totalFaltaValor),
     observacao: `Contagem de ${data} apurou falta de R$${Math.abs(totalFaltaValor).toFixed(2)} no total.\n\n${lista}`,
-    fechamentoId: chave,
+    status: 'pendente',
     criadoPorId: criadoPorId || null,
     criadoPorEmail: criadoPorEmail || null,
-    direcionadoParaId: null,
-    direcionadoParaEmail: null,
-  });
+    criadoEm: Date.now(),
+    resolvidoEm: null,
+    resolvidoPorEmail: null,
+    resolucaoObs: null,
+  };
+  await ref.set(registro);
+  desviosCache.invalidar();
+  return registro;
+}
+
+async function listDesviosUncached() {
+  const snap = await DESVIOS.orderBy('criadoEm', 'desc').get();
+  return snap.docs.map((d) => d.data());
+}
+const desviosCache = createCache(listDesviosUncached, 5 * 60 * 1000);
+const listDesvios = desviosCache.cached;
+
+async function resolverDesvio(id, { resolvidoPorEmail, resolucaoObs } = {}) {
+  const ref = DESVIOS.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Ocorrência não encontrada.');
+  const patch = {
+    status: 'resolvido',
+    resolvidoEm: Date.now(),
+    resolvidoPorEmail: resolvidoPorEmail || null,
+    resolucaoObs: (resolucaoObs || '').trim().slice(0, 500) || null,
+  };
+  await ref.update(patch);
+  desviosCache.invalidar();
+  return { ...snap.data(), ...patch };
 }
 
 async function getContagem(unidade, data) {
@@ -780,4 +808,5 @@ module.exports = {
   listSaidas, criarSaida, removerSaida,
   upsertContagem, getContagem, listContagens,
   calcularDiferencas, resumoPeriodo, historicoContagens,
+  listDesvios, resolverDesvio,
 };
