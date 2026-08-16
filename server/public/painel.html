@@ -773,6 +773,96 @@ async function cardManutencao(){
   </div>`);
 }
 
+// card do NOC Zenith: mesma lógica de "online/offline" de loja-status.html
+// (statusDe/computadoresReais lá) - so entram computadores DE VERDADE
+// (cadastrados, com nome), fantasma (heartbeat de posto nunca cadastrado)
+// fica de fora pra nao inflar os numeros. Unidade so aparece no chip se tem
+// pelo menos 1 computador cadastrado - loja sem NOC configurado nao polui o card.
+const TIPO_COMPUTADOR_LABEL_PAINEL = { atendimento:'🤖 atendimento', interno:'🔒 interno', abastecimento:'🛒 abastecimento' };
+let NOC_ROSTER_CACHE = [];
+let NOC_COMPUTADORES_CACHE = [];
+let NOC_ABERTA = null;
+
+function nocStatusComputador(c){
+  if(!c.ultimoHeartbeatEm) return 'nunca';
+  return c.online ? 'online' : 'offline';
+}
+function nocStatusUnidade(codigo){
+  const doUnidade = NOC_COMPUTADORES_CACHE.filter(c=>c.codigo===codigo);
+  if(doUnidade.some(c=>nocStatusComputador(c)==='offline')) return 'offline';
+  if(doUnidade.length && doUnidade.every(c=>nocStatusComputador(c)==='online')) return 'online';
+  return 'atencao'; // so tem computador que nunca conectou (nao e queda, mas merece olhar)
+}
+
+function renderNocChips(){
+  return NOC_ROSTER_CACHE.map(u=>{
+    const status = nocStatusUnidade(u.codigo);
+    const ativo = NOC_ABERTA===u.codigo;
+    const icone = status==='offline' ? '🔴' : (status==='online' ? '🟢' : '⚪');
+    return `<button type="button" class="pestoque-chip ${status==='online'?'ok':''} ${ativo?'ativo':''}" onclick="toggleNocUnidade('${u.codigo.replace(/'/g,"\\'")}')">${icone} ${escapeHtml(u.nome)}</button>`;
+  }).join('');
+}
+
+function toggleNocUnidade(codigo){
+  const chips = document.getElementById('noc-chips');
+  const det = document.getElementById('noc-detalhe');
+  if(!chips || !det) return;
+  if(NOC_ABERTA===codigo){
+    NOC_ABERTA = null;
+    chips.innerHTML = renderNocChips();
+    det.innerHTML = '';
+    return;
+  }
+  NOC_ABERTA = codigo;
+  chips.innerHTML = renderNocChips();
+  const doUnidade = NOC_COMPUTADORES_CACHE.filter(c=>c.codigo===codigo)
+    .sort((a,b)=>(nocStatusComputador(a)==='offline'?0:1) - (nocStatusComputador(b)==='offline'?0:1));
+  det.innerHTML = doUnidade.length ? `<div class="pestoque-tabela-wrap"><table class="pestoque-tabela"><thead><tr><th>Computador</th><th>Tipo</th><th>Status</th></tr></thead><tbody>${
+    doUnidade.map(c=>{
+      const st = nocStatusComputador(c);
+      const stLabel = st==='online' ? '🟢 online' : (st==='offline' ? '🔴 offline' : '⚪ nunca conectou');
+      return `<tr><td>${escapeHtml(c.nome||c.posto)}</td><td>${TIPO_COMPUTADOR_LABEL_PAINEL[c.tipo]||escapeHtml(c.tipo||'')}</td><td>${stLabel}</td></tr>`;
+    }).join('')
+  }</tbody></table></div>` : '<div class="pcard-vazio">Sem computador cadastrado nessa unidade.</div>';
+}
+
+async function cardNoc(){
+  const [unidades, computadoresBrutos] = await Promise.all([
+    fetch('/api/meta/unidades-publico').then(r=>r.json()),
+    fetch('/api/loja-status').then(r=>r.ok?r.json():[]),
+  ]);
+  NOC_COMPUTADORES_CACHE = computadoresBrutos.filter(c=>c.nome); // sem fantasma (posto nunca cadastrado)
+  NOC_ABERTA = null;
+  const codigosComComputador = new Set(NOC_COMPUTADORES_CACHE.map(c=>c.codigo));
+  NOC_ROSTER_CACHE = unidades.filter(u=>codigosComComputador.has(u.codigo)).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+
+  const online = NOC_COMPUTADORES_CACHE.filter(c=>nocStatusComputador(c)==='online').length;
+  const offline = NOC_COMPUTADORES_CACHE.filter(c=>nocStatusComputador(c)==='offline').length;
+  const unidadesComQueda = NOC_ROSTER_CACHE.filter(u=>nocStatusUnidade(u.codigo)==='offline').length;
+  const comAcessoRemoto = NOC_COMPUTADORES_CACHE.filter(c=>c.anydeskId).length;
+  const agora = Date.now();
+  const acessosRecentes = NOC_COMPUTADORES_CACHE.filter(c=>c.ultimoAcessoRemotoEm && (agora - c.ultimoAcessoRemotoEm) < 24*60*60*1000).length;
+
+  if(!NOC_COMPUTADORES_CACHE.length){
+    return pcardWrap('🖥️','NOC Zenith','/loja-status.html', `<div class="pcard-vazio">Nenhum computador cadastrado ainda.</div>`);
+  }
+
+  return pcardWrap('🖥️','NOC Zenith','/loja-status.html', `
+    <div class="pstats-row">
+      ${statRow('Computadores', NOC_COMPUTADORES_CACHE.length)}
+      ${statRow('Online', online, 'ok')}
+      ${statRow('Offline', offline, offline ? 'bad' : '')}
+    </div>
+    <div class="pstats-row">
+      ${statRow('Unidades com queda', unidadesComQueda, unidadesComQueda ? 'bad' : 'ok')}
+      ${statRow('Acesso remoto cadastrado', comAcessoRemoto)}
+      ${statRow('Acessos remotos (24h)', acessosRecentes, acessosRecentes ? 'warn' : '')}
+    </div>
+    <div class="pestoque-chips" id="noc-chips">${renderNocChips()}</div>
+    <div id="noc-detalhe"></div>
+  `);
+}
+
 async function cardIfood(){
   const hoje = hojeBrasilia();
   const rows = await fetch('/api/ifood/vendas').then(r=>r.json());
@@ -1124,6 +1214,7 @@ const CARDS_POR_SECAO = [
   // pode ver os tempos monitorados)
   { chave:'abastecimento', soMasterAdmin:true, build:cardAbastecimento },
   { chave:'tecnico', secao:'tecnico', build:cardChamados },
+  { chave:'noc', secao:'suporte', build:cardNoc },
   // tecnico/manutencao tambem podem ter cards da Central atribuidos a eles
   // (ver "Atribuir responsável" em central-historico.html) - por isso o
   // card de Central tambem aparece pra eles, nao so quem tem 'solicitacoes'
@@ -1210,7 +1301,7 @@ async function boot(){
   ME_GLOBAL = ME;
   IS_MASTER_GLOBAL = isMaster;
   IS_ADMIN_GLOBAL = !!ME.isAdmin;
-  const secoes = isMaster ? ['monitor','disputas','cofre','fechamentos','lancamento','sangria','entregas','entregas-lancamento','ifood','solicitacoes','tecnico','manutencao','inventario','parque','parque-checkin','festas','rh'] : (ME.permissions?.sections||[]);
+  const secoes = isMaster ? ['monitor','disputas','cofre','fechamentos','lancamento','sangria','entregas','entregas-lancamento','ifood','solicitacoes','tecnico','manutencao','inventario','parque','parque-checkin','festas','rh','suporte'] : (ME.permissions?.sections||[]);
   if(secoes.includes('solicitacoes')) iniciarNotificacoesCentral();
 
   document.getElementById('nav-monitor').classList.remove('hidden');
