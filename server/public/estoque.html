@@ -1310,6 +1310,7 @@ function renderItensRevisaoNota(){
         <input type="checkbox" id="rn-usar-${i}" checked style="margin-top:10px;">
         <div style="flex:1;min-width:220px;">
           <div class="sub" style="margin-bottom:4px;">Como veio na nota: "${escapeHtml(it.produtoTexto||'')}"</div>
+          ${it.conversaoAplicada ? `<div class="sub" style="color:var(--warn);margin-bottom:4px;">📐 Convertido de embalagem: ${escapeHtml(it.conversaoAplicada)} - confira</div>` : ''}
           <label>Item do catálogo</label>
           <select id="rn-item-${i}"><option value="">— selecione —</option>${opcoesItensAgrupadas()}</select>
           <div class="grid2" style="margin-top:6px;">
@@ -1318,12 +1319,29 @@ function renderItensRevisaoNota(){
           </div>
           <label>Valor total (R$)</label>
           <input type="number" step="0.01" id="rn-valortotal-${i}" value="${it.valorTotal!=null?it.valorTotal:''}">
+          <div style="margin-top:6px;">
+            <span class="tx-comentario" style="cursor:pointer;" onclick="document.getElementById('rn-mult-wrap-${i}').classList.toggle('hidden')">Veio em pacote/caixa com várias unidades e a quantidade acima está errada? Ajustar</span>
+            <div class="hidden" id="rn-mult-wrap-${i}" style="margin-top:6px;">
+              <label>Quantas unidades tem em cada pacote/caixa dessa linha?</label>
+              <input type="number" step="1" min="1" id="rn-mult-${i}" placeholder="ex: 50" oninput="recalcularMultiplicadorNota(${i})">
+              <div class="sub">Multiplica a quantidade da nota (${it.quantidade!=null?it.quantidade:'?'}) por esse número e recalcula o valor unitário - o valor total não muda.</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>`).join('') : '<div class="sub">Não encontrei itens nessa nota.</div>';
   itens.forEach((it,i)=>{
     if(it.itemId) document.getElementById(`rn-item-${i}`).value = it.itemId;
   });
+}
+function recalcularMultiplicadorNota(i){
+  const base = RASCUNHO_NOTA && RASCUNHO_NOTA.itens[i];
+  if(!base) return;
+  const mult = num(document.getElementById(`rn-mult-${i}`).value) || 1;
+  const novaQtd = (base.quantidade||0) * mult;
+  document.getElementById(`rn-qtd-${i}`).value = novaQtd || '';
+  const valorTotalAtual = num(document.getElementById(`rn-valortotal-${i}`).value) || base.valorTotal || 0;
+  if(valorTotalAtual>0 && novaQtd>0) document.getElementById(`rn-valorunit-${i}`).value = (valorTotalAtual/novaQtd).toFixed(4);
 }
 function cancelarRevisaoNota(){
   RASCUNHO_NOTA = null;
