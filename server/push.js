@@ -233,13 +233,27 @@ async function notifyAbastecimento(title, body, tag, secao) {
 // Beniboy nao conseguiu resolver sozinho e chamou um atendente: alarme
 // sonoro alto pro Master + tag Suporte (ver podeReceberCritico), que continua
 // tocando ate silenciar na propria notificacao (alerta-beniboy.html), pra
-// nao passar batido mesmo com o celular em outro app
-async function notifyBeniboyEscalonamento(chat, motivo) {
+// nao passar batido mesmo com o celular em outro app.
+//
+// opts.lojaOffline (calculado em index.js via lojaContextoEstaOffline, cruzando
+// chat.lojaContexto com o NOC Zenith): quando a loja de onde a conversa veio
+// esta sem internet/computador desligado, a conversa trava por causa disso,
+// nao porque o bot "nao conseguiu resolver" - nesse caso troca o alarme
+// critico (sirene + tela cheia pedindo pra "atender") por um push normal
+// explicando a causa real, e manda pro NOC Zenith em vez da tela de
+// atendimento (nao ha nada pra "atender" ali - o problema e' conectividade)
+async function notifyBeniboyEscalonamento(chat, motivo, opts) {
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const chatId = chat && chat.id;
   if (!chatId) return;
+  const lojaOffline = !!(opts && opts.lojaOffline);
   const params = new URLSearchParams({ chat: chatId, nome: (chat && chat.nome) || '', motivo: motivo || '' });
-  const payload = JSON.stringify({
+  const payload = JSON.stringify(lojaOffline ? {
+    title: '🔴 Loja sem conexão · conversa travada',
+    body: `${(chat && chat.lojaContexto) || 'A loja'} está sem internet/computador desligado - a conversa com ${(chat && chat.nome) || 'o visitante'} parou por causa disso, não porque o Beniboy não resolveu.`.slice(0, 150),
+    tag: 'beniboy-' + chatId,
+    url: '/loja-status.html',
+  } : {
     title: '🚨 Beniboy precisa de você',
     body: `${(chat && chat.nome) || 'Visitante'}${motivo ? ' · ' + motivo : ''}`.slice(0, 150),
     tag: 'beniboy-' + chatId,
@@ -250,7 +264,7 @@ async function notifyBeniboyEscalonamento(chat, motivo) {
   for (const sub of subs) {
     if (!podeReceberCritico(sub)) continue;
     try {
-      await webpush.sendNotification(sub, payload, { urgency: 'high' });
+      await webpush.sendNotification(sub, payload, { urgency: lojaOffline ? 'normal' : 'high' });
     } catch (err) {
       if (err.statusCode === 404 || err.statusCode === 410) {
         await removeSubscription(sub.endpoint);

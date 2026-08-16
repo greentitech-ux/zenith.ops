@@ -6757,6 +6757,26 @@ app.get('/api/ajuda/topicos-master', auth.requireMasterOrAdmin, (req, res) => {
   res.json(docsMaster.TOPICOS_MASTER);
 });
 
+// correlaciona uma conversa do chat de suporte com a loja de onde ela veio
+// (chat.lojaContexto - nome da loja, setado quando a pessoa abre o link/QR
+// de atendimento.html, ver suporteChat.js) com o NOC Zenith, pra saber se
+// "a loja caiu" e' a causa real de uma conversa travada, em vez do Beniboy
+// simplesmente nao ter resolvido - usado pra trocar o alarme/texto do push
+// (ver notifyBeniboyEscalonamento). So computador tipo 'atendimento' conta
+// (e' o que hospeda esse widget de chat) - se nenhum tiver batido heartbeat,
+// a loja esta sem conexao de verdade.
+async function lojaContextoEstaOffline(lojaContexto) {
+  if (!lojaContexto) return false;
+  try {
+    const { encontrada } = await resolverUnidadePublica(lojaContexto);
+    if (!encontrada) return false;
+    const computadores = (await lojaStatus.listar()).filter((c) => c.codigo === encontrada.codigo && c.tipo === 'atendimento');
+    return computadores.length > 0 && computadores.every((c) => !c.online);
+  } catch (err) {
+    return false;
+  }
+}
+
 // ---------- Chat de suporte do site (widget 💬 em todas as telas) ----------
 // Lado PUBLICO (sem login): o visitante cria a conversa e recebe {id, token};
 // o token e a chave dele pra ler/escrever depois. Lado do atendimento
@@ -6781,6 +6801,10 @@ async function acionarBeniboy(chatId) {
     }
     if (r.chamouAtendente) {
       push.notifySolicitacao('💬 Beniboy pediu um atendente humano', `${r.chat?.nome || ''}${r.motivoAtendente ? ' · ' + r.motivoAtendente : ''}`.slice(0, 120), chatId, '/tecnico.html');
+      // se a loja de onde veio essa conversa esta sem conexao, a causa real
+      // da conversa travada nao e o Beniboy "nao ter resolvido" - troca o
+      // alarme critico por um push explicando isso (ver lojaContextoEstaOffline)
+      const lojaOffline = await lojaContextoEstaOffline(r.chat?.lojaContexto);
       // alarme critico: alem do push normal (Master/Admin), o Master + tag
       // Suporte recebem um alerta sonoro que insiste ate ser silenciado -
       // push em TODOS os acessos logados dessa pessoa (celular fechado/outro
@@ -6788,7 +6812,7 @@ async function acionarBeniboy(chatId) {
       // suporte-chat.js). Seção 'suporte' de verdade (ver VALID_SECTIONS em
       // users.js): Master passa direto (bypass no broadcast()), quem tem
       // essa seção recebe tambem, Admin sem a seção fica de fora.
-      push.notifyBeniboyEscalonamento(r.chat, r.motivoAtendente);
+      push.notifyBeniboyEscalonamento(r.chat, r.motivoAtendente, { lojaOffline });
       broadcast('beniboy-escalonamento', { chatId, nome: r.chat?.nome || '', motivo: r.motivoAtendente || '' }, 'suporte');
       // marca o instante desse 1o alerta - a varredura reforcarAlarmesBeniboy()
       // usa isso pra saber quando repetir, ja que ninguem assumiu ainda
@@ -6809,6 +6833,18 @@ async function acionarBeniboy(chatId) {
 async function reforcarAlarmesBeniboy() {
   const pendentes = await suporteChat.listarParaReforcarAlarme();
   for (const chat of pendentes) {
+    const lojaOffline = await lojaContextoEstaOffline(chat.lojaContexto);
+    if (lojaOffline) {
+      // a loja ja caiu - a escalacao inicial ja avisou isso (com o texto
+      // certo, sem sirene, ver acionarBeniboy) e a varredura de
+      // conectividade (rodarVarreduraLojaStatus) segue avisando "loja sem
+      // conexao" por conta propria. Reforcar o alarme critico aqui de novo
+      // so criaria alarme falso repetido pra algo que ninguem consegue
+      // "atender" agora - so marca como avisado de novo pra nao cair aqui
+      // outra vez no proximo tick
+      await suporteChat.marcarAlertaEnviado(chat.id);
+      continue;
+    }
     push.notifyBeniboyEscalonamento(chat, null);
     broadcast('beniboy-escalonamento', { chatId: chat.id, nome: chat.nome || '', motivo: '' }, 'suporte');
     await suporteChat.marcarAlertaEnviado(chat.id);
