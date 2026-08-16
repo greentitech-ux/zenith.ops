@@ -47,17 +47,21 @@ Devolva SOMENTE um JSON válido, sem nenhum texto antes ou depois, exatamente ne
       "quantidade": numero,
       "valorUnitario": numero ou null,
       "valorTotal": numero ou null,
-      "itemIdSugerido": "id do catálogo acima, ou null se não tiver certeza"
+      "itemIdSugerido": "id do catálogo acima, ou null se não tiver certeza",
+      "conversaoAplicada": "string curta explicando a conta, só quando você converteu embalagem->unidade (ver regra abaixo), senão null"
     }
   ]
 }
 
 Regras:
 - Se a linha da nota só tiver o valor total (sem unitário) ou vice-versa, preencha o que tiver e deixe o outro null.
-- Quantidade é sempre o número escrito na nota, sem converter unidade.
 - Só preencha itemIdSugerido quando tiver bastante certeza de que é o mesmo produto do catálogo (nome parecido, mesma unidade) - errar a sugestão é pior que deixar null, porque quem confere só repara num erro sutil, mas um campo vazio ela preenche na hora olhando a nota.
 - Datas sempre em AAAA-MM-DD.
 - IMPORTANTE: os números na nota estão em formato brasileiro (ponto separa milhar, vírgula separa decimal - ex: "1.234,56"). Converta todo campo numérico (quantidade, valorUnitario, valorTotal) para o padrão JSON: só ponto decimal, sem separador de milhar, sem vírgula (ex: 1234.56). Nunca escreva um número com vírgula no JSON - isso quebra o formato.
+- ATENÇÃO ao empacotamento: a coluna Quantidade da nota fiscal costuma contar CAIXAS/PACOTES/FARDOS, não a unidade individual do catálogo. Preste atenção em notações no nome do produto como "10X1KG" (10 embalagens de 1kg = 10kg no total), "PCT 50" ou "C/50" (pacote com 50 unidades), "CX 12" (caixa com 12 unidades), "FD 20" (fardo com 20 unidades). Quando reconhecer uma dessas notações E o item do catálogo sugerido for medido na MESMA unidade individual (ex: catálogo em KG bate com "1KG" da notação; catálogo em UN bate com unidades soltas), devolva a quantidade JÁ CONVERTIDA para o total nessa unidade (quantidade da nota × o multiplicador da notação), e valorUnitario = valorTotal dividido por essa quantidade convertida. Preencha "conversaoAplicada" nesse caso com uma frase curta tipo "1 pacote × 10kg = 10kg" pra o gerente conferir a conta.
+  Exemplo 1: nota tem quantidade 1, produto "FUBA FECOMIX 400 10X1KG", valorTotal 86.23, catálogo tem "FUBA" em KG -> devolva quantidade: 10, valorUnitario: 8.623, valorTotal: 86.23, conversaoAplicada: "1 pacote × 10kg (10X1KG) = 10kg".
+  Exemplo 2: nota tem quantidade 1, produto "CAIXA 16 BRANCA DP PCT 50 GT", valorTotal 166.19, catálogo tem "CAIXA 40CM - 16" em UN -> devolva quantidade: 50, valorUnitario: 3.3238, valorTotal: 166.19, conversaoAplicada: "1 pacote × 50un (PCT 50) = 50un".
+  Se não tiver certeza da notação ou da conversão, NÃO adivinhe: devolva a quantidade exatamente como está escrita na nota e deixe conversaoAplicada null - é mais seguro o gerente corrigir manualmente do que uma conversão errada passar despercebida.
 - Se a imagem não for uma nota fiscal/comprovante de recebimento, devolva {"erro": "descrição curta do que você viu"} em vez do formato acima.`;
 }
 
@@ -102,6 +106,7 @@ async function lerNota({ buffer, mimeType, catalogo }) {
       itemId: item ? item.id : null,
       itemNome: item ? item.nome : null,
       itemUnidadeMedida: item ? item.unidadeMedida : null,
+      conversaoAplicada: it.conversaoAplicada ? String(it.conversaoAplicada).trim().slice(0, 160) : null,
     };
   });
 
