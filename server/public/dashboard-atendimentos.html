@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Dashboard de Atendimentos · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;overflow-x:clip;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 16px;padding:12px 32px 12px;border-bottom:1px solid var(--line);}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:12px;padding-bottom:12px;} h1{font-size:17px;} .eyebrow{font-size:8px;} }
+  h2{font-size:14px;font-weight:700;margin:0 0 4px;}
+  .header-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+  .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;transition:border-color .15s ease,color .15s ease,background .15s ease;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,color .15s ease;}
+  .btn-notif:hover{border-color:var(--accent);color:var(--text);}
+  .btn-sair{color:var(--bad);}
+  .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
+  .hidden{display:none!important;}
+  .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer-titulo{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px 12px;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
+  .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px;}
+  .filtros{display:flex;gap:10px;flex-wrap:wrap;align-items:end;}
+  .filtros label{display:block;font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;}
+  .filtros input,.filtros select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px;font-family:var(--sans);}
+  .filtros input:focus,.filtros select:focus{outline:none;border-color:var(--accent);}
+  .btn-primary{background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:9px 16px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 14px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+  .btn-ghost:hover{border-color:var(--accent);}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px;}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;}
+  .kpi .lbl{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
+  .kpi .val{font-size:26px;font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums;}
+  .kpi .val.ok{color:var(--ok);} .kpi .val.warn{color:var(--warn);} .kpi .val.bad{color:var(--bad);}
+  .kpi .sub{font-size:11px;color:var(--muted);margin-top:3px;}
+  .grid2{display:grid;grid-template-columns:2fr 1fr;gap:16px;}
+  @media(max-width:900px){ .grid2{grid-template-columns:1fr;} }
+  .chart-wrap{position:relative;height:280px;}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  th{text-align:left;padding:8px 10px;font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line);}
+  td{padding:8px 10px;border-bottom:1px solid var(--line);}
+  tr:last-child td{border-bottom:none;}
+  td.num,th.num{text-align:right;font-family:var(--mono);}
+  .barra-mini{height:4px;border-radius:2px;background:var(--panel2);overflow:hidden;margin-top:4px;}
+  .barra-mini i{display:block;height:100%;background:var(--accent);}
+  .horas-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(38px,1fr));gap:4px;align-items:end;height:90px;}
+  .hora-col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px;height:100%;}
+  .hora-col .barra{width:100%;background:var(--accent);border-radius:3px 3px 0 0;min-height:2px;}
+  .hora-col .lbl{font-family:var(--mono);font-size:8.5px;color:var(--muted);}
+  .loading{padding:40px;text-align:center;color:var(--muted);font-size:13px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <div style="min-width:0;">
+        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <h1>📊 Dashboard de Atendimentos</h1>
+      </div>
+    </div>
+    <div class="header-nav">
+      <a class="back" href="/beniboy.html">🐝 Central do Beniboy</a>
+      <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
+    </div>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer">
+  <div class="nav-drawer-titulo">Zenith Ops</div>
+  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
+  <a class="back hidden" id="nav-beniboy" href="/beniboy.html">🐝 Central do Beniboy</a>
+  <a class="back active" href="/dashboard-atendimentos.html">📊 Dashboard de Atendimentos</a>
+  <a class="back hidden" id="nav-loja-status" href="/loja-status.html">📡 NOC Zenith</a>
+  <a class="back" id="nav-ajuda" href="/ajuda.html">❓ Ajuda</a>
+  <div class="nav-drawer-sep"></div>
+  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
+</nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso a essa página. É preciso ser do time de Suporte, Admin ou Master.</div>
+
+<div id="root" class="hidden">
+  <div class="panel">
+    <div class="filtros">
+      <div>
+        <label>De</label>
+        <input type="date" id="f-de">
+      </div>
+      <div>
+        <label>Até</label>
+        <input type="date" id="f-ate">
+      </div>
+      <button type="button" class="btn-ghost" onclick="presetPeriodo('hoje')">Hoje</button>
+      <button type="button" class="btn-ghost" onclick="presetPeriodo('7d')">7 dias</button>
+      <button type="button" class="btn-ghost" onclick="presetPeriodo('mes')">Este mês</button>
+      <button type="button" class="btn-primary" onclick="carregar()">Filtrar</button>
+    </div>
+  </div>
+
+  <div id="loading" class="loading">Carregando...</div>
+
+  <div id="conteudo" class="hidden">
+    <div class="kpis">
+      <div class="kpi">
+        <div class="lbl">Total de atendimentos</div>
+        <div class="val" id="kpi-total">0</div>
+        <div class="sub">No período selecionado</div>
+      </div>
+      <div class="kpi">
+        <div class="lbl">Humanizados</div>
+        <div class="val ok" id="kpi-humanizados">0</div>
+        <div class="sub" id="kpi-humanizados-pct">0%</div>
+      </div>
+      <div class="kpi">
+        <div class="lbl">Via Beniboy (bot)</div>
+        <div class="val warn" id="kpi-bot">0</div>
+        <div class="sub" id="kpi-bot-pct">0%</div>
+      </div>
+      <div class="kpi">
+        <div class="lbl">Em aberto agora</div>
+        <div class="val" id="kpi-aberto">0</div>
+        <div class="sub">No período selecionado</div>
+      </div>
+      <div class="kpi">
+        <div class="lbl">Tempo médio de resposta</div>
+        <div class="val" id="kpi-resposta" style="font-size:19px;">—</div>
+        <div class="sub">Até a 1ª resposta humana</div>
+      </div>
+      <div class="kpi">
+        <div class="lbl">Tempo médio de resolução</div>
+        <div class="val" id="kpi-resolucao" style="font-size:19px;">—</div>
+        <div class="sub">Conversas já finalizadas</div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="panel">
+        <h2>Atendimentos por dia</h2>
+        <div class="chart-wrap"><canvas id="chart-dia"></canvas></div>
+      </div>
+      <div class="panel">
+        <h2>Por hora do dia</h2>
+        <div class="horas-grid" id="horas-grid"></div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="panel">
+        <h2>Por atendente</h2>
+        <table>
+          <thead><tr><th>Atendente</th><th class="num">Total</th><th class="num">Resolvidos</th><th class="num">Tempo médio</th></tr></thead>
+          <tbody id="tbody-agentes"></tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <h2>Por assunto</h2>
+        <table>
+          <thead><tr><th>Assunto</th><th class="num">Total</th><th class="num">Abertos</th><th class="num">Tempo médio</th></tr></thead>
+          <tbody id="tbody-assuntos"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/chart.umd.min.js"></script>
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
+function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function hojeYMD(){
+  return new Intl.DateTimeFormat('en-CA', { timeZone:'America/Sao_Paulo' }).format(new Date());
+}
+function somarDias(ymd, dias){
+  const d = new Date(ymd+'T12:00:00');
+  d.setDate(d.getDate()+dias);
+  return new Intl.DateTimeFormat('en-CA', { timeZone:'America/Sao_Paulo' }).format(d);
+}
+function presetPeriodo(tipo){
+  const hoje = hojeYMD();
+  if(tipo==='hoje'){ document.getElementById('f-de').value = hoje; document.getElementById('f-ate').value = hoje; }
+  else if(tipo==='7d'){ document.getElementById('f-de').value = somarDias(hoje,-6); document.getElementById('f-ate').value = hoje; }
+  else if(tipo==='mes'){ document.getElementById('f-de').value = hoje.slice(0,8)+'01'; document.getElementById('f-ate').value = hoje; }
+  carregar();
+}
+
+// formata ms em "Xh Ymin" (ou so minutos se < 1h) - null vira travessao,
+// ja que nem toda conversa tem resposta humana/resolucao pra medir
+function fmtDuracao(ms){
+  if(ms==null) return '—';
+  const min = Math.round(ms/60000);
+  if(min < 60) return min+' min';
+  const h = Math.floor(min/60), m = min%60;
+  return `${h}h ${m}min`;
+}
+
+let CHART_DIA = null;
+function renderChartDia(porDia){
+  const ctx = document.getElementById('chart-dia');
+  const labels = porDia.map(d=>d.dia.slice(5).split('-').reverse().join('/'));
+  const dados = porDia.map(d=>d.total);
+  if(CHART_DIA) CHART_DIA.destroy();
+  CHART_DIA = new Chart(ctx, {
+    type:'line',
+    data:{ labels, datasets:[{
+      label:'Atendimentos', data: dados, borderColor:'#5cc8ff', backgroundColor:'rgba(92,200,255,.12)',
+      tension:.35, fill:true, pointRadius:3, pointBackgroundColor:'#5cc8ff',
+    }]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:false } },
+      scales:{
+        x:{ ticks:{ color:'#7d8896', font:{ family:'JetBrains Mono', size:10 } }, grid:{ color:'#232a33' } },
+        y:{ beginAtZero:true, ticks:{ color:'#7d8896', font:{ family:'JetBrains Mono', size:10 }, precision:0 }, grid:{ color:'#232a33' } },
+      },
+    },
+  });
+}
+
+function renderHoras(porHora){
+  const max = Math.max(1, ...porHora.map(h=>h.total));
+  document.getElementById('horas-grid').innerHTML = porHora.map(h=>`
+    <div class="hora-col" title="${h.hora}h: ${h.total} atendimento(s)">
+      <div class="barra" style="height:${Math.max(2, Math.round(h.total/max*100))}%;"></div>
+      <div class="lbl">${h.hora}</div>
+    </div>
+  `).join('');
+}
+
+function renderTabelaAgentes(porAgente){
+  const tbody = document.getElementById('tbody-agentes');
+  tbody.innerHTML = porAgente.length ? porAgente.map(a=>`
+    <tr><td>${esc(a.nome)}</td><td class="num">${a.total}</td><td class="num">${a.resolvidos}</td><td class="num">${fmtDuracao(a.tempoMedioResolucaoMs)}</td></tr>
+  `).join('') : '<tr><td colspan="4" style="text-align:center;color:var(--muted);">Nenhum atendimento no período.</td></tr>';
+}
+
+function renderTabelaAssuntos(porAssunto){
+  const tbody = document.getElementById('tbody-assuntos');
+  tbody.innerHTML = porAssunto.length ? porAssunto.map(a=>`
+    <tr><td>${esc(a.assunto)}</td><td class="num">${a.total}</td><td class="num">${a.abertos}</td><td class="num">${fmtDuracao(a.tempoMedioResolucaoMs)}</td></tr>
+  `).join('') : '<tr><td colspan="4" style="text-align:center;color:var(--muted);">Nenhum atendimento no período.</td></tr>';
+}
+
+async function carregar(){
+  const de = document.getElementById('f-de').value;
+  const ate = document.getElementById('f-ate').value;
+  document.getElementById('loading').classList.remove('hidden');
+  document.getElementById('conteudo').classList.add('hidden');
+  const params = new URLSearchParams();
+  if(de) params.set('de', de);
+  if(ate) params.set('ate', ate);
+  const dados = await fetch('/api/suporte-chats/estatisticas?'+params.toString()).then(r=>r.json());
+
+  document.getElementById('kpi-total').textContent = dados.total;
+  document.getElementById('kpi-humanizados').textContent = dados.humanizados;
+  document.getElementById('kpi-humanizados-pct').textContent = dados.total ? Math.round(dados.humanizados/dados.total*100)+'% no período' : '—';
+  document.getElementById('kpi-bot').textContent = dados.viaBot;
+  document.getElementById('kpi-bot-pct').textContent = dados.total ? Math.round(dados.viaBot/dados.total*100)+'% no período' : '—';
+  document.getElementById('kpi-aberto').textContent = dados.emAberto;
+  document.getElementById('kpi-resposta').textContent = fmtDuracao(dados.tempoMedioRespostaMs);
+  document.getElementById('kpi-resolucao').textContent = fmtDuracao(dados.tempoMedioResolucaoMs);
+
+  renderChartDia(dados.porDia);
+  renderHoras(dados.porHora);
+  renderTabelaAgentes(dados.porAgente);
+  renderTabelaAssuntos(dados.porAssunto);
+
+  document.getElementById('loading').classList.add('hidden');
+  document.getElementById('conteudo').classList.remove('hidden');
+}
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  const me = await res.json();
+  const secoes = (me.permissions && me.permissions.sections) || [];
+  if(!(me.role==='master' || me.isAdmin || secoes.includes('suporte'))){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('root').classList.remove('hidden');
+  const hoje = hojeYMD();
+  document.getElementById('f-de').value = hoje.slice(0,8)+'01';
+  document.getElementById('f-ate').value = hoje;
+  await carregar();
+}
+boot();
+</script>
+<script src="/suporte-chat.js"></script>
+<script src="/notif-central.js"></script>
+<script src="/nav-gate.js"></script>
+</body>
+</html>

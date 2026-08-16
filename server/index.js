@@ -7108,6 +7108,15 @@ app.get('/api/suporte-chats', auth.requireAuth, async (req, res) => {
   res.json(todos.map(({ token, ...resto }) => resto));
 });
 
+// dashboard de metricas dos atendimentos via chat (dashboard-atendimentos.html)
+// - pedido explicito do usuario, inspirado num dashboard de outra plataforma
+// de atendimento que ele usa. de/ate no formato YYYY-MM-DD (opcionais).
+app.get('/api/suporte-chats/estatisticas', auth.requireAuth, async (req, res) => {
+  if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+  const { de, ate } = req.query;
+  res.json(await suporteChat.estatisticas({ de, ate }));
+});
+
 // PDF da conversa pro lado do atendimento (mesmo conteudo da rota publica
 // acima, so que autenticada) - so Master, pedido explicito do usuario (o
 // resto do time de suporte continua respondendo normalmente, so não gera

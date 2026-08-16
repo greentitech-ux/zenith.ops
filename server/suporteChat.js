@@ -313,6 +313,105 @@ async function listAllUncached() {
 const chatsCache = createCache(listAllUncached, 5 * 60 * 1000);
 const listAll = chatsCache.cached;
 
+// Brasilia e sempre UTC-3 (sem horario de verao desde 2019) - monta o limite
+// do dia local direto, sem depender de Intl/timeZone pra cada comparacao
+function limiteDiaBrasilia(dataYMD, fimDoDia) {
+  const hora = fimDoDia ? '23:59:59.999' : '00:00:00.000';
+  return new Date(`${dataYMD}T${hora}-03:00`).getTime();
+}
+
+function mediaMs(valores) {
+  const validos = valores.filter((v) => v != null && v >= 0);
+  if (!validos.length) return null;
+  return Math.round(validos.reduce((a, b) => a + b, 0) / validos.length);
+}
+
+// 1a mensagem de verdade de um humano do time (bot:true e o Beniboy, nao
+// conta) - usado pra "tempo medio ate a 1a resposta humana", metrica que nao
+// existe pronta em nenhum campo (ver comentario dos campos no topo do arquivo)
+function primeiraRespostaHumanaMs(chat) {
+  const m = (chat.mensagens || []).find((x) => x.de === 'suporte' && !x.bot);
+  if (!m) return null;
+  return new Date(m.em).getTime() - new Date(chat.criadoEm).getTime();
+}
+// so os chats que ja finalizaram tem finalizadoEm - os ainda ABERTOS ficam
+// de fora da media de resolucao (nao daria pra saber quanto tempo vao levar)
+function resolucaoMs(chat) {
+  if (!chat.finalizadoEm) return null;
+  return new Date(chat.finalizadoEm).getTime() - new Date(chat.criadoEm).getTime();
+}
+
+// metricas agregadas pra tela de dashboard (dashboard-atendimentos.html) -
+// tudo derivado dos campos que ja existem, sem nenhum campo pre-agregado no
+// documento (ver comentario dos campos no topo do arquivo). de/ate no
+// formato YYYY-MM-DD (calendario de Brasilia), ambos opcionais.
+async function estatisticas({ de, ate } = {}) {
+  const todos = await listAll();
+  const desdeMs = de ? limiteDiaBrasilia(de, false) : null;
+  const ateMs = ate ? limiteDiaBrasilia(ate, true) : null;
+  const doPeriodo = todos.filter((c) => {
+    const t = new Date(c.criadoEm).getTime();
+    return (!desdeMs || t >= desdeMs) && (!ateMs || t <= ateMs);
+  });
+
+  const total = doPeriodo.length;
+  const emAberto = doPeriodo.filter((c) => c.status === 'ABERTO').length;
+  // "via bot" = ninguem do time chegou a responder (atendidoPorEmail so e
+  // gravado na 1a resposta HUMANA, ver adicionarMensagem) - o resto e
+  // considerado humanizado, mesmo que o Beniboy tenha respondido antes
+  const viaBot = doPeriodo.filter((c) => !c.atendidoPorEmail).length;
+  const humanizados = total - viaBot;
+
+  const porDiaMapa = {};
+  const porHoraMapa = {};
+  const porAssuntoMapa = {};
+  const porAgenteMapa = {};
+  doPeriodo.forEach((c) => {
+    const dia = c.criadoEm.slice(0, 10);
+    porDiaMapa[dia] = (porDiaMapa[dia] || 0) + 1;
+    const hora = new Date(c.criadoEm).getHours();
+    porHoraMapa[hora] = (porHoraMapa[hora] || 0) + 1;
+
+    const r = resolucaoMs(c);
+    const assuntoChave = c.assunto || 'Outro';
+    if (!porAssuntoMapa[assuntoChave]) porAssuntoMapa[assuntoChave] = { assunto: assuntoChave, total: 0, abertos: 0, resolvidos: 0, temposResolucao: [] };
+    const ga = porAssuntoMapa[assuntoChave];
+    ga.total++;
+    if (c.status === 'ABERTO') ga.abertos++;
+    if (c.statusAtendimento === 'RESOLVIDO') ga.resolvidos++;
+    if (r != null) ga.temposResolucao.push(r);
+
+    // agente: prioriza quem esta responsavel agora (tem nome pronto); sem
+    // responsavel definido (conversa antiga/nunca atribuida formalmente),
+    // cai pro email de quem respondeu primeiro, so sem nome pra mostrar
+    const email = c.responsavel?.email || c.atendidoPorEmail;
+    if (email) {
+      if (!porAgenteMapa[email]) porAgenteMapa[email] = { email, nome: c.responsavel?.nome || email, total: 0, resolvidos: 0, temposResolucao: [] };
+      const gg = porAgenteMapa[email];
+      gg.total++;
+      if (c.responsavel?.nome) gg.nome = c.responsavel.nome;
+      if (c.statusAtendimento === 'RESOLVIDO') gg.resolvidos++;
+      if (r != null) gg.temposResolucao.push(r);
+    }
+  });
+
+  const porDia = Object.entries(porDiaMapa).sort(([a], [b]) => a.localeCompare(b)).map(([dia, total]) => ({ dia, total }));
+  const porHora = Array.from({ length: 24 }, (_, h) => ({ hora: h, total: porHoraMapa[h] || 0 }));
+  const porAssunto = Object.values(porAssuntoMapa)
+    .map((g) => ({ assunto: g.assunto, total: g.total, abertos: g.abertos, resolvidos: g.resolvidos, tempoMedioResolucaoMs: mediaMs(g.temposResolucao) }))
+    .sort((a, b) => b.total - a.total);
+  const porAgente = Object.values(porAgenteMapa)
+    .map((g) => ({ email: g.email, nome: g.nome, total: g.total, resolvidos: g.resolvidos, tempoMedioResolucaoMs: mediaMs(g.temposResolucao) }))
+    .sort((a, b) => b.total - a.total);
+
+  return {
+    total, emAberto, humanizados, viaBot,
+    tempoMedioRespostaMs: mediaMs(doPeriodo.map(primeiraRespostaHumanaMs)),
+    tempoMedioResolucaoMs: mediaMs(doPeriodo.map(resolucaoMs)),
+    porDia, porHora, porAssunto, porAgente,
+  };
+}
+
 // tempo entre re-alertas do alarme critico enquanto ninguem assume a
 // conversa (ver reforcarAlarmesBeniboy() em index.js) - pedido explicito do
 // usuario: o alarme disparava 1x quando o Beniboy chamava um atendente e
@@ -387,5 +486,5 @@ async function finalizarOciosos() {
 module.exports = {
   criar, getOne, getPublico, getComToken, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll, ASSUNTOS,
   atualizarStatusAtendimento, marcarDesbloqueio, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
-  listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna,
+  listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna, estatisticas,
 };
