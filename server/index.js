@@ -7206,12 +7206,14 @@ app.get('/api/abastecimento/fluxo', auth.requireMaster, async (req, res) => {
 });
 
 // SUGESTAO DE ENVIO (pre-envio): quanto falta pra encher o carrinho depois
-// da ultima contagem. Fica no MESMO gate de leitura do abastecimento (as
-// duas pontas precisam ver: o carrinho pra pedir, a loja pra mandar) - ver
-// podeVerAbastecimento. E so uma sugestao: quem lanca ajusta na tela.
+// da ultima contagem. MESMO gate de leitura do GET /api/abastecimento (as
+// duas pontas precisam ver: o carrinho pra pedir, a loja pra mandar).
+// E so uma sugestao: quem lanca ajusta na tela.
 app.get('/api/abastecimento/sugestao-envio', auth.requireAuth, async (req, res) => {
-  if (!podeVerAbastecimento(req)) return res.status(403).json({ error: 'Sem acesso ao Abastecimento do Carrinho.' });
   try {
+    if (!podePedirAbastecimento(req) && !podeEnviarAbastecimento(req)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    }
     const [regs, config] = await Promise.all([abastecimentoCarrinho.listAll(), abastecimentoCarrinho.getConfig()]);
     res.json(abastecimentoPrevisao.sugerirEnvio(regs, { capacidadesManuais: config.capacidades }));
   } catch (err) {
