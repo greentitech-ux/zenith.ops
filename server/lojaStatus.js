@@ -48,6 +48,12 @@ const COLLECTION = db.collection('lojaStatus');
 // achar o comando certo: já sabemos o id exato na hora do heartbeat
 const COMANDOS_COLLECTION = db.collection('lojaStatusComandos');
 const CONFIG_DOC = db.collection('lojaStatusConfig').doc('geral');
+// apelidos dos aparelhos da rede da loja, por unidade: { codigo: { mac: nome } }.
+// UM doc pra tudo de propósito - o nome que a pessoa dá ("Impressora da
+// cozinha") vale pra loja inteira, não pro computador que por acaso enxergou
+// aquele MAC primeiro; e um doc pequeno é mais barato que uma coleção nova
+// consultada a cada abertura do painel.
+const APELIDOS_DOC = db.collection('lojaStatusConfig').doc('apelidosRede');
 
 // config do NOC. Hoje so o toggle do PUSH de acesso remoto: DESLIGADO por
 // padrao (o alerta virava spam do proprio acesso remoto da equipe -
@@ -70,6 +76,32 @@ async function setConfig(patch) {
 async function pushAcessoRemotoAtivo() {
   const c = await getConfig();
   return c.pushAcessoRemoto === true; // default false
+}
+
+// mesma ideia do configCache: o painel lê isso a cada 30s e quase nunca muda
+let apelidosCache = null;
+let apelidosCacheEm = 0;
+async function getApelidos() {
+  if (apelidosCache && (Date.now() - apelidosCacheEm) < 30 * 1000) return apelidosCache;
+  const snap = await APELIDOS_DOC.get();
+  apelidosCache = snap.exists ? (snap.data().unidades || {}) : {};
+  apelidosCacheEm = Date.now();
+  return apelidosCache;
+}
+
+// o nome que a pessoa dá vence o que o DNS respondeu: quem batizou de
+// "Impressora da cozinha" sabe melhor que o hostname "BRWA4-2B-B0"
+async function definirApelidoDispositivo(codigo, mac, apelido) {
+  const macOk = String(mac || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(macOk)) throw new Error('MAC inválido.');
+  if (!codigo) throw new Error('Unidade é obrigatória.');
+  const atuais = await getApelidos();
+  const daUnidade = { ...(atuais[codigo] || {}) };
+  const limpo = String(apelido || '').trim().slice(0, 40);
+  if (limpo) daUnidade[macOk] = limpo; else delete daUnidade[macOk];
+  await APELIDOS_DOC.set({ unidades: { ...atuais, [codigo]: daUnidade } }, { merge: false });
+  apelidosCache = null;
+  return { codigo, mac: macOk, apelido: limpo || null };
 }
 
 const TIPOS_COMPUTADOR = ['atendimento', 'interno', 'abastecimento'];
@@ -328,8 +360,14 @@ function comOnline(doc) {
 // lista achatada, 1 item por computador (varios por unidade) - quem chama
 // (index.js/loja-status.html) agrupa por codigo pra exibir por unidade
 async function listar() {
-  const docs = await cache.cached();
-  return docs.map(comOnline).map(semSegredo);
+  const [docs, apelidos] = await Promise.all([cache.cached(), getApelidos()]);
+  return docs.map(comOnline).map(semSegredo).map((d) => {
+    // apelido é por UNIDADE, não por computador: se dois computadores da loja
+    // enxergam a mesma impressora, ela tem o mesmo nome nos dois
+    const daUnidade = apelidos[d.codigo] || {};
+    if (!d.dispositivos || !d.dispositivos.length) return d;
+    return { ...d, dispositivos: d.dispositivos.map((x) => ({ ...x, apelido: daUnidade[x.mac] || null })) };
+  });
 }
 
 // get-or-create do segredo do computador - chamado ao gerar o .ps1 (ver rota
@@ -522,13 +560,17 @@ async function registrarTelemetria(codigo, posto, dados, token) {
 
   const dispositivos = nocMaquina.sanitizarDispositivos(dados && dados.dispositivos);
   if (dispositivos) {
-    patch.dispositivos = dispositivos;
+    // a lista guardada acumula histórico: quem veio agora fica `ativo`, quem
+    // não veio continua listado com a última vez que apareceu. É o que dá
+    // STATUS por aparelho em vez de só uma contagem
+    const merge = nocMaquina.mesclarDispositivos(atual.dispositivos || atual.dispositivosConhecidos, dispositivos, agora);
+    patch.dispositivos = merge.dispositivos;
     patch.dispositivosEm = agora;
-    const diff = nocMaquina.diffDispositivos(atual.dispositivosConhecidos, dispositivos);
-    patch.dispositivosConhecidos = diff.conhecidos;
-    if (diff.novos.length) {
-      const resumo = diff.novos.slice(0, 5).map((d) => `${d.ip} (${d.mac})`).join(', ');
-      eventos = [...eventos, { tipo: 'dispositivo-novo', em: agora, detalhe: `${diff.novos.length} novo(s) na rede: ${resumo}`.slice(0, 200) }];
+    // campo do formato antigo (só MACs): some depois da primeira mesclagem
+    if (atual.dispositivosConhecidos) patch.dispositivosConhecidos = null;
+    if (merge.novos.length) {
+      const resumo = merge.novos.slice(0, 5).map((d) => `${d.nome || d.ip} (${d.mac})`).join(', ');
+      eventos = [...eventos, { tipo: 'dispositivo-novo', em: agora, detalhe: `${merge.novos.length} novo(s) na rede: ${resumo}`.slice(0, 200) }];
       patch.eventos = eventos.slice(-EVENTOS_MAX);
     }
   }
@@ -881,7 +923,7 @@ async function diagnosticoRede(dia) {
 module.exports = {
   heartbeat, listar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR,
-  getConfig, setConfig, pushAcessoRemotoAtivo,
+  getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
   enfileirarComando, enfileirarComandoEmTodos, COMANDO_LIMPAR_TRAVADOS,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
   saudeMaquinas,

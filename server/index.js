@@ -2078,6 +2078,17 @@ app.get('/api/loja-status/rede', requireSection('suporte'), async (req, res) => 
   }
 });
 
+// Batiza um aparelho da rede da loja ("Impressora da cozinha"). O nome vale
+// pra UNIDADE inteira, nao pro computador que por acaso enxergou aquele MAC -
+// por isso a rota e por codigo de unidade. Mesmo gate do painel.
+app.put('/api/loja-status/:codigo/dispositivos/:mac/apelido', requireSection('suporte'), async (req, res) => {
+  try {
+    res.json(await lojaStatus.definirApelidoDispositivo(req.params.codigo, req.params.mac, req.body.apelido));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Saude das maquinas: HD com problema (pior primeiro) + quantos aparelhos
 // cada loja enxerga na propria rede (ver nocMaquina.js). Mesmo gate e mesmo
 // cache do /rede acima - nenhuma leitura nova no Firestore.
