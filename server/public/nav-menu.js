@@ -95,6 +95,37 @@
   ];
 
   // ---------------------------------------------------------------
+  // 1b) VOLTAR - telas que sao um detalhe/relatorio/config de outra
+  //     ganham uma seta "‹ Nome do pai" colada no hamburguer.
+  //
+  //     O pai e apontado pelo ID DO ITEM DE MENU, nao pela URL: assim o
+  //     href, o rotulo e a REGRA DE PERMISSAO saem todos da definicao
+  //     unica la de cima. Se a pessoa nao pode abrir o pai, a seta nem
+  //     aparece - senao ela levaria direto pro "voce nao tem acesso a
+  //     esta pagina", que e pior do que nao ter atalho nenhum.
+  //
+  //     Criterio pra entrar aqui: a tela filha so faz sentido DEPOIS de
+  //     passar pela mae. Telas irmas (Central x Historico, por exemplo)
+  //     ficam de fora de proposito - seta de voltar entre iguais so
+  //     confunde quem esta lendo a hierarquia.
+  // ---------------------------------------------------------------
+  const VOLTAR = {
+    '/noc-rede.html': 'nav-loja-status',
+    '/abastecimento-relatorios.html': 'nav-abastecimento',
+    '/entregas-regras.html': 'nav-entregas',
+    '/dashboard-atendimentos.html': 'nav-beniboy',
+    '/mensalistas.html': 'nav-parque',
+  };
+
+  function itemPorId(id) {
+    for (const sec of MENU) {
+      const it = sec.itens.find((i) => i.id === id);
+      if (it) return it;
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------
   // 2) VISUAL - injetado daqui pra nao depender do CSS de cada pagina
   //    (cada uma tem a sua copia, entao mudar visual "no CSS" exigiria
   //    editar 35 arquivos de novo - exatamente o problema que isso resolve)
@@ -192,6 +223,26 @@
       #nav-drawer .nmz-rodape .nmz-suporte{ color:var(--accent,#5cc8ff); }
 
       @media (max-width:420px){ #nav-drawer{ width:86vw; } }
+
+      /* seta de voltar pro "pai" da tela (ver VOLTAR la em cima).
+         Nasce escondida: quem libera e aplicarRegras(), depois do
+         /api/me - mesma logica dos itens do menu. */
+      .nmz-voltar{
+        display:inline-flex; align-items:center; gap:7px; flex:none; box-sizing:border-box;
+        height:34px; padding:0 12px 0 9px; border-radius:8px;
+        border:1px solid var(--line,#232a33); background:var(--panel2,#181d24);
+        color:var(--text,#e7ecf1); text-decoration:none;
+        font-size:12.5px; line-height:1; white-space:nowrap; transition:.15s;
+      }
+      .nmz-voltar:hover{ border-color:var(--accent,#5cc8ff); color:var(--accent,#5cc8ff); }
+      .nmz-voltar.hidden{ display:none!important; }
+      .nmz-voltar .nmz-vseta{ font-size:15px; line-height:1; opacity:.8; }
+      /* no celular sobra so a seta - o titulo da tela e mais importante
+         que o nome da tela anterior quando a largura aperta */
+      @media (max-width:560px){
+        .nmz-voltar{ width:34px; padding:0; justify-content:center; }
+        .nmz-voltar .nmz-vrot{ display:none; }
+      }
     `;
     document.head.appendChild(st);
   }
@@ -241,6 +292,33 @@
     });
   }
 
+  // Acha o botao hamburguer da pagina. Os nomes variam por motivo
+  // historico (#btn-menu na maioria, #nav-toggle nas mais novas) - o que
+  // todas tem em comum e a classe .hamburger-btn.
+  function acharHamburguer() {
+    return document.querySelector('.hamburger-btn, #btn-menu, #nav-toggle');
+  }
+
+  // Monta a seta de voltar ao lado do hamburguer, se esta tela tiver pai.
+  let VOLTAR_EL = null;
+  function montarVoltar() {
+    const pai = itemPorId(VOLTAR[location.pathname]);
+    if (!pai) return;
+    const btn = acharHamburguer();
+    if (!btn || !btn.parentNode) return;
+    const a = document.createElement('a');
+    a.className = 'nmz-voltar hidden';
+    a.id = 'nmz-voltar';
+    a.href = pai.href;
+    a.title = 'Voltar para ' + pai.rotulo;
+    a.setAttribute('aria-label', 'Voltar para ' + pai.rotulo);
+    a.innerHTML = `<span class="nmz-vseta" aria-hidden="true">‹</span><span class="nmz-vrot">${esc(pai.rotulo)}</span>`;
+    btn.parentNode.insertBefore(a, btn.nextSibling);
+    VOLTAR_EL = a;
+    VOLTAR_PAI = pai;
+  }
+  let VOLTAR_PAI = null;
+
   // ---------------------------------------------------------------
   // 4) PERMISSAO
   // ---------------------------------------------------------------
@@ -283,6 +361,9 @@
       const temVisivel = !!wrap && [...wrap.children].some((c) => !c.classList.contains('hidden'));
       g.classList.toggle('hidden', !temVisivel);
     });
+    // a seta de voltar segue a MESMA regra do item no menu: sem acesso ao
+    // pai, sem atalho pra ele
+    if (VOLTAR_EL && VOLTAR_PAI) VOLTAR_EL.classList.toggle('hidden', !podeVer(VOLTAR_PAI, ME));
     const quem = document.getElementById('nmz-quem');
     if (quem) {
       const nome = ME.username || ME.nome || ME.email || '';
@@ -390,14 +471,33 @@
   // 6) BOOT
   // ---------------------------------------------------------------
   function iniciar() {
-    const nav = document.getElementById('nav-drawer');
-    if (!nav) return;
+    let nav = document.getElementById('nav-drawer');
+    // Se a pagina esqueceu o <nav id="nav-drawer">, cria aqui em vez de
+    // desistir em silencio. Era exatamente o que acontecia na Analise de
+    // Rede: ela tinha o botao hamburguer e carregava este script, mas sem
+    // o container o menu nunca abria - e sem erro nenhum no console, o
+    // que torna o bug quase invisivel em revisao. Agora o unico requisito
+    // pra ter menu e carregar o nav-menu.js.
+    if (!nav) {
+      nav = document.createElement('nav');
+      nav.id = 'nav-drawer';
+      nav.className = 'nav-drawer hidden';
+      document.body.appendChild(nav);
+    }
     injetarEstilo();
     nav.classList.add('nav-drawer');
     if (!nav.classList.contains('hidden')) nav.classList.add('hidden');
     montar(nav);
+    montarVoltar();
     marcarAtivo();
     acordeao();
+
+    // O botao hamburguer passa a ser ligado AQUI. Antes dependia de cada
+    // pagina lembrar do onclick="abrirMenu()" no HTML - e a Analise de
+    // Rede nao lembrou. abrir() e idempotente, entao nas paginas que ja
+    // tem o onclick inline os dois caminhos convivem sem efeito duplo.
+    const btnMenu = acharHamburguer();
+    if (btnMenu) btnMenu.addEventListener('click', abrir);
 
     const o = overlay();
     o.addEventListener('click', fechar);
