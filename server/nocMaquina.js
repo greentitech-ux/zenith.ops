@@ -223,6 +223,55 @@ function resumoDispositivos(docs) {
     .sort((a, b) => b.aparelhos - a.aparelhos);
 }
 
+// UMA linha por computador com tudo que a central de saúde precisa mostrar,
+// pior primeiro. Diferente das listas acima (que são filas de trabalho: só
+// quem tem problema), aqui entra a frota inteira - inclusive quem ainda não
+// mediu nada, que é uma informação em si ("o agente desse não subiu ainda").
+function panorama(docs) {
+  const linhas = docs.map((d) => {
+    const disco = d.disco || null;
+    const av = avaliarDisco(disco);
+    const dias = diasLigado(d.uptimeHoras);
+    const precisaReiniciar = ciclosSemReiniciar(d.uptimeHoras) >= 1;
+    // o pior entre disco e reboot vira o nível do CARD - quem olha no celular
+    // decide pela cor da borda, não lendo cada campo
+    const nivel = precisaReiniciar ? pior(av.nivel, 'atencao') : av.nivel;
+    const motivos = [...av.motivos];
+    if (precisaReiniciar) motivos.push(`ligado há ${dias} dias sem reiniciar`);
+    // o volume mais apertado é o que decide se a máquina vai travar
+    const volumes = (disco && disco.volumes) || [];
+    const volumeCritico = volumes.reduce((pi, v) => (
+      pi == null || (v.livrePct != null && v.livrePct < pi.livrePct) ? v : pi), null);
+    const temperatura = ((disco && disco.discos) || [])
+      .reduce((max, x) => (x.temperaturaC != null && (max == null || x.temperaturaC > max) ? x.temperaturaC : max), null);
+    return {
+      codigo: d.codigo,
+      posto: d.posto,
+      nome: d.nome || d.posto,
+      tipo: d.tipo || null,
+      online: !!d.online,
+      ultimoHeartbeatEm: d.ultimoHeartbeatEm || null,
+      nivel,
+      motivos,
+      disco,
+      volumeCritico,
+      temperatura,
+      // sem medição ainda: a central mostra isso como estado próprio em vez
+      // de fingir que está tudo bem
+      temMedicao: !!disco || d.uptimeHoras != null,
+      uptimeHoras: d.uptimeHoras != null ? d.uptimeHoras : null,
+      uptimeDias: dias,
+      precisaReiniciar,
+      aparelhosRede: (d.dispositivos || []).length,
+      dispositivosEm: d.dispositivosEm || null,
+    };
+  });
+  const peso = (l) => (l.nivel === 'critico' ? 0 : (l.nivel === 'atencao' ? 1 : (l.temMedicao ? 3 : 2)));
+  return linhas.sort((a, b) => peso(a) - peso(b)
+    || String(a.codigo).localeCompare(String(b.codigo))
+    || String(a.nome).localeCompare(String(b.nome)));
+}
+
 // lista de discos com problema, pior primeiro - é a fila de trabalho da TI
 function discosComProblema(docs) {
   return docs
@@ -236,5 +285,5 @@ module.exports = {
   UPTIME_REINICIAR_DIAS,
   sanitizarDisco, avaliarDisco, sanitizarDispositivos, diffDispositivos,
   sanitizarUptime, avaliarUptime, maquinasParaReiniciar,
-  resumoDispositivos, discosComProblema,
+  resumoDispositivos, discosComProblema, panorama,
 };

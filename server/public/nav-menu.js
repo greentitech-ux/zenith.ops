@@ -57,6 +57,7 @@
       // Solicitacoes (onde estava) - mesmo publico do Beniboy
       { id: 'nav-loja-status', href: '/loja-status.html', icone: '📡', rotulo: 'NOC Zenith', secoes: ['suporte'] },
       { id: 'nav-noc-rede', href: '/noc-rede.html', icone: '📈', rotulo: 'Análise de Rede', secoes: ['suporte'] },
+      { id: 'nav-noc-maquinas', href: '/noc-maquinas.html', icone: '💽', rotulo: 'Saúde das Máquinas', secoes: ['suporte'] },
     ] },
     { grupo: 'Atendimento', itens: [
       { id: 'nav-beniboy', href: '/beniboy.html', icone: '🐝', rotulo: 'Central do Beniboy', secoes: ['suporte'] },
@@ -111,6 +112,7 @@
   // ---------------------------------------------------------------
   const VOLTAR = {
     '/noc-rede.html': 'nav-loja-status',
+    '/noc-maquinas.html': 'nav-loja-status',
     '/abastecimento-relatorios.html': 'nav-abastecimento',
     '/entregas-regras.html': 'nav-entregas',
     '/dashboard-atendimentos.html': 'nav-beniboy',
