@@ -44,7 +44,28 @@ function sanitizarAlertaMin(v, padrao) {
   return Math.min(ALERTA_MIN_LIMITES.max, Math.max(ALERTA_MIN_LIMITES.min, n));
 }
 
-async function getConfig() {
+// capacidade do carrinho por item, em UNIDADES, cadastrada pelo Master:
+// { 'pizza:calabresa': 60, 'insumo:<id>': 24 }. So entra chave no formato
+// esperado e valor inteiro positivo - o resto e descartado, pra um
+// cadastro torto nao virar sugestao de envio torta la na ponta.
+function sanitizarCapacidades(mapa) {
+  const limpo = {};
+  if (!mapa || typeof mapa !== 'object') return limpo;
+  for (const [chave, valor] of Object.entries(mapa).slice(0, 200)) {
+    if (!/^(pizza|insumo):[A-Za-z0-9_-]{1,64}$/.test(chave)) continue;
+    const n = Math.round(Number(valor));
+    if (!Number.isFinite(n) || n <= 0) continue; // 0/vazio = "nao cadastrado"
+    limpo[chave] = Math.min(100000, n);
+  }
+  return limpo;
+}
+
+// A config e lida em TODA carga da tela e agora tambem em toda sugestao de
+// pre-envio (varios dispositivos, a cada evento do SSE) - sem cache isso
+// vira uma leitura no Firestore por dispositivo por movimentacao. Ela muda
+// raramente e toda escrita invalida na hora, entao 60s de TTL nao atrasa
+// nada perceptivel pra quem esta na tela.
+async function getConfigUncached() {
   const snap = await CONFIG_DOC.get();
   const data = snap.exists ? snap.data() : {};
   return {
@@ -52,7 +73,19 @@ async function getConfig() {
     alertaPedidoMin: sanitizarAlertaMin(data.alertaPedidoMin, ALERTA_MIN_DEFAULT.alertaPedidoMin),
     alertaEnvioMin: sanitizarAlertaMin(data.alertaEnvioMin, ALERTA_MIN_DEFAULT.alertaEnvioMin),
     alertaRecebimentoMin: sanitizarAlertaMin(data.alertaRecebimentoMin, ALERTA_MIN_DEFAULT.alertaRecebimentoMin),
+    capacidades: sanitizarCapacidades(data.capacidades),
   };
+}
+const configCache = createCache(getConfigUncached, 60 * 1000);
+const getConfig = configCache.cached;
+
+// substitui o mapa INTEIRO (nao faz merge por chave): e assim que a tela
+// consegue apagar uma capacidade cadastrada por engano - basta reenviar o
+// mapa sem ela
+async function salvarCapacidades(capacidades) {
+  await CONFIG_DOC.set({ capacidades: sanitizarCapacidades(capacidades) }, { merge: true });
+  configCache.invalidar();
+  return getConfig();
 }
 
 async function salvarConfig({ horasContagem, alertaPedidoMin, alertaEnvioMin, alertaRecebimentoMin }) {
@@ -67,6 +100,7 @@ async function salvarConfig({ horasContagem, alertaPedidoMin, alertaEnvioMin, al
     alertaEnvioMin: alertaEnvioMin == null ? atual.alertaEnvioMin : sanitizarAlertaMin(alertaEnvioMin, atual.alertaEnvioMin),
     alertaRecebimentoMin: alertaRecebimentoMin == null ? atual.alertaRecebimentoMin : sanitizarAlertaMin(alertaRecebimentoMin, atual.alertaRecebimentoMin),
   }, { merge: true });
+  configCache.invalidar();
   return getConfig();
 }
 
@@ -868,7 +902,7 @@ async function arquivarAntigos() {
 }
 
 module.exports = {
-  TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, editarDireto, getConfig, salvarConfig, arquivarAntigos,
+  TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, editarDireto, getConfig, salvarConfig, salvarCapacidades, arquivarAntigos,
   listarInsumos, criarInsumo, atualizarInsumo,
   listarOperadores, criarOperador, atualizarOperador, removerOperador, desbloquearOperador, buscarOperadorPorUsuario, validarOperador, validarOperadorQualquerPapel, trocarPapelOperador,
 };

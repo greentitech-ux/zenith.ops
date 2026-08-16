@@ -31,6 +31,29 @@
   @media(max-width:680px){
     body{max-width:680px;}
   }
+  /* PRE-ENVIO (sugestao pos-contagem): no celular vem antes dos botoes -
+     e o primeiro passo depois de contar. De 1000px pra cima vira a coluna
+     da direita (a "lateral"), sticky enquanto a lista de movimentacoes
+     rola. Sem media query nenhuma o layout continua o de sempre. */
+  .area-op{display:flex;flex-direction:column;}
+  .col-principal{min-width:0;}
+  @media(min-width:1000px){
+    .area-op{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:14px;align-items:start;}
+    .col-principal{order:1;}
+    .col-lateral{order:2;position:sticky;top:78px;}
+  }
+  .painel-sugestao{border:1px solid rgba(138,180,248,.45);box-shadow:0 0 0 1px rgba(138,180,248,.08) inset;}
+  .sug-sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:2px 0 8px;line-height:1.5;}
+  .sug-linha{display:flex;align-items:center;gap:7px;border-top:1px solid var(--line);padding:7px 0;}
+  .sug-linha:first-child{border-top:0;}
+  .sug-nome{flex:1;font-size:13.5px;line-height:1.25;}
+  .sug-de{display:block;font-family:var(--mono);font-size:10px;color:var(--muted);}
+  .sug-btn{width:30px;height:30px;flex:none;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:16px;line-height:1;cursor:pointer;}
+  .sug-btn:hover{border-color:var(--envio);color:var(--envio);}
+  .sug-qtd{width:56px;flex:none;text-align:center;padding:6px 4px;font-family:var(--mono);font-size:14px;font-weight:700;}
+  .sug-acoes{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+  .sug-acoes .btn-acao{flex:1 1 130px;font-size:12.5px;padding:9px 8px;}
+  .sug-nota{font-size:11px;color:var(--muted);line-height:1.5;margin-top:8px;}
   h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   h2{font-size:13.5px;font-weight:700;margin:0 0 4px;}
   .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -250,6 +273,30 @@
   <div class="resumo-grid" id="resumo-grid"></div>
 </div>
 
+<div class="area-op">
+
+<!-- PRE-ENVIO: sai da ultima contagem. No celular vem antes de tudo (e a
+     primeira coisa depois de contar); a partir de 1000px vira a coluna da
+     direita, grudada na tela enquanto a lista rola. -->
+<aside class="col-lateral">
+  <div class="panel painel-sugestao hidden" id="painel-sugestao">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+      <h2 style="margin:0;">📦 Pré-envio</h2>
+      <button type="button" class="link-badge-btn" id="btn-recolher-sug" onclick="alternarSugestao()">recolher</button>
+    </div>
+    <div class="sug-sub" id="sug-sub"></div>
+    <div id="sug-corpo">
+      <div id="sug-itens"></div>
+      <div class="sug-acoes" id="sug-acoes">
+        <button type="button" class="btn-acao envio" onclick="usarSugestao('ENVIO')">🚚 Usar no envio</button>
+        <button type="button" class="btn-acao pedido" onclick="usarSugestao('PEDIDO')">🛒 Usar no pedido</button>
+      </div>
+      <div class="sug-nota" id="sug-nota"></div>
+    </div>
+  </div>
+</aside>
+
+<div class="col-principal">
 <div class="acoes-topo">
   <button type="button" class="btn-acao pedido" onclick="abrirForm('PEDIDO')">🛒 Novo pedido <span style="font-weight:400;font-size:11px;">(carrinho)</span></button>
   <button type="button" class="btn-acao envio" onclick="abrirForm('ENVIO')">🚚 Registrar envio <span style="font-weight:400;font-size:11px;">(loja)</span></button>
@@ -280,6 +327,8 @@
   </div>
   <div id="lista-regs"><div class="empty">carregando...</div></div>
 </div>
+</div><!-- /col-principal -->
+</div><!-- /area-op -->
 </div>
 
 <!-- confirmacao de RECEBIMENTO (lado do carrinho): o envio nao finaliza
@@ -1224,6 +1273,119 @@ async function carregar(){
   verificarRecebimento();
   verificarContagem();
   if(CONVERSA_ABERTA) abrirConversa(); else atualizarChipConversa();
+  carregarSugestao();
+}
+
+// ---------- PRE-ENVIO (sugestao logo depois da contagem) ----------
+// O backend (abastecimentoPrevisao.js) devolve, por item: quanto foi
+// contado, quanto ja chegou depois da contagem, quanto esta A CAMINHO e
+// quanto cabe (capacidade). A sugestao e "encher ate a capacidade" - e um
+// PONTO DE PARTIDA: quem esta na ponta ajusta no + / - antes de usar.
+// AJUSTES guarda o que a pessoa mexeu por item, pra um refresh automatico
+// da tela (a lista recarrega sozinha) nao apagar o que ela acabou de
+// digitar. Some quando o pre-envio vira lancamento ou quando sai uma
+// contagem nova (base nova = sugestao nova).
+let SUGESTAO = null;
+let SUG_AJUSTES = {};
+let SUG_BASE = null;      // id da contagem que gerou a sugestao na tela
+let SUG_RECOLHIDO = localStorage.getItem('abastSugRecolhida') === '1';
+
+async function carregarSugestao(){
+  try{
+    const r = await fetch('/api/abastecimento/sugestao-envio');
+    SUGESTAO = r.ok ? await r.json() : null;
+  }catch(e){ SUGESTAO = null; }
+  // contagem nova zera os ajustes: o que a pessoa tinha mexido era sobre
+  // uma foto do carrinho que nao vale mais
+  const base = SUGESTAO && SUGESTAO.contagem ? SUGESTAO.contagem.id : null;
+  if(base !== SUG_BASE){ SUG_AJUSTES = {}; SUG_BASE = base; }
+  renderSugestao();
+}
+
+function sugValor(it){
+  if(SUG_AJUSTES[it.chave] != null) return SUG_AJUSTES[it.chave];
+  return it.sugestao == null ? 0 : it.sugestao;
+}
+
+function renderSugestao(){
+  const painel = document.getElementById('painel-sugestao');
+  if(!painel) return;
+  const s = SUGESTAO;
+  if(!s || !s.temBase || !s.itens.length){ painel.classList.add('hidden'); return; }
+  painel.classList.remove('hidden');
+
+  const c = s.contagem;
+  document.getElementById('sug-sub').innerHTML =
+    `base: contagem de ${fmtHora(c.em)}${c.por?' · '+escapeHtml(c.por):''}`
+    + (c.enviosDepois ? `<br>${c.enviosDepois} envio(s) depois dela já descontado(s)` : '');
+
+  document.getElementById('sug-itens').innerHTML = s.itens.map(it=>{
+    const semBase = it.capacidade == null;
+    const detalhe = semBase
+      ? 'sem capacidade cadastrada'
+      : `tem ${it.jaTem}${it.aCaminho?` · ${it.aCaminho} a caminho`:''} · cabe ${it.capacidade}`;
+    return `
+    <div class="sug-linha">
+      <span class="sug-nome">${escapeHtml(it.nome)}<span class="sug-de">${detalhe}</span></span>
+      <button type="button" class="sug-btn" aria-label="menos ${escapeHtml(it.nome)}" onclick="ajustarSugestao('${it.chave}',-1)">−</button>
+      <input type="number" min="0" inputmode="numeric" class="sug-qtd" value="${sugValor(it)}" oninput="mudarSugestao('${it.chave}', this.value)">
+      <button type="button" class="sug-btn" aria-label="mais ${escapeHtml(it.nome)}" onclick="ajustarSugestao('${it.chave}',1)">+</button>
+    </div>`;
+  }).join('');
+
+  document.getElementById('sug-nota').innerHTML = s.semCapacidade
+    ? 'Ainda não há capacidade pra calcular: ela é estimada a partir de pelo menos <b>duas contagens</b> (um turno fechado), ou cadastrada pelo Master em Relatórios do Carrinho.'
+    : 'Sugestão = o que cabe menos o que já está no carrinho (contado + a caminho). Ajuste antes de usar.';
+
+  document.getElementById('sug-corpo').classList.toggle('hidden', SUG_RECOLHIDO);
+  document.getElementById('btn-recolher-sug').textContent = SUG_RECOLHIDO ? 'abrir' : 'recolher';
+}
+
+function alternarSugestao(){
+  SUG_RECOLHIDO = !SUG_RECOLHIDO;
+  localStorage.setItem('abastSugRecolhida', SUG_RECOLHIDO ? '1' : '0');
+  renderSugestao();
+}
+function mudarSugestao(chave, valor){
+  const n = Math.max(0, Math.round(Number(valor) || 0));
+  SUG_AJUSTES[chave] = n;
+  // NAO re-renderiza: isso rouba o cursor de quem esta digitando. O valor
+  // ja esta no input e no estado - o proximo render usa o ajuste.
+}
+function ajustarSugestao(chave, delta){
+  const it = (SUGESTAO?.itens || []).find(i=>i.chave===chave);
+  if(!it) return;
+  SUG_AJUSTES[chave] = Math.max(0, sugValor(it) + delta);
+  renderSugestao();
+}
+
+// leva o pre-envio ajustado pro formulario de verdade (envio ou pedido) -
+// nada e lancado sozinho: o form ainda exige a senha do operador
+function usarSugestao(tipo){
+  const itens = (SUGESTAO?.itens || []).map(it=>({ it, qtd: sugValor(it) })).filter(x=>x.qtd > 0);
+  if(!itens.length){ alert('Nenhuma quantidade pra levar - ajuste os valores primeiro.'); return; }
+  abrirForm(tipo);
+  // o pre-envio nasce da CONTAGEM, nao de um pedido: se abrirForm tinha
+  // pre-selecionado um pedido pendente (o padrao dele), desvincula - senao
+  // o recebimento compararia com aquele pedido e acusaria "itens a mais"
+  // sem motivo. Quem quiser atender um pedido escolhe no seletor.
+  const atende = document.getElementById('f-atende');
+  if(tipo==='ENVIO' && atende) atende.value = '';
+  // abrirForm limpa os campos, entao o preenchimento vem depois dele
+  itens.forEach(({it, qtd})=>{
+    if(it.chave.startsWith('pizza:')){
+      const el = document.getElementById('f-' + it.chave.slice(6));
+      if(el) el.value = qtd;
+    }else{
+      const id = it.chave.slice(7);
+      // a sugestao e sempre em UNIDADE (a conta do backend normaliza caixa
+      // em unidade) - quem quiser lancar em caixa troca no seletor
+      if(insumoCadastro(id)) adicionarInsumo(id, 'unidade', qtd);
+    }
+  });
+  renderInsumos();
+  const obs = document.getElementById('f-obs');
+  if(obs && !obs.value) obs.value = 'pré-envio sugerido pela contagem';
 }
 
 async function carregarCatalogo(){

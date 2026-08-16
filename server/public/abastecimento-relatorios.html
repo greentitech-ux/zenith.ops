@@ -109,6 +109,31 @@
   .fluxo-preset{font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:14px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
   .fluxo-preset.ativo{color:var(--accent);border-color:var(--accent);}
   .fluxo-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;}
+  /* dia a dia + turnos */
+  .dd-titulo{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;
+    font-size:13.5px;font-weight:700;margin:18px 0 2px;padding-top:14px;border-top:1px solid var(--line);}
+  .dd-dia{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;}
+  .dd-cab{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px;}
+  .dd-data{font-size:13.5px;font-weight:700;}
+  .dd-meta{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+  .dd-linha{display:flex;align-items:baseline;gap:8px;border-top:1px solid var(--line);padding:5px 0;font-size:12.5px;}
+  .dd-linha:first-of-type{border-top:0;}
+  .dd-nome{flex:1;min-width:90px;}
+  .dd-num{font-family:var(--mono);font-size:12px;white-space:nowrap;}
+  .dd-num b{font-size:13px;}
+  .dd-ent b{color:var(--envio,#8ab4f8);}
+  .dd-sai b{color:var(--accent);}
+  .dd-neg,.dd-neg b{color:var(--bad,#ff5c5c);}
+  .dd-vazio{color:var(--muted);font-style:italic;}
+  .dd-turnos{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);}
+  .dd-turno{font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;}
+  .dd-turno b{color:var(--text);font-family:var(--sans);}
+  .cap-linha{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line);padding:8px 0;}
+  .cap-linha:first-child{border-top:0;}
+  .cap-nome{flex:1;font-size:13.5px;line-height:1.25;}
+  .cap-base{display:block;font-family:var(--mono);font-size:10px;color:var(--muted);}
+  .cap-input{width:88px;flex:none;text-align:center;padding:7px 6px;font-family:var(--mono);font-size:14px;
+    border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);}
   .fluxo-item .nome{font-weight:700;font-size:13px;}
   .fluxo-item .tag{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-left:6px;}
   .fluxo-eq{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;}
@@ -303,6 +328,31 @@
   <div class="resumo-grid" id="fluxo-kpis"></div>
   <div id="fluxo-itens"></div>
   <div id="fluxo-avarias"></div>
+
+  <!-- DIA A DIA: o mesmo periodo aberto por dia. Cada par de contagens
+       consecutivas e um turno fechado, entao da pra apurar a saida sem
+       estimar nada - dia que nao teve a segunda contagem aparece com a
+       saida em branco, nao com zero. -->
+  <div class="dd-titulo">
+    <span>📅 Dia a dia</span>
+    <button type="button" class="link-badge-btn" id="btn-turnos" onclick="alternarTurnos()">mostrar turnos</button>
+  </div>
+  <div id="fluxo-dias"></div>
+</div>
+
+<!-- capacidade do carrinho: o que cabe nas 2 geladeiras, por item. E o que
+     transforma a contagem em sugestao de envio la na tela de operacao. -->
+<div class="panel hidden" id="painel-capacidade">
+  <h2>📦 Capacidade do carrinho <span style="font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:400;">só Master</span></h2>
+  <div class="sub" style="margin:-4px 0 10px;">
+    É o que define o <b>pré-envio</b> sugerido depois de cada contagem (sugestão = capacidade − o que já está no carrinho).
+    Em branco, vale a <b>estimativa</b> pelo histórico: o maior volume que o carrinho já segurou num turno.
+  </div>
+  <div id="cap-itens"></div>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+    <button type="button" class="fluxo-preset ativo" onclick="salvarCapacidades()">Salvar capacidades</button>
+    <span class="sub" id="cap-msg"></span>
+  </div>
 </div>
 
 </div>
@@ -437,8 +487,111 @@ async function carregarFluxo(dias){
       ? `<div class="sub" style="margin:14px 0 4px;"><b>Avarias declaradas</b> (${d.avariasDetalhe.length})</div>`
         + d.avariasDetalhe.map(a=>`<div class="fluxo-avaria">${fmtDia(a.data)} · <b>${escapeHtml(a.nome)} ${a.quantidade}</b> — ${escapeHtml(a.observacao)}${a.temFoto?' 📷':''}</div>`).join('')
       : '';
+
+    renderDias(d);
+    renderCapacidades(d.capacidades || []);
   }catch(err){
     painel.classList.add('hidden');
+    document.getElementById('painel-capacidade').classList.add('hidden');
+  }
+}
+
+// ---------- dia a dia ----------
+// entradas vem dos ENVIOS do dia; a saida vem dos TURNOS que fecharam
+// naquele dia (par de contagens consecutivas). Dia sem contagem de
+// fechamento fica com a saida em branco de proposito - zero ali seria
+// mentira, nao "nao vendeu nada".
+let MOSTRAR_TURNOS = false;
+let ULTIMO_FLUXO = null;
+
+function alternarTurnos(){
+  MOSTRAR_TURNOS = !MOSTRAR_TURNOS;
+  document.getElementById('btn-turnos').textContent = MOSTRAR_TURNOS ? 'esconder turnos' : 'mostrar turnos';
+  if(ULTIMO_FLUXO) renderDias(ULTIMO_FLUXO);
+}
+
+function renderDias(d){
+  ULTIMO_FLUXO = d;
+  const dias = d.dias || [];
+  const alvo = document.getElementById('fluxo-dias');
+  if(!dias.length){ alvo.innerHTML = '<div class="sub" style="margin-top:8px;">Nenhum movimento no período.</div>'; return; }
+
+  alvo.innerHTML = dias.map(dia=>{
+    const turnos = (d.ciclos||[]).filter(c=>c.dia===dia.dia);
+    const linhas = dia.itens.map(i=>{
+      const un = i.tipo==='pizza' ? '' : ' un';
+      // saida negativa = sobrou mais do que entrou: alguma contagem ou envio
+      // nao foi lancado. Marca em vermelho em vez de exibir como se fosse
+      // um numero normal (foi o que denunciou o furo quando apareceu)
+      const saida = i.saida == null
+        ? '<span class="dd-num dd-vazio">sem fechamento</span>'
+        : `<span class="dd-num dd-sai${i.saida < 0 ? ' dd-neg' : ''}" ${i.saida < 0 ? 'title="sobrou mais do que entrou - contagem ou envio não lançado"' : ''}>saiu <b>${i.saida}${un}</b>${i.saida < 0 ? ' ⚠' : ''}</span>`;
+      return `<div class="dd-linha">
+        <span class="dd-nome">${escapeHtml(i.nome)}</span>
+        <span class="dd-num dd-ent">entrou <b>${i.entradas}${un}</b></span>
+        ${saida}
+      </div>`;
+    }).join('');
+
+    const blocoTurnos = (MOSTRAR_TURNOS && turnos.length) ? `
+      <div class="dd-turnos">${turnos.map(c=>{
+        const resumo = c.itens.filter(i=>i.saida || i.entradas).map(i=>`${escapeHtml(i.nome)} <b>${i.saida}</b>`).join(' · ') || 'sem movimento';
+        return `<div class="dd-turno">🕐 ${escapeHtml(c.rotulo)} · ${c.envios} envio(s) — saiu: ${resumo}</div>`;
+      }).join('')}</div>` : '';
+
+    return `<div class="dd-dia">
+      <div class="dd-cab">
+        <span class="dd-data">${fmtDia(dia.dia)}</span>
+        <span class="dd-meta">${dia.contagens} contagem(ns) · ${dia.envios} envio(s) · ${dia.ciclosFechados} turno(s) fechado(s)</span>
+      </div>
+      ${linhas || '<div class="dd-linha dd-vazio">sem itens</div>'}
+      ${blocoTurnos}
+    </div>`;
+  }).join('');
+}
+
+// ---------- capacidade (cadastro do Master) ----------
+let CAP_ITENS = [];
+function renderCapacidades(itens){
+  CAP_ITENS = itens;
+  const painel = document.getElementById('painel-capacidade');
+  if(!itens.length){ painel.classList.add('hidden'); return; }
+  painel.classList.remove('hidden');
+  document.getElementById('cap-itens').innerHTML = itens.map(i=>{
+    const un = i.tipo==='pizza' ? '' : ' un';
+    const base = i.capacidadeEstimada == null
+      ? 'sem histórico suficiente pra estimar'
+      : `estimado ${i.capacidadeEstimada}${un} · ${i.amostras} turno(s) · maior já visto ${i.maiorPico}${un}${i.consumoTipico!=null?` · consumo típico ${i.consumoTipico}${un}/turno`:''}`;
+    return `<div class="cap-linha">
+      <span class="cap-nome">${escapeHtml(i.nome || i.chave)}<span class="cap-base">${base}</span></span>
+      <input type="number" min="0" inputmode="numeric" class="cap-input" data-chave="${escapeHtml(i.chave)}"
+             value="${i.origem==='manual' ? i.capacidade : ''}"
+             placeholder="${i.capacidadeEstimada != null ? i.capacidadeEstimada : '—'}">
+    </div>`;
+  }).join('');
+  document.getElementById('cap-msg').textContent = '';
+}
+
+async function salvarCapacidades(){
+  const msg = document.getElementById('cap-msg');
+  const capacidades = {};
+  document.querySelectorAll('#cap-itens .cap-input').forEach(el=>{
+    const n = Math.round(Number(el.value));
+    // vazio/0 = "sem cadastro": volta a valer a estimativa do historico
+    if(Number.isFinite(n) && n > 0) capacidades[el.dataset.chave] = n;
+  });
+  msg.textContent = 'salvando...';
+  try{
+    const r = await fetch('/api/abastecimento/capacidades', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ capacidades }),
+    });
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.error || 'Erro ao salvar.');
+    msg.textContent = data.pendenteAprovacao ? 'enviado pra aprovação do Master' : '✓ salvo';
+    if(!data.pendenteAprovacao) carregarFluxo();
+  }catch(err){
+    msg.textContent = '⚠ ' + err.message;
   }
 }
 
