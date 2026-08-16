@@ -1951,7 +1951,12 @@ function codigosUnidadesFixas() {
 
 app.post('/api/meta/unidades-extras', auth.requireMaster, async (req, res) => {
   try {
-    const dados = { codigo: req.body.codigo, nome: req.body.nome, porEmail: req.user.email };
+    const dados = {
+      codigo: req.body.codigo, nome: req.body.nome, porEmail: req.user.email,
+      // perfil da unidade: onde ela aparece e o que ela aceita. Vazio = sem
+      // restrição, que é o comportamento de sempre (ver unidades.js)
+      areas: req.body.areas, tiposSolicitacao: req.body.tiposSolicitacao,
+    };
     if (await desviarSeQaMaster(req, res, 'unidadesExtras.criar', `Cadastrar unidade: ${req.body?.nome || req.body?.codigo || ''}`, { dados })) return;
     res.json(await unidadesExtras.criar(dados, codigosUnidadesFixas()));
   } catch (err) {
@@ -1961,8 +1966,9 @@ app.post('/api/meta/unidades-extras', auth.requireMaster, async (req, res) => {
 
 app.patch('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res) => {
   try {
-    if (await desviarSeQaMaster(req, res, 'unidadesExtras.editar', `Editar unidade ${req.params.id}`, { id: req.params.id, nome: req.body.nome })) return;
-    res.json(await unidadesExtras.atualizar(req.params.id, { nome: req.body.nome }));
+    const patch = { nome: req.body.nome, areas: req.body.areas, tiposSolicitacao: req.body.tiposSolicitacao };
+    if (await desviarSeQaMaster(req, res, 'unidadesExtras.editar', `Editar unidade ${req.params.id}`, { id: req.params.id, ...patch })) return;
+    res.json(await unidadesExtras.atualizar(req.params.id, patch));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -2720,7 +2726,7 @@ const EXECUTORES_QA = {
   'grupos.editar': (p) => grupos.update(p.id, p.dados),
   'grupos.excluir': (p) => grupos.remove(p.id),
   'unidadesExtras.criar': (p) => unidadesExtras.criar(p.dados, codigosUnidadesFixas()),
-  'unidadesExtras.editar': (p) => unidadesExtras.atualizar(p.id, { nome: p.nome }),
+  'unidadesExtras.editar': (p) => unidadesExtras.atualizar(p.id, { nome: p.nome, areas: p.areas, tiposSolicitacao: p.tiposSolicitacao }),
   'unidadesExtras.excluir': (p) => unidadesExtras.remover(p.id),
   'vaultGroups.criar': (p) => vaultGroups.create(p.name),
   'vaultGroups.editar': (p) => vaultGroups.rename(p.id, p.name),
@@ -5888,6 +5894,16 @@ app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anex
     const tiposPerm = tiposSolicitacaoPermitidos(req);
     if (tiposPerm && !tiposPerm.has(tipo)) {
       return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
+    }
+    // restrição da UNIDADE (diferente da do usuário acima): unidade
+    // administrativa tipo a MVPar só aceita os tipos que ela de fato usa.
+    // Vale até pro Master - se a empresa não tem operação, ninguém deveria
+    // conseguir abrir chamado de manutenção nela, nem por engano.
+    if (unidade && !(await unidadesExtras.aceitaTipo(unidade, tipo))) {
+      const perfilUnidade = await unidadesExtras.perfil(unidade);
+      return res.status(400).json({
+        error: `${unidadeNome || unidade} só aceita solicitação de: ${(perfilUnidade.tiposSolicitacao || []).join(', ')}.`,
+      });
     }
     const anexos = [];
     for (const file of req.files || []) {
