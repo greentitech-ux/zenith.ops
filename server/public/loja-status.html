@@ -143,6 +143,10 @@
   .btn-anydesk:hover{border-color:var(--ok);}
   .btn-anydesk.btn-anydesk-off{color:var(--muted);cursor:default;opacity:.45;}
   .btn-anydesk.btn-anydesk-off:hover{border-color:var(--line);}
+  /* Painel "Não identificados" (fantasmas - heartbeat de posto nunca
+     cadastrado, ver renderFantasmas) */
+  .fantasmas-badge{background:var(--warn-dim);color:var(--warn);font-family:var(--mono);font-size:10.5px;padding:1px 8px;border-radius:20px;margin-left:8px;}
+  .fantasma-dup{font-family:var(--mono);font-size:10px;color:var(--warn);background:var(--warn-dim);border-radius:6px;padding:5px 7px;line-height:1.4;}
 
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
   .overlay.hidden{display:none!important;}
@@ -276,6 +280,18 @@
   </div>
 
   <div id="grid-equip" class="equip-grid"></div>
+
+  <!-- Computadores que nunca foram cadastrados: o heartbeat bateu num posto
+       que não existe no banco (link/atalho velho de um computador removido/
+       recriado, ou alguém abriu o link errado). Separado da grade principal
+       pra não confundir com computador de verdade - ver renderFantasmas() -->
+  <div class="uni-panel hidden" id="fantasmas-panel">
+    <div class="uni-panel-head">
+      <span>🕵️ Não identificados<span class="fantasmas-badge" id="fantasmas-badge">0</span></span>
+      <span class="uni-panel-sub">nunca cadastrados - provável atalho velho</span>
+    </div>
+    <div id="grid-fantasmas" class="equip-grid"></div>
+  </div>
 </div>
 
 <div id="agente-root" class="hidden">
@@ -659,11 +675,17 @@ function setFiltroStatus(v){
 function onFiltroTexto(){ FILTRO_TEXTO = document.getElementById('filtro-texto').value.trim().toLowerCase(); render(); }
 function onFiltroUnidade(){ FILTRO_UNIDADE = document.getElementById('filtro-unidade').value; render(); }
 
+// computadores de verdade (passaram pelo cadastro, tem nome) - os "fantasmas"
+// (heartbeat de posto nunca cadastrado, ver renderFantasmas) ficam de fora
+// dos KPIs/Por unidade/grade principal pra nao inflar as contagens
+function computadoresReais(){ return COMPUTADORES.filter(c => c.nome); }
+
 function renderKpis(){
-  const total = COMPUTADORES.length;
-  const online = COMPUTADORES.filter(c => statusDe(c)==='online').length;
-  const offline = COMPUTADORES.filter(c => statusDe(c)==='offline').length;
-  const nunca = COMPUTADORES.filter(c => statusDe(c)==='nunca').length;
+  const reais = computadoresReais();
+  const total = reais.length;
+  const online = reais.filter(c => statusDe(c)==='online').length;
+  const offline = reais.filter(c => statusDe(c)==='offline').length;
+  const nunca = reais.filter(c => statusDe(c)==='nunca').length;
   document.getElementById('kpi-num-total').textContent = total;
   document.getElementById('kpi-num-online').textContent = online;
   document.getElementById('kpi-num-offline').textContent = offline;
@@ -680,7 +702,7 @@ function renderUnidades(){
   const grid = document.getElementById('grid-unidades');
   const sub = document.getElementById('uni-panel-sub');
   const porUni = {};
-  COMPUTADORES.forEach(c => {
+  computadoresReais().forEach(c => {
     const cod = c.codigo;
     if(!porUni[cod]) porUni[cod] = { online:0, offline:0, nunca:0, total:0 };
     porUni[cod][statusDe(c)]++;
@@ -723,8 +745,9 @@ function toggleFiltroUnidade(cod){
 function render(){
   renderKpis();
   renderUnidades();
+  renderFantasmas();
   const grid = document.getElementById('grid-equip');
-  let lista = COMPUTADORES.slice();
+  let lista = computadoresReais();
   if(FILTRO_UNIDADE) lista = lista.filter(c => c.codigo === FILTRO_UNIDADE);
   if(FILTRO_STATUS) lista = lista.filter(c => statusDe(c) === FILTRO_STATUS);
   if(FILTRO_TEXTO){
@@ -738,12 +761,83 @@ function render(){
     return rank(a) - rank(b) || (a.nome||'').localeCompare(b.nome||'', 'pt-BR');
   });
   if(!lista.length){
-    grid.innerHTML = `<div class="empty" style="width:100%;">${COMPUTADORES.length ? 'nenhum computador encontrado com esse filtro.' : 'nenhum computador cadastrado ainda - clique em "➕ Computador" pra começar.'}</div>`;
+    grid.innerHTML = `<div class="empty" style="width:100%;">${computadoresReais().length ? 'nenhum computador encontrado com esse filtro.' : 'nenhum computador cadastrado ainda - clique em "➕ Computador" pra começar.'}</div>`;
     return;
   }
   grid.innerHTML = lista.map(c => equipTileHtml(c.codigo, c)).join('');
   atualizarDetalheSeAberto();
   atualizarChatModalSeAberto();
+}
+
+// tenta adivinhar de qual computador cadastrado um fantasma e' a versao
+// velha, sem precisar perguntar a ninguem: mesmo IP publico (ok ser fraco
+// sozinho, a loja inteira sai por ele) + mesmo tipo + a aba do fantasma
+// (abertoDesde, fixo desde que a aba carregou) e' ANTERIOR ao cadastro do
+// computador real (criadoEm) - ou seja, essa aba ja estava aberta antes do
+// computador atual existir, sinal forte de que e' o atalho velho da mesma
+// maquina. So aponta quando bate em exatamente 1 candidato (ambiguo = null,
+// melhor nao arriscar palpite errado)
+function adivinharDuplicado(fantasma, reaisDaUnidade){
+  if(!fantasma.ip || !fantasma.abertoDesde) return null;
+  const candidatos = reaisDaUnidade.filter(r =>
+    r.tipo === fantasma.tipo && r.ip && r.ip === fantasma.ip &&
+    r.criadoEm && r.criadoEm > fantasma.abertoDesde);
+  return candidatos.length === 1 ? candidatos[0] : null;
+}
+
+function fantasmaTileHtml(codigo, c, duplicadoDe){
+  const status = statusDe(c);
+  const statusTexto = status==='nunca' ? 'nunca conectou' : (status==='online' ? 'online' : `offline · ${tempoRelativo(c.ultimoHeartbeatEm)}`);
+  const bits = [];
+  if(c.ip) bits.push(`🌐 ${escapeHtml(c.ip)}`);
+  if(c.abertoDesde) bits.push(`aberto há ${tempoRelativo(c.abertoDesde)}`);
+  const dupHtml = duplicadoDe
+    ? `<div class="fantasma-dup">🔗 provável = versão antiga de <b>${escapeHtml(duplicadoDe.nome)}</b></div>`
+    : '';
+  return `<div class="equip-tile status-${status}" data-codigo="${escapeHtml(codigo)}" data-posto="${escapeHtml(c.posto)}" onclick="abrirDetalheComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">
+    <div class="equip-tile-head">
+      <span class="status-dot ${status}"></span>
+      <span class="equip-tile-nome" style="color:var(--muted);font-weight:600;">(sem nome)</span>
+      <span class="tipo-badge">${TIPO_COMPUTADOR_LABEL[c.tipo]||TIPO_COMPUTADOR_LABEL.atendimento}</span>
+    </div>
+    <div class="equip-tile-unidade" title="${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}">${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}</div>
+    <div class="equip-tile-status ${status}">${statusTexto}</div>
+    ${bits.length ? `<div class="equip-tile-info">${bits.join(' · ')}</div>` : ''}
+    ${dupHtml}
+    <div class="equip-tile-acoes" style="margin-top:2px;">
+      <button type="button" class="btn-mini ok" onclick="event.stopPropagation();promoverFantasma('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">✏️ Cadastrar</button>
+      <button type="button" class="btn-mini" style="color:var(--bad);" onclick="event.stopPropagation();removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}',null)">🗑️ Remover</button>
+    </div>
+  </div>`;
+}
+
+// promove um fantasma a computador de verdade: so falta dar nome (o posto
+// ja existe no banco desde o primeiro heartbeat) - reaproveita o mesmo modal
+// de editar, so que com o nome em branco pra preencher
+function promoverFantasma(codigo, posto, tipo){
+  abrirModalEditarComputador(codigo, posto, '', tipo, '');
+}
+
+// painel "Não identificados": computadores que nunca passaram pelo cadastro
+// (nome null) - normalmente atalho/PWA velho de um computador removido e
+// recriado (o posto muda toda vez), ainda batendo heartbeat pro posto que
+// não existe mais. Separado da grade principal pra não confundir com
+// computador de verdade nem inflar os KPIs
+function renderFantasmas(){
+  const painel = document.getElementById('fantasmas-panel');
+  const grid = document.getElementById('grid-fantasmas');
+  const badge = document.getElementById('fantasmas-badge');
+  const reais = computadoresReais();
+  let fantasmas = COMPUTADORES.filter(c => !c.nome);
+  if(FILTRO_UNIDADE) fantasmas = fantasmas.filter(c => c.codigo === FILTRO_UNIDADE);
+  if(!fantasmas.length){ painel.classList.add('hidden'); grid.innerHTML=''; return; }
+  painel.classList.remove('hidden');
+  badge.textContent = fantasmas.length;
+  fantasmas.sort((a,b) => (b.ultimoHeartbeatEm||0) - (a.ultimoHeartbeatEm||0));
+  grid.innerHTML = fantasmas.map(c => {
+    const reaisDaUnidade = reais.filter(r => r.codigo === c.codigo);
+    return fantasmaTileHtml(c.codigo, c, adivinharDuplicado(c, reaisDaUnidade));
+  }).join('');
 }
 
 function atualizarTickerCarga(){

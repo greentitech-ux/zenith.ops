@@ -130,6 +130,7 @@ async function migrarLegado(docs) {
     const atual = doc.data();
     await COLLECTION.doc(docIdFor(atual.codigo, 'principal')).set({
       ...atual, posto: 'principal', nome: atual.nome || 'Computador 1', tipo: tipoValido(atual.tipo),
+      criadoEm: atual.criadoEm || atual.ultimoHeartbeatEm || Date.now(),
     }, { merge: true });
     await doc.ref.delete();
   }
@@ -177,6 +178,11 @@ async function heartbeat(codigo, posto, info, token) {
     posto: posto || 'principal',
     nome: (atual && atual.nome) || null,
     tipo: tipoValido((atual && atual.tipo) || 'atendimento'),
+    // so grava na primeira vez (posto novo/fantasma) - usado pra detectar
+    // "fantasma provavelmente e' a versao velha de tal computador" no painel
+    // (ver adivinharDuplicado em loja-status.html): compara com o abertoDesde
+    // dessa mesma aba, que fica fixo desde que ela carregou
+    criadoEm: (atual && atual.criadoEm) || Date.now(),
     ultimoHeartbeatEm: Date.now(),
     anydeskId: (atual && atual.anydeskId) || null,
     avisadoOffline: (atual && atual.avisadoOffline) || false,
@@ -255,6 +261,7 @@ async function cadastrarComputador(codigo, nome, tipo) {
   const id = docIdFor(codigo, posto);
   const registro = {
     codigo, posto, nome: nomeOk, tipo: tipoValido(tipo), anydeskId: null,
+    criadoEm: Date.now(),
     ultimoHeartbeatEm: null, avisadoOffline: false, offlineDesde: null, mensagemPendente: null,
     ip: null, userAgent: null, abertoDesde: null, ipLocal: null, ipLocalEm: null,
     comandoPendenteId: null,
