@@ -226,10 +226,15 @@ const ROTA_LOJA_VIGIA_SCRIPT_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/
 // (ver vigiaScript.js) - mesmo motivo publico das outras: quem chama e a
 // maquina, sem sessao de usuario
 const ROTA_LOJA_CHAT_RESPONDER_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/chat-responder$/;
+// NOCZenith reporta saude do HD (SMART/espaco) e a varredura passiva da rede
+// local (ver nocMaquina.js) - mesmo motivo publico das outras: quem chama e a
+// maquina, sem sessao de usuario. O token do agente continua obrigatorio.
+const ROTA_LOJA_TELEMETRIA_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/telemetria$/;
 function rotaPublicaSemDashboard(path) {
   return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/')
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
-    || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path);
+    || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path)
+    || ROTA_LOJA_TELEMETRIA_RE.test(path);
 }
 if (DASHBOARD_USER && DASHBOARD_PASSWORD) {
   app.use((req, res, next) => {
@@ -890,6 +895,22 @@ app.post('/api/loja-status/:codigo/computadores/:posto/comando-resultado', async
     res.json(await lojaStatus.marcarComandoExecutado(req.body.comandoId, { resultado: req.body.resultado, erro: req.body.erro }, {
       codigo: req.params.codigo, posto: req.params.posto, token,
     }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- saude do HD + varredura passiva da rede local, reportadas pelo
+// NOCZenith (ver nocMaquina.js) - publica pelo mesmo motivo do ip-local:
+// quem chama e a maquina, sem sessao. O token do agente e obrigatorio na
+// pratica (exigirTokenSeTiver) pra ninguem plantar disco falso num
+// computador que ja tem segredo ----------
+app.post('/api/loja-status/:codigo/computadores/:posto/telemetria', async (req, res) => {
+  try {
+    const token = req.headers['x-noc-token'] || req.body.token || null;
+    res.json(await lojaStatus.registrarTelemetria(req.params.codigo, req.params.posto, {
+      disco: req.body.disco, dispositivos: req.body.dispositivos,
+    }, token));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -2051,6 +2072,22 @@ app.get('/api/loja-status/rede', requireSection('suporte'), async (req, res) => 
     res.json({
       ...diag,
       computadores: diag.computadores.map((c) => ({ ...c, unidadeNome: mapa[c.codigo] || c.codigo })),
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Saude das maquinas: HD com problema (pior primeiro) + quantos aparelhos
+// cada loja enxerga na propria rede (ver nocMaquina.js). Mesmo gate e mesmo
+// cache do /rede acima - nenhuma leitura nova no Firestore.
+app.get('/api/loja-status/maquinas', requireSection('suporte'), async (req, res) => {
+  try {
+    const [saude, mapa] = await Promise.all([lojaStatus.saudeMaquinas(), construirUnidadesMapa()]);
+    res.json({
+      ...saude,
+      discos: saude.discos.map((d) => ({ ...d, unidadeNome: mapa[d.codigo] || d.codigo })),
+      redes: saude.redes.map((r) => ({ ...r, unidadeNome: mapa[r.codigo] || r.codigo })),
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -8962,6 +8999,14 @@ function aquecerBoot(promessa, ms) {
       for (const t of transicoes) {
         const nome = mapa[t.codigo] || t.codigo;
         broadcast('loja-status-mudou', { codigo: t.codigo, posto: t.posto, nome, computadorNome: t.nome, tipo: t.tipo }, 'suporte');
+        // HD morrendo/enchendo (ver nocMaquina.js): avisa uma vez por piora,
+        // nunca a cada medicao - HD com setor realocado continua assim pra
+        // sempre e um alerta repetido vira ruido que ninguem le
+        if (t.tipo === 'disco') {
+          push.notifyDiscoAlerta(nome, t.codigo, t.nome, t.posto, t.nivel, t.motivos)
+            .catch((err) => console.error('Erro no push de alerta de disco:', err.message));
+          continue;
+        }
         if (t.tipo === 'offline') push.notifyLojaOffline(nome, t.codigo, t.nome, t.posto).catch((err) => console.error('Erro no push de loja offline:', err.message));
         else push.notifyLojaVoltou(nome, t.codigo, t.nome, t.posto).catch((err) => console.error('Erro no push de loja online:', err.message));
       }

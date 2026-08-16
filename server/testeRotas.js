@@ -186,6 +186,7 @@ setTimeout(async () => {
     ['/api/abastecimento/fluxo?inicio=2026-08-10&fim=2026-08-16', 'fluxo dia a dia'],
     ['/api/abastecimento/capacidades', 'capacidades'],
     ['/api/loja-status/rede', 'diagnóstico de rede'],
+    ['/api/loja-status/maquinas', 'saúde das máquinas (HD + rede da loja)'],
     ['/api/users/sugerir-acesso?nomeCompleto=Priscila%20Pereira&dominio=grupobravoempresarial.com', 'sugerir acesso (email+usuário)'],
   ];
   let ruins = 0;
@@ -223,6 +224,17 @@ setTimeout(async () => {
   const okSemModelo = semModelo.status === 400 && /modelo/i.test(semModelo.corpo);
   if (!okSemModelo) ruins += 1;
   console.log(`${okSemModelo ? '✓' : '✗'} criar acesso sem modelo é recusado: HTTP ${semModelo.status} ${semModelo.corpo.slice(0, 90)}`);
+
+  // telemetria do NOCZenith: rota publica (a maquina nao tem sessao), com o
+  // payload no formato que o PowerShell 5.1 realmente manda - um disco so vai
+  // como objeto, nao como array (ver comoLista em nocMaquina.js)
+  const tele = await postarJson('/api/loja-status/AERO/computadores/ATM01/telemetria', {
+    disco: { discos: { modelo: 'ST500LM012', tipo: 'HDD', tamanhoGb: 465, saude: 'saudavel' }, volumes: { letra: 'C:', totalGb: 465, livreGb: 9 } },
+    dispositivos: [{ ip: '192.168.18.1', mac: 'A4-2B-B0-11-22-33' }],
+  });
+  const okTele = tele.status === 200 && /"disco":"critico"/.test(tele.corpo);
+  if (!okTele) ruins += 1;
+  console.log(`${okTele ? '✓' : '✗'} telemetria de HD/rede do NOCZenith: HTTP ${tele.status} ${tele.corpo.slice(0, 90)}`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

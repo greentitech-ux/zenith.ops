@@ -38,6 +38,7 @@ const crypto = require('crypto');
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
 const redeDiagnostico = require('./redeDiagnostico');
+const nocMaquina = require('./nocMaquina');
 
 const COLLECTION = db.collection('lojaStatus');
 // fila de comandos do agente (ver agenteAcoes.js) - histórico completo de
@@ -463,6 +464,64 @@ async function atualizarIpLocal(codigo, posto, ip, token) {
   return { codigo, posto, ipLocal: limpo };
 }
 
+// telemetria pesada do NOCZenith: saude do HD (SMART/espaco) e a varredura
+// PASSIVA da rede local (tabela ARP - quem o computador enxerga na LAN da
+// loja). Ver nocMaquina.js pro que cada campo significa e pros limites.
+//
+// Por que NAO vai de carona no heartbeat (como o diagnostico de link vai):
+// o heartbeat e o caminho mais quente do sistema (a cada 25s por maquina) e
+// tambem o mais critico - qualquer erro novo ali derruba a presenca de todo
+// mundo. Isso aqui chega a cada ~1h (rede) / ~6h (disco), ou seja ~25
+// escritas por dia por computador: irrelevante perto das 3.456 batidas, e
+// isolado do que nao pode quebrar.
+async function registrarTelemetria(codigo, posto, dados, token) {
+  const id = docIdFor(codigo, posto);
+  const snap = await COLLECTION.doc(id).get();
+  const atual = snap.exists ? snap.data() : null;
+  if (!atual) throw new Error('Computador não encontrado.');
+  exigirTokenSeTiver(atual, token);
+  const agora = Date.now();
+  const patch = {};
+  let eventos = atual.eventos || [];
+
+  const disco = nocMaquina.sanitizarDisco(dados && dados.disco);
+  if (disco) {
+    const antes = nocMaquina.avaliarDisco(atual.disco);
+    const depois = nocMaquina.avaliarDisco(disco);
+    patch.disco = disco;
+    patch.discoNivel = depois.nivel;
+    patch.discoMotivos = depois.motivos;
+    // so vira evento/alerta quando o estado PIORA. Um HD com setor realocado
+    // continua com setor realocado pra sempre - avisar a cada 6h treinaria
+    // todo mundo a ignorar o aviso, que e exatamente o oposto do objetivo.
+    if (depois.nivel !== 'ok' && depois.nivel !== antes.nivel) {
+      eventos = [...eventos, { tipo: 'disco', em: agora, detalhe: `${depois.nivel}: ${depois.motivos.join(' · ')}`.slice(0, 200) }];
+      patch.eventos = eventos.slice(-EVENTOS_MAX);
+      // a varredura periodica e quem manda o push (ver varrerAlertas) - aqui
+      // e caminho de agente, nao pode depender de push funcionar
+      patch.discoAlertaPendente = depois.nivel;
+    }
+  }
+
+  const dispositivos = nocMaquina.sanitizarDispositivos(dados && dados.dispositivos);
+  if (dispositivos) {
+    patch.dispositivos = dispositivos;
+    patch.dispositivosEm = agora;
+    const diff = nocMaquina.diffDispositivos(atual.dispositivosConhecidos, dispositivos);
+    patch.dispositivosConhecidos = diff.conhecidos;
+    if (diff.novos.length) {
+      const resumo = diff.novos.slice(0, 5).map((d) => `${d.ip} (${d.mac})`).join(', ');
+      eventos = [...eventos, { tipo: 'dispositivo-novo', em: agora, detalhe: `${diff.novos.length} novo(s) na rede: ${resumo}`.slice(0, 200) }];
+      patch.eventos = eventos.slice(-EVENTOS_MAX);
+    }
+  }
+
+  if (!Object.keys(patch).length) return { ok: false, motivo: 'nada útil na telemetria' };
+  await COLLECTION.doc(id).set(patch, { merge: true });
+  cache.invalidar();
+  return { ok: true, disco: patch.discoNivel || null, dispositivos: dispositivos ? dispositivos.length : 0 };
+}
+
 // o vigia detecta (via processos/conexoes de rede conhecidas - AnyDesk,
 // TeamViewer, DWService ou qualquer outra ferramenta de acesso remoto - ver
 // loja-status.html "Baixar vigia") quando alguem se conecta no computador e
@@ -701,6 +760,17 @@ async function varrerAlertas() {
   const docs = await listUncached();
   const transicoes = [];
   for (const candidato of docs) {
+    // alerta de HD: quem detecta e a telemetria do agente (registrarTelemetria),
+    // que so marca a flag; quem avisa e aqui, junto com o resto - assim o push
+    // sai de UM lugar so e uma falha de push nunca derruba o caminho do agente
+    if (candidato.discoAlertaPendente) {
+      await COLLECTION.doc(docIdFor(candidato.codigo, candidato.posto)).update({ discoAlertaPendente: null });
+      transicoes.push({
+        codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
+        tipo: 'disco', nivel: candidato.discoAlertaPendente,
+        motivos: candidato.discoMotivos || [],
+      });
+    }
     if (!candidato.ultimoHeartbeatEm) continue;
     let doc = candidato;
     // A lista acima vem do espelho em memoria. Ele e confiavel porque o
@@ -746,6 +816,21 @@ async function varrerAlertas() {
   return transicoes;
 }
 
+// Saude da FROTA: discos com problema (pior primeiro) + quantos aparelhos
+// cada loja enxerga na propria rede. Igual ao diagnosticoRede, sai do MESMO
+// cache de listar() - nao gera leitura extra no Firestore.
+async function saudeMaquinas() {
+  const docs = (await cache.cached()).map(semSegredo);
+  return {
+    discos: nocMaquina.discosComProblema(docs),
+    redes: nocMaquina.resumoDispositivos(docs),
+    // quantos ja reportaram: separa "está tudo bem" de "ninguém mediu ainda"
+    comDisco: docs.filter((d) => d.disco).length,
+    comVarredura: docs.filter((d) => d.dispositivos && d.dispositivos.length).length,
+    total: docs.length,
+  };
+}
+
 // Diagnostico de link de todos os computadores, pior primeiro (ver
 // redeDiagnostico.js). Usa o MESMO cache de listar() - nao gera leitura extra
 // no Firestore, so reinterpreta o que ja esta carregado.
@@ -766,6 +851,7 @@ module.exports = {
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR,
   getConfig, setConfig, pushAcessoRemotoAtivo,
   enfileirarComando, enfileirarComandoEmTodos, COMANDO_LIMPAR_TRAVADOS,
-  marcarComandoExecutado, registrarAcessoRemoto, responderChat,
+  marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
+  saudeMaquinas,
   garantirAgentToken, tokenDoComputador,
 };
