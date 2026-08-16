@@ -125,6 +125,9 @@
   table.pestoque-tabela th{position:sticky;top:0;background:var(--panel2);text-align:left;padding:6px 8px;font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
   table.pestoque-tabela td{padding:5px 8px;border-top:1px solid var(--line);}
   table.pestoque-tabela td:last-child{font-family:var(--mono);white-space:nowrap;}
+  .pnoc-btn{font-family:var(--mono);font-size:10.5px;padding:3px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-block;}
+  .pnoc-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .pnoc-ip{font-family:var(--mono);font-size:11px;color:var(--muted);}
   .pweek-titulo{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-family:var(--mono);margin-bottom:8px;display:flex;justify-content:space-between;align-items:baseline;gap:8px;}
   .pweek-titulo b{font-family:var(--mono);color:var(--text);font-size:13px;}
   .pweekstrip{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
@@ -790,7 +793,6 @@ async function cardManutencao(){
 // (cadastrados, com nome), fantasma (heartbeat de posto nunca cadastrado)
 // fica de fora pra nao inflar os numeros. Unidade so aparece no chip se tem
 // pelo menos 1 computador cadastrado - loja sem NOC configurado nao polui o card.
-const TIPO_COMPUTADOR_LABEL_PAINEL = { atendimento:'🤖 atendimento', interno:'🔒 interno', abastecimento:'🛒 abastecimento' };
 let NOC_ROSTER_CACHE = [];
 let NOC_COMPUTADORES_CACHE = [];
 let NOC_ABERTA = null;
@@ -829,13 +831,63 @@ function toggleNocUnidade(codigo){
   chips.innerHTML = renderNocChips();
   const doUnidade = NOC_COMPUTADORES_CACHE.filter(c=>c.codigo===codigo)
     .sort((a,b)=>(nocStatusComputador(a)==='offline'?0:1) - (nocStatusComputador(b)==='offline'?0:1));
-  det.innerHTML = doUnidade.length ? `<div class="pestoque-tabela-wrap"><table class="pestoque-tabela"><thead><tr><th>Computador</th><th>Tipo</th><th>Status</th></tr></thead><tbody>${
+  det.innerHTML = doUnidade.length ? `<div class="pestoque-tabela-wrap"><table class="pestoque-tabela"><thead><tr><th>Computador</th><th>Status</th><th>AnyDesk</th><th>IP local</th><th>Mensagem</th><th>Comando</th></tr></thead><tbody>${
     doUnidade.map(c=>{
       const st = nocStatusComputador(c);
       const stLabel = st==='online' ? '🟢 online' : (st==='offline' ? '🔴 offline' : '⚪ nunca conectou');
-      return `<tr><td>${escapeHtml(c.nome||c.posto)}</td><td>${TIPO_COMPUTADOR_LABEL_PAINEL[c.tipo]||escapeHtml(c.tipo||'')}</td><td>${stLabel}</td></tr>`;
+      const cod = c.codigo.replace(/'/g,"\\'");
+      const posto = c.posto.replace(/'/g,"\\'");
+      const tipo = (c.tipo||'atendimento').replace(/'/g,"\\'");
+      const anydesk = c.anydeskId
+        ? `<a class="pnoc-btn" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk">🖥️ Abrir</a>`
+        : '<span class="pnoc-ip">—</span>';
+      const ip = c.ipLocal
+        ? `<span class="pnoc-ip" style="cursor:pointer;" title="Clique pra copiar" onclick="painelCopiarIpLocal('${c.ipLocal.replace(/'/g,"\\'")}')">${escapeHtml(c.ipLocal)}</span>`
+        : '<span class="pnoc-ip">—</span>';
+      return `<tr>
+        <td>${escapeHtml(c.nome||c.posto)}</td>
+        <td>${stLabel}</td>
+        <td>${anydesk}</td>
+        <td>${ip}</td>
+        <td><button type="button" class="pnoc-btn" onclick="painelNocMensagem('${cod}','${posto}')">💬 Enviar</button></td>
+        <td><button type="button" class="pnoc-btn" onclick="painelNocComando('${cod}','${posto}','${tipo}')">📋 Copiar</button></td>
+      </tr>`;
     }).join('')
   }</tbody></table></div>` : '<div class="pcard-vazio">Sem computador cadastrado nessa unidade.</div>';
+}
+
+function painelCopiarIpLocal(ip){
+  if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ip).catch(()=>{});
+  alert('IP local copiado: '+ip);
+}
+
+async function painelNocMensagem(codigo, posto){
+  const texto = prompt('Mensagem pra esse computador:');
+  if(!texto || !texto.trim()) return;
+  try{
+    const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/mensagem`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok) throw new Error(data.error || 'Erro ao enviar.');
+    alert('Mensagem enviada! Aparece na tela desse computador no próximo heartbeat.');
+  }catch(err){ alert(err.message); }
+}
+
+// mesmo comando de instalacao gerado em loja-status.html ("Copiar comando") -
+// reaproveita a mesma rota, so muda onde o botao mora
+async function painelNocComando(codigo, posto, tipo){
+  try{
+    const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/comando-instalacao?tipo=${encodeURIComponent(tipo)}`);
+    if(!resp.ok) throw new Error('Erro ao gerar o comando.');
+    const { comando } = await resp.json();
+    try{
+      await navigator.clipboard.writeText(comando);
+      alert('Comando de instalação copiado! Cole no PowerShell do computador da loja.');
+    }catch(e){
+      prompt('Copie este comando e cole no PowerShell da loja (Ctrl+C):', comando);
+    }
+  }catch(err){ alert(err.message); }
 }
 
 async function cardNoc(){
