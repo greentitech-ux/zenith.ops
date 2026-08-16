@@ -2008,6 +2008,31 @@ app.get('/api/loja-status', requireSection('suporte'), async (req, res) => {
   res.json(status.map((s) => ({ ...s, unidadeNome: mapa[s.codigo] || s.codigo })));
 });
 
+// Botao de incidente: manda TODOS os computadores 'interno' matarem processos
+// NOCZenith orfaos - e o que fecha a caixa "Ocorreu uma excecao sem
+// tratamento" que ficou presa na tela das lojas. O comando NAO vem do corpo
+// da requisicao: e uma constante do lojaStatus.js. Expor texto livre aqui
+// seria um "executar qualquer coisa em toda a rede" numa rota HTTP.
+// Master-only e sem desvio pra aprovacao QA: e ferramenta de incidente, e o
+// comando ja e fixo e nao destrutivo (mata processo do proprio vigia).
+app.post('/api/loja-status/limpar-travados', auth.requireMaster, async (req, res) => {
+  try {
+    const resultados = await lojaStatus.enfileirarComandoEmTodos(
+      lojaStatus.COMANDO_LIMPAR_TRAVADOS, { origem: 'incidente' },
+    );
+    const enviados = resultados.filter((r) => r.ok);
+    res.json({
+      enviados: enviados.length,
+      total: resultados.length,
+      // cada maquina so pega na proxima batida (25s); quem falhou vem com o
+      // motivo, pra dar pra decidir se precisa ir na mao
+      detalhe: resultados,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Diagnostico de qualidade de link, pior primeiro (ver redeDiagnostico.js).
 // Mesmo gate do painel do NOC - quem enxerga os computadores enxerga a saude
 // da rede deles. Nao custa leitura extra: reaproveita o cache de listar().

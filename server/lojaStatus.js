@@ -494,6 +494,47 @@ async function registrarAcessoRemoto(codigo, posto, detalhe, token) {
 // 'interno' (unico que processa comando - ver heartbeat() acima) e so um
 // comando pendente/entregue por vez (evita perder o rastro de um
 // resultado se um segundo comando chegasse por cima)
+// Comando de INCIDENTE, fixo no código de propósito. Ele mata qualquer
+// processo NOCZenith órfão que tenha sobrado na máquina - é o que segura a
+// caixa "Ocorreu uma exceção sem tratamento" na tela da loja (ver a correção
+// da janela de chat em vigiaScript.js).
+//
+// Duas travas dentro do próprio comando:
+//   - exclui $PID: quem executa isto É o vigia saudável; sem isso ele se
+//     mataria e a loja ficaria sem monitoramento.
+//   - filtra por CommandLine contendo NOCZenith: não encosta em nenhum outro
+//     PowerShell que a loja porventura tenha aberto. CommandLine nulo (sem
+//     permissão de leitura) não casa no -like, então fica de fora.
+const COMANDO_LIMPAR_TRAVADOS = [
+  '$mortos = 0',
+  "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" -ErrorAction SilentlyContinue |",
+  "  Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*NOCZenith*' } |",
+  '  ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $mortos++ } catch {} }',
+  '"Processos NOCZenith orfaos encerrados: $mortos"',
+].join('\n');
+
+// Dispara o MESMO comando pra todos os computadores 'interno' de uma vez.
+// Não recebe o comando de fora: quem chama escolhe entre os comandos fixos
+// acima. Abrir isso pra texto livre seria criar um "executar qualquer coisa
+// em toda a rede" numa rota HTTP - não vale o risco nem num incidente.
+async function enfileirarComandoEmTodos(comando, opcoes) {
+  const docs = await listUncached();
+  const resultados = [];
+  for (const doc of docs) {
+    if (doc.tipo !== 'interno') continue;
+    try {
+      await enfileirarComando(doc.codigo, doc.posto, comando, opcoes);
+      resultados.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, ok: true });
+    } catch (err) {
+      // um computador que já tem comando pendente, ou sem token, não pode
+      // derrubar o disparo dos outros - o objetivo é alcançar o máximo de
+      // lojas possível numa tacada
+      resultados.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, ok: false, motivo: err.message });
+    }
+  }
+  return resultados;
+}
+
 async function enfileirarComando(codigo, posto, comando, opcoes) {
   const id = docIdFor(codigo, posto);
   const ref = COLLECTION.doc(id);
@@ -714,6 +755,7 @@ module.exports = {
   heartbeat, listar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR,
   getConfig, setConfig, pushAcessoRemotoAtivo,
-  enfileirarComando, marcarComandoExecutado, registrarAcessoRemoto, responderChat,
+  enfileirarComando, enfileirarComandoEmTodos, COMANDO_LIMPAR_TRAVADOS,
+  marcarComandoExecutado, registrarAcessoRemoto, responderChat,
   garantirAgentToken, tokenDoComputador,
 };

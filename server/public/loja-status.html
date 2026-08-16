@@ -253,6 +253,7 @@
     </div>
     <div class="header-nav">
       <span class="ultima-atualizacao" id="ultima-atualizacao"></span>
+      <button class="back hidden" id="btn-limpar-travados" onclick="limparTravados()" title="Manda todos os computadores fecharem processos travados do NOCZenith">🧹 Destravar lojas</button>
       <button class="btn-notif" onclick="carregar()" title="Atualizar">🔄</button>
       <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
     </div>
@@ -908,6 +909,26 @@ async function carregar(){
     popularSelectUnidades();
     render();
   }catch(e){ /* mantem a ultima lista carregada na tela */ }
+}
+
+// Ferramenta de incidente: manda todo computador 'interno' encerrar processos
+// NOCZenith orfaos - e o que fecha a caixa de erro presa na tela da loja.
+// Confirma antes porque encerra processo em maquina de loja, e avisa que nao
+// e instantaneo: cada uma so pega o comando na proxima batida (ate ~25s).
+async function limparTravados(){
+  if(!confirm('Mandar TODOS os computadores fecharem processos travados do NOCZenith?\n\nCada máquina executa na próxima batida (até ~25s). O vigia que está saudável continua rodando — só os processos órfãos são encerrados.')) return;
+  const b = document.getElementById('btn-limpar-travados');
+  b.disabled = true; b.textContent = '⏳ Enviando...';
+  try{
+    const r = await fetch('/api/loja-status/limpar-travados', { method: 'POST' });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || 'Não foi possível enviar.');
+    const falhas = (d.detalhe||[]).filter(x => !x.ok);
+    alert(`Comando enviado para ${d.enviados} de ${d.total} computador(es) internos.`
+      + `\nCada um executa na próxima batida (até ~25s).`
+      + (falhas.length ? `\n\nNão foi possível enviar para:\n` + falhas.map(f => `• ${f.nome || f.posto}: ${f.motivo}`).join('\n') : ''));
+  }catch(e){ alert('Erro: ' + e.message); }
+  b.disabled = false; b.textContent = '🧹 Destravar lojas';
 }
 
 // ---- diagnostico de rede (ver redeDiagnostico.js no servidor) ------------
@@ -1591,6 +1612,7 @@ async function boot(){
   if(unidadeDoLink) toggleFiltroUnidade(unidadeDoLink);
   if(me.role === 'master'){
     document.getElementById('agente-root').classList.remove('hidden');
+    document.getElementById('btn-limpar-travados').classList.remove('hidden');
     document.getElementById('btn-push-ar').classList.remove('hidden');
     carregarConfigPushAr();
     await carregarAgente();
