@@ -7047,6 +7047,151 @@ app.get('/api/abastecimento/comparativo-fechamento', auth.requireMaster, async (
   }
 });
 
+// ---------- fluxo de entrada e saida do carrinho (so Master) ----------
+// Reconciliacao de estoque no mesmo espirito do calcularDiferencas do
+// inventario.js, adaptada pro que o Abastecimento realmente registra:
+//
+//   saida apurada = saldo inicial + entradas - saldo final
+//
+// - saldo inicial/final saem das CONTAGENS (primeira e ultima do periodo) -
+//   por isso a conta so fecha com PELO MENOS DUAS contagens; com menos que
+//   isso a rota devolve reconciliavel:false e so os totais brutos, em vez de
+//   inventar um numero que nao se sustenta.
+// - a janela de reconciliacao e o intervalo ENTRE essas duas contagens (nao
+//   o periodo inteiro): envio que entrou antes da primeira contagem ja esta
+//   dentro do saldo inicial, contar de novo estouraria a conta.
+// - entradas usam o que foi REALMENTE RECEBIDO quando o carrinho conferiu
+//   (recebimento.recebido), e o enviado quando ainda nao conferiu - a
+//   diferenca entre os dois aparece separada como "perda em transito".
+// - AVARIAS entram como coluna informativa, NAO subtraem da saida apurada:
+//   a avaria e declarada na contagem e nao da pra saber daqui se o item
+//   danificado foi contado junto ou ja descartado - subtrair arriscaria
+//   contar a mesma perda duas vezes.
+//
+// Tudo em UNIDADES (insumo lancado em caixa vira quantidade x qtdPorCaixa),
+// senao bebida em caixa e bebida em unidade nao somam na mesma escala.
+app.get('/api/abastecimento/fluxo', auth.requireMaster, async (req, res) => {
+  try {
+    const hoje = hojeBrasiliaISO();
+    const fim = req.query.fim || hoje;
+    const inicio = req.query.inicio || (() => {
+      const d = new Date(`${fim}T00:00:00`);
+      d.setDate(d.getDate() - 6);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    })();
+    const dataOk = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    if (!dataOk(inicio) || !dataOk(fim)) return res.status(400).json({ error: 'Data inválida.' });
+    if (inicio > fim) return res.status(400).json({ error: 'O início não pode ser depois do fim.' });
+
+    const SABORES = abastecimentoCarrinho.SABORES;
+    const diaDe = (iso) => new Date(iso).toLocaleDateString('sv-SE', { timeZone: FUSO_BR });
+    const inteiro = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
+    // insumo pode ser lancado em caixa - normaliza tudo pra unidade
+    const emUnidades = (ins, qtd) => (ins.embalagem === 'caixa' && ins.qtdPorCaixa ? inteiro(qtd) * ins.qtdPorCaixa : inteiro(qtd));
+
+    const regs = await abastecimentoCarrinho.listAll();
+    const noPeriodo = regs.filter((r) => { const d = diaDe(r.criadoEm); return d >= inicio && d <= fim; });
+    const contagens = noPeriodo.filter((r) => r.tipo === 'CONTAGEM').sort((a, b) => String(a.criadoEm).localeCompare(String(b.criadoEm)));
+    const envios = noPeriodo.filter((r) => r.tipo === 'ENVIO');
+
+    const primeira = contagens[0] || null;
+    const ultima = contagens.length > 1 ? contagens[contagens.length - 1] : null;
+    const reconciliavel = !!(primeira && ultima);
+
+    const itens = new Map();
+    function slot(chave, nome, tipo) {
+      if (!itens.has(chave)) itens.set(chave, { chave, nome, tipo, saldoInicial: 0, saldoFinal: 0, entradas: 0, enviado: 0, recebido: 0, avarias: 0 });
+      return itens.get(chave);
+    }
+    const rotuloSabor = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+    function somarContagem(c, campo) {
+      SABORES.forEach((s) => { slot(`pizza:${s}`, rotuloSabor(s), 'pizza')[campo] += inteiro((c.pizzas || {})[s]); });
+      (c.insumos || []).forEach((ins) => {
+        if (!ins.insumoId) return; // texto livre legado nao entra na conta
+        slot(`insumo:${ins.insumoId}`, ins.nome, 'insumo')[campo] += inteiro(ins.totalUnidades) || emUnidades(ins, ins.quantidade);
+      });
+    }
+    if (primeira) somarContagem(primeira, 'saldoInicial');
+    if (ultima) somarContagem(ultima, 'saldoFinal');
+
+    // avarias declaradas em qualquer contagem do periodo (+ detalhe pro Master
+    // conseguir ir na origem: dia, quantidade e o que a loja escreveu)
+    const avariasDetalhe = [];
+    contagens.forEach((c) => {
+      (c.avarias || []).forEach((a) => {
+        if (!a.insumoId) return;
+        slot(`insumo:${a.insumoId}`, a.nome, 'insumo').avarias += inteiro(a.quantidade);
+        avariasDetalhe.push({ data: diaDe(c.criadoEm), nome: a.nome, quantidade: inteiro(a.quantidade), observacao: a.observacao || '', temFoto: !!a.foto });
+      });
+    });
+
+    // enviado x recebido no periodo inteiro (metrica operacional) e entradas
+    // so dentro da janela entre as duas contagens (metrica de reconciliacao)
+    let perdaTransitoTotal = 0;
+    envios.forEach((e) => {
+      const naJanela = reconciliavel && e.criadoEm > primeira.criadoEm && e.criadoEm <= ultima.criadoEm;
+      const rec = e.recebimento && e.recebimento.recebido ? e.recebimento.recebido : null;
+      SABORES.forEach((s) => {
+        const env = inteiro((e.pizzas || {})[s]);
+        if (!env) return;
+        const receb = rec && rec.pizzas && rec.pizzas[s] != null ? inteiro(rec.pizzas[s]) : env;
+        const alvo = slot(`pizza:${s}`, rotuloSabor(s), 'pizza');
+        alvo.enviado += env;
+        alvo.recebido += receb;
+        perdaTransitoTotal += env - receb;
+        if (naJanela) alvo.entradas += e.recebidoEm ? receb : env;
+      });
+      (e.insumos || []).forEach((ins, idx) => {
+        if (!ins.insumoId) return;
+        const env = inteiro(ins.totalUnidades) || emUnidades(ins, ins.quantidade);
+        // quantidadeRecebida vem na MESMA embalagem do lancamento (caixa ou
+        // unidade), entao converte de novo antes de comparar com o enviado
+        const recIns = rec && Array.isArray(rec.insumos) ? rec.insumos[idx] : null;
+        const receb = recIns && recIns.quantidadeRecebida != null ? emUnidades(ins, recIns.quantidadeRecebida) : env;
+        const alvo = slot(`insumo:${ins.insumoId}`, ins.nome, 'insumo');
+        alvo.enviado += env;
+        alvo.recebido += receb;
+        perdaTransitoTotal += env - receb;
+        if (naJanela) alvo.entradas += e.recebidoEm ? receb : env;
+      });
+    });
+
+    const lista = [...itens.values()].map((i) => ({
+      ...i,
+      perdaTransito: i.enviado - i.recebido,
+      saidaApurada: reconciliavel ? i.saldoInicial + i.entradas - i.saldoFinal : null,
+    })).filter((i) => i.tipo === 'pizza' || i.enviado || i.avarias || i.saldoInicial || i.saldoFinal)
+      .sort((a, b) => (a.tipo === b.tipo ? a.nome.localeCompare(b.nome, 'pt-BR') : (a.tipo === 'pizza' ? -1 : 1)));
+
+    const diasNoPeriodo = Math.round((new Date(`${fim}T00:00:00`) - new Date(`${inicio}T00:00:00`)) / 86400000) + 1;
+    const diasComContagem = new Set(contagens.map((c) => diaDe(c.criadoEm))).size;
+
+    res.json({
+      periodo: { inicio, fim, diasNoPeriodo },
+      reconciliavel,
+      // sem as duas contagens a conta nao fecha - a tela avisa em vez de
+      // mostrar um "consumo" que na verdade e chute
+      motivoNaoReconciliavel: reconciliavel ? null : (contagens.length ? 'Só tem uma contagem no período - são necessárias pelo menos duas pra fechar a conta.' : 'Nenhuma contagem lançada no período.'),
+      janela: reconciliavel ? { de: primeira.criadoEm, ate: ultima.criadoEm } : null,
+      itens: lista,
+      avariasDetalhe: avariasDetalhe.sort((a, b) => b.data.localeCompare(a.data)).slice(0, 50),
+      indicadores: {
+        contagens: contagens.length,
+        diasComContagem,
+        diasNoPeriodo,
+        envios: envios.length,
+        enviosSemRecebimento: envios.filter((e) => !e.recebidoEm).length,
+        recebimentosDivergentes: envios.filter((e) => e.recebimento && e.recebimento.confere === false).length,
+        perdaTransitoTotal,
+        avariasTotal: avariasDetalhe.reduce((s, a) => s + a.quantidade, 0),
+      },
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // topicos da Ajuda exclusivos de Master/Admin - servidos pelo backend de
 // proposito (ver docsMaster.js): conteudo que so a gestao pode conhecer nao
 // viaja pro navegador de quem nao e Master/Admin
