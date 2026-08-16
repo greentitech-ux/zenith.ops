@@ -1915,17 +1915,29 @@ function renderDocsNoModal(f){
       <div class="linha1" style="gap:6px;"><b style="font-size:12.5px;">${escapeHtml(label)}${obrig?' <span style="color:var(--bad)">*</span>':''}</b>${faltaObrig?'<span class="badge warn" style="font-size:9px;">falta</span>':''}</div>
       ${anexadosHtml}
       <div class="linha1" style="gap:8px;margin-top:5px;flex-wrap:wrap;">
-        <input type="file" id="ed-doc-file-${tipo}" style="flex:1;min-width:180px;">
+        <input type="file" id="ed-doc-file-${tipo}" style="flex:1;min-width:180px;" onchange="anexarDocumentoTipo('${tipo}')">
         <button type="button" class="btn-secundario" style="padding:6px 12px;" onclick="anexarDocumentoTipo('${tipo}')">📎 ${temAlgum?'anexar outro':'anexar'}</button>
       </div>
     </div>`;
   }).join('');
+}
+// atualiza TODOS (a lista global) com um registro ja atualizado que o
+// proprio servidor devolveu - evita depender de um novo GET (carregar())
+// bater antes do usuario reabrir a ficha, que era a raiz de "anexei e some":
+// entre o POST e o carregar() rodar, se o usuario reabria o detalhe rapido
+// demais podia ainda pegar o TODOS antigo. Isso resolve na hora, sem corrida.
+function atualizarRegistroLocal(atualizado){
+  if(!atualizado || !atualizado.id) return atualizado;
+  const idx = TODOS.findIndex(x=>x.id===atualizado.id);
+  if(idx>=0) TODOS[idx] = atualizado; else TODOS.push(atualizado);
+  return atualizado;
 }
 async function anexarDocumentoTipo(tipo){
   const msg = document.getElementById('msg-doc');
   const input = document.getElementById('ed-doc-file-'+tipo);
   const arq = input && input.files[0];
   if(!arq){ msg.textContent=`Escolha um arquivo para ${DOC_LABELS[tipo]||tipo}.`; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  msg.textContent = `Enviando ${DOC_LABELS[tipo]||tipo}...`; msg.className='msg'; msg.classList.remove('hidden');
   const fd = new FormData();
   fd.append('documento', arq);
   fd.append('tipo', tipo);
@@ -1933,10 +1945,9 @@ async function anexarDocumentoTipo(tipo){
     const resp = await fetch(`/api/rh/funcionarios/${EDITANDO_ID}/documentos`, { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao anexar.');
-    await carregar();
-    const atual = TODOS.find(x=>x.id===EDITANDO_ID) || data;
-    renderDocsNoModal(atual);
+    renderDocsNoModal(atualizarRegistroLocal(data));
     msg.textContent=`${DOC_LABELS[tipo]||tipo} anexado.`; msg.className='msg ok'; msg.classList.remove('hidden');
+    carregar().catch(()=>{}); // sincroniza contadores/filtros da tela em segundo plano, sem travar o feedback
   }catch(err){ msg.textContent=err.message; msg.className='msg err'; msg.classList.remove('hidden'); }
 }
 async function removerDocumentoRh(id, index){
@@ -1945,9 +1956,8 @@ async function removerDocumentoRh(id, index){
     const resp = await fetch(`/api/rh/funcionarios/${id}/documentos/${index}`, { method:'DELETE' });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao remover.');
-    await carregar();
-    const atual = TODOS.find(x=>x.id===id) || data;
-    renderDocsNoModal(atual);
+    renderDocsNoModal(atualizarRegistroLocal(data));
+    carregar().catch(()=>{});
   }catch(err){ alert(err.message); }
 }
 
