@@ -185,8 +185,12 @@ async function heartbeat(codigo, posto, info, token) {
     criadoEm: (atual && atual.criadoEm) || Date.now(),
     ultimoHeartbeatEm: Date.now(),
     anydeskId: (atual && atual.anydeskId) || null,
-    avisadoOffline: (atual && atual.avisadoOffline) || false,
-    offlineDesde: (atual && atual.offlineDesde) || null,
+    // avisadoOffline/offlineDesde NAO entram aqui de proposito: sao da
+    // varredura (ver varrerAlertas). O heartbeat le o doc e escreve depois;
+    // se a varredura marcasse offline NESSA janela, o heartbeat regravava o
+    // valor velho que leu e a marcacao se perdia - a varredura seguinte
+    // marcava "Caiu" de novo, inventando queda que nao houve. Com
+    // { merge: true }, nao citar o campo preserva o que estiver la.
     mensagemPendente: null,
     ip: dados.ip || (atual && atual.ip) || null,
     userAgent: dados.userAgent || (atual && atual.userAgent) || null,
@@ -557,7 +561,13 @@ async function varrerAlertas() {
       // deteccao - fica mais fiel no registro
       const evento = { tipo: 'offline', em: doc.ultimoHeartbeatEm };
       await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({
-        avisadoOffline: true, offlineDesde: Date.now(),
+        avisadoOffline: true,
+        // offlineDesde = quando de fato SILENCIOU, nao a hora da deteccao.
+        // A deteccao chega ate ~2,5min depois (limiar de 90s + tick de 1min),
+        // e como o "ficou fora" abaixo mede a partir daqui, usar Date.now()
+        // fazia o painel subnotificar toda queda nesse tanto - dava "7min"
+        // numa parada real de 9min.
+        offlineDesde: doc.ultimoHeartbeatEm,
         eventos: [...(doc.eventos || []), evento].slice(-EVENTOS_MAX),
       });
       transicoes.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'offline' });
