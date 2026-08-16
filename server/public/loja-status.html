@@ -183,6 +183,20 @@
      do nome e responde de relance "essa máquina está bem?", sem abrir o
      detalhe. Cor só quando passa do limite - chip colorido em tudo vira
      enfeite e para de significar alguma coisa. */
+  /* lista de aparelhos da rede da loja (detalhe do computador). Cada linha
+     responde as quatro coisas que a pessoa precisa: status (bolinha), nome,
+     IP e MAC. Nome vem do DNS/NetBIOS ou do apelido dado aqui mesmo. */
+  .disp-lista{margin-top:6px;border-top:1px solid var(--line);}
+  .disp-linha{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:11.5px;}
+  .disp-dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--ok);}
+  .disp-dot.off{background:var(--muted);opacity:.5;}
+  .disp-topo{display:flex;align-items:baseline;gap:6px;}
+  .disp-nome{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;}
+  .disp-visto{flex:none;font-size:9.5px;color:var(--muted);white-space:nowrap;}
+  .disp-nome.anon{font-weight:400;color:var(--muted);font-style:italic;}
+  .disp-rede{font-family:var(--mono);font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .disp-editar{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:4px;flex:none;min-width:28px;}
+  .disp-editar:hover{color:var(--accent);}
   .tile-metricas{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px;}
   /* apertado de propósito: as três métricas precisam caber em UMA linha na
      coluna estreita do celular (~159px), senão o card cresce e a promessa de
@@ -625,6 +639,23 @@ function resumoDispositivo(ua){
   return [so, nav].filter(Boolean).join(' · ') || null;
 }
 
+// batiza um aparelho da rede ("Impressora da cozinha"). O nome vale pra
+// UNIDADE inteira - se dois computadores da loja enxergam a mesma impressora,
+// ela fica com o mesmo nome nos dois. Apagar o texto remove o apelido e volta
+// a mostrar o que o DNS/NetBIOS respondeu.
+async function renomearDispositivo(codigo, mac, atual){
+  const nome = prompt(`Nome desse aparelho (${mac}):\n\nDeixe vazio pra voltar ao nome que a rede informa.`, atual || '');
+  if(nome === null) return;
+  try{
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/dispositivos/${encodeURIComponent(mac)}/apelido`, {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ apelido: nome }),
+    });
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.error||'Erro ao salvar.');
+    await carregar();
+  }catch(e){ alert(e.message); }
+}
+
 // as tres metricas que cabem num card estreito e que decidem manutencao:
 // quanto do disco esta cheio, temperatura e ha quantos dias sem reiniciar
 // (ver nocMaquina.js pros limites). O volume mostrado e o MAIS APERTADO -
@@ -739,10 +770,39 @@ function atualizarConteudoDetalhe(codigo, c){
       + (precisa ? ' <span style="font-size:11px;color:var(--warn,#e0a800);">— passou da semana, reinicie</span>' : ''));
   }
   if(c.dispositivos && c.dispositivos.length){
-    const lista = c.dispositivos.slice(0,12).map(d=>`${escapeHtml(d.ip)} <span style="color:var(--muted);">${escapeHtml(d.mac)}</span>`).join('<br>');
-    const resto = c.dispositivos.length > 12 ? `<br><span style="color:var(--muted);font-size:11px;">+${c.dispositivos.length-12} outros</span>` : '';
-    infoBits.push(`📡 <b>${c.dispositivos.length}</b> aparelho(s) na rede da loja · varrido ${escapeHtml(tempoRelativo(c.dispositivosEm))}`
-      + `<br><span style="font-size:11px;">${lista}${resto}</span>`);
+    // ativos primeiro (e a rede AGORA); quem sumiu continua listado com a
+    // ultima vez que apareceu - e assim que se percebe que a impressora saiu
+    // do ar, e nao so que "tem 6 aparelhos"
+    const ativos = c.dispositivos.filter(d=>d.ativo !== false);
+    const sumidos = c.dispositivos.filter(d=>d.ativo === false);
+    const linhaDisp = (d) => {
+      // MAC aleatorio (2o digito 2/6/A/E): celular com privacidade de MAC ou
+      // placa virtual. Nao adianta procurar "que aparelho e esse" - o MAC
+      // muda sozinho na semana que vem
+      const aleatorio = ['2','6','a','e'].includes(String(d.mac).charAt(1).toLowerCase());
+      const nome = d.apelido || d.nome || (aleatorio ? 'MAC aleatorio (celular/virtual)' : 'sem nome');
+      const temNome = !!(d.apelido || d.nome);
+      // o "visto ha X" fica na linha do nome, nao na do IP: no celular a linha
+      // de IP+MAC ja ocupa a largura toda e o texto extra era cortado com "..."
+      const quando = d.ativo === false ? `<span class="disp-visto">visto ${escapeHtml(tempoRelativo(d.visto))}</span>` : '';
+      return `<div class="disp-linha">
+        <span class="disp-dot ${d.ativo === false ? 'off' : 'on'}"></span>
+        <div style="flex:1;min-width:0;">
+          <div class="disp-topo">
+            <div class="disp-nome ${temNome?'':'anon'}" title="${escapeHtml(nome)}">${escapeHtml(nome)}</div>
+            ${quando}
+          </div>
+          <div class="disp-rede">${escapeHtml(d.ip)} · ${escapeHtml(d.mac)}</div>
+        </div>
+        <button type="button" class="disp-editar" title="Dar um nome a esse aparelho"
+          onclick="event.stopPropagation();renomearDispositivo('${escapeJs(codigo)}','${escapeJs(d.mac)}','${escapeJs(d.apelido||'')}')">✏️</button>
+      </div>`;
+    };
+    const html = [...ativos, ...sumidos].slice(0,20).map(linhaDisp).join('');
+    const resto = c.dispositivos.length > 20 ? `<div class="disp-linha" style="color:var(--muted);">+${c.dispositivos.length-20} outros</div>` : '';
+    infoBits.push(`📡 <b>${ativos.length}</b> aparelho(s) na rede da loja`
+      + (sumidos.length ? ` · <span style="color:var(--muted);">${sumidos.length} sumiu(ram)</span>` : '')
+      + ` · varrido ${escapeHtml(tempoRelativo(c.dispositivosEm))}<div class="disp-lista">${html}${resto}</div>`);
   }
   document.getElementById('detalhe-comp-info').innerHTML = infoBits.length ? infoBits.join('<br>') : '<span style="color:var(--muted);">sem mais informações.</span>';
 

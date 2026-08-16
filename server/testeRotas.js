@@ -137,11 +137,18 @@ function postarMultipart(caminho, campos, arquivo) {
   });
 }
 
+// mesmo postarJson, so que PUT (rota de apelido de dispositivo)
+function putJson(caminho, corpoObj, headers = {}) {
+  return enviarJson('PUT', caminho, corpoObj, headers);
+}
 function postarJson(caminho, corpoObj, headers = {}) {
+  return enviarJson('POST', caminho, corpoObj, headers);
+}
+function enviarJson(metodo, caminho, corpoObj, headers = {}) {
   const corpo = Buffer.from(JSON.stringify(corpoObj));
   return new Promise((resolve) => {
     const req = http.request({
-      host: '127.0.0.1', port: 8899, path: caminho, method: 'POST',
+      host: '127.0.0.1', port: 8899, path: caminho, method: metodo,
       headers: { ...headers, 'Content-Type': 'application/json', 'Content-Length': corpo.length },
     }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, corpo: b })); });
     req.on('error', (e) => resolve({ status: 0, corpo: e.message }));
@@ -236,6 +243,20 @@ setTimeout(async () => {
   const okTele = tele.status === 200 && /"disco":"critico"/.test(tele.corpo) && /"uptimeHoras":216/.test(tele.corpo);
   if (!okTele) ruins += 1;
   console.log(`${okTele ? '✓' : '✗'} telemetria de HD/rede do NOCZenith: HTTP ${tele.status} ${tele.corpo.slice(0, 90)}`);
+
+  // apelido de aparelho da rede: MAC invalido tem que ser recusado, MAC bom
+  // tem que gravar (o nome vale pra unidade inteira, ver definirApelidoDispositivo)
+  const macRuim = await putJson('/api/loja-status/AERO/dispositivos/nao-e-mac/apelido', { apelido: 'x' },
+    token ? { Authorization: 'Bearer ' + token } : {});
+  const okMacRuim = macRuim.status === 400 && /MAC/i.test(macRuim.corpo);
+  if (!okMacRuim) ruins += 1;
+  console.log(`${okMacRuim ? '✓' : '✗'} apelido com MAC inválido é recusado: HTTP ${macRuim.status} ${macRuim.corpo.slice(0, 60)}`);
+
+  const apelido = await putJson('/api/loja-status/AERO/dispositivos/a4:2b:b0:11:22:33/apelido', { apelido: 'Impressora da cozinha' },
+    token ? { Authorization: 'Bearer ' + token } : {});
+  const okApelido = apelido.status === 200 && /Impressora da cozinha/.test(apelido.corpo);
+  if (!okApelido) ruins += 1;
+  console.log(`${okApelido ? '✓' : '✗'} apelido de aparelho da rede: HTTP ${apelido.status} ${apelido.corpo.slice(0, 90)}`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

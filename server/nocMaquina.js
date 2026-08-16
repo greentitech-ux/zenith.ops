@@ -174,10 +174,12 @@ function normalizarMac(v) {
   return MAC_RE.test(limpo) ? limpo : null;
 }
 
-// A varredura é PASSIVA de propósito: o agente só lê a tabela ARP que o
-// Windows já mantém (quem o computador conversou na rede local). Não dispara
-// pacote nenhum, então não acorda IDS de shopping nem é confundida com
-// scanner hostil - e não custa banda numa loja que já está com link ruim.
+// A varredura lê a tabela ARP que o Windows já mantém (quem esse computador
+// conversou na rede da loja). Pra descobrir o NOME, o agente ainda faz uma
+// consulta de DNS reverso / NetBIOS por aparelho - então ela não é 100%
+// passiva como antes, mas continua sendo tráfego que qualquer máquina da
+// rede faz o tempo todo: nada de varredura de portas, nada que acorde IDS
+// de shopping.
 function sanitizarDispositivos(entrada) {
   const lista = comoLista(entrada);
   if (!lista.length) return null;
@@ -188,23 +190,61 @@ function sanitizarDispositivos(entrada) {
     const ip = d && IPV4_RE.test(String(d.ip || '').trim()) ? String(d.ip).trim() : null;
     if (!mac || !ip || vistos.has(mac)) continue;
     vistos.add(mac);
-    out.push({ mac, ip });
+    out.push({ mac, ip, nome: texto(d && d.nome, 40) });
     if (out.length >= DISPOSITIVOS_MAX) break;
   }
   return out.length ? out : null;
 }
 
-// Aparelho "novo" = MAC que esse computador nunca tinha visto. A primeira
-// varredura NÃO gera novidade nenhuma: ela vira a linha de base, senão o
-// primeiro dia depois do deploy alertaria a rede inteira de uma vez e
-// ninguém olharia o alerta de novo.
-function diffDispositivos(conhecidos, atuais) {
-  const base = Array.isArray(conhecidos) ? conhecidos : null;
-  const macsAtuais = atuais.map((d) => d.mac);
-  const novaBase = [...new Set([...(base || []), ...macsAtuais])].slice(-MACS_CONHECIDOS_MAX);
-  if (!base) return { novos: [], conhecidos: novaBase, primeiraVez: true };
-  const jaConhecido = new Set(base);
-  return { novos: atuais.filter((d) => !jaConhecido.has(d.mac)), conhecidos: novaBase, primeiraVez: false };
+// MAC "localmente administrado": o 2º dígito hexadecimal é 2, 6, A ou E.
+// Não é chute nem tabela de fabricante - está no próprio endereço. Quem usa
+// isso: celular com privacidade de MAC ligada (iPhone/Android modernos
+// sorteiam um MAC por rede) e placa virtual (Hyper-V, VPN, container). Serve
+// pra não perder tempo procurando "que aparelho é esse" numa coisa que muda
+// de MAC sozinha na semana que vem.
+function macAleatorio(mac) {
+  const segundo = String(mac || '').charAt(1).toLowerCase();
+  return ['2', '6', 'a', 'e'].includes(segundo);
+}
+
+// Junta a varredura de agora com o que já era conhecido. É isso que dá
+// STATUS por aparelho: quem veio na varredura está `ativo`; quem estava na
+// lista e não veio some da rede mas continua listado como inativo, com a
+// hora em que foi visto pela última vez - é assim que se percebe que a
+// impressora sumiu, e não só que "tem 6 aparelhos".
+//
+// A primeira varredura NÃO gera novidade nenhuma: ela vira a linha de base,
+// senão o primeiro dia depois do deploy alertaria a rede inteira de uma vez
+// e ninguém olharia o alerta de novo.
+function mesclarDispositivos(anteriores, atuais, agora) {
+  // formato antigo (só uma lista de MACs conhecidos) vira linha de base sem
+  // detalhe nenhum, em vez de ser jogado fora
+  const lista = comoLista(anteriores).map((d) => (typeof d === 'string' ? { mac: d } : d));
+  const primeiraVez = !Array.isArray(anteriores) || !anteriores.length;
+  const porMac = new Map(lista.filter((d) => d && d.mac).map((d) => [d.mac, { ...d, ativo: false }]));
+  const novos = [];
+  atuais.forEach((d) => {
+    const antes = porMac.get(d.mac);
+    if (!antes) {
+      const registro = { mac: d.mac, ip: d.ip, nome: d.nome || null, desde: agora, visto: agora, ativo: true };
+      porMac.set(d.mac, registro);
+      if (!primeiraVez) novos.push(registro);
+      return;
+    }
+    porMac.set(d.mac, {
+      ...antes,
+      ip: d.ip,
+      // nome só é sobrescrito quando a resolução DEU certo - senão um DNS
+      // que falhou uma vez apagaria o nome que já tínhamos
+      nome: d.nome || antes.nome || null,
+      visto: agora,
+      ativo: true,
+      desde: antes.desde || agora,
+    });
+  });
+  // ativos primeiro, e dentro de cada grupo o visto mais recente na frente
+  const todos = [...porMac.values()].sort((a, b) => (b.ativo ? 1 : 0) - (a.ativo ? 1 : 0) || (b.visto || 0) - (a.visto || 0));
+  return { dispositivos: todos.slice(0, MACS_CONHECIDOS_MAX), novos, primeiraVez };
 }
 
 // resumo por unidade pro painel: quantos aparelhos a loja enxerga e quantos
@@ -215,7 +255,9 @@ function resumoDispositivos(docs) {
     if (!d.dispositivos || !d.dispositivos.length) return;
     if (!porUnidade.has(d.codigo)) porUnidade.set(d.codigo, { codigo: d.codigo, macs: new Set(), em: 0 });
     const u = porUnidade.get(d.codigo);
-    d.dispositivos.forEach((x) => u.macs.add(x.mac));
+    // só os ATIVOS entram na conta: a lista guarda também quem sumiu, e
+    // "12 aparelhos" contando os que já foram embora não é a rede da loja
+    d.dispositivos.filter((x) => x.ativo !== false).forEach((x) => u.macs.add(x.mac));
     u.em = Math.max(u.em, d.dispositivosEm || 0);
   });
   return [...porUnidade.values()]
@@ -262,7 +304,7 @@ function panorama(docs) {
       uptimeHoras: d.uptimeHoras != null ? d.uptimeHoras : null,
       uptimeDias: dias,
       precisaReiniciar,
-      aparelhosRede: (d.dispositivos || []).length,
+      aparelhosRede: (d.dispositivos || []).filter((x) => x.ativo !== false).length,
       dispositivosEm: d.dispositivosEm || null,
     };
   });
@@ -283,7 +325,7 @@ function discosComProblema(docs) {
 module.exports = {
   LIVRE_CRITICO_PCT, LIVRE_ATENCAO_PCT, TEMPERATURA_ALTA_C, DISPOSITIVOS_MAX,
   UPTIME_REINICIAR_DIAS,
-  sanitizarDisco, avaliarDisco, sanitizarDispositivos, diffDispositivos,
+  sanitizarDisco, avaliarDisco, sanitizarDispositivos, mesclarDispositivos, macAleatorio,
   sanitizarUptime, avaliarUptime, maquinasParaReiniciar,
   resumoDispositivos, discosComProblema, panorama,
 };
