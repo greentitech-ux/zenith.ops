@@ -90,18 +90,33 @@ function abertoDesde(){
   if(!v){ v = String(Date.now()); sessionStorage.setItem('zenithAbertoDesde', v); }
   return Number(v);
 }
+// medicao de link (ver redeDiagnostico.js no servidor): o tempo do proprio
+// heartbeat ja e a latencia real de ponta a ponta, do jeito que o sistema e
+// usado. So fica conhecida DEPOIS que a resposta chega, entao cada beat leva
+// a medida do beat anterior; falhasSeguidas conta os beats que nao passaram.
+// Aqui nao da pra separar rede interna de link como o NOCZenith faz (o
+// navegador nao consegue pingar o roteador), mas a serie de latencia ja
+// mostra quando a loja fica lenta.
+let _redeUltimaLatencia = null;
+let _redeFalhasSeguidas = 0;
 async function heartbeat(codigo, posto){
+  const t0 = Date.now();
   try{
+    const rede = { falhasSeguidas: _redeFalhasSeguidas };
+    if(_redeUltimaLatencia !== null) rede.latenciaMs = _redeUltimaLatencia;
+    _redeUltimaLatencia = null; // cada medicao vai uma vez so, senao pesa varias vezes na media
     const r = await fetch('/api/loja-status/heartbeat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesde() }),
+      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesde(), rede }),
     });
     if(r.ok){
+      _redeUltimaLatencia = Date.now() - t0;
+      _redeFalhasSeguidas = 0;
       const d = await r.json();
       if(d.mensagemPendente) mostrarMensagemBanner(d.mensagemPendente);
-    }
-  }catch(e){ /* sem rede agora - a proxima tentativa em 25s tenta de novo */ }
+    }else{ _redeFalhasSeguidas++; }
+  }catch(e){ _redeFalhasSeguidas++; /* sem rede agora - a proxima tentativa em 25s tenta de novo */ }
 }
 
 // o icone fixado (Windows: "Criar atalho"/instalar como app) as vezes volta

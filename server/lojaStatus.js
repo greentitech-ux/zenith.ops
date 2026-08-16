@@ -37,6 +37,7 @@
 const crypto = require('crypto');
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
+const redeDiagnostico = require('./redeDiagnostico');
 
 const COLLECTION = db.collection('lojaStatus');
 // fila de comandos do agente (ver agenteAcoes.js) - histórico completo de
@@ -162,6 +163,25 @@ const cache = createCache(listUncached, 10 * 1000);
 // - e o mais perto que da pra chegar de "ha quanto tempo esta ligado" sem
 // instalar um agente de verdade na maquina, que e exatamente o que essa
 // ferramenta foi feita pra evitar
+// Monta os campos de diagnostico de link que vao junto na escrita do
+// heartbeat. Devolve {} quando nao ha nada novo, pra nao reescrever campo a
+// toa (nem apagar o acumulado do dia quando chega um beat sem medicao - o
+// caso do computador que ainda esta com a versao velha do agente).
+function metricasDeRede(atual, rede) {
+  const amostra = redeDiagnostico.sanitizarAmostra(rede);
+  const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+  const bucketAtual = (atual && atual.redeDia) || null;
+  const viraDia = !!(bucketAtual && bucketAtual.dia && bucketAtual.dia !== hoje);
+  if (!amostra && !viraDia) return {};
+  const campos = {};
+  if (viraDia) {
+    // fecha o dia anterior no historico antes de zerar o acumulador
+    campos.redeHistorico = redeDiagnostico.virarDia(bucketAtual, (atual && atual.redeHistorico) || [], hoje);
+  }
+  campos.redeDia = redeDiagnostico.acumular(viraDia ? null : bucketAtual, amostra, hoje);
+  return campos;
+}
+
 async function heartbeat(codigo, posto, info, token) {
   const id = docIdFor(codigo, posto || 'principal');
   const ref = COLLECTION.doc(id);
@@ -195,6 +215,12 @@ async function heartbeat(codigo, posto, info, token) {
     ip: dados.ip || (atual && atual.ip) || null,
     userAgent: dados.userAgent || (atual && atual.userAgent) || null,
     abertoDesde: dados.abertoDesde || (atual && atual.abertoDesde) || null,
+    // diagnostico de link (ver redeDiagnostico.js). Entra nesta MESMA escrita
+    // de proposito: o heartbeat ja grava a cada 25s, entao medir a rede nao
+    // custa nenhuma operacao a mais no Firestore. redeDia/redeHistorico sao
+    // donos do heartbeat (so ele escreve), entao o read-then-write aqui nao
+    // repete a corrida que avisadoOffline teve com a varredura.
+    ...metricasDeRede(atual, dados.rede),
   }, { merge: true });
   // token confere? (maquina legada sem token cadastrado nunca passa aqui -
   // recebe comando/chat vazios ate reinstalar o NOCZenith com o token assado)
@@ -584,8 +610,17 @@ async function varrerAlertas() {
   return transicoes;
 }
 
+// Diagnostico de link de todos os computadores, pior primeiro (ver
+// redeDiagnostico.js). Usa o MESMO cache de listar() - nao gera leitura extra
+// no Firestore, so reinterpreta o que ja esta carregado.
+async function diagnosticoRede(dia) {
+  const alvo = dia || new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+  const docs = (await cache.cached()).map(comOnline).map(semSegredo);
+  return { dia: alvo, computadores: redeDiagnostico.ranking(docs, alvo) };
+}
+
 module.exports = {
-  heartbeat, listar, cadastrarComputador, editarComputador, removerComputador, moverComputador,
+  heartbeat, listar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR,
   getConfig, setConfig, pushAcessoRemotoAtivo,
   enfileirarComando, marcarComandoExecutado, registrarAcessoRemoto, responderChat,

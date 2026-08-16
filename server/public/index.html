@@ -322,18 +322,29 @@ function mostrarMensagemBannerLoja(msg){
 document.getElementById('mensagemBannerOk').addEventListener('click', () => {
   document.getElementById('mensagemBanner').style.display = 'none';
 });
+// medicao de link (ver redeDiagnostico.js no servidor): o tempo do proprio
+// heartbeat ja e a latencia real de ponta a ponta. So fica conhecida depois
+// da resposta, entao cada beat leva a medida do beat anterior.
+let _redeUltimaLatencia = null;
+let _redeFalhasSeguidas = 0;
 async function heartbeatLoja(codigo, posto){
+  const t0 = Date.now();
   try{
+    const rede = { falhasSeguidas: _redeFalhasSeguidas };
+    if(_redeUltimaLatencia !== null) rede.latenciaMs = _redeUltimaLatencia;
+    _redeUltimaLatencia = null; // cada medicao vai uma vez so
     const r = await fetch('/api/loja-status/heartbeat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesdeLoja() }),
+      body: JSON.stringify({ unidade: codigo, posto: posto || undefined, userAgent: navigator.userAgent, abertoDesde: abertoDesdeLoja(), rede }),
     });
     if(r.ok){
+      _redeUltimaLatencia = Date.now() - t0;
+      _redeFalhasSeguidas = 0;
       const d = await r.json();
       if(d.mensagemPendente) mostrarMensagemBannerLoja(d.mensagemPendente);
-    }
-  }catch(e){ /* sem rede agora - a proxima tentativa em 25s tenta de novo */ }
+    }else{ _redeFalhasSeguidas++; }
+  }catch(e){ _redeFalhasSeguidas++; /* sem rede agora - a proxima tentativa em 25s tenta de novo */ }
 }
 // o icone fixado (Windows: "Criar atalho"/instalar como app) as vezes volta
 // a abrir a URL pelada (sem ?unidade=&posto=) em vez da URL exata que foi

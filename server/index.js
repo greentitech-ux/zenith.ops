@@ -836,6 +836,10 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
     const token = req.headers['x-noc-token'] || req.body.token || null;
     const { mensagemPendente, comandoPendente, chatMensagens } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
       ip, userAgent: req.body.userAgent, abertoDesde: req.body.abertoDesde,
+      // medicao de link (ver redeDiagnostico.js). Vem do agente/navegador e
+      // esta rota e PUBLICA, entao e tratado como dado hostil - quem sanitiza
+      // e o redeDiagnostico.sanitizarAmostra, chamado la dentro.
+      rede: req.body.rede,
     }, token);
     res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens });
   } catch (err) {
@@ -1983,6 +1987,24 @@ app.post('/api/alertas-central/:id/atender', auth.requireMaster, async (req, res
 app.get('/api/loja-status', requireSection('suporte'), async (req, res) => {
   const [status, mapa] = await Promise.all([lojaStatus.listar(), construirUnidadesMapa()]);
   res.json(status.map((s) => ({ ...s, unidadeNome: mapa[s.codigo] || s.codigo })));
+});
+
+// Diagnostico de qualidade de link, pior primeiro (ver redeDiagnostico.js).
+// Mesmo gate do painel do NOC - quem enxerga os computadores enxerga a saude
+// da rede deles. Nao custa leitura extra: reaproveita o cache de listar().
+app.get('/api/loja-status/rede', requireSection('suporte'), async (req, res) => {
+  try {
+    const [diag, mapa] = await Promise.all([
+      lojaStatus.diagnosticoRede(req.query.dia),
+      construirUnidadesMapa(),
+    ]);
+    res.json({
+      ...diag,
+      computadores: diag.computadores.map((c) => ({ ...c, unidadeNome: mapa[c.codigo] || c.codigo })),
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // ---------- Monitor: alertar a propria loja sobre um pedido especifico -
