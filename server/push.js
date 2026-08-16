@@ -44,6 +44,27 @@ async function addSubscription(sub, meta) {
   invalidarSubs();
 }
 
+// o navegador as vezes troca a inscricao sozinho (endpoint antigo invalidado
+// pelo SO/push service) - mais comum depois de MUITO tempo sem interacao,
+// exatamente o cenario "preciso que os alertas aconteçam mesmo com o app
+// sem interacao por um tempo". Isso dispara o evento pushsubscriptionchange
+// DENTRO do service worker (ver sw.js), sem nenhuma aba aberta - e sem
+// acesso ao token de login guardado no localStorage da pagina, entao nao da
+// pra chamar a rota autenticada de sempre (POST /api/push/subscribe). Em vez
+// disso, so migra o META (permissoes) da inscricao antiga pra nova, usando o
+// proprio endpoint antigo como prova de posse (so quem ja tinha a inscricao
+// valida sabe esse endpoint) - nao concede nada novo, so preserva o que ja
+// existia, pra o alerta nao morrer em silencio
+async function migrarSubscricao(oldEndpoint, novaSubscricao) {
+  if (!oldEndpoint || !novaSubscricao || !novaSubscricao.endpoint) return;
+  const antigaRef = COLLECTION.doc(subDocId(oldEndpoint));
+  const antigaSnap = await antigaRef.get();
+  const meta = antigaSnap.exists ? antigaSnap.data().meta : null;
+  await COLLECTION.doc(subDocId(novaSubscricao.endpoint)).set({ ...novaSubscricao, meta: meta || null }, { merge: true });
+  if (antigaSnap.exists && oldEndpoint !== novaSubscricao.endpoint) await antigaRef.delete();
+  invalidarSubs();
+}
+
 function podeReceber(sub, { unidade, section }) {
   const meta = sub.meta;
   if (!meta) return false; // inscricao antiga sem dono conhecido - nao arrisca
@@ -629,7 +650,7 @@ async function notifyAcessoRemotoDetectado(unidadeNome, codigo, computadorNome, 
 }
 
 module.exports = {
-  addSubscription, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
+  addSubscription, migrarSubscricao, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
   notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado,
