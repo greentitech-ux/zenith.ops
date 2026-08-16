@@ -2697,6 +2697,7 @@ app.get('/api/users/relatorio.:formato(csv|pdf)', auth.requireMaster, async (req
 // salvos, nunca uma função/closure).
 const EXECUTORES_QA = {
   'usuarios.criar': (p) => users.create(p),
+  'usuarios.criarCopiando': (p) => users.criarCopiandoDe(p),
   'usuarios.criarQaMaster': (p) => users.createQaMaster(p),
   'usuarios.permissoes': (p) => users.updatePermissions(p.id, p.permissions),
   'usuarios.ativo': (p) => users.setActive(p.id, p.active),
@@ -2907,6 +2908,53 @@ app.post('/api/users', auth.requireMaster, async (req, res) => {
   try {
     if (await desviarSeQaMaster(req, res, 'usuarios.criar', `Criar acesso: ${req.body?.email || ''}`, req.body)) return;
     res.json(await users.create(req.body));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Sugere email + usuario livres pro botao "Criar acesso" do ticket de
+// Suporte de TI (ver central-historico.html). So calcula, nao grava nada.
+app.get('/api/users/sugerir-acesso', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await users.sugerirAcesso({
+      nome: req.query.nome,
+      sobrenome: req.query.sobrenome,
+      nomeCompleto: req.query.nomeCompleto,
+      dominio: req.query.dominio,
+    }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Cria o acesso copiando as PERMISSOES de um usuario que ja existe.
+// Passa pelo mesmo gate do POST /api/users: se for um QA Master mexendo,
+// vira aprovacao em vez de criar na hora.
+app.post('/api/users/criar-copiando', auth.requireMaster, async (req, res) => {
+  try {
+    const { modeloId, email, username, senha, solicitacaoId } = req.body || {};
+    const payload = { modeloId, email, username, senha };
+    if (await desviarSeQaMaster(req, res, 'usuarios.criarCopiando', `Criar acesso ${email} copiando permissões de outro usuário`, payload)) return;
+    const resultado = await users.criarCopiandoDe(payload);
+    // deixa rastro no ticket que originou o acesso - sem isso ninguem
+    // consegue, depois, ligar o acesso novo ao pedido que o gerou.
+    // Falha aqui nao desfaz a criacao (o acesso ja existe e vale), so loga.
+    if (solicitacaoId) {
+      try {
+        await centralChat.addMessage({
+          tipo: req.body.solicitacaoTipo || 'suporte-ti',
+          cardId: solicitacaoId,
+          autorId: req.user.id,
+          autorEmail: req.user.email,
+          autorUsername: req.user.username || null,
+          texto: `👤 Acesso criado no Zenith: ${resultado.usuario.email} (usuário: ${resultado.usuario.username}), permissões copiadas de ${resultado.copiadoDe.username || resultado.copiadoDe.email}. A senha foi entregue pelo Master por fora do app e será trocada no primeiro login.`,
+        });
+      } catch (err) {
+        console.error('Acesso criado, mas falhou registrar no chat do ticket:', err.message);
+      }
+    }
+    res.json(resultado);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

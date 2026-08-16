@@ -3,6 +3,9 @@
 // proprias (secoes do app, unidades, grupos do cofre). So o Master pode
 // chamar essas funcoes (aplicado nas rotas via auth.requireMaster).
 const bcrypt = require('bcryptjs');
+// precisa do require: o `crypto` global do Node 20 e a WebCrypto, que NAO
+// tem randomBytes (usado em gerarSenhaTemporaria)
+const crypto = require('crypto');
 const db = require('./firestore');
 const { emptyPermissions, invalidarUsuario } = require('./auth');
 const { createCache } = require('./liveCache');
@@ -491,8 +494,119 @@ function toPublic(doc) {
   };
 }
 
+// ---------------------------------------------------------------
+// SUGESTAO DE ACESSO (botao "Criar acesso" do ticket de Suporte de TI,
+// ver central-historico.html). Monta email + usuario livres a partir do
+// nome da pessoa, sem gravar nada.
+//
+// Regra do usuario, definida pelo Master:
+//   1) so o primeiro nome              -> priscila
+//   2) se ocupado, so o sobrenome      -> pereira
+//   3) se ocupado, inicial + sobrenome -> ppereira
+//   4) se ocupado, sufixo numerico     -> ppereira2, ppereira3...
+// O email e sempre nome.sobrenome@dominio, com o mesmo sufixo numerico
+// quando ja existir.
+//
+// IMPORTANTE: isso so OLHA o que esta livre agora. Quem grava e o
+// create(), que confere email e usuario DE NOVO dentro da transacao -
+// entao dois Masters pedindo sugestao ao mesmo tempo nao conseguem criar
+// dois acessos iguais; o segundo recebe "Já existe um acesso com esse
+// usuário" e pede outra sugestao.
+// ---------------------------------------------------------------
+function semAcento(s) {
+  return String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+function soLetras(s) {
+  return semAcento(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// "Priscila Pereira" -> {nome:'Priscila', sobrenome:'Pereira'}
+// "Maria da Silva Santos" -> {nome:'Maria', sobrenome:'Santos'}
+// Conectivos (de/da/do/das/dos/e) nunca viram sobrenome.
+const CONECTIVOS = new Set(['de', 'da', 'do', 'das', 'dos', 'e']);
+function separarNome(completo) {
+  const partes = String(completo == null ? '' : completo).trim().split(/\s+/).filter(Boolean);
+  const nome = partes[0] || '';
+  let sobrenome = '';
+  for (let i = partes.length - 1; i >= 1; i--) {
+    if (!CONECTIVOS.has(soLetras(partes[i]))) { sobrenome = partes[i]; break; }
+  }
+  return { nome, sobrenome };
+}
+
+function gerarSenhaTemporaria() {
+  // 12 caracteres url-safe. O Master le no card e repassa por fora do app -
+  // mesmo fluxo que ja existe quando ele cria um acesso na mao (o create()
+  // marca precisaTrocarSenha, entao ela troca no primeiro login).
+  return crypto.randomBytes(9).toString('base64url');
+}
+
+const DOMINIO_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+
+async function sugerirAcesso({ nome, sobrenome, nomeCompleto, dominio }) {
+  if (nomeCompleto && !nome) ({ nome, sobrenome } = separarNome(nomeCompleto));
+  const n = soLetras(nome);
+  const s = soLetras(sobrenome);
+  if (n.length < 2) throw new Error('Informe o primeiro nome (pelo menos 2 letras).');
+
+  const dom = String(dominio == null ? '' : dominio).trim().toLowerCase().replace(/^@/, '');
+  if (!DOMINIO_RE.test(dom)) throw new Error('Domínio inválido (ex: grupobravoempresarial.com).');
+
+  const todos = await list();
+  const usernamesUsados = new Set(todos.map((u) => (u.username || '').toLowerCase()).filter(Boolean));
+  const emailsUsados = new Set(todos.map((u) => (u.email || '').toLowerCase()).filter(Boolean));
+
+  const candidatos = [n];
+  if (s) candidatos.push(s, n[0] + s);
+  const tentativas = candidatos
+    .map((c) => c.slice(0, 30))
+    .filter((c) => c.length >= 2)
+    .map((c) => ({ usuario: c, livre: !usernamesUsados.has(c) }));
+
+  let username = (tentativas.find((t) => t.livre) || {}).usuario || '';
+  if (!username) { // 4) todas ocupadas: sufixo numerico na ultima forma
+    const base = (s ? n[0] + s : n).slice(0, 27);
+    for (let i = 2; i < 1000 && !username; i++) {
+      if (!usernamesUsados.has(base + i)) username = base + i;
+    }
+  }
+
+  const baseEmail = s ? `${n}.${s}` : n;
+  let email = `${baseEmail}@${dom}`;
+  for (let i = 2; i < 1000 && emailsUsados.has(email); i++) email = `${baseEmail}${i}@${dom}`;
+
+  return { nome, sobrenome, dominio: dom, email, username, tentativas, senha: gerarSenhaTemporaria() };
+}
+
+// Cria o acesso copiando as PERMISSOES de um usuario que ja existe.
+//
+// De proposito copia so o bloco `permissions` (seções, unidades, subgrupos
+// do cofre, tipos de solicitação). NAO copia isAdmin, qaUser, cargo nem os
+// pode* (catálogo de estoque/insumos, cadastrar operadores, RH todas as
+// unidades...). Esses sao privilegios extras, e herdar em silencio um
+// "Admin" so porque o modelo era Admin e do tipo de coisa que ninguem
+// percebe ate dar errado. Se precisar, o Master liga depois em Usuários.
+async function criarCopiandoDe({ modeloId, email, username, senha }) {
+  const todos = await list();
+  const modelo = todos.find((u) => u.id === modeloId);
+  if (!modelo) throw new Error('Usuário-modelo não encontrado.');
+  if (modelo.role === 'master') throw new Error('Não dá pra copiar de um acesso Master. Escolha um usuário comum que já tenha o acesso certo.');
+  if (!modelo.permissions || !(modelo.permissions.sections || []).length) {
+    throw new Error(`O modelo (${modelo.username || modelo.email}) não tem nenhuma seção liberada - o acesso novo nasceria sem poder abrir nada.`);
+  }
+  const criado = await create({ email, password: senha, username, permissions: modelo.permissions });
+  return {
+    usuario: criado,
+    copiadoDe: { id: modelo.id, email: modelo.email, username: modelo.username },
+    naoCopiado: { isAdmin: !!modelo.isAdmin, cargo: modelo.cargo || null },
+  };
+}
+
 module.exports = {
   VALID_SECTIONS,
+  separarNome,
+  sugerirAcesso,
+  criarCopiandoDe,
   TIPOS_SOLICITACAO,
   CARGOS_VALIDOS,
   ehCargoGerente,
