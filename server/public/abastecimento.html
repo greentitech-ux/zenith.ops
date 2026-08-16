@@ -92,23 +92,6 @@
   .resumo-card.pend{border-color:rgba(242,179,61,.4);}
   .resumo-card.pend .hoje{color:var(--warn);}
 
-  /* fluxo de entrada e saida (so Master) - cada item vira um cartao com a
-     conta aberta (saldo inicial + entradas - saldo final), em vez de tabela:
-     a tela e usada no celular, tabela de 6 colunas nao cabe */
-  .fluxo-preset{font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:14px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
-  .fluxo-preset.ativo{color:var(--accent);border-color:var(--accent);}
-  .fluxo-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;}
-  .fluxo-item .nome{font-weight:700;font-size:13px;}
-  .fluxo-item .tag{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-left:6px;}
-  .fluxo-eq{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;}
-  .fluxo-eq b{color:var(--text);font-weight:700;}
-  .fluxo-saida{font-size:16px;font-weight:800;color:var(--accent);}
-  .fluxo-flag{font-size:11px;margin-top:5px;}
-  .fluxo-flag.ruim{color:var(--bad);}
-  .fluxo-flag.aviso{color:var(--warn);}
-  .fluxo-avaria{font-family:var(--mono);font-size:11px;color:var(--muted);padding:5px 0;border-top:1px solid var(--line);}
-  .fluxo-avaria b{color:var(--text);}
-
   .acoes-topo{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
   .btn-acao{flex:1;min-width:180px;border:none;border-radius:10px;padding:13px 12px;font-size:13.5px;font-weight:800;cursor:pointer;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:8px;}
   .btn-acao.pedido{background:var(--pedido-dim);color:var(--pedido);border:1px solid rgba(255,138,128,.4);}
@@ -264,6 +247,7 @@
   <a class="back hidden" id="nav-entregas" href="/entregas.html">🛵 Entregas</a>
   <a class="back hidden" id="nav-inventario" href="/estoque.html">📦 Estoque</a>
   <a class="back active" id="nav-abastecimento" href="/abastecimento.html">🛒 Abastec. Carrinho</a>
+  <a class="back hidden" id="nav-abastecimento-relatorios" href="/abastecimento-relatorios.html">📊 Relatórios do Carrinho</a>
   <div class="nav-drawer-grupo">Monitoramento</div>
   <a class="back hidden" id="nav-monitor" href="/monitor.html">📈 Monitor</a>
   <a class="back hidden" id="nav-relatorios" href="/relatorios.html">📊 Relatórios</a>
@@ -311,41 +295,6 @@
 <div class="panel">
   <h2>Enviado ao carrinho <span style="font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:400;">hoje · ontem</span></h2>
   <div class="resumo-grid" id="resumo-grid"></div>
-</div>
-
-<!-- comparativo Abastecimento x Fechamento - so Master (ver
-     /api/abastecimento/comparativo-fechamento em index.js): confere se o
-     que foi ENVIADO por sabor bate com o que ficou registrado nos KPIs
-     Extras do Fechamento do mesmo dia - data escolhida no seletor abaixo ---------- -->
-<div class="panel hidden" id="painel-comparativo-fechamento">
-  <h2>
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-      <span>🔍 Comparativo com o Fechamento <span style="font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:400;">só Master</span></span>
-      <input type="date" id="comparativo-data" onchange="carregarComparativoFechamento(this.value)" style="font-family:var(--mono);font-size:12px;padding:4px 8px;border-radius:6px;background:var(--panel2,#181d24);color:var(--text);border:1px solid var(--line);">
-    </div>
-  </h2>
-  <div class="sub" id="comparativo-sub" style="margin:-4px 0 10px;"></div>
-  <div class="resumo-grid" id="comparativo-grid"></div>
-</div>
-
-<!-- fluxo de entrada e saida do carrinho - so Master (ver
-     /api/abastecimento/fluxo em index.js): reconcilia contagem inicial +
-     entradas - contagem final = saida apurada, por pizza e por insumo, mais
-     perda em transito (enviado x recebido) e avarias declaradas -->
-<div class="panel hidden" id="painel-fluxo">
-  <h2>
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-      <span>📊 Fluxo de entrada e saída <span style="font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:400;">só Master</span></span>
-      <span style="display:flex;gap:6px;">
-        <button type="button" class="fluxo-preset" id="fluxo-p7" onclick="carregarFluxo(7)">7 dias</button>
-        <button type="button" class="fluxo-preset" id="fluxo-p30" onclick="carregarFluxo(30)">30 dias</button>
-      </span>
-    </div>
-  </h2>
-  <div class="sub" id="fluxo-sub" style="margin:-4px 0 10px;"></div>
-  <div class="resumo-grid" id="fluxo-kpis"></div>
-  <div id="fluxo-itens"></div>
-  <div id="fluxo-avarias"></div>
 </div>
 
 <div class="acoes-topo">
@@ -869,109 +818,6 @@ function renderResumo(){
       <div class="sabor">⏳ Aguardando envio</div>
       <div class="nums"><span class="hoje">${pendentes}</span><span class="ontem">pedido${pendentes===1?'':'s'}</span></div>
     </div>`;
-}
-
-// comparativo com o Fechamento (so Master) - quanto foi ENVIADO por sabor x
-// quanto ficou registrado nos KPIs Extras do Fechamento do mesmo dia (ver
-// /api/abastecimento/comparativo-fechamento em index.js) - "data" opcional
-// (YYYY-MM-DD) deixa consultar outro dia; sem ela o backend usa ontem
-async function carregarComparativoFechamento(data){
-  const painel = document.getElementById('painel-comparativo-fechamento');
-  const inputData = document.getElementById('comparativo-data');
-  inputData.max = dataBrasilia(new Date().toISOString());
-  try{
-    const url = '/api/abastecimento/comparativo-fechamento' + (data ? '?data='+encodeURIComponent(data) : '');
-    const dados = await fetch(url).then(r=>{ if(!r.ok) throw new Error('Erro ao carregar comparativo.'); return r.json(); });
-    painel.classList.remove('hidden');
-    inputData.value = dados.data;
-    const [y,m,d] = dados.data.split('-');
-    if(!dados.temFechamento){
-      document.getElementById('comparativo-sub').textContent = `Ainda não tem fechamento lançado pra ${d}/${m} - comparação aparece assim que lançar.`;
-    }else{
-      document.getElementById('comparativo-sub').textContent = `Referente a ${d}/${m}.`;
-    }
-    document.getElementById('comparativo-grid').innerHTML = dados.comparativo.map(c=>{
-      const semKpi = dados.temFechamento && !c.kpiEncontrado;
-      const diverge = c.diferenca != null && c.diferenca !== 0;
-      const corDif = diverge ? 'color:var(--bad);font-weight:700;' : '';
-      return `
-      <div class="resumo-card">
-        <div class="sabor">${SABOR_LABEL[c.sabor]}</div>
-        <div class="nums">
-          <span class="hoje">${c.enviado} <small style="font-size:9px;color:var(--muted);">enviado</small></span>
-          <span class="ontem">${c.registrado==null ? (semKpi?'sem KPI cadastrado':'—') : c.registrado+' fechamento'}</span>
-        </div>
-        ${diverge ? `<div style="${corDif}font-size:11px;margin-top:2px;">⚠ diferença de ${c.diferenca>0?'+':''}${c.diferenca}</div>` : ''}
-      </div>`;
-    }).join('');
-  }catch(err){
-    painel.classList.add('hidden');
-  }
-}
-
-// fluxo de entrada e saida (so Master) - ver /api/abastecimento/fluxo em
-// index.js. Mostra a conta aberta por item (saldo inicial + entradas -
-// saldo final = saida apurada) + os sinais de controle: perda em transito
-// (enviado x recebido), avarias declaradas e cobertura de contagem
-let FLUXO_DIAS = 7;
-async function carregarFluxo(dias){
-  if(dias) FLUXO_DIAS = dias;
-  const painel = document.getElementById('painel-fluxo');
-  document.getElementById('fluxo-p7').classList.toggle('ativo', FLUXO_DIAS===7);
-  document.getElementById('fluxo-p30').classList.toggle('ativo', FLUXO_DIAS===30);
-  const fim = dataBrasilia(new Date().toISOString());
-  const inicio = dataBrasilia(new Date(Date.now() - (FLUXO_DIAS-1)*86400000).toISOString());
-  try{
-    const d = await fetch(`/api/abastecimento/fluxo?inicio=${inicio}&fim=${fim}`).then(r=>{ if(!r.ok) throw new Error('Erro ao carregar fluxo.'); return r.json(); });
-    painel.classList.remove('hidden');
-    const ind = d.indicadores;
-    const semContagem = ind.diasComContagem < ind.diasNoPeriodo;
-
-    document.getElementById('fluxo-sub').innerHTML = d.reconciliavel
-      ? `Conta fechada entre a <b>primeira</b> e a <b>última contagem</b> do período (${fmtDia(dataBrasilia(d.janela.de))} ${fmtHora(d.janela.de)} → ${fmtDia(dataBrasilia(d.janela.ate))} ${fmtHora(d.janela.ate)}).`
-      : `<span style="color:var(--warn);">⚠ ${escapeHtml(d.motivoNaoReconciliavel)}</span> Abaixo, só o que foi enviado e as avarias.`;
-
-    document.getElementById('fluxo-kpis').innerHTML = `
-      <div class="resumo-card${semContagem?' pend':''}">
-        <div class="sabor">Contagens</div>
-        <div class="nums"><span class="hoje">${ind.diasComContagem}<span style="font-size:12px;color:var(--muted);">/${ind.diasNoPeriodo}</span></span><span class="ontem">dias cobertos</span></div>
-      </div>
-      <div class="resumo-card${ind.enviosSemRecebimento?' pend':''}">
-        <div class="sabor">Envios</div>
-        <div class="nums"><span class="hoje">${ind.envios}</span><span class="ontem">${ind.enviosSemRecebimento} sem conferir</span></div>
-      </div>
-      <div class="resumo-card">
-        <div class="sabor">Perda em trânsito</div>
-        <div class="nums"><span class="hoje" style="${ind.perdaTransitoTotal?'color:var(--bad);':''}">${ind.perdaTransitoTotal}</span><span class="ontem">${ind.recebimentosDivergentes} divergência${ind.recebimentosDivergentes===1?'':'s'}</span></div>
-      </div>
-      <div class="resumo-card">
-        <div class="sabor">Avarias</div>
-        <div class="nums"><span class="hoje" style="${ind.avariasTotal?'color:var(--warn);':''}">${ind.avariasTotal}</span><span class="ontem">declaradas</span></div>
-      </div>`;
-
-    document.getElementById('fluxo-itens').innerHTML = d.itens.map(i=>{
-      const un = i.tipo==='pizza' ? '' : ' un';
-      const conta = d.reconciliavel
-        ? `<span>saldo inicial <b>${i.saldoInicial}${un}</b></span><span>+ entradas <b>${i.entradas}${un}</b></span><span>− saldo final <b>${i.saldoFinal}${un}</b></span><span class="fluxo-saida">= ${i.saidaApurada}${un}</span>`
-        : `<span>enviado <b>${i.enviado}${un}</b></span><span>recebido <b>${i.recebido}${un}</b></span>`;
-      const flags = [];
-      if(i.perdaTransito > 0) flags.push(`<div class="fluxo-flag ruim">⚠ perda em trânsito: ${i.perdaTransito}${un} (enviou ${i.enviado}, chegou ${i.recebido})</div>`);
-      if(i.avarias > 0) flags.push(`<div class="fluxo-flag aviso">🔧 ${i.avarias}${un} declarado(s) como avaria</div>`);
-      if(d.reconciliavel && i.saidaApurada < 0) flags.push(`<div class="fluxo-flag ruim">⚠ saída negativa - sobrou mais do que entrou: provável contagem ou envio não lançado</div>`);
-      return `<div class="fluxo-item">
-        <div><span class="nome">${escapeHtml(i.nome)}</span><span class="tag">${i.tipo==='pizza'?'pizza':'insumo'}</span></div>
-        <div class="fluxo-eq">${conta}</div>
-        ${flags.join('')}
-      </div>`;
-    }).join('') || '<div class="sub" style="margin-top:8px;">Nenhum movimento no período.</div>';
-
-    document.getElementById('fluxo-avarias').innerHTML = d.avariasDetalhe.length
-      ? `<div class="sub" style="margin:14px 0 4px;"><b>Avarias declaradas</b> (${d.avariasDetalhe.length})</div>`
-        + d.avariasDetalhe.map(a=>`<div class="fluxo-avaria">${fmtDia(a.data)} · <b>${escapeHtml(a.nome)} ${a.quantidade}</b> — ${escapeHtml(a.observacao)}${a.temFoto?' 📷':''}</div>`).join('')
-      : '';
-  }catch(err){
-    painel.classList.add('hidden');
-  }
 }
 
 // (os indicadores de tempo/ocorrencias sairam desta tela de proposito -
@@ -2633,6 +2479,10 @@ async function boot(){
   document.getElementById('nav-central-alertas').classList.toggle('hidden', !IS_MASTER);
   document.getElementById('nav-entregas-regras').classList.toggle('hidden', !IS_MASTER);
   document.getElementById('nav-reset-senha').classList.toggle('hidden', !(IS_MASTER || ME.isAdmin));
+  // relatorios gerenciais moraram aqui ate virarem pagina propria
+  // (abastecimento-relatorios.html) - esta tela e a operacao, fica aberta
+  // o dia todo no tablet do carrinho/loja
+  document.getElementById('nav-abastecimento-relatorios').classList.toggle('hidden', !IS_MASTER);
 
   if(!TEM_PEDIDO && !TEM_ENVIO){
     document.getElementById('sem-acesso').classList.remove('hidden');
@@ -2650,7 +2500,6 @@ async function boot(){
   await carregarConfig();
   await carregarCatalogo();
   await carregar();
-  if(IS_MASTER){ carregarComparativoFechamento(); carregarFluxo(7); }
   iniciarStream();
   initDragChipConversa();
   // os limites de 5min (lembrete de envio / "esta demorando" / contagem /
