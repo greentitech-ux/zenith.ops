@@ -924,8 +924,10 @@ async function limparTravados(){
     const d = await r.json();
     if(!r.ok) throw new Error(d.error || 'Não foi possível enviar.');
     const falhas = (d.detalhe||[]).filter(x => !x.ok);
+    const jaTinham = (d.detalhe||[]).filter(x => x.jaTinha).length;
     alert(`Comando enviado para ${d.enviados} de ${d.total} computador(es) internos.`
       + `\nCada um executa na próxima batida (até ~25s).`
+      + (jaTinham ? `\n\n(${jaTinham} já tinham o comando na fila de um envio anterior — também vão executar.)` : '')
       + (falhas.length ? `\n\nNão foi possível enviar para:\n` + falhas.map(f => `• ${f.nome || f.posto}: ${f.motivo}`).join('\n') : ''));
   }catch(e){ alert('Erro: ' + e.message); }
   b.disabled = false; b.textContent = '🧹 Destravar lojas';
