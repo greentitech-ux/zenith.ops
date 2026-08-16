@@ -3534,19 +3534,25 @@ app.post('/api/inventario/catalogo/seed', auth.requireMaster, async (req, res) =
 
 // le a foto/PDF da nota de recebimento (ver inventarioNotaOcr.js) e devolve
 // um RASCUNHO (data, fornecedor, numero + itens ja tentando casar com o
-// catalogo) pro gerente conferir na tela antes de confirmar - nao grava nada
-// sozinho, cada linha confirmada vira um POST /api/inventario/recebimentos
-// normal (o mesmo de sempre), um por vez
+// catalogo) pro gerente conferir na tela antes de confirmar - nao grava
+// recebimento nenhum sozinho, cada linha confirmada vira um POST
+// /api/inventario/recebimentos normal (o mesmo de sempre), um por vez.
+// A FOTO/PDF em si e salva no Storage aqui (mesmo se a leitura falhar em
+// achar itens) - o comprovante fica guardado pra conferencia e, mais pra
+// frente, pra alimentar o custo operacional do DRE com o documento de
+// origem de cada custo lançado
 app.post('/api/inventario/recebimentos/ler-nota', requireSection('inventario'), uploadNotaFiscal.single('nota'), async (req, res) => {
   try {
     const unidade = req.body.unidade;
     if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     if (!req.file) return res.status(400).json({ error: 'Anexe a foto ou o PDF da nota.' });
     if (!inventarioNotaOcr.ativo()) return res.status(400).json({ error: 'Leitura automática de nota não está configurada neste servidor.' });
+    const notaArquivo = await storage.salvarArquivo(unidade, req.file, 'inventario-notas');
     const catalogo = (await inventario.listCatalogo(unidade))
       .filter((i) => i.ativo !== false)
       .map((i) => ({ id: i.id, nome: i.nome, unidadeMedida: i.unidadeMedida }));
     const rascunho = await inventarioNotaOcr.lerNota({ buffer: req.file.buffer, mimeType: req.file.mimetype, catalogo });
+    rascunho.notaArquivo = notaArquivo;
     res.json(rascunho);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -3573,6 +3579,15 @@ app.delete('/api/inventario/recebimentos/:id', auth.requireMaster, async (req, r
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+// mostra a foto/PDF da nota que originou o recebimento (ver notaFiscalArquivo
+// em inventario.js) - pra conferir o comprovante contra o que foi lançado
+app.get('/api/inventario/recebimentos/:id/nota', requireSection('inventario'), async (req, res) => {
+  const registro = (await inventario.listRecebimentos()).find((r) => r.id === req.params.id);
+  if (!registro) return res.status(404).json({ error: 'Recebimento não encontrado.' });
+  if (!podeUnidadeInventario(req, registro.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  if (!registro.notaFiscalArquivo) return res.status(404).json({ error: 'Esse recebimento não tem nota anexada.' });
+  storage.streamArquivo(registro.notaFiscalArquivo, null, res);
 });
 
 app.get('/api/inventario/saidas', requireSection('inventario'), async (req, res) => {

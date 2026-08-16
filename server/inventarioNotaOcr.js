@@ -27,7 +27,12 @@ function getCliente() {
   return cliente;
 }
 
-const MODELO = 'claude-opus-5';
+// Sonnet e o ponto de equilibrio certo aqui: leitura de nota (texto denso,
+// tabela, formato variando por fornecedor) precisa de precisao - Haiku e
+// bom pra tarefa simples, mas arrisca mais em foto borrada/letra pequena, e
+// esse dado agora tambem alimenta o custo operacional do DRE (ver
+// criarRecebimento em inventario.js), entao a barra de confianca subiu
+const MODELO = 'claude-sonnet-5';
 
 function montarPrompt(catalogo) {
   const catalogoTexto = catalogo.map((i) => `${i.id} | ${i.nome} | unidade: ${i.unidadeMedida}`).join('\n') || '(catálogo vazio)';

@@ -288,7 +288,7 @@ async function seedCatalogoPadrao(unidadesAlvo) {
 // de itens fracionados tipo 400g/300g/210g). O peso informado tambem vira o
 // novo padrao do item no catalogo, pra pre-preencher o proximo recebimento -
 // util quando a marca muda o tamanho da embalagem (1kg -> 1,2kg -> 1,7kg).
-async function criarRecebimento({ unidade, unidadeNome, itemId, fornecedor, quantidade, quantidadeEmbalagens, pesoEmbalagem, valorUnitario, valorTotal, data, notaFiscal, criadoPorId, criadoPorEmail }) {
+async function criarRecebimento({ unidade, unidadeNome, itemId, fornecedor, quantidade, quantidadeEmbalagens, pesoEmbalagem, valorUnitario, valorTotal, data, notaFiscal, notaFiscalArquivo, criadoPorId, criadoPorEmail }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!itemId) throw new Error('Selecione o item.');
   const dataValida = validarData(data);
@@ -316,6 +316,11 @@ async function criarRecebimento({ unidade, unidadeNome, itemId, fornecedor, quan
     quantidadeEmbalagens: porEmbalagem ? num(quantidadeEmbalagens) : null,
     pesoEmbalagem: pesoUsadoG,
     data: dataValida, notaFiscal: (notaFiscal || '').trim().slice(0, 60) || null,
+    // caminho no Storage da foto/PDF da nota que originou esse lançamento
+    // (ver POST /api/inventario/recebimentos/ler-nota em index.js) - guardado
+    // pra dar pra conferir o comprovante depois e, no futuro, alimentar o
+    // custo operacional do DRE com o documento de origem de cada custo
+    notaFiscalArquivo: notaFiscalArquivo || null,
     criadoPorId, criadoPorEmail, criadoEm: new Date().toISOString(),
   };
   await ref.set(registro);
