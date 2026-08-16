@@ -211,7 +211,12 @@ async function heartbeat(codigo, posto, info, token) {
   // flutuante (so tipo 'interno' processa isso hoje - ver vigiaScript.js).
   // So sai com token valido (a conversa pode ter dado sensivel)
   const chatMensagens = tokenOk ? ((atual && atual.chatMensagens) || []) : [];
-  cache.invalidar();
+  // NAO invalida o cache de listar() aqui: cada heartbeat (a cada 25s, de
+  // ~30-50 computadores) forcava um refetch da colecao inteira a cada
+  // chamada, multiplicando leituras sem necessidade - o TTL de 10s do cache
+  // (ver `cache` acima) ja fica bem abaixo do LIMIAR_OFFLINE_MS (90s), entao
+  // o status online/offline calculado por comOnline() nunca fica visivelmente
+  // desatualizado mesmo sem invalidar na hora
   return { mensagemPendente, comandoPendente, chatMensagens };
 }
 

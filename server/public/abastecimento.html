@@ -296,6 +296,16 @@
   <div class="resumo-grid" id="resumo-grid"></div>
 </div>
 
+<!-- comparativo Abastecimento x Fechamento - so Master (ver
+     /api/abastecimento/comparativo-fechamento em index.js): confere se o
+     que foi ENVIADO ontem por sabor bate com o que ficou registrado nos
+     KPIs Extras do Fechamento do mesmo dia -->
+<div class="panel hidden" id="painel-comparativo-fechamento">
+  <h2>🔍 Comparativo com o Fechamento <span style="font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:400;">ontem · só Master</span></h2>
+  <div class="sub" id="comparativo-sub" style="margin:-4px 0 10px;"></div>
+  <div class="resumo-grid" id="comparativo-grid"></div>
+</div>
+
 <div class="acoes-topo">
   <button type="button" class="btn-acao pedido" onclick="abrirForm('PEDIDO')">🛒 Novo pedido <span style="font-weight:400;font-size:11px;">(carrinho)</span></button>
   <button type="button" class="btn-acao envio" onclick="abrirForm('ENVIO')">🚚 Registrar envio <span style="font-weight:400;font-size:11px;">(loja)</span></button>
@@ -817,6 +827,39 @@ function renderResumo(){
       <div class="sabor">⏳ Aguardando envio</div>
       <div class="nums"><span class="hoje">${pendentes}</span><span class="ontem">pedido${pendentes===1?'':'s'}</span></div>
     </div>`;
+}
+
+// comparativo com o Fechamento (so Master) - quanto foi ENVIADO ontem por
+// sabor x quanto ficou registrado nos KPIs Extras do Fechamento do mesmo dia
+// (ver /api/abastecimento/comparativo-fechamento em index.js)
+async function carregarComparativoFechamento(){
+  const painel = document.getElementById('painel-comparativo-fechamento');
+  try{
+    const dados = await fetch('/api/abastecimento/comparativo-fechamento').then(r=>{ if(!r.ok) throw new Error('Erro ao carregar comparativo.'); return r.json(); });
+    painel.classList.remove('hidden');
+    const [y,m,d] = dados.data.split('-');
+    if(!dados.temFechamento){
+      document.getElementById('comparativo-sub').textContent = `Ainda não tem fechamento lançado pra ${d}/${m} - comparação aparece assim que lançar.`;
+    }else{
+      document.getElementById('comparativo-sub').textContent = `Referente a ${d}/${m}.`;
+    }
+    document.getElementById('comparativo-grid').innerHTML = dados.comparativo.map(c=>{
+      const semKpi = dados.temFechamento && !c.kpiEncontrado;
+      const diverge = c.diferenca != null && c.diferenca !== 0;
+      const corDif = diverge ? 'color:var(--bad);font-weight:700;' : '';
+      return `
+      <div class="resumo-card">
+        <div class="sabor">${SABOR_LABEL[c.sabor]}</div>
+        <div class="nums">
+          <span class="hoje">${c.enviado} <small style="font-size:9px;color:var(--muted);">enviado</small></span>
+          <span class="ontem">${c.registrado==null ? (semKpi?'sem KPI cadastrado':'—') : c.registrado+' fechamento'}</span>
+        </div>
+        ${diverge ? `<div style="${corDif}font-size:11px;margin-top:2px;">⚠ diferença de ${c.diferenca>0?'+':''}${c.diferenca}</div>` : ''}
+      </div>`;
+    }).join('');
+  }catch(err){
+    painel.classList.add('hidden');
+  }
 }
 
 // (os indicadores de tempo/ocorrencias sairam desta tela de proposito -
@@ -2495,6 +2538,7 @@ async function boot(){
   await carregarConfig();
   await carregarCatalogo();
   await carregar();
+  if(IS_MASTER) carregarComparativoFechamento();
   iniciarStream();
   initDragChipConversa();
   // os limites de 5min (lembrete de envio / "esta demorando" / contagem /
