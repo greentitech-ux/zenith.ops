@@ -212,6 +212,22 @@
       <button type="button" class="btn-secundario" id="btn-imprimir-termo" onclick="imprimirTermoPrevia()">🖨️ Imprimir termo</button>
       <button type="button" class="btn-primary" style="margin-top:8px;" id="btn-aplicar-termo" onclick="aplicarTermo()">✔ Aplicar termo assinado</button>
       <div class="sub" id="termo-status" style="font-size:12px;margin-top:6px;color:var(--warn);">Termo ainda não aplicado.</div>
+      <!-- Depois que o termo é IMPRESSO, o atendimento existe no servidor e
+           precisa terminar em venda ou em cancelamento com motivo. Não dá
+           pra simplesmente sair: a pendência já está gravada. -->
+      <div id="wrap-emissao" class="hidden" style="background:var(--panel2);border:1px solid var(--warn);border-radius:8px;padding:10px 12px;margin-top:10px;">
+        <div class="sub" style="font-size:12px;color:var(--warn);margin:0 0 8px;">
+          ⚠️ <b>Termo emitido.</b> Este atendimento já está registrado. Finalize a venda ou cancele com o motivo — não é possível deixar em aberto.
+        </div>
+        <button type="button" class="btn-secundario" id="btn-cancelar-emissao" onclick="abrirCancelarEmissao()">✖ Cancelar esta venda</button>
+      </div>
+    </div>
+
+    <div id="wrap-cancelar-emissao" class="hidden" style="background:var(--panel2);border:1px solid var(--bad);border-radius:8px;padding:10px 12px;margin-top:10px;">
+      <label style="margin-top:0;">Por que a venda não foi concluída? (obrigatório)</label>
+      <textarea id="f-motivo-cancelamento" placeholder="ex: cliente desistiu, criança passou mal, erro no cadastro..."></textarea>
+      <div class="sub" style="font-size:12px;color:var(--muted);margin-top:4px;">Fica registrado com seu usuário, data e hora. O termo impresso deve ser inutilizado.</div>
+      <button type="button" class="btn-primary" style="margin-top:8px;" onclick="confirmarCancelarEmissao()" id="btn-confirmar-cancelar">Confirmar cancelamento</button>
     </div>
 
     <div class="secao" id="secao-pagamento">
@@ -1417,6 +1433,7 @@ async function relancarVisita(){
     });
     const data = await res.json();
     if(!res.ok) throw new Error(data.error||'erro ao relançar');
+    EMISSAO_ID = null; // atendimento fechado: virou venda
     ULTIMO_CRIADO_ID = data.id;
     if(data.termoAssinado){
       alert('Relançado! O Termo assinado de hoje foi reaproveitado — é só fazer o check-in quando o grupo entrar.');
@@ -1517,11 +1534,13 @@ document.getElementById('form-checkin').addEventListener('submit', async (ev)=>{
       usarCreditoMin: (USAR_CREDITO && CREDITO_ATUAL) ? CREDITO_ATUAL.minutosDisponiveis : 0,
       // o termo já foi assinado antes de efetivar a venda (ver aplicarTermo)
       termoAssinado: TERMO_APLICADO,
+      emissaoTermoId: EMISSAO_ID,
     };
     const res = await fetch('/api/parque/checkins', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     const data = await res.json();
     if(!res.ok) throw new Error(data.error||'erro ao registrar check-in');
     msg.textContent = 'Venda registrada com o termo já assinado. Faça o check-in abaixo quando o grupo realmente for entrar.'; msg.className = 'msg ok';
+    EMISSAO_ID = null; // atendimento fechado: virou venda
     ULTIMO_CRIADO_ID = data.id;
     document.getElementById('link-termo').href = `/api/parque/checkins/${data.id}/termo.pdf?token=${encodeURIComponent(AUTH_TOKEN)}`;
     document.getElementById('painel-termo').classList.remove('hidden');
@@ -1584,12 +1603,56 @@ async function imprimirTermoPrevia(){
     if(!res.ok){ const e = await res.json().catch(()=>({})); throw new Error(e.error || 'Não foi possível gerar o termo.'); }
     // abre o PDF numa aba nova a partir do blob (a rota é POST, então não
     // dá pra simplesmente apontar um <a href>)
+    // o servidor gravou a emissão ANTES de mandar o PDF e devolveu o id no
+    // header. A partir daqui existe um atendimento em aberto que precisa
+    // terminar em venda ou cancelamento.
+    EMISSAO_ID = res.headers.get('X-Emissao-Id') || EMISSAO_ID;
     const url = URL.createObjectURL(await res.blob());
     window.open(url, '_blank');
     setTimeout(()=>URL.revokeObjectURL(url), 60000);
+    atualizarGateTermo();
   }catch(err){ alert(err.message); }
   finally{ btn.disabled = false; }
 }
+
+// ---------- forçar fechar o atendimento (venda ou cancelamento) ----------
+// Sem isso dava pra imprimir o termo (cliente presente, dinheiro na mão),
+// não registrar a venda e ficar com o valor - sem rastro nenhum.
+let EMISSAO_ID = null;
+
+function abrirCancelarEmissao(){
+  document.getElementById('wrap-cancelar-emissao').classList.remove('hidden');
+  document.getElementById('f-motivo-cancelamento').focus();
+}
+
+async function confirmarCancelarEmissao(){
+  const motivo = document.getElementById('f-motivo-cancelamento').value.trim();
+  if(motivo.length < 5){ alert('Escreva o motivo do cancelamento (pelo menos 5 caracteres).'); return; }
+  if(!EMISSAO_ID){ alert('Nenhum termo emitido para cancelar.'); return; }
+  const btn = document.getElementById('btn-confirmar-cancelar');
+  btn.disabled = true;
+  try{
+    const res = await fetch(`/api/parque/termo-emissoes/${EMISSAO_ID}/cancelar`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ motivo }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || 'Erro ao cancelar.');
+    EMISSAO_ID = null;
+    document.getElementById('f-motivo-cancelamento').value = '';
+    document.getElementById('wrap-cancelar-emissao').classList.add('hidden');
+    resetarForm();
+    alert('Venda cancelada e registrada. Inutilize o termo impresso.');
+  }catch(err){ alert(err.message); }
+  finally{ btn.disabled = false; }
+}
+
+// aviso do navegador se tentar fechar/sair com atendimento em aberto. É só
+// um lembrete - a garantia de verdade é o registro que já está no servidor.
+window.addEventListener('beforeunload', (e)=>{
+  if(!EMISSAO_ID) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
 
 function aplicarTermo(){
   const d = dadosDoTermo();
@@ -1608,6 +1671,8 @@ function atualizarGateTermo(){
   const pag = document.getElementById('secao-pagamento');
   const btnAplicar = document.getElementById('btn-aplicar-termo');
   const btnEnviar = document.getElementById('btn-enviar');
+  const emissao = document.getElementById('wrap-emissao');
+  if(emissao) emissao.classList.toggle('hidden', !EMISSAO_ID);
   if(!status || !pag) return;
   if(TERMO_APLICADO){
     status.textContent = '✔ Termo aplicado — pode seguir para o pagamento.';

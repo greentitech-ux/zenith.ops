@@ -1212,8 +1212,94 @@ async function buscarPorCpf(cpf) {
   return { ...achado, responsavel: { ...achado.responsavel, ...sep } };
 }
 
+// ---------------------------------------------------------------
+// EMISSAO DE TERMO - o rastro que fecha a brecha do dinheiro.
+//
+// O termo passou a sair ANTES do pagamento. Isso abriu um buraco: dava pra
+// imprimir o termo (cliente ja esta ali, ja pagou em dinheiro), NAO
+// finalizar a venda e ficar com o valor - nao existia registro nenhum de
+// que aquele atendimento aconteceu.
+//
+// Agora TODA impressao de termo grava uma emissao PENDENTE aqui, do lado
+// do servidor, ANTES do PDF sair. Fechar o navegador nao apaga nada: a
+// emissao continua pendente e aparece no painel. Ela so sai de pendente
+// de dois jeitos - virando venda (FINALIZADA, com o id do check-in) ou
+// sendo cancelada com motivo obrigatorio (CANCELADA, com quem cancelou).
+// Em nenhum dos dois o registro some.
+// ---------------------------------------------------------------
+const TERMOS = db.collection('parqueTermosEmitidos');
+const TERMO_STATUS = ['PENDENTE', 'FINALIZADA', 'CANCELADA'];
+
+async function criarEmissaoTermo({ unidade, unidadeNome, responsavel, criancas, dataUtilizacao, tempoMinutos, valorPrevisto, emitidoPorId, emitidoPorEmail }) {
+  const doc = TERMOS.doc();
+  const registro = {
+    id: doc.id,
+    unidade: unidade || null,
+    unidadeNome: unidadeNome || null,
+    responsavelNome: (responsavel && responsavel.nome) || null,
+    responsavelCpf: (responsavel && responsavel.cpf) || null,
+    qtdCriancas: Array.isArray(criancas) ? criancas.length : 0,
+    criancasNomes: Array.isArray(criancas) ? criancas.map((c) => c && c.nome).filter(Boolean).slice(0, 20) : [],
+    dataUtilizacao: dataUtilizacao || null,
+    tempoMinutos: tempoMinutos || null,
+    valorPrevisto: Number(valorPrevisto) || 0,
+    status: 'PENDENTE',
+    emitidoPorId: emitidoPorId || null,
+    emitidoPorEmail: emitidoPorEmail || null,
+    emitidoEm: new Date().toISOString(),
+    resolvidoEm: null,
+    checkinId: null,
+    motivoCancelamento: null,
+    canceladoPorId: null,
+    canceladoPorEmail: null,
+  };
+  await doc.set(registro);
+  return registro;
+}
+
+async function resolverEmissaoTermo(id, patch) {
+  if (!id) return null;
+  const ref = TERMOS.doc(String(id));
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+  const atual = snap.data();
+  // uma emissao ja resolvida nao volta atras - senao dava pra "cancelar"
+  // uma venda que existiu e sumir com ela do relatorio
+  if (atual.status !== 'PENDENTE') return atual;
+  const merge = { ...patch, resolvidoEm: new Date().toISOString() };
+  await ref.set(merge, { merge: true });
+  return { ...atual, ...merge };
+}
+
+const finalizarEmissaoTermo = (id, checkinId) => resolverEmissaoTermo(id, { status: 'FINALIZADA', checkinId: checkinId || null });
+
+async function cancelarEmissaoTermo(id, { motivo, canceladoPorId, canceladoPorEmail }) {
+  const texto = String(motivo == null ? '' : motivo).trim();
+  if (texto.length < 5) throw new Error('Explique em poucas palavras por que a venda não foi concluída (mínimo 5 caracteres).');
+  const r = await resolverEmissaoTermo(id, {
+    status: 'CANCELADA',
+    motivoCancelamento: texto.slice(0, 300),
+    canceladoPorId: canceladoPorId || null,
+    canceladoPorEmail: canceladoPorEmail || null,
+  });
+  if (!r) throw new Error('Emissão de termo não encontrada.');
+  return r;
+}
+
+// pendentes = termo saiu e a venda nunca fechou. E a lista que o gerente
+// tem que olhar: cada linha aqui e um atendimento sem venda registrada.
+async function listarEmissoesTermo({ unidades, apenasPendentes = true, dias = 7 } = {}) {
+  const corte = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString();
+  const snap = await TERMOS.where('emitidoEm', '>=', corte).get();
+  let itens = snap.docs.map((d) => d.data());
+  if (apenasPendentes) itens = itens.filter((e) => e.status === 'PENDENTE');
+  if (Array.isArray(unidades) && unidades.length) itens = itens.filter((e) => unidades.includes(e.unidade));
+  return itens.sort((a, b) => String(b.emitidoEm).localeCompare(String(a.emitidoEm)));
+}
+
 module.exports = {
   METODOS_PAGAMENTO, FORMAS_PAGAMENTO_SPLIT, PRECO_MEIA, valorPorTempo, valorDoCheckin,
+  TERMO_STATUS, criarEmissaoTermo, finalizarEmissaoTermo, cancelarEmissaoTermo, listarEmissoesTermo,
   getConfigPrecos, salvarConfigPrecos,
   criar, checkin, listAll, listByUnidades, resumoDoDia, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
   adicionarTempo, relancar, visitaHojePorCpf, remover,
