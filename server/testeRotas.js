@@ -258,6 +258,26 @@ setTimeout(async () => {
   if (!okApelido) ruins += 1;
   console.log(`${okApelido ? '✓' : '✗'} apelido de aparelho da rede: HTTP ${apelido.status} ${apelido.corpo.slice(0, 90)}`);
 
+  // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
+  // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
+  // esta página" pra todo mundo, Master inclusive - parece falta de
+  // permissao, mas e requisicao sem credencial. Ja aconteceu duas vezes
+  // (noc-maquinas.html); esta trava e pra nao acontecer uma terceira.
+  // As publicas de verdade ficam de fora: usam token proprio na URL.
+  const PAGINAS_PUBLICAS = [
+    'atendimento.html', 'decidir.html', 'estorno-cliente.html', 'rh-cadastro.html',
+    'rh-colaborador.html', 'solicitacao-publica.html', 'ticket-publico.html',
+  ];
+  const dirPublico = require('path').join(__dirname, 'public');
+  const semToken = require('fs').readdirSync(dirPublico)
+    .filter((f) => f.endsWith('.html') && !PAGINAS_PUBLICAS.includes(f))
+    .filter((f) => {
+      const html = require('fs').readFileSync(require('path').join(dirPublico, f), 'utf8');
+      return /fetch\(['"`]\/api\//.test(html) && !html.includes('authToken');
+    });
+  if (semToken.length) ruins += 1;
+  console.log(`${semToken.length ? '✗' : '✓'} páginas autenticadas mandam o token do login: ${semToken.length ? semToken.join(', ') : 'todas ok'}`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
