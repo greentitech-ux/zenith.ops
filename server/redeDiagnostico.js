@@ -25,7 +25,9 @@ const LATENCIA_BOA_MS = 150;      // abaixo disso ninguem percebe nada
 const LATENCIA_RUIM_MS = 1500;    // aqui a tela ja "trava" de forma obvia
 const LATENCIA_LENTA_MS = 1000;   // amostra acima disso conta como lentidao
 const SINAL_WIFI_BAIXO = 60;      // % - abaixo disso o wifi comeca a perder pacote
-const HISTORICO_DIAS_MAX = 14;    // dias fechados guardados no doc
+// 35 dias fechados: o filtro de "últimos 30 dias" precisa de 30 + folga pra
+// virada. Guardar dia fechado é barato (um resumo de ~14 números por dia).
+const HISTORICO_DIAS_MAX = 35;
 
 const CONEXOES = ['cabo', 'wifi'];
 
@@ -133,6 +135,63 @@ function acumular(bucket, amostra, dia) {
 // Cabe no mesmo documento e na mesma escrita do heartbeat: 48 baldes de 6
 // numeros. Nao ha custo novo de Firestore.
 const HORAS_MAX = 48;
+
+// ---- camada de 5 minutos (para a janela de "últimos 60 min") -------------
+//
+// Três camadas, não uma: é assim que ferramenta de monitoração séria faz
+// (Datadog, Grafana, New Relic). Ninguém plota 30 dias de pontos de 5 em 5
+// minutos - some a informação e o navegador engasga. O que muda junto com o
+// período é a GRANULARIDADE:
+//
+//   últimos 60 min  -> 1 ponto a cada 5 min   (esta camada)
+//   últimas 24h     -> 1 ponto por hora       (redeHoras)
+//   7 / 15 / 30 dias-> 1 ponto por dia        (redeHistorico + redeDia)
+//
+// A tela DIZ qual granularidade está mostrando - um gráfico que muda de
+// resolução sem avisar faz o leitor comparar coisas diferentes achando que
+// são iguais.
+//
+// 36 baldes = 3h. Dá folga pra janela de 60min sem inchar o documento.
+const MINUTO_BUCKET_MS = 5 * 60 * 1000;
+const MINUTOS_MAX = 36;
+
+// chave por epoch (não por texto local): imune a fuso e horário de verão, e o
+// cliente formata na hora de exibir
+const baldeMinuto = (ts) => Math.floor(ts / MINUTO_BUCKET_MS) * MINUTO_BUCKET_MS;
+
+function acumularMinuto(lista, amostra, agora) {
+  const arr = Array.isArray(lista) ? [...lista] : [];
+  if (!amostra || amostra.latenciaMs === null) return arr.slice(-MINUTOS_MAX);
+  const t = baldeMinuto(agora);
+  let balde = arr.length && arr[arr.length - 1].t === t ? { ...arr[arr.length - 1] } : null;
+  if (balde) arr[arr.length - 1] = balde;
+  else { balde = { t, n: 0, soma: 0, max: 0, lentas: 0 }; arr.push(balde); }
+  balde.n += 1;
+  balde.soma += amostra.latenciaMs;
+  if (amostra.latenciaMs > balde.max) balde.max = amostra.latenciaMs;
+  if (amostra.latenciaMs > LATENCIA_LENTA_MS) balde.lentas += 1;
+  return arr.slice(-MINUTOS_MAX);
+}
+
+function serieMinutos(lista) {
+  return (Array.isArray(lista) ? lista : [])
+    .filter((b) => b && b.n > 0)
+    .map((b) => ({ t: b.t, media: Math.round(b.soma / b.n), max: b.max || null, amostras: b.n, lentas: b.lentas || 0 }));
+}
+
+// Série diária: os dias já fechados (redeHistorico) mais o dia corrente, que
+// ainda está sendo acumulado. Sem juntar os dois, "últimos 7 dias" mostraria
+// tudo menos hoje - justo o dia que mais interessa num incidente.
+function serieDias(doc, diaHoje) {
+  const fechados = (doc && doc.redeHistorico ? doc.redeHistorico : [])
+    .filter((d) => d && d.dia && !d.semDados && d.latenciaMedia !== null && d.latenciaMedia !== undefined)
+    .map((d) => ({ dia: d.dia, media: d.latenciaMedia, max: d.latenciaMax || null, amostras: d.amostras, lentas: null }));
+  const hoje = (doc && doc.redeDia && doc.redeDia.dia === diaHoje) ? resumir(doc.redeDia) : null;
+  if (hoje && !hoje.semDados && hoje.latenciaMedia !== null) {
+    fechados.push({ dia: hoje.dia, media: hoje.latenciaMedia, max: hoje.latenciaMax, amostras: hoje.amostras, lentas: null });
+  }
+  return fechados;
+}
 
 function horaDe(ts, tz = 'America/Sao_Paulo') {
   const d = new Date(ts);
@@ -446,7 +505,11 @@ function analisarComputador(doc, dia, frota) {
     ...pontuar(resumo, quedasNoDia),
     veredito: veredito(resumo, frota),
     historico: (doc.redeHistorico || []).slice(-HISTORICO_DIAS_MAX),
+    // as três camadas vão juntas: o filtro da tela escolhe qual usar sem
+    // precisar de outra ida ao servidor
     serie: serieHoraria(doc.redeHoras),
+    serieMin: serieMinutos(doc.redeMinutos),
+    serieDia: serieDias(doc, dia),
     quedas: quedas.slice(0, HISTORICO_DIAS_MAX),
   };
 }
@@ -482,5 +545,6 @@ module.exports = {
   sanitizarAmostra, acumular, virarDia, resumir, pontuar, veredito,
   quedasPorDia, analisarComputador, ranking, baselineDaFrota,
   acumularHora, serieHoraria, horaDe, HORAS_MAX,
+  acumularMinuto, serieMinutos, serieDias, baldeMinuto, MINUTOS_MAX,
   LATENCIA_BOA_MS, LATENCIA_RUIM_MS, LATENCIA_LENTA_MS, SINAL_WIFI_BAIXO, HISTORICO_DIAS_MAX,
 };
