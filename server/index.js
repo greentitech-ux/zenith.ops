@@ -41,6 +41,7 @@ const ifoodStore = require('./ifoodStore');
 const ifoodSync = require('./ifoodSync');
 const solicitacoes = require('./solicitacoes');
 const chamadosTI = require('./chamadosTI');
+const chamadoRelatorio = require('./chamadoRelatorio');
 const chamadosManutencao = require('./chamadosManutencao');
 const suporteChat = require('./suporteChat');
 const suporteChatPDF = require('./suporteChatPDF');
@@ -8120,6 +8121,26 @@ app.get('/api/chamados/:id/evidencia-foto/:indice/:fotoIndice', requireAnySectio
   const foto = chamado?.evidencias?.[Number(req.params.indice)]?.fotos?.[Number(req.params.fotoIndice)];
   if (!foto) return res.sendStatus(404);
   storage.streamArquivo(foto.path, foto.tipo, res);
+});
+
+// Relatorio do atendimento em PDF: o chamado inteiro num arquivo so, com as
+// fotos EMBUTIDAS (ver chamadoRelatorio.js). E o que vai anexado numa
+// cobranca, mandado pro franqueado ou guardado como comprovante do servico -
+// tudo isso por gente que nao tem acesso ao Zenith, entao link nao serve.
+// Aberto numa aba nova (<a href>), por isso a autenticacao vem no ?token=
+// (auth.js:242 ja aceita) em vez de header.
+app.get('/api/chamados/:id/relatorio.pdf', requireAnySection('tecnico', 'suporte'), async (req, res) => {
+  try {
+    const chamado = await chamadosTI.getOne(req.params.id);
+    if (!chamado) return res.status(404).json({ error: 'Chamado não encontrado.' });
+    await chamadoRelatorio.gerarRelatorioPDF(res, chamado, { geradoPor: req.user.email });
+  } catch (err) {
+    console.error('Erro ao gerar relatório do chamado:', err.message);
+    // se o PDF ja comecou a sair, nao da pra trocar por JSON - o cliente
+    // recebe um arquivo truncado e o erro fica no log
+    if (!res.headersSent) res.status(500).json({ error: 'Não foi possível gerar o relatório agora.' });
+    else res.end();
+  }
 });
 
 // check-in: tecnico chegou na loja, registra os itens (descricao + foto) de
