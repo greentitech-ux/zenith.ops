@@ -447,6 +447,49 @@
   <button type="button" class="bs-cancelar" onclick="toggleModoSelecao()">Cancelar</button>
 </div>
 
+<!-- Criar acesso no Zenith direto do ticket de Suporte de TI. Abre JA
+     PREENCHIDO (email/usuário/senha sugeridos pelo servidor) e o Master
+     confirma - o nome vem de texto livre escrito pelo Beniboy, então
+     revisar antes de gravar evita nascer um acesso torto. -->
+<div class="overlay hidden" id="overlay-criar-acesso">
+  <div class="sheet-wrap" style="max-width:520px;">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharCriarAcesso()">✕</span>
+    <div class="sheet">
+      <h3 style="margin:0 0 4px;">👤 Criar acesso no Zenith</h3>
+      <div class="sub" style="margin-bottom:12px;">Isso cria só o <b>acesso ao Zenith</b>. A caixa de e-mail de verdade continua sendo criada por fora, pelo Master.</div>
+
+      <label>Nome completo da pessoa</label>
+      <input type="text" id="ca-nome" placeholder="ex: Priscila Pereira" oninput="agendarSugestao()">
+
+      <label style="margin-top:8px;">Domínio do e-mail</label>
+      <input type="text" id="ca-dominio" placeholder="ex: grupobravoempresarial.com" oninput="agendarSugestao()">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
+        <div>
+          <label>E-mail (login)</label>
+          <input type="email" id="ca-email" placeholder="preenche sozinho">
+        </div>
+        <div>
+          <label>Usuário</label>
+          <input type="text" id="ca-username" placeholder="preenche sozinho">
+        </div>
+      </div>
+      <div class="sub" id="ca-explica" style="margin-top:4px;"></div>
+
+      <label style="margin-top:8px;">Copiar permissões de</label>
+      <select id="ca-modelo"><option value="">Carregando usuários...</option></select>
+      <div class="sub" style="margin-top:4px;">Copia as seções, unidades e tipos de solicitação desse usuário. <b>Não</b> copia Admin nem permissões especiais — se precisar, ligue depois em Usuários.</div>
+
+      <label style="margin-top:8px;">Senha provisória</label>
+      <input type="text" id="ca-senha" placeholder="gerada sozinha">
+      <div class="sub" style="margin-top:4px;">Anote e repasse por fora do app. O Zenith obriga a trocar no primeiro login.</div>
+
+      <div class="msg hidden" id="msg-criar-acesso"></div>
+      <button type="button" class="btn-primary" style="margin-top:12px;" onclick="confirmarCriarAcesso()" id="btn-confirmar-criar-acesso">Criar acesso</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay hidden" id="overlay-enviar-email">
   <div class="sheet-wrap" style="max-width:420px;">
     <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharEnviarEmail()">✕</span>
@@ -1033,6 +1076,7 @@ function abrirDetalhe(tipo, id){
       <div><b>Decisão:</b> <span class="badge ${c.status}">${c.status}</span> · ${escapeHtml(c.decididoPorEmail||'')} · ${fmtDataHora(c.decididoEm)}</div>
       ${c.motivoDecisao ? `<div style="white-space:pre-wrap;margin-top:4px;">${escapeHtml(c.motivoDecisao)}</div>` : ''}
       ${c.chamadoId ? `<div style="margin-top:4px;color:var(--ok);">🔧 Chamado de ${c.tipo==='manutencao'?'Manutenção':'TI'} criado</div>` : ''}
+      ${podeCriarAcesso(c) ? `<button type="button" class="link-btn" style="margin-top:6px;padding:0;" onclick="abrirCriarAcesso()">👤 Criar acesso no Zenith</button>` : ''}
     </div>`;
   }
   document.getElementById('d-corpo').innerHTML = corpo;
@@ -1389,6 +1433,115 @@ async function desmarcarComprada(){
   }catch(err){ alert(err.message); }
 }
 function fecharDetalhe(){ document.getElementById('overlay-detalhe').classList.add('hidden'); DETALHE_ATUAL = null; }
+
+// ---------- Criar acesso no Zenith a partir do ticket ----------
+// Ticket de Suporte de TI ja aprovado, so pro Master. A checagem de
+// permissao de verdade esta na rota (auth.requireMaster); isso aqui so
+// evita mostrar um botao que ia dar 403.
+function podeCriarAcesso(c){
+  return IS_MASTER && c.tipo==='suporte-ti' && c.status==='APROVADO' && !ehBloqueioLogin(c);
+}
+
+// tenta achar o nome da pessoa no texto que o Beniboy escreveu
+// ("Nome do extra: Priscila Pereira"). Se nao achar, o campo abre vazio -
+// nunca chuta, porque nome errado vira acesso errado.
+function nomeNoTexto(c){
+  const txt = `${c.titulo||''}\n${c.descricao||''}`;
+  const m = txt.match(/nome(?:\s+d[oa]\s+\w+)?\s*:\s*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'.\- ]{2,60})/i);
+  return m ? m[1].trim().replace(/[.,;].*$/, '').trim() : '';
+}
+function dominioDoSolicitante(c){
+  const m = String(c.criadoPorEmail||'').match(/@([^@\s]+)$/);
+  return m ? m[1].toLowerCase() : '';
+}
+
+let SUGESTAO_TIMER = null;
+function abrirCriarAcesso(){
+  const c = DETALHE_ATUAL;
+  if(!c) return;
+  document.getElementById('ca-nome').value = nomeNoTexto(c);
+  document.getElementById('ca-dominio').value = dominioDoSolicitante(c);
+  document.getElementById('ca-email').value = '';
+  document.getElementById('ca-username').value = '';
+  document.getElementById('ca-senha').value = '';
+  document.getElementById('ca-explica').textContent = '';
+  document.getElementById('msg-criar-acesso').classList.add('hidden');
+  document.getElementById('overlay-criar-acesso').classList.remove('hidden');
+  carregarModelosAcesso();
+  agendarSugestao();
+}
+function fecharCriarAcesso(){ document.getElementById('overlay-criar-acesso').classList.add('hidden'); }
+
+async function carregarModelosAcesso(){
+  const sel = document.getElementById('ca-modelo');
+  try{
+    const lista = await fetch('/api/users').then(r=>r.json());
+    const uteis = (Array.isArray(lista)?lista:[]).filter(u=>u.role!=='master' && u.active && u.permissions && (u.permissions.sections||[]).length);
+    sel.innerHTML = '<option value="">Escolha quem já tem o acesso certo...</option>'
+      + uteis.map(u=>`<option value="${u.id}">${escapeHtml(u.username||u.email)} — ${(u.permissions.sections||[]).length} seção(ões)</option>`).join('');
+    if(!uteis.length) sel.innerHTML = '<option value="">Nenhum usuário com seções para copiar</option>';
+  }catch(e){ sel.innerHTML = '<option value="">Erro ao carregar usuários</option>'; }
+}
+
+// debounce: cada tecla no nome/domínio pediria uma sugestão ao servidor
+function agendarSugestao(){
+  clearTimeout(SUGESTAO_TIMER);
+  SUGESTAO_TIMER = setTimeout(buscarSugestao, 400);
+}
+async function buscarSugestao(){
+  const nome = document.getElementById('ca-nome').value.trim();
+  const dominio = document.getElementById('ca-dominio').value.trim();
+  const explica = document.getElementById('ca-explica');
+  if(!nome || !dominio){ explica.textContent = 'Preencha nome e domínio para gerar o e-mail e o usuário.'; return; }
+  try{
+    const q = new URLSearchParams({ nomeCompleto: nome, dominio });
+    const s = await fetch('/api/users/sugerir-acesso?'+q).then(async r=>{
+      const d = await r.json(); if(!r.ok) throw new Error(d.error||'Erro'); return d;
+    });
+    document.getElementById('ca-email').value = s.email;
+    document.getElementById('ca-username').value = s.username;
+    if(!document.getElementById('ca-senha').value) document.getElementById('ca-senha').value = s.senha;
+    const ocupadas = (s.tentativas||[]).filter(t=>!t.livre).map(t=>t.usuario);
+    explica.textContent = ocupadas.length
+      ? `"${ocupadas.join('", "')}" já em uso — por isso o usuário ficou "${s.username}".`
+      : `Usuário livre no primeiro nome.`;
+  }catch(err){ explica.textContent = err.message; }
+}
+
+async function confirmarCriarAcesso(){
+  const c = DETALHE_ATUAL;
+  const btn = document.getElementById('btn-confirmar-criar-acesso');
+  const msg = document.getElementById('msg-criar-acesso');
+  msg.classList.add('hidden');
+  btn.disabled = true; btn.textContent = 'Criando...';
+  try{
+    const body = {
+      modeloId: document.getElementById('ca-modelo').value,
+      email: document.getElementById('ca-email').value.trim(),
+      username: document.getElementById('ca-username').value.trim(),
+      senha: document.getElementById('ca-senha').value,
+      solicitacaoId: c ? c.id : null,
+      solicitacaoTipo: c ? c.tipo : null,
+    };
+    if(!body.modeloId) throw new Error('Escolha de quem copiar as permissões.');
+    if(!body.email || !body.username) throw new Error('E-mail e usuário são obrigatórios.');
+    const resp = await fetch('/api/users/criar-copiando', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao criar o acesso.');
+    if(data.pendente){ // QA Master: virou aprovação em vez de criar
+      msg.textContent = 'Enviado para aprovação de um Master de verdade.';
+      msg.className = 'msg'; msg.classList.remove('hidden');
+      return;
+    }
+    fecharCriarAcesso();
+    await carregarCentral();
+    alert(`✅ Acesso criado!\n\nE-mail: ${body.email}\nUsuário: ${body.username}\nSenha provisória: ${body.senha}\n\nAnote e repasse por fora do app — ela troca a senha no primeiro login. A caixa de e-mail de verdade ainda precisa ser criada por fora.`);
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{
+    btn.disabled = false; btn.textContent = 'Criar acesso';
+  }
+}
 
 let CHAT_ATUAL = [];
 let FOTO_CHAT = null;

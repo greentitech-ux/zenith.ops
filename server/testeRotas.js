@@ -137,6 +137,19 @@ function postarMultipart(caminho, campos, arquivo) {
   });
 }
 
+function postarJson(caminho, corpoObj, headers = {}) {
+  const corpo = Buffer.from(JSON.stringify(corpoObj));
+  return new Promise((resolve) => {
+    const req = http.request({
+      host: '127.0.0.1', port: 8899, path: caminho, method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json', 'Content-Length': corpo.length },
+    }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, corpo: b })); });
+    req.on('error', (e) => resolve({ status: 0, corpo: e.message }));
+    req.setTimeout(5000, () => { req.destroy(); resolve({ status: -1, corpo: 'TIMEOUT (requisição pendurada)' }); });
+    req.end(corpo);
+  });
+}
+
 setTimeout(async () => {
   // sessão de Master direto no módulo de auth (não passa pelo login)
   // login de verdade (ensureMaster criou o Master no Firestore falso no boot)
@@ -173,6 +186,7 @@ setTimeout(async () => {
     ['/api/abastecimento/fluxo?inicio=2026-08-10&fim=2026-08-16', 'fluxo dia a dia'],
     ['/api/abastecimento/capacidades', 'capacidades'],
     ['/api/loja-status/rede', 'diagnóstico de rede'],
+    ['/api/users/sugerir-acesso?nomeCompleto=Priscila%20Pereira&dominio=grupobravoempresarial.com', 'sugerir acesso (email+usuário)'],
   ];
   let ruins = 0;
   for (const [rota, nome] of casos) {
@@ -198,6 +212,17 @@ setTimeout(async () => {
   const okProibido = proibido.status === 400;
   if (!okProibido) ruins += 1;
   console.log(`${okProibido ? '✓' : '✗'} anexo de tipo proibido é recusado: HTTP ${proibido.status} ${proibido.corpo.slice(0, 90)}`);
+
+  // --- criar acesso copiando permissoes (botao do ticket de Suporte de TI) ---
+  // sem modeloId tem que recusar com 400 e mensagem clara, NAO estourar 500
+  // nem pendurar. E o caminho que mais me preocupa: essa rota chama
+  // centralChat.addMessage, e um nome de funcao errado ali so aparece aqui.
+  const semModelo = await postarJson('/api/users/criar-copiando',
+    { email: 'x.y@teste.local', username: 'xytest', senha: 'SenhaProvisoria1' },
+    token ? { Authorization: 'Bearer ' + token } : {});
+  const okSemModelo = semModelo.status === 400 && /modelo/i.test(semModelo.corpo);
+  if (!okSemModelo) ruins += 1;
+  console.log(`${okSemModelo ? '✓' : '✗'} criar acesso sem modelo é recusado: HTTP ${semModelo.status} ${semModelo.corpo.slice(0, 90)}`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
