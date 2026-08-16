@@ -850,8 +850,9 @@ async function varrerAlertas() {
 // cada loja enxerga na propria rede. Igual ao diagnosticoRede, sai do MESMO
 // cache de listar() - nao gera leitura extra no Firestore.
 async function saudeMaquinas() {
-  const docs = (await cache.cached()).map(semSegredo);
+  const docs = (await cache.cached()).map(comOnline).map(semSegredo);
   return {
+    computadores: nocMaquina.panorama(docs),
     discos: nocMaquina.discosComProblema(docs),
     reiniciar: nocMaquina.maquinasParaReiniciar(docs),
     redes: nocMaquina.resumoDispositivos(docs),

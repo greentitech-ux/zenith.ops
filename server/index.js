@@ -2086,6 +2086,7 @@ app.get('/api/loja-status/maquinas', requireSection('suporte'), async (req, res)
     const [saude, mapa] = await Promise.all([lojaStatus.saudeMaquinas(), construirUnidadesMapa()]);
     res.json({
       ...saude,
+      computadores: saude.computadores.map((c) => ({ ...c, unidadeNome: mapa[c.codigo] || c.codigo })),
       discos: saude.discos.map((d) => ({ ...d, unidadeNome: mapa[d.codigo] || d.codigo })),
       reiniciar: saude.reiniciar.map((r) => ({ ...r, unidadeNome: mapa[r.codigo] || r.codigo })),
       redes: saude.redes.map((r) => ({ ...r, unidadeNome: mapa[r.codigo] || r.codigo })),
