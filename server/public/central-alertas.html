@@ -92,14 +92,7 @@
 </header>
 
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
-<nav class="nav-drawer hidden" id="nav-drawer">
-  <div class="nav-drawer-titulo">Zenith Ops</div>
-  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
-  <a class="back active" id="nav-central-alertas-self" href="/central-alertas.html">🚨 Central de Alertas</a>
-  <a class="back" id="nav-ajuda" href="/ajuda.html">❓ Ajuda</a>
-  <div class="nav-drawer-sep"></div>
-  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
-</nav>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
 
 <div id="sem-acesso" class="empty hidden">Você não tem acesso a essa página. A Central de Alertas é só do Master.</div>
 
@@ -123,8 +116,8 @@ window.fetch = (url, opts = {}) => {
   return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
 };
 function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
-function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
-function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+function abrirMenu(){}
+function fecharMenu(){}
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 // tipo -> icone/rotulo pra exibicao - cada categoria de alerta do sistema
@@ -236,6 +229,6 @@ boot();
 </script>
 <script src="/suporte-chat.js"></script>
 <script src="/notif-central.js"></script>
-<script src="/nav-gate.js"></script>
+<script src="/nav-menu.js"></script>
 </body>
 </html>

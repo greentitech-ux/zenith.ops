@@ -220,21 +220,7 @@
 </header>
 
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
-<nav class="nav-drawer hidden" id="nav-drawer">
-  <div class="nav-drawer-titulo">Zenith Ops</div>
-  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
-  <div class="nav-drawer-grupo">Solicitações</div>
-  <a class="back hidden" id="nav-solicitacoes" href="/central.html">📋 Central</a>
-  <a class="back hidden" id="nav-historico" href="/central-historico.html">📜 Histórico</a>
-  <a class="back hidden" id="nav-tecnico" href="/tecnico.html">🔧 Chamados TI</a>
-  <a class="back hidden" id="nav-central-solucoes" href="/central-solucoes.html">💬 Central de Soluções</a>
-  <a class="back hidden" id="nav-beniboy" href="/beniboy.html">🐝 Central do Beniboy</a>
-  <a class="back hidden" id="nav-dashboard-atendimentos" href="/dashboard-atendimentos.html">📊 Dashboard de Atendimentos</a>
-  <a class="back active" id="nav-loja-status-self" href="/loja-status.html">📡 NOC Zenith</a>
-  <a class="back hidden" id="nav-central-alertas" href="/central-alertas.html">🚨 Central de Alertas</a>
-  <div class="nav-drawer-sep"></div>
-  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
-</nav>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
 
 <div id="sem-acesso" class="empty hidden">Você não tem acesso a essa página. Fale com o administrador (Master).</div>
 
@@ -479,8 +465,8 @@ window.fetch = (url, opts = {}) => {
   return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
 };
 function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
-function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
-function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+function abrirMenu(){}
+function fecharMenu(){}
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 // usado dentro de onclick="...('${escapeJs(x)}')" (atributo com aspas
 // duplas, argumento em aspas simples) - escapa barra invertida e aspas
@@ -1431,11 +1417,6 @@ async function boot(){
   if(!res.ok){ logout(); return; }
   const me = await res.json();
   const secoes = (me.permissions && me.permissions.sections) || [];
-  document.getElementById('nav-solicitacoes').classList.remove('hidden');
-  document.getElementById('nav-historico').classList.remove('hidden');
-  document.getElementById('nav-tecnico').classList.remove('hidden');
-  document.getElementById('nav-central-solucoes').classList.remove('hidden');
-  document.getElementById('nav-beniboy').classList.remove('hidden');
   if(!(me.role === 'master' || me.isAdmin || secoes.includes('suporte'))){
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;
@@ -1448,7 +1429,6 @@ async function boot(){
   const unidadeDoLink = new URLSearchParams(location.search).get('unidade');
   if(unidadeDoLink) toggleFiltroUnidade(unidadeDoLink);
   if(me.role === 'master'){
-    document.getElementById('nav-central-alertas').classList.remove('hidden');
     document.getElementById('agente-root').classList.remove('hidden');
     document.getElementById('btn-push-ar').classList.remove('hidden');
     carregarConfigPushAr();
@@ -1485,6 +1465,6 @@ boot();
 </script>
 <script src="/notif-central.js"></script>
 <script src="/suporte-chat.js"></script>
-<script src="/nav-gate.js"></script>
+<script src="/nav-menu.js"></script>
 </body>
 </html>

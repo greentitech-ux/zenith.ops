@@ -1,0 +1,434 @@
+// nav-menu.js
+// FONTE UNICA do menu lateral (hamburguer) de todo o Zenith Ops: a
+// definicao dos itens, a montagem do HTML, a regra de quem ve o que, o
+// acordeao dos grupos, o realce da pagina atual e o visual.
+//
+// POR QUE ISSO EXISTE: antes cada pagina carregava a PROPRIA copia do
+// <nav> no HTML. Com ~35 paginas, o menu virou 35 menus diferentes -
+// auditoria de 16/08 encontrou link faltando em 8 a 13 paginas (quem abria
+// o Beniboy ou o Dashboard de Atendimentos simplesmente nao via metade do
+// sistema), dois ids pro MESMO link (nav-entrega-lancamento e
+// nav-entregas-lancamento - o segundo escapava do filtro de permissao) e
+// rotulo divergente ("Email" x "E-mail"). Toda pagina nova tambem nascia
+// com o menu desatualizado, e todo link novo exigia editar 35 arquivos.
+//
+// Agora: a pagina so precisa ter <nav id="nav-drawer"> vazio (e, se
+// quiser, o overlay) - este script preenche. Adicionar um item ao menu =
+// uma linha em MENU aqui, e ele aparece em TODAS as telas de uma vez.
+//
+// Substitui o antigo nav-gate.js (que so escondia/mostrava links que a
+// pagina ja tinha declarado).
+(function () {
+  const token = localStorage.getItem('authToken');
+
+  // ---------------------------------------------------------------
+  // 1) A DEFINICAO DO MENU - unica coisa que se mexe no dia a dia.
+  //
+  // Regras de visibilidade por item (a primeira que existir vale):
+  //   master:true  -> so role 'master'
+  //   admin:true   -> master OU isAdmin
+  //   secoes:[...] -> master/admin OU quem tem QUALQUER uma das secoes
+  //   (nada)       -> todo mundo logado
+  // ---------------------------------------------------------------
+  const MENU = [
+    { itens: [
+      { id: 'nav-painel', href: '/painel.html', icone: '🏠', rotulo: 'Painel' },
+    ] },
+    { grupo: 'Operação diária', itens: [
+      // /lancamento.html serve DUAS coisas: quem tem 'lancamento' cai no
+      // painel de fechamento, quem so tem 'sangria' cai no de sangria/
+      // deposito. Antes a propria pagina reescrevia o texto do link
+      // (getElementById('nav-self')) - o que so funcionava DENTRO dela.
+      // Aqui o rotulo certo aparece no menu de qualquer tela.
+      { id: 'nav-lancamento', href: '/lancamento.html', icone: '🧾', rotulo: 'Fechamento', secoes: ['lancamento', 'sangria'],
+        alt: { quando: (me) => !temSecao(me, 'lancamento') && temSecao(me, 'sangria'), icone: '💰', rotulo: 'Sangria/Depósito' } },
+      { id: 'nav-entrega-lancamento', href: '/entrega-lancamento.html', icone: '📦', rotulo: 'Lançar entrega', secoes: ['entregas-lancamento'] },
+      { id: 'nav-fechamentos', href: '/fechamentos.html', icone: '💰', rotulo: 'Fechamentos', secoes: ['fechamentos'] },
+      { id: 'nav-entregas', href: '/entregas.html', icone: '🛵', rotulo: 'Entregas', secoes: ['entregas'] },
+      { id: 'nav-inventario', href: '/estoque.html', icone: '📦', rotulo: 'Estoque', secoes: ['inventario'] },
+      { id: 'nav-abastecimento', href: '/abastecimento.html', icone: '🛒', rotulo: 'Abastec. Carrinho', secoes: ['abastecimento-carrinho', 'abastecimento-loja'] },
+      { id: 'nav-abastecimento-relatorios', href: '/abastecimento-relatorios.html', icone: '📊', rotulo: 'Relatórios do Carrinho', master: true },
+    ] },
+    { grupo: 'Monitoramento', itens: [
+      { id: 'nav-monitor', href: '/monitor.html', icone: '📈', rotulo: 'Monitor', secoes: ['monitor'] },
+      { id: 'nav-relatorios', href: '/relatorios.html', icone: '📊', rotulo: 'Relatórios', secoes: ['disputas'] },
+      { id: 'nav-ifood', href: '/ifood.html', icone: '🍔', rotulo: 'iFood', secoes: ['ifood'] },
+      // conectividade das lojas: e infra, encaixa melhor aqui do que em
+      // Solicitacoes (onde estava) - mesmo publico do Beniboy
+      { id: 'nav-loja-status', href: '/loja-status.html', icone: '📡', rotulo: 'NOC Zenith', secoes: ['suporte'] },
+    ] },
+    { grupo: 'Atendimento', itens: [
+      { id: 'nav-beniboy', href: '/beniboy.html', icone: '🐝', rotulo: 'Central do Beniboy', secoes: ['suporte'] },
+      { id: 'nav-dashboard-atendimentos', href: '/dashboard-atendimentos.html', icone: '📊', rotulo: 'Dashboard de Atendimentos', secoes: ['suporte'] },
+      { id: 'nav-central-solucoes', href: '/central-solucoes.html', icone: '💬', rotulo: 'Central de Soluções', secoes: ['central-solucoes'] },
+    ] },
+    { grupo: 'Solicitações', itens: [
+      { id: 'nav-solicitacoes', href: '/central.html', icone: '📋', rotulo: 'Central', secoes: ['solicitacoes'] },
+      // o Historico tambem serve pra quem RECEBE card atribuido
+      { id: 'nav-historico', href: '/central-historico.html', icone: '📜', rotulo: 'Histórico', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
+      { id: 'nav-tecnico', href: '/tecnico.html', icone: '🔧', rotulo: 'Chamados TI', secoes: ['tecnico', 'suporte'] },
+      { id: 'nav-manutencao', href: '/manutencao.html', icone: '🛠️', rotulo: 'Manutenção', secoes: ['manutencao'] },
+      { id: 'nav-ativos-ti', href: '/ativos-ti.html', icone: '🖥️', rotulo: 'Ativos de TI', secoes: ['ativos-ti'] },
+    ] },
+    { grupo: 'Saltiverso', itens: [
+      { id: 'nav-parque-checkin', href: '/parque-checkin.html', icone: '🤸', rotulo: 'Check-in Parque', secoes: ['parque-checkin'] },
+      { id: 'nav-parque', href: '/parque.html', icone: '🎡', rotulo: 'Parque (painel)', secoes: ['parque'] },
+      { id: 'nav-festas', href: '/festas.html', icone: '🎉', rotulo: 'Festas', secoes: ['festas'] },
+      { id: 'nav-mensalistas', href: '/mensalistas.html', icone: '📅', rotulo: 'Mensalistas', secoes: ['parque'] },
+      { id: 'nav-saltiverso-vendas', href: '/saltiverso-vendas.html', icone: '🥤', rotulo: 'Bebidas & Meias', secoes: ['parque-loja'] },
+      { id: 'nav-saltiverso-fechamento', href: '/saltiverso-fechamento.html', icone: '🧾', rotulo: 'Fechamento do balcão', secoes: ['parque-loja'] },
+    ] },
+    { grupo: 'BigBrother', itens: [
+      { id: 'nav-rh', href: '/rh.html', icone: '🧑‍💼', rotulo: 'RH', secoes: ['rh'] },
+    ] },
+    { grupo: 'Administração', itens: [
+      { id: 'nav-usuarios', href: '/usuarios.html', icone: '👤', rotulo: 'Usuários', master: true },
+      { id: 'nav-grupos', href: '/grupos.html', icone: '🏷️', rotulo: 'Grupos', master: true },
+      { id: 'nav-cofre', href: '/cofre.html', icone: '🔐', rotulo: 'Cofre', secoes: ['cofre'] },
+      { id: 'nav-central-alertas', href: '/central-alertas.html', icone: '🚨', rotulo: 'Central de Alertas', master: true },
+      { id: 'nav-entregas-regras', href: '/entregas-regras.html', icone: '⚙️', rotulo: 'Regras de Entregas', master: true },
+      { id: 'nav-email', href: '/email.html', icone: '✉️', rotulo: 'Email', master: true },
+      { id: 'nav-login-custom', href: '/login-custom.html', icone: '🎨', rotulo: 'Tela de Login', master: true },
+      { id: 'nav-reset-senha', href: '/painel.html?resetSenha=1', icone: '🔑', rotulo: 'Reset senha', admin: true },
+    ] },
+  ];
+
+  // ---------------------------------------------------------------
+  // 2) VISUAL - injetado daqui pra nao depender do CSS de cada pagina
+  //    (cada uma tem a sua copia, entao mudar visual "no CSS" exigiria
+  //    editar 35 arquivos de novo - exatamente o problema que isso resolve)
+  // ---------------------------------------------------------------
+  function injetarEstilo() {
+    if (document.getElementById('nav-menu-estilo')) return;
+    const st = document.createElement('style');
+    st.id = 'nav-menu-estilo';
+    st.textContent = `
+      #nav-drawer{
+        position:fixed; top:0; left:0; bottom:0; width:270px; max-width:84vw;
+        background:var(--panel,#12161b); border-right:1px solid var(--line,#232a33);
+        z-index:999; padding:0; overflow:hidden;
+        display:flex!important; flex-direction:column; gap:0;
+        /* so o transform anima. Visibility fica FORA da transicao de
+           proposito: como propriedade discreta, ela so vira 'visible' no
+           meio/fim da animacao, e o menu piscava fora da tela no primeiro
+           frame ao abrir. */
+        transition:transform .22s cubic-bezier(.4,0,.2,1);
+        box-shadow:6px 0 28px rgba(0,0,0,.45);
+      }
+      /* fechado = fora da tela (em vez de display:none) pra ter animacao.
+         Se este CSS nao carregar, o display:none!important da pagina
+         continua valendo como fallback seguro. */
+      #nav-drawer.hidden{ transform:translateX(-102%); visibility:hidden; }
+      #nav-drawer-overlay{
+        position:fixed; inset:0; background:rgba(0,0,0,.5);
+        backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px);
+        z-index:998; transition:opacity .22s;
+      }
+      #nav-drawer-overlay.hidden{ display:none!important; }
+
+      .nmz-topo{
+        padding:14px 14px 10px; border-bottom:1px solid var(--line,#232a33);
+        flex:none; display:flex; align-items:center; gap:10px;
+      }
+      .nmz-marca{ font-family:var(--mono,monospace); font-size:11px; color:var(--accent,#5cc8ff);
+        text-transform:uppercase; letter-spacing:.12em; font-weight:700; line-height:1.3; }
+      .nmz-quem{ font-size:11px; color:var(--muted,#7d8896); margin-top:2px;
+        overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px; }
+      .nmz-fechar{
+        margin-left:auto; flex:none; background:none; border:1px solid var(--line,#232a33);
+        color:var(--muted,#7d8896); border-radius:8px; width:30px; height:30px;
+        font-size:15px; line-height:1; cursor:pointer; transition:.15s;
+      }
+      .nmz-fechar:hover{ color:var(--text,#e7ecf1); border-color:var(--accent,#5cc8ff); }
+
+      .nmz-corpo{ flex:1 1 auto; overflow-y:auto; padding:8px; }
+      .nmz-corpo::-webkit-scrollbar{ width:8px; }
+      .nmz-corpo::-webkit-scrollbar-thumb{ background:var(--line,#232a33); border-radius:8px; }
+
+      .nmz-grupo{
+        display:flex; align-items:center; justify-content:space-between;
+        font-family:var(--mono,monospace); font-size:9.5px; color:var(--muted,#7d8896);
+        text-transform:uppercase; letter-spacing:.1em; font-weight:700;
+        padding:12px 10px 5px; cursor:pointer; user-select:none; transition:color .15s;
+      }
+      .nmz-grupo:hover{ color:var(--text,#e7ecf1); }
+      .nmz-grupo .nmz-seta{ font-size:9px; transition:transform .18s ease; opacity:.7; }
+      .nmz-grupo.fechado .nmz-seta{ transform:rotate(-90deg); }
+      .nmz-wrap{ display:flex; flex-direction:column; gap:1px; overflow:hidden; }
+      .nmz-wrap.hidden{ display:none!important; }
+
+      #nav-drawer a.nmz-item, #nav-drawer button.nmz-item{
+        display:flex; align-items:center; gap:10px; width:100%; box-sizing:border-box;
+        padding:9px 10px; border-radius:9px; font-size:12.8px; line-height:1.25;
+        color:var(--text,#e7ecf1); text-decoration:none; position:relative;
+        border:1px solid transparent; transition:background .13s, color .13s, border-color .13s;
+      }
+      #nav-drawer .nmz-item .nmz-ico{
+        flex:none; width:20px; text-align:center; font-size:14px; line-height:1;
+        filter:grayscale(.25); transition:filter .13s;
+      }
+      #nav-drawer .nmz-item:hover{ background:var(--panel2,#181d24); }
+      #nav-drawer .nmz-item:hover .nmz-ico{ filter:none; }
+      #nav-drawer a.nmz-item.active{
+        background:rgba(92,200,255,.13); color:var(--accent,#5cc8ff); font-weight:600;
+      }
+      #nav-drawer a.nmz-item.active .nmz-ico{ filter:none; }
+      #nav-drawer a.nmz-item.active::before{
+        content:""; position:absolute; left:0; top:6px; bottom:6px; width:3px;
+        border-radius:0 3px 3px 0; background:var(--accent,#5cc8ff);
+      }
+      #nav-drawer a.nmz-item.hidden, #nav-drawer .nmz-grupo.hidden{ display:none!important; }
+
+      .nmz-rodape{
+        flex:none; border-top:1px solid var(--line,#232a33); padding:8px;
+        display:flex; flex-direction:column; gap:1px;
+      }
+      #nav-drawer .nmz-rodape a.nmz-item, #nav-drawer .nmz-rodape button.nmz-item{
+        font-size:12.3px; background:none; cursor:pointer; text-align:left; font-family:inherit;
+      }
+      #nav-drawer .nmz-rodape .nmz-sair{ color:var(--bad,#ff5c5c); }
+      #nav-drawer .nmz-rodape .nmz-sair:hover{ background:rgba(255,92,92,.1); }
+      #nav-drawer .nmz-rodape .nmz-suporte{ color:var(--accent,#5cc8ff); }
+
+      @media (max-width:420px){ #nav-drawer{ width:86vw; } }
+    `;
+    document.head.appendChild(st);
+  }
+
+  // ---------------------------------------------------------------
+  // 3) MONTAGEM
+  // ---------------------------------------------------------------
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function itemHtml(it) {
+    // nasce escondido: quem libera e aplicarRegras(), depois do /api/me.
+    // Assim ninguem ve por um instante um link que nao pode acessar.
+    return `<a class="nmz-item hidden" id="${it.id}" href="${esc(it.href)}">`
+      + `<span class="nmz-ico">${it.icone}</span><span class="nmz-rot">${esc(it.rotulo)}</span></a>`;
+  }
+
+  function montar(nav) {
+    const corpo = MENU.map((sec) => {
+      const itens = sec.itens.map(itemHtml).join('');
+      if (!sec.grupo) return `<div class="nmz-wrap" data-grupo="">${itens}</div>`;
+      return `<div class="nmz-grupo" data-grupo="${esc(sec.grupo)}"><span>${esc(sec.grupo)}</span><span class="nmz-seta">▾</span></div>`
+        + `<div class="nmz-wrap" data-grupo="${esc(sec.grupo)}">${itens}</div>`;
+    }).join('');
+
+    nav.innerHTML = `
+      <div class="nmz-topo">
+        <div style="min-width:0;">
+          <div class="nmz-marca">Zenith Ops</div>
+          <div class="nmz-quem" id="nmz-quem"></div>
+        </div>
+        <button type="button" class="nmz-fechar" id="nmz-fechar" aria-label="Fechar menu" title="Fechar">✕</button>
+      </div>
+      <div class="nmz-corpo">${corpo}</div>
+      <div class="nmz-rodape">
+        <a class="nmz-item" id="nav-ajuda" href="/ajuda.html"><span class="nmz-ico">❓</span><span>Ajuda</span></a>
+        <a class="nmz-item nmz-suporte" href="https://wa.me/5581995148654" target="_blank" rel="noopener"><span class="nmz-ico">💬</span><span>Suporte (81) 99514-8654</span></a>
+        <button type="button" class="nmz-item nmz-sair" id="nmz-sair"><span class="nmz-ico">🚪</span><span>Sair</span></button>
+      </div>`;
+
+    nav.querySelector('#nmz-fechar').addEventListener('click', fechar);
+    nav.querySelector('#nmz-sair').addEventListener('click', () => {
+      if (typeof window.logout === 'function') return window.logout();
+      localStorage.removeItem('authToken');
+      location.href = '/';
+    });
+  }
+
+  // ---------------------------------------------------------------
+  // 4) PERMISSAO
+  // ---------------------------------------------------------------
+  function temSecao(me, s) {
+    if (me.role === 'master' || me.isAdmin) return true;
+    return (((me.permissions && me.permissions.sections) || []).includes(s));
+  }
+
+  function podeVer(it, me) {
+    const isMaster = me.role === 'master';
+    const isAdmin = isMaster || !!me.isAdmin;
+    if (it.master) return isMaster;
+    if (it.admin) return isAdmin;
+    if (it.secoes) return it.secoes.some((s) => temSecao(me, s));
+    return true;
+  }
+
+  let ME = null;
+  function aplicarRegras() {
+    if (!ME) return;
+    MENU.forEach((sec) => {
+      sec.itens.forEach((it) => {
+        const el = document.getElementById(it.id);
+        if (!el) return;
+        el.classList.toggle('hidden', !podeVer(it, ME));
+        if (it.alt) {
+          const usaAlt = it.alt.quando(ME);
+          const ico = el.querySelector('.nmz-ico');
+          const rot = el.querySelector('.nmz-rot');
+          if (ico) ico.textContent = usaAlt ? it.alt.icone : it.icone;
+          if (rot) rot.textContent = usaAlt ? it.alt.rotulo : it.rotulo;
+        }
+      });
+    });
+    // grupo sem nenhum item visivel some junto (nao deixa titulo orfao).
+    // A visibilidade do wrap em si fica por conta do sincronizarRecolhido,
+    // que junta as duas condicoes (permissao + acordeao) num lugar so.
+    document.querySelectorAll('#nav-drawer .nmz-grupo').forEach((g) => {
+      const wrap = document.querySelector(`#nav-drawer .nmz-wrap[data-grupo="${CSS.escape(g.dataset.grupo)}"]`);
+      const temVisivel = !!wrap && [...wrap.children].some((c) => !c.classList.contains('hidden'));
+      g.classList.toggle('hidden', !temVisivel);
+    });
+    const quem = document.getElementById('nmz-quem');
+    if (quem) {
+      const nome = ME.username || ME.nome || ME.email || '';
+      const papel = ME.role === 'master' ? 'Master' : (ME.isAdmin ? 'Admin' : '');
+      quem.textContent = papel ? `${nome} · ${papel}` : nome;
+      quem.title = nome;
+    }
+  }
+
+  // Quao bem o href de um item descreve a tela aberta agora:
+  //   -1 = nao e essa tela
+  //    0 = mesmo caminho, sem query
+  //   >0 = mesmo caminho E a query do item bate (mais especifico)
+  // Isso existe porque "Reset senha" aponta pra /painel.html?resetSenha=1:
+  // comparando so o pathname, ele acendia junto com "Painel" em toda visita
+  // ao painel, e ainda abria o acordeao de Administracao sem motivo.
+  function grauDeMatch(a) {
+    let u;
+    try { u = new URL(a.getAttribute('href'), location.origin); } catch (e) { return -1; }
+    if (u.pathname !== location.pathname) return -1;
+    const atual = new URLSearchParams(location.search);
+    let grau = 0;
+    for (const [k, v] of u.searchParams) {
+      if (atual.get(k) !== v) return -1;
+      grau += 1;
+    }
+    return grau;
+  }
+
+  // marca UM item so: o de maior grau (empate -> o primeiro do menu)
+  function marcarAtivo() {
+    let melhor = null;
+    let melhorGrau = -1;
+    document.querySelectorAll('#nav-drawer a.nmz-item[href]').forEach((a) => {
+      a.classList.remove('active');
+      const g = grauDeMatch(a);
+      if (g > melhorGrau) { melhorGrau = g; melhor = a; }
+    });
+    if (melhor) melhor.classList.add('active');
+  }
+
+  // acordeao: abre so o grupo da pagina atual (pra ver onde esta); os
+  // outros comecam recolhidos, senao o menu fica longo demais no celular
+  function acordeao() {
+    document.querySelectorAll('#nav-drawer .nmz-grupo').forEach((g) => {
+      const wrap = document.querySelector(`#nav-drawer .nmz-wrap[data-grupo="${CSS.escape(g.dataset.grupo)}"]`);
+      if (!wrap) return;
+      // usa o item ja marcado por marcarAtivo() (chamado antes), pra o grupo
+      // que abre sozinho ser exatamente o do item aceso - nunca outro que
+      // por acaso tenha um link pro mesmo caminho com outra query
+      const temAtual = !!wrap.querySelector('a.nmz-item.active');
+      if (!temAtual) { g.classList.add('fechado'); wrap.dataset.recolhido = '1'; }
+      g.addEventListener('click', () => {
+        const abrir = g.classList.contains('fechado');
+        g.classList.toggle('fechado', !abrir);
+        wrap.dataset.recolhido = abrir ? '' : '1';
+        sincronizarRecolhido();
+      });
+    });
+    sincronizarRecolhido();
+  }
+  // "recolhido" e separado de "hidden" (permissao) pra um nao apagar o
+  // outro - permissao sempre ganha
+  function sincronizarRecolhido() {
+    document.querySelectorAll('#nav-drawer .nmz-wrap[data-grupo]').forEach((w) => {
+      if (!w.dataset.grupo) return;
+      const g = document.querySelector(`#nav-drawer .nmz-grupo[data-grupo="${CSS.escape(w.dataset.grupo)}"]`);
+      const semPermissao = g && g.classList.contains('hidden');
+      w.classList.toggle('hidden', semPermissao || w.dataset.recolhido === '1');
+    });
+  }
+
+  // ---------------------------------------------------------------
+  // 5) ABRIR / FECHAR - sobrescreve as funcoes locais das paginas (os
+  //    botoes hamburguer chamam abrirMenu() no onclick inline)
+  // ---------------------------------------------------------------
+  function overlay() {
+    let o = document.getElementById('nav-drawer-overlay');
+    if (!o) {
+      o = document.createElement('div');
+      o.id = 'nav-drawer-overlay';
+      o.className = 'nav-drawer-overlay hidden';
+      document.body.appendChild(o);
+    }
+    return o;
+  }
+  function abrir() {
+    const nav = document.getElementById('nav-drawer');
+    if (!nav) return;
+    nav.classList.remove('hidden');
+    overlay().classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+  function fechar() {
+    const nav = document.getElementById('nav-drawer');
+    if (nav) nav.classList.add('hidden');
+    const o = document.getElementById('nav-drawer-overlay');
+    if (o) o.classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+  window.abrirMenu = abrir;
+  window.fecharMenu = fechar;
+
+  // ---------------------------------------------------------------
+  // 6) BOOT
+  // ---------------------------------------------------------------
+  function iniciar() {
+    const nav = document.getElementById('nav-drawer');
+    if (!nav) return;
+    injetarEstilo();
+    nav.classList.add('nav-drawer');
+    if (!nav.classList.contains('hidden')) nav.classList.add('hidden');
+    montar(nav);
+    marcarAtivo();
+    acordeao();
+
+    const o = overlay();
+    o.addEventListener('click', fechar);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fechar(); });
+    // fechar ao clicar num item (no celular o menu cobre a tela)
+    nav.addEventListener('click', (e) => { if (e.target.closest('a.nmz-item')) fechar(); });
+
+    if (!token) return;
+    fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((me) => {
+        if (!me) return;
+        ME = me;
+        aplicarRegras();
+        sincronizarRecolhido();
+        marcarAtivo();
+        // trava de seguranca: varias paginas ainda tem no proprio boot()
+        // linhas antigas do tipo getElementById('nav-x').classList.remove
+        // ('hidden') - sem olhar permissao. O observer devolve a regra
+        // certa na hora, em vez do antigo "reaplica depois de 800ms".
+        const obs = new MutationObserver(() => {
+          obs.disconnect();
+          aplicarRegras();
+          sincronizarRecolhido();
+          marcarAtivo();
+          obs.observe(nav, { attributes: true, attributeFilter: ['class'], subtree: true });
+        });
+        obs.observe(nav, { attributes: true, attributeFilter: ['class'], subtree: true });
+      })
+      .catch(() => { /* API fora do ar - menu fica so com o que nao exige permissao */ });
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar, { once: true });
+  else iniciar();
+})();

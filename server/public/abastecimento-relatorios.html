@@ -264,54 +264,7 @@
 </header>
 
 <div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
-<nav class="nav-drawer hidden" id="nav-drawer">
-  <div class="nav-drawer-titulo">Zenith Ops</div>
-  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
-  <div class="nav-drawer-grupo">Operação diária</div>
-  <a class="back hidden" id="nav-lancamento" href="/lancamento.html">🧾 Fechamento</a>
-  <a class="back hidden" id="nav-entrega-lancamento" href="/entrega-lancamento.html">📦 Lançar entrega</a>
-  <a class="back hidden" id="nav-fechamentos" href="/fechamentos.html">💰 Fechamentos</a>
-  <a class="back hidden" id="nav-entregas" href="/entregas.html">🛵 Entregas</a>
-  <a class="back hidden" id="nav-inventario" href="/estoque.html">📦 Estoque</a>
-  <a class="back" id="nav-abastecimento" href="/abastecimento.html">🛒 Abastec. Carrinho</a>
-  <a class="back active hidden" id="nav-abastecimento-relatorios" href="/abastecimento-relatorios.html">📊 Relatórios do Carrinho</a>
-  <div class="nav-drawer-grupo">Monitoramento</div>
-  <a class="back hidden" id="nav-monitor" href="/monitor.html">📈 Monitor</a>
-  <a class="back hidden" id="nav-relatorios" href="/relatorios.html">📊 Relatórios</a>
-  <a class="back hidden" id="nav-ifood" href="/ifood.html">🍔 iFood</a>
-  <div class="nav-drawer-grupo" id="nav-grupo-saltiverso">Saltiverso</div>
-  <a class="back hidden" id="nav-parque-checkin" href="/parque-checkin.html">🤸 Check-in Parque</a>
-  <a class="back hidden" id="nav-parque" href="/parque.html">🤸 Parque (painel)</a>
-  <a class="back hidden" id="nav-festas" href="/festas.html">🎉 Festas</a>
-  <a class="back hidden" id="nav-mensalistas" href="/mensalistas.html">📅 Mensalistas</a>
-  <a class="back hidden" id="nav-saltiverso-vendas" href="/saltiverso-vendas.html">🥤 Bebidas & Meias</a>
-  <a class="back hidden" id="nav-saltiverso-fechamento" href="/saltiverso-fechamento.html">🧾 Fechamento do balcão</a>
-  <div class="nav-drawer-grupo">BigBrother</div>
-  <a class="back hidden" id="nav-rh" href="/rh.html">🧑‍💼 RH</a>
-  <div class="nav-drawer-grupo">Solicitações</div>
-  <a class="back hidden" id="nav-solicitacoes" href="/central.html">📋 Central</a>
-  <a class="back hidden" id="nav-historico" href="/central-historico.html">📜 Histórico</a>
-  <a class="back hidden" id="nav-tecnico" href="/tecnico.html">🔧 Chamados TI</a>
-  <a class="back" id="nav-ativos-ti" href="/ativos-ti.html">🖥️ Ativos de TI</a>
-  <a class="back hidden" id="nav-manutencao" href="/manutencao.html">🔧 Manutenção</a>
-  <a class="back hidden" id="nav-central-solucoes" href="/central-solucoes.html">💬 Central de Soluções</a>
-  <a class="back hidden" id="nav-beniboy" href="/beniboy.html">🐝 Central do Beniboy</a>
-  <a class="back hidden" id="nav-loja-status" href="/loja-status.html">📡 NOC Zenith</a>
-  <div class="nav-drawer-grupo">Administração</div>
-  <a class="back hidden" id="nav-usuarios" href="/usuarios.html">👤 Usuários</a>
-  <a class="back hidden" id="nav-grupos" href="/grupos.html">🏷️ Grupos</a>
-  <a class="back hidden" id="nav-email" href="/email.html">✉️ Email</a>
-  <a class="back hidden" id="nav-login-custom" href="/login-custom.html">🎨 Tela de Login</a>
-  <a class="back hidden" id="nav-central-alertas" href="/central-alertas.html">🚨 Central de Alertas</a>
-  <a class="back hidden" id="nav-entregas-regras" href="/entregas-regras.html">⚙️ Regras de Entregas</a>
-  <a class="back hidden" id="nav-cofre" href="/cofre.html">🔐 Cofre</a>
-  <a class="back" id="nav-ajuda" href="/ajuda.html">❓ Ajuda</a>
-  <a class="back hidden" id="nav-reset-senha" href="/painel.html?resetSenha=1">🔑 Reset senha</a>
-  <div class="nav-drawer-sep"></div>
-  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
-  <div class="nav-drawer-sep"></div>
-  <a class="back" href="https://wa.me/5581995148654" target="_blank" rel="noopener" style="color:var(--accent);">💬 Dúvidas? Suporte (81) 99514-8654</a>
-</nav>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
 
 <div id="sem-acesso" class="empty hidden">Esta página é exclusiva do Master.</div>
 
@@ -372,8 +325,8 @@ window.fetch = (url, opts = {}) => {
   return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
 };
 function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
-function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
-function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+function abrirMenu(){}
+function fecharMenu(){}
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function dataBrasilia(iso){ return new Date(iso).toLocaleDateString('sv-SE', { timeZone: FUSO_BR }); }
 function fmtHora(iso){ return new Date(iso).toLocaleTimeString('pt-BR', { timeZone: FUSO_BR, hour:'2-digit', minute:'2-digit' }); }
@@ -541,8 +494,6 @@ async function boot(){
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;
   }
-  document.getElementById('nav-abastecimento').classList.remove('hidden');
-  document.getElementById('nav-abastecimento-relatorios').classList.remove('hidden');
   document.getElementById('root').classList.remove('hidden');
   carregarComparativoFechamento();
   carregarFluxo(7);
@@ -551,6 +502,6 @@ boot();
 </script>
 <script src="/notif-central.js"></script>
 <script src="/suporte-chat.js"></script>
-<script src="/nav-gate.js"></script>
+<script src="/nav-menu.js"></script>
 </body>
 </html>
