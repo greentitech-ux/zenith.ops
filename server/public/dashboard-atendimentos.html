@@ -123,6 +123,7 @@
         <input type="date" id="f-ate">
       </div>
       <button type="button" class="btn-ghost" onclick="presetPeriodo('hoje')">Hoje</button>
+      <button type="button" class="btn-ghost" onclick="presetPeriodo('ontem')">Ontem</button>
       <button type="button" class="btn-ghost" onclick="presetPeriodo('7d')">7 dias</button>
       <button type="button" class="btn-ghost" onclick="presetPeriodo('mes')">Este mês</button>
       <button type="button" class="btn-primary" onclick="carregar()">Filtrar</button>
@@ -223,6 +224,7 @@ function somarDias(ymd, dias){
 function presetPeriodo(tipo){
   const hoje = hojeYMD();
   if(tipo==='hoje'){ document.getElementById('f-de').value = hoje; document.getElementById('f-ate').value = hoje; }
+  else if(tipo==='ontem'){ const ontem = somarDias(hoje,-1); document.getElementById('f-de').value = ontem; document.getElementById('f-ate').value = ontem; }
   else if(tipo==='7d'){ document.getElementById('f-de').value = somarDias(hoje,-6); document.getElementById('f-ate').value = hoje; }
   else if(tipo==='mes'){ document.getElementById('f-de').value = hoje.slice(0,8)+'01'; document.getElementById('f-ate').value = hoje; }
   carregar();
