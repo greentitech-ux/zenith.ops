@@ -91,6 +91,11 @@
   .sheet-fechar-flutuante{position:absolute;top:-14px;right:-6px;width:32px;height:32px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);color:var(--muted);font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.5);cursor:pointer;z-index:5;}
   .sheet-fechar-flutuante:hover{color:var(--text);border-color:var(--accent);}
   .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px 14px 0 0;padding:16px 14px 22px;width:100%;max-width:640px;max-height:88vh;overflow-y:auto;}
+  .ver-linha{padding:8px 0;border-top:1px solid var(--line);}
+  .ver-linha:first-child{border-top:none;}
+  .ver-linha .ver-lbl{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
+  .ver-linha .ver-val{font-size:13.5px;margin-top:2px;word-break:break-word;}
+  .ver-linha.destaque .ver-val{font-size:16px;font-weight:700;color:var(--ok);}
   .sheet h3{margin:0 0 4px;font-size:14px;}
   .sheet .sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px;}
   .resumo{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12.5px;display:flex;flex-direction:column;gap:4px;}
@@ -287,6 +292,17 @@
   <div id="lista-checkins"><div class="empty">carregando...</div></div>
 </div>
 
+</div>
+
+<div class="overlay hidden" id="overlay-ver">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharVer()">✕</span>
+    <div class="sheet">
+    <h3>👁 Conferir o que foi lançado</h3>
+    <div class="sub" id="ver-info"></div>
+    <div id="ver-corpo"></div>
+    </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="overlay-correcao">
@@ -1176,10 +1192,11 @@ function renderLista(){
         <span>${escapeHtml(c.responsavel?.nome||'')} · ${escapeHtml(c.unidadeNome||c.unidade)} · ${fmtData(c.dataUtilizacao)}</span>
         <span class="badge ${status.classe}">${status.texto}</span>
       </div>
-      <div class="sub">${horario} · ${c.pulseiras} pulseira(s)${c.valorMeias?` · 🧦 ${((c.criancas||[]).filter(x=>x.meia!==false).length + (c.meiasExtras||0))} meia(s)`:''}${c.minutosAdicionados?` · ➕ ${c.minutosAdicionados}min extras`:''}${c.relancadoDe?' · 🔁 relançado (termo do dia)':''}${c.adultoCortesia?' · A.C. x'+c.quantAC:''}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''}</div>
+      <div class="sub">${horario} · ${c.pulseiras} pulseira(s)${c.valorMeias?` · 🧦 ${((c.criancas||[]).filter(x=>x.meia!==false).length + (c.meiasExtras||0))} meia(s)`:''}${c.minutosAdicionados?` · ➕ ${c.minutosAdicionados}min extras`:''}${c.relancadoDe?' · 🔁 relançado (termo do dia)':''}${c.adultoCortesia?' · A.C. x'+c.quantAC:''}${c.checkoutAntecipado?` · 🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`:''} · <b>${fmtReal(valorDoCheckin(c))}</b>${c.metodoPagamento?' ('+escapeHtml(METODOS_LABEL[c.metodoPagamento]||c.metodoPagamento)+')':''}</div>
       <div class="criancas">${escapeHtml(criancas)}</div>
       ${cortesiaHtml(c)}
       <div style="margin-top:8px;">
+        <button type="button" class="link-btn" onclick="abrirVer('${c.id}')">👁 Ver</button>
         <a class="link-btn" href="/api/parque/checkins/${c.id}/termo.pdf?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">🖨️ Termo</a>
         ${!c.termoAssinado?`<button type="button" class="link-btn" onclick="marcarAssinadoId('${c.id}')">✔ Marcar assinado</button>`:''}
         ${(!c.iniciado && !(c.metodoPagamento==='cortesia' && ['PENDENTE','NEGADA'].includes(c.cortesiaStatus)))?`<button type="button" class="link-btn" style="color:var(--ok);" onclick="fazerCheckin('${c.id}')">▶ Fazer check-in</button>`:''}
@@ -1192,6 +1209,65 @@ function renderLista(){
     </div>`;
   }).join('');
 }
+
+// ---------- conferir o lançamento (👁 Ver) ----------
+// Aberto pra QUEM lança, não só pra gestão: quem digitou é quem consegue
+// perceber na hora que trocou o tempo ou esqueceu uma meia. O caminho antigo
+// era abrir o PDF do termo - que não mostra valor nem forma de pagamento,
+// justamente o que precisa de conferência.
+const METODOS_LABEL = { dinheiro:'Dinheiro', pix:'Pix', debito:'Débito', credito:'Crédito', voucher:'Voucher', gratuidade:'Gratuidade', cortesia:'Cortesia' };
+
+function valorDoCheckin(c){
+  if(c.valor!=null) return c.valor;
+  if(c.metodoPagamento==='cortesia') return 0;
+  return valorPorTempo(c.tempoMinutos) * ((c.criancas||[]).length || c.pulseiras || 0);
+}
+
+function verLinha(lbl, val, classe){
+  return `<div class="ver-linha ${classe||''}"><div class="ver-lbl">${escapeHtml(lbl)}</div><div class="ver-val">${val}</div></div>`;
+}
+
+function abrirVer(id){
+  const c = CHECKINS.find(x=>x.id===id);
+  if(!c) return;
+  document.getElementById('ver-info').textContent = `${c.unidadeNome||c.unidade} · ${fmtData(c.dataUtilizacao)}`;
+  const status = statusCheckin(c);
+  const horario = c.iniciado
+    ? `${(c.timeInicial||'').slice(0,5)} às ${(c.timeFinal||'').slice(0,5)}${c.autoCheckin?' · 🤖 automático':''}`
+    : `ainda não iniciou · previsto ${(c.horarioPrevisto||'').slice(0,5) || '—'}`;
+  const meias = (c.criancas||[]).filter(x=>x.meia!==false).length + (c.meiasExtras||0);
+  // uma linha por criança com o que foi cobrado dela - é onde se pega meia
+  // esquecida e niver aplicado no nome errado
+  const criancasHtml = (c.criancas||[]).length
+    ? (c.criancas||[]).map((cr,i)=>`${i+1}. <b>${escapeHtml(cr.nome||'(sem nome)')}</b>${cr.dataNascimento?` · nasc. ${fmtData((cr.dataNascimento||'').slice(0,10))}`:''} · ${cr.meia!==false?'🧦 com meia':'sem meia'}${cr.niver?' · 🎂 aniversariante':''}`).join('<br>')
+    : '—';
+  // formas de pagamento: quando a venda foi dividida, o que interessa
+  // conferir é CADA parcela contra o comprovante da maquininha
+  const pgs = Array.isArray(c.pagamentos) ? c.pagamentos : [];
+  const pagamentoHtml = pgs.length
+    ? pgs.map(p=>`${escapeHtml(METODOS_LABEL[p.forma]||p.forma||'—')} · <b>${fmtReal(p.valor)}</b>`).join('<br>')
+    : escapeHtml(c.metodoPagamento ? (METODOS_LABEL[c.metodoPagamento]||c.metodoPagamento) : '— sem forma registrada —');
+
+  let html = '';
+  html += verLinha('Valor total cobrado', escapeHtml(fmtReal(valorDoCheckin(c))), 'destaque');
+  html += verLinha('Forma(s) de pagamento', pagamentoHtml);
+  html += verLinha('Tempo contratado', `${c.tempoMinutos}min${c.minutosAdicionados?` <span style="color:var(--warn);">+ ${c.minutosAdicionados}min adicionados depois</span>`:''}`);
+  html += verLinha('Horário', escapeHtml(horario));
+  html += verLinha('Responsável', escapeHtml(c.responsavel?.nome||'—'));
+  html += verLinha('Contato', escapeHtml(c.responsavel?.contato||'—'));
+  html += verLinha('Criança(s)', criancasHtml);
+  html += verLinha('Pulseira(s) · meia(s)', `${c.pulseiras||0} pulseira(s) · ${meias} meia(s)${c.valorMeias?` (${fmtReal(c.valorMeias)})`:''}`);
+  if(c.adultoCortesia) html += verLinha('Adulto cortesia', `x${c.quantAC||1}`);
+  if(c.relancadoDe) html += verLinha('Relançado', '🔁 termo do dia reaproveitado');
+  if(c.motivoCortesia) html += verLinha('Motivo da cortesia', escapeHtml(c.motivoCortesia));
+  if(c.checkoutAntecipado) html += verLinha('Check-out antecipado', `🕐 ${c.tempoRestanteMin} min ${c.checkoutAprovado?'guardados':'a confirmar'}`);
+  html += verLinha('Termo assinado', c.termoAssinado ? '✅ sim' : '❌ ainda não');
+  html += verLinha('Status', escapeHtml(status.texto));
+  html += verLinha('Observação', c.observacao ? escapeHtml(c.observacao) : '—');
+  document.getElementById('ver-corpo').innerHTML = html;
+  document.getElementById('overlay-ver').classList.remove('hidden');
+}
+function fecharVer(){ document.getElementById('overlay-ver').classList.add('hidden'); }
 
 async function marcarAssinadoId(id){
   await fetch(`/api/parque/checkins/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ termoAssinado:true }) });

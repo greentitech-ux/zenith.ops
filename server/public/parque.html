@@ -514,11 +514,31 @@ async function carregarTermos(){
       <div class="sub" style="font-size:12px;color:var(--muted);">
         emitido ${fmtQuando(e.emitidoEm)} por ${escapeHtml(e.emitidoPorEmail||'—')}
       </div>
+      ${e.reimpressoes ? `<div class="sub" style="font-size:12px;color:var(--muted);">🖨️ termo reimpresso ${e.reimpressoes}x nesse mesmo atendimento</div>` : ''}
       ${e.status==='CANCELADA' ? `<div class="sub" style="font-size:12px;margin-top:3px;">✖ cancelado por ${escapeHtml(e.canceladoPorEmail||'—')} — <i>${escapeHtml(e.motivoCancelamento||'')}</i></div>` : ''}
+      ${pend ? `<button type="button" class="link-btn" style="margin-top:6px;" onclick="baixarEmissao('${e.id}','${escapeHtml(e.responsavelNome||'')}')">✖ Baixar pendência</button>` : ''}
     </div>`;
   };
   // pendentes primeiro: é o que exige ação agora
   lista.innerHTML = pendentes.map(linha).join('') + canceladas.map(linha).join('');
+}
+
+// Sem isso a pendência não tinha saída nenhuma por aqui: o cancelamento só
+// existia na tela de check-in e só alcançava o ÚLTIMO termo impresso. Uma
+// pendência de meia hora atrás ficava no painel pra sempre, sem botão.
+// O motivo é obrigatório - a baixa é o registro de quem resolveu e por quê.
+async function baixarEmissao(id, nome){
+  const motivo = prompt(`Baixar a pendência de ${nome||'(sem nome)'}.\n\nO que aconteceu? (ex: "venda registrada, termo foi reimpresso" ou "cliente desistiu")`);
+  if(motivo === null) return;
+  if(String(motivo).trim().length < 5){ alert('Escreva o motivo com pelo menos 5 caracteres.'); return; }
+  try{
+    const res = await fetch(`/api/parque/termo-emissoes/${id}/cancelar`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ motivo }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || 'Não foi possível baixar.');
+    await carregarTermos();
+  }catch(err){ alert(err.message); }
 }
 
 function edicaoPendentePara(checkinId){

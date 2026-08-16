@@ -1230,7 +1230,58 @@ async function buscarPorCpf(cpf) {
 const TERMOS = db.collection('parqueTermosEmitidos');
 const TERMO_STATUS = ['PENDENTE', 'FINALIZADA', 'CANCELADA'];
 
+// Chave do ATENDIMENTO (nao da impressao). Duas impressoes do mesmo termo,
+// pro mesmo responsavel, na mesma unidade e no mesmo dia sao o MESMO
+// atendimento - e uma venda so. Sem isso, cada reimpressao (papel amassado,
+// corrigiu o nome de uma crianca, a impressora comeu a folha) virava uma
+// pendencia propria que a venda nunca fechava, porque o check-in so baixa
+// UMA emissao. Resultado: alerta de "termo sem venda" numa venda que foi
+// paga - exatamente o falso positivo que faz o gerente parar de olhar.
+// CPF quando tem (e o identificador de verdade); senao o nome normalizado.
+function chaveAtendimento({ unidade, responsavel, dataUtilizacao }) {
+  const r = responsavel || {};
+  const cpf = String(r.cpf || '').replace(/\D/g, '');
+  const nome = String(r.nome || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ');
+  const quem = cpf || nome;
+  if (!quem) return null;
+  return `${unidade || ''}|${quem}|${dataUtilizacao || ''}`;
+}
+
+// pendencias em aberto que pertencem ao mesmo atendimento. Janela de 24h
+// (nao "o dia todo"): o que importa e a impressao recente, e uma emissao
+// esquecida de ontem nao deve ser fechada por uma venda de hoje.
+async function pendentesDoAtendimento(dados) {
+  const chave = chaveAtendimento(dados);
+  if (!chave) return [];
+  const corte = new Date(Date.now() - 24 * 3600000).toISOString();
+  const snap = await TERMOS.where('emitidoEm', '>=', corte).get();
+  return snap.docs.map((d) => d.data())
+    .filter((e) => e.status === 'PENDENTE' && chaveAtendimento({
+      unidade: e.unidade,
+      responsavel: { cpf: e.responsavelCpf, nome: e.responsavelNome },
+      dataUtilizacao: e.dataUtilizacao,
+    }) === chave);
+}
+
 async function criarEmissaoTermo({ unidade, unidadeNome, responsavel, criancas, dataUtilizacao, tempoMinutos, valorPrevisto, emitidoPorId, emitidoPorEmail }) {
+  // reimpressao do mesmo atendimento: atualiza a pendencia que ja existe em
+  // vez de abrir outra. O rastro nao se perde - fica registrado quantas
+  // vezes o termo saiu (reimpressoes), que e o dado que interessa se alguem
+  // quiser conferir depois.
+  const jaAberta = (await pendentesDoAtendimento({ unidade, responsavel, dataUtilizacao }))
+    .sort((a, b) => String(b.emitidoEm).localeCompare(String(a.emitidoEm)))[0];
+  if (jaAberta) {
+    const merge = {
+      qtdCriancas: Array.isArray(criancas) ? criancas.length : jaAberta.qtdCriancas,
+      criancasNomes: Array.isArray(criancas) ? criancas.map((c) => c && c.nome).filter(Boolean).slice(0, 20) : jaAberta.criancasNomes,
+      tempoMinutos: tempoMinutos || jaAberta.tempoMinutos,
+      valorPrevisto: Number(valorPrevisto) || jaAberta.valorPrevisto || 0,
+      reimpressoes: (jaAberta.reimpressoes || 0) + 1,
+      reimpressoEm: new Date().toISOString(),
+    };
+    await TERMOS.doc(jaAberta.id).set(merge, { merge: true });
+    return { ...jaAberta, ...merge };
+  }
   const doc = TERMOS.doc();
   const registro = {
     id: doc.id,
@@ -1244,6 +1295,7 @@ async function criarEmissaoTermo({ unidade, unidadeNome, responsavel, criancas, 
     tempoMinutos: tempoMinutos || null,
     valorPrevisto: Number(valorPrevisto) || 0,
     status: 'PENDENTE',
+    reimpressoes: 0,
     emitidoPorId: emitidoPorId || null,
     emitidoPorEmail: emitidoPorEmail || null,
     emitidoEm: new Date().toISOString(),
@@ -1272,6 +1324,28 @@ async function resolverEmissaoTermo(id, patch) {
 }
 
 const finalizarEmissaoTermo = (id, checkinId) => resolverEmissaoTermo(id, { status: 'FINALIZADA', checkinId: checkinId || null });
+
+// Baixa a pendencia pelo ATENDIMENTO, nao pelo id que o navegador guardou.
+// O id vive numa variavel de memoria da aba: recarregar a pagina, cair a
+// luz, o cliente voltar depois e a venda ser fechada em outro computador -
+// em todos esses casos a venda acontece e a pendencia ficava aberta pra
+// sempre, virando alerta de "termo sem venda" numa venda paga.
+// Casa por unidade + CPF (ou nome) + dia, entao so fecha o que e do mesmo
+// atendimento. Devolve quantas baixou, pra dar pra ver no log.
+async function finalizarEmissoesDoAtendimento(checkinId, dados, idExplicito) {
+  const baixadas = [];
+  if (idExplicito) {
+    const r = await finalizarEmissaoTermo(idExplicito, checkinId);
+    if (r) baixadas.push(r.id);
+  }
+  const pendentes = await pendentesDoAtendimento(dados);
+  for (const e of pendentes) {
+    if (baixadas.includes(e.id)) continue;
+    await finalizarEmissaoTermo(e.id, checkinId);
+    baixadas.push(e.id);
+  }
+  return baixadas;
+}
 
 async function cancelarEmissaoTermo(id, { motivo, canceladoPorId, canceladoPorEmail }) {
   const texto = String(motivo == null ? '' : motivo).trim();
@@ -1328,7 +1402,8 @@ async function emissoesParaAlertar() {
 
 module.exports = {
   METODOS_PAGAMENTO, FORMAS_PAGAMENTO_SPLIT, PRECO_MEIA, valorPorTempo, valorDoCheckin,
-  TERMO_STATUS, criarEmissaoTermo, finalizarEmissaoTermo, cancelarEmissaoTermo, listarEmissoesTermo,
+  TERMO_STATUS, criarEmissaoTermo, finalizarEmissaoTermo, finalizarEmissoesDoAtendimento,
+  cancelarEmissaoTermo, listarEmissoesTermo, chaveAtendimento, pendentesDoAtendimento,
   TERMO_ALERTA_HORAS, emissoesParaAlertar,
   getConfigPrecos, salvarConfigPrecos,
   criar, checkin, listAll, listByUnidades, resumoDoDia, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
