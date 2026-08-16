@@ -50,7 +50,13 @@ const ASSUNTOS = ['Computador/Sistema', 'Acesso/Senha', 'Financeiro/Estorno', 'O
 // Beniboy ja sabe de qual loja e o cliente sem precisar perguntar. Fica so
 // no registro (nunca na mensagem visivel do visitante, ver montarMensagens
 // em suporteBot.js).
-async function criar({ nome, contato, texto, assunto, logado, lojaContexto }) {
+// `anexo` = foto/PDF escolhido JA no formulario de abertura (pedido do
+// usuario: quem abre o chamado costuma estar com o print do erro na mao, e
+// mandar depois numa segunda mensagem se perde). Vem validado/gravado pela
+// rota - aqui so entra na primeira mensagem, no mesmo formato que o anexo de
+// qualquer outra mensagem, pra atendimento/PDF/download nao precisarem saber
+// que essa veio da abertura.
+async function criar({ nome, contato, texto, assunto, logado, lojaContexto, anexo }) {
   const nomeLimpo = limpar(nome, 120);
   const contatoLimpo = limpar(contato, 120);
   const textoLimpo = limpar(texto, MAX_TEXTO);
@@ -79,7 +85,7 @@ async function criar({ nome, contato, texto, assunto, logado, lojaContexto }) {
     assunto: assuntoLimpo,
     lojaContexto: lojaContextoLimpa || null,
     status: 'ABERTO',
-    mensagens: [{ de: 'visitante', texto: textoLimpo, em: agora }],
+    mensagens: [{ de: 'visitante', texto: textoLimpo, em: agora, ...(anexo ? { anexo } : {}) }],
     // registro interno de tentativas suspeitas nessa conversa (texto tipo
     // comando/script, ou arquivo bloqueado no upload - ver segurancaChat.js)
     // - nunca sai na visao publica (getPublico), so no atendimento

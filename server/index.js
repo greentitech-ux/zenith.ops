@@ -738,10 +738,29 @@ async function alertarSegurancaChat(req, chat, motivo, detalheExtra) {
   push.notifySegurancaChat(chat, motivo).catch((err) => console.error('Erro no push de alerta de segurança:', err.message));
 }
 
-app.post('/api/suporte-chat/iniciar', async (req, res) => {
+// aceita anexo JA na abertura (foto do erro, PDF do boleto, print da tela) -
+// quem abre o chamado normalmente esta com o arquivo na mao, e obrigar a
+// mandar depois numa segunda mensagem fazia o anexo se perder. uploadChatAnexo
+// deixa passar requisicao sem arquivo (e ate JSON puro), entao o caminho sem
+// anexo continua exatamente como era.
+app.post('/api/suporte-chat/iniciar', uploadChatAnexo.single('anexo'), async (req, res) => {
   try {
     const logado = await usuarioLogadoDoHeader(req);
-    const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto, assunto: req.body.assunto, logado, lojaContexto: req.body.lojaContexto });
+    let anexo = null;
+    if (req.file) {
+      // MESMA validacao do anexo de mensagem (ver rota abaixo): tipo/tamanho
+      // conferidos antes de qualquer coisa ir pro Storage
+      const validacao = segurancaChat.validarAnexo(req.file);
+      if (!validacao.ok) return res.status(400).json({ error: validacao.motivo });
+      // grava o arquivo ANTES de criar a conversa: assim ela nunca nasce
+      // apontando pra um anexo que falhou no upload. Se criar() recusar
+      // depois (nome/contato/texto em branco), sobra um arquivo orfao no
+      // Storage - preferivel a uma conversa aberta com o anexo faltando, que
+      // e o que o usuario notaria.
+      const path = await storage.salvarArquivo(`abertura-${Date.now()}`, req.file, 'suporte-chat');
+      anexo = { nome: req.file.originalname, path, tipo: req.file.mimetype || 'application/octet-stream', tamanho: req.file.size };
+    }
+    const chat = await suporteChat.criar({ nome: req.body.nome, contato: req.body.contato, texto: req.body.texto, assunto: req.body.assunto, logado, lojaContexto: req.body.lojaContexto, anexo });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     push.notifySolicitacao(`💬 Ticket #${chat.numeroTicket} · Novo chat de suporte`, `${chat.nome} · ${chat.contato}`, chat.id, '/tecnico.html');
     res.json({ id: chat.id, token: chat.token, numeroTicket: chat.numeroTicket });
