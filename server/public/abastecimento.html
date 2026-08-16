@@ -1321,21 +1321,30 @@ function renderSugestao(){
 
   document.getElementById('sug-itens').innerHTML = s.itens.map(it=>{
     const semBase = it.capacidade == null;
+    // sugestão 0 com capacidade conhecida NÃO é erro: é o carrinho já no
+    // limite. Dizer isso na linha evita o "por que não entra nada?" - e
+    // aponta o que fazer se o limite estimado estiver baixo demais
+    const noLimite = !semBase && it.sugestao === 0;
     const detalhe = semBase
       ? 'sem capacidade cadastrada'
-      : `tem ${it.jaTem}${it.aCaminho?` · ${it.aCaminho} a caminho`:''} · cabe ${it.capacidade}`;
+      : `tem ${it.jaTem}${it.aCaminho?` · ${it.aCaminho} a caminho`:''} · cabe ${it.capacidade}`
+        + (noLimite ? ` · <b>já no limite${it.origemCapacidade==='estimada'?' estimado':''}</b>` : '');
     return `
     <div class="sug-linha">
       <span class="sug-nome">${escapeHtml(it.nome)}<span class="sug-de">${detalhe}</span></span>
       <button type="button" class="sug-btn" aria-label="menos ${escapeHtml(it.nome)}" onclick="ajustarSugestao('${it.chave}',-1)">−</button>
-      <input type="number" min="0" inputmode="numeric" class="sug-qtd" value="${sugValor(it)}" oninput="mudarSugestao('${it.chave}', this.value)">
+      <input type="number" min="0" inputmode="numeric" class="sug-qtd" data-chave="${escapeHtml(it.chave)}" value="${sugValor(it)}" oninput="mudarSugestao('${it.chave}', this.value)">
       <button type="button" class="sug-btn" aria-label="mais ${escapeHtml(it.nome)}" onclick="ajustarSugestao('${it.chave}',1)">+</button>
     </div>`;
   }).join('');
 
+  const zerados = s.itens.filter(i=>i.capacidade != null && i.sugestao === 0);
   document.getElementById('sug-nota').innerHTML = s.semCapacidade
     ? 'Ainda não há capacidade pra calcular: ela é estimada a partir de pelo menos <b>duas contagens</b> (um turno fechado), ou cadastrada pelo Master em Relatórios do Carrinho.'
-    : 'Sugestão = o que cabe menos o que já está no carrinho (contado + a caminho). Ajuste antes de usar.';
+    : 'Sugestão = o que cabe menos o que já está no carrinho (contado + a caminho). Ajuste antes de usar.'
+      + (zerados.length
+        ? `<br>${zerados.map(i=>escapeHtml(i.nome)).join(', ')} ${zerados.length===1?'está':'estão'} no limite estimado pelo histórico. Se o carrinho cabe mais que isso, o Master cadastra a capacidade real em <b>Relatórios do Carrinho</b>.`
+        : '');
 
   document.getElementById('sug-corpo').classList.toggle('hidden', SUG_RECOLHIDO);
   document.getElementById('btn-recolher-sug').textContent = SUG_RECOLHIDO ? 'abrir' : 'recolher';
@@ -1362,8 +1371,18 @@ function ajustarSugestao(chave, delta){
 // leva o pre-envio ajustado pro formulario de verdade (envio ou pedido) -
 // nada e lancado sozinho: o form ainda exige a senha do operador
 function usarSugestao(tipo){
-  const itens = (SUGESTAO?.itens || []).map(it=>({ it, qtd: sugValor(it) })).filter(x=>x.qtd > 0);
-  if(!itens.length){ alert('Nenhuma quantidade pra levar - ajuste os valores primeiro.'); return; }
+  // le a quantidade DO CAMPO NA TELA, nao so do estado interno: o que a
+  // pessoa está vendo é o que tem que ir pro lançamento. (Antes vinha só do
+  // estado, e item com sugestão 0 era descartado - as pizzas simplesmente
+  // não entravam no envio, mesmo aparecendo no painel.)
+  const naTela = {};
+  document.querySelectorAll('#sug-itens .sug-qtd').forEach(el=>{
+    naTela[el.dataset.chave] = Math.max(0, Math.round(Number(el.value) || 0));
+  });
+  const itens = (SUGESTAO?.itens || []).map(it=>({
+    it, qtd: naTela[it.chave] != null ? naTela[it.chave] : sugValor(it),
+  }));
+  if(!itens.some(x=>x.qtd > 0)){ alert('Nenhuma quantidade pra levar - ajuste os valores primeiro.'); return; }
   abrirForm(tipo);
   // o pre-envio nasce da CONTAGEM, nao de um pedido: se abrirForm tinha
   // pre-selecionado um pedido pendente (o padrao dele), desvincula - senao
@@ -1374,9 +1393,12 @@ function usarSugestao(tipo){
   // abrirForm limpa os campos, entao o preenchimento vem depois dele
   itens.forEach(({it, qtd})=>{
     if(it.chave.startsWith('pizza:')){
+      // pizza SEMPRE é escrita, inclusive com 0: os 3 sabores são campos
+      // fixos do formulário, e deixar um deles com o resto de um preenchi-
+      // mento anterior mandaria pizza que ninguém pediu
       const el = document.getElementById('f-' + it.chave.slice(6));
-      if(el) el.value = qtd;
-    }else{
+      if(el) el.value = qtd > 0 ? qtd : '';
+    }else if(qtd > 0){
       const id = it.chave.slice(7);
       // a sugestao e sempre em UNIDADE (a conta do backend normaliza caixa
       // em unidade) - quem quiser lancar em caixa troca no seletor
