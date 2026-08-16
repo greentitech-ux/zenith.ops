@@ -71,6 +71,7 @@ const lojaStatus = require('./lojaStatus');
 const qaAprovacoes = require('./qaAprovacoes');
 const agenteAcoes = require('./agenteAcoes');
 const vigiaScript = require('./vigiaScript');
+const loginCustom = require('./loginCustom');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -95,6 +96,13 @@ const uploadChatAnexo = multer({
 const uploadNotaFiscal = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024, files: 1 },
+});
+
+// fundo customizado da tela de login (ver loginCustom.js) - so imagem,
+// limite generoso o bastante pra uma foto de boa qualidade sem exagerar
+const uploadLoginFundo = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
 });
 
 const app = express();
@@ -329,6 +337,18 @@ async function listaUnidadesPublicas() {
 
 app.get('/api/meta/unidades-publico', async (req, res) => {
   res.json(await listaUnidadesPublicas());
+});
+
+// personalizacao da tela de login (fundo + balao do robo, ver loginCustom.js
+// e o painel em login-custom.html, Master) - publica porque quem le e a
+// propria tela de login, antes de qualquer sessao existir
+app.get('/api/login-custom', async (req, res) => {
+  res.json(loginCustom.semDetalheInterno(await loginCustom.obter()));
+});
+app.get('/api/login-custom/fundo', async (req, res) => {
+  const config = await loginCustom.obter();
+  if (!config.fundoArquivo) return res.sendStatus(404);
+  storage.streamArquivo(config.fundoArquivo, null, res);
 });
 
 // dominio publico do app - usado pra montar links completos (clicaveis fora
@@ -5933,6 +5953,48 @@ app.post('/api/relatorio-config', auth.requireMaster, async (req, res) => {
       horaEnvio: req.body.horaEnvio,
       diasSemana: req.body.diasSemana,
     });
+    res.json(config);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// painel de personalização da tela de login (ver /login-custom.html) -
+// Master edita o texto do balão do robô e o fundo; a leitura pública (tela
+// de login em si) está lá em cima, perto de /api/meta/unidades-publico
+app.put('/api/login-custom', auth.requireMaster, async (req, res) => {
+  try {
+    const config = await loginCustom.salvar({
+      ativo: req.body.ativo,
+      bubbleTitulo: req.body.bubbleTitulo,
+      bubbleTexto: req.body.bubbleTexto,
+      atualizadoPorEmail: req.user.email,
+    });
+    res.json(config);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.post('/api/login-custom/fundo', auth.requireMaster, uploadLoginFundo.single('fundo'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Anexe uma imagem.' });
+    const atual = await loginCustom.obter();
+    const caminho = await storage.salvarArquivo('login-custom', req.file, 'login-custom');
+    const config = await loginCustom.salvarFundo(caminho, req.user.email);
+    // apaga o fundo antigo DEPOIS de garantir que o novo já foi salvo - se o
+    // upload novo falhasse antes, o antigo continuaria valendo em vez de
+    // sumir e deixar a tela sem nada
+    if (atual.fundoArquivo && atual.fundoArquivo !== caminho) await storage.apagarArquivo(atual.fundoArquivo);
+    res.json(config);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.delete('/api/login-custom/fundo', auth.requireMaster, async (req, res) => {
+  try {
+    const atual = await loginCustom.obter();
+    if (atual.fundoArquivo) await storage.apagarArquivo(atual.fundoArquivo);
+    const config = await loginCustom.removerFundo(req.user.email);
     res.json(config);
   } catch (err) {
     res.status(400).json({ error: err.message });
