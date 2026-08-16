@@ -138,14 +138,58 @@ async function migrarLegado(docs) {
   return true;
 }
 
-async function listUncached() {
+// ---- espelho em memoria da colecao ------------------------------------
+//
+// Por que existe: cada computador bate um heartbeat a cada 25s, e o
+// heartbeat precisava LER o documento antes de escrever. Isso dava 3.456
+// leituras por dia POR COMPUTADOR - com 15 maquinas, ~1,55 milhao de
+// leituras por mes so nisso, praticamente toda a cota gratuita do Firestore,
+// pra reler um documento que quase nunca muda. A varredura de 1min e o
+// painel aberto reliam a colecao inteira por cima disso.
+//
+// Por que da pra confiar na memoria: o app roda em UMA instancia (Render,
+// plano free - ver render.yaml) e TODA escrita nessa colecao passa por este
+// modulo. Entao a memoria e tao autoritativa quanto o Firestore. O TTL
+// abaixo e so rede de seguranca (processo reiniciado, escrita feita por
+// fora, console do Firebase).
+//
+// A invalidacao nao precisou ser espalhada por 12 lugares: todo ponto de
+// escrita ja chamava cache.invalidar(), entao o espelho pega carona nesse
+// mesmo gancho (ver a composicao de `cache` logo abaixo).
+const ESPELHO_TTL_MS = 10 * 60 * 1000;
+let espelho = null;      // Map docId -> dados
+let espelhoEm = 0;
+
+async function carregarEspelho() {
   const snap = await COLLECTION.get();
+  // so relê se a migracao mexeu em alguma coisa (o normal e nao mexer, e
+  // relê-la sempre dobrava o custo desta carga)
   const migrou = await migrarLegado(snap.docs);
-  if (!migrou) return snap.docs.map((d) => d.data());
-  const snap2 = await COLLECTION.get();
-  return snap2.docs.map((d) => d.data());
+  const docs = migrou ? (await COLLECTION.get()).docs : snap.docs;
+  const mapa = new Map();
+  docs.forEach((d) => mapa.set(d.id, d.data()));
+  espelho = mapa;
+  espelhoEm = Date.now();
+  return mapa;
 }
-const cache = createCache(listUncached, 10 * 1000);
+
+async function garantirEspelho() {
+  if (espelho && (Date.now() - espelhoEm) < ESPELHO_TTL_MS) return espelho;
+  return carregarEspelho();
+}
+
+function invalidarEspelho() { espelho = null; espelhoEm = 0; }
+
+async function listUncached() {
+  return [...(await garantirEspelho()).values()];
+}
+const cacheBase = createCache(listUncached, 10 * 1000);
+// invalidar() derruba o espelho JUNTO - assim os pontos de escrita que ja
+// chamavam cache.invalidar() continuam corretos sem nenhuma mudanca neles
+const cache = {
+  cached: cacheBase.cached,
+  invalidar: () => { invalidarEspelho(); cacheBase.invalidar(); },
+};
 
 // registra o heartbeat de um computador especifico e devolve a mensagem
 // pendente (se houver), ja limpando ela na mesma escrita - entrega "de uso
@@ -185,15 +229,21 @@ function metricasDeRede(atual, rede) {
 async function heartbeat(codigo, posto, info, token) {
   const id = docIdFor(codigo, posto || 'principal');
   const ref = COLLECTION.doc(id);
-  const snap = await ref.get();
-  const atual = snap.exists ? snap.data() : null;
+  // ANTES: um ref.get() por batida. Como a batida e a cada 25s, isso dava
+  // 3.456 leituras/dia POR COMPUTADOR pra reler um documento que o proprio
+  // servidor acabou de escrever. Agora sai do espelho em memoria (ver
+  // garantirEspelho) - e qualquer escrita vinda de outro caminho
+  // (mensagem, comando, edicao) derruba o espelho pelo cache.invalidar()
+  // que aqueles caminhos ja chamavam.
+  const memoria = await garantirEspelho();
+  const atual = memoria.get(id) || null;
   const mensagemPendente = (atual && atual.mensagemPendente) || null;
   const dados = info || {};
   // presenca (online/offline, IP, userAgent) continua SEM exigir token - e
   // telemetria de baixo risco e nao pode deixar maquina legada (que ainda
   // nao atualizou o NOCZenith, entao nao manda token) sumir do painel. Ja o
   // comando e a thread de chat (dados sensiveis) so saem com token valido.
-  await ref.set({
+  const patch = {
     codigo,
     posto: posto || 'principal',
     nome: (atual && atual.nome) || null,
@@ -211,7 +261,6 @@ async function heartbeat(codigo, posto, info, token) {
     // valor velho que leu e a marcacao se perdia - a varredura seguinte
     // marcava "Caiu" de novo, inventando queda que nao houve. Com
     // { merge: true }, nao citar o campo preserva o que estiver la.
-    mensagemPendente: null,
     ip: dados.ip || (atual && atual.ip) || null,
     userAgent: dados.userAgent || (atual && atual.userAgent) || null,
     abertoDesde: dados.abertoDesde || (atual && atual.abertoDesde) || null,
@@ -221,7 +270,16 @@ async function heartbeat(codigo, posto, info, token) {
     // donos do heartbeat (so ele escreve), entao o read-then-write aqui nao
     // repete a corrida que avisadoOffline teve com a varredura.
     ...metricasDeRede(atual, dados.rede),
-  }, { merge: true });
+  };
+  // so limpa a mensagem quando havia uma pra entregar. Zerar o campo em toda
+  // batida abria uma janela pra perder mensagem: se enviarMensagem() gravasse
+  // entre a leitura e esta escrita, o null apagava a mensagem que nunca
+  // chegou a ser mostrada.
+  if (mensagemPendente) patch.mensagemPendente = null;
+  await ref.set(patch, { merge: true });
+  // mantem o espelho em dia sem reler: o heartbeat sabe exatamente o que
+  // acabou de gravar. É isso que faz a proxima batida nao custar leitura.
+  memoria.set(id, { ...(atual || {}), ...patch });
   // token confere? (maquina legada sem token cadastrado nunca passa aqui -
   // recebe comando/chat vazios ate reinstalar o NOCZenith com o token assado)
   const tokenOk = !!(atual && atual.agentToken && tokensBatem(token, atual.agentToken));
@@ -553,6 +611,11 @@ async function enviarMensagem(codigo, posto, texto, deEmail) {
     codigo, posto,
     mensagemPendente: { texto: textoLimpo, deEmail: deEmail || null, em: Date.now() },
   }, { merge: true });
+  // explicito de proposito: sem isso o heartbeat seguiria lendo o espelho
+  // antigo (sem a mensagem) e ela nunca seria entregue. Hoje o
+  // adicionarNoChat abaixo tambem invalida, mas depender do efeito colateral
+  // dele deixaria uma falha silenciosa esperando alguem mexer naquela funcao.
+  cache.invalidar();
   await adicionarNoChat(codigo, posto, { de: 'master', texto: textoLimpo, deEmail: deEmail || null, em: Date.now() });
   return { codigo, posto, texto: textoLimpo };
 }
@@ -579,8 +642,23 @@ async function responderChat(codigo, posto, texto, token) {
 async function varrerAlertas() {
   const docs = await listUncached();
   const transicoes = [];
-  for (const doc of docs) {
-    if (!doc.ultimoHeartbeatEm) continue;
+  for (const candidato of docs) {
+    if (!candidato.ultimoHeartbeatEm) continue;
+    let doc = candidato;
+    // A lista acima vem do espelho em memoria. Ele e confiavel porque o
+    // proprio heartbeat o mantem em dia, mas marcar uma loja como CAIDA e a
+    // acao mais cara de errar aqui (push no celular de todo mundo de
+    // madrugada). Entao antes de disparar, confere o documento de verdade -
+    // uma leitura, e so quando a queda esta prestes a ser anunciada, o que
+    // acontece pouquissimas vezes por dia. Se um dia o app rodar em mais de
+    // uma instancia, e essa checagem que impede alarme falso em massa.
+    if ((Date.now() - candidato.ultimoHeartbeatEm) >= LIMIAR_OFFLINE_MS && !candidato.avisadoOffline) {
+      const snap = await COLLECTION.doc(docIdFor(candidato.codigo, candidato.posto)).get();
+      if (!snap.exists) continue;
+      doc = snap.data();
+      if (espelho) espelho.set(docIdFor(doc.codigo, doc.posto), doc);
+      if (!doc.ultimoHeartbeatEm) continue;
+    }
     const online = (Date.now() - doc.ultimoHeartbeatEm) < LIMIAR_OFFLINE_MS;
     if (!online && !doc.avisadoOffline) {
       // 'em' = ultimo heartbeat real (quando de fato silenciou), nao a hora da

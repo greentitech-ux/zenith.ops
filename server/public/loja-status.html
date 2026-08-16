@@ -71,6 +71,10 @@
   .rede-veredito.lan .rede-veredito-titulo,.rede-veredito.wifi .rede-veredito-titulo{color:var(--warn);}
   .rede-veredito.wan .rede-veredito-titulo,.rede-veredito.ambos .rede-veredito-titulo{color:var(--bad);}
   .rede-veredito.ok .rede-veredito-titulo{color:var(--ok);}
+  .rede-veredito.servidor .rede-veredito-titulo{color:var(--accent);}
+  .rede-global{border:1px solid var(--accent);background:rgba(92,200,255,.08);border-radius:10px;padding:12px 14px;margin-bottom:14px;}
+  .rede-global-titulo{font-weight:700;font-size:13px;color:var(--accent);margin-bottom:4px;}
+  .rede-global-detalhe{font-size:11.5px;line-height:1.55;color:var(--text);}
   .rede-veredito-detalhe{color:var(--muted);}
   .rede-penal{margin-top:7px;font-size:10.5px;color:var(--muted);}
   .rede-vazio{font-size:12px;color:var(--muted);padding:14px 0;}
@@ -331,6 +335,7 @@
     Medido pelo próprio batimento que cada computador já manda a cada 25s — pior link primeiro. Onde o NOCZenith está instalado, o teste separa a <b>rede interna</b> (até o roteador da loja) do <b>link da operadora</b>, que é o que decide para quem abrir chamado. Nos computadores que reportam só pelo navegador aparece apenas a latência do sistema.
   </div>
   <div class="rede-resumo" id="rede-resumo"></div>
+  <div class="rede-global hidden" id="rede-global"></div>
   <div id="rede-lista"></div>
 </div>
 
@@ -947,6 +952,24 @@ function renderRede(dados){
     document.getElementById('rede-lista').innerHTML = '<div class="rede-vazio">Nenhuma medição chegou ainda. Os computadores passam a reportar sozinhos assim que o NOCZenith se atualizar (leva até ~1h) ou assim que a tela da loja recarregar.</div>';
     return;
   }
+
+  // Leitura que só existe olhando TODAS as lojas juntas: se várias unidades
+  // diferentes, com links independentes, estão lentas ao mesmo tempo e todas
+  // com ping bom, o que elas têm em comum não é a rede - é o servidor. Uma
+  // loja lenta é problema da loja; cinco lojas lentas ao mesmo tempo é
+  // problema nosso, e o card individual sozinho nunca mostraria isso.
+  const culpaServidor = medidos.filter(c => c.veredito && c.veredito.culpa === 'servidor');
+  const unidadesAfetadas = new Set(culpaServidor.map(c => c.codigo));
+  const gl = document.getElementById('rede-global');
+  if(culpaServidor.length >= 2 && unidadesAfetadas.size >= 2){
+    const lat = culpaServidor.map(c => c.resumo.latenciaMedia).filter(Boolean).sort((a,b)=>a-b);
+    const mediana = lat.length ? lat[Math.floor(lat.length/2)] : 0;
+    gl.innerHTML = `<div class="rede-global-titulo">⚠️ O gargalo está no servidor, não nas lojas</div>
+      <div class="rede-global-detalhe">${culpaServidor.length} computador(es) em ${unidadesAfetadas.size} unidades diferentes estão lentos ao mesmo tempo —
+      todos com o ping até a internet normal. Links independentes não ficam ruins juntos: o que eles têm em comum é o Zenith.
+      Mediana de resposta: <b>${mediana}ms</b>. Não abra chamado na operadora dessas lojas.</div>`;
+    gl.classList.remove('hidden');
+  } else { gl.classList.add('hidden'); }
 
   document.getElementById('rede-lista').innerHTML = lista.map(c => {
     const r = c.resumo || {};

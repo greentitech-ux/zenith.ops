@@ -242,6 +242,26 @@ function veredito(resumo) {
   const wanRuim = temWan && (resumo.wanMedia > 120 || (resumo.wanPerda || 0) > 2);
   const wifiFraco = resumo.conexao === 'wifi' && resumo.sinalWifiMin !== null && resumo.sinalWifiMin < SINAL_WIFI_BAIXO;
 
+  // O caso que a primeira versao errava: a loja pinga a internet em 33ms mas
+  // a resposta do Zenith leva 1457ms. Os dois numeros estao certos - eles
+  // medem coisas diferentes. O ping mede o caminho ate a operadora; a
+  // latencia mede o caminho INTEIRO, incluindo o servidor da aplicacao. Se o
+  // ping esta bom e a latencia nao, o gargalo esta depois do link: e o
+  // servidor, nao a loja. Sem esta checagem o painel dizia "rede saudavel"
+  // com nota critica na mesma tela - contraditorio e, pior, mandava olhar o
+  // lugar errado.
+  const appLento = resumo.latenciaMedia !== null && resumo.latenciaMedia > 600;
+  if (appLento && temWan && !lanRuim && !wanRuim) {
+    return {
+      culpa: 'servidor',
+      titulo: 'O link está bom — o lento é o Zenith',
+      detalhe: `A loja alcança a internet em ${resumo.wanMedia}ms`
+        + `${temLan ? ` e o roteador em ${resumo.gatewayMedia}ms` : ''}, mas a resposta do Zenith está em `
+        + `${resumo.latenciaMedia}ms. Como o caminho até a operadora está limpo, o atraso está do servidor para cá: `
+        + 'não adianta mexer na rede desta loja nem abrir chamado na operadora.',
+    };
+  }
+
   if (wifiFraco && lanRuim) {
     return {
       culpa: 'wifi',
@@ -277,9 +297,19 @@ function veredito(resumo) {
   if (!temLan && !temWan) {
     return {
       culpa: 'indefinido',
-      titulo: 'Só temos latência do sistema',
-      detalhe: 'Esse computador reporta pelo navegador, então mede o tempo de resposta do Zenith mas não separa rede interna de link. '
-        + 'Instalar o NOCZenith nele destrava a medição completa.',
+      titulo: appLento ? 'Resposta lenta, origem não isolada' : 'Só temos latência do sistema',
+      detalhe: (appLento
+        ? `A resposta do Zenith está em ${resumo.latenciaMedia}ms. `
+        : '')
+        + 'Esse computador reporta pelo navegador, então mede o tempo de resposta do Zenith mas não separa rede interna, '
+        + 'link e servidor. Instalar o NOCZenith nele destrava a medição completa.',
+    };
+  }
+  if (appLento) {
+    return {
+      culpa: 'servidor',
+      titulo: 'O link está bom — o lento é o Zenith',
+      detalhe: `A rede da loja responde bem, mas o Zenith está levando ${resumo.latenciaMedia}ms. O atraso não está no link.`,
     };
   }
   return {
