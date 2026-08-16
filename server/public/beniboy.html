@@ -384,6 +384,7 @@ function iniciarTransicao(id, statusAlvo){
     document.getElementById('acao-titulo').textContent = 'Transferir conversa';
     document.getElementById('acao-corpo').innerHTML = `
       <div class="sub" style="margin-bottom:8px;">Pra qual nível vai essa conversa?</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;"><input type="radio" name="nivel-transf" value="1" style="width:auto;"> N1 · voltar para o Beniboy (bot)</label>
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;"><input type="radio" name="nivel-transf" value="2" checked style="width:auto;"> N2 · outro agente (time de Suporte)</label>
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;"><input type="radio" name="nivel-transf" value="3" style="width:auto;"> N3 · Master</label>`;
     document.getElementById('overlay-acao').classList.remove('hidden');
@@ -453,7 +454,14 @@ function confirmarModalAcao(){
   const extra = {};
   if(statusAlvo==='TRANSFERIDO'){
     const sel = document.querySelector('input[name="nivel-transf"]:checked');
-    extra.nivelDestino = sel ? Number(sel.value) : 2;
+    const nivelEscolhido = sel ? Number(sel.value) : 2;
+    fecharModalAcao();
+    // N1 nao e uma "transferencia" de verdade (nao tem outro humano
+    // assumindo) - devolver a conversa pro Beniboy e voltar pro PENDENTE,
+    // que ja zera nivel/responsavel e reativa o bot (ver
+    // atualizarStatusAtendimento em suporteChat.js)
+    if(nivelEscolhido===1) return moverPara(id, 'PENDENTE', {});
+    return moverPara(id, 'TRANSFERIDO', { nivelDestino: nivelEscolhido });
   }
   if(statusAlvo==='SEM_SOLUCAO'){
     const motivo = (document.getElementById('acao-motivo').value||'').trim();
