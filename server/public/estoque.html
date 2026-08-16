@@ -1072,6 +1072,17 @@ function abrirNovoItemContagem(){
   if(setor) document.getElementById('i-setor').value = setor;
 }
 
+// mesma ideia do abrirNovoItemContagem, mas chamado da revisão da nota
+// fiscal (linha sem match no catálogo) - depois de salvar, o item novo já
+// fica selecionado nessa linha, sem precisar sair da tela pra ir no Catálogo
+function abrirNovoItemDaNota(i){
+  const it = RASCUNHO_NOTA && RASCUNHO_NOTA.itens[i];
+  abrirNovoItem();
+  ITEM_ORIGEM = 'nota';
+  NOTA_ITEM_INDEX = i;
+  if(it && it.produtoTexto) document.getElementById('i-nome').value = it.produtoTexto;
+}
+
 async function salvarContagem(){
   const unidade = unidadeAtual();
   const data = document.getElementById('c-data').value;
@@ -1313,6 +1324,7 @@ function renderItensRevisaoNota(){
           ${it.conversaoAplicada ? `<div class="sub" style="color:var(--warn);margin-bottom:4px;">📐 Convertido de embalagem: ${escapeHtml(it.conversaoAplicada)} - confira</div>` : ''}
           <label>Item do catálogo</label>
           <select id="rn-item-${i}"><option value="">— selecione —</option>${opcoesItensAgrupadas()}</select>
+          <div style="margin:4px 0;"><span class="tx-comentario" style="cursor:pointer;" onclick="abrirNovoItemDaNota(${i})">Não achou na lista? + Cadastrar esse item no catálogo</span></div>
           <div class="grid2" style="margin-top:6px;">
             <div><label>Quantidade</label><input type="number" step="0.001" id="rn-qtd-${i}" value="${it.quantidade!=null?it.quantidade:''}"></div>
             <div><label>Valor unitário (R$)</label><input type="number" step="0.01" id="rn-valorunit-${i}" value="${it.valorUnitario!=null?it.valorUnitario:''}"></div>
@@ -1721,10 +1733,13 @@ async function carregarCatalogoPadrao(){
 }
 
 let ITEM_EDITANDO_ID = null;
-// de onde o modal "Novo item" foi aberto - 'catalogo' (padrão) ou 'contagem'
-// (ver abrirNovoItemContagem) - decide se, depois de salvar, atualiza a
-// lista de itens do setor atual na aba Contagem
+// de onde o modal "Novo item" foi aberto - 'catalogo' (padrão), 'contagem'
+// (ver abrirNovoItemContagem) ou 'nota' (ver abrirNovoItemDaNota) - decide o
+// que atualizar depois de salvar
 let ITEM_ORIGEM = 'catalogo';
+// qual linha da revisão de nota fiscal pediu o cadastro (só usado quando
+// ITEM_ORIGEM==='nota', ver abrirNovoItemDaNota)
+let NOTA_ITEM_INDEX = null;
 // peso da embalagem so faz sentido pra item medido em KG/G (peso de venc.
 // fracionado, ex: 400g) - some pra UN/LT/outras unidades, onde nao ha o que
 // converter (ver criarRecebimento em inventario.js)
@@ -1787,6 +1802,11 @@ document.getElementById('form-item').addEventListener('submit', async (ev)=>{
     await carregarCatalogo();
     renderCatalogo();
     popularSelectsItem();
+    if(ITEM_ORIGEM==='nota' && NOTA_ITEM_INDEX!=null){
+      const sel = document.getElementById(`rn-item-${NOTA_ITEM_INDEX}`);
+      if(sel){ sel.innerHTML = '<option value="">— selecione —</option>'+opcoesItensAgrupadas(); sel.value = data.id; }
+      NOTA_ITEM_INDEX = null;
+    }
     if(ITEM_ORIGEM==='contagem' && CONTAGEM_INICIADA){
       document.getElementById('c-setor').value = data.setor;
       renderContagemSetor();
