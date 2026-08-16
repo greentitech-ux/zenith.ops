@@ -7002,9 +7002,30 @@ app.get('/api/abastecimento/comparativo-fechamento', auth.requireMaster, async (
     const grupo = await grupos.grupoDaUnidade(unidade);
     const kpisDef = (grupo && grupo.kpisExtras) || [];
     const normalizar = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    // distancia de edicao (Levenshtein) - o Master digita o rotulo do KPI na
+    // mao em grupos.html, entao um typo (ex: "Calabress" sem o "a" final)
+    // nao pode fazer o comparativo simplesmente nao achar o campo
+    function levenshtein(a, b) {
+      const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+      for (let j = 0; j <= b.length; j += 1) dp[0][j] = j;
+      for (let i = 1; i <= a.length; i += 1) {
+        for (let j = 1; j <= b.length; j += 1) {
+          dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+        }
+      }
+      return dp[a.length][b.length];
+    }
+    // bate se o sabor aparece como substring (rotulo mais descritivo, ex:
+    // "Pizza Calabresa Grande") OU se alguma palavra do rotulo/campo esta a
+    // no maximo 2 edicoes do nome do sabor (tolera erro de digitacao)
+    function bateComSabor(texto, sabor) {
+      const norm = normalizar(texto);
+      if (norm.includes(sabor)) return true;
+      return norm.split(/[^a-z0-9]+/).some((palavra) => palavra.length >= 4 && levenshtein(palavra, sabor) <= 2);
+    }
 
     const comparativo = abastecimentoCarrinho.SABORES.map((sabor) => {
-      const def = kpisDef.find((k) => normalizar(k.campo).includes(sabor) || normalizar(k.label).includes(sabor));
+      const def = kpisDef.find((k) => bateComSabor(k.campo, sabor) || bateComSabor(k.label, sabor));
       const registrado = (fechamento && def) ? (Number(fechamento.kpisExtras && fechamento.kpisExtras[def.campo]) || 0) : null;
       return {
         sabor,
