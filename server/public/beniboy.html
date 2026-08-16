@@ -263,6 +263,14 @@ let FILTRO_DESBLOQUEIO = false;
 let PAINEIS_ABERTOS = []; // ids das conversas abertas agora, na ordem em que foram abertas - mais de uma ao mesmo tempo, ver renderPaineis()
 let DRAG_ID = null;
 let ACAO_PENDENTE = null; // {id, statusAlvo}
+// dados do NOC Zenith (ver loja-status.html) - só pra achar, quando o
+// assunto for Computador/Sistema e a loja já foi identificada na conversa
+// (chat.lojaContexto), se essa loja tem computador com acesso remoto
+// cadastrado (anydeskId) - se tiver, o painel mostra um atalho direto pra
+// tela do NOC daquele computador, em vez do atendente precisar ir procurar
+// na mão qual loja é e se ela tem acesso remoto configurado
+let NOC_UNIDADES = [];
+let NOC_COMPUTADORES = [];
 
 // mesmos 6 valores de STATUS_ATENDIMENTO em suporteChat.js, na ordem do funil
 const COLUNAS = [
@@ -510,6 +518,13 @@ function painelHtml(chat){
   }
   if(!chat.chamadoId) acoes.push(`<button type="button" class="btn-ghost" onclick="gerarChamadoRemoto('${chat.id}')">🎫 Gerar chamado remoto</button>`);
   if(IS_MASTER) acoes.push(`<button type="button" class="btn-ghost" onclick="baixarPdfConversa('${chat.id}')">📄 Baixar PDF</button>`);
+  // problema de Computador/Sistema numa loja já identificada e que já tem
+  // computador com acesso remoto cadastrado no NOC - atalho direto em vez de
+  // precisar ir procurar na mão qual loja é e se ela tem acesso remoto
+  if(chat.assunto==='Computador/Sistema'){
+    const codigoNoc = unidadeComAcessoRemoto(chat.lojaContexto);
+    if(codigoNoc) acoes.push(`<a class="btn-ghost" style="text-decoration:none;display:inline-flex;align-items:center;" href="/loja-status.html?unidade=${encodeURIComponent(codigoNoc)}" target="_blank" rel="noopener">🖥️ Ir para o NOC</a>`);
+  }
 
   const msgs = (chat.mensagens||[]).map(m=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'🤖 Beniboy':'Suporte'), texto: m.texto, em: m.em }));
   const msgsHtml = msgs.length ? msgs.map(m=>`
@@ -641,6 +656,30 @@ async function carregarLista(){
     renderPaineis();
   }catch(e){ /* rede fora - mantem lista anterior */ }
 }
+// carregado uma vez (não muda tão rápido quanto a lista de conversas) - só
+// pra alimentar o atalho "Ir para o NOC" no painel de cada conversa
+async function carregarNoc(){
+  try{
+    const [unidades, computadores] = await Promise.all([
+      fetch('/api/meta/unidades-publico').then(r=>r.json()),
+      fetch('/api/loja-status').then(r=>r.ok?r.json():[]),
+    ]);
+    NOC_UNIDADES = unidades;
+    NOC_COMPUTADORES = computadores;
+    renderPaineis();
+  }catch(e){ /* sem NOC agora - painel so nao mostra o atalho */ }
+}
+// devolve o código da unidade se ela estiver identificada (nome bate com o
+// cadastro) E tiver pelo menos um computador no NOC com AnyDesk cadastrado -
+// null nos dois outros casos (não identificada, ou identificada mas sem
+// acesso remoto configurado ainda)
+function unidadeComAcessoRemoto(nomeLoja){
+  if(!nomeLoja) return null;
+  const u = NOC_UNIDADES.find(x=>x.nome===nomeLoja);
+  if(!u) return null;
+  const temRemoto = NOC_COMPUTADORES.some(c=>c.codigo===u.codigo && c.anydeskId);
+  return temRemoto ? u.codigo : null;
+}
 
 function initNavDrawerAccordion(){
   const nav = document.getElementById('nav-drawer');
@@ -701,6 +740,7 @@ async function boot(){
   }
   document.getElementById('root').classList.remove('hidden');
   await carregarLista();
+  carregarNoc();
   conectarStream();
   setInterval(()=>{ if(!document.hidden) carregarLista(); }, 60000);
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) carregarLista(); });
