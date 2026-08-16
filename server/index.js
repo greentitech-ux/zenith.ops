@@ -53,6 +53,7 @@ const ativosTI = require('./ativosTI');
 const centralChat = require('./centralChat');
 const grupos = require('./grupos');
 const inventario = require('./inventario');
+const inventarioNotaOcr = require('./inventarioNotaOcr');
 const parque = require('./parque');
 const festas = require('./festas');
 const mensalistas = require('./mensalistas');
@@ -85,6 +86,15 @@ const upload = multer({
 const uploadChatAnexo = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+});
+
+// foto/PDF da nota fiscal de recebimento (ver inventarioNotaOcr.js) - vai
+// pro Claude com visao, limite mais folgado que o do chat (nota as vezes vem
+// como PDF escaneado em resolucao alta) mas sem chegar nos 50MB do upload
+// generico, que e overkill pra 1 documento
+const uploadNotaFiscal = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024, files: 1 },
 });
 
 const app = express();
@@ -3517,6 +3527,27 @@ app.post('/api/inventario/catalogo/seed', auth.requireMaster, async (req, res) =
       ? req.body.unidades
       : Object.keys(INVENTARIO_UNIDADES_NOMES);
     res.json(await inventario.seedCatalogoPadrao(unidadesAlvo));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// le a foto/PDF da nota de recebimento (ver inventarioNotaOcr.js) e devolve
+// um RASCUNHO (data, fornecedor, numero + itens ja tentando casar com o
+// catalogo) pro gerente conferir na tela antes de confirmar - nao grava nada
+// sozinho, cada linha confirmada vira um POST /api/inventario/recebimentos
+// normal (o mesmo de sempre), um por vez
+app.post('/api/inventario/recebimentos/ler-nota', requireSection('inventario'), uploadNotaFiscal.single('nota'), async (req, res) => {
+  try {
+    const unidade = req.body.unidade;
+    if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    if (!req.file) return res.status(400).json({ error: 'Anexe a foto ou o PDF da nota.' });
+    if (!inventarioNotaOcr.ativo()) return res.status(400).json({ error: 'Leitura automática de nota não está configurada neste servidor.' });
+    const catalogo = (await inventario.listCatalogo(unidade))
+      .filter((i) => i.ativo !== false)
+      .map((i) => ({ id: i.id, nome: i.nome, unidadeMedida: i.unidadeMedida }));
+    const rascunho = await inventarioNotaOcr.lerNota({ buffer: req.file.buffer, mimeType: req.file.mimetype, catalogo });
+    res.json(rascunho);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
