@@ -909,7 +909,7 @@ app.post('/api/loja-status/:codigo/computadores/:posto/telemetria', async (req, 
   try {
     const token = req.headers['x-noc-token'] || req.body.token || null;
     res.json(await lojaStatus.registrarTelemetria(req.params.codigo, req.params.posto, {
-      disco: req.body.disco, dispositivos: req.body.dispositivos,
+      disco: req.body.disco, dispositivos: req.body.dispositivos, uptimeHoras: req.body.uptimeHoras,
     }, token));
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2087,6 +2087,7 @@ app.get('/api/loja-status/maquinas', requireSection('suporte'), async (req, res)
     res.json({
       ...saude,
       discos: saude.discos.map((d) => ({ ...d, unidadeNome: mapa[d.codigo] || d.codigo })),
+      reiniciar: saude.reiniciar.map((r) => ({ ...r, unidadeNome: mapa[r.codigo] || r.codigo })),
       redes: saude.redes.map((r) => ({ ...r, unidadeNome: mapa[r.codigo] || r.codigo })),
     });
   } catch (err) {
@@ -9002,6 +9003,13 @@ function aquecerBoot(promessa, ms) {
         // HD morrendo/enchendo (ver nocMaquina.js): avisa uma vez por piora,
         // nunca a cada medicao - HD com setor realocado continua assim pra
         // sempre e um alerta repetido vira ruido que ninguem le
+        // política da casa: reboot semanal. Avisa a cada semana nova sem
+        // reiniciar, não todo dia (ver avaliarUptime em nocMaquina.js)
+        if (t.tipo === 'reiniciar') {
+          push.notifyReinicioPendente(nome, t.codigo, t.nome, t.posto, t.dias)
+            .catch((err) => console.error('Erro no push de reinício pendente:', err.message));
+          continue;
+        }
         if (t.tipo === 'disco') {
           push.notifyDiscoAlerta(nome, t.codigo, t.nome, t.posto, t.nivel, t.motivos)
             .catch((err) => console.error('Erro no push de alerta de disco:', err.message));

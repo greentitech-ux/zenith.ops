@@ -29,6 +29,11 @@ const LIVRE_CRITICO_PCT = 5;    // abaixo disso o Windows já começa a falhar
 const LIVRE_ATENCAO_PCT = 10;   // aqui ainda dá pra agendar uma limpeza
 const TEMPERATURA_ALTA_C = 60;  // acima disso a vida útil despenca
 const HORAS_MUITO_USO = 35000;  // ~4 anos ligado direto: disco em fim de vida
+// política da casa: computador de loja é reiniciado uma vez por semana.
+// Não é sobre o disco - é sobre o Windows: memória vazando, atualização
+// pendurada esperando reboot, sessão de impressora travada. Sete dias é o
+// ponto em que a máquina começa a "ficar estranha" sem motivo aparente.
+const UPTIME_REINICIAR_DIAS = 7;
 const DISCOS_MAX = 6;
 const VOLUMES_MAX = 8;
 // teto de aparelhos guardados por computador. Uma loja de shopping tem
@@ -121,6 +126,44 @@ function avaliarDisco(disco) {
   return { nivel, motivos };
 }
 
+// --------------------------------------------------- há quanto tempo ligado
+
+// uptime REAL do Windows (LastBootUpTime), não o tempo que a aba do
+// navegador está aberta - `abertoDesde` só existe nos computadores de
+// atendimento e zera a cada reload, então nunca serviu pra isso.
+const sanitizarUptime = (horas) => num(horas, 0, 200000);
+
+const diasLigado = (horas) => (horas == null ? null : Math.floor(horas / 24));
+
+// Quantas semanas inteiras a máquina passou sem reiniciar. É esse número - e
+// não "já passou de 7 dias" - que decide o aviso: assim quem ignorou o
+// primeiro é lembrado de novo na semana seguinte, sem ser lembrado todo dia.
+const ciclosSemReiniciar = (horas) => {
+  const d = diasLigado(horas);
+  return d == null ? 0 : Math.floor(d / UPTIME_REINICIAR_DIAS);
+};
+
+// avisa quando entra numa semana nova sem reboot. Reiniciou? o ciclo volta a
+// zero sozinho e o próximo aviso só sai daqui a 7 dias.
+function avaliarUptime(horas, cicloAvisado) {
+  const ciclo = ciclosSemReiniciar(horas);
+  const dias = diasLigado(horas);
+  return {
+    dias,
+    ciclo,
+    precisaReiniciar: ciclo >= 1,
+    avisarAgora: ciclo >= 1 && ciclo > (Number(cicloAvisado) || 0),
+  };
+}
+
+// máquinas que passaram do prazo de reboot, a mais esquecida primeiro
+function maquinasParaReiniciar(docs) {
+  return docs
+    .filter((d) => ciclosSemReiniciar(d.uptimeHoras) >= 1)
+    .map((d) => ({ codigo: d.codigo, posto: d.posto, nome: d.nome, dias: diasLigado(d.uptimeHoras), em: d.uptimeEm || null }))
+    .sort((a, b) => b.dias - a.dias);
+}
+
 // --------------------------------------------------------------- rede LAN
 
 const MAC_RE = /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/;
@@ -190,6 +233,8 @@ function discosComProblema(docs) {
 
 module.exports = {
   LIVRE_CRITICO_PCT, LIVRE_ATENCAO_PCT, TEMPERATURA_ALTA_C, DISPOSITIVOS_MAX,
+  UPTIME_REINICIAR_DIAS,
   sanitizarDisco, avaliarDisco, sanitizarDispositivos, diffDispositivos,
+  sanitizarUptime, avaliarUptime, maquinasParaReiniciar,
   resumoDispositivos, discosComProblema,
 };

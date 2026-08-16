@@ -680,6 +680,14 @@ function atualizarConteudoDetalhe(codigo, c){
     infoBits.push(`💽 disco: <b style="color:${cor};">${rotulo}</b> · medido ${escapeHtml(tempoRelativo(c.disco.em))}`
       + (discos?`<br>${discos}`:'') + (volumes?`<br>${volumes}`:'') + motivos);
   }
+  // regra da casa: reiniciar 1x por semana (ver UPTIME_REINICIAR_DIAS)
+  if(c.uptimeHoras != null){
+    const dias = Math.floor(c.uptimeHoras/24);
+    const precisa = dias >= 7;
+    const quanto = dias >= 1 ? `${dias} dia(s)` : `${Math.round(c.uptimeHoras)}h`;
+    infoBits.push(`🔁 sem reiniciar há <b style="color:${precisa?'var(--warn,#e0a800)':'var(--ok)'};">${quanto}</b>`
+      + (precisa ? ' <span style="font-size:11px;color:var(--warn,#e0a800);">— passou da semana, reinicie</span>' : ''));
+  }
   if(c.dispositivos && c.dispositivos.length){
     const lista = c.dispositivos.slice(0,12).map(d=>`${escapeHtml(d.ip)} <span style="color:var(--muted);">${escapeHtml(d.mac)}</span>`).join('<br>');
     const resto = c.dispositivos.length > 12 ? `<br><span style="color:var(--muted);font-size:11px;">+${c.dispositivos.length-12} outros</span>` : '';
@@ -705,6 +713,9 @@ function atualizarConteudoDetalhe(codigo, c){
       }
       if(ev.tipo==='disco'){
         return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Disco piorou</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+      }
+      if(ev.tipo==='reiniciar'){
+        return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Precisa reiniciar</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
       }
       if(ev.tipo==='dispositivo-novo'){
         return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Aparelho novo na rede</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;

@@ -231,8 +231,9 @@ setTimeout(async () => {
   const tele = await postarJson('/api/loja-status/AERO/computadores/ATM01/telemetria', {
     disco: { discos: { modelo: 'ST500LM012', tipo: 'HDD', tamanhoGb: 465, saude: 'saudavel' }, volumes: { letra: 'C:', totalGb: 465, livreGb: 9 } },
     dispositivos: [{ ip: '192.168.18.1', mac: 'A4-2B-B0-11-22-33' }],
+    uptimeHoras: 9 * 24,
   });
-  const okTele = tele.status === 200 && /"disco":"critico"/.test(tele.corpo);
+  const okTele = tele.status === 200 && /"disco":"critico"/.test(tele.corpo) && /"uptimeHoras":216/.test(tele.corpo);
   if (!okTele) ruins += 1;
   console.log(`${okTele ? '✓' : '✗'} telemetria de HD/rede do NOCZenith: HTTP ${tele.status} ${tele.corpo.slice(0, 90)}`);
 
