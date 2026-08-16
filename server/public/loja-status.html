@@ -118,6 +118,15 @@
      editar, mensagem, link, baixar vigia, remover) fica no modal de detalhe
      (ver abrirDetalheComputador), pra caber muito mais card por tela */
   .equip-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(184px,1fr));gap:10px;}
+  /* No celular o minmax(184px) só cabia UMA coluna (390px de tela - padding),
+     e o card ficava largo, alto e com metade dele vazio: dava 1,5 computador
+     por tela. Duas colunas fixas colocam 4 à mostra sem rolar, que é como
+     essa tela é usada de fato (conferir a frota de relance no celular). */
+  @media(max-width:640px){
+    .equip-grid{grid-template-columns:repeat(2,1fr);gap:8px;}
+    .equip-tile{padding:9px 9px;gap:4px;}
+    .equip-tile-nome{font-size:12px;}
+  }
   /* Painel Por unidade */
   .uni-panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:18px;}
   .uni-panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:12px;font-weight:700;font-size:14px;}
@@ -169,6 +178,19 @@
   .equip-tile-status.online{color:var(--ok);}
   .equip-tile-status.offline{color:var(--bad);}
   .equip-tile-status.nunca{color:var(--muted);}
+  /* faixa de métricas do card compacto: disco, temperatura e tempo sem
+     reiniciar (ver nocMaquina.js). Ocupa o espaço vazio que sobrava embaixo
+     do nome e responde de relance "essa máquina está bem?", sem abrir o
+     detalhe. Cor só quando passa do limite - chip colorido em tudo vira
+     enfeite e para de significar alguma coisa. */
+  .tile-metricas{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px;}
+  /* apertado de propósito: as três métricas precisam caber em UMA linha na
+     coluna estreita do celular (~159px), senão o card cresce e a promessa de
+     4 à mostra se perde */
+  .m-chip{font-family:var(--mono);font-size:9.5px;color:var(--muted);background:var(--panel2);
+    border:1px solid var(--line);border-radius:10px;padding:2px 5px;white-space:nowrap;line-height:1.5;}
+  .m-chip.alerta{color:var(--warn);border-color:var(--warn);}
+  .m-chip.ruim{color:var(--bad);border-color:var(--bad);}
   .equip-tile-info{font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.8;}
   .equip-tile-info b{color:var(--text);}
   .btn-copiar-ip{background:none;border:none;color:var(--accent);cursor:pointer;font-size:11px;padding:0 2px;vertical-align:middle;}
@@ -603,6 +625,30 @@ function resumoDispositivo(ua){
   return [so, nav].filter(Boolean).join(' · ') || null;
 }
 
+// as tres metricas que cabem num card estreito e que decidem manutencao:
+// quanto do disco esta cheio, temperatura e ha quantos dias sem reiniciar
+// (ver nocMaquina.js pros limites). O volume mostrado e o MAIS APERTADO -
+// e ele que trava a maquina, nao a media dos discos.
+function metricasTileHtml(c){
+  const bits = [];
+  const vol = ((c.disco && c.disco.volumes) || []).reduce((pi, v) => (
+    pi == null || (v.livrePct != null && v.livrePct < pi.livrePct) ? v : pi), null);
+  if(vol && vol.livrePct != null){
+    const usado = Math.round(100 - vol.livrePct);
+    const cls = vol.livrePct < 5 ? 'ruim' : (vol.livrePct < 10 ? 'alerta' : '');
+    bits.push(`<span class="m-chip ${cls}" title="${escapeHtml(vol.letra)} ${vol.livreGb} GB livres de ${vol.totalGb} GB">💽 ${usado}%</span>`);
+  }
+  const temp = ((c.disco && c.disco.discos) || []).reduce((max, d) => (
+    d.temperaturaC != null && (max == null || d.temperaturaC > max) ? d.temperaturaC : max), null);
+  if(temp != null) bits.push(`<span class="m-chip ${temp >= 60 ? 'alerta' : ''}" title="temperatura do disco">🌡️ ${temp}°</span>`);
+  if(c.uptimeHoras != null){
+    const dias = Math.floor(c.uptimeHoras / 24);
+    const rotulo = dias >= 1 ? `${dias}d` : `${Math.round(c.uptimeHoras)}h`;
+    bits.push(`<span class="m-chip ${dias >= 7 ? 'alerta' : ''}" title="sem reiniciar (política: 1x por semana)">🔁 ${rotulo}</span>`);
+  }
+  return bits.length ? `<div class="tile-metricas">${bits.join('')}</div>` : '';
+}
+
 // card compacto (grid principal) - so o essencial: nome, unidade, status,
 // anydesk. Tudo mais (IP, dispositivo, sinal, editar, mensagem, link,
 // baixar vigia, remover) fica no modal de detalhe, aberto ao clicar em
@@ -625,6 +671,7 @@ function equipTileHtml(codigo, c){
     <div class="equip-tile-unidade" title="${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}">${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}</div>
     <div class="equip-tile-status ${status}">${statusTexto}</div>
     ${c.ipLocal ? `<div class="equip-tile-ip" title="Copiar IP local" onclick="event.stopPropagation();copiarIpLocal('${escapeJs(c.ipLocal)}')">🏠 ${escapeHtml(c.ipLocal)} <span class="equip-tile-ip-copy">📋</span></div>` : ''}
+    ${metricasTileHtml(c)}
   </div>`;
 }
 
