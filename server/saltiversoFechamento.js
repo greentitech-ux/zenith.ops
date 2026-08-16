@@ -14,6 +14,7 @@ const db = require('./firestore');
 const { createCache } = require('./liveCache');
 const parque = require('./parque');
 const saltiversoVendas = require('./saltiversoVendas');
+const festas = require('./festas');
 const solicitacoes = require('./solicitacoes');
 
 const COLLECTION = db.collection('saltiversoFechamentos');
@@ -65,18 +66,22 @@ function bucketsDoResumo(resumo) {
 // parque + vendas de bebida/meia), tanto no total quanto por balde - é o
 // lado "automático" da comparação, nunca digitado
 async function calcularFaturado(unidade, data) {
-  const [parqueResumo, vendasResumo] = await Promise.all([
+  const [parqueResumo, vendasResumo, festasResumo] = await Promise.all([
     parque.resumoDoDia(unidade, data),
     saltiversoVendas.resumoDoDia(unidade, data),
+    // dinheiro de festa que entrou HOJE (sinal na data da venda + cada
+    // recebimento na data dele) - ver festas.resumoDoDia
+    festas.resumoDoDia(unidade, data),
   ]);
   const parqueBuckets = bucketsDoResumo(parqueResumo);
   const vendasBuckets = bucketsDoResumo(vendasResumo);
+  const festasBuckets = bucketsDoResumo(festasResumo);
   const faturadoPorForma = {};
-  BUCKETS.forEach((b) => { faturadoPorForma[b] = arred(parqueBuckets[b] + vendasBuckets[b]); });
+  BUCKETS.forEach((b) => { faturadoPorForma[b] = arred(parqueBuckets[b] + vendasBuckets[b] + festasBuckets[b]); });
   return {
-    faturado: arred(parqueResumo.total + vendasResumo.total),
+    faturado: arred(parqueResumo.total + vendasResumo.total + festasResumo.total),
     faturadoPorForma,
-    detalhe: { parque: parqueResumo, vendas: vendasResumo },
+    detalhe: { parque: parqueResumo, vendas: vendasResumo, festas: festasResumo },
   };
 }
 
@@ -121,9 +126,11 @@ function caixaDocId(unidade, data, operadorId) {
 // faturado ATRIBUIDO a cada operador (quem lancou a entrada/venda) - base do
 // modelo por operador e da regra "quem vendeu tem que fechar o proprio caixa"
 async function faturadoPorOperador(unidade, data) {
-  const [checkins, vendas] = await Promise.all([
+  const [checkins, vendas, movsFesta] = await Promise.all([
     parque.listAll(),
     saltiversoVendas.listVendasDoDia(unidade, data),
+    // quem vende/recebe a festa fica responsável pelo valor no caixa dele
+    festas.movimentosPorOperador(unidade, data),
   ]);
   const doDia = checkins.filter((c) => c.unidade === unidade && c.dataUtilizacao === data);
   const vendasOk = vendas.filter((v) => !v.cancelada);
@@ -143,6 +150,13 @@ async function faturadoPorOperador(unidade, data) {
     const o = get(v.criadoPorId, v.criadoPorEmail);
     o.total += num(v.total);
     (v.pagamentos || []).forEach((p) => { o.porFormaRaw[p.forma] = num(o.porFormaRaw[p.forma]) + num(p.valor); });
+  });
+  // festa: o sinal responsabiliza quem vendeu a reserva; cada recebimento
+  // posterior responsabiliza quem registrou aquele recebimento
+  movsFesta.forEach((m) => {
+    const o = get(m.porId, m.porEmail);
+    o.total += num(m.valor);
+    if (m.forma) o.porFormaRaw[m.forma] = num(o.porFormaRaw[m.forma]) + num(m.valor);
   });
   return [...map.values()].map((o) => ({
     operadorId: o.operadorId, operadorEmail: o.operadorEmail,
