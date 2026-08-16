@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Tela de Login · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;overflow-x:clip;overflow-y:clip;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 16px;padding:12px 32px 12px;border-bottom:1px solid var(--line);}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:12px;padding-bottom:12px;} h1{font-size:17px;} .eyebrow{font-size:8px;} }
+  h2{font-size:14px;font-weight:700;margin:0 0 4px;}
+  .header-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+  .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;transition:border-color .15s ease,color .15s ease,background .15s ease;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
+  .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,color .15s ease;}
+  .btn-notif:hover{border-color:var(--accent);color:var(--text);}
+  .btn-sair{color:var(--bad);}
+  .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
+  .hidden{display:none!important;}
+  .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer-titulo{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px 12px;}
+  .nav-drawer-grupo{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 4px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;}
+  .nav-drawer-grupo .ndg-seta{transition:transform .15s ease;font-size:9px;flex:none;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
+  .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px;max-width:520px;}
+  .sub{font-size:12px;color:var(--muted);margin-bottom:14px;}
+  label{display:block;font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:14px 0 6px;}
+  label:first-of-type{margin-top:0;}
+  input,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
+  textarea{resize:vertical;min-height:64px;}
+  input:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  .toggle-linha{display:flex;align-items:center;gap:8px;margin:14px 0 0;}
+  .toggle-linha input{width:auto;}
+  .toggle-linha span{font-size:13px;color:var(--text);}
+  .contador{font-size:11px;color:var(--muted);text-align:right;margin-top:4px;}
+  .btn-primary{background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);margin-top:16px;}
+  .btn-primary:disabled{opacity:.5;cursor:default;}
+  .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 14px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+  .btn-ghost:hover{border-color:var(--accent);}
+  .btn-ghost.bad{color:var(--bad);}
+  .btn-ghost.bad:hover{border-color:var(--bad);}
+  .msg{font-size:12.5px;padding:9px 12px;border-radius:8px;margin-top:12px;}
+  .msg.ok{background:var(--ok-dim);color:var(--ok);}
+  .msg.err{background:var(--bad-dim);color:var(--bad);}
+  .info-box{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:14px;line-height:1.5;}
+  .fundo-preview{margin-top:10px;border-radius:10px;overflow:hidden;border:1px solid var(--line);background:var(--panel2);height:120px;display:flex;align-items:center;justify-content:center;}
+  .fundo-preview img{width:100%;height:100%;object-fit:cover;display:block;}
+  .fundo-preview .vazio{color:var(--muted);font-size:12px;}
+  .fundo-acoes{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+  .fundo-acoes label.btn-ghost{display:inline-flex;align-items:center;gap:6px;cursor:pointer;}
+  /* pre-visualizacao do balao, igual ao que aparece na tela de login */
+  .preview-balao{margin-top:10px;background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:10px 16px;max-width:280px;}
+  .preview-balao b{font-size:14px;color:#ffd9a0;display:block;}
+  .preview-balao small{display:block;font-weight:500;color:var(--muted);font-size:11.5px;margin-top:3px;line-height:1.4;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <div style="min-width:0;">
+        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <h1>🎨 Tela de Login</h1>
+      </div>
+    </div>
+    <div class="header-nav">
+      <a class="back" href="/" target="_blank" rel="noopener">👁️ Ver tela de login</a>
+      <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
+    </div>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer">
+  <div class="nav-drawer-titulo">Zenith Ops</div>
+  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
+  <div class="nav-drawer-grupo">Administração</div>
+  <a class="back hidden" id="nav-usuarios" href="/usuarios.html">👤 Usuários</a>
+  <a class="back hidden" id="nav-grupos" href="/grupos.html">🏷️ Grupos</a>
+  <a class="back hidden" id="nav-rh" href="/rh.html">🧑‍💼 RH</a>
+  <a class="back hidden" id="nav-email" href="/email.html">📧 E-mail</a>
+  <a class="back active" id="nav-login-custom-self" href="/login-custom.html">🎨 Tela de Login</a>
+  <a class="back" id="nav-ajuda" href="/ajuda.html">❓ Ajuda</a>
+  <div class="nav-drawer-sep"></div>
+  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
+</nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso a essa página. Só o Master personaliza a tela de login.</div>
+
+<div id="root" class="hidden">
+  <div class="panel">
+    <h2>Fundo da tela de login</h2>
+    <div class="sub">A logo do Grupo Bravo, a frase acima dela, o card de login e o robô continuam do mesmo jeito - isso aqui troca só o fundo por trás de tudo. Sem imagem enviada, fica o fundo padrão escuro.</div>
+    <div class="fundo-preview" id="fundo-preview"><span class="vazio">Carregando...</span></div>
+    <div class="fundo-acoes">
+      <label class="btn-ghost">📤 Enviar imagem<input type="file" id="f-fundo" accept="image/jpeg,image/png,image/webp" hidden onchange="enviarFundo()"></label>
+      <button type="button" class="btn-ghost bad hidden" id="btn-remover-fundo" onclick="removerFundo()">🗑️ Remover fundo</button>
+    </div>
+    <div class="msg hidden" id="msg-fundo"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Balão de mensagem do robô</h2>
+    <div class="sub">O robô em cima do login continua sempre aparecendo - isso aqui troca só a mensagem dentro do balão dele. Boa hora pra escrever algo carinhoso: aniversário da equipe, feriado, "bom trabalho hoje" - o que fizer sentido no momento.</div>
+
+    <div class="toggle-linha">
+      <input type="checkbox" id="f-ativo" onchange="atualizarPreview()">
+      <span>Mostrar mensagem personalizada (desligado = mensagem padrão de boas-vindas)</span>
+    </div>
+
+    <label>Título do balão</label>
+    <input type="text" id="f-titulo" maxlength="80" placeholder="ex: Feliz Dia dos Pais! 🎉" oninput="atualizarPreview()">
+
+    <label>Texto do balão</label>
+    <textarea id="f-texto" maxlength="240" placeholder="ex: De toda a equipe Zenith Ops pros pais que também tocam o dia a dia da operação." oninput="atualizarPreview()"></textarea>
+    <div class="contador"><span id="contador-texto">0</span>/240</div>
+
+    <div class="sub" style="margin:10px 0 0;">Pré-visualização:</div>
+    <div class="preview-balao" id="preview-balao">
+      <b id="preview-titulo"></b>
+      <small id="preview-texto"></small>
+    </div>
+
+    <button type="button" class="btn-primary" id="btn-salvar" onclick="salvar()">💾 Salvar</button>
+    <div class="msg hidden" id="msg-salvar"></div>
+
+    <div class="info-box">
+      A tela de login recarrega a mensagem sozinha - não precisa avisar ninguém pra "atualizar a página". Desligando aqui, ela volta pra saudação padrão na hora.
+    </div>
+  </div>
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
+function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+let CONFIG_ATUAL = null;
+
+function atualizarPreview(){
+  const ativo = document.getElementById('f-ativo').checked;
+  const titulo = document.getElementById('f-titulo').value.trim();
+  const texto = document.getElementById('f-texto').value.trim();
+  document.getElementById('contador-texto').textContent = texto.length;
+  const balao = document.getElementById('preview-balao');
+  balao.style.opacity = ativo ? '1' : '.45';
+  document.getElementById('preview-titulo').textContent = titulo || '(sem título)';
+  document.getElementById('preview-texto').textContent = texto || '(sem texto)';
+}
+
+function renderFundoPreview(temFundo){
+  const el = document.getElementById('fundo-preview');
+  const btnRemover = document.getElementById('btn-remover-fundo');
+  if(temFundo){
+    el.innerHTML = `<img src="/api/login-custom/fundo?_=${Date.now()}" alt="Fundo atual">`;
+    btnRemover.classList.remove('hidden');
+  } else {
+    el.innerHTML = '<span class="vazio">Nenhuma imagem enviada - usando o fundo padrão.</span>';
+    btnRemover.classList.add('hidden');
+  }
+}
+
+async function carregarConfig(){
+  CONFIG_ATUAL = await fetch('/api/login-custom').then(r=>r.json());
+  document.getElementById('f-ativo').checked = !!CONFIG_ATUAL.ativo;
+  document.getElementById('f-titulo').value = CONFIG_ATUAL.bubbleTitulo || '';
+  document.getElementById('f-texto').value = CONFIG_ATUAL.bubbleTexto || '';
+  atualizarPreview();
+  renderFundoPreview(!!CONFIG_ATUAL.temFundo);
+}
+
+async function salvar(){
+  const msg = document.getElementById('msg-salvar');
+  const btn = document.getElementById('btn-salvar');
+  msg.classList.add('hidden');
+  btn.disabled = true;
+  try{
+    const resp = await fetch('/api/login-custom', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      ativo: document.getElementById('f-ativo').checked,
+      bubbleTitulo: document.getElementById('f-titulo').value,
+      bubbleTexto: document.getElementById('f-texto').value,
+    })});
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
+    CONFIG_ATUAL = data;
+    msg.textContent = '✅ Salvo! Já vale na próxima vez que a tela de login carregar.';
+    msg.className = 'msg ok';
+    msg.classList.remove('hidden');
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+async function enviarFundo(){
+  const input = document.getElementById('f-fundo');
+  const arquivo = input.files[0];
+  if(!arquivo) return;
+  const msg = document.getElementById('msg-fundo');
+  msg.classList.add('hidden');
+  try{
+    const fd = new FormData();
+    fd.append('fundo', arquivo);
+    const resp = await fetch('/api/login-custom/fundo', { method:'POST', body: fd });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao enviar a imagem.');
+    CONFIG_ATUAL = data;
+    renderFundoPreview(true);
+    msg.textContent = '✅ Fundo atualizado!'; msg.className = 'msg ok'; msg.classList.remove('hidden');
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{
+    input.value = '';
+  }
+}
+
+async function removerFundo(){
+  if(!confirm('Remover a imagem de fundo e voltar pro padrão?')) return;
+  const msg = document.getElementById('msg-fundo');
+  msg.classList.add('hidden');
+  try{
+    const resp = await fetch('/api/login-custom/fundo', { method:'DELETE' });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao remover.');
+    CONFIG_ATUAL = data;
+    renderFundoPreview(false);
+    msg.textContent = '✅ Fundo removido, voltou pro padrão.'; msg.className = 'msg ok'; msg.classList.remove('hidden');
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+}
+
+function initNavDrawerAccordion(){
+  const nav = document.getElementById('nav-drawer');
+  if(!nav || nav.dataset.ndgInit) return;
+  nav.dataset.ndgInit = '1';
+  [...nav.querySelectorAll(':scope > .nav-drawer-grupo')].forEach(g=>{
+    const nomeGrupo = g.textContent.trim();
+    const itens = [];
+    let el = g.nextElementSibling;
+    while(el && !el.classList.contains('nav-drawer-grupo') && !el.classList.contains('nav-drawer-sep')){
+      const prox = el.nextElementSibling;
+      itens.push(el);
+      el = prox;
+    }
+    if(!itens.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'ndg-wrap';
+    g.after(wrap);
+    itens.forEach(it=>wrap.appendChild(it));
+    g.innerHTML = `<span>${nomeGrupo}</span><span class="ndg-seta">▾</span>`;
+    const temAtual = itens.some((it)=>{ const h = it.getAttribute && it.getAttribute('href'); if(!h) return false; try { return new URL(h, location.origin).pathname === location.pathname; } catch(e){ return false; } });
+    const aberto = temAtual || nomeGrupo === 'Solicitações';
+    g.querySelector('.ndg-seta').style.transform = aberto ? '' : 'rotate(-90deg)';
+    wrap.classList.toggle('hidden', !aberto);
+    g.addEventListener('click', ()=>{
+      const abrirAgora = wrap.classList.contains('hidden');
+      wrap.classList.toggle('hidden', !abrirAgora);
+      g.querySelector('.ndg-seta').style.transform = abrirAgora ? '' : 'rotate(-90deg)';
+      localStorage.setItem('ndgAberto:'+nomeGrupo, abrirAgora ? '1' : '0');
+    });
+  });
+}
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  const me = await res.json();
+  if(me.role !== 'master'){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('nav-usuarios').classList.remove('hidden');
+  document.getElementById('nav-grupos').classList.remove('hidden');
+  document.getElementById('nav-email').classList.remove('hidden');
+  document.getElementById('root').classList.remove('hidden');
+  initNavDrawerAccordion();
+  await carregarConfig();
+}
+boot();
+</script>
+<script src="/nav-gate.js"></script>
+</body>
+</html>

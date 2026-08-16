@@ -40,13 +40,20 @@
   .popup-card .popup-suporte{display:block;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:13px;color:var(--accent);font-weight:700;text-decoration:none;margin-bottom:10px;}
   .popup-card .popup-fechar{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline;}
 
-  /* ===== DIA DOS PAIS 2026 - decoracao temporaria do login (remover apos 16/08/2026) ===== */
-  #auth-screen.auth-screen{position:relative;overflow:hidden;flex-direction:column;gap:22px;}
+  /* ===== login: robô + balão de mensagem (título/texto personalizáveis pelo
+     Master em login-custom.html, ver loginCustom.js) + fundo customizável.
+     Fixo por pedido explícito do usuário: logo do Grupo Bravo, frase acima
+     dela, o card de login e o robô em si - só o texto do balão e o fundo
+     por trás de tudo são trocáveis ===== */
+  #auth-screen.auth-screen{position:relative;overflow:hidden;flex-direction:column;gap:22px;background-size:cover;background-position:center;}
   #auth-screen.auth-screen::before{
     content:'';position:absolute;inset:0;z-index:0;pointer-events:none;
     background:
       radial-gradient(ellipse 640px 380px at 50% 0%, rgba(255,183,94,.11), transparent 60%),
       radial-gradient(ellipse 520px 520px at 92% 100%, rgba(92,200,255,.08), transparent 65%);
+  }
+  #auth-screen.auth-screen.tem-fundo::before{
+    background: linear-gradient(180deg, rgba(11,13,16,.55), rgba(11,13,16,.75));
   }
   .dp-hero{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;text-align:center;}
   .dp-bot{position:relative;animation:dp-float 4s ease-in-out infinite;flex:none;}
@@ -66,7 +73,7 @@
   @media (prefers-reduced-motion:reduce){
     .dp-bot,.dp-bot .dp-eyes,.dp-bot .dp-arm-l,.dp-bot .dp-arm-r{animation:none!important;}
   }
-  /* ===== FIM DIA DOS PAIS ===== */
+  /* ===== fim login: robô + balão ===== */
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -112,9 +119,9 @@
         </g>
       </svg>
     </div>
-    <div class="dp-bubble">
-      <b>Feliz Dia dos Pais! 🎉</b>
-      <small>De toda a equipe Zenith Ops pros pais que também tocam o dia a dia da operação.</small>
+    <div class="dp-bubble" id="dp-bubble">
+      <b id="dp-bubble-titulo">Bem-vindo(a) de volta! 👋</b>
+      <small id="dp-bubble-texto">Bom trabalho hoje.</small>
     </div>
   </div>
 
@@ -137,7 +144,6 @@
     <span>Zenith Ops faz parte do</span>
     <img src="/dia-dos-pais-2026-bravo.png" alt="Grupo Bravo Empresarial">
   </div>
-  <!-- FIM DIA DOS PAIS 2026 -->
 </section>
 
 <section id="trocar-senha-screen" class="auth-screen hidden">
@@ -355,6 +361,27 @@ function iniciarHeartbeatLoja(){
   setInterval(() => heartbeatLoja(unidade, posto), 25 * 1000);
 }
 iniciarHeartbeatLoja();
+
+// personalizacao da tela de login (balao + fundo, ver login-custom.html e
+// loginCustom.js) - le sem precisar de sessao, e o robo/logo/card continuam
+// exatamente como estao, so o texto do balao e o fundo por tras mudam.
+// Falha em silencio (rede fora, config nao existe ainda etc): fica a
+// mensagem padrao ja escrita no HTML, sem quebrar a tela de login
+async function carregarLoginCustom(){
+  try{
+    const config = await fetch('/api/login-custom').then(r=>r.ok?r.json():null);
+    if(config && config.ativo && (config.bubbleTitulo || config.bubbleTexto)){
+      if(config.bubbleTitulo) document.getElementById('dp-bubble-titulo').textContent = config.bubbleTitulo;
+      if(config.bubbleTexto) document.getElementById('dp-bubble-texto').textContent = config.bubbleTexto;
+    }
+    if(config && config.temFundo){
+      const tela = document.getElementById('auth-screen');
+      tela.style.backgroundImage = `url(/api/login-custom/fundo)`;
+      tela.classList.add('tem-fundo');
+    }
+  }catch(e){ /* segue com a mensagem/fundo padrao */ }
+}
+carregarLoginCustom();
 
 boot();
 </script>
