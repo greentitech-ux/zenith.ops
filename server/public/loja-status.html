@@ -429,6 +429,8 @@
   <div class="modal">
     <h3>✏️ Editar computador</h3>
     <div class="sub" id="editar-comp-unidade"></div>
+    <label>Unidade</label>
+    <select id="editar-comp-unidade-select"></select>
     <label>Nome do computador</label>
     <input type="text" id="editar-comp-nome" maxlength="60">
     <label>ID do AnyDesk (opcional)</label>
@@ -990,7 +992,10 @@ let EDITAR_COMP_POSTO = null;
 function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydeskAtual){
   EDITAR_COMP_CODIGO = codigo;
   EDITAR_COMP_POSTO = posto;
-  document.getElementById('editar-comp-unidade').textContent = `${nomeAtual || posto} · ${UNIDADES_NOMES[codigo] || codigo}`;
+  document.getElementById('editar-comp-unidade').textContent = `${nomeAtual || posto} · atualmente em ${UNIDADES_NOMES[codigo] || codigo}`;
+  const unidadesOrdenadas = UNIDADES.slice().sort((a,b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  document.getElementById('editar-comp-unidade-select').innerHTML = unidadesOrdenadas.map(u=>`<option value="${escapeHtml(u.codigo)}">${escapeHtml(u.nome)}</option>`).join('');
+  document.getElementById('editar-comp-unidade-select').value = codigo;
   document.getElementById('editar-comp-nome').value = nomeAtual || '';
   document.getElementById('editar-comp-anydesk').value = anydeskAtual || '';
   document.querySelectorAll('input[name="editar-comp-tipo"]').forEach(r => { r.checked = (r.value === (tipoAtual || 'atendimento')); });
@@ -1002,12 +1007,27 @@ async function salvarEdicaoComputador(){
   const nome = document.getElementById('editar-comp-nome').value.trim();
   const tipo = document.querySelector('input[name="editar-comp-tipo"]:checked').value;
   const anydeskId = document.getElementById('editar-comp-anydesk').value.trim();
+  const novaUnidade = document.getElementById('editar-comp-unidade-select').value;
   const status = document.getElementById('editar-comp-status');
   status.classList.add('hidden');
   if(!nome || !EDITAR_COMP_CODIGO || !EDITAR_COMP_POSTO) return;
   const btn = document.getElementById('editar-comp-salvar');
   btn.disabled = true;
+  let mudouUnidade = false;
   try{
+    // mudar de unidade primeiro (se foi o caso) - o "posto" nao muda, so o
+    // codigo na frente dele, entao as chamadas seguintes (nome/tipo/anydesk)
+    // ja precisam usar a unidade nova na URL
+    if(novaUnidade && novaUnidade !== EDITAR_COMP_CODIGO){
+      const respMov = await fetch(`/api/loja-status/${encodeURIComponent(EDITAR_COMP_CODIGO)}/computadores/${encodeURIComponent(EDITAR_COMP_POSTO)}/unidade`, {
+        method: 'PUT', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ novoCodigo: novaUnidade }),
+      });
+      const dataMov = await respMov.json();
+      if(!respMov.ok) throw new Error(dataMov.error || 'Erro ao mudar de unidade.');
+      EDITAR_COMP_CODIGO = novaUnidade;
+      mudouUnidade = true;
+    }
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(EDITAR_COMP_CODIGO)}/computadores/${encodeURIComponent(EDITAR_COMP_POSTO)}`, {
       method: 'PUT', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ nome, tipo }),
@@ -1021,6 +1041,9 @@ async function salvarEdicaoComputador(){
     if(!respAd.ok) throw new Error((await respAd.json()).error || 'Erro ao salvar o AnyDesk.');
     fecharModalEditarComputador();
     await carregar();
+    // mudou de unidade: o link/QR antigo (com a unidade velha) nao serve
+    // mais - mostra o link novo pra Master repassar pro dispositivo
+    if(mudouUnidade && data.url) mostrarLinkGerado(data.url);
   }catch(e){
     status.textContent = e.message; status.className = 'msg err'; status.classList.remove('hidden');
   }finally{
