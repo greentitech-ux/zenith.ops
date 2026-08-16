@@ -52,6 +52,8 @@
     // conectividade das lojas (heartbeat do quiosque atendimento.html) -
     // mesmo publico do Beniboy, ja que e quem cuida da infra das lojas
     'nav-loja-status': ['suporte'],
+    // metricas dos atendimentos via chat - mesmo publico do Beniboy
+    'nav-dashboard-atendimentos': ['suporte'],
   };
 
   function aplicar(me) {
