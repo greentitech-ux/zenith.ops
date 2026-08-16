@@ -70,6 +70,11 @@
   .painel-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;align-items:start;}
   .pcard-slot{position:relative;min-width:0;}
   .pcard-slot.wide{grid-column:span 2;}
+  .pcard-slot.full{grid-column:1 / -1;}
+  /* card full-width com chips (ex: NOC Zenith) - grid em vez de flex-wrap
+     puro, pra ficar organizado em colunas parelhas na largura toda, não só
+     empilhando da esquerda pra direita */
+  .pcard-slot.full .pestoque-chips{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));}
   .pcard-slot .pcard{height:100%;box-sizing:border-box;}
   .pcard-drag{position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:2;background:none;border:none;
     color:var(--muted);font-size:13px;line-height:1;padding:4px 18px;cursor:grab;touch-action:none;user-select:none;}
@@ -1252,6 +1257,13 @@ function salvarOrdemCards(){
 // (2 colunas) continua no CSS, disponivel se algum card novo precisar - basta
 // adicionar a chave dele aqui.
 const CHAVES_WIDE = new Set();
+// NOC Zenith pode ter dezenas de unidades com computador cadastrado - numa
+// coluna só (ou até 2) os chips empilham em muitas linhas e o card fica bem
+// mais alto que os vizinhos, deixando um buraco de espaço em branco do lado
+// (align-items:start não estica os cards curtos pra preencher a sobra).
+// Full-width evita esse descompasso de altura: os chips ganham a largura
+// inteira da tela pra se organizar, e nenhum card fica "esperando" ao lado
+const CHAVES_FULL = new Set(['noc']);
 // arrastar pela alça ⠿ (pointer events = funciona com dedo e mouse): o card
 // segue o ponteiro trocando de posicao ao vivo; soltou, a ordem e salva
 let PAINEL_ARRASTANDO = false;
@@ -1404,7 +1416,7 @@ async function renderizarCards(){
       console.error('Painel: erro ao carregar card', aplicaveis[i].chave, r.reason);
       html = pcardWrap('⚠️', aplicaveis[i].chave, '#', `<div class="pcard-erro">Não foi possível carregar esses dados agora.</div>`);
     }
-    const cls = CHAVES_WIDE.has(aplicaveis[i].chave) ? 'pcard-slot wide' : 'pcard-slot';
+    const cls = CHAVES_FULL.has(aplicaveis[i].chave) ? 'pcard-slot full' : (CHAVES_WIDE.has(aplicaveis[i].chave) ? 'pcard-slot wide' : 'pcard-slot');
     return `<div class="${cls}" data-chave="${aplicaveis[i].chave}">
       <button type="button" class="pcard-drag" title="Arraste pra reordenar os cards" aria-label="Mover card">⠿</button>
       ${html}
