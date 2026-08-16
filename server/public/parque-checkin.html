@@ -200,7 +200,21 @@
       </div>
     </div>
 
-    <div class="secao">
+    <!-- TERMO ANTES DO PAGAMENTO: o responsável assina com base no que já
+         foi preenchido (ele + crianças), e só depois de "Aplicar" a venda
+         pode ser efetivada. A prévia sai de POST /api/parque/termo-previa.pdf,
+         que monta o PDF a partir do formulário e NÃO cria nada. -->
+    <div class="secao" id="secao-termo">
+      <div class="secao-titulo">Termo de responsabilidade</div>
+      <div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:8px;">
+        Imprima, colha a assinatura do responsável e clique em <b>Aplicar</b>. O pagamento só libera depois disso.
+      </div>
+      <button type="button" class="btn-secundario" id="btn-imprimir-termo" onclick="imprimirTermoPrevia()">🖨️ Imprimir termo</button>
+      <button type="button" class="btn-primary" style="margin-top:8px;" id="btn-aplicar-termo" onclick="aplicarTermo()">✔ Aplicar termo assinado</button>
+      <div class="sub" id="termo-status" style="font-size:12px;margin-top:6px;color:var(--warn);">Termo ainda não aplicado.</div>
+    </div>
+
+    <div class="secao" id="secao-pagamento">
       <div class="secao-titulo">Pagamento</div>
       <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;">
         <input type="checkbox" id="f-cortesia" style="width:auto;" onchange="toggleCortesia()">
@@ -241,12 +255,14 @@
 </div>
 
 <div class="panel hidden" id="painel-termo">
-  <h2>Cadastro registrado</h2>
+  <h2>Venda registrada</h2>
   <div class="sub" style="font-size:12.5px;color:var(--muted);margin-bottom:10px;">
-    Imprima o termo e peça a assinatura do responsável. <b style="color:var(--warn);">A entrada no parque só é permitida depois do termo assinado E do check-in feito</b> - o check-in é quem inicia a contagem do tempo contratado, então só clique nele quando o grupo realmente for entrar.
+    O termo já foi assinado antes do pagamento. <b style="color:var(--warn);">Falta só o check-in</b> - é ele que inicia a contagem do tempo contratado, então só clique quando o grupo realmente for entrar. A 2ª via do termo fica no link abaixo.
   </div>
-  <a class="btn-secundario" style="display:block;text-align:center;text-decoration:none;" id="link-termo" target="_blank">🖨️ Imprimir termo de responsabilidade</a>
-  <button type="button" class="btn-primary" id="btn-marcar-assinado" onclick="marcarAssinado()">Confirmar termo assinado</button>
+  <a class="btn-secundario" style="display:block;text-align:center;text-decoration:none;" id="link-termo" target="_blank">🖨️ 2ª via do termo</a>
+  <!-- so aparece pra venda antiga, criada antes do termo passar pra frente
+       do pagamento (ou pro relancamento sem termo reaproveitado) -->
+  <button type="button" class="btn-primary hidden" id="btn-marcar-assinado" onclick="marcarAssinado()">Confirmar termo assinado</button>
   <button type="button" class="btn-checkin" id="btn-fazer-checkin" onclick="fazerCheckinUltimo()">▶ Fazer check-in agora (inicia a contagem)</button>
 </div>
 
@@ -784,6 +800,10 @@ function atualizarPreviewValor(){
     ? `cortesia · ${n} criança(s)`
     : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min)${niver?` · 🎂 Niver ${niverLabel} (${niver})`:''} + meias`;
   document.getElementById('preview-valor').textContent = fmtReal(total);
+  // roda junto com o preview porque ele já é chamado a cada mexida no
+  // formulário (criança, meia, tempo, cortesia) - é o gancho natural pra
+  // reavaliar se o termo aplicado ainda corresponde ao que está na tela
+  if(typeof atualizarGateTermo === 'function') atualizarGateTermo();
   if(!gratis){
     reconciliarPagamentos(total);
     atualizarBotaoPagamento(total);
@@ -1415,6 +1435,10 @@ async function relancarVisita(){
 }
 
 function resetarForm(){
+  // venda nova = termo novo. Sem isso o próximo grupo herdaria o "aplicado"
+  // do grupo anterior e entraria sem assinar nada.
+  TERMO_APLICADO = false;
+  TERMO_ASSINATURA = '';
   document.getElementById('form-checkin').reset();
   document.getElementById('f-data').value = hojeBrasilia();
   preencherSelectSlots('f-horario-previsto', proximoSlot30());
@@ -1491,11 +1515,13 @@ document.getElementById('form-checkin').addEventListener('submit', async (ev)=>{
       motivoCortesia: document.getElementById('f-motivo-cortesia').value,
       meiasExtras: Math.max(0, num(document.getElementById('f-meias-extras').value)),
       usarCreditoMin: (USAR_CREDITO && CREDITO_ATUAL) ? CREDITO_ATUAL.minutosDisponiveis : 0,
+      // o termo já foi assinado antes de efetivar a venda (ver aplicarTermo)
+      termoAssinado: TERMO_APLICADO,
     };
     const res = await fetch('/api/parque/checkins', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     const data = await res.json();
     if(!res.ok) throw new Error(data.error||'erro ao registrar check-in');
-    msg.textContent = 'Cadastro registrado. Imprima o termo abaixo - o check-in só deve ser feito quando o grupo for entrar de verdade.'; msg.className = 'msg ok';
+    msg.textContent = 'Venda registrada com o termo já assinado. Faça o check-in abaixo quando o grupo realmente for entrar.'; msg.className = 'msg ok';
     ULTIMO_CRIADO_ID = data.id;
     document.getElementById('link-termo').href = `/api/parque/checkins/${data.id}/termo.pdf?token=${encodeURIComponent(AUTH_TOKEN)}`;
     document.getElementById('painel-termo').classList.remove('hidden');
@@ -1508,6 +1534,97 @@ document.getElementById('form-checkin').addEventListener('submit', async (ev)=>{
     btn.disabled = false;
   }
 });
+
+// ---------- termo ANTES do pagamento ----------
+// Fluxo: preenche responsável + crianças -> imprime a prévia -> colhe a
+// assinatura -> Aplicar -> só então o Pagamento libera e a venda pode ser
+// efetivada. Antes o termo saía DEPOIS da venda, o que deixava a entrada
+// vendida com o papel ainda por assinar.
+let TERMO_APLICADO = false;
+
+function dadosDoTermo(){
+  const unidade = document.getElementById('f-unidade').value;
+  return {
+    unidade,
+    unidadeNome: UNIDADES_NOMES[unidade] || unidade,
+    responsavel: {
+      nome: document.getElementById('f-nome').value,
+      cpf: document.getElementById('f-cpf').value,
+      contato: document.getElementById('f-contato').value,
+      email: document.getElementById('f-email').value,
+      cep: document.getElementById('f-cep').value,
+      endereco: document.getElementById('f-endereco').value,
+      numero: document.getElementById('f-numero').value,
+      complemento: document.getElementById('f-complemento').value,
+    },
+    criancas: coletarCriancas(),
+    dataUtilizacao: document.getElementById('f-data').value,
+    tempoMinutos: TEMPO_SELECIONADO,
+  };
+}
+
+// "impressão digital" do que o termo cobre. Se o atendente mexer no
+// responsável ou nas crianças DEPOIS de aplicar, o papel assinado não vale
+// mais pro que está na tela - então o Aplicar cai sozinho e ele imprime de
+// novo. Sem isso dava pra assinar com 2 crianças e vender com 5.
+function assinaturaDoTermo(){
+  const d = dadosDoTermo();
+  return JSON.stringify([d.responsavel.nome, d.responsavel.cpf, (d.criancas||[]).map(c=>[c.nome, c.nascimento||c.idade])]);
+}
+let TERMO_ASSINATURA = '';
+
+async function imprimirTermoPrevia(){
+  const d = dadosDoTermo();
+  if(!String(d.responsavel.nome||'').trim()){ alert('Preencha o nome do responsável antes de imprimir o termo.'); return; }
+  if(!(d.criancas||[]).length){ alert('Adicione pelo menos uma criança antes de imprimir o termo.'); return; }
+  const btn = document.getElementById('btn-imprimir-termo');
+  btn.disabled = true;
+  try{
+    const res = await fetch('/api/parque/termo-previa.pdf', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(d) });
+    if(!res.ok){ const e = await res.json().catch(()=>({})); throw new Error(e.error || 'Não foi possível gerar o termo.'); }
+    // abre o PDF numa aba nova a partir do blob (a rota é POST, então não
+    // dá pra simplesmente apontar um <a href>)
+    const url = URL.createObjectURL(await res.blob());
+    window.open(url, '_blank');
+    setTimeout(()=>URL.revokeObjectURL(url), 60000);
+  }catch(err){ alert(err.message); }
+  finally{ btn.disabled = false; }
+}
+
+function aplicarTermo(){
+  const d = dadosDoTermo();
+  if(!String(d.responsavel.nome||'').trim()){ alert('Preencha o nome do responsável antes de aplicar o termo.'); return; }
+  if(!(d.criancas||[]).length){ alert('Adicione pelo menos uma criança antes de aplicar o termo.'); return; }
+  TERMO_APLICADO = true;
+  TERMO_ASSINATURA = assinaturaDoTermo();
+  atualizarGateTermo();
+}
+
+function atualizarGateTermo(){
+  // aplicou e depois mexeu no responsável/crianças? o termo assinado não
+  // corresponde mais ao que está na tela
+  if(TERMO_APLICADO && TERMO_ASSINATURA && assinaturaDoTermo() !== TERMO_ASSINATURA) TERMO_APLICADO = false;
+  const status = document.getElementById('termo-status');
+  const pag = document.getElementById('secao-pagamento');
+  const btnAplicar = document.getElementById('btn-aplicar-termo');
+  const btnEnviar = document.getElementById('btn-enviar');
+  if(!status || !pag) return;
+  if(TERMO_APLICADO){
+    status.textContent = '✔ Termo aplicado — pode seguir para o pagamento.';
+    status.style.color = 'var(--ok)';
+    btnAplicar.classList.add('hidden');
+    pag.classList.remove('hidden');
+    btnEnviar.disabled = false;
+    btnEnviar.title = '';
+  }else{
+    status.textContent = TERMO_ASSINATURA ? 'Os dados mudaram depois de aplicar — imprima e aplique o termo de novo.' : 'Termo ainda não aplicado.';
+    status.style.color = 'var(--warn)';
+    btnAplicar.classList.remove('hidden');
+    pag.classList.add('hidden');
+    btnEnviar.disabled = true;
+    btnEnviar.title = 'Aplique o termo assinado antes de efetivar a venda.';
+  }
+}
 
 async function boot(){
   const res = await fetch('/api/me');
@@ -1538,6 +1655,12 @@ async function boot(){
   preencherSelectSlots('f-horario-previsto', proximoSlot30());
   adicionarCrianca();
   adicionarPagamento();
+
+  // qualquer digitação no formulário reavalia o termo: se o atendente mudar
+  // o responsável ou as crianças depois de aplicar, o "aplicado" cai e o
+  // Pagamento tranca de novo (ver atualizarGateTermo)
+  document.getElementById('form-checkin').addEventListener('input', atualizarGateTermo);
+  atualizarGateTermo();
 
   document.getElementById('root').classList.remove('hidden');
   await carregar();
