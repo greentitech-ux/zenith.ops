@@ -356,10 +356,21 @@
 
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
 let ME = null;
 const FUSO_BR = 'America/Sao_Paulo';
 const SABOR_LABEL = { calabresa:'Calabresa', pepperoni:'Pepperoni', mussarela:'Mussarela' };
 
+// mesmo wrapper das demais paginas: o token do login fica no localStorage e
+// precisa ir no cabecalho de TODA chamada /api/ - sem isso o /api/me volta
+// 401 e o boot() derruba a sessao achando que o login expirou
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
 function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
 function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
 function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
