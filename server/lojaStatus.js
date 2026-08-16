@@ -295,6 +295,30 @@ async function removerComputador(codigo, posto) {
   return { codigo, posto };
 }
 
+// move um computador ja cadastrado pra outra unidade, mantendo o mesmo
+// "posto" (id do link/QR) - o docId embute o codigo (ver docIdFor), entao
+// "mover" e cria+apaga por baixo dos panos, preservando nome/tipo/anydesk/
+// token/historico de eventos. O link/QR ja distribuido pro dispositivo
+// fisico manda unidade+posto no heartbeat (ver POST /api/loja-status/
+// heartbeat) - depois de mover, esse link antigo aponta pra um registro que
+// nao existe mais aqui, entao quem mover precisa gerar/repassar um link novo
+// pro dispositivo (mesmo fluxo de "Novo computador")
+async function moverComputador(codigoAtual, posto, codigoNovo) {
+  const idAtual = docIdFor(codigoAtual, posto);
+  const idNovo = docIdFor(codigoNovo, posto);
+  if (idAtual === idNovo) throw new Error('Já está nessa unidade.');
+  const snap = await COLLECTION.doc(idAtual).get();
+  if (!snap.exists) throw new Error('Computador não encontrado.');
+  const novoSnap = await COLLECTION.doc(idNovo).get();
+  if (novoSnap.exists) throw new Error('Já existe um computador com esse mesmo id na unidade de destino.');
+  const atual = snap.data();
+  const registro = { ...atual, codigo: codigoNovo, posto };
+  await COLLECTION.doc(idNovo).set(registro);
+  await COLLECTION.doc(idAtual).delete();
+  cache.invalidar();
+  return semSegredo(registro);
+}
+
 // Master configura o ID do AnyDesk daquele computador pra acesso remoto
 // rapido - funciona mesmo se o computador nunca mandou heartbeat ainda, por
 // isso o merge:true (nao exige ja existir)
@@ -546,7 +570,7 @@ async function varrerAlertas() {
 }
 
 module.exports = {
-  heartbeat, listar, cadastrarComputador, editarComputador, removerComputador,
+  heartbeat, listar, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR,
   getConfig, setConfig, pushAcessoRemotoAtivo,
   enfileirarComando, marcarComandoExecutado, registrarAcessoRemoto, responderChat,

@@ -2071,6 +2071,16 @@ app.delete('/api/loja-status/:codigo/computadores/:posto', requireSection('supor
   }
 });
 
+app.put('/api/loja-status/:codigo/computadores/:posto/unidade', requireSection('suporte'), async (req, res) => {
+  try {
+    const registro = await lojaStatus.moverComputador(req.params.codigo, req.params.posto, req.body.novoCodigo);
+    const url = urlComputador(registro.codigo, registro.posto, registro.tipo);
+    res.json({ ...registro, url });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.put('/api/loja-status/:codigo/computadores/:posto/anydesk', requireSection('suporte'), async (req, res) => {
   try {
     res.json(await lojaStatus.definirAnydeskId(req.params.codigo, req.params.posto, req.body.anydeskId));
