@@ -108,20 +108,30 @@
 
 <div class="panel" id="painel-faturado">
   <h2>Faturado (automático)</h2>
-  <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);">Soma do que já está registrado no sistema pro dia: entradas do parque + vendas de bebida/meia.</div>
+  <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);">Soma do que já está registrado no sistema pro dia: entradas do parque + vendas de bebida/meia + dinheiro de festa que entrou hoje.</div>
   <div class="resumo" id="faturado-resumo"><div class="empty">carregando...</div></div>
 </div>
 
-<!-- MEU caixa: o operador logado fecha o proprio caixa -->
+<!-- MEU caixa: o operador logado fecha o proprio caixa (balcão) -->
 <div class="panel" id="painel-meu-caixa">
   <h2>🧑 Meu caixa</h2>
   <div id="meu-caixa-corpo"><div class="empty">carregando...</div></div>
 </div>
 
+<!-- caixa de FESTA: so aparece pra quem vendeu/recebeu festa no dia. E um
+     caixa separado do balcão de proposito - dinheiro de festa entra por
+     outro caminho (Pix combinado antes, sinal) e misturar escondia a
+     sobra/falta de cada um -->
+<div class="panel hidden" id="painel-meu-caixa-festa">
+  <h2>🎉 Meu caixa de festa</h2>
+  <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">só o dinheiro de festa que entrou hoje (sinal + recebimentos que você registrou). separado do balcão.</div>
+  <div id="meu-caixa-festa-corpo"><div class="empty">carregando...</div></div>
+</div>
+
 <!-- Caixas do dia (todos os operadores que ja fecharam) -->
 <div class="panel" id="painel-caixas">
   <h2>💼 Caixas do dia</h2>
-  <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">cada operador fecha o próprio caixa. quem vendeu e ainda não fechou aparece como pendente e trava o fecha-dia.</div>
+  <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">cada operador fecha o próprio caixa. quem vendeu festa fecha um caixa à parte (linha "· festa"). quem vendeu e ainda não fechou aparece como pendente e trava o fecha-dia.</div>
   <div id="lista-caixas"><div class="empty">carregando...</div></div>
 </div>
 
@@ -258,11 +268,13 @@ function renderFaturadoResumo(faturado, faturadoPorForma, detalhe){
   const linhasBucket = BUCKETS.map(b=>`<div class="linha"><span>${BUCKET_LABEL[b]}</span><b>${fmtReal((faturadoPorForma||{})[b])}</b></div>`).join('');
   const parqueTotal = detalhe && detalhe.parque ? detalhe.parque.total : 0;
   const vendasTotal = detalhe && detalhe.vendas ? detalhe.vendas.total : 0;
+  const festasTotal = detalhe && detalhe.festas ? detalhe.festas.total : 0;
   el.innerHTML = `
     ${linhasBucket}
     <div class="linha total"><span>Total faturado</span><b>${fmtReal(faturado)}</b></div>
     <div class="linha"><span class="sub2">↳ Parque (entradas)</span><span class="sub2">${fmtReal(parqueTotal)}</span></div>
     <div class="linha"><span class="sub2">↳ Bebidas/Meias</span><span class="sub2">${fmtReal(vendasTotal)}</span></div>
+    <div class="linha"><span class="sub2">↳ Festas (sinal + recebimentos)</span><span class="sub2">${fmtReal(festasTotal)}</span></div>
   `;
 }
 
@@ -295,7 +307,10 @@ async function carregarTudo(){
     renderCaixasDoDia();
     renderFecharDia();
   }
-  renderMeuCaixa();
+  renderMeuCaixa('balcao');
+  const temFesta = tenhoFesta();
+  document.getElementById('painel-meu-caixa-festa').classList.toggle('hidden', !temFesta);
+  if(temFesta) renderMeuCaixa('festa');
   if(PODE_APROVAR) carregarAprovacoes();
   await carregarHistorico();
 }
@@ -304,12 +319,33 @@ async function carregarTudo(){
 // estadoDoDiaParaOperador no index.js): sem "caixas"/"fechamento", so
 // "meuCaixa"/"diaFechado" - as duas formas sao tratadas aqui
 const diaFechado = () => ATUAL && (ATUAL.fechamento || ATUAL.diaFechado);
-function meuCaixa(){ return ATUAL.caixas ? (ATUAL.caixas||[]).find(c=>c.operadorId===ME.id) : (ATUAL.meuCaixa||null); }
+// dois caixas possiveis por operador no mesmo dia: balcão e festa. Gerente/
+// Master recebem a lista completa (ATUAL.caixas); o operador comum recebe so
+// os dele, ja separados pelo backend
+function meuCaixa(origem){
+  if(ATUAL.caixas) return (ATUAL.caixas||[]).find(c=>c.operadorId===ME.id && (c.origem||'balcao')===origem) || null;
+  return origem==='festa' ? (ATUAL.meuCaixaFesta||null) : (ATUAL.meuCaixa||null);
+}
+// a caixinha de festa so aparece pra quem tem dinheiro de festa hoje (ou ja
+// fechou esse caixa) - pra quem so trabalha no balcão a tela nao muda
+function tenhoFesta(){
+  if(!ATUAL) return false;
+  if(ATUAL.caixas) return !!meuCaixa('festa') || (ATUAL.pendentes||[]).some(p=>p.operadorId===ME.id && p.origem==='festa');
+  return !!ATUAL.temFesta;
+}
 
-function renderMeuCaixa(){
-  const el = document.getElementById('meu-caixa-corpo');
+// UM render pros dois caixas - so mudam os ids dos campos e o rotulo
+const CAIXA_UI = {
+  balcao: { corpo:'meu-caixa-corpo', pre:'td', preAlt:'alt', msg:'msg-fechar', msgAlt:'msg-alt', obs:'fc-observacao', form:'form-alteracao', oQue:'seu caixa' },
+  festa:  { corpo:'meu-caixa-festa-corpo', pre:'tdf', preAlt:'altf', msg:'msg-fechar-f', msgAlt:'msg-alt-f', obs:'fc-observacao-f', form:'form-alteracao-f', oQue:'seu caixa de festa' },
+};
+
+function renderMeuCaixa(origem='balcao'){
+  const ui = CAIXA_UI[origem];
+  const el = document.getElementById(ui.corpo);
+  if(!el) return;
   if(diaFechado()){ el.innerHTML = '<div class="sub">o dia já foi fechado. correções agora são feitas pelo Master no fechamento do dia.</div>'; return; }
-  const meu = meuCaixa();
+  const meu = meuCaixa(origem);
   if(meu){
     // ja fechou: mostra travado + solicitar alteracao. o resultado (ok/
     // sobrando/faltando) e sempre categorico aqui - nunca o valor exato da
@@ -319,38 +355,42 @@ function renderMeuCaixa(){
     const ri = RESULTADO_INFO[meu.resultado];
     const badge = ri ? `<div class="msg ${ri.cls}" style="margin-top:8px;">${ri.texto}</div>` : '';
     el.innerHTML = `
-      <div class="resumo">${linhas}<div class="linha total"><span>Total do seu caixa</span><b>${fmtReal(meu.somaDeclarado)}</b></div></div>
+      <div class="resumo">${linhas}<div class="linha total"><span>Total de ${ui.oQue}</span><b>${fmtReal(meu.somaDeclarado)}</b></div></div>
       ${badge}
-      <div class="sub" style="margin-top:8px;">✅ você fechou seu caixa. os valores estão travados — para mudar, peça uma alteração.</div>
-      <button type="button" class="btn-secundario" style="margin-top:10px;" onclick="abrirAlteracao()">✏️ Solicitar alteração</button>
-      <div id="form-alteracao" class="hidden" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
-        ${inputsBucketsHtml('alt', meu.declarado)}
+      <div class="sub" style="margin-top:8px;">✅ você fechou ${ui.oQue}. os valores estão travados — para mudar, peça uma alteração.</div>
+      <button type="button" class="btn-secundario" style="margin-top:10px;" onclick="abrirAlteracao('${origem}')">✏️ Solicitar alteração</button>
+      <div id="${ui.form}" class="hidden" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
+        ${inputsBucketsHtml(ui.preAlt, meu.declarado)}
         <label>Motivo da alteração</label>
-        <textarea id="alt-motivo" placeholder="por que precisa mudar?"></textarea>
-        <div class="msg hidden" id="msg-alt"></div>
-        <button type="button" class="btn-primary" style="width:100%;margin-top:8px;" onclick="enviarAlteracao('${meu.id}')">Enviar pedido ao Master</button>
+        <textarea id="${ui.preAlt}-motivo" placeholder="por que precisa mudar?"></textarea>
+        <div class="msg hidden" id="${ui.msgAlt}"></div>
+        <button type="button" class="btn-primary" style="width:100%;margin-top:8px;" onclick="enviarAlteracao('${meu.id}','${origem}')">Enviar pedido ao Master</button>
       </div>`;
   }else{
     // ainda nao fechou: form de lancar
+    const dica = origem==='festa'
+      ? 'confira o que entrou de festa hoje (Pix do sinal, dinheiro, maquininha) e digite o total de cada um. depois de fechar, trava.'
+      : 'confira os comprovantes físicos (maquininha/dinheiro/Pix) e digite o total de cada um. depois de fechar, trava.';
     el.innerHTML = `
-      <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">confira os comprovantes físicos (maquininha/dinheiro/Pix) e digite o total de cada um. depois de fechar, trava.</div>
-      ${inputsBucketsHtml('td')}
+      <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">${dica}</div>
+      ${inputsBucketsHtml(ui.pre)}
       <label>Observação (opcional)</label>
-      <textarea id="fc-observacao"></textarea>
-      <div class="msg hidden" id="msg-fechar"></div>
-      <button type="button" class="btn-primary" style="width:100%;margin-top:12px;" onclick="fecharMeuCaixa()">🔒 Fechar meu caixa</button>`;
+      <textarea id="${ui.obs}"></textarea>
+      <div class="msg hidden" id="${ui.msg}"></div>
+      <button type="button" class="btn-primary" style="width:100%;margin-top:12px;" onclick="fecharMeuCaixa('${origem}')">🔒 Fechar ${ui.oQue}</button>`;
   }
 }
-function abrirAlteracao(){ document.getElementById('form-alteracao').classList.toggle('hidden'); }
+function abrirAlteracao(origem='balcao'){ document.getElementById(CAIXA_UI[origem].form).classList.toggle('hidden'); }
 
-async function fecharMeuCaixa(){
-  const msg = document.getElementById('msg-fechar');
+async function fecharMeuCaixa(origem='balcao'){
+  const ui = CAIXA_UI[origem];
+  const msg = document.getElementById(ui.msg);
   msg.classList.add('hidden');
   try{
-    const declarado = lerBuckets('td');
+    const declarado = lerBuckets(ui.pre);
     const resp = await fetch('/api/saltiverso/fechamento/caixa', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
       unidade: unidadeAtual(), unidadeNome: UNIDADES_NOMES[unidadeAtual()] || unidadeAtual(),
-      data: dataAtual(), declarado, observacao: document.getElementById('fc-observacao').value,
+      data: dataAtual(), declarado, origem, observacao: document.getElementById(ui.obs).value,
     }) });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error||'Erro ao fechar o caixa.');
@@ -358,17 +398,25 @@ async function fecharMeuCaixa(){
   }catch(err){ msg.textContent = err.message; msg.className='msg err'; msg.classList.remove('hidden'); }
 }
 
-async function enviarAlteracao(caixaId){
-  const msg = document.getElementById('msg-alt');
+async function enviarAlteracao(caixaId, origem='balcao'){
+  const ui = CAIXA_UI[origem];
+  const msg = document.getElementById(ui.msgAlt);
   msg.classList.add('hidden');
-  const motivo = document.getElementById('alt-motivo').value.trim();
+  const motivo = document.getElementById(`${ui.preAlt}-motivo`).value.trim();
   if(!motivo){ msg.textContent='Descreva o motivo.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
   try{
-    const resp = await fetch(`/api/saltiverso/fechamento/caixa/${caixaId}/solicitar-alteracao`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ declarado: lerBuckets('alt'), motivo }) });
+    const resp = await fetch(`/api/saltiverso/fechamento/caixa/${caixaId}/solicitar-alteracao`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ declarado: lerBuckets(ui.preAlt), motivo }) });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error||'Erro ao enviar.');
     msg.textContent='Pedido enviado ao Master.'; msg.className='msg ok'; msg.classList.remove('hidden');
   }catch(err){ msg.textContent = err.message; msg.className='msg err'; msg.classList.remove('hidden'); }
+}
+
+// "aurea" e "aurea · festa" sao linhas distintas aqui de proposito - e o que
+// deixa dar pra ver de onde veio cada valor sem abrir nada
+function rotuloCaixa(nome, origem, icone){
+  const festa = (origem||'balcao')==='festa';
+  return `${icone || (festa?'🎉':'🧑')} ${escapeHtml(nome)}${festa?' · festa':''}`;
 }
 
 function renderCaixasDoDia(){
@@ -377,11 +425,11 @@ function renderCaixasDoDia(){
   const pendentes = ATUAL.pendentes || [];
   let html = caixas.map(c=>{
     const okDif = Math.abs(num(c.diferencaOperador)) <= 10;
-    return `<div class="card"><div class="linha1"><span>🧑 ${escapeHtml(c.operadorNome||c.operadorEmail||'operador')}</span><b>${fmtReal(c.somaDeclarado)}</b></div>
+    return `<div class="card"><div class="linha1"><span>${rotuloCaixa(c.operadorNome||c.operadorEmail||'operador', c.origem)}</span><b>${fmtReal(c.somaDeclarado)}</b></div>
       <div class="sub">faturado dele ${fmtReal(c.faturadoOperador)} · <span class="${okDif?'':'diferenca bad'}">dif. ${fmtReal(c.diferencaOperador)}</span></div></div>`;
   }).join('');
   if(pendentes.length){
-    html += pendentes.map(p=>`<div class="card" style="border-left:3px solid var(--warn,#e0a800);"><div class="linha1"><span>⏳ ${escapeHtml(p.operadorEmail||p.operadorId)}</span><span class="badge bad">não fechou</span></div><div class="sub">vendeu ${fmtReal(p.faturado)} e ainda não fechou o caixa</div></div>`).join('');
+    html += pendentes.map(p=>`<div class="card" style="border-left:3px solid var(--warn,#e0a800);"><div class="linha1"><span>${rotuloCaixa(p.operadorEmail||p.operadorId, p.origem, '⏳')}</span><span class="badge bad">não fechou</span></div><div class="sub">vendeu ${fmtReal(p.faturado)} e ainda não fechou o caixa</div></div>`).join('');
   }
   el.innerHTML = html || '<div class="empty">nenhum caixa fechado ainda hoje.</div>';
 }

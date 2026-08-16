@@ -16,6 +16,7 @@ const parque = require('./parque');
 const saltiversoVendas = require('./saltiversoVendas');
 const festas = require('./festas');
 const solicitacoes = require('./solicitacoes');
+const users = require('./users');
 
 const COLLECTION = db.collection('saltiversoFechamentos');
 // caixas individuais: cada operador (login) fecha O SEU proprio caixa. Depois
@@ -37,6 +38,18 @@ const DATA_RE = /^\d{4}-\d{2}-\d{2}$/;
 // automático é reagrupado nesses MESMOS 4 baldes (ver bucketsDoResumo) pra
 // comparar lado a lado com o que foi digitado manualmente
 const BUCKETS = ['maquininha', 'dinheiro', 'pix', 'outros'];
+
+// o MESMO operador pode ter dois caixas no mesmo dia: o do balcão (entradas
+// do parque + bebida/meia) e o de FESTA (sinal de reserva + recebimentos).
+// São dinheiros que chegam por caminhos diferentes - a festa muitas vezes é
+// um Pix combinado dias antes - e misturar os dois num caixa só deixava a
+// conferência ilegível: sobra/falta do balcão escondia sobra/falta da festa.
+// Separados, cada um fecha e confere sozinho, e a lista de caixas do dia
+// mostra "aurea" e "aurea · festa" como linhas distintas.
+const ORIGENS = ['balcao', 'festa'];
+const ORIGEM_LABEL = { balcao: 'balcão', festa: 'festa' };
+// caixa lancado antes dessa separacao nao tem o campo - era tudo balcão
+const normalizarOrigem = (o) => (ORIGENS.includes(o) ? o : 'balcao');
 
 function num(v) {
   const n = Number(v);
@@ -119,47 +132,72 @@ async function criarCardQuebra(registro) {
 // caixa; quem vendeu no dia (parque/bebida-meia carregam criadoPorId) e
 // obrigado a fechar; depois todos juntos "fecham o dia" (consolidacao).
 // ---------------------------------------------------------------------------
-function caixaDocId(unidade, data, operadorId) {
-  return `${unidade}__${data}__${operadorId}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+function caixaDocId(unidade, data, operadorId, origem) {
+  // o caixa de balcão mantém o id ANTIGO (sem sufixo) - os caixas já
+  // lançados antes da separação continuam sendo encontrados
+  const base = `${unidade}__${data}__${operadorId}`;
+  const id = normalizarOrigem(origem) === 'festa' ? `${base}__festa` : base;
+  return id.replace(/[^a-zA-Z0-9_.-]/g, '_');
+}
+
+// recebimento de festa lançado antes de `registradoPorId` existir só tem o
+// email de quem registrou. Resolve pelo email pra o dinheiro cair no caixa
+// de alguém em vez de virar "sem-operador" - que entra no faturado do dia,
+// não entra em caixa nenhum e trava a conferência pra sempre
+async function resolverIdsPorEmail(movs) {
+  if (!movs.some((m) => !m.porId && m.porEmail)) return movs;
+  let porEmail = new Map();
+  try {
+    porEmail = new Map((await users.list()).map((u) => [String(u.email || '').toLowerCase(), u.id]));
+  } catch (err) {
+    console.error('[saltiversoFechamento] não consegui resolver operador de festa pelo email:', err.message);
+    return movs;
+  }
+  return movs.map((m) => (m.porId || !m.porEmail
+    ? m
+    : { ...m, porId: porEmail.get(String(m.porEmail).toLowerCase()) || null }));
 }
 
 // faturado ATRIBUIDO a cada operador (quem lancou a entrada/venda) - base do
-// modelo por operador e da regra "quem vendeu tem que fechar o proprio caixa"
+// modelo por operador e da regra "quem vendeu tem que fechar o proprio caixa".
+// Uma linha por operador E POR ORIGEM (balcao/festa): quem vendeu nos dois
+// aparece duas vezes e fecha um caixa de cada.
 async function faturadoPorOperador(unidade, data) {
-  const [checkins, vendas, movsFesta] = await Promise.all([
+  const [checkins, vendas, movsFestaCru] = await Promise.all([
     parque.listAll(),
     saltiversoVendas.listVendasDoDia(unidade, data),
     // quem vende/recebe a festa fica responsável pelo valor no caixa dele
     festas.movimentosPorOperador(unidade, data),
   ]);
+  const movsFesta = await resolverIdsPorEmail(movsFestaCru);
   const doDia = checkins.filter((c) => c.unidade === unidade && c.dataUtilizacao === data);
   const vendasOk = vendas.filter((v) => !v.cancelada);
   const map = new Map();
-  const get = (id, email) => {
-    const key = id || email || 'sem-operador';
-    if (!map.has(key)) map.set(key, { operadorId: id || null, operadorEmail: email || null, total: 0, porFormaRaw: {} });
+  const get = (id, email, origem) => {
+    const key = `${id || email || 'sem-operador'}::${origem}`;
+    if (!map.has(key)) map.set(key, { operadorId: id || null, operadorEmail: email || null, origem, total: 0, porFormaRaw: {} });
     return map.get(key);
   };
   doDia.forEach((c) => {
-    const o = get(c.criadoPorId, c.criadoPorEmail);
+    const o = get(c.criadoPorId, c.criadoPorEmail, 'balcao');
     o.total += num(c.valor);
     (c.pagamentos || []).forEach((p) => { o.porFormaRaw[p.forma] = num(o.porFormaRaw[p.forma]) + num(p.valor); });
     (c.acrescimos || []).forEach((a) => { if (a.metodoPagamento) o.porFormaRaw[a.metodoPagamento] = num(o.porFormaRaw[a.metodoPagamento]) + num(a.valor); });
   });
   vendasOk.forEach((v) => {
-    const o = get(v.criadoPorId, v.criadoPorEmail);
+    const o = get(v.criadoPorId, v.criadoPorEmail, 'balcao');
     o.total += num(v.total);
     (v.pagamentos || []).forEach((p) => { o.porFormaRaw[p.forma] = num(o.porFormaRaw[p.forma]) + num(p.valor); });
   });
   // festa: o sinal responsabiliza quem vendeu a reserva; cada recebimento
   // posterior responsabiliza quem registrou aquele recebimento
   movsFesta.forEach((m) => {
-    const o = get(m.porId, m.porEmail);
+    const o = get(m.porId, m.porEmail, 'festa');
     o.total += num(m.valor);
     if (m.forma) o.porFormaRaw[m.forma] = num(o.porFormaRaw[m.forma]) + num(m.valor);
   });
   return [...map.values()].map((o) => ({
-    operadorId: o.operadorId, operadorEmail: o.operadorEmail,
+    operadorId: o.operadorId, operadorEmail: o.operadorEmail, origem: o.origem,
     faturado: arred(o.total),
     faturadoPorForma: bucketsDoResumo({ porForma: o.porFormaRaw }),
   }));
@@ -181,21 +219,22 @@ async function getCaixa(id) {
 
 // o operador logado fecha O SEU caixa (declara o que contou). Trava depois:
 // pra mudar, so via solicitarAlteracaoCaixa (aprovacao do Master)
-async function lancarCaixa({ unidade, unidadeNome, data, declarado, observacao, operadorId, operadorEmail, operadorNome }) {
+async function lancarCaixa({ unidade, unidadeNome, data, declarado, observacao, origem, operadorId, operadorEmail, operadorNome }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!data || !DATA_RE.test(data)) throw new Error('Data inválida.');
   if (!operadorId) throw new Error('Operador não identificado (faça login no Zenith).');
   if (await getOne(docId(unidade, data))) throw new Error('O dia já foi fechado. Peça uma alteração ao Master.');
-  const id = caixaDocId(unidade, data, operadorId);
-  if ((await CAIXAS.doc(id).get()).exists) throw new Error('Você já fechou o seu caixa hoje. Para mudar valores, peça uma alteração.');
+  const origemOk = normalizarOrigem(origem);
+  const id = caixaDocId(unidade, data, operadorId, origemOk);
+  if ((await CAIXAS.doc(id).get()).exists) throw new Error(`Você já fechou o seu caixa de ${ORIGEM_LABEL[origemOk]} hoje. Para mudar valores, peça uma alteração.`);
   const declaradoOk = sanitizarTotalDeclarado(declarado);
   const soma = arred(BUCKETS.reduce((s, b) => s + declaradoOk[b], 0));
   const faturados = await faturadoPorOperador(unidade, data);
-  const meu = faturados.find((f) => f.operadorId === operadorId) || { faturado: 0, faturadoPorForma: sanitizarTotalDeclarado({}) };
+  const meu = faturados.find((f) => f.operadorId === operadorId && f.origem === origemOk) || { faturado: 0, faturadoPorForma: sanitizarTotalDeclarado({}) };
   const diferenca = arred(soma - meu.faturado);
   const agora = new Date().toISOString();
   const registro = {
-    id, unidade, unidadeNome: unidadeNome || unidade, data,
+    id, unidade, unidadeNome: unidadeNome || unidade, data, origem: origemOk,
     operadorId, operadorEmail: operadorEmail || null, operadorNome: operadorNome || operadorEmail || null,
     declarado: declaradoOk, somaDeclarado: soma,
     faturadoOperador: meu.faturado, faturadoOperadorPorForma: meu.faturadoPorForma,
@@ -225,10 +264,12 @@ async function estadoDoDia(unidade, data) {
     calcularFaturado(unidade, data),
     faturadoPorOperador(unidade, data),
   ]);
-  const idsComCaixa = new Set(caixas.map((c) => c.operadorId));
+  // pendencia e por operador E POR ORIGEM: quem vendeu no balcão e vendeu
+  // festa precisa fechar os dois caixas
+  const chavesComCaixa = new Set(caixas.map((c) => `${c.operadorId}::${normalizarOrigem(c.origem)}`));
   const pendentes = faturadosOper
-    .filter((f) => f.operadorId && f.faturado > 0 && !idsComCaixa.has(f.operadorId))
-    .map((f) => ({ operadorId: f.operadorId, operadorEmail: f.operadorEmail, faturado: f.faturado }));
+    .filter((f) => f.operadorId && f.faturado > 0 && !chavesComCaixa.has(`${f.operadorId}::${f.origem}`))
+    .map((f) => ({ operadorId: f.operadorId, operadorEmail: f.operadorEmail, origem: f.origem, faturado: f.faturado }));
   const somaCaixas = arred(caixas.reduce((s, c) => s + c.somaDeclarado, 0));
   return {
     unidade, data,
@@ -304,8 +345,8 @@ async function fecharDia({ unidade, unidadeNome, data, observacao, criadoPorId, 
   }
   const estado = await estadoDoDia(unidade, data);
   if (estado.pendentes.length) {
-    const nomes = estado.pendentes.map((p) => p.operadorEmail || p.operadorId).join(', ');
-    throw new Error(`Não dá pra fechar o dia: ${estado.pendentes.length} operador(es) venderam e não fecharam o caixa (${nomes}). Todos precisam fechar primeiro.`);
+    const nomes = estado.pendentes.map((p) => `${p.operadorEmail || p.operadorId} (${ORIGEM_LABEL[normalizarOrigem(p.origem)]})`).join(', ');
+    throw new Error(`Não dá pra fechar o dia: ${estado.pendentes.length} caixa(s) de operador não foram fechados (${nomes}). Todos precisam fechar primeiro.`);
   }
   if (!estado.caixas.length) throw new Error('Nenhum caixa foi fechado ainda hoje.');
 
@@ -323,7 +364,7 @@ async function fecharDia({ unidade, unidadeNome, data, observacao, criadoPorId, 
     faturado, faturadoPorForma, detalhe,
     totalDeclarado: totalDeclaradoOk, somaTotalDeclarado, diferenca,
     // fotografia dos caixas que compuseram o dia (quem declarou o que)
-    caixas: estado.caixas.map((c) => ({ operadorId: c.operadorId, operadorNome: c.operadorNome, operadorEmail: c.operadorEmail, declarado: c.declarado, somaDeclarado: c.somaDeclarado, faturadoOperador: c.faturadoOperador, diferencaOperador: c.diferencaOperador })),
+    caixas: estado.caixas.map((c) => ({ operadorId: c.operadorId, operadorNome: c.operadorNome, operadorEmail: c.operadorEmail, origem: normalizarOrigem(c.origem), declarado: c.declarado, somaDeclarado: c.somaDeclarado, faturadoOperador: c.faturadoOperador, diferencaOperador: c.diferencaOperador })),
     observacao: observacao ? String(observacao).trim().slice(0, 500) : null,
     historico: [],
     criadoPorId, criadoPorEmail, criadoEm: agora, atualizadoEm: agora,
@@ -425,7 +466,7 @@ async function listFechamentos(unidade, dataInicio, dataFim) {
 }
 
 module.exports = {
-  LIMITE_QUEBRA_SALTIVERSO,
+  LIMITE_QUEBRA_SALTIVERSO, ORIGENS, ORIGEM_LABEL,
   calcularFaturado, fecharDia, corrigirFechamento, getOne, previewOuFechado, listFechamentos,
   // caixas individuais por operador
   faturadoPorOperador, lancarCaixa, listCaixasDoDia, getCaixa, estadoDoDia,

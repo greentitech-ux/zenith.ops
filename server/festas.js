@@ -390,7 +390,7 @@ async function reabrirPagamento(id, { porEmail }) {
 // livro-razao `recebimentos` e nunca mais pode ser editado ou removido.
 // Nao deixa lancar mais do que o restante devido; fecha o pagamento de novo
 // e o status vira 'pago' (cobriu tudo) ou 'pagamento-parcial' (ainda falta)
-async function registrarRecebimento(id, { valor, forma, data, porEmail }) {
+async function registrarRecebimento(id, { valor, forma, data, porId, porEmail }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Reserva não encontrada.');
@@ -406,6 +406,10 @@ async function registrarRecebimento(id, { valor, forma, data, porEmail }) {
     valor: v,
     forma: String(forma || '').trim().slice(0, 40),
     data: data || new Date().toISOString().slice(0, 10),
+    // o ID (nao so o email) e o que amarra o recebimento ao caixa de quem
+    // registrou no fechamento do dia - ver faturadoPorOperador em
+    // saltiversoFechamento.js
+    registradoPorId: porId || null,
     registradoPorEmail: porEmail,
     registradoEm: new Date().toISOString(),
   };
@@ -467,7 +471,10 @@ function movimentosDoDia(festa, data) {
     if (soDia(r.data) !== data) return;
     movs.push({
       valor: num(r.valor), forma: r.forma, origem: 'recebimento',
-      porId: null, porEmail: r.registradoPorEmail || null,
+      // recebimentos antigos (lancados antes desse campo existir) vem sem
+      // porId - o fechamento resolve pelo email, nao deixa o dinheiro
+      // ficar sem dono
+      porId: r.registradoPorId || null, porEmail: r.registradoPorEmail || null,
       cliente: (festa.cliente && festa.cliente.nome) || null, festaId: festa.id,
     });
   });

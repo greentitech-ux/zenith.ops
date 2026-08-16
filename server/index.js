@@ -4655,7 +4655,8 @@ app.post('/api/festas/:id/recebimentos', requireSection('festas'), async (req, r
       return res.status(403).json({ error: 'Só o Gerente da unidade ou o Master/Admin pode lançar recebimento.' });
     }
     const registro = await festas.registrarRecebimento(req.params.id, {
-      valor: req.body.valor, forma: req.body.forma, data: req.body.data, porEmail: req.user.email,
+      valor: req.body.valor, forma: req.body.forma, data: req.body.data,
+      porId: req.user.id, porEmail: req.user.email,
     });
     broadcast('festa-atualizada', registro, 'festas');
     res.json(registro);
@@ -5461,13 +5462,21 @@ app.delete('/api/saltiverso/vendas/:id', auth.requireMaster, async (req, res) =>
 // PROPRIO caixa (declarado que ele mesmo digitou + resultado categorico
 // ok/sobrando/faltando) e se o dia ja fechou (sem valores).
 function estadoDoDiaParaOperador(estado, operadorId) {
-  const meu = (estado.caixas || []).find((c) => c.operadorId === operadorId) || null;
+  const podar = (c) => (c ? {
+    id: c.id, origem: c.origem || 'balcao', declarado: c.declarado, somaDeclarado: c.somaDeclarado,
+    resultado: c.resultado, observacao: c.observacao, lancadoEm: c.lancadoEm,
+  } : null);
+  const meus = (estado.caixas || []).filter((c) => c.operadorId === operadorId);
+  const doOrigem = (origem) => podar(meus.find((c) => (c.origem || 'balcao') === origem) || null);
+  const caixaFesta = doOrigem('festa');
   return {
     unidade: estado.unidade, data: estado.data,
-    meuCaixa: meu ? {
-      id: meu.id, declarado: meu.declarado, somaDeclarado: meu.somaDeclarado,
-      resultado: meu.resultado, observacao: meu.observacao, lancadoEm: meu.lancadoEm,
-    } : null,
+    meuCaixa: doOrigem('balcao'),
+    meuCaixaFesta: caixaFesta,
+    // saber que EXISTE dinheiro de festa dele hoje nao entrega valor nenhum
+    // (foi ele mesmo que vendeu) e e o que faz a caixinha de festa aparecer
+    // na tela pra ele declarar
+    temFesta: caixaFesta !== null || (estado.pendentes || []).some((p) => p.operadorId === operadorId && p.origem === 'festa'),
     diaFechado: !!estado.fechamento,
   };
 }
@@ -5492,15 +5501,15 @@ app.get('/api/saltiverso/fechamento', requireSection('parque-loja'), async (req,
 // resultado categorico (o mesmo motivo do estadoDoDiaParaOperador acima).
 app.post('/api/saltiverso/fechamento/caixa', requireSection('parque-loja'), async (req, res) => {
   try {
-    const { unidade, unidadeNome, data, declarado, observacao } = req.body;
+    const { unidade, unidadeNome, data, declarado, observacao, origem } = req.body;
     if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     const caixa = await saltiversoFechamento.lancarCaixa({
-      unidade, unidadeNome, data, declarado, observacao,
+      unidade, unidadeNome, data, declarado, observacao, origem,
       operadorId: req.user.id, operadorEmail: req.user.email, operadorNome: req.user.username || req.user.email,
     });
     broadcast('saltiverso-caixa-lancado', caixa, 'parque-loja');
     if (podeVerFaturadoSaltiverso(req, unidade)) return res.json(caixa);
-    res.json({ id: caixa.id, declarado: caixa.declarado, somaDeclarado: caixa.somaDeclarado, resultado: caixa.resultado, observacao: caixa.observacao, lancadoEm: caixa.lancadoEm });
+    res.json({ id: caixa.id, origem: caixa.origem, declarado: caixa.declarado, somaDeclarado: caixa.somaDeclarado, resultado: caixa.resultado, observacao: caixa.observacao, lancadoEm: caixa.lancadoEm });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
