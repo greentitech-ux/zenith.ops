@@ -4041,12 +4041,20 @@ app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, r
     // aqui não desfaz a venda (ela vale), só deixa a emissão pendente - que
     // é o lado seguro do erro: sobra pendência pro gerente conferir, em vez
     // de sumir com o rastro.
-    if (req.body.emissaoTermoId) {
-      try {
-        await parque.finalizarEmissaoTermo(req.body.emissaoTermoId, registro.id);
-      } catch (err) {
-        console.error('Check-in criado, mas falhou baixar a emissão do termo:', err.message);
+    // baixa pelo id que o front mandou E por atendimento (unidade+CPF/nome+
+    // dia): o id mora numa variavel da aba e some se a pagina recarregar ou
+    // a venda for fechada em outro computador. Sem a baixa por atendimento a
+    // venda acontecia, o cliente pagava, e a pendencia continuava aberta
+    // virando alerta de "termo sem venda".
+    try {
+      const baixadas = await parque.finalizarEmissoesDoAtendimento(registro.id, {
+        unidade, responsavel, dataUtilizacao,
+      }, req.body.emissaoTermoId);
+      if (baixadas.length > 1) {
+        console.log(`Parque: check-in ${registro.id} baixou ${baixadas.length} emissões do mesmo atendimento (reimpressão de termo).`);
       }
+    } catch (err) {
+      console.error('Check-in criado, mas falhou baixar a emissão do termo:', err.message);
     }
     broadcast('parque-checkin-criado', registro, 'parque');
     broadcast('parque-checkin-criado', registro, 'parque-checkin');
