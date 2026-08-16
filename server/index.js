@@ -6986,7 +6986,12 @@ app.delete('/api/abastecimento/:id', auth.requireMaster, async (req, res) => {
 app.get('/api/abastecimento/comparativo-fechamento', auth.requireMaster, async (req, res) => {
   try {
     const unidade = "Domino's Carrinho Aeroporto Recife";
-    const data = ontemBrasiliaISO();
+    // aceita ?data=YYYY-MM-DD pra consultar outro dia (padrao: ontem, o caso
+    // de uso original) - pedido explicito do usuario de poder ver dias
+    // passados, nao so o ultimo
+    const dataPedida = req.query.data;
+    if (dataPedida && !/^\d{4}-\d{2}-\d{2}$/.test(dataPedida)) return res.status(400).json({ error: 'Data inválida.' });
+    const data = dataPedida || ontemBrasiliaISO();
     const regs = await abastecimentoCarrinho.listAll();
     const enviado = {};
     abastecimentoCarrinho.SABORES.forEach((s) => { enviado[s] = 0; });
