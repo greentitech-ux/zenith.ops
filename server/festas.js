@@ -427,8 +427,88 @@ async function remover(id) {
   festasCache.invalidar();
 }
 
+// ---------------------------------------------------------------
+// FESTA NO FECHAMENTO DO DIA
+//
+// Antes o fechamento do Saltiverso somava só entradas do parque + vendas
+// de balcão. O dinheiro de festa entrava no caixa e não aparecia em lugar
+// nenhum da conferência - quem fechava tinha sobra sem explicação.
+//
+// O que conta é o dinheiro que ENTROU no dia, não a data da festa (uma
+// festa de dezembro pode ser paga em agosto). Duas origens:
+//   - o SINAL, na data da venda (quem vendeu a reserva é o responsável)
+//   - cada RECEBIMENTO, na data dele (quem registrou é o responsável)
+// Reserva cancelada não entra.
+// ---------------------------------------------------------------
+const { FORMAS_PAGAMENTO_SPLIT } = require('./parque');
+
+const soDia = (v) => String(v == null ? '' : v).slice(0, 10);
+
+function movimentosDoDia(festa, data) {
+  const movs = [];
+  if (!festa || festa.status === 'cancelado') return movs;
+
+  const s = festa.sinal;
+  if (s && num(s.valor) > 0) {
+    // a data do sinal pode não ter sido preenchida - cai pra data da venda
+    // e, em último caso, pra criação; nunca pra data de USO da festa, que
+    // é no futuro e jogaria a receita no dia errado
+    const dia = soDia(s.data || festa.dataVenda || festa.criadoEm);
+    if (dia === data) {
+      movs.push({
+        valor: num(s.valor), forma: s.forma, origem: 'sinal',
+        porId: festa.criadoPorId || null, porEmail: festa.criadoPorEmail || null,
+        cliente: (festa.cliente && festa.cliente.nome) || null, festaId: festa.id,
+      });
+    }
+  }
+
+  (festa.recebimentos || []).forEach((r) => {
+    if (soDia(r.data) !== data) return;
+    movs.push({
+      valor: num(r.valor), forma: r.forma, origem: 'recebimento',
+      porId: null, porEmail: r.registradoPorEmail || null,
+      cliente: (festa.cliente && festa.cliente.nome) || null, festaId: festa.id,
+    });
+  });
+  return movs;
+}
+
+// mesmo formato que parque.resumoDoDia/saltiversoVendas.resumoDoDia, pro
+// bucketsDoResumo do fechamento consumir sem tratamento especial
+async function resumoDoDia(unidade, data) {
+  const todas = await listAll();
+  const porForma = {};
+  FORMAS_PAGAMENTO_SPLIT.forEach((f) => { porForma[f] = 0; });
+  let total = 0;
+  let movimentos = 0;
+  todas.filter((f) => f.unidade === unidade).forEach((f) => {
+    movimentosDoDia(f, data).forEach((m) => {
+      total += m.valor;
+      movimentos += 1;
+      // forma fora da lista conhecida vira 'outros' no balde do fechamento
+      // em vez de sumir da soma - dinheiro nunca some por causa de rótulo
+      if (FORMAS_PAGAMENTO_SPLIT.includes(m.forma)) porForma[m.forma] += m.valor;
+      else porForma.voucher += m.valor;
+    });
+  });
+  FORMAS_PAGAMENTO_SPLIT.forEach((f) => { porForma[f] = Math.round(porForma[f] * 100) / 100; });
+  return { total: Math.round(total * 100) / 100, porForma, movimentos };
+}
+
+// quem vendeu/recebeu fica responsável no fechamento por operador
+async function movimentosPorOperador(unidade, data) {
+  const todas = await listAll();
+  const out = [];
+  todas.filter((f) => f.unidade === unidade).forEach((f) => {
+    movimentosDoDia(f, data).forEach((m) => out.push(m));
+  });
+  return out;
+}
+
 module.exports = {
   STATUS_VALIDOS, valorFesta, totalRecebido, restanteDevido,
+  resumoDoDia, movimentosPorOperador, movimentosDoDia,
   getTabela, salvarTabela,
   criar, listAll, listByUnidades, getOne, atualizar, remover,
   reabrirPagamento, registrarRecebimento,
