@@ -57,6 +57,14 @@
     cursor:pointer;font-size:17px;color:#7d8896;border-radius:8px;}
   .szc-anexo-btn:hover{color:#5cc8ff;}
   .szc-anexo-btn.szc-anexo-tem{color:#5cc8ff;}
+  /* anexo no FORMULARIO DE ABERTURA: quem abre o chamado normalmente já está
+     com o print na mão - mandar depois numa segunda mensagem se perdia */
+  .szc-anexo-abrir{display:flex;align-items:center;gap:8px;width:100%;padding:9px 11px;margin-bottom:10px;
+    border:1px dashed #2c3542;border-radius:8px;background:#12161b;color:#7d8896;font-size:12.5px;
+    cursor:pointer;transition:border-color .15s ease,color .15s ease;}
+  .szc-anexo-abrir:hover{border-color:#5cc8ff;color:#e7ecf1;}
+  .szc-anexo-abrir.szc-anexo-tem{border-style:solid;border-color:#5cc8ff;color:#e7ecf1;}
+  .szc-anexo-abrir span:last-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .szc-msg img.szc-anexo-img{max-width:180px;max-height:180px;border-radius:8px;border:1px solid #232a33;margin-top:4px;display:block;}
   .szc-msg a.szc-anexo-arq{display:inline-block;margin-top:4px;color:#5cc8ff;font-size:12px;}
   /* cabeça de robo (Beniboy) dentro do botao - olhos brilham/piscam, bracos acenam */
@@ -298,9 +306,24 @@
       <select class="szc-input" id="szc-assunto">${ASSUNTOS.map((a) => `<option value="${esc(a)}" ${a === 'Acesso/Senha' ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select>
       <div class="szc-label">Mensagem</div>
       <textarea class="szc-textarea" id="szc-texto" maxlength="1000" placeholder="ex: não consigo entrar no sistema"></textarea>
+      <div class="szc-label">Anexo (opcional)</div>
+      <label class="szc-anexo-abrir" id="szc-inicial-anexo-label">
+        <span id="szc-inicial-anexo-icone">📎</span>
+        <span id="szc-inicial-anexo-nome">Anexar print, foto ou PDF</span>
+        <input type="file" id="szc-inicial-anexo" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden>
+      </label>
       <button type="button" class="szc-enviar" id="szc-iniciar">Iniciar conversa</button>
       <div class="szc-erro szc-hidden" id="szc-erro-inicial"></div>`;
     corpo.querySelector('#szc-iniciar').addEventListener('click', iniciarConversa);
+    // mostra o nome do arquivo escolhido - sem isso não dá pra saber se o
+    // clique pegou, e a pessoa acaba mandando de novo
+    const inicialAnexo = corpo.querySelector('#szc-inicial-anexo');
+    inicialAnexo.addEventListener('change', () => {
+      const arq = inicialAnexo.files[0];
+      corpo.querySelector('#szc-inicial-anexo-icone').textContent = arq ? '✅' : '📎';
+      corpo.querySelector('#szc-inicial-anexo-nome').textContent = arq ? arq.name : 'Anexar print, foto ou PDF';
+      corpo.querySelector('#szc-inicial-anexo-label').classList.toggle('szc-anexo-tem', !!arq);
+    });
   }
 
   async function iniciarConversa() {
@@ -317,15 +340,23 @@
       // decide sozinho o que fazer com isso (ex: liberar consulta de pedido
       // pro Beniboy); rota publica, nunca exige esse header
       const authToken = localStorage.getItem('authToken');
-      const headers = { 'Content-Type': 'application/json' };
+      const headers = {};
       if (authToken) headers.Authorization = 'Bearer ' + authToken;
-      const r = await rawFetch('/api/suporte-chat/iniciar', {
-        method: 'POST', headers,
-        // lojaContexto: setado pela pagina de atendimento (atendimento.html,
-        // ?unidade=) ANTES de carregar esse script - o Beniboy ja sabe a
-        // loja sem precisar perguntar (ver window.__zenithLojaContexto)
-        body: JSON.stringify({ nome, contato, texto, assunto, lojaContexto: window.__zenithLojaContexto || null }),
-      });
+      // FormData sempre (com ou sem arquivo), pra abertura usar UM caminho só
+      // - o Content-Type fica por conta do navegador, que precisa montar o
+      // boundary do multipart; definir na mão aqui quebraria o upload
+      const fd = new FormData();
+      fd.append('nome', nome);
+      fd.append('contato', contato);
+      fd.append('texto', texto);
+      fd.append('assunto', assunto);
+      // lojaContexto: setado pela pagina de atendimento (atendimento.html,
+      // ?unidade=) ANTES de carregar esse script - o Beniboy ja sabe a
+      // loja sem precisar perguntar (ver window.__zenithLojaContexto)
+      if (window.__zenithLojaContexto) fd.append('lojaContexto', window.__zenithLojaContexto);
+      const arquivoInicial = corpo.querySelector('#szc-inicial-anexo');
+      if (arquivoInicial && arquivoInicial.files[0]) fd.append('anexo', arquivoInicial.files[0]);
+      const r = await rawFetch('/api/suporte-chat/iniciar', { method: 'POST', headers, body: fd });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || 'Não foi possível iniciar a conversa.');
       localStorage.setItem(LS_ID, data.id);

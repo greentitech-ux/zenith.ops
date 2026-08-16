@@ -223,6 +223,13 @@ function metricasDeRede(atual, rede) {
     campos.redeHistorico = redeDiagnostico.virarDia(bucketAtual, (atual && atual.redeHistorico) || [], hoje);
   }
   campos.redeDia = redeDiagnostico.acumular(viraDia ? null : bucketAtual, amostra, hoje);
+  // serie por hora (ver redeDiagnostico): e o que permite ver se duas lojas
+  // ficaram lentas ao MESMO tempo. Vai na mesma escrita, sem custo novo.
+  if (amostra) {
+    campos.redeHoras = redeDiagnostico.acumularHora(
+      (atual && atual.redeHoras) || [], amostra, redeDiagnostico.horaDe(Date.now()),
+    );
+  }
   return campos;
 }
 
@@ -694,7 +701,13 @@ async function varrerAlertas() {
 async function diagnosticoRede(dia) {
   const alvo = dia || new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
   const docs = (await cache.cached()).map(comOnline).map(semSegredo);
-  return { dia: alvo, computadores: redeDiagnostico.ranking(docs, alvo) };
+  return {
+    dia: alvo,
+    // a mediana da frota vai junto: e a referencia que o painel usa pra dizer
+    // "esta maquina esta fora da curva" em vez de acusar o servidor
+    frota: redeDiagnostico.baselineDaFrota(docs, alvo),
+    computadores: redeDiagnostico.ranking(docs, alvo),
+  };
 }
 
 module.exports = {

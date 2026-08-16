@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Análise de Rede — NOC Zenith</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --warn:#f2b33d; --bad:#ff5c5c; --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+
+    /* Paleta categórica (coluna dark do sistema de dataviz), validada contra
+       ESTA superfície (#12161b) e não contra a padrão: banda de luminosidade,
+       piso de croma, separação para daltonismo (pior par ΔE 8.4) e contraste
+       - todas passaram. Não trocar hex sem revalidar. */
+    --serie-1:#3987e5;  /* mediana da frota */
+    --serie-2:#d95926;
+    --serie-3:#199e70;
+    --serie-4:#c98500;
+    /* status é reservado - nunca vira "série 5" */
+    --st-critico:#d03b3b; --st-alerta:#fab219; --st-bom:#0ca30c;
+    /* cromo do gráfico: recessivo, sempre sólido (nunca tracejado) */
+    --grade:#2c2c2a; --eixo:#383835; --tinta-fraca:#898781;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;overflow-x:clip;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 16px;padding:12px 32px;border-bottom:1px solid var(--line);}
+  .header-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+  .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  .hidden{display:none!important;}
+  .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;}
+
+  .intro{font-size:12.5px;color:var(--muted);line-height:1.6;max-width:78ch;margin-bottom:20px;}
+  .intro b{color:var(--text);font-weight:600;}
+
+  /* ---- stat tiles: quando a resposta é UM número, não é gráfico ---- */
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:22px;}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;}
+  .tile-rot{font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);}
+  .tile-val{font-size:26px;font-weight:700;margin-top:4px;line-height:1.1;}
+  .tile-sub{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.4;}
+  .tile-val.critico{color:var(--st-critico);} .tile-val.alerta{color:var(--st-alerta);} .tile-val.bom{color:var(--st-bom);}
+
+  .secao{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px;}
+  .secao-cab{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:2px;}
+  .secao h2{font-size:14.5px;font-weight:700;margin:0;}
+  .secao-sub{font-size:11.5px;color:var(--muted);line-height:1.55;margin:4px 0 14px;max-width:76ch;}
+  .secao-sub b{color:var(--text);font-weight:600;}
+
+  /* legenda: sempre presente para 2+ séries, com marca colorida ao lado de
+     texto em tinta normal (a cor nunca vai no texto) */
+  .legenda{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px;}
+  .leg-item{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text);}
+  .leg-marca{width:14px;height:3px;border-radius:2px;flex:none;}
+  .leg-item.espesso .leg-marca{height:5px;}
+
+  .grafico-wrap{overflow-x:auto;}
+  svg.gr{display:block;width:100%;height:auto;touch-action:pan-y;}
+  .gr text{font-family:var(--sans);}
+  .gr .tick{fill:var(--tinta-fraca);font-size:10px;}
+  .gr .grade{stroke:var(--grade);stroke-width:1;}
+  .gr .eixo{stroke:var(--eixo);stroke-width:1;}
+  .gr .linha{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round;}
+  .gr .linha.destaque{stroke-width:3.5;}
+  .gr .rotulo{font-size:10.5px;font-weight:600;}
+  .gr .faixa-ruim{fill:var(--st-critico);opacity:.07;}
+
+  /* crosshair + tooltip: um gráfico em HTML é interativo por padrão */
+  .gr .cruz{stroke:var(--tinta-fraca);stroke-width:1;}
+  .tt{position:fixed;z-index:60;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11.5px;pointer-events:none;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:260px;}
+  .tt-h{font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:5px;}
+  .tt-l{display:flex;align-items:center;gap:6px;margin-top:2px;white-space:nowrap;}
+  .tt-m{width:9px;height:9px;border-radius:2px;flex:none;}
+  .tt-v{font-family:var(--mono);margin-left:auto;padding-left:10px;}
+
+  /* small multiples: mesma escala em todos, pior primeiro - é aqui que
+     "caíram juntos" vira óbvio */
+  .mini-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;}
+  .mini{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;}
+  .mini-cab{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:2px;}
+  .mini-nome{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .mini-val{font-family:var(--mono);font-size:11px;flex:none;}
+  .mini-val.critico{color:var(--st-critico);} .mini-val.alerta{color:var(--st-alerta);} .mini-val.bom{color:var(--st-bom);}
+  .mini-uni{font-size:10px;color:var(--muted);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+  table.tab{width:100%;border-collapse:collapse;font-size:12px;}
+  table.tab th,table.tab td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);}
+  table.tab th{font-family:var(--mono);font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:400;}
+  table.tab td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums;}
+  .vazio{font-size:12.5px;color:var(--muted);padding:18px 0;line-height:1.6;}
+  @media(max-width:640px){
+    body{padding:16px 14px 40px;}
+    header{margin:-16px -14px 16px;padding:12px 14px;}
+    h1{font-size:17px;}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="header-top">
+    <button class="hamburger-btn" id="nav-toggle" aria-label="Menu">☰</button>
+    <div style="flex:1;min-width:0;">
+      <div class="eyebrow">Zenith Ops · Solutions TI Tech</div>
+      <h1>📈 Análise de Rede</h1>
+    </div>
+  </div>
+  <div class="header-nav">
+    <span style="font-family:var(--mono);font-size:10px;color:var(--muted);" id="atualizado"></span>
+    <a class="back" href="/loja-status.html">← NOC Zenith</a>
+    <button class="back" onclick="carregar()">🔄 Atualizar</button>
+  </div>
+</header>
+
+<div id="sem-acesso" class="hidden vazio">Você não tem acesso a esta página.</div>
+
+<div id="raiz" class="hidden">
+  <div class="intro">
+    Tudo aqui vem da medição que os próprios computadores já mandam a cada 25s — nenhuma sonda externa, nenhum
+    dado estimado. A pergunta que esta página responde é <b>uma só</b>: quando ficou lento, ficou lento
+    <b>só numa loja</b> ou <b>em todas ao mesmo tempo</b>? Uma loja lenta sozinha é problema do link dela.
+    Várias lojas lentas na mesma hora, com links independentes, é problema do servidor.
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="secao">
+    <div class="secao-cab"><h2>Latência por hora</h2></div>
+    <div class="secao-sub">
+      Mediana da frota em destaque, e as piores lojas por cima. Se as linhas <b>sobem juntas</b>, é o servidor.
+      Se só uma sobe enquanto a mediana fica baixa, é o link daquela loja. A faixa vermelha marca 1000ms —
+      acima disso a lentidão já é percebida por quem está operando.
+    </div>
+    <div class="legenda" id="legenda"></div>
+    <div class="grafico-wrap"><svg class="gr" id="gr-linhas" viewBox="0 0 860 300" preserveAspectRatio="xMidYMid meet"></svg></div>
+    <div id="gr-vazio" class="vazio hidden"></div>
+  </div>
+
+  <div class="secao">
+    <div class="secao-cab"><h2>Cada computador, mesma escala</h2></div>
+    <div class="secao-sub">
+      Um quadro por computador, todos na <b>mesma escala vertical</b> — é o que torna a comparação honesta.
+      Passe o olho na coluna: picos alinhados na mesma hora apontam causa comum.
+    </div>
+    <div class="mini-grid" id="mini-grid"></div>
+  </div>
+
+  <div class="secao">
+    <div class="secao-cab"><h2>Os números</h2></div>
+    <div class="secao-sub">A mesma informação em tabela, para conferir, copiar ou colar num chamado.</div>
+    <div style="overflow-x:auto;">
+      <table class="tab" id="tabela">
+        <thead><tr>
+          <th>Computador</th><th>Unidade</th><th class="num">Latência méd.</th><th class="num">Pico</th>
+          <th class="num">Roteador</th><th class="num">Internet</th><th class="num">Quedas hoje</th><th>Veredito</th>
+        </tr></thead>
+        <tbody id="tabela-corpo"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="tt hidden" id="tt"></div>
+
+<script>
+const CORES = ['var(--serie-1)','var(--serie-2)','var(--serie-3)','var(--serie-4)'];
+const LIMITE_LENTO = 1000;
+let DADOS = null;
+
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const mediana = (a) => { if(!a.length) return null; const s=[...a].sort((x,y)=>x-y); return s[Math.floor(s.length/2)]; };
+const horaCurta = (h) => (h||'').slice(11,13) + 'h';
+
+async function carregar(){
+  try{
+    const r = await fetch('/api/loja-status/rede');
+    if(!r.ok){ document.getElementById('sem-acesso').classList.remove('hidden'); return; }
+    DADOS = await r.json();
+    document.getElementById('atualizado').textContent = 'atualizado ' + new Date().toLocaleTimeString('pt-BR');
+    render();
+  }catch(e){ /* mantém a última carga na tela */ }
+}
+
+// Junta as séries por hora. Só entram computadores COM medição - misturar
+// quem não mede baixaria a mediana e faria o servidor parecer melhor do que é.
+function montarSeries(){
+  const comSerie = (DADOS.computadores||[]).filter(c => c.serie && c.serie.length);
+  const horas = [...new Set(comSerie.flatMap(c => c.serie.map(p => p.hora)))].sort().slice(-24);
+  const porComputador = comSerie.map(c => {
+    const mapa = new Map(c.serie.map(p => [p.hora, p]));
+    return { ...c, pontos: horas.map(h => (mapa.has(h) ? mapa.get(h).media : null)) };
+  });
+  const frota = horas.map((h,i) => mediana(porComputador.map(c => c.pontos[i]).filter(v => v !== null)));
+  return { horas, porComputador, frota };
+}
+
+function render(){
+  const { horas, porComputador, frota } = montarSeries();
+  renderTiles(porComputador, frota);
+  renderTabela();
+  if(!horas.length){
+    document.getElementById('gr-linhas').classList.add('hidden');
+    document.getElementById('legenda').classList.add('hidden');
+    const v = document.getElementById('gr-vazio');
+    v.classList.remove('hidden');
+    v.textContent = 'Ainda não há medição por hora. Os computadores começam a reportar sozinhos assim que o NOCZenith se atualizar (até ~1h) ou assim que a tela da loja recarregar — a série vai se formando hora a hora a partir daí.';
+    document.getElementById('mini-grid').innerHTML = '';
+    return;
+  }
+  document.getElementById('gr-linhas').classList.remove('hidden');
+  document.getElementById('legenda').classList.remove('hidden');
+  document.getElementById('gr-vazio').classList.add('hidden');
+  renderLinhas(horas, porComputador, frota);
+  renderMini(horas, porComputador);
+}
+
+function renderTiles(porComputador, frota){
+  const atual = frota.filter(v=>v!==null).slice(-1)[0] || null;
+  const medidos = porComputador.length;
+  const pior = (DADOS.computadores||[]).filter(c=>c.nota!==null).sort((a,b)=>a.nota-b.nota)[0];
+  const quedas = (DADOS.computadores||[]).reduce((s,c)=>s+(c.quedasNoDia||0),0);
+  const classe = (ms) => ms===null ? '' : (ms>LIMITE_LENTO ? 'critico' : (ms>400 ? 'alerta' : 'bom'));
+  document.getElementById('tiles').innerHTML = `
+    <div class="tile"><div class="tile-rot">Mediana da frota</div>
+      <div class="tile-val ${classe(atual)}">${atual===null?'—':atual+'ms'}</div>
+      <div class="tile-sub">última hora medida · ${medidos} computador(es) reportando</div></div>
+    <div class="tile"><div class="tile-rot">Pior computador</div>
+      <div class="tile-val ${pior?(pior.nota<40?'critico':(pior.nota<65?'alerta':'bom')):''}">${pior?pior.nota+'/100':'—'}</div>
+      <div class="tile-sub">${pior?escapeHtml(pior.nome)+' · '+escapeHtml(pior.unidadeNome||pior.codigo):'sem medição'}</div></div>
+    <div class="tile"><div class="tile-rot">Quedas hoje</div>
+      <div class="tile-val ${quedas>5?'critico':(quedas>0?'alerta':'bom')}">${quedas}</div>
+      <div class="tile-sub">somando todos os computadores</div></div>
+    <div class="tile"><div class="tile-rot">Sem medição</div>
+      <div class="tile-val">${(DADOS.computadores||[]).filter(c=>c.nota===null).length}</div>
+      <div class="tile-sub">aguardando o NOCZenith atualizar</div></div>`;
+}
+
+function renderLinhas(horas, porComputador, frota){
+  const L=52, R=18, T=14, B=30, W=860, H=300;
+  const larg = W-L-R, alt = H-T-B;
+  // as 3 piores por latência média do dia; o resto fica fora do overlay (vai
+  // nos small multiples) - nunca gerar cor nova pra uma 4a, 5a série
+  const destaques = porComputador
+    .filter(c => c.resumo && c.resumo.latenciaMedia !== null)
+    .sort((a,b) => b.resumo.latenciaMedia - a.resumo.latenciaMedia).slice(0,3);
+
+  const todos = [...frota.filter(v=>v!==null), ...destaques.flatMap(c=>c.pontos.filter(v=>v!==null))];
+  const maxY = Math.max(LIMITE_LENTO*1.15, ...(todos.length?todos:[LIMITE_LENTO]))*1.05;
+  const x = (i) => L + (horas.length===1 ? larg/2 : (i/(horas.length-1))*larg);
+  const y = (v) => T + alt - (v/maxY)*alt;
+  const caminho = (pts) => {
+    let d='', abriu=false;
+    pts.forEach((v,i)=>{ if(v===null){abriu=false;return;} d += (abriu?'L':'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1) + ' '; abriu=true; });
+    return d.trim();
+  };
+
+  const ticksY = [0, maxY/2, maxY].map(v=>Math.round(v));
+  let svg = '';
+  // faixa do limiar: contexto, não decoração
+  svg += `<rect class="faixa-ruim" x="${L}" y="${T}" width="${larg}" height="${(y(LIMITE_LENTO)-T).toFixed(1)}"></rect>`;
+  ticksY.forEach(v=>{
+    svg += `<line class="grade" x1="${L}" y1="${y(v).toFixed(1)}" x2="${L+larg}" y2="${y(v).toFixed(1)}"></line>`;
+    svg += `<text class="tick" x="${L-8}" y="${(y(v)+3.5).toFixed(1)}" text-anchor="end">${v}ms</text>`;
+  });
+  svg += `<line class="eixo" x1="${L}" y1="${T+alt}" x2="${L+larg}" y2="${T+alt}"></line>`;
+  const passo = Math.max(1, Math.ceil(horas.length/8));
+  horas.forEach((h,i)=>{ if(i%passo) return;
+    svg += `<text class="tick" x="${x(i).toFixed(1)}" y="${T+alt+16}" text-anchor="middle">${horaCurta(h)}</text>`; });
+
+  destaques.forEach((c,idx)=>{
+    svg += `<path class="linha" d="${caminho(c.pontos)}" stroke="${CORES[idx+1]}"></path>`;
+  });
+  svg += `<path class="linha destaque" d="${caminho(frota)}" stroke="${CORES[0]}"></path>`;
+
+  // rótulo direto só no fim da mediana (nunca um número em cada ponto)
+  const ultimo = frota.map((v,i)=>[v,i]).filter(([v])=>v!==null).slice(-1)[0];
+  if(ultimo) svg += `<text class="rotulo" x="${(x(ultimo[1])-6).toFixed(1)}" y="${(y(ultimo[0])-8).toFixed(1)}" text-anchor="end" fill="${CORES[0]}">${ultimo[0]}ms</text>`;
+
+  svg += `<line class="cruz hidden" id="cruz" x1="0" y1="${T}" x2="0" y2="${T+alt}"></line>`;
+  svg += `<rect id="captura" x="${L}" y="${T}" width="${larg}" height="${alt}" fill="transparent"></rect>`;
+  const el = document.getElementById('gr-linhas');
+  el.innerHTML = svg;
+
+  document.getElementById('legenda').innerHTML =
+    `<span class="leg-item espesso"><span class="leg-marca" style="background:${CORES[0]}"></span>Mediana da frota</span>` +
+    destaques.map((c,i)=>`<span class="leg-item"><span class="leg-marca" style="background:${CORES[i+1]}"></span>${escapeHtml(c.nome)}</span>`).join('');
+
+  ligarHover(el, { horas, frota, destaques, x, L, larg });
+}
+
+function ligarHover(el, ctx){
+  const tt = document.getElementById('tt');
+  const cruz = el.querySelector('#cruz');
+  const captura = el.querySelector('#captura');
+  const esconder = () => { tt.classList.add('hidden'); cruz.classList.add('hidden'); };
+  const mover = (ev) => {
+    const p = ev.touches ? ev.touches[0] : ev;
+    const cx = el.getBoundingClientRect();
+    const escala = 860 / cx.width;
+    const vx = (p.clientX - cx.left) * escala;
+    const i = Math.max(0, Math.min(ctx.horas.length-1,
+      Math.round(((vx - ctx.L) / ctx.larg) * (ctx.horas.length-1))));
+    cruz.setAttribute('x1', ctx.x(i).toFixed(1));
+    cruz.setAttribute('x2', ctx.x(i).toFixed(1));
+    cruz.classList.remove('hidden');
+    const linhas = [`<div class="tt-l"><span class="tt-m" style="background:${CORES[0]}"></span>Mediana da frota<span class="tt-v">${ctx.frota[i]===null?'—':ctx.frota[i]+'ms'}</span></div>`]
+      .concat(ctx.destaques.map((c,k)=>`<div class="tt-l"><span class="tt-m" style="background:${CORES[k+1]}"></span>${escapeHtml(c.nome)}<span class="tt-v">${c.pontos[i]===null?'—':c.pontos[i]+'ms'}</span></div>`));
+    tt.innerHTML = `<div class="tt-h">${escapeHtml(ctx.horas[i].replace('T',' '))}h</div>` + linhas.join('');
+    tt.classList.remove('hidden');
+    const larguraTt = tt.offsetWidth;
+    tt.style.left = Math.min(window.innerWidth - larguraTt - 10, p.clientX + 14) + 'px';
+    tt.style.top = Math.max(10, p.clientY - 20) + 'px';
+  };
+  captura.addEventListener('mousemove', mover);
+  captura.addEventListener('touchmove', mover, { passive: true });
+  captura.addEventListener('mouseleave', esconder);
+  captura.addEventListener('touchend', esconder);
+}
+
+function renderMini(horas, porComputador){
+  // MESMA escala em todos: é o que permite comparar de relance. Escalar cada
+  // um pelo próprio máximo faria uma loja de 120ms parecer tão ruim quanto
+  // uma de 1500ms.
+  const maxGlobal = Math.max(LIMITE_LENTO, ...porComputador.flatMap(c=>c.pontos.filter(v=>v!==null)));
+  const ordenados = [...porComputador].sort((a,b)=>(b.resumo.latenciaMedia||0)-(a.resumo.latenciaMedia||0));
+  const W=210,H=54;
+  document.getElementById('mini-grid').innerHTML = ordenados.map(c=>{
+    const x=(i)=> horas.length===1 ? W/2 : (i/(horas.length-1))*W;
+    const y=(v)=> H - (v/maxGlobal)*H;
+    let d='',abriu=false;
+    c.pontos.forEach((v,i)=>{ if(v===null){abriu=false;return;} d+=(abriu?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)+' '; abriu=true; });
+    const m = c.resumo.latenciaMedia;
+    const cls = m>LIMITE_LENTO?'critico':(m>400?'alerta':'bom');
+    const cor = m>LIMITE_LENTO?'var(--st-critico)':(m>400?'var(--st-alerta)':'var(--serie-1)');
+    return `<div class="mini">
+      <div class="mini-cab"><span class="mini-nome">${escapeHtml(c.nome)}</span><span class="mini-val ${cls}">${m}ms</span></div>
+      <div class="mini-uni">${escapeHtml(c.unidadeNome||c.codigo)}</div>
+      <svg class="gr" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:54px;">
+        <line class="grade" x1="0" y1="${y(LIMITE_LENTO).toFixed(1)}" x2="${W}" y2="${y(LIMITE_LENTO).toFixed(1)}"></line>
+        <path class="linha" d="${d.trim()}" stroke="${cor}"></path>
+      </svg>
+    </div>`;
+  }).join('') || '<div class="vazio">Nenhum computador com série por hora ainda.</div>';
+}
+
+function renderTabela(){
+  const num = (v,suf) => v===null||v===undefined ? '—' : v+(suf||'');
+  document.getElementById('tabela-corpo').innerHTML = (DADOS.computadores||[]).map(c=>{
+    const r = c.resumo||{};
+    return `<tr>
+      <td>${escapeHtml(c.nome)}</td>
+      <td>${escapeHtml(c.unidadeNome||c.codigo)}</td>
+      <td class="num">${num(r.latenciaMedia,'ms')}</td>
+      <td class="num">${num(r.latenciaMax,'ms')}</td>
+      <td class="num">${num(r.gatewayMedia,'ms')}</td>
+      <td class="num">${num(r.wanMedia,'ms')}</td>
+      <td class="num">${c.quedasNoDia||0}</td>
+      <td>${escapeHtml((c.veredito&&c.veredito.titulo)||'—')}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="vazio">Nenhum computador cadastrado.</td></tr>';
+}
+
+(async function inicio(){
+  try{
+    const me = await fetch('/api/me').then(r=>r.json());
+    const secoes = (me.permissions && me.permissions.sections) || [];
+    if(!(me.role === 'master' || me.isAdmin || secoes.includes('suporte'))){
+      document.getElementById('sem-acesso').classList.remove('hidden');
+      return;
+    }
+    document.getElementById('raiz').classList.remove('hidden');
+    await carregar();
+    setInterval(() => { if(!document.hidden) carregar(); }, 120000);
+  }catch(e){ document.getElementById('sem-acesso').classList.remove('hidden'); }
+})();
+</script>
+<script src="/nav-menu.js"></script>
+</body>
+</html>

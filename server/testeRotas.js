@@ -111,6 +111,32 @@ function pedir(caminho, headers = {}) {
   });
 }
 
+// POST multipart de verdade (o widget do chat passou a mandar assim SEMPRE,
+// com ou sem arquivo - o risco a cobrir e a abertura sem anexo ter quebrado)
+function postarMultipart(caminho, campos, arquivo) {
+  const B = '----zenithteste' + Math.random().toString(36).slice(2);
+  const partes = [];
+  Object.entries(campos).forEach(([k, v]) => {
+    partes.push(Buffer.from(`--${B}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
+  });
+  if (arquivo) {
+    partes.push(Buffer.from(`--${B}\r\nContent-Disposition: form-data; name="anexo"; filename="${arquivo.nome}"\r\nContent-Type: ${arquivo.tipo}\r\n\r\n`));
+    partes.push(arquivo.buffer);
+    partes.push(Buffer.from('\r\n'));
+  }
+  partes.push(Buffer.from(`--${B}--\r\n`));
+  const corpo = Buffer.concat(partes);
+  return new Promise((resolve) => {
+    const req = http.request({
+      host: '127.0.0.1', port: 8899, path: caminho, method: 'POST',
+      headers: { 'Content-Type': `multipart/form-data; boundary=${B}`, 'Content-Length': corpo.length },
+    }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, corpo: b })); });
+    req.on('error', (e) => resolve({ status: 0, corpo: e.message }));
+    req.setTimeout(5000, () => { req.destroy(); resolve({ status: -1, corpo: 'TIMEOUT' }); });
+    req.end(corpo);
+  });
+}
+
 setTimeout(async () => {
   // sessão de Master direto no módulo de auth (não passa pelo login)
   // login de verdade (ensureMaster criou o Master no Firestore falso no boot)
@@ -157,6 +183,22 @@ setTimeout(async () => {
     if (!ok) ruins += 1;
     console.log(`${ok ? '✓' : '✗'} ${nome}: HTTP ${r.status} ${r.corpo.slice(0, 120)}`);
   }
+  // --- abertura do chat de suporte ---
+  const semAnexo = await postarMultipart('/api/suporte-chat/iniciar',
+    { nome: 'Well', contato: 'well@x.com', texto: 'não consigo entrar', assunto: 'Acesso/Senha' });
+  const okSem = semAnexo.status === 200 && /"token"/.test(semAnexo.corpo);
+  if (!okSem) ruins += 1;
+  console.log(`${okSem ? '✓' : '✗'} abrir chat SEM anexo (multipart): HTTP ${semAnexo.status} ${semAnexo.corpo.slice(0, 90)}`);
+
+  // arquivo de tipo proibido tem que ser RECUSADO na abertura, igual já é na
+  // mensagem - o formulário é público, sem login
+  const proibido = await postarMultipart('/api/suporte-chat/iniciar',
+    { nome: 'Well', contato: 'well@x.com', texto: 'segue anexo', assunto: 'Acesso/Senha' },
+    { nome: 'virus.exe', tipo: 'application/x-msdownload', buffer: Buffer.from('MZ') });
+  const okProibido = proibido.status === 400;
+  if (!okProibido) ruins += 1;
+  console.log(`${okProibido ? '✓' : '✗'} anexo de tipo proibido é recusado: HTTP ${proibido.status} ${proibido.corpo.slice(0, 90)}`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

@@ -123,6 +123,53 @@ function acumular(bucket, amostra, dia) {
   return b;
 }
 
+// ---- serie por hora ----------------------------------------------------
+//
+// O agregado do dia responde "quem esta ruim", mas nao responde "ruim QUANDO"
+// - e sem isso nao da pra saber se duas lojas ficaram lentas ao MESMO tempo
+// (servidor) ou em horas diferentes (cada uma por um motivo). Essa e a
+// pergunta que separa culpa de verdade, entao precisa de eixo do tempo.
+//
+// Cabe no mesmo documento e na mesma escrita do heartbeat: 48 baldes de 6
+// numeros. Nao ha custo novo de Firestore.
+const HORAS_MAX = 48;
+
+function horaDe(ts, tz = 'America/Sao_Paulo') {
+  const d = new Date(ts);
+  const dia = d.toLocaleDateString('sv-SE', { timeZone: tz });
+  const h = d.toLocaleTimeString('en-GB', { timeZone: tz, hour: '2-digit', hour12: false });
+  return `${dia}T${h.slice(0, 2)}`;
+}
+
+function acumularHora(horas, amostra, horaAtual) {
+  const lista = Array.isArray(horas) ? [...horas] : [];
+  if (!amostra) return lista.slice(-HORAS_MAX);
+  let balde = lista.length && lista[lista.length - 1].h === horaAtual ? { ...lista[lista.length - 1] } : null;
+  if (balde) lista[lista.length - 1] = balde;
+  else { balde = { h: horaAtual, n: 0, soma: 0, max: 0, lentas: 0, falhas: 0 }; lista.push(balde); }
+
+  if (amostra.latenciaMs !== null) {
+    balde.n += 1;
+    balde.soma += amostra.latenciaMs;
+    if (amostra.latenciaMs > balde.max) balde.max = amostra.latenciaMs;
+    if (amostra.latenciaMs > LATENCIA_LENTA_MS) balde.lentas += 1;
+  }
+  return lista.slice(-HORAS_MAX);
+}
+
+// devolve pronto pro grafico: media por hora, sem os somatorios crus
+function serieHoraria(horas) {
+  return (Array.isArray(horas) ? horas : [])
+    .filter((b) => b && b.n > 0)
+    .map((b) => ({
+      hora: b.h,
+      media: Math.round(b.soma / b.n),
+      max: b.max || null,
+      amostras: b.n,
+      lentas: b.lentas || 0,
+    }));
+}
+
 // Vira o dia: fecha o bucket atual no historico e comeca um novo. Chamado
 // pelo heartbeat quando percebe que o dia mudou.
 function virarDia(bucketAtual, historico, dia) {
@@ -231,7 +278,12 @@ function pontuar(resumo, quedasNoDia) {
 // A parte que vira acao. Uma nota baixa sozinha nao diz com quem reclamar;
 // o que decide isso e comparar o salto ate o gateway (rede da loja) com o
 // salto ate a internet (operadora).
-function veredito(resumo) {
+// `frota` = { baselineMs, medidos } - a mediana de latencia das OUTRAS
+// maquinas. Sem isso nao da pra separar "o servidor esta lento" de "esta
+// maquina esta lenta": os dois aparecem igual num card sozinho. Se metade da
+// frota responde em 120ms pelo mesmo servidor, o servidor nao e o culpado da
+// maquina que esta em 1457ms - por mais que o ping dela pareca bom.
+function veredito(resumo, frota) {
   if (!resumo || resumo.semDados) {
     return { culpa: 'indefinido', titulo: 'Sem medição ainda', detalhe: 'O computador ainda não reportou dados de rede.' };
   }
@@ -251,14 +303,43 @@ function veredito(resumo) {
   // com nota critica na mesma tela - contraditorio e, pior, mandava olhar o
   // lugar errado.
   const appLento = resumo.latenciaMedia !== null && resumo.latenciaMedia > 600;
-  if (appLento && temWan && !lanRuim && !wanRuim) {
+  const baseline = frota && frota.baselineMs !== null && frota.baselineMs !== undefined ? frota.baselineMs : null;
+  const temComparacao = baseline !== null && frota.medidos >= 3;
+  // "muito pior que os colegas": o mesmo servidor atende todo mundo, entao
+  // uma maquina fora da curva denuncia a si mesma
+  const foraDaCurva = temComparacao && baseline > 0 && resumo.latenciaMedia > baseline * 2.5;
+  const frotaLenta = temComparacao && baseline > 600;
+
+  if (appLento && foraDaCurva) {
+    return {
+      culpa: 'local',
+      titulo: 'Só este computador está lento',
+      detalhe: `A resposta do Zenith aqui está em ${resumo.latenciaMedia}ms, mas o resto da frota está em `
+        + `${baseline}ms pelo MESMO servidor. Então o problema é deste ponto, não do Zenith. `
+        + 'O ping parece bom porque são 2 pacotes a cada 5 minutos — ele não pega os momentos ruins; '
+        + 'já a conexão do sistema acontece a cada 25s e pega. Link intermitente (4G/5G, wi-fi oscilando '
+        + 'ou cabo com mau contato) se comporta exatamente assim.',
+    };
+  }
+  if (appLento && frotaLenta) {
     return {
       culpa: 'servidor',
-      titulo: 'O link está bom — o lento é o Zenith',
+      titulo: 'A frota inteira está lenta — é o Zenith',
+      detalhe: `Esta máquina está em ${resumo.latenciaMedia}ms e a mediana da frota em ${baseline}ms — `
+        + 'lojas diferentes, links independentes, todas lentas ao mesmo tempo. O que elas têm em comum é o servidor. '
+        + 'Não abra chamado na operadora.',
+    };
+  }
+  if (appLento && temWan && !lanRuim && !wanRuim && !temComparacao) {
+    // ainda nao ha frota suficiente pra comparar - diz o que se sabe e o que
+    // ainda nao se sabe, em vez de escolher um culpado no chute
+    return {
+      culpa: 'indefinido',
+      titulo: 'Lento, mas ainda sem base de comparação',
       detalhe: `A loja alcança a internet em ${resumo.wanMedia}ms`
-        + `${temLan ? ` e o roteador em ${resumo.gatewayMedia}ms` : ''}, mas a resposta do Zenith está em `
-        + `${resumo.latenciaMedia}ms. Como o caminho até a operadora está limpo, o atraso está do servidor para cá: `
-        + 'não adianta mexer na rede desta loja nem abrir chamado na operadora.',
+        + `${temLan ? ` e o roteador em ${resumo.gatewayMedia}ms` : ''}, mas o Zenith responde em `
+        + `${resumo.latenciaMedia}ms. Com menos de 3 computadores medindo não dá pra dizer se é este ponto ou o `
+        + 'servidor — assim que mais máquinas reportarem, a comparação resolve isso sozinha.',
     };
   }
 
@@ -307,9 +388,11 @@ function veredito(resumo) {
   }
   if (appLento) {
     return {
-      culpa: 'servidor',
-      titulo: 'O link está bom — o lento é o Zenith',
-      detalhe: `A rede da loja responde bem, mas o Zenith está levando ${resumo.latenciaMedia}ms. O atraso não está no link.`,
+      culpa: 'indefinido',
+      titulo: 'Lento, e o link não explica',
+      detalhe: `A rede da loja responde bem, mas o Zenith está levando ${resumo.latenciaMedia}ms. `
+        + 'O ping é uma amostra de 2 pacotes a cada 5 minutos e não pega oscilação curta — compare com as outras '
+        + 'unidades na lista para saber se é só aqui ou geral.',
     };
   }
   return {
@@ -345,7 +428,7 @@ function quedasPorDia(eventos, tz = 'America/Sao_Paulo') {
 
 // Junta tudo pro painel: pega o doc cru do computador e devolve o diagnostico
 // pronto pra renderizar.
-function analisarComputador(doc, dia) {
+function analisarComputador(doc, dia, frota) {
   const bucket = (doc && doc.redeDia && doc.redeDia.dia === dia) ? doc.redeDia : null;
   const resumo = resumir(bucket);
   const quedas = quedasPorDia(doc && doc.eventos);
@@ -361,17 +444,32 @@ function analisarComputador(doc, dia) {
     quedasNoDia,
     msForaNoDia: doDia ? doDia.msFora : 0,
     ...pontuar(resumo, quedasNoDia),
-    veredito: veredito(resumo),
+    veredito: veredito(resumo, frota),
     historico: (doc.redeHistorico || []).slice(-HISTORICO_DIAS_MAX),
+    serie: serieHoraria(doc.redeHoras),
     quedas: quedas.slice(0, HISTORICO_DIAS_MAX),
   };
 }
 
 // Ranking: pior link primeiro. Quem nao tem medicao vai pro fim - nao e "bom"
 // nem "ruim", so nao sabemos, e misturar os dois esconderia problema real.
+// A mediana (nao a media) e de proposito: uma unica maquina em 1457ms puxaria
+// a media pra cima e faria ela "provar" que a frota esta lenta - justamente o
+// erro que essa comparacao existe pra evitar.
+function baselineDaFrota(docs, dia) {
+  const lat = docs
+    .map((d) => resumir((d && d.redeDia && d.redeDia.dia === dia) ? d.redeDia : null))
+    .filter((r) => !r.semDados && r.latenciaMedia !== null)
+    .map((r) => r.latenciaMedia)
+    .sort((a, b) => a - b);
+  if (!lat.length) return { baselineMs: null, medidos: 0 };
+  return { baselineMs: lat[Math.floor(lat.length / 2)], medidos: lat.length };
+}
+
 function ranking(docs, dia) {
+  const frota = baselineDaFrota(docs, dia);
   return docs
-    .map((d) => analisarComputador(d, dia))
+    .map((d) => analisarComputador(d, dia, frota))
     .sort((a, b) => {
       if (a.nota === null && b.nota === null) return 0;
       if (a.nota === null) return 1;
@@ -382,6 +480,7 @@ function ranking(docs, dia) {
 
 module.exports = {
   sanitizarAmostra, acumular, virarDia, resumir, pontuar, veredito,
-  quedasPorDia, analisarComputador, ranking,
+  quedasPorDia, analisarComputador, ranking, baselineDaFrota,
+  acumularHora, serieHoraria, horaDe, HORAS_MAX,
   LATENCIA_BOA_MS, LATENCIA_RUIM_MS, LATENCIA_LENTA_MS, SINAL_WIFI_BAIXO, HISTORICO_DIAS_MAX,
 };
