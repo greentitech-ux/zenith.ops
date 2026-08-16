@@ -75,6 +75,12 @@
      puro, pra ficar organizado em colunas parelhas na largura toda, não só
      empilhando da esquerda pra direita */
   .pcard-slot.full .pestoque-chips{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));}
+  /* pstats-row nos cards full-width: em vez de ficar tudo colado à esquerda
+     com max-width:160px sobrando espaço vazio na largura toda, os KPIs se
+     espalham em colunas parelhas ocupando o card inteiro, com rótulo e
+     valor centralizados em cada uma */
+  .pcard-slot.full .pstats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));}
+  .pcard-slot.full .pstats-row .pstat{max-width:none;text-align:center;}
   .pcard-slot .pcard{height:100%;box-sizing:border-box;}
   .pcard-drag{position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:2;background:none;border:none;
     color:var(--muted);font-size:13px;line-height:1;padding:4px 18px;cursor:grab;touch-action:none;user-select:none;}
