@@ -146,6 +146,26 @@
     });
   }
 
+  // re-envia a inscricao de push (se ja existir uma) toda vez que uma pagina
+  // carrega - silencioso, sem pedir permissao de novo. Existe pra dois casos
+  // que senao falhavam quieto: (1) permissoes do usuario mudaram desde a
+  // ultima vez que ele apertou o sino (o "meta" gravado no servidor, que
+  // decide quem recebe o que, ficaria desatualizado pra sempre); (2) a
+  // inscricao no servidor sumiu por algum motivo (endpoint expirado que ja
+  // foi limpo, restauracao de backup etc) mas o navegador ainda acha que
+  // esta inscrito - sem isso, os alertas parariam de chegar sem ninguem
+  // perceber ate reclamar "sumiu a notificacao"
+  async function reenviarSubscricaoPush() {
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      if (Notification.permission !== 'granted') return;
+      const reg = await navigator.serviceWorker.getRegistration('/sw.js');
+      const sub = reg && await reg.pushManager.getSubscription();
+      if (!sub) return;
+      await fetch('/api/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub) });
+    } catch (e) { /* proxima pagina tenta de novo */ }
+  }
+
   fetch('/api/me').then((r) => r.json()).then((me) => {
     const isMaster = me.role === 'master';
     const isAdmin = !!me.isAdmin;
@@ -153,5 +173,6 @@
     const es = new EventSource('/api/stream?token=' + encodeURIComponent(AUTH_TOKEN));
     initSolicitacoes(es, isMaster, isAdmin);
     initFraude(es, isMaster, sections);
+    reenviarSubscricaoPush();
   }).catch(() => { /* sem /api/me agora (sessao expirando?) - a propria pagina ja trata isso no fetch dela */ });
 })();

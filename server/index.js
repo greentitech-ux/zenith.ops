@@ -1045,6 +1045,30 @@ app.post('/api/rh/cadastro-publico', upload.single('curriculo'), async (req, res
   }
 });
 
+// chave publica do VAPID - de proposito PUBLICA (e o "public" do proprio
+// nome: qualquer navegador precisa dela pra montar a inscricao de push, a
+// chave privada nunca sai do servidor). Fica aqui, ACIMA do auth.requireAuth,
+// porque o service worker tambem precisa dela pra se re-inscrever sozinho
+// depois de um pushsubscriptionchange (ver sw.js), sem nenhuma aba aberta
+app.get('/api/push/vapid-public-key', (req, res) => {
+  res.json({ publicKey: push.PUBLIC_KEY });
+});
+
+// migra uma inscricao de push pra outra quando o proprio navegador troca o
+// endpoint sozinho (evento pushsubscriptionchange, ver sw.js) - roda DENTRO
+// do service worker, sem nenhuma aba aberta e sem acesso ao token de login
+// da pagina, entao precisa ficar publica igual o resto dessa faixa (heartbeat,
+// chat publico etc). Nao concede nada novo: so migra as permissoes (meta) de
+// quem ja provou que tinha a inscricao antiga, sabendo o endpoint dela
+app.post('/api/push/migrar-subscricao', async (req, res) => {
+  try {
+    await push.migrarSubscricao(req.body.oldEndpoint, req.body.subscricao);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // tudo abaixo daqui exige um usuario logado (token JWT, via header ou
 // ?token= - o EventSource do SSE usa a query porque nao manda headers custom)
 app.use('/api', auth.requireAuth);
@@ -2063,10 +2087,6 @@ app.get('/api/disputes/anexo/:disputeId/:index', requireSection('disputas'), asy
 });
 
 // ---------- notificacoes push (estorno, estorno agendado, chargeback, fraude) ----------
-app.get('/api/push/vapid-public-key', (req, res) => {
-  res.json({ publicKey: push.PUBLIC_KEY });
-});
-
 app.post('/api/push/subscribe', async (req, res) => {
   // guarda quem e essa inscricao (Master ve tudo; usuario comum so recebe
   // alerta das unidades e secoes que ele tem acesso - sem isso o push

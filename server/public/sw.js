@@ -40,6 +40,46 @@ self.addEventListener('push', (event) => {
   );
 });
 
+// base64 -> Uint8Array pra montar a applicationServerKey (mesma funcao usada
+// nas paginas na hora de assinar pela primeira vez)
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+// o navegador as vezes invalida a inscricao de push sozinho e pede uma nova -
+// mais comum depois de MUITO tempo sem o app ser aberto, exatamente o
+// cenario "alertas tem que continuar chegando mesmo com o celular bloqueado/
+// sem interacao". Isso roda aqui DENTRO do service worker, sem nenhuma aba
+// do app aberta - por isso re-assina sozinho e manda a nova inscricao pra
+// rota publica de migracao (ver /api/push/migrar-subscricao em index.js),
+// que so troca o endpoint mantendo as mesmas permissoes de antes. Sem isso,
+// o alerta simplesmente para de chegar em silencio, sem ninguem perceber.
+self.addEventListener('pushsubscriptionchange', (event) => {
+  const oldEndpoint = event.oldSubscription && event.oldSubscription.endpoint;
+  event.waitUntil(
+    (async () => {
+      try {
+        const { publicKey } = await fetch('/api/push/vapid-public-key').then((r) => r.json());
+        if (!publicKey) return;
+        const novaSubscricao = event.newSubscription || await self.registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        });
+        await fetch('/api/push/migrar-subscricao', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ oldEndpoint, subscricao: novaSubscricao }),
+        });
+      } catch (e) { /* proxima troca de inscricao tenta de novo */ }
+    })()
+  );
+});
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   // so caminho relativo dentro do proprio app - nada de URL externa
