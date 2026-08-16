@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 13;
+const VERSAO_VIGIA = 14;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -275,10 +275,25 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '# manda os dois blocos numa chamada so, fora do heartbeat (ver',
     '# nocMaquina.js). Falha aqui NUNCA pode derrubar o loop: e informacao',
     '# de apoio, o que nao pode faltar e a presenca da maquina.',
+    '# ha quanto tempo o Windows esta sem reiniciar. LastBootUpTime e o uptime',
+    '# REAL da maquina - nao confundir com o tempo que a janela do Zenith esta',
+    '# aberta, que zera a cada reload. Regra da casa: reiniciar 1x por semana.',
+    'function Medir-Uptime {',
+    '  try {',
+    '    $boot = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).LastBootUpTime',
+    '    if (-not $boot) { return $null }',
+    '    return [math]::Round(((Get-Date) - $boot).TotalHours, 1)',
+    '  } catch { return $null }',
+    '}',
+    '',
     'function Enviar-Telemetria($disco, $dispositivos) {',
     '  try {',
     '    $corpo = @{}',
     '    if ($disco) { $corpo.disco = $disco }',
+    '    # o uptime vai junto SEMPRE que houver telemetria - e uma linha so, e',
+    '    # e o que sustenta o lembrete semanal de reboot',
+    '    $up = Medir-Uptime',
+    '    if ($up -ne $null) { $corpo.uptimeHoras = $up }',
     '    if ($dispositivos -and $dispositivos.Count -gt 0) { $corpo.dispositivos = $dispositivos }',
     '    if ($corpo.Count -eq 0) { return }',
     '    # -Depth 5: sem isso o ConvertTo-Json (padrao 2) transforma a lista de',

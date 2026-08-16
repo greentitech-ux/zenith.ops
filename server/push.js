@@ -652,6 +652,35 @@ async function notifyDiscoAlerta(unidadeNome, codigo, computadorNome, posto, niv
   }
 }
 
+// máquina passou de mais uma semana sem reiniciar. Mesmo público e mesmo
+// espírito do alerta de disco: não é crítico, é lembrete de manutenção -
+// alguém precisa reiniciar aquele computador quando a loja fechar.
+async function notifyReinicioPendente(unidadeNome, codigo, computadorNome, posto, dias) {
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const dados = {
+    title: '🔁 Reiniciar computador',
+    body: `${prefixo}${unidadeNome || codigo}: ligado há ${dias} dias sem reiniciar.`,
+    tag: `noc-reiniciar-${codigo}-${posto || 'principal'}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-reiniciar', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (reinício pendente):', err.message);
+      }
+    }
+  }
+}
+
 async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto) {
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const dados = {
@@ -754,6 +783,6 @@ module.exports = {
   notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado,
-  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta,
+  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente,
   notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, PUBLIC_KEY,
 };

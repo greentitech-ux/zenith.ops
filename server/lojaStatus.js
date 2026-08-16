@@ -503,6 +503,23 @@ async function registrarTelemetria(codigo, posto, dados, token) {
     }
   }
 
+  // há quanto tempo o Windows está sem reiniciar. Regra da casa: reboot 1x
+  // por semana (ver UPTIME_REINICIAR_DIAS)
+  const uptimeHoras = nocMaquina.sanitizarUptime(dados && dados.uptimeHoras);
+  if (uptimeHoras != null) {
+    patch.uptimeHoras = uptimeHoras;
+    patch.uptimeEm = agora;
+    const u = nocMaquina.avaliarUptime(uptimeHoras, atual.uptimeCicloAvisado);
+    // grava o ciclo SEMPRE (não só quando avisa): é o que faz o contador
+    // voltar a zero sozinho quando a máquina finalmente reinicia
+    patch.uptimeCicloAvisado = u.ciclo;
+    if (u.avisarAgora) {
+      eventos = [...eventos, { tipo: 'reiniciar', em: agora, detalhe: `ligado há ${u.dias} dias sem reiniciar` }];
+      patch.eventos = eventos.slice(-EVENTOS_MAX);
+      patch.reinicioAlertaPendente = u.dias;
+    }
+  }
+
   const dispositivos = nocMaquina.sanitizarDispositivos(dados && dados.dispositivos);
   if (dispositivos) {
     patch.dispositivos = dispositivos;
@@ -519,7 +536,12 @@ async function registrarTelemetria(codigo, posto, dados, token) {
   if (!Object.keys(patch).length) return { ok: false, motivo: 'nada útil na telemetria' };
   await COLLECTION.doc(id).set(patch, { merge: true });
   cache.invalidar();
-  return { ok: true, disco: patch.discoNivel || null, dispositivos: dispositivos ? dispositivos.length : 0 };
+  return {
+    ok: true,
+    disco: patch.discoNivel || null,
+    dispositivos: dispositivos ? dispositivos.length : 0,
+    uptimeHoras: uptimeHoras != null ? uptimeHoras : null,
+  };
 }
 
 // o vigia detecta (via processos/conexoes de rede conhecidas - AnyDesk,
@@ -771,6 +793,14 @@ async function varrerAlertas() {
         motivos: candidato.discoMotivos || [],
       });
     }
+    // passou de mais uma semana sem reiniciar (ver UPTIME_REINICIAR_DIAS)
+    if (candidato.reinicioAlertaPendente) {
+      await COLLECTION.doc(docIdFor(candidato.codigo, candidato.posto)).update({ reinicioAlertaPendente: null });
+      transicoes.push({
+        codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
+        tipo: 'reiniciar', dias: candidato.reinicioAlertaPendente,
+      });
+    }
     if (!candidato.ultimoHeartbeatEm) continue;
     let doc = candidato;
     // A lista acima vem do espelho em memoria. Ele e confiavel porque o
@@ -823,6 +853,7 @@ async function saudeMaquinas() {
   const docs = (await cache.cached()).map(semSegredo);
   return {
     discos: nocMaquina.discosComProblema(docs),
+    reiniciar: nocMaquina.maquinasParaReiniciar(docs),
     redes: nocMaquina.resumoDispositivos(docs),
     // quantos ja reportaram: separa "está tudo bem" de "ninguém mediu ainda"
     comDisco: docs.filter((d) => d.disco).length,
