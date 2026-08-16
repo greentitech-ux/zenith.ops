@@ -518,20 +518,26 @@ const COMANDO_LIMPAR_TRAVADOS = [
 // acima. Abrir isso pra texto livre seria criar um "executar qualquer coisa
 // em toda a rede" numa rota HTTP - não vale o risco nem num incidente.
 async function enfileirarComandoEmTodos(comando, opcoes) {
-  const docs = await listUncached();
-  const resultados = [];
-  for (const doc of docs) {
-    if (doc.tipo !== 'interno') continue;
+  const docs = (await listUncached()).filter((d) => d.tipo === 'interno');
+  // EM PARALELO, e isso não é micro-otimização: cada enfileirarComando faz 3
+  // idas e voltas ao Firestore (1 leitura + 2 escritas). Em série, com algumas
+  // dezenas de computadores, a requisição HTTP passava de 20-30s numa
+  // instância free e o navegador desistia antes ("Failed to fetch"), deixando
+  // parte da frota comandada e parte não. Em paralelo vira ~3 rodadas.
+  const resultados = await Promise.all(docs.map(async (doc) => {
+    const base = { codigo: doc.codigo, posto: doc.posto, nome: doc.nome };
     try {
       await enfileirarComando(doc.codigo, doc.posto, comando, opcoes);
-      resultados.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, ok: true });
+      return { ...base, ok: true };
     } catch (err) {
-      // um computador que já tem comando pendente, ou sem token, não pode
-      // derrubar o disparo dos outros - o objetivo é alcançar o máximo de
-      // lojas possível numa tacada
-      resultados.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, ok: false, motivo: err.message });
+      // "já existe comando pendente" NÃO é falha pro nosso caso: significa
+      // que a máquina já tem um comando esperando (provavelmente desta mesma
+      // tentativa, que estourou no meio). Marcar como erro faria o operador
+      // sair atrás de loja que já está resolvida.
+      const jaTinha = /comando pendente/i.test(err.message || '');
+      return { ...base, ok: jaTinha, jaTinha, motivo: jaTinha ? null : err.message };
     }
-  }
+  }));
   return resultados;
 }
 
