@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Relatórios do Carrinho · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<!--
+  Relatorios do Abastecimento do Carrinho - SO MASTER.
+  Separado de abastecimento.html de proposito: aquela tela e o sistema que
+  roda a operacao (carrinho pede, loja envia, carrinho conta) e fica aberta
+  o dia todo no tablet; relatorio gerencial no meio do caminho so atrapalha
+  quem esta operando. Aqui ficam as duas leituras de controle:
+   - Comparativo com o Fechamento (o que foi enviado x o que a loja lancou)
+   - Fluxo de entrada e saida (reconciliacao de estoque do carrinho)
+  As rotas ja sao gated por auth.requireMaster no index.js - o gate do boot()
+  abaixo e so pra nao mostrar tela quebrada pra quem nao e Master.
+-->
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#5cc8ff;
+    --pedido:#ff8a80; --pedido-dim:#3a1d1a;
+    --envio:#8ab4f8; --envio-dim:#1a2540;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:1100px;margin-inline:auto;overflow-x:clip;overflow-y:clip;}
+  /* abaixo de 680px o layout fica identico ao original mobile-first;
+     acima disso o body usa mais largura (resumo-grid/acoes-topo ja se
+     ajustam sozinhos por serem auto-fit/flex-wrap) */
+  @media(max-width:680px){
+    body{max-width:680px;}
+  }
+  h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  h2{font-size:13.5px;font-weight:700;margin:0 0 4px;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  /* cabecalho fixo: sticky mantem o espaco dele no fluxo da pagina (nada
+     fica escondido por tras) e trava no topo ao rolar. As margens negativas
+     compensam o padding do body pra faixa ir de ponta a ponta da coluna */
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-16px -12px 16px;padding:12px 12px;border-bottom:1px solid var(--line);}
+  .header-top{display:flex;justify-content:space-between;align-items:center;gap:8px;}
+  .header-nav{display:flex;align-items:center;gap:6px;flex:none;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;}
+  .btn-notif:hover{border-color:var(--accent);color:var(--text);}
+  .btn-sair{color:var(--bad);}
+  .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
+  .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
+  .hidden{display:none!important;}
+  .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer-titulo{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px 12px;}
+  .nav-drawer-grupo{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 4px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;}
+  .nav-drawer-grupo .ndg-seta{transition:transform .15s ease;font-size:9px;flex:none;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
+  .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+  label{display:block;font-size:11.5px;color:var(--muted);margin:10px 0 4px;font-family:var(--mono);}
+  input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  textarea{resize:vertical;min-height:56px;}
+  .msg{margin-top:10px;font-size:12.5px;padding:10px 12px;border-radius:8px;word-break:break-word;}
+  .msg.ok{background:var(--ok-dim);color:var(--ok);}
+  .msg.err{background:var(--bad-dim);color:var(--bad);}
+  /* padding-top reserva espaco pro ✕ flutuante (que sobe 14px acima do
+     sheet) NUNCA sair da tela; os max-height:100% abaixo prendem o sheet
+     dentro do overlay mesmo com a fonte/zoom da Aparência aumentada (o
+     antigo 88vh nao acompanhava o zoom e o topo da janela sumia) */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;z-index:50;padding-top:46px;box-sizing:border-box;}
+  .overlay.hidden{display:none!important;}
+  .sheet-wrap{position:relative;width:100%;max-width:680px;max-height:100%;display:flex;flex-direction:column;}
+  .sheet-fechar-flutuante{position:absolute;top:-14px;right:-6px;width:32px;height:32px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);color:var(--muted);font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.5);cursor:pointer;z-index:5;}
+  .sheet-fechar-flutuante:hover{color:var(--text);border-color:var(--accent);}
+  .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px 14px 0 0;padding:16px 14px 22px;width:100%;max-width:680px;max-height:100%;overflow-y:auto;box-sizing:border-box;}
+  .sheet h3{margin:0 0 4px;font-size:14px;}
+  .sheet .sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px;}
+
+  /* resumo Ontem/Hoje por sabor (o card de saldo do AppSheet antigo) */
+  .resumo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;}
+  .resumo-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;}
+  .resumo-card .sabor{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}
+  .resumo-card .nums{display:flex;gap:10px;margin-top:6px;align-items:baseline;}
+  .resumo-card .hoje{font-size:20px;font-weight:800;}
+  .resumo-card .ontem{font-size:11.5px;color:var(--muted);font-family:var(--mono);}
+  .resumo-card.pend{border-color:rgba(242,179,61,.4);}
+  .resumo-card.pend .hoje{color:var(--warn);}
+
+  /* fluxo de entrada e saida (so Master) - cada item vira um cartao com a
+     conta aberta (saldo inicial + entradas - saldo final), em vez de tabela:
+     a tela e usada no celular, tabela de 6 colunas nao cabe */
+  .fluxo-preset{font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:14px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
+  .fluxo-preset.ativo{color:var(--accent);border-color:var(--accent);}
+  .fluxo-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;}
+  .fluxo-item .nome{font-weight:700;font-size:13px;}
+  .fluxo-item .tag{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-left:6px;}
+  .fluxo-eq{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;}
+  .fluxo-eq b{color:var(--text);font-weight:700;}
+  .fluxo-saida{font-size:16px;font-weight:800;color:var(--accent);}
+  .fluxo-flag{font-size:11px;margin-top:5px;}
+  .fluxo-flag.ruim{color:var(--bad);}
+  .fluxo-flag.aviso{color:var(--warn);}
+  .fluxo-avaria{font-family:var(--mono);font-size:11px;color:var(--muted);padding:5px 0;border-top:1px solid var(--line);}
+  .fluxo-avaria b{color:var(--text);}
+
+  .acoes-topo{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+  .btn-acao{flex:1;min-width:180px;border:none;border-radius:10px;padding:13px 12px;font-size:13.5px;font-weight:800;cursor:pointer;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:8px;}
+  .btn-acao.pedido{background:var(--pedido-dim);color:var(--pedido);border:1px solid rgba(255,138,128,.4);}
+  .btn-acao.envio{background:var(--envio-dim);color:var(--envio);border:1px solid rgba(138,180,248,.4);}
+  .btn-acao:hover{filter:brightness(1.15);}
+
+  .filtros-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+  .filtro-chip{font-family:var(--mono);font-size:10.5px;color:var(--muted);padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
+  .filtro-chip.ativo{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  /* linha separada dos filtros de verdade - esses botoes nao filtram a
+     lista, abrem outro painel (cadastro/operadores); o rotulo deixa isso
+     visualmente claro em vez de parecerem mais um filtro */
+  .admin-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding-top:6px;border-top:1px dashed var(--line);}
+  .admin-chips-rotulo{font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap;margin-right:2px;}
+
+  .dia-header{font-family:var(--mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px;display:flex;align-items:center;gap:8px;}
+  .dia-header::after{content:'';flex:1;height:1px;background:var(--line);}
+  /* paginacao do historico antigo (mais de 12h - ver renderLista/PAGINA_HISTORICO) */
+  .paginacao{display:flex;justify-content:center;flex-wrap:wrap;gap:6px;margin-top:14px;}
+  .pagina-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;min-width:32px;height:32px;padding:0 8px;font-size:12.5px;font-family:var(--mono);cursor:pointer;}
+  .pagina-btn.ativo{border-color:var(--accent);color:var(--accent);background:rgba(138,180,248,.12);font-weight:700;}
+  /* grupo "Pendentes" (so aparece em telas largas, ver renderLista) usa a
+     mesma cor de aviso do badge "aguardando" pra chamar atencao primeiro */
+  .dia-header.pendentes-header{color:var(--warn);}
+  .dia-header.pendentes-header::after{background:rgba(242,179,61,.35);}
+  .reg-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-top:8px;border-left:3px solid var(--line);}
+  .reg-card.PEDIDO{border-left-color:var(--pedido);}
+  .reg-card.ENVIO{border-left-color:var(--envio);}
+  .reg-card.CONTAGEM{border-left-color:var(--warn);}
+  .reg-tipo.CONTAGEM{color:var(--warn);}
+  .reg-linha1{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+  .reg-tipo{font-weight:800;font-size:13px;display:flex;align-items:center;gap:6px;}
+  .reg-tipo.PEDIDO{color:var(--pedido);}
+  .reg-tipo.ENVIO{color:var(--envio);}
+  .reg-hora{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+  .badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;display:inline-block;white-space:nowrap;}
+  .badge.aguardando{background:var(--warn-dim);color:var(--warn);}
+  .badge.atendido{background:var(--ok-dim);color:var(--ok);}
+  .badge.vinculo{background:var(--panel);color:var(--muted);border:1px solid var(--line);}
+  /* badges/links que sao acao (nao so status) precisam ser <button> de
+     verdade pro toque; essas duas classes so resetam o chrome nativo do
+     button, quem define cor/fundo continua sendo .badge.xxx ou o estilo
+     inline de cada caso */
+  .link-badge-btn{background:none;border:none;padding:0;margin:0;font:inherit;color:var(--accent);text-decoration:underline;cursor:pointer;}
+  button.badge{appearance:none;-webkit-appearance:none;border:none;margin:0;font-family:inherit;cursor:pointer;text-align:left;}
+  .qtd-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;}
+  .qtd-chip{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:8px;background:var(--panel);border:1px solid var(--line);}
+  .qtd-chip b{font-size:13px;}
+  .reg-insumos{margin-top:6px;font-size:12.5px;color:var(--text);}
+  .reg-insumos span{color:var(--muted);}
+  .reg-obs{margin-top:6px;font-size:12px;color:var(--muted);border-left:2px solid var(--line);padding-left:8px;white-space:pre-wrap;}
+  .reg-quem{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:7px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+  .btn-excluir{background:none;border:none;color:var(--bad);font-size:12px;cursor:pointer;padding:0;font-family:var(--sans);}
+
+  .sabores-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+  .sabores-grid label{margin-top:0;}
+  /* linha de insumo por CATALOGO: item + embalagem (unidade/caixa) + qtde */
+  .linha-item{display:grid;grid-template-columns:minmax(120px,1.4fr) minmax(96px,1fr) 70px auto;gap:6px;align-items:center;margin-top:6px;}
+  .linha-item input,.linha-item select{padding:9px 8px;font-size:13px;}
+  .insumo-total{grid-column:1 / -1;font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:-2px 0 2px 2px;}
+  .badge.visto{background:#12303a;color:var(--accent);}
+  /* AVARIA da Contagem: item + qtde + foto opcional + observacao obrigatoria
+     logo abaixo - vai adicionando de 1 em 1, mesmo espirito dos insumos */
+  .linha-avaria{display:grid;grid-template-columns:minmax(120px,1.6fr) 68px 36px 32px;gap:6px;align-items:center;}
+  .linha-avaria input,.linha-avaria select{padding:9px 8px;font-size:13px;}
+  .bloco-avaria{border:1px dashed var(--line);border-radius:10px;padding:8px;margin-top:8px;}
+  .bloco-avaria textarea{margin-top:6px;min-height:44px;}
+  .foto-btn{flex:none;width:36px;height:36px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);display:flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;}
+  .foto-btn.tem-foto{border-color:var(--accent);color:var(--accent);}
+
+  /* ALARME de pedido novo (lado da loja): overlay acima de tudo, contagem
+     regressiva de 5min - so some quando alguem aperta OK */
+  .alarme-overlay{position:fixed;inset:0;background:rgba(10,4,4,.88);z-index:12000;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .alarme-overlay.hidden{display:none!important;}
+  .alarme-card{background:var(--panel);border:2px solid var(--pedido);border-radius:16px;padding:26px 22px;width:100%;max-width:420px;text-align:center;box-shadow:0 0 60px rgba(255,138,128,.35);animation:alarmePulso 1s infinite;}
+  @keyframes alarmePulso{0%,100%{box-shadow:0 0 40px rgba(255,138,128,.25);}50%{box-shadow:0 0 90px rgba(255,138,128,.55);}}
+  .alarme-card h2{font-size:19px;color:var(--pedido);margin:0 0 4px;}
+  .alarme-card .alarme-sub{font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:14px;}
+  .alarme-itens{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:14px;text-align:left;margin-bottom:14px;}
+  .alarme-timer{font-family:var(--mono);font-size:38px;font-weight:800;letter-spacing:.04em;margin:6px 0 2px;}
+  .alarme-timer.ok{color:var(--warn);}
+  .alarme-timer.estourado{color:var(--bad);}
+  .alarme-timer-label{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:16px;}
+  .alarme-ok{width:100%;background:var(--ok);color:#06231a;border:none;border-radius:10px;padding:16px;font-size:16px;font-weight:800;cursor:pointer;font-family:var(--sans);}
+  .alarme-card.atrasado{border-color:var(--bad);box-shadow:0 0 60px rgba(255,92,92,.45);}
+  .alarme-card.atrasado h2{color:var(--bad);}
+  .alarme-btn2{width:100%;margin-top:8px;background:var(--envio-dim);color:var(--envio);border:1px solid rgba(138,180,248,.4);border-radius:10px;padding:13px;font-size:13.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .badge.preparando{background:#2a2033;color:#c9a2ff;}
+
+  /* conversa lateral do pedido: chip fixo na lateral direita + gaveta */
+  .conversa-chip{position:fixed;right:0;top:42%;z-index:8000;background:var(--panel2);border:1px solid var(--line);border-right:none;color:var(--accent);border-radius:10px 0 0 10px;padding:12px 8px;font-size:16px;cursor:pointer;writing-mode:vertical-rl;text-orientation:mixed;font-family:var(--mono);letter-spacing:.06em;box-shadow:-2px 2px 12px rgba(0,0,0,.4);}
+  .conversa-chip .conversa-badge{background:var(--bad);color:#fff;border-radius:10px;font-size:10px;padding:1px 5px;writing-mode:horizontal-tb;display:inline-block;margin-top:6px;}
+  .conversa-painel{position:fixed;right:0;top:0;bottom:0;width:320px;max-width:92vw;z-index:9500;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;box-shadow:-8px 0 30px rgba(0,0,0,.5);}
+  .conversa-painel.hidden{display:none!important;}
+  .conversa-head{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:8px;}
+  .conversa-head b{font-size:13px;}
+  .conversa-corpo{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:7px;}
+  .conversa-msg{max-width:88%;padding:7px 10px;border-radius:10px;font-size:12.5px;white-space:pre-wrap;word-break:break-word;}
+  .conversa-msg.carrinho{align-self:flex-start;background:var(--pedido-dim);border:1px solid rgba(255,138,128,.3);}
+  .conversa-msg.loja{align-self:flex-end;background:var(--envio-dim);border:1px solid rgba(138,180,248,.3);}
+  .conversa-msg .quem{font-family:var(--mono);font-size:9.5px;color:var(--muted);display:block;margin-bottom:2px;}
+  .conversa-atalhos{display:flex;flex-direction:column;gap:6px;padding:0 12px 8px;}
+  .conversa-atalho{background:var(--panel2);border:1px dashed var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:12px;cursor:pointer;text-align:left;font-family:var(--sans);}
+  .conversa-atalho:hover{border-color:var(--accent);}
+  .conversa-atalho.urgente{color:var(--warn);border-color:rgba(242,179,61,.5);}
+  .conversa-rodape{padding:10px 12px;border-top:1px solid var(--line);display:flex;gap:6px;}
+  .conversa-rodape input{flex:1;}
+  .cat-linha{display:grid;grid-template-columns:1fr 92px 70px;gap:6px;align-items:center;margin-top:6px;}
+  .cat-linha input{padding:8px 9px;font-size:13px;}
+  .cat-toggle{font-family:var(--mono);font-size:10px;padding:6px 4px;border-radius:8px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
+  .cat-toggle.on{color:var(--ok);border-color:rgba(61,220,151,.5);}
+  .cat-toggle.off{color:var(--bad);border-color:rgba(255,92,92,.5);}
+  /* mesmo visual do .cat-toggle, mas com nome proprio pro seletor de aba
+     do modal de correcao (alterar/remover) - ali nao e um toggle on/off de
+     cadastro, e uma troca de aba, so reaproveitava o estilo por acidente */
+  .tab-switch{font-family:var(--mono);font-size:10px;padding:6px 4px;border-radius:8px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
+  .tab-switch.on{color:var(--ok);border-color:rgba(61,220,151,.5);}
+  .tab-switch.off{color:var(--bad);border-color:rgba(255,92,92,.5);}
+  .btn-remover{background:var(--bad-dim);color:var(--bad);border:none;border-radius:6px;width:32px;height:36px;font-size:15px;cursor:pointer;flex:none;}
+  .btn-add{margin-top:8px;background:var(--panel2);border:1px dashed var(--line);color:var(--accent);border-radius:8px;padding:8px 10px;font-size:12px;font-family:var(--sans);cursor:pointer;width:100%;}
+  .btn-primary{width:100%;margin-top:16px;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);background:var(--accent);color:#06202b;}
+  .btn-primary:disabled{opacity:.5;cursor:default;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <div style="min-width:0;">
+        <div class="eyebrow">Zenith Ops · Dominos Aeroporto</div>
+        <h1>📊 Relatórios do Carrinho</h1>
+      </div>
+    </div>
+    <div class="header-nav">
+      <button class="btn-notif" onclick="location.reload()" title="Atualizar página">🔄</button>
+      <div class="nav-divider"></div>
+      <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
+    </div>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer">
+  <div class="nav-drawer-titulo">Zenith Ops</div>
+  <a class="back" id="nav-painel" href="/painel.html">🏠 Painel</a>
+  <div class="nav-drawer-grupo">Operação diária</div>
+  <a class="back hidden" id="nav-lancamento" href="/lancamento.html">🧾 Fechamento</a>
+  <a class="back hidden" id="nav-entrega-lancamento" href="/entrega-lancamento.html">📦 Lançar entrega</a>
+  <a class="back hidden" id="nav-fechamentos" href="/fechamentos.html">💰 Fechamentos</a>
+  <a class="back hidden" id="nav-entregas" href="/entregas.html">🛵 Entregas</a>
+  <a class="back hidden" id="nav-inventario" href="/estoque.html">📦 Estoque</a>
+  <a class="back" id="nav-abastecimento" href="/abastecimento.html">🛒 Abastec. Carrinho</a>
+  <a class="back active hidden" id="nav-abastecimento-relatorios" href="/abastecimento-relatorios.html">📊 Relatórios do Carrinho</a>
+  <div class="nav-drawer-grupo">Monitoramento</div>
+  <a class="back hidden" id="nav-monitor" href="/monitor.html">📈 Monitor</a>
+  <a class="back hidden" id="nav-relatorios" href="/relatorios.html">📊 Relatórios</a>
+  <a class="back hidden" id="nav-ifood" href="/ifood.html">🍔 iFood</a>
+  <div class="nav-drawer-grupo" id="nav-grupo-saltiverso">Saltiverso</div>
+  <a class="back hidden" id="nav-parque-checkin" href="/parque-checkin.html">🤸 Check-in Parque</a>
+  <a class="back hidden" id="nav-parque" href="/parque.html">🤸 Parque (painel)</a>
+  <a class="back hidden" id="nav-festas" href="/festas.html">🎉 Festas</a>
+  <a class="back hidden" id="nav-mensalistas" href="/mensalistas.html">📅 Mensalistas</a>
+  <a class="back hidden" id="nav-saltiverso-vendas" href="/saltiverso-vendas.html">🥤 Bebidas & Meias</a>
+  <a class="back hidden" id="nav-saltiverso-fechamento" href="/saltiverso-fechamento.html">🧾 Fechamento do balcão</a>
+  <div class="nav-drawer-grupo">BigBrother</div>
+  <a class="back hidden" id="nav-rh" href="/rh.html">🧑‍💼 RH</a>
+  <div class="nav-drawer-grupo">Solicitações</div>
+  <a class="back hidden" id="nav-solicitacoes" href="/central.html">📋 Central</a>
+  <a class="back hidden" id="nav-historico" href="/central-historico.html">📜 Histórico</a>
+  <a class="back hidden" id="nav-tecnico" href="/tecnico.html">🔧 Chamados TI</a>
+  <a class="back" id="nav-ativos-ti" href="/ativos-ti.html">🖥️ Ativos de TI</a>
+  <a class="back hidden" id="nav-manutencao" href="/manutencao.html">🔧 Manutenção</a>
+  <a class="back hidden" id="nav-central-solucoes" href="/central-solucoes.html">💬 Central de Soluções</a>
+  <a class="back hidden" id="nav-beniboy" href="/beniboy.html">🐝 Central do Beniboy</a>
+  <a class="back hidden" id="nav-loja-status" href="/loja-status.html">📡 NOC Zenith</a>
+  <div class="nav-drawer-grupo">Administração</div>
+  <a class="back hidden" id="nav-usuarios" href="/usuarios.html">👤 Usuários</a>
+  <a class="back hidden" id="nav-grupos" href="/grupos.html">🏷️ Grupos</a>
+  <a class="back hidden" id="nav-email" href="/email.html">✉️ Email</a>
+  <a class="back hidden" id="nav-login-custom" href="/login-custom.html">🎨 Tela de Login</a>
+  <a class="back hidden" id="nav-central-alertas" href="/central-alertas.html">🚨 Central de Alertas</a>
+  <a class="back hidden" id="nav-entregas-regras" href="/entregas-regras.html">⚙️ Regras de Entregas</a>
+  <a class="back hidden" id="nav-cofre" href="/cofre.html">🔐 Cofre</a>
+  <a class="back" id="nav-ajuda" href="/ajuda.html">❓ Ajuda</a>
+  <a class="back hidden" id="nav-reset-senha" href="/painel.html?resetSenha=1">🔑 Reset senha</a>
+  <div class="nav-drawer-sep"></div>
+  <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
+  <div class="nav-drawer-sep"></div>
+  <a class="back" href="https://wa.me/5581995148654" target="_blank" rel="noopener" style="color:var(--accent);">💬 Dúvidas? Suporte (81) 99514-8654</a>
+</nav>
+
+<div id="sem-acesso" class="empty hidden">Esta página é exclusiva do Master.</div>
+
+<div id="root" class="hidden">
+
+<!-- comparativo Abastecimento x Fechamento - so Master (ver
+     /api/abastecimento/comparativo-fechamento em index.js): confere se o
+     que foi ENVIADO por sabor bate com o que ficou registrado nos KPIs
+     Extras do Fechamento do mesmo dia - data escolhida no seletor abaixo ---------- -->
+<div class="panel hidden" id="painel-comparativo-fechamento">
+  <h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <span>🔍 Comparativo com o Fechamento <span style="font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:400;">só Master</span></span>
+      <input type="date" id="comparativo-data" onchange="carregarComparativoFechamento(this.value)" style="font-family:var(--mono);font-size:12px;padding:4px 8px;border-radius:6px;background:var(--panel2,#181d24);color:var(--text);border:1px solid var(--line);">
+    </div>
+  </h2>
+  <div class="sub" id="comparativo-sub" style="margin:-4px 0 10px;"></div>
+  <div class="resumo-grid" id="comparativo-grid"></div>
+</div>
+
+<!-- fluxo de entrada e saida do carrinho - so Master (ver
+     /api/abastecimento/fluxo em index.js): reconcilia contagem inicial +
+     entradas - contagem final = saida apurada, por pizza e por insumo, mais
+     perda em transito (enviado x recebido) e avarias declaradas -->
+<div class="panel hidden" id="painel-fluxo">
+  <h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <span>📊 Fluxo de entrada e saída <span style="font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:400;">só Master</span></span>
+      <span style="display:flex;gap:6px;">
+        <button type="button" class="fluxo-preset" id="fluxo-p7" onclick="carregarFluxo(7)">7 dias</button>
+        <button type="button" class="fluxo-preset" id="fluxo-p30" onclick="carregarFluxo(30)">30 dias</button>
+      </span>
+    </div>
+  </h2>
+  <div class="sub" id="fluxo-sub" style="margin:-4px 0 10px;"></div>
+  <div class="resumo-grid" id="fluxo-kpis"></div>
+  <div id="fluxo-itens"></div>
+  <div id="fluxo-avarias"></div>
+</div>
+
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+let ME = null;
+const FUSO_BR = 'America/Sao_Paulo';
+const SABOR_LABEL = { calabresa:'Calabresa', pepperoni:'Pepperoni', mussarela:'Mussarela' };
+
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function abrirMenu(){ document.getElementById('nav-drawer').classList.remove('hidden'); document.getElementById('nav-drawer-overlay').classList.remove('hidden'); }
+function fecharMenu(){ document.getElementById('nav-drawer').classList.add('hidden'); document.getElementById('nav-drawer-overlay').classList.add('hidden'); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function dataBrasilia(iso){ return new Date(iso).toLocaleDateString('sv-SE', { timeZone: FUSO_BR }); }
+function fmtHora(iso){ return new Date(iso).toLocaleTimeString('pt-BR', { timeZone: FUSO_BR, hour:'2-digit', minute:'2-digit' }); }
+function fmtDia(dataSv){
+  const hoje = dataBrasilia(new Date().toISOString());
+  const ontem = dataBrasilia(new Date(Date.now()-86400000).toISOString());
+  const [y,m,d] = dataSv.split('-');
+  if(dataSv===hoje) return `Hoje · ${d}/${m}`;
+  if(dataSv===ontem) return `Ontem · ${d}/${m}`;
+  return `${d}/${m}/${y}`;
+}
+
+// comparativo com o Fechamento (so Master) - quanto foi ENVIADO por sabor x
+// quanto ficou registrado nos KPIs Extras do Fechamento do mesmo dia (ver
+// /api/abastecimento/comparativo-fechamento em index.js) - "data" opcional
+// (YYYY-MM-DD) deixa consultar outro dia; sem ela o backend usa ontem
+async function carregarComparativoFechamento(data){
+  const painel = document.getElementById('painel-comparativo-fechamento');
+  const inputData = document.getElementById('comparativo-data');
+  inputData.max = dataBrasilia(new Date().toISOString());
+  try{
+    const url = '/api/abastecimento/comparativo-fechamento' + (data ? '?data='+encodeURIComponent(data) : '');
+    const dados = await fetch(url).then(r=>{ if(!r.ok) throw new Error('Erro ao carregar comparativo.'); return r.json(); });
+    painel.classList.remove('hidden');
+    inputData.value = dados.data;
+    const [y,m,d] = dados.data.split('-');
+    if(!dados.temFechamento){
+      document.getElementById('comparativo-sub').textContent = `Ainda não tem fechamento lançado pra ${d}/${m} - comparação aparece assim que lançar.`;
+    }else{
+      document.getElementById('comparativo-sub').textContent = `Referente a ${d}/${m}.`;
+    }
+    document.getElementById('comparativo-grid').innerHTML = dados.comparativo.map(c=>{
+      const semKpi = dados.temFechamento && !c.kpiEncontrado;
+      const diverge = c.diferenca != null && c.diferenca !== 0;
+      const corDif = diverge ? 'color:var(--bad);font-weight:700;' : '';
+      return `
+      <div class="resumo-card">
+        <div class="sabor">${SABOR_LABEL[c.sabor]}</div>
+        <div class="nums">
+          <span class="hoje">${c.enviado} <small style="font-size:9px;color:var(--muted);">enviado</small></span>
+          <span class="ontem">${c.registrado==null ? (semKpi?'sem KPI cadastrado':'—') : c.registrado+' fechamento'}</span>
+        </div>
+        ${diverge ? `<div style="${corDif}font-size:11px;margin-top:2px;">⚠ diferença de ${c.diferenca>0?'+':''}${c.diferenca}</div>` : ''}
+      </div>`;
+    }).join('');
+  }catch(err){
+    painel.classList.add('hidden');
+  }
+}
+
+// fluxo de entrada e saida (so Master) - ver /api/abastecimento/fluxo em
+// index.js. Mostra a conta aberta por item (saldo inicial + entradas -
+// saldo final = saida apurada) + os sinais de controle: perda em transito
+// (enviado x recebido), avarias declaradas e cobertura de contagem
+let FLUXO_DIAS = 7;
+async function carregarFluxo(dias){
+  if(dias) FLUXO_DIAS = dias;
+  const painel = document.getElementById('painel-fluxo');
+  document.getElementById('fluxo-p7').classList.toggle('ativo', FLUXO_DIAS===7);
+  document.getElementById('fluxo-p30').classList.toggle('ativo', FLUXO_DIAS===30);
+  const fim = dataBrasilia(new Date().toISOString());
+  const inicio = dataBrasilia(new Date(Date.now() - (FLUXO_DIAS-1)*86400000).toISOString());
+  try{
+    const d = await fetch(`/api/abastecimento/fluxo?inicio=${inicio}&fim=${fim}`).then(r=>{ if(!r.ok) throw new Error('Erro ao carregar fluxo.'); return r.json(); });
+    painel.classList.remove('hidden');
+    const ind = d.indicadores;
+    const semContagem = ind.diasComContagem < ind.diasNoPeriodo;
+
+    document.getElementById('fluxo-sub').innerHTML = d.reconciliavel
+      ? `Conta fechada entre a <b>primeira</b> e a <b>última contagem</b> do período (${fmtDia(dataBrasilia(d.janela.de))} ${fmtHora(d.janela.de)} → ${fmtDia(dataBrasilia(d.janela.ate))} ${fmtHora(d.janela.ate)}).`
+      : `<span style="color:var(--warn);">⚠ ${escapeHtml(d.motivoNaoReconciliavel)}</span> Abaixo, só o que foi enviado e as avarias.`;
+
+    document.getElementById('fluxo-kpis').innerHTML = `
+      <div class="resumo-card${semContagem?' pend':''}">
+        <div class="sabor">Contagens</div>
+        <div class="nums"><span class="hoje">${ind.diasComContagem}<span style="font-size:12px;color:var(--muted);">/${ind.diasNoPeriodo}</span></span><span class="ontem">dias cobertos</span></div>
+      </div>
+      <div class="resumo-card${ind.enviosSemRecebimento?' pend':''}">
+        <div class="sabor">Envios</div>
+        <div class="nums"><span class="hoje">${ind.envios}</span><span class="ontem">${ind.enviosSemRecebimento} sem conferir</span></div>
+      </div>
+      <div class="resumo-card">
+        <div class="sabor">Perda em trânsito</div>
+        <div class="nums"><span class="hoje" style="${ind.perdaTransitoTotal?'color:var(--bad);':''}">${ind.perdaTransitoTotal}</span><span class="ontem">${ind.recebimentosDivergentes} divergência${ind.recebimentosDivergentes===1?'':'s'}</span></div>
+      </div>
+      <div class="resumo-card">
+        <div class="sabor">Avarias</div>
+        <div class="nums"><span class="hoje" style="${ind.avariasTotal?'color:var(--warn);':''}">${ind.avariasTotal}</span><span class="ontem">declaradas</span></div>
+      </div>`;
+
+    document.getElementById('fluxo-itens').innerHTML = d.itens.map(i=>{
+      const un = i.tipo==='pizza' ? '' : ' un';
+      const conta = d.reconciliavel
+        ? `<span>saldo inicial <b>${i.saldoInicial}${un}</b></span><span>+ entradas <b>${i.entradas}${un}</b></span><span>− saldo final <b>${i.saldoFinal}${un}</b></span><span class="fluxo-saida">= ${i.saidaApurada}${un}</span>`
+        : `<span>enviado <b>${i.enviado}${un}</b></span><span>recebido <b>${i.recebido}${un}</b></span>`;
+      const flags = [];
+      if(i.perdaTransito > 0) flags.push(`<div class="fluxo-flag ruim">⚠ perda em trânsito: ${i.perdaTransito}${un} (enviou ${i.enviado}, chegou ${i.recebido})</div>`);
+      if(i.avarias > 0) flags.push(`<div class="fluxo-flag aviso">🔧 ${i.avarias}${un} declarado(s) como avaria</div>`);
+      if(d.reconciliavel && i.saidaApurada < 0) flags.push(`<div class="fluxo-flag ruim">⚠ saída negativa - sobrou mais do que entrou: provável contagem ou envio não lançado</div>`);
+      return `<div class="fluxo-item">
+        <div><span class="nome">${escapeHtml(i.nome)}</span><span class="tag">${i.tipo==='pizza'?'pizza':'insumo'}</span></div>
+        <div class="fluxo-eq">${conta}</div>
+        ${flags.join('')}
+      </div>`;
+    }).join('') || '<div class="sub" style="margin-top:8px;">Nenhum movimento no período.</div>';
+
+    document.getElementById('fluxo-avarias').innerHTML = d.avariasDetalhe.length
+      ? `<div class="sub" style="margin:14px 0 4px;"><b>Avarias declaradas</b> (${d.avariasDetalhe.length})</div>`
+        + d.avariasDetalhe.map(a=>`<div class="fluxo-avaria">${fmtDia(a.data)} · <b>${escapeHtml(a.nome)} ${a.quantidade}</b> — ${escapeHtml(a.observacao)}${a.temFoto?' 📷':''}</div>`).join('')
+      : '';
+  }catch(err){
+    painel.classList.add('hidden');
+  }
+}
+
+function initNavDrawerAccordion(){
+  const nav = document.getElementById('nav-drawer');
+  if(!nav || nav.dataset.ndgInit) return;
+  nav.dataset.ndgInit = '1';
+  [...nav.querySelectorAll(':scope > .nav-drawer-grupo')].forEach(g=>{
+    const nomeGrupo = g.textContent.trim();
+    const itens = [];
+    let el = g.nextElementSibling;
+    while(el && !el.classList.contains('nav-drawer-grupo') && !el.classList.contains('nav-drawer-sep')){
+      const prox = el.nextElementSibling;
+      itens.push(el);
+      el = prox;
+    }
+    if(!itens.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'ndg-wrap';
+    g.after(wrap);
+    itens.forEach(it=>wrap.appendChild(it));
+    g.innerHTML = `<span>${nomeGrupo}</span><span class="ndg-seta">▾</span>`;
+    const atualizarVazio = ()=>{
+      const temVisivel = itens.some(it=>!it.classList.contains('hidden'));
+      g.classList.toggle('hidden', !temVisivel);
+    };
+    atualizarVazio();
+    new MutationObserver(atualizarVazio).observe(wrap, { attributes:true, attributeFilter:['class'], subtree:true });
+    const key = 'ndgAberto:' + nomeGrupo;
+    // começa aberto SÓ o grupo da página atual (pra você ver onde está) e o
+    // de Solicitações (o mais usado); os outros começam recolhidos pra deixar
+    // o menu curto. Nada persiste entre páginas - ao navegar, o padrão volta
+    // (fim da "gambiarra" de abrir outra tela só pra achar o item).
+    const temAtual = itens.some((it)=>{ const h = it.getAttribute && it.getAttribute('href'); if(!h) return false; try { return new URL(h, location.origin).pathname === location.pathname; } catch(e){ return false; } });
+    const aberto = temAtual || nomeGrupo === 'Solicitações';
+    g.querySelector('.ndg-seta').style.transform = aberto ? '' : 'rotate(-90deg)';
+    wrap.classList.toggle('hidden', !aberto);
+    g.addEventListener('click', ()=>{
+      const abrirAgora = wrap.classList.contains('hidden');
+      wrap.classList.toggle('hidden', !abrirAgora);
+      g.querySelector('.ndg-seta').style.transform = abrirAgora ? '' : 'rotate(-90deg)';
+      localStorage.setItem(key, abrirAgora ? '1' : '0');
+    });
+  });
+}
+initNavDrawerAccordion();
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  ME = await res.json();
+  if(ME.role !== 'master'){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('nav-abastecimento').classList.remove('hidden');
+  document.getElementById('nav-abastecimento-relatorios').classList.remove('hidden');
+  document.getElementById('root').classList.remove('hidden');
+  carregarComparativoFechamento();
+  carregarFluxo(7);
+}
+boot();
+</script>
+<script src="/notif-central.js"></script>
+<script src="/suporte-chat.js"></script>
+<script src="/nav-gate.js"></script>
+</body>
+</html>
