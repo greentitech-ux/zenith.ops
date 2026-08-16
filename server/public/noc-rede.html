@@ -42,6 +42,20 @@
   .intro b{color:var(--text);font-weight:600;}
 
   /* ---- stat tiles: quando a resposta é UM número, não é gráfico ---- */
+  /* filtro de período: uma linha só, acima de tudo que ele afeta */
+  .filtros{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+  .filtro-btn{font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--panel);
+    border:1px solid var(--line);border-radius:16px;padding:6px 12px;cursor:pointer;white-space:nowrap;
+    transition:border-color .15s ease,color .15s ease,background .15s ease;}
+  .filtro-btn:hover{color:var(--text);border-color:var(--accent);}
+  .filtro-btn.sel{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.12);font-weight:600;}
+  .filtro-gran{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-left:auto;white-space:nowrap;}
+  @media(max-width:640px){ .filtro-gran{margin-left:0;width:100%;} }
+  /* aviso de cobertura parcial: honestidade sobre até onde o dado existe */
+  .aviso-cobertura{border:1px solid var(--warn);background:rgba(242,179,61,.07);border-radius:10px;
+    padding:10px 12px;margin-bottom:14px;font-size:11.5px;line-height:1.55;color:var(--text);}
+  .aviso-cobertura b{color:var(--warn);}
+
   .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:22px;}
   .tile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;}
   .tile-rot{font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);}
@@ -129,6 +143,9 @@
     Várias lojas lentas na mesma hora, com links independentes, é problema do servidor.
   </div>
 
+  <div class="filtros" id="filtros"></div>
+  <div class="aviso-cobertura hidden" id="aviso-cobertura"></div>
+
   <div class="tiles" id="tiles"></div>
 
   <div class="secao">
@@ -189,6 +206,23 @@ const CORES = ['var(--serie-1)','var(--serie-2)','var(--serie-3)','var(--serie-4
 const LIMITE_LENTO = 1000;
 let DADOS = null;
 
+// Períodos. Cada um declara de QUAL camada ele lê e quantos pontos pega -
+// é a granularidade que muda com o período, não o contrário (ver
+// redeDiagnostico.js). O rótulo de granularidade vai pra tela porque um
+// gráfico que muda de resolução em silêncio faz o leitor comparar coisas
+// diferentes achando que são iguais.
+const PERIODOS = [
+  { id: '60min', rotulo: '60 min',  camada: 'min', pontos: 12, gran: 'cada ponto = 5 minutos', retencao: 'A camada de 5 min guarda ~3h.' },
+  { id: '24h',   rotulo: '24 horas',camada: 'hora',pontos: 24, gran: 'cada ponto = 1 hora',    retencao: 'A camada por hora guarda 48h.' },
+  { id: '7d',    rotulo: '7 dias',  camada: 'dia', pontos: 7,  gran: 'cada ponto = 1 dia',     retencao: 'O histórico diário guarda 35 dias.' },
+  { id: '15d',   rotulo: '15 dias', camada: 'dia', pontos: 15, gran: 'cada ponto = 1 dia',     retencao: 'O histórico diário guarda 35 dias.' },
+  { id: '30d',   rotulo: '30 dias', camada: 'dia', pontos: 30, gran: 'cada ponto = 1 dia',     retencao: 'O histórico diário guarda 35 dias.' },
+];
+// 24h como padrão: é a janela que responde "o que aconteceu hoje" sem exigir
+// que a série longa já tenha se formado
+let PERIODO = localStorage.getItem('nocRedePeriodo') || '24h';
+if(!PERIODOS.some(p => p.id === PERIODO)) PERIODO = '24h';
+
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 const mediana = (a) => { if(!a.length) return null; const s=[...a].sort((x,y)=>x-y); return s[Math.floor(s.length/2)]; };
 const horaCurta = (h) => (h||'').slice(11,13) + 'h';
@@ -203,37 +237,79 @@ async function carregar(){
   }catch(e){ /* mantém a última carga na tela */ }
 }
 
-// Junta as séries por hora. Só entram computadores COM medição - misturar
-// quem não mede baixaria a mediana e faria o servidor parecer melhor do que é.
+const periodoAtual = () => PERIODOS.find(p => p.id === PERIODO) || PERIODOS[1];
+
+// De qual campo do computador vem a série, e como se lê a chave/rótulo de
+// cada ponto, em cada camada.
+const CAMADAS = {
+  min:  { campo: 'serieMin', chave: p => p.t,    rotulo: k => new Date(k).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) },
+  hora: { campo: 'serie',    chave: p => p.hora, rotulo: k => String(k).slice(11,13) + 'h' },
+  dia:  { campo: 'serieDia', chave: p => p.dia,  rotulo: k => String(k).slice(8,10) + '/' + String(k).slice(5,7) },
+};
+
+// Junta as séries da camada escolhida. Só entram computadores COM medição -
+// misturar quem não mede baixaria a mediana e faria o servidor parecer melhor
+// do que é.
 function montarSeries(){
-  const comSerie = (DADOS.computadores||[]).filter(c => c.serie && c.serie.length);
-  const horas = [...new Set(comSerie.flatMap(c => c.serie.map(p => p.hora)))].sort().slice(-24);
+  const per = periodoAtual();
+  const cam = CAMADAS[per.camada];
+  const comSerie = (DADOS.computadores||[]).filter(c => Array.isArray(c[cam.campo]) && c[cam.campo].length);
+  // ordena pela chave (epoch numérico ou texto ISO, ambos ordenáveis) e pega
+  // só a cauda do tamanho do período
+  const todas = [...new Set(comSerie.flatMap(c => c[cam.campo].map(cam.chave)))]
+    .sort((a,b) => (typeof a === 'number' ? a - b : (a < b ? -1 : a > b ? 1 : 0)));
+  const chaves = todas.slice(-per.pontos);
   const porComputador = comSerie.map(c => {
-    const mapa = new Map(c.serie.map(p => [p.hora, p]));
-    return { ...c, pontos: horas.map(h => (mapa.has(h) ? mapa.get(h).media : null)) };
+    const mapa = new Map(c[cam.campo].map(p => [cam.chave(p), p]));
+    return { ...c, pontos: chaves.map(k => (mapa.has(k) ? mapa.get(k).media : null)) };
   });
-  const frota = horas.map((h,i) => mediana(porComputador.map(c => c.pontos[i]).filter(v => v !== null)));
-  return { horas, porComputador, frota };
+  const frota = chaves.map((k,i) => mediana(porComputador.map(c => c.pontos[i]).filter(v => v !== null)));
+  return { chaves, rotulos: chaves.map(cam.rotulo), porComputador, frota, per, cobertura: todas.length };
+}
+
+function renderFiltros(){
+  const per = periodoAtual();
+  document.getElementById('filtros').innerHTML =
+    PERIODOS.map(p => `<button type="button" class="filtro-btn${p.id===PERIODO?' sel':''}" onclick="trocarPeriodo('${p.id}')">${p.rotulo}</button>`).join('')
+    + `<span class="filtro-gran">${per.gran}</span>`;
+}
+
+function trocarPeriodo(id){
+  PERIODO = id;
+  try{ localStorage.setItem('nocRedePeriodo', id); }catch(e){}
+  render();
 }
 
 function render(){
-  const { horas, porComputador, frota } = montarSeries();
+  renderFiltros();
+  const { chaves, rotulos, porComputador, frota, per, cobertura } = montarSeries();
   renderTiles(porComputador, frota);
   renderTabela();
-  if(!horas.length){
+
+  // Cobertura: dizer quando o período pedido é maior que o histórico que já
+  // existe. Sem isso "30 dias" mostrando 2 pontos parece dado, e não é - a
+  // pessoa tiraria conclusão de uma série que mal começou.
+  const av = document.getElementById('aviso-cobertura');
+  if(chaves.length && cobertura < per.pontos){
+    av.innerHTML = `<b>Cobertura parcial:</b> existem <b>${cobertura}</b> ponto(s) de histórico, o período pede ${per.pontos}. `
+      + `A medição começou agora — a série se completa sozinha com o tempo. ${per.retencao}`;
+    av.classList.remove('hidden');
+  } else { av.classList.add('hidden'); }
+
+  if(!chaves.length){
     document.getElementById('gr-linhas').classList.add('hidden');
     document.getElementById('legenda').classList.add('hidden');
     const v = document.getElementById('gr-vazio');
     v.classList.remove('hidden');
-    v.textContent = 'Ainda não há medição por hora. Os computadores começam a reportar sozinhos assim que o NOCZenith se atualizar (até ~1h) ou assim que a tela da loja recarregar — a série vai se formando hora a hora a partir daí.';
+    v.textContent = `Ainda não há medição nesta granularidade (${per.gran}). Os computadores começam a reportar sozinhos assim que o NOCZenith se atualizar (até ~1h) ou assim que a tela da loja recarregar — a série vai se formando a partir daí. ${per.retencao}`;
     document.getElementById('mini-grid').innerHTML = '';
     return;
   }
   document.getElementById('gr-linhas').classList.remove('hidden');
   document.getElementById('legenda').classList.remove('hidden');
   document.getElementById('gr-vazio').classList.add('hidden');
-  renderLinhas(horas, porComputador, frota);
-  renderMini(horas, porComputador);
+  renderLinhas(rotulos, porComputador, frota);
+  renderMini(rotulos, porComputador);
 }
 
 function renderTiles(porComputador, frota){
@@ -245,7 +321,7 @@ function renderTiles(porComputador, frota){
   document.getElementById('tiles').innerHTML = `
     <div class="tile"><div class="tile-rot">Mediana da frota</div>
       <div class="tile-val ${classe(atual)}">${atual===null?'—':atual+'ms'}</div>
-      <div class="tile-sub">última hora medida · ${medidos} computador(es) reportando</div></div>
+      <div class="tile-sub">último ponto de ${escapeHtml(periodoAtual().rotulo)} · ${medidos} computador(es) reportando</div></div>
     <div class="tile"><div class="tile-rot">Pior computador</div>
       <div class="tile-val ${pior?(pior.nota<40?'critico':(pior.nota<65?'alerta':'bom')):''}">${pior?pior.nota+'/100':'—'}</div>
       <div class="tile-sub">${pior?escapeHtml(pior.nome)+' · '+escapeHtml(pior.unidadeNome||pior.codigo):'sem medição'}</div></div>
@@ -257,7 +333,7 @@ function renderTiles(porComputador, frota){
       <div class="tile-sub">aguardando o NOCZenith atualizar</div></div>`;
 }
 
-function renderLinhas(horas, porComputador, frota){
+function renderLinhas(rotulos, porComputador, frota){
   const L=52, R=18, T=14, B=30, W=860, H=300;
   const larg = W-L-R, alt = H-T-B;
   // as 3 piores por latência média do dia; o resto fica fora do overlay (vai
@@ -268,7 +344,7 @@ function renderLinhas(horas, porComputador, frota){
 
   const todos = [...frota.filter(v=>v!==null), ...destaques.flatMap(c=>c.pontos.filter(v=>v!==null))];
   const maxY = Math.max(LIMITE_LENTO*1.15, ...(todos.length?todos:[LIMITE_LENTO]))*1.05;
-  const x = (i) => L + (horas.length===1 ? larg/2 : (i/(horas.length-1))*larg);
+  const x = (i) => L + (rotulos.length===1 ? larg/2 : (i/(rotulos.length-1))*larg);
   const y = (v) => T + alt - (v/maxY)*alt;
   const caminho = (pts) => {
     let d='', abriu=false;
@@ -285,9 +361,11 @@ function renderLinhas(horas, porComputador, frota){
     svg += `<text class="tick" x="${L-8}" y="${(y(v)+3.5).toFixed(1)}" text-anchor="end">${v}ms</text>`;
   });
   svg += `<line class="eixo" x1="${L}" y1="${T+alt}" x2="${L+larg}" y2="${T+alt}"></line>`;
-  const passo = Math.max(1, Math.ceil(horas.length/8));
-  horas.forEach((h,i)=>{ if(i%passo) return;
-    svg += `<text class="tick" x="${x(i).toFixed(1)}" y="${T+alt+16}" text-anchor="middle">${horaCurta(h)}</text>`; });
+  // no máximo ~8 marcas no eixo, seja qual for o período - com 30 pontos
+  // rotular todos vira borrão
+  const passo = Math.max(1, Math.ceil(rotulos.length/8));
+  rotulos.forEach((r,i)=>{ if(i%passo) return;
+    svg += `<text class="tick" x="${x(i).toFixed(1)}" y="${T+alt+16}" text-anchor="middle">${escapeHtml(r)}</text>`; });
 
   destaques.forEach((c,idx)=>{
     svg += `<path class="linha" d="${caminho(c.pontos)}" stroke="${CORES[idx+1]}"></path>`;
@@ -307,7 +385,7 @@ function renderLinhas(horas, porComputador, frota){
     `<span class="leg-item espesso"><span class="leg-marca" style="background:${CORES[0]}"></span>Mediana da frota</span>` +
     destaques.map((c,i)=>`<span class="leg-item"><span class="leg-marca" style="background:${CORES[i+1]}"></span>${escapeHtml(c.nome)}</span>`).join('');
 
-  ligarHover(el, { horas, frota, destaques, x, L, larg });
+  ligarHover(el, { rotulos, frota, destaques, x, L, larg });
 }
 
 function ligarHover(el, ctx){
@@ -320,14 +398,14 @@ function ligarHover(el, ctx){
     const cx = el.getBoundingClientRect();
     const escala = 860 / cx.width;
     const vx = (p.clientX - cx.left) * escala;
-    const i = Math.max(0, Math.min(ctx.horas.length-1,
-      Math.round(((vx - ctx.L) / ctx.larg) * (ctx.horas.length-1))));
+    const i = Math.max(0, Math.min(ctx.rotulos.length-1,
+      Math.round(((vx - ctx.L) / ctx.larg) * (ctx.rotulos.length-1))));
     cruz.setAttribute('x1', ctx.x(i).toFixed(1));
     cruz.setAttribute('x2', ctx.x(i).toFixed(1));
     cruz.classList.remove('hidden');
     const linhas = [`<div class="tt-l"><span class="tt-m" style="background:${CORES[0]}"></span>Mediana da frota<span class="tt-v">${ctx.frota[i]===null?'—':ctx.frota[i]+'ms'}</span></div>`]
       .concat(ctx.destaques.map((c,k)=>`<div class="tt-l"><span class="tt-m" style="background:${CORES[k+1]}"></span>${escapeHtml(c.nome)}<span class="tt-v">${c.pontos[i]===null?'—':c.pontos[i]+'ms'}</span></div>`));
-    tt.innerHTML = `<div class="tt-h">${escapeHtml(ctx.horas[i].replace('T',' '))}h</div>` + linhas.join('');
+    tt.innerHTML = `<div class="tt-h">${escapeHtml(ctx.rotulos[i])}</div>` + linhas.join('');
     tt.classList.remove('hidden');
     const larguraTt = tt.offsetWidth;
     tt.style.left = Math.min(window.innerWidth - larguraTt - 10, p.clientX + 14) + 'px';
@@ -339,7 +417,7 @@ function ligarHover(el, ctx){
   captura.addEventListener('touchend', esconder);
 }
 
-function renderMini(horas, porComputador){
+function renderMini(rotulos, porComputador){
   // MESMA escala em todos: é o que permite comparar de relance. Escalar cada
   // um pelo próprio máximo faria uma loja de 120ms parecer tão ruim quanto
   // uma de 1500ms.
@@ -347,7 +425,7 @@ function renderMini(horas, porComputador){
   const ordenados = [...porComputador].sort((a,b)=>(b.resumo.latenciaMedia||0)-(a.resumo.latenciaMedia||0));
   const W=210,H=54;
   document.getElementById('mini-grid').innerHTML = ordenados.map(c=>{
-    const x=(i)=> horas.length===1 ? W/2 : (i/(horas.length-1))*W;
+    const x=(i)=> rotulos.length===1 ? W/2 : (i/(rotulos.length-1))*W;
     const y=(v)=> H - (v/maxGlobal)*H;
     let d='',abriu=false;
     c.pontos.forEach((v,i)=>{ if(v===null){abriu=false;return;} d+=(abriu?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)+' '; abriu=true; });

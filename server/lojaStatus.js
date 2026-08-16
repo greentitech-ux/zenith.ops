@@ -229,6 +229,10 @@ function metricasDeRede(atual, rede) {
     campos.redeHoras = redeDiagnostico.acumularHora(
       (atual && atual.redeHoras) || [], amostra, redeDiagnostico.horaDe(Date.now()),
     );
+    // camada de 5min, pra janela de "últimos 60 minutos" (ver redeDiagnostico)
+    campos.redeMinutos = redeDiagnostico.acumularMinuto(
+      (atual && atual.redeMinutos) || [], amostra, Date.now(),
+    );
   }
   return campos;
 }
