@@ -325,6 +325,31 @@
 
 <!-- ---------- Recebimento ---------- -->
 <div class="panel tab-content hidden" id="tab-recebimento">
+  <div class="panel" style="margin-bottom:14px;">
+    <h2>📎 Anexar nota fiscal (opcional)</h2>
+    <div class="sub" style="margin-bottom:10px;">Anexe a foto ou o PDF da nota que o Zenith tenta ler os itens sozinho - você confere e confirma antes de lançar, nada é gravado automaticamente.</div>
+    <input type="file" id="rn-arquivo" accept="image/*,application/pdf">
+    <button type="button" class="btn-secundario" style="margin-top:10px;" id="btn-ler-nota" onclick="lerNotaFiscal()">🔎 Ler nota automaticamente</button>
+    <div class="msg hidden" id="msg-ler-nota"></div>
+  </div>
+
+  <div class="panel hidden" id="painel-revisao-nota" style="margin-bottom:14px;">
+    <h2>Confira antes de lançar</h2>
+    <div class="sub" style="margin-bottom:10px;">O Zenith leu a nota e tentou casar cada item com o catálogo - confira/ajuste e desmarque o que não quiser lançar.</div>
+    <div class="grid2">
+      <div><label>Data</label><input type="date" id="rn-data"></div>
+      <div><label>Fornecedor</label><input type="text" id="rn-fornecedor" list="datalist-fornecedores"></div>
+    </div>
+    <label>Nota fiscal</label>
+    <input type="text" id="rn-numero" placeholder="número da nota">
+    <div id="rn-itens" style="margin-top:6px;"></div>
+    <div class="msg hidden" id="msg-confirmar-nota"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
+      <button type="button" class="btn-primary" id="btn-confirmar-nota" onclick="confirmarRecebimentosDaNota()">✅ Lançar itens confirmados</button>
+      <button type="button" class="btn-secundario" onclick="cancelarRevisaoNota()">Cancelar</button>
+    </div>
+  </div>
+
   <h2>Novo recebimento de mercadoria</h2>
   <div class="sub" style="margin-bottom:10px;">Cadastre o item e o valor pago - é esse valor que dá a noção de CMV da loja (ver aba Diferenças).</div>
   <form id="form-recebimento">
@@ -1240,6 +1265,141 @@ document.getElementById('form-recebimento').addEventListener('submit', async (ev
     msg.classList.remove('hidden');
   }
 });
+
+// ---------- Leitura automática de nota fiscal ----------
+// gerente anexa a foto/PDF, o Zenith (Claude com visão) le e devolve um
+// RASCUNHO - nada e lançado sozinho, o gerente confere linha por linha no
+// painel de revisão antes de confirmar (ver server/inventarioNotaOcr.js)
+let RASCUNHO_NOTA = null;
+async function lerNotaFiscal(){
+  const arquivo = document.getElementById('rn-arquivo').files[0];
+  const msg = document.getElementById('msg-ler-nota');
+  if(!arquivo){
+    msg.textContent = 'Escolha a foto ou o PDF da nota primeiro.'; msg.className = 'msg err'; msg.classList.remove('hidden');
+    return;
+  }
+  const btn = document.getElementById('btn-ler-nota');
+  btn.disabled = true; btn.textContent = 'Lendo nota...';
+  msg.textContent = 'Lendo a nota, pode levar alguns segundos...'; msg.className = 'msg'; msg.classList.remove('hidden');
+  try{
+    const unidade = unidadeAtual();
+    const fd = new FormData();
+    fd.append('unidade', unidade);
+    fd.append('nota', arquivo);
+    const res = await fetch('/api/inventario/recebimentos/ler-nota', { method:'POST', body: fd });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error||'Não consegui ler essa nota.');
+    RASCUNHO_NOTA = data;
+    document.getElementById('rn-data').value = data.data || '';
+    document.getElementById('rn-fornecedor').value = data.fornecedor || '';
+    document.getElementById('rn-numero').value = data.numeroNota || '';
+    renderItensRevisaoNota();
+    document.getElementById('painel-revisao-nota').classList.remove('hidden');
+    msg.classList.add('hidden');
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err';
+  }finally{
+    btn.disabled = false; btn.textContent = '🔎 Ler nota automaticamente';
+  }
+}
+function renderItensRevisaoNota(){
+  const itens = (RASCUNHO_NOTA && RASCUNHO_NOTA.itens) || [];
+  document.getElementById('rn-itens').innerHTML = itens.length ? itens.map((it,i)=>`
+    <div class="panel" style="margin-bottom:8px;padding:10px;">
+      <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;">
+        <input type="checkbox" id="rn-usar-${i}" checked style="margin-top:10px;">
+        <div style="flex:1;min-width:220px;">
+          <div class="sub" style="margin-bottom:4px;">Como veio na nota: "${escapeHtml(it.produtoTexto||'')}"</div>
+          <label>Item do catálogo</label>
+          <select id="rn-item-${i}"><option value="">— selecione —</option>${opcoesItensAgrupadas()}</select>
+          <div class="grid2" style="margin-top:6px;">
+            <div><label>Quantidade</label><input type="number" step="0.001" id="rn-qtd-${i}" value="${it.quantidade!=null?it.quantidade:''}"></div>
+            <div><label>Valor unitário (R$)</label><input type="number" step="0.01" id="rn-valorunit-${i}" value="${it.valorUnitario!=null?it.valorUnitario:''}"></div>
+          </div>
+          <label>Valor total (R$)</label>
+          <input type="number" step="0.01" id="rn-valortotal-${i}" value="${it.valorTotal!=null?it.valorTotal:''}">
+        </div>
+      </div>
+    </div>`).join('') : '<div class="sub">Não encontrei itens nessa nota.</div>';
+  itens.forEach((it,i)=>{
+    if(it.itemId) document.getElementById(`rn-item-${i}`).value = it.itemId;
+  });
+}
+function cancelarRevisaoNota(){
+  RASCUNHO_NOTA = null;
+  document.getElementById('painel-revisao-nota').classList.add('hidden');
+  document.getElementById('rn-arquivo').value = '';
+  document.getElementById('msg-confirmar-nota').classList.add('hidden');
+}
+async function confirmarRecebimentosDaNota(){
+  const itens = (RASCUNHO_NOTA && RASCUNHO_NOTA.itens) || [];
+  const msg = document.getElementById('msg-confirmar-nota');
+  const unidade = unidadeAtual();
+  const unidadeNome = UNIDADES.find(u=>u.codigo===unidade)?.nome || unidade;
+  const data = document.getElementById('rn-data').value;
+  const fornecedor = document.getElementById('rn-fornecedor').value;
+  const notaFiscal = document.getElementById('rn-numero').value;
+  if(!data || !fornecedor){
+    msg.textContent = 'Preencha a data e o fornecedor da nota.'; msg.className = 'msg err'; msg.classList.remove('hidden');
+    return;
+  }
+  const selecionados = itens.map((it,i)=>({
+    usar: document.getElementById(`rn-usar-${i}`).checked,
+    itemId: document.getElementById(`rn-item-${i}`).value,
+    quantidade: document.getElementById(`rn-qtd-${i}`).value,
+    valorUnitario: document.getElementById(`rn-valorunit-${i}`).value,
+    valorTotal: document.getElementById(`rn-valortotal-${i}`).value,
+  })).filter(it=>it.usar);
+  if(!selecionados.length){
+    msg.textContent = 'Marque pelo menos um item para lançar.'; msg.className = 'msg err'; msg.classList.remove('hidden');
+    return;
+  }
+  for(const it of selecionados){
+    if(!it.itemId){
+      msg.textContent = 'Escolha o item do catálogo pra cada linha marcada.'; msg.className = 'msg err'; msg.classList.remove('hidden');
+      return;
+    }
+    if(num(it.quantidade)<=0){
+      msg.textContent = 'Informe a quantidade de cada linha marcada.'; msg.className = 'msg err'; msg.classList.remove('hidden');
+      return;
+    }
+    if(num(it.valorUnitario)<=0 && num(it.valorTotal)<=0){
+      msg.textContent = 'Informe o valor unitário ou total de cada linha marcada.'; msg.className = 'msg err'; msg.classList.remove('hidden');
+      return;
+    }
+  }
+  if(!confirm(`Lançar ${selecionados.length} item(ns) desse recebimento? Confira antes, isso não pode ser desfeito.`)) return;
+  const btn = document.getElementById('btn-confirmar-nota');
+  btn.disabled = true; btn.textContent = 'Lançando...';
+  msg.classList.add('hidden');
+  try{
+    for(const it of selecionados){
+      const body = {
+        unidade, unidadeNome,
+        itemId: it.itemId,
+        fornecedor,
+        quantidade: it.quantidade,
+        quantidadeEmbalagens: null,
+        pesoEmbalagem: null,
+        valorUnitario: it.valorUnitario,
+        valorTotal: it.valorTotal,
+        data,
+        notaFiscal,
+      };
+      const res = await fetch('/api/inventario/recebimentos', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const respData = await res.json();
+      if(!res.ok) throw new Error(respData.error||'erro ao lançar item');
+    }
+    msg.textContent = 'Recebimentos lançados com sucesso.'; msg.className = 'msg ok'; msg.classList.remove('hidden');
+    cancelarRevisaoNota();
+    await carregarRecebimentos();
+    renderRecebimentos();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{
+    btn.disabled = false; btn.textContent = '✅ Lançar itens confirmados';
+  }
+}
 
 // ---------- Saída ----------
 const NOMES_TIPO_SAIDA = { VENDA:'Venda', DESPERDICIO:'Desperdício', OUTRA:'Outra' };
