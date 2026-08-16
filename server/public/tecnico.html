@@ -200,6 +200,12 @@
     <h3 id="d-titulo"></h3>
     <div class="sub" id="d-sub"></div>
     <div id="d-descricao" style="font-size:13px;white-space:pre-wrap;margin-bottom:10px;"></div>
+    <!-- o chamado inteiro num arquivo só, com as fotos embutidas: é o que
+         vai anexado na cobrança ou mandado pro franqueado, que não tem
+         acesso ao Zenith pra abrir o chamado aqui -->
+    <div style="margin-bottom:12px;">
+      <a class="link-btn" id="d-relatorio" href="#" target="_blank" rel="noopener">📄 Relatório do atendimento (PDF)</a>
+    </div>
 
     <!-- ordem pensada pro fluxo real do chamado: primeiro classifica/decide
          (edição Master, triagem), depois documenta o que está sendo feito
@@ -635,6 +641,9 @@ function abrirDetalhe(id){
   document.getElementById('d-titulo').textContent = c.titulo;
   document.getElementById('d-sub').innerHTML = `${c.numeroTicket!=null?`<span style="font-family:var(--mono);color:var(--accent);">Ticket #${c.numeroTicket}</span> · `:''}${escapeHtml(c.unidadeNome||c.unidade)} · ${fmtDataHora(c.criadoEm)}<div class="chips-linha">${chipModalidade(c)}${chipPrioridade(c)}${chipSla(c)}${c.resolvidoNaAbertura?'<span class="badge CONCLUIDO">✅ resolvido na abertura</span>':''}</div>`;
   document.getElementById('d-descricao').textContent = c.descricao || '';
+  // link direto (abre em aba nova), então a autenticação vai no ?token= -
+  // o interceptador de fetch não alcança um <a href>
+  document.getElementById('d-relatorio').href = `/api/chamados/${c.id}/relatorio.pdf?token=${encodeURIComponent(AUTH_TOKEN)}`;
 
   // remoto em aberto: conclui a distancia (responsavel, Master ou Admin);
   // presencial segue o fluxo classico check-in -> checkout

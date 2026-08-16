@@ -38,9 +38,25 @@ async function streamArquivo(caminho, tipo, res) {
     .pipe(res);
 }
 
+// baixa o arquivo pra memoria em vez de mandar direto pro cliente. Existe
+// pro relatorio em PDF, que precisa EMBUTIR a foto dentro do documento (o
+// pdfkit e sincrono, entao os bytes tem que estar na mao antes de desenhar).
+// Devolve null em vez de estourar: uma foto que sumiu do Storage nao pode
+// derrubar o relatorio inteiro - o PDF sai com o aviso no lugar dela.
+async function baixarArquivo(caminho) {
+  try {
+    const bucket = await resolverBucket();
+    const [buffer] = await bucket.file(caminho).download();
+    return buffer;
+  } catch (err) {
+    console.error('Erro ao baixar arquivo do Storage:', caminho, err.message);
+    return null;
+  }
+}
+
 async function apagarArquivo(caminho) {
   const bucket = await resolverBucket();
   await bucket.file(caminho).delete({ ignoreNotFound: true });
 }
 
-module.exports = { salvarArquivo, streamArquivo, apagarArquivo };
+module.exports = { salvarArquivo, streamArquivo, baixarArquivo, apagarArquivo };
