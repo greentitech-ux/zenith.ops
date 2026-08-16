@@ -230,6 +230,7 @@
   <a class="back hidden" id="nav-central-solucoes" href="/central-solucoes.html">💬 Central de Soluções</a>
   <a class="back hidden" id="nav-beniboy" href="/beniboy.html">🐝 Central do Beniboy</a>
   <a class="back active" id="nav-loja-status-self" href="/loja-status.html">📡 NOC Zenith</a>
+  <a class="back hidden" id="nav-central-alertas" href="/central-alertas.html">🚨 Central de Alertas</a>
   <div class="nav-drawer-sep"></div>
   <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
 </nav>
@@ -1423,6 +1424,7 @@ async function boot(){
   const unidadeDoLink = new URLSearchParams(location.search).get('unidade');
   if(unidadeDoLink) toggleFiltroUnidade(unidadeDoLink);
   if(me.role === 'master'){
+    document.getElementById('nav-central-alertas').classList.remove('hidden');
     document.getElementById('agente-root').classList.remove('hidden');
     document.getElementById('btn-push-ar').classList.remove('hidden');
     carregarConfigPushAr();

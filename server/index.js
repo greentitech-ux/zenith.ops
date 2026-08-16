@@ -69,6 +69,7 @@ const rhAdvertencias = require('./rhAdvertencias');
 const unidadesExtras = require('./unidades');
 const lojaStatus = require('./lojaStatus');
 const qaAprovacoes = require('./qaAprovacoes');
+const alertasCentral = require('./alertasCentral');
 const agenteAcoes = require('./agenteAcoes');
 const vigiaScript = require('./vigiaScript');
 const loginCustom = require('./loginCustom');
@@ -1947,6 +1948,26 @@ app.delete('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res)
   try {
     if (await desviarSeQaMaster(req, res, 'unidadesExtras.excluir', `Excluir unidade ${req.params.id}`, { id: req.params.id })) return;
     res.json(await unidadesExtras.remover(req.params.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- Central de Alertas (alertasCentral.js) - log de TODOS os
+// alertas do sistema (NOC, Beniboy, seguranca, QA, RH, fraude...), pra
+// existir um lugar central que mostra o que aconteceu mesmo que o push
+// tenha falhado/nao tocado ou a pessoa so va olhar horas depois (pedido
+// explicito do usuario: "crie se preciso uma central de alertas que mostre
+// qual o alerta e o que e"). Master-only, mesmo espirito de qa-aprovacoes ----------
+app.get('/api/alertas-central', auth.requireMaster, async (req, res) => {
+  res.json(await alertasCentral.listar());
+});
+
+app.post('/api/alertas-central/:id/atender', auth.requireMaster, async (req, res) => {
+  try {
+    const atualizado = await alertasCentral.atender(req.params.id, req.user.email);
+    if (!atualizado) return res.status(404).json({ error: 'Alerta não encontrado.' });
+    res.json(atualizado);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

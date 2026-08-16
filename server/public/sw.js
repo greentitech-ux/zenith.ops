@@ -32,9 +32,20 @@ self.addEventListener('push', (event) => {
       });
       if (data.critical) {
         // app ja aberto em alguma aba: dispara o alarme sonoro na hora, sem
-        // esperar a pessoa clicar na notificacao
+        // esperar a pessoa clicar na notificacao. Manda titulo/corpo/tag
+        // junto (nao so a url) pra quem recebe a mensagem poder mostrar o
+        // alerta certo (NOC, seguranca, RH...) em vez de sempre cair no
+        // texto generico do Beniboy
         const list = await clients.matchAll({ type: 'window', includeUncontrolled: true });
-        for (const c of list) c.postMessage({ type: 'beniboy-alerta-critico', url: data.url });
+        for (const c of list) {
+          c.postMessage({
+            type: 'alerta-critico',
+            url: data.url,
+            title: data.title,
+            body: data.body,
+            tag: data.tag,
+          });
+        }
       }
     })()
   );

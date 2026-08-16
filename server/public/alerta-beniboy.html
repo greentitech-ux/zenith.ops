@@ -42,6 +42,7 @@
   </div>
 <script>
   const params = new URLSearchParams(location.search);
+  const chat = params.get('chat') || '';
   const nome = params.get('nome') || '';
   const motivo = params.get('motivo') || '';
   // tipo=seguranca: mesma tela/sirene de alarme, mas pra uma tentativa de
@@ -104,7 +105,11 @@
   document.getElementById('btn-silenciar').addEventListener('click', pararAlarme);
   document.getElementById('btn-atender').addEventListener('click', () => {
     pararAlarme();
-    location.href = ehSeguranca ? '/beniboy.html' : '/tecnico.html';
+    // ambos os casos (Beniboy pedindo ajuda ou alerta de seguranca) sao uma
+    // conversa especifica do chat de suporte - manda pro Beniboy ja abrindo
+    // essa conversa (ver ?chat= em beniboy.html), nunca pro /tecnico.html
+    // (isso era um bug: mandava pra tela errada e perdia qual chat era)
+    location.href = chat ? ('/beniboy.html?chat=' + encodeURIComponent(chat)) : '/beniboy.html';
   });
 </script>
 </body>

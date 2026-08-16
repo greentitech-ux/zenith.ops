@@ -170,6 +170,7 @@
   <a class="back hidden" id="nav-central-solucoes" href="/central-solucoes.html">💬 Central de Soluções</a>
   <a class="back active" id="nav-beniboy-self" href="/beniboy.html">🐝 Central do Beniboy</a>
   <a class="back hidden" id="nav-loja-status" href="/loja-status.html">📡 NOC Zenith</a>
+  <a class="back hidden" id="nav-central-alertas" href="/central-alertas.html">🚨 Central de Alertas</a>
   <div class="nav-drawer-sep"></div>
   <button type="button" class="back" style="color:var(--bad);cursor:pointer;" onclick="logout()">🚪 Sair</button>
 </nav>
@@ -734,6 +735,7 @@ async function boot(){
   document.getElementById('nav-historico').classList.remove('hidden');
   document.getElementById('nav-tecnico').classList.remove('hidden');
   document.getElementById('nav-central-solucoes').classList.remove('hidden');
+  document.getElementById('nav-central-alertas').classList.toggle('hidden', !IS_MASTER);
   if(!(IS_MASTER || IS_ADMIN || secoes.includes('suporte'))){
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;
@@ -744,6 +746,11 @@ async function boot(){
   conectarStream();
   setInterval(()=>{ if(!document.hidden) carregarLista(); }, 60000);
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) carregarLista(); });
+  // ?chat=<id> - deep link vindo do alerta critico (alerta-beniboy.html /
+  // suporte-chat.js "Atender agora"): abre essa conversa especifica direto,
+  // em vez da pessoa ter que procurar no kanban qual era
+  const chatIdUrl = new URLSearchParams(location.search).get('chat');
+  if(chatIdUrl) abrirDetalhePorId(chatIdUrl);
 }
 boot();
 </script>

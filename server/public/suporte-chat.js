@@ -661,9 +661,10 @@
   let alarmeAudioCtx = null;
   let alarmeSirenTimer = null;
   let alarmeVibraTimer = null;
+  let alarmeUrlAtual = '/beniboy.html'; // pra onde "Atender agora" leva - cada tipo de alerta manda a sua (ver dispararAlarmeBeniboy)
   const alarmeEl = el(`<div class="szc-alarme" role="alertdialog" aria-label="Alerta do Beniboy">
     <div class="szc-al-icone">🚨</div>
-    <div class="szc-al-titulo">Beniboy precisa de você</div>
+    <div class="szc-al-titulo" id="szc-al-titulo">Beniboy precisa de você</div>
     <div class="szc-al-corpo" id="szc-al-corpo">O assistente não conseguiu resolver sozinho.</div>
     <div class="szc-al-botoes">
       <button type="button" class="szc-al-atender">🎧 Atender agora</button>
@@ -691,11 +692,18 @@
     } catch (e) { /* audio bloqueado antes de alguma interacao - a vibracao/tela seguem */ }
   }
 
+  // info: { titulo, corpo, url } - cada chamador (escalonamento do Beniboy,
+  // seguranca do chat, ou qualquer alerta critico generico vindo do push/SW)
+  // manda o titulo/texto/destino REAIS do que aconteceu, em vez de sempre
+  // cair no texto fixo "Beniboy precisa de você" - e o que faz "Atender
+  // agora" ir pro lugar certo (chat especifico, NOC, etc) em vez de sempre
+  // /beniboy.html
   function dispararAlarmeBeniboy(info) {
     if (!ATEND.podeAlarme) return; // alarme e pro Master + tag Suporte (ver push.notifyBeniboyEscalonamento)
-    const corpo = info && (info.nome || info.motivo)
-      ? `${esc(info.nome || 'Visitante')}${info.motivo ? ' · ' + esc(info.motivo) : ''}`
-      : 'O assistente não conseguiu resolver sozinho.';
+    const titulo = (info && info.titulo) || 'Beniboy precisa de você';
+    const corpo = (info && info.corpo) || 'O assistente não conseguiu resolver sozinho.';
+    alarmeUrlAtual = (info && info.url) || '/beniboy.html';
+    alarmeEl.querySelector('#szc-al-titulo').textContent = titulo;
     alarmeEl.querySelector('#szc-al-corpo').textContent = corpo;
     if (alarmeAtivo) return; // ja tocando - so atualiza o texto
     alarmeAtivo = true;
@@ -717,13 +725,17 @@
   alarmeEl.querySelector('.szc-al-silenciar').addEventListener('click', pararAlarmeBeniboy);
   alarmeEl.querySelector('.szc-al-atender').addEventListener('click', () => {
     pararAlarmeBeniboy();
-    location.href = '/beniboy.html';
+    location.href = alarmeUrlAtual;
   });
   // notificacao push critica chegou com a pagina ja aberta (em qualquer aba)
-  // - o service worker avisa direto, sem esperar clique na notificacao
+  // - o service worker avisa direto, sem esperar clique na notificacao. Vem
+  // com titulo/corpo/url reais (ver sw.js) - nao so um aviso generico do
+  // Beniboy, pode ser NOC, seguranca, RH etc
   if (navigator.serviceWorker) {
     navigator.serviceWorker.addEventListener('message', (e) => {
-      if (e.data && e.data.type === 'beniboy-alerta-critico') dispararAlarmeBeniboy(null);
+      if (e.data && e.data.type === 'alerta-critico') {
+        dispararAlarmeBeniboy({ titulo: e.data.title, corpo: e.data.body, url: e.data.url });
+      }
     });
   }
 
@@ -796,15 +808,20 @@
       const es = new EventSource('/api/stream?token=' + encodeURIComponent(token));
       if (ATEND.ativo) {
         es.addEventListener('suporte-chat', () => { atendCarregar(); });
-        es.addEventListener('beniboy-escalonamento', (e) => { dispararAlarmeBeniboy(JSON.parse(e.data)); });
+        es.addEventListener('beniboy-escalonamento', (e) => {
+          const d = JSON.parse(e.data);
+          const corpo = `${esc(d.nome || 'Visitante')}${d.motivo ? ' · ' + esc(d.motivo) : ''}`;
+          dispararAlarmeBeniboy({ corpo, url: '/beniboy.html?chat=' + encodeURIComponent(d.chatId || '') });
+        });
         // alerta de seguranca (texto tipo comando/script ou upload bloqueado
         // no chat publico - ver segurancaChat.js/index.js) - SO Master, mais
         // restrito que o alarme critico acima (Master + tag Suporte). Reusa
-        // o mesmo alarme visual/sonoro, so muda o motivo mostrado
+        // o mesmo alarme visual/sonoro, so muda o titulo/motivo mostrado
         es.addEventListener('chat-seguranca-alerta', (e) => {
           if (!ATEND.ehMaster) return;
           const d = JSON.parse(e.data);
-          dispararAlarmeBeniboy({ nome: d.nome, motivo: '🛡️ ' + (d.motivo || 'Atividade suspeita detectada no chat') });
+          const corpo = `${esc(d.nome || 'Visitante')} · ${esc(d.motivo || 'Atividade suspeita detectada no chat')}`;
+          dispararAlarmeBeniboy({ titulo: '🛡️ Alerta de segurança do chat', corpo, url: '/beniboy.html?chat=' + encodeURIComponent(d.id || '') });
         });
       }
       es.addEventListener('pedido-status-mudou', (e) => { mostrarPopupPedido(JSON.parse(e.data)); });
