@@ -242,6 +242,13 @@ async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino,
     atualizadoEm: agora,
     historicoStatus: [...(chat.historicoStatus || []), { statusAtendimento, nivel, por: autor ? (autor.nome || autor.email || autor.id) : null, em: agora }].slice(-50),
   };
+  // voltar pro PENDENTE = devolver pro Beniboy de verdade (não só cosmético
+  // no kanban) - reativa o bot mesmo que ele tenha se calado antes (chamou
+  // atendente, ver desativarBot acima). Reverte só esse "desligamento
+  // manual"; se atendidoPorEmail já tiver sido gravado (algum humano
+  // respondeu antes), o bot continua fora dali por segurança - ver o gate
+  // em suporteBot.js (botDesativado || atendidoPorEmail)
+  if (statusAtendimento === 'PENDENTE') patch.botDesativado = false;
   if (STATUS_TERMINAL.has(statusAtendimento) && chat.status === 'ABERTO') {
     patch.status = 'FINALIZADO';
     patch.finalizadoEm = agora;
