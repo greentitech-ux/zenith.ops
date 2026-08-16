@@ -8894,6 +8894,24 @@ function aquecerBoot(promessa, ms) {
       rodarAutoCheckinsParque().catch((err) => console.error('Erro na varredura de check-in automático:', err.message));
     }, 60 * 1000);
 
+    // termo impresso e venda nunca fechada: avisa Master/Gerente da unidade
+    // depois de PARQUE_TERMO_ALERTA_HORAS (1h por padrão). Cada atendimento
+    // avisa UMA vez (o parque.emissoesParaAlertar marca avisadoEm) - alerta
+    // repetido é alerta que a pessoa aprende a ignorar.
+    const varrerTermosPendentes = async () => {
+      const h = horaBrasilia();
+      if (h < 8 || h >= 23) return; // fora do horário do parque não há o que cobrar
+      const pendentes = await parque.emissoesParaAlertar();
+      for (const e of pendentes) {
+        await push.notifyParqueTermoPendente(e);
+        console.log(`Parque: termo sem venda há ${e.horas}h (${e.unidadeNome || e.unidade} · ${e.responsavelNome || 's/ nome'}) - Master/Gerente avisados.`);
+      }
+    };
+    varrerTermosPendentes().catch((err) => console.error('Erro na varredura de termos pendentes:', err.message));
+    setInterval(() => {
+      varrerTermosPendentes().catch((err) => console.error('Erro na varredura de termos pendentes:', err.message));
+    }, 10 * 60 * 1000);
+
     // varredura do chat de suporte (Beniboy): conversa ABERTA sem nenhuma
     // mensagem nova (visitante ou time) ha mais de 40min se encerra sozinha
     // (SEM_SOLUCAO, ver suporteChat.finalizarOciosos) - evita conversa morta

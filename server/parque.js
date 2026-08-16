@@ -1297,9 +1297,39 @@ async function listarEmissoesTermo({ unidades, apenasPendentes = true, dias = 7 
   return itens.sort((a, b) => String(b.emitidoEm).localeCompare(String(a.emitidoEm)));
 }
 
+// Depois de quantas horas em aberto o termo pendente vira alerta. 1h por
+// padrao: o cliente nao fica uma hora no balcao, entao passar disso não é
+// fila, é pendência. Ajustavel por env sem mexer no codigo.
+const TERMO_ALERTA_HORAS = Number(process.env.PARQUE_TERMO_ALERTA_HORAS || 1);
+
+// Emissoes que ja passaram do limite e AINDA NAO foram avisadas. Marca
+// avisadoEm no mesmo passo, entao cada atendimento gera UM alerta - sem
+// isso o job avisaria de novo a cada rodada e o gerente aprenderia a
+// ignorar a notificacao, que e o pior resultado possivel.
+async function emissoesParaAlertar() {
+  const corteAlerta = new Date(Date.now() - TERMO_ALERTA_HORAS * 3600000).toISOString();
+  // janela de 48h: pendencia de dias atras ja foi vista no painel, nao
+  // adianta notificar retroativamente
+  const corteJanela = new Date(Date.now() - 48 * 3600000).toISOString();
+  const snap = await TERMOS.where('emitidoEm', '>=', corteJanela).get();
+  const alvos = snap.docs
+    .map((d) => d.data())
+    .filter((e) => e.status === 'PENDENTE' && !e.avisadoEm && e.emitidoEm <= corteAlerta);
+  const avisados = [];
+  for (const e of alvos) {
+    // marca ANTES de notificar: se o push falhar, o pior caso é um alerta
+    // perdido (a pendência continua no painel). Marcar depois arriscaria
+    // notificar em loop se o push desse erro no meio.
+    await TERMOS.doc(e.id).set({ avisadoEm: new Date().toISOString() }, { merge: true });
+    avisados.push({ ...e, horas: ((Date.now() - new Date(e.emitidoEm).getTime()) / 3600000).toFixed(1) });
+  }
+  return avisados;
+}
+
 module.exports = {
   METODOS_PAGAMENTO, FORMAS_PAGAMENTO_SPLIT, PRECO_MEIA, valorPorTempo, valorDoCheckin,
   TERMO_STATUS, criarEmissaoTermo, finalizarEmissaoTermo, cancelarEmissaoTermo, listarEmissoesTermo,
+  TERMO_ALERTA_HORAS, emissoesParaAlertar,
   getConfigPrecos, salvarConfigPrecos,
   criar, checkin, listAll, listByUnidades, resumoDoDia, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
   adicionarTempo, relancar, visitaHojePorCpf, remover,
