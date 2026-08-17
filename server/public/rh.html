@@ -49,6 +49,10 @@
   label{display:block;font-size:11.5px;color:var(--muted);margin:10px 0 4px;font-family:var(--mono);}
   label:first-child{margin-top:0;}
   input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
+  /* campo que vem da leitura do documento: nao se digita nele. O readonly
+     ja bloqueia o teclado; o fundo diferente e pra quem olha a tela saber
+     de onde veio aquele dado sem precisar clicar. */
+  input[readonly], .campo-do-documento{background:var(--panel);opacity:.85;cursor:not-allowed;}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
   textarea{resize:vertical;min-height:56px;}
   .grid2{display:grid;grid-template-columns:1fr;gap:0 10px;}
@@ -230,6 +234,18 @@
       <div class="sub" id="tipo-cadastro-explicacao" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:8px 0 0;">extra já entra direto na Ficha de Ativos - trabalho avulso, sem período de teste.</div>
       <label>Unidade</label>
       <select id="c-unidade" required></select>
+
+      <!-- Extra e Candidato: os dados pessoais vem do DOCUMENTO, nao da
+           digitacao (ver documentoIdentidadeOcr.js). O bloco fica antes dos
+           campos de proposito - a ordem da tela e a ordem do trabalho. -->
+      <div id="doc-wrap">
+        <label>Documento de identidade (RG, CNH ou CPF) — obrigatório</label>
+        <div class="sub" style="margin:-2px 0 6px;">Fotografe frente e verso (até 3 imagens). Nome, nascimento e CPF são lidos do documento — não são digitados.</div>
+        <input type="file" id="c-documento" accept="image/*,application/pdf" multiple>
+        <button type="button" class="btn-add" id="btn-ler-doc" style="margin-top:6px;">🔍 Ler documento</button>
+        <div id="doc-msg" class="sub hidden" style="margin-top:6px;"></div>
+      </div>
+
       <label>Nome completo</label>
       <input type="text" id="c-nome" required maxlength="150">
       <div class="grid2">
@@ -241,6 +257,20 @@
           <label>Cargo / função</label>
           <input type="text" id="c-cargo" maxlength="60" placeholder="Ex: Atendente, Cozinha, Entregador">
         </div>
+      </div>
+      <div class="grid2 hidden" id="doc-campos-lidos">
+        <div>
+          <label>CPF</label>
+          <input type="text" id="c-cpf" readonly>
+        </div>
+        <div>
+          <label>RG</label>
+          <input type="text" id="c-rg" readonly>
+        </div>
+      </div>
+      <div class="hidden" id="doc-mae-wrap">
+        <label>Nome da mãe</label>
+        <input type="text" id="c-nome-mae" readonly>
       </div>
       <div class="grid2">
         <div>
@@ -705,6 +735,119 @@ let ADVERTINDO_ID = null;
 let ADVERTENCIA_ABERTA_ID = null;
 let TIPO_CADASTRO = 'extra';
 
+// bloco da ficha com o que foi lido do documento. Mostra tambem o que a
+// leitura NAO trouxe: campo em branco aqui e "nao estava legivel no
+// documento", nao "a pessoa nao tem" - a diferenca importa na hora de pedir
+// o dado de novo pra alguem.
+function docIdentidadeHtml(f){
+  const linhas = [
+    ['CPF', f.cpf ? formatarCpf(f.cpf) : null],
+    ['RG', f.rg],
+    ['Nome da mãe', f.nomeMae],
+  ].filter(([,v])=>v);
+  if(!linhas.length && !f.documentoIdentidade){
+    return '<div class="sub" style="color:var(--muted)">sem documento anexado (cadastro anterior a essa exigência).</div>';
+  }
+  const lidos = linhas.map(([r,v])=>`<div><span class="sub">${r}:</span> ${escapeHtml(v)}</div>`).join('');
+  const naoLidos = (f.leituraDocumento?.naoLidos||[]).map(c=>LABEL_CAMPO_DOC[c]||c);
+  const aviso = naoLidos.length
+    ? `<div class="sub" style="color:var(--warn);margin-top:6px;">Não foi possível ler no documento: ${escapeHtml(naoLidos.join(', '))}.</div>`
+    : '';
+  const tipo = f.leituraDocumento?.tipoDocumento ? `<div class="sub" style="margin-bottom:4px;">Lido de: ${escapeHtml(f.leituraDocumento.tipoDocumento)}</div>` : '';
+  return tipo + (lidos || '<div class="sub" style="color:var(--muted)">nenhum dado lido além do nome.</div>') + aviso;
+}
+
+// ---------- cadastro por documento (Extra / Candidato) ----------
+// Os dados pessoais vem da LEITURA do documento anexado, nao de digitacao:
+// nome trocado ou nascimento errado numa ficha de RH vira contrato errado e
+// - se for menor de idade - escala ilegal. Efetivado fica de fora: a
+// contratacao formal tem seu proprio pacote de documentos, conferido pelo RH.
+const TIPOS_COM_DOCUMENTO = ['extra', 'candidato'];
+let DOC_LIDO = null; // leitura aceita; sem ela o envio nao passa
+
+function aplicarModoDocumento(tipo){
+  const exige = TIPOS_COM_DOCUMENTO.includes(tipo);
+  document.getElementById('doc-wrap').classList.toggle('hidden', !exige);
+  ['c-nome','c-nascimento'].forEach(id=>{
+    const el = document.getElementById(id);
+    el.readOnly = exige;
+    el.classList.toggle('campo-do-documento', exige);
+    el.title = exige ? 'Vem do documento anexado - não é digitado' : '';
+  });
+  if(!exige){ limparLeituraDocumento(); }
+}
+function limparLeituraDocumento(){
+  DOC_LIDO = null;
+  ['c-cpf','c-rg','c-nome-mae'].forEach(id=>{ document.getElementById(id).value = ''; });
+  document.getElementById('doc-campos-lidos').classList.add('hidden');
+  document.getElementById('doc-mae-wrap').classList.add('hidden');
+  const m = document.getElementById('doc-msg');
+  m.classList.add('hidden'); m.innerHTML = '';
+}
+const LABEL_CAMPO_DOC = { nome:'nome', dataNascimento:'data de nascimento', cpf:'CPF', rg:'RG', nomeMae:'nome da mãe' };
+
+async function lerDocumentoCadastro(){
+  const arquivos = Array.from(document.getElementById('c-documento').files || []);
+  const msg = document.getElementById('doc-msg');
+  msg.classList.remove('hidden');
+  if(!arquivos.length){
+    msg.innerHTML = '<span style="color:var(--bad);">Escolha a foto do documento primeiro.</span>';
+    return;
+  }
+  const btn = document.getElementById('btn-ler-doc');
+  btn.disabled = true; btn.textContent = '🔍 Lendo...';
+  msg.innerHTML = '<span style="color:var(--muted);">Lendo o documento... leva alguns segundos.</span>';
+  try{
+    const fd = new FormData();
+    arquivos.forEach(a=>fd.append('documento', a));
+    const resp = await fetch('/api/rh/ler-documento', { method:'POST', body: fd });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Não consegui ler o documento.');
+    if(!data.nome) throw new Error('Não consegui ler o nome nesse documento. Tire a foto de novo, com o documento inteiro e sem reflexo.');
+
+    DOC_LIDO = data;
+    document.getElementById('c-nome').value = data.nome;
+    document.getElementById('c-nascimento').value = data.dataNascimento || '';
+    document.getElementById('c-cpf').value = formatarCpf(data.cpf);
+    document.getElementById('c-rg').value = data.rg || '';
+    document.getElementById('c-nome-mae').value = data.nomeMae || '';
+    document.getElementById('doc-campos-lidos').classList.remove('hidden');
+    document.getElementById('doc-mae-wrap').classList.toggle('hidden', !data.nomeMae);
+
+    const partes = [`<b style="color:var(--ok);">✔ ${escapeHtml(data.tipoDocumento||'Documento')} lido.</b> Confira contra o documento antes de cadastrar.`];
+    // menor de idade muda a escala (nada de noturno/perigoso) - precisa
+    // aparecer aqui, nao ficar implicito na data de nascimento
+    if(data.menorDeIdade){
+      partes.push('<span style="color:var(--warn);"><b>⚠️ Menor de 18 anos.</b> Confira as restrições de horário e função antes de escalar.</span>');
+    }
+    if(data.cpfRejeitado){
+      partes.push('<span style="color:var(--warn);">O CPF lido não fechou o dígito verificador — foi descartado. Fotografe de novo a parte do CPF.</span>');
+    }
+    if(data.nascimentoRejeitado){
+      partes.push('<span style="color:var(--warn);">A data de nascimento lida não faz sentido (idade fora de 14 a 100 anos) — foi descartada.</span>');
+    }
+    const faltando = (data.naoLidos||[]).filter(c=>c!=='nome').map(c=>LABEL_CAMPO_DOC[c]||c);
+    if(faltando.length){
+      partes.push(`<span style="color:var(--muted);">Não consegui ler: ${escapeHtml(faltando.join(', '))}. Se estiver no documento, tente outra foto.</span>`);
+    }
+    msg.innerHTML = partes.join('<br>');
+  }catch(err){
+    limparLeituraDocumento();
+    const m = document.getElementById('doc-msg');
+    m.classList.remove('hidden');
+    m.innerHTML = `<span style="color:var(--bad);">${escapeHtml(err.message)}</span>`;
+  }finally{
+    btn.disabled = false; btn.textContent = '🔍 Ler documento';
+  }
+}
+function formatarCpf(d){
+  const s = String(d||'').replace(/\D/g,'');
+  return s.length === 11 ? `${s.slice(0,3)}.${s.slice(3,6)}.${s.slice(6,9)}-${s.slice(9)}` : '';
+}
+document.getElementById('btn-ler-doc').addEventListener('click', lerDocumentoCadastro);
+// trocou o arquivo: a leitura antiga nao vale mais pro que esta na tela
+document.getElementById('c-documento').addEventListener('change', limparLeituraDocumento);
+
 function escolherTipoCadastro(tipo){
   TIPO_CADASTRO = tipo;
   document.querySelectorAll('#form-cadastrar .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tipo===tipo));
@@ -720,6 +863,7 @@ function escolherTipoCadastro(tipo){
   document.getElementById('wrap-sem-experiencia').classList.toggle('hidden', tipo!=='efetivado');
   document.getElementById('sub-sem-experiencia').classList.toggle('hidden', tipo!=='efetivado');
   if(tipo!=='efetivado') document.getElementById('c-sem-experiencia').checked = false;
+  aplicarModoDocumento(tipo);
   if(tipo==='candidato'){
     explicacao.textContent = 'candidato entra em período de teste de 5 dias - só vira funcionário ativo quando efetivado (aba Acompanh. de Teste).';
     labelAdmissao.textContent = 'Data Início Teste';
@@ -1671,6 +1815,7 @@ async function abrirDetalheFuncionario(id){
     ${secao('🩺 Atestados', atestFinal)}
     ${secao('📋 Advertências', advsHtml)}
     ${secao('📸 Check-ins', ckHtml)}
+    ${secao('🪪 Documento de identidade', docIdentidadeHtml(f))}
     ${secao('📄 Currículo', curriculo)}
     ${acoes}
   `;
@@ -1756,12 +1901,21 @@ document.getElementById('form-cadastrar').addEventListener('submit', async (e)=>
   msg.classList.add('hidden');
   const arq = document.getElementById('c-curriculo').files[0];
   if(!arq){ msg.textContent = 'Anexe o currículo (obrigatório).'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
+  const docs = Array.from(document.getElementById('c-documento').files || []);
+  if(TIPOS_COM_DOCUMENTO.includes(TIPO_CADASTRO)){
+    if(!docs.length){ msg.textContent = 'Anexe a foto do documento de identidade.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
+    // sem ter clicado em "Ler documento" nao da pra conferir nada antes de
+    // enviar - o servidor le de novo de qualquer jeito, mas quem cadastra
+    // precisa ver o que saiu ANTES de gravar
+    if(!DOC_LIDO){ msg.textContent = 'Clique em "Ler documento" e confira os dados antes de cadastrar.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
+  }
   const btn = e.target.querySelector('button[type=submit]');
   btn.disabled = true;
   try{
     const fd = new FormData();
     fd.append('unidade', document.getElementById('c-unidade').value);
     fd.append('nome', document.getElementById('c-nome').value);
+    docs.forEach(d=>fd.append('documento', d));
     fd.append('contato', document.getElementById('c-contato').value);
     fd.append('cargoFuncao', document.getElementById('c-cargo').value);
     fd.append('dataNascimento', document.getElementById('c-nascimento').value);
@@ -1775,6 +1929,7 @@ document.getElementById('form-cadastrar').addEventListener('submit', async (e)=>
     const indoPraTeste = data.tipoCadastro === 'candidato';
     document.getElementById('form-cadastrar').reset();
     document.getElementById('c-admissao').value = hojeBrasilia();
+    limparLeituraDocumento();
     escolherTipoCadastro('extra');
     msg.textContent = `✅ ${data.nome} cadastrado(a) com sucesso.`; msg.className = 'msg ok';
     await carregar();

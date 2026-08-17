@@ -57,6 +57,7 @@ const grupos = require('./grupos');
 const inventario = require('./inventario');
 const inventarioNotaOcr = require('./inventarioNotaOcr');
 const canaisVendaOcr = require('./canaisVendaOcr');
+const documentoIdentidadeOcr = require('./documentoIdentidadeOcr');
 const parque = require('./parque');
 const festas = require('./festas');
 const mensalistas = require('./mensalistas');
@@ -110,6 +111,14 @@ const uploadNotaFiscal = multer({
 const uploadRelatorioPdv = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024, files: 5 },
+});
+
+// documento de identidade do cadastro de RH (ver documentoIdentidadeOcr.js):
+// frente + verso + eventual segunda via. Limite por arquivo menor que o do
+// relatorio do PDV porque e foto de documento, nao print de tela cheia
+const uploadDocumentoIdentidade = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 3 },
 });
 
 // fundo customizado da tela de login (ver loginCustom.js) - so imagem,
@@ -202,6 +211,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/rh-colaborador.html',
   '/rh-cadastro.html',
   '/api/rh/cadastro-publico',
+  '/api/rh/ler-documento-publico',
   '/api/loja-status/heartbeat',
   '/api/loja-status/vigia-versao',
 ]);
@@ -1109,19 +1119,115 @@ app.post('/api/rh/publico/:token/checkin/saida', upload.single('foto'), async (r
 // sentido decididas por quem tem acesso ao Zenith, nao por quem preenche um
 // link publico. Devolve o linkToken de auto-atendimento (rh-colaborador.html)
 // que rh.criar() ja gera sozinho, pra pessoa poder bater ponto na hora. ----------
-app.post('/api/rh/cadastro-publico', upload.single('curriculo'), async (req, res) => {
+// ---------- leitura do documento de identidade no cadastro de RH ----------
+// Extra e Candidato (teste de 5 dias) nao digitam mais nome/nascimento: os
+// campos vem da leitura do documento anexado (ver documentoIdentidadeOcr.js).
+// A rota so LE - nada e gravado aqui; o cadastro em si continua sendo o
+// POST separado, com o arquivo indo junto.
+async function responderLeituraDocumento(req, res) {
   try {
-    const { unidade, nome, contato, cargoFuncao, dataNascimento } = req.body;
+    const arquivos = (req.files || []).map((f) => ({ buffer: f.buffer, mimeType: f.mimetype }));
+    if (!arquivos.length) return res.status(400).json({ error: 'Anexe a foto do documento.' });
+    if (!documentoIdentidadeOcr.ativo()) {
+      return res.status(400).json({ error: 'Leitura automática de documento não está configurada neste servidor.' });
+    }
+    res.json(await documentoIdentidadeOcr.lerDocumento({ arquivos }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}
+
+// A versao publica fica fora do login (o link de auto-cadastro e aberto) e
+// por isso tem teto por IP: cada leitura custa uma chamada de modelo, e
+// endpoint de IA sem dono e o tipo de coisa que vira conta alta em uma noite.
+// Contador em memoria mesmo - reiniciou o processo, zerou; o objetivo e
+// travar abuso continuo, nao ser um limitador exato.
+const LEITURA_DOC_TETO = 20;          // por IP
+const LEITURA_DOC_JANELA_MS = 60 * 60 * 1000;
+const leiturasDocPorIp = new Map();
+function tetoLeituraDocumento(req, res, next) {
+  const ip = req.ip || req.connection?.remoteAddress || 'desconhecido';
+  const agora = Date.now();
+  const registro = leiturasDocPorIp.get(ip);
+  if (!registro || agora - registro.desde > LEITURA_DOC_JANELA_MS) {
+    leiturasDocPorIp.set(ip, { desde: agora, contagem: 1 });
+    // limpeza oportunista: sem isso o Map cresceria pra sempre num processo
+    // de longa duracao, guardando IP que nunca mais voltou
+    if (leiturasDocPorIp.size > 5000) {
+      for (const [k, v] of leiturasDocPorIp) {
+        if (agora - v.desde > LEITURA_DOC_JANELA_MS) leiturasDocPorIp.delete(k);
+      }
+    }
+    return next();
+  }
+  registro.contagem += 1;
+  if (registro.contagem > LEITURA_DOC_TETO) {
+    return res.status(429).json({ error: 'Muitas leituras seguidas. Espere alguns minutos e tente de novo.' });
+  }
+  return next();
+}
+
+app.post('/api/rh/ler-documento-publico', tetoLeituraDocumento, uploadDocumentoIdentidade.array('documento', 3), responderLeituraDocumento);
+
+// Usado pelas DUAS rotas de cadastro (a publica e a da loja). O servidor le
+// o documento DE NOVO na hora de gravar em vez de aceitar o que a tela
+// mandou: os campos serem readonly no navegador impede erro de digitacao,
+// nao impede alguem montar a requisicao na mao. Como o pedido e justamente
+// que esses dados venham do documento e nao de digitacao, quem decide e a
+// leitura do servidor. Custa uma chamada de modelo por cadastro (nao por
+// tecla) - num fluxo de poucos cadastros por semana, e barato pelo que
+// garante. Devolve tambem o arquivo salvo, pra ficar anexado na ficha.
+// Checagem barata, ANTES de qualquer upload: sem ela o currículo ia pro
+// Storage e só então rh.criar recusava por falta de documento - gravando
+// lixo pra uma requisição que nunca ia virar cadastro.
+function exigeDocumentoIdentidade(tipoCadastro, arquivosDoc) {
+  const tipo = tipoCadastro === 'candidato' ? 'candidato' : (tipoCadastro || 'extra');
+  if (!['extra', 'candidato'].includes(tipo)) return null;
+  if ((arquivosDoc || []).length) return null;
+  return 'Anexe a foto do documento de identidade (RG, CNH ou CPF) - os dados são preenchidos por ele.';
+}
+
+async function lerEGuardarDocumentoIdentidade(arquivosReq, unidade) {
+  const arquivos = (arquivosReq || []).map((f) => ({ buffer: f.buffer, mimeType: f.mimetype }));
+  if (!arquivos.length) return null;
+  const leitura = await documentoIdentidadeOcr.lerDocumento({ arquivos });
+  if (!leitura.nome) {
+    throw new Error('Não consegui ler o nome no documento. Tire a foto de novo, com o documento inteiro, sem reflexo e bem iluminado.');
+  }
+  const primeiro = arquivosReq[0];
+  const path = await storage.salvarArquivo(unidade, primeiro, 'rh-documentos');
+  return {
+    leitura,
+    anexo: { path, nomeOriginal: primeiro.originalname, tipo: primeiro.mimetype, paginas: arquivosReq.length },
+  };
+}
+
+app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCount: 1 }, { name: 'documento', maxCount: 3 }]), async (req, res) => {
+  try {
+    const { unidade, contato, cargoFuncao } = req.body;
     const tipoCadastro = req.body.tipoCadastro === 'candidato' ? 'candidato' : 'extra';
     const mapa = await construirUnidadesMapa();
     if (!unidade || !mapa[unidade]) return res.status(400).json({ error: 'Loja inválida.' });
+    const faltaDoc = exigeDocumentoIdentidade(tipoCadastro, req.files?.documento);
+    if (faltaDoc) return res.status(400).json({ error: faltaDoc });
+    const arquivoCurriculo = (req.files?.curriculo || [])[0];
     let curriculo = null;
-    if (req.file) {
-      const path = await storage.salvarArquivo(unidade, req.file, 'rh-curriculos');
-      curriculo = { path, nomeOriginal: req.file.originalname, tipo: req.file.mimetype };
+    if (arquivoCurriculo) {
+      const path = await storage.salvarArquivo(unidade, arquivoCurriculo, 'rh-curriculos');
+      curriculo = { path, nomeOriginal: arquivoCurriculo.originalname, tipo: arquivoCurriculo.mimetype };
     }
+    // nome/nascimento/CPF vem da leitura do documento feita AQUI, nao do
+    // que a tela mandou (ver lerEGuardarDocumentoIdentidade)
+    const doc = await lerEGuardarDocumentoIdentidade(req.files?.documento, unidade);
     const registro = await rh.criar({
-      unidade, nome, contato, cargoFuncao, dataNascimento, tipoCadastro,
+      unidade, contato, cargoFuncao, tipoCadastro,
+      nome: doc?.leitura.nome,
+      dataNascimento: doc?.leitura.dataNascimento,
+      cpf: doc?.leitura.cpf,
+      rg: doc?.leitura.rg,
+      nomeMae: doc?.leitura.nomeMae,
+      documentoIdentidade: doc?.anexo || null,
+      leituraDocumento: doc?.leitura || null,
       curriculo, cadastradoPorId: null, cadastradoPorEmail: 'Auto-cadastro (link público)',
       precisaAprovacao: true,
     });
@@ -4853,7 +4959,9 @@ function precisaAprovacaoCadastro(req) {
   return !(req.isMaster || req.isAdmin || auth.hasSection(req, 'rh'));
 }
 
-app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'), async (req, res) => {
+app.post('/api/rh/ler-documento', requireSection('rh'), uploadDocumentoIdentidade.array('documento', 3), responderLeituraDocumento);
+
+app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'curriculo', maxCount: 1 }, { name: 'documento', maxCount: 3 }]), async (req, res) => {
   try {
     const { unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro } = req.body;
     // "1" ou "true" vindo de multipart/form-data (checkbox HTML manda string)
@@ -4864,13 +4972,27 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.single('curriculo'
     if (tipoCadastro === 'efetivado' && !podeCadastrarEfetivado(req)) {
       return res.status(403).json({ error: 'Só o RH pode cadastrar alguém já efetivado direto. Cadastre como Extra ou Candidato (teste de 5 dias).' });
     }
+    const faltaDoc = exigeDocumentoIdentidade(tipoCadastro, req.files?.documento);
+    if (faltaDoc) return res.status(400).json({ error: faltaDoc });
+    const arquivoCurriculo = (req.files?.curriculo || [])[0];
     let curriculo = null;
-    if (req.file) {
-      const path = await storage.salvarArquivo(unidade || 'geral', req.file, 'rh-curriculos');
-      curriculo = { path, nomeOriginal: req.file.originalname, tipo: req.file.mimetype };
+    if (arquivoCurriculo) {
+      const path = await storage.salvarArquivo(unidade || 'geral', arquivoCurriculo, 'rh-curriculos');
+      curriculo = { path, nomeOriginal: arquivoCurriculo.originalname, tipo: arquivoCurriculo.mimetype };
     }
+    // Extra e Candidato so entram com documento, e os dados vem da leitura
+    // dele. Efetivado (contratacao formal pelo RH) segue digitado - la o
+    // pacote de documentos e outro e mais completo (DOCUMENTOS_OBRIGATORIOS)
+    const doc = await lerEGuardarDocumentoIdentidade(req.files?.documento, unidade || 'geral');
     const registro = await rh.criar({
-      unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro, semExperiencia,
+      unidade, contato, cargoFuncao, dataAdmissao, tipoCadastro, semExperiencia,
+      nome: doc ? doc.leitura.nome : nome,
+      dataNascimento: doc ? doc.leitura.dataNascimento : dataNascimento,
+      cpf: doc?.leitura.cpf,
+      rg: doc?.leitura.rg,
+      nomeMae: doc?.leitura.nomeMae,
+      documentoIdentidade: doc?.anexo || null,
+      leituraDocumento: doc?.leitura || null,
       curriculo, cadastradoPorId: req.user.id, cadastradoPorEmail: req.user.email,
       precisaAprovacao: precisaAprovacaoCadastro(req),
     });

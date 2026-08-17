@@ -1,0 +1,172 @@
+// documentoIdentidadeOcr.js
+// Le a foto do documento de identidade (RG, CNH ou CPF) que a pessoa anexa
+// no cadastro de Extra / Candidato (teste de 5 dias) e devolve os dados
+// pessoais ja separados por campo: nome, nascimento, CPF, RG, nome da mae.
+//
+// Mesma ideia da leitura da nota fiscal (inventarioNotaOcr.js) e do
+// relatorio do PDV (canaisVendaOcr.js). A diferenca aqui e o PESO do erro:
+// nome trocado ou nascimento errado numa ficha de RH vira contrato errado,
+// eSocial errado e, no caso de menor de idade, escala ilegal. Por isso este
+// modulo e o mais desconfiado dos tres:
+//
+// - CPF passa por digito verificador. E a unica validacao dos tres modulos
+//   que consegue provar que a leitura esta errada sem ninguem conferir: CPF
+//   lido torto quase nunca fecha a conta dos digitos. Nao fechando, o campo
+//   volta vazio em vez de entrar errado na ficha.
+// - Data de nascimento passa por sanidade de idade (14 a 100). "12/08/2026"
+//   lido no lugar de "12/08/1996" e um erro comum de OCR em documento gasto,
+//   e passaria despercebido num campo de data solto.
+// - Idade < 18 volta marcada. Menor de idade tem restricao de horario e de
+//   funcao (nada de trabalho noturno/perigoso), entao isso precisa aparecer
+//   pra quem cadastra em vez de ficar implicito na data.
+//
+// So funciona com ANTHROPIC_API_KEY configurada: sem ela ativo() volta false
+// e o cadastro segue com os campos digitados na mao, como era antes.
+let cliente = null;
+function ativo() {
+  return !!process.env.ANTHROPIC_API_KEY;
+}
+function getCliente() {
+  if (!cliente) {
+    const Anthropic = require('@anthropic-ai/sdk');
+    cliente = new Anthropic(); // le ANTHROPIC_API_KEY da env var sozinho
+  }
+  return cliente;
+}
+
+// Documento de identidade e denso e mal fotografado (plastificado brilhando,
+// papel gasto, foto torta) - e o dado lido vai pra ficha trabalhista
+const MODELO = 'claude-sonnet-5';
+
+const MAX_ARQUIVOS = 3; // frente + verso + eventual segunda via
+const IDADE_MIN = 14;   // menor aprendiz (CLT art. 403)
+const IDADE_MAX = 100;
+
+function montarPrompt(qtdImagens) {
+  const blocoMultiplas = qtdImagens > 1 ? `
+
+Você recebeu ${qtdImagens} imagens. Elas são do MESMO documento (frente e verso, ou páginas diferentes). Junte tudo numa resposta só. Se forem claramente de PESSOAS diferentes (nomes diferentes), devolva {"erro": "as fotos são de pessoas diferentes"}.` : '';
+  return `Você está vendo a foto de um documento de identidade brasileiro (RG, CNH, CPF, CIN/RG novo ou Carteira de Trabalho). Extraia os dados pessoais.${blocoMultiplas}
+
+Devolva SOMENTE um JSON válido, sem nenhum texto antes ou depois, exatamente neste formato:
+{
+  "tipoDocumento": "RG" | "CNH" | "CPF" | "CIN" | "CTPS" | "outro",
+  "nome": "nome completo exatamente como está escrito no documento, ou null",
+  "dataNascimento": "AAAA-MM-DD, ou null",
+  "cpf": "somente os 11 dígitos, sem pontos nem traço, ou null",
+  "rg": "número do RG como está no documento, ou null",
+  "nomeMae": "nome da mãe (filiação), ou null"
+}
+
+Regras:
+- Campo que você não conseguir ler com CERTEZA vai como null. Um campo vazio quem cadastra preenche olhando o documento; um campo errado vira contrato errado e ninguém percebe. Na dúvida entre duas letras ou dois números, devolva null.
+- NOME: copie exatamente como está no documento, com todos os sobrenomes, sem abreviar e sem "corrigir" grafia (nomes como "Jonhatan", "Wellyngton" ou "Cezar" existem e estão certos no documento). Não inclua "Nome:", "Titular" nem rótulo nenhum.
+- NÃO confunda o nome do titular com o nome da MÃE ou do PAI. No RG a filiação vem logo abaixo do nome e é fácil trocar: o nome do titular é o que aparece sob "NOME", e os da filiação sob "FILIAÇÃO" (geralmente dois nomes, mãe e pai). Se não der pra separar com certeza, mande nome como null.
+- DATA DE NASCIMENTO: é a data de nascimento do titular, nunca a data de emissão/expedição do documento, nem a validade. Documento sempre tem várias datas - a de nascimento costuma vir rotulada como "DATA DE NASCIMENTO" ou "NASC". Se houver dúvida sobre qual é qual, mande null.
+- CPF: só os 11 dígitos. Se o documento mostrar o CPF em mais de um lugar e eles não baterem, mande null.
+- Se a imagem NÃO for um documento de identidade (foto de pessoa, print de tela, papel em branco, currículo), devolva {"erro": "descrição curta do que você viu"}.`;
+}
+
+function extrairJson(texto) {
+  const limpo = String(texto || '').trim().replace(/^```(json)?/i, '').replace(/```\s*$/i, '').trim();
+  return JSON.parse(limpo);
+}
+
+// Digito verificador do CPF. Esta e a unica checagem do fluxo que prova
+// sozinha que a leitura saiu errada - por isso CPF que nao fecha volta null
+// em vez de ir pra ficha. Rejeita tambem os "111.111.111-11" da vida, que
+// fecham a conta mas nunca sao CPF de gente.
+function cpfValido(digitos) {
+  if (!/^\d{11}$/.test(digitos)) return false;
+  if (/^(\d)\1{10}$/.test(digitos)) return false;
+  const calcular = (ate) => {
+    let soma = 0;
+    for (let i = 0; i < ate; i += 1) soma += Number(digitos[i]) * (ate + 1 - i);
+    const resto = (soma * 10) % 11;
+    return resto === 10 ? 0 : resto;
+  };
+  return calcular(9) === Number(digitos[9]) && calcular(10) === Number(digitos[10]);
+}
+
+function idadeEm(dataISO, hoje = new Date()) {
+  const [a, m, d] = dataISO.split('-').map(Number);
+  let idade = hoje.getFullYear() - a;
+  const mesAtual = hoje.getMonth() + 1;
+  if (mesAtual < m || (mesAtual === m && hoje.getDate() < d)) idade -= 1;
+  return idade;
+}
+
+// nascimento so passa se for data real E de uma idade plausivel pra
+// trabalho: ano lido errado (2026 no lugar de 1996) e o erro mais comum de
+// OCR em documento gasto, e passaria batido num campo de data solto
+function nascimentoOuNull(valor) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(valor || ''))) return null;
+  const data = new Date(`${valor}T12:00:00Z`);
+  if (Number.isNaN(data.getTime())) return null;
+  if (data.toISOString().slice(0, 10) !== valor) return null; // 31/02 e afins
+  const idade = idadeEm(valor);
+  if (idade < IDADE_MIN || idade > IDADE_MAX) return null;
+  return valor;
+}
+
+const texto = (v, max) => {
+  const s = String(v == null ? '' : v).trim().replace(/\s+/g, ' ').slice(0, max);
+  return s || null;
+};
+
+async function lerDocumento({ arquivos }) {
+  if (!ativo()) throw new Error('Leitura automática de documento não está configurada neste servidor.');
+  const fotos = (Array.isArray(arquivos) ? arquivos : []).filter((a) => a && a.buffer);
+  if (!fotos.length) throw new Error('Anexe a foto do documento.');
+  if (fotos.length > MAX_ARQUIVOS) throw new Error(`Envie no máximo ${MAX_ARQUIVOS} imagens do documento.`);
+
+  const blocos = [];
+  fotos.forEach((f, i) => {
+    if (fotos.length > 1) blocos.push({ type: 'text', text: `Imagem ${i + 1} de ${fotos.length}:` });
+    blocos.push(f.mimeType === 'application/pdf'
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.buffer.toString('base64') } }
+      : { type: 'image', source: { type: 'base64', media_type: f.mimeType, data: f.buffer.toString('base64') } });
+  });
+  blocos.push({ type: 'text', text: montarPrompt(fotos.length) });
+
+  const resp = await getCliente().messages.create({
+    model: MODELO,
+    max_tokens: 1500,
+    messages: [{ role: 'user', content: blocos }],
+  });
+  const bruto = (resp.content || []).map((b) => b.text || '').join('');
+  let dados;
+  try {
+    dados = extrairJson(bruto);
+  } catch (e) {
+    // sem o texto bruto no log e impossivel diagnosticar corte por
+    // max_tokens ou JSON malformado pela mensagem generica que o usuario ve
+    console.error('documentoIdentidadeOcr: falha ao parsear JSON. stop_reason=%s texto=%s', resp.stop_reason, bruto.slice(0, 1500));
+    throw new Error('Não consegui ler esse documento. Tente uma foto mais nítida, com o documento inteiro e sem reflexo.');
+  }
+  if (dados.erro) throw new Error(String(dados.erro).slice(0, 200));
+
+  const cpfDigitos = String(dados.cpf || '').replace(/\D/g, '');
+  const cpf = cpfValido(cpfDigitos) ? cpfDigitos : null;
+  const dataNascimento = nascimentoOuNull(dados.dataNascimento);
+
+  // "naoLidos" existe pelo mesmo motivo do "faltando" da leitura de canais:
+  // a tela precisa dizer O QUE ficou faltando, em vez de deixar quem cadastra
+  // descobrir no erro de validacao do envio
+  const campos = { nome: texto(dados.nome, 150), dataNascimento, cpf, rg: texto(dados.rg, 30), nomeMae: texto(dados.nomeMae, 150) };
+  const naoLidos = Object.entries(campos).filter(([, v]) => !v).map(([k]) => k);
+
+  return {
+    ...campos,
+    tipoDocumento: texto(dados.tipoDocumento, 20),
+    // avisa quando o modelo devolveu um CPF que nao fecha o digito: nesse
+    // caso o campo volta vazio, e quem cadastra precisa saber que foi erro
+    // de leitura e nao ausencia do dado no documento
+    cpfRejeitado: !!(cpfDigitos && !cpf),
+    nascimentoRejeitado: !!(dados.dataNascimento && !dataNascimento),
+    menorDeIdade: !!(dataNascimento && idadeEm(dataNascimento) < 18),
+    naoLidos,
+  };
+}
+
+module.exports = { ativo, lerDocumento, cpfValido, MAX_ARQUIVOS };

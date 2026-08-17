@@ -32,6 +32,12 @@
   .ajuda{font-size:11px;color:var(--muted);margin:-2px 0 6px;}
   input,select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
   input:focus,select:focus{outline:none;border-color:var(--accent);}
+  /* campo lido do documento: nao se digita nele (ver documentoIdentidadeOcr) */
+  input[readonly]{background:var(--panel);opacity:.85;cursor:not-allowed;}
+  .sub{font-size:11px;color:var(--muted);line-height:1.5;}
+  .btn-secundario{width:100%;font-family:var(--sans);font-size:12.5px;font-weight:600;padding:11px;border-radius:8px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer;}
+  .btn-secundario:disabled{opacity:.5;cursor:default;}
+  .grid2-doc{display:grid;grid-template-columns:1fr 1fr;gap:0 10px;}
   .tipos{display:flex;gap:6px;margin-top:4px;}
   .tipo-btn{flex:1;font-family:var(--sans);font-size:12.5px;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
   .tipo-btn.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
@@ -89,8 +95,17 @@
     </div>
   </div>
 
+  <!-- O auto-cadastro so existe pra Extra e Candidato, e nos dois os dados
+       pessoais vem do DOCUMENTO (ver documentoIdentidadeOcr.js). Vem antes
+       do nome de proposito: e o primeiro passo, nao um anexo do fim. -->
+  <label>Documento de identidade (RG, CNH ou CPF)</label>
+  <div class="sub" style="margin:-2px 0 6px;">Fotografe frente e verso (até 3 imagens). Seu nome, nascimento e CPF são lidos do documento — você não precisa digitar.</div>
+  <input type="file" id="documento" accept="image/*,application/pdf" multiple required>
+  <button type="button" class="btn-secundario" id="btn-ler-doc" style="margin-top:6px;">🔍 Ler meu documento</button>
+  <div id="doc-msg" class="msg hidden" style="margin-top:8px;"></div>
+
   <label>Nome completo *</label>
-  <input type="text" id="nome" required maxlength="150">
+  <input type="text" id="nome" required maxlength="150" readonly>
 
   <label>Contato (telefone/WhatsApp)</label>
   <input type="text" id="contato" maxlength="40" placeholder="(11) 99999-9999">
@@ -98,8 +113,19 @@
   <label>Cargo / função</label>
   <input type="text" id="cargo" maxlength="60" placeholder="Ex: Atendente, Cozinha, Entregador">
 
+  <div class="grid2-doc hidden" id="doc-campos-lidos">
+    <div>
+      <label>CPF</label>
+      <input type="text" id="cpf" readonly>
+    </div>
+    <div>
+      <label>RG</label>
+      <input type="text" id="rg" readonly>
+    </div>
+  </div>
+
   <label>Data de nascimento</label>
-  <input type="date" id="nascimento">
+  <input type="date" id="nascimento" readonly>
 
   <label>Currículo (PDF, obrigatório)</label>
   <input type="file" id="curriculo" accept="application/pdf" required>
@@ -113,6 +139,59 @@ function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&'
 
 let TIPO_CADASTRO = 'extra';
 let LINK_TOKEN = null;
+let DOC_LIDO = null; // leitura aceita; sem ela o envio nao passa
+
+// Os dados pessoais vem da LEITURA do documento, nao de digitacao. O
+// servidor le de novo na hora de gravar (ver lerEGuardarDocumentoIdentidade
+// em index.js) - o readonly daqui evita erro de digitacao, quem garante que
+// o dado veio do documento e o servidor.
+const LABEL_CAMPO_DOC = { nome:'nome', dataNascimento:'data de nascimento', cpf:'CPF', rg:'RG', nomeMae:'nome da mãe' };
+function formatarCpf(d){
+  const s = String(d||'').replace(/\D/g,'');
+  return s.length === 11 ? `${s.slice(0,3)}.${s.slice(3,6)}.${s.slice(6,9)}-${s.slice(9)}` : '';
+}
+function limparLeituraDoc(){
+  DOC_LIDO = null;
+  ['nome','nascimento','cpf','rg'].forEach(id=>{ document.getElementById(id).value = ''; });
+  document.getElementById('doc-campos-lidos').classList.add('hidden');
+  const m = document.getElementById('doc-msg');
+  m.classList.add('hidden'); m.innerHTML = '';
+}
+document.getElementById('documento').addEventListener('change', limparLeituraDoc);
+document.getElementById('btn-ler-doc').addEventListener('click', async ()=>{
+  const arquivos = Array.from(document.getElementById('documento').files || []);
+  const msg = document.getElementById('doc-msg');
+  msg.classList.remove('hidden');
+  if(!arquivos.length){ msg.textContent = 'Escolha a foto do documento primeiro.'; msg.className = 'msg err'; return; }
+  const btn = document.getElementById('btn-ler-doc');
+  btn.disabled = true; btn.textContent = '🔍 Lendo...';
+  msg.className = 'msg'; msg.textContent = 'Lendo o documento... leva alguns segundos.';
+  try{
+    const fd = new FormData();
+    arquivos.forEach(a=>fd.append('documento', a));
+    const resp = await fetch('/api/rh/ler-documento-publico', { method:'POST', body: fd });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Não consegui ler o documento.');
+    if(!data.nome) throw new Error('Não consegui ler o nome nesse documento. Tire a foto de novo, com o documento inteiro e sem reflexo.');
+    DOC_LIDO = data;
+    document.getElementById('nome').value = data.nome;
+    document.getElementById('nascimento').value = data.dataNascimento || '';
+    document.getElementById('cpf').value = formatarCpf(data.cpf);
+    document.getElementById('rg').value = data.rg || '';
+    document.getElementById('doc-campos-lidos').classList.remove('hidden');
+    const partes = [`<b>✔ ${escapeHtml(data.tipoDocumento||'Documento')} lido.</b> Confira se está tudo certo antes de enviar.`];
+    if(data.cpfRejeitado) partes.push('O CPF lido não fechou a conta do dígito verificador — tente outra foto da parte do CPF.');
+    const faltando = (data.naoLidos||[]).filter(c=>c!=='nome').map(c=>LABEL_CAMPO_DOC[c]||c);
+    if(faltando.length) partes.push(`Não consegui ler: ${escapeHtml(faltando.join(', '))}.`);
+    msg.className = 'msg ok'; msg.innerHTML = partes.join('<br>');
+  }catch(err){
+    limparLeituraDoc();
+    const m = document.getElementById('doc-msg');
+    m.classList.remove('hidden'); m.className = 'msg err'; m.textContent = err.message;
+  }finally{
+    btn.disabled = false; btn.textContent = '🔍 Ler meu documento';
+  }
+});
 
 document.querySelectorAll('#tipos-btns .tipo-btn').forEach(b=>{
   b.addEventListener('click', ()=>{
@@ -160,6 +239,9 @@ document.getElementById('form-cadastro').addEventListener('submit', async (e)=>{
   msg.classList.add('hidden');
   const arquivo = document.getElementById('curriculo').files[0];
   if(!arquivo){ msg.textContent = 'Anexe o currículo (obrigatório).'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
+  const docs = Array.from(document.getElementById('documento').files || []);
+  if(!docs.length){ msg.textContent = 'Anexe a foto do seu documento de identidade.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
+  if(!DOC_LIDO){ msg.textContent = 'Clique em "Ler meu documento" e confira os dados antes de enviar.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
   const btn = document.getElementById('btn-enviar');
   btn.disabled = true; btn.textContent = 'Enviando...';
   try{
@@ -171,6 +253,7 @@ document.getElementById('form-cadastro').addEventListener('submit', async (e)=>{
     fd.append('cargoFuncao', document.getElementById('cargo').value);
     fd.append('dataNascimento', document.getElementById('nascimento').value);
     fd.append('curriculo', arquivo);
+    docs.forEach(d=>fd.append('documento', d));
     const resp = await fetch('/api/rh/cadastro-publico', { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar o cadastro.');
