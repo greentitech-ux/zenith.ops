@@ -3623,7 +3623,15 @@ app.get('/api/fechamentos/meus', requireSection('lancamento'), async (req, res) 
 // fechamento (precisa saber quais campos extras preencher) ou corrige
 // (central.html); so o Master cria/edita/apaga grupo ----------
 app.get('/api/grupos', requireAnySection('lancamento', 'fechamentos', 'solicitacoes'), async (req, res) => {
-  res.json(await grupos.list());
+  const lista = await grupos.list();
+  // "lerCanaisDisponivel" e derivado, nao cadastro: o Master pode ter ligado
+  // a leitura por foto no grupo, mas se o servidor esta sem ANTHROPIC_API_KEY
+  // ela nao funciona. O lancamento TRAVA os campos que a foto preenche, entao
+  // sem essa distincao a loja ficaria sem conseguir lancar - com os campos
+  // bloqueados e nenhuma forma de preenche-los. grupos.html ignora esse campo
+  // (o toggle de cadastro continua sendo lerCanaisPorImagem).
+  const ocrLigado = canaisVendaOcr.ativo();
+  res.json(lista.map((g) => ({ ...g, lerCanaisDisponivel: g.lerCanaisPorImagem === true && ocrLigado })));
 });
 
 // so id+email de quem pode ser "responsavel" por uma solicitação - usado
