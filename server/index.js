@@ -6704,6 +6704,19 @@ app.get('/api/relatorio-config', auth.requireMaster, async (req, res) => {
   res.json(await relatorioMV.getConfig());
 });
 
+// "por que o relatorio veio zerado?" - o filtro do relatorio depende de duas
+// pontas casarem (usuario gatilho existir E os tickets estarem direcionados a
+// ele), e as duas falhando davam a mesma tela de zeros (ver diagnostico em
+// relatorioMV.js). Rota propria porque o Master pode querer conferir sem
+// gerar a previa inteira.
+app.get('/api/relatorio-mv/diagnostico', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await relatorioMV.diagnostico());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/relatorio-config', auth.requireMaster, async (req, res) => {
   try {
     const config = await relatorioMV.salvarConfig({

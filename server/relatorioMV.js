@@ -558,7 +558,77 @@ async function enviarRelatorio() {
 // realmente funcionam se clicados
 async function previewHtml() {
   const dados = await montarDados();
-  return { html: montarHtml(dados), total: dados.total, pendentes: dados.grupos.PENDENTE.length, aprovados: dados.grupos.APROVADO.length, rejeitados: dados.grupos.REJEITADO.length };
+  return {
+    html: montarHtml(dados),
+    total: dados.total,
+    pendentes: dados.grupos.PENDENTE.length,
+    aprovados: dados.grupos.APROVADO.length,
+    rejeitados: dados.grupos.REJEITADO.length,
+    // vai SEMPRE junto: relatorio vazio e um resultado legitimo (ninguem
+    // direcionou nada hoje) e tambem o sintoma de config errada. Sem o
+    // diagnostico do lado, os dois casos sao a mesma tela de zeros.
+    diagnostico: await diagnostico(),
+  };
+}
+
+// ---------------------------------------------------------------
+// POR QUE O RELATORIO VEIO VAZIO
+// ---------------------------------------------------------------
+// O filtro do relatorio (ehDoMV) depende de duas pontas casarem: o usuario
+// GATILHO configurado em /email.html precisa existir, e os tickets precisam
+// estar direcionados/atribuidos a ELE. Qualquer uma das duas falhando da o
+// mesmo resultado na tela - zero - e nada dizia qual das duas foi.
+//
+// Esta funcao abre a caixa preta: quantos tickets existem, quantos casaram
+// por cada criterio, quantos nao tem direcionamento nenhum e - o que mais
+// resolve na pratica - PRA QUEM os tickets estao indo, quando nao e pro
+// gatilho. E a diferenca entre "esta certo, nao ha nada hoje" e "a config
+// aponta pra uma pessoa e os tickets vao pra outra".
+async function diagnostico() {
+  const [todos, config] = await Promise.all([centralCards.listarTodos(), getConfig()]);
+  const ativos = todos.filter((c) => c.status !== 'CONVERTIDO');
+
+  const emailAtual = config.gatilhoUserEmail;
+  const idAtual = config.gatilhoUserId;
+  const criterios = { direcionadoEmail: 0, direcionadoId: 0, atribuidoId: 0, atribuidoEmail: 0 };
+  const norm = (e) => String(e || '').trim().toLowerCase();
+
+  let semDirecionamento = 0;
+  const outrosDestinos = new Map();
+
+  ativos.forEach((c) => {
+    if (emailAtual && norm(c.direcionadoParaEmail) === emailAtual) criterios.direcionadoEmail += 1;
+    if (idAtual && c.direcionadoParaId === idAtual) criterios.direcionadoId += 1;
+    if (idAtual && Array.isArray(c.atribuidosIds) && c.atribuidosIds.includes(idAtual)) criterios.atribuidoId += 1;
+    if (emailAtual && Array.isArray(c.atribuidosEmails) && c.atribuidosEmails.some((e) => norm(e) === emailAtual)) criterios.atribuidoEmail += 1;
+
+    const destinos = [c.direcionadoParaEmail, ...(c.atribuidosEmails || [])].map(norm).filter(Boolean);
+    // ticket sem direcionamento nenhum nunca entra no relatorio de ninguem -
+    // e a causa mais comum de "tenho ticket e o relatorio veio zerado"
+    if (!destinos.length && !c.direcionadoParaId && !(c.atribuidosIds || []).length) {
+      semDirecionamento += 1;
+      return;
+    }
+    if (ehDoMV(c, config)) return;
+    destinos.forEach((d) => outrosDestinos.set(d, (outrosDestinos.get(d) || 0) + 1));
+  });
+
+  return {
+    usuarioGatilho: config.usuarioGatilho,
+    usuarioGatilhoEncontrado: config.usuarioGatilhoEncontrado,
+    gatilhoUserEmail: emailAtual,
+    totalCards: todos.length,
+    convertidos: todos.length - ativos.length,
+    ativos: ativos.length,
+    doGatilho: ativos.filter((c) => ehDoMV(c, config)).length,
+    criterios,
+    semDirecionamento,
+    // top 8 destinos concorrentes: o suficiente pra ver o padrão sem virar
+    // um despejo de e-mails no meio de uma tela de configuração
+    outrosDestinos: [...outrosDestinos.entries()]
+      .sort((a, b) => b[1] - a[1]).slice(0, 8)
+      .map(([email, qtd]) => ({ email, qtd })),
+  };
 }
 
 // agenda o envio diario (cron.schedule ja roda em cima do timezone
@@ -584,4 +654,4 @@ async function iniciarAgendamento() {
   agendar(await getConfig());
 }
 
-module.exports = { enviarRelatorio, previewHtml, iniciarAgendamento, montarDados, montarHtml, notificarCardMV, enviarCardsPorEmail, getConfig, salvarConfig, TIPOS_COM_ACAO_POR_EMAIL };
+module.exports = { enviarRelatorio, previewHtml, diagnostico, iniciarAgendamento, montarDados, montarHtml, notificarCardMV, enviarCardsPorEmail, getConfig, salvarConfig, TIPOS_COM_ACAO_POR_EMAIL };
