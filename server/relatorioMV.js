@@ -545,17 +545,67 @@ async function enviarComFallback(opcoesEmail) {
   throw new Error(`Falha ao conectar no Gmail em todas as portas/IPs (último erro: ${ultimoErro.message}). Veja os logs do servidor.`);
 }
 
-async function enviarRelatorio() {
+// origem: 'agendado' (cron) | 'manual' (botao Reenviar agora)
+// paraOverride: manda pra OUTRO endereco sem mexer na config - serve pro
+// Master conferir na propria caixa antes de mandar pro destinatario real
+async function enviarRelatorio({ origem = 'agendado', porEmail = null, paraOverride = null } = {}) {
   const [config, dados] = await Promise.all([getConfig(), montarDados()]);
-  const to = config.emailDestino;
-  await enviarComFallback({
-    from: `Zenith Ops <${process.env.RELATORIO_EMAIL_USER}>`,
-    to,
-    cc: config.emailCopia || undefined,
-    subject: `Relatório de Solicitações - MV - ${dataHojeBR()}`,
-    html: montarHtml(dados),
-  });
-  return { total: dados.total, pendentes: dados.grupos.PENDENTE.length, aprovados: dados.grupos.APROVADO.length, rejeitados: dados.grupos.REJEITADO.length };
+  const to = paraOverride || config.emailDestino;
+  // a copia so vale no envio normal: um reenvio de conferencia pra outro
+  // endereco nao deve encher a caixa de quem esta em copia
+  const cc = paraOverride ? undefined : (config.emailCopia || undefined);
+  const resumo = {
+    total: dados.total,
+    pendentes: dados.grupos.PENDENTE.length,
+    aprovados: dados.grupos.APROVADO.length,
+    rejeitados: dados.grupos.REJEITADO.length,
+  };
+  try {
+    await enviarComFallback({
+      from: `Zenith Ops <${process.env.RELATORIO_EMAIL_USER}>`,
+      to,
+      cc,
+      subject: `Relatório de Solicitações - MV - ${dataHojeBR()}`,
+      html: montarHtml(dados),
+    });
+  } catch (err) {
+    // registra a FALHA tambem: sem isso, um envio que estourou no SMTP era
+    // indistinguivel de um envio que nunca foi tentado - e o Master so
+    // descobria quando alguem reclamava que nao recebeu
+    await registrarEnvio({ ...resumo, para: to, copia: cc || null, origem, porEmail, ok: false, erro: err.message });
+    throw err;
+  }
+  await registrarEnvio({ ...resumo, para: to, copia: cc || null, origem, porEmail, ok: true, erro: null });
+  return resumo;
+}
+
+// ---------------------------------------------------------------
+// HISTORICO DE ENVIOS
+// ---------------------------------------------------------------
+// Antes nao havia registro nenhum: nao dava pra saber se o relatorio das 8h
+// saiu, pra quem foi, com quantos tickets - nem se falhou. Foi exatamente
+// isso que deixou passar dias de relatorio vazio sem ninguem perceber. Agora
+// todo envio (agendado ou manual, sucesso ou erro) deixa rastro, e o
+// historico e a resposta pra "ja mandei hoje?" antes de reenviar.
+const ENVIOS = db.collection('relatorioMVEnvios');
+
+async function registrarEnvio(dados) {
+  try {
+    const ref = ENVIOS.doc();
+    await ref.set({ id: ref.id, em: new Date().toISOString(), ...dados });
+  } catch (err) {
+    // registro e diagnostico, nao a entrega: falhar aqui nao pode derrubar
+    // (nem "desfazer") um e-mail que ja saiu
+    console.error('Não foi possível registrar o envio do relatório MV:', err.message);
+  }
+}
+
+// os N mais recentes, do mais novo pro mais antigo. Sem paginacao de
+// proposito: o que responde "ja mandei hoje? deu certo?" sao os ultimos
+// envios, nao o arquivo historico inteiro.
+async function listarEnvios(limite = 20) {
+  const snap = await ENVIOS.orderBy('em', 'desc').limit(Math.min(Number(limite) || 20, 100)).get();
+  return snap.docs.map((d) => d.data());
 }
 
 // mesma montagem do relatorio (montarDados+montarHtml) mas SEM mandar e-mail -
@@ -654,7 +704,7 @@ function agendar(config) {
     return;
   }
   tarefaAtual = cron.schedule(cronExpressao, () => {
-    enviarRelatorio().catch((err) => console.error('Erro ao enviar relatório diário MV:', err.message));
+    enviarRelatorio({ origem: 'agendado' }).catch((err) => console.error('Erro ao enviar relatório diário MV:', err.message));
   }, { timezone: FUSO_BR });
 }
 
@@ -662,4 +712,4 @@ async function iniciarAgendamento() {
   agendar(await getConfig());
 }
 
-module.exports = { enviarRelatorio, previewHtml, diagnostico, iniciarAgendamento, montarDados, montarHtml, notificarCardMV, enviarCardsPorEmail, getConfig, salvarConfig, TIPOS_COM_ACAO_POR_EMAIL };
+module.exports = { enviarRelatorio, previewHtml, diagnostico, listarEnvios, iniciarAgendamento, montarDados, montarHtml, notificarCardMV, enviarCardsPorEmail, getConfig, salvarConfig, TIPOS_COM_ACAO_POR_EMAIL };

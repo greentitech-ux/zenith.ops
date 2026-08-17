@@ -6664,9 +6664,29 @@ app.get('/api/central', requireAnySection('solicitacoes', 'manutencao', 'tecnico
 
 // dispara o relatorio diario do MV na hora, pra testar (ver relatorioMV.js -
 // mesmo relatorio que roda sozinho no horario configurado em RELATORIO_HORA)
-app.get('/api/relatorio-mv/testar', auth.requireMaster, async (req, res) => {
+// envio/REENVIO sob demanda do relatorio (o mesmo e-mail do agendamento,
+// recalculado agora). "para" opcional manda pra outro endereco sem mexer na
+// config - serve pro Master conferir na propria caixa antes de mandar pro
+// destinatario real. Mantem o caminho antigo (/testar) porque o botao da
+// tela ja apontava pra ele.
+async function reenviarRelatorioMV(req, res) {
   try {
-    res.json(await relatorioMV.enviarRelatorio());
+    const para = String(req.body?.para || req.query.para || '').trim();
+    res.json(await relatorioMV.enviarRelatorio({
+      origem: 'manual', porEmail: req.user.email, paraOverride: para || null,
+    }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}
+app.get('/api/relatorio-mv/testar', auth.requireMaster, reenviarRelatorioMV);
+app.post('/api/relatorio-mv/reenviar', auth.requireMaster, reenviarRelatorioMV);
+
+// historico dos ultimos envios (agendados e manuais, com sucesso e com erro)
+// - e o que responde "ja saiu hoje? pra quem? com quantos?" antes de reenviar
+app.get('/api/relatorio-mv/envios', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await relatorioMV.listarEnvios(req.query.limite));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
