@@ -35,8 +35,17 @@ function getCliente() {
 // imprime do seu jeito) - e o numero lido aqui vai direto pro Faturamento
 const MODELO = 'claude-sonnet-5';
 
-function montarPrompt(canais) {
+function montarPrompt(canais, dica) {
   const lista = canais.map((c) => `${c.campo} | ${c.label}`).join('\n');
+  // A dica vem do cadastro do grupo (Master), entao e texto confiavel - mas
+  // entra DEPOIS das regras e delimitada, pra ser leitura de relatorio e nao
+  // um jeito de reescrever o formato de saida.
+  const blocoDica = dica ? `
+
+Instruções específicas do relatório desta loja (escritas por quem opera - siga-as quando conflitarem com a leitura visual óbvia):
+"""
+${dica}
+"""` : '';
   return `Você está vendo a foto (ou print) de um relatório de vendas do sistema de PDV de uma loja de comida. Extraia o VALOR TOTAL VENDIDO em cada canal de venda.
 
 Canais de venda cadastrados para esta loja (use o "campo" exatamente como está escrito aqui):
@@ -58,9 +67,10 @@ Regras:
 - Não invente canal: se um canal da lista não aparece no relatório, simplesmente não o inclua no JSON (não mande com valor 0, porque 0 é uma informação diferente de "não apareceu").
 - "naoIdentificados" existe pra não perder dinheiro de vista: se o relatório mostra uma linha de venda que não casa com nenhum canal cadastrado, ela vai pra lá e o gerente decide. É melhor mostrar "sobrou R$ 320 que não sei onde colocar" do que ignorar em silêncio.
 - Ignore linhas que claramente NÃO são canal de venda: total geral, subtotal, quantidade de pedidos, ticket médio, número de clientes, impostos, desconto. Só valores de venda POR CANAL.
+- LINHA COM MAIS DE UM NÚMERO: é comum a linha de um canal ter várias colunas (quantidade, taxa, valor...). Nesses casos, o valor que interessa é o TOTAL VENDIDO em dinheiro daquele canal. Uma coluna zerada nunca é a resposta quando existe outra coluna com valor na mesma linha - se um canal aparece com 0,00 numa coluna e com um valor real em outra, mande o valor real. Se as colunas forem ambíguas e você não souber qual é o total em dinheiro, mande a linha pra "naoIdentificados" em vez de chutar.
 - IMPORTANTE: os números estão em formato brasileiro (ponto separa milhar, vírgula separa decimal - ex: "1.234,56"). Converta todo valor para o padrão JSON: só ponto decimal, sem separador de milhar (ex: 1234.56). Nunca escreva número com vírgula no JSON - isso quebra o formato.
 - Datas sempre em AAAA-MM-DD.
-- Se a imagem não for um relatório de vendas, devolva {"erro": "descrição curta do que você viu"} em vez do formato acima.`;
+- Se a imagem não for um relatório de vendas, devolva {"erro": "descrição curta do que você viu"} em vez do formato acima.${blocoDica}`;
 }
 
 function extrairJson(texto) {
@@ -70,7 +80,7 @@ function extrairJson(texto) {
 
 const numeroOuNull = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
 
-async function lerCanais({ buffer, mimeType, canais }) {
+async function lerCanais({ buffer, mimeType, canais, dica }) {
   if (!ativo()) throw new Error('Leitura automática por imagem não está configurada neste servidor.');
   if (!Array.isArray(canais) || !canais.length) {
     throw new Error('Essa loja ainda não tem Canais de venda cadastrados - peça pro Master configurar em Grupos.');
@@ -82,7 +92,7 @@ async function lerCanais({ buffer, mimeType, canais }) {
   const resp = await getCliente().messages.create({
     model: MODELO,
     max_tokens: 4000,
-    messages: [{ role: 'user', content: [bloco, { type: 'text', text: montarPrompt(canais) }] }],
+    messages: [{ role: 'user', content: [bloco, { type: 'text', text: montarPrompt(canais, dica) }] }],
   });
   const texto = (resp.content || []).map((b) => b.text || '').join('');
   let dados;

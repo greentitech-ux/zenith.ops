@@ -212,6 +212,10 @@
           <input type="checkbox" id="c-ler-canais-imagem" style="width:auto;margin:0;"> 📷 Preencher por foto do relatório do PDV
         </label>
         <div style="font-size:11px;color:var(--muted);margin:4px 0 0 22px;line-height:1.5;">Libera pra loja o botão de ler os canais acima a partir de uma foto — mesmo sistema da leitura de nota fiscal do Estoque. A loja sempre confere valor por valor antes de enviar. Ligue só depois de testar com o relatório dessa bandeira: cada PDV imprime de um jeito.</div>
+        <label style="display:block;font-size:12px;color:var(--text);margin:10px 0 3px 22px;">Dica de leitura do relatório <span style="color:var(--muted);font-weight:400;">(opcional)</span></label>
+        <div style="font-size:11px;color:var(--muted);margin:0 0 5px 22px;line-height:1.5;">Escreva em português como esse relatório é impresso: em que ordem os canais aparecem, qual coluna tem o valor que vale. Isso é o que evita a leitura pegar a coluna errada.</div>
+        <textarea id="c-dica-leitura-canais" rows="3" maxlength="600" placeholder="Ex: a sequência é sempre Delivery - Moto Especi / Carryout / Pick Up / Na Loja. No Delivery o valor é o SEGUNDO número da linha; o primeiro é sempre zero e não é usado." style="margin-left:22px;width:calc(100% - 22px);padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
+        <button type="button" class="btn-add" style="margin-left:22px;" onclick="usarDicaExemplo('c-dica-leitura-canais')">Usar o exemplo acima</button>
       </fieldset>
 
       <fieldset>
@@ -279,6 +283,10 @@
         <input type="checkbox" id="e-ler-canais-imagem" style="width:auto;margin:0;"> 📷 Preencher por foto do relatório do PDV
       </label>
       <div style="font-size:11px;color:var(--muted);margin:4px 0 0 22px;line-height:1.5;">Libera pra loja o botão de ler os canais acima a partir de uma foto — mesmo sistema da leitura de nota fiscal do Estoque. A loja sempre confere valor por valor antes de enviar. Ligue só depois de testar com o relatório dessa bandeira: cada PDV imprime de um jeito.</div>
+      <label style="display:block;font-size:12px;color:var(--text);margin:10px 0 3px 22px;">Dica de leitura do relatório <span style="color:var(--muted);font-weight:400;">(opcional)</span></label>
+      <div style="font-size:11px;color:var(--muted);margin:0 0 5px 22px;line-height:1.5;">Escreva em português como esse relatório é impresso: em que ordem os canais aparecem, qual coluna tem o valor que vale. Isso é o que evita a leitura pegar a coluna errada.</div>
+      <textarea id="e-dica-leitura-canais" rows="3" maxlength="600" placeholder="Ex: a sequência é sempre Delivery - Moto Especi / Carryout / Pick Up / Na Loja. No Delivery o valor é o SEGUNDO número da linha; o primeiro é sempre zero e não é usado." style="margin-left:22px;width:calc(100% - 22px);padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
+      <button type="button" class="btn-add" style="margin-left:22px;" onclick="usarDicaExemplo('e-dica-leitura-canais')">Usar o exemplo acima</button>
     </fieldset>
 
     <fieldset style="margin-top:10px;">
@@ -611,6 +619,17 @@ function renderGrupos(){
     </div>`).join('') || `<div style="color:var(--muted);text-align:center;padding:20px;">Nenhum grupo criado ainda.</div>`;
 }
 
+// o exemplo e o caso real que motivou o campo (relatorio do PDV com a coluna
+// zerada antes da que vale): quem cadastra tem um ponto de partida em vez de
+// olhar pra um textarea vazio sem saber o que escrever
+const DICA_EXEMPLO = 'A sequência dos canais é sempre: Delivery - Moto Especi / Carryout / Pick Up / Na Loja. No Delivery o valor é o SEGUNDO número da linha — o primeiro é sempre zero e não é usado.';
+function usarDicaExemplo(id){
+  const el = document.getElementById(id);
+  if(el.value.trim() && !confirm('Substituir a dica que já está escrita pelo exemplo?')) return;
+  el.value = DICA_EXEMPLO;
+  el.focus();
+}
+
 document.getElementById('create-form').addEventListener('submit', async (e)=>{
   e.preventDefault();
   const errEl = document.getElementById('create-err');
@@ -619,6 +638,7 @@ document.getElementById('create-form').addEventListener('submit', async (e)=>{
     nome: document.getElementById('c-nome').value,
     unidades: readChecked(document.getElementById('c-unidades')),
     lerCanaisPorImagem: document.getElementById('c-ler-canais-imagem').checked,
+    dicaLeituraCanais: document.getElementById('c-dica-leitura-canais').value,
     caixaHabilitado: document.getElementById('c-caixa-habilitado').checked,
     maquininhasHabilitado: document.getElementById('c-maquininhas-habilitado').checked,
     maquininhaPrefixo: document.getElementById('c-maquininha-prefixo').value,
@@ -659,6 +679,7 @@ function abrirEdicaoGrupo(id){
   document.getElementById('e-nome').value = g.nome;
   document.getElementById('e-unidades').innerHTML = unidadesChecksHtml('e-unidades', new Set(g.unidades||[]));
   document.getElementById('e-ler-canais-imagem').checked = g.lerCanaisPorImagem === true;
+  document.getElementById('e-dica-leitura-canais').value = g.dicaLeituraCanais || '';
   document.getElementById('e-caixa-habilitado').checked = g.caixaHabilitado !== false;
   document.getElementById('e-maquininhas-habilitado').checked = g.maquininhasHabilitado !== false;
   document.getElementById('e-maquininha-prefixo').value = g.maquininhaPrefixo || 'Maquininha';
@@ -685,6 +706,7 @@ document.getElementById('grupo-form').addEventListener('submit', async (e)=>{
     nome: document.getElementById('e-nome').value,
     unidades: readChecked(document.getElementById('e-unidades')),
     lerCanaisPorImagem: document.getElementById('e-ler-canais-imagem').checked,
+    dicaLeituraCanais: document.getElementById('e-dica-leitura-canais').value,
     caixaHabilitado: document.getElementById('e-caixa-habilitado').checked,
     maquininhasHabilitado: document.getElementById('e-maquininhas-habilitado').checked,
     maquininhaPrefixo: document.getElementById('e-maquininha-prefixo').value,
