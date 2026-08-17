@@ -146,7 +146,11 @@ function writePDF(res, { titulo, subtitulo, colunas, linhas, resumo, larguras, s
       // nunca mais alta que a area util de uma pagina inteira
       alturaLinha = Math.min(alturaLinha, doc.page.height - doc.page.margins.top - doc.page.margins.bottom - 30);
     }
-    if (y + alturaLinha > doc.page.height - doc.page.margins.bottom) {
+    // "_novaPagina" na linha forca a quebra ANTES dela - e como quem monta o
+    // relatorio separa blocos que precisam sair em folhas proprias (ex: cada
+    // rede do comparativo de Fechamentos). Comeca com "_" porque nao e
+    // coluna: toCSV so le as keys de "colunas", entao nao vaza pro CSV
+    if (linha._novaPagina || y + alturaLinha > doc.page.height - doc.page.margins.bottom) {
       doc.addPage();
       y = linhaCabecalhoTabela(doc.page.margins.top);
       doc.fontSize(8).fillColor('#222');

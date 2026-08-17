@@ -12,7 +12,14 @@
 // SO entram se pelo menos um fechamento do resultado de fato preencheu
 // aquele campo - o relatorio sai exatamente com as colunas preenchidas,
 // sem colunas fantasmas de R$ 0,00 nem campos lancados ficando de fora.
+//
+// DIVIDIDO POR REDE (ver redes.js): as linhas saem em duas secoes - Grupo
+// Bravo (GBE) e ARCFOOD - cada uma com SUBTOTAL proprio, e um TOTAL GERAL no
+// fim. Sao duas operacoes com contabilidade separada; a lista unica obrigava
+// quem le a somar na mao pra chegar no numero de cada uma, e era exatamente
+// isso que se fazia toda vez que o relatorio era usado.
 const PDFDocument = require('pdfkit');
+const redes = require('./redes');
 
 function slugify(text) {
   return String(text || 'relatorio-fechamentos')
@@ -88,6 +95,9 @@ function prepararRelatorio(fechamentos, grupos, ocultas) {
 
   const linhas = rows.map((f) => {
     const linha = {
+      // codigo da unidade fica na linha (sem virar coluna) so pra dividir
+      // por rede - o relatorio mostra o NOME, nao o codigo
+      _unidade: f.unidade,
       data: f.data,
       unidadeNome: f.unidadeNome || f.unidade,
       gerente: f.gerente || '—',
@@ -101,7 +111,33 @@ function prepararRelatorio(fechamentos, grupos, ocultas) {
     [...canais, ...formas].forEach((c) => { linha[c.key] = (f[c.origem] || {})[c.campo] || 0; });
     return linha;
   });
-  return { colunas, linhas };
+  return { colunas, linhas, secoes: dividirPorRede(colunas, linhas) };
+}
+
+// ---------------------------------------------------------------
+// divisao por rede + subtotais
+// ---------------------------------------------------------------
+// Subtotal soma TODA coluna de dinheiro, inclusive os canais/formas extras
+// que aparecerem - somar so faturamento deixaria as demais colunas sem
+// fechamento no fim da secao, que e onde a pessoa procura o numero.
+function somar(colunas, linhas) {
+  const soma = {};
+  colunas.filter((c) => c.moeda).forEach((c) => {
+    soma[c.key] = linhas.reduce((s, l) => s + (Number(l[c.key]) || 0), 0);
+  });
+  return soma;
+}
+
+// [{ id, nome, linhas, subtotal, qtd }] - rede sem linha nenhuma fica de
+// fora (ver agruparPorRede em redes.js)
+function dividirPorRede(colunas, linhas) {
+  return redes.agruparPorRede(linhas, '_unidade').map((g) => ({
+    id: g.id,
+    nome: g.nome,
+    linhas: g.itens,
+    qtd: g.itens.length,
+    subtotal: somar(colunas, g.itens),
+  }));
 }
 
 function formatarCelula(coluna, valor) {
@@ -110,7 +146,7 @@ function formatarCelula(coluna, valor) {
   return valor ?? '';
 }
 
-function toCSV(colunas, linhas) {
+function toCSV(colunas, linhas, secoes) {
   const escape = (v) => {
     let s = String(v ?? '');
     // neutraliza injecao de formula: uma celula que comeca com = + - @ (ou
@@ -120,8 +156,28 @@ function toCSV(colunas, linhas) {
     if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
+  const linhaCsv = (l) => colunas.map((c) => escape(formatarCelula(c, l[c.key]))).join(',');
+  // linha de soma: 1a coluna vira o rotulo, so as de dinheiro trazem numero
+  // (repetir data/unidade numa linha de soma seria mentira) - mesma regra do PDF
+  const linhaSoma = (soma, rotulo) => colunas
+    .map((c, i) => escape(i === 0 ? rotulo : (c.moeda ? fmtMoney(soma[c.key] || 0) : '')))
+    .join(',');
+
   const out = [colunas.map((c) => escape(c.label)).join(',')];
-  linhas.forEach((l) => out.push(colunas.map((c) => escape(formatarCelula(c, l[c.key]))).join(',')));
+  if (secoes && secoes.length) {
+    secoes.forEach((sec) => {
+      // titulo da secao ocupa so a 1a coluna - abrir no Excel e ver a faixa
+      // do mesmo jeito que no PDF
+      out.push(escape(`${sec.nome} · ${sec.qtd} fechamento(s)`) + ','.repeat(Math.max(0, colunas.length - 1)));
+      sec.linhas.forEach((l) => out.push(linhaCsv(l)));
+      out.push(linhaSoma(sec.subtotal, `SUBTOTAL ${sec.nome}`));
+      out.push('');
+    });
+    // com uma rede so, o total geral seria a repeticao literal do subtotal
+    if (secoes.length > 1) out.push(linhaSoma(somar(colunas, linhas), 'TOTAL GERAL'));
+  } else {
+    linhas.forEach((l) => out.push(linhaCsv(l)));
+  }
   // BOM no inicio - sem isso o Excel/Sheets as vezes le acentos errado num CSV UTF-8
   return '﻿' + out.join('\r\n');
 }
@@ -139,7 +195,7 @@ function largurasAjustadas(colunas) {
   return larg;
 }
 
-function writePDF(res, { titulo, subtitulo, colunas, linhas, nomeArquivo }) {
+function writePDF(res, { titulo, subtitulo, colunas, linhas, secoes, nomeArquivo }) {
   const doc = new PDFDocument({ margin: 36, size: 'A4', layout: 'landscape' });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${slugify(nomeArquivo || titulo)}.pdf"`);
@@ -191,33 +247,81 @@ function writePDF(res, { titulo, subtitulo, colunas, linhas, nomeArquivo }) {
     return y + 20;
   }
 
+  const alturaLinha = 18;
+  // cursor vertical compartilhado por todos os helpers abaixo (faixa de
+  // secao, linha e quebra de pagina leem e avancam o MESMO y)
+  let y = doc.page.margins.top;
+  const cabeNaPagina = (altura) => y + altura <= doc.page.height - doc.page.margins.bottom;
+  function novaPagina() {
+    doc.addPage();
+    y = linhaCabecalhoTabela(doc.page.margins.top);
+    doc.fontSize(fonteTabela).fillColor('#222');
+  }
+
+  // faixa com o nome da rede - e o que faz as duas operacoes se lerem
+  // separadas de relance, sem precisar conferir unidade por unidade
+  function faixaSecao(nome, qtd) {
+    if (!cabeNaPagina(24 + alturaLinha)) novaPagina();  // faixa orfa no pe da pagina nao ajuda ninguem
+    doc.rect(tableX, y, tableWidth, 20).fill('#dfe6ee');
+    doc.fillColor('#1b2733').fontSize(Math.max(7, fonteTabela + 1))
+      .text(`${nome} · ${qtd} fechamento(s)`, tableX + 4, y + 6, { width: tableWidth - 8 });
+    doc.fontSize(fonteTabela).fillColor('#222');
+    y += 20;
+  }
+
+  function linhaValores(linha, { negrito = false, fundo = null, rotulo = null } = {}) {
+    if (!cabeNaPagina(alturaLinha)) novaPagina();
+    if (fundo) doc.rect(tableX, y, tableWidth, alturaLinha).fill(fundo);
+    doc.fillColor(negrito ? '#111' : '#222').fontSize(fonteTabela);
+    let x = tableX;
+    colunas.forEach((c, i) => {
+      // no subtotal, a 1a coluna vira o rotulo e so as de dinheiro trazem
+      // numero - repetir data/unidade numa linha de soma seria mentira
+      const texto = rotulo != null
+        ? (i === 0 ? rotulo : (c.moeda ? fmtMoney(linha[c.key] || 0) : ''))
+        : String(formatarCelula(c, linha[c.key]) ?? '');
+      doc.text(texto, x + 4, y + 5, { width: larg[c.key] - 8, height: alturaLinha - 4, ellipsis: true });
+      x += larg[c.key];
+    });
+    doc.moveTo(tableX, y + alturaLinha).lineTo(tableX + tableWidth, y + alturaLinha)
+      .strokeColor(negrito ? '#98a4b3' : '#ddd').lineWidth(negrito ? 1 : 0.5).stroke();
+    y += alturaLinha;
+  }
+
   cabecalhoPagina();
-  let y = resumo(90);
+  y = resumo(90);
   y = linhaCabecalhoTabela(y);
 
   if (!linhas.length) {
     doc.fontSize(10).fillColor('#888').text('Nenhum fechamento encontrado nesse período.', tableX, y + 12);
+    doc.end();
+    return;
   }
 
   doc.fontSize(fonteTabela).fillColor('#222');
-  const alturaLinha = 18;
-  for (const linha of linhas) {
-    if (y + alturaLinha > doc.page.height - doc.page.margins.bottom) {
-      doc.addPage();
-      y = linhaCabecalhoTabela(doc.page.margins.top);
-      doc.fontSize(fonteTabela).fillColor('#222');
+  if (secoes && secoes.length) {
+    secoes.forEach((sec, i) => {
+      // cada rede comeca numa PAGINA nova: o relatorio e entregue por
+      // operacao (imprime/manda so as folhas do GBE, so as da ARCFOOD), e
+      // com as duas na mesma folha isso nao da pra fazer
+      if (i > 0) novaPagina();
+      faixaSecao(sec.nome, sec.qtd);
+      sec.linhas.forEach((l) => linhaValores(l));
+      linhaValores(sec.subtotal, { negrito: true, fundo: '#f4f7fa', rotulo: `SUBTOTAL ${sec.nome}` });
+    });
+    // com uma rede so, o total geral seria a repeticao literal do subtotal
+    if (secoes.length > 1) {
+      // consolidado tambem em folha propria - se ficasse no pe da ultima
+      // secao, seria lido como se fosse total da ARCFOOD
+      novaPagina();
+      faixaSecao('CONSOLIDADO · todas as redes', linhas.length);
+      linhaValores(somar(colunas, linhas), { negrito: true, fundo: '#e6ecf3', rotulo: 'TOTAL GERAL' });
     }
-    let x = tableX;
-    for (const c of colunas) {
-      const valor = formatarCelula(c, linha[c.key]);
-      doc.text(String(valor ?? ''), x + 4, y + 5, { width: larg[c.key] - 8, height: alturaLinha - 4, ellipsis: true });
-      x += larg[c.key];
-    }
-    doc.moveTo(tableX, y + alturaLinha).lineTo(tableX + tableWidth, y + alturaLinha).strokeColor('#ddd').lineWidth(0.5).stroke();
-    y += alturaLinha;
+  } else {
+    linhas.forEach((l) => linhaValores(l));
   }
 
   doc.end();
 }
 
-module.exports = { slugify, prepararRelatorio, toCSV, writePDF };
+module.exports = { slugify, prepararRelatorio, dividirPorRede, somar, toCSV, writePDF };
