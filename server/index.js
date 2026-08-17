@@ -7818,6 +7818,9 @@ async function acionarBeniboy(chatId) {
       // marca o instante desse 1o alerta - a varredura reforcarAlarmesBeniboy()
       // usa isso pra saber quando repetir, ja que ninguem assumiu ainda
       suporteChat.marcarAlertaEnviado(chatId).catch(() => {});
+      // acabou de nascer um alarme por reforcar: liga a varredura rapida
+      // (ver reforcarAlarmesBeniboy)
+      alarmeBeniboyPendente = true;
     }
   } catch (err) {
     console.error('[suporteBot] falha no acionamento:', err.message);
@@ -7831,8 +7834,18 @@ async function acionarBeniboy(chatId) {
 // agendamento mais abaixo); a propria varredura de ociosos do suporte
 // (40min sem nenhuma mensagem nova) acaba fechando quem ficou mesmo
 // abandonado, entao isso nao fica reforcando pra sempre.
+// Ha alguma conversa escalada esperando reforco? Nasce true pra que o
+// primeiro tick depois de um deploy sempre confira o banco (pode ter ficado
+// alguem escalado da instancia anterior). Depois disso quem manda e o
+// resultado da propria varredura + a escalacao nova em acionarBeniboy.
+let alarmeBeniboyPendente = true;
+
 async function reforcarAlarmesBeniboy() {
   const pendentes = await suporteChat.listarParaReforcarAlarme();
+  // sem ninguem esperando, a varredura passa pro ritmo lento (ver o
+  // agendamento) - a consulta so volta a ser de 15 em 15s quando ha de fato
+  // um alarme por reforcar
+  alarmeBeniboyPendente = pendentes.length > 0;
   for (const chat of pendentes) {
     const lojaOffline = await lojaContextoEstaOffline(chat.lojaContexto);
     if (lojaOffline) {
@@ -9287,7 +9300,16 @@ function aquecerBoot(promessa, ms) {
     // sem ninguem assumir. Varredura mais rapida que o proprio REALERTA_MS
     // pra nao empilhar atraso em cima do atraso (senao o reforco "de 30s"
     // virava de fato ~1min30 esperando o proximo tick de 1min)
+    // ...mas so enquanto HA alguem esperando. A consulta e sempre filtrada
+    // (ABERTO + bot desativado + PENDENTE), so que uma consulta que nao acha
+    // nada ainda custa 1 leitura no Firestore: de 15 em 15s isso dava 5.760
+    // leituras/dia pra descobrir, quase sempre, que nao ha nada a fazer. Sem
+    // ninguem escalado, o ritmo cai pra 2min (8 ticks); a escalacao nova
+    // (acionarBeniboy) liga o ritmo rapido na hora, sem esperar tick nenhum.
+    let ticksAlarmeBeniboy = 0;
     setInterval(() => {
+      ticksAlarmeBeniboy += 1;
+      if (!alarmeBeniboyPendente && ticksAlarmeBeniboy % 8 !== 0) return;
       reforcarAlarmesBeniboy().catch((err) => console.error('Erro no reforço do alarme do Beniboy:', err.message));
     }, 15 * 1000);
 
@@ -9360,4 +9382,27 @@ function aquecerBoot(promessa, ms) {
       console.warn('AVISO: RELATORIO_EMAIL_USER/RELATORIO_EMAIL_PASS não configurados - relatório diário do MV desativado.');
     }
   });
+
+  // Desligamento: grava o que ficou pendente das batidas de heartbeat.
+  //
+  // Desde a mudanca de custo (ver PERSIST_MS em lojaStatus.js) a batida de
+  // cada computador so vai pro Firestore de 5 em 5 minutos - no meio do
+  // caminho o timestamp fresco mora so na memoria deste processo. O Render
+  // manda SIGTERM antes de trocar a instancia num deploy; sem este flush a
+  // instancia nova subiria lendo timestamps de ate 5min atras e dispararia
+  // alerta de queda em massa de lojas que nunca cairam.
+  let desligando = false;
+  const desligar = async (sinal) => {
+    if (desligando) return; // Render manda SIGTERM e depois SIGKILL - nao repetir
+    desligando = true;
+    try {
+      const gravados = await lojaStatus.flushHeartbeatsPendentes();
+      if (gravados) console.log(`${sinal}: ${gravados} heartbeat(s) pendente(s) gravado(s) antes de sair.`);
+    } catch (err) {
+      console.error(`${sinal}: falha ao gravar heartbeats pendentes:`, err.message);
+    }
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => desligar('SIGTERM'));
+  process.on('SIGINT', () => desligar('SIGINT'));
 })();

@@ -193,6 +193,17 @@ const ESPELHO_TTL_MS = 10 * 60 * 1000;
 let espelho = null;      // Map docId -> dados
 let espelhoEm = 0;
 
+// Campos de que o heartbeat e DONO: so ele escreve neles. Como a gravacao
+// no Firestore passou a ser espacada (ver PERSIST_MS), a memoria fica mais
+// nova que o documento entre uma gravacao e outra - entao numa recarga do
+// espelho esses campos NAO podem voltar pro valor velho do banco. Sem isso,
+// o ultimoHeartbeatEm rebobinava ate 5min e a varredura anunciava queda de
+// uma maquina que nunca parou.
+const CAMPOS_DO_HEARTBEAT = [
+  'ultimoHeartbeatEm', 'ip', 'userAgent', 'abertoDesde',
+  'redeDia', 'redeHoras', 'redeMinutos', 'redeHistorico',
+];
+
 async function carregarEspelho() {
   const snap = await COLLECTION.get();
   // so relê se a migracao mexeu em alguma coisa (o normal e nao mexer, e
@@ -200,7 +211,20 @@ async function carregarEspelho() {
   const migrou = await migrarLegado(snap.docs);
   const docs = migrou ? (await COLLECTION.get()).docs : snap.docs;
   const mapa = new Map();
-  docs.forEach((d) => mapa.set(d.id, d.data()));
+  docs.forEach((d) => {
+    const doBanco = d.data();
+    const emMemoria = espelho && espelho.get(d.id);
+    // memoria mais nova que o banco: preserva o que o heartbeat acumulou
+    // desde a ultima gravacao, e pega do banco todo o resto (nome, tipo,
+    // anydeskId, avisadoOffline... - editados por outros caminhos)
+    if (emMemoria && (emMemoria.ultimoHeartbeatEm || 0) > (doBanco.ultimoHeartbeatEm || 0)) {
+      const preservado = {};
+      CAMPOS_DO_HEARTBEAT.forEach((c) => { if (emMemoria[c] !== undefined) preservado[c] = emMemoria[c]; });
+      mapa.set(d.id, { ...doBanco, ...preservado });
+      return;
+    }
+    mapa.set(d.id, doBanco);
+  });
   espelho = mapa;
   espelhoEm = Date.now();
   return mapa;
@@ -211,7 +235,12 @@ async function garantirEspelho() {
   return carregarEspelho();
 }
 
-function invalidarEspelho() { espelho = null; espelhoEm = 0; }
+// Zera a validade, mas NAO joga fora o mapa: a proxima carga precisa dele
+// pra saber quais campos da memoria estao mais novos que o banco (ver
+// carregarEspelho). Descartar aqui fazia uma edicao de nome/tipo derrubar
+// junto o ultimoHeartbeatEm ainda nao gravado - e a varredura seguinte
+// anunciava uma queda que nunca houve.
+function invalidarEspelho() { espelhoEm = 0; }
 
 async function listUncached() {
   return [...(await garantirEspelho()).values()];
@@ -270,6 +299,25 @@ function metricasDeRede(atual, rede) {
   return campos;
 }
 
+// De quanto em quanto tempo uma batida "sem novidade" ainda assim vira
+// gravacao. Serve so pra sobreviver a um restart: enquanto o processo vive,
+// quem responde online/offline e o espelho em memoria. Menor que o TTL do
+// espelho (10min) de proposito - assim uma recarga nunca acha um documento
+// mais velho que uma gravacao pendente.
+const PERSIST_MS = Number(process.env.LOJA_STATUS_PERSIST_MS) >= 0
+  ? Number(process.env.LOJA_STATUS_PERSIST_MS)
+  : 5 * 60 * 1000;
+const ultimaGravacaoEm = new Map(); // docId -> quando foi gravado de verdade
+
+// Depois de um restart, o ultimoHeartbeatEm gravado pode estar ate PERSIST_MS
+// atrasado - e a varredura anunciaria queda de maquina que nunca parou. Este
+// e o tempo que damos pra cada maquina viva bater pelo menos uma vez (a
+// batida e a cada 20-25s) antes de confiar no que veio do banco.
+const CARENCIA_POS_BOOT_MS = Number(process.env.LOJA_STATUS_CARENCIA_BOOT_MS) >= 0
+  ? Number(process.env.LOJA_STATUS_CARENCIA_BOOT_MS)
+  : 2 * 60 * 1000;
+const processoIniciadoEm = Date.now();
+
 async function heartbeat(codigo, posto, info, token) {
   const id = docIdFor(codigo, posto || 'principal');
   const ref = COLLECTION.doc(id);
@@ -320,10 +368,37 @@ async function heartbeat(codigo, posto, info, token) {
   // entre a leitura e esta escrita, o null apagava a mensagem que nunca
   // chegou a ser mostrada.
   if (mensagemPendente) patch.mensagemPendente = null;
-  await ref.set(patch, { merge: true });
+
+  // ---- decide se ESTA batida vira gravacao no Firestore ----
+  // A leitura ja tinha sido resolvida (espelho em memoria); a ESCRITA nao.
+  // Gravar toda batida dava, com ~40 maquinas a cada 25s, ~138 mil escritas
+  // POR DIA (4,1 milhoes/mes) pra registrar, na esmagadora maioria das
+  // vezes, so "continuo vivo". Escrita no Firestore custa 3x uma leitura -
+  // era esse o gasto.
+  //
+  // Agora a memoria e atualizada SEMPRE (de graca) e o banco so recebe
+  // quando ha o que contar: mudou algo que outra parte do sistema le, ou
+  // passou tempo demais desde a ultima gravacao (pra um restart nao perder
+  // o rastro). Quem decide online/offline e o espelho, entao espacar a
+  // gravacao nao atrasa a deteccao de queda enquanto o processo vive.
+  const anterior = atual || {};
+  const mudouAlgoQueImporta = mensagemPendente
+    || !anterior.ultimoHeartbeatEm            // primeira batida deste posto
+    || patch.ip !== anterior.ip
+    || patch.userAgent !== anterior.userAgent
+    || patch.abertoDesde !== anterior.abertoDesde
+    || patch.redeHistorico !== undefined;     // virada de dia da rede
+  const desdeUltimaGravacao = Date.now() - (ultimaGravacaoEm.get(id) || 0);
+  const precisaPersistir = mudouAlgoQueImporta || desdeUltimaGravacao >= PERSIST_MS;
+
+  if (precisaPersistir) {
+    await ref.set(patch, { merge: true });
+    ultimaGravacaoEm.set(id, Date.now());
+  }
   // mantem o espelho em dia sem reler: o heartbeat sabe exatamente o que
-  // acabou de gravar. É isso que faz a proxima batida nao custar leitura.
-  memoria.set(id, { ...(atual || {}), ...patch });
+  // acabou de gravar (ou o que gravaria). É isso que faz a proxima batida
+  // nao custar leitura - e agora, na maioria das vezes, nem escrita.
+  memoria.set(id, { ...anterior, ...patch });
   // token confere? (maquina legada sem token cadastrado nunca passa aqui -
   // recebe comando/chat vazios ate reinstalar o NOCZenith com o token assado)
   const tokenOk = !!(atual && atual.agentToken && tokensBatem(token, atual.agentToken));
@@ -855,11 +930,24 @@ async function varrerAlertas() {
     if ((Date.now() - candidato.ultimoHeartbeatEm) >= LIMIAR_OFFLINE_MS && !candidato.avisadoOffline) {
       const snap = await COLLECTION.doc(docIdFor(candidato.codigo, candidato.posto)).get();
       if (!snap.exists) continue;
-      doc = snap.data();
+      // MAX, nao substituicao: a memoria e sempre igual ou mais NOVA que o
+      // banco (o heartbeat grava espacado, ver PERSIST_MS), entao trocar uma
+      // pela outra rebobinaria o relogio e inventaria queda. O get() aqui
+      // serve pra enxergar batida recebida por OUTRA instancia - some com
+      // a memoria, nao a sobrescreve.
+      doc = { ...snap.data(), ultimoHeartbeatEm: Math.max(candidato.ultimoHeartbeatEm || 0, snap.data().ultimoHeartbeatEm || 0) };
       if (espelho) espelho.set(docIdFor(doc.codigo, doc.posto), doc);
       if (!doc.ultimoHeartbeatEm) continue;
     }
     const online = (Date.now() - doc.ultimoHeartbeatEm) < LIMIAR_OFFLINE_MS;
+    // logo depois de subir, "offline" pode ser so um timestamp gravado antes
+    // do restart - nao uma queda. So vale pra maquina cuja ultima batida
+    // CONHECIDA e anterior ao boot: se ela ja bateu neste processo e parou,
+    // isso e queda de verdade e vai pro alerta na hora. Maquina viva bate em
+    // ate 25s e se corrige sozinha dentro da carencia; maquina caida continua
+    // caida e e avisada no tick seguinte.
+    if (!online && doc.ultimoHeartbeatEm < processoIniciadoEm
+        && (Date.now() - processoIniciadoEm) < CARENCIA_POS_BOOT_MS) continue;
     if (!online && !doc.avisadoOffline) {
       // 'em' = ultimo heartbeat real (quando de fato silenciou), nao a hora da
       // deteccao - fica mais fiel no registro
@@ -920,7 +1008,35 @@ async function diagnosticoRede(dia) {
   };
 }
 
+// Grava o que ainda nao foi persistido das batidas (ver PERSIST_MS) - o
+// Render manda SIGTERM antes de trocar a instancia num deploy, e sem isso
+// a instancia nova subiria enxergando timestamps ate 5min velhos: pior que
+// perder o dado, isso disparava alerta de queda em massa logo apos deploy.
+async function flushHeartbeatsPendentes() {
+  if (!espelho) return 0;
+  const alvos = [];
+  for (const [id, doc] of espelho) {
+    if (!doc || !doc.ultimoHeartbeatEm) continue;
+    if (doc.ultimoHeartbeatEm <= (ultimaGravacaoEm.get(id) || 0)) continue;
+    // grava TODOS os campos do heartbeat, nao so o carimbo: as medicoes de
+    // rede do dia (redeDia) tambem so existem em memoria entre uma gravacao
+    // e outra, e sao o dado que o diagnostico de link usa
+    const patch = {};
+    CAMPOS_DO_HEARTBEAT.forEach((c) => { if (doc[c] !== undefined) patch[c] = doc[c]; });
+    alvos.push([id, patch]);
+  }
+  if (!alvos.length) return 0;
+  const r = await Promise.allSettled(alvos.map(([id, patch]) => COLLECTION.doc(id)
+    .set(patch, { merge: true })));
+  // so conta como gravado o que de fato foi: chamar duas vezes (SIGTERM
+  // seguido de SIGINT, ou o teste) nao pode regravar o que ja passou, mas
+  // tambem nao pode dar por gravado o que falhou
+  r.forEach((x, i) => { if (x.status === 'fulfilled') ultimaGravacaoEm.set(alvos[i][0], Date.now()); });
+  return r.filter((x) => x.status === 'fulfilled').length;
+}
+
 module.exports = {
+  flushHeartbeatsPendentes,
   heartbeat, listar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
