@@ -56,6 +56,7 @@ const centralChat = require('./centralChat');
 const grupos = require('./grupos');
 const inventario = require('./inventario');
 const inventarioNotaOcr = require('./inventarioNotaOcr');
+const canaisVendaOcr = require('./canaisVendaOcr');
 const parque = require('./parque');
 const festas = require('./festas');
 const mensalistas = require('./mensalistas');
@@ -3528,6 +3529,36 @@ async function uploadArquivosKpi(files, ownerId) {
   }
   return out;
 }
+
+// Le a foto do relatorio de vendas do PDV e devolve um RASCUNHO com o valor
+// de cada Canal de venda (ver canaisVendaOcr.js) - mesmo motor de visao da
+// leitura de nota fiscal do Estoque. Nao grava nada: quem confere e envia o
+// fechamento continua sendo a loja, campo a campo.
+//
+// So responde se o GRUPO daquela unidade tiver o recurso ligado
+// (lerCanaisPorImagem, marcado pelo Master em /grupos.html). O formato do
+// relatorio muda de PDV pra PDV: liberar pra todo mundo de uma vez seria
+// entregar leitura ruim pra lojas que nem foram testadas.
+app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadNotaFiscal.single('imagem'), async (req, res) => {
+  try {
+    const unidade = req.body.unidade;
+    if (!unidade) return res.status(400).json({ error: 'Informe a unidade.' });
+    if (!req.isMaster && !(req.permissions?.unidades || []).includes(unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'Anexe a foto do relatório de vendas.' });
+    if (!canaisVendaOcr.ativo()) return res.status(400).json({ error: 'Leitura automática por imagem não está configurada neste servidor.' });
+    const grupo = await grupos.grupoDaUnidade(unidade);
+    if (!grupo || grupo.lerCanaisPorImagem !== true) {
+      return res.status(400).json({ error: 'Essa loja não usa leitura de Canais por imagem. O Master ativa em Grupos.' });
+    }
+    const canais = (grupo.canaisVendaExtras || []).map((c) => ({ campo: c.campo, label: c.label }));
+    const rascunho = await canaisVendaOcr.lerCanais({ buffer: req.file.buffer, mimeType: req.file.mimetype, canais });
+    res.json(rascunho);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
 // ---------- lancamento de fechamento pela propria loja (secao "lancamento") ----------
 // substitui o AppSheet: a loja loga com um usuario proprio (papel "Fechamento",

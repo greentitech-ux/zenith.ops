@@ -199,6 +199,13 @@
 
     <div class="secao">
       <div class="secao-titulo">Canais de venda</div>
+      <!-- so aparece pra loja cujo GRUPO tem lerCanaisPorImagem ligado (o
+           Master ativa em /grupos.html) - ver atualizarBotaoLerCanais -->
+      <div id="ler-canais-wrap" class="hidden" style="margin:4px 0 8px;">
+        <input type="file" id="ler-canais-arquivo" accept="image/*,application/pdf" capture="environment" class="hidden">
+        <button type="button" class="btn-add" id="btn-ler-canais" onclick="document.getElementById('ler-canais-arquivo').click()">📷 Preencher por foto do relatório</button>
+        <div id="ler-canais-msg" class="sub hidden" style="margin-top:6px;"></div>
+      </div>
       <div class="grid2 hidden" id="canais-extras-container" style="margin-top:6px;"></div>
       <div class="sub hidden" id="canais-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
     </div>
@@ -680,7 +687,75 @@ function somaKpisEm(kpisDefs, destino){
 function arquivosKpiSelecionados(){
   return [...document.querySelectorAll('.kpi-extra-arquivo')].filter(el=>el.files && el.files[0]);
 }
-function renderCanaisExtras(unidade){ renderExtrasGrupo(unidade, 'canaisVendaExtras', 'canais-extras-container', 'canais-vazio', 'canal-extra-input'); }
+function renderCanaisExtras(unidade){
+  renderExtrasGrupo(unidade, 'canaisVendaExtras', 'canais-extras-container', 'canais-vazio', 'canal-extra-input');
+  atualizarBotaoLerCanais(unidade);
+}
+
+// ---------- preencher os Canais por foto do relatorio do PDV ----------
+// Mesmo caminho da leitura de nota fiscal do Estoque: manda a imagem, recebe
+// um RASCUNHO e preenche os campos - quem confere e envia continua sendo a
+// loja. O botao so existe se o grupo dessa unidade tiver o recurso ligado.
+function atualizarBotaoLerCanais(unidade){
+  const grupo = grupoKpiDaUnidade(unidade);
+  const ligado = !!grupo && grupo.lerCanaisPorImagem === true && (grupo.canaisVendaExtras||[]).length > 0;
+  document.getElementById('ler-canais-wrap').classList.toggle('hidden', !ligado);
+  if(!ligado) esconderMsgLerCanais();
+}
+function esconderMsgLerCanais(){
+  const msg = document.getElementById('ler-canais-msg');
+  msg.classList.add('hidden'); msg.innerHTML = '';
+}
+document.getElementById('ler-canais-arquivo').addEventListener('change', async (ev)=>{
+  const arquivo = ev.target.files && ev.target.files[0];
+  ev.target.value = ''; // permite escolher a MESMA foto de novo depois de um erro
+  if(!arquivo) return;
+  const botao = document.getElementById('btn-ler-canais');
+  const msg = document.getElementById('ler-canais-msg');
+  botao.disabled = true; botao.textContent = '📷 Lendo a foto...';
+  msg.classList.remove('hidden');
+  msg.innerHTML = '<span style="color:var(--muted);">Lendo o relatório... isso leva alguns segundos.</span>';
+  try{
+    const fd = new FormData();
+    fd.append('imagem', arquivo);
+    fd.append('unidade', document.getElementById('f-unidade').value);
+    const res = await fetch('/api/fechamentos/ler-canais', { method:'POST', body: fd });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || 'Não foi possível ler a imagem.');
+
+    // preenche SO o que veio; campo que a imagem nao trouxe fica como estava
+    // (em branco ou com o que a loja ja tinha digitado)
+    let preenchidos = 0;
+    (data.itens||[]).forEach(it=>{
+      const el = document.querySelector(`.canal-extra-input[data-extra-campo="${it.campo}"]`);
+      if(!el) return;
+      el.value = it.valor;
+      el.style.borderColor = 'var(--ok)'; // marca o que veio da foto, pra conferir
+      preenchidos++;
+    });
+    atualizarResumo();
+
+    const partes = [`<b style="color:var(--ok);">✔ ${preenchidos} canal(is) preenchido(s) pela foto.</b> Confira valor por valor antes de enviar — a leitura erra às vezes.`];
+    if((data.faltando||[]).length){
+      partes.push(`<span style="color:var(--warn);">Não achei na foto: ${data.faltando.map(f=>escapeHtml(f.label)).join(', ')} — preencha na mão.</span>`);
+    }
+    if((data.naoIdentificados||[]).length){
+      // dinheiro que aparece no relatorio mas nao casa com nenhum canal
+      // cadastrado: mostrar e melhor que ignorar em silencio
+      partes.push(`<span style="color:var(--warn);">Sobrou no relatório sem canal correspondente: `
+        + data.naoIdentificados.map(n=>`${escapeHtml(n.textoOrigem)} (${fmtMoney(n.valor)})`).join(', ')
+        + `. Se isso é venda, peça pro Master cadastrar o canal em Grupos.</span>`);
+    }
+    if(data.data && data.data !== document.getElementById('f-data').value){
+      partes.push(`<span style="color:var(--warn);">A data do relatório (${escapeHtml(data.data)}) é diferente da data escolhida acima — confira se é o relatório do dia certo.</span>`);
+    }
+    msg.innerHTML = partes.join('<br>');
+  }catch(err){
+    msg.innerHTML = `<span style="color:var(--bad);">${escapeHtml(err.message)}</span>`;
+  }finally{
+    botao.disabled = false; botao.textContent = '📷 Preencher por foto do relatório';
+  }
+});
 function lerCanaisExtras(){ return lerExtrasGrupo('canal-extra-input'); }
 function renderFormasExtras(unidade){ renderExtrasGrupo(unidade, 'formasPagamentoExtras', 'formas-extras-container', 'formas-vazio', 'forma-extra-input'); }
 function lerFormasExtras(){ return lerExtrasGrupo('forma-extra-input'); }
