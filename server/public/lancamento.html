@@ -1150,9 +1150,15 @@ function renderPedidoSemanal(){
   painel.classList.toggle('atrasado', temAtraso);
   painel.classList.toggle('tudo-feito', tudoFeito);
 
-  document.getElementById('ps-titulo').textContent = '📦 ' + (d.titulo || 'Pedido semanal');
-  document.getElementById('ps-sub').textContent =
-    `Todo ${(d.diaSemanaNome||'').toLowerCase()} · anexe o pedido pra confirmar`;
+  // o título e o dia vêm da REGRA, não de uma config global: duas lojas do
+  // mesmo acesso podem pedir em dias diferentes. Com uma regra só, o
+  // cabeçalho fala o dia dela; com mais de uma, cada linha diz o seu.
+  const titulos = [...new Set(visiveis.map(u=>u.titulo).filter(Boolean))];
+  const dias = [...new Set(visiveis.map(u=>u.diaSemanaNome).filter(Boolean))];
+  document.getElementById('ps-titulo').textContent = '📦 ' + (titulos.length===1 ? titulos[0] : 'Pedido semanal');
+  document.getElementById('ps-sub').textContent = dias.length===1
+    ? `Todo ${dias[0].toLowerCase()} · anexe o pedido pra confirmar`
+    : 'Anexe o pedido pra confirmar - cada loja tem o dia da regra dela';
 
   // os elementos são identificados pelo ÍNDICE, não pelo código da unidade:
   // código aqui é coisa como "Domino's Carrinho Aeroporto Recife" - tem
@@ -1181,14 +1187,16 @@ function renderPedidoSemanal(){
                    onclick="confirmarPedidoSemanal(${i})">Anexar pedido</button>
          </div>`;
     return `<div class="ps-linha">
-      <span class="ps-nome">${escapeHtml(u.nome)}<span class="ps-quando">pedido de ${fmtData(u.dataPedido)}</span></span>
+      <span class="ps-nome">${escapeHtml(u.nome)}<span class="ps-quando">pedido de ${fmtData(u.dataPedido)}${dias.length>1?' · '+escapeHtml((u.diaSemanaNome||'').toLowerCase()):''}</span></span>
       ${tag}${acao}
     </div>`;
   }).join('');
 
+  // instrução é da regra: junta as distintas em vez de mostrar só a primeira
   const inst = document.getElementById('ps-instrucoes');
-  inst.textContent = d.instrucoes || '';
-  inst.classList.toggle('hidden', !d.instrucoes);
+  const textos = [...new Set(visiveis.map(u=>u.instrucoes).filter(Boolean))];
+  inst.textContent = textos.join(' · ');
+  inst.classList.toggle('hidden', !textos.length);
 }
 
 // o botão tem dois papéis: sem arquivo escolhido ele ABRE o seletor; com

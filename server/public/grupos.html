@@ -163,37 +163,17 @@
     <p class="err hidden" id="ue-err"></p>
   </div>
 
-  <!-- PEDIDO SEMANAL (ver server/pedidoSemanal.js): o Master liga o lembrete
-       aqui, e a loja responde no Fechamento anexando o pedido. Fica em Grupos
-       porque é a página onde já se decide o que cada loja vê no fechamento. -->
+  <!-- PEDIDO SEMANAL (ver server/pedidoSemanal.js): a cobrança é por REGRA -
+       cada uma vale pra um grupo inteiro ou pras lojas escolhidas, com dia
+       da semana próprio. Fica em Grupos porque é a página onde já se decide
+       o que cada loja vê no fechamento. -->
   <div class="panel">
-    <h2>📦 Lembrete do pedido semanal</h2>
-    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">Cobra de cada loja o pedido semanal de insumos - que é feito fora do Zenith, no sistema do fornecedor. O lembrete aparece no <b>Fechamento do dia</b> e no <b>Painel</b>, e a loja só tira ele da tela <b>anexando o arquivo do pedido</b>. Quem não confirmar até o dia fica marcado como atrasado na semana seguinte.</p>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;">
-      <label style="font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px;">
-        <input type="checkbox" id="ps-ativo"> Lembrete ligado
-      </label>
-      <label style="font-size:11.5px;color:var(--muted);">Dia do pedido
-        <select id="ps-dia" style="display:block;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;"></select>
-      </label>
-      <label style="font-size:11.5px;color:var(--muted);">Avisar com antecedência de
-        <select id="ps-antecedencia" style="display:block;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;">
-          <option value="0">só no dia</option><option value="1">1 dia</option><option value="2">2 dias</option>
-          <option value="3">3 dias</option><option value="4">4 dias</option><option value="5">5 dias</option><option value="6">6 dias</option>
-        </select>
-      </label>
-      <label style="flex:1;min-width:180px;font-size:11.5px;color:var(--muted);">Título na tela da loja
-        <input type="text" id="ps-titulo-cfg" maxlength="60" placeholder="Pedido semanal" style="width:100%;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;">
-      </label>
-    </div>
-    <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:10px;">Instruções pra loja (opcional)
-      <textarea id="ps-instrucoes-cfg" rows="2" maxlength="600" placeholder="ex: pedido pelo portal do fornecedor, anexar o PDF da confirmação" style="width:100%;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;resize:vertical;"></textarea>
-    </label>
-    <div style="font-size:11.5px;color:var(--muted);margin-bottom:6px;">Unidades que <b>não</b> fazem esse pedido (marcadas ficam fora da cobrança):</div>
-    <div id="ps-excluidas" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:4px;margin-bottom:10px;"></div>
-    <button type="button" class="primary" style="padding:9px 16px;" onclick="salvarPedidoSemanalCfg()">Salvar lembrete</button>
+    <h2>📦 Pedido semanal</h2>
+    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">Cobra das lojas o pedido semanal de insumos - que é feito fora do Zenith, no sistema do fornecedor. Cada <b>regra</b> vale pra um <b>grupo inteiro</b> ou pras <b>lojas que você escolher</b>, com o dia da semana dela. O lembrete aparece no <b>Fechamento do dia</b> e no <b>Painel</b>, e a loja só tira ele da tela <b>anexando o arquivo do pedido</b>. Loja que não está em regra nenhuma não é cobrada.</p>
+    <div id="ps-regras" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;"></div>
+    <button type="button" class="primary" style="padding:9px 16px;" onclick="novaRegraPedido()">+ Nova regra</button>
     <p class="err hidden" id="ps-err"></p>
-    <p style="font-size:11px;color:var(--muted);margin:8px 0 0;" id="ps-quando"></p>
+    <p style="font-size:11px;color:var(--muted);margin:10px 0 0;" id="ps-sem-regra"></p>
   </div>
 
   <div class="panel">
@@ -836,53 +816,161 @@ async function excluirUnidadeExtra(id, nome){
 }
 
 // ---------- PEDIDO SEMANAL (ver server/pedidoSemanal.js) ----------
-// A cobranca so faz sentido se o Master puder tirar loja da lista sem
-// deploy: quem faz pedido proprio muda com contrato de fornecedor, nao com
-// versao do sistema.
-let PS_CFG = null;
+// Por REGRA, nao por config unica: fornecedor e dia de pedido mudam por rede
+// (Domino's na terca, Spoleto na quinta), e loja nova entra pela regra do
+// grupo dela sem ninguem lembrar de mexer em lista de loja.
+let PS_DADOS = null;
 
-async function carregarPedidoSemanalCfg(){
-  const d = await fetch('/api/pedido-semanal/config').then(r=>r.json()).catch(()=>null);
-  if(!d) return;
-  PS_CFG = d;
-  document.getElementById('ps-ativo').checked = !!d.config.ativo;
-  document.getElementById('ps-dia').innerHTML = d.dias
-    .map((nome,i)=>`<option value="${i}"${i===d.config.diaSemana?' selected':''}>${escapeHtml(nome)}</option>`).join('');
-  document.getElementById('ps-antecedencia').value = String(d.config.diasAntecedencia);
-  document.getElementById('ps-titulo-cfg').value = d.config.titulo || '';
-  document.getElementById('ps-instrucoes-cfg').value = d.config.instrucoes || '';
-  const fora = new Set(d.config.unidadesExcluidas || []);
-  document.getElementById('ps-excluidas').innerHTML = d.unidades.map((u,i)=>
-    `<label style="font-size:11.5px;color:var(--text);display:flex;align-items:center;gap:6px;">
-       <input type="checkbox" class="ps-ex" data-i="${i}"${fora.has(u.codigo)?' checked':''}> ${escapeHtml(u.nome)}
-     </label>`).join('');
-  document.getElementById('ps-quando').textContent = d.config.atualizadoEm
-    ? `Última alteração: ${new Date(d.config.atualizadoEm).toLocaleString('pt-BR')}${d.config.atualizadoPorEmail ? ' · ' + d.config.atualizadoPorEmail : ''}`
+async function carregarRegrasPedido(){
+  PS_DADOS = await fetch('/api/pedido-semanal/regras').then(r=>r.json()).catch(()=>null);
+  renderRegrasPedido();
+}
+
+function renderRegrasPedido(){
+  const el = document.getElementById('ps-regras');
+  if(!PS_DADOS){ el.innerHTML = '<div style="font-size:12px;color:var(--muted);">Não foi possível carregar as regras agora.</div>'; return; }
+  const { regras, cobertas, grupos, semRegra } = PS_DADOS;
+  el.innerHTML = regras.length ? regras.map((r,i)=>{
+    const alvo = r.alvoTipo==='grupo'
+      ? `grupo <b>${escapeHtml((grupos.find(g=>g.id===r.grupoId)||{}).nome || '(grupo apagado)')}</b>`
+      : `${(r.unidades||[]).length} loja(s) escolhida(s)`;
+    const qtd = (cobertas[r.id]||[]).length;
+    return `<div style="border:1px solid var(--line);border-radius:9px;padding:10px;background:var(--panel2);">
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;">
+        <div style="font-size:13px;font-weight:600;">${r.ativo?'🟢':'⚪'} ${escapeHtml(r.nome)}</div>
+        <div style="display:flex;gap:4px;">
+          <button type="button" class="back" style="cursor:pointer;" onclick="editarRegraPedido(${i})">Editar</button>
+          <button type="button" class="back" style="cursor:pointer;color:var(--bad);" onclick="excluirRegraPedido(${i})">Excluir</button>
+        </div>
+      </div>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:4px;">
+        Toda <b>${escapeHtml((PS_DADOS.dias[r.diaSemana]||'').toLowerCase())}</b> · avisa ${r.diasAntecedencia===0?'só no dia':r.diasAntecedencia+' dia(s) antes'} · ${alvo}
+        ${qtd ? ` · <b>${qtd}</b> loja(s) cobrada(s) hoje` : ' · <b>nenhuma loja cobrada</b> (grupo vazio ou regra desligada)'}
+      </div>
+    </div>`;
+  }).join('') : '<div style="font-size:12px;color:var(--muted);">Nenhuma regra cadastrada - ninguém está sendo cobrado pelo pedido semanal.</div>';
+
+  // quem ficou de fora: pode ser decisão (São Braz, Saltiverso, Milky Moo) ou
+  // esquecimento. Mostrar a lista é o que separa os dois casos.
+  document.getElementById('ps-sem-regra').innerHTML = (semRegra||[]).length
+    ? `Sem regra (não são cobradas): ${semRegra.map(u=>escapeHtml(u.nome)).join(' · ')}`
     : '';
 }
 
-async function salvarPedidoSemanalCfg(){
+function novaRegraPedido(){ abrirRegraPedido(null); }
+function editarRegraPedido(i){ abrirRegraPedido(PS_DADOS.regras[i]); }
+
+// formulário inline dentro do próprio card: modal aqui seria mais uma camada
+// pra editar 6 campos, e a página já é uma tela de cadastro
+function abrirRegraPedido(regra){
+  const r = regra || { nome:'', ativo:true, alvoTipo:'grupo', grupoId:'', unidades:[], diaSemana:2, diasAntecedencia:2, titulo:'Pedido semanal', instrucoes:'' };
+  const el = document.getElementById('ps-regras');
+  const opcoesDia = PS_DADOS.dias.map((n,i)=>`<option value="${i}"${i===r.diaSemana?' selected':''}>${escapeHtml(n)}</option>`).join('');
+  const opcoesGrupo = PS_DADOS.grupos.map(g=>`<option value="${g.id}"${g.id===r.grupoId?' selected':''}>${escapeHtml(g.nome)} (${(g.unidades||[]).length} lojas)</option>`).join('');
+  const marcadas = new Set(r.unidades||[]);
+  const checksUnidades = PS_DADOS.unidades.map((u,i)=>
+    `<label style="font-size:11.5px;color:var(--text);display:flex;align-items:center;gap:6px;">
+       <input type="checkbox" class="psf-un" data-i="${i}"${marcadas.has(u.codigo)?' checked':''}> ${escapeHtml(u.nome)}
+     </label>`).join('');
+  el.insertAdjacentHTML('beforeend', `
+  <div id="ps-form" style="border:1px solid var(--accent);border-radius:9px;padding:12px;background:var(--panel2);">
+    <input type="hidden" id="psf-id" value="${regra ? regra.id : ''}">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;">
+      <label style="flex:1;min-width:160px;font-size:11.5px;color:var(--muted);">Nome da regra (só você vê)
+        <input type="text" id="psf-nome" maxlength="60" value="${escapeHtml(r.nome)}" placeholder="ex: Domino's - terça" style="width:100%;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:12.5px;box-sizing:border-box;">
+      </label>
+      <label style="font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" id="psf-ativo"${r.ativo?' checked':''}> Ligada
+      </label>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;">
+      <label style="font-size:11.5px;color:var(--muted);">Vale pra
+        <select id="psf-alvo" onchange="alternarAlvoRegra()" style="display:block;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:12.5px;">
+          <option value="grupo"${r.alvoTipo==='grupo'?' selected':''}>Um grupo inteiro</option>
+          <option value="unidades"${r.alvoTipo!=='grupo'?' selected':''}>Lojas escolhidas</option>
+        </select>
+      </label>
+      <label style="font-size:11.5px;color:var(--muted);">Dia do pedido
+        <select id="psf-dia" style="display:block;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:12.5px;">${opcoesDia}</select>
+      </label>
+      <label style="font-size:11.5px;color:var(--muted);">Avisar com antecedência de
+        <select id="psf-antec" style="display:block;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:12.5px;">
+          ${[0,1,2,3,4,5,6].map(n=>`<option value="${n}"${n===r.diasAntecedencia?' selected':''}>${n===0?'só no dia':n+' dia(s)'}</option>`).join('')}
+        </select>
+      </label>
+      <label style="flex:1;min-width:160px;font-size:11.5px;color:var(--muted);">Título na tela da loja
+        <input type="text" id="psf-titulo" maxlength="60" value="${escapeHtml(r.titulo||'')}" placeholder="Pedido semanal" style="width:100%;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:12.5px;box-sizing:border-box;">
+      </label>
+    </div>
+    <div id="psf-box-grupo" style="margin-bottom:10px;">
+      <label style="font-size:11.5px;color:var(--muted);">Grupo
+        <select id="psf-grupo" style="display:block;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:12.5px;min-width:220px;">
+          <option value="">— escolha —</option>${opcoesGrupo}
+        </select>
+      </label>
+      <div style="font-size:11px;color:var(--muted);margin-top:5px;">Loja que entrar nesse grupo depois passa a ser cobrada sozinha.</div>
+    </div>
+    <div id="psf-box-unidades" style="margin-bottom:10px;">
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:5px;">Lojas cobradas por esta regra:</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:4px;">${checksUnidades}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:5px;">Regra por loja <b>ganha</b> da regra por grupo - é assim que se cadastra a exceção ("essa loja aqui pede em outro dia").</div>
+    </div>
+    <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:10px;">Instruções pra loja (opcional)
+      <textarea id="psf-instrucoes" rows="2" maxlength="600" placeholder="ex: pedido pelo portal do fornecedor, anexar o PDF da confirmação" style="width:100%;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:12.5px;box-sizing:border-box;resize:vertical;">${escapeHtml(r.instrucoes||'')}</textarea>
+    </label>
+    <div style="display:flex;gap:6px;">
+      <button type="button" class="primary" style="padding:8px 14px;" onclick="salvarRegraPedido()">Salvar regra</button>
+      <button type="button" class="back" style="cursor:pointer;" onclick="renderRegrasPedido()">Cancelar</button>
+    </div>
+  </div>`);
+  alternarAlvoRegra();
+  document.getElementById('ps-form').scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+
+function alternarAlvoRegra(){
+  const porGrupo = document.getElementById('psf-alvo').value === 'grupo';
+  document.getElementById('psf-box-grupo').style.display = porGrupo ? '' : 'none';
+  document.getElementById('psf-box-unidades').style.display = porGrupo ? 'none' : '';
+}
+
+async function salvarRegraPedido(){
   const err = document.getElementById('ps-err');
   err.classList.add('hidden');
-  // o indice remete a lista que o backend mandou: codigo de unidade tem
-  // espaco e apostrofo, entao nao vira atributo HTML
-  const excluidas = [...document.querySelectorAll('.ps-ex')]
-    .filter(el=>el.checked)
-    .map(el=>PS_CFG.unidades[Number(el.dataset.i)].codigo);
+  const id = document.getElementById('psf-id').value;
+  // índice em vez do código no atributo: código de unidade tem espaço e
+  // apóstrofo, que não sobrevivem inteiros num data-attribute montado à mão
+  const unidades = [...document.querySelectorAll('.psf-un')]
+    .filter(el=>el.checked).map(el=>PS_DADOS.unidades[Number(el.dataset.i)].codigo);
   const body = {
-    ativo: document.getElementById('ps-ativo').checked,
-    diaSemana: Number(document.getElementById('ps-dia').value),
-    diasAntecedencia: Number(document.getElementById('ps-antecedencia').value),
-    titulo: document.getElementById('ps-titulo-cfg').value,
-    instrucoes: document.getElementById('ps-instrucoes-cfg').value,
-    unidadesExcluidas: excluidas,
+    nome: document.getElementById('psf-nome').value,
+    ativo: document.getElementById('psf-ativo').checked,
+    alvoTipo: document.getElementById('psf-alvo').value,
+    grupoId: document.getElementById('psf-grupo').value,
+    unidades,
+    diaSemana: Number(document.getElementById('psf-dia').value),
+    diasAntecedencia: Number(document.getElementById('psf-antec').value),
+    titulo: document.getElementById('psf-titulo').value,
+    instrucoes: document.getElementById('psf-instrucoes').value,
   };
-  const r = await fetch('/api/pedido-semanal/config', {
-    method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body),
+  const r = await fetch(id ? `/api/pedido-semanal/regras/${id}` : '/api/pedido-semanal/regras', {
+    method: id ? 'PUT' : 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body),
   });
   const resp = await r.json().catch(()=>({}));
-  if(!r.ok){ err.textContent = resp.error || 'Não foi possível salvar.'; err.classList.remove('hidden'); return; }
-  await carregarPedidoSemanalCfg();
+  if(!r.ok){ err.textContent = resp.error || 'Não foi possível salvar a regra.'; err.classList.remove('hidden'); return; }
+  await carregarRegrasPedido();
+}
+
+async function excluirRegraPedido(i){
+  const regra = PS_DADOS.regras[i];
+  if(!confirm(`Excluir a regra "${regra.nome}"? As lojas dela deixam de ser cobradas (as confirmações já feitas continuam guardadas).`)) return;
+  const r = await fetch(`/api/pedido-semanal/regras/${regra.id}`, { method:'DELETE' });
+  if(!r.ok){
+    const resp = await r.json().catch(()=>({}));
+    const err = document.getElementById('ps-err');
+    err.textContent = resp.error || 'Não foi possível excluir.'; err.classList.remove('hidden');
+    return;
+  }
+  await carregarRegrasPedido();
 }
 
 async function boot(){
@@ -895,7 +983,7 @@ async function boot(){
   UNIDADES = await fetch('/api/meta/unidades').then(r=>r.json());
   document.getElementById('c-unidades').innerHTML = unidadesChecksHtml('unidades', new Set());
   carregarUnidadesExtras();
-  carregarPedidoSemanalCfg();
+  carregarRegrasPedido();
 
   const todosUsuarios = await fetch('/api/users').then(r=>r.json());
   USUARIOS_MASTER_ADMIN = todosUsuarios.filter(u=>u.role==='master' || u.isAdmin);
