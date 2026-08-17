@@ -54,6 +54,7 @@ const abastecimentoPrevisao = require('./abastecimentoPrevisao');
 const ativosTI = require('./ativosTI');
 const centralChat = require('./centralChat');
 const grupos = require('./grupos');
+const redes = require('./redes');
 const inventario = require('./inventario');
 const inventarioNotaOcr = require('./inventarioNotaOcr');
 const canaisVendaOcr = require('./canaisVendaOcr');
@@ -3751,49 +3752,88 @@ async function montarRelatorioFechamentos(req) {
 // de fora do relatorio de proposito: e uma projecao calculada em cima do
 // historico completo (nao so do periodo filtrado) e nao faz sentido como
 // valor estatico exportado
+// Sai DIVIDIDO POR REDE (ver redes.js): as unidades de cada rede em bloco,
+// com uma linha de subtotal, e o total geral no fim. Sao duas operacoes com
+// contabilidade separada - a lista unica ordenada por faturamento misturava
+// as duas e obrigava a somar na mao.
 function prepararFechamentosPorUnidade(rows) {
   const colunas = [
+    { key: 'rede', label: 'Rede' },
     { key: 'unidade', label: 'Unid.' }, { key: 'qtd', label: 'Fechamentos' }, { key: 'faturamento', label: 'Faturamento' },
     { key: 'diferenca', label: 'Diferença' }, { key: 'tc', label: 'TC total' }, { key: 'cancelados', label: 'Cancelados' },
   ];
   const porUnidade = {};
   rows.forEach((r) => {
-    const c = (porUnidade[r.unidade] ||= { nome: r.unidadeNome || r.unidade, qtd: 0, faturamento: 0, diferenca: 0, tc: 0, cancelados: 0 });
+    const c = (porUnidade[r.unidade] ||= { codigo: r.unidade, nome: r.unidadeNome || r.unidade, qtd: 0, faturamento: 0, diferenca: 0, tc: 0, cancelados: 0 });
     c.qtd++; c.faturamento += r.faturamento || 0; c.diferenca += r.diferenca || 0; c.tc += r.tc || 0; c.cancelados += r.cancelados || 0;
   });
-  const linhas = Object.values(porUnidade).sort((a, b) => b.faturamento - a.faturamento).map((c) => ({
-    unidade: c.nome, qtd: c.qtd, faturamento: reportUtil.fmtMoneyBR(c.faturamento), diferenca: reportUtil.fmtMoneyBR(c.diferenca),
+  const agregados = Object.values(porUnidade);
+  // a linha ja vem formatada (string) pro reportUtil generico - por isso o
+  // subtotal e somado ANTES, em cima dos numeros, nunca dos textos
+  const comoLinha = (c, rede) => ({
+    rede, unidade: c.nome, qtd: c.qtd,
+    faturamento: reportUtil.fmtMoneyBR(c.faturamento), diferenca: reportUtil.fmtMoneyBR(c.diferenca),
     tc: c.tc.toFixed(0), cancelados: c.cancelados.toFixed(0),
-  }));
-  return { colunas, linhas };
+  });
+
+  const grupos = redes.agruparPorRede(agregados, 'codigo');
+  const linhas = [];
+  grupos.forEach((g, i) => {
+    g.itens.sort((a, b) => b.faturamento - a.faturamento).forEach((c, j) => {
+      // cada rede numa folha propria no PDF (ver _novaPagina em reportUtil);
+      // a primeira nao quebra, senao sai uma folha em branco na frente
+      const linha = comoLinha(c, g.nome);
+      if (i > 0 && j === 0) linha._novaPagina = true;
+      linhas.push(linha);
+    });
+    const soma = g.itens.reduce((acc, c) => ({
+      qtd: acc.qtd + c.qtd, faturamento: acc.faturamento + c.faturamento, diferenca: acc.diferenca + c.diferenca,
+      tc: acc.tc + c.tc, cancelados: acc.cancelados + c.cancelados,
+    }), { qtd: 0, faturamento: 0, diferenca: 0, tc: 0, cancelados: 0 });
+    linhas.push(comoLinha({ ...soma, nome: `SUBTOTAL (${g.itens.length} unidade(s))` }, g.nome));
+  });
+  // com uma rede so, o total geral repetiria o subtotal logo acima
+  if (grupos.length > 1) {
+    const geral = agregados.reduce((acc, c) => ({
+      qtd: acc.qtd + c.qtd, faturamento: acc.faturamento + c.faturamento, diferenca: acc.diferenca + c.diferenca,
+      tc: acc.tc + c.tc, cancelados: acc.cancelados + c.cancelados,
+    }), { qtd: 0, faturamento: 0, diferenca: 0, tc: 0, cancelados: 0 });
+    // consolidado em folha propria - no pe da ultima rede seria lido como
+    // total daquela rede
+    linhas.push({ ...comoLinha({ ...geral, nome: 'TOTAL GERAL' }, 'Consolidado'), _novaPagina: true });
+  }
+  return { colunas, linhas, unidades: agregados.length };
 }
 
 app.get('/api/fechamentos/relatorio-unidades.:formato(csv|pdf)', requireSection('fechamentos'), async (req, res) => {
-  const { colunas, linhas } = prepararFechamentosPorUnidade(await fechamentosFiltrados(req));
+  const { colunas, linhas, unidades } = prepararFechamentosPorUnidade(await fechamentosFiltrados(req));
   if (req.params.formato === 'csv') {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${reportUtil.nomeArquivoComData('fechamentos-por-unidade')}.csv"`);
     return res.send(reportUtil.toCSV(colunas, linhas));
   }
-  reportUtil.writePDF(res, { titulo: 'Fechamentos · Comparativo por Unidade', subtitulo: `Exportado em ${reportUtil.agoraBrasiliaFmt()} · ${linhas.length} unidade(s)`, colunas, linhas, nomeArquivo: reportUtil.nomeArquivoComData('fechamentos-por-unidade') });
+  reportUtil.writePDF(res, { titulo: 'Fechamentos · Comparativo por Unidade', subtitulo: `Exportado em ${reportUtil.agoraBrasiliaFmt()} · ${unidades} unidade(s) · dividido por rede`, colunas, linhas, nomeArquivo: reportUtil.nomeArquivoComData('fechamentos-por-unidade') });
 });
 
 // ---------- relatorio de Fechamentos (CSV/PDF) do periodo filtrado na tela -
 // mesma secao 'fechamentos' da tela (nao restrito ao Master), respeitando as
 // unidades que o usuario tem permissao de ver ----------
 app.get('/api/fechamentos/relatorio.csv', requireSection('fechamentos'), async (req, res) => {
-  const { colunas, linhas } = await montarRelatorioFechamentos(req);
+  const { colunas, linhas, secoes } = await montarRelatorioFechamentos(req);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${fechamentosReport.slugify('relatorio-fechamentos')}-${reportUtil.dataArquivo()}.csv"`);
-  res.send(fechamentosReport.toCSV(colunas, linhas));
+  res.send(fechamentosReport.toCSV(colunas, linhas, secoes));
 });
 
 app.get('/api/fechamentos/relatorio.pdf', requireSection('fechamentos'), async (req, res) => {
   const { inicio, fim } = req.query;
-  const { colunas, linhas } = await montarRelatorioFechamentos(req);
+  const { colunas, linhas, secoes } = await montarRelatorioFechamentos(req);
   const periodo = inicio || fim ? ` · período: ${inicio || 'início'} a ${fim || 'hoje'}` : '';
-  const subtitulo = `Exportado em ${agoraBrasiliaFmt()}${periodo} · ${linhas.length} fechamento(s)`;
-  fechamentosReport.writePDF(res, { titulo: 'Relatório de Fechamentos', subtitulo, colunas, linhas, nomeArquivo: `relatorio-fechamentos-${reportUtil.dataArquivo()}` });
+  // dizer QUAIS redes entraram evita a duvida de "cade a ARCFOOD?" quando o
+  // filtro da tela deixou uma delas de fora
+  const porRede = secoes.map((sc) => `${sc.nome}: ${sc.qtd}`).join(' · ');
+  const subtitulo = `Exportado em ${agoraBrasiliaFmt()}${periodo} · ${linhas.length} fechamento(s)${porRede ? ' · ' + porRede : ''}`;
+  fechamentosReport.writePDF(res, { titulo: 'Relatório de Fechamentos', subtitulo, colunas, linhas, secoes, nomeArquivo: `relatorio-fechamentos-${reportUtil.dataArquivo()}` });
 });
 
 app.get('/api/fechamentos/sincronizacao', requireSection('fechamentos'), (req, res) => {

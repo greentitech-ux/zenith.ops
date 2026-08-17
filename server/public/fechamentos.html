@@ -178,7 +178,7 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow" id="eyebrow-grupos">ARCFOOD · Grupo Bravo · Solutions Ti Tech</div>
+        <div class="eyebrow" id="eyebrow-grupos">ARCFOOD · Grupo Bravo (GBE) · Solutions Ti Tech</div>
         <h1>Fechamentos de caixa</h1>
       </div>
     </div>
@@ -221,7 +221,7 @@
     <select id="f-grupo">
       <option value="">Todos os grupos</option>
       <option id="f-grupo-arcfood" value="ARCFOOD">ARCFOOD</option>
-      <option id="f-grupo-bravo" value="BRAVO">Grupo Bravo</option>
+      <option id="f-grupo-bravo" value="BRAVO">Grupo Bravo (GBE)</option>
     </select>
     <div class="multiselect" id="ms-unidade">
       <button type="button" class="multiselect-btn" id="ms-unidade-btn">Todas as unidades</button>
@@ -298,7 +298,7 @@
     <select id="fech-grupo">
       <option value="">Todos os grupos</option>
       <option id="fech-grupo-arcfood" value="ARCFOOD">ARCFOOD</option>
-      <option id="fech-grupo-bravo" value="BRAVO">Grupo Bravo</option>
+      <option id="fech-grupo-bravo" value="BRAVO">Grupo Bravo (GBE)</option>
     </select>
     <div class="multiselect" id="ms-fech-unidade">
       <button type="button" class="multiselect-btn" id="ms-fech-unidade-btn">Todas as unidades</button>
@@ -488,10 +488,25 @@ initNavDrawerAccordion();
 
 let DATA = [];
 let IS_MASTER = false;
+// ESPELHO de server/redes.js (que divide os relatorios) - a tela e o
+// relatorio tem que classificar igual, senao o filtro mostra uma coisa e o
+// PDF exportado mostra outra. ARCFOOD e lista FECHADA (4 lojas); o Grupo
+// Bravo/GBE e o RESTO.
 const GRUPOS = {
   ARCFOOD: ['19821','19855','19888','19889'],
-  BRAVO: ["Domino's Carrinho Aeroporto Recife","Dominos Bessa","Dominos Campina Grande","Dominos Caruaru","Dominos Garanhuns","Dominos Praça Aeroporto Recife","Dominos Tirol","Milky Moo Tirol","Spoleto Praça Aeroporto Recife","Spoleto Shopping Recife","Spoleto Shopping Tacaruna","São Braz IL"],
+  // antes: lista fixa de 12 nomes. Loja cadastrada depois (via /grupos.html)
+  // nao entrava em nenhum dos dois e sumia do filtro sem ninguem perceber -
+  // por isso agora e calculado, e sempre inclui as unidades extras
+  get BRAVO(){ return Object.keys(UNIDADES_NOMES).filter(c=>!GRUPOS.ARCFOOD.includes(c)); },
 };
+// a rede vem do CODIGO da unidade, nunca do campo "grupo" gravado no
+// fechamento: lancamento feito no sistema grava 'MANUAL' e sangria tambem,
+// entao filtrar pelo campo deixava esses registros fora dos dois grupos
+function redeDaUnidade(codigo){
+  const c = String(codigo==null?'':codigo).trim();
+  if(!c) return null;
+  return GRUPOS.ARCFOOD.includes(c) ? 'ARCFOOD' : 'BRAVO';
+}
 const UNIDADES_NOMES = { '19821':'Dom Sao Miguel', '19855':'Dom Carrão', '19888':'Dom Mooca', '19889':'Dom Tatuape' };
 const BRAVO_UNIDADES_NOMES = {
   "Domino's Carrinho Aeroporto Recife": 'Dom Car Aero Recife',
@@ -507,7 +522,7 @@ const BRAVO_UNIDADES_NOMES = {
   'Spoleto Shopping Tacaruna': 'Spo Shop Tacaruna',
   'São Braz IL': 'Sao Braz Ilha',
 };
-GRUPOS.BRAVO.forEach(u=>{ UNIDADES_NOMES[u] = BRAVO_UNIDADES_NOMES[u] || u; });
+Object.assign(UNIDADES_NOMES, BRAVO_UNIDADES_NOMES);
 
 // unidades cadastradas pelo Master em /grupos.html (runtime) - mescladas por
 // cima da lista fixa acima, antes de montar qualquer seletor (ver boot)
@@ -564,7 +579,7 @@ function atualizarVisibilidadeGrupos(){
 
   const nomes = [];
   if(GRUPO_VISIVEL.ARCFOOD) nomes.push('ARCFOOD');
-  if(GRUPO_VISIVEL.BRAVO) nomes.push('Grupo Bravo');
+  if(GRUPO_VISIVEL.BRAVO) nomes.push('Grupo Bravo (GBE)');
   nomes.push('Solutions Ti Tech');
   document.getElementById('eyebrow-grupos').textContent = nomes.join(' · ');
 }
@@ -650,8 +665,8 @@ async function carregar(){
   await carregarStatusSincronizacao();
   const datas = DATA.map(d=>d.data).filter(Boolean).sort();
   const partesGrupo = [];
-  if(GRUPO_VISIVEL.ARCFOOD) partesGrupo.push(`${DATA.filter(d=>d.grupo==='ARCFOOD').length} ARCFOOD`);
-  if(GRUPO_VISIVEL.BRAVO) partesGrupo.push(`${DATA.filter(d=>d.grupo==='BRAVO').length} Grupo Bravo`);
+  if(GRUPO_VISIVEL.ARCFOOD) partesGrupo.push(`${DATA.filter(d=>redeDaUnidade(d.unidade)==='ARCFOOD').length} ARCFOOD`);
+  if(GRUPO_VISIVEL.BRAVO) partesGrupo.push(`${DATA.filter(d=>redeDaUnidade(d.unidade)==='BRAVO').length} Grupo Bravo (GBE)`);
   const sufixoGrupo = partesGrupo.length ? ` (${partesGrupo.join(' · ')})` : '';
   const elSyncInfo = document.getElementById('sync-info');
   elSyncInfo.textContent = datas.length
@@ -897,7 +912,7 @@ function setupPresetsFech(){
 function filtrarPorIntervalo(start, end){
   const grupo = document.getElementById('f-grupo').value;
   return DATA.filter(d=>
-    (!grupo || d.grupo===grupo) &&
+    (!grupo || redeDaUnidade(d.unidade)===grupo) &&
     (SEL_UNIDADE.size===0 || SEL_UNIDADE.has(d.unidade)) &&
     (!start || (d.data||'') >= start) &&
     (!end || (d.data||'') <= end)
@@ -1029,7 +1044,7 @@ function renderKpis(rows){
     const grupo = document.getElementById('f-grupo').value;
     const prevEndIso = isoLocal(prevEnd), prevStartIso = isoLocal(prevStart);
     anteriores = DATA.filter(d=>
-      (!grupo || d.grupo===grupo) &&
+      (!grupo || redeDaUnidade(d.unidade)===grupo) &&
       (SEL_UNIDADE.size===0 || SEL_UNIDADE.has(d.unidade)) &&
       (d.data||'') >= prevStartIso && (d.data||'') <= prevEndIso
     );
@@ -1562,7 +1577,7 @@ function renderTabela(rows){
   const grupoFech = document.getElementById('fech-grupo').value;
   const filtradas = rows.filter(d=>
     (!inicio || (d.data||'')>=inicio) && (!fim || (d.data||'')<=fim) &&
-    (!grupoFech || d.grupo===grupoFech) &&
+    (!grupoFech || redeDaUnidade(d.unidade)===grupoFech) &&
     (SEL_UNIDADE_FECH.size===0 || SEL_UNIDADE_FECH.has(d.unidade))
   );
   const ordenadas = [...filtradas].sort((a,b)=>(b.data||'').localeCompare(a.data||''));

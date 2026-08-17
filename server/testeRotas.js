@@ -199,6 +199,14 @@ setTimeout(async () => {
     ['/api/loja-status/rede', 'diagnóstico de rede'],
     ['/api/loja-status/maquinas', 'saúde das máquinas (HD + rede da loja)'],
     ['/api/users/sugerir-acesso?nomeCompleto=Priscila%20Pereira&dominio=grupobravoempresarial.com', 'sugerir acesso (email+usuário)'],
+    // os 4 relatorios de Fechamento: sao gerados por codigo que so roda no
+    // download (montagem de PDF/CSV com secao por rede e quebra de pagina),
+    // entao um erro ali nao aparece em nenhuma outra tela - so como 500 na
+    // mao de quem clicou em Exportar
+    ['/api/fechamentos/relatorio.csv', 'relatório de fechamentos (CSV)'],
+    ['/api/fechamentos/relatorio.pdf', 'relatório de fechamentos (PDF)'],
+    ['/api/fechamentos/relatorio-unidades.csv', 'comparativo por unidade (CSV)'],
+    ['/api/fechamentos/relatorio-unidades.pdf', 'comparativo por unidade (PDF)'],
   ];
   let ruins = 0;
   for (const [rota, nome] of casos) {
