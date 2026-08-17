@@ -40,6 +40,7 @@ const ifoodClient = require('./ifoodClient');
 const ifoodStore = require('./ifoodStore');
 const ifoodSync = require('./ifoodSync');
 const solicitacoes = require('./solicitacoes');
+const comprasAcompanhamento = require('./comprasAcompanhamento');
 const chamadosTI = require('./chamadosTI');
 const chamadoRelatorio = require('./chamadoRelatorio');
 const chamadosManutencao = require('./chamadosManutencao');
@@ -6352,6 +6353,51 @@ app.delete('/api/fechamentos/edicoes/:id', auth.requireMaster, async (req, res) 
 
 // ---------- Compra / Manutenção / Suporte de TI (secao "solicitacoes") -
 // mesmo fluxo de fila-com-aprovacao do Estorno e do Ajuste de Fechamento,
+// ---------- acompanhamento das COMPRAS pelo gerente da loja (ver
+// comprasAcompanhamento.js e /compras.html) ----------
+// Visibilidade DIFERENTE da Central: la o criterio e "o que eu criei ou me
+// atribuiram" (todosCardsCentral), e por isso um gerente nao enxergava o
+// pedido que o assistente dele lancou - nem o que entrou pelo formulario
+// publico da loja. Aqui o criterio e a UNIDADE, igual ao resto do app
+// (Fechamento, Entregas, Estoque): quem tem a tag Gerente/Ass. Gerente
+// acompanha TODAS as compras das unidades que ja pode ver.
+// Quem nao e gerente cai na regra antiga (so o que criou), pra isso nao
+// virar uma porta lateral que mostra o pedido da loja pra qualquer acesso
+// que tenha a secao.
+function comprasVisiveisPara(req, lista) {
+  if (req.isMaster) return lista;
+  const unidades = req.permissions?.unidades || [];
+  if (users.ehCargoGerente(req.user.cargo) && unidades.length) {
+    return lista.filter((c) => unidades.includes(c.unidade));
+  }
+  return lista.filter((c) => c.criadoPorId === req.user.id);
+}
+
+app.get('/api/compras/acompanhamento', requireSection('solicitacoes'), async (req, res) => {
+  try {
+    // a restricao por tipo de solicitacao (users.js: tiposSolicitacao) vale
+    // aqui igual vale na Central - se o acesso nao pode ver "compra", essa
+    // tela nao pode ser o atalho que mostra
+    const tiposPerm = tiposSolicitacaoPermitidos(req);
+    if (tiposPerm && !tiposPerm.has('compra')) {
+      return res.status(403).json({ error: 'Seu acesso não inclui solicitações de compra.' });
+    }
+    const todas = await solicitacoes.listAll();
+    const visiveis = comprasVisiveisPara(req, todas);
+    res.json({
+      ...comprasAcompanhamento.montar(visiveis, {
+        etapa: req.query.etapa || null,
+        unidade: req.query.unidade || null,
+      }),
+      // a tela usa pra decidir se mostra o seletor de unidade
+      unidades: [...new Set(visiveis.map((c) => c.unidade))].sort(),
+      porUnidade: req.isMaster || users.ehCargoGerente(req.user.cargo),
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // so que pra pedidos que nao tem uma secao propria ja existente. Aprovar um
 // pedido de Suporte de TI ja cria o Chamado (ver chamadosTI.js) ----------
 app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anexos', 4), async (req, res) => {

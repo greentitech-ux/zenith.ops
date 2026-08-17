@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Acompanhamento de Compras · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:880px;margin-inline:auto;overflow-x:clip;overflow-y:clip;}
+  h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  h2{font-size:13.5px;font-weight:700;margin:0 0 4px;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin-left:-12px;margin-right:-12px;margin-top:-16px;padding-left:12px;padding-right:12px;padding-top:12px;padding-bottom:12px;display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .hidden{display:none!important;}
+  .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer-titulo{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px 12px;}
+  .nav-drawer-grupo{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 4px;}
+  .nav-drawer-grupo{cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;}
+  .nav-drawer-grupo .ndg-seta{transition:transform .15s ease;font-size:9px;flex:none;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
+  .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+  select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:13px;font-family:var(--sans);}
+  select:focus{outline:none;border-color:var(--accent);}
+
+  .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px;}
+  @media(min-width:520px){ .kpis{grid-template-columns:repeat(4,1fr);} }
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;}
+  .kpi .valor{font-size:20px;font-weight:700;letter-spacing:-.02em;}
+  .kpi .valor.bad{color:var(--bad);}
+  .kpi .rotulo{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;}
+
+  .filtro-topo{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;}
+  .chip{font-family:var(--mono);font-size:11px;padding:6px 11px;border-radius:20px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;white-space:nowrap;}
+  .chip:hover{color:var(--text);border-color:var(--accent);}
+  .chip.ativo{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .chip .n{opacity:.7;margin-left:3px;}
+
+  .compra{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;transition:border-color .15s ease;}
+  .compra:hover{border-color:var(--accent);}
+  .compra.travada{border-color:var(--bad);}
+  .compra-topo{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;}
+  .compra-titulo{font-size:13.5px;font-weight:700;}
+  .compra-sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:3px;}
+  .badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;display:inline-block;white-space:nowrap;flex:none;}
+  .badge.aguardando{background:var(--warn-dim);color:var(--warn);}
+  .badge.aprovada,.badge.comprada{background:rgba(92,200,255,.12);color:var(--accent);}
+  .badge.entregue{background:var(--ok-dim);color:var(--ok);}
+  .badge.recusada,.badge.convertida{background:var(--panel2);color:var(--muted);}
+  .badge.travada{background:var(--bad-dim);color:var(--bad);font-weight:700;}
+  .linha-timeline{display:flex;align-items:center;gap:2px;margin-top:12px;overflow-x:auto;}
+  .tl-etapa{display:flex;align-items:center;gap:5px;flex:none;}
+  .tl-ponto{width:8px;height:8px;border-radius:50%;background:var(--line);flex:none;}
+  .tl-ponto.feita{background:var(--ok);}
+  .tl-ponto.atual{background:var(--accent);box-shadow:0 0 0 3px rgba(92,200,255,.18);}
+  .tl-ponto.atual.travada{background:var(--bad);box-shadow:0 0 0 3px rgba(255,92,92,.18);}
+  .tl-rotulo{font-family:var(--mono);font-size:9.5px;color:var(--muted);white-space:nowrap;}
+  .tl-rotulo.feita{color:var(--text);}
+  .tl-linha{width:20px;height:1px;background:var(--line);flex:none;}
+  .tl-linha.feita{background:var(--ok);}
+  .compra-rodape{display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:8px;flex-wrap:wrap;}
+  .compra-valor{font-size:13px;font-weight:700;}
+  .compra-itens{font-size:11.5px;color:var(--muted);margin-top:4px;}
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+    <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+    <div style="min-width:0;">
+      <div class="eyebrow">Zenith Ops · Solicitações</div>
+      <h1>Acompanhamento de Compras</h1>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;">
+    <button class="back" onclick="logout()">🚪 Sair</button>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso a essa tela.</div>
+
+<div id="root" class="hidden">
+
+<div class="kpis">
+  <div class="kpi"><div class="valor" id="kpi-abertas">—</div><div class="rotulo">Em aberto</div></div>
+  <div class="kpi"><div class="valor bad" id="kpi-travadas">—</div><div class="rotulo">Travadas</div></div>
+  <div class="kpi"><div class="valor" id="kpi-valor">—</div><div class="rotulo">Valor em aberto</div></div>
+  <div class="kpi"><div class="valor" id="kpi-total">—</div><div class="rotulo">Total no período</div></div>
+</div>
+
+<div class="filtro-topo">
+  <select id="f-unidade" class="hidden"></select>
+  <div class="chips" id="chips-etapa"></div>
+</div>
+
+<div id="lista-compras"><div class="empty">carregando...</div></div>
+
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function abrirMenu(){}
+function fecharMenu(){}
+
+// mesmo acordeao do menu lateral usado em todas as telas (ver mensalistas.html
+// pra comentario completo) - copiado aqui por convencao do projeto
+function initNavDrawerAccordion(){
+  const nav = document.getElementById('nav-drawer');
+  if(!nav || nav.dataset.ndgInit) return;
+  nav.dataset.ndgInit = '1';
+  [...nav.querySelectorAll(':scope > .nav-drawer-grupo')].forEach(g=>{
+    const nomeGrupo = g.textContent.trim();
+    const itens = [];
+    let el = g.nextElementSibling;
+    while(el && !el.classList.contains('nav-drawer-grupo') && !el.classList.contains('nav-drawer-sep')){
+      const prox = el.nextElementSibling;
+      itens.push(el);
+      el = prox;
+    }
+    if(!itens.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'ndg-wrap';
+    g.after(wrap);
+    itens.forEach(it=>wrap.appendChild(it));
+    g.innerHTML = `<span>${nomeGrupo}</span><span class="ndg-seta">▾</span>`;
+    const atualizarVazio = ()=>{
+      const temVisivel = itens.some(it=>!it.classList.contains('hidden'));
+      g.classList.toggle('hidden', !temVisivel);
+    };
+    atualizarVazio();
+    new MutationObserver(atualizarVazio).observe(wrap, { attributes:true, attributeFilter:['class'], subtree:true });
+    const key = 'ndgAberto:' + nomeGrupo;
+    const temAtual = itens.some((it)=>{ const h = it.getAttribute && it.getAttribute('href'); if(!h) return false; try { return new URL(h, location.origin).pathname === location.pathname; } catch(e){ return false; } });
+    const aberto = temAtual || nomeGrupo === 'Solicitações';
+    g.querySelector('.ndg-seta').style.transform = aberto ? '' : 'rotate(-90deg)';
+    wrap.classList.toggle('hidden', !aberto);
+    g.addEventListener('click', ()=>{
+      const abrirAgora = wrap.classList.contains('hidden');
+      wrap.classList.toggle('hidden', !abrirAgora);
+      g.querySelector('.ndg-seta').style.transform = abrirAgora ? '' : 'rotate(-90deg)';
+      localStorage.setItem(key, abrirAgora ? '1' : '0');
+    });
+  });
+}
+initNavDrawerAccordion();
+
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtData(iso){ if(!iso) return '—'; const [y,m,d]=iso.split('-'); return `${d}/${m}/${y}`; }
+
+let ETAPA_ATUAL = null;
+let UNIDADE_ATUAL = '';
+let DADOS = null;
+
+async function carregar(){
+  const params = new URLSearchParams();
+  if(ETAPA_ATUAL) params.set('etapa', ETAPA_ATUAL);
+  if(UNIDADE_ATUAL) params.set('unidade', UNIDADE_ATUAL);
+  const res = await fetch('/api/compras/acompanhamento?' + params.toString());
+  if(!res.ok){
+    document.getElementById('lista-compras').innerHTML = '<div class="empty">Não foi possível carregar as compras.</div>';
+    return;
+  }
+  DADOS = await res.json();
+  renderKpis();
+  renderChips();
+  renderUnidades();
+  renderLista();
+}
+
+function renderKpis(){
+  const r = DADOS.resumo;
+  document.getElementById('kpi-abertas').textContent = r.abertas;
+  document.getElementById('kpi-travadas').textContent = r.travadas;
+  document.getElementById('kpi-valor').textContent = fmtMoney(r.valorAberto);
+  document.getElementById('kpi-total').textContent = r.total;
+}
+
+function renderChips(){
+  const r = DADOS.resumo;
+  const el = document.getElementById('chips-etapa');
+  const todas = `<button type="button" class="chip ${!ETAPA_ATUAL?'ativo':''}" onclick="filtrarEtapa(null)">Todas<span class="n">${r.total}</span></button>`;
+  const resto = DADOS.etapas.map(e=>{
+    const n = r.porEtapa[e.id] || 0;
+    if(!n) return '';
+    return `<button type="button" class="chip ${ETAPA_ATUAL===e.id?'ativo':''}" onclick="filtrarEtapa('${e.id}')">${e.icone} ${escapeHtml(e.rotulo)}<span class="n">${n}</span></button>`;
+  }).join('');
+  el.innerHTML = todas + resto;
+}
+
+function renderUnidades(){
+  const sel = document.getElementById('f-unidade');
+  // so faz sentido escolher unidade quando ha mais de uma pra ver - gerente
+  // de loja unica nao precisa desse seletor a mais na tela
+  if(!DADOS.porUnidade || DADOS.unidades.length <= 1){
+    sel.classList.add('hidden');
+    return;
+  }
+  sel.classList.remove('hidden');
+  const opcoes = ['<option value="">Todas as unidades</option>']
+    .concat(DADOS.unidades.map(u=>`<option value="${escapeHtml(u)}" ${u===UNIDADE_ATUAL?'selected':''}>${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`));
+  sel.innerHTML = opcoes.join('');
+}
+
+function filtrarEtapa(id){ ETAPA_ATUAL = id; carregar(); }
+
+document.getElementById('f-unidade').addEventListener('change', (ev)=>{
+  UNIDADE_ATUAL = ev.target.value;
+  carregar();
+});
+
+// linha do tempo: so as 4 etapas "positivas" (aguardando->aprovada->comprada
+// ->entregue) - recusada/convertida sao becos sem saida, mostrados so no
+// badge do topo, senao a barra ficaria com um 5o/6o ponto que nunca acende
+// junto com os primeiros
+const ETAPAS_LINHA = ['aguardando','aprovada','comprada','entregue'];
+function timeline(c){
+  const meta = { aguardando:'Pedida', aprovada:'Aprovada', comprada:'Comprada', entregue:'Entregue' };
+  if(c.etapa === 'recusada' || c.etapa === 'convertida') return '';
+  const posAtual = ETAPAS_LINHA.indexOf(c.etapa);
+  return '<div class="linha-timeline">' + ETAPAS_LINHA.map((id,i)=>{
+    const feita = i < posAtual || (i===posAtual && id==='entregue');
+    const atual = i === posAtual && id!=='entregue';
+    const ponto = `<span class="tl-ponto ${feita?'feita':''} ${atual?'atual':''} ${atual&&c.travada?'travada':''}"></span>`;
+    const rotulo = `<span class="tl-rotulo ${feita||atual?'feita':''}">${meta[id]}</span>`;
+    const linha = i>0 ? `<span class="tl-linha ${i<=posAtual?'feita':''}"></span>` : '';
+    return linha + `<span class="tl-etapa">${ponto}${rotulo}</span>`;
+  }).join('') + '</div>';
+}
+
+function renderLista(){
+  const el = document.getElementById('lista-compras');
+  if(!DADOS.linhas.length){ el.innerHTML = '<div class="empty">Nenhuma compra nessa visão.</div>'; return; }
+  el.innerHTML = DADOS.linhas.map(c=>{
+    const itensResumo = c.itens.length
+      ? c.itens.slice(0,3).map(it=>`${it.quantidade}x ${escapeHtml(it.descricao)}`).join(', ') + (c.itens.length>3?` +${c.itens.length-3}`:'')
+      : '';
+    const paradaTxt = c.aberta && c.diasParada!=null
+      ? (c.diasParada===0 ? 'hoje' : `há ${c.diasParada} dia${c.diasParada===1?'':'s'}`)
+      : '';
+    return `
+    <div class="compra ${c.travada?'travada':''}" onclick="abrirNaCentral(${c.numeroTicket})">
+      <div class="compra-topo">
+        <div>
+          <div class="compra-titulo">${c.numeroTicket?`#${c.numeroTicket} · `:''}${escapeHtml(c.titulo)}</div>
+          <div class="compra-sub">${escapeHtml(c.unidadeNome)}${c.criadoPorEmail?' · '+escapeHtml(c.criadoPorEmail):''}${paradaTxt?' · parada '+paradaTxt:''}</div>
+        </div>
+        <span class="badge ${c.travada?'travada':c.etapa}">${c.travada?'⚠️ travada':c.etapaIcone+' '+c.etapaRotulo}</span>
+      </div>
+      ${timeline(c)}
+      <div class="compra-rodape">
+        <div class="compra-valor">${c.valor?fmtMoney(c.valor):(c.ehOrcamento?'orçamento':'sem valor informado')}</div>
+        ${c.entregaVencida?`<span class="badge travada">entrega prevista ${fmtData(c.marcos.entregaPrevista)} vencida</span>`:''}
+      </div>
+      ${itensResumo?`<div class="compra-itens">${itensResumo}</div>`:''}
+    </div>`;
+  }).join('');
+}
+
+function abrirNaCentral(numeroTicket){
+  if(!numeroTicket) return;
+  location.href = '/central-historico.html?ticket=' + numeroTicket;
+}
+
+let ME = null;
+let UNIDADES_NOMES = {};
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  ME = await res.json();
+  const isMaster = ME.role==='master';
+  const secoes = isMaster ? ['solicitacoes'] : (ME.permissions?.sections||[]);
+  if(!secoes.includes('solicitacoes')){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+
+  try{ UNIDADES_NOMES = await (await fetch('/api/meta/unidades-extras')).json(); }catch(e){ UNIDADES_NOMES = {}; }
+
+  document.getElementById('root').classList.remove('hidden');
+  await carregar();
+}
+
+boot();
+</script>
+<script src="/notif-central.js"></script>
+<script src="/suporte-chat.js"></script>
+<script src="/nav-menu.js"></script>
+</body>
+</html>
