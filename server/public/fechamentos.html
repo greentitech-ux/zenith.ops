@@ -934,7 +934,43 @@ function filtrar(){
 // intervalo do mês anterior, trimestre com trimestre. Isso evita comparar
 // sábado (fraco) com sexta (forte) só por estarem "coladas" no calendário,
 // que distorceria a variação % sem refletir uma queda de verdade.
+// ultimo dia com dado real possivel - hoje ainda esta em andamento (venda
+// rolando, fechamento nem foi lançado), entao so conta como "fechado" ate
+// ontem
+function ultimoDiaFechadoIso(){
+  const d = agoraBrasilia(); d.setDate(d.getDate()-1);
+  return isoLocal(d);
+}
+
 function periodoAnterior(inicio, fim, tipoPreset){
+  // periodo em andamento (preset Mes/Trimestre/Semana da semana/mes/
+  // trimestre CORRENTE sempre devolve o bloco de calendario inteiro, mesmo
+  // que hoje seja so o dia 17): so os dias ate ontem tem venda de verdade.
+  // Sem aparar, um mes com 17 dias de venda seria comparado a um mes
+  // anterior FECHADO de 31 - a queda que aparece ali e do calendario, nao da
+  // venda (mesmo raciocinio de "comparar treze dias de agosto com julho
+  // fechado diria que caiu 60% quando o que caiu foi o calendário")
+  const ontemIso = ultimoDiaFechadoIso();
+  const fimAparado = fim > ontemIso ? ontemIso : fim;
+  const dias = Math.round((new Date(fimAparado+'T00:00:00') - new Date(inicio+'T00:00:00'))/86400000) + 1;
+
+  // corta o fim do periodo ANTERIOR pro MESMO NUMERO DE DIAS ja aparado do
+  // atual, SO QUANDO ISSO ENCURTA - preservando o inicio (que e o que
+  // identifica QUAL mes/trimestre/semana anterior e o certo). Comparar
+  // contra o TAMANHO NATURAL do bloco anterior (nao contra "dias" do atual
+  // direto) importa porque meses tem tamanhos diferentes: agosto (31) fechado
+  // vs julho (31) tambem fechado nao deve "esticar" julho pro dia 1/8 so
+  // porque agosto tem 1 dia a mais - so mes/trimestre/semana AINDA EM
+  // ANDAMENTO (dias < tamanho natural do anterior) precisa encolher.
+  // dias<=0 quer dizer que o periodo pedido nem comecou ainda.
+  function aparado(base){
+    if(dias <= 0) return { inicio: base.inicio, fim: base.inicio, dias: 0 };
+    const diasNaturais = Math.round((new Date(base.fim+'T00:00:00') - new Date(base.inicio+'T00:00:00'))/86400000) + 1;
+    if(dias >= diasNaturais) return { inicio: base.inicio, fim: base.fim, dias: diasNaturais };
+    const f = new Date(base.inicio+'T00:00:00'); f.setDate(f.getDate()+dias-1);
+    return { inicio: base.inicio, fim: isoLocal(f), dias };
+  }
+
   // ancora pelo FIM (mes de referencia usado pelo calcularPreset pra montar
   // tanto "Mês" quanto "Trimestre" - o trimestre e sempre o mes de
   // referencia + os 2 anteriores, entao "voltar 3 meses" tem que partir do
@@ -943,20 +979,21 @@ function periodoAnterior(inicio, fim, tipoPreset){
   const dEnd = new Date(fim+'T00:00:00');
   if(tipoPreset === 'mes'){
     const prevRef = new Date(dEnd.getFullYear(), dEnd.getMonth()-1, 1);
-    return calcularPreset('mes', isoLocal(prevRef));
+    return aparado(calcularPreset('mes', isoLocal(prevRef)));
   }
   if(tipoPreset === 'trimestre'){
     const prevRef = new Date(dEnd.getFullYear(), dEnd.getMonth()-3, 1);
-    return calcularPreset('trimestre', isoLocal(prevRef));
+    return aparado(calcularPreset('trimestre', isoLocal(prevRef)));
   }
-  // dia (Ontem) / semana / intervalo livre: desloca a janela inteira 7 dias
-  // pra trás, preservando o dia da semana de cada data - "semana" já é um
-  // bloco de 7 dias (dom-sáb), entao esse mesmo deslocamento já devolve a
-  // semana anterior certinha, sem precisar de um caso especial pra ela
+  // dia (Ontem) / semana / intervalo livre: desloca a janela INTEIRA 7 dias
+  // pra trás (fim natural = fim ORIGINAL, nao o aparado - aparar so
+  // acontece dentro de aparado() acima, se for o caso), preservando o dia
+  // da semana - "semana" já é um bloco de 7 dias (dom-sáb), entao esse
+  // mesmo deslocamento já devolve a semana anterior certinha
   const dStart = new Date(inicio+'T00:00:00');
   const prevStart = new Date(dStart); prevStart.setDate(prevStart.getDate()-7);
   const prevEnd = new Date(dEnd); prevEnd.setDate(prevEnd.getDate()-7);
-  return { inicio: isoLocal(prevStart), fim: isoLocal(prevEnd) };
+  return aparado({ inicio: isoLocal(prevStart), fim: isoLocal(prevEnd) });
 }
 
 function comparativoRange(){
@@ -993,7 +1030,15 @@ function renderComparativoPeriodo(){
   const atuais = filtrarPorIntervalo(inicio, fim);
   const anteriores = filtrarPorIntervalo(anterior.inicio, anterior.fim);
 
-  info.textContent = `Comparação por ${rotulo}: ${fmtData(inicio)} → ${fmtData(fim)} (atual) vs ${fmtData(anterior.inicio)} → ${fmtData(anterior.fim)} (anterior)`;
+  // avisa quando o periodo anterior saiu MAIS CURTO que o bloco de
+  // calendario inteiro - senao a data "anterior" mostrada parece um erro
+  // (ex: "até 17/07" no lugar do esperado "até 31/07") sem explicação
+  const ontemIso = ultimoDiaFechadoIso();
+  const aparado = fim > ontemIso;
+  const notaAparado = aparado
+    ? ` · período atual ainda em andamento — comparação aparada nos mesmos ${anterior.dias} dia(s) (até ${fmtData(ontemIso)})`
+    : '';
+  info.textContent = `Comparação por ${rotulo}: ${fmtData(inicio)} → ${fmtData(fim)} (atual) vs ${fmtData(anterior.inicio)} → ${fmtData(anterior.fim)} (anterior)${notaAparado}`;
 
   const porUnidade = {};
   function acumula(lista, chave){
@@ -1036,18 +1081,29 @@ function renderKpis(rows){
   const soma = (list,campo) => +list.reduce((s,d)=>s+(d[campo]||0),0).toFixed(2);
 
   let anteriores = [];
+  let aparado = false;
   if(start && end){
-    const dStart = new Date(start+'T00:00:00'), dEnd = new Date(end+'T00:00:00');
-    const dias = Math.round((dEnd-dStart)/86400000)+1;
-    const prevEnd = new Date(dStart); prevEnd.setDate(prevEnd.getDate()-1);
-    const prevStart = new Date(prevEnd); prevStart.setDate(prevStart.getDate()-(dias-1));
-    const grupo = document.getElementById('f-grupo').value;
-    const prevEndIso = isoLocal(prevEnd), prevStartIso = isoLocal(prevStart);
-    anteriores = DATA.filter(d=>
-      (!grupo || redeDaUnidade(d.unidade)===grupo) &&
-      (SEL_UNIDADE.size===0 || SEL_UNIDADE.has(d.unidade)) &&
-      (d.data||'') >= prevStartIso && (d.data||'') <= prevEndIso
-    );
+    // mesmo raciocinio do periodoAnterior() (ver comentario la): quando o
+    // "end" pedido (ex: preset Mes/Trimestre correndo) cai em hoje ou no
+    // futuro, so os dias ate ontem tem venda de verdade - sem aparar aqui
+    // tambem, esse card de cima (Faturamento etc) mostraria a MESMA queda
+    // fantasma do calendario que o comparativo por unidade logo abaixo
+    const ontemIso = ultimoDiaFechadoIso();
+    const endAparado = end > ontemIso ? ontemIso : end;
+    aparado = endAparado !== end;
+    if(endAparado >= start){
+      const dStart = new Date(start+'T00:00:00'), dEnd = new Date(endAparado+'T00:00:00');
+      const dias = Math.round((dEnd-dStart)/86400000)+1;
+      const prevEnd = new Date(dStart); prevEnd.setDate(prevEnd.getDate()-1);
+      const prevStart = new Date(prevEnd); prevStart.setDate(prevStart.getDate()-(dias-1));
+      const grupo = document.getElementById('f-grupo').value;
+      const prevEndIso = isoLocal(prevEnd), prevStartIso = isoLocal(prevStart);
+      anteriores = DATA.filter(d=>
+        (!grupo || redeDaUnidade(d.unidade)===grupo) &&
+        (SEL_UNIDADE.size===0 || SEL_UNIDADE.has(d.unidade)) &&
+        (d.data||'') >= prevStartIso && (d.data||'') <= prevEndIso
+      );
+    }
   }
 
   const faturamento = soma(rows,'faturamento');
@@ -1081,7 +1137,10 @@ function renderKpis(rows){
     if(k.delta!=null && isFinite(k.delta)){
       const cls = k.delta>0.5?'ok':(k.delta<-0.5?'bad':'muted');
       const seta = k.delta>0.5?'▲':(k.delta<-0.5?'▼':'—');
-      deltaHtml = `<div class="delta ${cls}">${seta} ${Math.abs(k.delta).toFixed(1)}% vs período anterior</div>`;
+      // avisa que o periodo anterior foi cortado no mesmo numero de dias -
+      // senao "vs período anterior" some parece comparar o mes inteiro
+      const nota = aparado ? ' (mesmo nº de dias)' : '';
+      deltaHtml = `<div class="delta ${cls}">${seta} ${Math.abs(k.delta).toFixed(1)}% vs período anterior${nota}</div>`;
     }
     return `<div class="kpi"><div class="lbl">${k.lbl}</div><div class="val ${k.cls}">${k.val}</div>${deltaHtml}</div>`;
   }).join('');
