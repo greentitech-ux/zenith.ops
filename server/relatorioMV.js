@@ -88,6 +88,11 @@ const configCache = createCache(async () => {
     ? data.diasSemana.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
     : DIAS_SEMANA_PADRAO;
   const alvo = await users.findByIdentifier(usuarioGatilho);
+  // Se o gatilho configurado JA E um e-mail, ele vale como identidade mesmo
+  // sem acesso no Zenith. Quem recebe os tickets nem sempre tem login: o
+  // ticket e direcionado pro endereco, e antes disso o relatorio dessa
+  // pessoa ficava eternamente zerado porque nao havia usuario pra resolver.
+  const emailDoIdentificador = usuarioGatilho.includes('@') ? usuarioGatilho.toLowerCase() : null;
   return {
     emailDestino,
     emailCopia,
@@ -96,7 +101,7 @@ const configCache = createCache(async () => {
     diasSemana: diasSemana.length ? diasSemana : DIAS_SEMANA_PADRAO,
     usuarioGatilhoEncontrado: !!alvo,
     gatilhoUserId: alvo ? alvo.id : null,
-    gatilhoUserEmail: alvo && alvo.email ? String(alvo.email).trim().toLowerCase() : null,
+    gatilhoUserEmail: (alvo && alvo.email ? String(alvo.email).trim().toLowerCase() : null) || emailDoIdentificador,
   };
 }, 5 * 60 * 1000);
 const getConfig = configCache.cached;
@@ -140,7 +145,10 @@ async function salvarConfig({ emailDestino, emailCopia, usuarioGatilho, horaEnvi
   const usuarioLimpo = String(usuarioGatilho || '').trim();
   if (!usuarioLimpo) throw new Error('Informe o usuário que vai disparar os e-mails.');
   const alvo = await users.findByIdentifier(usuarioLimpo);
-  if (!alvo) throw new Error(`Não encontrei nenhum usuário com "${usuarioLimpo}".`);
+  // e-mail sem acesso no Zenith e legitimo (ver getConfig) - o que nao pode
+  // passar e um APELIDO que nao resolve, que e sempre erro de digitacao e
+  // deixaria o relatorio zerado pra sempre sem ninguem entender por que
+  if (!alvo && !usuarioLimpo.includes('@')) throw new Error(`Não encontrei nenhum usuário com "${usuarioLimpo}".`);
   const horaLimpa = validarHoraEnvio(horaEnvio);
   const diasLimpos = validarDiasSemana(diasSemana);
   await CONFIG_DOC.set({

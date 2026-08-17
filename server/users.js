@@ -58,8 +58,21 @@ async function findByIdentifier(identifier) {
   if (!valor) return null;
   const campo = valor.includes('@') ? 'email' : 'username';
   const snap = await usersRef.where(campo, '==', valor).limit(1).get();
-  if (snap.empty) return null;
-  return { id: snap.docs[0].id, ...snap.docs[0].data() };
+  if (!snap.empty) return { id: snap.docs[0].id, ...snap.docs[0].data() };
+  // A query do Firestore e sensivel a maiuscula/minuscula, e o valor buscado
+  // vem sempre em minusculo. Acesso gravado ANTES do sanitizeUsername (ou
+  // por importacao/seed) pode ter "MV" no banco - a query nunca acha, e quem
+  // chamou conclui "usuario nao existe". Isso ja custou caro uma vez: o
+  // relatorio do MV ficava zerado porque o usuario gatilho nao resolvia, sem
+  // nenhum erro em lugar nenhum. A lista de usuarios e cacheada (list()),
+  // entao a segunda tentativa nao custa leitura em regime.
+  const todos = await list().catch(() => []);
+  const achado = todos.find((u) => String(u[campo] || '').trim().toLowerCase() === valor);
+  if (!achado) return null;
+  // list() devolve toPublic (sem hash de senha) - pra quem precisa do
+  // registro inteiro, relê pelo id ja conhecido
+  const doc = await usersRef.doc(achado.id).get();
+  return doc.exists ? { id: doc.id, ...doc.data() } : null;
 }
 
 function sanitizeHorarioPermitido(input) {
