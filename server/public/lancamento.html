@@ -211,9 +211,14 @@
            Fica aqui em cima mas preenche as DUAS secoes (Canais e Formas de
            pagamento): o relatorio do PDV traz as duas no mesmo print. -->
       <div id="ler-canais-wrap" class="hidden" style="margin:4px 0 8px;">
-        <input type="file" id="ler-canais-arquivo" accept="image/*,application/pdf" capture="environment" class="hidden">
+        <!-- multiple: a tela do PDV nem sempre cabe num print so (loja com
+             muito canal, ou relatorio impresso em mais de uma folha) - da pra
+             mandar ate 5 fotos do MESMO dia numa leitura. Sem "capture", pra
+             o celular deixar escolher varias da galeria em vez de abrir
+             direto a camera com uma foto so. -->
+        <input type="file" id="ler-canais-arquivo" accept="image/*,application/pdf" multiple class="hidden">
         <button type="button" class="btn-add" id="btn-ler-canais" onclick="document.getElementById('ler-canais-arquivo').click()">📷 Preencher por foto do relatório</button>
-        <div class="sub" style="margin-top:4px;">Preenche os Canais de venda e as Formas de pagamento de uma vez. Errou algum valor? Tire a foto de novo — a leitura recomeça do zero.</div>
+        <div class="sub" style="margin-top:4px;">Preenche os Canais de venda e as Formas de pagamento de uma vez. Pode mandar até 5 fotos do mesmo dia se o relatório não couber numa só. Errou algum valor? Tire a foto de novo — a leitura recomeça do zero.</div>
         <div id="ler-canais-msg" class="sub hidden" style="margin-top:6px;"></div>
       </div>
       <div class="grid2 hidden" id="canais-extras-container" style="margin-top:6px;"></div>
@@ -735,18 +740,24 @@ function esconderMsgLerCanais(){
   const msg = document.getElementById('ler-canais-msg');
   msg.classList.add('hidden'); msg.innerHTML = '';
 }
+const MAX_FOTOS_RELATORIO = 5;
 document.getElementById('ler-canais-arquivo').addEventListener('change', async (ev)=>{
-  const arquivo = ev.target.files && ev.target.files[0];
+  const arquivos = Array.from(ev.target.files || []);
   ev.target.value = ''; // permite escolher a MESMA foto de novo depois de um erro
-  if(!arquivo) return;
+  if(!arquivos.length) return;
   const botao = document.getElementById('btn-ler-canais');
   const msg = document.getElementById('ler-canais-msg');
-  botao.disabled = true; botao.textContent = '📷 Lendo a foto...';
   msg.classList.remove('hidden');
-  msg.innerHTML = '<span style="color:var(--muted);">Lendo o relatório... isso leva alguns segundos.</span>';
+  if(arquivos.length > MAX_FOTOS_RELATORIO){
+    msg.innerHTML = `<span style="color:var(--bad);">Você escolheu ${arquivos.length} arquivos. Mande no máximo ${MAX_FOTOS_RELATORIO} por leitura.</span>`;
+    return;
+  }
+  const plural = arquivos.length > 1;
+  botao.disabled = true; botao.textContent = plural ? `📷 Lendo ${arquivos.length} fotos...` : '📷 Lendo a foto...';
+  msg.innerHTML = `<span style="color:var(--muted);">Lendo o relatório${plural ? ` (${arquivos.length} fotos)` : ''}... isso leva alguns segundos.</span>`;
   try{
     const fd = new FormData();
-    fd.append('imagem', arquivo);
+    arquivos.forEach(a=>fd.append('imagem', a));
     fd.append('unidade', document.getElementById('f-unidade').value);
     const res = await fetch('/api/fechamentos/ler-canais', { method:'POST', body: fd });
     const data = await res.json();
@@ -778,14 +789,17 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', async (
     const resumo = [];
     if(canaisOk) resumo.push(`${canaisOk} em Canais de venda`);
     if(formasOk) resumo.push(`${formasOk} em Formas de pagamento`);
+    const origem = plural ? `pelas ${arquivos.length} fotos` : 'pela foto';
     const partes = [resumo.length
-      ? `<b style="color:var(--ok);">✔ Preenchido pela foto: ${resumo.join(' e ')}.</b> Confira valor por valor antes de enviar — se algum estiver errado, tire a foto de novo.`
-      : `<b style="color:var(--warn);">Não consegui preencher nenhum campo com essa foto.</b> Confira se o relatório está inteiro e legível na imagem.`];
+      ? `<b style="color:var(--ok);">✔ Preenchido ${origem}: ${resumo.join(' e ')}.</b> Confira valor por valor antes de enviar — se algum estiver errado, tire a foto de novo.`
+      : `<b style="color:var(--warn);">Não consegui preencher nenhum campo com ${plural ? 'essas fotos' : 'essa foto'}.</b> Confira se o relatório está inteiro e legível na imagem.`];
     if(zerados){
       partes.push(`<span style="color:var(--muted);">${zerados} campo(s) vieram zerados no relatório e ficaram em branco — em branco conta como zero.</span>`);
     }
     if((data.faltando||[]).length){
-      partes.push(`<span style="color:var(--warn);">Não achei na foto: ${data.faltando.map(f=>escapeHtml(f.label)).join(', ')} — confira se essa parte do relatório está enquadrada e tire a foto de novo.</span>`);
+      // com varias fotos, "faltando" quase sempre e uma parte do relatorio
+      // que nao entrou em nenhuma delas - vale dizer isso em vez de so listar
+      partes.push(`<span style="color:var(--warn);">Não achei ${plural ? 'em nenhuma das fotos' : 'na foto'}: ${data.faltando.map(f=>escapeHtml(f.label)).join(', ')} — fotografe também a parte do relatório onde esses campos aparecem e mande tudo junto.</span>`);
     }
     if((data.naoIdentificados||[]).length){
       // dinheiro que aparece no relatorio mas nao casa com nenhum campo
