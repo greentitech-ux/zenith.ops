@@ -208,6 +208,7 @@ setTimeout(async () => {
     ['/api/fechamentos/relatorio-unidades.csv', 'comparativo por unidade (CSV)'],
     ['/api/fechamentos/relatorio-unidades.pdf', 'comparativo por unidade (PDF)'],
     ['/api/compras/acompanhamento', 'acompanhamento de compras (gerente)'],
+    ['/api/fechamentos/recordes', 'recordes de venda (maior/menor dia e semana)'],
   ];
   let ruins = 0;
   for (const [rota, nome] of casos) {
