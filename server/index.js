@@ -2154,21 +2154,34 @@ app.delete('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res)
 
 // ---------- PEDIDO SEMANAL (pedidoSemanal.js) ----------
 // Lembrete do pedido de insumos que cada loja faz uma vez por semana, FORA
-// do Zenith (no sistema do fornecedor). O Master liga, escolhe o dia da
-// semana, e a loja confirma anexando o pedido - o anexo e o que separa
-// "cliquei pra sumir o aviso" de "o pedido existiu".
+// do Zenith (no sistema do fornecedor). A loja confirma anexando o pedido -
+// o anexo e o que separa "cliquei pra sumir o aviso" de "o pedido existiu".
 //
-// A lista de unidades cobradas nasce do Fechamento (uma entrada por loja,
-// ver FECHAMENTO_UNIDADES_NOMES) mais as cadastradas em runtime, menos as
-// que o Master excluiu. Nao uso construirUnidadesMapa() aqui de proposito:
-// ele mescla apelidos e codigos de outros sistemas, e a mesma loja apareceria
-// duas ou tres vezes na cobranca.
+// A cobranca e por REGRA: cada regra vale pra um GRUPO (franquia inteira) ou
+// pra LOJAS escolhidas a dedo, com dia da semana proprio. Loja que nao esta
+// em regra nenhuma nao e cobrada - e assim que Sao Braz, Saltiverso e Milky
+// Moo ficam de fora, sem lista de excecao pra alguem esquecer de manter.
+//
+// A lista de unidades candidatas nasce do Fechamento (uma entrada por loja,
+// ver FECHAMENTO_UNIDADES_NOMES) mais as cadastradas em runtime. Nao uso
+// construirUnidadesMapa() aqui de proposito: ele mescla apelidos e codigos de
+// outros sistemas, e a mesma loja apareceria duas ou tres vezes na cobranca.
 async function unidadesBasePedidoSemanal() {
   const extras = await unidadesExtras.mapa().catch(() => ({}));
   const mapa = { ...FECHAMENTO_UNIDADES_NOMES, ...extras };
   return Object.entries(mapa)
     .map(([codigo, nome]) => ({ codigo, nome }))
     .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+}
+
+// tudo que o calculo precisa, numa ida so - as tres rotas de leitura usam
+// exatamente o mesmo conjunto, e todas as fontes sao cacheadas
+async function contextoPedidoSemanal() {
+  const [regras, confirmacoes, base, listaGrupos] = await Promise.all([
+    pedidoSemanal.listarRegras(), pedidoSemanal.listarConfirmacoes(),
+    unidadesBasePedidoSemanal(), grupos.list().catch(() => []),
+  ]);
+  return { regras, confirmacoes, base, grupos: listaGrupos };
 }
 
 // Master/Admin acompanham TODAS as lojas (quem fez e quem nao fez); os
@@ -2181,16 +2194,13 @@ function filtrarUnidadesDoUsuario(req, lista) {
 }
 
 app.get('/api/pedido-semanal', async (req, res) => {
-  const [config, confirmacoes, base] = await Promise.all([
-    pedidoSemanal.obterConfig(), pedidoSemanal.listarConfirmacoes(), unidadesBasePedidoSemanal(),
-  ]);
-  const todas = pedidoSemanal.statusDasUnidades(base, { config, confirmacoes });
+  const ctx = await contextoPedidoSemanal();
+  const todas = pedidoSemanal.statusDasUnidades(ctx.base, ctx);
   res.json({
-    ativo: !!config.ativo,
-    titulo: config.titulo,
-    instrucoes: config.instrucoes,
-    diaSemana: config.diaSemana,
-    diaSemanaNome: pedidoSemanal.DIAS_NOME[config.diaSemana] || '',
+    // "ativo" aqui e do ponto de vista de QUEM PERGUNTA: existe alguma regra
+    // ligada cobrando alguma unidade. A tela nao precisa saber de regra
+    // nenhuma pra decidir se mostra o painel.
+    ativo: todas.length > 0,
     podeVerTodas: !!(req.isMaster || req.isAdmin),
     unidades: filtrarUnidadesDoUsuario(req, todas),
   });
@@ -2199,14 +2209,11 @@ app.get('/api/pedido-semanal', async (req, res) => {
 app.post('/api/pedido-semanal/:codigo/confirmar', uploadPedidoSemanal.single('arquivo'), async (req, res) => {
   try {
     const codigo = req.params.codigo;
-    const [config, confirmacoes, base] = await Promise.all([
-      pedidoSemanal.obterConfig(), pedidoSemanal.listarConfirmacoes(), unidadesBasePedidoSemanal(),
-    ]);
-    if (!config.ativo) return res.status(400).json({ error: 'O lembrete de pedido semanal está desativado.' });
-    // a unidade tem que estar na cobranca E no acesso de quem confirmou:
-    // sem os dois, um POST direto confirmaria loja alheia (ou uma das
-    // excluidas, criando cobranca pra quem nao faz pedido)
-    const cobradas = pedidoSemanal.statusDasUnidades(base, { config, confirmacoes });
+    const ctx = await contextoPedidoSemanal();
+    // a unidade tem que estar coberta por uma regra ativa E no acesso de
+    // quem confirmou: sem os dois, um POST direto confirmaria loja alheia
+    // (ou uma que nao faz pedido, criando cobranca do nada)
+    const cobradas = pedidoSemanal.statusDasUnidades(ctx.base, ctx);
     const alvo = filtrarUnidadesDoUsuario(req, cobradas).find((u) => u.codigo === codigo);
     if (!alvo) return res.status(403).json({ error: 'Essa unidade não faz pedido semanal ou não está no seu acesso.' });
     if (!req.file) return res.status(400).json({ error: 'Anexe o arquivo do pedido (PDF, print ou planilha).' });
@@ -2238,15 +2245,52 @@ app.get('/api/pedido-semanal/:codigo/arquivo', async (req, res) => {
   storage.streamArquivo(registro.arquivo.path, registro.arquivo.tipo, res);
 });
 
-app.get('/api/pedido-semanal/config', auth.requireMaster, async (req, res) => {
-  const [config, base] = await Promise.all([pedidoSemanal.obterConfig(), unidadesBasePedidoSemanal()]);
-  res.json({ config, unidades: base, dias: pedidoSemanal.DIAS_NOME });
+// ---- regras (Master) ----
+// devolve junto as unidades e os grupos: a tela de cadastro precisa dos dois
+// pra montar os seletores, e o "cobertas" mostra quem cada regra pega hoje -
+// sem isso o Master salva no escuro e so descobre o alcance no dia do pedido
+app.get('/api/pedido-semanal/regras', auth.requireMaster, async (req, res) => {
+  const ctx = await contextoPedidoSemanal();
+  const porUnidade = pedidoSemanal.regraDeCadaUnidade(ctx.base, ctx.regras, ctx.grupos);
+  const cobertas = {};
+  porUnidade.forEach((regra, codigo) => {
+    if (!cobertas[regra.id]) cobertas[regra.id] = [];
+    cobertas[regra.id].push(codigo);
+  });
+  res.json({
+    regras: ctx.regras,
+    // quem NAO esta em regra nenhuma - o Master precisa ver isso pra saber
+    // que loja ficou sem cobranca por esquecimento, e nao por decisao
+    semRegra: ctx.base.filter((u) => !porUnidade.has(u.codigo)),
+    cobertas,
+    unidades: ctx.base,
+    grupos: ctx.grupos.map((g) => ({ id: g.id, nome: g.nome, unidades: g.unidades || [] })),
+    dias: pedidoSemanal.DIAS_NOME,
+  });
 });
 
-app.put('/api/pedido-semanal/config', auth.requireMaster, async (req, res) => {
+app.post('/api/pedido-semanal/regras', auth.requireMaster, async (req, res) => {
   try {
-    if (await desviarSeQaMaster(req, res, 'pedidoSemanal.config', 'Configurar lembrete do pedido semanal', req.body || {})) return;
-    res.json(await pedidoSemanal.salvarConfig(req.body || {}, { porEmail: req.user.email }));
+    if (await desviarSeQaMaster(req, res, 'pedidoSemanal.criarRegra', `Criar regra de pedido semanal: ${req.body?.nome || ''}`, req.body || {})) return;
+    res.json(await pedidoSemanal.criarRegra(req.body || {}, { porEmail: req.user.email }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/pedido-semanal/regras/:id', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'pedidoSemanal.editarRegra', `Editar regra de pedido semanal ${req.params.id}`, { id: req.params.id, ...(req.body || {}) })) return;
+    res.json(await pedidoSemanal.atualizarRegra(req.params.id, req.body || {}, { porEmail: req.user.email }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/pedido-semanal/regras/:id', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'pedidoSemanal.excluirRegra', `Excluir regra de pedido semanal ${req.params.id}`, { id: req.params.id })) return;
+    res.json(await pedidoSemanal.removerRegra(req.params.id));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -3000,7 +3044,9 @@ app.get('/api/users/relatorio.:formato(csv|pdf)', auth.requireMaster, async (req
 // ação sobrevive até um restart do servidor (fica só o tipo+payload
 // salvos, nunca uma função/closure).
 const EXECUTORES_QA = {
-  'pedidoSemanal.config': (p) => pedidoSemanal.salvarConfig(p),
+  'pedidoSemanal.criarRegra': (p) => pedidoSemanal.criarRegra(p),
+  'pedidoSemanal.editarRegra': (p) => pedidoSemanal.atualizarRegra(p.id, p),
+  'pedidoSemanal.excluirRegra': (p) => pedidoSemanal.removerRegra(p.id),
   'usuarios.criar': (p) => users.create(p),
   'usuarios.criarCopiando': (p) => users.criarCopiandoDe(p),
   'usuarios.criarQaMaster': (p) => users.createQaMaster(p),

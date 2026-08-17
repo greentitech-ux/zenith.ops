@@ -568,7 +568,7 @@ async function cardPedidoSemanal(){
   const d = await fetch('/api/pedido-semanal').then(r=>r.json());
   if(!d.ativo){
     return pcardWrap('📦','Pedido semanal','/lancamento.html',
-      '<div class="pcard-vazio">Lembrete desligado. O Master liga em Grupos.</div>');
+      '<div class="pcard-vazio">Nenhuma regra de pedido semanal ativa. O Master cadastra em Grupos.</div>');
   }
   const unidades = d.unidades || [];
   const pendentes = unidades.filter(u=>u.estado!=='feito');
@@ -581,7 +581,7 @@ async function cardPedidoSemanal(){
     ? `<div class="pstats">
         ${statRow('Sua loja', minha.estado==='feito' ? 'pedido feito ✓' : 'ainda não fez', minha.estado==='feito' ? 'ok' : 'warn', true)}
         ${statRow('Pedido de', fmtDataBr(minha.dataPedido))}
-        ${statRow(minha.atraso ? 'Atrasado desde' : 'Todo', minha.atraso ? fmtDataBr(minha.atraso) : (d.diaSemanaNome||'—'), minha.atraso ? 'bad' : '')}
+        ${statRow(minha.atraso ? 'Atrasado desde' : 'Todo', minha.atraso ? fmtDataBr(minha.atraso) : (minha.diaSemanaNome||'—'), minha.atraso ? 'bad' : '')}
       </div>`
     : `<div class="pstats">
         ${statRow('Já fizeram', `${feitas} de ${unidades.length}`, feitas===unidades.length ? 'ok' : '')}

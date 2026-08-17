@@ -338,7 +338,7 @@ setTimeout(async () => {
   console.log(`${okCfg ? '✓' : '✗'} config de campos manuais é pública (link de auto-cadastro usa): HTTP ${cfgCampos.status} ${cfgCampos.corpo.slice(0, 80)}`);
 
   // ---- PEDIDO SEMANAL ----
-  // Desligado (o padrão) a rota tem que responder 200 com ativo:false, não
+  // Sem regra nenhuma (o padrão) a rota tem que responder 200 com ativo:false, não
   // 404/500: o Fechamento e o Painel chamam ela em TODO carregamento, e um
   // erro aqui apareceria como card quebrado numa tela que a loja usa o dia
   // inteiro pra outra coisa.
@@ -351,18 +351,20 @@ setTimeout(async () => {
   if (!okPs) ruins += 1;
   console.log(`${okPs ? '✓' : '✗'} pedido semanal desligado responde sem estourar: HTTP ${ps.status} ${ps.corpo.slice(0, 90)}`);
 
-  // A config traz a lista de unidades pro Master marcar as exceções - sem
-  // ela a tela de Grupos não teria o que renderizar
-  const psCfg = await pedir('/api/pedido-semanal/config', { Authorization: 'Bearer ' + token });
+  // A tela de regras precisa das unidades E dos grupos pra montar os dois
+  // seletores; "semRegra" é o que mostra ao Master quem ficou sem cobrança.
+  // Sem nenhuma regra cadastrada, TODA loja tem que aparecer ali.
+  const psCfg = await pedir('/api/pedido-semanal/regras', { Authorization: 'Bearer ' + token });
   let okPsCfg = false;
   try {
     const d = JSON.parse(psCfg.corpo);
-    okPsCfg = psCfg.status === 200 && Array.isArray(d.unidades) && d.unidades.length > 0
+    okPsCfg = psCfg.status === 200 && Array.isArray(d.regras) && Array.isArray(d.grupos)
       && Array.isArray(d.dias) && d.dias.length === 7
-      && (d.config.unidadesExcluidas || []).includes('São Braz IL');
+      && Array.isArray(d.unidades) && d.unidades.length > 0
+      && d.semRegra.length === d.unidades.length;
   } catch (e) { okPsCfg = false; }
   if (!okPsCfg) ruins += 1;
-  console.log(`${okPsCfg ? '✓' : '✗'} config do pedido semanal traz unidades + exceções padrão: HTTP ${psCfg.status} ${psCfg.corpo.slice(0, 90)}`);
+  console.log(`${okPsCfg ? '✓' : '✗'} regras do pedido semanal trazem unidades, grupos e quem está sem regra: HTTP ${psCfg.status} ${psCfg.corpo.slice(0, 90)}`);
 
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
