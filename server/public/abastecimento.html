@@ -54,6 +54,10 @@
   .sug-acoes{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
   .sug-acoes .btn-acao{flex:1 1 130px;font-size:12.5px;padding:9px 8px;}
   .sug-nota{font-size:11px;color:var(--muted);line-height:1.5;margin-top:8px;}
+  /* estado de espera: a sugestao ja foi cumprida (saiu envio de insumo) e
+     agora depende da proxima contagem. Fica no lugar da lista de itens */
+  .sug-espera{font-size:12.5px;line-height:1.55;padding:10px 0 2px;}
+  .sug-espera span{display:block;font-size:11px;color:var(--muted);margin-top:5px;}
   h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   h2{font-size:13.5px;font-weight:700;margin:0 0 4px;}
   .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -1331,9 +1335,27 @@ function renderSugestao(){
   painel.classList.remove('hidden');
 
   const c = s.contagem;
+
+  // JÁ ATENDIDA: saiu envio de insumo depois da contagem. A sugestão sai da
+  // tela e dá lugar ao aviso de espera - continuar mostrando o número seria
+  // mandar de novo o que o turno acabou de repor. Ela volta sozinha na
+  // próxima contagem, que é a foto nova do carrinho.
+  if(s.atendida){
+    document.getElementById('sug-sub').innerHTML =
+      `envio já feito${s.atendidaEm?' às '+fmtHora(s.atendidaEm):''} — base: contagem de ${fmtHora(c.em)}`;
+    document.getElementById('sug-itens').innerHTML =
+      `<div class="sug-espera">⏳ <b>Aguardando a próxima contagem</b>
+       <span>O carrinho já foi abastecido depois da contagem de ${fmtHora(c.em)}. A sugestão volta assim que sair uma contagem nova — é ela que diz o que ficou no carrinho.</span></div>`;
+    document.getElementById('sug-acoes').classList.add('hidden');
+    document.getElementById('sug-nota').innerHTML = '';
+    document.getElementById('sug-corpo').classList.toggle('hidden', SUG_RECOLHIDO);
+    document.getElementById('btn-recolher-sug').textContent = SUG_RECOLHIDO ? 'abrir' : 'recolher';
+    return;
+  }
+  document.getElementById('sug-acoes').classList.remove('hidden');
+
   document.getElementById('sug-sub').innerHTML =
     `base: contagem de ${fmtHora(c.em)}${c.por?' · '+escapeHtml(c.por):''}`
-    + (c.enviosDepois ? `<br>${c.enviosDepois} envio(s) depois dela já descontado(s)` : '')
     + '<br>só insumos — pizza vai por pedido, fracionada no dia';
 
   document.getElementById('sug-itens').innerHTML = s.itens.map(it=>{
