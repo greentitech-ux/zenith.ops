@@ -209,6 +209,8 @@ setTimeout(async () => {
     ['/api/fechamentos/relatorio-unidades.pdf', 'comparativo por unidade (PDF)'],
     ['/api/compras/acompanhamento', 'acompanhamento de compras (gerente)'],
     ['/api/fechamentos/recordes', 'recordes de venda (maior/menor dia e semana)'],
+    ['/api/inventario/recebimentos/relatorio.csv?unidade=19821', 'relatório de recebimentos - inventário (CSV)'],
+    ['/api/inventario/recebimentos/relatorio.pdf?unidade=19821', 'relatório de recebimentos - inventário (PDF)'],
   ];
   let ruins = 0;
   for (const [rota, nome] of casos) {

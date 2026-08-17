@@ -4404,6 +4404,46 @@ app.get('/api/inventario/relatorio.:formato(csv|pdf)', requireSection('inventari
   }
 });
 
+// relatorio (CSV/PDF) dos recebimentos de mercadoria - a tela so mostra os
+// ultimos 30 (ver renderRecebimentos em estoque.html), o relatorio sai com o
+// HISTORICO INTEIRO da unidade (ou o periodo, se inicio/fim vierem na
+// query), pra dar pra conferir compra/CMV fora do sistema
+app.get('/api/inventario/recebimentos/relatorio.:formato(csv|pdf)', requireSection('inventario'), async (req, res) => {
+  try {
+    const { unidade, inicio, fim } = req.query;
+    if (!unidade) return res.status(400).json({ error: 'Informe a unidade.' });
+    if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const todos = await inventario.listRecebimentos();
+    const linhas = todos
+      .filter((r) => r.unidade === unidade && (!inicio || (r.data || '') >= inicio) && (!fim || (r.data || '') <= fim))
+      .sort((a, b) => (b.data || '').localeCompare(a.data || ''))
+      .map((r) => ({
+        data: reportUtil.fmtDataBR(r.data), item: r.itemNome, setor: inventario.SETORES[r.setor] || r.setor,
+        fornecedor: r.fornecedor, quantidade: r.quantidade, valorUnitario: reportUtil.fmtMoneyBR(r.valorUnitario),
+        valorTotal: reportUtil.fmtMoneyBR(r.valorTotal), notaFiscal: r.notaFiscal || '—',
+      }));
+    const colunas = [
+      { key: 'data', label: 'Data' }, { key: 'item', label: 'Item' }, { key: 'setor', label: 'Setor' },
+      { key: 'fornecedor', label: 'Fornecedor' }, { key: 'quantidade', label: 'Quantidade' },
+      { key: 'valorUnitario', label: 'Valor unit.' }, { key: 'valorTotal', label: 'Valor total' }, { key: 'notaFiscal', label: 'Nota fiscal' },
+    ];
+    const nomeArquivo = reportUtil.nomeArquivoComData(`inventario-recebimentos-${unidade}`);
+    if (req.params.formato === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}.csv"`);
+      return res.send(reportUtil.toCSV(colunas, linhas));
+    }
+    const periodo = inicio || fim ? ` · período: ${inicio || 'início'} a ${fim || 'hoje'}` : ' · histórico completo';
+    reportUtil.writePDF(res, {
+      titulo: 'Inventário - Recebimentos de mercadoria',
+      subtitulo: `${INVENTARIO_UNIDADES_NOMES[unidade] || unidade}${periodo} · ${linhas.length} recebimento(s)`,
+      colunas, linhas, nomeArquivo,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---------- Saltiverso Patteo (parque de trampolins): controle de entrada
 // (check-ins) e reservas de festa. Duas secoes de checkin/painel (mesmo
 // padrao entregas/entregas-lancamento) + uma secao de festas ----------
