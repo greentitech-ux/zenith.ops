@@ -35,8 +35,23 @@ function getCliente() {
 // imprime do seu jeito) - e o numero lido aqui vai direto pro Faturamento
 const MODELO = 'claude-sonnet-5';
 
-function montarPrompt(canais, dica) {
-  const lista = canais.map((c) => `${c.campo} | ${c.label}`).join('\n');
+// A chave que vai pro modelo e prefixada pela secao ("canal." / "forma.")
+// porque os dois cadastros sao independentes e podem ter o mesmo campo: uma
+// loja com "AdyenV2" nos dois lugares mandaria o valor pro campo errado se a
+// chave fosse so o campo. Uma string so tambem e mais robusta que um campo
+// "secao" separado - o modelo nao tem como acertar metade dela.
+const chaveDe = (secao, campo) => `${secao}.${campo}`;
+
+function montarPrompt(canais, formas, dica) {
+  const linhas = (lista) => lista.map((c) => `${chaveDe(c.secao, c.campo)} | ${c.label}`).join('\n');
+  const blocoCanais = canais.length ? `
+CANAIS DE VENDA (de onde veio a venda: salão, delivery, retirada, apps...):
+${linhas(canais)}
+` : '';
+  const blocoFormas = formas.length ? `
+FORMAS DE PAGAMENTO (com o que o cliente pagou: cartão, pix, voucher...):
+${linhas(formas)}
+` : '';
   // A dica vem do cadastro do grupo (Master), entao e texto confiavel - mas
   // entra DEPOIS das regras e delimitada, pra ser leitura de relatorio e nao
   // um jeito de reescrever o formato de saida.
@@ -46,31 +61,32 @@ Instruções específicas do relatório desta loja (escritas por quem opera - si
 """
 ${dica}
 """` : '';
-  return `Você está vendo a foto (ou print) de um relatório de vendas do sistema de PDV de uma loja de comida. Extraia o VALOR TOTAL VENDIDO em cada canal de venda.
+  return `Você está vendo a foto (ou print) de um relatório de fechamento do sistema de PDV de uma loja de comida. Extraia os valores em dinheiro dos campos listados abaixo.
 
-Canais de venda cadastrados para esta loja (use o "campo" exatamente como está escrito aqui):
-${lista}
-
+Campos cadastrados para esta loja (use a "chave" exatamente como está escrita aqui, com o prefixo):
+${blocoCanais}${blocoFormas}
 Devolva SOMENTE um JSON válido, sem nenhum texto antes ou depois, exatamente neste formato:
 {
   "data": "AAAA-MM-DD da data do relatório, ou null se não conseguir ler",
-  "canais": [
-    { "campo": "campo exato da lista acima", "textoOrigem": "como o canal está escrito no relatório", "valor": numero }
+  "campos": [
+    { "chave": "chave exata da lista acima, com prefixo", "textoOrigem": "como a linha está escrita no relatório", "valor": numero }
   ],
   "naoIdentificados": [
-    { "textoOrigem": "linha do relatório que tem valor mas você não conseguiu casar com nenhum canal da lista", "valor": numero }
+    { "textoOrigem": "linha do relatório que tem valor mas você não conseguiu casar com nenhuma chave da lista", "valor": numero }
   ]
 }
 
 Regras:
-- Só inclua em "canais" quando tiver bastante certeza de que a linha do relatório é aquele canal da lista. Nome parecido não basta se houver duas opções plausíveis - nesse caso mande pra "naoIdentificados". Um valor no canal errado é pior que um campo vazio: o campo vazio o gerente preenche olhando a foto, o valor errado ele só percebe se conferir tudo de novo.
-- Não invente canal: se um canal da lista não aparece no relatório, simplesmente não o inclua no JSON (não mande com valor 0, porque 0 é uma informação diferente de "não apareceu").
-- "naoIdentificados" existe pra não perder dinheiro de vista: se o relatório mostra uma linha de venda que não casa com nenhum canal cadastrado, ela vai pra lá e o gerente decide. É melhor mostrar "sobrou R$ 320 que não sei onde colocar" do que ignorar em silêncio.
-- Ignore linhas que claramente NÃO são canal de venda: total geral, subtotal, quantidade de pedidos, ticket médio, número de clientes, impostos, desconto. Só valores de venda POR CANAL.
-- LINHA COM MAIS DE UM NÚMERO: é comum a linha de um canal ter várias colunas (quantidade, taxa, valor...). Nesses casos, o valor que interessa é o TOTAL VENDIDO em dinheiro daquele canal. Uma coluna zerada nunca é a resposta quando existe outra coluna com valor na mesma linha - se um canal aparece com 0,00 numa coluna e com um valor real em outra, mande o valor real. Se as colunas forem ambíguas e você não souber qual é o total em dinheiro, mande a linha pra "naoIdentificados" em vez de chutar.
+- Só inclua em "campos" quando tiver bastante certeza de que a linha do relatório é aquela chave da lista. Nome parecido não basta se houver duas opções plausíveis - nesse caso mande pra "naoIdentificados". Um valor no campo errado é pior que um campo vazio: o campo vazio o gerente preenche olhando a foto, o valor errado ele só percebe se conferir tudo de novo.
+- Não confunda as duas seções: canal de venda é de ONDE veio a venda, forma de pagamento é COM O QUE o cliente pagou. A mesma venda aparece nas duas, então os dois blocos costumam somar o mesmo total - isso é esperado, não é erro nem duplicidade.
+- Não invente campo: se um campo da lista não aparece no relatório, simplesmente não o inclua no JSON (não mande com valor 0, porque 0 é uma informação diferente de "não apareceu"). Se ele aparece no relatório valendo 0,00 de verdade, aí sim mande 0.
+- "naoIdentificados" existe pra não perder dinheiro de vista: se o relatório mostra uma linha com valor que não casa com nenhuma chave cadastrada, ela vai pra lá e o gerente decide. É melhor mostrar "sobrou R$ 320 que não sei onde colocar" do que ignorar em silêncio.
+- Ignore linhas que claramente não são nem canal nem forma de pagamento: total geral, subtotal, vendas totais/líquidas/royalty, imposto, quantidade de pedidos, ticket médio, número de clientes, mão de obra, cupom, quilometragem, fundo de caixa. Só os campos da lista.
+- PORCENTAGEM NUNCA É O VALOR. É comum a linha ter o nome, depois a participação em % e só então o valor em dinheiro (ex: "CarryOut 17,7% R$515,20" → o valor é 515.20, nunca 17.7). Qualquer número acompanhado de "%" deve ser ignorado.
+- DUAS LINHAS PARECIDAS: o mesmo canal pode aparecer em mais de uma linha, variantes do mesmo nome (ex: dois tipos de Delivery, um por tipo de entregador), e normalmente só uma delas é usada - a outra fica zerada o tempo todo. Quando duas linhas parecidas disputam a mesma chave da lista e só uma tem valor, mande a que tem valor. Se as duas tiverem valor, não escolha no chute: mande as duas pra "naoIdentificados" com o texto de origem de cada uma, pro gerente decidir.
 - IMPORTANTE: os números estão em formato brasileiro (ponto separa milhar, vírgula separa decimal - ex: "1.234,56"). Converta todo valor para o padrão JSON: só ponto decimal, sem separador de milhar (ex: 1234.56). Nunca escreva número com vírgula no JSON - isso quebra o formato.
-- Datas sempre em AAAA-MM-DD.
-- Se a imagem não for um relatório de vendas, devolva {"erro": "descrição curta do que você viu"} em vez do formato acima.${blocoDica}`;
+- Datas sempre em AAAA-MM-DD. Se o relatório mostrar data e hora juntas, use só a data.
+- Se a imagem não for um relatório de fechamento/vendas, devolva {"erro": "descrição curta do que você viu"} em vez do formato acima.${blocoDica}`;
 }
 
 function extrairJson(texto) {
@@ -80,10 +96,13 @@ function extrairJson(texto) {
 
 const numeroOuNull = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
 
-async function lerCanais({ buffer, mimeType, canais, dica }) {
+async function lerCanais({ buffer, mimeType, canais, formas, dica }) {
   if (!ativo()) throw new Error('Leitura automática por imagem não está configurada neste servidor.');
-  if (!Array.isArray(canais) || !canais.length) {
-    throw new Error('Essa loja ainda não tem Canais de venda cadastrados - peça pro Master configurar em Grupos.');
+  const listaCanais = (Array.isArray(canais) ? canais : []).map((c) => ({ ...c, secao: 'canal' }));
+  const listaFormas = (Array.isArray(formas) ? formas : []).map((c) => ({ ...c, secao: 'forma' }));
+  const todos = [...listaCanais, ...listaFormas];
+  if (!todos.length) {
+    throw new Error('Essa loja ainda não tem Canais de venda nem Formas de pagamento cadastrados - peça pro Master configurar em Grupos.');
   }
   const ehPdf = mimeType === 'application/pdf';
   const bloco = ehPdf
@@ -92,7 +111,7 @@ async function lerCanais({ buffer, mimeType, canais, dica }) {
   const resp = await getCliente().messages.create({
     model: MODELO,
     max_tokens: 4000,
-    messages: [{ role: 'user', content: [bloco, { type: 'text', text: montarPrompt(canais, dica) }] }],
+    messages: [{ role: 'user', content: [bloco, { type: 'text', text: montarPrompt(listaCanais, listaFormas, dica) }] }],
   });
   const texto = (resp.content || []).map((b) => b.text || '').join('');
   let dados;
@@ -107,18 +126,20 @@ async function lerCanais({ buffer, mimeType, canais, dica }) {
   }
   if (dados.erro) throw new Error(String(dados.erro).slice(0, 200));
 
-  // so aceita campo que existe MESMO no grupo: o modelo pode devolver um
-  // campo inventado ou de outra loja, e ai o valor entraria num campo que
+  // so aceita chave que existe MESMO no grupo: o modelo pode devolver uma
+  // chave inventada ou de outra loja, e ai o valor entraria num campo que
   // a tela nem mostra - sumindo silenciosamente do fechamento
-  const porCampo = new Map(canais.map((c) => [c.campo, c]));
+  const porChave = new Map(todos.map((c) => [chaveDe(c.secao, c.campo), c]));
   const vistos = new Set();
   const itens = [];
-  (Array.isArray(dados.canais) ? dados.canais : []).forEach((c) => {
-    const def = porCampo.get(String(c && c.campo));
+  (Array.isArray(dados.campos) ? dados.campos : []).forEach((c) => {
+    const chave = String((c && c.chave) || '');
+    const def = porChave.get(chave);
     const valor = numeroOuNull(c && c.valor);
-    if (!def || valor == null || vistos.has(def.campo)) return;
-    vistos.add(def.campo);
+    if (!def || valor == null || vistos.has(chave)) return;
+    vistos.add(chave);
     itens.push({
+      secao: def.secao,
       campo: def.campo,
       label: def.label,
       valor,
@@ -134,10 +155,12 @@ async function lerCanais({ buffer, mimeType, canais, dica }) {
     data: /^\d{4}-\d{2}-\d{2}$/.test(dados.data) ? dados.data : null,
     itens,
     naoIdentificados,
-    // canais que a loja tem mas nao apareceram na imagem: a tela avisa quais
+    // campos que a loja tem mas nao apareceram na imagem: a tela avisa quais
     // continuam pra preencher na mao, em vez de deixar o gerente descobrir
     // no erro de fechamento
-    faltando: canais.filter((c) => !vistos.has(c.campo)).map((c) => ({ campo: c.campo, label: c.label })),
+    faltando: todos
+      .filter((c) => !vistos.has(chaveDe(c.secao, c.campo)))
+      .map((c) => ({ secao: c.secao, campo: c.campo, label: c.label })),
   };
 }
 
