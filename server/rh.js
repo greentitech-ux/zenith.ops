@@ -118,10 +118,18 @@ function calcularInicioAPartirDoPrazo(prazoIso, etapa) {
 // "ja efetivado"
 const TIPOS_CADASTRO = ['extra', 'candidato', 'efetivado'];
 
+// Tipos de cadastro que so entram com o documento de identidade anexado
+// (ver documentoIdentidadeOcr.js): quem contrata extra/candidato faz isso na
+// correria, e ficha sem documento era o caminho normal de entrar gente sem
+// conferencia nenhuma. Efetivado nao entra na regra porque a contratacao
+// formal ja tem seu proprio pacote de documentos (ver DOCUMENTOS_OBRIGATORIOS).
+const TIPOS_EXIGEM_DOCUMENTO = ['extra', 'candidato'];
+
 async function criar({
   unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro, semExperiencia,
   curriculo, cadastradoPorId, cadastradoPorEmail, precisaAprovacao, exigirCurriculo = true,
   dataExamePeriodico, periodicidadeExameMeses, dataUltimasFerias,
+  cpf, rg, nomeMae, documentoIdentidade, leituraDocumento, exigirDocumento = true,
 }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   const nomeOk = limpar(nome, 150);
@@ -140,6 +148,13 @@ async function criar({
   ));
   if (jaExiste) throw new Error(`"${nomeOk}" já está cadastrado nessa loja - confira na lista antes de cadastrar de novo.`);
   const tipo = TIPOS_CADASTRO.includes(tipoCadastro) ? tipoCadastro : 'extra';
+  // o anexo e o que sustenta os campos: nome e nascimento vem da LEITURA
+  // dele, nao de digitacao. Sem o arquivo guardado, um dado errado depois
+  // nao teria como ser conferido contra nada - a ficha viraria a unica
+  // versao da verdade sobre a identidade da pessoa.
+  if (exigirDocumento && TIPOS_EXIGEM_DOCUMENTO.includes(tipo) && !documentoIdentidade) {
+    throw new Error('Anexe a foto do documento de identidade (RG, CNH ou CPF) - os dados são preenchidos por ele.');
+  }
   // extra (avulso) e efetivado (contratacao direta) ja entram como ativo -
   // nao passam por decisao de contratacao. candidato (teste de 5 dias) so
   // vira "ativo" quando efetivado (ver registrarDecisaoTeste) - ate la fica
@@ -165,6 +180,18 @@ async function criar({
     dataNascimento: validarDataOuNull(dataNascimento, 'Data de nascimento'),
     dataAdmissao: dataAdmissaoOk,
     curriculo: curriculo || null,
+    // dados lidos do documento de identidade (documentoIdentidadeOcr.js).
+    // CPF ja chega aqui validado por digito verificador - o modulo devolve
+    // null quando nao fecha, entao o que estiver gravado passou na conta.
+    cpf: String(cpf || '').replace(/\D/g, '').slice(0, 11) || null,
+    rg: limpar(rg, 30),
+    nomeMae: limpar(nomeMae, 150),
+    // o proprio arquivo do documento, guardado igual ao curriculo
+    documentoIdentidade: documentoIdentidade || null,
+    // fica registrado O QUE a leitura devolveu e o que ela nao conseguiu ler:
+    // se aparecer divergencia meses depois, da pra saber se o dado veio do
+    // documento ou foi preenchido por fora
+    leituraDocumento: leituraDocumento || null,
     // saude ocupacional (ASO) e ferias - base dos alertas trabalhistas
     // (evitar multa por exame periodico vencido / ferias nao concedidas no
     // prazo legal). dataExamePeriodico = data do ULTIMO ASO; o proximo vence
@@ -312,6 +339,12 @@ async function atualizar(id, patch) {
   if (patch.dataNascimento !== undefined) merge.dataNascimento = validarDataOuNull(patch.dataNascimento, 'Data de nascimento');
   if (patch.dataAdmissao !== undefined) merge.dataAdmissao = validarDataOuNull(patch.dataAdmissao, 'Data de admissão');
   if (patch.curriculo !== undefined) merge.curriculo = patch.curriculo;
+  // correcao de dado do documento e do Master/RH (a rota ja limita quem
+  // chega aqui) - a trava de "nao editavel" e do cadastro, nao da ficha:
+  // documento mal fotografado precisa poder ser corrigido depois
+  if (patch.cpf !== undefined) merge.cpf = String(patch.cpf || '').replace(/\D/g, '').slice(0, 11) || null;
+  if (patch.rg !== undefined) merge.rg = limpar(patch.rg, 30);
+  if (patch.nomeMae !== undefined) merge.nomeMae = limpar(patch.nomeMae, 150);
   if (patch.dataExamePeriodico !== undefined) merge.dataExamePeriodico = validarDataOuNull(patch.dataExamePeriodico, 'Data do exame periódico');
   if (patch.periodicidadeExameMeses !== undefined) merge.periodicidadeExameMeses = Number(patch.periodicidadeExameMeses) > 0 ? Math.round(Number(patch.periodicidadeExameMeses)) : 12;
   if (patch.dataUltimasFerias !== undefined) merge.dataUltimasFerias = validarDataOuNull(patch.dataUltimasFerias, 'Data das últimas férias');

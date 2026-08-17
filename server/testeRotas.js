@@ -304,6 +304,27 @@ setTimeout(async () => {
   console.log(`${okMulti ? '✓' : '✗'} ler Canais aceita várias fotos no mesmo envio: HTTP ${multi.status} ${multi.corpo.slice(0, 90)}`);
   console.log(`${okSemRecurso ? '✓' : '✗'} ler Canais exige o recurso ligado no Grupo: HTTP ${semRecurso.status} ${semRecurso.corpo.slice(0, 90)}`);
 
+  // Extra e Candidato so entram com o documento de identidade anexado (os
+  // dados vem da leitura dele, ver documentoIdentidadeOcr.js). Sem o anexo,
+  // a recusa tem que ser explicita - antes o cadastro passava com o nome
+  // digitado e ninguem tinha como conferir a identidade depois.
+  const semDoc = await postarMultipart('/api/rh/funcionarios',
+    { unidade: 'AERO', nome: 'Fulano de Teste', tipoCadastro: 'extra' },
+    { nome: 'cv.pdf', tipo: 'application/pdf', buffer: Buffer.from('%PDF-1.4 teste') }, 'curriculo',
+    token ? { Authorization: 'Bearer ' + token } : {});
+  const okSemDoc = semDoc.status === 400 && /documento de identidade/i.test(semDoc.corpo);
+  if (!okSemDoc) ruins += 1;
+  console.log(`${okSemDoc ? '✓' : '✗'} cadastro de Extra sem documento é recusado: HTTP ${semDoc.status} ${semDoc.corpo.slice(0, 90)}`);
+
+  // sem ANTHROPIC_API_KEY nao ha como ler documento nenhum - a rota precisa
+  // dizer isso, e nao estourar tentando chamar a API sem chave
+  const lerDoc = await postarMultipart('/api/rh/ler-documento', {},
+    { nome: 'rg.png', tipo: 'image/png', buffer: pngFalso }, 'documento',
+    token ? { Authorization: 'Bearer ' + token } : {});
+  const okLerDoc = lerDoc.status === 400 && /não está configurada/i.test(lerDoc.corpo);
+  if (!okLerDoc) ruins += 1;
+  console.log(`${okLerDoc ? '✓' : '✗'} ler documento sem ANTHROPIC_API_KEY é recusado: HTTP ${lerDoc.status} ${lerDoc.corpo.slice(0, 80)}`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de
