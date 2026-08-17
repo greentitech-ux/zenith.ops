@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Recordes de Venda · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:980px;margin-inline:auto;overflow-x:clip;overflow-y:clip;}
+  h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  h2{font-size:13.5px;font-weight:700;margin:0 0 10px;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin-left:-12px;margin-right:-12px;margin-top:-16px;padding-left:12px;padding-right:12px;padding-top:12px;padding-bottom:12px;display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .hidden{display:none!important;}
+  .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer-titulo{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px 12px;}
+  .nav-drawer-grupo{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 4px;}
+  .nav-drawer-grupo{cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;}
+  .nav-drawer-grupo .ndg-seta{transition:transform .15s ease;font-size:9px;flex:none;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
+  .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:16px;}
+  select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:13px;font-family:var(--sans);}
+  select:focus{outline:none;border-color:var(--accent);}
+
+  .filtro-topo{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;}
+  .filtro-topo label{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
+
+  .geral-grid{display:grid;grid-template-columns:1fr;gap:10px;}
+  @media(min-width:640px){ .geral-grid{grid-template-columns:repeat(2,1fr);} }
+  .geral-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;}
+  .geral-card.alta{border-color:rgba(61,220,151,.35);}
+  .geral-card.baixa{border-color:rgba(255,92,92,.28);}
+  .geral-rotulo{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}
+  .geral-valor{font-size:22px;font-weight:700;letter-spacing:-.02em;margin-top:4px;}
+  .geral-valor.alta{color:var(--ok);}
+  .geral-valor.baixa{color:var(--bad);}
+  .geral-sub{font-size:12.5px;color:var(--text);margin-top:4px;}
+  .geral-data{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px;}
+
+  .meta-card{background:var(--panel);border:1px solid rgba(61,220,151,.35);border-radius:12px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
+  .meta-nome{font-size:13.5px;font-weight:700;}
+  .meta-detalhe{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:3px;}
+  .badge{font-family:var(--mono);font-size:10px;padding:3px 9px;border-radius:20px;display:inline-block;white-space:nowrap;flex:none;background:var(--ok-dim);color:var(--ok);font-weight:700;}
+
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  th{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;text-align:left;padding:10px 12px;background:var(--panel2);white-space:nowrap;position:sticky;top:0;}
+  td{padding:9px 12px;border-top:1px solid var(--line);white-space:nowrap;}
+  tr:hover td{background:var(--panel2);}
+  .unidade-nome{font-weight:600;}
+  .val{font-weight:600;}
+  .val.alta{color:var(--ok);}
+  .val.baixa{color:var(--bad);}
+  .sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
+  .tag-recente{font-family:var(--mono);font-size:9px;padding:1px 6px;border-radius:10px;background:rgba(61,220,151,.15);color:var(--ok);margin-left:5px;white-space:nowrap;}
+  .sem-semana{color:var(--muted);font-style:italic;}
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+    <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+    <div style="min-width:0;">
+      <div class="eyebrow">Zenith Ops · Fechamentos</div>
+      <h1>Recordes de Venda</h1>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;">
+    <button class="back" onclick="logout()">🚪 Sair</button>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso a essa tela.</div>
+
+<div id="root" class="hidden">
+
+<div class="filtro-topo">
+  <label for="f-janela">Considerar recorde recente até</label>
+  <select id="f-janela">
+    <option value="7">7 dias atrás</option>
+    <option value="15">15 dias atrás</option>
+    <option value="30" selected>30 dias atrás</option>
+    <option value="60">60 dias atrás</option>
+    <option value="90">90 dias atrás</option>
+  </select>
+</div>
+
+<div class="panel">
+  <h2>Recorde geral · todas as lojas</h2>
+  <div class="geral-grid" id="geral-grid"><div class="empty">carregando...</div></div>
+</div>
+
+<div class="panel" id="painel-meta">
+  <h2>🏆 Bateram recorde recentemente · candidatos a plano de meta</h2>
+  <div id="lista-meta"><div class="empty">carregando...</div></div>
+</div>
+
+<div class="panel">
+  <h2>Recordes por loja</h2>
+  <div class="tablewrap"><table>
+    <thead><tr>
+      <th>Loja</th>
+      <th>Maior venda · dia</th>
+      <th>Menor venda · dia</th>
+      <th>Maior venda · semana</th>
+      <th>Menor venda · semana</th>
+    </tr></thead>
+    <tbody id="tabela-unidades"></tbody>
+  </table></div>
+</div>
+
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function abrirMenu(){}
+function fecharMenu(){}
+
+// mesmo acordeao do menu lateral usado em todas as telas (ver mensalistas.html
+// pra comentario completo) - copiado aqui por convencao do projeto
+function initNavDrawerAccordion(){
+  const nav = document.getElementById('nav-drawer');
+  if(!nav || nav.dataset.ndgInit) return;
+  nav.dataset.ndgInit = '1';
+  [...nav.querySelectorAll(':scope > .nav-drawer-grupo')].forEach(g=>{
+    const nomeGrupo = g.textContent.trim();
+    const itens = [];
+    let el = g.nextElementSibling;
+    while(el && !el.classList.contains('nav-drawer-grupo') && !el.classList.contains('nav-drawer-sep')){
+      const prox = el.nextElementSibling;
+      itens.push(el);
+      el = prox;
+    }
+    if(!itens.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'ndg-wrap';
+    g.after(wrap);
+    itens.forEach(it=>wrap.appendChild(it));
+    g.innerHTML = `<span>${nomeGrupo}</span><span class="ndg-seta">▾</span>`;
+    const atualizarVazio = ()=>{
+      const temVisivel = itens.some(it=>!it.classList.contains('hidden'));
+      g.classList.toggle('hidden', !temVisivel);
+    };
+    atualizarVazio();
+    new MutationObserver(atualizarVazio).observe(wrap, { attributes:true, attributeFilter:['class'], subtree:true });
+    const key = 'ndgAberto:' + nomeGrupo;
+    const temAtual = itens.some((it)=>{ const h = it.getAttribute && it.getAttribute('href'); if(!h) return false; try { return new URL(h, location.origin).pathname === location.pathname; } catch(e){ return false; } });
+    const aberto = temAtual || nomeGrupo === 'Operação diária';
+    g.querySelector('.ndg-seta').style.transform = aberto ? '' : 'rotate(-90deg)';
+    wrap.classList.toggle('hidden', !aberto);
+    g.addEventListener('click', ()=>{
+      const abrirAgora = wrap.classList.contains('hidden');
+      wrap.classList.toggle('hidden', !abrirAgora);
+      g.querySelector('.ndg-seta').style.transform = abrirAgora ? '' : 'rotate(-90deg)';
+      localStorage.setItem(key, abrirAgora ? '1' : '0');
+    });
+  });
+}
+initNavDrawerAccordion();
+
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtData(iso){ if(!iso) return '—'; const [y,m,d]=iso.split('-'); return `${d}/${m}/${y}`; }
+function fmtSemana(s){ return s ? `${fmtData(s.inicio)} a ${fmtData(s.fim)}` : ''; }
+
+let DADOS = null;
+
+async function carregar(){
+  const janela = document.getElementById('f-janela').value;
+  const res = await fetch('/api/fechamentos/recordes?janela=' + janela);
+  if(!res.ok){
+    document.getElementById('geral-grid').innerHTML = '<div class="empty">Não foi possível carregar os recordes.</div>';
+    return;
+  }
+  DADOS = await res.json();
+  renderGeral();
+  renderMeta();
+  renderTabela();
+}
+
+function cardGeral(rotulo, item, tipo){
+  if(!item) return `<div class="geral-card ${tipo}"><div class="geral-rotulo">${rotulo}</div><div class="empty" style="padding:8px 0;">sem dados suficientes</div></div>`;
+  const semana = item.inicio != null;
+  return `<div class="geral-card ${tipo}">
+    <div class="geral-rotulo">${rotulo}</div>
+    <div class="geral-valor ${tipo}">${fmtMoney(item.valor)}</div>
+    <div class="geral-sub">${escapeHtml(item.unidadeNome)}</div>
+    <div class="geral-data">${semana ? fmtSemana(item) : fmtData(item.data)}</div>
+  </div>`;
+}
+
+function renderGeral(){
+  const g = DADOS.geral;
+  document.getElementById('geral-grid').innerHTML =
+    cardGeral('Maior venda · um dia', g.diaRecorde, 'alta') +
+    cardGeral('Menor venda · um dia', g.diaMenor, 'baixa') +
+    cardGeral('Maior venda · uma semana', g.semanaRecorde, 'alta') +
+    cardGeral('Menor venda · uma semana', g.semanaMenor, 'baixa');
+}
+
+function renderMeta(){
+  const el = document.getElementById('lista-meta');
+  const janela = document.getElementById('f-janela').value;
+  if(!DADOS.candidatosMeta.length){
+    el.innerHTML = `<div class="empty">Nenhuma loja bateu recorde de dia ou de semana nos últimos ${janela} dias.</div>`;
+    return;
+  }
+  el.innerHTML = DADOS.candidatosMeta.map(c=>{
+    const partes = [];
+    if(c.diaRecorde) partes.push(`dia ${fmtData(c.diaRecorde.data)} · ${fmtMoney(c.diaRecorde.valor)}`);
+    if(c.semanaRecorde) partes.push(`semana ${fmtSemana(c.semanaRecorde)} · ${fmtMoney(c.semanaRecorde.valor)}`);
+    const rotuloMotivo = c.motivo === 'dia+semana' ? '🏆 dia + semana' : (c.motivo === 'dia' ? '🏆 dia' : '🏆 semana');
+    return `<div class="meta-card">
+      <div>
+        <div class="meta-nome">${escapeHtml(c.unidadeNome)}</div>
+        <div class="meta-detalhe">${partes.join(' · ')}</div>
+      </div>
+      <span class="badge">${rotuloMotivo}</span>
+    </div>`;
+  }).join('');
+}
+
+function celulaDia(item, tipo){
+  if(!item) return '<span class="sem-semana">—</span>';
+  return `<div class="val ${tipo}">${fmtMoney(item.valor)}</div><div class="sub">${fmtData(item.data)}</div>`;
+}
+function celulaSemana(item, tipo){
+  if(!item) return '<span class="sem-semana">sem semana completa</span>';
+  return `<div class="val ${tipo}">${fmtMoney(item.valor)}</div><div class="sub">${fmtSemana(item)}</div>`;
+}
+
+function renderTabela(){
+  const corpo = document.getElementById('tabela-unidades');
+  if(!DADOS.unidades.length){
+    corpo.innerHTML = '<tr><td colspan="5"><div class="empty">Nenhum fechamento no histórico.</div></td></tr>';
+    return;
+  }
+  corpo.innerHTML = DADOS.unidades.map(u=>`
+    <tr>
+      <td class="unidade-nome">${escapeHtml(u.unidadeNome)}</td>
+      <td>${celulaDia(u.diaRecorde,'alta')}${u.diaRecordeRecente?'<span class="tag-recente">recente</span>':''}</td>
+      <td>${celulaDia(u.diaMenor,'baixa')}</td>
+      <td>${celulaSemana(u.semanaRecorde,'alta')}${u.semanaRecordeRecente?'<span class="tag-recente">recente</span>':''}</td>
+      <td>${celulaSemana(u.semanaMenor,'baixa')}</td>
+    </tr>
+  `).join('');
+}
+
+document.getElementById('f-janela').addEventListener('change', carregar);
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  const me = await res.json();
+  const isMaster = me.role==='master';
+  const secoes = isMaster ? ['fechamentos'] : (me.permissions?.sections||[]);
+  if(!secoes.includes('fechamentos')){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('root').classList.remove('hidden');
+  await carregar();
+}
+
+boot();
+</script>
+<script src="/notif-central.js"></script>
+<script src="/suporte-chat.js"></script>
+<script src="/nav-menu.js"></script>
+</body>
+</html>

@@ -56,6 +56,7 @@ const ativosTI = require('./ativosTI');
 const centralChat = require('./centralChat');
 const grupos = require('./grupos');
 const redes = require('./redes');
+const vendasRecordes = require('./vendasRecordes');
 const inventario = require('./inventario');
 const inventarioNotaOcr = require('./inventarioNotaOcr');
 const canaisVendaOcr = require('./canaisVendaOcr');
@@ -3835,6 +3836,23 @@ app.get('/api/fechamentos/relatorio.pdf', requireSection('fechamentos'), async (
   const porRede = secoes.map((sc) => `${sc.nome}: ${sc.qtd}`).join(' · ');
   const subtitulo = `Exportado em ${agoraBrasiliaFmt()}${periodo} · ${linhas.length} fechamento(s)${porRede ? ' · ' + porRede : ''}`;
   fechamentosReport.writePDF(res, { titulo: 'Relatório de Fechamentos', subtitulo, colunas, linhas, secoes, nomeArquivo: `relatorio-fechamentos-${reportUtil.dataArquivo()}` });
+});
+
+// ---------- recordes de venda (maior/menor dia, maior/menor semana) por
+// unidade + quem bateu recorde recentemente (candidatos a plano de meta) -
+// ver vendasRecordes.js. Usa a MESMA base de fechamentosFiltrados() da tela
+// (planilha + lançado no sistema + sangria, já filtrado por permissão), sem
+// data/grupo/unidades na query = histórico inteiro, que é o normal aqui: o
+// recorde precisa olhar todo o passado, não só o período que a tela de
+// Fechamentos tem selecionado no momento ----------
+app.get('/api/fechamentos/recordes', requireSection('fechamentos'), async (req, res) => {
+  try {
+    const janelaDias = Number(req.query.janela) > 0 ? Number(req.query.janela) : 30;
+    const fechamentos = await fechamentosFiltrados(req);
+    res.json(vendasRecordes.montar(fechamentos, { janelaDias }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.get('/api/fechamentos/sincronizacao', requireSection('fechamentos'), (req, res) => {
