@@ -3553,7 +3553,15 @@ app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadNota
       return res.status(400).json({ error: 'Essa loja não usa leitura de Canais por imagem. O Master ativa em Grupos.' });
     }
     const canais = (grupo.canaisVendaExtras || []).map((c) => ({ campo: c.campo, label: c.label }));
-    const rascunho = await canaisVendaOcr.lerCanais({ buffer: req.file.buffer, mimeType: req.file.mimetype, canais });
+    // a dica e escrita pelo Master no cadastro do grupo: cada PDV imprime de
+    // um jeito (coluna que vale, sequencia das linhas) e isso nao cabe no
+    // codigo sem virar um "if" por bandeira
+    const rascunho = await canaisVendaOcr.lerCanais({
+      buffer: req.file.buffer,
+      mimeType: req.file.mimetype,
+      canais,
+      dica: grupo.dicaLeituraCanais,
+    });
     res.json(rascunho);
   } catch (err) {
     res.status(400).json({ error: err.message });

@@ -90,6 +90,17 @@ function sanitizarCamposExtras(lista) {
     .slice(0, 40);
 }
 
+// Dica de leitura do relatorio do PDV, usada no prompt do canaisVendaOcr.
+// Existe porque cada PDV imprime de um jeito e as regras que so quem opera
+// sabe ("o Delivery e o SEGUNDO numero da linha; o primeiro e sempre zero e
+// nao vale") nao cabem num codigo generico - se cada bandeira precisasse de
+// um `if` aqui, o modulo viraria uma colcha de retalhos e cada loja nova
+// exigiria deploy. Texto livre, curto de proposito: e instrucao pontual, nao
+// manual.
+function sanitizarDicaLeitura(s) {
+  return String(s || '').trim().slice(0, 600);
+}
+
 // nome padrao das maquininhas (ex: "Maquininha 1", "Maquininha 2"...) -
 // franquia que usa uma maquinha especifica pode trocar o prefixo (ex:
 // "Getnet" -> "Getnet 1", "Getnet 2"...), ver lancamento.html
@@ -109,7 +120,7 @@ async function listUncached() {
 const gruposCache = createCache(listUncached, 5 * 60 * 1000);
 const list = gruposCache.cached;
 
-async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado, lerCanaisPorImagem }) {
+async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado, lerCanaisPorImagem, dicaLeituraCanais }) {
   const nomeLimpo = String(nome || '').trim();
   if (!nomeLimpo) throw new Error('Informe o nome do grupo.');
   const ref = COLLECTION.doc();
@@ -132,6 +143,7 @@ async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPag
     // formato do relatorio muda de PDV pra PDV, entao cada loja precisa ser
     // testada antes de confiar no numero que sai da foto.
     lerCanaisPorImagem: lerCanaisPorImagem === true,
+    dicaLeituraCanais: sanitizarDicaLeitura(dicaLeituraCanais),
     caixaHabilitado: caixaHabilitado !== false,
     maquininhasHabilitado: maquininhasHabilitado !== false,
     maquininhaPrefixo: sanitizarPrefixo(maquininhaPrefixo),
@@ -149,7 +161,7 @@ async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPag
   return registro;
 }
 
-async function update(id, { nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado, lerCanaisPorImagem }) {
+async function update(id, { nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado, lerCanaisPorImagem, dicaLeituraCanais }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Grupo não encontrado.');
@@ -165,6 +177,7 @@ async function update(id, { nome, unidades, kpisExtras, canaisVendaExtras, forma
   if (formasPagamentoExtras != null) patch.formasPagamentoExtras = sanitizarCamposExtras(formasPagamentoExtras);
   if (responsaveis != null) patch.responsaveis = Array.isArray(responsaveis) ? responsaveis.map(String) : [];
   if (lerCanaisPorImagem != null) patch.lerCanaisPorImagem = lerCanaisPorImagem === true;
+  if (dicaLeituraCanais != null) patch.dicaLeituraCanais = sanitizarDicaLeitura(dicaLeituraCanais);
   if (caixaHabilitado != null) patch.caixaHabilitado = caixaHabilitado !== false;
   if (maquininhasHabilitado != null) patch.maquininhasHabilitado = maquininhasHabilitado !== false;
   if (maquininhaPrefixo != null) patch.maquininhaPrefixo = sanitizarPrefixo(maquininhaPrefixo);
