@@ -72,6 +72,7 @@ const rh = require('./rh');
 const rhCheckin = require('./rhCheckin');
 const rhAdvertencias = require('./rhAdvertencias');
 const unidadesExtras = require('./unidades');
+const pedidoSemanal = require('./pedidoSemanal');
 const lojaStatus = require('./lojaStatus');
 const qaAprovacoes = require('./qaAprovacoes');
 const alertasCentral = require('./alertasCentral');
@@ -120,6 +121,15 @@ const uploadRelatorioPdv = multer({
 const uploadDocumentoIdentidade = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024, files: 3 },
+});
+
+// arquivo do pedido semanal que a loja anexa pra confirmar (ver
+// pedidoSemanal.js) - vem do sistema do fornecedor, entao pode ser PDF,
+// print da tela ou planilha; 1 por semana, sem teto apertado porque um
+// pedido de insumos as vezes sai como PDF de varias paginas
+const uploadPedidoSemanal = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024, files: 1 },
 });
 
 // fundo customizado da tela de login (ver loginCustom.js) - so imagem,
@@ -2142,6 +2152,106 @@ app.delete('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res)
   }
 });
 
+// ---------- PEDIDO SEMANAL (pedidoSemanal.js) ----------
+// Lembrete do pedido de insumos que cada loja faz uma vez por semana, FORA
+// do Zenith (no sistema do fornecedor). O Master liga, escolhe o dia da
+// semana, e a loja confirma anexando o pedido - o anexo e o que separa
+// "cliquei pra sumir o aviso" de "o pedido existiu".
+//
+// A lista de unidades cobradas nasce do Fechamento (uma entrada por loja,
+// ver FECHAMENTO_UNIDADES_NOMES) mais as cadastradas em runtime, menos as
+// que o Master excluiu. Nao uso construirUnidadesMapa() aqui de proposito:
+// ele mescla apelidos e codigos de outros sistemas, e a mesma loja apareceria
+// duas ou tres vezes na cobranca.
+async function unidadesBasePedidoSemanal() {
+  const extras = await unidadesExtras.mapa().catch(() => ({}));
+  const mapa = { ...FECHAMENTO_UNIDADES_NOMES, ...extras };
+  return Object.entries(mapa)
+    .map(([codigo, nome]) => ({ codigo, nome }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+}
+
+// Master/Admin acompanham TODAS as lojas (quem fez e quem nao fez); os
+// demais so veem as unidades do proprio acesso - o lembrete e uma cobranca
+// da loja, nao um placar publico
+function filtrarUnidadesDoUsuario(req, lista) {
+  if (req.isMaster || req.isAdmin) return lista;
+  const permitidas = new Set((req.permissions && req.permissions.unidades) || []);
+  return lista.filter((u) => permitidas.has(u.codigo));
+}
+
+app.get('/api/pedido-semanal', async (req, res) => {
+  const [config, confirmacoes, base] = await Promise.all([
+    pedidoSemanal.obterConfig(), pedidoSemanal.listarConfirmacoes(), unidadesBasePedidoSemanal(),
+  ]);
+  const todas = pedidoSemanal.statusDasUnidades(base, { config, confirmacoes });
+  res.json({
+    ativo: !!config.ativo,
+    titulo: config.titulo,
+    instrucoes: config.instrucoes,
+    diaSemana: config.diaSemana,
+    diaSemanaNome: pedidoSemanal.DIAS_NOME[config.diaSemana] || '',
+    podeVerTodas: !!(req.isMaster || req.isAdmin),
+    unidades: filtrarUnidadesDoUsuario(req, todas),
+  });
+});
+
+app.post('/api/pedido-semanal/:codigo/confirmar', uploadPedidoSemanal.single('arquivo'), async (req, res) => {
+  try {
+    const codigo = req.params.codigo;
+    const [config, confirmacoes, base] = await Promise.all([
+      pedidoSemanal.obterConfig(), pedidoSemanal.listarConfirmacoes(), unidadesBasePedidoSemanal(),
+    ]);
+    if (!config.ativo) return res.status(400).json({ error: 'O lembrete de pedido semanal está desativado.' });
+    // a unidade tem que estar na cobranca E no acesso de quem confirmou:
+    // sem os dois, um POST direto confirmaria loja alheia (ou uma das
+    // excluidas, criando cobranca pra quem nao faz pedido)
+    const cobradas = pedidoSemanal.statusDasUnidades(base, { config, confirmacoes });
+    const alvo = filtrarUnidadesDoUsuario(req, cobradas).find((u) => u.codigo === codigo);
+    if (!alvo) return res.status(403).json({ error: 'Essa unidade não faz pedido semanal ou não está no seu acesso.' });
+    if (!req.file) return res.status(400).json({ error: 'Anexe o arquivo do pedido (PDF, print ou planilha).' });
+
+    const path = await storage.salvarArquivo(codigo, req.file, 'pedido-semanal');
+    const registro = await pedidoSemanal.confirmar({
+      unidade: codigo,
+      unidadeNome: alvo.nome,
+      // a semana vem do servidor, nunca do cliente: aceitar a data do corpo
+      // deixaria confirmar semana passada (ou a de 2030) pra limpar a tela
+      dataPedido: alvo.dataPedido,
+      arquivo: { path, nome: req.file.originalname, tipo: req.file.mimetype, tamanho: req.file.size },
+      porEmail: req.user.email,
+      porNome: req.user.username || req.user.email,
+    });
+    broadcast('pedido-semanal-confirmado', { unidade: codigo, dataPedido: registro.dataPedido }, 'fechamentos');
+    res.json({ ok: true, dataPedido: registro.dataPedido });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/pedido-semanal/:codigo/arquivo', async (req, res) => {
+  const registro = await pedidoSemanal.buscarConfirmacao(req.params.codigo, String(req.query.data || ''));
+  if (!registro || !registro.arquivo) return res.sendStatus(404);
+  const podeVer = req.isMaster || req.isAdmin
+    || ((req.permissions && req.permissions.unidades) || []).includes(registro.unidade);
+  if (!podeVer) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  storage.streamArquivo(registro.arquivo.path, registro.arquivo.tipo, res);
+});
+
+app.get('/api/pedido-semanal/config', auth.requireMaster, async (req, res) => {
+  const [config, base] = await Promise.all([pedidoSemanal.obterConfig(), unidadesBasePedidoSemanal()]);
+  res.json({ config, unidades: base, dias: pedidoSemanal.DIAS_NOME });
+});
+
+app.put('/api/pedido-semanal/config', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'pedidoSemanal.config', 'Configurar lembrete do pedido semanal', req.body || {})) return;
+    res.json(await pedidoSemanal.salvarConfig(req.body || {}, { porEmail: req.user.email }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---------- Central de Alertas (alertasCentral.js) - log de TODOS os
 // alertas do sistema (NOC, Beniboy, seguranca, QA, RH, fraude...), pra
 // existir um lugar central que mostra o que aconteceu mesmo que o push
@@ -2890,6 +3000,7 @@ app.get('/api/users/relatorio.:formato(csv|pdf)', auth.requireMaster, async (req
 // ação sobrevive até um restart do servidor (fica só o tipo+payload
 // salvos, nunca uma função/closure).
 const EXECUTORES_QA = {
+  'pedidoSemanal.config': (p) => pedidoSemanal.salvarConfig(p),
   'usuarios.criar': (p) => users.create(p),
   'usuarios.criarCopiando': (p) => users.criarCopiandoDe(p),
   'usuarios.criarQaMaster': (p) => users.createQaMaster(p),

@@ -125,6 +125,9 @@
   .ptipos .linha b{font-family:var(--mono);}
   .pcard-erro{color:var(--bad);font-size:12px;}
   .pcard-vazio{color:var(--muted);font-size:12px;}
+  /* linha de apoio embaixo dos stats de um card (ex: quais lojas ainda
+     faltam no Pedido semanal) - texto secundario, nunca a informacao principal */
+  .pcard-nota{color:var(--muted);font-size:11px;line-height:1.5;margin-top:8px;border-top:1px solid var(--line);padding-top:8px;}
   .pestoque-chips{display:flex;flex-wrap:wrap;gap:6px;}
   .pestoque-chip{font-family:var(--mono);font-size:11px;padding:5px 9px;border-radius:14px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;transition:border-color .15s ease,color .15s ease;}
   .pestoque-chip:hover{border-color:var(--accent);color:var(--text);}
@@ -557,6 +560,40 @@ async function iniciarNotificacoesCentral(){
     removerNotificacaoSolicitacao(info.tipo, info.id);
   });
 }
+
+// Pedido semanal (ver server/pedidoSemanal.js): aqui e RADAR, nao acao - a
+// confirmacao com anexo vive no Fechamento, que e onde a loja ja esta com o
+// pedido em maos. O Painel responde "quem ainda nao fez?" e leva pra la.
+async function cardPedidoSemanal(){
+  const d = await fetch('/api/pedido-semanal').then(r=>r.json());
+  if(!d.ativo){
+    return pcardWrap('📦','Pedido semanal','/lancamento.html',
+      '<div class="pcard-vazio">Lembrete desligado. O Master liga em Grupos.</div>');
+  }
+  const unidades = d.unidades || [];
+  const pendentes = unidades.filter(u=>u.estado!=='feito');
+  const atrasadas = unidades.filter(u=>u.atraso);
+  const feitas = unidades.length - pendentes.length;
+  // pra quem ve so a propria loja, contar "1 de 1" nao diz nada - o que
+  // importa e se ELA fez ou nao
+  const minha = !d.podeVerTodas && unidades.length === 1 ? unidades[0] : null;
+  const corpo = minha
+    ? `<div class="pstats">
+        ${statRow('Sua loja', minha.estado==='feito' ? 'pedido feito ✓' : 'ainda não fez', minha.estado==='feito' ? 'ok' : 'warn', true)}
+        ${statRow('Pedido de', fmtDataBr(minha.dataPedido))}
+        ${statRow(minha.atraso ? 'Atrasado desde' : 'Todo', minha.atraso ? fmtDataBr(minha.atraso) : (d.diaSemanaNome||'—'), minha.atraso ? 'bad' : '')}
+      </div>`
+    : `<div class="pstats">
+        ${statRow('Já fizeram', `${feitas} de ${unidades.length}`, feitas===unidades.length ? 'ok' : '')}
+        ${statRow('Faltam', pendentes.length, pendentes.length ? 'warn' : 'ok')}
+        ${statRow('Atrasadas', atrasadas.length, atrasadas.length ? 'bad' : '')}
+      </div>`
+    + (pendentes.length
+        ? `<div class="pcard-nota">${pendentes.slice(0,6).map(u=>escapeHtml(u.nome)).join(' · ')}${pendentes.length>6?` +${pendentes.length-6}`:''}</div>`
+        : '');
+  return pcardWrap('📦','Pedido semanal','/lancamento.html', corpo);
+}
+const fmtDataBr = (d) => { if(!d) return '—'; const [y,m,dd]=d.split('-'); return `${dd}/${m}`; };
 
 function statRow(label, valor, classe, wide){
   return `<div class="pstat${wide?' wide':''}"><div class="lbl">${escapeHtml(label)}</div><div class="val ${classe||''}">${valor}</div></div>`;
@@ -1258,6 +1295,8 @@ const CARDS_POR_SECAO = [
   { chave:'manutencao', secao:'manutencao', build:cardManutencao },
   { chave:'estoque', secao:'inventario', build:cardEstoque },
   { chave:'fechamentos', secao:'fechamentos', build:cardFechamentos },
+  // aparece pra quem lanca fechamento (a loja) e pra quem so acompanha
+  { chave:'pedido-semanal', secoes:['lancamento','fechamentos'], build:cardPedidoSemanal },
   { chave:'ifood', secao:'ifood', build:cardIfood },
   { chave:'entregas', secao:'entregas', build:cardEntregas },
 ];
