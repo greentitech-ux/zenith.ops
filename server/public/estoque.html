@@ -341,7 +341,16 @@
   </form>
 </div>
 <div class="panel tab-content hidden" id="tab-recebimento-lista">
-  <h2>Últimos recebimentos</h2>
+  <h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <span>Últimos recebimentos</span>
+      <span style="display:flex;gap:8px;">
+        <button type="button" class="preset-btn" onclick="baixarRelatorioRecebimentos('csv')">📄 CSV</button>
+        <button type="button" class="preset-btn" onclick="baixarRelatorioRecebimentos('pdf')">📄 PDF</button>
+      </span>
+    </div>
+  </h2>
+  <div class="sub" style="margin:-4px 0 12px;">Aqui embaixo só os últimos 30 - o relatório sai com o histórico completo da unidade.</div>
   <div class="tablewrap">
     <table>
       <thead><tr><th>Data</th><th>Item</th><th>Fornecedor</th><th>Qtd</th><th>Valor unit.</th><th>Total</th><th></th></tr></thead>
@@ -1109,6 +1118,12 @@ async function excluirRecebimento(id){
   renderRecebimentos();
 }
 async function carregarRecebimentos(){ RECEBIMENTOS = await fetch('/api/inventario/recebimentos').then(r=>r.json()); }
+// relatorio do HISTORICO INTEIRO da unidade (a tabela na tela so mostra os
+// ultimos 30 - ver renderRecebimentos) - mesmo padrao de baixarRelatorioDiferencas
+function baixarRelatorioRecebimentos(formato){
+  const params = new URLSearchParams({ token: AUTH_TOKEN, unidade: unidadeAtual() });
+  window.location.href = `/api/inventario/recebimentos/relatorio.${formato}?${params.toString()}`;
+}
 
 // item medido em KG/G com peso de embalagem cadastrado (ver i-peso-embalagem
 // no Catálogo) entra no "modo embalagem": em vez de digitar a quantidade já
