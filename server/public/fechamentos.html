@@ -433,6 +433,18 @@ function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
 function abrirMenu(){}
 function fecharMenu(){}
 
+// pagina fixada num grupo (ver nav-menu.js: "Fechamentos ARCFOOD" e
+// "Fechamentos GBE" viraram 2 itens de menu, cada um mandando pra ca com
+// ?grupo=, em vez de 1 item so com o seletor que existia antes - cada
+// franquia so precisa ver o proprio numero, sem lembrar de trocar filtro).
+// Sem o parametro (link antigo tipo "Ver Fechamentos" em lancamento.html, ou
+// o card do Painel) o comportamento de sempre continua: os dois grupos juntos
+const GRUPO_FIXO = (()=>{
+  const g = new URLSearchParams(location.search).get('grupo');
+  return (g==='ARCFOOD' || g==='BRAVO') ? g : null;
+})();
+const NOME_GRUPO_FIXO = { ARCFOOD:'ARCFOOD', BRAVO:'Grupo Bravo (GBE)' };
+
 // grupos do menu (Operacao diaria/Monitoramento/Solicitacoes/Administracao)
 // viram dropdown: clicar no titulo do grupo expande/recolhe os itens dele.
 // O grupo que contem a pagina atual comeca aberto; os outros comecam
@@ -577,9 +589,21 @@ function atualizarVisibilidadeGrupos(){
   if(!GRUPO_VISIVEL.ARCFOOD && document.getElementById('fech-grupo').value==='ARCFOOD') document.getElementById('fech-grupo').value = '';
   if(!GRUPO_VISIVEL.BRAVO && document.getElementById('fech-grupo').value==='BRAVO') document.getElementById('fech-grupo').value = '';
 
+  // pagina fixada num grupo (?grupo= na URL, ver GRUPO_FIXO): trava os dois
+  // seletores nesse grupo e some com eles - nao ha o que escolher, e a
+  // franquia nunca deveria ver o numero do outro grupo por engano
+  if(GRUPO_FIXO){
+    document.getElementById('f-grupo').value = GRUPO_FIXO;
+    document.getElementById('fech-grupo').value = GRUPO_FIXO;
+    document.getElementById('f-grupo').classList.add('hidden');
+    document.getElementById('fech-grupo').classList.add('hidden');
+    document.title = `Fechamentos ${NOME_GRUPO_FIXO[GRUPO_FIXO]} · Zenith Ops`;
+    document.querySelector('h1').textContent = `Fechamentos de caixa · ${NOME_GRUPO_FIXO[GRUPO_FIXO]}`;
+  }
+
   const nomes = [];
-  if(GRUPO_VISIVEL.ARCFOOD) nomes.push('ARCFOOD');
-  if(GRUPO_VISIVEL.BRAVO) nomes.push('Grupo Bravo (GBE)');
+  if((!GRUPO_FIXO || GRUPO_FIXO==='ARCFOOD') && GRUPO_VISIVEL.ARCFOOD) nomes.push('ARCFOOD');
+  if((!GRUPO_FIXO || GRUPO_FIXO==='BRAVO') && GRUPO_VISIVEL.BRAVO) nomes.push('Grupo Bravo (GBE)');
   nomes.push('Solutions Ti Tech');
   document.getElementById('eyebrow-grupos').textContent = nomes.join(' · ');
 }
@@ -2067,6 +2091,11 @@ async function boot(){
   document.getElementById('btn-sincronizar-planilhas').classList.toggle('hidden', !isMaster);
 
   if(!secoes.includes('fechamentos')){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  if(GRUPO_FIXO && !GRUPO_VISIVEL[GRUPO_FIXO]){
+    document.getElementById('sem-acesso').textContent = `Você não tem acesso às unidades do grupo ${NOME_GRUPO_FIXO[GRUPO_FIXO]}. Fale com o administrador (Master).`;
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;
   }
