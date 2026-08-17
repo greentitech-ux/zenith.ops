@@ -240,10 +240,20 @@
            campos de proposito - a ordem da tela e a ordem do trabalho. -->
       <div id="doc-wrap">
         <label>Documento de identidade (RG, CNH ou CPF) — obrigatório</label>
-        <div class="sub" style="margin:-2px 0 6px;">Fotografe frente e verso (até 3 imagens). Nome, nascimento e CPF são lidos do documento — não são digitados.</div>
+        <div class="sub" id="doc-explicacao" style="margin:-2px 0 6px;">Fotografe frente e verso (até 3 imagens). Os dados pessoais são lidos do documento — não são digitados.</div>
         <input type="file" id="c-documento" accept="image/*,application/pdf" multiple>
         <button type="button" class="btn-add" id="btn-ler-doc" style="margin-top:6px;">🔍 Ler documento</button>
         <div id="doc-msg" class="sub hidden" style="margin-top:6px;"></div>
+        <!-- Master-only: mesma ideia do "digitado na mão" dos Canais/Formas
+             em Grupos - quem marca é o Master, a loja só encontra o campo
+             já liberado ou já travado. -->
+        <details id="doc-config-wrap" class="hidden" style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px;">
+          <summary style="cursor:pointer;font-size:11.5px;color:var(--muted);font-family:var(--mono);">⚙️ Quais campos são digitados na mão (Master)</summary>
+          <div class="sub" style="margin:8px 0 6px;">Marque o que NÃO sai no documento desta operação (RG antigo não traz CPF, CNH velha não traz nome da mãe). O marcado vira campo editável no cadastro e sai da leitura.</div>
+          <div id="doc-config-campos" style="display:flex;flex-direction:column;gap:5px;"></div>
+          <button type="button" class="btn-add" id="btn-salvar-doc-config" style="margin-top:8px;">Salvar</button>
+          <span id="doc-config-msg" class="sub" style="margin-left:8px;"></span>
+        </details>
       </div>
 
       <label>Nome completo</label>
@@ -764,23 +774,87 @@ function docIdentidadeHtml(f){
 // contratacao formal tem seu proprio pacote de documentos, conferido pelo RH.
 const TIPOS_COM_DOCUMENTO = ['extra', 'candidato'];
 let DOC_LIDO = null; // leitura aceita; sem ela o envio nao passa
+// campos que o Master liberou pra digitação (ver rhCamposConfig.js) - mesma
+// ideia do "digitado na mão" dos Canais/Formas no fechamento
+let CAMPOS_MANUAIS = [];
+const INPUT_DO_CAMPO = { nome:'c-nome', dataNascimento:'c-nascimento', cpf:'c-cpf', rg:'c-rg', nomeMae:'c-nome-mae' };
+const ehManual = (campo) => CAMPOS_MANUAIS.includes(campo);
 
 function aplicarModoDocumento(tipo){
   const exige = TIPOS_COM_DOCUMENTO.includes(tipo);
   document.getElementById('doc-wrap').classList.toggle('hidden', !exige);
-  ['c-nome','c-nascimento'].forEach(id=>{
+  // campo liberado pelo Master continua editável mesmo no modo documento -
+  // é o mesmo desenho do Pix CNPJ: a trava vale pro que vem da leitura
+  Object.entries(INPUT_DO_CAMPO).forEach(([campo, id])=>{
     const el = document.getElementById(id);
-    el.readOnly = exige;
-    el.classList.toggle('campo-do-documento', exige);
-    el.title = exige ? 'Vem do documento anexado - não é digitado' : '';
+    if(!el) return;
+    const travar = exige && !ehManual(campo);
+    el.readOnly = travar;
+    el.classList.toggle('campo-do-documento', travar);
+    el.title = travar ? 'Vem do documento anexado - não é digitado'
+      : (exige ? 'Não sai no documento desta operação - digite na mão' : '');
   });
+  // CPF/RG/nome da mãe ficam escondidos até a leitura; se forem manuais,
+  // precisam aparecer desde o começo, senão não há onde digitar
+  const manualExtra = exige && ['cpf','rg'].some(ehManual);
+  if(manualExtra) document.getElementById('doc-campos-lidos').classList.remove('hidden');
+  if(exige && ehManual('nomeMae')) document.getElementById('doc-mae-wrap').classList.remove('hidden');
+  const marcados = CAMPOS_MANUAIS.map(c=>LABEL_CAMPO_DOC[c]||c);
+  document.getElementById('doc-explicacao').innerHTML = marcados.length
+    ? `Fotografe frente e verso (até 3 imagens). Os dados pessoais são lidos do documento — exceto <b>${escapeHtml(marcados.join(', '))}</b>, que ${marcados.length>1?'são digitados':'é digitado'} na mão.`
+    : 'Fotografe frente e verso (até 3 imagens). Os dados pessoais são lidos do documento — não são digitados.';
   if(!exige){ limparLeituraDocumento(); }
+}
+
+// ---------- config do Master: quais campos são digitados na mão ----------
+async function carregarCamposConfig(){
+  try{
+    const cfg = await fetch('/api/rh/campos-config-publico').then(r=>r.json());
+    CAMPOS_MANUAIS = cfg.camposManuais || [];
+    const wrap = document.getElementById('doc-config-wrap');
+    if(IS_MASTER){
+      wrap.classList.remove('hidden');
+      document.getElementById('doc-config-campos').innerHTML = (cfg.campos||[]).map(c=>`
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);">
+          <input type="checkbox" class="doc-campo-manual" value="${escapeHtml(c)}" ${CAMPOS_MANUAIS.includes(c)?'checked':''} style="width:auto;margin:0;">
+          ✏️ ${escapeHtml((cfg.labels||{})[c]||c)}
+        </label>`).join('');
+    }
+  }catch(e){ CAMPOS_MANUAIS = []; }
+  aplicarModoDocumento(TIPO_CADASTRO);
+}
+async function salvarCamposConfig(){
+  const msg = document.getElementById('doc-config-msg');
+  const escolhidos = [...document.querySelectorAll('.doc-campo-manual:checked')].map(el=>el.value);
+  // liberar TUDO deixaria o documento sem função - continua obrigatório
+  // como comprovante, mas nada seria lido dele
+  if(escolhidos.length === 5 && !confirm('Marcando todos, nada mais é lido do documento - ele vira só um anexo de comprovação. Confirma?')) return;
+  msg.textContent = 'salvando...';
+  try{
+    const resp = await fetch('/api/rh/campos-config', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ camposManuais: escolhidos }),
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
+    CAMPOS_MANUAIS = data.camposManuais || escolhidos;
+    limparLeituraDocumento();
+    aplicarModoDocumento(TIPO_CADASTRO);
+    msg.textContent = '✔ salvo';
+    setTimeout(()=>{ msg.textContent = ''; }, 2500);
+  }catch(err){ msg.textContent = err.message; }
 }
 function limparLeituraDocumento(){
   DOC_LIDO = null;
-  ['c-cpf','c-rg','c-nome-mae'].forEach(id=>{ document.getElementById(id).value = ''; });
-  document.getElementById('doc-campos-lidos').classList.add('hidden');
-  document.getElementById('doc-mae-wrap').classList.add('hidden');
+  // só limpa o que veio da leitura - campo digitado na mão não é dela pra
+  // apagar (mesma regra do Pix CNPJ quando a loja tira outra foto)
+  ['cpf','rg','nomeMae'].forEach(campo=>{
+    if(ehManual(campo)) return;
+    const el = document.getElementById(INPUT_DO_CAMPO[campo]);
+    if(el) el.value = '';
+  });
+  document.getElementById('doc-campos-lidos').classList.toggle('hidden', !['cpf','rg'].some(ehManual));
+  document.getElementById('doc-mae-wrap').classList.toggle('hidden', !ehManual('nomeMae'));
   const m = document.getElementById('doc-msg');
   m.classList.add('hidden'); m.innerHTML = '';
 }
@@ -806,13 +880,15 @@ async function lerDocumentoCadastro(){
     if(!data.nome) throw new Error('Não consegui ler o nome nesse documento. Tire a foto de novo, com o documento inteiro e sem reflexo.');
 
     DOC_LIDO = data;
-    document.getElementById('c-nome').value = data.nome;
-    document.getElementById('c-nascimento').value = data.dataNascimento || '';
-    document.getElementById('c-cpf').value = formatarCpf(data.cpf);
-    document.getElementById('c-rg').value = data.rg || '';
-    document.getElementById('c-nome-mae').value = data.nomeMae || '';
+    // campo manual não é tocado: o que foi digitado é a fonte dele
+    const porFora = { nome: data.nome, dataNascimento: data.dataNascimento || '', cpf: formatarCpf(data.cpf), rg: data.rg || '', nomeMae: data.nomeMae || '' };
+    Object.entries(INPUT_DO_CAMPO).forEach(([campo, id])=>{
+      if(ehManual(campo)) return;
+      const el = document.getElementById(id);
+      if(el) el.value = porFora[campo];
+    });
     document.getElementById('doc-campos-lidos').classList.remove('hidden');
-    document.getElementById('doc-mae-wrap').classList.toggle('hidden', !data.nomeMae);
+    document.getElementById('doc-mae-wrap').classList.toggle('hidden', !(data.nomeMae || ehManual('nomeMae')));
 
     const partes = [`<b style="color:var(--ok);">✔ ${escapeHtml(data.tipoDocumento||'Documento')} lido.</b> Confira contra o documento antes de cadastrar.`];
     // menor de idade muda a escala (nada de noturno/perigoso) - precisa
@@ -845,6 +921,7 @@ function formatarCpf(d){
   return s.length === 11 ? `${s.slice(0,3)}.${s.slice(3,6)}.${s.slice(6,9)}-${s.slice(9)}` : '';
 }
 document.getElementById('btn-ler-doc').addEventListener('click', lerDocumentoCadastro);
+document.getElementById('btn-salvar-doc-config').addEventListener('click', salvarCamposConfig);
 // trocou o arquivo: a leitura antiga nao vale mais pro que esta na tela
 document.getElementById('c-documento').addEventListener('change', limparLeituraDocumento);
 
@@ -1915,6 +1992,12 @@ document.getElementById('form-cadastrar').addEventListener('submit', async (e)=>
     const fd = new FormData();
     fd.append('unidade', document.getElementById('c-unidade').value);
     fd.append('nome', document.getElementById('c-nome').value);
+    // os campos liberados pra digitação vão no corpo; os automáticos o
+    // servidor relê do documento e ignora o que a tela mandou
+    CAMPOS_MANUAIS.forEach(campo=>{
+      const el = document.getElementById(INPUT_DO_CAMPO[campo]);
+      if(el) fd.append(campo, el.value);
+    });
     docs.forEach(d=>fd.append('documento', d));
     fd.append('contato', document.getElementById('c-contato').value);
     fd.append('cargoFuncao', document.getElementById('c-cargo').value);
@@ -2267,6 +2350,10 @@ async function boot(){
   IS_MASTER = isMaster;
   IS_ADMIN = !!ME.isAdmin;
   const temAcesso = isMaster || ME.isAdmin || (ME.permissions?.sections||[]).includes('rh');
+  // depois de saber se é Master (o painel de config só aparece pra ele) e
+  // antes de o formulário ser usado: é essa config que decide quais campos
+  // nascem travados
+  carregarCamposConfig();
 
 
   if(!temAcesso){
