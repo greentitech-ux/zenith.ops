@@ -79,6 +79,12 @@
   .modal-preview-topo{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line);}
   .modal-preview-topo span{font-family:var(--mono);font-size:11.5px;color:var(--text);}
   #preview-iframe{border:none;width:100%;flex:1;min-height:60vh;background:#fff;}
+  /* diagnóstico do relatório vazio: fica DENTRO do modal, colado no relatório
+     que está zerado - é ali que a pergunta nasce ("cadê meus tickets?") */
+  .preview-diag{padding:10px 14px;background:var(--warn-dim);color:var(--text);font-size:12px;line-height:1.6;border-bottom:1px solid var(--line);}
+  .preview-diag b{color:var(--warn);}
+  .preview-diag ul{margin:6px 0 0;padding-left:18px;}
+  .preview-diag code{font-family:var(--mono);font-size:11px;}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -157,6 +163,7 @@
       <span id="preview-titulo">Pré-visualização</span>
       <button type="button" class="back" onclick="fecharPreview()">✕ Fechar</button>
     </div>
+    <div class="preview-diag hidden" id="preview-diag"></div>
     <iframe id="preview-iframe" title="Pré-visualização do relatório"></iframe>
   </div>
 </div>
@@ -285,6 +292,7 @@ async function previsualizar(){
     if(!resp.ok) throw new Error(data.error || 'Erro ao gerar pré-visualização.');
     document.getElementById('preview-titulo').textContent = `${data.total} solicitação(ões) · ${data.pendentes} pendente(s), ${data.aprovados} aprovada(s), ${data.rejeitados} recusada(s)`;
     document.getElementById('preview-iframe').srcdoc = data.html;
+    mostrarDiagnostico(data.total, data.diagnostico);
     document.getElementById('preview-overlay').classList.remove('hidden');
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
@@ -292,9 +300,36 @@ async function previsualizar(){
     btn.disabled = false; btn.textContent = txt;
   }
 }
+// Relatório zerado é ambíguo: pode ser "não há nada hoje" (certo) ou config
+// apontando pra pessoa errada (errado). Só aparece quando o total é 0 - com
+// tickets na tela, esse bloco seria ruído.
+function mostrarDiagnostico(total, d){
+  const el = document.getElementById('preview-diag');
+  if(total > 0 || !d){ el.classList.add('hidden'); el.innerHTML = ''; return; }
+  const linhas = [];
+  if(!d.usuarioGatilhoEncontrado){
+    linhas.push(`O usuário configurado (<code>${escapeHtml(d.usuarioGatilho||'')}</code>) <b>não existe mais</b> no sistema. Enquanto isso, nenhum ticket casa - escolha outro na lista acima e salve.`);
+  } else if(d.ativos === 0){
+    linhas.push('Não há nenhuma solicitação ativa na Central. O relatório está zerado porque não há o que relatar.');
+  } else {
+    linhas.push(`Existem <b>${d.ativos}</b> solicitação(ões) ativa(s) na Central, e <b>nenhuma</b> está direcionada a <code>${escapeHtml(d.usuarioGatilho||'')}</code> (${escapeHtml(d.gatilhoUserEmail||'sem e-mail')}).`);
+    if(d.semDirecionamento){
+      linhas.push(`<b>${d.semDirecionamento}</b> ticket(s) estão <b>sem direcionamento nenhum</b> - ninguém usou "Direcionar para" nem "Atribuir Responsável" neles. Esses não entram no relatório de pessoa alguma.`);
+    }
+    if((d.outrosDestinos||[]).length){
+      linhas.push('Os que <b>têm</b> direcionamento estão indo pra:<ul>'
+        + d.outrosDestinos.map(o=>`<li><code>${escapeHtml(o.email)}</code> — ${o.qtd} ticket(s)</li>`).join('')
+        + '</ul>Se o certo é uma dessas pessoas, troque o usuário acima. Se é o MV mesmo, os tickets precisam ser direcionados a ele na Central.');
+    }
+  }
+  el.innerHTML = `<b>Por que está zerado:</b><br>${linhas.join('<br>')}`;
+  el.classList.remove('hidden');
+}
+
 function fecharPreview(){
   document.getElementById('preview-overlay').classList.add('hidden');
   document.getElementById('preview-iframe').srcdoc = '';
+  document.getElementById('preview-diag').classList.add('hidden');
 }
 
 document.getElementById('f-usuario').addEventListener('change', atualizarStatusUsuario);
