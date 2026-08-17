@@ -42,7 +42,7 @@ const MODELO = 'claude-sonnet-5';
 // "secao" separado - o modelo nao tem como acertar metade dela.
 const chaveDe = (secao, campo) => `${secao}.${campo}`;
 
-function montarPrompt(canais, formas, dica) {
+function montarPrompt(canais, formas, dica, qtdImagens) {
   const linhas = (lista) => lista.map((c) => `${chaveDe(c.secao, c.campo)} | ${c.label}`).join('\n');
   const blocoCanais = canais.length ? `
 CANAIS DE VENDA (de onde veio a venda: salão, delivery, retirada, apps...):
@@ -61,7 +61,17 @@ Instruções específicas do relatório desta loja (escritas por quem opera - si
 """
 ${dica}
 """` : '';
-  return `Você está vendo a foto (ou print) de um relatório de fechamento do sistema de PDV de uma loja de comida. Extraia os valores em dinheiro dos campos listados abaixo.
+  // com mais de uma imagem o modelo precisa saber que sao PARTES do mesmo
+  // relatorio - senao trata cada uma como um relatorio independente e a
+  // segunda "corrige" a primeira, perdendo metade dos valores
+  const blocoMultiplas = qtdImagens > 1 ? `
+
+Você recebeu ${qtdImagens} imagens. Elas são PARTES DO MESMO relatório, do mesmo dia - fotografadas separadamente porque não coubessem numa tela só. Junte tudo numa resposta única:
+- Um campo que aparece em mais de uma imagem entra UMA vez só no JSON.
+- Se o mesmo campo aparecer com valores DIFERENTES em duas imagens, não escolha: mande as duas leituras pra "naoIdentificados" com o texto de origem de cada uma. Pode ser foto de dias diferentes misturada, e nesse caso o gerente precisa ver.
+- Se as imagens claramente forem de DIAS diferentes (datas diferentes impressas), devolva {"erro": "as fotos são de dias diferentes"} em vez de somar.
+- Imagem que não for relatório de vendas (foto tremida, tela de outro sistema): simplesmente ignore, desde que pelo menos uma sirva.` : '';
+  return `Você está vendo a foto (ou print) de um relatório de fechamento do sistema de PDV de uma loja de comida. Extraia os valores em dinheiro dos campos listados abaixo.${blocoMultiplas}
 
 Campos cadastrados para esta loja (use a "chave" exatamente como está escrita aqui, com o prefixo):
 ${blocoCanais}${blocoFormas}
@@ -96,22 +106,33 @@ function extrairJson(texto) {
 
 const numeroOuNull = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
 
-async function lerCanais({ buffer, mimeType, canais, formas, dica }) {
+const MAX_ARQUIVOS = 5;
+
+async function lerCanais({ arquivos, canais, formas, dica }) {
   if (!ativo()) throw new Error('Leitura automática por imagem não está configurada neste servidor.');
+  const fotos = (Array.isArray(arquivos) ? arquivos : []).filter((a) => a && a.buffer);
+  if (!fotos.length) throw new Error('Anexe a foto do relatório de vendas.');
+  if (fotos.length > MAX_ARQUIVOS) throw new Error(`Envie no máximo ${MAX_ARQUIVOS} fotos por leitura.`);
   const listaCanais = (Array.isArray(canais) ? canais : []).map((c) => ({ ...c, secao: 'canal' }));
   const listaFormas = (Array.isArray(formas) ? formas : []).map((c) => ({ ...c, secao: 'forma' }));
   const todos = [...listaCanais, ...listaFormas];
   if (!todos.length) {
     throw new Error('Essa loja ainda não tem Canais de venda nem Formas de pagamento cadastrados - peça pro Master configurar em Grupos.');
   }
-  const ehPdf = mimeType === 'application/pdf';
-  const bloco = ehPdf
-    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: buffer.toString('base64') } }
-    : { type: 'image', source: { type: 'base64', media_type: mimeType, data: buffer.toString('base64') } };
+  // com varias fotos vale numerar: sem o rotulo, o "textoOrigem" de uma
+  // divergencia nao diz de QUAL foto veio, e o gerente nao sabe qual refazer
+  const blocos = [];
+  fotos.forEach((f, i) => {
+    if (fotos.length > 1) blocos.push({ type: 'text', text: `Foto ${i + 1} de ${fotos.length}:` });
+    blocos.push(f.mimeType === 'application/pdf'
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.buffer.toString('base64') } }
+      : { type: 'image', source: { type: 'base64', media_type: f.mimeType, data: f.buffer.toString('base64') } });
+  });
+  blocos.push({ type: 'text', text: montarPrompt(listaCanais, listaFormas, dica, fotos.length) });
   const resp = await getCliente().messages.create({
     model: MODELO,
     max_tokens: 4000,
-    messages: [{ role: 'user', content: [bloco, { type: 'text', text: montarPrompt(listaCanais, listaFormas, dica) }] }],
+    messages: [{ role: 'user', content: blocos }],
   });
   const texto = (resp.content || []).map((b) => b.text || '').join('');
   let dados;

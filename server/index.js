@@ -102,6 +102,16 @@ const uploadNotaFiscal = multer({
   limits: { fileSize: 15 * 1024 * 1024, files: 1 },
 });
 
+// relatorio do PDV pra leitura dos Canais/Formas (ver canaisVendaOcr.js):
+// diferente da nota fiscal, aqui podem vir VARIAS imagens do mesmo
+// relatorio - a tela do Pulse nao cabe num print so quando a loja tem
+// muito canal, e o gerente acaba fotografando em partes. O teto de 5 e o
+// ponto em que a conta de tokens por leitura ainda vale a pena.
+const uploadRelatorioPdv = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024, files: 5 },
+});
+
 // fundo customizado da tela de login (ver loginCustom.js) - so imagem,
 // limite generoso o bastante pra uma foto de boa qualidade sem exagerar
 const uploadLoginFundo = multer({
@@ -3539,14 +3549,15 @@ async function uploadArquivosKpi(files, ownerId) {
 // (lerCanaisPorImagem, marcado pelo Master em /grupos.html). O formato do
 // relatorio muda de PDV pra PDV: liberar pra todo mundo de uma vez seria
 // entregar leitura ruim pra lojas que nem foram testadas.
-app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadNotaFiscal.single('imagem'), async (req, res) => {
+app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRelatorioPdv.array('imagem', 5), async (req, res) => {
   try {
     const unidade = req.body.unidade;
     if (!unidade) return res.status(400).json({ error: 'Informe a unidade.' });
     if (!req.isMaster && !(req.permissions?.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
-    if (!req.file) return res.status(400).json({ error: 'Anexe a foto do relatório de vendas.' });
+    const arquivos = (req.files || []).map((f) => ({ buffer: f.buffer, mimeType: f.mimetype }));
+    if (!arquivos.length) return res.status(400).json({ error: 'Anexe a foto do relatório de vendas.' });
     if (!canaisVendaOcr.ativo()) return res.status(400).json({ error: 'Leitura automática por imagem não está configurada neste servidor.' });
     const grupo = await grupos.grupoDaUnidade(unidade);
     if (!grupo || grupo.lerCanaisPorImagem !== true) {
@@ -3560,8 +3571,7 @@ app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadNota
     // um jeito (ordem das linhas, coluna que vale) e isso nao cabe no codigo
     // sem virar um "if" por bandeira
     const rascunho = await canaisVendaOcr.lerCanais({
-      buffer: req.file.buffer,
-      mimeType: req.file.mimetype,
+      arquivos,
       canais: (grupo.canaisVendaExtras || []).map(soCampoLabel),
       formas: (grupo.formasPagamentoExtras || []).map(soCampoLabel),
       dica: grupo.dicaLeituraCanais,

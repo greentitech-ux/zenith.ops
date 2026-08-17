@@ -121,11 +121,13 @@ function postarMultipart(caminho, campos, arquivo, nomeCampo = 'anexo', headers 
   Object.entries(campos).forEach(([k, v]) => {
     partes.push(Buffer.from(`--${B}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
   });
-  if (arquivo) {
-    partes.push(Buffer.from(`--${B}\r\nContent-Disposition: form-data; name="${nomeCampo}"; filename="${arquivo.nome}"\r\nContent-Type: ${arquivo.tipo}\r\n\r\n`));
-    partes.push(arquivo.buffer);
+  // aceita 1 arquivo ou uma lista: a leitura do relatorio do PDV manda
+  // varias fotos com o MESMO nome de campo (ver /api/fechamentos/ler-canais)
+  (arquivo ? [].concat(arquivo) : []).forEach((a) => {
+    partes.push(Buffer.from(`--${B}\r\nContent-Disposition: form-data; name="${nomeCampo}"; filename="${a.nome}"\r\nContent-Type: ${a.tipo}\r\n\r\n`));
+    partes.push(a.buffer);
     partes.push(Buffer.from('\r\n'));
-  }
+  });
   partes.push(Buffer.from(`--${B}--\r\n`));
   const corpo = Buffer.concat(partes);
   return new Promise((resolve) => {
@@ -265,8 +267,9 @@ setTimeout(async () => {
   // no teste, o esperado e a recusa explicando onde ativar - e isso que
   // garante que ninguem liga leitura por imagem sem passar por Grupos.
   const pngFalso = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
-  const lerCanaisImg = () => postarMultipart('/api/fechamentos/ler-canais', { unidade: 'AERO' },
-    { nome: 'relatorio.png', tipo: 'image/png', buffer: pngFalso }, 'imagem',
+  const foto = (n) => ({ nome: `relatorio${n}.png`, tipo: 'image/png', buffer: pngFalso });
+  const lerCanaisImg = (qtd = 1) => postarMultipart('/api/fechamentos/ler-canais', { unidade: 'AERO' },
+    Array.from({ length: qtd }, (_, i) => foto(i + 1)), 'imagem',
     token ? { Authorization: 'Bearer ' + token } : {});
 
   // sem ANTHROPIC_API_KEY o servidor nao tem como ler nada - a tela cai no
@@ -287,6 +290,18 @@ setTimeout(async () => {
   DOCS.delete('grupos/g-teste');
   const okSemRecurso = semRecurso.status === 400 && /Grupos/.test(semRecurso.corpo);
   if (!okSemRecurso) ruins += 1;
+  // varias fotos do mesmo relatorio no mesmo envio (a tela do PDV nem sempre
+  // cabe num print so). Chegar no gate de Grupos - e nao num erro do multer -
+  // e o que prova que o upload aceitou mais de um arquivo no campo "imagem".
+  DOCS.set('grupos/g-teste', { id: 'g-teste', nome: 'Teste', unidades: ['AERO'],
+    canaisVendaExtras: [{ campo: 'salao', label: 'Salão' }], lerCanaisPorImagem: false });
+  process.env.ANTHROPIC_API_KEY = 'chave-de-teste';
+  const multi = await lerCanaisImg(3);
+  delete process.env.ANTHROPIC_API_KEY;
+  DOCS.delete('grupos/g-teste');
+  const okMulti = multi.status === 400 && /Grupos/.test(multi.corpo);
+  if (!okMulti) ruins += 1;
+  console.log(`${okMulti ? '✓' : '✗'} ler Canais aceita várias fotos no mesmo envio: HTTP ${multi.status} ${multi.corpo.slice(0, 90)}`);
   console.log(`${okSemRecurso ? '✓' : '✗'} ler Canais exige o recurso ligado no Grupo: HTTP ${semRecurso.status} ${semRecurso.corpo.slice(0, 90)}`);
 
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
