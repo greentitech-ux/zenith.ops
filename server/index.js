@@ -3566,14 +3566,17 @@ app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRela
     // le as duas secoes na mesma passada: o relatorio do PDV mostra os canais
     // e as formas de pagamento no mesmo print, e mandar a imagem duas vezes
     // custaria o dobro pra ler exatamente a mesma coisa
-    const soCampoLabel = (c) => ({ campo: c.campo, label: c.label });
+    // campo marcado como "digitado na mao" no Grupo (Pix CNPJ, Outros...) nao
+    // vai pro modelo: ele nao sai no relatorio, entao listar seria so dar ao
+    // modelo a chance de casar uma linha qualquer com ele
+    const paraLeitura = (lista) => (lista || []).filter((c) => c.manual !== true).map((c) => ({ campo: c.campo, label: c.label }));
     // a dica e escrita pelo Master no cadastro do grupo: cada PDV imprime de
     // um jeito (ordem das linhas, coluna que vale) e isso nao cabe no codigo
     // sem virar um "if" por bandeira
     const rascunho = await canaisVendaOcr.lerCanais({
       arquivos,
-      canais: (grupo.canaisVendaExtras || []).map(soCampoLabel),
-      formas: (grupo.formasPagamentoExtras || []).map(soCampoLabel),
+      canais: paraLeitura(grupo.canaisVendaExtras),
+      formas: paraLeitura(grupo.formasPagamentoExtras),
       dica: grupo.dicaLeituraCanais,
     });
     res.json(rascunho);
