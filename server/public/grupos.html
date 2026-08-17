@@ -432,7 +432,7 @@ const TIPOS_KPI = [
 // Toda linha (Canal/Forma/KPI) ganha ▲▼ pra reordenar - a ORDEM da lista e
 // literalmente a ordem das divs no container, sem campo novo: lerKpis() lê
 // na ordem do DOM, entao mover a div já move o item na lista salva.
-function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, tambemInicial, somaEmInicial){
+function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, tambemInicial, somaEmInicial, manualInicial){
   const container = document.getElementById(containerId);
   const ehKpi = containerId.includes('kpis');
   const ehCanal = containerId.includes('canais');
@@ -445,6 +445,7 @@ function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, t
   const opcoes = (ehCanal||ehForma) ? `<div class="linha-kpi-opcoes">
       <label>Operação <select class="extra-operacao-select"><option value="soma" ${(operacaoInicial||'soma')==='soma'?'selected':''}>Soma</option><option value="subtrai" ${operacaoInicial==='subtrai'?'selected':''}>Subtrai</option></select></label>
       <label><input type="checkbox" class="extra-tambem-checkbox" ${tambemInicial?'checked':''}> também contar em ${outroTotal}</label>
+      <label title="Marque nos campos que a loja digita na mão (Pix CNPJ, Outros...). Só faz diferença na loja que usa a leitura por foto: os marcados continuam editáveis e ficam de fora da leitura."><input type="checkbox" class="extra-manual-checkbox" ${manualInicial?'checked':''}> ✏️ digitado na mão (não sai no relatório do PDV)</label>
     </div>` : '';
   const ehMoedaInicial = (tipoInicial||'quantidade')==='moeda';
   const somaEmKpi = ehKpi ? `<label class="linha-kpi-soma-em">Somar em
@@ -516,6 +517,8 @@ function lerKpis(containerId){
         item.operacao = selOp ? selOp.value : 'soma';
         const chkTambem = linha.querySelector('.extra-tambem-checkbox');
         item.tambemNoOutroTotal = chkTambem ? chkTambem.checked : false;
+        const chkManual = linha.querySelector('.extra-manual-checkbox');
+        item.manual = chkManual ? chkManual.checked : false;
       }
       return item;
     })
@@ -687,9 +690,9 @@ function abrirEdicaoGrupo(id){
   document.getElementById('e-maquininha-pos-prefixo').value = g.maquininhaPosPrefixo || 'Maquininha POS';
   document.getElementById('e-saidas-habilitado').checked = g.saidasHabilitado !== false;
   document.getElementById('e-canais').innerHTML = '';
-  (g.canaisVendaExtras||[]).forEach(k=>adicionarKpi('e-canais', k.label, null, k.operacao, k.tambemNoOutroTotal));
+  (g.canaisVendaExtras||[]).forEach(k=>adicionarKpi('e-canais', k.label, null, k.operacao, k.tambemNoOutroTotal, null, k.manual));
   document.getElementById('e-formas').innerHTML = '';
-  (g.formasPagamentoExtras||[]).forEach(k=>adicionarKpi('e-formas', k.label, null, k.operacao, k.tambemNoOutroTotal));
+  (g.formasPagamentoExtras||[]).forEach(k=>adicionarKpi('e-formas', k.label, null, k.operacao, k.tambemNoOutroTotal, null, k.manual));
   document.getElementById('e-kpis').innerHTML = '';
   (g.kpisExtras||[]).forEach(k=>adicionarKpi('e-kpis', k.label, k.tipo, null, null, k.somaEm));
   responsaveisChecksHtml('e-responsaveis', new Set(g.responsaveis||[]));

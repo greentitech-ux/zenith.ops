@@ -80,6 +80,11 @@ function sanitizarCamposExtras(lista) {
       if (k?.tipo != null) item.tipo = TIPOS_KPI_VALIDOS.has(k.tipo) ? k.tipo : 'quantidade';
       if (k?.operacao != null) item.operacao = OPERACOES_VALIDAS.has(k.operacao) ? k.operacao : 'soma';
       if (k?.tambemNoOutroTotal != null) item.tambemNoOutroTotal = !!k.tambemNoOutroTotal;
+      // campo que NAO sai no relatorio do PDV (Pix CNPJ, Outros...): mesmo na
+      // loja que lanca por foto, continua digitado na mao. Sem essa marca ele
+      // ficaria travado e vazio pra sempre - e ainda entraria na lista mandada
+      // pro modelo, convidando a inventar um valor pra ele.
+      if (k?.manual != null) item.manual = !!k.manual;
       if (k?.somaEm != null) {
         const valido = SOMA_EM_VALIDAS.has(k.somaEm) ? k.somaEm : 'nao';
         item.somaEm = item.tipo === 'moeda' ? valido : 'nao';

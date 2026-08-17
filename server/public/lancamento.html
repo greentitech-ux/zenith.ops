@@ -594,14 +594,26 @@ function renderExtrasGrupo(unidade, chaveGrupo, containerId, vazioId, classe){
   // esta no relatorio do PDV, ponto. Campo digitavel abriria espaco pra
   // divergencia entre o que o PDV imprimiu e o que foi lancado - e essa
   // divergencia so apareceria muito depois, no fechamento fechado.
-  const travado = leituraPorFoto(unidade);
-  const attr = travado ? ' readonly class="'+classe+' campo-automatico" title="Preenchido pela foto do relatório - não editável"' : ' class="'+classe+'"';
-  const aviso = travado
-    ? `<div class="sub" style="grid-column:1/-1;margin:0 0 2px;">🔒 Preenchimento automático pela foto do relatório — estes campos não são digitados. Valor zerado no relatório fica em branco.</div>`
+  const automatico = leituraPorFoto(unidade);
+  // campo marcado como "digitado na mao" no Grupo (Pix CNPJ, Outros...) segue
+  // editavel mesmo na loja automatica: ele nao sai no relatorio do PDV, entao
+  // travar seria deixar um campo vazio que ninguem tem como preencher
+  const travar = (k) => automatico && k.manual !== true;
+  const algumTravado = campos.some(travar);
+  const algumManual = automatico && campos.some((k) => k.manual === true);
+  const avisos = [];
+  if(algumTravado) avisos.push('🔒 Os campos com fundo cinza vêm da foto do relatório e não são digitados. Valor zerado no relatório fica em branco.');
+  if(algumManual) avisos.push('✏️ Os demais não saem no relatório — esses você digita normalmente.');
+  const aviso = avisos.length
+    ? `<div class="sub" style="grid-column:1/-1;margin:0 0 2px;">${avisos.join(' ')}</div>`
     : '';
-  container.innerHTML = aviso + campos.map(k=>`
-    <div><label>${escapeHtml(k.label)}</label><input type="number" step="0.01" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}"${attr}></div>
-  `).join('');
+  container.innerHTML = aviso + campos.map(k=>{
+    const attr = travar(k)
+      ? ' readonly class="'+classe+' campo-automatico" title="Preenchido pela foto do relatório - não editável"'
+      : ' class="'+classe+'"';
+    const marca = travar(k) ? '' : (automatico ? ' <span style="color:var(--muted);font-weight:400;">✏️</span>' : '');
+    return `<div><label>${escapeHtml(k.label)}${marca}</label><input type="number" step="0.01" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}"${attr}></div>`;
+  }).join('');
   container.querySelectorAll('.'+classe).forEach(el=>el.addEventListener('input', atualizarResumo));
 }
 // a loja so entra no modo automatico quando a leitura REALMENTE funciona
@@ -767,8 +779,10 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', async (
     // (em branco ou com o que a loja ja tinha digitado). A secao decide em
     // qual das duas listas o valor entra - "AdyenV2" pode existir nas duas
     // toda leitura recomeça do zero: sem limpar, um valor da foto anterior
-    // ficaria num campo que a foto nova nao trouxe, e ninguem veria
-    document.querySelectorAll('.canal-extra-input, .forma-extra-input').forEach(el=>{
+    // ficaria num campo que a foto nova nao trouxe, e ninguem veria. Limpa SO
+    // os campos automaticos - o que a loja digitou no Pix CNPJ/Outros nao e
+    // da foto e nao pode ser apagado por ela.
+    document.querySelectorAll('.campo-automatico').forEach(el=>{
       el.value = ''; el.style.borderColor = '';
     });
     let canaisOk = 0; let formasOk = 0; let zerados = 0;
