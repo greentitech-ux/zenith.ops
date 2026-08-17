@@ -99,7 +99,7 @@
        pessoais vem do DOCUMENTO (ver documentoIdentidadeOcr.js). Vem antes
        do nome de proposito: e o primeiro passo, nao um anexo do fim. -->
   <label>Documento de identidade (RG, CNH ou CPF)</label>
-  <div class="sub" style="margin:-2px 0 6px;">Fotografe frente e verso (até 3 imagens). Seu nome, nascimento e CPF são lidos do documento — você não precisa digitar.</div>
+  <div class="sub" id="doc-ajuda" style="margin:-2px 0 6px;">Fotografe frente e verso (até 3 imagens). Seu nome, nascimento e CPF são lidos do documento — você não precisa digitar.</div>
   <input type="file" id="documento" accept="image/*,application/pdf" multiple required>
   <button type="button" class="btn-secundario" id="btn-ler-doc" style="margin-top:6px;">🔍 Ler meu documento</button>
   <div id="doc-msg" class="msg hidden" style="margin-top:8px;"></div>
@@ -146,14 +146,42 @@ let DOC_LIDO = null; // leitura aceita; sem ela o envio nao passa
 // em index.js) - o readonly daqui evita erro de digitacao, quem garante que
 // o dado veio do documento e o servidor.
 const LABEL_CAMPO_DOC = { nome:'nome', dataNascimento:'data de nascimento', cpf:'CPF', rg:'RG', nomeMae:'nome da mãe' };
+// campos que o Master liberou pra digitação (ver rhCamposConfig.js): aqui
+// eles nascem editáveis e o que a pessoa digitar é o que vale
+let CAMPOS_MANUAIS = [];
+const INPUT_DO_CAMPO = { nome:'nome', dataNascimento:'nascimento', cpf:'cpf', rg:'rg' };
+const ehManual = (campo) => CAMPOS_MANUAIS.includes(campo);
+async function carregarCamposConfig(){
+  try{
+    const cfg = await fetch('/api/rh/campos-config-publico').then(r=>r.json());
+    CAMPOS_MANUAIS = cfg.camposManuais || [];
+  }catch(e){ CAMPOS_MANUAIS = []; }
+  Object.entries(INPUT_DO_CAMPO).forEach(([campo, id])=>{
+    const el = document.getElementById(id);
+    if(el) el.readOnly = !ehManual(campo);
+  });
+  // CPF/RG só aparecem depois da leitura; sendo manuais, precisam estar
+  // visíveis desde o começo pra pessoa digitar
+  if(['cpf','rg'].some(ehManual)) document.getElementById('doc-campos-lidos').classList.remove('hidden');
+  const marcados = CAMPOS_MANUAIS.map(c=>LABEL_CAMPO_DOC[c]||c);
+  if(marcados.length){
+    document.getElementById('doc-ajuda').innerHTML =
+      `Fotografe frente e verso (até 3 imagens). Seus dados são lidos do documento — só ${escapeHtml(marcados.join(', '))} você digita.`;
+  }
+}
 function formatarCpf(d){
   const s = String(d||'').replace(/\D/g,'');
   return s.length === 11 ? `${s.slice(0,3)}.${s.slice(3,6)}.${s.slice(6,9)}-${s.slice(9)}` : '';
 }
 function limparLeituraDoc(){
   DOC_LIDO = null;
-  ['nome','nascimento','cpf','rg'].forEach(id=>{ document.getElementById(id).value = ''; });
-  document.getElementById('doc-campos-lidos').classList.add('hidden');
+  // o que a pessoa digitou não é da leitura pra apagar
+  Object.entries(INPUT_DO_CAMPO).forEach(([campo, id])=>{
+    if(ehManual(campo)) return;
+    const el = document.getElementById(id);
+    if(el) el.value = '';
+  });
+  document.getElementById('doc-campos-lidos').classList.toggle('hidden', !['cpf','rg'].some(ehManual));
   const m = document.getElementById('doc-msg');
   m.classList.add('hidden'); m.innerHTML = '';
 }
@@ -174,10 +202,12 @@ document.getElementById('btn-ler-doc').addEventListener('click', async ()=>{
     if(!resp.ok) throw new Error(data.error || 'Não consegui ler o documento.');
     if(!data.nome) throw new Error('Não consegui ler o nome nesse documento. Tire a foto de novo, com o documento inteiro e sem reflexo.');
     DOC_LIDO = data;
-    document.getElementById('nome').value = data.nome;
-    document.getElementById('nascimento').value = data.dataNascimento || '';
-    document.getElementById('cpf').value = formatarCpf(data.cpf);
-    document.getElementById('rg').value = data.rg || '';
+    const porFora = { nome: data.nome, dataNascimento: data.dataNascimento || '', cpf: formatarCpf(data.cpf), rg: data.rg || '' };
+    Object.entries(INPUT_DO_CAMPO).forEach(([campo, id])=>{
+      if(ehManual(campo)) return;
+      const el = document.getElementById(id);
+      if(el) el.value = porFora[campo];
+    });
     document.getElementById('doc-campos-lidos').classList.remove('hidden');
     const partes = [`<b>✔ ${escapeHtml(data.tipoDocumento||'Documento')} lido.</b> Confira se está tudo certo antes de enviar.`];
     if(data.cpfRejeitado) partes.push('O CPF lido não fechou a conta do dígito verificador — tente outra foto da parte do CPF.');
@@ -253,6 +283,12 @@ document.getElementById('form-cadastro').addEventListener('submit', async (e)=>{
     fd.append('cargoFuncao', document.getElementById('cargo').value);
     fd.append('dataNascimento', document.getElementById('nascimento').value);
     fd.append('curriculo', arquivo);
+    // só o que foi liberado pra digitação vai no corpo; o resto o servidor
+    // relê do documento
+    CAMPOS_MANUAIS.forEach(campo=>{
+      const el = document.getElementById(INPUT_DO_CAMPO[campo]);
+      if(el) fd.append(campo, el.value);
+    });
     docs.forEach(d=>fd.append('documento', d));
     const resp = await fetch('/api/rh/cadastro-publico', { method:'POST', body: fd });
     const data = await resp.json();
@@ -273,6 +309,7 @@ document.getElementById('btn-abrir-ponto').addEventListener('click', ()=>{
 });
 
 boot();
+carregarCamposConfig();
 </script>
 <script src="/suporte-chat.js"></script>
 </body>

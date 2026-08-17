@@ -325,6 +325,18 @@ setTimeout(async () => {
   if (!okLerDoc) ruins += 1;
   console.log(`${okLerDoc ? '✓' : '✗'} ler documento sem ANTHROPIC_API_KEY é recusado: HTTP ${lerDoc.status} ${lerDoc.corpo.slice(0, 80)}`);
 
+  // A config de campos digitados na mão é lida ANTES do login: as duas telas
+  // de cadastro (a interna e o link público) montam o formulário com ela, e
+  // o link público não tem sessão. Precisa responder sem token.
+  const cfgCampos = await pedir("/api/rh/campos-config-publico");
+  let okCfg = false;
+  try {
+    const c = JSON.parse(cfgCampos.corpo);
+    okCfg = cfgCampos.status === 200 && Array.isArray(c.camposManuais) && Array.isArray(c.campos) && c.campos.includes('cpf');
+  } catch (e) { okCfg = false; }
+  if (!okCfg) ruins += 1;
+  console.log(`${okCfg ? '✓' : '✗'} config de campos manuais é pública (link de auto-cadastro usa): HTTP ${cfgCampos.status} ${cfgCampos.corpo.slice(0, 80)}`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de

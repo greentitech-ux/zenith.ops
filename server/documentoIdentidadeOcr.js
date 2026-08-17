@@ -42,7 +42,23 @@ const MAX_ARQUIVOS = 3; // frente + verso + eventual segunda via
 const IDADE_MIN = 14;   // menor aprendiz (CLT art. 403)
 const IDADE_MAX = 100;
 
-function montarPrompt(qtdImagens) {
+const TODOS_CAMPOS = ['nome', 'dataNascimento', 'cpf', 'rg', 'nomeMae'];
+const LINHA_JSON = {
+  nome: '  "nome": "nome completo exatamente como está escrito no documento, ou null",',
+  dataNascimento: '  "dataNascimento": "AAAA-MM-DD, ou null",',
+  cpf: '  "cpf": "somente os 11 dígitos, sem pontos nem traço, ou null",',
+  rg: '  "rg": "número do RG como está no documento, ou null",',
+  nomeMae: '  "nomeMae": "nome da mãe (filiação), ou null"',
+};
+// regra que só faz sentido se o campo estiver sendo pedido - pedir cuidado
+// com um campo que nem vai ser lido é ruído no prompt
+const REGRA_DO_CAMPO = {
+  nome: '- NOME: copie exatamente como está no documento, com todos os sobrenomes, sem abreviar e sem "corrigir" grafia (nomes como "Jonhatan", "Wellyngton" ou "Cezar" existem e estão certos no documento). Não inclua "Nome:", "Titular" nem rótulo nenhum.\n- NÃO confunda o nome do titular com o nome da MÃE ou do PAI. No RG a filiação vem logo abaixo do nome e é fácil trocar: o nome do titular é o que aparece sob "NOME", e os da filiação sob "FILIAÇÃO" (geralmente dois nomes, mãe e pai). Se não der pra separar com certeza, mande nome como null.',
+  dataNascimento: '- DATA DE NASCIMENTO: é a data de nascimento do titular, nunca a data de emissão/expedição do documento, nem a validade. Documento sempre tem várias datas - a de nascimento costuma vir rotulada como "DATA DE NASCIMENTO" ou "NASC". Se houver dúvida sobre qual é qual, mande null.',
+  cpf: '- CPF: só os 11 dígitos. Se o documento mostrar o CPF em mais de um lugar e eles não baterem, mande null.',
+};
+
+function montarPrompt(qtdImagens, campos) {
   const blocoMultiplas = qtdImagens > 1 ? `
 
 Você recebeu ${qtdImagens} imagens. Elas são do MESMO documento (frente e verso, ou páginas diferentes). Junte tudo numa resposta só. Se forem claramente de PESSOAS diferentes (nomes diferentes), devolva {"erro": "as fotos são de pessoas diferentes"}.` : '';
@@ -51,19 +67,13 @@ Você recebeu ${qtdImagens} imagens. Elas são do MESMO documento (frente e vers
 Devolva SOMENTE um JSON válido, sem nenhum texto antes ou depois, exatamente neste formato:
 {
   "tipoDocumento": "RG" | "CNH" | "CPF" | "CIN" | "CTPS" | "outro",
-  "nome": "nome completo exatamente como está escrito no documento, ou null",
-  "dataNascimento": "AAAA-MM-DD, ou null",
-  "cpf": "somente os 11 dígitos, sem pontos nem traço, ou null",
-  "rg": "número do RG como está no documento, ou null",
-  "nomeMae": "nome da mãe (filiação), ou null"
+${campos.map((c) => LINHA_JSON[c]).join('\n').replace(/,$/, '')}
 }
 
 Regras:
 - Campo que você não conseguir ler com CERTEZA vai como null. Um campo vazio quem cadastra preenche olhando o documento; um campo errado vira contrato errado e ninguém percebe. Na dúvida entre duas letras ou dois números, devolva null.
-- NOME: copie exatamente como está no documento, com todos os sobrenomes, sem abreviar e sem "corrigir" grafia (nomes como "Jonhatan", "Wellyngton" ou "Cezar" existem e estão certos no documento). Não inclua "Nome:", "Titular" nem rótulo nenhum.
-- NÃO confunda o nome do titular com o nome da MÃE ou do PAI. No RG a filiação vem logo abaixo do nome e é fácil trocar: o nome do titular é o que aparece sob "NOME", e os da filiação sob "FILIAÇÃO" (geralmente dois nomes, mãe e pai). Se não der pra separar com certeza, mande nome como null.
-- DATA DE NASCIMENTO: é a data de nascimento do titular, nunca a data de emissão/expedição do documento, nem a validade. Documento sempre tem várias datas - a de nascimento costuma vir rotulada como "DATA DE NASCIMENTO" ou "NASC". Se houver dúvida sobre qual é qual, mande null.
-- CPF: só os 11 dígitos. Se o documento mostrar o CPF em mais de um lugar e eles não baterem, mande null.
+${campos.map((c) => REGRA_DO_CAMPO[c]).filter(Boolean).join('\n')}
+- Não devolva nenhum campo além dos listados acima, mesmo que apareça no documento.
 - Se a imagem NÃO for um documento de identidade (foto de pessoa, print de tela, papel em branco, currículo), devolva {"erro": "descrição curta do que você viu"}.`;
 }
 
@@ -114,8 +124,16 @@ const texto = (v, max) => {
   return s || null;
 };
 
-async function lerDocumento({ arquivos }) {
+// camposLidos: quais campos devem sair do documento. O que o Master marcou
+// como "digitado na mão" (ver rhCamposConfig.js) nao entra - nem no prompt
+// nem no "naoLidos", senao a tela cobraria da leitura um campo que ela nao
+// foi encarregada de trazer.
+async function lerDocumento({ arquivos, camposLidos }) {
   if (!ativo()) throw new Error('Leitura automática de documento não está configurada neste servidor.');
+  const campos = Array.isArray(camposLidos) && camposLidos.length
+    ? TODOS_CAMPOS.filter((c) => camposLidos.includes(c))
+    : TODOS_CAMPOS;
+  if (!campos.length) throw new Error('Todos os campos estão marcados como digitados na mão - não há o que ler no documento.');
   const fotos = (Array.isArray(arquivos) ? arquivos : []).filter((a) => a && a.buffer);
   if (!fotos.length) throw new Error('Anexe a foto do documento.');
   if (fotos.length > MAX_ARQUIVOS) throw new Error(`Envie no máximo ${MAX_ARQUIVOS} imagens do documento.`);
@@ -127,7 +145,7 @@ async function lerDocumento({ arquivos }) {
       ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.buffer.toString('base64') } }
       : { type: 'image', source: { type: 'base64', media_type: f.mimeType, data: f.buffer.toString('base64') } });
   });
-  blocos.push({ type: 'text', text: montarPrompt(fotos.length) });
+  blocos.push({ type: 'text', text: montarPrompt(fotos.length, campos) });
 
   const resp = await getCliente().messages.create({
     model: MODELO,
@@ -153,20 +171,27 @@ async function lerDocumento({ arquivos }) {
   // "naoLidos" existe pelo mesmo motivo do "faltando" da leitura de canais:
   // a tela precisa dizer O QUE ficou faltando, em vez de deixar quem cadastra
   // descobrir no erro de validacao do envio
-  const campos = { nome: texto(dados.nome, 150), dataNascimento, cpf, rg: texto(dados.rg, 30), nomeMae: texto(dados.nomeMae, 150) };
-  const naoLidos = Object.entries(campos).filter(([, v]) => !v).map(([k]) => k);
+  const todos = { nome: texto(dados.nome, 150), dataNascimento, cpf, rg: texto(dados.rg, 30), nomeMae: texto(dados.nomeMae, 150) };
+  // campo fora do pedido volta null mesmo que o modelo tenha mandado: quem
+  // preenche esse e quem cadastra, e um valor "vindo do documento" aqui
+  // sobrescreveria a digitacao sem ninguem pedir
+  const lidos = Object.fromEntries(TODOS_CAMPOS.map((c) => [c, campos.includes(c) ? todos[c] : null]));
+  const naoLidos = campos.filter((c) => !lidos[c]);
 
   return {
-    ...campos,
+    ...lidos,
+    camposLidos: campos,
     tipoDocumento: texto(dados.tipoDocumento, 20),
     // avisa quando o modelo devolveu um CPF que nao fecha o digito: nesse
     // caso o campo volta vazio, e quem cadastra precisa saber que foi erro
     // de leitura e nao ausencia do dado no documento
-    cpfRejeitado: !!(cpfDigitos && !cpf),
-    nascimentoRejeitado: !!(dados.dataNascimento && !dataNascimento),
-    menorDeIdade: !!(dataNascimento && idadeEm(dataNascimento) < 18),
+    // os avisos so valem pro campo que foi PEDIDO: CPF digitado na mao nao
+    // passou por essa leitura, entao nao ha rejeicao a relatar
+    cpfRejeitado: !!(campos.includes('cpf') && cpfDigitos && !cpf),
+    nascimentoRejeitado: !!(campos.includes('dataNascimento') && dados.dataNascimento && !dataNascimento),
+    menorDeIdade: !!(lidos.dataNascimento && idadeEm(lidos.dataNascimento) < 18),
     naoLidos,
   };
 }
 
-module.exports = { ativo, lerDocumento, cpfValido, MAX_ARQUIVOS };
+module.exports = { ativo, lerDocumento, cpfValido, MAX_ARQUIVOS, TODOS_CAMPOS };

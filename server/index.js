@@ -58,6 +58,7 @@ const inventario = require('./inventario');
 const inventarioNotaOcr = require('./inventarioNotaOcr');
 const canaisVendaOcr = require('./canaisVendaOcr');
 const documentoIdentidadeOcr = require('./documentoIdentidadeOcr');
+const rhCamposConfig = require('./rhCamposConfig');
 const parque = require('./parque');
 const festas = require('./festas');
 const mensalistas = require('./mensalistas');
@@ -212,6 +213,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/rh-cadastro.html',
   '/api/rh/cadastro-publico',
   '/api/rh/ler-documento-publico',
+  '/api/rh/campos-config-publico',
   '/api/loja-status/heartbeat',
   '/api/loja-status/vigia-versao',
 ]);
@@ -1131,11 +1133,20 @@ async function responderLeituraDocumento(req, res) {
     if (!documentoIdentidadeOcr.ativo()) {
       return res.status(400).json({ error: 'Leitura automática de documento não está configurada neste servidor.' });
     }
-    res.json(await documentoIdentidadeOcr.lerDocumento({ arquivos }));
+    const camposLidos = await rhCamposConfig.camposLidosDoDocumento();
+    res.json(await documentoIdentidadeOcr.lerDocumento({ arquivos, camposLidos }));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 }
+
+// qual campo o cadastro digita na mao - a tela precisa saber ANTES de
+// montar o formulario (mesmo papel do lerCanaisDisponivel no lançamento).
+// Publica porque o link de auto-cadastro tambem monta o formulario.
+app.get('/api/rh/campos-config-publico', async (req, res) => {
+  const { camposManuais } = await rhCamposConfig.obter();
+  res.json({ camposManuais, labels: rhCamposConfig.LABEL, campos: rhCamposConfig.CAMPOS_DO_DOCUMENTO });
+});
 
 // A versao publica fica fora do login (o link de auto-cadastro e aberto) e
 // por isso tem teto por IP: cada leitura custa uma chamada de modelo, e
@@ -1187,17 +1198,30 @@ function exigeDocumentoIdentidade(tipoCadastro, arquivosDoc) {
   return 'Anexe a foto do documento de identidade (RG, CNH ou CPF) - os dados são preenchidos por ele.';
 }
 
-async function lerEGuardarDocumentoIdentidade(arquivosReq, unidade) {
+async function lerEGuardarDocumentoIdentidade(arquivosReq, unidade, digitados = {}) {
   const arquivos = (arquivosReq || []).map((f) => ({ buffer: f.buffer, mimeType: f.mimetype }));
   if (!arquivos.length) return null;
-  const leitura = await documentoIdentidadeOcr.lerDocumento({ arquivos });
-  if (!leitura.nome) {
+  const camposLidos = await rhCamposConfig.camposLidosDoDocumento();
+  const leitura = await documentoIdentidadeOcr.lerDocumento({ arquivos, camposLidos });
+  // so cobra o nome da leitura se o nome for um campo lido: com ele marcado
+  // como manual, quem cadastra e que digita, e exigir da leitura travaria o
+  // cadastro por um dado que nem foi pedido ao modelo
+  if (camposLidos.includes('nome') && !leitura.nome) {
     throw new Error('Não consegui ler o nome no documento. Tire a foto de novo, com o documento inteiro, sem reflexo e bem iluminado.');
   }
+  // cada campo vem de UMA fonte só: o que o Master deixou automático vem da
+  // leitura (e o que a tela mandou é ignorado); o que ele marcou como
+  // digitado na mão vem da tela. Sem essa separação explícita, um campo
+  // liberado continuaria sendo sobrescrito pelo null da leitura.
+  const campos = {};
+  documentoIdentidadeOcr.TODOS_CAMPOS.forEach((c) => {
+    campos[c] = camposLidos.includes(c) ? leitura[c] : (digitados[c] ?? null);
+  });
   const primeiro = arquivosReq[0];
   const path = await storage.salvarArquivo(unidade, primeiro, 'rh-documentos');
   return {
     leitura,
+    campos,
     anexo: { path, nomeOriginal: primeiro.originalname, tipo: primeiro.mimetype, paginas: arquivosReq.length },
   };
 }
@@ -1218,14 +1242,10 @@ app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCoun
     }
     // nome/nascimento/CPF vem da leitura do documento feita AQUI, nao do
     // que a tela mandou (ver lerEGuardarDocumentoIdentidade)
-    const doc = await lerEGuardarDocumentoIdentidade(req.files?.documento, unidade);
+    const doc = await lerEGuardarDocumentoIdentidade(req.files?.documento, unidade, req.body);
     const registro = await rh.criar({
       unidade, contato, cargoFuncao, tipoCadastro,
-      nome: doc?.leitura.nome,
-      dataNascimento: doc?.leitura.dataNascimento,
-      cpf: doc?.leitura.cpf,
-      rg: doc?.leitura.rg,
-      nomeMae: doc?.leitura.nomeMae,
+      ...(doc?.campos || {}),
       documentoIdentidade: doc?.anexo || null,
       leituraDocumento: doc?.leitura || null,
       curriculo, cadastradoPorId: null, cadastradoPorEmail: 'Auto-cadastro (link público)',
@@ -2891,6 +2911,7 @@ const EXECUTORES_QA = {
   'usuarios.usernamesEmMassa': (p) => users.updateUsernamesEmMassa(p.itens),
   'usuarios.excluir': (p) => users.remove(p.id),
   'grupos.criar': (p) => grupos.create(p),
+  'rh.camposConfig': (p) => rhCamposConfig.salvar(p.camposManuais, { porEmail: 'aprovação QA' }),
   'grupos.editar': (p) => grupos.update(p.id, p.dados),
   'grupos.excluir': (p) => grupos.remove(p.id),
   'unidadesExtras.criar': (p) => unidadesExtras.criar(p.dados, codigosUnidadesFixas()),
@@ -4983,14 +5004,12 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'c
     // Extra e Candidato so entram com documento, e os dados vem da leitura
     // dele. Efetivado (contratacao formal pelo RH) segue digitado - la o
     // pacote de documentos e outro e mais completo (DOCUMENTOS_OBRIGATORIOS)
-    const doc = await lerEGuardarDocumentoIdentidade(req.files?.documento, unidade || 'geral');
+    const doc = await lerEGuardarDocumentoIdentidade(req.files?.documento, unidade || 'geral', req.body);
     const registro = await rh.criar({
       unidade, contato, cargoFuncao, dataAdmissao, tipoCadastro, semExperiencia,
-      nome: doc ? doc.leitura.nome : nome,
-      dataNascimento: doc ? doc.leitura.dataNascimento : dataNascimento,
-      cpf: doc?.leitura.cpf,
-      rg: doc?.leitura.rg,
-      nomeMae: doc?.leitura.nomeMae,
+      // sem documento (Efetivado) tudo continua vindo do formulário
+      nome, dataNascimento,
+      ...(doc?.campos || {}),
       documentoIdentidade: doc?.anexo || null,
       leituraDocumento: doc?.leitura || null,
       curriculo, cadastradoPorId: req.user.id, cadastradoPorEmail: req.user.email,
@@ -6511,6 +6530,19 @@ app.get('/api/relatorio-mv/preview', auth.requireMaster, async (req, res) => {
 // recebe (emailDestino) e QUAL usuário dispara o envio (usuarioGatilho,
 // pelo username) - editável na hora pelo Master, sem precisar mexer em env
 // var nem redeploy (ver relatorioMV.getConfig/salvarConfig)
+// quais campos do cadastro de Extra/Candidato saem da digitação em vez da
+// leitura do documento (ver rhCamposConfig.js). Mesmo desenho do "digitado
+// na mão" dos Canais/Formas: quem marca é o Master, a loja só encontra o
+// campo já liberado. Passa por desviarSeQaMaster como o resto do admin.
+app.put('/api/rh/campos-config', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'rh.camposConfig', 'Alterar campos digitados na mão do cadastro RH', req.body)) return;
+    res.json(await rhCamposConfig.salvar(req.body.camposManuais, { porEmail: req.user.email }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/relatorio-config', auth.requireMaster, async (req, res) => {
   res.json(await relatorioMV.getConfig());
 });
