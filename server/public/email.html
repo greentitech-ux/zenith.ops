@@ -85,6 +85,14 @@
   .preview-diag b{color:var(--warn);}
   .preview-diag ul{margin:6px 0 0;padding-left:18px;}
   .preview-diag code{font-family:var(--mono);font-size:11px;}
+  /* histórico de envios: linha compacta, o suficiente pra bater o olho e
+     saber se o e-mail do dia saiu e com quantos tickets */
+  .envios{display:flex;flex-direction:column;gap:5px;margin-top:6px;}
+  .envio{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11.5px;line-height:1.5;background:var(--panel2);}
+  .envio .quando{font-family:var(--mono);color:var(--muted);}
+  .envio .falhou{color:var(--bad);}
+  .envio .vazio{color:var(--warn);}
+  .envios-nenhum{font-size:11.5px;color:var(--muted);}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -148,8 +156,16 @@
     <button type="button" class="btn-ghost" id="btn-preview" onclick="previsualizar()">👁️ Pré-visualizar agora</button>
     <div class="msg hidden" id="msg-preview"></div>
 
-    <button type="button" class="btn-ghost" id="btn-testar" onclick="testarAgora()">📤 Enviar relatório de teste agora</button>
+    <label style="margin-top:14px;">Reenviar o relatório agora</label>
+    <div class="sub" style="margin-top:-2px;">Recalcula com os dados <b>deste momento</b> e manda de novo - útil quando o envio do dia saiu antes de alguém direcionar os tickets, ou saiu com erro.</div>
+    <input type="text" id="f-reenviar-para" placeholder="Deixe em branco pra mandar pro destino configurado">
+    <div class="sub" style="margin-top:-2px;">Preencha só se quiser conferir na sua própria caixa antes - nesse caso a cópia (CC) não é usada.</div>
+    <button type="button" class="btn-ghost" id="btn-testar" onclick="testarAgora()">📤 Reenviar agora</button>
     <div class="msg hidden" id="msg-testar"></div>
+
+    <label style="margin-top:14px;">Últimos envios</label>
+    <div class="sub" style="margin-top:-2px;">Responde "já saiu hoje, pra quem, com quantos?" antes de reenviar.</div>
+    <div id="lista-envios" class="envios"></div>
 
     <div class="info-box">
       Um ticket "é do usuário" de duas formas: quando ele foi diretamente atribuído a essa pessoa (campo "Direcionar para" na Central), ou quando o e-mail gravado no ticket bate com o e-mail atual dela - por isso trocar o e-mail aqui não quebra tickets antigos.
@@ -265,20 +281,54 @@ async function salvar(){
 async function testarAgora(){
   const msg = document.getElementById('msg-testar');
   const btn = document.getElementById('btn-testar');
+  const para = document.getElementById('f-reenviar-para').value.trim();
   msg.classList.add('hidden');
   btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Enviando...';
   try{
-    const resp = await fetch('/api/relatorio-mv/testar');
+    const resp = await fetch('/api/relatorio-mv/reenviar', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ para }),
+    });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar.');
-    msg.textContent = `✅ Enviado! ${data.total} solicitação(ões) no relatório · ${data.pendentes} pendente(s), ${data.aprovados} aprovada(s), ${data.rejeitados} recusada(s).`;
-    msg.className = 'msg ok';
+    // relatório vazio é um envio que deu certo e não serviu pra nada - dizer
+    // "✅ Enviado!" nesse caso esconderia justamente o problema
+    msg.textContent = data.total
+      ? `✅ Enviado${para ? ' pra ' + para : ''}! ${data.total} solicitação(ões) · ${data.pendentes} pendente(s), ${data.aprovados} aprovada(s), ${data.rejeitados} recusada(s).`
+      : '⚠️ Enviado, mas o relatório saiu VAZIO (0 solicitações). Use "Pré-visualizar agora" - ele diz por quê.';
+    msg.className = data.total ? 'msg ok' : 'msg err';
     msg.classList.remove('hidden');
+    carregarEnvios();
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+    carregarEnvios();   // a falha também vira registro - mostra na hora
   }finally{
     btn.disabled = false; btn.textContent = txt;
   }
+}
+
+// histórico dos últimos envios (agendados e manuais, com sucesso e com erro)
+async function carregarEnvios(){
+  const el = document.getElementById('lista-envios');
+  let lista = [];
+  try{ lista = await fetch('/api/relatorio-mv/envios?limite=10').then(r=>r.json()); }catch(e){ lista = []; }
+  if(!Array.isArray(lista) || !lista.length){
+    el.innerHTML = '<div class="envios-nenhum">Nenhum envio registrado ainda. O histórico começa a partir do próximo envio.</div>';
+    return;
+  }
+  el.innerHTML = lista.map(e=>{
+    const quando = new Date(e.em).toLocaleString('pt-BR', { timeZone:'America/Recife' });
+    const origem = e.origem === 'manual' ? 'reenvio manual' : 'automático';
+    const quem = e.porEmail ? ` por ${escapeHtml(e.porEmail)}` : '';
+    const corpo = e.ok
+      ? (e.total
+          ? `${e.total} solicitação(ões) · ${e.pendentes} pendente(s), ${e.aprovados} aprovada(s), ${e.rejeitados} recusada(s)`
+          : '<span class="vazio">saiu VAZIO (0 solicitações)</span>')
+      : `<span class="falhou">falhou: ${escapeHtml(e.erro || 'erro desconhecido')}</span>`;
+    return `<div class="envio">
+      <span class="quando">${escapeHtml(quando)}</span> · ${origem}${quem}<br>
+      para <b>${escapeHtml(e.para || '—')}</b>${e.copia ? ` (cc ${escapeHtml(e.copia)})` : ''}<br>${corpo}
+    </div>`;
+  }).join('');
 }
 
 async function previsualizar(){
@@ -381,6 +431,7 @@ async function boot(){
   initNavDrawerAccordion();
   await carregarUsuarios();
   await carregarConfig();
+  carregarEnvios();   // sem await: o histórico é apoio, não segura a tela
 }
 boot();
 </script>
