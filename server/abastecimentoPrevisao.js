@@ -243,6 +243,15 @@ function sugerirEnvio(regs, { capacidadesManuais = {}, ciclos = null } = {}) {
     });
   });
 
+  // Envios que carregaram INSUMO depois da contagem. E o que "gasta" a
+  // sugestao: a partir do primeiro deles, a foto do carrinho que gerou esta
+  // conta nao descreve mais o carrinho - o turno ja repos, com ou sem usar o
+  // que estava sugerido aqui. Dai em diante a tela para de sugerir e espera a
+  // proxima contagem, em vez de continuar mostrando um numero que envelheceu.
+  // Envio so de pizza NAO conta: pizza sai fracionada o dia inteiro por
+  // pedido do carrinho e nunca entrou nesta conta (ver o topo desta secao).
+  const enviosDeInsumo = posteriores.filter((e) => soInsumo(entradasDe(e)).some((it) => it.qtd > 0));
+
   const lista = [...itens.values()].map((i) => {
     const aBordo = i.contado + i.chegouDepois + i.aCaminho;
     return {
@@ -259,10 +268,15 @@ function sugerirEnvio(regs, { capacidadesManuais = {}, ciclos = null } = {}) {
       id: ultima.id,
       em: ultima.criadoEm,
       por: ultima.operadorNome || ultima.criadoPorNome || ultima.criadoPorEmail || null,
-      // quantos envios ja sairam depois dessa contagem - a tela avisa, senao
-      // parece que a sugestao ignorou o que o turno acabou de mandar
-      enviosDepois: posteriores.length,
+      // quantos envios de insumo ja sairam depois dessa contagem - a tela
+      // avisa, senao parece que a sugestao ignorou o que o turno mandou
+      enviosDepois: enviosDeInsumo.length,
     },
+    // a sugestao ja foi cumprida: saiu envio de insumo depois da contagem.
+    // A tela troca a lista pelo aviso de "aguardando a proxima contagem" -
+    // sugerir em cima de uma foto vencida e pior que nao sugerir nada.
+    atendida: enviosDeInsumo.length > 0,
+    atendidaEm: enviosDeInsumo.length ? enviosDeInsumo[enviosDeInsumo.length - 1].criadoEm : null,
     // sem nenhum item com capacidade conhecida a tela mostra a explicacao em
     // vez de uma coluna inteira de "-"
     semCapacidade: lista.every((i) => i.capacidade == null),
