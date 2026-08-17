@@ -208,6 +208,10 @@
         <legend>Canais de venda extras (somam no Faturamento, além de Delivery/Carryout/Pickup/Loja)</legend>
         <div id="c-canais"></div>
         <button type="button" class="btn-add" onclick="adicionarKpi('c-canais')">+ Adicionar canal</button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);margin-top:10px;padding-top:9px;border-top:1px solid var(--line);">
+          <input type="checkbox" id="c-ler-canais-imagem" style="width:auto;margin:0;"> 📷 Preencher por foto do relatório do PDV
+        </label>
+        <div style="font-size:11px;color:var(--muted);margin:4px 0 0 22px;line-height:1.5;">Libera pra loja o botão de ler os canais acima a partir de uma foto — mesmo sistema da leitura de nota fiscal do Estoque. A loja sempre confere valor por valor antes de enviar. Ligue só depois de testar com o relatório dessa bandeira: cada PDV imprime de um jeito.</div>
       </fieldset>
 
       <fieldset>
@@ -271,6 +275,10 @@
         <button type="button" class="btn-add" onclick="adicionarKpi('e-canais')">+ Adicionar canal</button>
         <button type="button" class="btn-add" style="color:var(--bad);" onclick="limparExtras('e-canais')">🗑️ Limpar tudo</button>
       </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);margin-top:10px;padding-top:9px;border-top:1px solid var(--line);">
+        <input type="checkbox" id="e-ler-canais-imagem" style="width:auto;margin:0;"> 📷 Preencher por foto do relatório do PDV
+      </label>
+      <div style="font-size:11px;color:var(--muted);margin:4px 0 0 22px;line-height:1.5;">Libera pra loja o botão de ler os canais acima a partir de uma foto — mesmo sistema da leitura de nota fiscal do Estoque. A loja sempre confere valor por valor antes de enviar. Ligue só depois de testar com o relatório dessa bandeira: cada PDV imprime de um jeito.</div>
     </fieldset>
 
     <fieldset style="margin-top:10px;">
@@ -610,6 +618,7 @@ document.getElementById('create-form').addEventListener('submit', async (e)=>{
   const payload = {
     nome: document.getElementById('c-nome').value,
     unidades: readChecked(document.getElementById('c-unidades')),
+    lerCanaisPorImagem: document.getElementById('c-ler-canais-imagem').checked,
     caixaHabilitado: document.getElementById('c-caixa-habilitado').checked,
     maquininhasHabilitado: document.getElementById('c-maquininhas-habilitado').checked,
     maquininhaPrefixo: document.getElementById('c-maquininha-prefixo').value,
@@ -649,6 +658,7 @@ function abrirEdicaoGrupo(id){
   document.getElementById('grupo-title').textContent = 'Editar ' + g.nome;
   document.getElementById('e-nome').value = g.nome;
   document.getElementById('e-unidades').innerHTML = unidadesChecksHtml('e-unidades', new Set(g.unidades||[]));
+  document.getElementById('e-ler-canais-imagem').checked = g.lerCanaisPorImagem === true;
   document.getElementById('e-caixa-habilitado').checked = g.caixaHabilitado !== false;
   document.getElementById('e-maquininhas-habilitado').checked = g.maquininhasHabilitado !== false;
   document.getElementById('e-maquininha-prefixo').value = g.maquininhaPrefixo || 'Maquininha';
@@ -674,6 +684,7 @@ document.getElementById('grupo-form').addEventListener('submit', async (e)=>{
   const payload = {
     nome: document.getElementById('e-nome').value,
     unidades: readChecked(document.getElementById('e-unidades')),
+    lerCanaisPorImagem: document.getElementById('e-ler-canais-imagem').checked,
     caixaHabilitado: document.getElementById('e-caixa-habilitado').checked,
     maquininhasHabilitado: document.getElementById('e-maquininhas-habilitado').checked,
     maquininhaPrefixo: document.getElementById('e-maquininha-prefixo').value,

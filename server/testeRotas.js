@@ -113,14 +113,16 @@ function pedir(caminho, headers = {}) {
 
 // POST multipart de verdade (o widget do chat passou a mandar assim SEMPRE,
 // com ou sem arquivo - o risco a cobrir e a abertura sem anexo ter quebrado)
-function postarMultipart(caminho, campos, arquivo) {
+// nomeCampo/headers sao opcionais: o chat manda "anexo" sem auth, a leitura
+// de Canais manda "imagem" com Bearer - mesma montagem de corpo
+function postarMultipart(caminho, campos, arquivo, nomeCampo = 'anexo', headers = {}) {
   const B = '----zenithteste' + Math.random().toString(36).slice(2);
   const partes = [];
   Object.entries(campos).forEach(([k, v]) => {
     partes.push(Buffer.from(`--${B}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
   });
   if (arquivo) {
-    partes.push(Buffer.from(`--${B}\r\nContent-Disposition: form-data; name="anexo"; filename="${arquivo.nome}"\r\nContent-Type: ${arquivo.tipo}\r\n\r\n`));
+    partes.push(Buffer.from(`--${B}\r\nContent-Disposition: form-data; name="${nomeCampo}"; filename="${arquivo.nome}"\r\nContent-Type: ${arquivo.tipo}\r\n\r\n`));
     partes.push(arquivo.buffer);
     partes.push(Buffer.from('\r\n'));
   }
@@ -129,7 +131,7 @@ function postarMultipart(caminho, campos, arquivo) {
   return new Promise((resolve) => {
     const req = http.request({
       host: '127.0.0.1', port: 8899, path: caminho, method: 'POST',
-      headers: { 'Content-Type': `multipart/form-data; boundary=${B}`, 'Content-Length': corpo.length },
+      headers: { 'Content-Type': `multipart/form-data; boundary=${B}`, 'Content-Length': corpo.length, ...headers },
     }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, corpo: b })); });
     req.on('error', (e) => resolve({ status: 0, corpo: e.message }));
     req.setTimeout(5000, () => { req.destroy(); resolve({ status: -1, corpo: 'TIMEOUT' }); });
@@ -257,6 +259,35 @@ setTimeout(async () => {
   const okApelido = apelido.status === 200 && /Impressora da cozinha/.test(apelido.corpo);
   if (!okApelido) ruins += 1;
   console.log(`${okApelido ? '✓' : '✗'} apelido de aparelho da rede: HTTP ${apelido.status} ${apelido.corpo.slice(0, 90)}`);
+
+  // Leitura de Canais de venda por foto (ver canaisVendaOcr.js): a rota so
+  // responde pra loja cujo GRUPO tem o recurso ligado. Sem grupo configurado
+  // no teste, o esperado e a recusa explicando onde ativar - e isso que
+  // garante que ninguem liga leitura por imagem sem passar por Grupos.
+  const pngFalso = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const lerCanaisImg = () => postarMultipart('/api/fechamentos/ler-canais', { unidade: 'AERO' },
+    { nome: 'relatorio.png', tipo: 'image/png', buffer: pngFalso }, 'imagem',
+    token ? { Authorization: 'Bearer ' + token } : {});
+
+  // sem ANTHROPIC_API_KEY o servidor nao tem como ler nada - a tela cai no
+  // preenchimento manual em vez de mostrar botao que nunca funciona
+  const semChave = await lerCanaisImg();
+  const okSemChave = semChave.status === 400 && /não está configurada/i.test(semChave.corpo);
+  if (!okSemChave) ruins += 1;
+  console.log(`${okSemChave ? '✓' : '✗'} ler Canais sem ANTHROPIC_API_KEY é recusado: HTTP ${semChave.status} ${semChave.corpo.slice(0, 80)}`);
+
+  // com chave, mas grupo SEM o recurso ligado: e o gate que garante que
+  // ninguem liga leitura por imagem sem passar pelo cadastro de Grupos.
+  // A chave so existe durante esta requisicao (ativo() le a env na hora).
+  DOCS.set('grupos/g-teste', { id: 'g-teste', nome: 'Teste', unidades: ['AERO'],
+    canaisVendaExtras: [{ campo: 'salao', label: 'Salão' }], lerCanaisPorImagem: false });
+  process.env.ANTHROPIC_API_KEY = 'chave-de-teste';
+  const semRecurso = await lerCanaisImg();
+  delete process.env.ANTHROPIC_API_KEY;
+  DOCS.delete('grupos/g-teste');
+  const okSemRecurso = semRecurso.status === 400 && /Grupos/.test(semRecurso.corpo);
+  if (!okSemRecurso) ruins += 1;
+  console.log(`${okSemRecurso ? '✓' : '✗'} ler Canais exige o recurso ligado no Grupo: HTTP ${semRecurso.status} ${semRecurso.corpo.slice(0, 90)}`);
 
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a

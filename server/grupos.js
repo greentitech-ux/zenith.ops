@@ -109,7 +109,7 @@ async function listUncached() {
 const gruposCache = createCache(listUncached, 5 * 60 * 1000);
 const list = gruposCache.cached;
 
-async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado }) {
+async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado, lerCanaisPorImagem }) {
   const nomeLimpo = String(nome || '').trim();
   if (!nomeLimpo) throw new Error('Informe o nome do grupo.');
   const ref = COLLECTION.doc();
@@ -127,6 +127,11 @@ async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPag
     // secoes fixas do lancamento (Caixa/Maquininhas/Outras saidas) que a
     // franquia pode nao usar - todas habilitadas por padrao (comportamento
     // de sempre, pra grupo criado antes dessa feature nao mudar nada)
+    // Ler os Canais de venda de uma foto do relatorio do PDV (ver
+    // canaisVendaOcr.js). Nasce DESLIGADO, diferente dos toggles acima: o
+    // formato do relatorio muda de PDV pra PDV, entao cada loja precisa ser
+    // testada antes de confiar no numero que sai da foto.
+    lerCanaisPorImagem: lerCanaisPorImagem === true,
     caixaHabilitado: caixaHabilitado !== false,
     maquininhasHabilitado: maquininhasHabilitado !== false,
     maquininhaPrefixo: sanitizarPrefixo(maquininhaPrefixo),
@@ -144,7 +149,7 @@ async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPag
   return registro;
 }
 
-async function update(id, { nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado }) {
+async function update(id, { nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado, lerCanaisPorImagem }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Grupo não encontrado.');
@@ -159,6 +164,7 @@ async function update(id, { nome, unidades, kpisExtras, canaisVendaExtras, forma
   if (canaisVendaExtras != null) patch.canaisVendaExtras = sanitizarCamposExtras(canaisVendaExtras);
   if (formasPagamentoExtras != null) patch.formasPagamentoExtras = sanitizarCamposExtras(formasPagamentoExtras);
   if (responsaveis != null) patch.responsaveis = Array.isArray(responsaveis) ? responsaveis.map(String) : [];
+  if (lerCanaisPorImagem != null) patch.lerCanaisPorImagem = lerCanaisPorImagem === true;
   if (caixaHabilitado != null) patch.caixaHabilitado = caixaHabilitado !== false;
   if (maquininhasHabilitado != null) patch.maquininhasHabilitado = maquininhasHabilitado !== false;
   if (maquininhaPrefixo != null) patch.maquininhaPrefixo = sanitizarPrefixo(maquininhaPrefixo);
