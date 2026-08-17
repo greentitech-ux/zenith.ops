@@ -207,6 +207,7 @@ setTimeout(async () => {
     ['/api/fechamentos/relatorio.pdf', 'relatório de fechamentos (PDF)'],
     ['/api/fechamentos/relatorio-unidades.csv', 'comparativo por unidade (CSV)'],
     ['/api/fechamentos/relatorio-unidades.pdf', 'comparativo por unidade (PDF)'],
+    ['/api/compras/acompanhamento', 'acompanhamento de compras (gerente)'],
   ];
   let ruins = 0;
   for (const [rota, nome] of casos) {

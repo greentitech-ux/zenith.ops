@@ -66,6 +66,7 @@
     ] },
     { grupo: 'Solicitações', itens: [
       { id: 'nav-solicitacoes', href: '/central.html', icone: '📋', rotulo: 'Central', secoes: ['solicitacoes'] },
+      { id: 'nav-compras', href: '/compras.html', icone: '🛍️', rotulo: 'Acompanhar Compras', secoes: ['solicitacoes'] },
       // o Historico tambem serve pra quem RECEBE card atribuido
       { id: 'nav-historico', href: '/central-historico.html', icone: '📜', rotulo: 'Histórico', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
       { id: 'nav-tecnico', href: '/tecnico.html', icone: '🔧', rotulo: 'Chamados TI', secoes: ['tecnico', 'suporte'] },
