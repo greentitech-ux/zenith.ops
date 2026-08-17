@@ -200,10 +200,13 @@
     <div class="secao">
       <div class="secao-titulo">Canais de venda</div>
       <!-- so aparece pra loja cujo GRUPO tem lerCanaisPorImagem ligado (o
-           Master ativa em /grupos.html) - ver atualizarBotaoLerCanais -->
+           Master ativa em /grupos.html) - ver atualizarBotaoLerCanais.
+           Fica aqui em cima mas preenche as DUAS secoes (Canais e Formas de
+           pagamento): o relatorio do PDV traz as duas no mesmo print. -->
       <div id="ler-canais-wrap" class="hidden" style="margin:4px 0 8px;">
         <input type="file" id="ler-canais-arquivo" accept="image/*,application/pdf" capture="environment" class="hidden">
         <button type="button" class="btn-add" id="btn-ler-canais" onclick="document.getElementById('ler-canais-arquivo').click()">📷 Preencher por foto do relatório</button>
+        <div class="sub" style="margin-top:4px;">Preenche os Canais de venda e as Formas de pagamento de uma vez.</div>
         <div id="ler-canais-msg" class="sub hidden" style="margin-top:6px;"></div>
       </div>
       <div class="grid2 hidden" id="canais-extras-container" style="margin-top:6px;"></div>
@@ -698,7 +701,10 @@ function renderCanaisExtras(unidade){
 // loja. O botao so existe se o grupo dessa unidade tiver o recurso ligado.
 function atualizarBotaoLerCanais(unidade){
   const grupo = grupoKpiDaUnidade(unidade);
-  const ligado = !!grupo && grupo.lerCanaisPorImagem === true && (grupo.canaisVendaExtras||[]).length > 0;
+  // basta ter campo cadastrado em UMA das duas secoes: tem relatorio que so
+  // traz os canais e tem loja que so usa as formas de pagamento
+  const temCampos = !!grupo && ((grupo.canaisVendaExtras||[]).length + (grupo.formasPagamentoExtras||[]).length) > 0;
+  const ligado = !!grupo && grupo.lerCanaisPorImagem === true && temCampos;
   document.getElementById('ler-canais-wrap').classList.toggle('hidden', !ligado);
   if(!ligado) esconderMsgLerCanais();
 }
@@ -724,27 +730,34 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', async (
     if(!res.ok) throw new Error(data.error || 'Não foi possível ler a imagem.');
 
     // preenche SO o que veio; campo que a imagem nao trouxe fica como estava
-    // (em branco ou com o que a loja ja tinha digitado)
-    let preenchidos = 0;
+    // (em branco ou com o que a loja ja tinha digitado). A secao decide em
+    // qual das duas listas o valor entra - "AdyenV2" pode existir nas duas
+    let canaisOk = 0; let formasOk = 0;
     (data.itens||[]).forEach(it=>{
-      const el = document.querySelector(`.canal-extra-input[data-extra-campo="${it.campo}"]`);
+      const classe = it.secao === 'forma' ? 'forma-extra-input' : 'canal-extra-input';
+      const el = document.querySelector(`.${classe}[data-extra-campo="${it.campo}"]`);
       if(!el) return;
       el.value = it.valor;
       el.style.borderColor = 'var(--ok)'; // marca o que veio da foto, pra conferir
-      preenchidos++;
+      if(it.secao === 'forma') formasOk++; else canaisOk++;
     });
     atualizarResumo();
 
-    const partes = [`<b style="color:var(--ok);">✔ ${preenchidos} canal(is) preenchido(s) pela foto.</b> Confira valor por valor antes de enviar — a leitura erra às vezes.`];
+    const resumo = [];
+    if(canaisOk) resumo.push(`${canaisOk} em Canais de venda`);
+    if(formasOk) resumo.push(`${formasOk} em Formas de pagamento`);
+    const partes = [resumo.length
+      ? `<b style="color:var(--ok);">✔ Preenchido pela foto: ${resumo.join(' e ')}.</b> Confira valor por valor antes de enviar — a leitura erra às vezes.`
+      : `<b style="color:var(--warn);">Não consegui preencher nenhum campo com essa foto.</b> Confira se o relatório está inteiro e legível na imagem.`];
     if((data.faltando||[]).length){
       partes.push(`<span style="color:var(--warn);">Não achei na foto: ${data.faltando.map(f=>escapeHtml(f.label)).join(', ')} — preencha na mão.</span>`);
     }
     if((data.naoIdentificados||[]).length){
-      // dinheiro que aparece no relatorio mas nao casa com nenhum canal
+      // dinheiro que aparece no relatorio mas nao casa com nenhum campo
       // cadastrado: mostrar e melhor que ignorar em silencio
-      partes.push(`<span style="color:var(--warn);">Sobrou no relatório sem canal correspondente: `
+      partes.push(`<span style="color:var(--warn);">Sobrou no relatório sem campo correspondente: `
         + data.naoIdentificados.map(n=>`${escapeHtml(n.textoOrigem)} (${fmtMoney(n.valor)})`).join(', ')
-        + `. Se isso é venda, peça pro Master cadastrar o canal em Grupos.</span>`);
+        + `. Se isso é venda, peça pro Master cadastrar o campo em Grupos.</span>`);
     }
     if(data.data && data.data !== document.getElementById('f-data').value){
       partes.push(`<span style="color:var(--warn);">A data do relatório (${escapeHtml(data.data)}) é diferente da data escolhida acima — confira se é o relatório do dia certo.</span>`);

@@ -211,10 +211,10 @@
         <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);margin-top:10px;padding-top:9px;border-top:1px solid var(--line);">
           <input type="checkbox" id="c-ler-canais-imagem" style="width:auto;margin:0;"> 📷 Preencher por foto do relatório do PDV
         </label>
-        <div style="font-size:11px;color:var(--muted);margin:4px 0 0 22px;line-height:1.5;">Libera pra loja o botão de ler os canais acima a partir de uma foto — mesmo sistema da leitura de nota fiscal do Estoque. A loja sempre confere valor por valor antes de enviar. Ligue só depois de testar com o relatório dessa bandeira: cada PDV imprime de um jeito.</div>
+        <div style="font-size:11px;color:var(--muted);margin:4px 0 0 22px;line-height:1.5;">Libera pra loja o botão de preencher os Canais de venda <b>e as Formas de pagamento</b> a partir de uma foto do relatório — mesmo sistema da leitura de nota fiscal do Estoque. A loja sempre confere valor por valor antes de enviar. Ligue só depois de testar com o relatório dessa bandeira: cada PDV imprime de um jeito.</div>
         <label style="display:block;font-size:12px;color:var(--text);margin:10px 0 3px 22px;">Dica de leitura do relatório <span style="color:var(--muted);font-weight:400;">(opcional)</span></label>
-        <div style="font-size:11px;color:var(--muted);margin:0 0 5px 22px;line-height:1.5;">Escreva em português como esse relatório é impresso: em que ordem os canais aparecem, qual coluna tem o valor que vale. Isso é o que evita a leitura pegar a coluna errada.</div>
-        <textarea id="c-dica-leitura-canais" rows="3" maxlength="600" placeholder="Ex: a sequência é sempre Delivery - Moto Especi / Carryout / Pick Up / Na Loja. No Delivery o valor é o SEGUNDO número da linha; o primeiro é sempre zero e não é usado." style="margin-left:22px;width:calc(100% - 22px);padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
+        <div style="font-size:11px;color:var(--muted);margin:0 0 5px 22px;line-height:1.5;">Escreva em português como esse relatório é impresso: em que ordem as linhas aparecem, quais são as que não se usam, onde fica o valor em reais. Isso é o que evita a leitura pegar a linha errada.</div>
+        <textarea id="c-dica-leitura-canais" rows="3" maxlength="600" placeholder="Ex: os canais saem nesta ordem: Delivery - Moto da empresa (sempre zero, não usar), Delivery - Moto Especi (esse é o Delivery que vale), CarryOut, Pick Up, Na loja." style="margin-left:22px;width:calc(100% - 22px);padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
         <button type="button" class="btn-add" style="margin-left:22px;" onclick="usarDicaExemplo('c-dica-leitura-canais')">Usar o exemplo acima</button>
       </fieldset>
 
@@ -282,10 +282,10 @@
       <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);margin-top:10px;padding-top:9px;border-top:1px solid var(--line);">
         <input type="checkbox" id="e-ler-canais-imagem" style="width:auto;margin:0;"> 📷 Preencher por foto do relatório do PDV
       </label>
-      <div style="font-size:11px;color:var(--muted);margin:4px 0 0 22px;line-height:1.5;">Libera pra loja o botão de ler os canais acima a partir de uma foto — mesmo sistema da leitura de nota fiscal do Estoque. A loja sempre confere valor por valor antes de enviar. Ligue só depois de testar com o relatório dessa bandeira: cada PDV imprime de um jeito.</div>
+      <div style="font-size:11px;color:var(--muted);margin:4px 0 0 22px;line-height:1.5;">Libera pra loja o botão de preencher os Canais de venda <b>e as Formas de pagamento</b> a partir de uma foto do relatório — mesmo sistema da leitura de nota fiscal do Estoque. A loja sempre confere valor por valor antes de enviar. Ligue só depois de testar com o relatório dessa bandeira: cada PDV imprime de um jeito.</div>
       <label style="display:block;font-size:12px;color:var(--text);margin:10px 0 3px 22px;">Dica de leitura do relatório <span style="color:var(--muted);font-weight:400;">(opcional)</span></label>
-      <div style="font-size:11px;color:var(--muted);margin:0 0 5px 22px;line-height:1.5;">Escreva em português como esse relatório é impresso: em que ordem os canais aparecem, qual coluna tem o valor que vale. Isso é o que evita a leitura pegar a coluna errada.</div>
-      <textarea id="e-dica-leitura-canais" rows="3" maxlength="600" placeholder="Ex: a sequência é sempre Delivery - Moto Especi / Carryout / Pick Up / Na Loja. No Delivery o valor é o SEGUNDO número da linha; o primeiro é sempre zero e não é usado." style="margin-left:22px;width:calc(100% - 22px);padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
+      <div style="font-size:11px;color:var(--muted);margin:0 0 5px 22px;line-height:1.5;">Escreva em português como esse relatório é impresso: em que ordem as linhas aparecem, quais são as que não se usam, onde fica o valor em reais. Isso é o que evita a leitura pegar a linha errada.</div>
+      <textarea id="e-dica-leitura-canais" rows="3" maxlength="600" placeholder="Ex: os canais saem nesta ordem: Delivery - Moto da empresa (sempre zero, não usar), Delivery - Moto Especi (esse é o Delivery que vale), CarryOut, Pick Up, Na loja." style="margin-left:22px;width:calc(100% - 22px);padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
       <button type="button" class="btn-add" style="margin-left:22px;" onclick="usarDicaExemplo('e-dica-leitura-canais')">Usar o exemplo acima</button>
     </fieldset>
 
@@ -622,7 +622,7 @@ function renderGrupos(){
 // o exemplo e o caso real que motivou o campo (relatorio do PDV com a coluna
 // zerada antes da que vale): quem cadastra tem um ponto de partida em vez de
 // olhar pra um textarea vazio sem saber o que escrever
-const DICA_EXEMPLO = 'A sequência dos canais é sempre: Delivery - Moto Especi / Carryout / Pick Up / Na Loja. No Delivery o valor é o SEGUNDO número da linha — o primeiro é sempre zero e não é usado.';
+const DICA_EXEMPLO = 'Relatório "Resumo do dia" do Domino\'s Pulse. Os canais aparecem nesta sequência: Delivery - Moto da empresa, Delivery - Moto Especi, CarryOut, Pick Up, Na loja. A linha "Delivery - Moto da empresa" é sempre zero e NÃO é usada — o Delivery que vale é a linha seguinte, "Delivery - Moto Especi". Cada linha tem o nome, a participação em % e só depois o valor em reais: use sempre o valor em reais. AdyenV2 fica na coluna do meio, junto com as outras formas de pagamento.';
 function usarDicaExemplo(id){
   const el = document.getElementById(id);
   if(el.value.trim() && !confirm('Substituir a dica que já está escrita pelo exemplo?')) return;
