@@ -52,6 +52,26 @@
   .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
   .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+  /* PEDIDO SEMANAL (ver pedidoSemanal.js): faixa no topo da tela que a loja
+     abre todo dia. Cor pelo estado - amarelo cobra, vermelho está devendo,
+     verde já resolveu - pra dar pra ler sem ler. */
+  .painel-pedido{border-color:rgba(242,179,61,.5);}
+  .painel-pedido.atrasado{border-color:rgba(255,107,107,.55);}
+  .painel-pedido.tudo-feito{border-color:rgba(61,220,151,.45);}
+  .ps-linha{border-top:1px solid var(--line);padding:10px 0;display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+  .ps-linha:first-child{border-top:0;}
+  .ps-nome{flex:1 1 160px;min-width:0;font-size:13px;font-weight:600;}
+  .ps-quando{display:block;font-family:var(--mono);font-size:10.5px;font-weight:400;color:var(--muted);margin-top:2px;}
+  .ps-tag{font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:12px;white-space:nowrap;}
+  .ps-tag.hoje{background:var(--warn-dim);color:var(--warn);}
+  .ps-tag.proximo{background:var(--panel2);color:var(--muted);}
+  .ps-tag.atrasado{background:var(--bad-dim);color:var(--bad);}
+  .ps-tag.feito{background:var(--ok-dim);color:var(--ok);}
+  .ps-acao{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .ps-arquivo{font-size:11px;color:var(--muted);max-width:190px;}
+  .ps-enviar{background:var(--warn);color:#2a1f06;border:none;border-radius:7px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .ps-enviar:disabled{opacity:.5;cursor:default;}
+  .ps-baixar{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-decoration:none;}
   .secao{border-top:1px solid var(--line);margin-top:14px;padding-top:14px;}
   .secao:first-of-type{border-top:none;margin-top:0;padding-top:0;}
   .secao-titulo{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
@@ -132,6 +152,16 @@
 <div id="sem-acesso" class="empty hidden">Você não tem acesso ao lançamento de fechamento. Fale com o administrador (Master).</div>
 
 <div id="root" class="hidden">
+
+<!-- Pedido semanal: primeira coisa da tela de propósito. O fechamento é a
+     página que toda loja abre todo dia - é o único lugar onde um lembrete
+     semanal tem chance de ser visto no dia certo. -->
+<div class="panel painel-pedido hidden" id="painel-pedido-semanal">
+  <h2 id="ps-titulo">📦 Pedido semanal</h2>
+  <div class="sub" id="ps-sub" style="margin:-2px 0 10px;"></div>
+  <div id="ps-lista"></div>
+  <div class="sub hidden" id="ps-instrucoes" style="margin-top:10px;"></div>
+</div>
 
 <div class="panel" id="painel-sangria">
   <h2>💰 Registrar sangria/depósito</h2>
@@ -1085,6 +1115,112 @@ async function boot(){
 
   document.getElementById('root').classList.remove('hidden');
   if(podeSangria) await carregarSangrias();
+  // depois do root aparecer e sem await: o lembrete é importante, mas não a
+  // ponto de segurar a tela de lançamento se a rota dele estiver lenta
+  carregarPedidoSemanal();
+}
+
+// ---------- PEDIDO SEMANAL (ver server/pedidoSemanal.js) ----------
+// O pedido de insumos da semana é feito FORA do Zenith, no sistema do
+// fornecedor - não há como o sistema saber sozinho se foi feito. Então ele
+// cobra, e a loja responde ANEXANDO o pedido. Sem o anexo isso seria um
+// botão de "ok, li", que some do mesmo jeito com ou sem pedido feito.
+let PEDIDO_SEMANAL = null;
+let PS_VISIVEIS = [];
+
+async function carregarPedidoSemanal(){
+  try{
+    PEDIDO_SEMANAL = await fetch('/api/pedido-semanal').then(r=>r.ok ? r.json() : null);
+  }catch(e){ PEDIDO_SEMANAL = null; }
+  renderPedidoSemanal();
+}
+
+function renderPedidoSemanal(){
+  const painel = document.getElementById('painel-pedido-semanal');
+  const d = PEDIDO_SEMANAL;
+  // Master/Admin enxergam TODAS as lojas nessa rota - aqui a tela é da ponta,
+  // então só entra o que está pendente de alguém; o acompanhamento de quem
+  // fez e quem não fez vive no Painel
+  const visiveis = d && d.ativo ? (d.unidades||[]).filter(u=>u.visivel) : [];
+  if(!visiveis.length){ painel.classList.add('hidden'); return; }
+  painel.classList.remove('hidden');
+
+  const temAtraso = visiveis.some(u=>u.atraso);
+  const tudoFeito = visiveis.every(u=>u.estado==='feito' && !u.atraso);
+  painel.classList.toggle('atrasado', temAtraso);
+  painel.classList.toggle('tudo-feito', tudoFeito);
+
+  document.getElementById('ps-titulo').textContent = '📦 ' + (d.titulo || 'Pedido semanal');
+  document.getElementById('ps-sub').textContent =
+    `Todo ${(d.diaSemanaNome||'').toLowerCase()} · anexe o pedido pra confirmar`;
+
+  // os elementos são identificados pelo ÍNDICE, não pelo código da unidade:
+  // código aqui é coisa como "Domino's Carrinho Aeroporto Recife" - tem
+  // espaço e apóstrofo, que quebram tanto o id do HTML quanto o onclick
+  PS_VISIVEIS = visiveis;
+  document.getElementById('ps-lista').innerHTML = visiveis.map((u,i)=>{
+    const tag = u.atraso
+      ? `<span class="ps-tag atrasado">atrasado · ${fmtData(u.atraso)}</span>`
+      : (u.estado==='feito' ? '<span class="ps-tag feito">✓ feito</span>'
+      : (u.estado==='hoje' ? '<span class="ps-tag hoje">vence hoje</span>'
+      : `<span class="ps-tag proximo">em ${u.diasRestantes} dia${u.diasRestantes===1?'':'s'}</span>`));
+    // quem já confirmou a semana e não deve nada some da linha de ação: o
+    // que sobra é o comprovante, pra conferir sem precisar refazer
+    const feitoLimpo = u.estado==='feito' && !u.atraso;
+    const acao = feitoLimpo
+      ? `<div class="ps-acao">
+           <span class="ps-arquivo">${escapeHtml(u.confirmacao?.porNome||'')}</span>
+           <a class="ps-baixar" href="/api/pedido-semanal/${encodeURIComponent(u.codigo)}/arquivo?data=${u.dataPedido}" target="_blank" rel="noopener">ver pedido</a>
+         </div>`
+      : `<div class="ps-acao">
+           <input type="file" id="ps-file-${i}" style="display:none"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.xls,.xlsx,image/*,application/pdf"
+                  onchange="pedidoArquivoEscolhido(${i})">
+           <span class="ps-arquivo" id="ps-nome-${i}">nenhum arquivo</span>
+           <button type="button" class="ps-enviar" id="ps-btn-${i}"
+                   onclick="confirmarPedidoSemanal(${i})">Anexar pedido</button>
+         </div>`;
+    return `<div class="ps-linha">
+      <span class="ps-nome">${escapeHtml(u.nome)}<span class="ps-quando">pedido de ${fmtData(u.dataPedido)}</span></span>
+      ${tag}${acao}
+    </div>`;
+  }).join('');
+
+  const inst = document.getElementById('ps-instrucoes');
+  inst.textContent = d.instrucoes || '';
+  inst.classList.toggle('hidden', !d.instrucoes);
+}
+
+// o botão tem dois papéis: sem arquivo escolhido ele ABRE o seletor; com
+// arquivo escolhido ele envia. Um clique a menos numa tela que a loja usa
+// com pressa - e nunca dá pra enviar sem anexo, que é a regra da feature.
+function pedidoArquivoEscolhido(i){
+  const input = document.getElementById(`ps-file-${i}`);
+  const arq = input && input.files && input.files[0];
+  document.getElementById(`ps-nome-${i}`).textContent = arq ? arq.name : 'nenhum arquivo';
+  document.getElementById(`ps-btn-${i}`).textContent = arq ? 'Confirmar pedido' : 'Anexar pedido';
+}
+
+async function confirmarPedidoSemanal(i){
+  const unidade = PS_VISIVEIS[i];
+  if(!unidade) return;
+  const codigo = unidade.codigo;
+  const input = document.getElementById(`ps-file-${i}`);
+  const arq = input && input.files && input.files[0];
+  if(!arq){ input.click(); return; }
+  const btn = document.getElementById(`ps-btn-${i}`);
+  btn.disabled = true; btn.textContent = 'Enviando...';
+  try{
+    const fd = new FormData();
+    fd.append('arquivo', arq);
+    const r = await fetch(`/api/pedido-semanal/${encodeURIComponent(codigo)}/confirmar`, { method:'POST', body: fd });
+    const resp = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(resp.error || 'Não foi possível confirmar agora.');
+    await carregarPedidoSemanal();
+  }catch(e){
+    alert(e.message);
+    btn.disabled = false; btn.textContent = 'Confirmar pedido';
+  }
 }
 
 boot();

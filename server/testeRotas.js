@@ -337,6 +337,33 @@ setTimeout(async () => {
   if (!okCfg) ruins += 1;
   console.log(`${okCfg ? '✓' : '✗'} config de campos manuais é pública (link de auto-cadastro usa): HTTP ${cfgCampos.status} ${cfgCampos.corpo.slice(0, 80)}`);
 
+  // ---- PEDIDO SEMANAL ----
+  // Desligado (o padrão) a rota tem que responder 200 com ativo:false, não
+  // 404/500: o Fechamento e o Painel chamam ela em TODO carregamento, e um
+  // erro aqui apareceria como card quebrado numa tela que a loja usa o dia
+  // inteiro pra outra coisa.
+  const ps = await pedir('/api/pedido-semanal', { Authorization: 'Bearer ' + token });
+  let okPs = false;
+  try {
+    const d = JSON.parse(ps.corpo);
+    okPs = ps.status === 200 && d.ativo === false && Array.isArray(d.unidades);
+  } catch (e) { okPs = false; }
+  if (!okPs) ruins += 1;
+  console.log(`${okPs ? '✓' : '✗'} pedido semanal desligado responde sem estourar: HTTP ${ps.status} ${ps.corpo.slice(0, 90)}`);
+
+  // A config traz a lista de unidades pro Master marcar as exceções - sem
+  // ela a tela de Grupos não teria o que renderizar
+  const psCfg = await pedir('/api/pedido-semanal/config', { Authorization: 'Bearer ' + token });
+  let okPsCfg = false;
+  try {
+    const d = JSON.parse(psCfg.corpo);
+    okPsCfg = psCfg.status === 200 && Array.isArray(d.unidades) && d.unidades.length > 0
+      && Array.isArray(d.dias) && d.dias.length === 7
+      && (d.config.unidadesExcluidas || []).includes('São Braz IL');
+  } catch (e) { okPsCfg = false; }
+  if (!okPsCfg) ruins += 1;
+  console.log(`${okPsCfg ? '✓' : '✗'} config do pedido semanal traz unidades + exceções padrão: HTTP ${psCfg.status} ${psCfg.corpo.slice(0, 90)}`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de
