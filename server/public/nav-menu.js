@@ -43,7 +43,13 @@
       { id: 'nav-lancamento', href: '/lancamento.html', icone: '🧾', rotulo: 'Fechamento', secoes: ['lancamento', 'sangria'],
         alt: { quando: (me) => !temSecao(me, 'lancamento') && temSecao(me, 'sangria'), icone: '💰', rotulo: 'Sangria/Depósito' } },
       { id: 'nav-entrega-lancamento', href: '/entrega-lancamento.html', icone: '📦', rotulo: 'Lançar entrega', secoes: ['entregas-lancamento'] },
-      { id: 'nav-fechamentos', href: '/fechamentos.html', icone: '💰', rotulo: 'Fechamentos', secoes: ['fechamentos'] },
+      // pagina de Fechamentos e uma so (fechamentos.html), mas cada franquia
+      // so quer ver o proprio numero sem lembrar de trocar um filtro toda
+      // vez - por isso 2 itens de menu, cada um mandando pra ca com
+      // ?grupo=ARCFOOD/BRAVO ja fixado (a pagina trava o seletor sozinha
+      // quando ve o parametro, ver GRUPO_FIXO em fechamentos.html)
+      { id: 'nav-fechamentos-arcfood', href: '/fechamentos.html?grupo=ARCFOOD', icone: '💰', rotulo: 'Fechamentos Arcfood', secoes: ['fechamentos'] },
+      { id: 'nav-fechamentos-gbe', href: '/fechamentos.html?grupo=BRAVO', icone: '💰', rotulo: 'Fechamentos GBE', secoes: ['fechamentos'] },
       { id: 'nav-vendas-recordes', href: '/vendas-recordes.html', icone: '🏆', rotulo: 'Recordes de Venda', secoes: ['fechamentos'] },
       { id: 'nav-entregas', href: '/entregas.html', icone: '🛵', rotulo: 'Entregas', secoes: ['entregas'] },
       { id: 'nav-inventario', href: '/estoque.html', icone: '📦', rotulo: 'Estoque', secoes: ['inventario'] },
@@ -115,7 +121,7 @@
   const VOLTAR = {
     '/noc-rede.html': 'nav-loja-status',
     '/noc-maquinas.html': 'nav-loja-status',
-    '/vendas-recordes.html': 'nav-fechamentos',
+    '/vendas-recordes.html': 'nav-fechamentos-arcfood',
     '/abastecimento-relatorios.html': 'nav-abastecimento',
     '/entregas-regras.html': 'nav-entregas',
     '/dashboard-atendimentos.html': 'nav-beniboy',
