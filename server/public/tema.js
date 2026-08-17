@@ -75,8 +75,11 @@
   aplicar(); // roda ja no <head>: o body nasce com o tema/fonte certos
 
   // ---- controles no menu ☰ (secao "Aparência", no fim do drawer) ----
+  // O drawer aparece como class OU id, dependendo da idade da pagina.
+  function acharDrawer() { return document.querySelector('#nav-drawer, .nav-drawer'); }
+
   function montarControles() {
-    var drawer = document.querySelector('.nav-drawer');
+    var drawer = acharDrawer();
     if (!drawer || document.getElementById('zenith-aparencia')) return;
     var css = document.createElement('style');
     css.textContent = [
@@ -114,6 +117,40 @@
     aplicar();
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', montarControles);
-  else montarControles();
+  // O nav-menu.js monta o menu com `nav.innerHTML = ...`, o que APAGA tudo
+  // que estiver dentro do drawer. Os dois esperam DOMContentLoaded e o
+  // tema.js (que vive no <head>) registra o listener primeiro - entao a
+  // ordem era: tema adiciona a "Aparência" -> nav-menu limpa o drawer e a
+  // secao some. Era esse o motivo de o tema claro e o A+/A− terem
+  // "desaparecido": o codigo estava aqui, mas o menu novo apagava a cada
+  // carregamento.
+  //
+  // O observer resolve sem depender de ordem de carregamento: sempre que o
+  // conteudo do drawer for trocado (por quem for), a Aparência volta. Nao
+  // entra em laco porque montarControles sai na hora se a secao ja existe.
+  // Em algumas paginas o drawer nem existe no HTML: o nav-menu.js cria e
+  // pendura no body (ver nav-menu.js:484). Nesses casos, no momento em que
+  // este arquivo roda ainda nao ha o que observar - por isso a espera pelo
+  // body antes de vigiar o drawer.
+  var obsCorpo = null;
+  function vigiarDrawer() {
+    var drawer = acharDrawer();
+    if (!drawer) {
+      if (!obsCorpo) {
+        obsCorpo = new MutationObserver(vigiarDrawer);
+        obsCorpo.observe(document.body, { childList: true });
+      }
+      return;
+    }
+    if (obsCorpo) { obsCorpo.disconnect(); obsCorpo = null; }
+    montarControles();
+    if (drawer.__zenithVigiado) return;
+    drawer.__zenithVigiado = true;
+    new MutationObserver(montarControles).observe(drawer, { childList: true });
+  }
+
+  function iniciar() { montarControles(); vigiarDrawer(); }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);
+  else iniciar();
 })();
