@@ -49,6 +49,7 @@ const suporteChatPDF = require('./suporteChatPDF');
 const segurancaChat = require('./segurancaChat');
 const suporteBot = require('./suporteBot');
 const pedidoWatch = require('./pedidoWatch');
+const preferencias = require('./preferencias');
 const docsMaster = require('./docsMaster');
 const abastecimentoCarrinho = require('./abastecimentoCarrinho');
 const abastecimentoPrevisao = require('./abastecimentoPrevisao');
@@ -1300,6 +1301,30 @@ app.post('/api/push/migrar-subscricao', async (req, res) => {
 // tudo abaixo daqui exige um usuario logado (token JWT, via header ou
 // ?token= - o EventSource do SSE usa a query porque nao manda headers custom)
 app.use('/api', auth.requireAuth);
+
+// preferencias de tela da PESSOA logada (ver preferencias.js) - hoje so o
+// seletor 🧩 Colunas do Fechamento usa. Fica no servidor, e nao no
+// localStorage, pra escolha confirmada valer em qualquer aparelho e
+// sobreviver a limpeza de cache do app.
+app.get('/api/preferencias/:chave', async (req, res) => {
+  try {
+    const valor = await preferencias.obter(req.user.id, req.params.chave);
+    res.json({ valor });
+  } catch (e) {
+    console.error('Erro ao ler preferencia:', e.message);
+    res.status(500).json({ error: 'Erro ao ler preferência.' });
+  }
+});
+
+app.put('/api/preferencias/:chave', async (req, res) => {
+  try {
+    const valor = await preferencias.salvar(req.user.id, req.params.chave, req.body && req.body.valor);
+    res.json({ valor });
+  } catch (e) {
+    console.error('Erro ao salvar preferencia:', e.message);
+    res.status(400).json({ error: e.message || 'Erro ao salvar preferência.' });
+  }
+});
 
 app.get('/api/me', (req, res) => {
   res.json({
