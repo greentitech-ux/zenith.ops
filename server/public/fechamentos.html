@@ -41,12 +41,7 @@
   .nav-drawer-overlay.hidden{display:none!important;}
   .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
   .nav-drawer.hidden{display:none!important;}
-  .nav-drawer-titulo{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px 12px;}
-  .nav-drawer-grupo{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 4px;}
-  .nav-drawer-grupo{cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;}
-  .nav-drawer-grupo .ndg-seta{transition:transform .15s ease;font-size:9px;flex:none;}
   .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
-  .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
   .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,color .15s ease;}
   .btn-notif:hover{border-color:var(--accent);color:var(--text);}
   .btn-sair{color:var(--bad);}
@@ -157,8 +152,13 @@
   .coluna-linha{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:2px 4px;border-radius:6px;cursor:grab;}
   .coluna-linha.arrastando{opacity:.35;}
   .coluna-linha-alca{color:var(--muted);font-size:14px;line-height:1;user-select:none;flex:none;}
-  .coluna-linha label{display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;min-width:0;}
+  .coluna-linha-nome{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .coluna-linha-mover-check{flex:none;width:auto;margin:0;cursor:pointer;}
+  /* os dois checks de visibilidade (Tela / Relatório) e o cabecalho deles -
+     larguras iguais pra coluna de check ficar alinhada linha a linha */
+  .coluna-check{flex:none;width:auto;margin:0;cursor:pointer;width:34px;}
+  .coluna-cabecalho{display:flex;align-items:center;gap:8px;padding:0 4px 4px;font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line);margin-bottom:4px;}
+  .coluna-cabecalho span:not(.coluna-linha-alca){flex:none;width:34px;text-align:center;}
   .fech-modal .secao-titulo:first-of-type{margin-top:0;}
   .fech-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 10px;}
   @media(max-width:480px){ .fech-grid{grid-template-columns:1fr;} }
@@ -316,17 +316,18 @@
 
 </div><!-- /#root -->
 
-<!-- seletor de colunas da tabela de Fechamentos - a mesma escolha vale pros
-     relatorios CSV/PDF (vai por ?ocultas= pro backend) e fica salva neste
+<!-- seletor de colunas da tabela de Fechamentos - dois checks por coluna:
+     "Tela" (esta tabela) e "Relat." (o que sai no CSV/PDF, vai por
+     ?ocultas= pro backend), independentes entre si. Fica salvo neste
      navegador (localStorage) -->
 <div class="fech-overlay hidden" id="colunas-overlay">
-  <div class="fech-modal" style="max-width:420px;">
+  <div class="fech-modal" style="max-width:460px;">
     <h3>🧩 Colunas da tabela e dos relatórios</h3>
-    <div class="sub">Só aparecem as colunas dos grupos exibidos agora na tabela. Desmarque o que não deve aparecer, e arraste pela ⠿ pra colocar na ordem que quiser exportar. Pra mover várias de uma vez, marque o check da direita nelas e arraste qualquer uma das marcadas - todas seguem juntas, na mesma ordem que já tinham entre si. Data e Unidade são sempre exibidas, sempre primeiro. A escolha fica salva neste navegador.</div>
+    <div class="sub">Só aparecem as colunas dos grupos exibidos agora na tabela. Cada coluna tem <b>dois checks independentes</b>: <b>Tela</b> (aparece nesta tabela) e <b>Relat.</b> (sai no CSV e no PDF) - dá pra deixar uma coluna aqui pra conferir e mesmo assim tirar ela do relatório que vai pra fora. Arraste pela ⠿ pra colocar na ordem que quiser exportar; pra mover várias de uma vez, marque o check <b>Mover</b> nelas e arraste qualquer uma das marcadas - todas seguem juntas, na mesma ordem que já tinham entre si. Data e Unidade são sempre exibidas, sempre primeiro. A escolha fica salva neste navegador.</div>
     <div id="colunas-lista" style="display:flex;flex-direction:column;gap:4px;margin:12px 0;max-height:50vh;overflow-y:auto;"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button type="button" class="preset-btn" onclick="fecharSeletorColunas()">Cancelar</button>
-      <button type="button" class="preset-btn" onclick="restaurarColunas()" title="Voltar a mostrar todas as colunas">Mostrar todas</button>
+      <button type="button" class="preset-btn" onclick="restaurarColunas()" title="Voltar a mostrar todas as colunas na tela e no relatório">Mostrar todas</button>
       <button type="button" class="preset-btn" onclick="salvarColunas()" style="color:var(--accent);">Salvar</button>
     </div>
   </div>
@@ -447,58 +448,6 @@ const GRUPO_FIXO = (()=>{
 })();
 const NOME_GRUPO_FIXO = { ARCFOOD:'ARCFOOD', BRAVO:'Grupo Bravo (GBE)' };
 
-// grupos do menu (Operacao diaria/Monitoramento/Solicitacoes/Administracao)
-// viram dropdown: clicar no titulo do grupo expande/recolhe os itens dele.
-// O grupo que contem a pagina atual comeca aberto; os outros comecam
-// fechados (lembra a preferencia de cada grupo entre paginas via
-// localStorage, pelo nome do grupo - mesmo criterio em todo o app)
-function initNavDrawerAccordion(){
-  const nav = document.getElementById('nav-drawer');
-  if(!nav || nav.dataset.ndgInit) return;
-  nav.dataset.ndgInit = '1';
-  [...nav.querySelectorAll(':scope > .nav-drawer-grupo')].forEach(g=>{
-    const nomeGrupo = g.textContent.trim();
-    const itens = [];
-    let el = g.nextElementSibling;
-    while(el && !el.classList.contains('nav-drawer-grupo') && !el.classList.contains('nav-drawer-sep')){
-      const prox = el.nextElementSibling;
-      itens.push(el);
-      el = prox;
-    }
-    if(!itens.length) return;
-    const wrap = document.createElement('div');
-    wrap.className = 'ndg-wrap';
-    g.after(wrap);
-    itens.forEach(it=>wrap.appendChild(it));
-    g.innerHTML = `<span>${nomeGrupo}</span><span class="ndg-seta">▾</span>`;
-    // esconde o grupo inteiro (titulo + itens) se nenhum item dentro dele
-    // estiver visivel pra esse usuario (sem nenhuma permissao do grupo) -
-    // dropdown vazio some sozinho. Administracao nunca some porque sempre
-    // tem Ajuda visivel pra todo mundo
-    const atualizarVazio = ()=>{
-      const temVisivel = itens.some(it=>!it.classList.contains('hidden'));
-      g.classList.toggle('hidden', !temVisivel);
-    };
-    atualizarVazio();
-    new MutationObserver(atualizarVazio).observe(wrap, { attributes:true, attributeFilter:['class'], subtree:true });
-    const key = 'ndgAberto:' + nomeGrupo;
-    // começa aberto SÓ o grupo da página atual (pra você ver onde está) e o
-    // de Solicitações (o mais usado); os outros começam recolhidos pra deixar
-    // o menu curto. Nada persiste entre páginas - ao navegar, o padrão volta
-    // (fim da "gambiarra" de abrir outra tela só pra achar o item).
-    const temAtual = itens.some((it)=>{ const h = it.getAttribute && it.getAttribute('href'); if(!h) return false; try { return new URL(h, location.origin).pathname === location.pathname; } catch(e){ return false; } });
-    const aberto = temAtual || nomeGrupo === 'Solicitações';
-    g.querySelector('.ndg-seta').style.transform = aberto ? '' : 'rotate(-90deg)';
-    wrap.classList.toggle('hidden', !aberto);
-    g.addEventListener('click', ()=>{
-      const abrirAgora = wrap.classList.contains('hidden');
-      wrap.classList.toggle('hidden', !abrirAgora);
-      g.querySelector('.ndg-seta').style.transform = abrirAgora ? '' : 'rotate(-90deg)';
-      localStorage.setItem(key, abrirAgora ? '1' : '0');
-    });
-  });
-}
-initNavDrawerAccordion();
 
 let DATA = [];
 let IS_MASTER = false;
@@ -1624,6 +1573,24 @@ function colunasValores(rows, grupo){
 // entao a escolha vale igual na tela e no CSV/PDF. Salvo por navegador.
 let COLUNAS_OCULTAS = new Set();
 try{ COLUNAS_OCULTAS = new Set(JSON.parse(localStorage.getItem('fechColunasOcultas')||'[]')); }catch(e){}
+
+// colunas fora do RELATÓRIO (CSV/PDF), independente da tela - dá pra deixar
+// uma coluna visível pra conferir aqui e mesmo assim mantê-la fora do que
+// vai pra fora do sistema. Antes existia um check só, que tirava dos dois
+// lugares ao mesmo tempo.
+//
+// Migração: quem já tinha coluna escondida antes desta separação esperava
+// que ela também não saísse no relatório. Se a chave nova nunca foi salva
+// (null, não "[]"), ela nasce como cópia das escondidas da tela - assim o
+// comportamento de antes é preservado. Depois do primeiro Salvar a escolha
+// vale por si, mesmo vazia.
+let COLUNAS_FORA_RELATORIO = new Set();
+try{
+  const salvo = localStorage.getItem('fechColunasForaRelatorio');
+  COLUNAS_FORA_RELATORIO = new Set(salvo === null ? [...COLUNAS_OCULTAS] : JSON.parse(salvo || '[]'));
+}catch(e){}
+// Data e Unidade são a âncora de leitura também no relatório - nunca saem
+function colVisivelRelatorio(key){ return key==='data' || key==='unidadeNome' || !COLUNAS_FORA_RELATORIO.has(key); }
 // Data e Unidade sao a ancora de leitura da tabela - nunca escondem
 function colVisivel(key){ return key==='data' || key==='unidadeNome' || !COLUNAS_OCULTAS.has(key); }
 
@@ -1733,14 +1700,23 @@ function opcoesColunas(){
 // monta as linhas do seletor - cada uma arrastavel (drag-and-drop nativo)
 // pra reordenar: a ordem literal das divs no container E a ordem salva,
 // lida na hora de Salvar via querySelectorAll (ver salvarColunas)
-function renderColunasLista(opcoes, marcada){
-  document.getElementById('colunas-lista').innerHTML = opcoes.map(o=>`
+// "marcada" diz se a coluna aparece na TELA; "marcadaRel", se ela vai pro
+// RELATÓRIO. Data e Unidade nem entram nesta lista (ver opcoesColunas) - sao
+// ancora de leitura, sempre visiveis nos dois lugares
+function renderColunasLista(opcoes, marcada, marcadaRel){
+  document.getElementById('colunas-lista').innerHTML = `
+    <div class="coluna-cabecalho">
+      <span class="coluna-linha-alca" style="visibility:hidden;">⠿</span>
+      <span title="Aparece na tabela desta tela">Tela</span>
+      <span title="Sai no CSV e no PDF">Relat.</span>
+      <span style="flex:1;"></span>
+      <span title="Marcar pra mover várias de uma vez">Mover</span>
+    </div>` + opcoes.map(o=>`
     <div class="coluna-linha" data-coluna="${escapeHtml(o.key)}" draggable="true" ondragstart="iniciarArrastoColuna(event)" ondragover="sobreArrastoColuna(event)" ondragend="terminarArrastoColuna(event)">
       <span class="coluna-linha-alca" title="Arraste pra reordenar">⠿</span>
-      <label>
-        <input type="checkbox" data-check ${marcada(o.key)?'checked':''} style="width:auto;margin:0;">
-        ${escapeHtml(o.label)}
-      </label>
+      <input type="checkbox" data-check ${marcada(o.key)?'checked':''} class="coluna-check" title="Aparece na tabela desta tela">
+      <input type="checkbox" data-check-rel ${marcadaRel(o.key)?'checked':''} class="coluna-check" title="Sai no relatório CSV/PDF">
+      <span class="coluna-linha-nome">${escapeHtml(o.label)}</span>
       <input type="checkbox" data-mover class="coluna-linha-mover-check" title="Marcar pra mover junto com outras marcadas - arraste qualquer uma delas">
     </div>`).join('');
 }
@@ -1789,7 +1765,7 @@ function terminarArrastoColuna(e){
   COLUNAS_ARRASTANDO = null;
 }
 function abrirSeletorColunas(){
-  renderColunasLista(ordenarPorPreferencia(opcoesColunas()), k=>!COLUNAS_OCULTAS.has(k));
+  renderColunasLista(ordenarPorPreferencia(opcoesColunas()), k=>!COLUNAS_OCULTAS.has(k), k=>!COLUNAS_FORA_RELATORIO.has(k));
   document.getElementById('colunas-overlay').classList.remove('hidden');
 }
 function fecharSeletorColunas(){ document.getElementById('colunas-overlay').classList.add('hidden'); }
@@ -1797,14 +1773,19 @@ function fecharSeletorColunas(){ document.getElementById('colunas-overlay').clas
 // preferencia de exibicao - nao teria como "restaurar visibilidade" de
 // forma clara mantendo uma ordem custom no meio do caminho
 function restaurarColunas(){
-  renderColunasLista(opcoesColunas(), ()=>true);
+  renderColunasLista(opcoesColunas(), ()=>true, ()=>true);
 }
 function salvarColunas(){
   const linhas = [...document.querySelectorAll('#colunas-lista .coluna-linha')];
+  const desmarcadas = (attr) => new Set(linhas
+    .filter(l=>!l.querySelector(`input[${attr}]`).checked)
+    .map(l=>l.dataset.coluna));
   ORDEM_COLUNAS = linhas.map(l=>l.dataset.coluna);
-  COLUNAS_OCULTAS = new Set(linhas.filter(l=>!l.querySelector('input[data-check]').checked).map(l=>l.dataset.coluna));
+  COLUNAS_OCULTAS = desmarcadas('data-check');
+  COLUNAS_FORA_RELATORIO = desmarcadas('data-check-rel');
   localStorage.setItem('fechColunasOrdem', JSON.stringify(ORDEM_COLUNAS));
   localStorage.setItem('fechColunasOcultas', JSON.stringify([...COLUNAS_OCULTAS]));
+  localStorage.setItem('fechColunasForaRelatorio', JSON.stringify([...COLUNAS_FORA_RELATORIO]));
   fecharSeletorColunas();
   renderTabela(filtrar());
 }
@@ -2216,8 +2197,10 @@ function baixarRelatorioFechamentos(formato){
   if(inicio) params.set('inicio', inicio);
   if(fim) params.set('fim', fim);
   if(unidades) params.set('unidades', unidades);
-  // mesmas colunas escondidas/reordenadas da tabela (seletor 🧩 Colunas) valem no relatorio
-  if(COLUNAS_OCULTAS.size) params.set('ocultas', [...COLUNAS_OCULTAS].join(','));
+  // as colunas fora do relatorio tem check PROPRIO no seletor 🧩 Colunas
+  // (independente do que esta visivel na tela) - a ordem, essa sim, e a
+  // mesma da tabela
+  if(COLUNAS_FORA_RELATORIO.size) params.set('ocultas', [...COLUNAS_FORA_RELATORIO].join(','));
   if(ORDEM_COLUNAS.length) params.set('ordem', ORDEM_COLUNAS.join(','));
   window.location.href = `/api/fechamentos/relatorio.${formato}?${params.toString()}`;
 }
