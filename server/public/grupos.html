@@ -856,10 +856,16 @@ function renderUnidadesExtrasLista(){
       const linhas = itens.map(u=>{
         const perfil = UNIDADES_EXTRAS_LISTA.find(p=>p.codigo===u.codigo);
         const dinamica = grupo === 'Cadastradas no sistema'; // criada por aqui - tem nome/codigo proprios e pode ser excluida
+        // data-attributes + delegação (abaixo) em vez de onclick="...('${codigo}')" -
+        // codigo/nome de unidade podem ter apóstrofo de verdade (ex: "Domino's
+        // Carrinho Aeroporto Recife"), e um onclick interpolado quebra nesse caso:
+        // o HTML decodifica a entidade ANTES do JS parsear o handler, então o
+        // apóstrofo volta a ser literal e fecha a string js cedo demais - o botão
+        // simplesmente não fazia nada, sem erro visível pra quem clicava
         return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:12.5px;">
           <span style="flex:1;">${escapeHtml(u.nome)} <span style="color:var(--muted);font-size:11px;">· código: ${escapeHtml(String(u.codigo))}</span><br>${badgePerfil(perfil)}</span>
-          <button type="button" class="back" style="cursor:pointer;" onclick="abrirEdicaoUnidadeExtra('${escapeHtml(String(u.codigo)).replace(/'/g,"&#39;")}')">✏️ perfil</button>
-          ${dinamica && perfil ? `<button type="button" class="back" style="cursor:pointer;color:var(--bad);" onclick="excluirUnidadeExtra('${perfil.id}', '${escapeHtml(u.nome).replace(/'/g,"&#39;")}')">🗑️</button>` : ''}
+          <button type="button" class="back btn-perfil-unidade" style="cursor:pointer;" data-codigo="${escapeHtml(String(u.codigo))}">✏️ perfil</button>
+          ${dinamica && perfil ? `<button type="button" class="back btn-excluir-unidade" style="cursor:pointer;color:var(--bad);" data-id="${escapeHtml(perfil.id)}" data-nome="${escapeHtml(u.nome)}">🗑️</button>` : ''}
         </div>`;
       }).join('');
       return `<div class="unidades-grupo-titulo">${escapeHtml(grupo)}</div><div style="display:flex;flex-direction:column;gap:5px;margin-bottom:6px;">${linhas}</div>`;
@@ -867,6 +873,16 @@ function renderUnidadesExtrasLista(){
     return `<div><div class="unidades-secao-titulo">${escapeHtml(secao)}</div>${blocos}</div>`;
   }).join('');
 }
+
+// delegação: um listener só, no container, em vez de onclick por linha (ver
+// comentário acima de renderUnidadesExtrasLista) - sobrevive a re-render e
+// nao depende de escapar codigo/nome pra dentro de um atributo js
+document.getElementById('unidades-extras-lista').addEventListener('click', (e)=>{
+  const btnPerfil = e.target.closest('.btn-perfil-unidade');
+  if(btnPerfil){ abrirEdicaoUnidadeExtra(btnPerfil.dataset.codigo); return; }
+  const btnExcluir = e.target.closest('.btn-excluir-unidade');
+  if(btnExcluir){ excluirUnidadeExtra(btnExcluir.dataset.id, btnExcluir.dataset.nome); }
+});
 
 const unidadePerfilOverlay = document.getElementById('unidade-perfil-overlay');
 let EDITANDO_UNIDADE_CODIGO = null;
