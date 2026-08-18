@@ -535,10 +535,15 @@
 
 <div class="overlay hidden" id="detalhe-comp-overlay">
   <div class="modal">
-    <div style="display:flex;align-items:center;gap:8px;">
+    <!-- cabecalho GRUDADO no topo enquanto o conteudo rola (o modal e longo:
+         disco, rede, aparelhos...) - o ✕ de fechar fica SEMPRE visivel, sem
+         precisar rolar ate o "Fechar" la embaixo. As margens negativas
+         cancelam o padding do .modal pra barra cobrir a largura/topo inteiros -->
+    <div style="display:flex;align-items:center;gap:8px;position:sticky;top:-20px;z-index:2;background:var(--panel);margin:-20px -20px 10px;padding:16px 20px 10px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;">
       <span class="status-dot" id="detalhe-comp-dot"></span>
       <h3 id="detalhe-comp-nome" style="margin:0;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></h3>
       <button type="button" class="icon-btn" title="Editar" id="detalhe-comp-editar">✏️</button>
+      <button type="button" class="icon-btn" title="Fechar" onclick="fecharDetalheComputador()">✕</button>
     </div>
     <div class="sub" id="detalhe-comp-sub"></div>
     <div class="equip-tile-status" id="detalhe-comp-status" style="margin-bottom:12px;"></div>
