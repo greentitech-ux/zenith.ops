@@ -472,6 +472,22 @@ setTimeout(async () => {
   if (!okBloqueiaFixa) ruins += 1;
   console.log(`${okBloqueiaFixa ? '✓' : '✗'} servidor recusa fechamento na unidade fixa restrita, mesmo que a tela ainda mostrasse ela: HTTP ${lancouFixaRestrita.status} ${lancouFixaRestrita.corpo.slice(0, 90)}`);
 
+  // ---- caso real que motivou a migração: mesmo SEM rodar a migração
+  // ainda, um código antigo solto (ex: planilha do Google Sheets ainda não
+  // resincronizada) não pode aparecer como cadastro separado no painel de
+  // Unidades ao lado do código novo - construirUnidadesMapa funde os dois ----
+  DOCS.set('entregasLive/fold1', { id: 'fold1', unidade: 'Garanhuns', unidadeNome: 'Dom Garanhuns', data: '2026-08-01', entregador: 'Ciclano' });
+  const unidadesComCodigoSolto = await pedir('/api/meta/unidades', { Authorization: 'Bearer ' + token });
+  let okFundeCodigoSolto = false;
+  try {
+    const lista = JSON.parse(unidadesComCodigoSolto.corpo);
+    okFundeCodigoSolto = unidadesComCodigoSolto.status === 200
+      && !lista.some((u) => u.codigo === 'Garanhuns')
+      && lista.some((u) => u.codigo === 'Dominos Garanhuns');
+  } catch (e) { okFundeCodigoSolto = false; }
+  if (!okFundeCodigoSolto) ruins += 1;
+  console.log(`${okFundeCodigoSolto ? '✓' : '✗'} código antigo solto (fonte não migrada) some sozinho, funde no código unificado: HTTP ${unidadesComCodigoSolto.status}`);
+
   // ---- MIGRAÇÃO Entregas→Fechamento (ver migracaoUnidades.js): unifica o
   // código "Bessa" (Entregas) pro código "Dominos Bessa" (Fechamento) -
   // caso real que motivou a mudança (Dom Bessa aparecia como 2 cadastros) ----

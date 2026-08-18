@@ -2083,6 +2083,18 @@ async function construirUnidadesMapa() {
   // unidades cadastradas pelo Master em runtime (unidades.js) - loja nova ou
   // unidade administrativa que ainda nao existe em nenhuma lista fixa
   Object.entries(await unidadesExtras.mapa().catch(() => ({}))).forEach(([codigo, nome]) => { mapa[codigo] = mapa[codigo] || nome; });
+  // funde qualquer codigo ANTIGO de Entregas que ainda apareça em alguma
+  // fonte (planilha ainda nao resincronizada por completo, cache antigo em
+  // memoria...) no codigo unificado - ver migracaoUnidades.js. Sem isso um
+  // "Caruaru" solto reaparecia do lado do "Dominos Caruaru" (que já é o
+  // cadastro de verdade) mesmo depois da migração já ter rodado no Firestore,
+  // porque entregasHistoricoData vem direto da planilha, não do banco
+  Object.entries(migracaoUnidades.MAPA_CODIGO_ENTREGAS_PARA_FECHAMENTO).forEach(([antigo, novo]) => {
+    if (antigo in mapa) {
+      mapa[novo] = mapa[novo] || mapa[antigo];
+      delete mapa[antigo];
+    }
+  });
   // ultimo passo, sempre - reaplica os mapas fixos por cima de tudo, pra
   // garantir o nome unificado mesmo se algum dado importado/lançado tenha
   // gravado um unidadeNome diferente (cru, com typo, ou desatualizado)
