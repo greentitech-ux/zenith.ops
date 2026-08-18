@@ -153,12 +153,16 @@
   .coluna-linha.arrastando{opacity:.35;}
   .coluna-linha-alca{color:var(--muted);font-size:14px;line-height:1;user-select:none;flex:none;}
   .coluna-linha-nome{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .coluna-linha-mover-check{flex:none;width:auto;margin:0;cursor:pointer;}
-  /* os dois checks de visibilidade (Tela / Relatório) e o cabecalho deles -
-     larguras iguais pra coluna de check ficar alinhada linha a linha */
-  .coluna-check{flex:none;width:auto;margin:0;cursor:pointer;width:34px;}
+  /* ATENCAO: ".fech-modal input" (linha acima) tem width:100% e especificidade
+     (0,1,1) - maior que a de uma classe sozinha. Sem este seletor mais
+     especifico, CADA checkbox do seletor de colunas esticava pra largura
+     inteira da linha e empurrava o nome da coluna pra fora da tela. */
+  .fech-modal #colunas-lista input[type=checkbox]{flex:none;width:auto;margin:0;padding:0;cursor:pointer;}
+  /* celula de largura fixa pros dois checks de visibilidade (Tela/Relat.):
+     e ela, nao o checkbox, que garante o alinhamento com o cabecalho */
+  .coluna-check-cel{flex:none;width:34px;display:flex;align-items:center;justify-content:center;}
   .coluna-cabecalho{display:flex;align-items:center;gap:8px;padding:0 4px 4px;font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line);margin-bottom:4px;}
-  .coluna-cabecalho span:not(.coluna-linha-alca){flex:none;width:34px;text-align:center;}
+  .coluna-cabecalho .cel{flex:none;width:34px;text-align:center;}
   .fech-modal .secao-titulo:first-of-type{margin-top:0;}
   .fech-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 10px;}
   @media(max-width:480px){ .fech-grid{grid-template-columns:1fr;} }
@@ -1707,17 +1711,17 @@ function renderColunasLista(opcoes, marcada, marcadaRel){
   document.getElementById('colunas-lista').innerHTML = `
     <div class="coluna-cabecalho">
       <span class="coluna-linha-alca" style="visibility:hidden;">⠿</span>
-      <span title="Aparece na tabela desta tela">Tela</span>
-      <span title="Sai no CSV e no PDF">Relat.</span>
+      <span class="cel" title="Aparece na tabela desta tela">Tela</span>
+      <span class="cel" title="Sai no CSV e no PDF">Relat.</span>
       <span style="flex:1;"></span>
-      <span title="Marcar pra mover várias de uma vez">Mover</span>
+      <span class="cel" title="Marcar pra mover várias de uma vez">Mover</span>
     </div>` + opcoes.map(o=>`
     <div class="coluna-linha" data-coluna="${escapeHtml(o.key)}" draggable="true" ondragstart="iniciarArrastoColuna(event)" ondragover="sobreArrastoColuna(event)" ondragend="terminarArrastoColuna(event)">
       <span class="coluna-linha-alca" title="Arraste pra reordenar">⠿</span>
-      <input type="checkbox" data-check ${marcada(o.key)?'checked':''} class="coluna-check" title="Aparece na tabela desta tela">
-      <input type="checkbox" data-check-rel ${marcadaRel(o.key)?'checked':''} class="coluna-check" title="Sai no relatório CSV/PDF">
+      <span class="coluna-check-cel"><input type="checkbox" data-check ${marcada(o.key)?'checked':''} title="Aparece na tabela desta tela"></span>
+      <span class="coluna-check-cel"><input type="checkbox" data-check-rel ${marcadaRel(o.key)?'checked':''} title="Sai no relatório CSV/PDF"></span>
       <span class="coluna-linha-nome">${escapeHtml(o.label)}</span>
-      <input type="checkbox" data-mover class="coluna-linha-mover-check" title="Marcar pra mover junto com outras marcadas - arraste qualquer uma delas">
+      <span class="coluna-check-cel"><input type="checkbox" data-mover title="Marcar pra mover junto com outras marcadas - arraste qualquer uma delas"></span>
     </div>`).join('');
 }
 // drag-and-drop nativo (HTML5): guarda a(s) linha(s) arrastada(s) numa
