@@ -42,7 +42,16 @@ const MODELO = 'claude-sonnet-5';
 // "secao" separado - o modelo nao tem como acertar metade dela.
 const chaveDe = (secao, campo) => `${secao}.${campo}`;
 
-function montarPrompt(canais, formas, dica, qtdImagens) {
+// KPI (diferente de canal/forma) nem sempre e dinheiro - moeda/kg/quantidade
+// tem unidades diferentes, e o modelo precisa saber qual pra nao confundir
+// "12,500" de peso com R$ 12,50, por exemplo
+function unidadeHintKpi(tipo) {
+  if (tipo === 'moeda') return ' (em R$)';
+  if (tipo === 'kg') return ' (em Kg)';
+  return ' (quantidade, sem unidade/dinheiro)';
+}
+
+function montarPrompt(canais, formas, kpis, dica, qtdImagens) {
   const linhas = (lista) => lista.map((c) => `${chaveDe(c.secao, c.campo)} | ${c.label}`).join('\n');
   const blocoCanais = canais.length ? `
 CANAIS DE VENDA (de onde veio a venda: salão, delivery, retirada, apps...):
@@ -51,6 +60,13 @@ ${linhas(canais)}
   const blocoFormas = formas.length ? `
 FORMAS DE PAGAMENTO (com o que o cliente pagou: cartão, pix, voucher...):
 ${linhas(formas)}
+` : '';
+  // so entram aqui os KPI's numericos (quantidade/moeda/kg) - tipo tempo/
+  // texto/arquivo nao cabem no formato "valor: numero" da resposta (ver
+  // filtro em index.js antes de chamar lerCanais)
+  const blocoKpis = kpis.length ? `
+KPI'S (outras informações que também podem aparecer no relatório - nem sempre é dinheiro; a unidade de cada uma está indicada):
+${kpis.map((c) => `${chaveDe(c.secao, c.campo)} | ${c.label}${unidadeHintKpi(c.tipo)}`).join('\n')}
 ` : '';
   // A dica vem do cadastro do grupo (Master), entao e texto confiavel - mas
   // entra DEPOIS das regras e delimitada, pra ser leitura de relatorio e nao
@@ -71,10 +87,10 @@ Você recebeu ${qtdImagens} imagens. Elas são PARTES DO MESMO relatório, do me
 - Se o mesmo campo aparecer com valores DIFERENTES em duas imagens, não escolha: mande as duas leituras pra "naoIdentificados" com o texto de origem de cada uma. Pode ser foto de dias diferentes misturada, e nesse caso o gerente precisa ver.
 - Se as imagens claramente forem de DIAS diferentes (datas diferentes impressas), devolva {"erro": "as fotos são de dias diferentes"} em vez de somar.
 - Imagem que não for relatório de vendas (foto tremida, tela de outro sistema): simplesmente ignore, desde que pelo menos uma sirva.` : '';
-  return `Você está vendo a foto (ou print) de um relatório de fechamento do sistema de PDV de uma loja de comida. Extraia os valores em dinheiro dos campos listados abaixo.${blocoMultiplas}
+  return `Você está vendo a foto (ou print) de um relatório de fechamento do sistema de PDV de uma loja de comida. Extraia o valor de cada campo listado abaixo - a maioria é dinheiro, mas alguns KPI's podem ser quantidade ou peso (a unidade de cada campo está indicada quando não for dinheiro).${blocoMultiplas}
 
 Campos cadastrados para esta loja (use a "chave" exatamente como está escrita aqui, com o prefixo):
-${blocoCanais}${blocoFormas}
+${blocoCanais}${blocoFormas}${blocoKpis}
 Devolva SOMENTE um JSON válido, sem nenhum texto antes ou depois, exatamente neste formato:
 {
   "data": "AAAA-MM-DD da data do relatório, ou null se não conseguir ler",
@@ -91,7 +107,7 @@ Regras:
 - Não confunda as duas seções: canal de venda é de ONDE veio a venda, forma de pagamento é COM O QUE o cliente pagou. A mesma venda aparece nas duas, então os dois blocos costumam somar o mesmo total - isso é esperado, não é erro nem duplicidade.
 - Não invente campo: se um campo da lista não aparece no relatório, simplesmente não o inclua no JSON (não mande com valor 0, porque 0 é uma informação diferente de "não apareceu"). Se ele aparece no relatório valendo 0,00 de verdade, aí sim mande 0.
 - "naoIdentificados" existe pra não perder dinheiro de vista: se o relatório mostra uma linha com valor que não casa com nenhuma chave cadastrada, ela vai pra lá e o gerente decide. É melhor mostrar "sobrou R$ 320 que não sei onde colocar" do que ignorar em silêncio.
-- Ignore linhas que claramente não são nem canal nem forma de pagamento: total geral, subtotal, vendas totais/líquidas/royalty, imposto, quantidade de pedidos, ticket médio, número de clientes, mão de obra, cupom, quilometragem, fundo de caixa. Só os campos da lista.
+- Ignore linhas que claramente não são canal, forma de pagamento nem KPI cadastrado: total geral, subtotal, vendas totais/líquidas/royalty, imposto, número de clientes, mão de obra, cupom, fundo de caixa. EXCEÇÃO: se uma dessas linhas (ex: "quantidade de pedidos", "ticket médio", "quilometragem") tiver o mesmo nome/sentido de um KPI cadastrado na lista de KPI's acima, ela NÃO é ruído - extraia normalmente pra chave daquele KPI. Só ignore o que não está em nenhuma das 3 listas.
 - PORCENTAGEM NUNCA É O VALOR. É comum a linha ter o nome, depois a participação em % e só então o valor em dinheiro (ex: "CarryOut 17,7% R$515,20" → o valor é 515.20, nunca 17.7). Qualquer número acompanhado de "%" deve ser ignorado.
 - DUAS LINHAS PARECIDAS: o mesmo canal pode aparecer em mais de uma linha, variantes do mesmo nome (ex: dois tipos de Delivery, um por tipo de entregador), e normalmente só uma delas é usada - a outra fica zerada o tempo todo. Quando duas linhas parecidas disputam a mesma chave da lista e só uma tem valor, mande a que tem valor. Se as duas tiverem valor, não escolha no chute: mande as duas pra "naoIdentificados" com o texto de origem de cada uma, pro gerente decidir.
 - IMPORTANTE: os números estão em formato brasileiro (ponto separa milhar, vírgula separa decimal - ex: "1.234,56"). Converta todo valor para o padrão JSON: só ponto decimal, sem separador de milhar (ex: 1234.56). Nunca escreva número com vírgula no JSON - isso quebra o formato.
@@ -108,16 +124,19 @@ const numeroOuNull = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v)
 
 const MAX_ARQUIVOS = 5;
 
-async function lerCanais({ arquivos, canais, formas, dica }) {
+async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
   if (!ativo()) throw new Error('Leitura automática por imagem não está configurada neste servidor.');
   const fotos = (Array.isArray(arquivos) ? arquivos : []).filter((a) => a && a.buffer);
   if (!fotos.length) throw new Error('Anexe a foto do relatório de vendas.');
   if (fotos.length > MAX_ARQUIVOS) throw new Error(`Envie no máximo ${MAX_ARQUIVOS} fotos por leitura.`);
   const listaCanais = (Array.isArray(canais) ? canais : []).map((c) => ({ ...c, secao: 'canal' }));
   const listaFormas = (Array.isArray(formas) ? formas : []).map((c) => ({ ...c, secao: 'forma' }));
-  const todos = [...listaCanais, ...listaFormas];
+  // so os KPI's numericos (quantidade/moeda/kg) chegam aqui - tempo/texto/
+  // arquivo ja saem filtrados de index.js, antes de chamar essa funcao
+  const listaKpis = (Array.isArray(kpis) ? kpis : []).map((c) => ({ ...c, secao: 'kpi' }));
+  const todos = [...listaCanais, ...listaFormas, ...listaKpis];
   if (!todos.length) {
-    throw new Error('Essa loja ainda não tem Canais de venda nem Formas de pagamento cadastrados - peça pro Master configurar em Grupos.');
+    throw new Error('Essa loja ainda não tem Canais de venda, Formas de pagamento nem KPI\'s cadastrados - peça pro Master configurar em Grupos.');
   }
   // com varias fotos vale numerar: sem o rotulo, o "textoOrigem" de uma
   // divergencia nao diz de QUAL foto veio, e o gerente nao sabe qual refazer
@@ -128,7 +147,7 @@ async function lerCanais({ arquivos, canais, formas, dica }) {
       ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.buffer.toString('base64') } }
       : { type: 'image', source: { type: 'base64', media_type: f.mimeType, data: f.buffer.toString('base64') } });
   });
-  blocos.push({ type: 'text', text: montarPrompt(listaCanais, listaFormas, dica, fotos.length) });
+  blocos.push({ type: 'text', text: montarPrompt(listaCanais, listaFormas, listaKpis, dica, fotos.length) });
   const resp = await getCliente().messages.create({
     model: MODELO,
     max_tokens: 4000,
