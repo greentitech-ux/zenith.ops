@@ -53,9 +53,15 @@ const COLUNAS_BASE = [
 // pode ser "Adyen" (colidia com a forma de pagamento "Adyen" definida pelo
 // grupo, saindo duas colunas "Adyen" no relatorio - ver mesmo fix em
 // fechamentos.html). Mesma regra da tela: so aparece se alguma linha usa
+// Os DEZ campos de valor que a planilha importa (ver linhaParaFechamento em
+// sheetsSync.js) - Delivery/Carryout/Pick-up/Pix CNPJ/Outros eram lidos e
+// gravados mas nao tinham coluna, entao o dado sumia do relatorio. Mesma
+// lista (e mesma ordem) de CAMPOS_FIXOS em public/fechamentos.html
 const CAMPOS_FIXOS = [
-  { key: 'adyen', label: 'Maquininhas (cartão)' }, { key: 'ifood', label: 'Ifood' }, { key: 'food99', label: '99Food' },
-  { key: 'pix', label: 'Pix' }, { key: 'loja', label: 'Loja' },
+  { key: 'delivery', label: 'Delivery' }, { key: 'carryout', label: 'Carryout' }, { key: 'pickup', label: 'Pick-up' },
+  { key: 'loja', label: 'Loja' }, { key: 'adyen', label: 'Maquininhas (cartão)' }, { key: 'ifood', label: 'Ifood' },
+  { key: 'food99', label: '99Food' }, { key: 'pix', label: 'Pix' }, { key: 'pixCnpj', label: 'Pix CNPJ' },
+  { key: 'outros', label: 'Outros' },
 ];
 const COLUNA_OBSERVACAO = { key: 'observacao', label: 'Observação', largura: 75 };
 
@@ -92,15 +98,24 @@ function chaveLabel(label) {
 // a key vem sempre da PRIMEIRA fonte na ordem em que as listas chegam
 // (fixo > canal > forma) - nunca da ordem dos dados, senao a mesma coluna
 // mudaria de key conforme o filtro e a preferencia salva na tela pararia de
-// casar com a do relatorio
-function unificarPorNome(colunas) {
+// casar com a do relatorio. Por isso a lista de CAMPOS_FIXOS entra aqui
+// INTEIRA, mesmo os campos sem valor nenhum no resultado: sao eles que
+// fixam a key. O descarte do que nao tem dado vem depois (campo `usada`),
+// nunca antes - senao um resultado sem linha de planilha daria key
+// "canal:delivery" pra uma coluna que na tela e "delivery".
+function unificarPorNome(colunas, rows) {
   const porNome = new Map();
   colunas.forEach((c) => {
     const k = chaveLabel(c.label);
-    if (!porNome.has(k)) porNome.set(k, { ...c, fontes: [] });
-    porNome.get(k).fontes.push({ origem: c.origem, campo: c.campo, key: c.key });
+    if (!porNome.has(k)) porNome.set(k, { ...c, fontes: [], usada: false });
+    const col = porNome.get(k);
+    const fonte = { origem: c.origem, campo: c.campo, key: c.key };
+    col.fontes.push(fonte);
+    // canal/forma so chega aqui se ja apareceu em alguma linha (ver
+    // colunasExtrasUsadas); campo fixo precisa ser conferido nas linhas
+    if (c.origem || rows.some((f) => Math.abs(valorColuna(f, { fontes: [fonte] })) > 0.001)) col.usada = true;
   });
-  return [...porNome.values()];
+  return [...porNome.values()].filter((c) => c.usada);
 }
 // soma as fontes em vez de pegar a primeira: uma linha so grava em UMA
 // delas, entao na pratica e um "pega onde tiver" - mas se as duas vierem
@@ -140,12 +155,10 @@ function ordenarColunas(colunas, ordem) {
 // de keys, opcional) e a reordenacao escolhida no mesmo seletor.
 function prepararRelatorio(fechamentos, grupos, ocultas, ordem) {
   const rows = [...fechamentos].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
-  const fixasUsadas = CAMPOS_FIXOS
-    .filter((c) => rows.some((f) => Math.abs(f[c.key] || 0) > 0.001))
-    .map((c) => ({ ...c, moeda: true, largura: 58 }));
+  const fixas = CAMPOS_FIXOS.map((c) => ({ ...c, moeda: true, largura: 58 }));
   const canais = colunasExtrasUsadas(rows, grupos, 'canaisVendaExtras', 'canal:');
   const formas = colunasExtrasUsadas(rows, grupos, 'formasPagamentoExtras', 'forma:');
-  const colunasDeValor = unificarPorNome([...fixasUsadas, ...canais, ...formas]);
+  const colunasDeValor = unificarPorNome([...fixas, ...canais, ...formas], rows);
   let colunas = [...COLUNAS_BASE, ...colunasDeValor, COLUNA_OBSERVACAO];
   if (ocultas && ocultas.size) {
     colunas = colunas.filter((c) => c.key === 'data' || c.key === 'unidadeNome' || !ocultas.has(c.key));
