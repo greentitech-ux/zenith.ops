@@ -2007,6 +2007,16 @@ function classificarUnidade(codigo) {
   if (codigo in ifoodClient.IFOOD_UNIDADES_NOMES) return { secao: 'iFood', grupo: null };
   return { secao: 'Monitor / Disputas (Adyen)', grupo: 'Outras' };
 }
+// true so quando o codigo NAO e reconhecido por nenhuma lista fixa acima -
+// usado por /api/meta/unidades pra saber se uma unidade e "de verdade"
+// cadastrada em runtime (criada em /grupos.html, sem lar em lista nenhuma)
+// ou se e uma unidade FIXA que so ganhou PERFIL (ver unidades.upsertPerfil).
+// Sem essa distincao, dar perfil a uma loja fixa fazia ela "sumir" da secao
+// certa (Entregas/Monitor/...) e ser jogada em "Cadastradas no sistema"
+function codigoEhFixo(codigo) {
+  const c = classificarUnidade(codigo);
+  return !(c.secao === 'Monitor / Disputas (Adyen)' && c.grupo === 'Outras');
+}
 
 // nome canonico de um codigo de unidade, olhando os mapas fixos nesta ordem
 // (apelidos manuais > fechamento > entregas > ifood) - usado sempre que
@@ -2080,9 +2090,16 @@ app.get('/api/admin/storage-diagnostico', auth.requireMaster, async (req, res) =
 
 app.get('/api/meta/unidades', auth.requireMaster, async (req, res) => {
   const mapa = await construirUnidadesMapa();
-  // as cadastradas em runtime ganham classificacao propria no checklist -
-  // classificarUnidade so conhece as listas fixas e jogaria elas em "Outras"
-  const codigosExtras = new Set((await unidadesExtras.listAll().catch(() => [])).map((u) => u.codigo));
+  // as cadastradas em runtime (de verdade, sem lar em NENHUMA lista fixa)
+  // ganham classificacao propria no checklist - classificarUnidade so
+  // conhece as listas fixas e jogaria elas em "Outras". Uma unidade FIXA que
+  // so ganhou PERFIL (ver unidades.upsertPerfil) NAO entra aqui - ela
+  // continua na secao real dela (Entregas/Monitor/...), senao "sumia" de lá
+  const codigosExtras = new Set(
+    (await unidadesExtras.listAll().catch(() => []))
+      .map((u) => u.codigo)
+      .filter((codigo) => !codigoEhFixo(codigo)),
+  );
   const SECAO_ORDEM = ['Fechamento', 'Entregas', 'Monitor / Disputas (Adyen)', 'iFood'];
   const lista = Object.entries(mapa)
     .map(([codigo, nome]) => ({
