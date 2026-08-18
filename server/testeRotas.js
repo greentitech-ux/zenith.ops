@@ -378,6 +378,52 @@ setTimeout(async () => {
   if (!okPsCfg) ruins += 1;
   console.log(`${okPsCfg ? '✓' : '✗'} regras do pedido semanal trazem unidades, grupos e quem está sem regra: HTTP ${psCfg.status} ${psCfg.corpo.slice(0, 90)}`);
 
+  // ---- PERFIL DE UNIDADE (areas/tiposSolicitacao) - caso MVPar: unidade
+  // administrativa sem operação de loja, só aparece em RH/NOC/Solicitações,
+  // nunca em Fechamento (ver server/unidades.js) ----
+  const criouPerfil = await postarJson('/api/meta/unidades-extras', {
+    nome: 'MVPar Teste', codigo: 'MVPAR_TESTE',
+    areas: ['rh', 'noc', 'solicitacoes'],
+    tiposSolicitacao: ['compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota'],
+  }, { Authorization: 'Bearer ' + token });
+  let okPerfilCriar = false;
+  try {
+    const d = JSON.parse(criouPerfil.corpo);
+    okPerfilCriar = criouPerfil.status === 200 && d.codigo === 'MVPAR_TESTE'
+      && JSON.stringify(d.areas.slice().sort()) === JSON.stringify(['noc', 'rh', 'solicitacoes']);
+  } catch (e) { okPerfilCriar = false; }
+  if (!okPerfilCriar) ruins += 1;
+  console.log(`${okPerfilCriar ? '✓' : '✗'} cadastrar unidade com perfil restrito (caso MVPar): HTTP ${criouPerfil.status} ${criouPerfil.corpo.slice(0, 90)}`);
+
+  const mapaFech = await pedir('/api/meta/unidades-extras?area=fechamento', { Authorization: 'Bearer ' + token });
+  let okMapaFech = false;
+  try {
+    const d = JSON.parse(mapaFech.corpo);
+    okMapaFech = mapaFech.status === 200 && !('MVPAR_TESTE' in d);
+  } catch (e) { okMapaFech = false; }
+  if (!okMapaFech) ruins += 1;
+  console.log(`${okMapaFech ? '✓' : '✗'} unidade sem área "fechamento" some do seletor filtrado: HTTP ${mapaFech.status} ${mapaFech.corpo.slice(0, 90)}`);
+
+  const mapaRh = await pedir('/api/meta/unidades-extras?area=rh', { Authorization: 'Bearer ' + token });
+  let okMapaRh = false;
+  try {
+    const d = JSON.parse(mapaRh.corpo);
+    okMapaRh = mapaRh.status === 200 && d.MVPAR_TESTE === 'MVPar Teste';
+  } catch (e) { okMapaRh = false; }
+  if (!okMapaRh) ruins += 1;
+  console.log(`${okMapaRh ? '✓' : '✗'} mesma unidade continua no seletor de RH: HTTP ${mapaRh.status} ${mapaRh.corpo.slice(0, 90)}`);
+
+  const lancouFech = await postarJson('/api/fechamentos/lancar', {
+    unidade: 'MVPAR_TESTE', unidadeNome: 'MVPar Teste', data: '2026-08-18', gerente: 'Teste', campos: {},
+  }, { Authorization: 'Bearer ' + token });
+  let okBloqueiaFech = false;
+  try {
+    const d = JSON.parse(lancouFech.corpo);
+    okBloqueiaFech = lancouFech.status === 400 && /não tem fechamento/i.test(d.error || '');
+  } catch (e) { okBloqueiaFech = false; }
+  if (!okBloqueiaFech) ruins += 1;
+  console.log(`${okBloqueiaFech ? '✓' : '✗'} lançar fechamento numa unidade sem essa área é recusado (até pro Master): HTTP ${lancouFech.status} ${lancouFech.corpo.slice(0, 90)}`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de
