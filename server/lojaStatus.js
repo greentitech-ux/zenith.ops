@@ -144,6 +144,20 @@ const LIMIAR_OFFLINE_MS = 90 * 1000;
 // depender de print. Capado pra o documento nao crescer sem limite.
 const EVENTOS_MAX = 60;
 
+// historico de mudancas de IP por computador (pedido do Master: "preciso de
+// dados quando o IP da maquina mudar"). Cobre os DOIS IPs que o NOC enxerga:
+// 'publico' (visto pelo servidor a cada heartbeat - muda quando o link da
+// loja troca: queda do provedor, failover pra 4G, renovacao do CGNAT) e
+// 'local' (reportado pelo agente NOCZenith - muda em troca de DHCP/roteador).
+// Fica no proprio doc do computador, capado pra nao crescer sem limite; a
+// primeira aparicao tambem entra (de: null) pra registrar DESDE QUANDO o IP
+// atual vale, nao so as trocas.
+const IP_HISTORICO_MAX = 40;
+function comMudancaDeIp(historico, tipo, de, para) {
+  const lista = Array.isArray(historico) ? historico : [];
+  return [...lista, { tipo, de: de || null, para, em: Date.now() }].slice(-IP_HISTORICO_MAX);
+}
+
 function docIdFor(codigo, posto) {
   const limpoCodigo = String(codigo || '').trim().replace(/\//g, '_').slice(0, 200);
   if (!limpoCodigo) throw new Error('Código da unidade é obrigatório.');
@@ -369,6 +383,14 @@ async function heartbeat(codigo, posto, info, token) {
   // chegou a ser mostrada.
   if (mensagemPendente) patch.mensagemPendente = null;
 
+  // IP publico mudou (ou apareceu pela primeira vez): entra no historico. A
+  // mudanca de ip ja forca gravacao imediata (ver mudouAlgoQueImporta), entao
+  // o historico nunca fica so na memoria - por isso nao precisa entrar em
+  // CAMPOS_DO_HEARTBEAT.
+  if (patch.ip && patch.ip !== ((atual && atual.ip) || null)) {
+    patch.ipHistorico = comMudancaDeIp(atual && atual.ipHistorico, 'publico', atual && atual.ip, patch.ip);
+  }
+
   // ---- decide se ESTA batida vira gravacao no Firestore ----
   // A leitura ja tinha sido resolvida (espelho em memoria); a ESCRITA nao.
   // Gravar toda batida dava, com ~40 maquinas a cada 25s, ~138 mil escritas
@@ -571,8 +593,14 @@ async function atualizarIpLocal(codigo, posto, ip, token) {
   const limpo = String(ip || '').trim().slice(0, 45);
   if (!limpo) throw new Error('IP inválido.');
   const snap = await COLLECTION.doc(id).get();
-  exigirTokenSeTiver(snap.exists ? snap.data() : null, token);
-  await COLLECTION.doc(id).set({ codigo, posto, ipLocal: limpo, ipLocalEm: Date.now() }, { merge: true });
+  const atual = snap.exists ? snap.data() : null;
+  exigirTokenSeTiver(atual, token);
+  const patch = { codigo, posto, ipLocal: limpo, ipLocalEm: Date.now() };
+  // IP local mudou: entra no mesmo historico do IP publico (tipo 'local')
+  if (limpo !== ((atual && atual.ipLocal) || null)) {
+    patch.ipHistorico = comMudancaDeIp(atual && atual.ipHistorico, 'local', atual && atual.ipLocal, limpo);
+  }
+  await COLLECTION.doc(id).set(patch, { merge: true });
   cache.invalidar();
   return { codigo, posto, ipLocal: limpo };
 }

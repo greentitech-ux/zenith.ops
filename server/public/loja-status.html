@@ -809,8 +809,12 @@ function atualizarConteudoDetalhe(codigo, c){
 
   // Registro de atividades: as ultimas quedas/retornos de conexao (mais recente
   // em cima). 'caiu' mostra a hora do ultimo contato; 'voltou' mostra ha quanto
-  // tempo e quanto ficou fora
-  const eventos = (c.eventos || []).slice().reverse();
+  // tempo e quanto ficou fora. As trocas de IP (ipHistorico, ver lojaStatus.js)
+  // entram na MESMA linha do tempo - "quando o IP mudou, de qual pra qual" e
+  // um evento como qualquer outro (ipTipo renomeado pra nao colidir com o
+  // "tipo" que diz qual linha renderizar)
+  const trocasIp = (c.ipHistorico || []).map(h=>({ em: h.em, tipo: 'ip', ipTipo: h.tipo, de: h.de, para: h.para }));
+  const eventos = [...(c.eventos || []), ...trocasIp].sort((a,b)=>(b.em||0)-(a.em||0));
   const elEv = document.getElementById('detalhe-comp-eventos');
   if(!eventos.length){
     elEv.innerHTML = '<div class="sub" style="color:var(--muted);font-size:11px;">📊 Registro de atividades — sem quedas registradas ainda.</div>';
@@ -818,6 +822,13 @@ function atualizarConteudoDetalhe(codigo, c){
     const linhas = eventos.slice(0,20).map(ev=>{
       if(ev.tipo==='offline'){
         return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Caiu</b> · ${fmtDataHora(ev.em)}</div>`;
+      }
+      if(ev.tipo==='ip'){
+        const qual = ev.ipTipo==='local' ? '🏠 IP local' : '🌐 IP público';
+        const texto = ev.de
+          ? `mudou · ${escapeHtml(ev.de)} → <b>${escapeHtml(ev.para)}</b>`
+          : `registrado · <b>${escapeHtml(ev.para)}</b>`;
+        return `<div class="ev-linha"><span class="ev-dot warn"></span><b>${qual}</b> ${texto} · ${fmtDataHora(ev.em)}</div>`;
       }
       if(ev.tipo==='acesso-remoto'){
         return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Acesso remoto</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
