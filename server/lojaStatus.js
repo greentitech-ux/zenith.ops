@@ -39,6 +39,7 @@ const db = require('./firestore');
 const { createCache } = require('./liveCache');
 const redeDiagnostico = require('./redeDiagnostico');
 const nocMaquina = require('./nocMaquina');
+const ouiFabricantes = require('./ouiFabricantes');
 
 const COLLECTION = db.collection('lojaStatus');
 // fila de comandos do agente (ver agenteAcoes.js) - histórico completo de
@@ -468,7 +469,10 @@ async function listar() {
     // enxergam a mesma impressora, ela tem o mesmo nome nos dois
     const daUnidade = apelidos[d.codigo] || {};
     if (!d.dispositivos || !d.dispositivos.length) return d;
-    return { ...d, dispositivos: d.dispositivos.map((x) => ({ ...x, apelido: daUnidade[x.mac] || null })) };
+    // fabricante resolvido na hora pelo prefixo do MAC (ver ouiFabricantes) -
+    // nao e gravado no doc de proposito: a tabela pode ser atualizada e o
+    // dado ja existente ganha o nome novo sem migracao nenhuma
+    return { ...d, dispositivos: d.dispositivos.map((x) => ({ ...x, apelido: daUnidade[x.mac] || null, fabricante: ouiFabricantes.fabricanteDe(x.mac) })) };
   });
 }
 
