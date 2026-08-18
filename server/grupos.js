@@ -208,4 +208,31 @@ async function grupoDaUnidade(unidade) {
   return grupos.find((g) => (g.unidades || []).includes(unidade)) || null;
 }
 
-module.exports = { list, create, update, remove, grupoDaUnidade };
+// bootstrap idempotente (chamado no boot, ver index.js): garante que a
+// unidade 'Saltiverso Patteo' tem um grupo cadastrado com as 4 formas de
+// pagamento do balcao (maquininha/dinheiro/pix/outros, mesmos BUCKETS de
+// saltiversoFechamento.js). Sem isso o fechamento do Saltiverso caia no
+// bloco "Sem grupo definido" da tabela de Fechamentos, com as colunas
+// erradas (Adyen/Ifood/99Food - que nao existem pra ele) e nunca aparecia
+// separado por rede (GBE). So cria se NENHUM grupo ja cobre essa unidade -
+// o Master continua livre pra editar/renomear depois em /grupos.html, isso
+// so garante que ela nao nasce sem grupo nenhum.
+async function ensureGrupoSaltiverso() {
+  const todos = await list();
+  if (todos.some((g) => (g.unidades || []).includes('Saltiverso Patteo'))) return;
+  await create({
+    nome: 'Saltiverso Patteo',
+    unidades: ['Saltiverso Patteo'],
+    formasPagamentoExtras: [
+      { label: 'Maquininha' }, { label: 'Dinheiro' }, { label: 'Pix' }, { label: 'Outros' },
+    ],
+    // Saltiverso nao conta caixa fisico nem tem maquininha Adyen integrada
+    // (ver saltiversoFechamento.js) - as secoes fixas de sempre nao se
+    // aplicam, so os 4 baldes acima
+    caixaHabilitado: false,
+    maquininhasHabilitado: false,
+    saidasHabilitado: false,
+  });
+}
+
+module.exports = { list, create, update, remove, grupoDaUnidade, ensureGrupoSaltiverso };
