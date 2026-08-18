@@ -37,12 +37,7 @@
   .nav-drawer-overlay.hidden{display:none!important;}
   .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
   .nav-drawer.hidden{display:none!important;}
-  .nav-drawer-titulo{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;padding:6px 10px 12px;}
-  .nav-drawer-grupo{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 4px;}
-  .nav-drawer-grupo{cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;}
-  .nav-drawer-grupo .ndg-seta{transition:transform .15s ease;font-size:9px;flex:none;}
   .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
-  .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
   .empty{padding:24px;text-align:center;color:var(--muted);font-size:13px;}
   .sub{color:var(--muted);font-size:12px;margin-top:4px;font-family:var(--mono);}
   .aviso{background:var(--warn-dim);border:1px solid #4a3a1a;color:var(--warn);border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:16px;}
@@ -181,58 +176,6 @@ function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
 function abrirMenu(){}
 function fecharMenu(){}
 
-// grupos do menu (Operacao diaria/Monitoramento/Solicitacoes/Administracao)
-// viram dropdown: clicar no titulo do grupo expande/recolhe os itens dele.
-// O grupo que contem a pagina atual comeca aberto; os outros comecam
-// fechados (lembra a preferencia de cada grupo entre paginas via
-// localStorage, pelo nome do grupo - mesmo criterio em todo o app)
-function initNavDrawerAccordion(){
-  const nav = document.getElementById('nav-drawer');
-  if(!nav || nav.dataset.ndgInit) return;
-  nav.dataset.ndgInit = '1';
-  [...nav.querySelectorAll(':scope > .nav-drawer-grupo')].forEach(g=>{
-    const nomeGrupo = g.textContent.trim();
-    const itens = [];
-    let el = g.nextElementSibling;
-    while(el && !el.classList.contains('nav-drawer-grupo') && !el.classList.contains('nav-drawer-sep')){
-      const prox = el.nextElementSibling;
-      itens.push(el);
-      el = prox;
-    }
-    if(!itens.length) return;
-    const wrap = document.createElement('div');
-    wrap.className = 'ndg-wrap';
-    g.after(wrap);
-    itens.forEach(it=>wrap.appendChild(it));
-    g.innerHTML = `<span>${nomeGrupo}</span><span class="ndg-seta">▾</span>`;
-    // esconde o grupo inteiro (titulo + itens) se nenhum item dentro dele
-    // estiver visivel pra esse usuario (sem nenhuma permissao do grupo) -
-    // dropdown vazio some sozinho. Administracao nunca some porque sempre
-    // tem Ajuda visivel pra todo mundo
-    const atualizarVazio = ()=>{
-      const temVisivel = itens.some(it=>!it.classList.contains('hidden'));
-      g.classList.toggle('hidden', !temVisivel);
-    };
-    atualizarVazio();
-    new MutationObserver(atualizarVazio).observe(wrap, { attributes:true, attributeFilter:['class'], subtree:true });
-    const key = 'ndgAberto:' + nomeGrupo;
-    // começa aberto SÓ o grupo da página atual (pra você ver onde está) e o
-    // de Solicitações (o mais usado); os outros começam recolhidos pra deixar
-    // o menu curto. Nada persiste entre páginas - ao navegar, o padrão volta
-    // (fim da "gambiarra" de abrir outra tela só pra achar o item).
-    const temAtual = itens.some((it)=>{ const h = it.getAttribute && it.getAttribute('href'); if(!h) return false; try { return new URL(h, location.origin).pathname === location.pathname; } catch(e){ return false; } });
-    const aberto = temAtual || nomeGrupo === 'Solicitações';
-    g.querySelector('.ndg-seta').style.transform = aberto ? '' : 'rotate(-90deg)';
-    wrap.classList.toggle('hidden', !aberto);
-    g.addEventListener('click', ()=>{
-      const abrirAgora = wrap.classList.contains('hidden');
-      wrap.classList.toggle('hidden', !abrirAgora);
-      g.querySelector('.ndg-seta').style.transform = abrirAgora ? '' : 'rotate(-90deg)';
-      localStorage.setItem(key, abrirAgora ? '1' : '0');
-    });
-  });
-}
-initNavDrawerAccordion();
 
 let DATA = [];
 let UNIDADES_NOMES = {};
