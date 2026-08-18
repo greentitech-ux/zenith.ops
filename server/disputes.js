@@ -73,4 +73,7 @@ async function remove(id) {
 }
 
 
-module.exports = { STATUSES, create, listAll, listByPedido, getOne, updateStatus, remove };
+module.exports = {
+  STATUSES, create, listAll, listByPedido, getOne, updateStatus, remove,
+  invalidar: () => disputesCache.invalidar(),
+};

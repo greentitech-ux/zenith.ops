@@ -99,6 +99,7 @@ require('/home/user/adyen-monitor/server/index.js');
 // ---- exercita as rotas novas com um Master de mentira ----
 const http = require('http');
 const auth = require('/home/user/adyen-monitor/server/auth.js');
+const store = require('/home/user/adyen-monitor/server/store.js');
 
 function pedir(caminho, headers = {}) {
   return new Promise((resolve) => {
@@ -528,6 +529,78 @@ setTimeout(async () => {
   } catch (e) { okIdempotente = false; }
   if (!okIdempotente) ruins += 1;
   console.log(`${okIdempotente ? '✓' : '✗'} rodar a migração de novo não acha mais nada pra mudar (idempotente): HTTP ${rodouDeNovo.status}`);
+
+  // ---- fold do espaço Monitor/Adyen: mesma ideia do fold de Entregas acima,
+  // mas pro merchantAccountCode que chega direto numa transacao (cache em
+  // memoria do store.js), sem passar pela migracao ainda ----
+  store.addOrUpdate({ pspReference: 'psp-fold-mon', eventCode: 'AUTHORISATION', unidade: 'Carrao', status: 'APROVADO', dataHora: new Date().toISOString(), valor: 42 });
+  const unidadesComCodigoMonitorSolto = await pedir('/api/meta/unidades', { Authorization: 'Bearer ' + token });
+  let okFundeMonitorSolto = false;
+  try {
+    const lista = JSON.parse(unidadesComCodigoMonitorSolto.corpo);
+    okFundeMonitorSolto = unidadesComCodigoMonitorSolto.status === 200
+      && !lista.some((u) => u.codigo === 'Carrao')
+      && lista.some((u) => u.codigo === '19855');
+  } catch (e) { okFundeMonitorSolto = false; }
+  if (!okFundeMonitorSolto) ruins += 1;
+  console.log(`${okFundeMonitorSolto ? '✓' : '✗'} código antigo solto do Monitor (transação em cache, sem migração) some sozinho, funde no código do Fechamento: HTTP ${unidadesComCodigoMonitorSolto.status}`);
+
+  // ---- MIGRAÇÃO Monitor(Adyen)→Fechamento (ver migracaoUnidades.js):
+  // unifica "Mooca" (merchantAccountCode) pro código "19888" (Fechamento) -
+  // cobre transações, fraude, disputas, estornos e permissões. O usuário de
+  // teste tem permissão pra DOIS códigos antigos do MESMO mapa ao mesmo
+  // tempo (Mooca + Sao Miguel), de propósito: é o caso que expôs o bug do
+  // passe-por-código (2ª gravação desfazendo a 1ª) corrigido nesta revisão ----
+  store.addOrUpdate({ pspReference: 'psp-mig-mon-1', eventCode: 'AUTHORISATION', unidade: 'Mooca', status: 'APROVADO', dataHora: new Date().toISOString(), valor: 77 });
+  DOCS.set('fraudMarks/fm-mig-1', { id: 'fm-mig-1', pedidoId: 'ped-mig-mon-1', unidade: 'Mooca', nivel: 'SUSPEITO', removido: false, criadoEm: new Date().toISOString(), atualizadoEm: new Date().toISOString() });
+  DOCS.set('disputes/d-mig-1', { id: 'd-mig-1', pedidoId: 'ped-mig-mon-1', unidade: 'Mooca', status: 'MONITORANDO', criadoEm: new Date().toISOString(), atualizadoEm: new Date().toISOString() });
+  DOCS.set('refundRequests/r-mig-1', { id: 'r-mig-1', pedidoId: 'ped-mig-mon-1', unidade: 'Mooca', status: 'PENDENTE' });
+  DOCS.set('users/mig-user-1', { email: 'mig1@teste.local', role: 'user', active: true, permissions: { sections: [], unidades: ['Mooca', 'Sao Miguel'], vaultSubgroups: [], tiposSolicitacao: [] }, createdAt: new Date().toISOString() });
+  // users.list() tem cache de 60s (ver liveCache.js) - sem invalidar, o
+  // usuario semeado acima direto no DOCS ficaria invisivel pra migracao
+  const users = require('/home/user/adyen-monitor/server/users.js');
+  await users.updatePermissions('mig-user-1', { unidades: ['Mooca', 'Sao Miguel'] });
+
+  const previaMigMon = await pedir('/api/admin/migrar-codigos-monitor', { Authorization: 'Bearer ' + token });
+  let okPreviaMigMon = false;
+  try {
+    const d = JSON.parse(previaMigMon.corpo);
+    const mooca = d.find((x) => x.antigo === 'Mooca');
+    okPreviaMigMon = previaMigMon.status === 200 && mooca
+      && mooca.transacoes === 1 && mooca.fraudMarks === 1 && mooca.disputes === 1 && mooca.refundRequests === 1 && mooca.usuarios === 1
+      && DOCS.get('fraudMarks/fm-mig-1').unidade === 'Mooca'; // dry-run nao grava nada
+  } catch (e) { okPreviaMigMon = false; }
+  if (!okPreviaMigMon) ruins += 1;
+  console.log(`${okPreviaMigMon ? '✓' : '✗'} prévia da migração Monitor conta o impacto (transações/fraude/disputas/estornos/usuários) sem gravar nada: HTTP ${previaMigMon.status} ${previaMigMon.corpo.slice(0, 160)}`);
+
+  const executouMigMon = await postarJson('/api/admin/migrar-codigos-monitor', {}, { Authorization: 'Bearer ' + token });
+  let okExecutouMigMon = false;
+  try {
+    const txMigrada = store.allTransactions().find((t) => t.pspReference === 'psp-mig-mon-1');
+    const permsUsuario = DOCS.get('users/mig-user-1').permissions.unidades;
+    okExecutouMigMon = executouMigMon.status === 200
+      && txMigrada && txMigrada.unidade === '19888'
+      && DOCS.get('fraudMarks/fm-mig-1').unidade === '19888'
+      && DOCS.get('disputes/d-mig-1').unidade === '19888'
+      && DOCS.get('refundRequests/r-mig-1').unidade === '19888'
+      // as DUAS permissões (de mapas diferentes) sobrevivem - a antiga (Bug
+      // encontrado nesta revisão) fazia a 2a gravação reverter a 1a
+      && permsUsuario.includes('19888') && permsUsuario.includes('19821')
+      && !permsUsuario.includes('Mooca') && !permsUsuario.includes('Sao Miguel');
+  } catch (e) { okExecutouMigMon = false; }
+  if (!okExecutouMigMon) ruins += 1;
+  console.log(`${okExecutouMigMon ? '✓' : '✗'} migração Monitor executada troca o código em transações/fraude/disputas/estornos/AMBAS as permissões do usuário: HTTP ${executouMigMon.status}`);
+
+  const rodouDeNovoMon = await pedir('/api/admin/migrar-codigos-monitor', { Authorization: 'Bearer ' + token });
+  let okIdempotenteMon = false;
+  try {
+    const d = JSON.parse(rodouDeNovoMon.corpo);
+    const mooca = d.find((x) => x.antigo === 'Mooca');
+    okIdempotenteMon = rodouDeNovoMon.status === 200 && mooca
+      && mooca.transacoes === 0 && mooca.fraudMarks === 0 && mooca.disputes === 0 && mooca.refundRequests === 0 && mooca.usuarios === 0;
+  } catch (e) { okIdempotenteMon = false; }
+  if (!okIdempotenteMon) ruins += 1;
+  console.log(`${okIdempotenteMon ? '✓' : '✗'} rodar a migração Monitor de novo não acha mais nada pra mudar (idempotente): HTTP ${rodouDeNovoMon.status}`);
 
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a

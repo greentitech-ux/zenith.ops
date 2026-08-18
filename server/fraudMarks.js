@@ -137,6 +137,9 @@ async function listFraudeNomes() {
   return nomes;
 }
 
-module.exports = { NIVEIS, marcar, remover, listAll, listAllCached, listHistorico, listFraudeNomes, normalizarNome };
+module.exports = {
+  NIVEIS, marcar, remover, listAll, listAllCached, listHistorico, listFraudeNomes, normalizarNome,
+  invalidar: invalidarCache,
+};
 
 

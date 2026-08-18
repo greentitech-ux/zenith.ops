@@ -4,6 +4,10 @@
 // o mesmo store e o agrupamento por pedido (merchantReference) funciona igual.
 // https://docs.adyen.com/reporting/invoice-reconciliation/payment-accounting-report
 
+// mesma normalizacao de codigo de unidade que o webhook (normalize.js) usa -
+// ver migracaoUnidades.js
+const { normalizarCodigoUnidade } = require('./migracaoUnidades');
+
 const RECORD_TYPE_TO_EVENT = {
   authorised: { eventCode: 'AUTHORISATION', success: true },
   captured: { eventCode: 'AUTHORISATION', success: true },
@@ -69,7 +73,8 @@ function rowToTx(row) {
   const status = statusForEvent(mapping.eventCode, mapping.success);
   const amountStr = pick(row, 'main amount', 'payable (sc)') || '0';
   const valor = Math.abs(parseFloat(String(amountStr).replace(',', '.')) || 0);
-  const unidade = pick(row, 'merchant account');
+  const unidadeBruta = pick(row, 'merchant account');
+  const unidade = unidadeBruta ? normalizarCodigoUnidade(unidadeBruta) : unidadeBruta;
 
   return {
     pspReference,
@@ -84,7 +89,7 @@ function rowToTx(row) {
     last4: last4FromCardNumber(pick(row, 'card number')),
     bin: null,
     cardHolder: null,
-    shopperReference: unidade ? `${unidade}:` : null,
+    shopperReference: unidadeBruta ? `${unidadeBruta}:` : null,
     unidade,
     dataHora: parseBookingDate(pick(row, 'booking date')),
     disputeStatus: null,
