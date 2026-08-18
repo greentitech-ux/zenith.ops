@@ -2101,8 +2101,13 @@ app.get('/api/meta/unidades', auth.requireMaster, async (req, res) => {
 // mapa {codigo: nome} pra QUALQUER usuario logado - as paginas (RH, Central,
 // Lançamento...) mesclam isso por cima do UNIDADES_NOMES fixo delas no boot,
 // entao uma unidade nova cadastrada aqui aparece nos seletores sem deploy
+// ?area= opcional (ver unidades.js AREAS_VALIDAS): filtra as unidades que tem
+// perfil restrito, pra um seletor especifico (ex: lancamento.html so quer
+// unidade que de fato lanca fechamento, nao a MVPar) - sem o parametro,
+// devolve o mapa inteiro, comportamento de sempre
 app.get('/api/meta/unidades-extras', async (req, res) => {
-  res.json(await unidadesExtras.mapa().catch(() => ({})));
+  const m = await unidadesExtras.mapa().catch(() => ({}));
+  res.json(req.query.area ? await unidadesExtras.filtrarMapaPorArea(m, req.query.area) : m);
 });
 
 // lista completa (com id/criadoPor) pra tela de gestao - so Master
@@ -3956,6 +3961,11 @@ app.post('/api/fechamentos/lancar', requireSection('lancamento'), upload.any(), 
     const { unidade, unidadeNome, grupo, data, gerente, campos, canaisVendaExtras, formasPagamentoExtras, observacao, detalhesMaquinas, detalhesMaquinasPos, detalhesSaidas } = body;
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    // unidade administrativa (ex: MVPar) pode nao ter fechamento - vale ate
+    // pro Master, mesma logica do check de tiposSolicitacao (ver unidades.js)
+    if (unidade && !(await unidadesExtras.apareceEm(unidade, 'fechamento'))) {
+      return res.status(400).json({ error: 'Essa unidade não tem fechamento habilitado.' });
     }
     const arquivosKpi = await uploadArquivosKpi(req.files, unidade || 'geral');
     const kpisExtras = { ...(body.kpisExtras || {}), ...arquivosKpi };

@@ -405,9 +405,11 @@ const BRAVO_UNIDADES = Object.keys(BRAVO_UNIDADES_NOMES);
 const UNIDADES_NOMES = { ...ARCFOOD_UNIDADES, ...BRAVO_UNIDADES_NOMES };
 
 // unidades cadastradas pelo Master em /grupos.html (runtime) - mescladas por
-// cima da lista fixa acima, antes de montar qualquer seletor (ver boot)
+// cima da lista fixa acima, antes de montar qualquer seletor (ver boot).
+// area=fechamento: unidade administrativa (ex: MVPar, sem operação de loja)
+// fica de fora - ela não lança fechamento (ver unidades.js apareceEm)
 async function mesclarUnidadesExtras(){
-  try{ Object.assign(UNIDADES_NOMES, await (await fetch('/api/meta/unidades-extras')).json()); }catch(e){}
+  try{ Object.assign(UNIDADES_NOMES, await (await fetch('/api/meta/unidades-extras?area=fechamento')).json()); }catch(e){}
 }
 function grupoDaUnidade(u){ return ARCFOOD_UNIDADES[u] ? 'ARCFOOD' : 'BRAVO'; }
 

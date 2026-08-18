@@ -257,6 +257,32 @@
   </div>
 </div>
 
+<div class="overlay" id="unidade-perfil-overlay">
+  <form class="modal" id="unidade-perfil-form" style="max-width:420px;">
+    <h3 id="unidade-perfil-title">Perfil da unidade</h3>
+    <label style="font-size:11.5px;color:var(--muted);">Nome da unidade</label>
+    <input type="text" id="up-nome" required style="width:100%;margin:4px 0 12px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;">
+
+    <fieldset>
+      <legend>Onde essa unidade aparece</legend>
+      <p style="font-size:11px;color:var(--muted);margin:2px 0 8px;">Marque só as áreas que valem pra essa unidade. Sem nenhuma marcada, ela continua aparecendo em tudo (padrão de sempre - use assim pra loja normal). Pra unidade administrativa (sem operação, tipo escritório), marque só as áreas que ela de fato usa.</p>
+      <div id="up-areas" style="display:flex;flex-direction:column;gap:5px;"></div>
+    </fieldset>
+
+    <fieldset style="margin-top:10px;">
+      <legend>Tipos de solicitação aceitos</legend>
+      <p style="font-size:11px;color:var(--muted);margin:2px 0 8px;">Mesma regra: nenhum marcado = aceita todos (padrão). Marcado = só esses tipos podem ser abertos pra essa unidade.</p>
+      <div id="up-tipos" style="display:flex;flex-direction:column;gap:5px;"></div>
+    </fieldset>
+
+    <p class="err hidden" id="unidade-perfil-err"></p>
+    <div class="modal-actions">
+      <button type="button" id="unidade-perfil-cancel">Cancelar</button>
+      <button type="submit" class="primary">Salvar</button>
+    </div>
+  </form>
+</div>
+
 <div class="overlay" id="grupo-overlay">
   <form class="modal" id="grupo-form">
     <h3 id="grupo-title">Editar grupo</h3>
@@ -772,17 +798,67 @@ async function carregarGrupos(){
 }
 
 // ---------- unidades cadastradas em runtime (unidades.js no backend) ----------
+// perfil de area/tipos de solicitacao aceitos (ver server/unidades.js) - caso
+// motivador: MVPar (holding/escritorio central) não tem fechamento/entregas/
+// estoque/parque, só solicitações (compra/manutenção/TI/pagamento/nota) + RH/NOC
+const AREAS_LABEL = { fechamento:'Fechamento', entregas:'Entregas', estoque:'Estoque', parque:'Parque', rh:'RH', noc:'NOC Zenith', solicitacoes:'Solicitações (Central)', monitor:'Monitor' };
+const TIPOS_SOLICITACAO_LABEL = { estorno:'Estorno', 'ajuste-fechamento':'Ajuste de fechamento', compra:'Compra', manutencao:'Manutenção', 'suporte-ti':'Suporte TI', pagamento:'Pagamento', nota:'Nota' };
+let UNIDADES_EXTRAS_LISTA = [];
 async function carregarUnidadesExtras(){
-  const lista = await fetch('/api/meta/unidades-extras/lista').then(r=>r.json()).catch(()=>[]);
+  UNIDADES_EXTRAS_LISTA = await fetch('/api/meta/unidades-extras/lista').then(r=>r.json()).catch(()=>[]);
   const el = document.getElementById('unidades-extras-lista');
-  el.innerHTML = lista.length ? lista.map(u=>`
+  el.innerHTML = UNIDADES_EXTRAS_LISTA.length ? UNIDADES_EXTRAS_LISTA.map(u=>{
+    const areas = u.areas||[], tipos = u.tiposSolicitacao||[];
+    const restricao = areas.length
+      ? `<span style="color:var(--warn);font-size:10.5px;">restrita a: ${areas.map(a=>escapeHtml(AREAS_LABEL[a]||a)).join(', ')}</span>`
+      : `<span style="color:var(--muted);font-size:10.5px;">sem restrição - aparece em tudo</span>`;
+    return `
     <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:12.5px;">
-      <span style="flex:1;">${escapeHtml(u.nome)} <span style="color:var(--muted);font-size:11px;">· código: ${escapeHtml(u.codigo)}</span></span>
-      <button type="button" class="back" style="cursor:pointer;" onclick="renomearUnidadeExtra('${u.id}', '${escapeHtml(u.nome).replace(/'/g, '&#39;')}')">✏️ renomear</button>
+      <span style="flex:1;">${escapeHtml(u.nome)} <span style="color:var(--muted);font-size:11px;">· código: ${escapeHtml(u.codigo)}</span><br>${restricao}${tipos.length ? ` · <span style="color:var(--warn);font-size:10.5px;">tipos: ${tipos.map(t=>escapeHtml(TIPOS_SOLICITACAO_LABEL[t]||t)).join(', ')}</span>` : ''}</span>
+      <button type="button" class="back" style="cursor:pointer;" onclick="abrirEdicaoUnidadeExtra('${u.id}')">✏️ editar</button>
       <button type="button" class="back" style="cursor:pointer;color:var(--bad);" onclick="excluirUnidadeExtra('${u.id}', '${escapeHtml(u.nome).replace(/'/g, '&#39;')}')">🗑️</button>
-    </div>`).join('') :
+    </div>`;
+  }).join('') :
     '<span style="color:var(--muted);font-size:11.5px;">Nenhuma unidade cadastrada por aqui ainda - as fixas do sistema continuam valendo normalmente.</span>';
 }
+
+const unidadePerfilOverlay = document.getElementById('unidade-perfil-overlay');
+let EDITANDO_UNIDADE_EXTRA = null;
+function checksPerfilHtml(name, labels, marcados){
+  const set = new Set(marcados||[]);
+  return Object.entries(labels).map(([valor,label])=>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);"><input type="checkbox" name="${name}" value="${valor}" ${set.has(valor)?'checked':''} style="width:auto;margin:0;"> ${escapeHtml(label)}</label>`
+  ).join('');
+}
+function abrirEdicaoUnidadeExtra(id){
+  const u = UNIDADES_EXTRAS_LISTA.find(x=>x.id===id);
+  if(!u) return;
+  EDITANDO_UNIDADE_EXTRA = id;
+  document.getElementById('unidade-perfil-title').textContent = 'Perfil da unidade · ' + u.nome;
+  document.getElementById('up-nome').value = u.nome;
+  document.getElementById('up-areas').innerHTML = checksPerfilHtml('up-areas', AREAS_LABEL, u.areas);
+  document.getElementById('up-tipos').innerHTML = checksPerfilHtml('up-tipos', TIPOS_SOLICITACAO_LABEL, u.tiposSolicitacao);
+  document.getElementById('unidade-perfil-err').classList.add('hidden');
+  unidadePerfilOverlay.classList.add('show');
+}
+document.getElementById('unidade-perfil-cancel').addEventListener('click', ()=>unidadePerfilOverlay.classList.remove('show'));
+unidadePerfilOverlay.addEventListener('click', (e)=>{ if(e.target===unidadePerfilOverlay) unidadePerfilOverlay.classList.remove('show'); });
+document.getElementById('unidade-perfil-form').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const errEl = document.getElementById('unidade-perfil-err');
+  const payload = {
+    nome: document.getElementById('up-nome').value,
+    areas: readChecked(document.getElementById('up-areas')),
+    tiposSolicitacao: readChecked(document.getElementById('up-tipos')),
+  };
+  try{
+    const resp = await fetch(`/api/meta/unidades-extras/${EDITANDO_UNIDADE_EXTRA}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
+    unidadePerfilOverlay.classList.remove('show');
+    await recarregarUnidades();
+  }catch(err){ errEl.textContent = err.message; errEl.classList.remove('hidden'); }
+});
 
 // recarrega tambem o checklist de lojas (a unidade nova precisa aparecer
 // nas opcoes de "Lojas desse grupo" imediatamente)
@@ -808,14 +884,6 @@ async function criarUnidadeExtra(){
   }catch(e){ err.textContent = e.message; err.classList.remove('hidden'); }
 }
 
-async function renomearUnidadeExtra(id, nomeAtual){
-  const nome = prompt('Novo nome da unidade:', nomeAtual);
-  if(!nome || nome===nomeAtual) return;
-  const resp = await fetch(`/api/meta/unidades-extras/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ nome }) });
-  const data = await resp.json();
-  if(!resp.ok){ alert(data.error || 'Erro ao renomear.'); return; }
-  await recarregarUnidades();
-}
 
 async function excluirUnidadeExtra(id, nome){
   if(!confirm(`Excluir a unidade "${nome}"?\n\nCadastros já feitos com esse código (funcionários do RH, permissões...) continuam gravados - a unidade só some das opções de seleção.`)) return;
