@@ -19,6 +19,13 @@ const ABAS = (process.env.SHEET_ABAS_ENTREGAS || 'Garanhuns,Bessa,Caruaru,Tirol,
 
 const MESES_PT = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };
 
+// a planilha "MOTOS BRAVO" continua com o codigo ANTIGO na coluna "Unidade"
+// (Bessa/Caruaru/Garanhuns) - nao dá pra editar a planilha em produção
+// daqui, então normaliza pro codigo unificado (= codigo do Fechamento, ver
+// ENTREGAS_UNIDADES_NOMES em index.js e migracaoUnidades.js) direto na
+// leitura, pra toda linha nova continuar caindo no mesmo cadastro
+const CODIGO_ANTIGO_PARA_NOVO = { Bessa: 'Dominos Bessa', Caruaru: 'Dominos Caruaru', Garanhuns: 'Dominos Garanhuns' };
+
 // "24/12" (Data) + "dez./25" ou "DEZ./2025" (Mes, ano com 2 ou 4 dígitos) -> "2025-12-24"
 function parseData(dataStr, mesStr) {
   const dia = parseInt(String(dataStr || '').split('/')[0], 10);
@@ -55,8 +62,9 @@ function linhaParaEntrega(aba, header, linha) {
   const data = parseData(get('Data'), get('Mes'));
   if (!data) return null; // sem data nao da pra mostrar no dashboard por periodo
 
-  const unidade = get('Unidade');
-  if (!unidade) return null;
+  const unidadeBruta = get('Unidade');
+  if (!unidadeBruta) return null;
+  const unidade = CODIGO_ANTIGO_PARA_NOVO[unidadeBruta] || unidadeBruta;
 
   return {
     id: `${aba.toLowerCase()}-${id}`,

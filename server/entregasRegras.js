@@ -193,4 +193,5 @@ function calcular(regra, { data, entrega, retorno, extra, foraDeArea, camposRemo
 module.exports = {
   listAll, getPara, salvar, calcular, defaultRegra,
   DIAS_SEMANA, BASES_VALIDAS, DESTINOS_VALIDOS, MOTIVOS_REMOCAO_CAMPO,
+  invalidar: () => regrasCache.invalidar(),
 };

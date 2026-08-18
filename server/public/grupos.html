@@ -164,6 +164,16 @@
     <p class="err hidden" id="ue-err"></p>
   </div>
 
+  <div class="panel">
+    <h2>🔧 Unificar códigos Entregas/Fechamento</h2>
+    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">Dom Bessa, Dom Caruaru e Dom Garanhuns têm hoje 2 códigos - um pro Fechamento ("Dominos Bessa") e outro pras Entregas ("Bessa") -, o que fazia cada uma dessas 3 lojas aparecer como 2 cadastros separados. Isso passa o que já está gravado (lançamentos, edições pendentes, regras de pagamento, permissões de usuário) das Entregas pro código do Fechamento, que passa a ser o único. Rode primeiro sem marcar nada pra só ver o tamanho do impacto.</p>
+    <div id="migracao-resultado" style="font-size:12px;margin-bottom:8px;"></div>
+    <div style="display:flex;gap:8px;">
+      <button type="button" class="back" style="cursor:pointer;" onclick="rodarMigracaoEntregas(false)">Ver o que mudaria (sem gravar nada)</button>
+      <button type="button" class="primary" style="padding:8px 14px;" onclick="rodarMigracaoEntregas(true)">Unificar de verdade</button>
+    </div>
+  </div>
+
   <!-- PEDIDO SEMANAL (ver server/pedidoSemanal.js): a cobrança é por REGRA -
        cada uma vale pra um grupo inteiro ou pras lojas escolhidas, com dia
        da semana próprio. Fica em Grupos porque é a página onde já se decide
@@ -822,6 +832,32 @@ let TODAS_UNIDADES = [];
 // que so ganhou perfil (nesse caso o nome aqui é so um espelho, quem manda
 // no nome de exibição da fixa continua sendo o mapa fixo de index.js)
 let UNIDADES_EXTRAS_LISTA = [];
+// ---------- migracao pontual: unificar codigos Entregas/Fechamento (ver
+// server/migracaoUnidades.js) ----------
+function formatarResumoMigracao(resumo){
+  return resumo.map(item=>{
+    const partes = [];
+    if(item.entregasLive) partes.push(`${item.entregasLive} lançamento(s)`);
+    if(item.entregaEdicoes) partes.push(`${item.entregaEdicoes} edição(ões) pendente(s)`);
+    if(item.entregasRegras) partes.push('regra de pagamento');
+    if(item.usuarios) partes.push(`${item.usuarios} usuário(s) com permissão`);
+    return `${item.antigo} → ${item.novo}: ${partes.length ? partes.join(', ') : 'nada a mudar'}`;
+  }).join('\n');
+}
+async function rodarMigracaoEntregas(executar){
+  const el = document.getElementById('migracao-resultado');
+  if(executar && !confirm('Isso vai REGRAVAR dados já lançados (entregas, permissões de usuário) trocando o código antigo pelo do Fechamento. Não tem desfazer automático. Rodou "ver o que mudaria" antes e confere que faz sentido?')) return;
+  el.textContent = 'Rodando...';
+  try{
+    const resp = await fetch('/api/admin/migrar-codigos-entregas', { method: executar ? 'POST' : 'GET' });
+    const resumo = await resp.json();
+    if(!resp.ok) throw new Error(resumo.error || 'Erro ao rodar.');
+    el.textContent = (executar ? '✅ Feito:\n' : 'Prévia (nada foi gravado ainda):\n') + formatarResumoMigracao(resumo);
+    el.style.whiteSpace = 'pre-wrap';
+    if(executar) await recarregarUnidades();
+  }catch(e){ el.textContent = 'Erro: ' + e.message; }
+}
+
 async function carregarUnidadesExtras(){
   [TODAS_UNIDADES, UNIDADES_EXTRAS_LISTA] = await Promise.all([
     fetch('/api/meta/unidades').then(r=>r.json()).catch(()=>[]),

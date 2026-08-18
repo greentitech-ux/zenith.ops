@@ -472,6 +472,47 @@ setTimeout(async () => {
   if (!okBloqueiaFixa) ruins += 1;
   console.log(`${okBloqueiaFixa ? '✓' : '✗'} servidor recusa fechamento na unidade fixa restrita, mesmo que a tela ainda mostrasse ela: HTTP ${lancouFixaRestrita.status} ${lancouFixaRestrita.corpo.slice(0, 90)}`);
 
+  // ---- MIGRAÇÃO Entregas→Fechamento (ver migracaoUnidades.js): unifica o
+  // código "Bessa" (Entregas) pro código "Dominos Bessa" (Fechamento) -
+  // caso real que motivou a mudança (Dom Bessa aparecia como 2 cadastros) ----
+  DOCS.set('entregasLive/mig1', { id: 'mig1', unidade: 'Bessa', unidadeNome: 'Dom Bessa', data: '2026-08-01', entregador: 'Fulano' });
+  DOCS.set('entregaEdicoes/mig2', { id: 'mig2', entregaId: 'mig1', unidade: 'Bessa', status: 'PENDENTE' });
+  DOCS.set('entregasRegras/Bessa', { unidade: 'Bessa', modo: 'plataforma', plataformaNome: 'GAMI', camposValor: [] });
+
+  const previaMig = await pedir('/api/admin/migrar-codigos-entregas', { Authorization: 'Bearer ' + token });
+  let okPreviaMig = false;
+  try {
+    const d = JSON.parse(previaMig.corpo);
+    const bessa = d.find((x) => x.antigo === 'Bessa');
+    okPreviaMig = previaMig.status === 200 && bessa
+      && bessa.entregasLive === 1 && bessa.entregaEdicoes === 1 && bessa.entregasRegras === true
+      && DOCS.get('entregasLive/mig1').unidade === 'Bessa'; // dry-run nao grava nada
+  } catch (e) { okPreviaMig = false; }
+  if (!okPreviaMig) ruins += 1;
+  console.log(`${okPreviaMig ? '✓' : '✗'} prévia da migração de códigos conta o impacto sem gravar nada: HTTP ${previaMig.status} ${previaMig.corpo.slice(0, 120)}`);
+
+  const executouMig = await postarJson('/api/admin/migrar-codigos-entregas', {}, { Authorization: 'Bearer ' + token });
+  let okExecutouMig = false;
+  try {
+    okExecutouMig = executouMig.status === 200
+      && DOCS.get('entregasLive/mig1').unidade === 'Dominos Bessa'
+      && DOCS.get('entregaEdicoes/mig2').unidade === 'Dominos Bessa'
+      && !DOCS.has('entregasRegras/Bessa')
+      && DOCS.get('entregasRegras/Dominos Bessa').unidade === 'Dominos Bessa';
+  } catch (e) { okExecutouMig = false; }
+  if (!okExecutouMig) ruins += 1;
+  console.log(`${okExecutouMig ? '✓' : '✗'} migração executada troca o código gravado (entregasLive/edições/regras): HTTP ${executouMig.status}`);
+
+  const rodouDeNovo = await pedir('/api/admin/migrar-codigos-entregas', { Authorization: 'Bearer ' + token });
+  let okIdempotente = false;
+  try {
+    const d = JSON.parse(rodouDeNovo.corpo);
+    const bessa = d.find((x) => x.antigo === 'Bessa');
+    okIdempotente = rodouDeNovo.status === 200 && bessa && bessa.entregasLive === 0 && bessa.entregaEdicoes === 0 && bessa.entregasRegras === false;
+  } catch (e) { okIdempotente = false; }
+  if (!okIdempotente) ruins += 1;
+  console.log(`${okIdempotente ? '✓' : '✗'} rodar a migração de novo não acha mais nada pra mudar (idempotente): HTTP ${rodouDeNovo.status}`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de

@@ -75,6 +75,7 @@ const rh = require('./rh');
 const rhCheckin = require('./rhCheckin');
 const rhAdvertencias = require('./rhAdvertencias');
 const unidadesExtras = require('./unidades');
+const migracaoUnidades = require('./migracaoUnidades');
 const pedidoSemanal = require('./pedidoSemanal');
 const lojaStatus = require('./lojaStatus');
 const qaAprovacoes = require('./qaAprovacoes');
@@ -1959,11 +1960,20 @@ const INVENTARIO_UNIDADES_NOMES = {
 // pra ja aparecerem no checklist de permissoes mesmo antes de qualquer
 // lançamento. O Master pode liberar mais conforme novas unidades entrarem
 // (o app de entregas ainda esta sendo migrado loja a loja do AppSheet).
+// Bessa/Caruaru/Garanhuns usam o MESMO codigo do Fechamento (ver
+// FECHAMENTO_UNIDADES_NOMES acima) desde a unificacao de 2026-08-18 - antes
+// cada um tinha um codigo proprio aqui (so o nome da aba na planilha de
+// Entregas: "Bessa" em vez de "Dominos Bessa"), o que fazia a MESMA loja
+// virar 2 cadastros separados no painel de Unidades. Decisao do Master:
+// Fechamento e o dado mais importante, o codigo dele e que vale (ver
+// migracaoUnidades.js pro script que corrigiu o que ja estava gravado, e
+// entregasSync.js/normalizarCodigoEntrega pra planilha antiga continuar
+// funcionando mesmo sem editar a coluna "Unidade" nela)
 const ENTREGAS_UNIDADES_NOMES = {
   'MMTirol Natal': 'Milky Moo Tirol Natal (Entregas)',
-  Bessa: 'Dom Bessa',
-  Caruaru: 'Dom Caruaru',
-  Garanhuns: 'Dom Garanhuns',
+  'Dominos Bessa': 'Dom Bessa',
+  'Dominos Caruaru': 'Dom Caruaru',
+  'Dominos Garanhuns': 'Dom Garanhuns',
 };
 
 // apelidos - a mesma loja fisica as vezes aparece com codigos diferentes em
@@ -2002,8 +2012,12 @@ function classificarUnidade(codigo) {
   if (ARCFOOD_FECHAMENTO.has(codigo)) return { secao: 'Fechamento', grupo: 'ARCFOOD' };
   if (ARCFOOD_MONITOR.has(codigo)) return { secao: 'Monitor / Disputas (Adyen)', grupo: 'ARCFOOD' };
   if (GBE_MONITOR.has(codigo)) return { secao: 'Monitor / Disputas (Adyen)', grupo: 'Grupo Bravo (GBE)' };
-  if (codigo in ENTREGAS_UNIDADES_NOMES) return { secao: 'Entregas', grupo: 'Grupo Bravo (GBE)' };
+  // Fechamento antes de Entregas: desde a unificacao de codigos (ver
+  // comentario de ENTREGAS_UNIDADES_NOMES), uma loja que faz as duas coisas
+  // (ex: Dominos Bessa) tem o MESMO codigo nos dois mapas - o Master decidiu
+  // que Fechamento e a classificacao principal quando isso acontece
   if (codigo in FECHAMENTO_UNIDADES_NOMES) return { secao: 'Fechamento', grupo: 'Grupo Bravo (GBE)' };
+  if (codigo in ENTREGAS_UNIDADES_NOMES) return { secao: 'Entregas', grupo: 'Grupo Bravo (GBE)' };
   if (codigo in ifoodClient.IFOOD_UNIDADES_NOMES) return { secao: 'iFood', grupo: null };
   return { secao: 'Monitor / Disputas (Adyen)', grupo: 'Outras' };
 }
@@ -2080,6 +2094,26 @@ async function construirUnidadesMapa() {
 // candidato do Firebase Storage e devolve o erro cru de cada um - abrir no
 // navegador logado (ou com ?token=) quando os anexos estiverem falhando,
 // pra saber a causa exata sem depender do log do Render
+// migracao pontual (ver migracaoUnidades.js): unifica os codigos de
+// Entregas com os de Fechamento das lojas que hoje tem os dois. GET so
+// mostra o que SERIA mudado (nada e gravado); POST executa de verdade.
+// Idempotente: rodar de novo depois de já ter migrado não acha mais nada
+// pra mudar (os códigos antigos já não existem em lugar nenhum).
+app.get('/api/admin/migrar-codigos-entregas', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await migracaoUnidades.migrarCodigosEntregas({ executar: false }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+app.post('/api/admin/migrar-codigos-entregas', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await migracaoUnidades.migrarCodigosEntregas({ executar: true }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/admin/storage-diagnostico', auth.requireMaster, async (req, res) => {
   try {
     res.json(await require('./storageBucket').diagnostico());
