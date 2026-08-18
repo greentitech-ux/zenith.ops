@@ -267,12 +267,20 @@
     <fieldset>
       <legend>Onde essa unidade aparece</legend>
       <p style="font-size:11px;color:var(--muted);margin:2px 0 8px;">Marque só as áreas que valem pra essa unidade. Sem nenhuma marcada, ela continua aparecendo em tudo (padrão de sempre - use assim pra loja normal). Pra unidade administrativa (sem operação, tipo escritório), marque só as áreas que ela de fato usa.</p>
+      <div style="display:flex;gap:10px;margin-bottom:6px;">
+        <button type="button" class="btn-add" onclick="marcarTodosChecks('up-areas', true)">marcar todas</button>
+        <button type="button" class="btn-add" onclick="marcarTodosChecks('up-areas', false)">desmarcar todas</button>
+      </div>
       <div id="up-areas" style="display:flex;flex-direction:column;gap:5px;"></div>
     </fieldset>
 
     <fieldset style="margin-top:10px;">
       <legend>Tipos de solicitação aceitos</legend>
       <p style="font-size:11px;color:var(--muted);margin:2px 0 8px;">Mesma regra: nenhum marcado = aceita todos (padrão). Marcado = só esses tipos podem ser abertos pra essa unidade.</p>
+      <div style="display:flex;gap:10px;margin-bottom:6px;">
+        <button type="button" class="btn-add" onclick="marcarTodosChecks('up-tipos', true)">marcar todos</button>
+        <button type="button" class="btn-add" onclick="marcarTodosChecks('up-tipos', false)">desmarcar todos</button>
+      </div>
       <div id="up-tipos" style="display:flex;flex-direction:column;gap:5px;"></div>
     </fieldset>
 
@@ -862,6 +870,9 @@ function renderUnidadesExtrasLista(){
 
 const unidadePerfilOverlay = document.getElementById('unidade-perfil-overlay');
 let EDITANDO_UNIDADE_CODIGO = null;
+function marcarTodosChecks(containerId, marcar){
+  document.querySelectorAll(`#${containerId} input[type=checkbox]`).forEach(c=>{ c.checked = marcar; });
+}
 function checksPerfilHtml(name, labels, marcados){
   const set = new Set(marcados||[]);
   return Object.entries(labels).map(([valor,label])=>
