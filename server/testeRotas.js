@@ -438,6 +438,20 @@ setTimeout(async () => {
   if (!okPerfilFixa) ruins += 1;
   console.log(`${okPerfilFixa ? '✓' : '✗'} unidade FIXA também ganha perfil restrito (não precisa recriar): HTTP ${perfilFixa.status} ${perfilFixa.corpo.slice(0, 90)}`);
 
+  // ganhar perfil não pode fazer a unidade fixa "sumir" da seção de verdade
+  // dela (Fechamento/ARCFOOD) pra cair genérica em "Cadastradas no sistema" -
+  // bug real que apareceu na tela (lojas com perfil duplicando/mudando de
+  // lugar no painel)
+  const todasUnidades = await pedir('/api/meta/unidades', { Authorization: 'Bearer ' + token });
+  let okClassificacao = false;
+  try {
+    const lista = JSON.parse(todasUnidades.corpo);
+    const item = lista.find((u) => u.codigo === '19821');
+    okClassificacao = todasUnidades.status === 200 && !!item && item.secao === 'Fechamento' && item.grupo === 'ARCFOOD';
+  } catch (e) { okClassificacao = false; }
+  if (!okClassificacao) ruins += 1;
+  console.log(`${okClassificacao ? '✓' : '✗'} unidade fixa com perfil continua classificada na seção real dela (Fechamento/ARCFOOD): HTTP ${todasUnidades.status}`);
+
   const restritas = await pedir('/api/meta/unidades-restritas?area=fechamento', { Authorization: 'Bearer ' + token });
   let okRestritas = false;
   try {

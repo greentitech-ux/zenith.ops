@@ -865,7 +865,7 @@ function renderUnidadesExtrasLista(){
         return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:12.5px;">
           <span style="flex:1;">${escapeHtml(u.nome)} <span style="color:var(--muted);font-size:11px;">· código: ${escapeHtml(String(u.codigo))}</span><br>${badgePerfil(perfil)}</span>
           <button type="button" class="back btn-perfil-unidade" style="cursor:pointer;" data-codigo="${escapeHtml(String(u.codigo))}">✏️ perfil</button>
-          ${dinamica && perfil ? `<button type="button" class="back btn-excluir-unidade" style="cursor:pointer;color:var(--bad);" data-id="${escapeHtml(perfil.id)}" data-nome="${escapeHtml(u.nome)}">🗑️</button>` : ''}
+          ${perfil ? `<button type="button" class="back btn-excluir-unidade" style="cursor:pointer;color:var(--bad);" data-id="${escapeHtml(perfil.id)}" data-nome="${escapeHtml(u.nome)}" data-dinamica="${dinamica?'1':'0'}">🗑️ ${dinamica?'excluir':'remover perfil'}</button>` : ''}
         </div>`;
       }).join('');
       return `<div class="unidades-grupo-titulo">${escapeHtml(grupo)}</div><div style="display:flex;flex-direction:column;gap:5px;margin-bottom:6px;">${linhas}</div>`;
@@ -881,7 +881,7 @@ document.getElementById('unidades-extras-lista').addEventListener('click', (e)=>
   const btnPerfil = e.target.closest('.btn-perfil-unidade');
   if(btnPerfil){ abrirEdicaoUnidadeExtra(btnPerfil.dataset.codigo); return; }
   const btnExcluir = e.target.closest('.btn-excluir-unidade');
-  if(btnExcluir){ excluirUnidadeExtra(btnExcluir.dataset.id, btnExcluir.dataset.nome); }
+  if(btnExcluir){ excluirUnidadeExtra(btnExcluir.dataset.id, btnExcluir.dataset.nome, btnExcluir.dataset.dinamica==='1'); }
 });
 
 const unidadePerfilOverlay = document.getElementById('unidade-perfil-overlay');
@@ -952,8 +952,15 @@ async function criarUnidadeExtra(){
 }
 
 
-async function excluirUnidadeExtra(id, nome){
-  if(!confirm(`Excluir a unidade "${nome}"?\n\nCadastros já feitos com esse código (funcionários do RH, permissões...) continuam gravados - a unidade só some das opções de seleção.`)) return;
+async function excluirUnidadeExtra(id, nome, dinamica){
+  // unidade cadastrada aqui: excluir o registro tira ela dos seletores por
+  // completo. unidade FIXA que so ganhou perfil (ver upsertPerfil): excluir
+  // so o registro de PERFIL - a unidade em si continua existindo normal,
+  // só volta a aparecer em tudo (sem restrição, o padrão de sempre)
+  const msg = dinamica
+    ? `Excluir a unidade "${nome}"?\n\nCadastros já feitos com esse código (funcionários do RH, permissões...) continuam gravados - a unidade só some das opções de seleção.`
+    : `Remover o perfil restrito de "${nome}"?\n\nA unidade em si continua existindo normalmente (é uma unidade fixa do sistema) - ela só volta a aparecer em tudo, sem restrição nenhuma.`;
+  if(!confirm(msg)) return;
   const resp = await fetch(`/api/meta/unidades-extras/${id}`, { method:'DELETE' });
   const data = await resp.json();
   if(!resp.ok){ alert(data.error || 'Erro ao excluir.'); return; }
