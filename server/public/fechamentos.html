@@ -322,12 +322,13 @@
 
 <!-- seletor de colunas da tabela de Fechamentos - dois checks por coluna:
      "Tela" (esta tabela) e "Relat." (o que sai no CSV/PDF, vai por
-     ?ocultas= pro backend), independentes entre si. Fica salvo neste
-     navegador (localStorage) -->
+     ?ocultas= pro backend), independentes entre si. O Salvar grava a
+     escolha no SERVIDOR, por usuario (/api/preferencias) - ver
+     carregarPreferenciaColunas -->
 <div class="fech-overlay hidden" id="colunas-overlay">
   <div class="fech-modal" style="max-width:460px;">
     <h3>🧩 Colunas da tabela e dos relatórios</h3>
-    <div class="sub">Só aparecem as colunas dos grupos exibidos agora na tabela. Cada coluna tem <b>dois checks independentes</b>: <b>Tela</b> (aparece nesta tabela) e <b>Relat.</b> (sai no CSV e no PDF) - dá pra deixar uma coluna aqui pra conferir e mesmo assim tirar ela do relatório que vai pra fora. Arraste pela ⠿ pra colocar na ordem que quiser exportar; pra mover várias de uma vez, marque o check <b>Mover</b> nelas e arraste qualquer uma das marcadas - todas seguem juntas, na mesma ordem que já tinham entre si. Data e Unidade são sempre exibidas, sempre primeiro. A escolha fica salva neste navegador.</div>
+    <div class="sub">Só aparecem as colunas dos grupos exibidos agora na tabela. Cada coluna tem <b>dois checks independentes</b>: <b>Tela</b> (aparece nesta tabela) e <b>Relat.</b> (sai no CSV e no PDF) - dá pra deixar uma coluna aqui pra conferir e mesmo assim tirar ela do relatório que vai pra fora. Arraste pela ⠿ pra colocar na ordem que quiser exportar; pra mover várias de uma vez, marque o check <b>Mover</b> nelas e arraste qualquer uma das marcadas - todas seguem juntas, na mesma ordem que já tinham entre si. Data e Unidade são sempre exibidas, sempre primeiro. Depois de <b>Salvar</b>, essa passa a ser a sua ordem padrão - vale ao atualizar a página, ao sair e voltar no app, e em qualquer aparelho onde você entrar, tanto na tela quanto nos relatórios.</div>
     <div id="colunas-lista" style="display:flex;flex-direction:column;gap:4px;margin:12px 0;max-height:50vh;overflow-y:auto;"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button type="button" class="preset-btn" onclick="fecharSeletorColunas()">Cancelar</button>
@@ -1574,7 +1575,8 @@ function colunasValores(rows, grupo){
 // origem - sistema OU planilha - pra essas colunas nunca se misturarem.
 // colunas que o usuario escolheu ESCONDER (seletor 🧩 Colunas) - por key
 // canonica, a mesma usada no relatorio do backend (fechamentosReport.js),
-// entao a escolha vale igual na tela e no CSV/PDF. Salvo por navegador.
+// entao a escolha vale igual na tela e no CSV/PDF. Salvo no servidor,
+// por usuario - ver carregarPreferenciaColunas mais abaixo.
 let COLUNAS_OCULTAS = new Set();
 try{ COLUNAS_OCULTAS = new Set(JSON.parse(localStorage.getItem('fechColunasOcultas')||'[]')); }catch(e){}
 
@@ -1603,6 +1605,39 @@ function colVisivel(key){ return key==='data' || key==='unidadeNome' || !COLUNAS
 // COLUNAS_OCULTAS acima, ver ordenarPorPreferencia)
 let ORDEM_COLUNAS = [];
 try{ ORDEM_COLUNAS = JSON.parse(localStorage.getItem('fechColunasOrdem')||'[]'); }catch(e){}
+
+// ---- a escolha confirmada vira A PADRAO, em qualquer aparelho ----
+// As tres preferencias acima nascem do localStorage so pra primeira pintura
+// da tela nao ter que esperar a rede. A fonte da verdade e o servidor
+// (/api/preferencias, por usuario - ver preferencias.js): o boot() puxa de
+// la ANTES do primeiro render e, se houver algo salvo, ele manda. E por isso
+// que a ordem sobrevive a atualizar a pagina, a fechar o app e a limpar o
+// cache do navegador - e por isso que ela vale igual no celular e no
+// computador. Vale pros dois lados: a tabela e o relatorio CSV/PDF (que
+// recebe as mesmas keys via ?ocultas=/?ordem=, ver baixarRelatorio).
+const PREF_COLUNAS = 'fechamentoColunas';
+async function carregarPreferenciaColunas(){
+  let salvo = null;
+  try{
+    salvo = await fetch('/api/preferencias/'+PREF_COLUNAS).then(r=>r.ok?r.json():null);
+  }catch(e){ return; } // servidor fora do ar: segue com o que o navegador tinha
+  const v = salvo && salvo.valor;
+  if(!v) return; // nunca salvou no servidor - o localStorage continua valendo
+  if(Array.isArray(v.ordem)) ORDEM_COLUNAS = v.ordem;
+  if(Array.isArray(v.ocultas)) COLUNAS_OCULTAS = new Set(v.ocultas);
+  if(Array.isArray(v.foraRelatorio)) COLUNAS_FORA_RELATORIO = new Set(v.foraRelatorio);
+  espelharColunasNoNavegador();
+}
+// o localStorage vira um espelho do que esta no servidor - serve de cache
+// pra proxima abertura pintar certo de primeira, mesmo antes da resposta da
+// rede (e de ultimo recurso se o servidor nao responder)
+function espelharColunasNoNavegador(){
+  try{
+    localStorage.setItem('fechColunasOrdem', JSON.stringify(ORDEM_COLUNAS));
+    localStorage.setItem('fechColunasOcultas', JSON.stringify([...COLUNAS_OCULTAS]));
+    localStorage.setItem('fechColunasForaRelatorio', JSON.stringify([...COLUNAS_FORA_RELATORIO]));
+  }catch(e){}
+}
 // aplica ORDEM_COLUNAS numa lista de {key,...} - o que nao esta na lista
 // salva (coluna nova, ou que so passou a existir depois) mantem a ordem
 // padrao, no fim. Data/Unidade sempre primeiro, nunca reordenam (mesma
@@ -1787,11 +1822,29 @@ function salvarColunas(){
   ORDEM_COLUNAS = linhas.map(l=>l.dataset.coluna);
   COLUNAS_OCULTAS = desmarcadas('data-check');
   COLUNAS_FORA_RELATORIO = desmarcadas('data-check-rel');
-  localStorage.setItem('fechColunasOrdem', JSON.stringify(ORDEM_COLUNAS));
-  localStorage.setItem('fechColunasOcultas', JSON.stringify([...COLUNAS_OCULTAS]));
-  localStorage.setItem('fechColunasForaRelatorio', JSON.stringify([...COLUNAS_FORA_RELATORIO]));
+  espelharColunasNoNavegador();
+  // fecha e repinta na hora, sem esperar a rede - a gravacao no servidor
+  // (que e o que faz a escolha valer nos outros aparelhos e depois de
+  // limpar o cache) corre em segundo plano; se ela falhar, o aviso aparece
+  // mas a escolha ja esta valendo aqui e no espelho local
   fecharSeletorColunas();
   renderTabela(filtrar());
+  fetch('/api/preferencias/'+PREF_COLUNAS, {
+    // keepalive: se a pessoa Salvar e ja sair da pagina (baixar o relatorio
+    // faz location.href, por exemplo), o navegador CANCELA um fetch normal
+    // no meio - a escolha nao chegaria no servidor e o catch abaixo ainda
+    // acusaria um erro que nao existe. Com keepalive a requisicao termina
+    // mesmo com a pagina descarregando (o corpo e uma lista de chaves,
+    // muito abaixo do limite de 64KB dessa opcao).
+    keepalive: true,
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ valor: {
+      ordem: ORDEM_COLUNAS,
+      ocultas: [...COLUNAS_OCULTAS],
+      foraRelatorio: [...COLUNAS_FORA_RELATORIO],
+    } }),
+  }).then(r=>{ if(!r.ok) throw new Error(); })
+    .catch(()=>alert('A ordem valeu nesta tela, mas não deu pra salvar como padrão no servidor. Confira a conexão e clique em Salvar de novo pra ela valer nos outros aparelhos.'));
 }
 
 function renderTabela(rows){
@@ -2241,6 +2294,8 @@ async function boot(){
     try{ GRUPOS_KPI = await fetch('/api/grupos').then(r=>r.json()); }catch(e){ GRUPOS_KPI = []; }
   }
   document.getElementById('root').classList.remove('hidden');
+  // antes do primeiro render: a ordem/visibilidade salva no servidor manda
+  await carregarPreferenciaColunas();
   await carregar();
   if(isMaster) await carregarEdicoes();
 }

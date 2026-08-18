@@ -579,6 +579,36 @@ setTimeout(async () => {
   if (!okPlanilhaCompleta) ruins += 1;
   console.log(`${okPlanilhaCompleta ? '✓' : '✗'} os 10 campos de valor que a planilha importa aparecem todos na tabela`);
 
+  // ---- a ordem de colunas confirmada tem que virar A PADRAO: gravada no
+  // servidor, por usuario, ela sobrevive a atualizar a pagina, a fechar o
+  // app e a limpar o cache do navegador (antes so existia em localStorage,
+  // "salvo neste navegador"). O teste faz a ida-e-volta que a tela faz:
+  // salva no Salvar do seletor 🧩 Colunas e le de volta no boot ----
+  let okPrefColunas = false;
+  try {
+    const escolha = { ordem: ['ifood', 'loja', 'delivery'], ocultas: ['quebra'], foraRelatorio: ['observacao'] };
+    const gravou = await putJson('/api/preferencias/fechamentoColunas', { valor: escolha }, token ? { Authorization: 'Bearer ' + token } : {});
+    const leu = await pedir('/api/preferencias/fechamentoColunas', token ? { Authorization: 'Bearer ' + token } : {});
+    const v = JSON.parse(leu.corpo).valor;
+    okPrefColunas = gravou.status === 200 && leu.status === 200
+      && JSON.stringify(v.ordem) === JSON.stringify(escolha.ordem)
+      && JSON.stringify(v.ocultas) === JSON.stringify(escolha.ocultas)
+      && JSON.stringify(v.foraRelatorio) === JSON.stringify(escolha.foraRelatorio);
+  } catch (e) { okPrefColunas = false; }
+  if (!okPrefColunas) ruins += 1;
+  console.log(`${okPrefColunas ? '✓' : '✗'} ordem/visibilidade de colunas salva no servidor volta igual (vira a padrão em qualquer aparelho)`);
+
+  // preferencia de uma tela nao pode apagar a de outra: sao chaves
+  // independentes no MESMO documento do usuario (set com merge)
+  let okPrefIsolada = false;
+  try {
+    await putJson('/api/preferencias/outraTela', { valor: { x: 1 } }, token ? { Authorization: 'Bearer ' + token } : {});
+    const antiga = await pedir('/api/preferencias/fechamentoColunas', token ? { Authorization: 'Bearer ' + token } : {});
+    okPrefIsolada = antiga.status === 200 && (JSON.parse(antiga.corpo).valor || {}).ordem.length === 3;
+  } catch (e) { okPrefIsolada = false; }
+  if (!okPrefIsolada) ruins += 1;
+  console.log(`${okPrefIsolada ? '✓' : '✗'} salvar a preferência de uma tela não apaga a de outra`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de
