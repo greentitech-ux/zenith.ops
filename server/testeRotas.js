@@ -424,6 +424,40 @@ setTimeout(async () => {
   if (!okBloqueiaFech) ruins += 1;
   console.log(`${okBloqueiaFech ? '✓' : '✗'} lançar fechamento numa unidade sem essa área é recusado (até pro Master): HTTP ${lancouFech.status} ${lancouFech.corpo.slice(0, 90)}`);
 
+  // ---- PERFIL POR CODIGO em unidade FIXA (loja Adyen/planilha, código que
+  // nunca muda) - a mesma "unificação" pedida pelo usuário: toda unidade,
+  // fixa ou cadastrada em runtime, pode ganhar o perfil que a MVPar tem ----
+  const perfilFixa = await putJson('/api/meta/unidades/19821/perfil', {
+    nome: 'Dom Sao Miguel', areas: ['rh'], tiposSolicitacao: [],
+  }, { Authorization: 'Bearer ' + token });
+  let okPerfilFixa = false;
+  try {
+    const d = JSON.parse(perfilFixa.corpo);
+    okPerfilFixa = perfilFixa.status === 200 && d.codigo === '19821' && JSON.stringify(d.areas) === JSON.stringify(['rh']);
+  } catch (e) { okPerfilFixa = false; }
+  if (!okPerfilFixa) ruins += 1;
+  console.log(`${okPerfilFixa ? '✓' : '✗'} unidade FIXA também ganha perfil restrito (não precisa recriar): HTTP ${perfilFixa.status} ${perfilFixa.corpo.slice(0, 90)}`);
+
+  const restritas = await pedir('/api/meta/unidades-restritas?area=fechamento', { Authorization: 'Bearer ' + token });
+  let okRestritas = false;
+  try {
+    const d = JSON.parse(restritas.corpo);
+    okRestritas = restritas.status === 200 && Array.isArray(d) && d.includes('19821');
+  } catch (e) { okRestritas = false; }
+  if (!okRestritas) ruins += 1;
+  console.log(`${okRestritas ? '✓' : '✗'} unidade fixa restrita aparece em unidades-restritas?area=fechamento (pra telas com base pré-populada removerem): HTTP ${restritas.status} ${restritas.corpo.slice(0, 90)}`);
+
+  const lancouFixaRestrita = await postarJson('/api/fechamentos/lancar', {
+    unidade: '19821', unidadeNome: 'Dom Sao Miguel', data: '2026-08-18', gerente: 'Teste', campos: {},
+  }, { Authorization: 'Bearer ' + token });
+  let okBloqueiaFixa = false;
+  try {
+    const d = JSON.parse(lancouFixaRestrita.corpo);
+    okBloqueiaFixa = lancouFixaRestrita.status === 400 && /não tem fechamento/i.test(d.error || '');
+  } catch (e) { okBloqueiaFixa = false; }
+  if (!okBloqueiaFixa) ruins += 1;
+  console.log(`${okBloqueiaFixa ? '✓' : '✗'} servidor recusa fechamento na unidade fixa restrita, mesmo que a tela ainda mostrasse ela: HTTP ${lancouFixaRestrita.status} ${lancouFixaRestrita.corpo.slice(0, 90)}`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de

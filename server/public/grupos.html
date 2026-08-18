@@ -148,11 +148,12 @@
 
 <div id="root" class="hidden">
   <div class="panel">
-    <h2>🏪 Unidades cadastradas no sistema</h2>
-    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">Unidades novas (loja abrindo, escritório/administrativo...) que ainda não existem nas listas fixas. Depois de cadastrada aqui, a unidade aparece nos seletores do RH, Central, permissões de usuário e nas lojas dos grupos abaixo. O código é a identidade da unidade e não muda depois de criado - só o nome de exibição.</p>
-    <div id="unidades-extras-lista" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;"></div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;">
-      <label style="flex:1;min-width:160px;font-size:11.5px;color:var(--muted);">Nome da unidade
+    <h2>🏪 Unidades</h2>
+    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">TODAS as unidades do sistema num lugar só - as fixas (loja com código Adyen/planilha, que nunca muda) e as cadastradas aqui em runtime (loja nova, escritório/administrativo...). Toda unidade pode ganhar um perfil (onde aparece, que tipo de solicitação aceita) igual o da MVPar - clique em ✏️ perfil pra configurar. Sem perfil nenhum, a unidade continua aparecendo em tudo, do jeito de sempre.</p>
+    <input type="text" id="ue-busca" placeholder="🔎 buscar por nome ou código..." oninput="renderUnidadesExtrasLista()" style="width:100%;margin-bottom:10px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;">
+    <div id="unidades-extras-lista" style="display:flex;flex-direction:column;gap:14px;margin-bottom:10px;max-height:480px;overflow-y:auto;"></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;border-top:1px solid var(--line);padding-top:10px;">
+      <label style="flex:1;min-width:160px;font-size:11.5px;color:var(--muted);">+ Cadastrar unidade nova (loja abrindo, escritório...) · Nome
         <input type="text" id="ue-nome" placeholder="ex: Administrativa (Escritório)" style="width:100%;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;">
       </label>
       <label style="flex:1;min-width:160px;font-size:11.5px;color:var(--muted);">Código (opcional - padrão: o próprio nome)
@@ -803,41 +804,80 @@ async function carregarGrupos(){
 // estoque/parque, só solicitações (compra/manutenção/TI/pagamento/nota) + RH/NOC
 const AREAS_LABEL = { fechamento:'Fechamento', entregas:'Entregas', estoque:'Estoque', parque:'Parque', rh:'RH', noc:'NOC Zenith', solicitacoes:'Solicitações (Central)', monitor:'Monitor' };
 const TIPOS_SOLICITACAO_LABEL = { estorno:'Estorno', 'ajuste-fechamento':'Ajuste de fechamento', compra:'Compra', manutencao:'Manutenção', 'suporte-ti':'Suporte TI', pagamento:'Pagamento', nota:'Nota' };
+// TODAS as unidades (fixas + cadastradas em runtime), a mesma lista que já
+// alimenta o checklist "Lojas desse grupo" (classificarUnidade em index.js) -
+// reaproveitada aqui pra unificar num painel só, em vez do antigo (que só
+// listava as cadastradas em runtime e escondia as fixas por completo
+let TODAS_UNIDADES = [];
+// so as que JA TEM perfil (colecao unidadesExtras) - pode ser tanto unidade
+// cadastrada em runtime (tem nome+codigo próprios) quanto uma unidade FIXA
+// que so ganhou perfil (nesse caso o nome aqui é so um espelho, quem manda
+// no nome de exibição da fixa continua sendo o mapa fixo de index.js)
 let UNIDADES_EXTRAS_LISTA = [];
 async function carregarUnidadesExtras(){
-  UNIDADES_EXTRAS_LISTA = await fetch('/api/meta/unidades-extras/lista').then(r=>r.json()).catch(()=>[]);
+  [TODAS_UNIDADES, UNIDADES_EXTRAS_LISTA] = await Promise.all([
+    fetch('/api/meta/unidades').then(r=>r.json()).catch(()=>[]),
+    fetch('/api/meta/unidades-extras/lista').then(r=>r.json()).catch(()=>[]),
+  ]);
+  renderUnidadesExtrasLista();
+}
+function badgePerfil(perfil){
+  const areas = (perfil && perfil.areas) || [], tipos = (perfil && perfil.tiposSolicitacao) || [];
+  if(!areas.length && !tipos.length) return `<span style="color:var(--muted);font-size:10.5px;">sem restrição - aparece em tudo</span>`;
+  const partes = [];
+  if(areas.length) partes.push(`restrita a: ${areas.map(a=>escapeHtml(AREAS_LABEL[a]||a)).join(', ')}`);
+  if(tipos.length) partes.push(`tipos: ${tipos.map(t=>escapeHtml(TIPOS_SOLICITACAO_LABEL[t]||t)).join(', ')}`);
+  return `<span style="color:var(--warn);font-size:10.5px;">${partes.join(' · ')}</span>`;
+}
+function renderUnidadesExtrasLista(){
   const el = document.getElementById('unidades-extras-lista');
-  el.innerHTML = UNIDADES_EXTRAS_LISTA.length ? UNIDADES_EXTRAS_LISTA.map(u=>{
-    const areas = u.areas||[], tipos = u.tiposSolicitacao||[];
-    const restricao = areas.length
-      ? `<span style="color:var(--warn);font-size:10.5px;">restrita a: ${areas.map(a=>escapeHtml(AREAS_LABEL[a]||a)).join(', ')}</span>`
-      : `<span style="color:var(--muted);font-size:10.5px;">sem restrição - aparece em tudo</span>`;
-    return `
-    <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:12.5px;">
-      <span style="flex:1;">${escapeHtml(u.nome)} <span style="color:var(--muted);font-size:11px;">· código: ${escapeHtml(u.codigo)}</span><br>${restricao}${tipos.length ? ` · <span style="color:var(--warn);font-size:10.5px;">tipos: ${tipos.map(t=>escapeHtml(TIPOS_SOLICITACAO_LABEL[t]||t)).join(', ')}</span>` : ''}</span>
-      <button type="button" class="back" style="cursor:pointer;" onclick="abrirEdicaoUnidadeExtra('${u.id}')">✏️ editar</button>
-      <button type="button" class="back" style="cursor:pointer;color:var(--bad);" onclick="excluirUnidadeExtra('${u.id}', '${escapeHtml(u.nome).replace(/'/g, '&#39;')}')">🗑️</button>
-    </div>`;
-  }).join('') :
-    '<span style="color:var(--muted);font-size:11.5px;">Nenhuma unidade cadastrada por aqui ainda - as fixas do sistema continuam valendo normalmente.</span>';
+  const busca = (document.getElementById('ue-busca').value||'').trim().toLowerCase();
+  const filtradas = !busca ? TODAS_UNIDADES : TODAS_UNIDADES.filter(u=>
+    u.nome.toLowerCase().includes(busca) || String(u.codigo).toLowerCase().includes(busca));
+  if(!filtradas.length){ el.innerHTML = '<span style="color:var(--muted);font-size:11.5px;">Nenhuma unidade encontrada.</span>'; return; }
+  const porSecao = new Map();
+  filtradas.forEach(u=>{
+    if(!porSecao.has(u.secao)) porSecao.set(u.secao, new Map());
+    const porGrupo = porSecao.get(u.secao);
+    const grupo = u.grupo || '—';
+    if(!porGrupo.has(grupo)) porGrupo.set(grupo, []);
+    porGrupo.get(grupo).push(u);
+  });
+  el.innerHTML = [...porSecao.entries()].map(([secao, porGrupo])=>{
+    const blocos = [...porGrupo.entries()].map(([grupo, itens])=>{
+      const linhas = itens.map(u=>{
+        const perfil = UNIDADES_EXTRAS_LISTA.find(p=>p.codigo===u.codigo);
+        const dinamica = grupo === 'Cadastradas no sistema'; // criada por aqui - tem nome/codigo proprios e pode ser excluida
+        return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:12.5px;">
+          <span style="flex:1;">${escapeHtml(u.nome)} <span style="color:var(--muted);font-size:11px;">· código: ${escapeHtml(String(u.codigo))}</span><br>${badgePerfil(perfil)}</span>
+          <button type="button" class="back" style="cursor:pointer;" onclick="abrirEdicaoUnidadeExtra('${escapeHtml(String(u.codigo)).replace(/'/g,"&#39;")}')">✏️ perfil</button>
+          ${dinamica && perfil ? `<button type="button" class="back" style="cursor:pointer;color:var(--bad);" onclick="excluirUnidadeExtra('${perfil.id}', '${escapeHtml(u.nome).replace(/'/g,"&#39;")}')">🗑️</button>` : ''}
+        </div>`;
+      }).join('');
+      return `<div class="unidades-grupo-titulo">${escapeHtml(grupo)}</div><div style="display:flex;flex-direction:column;gap:5px;margin-bottom:6px;">${linhas}</div>`;
+    }).join('');
+    return `<div><div class="unidades-secao-titulo">${escapeHtml(secao)}</div>${blocos}</div>`;
+  }).join('');
 }
 
 const unidadePerfilOverlay = document.getElementById('unidade-perfil-overlay');
-let EDITANDO_UNIDADE_EXTRA = null;
+let EDITANDO_UNIDADE_CODIGO = null;
 function checksPerfilHtml(name, labels, marcados){
   const set = new Set(marcados||[]);
   return Object.entries(labels).map(([valor,label])=>
     `<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);"><input type="checkbox" name="${name}" value="${valor}" ${set.has(valor)?'checked':''} style="width:auto;margin:0;"> ${escapeHtml(label)}</label>`
   ).join('');
 }
-function abrirEdicaoUnidadeExtra(id){
-  const u = UNIDADES_EXTRAS_LISTA.find(x=>x.id===id);
-  if(!u) return;
-  EDITANDO_UNIDADE_EXTRA = id;
-  document.getElementById('unidade-perfil-title').textContent = 'Perfil da unidade · ' + u.nome;
-  document.getElementById('up-nome').value = u.nome;
-  document.getElementById('up-areas').innerHTML = checksPerfilHtml('up-areas', AREAS_LABEL, u.areas);
-  document.getElementById('up-tipos').innerHTML = checksPerfilHtml('up-tipos', TIPOS_SOLICITACAO_LABEL, u.tiposSolicitacao);
+function abrirEdicaoUnidadeExtra(codigo){
+  const base = TODAS_UNIDADES.find(x=>String(x.codigo)===codigo);
+  const perfil = UNIDADES_EXTRAS_LISTA.find(x=>x.codigo===codigo);
+  if(!base && !perfil) return;
+  EDITANDO_UNIDADE_CODIGO = codigo;
+  const nome = (base && base.nome) || (perfil && perfil.nome) || codigo;
+  document.getElementById('unidade-perfil-title').textContent = 'Perfil da unidade · ' + nome;
+  document.getElementById('up-nome').value = nome;
+  document.getElementById('up-areas').innerHTML = checksPerfilHtml('up-areas', AREAS_LABEL, perfil && perfil.areas);
+  document.getElementById('up-tipos').innerHTML = checksPerfilHtml('up-tipos', TIPOS_SOLICITACAO_LABEL, perfil && perfil.tiposSolicitacao);
   document.getElementById('unidade-perfil-err').classList.add('hidden');
   unidadePerfilOverlay.classList.add('show');
 }
@@ -852,7 +892,7 @@ document.getElementById('unidade-perfil-form').addEventListener('submit', async 
     tiposSolicitacao: readChecked(document.getElementById('up-tipos')),
   };
   try{
-    const resp = await fetch(`/api/meta/unidades-extras/${EDITANDO_UNIDADE_EXTRA}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const resp = await fetch(`/api/meta/unidades/${encodeURIComponent(EDITANDO_UNIDADE_CODIGO)}/perfil`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
     unidadePerfilOverlay.classList.remove('show');
@@ -864,7 +904,7 @@ document.getElementById('unidade-perfil-form').addEventListener('submit', async 
 // nas opcoes de "Lojas desse grupo" imediatamente)
 async function recarregarUnidades(){
   await carregarUnidadesExtras();
-  UNIDADES = await fetch('/api/meta/unidades').then(r=>r.json());
+  UNIDADES = TODAS_UNIDADES;
   document.getElementById('c-unidades').innerHTML = unidadesChecksHtml('unidades', new Set());
 }
 
