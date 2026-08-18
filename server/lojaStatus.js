@@ -978,8 +978,14 @@ async function varrerAlertas() {
         && (Date.now() - processoIniciadoEm) < CARENCIA_POS_BOOT_MS) continue;
     if (!online && !doc.avisadoOffline) {
       // 'em' = ultimo heartbeat real (quando de fato silenciou), nao a hora da
-      // deteccao - fica mais fiel no registro
-      const evento = { tipo: 'offline', em: doc.ultimoHeartbeatEm };
+      // deteccao - fica mais fiel no registro. ip/ipLocal sao um retrato de
+      // QUANDO CAIU (pedido do Master: "qual era o IP quando perdeu conexao")
+      // - se a maquina voltar com IP novo, o evento preserva o antigo mesmo
+      // que o campo vivo do doc seja sobrescrito
+      const evento = {
+        tipo: 'offline', em: doc.ultimoHeartbeatEm,
+        ...(doc.ip ? { ip: doc.ip } : {}), ...(doc.ipLocal ? { ipLocal: doc.ipLocal } : {}),
+      };
       await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({
         avisadoOffline: true,
         // offlineDesde = quando de fato SILENCIOU, nao a hora da deteccao.
@@ -992,7 +998,13 @@ async function varrerAlertas() {
       });
       transicoes.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'offline' });
     } else if (online && doc.avisadoOffline) {
-      const evento = { tipo: 'online', em: Date.now(), duracaoMs: doc.offlineDesde ? (Date.now() - doc.offlineDesde) : null };
+      // no retorno o doc ja tem o IP NOVO (o heartbeat que provou que voltou
+      // tambem gravou o ip) - junto com o retrato do evento 'offline', o
+      // registro mostra se a maquina voltou com outro IP depois da queda
+      const evento = {
+        tipo: 'online', em: Date.now(), duracaoMs: doc.offlineDesde ? (Date.now() - doc.offlineDesde) : null,
+        ...(doc.ip ? { ip: doc.ip } : {}), ...(doc.ipLocal ? { ipLocal: doc.ipLocal } : {}),
+      };
       await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({
         avisadoOffline: false, offlineDesde: null,
         eventos: [...(doc.eventos || []), evento].slice(-EVENTOS_MAX),
