@@ -1315,7 +1315,11 @@ async function salvarNovoComputador(){
     if(!resp.ok) throw new Error(data.error || 'Erro ao cadastrar.');
     fecharModalNovoComputador();
     await carregar();
-    mostrarLinkGerado(data.url);
+    // logo apos cadastrar, o que a pessoa vai FAZER e instalar o vigia -
+    // entao a tela ja entrega o comando do PowerShell pronto, nao o link. O
+    // link continua a um clique, no botao 🔗 Link do detalhe do computador
+    // (so serve pro tipo atendimento, que roda no navegador).
+    await copiarComandoVigia(codigo, data.posto, data.tipo || tipo, `Computador "${nome}" cadastrado. ✅`);
   }catch(e){
     status.textContent = e.message; status.className = 'msg err'; status.classList.remove('hidden');
   }finally{
@@ -1346,17 +1350,25 @@ function copiarIpLocal(ip){
 // pra colar no PowerShell da loja. Baixa e instala contornando o Controle de
 // Aplicativo Inteligente do Windows 11 (que bloqueia .ps1 baixado pelo
 // navegador). Ver montarComandoInstalacao/rota comando-instalacao no servidor.
-async function copiarComandoVigia(codigo, posto, tipo){
+async function copiarComandoVigia(codigo, posto, tipo, prefixo){
   try{
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/comando-instalacao?tipo=${encodeURIComponent(tipo)}`);
     if(!resp.ok) throw new Error('Erro ao gerar o comando.');
     const { comando } = await resp.json();
+    // o passo-a-passo e o mesmo com ou sem area de transferencia - o que muda
+    // e so de onde a pessoa copia. Antes o caminho do fallback perdia a
+    // instrucao inteira e sobrava um comando solto sem explicacao
+    const passos = 'No computador da loja:\n1) Abra o PowerShell (menu Iniciar > digite PowerShell)\n'
+      + '2) Cole (Ctrl+V) e aperte Enter\n\nPronto - ele baixa, instala numa pasta fixa e já começa a rodar. '
+      + 'Não precisa clicar em nada nem baixar arquivo, e nada fica "solto" pra apagar depois.\n\n'
+      + 'Computador tipo servidor/escritório: a tarefa roda no PRÓXIMO LOGIN do usuário - deixe a sessão '
+      + 'bloqueada/desconectada (nunca "Sair").';
     let copiou = false;
     try { await navigator.clipboard.writeText(comando); copiou = true; } catch(e){ /* clipboard bloqueado (http/permissão) - mostra pra copiar na mão */ }
     if(copiou){
-      alert(`Comando de instalação copiado! ✅\n\nNo computador da loja:\n1) Abra o PowerShell (menu Iniciar > digite PowerShell)\n2) Cole (Ctrl+V) e aperte Enter\n\nPronto - ele baixa, instala numa pasta fixa e já começa a rodar. Não precisa clicar em nada nem baixar arquivo, e nada fica "solto" pra apagar depois.\n\nComputador tipo servidor/escritório: a tarefa roda no PRÓXIMO LOGIN do usuário - deixe a sessão bloqueada/desconectada (nunca "Sair").`);
+      alert(`${prefixo ? prefixo + '\n\n' : ''}Comando de instalação copiado! ✅\n\n${passos}`);
     } else {
-      prompt('Copie este comando e cole no PowerShell da loja (Ctrl+C):', comando);
+      prompt(`${prefixo ? prefixo + ' ' : ''}Copie este comando (Ctrl+C) e cole no PowerShell da loja:\n\n${passos}`, comando);
     }
   }catch(e){
     alert(e.message);
@@ -1434,11 +1446,16 @@ async function salvarEdicaoComputador(){
       body: JSON.stringify({ anydeskId }),
     });
     if(!respAd.ok) throw new Error((await respAd.json()).error || 'Erro ao salvar o AnyDesk.');
+    // guarda antes de fechar: fecharModalEditarComputador() zera as duas
+    const compCodigo = EDITAR_COMP_CODIGO;
+    const compPosto = EDITAR_COMP_POSTO;
     fecharModalEditarComputador();
     await carregar();
-    // mudou de unidade: o link/QR antigo (com a unidade velha) nao serve
-    // mais - mostra o link novo pra Master repassar pro dispositivo
-    if(mudouUnidade && data.url) mostrarLinkGerado(data.url);
+    // mudou de unidade: o vigia que ja esta instalado tem a unidade VELHA
+    // assada dentro dele (ver codigoTextoPS em vigiaScript.js), entao nao
+    // basta reabrir um link - a maquina precisa ser reinstalada com o
+    // comando novo. Por isso entrega o comando, igual ao cadastro.
+    if(mudouUnidade) await copiarComandoVigia(compCodigo, compPosto, tipo, 'Mudou de unidade - rode o comando abaixo na máquina pra ela reportar na unidade nova.');
   }catch(e){
     status.textContent = e.message; status.className = 'msg err'; status.classList.remove('hidden');
   }finally{
