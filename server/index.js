@@ -1993,6 +1993,11 @@ const UNIDADES_APELIDOS = {
   DOM_19706: 'Dom Bessa', Bessa: 'Dom Bessa', 'Dominos Bessa': 'Dom Bessa',
   DOM_19633: 'Dom Campina Grande', 'Dominos Campina Grande': 'Dom Campina Grande',
   DOM19940: 'Dom Tirol', 'Dominos Tirol': 'Dom Tirol',
+  // "Milky Moo Tirol Natal" - so tem codigo de Entregas (MMTirol Natal, sem
+  // Fechamento) mais o codigo direto da Adyen (Tirol Natal), que sem esse
+  // apelido caia no fallback generico e virava um 2o cadastro solto na
+  // secao Monitor/Outras (ver migracaoUnidades.js pro codigo unificado)
+  'MMTirol Natal': 'Milky Moo Tirol Natal', 'Tirol Natal': 'Milky Moo Tirol Natal',
   "Domino's Carrinho Aeroporto Recife": 'Dom Car Aero Recife',
   'Dominos Praça Aeroporto Recife': 'Dom Praça Aero Recife',
   'Spoleto Praça Aeroporto Recife': 'Spo Praça Aero Recife',
