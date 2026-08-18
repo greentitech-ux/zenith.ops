@@ -114,10 +114,20 @@
     <option value="60">60 dias atrás</option>
     <option value="90">90 dias atrás</option>
   </select>
+  <label for="f-grupo">Grupo</label>
+  <select id="f-grupo">
+    <option value="">Todos</option>
+    <option value="ARCFOOD">ARCFOOD</option>
+    <option value="BRAVO">Grupo Bravo (GBE)</option>
+  </select>
+  <label for="f-unidade">Unidade</label>
+  <select id="f-unidade">
+    <option value="">Todas</option>
+  </select>
 </div>
 
 <div class="panel">
-  <h2>Recorde geral · todas as lojas</h2>
+  <h2 id="geral-titulo">Recorde geral · todas as lojas</h2>
   <div class="geral-grid" id="geral-grid"><div class="empty">carregando...</div></div>
 </div>
 
@@ -206,14 +216,35 @@ function fmtSemana(s){ return s ? `${fmtData(s.inicio)} a ${fmtData(s.fim)}` : '
 
 let DADOS = null;
 
+// opcoes do seletor de Unidade vem da 1a carga (sem filtro nenhum, ja que os
+// selects comecam vazios/"Todas") - assim escolher um Grupo depois nao faz
+// as opcoes de Unidade encolherem pro que sobrou do filtro atual
+let UNIDADES_CARREGADAS = false;
+function popularUnidades(unidades){
+  const sel = document.getElementById('f-unidade');
+  const atual = sel.value;
+  const lista = [...(unidades||[])].sort((a,b)=>(a.unidadeNome||'').localeCompare(b.unidadeNome||'','pt-BR'));
+  sel.innerHTML = '<option value="">Todas</option>' + lista.map(u=>`<option value="${escapeHtml(u.unidade)}">${escapeHtml(u.unidadeNome)}</option>`).join('');
+  sel.value = atual;
+}
+
 async function carregar(){
   const janela = document.getElementById('f-janela').value;
-  const res = await fetch('/api/fechamentos/recordes?janela=' + janela);
+  const grupo = document.getElementById('f-grupo').value;
+  const unidade = document.getElementById('f-unidade').value;
+  const params = new URLSearchParams({ janela });
+  if(grupo) params.set('grupo', grupo);
+  if(unidade) params.set('unidades', unidade);
+  const res = await fetch('/api/fechamentos/recordes?' + params.toString());
   if(!res.ok){
     document.getElementById('geral-grid').innerHTML = '<div class="empty">Não foi possível carregar os recordes.</div>';
     return;
   }
   DADOS = await res.json();
+  if(!UNIDADES_CARREGADAS){
+    popularUnidades(DADOS.unidades);
+    UNIDADES_CARREGADAS = true;
+  }
   renderGeral();
   renderMeta();
   renderTabela();
@@ -230,8 +261,17 @@ function cardGeral(rotulo, item, tipo){
   </div>`;
 }
 
+function tituloFiltroAtivo(){
+  const grupoSel = document.getElementById('f-grupo');
+  const unidadeSel = document.getElementById('f-unidade');
+  if(unidadeSel.value) return unidadeSel.options[unidadeSel.selectedIndex].textContent;
+  if(grupoSel.value) return grupoSel.options[grupoSel.selectedIndex].textContent;
+  return 'todas as lojas';
+}
+
 function renderGeral(){
   const g = DADOS.geral;
+  document.getElementById('geral-titulo').textContent = 'Recorde geral · ' + tituloFiltroAtivo();
   document.getElementById('geral-grid').innerHTML =
     cardGeral('Maior venda · um dia', g.diaRecorde, 'alta') +
     cardGeral('Menor venda · um dia', g.diaMenor, 'baixa') +
@@ -288,6 +328,8 @@ function renderTabela(){
 }
 
 document.getElementById('f-janela').addEventListener('change', carregar);
+document.getElementById('f-grupo').addEventListener('change', carregar);
+document.getElementById('f-unidade').addEventListener('change', carregar);
 
 async function boot(){
   const res = await fetch('/api/me');
