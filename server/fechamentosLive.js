@@ -530,8 +530,14 @@ function sanitizarPatchMapa(obj, tipos) {
 async function editarDireto({ fechamentoId, mudancas, mudancasKpis, mudancasCanais, mudancasFormas, motivo, editadoPorEmail }) {
   const atual = await getOne(fechamentoId);
   if (!atual) throw new Error('Fechamento não encontrado.');
+  // grupo com Quebra desabilitada (ver grupos.js): 'quebra' nunca entra na
+  // edicao, mesmo que venha no payload - defesa em profundidade por tras do
+  // campo ja estar escondido no modal (fechamentos.html) pra esse grupo
+  const grupoDaUnidade = await grupos.grupoDaUnidade(atual.unidade);
+  const quebraDesabilitada = grupoDaUnidade && grupoDaUnidade.quebraHabilitada === false;
   const camposValidos = {};
   Object.entries(mudancas || {}).forEach(([campo, valor]) => {
+    if (campo === 'quebra' && quebraDesabilitada) return;
     if (CAMPOS_NUMERICOS.includes(campo)) camposValidos[campo] = num(valor);
     else if (CAMPOS_TEXTO.includes(campo)) camposValidos[campo] = String(valor ?? '').slice(0, 500);
   });

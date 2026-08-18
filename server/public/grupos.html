@@ -215,6 +215,9 @@
         <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);margin-top:10px;">
           <input type="checkbox" id="c-saidas-habilitado" style="width:auto;margin:0;" checked> Habilitar seção Outras saídas de caixa
         </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);margin-top:10px;">
+          <input type="checkbox" id="c-quebra-habilitada" style="width:auto;margin:0;" checked> Habilitar campo Quebra de caixa (schema antigo - desligue se essa franquia não usa)
+        </label>
       </fieldset>
 
       <fieldset>
@@ -282,6 +285,9 @@
       <input type="text" id="e-maquininha-pos-prefixo" placeholder="Maquininha POS" style="margin-left:22px;width:calc(100% - 22px);padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;">
       <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);margin-top:10px;">
         <input type="checkbox" id="e-saidas-habilitado" style="width:auto;margin:0;"> Habilitar seção Outras saídas de caixa
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);margin-top:10px;">
+        <input type="checkbox" id="e-quebra-habilitada" style="width:auto;margin:0;"> Habilitar campo Quebra de caixa (schema antigo - desligue se essa franquia não usa)
       </label>
     </fieldset>
 
@@ -661,6 +667,7 @@ document.getElementById('create-form').addEventListener('submit', async (e)=>{
     maquininhaPosHabilitado: document.getElementById('c-maquininha-pos-habilitado').checked,
     maquininhaPosPrefixo: document.getElementById('c-maquininha-pos-prefixo').value,
     saidasHabilitado: document.getElementById('c-saidas-habilitado').checked,
+    quebraHabilitada: document.getElementById('c-quebra-habilitada').checked,
     canaisVendaExtras: lerKpis('c-canais'),
     formasPagamentoExtras: lerKpis('c-formas'),
     kpisExtras: lerKpis('c-kpis'),
@@ -678,6 +685,7 @@ document.getElementById('create-form').addEventListener('submit', async (e)=>{
     document.getElementById('c-maquininha-pos-habilitado').checked = false;
     document.getElementById('c-maquininha-pos-prefixo').value = 'Maquininha POS';
     document.getElementById('c-saidas-habilitado').checked = true;
+    document.getElementById('c-quebra-habilitada').checked = true;
     document.getElementById('c-canais').innerHTML = '';
     document.getElementById('c-formas').innerHTML = '';
     document.getElementById('c-kpis').innerHTML = '';
@@ -702,6 +710,7 @@ function abrirEdicaoGrupo(id){
   document.getElementById('e-maquininha-pos-habilitado').checked = g.maquininhaPosHabilitado === true;
   document.getElementById('e-maquininha-pos-prefixo').value = g.maquininhaPosPrefixo || 'Maquininha POS';
   document.getElementById('e-saidas-habilitado').checked = g.saidasHabilitado !== false;
+  document.getElementById('e-quebra-habilitada').checked = g.quebraHabilitada !== false;
   document.getElementById('e-canais').innerHTML = '';
   (g.canaisVendaExtras||[]).forEach(k=>adicionarKpi('e-canais', k.label, null, k.operacao, k.tambemNoOutroTotal, null, k.manual));
   document.getElementById('e-formas').innerHTML = '';
@@ -729,6 +738,7 @@ document.getElementById('grupo-form').addEventListener('submit', async (e)=>{
     maquininhaPosHabilitado: document.getElementById('e-maquininha-pos-habilitado').checked,
     maquininhaPosPrefixo: document.getElementById('e-maquininha-pos-prefixo').value,
     saidasHabilitado: document.getElementById('e-saidas-habilitado').checked,
+    quebraHabilitada: document.getElementById('e-quebra-habilitada').checked,
     canaisVendaExtras: lerKpis('e-canais'),
     formasPagamentoExtras: lerKpis('e-formas'),
     kpisExtras: lerKpis('e-kpis'),

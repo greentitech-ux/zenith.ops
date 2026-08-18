@@ -17,8 +17,26 @@ const { resolverBucket } = require('./storageBucket');
 const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
+// planilha ARCFOOD "viva": aba "BD", onde o app grava os fechamentos
+// lançados ao vivo (enviarFechamentoArcfood) e de onde ele le pra exibir no
+// painel - cobre so os dias recentes (o restante do historico, mais antigo,
+// nao passa mais por ela).
+const SHEET_ID_ARCFOOD = process.env.SHEET_ID_ARCFOOD || '1XosBc3cNF9gAha91u_g9WnAOtbeTvxrhfKuupolguUU';
+const SHEET_ABA_ARCFOOD = process.env.SHEET_ABA_ARCFOOD || 'BD';
+
+// historico antigo da ARCFOOD: 4 abas, uma por loja (MOOCA/TATUAPE/CARRAO/
+// SMIGUEL), com os lancamentos legados (a aba BD costumava ter uma query
+// puxando delas - hoje nao puxa mais, entao esse historico nao aparecia no
+// painel). Entram como fontes SO DE LEITURA adicionais, somadas ao BD - por
+// enquanto as datas de cada fonte nao se sobrepoem (BD = recente, essas 4 =
+// mais antigas), entao mesclarLancamentosDoMesmoDia nao soma fechamento em
+// dobro; se um dia passar a haver sobreposicao real, precisa revisitar isso.
+const SHEET_ID_ARCFOOD_HISTORICO = process.env.SHEET_ID_ARCFOOD_HISTORICO || '1F-FnLydHOfeiMJexjO2RJOwn88O6uUt_PeVH0PjoKYs';
+const ARCFOOD_ABAS_HISTORICO = ['MOOCA', 'TATUAPE', 'CARRAO', 'SMIGUEL'];
+
 const PLANILHAS = [
-  { grupo: 'ARCFOOD', id: process.env.SHEET_ID_ARCFOOD || '1XosBc3cNF9gAha91u_g9WnAOtbeTvxrhfKuupolguUU', aba: process.env.SHEET_ABA_ARCFOOD || 'BD' },
+  { grupo: 'ARCFOOD', id: SHEET_ID_ARCFOOD, aba: SHEET_ABA_ARCFOOD },
+  ...ARCFOOD_ABAS_HISTORICO.map((aba) => ({ grupo: 'ARCFOOD', id: SHEET_ID_ARCFOOD_HISTORICO, aba })),
   { grupo: 'BRAVO', id: process.env.SHEET_ID_BRAVO || '1dObCSsx4BYDGSQG81KLIOtFSNNs18mVOD5GfYzRIZcM', aba: process.env.SHEET_ABA_BRAVO || 'BD' },
 ];
 
@@ -51,10 +69,23 @@ function parseMoneyBR(raw) {
 
 const MESES_PT = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };
 
-// planilha ARCFOOD: coluna "Data" so tem dia/mes ("31/08"), o ano vem da
-// coluna "Mes" ("AGO/2026", "MAR./2026" etc)
+// planilha ARCFOOD: schema antigo, coluna "Data" so tem dia/mes ("31/08"), o
+// ano vem da coluna "Mes" ("AGO/2026", "MAR./2026" etc). Schema novo (abas
+// ja reorganizadas, sem coluna "Mes"): "Data" já vem completa ("31/08/2026")
+// - tenta esse formato primeiro, cai pro antigo (dataStr+mesStr) se a Data
+// não tiver o ano.
 function parseDataArcfood(dataStr, mesStr) {
-  const dia = parseInt(String(dataStr || '').split('/')[0], 10);
+  const partes = String(dataStr || '').split('/');
+  if (partes.length === 3) {
+    const [dd, mm, anoRaw] = partes;
+    const dia = parseInt(dd, 10);
+    const mes = parseInt(mm, 10);
+    if (dia && mes && anoRaw) {
+      const ano = anoRaw.length === 2 ? '20' + anoRaw : anoRaw;
+      return `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+    }
+  }
+  const dia = parseInt(partes[0], 10);
   const m = String(mesStr || '').toLowerCase().match(/([a-z]{3})\.?\/(\d{4})/);
   if (!dia || !m || !MESES_PT[m[1]]) return null;
   return `${m[2]}-${String(MESES_PT[m[1]]).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
@@ -238,7 +269,7 @@ function linhaParaFechamento(grupo, header, linha) {
     carryout: parseMoneyBR(get('Carryout')),
     pickup: parseMoneyBR(get('Pick-UP')),
     loja: parseMoneyBR(get('Loja')),
-    adyen: parseMoneyBR(get('Adyen')),
+    adyen: parseMoneyBR(get('AdyenV2') ?? get('Adyen')),
     ifood: parseMoneyBR(get('Ifood')),
     food99: parseMoneyBR(get('99Food')),
     pix: parseMoneyBR(get('Pix')),
@@ -256,7 +287,7 @@ function linhaParaFechamento(grupo, header, linha) {
     observacao: get('Observação') || null,
     quebra: parseMoneyBR(get('Quebra')),
     tc: parseMoneyBR(get('TC')),
-    cancelados: parseMoneyBR(get('Cancelados')),
+    cancelados: parseMoneyBR(get('Cancelados') ?? get('Cancelado')),
   };
 }
 
@@ -367,29 +398,35 @@ async function sincronizar({ completa = false } = {}) {
   let linhasNovas = 0;
   for (const planilha of PLANILHAS) {
     const chave = `${planilha.id}__${planilha.aba}`;
-    let estado = completa ? null : estadoSyncFechamentos.get(chave);
-    if (!estado) {
-      const valores = await buscarAba(planilha.id, planilha.aba);
-      if (!valores.length) { estadoSyncFechamentos.delete(chave); continue; }
-      const header = valores[0];
-      const brutos = [];
-      for (let i = 1; i < valores.length; i++) {
-        const fechamento = linhaParaFechamento(planilha.grupo, header, valores[i]);
-        if (fechamento) brutos.push(fechamento);
+    try {
+      let estado = completa ? null : estadoSyncFechamentos.get(chave);
+      if (!estado) {
+        const valores = await buscarAba(planilha.id, planilha.aba);
+        if (!valores.length) { estadoSyncFechamentos.delete(chave); continue; }
+        const header = valores[0];
+        const brutos = [];
+        for (let i = 1; i < valores.length; i++) {
+          const fechamento = linhaParaFechamento(planilha.grupo, header, valores[i]);
+          if (fechamento) brutos.push(fechamento);
+        }
+        estado = { header, linhasLidas: valores.length, brutos };
+        estadoSyncFechamentos.set(chave, estado);
+        linhasNovas += valores.length - 1;
+      } else {
+        const novas = await buscarLinhasNovas(planilha.id, planilha.aba, estado.linhasLidas + 1);
+        for (const linha of novas) {
+          const fechamento = linhaParaFechamento(planilha.grupo, estado.header, linha);
+          if (fechamento) estado.brutos.push(fechamento);
+        }
+        estado.linhasLidas += novas.length;
+        linhasNovas += novas.length;
       }
-      estado = { header, linhasLidas: valores.length, brutos };
-      estadoSyncFechamentos.set(chave, estado);
-      linhasNovas += valores.length - 1;
-    } else {
-      const novas = await buscarLinhasNovas(planilha.id, planilha.aba, estado.linhasLidas + 1);
-      for (const linha of novas) {
-        const fechamento = linhaParaFechamento(planilha.grupo, estado.header, linha);
-        if (fechamento) estado.brutos.push(fechamento);
-      }
-      estado.linhasLidas += novas.length;
-      linhasNovas += novas.length;
+      resultado.push(...estado.brutos);
+    } catch (e) {
+      // uma fonte com problema (nao compartilhada, aba renomeada, etc) nao
+      // pode derrubar a sincronizacao inteira - registra e segue pras outras
+      console.warn(`sheetsSync: falha lendo ${chave} (${planilha.grupo}): ${e.message}`);
     }
-    resultado.push(...estado.brutos);
   }
   if (linhasNovas > 0) await persistenciaFechamentos.salvar();
   const lista = mesclarLancamentosDoMesmoDia(resultado);
@@ -411,9 +448,12 @@ const ARCFOOD_EMAIL = {
 };
 const MESES_PT_INVERSO = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 
-function ddmmDaData(dataISO) {
-  const [, mm, dd] = String(dataISO).split('-');
-  return `${dd}/${mm}`;
+// manda a data completa (dd/mm/yyyy) - funciona tanto pro schema antigo
+// (que ainda tem a coluna "Mes" separada pro ano, e so usa o dd/mm daqui)
+// quanto pro novo (sem "Mes", precisa do ano direto na coluna "Data")
+function ddmmyyyyDaData(dataISO) {
+  const [ano, mm, dd] = String(dataISO).split('-');
+  return `${dd}/${mm}/${ano}`;
 }
 function mesDaDataArcfood(dataISO) {
   const [ano, mm] = String(dataISO).split('-');
@@ -443,13 +483,18 @@ const ARCFOOD_SAIDA_SLOTS = [
 // planilha (caminho inverso de linhaParaFechamento). "adyen"/"adyenPos" no
 // registro do app SÃO a soma das maquininhas/maquininhas-POS (ver
 // lancamento.html, campos.adyen = soma de MAQUINAS) - por isso tambem
-// preenchem Adyen/SomaMaq/SomaPOS
+// preenchem Adyen/SomaMaq/SomaPOS.
+// Alguns nomes aparecem duplicados de propósito (Adyen/AdyenV2,
+// Cancelados/Cancelado): cada aba ARCFOOD pode estar no schema antigo ou no
+// reorganizado, com nomes de coluna diferentes - setCol/valuesBatchUpdate
+// ignoram silenciosamente o nome que não existir no cabeçalho daquela aba,
+// então só a chave certa realmente grava.
 function camposEscalaresArcfood(f) {
   return {
     Nome: f.gerente || '',
     Unidade: ARCFOOD_NOME_PLANILHA[f.unidade] || f.unidadeNome || f.unidade,
-    Data: ddmmDaData(f.data),
-    Mes: mesDaDataArcfood(f.data),
+    Data: ddmmyyyyDaData(f.data),
+    Mes: mesDaDataArcfood(f.data), // só usada pelas abas no schema antigo
     'Caixa Inicial': numEnvio(f.caixaInicial),
     'Caixa Final': numEnvio(f.caixaFinal),
     Delivery: numEnvio(f.delivery),
@@ -457,6 +502,7 @@ function camposEscalaresArcfood(f) {
     'Pick-UP': numEnvio(f.pickup),
     Loja: numEnvio(f.loja),
     Adyen: numEnvio(f.adyen),
+    AdyenV2: numEnvio(f.adyen),
     Ifood: numEnvio(f.ifood),
     '99Food': numEnvio(f.food99),
     Pix: numEnvio(f.pix),
@@ -475,6 +521,7 @@ function camposEscalaresArcfood(f) {
     Quebra: numEnvio(f.quebra),
     TC: numEnvio(f.tc),
     Cancelados: numEnvio(f.cancelados),
+    Cancelado: numEnvio(f.cancelados),
     Email: ARCFOOD_EMAIL[f.unidade] || '',
   };
 }
@@ -567,8 +614,11 @@ async function valuesBatchUpdate(spreadsheetId, aba, linhaNumero, header, mudanc
 // planilha), atualiza so as colunas conhecidas em vez de acrescentar linha
 // duplicada; senao, adiciona uma linha nova no final
 async function enviarFechamentoArcfood(f) {
-  const planilha = PLANILHAS.find((p) => p.grupo === 'ARCFOOD');
-  if (!planilha) throw new Error('Planilha ARCFOOD não configurada.');
+  // grava sempre na aba BD viva - nunca nas 4 abas de historico (leitura
+  // apenas). Filtra por id+aba especificos, e nao so por grupo==='ARCFOOD',
+  // ja que agora PLANILHAS tem 5 entradas ARCFOOD (BD + 4 historico)
+  const planilha = PLANILHAS.find((p) => p.grupo === 'ARCFOOD' && p.id === SHEET_ID_ARCFOOD && p.aba === SHEET_ABA_ARCFOOD);
+  if (!planilha) throw new Error('Planilha ARCFOOD (aba BD) não configurada.');
   const token = await getAccessToken();
   const valores = await buscarAba(planilha.id, planilha.aba);
   const header = valores[0] || [];
@@ -576,15 +626,18 @@ async function enviarFechamentoArcfood(f) {
 
   const iUnidade = header.indexOf('Unidade');
   const iData = header.indexOf('Data');
-  const iMes = header.indexOf('Mes');
+  const iMes = header.indexOf('Mes'); // -1 nas abas ja reorganizadas (sem essa coluna)
   const unidadeAlvo = normalizarTexto(ARCFOOD_NOME_PLANILHA[f.unidade] || '');
-  const dataAlvo = ddmmDaData(f.data);
-  const mesAlvo = mesDaDataArcfood(f.data);
 
+  // compara pela data ISO já interpretada (mesmo parser da leitura), em vez
+  // de comparar o texto cru da celula - assim funciona tanto pro schema
+  // antigo (Data curta + coluna Mes) quanto pro novo (Data completa, sem
+  // Mes), e nao quebra se a celula estiver formatada de forma abreviada
   let linhaExistente = -1;
   for (let i = 1; i < valores.length; i++) {
     const linha = valores[i];
-    if (normalizarTexto(linha[iUnidade]) === unidadeAlvo && String(linha[iData] || '').trim() === dataAlvo && String(linha[iMes] || '').trim() === mesAlvo) {
+    const dataLinha = parseDataArcfood(linha[iData], iMes >= 0 ? linha[iMes] : undefined);
+    if (normalizarTexto(linha[iUnidade]) === unidadeAlvo && dataLinha === f.data) {
       linhaExistente = i + 1; // 1-indexado + linha de cabecalho
       break;
     }

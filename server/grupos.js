@@ -125,7 +125,7 @@ async function listUncached() {
 const gruposCache = createCache(listUncached, 5 * 60 * 1000);
 const list = gruposCache.cached;
 
-async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado, lerCanaisPorImagem, dicaLeituraCanais }) {
+async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado, lerCanaisPorImagem, dicaLeituraCanais, quebraHabilitada }) {
   const nomeLimpo = String(nome || '').trim();
   if (!nomeLimpo) throw new Error('Informe o nome do grupo.');
   const ref = COLLECTION.doc();
@@ -159,6 +159,13 @@ async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPag
     maquininhaPosHabilitado: maquininhaPosHabilitado === true,
     maquininhaPosPrefixo: sanitizarPrefixoPos(maquininhaPosPrefixo),
     saidasHabilitado: saidasHabilitado !== false,
+    // "Quebra de caixa" e o unico campo fixo do schema antigo (planilha
+    // importada) que uma franquia pode querer desligar de vez - nasce
+    // habilitado (comportamento de sempre) pra nao mudar nada em grupo ja
+    // existente. Desligado: some da tela/relatorio E do modal de edicao do
+    // Master (ver fechamentos.html), nao so escondido por preferencia
+    // pessoal como o seletor 🧩 Colunas
+    quebraHabilitada: quebraHabilitada !== false,
     criadoEm: new Date().toISOString(),
   };
   await ref.set(registro);
@@ -166,7 +173,7 @@ async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPag
   return registro;
 }
 
-async function update(id, { nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado, lerCanaisPorImagem, dicaLeituraCanais }) {
+async function update(id, { nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado, lerCanaisPorImagem, dicaLeituraCanais, quebraHabilitada }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Grupo não encontrado.');
@@ -189,6 +196,7 @@ async function update(id, { nome, unidades, kpisExtras, canaisVendaExtras, forma
   if (maquininhaPosHabilitado != null) patch.maquininhaPosHabilitado = maquininhaPosHabilitado === true;
   if (maquininhaPosPrefixo != null) patch.maquininhaPosPrefixo = sanitizarPrefixoPos(maquininhaPosPrefixo);
   if (saidasHabilitado != null) patch.saidasHabilitado = saidasHabilitado !== false;
+  if (quebraHabilitada != null) patch.quebraHabilitada = quebraHabilitada !== false;
   await ref.update(patch);
   gruposCache.invalidar();
   return { ...snap.data(), ...patch };
