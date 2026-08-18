@@ -161,6 +161,7 @@
   .coluna-linha.arrastando{opacity:.35;}
   .coluna-linha-alca{color:var(--muted);font-size:14px;line-height:1;user-select:none;flex:none;}
   .coluna-linha label{display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;min-width:0;}
+  .coluna-linha-mover-check{flex:none;width:auto;margin:0;cursor:pointer;}
   .fech-modal .secao-titulo:first-of-type{margin-top:0;}
   .fech-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 10px;}
   @media(max-width:480px){ .fech-grid{grid-template-columns:1fr;} }
@@ -324,7 +325,7 @@
 <div class="fech-overlay hidden" id="colunas-overlay">
   <div class="fech-modal" style="max-width:420px;">
     <h3>🧩 Colunas da tabela e dos relatórios</h3>
-    <div class="sub">Só aparecem as colunas dos grupos exibidos agora na tabela. Desmarque o que não deve aparecer, e arraste pela ⠿ pra colocar na ordem que quiser exportar. Data e Unidade são sempre exibidas, sempre primeiro. A escolha fica salva neste navegador.</div>
+    <div class="sub">Só aparecem as colunas dos grupos exibidos agora na tabela. Desmarque o que não deve aparecer, e arraste pela ⠿ pra colocar na ordem que quiser exportar. Pra mover várias de uma vez, marque o check da direita nelas e arraste qualquer uma das marcadas - todas seguem juntas, na mesma ordem que já tinham entre si. Data e Unidade são sempre exibidas, sempre primeiro. A escolha fica salva neste navegador.</div>
     <div id="colunas-lista" style="display:flex;flex-direction:column;gap:4px;margin:12px 0;max-height:50vh;overflow-y:auto;"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button type="button" class="preset-btn" onclick="fecharSeletorColunas()">Cancelar</button>
@@ -1683,30 +1684,52 @@ function renderColunasLista(opcoes, marcada){
         <input type="checkbox" data-check ${marcada(o.key)?'checked':''} style="width:auto;margin:0;">
         ${escapeHtml(o.label)}
       </label>
+      <input type="checkbox" data-mover class="coluna-linha-mover-check" title="Marcar pra mover junto com outras marcadas - arraste qualquer uma delas">
     </div>`).join('');
 }
-// drag-and-drop nativo (HTML5): guarda a linha arrastada numa variavel
-// simples (mais confiavel que depender do dataTransfer pra achar o elemento
-// de novo) - dragover vai reposicionando a linha ao vivo, conforme o mouse
-// passa por cima da metade de cima ou de baixo da linha alvo
-let COLUNA_ARRASTANDO = null;
+// drag-and-drop nativo (HTML5): guarda a(s) linha(s) arrastada(s) numa
+// variavel simples (mais confiavel que depender do dataTransfer pra achar o
+// elemento de novo) - dragover vai reposicionando ao vivo, conforme o mouse
+// passa por cima da metade de cima ou de baixo da linha alvo.
+//
+// checkbox da direita ("mover junto"): marca varias linhas e arraste
+// QUALQUER uma das marcadas - todas se movem juntas pro ponto do drop, na
+// MESMA ordem relativa que tinham entre si antes (ex: marcou a 3a, a 10a e
+// a 13a e arrastou pro topo -> viram 1a, 2a e 3a, nessa ordem). Arrastar uma
+// linha NAO marcada continua movendo só ela, do jeito de sempre.
+let COLUNAS_ARRASTANDO = null; // array - 1 item no caso normal, varios no caso "mover junto"
+function linhasMarcadasParaMover(){
+  return [...document.querySelectorAll('#colunas-lista .coluna-linha')].filter((l) => l.querySelector('input[data-mover]').checked);
+}
 function iniciarArrastoColuna(e){
-  COLUNA_ARRASTANDO = e.currentTarget;
-  e.currentTarget.classList.add('arrastando');
+  const linha = e.currentTarget;
+  const marcadas = linhasMarcadasParaMover();
+  COLUNAS_ARRASTANDO = (marcadas.length > 1 && marcadas.includes(linha)) ? marcadas : [linha];
+  COLUNAS_ARRASTANDO.forEach((l) => l.classList.add('arrastando'));
   e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', e.currentTarget.dataset.coluna); // exigido por alguns navegadores pra permitir o drag
+  e.dataTransfer.setData('text/plain', linha.dataset.coluna); // exigido por alguns navegadores pra permitir o drag
 }
 function sobreArrastoColuna(e){
   e.preventDefault();
-  if(!COLUNA_ARRASTANDO || e.currentTarget===COLUNA_ARRASTANDO) return;
+  if(!COLUNAS_ARRASTANDO || !COLUNAS_ARRASTANDO.length) return;
   const alvo = e.currentTarget;
+  if(COLUNAS_ARRASTANDO.includes(alvo)) return;
   const rect = alvo.getBoundingClientRect();
   const antesDoAlvo = (e.clientY - rect.top) < rect.height/2;
-  alvo.parentElement.insertBefore(COLUNA_ARRASTANDO, antesDoAlvo ? alvo : alvo.nextSibling);
+  const ref = antesDoAlvo ? alvo : alvo.nextSibling;
+  // o ponto de referencia tambem esta sendo arrastado (ex: passou o mouse
+  // entre duas linhas marcadas) - espera o mouse chegar numa linha que nao
+  // faz parte do grupo, senao a ordem entre as marcadas embaralharia
+  if(ref && COLUNAS_ARRASTANDO.includes(ref)) return;
+  COLUNAS_ARRASTANDO.forEach((l) => alvo.parentElement.insertBefore(l, ref));
 }
 function terminarArrastoColuna(e){
-  e.currentTarget.classList.remove('arrastando');
-  COLUNA_ARRASTANDO = null;
+  (COLUNAS_ARRASTANDO||[]).forEach((l) => l.classList.remove('arrastando'));
+  // desmarca os checks de "mover junto" depois de usados - senao a proxima
+  // vez que alguem arrastar UMA linha qualquer, ela viria junto com um grupo
+  // que ninguem lembra mais que tava marcado
+  document.querySelectorAll('#colunas-lista input[data-mover]').forEach((cb) => { cb.checked = false; });
+  COLUNAS_ARRASTANDO = null;
 }
 function abrirSeletorColunas(){
   renderColunasLista(ordenarPorPreferencia(opcoesColunas()), k=>!COLUNAS_OCULTAS.has(k));
