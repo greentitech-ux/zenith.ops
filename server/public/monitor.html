@@ -1333,12 +1333,18 @@ setupMultiselect('status');
 setupMultiselect('unidade');
 
 // grupos de unidades: clicar no grupo seleciona de uma vez todas as
-// unidades daquele grupo (identificadas pelos digitos do codigo da unidade)
+// unidades daquele grupo. Lista tanto o codigo UNIFICADO (= codigo do
+// Fechamento, ver migracaoUnidades.js no backend) quanto os codigos ANTIGOS
+// de merchantAccountCode da Adyen que ainda podem aparecer numa transacao
+// que nao passou pela migracao - ex: "Dominos Caruaru" (novo) e "DOM_19798"
+// (antigo) sao a MESMA loja. Antes disso comparava so os DIGITOS do codigo
+// (digitsOf), o que quebrava pro Grupo Bravo (GBE) porque o codigo
+// unificado dessas lojas e um nome, sem digito nenhum (ex: "Dominos
+// Caruaru") - o grupo simplesmente nao selecionava nada.
 const UNIDADE_GROUPS = {
-  ARCFOOD: ['19888','19889','19855','19821'],
-  GBE: ['19911','19940','19633','19706','19798'],
+  ARCFOOD: ['19888','19889','19855','19821','Mooca','Tatuape','Carrao','Sao Miguel','DOM___19888','DOM_19889','DOM__19821','DOM__19855'],
+  GBE: ['Dominos Caruaru','Dominos Garanhuns','Dominos Bessa','Dominos Campina Grande','Dominos Tirol','DOM_19798','DOM19911','DOM_19706','DOM_19633','DOM19940'],
 };
-function digitsOf(s){ return (s||'').replace(/\D/g,''); }
 
 function renderMultiselectOptions(key, options, selectedSet, allLabel, singularLabel, groups){
   const panel = document.getElementById('ms-'+key+'-panel');
@@ -1346,7 +1352,7 @@ function renderMultiselectOptions(key, options, selectedSet, allLabel, singularL
   // remove selecoes de opcoes que nao existem mais nos dados
   for(const v of [...selectedSet]) if(!options.includes(v)) selectedSet.delete(v);
   const groupsHtml = groups ? '<div class="group-sep">' + Object.entries(groups).map(([nome, nums])=>{
-    const membros = options.filter(o=>nums.includes(digitsOf(o)));
+    const membros = options.filter(o=>nums.includes(o));
     const marcado = membros.length>0 && membros.every(o=>selectedSet.has(o));
     return `<label class="group-option" data-group="${nome}"><span>${nome}</span><input type="checkbox" data-group-cb value="${nome}" ${marcado?'checked':''}></label>`;
   }).join('') + '</div>' : '';
@@ -1363,7 +1369,7 @@ function renderMultiselectOptions(key, options, selectedSet, allLabel, singularL
   if(groups){
     panel.querySelectorAll('[data-group-cb]').forEach(cb=>{
       cb.addEventListener('change', ()=>{
-        const membros = options.filter(o=>groups[cb.value].includes(digitsOf(o)));
+        const membros = options.filter(o=>groups[cb.value].includes(o));
         if(cb.checked) membros.forEach(o=>selectedSet.add(o));
         else membros.forEach(o=>selectedSet.delete(o));
         renderMultiselectOptions(key, options, selectedSet, allLabel, singularLabel, groups);

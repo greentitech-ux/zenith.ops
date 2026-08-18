@@ -375,4 +375,5 @@ module.exports = {
   STATUSES, EXECUCAO_STATUSES, create, listAll, getOne, updateStatus, update, remove, marcarNotificacaoVista,
   redirecionar, converterParaSolicitacao, atualizarExecucao, podeAgirComLink, gerarLinkAcao, revogarLinkAcao,
   buscarPorLinkAcao, decidirComLink, atualizarExecucaoComLink,
+  invalidar: () => refundsCache.invalidar(),
 };

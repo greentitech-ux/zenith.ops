@@ -165,6 +165,34 @@ function allTransactions() {
   return load();
 }
 
+// migracao pontual de codigo de unidade em lote (ver migracaoUnidades.js,
+// unificacao do espaco Monitor/Adyen com o de Fechamento) - reescreve o
+// campo unidade tanto no cache em memoria quanto no Firestore, e refaz o
+// snapshot do Storage na hora: sem isso o cache/snapshot ficariam com o
+// codigo antigo ate o proximo boot, mesmo com o Firestore ja corrigido. O
+// docId nao muda (e baseado em pspReference+eventCode, nunca na unidade),
+// entao da pra so atualizar o campo no mesmo documento, sem apagar/recriar.
+async function renomearUnidades(mapaAntigoParaNovo, { executar = false } = {}) {
+  const all = load();
+  const afetadas = all.filter((t) => mapaAntigoParaNovo[t.unidade]);
+  if (!executar) return afetadas.length;
+  if (!afetadas.length) return 0;
+
+  for (const tx of afetadas) tx.unidade = mapaAntigoParaNovo[tx.unidade];
+
+  // Firestore aceita no maximo 500 operacoes por batch
+  for (let i = 0; i < afetadas.length; i += 450) {
+    const lote = afetadas.slice(i, i + 450);
+    const batch = db.batch();
+    for (const t of lote) {
+      batch.update(COLLECTION.doc(docId(t)), { unidade: t.unidade, _syncEm: admin.firestore.FieldValue.serverTimestamp() });
+    }
+    await batch.commit();
+  }
+  await salvarSnapshot();
+  return afetadas.length;
+}
+
 // comentario manual sobre um estorno especifico (ex: "estornei eu mesmo pelo
 // painel da Adyen") - identificado pelo mesmo par pspReference+eventCode
 // usado no resto do store
@@ -285,6 +313,7 @@ module.exports = {
   init,
   addOrUpdate,
   allTransactions,
+  renomearUnidades,
   setComentario,
   clientStats,
   clientKey,

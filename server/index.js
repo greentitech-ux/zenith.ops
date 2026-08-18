@@ -1992,6 +1992,7 @@ const UNIDADES_APELIDOS = {
   DOM19911: 'Dom Garanhuns', Garanhuns: 'Dom Garanhuns', 'Dominos Garanhuns': 'Dom Garanhuns',
   DOM_19706: 'Dom Bessa', Bessa: 'Dom Bessa', 'Dominos Bessa': 'Dom Bessa',
   DOM_19633: 'Dom Campina Grande', 'Dominos Campina Grande': 'Dom Campina Grande',
+  DOM19940: 'Dom Tirol', 'Dominos Tirol': 'Dom Tirol',
   "Domino's Carrinho Aeroporto Recife": 'Dom Car Aero Recife',
   'Dominos Praça Aeroporto Recife': 'Dom Praça Aero Recife',
   'Spoleto Praça Aeroporto Recife': 'Spo Praça Aero Recife',
@@ -2007,7 +2008,7 @@ const UNIDADES_APELIDOS = {
 // Usuarios; nao afeta em nada o filtro de permissao em si
 const ARCFOOD_FECHAMENTO = new Set(['19821', '19855', '19888', '19889']);
 const ARCFOOD_MONITOR = new Set(['Mooca', 'Tatuape', 'Carrao', 'Sao Miguel', 'DOM___19888', 'DOM_19889', 'DOM__19821', 'DOM__19855']);
-const GBE_MONITOR = new Set(['DOM_19798', 'DOM19911', 'DOM_19706', 'DOM_19633']);
+const GBE_MONITOR = new Set(['DOM_19798', 'DOM19911', 'DOM_19706', 'DOM_19633', 'DOM19940']);
 function classificarUnidade(codigo) {
   if (ARCFOOD_FECHAMENTO.has(codigo)) return { secao: 'Fechamento', grupo: 'ARCFOOD' };
   if (ARCFOOD_MONITOR.has(codigo)) return { secao: 'Monitor / Disputas (Adyen)', grupo: 'ARCFOOD' };
@@ -2083,13 +2084,15 @@ async function construirUnidadesMapa() {
   // unidades cadastradas pelo Master em runtime (unidades.js) - loja nova ou
   // unidade administrativa que ainda nao existe em nenhuma lista fixa
   Object.entries(await unidadesExtras.mapa().catch(() => ({}))).forEach(([codigo, nome]) => { mapa[codigo] = mapa[codigo] || nome; });
-  // funde qualquer codigo ANTIGO de Entregas que ainda apareça em alguma
-  // fonte (planilha ainda nao resincronizada por completo, cache antigo em
-  // memoria...) no codigo unificado - ver migracaoUnidades.js. Sem isso um
-  // "Caruaru" solto reaparecia do lado do "Dominos Caruaru" (que já é o
-  // cadastro de verdade) mesmo depois da migração já ter rodado no Firestore,
-  // porque entregasHistoricoData vem direto da planilha, não do banco
-  Object.entries(migracaoUnidades.MAPA_CODIGO_ENTREGAS_PARA_FECHAMENTO).forEach(([antigo, novo]) => {
+  // funde qualquer codigo ANTIGO (Entregas OU Monitor/Adyen) que ainda
+  // apareça em alguma fonte (planilha ainda nao resincronizada por completo,
+  // cache antigo em memoria, transacao Adyen antiga em cache/snapshot...) no
+  // codigo unificado - ver migracaoUnidades.js. Sem isso um "Caruaru"/"Mooca"
+  // solto reaparecia do lado do cadastro já unificado mesmo depois da
+  // migração já ter rodado no Firestore, porque entregasHistoricoData vem
+  // direto da planilha (não do banco) e store.allTransactions() pode ter
+  // carregado um snapshot/cache de antes da migração de transactions rodar
+  Object.entries(migracaoUnidades.MAPA_CODIGO_UNIFICADO).forEach(([antigo, novo]) => {
     if (antigo in mapa) {
       mapa[novo] = mapa[novo] || mapa[antigo];
       delete mapa[antigo];
@@ -2121,6 +2124,25 @@ app.get('/api/admin/migrar-codigos-entregas', auth.requireMaster, async (req, re
 app.post('/api/admin/migrar-codigos-entregas', auth.requireMaster, async (req, res) => {
   try {
     res.json(await migracaoUnidades.migrarCodigosEntregas({ executar: true }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// migração do espaço Monitor/Disputas (Adyen) - ver comentário de
+// MAPA_CODIGO_MONITOR_PARA_FECHAMENTO em migracaoUnidades.js. Mais sensível
+// que a de Entregas (mexe em transações/fraude/disputas/estornos), mesmo
+// padrão prévia-sem-gravar / executa de verdade.
+app.get('/api/admin/migrar-codigos-monitor', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await migracaoUnidades.migrarCodigosMonitor({ executar: false }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+app.post('/api/admin/migrar-codigos-monitor', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await migracaoUnidades.migrarCodigosMonitor({ executar: true }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

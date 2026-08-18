@@ -2,6 +2,13 @@
 // Converte um NotificationRequestItem da Adyen no formato que o dashboard usa.
 // Referencia de eventCodes: https://docs.adyen.com/development-resources/webhooks/notification-structure/
 
+// unificacao de codigos de unidade (2026-08-18, ver migracaoUnidades.js) -
+// o merchantAccountCode que a Adyen manda ("Mooca", "DOM___19888"...) e
+// convertido pro codigo unificado (= codigo do Fechamento) direto na
+// ingestao, pra toda transacao NOVA ja nascer sem duplicar cadastro com o
+// codigo antigo
+const { normalizarCodigoUnidade } = require('./migracaoUnidades');
+
 function centsToReais(amount) {
   if (!amount || typeof amount.value !== 'number') return 0;
   return amount.value / 100;
@@ -100,7 +107,7 @@ function normalize(item) {
     cardHolder, // nome do cartao (impresso no cartao)
     nomeCliente: shopperName(additional) || cardHolder, // nome do cliente que fez o pedido
     shopperReference: additional.shopperReference || item.merchantAccountCode + ':' + (additional.shopperEmail || ''),
-    unidade: item.merchantAccountCode,
+    unidade: normalizarCodigoUnidade(item.merchantAccountCode),
     dataHora: new Date().toISOString(), // Adyen nao manda timestamp do evento; usamos hora de recebimento
     disputeStatus: additional.disputeStatus || null,
     // prazo final pra enviar defesa/recorrer do chargeback - a Adyen manda
