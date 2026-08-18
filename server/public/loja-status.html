@@ -786,8 +786,11 @@ function atualizarConteudoDetalhe(codigo, c){
       // placa virtual. Nao adianta procurar "que aparelho e esse" - o MAC
       // muda sozinho na semana que vem
       const aleatorio = ['2','6','a','e'].includes(String(d.mac).charAt(1).toLowerCase());
-      const nome = d.apelido || d.nome || (aleatorio ? 'MAC aleatorio (celular/virtual)' : 'sem nome');
-      const temNome = !!(d.apelido || d.nome);
+      // sem apelido/nome DNS, o FABRICANTE (resolvido pelo prefixo do MAC no
+      // servidor, ver ouiFabricantes.js) entra no lugar de "sem nome" -
+      // "Hewlett Packard" diz muito mais que um traço
+      const nome = d.apelido || d.nome || (aleatorio ? 'MAC aleatorio (celular/virtual)' : (d.fabricante || 'sem nome'));
+      const temNome = !!(d.apelido || d.nome || d.fabricante);
       // o "visto ha X" fica na linha do nome, nao na do IP: no celular a linha
       // de IP+MAC ja ocupa a largura toda e o texto extra era cortado com "..."
       const quando = d.ativo === false ? `<span class="disp-visto">visto ${escapeHtml(tempoRelativo(d.visto))}</span>` : '';
@@ -804,13 +807,22 @@ function atualizarConteudoDetalhe(codigo, c){
           onclick="event.stopPropagation();renomearDispositivo('${escapeJs(codigo)}','${escapeJs(d.mac)}','${escapeJs(d.apelido||'')}')">✏️</button>
       </div>`;
     };
-    const html = [...ativos, ...sumidos].slice(0,20).map(linhaDisp).join('');
-    const resto = c.dispositivos.length > 20 ? `<div class="disp-linha" style="color:var(--muted);">+${c.dispositivos.length-20} outros</div>` : '';
+    // TODOS os aparelhos, numa janela de ~5 linhas com rolagem interna -
+    // mesmo padrao do Registro de atividades (pedido do Master); o poll de
+    // 30s re-renderiza o modal aberto, entao a posicao da rolagem e
+    // preservada la embaixo, depois do innerHTML
+    const html = [...ativos, ...sumidos].map(linhaDisp).join('');
     infoBits.push(`📡 <b>${ativos.length}</b> aparelho(s) na rede da loja`
       + (sumidos.length ? ` · <span style="color:var(--muted);">${sumidos.length} sumiu(ram)</span>` : '')
-      + ` · varrido ${escapeHtml(tempoRelativo(c.dispositivosEm))}<div class="disp-lista">${html}${resto}</div>`);
+      + ` · varrido ${escapeHtml(tempoRelativo(c.dispositivosEm))}<div class="disp-lista" id="disp-lista" style="max-height:180px;overflow-y:auto;overscroll-behavior:contain;">${html}</div>`);
   }
+  // preserva a rolagem da lista de aparelhos entre um poll e outro (mesmo
+  // cuidado do ev-lista em renderEventosDetalhe)
+  const dispListaAntiga = document.getElementById('disp-lista');
+  const dispScrollAnterior = dispListaAntiga ? dispListaAntiga.scrollTop : 0;
   document.getElementById('detalhe-comp-info').innerHTML = infoBits.length ? infoBits.join('<br>') : '<span style="color:var(--muted);">sem mais informações.</span>';
+  const dispListaNova = document.getElementById('disp-lista');
+  if(dispListaNova) dispListaNova.scrollTop = dispScrollAnterior;
 
   // Registro de atividades: as ultimas quedas/retornos de conexao (mais recente
   // em cima). 'caiu' mostra a hora do ultimo contato; 'voltou' mostra ha quanto
