@@ -824,9 +824,18 @@ function atualizarConteudoDetalhe(codigo, c){
   if(!eventos.length){
     elEv.innerHTML = '<div class="sub" style="color:var(--muted);font-size:11px;">📊 Registro de atividades — sem quedas registradas ainda.</div>';
   }else{
+    // retrato de IP carimbado no evento (ver varrerAlertas em lojaStatus.js):
+    // no "Caiu" e o IP de QUANDO caiu; no "Voltou", o IP com que voltou -
+    // se a maquina voltou com outro IP, a diferenca aparece aqui mesmo
+    const ipsDoEvento = (ev) => {
+      const bits = [];
+      if(ev.ip) bits.push(`🌐 ${escapeHtml(ev.ip)}`);
+      if(ev.ipLocal) bits.push(`🏠 ${escapeHtml(ev.ipLocal)}`);
+      return bits.length ? ` · <span style="color:var(--muted);font-size:11px;">${bits.join(' · ')}</span>` : '';
+    };
     const linhas = eventos.slice(0,20).map(ev=>{
       if(ev.tipo==='offline'){
-        return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Caiu</b> · ${fmtDataHora(ev.em)}</div>`;
+        return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Caiu</b> · ${fmtDataHora(ev.em)}${ipsDoEvento(ev)}</div>`;
       }
       if(ev.tipo==='ip'){
         const qual = ev.ipTipo==='local' ? '🏠 IP local' : '🌐 IP público';
@@ -848,7 +857,7 @@ function atualizarConteudoDetalhe(codigo, c){
         return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Aparelho novo na rede</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
       }
       const fora = ev.duracaoMs!=null ? ` · ficou fora ${fmtDuracao(ev.duracaoMs)}` : '';
-      return `<div class="ev-linha"><span class="ev-dot ok"></span><b>Voltou</b> · ${fmtDataHora(ev.em)}${fora}</div>`;
+      return `<div class="ev-linha"><span class="ev-dot ok"></span><b>Voltou</b> · ${fmtDataHora(ev.em)}${fora}${ipsDoEvento(ev)}</div>`;
     }).join('');
     elEv.innerHTML = `<div class="sub" style="font-weight:700;font-size:12px;margin-bottom:6px;">📊 Registro de atividades</div>${linhas}`;
   }

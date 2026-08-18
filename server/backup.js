@@ -12,6 +12,11 @@ const COLECOES = [
   'transactions', 'orders', 'chargebacks', 'disputes', 'users',
   'vaultGroups', 'vaultSubgroups', 'vaultEntries', 'refundRequests',
   'fechamentosLive', 'fechamentoEdicoes',
+  // NOC Zenith: 1 doc por computador (IP atual + historico, eventos de
+  // queda, telemetria). Entrou depois que o Master precisou do IP ANTIGO de
+  // uma maquina e nao havia retrato de lugar nenhum - com o backup diario,
+  // qualquer campo desses docs tem ate 30 dias de retroativo.
+  'lojaStatus',
 ];
 
 const RETENCAO_DIAS = 30;
