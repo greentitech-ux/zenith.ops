@@ -45,6 +45,8 @@ const COLUNAS_BASE = [
   { key: 'totalDeclarado', label: 'Total declarado', moeda: true, largura: 64 },
   { key: 'diferenca', label: 'Diferença', moeda: true, largura: 58 },
   { key: 'quebra', label: 'Quebra', moeda: true, largura: 56 },
+  { key: 'entradaDinheiro', label: 'Entrada em dinheiro', moeda: true, largura: 62 },
+  { key: 'totalSaida', label: 'Total de saída', moeda: true, largura: 58 },
 ];
 // schema antigo (planilha importada) - MAS "adyen" tambem e a soma da secao
 // "Maquininhas (cartao)" de todo lancamento do sistema, por isso o label nao
@@ -129,6 +131,8 @@ function prepararRelatorio(fechamentos, grupos, ocultas, ordem) {
       totalDeclarado: f.totalDeclarado || 0,
       diferenca: f.diferenca || 0,
       quebra: f.quebra || 0,
+      entradaDinheiro: f.entradaDinheiro || 0,
+      totalSaida: f.totalSaida || 0,
       observacao: f.observacao || f.obsDif || '—',
     };
     fixasUsadas.forEach((c) => { linha[c.key] = f[c.key] || 0; });
