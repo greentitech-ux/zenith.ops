@@ -2114,44 +2114,6 @@ async function construirUnidadesMapa() {
 // candidato do Firebase Storage e devolve o erro cru de cada um - abrir no
 // navegador logado (ou com ?token=) quando os anexos estiverem falhando,
 // pra saber a causa exata sem depender do log do Render
-// migracao pontual (ver migracaoUnidades.js): unifica os codigos de
-// Entregas com os de Fechamento das lojas que hoje tem os dois. GET so
-// mostra o que SERIA mudado (nada e gravado); POST executa de verdade.
-// Idempotente: rodar de novo depois de já ter migrado não acha mais nada
-// pra mudar (os códigos antigos já não existem em lugar nenhum).
-app.get('/api/admin/migrar-codigos-entregas', auth.requireMaster, async (req, res) => {
-  try {
-    res.json(await migracaoUnidades.migrarCodigosEntregas({ executar: false }));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-app.post('/api/admin/migrar-codigos-entregas', auth.requireMaster, async (req, res) => {
-  try {
-    res.json(await migracaoUnidades.migrarCodigosEntregas({ executar: true }));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// migração do espaço Monitor/Disputas (Adyen) - ver comentário de
-// MAPA_CODIGO_MONITOR_PARA_FECHAMENTO em migracaoUnidades.js. Mais sensível
-// que a de Entregas (mexe em transações/fraude/disputas/estornos), mesmo
-// padrão prévia-sem-gravar / executa de verdade.
-app.get('/api/admin/migrar-codigos-monitor', auth.requireMaster, async (req, res) => {
-  try {
-    res.json(await migracaoUnidades.migrarCodigosMonitor({ executar: false }));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-app.post('/api/admin/migrar-codigos-monitor', auth.requireMaster, async (req, res) => {
-  try {
-    res.json(await migracaoUnidades.migrarCodigosMonitor({ executar: true }));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 app.get('/api/admin/storage-diagnostico', auth.requireMaster, async (req, res) => {
   try {
