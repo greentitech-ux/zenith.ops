@@ -701,7 +701,9 @@ async function cardFechamentos(){
 // mesmo roster hardcoded de entregas.html (dominio proprio de Entregas, com
 // codigos diferentes do cadastro geral de lojas usado por Fechamento/Monitor
 // - ex: "Bessa", nao "Dominos Bessa" ou "19855")
-const ENTREGAS_UNIDADES_NOMES = { 'MMTirol Natal':'Milky Moo Tirol Natal', Bessa:'Dom Bessa', Caruaru:'Dom Caruaru', Garanhuns:'Dom Garanhuns' };
+// Bessa/Caruaru/Garanhuns usam o codigo do Fechamento desde a unificação de
+// 2026-08-18 (ver ENTREGAS_UNIDADES_NOMES em index.js)
+const ENTREGAS_UNIDADES_NOMES = { 'MMTirol Natal':'Milky Moo Tirol Natal', 'Dominos Bessa':'Dom Bessa', 'Dominos Caruaru':'Dom Caruaru', 'Dominos Garanhuns':'Dom Garanhuns' };
 let ENTREGAS_DODIA_CACHE = [];
 let ENTREGAS_ROSTER_CACHE = [];
 
