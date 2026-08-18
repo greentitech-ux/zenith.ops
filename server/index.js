@@ -3918,11 +3918,13 @@ app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRela
     // vai pro modelo: ele nao sai no relatorio, entao listar seria so dar ao
     // modelo a chance de casar uma linha qualquer com ele
     const paraLeitura = (lista) => (lista || []).filter((c) => c.manual !== true).map((c) => ({ campo: c.campo, label: c.label, tipo: c.tipo }));
-    // KPI so entra na leitura quando o VALOR faz sentido como "um numero so"
-    // (quantidade/moeda/kg) - tempo (mm:ss), texto livre e arquivo nao cabem
-    // no formato "valor: numero" que o modelo devolve, entao nem sao
-    // oferecidos a ele (ver montarPrompt em canaisVendaOcr.js)
-    const kpisOcrElegiveis = (grupo.kpisExtras || []).filter((k) => ['quantidade', 'moeda', 'kg'].includes(k.tipo || 'quantidade'));
+    // KPI entra na leitura quando o valor cabe numa resposta simples: numero
+    // (quantidade/moeda/kg) OU texto solto (ex: "2,05" - metrica de tempo em
+    // minutos DECIMAL que o Master cadastrou como "Texto Livre" porque o
+    // tipo "Tempo" da tela so aceita mm:ss). Tempo (mm:ss) e arquivo ficam de
+    // fora: mm:ss exigiria o modelo acertar um formato rigido, e arquivo nem
+    // e leitura de valor (e upload de anexo)
+    const kpisOcrElegiveis = (grupo.kpisExtras || []).filter((k) => ['quantidade', 'moeda', 'kg', 'texto'].includes(k.tipo || 'quantidade'));
     // a dica e escrita pelo Master no cadastro do grupo: cada PDV imprime de
     // um jeito (ordem das linhas, coluna que vale) e isso nao cabe no codigo
     // sem virar um "if" por bandeira
