@@ -465,9 +465,54 @@ async function listFechamentos(unidade, dataInicio, dataFim) {
     && (!dataFim || f.data <= dataFim));
 }
 
+// todos os dias fechados, de qualquer unidade - usado por GET /api/fechamentos
+// (ver comoFechamento abaixo) pra esses dias aparecerem no painel geral de
+// Fechamentos junto com as lojas, e nao só na tela dedicada do Saltiverso
+async function listAll() {
+  return listAllCached();
+}
+
+// converte um fechamento do Saltiverso pro MESMO formato de linha que
+// fechamentosLive.js usa - mesmo padrao de sangrias.comoFechamento (ver
+// sangrias.js): o painel de Fechamentos nunca precisa saber que essa linha
+// veio de outra coleção, so trata como mais um fechamento. Faturamento =
+// Faturado (calculado sozinho a partir do que já foi vendido no sistema),
+// Total Declarado = soma do que cada operador conferiu contra os
+// comprovantes físicos - os MESMOS 4 baldes (maquininha/dinheiro/pix/
+// outros) viram "Formas de pagamento" extras do grupo Saltiverso Patteo
+// (ver grupos.ensureGrupoSaltiverso), pra tabela mostrar o breakdown certo
+// em vez de tudo somado numa coluna só
+function comoFechamento(f) {
+  return {
+    id: f.id,
+    gerente: f.criadoPorEmail || '',
+    unidadeNome: f.unidadeNome || f.unidade,
+    unidade: f.unidade,
+    data: f.data,
+    // schema fixo antigo (planilha/legado) - Saltiverso nao usa nenhum
+    // desses, ficam zerados pra nao aparecer coluna nenhuma deles na tabela
+    caixaInicial: 0, caixaFinal: 0, adyen: 0, adyenPos: 0,
+    ifood: 0, food99: 0, pix: 0, pixCnpj: 0, loja: 0, outros: 0,
+    totalSaida: 0, quebra: 0, entradaDinheiro: 0, deposito: 0,
+    faturamento: f.faturado,
+    totalDeclarado: f.somaTotalDeclarado,
+    diferenca: f.diferenca,
+    obsDif: null,
+    observacao: f.observacao || '',
+    tc: 0, cancelados: 0,
+    canaisVendaExtras: {},
+    kpisExtras: {},
+    // o que cada operador CONFEREIU contra o comprovante físico, por balde -
+    // o Faturado (automático) já virou o Faturamento acima
+    formasPagamentoExtras: { ...(f.totalDeclarado || {}) },
+    criadoPorId: f.criadoPorId, criadoPorEmail: f.criadoPorEmail, criadoEm: f.criadoEm,
+  };
+}
+
 module.exports = {
   LIMITE_QUEBRA_SALTIVERSO, ORIGENS, ORIGEM_LABEL,
   calcularFaturado, fecharDia, corrigirFechamento, getOne, previewOuFechado, listFechamentos,
+  listAll, comoFechamento,
   // caixas individuais por operador
   faturadoPorOperador, lancarCaixa, listCaixasDoDia, getCaixa, estadoDoDia,
   solicitarAlteracaoCaixa, listAlteracoesPendentes, decidirAlteracaoCaixa,

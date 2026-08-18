@@ -3626,7 +3626,12 @@ async function sincronizarPlanilhasFechamento({ completa = false } = {}) {
 app.get('/api/fechamentos', requireSection('fechamentos'), async (req, res) => {
   const lancados = await fechamentosLive.listAll();
   const sangriasLancadas = (await sangrias.listAll()).map(sangrias.comoFechamento);
-  const combinado = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas]);
+  // fechamento do Saltiverso mora numa colecao a parte (saltiversoFechamentos,
+  // schema proprio) - entra aqui so na LEITURA, convertido pro mesmo formato
+  // de linha (ver saltiversoFechamento.comoFechamento), pra aparecer junto
+  // com as lojas no painel geral em vez de só na tela dedicada dele
+  const saltiversoLancado = (await saltiversoFechamento.listAll()).map(saltiversoFechamento.comoFechamento);
+  const combinado = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas, ...saltiversoLancado]);
   res.json(auth.filterByUnidade(req, combinado));
 });
 
@@ -9457,6 +9462,7 @@ function aquecerBoot(promessa, ms) {
   const aquecimento = (async () => {
     await tarefaDeBoot(() => store.init(), 'carregar histórico do Firestore');
     await tarefaDeBoot(() => auth.ensureMaster(), 'garantir usuário Master');
+    await tarefaDeBoot(() => grupos.ensureGrupoSaltiverso(), 'garantir grupo do Saltiverso Patteo');
   })();
   await aquecerBoot(aquecimento, BOOT_AQUECIMENTO_MS);
 
