@@ -819,48 +819,8 @@ function atualizarConteudoDetalhe(codigo, c){
   // um evento como qualquer outro (ipTipo renomeado pra nao colidir com o
   // "tipo" que diz qual linha renderizar)
   const trocasIp = (c.ipHistorico || []).map(h=>({ em: h.em, tipo: 'ip', ipTipo: h.tipo, de: h.de, para: h.para }));
-  const eventos = [...(c.eventos || []), ...trocasIp].sort((a,b)=>(b.em||0)-(a.em||0));
-  const elEv = document.getElementById('detalhe-comp-eventos');
-  if(!eventos.length){
-    elEv.innerHTML = '<div class="sub" style="color:var(--muted);font-size:11px;">📊 Registro de atividades — sem quedas registradas ainda.</div>';
-  }else{
-    // retrato de IP carimbado no evento (ver varrerAlertas em lojaStatus.js):
-    // no "Caiu" e o IP de QUANDO caiu; no "Voltou", o IP com que voltou -
-    // se a maquina voltou com outro IP, a diferenca aparece aqui mesmo
-    const ipsDoEvento = (ev) => {
-      const bits = [];
-      if(ev.ip) bits.push(`🌐 ${escapeHtml(ev.ip)}`);
-      if(ev.ipLocal) bits.push(`🏠 ${escapeHtml(ev.ipLocal)}`);
-      return bits.length ? ` · <span style="color:var(--muted);font-size:11px;">${bits.join(' · ')}</span>` : '';
-    };
-    const linhas = eventos.slice(0,20).map(ev=>{
-      if(ev.tipo==='offline'){
-        return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Caiu</b> · ${fmtDataHora(ev.em)}${ipsDoEvento(ev)}</div>`;
-      }
-      if(ev.tipo==='ip'){
-        const qual = ev.ipTipo==='local' ? '🏠 IP local' : '🌐 IP público';
-        const texto = ev.de
-          ? `mudou · ${escapeHtml(ev.de)} → <b>${escapeHtml(ev.para)}</b>`
-          : `registrado · <b>${escapeHtml(ev.para)}</b>`;
-        return `<div class="ev-linha"><span class="ev-dot warn"></span><b>${qual}</b> ${texto} · ${fmtDataHora(ev.em)}</div>`;
-      }
-      if(ev.tipo==='acesso-remoto'){
-        return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Acesso remoto</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
-      }
-      if(ev.tipo==='disco'){
-        return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Disco piorou</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
-      }
-      if(ev.tipo==='reiniciar'){
-        return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Precisa reiniciar</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
-      }
-      if(ev.tipo==='dispositivo-novo'){
-        return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Aparelho novo na rede</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
-      }
-      const fora = ev.duracaoMs!=null ? ` · ficou fora ${fmtDuracao(ev.duracaoMs)}` : '';
-      return `<div class="ev-linha"><span class="ev-dot ok"></span><b>Voltou</b> · ${fmtDataHora(ev.em)}${fora}${ipsDoEvento(ev)}</div>`;
-    }).join('');
-    elEv.innerHTML = `<div class="sub" style="font-weight:700;font-size:12px;margin-bottom:6px;">📊 Registro de atividades</div>${linhas}`;
-  }
+  EVENTOS_DETALHE = [...(c.eventos || []), ...trocasIp].sort((a,b)=>(b.em||0)-(a.em||0));
+  renderEventosDetalhe();
 
   document.getElementById('detalhe-comp-acoes').innerHTML = `
     ${c.anydeskId ? `<a class="btn-mini ok" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk">🖥️ AnyDesk</a>` : ''}
@@ -876,10 +836,86 @@ function atualizarConteudoDetalhe(codigo, c){
   };
 }
 
+// ---- Registro de atividades do detalhe ----
+// A lista completa (eventos + trocas de IP) fica aqui fora pra o filtro por
+// data re-renderizar sem esperar o proximo poll; a janela mostra ~5 linhas e
+// o resto rola (pedido do Master: "apenas 5 registros aparecendo, o restante
+// como scroll" + "registros por data pesquisavel")
+let EVENTOS_DETALHE = [];
+let EV_FILTRO_DATA = '';
+function dataDoEvento(ms){
+  try{ return new Date(ms).toLocaleDateString('sv-SE', { timeZone:'America/Sao_Paulo' }); }
+  catch(e){ return ''; }
+}
+function linhaEvento(ev){
+  // retrato de IP carimbado no evento (ver varrerAlertas em lojaStatus.js):
+  // no "Caiu" e o IP de QUANDO caiu; no "Voltou", o IP com que voltou -
+  // se a maquina voltou com outro IP, a diferenca aparece aqui mesmo
+  const ips = [];
+  if(ev.ip) ips.push(`🌐 ${escapeHtml(ev.ip)}`);
+  if(ev.ipLocal) ips.push(`🏠 ${escapeHtml(ev.ipLocal)}`);
+  const sufixoIp = ips.length ? ` · <span style="color:var(--muted);font-size:11px;">${ips.join(' · ')}</span>` : '';
+  if(ev.tipo==='offline'){
+    return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Caiu</b> · ${fmtDataHora(ev.em)}${sufixoIp}</div>`;
+  }
+  if(ev.tipo==='ip'){
+    const qual = ev.ipTipo==='local' ? '🏠 IP local' : '🌐 IP público';
+    const texto = ev.de
+      ? `mudou · ${escapeHtml(ev.de)} → <b>${escapeHtml(ev.para)}</b>`
+      : `registrado · <b>${escapeHtml(ev.para)}</b>`;
+    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>${qual}</b> ${texto} · ${fmtDataHora(ev.em)}</div>`;
+  }
+  if(ev.tipo==='acesso-remoto'){
+    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Acesso remoto</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+  }
+  if(ev.tipo==='disco'){
+    return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Disco piorou</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+  }
+  if(ev.tipo==='reiniciar'){
+    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Precisa reiniciar</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+  }
+  if(ev.tipo==='dispositivo-novo'){
+    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Aparelho novo na rede</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+  }
+  const fora = ev.duracaoMs!=null ? ` · ficou fora ${fmtDuracao(ev.duracaoMs)}` : '';
+  return `<div class="ev-linha"><span class="ev-dot ok"></span><b>Voltou</b> · ${fmtDataHora(ev.em)}${fora}${sufixoIp}</div>`;
+}
+function setFiltroEventosData(v){
+  EV_FILTRO_DATA = v || '';
+  renderEventosDetalhe();
+}
+function renderEventosDetalhe(){
+  const elEv = document.getElementById('detalhe-comp-eventos');
+  if(!elEv) return;
+  if(!EVENTOS_DETALHE.length){
+    elEv.innerHTML = '<div class="sub" style="color:var(--muted);font-size:11px;">📊 Registro de atividades — sem quedas registradas ainda.</div>';
+    return;
+  }
+  const filtrados = EV_FILTRO_DATA ? EVENTOS_DETALHE.filter(ev=>dataDoEvento(ev.em)===EV_FILTRO_DATA) : EVENTOS_DETALHE;
+  // o poll de 30s re-renderiza o modal aberto - preserva a posicao da
+  // rolagem pra lista nao "pular" pro topo no meio de uma leitura
+  const listaAntiga = document.getElementById('ev-lista');
+  const scrollAnterior = listaAntiga ? listaAntiga.scrollTop : 0;
+  const linhas = filtrados.map(linhaEvento).join('')
+    || '<div class="ev-linha" style="color:var(--muted);">nenhum registro nesse dia.</div>';
+  elEv.innerHTML = `
+    <div class="sub" style="font-weight:700;font-size:12px;margin-bottom:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <span style="flex:1 1 auto;">📊 Registro de atividades <span style="color:var(--muted);font-weight:400;">(${filtrados.length}${EV_FILTRO_DATA?` de ${EVENTOS_DETALHE.length}`:''})</span></span>
+      <input type="date" value="${EV_FILTRO_DATA}" onchange="setFiltroEventosData(this.value)" title="Filtrar registros por data"
+        style="background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--text);font-size:11px;padding:2px 6px;font-family:var(--mono);color-scheme:dark;">
+      ${EV_FILTRO_DATA?'<button type="button" class="btn-mini" onclick="setFiltroEventosData(\'\')">✕ limpar</button>':''}
+    </div>
+    <div id="ev-lista" style="max-height:140px;overflow-y:auto;overscroll-behavior:contain;">${linhas}</div>`;
+  const lista = document.getElementById('ev-lista');
+  if(lista) lista.scrollTop = scrollAnterior;
+}
+
 let DETALHE_ATUAL = null; // { codigo, posto }
 function abrirDetalheComputador(codigo, posto){
   const c = COMPUTADORES.find(x => x.codigo===codigo && x.posto===posto);
   if(!c) return;
+  // abriu OUTRO computador: o filtro de data do anterior nao vale mais
+  if(!DETALHE_ATUAL || DETALHE_ATUAL.codigo!==codigo || DETALHE_ATUAL.posto!==posto) EV_FILTRO_DATA = '';
   DETALHE_ATUAL = { codigo, posto };
   atualizarConteudoDetalhe(codigo, c);
   document.getElementById('detalhe-comp-overlay').classList.remove('hidden');

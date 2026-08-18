@@ -142,7 +142,12 @@ const LIMIAR_OFFLINE_MS = 90 * 1000;
 // registro de atividades por computador: guarda as ultimas N transicoes
 // online<->offline (ver varrerAlertas), pra auditar quedas de conexao sem
 // depender de print. Capado pra o documento nao crescer sem limite.
-const EVENTOS_MAX = 60;
+// 60 rotacionava rapido demais numa maquina com acesso remoto frequente
+// (cada deteccao e 1 evento) - o Master abriu o painel e os registros mais
+// antigos ja tinham sido empurrados pra fora. 200 entradas curtas custam
+// ~15KB no doc (limite do Firestore e 1MB) e cobrem semanas; alem disso o
+// backup diario da colecao guarda 30 dias de retratos completos.
+const EVENTOS_MAX = 200;
 
 // historico de mudancas de IP por computador (pedido do Master: "preciso de
 // dados quando o IP da maquina mudar"). Cobre os DOIS IPs que o NOC enxerga:
