@@ -22,9 +22,10 @@ const MESES_PT = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 
 // a planilha "MOTOS BRAVO" continua com o codigo ANTIGO na coluna "Unidade"
 // (Bessa/Caruaru/Garanhuns) - nao dá pra editar a planilha em produção
 // daqui, então normaliza pro codigo unificado (= codigo do Fechamento, ver
-// ENTREGAS_UNIDADES_NOMES em index.js e migracaoUnidades.js) direto na
-// leitura, pra toda linha nova continuar caindo no mesmo cadastro
-const CODIGO_ANTIGO_PARA_NOVO = { Bessa: 'Dominos Bessa', Caruaru: 'Dominos Caruaru', Garanhuns: 'Dominos Garanhuns' };
+// ENTREGAS_UNIDADES_NOMES em index.js) direto na leitura, pra toda linha
+// nova continuar caindo no mesmo cadastro. Mesmo mapa de migracaoUnidades.js
+// (reaproveitado, não duplicado, pra nunca desalinhar os dois)
+const { MAPA_CODIGO_ENTREGAS_PARA_FECHAMENTO: CODIGO_ANTIGO_PARA_NOVO } = require('./migracaoUnidades');
 
 // "24/12" (Data) + "dez./25" ou "DEZ./2025" (Mes, ano com 2 ou 4 dígitos) -> "2025-12-24"
 function parseData(dataStr, mesStr) {
