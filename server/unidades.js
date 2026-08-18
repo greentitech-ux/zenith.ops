@@ -102,6 +102,36 @@ async function atualizar(id, { nome, areas, tiposSolicitacao }) {
   return { ...snap.data(), ...patch };
 }
 
+// upsert de PERFIL por codigo - diferente de criar()/atualizar(), que tratam
+// o registro inteiro (nome+codigo) de uma unidade nova cadastrada aqui. Esta
+// funcao existe pra deixar QUALQUER unidade (inclusive as fixas de index.js,
+// tipo loja Adyen/planilha, cujo codigo nunca muda) ganhar o mesmo perfil de
+// areas/tiposSolicitacao que a MVPar tem - sem recriar nem tocar no codigo,
+// que ja pode estar gravado em fechamentos/RH/permissoes antigos. Por isso
+// NAO passa pelo check de codigosReservados de criar(): aqui a intencao e
+// exatamente anexar o perfil a um codigo que ja existe em outro lugar.
+async function upsertPerfil(codigo, { nome, areas, tiposSolicitacao, porEmail }) {
+  const codigoLimpo = String(codigo || '').trim().slice(0, 60);
+  if (!codigoLimpo) throw new Error('Código da unidade inválido.');
+  const existentes = await listAll();
+  const atual = existentes.find((u) => u.codigo === codigoLimpo);
+  const nomeLimpo = String(nome || (atual && atual.nome) || codigoLimpo).trim().slice(0, 60);
+  const agora = new Date().toISOString();
+  const registro = {
+    id: atual ? atual.id : COLLECTION.doc().id,
+    codigo: codigoLimpo,
+    nome: nomeLimpo,
+    areas: listaVaziaOuValida(areas, AREAS_VALIDAS),
+    tiposSolicitacao: listaVaziaOuValida(tiposSolicitacao, TIPOS_SOLICITACAO_VALIDOS),
+    criadoPorEmail: (atual && atual.criadoPorEmail) || porEmail || null,
+    criadoEm: (atual && atual.criadoEm) || agora,
+    atualizadoEm: agora,
+  };
+  await COLLECTION.doc(registro.id).set(registro);
+  cache.invalidar();
+  return registro;
+}
+
 // ---- consultas de perfil (usadas pelas rotas e pelos seletores) ----
 async function perfil(codigo) {
   const u = (await listAll()).find((x) => x.codigo === codigo);
@@ -120,6 +150,18 @@ async function aceitaTipo(codigo, tipo) {
   const u = await perfil(codigo);
   if (!u || !Array.isArray(u.tiposSolicitacao) || !u.tiposSolicitacao.length) return true;
   return u.tiposSolicitacao.includes(tipo);
+}
+
+// codigos com perfil que EXCLUI a area dada - usado pelas telas que montam
+// o seletor de unidade a partir de uma lista fixa pre-populada (ex:
+// lancamento.html, ARCFOOD/BRAVO fixos) e so DEPOIS mesclam unidadesExtras
+// por cima: mesclar nunca remove chave, entao uma unidade FIXA (ex: MVPar
+// registrada nas listas fixas) que ganhou perfil restrito continua na lista
+// se ninguem tirar ela explicitamente - e o que essas telas fazem com isto
+async function codigosRestritosDe(area) {
+  return (await listAll())
+    .filter((u) => Array.isArray(u.areas) && u.areas.length && !u.areas.includes(area))
+    .map((u) => u.codigo);
 }
 
 // filtra um mapa {codigo: nome} deixando só quem aparece na área - é o que
@@ -145,7 +187,7 @@ async function remover(id) {
 
 module.exports = {
   AREAS_VALIDAS, TIPOS_SOLICITACAO_VALIDOS,
-  listAll, mapa, criar, atualizar, remover,
-  perfil, apareceEm, aceitaTipo, filtrarMapaPorArea,
+  listAll, mapa, criar, atualizar, remover, upsertPerfil,
+  perfil, apareceEm, aceitaTipo, filtrarMapaPorArea, codigosRestritosDe,
   invalidar: () => cache.invalidar(),
 };

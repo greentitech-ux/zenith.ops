@@ -2110,6 +2110,17 @@ app.get('/api/meta/unidades-extras', async (req, res) => {
   res.json(req.query.area ? await unidadesExtras.filtrarMapaPorArea(m, req.query.area) : m);
 });
 
+// codigos (fixos OU cadastrados em runtime) com perfil que EXCLUI a area -
+// pra telas que montam o seletor a partir de uma lista fixa PRE-POPULADA
+// (ex: lancamento.html) e so DEPOIS mesclam unidades-extras por cima: um
+// merge nunca REMOVE chave, entao uma unidade fixa que ganhou perfil
+// restrito (ver PUT /api/meta/unidades/:codigo/perfil) precisa ser tirada
+// à parte - ver unidades.codigosRestritosDe
+app.get('/api/meta/unidades-restritas', async (req, res) => {
+  if (!req.query.area) return res.json([]);
+  res.json(await unidadesExtras.codigosRestritosDe(req.query.area).catch(() => []));
+});
+
 // lista completa (com id/criadoPor) pra tela de gestao - so Master
 app.get('/api/meta/unidades-extras/lista', auth.requireMaster, async (req, res) => {
   res.json(await unidadesExtras.listAll());
@@ -2146,6 +2157,21 @@ app.patch('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res) 
     const patch = { nome: req.body.nome, areas: req.body.areas, tiposSolicitacao: req.body.tiposSolicitacao };
     if (await desviarSeQaMaster(req, res, 'unidadesExtras.editar', `Editar unidade ${req.params.id}`, { id: req.params.id, ...patch })) return;
     res.json(await unidadesExtras.atualizar(req.params.id, patch));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// perfil (areas/tiposSolicitacao) de QUALQUER unidade, fixa ou cadastrada em
+// runtime - diferente das rotas acima (que so tratam registros da colecao
+// unidadesExtras pelo id), esta mexe pelo CODIGO, entao uma loja fixa (Adyen/
+// planilha, codigo que nunca muda) tambem pode ganhar o mesmo perfil que a
+// MVPar tem, sem precisar recriar nada (ver unidades.upsertPerfil)
+app.put('/api/meta/unidades/:codigo/perfil', auth.requireMaster, async (req, res) => {
+  try {
+    const patch = { nome: req.body.nome, areas: req.body.areas, tiposSolicitacao: req.body.tiposSolicitacao, porEmail: req.user.email };
+    if (await desviarSeQaMaster(req, res, 'unidadesExtras.perfil', `Definir perfil da unidade ${req.params.codigo}`, { codigo: req.params.codigo, ...patch })) return;
+    res.json(await unidadesExtras.upsertPerfil(req.params.codigo, patch));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -3082,6 +3108,7 @@ const EXECUTORES_QA = {
   'unidadesExtras.criar': (p) => unidadesExtras.criar(p.dados, codigosUnidadesFixas()),
   'unidadesExtras.editar': (p) => unidadesExtras.atualizar(p.id, { nome: p.nome, areas: p.areas, tiposSolicitacao: p.tiposSolicitacao }),
   'unidadesExtras.excluir': (p) => unidadesExtras.remover(p.id),
+  'unidadesExtras.perfil': (p) => unidadesExtras.upsertPerfil(p.codigo, { nome: p.nome, areas: p.areas, tiposSolicitacao: p.tiposSolicitacao, porEmail: p.porEmail }),
   'vaultGroups.criar': (p) => vaultGroups.create(p.name),
   'vaultGroups.editar': (p) => vaultGroups.rename(p.id, p.name),
   'vaultGroups.excluir': (p) => vaultGroups.remove(p.id),
