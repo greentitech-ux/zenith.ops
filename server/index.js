@@ -3964,10 +3964,12 @@ app.get('/api/fechamentos/relatorio.pdf', requireSection('fechamentos'), async (
 // ---------- recordes de venda (maior/menor dia, maior/menor semana) por
 // unidade + quem bateu recorde recentemente (candidatos a plano de meta) -
 // ver vendasRecordes.js. Usa a MESMA base de fechamentosFiltrados() da tela
-// (planilha + lançado no sistema + sangria, já filtrado por permissão), sem
-// data/grupo/unidades na query = histórico inteiro, que é o normal aqui: o
-// recorde precisa olhar todo o passado, não só o período que a tela de
-// Fechamentos tem selecionado no momento ----------
+// (planilha + lançado no sistema + sangria, já filtrado por permissão) -
+// inicio/fim são OPCIONAIS aqui (a tela manda um filtro de Período próprio,
+// separado do de Fechamentos): sem eles, olha o histórico inteiro, que é o
+// normal - o recorde geralmente precisa olhar todo o passado, não só um
+// período recente. Com eles, restringe a busca de recorde a essa janela
+// (ex: "qual foi o recorde só neste trimestre") ----------
 app.get('/api/fechamentos/recordes', requireSection('fechamentos'), async (req, res) => {
   try {
     const janelaDias = Number(req.query.janela) > 0 ? Number(req.query.janela) : 30;

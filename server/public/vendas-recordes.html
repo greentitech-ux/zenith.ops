@@ -45,8 +45,9 @@
   .nav-drawer .nav-drawer-sep{height:1px;background:var(--line);margin:8px 2px;flex:none;}
   .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:16px;}
-  select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:13px;font-family:var(--sans);}
-  select:focus{outline:none;border-color:var(--accent);}
+  select,input[type=date]{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:13px;font-family:var(--sans);}
+  select:focus,input[type=date]:focus{outline:none;border-color:var(--accent);}
+  input[type=date]{color-scheme:dark;}
 
   .filtro-topo{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;}
   .filtro-topo label{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
@@ -106,6 +107,10 @@
 <div id="root" class="hidden">
 
 <div class="filtro-topo">
+  <label for="f-inicio">Período de</label>
+  <input type="date" id="f-inicio">
+  <label for="f-fim">até</label>
+  <input type="date" id="f-fim">
   <label for="f-janela">Considerar recorde recente até</label>
   <select id="f-janela">
     <option value="7">7 dias atrás</option>
@@ -232,9 +237,13 @@ async function carregar(){
   const janela = document.getElementById('f-janela').value;
   const grupo = document.getElementById('f-grupo').value;
   const unidade = document.getElementById('f-unidade').value;
+  const inicio = document.getElementById('f-inicio').value;
+  const fim = document.getElementById('f-fim').value;
   const params = new URLSearchParams({ janela });
   if(grupo) params.set('grupo', grupo);
   if(unidade) params.set('unidades', unidade);
+  if(inicio) params.set('inicio', inicio);
+  if(fim) params.set('fim', fim);
   const res = await fetch('/api/fechamentos/recordes?' + params.toString());
   if(!res.ok){
     document.getElementById('geral-grid').innerHTML = '<div class="empty">Não foi possível carregar os recordes.</div>';
@@ -330,6 +339,8 @@ function renderTabela(){
 document.getElementById('f-janela').addEventListener('change', carregar);
 document.getElementById('f-grupo').addEventListener('change', carregar);
 document.getElementById('f-unidade').addEventListener('change', carregar);
+document.getElementById('f-inicio').addEventListener('change', carregar);
+document.getElementById('f-fim').addEventListener('change', carregar);
 
 async function boot(){
   const res = await fetch('/api/me');
