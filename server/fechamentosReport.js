@@ -77,6 +77,40 @@ function colunasExtrasUsadas(fechamentos, grupos, chave, prefixo) {
   return [...vistas.entries()].map(([campo, label]) => ({ key: prefixo + campo, label, moeda: true, largura: 58, origem: chave, campo }));
 }
 
+// ---------- colunas de valor unificadas por NOME ----------
+// A MESMA coisa do mundo real pode estar gravada em dois lugares, conforme a
+// origem da linha: "Ifood" de um fechamento antigo esta no campo fixo `ifood`
+// (schema da planilha), e o de um lançamento do sistema esta em
+// canaisVendaExtras.ifood (canal que o Master cadastrou em /grupos.html).
+// Sem unificar, saiam DUAS colunas "Ifood" no CSV/PDF - uma preenchida e a
+// outra zerada. Mesma logica (e mesmos comentarios) de colunasValores em
+// public/fechamentos.html: as duas precisam concordar, senao a coluna que a
+// pessoa esconde/reordena na tela nao bate com a do relatorio.
+function chaveLabel(label) {
+  return String(label || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+// a key vem sempre da PRIMEIRA fonte na ordem em que as listas chegam
+// (fixo > canal > forma) - nunca da ordem dos dados, senao a mesma coluna
+// mudaria de key conforme o filtro e a preferencia salva na tela pararia de
+// casar com a do relatorio
+function unificarPorNome(colunas) {
+  const porNome = new Map();
+  colunas.forEach((c) => {
+    const k = chaveLabel(c.label);
+    if (!porNome.has(k)) porNome.set(k, { ...c, fontes: [] });
+    porNome.get(k).fontes.push({ origem: c.origem, campo: c.campo, key: c.key });
+  });
+  return [...porNome.values()];
+}
+// soma as fontes em vez de pegar a primeira: uma linha so grava em UMA
+// delas, entao na pratica e um "pega onde tiver" - mas se as duas vierem
+// preenchidas, somar e a leitura honesta em vez de esconder uma
+function valorColuna(f, col) {
+  return col.fontes.reduce((soma, fonte) => soma + Number(
+    fonte.origem ? ((f[fonte.origem] || {})[fonte.campo] || 0) : (f[fonte.key] || 0),
+  ), 0);
+}
+
 // aplica a ordem escolhida no seletor 🧩 Colunas de fechamentos.html (chega
 // via ?ordem=, lista de keys separada por virgula - mesmo array lido da
 // ordem literal das divs no seletor, ver salvarColunas). Data/Unidade
@@ -111,7 +145,8 @@ function prepararRelatorio(fechamentos, grupos, ocultas, ordem) {
     .map((c) => ({ ...c, moeda: true, largura: 58 }));
   const canais = colunasExtrasUsadas(rows, grupos, 'canaisVendaExtras', 'canal:');
   const formas = colunasExtrasUsadas(rows, grupos, 'formasPagamentoExtras', 'forma:');
-  let colunas = [...COLUNAS_BASE, ...fixasUsadas, ...canais, ...formas, COLUNA_OBSERVACAO];
+  const colunasDeValor = unificarPorNome([...fixasUsadas, ...canais, ...formas]);
+  let colunas = [...COLUNAS_BASE, ...colunasDeValor, COLUNA_OBSERVACAO];
   if (ocultas && ocultas.size) {
     colunas = colunas.filter((c) => c.key === 'data' || c.key === 'unidadeNome' || !ocultas.has(c.key));
   }
@@ -135,8 +170,7 @@ function prepararRelatorio(fechamentos, grupos, ocultas, ordem) {
       totalSaida: f.totalSaida || 0,
       observacao: f.observacao || f.obsDif || '—',
     };
-    fixasUsadas.forEach((c) => { linha[c.key] = f[c.key] || 0; });
-    [...canais, ...formas].forEach((c) => { linha[c.key] = (f[c.origem] || {})[c.campo] || 0; });
+    colunasDeValor.forEach((c) => { linha[c.key] = valorColuna(f, c); });
     return linha;
   });
   return { colunas, linhas, secoes: dividirPorRede(colunas, linhas) };

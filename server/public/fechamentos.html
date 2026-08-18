@@ -114,9 +114,6 @@
   .fech-grupo-titulo{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;margin:16px 2px 8px;}
   #fechamentos-tabelas > .fech-grupo-titulo:first-child{margin-top:4px;}
   .fech-grupo-titulo .n{font-family:var(--mono);color:var(--muted);font-weight:400;font-size:12px;}
-  .fech-subtitulo{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:10px 2px 6px;padding-top:8px;border-top:1px dashed var(--line);}
-  .fech-subtitulo:first-of-type{border-top:none;padding-top:0;}
-  .fech-subtitulo .n{font-weight:400;}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
   @media(max-width:900px){.grid2{grid-template-columns:1fr;}}
 
@@ -1556,13 +1553,54 @@ function colunasExtras(rows, chave, grupo){
 // colidia com a forma de pagamento "Adyen" que o grupo define em
 // /grupos.html e a tabela mostrava duas colunas "Adyen" com valores
 // diferentes (uma era a soma das maquininhas, a outra a forma do grupo).
-// Mesma logica de colunasExtras: so aparece se alguma linha de fato usa
 const CAMPOS_FIXOS = [
   {campo:'adyen', label:'Maquininhas (cartão)'}, {campo:'ifood', label:'Ifood'}, {campo:'food99', label:'99Food'},
   {campo:'pix', label:'Pix'}, {campo:'loja', label:'Loja'},
 ];
-function colunasFixasUsadas(rows){
-  return CAMPOS_FIXOS.filter(c => rows.some(d => Math.abs(d[c.campo]||0) > 0.001));
+
+// ---------- colunas de valor unificadas por NOME ----------
+// A MESMA coisa do mundo real pode estar gravada em dois lugares diferentes,
+// conforme a origem da linha: "Ifood" de um fechamento antigo esta no campo
+// fixo `ifood` (schema da planilha), e o de um lançamento do sistema esta em
+// canaisVendaExtras.ifood (canal que o Master cadastrou em /grupos.html).
+// Isso saía como DUAS colunas "Ifood" lado a lado - uma preenchida e a outra
+// zerada - e foi o que obrigou a tabela a se dividir por origem (a divisão
+// só escondia o problema: a mesma loja aparecia em duas tabelas, com
+// colunas que não batiam entre si). Agora é UMA coluna por nome, que lê o
+// valor de onde ele estiver - o que dispensa a divisão por origem.
+function chaveLabel(label){
+  return String(label||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+// soma as fontes em vez de pegar a primeira: uma linha só grava em UMA
+// delas (a outra fica zerada), então na prática é um "pega onde tiver" -
+// mas se um dia as duas vierem preenchidas, somar é a leitura honesta
+// ("total dessa coisa nessa linha") em vez de escolher uma e esconder a outra
+function valorColuna(d, col){
+  return col.fontes.reduce((soma, f) => soma + Number(
+    f.tipo === 'fixo' ? (d[f.campo]||0) : ((d[f.origem]||{})[f.campo]||0)
+  ), 0);
+}
+// A key (usada pra esconder/reordenar no seletor 🧩 Colunas, e mandada pro
+// relatório CSV/PDF) vem sempre da PRIMEIRA fonte na ordem fixa
+// fixo > canal > forma - nunca da ordem em que os dados apareceram, senão a
+// mesma coluna mudaria de key conforme o filtro da tela e a preferência
+// salva pararia de valer.
+function colunasValores(rows, grupo){
+  const porNome = new Map();
+  const add = (label, fonte) => {
+    const k = chaveLabel(label);
+    if(!porNome.has(k)) porNome.set(k, { key: fonte.key, label, fontes: [], usada: false });
+    const col = porNome.get(k);
+    col.fontes.push(fonte);
+    if(fonte.sempreVisivel || rows.some(d => Math.abs(valorColuna(d, {fontes:[fonte]})) > 0.001)) col.usada = true;
+  };
+  // campo fixo só entra se alguma linha de fato usa (schema antigo, sem
+  // grupo pra dizer quais existem); canal/forma vem da definição do grupo,
+  // que é a lista completa e ordenada - esses aparecem mesmo zerados
+  CAMPOS_FIXOS.forEach(c => add(c.label, { key:c.campo, tipo:'fixo', campo:c.campo }));
+  colunasExtras(rows, 'canaisVendaExtras', grupo).forEach(c => add(c.label, { key:'canal:'+c.campo, tipo:'extra', origem:'canaisVendaExtras', campo:c.campo, sempreVisivel:!!grupo }));
+  colunasExtras(rows, 'formasPagamentoExtras', grupo).forEach(c => add(c.label, { key:'forma:'+c.campo, tipo:'extra', origem:'formasPagamentoExtras', campo:c.campo, sempreVisivel:!!grupo }));
+  return [...porNome.values()].filter(c => c.usada);
 }
 
 // monta UMA tabela de fechamentos a partir de um conjunto de linhas - as
@@ -1600,9 +1638,7 @@ function ordenarPorPreferencia(itens){
 
 function tabelaFechamentosHtml(rows){
   const grupo = grupoKpiDaUnidade((rows[0]||{}).unidade);
-  const colunasFixas = colunasFixasUsadas(rows);
-  const colunasCanais = colunasExtras(rows, 'canaisVendaExtras', grupo);
-  const colunasFormas = colunasExtras(rows, 'formasPagamentoExtras', grupo);
+  const colunasDeValor = colunasValores(rows, grupo);
 
   // defs na mesma ordem de sempre - th e td saem do MESMO array, entao
   // esconder/mostrar coluna nunca desalinha o cabecalho do corpo
@@ -1618,9 +1654,7 @@ function tabelaFechamentosHtml(rows){
     { key:'quebra', label:'Quebra', td:d=>`<td class="valor">${fmtMoney(d.quebra)}</td>` },
     { key:'entradaDinheiro', label:'Entrada em dinheiro', td:d=>`<td class="valor">${fmtMoney(d.entradaDinheiro)}</td>` },
     { key:'totalSaida', label:'Total de saída', td:d=>`<td class="valor">${fmtMoney(d.totalSaida)}</td>` },
-    ...colunasFixas.map(c=>({ key:c.campo, label:c.label, td:d=>`<td class="valor">${fmtMoney(d[c.campo])}</td>` })),
-    ...colunasCanais.map(c=>({ key:'canal:'+c.campo, label:c.label, td:d=>`<td class="valor">${fmtMoney((d.canaisVendaExtras||{})[c.campo]||0)}</td>` })),
-    ...colunasFormas.map(c=>({ key:'forma:'+c.campo, label:c.label, td:d=>`<td class="valor">${fmtMoney((d.formasPagamentoExtras||{})[c.campo]||0)}</td>` })),
+    ...colunasDeValor.map(c=>({ key:c.key, label:c.label, td:d=>`<td class="valor">${fmtMoney(valorColuna(d, c))}</td>` })),
     { key:'observacao', label:'Observação', td:d=>`<td class="truncate" title="${escapeHtml(d.observacao||d.obsDif||'')}">${escapeHtml(d.observacao||d.obsDif||'—')}</td>` },
   ]).filter(c=>colVisivel(c.key));
 
@@ -1650,8 +1684,7 @@ let ULTIMOS_GRUPOS_VISIVEIS = null;
 // de colunas de operacoes que nem estao na tela (ex: Getnet/Visa/Elo do
 // Grupo Bravo aparecendo junto com a ARCFOOD)
 function opcoesColunas(){
-  const vistos = new Map();
-  [
+  const opcoes = [
     {key:'gerente', label:'Responsável'},
     {key:'previsao', label:'Previsão (dia seguinte)'},
     {key:'faturamento', label:'Faturamento'},
@@ -1660,17 +1693,31 @@ function opcoesColunas(){
     {key:'quebra', label:'Quebra'},
     {key:'entradaDinheiro', label:'Entrada em dinheiro'},
     {key:'totalSaida', label:'Total de saída'},
-    ...CAMPOS_FIXOS.map(c=>({key:c.campo, label:c.label})),
-  ].forEach(o=>vistos.set(o.key, o.label));
+  ];
+  // as colunas de valor entram unificadas por nome, com a MESMA regra de key
+  // de colunasValores (fixo > canal > forma) - senao o seletor listaria
+  // "Ifood" e "Ifood (canal)" separados pra uma coluna só da tabela, e
+  // esconder um dos dois não faria nada
+  const porNome = new Map();
+  const addValor = (label, key, sufixo) => {
+    const k = chaveLabel(label);
+    if(porNome.has(k)){ porNome.get(k).unificada = true; return; } // já veio de outra origem
+    porNome.set(k, { key, label, sufixo, unificada:false });
+  };
+  CAMPOS_FIXOS.forEach(c=>addValor(c.label, c.campo, ''));
   const gruposParaMostrar = ULTIMOS_GRUPOS_VISIVEIS
     ? GRUPOS_KPI.filter(g=>ULTIMOS_GRUPOS_VISIVEIS.has(g.id))
     : GRUPOS_KPI;
   gruposParaMostrar.forEach(g=>{
-    (g.canaisVendaExtras||[]).forEach(c=>{ if(!vistos.has('canal:'+c.campo)) vistos.set('canal:'+c.campo, c.label+' (canal)'); });
-    (g.formasPagamentoExtras||[]).forEach(c=>{ if(!vistos.has('forma:'+c.campo)) vistos.set('forma:'+c.campo, c.label+' (forma pgto.)'); });
+    (g.canaisVendaExtras||[]).forEach(c=>addValor(c.label, 'canal:'+c.campo, ' (canal)'));
+    (g.formasPagamentoExtras||[]).forEach(c=>addValor(c.label, 'forma:'+c.campo, ' (forma pgto.)'));
   });
-  vistos.set('observacao', 'Observação');
-  return [...vistos.entries()].map(([key,label])=>({key,label}));
+  // o sufixo "(canal)"/"(forma pgto.)" só ajuda quando a coluna vem de UMA
+  // origem só - numa unificada ele passaria a informação errada (a coluna é
+  // as duas coisas ao mesmo tempo)
+  porNome.forEach(c=>opcoes.push({ key:c.key, label:c.label + (c.unificada ? '' : c.sufixo) }));
+  opcoes.push({key:'observacao', label:'Observação'});
+  return opcoes;
 }
 
 // monta as linhas do seletor - cada uma arrastavel (drag-and-drop nativo)
@@ -1799,29 +1846,17 @@ function renderTabela(rows){
   container.innerHTML = lista.map(b=>{
     const titulo = soSemGrupo ? '' : `<div class="fech-grupo-titulo">🏪 ${escapeHtml(b.nome)} <span class="n">${b.rows.length}</span></div>`;
 
-    // dentro do grupo, separa por ORIGEM: lançado pelo sistema (tem
-    // criadoPorId, usa exclusivamente os Canais de venda/Formas de
-    // pagamento/KPI's que o Master configurou pro grupo) x importado de
-    // planilha (sheetsSync.js, usa o schema antigo Adyen/Ifood/99Food/Pix/
-    // Loja). Sem essa separação as colunas de UMA origem vazavam pra tabela
-    // da outra (ex: unidade com fechamento antigo de planilha E fechamento
-    // novo pelo sistema no mesmo grupo mostrava as duas "Adyen" ao mesmo
-    // tempo - uma sempre zerada) - a planilha não pode se sobrepor ao
-    // sistema, que é quem organiza os fechamentos lançados hoje
-    const sistemaRows = b.rows.filter(d=>d.criadoPorId);
-    const planilhaRows = b.rows.filter(d=>!d.criadoPorId);
-    const temAsDuas = sistemaRows.length && planilhaRows.length;
-
-    let corpo = '';
-    if(sistemaRows.length){
-      corpo += (temAsDuas ? `<div class="fech-subtitulo">🧾 Lançamentos do sistema <span class="n">${sistemaRows.length}</span></div>` : '') +
-        tabelaFechamentosHtml(sistemaRows);
-    }
-    if(planilhaRows.length){
-      corpo += (temAsDuas ? `<div class="fech-subtitulo">📄 Histórico de planilha (importado) <span class="n">${planilhaRows.length}</span></div>` : '') +
-        tabelaFechamentosHtml(planilhaRows);
-    }
-    return titulo + corpo;
+    // UMA tabela por grupo, com lançamento do sistema e histórico de
+    // planilha juntos. Antes isso era dividido em duas tabelas por origem,
+    // porque as colunas de uma vazavam pra outra (a mesma "Ifood" existia
+    // como campo fixo do schema antigo E como canal de venda do grupo,
+    // saindo duas colunas de mesmo nome, uma sempre zerada). Isso agora é
+    // resolvido na raiz por colunasValores(), que unifica as colunas por
+    // nome - então a divisão perdeu o motivo de existir e só atrapalhava
+    // (a mesma loja aparecia em duas tabelas, com colunas desalinhadas
+    // entre elas). A coluna Ações continua tratando linha a linha: só
+    // fechamento lançado pelo sistema (com criadoPorId) tem editar/excluir.
+    return titulo + tabelaFechamentosHtml(b.rows);
   }).join('');
 }
 
