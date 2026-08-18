@@ -44,10 +44,15 @@ const chaveDe = (secao, campo) => `${secao}.${campo}`;
 
 // KPI (diferente de canal/forma) nem sempre e dinheiro - moeda/kg/quantidade
 // tem unidades diferentes, e o modelo precisa saber qual pra nao confundir
-// "12,500" de peso com R$ 12,50, por exemplo
+// "12,500" de peso com R$ 12,50, por exemplo. "texto" existe pra metrica que
+// o Master nao conseguiu encaixar em nenhum tipo numerico - normalmente
+// tempo em minutos DECIMAL (ex: "2,05"), que nao cabe no tipo "Tempo" da
+// tela (esse so aceita mm:ss) - mas o relatorio imprime como texto solto
+// mesmo assim, entao a resposta pode vir string em vez de numero
 function unidadeHintKpi(tipo) {
   if (tipo === 'moeda') return ' (em R$)';
   if (tipo === 'kg') return ' (em Kg)';
+  if (tipo === 'texto') return ' (texto livre - copie exatamente como está escrito no relatório, não precisa ser um número redondo)';
   return ' (quantidade, sem unidade/dinheiro)';
 }
 
@@ -61,9 +66,10 @@ ${linhas(canais)}
 FORMAS DE PAGAMENTO (com o que o cliente pagou: cartão, pix, voucher...):
 ${linhas(formas)}
 ` : '';
-  // so entram aqui os KPI's numericos (quantidade/moeda/kg) - tipo tempo/
-  // texto/arquivo nao cabem no formato "valor: numero" da resposta (ver
-  // filtro em index.js antes de chamar lerCanais)
+  // entram aqui os KPI's numericos (quantidade/moeda/kg) e os de texto livre
+  // (esses respondem com "valor" em string, nao numero) - tipo tempo (mm:ss)
+  // e arquivo continuam de fora (ver filtro em index.js antes de chamar
+  // lerCanais)
   const blocoKpis = kpis.length ? `
 KPI'S (outras informações que também podem aparecer no relatório - nem sempre é dinheiro; a unidade de cada uma está indicada):
 ${kpis.map((c) => `${chaveDe(c.secao, c.campo)} | ${c.label}${unidadeHintKpi(c.tipo)}`).join('\n')}
@@ -95,7 +101,7 @@ Devolva SOMENTE um JSON válido, sem nenhum texto antes ou depois, exatamente ne
 {
   "data": "AAAA-MM-DD da data do relatório, ou null se não conseguir ler",
   "campos": [
-    { "chave": "chave exata da lista acima, com prefixo", "textoOrigem": "como a linha está escrita no relatório", "valor": numero }
+    { "chave": "chave exata da lista acima, com prefixo", "textoOrigem": "como a linha está escrita no relatório", "valor": numero (ou texto, só pra chave marcada "texto livre" na lista de KPI's) }
   ],
   "naoIdentificados": [
     { "textoOrigem": "linha do relatório que tem valor mas você não conseguiu casar com nenhuma chave da lista", "valor": numero }
@@ -121,6 +127,10 @@ function extrairJson(texto) {
 }
 
 const numeroOuNull = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
+// pro KPI "texto livre" - aceita a string exatamente como o modelo devolveu
+// (pode ser um numero decimal que nao serve pro tipo "Tempo" da tela, ex:
+// "2,05" minutos), sem forcar conversao numerica
+const textoOuNull = (v) => { const s = String(v == null ? '' : v).trim().slice(0, 200); return s || null; };
 
 const MAX_ARQUIVOS = 5;
 
@@ -175,8 +185,11 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
   (Array.isArray(dados.campos) ? dados.campos : []).forEach((c) => {
     const chave = String((c && c.chave) || '');
     const def = porChave.get(chave);
-    const valor = numeroOuNull(c && c.valor);
-    if (!def || valor == null || vistos.has(chave)) return;
+    if (!def) return;
+    // KPI "texto livre" aceita a resposta como string (ex: "2,05") - os
+    // outros (canal/forma/kpi numerico) continuam exigindo numero de verdade
+    const valor = (def.secao === 'kpi' && def.tipo === 'texto') ? textoOuNull(c && c.valor) : numeroOuNull(c && c.valor);
+    if (valor == null || vistos.has(chave)) return;
     vistos.add(chave);
     itens.push({
       secao: def.secao,

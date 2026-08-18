@@ -692,10 +692,14 @@ function somaExtrasComSinal(classe, defs, { soCruzado } = {}){
 // (convertido pra segundos na leitura, ver lerKpisExtras), texto vira texto
 // livre, e arquivo vira upload de anexo (nao entra no mapa kpisExtras da
 // leitura normal - vai junto do FormData no submit, ver arquivosKpiSelecionados)
-// so esses 3 tipos de KPI cabem no formato "valor: numero" que a leitura por
-// foto devolve (ver montarPrompt em canaisVendaOcr.js) - tempo (mm:ss),
-// texto livre e arquivo continuam sempre digitados/anexados na mao
-function kpiOcrElegivel(k){ return ['quantidade','moeda','kg'].includes(k.tipo||'quantidade'); }
+// esses tipos de KPI cabem na leitura por foto (ver montarPrompt em
+// canaisVendaOcr.js): quantidade/moeda/kg respondem com numero, texto livre
+// responde com a string exatamente como veio (util pra metrica de tempo em
+// minutos DECIMAL, tipo "2,05" - nao cabe no tipo "Tempo" da tela, que so
+// aceita mm:ss). Tempo (mm:ss) e arquivo continuam sempre digitados/
+// anexados na mao - mm:ss exigiria o modelo acertar um formato rigido, e
+// arquivo nem e leitura de valor
+function kpiOcrElegivel(k){ return ['quantidade','moeda','kg','texto'].includes(k.tipo||'quantidade'); }
 function renderKpisExtras(unidade){
   const grupo = grupoKpiDaUnidade(unidade);
   const campos = grupo ? (grupo.kpisExtras||[]) : [];
@@ -720,9 +724,6 @@ function renderKpisExtras(unidade){
     if(tipo === 'arquivo'){
       return `<div><label>${escapeHtml(k.label)}</label><input type="file" accept="image/*,application/pdf" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-arquivo"></div>`;
     }
-    if(tipo === 'texto'){
-      return `<div><label>${escapeHtml(k.label)}</label><input type="text" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input"></div>`;
-    }
     if(tipo === 'tempo'){
       return `<div><label>${escapeHtml(k.label)} (min:seg)</label><input type="text" placeholder="mm:ss" pattern="[0-9]{1,4}:[0-5][0-9]" inputmode="numeric" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input kpi-extra-tempo"></div>`;
     }
@@ -730,6 +731,9 @@ function renderKpisExtras(unidade){
     const classeExtra = bloq ? ' campo-automatico' : '';
     const roAttr = bloq ? ' readonly title="Preenchido pela foto do relatório - não editável"' : '';
     const marca = (!bloq && automatico && kpiOcrElegivel(k)) ? ' <span style="color:var(--muted);font-weight:400;">✏️</span>' : '';
+    if(tipo === 'texto'){
+      return `<div><label>${escapeHtml(k.label)}${marca}</label><input type="text" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
+    }
     const step = tipo === 'quantidade' ? '1' : (tipo === 'kg' ? '0.001' : '0.01');
     const sufixo = tipo === 'kg' ? ' (Kg)' : (tipo === 'moeda' ? ' (R$)' : '');
     return `<div><label>${escapeHtml(k.label)}${sufixo}${marca}</label><input type="number" step="${step}" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
