@@ -692,6 +692,10 @@ function somaExtrasComSinal(classe, defs, { soCruzado } = {}){
 // (convertido pra segundos na leitura, ver lerKpisExtras), texto vira texto
 // livre, e arquivo vira upload de anexo (nao entra no mapa kpisExtras da
 // leitura normal - vai junto do FormData no submit, ver arquivosKpiSelecionados)
+// so esses 3 tipos de KPI cabem no formato "valor: numero" que a leitura por
+// foto devolve (ver montarPrompt em canaisVendaOcr.js) - tempo (mm:ss),
+// texto livre e arquivo continuam sempre digitados/anexados na mao
+function kpiOcrElegivel(k){ return ['quantidade','moeda','kg'].includes(k.tipo||'quantidade'); }
 function renderKpisExtras(unidade){
   const grupo = grupoKpiDaUnidade(unidade);
   const campos = grupo ? (grupo.kpisExtras||[]) : [];
@@ -699,7 +703,19 @@ function renderKpisExtras(unidade){
   document.getElementById('kpis-vazio').classList.toggle('hidden', !!campos.length);
   if(!campos.length){ container.innerHTML = ''; container.classList.add('hidden'); return; }
   container.classList.remove('hidden');
-  container.innerHTML = campos.map(k=>{
+  // mesma logica de travamento de renderExtrasGrupo (Canais/Formas): loja
+  // automatica trava so os KPI's que a foto realmente pode ler
+  const automatico = leituraPorFoto(unidade);
+  const travar = (k) => automatico && kpiOcrElegivel(k) && k.manual !== true;
+  const algumTravado = campos.some(travar);
+  const algumManual = automatico && campos.some(k=>kpiOcrElegivel(k) && k.manual===true);
+  const avisos = [];
+  if(algumTravado) avisos.push('🔒 Os campos com fundo cinza vêm da foto do relatório e não são digitados. Valor zerado no relatório fica em branco.');
+  if(algumManual) avisos.push('✏️ Os demais não saem no relatório — esses você digita normalmente.');
+  const aviso = avisos.length
+    ? `<div class="sub" style="grid-column:1/-1;margin:0 0 2px;">${avisos.join(' ')}</div>`
+    : '';
+  container.innerHTML = aviso + campos.map(k=>{
     const tipo = k.tipo || 'quantidade';
     if(tipo === 'arquivo'){
       return `<div><label>${escapeHtml(k.label)}</label><input type="file" accept="image/*,application/pdf" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-arquivo"></div>`;
@@ -710,9 +726,13 @@ function renderKpisExtras(unidade){
     if(tipo === 'tempo'){
       return `<div><label>${escapeHtml(k.label)} (min:seg)</label><input type="text" placeholder="mm:ss" pattern="[0-9]{1,4}:[0-5][0-9]" inputmode="numeric" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input kpi-extra-tempo"></div>`;
     }
+    const bloq = travar(k);
+    const classeExtra = bloq ? ' campo-automatico' : '';
+    const roAttr = bloq ? ' readonly title="Preenchido pela foto do relatório - não editável"' : '';
+    const marca = (!bloq && automatico && kpiOcrElegivel(k)) ? ' <span style="color:var(--muted);font-weight:400;">✏️</span>' : '';
     const step = tipo === 'quantidade' ? '1' : (tipo === 'kg' ? '0.001' : '0.01');
     const sufixo = tipo === 'kg' ? ' (Kg)' : (tipo === 'moeda' ? ' (R$)' : '');
-    return `<div><label>${escapeHtml(k.label)}${sufixo}</label><input type="number" step="${step}" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input"></div>`;
+    return `<div><label>${escapeHtml(k.label)}${sufixo}${marca}</label><input type="number" step="${step}" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
   }).join('');
   // KPI moeda com "somar em" (ver grupos.html) precisa recalcular o preview
   // de Faturamento/Total Declarado a cada digitação, igual Canais/Formas ja
@@ -771,9 +791,10 @@ function renderCanaisExtras(unidade){
 // loja. O botao so existe se o grupo dessa unidade tiver o recurso ligado.
 function atualizarBotaoLerCanais(unidade){
   const grupo = grupoKpiDaUnidade(unidade);
-  // basta ter campo cadastrado em UMA das duas secoes: tem relatorio que so
-  // traz os canais e tem loja que so usa as formas de pagamento
-  const temCampos = !!grupo && ((grupo.canaisVendaExtras||[]).length + (grupo.formasPagamentoExtras||[]).length) > 0;
+  // basta ter campo cadastrado em UMA das tres frentes: tem relatorio que so
+  // traz os canais, tem loja que so usa as formas de pagamento, e tem grupo
+  // que so tem KPI numerico cadastrado (sem canal/forma nenhum)
+  const temCampos = !!grupo && ((grupo.canaisVendaExtras||[]).length + (grupo.formasPagamentoExtras||[]).length + (grupo.kpisExtras||[]).filter(kpiOcrElegivel).length) > 0;
   const ligado = leituraPorFoto(unidade) && temCampos;
   document.getElementById('ler-canais-wrap').classList.toggle('hidden', !ligado);
   if(!ligado) esconderMsgLerCanais();
@@ -805,37 +826,56 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', async (
     const data = await res.json();
     if(!res.ok) throw new Error(data.error || 'Não foi possível ler a imagem.');
 
-    // preenche SO o que veio; campo que a imagem nao trouxe fica como estava
-    // (em branco ou com o que a loja ja tinha digitado). A secao decide em
-    // qual das duas listas o valor entra - "AdyenV2" pode existir nas duas
-    // toda leitura recomeça do zero: sem limpar, um valor da foto anterior
-    // ficaria num campo que a foto nova nao trouxe, e ninguem veria. Limpa SO
-    // os campos automaticos - o que a loja digitou no Pix CNPJ/Outros nao e
-    // da foto e nao pode ser apagado por ela.
-    document.querySelectorAll('.campo-automatico').forEach(el=>{
-      el.value = ''; el.style.borderColor = '';
-    });
-    let canaisOk = 0; let formasOk = 0; let zerados = 0;
+    // acha o input de um item/campo "faltando" pela secao (canal/forma/kpi)
+    function elDoItem(x){
+      const classe = x.secao === 'forma' ? 'forma-extra-input' : (x.secao === 'kpi' ? 'kpi-extra-input' : 'canal-extra-input');
+      return document.querySelector(`.${classe}[data-extra-campo="${x.campo}"]`);
+    }
+    // preenche SO o que essa foto trouxe; campo que ela nao trouxe fica como
+    // estava (com o valor de uma foto ANTERIOR que ja tinha achado, ou com o
+    // que a loja ja tinha digitado à mão). Antes disso a tela apagava TODOS
+    // os campos automáticos a cada leitura nova - a 2ª foto sumia com o que
+    // a 1ª já tinha achado, mesmo quando ela não cobria aquele campo.
+    let canaisOk = 0; let formasOk = 0; let kpisOk = 0; let zerados = 0;
     (data.itens||[]).forEach(it=>{
-      const classe = it.secao === 'forma' ? 'forma-extra-input' : 'canal-extra-input';
-      const el = document.querySelector(`.${classe}[data-extra-campo="${it.campo}"]`);
+      const el = elDoItem(it);
       if(!el) return;
+      // essa foto ACHOU esse campo agora - trava de novo (mesmo que uma
+      // tentativa anterior tivesse liberado ele por nao achar, ver bloco
+      // "faltando" abaixo) e sobrescreve com a leitura mais recente
+      el.readOnly = true;
+      el.classList.add('campo-automatico');
+      el.title = 'Preenchido pela foto do relatório - não editável';
       // canal zerado no relatorio fica EM BRANCO, nao "0": em branco o campo
       // continua legivel de longe como "nao teve venda aqui", e o fechamento
       // trata vazio como zero do mesmo jeito
-      if(Number(it.valor) === 0){ zerados++; return; }
+      if(Number(it.valor) === 0){ el.value=''; el.style.borderColor=''; zerados++; return; }
       el.value = it.valor;
       el.style.borderColor = 'var(--ok)'; // marca o que veio da foto, pra conferir
-      if(it.secao === 'forma') formasOk++; else canaisOk++;
+      if(it.secao === 'forma') formasOk++; else if(it.secao === 'kpi') kpisOk++; else canaisOk++;
+    });
+    // campos que essa foto NAO trouxe: libera pra digitar à mão - mas SO um
+    // campo ainda intocado (travado e vazio). Um campo que uma foto ANTERIOR
+    // já preencheu fica travado com aquele valor, sem liberar por engano; um
+    // campo que a loja já liberou e digitou numa tentativa anterior também
+    // não é mexido de novo aqui.
+    (data.faltando||[]).forEach(f=>{
+      const el = elDoItem(f);
+      if(!el || !el.readOnly || el.value) return;
+      el.readOnly = false;
+      el.classList.remove('campo-automatico');
+      el.title = 'Não veio no relatório - pode digitar esse valor à mão.';
+      el.style.borderColor = 'var(--warn)';
     });
     atualizarResumo();
 
     const resumo = [];
     if(canaisOk) resumo.push(`${canaisOk} em Canais de venda`);
     if(formasOk) resumo.push(`${formasOk} em Formas de pagamento`);
+    if(kpisOk) resumo.push(`${kpisOk} em KPI's`);
     const origem = plural ? `pelas ${arquivos.length} fotos` : 'pela foto';
     const partes = [resumo.length
-      ? `<b style="color:var(--ok);">✔ Preenchido ${origem}: ${resumo.join(' e ')}.</b> Confira valor por valor antes de enviar — se algum estiver errado, tire a foto de novo.`
+      ? `<b style="color:var(--ok);">✔ Preenchido ${origem}: ${resumo.join(', ')}.</b> Confira valor por valor antes de enviar — se algum estiver errado, tire a foto de novo.`
       : `<b style="color:var(--warn);">Não consegui preencher nenhum campo com ${plural ? 'essas fotos' : 'essa foto'}.</b> Confira se o relatório está inteiro e legível na imagem.`];
     if(zerados){
       partes.push(`<span style="color:var(--muted);">${zerados} campo(s) vieram zerados no relatório e ficaram em branco — em branco conta como zero.</span>`);
@@ -843,7 +883,7 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', async (
     if((data.faltando||[]).length){
       // com varias fotos, "faltando" quase sempre e uma parte do relatorio
       // que nao entrou em nenhuma delas - vale dizer isso em vez de so listar
-      partes.push(`<span style="color:var(--warn);">Não achei ${plural ? 'em nenhuma das fotos' : 'na foto'}: ${data.faltando.map(f=>escapeHtml(f.label)).join(', ')} — fotografe também a parte do relatório onde esses campos aparecem e mande tudo junto.</span>`);
+      partes.push(`<span style="color:var(--warn);">Não achei ${plural ? 'em nenhuma das fotos' : 'na foto'}: ${data.faltando.map(f=>escapeHtml(f.label)).join(', ')} — fotografe também a parte do relatório onde esses campos aparecem e mande tudo junto, ou digite o valor à mão (o campo foi liberado).</span>`);
     }
     if((data.naoIdentificados||[]).length){
       // dinheiro que aparece no relatorio mas nao casa com nenhum campo

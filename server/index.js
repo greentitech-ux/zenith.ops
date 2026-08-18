@@ -3917,7 +3917,12 @@ app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRela
     // campo marcado como "digitado na mao" no Grupo (Pix CNPJ, Outros...) nao
     // vai pro modelo: ele nao sai no relatorio, entao listar seria so dar ao
     // modelo a chance de casar uma linha qualquer com ele
-    const paraLeitura = (lista) => (lista || []).filter((c) => c.manual !== true).map((c) => ({ campo: c.campo, label: c.label }));
+    const paraLeitura = (lista) => (lista || []).filter((c) => c.manual !== true).map((c) => ({ campo: c.campo, label: c.label, tipo: c.tipo }));
+    // KPI so entra na leitura quando o VALOR faz sentido como "um numero so"
+    // (quantidade/moeda/kg) - tempo (mm:ss), texto livre e arquivo nao cabem
+    // no formato "valor: numero" que o modelo devolve, entao nem sao
+    // oferecidos a ele (ver montarPrompt em canaisVendaOcr.js)
+    const kpisOcrElegiveis = (grupo.kpisExtras || []).filter((k) => ['quantidade', 'moeda', 'kg'].includes(k.tipo || 'quantidade'));
     // a dica e escrita pelo Master no cadastro do grupo: cada PDV imprime de
     // um jeito (ordem das linhas, coluna que vale) e isso nao cabe no codigo
     // sem virar um "if" por bandeira
@@ -3925,6 +3930,7 @@ app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRela
       arquivos,
       canais: paraLeitura(grupo.canaisVendaExtras),
       formas: paraLeitura(grupo.formasPagamentoExtras),
+      kpis: paraLeitura(kpisOcrElegiveis),
       dica: grupo.dicaLeituraCanais,
     });
     res.json(rascunho);
