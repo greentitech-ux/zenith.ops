@@ -7,10 +7,9 @@
 // principal (é o dado mais importante do sistema) - o código de Entregas
 // morre, tudo que usava ele passa a usar o código de Fechamento.
 //
-// Só cobre as 3 lojas que hoje têm os dois espaços de código ao mesmo tempo
-// (ver ENTREGAS_UNIDADES_NOMES/FECHAMENTO_UNIDADES_NOMES em index.js) -
-// Bessa/Caruaru/Garanhuns. MMTirol Natal não tem código de Fechamento
-// (unidade só de Entregas) e continua como está.
+// Cobre as 3 lojas que têm Entregas+Fechamento ao mesmo tempo (ver
+// ENTREGAS_UNIDADES_NOMES/FECHAMENTO_UNIDADES_NOMES em index.js) -
+// Bessa/Caruaru/Garanhuns.
 const db = require('./firestore');
 const store = require('./store');
 const entregasLive = require('./entregasLive');
@@ -32,8 +31,14 @@ const MAPA_CODIGO_ENTREGAS_PARA_FECHAMENTO = {
 // cadastro com o de Fechamento pra loja que tem os dois. Mais arriscado que
 // a migração de Entregas (dado financeiro/fraude, não só operacional) -
 // cobre as 9 unidades ARCFOOD/GBE que hoje tem os dois códigos (inclui
-// DOM19940/Dominos Tirol, achado nesta revisão - já usada em produção, ver
-// fechamentos.html UNIDADES_IDPULSE, mas faltava no GBE_MONITOR/index.js)
+// DOM19940/Dominos Tirol, achado numa revisão anterior - já usada em
+// produção, ver fechamentos.html UNIDADES_IDPULSE, mas faltava no
+// GBE_MONITOR/index.js), MAIS "Tirol Natal" -> "MMTirol Natal": mesmo caso,
+// só que essa loja não tem código de Fechamento (só Entregas, ver comentário
+// no topo do arquivo) - aqui o "principal" pro qual o código Monitor migra
+// é o de Entregas mesmo, não Fechamento (nome do mapa continua
+// "PARA_FECHAMENTO" pelas outras 9 entradas, mas o destino é sempre "o
+// código que já tem o cadastro de verdade", não necessariamente Fechamento)
 const MAPA_CODIGO_MONITOR_PARA_FECHAMENTO = {
   Mooca: '19888', DOM___19888: '19888',
   Tatuape: '19889', DOM_19889: '19889',
@@ -44,6 +49,7 @@ const MAPA_CODIGO_MONITOR_PARA_FECHAMENTO = {
   DOM_19706: 'Dominos Bessa',
   DOM_19633: 'Dominos Campina Grande',
   DOM19940: 'Dominos Tirol',
+  'Tirol Natal': 'MMTirol Natal',
 };
 
 // mapa combinado, pra normalizar QUALQUER codigo bruto que chegue na

@@ -545,6 +545,22 @@ setTimeout(async () => {
   if (!okFundeMonitorSolto) ruins += 1;
   console.log(`${okFundeMonitorSolto ? '✓' : '✗'} código antigo solto do Monitor (transação em cache, sem migração) some sozinho, funde no código do Fechamento: HTTP ${unidadesComCodigoMonitorSolto.status}`);
 
+  // ---- caso real reportado pelo usuário: "Tirol Natal" (merchantAccountCode
+  // solto, sem lar em nenhuma lista fixa) duplicando com "MMTirol Natal" (a
+  // mesma loja no espaço de Entregas) - aqui o destino do fold NÃO é
+  // Fechamento (essa loja não tem), é o próprio código de Entregas ----
+  store.addOrUpdate({ pspReference: 'psp-fold-tirol-natal', eventCode: 'AUTHORISATION', unidade: 'Tirol Natal', status: 'APROVADO', dataHora: new Date().toISOString(), valor: 15 });
+  const unidadesComTirolNatalSolto = await pedir('/api/meta/unidades', { Authorization: 'Bearer ' + token });
+  let okFundeTirolNatal = false;
+  try {
+    const lista = JSON.parse(unidadesComTirolNatalSolto.corpo);
+    okFundeTirolNatal = unidadesComTirolNatalSolto.status === 200
+      && !lista.some((u) => u.codigo === 'Tirol Natal')
+      && lista.some((u) => u.codigo === 'MMTirol Natal' && u.nome === 'Milky Moo Tirol Natal');
+  } catch (e) { okFundeTirolNatal = false; }
+  if (!okFundeTirolNatal) ruins += 1;
+  console.log(`${okFundeTirolNatal ? '✓' : '✗'} "Tirol Natal" (Monitor solto) funde em "MMTirol Natal" (Entregas, sem Fechamento pra essa loja): HTTP ${unidadesComTirolNatalSolto.status}`);
+
   // ---- MIGRAÇÃO Monitor(Adyen)→Fechamento (ver migracaoUnidades.js):
   // unifica "Mooca" (merchantAccountCode) pro código "19888" (Fechamento) -
   // cobre transações, fraude, disputas, estornos e permissões. O usuário de
