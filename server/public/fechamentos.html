@@ -157,6 +157,11 @@
   .fech-modal h3{margin:0 0 4px;font-size:15px;}
   .fech-modal .sub{margin-bottom:14px;}
   .fech-modal .secao-titulo{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:14px 0 6px;}
+  .coluna-linha{display:flex;align-items:center;gap:8px;font-size:12.5px;}
+  .coluna-linha-mover{display:flex;flex-direction:column;gap:2px;}
+  .coluna-linha label{display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;min-width:0;}
+  .btn-mover-col{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:5px;width:20px;height:16px;font-size:9px;line-height:1;cursor:pointer;padding:0;}
+  .btn-mover-col:disabled{opacity:.3;cursor:default;}
   .fech-modal .secao-titulo:first-of-type{margin-top:0;}
   .fech-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 10px;}
   @media(max-width:480px){ .fech-grid{grid-template-columns:1fr;} }
@@ -318,10 +323,10 @@
      relatorios CSV/PDF (vai por ?ocultas= pro backend) e fica salva neste
      navegador (localStorage) -->
 <div class="fech-overlay hidden" id="colunas-overlay">
-  <div class="fech-modal" style="max-width:560px;">
+  <div class="fech-modal" style="max-width:420px;">
     <h3>🧩 Colunas da tabela e dos relatórios</h3>
-    <div class="sub">Desmarque o que não deve aparecer na tabela de Fechamentos nem nos relatórios CSV/PDF. Data e Unidade são sempre exibidas. A escolha fica salva neste navegador.</div>
-    <div id="colunas-lista" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;margin:12px 0;"></div>
+    <div class="sub">Só aparecem as colunas dos grupos exibidos agora na tabela. Desmarque o que não deve aparecer, e use ▲▼ pra colocar na ordem que quiser exportar. Data e Unidade são sempre exibidas, sempre primeiro. A escolha fica salva neste navegador.</div>
+    <div id="colunas-lista" style="display:flex;flex-direction:column;gap:4px;margin:12px 0;max-height:50vh;overflow-y:auto;"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button type="button" class="preset-btn" onclick="fecharSeletorColunas()">Cancelar</button>
       <button type="button" class="preset-btn" onclick="restaurarColunas()" title="Voltar a mostrar todas as colunas">Mostrar todas</button>
@@ -1574,6 +1579,25 @@ try{ COLUNAS_OCULTAS = new Set(JSON.parse(localStorage.getItem('fechColunasOcult
 // Data e Unidade sao a ancora de leitura da tabela - nunca escondem
 function colVisivel(key){ return key==='data' || key==='unidadeNome' || !COLUNAS_OCULTAS.has(key); }
 
+// ordem de colunas escolhida no seletor 🧩 Colunas (reordenavel com ▲▼) -
+// vale igual na tabela da tela e nos relatorios CSV/PDF (mesma ideia do
+// COLUNAS_OCULTAS acima, ver ordenarPorPreferencia)
+let ORDEM_COLUNAS = [];
+try{ ORDEM_COLUNAS = JSON.parse(localStorage.getItem('fechColunasOrdem')||'[]'); }catch(e){}
+// aplica ORDEM_COLUNAS numa lista de {key,...} - o que nao esta na lista
+// salva (coluna nova, ou que so passou a existir depois) mantem a ordem
+// padrao, no fim. Data/Unidade sempre primeiro, nunca reordenam (mesma
+// regra de colVisivel acima)
+function ordenarPorPreferencia(itens){
+  const indice = new Map(ORDEM_COLUNAS.map((k,i)=>[k,i]));
+  const fixas = itens.filter(o=>o.key==='data'||o.key==='unidadeNome');
+  const resto = itens.filter(o=>o.key!=='data'&&o.key!=='unidadeNome')
+    .map((o,i)=>({o, i, idx: indice.has(o.key) ? indice.get(o.key) : Number.MAX_SAFE_INTEGER}))
+    .sort((a,b)=> a.idx-b.idx || a.i-b.i)
+    .map(x=>x.o);
+  return [...fixas, ...resto];
+}
+
 function tabelaFechamentosHtml(rows){
   const grupo = grupoKpiDaUnidade((rows[0]||{}).unidade);
   const colunasFixas = colunasFixasUsadas(rows);
@@ -1583,7 +1607,7 @@ function tabelaFechamentosHtml(rows){
   // defs na mesma ordem de sempre - th e td saem do MESMO array, entao
   // esconder/mostrar coluna nunca desalinha o cabecalho do corpo
   // ("previsao" e a unica coluna so da tela, o relatorio nao a tem)
-  const defs = [
+  const defs = ordenarPorPreferencia([
     { key:'data', label:'Data', td:d=>`<td>${fmtData(d.data)}</td>` },
     { key:'unidadeNome', label:'Unid.', td:d=>`<td>${escapeHtml(UNIDADES_NOMES[d.unidade]||d.unidade)}</td>` },
     { key:'gerente', label:'Responsável', td:d=>`<td class="truncate" title="${escapeHtml(d.gerente||'')}">${escapeHtml(d.gerente||'—')}</td>` },
@@ -1596,7 +1620,7 @@ function tabelaFechamentosHtml(rows){
     ...colunasCanais.map(c=>({ key:'canal:'+c.campo, label:c.label, td:d=>`<td class="valor">${fmtMoney((d.canaisVendaExtras||{})[c.campo]||0)}</td>` })),
     ...colunasFormas.map(c=>({ key:'forma:'+c.campo, label:c.label, td:d=>`<td class="valor">${fmtMoney((d.formasPagamentoExtras||{})[c.campo]||0)}</td>` })),
     { key:'observacao', label:'Observação', td:d=>`<td class="truncate" title="${escapeHtml(d.observacao||d.obsDif||'')}">${escapeHtml(d.observacao||d.obsDif||'—')}</td>` },
-  ].filter(c=>colVisivel(c.key));
+  ]).filter(c=>colVisivel(c.key));
 
   const thead = defs.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('') + (IS_MASTER ? '<th>Ações</th>' : '');
   const corpo = rows.map(d=>
@@ -1610,9 +1634,19 @@ function tabelaFechamentosHtml(rows){
 }
 
 // ---------- seletor 🧩 Colunas ----------
-// todas as colunas que PODEM existir (fixas + canais/formas de TODOS os
-// grupos cadastrados) - nao so as visiveis no filtro atual, pra escolha
-// nao "sumir" quando o periodo filtrado nao usa uma coluna
+// grupos (franquias) que de fato aparecem na tabela AGORA (ver renderTabela,
+// que preenche isso a cada render) - o seletor so lista as colunas DESSES
+// grupos, nao de todo mundo cadastrado no sistema. Comeca null (antes do 1o
+// render da tabela); nesse caso opcoesColunas cai pra "todos os grupos", que
+// na pratica nunca deveria aparecer pro usuario (o seletor so abre depois
+// da tabela já ter carregado)
+let ULTIMOS_GRUPOS_VISIVEIS = null;
+
+// colunas que podem existir nos grupos ATUALMENTE exibidos na tabela (fixas
+// + canais/formas so dos grupos de ULTIMOS_GRUPOS_VISIVEIS) - antes so
+// juntava de TODOS os grupos cadastrados no sistema, o que enchia o seletor
+// de colunas de operacoes que nem estao na tela (ex: Getnet/Visa/Elo do
+// Grupo Bravo aparecendo junto com a ARCFOOD)
 function opcoesColunas(){
   const vistos = new Map();
   [
@@ -1624,7 +1658,10 @@ function opcoesColunas(){
     {key:'quebra', label:'Quebra'},
     ...CAMPOS_FIXOS.map(c=>({key:c.campo, label:c.label})),
   ].forEach(o=>vistos.set(o.key, o.label));
-  GRUPOS_KPI.forEach(g=>{
+  const gruposParaMostrar = ULTIMOS_GRUPOS_VISIVEIS
+    ? GRUPOS_KPI.filter(g=>ULTIMOS_GRUPOS_VISIVEIS.has(g.id))
+    : GRUPOS_KPI;
+  gruposParaMostrar.forEach(g=>{
     (g.canaisVendaExtras||[]).forEach(c=>{ if(!vistos.has('canal:'+c.campo)) vistos.set('canal:'+c.campo, c.label+' (canal)'); });
     (g.formasPagamentoExtras||[]).forEach(c=>{ if(!vistos.has('forma:'+c.campo)) vistos.set('forma:'+c.campo, c.label+' (forma pgto.)'); });
   });
@@ -1632,20 +1669,45 @@ function opcoesColunas(){
   return [...vistos.entries()].map(([key,label])=>({key,label}));
 }
 
+// monta as linhas do seletor - cada uma com ▲▼ pra reordenar (mesmo padrao
+// de moverLinhaKpi em grupos.html: a ordem literal das divs no container E
+// a ordem salva, lida na hora de Salvar via querySelectorAll)
+function renderColunasLista(opcoes, marcada){
+  document.getElementById('colunas-lista').innerHTML = opcoes.map(o=>`
+    <div class="coluna-linha" data-coluna="${escapeHtml(o.key)}">
+      <span class="coluna-linha-mover">
+        <button type="button" class="btn-mover-col" onclick="moverColuna(this,-1)" title="Mover pra cima">▲</button>
+        <button type="button" class="btn-mover-col" onclick="moverColuna(this,1)" title="Mover pra baixo">▼</button>
+      </span>
+      <label>
+        <input type="checkbox" data-check ${marcada(o.key)?'checked':''} style="width:auto;margin:0;">
+        ${escapeHtml(o.label)}
+      </label>
+    </div>`).join('');
+}
+function moverColuna(btn, direcao){
+  const linha = btn.closest('.coluna-linha');
+  const vizinha = direcao < 0 ? linha.previousElementSibling : linha.nextElementSibling;
+  if(!vizinha) return;
+  if(direcao < 0) linha.parentElement.insertBefore(linha, vizinha);
+  else linha.parentElement.insertBefore(vizinha, linha);
+}
 function abrirSeletorColunas(){
-  document.getElementById('colunas-lista').innerHTML = opcoesColunas().map(o=>`
-    <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;">
-      <input type="checkbox" data-coluna="${escapeHtml(o.key)}" ${COLUNAS_OCULTAS.has(o.key)?'':'checked'} style="width:auto;margin:0;">
-      ${escapeHtml(o.label)}
-    </label>`).join('');
+  renderColunasLista(ordenarPorPreferencia(opcoesColunas()), k=>!COLUNAS_OCULTAS.has(k));
   document.getElementById('colunas-overlay').classList.remove('hidden');
 }
 function fecharSeletorColunas(){ document.getElementById('colunas-overlay').classList.add('hidden'); }
+// "Mostrar todas" tambem volta a ordem padrao, ja que ela e so uma
+// preferencia de exibicao - nao teria como "restaurar visibilidade" de
+// forma clara mantendo uma ordem custom no meio do caminho
 function restaurarColunas(){
-  document.querySelectorAll('#colunas-lista input[data-coluna]').forEach(cb=>{ cb.checked = true; });
+  renderColunasLista(opcoesColunas(), ()=>true);
 }
 function salvarColunas(){
-  COLUNAS_OCULTAS = new Set([...document.querySelectorAll('#colunas-lista input[data-coluna]')].filter(cb=>!cb.checked).map(cb=>cb.dataset.coluna));
+  const linhas = [...document.querySelectorAll('#colunas-lista .coluna-linha')];
+  ORDEM_COLUNAS = linhas.map(l=>l.dataset.coluna);
+  COLUNAS_OCULTAS = new Set(linhas.filter(l=>!l.querySelector('input[data-check]').checked).map(l=>l.dataset.coluna));
+  localStorage.setItem('fechColunasOrdem', JSON.stringify(ORDEM_COLUNAS));
   localStorage.setItem('fechColunasOcultas', JSON.stringify([...COLUNAS_OCULTAS]));
   fecharSeletorColunas();
   renderTabela(filtrar());
@@ -1668,6 +1730,7 @@ function renderTabela(rows){
 
   const container = document.getElementById('fechamentos-tabelas');
   if(!ordenadas.length){
+    ULTIMOS_GRUPOS_VISIVEIS = new Set();
     container.innerHTML = '<div class="empty">Nenhum fechamento no período/unidade selecionados.</div>';
     return;
   }
@@ -1683,6 +1746,9 @@ function renderTabela(rows){
     if(!blocos.has(chave)) blocos.set(chave, { nome: g ? g.nome : 'Sem grupo definido', semGrupo: !g, rows: [] });
     blocos.get(chave).rows.push(d);
   });
+  // usado pelo seletor 🧩 Colunas (opcoesColunas) pra so listar as colunas
+  // dos grupos que de fato estao na tela agora
+  ULTIMOS_GRUPOS_VISIVEIS = new Set([...blocos.keys()].filter(k=>k!=='__sem_grupo__'));
   const lista = [...blocos.values()].sort((a,b)=>{
     if(a.semGrupo !== b.semGrupo) return a.semGrupo ? 1 : -1; // sem grupo por último
     return a.nome.localeCompare(b.nome, 'pt-BR');
@@ -2066,8 +2132,9 @@ function baixarRelatorioFechamentos(formato){
   if(inicio) params.set('inicio', inicio);
   if(fim) params.set('fim', fim);
   if(unidades) params.set('unidades', unidades);
-  // mesmas colunas escondidas da tabela (seletor 🧩 Colunas) valem no relatorio
+  // mesmas colunas escondidas/reordenadas da tabela (seletor 🧩 Colunas) valem no relatorio
   if(COLUNAS_OCULTAS.size) params.set('ocultas', [...COLUNAS_OCULTAS].join(','));
+  if(ORDEM_COLUNAS.length) params.set('ordem', ORDEM_COLUNAS.join(','));
   window.location.href = `/api/fechamentos/relatorio.${formato}?${params.toString()}`;
 }
 

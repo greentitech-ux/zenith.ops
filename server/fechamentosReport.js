@@ -75,13 +75,34 @@ function colunasExtrasUsadas(fechamentos, grupos, chave, prefixo) {
   return [...vistas.entries()].map(([campo, label]) => ({ key: prefixo + campo, label, moeda: true, largura: 58, origem: chave, campo }));
 }
 
+// aplica a ordem escolhida no seletor 🧩 Colunas de fechamentos.html (chega
+// via ?ordem=, lista de keys separada por virgula - mesmo array lido da
+// ordem literal das divs no seletor, ver salvarColunas). Data/Unidade
+// sempre ficam primeiro (ancora de leitura, nunca reordenam - mesma regra
+// do filtro de ocultas acima); colunas que a lista nao menciona (novas, ou
+// de outro grupo que nao passou pelo seletor ainda) mantem a ordem padrao,
+// no fim - Array.prototype.sort e estavel, entao a ordem relativa entre
+// colunas nao mencionadas se preserva
+function ordenarColunas(colunas, ordem) {
+  const indice = new Map(ordem.map((k, i) => [k, i]));
+  const fixas = colunas.filter((c) => c.key === 'data' || c.key === 'unidadeNome');
+  const resto = colunas.filter((c) => c.key !== 'data' && c.key !== 'unidadeNome');
+  resto.sort((a, b) => {
+    const ia = indice.has(a.key) ? indice.get(a.key) : Number.MAX_SAFE_INTEGER;
+    const ib = indice.has(b.key) ? indice.get(b.key) : Number.MAX_SAFE_INTEGER;
+    return ia - ib;
+  });
+  return [...fixas, ...resto];
+}
+
 // monta colunas (na ordem da tela) + linhas ja com todos os valores
 // achatados por key - "grupos" e a lista de grupos.list() (pros labels).
 // "ocultas" (Set de keys, opcional) sao as colunas que o usuario escondeu
 // no seletor 🧩 Colunas de fechamentos.html (chegam via ?ocultas=) - mesmas
 // keys da tela, entao a escolha vale igual na tabela e no CSV/PDF;
-// Data/Unidade nunca saem (ancora de leitura do relatorio)
-function prepararRelatorio(fechamentos, grupos, ocultas) {
+// Data/Unidade nunca saem (ancora de leitura do relatorio). "ordem" (array
+// de keys, opcional) e a reordenacao escolhida no mesmo seletor.
+function prepararRelatorio(fechamentos, grupos, ocultas, ordem) {
   const rows = [...fechamentos].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
   const fixasUsadas = CAMPOS_FIXOS
     .filter((c) => rows.some((f) => Math.abs(f[c.key] || 0) > 0.001))
@@ -91,6 +112,9 @@ function prepararRelatorio(fechamentos, grupos, ocultas) {
   let colunas = [...COLUNAS_BASE, ...fixasUsadas, ...canais, ...formas, COLUNA_OBSERVACAO];
   if (ocultas && ocultas.size) {
     colunas = colunas.filter((c) => c.key === 'data' || c.key === 'unidadeNome' || !ocultas.has(c.key));
+  }
+  if (ordem && ordem.length) {
+    colunas = ordenarColunas(colunas, ordem);
   }
 
   const linhas = rows.map((f) => {
