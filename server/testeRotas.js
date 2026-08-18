@@ -636,7 +636,7 @@ setTimeout(async () => {
       canaisVendaExtras: { delivery: 1850.48, loja: 255.12 }, formasPagamentoExtras: { ifood: 454.33, food99: 577.30 } },
     // importado de planilha: mesmos conceitos, no schema antigo
     { unidade: '19888', unidadeNome: 'Dom Mooca', data: '2026-08-17', faturamento: 1330.73,
-      ifood: 382.96, food99: 251.50, loja: 76.90 },
+      ifood: 382.96, food99: 251.50, loja: 76.90, delivery: 611.20, pixCnpj: 8.40, outros: 3.10 },
   ];
   let okColunasUnificadas = false;
   try {
@@ -649,10 +649,33 @@ setTimeout(async () => {
     okColunasUnificadas = !repetidas.length
       // as duas origens caem na MESMA coluna, cada linha lendo de onde gravou
       && carrao[porNome('Ifood').key] === 454.33 && mooca[porNome('Ifood').key] === 382.96
-      && carrao[porNome('Loja').key] === 255.12 && mooca[porNome('Loja').key] === 76.90;
+      && carrao[porNome('Loja').key] === 255.12 && mooca[porNome('Loja').key] === 76.90
+      // Delivery da planilha (schema antigo) aparece na MESMA coluna do
+      // Delivery lançado no sistema (canal do grupo)
+      && carrao[porNome('Delivery').key] === 1850.48 && mooca[porNome('Delivery').key] === 611.20;
   } catch (e) { okColunasUnificadas = false; }
   if (!okColunasUnificadas) ruins += 1;
-  console.log(`${okColunasUnificadas ? '✓' : '✗'} colunas do Fechamento não duplicam por origem (planilha e sistema na mesma coluna Ifood/Loja)`);
+  console.log(`${okColunasUnificadas ? '✓' : '✗'} colunas do Fechamento não duplicam por origem (planilha e sistema na mesma coluna Ifood/Loja/Delivery)`);
+
+  // ---- o dado da planilha não pode sumir da tela: sheetsSync importa DEZ
+  // campos de valor, e por muito tempo só 5 tinham coluna (Delivery,
+  // Carryout, Pick-up, Pix CNPJ e Outros eram gravados e nunca exibidos).
+  // Sem grupo nenhum definido - é o caso que mais expõe o buraco, porque aí
+  // não há canal/forma do grupo pra "cobrir" a coluna faltante ----
+  let okPlanilhaCompleta = false;
+  try {
+    const soPlanilha = [{ unidade: 'X', unidadeNome: 'Loja Planilha', data: '2026-08-17', faturamento: 100,
+      delivery: 611.20, carryout: 44.30, pickup: 12.90, loja: 76.90, adyen: 109.80,
+      ifood: 382.96, food99: 251.50, pix: 5.50, pixCnpj: 8.40, outros: 3.10 }];
+    const { colunas, linhas } = relFech.prepararRelatorio(soPlanilha, []);
+    const valor = (nome) => linhas[0][(colunas.find((c) => c.label === nome) || {}).key];
+    okPlanilhaCompleta = valor('Delivery') === 611.20 && valor('Carryout') === 44.30 && valor('Pick-up') === 12.90
+      && valor('Pix CNPJ') === 8.40 && valor('Outros') === 3.10
+      && valor('Loja') === 76.90 && valor('Maquininhas (cartão)') === 109.80 && valor('Pix') === 5.50
+      && valor('Ifood') === 382.96 && valor('99Food') === 251.50;
+  } catch (e) { okPlanilhaCompleta = false; }
+  if (!okPlanilhaCompleta) ruins += 1;
+  console.log(`${okPlanilhaCompleta ? '✓' : '✗'} os 10 campos de valor que a planilha importa aparecem todos na tabela`);
 
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a

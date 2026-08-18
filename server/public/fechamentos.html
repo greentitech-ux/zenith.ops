@@ -1553,9 +1553,19 @@ function colunasExtras(rows, chave, grupo){
 // colidia com a forma de pagamento "Adyen" que o grupo define em
 // /grupos.html e a tabela mostrava duas colunas "Adyen" com valores
 // diferentes (uma era a soma das maquininhas, a outra a forma do grupo).
+// A planilha importa DEZ campos de valor (ver linhaParaFechamento em
+// sheetsSync.js) - Delivery/Carryout/Pick-up/Pix CNPJ/Outros estavam sendo
+// lidos e gravados, mas não tinham coluna nenhuma aqui, então o dado existia
+// no registro e simplesmente não aparecia na tela (a linha de planilha
+// mostrava R$ 0,00 nessas colunas, que só o lançamento do sistema
+// preenchia). Com os dez listados aqui + a unificação por nome logo abaixo,
+// a linha vinda de planilha preenche as MESMAS colunas do lançamento do
+// sistema. Ordem = ordem de leitura da tabela.
 const CAMPOS_FIXOS = [
-  {campo:'adyen', label:'Maquininhas (cartão)'}, {campo:'ifood', label:'Ifood'}, {campo:'food99', label:'99Food'},
-  {campo:'pix', label:'Pix'}, {campo:'loja', label:'Loja'},
+  {campo:'delivery', label:'Delivery'}, {campo:'carryout', label:'Carryout'}, {campo:'pickup', label:'Pick-up'},
+  {campo:'loja', label:'Loja'}, {campo:'adyen', label:'Maquininhas (cartão)'}, {campo:'ifood', label:'Ifood'},
+  {campo:'food99', label:'99Food'}, {campo:'pix', label:'Pix'}, {campo:'pixCnpj', label:'Pix CNPJ'},
+  {campo:'outros', label:'Outros'},
 ];
 
 // ---------- colunas de valor unificadas por NOME ----------
