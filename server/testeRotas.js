@@ -618,6 +618,42 @@ setTimeout(async () => {
   if (!okIdempotenteMon) ruins += 1;
   console.log(`${okIdempotenteMon ? '✓' : '✗'} rodar a migração Monitor de novo não acha mais nada pra mudar (idempotente): HTTP ${rodouDeNovoMon.status}`);
 
+  // ---- colunas do Fechamento unificadas por NOME (ver colunasValores em
+  // public/fechamentos.html e unificarPorNome em fechamentosReport.js): a
+  // mesma "Ifood" existe como campo fixo do schema antigo (linha vinda de
+  // planilha) E como canal de venda do grupo (linha lançada no sistema), e
+  // saía como DUAS colunas de mesmo nome - uma preenchida e a outra zerada.
+  // Cenário exato reportado pelo Master no painel da ARCFOOD. ----
+  const relFech = require('/home/user/adyen-monitor/server/fechamentosReport.js');
+  const gruposTeste = [{
+    id: 'arcfood', nome: 'Dominos ARCFOOD', unidades: ['19855', '19888'],
+    canaisVendaExtras: [{ campo: 'delivery', label: 'Delivery' }, { campo: 'loja', label: 'Loja' }],
+    formasPagamentoExtras: [{ campo: 'ifood', label: 'Ifood' }, { campo: 'food99', label: '99Food' }],
+  }];
+  const fechTeste = [
+    // lançado no sistema: usa os canais/formas que o grupo define
+    { unidade: '19855', unidadeNome: 'Dom Carrão', data: '2026-08-17', criadoPorId: 'u1', faturamento: 2195.45,
+      canaisVendaExtras: { delivery: 1850.48, loja: 255.12 }, formasPagamentoExtras: { ifood: 454.33, food99: 577.30 } },
+    // importado de planilha: mesmos conceitos, no schema antigo
+    { unidade: '19888', unidadeNome: 'Dom Mooca', data: '2026-08-17', faturamento: 1330.73,
+      ifood: 382.96, food99: 251.50, loja: 76.90 },
+  ];
+  let okColunasUnificadas = false;
+  try {
+    const { colunas, linhas } = relFech.prepararRelatorio(fechTeste, gruposTeste);
+    const labels = colunas.map((c) => c.label);
+    const repetidas = labels.filter((l, i) => labels.indexOf(l) !== i);
+    const porNome = (nome) => colunas.find((c) => c.label === nome);
+    const carrao = linhas.find((l) => l.unidadeNome === 'Dom Carrão');
+    const mooca = linhas.find((l) => l.unidadeNome === 'Dom Mooca');
+    okColunasUnificadas = !repetidas.length
+      // as duas origens caem na MESMA coluna, cada linha lendo de onde gravou
+      && carrao[porNome('Ifood').key] === 454.33 && mooca[porNome('Ifood').key] === 382.96
+      && carrao[porNome('Loja').key] === 255.12 && mooca[porNome('Loja').key] === 76.90;
+  } catch (e) { okColunasUnificadas = false; }
+  if (!okColunasUnificadas) ruins += 1;
+  console.log(`${okColunasUnificadas ? '✓' : '✗'} colunas do Fechamento não duplicam por origem (planilha e sistema na mesma coluna Ifood/Loja)`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de
