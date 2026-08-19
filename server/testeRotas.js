@@ -626,6 +626,31 @@ setTimeout(async () => {
   if (!okEnvioGrupo) ruins += 1;
   console.log(`${okEnvioGrupo ? '✓' : '✗'} enviar-planilha aceita ARCFOOD e BRAVO (grupo na rota, lojas do Bravo vindas do sheetsSync)`);
 
+  // ---- leitura de Canais por foto: o modelo por vezes devolve numero em
+  // formato BR (virgula decimal, ex: "3.636,40") ou uma frase antes/depois
+  // do JSON, apesar da instrucao no prompt - os dois quebram JSON.parse cru
+  // e a tela mostrava "Nao consegui entender essa imagem", que sugere foto
+  // ruim quando na verdade a foto estava perfeita e o problema era so
+  // formatacao da resposta do modelo (ver extrairJson em canaisVendaOcr.js) ----
+  let okExtrairJson = false;
+  try {
+    const { extrairJson } = require('./canaisVendaOcr.js');
+    const brComMilhar = extrairJson('{"campos":[{"chave":"canal.delivery","valor": 3.636,40}]}');
+    const brSemMilhar = extrairJson('{"campos":[{"chave":"forma.elo","valor": 51,90}]}');
+    const brNegativo = extrairJson('{"campos":[{"chave":"kpi.x","valor": -1,91}]}');
+    const comProsa = extrairJson('Aqui está o relatório extraído:\n{"data":"2026-08-18","campos":[]}\nEspero ter ajudado!');
+    const jaCorreto = extrairJson('{"campos":[{"chave":"canal.loja","valor": 1153.60},{"chave":"canal.pickup","valor": 0}]}');
+    const virgulaDeArray = extrairJson('{"campos":[{"chave":"a","valor":100},{"chave":"b","valor":200}]}');
+    okExtrairJson = brComMilhar.campos[0].valor === 3636.40
+      && brSemMilhar.campos[0].valor === 51.90
+      && brNegativo.campos[0].valor === -1.91
+      && comProsa.data === '2026-08-18'
+      && jaCorreto.campos[0].valor === 1153.60 && jaCorreto.campos[1].valor === 0
+      && virgulaDeArray.campos.length === 2 && virgulaDeArray.campos[1].valor === 200;
+  } catch (e) { okExtrairJson = false; }
+  if (!okExtrairJson) ruins += 1;
+  console.log(`${okExtrairJson ? '✓' : '✗'} leitura de Canais por foto: número BR/prosa antes do JSON não derruba mais o parser`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de
