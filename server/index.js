@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const path = require('path');
 const multer = require('multer');
 
+const db = require('./firestore'); // so pro contador de leituras (ver relatorioLeituras)
 const store = require('./store');
 const { normalize } = require('./normalize');
 const { lookupBank } = require('./binLookup');
@@ -159,6 +160,21 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
+});
+
+// Atribuicao de LEITURAS do Firestore por rota (ver o contador em
+// firestore.js). Precisa embrulhar o resto da cadeia num AsyncLocalStorage:
+// com varias requisicoes em voo, medir "antes e depois" no middleware
+// colocaria a leitura de uma rota na conta de outra. Usa req.path e nao
+// req.originalUrl de proposito - id e querystring virariam milhares de
+// chaves distintas no relatorio, escondendo justamente o padrao que a gente
+// quer enxergar.
+app.use((req, res, next) => {
+  // contador ausente (fake do testeRotas.js, ou instalacao que falhou) nao
+  // pode derrubar requisicao nenhuma - diagnostico e acessorio
+  if (!db.contextoRota) return next();
+  const rota = `${req.method} ${req.path.replace(/\/[0-9a-zA-Z_-]{16,}(?=\/|$)/g, '/:id')}`;
+  db.contextoRota.run({ rota }, next);
 });
 
 // fuso horario usado em todos os timestamps "Exportado em ..." dos
@@ -2415,7 +2431,23 @@ app.delete('/api/pedido-semanal/regras/:id', auth.requireMaster, async (req, res
 // explicito do usuario: "crie se preciso uma central de alertas que mostre
 // qual o alerta e o que e"). Master-only, mesmo espirito de qa-aprovacoes ----------
 app.get('/api/alertas-central', auth.requireMaster, async (req, res) => {
-  res.json(await alertasCentral.listar());
+  // ?desde=<criadoEm do alerta mais novo que a tela ja tem> devolve SO os mais
+  // novos que isso - e o que o polling de 15s usa (custa ~1 leitura em vez dos
+  // 300 documentos da lista inteira, ver alertasCentral.js). Sem o parametro
+  // devolve a lista completa, que e o caso da abertura da tela.
+  const desde = String(req.query.desde || '').trim();
+  res.json(desde ? await alertasCentral.listarDesde(desde) : await alertasCentral.listar());
+});
+
+// Diagnostico de custo do Firestore: quantos DOCUMENTOS cada colecao e cada
+// rota leram desde o ultimo restart (ou desde o ultimo ?zerar=1). O console do
+// Firebase so mostra o total da conta - sem isso nao da pra saber de onde vem
+// o gasto, e otimizar vira chute.
+app.get('/api/debug/leituras', auth.requireMaster, (req, res) => {
+  if (!db.relatorioLeituras) return res.status(503).json({ error: 'Contador de leituras não está instalado neste processo.' });
+  const relatorio = db.relatorioLeituras();
+  if (String(req.query.zerar || '') === '1') db.zerarLeituras();
+  res.json(relatorio);
 });
 
 app.post('/api/alertas-central/:id/atender', auth.requireMaster, async (req, res) => {

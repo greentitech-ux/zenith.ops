@@ -859,6 +859,57 @@ setTimeout(async () => {
   if (!okCustoSessao) ruins += 1;
   console.log(`${okCustoSessao ? '✓' : '✗'} autenticação: validar sessão custa 1 leitura de 1 documento e não é derrubada pela atividade de outro usuário`);
 
+  // ------------------------------------------------------------------
+  // Custo da Central de Alertas. A tela faz polling a cada 15s; ate
+  // 18/08/2026 cada batida relia os 300 documentos da colecao inteira
+  // (cache com TTL de 8s, MENOR que o intervalo do polling - nunca acertava),
+  // o que da 72 mil leituras/hora com UMA aba aberta e foi o que disparou a
+  // fatura do Firestore. Agora o polling manda ?desde=<criadoEm mais novo> e
+  // paga ~1 leitura por batida. Este teste trava esse custo.
+  let okCustoAlertas = false;
+  try {
+    const alertasCentral = require('/home/user/adyen-monitor/server/alertasCentral.js');
+    const cabAlertas = token ? { Authorization: 'Bearer ' + token } : {};
+    for (let i = 0; i < 300; i++) {
+      const id = 'alerta-' + String(i).padStart(3, '0');
+      // criadoEm crescente: o mais novo (i=299) e o que a tela usa como "desde"
+      DOCS.set('alertasCentral/' + id, {
+        id, tipo: 'teste', titulo: 'Alerta ' + i, resumo: null, url: '/', critico: false,
+        criadoEm: new Date(Date.UTC(2026, 7, 1, 0, 0, i)).toISOString(),
+        atendidoEm: null, atendidoPorEmail: null,
+      });
+    }
+    const maisNovo = new Date(Date.UTC(2026, 7, 1, 0, 0, 299)).toISOString();
+
+    // abertura da tela: paga a lista inteira uma vez, e so
+    const antesCompleta = LEITURAS.docs;
+    const completa = JSON.parse((await pedir('/api/alertas-central', cabAlertas)).corpo);
+    const custoAbertura = LEITURAS.docs - antesCompleta;
+
+    // 10 batidas do polling sem alerta novo. Com o cache incremental de 8s a
+    // maioria nem chega no Firestore; o teto aceitavel e 1 leitura por batida
+    const antesPolling = LEITURAS.docs;
+    for (let i = 0; i < 10; i++) {
+      await pedir('/api/alertas-central?desde=' + encodeURIComponent(maisNovo), cabAlertas);
+    }
+    const custoPolling = LEITURAS.docs - antesPolling;
+
+    // e um alerta NOVO ainda tem que aparecer pra tela. Contagem relativa
+    // porque os testes anteriores deste arquivo ja registraram alertas de
+    // verdade (NOC, QA...) mais novos que os semeados aqui
+    const antesDoNovo = JSON.parse((await pedir('/api/alertas-central?desde=' + encodeURIComponent(maisNovo), cabAlertas)).corpo);
+    await alertasCentral.registrar({ tipo: 'teste', titulo: 'chegou agora' });
+    const novos = JSON.parse((await pedir('/api/alertas-central?desde=' + encodeURIComponent(maisNovo), cabAlertas)).corpo);
+
+    const apareceu = novos.length === antesDoNovo.length + 1 && novos.some((a) => a.titulo === 'chegou agora');
+    okCustoAlertas = completa.length === 300 && custoPolling <= 10 && apareceu;
+    if (!okCustoAlertas) {
+      console.log(`  (lista completa: ${completa.length}, esperado 300 · 10 batidas do polling: ${custoPolling}, teto 10 · alertas novos: ${antesDoNovo.length} -> ${novos.length}, esperado +1 com "chegou agora")`);
+    }
+  } catch (e) { okCustoAlertas = false; console.log('  erro: ' + e.message); }
+  if (!okCustoAlertas) ruins += 1;
+  console.log(`${okCustoAlertas ? '✓' : '✗'} Central de Alertas: polling incremental custa ~1 leitura por batida (era 300) e ainda mostra alerta novo`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de

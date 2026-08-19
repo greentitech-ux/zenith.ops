@@ -204,8 +204,33 @@ async function atender(id, semRecarregar){
   }catch(e){ /* silencioso - proxima carga corrige */ }
 }
 
-async function carregar(){
-  ALERTAS = await fetch('/api/alertas-central').then(r=>r.json());
+// O polling de 15s NAO recarrega a lista inteira: manda ?desde=<criadoEm do
+// alerta mais novo que ja temos> e recebe so o que apareceu depois disso -
+// quase sempre nada. Recarregar tudo custava 300 leituras do Firestore por
+// batida (72 mil/hora com uma aba aberta), que foi o que disparou a fatura em
+// agosto/2026.
+//
+// A carga COMPLETA continua acontecendo na abertura da tela e toda vez que a
+// aba volta a ficar visivel - e assim que "atendido por outro Master" entra na
+// tela, ja que a consulta incremental so enxerga alerta NOVO, nao alteracao em
+// alerta antigo.
+let ULTIMO_CRIADO_EM = null;
+
+async function carregar(incremental){
+  const url = (incremental && ULTIMO_CRIADO_EM)
+    ? '/api/alertas-central?desde=' + encodeURIComponent(ULTIMO_CRIADO_EM)
+    : '/api/alertas-central';
+  const lista = await fetch(url).then(r=>r.json());
+  if(!Array.isArray(lista)) return;
+  if(incremental && ULTIMO_CRIADO_EM){
+    if(!lista.length) return; // nada novo: nem re-renderiza
+    const novosIds = new Set(lista.map(a=>a.id));
+    ALERTAS = [...lista, ...ALERTAS.filter(a=>!novosIds.has(a.id))].slice(0,300);
+  } else {
+    ALERTAS = lista;
+  }
+  // a lista vem em ordem decrescente de criadoEm, entao o [0] e sempre o mais novo
+  if(ALERTAS.length) ULTIMO_CRIADO_EM = ALERTAS[0].criadoEm;
   render();
 }
 
@@ -218,9 +243,9 @@ async function boot(){
     return;
   }
   document.getElementById('root').classList.remove('hidden');
-  await carregar();
-  setInterval(()=>{ if(!document.hidden) carregar(); }, 15000);
-  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) carregar(); });
+  await carregar(false);
+  setInterval(()=>{ if(!document.hidden) carregar(true); }, 15000);
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) carregar(false); });
 }
 boot();
 </script>
