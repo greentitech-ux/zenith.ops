@@ -80,6 +80,10 @@
   .tl-linha{width:20px;height:1px;background:var(--line);flex:none;}
   .tl-linha.feita{background:var(--ok);}
   .compra-rodape{display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:8px;flex-wrap:wrap;}
+  .compra-acoes{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .compra-entrega{font-size:11.5px;color:var(--muted);}
+  .compra-comprovante{font-size:11.5px;color:var(--accent);text-decoration:none;}
+  .compra-comprovante:hover{text-decoration:underline;}
   .compra-valor{font-size:13px;font-weight:700;}
   .compra-itens{font-size:11.5px;color:var(--muted);margin-top:4px;}
 </style>
@@ -245,7 +249,14 @@ function renderLista(){
       ${timeline(c)}
       <div class="compra-rodape">
         <div class="compra-valor">${c.valor?fmtMoney(c.valor):(c.ehOrcamento?'orçamento':'sem valor informado')}</div>
-        ${c.entregaVencida?`<span class="badge travada">entrega prevista ${fmtData(c.marcos.entregaPrevista)} vencida</span>`:''}
+        <div class="compra-acoes">
+          ${c.entregaVencida
+            ? `<span class="badge travada">entrega prevista ${fmtData(c.marcos.entregaPrevista)} vencida</span>`
+            : (c.marcos.entregaPrevista ? `<span class="compra-entrega">🗓️ entrega prevista ${fmtData(c.marcos.entregaPrevista)}</span>` : '')}
+          ${c.temComprovante
+            ? `<a class="compra-comprovante" href="/api/solicitacoes/${c.id}/comprovante?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" onclick="event.stopPropagation()">📎 ver comprovante</a>`
+            : ''}
+        </div>
       </div>
       ${itensResumo?`<div class="compra-itens">${itensResumo}</div>`:''}
     </div>`;
