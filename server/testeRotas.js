@@ -101,6 +101,7 @@ const http = require('http');
 const auth = require('/home/user/adyen-monitor/server/auth.js');
 const store = require('/home/user/adyen-monitor/server/store.js');
 const parque = require('/home/user/adyen-monitor/server/parque.js');
+const sheetsSync = require('/home/user/adyen-monitor/server/sheetsSync.js');
 
 function pedir(caminho, headers = {}) {
   return new Promise((resolve) => {
@@ -755,6 +756,22 @@ setTimeout(async () => {
   } catch (e) { okGratuidadeMista = false; console.log('  erro: ' + e.message); }
   if (!okGratuidadeMista) ruins += 1;
   console.log(`${okGratuidadeMista ? '✓' : '✗'} Parque: cortesia PCD/geral aceita 1 criança pagando junto com a beneficiária, sem furar a cota de 2/hora`);
+
+  // ---- Fechamentos: historico do Grupo Bravo agora vem de abas
+  // descobertas dinamicamente na propria planilha (uma por unidade, ver
+  // abasHistoricoBravo em sheetsSync.js), no lugar de tudo empilhado na
+  // aba "BD" - mesmo padrao ja usado no historico da ARCFOOD (que tem
+  // abas fixas, ver ARCFOOD_ABAS_HISTORICO). Sem credencial do Google
+  // Sheets (sandbox), a descoberta falha de forma silenciosa - o que
+  // importa aqui e' que uma falha ali NAO derruba sincronizar() inteiro ----
+  let okAbasBravo = false;
+  try {
+    const abas = await sheetsSync.abasHistoricoBravo();
+    const resultado = await sheetsSync.sincronizar({});
+    okAbasBravo = Array.isArray(abas) && abas.length === 0 && Array.isArray(resultado);
+  } catch (e) { okAbasBravo = false; }
+  if (!okAbasBravo) ruins += 1;
+  console.log(`${okAbasBravo ? '✓' : '✗'} Fechamentos: descoberta das abas de histórico do Grupo Bravo não derruba a sincronização quando a planilha está inacessível`);
 
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a

@@ -45,6 +45,31 @@ const PLANILHAS = [
   { grupo: 'BRAVO', id: SHEET_ID_BRAVO, aba: SHEET_ABA_BRAVO },
 ];
 
+// historico do Grupo Bravo: reorganizado (2026-08) do mesmo jeito que ja
+// era feito na ARCFOOD - uma aba por UNIDADE, so-de-leitura, em vez de tudo
+// misturado na aba "BD" (que segue sendo a aba VIVA: onde o app grava os
+// fechamentos lançados ao vivo, ver enviarFechamentoPlanilha, e de onde le
+// os dias recentes). Diferente da ARCFOOD (4 abas fixas numa planilha
+// separada, ver ARCFOOD_ABAS_HISTORICO/SHEET_ID_ARCFOOD_HISTORICO), aqui as
+// abas de historico vivem na MESMA planilha do Bravo e o nome/quantidade
+// delas pode mudar (o Master reorganiza a vontade) - por isso a lista NAO e
+// fixa no codigo: e descoberta a cada sincronizacao (toda aba da planilha
+// Bravo, exceto a aba viva "BD", vira fonte extra so-de-leitura). Uma aba
+// sem as colunas certas simplesmente nao produz fechamento nenhum
+// (linhaParaFechamento devolve null por falta de ID/Unidade valida) - nao
+// precisa validar o nome nem o conteudo antes.
+async function abasHistoricoBravo() {
+  try {
+    const token = await getAccessToken();
+    const abas = await listarAbas(SHEET_ID_BRAVO, token);
+    const vivaNormalizada = normalizarNomeAba(SHEET_ABA_BRAVO);
+    return abas.filter((nome) => normalizarNomeAba(nome) !== vivaNormalizada);
+  } catch (e) {
+    console.warn(`sheetsSync: não deu pra listar as abas de histórico do Grupo Bravo: ${e.message}`);
+    return [];
+  }
+}
+
 // mesmas unidades usadas no resto do app (fechamentos.html/lancamento.html) -
 // a planilha ARCFOOD grava o nome da loja sem acento na coluna "Unidade"
 const ARCFOOD_CODIGOS = { '19821': 'São Miguel', '19855': 'Carrão', '19888': 'Mooca', '19889': 'Tatuapé' };
@@ -399,9 +424,17 @@ const persistenciaFechamentos = criarPersistenciaEstado('sync-estado/fechamentos
 
 async function sincronizar({ completa = false } = {}) {
   if (!completa) await persistenciaFechamentos.carregar();
+  // abas de historico do Bravo sao descobertas a cada sincronizacao (ver
+  // abasHistoricoBravo acima) - entram como fontes extras, alem das fixas
+  // em PLANILHAS. Uma falha aqui (planilha fora do ar, sem permissao) so
+  // reduz a lista pra [], nunca derruba a sincronizacao inteira
+  const planilhas = [
+    ...PLANILHAS,
+    ...(await abasHistoricoBravo()).map((aba) => ({ grupo: 'BRAVO', id: SHEET_ID_BRAVO, aba })),
+  ];
   const resultado = [];
   let linhasNovas = 0;
-  for (const planilha of PLANILHAS) {
+  for (const planilha of planilhas) {
     const chave = `${planilha.id}__${planilha.aba}`;
     try {
       let estado = completa ? null : estadoSyncFechamentos.get(chave);
@@ -694,5 +727,5 @@ async function enviarFechamentoPlanilha(f, grupo) {
 
 module.exports = {
   sincronizar, parseMoneyBR, parseDataArcfood, parseDataBravo, getAccessToken, buscarAba, buscarLinhasNovas, buscarAbaPorCandidatos, mesclarLancamentosDoMesmoDia, criarPersistenciaEstado,
-  enviarFechamentoPlanilha, BRAVO_UNIDADES,
+  enviarFechamentoPlanilha, BRAVO_UNIDADES, abasHistoricoBravo,
 };
