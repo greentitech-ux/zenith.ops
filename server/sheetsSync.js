@@ -695,5 +695,5 @@ async function enviarFechamentoPlanilha(f, grupo) {
 
 module.exports = {
   sincronizar, parseMoneyBR, parseDataArcfood, parseDataBravo, getAccessToken, buscarAba, buscarLinhasNovas, buscarAbaPorCandidatos, mesclarLancamentosDoMesmoDia, criarPersistenciaEstado,
-  enviarFechamentoPlanilha, BRAVO_UNIDADES, SHEET_ID_BRAVO,
+  enviarFechamentoPlanilha, BRAVO_UNIDADES, SHEET_ID_BRAVO, listarAbas,
 };
