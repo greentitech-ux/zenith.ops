@@ -983,15 +983,15 @@ setTimeout(async () => {
     const header = ['ID', 'Unidade', 'Data', 'Nome', 'Delivery'];
     const aval = (linha) => bravoImport.avaliarLinha(header, linha, 'Dominos Bessa');
 
-    const semId = aval(['', 'Dominos Bessa', '10/03/2026', 'Ana', '100']);
-    const dataRuim = aval(['abc123', 'Dominos Bessa', '10-03-2026', 'Ana', '100']);
+    // "10-03-2026" DEIXOU de ser erro (o parser passou a aceitar tracinho);
+    // o que continua sem leitura possivel e texto livre
+    const dataRuim = aval(['abc123', 'Dominos Bessa', '10 de março', 'Ana', '100']);
     const dataVazia = aval(['abc123', 'Dominos Bessa', '', 'Ana', '100']);
     const excluido = aval(['7fcda565', 'Dominos Bessa', '10/03/2026', 'Ana', '100']);
     const boa = aval(['abc123', 'Dominos Bessa', '10/03/2026', 'Ana', '100']);
 
     const conferencias = {
-      'ID vazio diz o motivo': semId.motivo === 'coluna ID vazia' && !semId.lancamento,
-      'data em formato errado diz o motivo': /formato que o importador não lê/.test(dataRuim.motivo || '') && (dataRuim.amostra || '').includes('10-03-2026'),
+      'data em formato errado diz o motivo': /formato que o importador não lê/.test(dataRuim.motivo || '') && (dataRuim.amostra || '').includes('10 de março'),
       'data vazia diz o motivo': /formato que o importador não lê/.test(dataVazia.motivo || ''),
       'ID excluído diz o motivo': /lista de exclusão/.test(excluido.motivo || ''),
       'linha boa vira lançamento': !!boa.lancamento && boa.lancamento.data === '2026-03-10',
@@ -1008,6 +1008,63 @@ setTimeout(async () => {
   } catch (e) { okDiagBravo = false; console.log('  erro: ' + e.message); }
   if (!okDiagBravo) ruins += 1;
   console.log(`${okDiagBravo ? '✓' : '✗'} Grupo Bravo: nenhuma linha é descartada em silêncio (motivo + nome de loja tolerante)`);
+
+  // ------------------------------------------------------------------
+  // Data da planilha do Bravo: as abas foram reorganizadas em momentos
+  // diferentes e nem todas ficaram no mesmo formato. O parser antigo so
+  // entendia DD/MM/AAAA e descartava o resto EM SILENCIO - principal
+  // suspeita do sumico do historico. Tambem: ID vazio nao pode mais derrubar
+  // a linha (nas abas refeitas a mao ele quase nunca foi preenchido).
+  let okDataBravo = false;
+  try {
+    const bravoImport = require('/home/user/adyen-monitor/server/bravoImport.js');
+    const header = ['ID', 'Unidade', 'Data', 'Delivery'];
+    const dataDe = (v) => {
+      const r = bravoImport.avaliarLinha(header, ['x1', 'Dominos Bessa', v, '100'], 'Dominos Bessa');
+      return r.lancamento ? r.lancamento.data : null;
+    };
+    const semId = bravoImport.avaliarLinha(header, ['', 'Dominos Bessa', '28/11/2025', '100'], 'Dominos Bessa');
+
+    const conferencias = {
+      'DD/MM/AAAA': dataDe('28/11/2025') === '2025-11-28',
+      'ano de 2 digitos': dataDe('28/11/25') === '2025-11-28',
+      'separador tracinho': dataDe('28-11-2025') === '2025-11-28',
+      'separador ponto': dataDe('28.11.2025') === '2025-11-28',
+      'ja no formato do banco': dataDe('2025-11-28') === '2025-11-28',
+      'numero de serie do Sheets': dataDe('45989') === '2025-11-28',
+      'data impossivel continua recusada': dataDe('13/13/2025') === null,
+      'texto continua recusado': dataDe('sei la') === null,
+      'numero pequeno nao vira data': dataDe('1234') === null,
+      'ID vazio NAO derruba a linha': !!semId.lancamento && semId.lancamento.data === '2025-11-28',
+      'ID vazio fica marcado na origem': !!semId.lancamento && semId.lancamento.origemPlanilha.semIdNaPlanilha === true,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okDataBravo = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okDataBravo = false; console.log('  erro: ' + e.message); }
+  if (!okDataBravo) ruins += 1;
+  console.log(`${okDataBravo ? '✓' : '✗'} Grupo Bravo: data lida em vários formatos e ID vazio não descarta o fechamento`);
+
+  // Semelhanca entre nomes de coluna - e o que decide se o importador PERGUNTA
+  // "quer unificar?" ou propoe campo novo. Precisa acertar os dois lados: nao
+  // pode deixar passar sinonimo obvio nem sugerir unificar coisa sem relacao.
+  let okSemelhanca = false;
+  try {
+    const bravoImport = require('/home/user/adyen-monitor/server/bravoImport.js');
+    const sim = bravoImport.semelhanca;
+    const conferencias = {
+      'identicas dao 1': sim('tef credito', 'tef credito') === 1,
+      'quase iguais pontuam alto': sim('tef credito', 'tef credit') > 0.7,
+      'ordem trocada ainda pontua': sim('getnet pix', 'pix getnet') > 0.5,
+      'sem relacao pontua baixo': sim('dinheiro', 'delivery') < 0.4,
+      'vazio da zero': sim('', 'dinheiro') === 0,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okSemelhanca = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okSemelhanca = false; console.log('  erro: ' + e.message); }
+  if (!okSemelhanca) ruins += 1;
+  console.log(`${okSemelhanca ? '✓' : '✗'} Grupo Bravo: comparador de nomes de coluna separa sinônimo de coisa sem relação`);
 
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a

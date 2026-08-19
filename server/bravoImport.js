@@ -16,6 +16,7 @@
 
 const sheetsSync = require('./sheetsSync');
 const grupos = require('./grupos');
+const bravoMapa = require('./bravoMapa');
 const fechamentosLive = require('./fechamentosLive');
 
 const { BRAVO_UNIDADES, SHEET_ID_BRAVO, parseMoneyBR, parseDataBravo } = sheetsSync;
@@ -211,13 +212,53 @@ function ehColunaMaquina(nome) {
 }
 
 // uma linha da planilha -> o payload que fechamentosLive.create espera
+// Data: a planilha foi reorganizada aba a aba ao longo de meses e nem todas
+// ficaram no mesmo formato. O parser do sync (parseDataBravo) só entende
+// DD/MM/AAAA - qualquer outra coisa virava linha descartada em silêncio, que é
+// a principal suspeita do sumiço do histórico de dezembro/2025 em diante.
+// Aqui a leitura aceita o que o Google Sheets costuma devolver:
+//   28/11/2025 · 28/11/25 · 28-11-2025 · 2025-11-28 · 28.11.2025
+//   45989 (número de série do Sheets, quando a célula é data de verdade)
+// Só isso: nada de adivinhar mês por extenso ou inverter dia/mês, que geraria
+// lançamento na data errada - erro pior que a linha faltando.
+const SERIE_SHEETS_EPOCH = Date.UTC(1899, 11, 30); // dia 0 do Sheets
+function parseDataBravoTolerante(bruto) {
+  const cru = String(bruto ?? '').trim();
+  if (!cru) return null;
+
+  // já no formato do banco
+  const iso = cru.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return cru;
+
+  // DD/MM/AAAA, DD-MM-AAAA, DD.MM.AAAA (e com ano de 2 dígitos)
+  const br = cru.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2}|\d{4})$/);
+  if (br) {
+    const [, dd, mm, yy] = br;
+    const ano = yy.length === 2 ? `20${yy}` : yy;
+    const d = Number(dd); const m = Number(mm);
+    if (d < 1 || d > 31 || m < 1 || m > 12) return null;
+    return `${ano}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+
+  // número de série do Sheets (célula formatada como data)
+  if (/^\d{4,6}$/.test(cru)) {
+    const n = Number(cru);
+    // 40000 ≈ 2009, 60000 ≈ 2064 - fora disso é código, não data
+    if (n >= 40000 && n <= 60000) {
+      const d = new Date(SERIE_SHEETS_EPOCH + n * 86400000);
+      return d.toISOString().slice(0, 10);
+    }
+  }
+  return null;
+}
+
 // Avalia UMA linha da planilha. Devolve { lancamento } quando dá certo, ou
 // { motivo, amostra } quando a linha não vira fechamento. Existe separada de
 // linhaParaLancamento porque o "return null" silencioso era exatamente o
 // problema: 8 lojas ficaram sem histórico e não havia como saber por quê -
 // a linha era descartada sem deixar rastro nenhum. Agora todo descarte é
 // contado e mostrado no passo 1 (Conferir).
-function avaliarLinha(header, linha, unidade) {
+function avaliarLinha(header, linha, unidade, mapa = {}) {
   const modelo = modeloDaUnidade(unidade);
   if (!modelo) return { motivo: 'loja sem modelo de colunas cadastrado', amostra: unidade };
   const get = (nome) => {
@@ -227,16 +268,21 @@ function avaliarLinha(header, linha, unidade) {
   const valor = (nome) => parseMoneyBR(get(nome));
 
   const id = String(get('ID') || '').trim();
-  if (!id) return { motivo: 'coluna ID vazia', amostra: `Data="${String(get('Data') ?? '')}"` };
   if (IDS_EXCLUIDOS.has(id)) return { motivo: 'ID na lista de exclusão (linha de teste/versão antiga)', amostra: id };
-  const data = parseDataBravo(get('Data'));
+
+  const data = parseDataBravoTolerante(get('Data'));
   if (!data) {
     const bruta = String(get('Data') ?? '');
     return {
-      motivo: header.includes('Data') ? 'Data em formato que o importador não lê (esperado DD/MM/AAAA)' : 'aba sem coluna "Data"',
+      motivo: header.includes('Data') ? 'Data em formato que o importador não lê' : 'aba sem coluna "Data"',
       amostra: bruta ? `"${bruta}"` : '(vazia)',
     };
   }
+  // ID vazio NÃO derruba mais a linha: nas abas reorganizadas à mão ele
+  // frequentemente não foi preenchido, e recusar por causa disso jogava fora
+  // o fechamento inteiro. O ID só serve pro rastro de origem e pra lista de
+  // exclusão - sem ele a linha continua valendo, identificada por loja+data.
+  const idEfetivo = id || `sem-id:${unidade}:${data}`;
 
   const campos = {};
   Object.entries(modelo.fixos).forEach(([coluna, campo]) => {
@@ -271,6 +317,29 @@ function avaliarLinha(header, linha, unidade) {
     return out;
   };
 
+  // Decisões do Master (bravoMapa) por cima do que o modelo fixo já cobre.
+  // É isto que faz uma coluna renomeada na planilha continuar caindo no campo
+  // certo do Zenith sem precisar de deploy: "unificar" manda o valor pro campo
+  // que já existe, "criar" abre um campo novo, "ignorar" descarta de propósito.
+  const doMapa = { canal: {}, forma: {}, kpi: {} };
+  header.forEach((coluna) => {
+    const nome = String(coluna || '').trim();
+    if (!nome) return;
+    const d = mapa[bravoMapa.chaveColuna(nome)];
+    if (!d || d.acao === 'ignorar' || !doMapa[d.destino]) return;
+    const campo = d.acao === 'unificar' ? d.campo : grupos.slugify(canonico(d.label || nome));
+    if (!campo) return;
+    // soma quando duas colunas diferentes foram unificadas no MESMO campo
+    doMapa[d.destino][campo] = +((doMapa[d.destino][campo] || 0) + valor(nome)).toFixed(2);
+  });
+  const juntarExtras = (doModelo, doMapaLista) => {
+    const out = { ...doModelo };
+    Object.entries(doMapaLista).forEach(([campo, v]) => {
+      out[campo] = +((out[campo] || 0) + v).toFixed(2);
+    });
+    return out;
+  };
+
   return { lancamento: {
     unidade,
     unidadeNome: unidade,
@@ -278,20 +347,20 @@ function avaliarLinha(header, linha, unidade) {
     data,
     gerente: String(get('Nome') || '').trim(),
     campos,
-    canaisVendaExtras: mapaExtras(modelo.canais),
-    formasPagamentoExtras: mapaExtras(modelo.formas),
-    kpisExtras: mapaExtras(modelo.kpis),
+    canaisVendaExtras: juntarExtras(mapaExtras(modelo.canais), doMapa.canal),
+    formasPagamentoExtras: juntarExtras(mapaExtras(modelo.formas), doMapa.forma),
+    kpisExtras: juntarExtras(mapaExtras(modelo.kpis), doMapa.kpi),
     observacao: String(get('Observação') || '').trim() || null,
     detalhesMaquinas,
     detalhesSaidas,
     // rastro de origem: dá pra achar (e desfazer) tudo que veio da planilha
-    origemPlanilha: { sheetId: SHEET_ID_BRAVO, idLinha: id },
+    origemPlanilha: { sheetId: SHEET_ID_BRAVO, idLinha: idEfetivo, semIdNaPlanilha: !id },
   } };
 }
 
 // wrapper antigo (usado fora daqui): só o lançamento, ou null
-function linhaParaLancamento(header, linha, unidade) {
-  const r = avaliarLinha(header, linha, unidade);
+function linhaParaLancamento(header, linha, unidade, mapa = {}) {
+  const r = avaliarLinha(header, linha, unidade, mapa);
   return r.lancamento || null;
 }
 
@@ -299,11 +368,22 @@ function linhaParaLancamento(header, linha, unidade) {
 // somarem nos totais. Sem elas, recomputarTotais (fechamentosLive.js) não
 // sabe que "tefCredito" é canal de venda e o faturamento sai zerado - por
 // isso a importação confere isto ANTES de gravar qualquer coisa.
-function definicoesDeCampos(unidade) {
+function definicoesDeCampos(unidade, mapa = {}) {
   const modelo = modeloDaUnidade(unidade);
   if (!modelo) return { canais: [], formas: [], kpis: [] };
   const def = (label, extra) => ({ campo: grupos.slugify(canonico(label)), label: canonico(label), ...extra });
-  return {
+
+  // colunas que o Master mandou CRIAR na tela de conferência (bravoMapa).
+  // "unificar" não entra aqui de propósito: unificar aponta pra um campo que
+  // JÁ existe no grupo, então não há nada pra cadastrar.
+  const doMapa = { canal: [], forma: [], kpi: [] };
+  Object.values(mapa || {}).forEach((d) => {
+    if (!d || d.acao !== 'criar' || !doMapa[d.destino]) return;
+    const label = canonico(d.label || d.coluna);
+    doMapa[d.destino].push({ campo: grupos.slugify(label), label });
+  });
+
+  const base = {
     canais: (modelo.canais || []).map((c) => def(c, {
       operacao: 'soma',
       // ver o comentário grande em MODELOS: nas lojas de um lado só, tudo
@@ -313,6 +393,18 @@ function definicoesDeCampos(unidade) {
     })),
     formas: (modelo.formas || []).map((c) => def(c, { operacao: 'soma', tambemNoOutroTotal: false })),
     kpis: (modelo.kpis || []).map((c) => def(c, { tipo: 'quantidade', somaEm: 'nao' })),
+  };
+
+  // junta sem duplicar: se a coluna já estava no modelo, o modelo manda (ele
+  // carrega o tambemNoOutroTotal, que a decisão de tela não tem como saber)
+  const juntar = (lista, novos, extra) => {
+    const vistos = new Set(lista.map((d) => d.campo));
+    return lista.concat(novos.filter((d) => !vistos.has(d.campo)).map((d) => ({ ...d, ...extra })));
+  };
+  return {
+    canais: juntar(base.canais, doMapa.canal, { operacao: 'soma', tambemNoOutroTotal: false }),
+    formas: juntar(base.formas, doMapa.forma, { operacao: 'soma', tambemNoOutroTotal: false }),
+    kpis: juntar(base.kpis, doMapa.kpi, { tipo: 'quantidade', somaEm: 'nao' }),
   };
 }
 
@@ -419,9 +511,153 @@ function resolverUnidade(bruto) {
   return BRAVO_POR_NOME_NORMALIZADO.get(normalizarNome(bruto)) || null;
 }
 
+// ---------------------------------------------------------------------------
+// Conferência de COLUNAS: o que a planilha tem x o que o Zenith já conhece
+// ---------------------------------------------------------------------------
+// Colunas que nunca viram campo: são estrutura da linha, não valor de venda.
+const COLUNAS_ESTRUTURAIS = new Set(['ID', 'Unidade', 'Data', 'Nome', 'Observação', 'Observacao']);
+
+// Semelhança entre dois nomes de coluna pelo coeficiente de Dice sobre bigramas
+// (0 = nada a ver, 1 = idêntico). Escolhido por ser estável e sem dependência:
+// pega "TEF Credito" x "TEF Crédito" (1.0 depois de normalizar), "Getnet Pix" x
+// "Pix Getnet" (alto) e "Dinheiro" x "Delivery" (baixo).
+function bigramas(s) {
+  const t = ` ${s} `;
+  const out = new Map();
+  for (let i = 0; i < t.length - 1; i++) {
+    const b = t.slice(i, i + 2);
+    out.set(b, (out.get(b) || 0) + 1);
+  }
+  return out;
+}
+function semelhanca(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const A = bigramas(a); const B = bigramas(b);
+  let comuns = 0; let totalA = 0; let totalB = 0;
+  A.forEach((n) => { totalA += n; });
+  B.forEach((n) => { totalB += n; });
+  A.forEach((n, bi) => { comuns += Math.min(n, B.get(bi) || 0); });
+  return (2 * comuns) / (totalA + totalB);
+}
+// abaixo disto a sugestão é ruim demais pra valer a pena perguntar - vira
+// "criar novo" direto. Acima, o Master decide.
+const LIMIAR_PARECIDA = 0.62;
+
+// palpite do tipo de campo, só pra pré-selecionar o rádio na tela - o Master
+// muda com um clique se errar
+const PISTAS_KPI = /(quantidade|numero|n[uú]mero|cupom|tempo|entregas|pedidos?)/i;
+const PISTAS_FORMA = /^(comp\.|dec\.|declarad)/i;
+function palpiteDestino(label) {
+  if (PISTAS_FORMA.test(label)) return 'forma';
+  if (PISTAS_KPI.test(label)) return 'kpi';
+  return 'canal';
+}
+
+// Lê a planilha e devolve, POR COLUNA, o que fazer com ela. É o que alimenta a
+// tela de aprovação: nada aqui grava nada.
+async function analisarColunas() {
+  const token = await sheetsSync.getAccessToken();
+  const abas = await sheetsSync.listarAbas(SHEET_ID_BRAVO, token);
+  const decisoes = await bravoMapa.obter();
+
+  // colunas que APARECEM na planilha, com onde e quantas linhas têm valor
+  const vistas = new Map(); // chave -> { coluna, unidades:Set, abas:Set, comValor }
+
+  for (const aba of abas) {
+    let valores;
+    try { valores = await sheetsSync.buscarAba(SHEET_ID_BRAVO, aba); } catch (e) { continue; }
+    if (!valores.length) continue;
+    const header = valores[0];
+    const iUnidade = header.indexOf('Unidade');
+    if (iUnidade < 0) continue;
+
+    header.forEach((coluna, iCol) => {
+      const nome = String(coluna || '').trim();
+      if (!nome || COLUNAS_ESTRUTURAIS.has(nome)) return;
+      if (COLUNAS_IGNORADAS.has(nome)) return;
+      if (ehColunaMaquina(nome)) return;         // vira detalhe de maquininha
+      if (SAIDA_SLOTS.some(([v, d]) => v === nome || d === nome)) return; // vira detalhe de saída
+
+      const chave = bravoMapa.chaveColuna(nome);
+      const at = vistas.get(chave) || { coluna: nome, unidades: new Set(), abas: new Set(), comValor: 0 };
+      at.abas.add(aba);
+      for (let i = 1; i < valores.length; i++) {
+        const u = resolverUnidade(valores[i][iUnidade]);
+        if (!u) continue;
+        at.unidades.add(u);
+        if (parseMoneyBR(valores[i][iCol])) at.comValor += 1;
+      }
+      vistas.set(chave, at);
+    });
+  }
+
+  // o que o Zenith já conhece, pra cada grupo que tem loja do Bravo
+  const todosGrupos = await grupos.listar();
+  const conhecidos = []; // { campo, label, destino, grupoNome }
+  const vistoCampo = new Set();
+  todosGrupos.forEach((g) => {
+    [['canaisVendaExtras', 'canal'], ['formasPagamentoExtras', 'forma'], ['kpisExtras', 'kpi']]
+      .forEach(([lista, destino]) => {
+        (g[lista] || []).forEach((c) => {
+          const id = `${destino}:${c.campo}`;
+          if (vistoCampo.has(id)) return;
+          vistoCampo.add(id);
+          conhecidos.push({ campo: c.campo, label: c.label || c.campo, destino, grupoNome: g.nome || g.id });
+        });
+      });
+  });
+
+  // e o que os MODELOS fixos já cobrem (essas não precisam de decisão nenhuma)
+  const cobertasPorModelo = new Set();
+  Object.values(MODELOS).forEach((m) => {
+    Object.keys(m.fixos || {}).forEach((c) => cobertasPorModelo.add(bravoMapa.chaveColuna(c)));
+    [...(m.canais || []), ...(m.formas || []), ...(m.kpis || [])]
+      .forEach((c) => cobertasPorModelo.add(bravoMapa.chaveColuna(canonico(c))));
+  });
+
+  const jaResolvidas = [];
+  const paraDecidir = [];
+  for (const [chave, v] of vistas) {
+    const base = {
+      coluna: v.coluna,
+      abas: [...v.abas],
+      unidades: [...v.unidades],
+      linhasComValor: v.comValor,
+    };
+
+    if (decisoes[chave]) { jaResolvidas.push({ ...base, ...decisoes[chave], origem: 'decidida pelo Master' }); continue; }
+    if (cobertasPorModelo.has(chave)) { jaResolvidas.push({ ...base, acao: 'ja-existe', origem: 'já mapeada no importador' }); continue; }
+
+    // procura o campo existente mais parecido
+    let melhor = null;
+    conhecidos.forEach((c) => {
+      const nota = semelhanca(chave, bravoMapa.chaveColuna(c.label));
+      if (!melhor || nota > melhor.nota) melhor = { ...c, nota: +nota.toFixed(3) };
+    });
+
+    if (melhor && melhor.nota === 1) {
+      jaResolvidas.push({ ...base, acao: 'ja-existe', campo: melhor.campo, origem: `igual a "${melhor.label}"` });
+      continue;
+    }
+    paraDecidir.push({
+      ...base,
+      sugestao: melhor && melhor.nota >= LIMIAR_PARECIDA ? melhor : null,
+      acaoSugerida: melhor && melhor.nota >= LIMIAR_PARECIDA ? 'unificar' : 'criar',
+      destinoSugerido: palpiteDestino(v.coluna),
+    });
+  }
+
+  // primeiro as que mais aparecem com valor - são as que mais doem se ficarem de fora
+  paraDecidir.sort((a, b) => b.linhasComValor - a.linhasComValor);
+  jaResolvidas.sort((a, b) => b.linhasComValor - a.linhasComValor);
+  return { paraDecidir, jaResolvidas, camposConhecidos: conhecidos };
+}
+
 async function lerPlanilha() {
   const token = await sheetsSync.getAccessToken();
   const abas = await sheetsSync.listarAbas(SHEET_ID_BRAVO, token);
+  const mapa = await bravoMapa.obter();
   const lancamentos = [];
   const problemas = [];
   // Contabilidade de tudo que NÃO virou fechamento. Sem isto, uma linha
@@ -465,7 +701,7 @@ async function lerPlanilha() {
         desconhecidas.set(nome, at);
         continue;
       }
-      const r = avaliarLinha(header, valores[i], unidade);
+      const r = avaliarLinha(header, valores[i], unidade, mapa);
       if (r.lancamento) lancamentos.push(r.lancamento);
       else registrar(aba, r.motivo, r.amostra);
     }
@@ -521,7 +757,32 @@ async function simular() {
     atual.totalDeclarado = +(atual.totalDeclarado + t.totalDeclarado).toFixed(2);
     if (l.data < atual.primeira) atual.primeira = l.data;
     if (l.data > atual.ultima) atual.ultima = l.data;
+    // dias por MÊS: é assim que dá pra ver de relance se dezembro/2025 até
+    // hoje está inteiro ou se falta um pedaço no meio. Só olhar "primeira e
+    // última data" esconde buraco no miolo, que foi exatamente o que
+    // aconteceu com a Spoleto Shopping Recife.
+    (atual.meses = atual.meses || new Map());
+    const mes = l.data.slice(0, 7);
+    atual.meses.set(mes, (atual.meses.get(mes) || 0) + 1);
     porUnidade.set(l.unidade, atual);
+  });
+
+  // marca os meses SEM nenhum lançamento entre a primeira e a última data de
+  // cada loja - o buraco é o que interessa, não a presença
+  porUnidade.forEach((u) => {
+    const meses = u.meses || new Map();
+    u.mesesLista = [...meses.entries()].map(([mes, dias]) => ({ mes, dias })).sort((a, b) => a.mes.localeCompare(b.mes));
+    u.mesesVazios = [];
+    if (u.mesesLista.length) {
+      const [ai, mi] = u.primeira.slice(0, 7).split('-').map(Number);
+      const [af, mf] = u.ultima.slice(0, 7).split('-').map(Number);
+      for (let ano = ai, m = mi; ano < af || (ano === af && m <= mf);) {
+        const chave = `${ano}-${String(m).padStart(2, '0')}`;
+        if (!meses.has(chave)) u.mesesVazios.push(chave);
+        m += 1; if (m > 12) { m = 1; ano += 1; }
+      }
+    }
+    delete u.meses;
   });
 
   // dia repetido pra mesma loja: o app não deixa dois fechamentos no mesmo
@@ -583,10 +844,11 @@ const QUAIS = [
 async function conferirCampos() {
   const faltando = [];
   const porGrupo = new Map();
+  const mapa = await bravoMapa.obter();
   for (const unidade of Object.keys(UNIDADE_MODELO)) {
     const grupo = await grupos.grupoDaUnidade(unidade);
     if (!grupo) { faltando.push({ unidade, erro: 'unidade não está em nenhum grupo' }); continue; }
-    const precisa = definicoesDeCampos(unidade);
+    const precisa = definicoesDeCampos(unidade, mapa);
     const atual = porGrupo.get(grupo.id)
       || { grupo, canais: new Map(), formas: new Map(), kpis: new Map(), corrigir: new Map() };
     QUAIS.forEach(({ qual, chave }) => {
@@ -716,6 +978,6 @@ async function importar({ confirmar, repor = false } = {}) {
 
 module.exports = {
   simular, importar, conferirCampos, cadastrarCampos, lerPlanilha, linhaParaLancamento, definicoesDeCampos, totaisPrevistos,
-  mesclarPorDia, MARCA_IMPORTACAO, avaliarLinha, resolverUnidade,
+  mesclarPorDia, MARCA_IMPORTACAO, avaliarLinha, resolverUnidade, analisarColunas, semelhanca,
   MODELOS, UNIDADE_MODELO, IDS_EXCLUIDOS, COLUNAS_IGNORADAS,
 };

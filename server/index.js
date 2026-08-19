@@ -37,6 +37,7 @@ const backup = require('./backup');
 const relatorios = require('./relatorios');
 const sheetsSync = require('./sheetsSync');
 const bravoImport = require('./bravoImport');
+const bravoMapa = require('./bravoMapa');
 const entregasSync = require('./entregasSync');
 const ifoodClient = require('./ifoodClient');
 const ifoodStore = require('./ifoodStore');
@@ -4042,6 +4043,15 @@ app.post('/api/fechamentos/bravo/importar', auth.requireMaster, async (req, res)
   try {
     if (acao === 'simular') return res.json({ acao, ...(await bravoImport.simular()), campos: await bravoImport.conferirCampos() });
     if (acao === 'cadastrar-campos') return res.json({ acao, ...(await bravoImport.cadastrarCampos()) });
+    // Conferência de COLUNAS: mostra o que a planilha tem, o que o Zenith já
+    // conhece e o que é parecido o suficiente pra valer uma pergunta. Não grava.
+    if (acao === 'analisar-colunas') return res.json({ acao, ...(await bravoImport.analisarColunas()) });
+    // Grava as decisões do Master (unificar / criar / ignorar). A partir daqui
+    // toda leitura da planilha já respeita elas - sem deploy.
+    if (acao === 'decidir-colunas') {
+      const r = await bravoMapa.salvarDecisoes(req.body?.decisoes, req.user.email);
+      return res.json({ acao, ...r });
+    }
     if (acao === 'gravar') {
       const r = await bravoImport.importar({ confirmar: req.body?.confirmar });
       fechamentosLive.invalidarCache();
@@ -4057,7 +4067,7 @@ app.post('/api/fechamentos/bravo/importar', auth.requireMaster, async (req, res)
       fechamentosLive.invalidarCache();
       return res.json({ acao, ...r });
     }
-    return res.status(400).json({ error: 'Ação inválida. Use simular, cadastrar-campos, gravar ou repor.' });
+    return res.status(400).json({ error: 'Ação inválida. Use simular, analisar-colunas, decidir-colunas, cadastrar-campos, gravar ou repor.' });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
