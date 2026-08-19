@@ -632,7 +632,8 @@ async function analisarColunas() {
   }
 
   // o que o Zenith já conhece, pra cada grupo que tem loja do Bravo
-  const todosGrupos = await grupos.listar();
+  // grupos.js exporta list(), nao listar() - ver module.exports la
+  const todosGrupos = await grupos.list();
   const conhecidos = []; // { campo, label, destino, grupoNome }
   const vistoCampo = new Set();
   todosGrupos.forEach((g) => {
