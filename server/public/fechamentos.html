@@ -224,17 +224,19 @@
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <button type="button" class="back" id="imp-btn-1" onclick="importBravo('simular')" style="cursor:pointer;">1 · Conferir (não grava)</button>
-      <button type="button" class="back" id="imp-btn-2" onclick="importBravo('cadastrar-campos')" style="cursor:pointer;" disabled>2 · Preparar os grupos</button>
-      <button type="button" class="back" id="imp-btn-3" onclick="importBravo('gravar')" style="cursor:pointer;" disabled>3 · Gravar no banco</button>
-      <button type="button" class="back" id="imp-btn-4" onclick="importBravo('repor')" style="cursor:pointer;" disabled>4 · Completar o que faltou</button>
+      <button type="button" class="back" id="imp-btn-c" onclick="importBravo('analisar-colunas')" style="cursor:pointer;" disabled>2 · Conferir as colunas</button>
+      <button type="button" class="back" id="imp-btn-2" onclick="importBravo('cadastrar-campos')" style="cursor:pointer;" disabled>3 · Preparar os grupos</button>
+      <button type="button" class="back" id="imp-btn-3" onclick="importBravo('gravar')" style="cursor:pointer;" disabled>4 · Gravar no banco</button>
+      <button type="button" class="back" id="imp-btn-4" onclick="importBravo('repor')" style="cursor:pointer;" disabled>5 · Completar o que faltou</button>
     </div>
     <div class="sub" style="margin-top:8px;font-size:11.5px;">
-      O passo 4 só é necessário se a planilha tinha <b>mais de uma linha no mesmo dia</b> pra mesma loja
+      O passo 5 só é necessário se a planilha tinha <b>mais de uma linha no mesmo dia</b> pra mesma loja
       (sangria lançada à parte, turno dividido em duas linhas). Nesse caso a primeira gravação trouxe só um
-      pedaço do dia. O passo 4 junta as linhas e troca o dia pela versão completa — e nunca mexe em
+      pedaço do dia. O passo 5 junta as linhas e troca o dia pela versão completa — e nunca mexe em
       fechamento que uma pessoa lançou à mão.
     </div>
     <div id="imp-resultado" style="margin-top:12px;"></div>
+    <div id="imp-colunas" style="margin-top:12px;"></div>
   </div>
 </div>
 
@@ -723,8 +725,104 @@ function renderDescartesBravo(dados){
   return html + '</div>';
 }
 
+// ---------- conferência de COLUNAS (o Master aprova cada unificação) -------
+// A lista de colunas do importador era fixa no código: coluna renomeada na
+// planilha virava valor zero em silêncio, e só dava pra corrigir com deploy.
+// Aqui o Master decide na tela e a decisão fica guardada (bravoMapa) - a
+// próxima leitura da planilha já obedece.
+let COLUNAS_ANALISE = null;
+
+function renderColunasBravo(dados){
+  COLUNAS_ANALISE = dados;
+  const alvo = document.getElementById('imp-colunas');
+  const decidir = dados.paraDecidir || [];
+  const prontas = dados.jaResolvidas || [];
+  const campos = dados.camposConhecidos || [];
+
+  if(!decidir.length){
+    alvo.innerHTML = `<div style="color:var(--ok);font-size:12.5px;">✅ Nenhuma coluna pendente. `+
+      `${prontas.length} coluna(s) já estão mapeadas.</div>`;
+    return;
+  }
+
+  const opcoesCampo = campos.map(c=>
+    `<option value="${escapeHtml(c.destino)}|${escapeHtml(c.campo)}">${escapeHtml(c.label)} · ${escapeHtml(c.destino)}</option>`).join('');
+
+  alvo.innerHTML =
+    `<div style="border-top:1px solid var(--border);padding-top:10px;">`+
+    `<div style="font-size:12.5px;font-weight:700;margin-bottom:4px;">🔀 ${decidir.length} coluna(s) precisam da sua decisão</div>`+
+    `<div class="sub" style="margin-bottom:10px;">Ordenadas pelas que mais têm valor preenchido. `+
+    `<b>Unificar</b> manda o valor pra um campo que já existe; <b>Criar</b> abre um campo novo; `+
+    `<b>Ignorar</b> descarta de propósito. Nada é gravado até você clicar em Salvar decisões.</div>`+
+    decidir.map((c,i)=>{
+      const sug = c.sugestao;
+      const marcado = a => c.acaoSugerida===a ? 'checked' : '';
+      return `<div style="border:1px solid var(--border);border-radius:8px;padding:9px 11px;margin-bottom:7px;">
+        <div style="font-size:12.5px;font-weight:700;">${escapeHtml(c.coluna)}</div>
+        <div class="sub" style="font-size:11px;margin:2px 0 7px;">
+          ${c.linhasComValor} linha(s) com valor · ${escapeHtml((c.unidades||[]).slice(0,4).join(', '))}${(c.unidades||[]).length>4?' …':''}
+        </div>
+        <label style="display:block;font-size:12px;margin-bottom:4px;">
+          <input type="radio" name="col-${i}" value="unificar" ${marcado('unificar')} ${sug?'':'disabled'}>
+          Unificar com
+          <select id="col-${i}-campo" style="font-size:11.5px;max-width:230px;" ${sug?'':'disabled'}>
+            ${sug?`<option value="${escapeHtml(sug.destino)}|${escapeHtml(sug.campo)}" selected>${escapeHtml(sug.label)} · ${escapeHtml(sug.destino)}</option>`:''}
+            ${opcoesCampo}
+          </select>
+          ${sug?`<span class="sub" style="font-size:10.5px;"> (parecidas ${Math.round(sug.nota*100)}%)</span>`:'<span class="sub" style="font-size:10.5px;"> — nada parecido encontrado</span>'}
+        </label>
+        <label style="display:block;font-size:12px;margin-bottom:4px;">
+          <input type="radio" name="col-${i}" value="criar" ${marcado('criar')}>
+          Criar campo novo como
+          <select id="col-${i}-destino" style="font-size:11.5px;">
+            <option value="canal" ${c.destinoSugerido==='canal'?'selected':''}>Canal de venda</option>
+            <option value="forma" ${c.destinoSugerido==='forma'?'selected':''}>Forma de pagamento</option>
+            <option value="kpi" ${c.destinoSugerido==='kpi'?'selected':''}>KPI</option>
+          </select>
+        </label>
+        <label style="display:block;font-size:12px;">
+          <input type="radio" name="col-${i}" value="ignorar"> Ignorar esta coluna
+        </label>
+      </div>`;
+    }).join('')+
+    `<button type="button" class="back" onclick="salvarDecisoesColunas()" style="cursor:pointer;margin-top:6px;">✔ Salvar decisões</button>`+
+    (prontas.length?`<div class="sub" style="margin-top:8px;">${prontas.length} coluna(s) já mapeadas, sem pendência.</div>`:'')+
+    `</div>`;
+}
+
+async function salvarDecisoesColunas(){
+  if(!COLUNAS_ANALISE) return;
+  const decisoes = [];
+  (COLUNAS_ANALISE.paraDecidir||[]).forEach((c,i)=>{
+    const escolhido = document.querySelector(`input[name="col-${i}"]:checked`);
+    if(!escolhido) return;
+    const acao = escolhido.value;
+    if(acao === 'ignorar'){ decisoes.push({ coluna:c.coluna, acao }); return; }
+    if(acao === 'unificar'){
+      const v = document.getElementById(`col-${i}-campo`).value || '';
+      const [destino, campo] = v.split('|');
+      if(!campo) return;
+      decisoes.push({ coluna:c.coluna, acao, campo, destino, label:c.coluna });
+      return;
+    }
+    decisoes.push({ coluna:c.coluna, acao:'criar', destino: document.getElementById(`col-${i}-destino`).value, label:c.coluna });
+  });
+  if(!decisoes.length){ alert('Marque ao menos uma opção.'); return; }
+  const alvo = document.getElementById('imp-colunas');
+  try{
+    const r = await fetch('/api/fechamentos/bravo/importar', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ acao:'decidir-colunas', decisoes }),
+    });
+    const d = await r.json();
+    if(!r.ok){ alert(d.error || ('Erro ' + r.status)); return; }
+    alvo.innerHTML = `<div style="color:var(--ok);font-size:12.5px;">✅ ${d.salvas} decisão(ões) salva(s). Agora o passo 3 (Preparar os grupos).</div>`;
+    document.getElementById('imp-btn-2').disabled = false;
+  }catch(e){ alert(e.message); }
+}
+
 async function importBravo(acao){
-  const btns = ['imp-btn-1','imp-btn-2','imp-btn-3','imp-btn-4'].map(id=>document.getElementById(id));
+  const btns = ['imp-btn-1','imp-btn-c','imp-btn-2','imp-btn-3','imp-btn-4'].map(id=>document.getElementById(id));
   const saida = document.getElementById('imp-resultado');
   if(acao === 'gravar'){
     if(!confirm('Gravar os lançamentos da planilha no banco?\n\nPode demorar alguns minutos. É seguro repetir depois: dia que já existe é pulado.')) return;
@@ -734,7 +832,7 @@ async function importBravo(acao){
   }
   const rotulos = btns.map(b=>b.textContent);
   btns.forEach(b=>{ b.disabled = true; });
-  const iAtivo = acao === 'simular' ? 0 : acao === 'cadastrar-campos' ? 1 : acao === 'gravar' ? 2 : 3;
+  const iAtivo = acao === 'simular' ? 0 : acao === 'analisar-colunas' ? 1 : acao === 'cadastrar-campos' ? 2 : acao === 'gravar' ? 3 : 4;
   btns[iAtivo].textContent = 'Aguarde...';
   saida.innerHTML = '<div class="sub">Processando…</div>';
   try{
@@ -754,21 +852,31 @@ async function importBravo(acao){
       const linhas = (dados.unidades||[]).map(u=>
         `<tr><td>${escapeHtml(u.unidade)}</td><td style="text-align:right;">${u.linhas}</td>`+
         `<td style="text-align:right;">${fmtMoney(u.faturamento)}</td>`+
-        `<td style="text-align:right;">${escapeHtml(u.primeira)} a ${escapeHtml(u.ultima)}</td></tr>`).join('');
+        `<td style="text-align:right;">${escapeHtml(u.primeira)} a ${escapeHtml(u.ultima)}</td>`+
+        `<td style="text-align:right;color:${(u.mesesVazios||[]).length?'var(--bad)':'var(--muted)'};">`+
+        `${(u.mesesVazios||[]).length ? escapeHtml(u.mesesVazios.join(', ')) : '—'}</td></tr>`).join('');
       const pend = (dados.campos && dados.campos.pendentes) || [];
       saida.innerHTML =
         `<div style="color:var(--ok);font-size:12.5px;margin-bottom:8px;">✅ Li a planilha. <b>${dados.total}</b> lançamentos, faturamento total <b>${fmtMoney(dados.faturamento)}</b>. Nada foi gravado.</div>`+
         (dados.diasMesclados
           ? `<div class="sub" style="margin-bottom:8px;">A planilha tinha <b>${dados.linhasLidas}</b> linhas: <b>${dados.diasMesclados}</b> dia(s) apareciam mais de uma vez e foram somados numa linha só (${dados.linhasAbsorvidas} linha(s) absorvida(s)) — igual a ARCFOOD já faz.</div>`
           : '')+
-        `<table style="width:100%;font-size:11.5px;"><tr><th style="text-align:left;">Loja</th><th style="text-align:right;">Dias</th><th style="text-align:right;">Faturamento</th><th style="text-align:right;">Período</th></tr>${linhas}</table>`+
+        `<table style="width:100%;font-size:11.5px;"><tr><th style="text-align:left;">Loja</th><th style="text-align:right;">Dias</th><th style="text-align:right;">Faturamento</th><th style="text-align:right;">Período</th><th style="text-align:right;">Meses sem nada</th></tr>${linhas}</table>`+
         renderDescartesBravo(dados)+
         (pend.length
           ? `<div class="sub" style="margin-top:10px;">Falta preparar ${pend.length} grupo(s) — é o passo 2.</div>`
           : `<div class="sub" style="margin-top:10px;">Os grupos já estão preparados — pode pular pro passo 3.</div>`);
       btns[0].disabled = false;
+      btns[1].disabled = false; // conferir colunas
+      btns[2].disabled = false; // preparar grupos
+      if(!pend.length){ btns[3].disabled = false; btns[4].disabled = false; }
+      return;
+    }
+    if(acao === 'analisar-colunas'){
+      saida.innerHTML = '<div class="sub">Colunas conferidas — veja abaixo.</div>';
+      renderColunasBravo(dados);
       btns[1].disabled = false;
-      if(!pend.length){ btns[2].disabled = false; btns[3].disabled = false; }
+      btns[2].disabled = false;
       return;
     }
     if(acao === 'cadastrar-campos'){
@@ -776,9 +884,9 @@ async function importBravo(acao){
       saida.innerHTML = feitos.length
         ? `<div style="color:var(--ok);font-size:12.5px;">✅ Grupos preparados: ${feitos.map(f=>`${escapeHtml(f.grupo)} (+${f.canais+f.formas+f.kpis} campo(s)${f.corrigidos?`, ${f.corrigidos} corrigido(s)`:''})`).join(', ')}. Agora o passo 3.</div>`
         : '<div style="color:var(--ok);font-size:12.5px;">✅ Não faltava nada. Pode ir pro passo 3.</div>';
-      btns[1].disabled = false;
       btns[2].disabled = false;
       btns[3].disabled = false;
+      btns[4].disabled = false;
       return;
     }
     // gravar / repor
@@ -798,8 +906,8 @@ async function importBravo(acao){
         : '')+
       (erros.length ? `<div style="color:var(--bad);font-size:12px;margin-top:6px;">${erros.length} com erro: ${escapeHtml(erros.slice(0,3).map(e=>`${e.unidade} ${e.data}: ${e.erro}`).join(' · '))}</div>` : '')+
       `<div class="sub" style="margin-top:8px;">Pra ver os dados na tela, puxe o filtro de período pra trás — o histórico vai de <b>28/11/2025</b> a <b>19/05/2026</b>.</div>`;
-    btns[2].disabled = false;
     btns[3].disabled = false;
+    btns[4].disabled = false;
     await carregar();
   }catch(e){
     btns.forEach((b,i)=>{ b.textContent = rotulos[i]; });
