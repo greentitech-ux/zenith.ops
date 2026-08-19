@@ -21,6 +21,12 @@ function slugify(s) {
     .replace(/[^a-zA-Z0-9]+/g, ' ')
     .trim();
   if (!limpo) return '';
+  // JA e um campo (saiu de um slugify anterior): devolve intacto. Sem isto a
+  // funcao nao e idempotente - ela baixa a PRIMEIRA PALAVRA inteira, entao
+  // "TEF Credito" -> "tefCredito" -> "tefcredito" -> ... A cada regravacao do
+  // grupo mandando de volta o campo que ele mesmo tinha lido, a chave mudava
+  // e os valores ja gravados naquele campo viravam orfaos.
+  if (/^[a-z][a-zA-Z0-9]*$/.test(limpo)) return limpo;
   return limpo
     .split(' ')
     .map((palavra, i) => (i === 0 ? palavra.toLowerCase() : palavra.charAt(0).toUpperCase() + palavra.slice(1).toLowerCase()))
