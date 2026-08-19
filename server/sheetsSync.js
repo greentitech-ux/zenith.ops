@@ -32,12 +32,17 @@ const SHEET_ABA_ARCFOOD = process.env.SHEET_ABA_ARCFOOD || 'BD';
 // mais antigas), entao mesclarLancamentosDoMesmoDia nao soma fechamento em
 // dobro; se um dia passar a haver sobreposicao real, precisa revisitar isso.
 const SHEET_ID_ARCFOOD_HISTORICO = process.env.SHEET_ID_ARCFOOD_HISTORICO || '1F-FnLydHOfeiMJexjO2RJOwn88O6uUt_PeVH0PjoKYs';
+
+// planilha do Grupo Bravo - mesma estrutura de colunas da ARCFOOD (por isso
+// linhaParaFechamento le as duas com os MESMOS get('Delivery')/get('Ifood')/...)
+const SHEET_ID_BRAVO = process.env.SHEET_ID_BRAVO || '1dObCSsx4BYDGSQG81KLIOtFSNNs18mVOD5GfYzRIZcM';
+const SHEET_ABA_BRAVO = process.env.SHEET_ABA_BRAVO || 'BD';
 const ARCFOOD_ABAS_HISTORICO = ['MOOCA', 'TATUAPE', 'CARRAO', 'SMIGUEL'];
 
 const PLANILHAS = [
   { grupo: 'ARCFOOD', id: SHEET_ID_ARCFOOD, aba: SHEET_ABA_ARCFOOD },
   ...ARCFOOD_ABAS_HISTORICO.map((aba) => ({ grupo: 'ARCFOOD', id: SHEET_ID_ARCFOOD_HISTORICO, aba })),
-  { grupo: 'BRAVO', id: process.env.SHEET_ID_BRAVO || '1dObCSsx4BYDGSQG81KLIOtFSNNs18mVOD5GfYzRIZcM', aba: process.env.SHEET_ABA_BRAVO || 'BD' },
+  { grupo: 'BRAVO', id: SHEET_ID_BRAVO, aba: SHEET_ABA_BRAVO },
 ];
 
 // mesmas unidades usadas no resto do app (fechamentos.html/lancamento.html) -
@@ -435,9 +440,13 @@ async function sincronizar({ completa = false } = {}) {
 }
 
 // ---------- caminho inverso: manda o fechamento lançado ao vivo no app
-// (fechamentosLive.js) de volta pra planilha ARCFOOD (aba BD) - pros
-// stakeholders que ainda acompanham por ela. So ARCFOOD por enquanto (Grupo
-// Bravo nunca teve planilha, nasceu direto no app) ----------
+// (fechamentosLive.js) de volta pra planilha (aba BD) - pros stakeholders
+// que ainda acompanham por ela. Vale pros DOIS grupos: ARCFOOD e Grupo
+// Bravo. O Bravo passou a ter planilha depois (o comentario antigo aqui
+// dizia que ele "nasceu direto no app"), e as duas planilhas usam os mesmos
+// nomes de coluna - tanto que linhaParaFechamento le as duas com os mesmos
+// get('Delivery')/get('Ifood')/... A unica coisa que muda de um pro outro
+// esta em DESTINOS logo abaixo ----------
 
 // mesmo nome sem acento gravado na coluna "Unidade" da planilha (ver
 // ARCFOOD_UNIDADES_POR_NOME acima, que faz o caminho contrario)
@@ -446,6 +455,36 @@ const ARCFOOD_EMAIL = {
   '19821': 'saomiguel.arcfood@gmail.com', '19855': 'carrao.arcfood@gmail.com',
   '19888': 'mooca.arcfood@gmail.com', '19889': 'tatuape.arcfood@gmail.com',
 };
+// tudo que difere entre ARCFOOD e Grupo Bravo no caminho de VOLTA. O resto
+// (nomes de coluna, formato de data dd/mm/aaaa, numeros puros) e igual nas
+// duas planilhas.
+//
+// - nomeNaPlanilha: na ARCFOOD o codigo da unidade e numerico ("19888") e a
+//   planilha grava o nome sem acento ("Mooca"); no Bravo o proprio codigo JA
+//   e o nome da loja, entao vai direto.
+// - dataDaLinha: a ARCFOOD tem abas em dois schemas (um com "Data" curta +
+//   coluna "Mes" separada pro ano, outro com a data completa), o Bravo tem so
+//   dd/mm/aaaa. Cada grupo acha a linha existente com o MESMO parser que usa
+//   pra ler - senao a comparacao erra e a gente acrescenta linha duplicada.
+//
+// Colunas que so existem num dos dois (Mes e Email, da ARCFOOD) nao precisam
+// de tratamento: setCol/valuesBatchUpdate ignoram silenciosamente o nome que
+// nao esta no cabecalho daquela aba.
+const DESTINOS = {
+  ARCFOOD: {
+    id: SHEET_ID_ARCFOOD,
+    aba: SHEET_ABA_ARCFOOD,
+    nomeNaPlanilha: (f) => ARCFOOD_NOME_PLANILHA[f.unidade] || f.unidadeNome || f.unidade,
+    dataDaLinha: (linha, iData, iMes) => parseDataArcfood(linha[iData], iMes >= 0 ? linha[iMes] : undefined),
+  },
+  BRAVO: {
+    id: SHEET_ID_BRAVO,
+    aba: SHEET_ABA_BRAVO,
+    nomeNaPlanilha: (f) => f.unidade,
+    dataDaLinha: (linha, iData) => parseDataBravo(linha[iData]),
+  },
+};
+
 const MESES_PT_INVERSO = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 
 // manda a data completa (dd/mm/yyyy) - funciona tanto pro schema antigo
@@ -489,10 +528,10 @@ const ARCFOOD_SAIDA_SLOTS = [
 // reorganizado, com nomes de coluna diferentes - setCol/valuesBatchUpdate
 // ignoram silenciosamente o nome que não existir no cabeçalho daquela aba,
 // então só a chave certa realmente grava.
-function camposEscalaresArcfood(f) {
+function camposEscalares(f, grupo) {
   return {
     Nome: f.gerente || '',
-    Unidade: ARCFOOD_NOME_PLANILHA[f.unidade] || f.unidadeNome || f.unidade,
+    Unidade: DESTINOS[grupo].nomeNaPlanilha(f),
     Data: ddmmyyyyDaData(f.data),
     Mes: mesDaDataArcfood(f.data), // só usada pelas abas no schema antigo
     'Caixa Inicial': numEnvio(f.caixaInicial),
@@ -529,14 +568,14 @@ function camposEscalaresArcfood(f) {
 // linha completa (array na ordem do cabecalho real da planilha) pra uma
 // linha NOVA - colunas que a gente nao conhece (Pedido Anulado, Venda,
 // AnaliseEspecialista etc) ficam em branco, sem problema numa linha nova
-function novaLinhaArcfood(header, f) {
+function novaLinhaPlanilha(header, f, grupo) {
   const linha = header.map(() => '');
   const setCol = (nome, valor) => {
     const i = header.indexOf(nome);
     if (i >= 0) linha[i] = valor;
   };
   setCol('ID', crypto.randomBytes(4).toString('hex'));
-  Object.entries(camposEscalaresArcfood(f)).forEach(([nome, valor]) => setCol(nome, valor));
+  Object.entries(camposEscalares(f, grupo)).forEach(([nome, valor]) => setCol(nome, valor));
   (f.detalhesMaquinas || []).slice(0, ARCFOOD_MAQ_SLOTS.length).forEach((m, i) => setCol(ARCFOOD_MAQ_SLOTS[i][0], numEnvio(m.valor)));
   (f.detalhesMaquinasPos || []).slice(0, ARCFOOD_MAQ_SLOTS.length).forEach((m, i) => setCol(ARCFOOD_MAQ_SLOTS[i][1], numEnvio(m.valor)));
   (f.detalhesSaidas || []).slice(0, ARCFOOD_SAIDA_SLOTS.length).forEach((s, i) => {
@@ -550,8 +589,8 @@ function novaLinhaArcfood(header, f) {
 // so as colunas que a gente conhece (nunca mexe no ID nem nas colunas que
 // esse sistema nao usa, tipo Pedido Anulado/Venda/AnaliseEspecialista, pra
 // nao apagar algo preenchido manualmente ali)
-function mudancasArcfood(f) {
-  const mudancas = { ...camposEscalaresArcfood(f) };
+function mudancasPlanilha(f, grupo) {
+  const mudancas = { ...camposEscalares(f, grupo) };
   (f.detalhesMaquinas || []).slice(0, ARCFOOD_MAQ_SLOTS.length).forEach((m, i) => { mudancas[ARCFOOD_MAQ_SLOTS[i][0]] = numEnvio(m.valor); });
   (f.detalhesMaquinasPos || []).slice(0, ARCFOOD_MAQ_SLOTS.length).forEach((m, i) => { mudancas[ARCFOOD_MAQ_SLOTS[i][1]] = numEnvio(m.valor); });
   (f.detalhesSaidas || []).slice(0, ARCFOOD_SAIDA_SLOTS.length).forEach((s, i) => {
@@ -609,49 +648,51 @@ async function valuesBatchUpdate(spreadsheetId, aba, linhaNumero, header, mudanc
 }
 
 // manda o fechamento (lançado ao vivo, ja no formato de server/fechamentosLive.js)
-// de UMA loja ARCFOOD pra planilha, aba BD. Se ja existir uma linha da
-// mesma loja+data+mes (por exemplo alguem tambem lançou direto na
-// planilha), atualiza so as colunas conhecidas em vez de acrescentar linha
-// duplicada; senao, adiciona uma linha nova no final
-async function enviarFechamentoArcfood(f) {
-  // grava sempre na aba BD viva - nunca nas 4 abas de historico (leitura
-  // apenas). Filtra por id+aba especificos, e nao so por grupo==='ARCFOOD',
-  // ja que agora PLANILHAS tem 5 entradas ARCFOOD (BD + 4 historico)
-  const planilha = PLANILHAS.find((p) => p.grupo === 'ARCFOOD' && p.id === SHEET_ID_ARCFOOD && p.aba === SHEET_ABA_ARCFOOD);
-  if (!planilha) throw new Error('Planilha ARCFOOD (aba BD) não configurada.');
+// de UMA loja pra planilha do grupo dela, aba BD. Se ja existir uma linha da
+// mesma loja+data (por exemplo alguem tambem lançou direto na planilha),
+// atualiza so as colunas conhecidas em vez de acrescentar linha duplicada;
+// senao, adiciona uma linha nova no final.
+async function enviarFechamentoPlanilha(f, grupo) {
+  const destino = DESTINOS[grupo];
+  if (!destino) throw new Error(`Grupo sem planilha de destino: ${grupo}`);
+  // grava sempre na aba BD viva - nunca nas 4 abas de historico da ARCFOOD
+  // (leitura apenas). Filtra por id+aba especificos, e nao so por grupo,
+  // ja que PLANILHAS tem 5 entradas ARCFOOD (BD + 4 historico)
+  const planilha = PLANILHAS.find((p) => p.grupo === grupo && p.id === destino.id && p.aba === destino.aba);
+  if (!planilha) throw new Error(`Planilha ${grupo} (aba ${destino.aba}) não configurada.`);
   const token = await getAccessToken();
   const valores = await buscarAba(planilha.id, planilha.aba);
   const header = valores[0] || [];
-  if (!header.length) throw new Error('Planilha ARCFOOD sem cabeçalho na aba BD.');
+  if (!header.length) throw new Error(`Planilha ${grupo} sem cabeçalho na aba ${destino.aba}.`);
 
   const iUnidade = header.indexOf('Unidade');
   const iData = header.indexOf('Data');
-  const iMes = header.indexOf('Mes'); // -1 nas abas ja reorganizadas (sem essa coluna)
-  const unidadeAlvo = normalizarTexto(ARCFOOD_NOME_PLANILHA[f.unidade] || '');
+  const iMes = header.indexOf('Mes'); // -1 no Bravo e nas abas ARCFOOD ja reorganizadas
+  const unidadeAlvo = normalizarTexto(destino.nomeNaPlanilha(f) || '');
+  if (!unidadeAlvo) throw new Error('Não foi possível resolver o nome da unidade na planilha.');
 
-  // compara pela data ISO já interpretada (mesmo parser da leitura), em vez
-  // de comparar o texto cru da celula - assim funciona tanto pro schema
-  // antigo (Data curta + coluna Mes) quanto pro novo (Data completa, sem
-  // Mes), e nao quebra se a celula estiver formatada de forma abreviada
+  // compara pela data ISO já interpretada (mesmo parser que a LEITURA daquele
+  // grupo usa), em vez de comparar o texto cru da celula - assim funciona pros
+  // dois schemas da ARCFOOD (Data curta + coluna Mes, ou Data completa) e pro
+  // Bravo, e nao quebra se a celula estiver formatada de forma abreviada
   let linhaExistente = -1;
   for (let i = 1; i < valores.length; i++) {
     const linha = valores[i];
-    const dataLinha = parseDataArcfood(linha[iData], iMes >= 0 ? linha[iMes] : undefined);
-    if (normalizarTexto(linha[iUnidade]) === unidadeAlvo && dataLinha === f.data) {
+    if (normalizarTexto(linha[iUnidade]) === unidadeAlvo && destino.dataDaLinha(linha, iData, iMes) === f.data) {
       linhaExistente = i + 1; // 1-indexado + linha de cabecalho
       break;
     }
   }
 
   if (linhaExistente > 0) {
-    await valuesBatchUpdate(planilha.id, planilha.aba, linhaExistente, header, mudancasArcfood(f), token);
+    await valuesBatchUpdate(planilha.id, planilha.aba, linhaExistente, header, mudancasPlanilha(f, grupo), token);
     return { acao: 'atualizado', linha: linhaExistente };
   }
-  await valuesAppend(planilha.id, planilha.aba, novaLinhaArcfood(header, f), token);
+  await valuesAppend(planilha.id, planilha.aba, novaLinhaPlanilha(header, f, grupo), token);
   return { acao: 'adicionado' };
 }
 
 module.exports = {
   sincronizar, parseMoneyBR, parseDataArcfood, parseDataBravo, getAccessToken, buscarAba, buscarLinhasNovas, buscarAbaPorCandidatos, mesclarLancamentosDoMesmoDia, criarPersistenciaEstado,
-  enviarFechamentoArcfood,
+  enviarFechamentoPlanilha, BRAVO_UNIDADES,
 };
