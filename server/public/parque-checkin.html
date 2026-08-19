@@ -701,32 +701,43 @@ function preencherSelectSlots(id, valor){
 }
 function selecionarTempo(t){
   TEMPO_SELECIONADO = t; CATEGORIA_SELECIONADA = null;
-  document.getElementById('wrap-pagamentos').classList.toggle('hidden', document.getElementById('f-cortesia').checked);
+  atualizarVisibilidadeGratuidade();
   renderTempos(); atualizarPreviewValor();
 }
 function selecionarCategoriaPcd(cat){
   CATEGORIA_SELECIONADA = cat;
   TEMPO_SELECIONADO = minutosPcd(cat);
   if(cat==='pcd-cortesia'){
-    // troca pra 5%CP com mais de 2 criancas ja cadastradas: remove as
-    // excedentes em vez de deixar o formulario num estado que o servidor
-    // vai recusar
+    // troca pra 5%CP com mais de 2 criancas ja cadastradas: as 2 primeiras
+    // continuam na gratuidade (o limite de 2/hora do servidor so conta
+    // quem de fato recebe a cortesia - ver parque.js), as demais viram
+    // "paga" automaticamente em vez de sumir do formulario - o atendente
+    // pode reverter marcando a gratuidade de volta em qualquer uma
     const linhas = [...document.querySelectorAll('#lista-criancas .crianca-linha')];
-    linhas.slice(2).forEach(l=>l.remove());
-    document.getElementById('wrap-pagamentos').classList.add('hidden');
-  } else {
-    document.getElementById('wrap-pagamentos').classList.toggle('hidden', document.getElementById('f-cortesia').checked);
+    linhas.slice(2).forEach(l=>{ const chk=l.querySelector('.crianca-gratuita'); if(chk) chk.checked=false; });
   }
+  atualizarVisibilidadeGratuidade();
   renderTempos();
   atualizarPreviewValor();
 }
 
 // valor da entrada = tabela do tempo x quantidade de criancas (pulseiras)
 // + meias: R$25 por crianca com a meia marcada (padrao) + pares extras.
-// Cortesia zera. Minutos de credito usados nao mudam o valor (ja pagos)
-function contarMeias(){
-  return [...document.querySelectorAll('#lista-criancas .crianca-linha')]
-    .filter(l=>l.querySelector('.crianca-nome').value.trim() && l.querySelector('.crianca-meia').checked).length;
+// Cortesia/PCD-cortesia zera SO quem esta marcado como gratuita - a
+// crianca desmarcada (ver crianca-gratuita-wrap) paga normal, junto no
+// mesmo check-in. Minutos de credito usados nao mudam o valor (ja pagos)
+function listaCriancasPreenchidas(){
+  return [...document.querySelectorAll('#lista-criancas .crianca-linha')].filter(l=>l.querySelector('.crianca-nome').value.trim());
+}
+function criancaEhGratuita(linha){
+  const chk = linha.querySelector('.crianca-gratuita');
+  return !chk || chk.checked;
+}
+// preco de quem fica de fora da gratuidade: tabela normal do MESMO tempo
+// contratado, nunca o preco fixo do PCD (que so vale pra quem de fato usa
+// a categoria) - mesma regra do servidor (ver unitarioPagante em parque.js)
+function valorUnitarioPagante(){
+  return CATEGORIA_SELECIONADA ? valorPorTempo(TEMPO_SELECIONADO) : valorUnitarioAtual();
 }
 // niver so vale pro tempo contratado de 60min por padrao; 30min so entra se
 // TABELA_PRECOS.niverAplicar30 estiver marcado (Master configura na tabela).
@@ -739,8 +750,8 @@ function contarNiver(){
   if(CATEGORIA_SELECIONADA) return 0; // PCD30/PCD60/5%CP nunca tem niver
   if(!niverElegivelTempo()) return 0;
   const dataUso = document.getElementById('f-data').value;
-  return [...document.querySelectorAll('#lista-criancas .crianca-linha')]
-    .filter(l=>l.querySelector('.crianca-nome').value.trim() && ehNiverAuto(l.querySelector('.crianca-nasc').value, dataUso)).length;
+  return listaCriancasPreenchidas()
+    .filter(l=>ehNiverAuto(l.querySelector('.crianca-nasc').value, dataUso)).length;
 }
 // valor cobrado por crianca aniversariante elegivel: OU valor cheio fixo
 // (TABELA_PRECOS.niverValorCheio, quando > 0) OU desconto percentual sobre o
@@ -749,37 +760,69 @@ function valorNiverPorCrianca(unit){
   if(TABELA_PRECOS.niverValorCheio > 0) return TABELA_PRECOS.niverValorCheio;
   return unit * (1 - (TABELA_PRECOS.niverDesconto||0)/100);
 }
+// soma da entrada crianca a crianca: quem esta na gratuidade paga 0, quem
+// nao esta paga o preco cheio (ou o niver, se elegivel) - mesma logica do
+// servidor (ver valorEntradaCriancas em parque.js)
+function valorEntradasPreview(linhas){
+  const gratuidadeAtiva = modoGratuidadeAtivo();
+  const unit = valorUnitarioAtual();
+  const unitPagante = valorUnitarioPagante();
+  const dataUso = document.getElementById('f-data').value;
+  return linhas.reduce((soma, l)=>{
+    if(gratuidadeAtiva && criancaEhGratuita(l)) return soma;
+    const precoBase = gratuidadeAtiva ? unitPagante : unit;
+    const niverOk = !CATEGORIA_SELECIONADA && niverElegivelTempo() && ehNiverAuto(l.querySelector('.crianca-nasc').value, dataUso);
+    return soma + (niverOk ? valorNiverPorCrianca(precoBase) : precoBase);
+  }, 0);
+}
+// meias: quem esta na gratuidade nao paga (igual sempre foi); o par extra
+// (nao ligado a nenhuma crianca) so cobra se tiver alguem pagando nesse
+// check-in - senao (uso normal, ninguem desmarcou nada) continua de graca
+function contarMeiasCobrando(linhas){
+  const gratuidadeAtiva = modoGratuidadeAtivo();
+  const optantes = linhas.filter(l=>{
+    if(!l.querySelector('.crianca-meia').checked) return false;
+    return !gratuidadeAtiva || !criancaEhGratuita(l);
+  }).length;
+  const temPagante = gratuidadeAtiva && linhas.some(l=>!criancaEhGratuita(l));
+  const extrasCobram = !gratuidadeAtiva || temPagante;
+  const meiasExtras = Math.max(0, num(document.getElementById('f-meias-extras').value));
+  return optantes + (extrasCobram ? meiasExtras : 0);
+}
 // total da entrada (sem contar pagamentos ainda) - mesma conta usada pra
 // preencher o resumo E pra travar as formas de pagamento (ver abaixo)
 function calcularTotalAtual(){
-  const gratis = document.getElementById('f-cortesia').checked || CATEGORIA_SELECIONADA==='pcd-cortesia';
-  if(gratis) return 0;
-  const n = [...document.querySelectorAll('#lista-criancas .crianca-nome')].filter(i=>i.value.trim()).length;
-  const unit = valorUnitarioAtual();
-  const niver = contarNiver();
-  const valorEntradas = unit * (n - niver) + valorNiverPorCrianca(unit) * niver;
-  const meias = contarMeias() + Math.max(0, num(document.getElementById('f-meias-extras').value));
-  return valorEntradas + PRECO_MEIA * meias;
+  const linhas = listaCriancasPreenchidas();
+  return valorEntradasPreview(linhas) + PRECO_MEIA * contarMeiasCobrando(linhas);
 }
 function atualizarPreviewValor(){
-  const n = [...document.querySelectorAll('#lista-criancas .crianca-nome')].filter(i=>i.value.trim()).length;
-  const gratis = document.getElementById('f-cortesia').checked || CATEGORIA_SELECIONADA==='pcd-cortesia';
+  const linhas = listaCriancasPreenchidas();
+  const n = linhas.length;
+  const gratuidadeAtiva = modoGratuidadeAtivo();
   const unit = valorUnitarioAtual();
   const niver = contarNiver();
-  const meias = contarMeias() + Math.max(0, num(document.getElementById('f-meias-extras').value));
-  const valorMeias = gratis ? 0 : PRECO_MEIA * meias;
+  const meias = contarMeiasCobrando(linhas);
+  const valorMeias = PRECO_MEIA * meias;
   const total = calcularTotalAtual();
   const niverLabel = TABELA_PRECOS.niverValorCheio > 0 ? `R$${TABELA_PRECOS.niverValorCheio}` : `${TABELA_PRECOS.niverDesconto}% off`;
   document.getElementById('preview-meias').textContent = `${meias} par(es) · ${fmtReal(valorMeias)}`;
-  document.getElementById('valor-detalhe').textContent = gratis
-    ? `cortesia · ${n} criança(s)`
-    : `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min)${niver?` · 🎂 Niver ${niverLabel} (${niver})`:''} + meias`;
+  if(gratuidadeAtiva){
+    const gratuitas = linhas.filter(criancaEhGratuita).length;
+    const pagantes = n - gratuitas;
+    document.getElementById('valor-detalhe').textContent = pagantes>0
+      ? `${gratuitas} gratuita(s) + ${pagantes} pagando × ${fmtReal(valorUnitarioPagante())} + meias`
+      : `cortesia · ${n} criança(s)`;
+  } else {
+    document.getElementById('valor-detalhe').textContent =
+      `${n} criança(s) × ${fmtReal(unit)} (${TEMPO_SELECIONADO}min)${niver?` · 🎂 Niver ${niverLabel} (${niver})`:''} + meias`;
+  }
   document.getElementById('preview-valor').textContent = fmtReal(total);
   // roda junto com o preview porque ele já é chamado a cada mexida no
   // formulário (criança, meia, tempo, cortesia) - é o gancho natural pra
   // reavaliar se o termo aplicado ainda corresponde ao que está na tela
   if(typeof atualizarGateTermo === 'function') atualizarGateTermo();
-  if(!gratis){
+  document.getElementById('wrap-pagamentos').classList.toggle('hidden', total<=0);
+  if(total>0){
     reconciliarPagamentos(total);
     atualizarBotaoPagamento(total);
   }
@@ -787,7 +830,7 @@ function atualizarPreviewValor(){
 function toggleCortesia(){
   const cortesia = document.getElementById('f-cortesia').checked;
   document.getElementById('wrap-motivo-cortesia').classList.toggle('hidden', !cortesia);
-  document.getElementById('wrap-pagamentos').classList.toggle('hidden', cortesia);
+  atualizarVisibilidadeGratuidade();
   atualizarPreviewValor();
 }
 // campo pouco usado (maioria das entradas nao tem meia extra) - fica
@@ -944,15 +987,20 @@ function setAC(ativo){
 }
 
 let CRIANCA_SEQ = 0;
+// cortesia PCD (5%CP) ou cortesia geral (checkbox com justificativa): a
+// crianca continua gratuita por padrao (mesmo comportamento de sempre),
+// mas o atendente pode desmarcar "gratuidade" numa crianca especifica pra
+// ela pagar o preco cheio, ficando junto no MESMO check-in/termo - estilo
+// aniversariante, so que manual (nao por data de nascimento). Ver
+// gratuidadeAtiva em parque.js.
+function modoGratuidadeAtivo(){
+  return CATEGORIA_SELECIONADA==='pcd-cortesia' || document.getElementById('f-cortesia').checked;
+}
+function atualizarVisibilidadeGratuidade(){
+  const ativo = modoGratuidadeAtivo();
+  document.querySelectorAll('#lista-criancas .crianca-gratuita-wrap').forEach(w=>w.classList.toggle('hidden', !ativo));
+}
 function adicionarCrianca(){
-  // 5%CP (PCD-cortesia): no maximo 2 criancas por entrada - mesmo limite
-  // que o servidor aplica por hora-relogio (ver PCD_CORTESIA_LIMITE_HORA
-  // em parque.js), so que travado aqui na hora de montar o formulario, sem
-  // precisar esperar o erro do servidor depois de preencher tudo
-  if(CATEGORIA_SELECIONADA==='pcd-cortesia' && document.querySelectorAll('#lista-criancas .crianca-linha').length>=2){
-    alert('5%CP libera no máximo 2 crianças por entrada.');
-    return;
-  }
   CRIANCA_SEQ++;
   const id = 'crianca-' + CRIANCA_SEQ;
   const div = document.createElement('div');
@@ -968,10 +1016,15 @@ function adicionarCrianca(){
       <input type="checkbox" class="crianca-meia" style="width:auto;" onchange="atualizarPreviewValor()">
       🧦 Par de meia · R$25 <span style="color:var(--muted);">(marque se a criança precisa comprar o par de meia)</span>
     </label>
+    <label class="crianca-gratuita-wrap hidden" style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
+      <input type="checkbox" class="crianca-gratuita" checked style="width:auto;" onchange="atualizarPreviewValor()">
+      🎁 Entra na gratuidade <span style="color:var(--muted);">(desmarque pra essa criança pagar normal, junto no mesmo termo)</span>
+    </label>
   `;
   document.getElementById('lista-criancas').appendChild(div);
   div.querySelector('.crianca-nome').addEventListener('input', atualizarPreviewPulseiras);
   div.querySelector('.crianca-nasc').addEventListener('change', atualizarPreviewValor);
+  atualizarVisibilidadeGratuidade();
 }
 // escopado no #lista-criancas: o overlay de correção tem linhas de criança
 // próprias (.cor-cr-*) que não podem entrar na contagem do formulário
@@ -981,11 +1034,15 @@ function atualizarPreviewPulseiras(){
   atualizarPreviewValor();
 }
 function coletarCriancas(){
-  return [...document.querySelectorAll('#lista-criancas .crianca-linha')].map(div=>({
-    nome: div.querySelector('.crianca-nome').value.trim(),
-    dataNascimento: div.querySelector('.crianca-nasc').value || null,
-    meia: div.querySelector('.crianca-meia').checked,
-  })).filter(c=>c.nome);
+  return [...document.querySelectorAll('#lista-criancas .crianca-linha')].map(div=>{
+    const chkGratuita = div.querySelector('.crianca-gratuita');
+    return {
+      nome: div.querySelector('.crianca-nome').value.trim(),
+      dataNascimento: div.querySelector('.crianca-nasc').value || null,
+      meia: div.querySelector('.crianca-meia').checked,
+      gratuita: chkGratuita ? chkGratuita.checked : true,
+    };
+  }).filter(c=>c.nome);
 }
 
 async function carregar(){
@@ -1509,12 +1566,14 @@ document.getElementById('form-checkin').addEventListener('submit', async (ev)=>{
   const criancas = coletarCriancas();
   if(!criancas.length){ alert('Cadastre pelo menos uma criança.'); return; }
   const cortesia = document.getElementById('f-cortesia').checked;
-  // 5%CP (PCD-cortesia): entrada gratuita automatica, sem alcada - nao
-  // precisa de forma de pagamento nenhuma, igual a cortesia normal
-  const gratis = cortesia || CATEGORIA_SELECIONADA==='pcd-cortesia';
+  const total = calcularTotalAtual();
+  // 5%CP (PCD-cortesia) e cortesia geral zeram normalmente, mas agora
+  // podem ter uma criança fora da gratuidade pagando junto (ver
+  // crianca-gratuita-wrap) - nesse caso o total NAO fica zero e precisa de
+  // forma de pagamento igual a uma venda comum
+  const gratis = total <= 0;
   const pagamentos = coletarPagamentos();
   if(!gratis){
-    const total = calcularTotalAtual();
     const soma = pagamentos.reduce((s,p)=>s+p.valor,0);
     if(!pagamentos.length){ alert('Informe pelo menos uma forma de pagamento.'); return; }
     if(Math.abs(soma-total) > 0.01){ alert(`A soma das formas de pagamento (${fmtReal(soma)}) precisa bater com o valor total (${fmtReal(total)}).`); return; }
@@ -1546,7 +1605,13 @@ document.getElementById('form-checkin').addEventListener('submit', async (ev)=>{
       adultoCortesia: AC_ATIVO,
       quantAC: AC_ATIVO ? document.getElementById('f-quantAC').value : 0,
       criancas,
-      metodoPagamento: cortesia ? 'cortesia' : (CATEGORIA_SELECIONADA==='pcd-cortesia' ? 'gratuidade' : (pagamentos.length===1 ? pagamentos[0].forma : 'misto')),
+      // cortesia geral sempre manda 'cortesia' (mesmo com uma crianca
+      // pagando junto - o card de aprovacao continua sendo sobre a parte
+      // gratuita). PCD-cortesia so manda 'gratuidade' quando o check-in
+      // inteiro e' de graca (gratis); com alguém pagando, manda a forma de
+      // pagamento de verdade, senão o financeiro mostraria "gratuidade"
+      // com dinheiro de verdade dentro (ver metodoPagamento em parque.js)
+      metodoPagamento: cortesia ? 'cortesia' : (gratis ? 'gratuidade' : (pagamentos.length===1 ? pagamentos[0].forma : 'misto')),
       pagamentos: gratis ? [] : pagamentos,
       motivoCortesia: document.getElementById('f-motivo-cortesia').value,
       meiasExtras: Math.max(0, num(document.getElementById('f-meias-extras').value)),
