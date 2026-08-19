@@ -191,7 +191,8 @@
     <div class="header-nav">
       <div class="nav-actions">
         <a class="back" href="/lancamento.html">➕ Adicionar Fechamento</a>
-        <button class="back hidden" id="btn-sincronizar-planilhas" onclick="sincronizarPlanilhas()" style="cursor:pointer;">🔄 Sincronizar agora</button>
+        <button class="back hidden" id="btn-sincronizar-planilhas" onclick="sincronizarPlanilhas(false)" style="cursor:pointer;">🔄 Sincronizar agora</button>
+        <button class="back hidden" id="btn-sincronizar-completa" onclick="sincronizarPlanilhas(true)" title="Relê a planilha inteira do zero (mais lento) - use depois de reorganizar/limpar abas na planilha, pra descartar linhas antigas que a leitura incremental não percebe que sumiram" style="cursor:pointer;">🔁 Recarregar tudo</button>
         <button class="btn-notif" onclick="location.reload()" title="Atualizar página">🔄</button>
         <div class="nav-divider"></div>
         <button class="btn-notif btn-sair" onclick="logout()" title="Sair" style="cursor:pointer;">🚪</button>
@@ -618,14 +619,21 @@ async function carregarStatusSincronizacao(){
   }
 }
 
-// leitura INCREMENTAL: o servidor le so as linhas novas da planilha desde a
-// ultima leitura (o comeco ja e conhecido). Nao existe mais sincronizacao
-// automatica - planilha so e lida quando o Master aciona este botao
-async function sincronizarPlanilhas(){
-  const btn = document.getElementById('btn-sincronizar-planilhas');
-  btn.disabled = true; btn.textContent = '🔄 Sincronizando...';
+// leitura INCREMENTAL (padrao): o servidor le so as linhas novas da
+// planilha desde a ultima leitura (o comeco ja e conhecido) - nao percebe
+// linha antiga que sumiu (ex: historico movido/removido da aba "BD" na
+// reorganização do Grupo Bravo). "Recarregar tudo" (completa=true) rele a
+// planilha inteira do zero, descartando o que estava em cache - mais lento,
+// use so quando reorganizar/limpar abas na planilha. Nao existe mais
+// sincronizacao automatica - planilha so e lida quando o Master aciona um
+// destes botoes
+async function sincronizarPlanilhas(completa){
+  if(completa && !confirm('Isso relê a planilha inteira do zero (pode demorar bem mais) e descarta o que estava em cache. Use depois de reorganizar/limpar abas na planilha. Continuar?')) return;
+  const btn = document.getElementById(completa ? 'btn-sincronizar-completa' : 'btn-sincronizar-planilhas');
+  const textoOriginal = btn.textContent;
+  btn.disabled = true; btn.textContent = completa ? '🔁 Recarregando...' : '🔄 Sincronizando...';
   try{
-    const resp = await fetch('/api/fechamentos/sincronizar-planilhas', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+    const resp = await fetch('/api/fechamentos/sincronizar-planilhas', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ completa: !!completa }) });
     const status = await resp.json();
     if(!resp.ok) throw new Error(status.ultimoErro || 'Erro ao sincronizar.');
     await carregar();
@@ -633,7 +641,7 @@ async function sincronizarPlanilhas(){
   }catch(err){
     alert('Não foi possível sincronizar as planilhas: ' + err.message);
   }finally{
-    btn.disabled = false; btn.textContent = '🔄 Sincronizar agora';
+    btn.disabled = false; btn.textContent = textoOriginal;
   }
 }
 
@@ -2280,6 +2288,7 @@ async function boot(){
   atualizarVisibilidadeGrupos();
 
   document.getElementById('btn-sincronizar-planilhas').classList.toggle('hidden', !isMaster);
+  document.getElementById('btn-sincronizar-completa').classList.toggle('hidden', !isMaster);
 
   if(!secoes.includes('fechamentos')){
     document.getElementById('sem-acesso').classList.remove('hidden');
