@@ -208,10 +208,14 @@ async function listarEdicoesUncached() {
   const pedidos = snap.docs.map((d) => d.data());
   // pedidos criados antes do resumo "de -> para" existir ganham o resumo na
   // leitura, enquanto PENDENTES (o lançamento ainda tem os valores antigos)
-  for (const p of pedidos) {
-    if (p.status !== 'PENDENTE' || (p.resumoMudancas || []).length) continue;
+  const precisamResumo = pedidos.filter((p) => p.status === 'PENDENTE' && !(p.resumoMudancas || []).length);
+  if (!precisamResumo.length) return pedidos;
+  // uma leitura (do cache) no lugar de um getOne por pedido - mesmo N+1 que
+  // foi corrigido na fila de edicoes de fechamento (fechamentosLive.js)
+  const porId = new Map((await listAll()).map((e) => [e.id, e]));
+  for (const p of precisamResumo) {
     try {
-      const atual = await getOne(p.entregaId);
+      const atual = porId.get(p.entregaId);
       if (atual) p.resumoMudancas = montarResumoMudancasEntrega(p, atual);
     } catch (e) { /* sem resumo, o pedido segue mostrando so as mudancas cruas */ }
   }
