@@ -691,6 +691,38 @@ async function sincronizarPlanilhas(completa){
 // anterior dar certo. Nada é gravado até o passo 3, e o passo 3 pede
 // confirmação escrita. É uma tarefa com FIM: quando não sobrar lançamento
 // pra importar, o painel some sozinho (ver o fim de importBravo).
+// O que a planilha tinha e NÃO virou fechamento, com o motivo. Existe porque
+// o importador descartava linha em silêncio: 8 lojas ficaram sem histórico e
+// não havia nenhuma pista do porquê na tela. Agora todo descarte aparece aqui.
+function renderDescartesBravo(dados){
+  const desc = dados.descartes || [];
+  const desconhecidas = dados.unidadesDesconhecidas || [];
+  if(!desc.length && !desconhecidas.length) return '';
+  let html = '<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;">'+
+    '<div style="font-size:12px;font-weight:700;margin-bottom:6px;">⚠️ Linhas que NÃO viraram fechamento</div>';
+  if(desc.length){
+    html += '<table style="width:100%;font-size:11px;">'+
+      '<tr><th style="text-align:left;">Aba</th><th style="text-align:left;">Motivo</th>'+
+      '<th style="text-align:right;">Linhas</th><th style="text-align:left;">Exemplo</th></tr>'+
+      desc.map(d=>`<tr><td>${escapeHtml(d.aba)}</td><td>${escapeHtml(d.motivo)}</td>`+
+        `<td style="text-align:right;">${d.total}</td>`+
+        `<td style="color:var(--muted);">${escapeHtml((d.exemplos||[]).join(' · '))}</td></tr>`).join('')+
+      '</table>';
+  }
+  if(desconhecidas.length){
+    html += '<div class="sub" style="margin-top:8px;">Valores da coluna <b>Unidade</b> que não batem com nenhuma loja cadastrada. '+
+      'Cabeçalho repetido e linha de resumo são normais aqui — mas se aparecer <b>nome de loja</b> nesta lista, '+
+      'são lançamentos reais sendo perdidos e o nome precisa ser corrigido na planilha:</div>'+
+      '<table style="width:100%;font-size:11px;margin-top:4px;">'+
+      '<tr><th style="text-align:left;">Valor na célula</th><th style="text-align:right;">Linhas</th><th style="text-align:left;">Abas</th></tr>'+
+      desconhecidas.slice(0,20).map(u=>`<tr><td>${escapeHtml(u.nome)}</td>`+
+        `<td style="text-align:right;">${u.total}</td>`+
+        `<td style="color:var(--muted);">${escapeHtml((u.abas||[]).join(', '))}</td></tr>`).join('')+
+      '</table>';
+  }
+  return html + '</div>';
+}
+
 async function importBravo(acao){
   const btns = ['imp-btn-1','imp-btn-2','imp-btn-3','imp-btn-4'].map(id=>document.getElementById(id));
   const saida = document.getElementById('imp-resultado');
@@ -730,6 +762,7 @@ async function importBravo(acao){
           ? `<div class="sub" style="margin-bottom:8px;">A planilha tinha <b>${dados.linhasLidas}</b> linhas: <b>${dados.diasMesclados}</b> dia(s) apareciam mais de uma vez e foram somados numa linha só (${dados.linhasAbsorvidas} linha(s) absorvida(s)) — igual a ARCFOOD já faz.</div>`
           : '')+
         `<table style="width:100%;font-size:11.5px;"><tr><th style="text-align:left;">Loja</th><th style="text-align:right;">Dias</th><th style="text-align:right;">Faturamento</th><th style="text-align:right;">Período</th></tr>${linhas}</table>`+
+        renderDescartesBravo(dados)+
         (pend.length
           ? `<div class="sub" style="margin-top:10px;">Falta preparar ${pend.length} grupo(s) — é o passo 2.</div>`
           : `<div class="sub" style="margin-top:10px;">Os grupos já estão preparados — pode pular pro passo 3.</div>`);

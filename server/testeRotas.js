@@ -972,6 +972,43 @@ setTimeout(async () => {
   if (!okMesclaBravo) ruins += 1;
   console.log(`${okMesclaBravo ? '✓' : '✗'} Grupo Bravo: linhas do mesmo dia+loja são somadas antes de gravar (saldo de caixa fica de fora)`);
 
+  // ------------------------------------------------------------------
+  // O importador do Bravo descartava linha em SILENCIO (return null): 8 lojas
+  // ficaram sem historico e nao havia como saber por que. Agora toda linha
+  // recusada devolve o motivo, e o nome da loja e reconhecido mesmo com
+  // acento/caixa/espaco diferentes do cadastro.
+  let okDiagBravo = false;
+  try {
+    const bravoImport = require('/home/user/adyen-monitor/server/bravoImport.js');
+    const header = ['ID', 'Unidade', 'Data', 'Nome', 'Delivery'];
+    const aval = (linha) => bravoImport.avaliarLinha(header, linha, 'Dominos Bessa');
+
+    const semId = aval(['', 'Dominos Bessa', '10/03/2026', 'Ana', '100']);
+    const dataRuim = aval(['abc123', 'Dominos Bessa', '10-03-2026', 'Ana', '100']);
+    const dataVazia = aval(['abc123', 'Dominos Bessa', '', 'Ana', '100']);
+    const excluido = aval(['7fcda565', 'Dominos Bessa', '10/03/2026', 'Ana', '100']);
+    const boa = aval(['abc123', 'Dominos Bessa', '10/03/2026', 'Ana', '100']);
+
+    const conferencias = {
+      'ID vazio diz o motivo': semId.motivo === 'coluna ID vazia' && !semId.lancamento,
+      'data em formato errado diz o motivo': /formato que o importador não lê/.test(dataRuim.motivo || '') && (dataRuim.amostra || '').includes('10-03-2026'),
+      'data vazia diz o motivo': /formato que o importador não lê/.test(dataVazia.motivo || ''),
+      'ID excluído diz o motivo': /lista de exclusão/.test(excluido.motivo || ''),
+      'linha boa vira lançamento': !!boa.lancamento && boa.lancamento.data === '2026-03-10',
+      // reconhecimento tolerante do nome da loja
+      'nome exato resolve': bravoImport.resolverUnidade('Dominos Bessa') === 'Dominos Bessa',
+      'CAIXA ALTA resolve': bravoImport.resolverUnidade('DOMINOS BESSA') === 'Dominos Bessa',
+      'espaço sobrando resolve': bravoImport.resolverUnidade('  Dominos  Bessa ') === 'Dominos Bessa',
+      'sem acento resolve': bravoImport.resolverUnidade('Sao Braz IL') === 'São Braz IL',
+      'loja de outro grupo NÃO resolve': bravoImport.resolverUnidade('Mooca') === null,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([nome]) => nome);
+    okDiagBravo = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okDiagBravo = false; console.log('  erro: ' + e.message); }
+  if (!okDiagBravo) ruins += 1;
+  console.log(`${okDiagBravo ? '✓' : '✗'} Grupo Bravo: nenhuma linha é descartada em silêncio (motivo + nome de loja tolerante)`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de
