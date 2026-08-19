@@ -581,6 +581,7 @@ let ULTIMA_CARGA_EM = null;
 let FILTRO_TEXTO = '';
 let FILTRO_UNIDADE = '';
 let FILTRO_STATUS = ''; // '' | 'online' | 'offline' | 'nunca'
+let ULTIMO_REDE_DADOS = null; // ultima resposta de /api/loja-status/rede - reaplica o filtro sem refazer a chamada
 
 function tempoRelativo(quando){
   if(!quando) return 'nunca';
@@ -1021,6 +1022,7 @@ function render(){
   renderKpis();
   renderUnidades();
   renderFantasmas();
+  if(ULTIMO_REDE_DADOS) renderRede(ULTIMO_REDE_DADOS);
   const grid = document.getElementById('grid-equip');
   let lista = computadoresReais();
   if(FILTRO_UNIDADE) lista = lista.filter(c => c.codigo === FILTRO_UNIDADE);
@@ -1168,7 +1170,8 @@ async function carregarRede(){
   try{
     const r = await fetch('/api/loja-status/rede');
     if(!r.ok) return;
-    renderRede(await r.json());
+    ULTIMO_REDE_DADOS = await r.json();
+    renderRede(ULTIMO_REDE_DADOS);
   }catch(e){ /* mantem o que ja estava na tela */ }
 }
 
@@ -1180,7 +1183,17 @@ const msTexto = (ms) => {
 };
 
 function renderRede(dados){
-  const lista = (dados && dados.computadores) || [];
+  // mesmos dois filtros da grade de computadores (🔎 busca + seletor de
+  // unidade) - o texto casa com nome do computador OU unidade, igual a
+  // render() acima
+  let lista = (dados && dados.computadores) || [];
+  if(FILTRO_UNIDADE) lista = lista.filter(c => c.codigo === FILTRO_UNIDADE);
+  if(FILTRO_TEXTO){
+    lista = lista.filter(c => {
+      const alvo = `${c.nome||c.posto||''} ${c.unidadeNome||UNIDADES_NOMES[c.codigo]||c.codigo}`.toLowerCase();
+      return alvo.includes(FILTRO_TEXTO);
+    });
+  }
   const medidos = lista.filter(c => c.nota !== null);
   const conta = (cl) => medidos.filter(c => c.classe === cl).length;
 
