@@ -183,7 +183,13 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
   blocos.push({ type: 'text', text: montarPrompt(listaCanais, listaFormas, listaKpis, dica, fotos.length) });
   const resp = await getCliente().messages.create({
     model: MODELO,
-    max_tokens: 4000,
+    // relatorio com muito KPI cadastrado (Service Times Summary do PDV da
+    // Domino's, por exemplo, passa de 15 metricas) gera um JSON grande - com
+    // textoOrigem de cada campo, o array de "campos" sozinho ja pode passar
+    // de 4000 tokens e cortar a resposta no meio (stop_reason:'max_tokens'),
+    // o que quebra o JSON.parse do mesmo jeito que foto ruim quebraria, mas
+    // por um motivo que reenviar a MESMA foto nunca resolve
+    max_tokens: 8000,
     messages: [{ role: 'user', content: blocos }],
   });
   const texto = (resp.content || []).map((b) => b.text || '').join('');
@@ -195,6 +201,12 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
     // virgula, corte por max_tokens) fica impossivel de diagnosticar pela
     // mensagem generica que o gerente ve
     console.error('canaisVendaOcr: falha ao parsear JSON. stop_reason=%s texto=%s', resp.stop_reason, texto.slice(0, 2000));
+    // "tire uma foto mais nitida" e um conselho ERRADO quando o problema foi
+    // a resposta cortada no meio (relatorio com muitos campos cadastrados) -
+    // mandar refazer a MESMA foto nunca resolve isso, so confunde quem usa
+    if (resp.stop_reason === 'max_tokens') {
+      throw new Error('Esse relatório tem campos demais pra eu processar de uma vez (a resposta foi cortada no meio) - não é problema da foto, tirar de novo não resolve. Faça em LEITURAS SEPARADAS: clique em "Preencher por foto" de novo pra cada parte (ex: uma leitura só com a foto de Canais/Formas, outra leitura só com a foto dos indicadores de tempo) - o que uma leitura já preencheu não se perde na próxima.');
+    }
     throw new Error('Não consegui entender essa imagem. Tente uma foto mais nítida, com o relatório inteiro enquadrado.');
   }
   if (dados.erro) throw new Error(String(dados.erro).slice(0, 200));
