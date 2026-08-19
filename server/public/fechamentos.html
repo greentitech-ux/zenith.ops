@@ -212,6 +212,25 @@
 
 <div class="kpis" id="kpis"></div>
 
+<!-- Migração de uma vez só da planilha aposentada do Grupo Bravo pro banco.
+     Some sozinho quando não houver mais nada pra importar (ver
+     carregarImportBravo) - é uma tarefa com fim, não um painel permanente. -->
+<div class="panel hidden" id="import-bravo-panel">
+  <h2><div class="title-group"><span>📥 Trazer o histórico da planilha pro Zenith</span></div></h2>
+  <div style="padding:12px 16px;">
+    <div class="sub" style="margin-bottom:12px;">
+      A planilha do Grupo Bravo foi aposentada. Os lançamentos antigos dela ainda não estão aqui —
+      estes 3 passos trazem tudo pro banco, de uma vez só. <b>Faça na ordem.</b> Nada é gravado até o passo 3.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <button type="button" class="back" id="imp-btn-1" onclick="importBravo('simular')" style="cursor:pointer;">1 · Conferir (não grava)</button>
+      <button type="button" class="back" id="imp-btn-2" onclick="importBravo('cadastrar-campos')" style="cursor:pointer;" disabled>2 · Preparar os grupos</button>
+      <button type="button" class="back" id="imp-btn-3" onclick="importBravo('gravar')" style="cursor:pointer;" disabled>3 · Gravar no banco</button>
+    </div>
+    <div id="imp-resultado" style="margin-top:12px;"></div>
+  </div>
+</div>
+
 <div class="panel hidden" id="edicoes-panel">
   <h2><div class="title-group"><span>Pedidos de correção de fechamento</span><span class="n" id="edicoes-count"></span></div></h2>
   <div id="edicoes-lista" style="padding:12px 16px;display:flex;flex-direction:column;gap:10px;"></div>
@@ -657,6 +676,79 @@ async function sincronizarPlanilhas(completa){
     alert('Não foi possível sincronizar as planilhas: ' + err.message);
   }finally{
     btn.disabled = false; btn.textContent = textoOriginal;
+  }
+}
+
+// ---------- migração do histórico da planilha aposentada (Grupo Bravo) ----
+// Três passos, um botão cada, na ordem - o botão seguinte só liga depois do
+// anterior dar certo. Nada é gravado até o passo 3, e o passo 3 pede
+// confirmação escrita. É uma tarefa com FIM: quando não sobrar lançamento
+// pra importar, o painel some sozinho (ver o fim de importBravo).
+async function importBravo(acao){
+  const btns = ['imp-btn-1','imp-btn-2','imp-btn-3'].map(id=>document.getElementById(id));
+  const saida = document.getElementById('imp-resultado');
+  if(acao === 'gravar'){
+    if(!confirm('Gravar os lançamentos da planilha no banco?\n\nPode demorar alguns minutos. É seguro repetir depois: dia que já existe é pulado.')) return;
+  }
+  const rotulos = btns.map(b=>b.textContent);
+  btns.forEach(b=>{ b.disabled = true; });
+  const iAtivo = acao === 'simular' ? 0 : acao === 'cadastrar-campos' ? 1 : 2;
+  btns[iAtivo].textContent = 'Aguarde...';
+  saida.innerHTML = '<div class="sub">Processando…</div>';
+  try{
+    const corpo = { acao };
+    if(acao === 'gravar') corpo.confirmar = 'GRAVAR';
+    const r = await fetch('/api/fechamentos/bravo/importar', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo),
+    });
+    const dados = await r.json();
+    btns.forEach((b,i)=>{ b.textContent = rotulos[i]; });
+    if(!r.ok){
+      saida.innerHTML = `<div style="color:var(--bad);font-size:12.5px;">❌ ${escapeHtml(dados.error || ('Erro ' + r.status))}</div>`;
+      btns[iAtivo].disabled = false;
+      return;
+    }
+    if(acao === 'simular'){
+      const linhas = (dados.unidades||[]).map(u=>
+        `<tr><td>${escapeHtml(u.unidade)}</td><td style="text-align:right;">${u.linhas}</td>`+
+        `<td style="text-align:right;">${fmtMoney(u.faturamento)}</td>`+
+        `<td style="text-align:right;">${escapeHtml(u.primeira)} a ${escapeHtml(u.ultima)}</td></tr>`).join('');
+      const pend = (dados.campos && dados.campos.pendentes) || [];
+      saida.innerHTML =
+        `<div style="color:var(--ok);font-size:12.5px;margin-bottom:8px;">✅ Li a planilha. <b>${dados.total}</b> lançamentos, faturamento total <b>${fmtMoney(dados.faturamento)}</b>. Nada foi gravado.</div>`+
+        `<table style="width:100%;font-size:11.5px;"><tr><th style="text-align:left;">Loja</th><th style="text-align:right;">Dias</th><th style="text-align:right;">Faturamento</th><th style="text-align:right;">Período</th></tr>${linhas}</table>`+
+        (pend.length
+          ? `<div class="sub" style="margin-top:10px;">Falta preparar ${pend.length} grupo(s) — é o passo 2.</div>`
+          : `<div class="sub" style="margin-top:10px;">Os grupos já estão preparados — pode pular pro passo 3.</div>`);
+      btns[0].disabled = false;
+      btns[1].disabled = false;
+      if(!pend.length) btns[2].disabled = false;
+      return;
+    }
+    if(acao === 'cadastrar-campos'){
+      const feitos = dados.feitos || [];
+      saida.innerHTML = feitos.length
+        ? `<div style="color:var(--ok);font-size:12.5px;">✅ Grupos preparados: ${feitos.map(f=>`${escapeHtml(f.grupo)} (+${f.canais+f.formas+f.kpis} campo(s))`).join(', ')}. Agora o passo 3.</div>`
+        : '<div style="color:var(--ok);font-size:12.5px;">✅ Não faltava nada. Pode ir pro passo 3.</div>';
+      btns[1].disabled = false;
+      btns[2].disabled = false;
+      return;
+    }
+    // gravar
+    const jaTinha = (dados.jaExistiam||[]).length;
+    const erros = dados.erros || [];
+    saida.innerHTML =
+      `<div style="color:var(--ok);font-size:12.5px;">✅ <b>${dados.gravados}</b> lançamento(s) gravado(s).`+
+      (jaTinha ? ` ${jaTinha} já existiam e foram pulados.` : '')+
+      `</div>`+
+      (erros.length ? `<div style="color:var(--bad);font-size:12px;margin-top:6px;">${erros.length} com erro: ${escapeHtml(erros.slice(0,3).map(e=>`${e.unidade} ${e.data}: ${e.erro}`).join(' · '))}</div>` : '')+
+      `<div class="sub" style="margin-top:8px;">Pra ver os dados na tela, puxe o filtro de período pra trás — o histórico vai de <b>28/11/2025</b> a <b>19/05/2026</b>.</div>`;
+    btns[2].disabled = false;
+    await carregar();
+  }catch(e){
+    btns.forEach((b,i)=>{ b.textContent = rotulos[i]; });
+    saida.innerHTML = `<div style="color:var(--bad);font-size:12.5px;">❌ ${escapeHtml(e.message)}</div>`;
+    btns[iAtivo].disabled = false;
   }
 }
 
@@ -2304,6 +2396,7 @@ async function boot(){
 
   document.getElementById('btn-sincronizar-planilhas').classList.toggle('hidden', !isMaster);
   document.getElementById('btn-sincronizar-completa').classList.toggle('hidden', !isMaster);
+  document.getElementById('import-bravo-panel').classList.toggle('hidden', !isMaster);
 
   if(!secoes.includes('fechamentos')){
     document.getElementById('sem-acesso').classList.remove('hidden');
