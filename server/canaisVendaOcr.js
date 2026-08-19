@@ -121,8 +121,31 @@ Regras:
 - Se a imagem não for um relatório de fechamento/vendas, devolva {"erro": "descrição curta do que você viu"} em vez do formato acima.${blocoDica}`;
 }
 
+// A mensagem generica "Nao consegui entender essa imagem" que a tela mostra
+// nao quer dizer foto ruim - ela dispara sempre que o modelo devolve algo
+// que nao e JSON valido, o que acontece por dois motivos comuns mesmo com a
+// foto perfeitamente legivel:
+//  1) o modelo escreve uma frase antes/depois do JSON, apesar da instrucao
+//     "SOMENTE JSON" no prompt;
+//  2) um numero fica em formato BR (virgula decimal, ex: "3.636,40") na
+//     posicao de VALOR, apesar da regra explicita no prompt pra converter -
+//     JSON.parse('{"a":3.636,40}') estoura porque depois do "," o parser
+//     espera a proxima chave (entre aspas), nao outro digito solto.
+// As duas correcoes abaixo sao best-effort: nao mudam o resultado quando o
+// texto ja vem certo (o caso comum), so evitam refazer a foto por um
+// tropeco de formatacao do modelo que nao tem nada a ver com a imagem.
 function extrairJson(texto) {
-  const limpo = String(texto || '').trim().replace(/^```(json)?/i, '').replace(/```\s*$/i, '').trim();
+  let limpo = String(texto || '').trim().replace(/^```(json)?/i, '').replace(/```\s*$/i, '').trim();
+  // corta qualquer coisa fora do primeiro "{" e do ultimo "}" - o corpo do
+  // JSON em si nunca tem chave desbalanceada por fora dele
+  const inicio = limpo.indexOf('{');
+  const fim = limpo.lastIndexOf('}');
+  if (inicio >= 0 && fim > inicio) limpo = limpo.slice(inicio, fim + 1);
+  // so mexe em numero que aparece logo depois de ":" (posicao de valor -
+  // chave de objeto sempre vem entre aspas, nunca cai aqui) e antes de "," /
+  // "}" / "]" (fim do valor) - nao arrisca tocar em nenhum outro lugar do JSON
+  limpo = limpo.replace(/:(\s*)(-?)((?:\d{1,3}(?:\.\d{3})+|\d+)),(\d{1,2})(?=\s*[,}\]])/g,
+    (m, esp, sinal, inteiro, dec) => `:${esp}${sinal}${inteiro.replace(/\./g, '')}.${dec}`);
   return JSON.parse(limpo);
 }
 
@@ -217,4 +240,4 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
   };
 }
 
-module.exports = { ativo, lerCanais };
+module.exports = { ativo, lerCanais, extrairJson };
