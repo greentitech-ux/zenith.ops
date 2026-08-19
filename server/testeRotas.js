@@ -635,22 +635,27 @@ setTimeout(async () => {
   if (!okPrefIsolada) ruins += 1;
   console.log(`${okPrefIsolada ? '✓' : '✗'} salvar a preferência de uma tela não apaga a de outra`);
 
-  // ---- envio pra planilha deixou de ser so ARCFOOD: a rota agora recebe o
-  // grupo. Cobre o roteamento (nao chega a falar com o Google Sheets aqui) ----
+  // ---- envio pra planilha ficou SO pra ARCFOOD: o Grupo Bravo aposentou a
+  // planilha dele (2026-08, aba "BD" apagada) e virou 100% nativo no
+  // Firestore. Mandar fechamento do Bravo de volta pra planilha nao existe
+  // mais e precisa falhar com mensagem clara, nao tentar escrever numa aba
+  // que nao existe. Cobre so o roteamento (nao fala com o Google Sheets) ----
   let okEnvioGrupo = false;
   try {
     const cab = token ? { Authorization: 'Bearer ' + token } : {};
     const invalido = await postarJson('/api/fechamentos/xpto/enviar-planilha', { data: '2026-08-18' }, cab);
-    const dataRuim = await postarJson('/api/fechamentos/bravo/enviar-planilha', { data: '18/08/2026' }, cab);
     const bravo = await postarJson('/api/fechamentos/bravo/enviar-planilha', { data: '2026-08-18' }, cab);
-    const corpoBravo = JSON.parse(bravo.corpo || '{}');
-    okEnvioGrupo = invalido.status === 400 && /Grupo inválido/.test(invalido.corpo)
+    const dataRuim = await postarJson('/api/fechamentos/arcfood/enviar-planilha', { data: '18/08/2026' }, cab);
+    const arcfood = await postarJson('/api/fechamentos/arcfood/enviar-planilha', { data: '2026-08-18' }, cab);
+    const corpoArcfood = JSON.parse(arcfood.corpo || '{}');
+    okEnvioGrupo = invalido.status === 400 && /planilha de destino/.test(invalido.corpo)
+      && bravo.status === 400 && /planilha de destino/.test(bravo.corpo)
       && dataRuim.status === 400 && /Data inválida/.test(dataRuim.corpo)
-      // sem lançamento nenhum semeado, as 12 lojas do Bravo caem em semLancamento
-      && bravo.status === 200 && corpoBravo.grupo === 'BRAVO' && corpoBravo.semLancamento.length === 12;
+      // sem lançamento nenhum semeado, as 4 lojas da ARCFOOD caem em semLancamento
+      && arcfood.status === 200 && corpoArcfood.grupo === 'ARCFOOD' && corpoArcfood.semLancamento.length === 4;
   } catch (e) { okEnvioGrupo = false; }
   if (!okEnvioGrupo) ruins += 1;
-  console.log(`${okEnvioGrupo ? '✓' : '✗'} enviar-planilha aceita ARCFOOD e BRAVO (grupo na rota, lojas do Bravo vindas do sheetsSync)`);
+  console.log(`${okEnvioGrupo ? '✓' : '✗'} enviar-planilha vale só pra ARCFOOD - Grupo Bravo (planilha aposentada) é recusado`);
 
   // ---- leitura de Canais por foto: o modelo por vezes devolve numero em
   // formato BR (virgula decimal, ex: "3.636,40") ou uma frase antes/depois
@@ -764,21 +769,45 @@ setTimeout(async () => {
   if (!okGratuidadeMista) ruins += 1;
   console.log(`${okGratuidadeMista ? '✓' : '✗'} Parque: cortesia PCD/geral aceita 1 criança pagando junto com a beneficiária, sem furar a cota de 2/hora`);
 
-  // ---- Fechamentos: historico do Grupo Bravo agora vem de abas
-  // descobertas dinamicamente na propria planilha (uma por unidade, ver
-  // abasHistoricoBravo em sheetsSync.js), no lugar de tudo empilhado na
-  // aba "BD" - mesmo padrao ja usado no historico da ARCFOOD (que tem
-  // abas fixas, ver ARCFOOD_ABAS_HISTORICO). Sem credencial do Google
-  // Sheets (sandbox), a descoberta falha de forma silenciosa - o que
-  // importa aqui e' que uma falha ali NAO derruba sincronizar() inteiro ----
-  let okAbasBravo = false;
+  // ---- Fechamentos: a planilha do Grupo Bravo foi APOSENTADA (2026-08). O
+  // historico dela virou lançamento nativo no Firestore e a aba viva "BD"
+  // foi apagada, entao sincronizar() nao pode mais nem TENTAR ler aquela
+  // planilha - se voltasse a tentar, cada sincronizacao gastaria chamada a
+  // toa e o painel poderia ressuscitar dado velho por cima do migrado.
+  // Conferir "nao deu erro" nao bastaria: sincronizar() engole falha por
+  // fonte de proposito. Entao este teste OLHA AS URLS pedidas - com uma
+  // chave RSA descartavel so pra assinatura do JWT passar e o fetch ser
+  // realmente alcancado ----
+  let okBravoForaDoSync = false;
+  const fetchOriginal = global.fetch;
+  const envEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const envKey = process.env.FIREBASE_PRIVATE_KEY;
   try {
-    const abas = await sheetsSync.abasHistoricoBravo();
-    const resultado = await sheetsSync.sincronizar({});
-    okAbasBravo = Array.isArray(abas) && abas.length === 0 && Array.isArray(resultado);
-  } catch (e) { okAbasBravo = false; }
-  if (!okAbasBravo) ruins += 1;
-  console.log(`${okAbasBravo ? '✓' : '✗'} Fechamentos: descoberta das abas de histórico do Grupo Bravo não derruba a sincronização quando a planilha está inacessível`);
+    const { generateKeyPairSync } = require('crypto');
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' } });
+    process.env.FIREBASE_CLIENT_EMAIL = 'teste@teste.local';
+    process.env.FIREBASE_PRIVATE_KEY = privateKey;
+    const urlsPedidas = [];
+    global.fetch = async (url) => {
+      urlsPedidas.push(String(url));
+      if (String(url).includes('oauth2.googleapis.com/token')) {
+        return { ok: true, json: async () => ({ access_token: 'tok', expires_in: 3600 }) };
+      }
+      return { ok: true, json: async () => ({ values: [] }) };
+    };
+    await sheetsSync.sincronizar({ completa: true });
+    const pediuBravo = urlsPedidas.some((u) => u.includes(sheetsSync.SHEET_ID_BRAVO));
+    const pediuAlgumaPlanilha = urlsPedidas.some((u) => u.includes('sheets.googleapis.com'));
+    okBravoForaDoSync = !pediuBravo && pediuAlgumaPlanilha
+      // a funcao que descobria as abas do Bravo tambem tem que ter sumido
+      && typeof sheetsSync.abasHistoricoBravo === 'undefined';
+  } catch (e) { okBravoForaDoSync = false; } finally {
+    global.fetch = fetchOriginal;
+    if (envEmail === undefined) delete process.env.FIREBASE_CLIENT_EMAIL; else process.env.FIREBASE_CLIENT_EMAIL = envEmail;
+    if (envKey === undefined) delete process.env.FIREBASE_PRIVATE_KEY; else process.env.FIREBASE_PRIVATE_KEY = envKey;
+  }
+  if (!okBravoForaDoSync) ruins += 1;
+  console.log(`${okBravoForaDoSync ? '✓' : '✗'} Fechamentos: sincronização não toca mais na planilha do Grupo Bravo (só ARCFOOD)`);
 
   // ---- CUSTO DE LEITURA do caminho de autenticação (sessions.js).
   // existeEValida roda no requireAuth de TODA requisição autenticada (~90

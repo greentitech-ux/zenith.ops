@@ -3809,20 +3809,20 @@ function ontemBrasiliaISO() {
 // ela. So Master, e so sob demanda (nao automatico) - escreve numa
 // planilha externa/compartilhada, e um dado errado lá tem mais trabalho
 // pra desfazer do que só rodar de novo depois de corrigir.
-// unidades de cada grupo, na ordem em que saem no resultado. ARCFOOD sao os
-// 4 codigos numericos; no Bravo o proprio nome da loja E o codigo (ver
-// linhaParaFechamento em sheetsSync.js), por isso a lista vem de la - assim
-// incluir/tirar loja do Bravo se faz num lugar so.
+// So a ARCFOOD tem planilha de destino: o Grupo Bravo aposentou a dele
+// (2026-08) e agora e 100% nativo no Firestore, entao mandar fechamento de
+// volta pra la nao existe mais - a aba "BD" que recebia essa escrita foi
+// apagada. Quando a ARCFOOD tambem for implantada em todas as unidades,
+// essa rota inteira sai junto.
 const UNIDADES_ENVIO_PLANILHA = {
   ARCFOOD: ['19821', '19855', '19888', '19889'],
-  BRAVO: [...sheetsSync.BRAVO_UNIDADES],
 };
 
 app.post('/api/fechamentos/:grupo/enviar-planilha', auth.requireMaster, async (req, res) => {
   try {
     const grupo = String(req.params.grupo || '').toUpperCase();
     const unidades = UNIDADES_ENVIO_PLANILHA[grupo];
-    if (!unidades) return res.status(400).json({ error: 'Grupo inválido. Use arcfood ou bravo.' });
+    if (!unidades) return res.status(400).json({ error: 'Grupo sem planilha de destino. Só a ARCFOOD ainda usa planilha.' });
     const data = (req.body && req.body.data) || ontemBrasiliaISO();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) return res.status(400).json({ error: 'Data inválida.' });
     const lancados = (await fechamentosLive.listByUnidades(unidades)).filter((f) => f.data === data);

@@ -1,11 +1,16 @@
 // sheetsSync.js
-// Sincroniza os fechamentos direto das planilhas do Google Sheets (ARCFOOD e
-// Grupo Bravo, aba "BD") pro dashboard, substituindo o export manual pra
-// fechamentos-snapshot.json. Autentica como a mesma conta de servico usada
-// pro Firestore (FIREBASE_CLIENT_EMAIL/FIREBASE_PRIVATE_KEY) - pra funcionar,
-// a API do Google Sheets precisa estar habilitada no mesmo projeto GCP, e as
-// duas planilhas precisam estar compartilhadas com o email dessa conta de
-// servico (como leitor).
+// Sincroniza os fechamentos da planilha do Google Sheets da ARCFOOD pro
+// dashboard, substituindo o export manual pra fechamentos-snapshot.json.
+// Autentica como a mesma conta de servico usada pro Firestore
+// (FIREBASE_CLIENT_EMAIL/FIREBASE_PRIVATE_KEY) - pra funcionar, a API do
+// Google Sheets precisa estar habilitada no mesmo projeto GCP, e a planilha
+// precisa estar compartilhada com o email dessa conta de servico (leitor).
+//
+// O GRUPO BRAVO NAO PASSA MAIS POR AQUI (2026-08): a planilha dele foi
+// aposentada e o historico virou lançamento nativo no Firestore, igual ao
+// que a loja lança direto no app (ver bravoImport.js). Sobraram deste modulo
+// so as pecas que o importador reaproveita pra LER a planilha uma unica vez:
+// SHEET_ID_BRAVO, BRAVO_UNIDADES, parseDataBravo e parseMoneyBR.
 
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
@@ -33,45 +38,21 @@ const SHEET_ABA_ARCFOOD = process.env.SHEET_ABA_ARCFOOD || 'BD';
 // dobro; se um dia passar a haver sobreposicao real, precisa revisitar isso.
 const SHEET_ID_ARCFOOD_HISTORICO = process.env.SHEET_ID_ARCFOOD_HISTORICO || '1F-FnLydHOfeiMJexjO2RJOwn88O6uUt_PeVH0PjoKYs';
 
-// planilha do Grupo Bravo - mesma estrutura de colunas da ARCFOOD (por isso
-// linhaParaFechamento le as duas com os MESMOS get('Delivery')/get('Ifood')/...)
+// planilha (aposentada) do Grupo Bravo - fica aqui so pro importador de uma
+// vez só conseguir lê-la; nao e mais sincronizada nem escrita (ver o topo)
 const SHEET_ID_BRAVO = process.env.SHEET_ID_BRAVO || '1dObCSsx4BYDGSQG81KLIOtFSNNs18mVOD5GfYzRIZcM';
-const SHEET_ABA_BRAVO = process.env.SHEET_ABA_BRAVO || 'BD';
 const ARCFOOD_ABAS_HISTORICO = ['MOOCA', 'TATUAPE', 'CARRAO', 'SMIGUEL'];
 
 const PLANILHAS = [
   { grupo: 'ARCFOOD', id: SHEET_ID_ARCFOOD, aba: SHEET_ABA_ARCFOOD },
   ...ARCFOOD_ABAS_HISTORICO.map((aba) => ({ grupo: 'ARCFOOD', id: SHEET_ID_ARCFOOD_HISTORICO, aba })),
-  { grupo: 'BRAVO', id: SHEET_ID_BRAVO, aba: SHEET_ABA_BRAVO },
 ];
 
-// historico do Grupo Bravo: reorganizado (2026-08) do mesmo jeito que ja
-// era feito na ARCFOOD - uma aba por UNIDADE, so-de-leitura, em vez de tudo
-// misturado na aba "BD" (que segue sendo a aba VIVA: onde o app grava os
-// fechamentos lançados ao vivo, ver enviarFechamentoPlanilha, e de onde le
-// os dias recentes). Diferente da ARCFOOD (4 abas fixas numa planilha
-// separada, ver ARCFOOD_ABAS_HISTORICO/SHEET_ID_ARCFOOD_HISTORICO), aqui as
-// abas de historico vivem na MESMA planilha do Bravo e o nome/quantidade
-// delas pode mudar (o Master reorganiza a vontade) - por isso a lista NAO e
-// fixa no codigo: e descoberta a cada sincronizacao (toda aba da planilha
-// Bravo, exceto a aba viva "BD", vira fonte extra so-de-leitura). Uma aba
-// sem as colunas certas simplesmente nao produz fechamento nenhum
-// (linhaParaFechamento devolve null por falta de ID/Unidade valida) - nao
-// precisa validar o nome nem o conteudo antes.
-async function abasHistoricoBravo() {
-  try {
-    const token = await getAccessToken();
-    const abas = await listarAbas(SHEET_ID_BRAVO, token);
-    const vivaNormalizada = normalizarNomeAba(SHEET_ABA_BRAVO);
-    return abas.filter((nome) => normalizarNomeAba(nome) !== vivaNormalizada);
-  } catch (e) {
-    console.warn(`sheetsSync: não deu pra listar as abas de histórico do Grupo Bravo: ${e.message}`);
-    return [];
-  }
-}
-
 // mesmas unidades usadas no resto do app (fechamentos.html/lancamento.html) -
-// a planilha ARCFOOD grava o nome da loja sem acento na coluna "Unidade"
+// a planilha ARCFOOD grava o nome da loja sem acento na coluna "Unidade".
+// No Bravo o proprio nome da loja E o codigo da unidade, e BRAVO_UNIDADES e
+// a lista canonica delas - usada pelo importador pra saber quais linhas da
+// planilha aposentada sao fechamento de verdade.
 const ARCFOOD_CODIGOS = { '19821': 'São Miguel', '19855': 'Carrão', '19888': 'Mooca', '19889': 'Tatuapé' };
 const ARCFOOD_UNIDADES_POR_NOME = { 'sao miguel': '19821', 'carrao': '19855', 'mooca': '19888', 'tatuape': '19889' };
 const BRAVO_UNIDADES = new Set([
@@ -424,14 +405,7 @@ const persistenciaFechamentos = criarPersistenciaEstado('sync-estado/fechamentos
 
 async function sincronizar({ completa = false } = {}) {
   if (!completa) await persistenciaFechamentos.carregar();
-  // abas de historico do Bravo sao descobertas a cada sincronizacao (ver
-  // abasHistoricoBravo acima) - entram como fontes extras, alem das fixas
-  // em PLANILHAS. Uma falha aqui (planilha fora do ar, sem permissao) so
-  // reduz a lista pra [], nunca derruba a sincronizacao inteira
-  const planilhas = [
-    ...PLANILHAS,
-    ...(await abasHistoricoBravo()).map((aba) => ({ grupo: 'BRAVO', id: SHEET_ID_BRAVO, aba })),
-  ];
+  const planilhas = PLANILHAS;
   const resultado = [];
   let linhasNovas = 0;
   for (const planilha of planilhas) {
@@ -509,12 +483,6 @@ const DESTINOS = {
     aba: SHEET_ABA_ARCFOOD,
     nomeNaPlanilha: (f) => ARCFOOD_NOME_PLANILHA[f.unidade] || f.unidadeNome || f.unidade,
     dataDaLinha: (linha, iData, iMes) => parseDataArcfood(linha[iData], iMes >= 0 ? linha[iMes] : undefined),
-  },
-  BRAVO: {
-    id: SHEET_ID_BRAVO,
-    aba: SHEET_ABA_BRAVO,
-    nomeNaPlanilha: (f) => f.unidade,
-    dataDaLinha: (linha, iData) => parseDataBravo(linha[iData]),
   },
 };
 
@@ -727,5 +695,5 @@ async function enviarFechamentoPlanilha(f, grupo) {
 
 module.exports = {
   sincronizar, parseMoneyBR, parseDataArcfood, parseDataBravo, getAccessToken, buscarAba, buscarLinhasNovas, buscarAbaPorCandidatos, mesclarLancamentosDoMesmoDia, criarPersistenciaEstado,
-  enviarFechamentoPlanilha, BRAVO_UNIDADES, abasHistoricoBravo,
+  enviarFechamentoPlanilha, BRAVO_UNIDADES, SHEET_ID_BRAVO,
 };
