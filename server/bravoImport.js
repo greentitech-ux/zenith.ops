@@ -392,6 +392,21 @@ async function simular() {
 // no banco mas recomputarTotais não soma - as 7 lojas que não são Domino's
 // apareceriam com faturamento R$ 0,00 e ninguém entenderia por quê.
 // Por isso a importação confere isto ANTES e se recusa a gravar faltando.
+// compara campo por RÓTULO, não pela chave. A chave (campo) já nasceu
+// errada uma vez - slugify não era idempotente e gravou "tefcredito" onde
+// devia ser "tefCredito" (corrigido em grupos.js). Comparar por rótulo faz
+// o conferir reconhecer o que já existe mesmo com a chave torta, em vez de
+// cadastrar tudo de novo e deixar o grupo com dois campos pro mesmo dado.
+function chaveRotulo(label) {
+  return String(label || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+}
+
+const QUAIS = [
+  { qual: 'canais', chave: 'canaisVendaExtras' },
+  { qual: 'formas', chave: 'formasPagamentoExtras' },
+  { qual: 'kpis', chave: 'kpisExtras' },
+];
+
 async function conferirCampos() {
   const faltando = [];
   const porGrupo = new Map();
@@ -399,11 +414,15 @@ async function conferirCampos() {
     const grupo = await grupos.grupoDaUnidade(unidade);
     if (!grupo) { faltando.push({ unidade, erro: 'unidade não está em nenhum grupo' }); continue; }
     const precisa = definicoesDeCampos(unidade);
-    const atual = porGrupo.get(grupo.id) || { grupo, canais: new Map(), formas: new Map(), kpis: new Map() };
-    ['canais', 'formas', 'kpis'].forEach((qual) => {
-      const chave = qual === 'canais' ? 'canaisVendaExtras' : qual === 'formas' ? 'formasPagamentoExtras' : 'kpisExtras';
-      const jaTem = new Set((grupo[chave] || []).map((d) => d.campo));
-      precisa[qual].forEach((d) => { if (!jaTem.has(d.campo)) atual[qual].set(d.campo, d); });
+    const atual = porGrupo.get(grupo.id)
+      || { grupo, canais: new Map(), formas: new Map(), kpis: new Map(), corrigir: new Map() };
+    QUAIS.forEach(({ qual, chave }) => {
+      const existentes = new Map((grupo[chave] || []).map((d) => [chaveRotulo(d.label), d]));
+      precisa[qual].forEach((d) => {
+        const jaTem = existentes.get(chaveRotulo(d.label));
+        if (!jaTem) atual[qual].set(d.campo, d);
+        else if (jaTem.campo !== d.campo) atual.corrigir.set(`${chave}::${jaTem.campo}`, { chave, de: jaTem.campo, para: d.campo, label: d.label });
+      });
     });
     porGrupo.set(grupo.id, atual);
   }
@@ -411,14 +430,15 @@ async function conferirCampos() {
     .map((g) => ({
       grupoId: g.grupo.id, grupoNome: g.grupo.nome,
       canais: [...g.canais.values()], formas: [...g.formas.values()], kpis: [...g.kpis.values()],
+      corrigir: [...g.corrigir.values()],
     }))
-    .filter((g) => g.canais.length || g.formas.length || g.kpis.length);
+    .filter((g) => g.canais.length || g.formas.length || g.kpis.length || g.corrigir.length);
   return { pendentes, faltando };
 }
 
-// Acrescenta no cadastro do grupo só o que falta, PRESERVANDO o que já está
-// lá (e a ordem que o Master escolheu). Nunca remove nem reordena: se ele
-// arrumou os KPI's a mão, não é a importação que vai desmanchar.
+// Acrescenta o que falta e CORRIGE a chave dos que ficaram tortos, sempre
+// preservando o que o Master já tinha configurado e a ordem que ele
+// escolheu. Nunca remove nada.
 async function cadastrarCampos() {
   const { pendentes, faltando } = await conferirCampos();
   const feitos = [];
@@ -426,12 +446,21 @@ async function cadastrarCampos() {
     const lista = await grupos.list();
     const g = lista.find((x) => x.id === p.grupoId);
     if (!g) continue;
-    await grupos.update(p.grupoId, {
-      canaisVendaExtras: [...(g.canaisVendaExtras || []), ...p.canais],
-      formasPagamentoExtras: [...(g.formasPagamentoExtras || []), ...p.formas],
-      kpisExtras: [...(g.kpisExtras || []), ...p.kpis],
+    const corrigirPor = new Map(p.corrigir.map((c) => [`${c.chave}::${c.de}`, c]));
+    const patch = {};
+    QUAIS.forEach(({ qual, chave }) => {
+      const atuais = (g[chave] || []).map((d) => {
+        const fix = corrigirPor.get(`${chave}::${d.campo}`);
+        return fix ? { ...d, campo: fix.para } : d;
+      });
+      patch[chave] = [...atuais, ...p[qual]];
     });
-    feitos.push({ grupo: p.grupoNome, canais: p.canais.length, formas: p.formas.length, kpis: p.kpis.length });
+    await grupos.update(p.grupoId, patch);
+    feitos.push({
+      grupo: p.grupoNome,
+      canais: p.canais.length, formas: p.formas.length, kpis: p.kpis.length,
+      corrigidos: p.corrigir.length,
+    });
   }
   return { feitos, faltando };
 }

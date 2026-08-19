@@ -728,7 +728,7 @@ async function importBravo(acao){
     if(acao === 'cadastrar-campos'){
       const feitos = dados.feitos || [];
       saida.innerHTML = feitos.length
-        ? `<div style="color:var(--ok);font-size:12.5px;">✅ Grupos preparados: ${feitos.map(f=>`${escapeHtml(f.grupo)} (+${f.canais+f.formas+f.kpis} campo(s))`).join(', ')}. Agora o passo 3.</div>`
+        ? `<div style="color:var(--ok);font-size:12.5px;">✅ Grupos preparados: ${feitos.map(f=>`${escapeHtml(f.grupo)} (+${f.canais+f.formas+f.kpis} campo(s)${f.corrigidos?`, ${f.corrigidos} corrigido(s)`:''})`).join(', ')}. Agora o passo 3.</div>`
         : '<div style="color:var(--ok);font-size:12.5px;">✅ Não faltava nada. Pode ir pro passo 3.</div>';
       btns[1].disabled = false;
       btns[2].disabled = false;
