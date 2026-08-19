@@ -4053,7 +4053,7 @@ app.post('/api/fechamentos/bravo/importar', auth.requireMaster, async (req, res)
       return res.json({ acao, ...r });
     }
     if (acao === 'gravar') {
-      const r = await bravoImport.importar({ confirmar: req.body?.confirmar });
+      const r = await bravoImport.importar({ confirmar: req.body?.confirmar, unidade: req.body?.unidade || null });
       fechamentosLive.invalidarCache();
       return res.json({ acao, ...r });
     }
@@ -4063,7 +4063,7 @@ app.post('/api/fechamentos/bravo/importar', auth.requireMaster, async (req, res)
     // uma linha e só a primeira gravava). Nunca toca em fechamento lançado por
     // uma pessoa - ver o modo repor em bravoImport.js.
     if (acao === 'repor') {
-      const r = await bravoImport.importar({ confirmar: req.body?.confirmar, repor: true });
+      const r = await bravoImport.importar({ confirmar: req.body?.confirmar, repor: true, unidade: req.body?.unidade || null });
       fechamentosLive.invalidarCache();
       return res.json({ acao, ...r });
     }
