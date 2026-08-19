@@ -243,4 +243,8 @@ async function ensureGrupoSaltiverso() {
   });
 }
 
-module.exports = { list, create, update, remove, grupoDaUnidade, ensureGrupoSaltiverso };
+// slugify sai daqui pro importador do Grupo Bravo (bravoImport.js) gerar
+// EXATAMENTE o mesmo 'campo' que este cadastro geraria pro mesmo label -
+// se as duas pontas divergirem, o valor importado nao casa com a definicao
+// do grupo e some da tela
+module.exports = { list, create, update, remove, grupoDaUnidade, ensureGrupoSaltiverso, slugify };

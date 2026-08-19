@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KPI's operacionais · Zenith Ops</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --warn:#f2b33d; --bad:#ff5c5c;
+    --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 16px;padding:12px 32px;border-bottom:1px solid var(--line);}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;}
+  .eyebrow{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;}
+  .header-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
+  .nav-actions{display:flex;gap:6px;align-items:center;}
+  .hamburger-btn,.btn-notif{background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:7px 10px;cursor:pointer;font-size:14px;}
+  .hamburger-btn:hover,.btn-notif:hover{color:var(--text);border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .back{background:var(--panel2);border:1px solid var(--line);color:var(--muted);text-decoration:none;cursor:pointer;font-family:var(--sans);}
+  .back:hover{color:var(--text);border-color:var(--accent);}
+  .hidden{display:none!important;}
+  .empty{color:var(--muted);font-size:13px;padding:26px;text-align:center;border:1px dashed var(--line);border-radius:10px;background:var(--panel);}
+
+  .painel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px;}
+  .painel h2{font-size:13px;margin:0 0 10px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .painel h2 .n{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400;}
+
+  /* filtros numa linha só, acima dos gráficos (ver interaction.md) */
+  .filtros{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;}
+  .filtros input[type=date],.filtros select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:6px 9px;font-family:var(--mono);font-size:11.5px;}
+  .preset{font-family:var(--mono);font-size:11.5px;padding:6px 12px;border-radius:16px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
+  .preset.active{border-color:var(--accent);color:var(--accent);background:#132029;}
+  .sub{color:var(--muted);font-size:11.5px;line-height:1.5;}
+
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th,td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;}
+  th{font-family:var(--mono);font-size:10.5px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.06em;position:sticky;top:0;background:var(--panel);}
+  th:first-child,td:first-child{text-align:left;}
+  td.valor{font-family:var(--mono);}
+  /* o KPI da linha é clicável: escolhe quem vai pro gráfico de tendência */
+  tr.kpi-linha{cursor:pointer;}
+  tr.kpi-linha:hover td{background:var(--panel2);}
+  tr.kpi-linha.sel td{background:#132029;}
+  tr.kpi-linha.sel td:first-child{box-shadow:inset 3px 0 0 var(--accent);}
+  .vazio-cel{color:var(--muted);}
+  .rolagem{overflow-x:auto;}
+
+  /* legenda: identidade nunca é só cor - tem o nome do lado da marca */
+  .legenda{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin-bottom:8px;}
+  .legenda span{display:flex;align-items:center;gap:6px;}
+  .legenda i{width:10px;height:10px;border-radius:3px;display:inline-block;}
+
+  .grid-line{stroke:var(--line);stroke-width:1;}
+  .eixo{font-family:var(--mono);font-size:9.5px;fill:var(--muted);}
+  .crosshair{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3;opacity:0;pointer-events:none;}
+  .hit-col{fill:transparent;}
+  #tooltip{position:fixed;z-index:60;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11.5px;pointer-events:none;box-shadow:0 6px 20px rgba(0,0,0,.5);}
+  .tt-date{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:5px;}
+  .tt-row{display:flex;justify-content:space-between;gap:14px;}
+  .tt-key{display:flex;align-items:center;gap:6px;}
+  .tt-key i{width:9px;height:9px;border-radius:2px;}
+  .tt-val{font-family:var(--mono);}
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin:-16px -14px 16px;padding:12px 14px;} h1{font-size:17px;} }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <div style="min-width:0;">
+        <div class="eyebrow" id="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <h1>KPI's operacionais</h1>
+      </div>
+    </div>
+    <div class="nav-actions">
+      <button class="btn-notif" onclick="location.reload()" title="Atualizar página">🔄</button>
+      <button class="btn-notif btn-sair" onclick="logout()" title="Sair" style="cursor:pointer;">🚪</button>
+    </div>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso aos Fechamentos. Fale com o administrador (Master).</div>
+
+<div id="root" class="hidden">
+
+  <div class="filtros">
+    <select id="f-grupo" onchange="trocarGrupo()"></select>
+    <button type="button" class="preset" data-preset="semana" onclick="aplicarPreset('semana')">Semana</button>
+    <button type="button" class="preset" data-preset="mes" onclick="aplicarPreset('mes')">Mês</button>
+    <button type="button" class="preset" data-preset="trimestre" onclick="aplicarPreset('trimestre')">Trimestre</button>
+    <input type="date" id="f-inicio" onchange="marcarPresetManual();render()">
+    <span class="sub">até</span>
+    <input type="date" id="f-fim" onchange="marcarPresetManual();render()">
+    <select id="f-agregacao" onchange="render()" title="Como juntar os dias do período">
+      <option value="auto">Agregação automática</option>
+      <option value="media">Sempre média</option>
+      <option value="soma">Sempre soma</option>
+    </select>
+  </div>
+
+  <div class="painel">
+    <h2>Comparativo por loja <span class="n" id="matriz-info"></span></h2>
+    <div class="sub" style="margin-bottom:10px;">Clique num KPI pra ver a evolução dele dia a dia no gráfico abaixo. <b>Tempo</b>, <b>OTD</b>, <b>Taxa</b> e <b>Média</b> são agregados por <b>média</b> do período; o resto por <b>soma</b> — a coluna diz qual foi usada.</div>
+    <div class="rolagem"><table id="matriz"></table></div>
+  </div>
+
+  <div class="painel" id="painel-tendencia">
+    <h2>Evolução diária <span class="n" id="tend-info"></span></h2>
+    <div class="legenda" id="legenda"></div>
+    <div id="grafico"></div>
+  </div>
+
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function abrirMenu(){}
+function fecharMenu(){}
+
+// MESMA paleta categórica do resto do app (ver fechamentos.html) - validada
+// pros 5 tons usados aqui contra o fundo escuro do painel: banda de
+// luminosidade, piso de croma, separação p/ daltonismo (pior par ΔE 8.4),
+// piso de visão normal (19.3) e contraste. Ordem FIXA por loja: o filtro
+// pode tirar lojas da tela, e as que sobram não trocam de cor.
+const PALETA_CATEGORICA = ['#3987e5','#d95926','#199e70','#c98500','#d55181','#3ddc97','#9085e9','#e66767'];
+
+let GRUPOS = [];        // grupos que têm KPI cadastrado
+let GRUPO_ATUAL = null;
+let FECHAMENTOS = [];
+let CORES = {};         // unidade -> cor (fixa, atribuída na troca de grupo)
+let KPI_SEL = null;     // campo do KPI mostrado no gráfico
+let PRESET = 'mes';
+
+const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+function escapeHtml(s){ const d=document.createElement('div'); d.textContent = s==null?'':String(s); return d.innerHTML; }
+function fmtData(iso){ if(!iso) return '—'; const [y,m,d]=iso.split('-'); return `${d}/${m}`; }
+function isoDe(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+
+// KPI de tempo/percentual/média se agrega por MÉDIA; contagem, por SOMA.
+// Somar um tempo médio de 30 dias produziria um número sem significado
+// nenhum. O tipo cadastrado no grupo não serve pra decidir isso (esses KPI's
+// estão todos como "quantidade"), então vai pelo rótulo - e o seletor de
+// agregação existe justamente pra quando o palpite não servir.
+function agregaPorMedia(label){
+  return /time|tempo|otd|taxa|media|média|m[ée]dio/i.test(String(label||''));
+}
+function modoAgregacao(def){
+  const escolha = document.getElementById('f-agregacao').value;
+  if(escolha !== 'auto') return escolha;
+  return agregaPorMedia(def.label) ? 'media' : 'soma';
+}
+function fmtValor(v, modo){
+  if(v == null) return null;
+  return modo === 'media' ? v.toFixed(1) : String(Math.round(v));
+}
+
+function unidadesDoGrupo(){ return (GRUPO_ATUAL && GRUPO_ATUAL.unidades) || []; }
+function kpisDoGrupo(){ return (GRUPO_ATUAL && GRUPO_ATUAL.kpisExtras) || []; }
+
+// linhas do período, só das lojas do grupo escolhido
+function linhasFiltradas(){
+  const ini = document.getElementById('f-inicio').value;
+  const fim = document.getElementById('f-fim').value;
+  const lojas = new Set(unidadesDoGrupo());
+  return FECHAMENTOS.filter(f => lojas.has(f.unidade) && (f.data||'') >= ini && (f.data||'') <= fim);
+}
+
+// valores de UM kpi por loja: {unidade: [valores...]} - só entra dia em que
+// a loja realmente preencheu, senão a média cairia por causa de dia vazio
+function valoresPorLoja(campo, linhas){
+  const out = {};
+  unidadesDoGrupo().forEach(u => { out[u] = []; });
+  linhas.forEach(f => {
+    const bruto = (f.kpisExtras||{})[campo];
+    if(bruto === undefined || bruto === null || bruto === '') return;
+    if(out[f.unidade]) out[f.unidade].push({ data: f.data, valor: num(bruto) });
+  });
+  return out;
+}
+function agregar(lista, modo){
+  if(!lista.length) return null;
+  const soma = lista.reduce((s,x) => s + x.valor, 0);
+  return modo === 'media' ? soma/lista.length : soma;
+}
+
+function renderMatriz(){
+  const linhas = linhasFiltradas();
+  const lojas = unidadesDoGrupo();
+  const kpis = kpisDoGrupo();
+  const tabela = document.getElementById('matriz');
+  document.getElementById('matriz-info').textContent =
+    `${linhas.length} lançamento(s) · ${kpis.length} KPI's · ${lojas.length} loja(s)`;
+
+  if(!kpis.length){
+    tabela.innerHTML = '';
+    document.getElementById('matriz').innerHTML = '<tr><td class="vazio-cel" style="padding:20px;">Esse grupo não tem KPI cadastrado. O Master cadastra em Grupos.</td></tr>';
+    return;
+  }
+
+  const cab = ['<tr><th>KPI</th><th>Agreg.</th>' +
+    lojas.map(u => `<th><span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:9px;height:9px;border-radius:2px;background:${CORES[u]};display:inline-block;"></i>${escapeHtml(u)}</span></th>`).join('') +
+    '</tr>'];
+
+  const corpo = kpis.map(def => {
+    const modo = modoAgregacao(def);
+    const porLoja = valoresPorLoja(def.campo, linhas);
+    const celulas = lojas.map(u => {
+      const v = agregar(porLoja[u], modo);
+      const txt = fmtValor(v, modo);
+      return `<td class="valor">${txt === null ? '<span class="vazio-cel">—</span>' : escapeHtml(txt)}</td>`;
+    }).join('');
+    const sel = KPI_SEL === def.campo ? ' sel' : '';
+    return `<tr class="kpi-linha${sel}" onclick="escolherKpi('${escapeHtml(def.campo)}')">` +
+      `<td>${escapeHtml(def.label)}</td>` +
+      `<td class="valor vazio-cel" style="font-size:10.5px;">${modo === 'media' ? 'média' : 'soma'}</td>` +
+      celulas + '</tr>';
+  });
+  tabela.innerHTML = cab.concat(corpo).join('');
+}
+
+function escolherKpi(campo){ KPI_SEL = campo; render(); }
+
+// linha por loja ao longo dos dias. Um eixo só (nunca dois) - se um dia
+// alguém quiser comparar dois KPI's de escalas diferentes, são dois
+// gráficos, não dois eixos.
+function renderTendencia(){
+  const alvo = document.getElementById('grafico');
+  const legenda = document.getElementById('legenda');
+  const info = document.getElementById('tend-info');
+  const def = kpisDoGrupo().find(k => k.campo === KPI_SEL);
+  if(!def){ alvo.innerHTML = '<div class="empty">Escolha um KPI na tabela acima.</div>'; legenda.innerHTML=''; info.textContent=''; return; }
+
+  const linhas = linhasFiltradas();
+  const porLoja = valoresPorLoja(def.campo, linhas);
+  const lojas = unidadesDoGrupo().filter(u => porLoja[u] && porLoja[u].length);
+  const dias = [...new Set(linhas.map(f => f.data))].sort();
+  info.textContent = def.label;
+
+  if(!lojas.length || dias.length < 1){
+    alvo.innerHTML = `<div class="empty">Nenhuma loja preencheu <b>${escapeHtml(def.label)}</b> nesse período.</div>`;
+    legenda.innerHTML = '';
+    return;
+  }
+
+  legenda.innerHTML = lojas.map(u => `<span><i style="background:${CORES[u]}"></i>${escapeHtml(u)}</span>`).join('');
+
+  const porDia = {};
+  lojas.forEach(u => { porDia[u] = {}; porLoja[u].forEach(x => { porDia[u][x.data] = x.valor; }); });
+  const todos = lojas.flatMap(u => porLoja[u].map(x => x.valor));
+  const maxV = Math.max(1, ...todos);
+
+  const W = Math.max(320, alvo.clientWidth || 900), H = 240, padL = 54, padR = 14, padT = 12, padB = 26;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const n = dias.length;
+  const xAt = (i) => padL + (n === 1 ? innerW/2 : innerW * i/(n-1));
+  const yAt = (v) => padT + innerH - (v/maxV*innerH);
+
+  const grade = [0,.25,.5,.75,1].map(f => {
+    const y = padT + innerH*(1-f);
+    return `<line class="grid-line" x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}"/>` +
+      `<text class="eixo" x="${padL-8}" y="${(y+3).toFixed(1)}" text-anchor="end">${(maxV*f).toFixed(maxV<10?1:0)}</text>`;
+  }).join('');
+
+  const passo = Math.max(1, Math.ceil(n/8));
+  const rotulosX = dias.map((d,i) => (i % passo === 0 || i === n-1)
+    ? `<text class="eixo" x="${xAt(i).toFixed(1)}" y="${H-8}" text-anchor="middle">${fmtData(d)}</text>` : '').join('');
+
+  // marca fina (2px) por loja; ponto só quando o dia tem valor
+  const series = lojas.map(u => {
+    const pts = dias.map((d,i) => porDia[u][d] === undefined ? null : `${xAt(i).toFixed(1)},${yAt(porDia[u][d]).toFixed(1)}`).filter(Boolean);
+    const dots = dias.map((d,i) => porDia[u][d] === undefined ? '' :
+      `<circle cx="${xAt(i).toFixed(1)}" cy="${yAt(porDia[u][d]).toFixed(1)}" r="4" fill="${CORES[u]}" stroke="var(--panel)" stroke-width="2"/>`).join('');
+    return `<polyline points="${pts.join(' ')}" fill="none" stroke="${CORES[u]}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>${dots}`;
+  }).join('');
+
+  const hit = `<rect id="g-hit" class="hit-col" x="${padL}" y="${padT}" width="${innerW}" height="${innerH}"/>`;
+  const cross = `<line class="crosshair" id="g-cross" x1="0" y1="${padT}" x2="0" y2="${H-padB}"/>`;
+  alvo.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" style="display:block;">${grade}${rotulosX}${series}${cross}${hit}</svg>`;
+
+  ligarHover(alvo, { dias, lojas, porDia, xAt, padL, innerW, n, label: def.label });
+}
+
+// crosshair + tooltip: um gráfico HTML É interativo, então isso é padrão,
+// não enfeite. A área de toque é a faixa inteira, não a marca.
+function ligarHover(alvo, ctx){
+  const hit = alvo.querySelector('#g-hit');
+  const cross = alvo.querySelector('#g-cross');
+  if(!hit) return;
+  const tip = () => {
+    let el = document.getElementById('tooltip');
+    if(!el){ el = document.createElement('div'); el.id = 'tooltip'; document.body.appendChild(el); }
+    return el;
+  };
+  function mover(ev){
+    const e = ev.touches ? ev.touches[0] : ev;
+    const r = hit.getBoundingClientRect();
+    const rel = (e.clientX - r.left) / Math.max(1, r.width);
+    const i = Math.max(0, Math.min(ctx.n-1, Math.round(rel*(ctx.n-1))));
+    const x = ctx.xAt(i);
+    cross.setAttribute('x1', x); cross.setAttribute('x2', x); cross.style.opacity = 1;
+    const linhasTt = ctx.lojas
+      .map(u => ({ u, v: ctx.porDia[u][ctx.dias[i]] }))
+      .filter(x => x.v !== undefined)
+      .sort((a,b) => b.v - a.v);
+    const el = tip();
+    el.innerHTML = `<div class="tt-date">${fmtData(ctx.dias[i])} · ${escapeHtml(ctx.label)}</div>` +
+      (linhasTt.length ? linhasTt.map(r2 =>
+        `<div class="tt-row"><span class="tt-key"><i style="background:${CORES[r2.u]}"></i>${escapeHtml(r2.u)}</span><span class="tt-val">${r2.v.toFixed(maxDecimais(r2.v))}</span></div>`
+      ).join('') : '<div class="tt-row"><span class="tt-key">sem lançamento</span></div>');
+    el.style.display = 'block';
+    const larg = el.offsetWidth || 200;
+    el.style.left = Math.min(window.innerWidth - larg - 12, e.clientX + 14) + 'px';
+    el.style.top = Math.max(8, e.clientY - 12) + 'px';
+  }
+  function sair(){
+    cross.style.opacity = 0;
+    const el = document.getElementById('tooltip');
+    if(el) el.style.display = 'none';
+  }
+  hit.addEventListener('mousemove', mover);
+  hit.addEventListener('mouseleave', sair);
+  hit.addEventListener('touchmove', (e)=>{ mover(e); e.preventDefault(); }, {passive:false});
+  hit.addEventListener('touchend', sair);
+}
+function maxDecimais(v){ return Number.isInteger(v) ? 0 : 1; }
+
+function render(){ renderMatriz(); renderTendencia(); }
+
+function marcarPresetManual(){
+  PRESET = null;
+  document.querySelectorAll('.preset').forEach(b => b.classList.remove('active'));
+}
+function aplicarPreset(qual){
+  PRESET = qual;
+  document.querySelectorAll('.preset').forEach(b => b.classList.toggle('active', b.dataset.preset === qual));
+  const hoje = new Date();
+  const ini = new Date(hoje);
+  if(qual === 'semana') ini.setDate(hoje.getDate() - 6);
+  else if(qual === 'mes') ini.setDate(hoje.getDate() - 29);
+  else ini.setDate(hoje.getDate() - 89);
+  document.getElementById('f-inicio').value = isoDe(ini);
+  document.getElementById('f-fim').value = isoDe(hoje);
+  render();
+}
+
+function trocarGrupo(){
+  const id = document.getElementById('f-grupo').value;
+  GRUPO_ATUAL = GRUPOS.find(g => g.id === id) || GRUPOS[0] || null;
+  CORES = {};
+  unidadesDoGrupo().forEach((u,i) => { CORES[u] = PALETA_CATEGORICA[i % PALETA_CATEGORICA.length]; });
+  const kpis = kpisDoGrupo();
+  KPI_SEL = kpis.length ? kpis[0].campo : null;
+  document.getElementById('eyebrow').textContent = 'Zenith Ops · ' + (GRUPO_ATUAL ? GRUPO_ATUAL.nome : 'Solutions Ti Tech');
+  render();
+}
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  const me = await res.json();
+  const isMaster = me.role === 'master';
+  const secoes = isMaster ? ['fechamentos'] : (me.permissions?.sections || []);
+  if(!secoes.includes('fechamentos')){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('root').classList.remove('hidden');
+
+  const [gruposTodos, fechamentos] = await Promise.all([
+    fetch('/api/grupos').then(r => r.json()).catch(() => []),
+    fetch('/api/fechamentos').then(r => r.json()).catch(() => []),
+  ]);
+  FECHAMENTOS = Array.isArray(fechamentos) ? fechamentos : [];
+  // só grupo que TEM KPI cadastrado - grupo sem KPI não tem o que mostrar
+  // aqui, e deixá-lo no seletor só rende tela vazia
+  GRUPOS = (Array.isArray(gruposTodos) ? gruposTodos : []).filter(g => (g.kpisExtras||[]).length);
+  if(!GRUPOS.length){
+    document.getElementById('root').innerHTML = '<div class="empty">Nenhum grupo tem KPI cadastrado ainda. O Master cadastra em <b>Grupos</b> → KPI\'s.</div>';
+    return;
+  }
+  document.getElementById('f-grupo').innerHTML = GRUPOS
+    .map(g => `<option value="${escapeHtml(g.id)}">${escapeHtml(g.nome)} · ${(g.kpisExtras||[]).length} KPI's</option>`).join('');
+  trocarGrupo();
+  aplicarPreset('mes');
+}
+
+window.addEventListener('resize', () => { if(KPI_SEL) renderTendencia(); });
+boot();
+</script>
+<script src="/notif-central.js"></script>
+<script src="/suporte-chat.js"></script>
+<script src="/nav-menu.js"></script>
+</body>
+</html>
