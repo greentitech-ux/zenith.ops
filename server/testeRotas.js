@@ -100,6 +100,7 @@ require('/home/user/adyen-monitor/server/index.js');
 const http = require('http');
 const auth = require('/home/user/adyen-monitor/server/auth.js');
 const store = require('/home/user/adyen-monitor/server/store.js');
+const parque = require('/home/user/adyen-monitor/server/parque.js');
 
 function pedir(caminho, headers = {}) {
   return new Promise((resolve) => {
@@ -694,6 +695,66 @@ setTimeout(async () => {
   } catch (e) { okGateTermos = false; }
   if (!okGateTermos) ruins += 1;
   console.log(`${okGateTermos ? '✓' : '✗'} termos emitidos sem venda: só Master/Gerente vê (atendente com a seção Parque toma 403)`);
+
+  // ---- Parque: cortesia PCD (5%CP) e cortesia geral agora podem juntar
+  // uma criança PAGANTE no MESMO check-in da criança que recebe a
+  // gratuidade (checkbox "gratuita" desmarcado) - 1 termo só, em vez de 2
+  // check-ins separados. A pagante entra pelo preço CHEIO da tabela (nunca
+  // o preço fixo do PCD) e a cota de "2 crianças/hora" da 5%CP conta só
+  // quem de fato recebe a cortesia (ver criar() em parque.js) ----
+  let okGratuidadeMista = false;
+  try {
+    const base = {
+      unidade: '19821', unidadeNome: 'Dom Sao Miguel',
+      responsavel: { nome: 'Responsavel Teste', contato: '11999999999' },
+      dataUtilizacao: '2026-08-19', categoriaTempo: 'pcd-cortesia',
+      horarioPrevisto: '10:00', criadoPorId: 'x', criadoPorEmail: 'teste@x.com',
+    };
+    const misto = await parque.criar({
+      ...base,
+      criancas: [
+        { nome: 'Beneficiaria', meia: false, gratuita: true },
+        { nome: 'Pagante', meia: false, gratuita: false },
+      ],
+      metodoPagamento: 'pix', pagamentos: [{ forma: 'pix', valor: 50 }],
+    });
+    // preco cheio da tabela padrao pro tempo de 60min (pcdCortesiaMinutos
+    // default) e' R$50 - nunca os R$32 fixos do PCD, que so valem pra quem
+    // de fato usa a categoria
+    const precoOk = misto.valor === 50 && misto.metodoPagamento === 'pix'
+      && misto.criancas[0].gratuita === true && misto.criancas[1].gratuita === false;
+
+    // cota de 2/hora: essa venda ja usou 1 vaga (a beneficiaria). Duas
+    // vendas so-pagante (sem beneficiario nenhum) NAO devem consumir vaga -
+    // tem que passar mesmo repetindo o mesmo horario varias vezes
+    const soPagante1 = await parque.criar({
+      ...base,
+      criancas: [{ nome: 'Pagante2', meia: false, gratuita: false }],
+      metodoPagamento: 'pix', pagamentos: [{ forma: 'pix', valor: 50 }],
+    });
+    const soPagante2 = await parque.criar({
+      ...base,
+      criancas: [{ nome: 'Pagante3', meia: false, gratuita: false }],
+      metodoPagamento: 'pix', pagamentos: [{ forma: 'pix', valor: 50 }],
+    });
+    const naoContaNaCota = !!(soPagante1 && soPagante1.id) && !!(soPagante2 && soPagante2.id);
+
+    // agora 1 beneficiaria a mais fecha a cota (1+1=2); a proxima tem que
+    // recusar - prova que a cota conta certo mesmo com pagantes misturados
+    // no meio
+    await parque.criar({
+      ...base,
+      criancas: [{ nome: 'Beneficiaria2', meia: false, gratuita: true }],
+    });
+    let estourouCota = false;
+    try {
+      await parque.criar({ ...base, criancas: [{ nome: 'Beneficiaria3', meia: false, gratuita: true }] });
+    } catch (e) { estourouCota = /vagas de cortesia/.test(e.message); }
+
+    okGratuidadeMista = precoOk && naoContaNaCota && estourouCota;
+  } catch (e) { okGratuidadeMista = false; console.log('  erro: ' + e.message); }
+  if (!okGratuidadeMista) ruins += 1;
+  console.log(`${okGratuidadeMista ? '✓' : '✗'} Parque: cortesia PCD/geral aceita 1 criança pagando junto com a beneficiária, sem furar a cota de 2/hora`);
 
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a

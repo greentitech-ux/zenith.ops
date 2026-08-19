@@ -148,9 +148,20 @@ function valorPorTempo(tempoMinutos, tabela) {
 // crianca ja chegou com a propria meia. Alem disso da pra vender pares
 // extras (meiasExtras) alem da quantidade de criancas
 const PRECO_MEIA = 25;
-function valorMeias(criancas, meiasExtras) {
-  const optantes = (criancas || []).filter((c) => c.meia !== false).length;
-  return PRECO_MEIA * (optantes + Math.max(0, num(meiasExtras)));
+// gratuidadeAtiva: so passado por criar() quando o check-in usa cortesia
+// PCD (5%CP) ou cortesia geral - nesse caso a crianca marcada como
+// beneficiaria (ver gratuita em sanitizarCriancas) nao paga a meia, so
+// quem foi desmarcado (a crianca extra que vai pagar, ver criar()) paga
+// normal. O par extra (meiasExtras, nao ligado a nenhuma crianca) so cobra
+// se tiver pelo menos 1 crianca pagando nesse check-in - do contrario (uso
+// normal da cortesia, sem misturar ninguem pagando) continua de graca,
+// exatamente como sempre foi. Correcao (atualizar()) nunca passa esse
+// parametro - undefined cai direto no comportamento de sempre.
+function valorMeias(criancas, meiasExtras, gratuidadeAtiva) {
+  const lista = criancas || [];
+  const optantes = lista.filter((c) => c.meia !== false && (!gratuidadeAtiva || c.gratuita === false)).length;
+  const extrasCobram = !gratuidadeAtiva || lista.some((c) => c.gratuita === false);
+  return PRECO_MEIA * (optantes + (extrasCobram ? Math.max(0, num(meiasExtras)) : 0));
 }
 
 // aniversariante: desconto/preco especial AUTOMATICO na entrada so daquela
@@ -191,14 +202,25 @@ function aplicarNiverAutomatico(criancas, dataUtilizacao, categoriaPcd) {
 // tempoMinutos: tempo contratado desse check-in (define se o niver esta
 // elegivel - ver comentario acima). tabela: opcional, pra chamador antigo
 // sem tabela cair no comportamento anterior (50% em qualquer tempo)
-function valorEntradaCriancas(criancas, unitario, tempoMinutos, tabela) {
+// opts.gratuidadeAtiva + opts.unitarioPagante: usados so por criar() quando
+// o check-in usa cortesia PCD (5%CP) ou cortesia geral - permite misturar,
+// no MESMO check-in/termo, uma crianca beneficiaria (gratuita, valor 0) com
+// outra crianca comum que paga o preco cheio da tabela (unitarioPagante) -
+// mesmo estilo do aniversariante, so que a gratuidade e' escolhida manual
+// (checkbox por crianca), nao pela data de nascimento. Sem opts (correcao,
+// venda normal), comportamento identico ao de sempre.
+function valorEntradaCriancas(criancas, unitario, tempoMinutos, tabela, opts) {
   const t = tabela || {};
   const elegivel = !tabela || tempoMinutos === 60 || (tempoMinutos === 30 && t.niverAplicar30 === true);
   const valorCheio = Number.isFinite(t.niverValorCheio) && t.niverValorCheio > 0 ? t.niverValorCheio : null;
   const desconto = Math.max(0, Math.min(100, Number.isFinite(t.niverDesconto) ? t.niverDesconto : NIVER_DESCONTO_PADRAO)) / 100;
+  const gratuidadeAtiva = !!(opts && opts.gratuidadeAtiva);
+  const unitarioPagante = (opts && Number.isFinite(opts.unitarioPagante)) ? opts.unitarioPagante : unitario;
   return (criancas || []).reduce((soma, c) => {
-    if (c.niver && elegivel) return soma + (valorCheio != null ? valorCheio : unitario * (1 - desconto));
-    return soma + unitario;
+    if (gratuidadeAtiva && c.gratuita !== false) return soma;
+    const precoBase = gratuidadeAtiva ? unitarioPagante : unitario;
+    if (c.niver && elegivel) return soma + (valorCheio != null ? valorCheio : precoBase * (1 - desconto));
+    return soma + precoBase;
   }, 0);
 }
 
@@ -431,6 +453,11 @@ function sanitizarCriancas(lista) {
       meia: !(c && c.meia === false),
       // niver NAO entra aqui - e' calculado automaticamente por data (ver
       // aplicarNiverAutomatico), nunca aceito direto do cliente
+      // gratuita: default true (mantem o check-in inteiro de graca, igual
+      // sempre foi) - so vira false quando o atendente desmarca a crianca
+      // extra que vai pagar, dentro de um check-in de cortesia PCD/geral
+      // (ver criar()). Fora desses dois modos o campo fica ignorado.
+      gratuita: !(c && c.gratuita === false),
     }))
     .filter((c) => c.nome)
     .slice(0, 30);
@@ -493,11 +520,19 @@ async function criar({
     throw new Error('Cortesia exige justificativa: explique o motivo da entrada sem cobrança.');
   }
   const meiasExtrasOk = Math.max(0, Math.min(30, num(meiasExtras)));
-  const valorMeiasCalc = categoriaPcd === 'pcd-cortesia' ? 0 : valorMeias(criancasOk, meiasExtrasOk);
   const valorUnitario = categoriaPcd ? valorUnitarioPcd(categoriaPcd, tabela) : valorPorTempo(tempo, tabela);
-  const valorFinal = (categoriaPcd === 'pcd-cortesia' || ehCortesia)
-    ? 0
-    : valorEntradaCriancas(criancasOk, valorUnitario, tempo, tabela) + valorMeiasCalc;
+  // gratuidade (cortesia PCD/geral): por padrao TODA crianca do check-in
+  // continua de graca, igual sempre foi. O atendente pode desmarcar
+  // "gratuita" de uma crianca especifica (ver sanitizarCriancas) pra
+  // juntar, no MESMO check-in/termo, um irmao que paga o preco cheio da
+  // tabela - estilo aniversariante, so que a gratuidade e' manual, nao por
+  // data de nascimento. A crianca pagante nunca usa o preco fixo do PCD
+  // (que so vale pra quem de fato usa a categoria): paga o preco normal da
+  // tabela pro MESMO tempo contratado.
+  const gratuidadeAtiva = categoriaPcd === 'pcd-cortesia' || ehCortesia;
+  const unitarioPagante = categoriaPcd ? valorPorTempo(tempo, tabela) : valorUnitario;
+  const valorMeiasCalc = valorMeias(criancasOk, meiasExtrasOk, gratuidadeAtiva);
+  const valorFinal = valorEntradaCriancas(criancasOk, valorUnitario, tempo, tabela, { gratuidadeAtiva, unitarioPagante }) + valorMeiasCalc;
   // divide o valor entre mais de uma forma de pagamento - servidor sempre
   // revalida a soma (o front so ajuda o atendente a nao errar): tem que
   // bater exatamente com valorFinal, nunca menos nem mais
@@ -525,8 +560,10 @@ async function criar({
   // inicia sozinho NESSE horario e avisa a equipe (ver rodarAutoCheckins)
   const previsto = horarioPrevisto ? validarHorarioPrevisto(horarioPrevisto) : null;
 
-  // PCD cortesia: no maximo 2 criancas por hora-relogio, por unidade - nao
-  // bloqueia via card de aprovacao, so recusa a venda e avisa Gerente+Master
+  // PCD cortesia: no maximo 2 criancas GRATUITAS por hora-relogio, por
+  // unidade - nao bloqueia via card de aprovacao, so recusa a venda e avisa
+  // Gerente+Master. A crianca extra que paga (gratuita:false, ver acima)
+  // NAO consome vaga da cota - so quem de fato recebe a cortesia conta
   if (categoriaPcd === 'pcd-cortesia') {
     if (!previsto) throw new Error('Informe o horário previsto de entrada para aplicar a cortesia PCD.');
     const horaBucket = previsto.slice(0, 2);
@@ -534,8 +571,9 @@ async function criar({
     const usadosNaHora = existentes
       .filter((c) => c.unidade === unidade && c.dataUtilizacao === dataUtilizacao
         && c.categoriaTempo === 'pcd-cortesia' && String(c.horarioPrevisto || '').slice(0, 2) === horaBucket)
-      .reduce((soma, c) => soma + (c.criancas || []).length, 0);
-    if (usadosNaHora + criancasOk.length > PCD_CORTESIA_LIMITE_HORA) {
+      .reduce((soma, c) => soma + (c.criancas || []).filter((cr) => cr.gratuita !== false).length, 0);
+    const novosBeneficiarios = criancasOk.filter((c) => c.gratuita !== false).length;
+    if (usadosNaHora + novosBeneficiarios > PCD_CORTESIA_LIMITE_HORA) {
       require('./push').notifyParquePcdCortesiaLimite({
         unidade, unidadeNome: unidadeNome || unidade, horaBucket, dataUtilizacao,
       }).catch(() => {});
@@ -578,10 +616,13 @@ async function criar({
     // financeiro: valor pela tabela (por pulseira) + meias (R$25 por crianca
     // optante + pares extras) + forma de pagamento - 'cortesia' registra a
     // entrada com valor zero. PCD-cortesia (botao "5%CP") e' gratuidade
-    // automatica, sem alcada - forcado no servidor pra nunca virar 'misto'
-    // (sem pagamentos pra somar) nem se confundir com a cortesia normal
-    // (que exige aprovacao Gerente/Master, ver bloco acima)
-    metodoPagamento: categoriaPcd === 'pcd-cortesia' ? 'gratuidade' : sanitizarMetodoPagamento(metodoPagamento),
+    // automatica, sem alcada - forcado pra 'gratuidade' so quando TODA
+    // crianca do check-in e' beneficiaria (valorFinal===0); se alguma
+    // crianca ficou de fora (paga, ver gratuidadeAtiva acima) o check-in
+    // teve dinheiro de verdade, entao usa a forma de pagamento informada -
+    // senao o relatorio financeiro mostraria "gratuidade" com pagamentos
+    // reais dentro
+    metodoPagamento: (categoriaPcd === 'pcd-cortesia' && valorFinal === 0) ? 'gratuidade' : sanitizarMetodoPagamento(metodoPagamento),
     // divisao entre formas de pagamento (ver sanitizarPagamentos acima) -
     // so fica vazio quando a entrada e' gratis (cortesia ou pcd-cortesia)
     pagamentos: pagamentosOk,
