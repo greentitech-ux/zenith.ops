@@ -22,6 +22,11 @@ const origLoad = Module._load;
 
 // ---- Firestore falso: qualquer método encadeia, toda leitura vem vazia ----
 const DOCS = new Map(); // caminho -> dados (o que o teste semear fica aqui)
+// contador de DOCUMENTOS lidos - e assim que o Firestore cobra (a conta do
+// mes e por documento devolvido, nao por chamada). Permite testar consumo de
+// leitura de verdade, e nao so "a rota respondeu": ver o teste do cache de
+// sessao la embaixo, que sem isso passaria igual com ou sem o cache
+const LEITURAS = { docs: 0 };
 function snapDoc(caminho) {
   const dados = DOCS.get(caminho);
   return { exists: dados !== undefined, id: caminho.split('/').pop(), data: () => dados, ref: { path: caminho } };
@@ -54,6 +59,8 @@ function fakeQuery(caminho, filtros = [], ordem = null, lim = null) {
         return ordem.dir === 'desc' ? -c : c;
       });
       if (lim != null) docs = docs.slice(0, lim);
+      // consulta que nao devolve nada ainda custa 1 leitura no Firestore real
+      LEITURAS.docs += docs.length || 1;
       return { empty: !docs.length, size: docs.length, docs, forEach: (fn) => docs.forEach(fn) };
     },
     doc: (id) => fakeDoc(`${caminho}/${id || 'auto' + Math.random().toString(36).slice(2)}`),
@@ -65,7 +72,7 @@ function fakeQuery(caminho, filtros = [], ordem = null, lim = null) {
 function fakeDoc(caminho) {
   return {
     id: caminho.split('/').pop(), path: caminho,
-    get: async () => snapDoc(caminho),
+    get: async () => { LEITURAS.docs += 1; return snapDoc(caminho); },
     set: async (d, o) => { DOCS.set(caminho, o && o.merge ? { ...(DOCS.get(caminho) || {}), ...d } : d); },
     update: async (d) => { DOCS.set(caminho, { ...(DOCS.get(caminho) || {}), ...d }); },
     delete: async () => { DOCS.delete(caminho); },
@@ -772,6 +779,56 @@ setTimeout(async () => {
   } catch (e) { okAbasBravo = false; }
   if (!okAbasBravo) ruins += 1;
   console.log(`${okAbasBravo ? '✓' : '✗'} Fechamentos: descoberta das abas de histórico do Grupo Bravo não derruba a sincronização quando a planilha está inacessível`);
+
+  // ---- CUSTO DE LEITURA do caminho de autenticação (sessions.js).
+  // existeEValida roda no requireAuth de TODA requisição autenticada (~90
+  // rotas), e antes lia a coleção INTEIRA de sessões por um cache único
+  // compartilhado - que ainda por cima era invalidado pelo tocar() de
+  // qualquer outro usuário (1x/min por sessão ativa). Com vários acessos
+  // simultâneos as invalidações se sobrepunham, o TTL nunca era aproveitado
+  // e cada requisição de todo mundo custava N leituras. Este teste mede
+  // DOCUMENTOS lidos (que é como o Firestore cobra) em vez de só conferir
+  // que a função respondeu - sem isso, a regressão voltaria calada ----
+  let okCustoSessao = false;
+  try {
+    const sessions = require('./sessions.js');
+    const agoraMs = Date.now();
+    const SESSOES = 40;
+    for (let i = 0; i < SESSOES; i++) {
+      DOCS.set(`sessions/sess-${i}`, {
+        id: `sess-${i}`, userId: `user-${i}`, criadoEm: new Date(agoraMs).toISOString(),
+        ultimaAtividadeEm: new Date(agoraMs).toISOString(), expiraEm: agoraMs + 60 * 60 * 1000,
+      });
+    }
+
+    const antes = LEITURAS.docs;
+    // 30 requisições da MESMA sessão: com o cache por sessão, isso é 1
+    // leitura de 1 documento (as outras 29 saem do cache)
+    for (let i = 0; i < 30; i++) await sessions.existeEValida('sess-0');
+    const custoMesmaSessao = LEITURAS.docs - antes;
+
+    // a parte que pega a regressão de verdade: outra sessão tem atividade
+    // (tocar) e a nossa continua servida do cache. Antes, esse tocar()
+    // invalidava o cache compartilhado e a próxima chamada relia as 40
+    const antesDoToque = LEITURAS.docs;
+    sessions.tocar('sess-7');
+    sessions.tocar('sess-9');
+    await new Promise((r) => setImmediate(r)); // deixa o update assíncrono correr
+    for (let i = 0; i < 10; i++) await sessions.existeEValida('sess-0');
+    const custoDepoisDoToqueAlheio = LEITURAS.docs - antesDoToque;
+
+    // sessão encerrada tem que cair na hora, não esperar o TTL - é o que
+    // "encerrar acesso" promete pro Master
+    await sessions.encerrar('sess-0');
+    const aindaValida = await sessions.existeEValida('sess-0');
+
+    okCustoSessao = custoMesmaSessao === 1 && custoDepoisDoToqueAlheio === 0 && aindaValida === false;
+    if (!okCustoSessao) {
+      console.log(`  (mesma sessão: ${custoMesmaSessao} leitura(s), esperado 1 · após toque alheio: ${custoDepoisDoToqueAlheio}, esperado 0 · válida após encerrar: ${aindaValida}, esperado false)`);
+    }
+  } catch (e) { okCustoSessao = false; console.log('  erro: ' + e.message); }
+  if (!okCustoSessao) ruins += 1;
+  console.log(`${okCustoSessao ? '✓' : '✗'} autenticação: validar sessão custa 1 leitura de 1 documento e não é derrubada pela atividade de outro usuário`);
 
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a

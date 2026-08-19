@@ -611,10 +611,18 @@ async function listarEdicoesUncached() {
   // pedidos criados antes do resumo "de -> para" existir ganham o resumo na
   // leitura, enquanto PENDENTES (o fechamento ainda tem os valores antigos)
   // - assim ninguem aprova as cegas nem os pedidos da fila antiga
-  for (const p of pedidos) {
-    if (p.status !== 'PENDENTE' || (p.resumoMudancas || []).length) continue;
+  const precisamResumo = pedidos.filter((p) => p.status === 'PENDENTE' && !(p.resumoMudancas || []).length);
+  if (!precisamResumo.length) return pedidos;
+  // busca os fechamentos UMA vez, da listagem que ja esta em cache, em vez de
+  // um getOne() (= 1 leitura no Firestore) por pedido da fila. Era o unico
+  // N+1 de leitura que sobrou no caminho da Central. Cair pro cache tambem
+  // nao piora a validade do resultado: os dois caches tem o mesmo TTL de
+  // 5min e o de fechamentos e invalidado em toda escrita, entao o "de" do
+  // resumo sai tao fresco quanto sairia pelo getOne
+  const porId = new Map((await listAll()).map((f) => [f.id, f]));
+  for (const p of precisamResumo) {
     try {
-      const atual = await getOne(p.fechamentoId);
+      const atual = porId.get(p.fechamentoId);
       if (atual) p.resumoMudancas = await montarResumoMudancas(p, atual);
     } catch (e) { /* sem resumo, o pedido segue mostrando so o motivo */ }
   }

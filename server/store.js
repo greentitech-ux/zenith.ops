@@ -9,6 +9,16 @@ const { resolverBucket } = require('./storageBucket');
 const COLLECTION = db.collection('transactions');
 
 let cache = [];
+// so vira true quando init() terminou de popular o cache. Quem for LER o
+// cache no lugar do Firestore (ver backup.js) PRECISA checar isso antes: o
+// boot do index.js corre com timeout (aquecerBoot/Promise.race), entao o
+// servidor pode comecar a atender - e os jobs periodicos a rodar - com o
+// init() ainda em voo. Sem essa trava, um backup que rodasse nessa janela
+// gravaria "0 transacoes" como se fosse a verdade.
+let cacheCarregado = false;
+function estaCarregado() {
+  return cacheCarregado;
+}
 
 function docId(tx) {
   return `${tx.pspReference}__${tx.eventCode}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
@@ -79,6 +89,7 @@ async function init() {
     cache = snap.docs.map((d) => d.data());
     console.log(`Boot: sem snapshot em Storage - carregado ${cache.length} transações direto do Firestore.`);
   }
+  cacheCarregado = true;
   // deixa o proximo boot mais barato - nao trava a subida do servidor
   // esperando o upload, so loga se der errado
   salvarSnapshot();
@@ -311,6 +322,12 @@ function clientStats(key, allowedUnidades) {
 
 module.exports = {
   init,
+  estaCarregado,
+  // exportado pro backup.js montar o mesmo id que o documento tem no
+  // Firestore ao exportar do cache em memoria - o restaurarDocumento grava
+  // de volta em .doc(id), entao recriar essa regra do lado de la (e esquecer
+  // o replace de caractere invalido) geraria um id que nao restaura
+  docId,
   addOrUpdate,
   allTransactions,
   renomearUnidades,

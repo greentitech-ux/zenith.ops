@@ -7,6 +7,7 @@
 // crescer pra sempre.
 const db = require('./firestore'); // garante que o app do firebase-admin ja foi inicializado
 const { resolverBucket } = require('./storageBucket');
+const store = require('./store');
 
 const COLECOES = [
   'transactions', 'orders', 'chargebacks', 'disputes', 'users',
@@ -38,6 +39,20 @@ const COOLDOWN_MS = 20 * 60 * 60 * 1000;
 const META_DOC = db.collection('meta').doc('backupStatus');
 
 async function exportarColecao(nome) {
+  // "transactions" e de longe a maior colecao do banco - e ela ja esta
+  // INTEIRA em memoria no store.js, que a carrega uma vez no boot a partir
+  // de um snapshot no Storage (nao do Firestore) e mantem atualizada a cada
+  // webhook. Reler do Firestore aqui era pagar de novo, todo dia, por um
+  // dado que o processo ja tem na mao.
+  // A trava do estaCarregado() nao e opcional: o index.js sobe o servidor
+  // com timeout no aquecimento (aquecerBoot/Promise.race), entao este
+  // backup pode disparar com o store.init() ainda em voo - e nessa janela o
+  // cache esta vazio. Sem checar, o backup gravaria "0 transacoes" como se
+  // fosse a verdade e a copia do dia iria pro lixo silenciosamente. Se o
+  // cache ainda nao estiver pronto, cai na leitura do Firestore de sempre.
+  if (nome === 'transactions' && store.estaCarregado()) {
+    return store.allTransactions().map((tx) => ({ id: store.docId(tx), ...tx }));
+  }
   const snap = await db.collection(nome).get();
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
