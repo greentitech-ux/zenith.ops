@@ -879,6 +879,22 @@ setTimeout(async () => {
   if (semToken.length) ruins += 1;
   console.log(`${semToken.length ? '✗' : '✓'} páginas autenticadas mandam o token do login: ${semToken.length ? semToken.join(', ') : 'todas ok'}`);
 
+  // Tela que monta seletor/contagem de unidade a partir da lista FIXA
+  // pre-populada no proprio HTML precisa do PAR de chamadas: filtrar o que
+  // vem do cadastro em runtime (unidades-extras?area=) E apagar quem ja
+  // estava na lista fixa e depois ganhou perfil restrito
+  // (unidades-restritas?area=) - um Object.assign nunca REMOVE chave.
+  // Faltando qualquer uma das duas, unidade administrativa (MVPar,
+  // Administrativa...) entra na conta como se fosse loja: era isso que
+  // fazia o KPI de Fechamentos dizer "12 de 25" em vez de "12 de 13".
+  const PAGINAS_UNIDADE_FECHAMENTO = ['fechamentos.html', 'lancamento.html'];
+  const semFiltroArea = PAGINAS_UNIDADE_FECHAMENTO.filter((f) => {
+    const html = require('fs').readFileSync(require('path').join(dirPublico, f), 'utf8');
+    return !html.includes('unidades-extras?area=fechamento') || !html.includes('unidades-restritas?area=fechamento');
+  });
+  if (semFiltroArea.length) ruins += 1;
+  console.log(`${semFiltroArea.length ? '✗' : '✓'} telas de fechamento filtram unidade por área (administrativa não conta como loja): ${semFiltroArea.length ? semFiltroArea.join(', ') : 'todas ok'}`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
