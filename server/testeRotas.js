@@ -1141,6 +1141,53 @@ setTimeout(async () => {
   if (!okLinhaReal) ruins += 1;
   console.log(`${okLinhaReal ? '✓' : '✗'} Grupo Bravo: linha real da Domino's bate centavo a centavo com o Faturam./Total Decla da planilha`);
 
+  // ------------------------------------------------------------------
+  // Chamada entre modulos com nome que NAO EXISTE. Foi assim que
+  // "grupos.listar is not a function" chegou em producao: grupos.js exporta
+  // list(), nao listar(). node --check nao pega (a sintaxe esta certa) e o
+  // teste de rotas so pegaria se a rota fosse exercitada de verdade - e a
+  // rota nova dependia da planilha, entao nunca rodava aqui. Esta varredura
+  // e estatica: le o module.exports de cada modulo local e confere toda
+  // chamada alias.metodo() contra ele.
+  let okChamadas = false;
+  try {
+    const fs = require('fs'); const path = require('path');
+    // metodos de Array/Object/String: se aparecem, o "alias" e uma variavel
+    // local que por acaso tem o mesmo nome do modulo, nao o modulo
+    const NATIVOS = new Set(['map', 'forEach', 'filter', 'find', 'findIndex', 'reduce', 'some', 'every',
+      'slice', 'splice', 'sort', 'push', 'pop', 'shift', 'unshift', 'join', 'concat', 'includes',
+      'indexOf', 'reverse', 'flat', 'flatMap', 'keys', 'values', 'entries', 'toString', 'trim',
+      'split', 'replace', 'match', 'padStart', 'toFixed', 'then', 'catch', 'finally', 'js']);
+    const semComentario = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const exportsDe = (arq) => {
+      let src; try { src = semComentario(fs.readFileSync(path.join(__dirname, arq), 'utf8')); } catch (e) { return null; }
+      const nomes = new Set();
+      const m = src.match(/module\.exports\s*=\s*\{([\s\S]*?)\}\s*;/);
+      if (m) m[1].split(',').forEach((x) => { const n = x.split(':')[0].trim(); if (/^[A-Za-z_$][\w$]*$/.test(n)) nomes.add(n); });
+      [...src.matchAll(/(?:module\.)?exports\.(\w+)\s*=/g)].forEach((x) => nomes.add(x[1]));
+      return nomes.size ? nomes : null;
+    };
+    const quebradas = [];
+    for (const arq of fs.readdirSync(__dirname).filter((f) => f.endsWith('.js'))) {
+      const src = semComentario(fs.readFileSync(path.join(__dirname, arq), 'utf8'));
+      for (const [, alias, mod] of src.matchAll(/const (\w+) = require\('\.\/([\w-]+)'\)/g)) {
+        const ex = exportsDe(mod + '.js');
+        if (!ex) continue;
+        // alias redeclarado como variavel local no mesmo arquivo? entao nao da
+        // pra afirmar que a chamada e no modulo - fica de fora
+        if (new RegExp(`(?:const|let|var)\\s+${alias}\\s*=(?!\\s*require)`).test(src)) continue;
+        for (const [, nome] of src.matchAll(new RegExp(`\\b${alias}\\.(\\w+)\\s*\\(`, 'g'))) {
+          if (!NATIVOS.has(nome) && !ex.has(nome)) quebradas.push(`${arq}: ${alias}.${nome}() não existe em ${mod}.js`);
+        }
+      }
+    }
+    const unicas = [...new Set(quebradas)];
+    okChamadas = !unicas.length;
+    if (unicas.length) unicas.slice(0, 8).forEach((q) => console.log('  ' + q));
+  } catch (e) { okChamadas = false; console.log('  erro: ' + e.message); }
+  if (!okChamadas) ruins += 1;
+  console.log(`${okChamadas ? '✓' : '✗'} nenhum módulo chama função que o outro não exporta (pega "x.y is not a function" antes do deploy)`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de
