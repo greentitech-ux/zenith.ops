@@ -494,9 +494,24 @@ const BRAVO_UNIDADES_NOMES = {
 Object.assign(UNIDADES_NOMES, BRAVO_UNIDADES_NOMES);
 
 // unidades cadastradas pelo Master em /grupos.html (runtime) - mescladas por
-// cima da lista fixa acima, antes de montar qualquer seletor (ver boot)
+// cima da lista fixa acima, antes de montar qualquer seletor (ver boot).
+// MESMO par de chamadas do lancamento.html (ver mesclarUnidadesExtras la):
+// 1) area=fechamento ja filtra o que vem do cadastro em runtime - unidade
+//    administrativa (MVPar, Administrativa...) nao lança fechamento e nao
+//    pode entrar aqui;
+// 2) um merge (Object.assign) nunca REMOVE chave, entao unidade que ja
+//    nasceu na lista FIXA acima e depois ganhou perfil restrito continuaria
+//    aqui - por isso o segundo passo apaga essas explicitamente.
+// Sem os dois, o grupo Bravo (que e definido como "tudo que nao e ARCFOOD",
+// ver GRUPOS acima) engolia toda unidade cadastrada, e o KPI "Fechamentos
+// X de Y" comparava as lojas que lançaram contra um Y inflado por unidade
+// administrativa - "12 de 25" quando o certo era "12 de 13".
 async function mesclarUnidadesExtras(){
-  try{ Object.assign(UNIDADES_NOMES, await (await fetch('/api/meta/unidades-extras')).json()); }catch(e){}
+  try{ Object.assign(UNIDADES_NOMES, await (await fetch('/api/meta/unidades-extras?area=fechamento')).json()); }catch(e){}
+  try{
+    const restritas = await (await fetch('/api/meta/unidades-restritas?area=fechamento')).json();
+    restritas.forEach(codigo=>{ delete UNIDADES_NOMES[codigo]; });
+  }catch(e){}
 }
 
 // codigo IDPULSE conhecido de algumas unidades do Grupo Bravo (mesmos
