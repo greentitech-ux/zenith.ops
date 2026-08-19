@@ -846,7 +846,55 @@ async function salvarDecisoesColunas(){
   }catch(e){ alert(e.message); }
 }
 
+// Gravação LOJA POR LOJA. A importação inteira num request só não cabe:
+// ~2.600 gravações sequenciais no Firestore estouram o timeout, e como as abas
+// são percorridas na ordem da planilha o que sobrava era sempre o mesmo -
+// primeiras abas completas, últimas abas vazias. As 5 Domino's são as 5
+// últimas abas da planilha; era esse o motivo delas não subirem.
+let UNIDADES_IMPORT = [];
+
+async function gravarPorLoja(acao){
+  const lojas = UNIDADES_IMPORT.slice();
+  if(!lojas.length){ alert('Rode o passo 1 (Conferir) antes — é ele que descobre as lojas.'); return; }
+  const rotulo = acao === 'repor' ? 'Completando' : 'Gravando';
+  if(!confirm(`${rotulo} ${lojas.length} loja(s), uma de cada vez.\n\nPode levar alguns minutos. Não feche a página — o progresso aparece na tela e o que já entrou não se perde se algo falhar no meio.`)) return;
+
+  const saida = document.getElementById('imp-resultado');
+  const btns = ['imp-btn-1','imp-btn-c','imp-btn-2','imp-btn-3','imp-btn-4'].map(id=>document.getElementById(id));
+  btns.forEach(b=>{ b.disabled = true; });
+  const feitos = [];
+  for(let i=0;i<lojas.length;i++){
+    const loja = lojas[i];
+    saida.innerHTML = `<div class="sub">${rotulo} ${i+1} de ${lojas.length}: <b>${escapeHtml(loja)}</b>…</div>`+
+      feitos.map(f=>`<div style="font-size:11.5px;">${f}</div>`).join('');
+    try{
+      const r = await fetch('/api/fechamentos/bravo/importar', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ acao, confirmar:'GRAVAR', unidade: loja }),
+      });
+      const d = await r.json();
+      if(!r.ok){ feitos.push(`❌ ${escapeHtml(loja)}: ${escapeHtml(d.error||('erro '+r.status))}`); continue; }
+      const partes = [];
+      if(d.gravados) partes.push(`${d.gravados} gravado(s)`);
+      if(d.repostos) partes.push(`${d.repostos} completado(s)`);
+      if((d.jaExistiam||[]).length) partes.push(`${d.jaExistiam.length} já existiam`);
+      if((d.preservados||[]).length) partes.push(`${d.preservados.length} preservado(s)`);
+      if((d.erros||[]).length) partes.push(`<span style="color:var(--bad);">${d.erros.length} com erro</span>`);
+      feitos.push(`✅ ${escapeHtml(loja)} — ${partes.join(' · ') || 'nada a fazer'}`);
+    }catch(e){
+      feitos.push(`❌ ${escapeHtml(loja)}: ${escapeHtml(e.message)}`);
+    }
+  }
+  saida.innerHTML = `<div style="color:var(--ok);font-size:12.5px;margin-bottom:6px;">Terminou as ${lojas.length} loja(s).</div>`+
+    feitos.map(f=>`<div style="font-size:11.5px;">${f}</div>`).join('')+
+    `<div class="sub" style="margin-top:8px;">Puxe o filtro de período pra trás pra ver o histórico.</div>`;
+  btns.forEach(b=>{ b.disabled = false; });
+  await carregar();
+}
+
 async function importBravo(acao){
+  // gravar/repor vão pelo caminho loja a loja
+  if(acao === 'gravar' || acao === 'repor') return gravarPorLoja(acao);
   const btns = ['imp-btn-1','imp-btn-c','imp-btn-2','imp-btn-3','imp-btn-4'].map(id=>document.getElementById(id));
   const saida = document.getElementById('imp-resultado');
   if(acao === 'gravar'){
@@ -874,6 +922,7 @@ async function importBravo(acao){
       return;
     }
     if(acao === 'simular'){
+      UNIDADES_IMPORT = (dados.unidades||[]).map(u=>u.unidade);
       const linhas = (dados.unidades||[]).map(u=>
         `<tr><td>${escapeHtml(u.unidade)}</td><td style="text-align:right;">${u.linhas}</td>`+
         `<td style="text-align:right;">${fmtMoney(u.faturamento)}</td>`+

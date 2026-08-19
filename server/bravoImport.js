@@ -980,7 +980,21 @@ async function cadastrarCampos() {
 // com o criadoPorEmail gravado, entao vive numa constante so.
 const MARCA_IMPORTACAO = 'importação da planilha (Grupo Bravo)';
 
-async function importar({ confirmar, repor = false } = {}) {
+// A importacao inteira num request so NAO CABE: sao ~2.600 gravacoes
+// sequenciais no Firestore e o request morre no timeout do proxy/hospedagem
+// muito antes de terminar. Como lerPlanilha percorre as abas NA ORDEM DA
+// PLANILHA, o que sobrava era sempre o mesmo recorte: as primeiras abas
+// entravam completas e as ultimas nao entravam quase nada - e as 5 Domino's
+// sao justamente as 5 ultimas abas. Era isso, e nao erro de leitura, o motivo
+// de elas nao subirem: rodando o parser numa linha real da Campina Grande o
+// resultado e faturamento 1.189,53 e declarado 1.186,03, batendo centavo a
+// centavo com as colunas "Faturam."/"Total Decla" da propria planilha.
+//
+// Dai o parametro `unidade`: a tela chama UMA LOJA POR VEZ, cada chamada
+// termina rapido, o progresso aparece e uma falha no meio nao leva junto o
+// que ja entrou. Sem o parametro o comportamento e o de antes (tudo de uma
+// vez), que continua valendo pra base pequena.
+async function importar({ confirmar, repor = false, unidade = null } = {}) {
   if (confirmar !== 'GRAVAR') {
     throw new Error('Importação não confirmada. Rode a simulação, confira os totais e mande confirmar: "GRAVAR".');
   }
@@ -990,8 +1004,12 @@ async function importar({ confirmar, repor = false } = {}) {
     throw new Error(`Falta cadastrar campo no grupo antes de importar: ${resumo}. Rode a ação "cadastrar-campos" primeiro - sem isso o faturamento dessas lojas entraria zerado.`);
   }
   const leitura = await lerPlanilha();
-  const { lancamentos, problemas } = leitura;
+  const { problemas } = leitura;
+  const lancamentos = unidade
+    ? leitura.lancamentos.filter((l) => l.unidade === unidade)
+    : leitura.lancamentos;
   const resultado = {
+    unidade,
     gravados: 0, repostos: 0, jaExistiam: [], preservados: [], erros: [], problemas,
     linhasLidas: leitura.linhasLidas,
     diasMesclados: leitura.diasMesclados,

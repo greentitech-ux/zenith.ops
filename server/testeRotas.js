@@ -1107,6 +1107,40 @@ setTimeout(async () => {
   if (!okCabecalhoBravo) ruins += 1;
   console.log(`${okCabecalhoBravo ? '✓' : '✗'} Grupo Bravo: acha o cabeçalho mesmo com título em cima e casa coluna sem depender de acento/caixa`);
 
+  // ------------------------------------------------------------------
+  // O parser do Bravo lendo uma linha REAL da planilha (Campina Grande
+  // 07/04/26). Essa aba e a unica que ainda traz as colunas "Faturam." e
+  // "Total Decla" calculadas pela propria planilha - ou seja, da pra conferir
+  // o resultado do importador contra o numero que o Grupo Bravo ja usava.
+  // Foi isso que provou que a leitura das Domino's NUNCA esteve errada: o que
+  // faltava era a gravacao chegar ate elas (sao as 5 ultimas abas, e o request
+  // morria no timeout antes). Se este teste quebrar, o parser regrediu.
+  let okLinhaReal = false;
+  try {
+    const bravoImport = require('/home/user/adyen-monitor/server/bravoImport.js');
+    const header = ['ID', 'Nome', 'Unidade', 'Data', 'Caixa Inicial', 'Caixa Final', 'Delivery', 'Carryout',
+      'Pick-UP', 'Loja', 'AdyenV2', 'Pix CNPJ', 'Ifood', 'Outros', 'MaqBalcao', 'PosMaqBalcao', 'Maquina02',
+      'Entrada Dinheiro', 'Deposito', 'Total Saida', 'Faturam.', 'Total Decla', 'Dif.'];
+    const linha = ['76319b53', 'Maisa Lana', 'Dominos Campina Grande', '07/04/26', 'R$  -', 'R$  255,00',
+      'R$  -', 'R$  858,13', 'R$  -', 'R$  331,40', 'R$  -', 'R$  -', 'R$  -', 'R$  55,90',
+      'R$  650,00', '', 'R$  225,13', 'R$  255,00', 'R$  -', 'R$  -', 'R$  1.189,53', 'R$  1.186,03', 'R$  (3,50)'];
+
+    const r = bravoImport.avaliarLinha(header, linha, 'Dominos Campina Grande');
+    const t = r.lancamento ? bravoImport.totaisPrevistos(r.lancamento) : null;
+    const conferencias = {
+      'a linha vira lançamento': !!r.lancamento,
+      'data 07/04/26 -> 2026-04-07': r.lancamento && r.lancamento.data === '2026-04-07',
+      'faturamento bate com a coluna Faturam. da planilha': t && t.faturamento === 1189.53,
+      'declarado bate com a coluna Total Decla da planilha': t && t.totalDeclarado === 1186.03,
+      'maquininhas somadas no campo adyen': r.lancamento && r.lancamento.campos.adyen === 875.13,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okLinhaReal = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (faturamento=${t && t.faturamento}, declarado=${t && t.totalDeclarado})`);
+  } catch (e) { okLinhaReal = false; console.log('  erro: ' + e.message); }
+  if (!okLinhaReal) ruins += 1;
+  console.log(`${okLinhaReal ? '✓' : '✗'} Grupo Bravo: linha real da Domino's bate centavo a centavo com o Faturam./Total Decla da planilha`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de
