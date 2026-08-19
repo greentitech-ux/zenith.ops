@@ -55,6 +55,7 @@
   .kpi{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;}
   .kpi .val{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;}
   .kpi .lbl{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;margin-top:2px;}
+  .kpi .sub{font-family:var(--sans);font-size:11px;color:var(--muted);margin-top:4px;}
   .grupo-data{font-family:var(--mono);font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:.05em;margin:16px 0 6px;}
   .grupo-data:first-child{margin-top:0;}
   .card{border-top:1px solid var(--line);padding:12px 0;}
@@ -176,6 +177,7 @@
     tabela por pulseira: 30min R$40 · 60min R$50 · demais combinam (90min R$90, 120min R$100...)
   </div>
   <div class="kpi-grid" id="fin-kpis" style="grid-template-columns:repeat(2,1fr);"></div>
+  <div id="fin-gratuidade-dia"></div>
   <div class="filtros-acoes">
     <a class="btn-secundario" id="link-fin-csv" href="#">⬇️ CSV financeiro</a>
     <a class="btn-secundario" id="link-fin-pdf" href="#">⬇️ PDF financeiro</a>
@@ -995,6 +997,31 @@ function valorDoCheckin(c){
 }
 function fmtReal(v){ return 'R$ ' + Number(v||0).toFixed(2).replace('.', ','); }
 const METODOS_LABEL = { dinheiro:'Dinheiro', pix:'Pix', debito:'Débito', credito:'Crédito', voucher:'Voucher', gratuidade:'Gratuidade', cortesia:'Cortesia' };
+const PRECO_MEIA_FIN = 25;
+
+// custo da gratuidade/cortesia: quantidade de crianças e quanto TERIA sido
+// cobrado (preço cheio da tabela pro tempo contratado + meia, se optou) -
+// util pro gestor enxergar o tamanho da renuncia, ja que o valor financeiro
+// dessas entradas e' sempre R$0. Cortesia PCD (5%CP) vira "Gratuidade";
+// cortesia geral (checkbox com justificativa) vira "Cortesia" - mesmos dois
+// rotulos que ja apareciam no card financeiro. Depois que uma criança paga
+// pode entrar junto no mesmo check-in (ver criança-gratuita-wrap em
+// parque-checkin.html), so quem tem gratuita!==false conta aqui - a
+// pagante já está contabilizada no método real dela (pix/dinheiro/etc)
+function classificarGratuidade(c){
+  if(c.categoriaTempo==='pcd-cortesia') return 'Gratuidade';
+  if(c.metodoPagamento==='cortesia') return 'Cortesia';
+  return null;
+}
+function custoGratuidadeCheckin(c){
+  const tipo = classificarGratuidade(c);
+  if(!tipo) return null;
+  const gratuitas = (c.criancas||[]).filter(cr=>cr.gratuita!==false);
+  if(!gratuitas.length) return null;
+  const precoEntrada = valorPorTempo(c.tempoMinutos);
+  const custo = gratuitas.reduce((s,cr)=> s + precoEntrada + (cr.meia!==false ? PRECO_MEIA_FIN : 0), 0);
+  return { tipo, qtd: gratuitas.length, custo };
+}
 
 // financeiro e assunto de gestao: Master/Admin e Gerente da unidade
 function podeVerFinanceiro(){
@@ -1006,17 +1033,56 @@ function renderFinanceiro(lista){
   document.getElementById('painel-financeiro').classList.remove('hidden');
   const porMetodo = {};
   let total = 0;
+  const gratQtd = { Cortesia:0, Gratuidade:0 };
+  const gratCusto = { Cortesia:0, Gratuidade:0 };
+  const porDia = {}; // data -> { Cortesia:{qtd,custo}, Gratuidade:{qtd,custo} }
   lista.forEach(c=>{
     const v = valorDoCheckin(c);
     total += v;
     const m = METODOS_LABEL[c.metodoPagamento] || 'sem método';
     porMetodo[m] = (porMetodo[m]||0) + v;
+    const g = custoGratuidadeCheckin(c);
+    if(g){
+      gratQtd[g.tipo] += g.qtd;
+      gratCusto[g.tipo] += g.custo;
+      const dia = c.dataUtilizacao;
+      if(!porDia[dia]) porDia[dia] = { Cortesia:{qtd:0,custo:0}, Gratuidade:{qtd:0,custo:0} };
+      porDia[dia][g.tipo].qtd += g.qtd;
+      porDia[dia][g.tipo].custo += g.custo;
+    }
   });
   const kpis = [[ 'faturamento no período', fmtReal(total) ]]
-    .concat(Object.entries(porMetodo).sort((a,b)=>b[1]-a[1]).map(([m,v])=>[m, fmtReal(v)]));
-  document.getElementById('fin-kpis').innerHTML = kpis.map(([lbl,val])=>
-    `<div class="kpi"><div class="val" style="font-size:16px;">${escapeHtml(val)}</div><div class="lbl">${escapeHtml(lbl)}</div></div>`
+    .concat(Object.entries(porMetodo).sort((a,b)=>b[1]-a[1]).map(([m,v])=>{
+      const sub = (m==='Cortesia'||m==='Gratuidade') && gratQtd[m]>0
+        ? `${gratQtd[m]} criança(s) · custaria ${fmtReal(gratCusto[m])}`
+        : null;
+      return [m, fmtReal(v), sub];
+    }));
+  document.getElementById('fin-kpis').innerHTML = kpis.map(([lbl,val,sub])=>
+    `<div class="kpi"><div class="val" style="font-size:16px;">${escapeHtml(val)}</div><div class="lbl">${escapeHtml(lbl)}</div>${sub?`<div class="sub">${escapeHtml(sub)}</div>`:''}</div>`
   ).join('');
+  renderGratuidadePorDia(porDia);
+}
+
+// tabela "por dia" pedida pelo gestor: quantas crianças e quanto teria
+// custado a gratuidade/cortesia em cada dia do período filtrado - so
+// aparece quando teve alguma no período (senão fica vazio, sem poluir)
+function renderGratuidadePorDia(porDia){
+  const el = document.getElementById('fin-gratuidade-dia');
+  const dias = Object.keys(porDia).sort().reverse()
+    .filter(d=> porDia[d].Cortesia.qtd>0 || porDia[d].Gratuidade.qtd>0);
+  if(!dias.length){ el.innerHTML = ''; return; }
+  const linhas = dias.map(d=>{
+    const partes = [];
+    if(porDia[d].Gratuidade.qtd>0) partes.push(`Gratuidade: ${porDia[d].Gratuidade.qtd} criança(s) · ${fmtReal(porDia[d].Gratuidade.custo)}`);
+    if(porDia[d].Cortesia.qtd>0) partes.push(`Cortesia: ${porDia[d].Cortesia.qtd} criança(s) · ${fmtReal(porDia[d].Cortesia.custo)}`);
+    return `<tr><td style="padding:4px 10px 4px 0;white-space:nowrap;">${fmtData(d)}</td><td style="padding:4px 0;color:var(--muted);">${partes.join(' · ')}</td></tr>`;
+  }).join('');
+  el.innerHTML = `
+    <div style="margin-top:12px;">
+      <div class="lbl" style="margin-bottom:4px;">gratuidade/cortesia por dia (quantas crianças · quanto teria custado)</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;font-family:var(--sans);">${linhas}</table>
+    </div>`;
 }
 
 function atualizarLinksExport(){
