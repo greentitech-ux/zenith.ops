@@ -200,7 +200,7 @@
         </div>
         <div>
           <label>Responsável</label>
-          <input type="text" id="f-gerente" placeholder="nome de quem fechou">
+          <input type="text" id="f-gerente" readonly class="campo-automatico" title="Travado no usuário logado - quem lança é sempre quem assina o fechamento.">
         </div>
       </div>
     </div>
@@ -967,9 +967,18 @@ document.getElementById('form-sangria').addEventListener('submit', async (ev)=>{
   }
 });
 
+// "Responsável" e travado no usuario logado (decisao do Master: quem
+// lanca E quem assina, sem excecao - o servidor tambem ignora qualquer
+// outro valor, ver rota /api/fechamentos/lancar). So exibe aqui; quem
+// realmente vale e o que index.js grava a partir de req.user
+function preencherGerenteLogado(){
+  const el = document.getElementById('f-gerente');
+  if(el && ME) el.value = ME.username || ME.email || '';
+}
 function resetarForm(){
   document.getElementById('form-lancar').reset();
   document.getElementById('f-data').value = dataFechamentoBrasilia();
+  preencherGerenteLogado(); // form.reset() tambem limpa campo readonly - repoe
   MAQUINAS = []; SAIDAS = [];
   adicionarMaquina();
   renderSaidas();
@@ -1076,6 +1085,7 @@ async function boot(){
     return;
   }
 
+  preencherGerenteLogado();
   const tituloPagina = podeLancamento ? 'Lançamento de fechamento' : 'Registrar sangria/depósito';
   document.getElementById('titulo-pagina').textContent = tituloPagina;
   // o rotulo do link no menu (Fechamento x Sangria/Deposito) e resolvido

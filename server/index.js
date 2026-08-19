@@ -4076,10 +4076,17 @@ app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRela
 app.post('/api/fechamentos/lancar', requireSection('lancamento'), upload.any(), async (req, res) => {
   try {
     const body = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
-    const { unidade, unidadeNome, grupo, data, gerente, campos, canaisVendaExtras, formasPagamentoExtras, observacao, detalhesMaquinas, detalhesMaquinasPos, detalhesSaidas } = body;
+    const { unidade, unidadeNome, grupo, data, campos, canaisVendaExtras, formasPagamentoExtras, observacao, detalhesMaquinas, detalhesMaquinasPos, detalhesSaidas } = body;
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
+    // "Responsável" e travado no usuario logado - nao aceita mais o texto
+    // livre do body (mesmo que a tela mande algo, e ignorado). Decisao do
+    // Master: quem lanca no sistema E quem assina o fechamento sao sempre a
+    // mesma pessoa, sem excecao - antes era texto digitado a mao, sem
+    // vinculo nenhum com o login (podia divergir do que "criadoPorEmail" ja
+    // registrava por baixo dos panos)
+    const gerente = req.user.username || req.user.email;
     // unidade administrativa (ex: MVPar) pode nao ter fechamento - vale ate
     // pro Master, mesma logica do check de tiposSolicitacao (ver unidades.js)
     if (unidade && !(await unidadesExtras.apareceEm(unidade, 'fechamento'))) {

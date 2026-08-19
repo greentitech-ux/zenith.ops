@@ -425,6 +425,23 @@ setTimeout(async () => {
   if (!okBloqueiaFech) ruins += 1;
   console.log(`${okBloqueiaFech ? '✓' : '✗'} lançar fechamento numa unidade sem essa área é recusado (até pro Master): HTTP ${lancouFech.status} ${lancouFech.corpo.slice(0, 90)}`);
 
+  // ---- "Responsável" travado no usuario logado (decisao do Master): o
+  // servidor IGNORA o "gerente" que o body manda e usa sempre
+  // req.user.username||req.user.email - antes era texto livre, sem vinculo
+  // nenhum com quem estava logado de verdade ----
+  const lancouComGerenteForjado = await postarJson('/api/fechamentos/lancar', {
+    unidade: '19855', unidadeNome: 'Dom Carrão', data: '2026-08-19', gerente: 'Nome Forjado Que Nao Deveria Valer', campos: {},
+  }, { Authorization: 'Bearer ' + token });
+  let okGerenteTravado = false;
+  try {
+    const d = JSON.parse(lancouComGerenteForjado.corpo);
+    okGerenteTravado = lancouComGerenteForjado.status === 200
+      && d.gerente === (process.env.MASTER_EMAIL || '').trim().toLowerCase()
+      && d.gerente !== 'Nome Forjado Que Nao Deveria Valer';
+  } catch (e) { okGerenteTravado = false; }
+  if (!okGerenteTravado) ruins += 1;
+  console.log(`${okGerenteTravado ? '✓' : '✗'} "Responsável" do fechamento ignora o texto do body e trava no usuário logado: HTTP ${lancouComGerenteForjado.status} ${lancouComGerenteForjado.corpo.slice(0, 90)}`);
+
   // ---- PERFIL POR CODIGO em unidade FIXA (loja Adyen/planilha, código que
   // nunca muda) - a mesma "unificação" pedida pelo usuário: toda unidade,
   // fixa ou cadastrada em runtime, pode ganhar o perfil que a MVPar tem ----
