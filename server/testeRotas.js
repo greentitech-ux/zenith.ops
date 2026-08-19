@@ -668,6 +668,33 @@ setTimeout(async () => {
   if (!okExtrairJson) ruins += 1;
   console.log(`${okExtrairJson ? '✓' : '✗'} leitura de Canais por foto: número BR/prosa antes do JSON não derruba mais o parser`);
 
+  // ---- Termos emitidos sem venda (Parque): so Master/Gerente pode ver quem
+  // emitiu (nome, email, horas em aberto) - a rota so tinha o gate de SECAO
+  // (requireAnySection('parque','parque-checkin')), entao um atendente com
+  // acesso ao Parque conseguia ler a lista inteira. Semeia um usuario
+  // gerente e um atendente de mentira pra provar o 200/403 (ver
+  // users.ehCargoGerente em index.js) ----
+  let okGateTermos = false;
+  try {
+    const bcrypt = require('bcryptjs');
+    const senhaHash = bcrypt.hashSync('SenhaDeTeste!2026', 4);
+    const base = {
+      passwordHash: senhaHash, role: 'user', active: true,
+      permissions: { sections: ['parque'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    };
+    DOCS.set('users/u-gerente-teste', { ...base, email: 'gerente-teste@teste.local', username: 'gerenteteste', cargo: 'gerente' });
+    DOCS.set('users/u-atendente-teste', { ...base, email: 'atendente-teste@teste.local', username: 'atendenteteste', cargo: null });
+    const tokenGerente = (await auth.login('gerente-teste@teste.local', 'SenhaDeTeste!2026')).token;
+    const tokenAtendente = (await auth.login('atendente-teste@teste.local', 'SenhaDeTeste!2026')).token;
+    const comoMaster = await pedir('/api/parque/termo-emissoes', token ? { Authorization: 'Bearer ' + token } : {});
+    const comoGerente = await pedir('/api/parque/termo-emissoes', { Authorization: 'Bearer ' + tokenGerente });
+    const comoAtendente = await pedir('/api/parque/termo-emissoes', { Authorization: 'Bearer ' + tokenAtendente });
+    okGateTermos = comoMaster.status === 200 && comoGerente.status === 200 && comoAtendente.status === 403;
+  } catch (e) { okGateTermos = false; }
+  if (!okGateTermos) ruins += 1;
+  console.log(`${okGateTermos ? '✓' : '✗'} termos emitidos sem venda: só Master/Gerente vê (atendente com a seção Parque toma 403)`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de

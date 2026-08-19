@@ -4751,9 +4751,17 @@ app.post('/api/parque/termo-previa.pdf', requireAnySection('parque', 'parque-che
 });
 
 // Termos emitidos e nao resolvidos: cada linha é um atendimento em que o
-// termo saiu e a venda nunca fechou. É a lista que o gerente confere.
+// termo saiu e a venda nunca fechou. É a lista que o gerente confere - so
+// que so o gate do PUSH (notifyParqueTermoPendente/podeReceberPcdCortesia)
+// era Master/Gerente; a ROTA que alimenta a TELA ficava aberta pra
+// qualquer acesso com a secao 'parque' (ex: atendente), expondo nome,
+// email e horas em aberto de quem emitiu cada termo. Mesmo gate do
+// financeiro (ver podeVerFinanceiro em parque.html).
 app.get('/api/parque/termo-emissoes', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
   try {
+    if (!req.isMaster && !users.ehCargoGerente(req.user.cargo)) {
+      return res.status(403).json({ error: 'Apenas gerente ou master vê os termos em aberto.' });
+    }
     res.json(await parque.listarEmissoesTermo({
       unidades: req.isMaster ? null : (req.permissions.unidades || []),
       apenasPendentes: req.query.todas !== '1',

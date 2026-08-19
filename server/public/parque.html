@@ -409,6 +409,11 @@ function fmtQuando(iso){
 }
 
 async function carregarTermos(){
+  // mesmo gate do financeiro (podeVerFinanceiro): so Master/Gerente vê quem
+  // emitiu termo sem fechar venda - servidor também recusa (403), isso aqui
+  // só evita a chamada e o "carregando..." pendurado pra quem nunca vai ver
+  if(!podeVerFinanceiro()){ document.getElementById('painel-termos').classList.add('hidden'); return; }
+  document.getElementById('painel-termos').classList.remove('hidden');
   const lista = document.getElementById('lista-termos');
   const resumo = document.getElementById('termos-resumo');
   if(!lista) return;
