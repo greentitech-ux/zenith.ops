@@ -50,6 +50,7 @@
       // quando ve o parametro, ver GRUPO_FIXO em fechamentos.html)
       { id: 'nav-fechamentos-arcfood', href: '/fechamentos.html?grupo=ARCFOOD', icone: '💰', rotulo: 'Fechamentos Arcfood', secoes: ['fechamentos'] },
       { id: 'nav-fechamentos-gbe', href: '/fechamentos.html?grupo=BRAVO', icone: '💰', rotulo: 'Fechamentos GBE', secoes: ['fechamentos'] },
+      { id: 'nav-kpis-operacionais', href: '/kpis-operacionais.html', icone: '⏱️', rotulo: "KPI's operacionais", secoes: ['fechamentos'] },
       { id: 'nav-vendas-recordes', href: '/vendas-recordes.html', icone: '🏆', rotulo: 'Recordes de Venda', secoes: ['fechamentos'] },
       { id: 'nav-entregas', href: '/entregas.html', icone: '🛵', rotulo: 'Entregas', secoes: ['entregas'] },
       { id: 'nav-inventario', href: '/estoque.html', icone: '📦', rotulo: 'Estoque', secoes: ['inventario'] },
