@@ -211,9 +211,15 @@ function ehColunaMaquina(nome) {
 }
 
 // uma linha da planilha -> o payload que fechamentosLive.create espera
-function linhaParaLancamento(header, linha, unidade) {
+// Avalia UMA linha da planilha. Devolve { lancamento } quando dá certo, ou
+// { motivo, amostra } quando a linha não vira fechamento. Existe separada de
+// linhaParaLancamento porque o "return null" silencioso era exatamente o
+// problema: 8 lojas ficaram sem histórico e não havia como saber por quê -
+// a linha era descartada sem deixar rastro nenhum. Agora todo descarte é
+// contado e mostrado no passo 1 (Conferir).
+function avaliarLinha(header, linha, unidade) {
   const modelo = modeloDaUnidade(unidade);
-  if (!modelo) return null;
+  if (!modelo) return { motivo: 'loja sem modelo de colunas cadastrado', amostra: unidade };
   const get = (nome) => {
     const i = header.indexOf(nome);
     return i >= 0 ? linha[i] : undefined;
@@ -221,9 +227,16 @@ function linhaParaLancamento(header, linha, unidade) {
   const valor = (nome) => parseMoneyBR(get(nome));
 
   const id = String(get('ID') || '').trim();
-  if (!id || IDS_EXCLUIDOS.has(id)) return null;
+  if (!id) return { motivo: 'coluna ID vazia', amostra: `Data="${String(get('Data') ?? '')}"` };
+  if (IDS_EXCLUIDOS.has(id)) return { motivo: 'ID na lista de exclusão (linha de teste/versão antiga)', amostra: id };
   const data = parseDataBravo(get('Data'));
-  if (!data) return null;
+  if (!data) {
+    const bruta = String(get('Data') ?? '');
+    return {
+      motivo: header.includes('Data') ? 'Data em formato que o importador não lê (esperado DD/MM/AAAA)' : 'aba sem coluna "Data"',
+      amostra: bruta ? `"${bruta}"` : '(vazia)',
+    };
+  }
 
   const campos = {};
   Object.entries(modelo.fixos).forEach(([coluna, campo]) => {
@@ -258,7 +271,7 @@ function linhaParaLancamento(header, linha, unidade) {
     return out;
   };
 
-  return {
+  return { lancamento: {
     unidade,
     unidadeNome: unidade,
     grupo: 'BRAVO',
@@ -273,7 +286,13 @@ function linhaParaLancamento(header, linha, unidade) {
     detalhesSaidas,
     // rastro de origem: dá pra achar (e desfazer) tudo que veio da planilha
     origemPlanilha: { sheetId: SHEET_ID_BRAVO, idLinha: id },
-  };
+  } };
+}
+
+// wrapper antigo (usado fora daqui): só o lançamento, ou null
+function linhaParaLancamento(header, linha, unidade) {
+  const r = avaliarLinha(header, linha, unidade);
+  return r.lancamento || null;
 }
 
 // Definições que o CADASTRO DO GRUPO precisa ter pros valores importados
@@ -382,11 +401,42 @@ function mesclarPorDia(lancamentos) {
 }
 
 // lê as 12 abas da planilha aposentada e devolve os lançamentos já montados
+// Reconhece a loja mesmo que a célula "Unidade" tenha vindo com acento,
+// caixa ou espaço diferentes do cadastro (ex: "DOMINOS BESSA", "Dominos
+// Bessa ", "Sao Braz IL"). Antes a comparação era exata e qualquer diferença
+// invisível derrubava a linha em silêncio. Devolve SEMPRE o nome canônico -
+// é ele que vira o código da unidade, então normalizar aqui evita criar
+// unidade duplicada no sistema.
+const BRAVO_POR_NOME_NORMALIZADO = new Map(
+  [...BRAVO_UNIDADES].map((nome) => [normalizarNome(nome), nome]),
+);
+function normalizarNome(s) {
+  return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, ' ').trim().toLowerCase();
+}
+function resolverUnidade(bruto) {
+  if (BRAVO_UNIDADES.has(bruto)) return bruto;
+  return BRAVO_POR_NOME_NORMALIZADO.get(normalizarNome(bruto)) || null;
+}
+
 async function lerPlanilha() {
   const token = await sheetsSync.getAccessToken();
   const abas = await sheetsSync.listarAbas(SHEET_ID_BRAVO, token);
   const lancamentos = [];
   const problemas = [];
+  // Contabilidade de tudo que NÃO virou fechamento. Sem isto, uma linha
+  // descartada some sem deixar rastro - foi o que escondeu, por dias, o
+  // motivo de 8 lojas ficarem sem histórico.
+  const descartes = new Map();   // "aba · motivo" -> { aba, motivo, total, exemplos[] }
+  const desconhecidas = new Map(); // nome cru da célula Unidade -> { nome, total, abas:Set }
+  const registrar = (aba, motivo, amostra) => {
+    const chave = `${aba} · ${motivo}`;
+    const atual = descartes.get(chave) || { aba, motivo, total: 0, exemplos: [] };
+    atual.total += 1;
+    if (amostra && atual.exemplos.length < 3) atual.exemplos.push(String(amostra).slice(0, 60));
+    descartes.set(chave, atual);
+  };
+
   for (const aba of abas) {
     let valores;
     try {
@@ -400,12 +450,24 @@ async function lerPlanilha() {
     const iUnidade = header.indexOf('Unidade');
     if (iUnidade < 0) continue; // aba que não é de fechamento (ex: "Gerentes")
     for (let i = 1; i < valores.length; i++) {
-      const unidade = valores[i][iUnidade];
-      // mesma trava da leitura antiga: linha cuja Unidade não é uma das 12
-      // lojas não é fechamento (cabeçalho repetido, resumo, aba de apoio)
-      if (!BRAVO_UNIDADES.has(unidade)) continue;
-      const l = linhaParaLancamento(header, valores[i], unidade);
-      if (l) lancamentos.push(l);
+      const bruto = valores[i][iUnidade];
+      // linha totalmente vazia não é descarte, é fim da planilha
+      if (!String(bruto || '').trim() && !valores[i].some((c) => String(c || '').trim())) continue;
+
+      const unidade = resolverUnidade(bruto);
+      if (!unidade) {
+        // Pode ser cabeçalho repetido/linha de resumo (normal), ou uma loja
+        // com o nome escrito diferente do cadastro (aí é lançamento REAL
+        // sendo perdido). Só dá pra saber vendo o nome - por isso é listado.
+        const nome = String(bruto || '(vazio)').trim() || '(vazio)';
+        const at = desconhecidas.get(nome) || { nome, total: 0, abas: new Set() };
+        at.total += 1; at.abas.add(aba);
+        desconhecidas.set(nome, at);
+        continue;
+      }
+      const r = avaliarLinha(header, valores[i], unidade);
+      if (r.lancamento) lancamentos.push(r.lancamento);
+      else registrar(aba, r.motivo, r.amostra);
     }
   }
   // junta as linhas do mesmo dia+loja ANTES de qualquer coisa - a simulacao
@@ -417,6 +479,10 @@ async function lerPlanilha() {
     linhasLidas: lancamentos.length,
     diasMesclados: juntos.mesclados,
     linhasAbsorvidas: juntos.linhasAbsorvidas,
+    descartes: [...descartes.values()].sort((a, b) => b.total - a.total),
+    unidadesDesconhecidas: [...desconhecidas.values()]
+      .map((u) => ({ nome: u.nome, total: u.total, abas: [...u.abas] }))
+      .sort((a, b) => b.total - a.total),
   };
 }
 
@@ -484,6 +550,10 @@ async function simular() {
     unidades,
     duplicados,
     problemas,
+    // TUDO que a planilha tinha e não virou fechamento, com motivo e exemplo.
+    // É aqui que aparece o "por quê" de uma loja ficar sem histórico.
+    descartes: leitura.descartes,
+    unidadesDesconhecidas: leitura.unidadesDesconhecidas,
     // o que o cadastro de grupo precisa ter pra esses valores somarem
     camposNecessarios: [...porUnidade.keys()].map((u) => ({ unidade: u, ...definicoesDeCampos(u) })),
   };
@@ -646,6 +716,6 @@ async function importar({ confirmar, repor = false } = {}) {
 
 module.exports = {
   simular, importar, conferirCampos, cadastrarCampos, lerPlanilha, linhaParaLancamento, definicoesDeCampos, totaisPrevistos,
-  mesclarPorDia, MARCA_IMPORTACAO,
+  mesclarPorDia, MARCA_IMPORTACAO, avaliarLinha, resolverUnidade,
   MODELOS, UNIDADE_MODELO, IDS_EXCLUIDOS, COLUNAS_IGNORADAS,
 };
