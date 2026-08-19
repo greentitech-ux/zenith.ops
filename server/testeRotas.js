@@ -1066,6 +1066,47 @@ setTimeout(async () => {
   if (!okSemelhanca) ruins += 1;
   console.log(`${okSemelhanca ? '✓' : '✗'} Grupo Bravo: comparador de nomes de coluna separa sinônimo de coisa sem relação`);
 
+  // ------------------------------------------------------------------
+  // Cabecalho da aba: a leitura assumia que o cabecalho era a LINHA 1 e que a
+  // coluna se chamava exatamente "Unidade". Aba reorganizada costuma ganhar
+  // titulo/linha em branco em cima - e quando isso acontecia a aba INTEIRA era
+  // pulada em silencio, sem entrar nem no relatorio de descartes. Era o ponto
+  // cego que escondia o sumico das Domino's.
+  let okCabecalhoBravo = false;
+  try {
+    const bravoImport = require('/home/user/adyen-monitor/server/bravoImport.js');
+    const { acharCabecalho, indiceDaColuna } = bravoImport;
+
+    const naLinha1 = acharCabecalho([['ID', 'Unidade', 'Data'], ['x', 'Dominos Bessa', '01/12/2025']]);
+    const comTitulo = acharCabecalho([
+      ['FECHAMENTO DE CAIXA - DOM BESSA'], [],
+      ['ID', 'Unidade', 'Data'], ['x', 'Dominos Bessa', '01/12/2025'],
+    ]);
+    const caixaAlta = acharCabecalho([['ID', 'UNIDADE', 'DATA']]);
+    const apelido = acharCabecalho([['ID', 'Loja', 'Data']]);
+    const semNada = acharCabecalho([['a', 'b'], ['c', 'd']]);
+    const fundo = acharCabecalho(Array.from({ length: 30 }, (_, i) => (i === 20 ? ['Unidade'] : ['x'])));
+
+    const header = ['ID', 'Unidade ', 'Pick-Up', 'TEF Crédito'];
+    const conferencias = {
+      'cabecalho na linha 1': naLinha1 && naLinha1.linhaCabecalho === 0 && naLinha1.iUnidade === 1,
+      'cabecalho abaixo de um titulo': comTitulo && comTitulo.linhaCabecalho === 2 && comTitulo.iUnidade === 1,
+      'CAIXA ALTA no cabecalho': caixaAlta && caixaAlta.iUnidade === 1,
+      'apelido "Loja" tambem vale': apelido && apelido.iUnidade === 1,
+      'aba sem Unidade devolve null': semNada === null,
+      'nao procura alem das 10 primeiras linhas': fundo === null,
+      'coluna com espaco no fim': indiceDaColuna(header, 'Unidade') === 1,
+      'coluna com caixa diferente': indiceDaColuna(header, 'Pick-UP') === 2,
+      'coluna com acento diferente': indiceDaColuna(header, 'TEF Credito') === 3,
+      'coluna inexistente da -1': indiceDaColuna(header, 'Delivery') === -1,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okCabecalhoBravo = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okCabecalhoBravo = false; console.log('  erro: ' + e.message); }
+  if (!okCabecalhoBravo) ruins += 1;
+  console.log(`${okCabecalhoBravo ? '✓' : '✗'} Grupo Bravo: acha o cabeçalho mesmo com título em cima e casa coluna sem depender de acento/caixa`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de

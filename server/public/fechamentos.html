@@ -696,6 +696,31 @@ async function sincronizarPlanilhas(completa){
 // O que a planilha tinha e NÃO virou fechamento, com o motivo. Existe porque
 // o importador descartava linha em silêncio: 8 lojas ficaram sem histórico e
 // não havia nenhuma pista do porquê na tela. Agora todo descarte aparece aqui.
+// TODA aba da planilha, lida ou não. Existe porque uma aba sem "Unidade" na
+// linha 1 era pulada em silêncio - aba de loja com título em cima do
+// cabeçalho sumia inteira e não aparecia em lugar nenhum do diagnóstico.
+function renderAbasBravo(dados){
+  const abas = dados.abasLidas || [];
+  if(!abas.length) return '';
+  const problema = abas.filter(a=>a.status!=='lida' || !a.lancamentos);
+  return `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;">`+
+    `<div style="font-size:12px;font-weight:700;margin-bottom:6px;">📄 Abas da planilha `+
+    (problema.length?`<span style="color:var(--bad);">(${problema.length} sem nenhum fechamento)</span>`:'')+`</div>`+
+    `<table style="width:100%;font-size:11px;">`+
+    `<tr><th style="text-align:left;">Aba</th><th style="text-align:left;">Situação</th>`+
+    `<th style="text-align:right;">Cabeçalho</th><th style="text-align:right;">Linhas</th><th style="text-align:right;">Fechamentos</th></tr>`+
+    abas.map(a=>{
+      const ruim = a.status!=='lida' || !a.lancamentos;
+      return `<tr style="${ruim?'color:var(--bad);':''}">`+
+        `<td>${escapeHtml(a.aba)}</td>`+
+        `<td>${escapeHtml(a.status)}${a.colunas?` <span style="color:var(--muted);">— colunas: ${escapeHtml(a.colunas.join(', '))}</span>`:''}</td>`+
+        `<td style="text-align:right;">${a.linhaCabecalho?('linha '+a.linhaCabecalho):'—'}</td>`+
+        `<td style="text-align:right;">${a.linhasNaAba!=null?a.linhasNaAba:'—'}</td>`+
+        `<td style="text-align:right;">${a.lancamentos}</td></tr>`;
+    }).join('')+
+    `</table></div>`;
+}
+
 function renderDescartesBravo(dados){
   const desc = dados.descartes || [];
   const desconhecidas = dados.unidadesDesconhecidas || [];
@@ -862,6 +887,7 @@ async function importBravo(acao){
           ? `<div class="sub" style="margin-bottom:8px;">A planilha tinha <b>${dados.linhasLidas}</b> linhas: <b>${dados.diasMesclados}</b> dia(s) apareciam mais de uma vez e foram somados numa linha só (${dados.linhasAbsorvidas} linha(s) absorvida(s)) — igual a ARCFOOD já faz.</div>`
           : '')+
         `<table style="width:100%;font-size:11.5px;"><tr><th style="text-align:left;">Loja</th><th style="text-align:right;">Dias</th><th style="text-align:right;">Faturamento</th><th style="text-align:right;">Período</th><th style="text-align:right;">Meses sem nada</th></tr>${linhas}</table>`+
+        renderAbasBravo(dados)+
         renderDescartesBravo(dados)+
         (pend.length
           ? `<div class="sub" style="margin-top:10px;">Falta preparar ${pend.length} grupo(s) — é o passo 2.</div>`

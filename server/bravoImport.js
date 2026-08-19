@@ -212,6 +212,44 @@ function ehColunaMaquina(nome) {
 }
 
 // uma linha da planilha -> o payload que fechamentosLive.create espera
+// Comparação de nome de COLUNA sem acento/caixa/pontuação. A leitura usava
+// header.indexOf(nome), que é exato: "UNIDADE", "Unidade " (espaço no fim) ou
+// "Pick-Up" no lugar de "Pick-UP" faziam a coluna inteira sumir sem aviso.
+function chaveCol(s) {
+  return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, ' ').trim().toLowerCase();
+}
+function indiceDaColuna(header, nome) {
+  const alvo = chaveCol(nome);
+  if (!alvo) return -1;
+  for (let i = 0; i < header.length; i++) {
+    if (chaveCol(header[i]) === alvo) return i;
+  }
+  return -1;
+}
+
+// Onde está a linha de cabeçalho. Era assumido valores[0] - mas aba
+// reorganizada costuma ganhar título/linha em branco em cima, e aí a linha 1
+// não é o cabeçalho. Quando isso acontecia a aba INTEIRA era pulada, em
+// silêncio e sem entrar em lugar nenhum do diagnóstico: exatamente o buraco
+// que escondeu o sumiço das Domino's.
+//
+// Procura nas primeiras linhas a que tem uma célula "Unidade" (ou um apelido
+// comum dela). Limitado a 10 linhas pra não confundir dado com cabeçalho.
+const APELIDOS_UNIDADE = ['unidade', 'loja', 'unidade loja', 'nome da loja', 'unidade da loja'];
+function acharCabecalho(valores) {
+  const limite = Math.min(valores.length, 10);
+  for (let i = 0; i < limite; i++) {
+    const linha = valores[i] || [];
+    for (let c = 0; c < linha.length; c++) {
+      if (APELIDOS_UNIDADE.includes(chaveCol(linha[c]))) {
+        return { linhaCabecalho: i, header: linha, iUnidade: c };
+      }
+    }
+  }
+  return null;
+}
+
 // Data: a planilha foi reorganizada aba a aba ao longo de meses e nem todas
 // ficaram no mesmo formato. O parser do sync (parseDataBravo) só entende
 // DD/MM/AAAA - qualquer outra coisa virava linha descartada em silêncio, que é
@@ -262,9 +300,10 @@ function avaliarLinha(header, linha, unidade, mapa = {}) {
   const modelo = modeloDaUnidade(unidade);
   if (!modelo) return { motivo: 'loja sem modelo de colunas cadastrado', amostra: unidade };
   const get = (nome) => {
-    const i = header.indexOf(nome);
+    const i = indiceDaColuna(header, nome);
     return i >= 0 ? linha[i] : undefined;
   };
+  const temColuna = (nome) => indiceDaColuna(header, nome) >= 0;
   const valor = (nome) => parseMoneyBR(get(nome));
 
   const id = String(get('ID') || '').trim();
@@ -274,7 +313,7 @@ function avaliarLinha(header, linha, unidade, mapa = {}) {
   if (!data) {
     const bruta = String(get('Data') ?? '');
     return {
-      motivo: header.includes('Data') ? 'Data em formato que o importador não lê' : 'aba sem coluna "Data"',
+      motivo: temColuna('Data') ? 'Data em formato que o importador não lê' : 'aba sem coluna "Data"',
       amostra: bruta ? `"${bruta}"` : '(vazia)',
     };
   }
@@ -286,7 +325,7 @@ function avaliarLinha(header, linha, unidade, mapa = {}) {
 
   const campos = {};
   Object.entries(modelo.fixos).forEach(([coluna, campo]) => {
-    if (header.includes(coluna)) campos[campo] = valor(coluna);
+    if (temColuna(coluna)) campos[campo] = valor(coluna);
   });
 
   // maquininhas: viram detalhe (abertura item a item) e o total vai pro
@@ -311,7 +350,7 @@ function avaliarLinha(header, linha, unidade, mapa = {}) {
   const mapaExtras = (colunas) => {
     const out = {};
     (colunas || []).forEach((coluna) => {
-      if (!header.includes(coluna)) return;
+      if (!temColuna(coluna)) return;
       out[grupos.slugify(canonico(coluna))] = valor(coluna);
     });
     return out;
@@ -568,9 +607,9 @@ async function analisarColunas() {
     let valores;
     try { valores = await sheetsSync.buscarAba(SHEET_ID_BRAVO, aba); } catch (e) { continue; }
     if (!valores.length) continue;
-    const header = valores[0];
-    const iUnidade = header.indexOf('Unidade');
-    if (iUnidade < 0) continue;
+    const cab = acharCabecalho(valores);
+    if (!cab) continue;
+    const { header, iUnidade, linhaCabecalho } = cab;
 
     header.forEach((coluna, iCol) => {
       const nome = String(coluna || '').trim();
@@ -582,7 +621,7 @@ async function analisarColunas() {
       const chave = bravoMapa.chaveColuna(nome);
       const at = vistas.get(chave) || { coluna: nome, unidades: new Set(), abas: new Set(), comValor: 0 };
       at.abas.add(aba);
-      for (let i = 1; i < valores.length; i++) {
+      for (let i = linhaCabecalho + 1; i < valores.length; i++) {
         const u = resolverUnidade(valores[i][iUnidade]);
         if (!u) continue;
         at.unidades.add(u);
@@ -663,6 +702,7 @@ async function lerPlanilha() {
   // Contabilidade de tudo que NÃO virou fechamento. Sem isto, uma linha
   // descartada some sem deixar rastro - foi o que escondeu, por dias, o
   // motivo de 8 lojas ficarem sem histórico.
+  const abasLidas = [];          // TODA aba entra aqui, lida ou não
   const descartes = new Map();   // "aba · motivo" -> { aba, motivo, total, exemplos[] }
   const desconhecidas = new Map(); // nome cru da célula Unidade -> { nome, total, abas:Set }
   const registrar = (aba, motivo, amostra) => {
@@ -681,11 +721,23 @@ async function lerPlanilha() {
       problemas.push(`aba "${aba}": ${e.message}`);
       continue;
     }
-    if (!valores.length) continue;
-    const header = valores[0];
-    const iUnidade = header.indexOf('Unidade');
-    if (iUnidade < 0) continue; // aba que não é de fechamento (ex: "Gerentes")
-    for (let i = 1; i < valores.length; i++) {
+    if (!valores.length) { abasLidas.push({ aba, status: 'vazia', lancamentos: 0 }); continue; }
+
+    const cab = acharCabecalho(valores);
+    if (!cab) {
+      // Aba de apoio (Gerentes, resumo) cai aqui e tudo bem - mas aba de loja
+      // com título em cima do cabeçalho TAMBÉM caía, e sumia sem deixar
+      // rastro. Agora toda aba aparece no relatório, com as colunas que ela
+      // tem, pra dar pra ver na hora que é uma aba de fechamento perdida.
+      abasLidas.push({
+        aba, status: 'sem coluna "Unidade" nas 10 primeiras linhas', lancamentos: 0,
+        colunas: (valores[0] || []).map((c) => String(c || '').trim()).filter(Boolean).slice(0, 12),
+      });
+      continue;
+    }
+    const { header, iUnidade, linhaCabecalho } = cab;
+    const antesDaAba = lancamentos.length;
+    for (let i = linhaCabecalho + 1; i < valores.length; i++) {
       const bruto = valores[i][iUnidade];
       // linha totalmente vazia não é descarte, é fim da planilha
       if (!String(bruto || '').trim() && !valores[i].some((c) => String(c || '').trim())) continue;
@@ -705,6 +757,13 @@ async function lerPlanilha() {
       if (r.lancamento) lancamentos.push(r.lancamento);
       else registrar(aba, r.motivo, r.amostra);
     }
+    abasLidas.push({
+      aba,
+      status: 'lida',
+      linhaCabecalho: linhaCabecalho + 1, // 1-based, como aparece no Sheets
+      linhasNaAba: Math.max(valores.length - linhaCabecalho - 1, 0),
+      lancamentos: lancamentos.length - antesDaAba,
+    });
   }
   // junta as linhas do mesmo dia+loja ANTES de qualquer coisa - a simulacao
   // precisa mostrar o mesmo numero que a gravacao vai produzir
@@ -715,6 +774,7 @@ async function lerPlanilha() {
     linhasLidas: lancamentos.length,
     diasMesclados: juntos.mesclados,
     linhasAbsorvidas: juntos.linhasAbsorvidas,
+    abasLidas,
     descartes: [...descartes.values()].sort((a, b) => b.total - a.total),
     unidadesDesconhecidas: [...desconhecidas.values()]
       .map((u) => ({ nome: u.nome, total: u.total, abas: [...u.abas] }))
@@ -813,6 +873,7 @@ async function simular() {
     problemas,
     // TUDO que a planilha tinha e não virou fechamento, com motivo e exemplo.
     // É aqui que aparece o "por quê" de uma loja ficar sem histórico.
+    abasLidas: leitura.abasLidas,
     descartes: leitura.descartes,
     unidadesDesconhecidas: leitura.unidadesDesconhecidas,
     // o que o cadastro de grupo precisa ter pra esses valores somarem
@@ -979,5 +1040,6 @@ async function importar({ confirmar, repor = false } = {}) {
 module.exports = {
   simular, importar, conferirCampos, cadastrarCampos, lerPlanilha, linhaParaLancamento, definicoesDeCampos, totaisPrevistos,
   mesclarPorDia, MARCA_IMPORTACAO, avaliarLinha, resolverUnidade, analisarColunas, semelhanca,
+  acharCabecalho, indiceDaColuna,
   MODELOS, UNIDADE_MODELO, IDS_EXCLUIDOS, COLUNAS_IGNORADAS,
 };
