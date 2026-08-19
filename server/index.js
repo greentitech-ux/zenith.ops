@@ -35,6 +35,7 @@ const entregasRegras = require('./entregasRegras');
 const backup = require('./backup');
 const relatorios = require('./relatorios');
 const sheetsSync = require('./sheetsSync');
+const bravoImport = require('./bravoImport');
 const entregasSync = require('./entregasSync');
 const ifoodClient = require('./ifoodClient');
 const ifoodStore = require('./ifoodStore');
@@ -3992,6 +3993,34 @@ app.get('/api/fechamentos/sincronizacao', requireSection('fechamentos'), (req, r
 // disparar chamadas extras na API do Google sem necessidade). Por padrao a
 // leitura e INCREMENTAL (so as linhas novas desde a ultima leitura); passe
 // { completa: true } pra reler a planilha inteira (pega linha antiga editada)
+// Migração de UMA VEZ SÓ da planilha aposentada do Grupo Bravo pro banco
+// (ver bravoImport.js). Três ações, nesta ordem - a rota não deixa pular:
+//   simular         -> lê a planilha e devolve os totais, sem gravar nada
+//   cadastrar-campos-> acrescenta no grupo as definições de canal/forma que
+//                      faltam (sem isso o faturamento entraria zerado)
+//   gravar          -> grava, exigindo a palavra de confirmação
+// Master de verdade só: um QA Master não pode disparar 844 escritas.
+// Idempotente - dia que já existe é pulado, então rodar duas vezes não
+// duplica e uma queda no meio se resolve rodando de novo.
+app.post('/api/fechamentos/bravo/importar', auth.requireMaster, async (req, res) => {
+  if (req.isQaMaster) {
+    return res.status(403).json({ error: 'Importação da planilha não roda em acesso de QA - precisa de um Master de verdade.' });
+  }
+  const acao = String(req.body?.acao || 'simular');
+  try {
+    if (acao === 'simular') return res.json({ acao, ...(await bravoImport.simular()), campos: await bravoImport.conferirCampos() });
+    if (acao === 'cadastrar-campos') return res.json({ acao, ...(await bravoImport.cadastrarCampos()) });
+    if (acao === 'gravar') {
+      const r = await bravoImport.importar({ confirmar: req.body?.confirmar });
+      fechamentosLive.invalidarCache();
+      return res.json({ acao, ...r });
+    }
+    return res.status(400).json({ error: 'Ação inválida. Use simular, cadastrar-campos ou gravar.' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/fechamentos/sincronizar-planilhas', auth.requireMaster, async (req, res) => {
   const status = await sincronizarPlanilhasFechamento({ completa: req.body?.completa === true });
   if (status.ultimoErro) return res.status(502).json(status);

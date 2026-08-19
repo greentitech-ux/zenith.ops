@@ -386,6 +386,56 @@ async function simular() {
   };
 }
 
+// PRÉ-REQUISITO da gravação. Os valores de canal/forma são gravados num mapa
+// livre (canaisVendaExtras), e quem diz "tefCredito é canal de venda e soma
+// no faturamento" é o CADASTRO DO GRUPO. Sem a definição lá, o valor entra
+// no banco mas recomputarTotais não soma - as 7 lojas que não são Domino's
+// apareceriam com faturamento R$ 0,00 e ninguém entenderia por quê.
+// Por isso a importação confere isto ANTES e se recusa a gravar faltando.
+async function conferirCampos() {
+  const faltando = [];
+  const porGrupo = new Map();
+  for (const unidade of Object.keys(UNIDADE_MODELO)) {
+    const grupo = await grupos.grupoDaUnidade(unidade);
+    if (!grupo) { faltando.push({ unidade, erro: 'unidade não está em nenhum grupo' }); continue; }
+    const precisa = definicoesDeCampos(unidade);
+    const atual = porGrupo.get(grupo.id) || { grupo, canais: new Map(), formas: new Map(), kpis: new Map() };
+    ['canais', 'formas', 'kpis'].forEach((qual) => {
+      const chave = qual === 'canais' ? 'canaisVendaExtras' : qual === 'formas' ? 'formasPagamentoExtras' : 'kpisExtras';
+      const jaTem = new Set((grupo[chave] || []).map((d) => d.campo));
+      precisa[qual].forEach((d) => { if (!jaTem.has(d.campo)) atual[qual].set(d.campo, d); });
+    });
+    porGrupo.set(grupo.id, atual);
+  }
+  const pendentes = [...porGrupo.values()]
+    .map((g) => ({
+      grupoId: g.grupo.id, grupoNome: g.grupo.nome,
+      canais: [...g.canais.values()], formas: [...g.formas.values()], kpis: [...g.kpis.values()],
+    }))
+    .filter((g) => g.canais.length || g.formas.length || g.kpis.length);
+  return { pendentes, faltando };
+}
+
+// Acrescenta no cadastro do grupo só o que falta, PRESERVANDO o que já está
+// lá (e a ordem que o Master escolheu). Nunca remove nem reordena: se ele
+// arrumou os KPI's a mão, não é a importação que vai desmanchar.
+async function cadastrarCampos() {
+  const { pendentes, faltando } = await conferirCampos();
+  const feitos = [];
+  for (const p of pendentes) {
+    const lista = await grupos.list();
+    const g = lista.find((x) => x.id === p.grupoId);
+    if (!g) continue;
+    await grupos.update(p.grupoId, {
+      canaisVendaExtras: [...(g.canaisVendaExtras || []), ...p.canais],
+      formasPagamentoExtras: [...(g.formasPagamentoExtras || []), ...p.formas],
+      kpisExtras: [...(g.kpisExtras || []), ...p.kpis],
+    });
+    feitos.push({ grupo: p.grupoNome, canais: p.canais.length, formas: p.formas.length, kpis: p.kpis.length });
+  }
+  return { feitos, faltando };
+}
+
 // GRAVAÇÃO. Exige a palavra de confirmação de propósito: é a única função
 // deste arquivo que escreve, e escreve 844 documentos de uma vez.
 //
@@ -403,6 +453,11 @@ async function simular() {
 async function importar({ confirmar } = {}) {
   if (confirmar !== 'GRAVAR') {
     throw new Error('Importação não confirmada. Rode a simulação, confira os totais e mande confirmar: "GRAVAR".');
+  }
+  const { pendentes } = await conferirCampos();
+  if (pendentes.length) {
+    const resumo = pendentes.map((p) => `${p.grupoNome} (${p.canais.length + p.formas.length + p.kpis.length} campo(s))`).join(', ');
+    throw new Error(`Falta cadastrar campo no grupo antes de importar: ${resumo}. Rode a ação "cadastrar-campos" primeiro - sem isso o faturamento dessas lojas entraria zerado.`);
   }
   const { lancamentos, problemas } = await lerPlanilha();
   const resultado = { gravados: 0, jaExistiam: [], erros: [], problemas };
@@ -423,6 +478,6 @@ async function importar({ confirmar } = {}) {
 }
 
 module.exports = {
-  simular, importar, lerPlanilha, linhaParaLancamento, definicoesDeCampos, totaisPrevistos,
+  simular, importar, conferirCampos, cadastrarCampos, lerPlanilha, linhaParaLancamento, definicoesDeCampos, totaisPrevistos,
   MODELOS, UNIDADE_MODELO, IDS_EXCLUIDOS, COLUNAS_IGNORADAS,
 };
