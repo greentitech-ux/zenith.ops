@@ -226,6 +226,13 @@
       <button type="button" class="back" id="imp-btn-1" onclick="importBravo('simular')" style="cursor:pointer;">1 · Conferir (não grava)</button>
       <button type="button" class="back" id="imp-btn-2" onclick="importBravo('cadastrar-campos')" style="cursor:pointer;" disabled>2 · Preparar os grupos</button>
       <button type="button" class="back" id="imp-btn-3" onclick="importBravo('gravar')" style="cursor:pointer;" disabled>3 · Gravar no banco</button>
+      <button type="button" class="back" id="imp-btn-4" onclick="importBravo('repor')" style="cursor:pointer;" disabled>4 · Completar o que faltou</button>
+    </div>
+    <div class="sub" style="margin-top:8px;font-size:11.5px;">
+      O passo 4 só é necessário se a planilha tinha <b>mais de uma linha no mesmo dia</b> pra mesma loja
+      (sangria lançada à parte, turno dividido em duas linhas). Nesse caso a primeira gravação trouxe só um
+      pedaço do dia. O passo 4 junta as linhas e troca o dia pela versão completa — e nunca mexe em
+      fechamento que uma pessoa lançou à mão.
     </div>
     <div id="imp-resultado" style="margin-top:12px;"></div>
   </div>
@@ -685,19 +692,22 @@ async function sincronizarPlanilhas(completa){
 // confirmação escrita. É uma tarefa com FIM: quando não sobrar lançamento
 // pra importar, o painel some sozinho (ver o fim de importBravo).
 async function importBravo(acao){
-  const btns = ['imp-btn-1','imp-btn-2','imp-btn-3'].map(id=>document.getElementById(id));
+  const btns = ['imp-btn-1','imp-btn-2','imp-btn-3','imp-btn-4'].map(id=>document.getElementById(id));
   const saida = document.getElementById('imp-resultado');
   if(acao === 'gravar'){
     if(!confirm('Gravar os lançamentos da planilha no banco?\n\nPode demorar alguns minutos. É seguro repetir depois: dia que já existe é pulado.')) return;
   }
+  if(acao === 'repor'){
+    if(!confirm('Completar os dias que entraram pela metade?\n\nOs dias que a IMPORTAÇÃO criou vão ser trocados pela versão completa da planilha (com as linhas do mesmo dia somadas).\n\nFechamento lançado por uma pessoa não é tocado.')) return;
+  }
   const rotulos = btns.map(b=>b.textContent);
   btns.forEach(b=>{ b.disabled = true; });
-  const iAtivo = acao === 'simular' ? 0 : acao === 'cadastrar-campos' ? 1 : 2;
+  const iAtivo = acao === 'simular' ? 0 : acao === 'cadastrar-campos' ? 1 : acao === 'gravar' ? 2 : 3;
   btns[iAtivo].textContent = 'Aguarde...';
   saida.innerHTML = '<div class="sub">Processando…</div>';
   try{
     const corpo = { acao };
-    if(acao === 'gravar') corpo.confirmar = 'GRAVAR';
+    if(acao === 'gravar' || acao === 'repor') corpo.confirmar = 'GRAVAR';
     const r = await fetch('/api/fechamentos/bravo/importar', {
       method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo),
     });
@@ -716,13 +726,16 @@ async function importBravo(acao){
       const pend = (dados.campos && dados.campos.pendentes) || [];
       saida.innerHTML =
         `<div style="color:var(--ok);font-size:12.5px;margin-bottom:8px;">✅ Li a planilha. <b>${dados.total}</b> lançamentos, faturamento total <b>${fmtMoney(dados.faturamento)}</b>. Nada foi gravado.</div>`+
+        (dados.diasMesclados
+          ? `<div class="sub" style="margin-bottom:8px;">A planilha tinha <b>${dados.linhasLidas}</b> linhas: <b>${dados.diasMesclados}</b> dia(s) apareciam mais de uma vez e foram somados numa linha só (${dados.linhasAbsorvidas} linha(s) absorvida(s)) — igual a ARCFOOD já faz.</div>`
+          : '')+
         `<table style="width:100%;font-size:11.5px;"><tr><th style="text-align:left;">Loja</th><th style="text-align:right;">Dias</th><th style="text-align:right;">Faturamento</th><th style="text-align:right;">Período</th></tr>${linhas}</table>`+
         (pend.length
           ? `<div class="sub" style="margin-top:10px;">Falta preparar ${pend.length} grupo(s) — é o passo 2.</div>`
           : `<div class="sub" style="margin-top:10px;">Os grupos já estão preparados — pode pular pro passo 3.</div>`);
       btns[0].disabled = false;
       btns[1].disabled = false;
-      if(!pend.length) btns[2].disabled = false;
+      if(!pend.length){ btns[2].disabled = false; btns[3].disabled = false; }
       return;
     }
     if(acao === 'cadastrar-campos'){
@@ -732,18 +745,28 @@ async function importBravo(acao){
         : '<div style="color:var(--ok);font-size:12.5px;">✅ Não faltava nada. Pode ir pro passo 3.</div>';
       btns[1].disabled = false;
       btns[2].disabled = false;
+      btns[3].disabled = false;
       return;
     }
-    // gravar
+    // gravar / repor
     const jaTinha = (dados.jaExistiam||[]).length;
+    const preservados = dados.preservados || [];
     const erros = dados.erros || [];
     saida.innerHTML =
       `<div style="color:var(--ok);font-size:12.5px;">✅ <b>${dados.gravados}</b> lançamento(s) gravado(s).`+
+      (dados.repostos ? ` <b>${dados.repostos}</b> dia(s) incompleto(s) foram completados.` : '')+
       (jaTinha ? ` ${jaTinha} já existiam e foram pulados.` : '')+
       `</div>`+
+      (dados.diasMesclados
+        ? `<div class="sub" style="margin-top:6px;">${dados.linhasLidas} linhas na planilha → ${dados.diasMesclados} dia(s) com linha repetida foram somados (${dados.linhasAbsorvidas} linha(s) absorvida(s)).</div>`
+        : '')+
+      (preservados.length
+        ? `<div class="sub" style="margin-top:6px;">${preservados.length} dia(s) não foram tocados porque alguém lançou à mão: ${escapeHtml(preservados.slice(0,3).join(' · '))}${preservados.length>3?' …':''}</div>`
+        : '')+
       (erros.length ? `<div style="color:var(--bad);font-size:12px;margin-top:6px;">${erros.length} com erro: ${escapeHtml(erros.slice(0,3).map(e=>`${e.unidade} ${e.data}: ${e.erro}`).join(' · '))}</div>` : '')+
       `<div class="sub" style="margin-top:8px;">Pra ver os dados na tela, puxe o filtro de período pra trás — o histórico vai de <b>28/11/2025</b> a <b>19/05/2026</b>.</div>`;
     btns[2].disabled = false;
+    btns[3].disabled = false;
     await carregar();
   }catch(e){
     btns.forEach((b,i)=>{ b.textContent = rotulos[i]; });

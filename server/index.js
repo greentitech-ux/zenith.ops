@@ -4047,7 +4047,17 @@ app.post('/api/fechamentos/bravo/importar', auth.requireMaster, async (req, res)
       fechamentosLive.invalidarCache();
       return res.json({ acao, ...r });
     }
-    return res.status(400).json({ error: 'Ação inválida. Use simular, cadastrar-campos ou gravar.' });
+    // "repor" = mesmo que gravar, mas em vez de pular o dia que já existe,
+    // troca ele pela versão mesclada da planilha. Conserta os dias que
+    // entraram pela metade na primeira importação (quando o dia tinha mais de
+    // uma linha e só a primeira gravava). Nunca toca em fechamento lançado por
+    // uma pessoa - ver o modo repor em bravoImport.js.
+    if (acao === 'repor') {
+      const r = await bravoImport.importar({ confirmar: req.body?.confirmar, repor: true });
+      fechamentosLive.invalidarCache();
+      return res.json({ acao, ...r });
+    }
+    return res.status(400).json({ error: 'Ação inválida. Use simular, cadastrar-campos, gravar ou repor.' });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

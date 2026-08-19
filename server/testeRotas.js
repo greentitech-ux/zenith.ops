@@ -910,6 +910,68 @@ setTimeout(async () => {
   if (!okCustoAlertas) ruins += 1;
   console.log(`${okCustoAlertas ? '✓' : '✗'} Central de Alertas: polling incremental custa ~1 leitura por batida (era 300) e ainda mostra alerta novo`);
 
+  // ------------------------------------------------------------------
+  // Importacao do Grupo Bravo: a planilha permite MAIS DE UMA LINHA no mesmo
+  // dia pra mesma loja (sangria lançada à parte, turno partido). O
+  // fechamentosLive.create() recusa a segunda ("Já existe um fechamento"),
+  // entao sem juntar as linhas ANTES de gravar o dia entrava no sistema com
+  // so um pedaço do faturamento - foi o que aconteceu na primeira importacao.
+  // A ARCFOOD nunca sofreu disso porque a sincronizacao dela ja passa por
+  // mesclarLancamentosDoMesmoDia. Este teste trava a mescla equivalente.
+  let okMesclaBravo = false;
+  try {
+    const bravoImport = require('/home/user/adyen-monitor/server/bravoImport.js');
+    const linha = (extra) => ({
+      unidade: 'Dom Bessa', unidadeNome: 'Dom Bessa', grupo: 'BRAVO', data: '2026-03-10',
+      gerente: '', campos: {}, canaisVendaExtras: {}, formasPagamentoExtras: {}, kpisExtras: {},
+      observacao: null, detalhesMaquinas: [], detalhesSaidas: [],
+      origemPlanilha: { sheetId: 'x', idLinha: 'l1' }, ...extra,
+    });
+
+    const entrada = [
+      // fechamento de verdade
+      linha({
+        campos: { delivery: 1000, loja: 500, caixaInicial: 200, caixaFinal: 300, entradaDinheiro: 400, totalSaida: 50 },
+        kpisExtras: { quantidadeDePedidos: 30 },
+        detalhesSaidas: [{ descricao: 'gás', valor: 50 }],
+        observacao: 'fechamento',
+        origemPlanilha: { sheetId: 'x', idLinha: 'l1' },
+      }),
+      // sangria do mesmo dia: faturamento zerado, so a saida preenchida.
+      // Caixa Inicial/Final vem preenchido errado de proposito - se a mescla
+      // somar esses dois, inventa dinheiro que nunca existiu
+      linha({
+        campos: { delivery: 0, loja: 0, caixaInicial: 999, caixaFinal: 999, entradaDinheiro: 100, totalSaida: 70 },
+        kpisExtras: { quantidadeDePedidos: 5 },
+        detalhesSaidas: [{ descricao: 'sangria', valor: 70 }],
+        observacao: 'sangria',
+        origemPlanilha: { sheetId: 'x', idLinha: 'l2' },
+      }),
+      // outro dia, linha unica: tem que passar intacta
+      linha({ data: '2026-03-11', campos: { delivery: 700, caixaInicial: 111 }, origemPlanilha: { sheetId: 'x', idLinha: 'l3' } }),
+    ];
+
+    const r = bravoImport.mesclarPorDia(entrada);
+    const dia10 = r.lancamentos.find((l) => l.data === '2026-03-10');
+    const dia11 = r.lancamentos.find((l) => l.data === '2026-03-11');
+
+    const conferencias = {
+      'juntou os 2 numa linha só': r.lancamentos.length === 2 && r.mesclados === 1 && r.linhasAbsorvidas === 1,
+      'somou os movimentos': dia10.campos.delivery === 1000 && dia10.campos.entradaDinheiro === 500 && dia10.campos.totalSaida === 120,
+      'NÃO somou saldo de caixa': dia10.campos.caixaInicial === 200 && dia10.campos.caixaFinal === 300,
+      'somou os KPIs extras': dia10.kpisExtras.quantidadeDePedidos === 35,
+      'concatenou os detalhes de saída': dia10.detalhesSaidas.length === 2,
+      'juntou as observações': dia10.observacao === 'fechamento · sangria',
+      'guardou o rastro das 2 linhas': (dia10.origemPlanilha.idsLinhas || []).join(',') === 'l1,l2',
+      'dia de linha única passou intacto': dia11.campos.delivery === 700 && dia11.campos.caixaInicial === 111,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([nome]) => nome);
+    okMesclaBravo = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okMesclaBravo = false; console.log('  erro: ' + e.message); }
+  if (!okMesclaBravo) ruins += 1;
+  console.log(`${okMesclaBravo ? '✓' : '✗'} Grupo Bravo: linhas do mesmo dia+loja são somadas antes de gravar (saldo de caixa fica de fora)`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de

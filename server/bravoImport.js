@@ -297,6 +297,90 @@ function definicoesDeCampos(unidade) {
   };
 }
 
+// Campos FIXOS que NAO podem ser somados quando o mesmo dia+loja aparece em
+// mais de uma linha da planilha. Sao saldos/posicoes de caixa, nao movimentos:
+// somar o "Caixa Inicial" de duas linhas do mesmo dia inventa dinheiro que
+// nunca existiu. Esses tres vem sempre da linha principal (o fechamento de
+// verdade). Mesma regra que a ARCFOOD ja usa - ver CAMPOS_SOMA e o comentario
+// em mesclarLancamentosDoMesmoDia (sheetsSync.js).
+const CAMPOS_QUE_NAO_SOMAM = new Set(['caixaInicial', 'caixaFinal', 'deposito']);
+
+function somarMapas(mapas) {
+  const out = {};
+  mapas.forEach((m) => {
+    Object.entries(m || {}).forEach(([k, v]) => { out[k] = +((out[k] || 0) + (Number(v) || 0)).toFixed(2); });
+  });
+  return out;
+}
+
+// A planilha permite MAIS DE UMA LINHA pro mesmo dia+loja - o caso comum e a
+// sangria/retirada lancada separado do fechamento, e o turno lancado em duas
+// partes. O fechamentosLive.create() recusa a segunda linha ("Já existe um
+// fechamento..."), entao sem juntar aqui essas linhas simplesmente sumiam:
+// a importacao dizia "jaExistiam" e o dia entrava no sistema com so um pedaco
+// do faturamento. Era exatamente o que a tela mostrava - lojas com R$70-120 mil
+// onde deviam ter centenas de milhares.
+//
+// A ARCFOOD nunca teve esse problema porque a sincronizacao dela ja passava
+// por mesclarLancamentosDoMesmoDia (sheetsSync.js). Aqui e a mesma ideia, so
+// que no formato aninhado do importador ({campos, canaisVendaExtras,
+// formasPagamentoExtras, kpisExtras, detalhes...}) em vez do formato plano do
+// snapshot - por isso nao da pra reaproveitar aquela funcao direto.
+function mesclarPorDia(lancamentos) {
+  const porChave = new Map();
+  lancamentos.forEach((l) => {
+    const chave = `${l.unidade}__${l.data}`;
+    if (!porChave.has(chave)) porChave.set(chave, []);
+    porChave.get(chave).push(l);
+  });
+
+  const resultado = [];
+  let mesclados = 0;
+  let linhasAbsorvidas = 0;
+  for (const linhas of porChave.values()) {
+    if (linhas.length === 1) { resultado.push(linhas[0]); continue; }
+    mesclados += 1;
+    linhasAbsorvidas += linhas.length - 1;
+
+    // a linha "principal" e a de maior faturamento previsto (o fechamento de
+    // verdade); a linha de sangria tem faturamento zerado e so a saida
+    // preenchida, entao ela nunca vence essa disputa
+    const principal = linhas.reduce((a, b) => (totaisPrevistos(b).faturamento > totaisPrevistos(a).faturamento ? b : a));
+
+    // parte da linha principal (que ja traz Caixa Inicial/Final e Deposito
+    // corretos) e soma por cima so o que as OUTRAS linhas movimentaram
+    const campos = { ...(principal.campos || {}) };
+    linhas.forEach((l) => {
+      if (l === principal) return;
+      Object.entries(l.campos || {}).forEach(([c, v]) => {
+        if (CAMPOS_QUE_NAO_SOMAM.has(c)) return;
+        campos[c] = +((campos[c] || 0) + (Number(v) || 0)).toFixed(2);
+      });
+    });
+
+    resultado.push({
+      ...principal,
+      campos,
+      canaisVendaExtras: somarMapas(linhas.map((l) => l.canaisVendaExtras)),
+      formasPagamentoExtras: somarMapas(linhas.map((l) => l.formasPagamentoExtras)),
+      kpisExtras: somarMapas(linhas.map((l) => l.kpisExtras)),
+      // detalhes sao listas: concatenar mantem a abertura item a item batendo
+      // com os totais somados acima (adyen vem de detalhesMaquinas,
+      // totalSaida de detalhesSaidas)
+      detalhesMaquinas: linhas.flatMap((l) => l.detalhesMaquinas || []),
+      detalhesSaidas: linhas.flatMap((l) => l.detalhesSaidas || []),
+      observacao: linhas.map((l) => l.observacao).filter(Boolean).join(' · ') || null,
+      origemPlanilha: {
+        ...principal.origemPlanilha,
+        // guarda o ID de TODAS as linhas que entraram, nao so o da principal -
+        // sem isso o rastro de origem some pras linhas absorvidas
+        idsLinhas: linhas.map((l) => l.origemPlanilha && l.origemPlanilha.idLinha).filter(Boolean),
+      },
+    });
+  }
+  return { lancamentos: resultado, mesclados, linhasAbsorvidas };
+}
+
 // lê as 12 abas da planilha aposentada e devolve os lançamentos já montados
 async function lerPlanilha() {
   const token = await sheetsSync.getAccessToken();
@@ -324,7 +408,16 @@ async function lerPlanilha() {
       if (l) lancamentos.push(l);
     }
   }
-  return { lancamentos, problemas };
+  // junta as linhas do mesmo dia+loja ANTES de qualquer coisa - a simulacao
+  // precisa mostrar o mesmo numero que a gravacao vai produzir
+  const juntos = mesclarPorDia(lancamentos);
+  return {
+    lancamentos: juntos.lancamentos,
+    problemas,
+    linhasLidas: lancamentos.length,
+    diasMesclados: juntos.mesclados,
+    linhasAbsorvidas: juntos.linhasAbsorvidas,
+  };
 }
 
 // soma o que CADA total vai receber, do mesmo jeito que recomputarTotais faz
@@ -351,7 +444,8 @@ function totaisPrevistos(l) {
 // SIMULAÇÃO: lê a planilha, monta tudo e devolve o resumo - sem tocar no
 // banco. É o passo obrigatório antes de importar.
 async function simular() {
-  const { lancamentos, problemas } = await lerPlanilha();
+  const leitura = await lerPlanilha();
+  const { lancamentos, problemas } = leitura;
   const porUnidade = new Map();
   lancamentos.forEach((l) => {
     const t = totaisPrevistos(l);
@@ -366,6 +460,9 @@ async function simular() {
 
   // dia repetido pra mesma loja: o app não deixa dois fechamentos no mesmo
   // unidade+data (docId é unidade__data), então isso PRECISA aparecer antes
+  // depois de mesclarPorDia isto TEM que sair vazio - se aparecer algo aqui,
+  // a mescla furou e a gravação vai perder linha de novo. Fica como rede de
+  // segurança, não como o caminho normal.
   const vistos = new Set();
   const duplicados = [];
   lancamentos.forEach((l) => {
@@ -376,6 +473,12 @@ async function simular() {
   const unidades = [...porUnidade.values()].sort((a, b) => b.faturamento - a.faturamento);
   return {
     total: lancamentos.length,
+    // quantas LINHAS a planilha tinha antes de juntar os dias repetidos, e
+    // quantas foram absorvidas nessa junção - é o número que explica a
+    // diferença entre "linhas na planilha" e "fechamentos no sistema"
+    linhasLidas: leitura.linhasLidas,
+    diasMesclados: leitura.diasMesclados,
+    linhasAbsorvidas: leitura.linhasAbsorvidas,
     faturamento: +unidades.reduce((s, u) => s + u.faturamento, 0).toFixed(2),
     totalDeclarado: +unidades.reduce((s, u) => s + u.totalDeclarado, 0).toFixed(2),
     unidades,
@@ -479,7 +582,12 @@ async function cadastrarCampos() {
 // do grupo. Passar por fora disso pra ganhar velocidade produziria registro
 // diferente do que a loja produz lançando na mão - que é exatamente o que
 // esta migração existe pra evitar.
-async function importar({ confirmar } = {}) {
+// carimbo de quem criou o registro pela importacao. E o que permite o modo
+// "repor" saber o que pode sobrescrever com seguranca - tem que bater EXATO
+// com o criadoPorEmail gravado, entao vive numa constante so.
+const MARCA_IMPORTACAO = 'importação da planilha (Grupo Bravo)';
+
+async function importar({ confirmar, repor = false } = {}) {
   if (confirmar !== 'GRAVAR') {
     throw new Error('Importação não confirmada. Rode a simulação, confira os totais e mande confirmar: "GRAVAR".');
   }
@@ -488,19 +596,49 @@ async function importar({ confirmar } = {}) {
     const resumo = pendentes.map((p) => `${p.grupoNome} (${p.canais.length + p.formas.length + p.kpis.length} campo(s))`).join(', ');
     throw new Error(`Falta cadastrar campo no grupo antes de importar: ${resumo}. Rode a ação "cadastrar-campos" primeiro - sem isso o faturamento dessas lojas entraria zerado.`);
   }
-  const { lancamentos, problemas } = await lerPlanilha();
-  const resultado = { gravados: 0, jaExistiam: [], erros: [], problemas };
+  const leitura = await lerPlanilha();
+  const { lancamentos, problemas } = leitura;
+  const resultado = {
+    gravados: 0, repostos: 0, jaExistiam: [], preservados: [], erros: [], problemas,
+    linhasLidas: leitura.linhasLidas,
+    diasMesclados: leitura.diasMesclados,
+    linhasAbsorvidas: leitura.linhasAbsorvidas,
+  };
   for (const l of lancamentos) {
+    const base = { ...l, criadoPorId: null, criadoPorEmail: MARCA_IMPORTACAO };
     try {
-      await fechamentosLive.create({
-        ...l,
-        criadoPorId: null,
-        criadoPorEmail: 'importação da planilha (Grupo Bravo)',
-      });
+      await fechamentosLive.create(base);
       resultado.gravados += 1;
+      continue;
     } catch (e) {
-      if (/[Jj]á existe/.test(e.message)) resultado.jaExistiam.push(`${l.unidade} ${l.data}`);
-      else resultado.erros.push({ unidade: l.unidade, data: l.data, erro: e.message });
+      if (!/[Jj]á existe/.test(e.message)) {
+        resultado.erros.push({ unidade: l.unidade, data: l.data, erro: e.message });
+        continue;
+      }
+    }
+
+    // O dia ja existe no sistema.
+    if (!repor) { resultado.jaExistiam.push(`${l.unidade} ${l.data}`); continue; }
+
+    // Modo REPOR: troca o registro pela versao mesclada. Isso e o que
+    // conserta os dias que entraram pela metade na primeira importacao (so a
+    // primeira linha do dia gravou; as outras morreram no "já existe").
+    // So mexe no que a PROPRIA importacao criou - fechamento lançado por uma
+    // pessoa nunca e sobrescrito, ou a gente estaria jogando fora trabalho
+    // de alguem sem avisar.
+    try {
+      const id = `${l.unidade}__${l.data}`;
+      const atual = await fechamentosLive.getOne(id);
+      if (!atual) { resultado.erros.push({ unidade: l.unidade, data: l.data, erro: 'existia ao gravar mas sumiu ao reler' }); continue; }
+      if (atual.criadoPorEmail !== MARCA_IMPORTACAO) {
+        resultado.preservados.push(`${l.unidade} ${l.data} (lançado por ${atual.criadoPorEmail || 'alguém'})`);
+        continue;
+      }
+      await fechamentosLive.remove(id);
+      await fechamentosLive.create(base);
+      resultado.repostos += 1;
+    } catch (e) {
+      resultado.erros.push({ unidade: l.unidade, data: l.data, erro: e.message });
     }
   }
   return resultado;
@@ -508,5 +646,6 @@ async function importar({ confirmar } = {}) {
 
 module.exports = {
   simular, importar, conferirCampos, cadastrarCampos, lerPlanilha, linhaParaLancamento, definicoesDeCampos, totaisPrevistos,
+  mesclarPorDia, MARCA_IMPORTACAO,
   MODELOS, UNIDADE_MODELO, IDS_EXCLUIDOS, COLUNAS_IGNORADAS,
 };
