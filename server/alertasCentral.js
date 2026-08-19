@@ -12,18 +12,47 @@ const { createCache } = require('./liveCache');
 
 const COLLECTION = db.collection('alertasCentral');
 
+const LIMITE = 300;
+
 const listUncached = async () => {
-  const snap = await COLLECTION.orderBy('criadoEm', 'desc').limit(300).get();
+  const snap = await COLLECTION.orderBy('criadoEm', 'desc').limit(LIMITE).get();
   return snap.docs.map((d) => d.data());
 };
-// cache curto (mesmo espirito dos outros modulos "live") - a tela faz
-// polling a cada alguns segundos pra ficar perto de tempo real sem bater
-// direto no Firestore a cada request
-const cache = createCache(listUncached, 8 * 1000);
+// TTL alto de proposito: esta lista completa e paga so na ABERTURA da tela
+// (e quando a aba volta a ficar visivel). O polling de 15s usa listarDesde()
+// abaixo, que custa ~1 leitura. Antes disso o TTL era 8s, MENOR que o
+// intervalo do polling - ou seja, o cache nunca acertava e cada poll relia os
+// 300 documentos: 240 polls/hora x 300 = 72.000 leituras/hora POR ABA aberta,
+// a causa principal do salto de custo de agosto/2026.
+const cache = createCache(listUncached, 60 * 1000);
 
 async function listar() {
   return cache.cached();
 }
+
+// Leitura INCREMENTAL: so os alertas criados depois do mais recente que a tela
+// ja tem. Consulta com desigualdade e ordenacao no MESMO campo (criadoEm), que
+// o Firestore resolve com o indice de campo unico - nao precisa de indice
+// composto. Quase sempre nao acha nada e custa 1 leitura (o minimo cobrado),
+// em vez dos 300 documentos da lista inteira.
+//
+// Cache de uma posicao so (nao um Map): todas as abas convergem pro MESMO
+// "desde" - o criadoEm do alerta mais novo - entao uma entrada cobre todo
+// mundo, e a chave nao acumula lixo com o passar dos dias.
+let incremental = { desde: null, valor: null, expiraEm: 0 };
+
+async function listarDesde(desde) {
+  const chave = String(desde || '');
+  if (!chave) return listar();
+  const agora = Date.now();
+  if (incremental.desde === chave && agora < incremental.expiraEm) return incremental.valor;
+  const snap = await COLLECTION.where('criadoEm', '>', chave).orderBy('criadoEm', 'desc').limit(LIMITE).get();
+  const valor = snap.docs.map((d) => d.data());
+  incremental = { desde: chave, valor, expiraEm: Date.now() + 8 * 1000 };
+  return valor;
+}
+
+function invalidarIncremental() { incremental = { desde: null, valor: null, expiraEm: 0 }; }
 
 // tipo identifica a categoria (ex: 'noc-offline', 'noc-acesso-remoto',
 // 'beniboy', 'seguranca', 'qa-aprovacao', 'rh', 'fraude'...) - usado pro
@@ -39,14 +68,26 @@ async function registrar({ tipo, titulo, resumo, url, critico }) {
   };
   await COLLECTION.doc(id).set(registro);
   cache.invalidar();
+  invalidarIncremental();
   return registro;
 }
 
 async function atender(id, porEmail) {
-  await COLLECTION.doc(id).update({ atendidoEm: new Date().toISOString(), atendidoPorEmail: porEmail || null });
+  const ref = COLLECTION.doc(id);
+  const patch = { atendidoEm: new Date().toISOString(), atendidoPorEmail: porEmail || null };
+  try {
+    await ref.update(patch);
+  } catch (err) {
+    // update() em documento inexistente e o unico erro esperado aqui
+    if (err.code === 5 || /NOT_FOUND|No document to update/i.test(err.message || '')) return null;
+    throw err;
+  }
   cache.invalidar();
-  const atual = await listar();
-  return atual.find((a) => a.id === id) || null;
+  invalidarIncremental();
+  // 1 leitura (o proprio documento) em vez de reler os 300 da lista inteira -
+  // e isso rodava a CADA clique em "sinalizar que vi"
+  const snap = await ref.get();
+  return snap.exists ? snap.data() : null;
 }
 
-module.exports = { listar, registrar, atender };
+module.exports = { listar, listarDesde, registrar, atender };
