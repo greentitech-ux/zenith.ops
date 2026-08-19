@@ -609,6 +609,23 @@ setTimeout(async () => {
   if (!okPrefIsolada) ruins += 1;
   console.log(`${okPrefIsolada ? '✓' : '✗'} salvar a preferência de uma tela não apaga a de outra`);
 
+  // ---- envio pra planilha deixou de ser so ARCFOOD: a rota agora recebe o
+  // grupo. Cobre o roteamento (nao chega a falar com o Google Sheets aqui) ----
+  let okEnvioGrupo = false;
+  try {
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const invalido = await postarJson('/api/fechamentos/xpto/enviar-planilha', { data: '2026-08-18' }, cab);
+    const dataRuim = await postarJson('/api/fechamentos/bravo/enviar-planilha', { data: '18/08/2026' }, cab);
+    const bravo = await postarJson('/api/fechamentos/bravo/enviar-planilha', { data: '2026-08-18' }, cab);
+    const corpoBravo = JSON.parse(bravo.corpo || '{}');
+    okEnvioGrupo = invalido.status === 400 && /Grupo inválido/.test(invalido.corpo)
+      && dataRuim.status === 400 && /Data inválida/.test(dataRuim.corpo)
+      // sem lançamento nenhum semeado, as 12 lojas do Bravo caem em semLancamento
+      && bravo.status === 200 && corpoBravo.grupo === 'BRAVO' && corpoBravo.semLancamento.length === 12;
+  } catch (e) { okEnvioGrupo = false; }
+  if (!okEnvioGrupo) ruins += 1;
+  console.log(`${okEnvioGrupo ? '✓' : '✗'} enviar-planilha aceita ARCFOOD e BRAVO (grupo na rota, lojas do Bravo vindas do sheetsSync)`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de

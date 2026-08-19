@@ -3809,23 +3809,35 @@ function ontemBrasiliaISO() {
 // ela. So Master, e so sob demanda (nao automatico) - escreve numa
 // planilha externa/compartilhada, e um dado errado lá tem mais trabalho
 // pra desfazer do que só rodar de novo depois de corrigir.
-app.post('/api/fechamentos/arcfood/enviar-planilha', auth.requireMaster, async (req, res) => {
+// unidades de cada grupo, na ordem em que saem no resultado. ARCFOOD sao os
+// 4 codigos numericos; no Bravo o proprio nome da loja E o codigo (ver
+// linhaParaFechamento em sheetsSync.js), por isso a lista vem de la - assim
+// incluir/tirar loja do Bravo se faz num lugar so.
+const UNIDADES_ENVIO_PLANILHA = {
+  ARCFOOD: ['19821', '19855', '19888', '19889'],
+  BRAVO: [...sheetsSync.BRAVO_UNIDADES],
+};
+
+app.post('/api/fechamentos/:grupo/enviar-planilha', auth.requireMaster, async (req, res) => {
   try {
+    const grupo = String(req.params.grupo || '').toUpperCase();
+    const unidades = UNIDADES_ENVIO_PLANILHA[grupo];
+    if (!unidades) return res.status(400).json({ error: 'Grupo inválido. Use arcfood ou bravo.' });
     const data = (req.body && req.body.data) || ontemBrasiliaISO();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) return res.status(400).json({ error: 'Data inválida.' });
-    const unidadesArcfood = ['19821', '19855', '19888', '19889'];
-    const lancados = (await fechamentosLive.listByUnidades(unidadesArcfood)).filter((f) => f.data === data);
+    const lancados = (await fechamentosLive.listByUnidades(unidades)).filter((f) => f.data === data);
     const porUnidade = new Map(lancados.map((f) => [f.unidade, f]));
 
-    const resultado = { data, enviados: [], semLancamento: [], erros: [] };
-    for (const cod of unidadesArcfood) {
+    const resultado = { grupo, data, enviados: [], semLancamento: [], erros: [] };
+    for (const cod of unidades) {
       const f = porUnidade.get(cod);
-      if (!f) { resultado.semLancamento.push(FECHAMENTO_UNIDADES_NOMES[cod] || cod); continue; }
+      const nome = (f && f.unidadeNome) || FECHAMENTO_UNIDADES_NOMES[cod] || cod;
+      if (!f) { resultado.semLancamento.push(nome); continue; }
       try {
-        const r = await sheetsSync.enviarFechamentoArcfood(f);
-        resultado.enviados.push({ unidade: f.unidadeNome || FECHAMENTO_UNIDADES_NOMES[cod] || cod, acao: r.acao });
+        const r = await sheetsSync.enviarFechamentoPlanilha(f, grupo);
+        resultado.enviados.push({ unidade: nome, acao: r.acao });
       } catch (err) {
-        resultado.erros.push({ unidade: f.unidadeNome || FECHAMENTO_UNIDADES_NOMES[cod] || cod, erro: err.message });
+        resultado.erros.push({ unidade: nome, erro: err.message });
       }
     }
     res.json(resultado);
