@@ -218,6 +218,44 @@ async function vincularChamado(id, chamadoId) {
 // visitante tambem (mesmo efeito de finalizar()); sair de um estado terminal
 // de volta pra um estado aberto REABRE a conversa (visitante pode escrever
 // de novo) - card "esfriou" mas o time decidiu voltar a mexer nele.
+// ---- saudacao automatica de quem assume o atendimento ----
+// Pedido do usuario: ao assumir uma conversa (botao "Assumir atendimento"
+// ou simplesmente respondendo nela), o visitante recebe na hora uma
+// mensagem se apresentando: saudacao pelo horario de Brasilia + Sr./Sra.
+// pelo nome de quem pediu + O/A pelo nome de quem atende.
+function saudacaoPorHorario(agora = new Date()) {
+  const hora = Number(new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false }).format(agora));
+  if (hora < 5) return 'Boa madrugada';
+  if (hora < 12) return 'Bom dia';
+  if (hora < 18) return 'Boa tarde';
+  return 'Boa noite';
+}
+// Heuristica de genero pelo PRIMEIRO nome: termina em "a" = feminino, com
+// listas de excecao pros nomes comuns que fogem da regra. E um palpite
+// (nao existe campo de genero em lugar nenhum) - erra pouco em nome
+// brasileiro e o formato foi pedido explicitamente assim.
+const NOMES_FEMININOS_SEM_A = new Set([
+  'isabel', 'raquel', 'rachel', 'ester', 'esther', 'beatriz', 'ines', 'miriam', 'mirian', 'carmen',
+  'ruth', 'edith', 'elisabeth', 'elizabeth', 'nicole', 'michele', 'michelle', 'denise', 'alice',
+  'clarice', 'berenice', 'simone', 'solange', 'ivone', 'marlene', 'irene', 'helen', 'ellen', 'karen',
+  'eliane', 'viviane', 'daniele', 'danielle', 'gabrielle', 'isabelle', 'ingrid', 'yasmin', 'iris',
+  'tais', 'thais', 'lais', 'kelly', 'emily', 'shirley', 'joice', 'joyce', 'rose', 'liz', 'cris',
+]);
+const NOMES_MASCULINOS_COM_A = new Set(['luca', 'nicola', 'juca', 'jonata', 'mustafa', 'josafa']);
+function ehNomeFeminino(nome) {
+  const primeiro = String(nome || '').trim().split(/[\s.]+/)[0]
+    .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  if (!primeiro) return false;
+  if (NOMES_MASCULINOS_COM_A.has(primeiro)) return false;
+  if (NOMES_FEMININOS_SEM_A.has(primeiro)) return true;
+  return primeiro.endsWith('a');
+}
+function mensagemAssumir(nomeVisitante, nomeAtendente) {
+  const tratamento = ehNomeFeminino(nomeVisitante) ? 'Sra.' : 'Sr.';
+  const artigo = ehNomeFeminino(nomeAtendente) ? 'A' : 'O';
+  return `${saudacaoPorHorario()}, ${tratamento} ${String(nomeVisitante || '').trim() || 'cliente'}! ${artigo} ${String(nomeAtendente || '').trim()} irá seguir com o seu atendimento.`;
+}
+
 async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino, motivoSemSolucao, autor } = {}) {
   if (!STATUS_ATENDIMENTO.includes(statusAtendimento)) throw new Error('Status de atendimento inválido.');
   const chat = await getOne(id);
@@ -248,6 +286,23 @@ async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino,
     atualizadoEm: agora,
     historicoStatus: [...(chat.historicoStatus || []), { statusAtendimento, nivel, por: autor ? (autor.nome || autor.email || autor.id) : null, em: agora }].slice(-50),
   };
+  // assumiu DE VERDADE (EM_ATENDIMENTO com responsável novo, conversa ainda
+  // aberta): o visitante recebe a apresentação automática na mesma escrita.
+  // Não dispara em RESOLVIDO/TRANSFERIDO nem quando a mesma pessoa só mexe
+  // no card de novo - senão viraria ruído a cada arrasto no kanban.
+  const assumiuNovo = statusAtendimento === 'EM_ATENDIMENTO' && autor
+    && chat.status === 'ABERTO'
+    && (!chat.responsavel || chat.responsavel.email !== autor.email);
+  if (assumiuNovo) {
+    patch.mensagens = [...(chat.mensagens || []), {
+      de: 'suporte', em: agora, autorEmail: autor.email || null, automatica: true,
+      texto: mensagemAssumir(chat.nome, autor.nome || autor.email),
+    }];
+    // humano assumiu: o bot sai de cena daqui em diante (mesmo efeito de
+    // uma resposta humana em adicionarMensagem)
+    if (!chat.atendidoPorEmail) patch.atendidoPorEmail = autor.email || null;
+  }
+
   // voltar pro PENDENTE = devolver pro Beniboy de verdade (não só cosmético
   // no kanban) - reativa o bot mesmo que ele tenha se calado antes (chamou
   // atendente, ver desativarBot acima). Reverte só esse "desligamento
@@ -500,4 +555,5 @@ module.exports = {
   criar, getOne, getPublico, getComToken, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll, ASSUNTOS,
   atualizarStatusAtendimento, marcarDesbloqueio, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
   listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna, estatisticas,
+  saudacaoPorHorario, ehNomeFeminino, mensagemAssumir,
 };
