@@ -62,6 +62,8 @@
   .status-badge.rejeitado{background:var(--bad-dim);color:var(--bad);}
   .status-badge.convertido{background:var(--panel2);color:var(--accent);}
   .status-badge.finalizado{background:rgba(92,200,255,.12);color:var(--accent);}
+  .itens-lista{margin:6px 0 0;padding-left:20px;font-size:13.5px;line-height:1.8;color:#ccd3da;}
+  .itens-lista b{color:var(--text);}
   .anexo-link{display:block;font-size:12.5px;color:var(--accent);text-decoration:none;margin-top:6px;}
   .anexo-link:hover{text-decoration:underline;}
   .chat-msg{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;}
@@ -123,6 +125,18 @@
     <button type="button" class="btn-primary" id="btn-enviar-execucao" disabled onclick="enviarExecucao()">Escolha o andamento acima</button>
   </div>
 
+  <div class="panel hidden" id="painel-comprada">
+    <h3>🛒 Compra realizada</h3>
+    <label>Seu nome</label>
+    <input type="text" id="autor-nome-comprada" placeholder="Como podemos te chamar" maxlength="80">
+    <label>Data da entrega</label>
+    <input type="date" id="comprada-entrega">
+    <label>Comprovante da compra (foto ou PDF)</label>
+    <input type="file" id="comprada-comprovante" accept="image/*,application/pdf" capture="environment">
+    <div class="msg hidden" id="msg-comprada"></div>
+    <button type="button" class="btn-primary" id="btn-comprada" onclick="enviarComprada()">🛒 Marcar como comprada</button>
+  </div>
+
   <div class="panel" id="painel-chat">
     <h3>💬 Chat</h3>
     <div id="chat-lista" style="display:flex;flex-direction:column;gap:8px;max-height:320px;overflow-y:auto;margin-bottom:4px;"></div>
@@ -165,7 +179,7 @@ function renderDetalhe(d){
   const meta = [d.unidadeNome, fmtData(d.criadoEm)].filter(Boolean).join(' · ');
   linhas.push(`<div class="ticket-meta">${escapeHtml(meta)}</div>`);
   linhas.push(`<span class="status-badge ${STATUS_CLASSE[d.status] || ''}">${STATUS_LABEL[d.status] || d.status}</span>`);
-  if(d.status === 'APROVADO' && d.execucaoStatus){
+  if(d.status === 'APROVADO' && d.execucaoStatus && d.tipo !== 'compra'){
     const cls = d.execucaoStatus === 'FINALIZADO' ? 'finalizado' : 'pendente';
     linhas.push(`<span class="status-badge ${cls}" style="margin-left:6px;">Execução: ${EXECUCAO_LABEL[d.execucaoStatus] || d.execucaoStatus}</span>`);
   }
@@ -180,6 +194,24 @@ function renderDetalhe(d){
     if(d.pixChave) linhas.push(`<div class="campo-linha"><b>Pix para devolução:</b> ${escapeHtml(d.pixChave)}${d.pixNomeTitular ? ' · '+escapeHtml(d.pixNomeTitular) : ''}${d.pixBanco ? ' · '+escapeHtml(d.pixBanco) : ''}</div>`);
     if(d.observacaoCliente) linhas.push(`<div class="ticket-obs">${escapeHtml(d.observacaoCliente)}</div>`);
     if(d.observacao) linhas.push(`<div class="ticket-obs">${escapeHtml(d.observacao)}</div>`);
+  }else if(d.tipo === 'compra'){
+    // Vista LIMPA pra quem faz a compra (pedido do usuario: "apenas titulo,
+    // itens, observacao, aprovado ou recusado, data da entrega, marcar como
+    // comprado, comprovante") - sem decidido-por, sem valor estimado, sem
+    // status de execucao, e os itens em LISTA com a quantidade destacada
+    // (igual a Central), nao espremidos numa linha so.
+    if(d.titulo) linhas.push(`<div class="campo-linha" style="font-size:15px;margin-top:12px;"><b>${escapeHtml(d.titulo)}</b></div>`);
+    if(Array.isArray(d.itens) && d.itens.length){
+      linhas.push('<div class="campo-linha" style="margin-top:10px;"><b>Itens:</b></div><ul class="itens-lista">'
+        + d.itens.map(i=>`<li>${escapeHtml(i.descricao)}${i.quantidade ? ` · <b>qtd. ${escapeHtml(String(i.quantidade))}</b>` : ''}</li>`).join('')
+        + '</ul>');
+    }
+    if(d.observacao) linhas.push(`<div class="ticket-obs">${escapeHtml(d.observacao)}</div>`);
+    if(d.comprada){
+      linhas.push(`<div style="margin-top:12px;"><span class="status-badge aprovado">🛒 Comprada</span></div>`);
+      if(d.dataEntregaPrevista) linhas.push(`<div class="campo-linha"><b>Data da entrega:</b> ${escapeHtml(d.dataEntregaPrevista.split('-').reverse().join('/'))}</div>`);
+      if(d.temComprovante) linhas.push(`<a class="anexo-link" href="${apiUrl('comprovante-publico')}" target="_blank" rel="noopener">📎 Comprovante da compra</a>`);
+    }
   }else{
     linhas.push(`<div class="campo-linha"><b>${escapeHtml(d.titulo || '')}</b></div>`);
     if(d.valorEstimado != null) linhas.push(`<div class="campo-linha"><b>Valor estimado:</b> ${fmtMoney(d.valorEstimado)}${d.ehOrcamento ? ' (orçamento)' : ''}</div>`);
@@ -188,11 +220,11 @@ function renderDetalhe(d){
     if(d.observacao) linhas.push(`<div class="ticket-obs">${escapeHtml(d.observacao)}</div>`);
   }
 
-  if(d.status === 'APROVADO' || d.status === 'REJEITADO'){
+  if(d.tipo !== 'compra' && (d.status === 'APROVADO' || d.status === 'REJEITADO')){
     if(d.decididoPorEmail) linhas.push(`<div class="campo-linha"><b>Decidido por:</b> ${escapeHtml(d.decididoPorEmail)}${d.decididoEm ? ' em '+fmtData(d.decididoEm) : ''}</div>`);
     if(d.motivoDecisao) linhas.push(`<div class="campo-linha"><b>Observação da decisão:</b> ${escapeHtml(d.motivoDecisao)}</div>`);
   }
-  if(d.execucaoPorNome) linhas.push(`<div class="campo-linha"><b>Execução atualizada por:</b> ${escapeHtml(d.execucaoPorNome)}</div>`);
+  if(d.tipo !== 'compra' && d.execucaoPorNome) linhas.push(`<div class="campo-linha"><b>Execução atualizada por:</b> ${escapeHtml(d.execucaoPorNome)}</div>`);
 
   if(Array.isArray(d.anexos) && d.anexos.length){
     linhas.push('<div style="margin-top:10px;">' + d.anexos.map(a =>
@@ -236,7 +268,12 @@ async function carregar(){
     document.getElementById('autor-nome-exec').value = nomeSalvo();
     document.getElementById('chat-nome').value = nomeSalvo();
     document.getElementById('painel-decidir').classList.toggle('hidden', !data.podeDecidir);
-    document.getElementById('painel-execucao').classList.toggle('hidden', !(!data.podeDecidir && data.podeAtualizarExecucao));
+    // compra usa o fluxo proprio de "marcar como comprada" no lugar do
+    // andamento generico Em andamento/Finalizado (pedido do usuario: tela
+    // limpa e objetiva pra quem realiza a compra)
+    document.getElementById('painel-execucao').classList.toggle('hidden', data.tipo === 'compra' || !(!data.podeDecidir && data.podeAtualizarExecucao));
+    document.getElementById('painel-comprada').classList.toggle('hidden', !data.podeMarcarComprada);
+    const nomeC = document.getElementById('autor-nome-comprada'); if(nomeC) nomeC.value = nomeSalvo();
     await carregarChat();
     setInterval(carregarChat, 15000);
   }catch(err){
@@ -305,6 +342,37 @@ async function enviarExecucao(){
     document.getElementById('sucesso-icone').textContent = status==='FINALIZADO' ? '✅' : '🔧';
     document.getElementById('sucesso-titulo').textContent = status==='FINALIZADO' ? 'Finalizado!' : 'Em andamento!';
     document.getElementById('sucesso-texto').textContent = `Ticket #${DATA.numeroTicket} atualizado.`;
+    document.getElementById('sucesso').classList.remove('hidden');
+  }catch(err){
+    msgEl.textContent = err.message; msgEl.className = 'msg err'; msgEl.classList.remove('hidden');
+    btn.disabled = false; btn.textContent = textoOriginal;
+  }
+}
+
+async function enviarComprada(){
+  const nome = document.getElementById('autor-nome-comprada').value.trim();
+  salvarNome(nome);
+  const btn = document.getElementById('btn-comprada');
+  const msgEl = document.getElementById('msg-comprada');
+  msgEl.classList.add('hidden');
+  btn.disabled = true;
+  const textoOriginal = btn.textContent;
+  btn.textContent = 'Enviando...';
+  try{
+    const fd = new FormData();
+    fd.append('payload', JSON.stringify({
+      link: LINK, autorNome: nome || null,
+      dataEntregaPrevista: document.getElementById('comprada-entrega').value || null,
+    }));
+    const arquivo = document.getElementById('comprada-comprovante').files[0];
+    if(arquivo) fd.append('comprovante', arquivo);
+    const resp = await fetch(`/api/central/${encodeURIComponent(TIPO)}/${encodeURIComponent(TICKET)}/comprada-publico`, { method:'POST', body: fd });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Não foi possível marcar como comprada.');
+    document.getElementById('painel-comprada').classList.add('hidden');
+    document.getElementById('sucesso-icone').textContent = '🛒';
+    document.getElementById('sucesso-titulo').textContent = 'Compra registrada!';
+    document.getElementById('sucesso-texto').textContent = `Ticket #${DATA.numeroTicket} marcado como comprada${data.dataEntregaPrevista ? ' · entrega '+data.dataEntregaPrevista.split('-').reverse().join('/') : ''}.`;
     document.getElementById('sucesso').classList.remove('hidden');
   }catch(err){
     msgEl.textContent = err.message; msgEl.className = 'msg err'; msgEl.classList.remove('hidden');

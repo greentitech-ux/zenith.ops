@@ -1720,6 +1720,49 @@ setTimeout(async () => {
   if (!okAssumir) ruins += 1;
   console.log(`${okAssumir ? '✓' : '✗'} Beniboy: assumir/responder apresenta o atendente com saudação automática`);
 
+  // ------------------------------------------------------------------
+  // Link público de Compra (ticket-publico.html): quem recebe o link pra
+  // COMPRAR precisa de uma vista limpa (título, itens em lista, observação,
+  // aprovado/recusado) e das ações de quem compra: data da entrega, marcar
+  // como comprada e anexar o comprovante - tudo autorizado só pelo link.
+  let okCompraLink = false;
+  try {
+    DOCS.set('solicitacoes/cmp1', {
+      id: 'cmp1', tipo: 'compra', status: 'APROVADO', numeroTicket: 10391,
+      unidade: 'MMTirol Natal', unidadeNome: 'MilkyMoo Tirol',
+      titulo: 'Comprar de insumos orçamento', observacao: 'Comprar até amanhã.',
+      itens: [{ descricao: 'Biscoito maria 15 unidades', quantidade: 96 }, { descricao: 'suspiro 4 unidades', quantidade: 28 }],
+      criadoEm: new Date().toISOString(), linkAcao: 'linkteste123', linkAcaoRevogado: false,
+      comprada: false, anexos: [],
+    });
+    const antes = await pedir('/api/central/compra/cmp1/publico?link=linkteste123');
+    const dAntes = antes.status === 200 ? JSON.parse(antes.corpo) : {};
+    const errado = await pedir('/api/central/compra/cmp1/publico?link=outrolink');
+
+    const marcar = await postarJson('/api/central/compra/cmp1/comprada-publico',
+      { link: 'linkteste123', dataEntregaPrevista: '2026-08-22', autorNome: 'Valdenice' });
+    const depois = await pedir('/api/central/compra/cmp1/publico?link=linkteste123');
+    const dDepois = depois.status === 200 ? JSON.parse(depois.corpo) : {};
+
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'ticket-publico.html'), 'utf8');
+    const conferencias = {
+      'o link abre com itens e a ação de marcar comprada': antes.status === 200
+        && dAntes.podeMarcarComprada === true && Array.isArray(dAntes.itens) && dAntes.itens.length === 2,
+      'link errado é recusado': errado.status === 404,
+      'marcar como comprada pelo link funciona': marcar.status === 200 && /"comprada":true/.test(marcar.corpo),
+      'depois de comprada o estado reflete (data + sem ação de novo)':
+        dDepois.comprada === true && dDepois.dataEntregaPrevista === '2026-08-22' && dDepois.podeMarcarComprada === false,
+      'a tela tem o painel de compra (nome + data + comprovante)': /painel-comprada/.test(html) && /enviarComprada/.test(html) && /comprada-comprovante/.test(html),
+      'itens saem em LISTA na vista de compra': /itens-lista/.test(html),
+      'a vista de compra esconde o decidido-por/execução': /d\.tipo !== 'compra' && \(d\.status === 'APROVADO'/.test(html),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okCompraLink = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (antes ${antes.status}, marcar ${marcar.status} ${marcar.corpo.slice(0, 80)})`);
+  } catch (e) { okCompraLink = false; console.log('  erro: ' + e.message); }
+  if (!okCompraLink) ruins += 1;
+  console.log(`${okCompraLink ? '✓' : '✗'} Compra pelo link: vista limpa + data de entrega + marcar comprada + comprovante`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

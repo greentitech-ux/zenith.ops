@@ -277,7 +277,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
 // terminam em "-publico"/"publico" ficam liberados; /api/central/:tipo/:id/chat
 // (sem sufixo) continua atras do login normal, entao o regex precisa ser
 // especifico pra nao vazar essa rota autenticada por engano
-const ROTA_TICKET_PUBLICO_RE = /^\/api\/central\/[^/]+\/[^/]+\/(publico|chat-publico|decidir-publico|execucao-publico|anexo-publico\/\d+)$/;
+const ROTA_TICKET_PUBLICO_RE = /^\/api\/central\/[^/]+\/[^/]+\/(publico|chat-publico|decidir-publico|execucao-publico|comprada-publico|comprovante-publico|anexo-publico\/\d+)$/;
 // script de vigia (roda fora do navegador, direto no Windows - ver
 // loja-status.html "Baixar vigia") reportando o IP da rede local: mesmo
 // motivo do heartbeat, precisa ser publica (a maquina nao tem sessao de
@@ -675,6 +675,12 @@ function payloadPublicoTicket(tipo, r) {
     ehOrcamento: r.ehOrcamento,
     fornecedor: r.fornecedor,
     vencimento: r.vencimento,
+    // fluxo de COMPRA pelo link (ticket-publico.html): quem compra ve se ja
+    // foi comprada, a data de entrega e o comprovante, e pode marcar
+    comprada: !!r.comprada,
+    dataEntregaPrevista: r.dataEntregaPrevista || null,
+    temComprovante: !!r.comprovante,
+    podeMarcarComprada: tipo === 'compra' && r.status === 'APROVADO' && !r.comprada,
   };
 }
 
@@ -743,6 +749,37 @@ app.post('/api/central/:tipo/:id/decidir-publico', upload.single('comprovante'),
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// quem fez a compra marca como Comprada pelo link, com data de entrega e/ou
+// comprovante da compra (mesmo fluxo Comprada da Central, autorizado pelo
+// linkAcao em vez de sessao - ver marcarCompradaComLink em solicitacoes.js)
+app.post('/api/central/:tipo/:id/comprada-publico', upload.single('comprovante'), async (req, res) => {
+  try {
+    if (req.params.tipo === 'estorno') return res.status(400).json({ error: 'Só pedidos de Compra podem ser marcados como Comprada.' });
+    const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
+    let comprovante = null;
+    if (req.file) {
+      const registroAtual = await solicitacoes.getOne(req.params.id);
+      const path = await storage.salvarArquivo((registroAtual && registroAtual.unidade) || 'geral', req.file, 'solicitacoes');
+      comprovante = { nome: req.file.originalname, path, tipo: req.file.mimetype || 'application/octet-stream' };
+    }
+    const atualizado = await solicitacoes.marcarCompradaComLink(req.params.id, payload.link, {
+      dataEntregaPrevista: payload.dataEntregaPrevista, comprovante, autorNome: payload.autorNome,
+    });
+    broadcast('solicitacao-decidida', atualizado, 'solicitacoes');
+    res.json({ ok: true, comprada: true, dataEntregaPrevista: atualizado.dataEntregaPrevista });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// comprovante da COMPRA (o print/nota que quem comprou anexou ao marcar
+// Comprada) - mesmo gate por link dos outros arquivos publicos do ticket
+app.get('/api/central/:tipo/:id/comprovante-publico', async (req, res) => {
+  const registro = await moduloTicket(req.params.tipo).buscarPorLinkAcao(req.params.id, req.query.link);
+  if (!registro || !registro.comprovante) return res.sendStatus(404);
+  storage.streamArquivo(registro.comprovante.path, registro.comprovante.tipo, res);
 });
 
 app.post('/api/central/:tipo/:id/execucao-publico', async (req, res) => {
