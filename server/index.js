@@ -2812,6 +2812,16 @@ app.post('/api/push/unsubscribe', async (req, res) => {
   res.json({ ok: true });
 });
 
+// dispara uma notificacao de teste pra TODOS os aparelhos do proprio
+// usuario e conta o que aconteceu - e o que transforma "nao chega alerta no
+// celular" em diagnostico: se dispositivos=0, a inscricao nunca chegou ao
+// servidor (reative o sino); se enviou e nao apareceu, o bloqueio esta no
+// aparelho (permissao do site/economia de bateria). O sino chama isso
+// sozinho logo depois de ativar (ver toggleNotifications em painel.html)
+app.post('/api/push/testar', async (req, res) => {
+  res.json(await push.testarPush(req.user.id));
+});
+
 // ---------- cofre de senhas (secao "cofre") ----------
 // grupos (ex: GBE) contem subgrupos (unidades, ex: DOM_BESSA, SPO_TACARUNA) -
 // e nos subgrupos que as senhas ficam. Grupos/subgrupos sao da organizacao

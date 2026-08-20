@@ -2081,6 +2081,13 @@ async function toggleNotifications(){
   });
   await fetch('/api/push/subscribe', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(sub) });
   updateNotifBtn(true);
+  // mesma prova real do sino do Painel: teste imediato em todos os aparelhos
+  try{
+    const t = await fetch('/api/push/testar', { method: 'POST' }).then(r=>r.json());
+    alert(t.configurado === false
+      ? 'Inscrição feita, mas o servidor está sem as chaves de push (VAPID) configuradas - fale com o Master.'
+      : `Notificações ativadas! Enviei uma notificação de teste pra ${t.dispositivos} aparelho(s) seu(s) - ela deve aparecer neste aparelho AGORA. Se não aparecer, confira a permissão de notificações do site nas configurações do celular.`);
+  }catch(e){ /* teste é cortesia - a inscrição em si já foi feita */ }
 }
 
 async function initNotifBtn(){
