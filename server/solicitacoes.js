@@ -425,6 +425,16 @@ async function marcarComprada(id, { dataEntregaPrevista, comprovante, marcadoPor
   return getOne(id);
 }
 
+// versao do LINK publico (ticket-publico.html): quem recebeu o link e fez a
+// compra marca como Comprada com data de entrega e/ou comprovante, sem
+// login - o link de acao e a credencial (mesma validacao de decidirComLink)
+async function marcarCompradaComLink(id, link, { dataEntregaPrevista, comprovante, autorNome } = {}) {
+  const registro = await buscarPorLinkAcao(id, link);
+  if (!registro) throw new Error('Link inválido ou revogado.');
+  const nome = String(autorNome || '').trim().slice(0, 80) || 'Visitante';
+  return marcarComprada(id, { dataEntregaPrevista, comprovante, marcadoPorEmail: `${nome} · via link` });
+}
+
 async function desmarcarComprada(id) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
@@ -569,5 +579,5 @@ module.exports = {
   marcarNotificacaoVista, marcarComprada, desmarcarComprada, redirecionar, mudarTipo, converterParaEstorno,
   atualizarExecucao, atualizarPrioridade, gerarTokenAcao, validarToken, decidirPorToken,
   buscarEstadoPorToken, podeDecidirComToken, podeAgirComLink, gerarLinkAcao, revogarLinkAcao,
-  buscarPorLinkAcao, decidirComLink, atualizarExecucaoComLink,
+  buscarPorLinkAcao, decidirComLink, atualizarExecucaoComLink, marcarCompradaComLink,
 };
