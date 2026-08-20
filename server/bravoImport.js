@@ -921,13 +921,23 @@ const QUAIS = [
   { qual: 'kpis', chave: 'kpisExtras' },
 ];
 
-async function conferirCampos() {
+// `somenteUnidade` limita a conferencia ao grupo daquela loja. Sem isso a
+// checagem era GLOBAL: um campo faltando no grupo das Domino's derrubava a
+// importacao do Spoleto, do Milky Moo e do Sao Braz junto - lojas que nao tem
+// nada a ver com aquele campo. Era esse o motivo de 11 lojas falharem com a
+// mesma mensagem de "Falta cadastrar campo no grupo Domino's GBE".
+async function conferirCampos(somenteUnidade = null) {
   const faltando = [];
   const porGrupo = new Map();
   const mapa = await bravoMapa.obter();
+  const grupoAlvo = somenteUnidade ? await grupos.grupoDaUnidade(somenteUnidade) : null;
   for (const unidade of Object.keys(UNIDADE_MODELO)) {
     const grupo = await grupos.grupoDaUnidade(unidade);
-    if (!grupo) { faltando.push({ unidade, erro: 'unidade não está em nenhum grupo' }); continue; }
+    if (!grupo) {
+      if (!grupoAlvo || unidade === somenteUnidade) faltando.push({ unidade, erro: 'unidade não está em nenhum grupo' });
+      continue;
+    }
+    if (grupoAlvo && grupo.id !== grupoAlvo.id) continue;
     const precisa = definicoesDeCampos(unidade, mapa);
     const atual = porGrupo.get(grupo.id)
       || { grupo, canais: new Map(), formas: new Map(), kpis: new Map(), corrigir: new Map() };
@@ -1017,10 +1027,16 @@ async function importar({ confirmar, repor = false, unidade = null, pular = 0, l
   if (confirmar !== 'GRAVAR') {
     throw new Error('Importação não confirmada. Rode a simulação, confira os totais e mande confirmar: "GRAVAR".');
   }
-  const { pendentes } = await conferirCampos();
+  const { pendentes } = await conferirCampos(unidade);
   if (pendentes.length) {
-    const resumo = pendentes.map((p) => `${p.grupoNome} (${p.canais.length + p.formas.length + p.kpis.length} campo(s))`).join(', ');
-    throw new Error(`Falta cadastrar campo no grupo antes de importar: ${resumo}. Rode a ação "cadastrar-campos" primeiro - sem isso o faturamento dessas lojas entraria zerado.`);
+    // diz QUAIS campos faltam, nao so quantos - com "1 campo(s)" nao havia
+    // como saber o que precisava ser cadastrado
+    const resumo = pendentes.map((p) => {
+      const quais = [...p.canais, ...p.formas, ...p.kpis].map((d) => d.label);
+      const corr = p.corrigir.length ? `, ${p.corrigir.length} a corrigir` : '';
+      return `${p.grupoNome}: ${quais.length ? quais.join(', ') : '(nenhum novo)'}${corr}`;
+    }).join(' · ');
+    throw new Error(`Falta cadastrar campo no grupo antes de importar — ${resumo}. Rode o passo "Preparar os grupos" primeiro; sem isso o faturamento entraria zerado.`);
   }
   const leitura = await lerPlanilhaCacheada();
   const { problemas } = leitura;

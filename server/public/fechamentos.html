@@ -857,11 +857,32 @@ async function gravarPorLoja(acao){
   const lojas = UNIDADES_IMPORT.slice();
   if(!lojas.length){ alert('Rode o passo 1 (Conferir) antes — é ele que descobre as lojas.'); return; }
   const rotulo = acao === 'repor' ? 'Completando' : 'Gravando';
-  if(!confirm(`${rotulo} ${lojas.length} loja(s), uma de cada vez.\n\nPode levar alguns minutos. Não feche a página — o progresso aparece na tela e o que já entrou não se perde se algo falhar no meio.`)) return;
+  if(!confirm(`${rotulo} ${lojas.length} loja(s), uma de cada vez.\n\nOs grupos são preparados automaticamente antes (passo 3).\n\nPode levar alguns minutos. Não feche a página — o progresso aparece na tela e o que já entrou não se perde se algo falhar no meio.`)) return;
 
   const saida = document.getElementById('imp-resultado');
   const btns = ['imp-btn-1','imp-btn-c','imp-btn-2','imp-btn-3','imp-btn-4'].map(id=>document.getElementById(id));
   btns.forEach(b=>{ b.disabled = true; });
+
+  // "Preparar os grupos" é pré-requisito da gravação e é idempotente (só
+  // acrescenta e corrige, nunca remove — ver cadastrarCampos). Rodar sozinho
+  // aqui elimina o tiro no pé de clicar em Gravar antes do passo 3 e receber
+  // "Falta cadastrar campo" em todas as lojas.
+  saida.innerHTML = '<div class="sub">Preparando os grupos antes de gravar…</div>';
+  try{
+    const rp = await fetch('/api/fechamentos/bravo/importar', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'cadastrar-campos' }),
+    });
+    const dp = await rp.json();
+    if(!rp.ok){
+      saida.innerHTML = `<div style="color:var(--bad);font-size:12.5px;">❌ Não consegui preparar os grupos: ${escapeHtml(dp.error||('erro '+rp.status))}</div>`;
+      btns.forEach(b=>{ b.disabled = false; });
+      return;
+    }
+  }catch(e){
+    saida.innerHTML = `<div style="color:var(--bad);font-size:12.5px;">❌ Não consegui preparar os grupos: ${escapeHtml(e.message)}</div>`;
+    btns.forEach(b=>{ b.disabled = false; });
+    return;
+  }
   // Blocos de LOTE dias por chamada. Uma loja pode ter ~250 dias e gravar
   // tudo numa requisição só volta a estourar o tempo — foi o que gerou
   // "Failed to fetch" nas 12 lojas. Cada bloco termina em segundos.

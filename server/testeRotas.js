@@ -1233,6 +1233,63 @@ setTimeout(async () => {
   if (!okFatias) ruins += 1;
   console.log(`${okFatias ? '✓' : '✗'} Grupo Bravo: gravação fatiada cobre todos os dias sem repetir nem pular`);
 
+  // ------------------------------------------------------------------
+  // A conferencia de campos do Bravo era GLOBAL: um campo faltando no grupo
+  // das Domino's derrubava a importacao do Spoleto, do Milky Moo e do Sao
+  // Braz junto - 11 lojas recusadas pela mesma mensagem, sendo que so uma
+  // familia de lojas tinha pendencia. Agora conferirCampos(unidade) olha so
+  // o grupo daquela loja.
+  let okEscopoCampos = false;
+  try {
+    const bravoImport = require('/home/user/adyen-monitor/server/bravoImport.js');
+    const grupos = require('/home/user/adyen-monitor/server/grupos.js');
+
+    const bravoMapa = require('/home/user/adyen-monitor/server/bravoMapa.js');
+    // O modelo "dominos" nao pede campo extra nenhum (canais/formas vazios) -
+    // a pendencia real vem de uma DECISAO DE COLUNA do Master (bravoMapa) com
+    // acao "criar", que passa a valer pros dois grupos. Foi o que aconteceu em
+    // producao: o Spoleto ja tinha o campo cadastrado de uma rodada anterior
+    // do passo 3, o grupo das Domino's nao - e a checagem global barrava as 11
+    // lojas por causa de um campo que so faltava num grupo.
+    DOCS.set('bravoImportMapa/principal', {
+      colunas: {
+        'taxa entrega': { coluna: 'Taxa Entrega', acao: 'criar', destino: 'canal', label: 'Taxa Entrega' },
+      },
+    });
+    bravoMapa.invalidarCache();
+
+    const campoNovo = { campo: bravoImport.MODELOS ? 'taxaEntrega' : 'taxaEntrega', label: 'Taxa Entrega', operacao: 'soma', tambemNoOutroTotal: false };
+    DOCS.set('grupos/g-spoleto', {
+      id: 'g-spoleto', nome: 'Spoleto GBE', unidades: ['Spoleto Shopping Recife'],
+      // ja tem tudo: o que o modelo pede + o campo criado pela decisao
+      canaisVendaExtras: [...bravoImport.definicoesDeCampos('Spoleto Shopping Recife').canais],
+      formasPagamentoExtras: bravoImport.definicoesDeCampos('Spoleto Shopping Recife').formas,
+      kpisExtras: bravoImport.definicoesDeCampos('Spoleto Shopping Recife').kpis,
+    });
+    DOCS.set('grupos/g-dominos', {
+      id: 'g-dominos', nome: "Domino's GBE", unidades: ['Dominos Bessa'],
+      canaisVendaExtras: [], formasPagamentoExtras: [], kpisExtras: [], // falta o campo novo
+    });
+    grupos.invalidarCache();
+
+    const doSpoleto = await bravoImport.conferirCampos('Spoleto Shopping Recife');
+    const global = await bravoImport.conferirCampos();
+
+    const pendenteDeOutroGrupo = (r) => (r.pendentes || []).some((p) => /Domino/.test(p.grupoNome || ''));
+    const conferencias = {
+      // esta primeira e a que prova que a fixture e real: sem ela, "nao
+      // aparece no escopo do Spoleto" passaria mesmo se NUNCA aparecesse
+      'a pendência das Domino\'s existe de verdade (conferência global vê)': pendenteDeOutroGrupo(global),
+      'conferindo o Spoleto, a pendência das Domino\'s NÃO aparece': !pendenteDeOutroGrupo(doSpoleto),
+      'conferirCampos aceita o filtro sem estourar': Array.isArray(doSpoleto.pendentes),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okEscopoCampos = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okEscopoCampos = false; console.log('  erro: ' + e.message); }
+  if (!okEscopoCampos) ruins += 1;
+  console.log(`${okEscopoCampos ? '✓' : '✗'} Grupo Bravo: campo faltando num grupo não bloqueia a importação das lojas dos outros grupos`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de
