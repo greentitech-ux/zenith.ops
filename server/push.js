@@ -369,6 +369,38 @@ async function notifyUsuario(userId, title, body, tag, url) {
   }
 }
 
+// Saida NEGATIVA apurada no fechamento de um turno do carrinho: sobrou mais
+// do que entrou - contagem errada ou envio nao lancado (ver
+// verificarDivergenciaAbastecimento em index.js). Antes isso so aparecia pra
+// quem abrisse Relatorios do Carrinho; agora vira push na hora pro
+// Master/Admin (mesmo publico do toast de solicitacao) e fica registrado na
+// Central de Alertas.
+async function notifyAbastecimentoDivergencia(rotuloTurno, resumo) {
+  const dados = {
+    title: '⚠ Divergência no carrinho',
+    body: `Turno ${rotuloTurno}: saída negativa em ${resumo}`,
+    tag: 'abastecimento-divergencia',
+    critical: true,
+    url: '/abastecimento-relatorios.html',
+  };
+  await alertasCentral.registrar({ tipo: 'abastecimento-divergencia', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberSolicitacao(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload, { urgency: 'high' });
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (divergência abastecimento):', err.message);
+      }
+    }
+  }
+}
+
 // Teste de ponta a ponta pedido pelo proprio usuario (rota POST
 // /api/push/testar): dispara uma notificacao real pra TODOS os aparelhos
 // dele e devolve o que aconteceu com cada envio. Existe porque "nao chega
@@ -820,5 +852,6 @@ module.exports = {
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente,
-  notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush, PUBLIC_KEY,
+  notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
+  notifyAbastecimentoDivergencia, PUBLIC_KEY,
 };

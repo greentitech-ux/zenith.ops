@@ -332,6 +332,7 @@
        saida em branco, nao com zero. -->
   <div class="dd-titulo">
     <span>📅 Dia a dia</span>
+    <button type="button" class="link-badge-btn" onclick="baixarPdfDias()">📄 PDF</button>
     <button type="button" class="link-badge-btn" id="btn-turnos" onclick="alternarTurnos()">mostrar turnos</button>
   </div>
   <div id="fluxo-dias"></div>
@@ -501,6 +502,16 @@ async function carregarFluxo(dias){
 // mentira, nao "nao vendeu nada".
 let MOSTRAR_TURNOS = false;
 let ULTIMO_FLUXO = null;
+
+// baixa o PDF do mesmo período que a tela está mostrando (7 ou 30 dias).
+// window.open não passa pelo wrapper de fetch, então o token do login vai
+// na URL - a autenticação da rota aceita ?token= (ver requireAuth)
+function baixarPdfDias(){
+  const fim = dataBrasilia(new Date().toISOString());
+  const inicio = dataBrasilia(new Date(Date.now() - (FLUXO_DIAS-1)*86400000).toISOString());
+  const token = localStorage.getItem('authToken') || '';
+  window.open(`/api/abastecimento/fluxo/relatorio.pdf?inicio=${inicio}&fim=${fim}&token=${encodeURIComponent(token)}`, '_blank');
+}
 
 function alternarTurnos(){
   MOSTRAR_TURNOS = !MOSTRAR_TURNOS;

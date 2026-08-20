@@ -7638,6 +7638,24 @@ async function abrirTicketBloqueioOperador(op, req) {
 // JSON puro, sem avarias. upload.array() so mexe quando o content-type e
 // multipart - request JSON passa direto (req.body ja populado pelo
 // express.json de sempre), entao os dois formatos convivem na mesma rota.
+// A contagem recem-lancada fecha o turno cujo fim e exatamente ela (ver
+// montarCiclos em abastecimentoPrevisao.js). Saida apurada NEGATIVA = sobrou
+// mais do que entrou: contagem errada ou envio que nao foi lancado. E o ⚠
+// vermelho do "Dia a dia" em Relatorios do Carrinho - so que empurrado pro
+// celular do Master/Admin na hora, com registro na Central de Alertas.
+async function verificarDivergenciaAbastecimento(contagem) {
+  const regs = await abastecimentoCarrinho.listAll();
+  const ciclos = abastecimentoPrevisao.montarCiclos(regs);
+  const ciclo = ciclos.filter((c) => c.ate === contagem.criadoEm).pop();
+  if (!ciclo) return; // primeira contagem de todas - ainda nao fecha turno
+  const negativos = ciclo.itens.filter((i) => i.saida < 0);
+  if (!negativos.length) return;
+  const resumo = negativos.slice(0, 5)
+    .map((i) => `${i.nome} (${i.saida}${i.tipo === 'pizza' ? '' : ' un'})`).join(' · ')
+    + (negativos.length > 5 ? ` e mais ${negativos.length - 5} item(ns)` : '');
+  await push.notifyAbastecimentoDivergencia(ciclo.rotulo, resumo);
+}
+
 app.post('/api/abastecimento', auth.requireAuth, upload.array('fotosAvarias', 20), async (req, res) => {
   try {
     const body = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
@@ -7671,6 +7689,14 @@ app.post('/api/abastecimento', auth.requireAuth, upload.array('fotosAvarias', 20
       criadoPorNome: req.user.username || req.user.email,
     });
     broadcast('abastecimento-atualizado', { id: registro.id, tipo: registro.tipo });
+    // uma CONTAGEM fecha um turno (par de contagens consecutivas): se a
+    // saida apurada ficou negativa em algum item, avisa o Master na hora em
+    // vez de esperar alguem abrir o relatorio. Fire-and-forget de proposito:
+    // o lancamento da contagem nunca pode falhar por causa do aviso
+    if (registro.tipo === 'CONTAGEM') {
+      verificarDivergenciaAbastecimento(registro)
+        .catch((err) => console.error('Erro ao checar divergência do carrinho:', err.message));
+    }
     if (registro.tipo === 'PEDIDO') {
       // aviso operacional do balcao: vai so pra quem opera a loja (secao
       // abastecimento-loja) - Master/Admin nao recebem esse push
@@ -8326,6 +8352,72 @@ app.get('/api/abastecimento/fluxo', auth.requireMaster, async (req, res) => {
         perdaTransitoTotal,
         avariasTotal: avariasDetalhe.reduce((s, a) => s + a.quantidade, 0),
       },
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// PDF do "Dia a dia" dos Relatorios do Carrinho: mesmo calculo da tela
+// (resumoPorDia/montarCiclos), item a item por dia, com a divergencia
+// (saida negativa) marcada em texto na coluna Alerta. Mesmo gate da tela.
+app.get('/api/abastecimento/fluxo/relatorio.pdf', auth.requireMaster, async (req, res) => {
+  try {
+    const hoje = hojeBrasiliaISO();
+    const fim = req.query.fim || hoje;
+    const inicio = req.query.inicio || (() => {
+      const d = new Date(`${fim}T00:00:00`);
+      d.setDate(d.getDate() - 6);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    })();
+    const dataOk = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    if (!dataOk(inicio) || !dataOk(fim) || inicio > fim) return res.status(400).json({ error: 'Período inválido.' });
+
+    const diaDe = (iso) => new Date(iso).toLocaleDateString('sv-SE', { timeZone: FUSO_BR });
+    const regs = await abastecimentoCarrinho.listAll();
+    const noPeriodo = regs.filter((r) => { const d = diaDe(r.criadoEm); return d >= inicio && d <= fim; });
+    const ciclos = abastecimentoPrevisao.montarCiclos(noPeriodo);
+    const dias = abastecimentoPrevisao.resumoPorDia(noPeriodo, { inicio, fim, ciclos });
+
+    let divergencias = 0;
+    const linhas = [];
+    dias.forEach((dia) => {
+      dia.itens.forEach((i, j) => {
+        const un = i.tipo === 'pizza' ? '' : ' un';
+        const divergente = i.saida != null && i.saida < 0;
+        if (divergente) divergencias += 1;
+        linhas.push({
+          dia: j === 0 ? reportUtil.fmtDataBR(dia.dia) : '',
+          meta: j === 0 ? `${dia.contagens} contagem(ns) · ${dia.envios} envio(s) · ${dia.ciclosFechados} turno(s)` : '',
+          item: i.nome,
+          entrou: `${i.entradas}${un}`,
+          saiu: i.saida == null ? 'sem fechamento' : `${i.saida}${un}`,
+          alerta: divergente ? 'DIVERGÊNCIA: sobrou mais do que entrou (contagem ou envio não lançado)' : '',
+        });
+      });
+    });
+
+    reportUtil.writePDF(res, {
+      titulo: 'Relatórios do Carrinho — Dia a dia',
+      subtitulo: `Período ${reportUtil.fmtDataBR(inicio)} a ${reportUtil.fmtDataBR(fim)} · gerado em ${reportUtil.agoraBrasiliaFmt()}`,
+      resumo: [
+        [dias.length, 'dias com movimento'],
+        [noPeriodo.filter((r) => r.tipo === 'CONTAGEM').length, 'contagens'],
+        [noPeriodo.filter((r) => r.tipo === 'ENVIO').length, 'envios'],
+        [divergencias, 'divergências (saída negativa)'],
+      ],
+      colunas: [
+        { key: 'dia', label: 'Dia' },
+        { key: 'meta', label: 'Movimento do dia' },
+        { key: 'item', label: 'Item' },
+        { key: 'entrou', label: 'Entrou' },
+        { key: 'saiu', label: 'Saiu' },
+        { key: 'alerta', label: 'Alerta' },
+      ],
+      larguras: { dia: 60, meta: 150, item: 170, entrou: 70, saiu: 90, alerta: 221 },
+      linhas,
+      nomeArquivo: `carrinho-dia-a-dia-${inicio}-a-${fim}`,
+      semDadosMsg: 'Nenhum movimento no período.',
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
