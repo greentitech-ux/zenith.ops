@@ -375,13 +375,16 @@ async function notifyUsuario(userId, title, body, tag, url) {
 // quem abrisse Relatorios do Carrinho; agora vira push na hora pro
 // Master/Admin (mesmo publico do toast de solicitacao) e fica registrado na
 // Central de Alertas.
-async function notifyAbastecimentoDivergencia(rotuloTurno, resumo) {
+async function notifyAbastecimentoDivergencia(rotuloTurno, resumo, turnoAte) {
   const dados = {
     title: '⚠ Divergência no carrinho',
     body: `Turno ${rotuloTurno}: saída negativa em ${resumo}`,
     tag: 'abastecimento-divergencia',
     critical: true,
-    url: '/abastecimento-relatorios.html',
+    // com o "ate" do ciclo, o clique abre direto na explicacao daquele
+    // turno (ver /api/abastecimento/turno/:ate em index.js) em vez de cair
+    // na tela geral - sem ele (chamada antiga/defensiva), cai na tela geral
+    url: turnoAte ? `/abastecimento-relatorios.html?turno=${encodeURIComponent(turnoAte)}` : '/abastecimento-relatorios.html',
   };
   await alertasCentral.registrar({ tipo: 'abastecimento-divergencia', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;

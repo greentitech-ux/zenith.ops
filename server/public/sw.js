@@ -98,12 +98,14 @@ self.addEventListener('notificationclick', (event) => {
   if (!url.startsWith('/')) url = '/';
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
-      // 1) ja tem uma aba na tela certa? foca nela
+      // 1) ja tem uma aba EXATAMENTE nessa tela (path + query, ex: um turno
+      // especifico do carrinho via ?turno=)? so foca, sem recarregar
       for (const c of list) {
-        const caminho = new URL(c.url).pathname;
-        if (caminho === url.split('?')[0] && 'focus' in c) return c.focus();
+        const u = new URL(c.url);
+        if (u.pathname + u.search === url && 'focus' in c) return c.focus();
       }
-      // 2) tem alguma aba do app aberta? foca e navega pro conteudo
+      // 2) tem alguma aba do app aberta (mesmo que seja a mesma pagina sem
+      // a query, ou outra tela)? foca e navega pro conteudo certo
       for (const c of list) {
         if ('focus' in c && 'navigate' in c) return c.focus().then(() => c.navigate(url));
       }
