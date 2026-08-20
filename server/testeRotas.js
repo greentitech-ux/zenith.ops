@@ -1835,6 +1835,67 @@ setTimeout(async () => {
   if (!okFormularios) ruins += 1;
   console.log(`${okFormularios ? '✓' : '✗'} Formulários: links de assinatura por papel, assinatura pelo celular e PDF montado`);
 
+  // ------------------------------------------------------------------
+  // Formulários - memória de favorecido + anexos: preencher um Reembolso
+  // com CPF grava o favorecido (nome + dados bancários); digitar o mesmo
+  // CPF de novo devolve tudo pra tela preencher sozinha. A criação também
+  // aceita multipart com comprovantes (PDF/imagem, até 5) e as rotas de
+  // anexo (logada e pública por token) respondem sem vazar por índice/token.
+  let okFavorecido = false;
+  try {
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const reemb = await postarJson('/api/formularios', {
+      tipo: 'reembolso', unidade: 'Spoleto Shopping Recife',
+      campos: { colaborador: 'Sidney Ferreira de Lima', cpf: '092.055.424-58', banco: 'Santander', agencia: '0001', conta: '12345-6', chavePix: 'sidney@pix.com' },
+      linhas: [{ data: '19/08/2026', fornecedor: 'Posto BR', descricao: 'Combustível', valor: '80,00' }],
+    }, cab);
+    const fR = reemb.status === 200 ? JSON.parse(reemb.corpo) : {};
+
+    // busca pelo CPF só com dígitos E formatado (a rota limpa a máscara)
+    const lembrado = await pedir('/api/formularios/favorecido?doc=09205542458', cab);
+    const dLembrado = lembrado.status === 200 ? JSON.parse(lembrado.corpo) : {};
+    const formatado = await pedir('/api/formularios/favorecido?doc=' + encodeURIComponent('092.055.424-58'), cab);
+    const desconhecido = await pedir('/api/formularios/favorecido?doc=11111111111', cab);
+
+    // multipart SEM arquivo tem que criar igual (é como a tela manda agora)
+    const viaMultipart = await postarMultipart('/api/formularios', {
+      payload: JSON.stringify({ tipo: 'avulso', unidade: 'Spoleto Tacaruna', campos: { fornecedor: 'X' }, linhas: [{ data: 'x', descricao: 'y', valor: '10' }] }),
+    }, null, 'anexos', cab);
+    // arquivo que não é PDF nem imagem é barrado ANTES de tocar no storage
+    const tipoRuim = await postarMultipart('/api/formularios', {
+      payload: JSON.stringify({ tipo: 'avulso', unidade: 'Spoleto Tacaruna', campos: {}, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }),
+    }, { nome: 'nota.txt', tipo: 'text/plain', buffer: Buffer.from('oi') }, 'anexos', cab);
+
+    // rotas de anexo: índice inexistente e token errado caem em 404
+    const tokenAss = new URLSearchParams(String((fR.assinaturas.find((a) => a.chave === 'colaborador') || {}).link).split('?')[1]).get('t');
+    const anexoForaDoIndice = await pedir(`/api/formularios/${fR.id}/anexo/0?token=${encodeURIComponent(token)}`);
+    const anexoPublicoForaDoIndice = await pedir(`/api/formularios-publico/${fR.id}/anexo/0?token=${tokenAss}`);
+    const anexoTokenErrado = await pedir(`/api/formularios-publico/${fR.id}/anexo/0?token=naoexiste`);
+
+    const fs2 = require('fs');
+    const path2 = require('path');
+    const htmlForms2 = fs2.readFileSync(path2.join(__dirname, 'public', 'formularios.html'), 'utf8');
+    const htmlAssinar2 = fs2.readFileSync(path2.join(__dirname, 'public', 'assinar.html'), 'utf8');
+    const conferencias = {
+      'criar o reembolso grava o favorecido pelo CPF': reemb.status === 200 && lembrado.status === 200
+        && dLembrado.nome === 'Sidney Ferreira de Lima' && dLembrado.banco === 'Santander' && dLembrado.chavePix === 'sidney@pix.com',
+      'a busca aceita o CPF com máscara': formatado.status === 200,
+      'CPF nunca usado devolve 404': desconhecido.status === 404,
+      'criar por multipart (sem arquivo) funciona': viaMultipart.status === 200,
+      'arquivo que não é PDF/imagem é recusado': tipoRuim.status === 400 && /PDF nem imagem/.test(tipoRuim.corpo),
+      'anexo com índice inexistente dá 404 (logado e público)': anexoForaDoIndice.status === 404 && anexoPublicoForaDoIndice.status === 404,
+      'anexo público com token errado dá 404': anexoTokenErrado.status === 404,
+      'a tela de formulários tem o campo de comprovantes e manda FormData':
+        /id="f-anexos"/.test(htmlForms2) && /new FormData\(\)/.test(htmlForms2) && /buscarFavorecido/.test(htmlForms2),
+      'a página de assinar mostra os comprovantes': /anexo\//.test(htmlAssinar2) && /Comprovantes/.test(htmlAssinar2),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okFavorecido = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (reemb ${reemb.status} · lembrado ${lembrado.status} ${lembrado.corpo.slice(0, 80)} · multipart ${viaMultipart.status} ${viaMultipart.corpo.slice(0, 80)})`);
+  } catch (e) { okFavorecido = false; console.log('  erro: ' + e.message); }
+  if (!okFavorecido) ruins += 1;
+  console.log(`${okFavorecido ? '✓' : '✗'} Formulários: favorecido lembrado pelo CPF + anexos de comprovante`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

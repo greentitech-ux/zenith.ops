@@ -83,6 +83,9 @@
       <div style="margin-top:8px;"><button type="button" class="btn-ghost" onclick="addLinha()">➕ Adicionar linha</button></div>
       <div class="total" id="total">Total: R$ 0,00</div>
 
+      <label>📎 Comprovantes da solicitação (PDF ou imagem, até 5 — opcional)</label>
+      <input type="file" id="f-anexos" multiple accept="image/*,application/pdf">
+
       <div class="msg err hidden" id="msg-criar"></div>
       <button type="button" class="btn" id="btn-criar" style="margin-top:12px;width:100%;" onclick="criar()">💾 Criar formulário e gerar links de assinatura</button>
     </div>
@@ -130,6 +133,11 @@ function escolherTipo(tipo){
   // no servidor) - o input nem existe, e o servidor ignora se alguém mandar
   document.getElementById('campos').innerHTML = m.cabecalho.filter(c=>c.key!=='cnpj').map(c=>
     `<div><label>${escapeHtml(c.label)}</label><input type="text" data-campo="${escapeHtml(c.key)}"></div>`).join('');
+  // memória de favorecido: terminou de digitar um CPF/CNPJ já usado antes ->
+  // puxa nome + dados bancários salvos e preenche o que estiver vazio
+  document.querySelectorAll('#campos input[data-campo="cpf"], #campos input[data-campo="cnpjFornecedor"]')
+    .forEach(el=> el.addEventListener('input', ()=>buscarFavorecido(el)));
+  document.getElementById('f-anexos').value = '';
   atualizarUnidadeInfo();
   // cabeçalho da tabela + 1 linha inicial (a coluna de assinatura das
   // diárias não é digitada aqui - nasce sozinha, um link por linha)
@@ -146,6 +154,22 @@ function addLinha(){
     `<td><input type="text" data-col="${escapeHtml(c.key)}" ${c.valor?'inputmode="decimal" placeholder="0,00" oninput="atualizarTotal()"':''} style="${c.valor?'width:90px;text-align:right;':''}"></td>`).join('')
     + '<td><button type="button" class="btn-mini" onclick="this.closest(\'tr\').remove();atualizarTotal()">✕</button></td>';
   document.getElementById('tabela-corpo').appendChild(tr);
+}
+
+// pra cada campo do formulário, qual campo do favorecido salvo o preenche
+const CAMPOS_FAVORECIDO = { colaborador:'nome', fornecedor:'nome', banco:'banco', agencia:'agencia', conta:'conta', chavePix:'chavePix' };
+async function buscarFavorecido(el){
+  const dig = String(el.value||'').replace(/\D/g,'');
+  if(dig.length!==11 && dig.length!==14) return;
+  try{
+    const r = await fetch('/api/formularios/favorecido?doc='+dig);
+    if(!r.ok) return;
+    const fav = await r.json();
+    document.querySelectorAll('#campos input[data-campo]').forEach(inp=>{
+      const chave = CAMPOS_FAVORECIDO[inp.dataset.campo];
+      if(chave && !inp.value.trim() && fav[chave]) inp.value = fav[chave];
+    });
+  }catch(e){ /* sem rede: segue digitando na mão */ }
 }
 
 function valorBR(s){
@@ -180,8 +204,12 @@ async function criar(){
   });
   btn.disabled = true;
   try{
-    const r = await fetch('/api/formularios', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ tipo: TIPO_ATUAL, unidade: document.getElementById('f-unidade').value, campos, linhas }) });
+    // multipart: payload em JSON + anexos; sem Content-Type manual pro
+    // navegador colocar o boundary (o wrapper de fetch só soma Authorization)
+    const fd = new FormData();
+    fd.append('payload', JSON.stringify({ tipo: TIPO_ATUAL, unidade: document.getElementById('f-unidade').value, campos, linhas }));
+    for(const arq of document.getElementById('f-anexos').files) fd.append('anexos', arq);
+    const r = await fetch('/api/formularios', { method:'POST', body: fd });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error || ('erro '+r.status));
     document.getElementById('editor').classList.add('hidden');
@@ -229,6 +257,7 @@ function renderLista(){
       <div class="fi-titulo">${escapeHtml(t?t.rotulo:f.tipo)} · ${escapeHtml(f.unidade)}
         <span class="badge ${f.status==='ASSINADO'?'assinado':'pendente'}">${f.status==='ASSINADO'?'✅ assinado':`✍️ falta(m) ${pendentes}`}</span></div>
       <div class="fi-sub">${fmtData(f.criadoEm)} · ${f.linhas.length} linha(s) · total ${fmtMoney(f.valorTotal)} · por ${escapeHtml(f.criadoPorEmail||'')}</div>
+      ${(f.anexos||[]).length ? `<div class="fi-sub">📎 ${f.anexos.map((an,i)=>`<a href="/api/formularios/${f.id}/anexo/${i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" style="color:var(--accent);">${escapeHtml(an.nome)}</a>`).join(' · ')}</div>` : ''}
       <div class="acoes-form">
         <button type="button" class="btn-ghost" onclick="abrirLinks('${f.id}')">✍️ Assinaturas e links</button>
         <button type="button" class="btn-ghost" onclick="baixarPdf('${f.id}')">📄 PDF</button>
