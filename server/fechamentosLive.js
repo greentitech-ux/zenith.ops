@@ -319,7 +319,35 @@ async function listAllUncached() {
   const snap = await COLLECTION.orderBy('data', 'desc').get();
   return snap.docs.map((d) => d.data());
 }
-const fechamentosCache = createCache(listAllUncached, 5 * 60 * 1000);
+// TTL longo de proposito: essa e a maior colecao viva do banco (milhares de
+// docs) e TODA escrita nela passa por este modulo, que invalida o cache na
+// hora - o TTL nao e o que mantem o dado fresco, e so rede de seguranca pra
+// escrita feita por fora (console do Firebase, restauracao de backup - que
+// tambem ja chama invalidarCache pela rota). Com 5min, a colecao inteira era
+// relida ~288x/dia mesmo sem nada mudar; era a maior fatia das leituras
+// diarias do Firestore (analise de 20/08).
+const fechamentosCacheBase = createCache(listAllUncached, 6 * 60 * 60 * 1000);
+
+// Importacao em massa (ver bravoImport.js): cada dia gravado invalida o
+// cache, e qualquer leitura entre duas gravacoes paga a colecao inteira de
+// novo - num lote de dezenas de dias com telas abertas isso virava
+// tempestade de leituras. Suspender segura as invalidacoes e aplica UMA so
+// quando o lote termina (retomar). Nao afeta escrita avulsa: fora do lote,
+// invalidar() continua imediato.
+let invalidacoesSuspensas = false;
+let invalidacaoPendente = false;
+const fechamentosCache = {
+  cached: fechamentosCacheBase.cached,
+  invalidar: () => {
+    if (invalidacoesSuspensas) { invalidacaoPendente = true; return; }
+    fechamentosCacheBase.invalidar();
+  },
+};
+function suspenderInvalidacao() { invalidacoesSuspensas = true; }
+function retomarInvalidacao() {
+  invalidacoesSuspensas = false;
+  if (invalidacaoPendente) { invalidacaoPendente = false; fechamentosCacheBase.invalidar(); }
+}
 const listAll = fechamentosCache.cached;
 
 
@@ -834,5 +862,6 @@ function invalidarCache() {
 module.exports = {
   CAMPOS_NUMERICOS, create, listAll, listByUnidades, getOne, solicitarEdicao, listarEdicoes, getEdicao,
   decidirEdicao, editarDireto, moverFechamento, removerEdicao, remove, invalidarCache, marcarNotificacaoVistaEdicao, redirecionarEdicao,
+  suspenderInvalidacao, retomarInvalidacao,
   backfillQuebraCaixa,
 };

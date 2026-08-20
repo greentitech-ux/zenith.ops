@@ -476,6 +476,33 @@ async function listar() {
   });
 }
 
+// Campos pesados que so o DETALHE de um computador usa (modal do NOC):
+// historicos, listas e saidas longas de comando. A lista geral viajava com
+// tudo isso pra TODAS as ~dezenas de maquinas a cada poll de 30s do painel -
+// era a maior fatia da banda do servico (a que estourou os 5 GB do Render em
+// 20/08). O painel agora recebe o resumo e busca o detalhe so da maquina
+// cujo modal esta aberto (ver GET .../detalhe em index.js).
+const CAMPOS_SO_DO_DETALHE = [
+  'eventos', 'ipHistorico', 'chatMensagens', 'dispositivos',
+  'redeDia', 'redeHoras', 'redeMinutos', 'redeHistorico',
+  'ultimoComandoTexto', 'ultimoComandoResultado', 'ultimoComandoErro',
+];
+function resumoDe(doc) {
+  const copia = { ...doc };
+  CAMPOS_SO_DO_DETALHE.forEach((campo) => { delete copia[campo]; });
+  return copia;
+}
+async function listarResumo() {
+  return (await listar()).map(resumoDe);
+}
+
+// detalhe completo de UM computador, com o mesmo enriquecimento (online,
+// apelidos, fabricante) da listar() - sai do mesmo cache, sem leitura extra
+async function detalhar(codigo, posto) {
+  const alvo = docIdFor(codigo, posto);
+  return (await listar()).find((d) => docIdFor(d.codigo, d.posto) === alvo) || null;
+}
+
 // get-or-create do segredo do computador - chamado ao gerar o .ps1 (ver rota
 // vigia.ps1 em index.js), pra que o token va assado no script daquele posto.
 // Idempotente: uma vez criado, sempre devolve o mesmo. Nao invalida o cache
@@ -1086,7 +1113,7 @@ async function flushHeartbeatsPendentes() {
 
 module.exports = {
   flushHeartbeatsPendentes,
-  heartbeat, listar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
+  heartbeat, listar, listarResumo, detalhar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
   enfileirarComando, enfileirarComandoEmTodos, COMANDO_LIMPAR_TRAVADOS,
