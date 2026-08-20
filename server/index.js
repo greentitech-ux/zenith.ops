@@ -4050,10 +4050,16 @@ app.post('/api/fechamentos/bravo/importar', auth.requireMaster, async (req, res)
     // toda leitura da planilha já respeita elas - sem deploy.
     if (acao === 'decidir-colunas') {
       const r = await bravoMapa.salvarDecisoes(req.body?.decisoes, req.user.email);
+      // a leitura cacheada foi montada com as decisões ANTIGAS - se ficasse,
+      // a gravação usaria o mapeamento que o Master acabou de trocar
+      bravoImport.invalidarLeitura();
       return res.json({ acao, ...r });
     }
     if (acao === 'gravar') {
-      const r = await bravoImport.importar({ confirmar: req.body?.confirmar, unidade: req.body?.unidade || null });
+      const r = await bravoImport.importar({
+        confirmar: req.body?.confirmar, unidade: req.body?.unidade || null,
+        pular: req.body?.pular, limite: req.body?.limite,
+      });
       fechamentosLive.invalidarCache();
       return res.json({ acao, ...r });
     }
@@ -4063,7 +4069,10 @@ app.post('/api/fechamentos/bravo/importar', auth.requireMaster, async (req, res)
     // uma linha e só a primeira gravava). Nunca toca em fechamento lançado por
     // uma pessoa - ver o modo repor em bravoImport.js.
     if (acao === 'repor') {
-      const r = await bravoImport.importar({ confirmar: req.body?.confirmar, repor: true, unidade: req.body?.unidade || null });
+      const r = await bravoImport.importar({
+        confirmar: req.body?.confirmar, repor: true, unidade: req.body?.unidade || null,
+        pular: req.body?.pular, limite: req.body?.limite,
+      });
       fechamentosLive.invalidarCache();
       return res.json({ acao, ...r });
     }

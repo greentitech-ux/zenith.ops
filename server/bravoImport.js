@@ -694,6 +694,24 @@ async function analisarColunas() {
   return { paraDecidir, jaResolvidas, camposConhecidos: conhecidos };
 }
 
+// Cache da leitura da planilha. Sem isto, gravar loja por loja ficava MAIS
+// lento que gravar tudo de uma vez: cada uma das 12 chamadas relia as 12 abas
+// pela API do Sheets antes de filtrar a loja - 144 leituras remotas no total.
+// Cada request estourava o tempo e o navegador devolvia "Failed to fetch" nas
+// 12. Agora a planilha e lida UMA vez e as outras 11 chamadas reaproveitam.
+// TTL curto o suficiente pra ninguem trabalhar em cima de dado velho, e
+// invalidado na mao quando as decisoes de coluna mudam (ver a rota).
+let leituraCache = { valor: null, expiraEm: 0 };
+const LEITURA_TTL_MS = 15 * 60 * 1000;
+function invalidarLeitura() { leituraCache = { valor: null, expiraEm: 0 }; }
+
+async function lerPlanilhaCacheada() {
+  if (leituraCache.valor && Date.now() < leituraCache.expiraEm) return leituraCache.valor;
+  const valor = await lerPlanilha();
+  leituraCache = { valor, expiraEm: Date.now() + LEITURA_TTL_MS };
+  return valor;
+}
+
 async function lerPlanilha() {
   const token = await sheetsSync.getAccessToken();
   const abas = await sheetsSync.listarAbas(SHEET_ID_BRAVO, token);
@@ -995,7 +1013,7 @@ const MARCA_IMPORTACAO = 'importação da planilha (Grupo Bravo)';
 // termina rapido, o progresso aparece e uma falha no meio nao leva junto o
 // que ja entrou. Sem o parametro o comportamento e o de antes (tudo de uma
 // vez), que continua valendo pra base pequena.
-async function importar({ confirmar, repor = false, unidade = null } = {}) {
+async function importar({ confirmar, repor = false, unidade = null, pular = 0, limite = 0 } = {}) {
   if (confirmar !== 'GRAVAR') {
     throw new Error('Importação não confirmada. Rode a simulação, confira os totais e mande confirmar: "GRAVAR".');
   }
@@ -1004,13 +1022,22 @@ async function importar({ confirmar, repor = false, unidade = null } = {}) {
     const resumo = pendentes.map((p) => `${p.grupoNome} (${p.canais.length + p.formas.length + p.kpis.length} campo(s))`).join(', ');
     throw new Error(`Falta cadastrar campo no grupo antes de importar: ${resumo}. Rode a ação "cadastrar-campos" primeiro - sem isso o faturamento dessas lojas entraria zerado.`);
   }
-  const leitura = await lerPlanilha();
+  const leitura = await lerPlanilhaCacheada();
   const { problemas } = leitura;
-  const lancamentos = unidade
+  const daLoja = unidade
     ? leitura.lancamentos.filter((l) => l.unidade === unidade)
     : leitura.lancamentos;
+  // Fatia: mesmo com a leitura cacheada, gravar ~250 dias de uma loja e
+  // ~250 escritas sequenciais no Firestore - perto demais do limite de tempo
+  // do request. A tela chama em blocos e repete ate `restam` chegar a zero.
+  const inicio = Math.max(0, Number(pular) || 0);
+  const fim = limite > 0 ? inicio + Number(limite) : daLoja.length;
+  const lancamentos = daLoja.slice(inicio, fim);
   const resultado = {
     unidade,
+    totalDaLoja: daLoja.length,
+    processados: lancamentos.length,
+    restam: Math.max(daLoja.length - fim, 0),
     gravados: 0, repostos: 0, jaExistiam: [], preservados: [], erros: [], problemas,
     linhasLidas: leitura.linhasLidas,
     diasMesclados: leitura.diasMesclados,
@@ -1058,7 +1085,7 @@ async function importar({ confirmar, repor = false, unidade = null } = {}) {
 
 module.exports = {
   simular, importar, conferirCampos, cadastrarCampos, lerPlanilha, linhaParaLancamento, definicoesDeCampos, totaisPrevistos,
-  mesclarPorDia, MARCA_IMPORTACAO, avaliarLinha, resolverUnidade, analisarColunas, semelhanca,
+  mesclarPorDia, MARCA_IMPORTACAO, avaliarLinha, resolverUnidade, analisarColunas, semelhanca, invalidarLeitura,
   acharCabecalho, indiceDaColuna,
   MODELOS, UNIDADE_MODELO, IDS_EXCLUIDOS, COLUNAS_IGNORADAS,
 };
