@@ -1290,6 +1290,37 @@ setTimeout(async () => {
   if (!okEscopoCampos) ruins += 1;
   console.log(`${okEscopoCampos ? '✓' : '✗'} Grupo Bravo: campo faltando num grupo não bloqueia a importação das lojas dos outros grupos`);
 
+  // ------------------------------------------------------------------
+  // O painel de importacao do Bravo nao pode ter beco sem saida: os botoes 4
+  // (Gravar) e 5 (Completar) ficavam DESABILITADOS quando o passo 1 achava
+  // pendencia de campo, e so o passo 3 os reabilitava. Como o passo 4 passou
+  // a rodar o passo 3 sozinho, essa trava so servia pra deixar o Master preso
+  // olhando um botao apagado. Varredura no HTML pra nao voltar.
+  let okBotoesImport = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+    const botao = (id) => (html.match(new RegExp(`<button[^>]*id="${id}"[^>]*>`)) || [''])[0];
+    const gravar = botao('imp-btn-3');
+    const completar = botao('imp-btn-4');
+    const conferir = botao('imp-btn-1');
+
+    const conferencias = {
+      'o botão Gravar existe': !!gravar,
+      'o botão Completar existe': !!completar,
+      'Gravar não nasce desabilitado': !!gravar && !/\bdisabled\b/.test(gravar),
+      'Completar não nasce desabilitado': !!completar && !/\bdisabled\b/.test(completar),
+      'Conferir também não': !!conferir && !/\bdisabled\b/.test(conferir),
+      'a gravação prepara os grupos sozinha antes': /acao:'cadastrar-campos'/.test(html.replace(/\s/g, '')) ,
+      'a gravação descobre as lojas se o passo 1 não rodou': /if\(!UNIDADES_IMPORT\.length\)/.test(html),
+      'não sobrou trava condicional reabilitando 4 e 5': !/if\(!pend\.length\)\{\s*btns\[3\]/.test(html),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okBotoesImport = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okBotoesImport = false; console.log('  erro: ' + e.message); }
+  if (!okBotoesImport) ruins += 1;
+  console.log(`${okBotoesImport ? '✓' : '✗'} Importação do Bravo: passo 4 funciona sozinho (não depende de clicar no 3 antes)`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de
