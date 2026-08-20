@@ -1638,6 +1638,48 @@ setTimeout(async () => {
   console.log(`${okCarrinho ? '✓' : '✗'} Carrinho: divergência vira alerta e o Dia a dia sai em PDF`);
 
   // ------------------------------------------------------------------
+  // Carrinho: explicação de UMA divergência específica (pedido do usuário -
+  // "quero um local que apareça um relatório explicando e que eu possa
+  // exportar em PDF para apresentar"). O turno que fechou negativo no teste
+  // anterior tem que ter uma rota própria (identificada pelo "ate" do ciclo)
+  // que devolve a explicação, gera um PDF de UMA página, e o link que a
+  // notificação manda tem que apontar pra esse turno específico - não pra
+  // tela genérica.
+  let okExplicacaoTurno = false;
+  try {
+    const abastecimentoCarrinho = require('/home/user/adyen-monitor/server/abastecimentoCarrinho.js');
+    const abastecimentoPrevisao = require('/home/user/adyen-monitor/server/abastecimentoPrevisao.js');
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const ciclos = abastecimentoPrevisao.montarCiclos(await abastecimentoCarrinho.listAll());
+    const ultimo = ciclos[ciclos.length - 1];
+
+    const explicacao = await pedir(`/api/abastecimento/turno/${encodeURIComponent(ultimo.ate)}`, cab);
+    const dExplicacao = explicacao.status === 200 ? JSON.parse(explicacao.corpo) : {};
+    const pdfTurno = await pedir(`/api/abastecimento/turno/${encodeURIComponent(ultimo.ate)}/relatorio.pdf?token=${encodeURIComponent(token)}`);
+    const turnoInexistente = await pedir(`/api/abastecimento/turno/${encodeURIComponent('2000-01-01T00:00:00.000Z')}`, cab);
+
+    const srcPush = require('fs').readFileSync(require('path').join(__dirname, 'push.js'), 'utf8');
+    const srcSw = require('fs').readFileSync(require('path').join(__dirname, 'public', 'sw.js'), 'utf8');
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'abastecimento-relatorios.html'), 'utf8');
+
+    const conferencias = {
+      'a explicação do turno traz o item negativo': explicacao.status === 200
+        && (dExplicacao.negativos || []).some((i) => i.chave === 'pizza:calabresa' && i.saida === -5),
+      'turno que não existe dá 404': turnoInexistente.status === 404,
+      'o PDF de UM turno sai válido': pdfTurno.status === 200 && pdfTurno.corpo.startsWith('%PDF'),
+      'o push da divergência manda o link já apontando pro turno': /url: turnoAte \? `\/abastecimento-relatorios\.html\?turno=/.test(srcPush),
+      'o service worker navega respeitando a query string (não só o path)': /u\.pathname \+ u\.search === url/.test(srcSw),
+      'a tela lê ?turno= no boot e mostra o card de explicação': /carregarExplicacaoTurno/.test(html) && /painel-explicacao-turno/.test(html),
+      'a tela tem o botão de PDF desta divergência': /baixarPdfTurno/.test(html) && /turno\/\$\{encodeURIComponent\(TURNO_ATE\)\}\/relatorio\.pdf/.test(html),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okExplicacaoTurno = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (explicacao ${explicacao.status} ${explicacao.corpo.slice(0, 100)}, pdf ${pdfTurno.status})`);
+  } catch (e) { okExplicacaoTurno = false; console.log('  erro: ' + e.message); }
+  if (!okExplicacaoTurno) ruins += 1;
+  console.log(`${okExplicacaoTurno ? '✓' : '✗'} Carrinho: explicação de UMA divergência + PDF de apresentação`);
+
+  // ------------------------------------------------------------------
   // Monitor: a coluna UNID. sumiu ("—" em toda linha) depois da unificação
   // de códigos de 18/08 - as lojas GBE passaram a usar o NOME do Fechamento
   // ("Dominos Caruaru"), sem dígito, e o rótulo da célula jogava fora tudo

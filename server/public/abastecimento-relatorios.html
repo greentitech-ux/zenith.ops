@@ -292,6 +292,24 @@
 
 <div id="root" class="hidden">
 
+<!-- explicacao de UMA divergencia especifica (ver /api/abastecimento/turno/:ate
+     em index.js) - so aparece quando chega pelo link ?turno= da notificacao
+     "⚠ Divergência no carrinho" (ver notifyAbastecimentoDivergencia em
+     push.js). Diferente do Dia a dia/Fluxo abaixo (que mostram o periodo
+     inteiro), aqui e o recorte de UM turno so, em linguagem direta, com um
+     PDF de UMA pagina pronto pra apresentar (franqueado, outro Master etc) -
+     sem precisar exportar a semana inteira pra explicar um caso pontual -->
+<div class="panel hidden" id="painel-explicacao-turno" style="border-color:rgba(255,92,92,.4);">
+  <h2>⚠ Explicação da divergência</h2>
+  <div class="sub" id="explicacao-sub" style="margin:-4px 0 10px;"></div>
+  <div class="resumo-grid" id="explicacao-kpis"></div>
+  <div id="explicacao-itens"></div>
+  <div class="msg err hidden" id="explicacao-erro"></div>
+  <div style="margin-top:12px;">
+    <button type="button" class="link-badge-btn" id="btn-pdf-turno" onclick="baixarPdfTurno()">📄 Baixar PDF desta divergência (pra apresentar)</button>
+  </div>
+</div>
+
 <!-- comparativo Abastecimento x Fechamento - so Master (ver
      /api/abastecimento/comparativo-fechamento em index.js): confere se o
      que foi ENVIADO por sabor bate com o que ficou registrado nos KPIs
@@ -502,6 +520,67 @@ async function carregarFluxo(dias){
 // mentira, nao "nao vendeu nada".
 let MOSTRAR_TURNOS = false;
 let ULTIMO_FLUXO = null;
+let TURNO_ATE = null;
+
+// ---------- explicacao de UMA divergencia (chegou pelo link ?turno= da
+// notificacao) - ver /api/abastecimento/turno/:ate em index.js ----------
+async function carregarExplicacaoTurno(ate){
+  TURNO_ATE = ate;
+  const painel = document.getElementById('painel-explicacao-turno');
+  const erro = document.getElementById('explicacao-erro');
+  erro.classList.add('hidden');
+  try{
+    const r = await fetch(`/api/abastecimento/turno/${encodeURIComponent(ate)}`);
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || 'Turno não encontrado.');
+    painel.classList.remove('hidden');
+    const negativos = d.negativos || [];
+    document.getElementById('explicacao-sub').innerHTML =
+      `Turno <b>${escapeHtml(d.ciclo.rotulo)}</b> · fechou ${fmtDia(dataBrasilia(d.ciclo.ate))} ${fmtHora(d.ciclo.ate)}. `
+      + (negativos.length
+        ? `${negativos.length} ite${negativos.length===1?'m saiu':'ns saíram'} mais do que entrou nesse turno — sinal de contagem ou envio não lançado. Detalhe abaixo, item a item.`
+        : 'Esse turno não tem mais itens com saída negativa (pode já ter sido corrigido desde o alerta).');
+    document.getElementById('explicacao-kpis').innerHTML = `
+      <div class="resumo-card${negativos.length?' pend':''}">
+        <div class="sabor">Itens com problema</div>
+        <div class="nums"><span class="hoje">${negativos.length}</span><span class="ontem">de ${d.ciclo.itens.length} no turno</span></div>
+      </div>
+      <div class="resumo-card">
+        <div class="sabor">Envios no turno</div>
+        <div class="nums"><span class="hoje">${d.ciclo.envios}</span><span class="ontem">durante o período</span></div>
+      </div>
+      <div class="resumo-card">
+        <div class="sabor">Duração</div>
+        <div class="nums"><span class="hoje">${d.ciclo.horas.toFixed(1)}h</span><span class="ontem">${fmtHora(d.ciclo.de)} → ${fmtHora(d.ciclo.ate)}</span></div>
+      </div>`;
+    document.getElementById('explicacao-itens').innerHTML = d.ciclo.itens.map(i=>{
+      const un = i.tipo==='pizza' ? '' : ' un';
+      const neg = i.saida < 0;
+      return `<div class="fluxo-item"${neg?' style="border-color:rgba(255,92,92,.4);"':''}>
+        <div><span class="nome">${escapeHtml(i.nome)}</span><span class="tag">${i.tipo==='pizza'?'pizza':'insumo'}</span></div>
+        <div class="fluxo-eq">
+          <span>saldo inicial <b>${i.saldoInicial}${un}</b></span><span>+ entradas <b>${i.entradas}${un}</b></span>
+          <span>− saldo final <b>${i.saldoFinal}${un}</b></span><span class="fluxo-saida">= ${i.saida}${un}</span>
+        </div>
+        ${neg ? '<div class="fluxo-flag ruim">⚠ saída negativa - sobrou mais do que entrou: provável contagem ou envio não lançado</div>' : ''}
+      </div>`;
+    }).join('');
+    painel.scrollIntoView({ behavior:'smooth', block:'start' });
+  }catch(err){
+    painel.classList.remove('hidden');
+    document.getElementById('explicacao-sub').textContent = '';
+    document.getElementById('explicacao-kpis').innerHTML = '';
+    document.getElementById('explicacao-itens').innerHTML = '';
+    erro.textContent = err.message;
+    erro.classList.remove('hidden');
+  }
+}
+
+function baixarPdfTurno(){
+  if(!TURNO_ATE) return;
+  const token = localStorage.getItem('authToken') || '';
+  window.open(`/api/abastecimento/turno/${encodeURIComponent(TURNO_ATE)}/relatorio.pdf?token=${encodeURIComponent(token)}`, '_blank');
+}
 
 // baixa o PDF do mesmo período que a tela está mostrando (7 ou 30 dias).
 // window.open não passa pelo wrapper de fetch, então o token do login vai
@@ -620,6 +699,8 @@ async function boot(){
   document.getElementById('root').classList.remove('hidden');
   carregarComparativoFechamento();
   carregarFluxo(7);
+  const turno = new URLSearchParams(location.search).get('turno');
+  if(turno) carregarExplicacaoTurno(turno);
 }
 boot();
 </script>

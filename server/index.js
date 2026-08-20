@@ -7815,7 +7815,17 @@ async function verificarDivergenciaAbastecimento(contagem) {
   const resumo = negativos.slice(0, 5)
     .map((i) => `${i.nome} (${i.saida}${i.tipo === 'pizza' ? '' : ' un'})`).join(' · ')
     + (negativos.length > 5 ? ` e mais ${negativos.length - 5} item(ns)` : '');
-  await push.notifyAbastecimentoDivergencia(ciclo.rotulo, resumo);
+  await push.notifyAbastecimentoDivergencia(ciclo.rotulo, resumo, ciclo.ate);
+}
+
+// mesmo calculo do fluxo, so recortado pra UM turno (identificado pelo "ate"
+// - o criadoEm da contagem que fechou aquele ciclo, unico por turno). Serve
+// de base tanto pra tela de explicacao quanto pro PDF de apresentacao logo
+// abaixo - o link que a notificacao de divergencia manda aponta pra ca.
+async function buscarTurno(ate) {
+  const regs = await abastecimentoCarrinho.listAll();
+  const ciclos = abastecimentoPrevisao.montarCiclos(regs);
+  return ciclos.find((c) => c.ate === ate) || null;
 }
 
 app.post('/api/abastecimento', auth.requireAuth, upload.array('fotosAvarias', 20), async (req, res) => {
@@ -8580,6 +8590,69 @@ app.get('/api/abastecimento/fluxo/relatorio.pdf', auth.requireMaster, async (req
       linhas,
       nomeArquivo: `carrinho-dia-a-dia-${inicio}-a-${fim}`,
       semDadosMsg: 'Nenhum movimento no período.',
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// explicacao de UM turno especifico - a tela usa isso pra montar o card
+// "o que aconteceu" quando chega pelo link da notificacao de divergencia
+app.get('/api/abastecimento/turno/:ate', auth.requireMaster, async (req, res) => {
+  try {
+    const ciclo = await buscarTurno(req.params.ate);
+    if (!ciclo) return res.status(404).json({ error: 'Turno não encontrado (pode já ter saído da janela de dados).' });
+    res.json({ ciclo, negativos: ciclo.itens.filter((i) => i.saida < 0) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// PDF de UMA divergencia especifica, pensado pra apresentar (franqueado,
+// Master de outra unidade etc) - ao contrario do "Dia a dia" (que despeja o
+// periodo inteiro), esse e o recorte de um turno so, pronto pra explicar o
+// que aconteceu sem precisar reabrir a tela
+app.get('/api/abastecimento/turno/:ate/relatorio.pdf', auth.requireMaster, async (req, res) => {
+  try {
+    const ciclo = await buscarTurno(req.params.ate);
+    if (!ciclo) return res.status(404).json({ error: 'Turno não encontrado (pode já ter saído da janela de dados).' });
+    const negativos = ciclo.itens.filter((i) => i.saida < 0);
+    // divergentes primeiro - quem abre o PDF ve o problema sem precisar rolar
+    const linhas = [...ciclo.itens].sort((a, b) => (a.saida < 0 ? 0 : 1) - (b.saida < 0 ? 0 : 1)).map((i) => {
+      const un = i.tipo === 'pizza' ? '' : ' un';
+      return {
+        item: i.nome,
+        tipo: i.tipo === 'pizza' ? 'pizza' : 'insumo',
+        inicial: `${i.saldoInicial}${un}`,
+        entrou: `${i.entradas}${un}`,
+        final: `${i.saldoFinal}${un}`,
+        saiu: `${i.saida}${un}`,
+        explicacao: i.saida < 0 ? 'Saída negativa: sobrou mais do que entrou — sinal de contagem ou envio não lançado nesse turno.' : '',
+      };
+    });
+    reportUtil.writePDF(res, {
+      titulo: 'Explicação da divergência — Relatórios do Carrinho',
+      subtitulo: `Turno ${ciclo.rotulo} · fechado em ${reportUtil.fmtDataHoraBR(ciclo.ate)} · gerado em ${reportUtil.agoraBrasiliaFmt()}`,
+      resumo: [
+        [negativos.length, negativos.length === 1 ? 'item com saída negativa' : 'itens com saída negativa'],
+        [ciclo.envios, ciclo.envios === 1 ? 'envio no turno' : 'envios no turno'],
+        [ciclo.itens.length, 'itens contados no turno'],
+        [`${ciclo.horas.toFixed(1)}h`, 'duração do turno'],
+      ],
+      colunas: [
+        { key: 'item', label: 'Item' },
+        { key: 'tipo', label: 'Tipo' },
+        { key: 'inicial', label: 'Saldo inicial' },
+        { key: 'entrou', label: 'Entrou' },
+        { key: 'final', label: 'Saldo final' },
+        { key: 'saiu', label: 'Saída apurada' },
+        { key: 'explicacao', label: 'Explicação' },
+      ],
+      larguras: { item: 110, tipo: 55, inicial: 75, entrou: 65, final: 75, saiu: 90, explicacao: 291 },
+      linhas,
+      linhasDinamicas: true,
+      nomeArquivo: `carrinho-divergencia-${ciclo.dia}-${reportUtil.slugify(ciclo.rotulo)}`,
+      semDadosMsg: 'Turno sem itens.',
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
