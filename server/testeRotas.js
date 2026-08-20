@@ -1637,6 +1637,32 @@ setTimeout(async () => {
   if (!okCarrinho) ruins += 1;
   console.log(`${okCarrinho ? '✓' : '✗'} Carrinho: divergência vira alerta e o Dia a dia sai em PDF`);
 
+  // ------------------------------------------------------------------
+  // Monitor: a coluna UNID. sumiu ("—" em toda linha) depois da unificação
+  // de códigos de 18/08 - as lojas GBE passaram a usar o NOME do Fechamento
+  // ("Dominos Caruaru"), sem dígito, e o rótulo da célula jogava fora tudo
+  // que não fosse número. Roda a função REAL extraída do HTML contra os
+  // dois espaços de código (numérico ARCFOOD e nome GBE).
+  let okUnidMonitor = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'monitor.html'), 'utf8');
+    const fonte = (html.match(/function soNumero\(unidade\)\{[\s\S]*?\n\}/) || [''])[0];
+    // eslint-disable-next-line no-eval
+    const soNumero = eval('(' + fonte.replace('function soNumero', 'function') + ')');
+    const conferencias = {
+      'código numérico continua saindo só o número': soNumero('19888') === '19888',
+      'código antigo da Adyen continua saindo o número': soNumero('DOM_19798') === '19798',
+      'código unificado SEM dígito mostra o nome (não "—")': soNumero('Dominos Caruaru') === 'Caruaru',
+      'nome sem prefixo Dominos sai inteiro': soNumero('MMTirol Natal') === 'MMTirol Natal',
+      'vazio segue como travessão': soNumero('') === '—' && soNumero(null) === '—',
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okUnidMonitor = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okUnidMonitor = false; console.log('  erro: ' + e.message); }
+  if (!okUnidMonitor) ruins += 1;
+  console.log(`${okUnidMonitor ? '✓' : '✗'} Monitor: coluna UNID. mostra a loja mesmo com código unificado sem dígito`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
