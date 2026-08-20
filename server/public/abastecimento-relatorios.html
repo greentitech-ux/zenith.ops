@@ -350,7 +350,8 @@
        saida em branco, nao com zero. -->
   <div class="dd-titulo">
     <span>📅 Dia a dia</span>
-    <button type="button" class="link-badge-btn" onclick="baixarPdfDias()">📄 PDF</button>
+    <button type="button" class="link-badge-btn" id="btn-so-divergencias" onclick="alternarSoDivergencias()">🚨 só divergências</button>
+    <button type="button" class="link-badge-btn" id="btn-pdf-dias" onclick="baixarPdfDias()">📄 PDF</button>
     <button type="button" class="link-badge-btn" id="btn-turnos" onclick="alternarTurnos()">mostrar turnos</button>
   </div>
   <div id="fluxo-dias"></div>
@@ -395,6 +396,16 @@ function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
 function abrirMenu(){}
 function fecharMenu(){}
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// "saiu -8un" confunde (nao da pra "sair" quantidade negativa) - o que
+// aconteceu de verdade e o oposto: SOBROU 8 a mais do que devia (contagem
+// ou envio nao lancado). Usado em toda tela que mostra saida apurada -
+// mesma frase do texto que o servidor manda no PDF (ver fmtSaidaTxt em
+// index.js), sem repetir o "un" duas vezes.
+function fraseSaida(saida, un){
+  if(saida == null) return 'sem fechamento';
+  if(saida < 0) return `⚠ ${Math.abs(saida)}${un} a mais`;
+  return `saiu ${saida}${un}`;
+}
 function dataBrasilia(iso){ return new Date(iso).toLocaleDateString('sv-SE', { timeZone: FUSO_BR }); }
 function fmtHora(iso){ return new Date(iso).toLocaleTimeString('pt-BR', { timeZone: FUSO_BR, hour:'2-digit', minute:'2-digit' }); }
 function fmtDia(dataSv){
@@ -486,8 +497,9 @@ async function carregarFluxo(dias){
 
     document.getElementById('fluxo-itens').innerHTML = d.itens.map(i=>{
       const un = i.tipo==='pizza' ? '' : ' un';
+      const saidaTxt = i.saidaApurada < 0 ? `sobrou ${Math.abs(i.saidaApurada)}${un}` : `${i.saidaApurada}${un}`;
       const conta = d.reconciliavel
-        ? `<span>saldo inicial <b>${i.saldoInicial}${un}</b></span><span>+ entradas <b>${i.entradas}${un}</b></span><span>− saldo final <b>${i.saldoFinal}${un}</b></span><span class="fluxo-saida">= ${i.saidaApurada}${un}</span>`
+        ? `<span>saldo inicial <b>${i.saldoInicial}${un}</b></span><span>+ entradas <b>${i.entradas}${un}</b></span><span>− saldo final <b>${i.saldoFinal}${un}</b></span><span class="fluxo-saida${i.saidaApurada<0?' dd-neg':''}">= ${saidaTxt}</span>`
         : `<span>enviado <b>${i.enviado}${un}</b></span><span>recebido <b>${i.recebido}${un}</b></span>`;
       const flags = [];
       if(i.perdaTransito > 0) flags.push(`<div class="fluxo-flag ruim">⚠ perda em trânsito: ${i.perdaTransito}${un} (enviou ${i.enviado}, chegou ${i.recebido})</div>`);
@@ -556,11 +568,12 @@ async function carregarExplicacaoTurno(ate){
     document.getElementById('explicacao-itens').innerHTML = d.ciclo.itens.map(i=>{
       const un = i.tipo==='pizza' ? '' : ' un';
       const neg = i.saida < 0;
+      const saidaTxt = neg ? `sobrou ${Math.abs(i.saida)}${un}` : `${i.saida}${un}`;
       return `<div class="fluxo-item"${neg?' style="border-color:rgba(255,92,92,.4);"':''}>
         <div><span class="nome">${escapeHtml(i.nome)}</span><span class="tag">${i.tipo==='pizza'?'pizza':'insumo'}</span></div>
         <div class="fluxo-eq">
           <span>saldo inicial <b>${i.saldoInicial}${un}</b></span><span>+ entradas <b>${i.entradas}${un}</b></span>
-          <span>− saldo final <b>${i.saldoFinal}${un}</b></span><span class="fluxo-saida">= ${i.saida}${un}</span>
+          <span>− saldo final <b>${i.saldoFinal}${un}</b></span><span class="fluxo-saida${neg?' dd-neg':''}">= ${saidaTxt}</span>
         </div>
         ${neg ? '<div class="fluxo-flag ruim">⚠ saída negativa - sobrou mais do que entrou: provável contagem ou envio não lançado</div>' : ''}
       </div>`;
@@ -584,12 +597,14 @@ function baixarPdfTurno(){
 
 // baixa o PDF do mesmo período que a tela está mostrando (7 ou 30 dias).
 // window.open não passa pelo wrapper de fetch, então o token do login vai
-// na URL - a autenticação da rota aceita ?token= (ver requireAuth)
+// na URL - a autenticação da rota aceita ?token= (ver requireAuth). Respeita
+// o toggle "só divergências" - o PDF sai igual ao que está na tela
 function baixarPdfDias(){
   const fim = dataBrasilia(new Date().toISOString());
   const inicio = dataBrasilia(new Date(Date.now() - (FLUXO_DIAS-1)*86400000).toISOString());
   const token = localStorage.getItem('authToken') || '';
-  window.open(`/api/abastecimento/fluxo/relatorio.pdf?inicio=${inicio}&fim=${fim}&token=${encodeURIComponent(token)}`, '_blank');
+  const flag = SO_DIVERGENCIAS ? '&divergencias=1' : '';
+  window.open(`/api/abastecimento/fluxo/relatorio.pdf?inicio=${inicio}&fim=${fim}${flag}&token=${encodeURIComponent(token)}`, '_blank');
 }
 
 function alternarTurnos(){
@@ -598,11 +613,30 @@ function alternarTurnos(){
   if(ULTIMO_FLUXO) renderDias(ULTIMO_FLUXO);
 }
 
+// "só divergências": em vez de despejar os ~27 itens de cada dia (a maioria
+// sem nada de errado), fica só a linha que precisa de atenção - o item de
+// contagem calculado fora do fluxo normal (dados que ja estao carregados,
+// zero leitura extra) - pedido do Master depois de olhar o PDF completo
+let SO_DIVERGENCIAS = false;
+function alternarSoDivergencias(){
+  SO_DIVERGENCIAS = !SO_DIVERGENCIAS;
+  document.getElementById('btn-so-divergencias').textContent = SO_DIVERGENCIAS ? '✓ só divergências' : '🚨 só divergências';
+  document.getElementById('btn-pdf-dias').textContent = SO_DIVERGENCIAS ? '📄 PDF (só divergências)' : '📄 PDF';
+  if(ULTIMO_FLUXO) renderDias(ULTIMO_FLUXO);
+}
+
 function renderDias(d){
   ULTIMO_FLUXO = d;
-  const dias = d.dias || [];
   const alvo = document.getElementById('fluxo-dias');
-  if(!dias.length){ alvo.innerHTML = '<div class="sub" style="margin-top:8px;">Nenhum movimento no período.</div>'; return; }
+  const dias = SO_DIVERGENCIAS
+    ? (d.dias || []).map(dia=>({ ...dia, itens: dia.itens.filter(i=>i.saida != null && i.saida < 0) })).filter(dia=>dia.itens.length)
+    : (d.dias || []);
+  if(!dias.length){
+    alvo.innerHTML = SO_DIVERGENCIAS
+      ? '<div class="sub" style="margin-top:8px;color:var(--ok);">✓ Nenhuma divergência no período.</div>'
+      : '<div class="sub" style="margin-top:8px;">Nenhum movimento no período.</div>';
+    return;
+  }
 
   alvo.innerHTML = dias.map(dia=>{
     const turnos = (d.ciclos||[]).filter(c=>c.dia===dia.dia);
@@ -611,13 +645,13 @@ function renderDias(d){
       // saida negativa = sobrou mais do que entrou: alguma contagem ou envio
       // nao foi lancado. Marca em vermelho em vez de exibir como se fosse
       // um numero normal (foi o que denunciou o furo quando apareceu)
-      const saida = i.saida == null
+      const saidaHtml = i.saida == null
         ? '<span class="dd-num dd-vazio">sem fechamento</span>'
-        : `<span class="dd-num dd-sai${i.saida < 0 ? ' dd-neg' : ''}" ${i.saida < 0 ? 'title="sobrou mais do que entrou - contagem ou envio não lançado"' : ''}>saiu <b>${i.saida}${un}</b>${i.saida < 0 ? ' ⚠' : ''}</span>`;
+        : `<span class="dd-num dd-sai${i.saida < 0 ? ' dd-neg' : ''}" ${i.saida < 0 ? 'title="sobrou mais do que entrou - contagem ou envio não lançado"' : ''}>${fraseSaida(i.saida, un)}</span>`;
       return `<div class="dd-linha">
         <span class="dd-nome">${escapeHtml(i.nome)}</span>
         <span class="dd-num dd-ent">entrou <b>${i.entradas}${un}</b></span>
-        ${saida}
+        ${saidaHtml}
       </div>`;
     }).join('');
 

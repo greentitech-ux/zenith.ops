@@ -1638,6 +1638,36 @@ setTimeout(async () => {
   console.log(`${okCarrinho ? '✓' : '✗'} Carrinho: divergência vira alerta e o Dia a dia sai em PDF`);
 
   // ------------------------------------------------------------------
+  // Carrinho: "saiu -14 un" confundia quem lia (não dá pra "sair" uma
+  // quantidade negativa) e o PDF completo despejava TODOS os ~27 itens de
+  // cada dia pra achar 26 divergências perdidas no meio - pedido do Master
+  // depois de ver o PDF: "precisamos ter um relatório apenas das
+  // divergências". Confere a wording nova (fonte + tela) e que o PDF com
+  // ?divergencias=1 sai menor que o completo (menos linhas = menos itens
+  // saudáveis, só o que precisa de atenção).
+  let okDivergenciasFiltro = false;
+  try {
+    const src = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'abastecimento-relatorios.html'), 'utf8');
+    const pdfCompleto = await pedir(`/api/abastecimento/fluxo/relatorio.pdf?token=${encodeURIComponent(token)}`);
+    const pdfFiltrado = await pedir(`/api/abastecimento/fluxo/relatorio.pdf?divergencias=1&token=${encodeURIComponent(token)}`);
+
+    const conferencias = {
+      'a wording nova ("a mais") existe no servidor - sem número negativo cru': /function fmtSaidaTxt/.test(src) && /a mais/.test(src),
+      'o filtro ?divergencias=1 existe na rota do PDF': /req\.query\.divergencias === '1'/.test(src),
+      'o PDF só-divergências sai válido e MENOR que o completo (menos linhas)':
+        pdfFiltrado.status === 200 && pdfFiltrado.corpo.startsWith('%PDF') && pdfFiltrado.corpo.length < pdfCompleto.corpo.length,
+      'a tela tem o toggle "só divergências"': /alternarSoDivergencias/.test(html) && /SO_DIVERGENCIAS/.test(html),
+      'a tela usa a mesma frase clara ("a mais"), não o número negativo cru': /function fraseSaida/.test(html) && /a mais/.test(html),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okDivergenciasFiltro = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (completo ${pdfCompleto.corpo.length}b, filtrado ${pdfFiltrado.status===200 ? pdfFiltrado.corpo.length+'b' : pdfFiltrado.status})`);
+  } catch (e) { okDivergenciasFiltro = false; console.log('  erro: ' + e.message); }
+  if (!okDivergenciasFiltro) ruins += 1;
+  console.log(`${okDivergenciasFiltro ? '✓' : '✗'} Carrinho: relatório só de divergências + "sobrou X a mais" em vez do número negativo cru`);
+
+  // ------------------------------------------------------------------
   // Carrinho: explicação de UMA divergência específica (pedido do usuário -
   // "quero um local que apareça um relatório explicando e que eu possa
   // exportar em PDF para apresentar"). O turno que fechou negativo no teste
