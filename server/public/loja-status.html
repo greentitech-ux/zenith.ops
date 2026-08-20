@@ -583,6 +583,38 @@ let FILTRO_UNIDADE = '';
 let FILTRO_STATUS = ''; // '' | 'online' | 'offline' | 'nunca'
 let ULTIMO_REDE_DADOS = null; // ultima resposta de /api/loja-status/rede - reaplica o filtro sem refazer a chamada
 
+// A lista do poll de 30s vem RESUMIDA do servidor (sem eventos, aparelhos da
+// rede, chat, séries de rede, saída de comando - ver listarResumo em
+// lojaStatus.js): mandar isso de todas as máquinas a cada poll era a maior
+// fatia da banda do serviço. O detalhe pesado é buscado só da máquina cujo
+// modal (detalhe ou chat) está aberto, e guardado aqui pra mesclar na hora
+// de renderizar.
+let DETALHE_EXTRA = {}; // 'codigo|posto' -> campos pesados da rota /detalhe
+function chaveComp(codigo, posto){ return codigo + '|' + posto; }
+function compComDetalhe(c){ return { ...c, ...(DETALHE_EXTRA[chaveComp(c.codigo, c.posto)] || {}) }; }
+async function buscarDetalheComp(codigo, posto){
+  try{
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/detalhe`);
+    if(!r.ok) return null;
+    const d = await r.json();
+    DETALHE_EXTRA[chaveComp(codigo, posto)] = d;
+    return d;
+  }catch(e){ return null; }
+}
+// mantém o modal aberto (detalhe e/ou chat) com o dado pesado fresco - roda
+// junto de cada poll, é 1 requisição pequena só da máquina aberta
+async function atualizarDetalheExtraDosModais(){
+  const alvos = [];
+  if(DETALHE_ATUAL) alvos.push(DETALHE_ATUAL);
+  if(MSG_CODIGO && MSG_POSTO && !(DETALHE_ATUAL && DETALHE_ATUAL.codigo===MSG_CODIGO && DETALHE_ATUAL.posto===MSG_POSTO)){
+    alvos.push({ codigo: MSG_CODIGO, posto: MSG_POSTO });
+  }
+  if(!alvos.length) return;
+  await Promise.all(alvos.map(a => buscarDetalheComp(a.codigo, a.posto)));
+  atualizarDetalheSeAberto();
+  atualizarChatModalSeAberto();
+}
+
 function tempoRelativo(quando){
   if(!quando) return 'nunca';
   // a maioria dos carimbos aqui e Date.now() (numero), mas alguns campos sao
@@ -927,8 +959,14 @@ function abrirDetalheComputador(codigo, posto){
   // abriu OUTRO computador: o filtro de data do anterior nao vale mais
   if(!DETALHE_ATUAL || DETALHE_ATUAL.codigo!==codigo || DETALHE_ATUAL.posto!==posto) EV_FILTRO_DATA = '';
   DETALHE_ATUAL = { codigo, posto };
-  atualizarConteudoDetalhe(codigo, c);
+  // abre na hora com o resumo (e o que ja tiver de detalhe de uma abertura
+  // anterior) e busca o detalhe pesado em paralelo - quando chegar, o modal
+  // se re-renderiza sozinho
+  atualizarConteudoDetalhe(codigo, compComDetalhe(c));
   document.getElementById('detalhe-comp-overlay').classList.remove('hidden');
+  buscarDetalheComp(codigo, posto).then(d => {
+    if(d && DETALHE_ATUAL && DETALHE_ATUAL.codigo===codigo && DETALHE_ATUAL.posto===posto) atualizarDetalheSeAberto();
+  });
 }
 function fecharDetalheComputador(){
   document.getElementById('detalhe-comp-overlay').classList.add('hidden');
@@ -941,7 +979,7 @@ function atualizarDetalheSeAberto(){
   if(!DETALHE_ATUAL) return;
   const c = COMPUTADORES.find(x => x.codigo===DETALHE_ATUAL.codigo && x.posto===DETALHE_ATUAL.posto);
   if(!c){ fecharDetalheComputador(); return; }
-  atualizarConteudoDetalhe(DETALHE_ATUAL.codigo, c);
+  atualizarConteudoDetalhe(DETALHE_ATUAL.codigo, compComDetalhe(c));
 }
 
 function setFiltroStatus(v){
@@ -1137,6 +1175,9 @@ async function carregar(){
     atualizarTickerCarga();
     popularSelectUnidades();
     render();
+    // a lista veio resumida - se algum modal (detalhe/chat) estiver aberto,
+    // busca o dado pesado fresco só daquela(s) máquina(s)
+    atualizarDetalheExtraDosModais();
   }catch(e){ /* mantem a ultima lista carregada na tela */ }
 }
 
@@ -1508,8 +1549,11 @@ function abrirModalMensagem(codigo, posto, nomeComputador){
   document.getElementById('msg-texto').value = '';
   document.getElementById('msg-modal-status').classList.add('hidden');
   const c = COMPUTADORES.find(x => x.codigo===codigo && x.posto===posto);
-  renderChatThread(c);
+  // a thread (chatMensagens) e' campo pesado que nao vem mais na lista - abre
+  // com o que houver em cache e busca o detalhe fresco em paralelo
+  renderChatThread(c ? compComDetalhe(c) : c);
   document.getElementById('msg-overlay').classList.remove('hidden');
+  buscarDetalheComp(codigo, posto).then(d => { if(d) atualizarChatModalSeAberto(); });
 }
 function fecharModalMensagem(){ document.getElementById('msg-overlay').classList.add('hidden'); MSG_CODIGO = null; MSG_POSTO = null; }
 // chamado no fim de render() - mantem a thread viva enquanto o modal
@@ -1517,7 +1561,7 @@ function fecharModalMensagem(){ document.getElementById('msg-overlay').classList
 function atualizarChatModalSeAberto(){
   if(!MSG_CODIGO || !MSG_POSTO) return;
   const c = COMPUTADORES.find(x => x.codigo===MSG_CODIGO && x.posto===MSG_POSTO);
-  if(c) renderChatThread(c);
+  if(c) renderChatThread(compComDetalhe(c));
 }
 async function enviarMensagemLoja(){
   const texto = document.getElementById('msg-texto').value.trim();

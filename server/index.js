@@ -2484,9 +2484,25 @@ app.post('/api/alertas-central/:id/atender', auth.requireMaster, async (req, res
 // aqui e achatada (1 item por computador), a tela agrupa por unidade pra
 // exibir. "nome" no item e o nome do COMPUTADOR (ver lojaStatus.js); o nome
 // de exibicao da unidade vai em "unidadeNome" pra nao colidir ----------
+// A lista vai RESUMIDA (ver listarResumo em lojaStatus.js): o poll de 30s do
+// painel multiplicava os historicos/listas de todas as maquinas e era a
+// maior fatia da banda do servico. O detalhe completo de uma maquina sai na
+// rota /detalhe abaixo, buscada so quando o modal dela esta aberto.
 app.get('/api/loja-status', requireSection('suporte'), async (req, res) => {
-  const [status, mapa] = await Promise.all([lojaStatus.listar(), construirUnidadesMapa()]);
+  const [status, mapa] = await Promise.all([lojaStatus.listarResumo(), construirUnidadesMapa()]);
   res.json(status.map((s) => ({ ...s, unidadeNome: mapa[s.codigo] || s.codigo })));
+});
+
+// detalhe completo de UM computador (eventos, aparelhos da rede, chat,
+// series de rede, saida do ultimo comando) - mesmo gate da lista
+app.get('/api/loja-status/:codigo/computadores/:posto/detalhe', requireSection('suporte'), async (req, res) => {
+  try {
+    const c = await lojaStatus.detalhar(req.params.codigo, req.params.posto);
+    if (!c) return res.status(404).json({ error: 'Computador não encontrado.' });
+    res.json(c);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // Botao de incidente: manda TODOS os computadores 'interno' matarem processos

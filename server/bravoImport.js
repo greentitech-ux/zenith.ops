@@ -1092,42 +1092,52 @@ async function importar({ confirmar, repor = true, unidade = null, pular = 0, li
     diasMesclados: leitura.diasMesclados,
     linhasAbsorvidas: leitura.linhasAbsorvidas,
   };
-  for (const l of lancamentos) {
-    const base = { ...l, criadoPorId: null, criadoPorEmail: MARCA_IMPORTACAO };
-    try {
-      await fechamentosLive.create(base);
-      resultado.gravados += 1;
-      continue;
-    } catch (e) {
-      if (!/[Jj]á existe/.test(e.message)) {
+  // Cada create/remove invalida o cache do fechamentosLive, e qualquer
+  // leitura entre duas gravacoes (tela de Fechamentos aberta, Painel) paga a
+  // colecao INTEIRA de novo no Firestore - num lote de dezenas de dias isso
+  // virava tempestade de leituras. Segura as invalidacoes durante o lote e
+  // aplica UMA no final (o finally garante mesmo com erro no meio).
+  fechamentosLive.suspenderInvalidacao();
+  try {
+    for (const l of lancamentos) {
+      const base = { ...l, criadoPorId: null, criadoPorEmail: MARCA_IMPORTACAO };
+      try {
+        await fechamentosLive.create(base);
+        resultado.gravados += 1;
+        continue;
+      } catch (e) {
+        if (!/[Jj]á existe/.test(e.message)) {
+          resultado.erros.push({ unidade: l.unidade, data: l.data, erro: e.message });
+          continue;
+        }
+      }
+
+      // O dia ja existe no sistema.
+      if (!repor) { resultado.jaExistiam.push(`${l.unidade} ${l.data}`); continue; }
+
+      // Modo REPOR: troca o registro pela versao mesclada. Isso e o que
+      // conserta os dias que entraram pela metade na primeira importacao (so a
+      // primeira linha do dia gravou; as outras morreram no "já existe").
+      // So mexe no que a PROPRIA importacao criou - fechamento lançado por uma
+      // pessoa nunca e sobrescrito, ou a gente estaria jogando fora trabalho
+      // de alguem sem avisar.
+      try {
+        const id = `${l.unidade}__${l.data}`;
+        const atual = await fechamentosLive.getOne(id);
+        if (!atual) { resultado.erros.push({ unidade: l.unidade, data: l.data, erro: 'existia ao gravar mas sumiu ao reler' }); continue; }
+        if (atual.criadoPorEmail !== MARCA_IMPORTACAO) {
+          resultado.preservados.push(`${l.unidade} ${l.data} (lançado por ${atual.criadoPorEmail || 'alguém'})`);
+          continue;
+        }
+        await fechamentosLive.remove(id);
+        await fechamentosLive.create(base);
+        resultado.repostos += 1;
+      } catch (e) {
         resultado.erros.push({ unidade: l.unidade, data: l.data, erro: e.message });
-        continue;
       }
     }
-
-    // O dia ja existe no sistema.
-    if (!repor) { resultado.jaExistiam.push(`${l.unidade} ${l.data}`); continue; }
-
-    // Modo REPOR: troca o registro pela versao mesclada. Isso e o que
-    // conserta os dias que entraram pela metade na primeira importacao (so a
-    // primeira linha do dia gravou; as outras morreram no "já existe").
-    // So mexe no que a PROPRIA importacao criou - fechamento lançado por uma
-    // pessoa nunca e sobrescrito, ou a gente estaria jogando fora trabalho
-    // de alguem sem avisar.
-    try {
-      const id = `${l.unidade}__${l.data}`;
-      const atual = await fechamentosLive.getOne(id);
-      if (!atual) { resultado.erros.push({ unidade: l.unidade, data: l.data, erro: 'existia ao gravar mas sumiu ao reler' }); continue; }
-      if (atual.criadoPorEmail !== MARCA_IMPORTACAO) {
-        resultado.preservados.push(`${l.unidade} ${l.data} (lançado por ${atual.criadoPorEmail || 'alguém'})`);
-        continue;
-      }
-      await fechamentosLive.remove(id);
-      await fechamentosLive.create(base);
-      resultado.repostos += 1;
-    } catch (e) {
-      resultado.erros.push({ unidade: l.unidade, data: l.data, erro: e.message });
-    }
+  } finally {
+    fechamentosLive.retomarInvalidacao();
   }
   return resultado;
 }

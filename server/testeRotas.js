@@ -1488,6 +1488,85 @@ setTimeout(async () => {
   if (semFiltroArea.length) ruins += 1;
   console.log(`${semFiltroArea.length ? '✗' : '✓'} telas de fechamento filtram unidade por área (administrativa não conta como loja): ${semFiltroArea.length ? semFiltroArea.join(', ') : 'todas ok'}`);
 
+  // ------------------------------------------------------------------
+  // NOC: a lista do poll de 30s tem que ir RESUMIDA (sem eventos, aparelhos
+  // da rede, chat, series de rede, saida de comando) - mandar isso de todas
+  // as maquinas a cada poll era a maior fatia da banda que estourou os 5 GB
+  // do Render. O detalhe pesado continua existindo, mas so na rota /detalhe
+  // de UMA maquina, e o painel so a chama com o modal aberto.
+  let okNocResumo = false;
+  try {
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const lista = await pedir('/api/loja-status', cab);
+    const itens = JSON.parse(lista.corpo);
+    const alvo = itens.find((c) => c.codigo === 'AERO' && c.posto === 'ATM01');
+    const detalhe = await pedir('/api/loja-status/AERO/computadores/ATM01/detalhe', cab);
+    const det = detalhe.status === 200 ? JSON.parse(detalhe.corpo) : {};
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const conferencias = {
+      'a lista responde e acha a máquina semeada': lista.status === 200 && !!alvo,
+      // o doc semeado tem redeDia e eventos, e a telemetria de cima gravou
+      // dispositivos - NENHUM deles pode viajar na lista
+      'a lista NÃO carrega os campos pesados': !!alvo && !itens.some((c) => 'eventos' in c || 'redeDia' in c
+        || 'dispositivos' in c || 'chatMensagens' in c || 'ipHistorico' in c || 'ultimoComandoResultado' in c),
+      'a lista mantém o que os cards usam': !!alvo && 'ultimoHeartbeatEm' in alvo && 'online' in alvo && 'tipo' in alvo,
+      'o detalhe devolve os campos pesados': detalhe.status === 200 && 'redeDia' in det && 'eventos' in det && 'dispositivos' in det,
+      'o painel busca o detalhe só do modal aberto': /buscarDetalheComp/.test(html) && /atualizarDetalheExtraDosModais/.test(html),
+      'o modal renderiza mesclando lista + detalhe': /compComDetalhe\(c\)/.test(html),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okNocResumo = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okNocResumo = false; console.log('  erro: ' + e.message); }
+  if (!okNocResumo) ruins += 1;
+  console.log(`${okNocResumo ? '✓' : '✗'} NOC: lista do poll vai resumida e o detalhe pesado sai só por máquina`);
+
+  // ------------------------------------------------------------------
+  // fechamentosLive: (1) o TTL do cache e LONGO (toda escrita passa pelo
+  // modulo e invalida na hora - reler a maior colecao do banco a cada 5min
+  // era a maior fatia das leituras diarias do Firestore); (2) durante uma
+  // importacao em lote (bravoImport) as invalidacoes ficam SUSPENSAS e uma
+  // so e aplicada no final - sem isso, cada dia gravado fazia a proxima
+  // leitura pagar a colecao inteira de novo.
+  let okCacheFech = false;
+  try {
+    const fs = require('fs');
+    const srcFech = fs.readFileSync(require('path').join(__dirname, 'fechamentosLive.js'), 'utf8');
+    const srcBravo = fs.readFileSync(require('path').join(__dirname, 'bravoImport.js'), 'utf8');
+    const fech = require('/home/user/adyen-monitor/server/fechamentosLive.js');
+
+    // comportamento, medido em documentos lidos de verdade:
+    fech.invalidarCache();
+    let antes = LEITURAS.docs;
+    await fech.listAll();
+    const custoFrio = LEITURAS.docs - antes; // paga a coleção
+
+    fech.suspenderInvalidacao();
+    fech.invalidarCache(); // dentro do lote: tem que ser SEGURADA
+    antes = LEITURAS.docs;
+    await fech.listAll();
+    const custoSuspenso = LEITURAS.docs - antes; // cache segue de pé -> 0
+
+    fech.retomarInvalidacao(); // aplica a invalidação que ficou pendente
+    antes = LEITURAS.docs;
+    await fech.listAll();
+    const custoAposRetomar = LEITURAS.docs - antes; // agora sim relê
+
+    const conferencias = {
+      'leitura fria paga a coleção': custoFrio >= 1,
+      'invalidação suspensa não derruba o cache': custoSuspenso === 0,
+      'retomar aplica a invalidação pendente': custoAposRetomar >= 1,
+      'o TTL virou horas, não minutos': /createCache\(listAllUncached, 6 \* 60 \* 60 \* 1000\)/.test(srcFech),
+      'o import do Bravo grava dentro da suspensão': /suspenderInvalidacao\(\);\s*try \{/.test(srcBravo),
+      'e retoma num finally (mesmo com erro no meio)': /\} finally \{\s*fechamentosLive\.retomarInvalidacao\(\);/.test(srcBravo),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okCacheFech = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (frio=${custoFrio}, suspenso=${custoSuspenso}, retomar=${custoAposRetomar})`);
+  } catch (e) { okCacheFech = false; console.log('  erro: ' + e.message); }
+  if (!okCacheFech) ruins += 1;
+  console.log(`${okCacheFech ? '✓' : '✗'} fechamentosLive: cache longo + invalidação em lote na importação (menos leituras no Firestore)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
