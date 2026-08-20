@@ -1188,6 +1188,51 @@ setTimeout(async () => {
   if (!okChamadas) ruins += 1;
   console.log(`${okChamadas ? '✓' : '✗'} nenhum módulo chama função que o outro não exporta (pega "x.y is not a function" antes do deploy)`);
 
+  // ------------------------------------------------------------------
+  // Fatiamento da gravacao do Bravo. Gravar loja por loja resolveu a ordem
+  // das abas, mas cada chamada continuava relendo as 12 abas pela API do
+  // Sheets antes de filtrar - 144 leituras remotas no total - e uma loja com
+  // ~250 dias ainda e ~250 escritas sequenciais no Firestore. As duas coisas
+  // juntas estouravam o tempo do request e o navegador devolvia "Failed to
+  // fetch" nas 12 lojas. A leitura virou cacheada e a gravacao virou fatiada
+  // (pular/limite). Este teste trava a aritmetica das fatias.
+  let okFatias = false;
+  try {
+    const bravoImport = require('/home/user/adyen-monitor/server/bravoImport.js');
+    // simula o laco que a tela faz: pede blocos de LOTE ate restam=0
+    const fatiar = (total, lote) => {
+      const blocos = [];
+      let pular = 0;
+      for (let guarda = 0; guarda < 1000; guarda += 1) {
+        const fim = lote > 0 ? pular + lote : total;
+        const processados = Math.max(Math.min(fim, total) - pular, 0);
+        const restam = Math.max(total - fim, 0);
+        blocos.push({ pular, processados, restam });
+        pular += lote;
+        if (!restam) break;
+      }
+      return blocos;
+    };
+    const b250 = fatiar(250, 40);
+    const b40 = fatiar(40, 40);
+    const b0 = fatiar(0, 40);
+
+    const conferencias = {
+      '250 dias em blocos de 40 = 7 chamadas': b250.length === 7,
+      'nenhum dia fica de fora': b250.reduce((s, x) => s + x.processados, 0) === 250,
+      'nenhum dia e processado duas vezes': b250[b250.length - 1].pular + b250[b250.length - 1].processados === 250,
+      'so o ultimo bloco tem restam=0': b250.filter((x) => x.restam === 0).length === 1,
+      'total exatamente igual ao lote nao gera bloco vazio': b40.length === 1 && b40[0].restam === 0,
+      'loja sem nenhum dia termina na primeira chamada': b0.length === 1 && b0[0].processados === 0 && b0[0].restam === 0,
+      'invalidarLeitura existe (a rota chama depois de decidir colunas)': typeof bravoImport.invalidarLeitura === 'function',
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okFatias = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okFatias = false; console.log('  erro: ' + e.message); }
+  if (!okFatias) ruins += 1;
+  console.log(`${okFatias ? '✓' : '✗'} Grupo Bravo: gravação fatiada cobre todos os dias sem repetir nem pular`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de

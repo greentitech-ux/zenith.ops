@@ -862,27 +862,57 @@ async function gravarPorLoja(acao){
   const saida = document.getElementById('imp-resultado');
   const btns = ['imp-btn-1','imp-btn-c','imp-btn-2','imp-btn-3','imp-btn-4'].map(id=>document.getElementById(id));
   btns.forEach(b=>{ b.disabled = true; });
+  // Blocos de LOTE dias por chamada. Uma loja pode ter ~250 dias e gravar
+  // tudo numa requisição só volta a estourar o tempo — foi o que gerou
+  // "Failed to fetch" nas 12 lojas. Cada bloco termina em segundos.
+  const LOTE = 40;
+  // uma retentativa por bloco: a primeira chamada do dia paga a leitura da
+  // planilha inteira (as outras saem do cache do servidor) e é a mais
+  // propensa a tropeçar em rede
+  async function chamar(corpo, tentativa){
+    try{
+      const r = await fetch('/api/fechamentos/bravo/importar', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo),
+      });
+      const d = await r.json();
+      if(!r.ok) throw new Error(d.error || ('erro ' + r.status));
+      return d;
+    }catch(e){
+      if(tentativa < 1) return chamar(corpo, tentativa + 1);
+      throw e;
+    }
+  }
+
   const feitos = [];
   for(let i=0;i<lojas.length;i++){
     const loja = lojas[i];
-    saida.innerHTML = `<div class="sub">${rotulo} ${i+1} de ${lojas.length}: <b>${escapeHtml(loja)}</b>…</div>`+
-      feitos.map(f=>`<div style="font-size:11.5px;">${f}</div>`).join('');
+    const acc = { gravados:0, repostos:0, jaExistiam:0, preservados:0, erros:0 };
+    let pular = 0, total = null, falhou = null;
     try{
-      const r = await fetch('/api/fechamentos/bravo/importar', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ acao, confirmar:'GRAVAR', unidade: loja }),
-      });
-      const d = await r.json();
-      if(!r.ok){ feitos.push(`❌ ${escapeHtml(loja)}: ${escapeHtml(d.error||('erro '+r.status))}`); continue; }
+      for(;;){
+        saida.innerHTML = `<div class="sub">${rotulo} ${i+1} de ${lojas.length}: <b>${escapeHtml(loja)}</b>`+
+          (total!=null ? ` — ${Math.min(pular,total)} de ${total} dia(s)` : '')+`…</div>`+
+          feitos.map(f=>`<div style="font-size:11.5px;">${f}</div>`).join('');
+        const d = await chamar({ acao, confirmar:'GRAVAR', unidade: loja, pular, limite: LOTE }, 0);
+        total = d.totalDaLoja;
+        acc.gravados += d.gravados||0;
+        acc.repostos += d.repostos||0;
+        acc.jaExistiam += (d.jaExistiam||[]).length;
+        acc.preservados += (d.preservados||[]).length;
+        acc.erros += (d.erros||[]).length;
+        pular += LOTE;
+        if(!d.restam) break;
+      }
       const partes = [];
-      if(d.gravados) partes.push(`${d.gravados} gravado(s)`);
-      if(d.repostos) partes.push(`${d.repostos} completado(s)`);
-      if((d.jaExistiam||[]).length) partes.push(`${d.jaExistiam.length} já existiam`);
-      if((d.preservados||[]).length) partes.push(`${d.preservados.length} preservado(s)`);
-      if((d.erros||[]).length) partes.push(`<span style="color:var(--bad);">${d.erros.length} com erro</span>`);
-      feitos.push(`✅ ${escapeHtml(loja)} — ${partes.join(' · ') || 'nada a fazer'}`);
+      if(acc.gravados) partes.push(`${acc.gravados} gravado(s)`);
+      if(acc.repostos) partes.push(`${acc.repostos} completado(s)`);
+      if(acc.jaExistiam) partes.push(`${acc.jaExistiam} já existiam`);
+      if(acc.preservados) partes.push(`${acc.preservados} preservado(s)`);
+      if(acc.erros) partes.push(`<span style="color:var(--bad);">${acc.erros} com erro</span>`);
+      feitos.push(`✅ ${escapeHtml(loja)} (${total||0} dia(s)) — ${partes.join(' · ') || 'nada a fazer'}`);
     }catch(e){
-      feitos.push(`❌ ${escapeHtml(loja)}: ${escapeHtml(e.message)}`);
+      falhou = e.message;
+      feitos.push(`❌ ${escapeHtml(loja)}: ${escapeHtml(falhou)} — parou no dia ${pular}, o que já entrou está salvo`);
     }
   }
   saida.innerHTML = `<div style="color:var(--ok);font-size:12.5px;margin-bottom:6px;">Terminou as ${lojas.length} loja(s).</div>`+
