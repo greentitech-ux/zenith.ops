@@ -95,6 +95,7 @@ function renderDetalhe(d){
   const linhas = [];
   linhas.push(`<div class="titulo-form">${escapeHtml(d.titulo)}</div>`);
   linhas.push(`<div class="campo"><b>UNIDADE:</b> ${escapeHtml(d.unidade)}</div>`);
+  if(d.razaoSocial && d.razaoSocial !== d.unidade) linhas.push(`<div class="campo"><b>RAZÃO SOCIAL:</b> ${escapeHtml(d.razaoSocial)}</div>`);
   d.cabecalho.forEach(c=>{
     if(d.campos[c.key]) linhas.push(`<div class="campo"><b>${escapeHtml(c.label)}:</b> ${escapeHtml(d.campos[c.key])}</div>`);
   });

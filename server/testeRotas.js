@@ -1777,8 +1777,10 @@ setTimeout(async () => {
     const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
     const criado = await postarJson('/api/formularios', {
-      tipo: 'avulso', unidade: 'Dominos Bessa',
-      campos: { cnpj: '11.222.333/0001-44', fornecedor: 'Padaria Central', chavePix: 'pix@padaria.com' },
+      tipo: 'avulso', unidade: "Domino's Bessa - João Pessoa",
+      // o cnpj mandado aqui é ERRADO de propósito: o servidor tem que
+      // ignorar e usar o do cadastro fixo (UNIDADES_FORM)
+      campos: { cnpj: '99.999.999/9999-99', fornecedor: 'Padaria Central', chavePix: 'pix@padaria.com' },
       linhas: [{ data: '20/08/2026', descricao: 'Pães para evento', valor: '150,50' }, { data: '20/08/2026', descricao: 'Bolo', valor: '87,22' }],
     }, cab);
     const f = criado.status === 200 ? JSON.parse(criado.corpo) : {};
@@ -1800,7 +1802,7 @@ setTimeout(async () => {
 
     // diárias: cada linha da tabela vira um slot próprio de assinatura
     const diarias = await postarJson('/api/formularios', {
-      tipo: 'diarias', unidade: 'Dominos Bessa', campos: { cnpj: '11.222.333/0001-44' },
+      tipo: 'diarias', unidade: "Domino's Bessa - João Pessoa", campos: {},
       linhas: [{ nome: 'Carlos', datas: '18 e 19/08', chavePix: 'c@x', banco: 'BB', valor: '120' }, { nome: 'Ana', datas: '19/08', chavePix: 'a@x', banco: 'Nubank', valor: '60' }],
     }, cab);
     const dDiarias = diarias.status === 200 ? JSON.parse(diarias.corpo) : {};
@@ -1812,6 +1814,9 @@ setTimeout(async () => {
       'criar devolve um link de assinatura por papel': criado.status === 200
         && !!(linkDe('fornecedor') && linkDe('fornecedor').link) && !!(linkDe('gerente') && linkDe('gerente').link),
       'o total soma a coluna de valor (pt-BR)': f.valorTotal === 237.72,
+      'CNPJ e razão social vêm do cadastro fixo (ignora o que o navegador mandou)':
+        f.campos && f.campos.cnpj === '59.449.391/0001-79' && f.razaoSocial === 'America Bessa',
+      'unidade fora do cadastro é recusada': (await postarJson('/api/formularios', { tipo: 'avulso', unidade: 'Loja Inventada', campos: {}, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }, cab)).status === 400,
       'o link público mostra o formulário e o papel de quem abriu': vista.status === 200 && dVista.meuPapel === 'fornecedor' && dVista.jaAssinei === false,
       'token errado é recusado': tokenErrado.status === 404,
       'as duas assinaturas completam o formulário': ass1.status === 200 && ass2.status === 200 && dAss2.completo === true,

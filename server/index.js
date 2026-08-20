@@ -2882,6 +2882,11 @@ app.get('/api/formularios/tipos', requireSection('formularios'), (req, res) => {
   })));
 });
 
+// cadastro fixo unidade -> razão social + CNPJ (preenchimento sem edição)
+app.get('/api/formularios/unidades', requireSection('formularios'), (req, res) => {
+  res.json(formularios.UNIDADES_FORM);
+});
+
 app.post('/api/formularios', requireSection('formularios'), async (req, res) => {
   try {
     const criado = await formularios.criar({
