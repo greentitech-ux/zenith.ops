@@ -1348,6 +1348,40 @@ setTimeout(async () => {
   if (!okDoisPassosFoto) ruins += 1;
   console.log(`${okDoisPassosFoto ? '✓' : '✗'} Foto do relatório: escolher e ler são dois passos (escolher não envia nada)`);
 
+  // ------------------------------------------------------------------
+  // Gravar do Bravo tem que RECONCILIAR, nao "inserir se nao existir". As
+  // primeiras importacoes (antes das correcoes de ordem de aba, timeout e
+  // mescla) deixaram dias gravados pela metade; numa segunda passada esses
+  // dias caiam em "jaExistiam" e eram pulados, entao o valor errado ficava la
+  // pra sempre - o buraco no meio do grafico de Bessa/Tirol/Garanhuns/MilkyMoo.
+  let okReconciliar = false;
+  try {
+    const fs = require('fs');
+    const src = fs.readFileSync(require('path').join(__dirname, 'bravoImport.js'), 'utf8');
+    const assinatura = (src.match(/async function importar\(\{[^}]*\}/) || [''])[0];
+
+    const bravoImport = require('/home/user/adyen-monitor/server/bravoImport.js');
+    // chamada sem confirmar tem que ser recusada - a trava de seguranca segue
+    let recusou = false;
+    try { await bravoImport.importar({}); } catch (e) { recusou = /não confirmada/i.test(e.message); }
+
+    const html = fs.readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+    const conferencias = {
+      'importar() reconcilia por padrão (repor = true)': /repor\s*=\s*true/.test(assinatura),
+      'sem confirmar continua recusando': recusou,
+      'a tela devolve os meses vazios DA PLANILHA': /mesesVaziosNaPlanilha/.test(src) && /mesesVaziosNaPlanilha/.test(html),
+      'a tela devolve o período coberto pela planilha': /primeiraData/.test(src) && /primeiraData/.test(html),
+      'o botão 4 fala em atualizar, não só gravar': /4 · Gravar \/ atualizar tudo/.test(html),
+      // no HTML o class vem ANTES do id nesse botao - pega a tag inteira
+      'o passo 5 saiu da frente do usuário': /\bhidden\b/.test((html.match(/<button[^>]*id="imp-btn-4"[^>]*>/) || [''])[0]),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okReconciliar = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okReconciliar = false; console.log('  erro: ' + e.message); }
+  if (!okReconciliar) ruins += 1;
+  console.log(`${okReconciliar ? '✓' : '✗'} Grupo Bravo: gravar reconcilia todo dia contra a planilha (não pula o que já existe)`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de

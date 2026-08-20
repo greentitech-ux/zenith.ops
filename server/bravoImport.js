@@ -1023,7 +1023,18 @@ const MARCA_IMPORTACAO = 'importação da planilha (Grupo Bravo)';
 // termina rapido, o progresso aparece e uma falha no meio nao leva junto o
 // que ja entrou. Sem o parametro o comportamento e o de antes (tudo de uma
 // vez), que continua valendo pra base pequena.
-async function importar({ confirmar, repor = false, unidade = null, pular = 0, limite = 0 } = {}) {
+// repor=true por PADRAO: gravar passou a ser uma reconciliacao, nao um
+// "inserir se nao existir". O motivo esta na tela do usuario - as primeiras
+// importacoes (antes das correcoes de ordem de aba, timeout e mescla)
+// deixaram dias gravados PELA METADE. Numa segunda passada esses dias caiam
+// em "jaExistiam" e eram pulados, entao o valor errado ficava la pra sempre:
+// e exatamente o buraco no meio do grafico de Bessa, Tirol, Garanhuns e
+// MilkyMoo. Agora todo dia e conferido contra a planilha.
+//
+// Continua sem risco pro trabalho de ninguem: so registro criado pela PROPRIA
+// importacao e substituido. Fechamento que uma pessoa lancou a mao entra em
+// "preservados" e nao e tocado.
+async function importar({ confirmar, repor = true, unidade = null, pular = 0, limite = 0 } = {}) {
   if (confirmar !== 'GRAVAR') {
     throw new Error('Importação não confirmada. Rode a simulação, confira os totais e mande confirmar: "GRAVAR".');
   }
@@ -1049,9 +1060,31 @@ async function importar({ confirmar, repor = false, unidade = null, pular = 0, l
   const inicio = Math.max(0, Number(pular) || 0);
   const fim = limite > 0 ? inicio + Number(limite) : daLoja.length;
   const lancamentos = daLoja.slice(inicio, fim);
+  // meses SEM NENHUMA linha na planilha, entre a primeira e a ultima data da
+  // loja. Se sobrar buraco no grafico depois de reconciliar, e aqui que se ve
+  // se a planilha simplesmente nao tem aquele mes - em vez de virar mais uma
+  // rodada de adivinhacao.
+  const mesesVaziosDaLoja = (() => {
+    if (!daLoja.length) return [];
+    const meses = new Set(daLoja.map((l) => l.data.slice(0, 7)));
+    const datas = daLoja.map((l) => l.data).sort();
+    const [ai, mi] = datas[0].slice(0, 7).split('-').map(Number);
+    const [af, mf] = datas[datas.length - 1].slice(0, 7).split('-').map(Number);
+    const vazios = [];
+    for (let ano = ai, m = mi; ano < af || (ano === af && m <= mf);) {
+      const chave = `${ano}-${String(m).padStart(2, '0')}`;
+      if (!meses.has(chave)) vazios.push(chave);
+      m += 1; if (m > 12) { m = 1; ano += 1; }
+    }
+    return vazios;
+  })();
+
   const resultado = {
     unidade,
     totalDaLoja: daLoja.length,
+    primeiraData: daLoja.length ? daLoja.map((l) => l.data).sort()[0] : null,
+    ultimaData: daLoja.length ? daLoja.map((l) => l.data).sort().slice(-1)[0] : null,
+    mesesVaziosNaPlanilha: mesesVaziosDaLoja,
     processados: lancamentos.length,
     restam: Math.max(daLoja.length - fim, 0),
     gravados: 0, repostos: 0, jaExistiam: [], preservados: [], erros: [], problemas,

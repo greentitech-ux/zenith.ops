@@ -226,14 +226,17 @@
       <button type="button" class="back" id="imp-btn-1" onclick="importBravo('simular')" style="cursor:pointer;">1 · Conferir (não grava)</button>
       <button type="button" class="back" id="imp-btn-c" onclick="importBravo('analisar-colunas')" style="cursor:pointer;" disabled>2 · Conferir as colunas</button>
       <button type="button" class="back" id="imp-btn-2" onclick="importBravo('cadastrar-campos')" style="cursor:pointer;" disabled>3 · Preparar os grupos</button>
-      <button type="button" class="back" id="imp-btn-3" onclick="importBravo('gravar')" style="cursor:pointer;">4 · Gravar no banco</button>
-      <button type="button" class="back" id="imp-btn-4" onclick="importBravo('repor')" style="cursor:pointer;">5 · Completar o que faltou</button>
+      <button type="button" class="back" id="imp-btn-3" onclick="importBravo('gravar')" style="cursor:pointer;">4 · Gravar / atualizar tudo</button>
+      <!-- o antigo passo 5 ("Completar o que faltou") sumiu: gravar passou a
+           conferir TODO dia contra a planilha, entao nao existe mais um estado
+           "gravado pela metade" pra consertar depois. O botao continua no DOM,
+           escondido, so pra não quebrar quem tiver a pagina velha aberta. -->
+      <button type="button" class="back hidden" id="imp-btn-4" onclick="importBravo('repor')" style="cursor:pointer;">5 · Completar o que faltou</button>
     </div>
     <div class="sub" style="margin-top:8px;font-size:11.5px;">
-      O passo 5 só é necessário se a planilha tinha <b>mais de uma linha no mesmo dia</b> pra mesma loja
-      (sangria lançada à parte, turno dividido em duas linhas). Nesse caso a primeira gravação trouxe só um
-      pedaço do dia. O passo 5 junta as linhas e troca o dia pela versão completa — e nunca mexe em
-      fechamento que uma pessoa lançou à mão.
+      O passo 4 pode ser repetido quantas vezes quiser: ele confere <b>cada dia</b> contra a planilha e
+      corrige o que estiver diferente — inclusive dia que entrou pela metade numa tentativa anterior.
+      Fechamento que uma <b>pessoa</b> lançou à mão nunca é sobrescrito (aparece como "preservado").
     </div>
     <div id="imp-resultado" style="margin-top:12px;"></div>
     <div id="imp-colunas" style="margin-top:12px;"></div>
@@ -873,8 +876,8 @@ async function gravarPorLoja(acao){
   }
   const lojas = UNIDADES_IMPORT.slice();
   if(!lojas.length){ alert('A planilha não devolveu nenhuma loja. Rode o passo 1 (Conferir) pra ver o motivo.'); return; }
-  const rotulo = acao === 'repor' ? 'Completando' : 'Gravando';
-  if(!confirm(`${rotulo} ${lojas.length} loja(s), uma de cada vez.\n\nOs grupos são preparados automaticamente antes (passo 3).\n\nPode levar alguns minutos. Não feche a página — o progresso aparece na tela e o que já entrou não se perde se algo falhar no meio.`)) return;
+  const rotulo = acao === 'repor' ? 'Completando' : 'Gravando/atualizando';
+  if(!confirm(`${rotulo} ${lojas.length} loja(s), uma de cada vez.\n\nCada dia é conferido contra a planilha e corrigido se estiver diferente. Fechamento lançado à mão por uma pessoa não é tocado.\n\nOs grupos são preparados automaticamente antes. Pode levar alguns minutos — não feche a página.`)) return;
 
   const saida = document.getElementById('imp-resultado');
   const btns = ['imp-btn-1','imp-btn-c','imp-btn-2','imp-btn-3','imp-btn-4'].map(id=>document.getElementById(id));
@@ -925,7 +928,7 @@ async function gravarPorLoja(acao){
   for(let i=0;i<lojas.length;i++){
     const loja = lojas[i];
     const acc = { gravados:0, repostos:0, jaExistiam:0, preservados:0, erros:0 };
-    let pular = 0, total = null, falhou = null;
+    let pular = 0, total = null, falhou = null, info = null;
     try{
       for(;;){
         saida.innerHTML = `<div class="sub">${rotulo} ${i+1} de ${lojas.length}: <b>${escapeHtml(loja)}</b>`+
@@ -933,6 +936,7 @@ async function gravarPorLoja(acao){
           feitos.map(f=>`<div style="font-size:11.5px;">${f}</div>`).join('');
         const d = await chamar({ acao, confirmar:'GRAVAR', unidade: loja, pular, limite: LOTE }, 0);
         total = d.totalDaLoja;
+        if(!info) info = { primeira:d.primeiraData, ultima:d.ultimaData, vazios:d.mesesVaziosNaPlanilha||[] };
         acc.gravados += d.gravados||0;
         acc.repostos += d.repostos||0;
         acc.jaExistiam += (d.jaExistiam||[]).length;
@@ -943,11 +947,16 @@ async function gravarPorLoja(acao){
       }
       const partes = [];
       if(acc.gravados) partes.push(`${acc.gravados} gravado(s)`);
-      if(acc.repostos) partes.push(`${acc.repostos} completado(s)`);
+      if(acc.repostos) partes.push(`${acc.repostos} atualizado(s)`);
       if(acc.jaExistiam) partes.push(`${acc.jaExistiam} já existiam`);
       if(acc.preservados) partes.push(`${acc.preservados} preservado(s)`);
       if(acc.erros) partes.push(`<span style="color:var(--bad);">${acc.erros} com erro</span>`);
-      feitos.push(`✅ ${escapeHtml(loja)} (${total||0} dia(s)) — ${partes.join(' · ') || 'nada a fazer'}`);
+      // periodo e meses vazios vem da PLANILHA: se sobrar buraco no gráfico, é
+      // aqui que se vê se a planilha simplesmente não tem aquele mês
+      const periodo = info && info.primeira ? ` ${info.primeira} a ${info.ultima}` : '';
+      const vazios = info && info.vazios.length
+        ? ` <span style="color:var(--warn);">· sem nada na planilha em ${escapeHtml(info.vazios.join(', '))}</span>` : '';
+      feitos.push(`✅ ${escapeHtml(loja)} (${total||0} dia(s)${periodo}) — ${partes.join(' · ') || 'nada a fazer'}${vazios}`);
     }catch(e){
       falhou = e.message;
       feitos.push(`❌ ${escapeHtml(loja)}: ${escapeHtml(falhou)} — parou no dia ${pular}, o que já entrou está salvo`);
