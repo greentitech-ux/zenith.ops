@@ -10178,6 +10178,10 @@ function aquecerBoot(promessa, ms) {
             .catch((err) => console.error('Erro no push de alerta de disco:', err.message));
           continue;
         }
+        // celular que fechou o navegador num posto 'interno' não é loja caída
+        // (ver quedaDeCelular em lojaStatus.js) - o NOC mostra a transição,
+        // mas ninguém é acordado com push por causa disso
+        if (t.celular) continue;
         if (t.tipo === 'offline') push.notifyLojaOffline(nome, t.codigo, t.nome, t.posto).catch((err) => console.error('Erro no push de loja offline:', err.message));
         else push.notifyLojaVoltou(nome, t.codigo, t.nome, t.posto).catch((err) => console.error('Erro no push de loja online:', err.message));
       }

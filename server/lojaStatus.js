@@ -959,6 +959,23 @@ async function responderChat(codigo, posto, texto, token) {
 // considera computadores que ja mandaram heartbeat alguma vez, senao todo
 // computador cadastrado mas ainda nao aberto no navegador da loja apareceria
 // como "caido" desde sempre
+// Celular navegando não é máquina de loja. Num posto 'interno', a batida
+// certa vem do computador de verdade (navegador desktop) ou do vigia
+// ("NOCZenith/1.0 (Windows NT; PowerShell)") - se a ÚLTIMA batida veio de um
+// navegador de CELULAR, foi alguém abrindo o Zenith no telefone com o
+// monitoramento fixo gravado, e a "queda" é só a pessoa fechando o navegador
+// ou bloqueando a tela. Registra o evento normalmente (fica no histórico do
+// NOC), mas a transição sai marcada pra NÃO virar push de "Loja sem conexão".
+// A tela de login (index.html) também parou de mandar heartbeat de celular,
+// mas isso só vale depois que cada aparelho recarregar a página - este filtro
+// cobre a janela e qualquer celular antigo com a página em cache.
+function ehCelular(userAgent) {
+  return /Android|iPhone|iPod|IEMobile|Opera Mini|Mobile/i.test(String(userAgent || ''));
+}
+function quedaDeCelular(doc) {
+  return doc.tipo === 'interno' && ehCelular(doc.userAgent);
+}
+
 async function varrerAlertas() {
   const docs = await listUncached();
   const transicoes = [];
@@ -1032,7 +1049,7 @@ async function varrerAlertas() {
         offlineDesde: doc.ultimoHeartbeatEm,
         eventos: [...(doc.eventos || []), evento].slice(-EVENTOS_MAX),
       });
-      transicoes.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'offline' });
+      transicoes.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'offline', celular: quedaDeCelular(doc) });
     } else if (online && doc.avisadoOffline) {
       // no retorno o doc ja tem o IP NOVO (o heartbeat que provou que voltou
       // tambem gravou o ip) - junto com o retrato do evento 'offline', o
@@ -1045,7 +1062,7 @@ async function varrerAlertas() {
         avisadoOffline: false, offlineDesde: null,
         eventos: [...(doc.eventos || []), evento].slice(-EVENTOS_MAX),
       });
-      transicoes.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'online' });
+      transicoes.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'online', celular: quedaDeCelular(doc) });
     }
   }
   if (transicoes.length) cache.invalidar();
@@ -1114,7 +1131,7 @@ async function flushHeartbeatsPendentes() {
 module.exports = {
   flushHeartbeatsPendentes,
   heartbeat, listar, listarResumo, detalhar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
-  definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR,
+  definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR, ehCelular,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
   enfileirarComando, enfileirarComandoEmTodos, COMANDO_LIMPAR_TRAVADOS,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,

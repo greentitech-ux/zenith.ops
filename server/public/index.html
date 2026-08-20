@@ -356,6 +356,16 @@ async function heartbeatLoja(codigo, posto){
 // em diante, mesmo se o icone reabrir a URL pelada, o monitoramento
 // continua vindo do que foi salvo nesse mesmo computador/perfil do Chrome
 function iniciarHeartbeatLoja(){
+  // celular NUNCA vira monitor de presença: quem abre o Zenith no celular é
+  // uma pessoa navegando, que fecha o navegador/bloqueia a tela toda hora -
+  // se o aparelho gravar o zenithMonitorFixo (bastava abrir UM link com
+  // ?unidade=&posto=), cada bloqueio vira alarme falso de "loja sem
+  // conexão". Além de não monitorar, apaga a configuração que esse aparelho
+  // possa ter gravado no passado.
+  if(/Android|iPhone|iPod|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent)){
+    try{ localStorage.removeItem('zenithMonitorFixo'); }catch(e){}
+    return;
+  }
   const params = new URLSearchParams(location.search);
   let unidade = params.get('unidade');
   let posto = params.get('posto');
