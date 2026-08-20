@@ -824,6 +824,15 @@ app.get('/api/formularios-publico/:id/pdf', async (req, res) => {
   formularios.gerarPdf(registro, res);
 });
 
+// comprovantes anexados na criação - o assinante confere antes de assinar
+app.get('/api/formularios-publico/:id/anexo/:indice', async (req, res) => {
+  const registro = await formularios.getOne(req.params.id);
+  if (!registro || !formularios.chaveDoToken(registro, req.query.token)) return res.status(404).json({ error: 'Link inválido ou revogado.' });
+  const anexo = (registro.anexos || [])[Number(req.params.indice)];
+  if (!anexo) return res.sendStatus(404);
+  storage.streamArquivo(anexo.path, anexo.tipo, res);
+});
+
 // lado do VISITANTE do chat de suporte (widget de canto, ver suporte-chat.js) -
 // publico de proposito (Ajuda #212: "logado ou nao"), por isso fica ACIMA do
 // app.use('/api', auth.requireAuth) logo abaixo. acionarBeniboy() e uma
@@ -2887,10 +2896,27 @@ app.get('/api/formularios/unidades', requireSection('formularios'), (req, res) =
   res.json(formularios.UNIDADES_FORM);
 });
 
-app.post('/api/formularios', requireSection('formularios'), async (req, res) => {
+// memória de favorecido: digitou um CPF/CNPJ já usado antes -> devolve os
+// dados bancários salvos na última vez pro front preencher sozinho.
+// Registrada ANTES de /api/formularios/:id pra não cair no :id.
+app.get('/api/formularios/favorecido', requireSection('formularios'), async (req, res) => {
+  const achado = await formularios.buscarFavorecido(req.query.doc);
+  if (!achado) return res.status(404).json({ error: 'Nenhum favorecido salvo com esse documento.' });
+  res.json(achado);
+});
+
+app.post('/api/formularios', requireSection('formularios'), upload.array('anexos', 5), async (req, res) => {
   try {
+    const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
+    const anexos = [];
+    for (const file of req.files || []) {
+      const tipoOk = /^image\//.test(file.mimetype || '') || file.mimetype === 'application/pdf';
+      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF nem imagem.` });
+      const path = await storage.salvarArquivo(payload.unidade || 'geral', file, 'formularios');
+      anexos.push({ nome: file.originalname, path, tipo: file.mimetype });
+    }
     const criado = await formularios.criar({
-      tipo: req.body.tipo, unidade: req.body.unidade, campos: req.body.campos, linhas: req.body.linhas,
+      tipo: payload.tipo, unidade: payload.unidade, campos: payload.campos, linhas: payload.linhas, anexos,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
     });
     res.json(formularioComLinks(criado));
@@ -2909,6 +2935,13 @@ app.get('/api/formularios/:id/pdf', requireSection('formularios'), async (req, r
   const registro = await formularios.getOne(req.params.id);
   if (!registro) return res.status(404).json({ error: 'Formulário não encontrado.' });
   formularios.gerarPdf(registro, res);
+});
+
+app.get('/api/formularios/:id/anexo/:indice', requireSection('formularios'), async (req, res) => {
+  const registro = await formularios.getOne(req.params.id);
+  const anexo = registro && (registro.anexos || [])[Number(req.params.indice)];
+  if (!anexo) return res.sendStatus(404);
+  storage.streamArquivo(anexo.path, anexo.tipo, res);
 });
 
 app.delete('/api/formularios/:id', auth.requireMaster, async (req, res) => {

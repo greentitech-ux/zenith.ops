@@ -20,6 +20,12 @@ const db = require('./firestore');
 const { createCache } = require('./liveCache');
 
 const COLLECTION = db.collection('formularios');
+// memoria de FAVORECIDO por documento (CPF do colaborador no Reembolso,
+// CNPJ do fornecedor no Avulso): todo formulario criado grava/atualiza os
+// dados bancarios daquele documento, e a tela preenche sozinha quando o
+// mesmo CPF/CNPJ for digitado de novo (pedido do Master: "quando o CPF foi
+// inserido ja, deixar salvo")
+const FAVORECIDOS = db.collection('formularioFavorecidos');
 
 // Modelo de cada tipo: campos do cabeçalho, colunas da tabela e quem
 // assina - transcrição fiel dos 4 PDFs originais enviados pelo Master.
@@ -85,7 +91,7 @@ const TIPOS = {
     titulo: 'SOLICITAÇÃO DE REEMBOLSO',
     cabecalho: [
       { key: 'cnpj', label: 'CNPJ' },
-      { key: 'colaborador', label: 'NOME DO COLABORADOR' },
+      { key: 'colaborador', label: 'FAVORECIDO' },
       { key: 'cpf', label: 'CPF' },
       { key: 'banco', label: 'BANCO' },
       { key: 'agencia', label: 'AGÊNCIA' },
@@ -131,6 +137,33 @@ const MAX_LINHAS = 20;
 const MAX_IMAGEM_CHARS = 300000;
 
 function limpar(v, max = 120) { return String(v == null ? '' : v).trim().slice(0, max); }
+function soDigitos(v) { return String(v || '').replace(/\D/g, ''); }
+
+// nunca derruba a criacao do formulario: aprender o favorecido e bonus
+async function salvarFavorecido(campos) {
+  try {
+    const cpf = soDigitos(campos.cpf);
+    const cnpj = soDigitos(campos.cnpjFornecedor);
+    const chave = cpf.length === 11 ? cpf : (cnpj.length === 14 ? cnpj : null);
+    if (!chave) return;
+    const dados = {
+      doc: chave,
+      nome: campos.colaborador || campos.fornecedor || null,
+      cpf: campos.cpf || null, cnpjFornecedor: campos.cnpjFornecedor || null,
+      banco: campos.banco || null, agencia: campos.agencia || null, conta: campos.conta || null,
+      chavePix: campos.chavePix || null,
+      atualizadoEm: new Date().toISOString(),
+    };
+    await FAVORECIDOS.doc(chave).set(dados, { merge: true });
+  } catch (e) { /* memoria de favorecido e best-effort */ }
+}
+
+async function buscarFavorecido(docBruto) {
+  const chave = soDigitos(docBruto);
+  if (chave.length !== 11 && chave.length !== 14) return null;
+  const snap = await FAVORECIDOS.doc(chave).get();
+  return snap.exists ? snap.data() : null;
+}
 
 // aceita número ou texto pt-BR ("1.234,56", "R$ 237,72")
 function parseValor(v) {
@@ -181,7 +214,7 @@ async function detalhar(id) {
   return base;
 }
 
-async function criar({ tipo, unidade, campos, linhas, criadoPorId, criadoPorEmail }) {
+async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criadoPorEmail }) {
   const modelo = TIPOS[tipo];
   if (!modelo) throw new Error('Tipo de formulário inválido.');
   const unidadeOk = limpar(unidade, 80);
@@ -220,15 +253,22 @@ async function criar({ tipo, unidade, campos, linhas, criadoPorId, criadoPorEmai
   }
   modelo.assinantes.forEach((a) => slot(a.papel, a.rotulo));
 
+  // comprovantes da solicitacao (PDF/imagem) - ja salvos no Storage pela
+  // rota, aqui entra so a referencia
+  const anexosOk = (Array.isArray(anexos) ? anexos : []).slice(0, 5)
+    .map((a) => ({ nome: limpar(a.nome, 120) || 'anexo', path: String(a.path || ''), tipo: limpar(a.tipo, 80) }))
+    .filter((a) => a.path);
+
   const doc = COLLECTION.doc();
   const registro = {
     id: doc.id, tipo, unidade: unidadeOk, razaoSocial: cadastro.razaoSocial,
-    campos: camposOk, linhas: linhasOk, valorTotal,
+    campos: camposOk, linhas: linhasOk, valorTotal, anexos: anexosOk,
     assinaturas, status: 'PENDENTE',
     criadoEm: new Date().toISOString(), criadoPorId: criadoPorId || null, criadoPorEmail: criadoPorEmail || null,
   };
   await doc.set(registro);
   cache.invalidar();
+  await salvarFavorecido(camposOk);
   return detalhar(doc.id);
 }
 
@@ -253,6 +293,7 @@ async function vistaPublica(id, token) {
     unidade: r.unidade, razaoSocial: r.razaoSocial || null, campos: r.campos, linhas: r.linhas, valorTotal: r.valorTotal,
     colunas: TIPOS[r.tipo].colunas, cabecalho: TIPOS[r.tipo].cabecalho,
     status: r.status, criadoEm: r.criadoEm,
+    anexos: (r.anexos || []).map((an, i) => ({ nome: an.nome, indice: i })),
     meuPapel: chave, meuRotulo: a.rotulo, jaAssinei: !!a.imagem,
     assinaturas: Object.values(r.assinaturas).map((s) => ({ rotulo: s.rotulo, assinado: !!s.imagem })),
   };
@@ -388,8 +429,12 @@ function gerarPdf(r, res) {
   if (modelo.obs) {
     doc.font('Helvetica-Oblique').fontSize(8).fillColor('#333').text(modelo.obs, X, yAssin + 40, { width: LARGURA });
   }
+  if ((r.anexos || []).length) {
+    doc.font('Helvetica').fontSize(8).fillColor('#333')
+      .text(`Anexos (${r.anexos.length}): ${r.anexos.map((a) => a.nome).join(' · ')}`, X, yAssin + (modelo.obs ? 62 : 40), { width: LARGURA });
+  }
 
   doc.end();
 }
 
-module.exports = { TIPOS, UNIDADES_FORM, criar, listar, detalhar, getOne, vistaPublica, assinar, remover, gerarPdf, chaveDoToken, parseValor };
+module.exports = { TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, remover, gerarPdf, chaveDoToken, parseValor };

@@ -103,6 +103,7 @@ function renderDetalhe(d){
   const trs = d.linhas.map(l=>'<tr>'+d.colunas.map(c=>`<td style="${c.valor?'text-align:right;font-family:var(--mono);':''}">${c.valor?fmtMoney(l[c.key]):escapeHtml(l[c.key])}</td>`).join('')+'</tr>').join('');
   linhas.push(`<div class="tabela-wrap"><table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></div>`);
   linhas.push(`<div class="total"><b>TOTAL: ${fmtMoney(d.valorTotal)}</b></div>`);
+  if((d.anexos||[]).length) linhas.push(`<div class="andamento">📎 Comprovantes: ${d.anexos.map(a=>`<a href="/api/formularios-publico/${encodeURIComponent(FORM)}/anexo/${a.indice}?token=${encodeURIComponent(TOKEN)}" target="_blank" style="color:var(--accent);">${escapeHtml(a.nome)}</a>`).join(' · ')}</div>`);
   linhas.push(`<div class="andamento">Assinaturas: ${d.assinaturas.map(a=>`${a.assinado?'✅':'✍️'} ${escapeHtml(a.rotulo)}`).join(' · ')}</div>`);
   document.getElementById('detalhe').innerHTML = linhas.join('');
 }
