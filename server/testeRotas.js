@@ -1382,6 +1382,33 @@ setTimeout(async () => {
   if (!okReconciliar) ruins += 1;
   console.log(`${okReconciliar ? '✓' : '✗'} Grupo Bravo: gravar reconcilia todo dia contra a planilha (não pula o que já existe)`);
 
+  // ------------------------------------------------------------------
+  // Reordenar coluna arrastando o PROPRIO cabecalho da tabela. A
+  // reordenacao ja existia, mas so dentro do modal 🧩 Colunas - lugar onde
+  // ninguem procura. O arrasto no cabecalho tem que usar o MESMO estado e a
+  // MESMA gravacao (nada de segunda fonte de verdade), e Data/Unid. nao
+  // podem arrastar (sao as ancoras da tabela).
+  let okArrastoColuna = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+    const semEspaco = html.replace(/\s+/g, ' ');
+    const conferencias = {
+      'o cabeçalho vira arrastável': /class="th-move" draggable="true" data-col=/.test(semEspaco),
+      'Data e Unid. seguem fora do arrasto': /const fixa = \(k\)=> k==='data' \|\| k==='unidadeNome'/.test(semEspaco),
+      'soltar reordena e grava': /function soltarColunaTabela[\s\S]*?persistirColunas\(\)/.test(html),
+      'a gravação é compartilhada com o seletor': (html.match(/persistirColunas\(\)/g) || []).length >= 2
+        && /function persistirColunas\(\)/.test(html),
+      'a ordem continua indo pro relatório': /params\.set\('ordem', ORDEM_COLUNAS\.join\(','\)\)/.test(html),
+      'a ordem continua sendo salva no servidor': /\/api\/preferencias\/'\+PREF_COLUNAS/.test(html),
+      'existe pista visual de que dá pra arrastar': /th\.th-move\{cursor:grab/.test(semEspaco),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okArrastoColuna = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okArrastoColuna = false; console.log('  erro: ' + e.message); }
+  if (!okArrastoColuna) ruins += 1;
+  console.log(`${okArrastoColuna ? '✓' : '✗'} Fechamentos: coluna se move arrastando o cabeçalho, com a mesma gravação do seletor`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de

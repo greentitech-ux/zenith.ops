@@ -157,6 +157,9 @@
      (0,1,1) - maior que a de uma classe sozinha. Sem este seletor mais
      especifico, CADA checkbox do seletor de colunas esticava pra largura
      inteira da linha e empurrava o nome da coluna pra fora da tela. */
+  th.th-move{cursor:grab;user-select:none;}
+  th.th-move:active{cursor:grabbing;}
+  th.th-move:hover{text-decoration:underline dotted;text-underline-offset:3px;}
   .fech-modal #colunas-lista input[type=checkbox]{flex:none;width:auto;margin:0;padding:0;cursor:pointer;}
   /* celula de largura fixa pros dois checks de visibilidade (Tela/Relat.):
      e ela, nao o checkbox, que garante o alinhamento com o cabecalho */
@@ -2106,7 +2109,20 @@ function tabelaFechamentosHtml(rows){
     { key:'observacao', label:'Observação', td:d=>`<td class="truncate" title="${escapeHtml(d.observacao||d.obsDif||'')}">${escapeHtml(d.observacao||d.obsDif||'—')}</td>` },
   ]).filter(c=>colVisivel(c.key));
 
-  const thead = defs.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('') + (IS_MASTER ? '<th>Ações</th>' : '');
+  // Cabecalho ARRASTAVEL. A reordenacao ja existia, mas so dentro do modal
+  // 🧩 Colunas - lugar onde ninguem procura. Aqui e o mesmo estado e a mesma
+  // gravacao, so que na interacao que a pessoa espera: pegar a coluna e
+  // arrastar. Data e Unid. nao arrastam (sao ancoras da tabela, mesma regra
+  // do ordenarPorPreferencia).
+  const fixa = (k)=> k==='data' || k==='unidadeNome';
+  const thead = defs.map(c=>{
+    if(fixa(c.key)) return `<th>${escapeHtml(c.label)}</th>`;
+    return `<th class="th-move" draggable="true" data-col="${escapeHtml(c.key)}"`
+      + ` ondragstart="arrastarColunaTabela(event)" ondragover="event.preventDefault()"`
+      + ` ondrop="soltarColunaTabela(event)" ondragend="fimArrastoColunaTabela(event)"`
+      + ` title="Arraste para mudar a coluna de lugar — a posição vale também nos relatórios CSV/PDF e fica salva">`
+      + `${escapeHtml(c.label)}</th>`;
+  }).join('') + (IS_MASTER ? '<th>Ações</th>' : '');
   const corpo = rows.map(d=>
     `<tr>${defs.map(c=>c.td(d)).join('')}${IS_MASTER ? `<td>${d.criadoPorId ? `
         <button type="button" class="acao-btn" title="Editar" onclick="abrirEdicaoFechamento('${d.id}')">✏️</button>
@@ -2261,7 +2277,14 @@ function salvarColunas(){
   // mas a escolha ja esta valendo aqui e no espelho local
   fecharSeletorColunas();
   renderTabela(filtrar());
-  fetch('/api/preferencias/'+PREF_COLUNAS, {
+  persistirColunas();
+}
+
+// grava ordem + visibilidade no servidor. Usada pelos DOIS caminhos: o
+// Salvar do seletor 🧩 Colunas e o arrasto direto no cabecalho da tabela -
+// os dois mexem no MESMO estado, entao nao ha duas fontes de verdade.
+function persistirColunas(){
+  return fetch('/api/preferencias/'+PREF_COLUNAS, {
     // keepalive: se a pessoa Salvar e ja sair da pagina (baixar o relatorio
     // faz location.href, por exemplo), o navegador CANCELA um fetch normal
     // no meio - a escolha nao chegaria no servidor e o catch abaixo ainda
@@ -2277,6 +2300,42 @@ function salvarColunas(){
     } }),
   }).then(r=>{ if(!r.ok) throw new Error(); })
     .catch(()=>alert('A ordem valeu nesta tela, mas não deu pra salvar como padrão no servidor. Confira a conexão e clique em Salvar de novo pra ela valer nos outros aparelhos.'));
+}
+
+// ---------- arrastar coluna direto no cabecalho ----------
+let COL_ARRASTADA = null;
+function arrastarColunaTabela(ev){
+  COL_ARRASTADA = ev.currentTarget.dataset.col;
+  ev.currentTarget.style.opacity = '.45';
+  // sem isso o Firefox nem comeca o arrasto
+  try{ ev.dataTransfer.setData('text/plain', COL_ARRASTADA); }catch(e){}
+  ev.dataTransfer.effectAllowed = 'move';
+}
+function fimArrastoColunaTabela(ev){
+  ev.currentTarget.style.opacity = '';
+  document.querySelectorAll('th.th-move').forEach(th=>{ th.style.borderLeft=''; });
+}
+function soltarColunaTabela(ev){
+  ev.preventDefault();
+  const alvo = ev.currentTarget.dataset.col;
+  document.querySelectorAll('th.th-move').forEach(th=>{ th.style.borderLeft=''; });
+  if(!COL_ARRASTADA || !alvo || COL_ARRASTADA === alvo) return;
+
+  // Trabalha sobre a lista COMPLETA de colunas conhecidas (nao so as
+  // visiveis): mover uma coluna nao pode reordenar por tabela nem perder a
+  // posicao das que estao ocultas agora.
+  const completa = ordenarPorPreferencia(opcoesColunas()).map(o=>o.key);
+  const de = completa.indexOf(COL_ARRASTADA);
+  const para = completa.indexOf(alvo);
+  if(de < 0 || para < 0) return;
+  completa.splice(de, 1);
+  completa.splice(completa.indexOf(alvo) + (para > de ? 1 : 0), 0, COL_ARRASTADA);
+
+  ORDEM_COLUNAS = completa;
+  COL_ARRASTADA = null;
+  espelharColunasNoNavegador();
+  renderTabela(filtrar());
+  persistirColunas();
 }
 
 function renderTabela(rows){
