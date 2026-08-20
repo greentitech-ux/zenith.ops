@@ -253,4 +253,7 @@ async function ensureGrupoSaltiverso() {
 // EXATAMENTE o mesmo 'campo' que este cadastro geraria pro mesmo label -
 // se as duas pontas divergirem, o valor importado nao casa com a definicao
 // do grupo e some da tela
-module.exports = { list, create, update, remove, grupoDaUnidade, ensureGrupoSaltiverso, slugify };
+// invalidarCache exportado pro teste conseguir trocar os grupos em memoria
+// entre as conferencias (o cache e de 5 min - sem isto o teste media sempre
+// o mesmo estado e passava sem provar nada)
+module.exports = { list, create, update, remove, grupoDaUnidade, ensureGrupoSaltiverso, slugify, invalidarCache: gruposCache.invalidar };
