@@ -1409,6 +1409,49 @@ setTimeout(async () => {
   if (!okArrastoColuna) ruins += 1;
   console.log(`${okArrastoColuna ? '✓' : '✗'} Fechamentos: coluna se move arrastando o cabeçalho, com a mesma gravação do seletor`);
 
+  // ------------------------------------------------------------------
+  // gzip de verdade, ponta a ponta: o Render free tem 5 GB/mes de banda e o
+  // servico foi suspenso por estourar isso - o app mandava tudo cru
+  // (/api/fechamentos ~2,1 MB por chamada; com gzip, ~0,30 MB). Aqui uma
+  // requisicao com Accept-Encoding: gzip a uma pagina grande tem que voltar
+  // comprimida E o corpo descomprimido tem que bater com o original. O SSE
+  // (/api/stream) fica de fora do gzip - comprimido, o event-stream so
+  // chegaria quando o buffer enchesse, matando o tempo real.
+  let okGzip = false;
+  try {
+    const zlib = require('zlib');
+    const pedirGzip = (caminho) => new Promise((resolve) => {
+      const req = require('http').request({
+        host: '127.0.0.1', port: 8899, path: caminho,
+        headers: { 'Accept-Encoding': 'gzip' },
+      }, (res) => {
+        const pedacos = [];
+        res.on('data', (c) => pedacos.push(c));
+        res.on('end', () => resolve({ status: res.statusCode, encoding: res.headers['content-encoding'] || null, corpo: Buffer.concat(pedacos) }));
+      });
+      req.on('error', () => resolve({ status: 0, encoding: null, corpo: Buffer.alloc(0) }));
+      req.setTimeout(5000, () => { req.destroy(); resolve({ status: -1, encoding: null, corpo: Buffer.alloc(0) }); });
+      req.end();
+    });
+
+    const comGzip = await pedirGzip('/fechamentos.html');
+    const semGzip = await pedir('/fechamentos.html');
+    const descomprimido = comGzip.encoding === 'gzip' ? zlib.gunzipSync(comGzip.corpo).toString('utf8') : comGzip.corpo.toString('utf8');
+
+    const src = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
+    const conferencias = {
+      'resposta grande volta comprimida': comGzip.status === 200 && comGzip.encoding === 'gzip',
+      'comprimida e de fato menor': comGzip.corpo.length < Buffer.byteLength(semGzip.corpo) / 2,
+      'o corpo descomprimido bate com o original': descomprimido === semGzip.corpo,
+      'o SSE fica fora do gzip (filtro no codigo)': /req\.path === '\/api\/stream'\) return false/.test(src),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okGzip = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (encoding=${comGzip.encoding}, ${comGzip.corpo.length} vs ${Buffer.byteLength(semGzip.corpo)} bytes)`);
+  } catch (e) { okGzip = false; console.log('  erro: ' + e.message); }
+  if (!okGzip) ruins += 1;
+  console.log(`${okGzip ? '✓' : '✗'} gzip ligado: resposta grande sai ~7x menor e o SSE segue sem compressão`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de

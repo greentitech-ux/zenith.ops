@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const path = require('path');
 const multer = require('multer');
 
+const compression = require('compression');
 const db = require('./firestore'); // so pro contador de leituras (ver relatorioLeituras)
 const store = require('./store');
 const { normalize } = require('./normalize');
@@ -162,6 +163,22 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });
+
+// gzip em TODA resposta compressivel (JSON, HTML, CSV, JS). Motivo direto:
+// o plano free do Render inclui so 5 GB/mes de banda e o servico foi
+// SUSPENSO por estourar isso em 20/08/2026. O /api/fechamentos sozinho
+// devolve ~2,1 MB por chamada sem compressao - com gzip cai pra ~0,30 MB
+// (7x). O filtro tira o SSE (/api/stream): o compression bufferiza o corpo
+// e um event-stream comprimido so chega ao navegador quando o buffer enche,
+// o que mataria o "tempo real" dos eventos. PDF ja e comprimido e o proprio
+// compression pula tipos nao-compressiveis; o threshold padrao (1 KB) deixa
+// resposta minuscula passar direto.
+app.use(compression({
+  filter: (req, res) => {
+    if (req.path === '/api/stream') return false;
+    return compression.filter(req, res);
+  },
+}));
 
 // Atribuicao de LEITURAS do Firestore por rota (ver o contador em
 // firestore.js). Precisa embrulhar o resto da cadeia num AsyncLocalStorage:
