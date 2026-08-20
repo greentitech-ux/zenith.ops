@@ -1663,6 +1663,63 @@ setTimeout(async () => {
   if (!okUnidMonitor) ruins += 1;
   console.log(`${okUnidMonitor ? '✓' : '✗'} Monitor: coluna UNID. mostra a loja mesmo com código unificado sem dígito`);
 
+  // ------------------------------------------------------------------
+  // Central do Beniboy: assumir um atendimento apresenta o atendente pro
+  // visitante ("[saudação], Sr./Sra. [solicitante]! O/A [atendente] irá
+  // seguir com o seu atendimento.") e RESPONDER numa conversa aberta também
+  // assume (o responsável vira quem escreveu). A saudação segue o horário
+  // de Brasília e o Sr./Sra. + O/A saem da heurística de gênero pelo nome.
+  let okAssumir = false;
+  try {
+    const sc = require('/home/user/adyen-monitor/server/suporteChat.js');
+    const chatNovo = await sc.criar({ nome: 'Letícia', contato: 'leticia@x.com', texto: 'não consigo acessar' });
+
+    // assumir com atendente mulher
+    const aposMarcela = await sc.atualizarStatusAtendimento(chatNovo.id, {
+      statusAtendimento: 'EM_ATENDIMENTO', autor: { id: 'u9', email: 'marcela@x', nome: 'Marcela' },
+    });
+    const m1 = aposMarcela.mensagens[aposMarcela.mensagens.length - 1];
+    const qtdAposMarcela = aposMarcela.mensagens.length;
+
+    // a MESMA pessoa mexendo de novo no card não repete a apresentação
+    const repetido = await sc.atualizarStatusAtendimento(chatNovo.id, {
+      statusAtendimento: 'EM_ATENDIMENTO', autor: { id: 'u9', email: 'marcela@x', nome: 'Marcela' },
+    });
+
+    // outro atendente (homem) assume por cima: nova apresentação com "O"
+    const aposCarlos = await sc.atualizarStatusAtendimento(chatNovo.id, {
+      statusAtendimento: 'EM_ATENDIMENTO', autor: { id: 'u10', email: 'carlos@x', nome: 'Carlos' },
+    });
+    const m2 = aposCarlos.mensagens[aposCarlos.mensagens.length - 1];
+
+    // responder pela rota também assume (Master escreve -> vira responsável,
+    // com a apresentação ANTES da resposta digitada)
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const resp = await postarMultipart(`/api/suporte-chats/${chatNovo.id}/responder`, { texto: 'já estou verificando' }, null, 'anexo', cab);
+    const final = await sc.getOne(chatNovo.id);
+    const msgs = final.mensagens;
+
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'beniboy.html'), 'utf8');
+    const conferencias = {
+      'apresentação com saudação + Sra. + A [atendente]':
+        /^(Bom dia|Boa tarde|Boa noite|Boa madrugada), Sra\. Letícia! A Marcela irá seguir com o seu atendimento\.$/.test(m1.texto)
+        && m1.de === 'suporte' && m1.automatica === true,
+      'assumir grava o responsável': aposMarcela.responsavel && aposMarcela.responsavel.email === 'marcela@x',
+      'mesma pessoa de novo não repete a apresentação': repetido.mensagens.length === qtdAposMarcela,
+      'atendente homem sai com "O"': / O Carlos irá seguir com o seu atendimento\.$/.test(m2.texto),
+      'responder pela rota assume o atendimento': resp.status === 200 && final.responsavel && final.responsavel.email === process.env.MASTER_EMAIL,
+      'a apresentação vem antes da resposta digitada':
+        msgs[msgs.length - 1].texto === 'já estou verificando' && msgs[msgs.length - 2].automatica === true,
+      'heurística de gênero cobre as exceções': sc.ehNomeFeminino('Isabel') && !sc.ehNomeFeminino('Luca') && !sc.ehNomeFeminino('Rafael') && sc.ehNomeFeminino('Ana'),
+      'a tela tem o botão de assumir (mesmo com outro responsável)': /assumirAtendimento\(/.test(html) && /respEmail !== meuEmail/.test(html),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okAssumir = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (m1="${m1 && m1.texto}", m2="${m2 && m2.texto}", resp HTTP ${resp.status})`);
+  } catch (e) { okAssumir = false; console.log('  erro: ' + e.message); }
+  if (!okAssumir) ruins += 1;
+  console.log(`${okAssumir ? '✓' : '✗'} Beniboy: assumir/responder apresenta o atendente com saudação automática`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

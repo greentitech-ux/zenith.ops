@@ -384,6 +384,22 @@ function iniciarTransicao(id, statusAlvo){
 }
 function fecharModalAcao(){ document.getElementById('overlay-acao').classList.add('hidden'); ACAO_PENDENTE = null; }
 
+// assume o atendimento MESMO que o card já esteja em "Em atendimento" com
+// outra pessoa (iniciarTransicao ignora quando o status alvo é o atual, por
+// isso não serve aqui) - o servidor troca o responsável e manda a
+// apresentação automática pro visitante
+async function assumirAtendimento(id){
+  try{
+    const r = await fetch(`/api/suporte-chats/${encodeURIComponent(id)}/status`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ statusAtendimento:'EM_ATENDIMENTO' }),
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || ('erro '+r.status));
+    await carregarLista();
+  }catch(e){ alert('Não foi possível assumir o atendimento: '+e.message); }
+}
+
 // ---------- mensagem direta pra alguem logado (nao so responder quem chama
 // no chat) - ver POST /api/mensagens/enviar ----------
 let USUARIOS_MENSAGEM = null;
@@ -499,7 +515,16 @@ function painelHtml(chat){
   const tickets = chat.ticketsVinculados || [];
 
   const acoes = [];
-  if(statusAtual==='PENDENTE') acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">🙋 Assumir atendimento</button>`);
+  // "Assumir" aparece sempre que a conversa está aberta e AINDA NÃO é minha
+  // (pendente ou na mão de outra pessoa). Assumir manda a apresentação
+  // automática pro visitante (saudação + quem segue o atendimento - ver
+  // mensagemAssumir no servidor); responder na conversa também assume.
+  const meuEmail = (ME && ME.email) || '';
+  const respEmail = (chat.responsavel && chat.responsavel.email) || '';
+  const naoTerminal = statusAtual!=='RESOLVIDO' && statusAtual!=='SEM_SOLUCAO';
+  if(naoTerminal && respEmail !== meuEmail){
+    acoes.push(`<button type="button" class="btn-ghost" onclick="assumirAtendimento('${chat.id}')">🙋 Assumir atendimento</button>`);
+  }
   if(statusAtual!=='RESOLVIDO' && statusAtual!=='SEM_SOLUCAO'){
     acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','TRANSFERIDO')">🔀 Transferir</button>`);
     acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','RESOLVIDO')">✅ Marcar resolvido</button>`);
@@ -538,7 +563,7 @@ function painelHtml(chat){
     <div class="painel-topo">
       <div style="min-width:0;">
         <h3>${escapeHtml(chat.nome || 'Visitante')}</h3>
-        <div class="sub">${chat.numeroTicket?'Protocolo #'+escapeHtml(chat.numeroTicket)+' · ':''}${escapeHtml(chat.contato||'')} · ${escapeHtml(chat.assunto||'Suporte geral')}${chat.lojaContexto?' · loja: '+escapeHtml(chat.lojaContexto):''} · N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}</div>
+        <div class="sub">${chat.numeroTicket?'Protocolo #'+escapeHtml(chat.numeroTicket)+' · ':''}${escapeHtml(chat.contato||'')} · ${escapeHtml(chat.assunto||'Suporte geral')}${chat.lojaContexto?' · loja: '+escapeHtml(chat.lojaContexto):''} · N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}${chat.responsavel?' · 🙋 '+escapeHtml(chat.responsavel.nome||chat.responsavel.email||''):''}</div>
       </div>
       <span class="painel-fechar" title="Fechar" onclick="fecharPainel('${idAttr}')">✕</span>
     </div>

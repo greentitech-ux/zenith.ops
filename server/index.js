@@ -8681,6 +8681,18 @@ app.post('/api/suporte-chats/:id/responder', auth.requireAuth, uploadChatAnexo.s
       const path = await storage.salvarArquivo(req.params.id, req.file, 'suporte-chat');
       anexo = { nome: req.file.originalname, path, tipo: req.file.mimetype || 'application/octet-stream', tamanho: req.file.size };
     }
+    // responder numa conversa aberta ASSUME o atendimento (pedido do
+    // usuario): quem escreve vira o responsavel, o card vai pra "Em
+    // atendimento" e o visitante recebe a apresentacao automatica (ver
+    // mensagemAssumir em suporteChat.js) antes da resposta digitada.
+    const atual = await suporteChat.getOne(req.params.id);
+    if (atual && atual.status === 'ABERTO'
+        && (!atual.responsavel || atual.responsavel.email !== req.user.email)) {
+      await suporteChat.atualizarStatusAtendimento(req.params.id, {
+        statusAtendimento: 'EM_ATENDIMENTO',
+        autor: { id: req.user.id, email: req.user.email, nome: req.user.username || req.user.email },
+      });
+    }
     const chat = await suporteChat.adicionarMensagem(req.params.id, { de: 'suporte', texto: req.body.texto, autorEmail: req.user.email, anexo });
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     const { token, ...resto } = chat;
