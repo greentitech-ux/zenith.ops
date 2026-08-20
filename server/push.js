@@ -369,6 +369,42 @@ async function notifyUsuario(userId, title, body, tag, url) {
   }
 }
 
+// Teste de ponta a ponta pedido pelo proprio usuario (rota POST
+// /api/push/testar): dispara uma notificacao real pra TODOS os aparelhos
+// dele e devolve o que aconteceu com cada envio. Existe porque "nao chega
+// alerta no celular" era indiagnosticavel: a inscricao pode ter morrido no
+// push service (410, removida aqui), nunca ter chegado ao servidor, ou ser
+// antiga sem meta (que nao recebe nada de proposito) - e nenhum desses
+// casos dava sinal de vida pro usuario.
+async function testarPush(userId) {
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return { configurado: false, dispositivos: 0, enviados: 0, expiradasRemovidas: 0 };
+  const subs = await loadSubs();
+  const minhas = subs.filter((s) => s.meta && s.meta.userId === userId);
+  const payload = JSON.stringify({
+    title: '🔔 Teste de notificação',
+    body: 'Se você está vendo isso, os alertas estão chegando neste aparelho.',
+    tag: 'teste-push',
+    url: '/painel.html',
+  });
+  let enviados = 0;
+  let expiradasRemovidas = 0;
+  const erros = [];
+  for (const sub of minhas) {
+    try {
+      await webpush.sendNotification(sub, payload, { urgency: 'high' });
+      enviados += 1;
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+        expiradasRemovidas += 1;
+      } else {
+        erros.push(err.message);
+      }
+    }
+  }
+  return { configurado: true, dispositivos: minhas.length, enviados, expiradasRemovidas, erros };
+}
+
 // PCD cortesia do parque bateu o limite de 2 criancas por hora-relogio (ver
 // criar() em parque.js): aviso SILENCIOSO, sem som/alarme especial - so pro
 // Master e pra Gerente DA UNIDADE onde aconteceu (precisa do campo `cargo`
@@ -784,5 +820,5 @@ module.exports = {
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente,
-  notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, PUBLIC_KEY,
+  notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush, PUBLIC_KEY,
 };

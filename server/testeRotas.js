@@ -1567,6 +1567,32 @@ setTimeout(async () => {
   if (!okCacheFech) ruins += 1;
   console.log(`${okCacheFech ? '✓' : '✗'} fechamentosLive: cache longo + invalidação em lote na importação (menos leituras no Firestore)`);
 
+  // ------------------------------------------------------------------
+  // "não chega alerta no celular" tem que ser diagnosticável pelo próprio
+  // usuário: a rota de teste dispara um push real pra todos os aparelhos
+  // dele e devolve a contagem; o sino (painel/monitor) chama esse teste
+  // logo depois de ativar, então a pessoa vê na hora se chegou. Aqui, sem
+  // VAPID configurada, a rota tem que responder configurado:false (e não
+  // 500/pendurar) - é o mesmo caminho de código da produção até o envio.
+  let okTestePush = false;
+  try {
+    const r = await postarJson('/api/push/testar', {}, token ? { Authorization: 'Bearer ' + token } : {});
+    const d = r.status === 200 ? JSON.parse(r.corpo) : {};
+    const fs = require('fs');
+    const painel = fs.readFileSync(require('path').join(__dirname, 'public', 'painel.html'), 'utf8');
+    const monitor = fs.readFileSync(require('path').join(__dirname, 'public', 'monitor.html'), 'utf8');
+    const conferencias = {
+      'a rota responde e diz se o push está configurado': r.status === 200 && 'configurado' in d && 'dispositivos' in d,
+      'o sino do Painel dispara o teste ao ativar': /api\/push\/testar/.test(painel),
+      'o sino do Monitor dispara o teste ao ativar': /api\/push\/testar/.test(monitor),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okTestePush = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (HTTP ${r.status} ${r.corpo.slice(0, 90)})`);
+  } catch (e) { okTestePush = false; console.log('  erro: ' + e.message); }
+  if (!okTestePush) ruins += 1;
+  console.log(`${okTestePush ? '✓' : '✗'} push: teste de notificação de ponta a ponta (rota + sino do Painel/Monitor)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
