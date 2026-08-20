@@ -242,8 +242,16 @@
              o celular deixar escolher varias da galeria em vez de abrir
              direto a camera com uma foto so. -->
         <input type="file" id="ler-canais-arquivo" accept="image/*,application/pdf" multiple class="hidden">
-        <button type="button" class="btn-add" id="btn-ler-canais" onclick="document.getElementById('ler-canais-arquivo').click()">📷 Preencher por foto do relatório</button>
-        <div class="sub" style="margin-top:4px;">Preenche os Canais de venda e as Formas de pagamento de uma vez. Pode mandar até 5 fotos do mesmo dia se o relatório não couber numa só. Errou algum valor? Tire a foto de novo — a leitura recomeça do zero.</div>
+        <!-- DOIS passos de proposito: escolher e depois ler. Antes a leitura
+             disparava sozinha no "change" do input - abrir a galeria e tocar
+             numa foto ja gastava a chamada, sem chance de conferir se
+             escolheu a foto certa, de trocar uma delas ou de desistir. -->
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <button type="button" class="btn-add" id="btn-escolher-relatorio" onclick="document.getElementById('ler-canais-arquivo').click()">📷 Escolher foto(s) do relatório</button>
+          <button type="button" class="btn-add" id="btn-ler-canais" onclick="realizarLeituraRelatorio()" disabled>🔍 Realizar leitura</button>
+        </div>
+        <div id="ler-canais-selecao" class="sub hidden" style="margin-top:6px;"></div>
+        <div class="sub" style="margin-top:4px;">Preenche os Canais de venda e as Formas de pagamento de uma vez. Pode mandar até 5 fotos do mesmo dia se o relatório não couber numa só. Só depois de clicar em <b>Realizar leitura</b> as fotos são enviadas. Errou algum valor? Escolha as fotos de novo — a leitura recomeça do zero.</div>
         <div id="ler-canais-msg" class="sub hidden" style="margin-top:6px;"></div>
       </div>
       <div class="grid2 hidden" id="canais-extras-container" style="margin-top:6px;"></div>
@@ -747,6 +755,13 @@ function renderCanaisExtras(unidade){
 // Mesmo caminho da leitura de nota fiscal do Estoque: manda a imagem, recebe
 // um RASCUNHO e preenche os campos - quem confere e envia continua sendo a
 // loja. O botao so existe se o grupo dessa unidade tiver o recurso ligado.
+// fotos escolhidas mas AINDA NAO enviadas. Declarado aqui em cima, antes da
+// primeira funcao que mexe nele, pra nao cair em TDZ se algum dia essa funcao
+// passar a rodar mais cedo no carregamento da pagina. Fica numa variavel (e
+// nao no proprio input) porque o input e limpo logo depois do change - senao
+// escolher a MESMA foto de novo, depois de um erro, nao dispara evento nenhum.
+let ARQUIVOS_RELATORIO = [];
+
 function atualizarBotaoLerCanais(unidade){
   const grupo = grupoKpiDaUnidade(unidade);
   // basta ter campo cadastrado em UMA das tres frentes: tem relatorio que so
@@ -755,26 +770,64 @@ function atualizarBotaoLerCanais(unidade){
   const temCampos = !!grupo && ((grupo.canaisVendaExtras||[]).length + (grupo.formasPagamentoExtras||[]).length + (grupo.kpisExtras||[]).filter(kpiOcrElegivel).length) > 0;
   const ligado = leituraPorFoto(unidade) && temCampos;
   document.getElementById('ler-canais-wrap').classList.toggle('hidden', !ligado);
-  if(!ligado) esconderMsgLerCanais();
+  if(!ligado){ esconderMsgLerCanais(); ARQUIVOS_RELATORIO = []; pintarSelecaoRelatorio(); }
 }
 function esconderMsgLerCanais(){
   const msg = document.getElementById('ler-canais-msg');
   msg.classList.add('hidden'); msg.innerHTML = '';
 }
 const MAX_FOTOS_RELATORIO = 5;
-document.getElementById('ler-canais-arquivo').addEventListener('change', async (ev)=>{
+
+function nomesSelecionados(){
+  return ARQUIVOS_RELATORIO.map(a=>a.name || 'foto').join(', ');
+}
+function pintarSelecaoRelatorio(){
+  const sel = document.getElementById('ler-canais-selecao');
+  const btnLer = document.getElementById('btn-ler-canais');
+  if(!ARQUIVOS_RELATORIO.length){
+    sel.classList.add('hidden'); sel.innerHTML = '';
+    btnLer.disabled = true;
+    return;
+  }
+  sel.classList.remove('hidden');
+  sel.innerHTML = `<b>${ARQUIVOS_RELATORIO.length}</b> foto(s) escolhida(s): ${escapeHtml(nomesSelecionados())}`+
+    ` — <a href="#" onclick="limparSelecaoRelatorio();return false;" style="color:var(--muted);">limpar</a>`;
+  btnLer.disabled = false;
+}
+function limparSelecaoRelatorio(){
+  ARQUIVOS_RELATORIO = [];
+  pintarSelecaoRelatorio();
+  esconderMsgLerCanais();
+}
+
+document.getElementById('ler-canais-arquivo').addEventListener('change', (ev)=>{
   const arquivos = Array.from(ev.target.files || []);
   ev.target.value = ''; // permite escolher a MESMA foto de novo depois de um erro
   if(!arquivos.length) return;
-  const botao = document.getElementById('btn-ler-canais');
   const msg = document.getElementById('ler-canais-msg');
   msg.classList.remove('hidden');
   if(arquivos.length > MAX_FOTOS_RELATORIO){
+    ARQUIVOS_RELATORIO = [];
+    pintarSelecaoRelatorio();
     msg.innerHTML = `<span style="color:var(--bad);">Você escolheu ${arquivos.length} arquivos. Mande no máximo ${MAX_FOTOS_RELATORIO} por leitura.</span>`;
     return;
   }
+  ARQUIVOS_RELATORIO = arquivos;
+  pintarSelecaoRelatorio();
+  msg.innerHTML = `<span style="color:var(--muted);">Confira as fotos e clique em <b>Realizar leitura</b>. Nada foi enviado ainda.</span>`;
+});
+
+async function realizarLeituraRelatorio(){
+  const arquivos = ARQUIVOS_RELATORIO.slice();
+  const botao = document.getElementById('btn-ler-canais');
+  const msg = document.getElementById('ler-canais-msg');
+  msg.classList.remove('hidden');
+  if(!arquivos.length){
+    msg.innerHTML = `<span style="color:var(--warn);">Escolha a(s) foto(s) do relatório primeiro.</span>`;
+    return;
+  }
   const plural = arquivos.length > 1;
-  botao.disabled = true; botao.textContent = plural ? `📷 Lendo ${arquivos.length} fotos...` : '📷 Lendo a foto...';
+  botao.disabled = true; botao.textContent = plural ? `🔍 Lendo ${arquivos.length} fotos...` : '🔍 Lendo a foto...';
   msg.innerHTML = `<span style="color:var(--muted);">Lendo o relatório${plural ? ` (${arquivos.length} fotos)` : ''}... isso leva alguns segundos.</span>`;
   try{
     const fd = new FormData();
@@ -857,9 +910,12 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', async (
   }catch(err){
     msg.innerHTML = `<span style="color:var(--bad);">${escapeHtml(err.message)}</span>`;
   }finally{
-    botao.disabled = false; botao.textContent = '📷 Preencher por foto do relatório';
+    // volta habilitado com a selecao intacta: se a leitura falhou por rede,
+    // da pra tentar de novo sem reescolher as fotos
+    botao.disabled = false; botao.textContent = '🔍 Realizar leitura';
+    pintarSelecaoRelatorio();
   }
-});
+}
 function lerCanaisExtras(){ return lerExtrasGrupo('canal-extra-input'); }
 function renderFormasExtras(unidade){ renderExtrasGrupo(unidade, 'formasPagamentoExtras', 'formas-extras-container', 'formas-vazio', 'forma-extra-input'); }
 function lerFormasExtras(){ return lerExtrasGrupo('forma-extra-input'); }

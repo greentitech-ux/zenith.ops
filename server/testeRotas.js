@@ -1321,6 +1321,33 @@ setTimeout(async () => {
   if (!okBotoesImport) ruins += 1;
   console.log(`${okBotoesImport ? '✓' : '✗'} Importação do Bravo: passo 4 funciona sozinho (não depende de clicar no 3 antes)`);
 
+  // ------------------------------------------------------------------
+  // Leitura do relatorio por foto (lancamento.html): a leitura NAO pode
+  // disparar no "change" do input. Antes disso, abrir a galeria e tocar numa
+  // foto ja gastava a chamada - sem chance de conferir se escolheu a foto
+  // certa, trocar uma delas ou desistir. Agora sao dois passos: escolher e
+  // depois "Realizar leitura".
+  let okDoisPassosFoto = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'lancamento.html'), 'utf8');
+    // o corpo do listener de change, pra garantir que ele NAO envia nada
+    const listener = (html.match(/addEventListener\('change',[\s\S]*?\n\}\);/) || [''])[0];
+    const conferencias = {
+      'existe o botão de escolher': /id="btn-escolher-relatorio"/.test(html),
+      'existe o botão de realizar leitura': /id="btn-ler-canais"[^>]*onclick="realizarLeituraRelatorio\(\)"/.test(html),
+      'o botão de leitura nasce desabilitado': /id="btn-ler-canais"[^>]*\bdisabled\b/.test(html),
+      'o listener de change NÃO chama fetch': !!listener && !/fetch\(/.test(listener),
+      'o listener de change NÃO chama a leitura': !!listener && !/realizarLeituraRelatorio\(/.test(listener),
+      'a leitura de verdade continua batendo na rota': /realizarLeituraRelatorio[\s\S]*?ler-canais/.test(html),
+      'dá pra limpar a seleção': /limparSelecaoRelatorio/.test(html),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okDoisPassosFoto = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okDoisPassosFoto = false; console.log('  erro: ' + e.message); }
+  if (!okDoisPassosFoto) ruins += 1;
+  console.log(`${okDoisPassosFoto ? '✓' : '✗'} Foto do relatório: escolher e ler são dois passos (escolher não envia nada)`);
+
   // Toda pagina que chama /api/ PRECISA mandar o token do login no header.
   // Sem isso o servidor devolve 401 e a pagina mostra "Você não tem acesso a
   // esta página" pra todo mundo, Master inclusive - parece falta de
