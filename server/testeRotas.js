@@ -1710,6 +1710,67 @@ setTimeout(async () => {
   console.log(`${okExplicacaoTurno ? '✓' : '✗'} Carrinho: explicação de UMA divergência + PDF de apresentação`);
 
   // ------------------------------------------------------------------
+  // Chamados de TI: triagem em duas etapas (N1 -> N2 -> presencial) -
+  // pedido do usuário: "quebra de caixa, desbloqueio, entre tantos outros
+  // são apenas chamados Remoto N1 só evolui para N2 só depois de evoluir
+  // que pode ir para uma fila de presencial". Cria um chamado remoto de
+  // verdade, confere que nasce N1, que escalar pra presencial é RECUSADO
+  // em N1, que só o próprio técnico (ou gestor) evolui pro N2, e que só
+  // depois disso o escalonamento funciona.
+  let okNivelChamados = false;
+  try {
+    const chamadosTI = require('/home/user/adyen-monitor/server/chamadosTI.js');
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+
+    const criado = await chamadosTI.create({
+      unidade: 'AERO', unidadeNome: 'Aeroporto', titulo: 'Desbloqueio de login',
+      tecnicoId: 'tec1', tecnicoEmail: 'tec1@t.com', criadoPorEmail: 'x@x',
+    });
+
+    // tentar escalar direto de N1 tem que ser recusado, mesmo com Master
+    const escalarCedo = await postarJson(`/api/chamados/${criado.id}/escalar-presencial`, { motivo: 'teste' }, cab);
+
+    // tecnico que NAO e o dono do chamado nao evolui o nivel de outro -
+    // direto no modulo, pra testar a regra sem o atalho de Master
+    let recusouOutroTecnico = false;
+    try { await chamadosTI.evoluirNivel(criado.id, { tecnicoId: 'outro-tec', ehGestor: false }); } catch (e) { recusouOutroTecnico = /não é seu/.test(e.message); }
+
+    // o dono evolui o proprio chamado
+    const evoluido = await chamadosTI.evoluirNivel(criado.id, { tecnicoId: 'tec1', ehGestor: false });
+
+    // agora sim, escalar pra presencial funciona (via rota HTTP)
+    const escalarAgora = await postarJson(`/api/chamados/${criado.id}/escalar-presencial`, { motivo: 'precisa de visita' }, cab);
+    const dEscalarAgora = escalarAgora.status === 200 ? JSON.parse(escalarAgora.corpo) : {};
+
+    // segundo chamado so pra testar a rota HTTP /evoluir-nivel ponta a
+    // ponta (Master sempre passa, via ehGestor)
+    const outro = await chamadosTI.create({
+      unidade: 'AERO', unidadeNome: 'Aeroporto', titulo: 'Quebra de caixa',
+      tecnicoId: 'tec2', tecnicoEmail: 'tec2@t.com', criadoPorEmail: 'x@x',
+    });
+    const rotaEvoluir = await postarJson(`/api/chamados/${outro.id}/evoluir-nivel`, {}, cab);
+    const dRotaEvoluir = rotaEvoluir.status === 200 ? JSON.parse(rotaEvoluir.corpo) : {};
+
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tecnico.html'), 'utf8');
+
+    const conferencias = {
+      'chamado nasce em N1': criado.nivel === 'N1',
+      'escalar direto de N1 é recusado': escalarCedo.status === 400 && /N1/.test(escalarCedo.corpo),
+      'técnico que não é o dono não evolui o nível de outro': recusouOutroTecnico,
+      'o dono evolui pro N2': evoluido.nivel === 'N2',
+      'depois de N2, escalar pra presencial funciona': escalarAgora.status === 200 && dEscalarAgora.modalidade === 'presencial',
+      'a rota HTTP /evoluir-nivel funciona (Master via ehGestor)': rotaEvoluir.status === 200 && dRotaEvoluir.nivel === 'N2',
+      'a tela mostra o nível no chip e tem o botão de evoluir': /nivelDe\(c\)/.test(html) && /btn-evoluir-nivel/.test(html) && /function evoluirNivel/.test(html),
+      'a tela só libera escalar em N2': /nivelDe\(c\)===.N2./.test(html),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okNivelChamados = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (escalarCedo ${escalarCedo.status} ${escalarCedo.corpo.slice(0, 80)}, escalarAgora ${escalarAgora.status})`);
+  } catch (e) { okNivelChamados = false; console.log('  erro: ' + e.message); }
+  if (!okNivelChamados) ruins += 1;
+  console.log(`${okNivelChamados ? '✓' : '✗'} Chamados de TI: triagem em duas etapas (N1 -> N2 -> presencial)`);
+
+  // ------------------------------------------------------------------
   // Monitor: a coluna UNID. sumiu ("—" em toda linha) depois da unificação
   // de códigos de 18/08 - as lojas GBE passaram a usar o NOME do Fechamento
   // ("Dominos Caruaru"), sem dígito, e o rótulo da célula jogava fora tudo

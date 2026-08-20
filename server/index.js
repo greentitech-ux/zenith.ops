@@ -9131,6 +9131,22 @@ app.post('/api/chamados/:id/concluir-remoto', requireAnySection('tecnico', 'supo
   }
 });
 
+// evolui a triagem de N1 pra N2 - mesmo tecnico com o chamado (ou gestor,
+// Master/Admin) - so depois disso a porta pra presencial libera (ver
+// escalar-presencial abaixo e evoluirNivel em chamadosTI.js)
+app.post('/api/chamados/:id/evoluir-nivel', requireAnySection('tecnico', 'suporte'), async (req, res) => {
+  try {
+    const chamado = await chamadosTI.evoluirNivel(req.params.id, {
+      tecnicoId: req.user.id,
+      ehGestor: req.isMaster || req.isAdmin,
+    });
+    broadcast('chamado-atualizado', { id: chamado.id }, 'tecnico');
+    res.json(chamado);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/chamados/:id', auth.requireMaster, async (req, res) => {
   const chamado = await chamadosTI.getOne(req.params.id);
   if (!chamado) return res.sendStatus(404);
@@ -9158,6 +9174,7 @@ app.patch('/api/chamados/:id/editar', auth.requireMaster, async (req, res) => {
       modalidade: req.body.modalidade,
       status: req.body.status,
       prioridade: req.body.prioridade,
+      nivel: req.body.nivel,
     });
     broadcast('chamado-atualizado', { id: chamado.id }, 'tecnico');
     res.json(chamado);
