@@ -7818,6 +7818,17 @@ async function verificarDivergenciaAbastecimento(contagem) {
   await push.notifyAbastecimentoDivergencia(ciclo.rotulo, resumo, ciclo.ate);
 }
 
+// "-14 un" lido solto (sem contexto do sinal) confunde quem le - a
+// coluna se chama "Saiu" e o numero vem negativo, e "saiu -14" nao faz
+// sentido fisico (nao da pra sair uma quantidade negativa). O que aconteceu
+// de verdade e o oposto: SOBROU 14 a mais do que devia, por isso escreve
+// assim - o texto explicativo continua igual na coluna Alerta ao lado
+function fmtSaidaTxt(saida, un) {
+  if (saida == null) return 'sem fechamento';
+  if (saida < 0) return `⚠ ${Math.abs(saida)}${un} a mais`;
+  return `${saida}${un}`;
+}
+
 // mesmo calculo do fluxo, so recortado pra UM turno (identificado pelo "ate"
 // - o criadoEm da contagem que fechou aquele ciclo, unico por turno). Serve
 // de base tanto pra tela de explicacao quanto pro PDF de apresentacao logo
@@ -8550,11 +8561,18 @@ app.get('/api/abastecimento/fluxo/relatorio.pdf', auth.requireMaster, async (req
     const noPeriodo = regs.filter((r) => { const d = diaDe(r.criadoEm); return d >= inicio && d <= fim; });
     const ciclos = abastecimentoPrevisao.montarCiclos(noPeriodo);
     const dias = abastecimentoPrevisao.resumoPorDia(noPeriodo, { inicio, fim, ciclos });
+    // ?divergencias=1 - recorte "só o que deu problema": em vez de despejar
+    // os ~27 itens de cada dia (a maioria sem nada de errado), fica só a
+    // linha que realmente precisa de atenção - pedido do Master depois de
+    // ver o PDF completo: "precisamos ter um relatório apenas das
+    // divergências" pra não ter que garimpar
+    const soDivergencias = req.query.divergencias === '1';
 
     let divergencias = 0;
     const linhas = [];
     dias.forEach((dia) => {
-      dia.itens.forEach((i, j) => {
+      const itensDoDia = soDivergencias ? dia.itens.filter((i) => i.saida != null && i.saida < 0) : dia.itens;
+      itensDoDia.forEach((i, j) => {
         const un = i.tipo === 'pizza' ? '' : ' un';
         const divergente = i.saida != null && i.saida < 0;
         if (divergente) divergencias += 1;
@@ -8563,14 +8581,14 @@ app.get('/api/abastecimento/fluxo/relatorio.pdf', auth.requireMaster, async (req
           meta: j === 0 ? `${dia.contagens} contagem(ns) · ${dia.envios} envio(s) · ${dia.ciclosFechados} turno(s)` : '',
           item: i.nome,
           entrou: `${i.entradas}${un}`,
-          saiu: i.saida == null ? 'sem fechamento' : `${i.saida}${un}`,
+          saiu: fmtSaidaTxt(i.saida, un),
           alerta: divergente ? 'DIVERGÊNCIA: sobrou mais do que entrou (contagem ou envio não lançado)' : '',
         });
       });
     });
 
     reportUtil.writePDF(res, {
-      titulo: 'Relatórios do Carrinho — Dia a dia',
+      titulo: `Relatórios do Carrinho — ${soDivergencias ? 'Só divergências' : 'Dia a dia'}`,
       subtitulo: `Período ${reportUtil.fmtDataBR(inicio)} a ${reportUtil.fmtDataBR(fim)} · gerado em ${reportUtil.agoraBrasiliaFmt()}`,
       resumo: [
         [dias.length, 'dias com movimento'],
@@ -8588,8 +8606,8 @@ app.get('/api/abastecimento/fluxo/relatorio.pdf', auth.requireMaster, async (req
       ],
       larguras: { dia: 60, meta: 150, item: 170, entrou: 70, saiu: 90, alerta: 221 },
       linhas,
-      nomeArquivo: `carrinho-dia-a-dia-${inicio}-a-${fim}`,
-      semDadosMsg: 'Nenhum movimento no período.',
+      nomeArquivo: `carrinho-${soDivergencias ? 'divergencias' : 'dia-a-dia'}-${inicio}-a-${fim}`,
+      semDadosMsg: soDivergencias ? 'Nenhuma divergência no período. 🎉' : 'Nenhum movimento no período.',
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -8626,7 +8644,7 @@ app.get('/api/abastecimento/turno/:ate/relatorio.pdf', auth.requireMaster, async
         inicial: `${i.saldoInicial}${un}`,
         entrou: `${i.entradas}${un}`,
         final: `${i.saldoFinal}${un}`,
-        saiu: `${i.saida}${un}`,
+        saiu: fmtSaidaTxt(i.saida, un),
         explicacao: i.saida < 0 ? 'Saída negativa: sobrou mais do que entrou — sinal de contagem ou envio não lançado nesse turno.' : '',
       };
     });
