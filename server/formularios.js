@@ -107,6 +107,24 @@ const TIPOS = {
   },
 };
 
+// Cadastro FIXO unidade -> razão social + CNPJ (lista enviada pelo Master
+// em 20/08/2026). O formulário nasce com esses dados já preenchidos e SEM
+// edição: quem cria só escolhe a unidade - o CNPJ que o navegador mandar é
+// IGNORADO de propósito (a fonte é este cadastro, não o formulário).
+const UNIDADES_FORM = [
+  { unidade: 'Spoleto Shopping Recife', razaoSocial: 'Trigo Recife', cnpj: '50.625.368/0001-13' },
+  { unidade: "Domino's Caruaru", razaoSocial: 'America Caruaru', cnpj: '50.724.770/0001-55' },
+  { unidade: 'São Braz Ilha do Leite', razaoSocial: 'Cafe SBI', cnpj: '50.929.548/0001-99' },
+  { unidade: "Domino's Garanhuns", razaoSocial: 'America Restaurante', cnpj: '43.675.465/0001-55' },
+  { unidade: 'Spoleto Tacaruna', razaoSocial: 'Grano Tacaruna', cnpj: '49.942.203/0001-96' },
+  { unidade: "Spoleto Domino's Aeroporto Recife", razaoSocial: 'Grande Fratello', cnpj: '20.182.750/0001-39' },
+  { unidade: "Domino's Tirol - Natal", razaoSocial: 'America Partners RN', cnpj: '47.677.381/0001-01' },
+  { unidade: 'Milky Moo Tirol - Natal', razaoSocial: 'Milky Moo Tirol - Natal', cnpj: '48.049.478/0001-32' },
+  { unidade: "Domino's Bessa - João Pessoa", razaoSocial: 'America Bessa', cnpj: '59.449.391/0001-79' },
+  { unidade: 'Big Brother - Recife', razaoSocial: 'Big Brother Serviços Combinados LTDA.', cnpj: '36.196.587/0001-01' },
+  { unidade: 'Grupo Bravo Empresarial', razaoSocial: 'MvPar', cnpj: '41.051.829/0001-09' },
+];
+
 const MAX_LINHAS = 20;
 // PNG do canvas de assinatura fica em torno de 5-30KB; o cap é folga, não
 // meta - acima disso é foto/arquivo indevido, não um traço de caneta
@@ -168,9 +186,14 @@ async function criar({ tipo, unidade, campos, linhas, criadoPorId, criadoPorEmai
   if (!modelo) throw new Error('Tipo de formulário inválido.');
   const unidadeOk = limpar(unidade, 80);
   if (!unidadeOk) throw new Error('Informe a unidade.');
+  const cadastro = UNIDADES_FORM.find((u) => u.unidade === unidadeOk);
+  if (!cadastro) throw new Error('Unidade inválida - escolha uma das unidades cadastradas.');
 
   const camposOk = {};
   modelo.cabecalho.forEach((c) => { camposOk[c.key] = limpar((campos || {})[c.key], 160); });
+  // Nome/CNPJ vem do cadastro fixo, nunca do formulário (pedido do Master:
+  // "já preenchido e sem edição")
+  camposOk.cnpj = cadastro.cnpj;
 
   const linhasOk = (Array.isArray(linhas) ? linhas : []).slice(0, MAX_LINHAS)
     .map((l) => {
@@ -199,7 +222,7 @@ async function criar({ tipo, unidade, campos, linhas, criadoPorId, criadoPorEmai
 
   const doc = COLLECTION.doc();
   const registro = {
-    id: doc.id, tipo, unidade: unidadeOk,
+    id: doc.id, tipo, unidade: unidadeOk, razaoSocial: cadastro.razaoSocial,
     campos: camposOk, linhas: linhasOk, valorTotal,
     assinaturas, status: 'PENDENTE',
     criadoEm: new Date().toISOString(), criadoPorId: criadoPorId || null, criadoPorEmail: criadoPorEmail || null,
@@ -227,7 +250,7 @@ async function vistaPublica(id, token) {
   const a = r.assinaturas[chave];
   return {
     id: r.id, tipo: r.tipo, rotuloTipo: TIPOS[r.tipo].rotulo, titulo: TIPOS[r.tipo].titulo,
-    unidade: r.unidade, campos: r.campos, linhas: r.linhas, valorTotal: r.valorTotal,
+    unidade: r.unidade, razaoSocial: r.razaoSocial || null, campos: r.campos, linhas: r.linhas, valorTotal: r.valorTotal,
     colunas: TIPOS[r.tipo].colunas, cabecalho: TIPOS[r.tipo].cabecalho,
     status: r.status, criadoEm: r.criadoEm,
     meuPapel: chave, meuRotulo: a.rotulo, jaAssinei: !!a.imagem,
@@ -286,6 +309,7 @@ function gerarPdf(r, res) {
     y += 20;
   };
   linhaCabecalho('UNIDADE', r.unidade);
+  if (r.razaoSocial && r.razaoSocial !== r.unidade) linhaCabecalho('RAZÃO SOCIAL', r.razaoSocial);
   modelo.cabecalho.forEach((c) => linhaCabecalho(c.label, r.campos[c.key]));
 
   // título centralizado
@@ -368,4 +392,4 @@ function gerarPdf(r, res) {
   doc.end();
 }
 
-module.exports = { TIPOS, criar, listar, detalhar, getOne, vistaPublica, assinar, remover, gerarPdf, chaveDoToken, parseValor };
+module.exports = { TIPOS, UNIDADES_FORM, criar, listar, detalhar, getOne, vistaPublica, assinar, remover, gerarPdf, chaveDoToken, parseValor };

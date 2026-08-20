@@ -75,7 +75,8 @@
 
     <div id="editor" class="hidden">
       <label>Unidade</label>
-      <select id="f-unidade"></select>
+      <select id="f-unidade" onchange="atualizarUnidadeInfo()"></select>
+      <div id="unidade-info" style="margin-top:8px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12.5px;color:var(--muted);"></div>
       <div class="grade-campos" id="campos"></div>
 
       <div class="tabela-wrap"><table id="tabela"><thead id="tabela-head"></thead><tbody id="tabela-corpo"></tbody></table></div>
@@ -125,8 +126,11 @@ function escolherTipo(tipo){
   renderTipos();
   const m = modelo();
   document.getElementById('editor').classList.remove('hidden');
-  document.getElementById('campos').innerHTML = m.cabecalho.map(c=>
+  // CNPJ não é digitado: vem travado do cadastro fixo (ver UNIDADES_FORM
+  // no servidor) - o input nem existe, e o servidor ignora se alguém mandar
+  document.getElementById('campos').innerHTML = m.cabecalho.filter(c=>c.key!=='cnpj').map(c=>
     `<div><label>${escapeHtml(c.label)}</label><input type="text" data-campo="${escapeHtml(c.key)}"></div>`).join('');
+  atualizarUnidadeInfo();
   // cabeçalho da tabela + 1 linha inicial (a coluna de assinatura das
   // diárias não é digitada aqui - nasce sozinha, um link por linha)
   document.getElementById('tabela-head').innerHTML = '<tr>' + m.colunas.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('') + '<th></th></tr>';
@@ -243,16 +247,24 @@ async function carregarLista(){
   }catch(e){ /* mantém o que está na tela */ }
 }
 
+function atualizarUnidadeInfo(){
+  const u = UNIDADES.find(x=>x.unidade===document.getElementById('f-unidade').value);
+  document.getElementById('unidade-info').innerHTML = u
+    ? `<b style="color:var(--text);">${escapeHtml(u.razaoSocial)}</b> · CNPJ <span style="font-family:var(--mono);color:var(--text);">${escapeHtml(u.cnpj)}</span> <span style="font-size:11px;">(preenchido automaticamente, sem edição)</span>`
+    : '';
+}
+
 async function boot(){
-  const [tiposR, unidades] = await Promise.all([
+  const [tiposR, unidadesR] = await Promise.all([
     fetch('/api/formularios/tipos'),
-    fetch('/api/meta/unidades-publico').then(r=>r.ok?r.json():[]),
+    fetch('/api/formularios/unidades'),
   ]);
   if(tiposR.status===403){ document.getElementById('sem-acesso').classList.remove('hidden'); return; }
   TIPOS = await tiposR.json();
-  UNIDADES = unidades;
+  UNIDADES = unidadesR.ok ? await unidadesR.json() : [];
   document.getElementById('raiz').classList.remove('hidden');
-  document.getElementById('f-unidade').innerHTML = unidades.map(u=>`<option value="${escapeHtml(u.nome)}">${escapeHtml(u.nome)}</option>`).join('');
+  document.getElementById('f-unidade').innerHTML = UNIDADES.map(u=>`<option value="${escapeHtml(u.unidade)}">${escapeHtml(u.unidade)}</option>`).join('');
+  atualizarUnidadeInfo();
   renderTipos();
   carregarLista();
 }
