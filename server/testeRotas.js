@@ -1896,6 +1896,38 @@ setTimeout(async () => {
   if (!okFavorecido) ruins += 1;
   console.log(`${okFavorecido ? '✓' : '✗'} Formulários: favorecido lembrado pelo CPF + anexos de comprovante`);
 
+  // ------------------------------------------------------------------
+  // NOC - alarme falso de celular: quem abre o Zenith no CELULAR com o
+  // monitoramento fixo gravado (zenithMonitorFixo) virava "computador da
+  // loja"; cada bloqueio de tela disparava push de "Loja sem conexão".
+  // Agora: (1) a tela de login não manda heartbeat de celular e apaga a
+  // configuração gravada; (2) se a última batida de um posto 'interno' veio
+  // de navegador de celular, a queda não vira push (só histórico no NOC).
+  let okCelularNoc = false;
+  try {
+    const lojaStatusMod = require('./lojaStatus');
+    const fs3 = require('fs');
+    const path3 = require('path');
+    const htmlLogin = fs3.readFileSync(path3.join(__dirname, 'public', 'index.html'), 'utf8');
+    const srcIndex = fs3.readFileSync(path3.join(__dirname, 'index.js'), 'utf8');
+    const srcLoja = fs3.readFileSync(path3.join(__dirname, 'lojaStatus.js'), 'utf8');
+    const conferencias = {
+      'navegador de celular Android é reconhecido': lojaStatusMod.ehCelular('Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36') === true,
+      'iPhone é reconhecido': lojaStatusMod.ehCelular('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15') === true,
+      'desktop NÃO é celular (queda real continua alertando)': lojaStatusMod.ehCelular('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36') === false,
+      'o vigia NÃO é celular (queda com vigia continua alertando)': lojaStatusMod.ehCelular('NOCZenith/1.0 (Windows NT; PowerShell)') === false,
+      'a varredura marca a transição vinda de celular': /celular: quedaDeCelular\(doc\)/.test(srcLoja) && /tipo === 'interno' && ehCelular\(doc\.userAgent\)/.test(srcLoja),
+      'o push de loja offline/online pula transição de celular': /if \(t\.celular\) continue;/.test(srcIndex),
+      'a tela de login não monitora em celular e apaga a configuração gravada':
+        /Mobile/.test(htmlLogin) && /removeItem\('zenithMonitorFixo'\)/.test(htmlLogin),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okCelularNoc = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okCelularNoc = false; console.log('  erro: ' + e.message); }
+  if (!okCelularNoc) ruins += 1;
+  console.log(`${okCelularNoc ? '✓' : '✗'} NOC: celular fechando o navegador não dispara alarme de loja caída`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
