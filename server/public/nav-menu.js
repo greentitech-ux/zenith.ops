@@ -80,6 +80,7 @@
       { id: 'nav-tecnico', href: '/tecnico.html', icone: '🔧', rotulo: 'Chamados TI', secoes: ['tecnico', 'suporte'] },
       { id: 'nav-manutencao', href: '/manutencao.html', icone: '🛠️', rotulo: 'Manutenção', secoes: ['manutencao'] },
       { id: 'nav-ativos-ti', href: '/ativos-ti.html', icone: '🖥️', rotulo: 'Ativos de TI', secoes: ['ativos-ti'] },
+      { id: 'nav-formularios', href: '/formularios.html', icone: '🖊️', rotulo: 'Formulários', secoes: ['formularios'] },
     ] },
     { grupo: 'Saltiverso', itens: [
       { id: 'nav-parque-checkin', href: '/parque-checkin.html', icone: '🤸', rotulo: 'Check-in Parque', secoes: ['parque-checkin'] },
