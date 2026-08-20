@@ -31,6 +31,12 @@ const COLLECTION = db.collection('chamadosTI');
 
 const STATUSES = ['ABERTO', 'INICIADO', 'CONCLUIDO', 'CANCELADO'];
 const MODALIDADES = ['presencial', 'remoto'];
+// triagem remota em DUAS etapas, pedido do Master: todo chamado nasce N1;
+// so depois de evoluir pra N2 (ver evoluirNivel) e que a porta pra
+// presencial libera (ver escalarPresencial) - evita chamado simples
+// (desbloqueio, duvida rapida) pular direto pra visita sem tentar resolver
+// a distancia primeiro
+const NIVEIS = ['N1', 'N2'];
 
 function modalidadeDe(chamado) {
   return chamado && chamado.modalidade === 'remoto' ? 'remoto' : 'presencial';
@@ -89,6 +95,10 @@ async function create({ unidade, unidadeNome, titulo, descricao, tecnicoId, tecn
     titulo: String(titulo).trim().slice(0, 200),
     descricao: descricao || '',
     modalidade: mod,
+    // triagem em duas etapas: todo chamado nasce N1 (ver NIVEIS acima) -
+    // chamado que já nasce resolvido não passa por triagem nenhuma, mas o
+    // campo fica preenchido igual pra não ficar undefined no registro
+    nivel: 'N1',
     prioridade: prio,
     slaPrazo: prioridades.slaPrazo(prio, agora),
     tecnicoId,
@@ -214,13 +224,17 @@ async function garantirTicket(id) {
 // edicao do Master: modalidade (presencial <-> remoto), status (ativo,
 // concluido, cancelado, reaberto...) e prioridade - autonomia total pra
 // corrigir qualquer chamado, em qualquer momento
-async function editarMaster(id, { modalidade, status, prioridade }) {
+async function editarMaster(id, { modalidade, status, prioridade, nivel }) {
   const atual = await getOne(id);
   if (!atual) throw new Error('Chamado não encontrado.');
   const merge = {};
   if (modalidade !== undefined) {
     if (!MODALIDADES.includes(modalidade)) throw new Error("Modalidade inválida: use 'presencial' ou 'remoto'.");
     merge.modalidade = modalidade;
+  }
+  if (nivel !== undefined) {
+    if (!NIVEIS.includes(nivel)) throw new Error("Nível inválido: use 'N1' ou 'N2'.");
+    merge.nivel = nivel;
   }
   if (status !== undefined) {
     if (!STATUSES.includes(status)) throw new Error('Status inválido.');
@@ -240,17 +254,37 @@ async function editarMaster(id, { modalidade, status, prioridade }) {
   return getOne(id);
 }
 
+// evolui a triagem de N1 pra N2 - so isso libera a porta pra presencial
+// (ver escalarPresencial). Mesmo tecnico que esta com o chamado evolui o
+// proprio nivel (continua sendo dele - nao muda responsavel nem fila),
+// ou um gestor (Master/Admin), mesmo espirito de concluirRemoto acima
+async function evoluirNivel(id, { tecnicoId, ehGestor }) {
+  const atual = await getOne(id);
+  if (!atual) throw new Error('Chamado não encontrado.');
+  if (modalidadeDe(atual) !== 'remoto') throw new Error('Só chamado em triagem remota tem nível N1/N2.');
+  if (!ehGestor && atual.tecnicoId !== tecnicoId) throw new Error('Esse chamado não é seu.');
+  if (atual.status !== 'ABERTO') throw new Error('Só dá pra evoluir o nível de um chamado ainda aberto.');
+  if ((atual.nivel || 'N1') === 'N2') throw new Error('Esse chamado já está em N2.');
+  await COLLECTION.doc(id).update({ nivel: 'N2' });
+  chamadosCache.invalidar();
+  return getOne(id);
+}
+
 // TRIAGEM: Master ou alguem com a secao "suporte" decide, olhando um chamado
 // remoto em aberto, que precisa de visita - a UNICA porta pra um chamado
 // virar presencial (fora da edicao livre do Master em editarMaster). Exige
 // motivo (fica no historico) e pode trocar o tecnico de campo responsavel na
 // mesma acao. So sai de remoto+ABERTO - depois de concluido/cancelado, ou se
-// ja foi escalado, o ajuste fino continua sendo via editarMaster.
+// ja foi escalado, o ajuste fino continua sendo via editarMaster. Precisa
+// estar em N2 - a triagem passa OBRIGATORIAMENTE por N1 -> N2 antes de virar
+// visita presencial (pedido do Master: chamado simples nao pode pular a
+// triagem direto pra campo)
 async function escalarPresencial(id, { tecnicoId, tecnicoEmail, motivo, autorEmail }) {
   const atual = await getOne(id);
   if (!atual) throw new Error('Chamado não encontrado.');
   if (modalidadeDe(atual) !== 'remoto') throw new Error('Esse chamado não está mais em triagem remota.');
   if (atual.status !== 'ABERTO') throw new Error('Só dá pra escalar um chamado que ainda está aberto (aguardando triagem).');
+  if ((atual.nivel || 'N1') !== 'N2') throw new Error('Esse chamado ainda está em N1 — evolua pra N2 antes de escalar pra presencial.');
   const motivoLimpo = String(motivo || '').trim();
   if (!motivoLimpo) throw new Error('Descreva por que esse chamado precisa de visita presencial.');
   const patch = {
@@ -376,7 +410,7 @@ async function reatribuir(id, { tecnicoId, tecnicoEmail }) {
 }
 
 module.exports = {
-  STATUSES, MODALIDADES, modalidadeDe, create, listAll, getOne, iniciar, concluir, concluirRemoto, cancelar, reatribuir,
-  garantirTicket, editarMaster, escalarPresencial, definirDataExecucao, salvarOrcamentoPecas, salvarCobranca, marcarCobrancaEnviada,
+  STATUSES, MODALIDADES, NIVEIS, modalidadeDe, create, listAll, getOne, iniciar, concluir, concluirRemoto, cancelar, reatribuir,
+  garantirTicket, editarMaster, evoluirNivel, escalarPresencial, definirDataExecucao, salvarOrcamentoPecas, salvarCobranca, marcarCobrancaEnviada,
   adicionarEvidencia, removerEvidencia,
 };

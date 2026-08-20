@@ -227,6 +227,10 @@
           <option value="presencial">🚗 Presencial</option>
           <option value="remoto">🎧 Remoto</option>
         </select>
+        <select id="m-nivel" style="margin:0;">
+          <option value="N1">🔺 N1</option>
+          <option value="N2">🔺 N2</option>
+        </select>
         <select id="m-status" style="margin:0;">
           <option value="ABERTO">ABERTO (ativo)</option>
           <option value="INICIADO">INICIADO</option>
@@ -285,10 +289,19 @@
       </div>
     </div>
 
+    <!-- triagem em N1: quem esta com o chamado (ou um gestor) evolui pra N2
+         quando o caso simples nao resolveu de primeira - so a partir daqui
+         a porta pra presencial libera (ver bloco-escalar abaixo) -->
+    <div id="bloco-nivel" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px;">
+      <label>🔺 Triagem N1 <span style="text-transform:none;letter-spacing:0;">(não resolveu de primeira? evolua pra N2 antes de escalar pra visita)</span></label>
+      <button type="button" class="btn-add" id="btn-evoluir-nivel" onclick="evoluirNivel()">🔺 Evoluir pra N2</button>
+    </div>
+
     <!-- TRIAGEM: Master ou time de Suporte decide se precisa de visita -
          unica porta pra um chamado sair do remoto (fora da edicao livre do
-         Master, mais acima). Fica logo antes das acoes que fecham o
-         chamado, ja que e a ultima decisao antes de concluir ou escalar -->
+         Master, mais acima). So libera em N2 (ver bloco-nivel acima). Fica
+         logo antes das acoes que fecham o chamado, ja que e a ultima decisao
+         antes de concluir ou escalar -->
     <div id="bloco-escalar" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px;">
       <label>🚗 Escalar pra atendimento presencial <span style="text-transform:none;letter-spacing:0;">(triagem: só quando não dá pra resolver a distância)</span></label>
       <textarea id="esc-motivo" placeholder="por que esse chamado precisa de visita presencial?"></textarea>
@@ -412,9 +425,12 @@ function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
 // prazo (slaPrazo) ja vem calculado do servidor, aqui so pintamos o chip
 const PRIORIDADES_INFO = { critica:{label:'Crítica',ordem:0}, alta:{label:'Alta',ordem:1}, media:{label:'Média',ordem:2}, baixa:{label:'Baixa',ordem:3} };
 function modalidadeDe(c){ return c.modalidade==='remoto' ? 'remoto' : 'presencial'; }
+// triagem em duas etapas (N1 -> N2 -> presencial, ver evoluirNivel em
+// chamadosTI.js): chamado antigo sem o campo nasce N1 igual
+function nivelDe(c){ return c.nivel==='N2' ? 'N2' : 'N1'; }
 function chipModalidade(c){
   return modalidadeDe(c)==='remoto'
-    ? '<span class="badge mod-remoto">🎧 Triagem (remoto)</span>'
+    ? `<span class="badge mod-remoto">🎧 Triagem (remoto) · ${nivelDe(c)}</span>`
     : '<span class="badge mod-presencial">🚗 Escalado (presencial)</span>';
 }
 function chipPrioridade(c){
@@ -594,10 +610,16 @@ function abrirDetalhe(id){
   document.getElementById('bloco-remoto').classList.toggle('hidden', !podeConcluirRemoto);
   if(podeConcluirRemoto) document.getElementById('r-observacao').value = '';
 
+  // triagem N1 -> N2: quem esta com o chamado (ou gestor) evolui - so
+  // aparece em N1, some depois de evoluir (o botao de escalar assume)
+  const podeEvoluirNivel = ehRemoto && c.status==='ABERTO' && nivelDe(c)==='N1' && (c.tecnicoId===ME.id || EH_GESTOR);
+  document.getElementById('bloco-nivel').classList.toggle('hidden', !podeEvoluirNivel);
+
   // triagem: Master ou time de Suporte (mesmo grupo que atende os chats do
   // site) decide se esse chamado remoto precisa de visita - independe de
-  // quem esta atribuido ao chamado
-  const podeEscalar = ehRemoto && c.status==='ABERTO' && PODE_ATENDER_CHATS;
+  // quem esta atribuido ao chamado. So libera depois que o chamado evoluiu
+  // pra N2 (pedido do Master: chamado simples nao pula direto pra campo)
+  const podeEscalar = ehRemoto && c.status==='ABERTO' && nivelDe(c)==='N2' && PODE_ATENDER_CHATS;
   document.getElementById('bloco-escalar').classList.toggle('hidden', !podeEscalar);
   if(podeEscalar){
     document.getElementById('esc-motivo').value = '';
@@ -646,6 +668,7 @@ function abrirDetalhe(id){
   document.getElementById('bloco-master').classList.toggle('hidden', !IS_MASTER);
   if(IS_MASTER){
     document.getElementById('m-modalidade').value = modalidadeDe(c);
+    document.getElementById('m-nivel').value = nivelDe(c);
     document.getElementById('m-status').value = c.status;
     document.getElementById('m-prioridade').value = c.prioridade || 'media';
   }
@@ -725,6 +748,22 @@ async function reclassificarChamado(){
   }catch(err){ erroDetalhe(err.message); }
 }
 
+// ---------- triagem N1 -> N2 (evolui o proprio chamado, ver evoluirNivel
+// em chamadosTI.js) ----------
+async function evoluirNivel(){
+  if(!DETALHE_ATUAL) return;
+  const btn = document.getElementById('btn-evoluir-nivel');
+  btn.disabled = true;
+  try{
+    const resp = await fetch(`/api/chamados/${DETALHE_ATUAL.id}/evoluir-nivel`, { method:'POST' });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao evoluir o nível.');
+    await carregarChamados();
+    abrirDetalhe(DETALHE_ATUAL.id);
+  }catch(err){ erroDetalhe(err.message); }
+  finally{ btn.disabled = false; }
+}
+
 async function escalarPresencial(){
   if(!DETALHE_ATUAL) return;
   const motivo = document.getElementById('esc-motivo').value.trim();
@@ -751,6 +790,7 @@ async function salvarEdicaoMaster(){
   try{
     const resp = await fetch(`/api/chamados/${DETALHE_ATUAL.id}/editar`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
       modalidade: document.getElementById('m-modalidade').value,
+      nivel: document.getElementById('m-nivel').value,
       status: document.getElementById('m-status').value,
       prioridade: document.getElementById('m-prioridade').value,
     }) });
