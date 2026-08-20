@@ -44,6 +44,7 @@ const ifoodClient = require('./ifoodClient');
 const ifoodStore = require('./ifoodStore');
 const ifoodSync = require('./ifoodSync');
 const solicitacoes = require('./solicitacoes');
+const formularios = require('./formularios');
 const comprasAcompanhamento = require('./comprasAcompanhamento');
 const chamadosTI = require('./chamadosTI');
 const chamadoRelatorio = require('./chamadoRelatorio');
@@ -266,6 +267,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/rh/campos-config-publico',
   '/api/loja-status/heartbeat',
   '/api/loja-status/vigia-versao',
+  '/assinar.html',
 ]);
 // o chat de suporte do site tem rotas com id dinamico (/api/suporte-chat/:id
 // e /api/suporte-chat/:id/mensagem) - liberadas por prefixo. So o lado
@@ -306,6 +308,7 @@ const ROTA_LOJA_CHAT_RESPONDER_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[
 const ROTA_LOJA_TELEMETRIA_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/telemetria$/;
 function rotaPublicaSemDashboard(path) {
   return ROTAS_PUBLICAS_SEM_DASHBOARD.has(path) || path.startsWith('/api/suporte-chat/') || path.startsWith('/api/rh/publico/')
+    || path.startsWith('/api/formularios-publico/')
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
     || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path)
     || ROTA_LOJA_TELEMETRIA_RE.test(path);
@@ -791,6 +794,34 @@ app.post('/api/central/:tipo/:id/execucao-publico', async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// ---------- Formulários com assinatura remota (ver formularios.js) ----------
+// Lado PÚBLICO: quem recebeu um link de assinatura abre assinar.html no
+// celular, confere o formulário e desenha a assinatura - o token do link é
+// a credencial (um por papel; nas diárias, um por linha da tabela). Ficam
+// ACIMA do app.use('/api', auth.requireAuth), mesmo motivo do ticket-publico.
+app.get('/api/formularios-publico/:id', async (req, res) => {
+  const vista = await formularios.vistaPublica(req.params.id, req.query.token);
+  if (!vista) return res.status(404).json({ error: 'Link de assinatura inválido ou revogado.' });
+  res.json(vista);
+});
+
+app.post('/api/formularios-publico/:id/assinar', async (req, res) => {
+  try {
+    const resultado = await formularios.assinar(req.params.id, req.body.token, { nome: req.body.nome, imagem: req.body.imagem });
+    broadcast('formulario-assinado', { id: req.params.id }, 'solicitacoes');
+    res.json(resultado);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// o próprio assinante pode baixar o PDF (com as assinaturas já na posição)
+app.get('/api/formularios-publico/:id/pdf', async (req, res) => {
+  const registro = await formularios.getOne(req.params.id);
+  if (!registro || !formularios.chaveDoToken(registro, req.query.token)) return res.status(404).json({ error: 'Link inválido ou revogado.' });
+  formularios.gerarPdf(registro, res);
 });
 
 // lado do VISITANTE do chat de suporte (widget de canto, ver suporte-chat.js) -
@@ -2825,6 +2856,61 @@ app.get('/api/disputes/anexo/:disputeId/:index', requireSection('disputas'), asy
   storage.streamArquivo(anexo.path, anexo.tipo, res);
 });
 
+// ---------- Formulários com assinatura remota - lado LOGADO ----------
+// Quem tem a seção 'formularios' (Master/Admin sempre) cria o formulário,
+// recebe os links de assinatura de cada papel e acompanha/baixa o PDF.
+function formularioComLinks(f) {
+  if (!f) return f;
+  return {
+    ...f,
+    assinaturas: f.assinaturas.map((a) => ({
+      ...a,
+      link: a.token ? `${APP_BASE_URL}/assinar.html?f=${encodeURIComponent(f.id)}&t=${encodeURIComponent(a.token)}` : null,
+      token: undefined,
+    })),
+  };
+}
+
+app.get('/api/formularios', requireSection('formularios'), async (req, res) => {
+  res.json(auth.filterByUnidade(req, await formularios.listar()));
+});
+
+app.get('/api/formularios/tipos', requireSection('formularios'), (req, res) => {
+  res.json(Object.entries(formularios.TIPOS).map(([tipo, m]) => ({
+    tipo, rotulo: m.rotulo, cabecalho: m.cabecalho, colunas: m.colunas,
+    assinantes: m.assinantes, assinaturaPorLinha: !!m.assinaturaPorLinha,
+  })));
+});
+
+app.post('/api/formularios', requireSection('formularios'), async (req, res) => {
+  try {
+    const criado = await formularios.criar({
+      tipo: req.body.tipo, unidade: req.body.unidade, campos: req.body.campos, linhas: req.body.linhas,
+      criadoPorId: req.user.id, criadoPorEmail: req.user.email,
+    });
+    res.json(formularioComLinks(criado));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/formularios/:id', requireSection('formularios'), async (req, res) => {
+  const f = await formularios.detalhar(req.params.id);
+  if (!f) return res.status(404).json({ error: 'Formulário não encontrado.' });
+  res.json(formularioComLinks(f));
+});
+
+app.get('/api/formularios/:id/pdf', requireSection('formularios'), async (req, res) => {
+  const registro = await formularios.getOne(req.params.id);
+  if (!registro) return res.status(404).json({ error: 'Formulário não encontrado.' });
+  formularios.gerarPdf(registro, res);
+});
+
+app.delete('/api/formularios/:id', auth.requireMaster, async (req, res) => {
+  if (await desviarSeQaMaster(req, res, 'formularios.remover', `Excluir formulário ${req.params.id}`, { id: req.params.id })) return;
+  res.json(await formularios.remover(req.params.id));
+});
+
 // ---------- notificacoes push (estorno, estorno agendado, chargeback, fraude) ----------
 app.post('/api/push/subscribe', async (req, res) => {
   // guarda quem e essa inscricao (Master ve tudo; usuario comum so recebe
@@ -3269,6 +3355,7 @@ app.get('/api/users/relatorio.:formato(csv|pdf)', auth.requireMaster, async (req
 // ação sobrevive até um restart do servidor (fica só o tipo+payload
 // salvos, nunca uma função/closure).
 const EXECUTORES_QA = {
+  'formularios.remover': (p) => formularios.remover(p.id),
   'pedidoSemanal.criarRegra': (p) => pedidoSemanal.criarRegra(p),
   'pedidoSemanal.editarRegra': (p) => pedidoSemanal.atualizarRegra(p.id, p),
   'pedidoSemanal.excluirRegra': (p) => pedidoSemanal.removerRegra(p.id),

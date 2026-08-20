@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Assinar formulário · Zenith Ops</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e; --warn:#f2b33d; --warn-dim:#3a2e14; --bad:#ff5c5c; --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:560px;margin-inline:auto;}
+  h1{font-size:17px;font-weight:700;margin:0;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;}
+  header{margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line);}
+  .hidden{display:none!important;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px;}
+  .titulo-form{font-size:15px;font-weight:800;text-align:center;margin:4px 0 10px;}
+  .campo{font-size:13px;margin-top:6px;color:#ccd3da;}
+  .campo b{color:var(--text);}
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px;}
+  th{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;text-align:left;padding:4px 6px;border-bottom:1px solid var(--line);}
+  td{padding:6px;border-bottom:1px solid var(--line);}
+  .tabela-wrap{overflow-x:auto;}
+  .total{font-family:var(--mono);font-size:13px;margin-top:8px;text-align:right;}
+  .meu-papel{background:var(--warn-dim);color:var(--warn);border-radius:8px;padding:10px 12px;font-size:13px;font-weight:700;margin-top:12px;}
+  label{display:block;font-size:11.5px;color:var(--muted);margin:14px 0 4px;font-family:var(--mono);}
+  input{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
+  /* quadro de assinatura: fundo BRANCO de propósito - é o que vai pro PDF */
+  .pad-wrap{margin-top:6px;border-radius:10px;overflow:hidden;border:2px dashed var(--accent);background:#fff;touch-action:none;}
+  canvas{display:block;width:100%;height:190px;background:#fff;}
+  .pad-acoes{display:flex;gap:10px;margin-top:8px;}
+  .btn{flex:1;background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .btn:disabled{opacity:.5;}
+  .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:13px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+  .msg{margin-top:10px;font-size:12.5px;padding:10px 12px;border-radius:8px;}
+  .msg.err{background:#3a1616;color:var(--bad);}
+  .sucesso{text-align:center;padding:36px 10px;}
+  .sucesso .icone{font-size:42px;margin-bottom:10px;}
+  .sucesso p{font-size:13px;color:var(--muted);line-height:1.6;}
+  .andamento{font-size:12px;color:var(--muted);margin-top:10px;}
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+<header>
+  <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+  <h1>Assinar formulário</h1>
+</header>
+
+<div id="carregando" class="panel" style="text-align:center;color:var(--muted);">Carregando...</div>
+<div id="erro-carregar" class="panel hidden" style="text-align:center;color:var(--muted);padding:36px 10px;">
+  <div style="font-size:34px;margin-bottom:10px;">⚠️</div>
+  <p id="erro-texto">Link inválido ou revogado.</p>
+</div>
+
+<div id="conteudo" class="hidden">
+  <div class="panel" id="detalhe"></div>
+
+  <div class="panel" id="painel-assinar">
+    <div class="meu-papel" id="meu-papel"></div>
+    <label>Seu nome completo</label>
+    <input type="text" id="nome" placeholder="Nome de quem está assinando" maxlength="80">
+    <label>Assine no quadro abaixo (com o dedo ou caneta)</label>
+    <div class="pad-wrap"><canvas id="pad"></canvas></div>
+    <div class="pad-acoes">
+      <button type="button" class="btn-ghost" onclick="limparPad()">🧹 Limpar</button>
+      <button type="button" class="btn" id="btn-assinar" onclick="enviar()">✍️ Confirmar assinatura</button>
+    </div>
+    <div class="msg err hidden" id="msg"></div>
+  </div>
+
+  <div class="panel sucesso hidden" id="sucesso">
+    <div class="icone">✅</div>
+    <h2 style="font-size:16px;margin:0 0 8px;">Assinatura registrada!</h2>
+    <p id="sucesso-texto"></p>
+    <button type="button" class="btn-ghost" onclick="baixarPdf()">📄 Ver o formulário assinado (PDF)</button>
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const FORM = params.get('f');
+const TOKEN = params.get('t');
+const escapeHtml = (s) => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtMoney = (v) => 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+let DATA = null;
+
+function renderDetalhe(d){
+  const linhas = [];
+  linhas.push(`<div class="titulo-form">${escapeHtml(d.titulo)}</div>`);
+  linhas.push(`<div class="campo"><b>UNIDADE:</b> ${escapeHtml(d.unidade)}</div>`);
+  d.cabecalho.forEach(c=>{
+    if(d.campos[c.key]) linhas.push(`<div class="campo"><b>${escapeHtml(c.label)}:</b> ${escapeHtml(d.campos[c.key])}</div>`);
+  });
+  const ths = d.colunas.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('');
+  const trs = d.linhas.map(l=>'<tr>'+d.colunas.map(c=>`<td style="${c.valor?'text-align:right;font-family:var(--mono);':''}">${c.valor?fmtMoney(l[c.key]):escapeHtml(l[c.key])}</td>`).join('')+'</tr>').join('');
+  linhas.push(`<div class="tabela-wrap"><table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></div>`);
+  linhas.push(`<div class="total"><b>TOTAL: ${fmtMoney(d.valorTotal)}</b></div>`);
+  linhas.push(`<div class="andamento">Assinaturas: ${d.assinaturas.map(a=>`${a.assinado?'✅':'✍️'} ${escapeHtml(a.rotulo)}`).join(' · ')}</div>`);
+  document.getElementById('detalhe').innerHTML = linhas.join('');
+}
+
+// ---- quadro de assinatura (canvas puro, dedo/caneta/mouse) ----
+let ctx, desenhou = false;
+function prepararPad(){
+  const canvas = document.getElementById('pad');
+  // resolução real 2x pro traço não sair serrilhado no PDF
+  const largura = canvas.clientWidth || 500;
+  canvas.width = largura * 2; canvas.height = 380;
+  ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.strokeStyle = '#111'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  let tracando = false;
+  const ponto = (e) => {
+    const r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) };
+  };
+  canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); canvas.setPointerCapture(e.pointerId); tracando = true; desenhou = true; const p = ponto(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + .1, p.y + .1); ctx.stroke(); });
+  canvas.addEventListener('pointermove', (e) => { if(!tracando) return; e.preventDefault(); const p = ponto(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+  const soltar = () => { tracando = false; };
+  canvas.addEventListener('pointerup', soltar);
+  canvas.addEventListener('pointercancel', soltar);
+}
+function limparPad(){
+  const canvas = document.getElementById('pad');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  desenhou = false;
+}
+
+async function enviar(){
+  const msg = document.getElementById('msg');
+  msg.classList.add('hidden');
+  const nome = document.getElementById('nome').value.trim();
+  if(!nome){ msg.textContent = 'Escreva seu nome completo.'; msg.classList.remove('hidden'); return; }
+  if(!desenhou){ msg.textContent = 'Assine no quadro antes de confirmar.'; msg.classList.remove('hidden'); return; }
+  const btn = document.getElementById('btn-assinar');
+  btn.disabled = true; btn.textContent = 'Enviando...';
+  try{
+    const imagem = document.getElementById('pad').toDataURL('image/png');
+    const r = await fetch(`/api/formularios-publico/${encodeURIComponent(FORM)}/assinar`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token: TOKEN, nome, imagem }),
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || 'Não foi possível registrar a assinatura.');
+    document.getElementById('painel-assinar').classList.add('hidden');
+    document.getElementById('sucesso-texto').textContent = d.completo
+      ? 'Todas as assinaturas foram coletadas - o formulário está completo.'
+      : 'Sua assinatura entrou no formulário. Ainda há assinatura(s) pendente(s) de outras pessoas.';
+    document.getElementById('sucesso').classList.remove('hidden');
+  }catch(e){
+    msg.textContent = e.message; msg.classList.remove('hidden');
+    btn.disabled = false; btn.textContent = '✍️ Confirmar assinatura';
+  }
+}
+
+function baixarPdf(){
+  window.open(`/api/formularios-publico/${encodeURIComponent(FORM)}/pdf?token=${encodeURIComponent(TOKEN)}`, '_blank');
+}
+
+async function carregar(){
+  if(!FORM || !TOKEN){ mostrarErro('Link incompleto.'); return; }
+  try{
+    const r = await fetch(`/api/formularios-publico/${encodeURIComponent(FORM)}?token=${encodeURIComponent(TOKEN)}`);
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || 'Link inválido ou revogado.');
+    DATA = d;
+    document.getElementById('carregando').classList.add('hidden');
+    document.getElementById('conteudo').classList.remove('hidden');
+    renderDetalhe(d);
+    if(d.jaAssinei){
+      document.getElementById('painel-assinar').classList.add('hidden');
+      document.getElementById('sucesso-texto').textContent = 'Você já assinou este formulário.';
+      document.getElementById('sucesso').classList.remove('hidden');
+    }else{
+      document.getElementById('meu-papel').textContent = `✍️ Você assina como: ${d.meuRotulo}`;
+      prepararPad();
+    }
+  }catch(e){ mostrarErro(e.message); }
+}
+function mostrarErro(m){
+  document.getElementById('carregando').classList.add('hidden');
+  document.getElementById('erro-texto').textContent = m;
+  document.getElementById('erro-carregar').classList.remove('hidden');
+}
+carregar();
+</script>
+</body>
+</html>

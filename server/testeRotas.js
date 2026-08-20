@@ -1460,7 +1460,7 @@ setTimeout(async () => {
   // As publicas de verdade ficam de fora: usam token proprio na URL.
   const PAGINAS_PUBLICAS = [
     'atendimento.html', 'decidir.html', 'estorno-cliente.html', 'rh-cadastro.html',
-    'rh-colaborador.html', 'solicitacao-publica.html', 'ticket-publico.html',
+    'rh-colaborador.html', 'solicitacao-publica.html', 'ticket-publico.html', 'assinar.html',
   ];
   const dirPublico = require('path').join(__dirname, 'public');
   const semToken = require('fs').readdirSync(dirPublico)
@@ -1762,6 +1762,73 @@ setTimeout(async () => {
   } catch (e) { okCompraLink = false; console.log('  erro: ' + e.message); }
   if (!okCompraLink) ruins += 1;
   console.log(`${okCompraLink ? '✓' : '✗'} Compra pelo link: vista limpa + data de entrega + marcar comprada + comprovante`);
+
+  // ------------------------------------------------------------------
+  // Formulários com assinatura remota (Depósito/Diárias/Avulso/Reembolso):
+  // criar gera um LINK por papel (nas diárias, um por linha da tabela);
+  // cada pessoa assina pelo link no celular (token = credencial) e a
+  // assinatura entra na posição certa do PDF. Fecha o ciclo inteiro aqui:
+  // cria um Avulso (2 papéis), assina os dois pelo link público, o status
+  // vira ASSINADO e o PDF sai válido; diárias geram 1 slot extra por linha.
+  let okFormularios = false;
+  try {
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    // PNG 1x1 válido - o mesmo formato que o canvas do assinar.html manda
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+    const criado = await postarJson('/api/formularios', {
+      tipo: 'avulso', unidade: 'Dominos Bessa',
+      campos: { cnpj: '11.222.333/0001-44', fornecedor: 'Padaria Central', chavePix: 'pix@padaria.com' },
+      linhas: [{ data: '20/08/2026', descricao: 'Pães para evento', valor: '150,50' }, { data: '20/08/2026', descricao: 'Bolo', valor: '87,22' }],
+    }, cab);
+    const f = criado.status === 200 ? JSON.parse(criado.corpo) : {};
+    const linkDe = (papel) => (f.assinaturas || []).find((a) => a.chave === papel);
+    const tokenDoLink = (papel) => new URLSearchParams(String(linkDe(papel).link).split('?')[1]).get('t');
+
+    const vista = await pedir(`/api/formularios-publico/${f.id}?token=${tokenDoLink('fornecedor')}`);
+    const dVista = vista.status === 200 ? JSON.parse(vista.corpo) : {};
+    const tokenErrado = await pedir(`/api/formularios-publico/${f.id}?token=naoexiste`);
+
+    const ass1 = await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tokenDoLink('fornecedor'), nome: 'João Padeiro', imagem: PNG });
+    const ass2 = await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tokenDoLink('gerente'), nome: 'Marcela', imagem: PNG });
+    const dAss2 = ass2.status === 200 ? JSON.parse(ass2.corpo) : {};
+    const repetida = await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tokenDoLink('gerente'), nome: 'Marcela', imagem: PNG });
+
+    const depois = await pedir(`/api/formularios/${f.id}`, cab);
+    const dDepois = depois.status === 200 ? JSON.parse(depois.corpo) : {};
+    const pdf = await pedir(`/api/formularios/${f.id}/pdf?token=${encodeURIComponent(token)}`);
+
+    // diárias: cada linha da tabela vira um slot próprio de assinatura
+    const diarias = await postarJson('/api/formularios', {
+      tipo: 'diarias', unidade: 'Dominos Bessa', campos: { cnpj: '11.222.333/0001-44' },
+      linhas: [{ nome: 'Carlos', datas: '18 e 19/08', chavePix: 'c@x', banco: 'BB', valor: '120' }, { nome: 'Ana', datas: '19/08', chavePix: 'a@x', banco: 'Nubank', valor: '60' }],
+    }, cab);
+    const dDiarias = diarias.status === 200 ? JSON.parse(diarias.corpo) : {};
+
+    const fs = require('fs');
+    const htmlAssinar = fs.readFileSync(require('path').join(__dirname, 'public', 'assinar.html'), 'utf8');
+    const htmlForms = fs.readFileSync(require('path').join(__dirname, 'public', 'formularios.html'), 'utf8');
+    const conferencias = {
+      'criar devolve um link de assinatura por papel': criado.status === 200
+        && !!(linkDe('fornecedor') && linkDe('fornecedor').link) && !!(linkDe('gerente') && linkDe('gerente').link),
+      'o total soma a coluna de valor (pt-BR)': f.valorTotal === 237.72,
+      'o link público mostra o formulário e o papel de quem abriu': vista.status === 200 && dVista.meuPapel === 'fornecedor' && dVista.jaAssinei === false,
+      'token errado é recusado': tokenErrado.status === 404,
+      'as duas assinaturas completam o formulário': ass1.status === 200 && ass2.status === 200 && dAss2.completo === true,
+      'assinar duas vezes é recusado': repetida.status === 400,
+      'o detalhe reflete ASSINADO com nomes': dDepois.status === 'ASSINADO' && dDepois.assinaturas.every((a) => a.assinado && a.nome),
+      'o PDF sai válido': pdf.status === 200 && pdf.corpo.startsWith('%PDF'),
+      'diárias criam um slot de assinatura POR LINHA + gerente':
+        diarias.status === 200 && ['linha-0', 'linha-1', 'gerente'].every((c) => (dDiarias.assinaturas || []).some((a) => a.chave === c)),
+      'a página de assinar tem o quadro de desenho': /canvas id="pad"/.test(htmlAssinar) && /toDataURL\('image\/png'\)/.test(htmlAssinar),
+      'a tela de formulários gera links por papel': /Copiar link/.test(htmlForms) && /assinar\.html/.test(require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8')),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okFormularios = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (criar ${criado.status} ${criado.corpo.slice(0, 100)})`);
+  } catch (e) { okFormularios = false; console.log('  erro: ' + e.message); }
+  if (!okFormularios) ruins += 1;
+  console.log(`${okFormularios ? '✓' : '✗'} Formulários: links de assinatura por papel, assinatura pelo celular e PDF montado`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

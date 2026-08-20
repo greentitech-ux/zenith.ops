@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Formulários · Zenith Ops</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e; --warn:#f2b33d; --warn-dim:#3a2e14; --bad:#ff5c5c; --accent:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 14px 60px;overflow-x:clip;-webkit-text-size-adjust:100%;max-width:860px;margin-inline:auto;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-16px -14px 14px;padding:12px 14px;border-bottom:1px solid var(--line);}
+  .header-top{display:flex;align-items:center;gap:10px;}
+  h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;}
+  h3{font-size:12px;font-weight:700;margin:0 0 10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-family:var(--mono);}
+  .eyebrow{font-family:var(--mono);font-size:10px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:3px;}
+  .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:38px;height:38px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;}
+  .hidden{display:none!important;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px;}
+  .tipos{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;}
+  .tipo-card{background:var(--panel2);border:2px solid var(--line);border-radius:10px;padding:14px 12px;cursor:pointer;font-weight:700;font-size:13px;text-align:center;color:var(--text);font-family:var(--sans);}
+  .tipo-card.ativo{border-color:var(--accent);color:var(--accent);}
+  label{display:block;font-size:11px;color:var(--muted);margin:12px 0 4px;font-family:var(--mono);}
+  input,select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:13.5px;font-family:var(--sans);}
+  input:focus,select:focus{outline:none;border-color:var(--accent);}
+  .grade-campos{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:0 14px;}
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px;}
+  th{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;text-align:left;padding:4px 6px;border-bottom:1px solid var(--line);}
+  td{padding:4px 4px;border-bottom:1px solid var(--line);vertical-align:middle;}
+  td input{padding:7px 8px;font-size:12.5px;}
+  .tabela-wrap{overflow-x:auto;}
+  .btn{background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:11px 16px;font-size:13.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .btn:disabled{opacity:.5;cursor:default;}
+  .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+  .btn-mini{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 9px;font-size:11.5px;cursor:pointer;font-family:var(--sans);}
+  .total{font-family:var(--mono);font-size:13px;margin-top:10px;text-align:right;}
+  .msg{margin-top:10px;font-size:12.5px;padding:10px 12px;border-radius:8px;}
+  .msg.err{background:#3a1616;color:var(--bad);}
+  .badge{display:inline-block;font-family:var(--mono);font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:99px;}
+  .badge.pendente{background:var(--warn-dim);color:var(--warn);}
+  .badge.assinado{background:var(--ok-dim);color:var(--ok);}
+  .form-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px;}
+  .form-item .fi-titulo{font-weight:700;font-size:13.5px;}
+  .fi-sub{font-size:11.5px;color:var(--muted);margin-top:3px;font-family:var(--mono);}
+  .ass-linha{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;font-size:12.5px;}
+  .ass-linha .rot{flex:1;min-width:140px;}
+  .acoes-form{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+  .vazio{color:var(--muted);font-size:12.5px;padding:8px 0;}
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+<header>
+  <div class="header-top">
+    <button class="hamburger-btn" id="nav-toggle" aria-label="Menu">☰</button>
+    <div style="flex:1;min-width:0;">
+      <div class="eyebrow">Zenith Ops · Solutions TI Tech</div>
+      <h1>🖊️ Formulários</h1>
+    </div>
+  </div>
+</header>
+
+<div id="sem-acesso" class="hidden panel vazio">Você não tem acesso a esta página.</div>
+
+<div id="raiz" class="hidden">
+  <div class="panel">
+    <h3>Novo formulário</h3>
+    <div class="tipos" id="tipos"></div>
+
+    <div id="editor" class="hidden">
+      <label>Unidade</label>
+      <select id="f-unidade"></select>
+      <div class="grade-campos" id="campos"></div>
+
+      <div class="tabela-wrap"><table id="tabela"><thead id="tabela-head"></thead><tbody id="tabela-corpo"></tbody></table></div>
+      <div style="margin-top:8px;"><button type="button" class="btn-ghost" onclick="addLinha()">➕ Adicionar linha</button></div>
+      <div class="total" id="total">Total: R$ 0,00</div>
+
+      <div class="msg err hidden" id="msg-criar"></div>
+      <button type="button" class="btn" id="btn-criar" style="margin-top:12px;width:100%;" onclick="criar()">💾 Criar formulário e gerar links de assinatura</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Formulários</h3>
+    <div id="lista"><div class="vazio">carregando...</div></div>
+  </div>
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+const escapeHtml = (s) => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtMoney = (v) => 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtData = (iso) => iso ? new Date(iso).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+
+let TIPOS = [];
+let TIPO_ATUAL = null;
+let UNIDADES = [];
+let LISTA = [];
+
+function modelo(){ return TIPOS.find(t=>t.tipo===TIPO_ATUAL); }
+
+function renderTipos(){
+  document.getElementById('tipos').innerHTML = TIPOS.map(t=>
+    `<button type="button" class="tipo-card ${t.tipo===TIPO_ATUAL?'ativo':''}" onclick="escolherTipo('${t.tipo}')">${escapeHtml(t.rotulo)}</button>`).join('');
+}
+
+function escolherTipo(tipo){
+  TIPO_ATUAL = tipo;
+  renderTipos();
+  const m = modelo();
+  document.getElementById('editor').classList.remove('hidden');
+  document.getElementById('campos').innerHTML = m.cabecalho.map(c=>
+    `<div><label>${escapeHtml(c.label)}</label><input type="text" data-campo="${escapeHtml(c.key)}"></div>`).join('');
+  // cabeçalho da tabela + 1 linha inicial (a coluna de assinatura das
+  // diárias não é digitada aqui - nasce sozinha, um link por linha)
+  document.getElementById('tabela-head').innerHTML = '<tr>' + m.colunas.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('') + '<th></th></tr>';
+  document.getElementById('tabela-corpo').innerHTML = '';
+  addLinha();
+  atualizarTotal();
+}
+
+function addLinha(){
+  const m = modelo();
+  const tr = document.createElement('tr');
+  tr.innerHTML = m.colunas.map(c=>
+    `<td><input type="text" data-col="${escapeHtml(c.key)}" ${c.valor?'inputmode="decimal" placeholder="0,00" oninput="atualizarTotal()"':''} style="${c.valor?'width:90px;text-align:right;':''}"></td>`).join('')
+    + '<td><button type="button" class="btn-mini" onclick="this.closest(\'tr\').remove();atualizarTotal()">✕</button></td>';
+  document.getElementById('tabela-corpo').appendChild(tr);
+}
+
+function valorBR(s){
+  const t = String(s||'').replace(/[R$\s]/g,'');
+  if(!t) return 0;
+  const n = Number(t.includes(',') ? t.replace(/\./g,'').replace(',','.') : t);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function atualizarTotal(){
+  const m = modelo(); if(!m) return;
+  const colValor = m.colunas.find(c=>c.valor);
+  let total = 0;
+  document.querySelectorAll('#tabela-corpo tr').forEach(tr=>{
+    const el = tr.querySelector(`input[data-col="${colValor.key}"]`);
+    if(el) total += valorBR(el.value);
+  });
+  document.getElementById('total').textContent = 'Total: ' + fmtMoney(total);
+}
+
+async function criar(){
+  const m = modelo(); if(!m) return;
+  const btn = document.getElementById('btn-criar');
+  const msg = document.getElementById('msg-criar');
+  msg.classList.add('hidden');
+  const campos = {};
+  document.querySelectorAll('#campos input[data-campo]').forEach(el=>{ campos[el.dataset.campo] = el.value; });
+  const linhas = [...document.querySelectorAll('#tabela-corpo tr')].map(tr=>{
+    const l = {};
+    tr.querySelectorAll('input[data-col]').forEach(el=>{ l[el.dataset.col] = el.value; });
+    return l;
+  });
+  btn.disabled = true;
+  try{
+    const r = await fetch('/api/formularios', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ tipo: TIPO_ATUAL, unidade: document.getElementById('f-unidade').value, campos, linhas }) });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || ('erro '+r.status));
+    document.getElementById('editor').classList.add('hidden');
+    TIPO_ATUAL = null; renderTipos();
+    await carregarLista();
+    alert('Formulário criado! Os links de assinatura estão no card dele abaixo - mande cada link pra pessoa certa (WhatsApp).');
+  }catch(e){
+    msg.textContent = e.message; msg.classList.remove('hidden');
+  }finally{ btn.disabled = false; }
+}
+
+function copiar(texto){
+  navigator.clipboard.writeText(texto).then(()=>alert('Link copiado! Cole no WhatsApp de quem vai assinar.'))
+    .catch(()=>prompt('Copie o link:', texto));
+}
+function whatsapp(texto){ window.open('https://wa.me/?text='+encodeURIComponent(texto), '_blank'); }
+
+function baixarPdf(id){
+  window.open(`/api/formularios/${encodeURIComponent(id)}/pdf?token=${encodeURIComponent(AUTH_TOKEN)}`, '_blank');
+}
+
+async function abrirLinks(id){
+  try{
+    const r = await fetch(`/api/formularios/${encodeURIComponent(id)}`);
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||('erro '+r.status));
+    const alvo = document.getElementById('links-'+id);
+    alvo.innerHTML = d.assinaturas.map(a=>`
+      <div class="ass-linha">
+        <span class="rot">${a.assinado?'✅':'✍️'} ${escapeHtml(a.rotulo)}${a.nome?` · <span style="color:var(--muted);">${escapeHtml(a.nome)}</span>`:''}</span>
+        ${a.assinado ? `<span style="color:var(--ok);font-size:11.5px;">assinado ${fmtData(a.assinadoEm)}</span>` : `
+          <button type="button" class="btn-mini" onclick="copiar('${a.link}')">🔗 Copiar link</button>
+          <button type="button" class="btn-mini" onclick="whatsapp('Assine o formulário aqui: '+'${a.link}')">💬 WhatsApp</button>`}
+      </div>`).join('');
+  }catch(e){ alert(e.message); }
+}
+
+function renderLista(){
+  const alvo = document.getElementById('lista');
+  if(!LISTA.length){ alvo.innerHTML = '<div class="vazio">Nenhum formulário ainda - crie o primeiro acima.</div>'; return; }
+  alvo.innerHTML = LISTA.map(f=>{
+    const t = TIPOS.find(x=>x.tipo===f.tipo);
+    const pendentes = f.assinaturas.filter(a=>!a.assinado).length;
+    return `<div class="form-item">
+      <div class="fi-titulo">${escapeHtml(t?t.rotulo:f.tipo)} · ${escapeHtml(f.unidade)}
+        <span class="badge ${f.status==='ASSINADO'?'assinado':'pendente'}">${f.status==='ASSINADO'?'✅ assinado':`✍️ falta(m) ${pendentes}`}</span></div>
+      <div class="fi-sub">${fmtData(f.criadoEm)} · ${f.linhas.length} linha(s) · total ${fmtMoney(f.valorTotal)} · por ${escapeHtml(f.criadoPorEmail||'')}</div>
+      <div class="acoes-form">
+        <button type="button" class="btn-ghost" onclick="abrirLinks('${f.id}')">✍️ Assinaturas e links</button>
+        <button type="button" class="btn-ghost" onclick="baixarPdf('${f.id}')">📄 PDF</button>
+      </div>
+      <div id="links-${f.id}"></div>
+    </div>`;
+  }).join('');
+}
+
+async function carregarLista(){
+  try{
+    const r = await fetch('/api/formularios');
+    if(r.status===403){ document.getElementById('sem-acesso').classList.remove('hidden'); return; }
+    LISTA = await r.json();
+    renderLista();
+  }catch(e){ /* mantém o que está na tela */ }
+}
+
+async function boot(){
+  const [tiposR, unidades] = await Promise.all([
+    fetch('/api/formularios/tipos'),
+    fetch('/api/meta/unidades-publico').then(r=>r.ok?r.json():[]),
+  ]);
+  if(tiposR.status===403){ document.getElementById('sem-acesso').classList.remove('hidden'); return; }
+  TIPOS = await tiposR.json();
+  UNIDADES = unidades;
+  document.getElementById('raiz').classList.remove('hidden');
+  document.getElementById('f-unidade').innerHTML = unidades.map(u=>`<option value="${escapeHtml(u.nome)}">${escapeHtml(u.nome)}</option>`).join('');
+  renderTipos();
+  carregarLista();
+}
+boot();
+</script>
+<script src="/notif-central.js"></script>
+<script src="/suporte-chat.js"></script>
+<script src="/nav-menu.js"></script>
+</body>
+</html>
