@@ -1593,6 +1593,50 @@ setTimeout(async () => {
   if (!okTestePush) ruins += 1;
   console.log(`${okTestePush ? '✓' : '✗'} push: teste de notificação de ponta a ponta (rota + sino do Painel/Monitor)`);
 
+  // ------------------------------------------------------------------
+  // Carrinho: divergência (saída negativa ao fechar turno) tem que virar
+  // alerta - e o Dia a dia tem que sair em PDF. Fecha um turno de verdade
+  // com saída negativa (contagem final maior que inicial, sem envio no
+  // meio), confere que o cálculo acusa, que o aviso registra na Central de
+  // Alertas mesmo sem VAPID, que o gancho está no caminho da CONTAGEM, e
+  // que a rota de PDF devolve um PDF de verdade.
+  let okCarrinho = false;
+  try {
+    const abastecimentoCarrinho = require('/home/user/adyen-monitor/server/abastecimentoCarrinho.js');
+    const abastecimentoPrevisao = require('/home/user/adyen-monitor/server/abastecimentoPrevisao.js');
+    const pushMod = require('/home/user/adyen-monitor/server/push.js');
+    // a contagem semeada (ct1) tem calabresa 4; esta fecha o turno com 9 -
+    // saiu 4 + 0 - 9 = -5 (sobrou mais do que entrou)
+    await abastecimentoCarrinho.criar({
+      operador: { usuario: 'anat1234', nome: 'Ana Teste' }, tipo: 'CONTAGEM',
+      pizzas: { calabresa: 9, pepperoni: 0, mussarela: 0 }, insumos: [],
+      criadoPorId: 'u1', criadoPorEmail: 't@t', criadoPorNome: 'Teste',
+    });
+    const ciclos = abastecimentoPrevisao.montarCiclos(await abastecimentoCarrinho.listAll());
+    const ultimo = ciclos[ciclos.length - 1] || { itens: [] };
+    const calabresa = ultimo.itens.find((i) => i.chave === 'pizza:calabresa') || {};
+
+    await pushMod.notifyAbastecimentoDivergencia(ultimo.rotulo || 'teste', 'Calabresa (-5)');
+    const alertaGravado = [...DOCS.entries()].some(([k, v]) => k.startsWith('alertasCentral/') && v && v.tipo === 'abastecimento-divergencia');
+
+    const src = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'abastecimento-relatorios.html'), 'utf8');
+    const pdf = await pedir(`/api/abastecimento/fluxo/relatorio.pdf?token=${encodeURIComponent(token)}`);
+
+    const conferencias = {
+      'o turno fechado acusa a saída negativa': calabresa.saida === -5,
+      'o aviso registra na Central de Alertas (mesmo sem VAPID)': alertaGravado,
+      'o gancho roda ao lançar CONTAGEM': /tipo === 'CONTAGEM'[\s\S]{0,200}verificarDivergenciaAbastecimento/.test(src),
+      'a rota de PDF devolve um PDF': pdf.status === 200 && pdf.corpo.startsWith('%PDF'),
+      'a tela tem o botão de PDF do Dia a dia': /baixarPdfDias/.test(html) && /fluxo\/relatorio\.pdf/.test(html),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okCarrinho = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (saida=${calabresa.saida}, pdf HTTP ${pdf.status})`);
+  } catch (e) { okCarrinho = false; console.log('  erro: ' + e.message); }
+  if (!okCarrinho) ruins += 1;
+  console.log(`${okCarrinho ? '✓' : '✗'} Carrinho: divergência vira alerta e o Dia a dia sai em PDF`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
