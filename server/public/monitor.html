@@ -565,7 +565,18 @@ function agoraBrasilia(){
 function isoLocalBR(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function hojeBrasilia(){ return isoLocalBR(agoraBrasilia()); }
 function clientKeyOf(t){ return t.shopperReference || `${t.cardHolder||'desconhecido'}::${t.last4||'----'}`; }
-function soNumero(unidade){ return (unidade||'').replace(/\D/g,'') || '—'; }
+// rótulo curto da unidade pra célula estreita. Código numérico vira só o
+// número (ex: '19888'). Depois da unificação de códigos (18/08, ver
+// migracaoUnidades.js no servidor) as lojas GBE passaram a usar o NOME do
+// Fechamento ("Dominos Caruaru") - sem dígito nenhum, o replace antigo
+// devolvia '—' e a coluna UNID. ficou vazia pra todas elas. Nome fica sem o
+// prefixo "Dominos" (a coluna já é curta e o contexto é esse).
+function soNumero(unidade){
+  const s = String(unidade||'').trim();
+  if(!s) return '—';
+  const digitos = s.replace(/\D/g,'');
+  return digitos || s.replace(/^dominos\s+/i,'');
+}
 
 let ORDERS_CHANGED = [];
 let CHARGEBACKS = [];
