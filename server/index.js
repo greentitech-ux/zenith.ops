@@ -436,6 +436,13 @@ app.get('/api/login-custom/fundo', async (req, res) => {
   if (!config.fundoArquivo) return res.sendStatus(404);
   storage.streamArquivo(config.fundoArquivo, null, res);
 });
+// imagem de cada logo do rodapé - pública pelo mesmo motivo do fundo: quem
+// lê é a própria tela de login, antes de existir sessão
+app.get('/api/login-custom/logo/:id', async (req, res) => {
+  const logo = await loginCustom.acharLogo(req.params.id);
+  if (!logo || !logo.arquivo) return res.sendStatus(404);
+  storage.streamArquivo(logo.arquivo, null, res);
+});
 
 // dominio publico do app - usado pra montar links completos (clicaveis fora
 // do Zenith, ex: mandados pelo Beniboy no chat pro colaborador repassar pro
@@ -7684,6 +7691,41 @@ app.delete('/api/login-custom/fundo', auth.requireMaster, async (req, res) => {
     if (atual.fundoArquivo) await storage.apagarArquivo(atual.fundoArquivo);
     const config = await loginCustom.removerFundo(req.user.email);
     res.json(config);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// logos das empresas do grupo no rodapé do login. Antes era imagem fixa no
+// código: empresa entrava ou saía do grupo e só dava pra refletir isso com
+// deploy. Agora o Master sobe e remove pela tela.
+app.get('/api/login-custom/logos', auth.requireMaster, async (req, res) => {
+  const config = await loginCustom.obter();
+  res.json((config.logos || []).map((l) => ({ id: l.id, nome: l.nome, em: l.em || null })));
+});
+app.post('/api/login-custom/logos', auth.requireMaster, uploadLoginFundo.single('logo'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Anexe a imagem da logo.' });
+    if (!/^image\//.test(req.file.mimetype || '')) return res.status(400).json({ error: 'A logo precisa ser uma imagem (PNG de preferência, com fundo transparente).' });
+    const caminho = await storage.salvarArquivo('login-custom', req.file, 'login-custom');
+    try {
+      const config = await loginCustom.adicionarLogo({ nome: req.body.nome, caminho, atualizadoPorEmail: req.user.email });
+      res.json(loginCustom.semDetalheInterno(config));
+    } catch (err) {
+      // cadastro recusou (limite cheio, por exemplo): não deixa o arquivo
+      // órfão no Storage ocupando espaço sem ninguém apontando pra ele
+      await storage.apagarArquivo(caminho).catch(() => {});
+      throw err;
+    }
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.delete('/api/login-custom/logos/:id', auth.requireMaster, async (req, res) => {
+  try {
+    const { config, arquivoRemovido } = await loginCustom.removerLogo(req.params.id, req.user.email);
+    if (arquivoRemovido) await storage.apagarArquivo(arquivoRemovido).catch(() => {});
+    res.json(loginCustom.semDetalheInterno(config));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

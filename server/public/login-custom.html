@@ -74,6 +74,11 @@
   .fundo-acoes{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
   .fundo-acoes label.btn-ghost{display:inline-flex;align-items:center;gap:6px;cursor:pointer;}
   /* pre-visualizacao do balao, igual ao que aparece na tela de login */
+  .logo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:10px;}
+  .logo-card{background:#000;border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;align-items:center;gap:8px;}
+  .logo-card img{max-width:100%;height:48px;object-fit:contain;}
+  .logo-card .nome{font-size:11.5px;color:#c3ccd8;text-align:center;word-break:break-word;}
+  .logo-vazio{color:var(--muted);font-size:12px;padding:8px 0;}
   .preview-balao{margin-top:10px;background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:10px 16px;max-width:280px;}
   .preview-balao b{font-size:14px;color:#ffd9a0;display:block;}
   .preview-balao small{display:block;font-weight:500;color:var(--muted);font-size:11.5px;margin-top:3px;line-height:1.4;}
@@ -105,8 +110,20 @@
 
 <div id="root" class="hidden">
   <div class="panel">
+    <h2>Empresas do grupo (logos do rodapé)</h2>
+    <div class="sub">São as logos que aparecem embaixo de "Zenith Ops faz parte do", na tela de login. Suba quando uma empresa entrar no grupo e remova quando sair - sem precisar de deploy. Enquanto não houver nenhuma cadastrada aqui, a tela continua mostrando a logo fixa do Grupo Bravo.</div>
+    <div class="sub" style="margin-top:6px;">Melhor formato: <b>PNG com fundo transparente</b>, deitado (mais largo que alto). O rodapé mostra todas na mesma altura e quebra linha sozinho quando não couberem.</div>
+    <div class="logo-grid" id="logo-grid"></div>
+    <div class="fundo-acoes">
+      <input type="text" id="f-logo-nome" placeholder="Nome da empresa (ex: Grupo Bravo)" maxlength="60" style="flex:1;min-width:180px;">
+      <label class="btn-ghost">📤 Enviar logo<input type="file" id="f-logo" accept="image/*" hidden onchange="enviarLogo()"></label>
+    </div>
+    <div class="msg hidden" id="msg-logo"></div>
+  </div>
+
+  <div class="panel">
     <h2>Fundo da tela de login</h2>
-    <div class="sub">A logo do Grupo Bravo, a frase acima dela, o card de login e o robô continuam do mesmo jeito - isso aqui troca só o fundo por trás de tudo. Sem imagem enviada, fica o fundo padrão escuro.</div>
+    <div class="sub">A frase do rodapé, o card de login e o robô continuam do mesmo jeito - isso aqui troca só o fundo por trás de tudo. Sem imagem enviada, fica o fundo padrão escuro. Com imagem, a arte aparece limpa e o rodapé desce um pouco, dentro de uma caixa preta arredondada, pra continuar legível sem escurecer a campanha.</div>
     <div class="fundo-preview" id="fundo-preview"><span class="vazio">Carregando...</span></div>
     <div class="fundo-acoes">
       <label class="btn-ghost">📤 Enviar imagem<input type="file" id="f-fundo" accept="image/jpeg,image/png,image/webp" hidden onchange="enviarFundo()"></label>
@@ -187,8 +204,62 @@ function renderFundoPreview(temFundo){
   }
 }
 
+// ---- logos das empresas do grupo (rodapé do login) ----
+function renderLogos(logos){
+  const el = document.getElementById('logo-grid');
+  if(!logos || !logos.length){
+    el.innerHTML = '<div class="logo-vazio">Nenhuma logo cadastrada - a tela de login está mostrando a logo fixa do Grupo Bravo.</div>';
+    return;
+  }
+  // fundo preto no card do preview de propósito: é assim que a logo vai
+  // aparecer no rodapé quando houver campanha, então dá pra conferir aqui
+  // mesmo se o PNG tem contraste suficiente
+  el.innerHTML = logos.map(l => `
+    <div class="logo-card">
+      <img src="/api/login-custom/logo/${encodeURIComponent(l.id)}?_=${Date.now()}" alt="${escapeHtml(l.nome)}">
+      <div class="nome">${escapeHtml(l.nome)}</div>
+      <button type="button" class="btn-ghost bad" onclick="removerLogo('${escapeHtml(l.id)}','${escapeHtml(l.nome)}')">🗑️ Remover</button>
+    </div>`).join('');
+}
+
+async function enviarLogo(){
+  const input = document.getElementById('f-logo');
+  const arquivo = input.files && input.files[0];
+  if(!arquivo) return;
+  const msg = document.getElementById('msg-logo');
+  msg.textContent = 'enviando...'; msg.className = 'msg'; msg.classList.remove('hidden');
+  try{
+    const fd = new FormData();
+    fd.append('logo', arquivo);
+    fd.append('nome', document.getElementById('f-logo-nome').value.trim() || arquivo.name.replace(/\.[^.]+$/, ''));
+    const resp = await fetch('/api/login-custom/logos', { method:'POST', body: fd });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Não consegui enviar.');
+    CONFIG_ATUAL = data;
+    renderLogos(data.logos);
+    document.getElementById('f-logo-nome').value = '';
+    msg.textContent = '✅ Logo adicionada ao rodapé do login.'; msg.className = 'msg ok';
+  }catch(e){ msg.textContent = e.message; msg.className = 'msg err'; }
+  finally{ input.value = ''; }
+}
+
+async function removerLogo(id, nome){
+  if(!confirm(`Remover a logo "${nome}" do rodapé do login?`)) return;
+  const msg = document.getElementById('msg-logo');
+  msg.textContent = 'removendo...'; msg.className = 'msg'; msg.classList.remove('hidden');
+  try{
+    const resp = await fetch('/api/login-custom/logos/' + encodeURIComponent(id), { method:'DELETE' });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Não consegui remover.');
+    CONFIG_ATUAL = data;
+    renderLogos(data.logos);
+    msg.textContent = '✅ Logo removida.'; msg.className = 'msg ok';
+  }catch(e){ msg.textContent = e.message; msg.className = 'msg err'; }
+}
+
 async function carregarConfig(){
   CONFIG_ATUAL = await fetch('/api/login-custom').then(r=>r.json());
+  renderLogos(CONFIG_ATUAL.logos);
   document.getElementById('f-ativo').checked = !!CONFIG_ATUAL.ativo;
   document.getElementById('f-titulo').value = CONFIG_ATUAL.bubbleTitulo || '';
   document.getElementById('f-texto').value = CONFIG_ATUAL.bubbleTexto || '';
