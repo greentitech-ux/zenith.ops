@@ -3228,6 +3228,108 @@ setTimeout(async () => {
   if (!okKpiRelatorio) ruins += 1;
   console.log(`${okKpiRelatorio ? '✓' : '✗'} KPI's operacionais: matriz da tela vira CSV/PDF e o PDF abre pelos indicadores mais ofensivos`);
 
+  // ---- RH: foto+localização obrigatórias e cobrança do check-out ----
+  // Duas regras juntas porque valem pro MESMO registro de ponto, seja extra
+  // ou candidato em teste: (1) nem entrada nem saída passam sem foto E
+  // localização, (2) passou de LIMITE_CHECKOUT_HORAS em aberto, o sistema
+  // começa a cobrar - e volta a cobrar de tempos em tempos, não uma vez só.
+  let okPontoRh = false;
+  try {
+    const rhc = require('/home/user/adyen-monitor/server/rhCheckin.js');
+    const rhMod = require('/home/user/adyen-monitor/server/rh.js');
+    const PNG_MIN = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+    const fotoFake = { path: 'rh-checkins/x.png', tipo: 'image/png' };
+    const localFake = { lat: -7.2, lng: -35.9, precisao: 12 };
+
+    // duas pessoas: um extra e um candidato em teste
+    const pessoas = {};
+    for (const [chave, tipo, status] of [['extra', 'extra', 'ativo'], ['candidato', 'candidato', 'candidato']]) {
+      const id = 'f-' + chave;
+      DOCS.set('rhFuncionarios/' + id, {
+        id, nome: 'Pessoa ' + chave, unidade: 'DomCG', tipoCadastro: tipo, status,
+        dataAdmissao: '2026-08-20', criadoEm: '2026-08-20T10:00:00Z', linkToken: 'tok-' + chave,
+        feedbackTeste: null,
+      });
+      pessoas[chave] = id;
+    }
+    rhMod.invalidar && rhMod.invalidar();
+    rhc.invalidar();
+
+    // (1) entrada e saída exigem foto E localização - pros DOIS tipos
+    const recusas = {};
+    for (const chave of ['extra', 'candidato']) {
+      const semFoto = await rhc.registrarEntrada({ funcionarioId: pessoas[chave], foto: null, localizacao: localFake })
+        .then(() => null).catch((e) => e.message);
+      const semLocal = await rhc.registrarEntrada({ funcionarioId: pessoas[chave], foto: fotoFake, localizacao: null })
+        .then(() => null).catch((e) => e.message);
+      recusas[chave] = { semFoto, semLocal };
+    }
+
+    // entrada válida do extra, pra ter um check-in aberto pra fechar
+    const entrada = await rhc.registrarEntrada({ funcionarioId: pessoas.extra, foto: fotoFake, localizacao: localFake });
+    const saidaSemFoto = await rhc.registrarSaida(entrada.id, { foto: null, localizacao: localFake })
+      .then(() => null).catch((e) => e.message);
+    const saidaSemLocal = await rhc.registrarSaida(entrada.id, { foto: fotoFake, localizacao: null })
+      .then(() => null).catch((e) => e.message);
+
+    // (2) cobrança do check-out: envelhece a entrada pra pouco antes e pouco
+    // depois do limite, e confere que só o segundo caso é cobrado.
+    // As horas abaixo são LITERAIS de propósito (8,5h e 9,2h): se viessem de
+    // rhc.LIMITE_CHECKOUT_HORAS, mudar a constante moveria a régua junto e o
+    // teste passaria com qualquer limite - inclusive um errado.
+    const chave = 'rhCheckins/' + entrada.id;
+    const envelhecer = (horas) => {
+      const d = DOCS.get(chave);
+      DOCS.set(chave, { ...d, entrada: { ...d.entrada, horario: new Date(Date.now() - horas * 3600000).toISOString() } });
+      rhc.invalidar();
+    };
+
+    envelhecer(8.5);
+    const antesDoLimite = await rhc.verificarCheckoutsAtrasados();
+    envelhecer(9.2);
+    const noLimite = await rhc.verificarCheckoutsAtrasados();
+    // primeiro aviso: pode furar o silêncio noturno
+    const primeiro = noLimite.find((c) => c.id === entrada.id);
+    await rhc.marcarAlertaCheckout(entrada.id);
+    rhc.invalidar();
+    // logo depois de avisar, não repete
+    const logoDepois = await rhc.verificarCheckoutsAtrasados();
+    // mas volta a cobrar quando passa o intervalo de repetição
+    const d2 = DOCS.get(chave);
+    DOCS.set(chave, { ...d2, alertaCheckoutEm: new Date(Date.now() - 3 * 3600000).toISOString() });
+    rhc.invalidar();
+    const repetiu = await rhc.verificarCheckoutsAtrasados();
+
+    // fechar o ponto tira a pessoa da cobrança - é o que o alerta pede
+    await rhc.registrarSaida(entrada.id, { foto: fotoFake, localizacao: localFake });
+    rhc.invalidar();
+    const depoisDeFechar = await rhc.verificarCheckoutsAtrasados();
+
+    const conferencias = {
+      'o limite de jornada é o combinado (9h)': rhc.LIMITE_CHECKOUT_HORAS === 9,
+      'extra não entra sem foto': /foto/i.test(recusas.extra.semFoto || ''),
+      'extra não entra sem localização': /localiza/i.test(recusas.extra.semLocal || ''),
+      'candidato em teste não entra sem foto': /foto/i.test(recusas.candidato.semFoto || ''),
+      'candidato em teste não entra sem localização': /localiza/i.test(recusas.candidato.semLocal || ''),
+      'check-out também exige foto': /foto/i.test(saidaSemFoto || ''),
+      'check-out também exige localização': /localiza/i.test(saidaSemLocal || ''),
+      'antes do limite ninguém é cobrado': !antesDoLimite.some((c) => c.id === entrada.id),
+      'com 9,2h em aberto, vira cobrança': !!primeiro,
+      'a cobrança informa há quantas horas está aberto': !!primeiro && primeiro.horasEmAberto >= 9,
+      'o primeiro aviso é marcado como primeiro (pode tocar de madrugada)': !!primeiro && primeiro.primeiroAviso === true,
+      'logo após avisar, não repete o alerta': !logoDepois.some((c) => c.id === entrada.id),
+      'passado o intervalo, volta a cobrar': repetiu.some((c) => c.id === entrada.id),
+      'e a repetição NÃO é primeiro aviso (respeita a madrugada)':
+        (repetiu.find((c) => c.id === entrada.id) || {}).primeiroAviso === false,
+      'bater o check-out encerra a cobrança': !depoisDeFechar.some((c) => c.id === entrada.id),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okPontoRh = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okPontoRh = false; console.log('  erro: ' + e.message); }
+  if (!okPontoRh) ruins += 1;
+  console.log(`${okPontoRh ? '✓' : '✗'} RH: ponto sem foto/localização é recusado (extra e teste) e ponto aberto demais vira cobrança de check-out`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
