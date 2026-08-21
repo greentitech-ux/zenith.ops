@@ -149,8 +149,16 @@
   .az-list label:hover{background:var(--panel2);}
   .az-list label input[type=checkbox]{flex:none;width:15px;height:15px;margin-top:2px;}
   .az-list label span{flex:1;min-width:0;white-space:normal;line-height:1.4;overflow-wrap:break-word;}
+  /* nos checklists de permissão a letra continua sendo só um rótulo; na
+     lista de Acessos ela virou o botão que abre/fecha o grupo */
   .az-letra{width:100%;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--accent);margin:8px 0 3px;padding-bottom:2px;border-bottom:1px solid var(--line);}
   .az-letra:first-child{margin-top:0;}
+  button.az-letra{display:flex;align-items:center;gap:8px;background:none;border:none;border-bottom:1px solid var(--line);
+    text-align:left;cursor:pointer;padding:7px 4px;margin:6px 0 0;font-family:var(--mono);border-radius:6px 6px 0 0;}
+  button.az-letra:hover{background:var(--panel2);}
+  .az-seta{font-size:9px;opacity:.8;width:9px;}
+  .az-contagem{margin-left:auto;color:var(--muted);font-weight:600;}
+  .az-corpo{padding-top:2px;}
   .az-sufixo{color:var(--muted);font-weight:400;}
   .az-scroll{max-height:270px;overflow-y:auto;padding-right:4px;}
 
@@ -1038,14 +1046,7 @@ function renderUsers(){
   const ordenados = FILTRO_USERS_STATUS ? apósBusca.filter(u=>statusUsuario(u)===FILTRO_USERS_STATUS) : apósBusca;
   document.getElementById('users-contagem').textContent =
     `Mostrando ${ordenados.length} de ${USERS.length} acesso${USERS.length===1?'':'s'}`;
-  // agrupa por letra inicial do email (mesmo critério de letraChave usado
-  // nos checklists de permissão) - cabeçalho A/B/C só aqui na lista geral,
-  // não mais nos formulários de cadastro/edição de permissão
-  let letraAtual = '';
-  container.innerHTML = ordenados.map(u=>{
-    const letra = (letraChave(u.email)[0]||'#').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-    let cabecalhoLetra = '';
-    if(letra !== letraAtual){ letraAtual = letra; cabecalhoLetra = `<div class="az-letra">${escapeHtml(letra)}</div>`; }
+  const cardUsuario = (u) => {
     const perms = u.permissions || {sections:[],unidades:[],vaultSubgroups:[],tiposSolicitacao:[]};
     const subgroupNames = (perms.vaultSubgroups||[]).map(caminhoSubgrupo);
     const isMaster = u.role==='master';
@@ -1080,8 +1081,7 @@ function renderUsers(){
          <div class="user-detail-linha"><b>Unidades:</b> ${tagList(perms.unidades, c=>UNIDADES_NOMES[c]||c)}</div>
          <div class="user-detail-linha"><b>Cofre (subgrupos):</b> ${tagList(subgroupNames)}</div>
          <div class="user-detail-linha"><b>Tipos (Central):</b> ${(perms.tiposSolicitacao||[]).length ? tagList(perms.tiposSolicitacao, t=>(TIPOS_SOLICITACAO.find(o=>o[0]===t)||[t,t])[1]) : '<span style="color:var(--muted);">todos</span>'}</div>`;
-    return `${cabecalhoLetra}
-    <div class="user-row">
+    return `<div class="user-row">
       <span class="user-status-dot ${status.cor}" title="${status.texto}"></span>
       <div class="user-info">
         <div class="user-nome" onclick="toggleDetalheUsuario('${u.id}')" title="Clique pra ver os detalhes">${escapeHtml(u.email)}</div>
@@ -1093,7 +1093,45 @@ function renderUsers(){
       ${isMaster ? `<button type="button" class="btn-acoes" onclick="toggleDetalheUsuario('${u.id}')" title="Sessão sempre conectada">⚙️ Ações</button>` : `<button type="button" class="btn-acoes" onclick="abrirAcoes('${u.id}')">⚙️ Ações</button>`}
     </div>
     <div class="user-detail hidden" id="detalhe-${u.id}">${detalhe}</div>`;
-  }).join('') || `<div style="color:var(--muted);text-align:center;padding:20px;">${USERS.length ? 'Nenhum acesso encontrado com esse filtro.' : 'Nenhum acesso criado ainda.'}</div>`;
+  };
+
+  // agrupa por letra inicial do email (mesmo critério de letraChave usado
+  // nos checklists de permissão). Cada letra é um bloco que abre/fecha,
+  // RECOLHIDO por padrão - a lista inteira aberta é um paredão que obriga a
+  // rolar muito pra achar alguém.
+  const grupos = [];
+  ordenados.forEach(u=>{
+    const letra = (letraChave(u.email)[0]||'#').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const ultimo = grupos[grupos.length-1];
+    if(ultimo && ultimo.letra === letra) ultimo.itens.push(u);
+    else grupos.push({ letra, itens:[u] });
+  });
+
+  // com busca ou filtro ativo, os grupos nascem ABERTOS: esconder o
+  // resultado de uma busca é o mesmo que a busca não ter funcionado
+  const filtrando = !!String(FILTRO_USERS_BUSCA || '').trim() || !!FILTRO_USERS_STATUS;
+
+  container.innerHTML = grupos.length ? grupos.map(g=>{
+    const aberto = filtrando || LETRAS_ABERTAS.has(g.letra);
+    return `<div class="az-grupo">
+      <button type="button" class="az-letra" onclick="alternarLetraUsuarios('${g.letra}')" aria-expanded="${aberto}">
+        <span class="az-seta">${aberto?'▾':'▸'}</span>
+        <span>${escapeHtml(g.letra)}</span>
+        <span class="az-contagem">${g.itens.length}</span>
+      </button>
+      <div class="az-corpo${aberto?'':' hidden'}">${g.itens.map(cardUsuario).join('')}</div>
+    </div>`;
+  }).join('') : `<div style="color:var(--muted);text-align:center;padding:20px;">${USERS.length ? 'Nenhum acesso encontrado com esse filtro.' : 'Nenhum acesso criado ainda.'}</div>`;
+}
+
+// letras que a pessoa abriu nesta visita. Em memória de propósito: "por
+// padrão recolhida" vale a cada vez que a tela abre; o que não pode é
+// recolher no meio do uso, quando a lista se redesenha depois de uma ação.
+const LETRAS_ABERTAS = new Set();
+function alternarLetraUsuarios(letra){
+  if(LETRAS_ABERTAS.has(letra)) LETRAS_ABERTAS.delete(letra);
+  else LETRAS_ABERTAS.add(letra);
+  renderUsers();
 }
 function toggleDetalheUsuario(id){
   const el = document.getElementById('detalhe-'+id);
