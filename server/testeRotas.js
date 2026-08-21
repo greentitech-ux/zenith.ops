@@ -149,6 +149,26 @@ const sheetsSync = require('/home/user/adyen-monitor/server/sheetsSync.js');
 // chunks numa string (como o `pedir` faz) corrompe os bytes. Este aqui
 // preserva o buffer, e textoDoPdf desinfla e remonta o texto pra dar pra
 // conferir o que foi realmente IMPRESSO, não só que a rota respondeu 200.
+// mesma ideia do pedirBinario, so que POST com corpo JSON: o relatorio de
+// KPI's manda a matriz JA CALCULADA na tela e recebe o PDF de volta (a
+// conta e feita no navegador; recalcular no servidor criaria uma segunda
+// fonte de verdade que pode discordar do que a pessoa esta vendo)
+function postarBinario(caminho, corpoObj, headers = {}) {
+  const corpo = Buffer.from(JSON.stringify(corpoObj));
+  return new Promise((resolve) => {
+    const req = http.request({
+      host: '127.0.0.1', port: 8899, path: caminho, method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json', 'Content-Length': corpo.length },
+    }, (res) => {
+      const pedacos = [];
+      res.on('data', (c) => pedacos.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, buffer: Buffer.concat(pedacos) }));
+    });
+    req.on('error', () => resolve({ status: 0, buffer: Buffer.alloc(0) }));
+    req.setTimeout(8000, () => { req.destroy(); resolve({ status: -1, buffer: Buffer.alloc(0) }); });
+    req.end(corpo);
+  });
+}
 function pedirBinario(caminho, headers = {}) {
   return new Promise((resolve) => {
     const req = http.request({ host: '127.0.0.1', port: 8899, path: caminho, headers }, (res) => {
@@ -3129,6 +3149,84 @@ setTimeout(async () => {
   } catch (e) { okReinicioAlerta = false; console.log('  erro: ' + e.message); }
   if (!okReinicioAlerta) ruins += 1;
   console.log(`${okReinicioAlerta ? '✓' : '✗'} NOC: máquina que NÓS mandamos reiniciar aparece como "reiniciando", não como "sem conexão"`);
+
+  // ---- KPI's operacionais: exportar a matriz + ranking de ofensores ----
+  // O que importa provar aqui: (1) o CSV/PDF sai com EXATAMENTE a matriz que
+  // a tela mandou (a conta e feita no navegador de proposito - ver o
+  // comentario em postarBinario), (2) periodo vazio nao gera arquivo mudo, e
+  // (3) a "direcao" do KPI (ruim quando sobe / ruim quando cai), que e o que
+  // da sentido a palavra "ofensivo", sobrevive ao cadastro em Grupos.
+  let okKpiRelatorio = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const grupoCriado = await postarJson('/api/grupos', {
+      nome: 'Grupo KPI Teste',
+      unidades: ['AERO'],
+      kpisExtras: [
+        { label: 'Tempo de entrega', tipo: 'tempo', direcao: 'menor-melhor' },
+        { label: 'Nota do cliente', tipo: 'quantidade', direcao: 'maior-melhor' },
+        // direcao inexistente tem que cair pra 'neutro', nunca ser gravada crua
+        { label: 'Inventado', tipo: 'quantidade', direcao: 'ruim-quando-chove' },
+        // sem direcao nenhuma: o campo nem deve aparecer no registro
+        { label: 'Sem direcao', tipo: 'quantidade' },
+      ],
+    }, cab);
+    const g = grupoCriado.status === 200 ? JSON.parse(grupoCriado.corpo) : { kpisExtras: [] };
+    const porLabel = {};
+    (g.kpisExtras || []).forEach((k) => { porLabel[k.label] = k; });
+
+    // a matriz que a tela manda: 2 lojas, 2 KPI's, um valor faltando
+    const matriz = {
+      grupo: 'Grupo KPI Teste',
+      inicio: '2026-08-01', fim: '2026-08-20', lancamentos: 12,
+      lojas: ['Dom Aeroporto', 'Dom Tirol'],
+      linhas: [
+        { kpi: 'Tempo de entrega', agregacao: 'média', valores: ['42:00', '31:00'] },
+        // celula vazia tem que virar tracinho, nao "undefined" nem sumir
+        { kpi: 'Nota do cliente', agregacao: 'média', valores: ['4,1', ''] },
+        // KPI com nome que o Excel executaria como formula
+        { kpi: '=SOMA(A1:A9)', agregacao: 'soma', valores: ['10', '20'] },
+      ],
+      ofensores: [
+        { kpi: 'Tempo de entrega', loja: 'Dom Aeroporto', texto: '+35% vs mediana' },
+      ],
+    };
+    const csv = await postarJson('/api/kpis-operacionais/relatorio?formato=csv', matriz, cab);
+    const linhasCsv = csv.corpo.replace(/^﻿/, '').split('\r\n');
+    const pdf = await postarBinario('/api/kpis-operacionais/relatorio', matriz, cab);
+    const textoPdf = pdf.status === 200 ? textoDoPdf(pdf.buffer) : '';
+    const vazio = await postarJson('/api/kpis-operacionais/relatorio?formato=csv',
+      { ...matriz, linhas: [] }, cab);
+
+    const conferencias = {
+      'KPI ruim-quando-sobe e ruim-quando-cai ficam gravados como cadastrados':
+        porLabel['Tempo de entrega']?.direcao === 'menor-melhor'
+        && porLabel['Nota do cliente']?.direcao === 'maior-melhor',
+      'direcao inventada vira "neutro" em vez de entrar crua':
+        porLabel['Inventado']?.direcao === 'neutro',
+      'KPI sem direcao nao ganha o campo do nada':
+        porLabel['Sem direcao'] && porLabel['Sem direcao'].direcao === undefined,
+      'CSV sai com uma coluna por loja, na ordem da tela':
+        linhasCsv[0] === 'KPI,Agreg.,Dom Aeroporto,Dom Tirol',
+      'CSV leva os valores exatamente como a tela calculou':
+        linhasCsv[1] === 'Tempo de entrega,média,42:00,31:00',
+      'loja sem valor no periodo sai como tracinho, nao vazia':
+        linhasCsv[2] === 'Nota do cliente,média,"4,1",—',
+      'nome de KPI que parece formula nao e executado pelo Excel':
+        linhasCsv[3].startsWith("'=SOMA"),
+      'PDF responde de verdade': pdf.status === 200,
+      'PDF imprime a matriz': /Tempo de entrega/.test(textoPdf) && /DOM TIROL/.test(textoPdf),
+      'PDF abre com o ofensor em destaque, antes da tabela':
+        /35% vs mediana/.test(textoPdf) && textoPdf.indexOf('35% vs mediana') < textoPdf.indexOf('Nota do cliente'),
+      'periodo sem KPI nenhum recusa em vez de gerar arquivo vazio':
+        vazio.status === 400 && /Nada pra exportar/.test(vazio.corpo),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okKpiRelatorio = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okKpiRelatorio = false; console.log('  erro: ' + e.message); }
+  if (!okKpiRelatorio) ruins += 1;
+  console.log(`${okKpiRelatorio ? '✓' : '✗'} KPI's operacionais: matriz da tela vira CSV/PDF e o PDF abre pelos indicadores mais ofensivos`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

@@ -7654,6 +7654,75 @@ app.post('/api/relatorio-config', auth.requireMaster, async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------
+// Relatório dos KPI's operacionais (CSV e PDF).
+//
+// A matriz vem PRONTA da tela, e isso é decisão, não preguiça: o valor de
+// cada célula depende de escolhas que moram lá (média x soma por KPI, o
+// override manual do seletor de agregação, o período). Recalcular aqui
+// criaria uma segunda fonte de verdade, e o relatório passaria a poder
+// discordar da tela que a pessoa está olhando - que é exatamente o que um
+// comparativo não pode fazer.
+//
+// O servidor não aceita qualquer coisa: valida o formato, corta tamanho, e
+// os títulos/cabeçalho são fixos aqui. O que chega de fora é dado, não
+// layout.
+function sanitizarMatrizKpi(body) {
+  const texto = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
+  const lojas = (Array.isArray(body.lojas) ? body.lojas : []).slice(0, 30).map((u) => texto(u, 60)).filter(Boolean);
+  const linhas = (Array.isArray(body.linhas) ? body.linhas : []).slice(0, 200).map((l) => ({
+    kpi: texto(l && l.kpi, 80),
+    agregacao: texto(l && l.agregacao, 10),
+    valores: (Array.isArray(l && l.valores) ? l.valores : []).slice(0, 30).map((v) => texto(v, 20)),
+  })).filter((l) => l.kpi);
+  const ofensores = (Array.isArray(body.ofensores) ? body.ofensores : []).slice(0, 3).map((o) => ({
+    kpi: texto(o && o.kpi, 40), loja: texto(o && o.loja, 40), texto: texto(o && o.texto, 24),
+  })).filter((o) => o.kpi);
+  return {
+    grupo: texto(body.grupo, 60) || 'Grupo',
+    inicio: texto(body.inicio, 10), fim: texto(body.fim, 10),
+    lancamentos: Number(body.lancamentos) || 0,
+    lojas, linhas, ofensores,
+  };
+}
+
+app.post('/api/kpis-operacionais/relatorio', requireSection('fechamentos'), async (req, res) => {
+  try {
+    const d = sanitizarMatrizKpi(req.body || {});
+    if (!d.linhas.length) return res.status(400).json({ error: 'Nada pra exportar nesse período.' });
+    const colunas = [
+      { key: 'kpi', label: 'KPI' },
+      { key: 'agregacao', label: 'Agreg.' },
+      ...d.lojas.map((u, i) => ({ key: 'l' + i, label: u })),
+    ];
+    const linhas = d.linhas.map((l) => {
+      const linha = { kpi: l.kpi, agregacao: l.agregacao };
+      d.lojas.forEach((_, i) => { linha['l' + i] = l.valores[i] == null || l.valores[i] === '' ? '—' : l.valores[i]; });
+      return linha;
+    });
+    const periodo = `${reportUtil.fmtDataBR(d.inicio)} a ${reportUtil.fmtDataBR(d.fim)}`;
+    const subtitulo = `${d.grupo} · ${periodo} · ${d.lancamentos} lançamento(s) · ${d.linhas.length} KPI's · ${d.lojas.length} loja(s)`;
+    const nomeArquivo = reportUtil.nomeArquivoComData(`kpis-${reportUtil.slugify(d.grupo, 'grupo')}`);
+
+    if (req.query.formato === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}.csv"`);
+      return res.send(reportUtil.toCSV(colunas, linhas));
+    }
+    // no PDF os ofensores viram o bloco de destaque no topo: é a primeira
+    // coisa que alguém quer saber ao abrir o arquivo, antes da matriz
+    const resumo = d.ofensores.map((o) => [o.texto, `${o.kpi} · ${o.loja}`]);
+    return reportUtil.writePDF(res, {
+      titulo: "KPI's operacionais", subtitulo, colunas, linhas,
+      resumo: resumo.length ? resumo : null,
+      semDadosMsg: 'Nenhum KPI preenchido nesse período.',
+      nomeArquivo,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // painel de personalização da tela de login (ver /login-custom.html) -
 // Master edita o texto do balão do robô e o fundo; a leitura pública (tela
 // de login em si) está lá em cima, perto de /api/meta/unidades-publico

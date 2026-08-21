@@ -462,7 +462,15 @@ const TIPOS_KPI = [
 // Toda linha (Canal/Forma/KPI) ganha ▲▼ pra reordenar - a ORDEM da lista e
 // literalmente a ordem das divs no container, sem campo novo: lerKpis() lê
 // na ordem do DOM, entao mover a div já move o item na lista salva.
-function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, tambemInicial, somaEmInicial, manualInicial){
+// pra que lado o KPI é ruim - é o que permite o ranking de "indicadores
+// mais ofensivos" (ver kpis-operacionais.html). Deixar em "não sei" não
+// quebra nada: o ranking cai pra divergência entre lojas.
+const DIRECOES_KPI = [
+  ['neutro', 'Direção: não sei'],
+  ['menor-melhor', 'Ruim quando SOBE'],
+  ['maior-melhor', 'Ruim quando CAI'],
+];
+function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, tambemInicial, somaEmInicial, manualInicial, direcaoInicial){
   const container = document.getElementById(containerId);
   const ehKpi = containerId.includes('kpis');
   const ehCanal = containerId.includes('canais');
@@ -478,6 +486,7 @@ function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, t
       <label title="Marque nos campos que a loja digita na mão (Pix CNPJ, Outros...). Só faz diferença na loja que usa a leitura por foto: os marcados continuam editáveis e ficam de fora da leitura."><input type="checkbox" class="extra-manual-checkbox" ${manualInicial?'checked':''}> ✏️ digitado na mão (não sai no relatório do PDV)</label>
     </div>` : '';
   const ehMoedaInicial = (tipoInicial||'quantidade')==='moeda';
+  const seletorDirecao = ehKpi ? `<select class="kpi-direcao-select" title="Pra que lado esse indicador é ruim - usado no ranking de ofensores">${DIRECOES_KPI.map(([v,l])=>`<option value="${v}" ${(direcaoInicial||'neutro')===v?'selected':''}>${l}</option>`).join('')}</select>` : '';
   const somaEmKpi = ehKpi ? `<label class="linha-kpi-soma-em">Somar em
       <select class="kpi-soma-em-select" ${ehMoedaInicial ? '' : 'disabled'}>
         <option value="nao" ${(somaEmInicial||'nao')==='nao'?'selected':''}>Não somar (só captar o dado)</option>
@@ -491,6 +500,7 @@ function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, t
     </div>
     <input type="text" value="${escapeHtml(valorInicial||'')}" list="${datalistId}" placeholder="ex: Taxa de entrega, LegTime, OTD... (ou escolha um já usado)">
     ${seletorTipo}
+    ${seletorDirecao}
     <button type="button" class="btn-remover" onclick="this.closest('.linha-kpi').remove()">✕</button>
     ${opcoes}
     ${somaEmKpi}`;
@@ -541,6 +551,8 @@ function lerKpis(containerId){
         item.tipo = sel ? sel.value : 'quantidade';
         const selSoma = linha.querySelector('.kpi-soma-em-select');
         item.somaEm = selSoma ? selSoma.value : 'nao';
+        const selDir = linha.querySelector('.kpi-direcao-select');
+        item.direcao = selDir ? selDir.value : 'neutro';
       }
       if(ehCanalOuForma){
         const selOp = linha.querySelector('.extra-operacao-select');
@@ -727,7 +739,7 @@ function abrirEdicaoGrupo(id){
   document.getElementById('e-formas').innerHTML = '';
   (g.formasPagamentoExtras||[]).forEach(k=>adicionarKpi('e-formas', k.label, null, k.operacao, k.tambemNoOutroTotal, null, k.manual));
   document.getElementById('e-kpis').innerHTML = '';
-  (g.kpisExtras||[]).forEach(k=>adicionarKpi('e-kpis', k.label, k.tipo, null, null, k.somaEm));
+  (g.kpisExtras||[]).forEach(k=>adicionarKpi('e-kpis', k.label, k.tipo, null, null, k.somaEm, null, k.direcao));
   responsaveisChecksHtml('e-responsaveis', new Set(g.responsaveis||[]));
   document.getElementById('grupo-err').classList.add('hidden');
   grupoOverlay.classList.add('show');
