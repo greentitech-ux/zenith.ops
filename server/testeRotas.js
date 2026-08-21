@@ -530,21 +530,34 @@ setTimeout(async () => {
   if (!okFundeMonitorSolto) ruins += 1;
   console.log(`${okFundeMonitorSolto ? '✓' : '✗'} código antigo solto do Monitor (transação em cache, sem migração) some sozinho, funde no código do Fechamento: HTTP ${unidadesComCodigoMonitorSolto.status}`);
 
-  // ---- caso real reportado pelo usuário: "Tirol Natal" (merchantAccountCode
-  // solto, sem lar em nenhuma lista fixa) duplicando com "MMTirol Natal" (a
-  // mesma loja no espaço de Entregas) - aqui o destino do fold NÃO é
-  // Fechamento (essa loja não tem), é o próprio código de Entregas ----
+  // ---- "MMTirol Natal"/"Tirol Natal": o Master olhou a tela de Unidades e
+  // disse que essa loja NÃO EXISTE - excluir em definitivo. O teste que
+  // existia aqui antes era o oposto (conferia que os dois códigos fundiam
+  // num cadastro só); agora o certo é os DOIS sumirem.
+  //
+  // O que importa provar: não basta ter tirado da lista fixa. O código volta
+  // sozinho pelo DADO - é isso que a transação abaixo simula (transação da
+  // Adyen em cache, como acontece de verdade no boot). Sem CODIGOS_REMOVIDOS
+  // ele reaparecia aqui, agora sem nome, como órfão em "Outras". ----
   store.addOrUpdate({ pspReference: 'psp-fold-tirol-natal', eventCode: 'AUTHORISATION', unidade: 'Tirol Natal', status: 'APROVADO', dataHora: new Date().toISOString(), valor: 15 });
-  const unidadesComTirolNatalSolto = await pedir('/api/meta/unidades', { Authorization: 'Bearer ' + token });
-  let okFundeTirolNatal = false;
+  const unidadesTirolNatalRemovida = await pedir('/api/meta/unidades', { Authorization: 'Bearer ' + token });
+  const criarUnidadeRemovida = await postarJson('/api/meta/unidades-extras', { codigo: 'MMTirol Natal', nome: 'Milky Moo Tirol Natal' }, { Authorization: 'Bearer ' + token });
+  let okTirolNatalRemovida = false;
   try {
-    const lista = JSON.parse(unidadesComTirolNatalSolto.corpo);
-    okFundeTirolNatal = unidadesComTirolNatalSolto.status === 200
+    const lista = JSON.parse(unidadesTirolNatalRemovida.corpo);
+    okTirolNatalRemovida = unidadesTirolNatalRemovida.status === 200
+      // nenhum dos dois códigos aparece, mesmo com transação viva no cache
       && !lista.some((u) => u.codigo === 'Tirol Natal')
-      && lista.some((u) => u.codigo === 'MMTirol Natal' && u.nome === 'Milky Moo Tirol Natal');
-  } catch (e) { okFundeTirolNatal = false; }
-  if (!okFundeTirolNatal) ruins += 1;
-  console.log(`${okFundeTirolNatal ? '✓' : '✗'} "Tirol Natal" (Monitor solto) funde em "MMTirol Natal" (Entregas, sem Fechamento pra essa loja): HTTP ${unidadesComTirolNatalSolto.status}`);
+      && !lista.some((u) => u.codigo === 'MMTirol Natal')
+      // e não sobrou nada com o nome antigo por outro caminho
+      && !lista.some((u) => String(u.nome || '').includes('Tirol Natal'))
+      // a loja de verdade (Milky Moo Tirol, do Fechamento) continua lá
+      && lista.some((u) => u.codigo === 'Milky Moo Tirol')
+      // e recadastrar o código na mão é recusado com explicação
+      && criarUnidadeRemovida.status === 400 && /excluído em definitivo/.test(criarUnidadeRemovida.corpo);
+  } catch (e) { okTirolNatalRemovida = false; }
+  if (!okTirolNatalRemovida) ruins += 1;
+  console.log(`${okTirolNatalRemovida ? '✓' : '✗'} "MMTirol Natal"/"Tirol Natal" excluída em definitivo: não volta nem pelo dado em cache nem por cadastro manual: HTTP ${unidadesTirolNatalRemovida.status}`);
 
   // ---- colunas do Fechamento unificadas por NOME (ver colunasValores em
   // public/fechamentos.html e unificarPorNome em fechamentosReport.js): a
@@ -1829,7 +1842,7 @@ setTimeout(async () => {
       'código numérico continua saindo só o número': soNumero('19888') === '19888',
       'código antigo da Adyen continua saindo o número': soNumero('DOM_19798') === '19798',
       'código unificado SEM dígito mostra o nome (não "—")': soNumero('Dominos Caruaru') === 'Caruaru',
-      'nome sem prefixo Dominos sai inteiro': soNumero('MMTirol Natal') === 'MMTirol Natal',
+      'nome sem prefixo Dominos sai inteiro': soNumero('Milky Moo Tirol') === 'Milky Moo Tirol',
       'vazio segue como travessão': soNumero('') === '—' && soNumero(null) === '—',
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
@@ -1905,7 +1918,7 @@ setTimeout(async () => {
   try {
     DOCS.set('solicitacoes/cmp1', {
       id: 'cmp1', tipo: 'compra', status: 'APROVADO', numeroTicket: 10391,
-      unidade: 'MMTirol Natal', unidadeNome: 'MilkyMoo Tirol',
+      unidade: 'Milky Moo Tirol', unidadeNome: 'MilkyMoo Tirol',
       titulo: 'Comprar de insumos orçamento', observacao: 'Comprar até amanhã.',
       itens: [{ descricao: 'Biscoito maria 15 unidades', quantidade: 96 }, { descricao: 'suspiro 4 unidades', quantidade: 28 }],
       criadoEm: new Date().toISOString(), linkAcao: 'linkteste123', linkAcaoRevogado: false,
@@ -2162,7 +2175,8 @@ setTimeout(async () => {
         && !gbe.padrao
         && ['Dominos Bessa', 'Spoleto Shopping Recife', 'Saltiverso Patteo'].every((c) => gbe.unidades.includes(c)),
       'GBE também lista os códigos da Adyen/Entregas das mesmas lojas (senão o Monitor sai vazio)':
-        !!gbe && ['DOM_19706', 'MMTirol Natal', 'Tirol Natal'].every((c) => gbe.unidades.includes(c)),
+        !!gbe && ['DOM_19706', 'Caruaru', 'DOM19940'].every((c) => gbe.unidades.includes(c))
+        && !gbe.unidades.some((c) => ['MMTirol Natal', 'Tirol Natal'].includes(c)),
       'o seed cria Arcfood com os códigos dela (Fechamento + Adyen)': !!arcfood && !arcfood.padrao
         && ['19821', '19855', '19888', '19889', 'Mooca', 'DOM__19821'].every((c) => arcfood.unidades.includes(c)),
       'nenhuma empresa é "padrão"/catch-all': todas.every((e) => !e.padrao),

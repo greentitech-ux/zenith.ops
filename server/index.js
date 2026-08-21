@@ -2141,7 +2141,6 @@ const INVENTARIO_UNIDADES_NOMES = {
 // entregasSync.js/normalizarCodigoEntrega pra planilha antiga continuar
 // funcionando mesmo sem editar a coluna "Unidade" nela)
 const ENTREGAS_UNIDADES_NOMES = {
-  'MMTirol Natal': 'Milky Moo Tirol Natal (Entregas)',
   'Dominos Bessa': 'Dom Bessa',
   'Dominos Caruaru': 'Dom Caruaru',
   'Dominos Garanhuns': 'Dom Garanhuns',
@@ -2164,11 +2163,6 @@ const UNIDADES_APELIDOS = {
   DOM_19706: 'Dom Bessa', Bessa: 'Dom Bessa', 'Dominos Bessa': 'Dom Bessa',
   DOM_19633: 'Dom Campina Grande', 'Dominos Campina Grande': 'Dom Campina Grande',
   DOM19940: 'Dom Tirol', 'Dominos Tirol': 'Dom Tirol',
-  // "Milky Moo Tirol Natal" - so tem codigo de Entregas (MMTirol Natal, sem
-  // Fechamento) mais o codigo direto da Adyen (Tirol Natal), que sem esse
-  // apelido caia no fallback generico e virava um 2o cadastro solto na
-  // secao Monitor/Outras (ver migracaoUnidades.js pro codigo unificado)
-  'MMTirol Natal': 'Milky Moo Tirol Natal', 'Tirol Natal': 'Milky Moo Tirol Natal',
   "Domino's Carrinho Aeroporto Recife": 'Dom Car Aero Recife',
   'Dominos Praça Aeroporto Recife': 'Dom Praça Aero Recife',
   'Spoleto Praça Aeroporto Recife': 'Spo Praça Aero Recife',
@@ -2278,6 +2272,12 @@ async function construirUnidadesMapa() {
   // garantir o nome unificado mesmo se algum dado importado/lançado tenha
   // gravado um unidadeNome diferente (cru, com typo, ou desatualizado)
   Object.keys(mapa).forEach((codigo) => { mapa[codigo] = nomeCanonicoUnidade(codigo, mapa[codigo]); });
+  // ...e por ULTIMO mesmo, as unidades que o Master mandou excluir em
+  // definitivo (ver CODIGOS_REMOVIDOS em migracaoUnidades.js). Tem que ser
+  // aqui no fim: o código pode ter entrado por qualquer uma das fontes
+  // acima (transação em cache, linha da planilha, fechamento antigo), e
+  // tirar só da lista fixa fazia ele voltar sem nome na próxima montagem.
+  migracaoUnidades.CODIGOS_REMOVIDOS.forEach((codigo) => { delete mapa[codigo]; });
   return mapa;
 }
 
@@ -2368,6 +2368,12 @@ function codigosUnidadesFixas() {
 
 app.post('/api/meta/unidades-extras', auth.requireMaster, async (req, res) => {
   try {
+    // código excluído em definitivo (ver CODIGOS_REMOVIDOS) não volta por
+    // cadastro manual - senão ficava um cadastro que a tela aceita mas que
+    // construirUnidadesMapa esconde logo depois, sem explicação nenhuma
+    if (migracaoUnidades.unidadeFoiRemovida(req.body.codigo)) {
+      return res.status(400).json({ error: `O código "${String(req.body.codigo).trim()}" foi excluído em definitivo. Se essa loja voltou a existir, tire ele de CODIGOS_REMOVIDOS em migracaoUnidades.js.` });
+    }
     const dados = {
       codigo: req.body.codigo, nome: req.body.nome, porEmail: req.user.email,
       // perfil da unidade: onde ela aparece e o que ela aceita. Vazio = sem

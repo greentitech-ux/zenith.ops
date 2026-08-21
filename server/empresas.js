@@ -19,7 +19,7 @@
 //
 // Sobre os códigos: a MESMA loja física aparece com código diferente em
 // cada espaço de dados (Fechamento "19888", Adyen/Monitor "DOM___19888" e
-// "Mooca", Entregas "MMTirol Natal"...). Como esta lista é o que filtra o
+// "Mooca", Entregas "Dominos Bessa"...). Como esta lista é o que filtra o
 // que cada empresa enxerga, ela precisa dos códigos de TODOS os espaços -
 // senão o Admin abre o Monitor e não vê transação nenhuma. Mesmo motivo da
 // CODIGOS_ARCFOOD em redes.js ter as duas famílias de código.
@@ -76,15 +76,12 @@ const UNIDADES_GBE = [
   'Spo Shop Midway',
   'Saltiverso Patteo',
   'Administrativa',
-  // Entregas (mesma loja, código da planilha de motoboy)
-  'MMTirol Natal',
   // Adyen/Monitor (mesma loja, merchantAccountCode)
   'DOM_19798', 'Caruaru',
   'DOM19911', 'Garanhuns',
   'DOM_19706', 'Bessa',
   'DOM_19633',
   'DOM19940',
-  'Tirol Natal',
 ];
 
 async function listUncached() {
