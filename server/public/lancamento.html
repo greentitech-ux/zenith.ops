@@ -316,6 +316,7 @@
 
 </div>
 
+<script src="/kpi-tempo.js"></script>
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
@@ -687,7 +688,7 @@ function renderKpisExtras(unidade){
       return `<div><label>${escapeHtml(k.label)}</label><input type="file" accept="image/*,application/pdf" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-arquivo"></div>`;
     }
     if(tipo === 'tempo'){
-      return `<div><label>${escapeHtml(k.label)} (min:seg)</label><input type="text" placeholder="mm:ss" pattern="[0-9]{1,4}:[0-5][0-9]" inputmode="numeric" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input kpi-extra-tempo"></div>`;
+      return `<div><label>${escapeHtml(k.label)} (min:seg ou minutos)</label><input type="text" placeholder="9,66 ou 9:40" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input kpi-extra-tempo"></div>`;
     }
     const bloq = travar(k);
     const classeExtra = bloq ? ' campo-automatico' : '';
@@ -705,23 +706,21 @@ function renderKpisExtras(unidade){
   // fazem (ver renderExtrasGrupo) - antes disso nao precisava, KPI nunca
   // afetava nenhum total
   container.querySelectorAll('.kpi-extra-input').forEach(el=>el.addEventListener('input', atualizarResumo));
+  // liga a conferência do campo de tempo (aceita 9,66 e 9:40, e mostra na
+  // tela o que entendeu) - ver public/kpi-tempo.js
+  window.ZenithKpiTempo.ligarTodos('.kpi-extra-tempo');
 }
 // mm:ss (ou h:mm:ss) -> total de segundos, pra gravar como numero (mesmo
 // mapa kpisExtras dos outros tipos - ver sanitizarMapaExtras em
 // fechamentosLive.js, que trata "tempo" igual quantidade/kg: um numero)
 function tempoParaSegundos(txt){
-  const partes = String(txt||'').trim().split(':').map(p=>parseInt(p,10));
-  if(partes.some(isNaN) || !partes.length) return 0;
-  let seg = 0;
-  partes.forEach(p=>{ seg = seg*60 + p; });
-  return seg;
+  // uma conversão só pro app inteiro (ver public/kpi-tempo.js): aceita tanto
+  // "9,66" (minutos, como vem do relatório) quanto "9:40" (minuto:segundo)
+  return window.ZenithKpiTempo.paraSegundos(txt);
 }
 // segundos -> "mm:ss", pra reexibir um valor ja salvo (ex: edição do Master)
 function segundosParaTempo(seg){
-  const s = Math.max(0, Math.round(num(seg)));
-  const m = Math.floor(s/60);
-  const r = s%60;
-  return `${m}:${String(r).padStart(2,'0')}`;
+  return window.ZenithKpiTempo.paraTexto(seg);
 }
 function lerKpisExtras(){
   const out = lerExtrasGrupo('kpi-extra-input');

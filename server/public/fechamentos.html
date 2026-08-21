@@ -461,6 +461,7 @@
   </div>
 </div>
 
+<script src="/kpi-tempo.js"></script>
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
@@ -2452,11 +2453,14 @@ function renderKpisEdicaoFechamento(grupo, mapaAtual, fechamentoId){
       return `<div><label>${escapeHtml(k.label)}</label><input type="text" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="texto" class="ef-kpi-extra-input" value="${escapeHtml(atual||'')}"></div>`;
     }
     if(tipo === 'tempo'){
-      return `<div><label>${escapeHtml(k.label)} (min:seg)</label><input type="text" placeholder="mm:ss" pattern="[0-9]{1,4}:[0-5][0-9]" inputmode="numeric" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="tempo" class="ef-kpi-extra-input" value="${segundosParaTempo(atual)}"></div>`;
+      return `<div><label>${escapeHtml(k.label)} (min:seg ou minutos)</label><input type="text" placeholder="9,66 ou 9:40" inputmode="decimal" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="tempo" class="ef-kpi-extra-input kpi-extra-tempo" value="${segundosParaTempo(atual)}"></div>`;
     }
     const step = tipo === 'quantidade' ? '1' : (tipo === 'kg' ? '0.001' : '0.01');
     return `<div><label>${escapeHtml(k.label)}</label><input type="number" step="${step}" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="${tipo}" class="ef-kpi-extra-input" value="${num(atual)}"></div>`;
   }).join('');
+  // liga a conferência do campo de tempo (aceita 9,66 e 9:40, e mostra na
+  // tela o que entendeu) - ver public/kpi-tempo.js
+  window.ZenithKpiTempo.ligarTodos('.kpi-extra-tempo');
 }
 
 async function abrirEdicaoFechamento(id){
@@ -2597,17 +2601,12 @@ function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
 // tipos, ver sanitizarMapaExtras em fechamentosLive.js) - o Master digita/vê
 // min:seg na edição direta (mm:ss <-> segundos)
 function tempoParaSegundos(txt){
-  const partes = String(txt||'').trim().split(':').map(p=>parseInt(p,10));
-  if(partes.some(isNaN) || !partes.length) return 0;
-  let seg = 0;
-  partes.forEach(p=>{ seg = seg*60 + p; });
-  return seg;
+  // uma conversão só pro app inteiro (ver public/kpi-tempo.js): aceita tanto
+  // "9,66" (minutos, como vem do relatório) quanto "9:40" (minuto:segundo)
+  return window.ZenithKpiTempo.paraSegundos(txt);
 }
 function segundosParaTempo(seg){
-  const s = Math.max(0, Math.round(num(seg)));
-  const m = Math.floor(s/60);
-  const r = s%60;
-  return `${m}:${String(r).padStart(2,'0')}`;
+  return window.ZenithKpiTempo.paraTexto(seg);
 }
 function fecharEdicaoFechamento(){
   document.getElementById('fech-overlay').classList.add('hidden');
