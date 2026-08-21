@@ -169,6 +169,71 @@ async function carregarCamposConfig(){
       `Fotografe frente e verso (até 3 imagens). Seus dados são lidos do documento — só ${escapeHtml(marcados.join(', '))} você digita.`;
   }
 }
+// Foto de celular hoje sai com 5-8 MB. Do jeito que estava, a MESMA foto
+// subia duas vezes (uma na leitura, outra no envio) - 13 MB no 4G da loja pra
+// um cadastro so. Era o pedido mais pesado do app e era ele que morria antes
+// do servidor responder: "Failed to fetch" nao e erro do servidor, e a
+// conexao caindo sem resposta nenhuma.
+// Duas coisas resolvem, e as duas estao aqui: reduzir a imagem ANTES de subir
+// (1600px de lado maior e mais do que o suficiente pra ler um RG) e mandar,
+// no envio, so o token da leitura que ja esta guardada no servidor.
+const LADO_MAX = 1600;
+const QUALIDADE = 0.82;
+const JA_PEQUENA = 1200000; // ~1,2 MB: nao vale mexer, so perderia nitidez
+function carregarViaImg(file){
+  return new Promise((ok, falha)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{ URL.revokeObjectURL(url); ok(img); };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); falha(new Error('imagem ilegível')); };
+    img.src = url;
+  });
+}
+async function comprimirImagem(file){
+  if(!file || !/^image\//.test(file.type||'')) return file; // PDF sobe inteiro
+  try{
+    const img = window.createImageBitmap ? await createImageBitmap(file) : await carregarViaImg(file);
+    const lado = Math.max(img.width, img.height);
+    const escala = Math.min(1, LADO_MAX / lado);
+    if(escala === 1 && file.size <= JA_PEQUENA) return file;
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.width * escala);
+    c.height = Math.round(img.height * escala);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise(r=>c.toBlob(r, 'image/jpeg', QUALIDADE));
+    if(!blob || blob.size >= file.size) return file; // se nao melhorou, fica o original
+    return new File([blob], String(file.name||'foto').replace(/\.[^.]+$/,'') + '.jpg', { type:'image/jpeg' });
+  }catch(e){
+    return file; // qualquer tropeço na compressão manda o original; nunca trava o cadastro
+  }
+}
+async function comprimirVarias(lista){
+  const saida = [];
+  for(const f of lista) saida.push(await comprimirImagem(f));
+  return saida;
+}
+
+// "Failed to fetch" e o texto cru do navegador pra "morreu sem resposta" -
+// nao ajuda em nada quem esta preenchendo o cadastro. Aqui vira uma frase que
+// diz o que fazer. O tempo limite existe pelo mesmo motivo: sem ele o botao
+// fica "Enviando..." pra sempre num 4G que travou.
+const TEMPO_LIMITE_MS = 120000;
+async function postarArquivos(url, fd, tempoMs){
+  const corta = new AbortController();
+  const relogio = setTimeout(()=>corta.abort(), tempoMs || TEMPO_LIMITE_MS);
+  try{
+    const resp = await fetch(url, { method:'POST', body: fd, signal: corta.signal });
+    let data = {};
+    try{ data = await resp.json(); }catch(e){ /* resposta que nao e JSON (proxy, 502...) */ }
+    if(!resp.ok) throw new Error(data.error || `O servidor recusou o envio (erro ${resp.status}). Tente de novo em alguns minutos.`);
+    return data;
+  }catch(err){
+    if(err.name === 'AbortError') throw new Error('A internet está muito lenta e o envio passou do tempo. Chegue mais perto do wi-fi e tente de novo — nada foi perdido.');
+    if(err instanceof TypeError) throw new Error('A conexão caiu no meio do envio. Confira a internet do aparelho e toque em enviar de novo.');
+    throw err;
+  }finally{ clearTimeout(relogio); }
+}
+
 function formatarCpf(d){
   const s = String(d||'').replace(/\D/g,'');
   return s.length === 11 ? `${s.slice(0,3)}.${s.slice(3,6)}.${s.slice(6,9)}-${s.slice(9)}` : '';
@@ -196,10 +261,8 @@ document.getElementById('btn-ler-doc').addEventListener('click', async ()=>{
   msg.className = 'msg'; msg.textContent = 'Lendo o documento... leva alguns segundos.';
   try{
     const fd = new FormData();
-    arquivos.forEach(a=>fd.append('documento', a));
-    const resp = await fetch('/api/rh/ler-documento-publico', { method:'POST', body: fd });
-    const data = await resp.json();
-    if(!resp.ok) throw new Error(data.error || 'Não consegui ler o documento.');
+    (await comprimirVarias(arquivos)).forEach(a=>fd.append('documento', a));
+    const data = await postarArquivos('/api/rh/ler-documento-publico', fd);
     if(!data.nome) throw new Error('Não consegui ler o nome nesse documento. Tire a foto de novo, com o documento inteiro e sem reflexo.');
     DOC_LIDO = data;
     const porFora = { nome: data.nome, dataNascimento: data.dataNascimento || '', cpf: formatarCpf(data.cpf), rg: data.rg || '' };
@@ -282,17 +345,19 @@ document.getElementById('form-cadastro').addEventListener('submit', async (e)=>{
     fd.append('contato', document.getElementById('contato').value);
     fd.append('cargoFuncao', document.getElementById('cargo').value);
     fd.append('dataNascimento', document.getElementById('nascimento').value);
-    fd.append('curriculo', arquivo);
+    fd.append('curriculo', await comprimirImagem(arquivo));
     // só o que foi liberado pra digitação vai no corpo; o resto o servidor
     // relê do documento
     CAMPOS_MANUAIS.forEach(campo=>{
       const el = document.getElementById(INPUT_DO_CAMPO[campo]);
       if(el) fd.append(campo, el.value);
     });
-    docs.forEach(d=>fd.append('documento', d));
-    const resp = await fetch('/api/rh/cadastro-publico', { method:'POST', body: fd });
-    const data = await resp.json();
-    if(!resp.ok) throw new Error(data.error || 'Erro ao enviar o cadastro.');
+    // a foto do documento JA esta no servidor desde o "Ler meu documento":
+    // aqui vai so o token dela. Se o servidor for de uma versao sem token
+    // (ou a leitura tiver expirado), sobe a foto como antes.
+    if(DOC_LIDO && DOC_LIDO.docToken) fd.append('docToken', DOC_LIDO.docToken);
+    else (await comprimirVarias(docs)).forEach(d=>fd.append('documento', d));
+    const data = await postarArquivos('/api/rh/cadastro-publico', fd);
     LINK_TOKEN = data.linkToken;
     document.getElementById('suc-texto').textContent = `${data.nome}, seu cadastro foi registrado e está aguardando aprovação do RH.`;
     document.getElementById('form-cadastro').classList.add('hidden');

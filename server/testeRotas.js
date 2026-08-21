@@ -126,9 +126,27 @@ const bucketFake = {
   }),
 };
 
+// Leitor de documento de mentira, DESLIGADO por padrão (os testes que já
+// existem provam justamente o caminho sem ANTHROPIC_API_KEY, e stubar de
+// vez apagaria eles). Ligado, conta quantas vezes o modelo foi chamado - é
+// o que prova que o cadastro pelo link público lê o documento UMA vez, e
+// não duas: era a leitura repetida que dobrava o upload do celular e
+// derrubava o envio antes da resposta (o "Failed to fetch").
+const OCR_FALSO = { ligado: false, chamadas: 0, resposta: {} };
 Module._load = function (req, parent, isMain) {
   if (req === './firestore') return fakeDb;
   if (req === './storageBucket') return { resolverBucket: async () => bucketFake, comBucket: async (fn) => fn(bucketFake) };
+  if (req === './documentoIdentidadeOcr') {
+    const real = origLoad.apply(this, arguments);
+    return new Proxy(real, {
+      get(alvo, prop) {
+        if (!OCR_FALSO.ligado) return alvo[prop];
+        if (prop === 'ativo') return () => true;
+        if (prop === 'lerDocumento') return async () => { OCR_FALSO.chamadas += 1; return { ...OCR_FALSO.resposta }; };
+        return alvo[prop];
+      },
+    });
+  }
   return origLoad.apply(this, arguments);
 };
 
@@ -452,6 +470,82 @@ setTimeout(async () => {
   const okLerDoc = lerDoc.status === 400 && /não está configurada/i.test(lerDoc.corpo);
   if (!okLerDoc) ruins += 1;
   console.log(`${okLerDoc ? '✓' : '✗'} ler documento sem ANTHROPIC_API_KEY é recusado: HTTP ${lerDoc.status} ${lerDoc.corpo.slice(0, 80)}`);
+
+  // ---- LINK PUBLICO DE CADASTRO (EXTRA): a foto sobe UMA vez ----
+  // O envio estava dando "Failed to fetch" no celular da loja. Nao era erro
+  // do servidor: a MESMA foto de 6 MB subia duas vezes (uma pra ler o
+  // documento, outra no envio) e o modelo era chamado duas vezes - 13 MB e
+  // duas leituras por cadastro. O pedido morria antes de responder, e fetch
+  // so rejeita assim quando a conexao cai sem resposta nenhuma.
+  // O que este bloco protege: a leitura fica guardada no servidor com um
+  // token, e o envio manda so o token. Se alguem desfizer isso, o contador
+  // de chamadas ao modelo volta pra 2 e o teste acusa.
+  OCR_FALSO.ligado = true;
+  OCR_FALSO.chamadas = 0;
+  OCR_FALSO.resposta = { nome: 'Maria da Leitura', dataNascimento: '1996-08-12', cpf: null, rg: null, nomeMae: null, tipoDocumento: 'RG', naoLidos: [] };
+  const fotoDoc = { nome: 'rg.png', tipo: 'image/png', buffer: pngFalso };
+
+  const leu = await postarMultipart('/api/rh/ler-documento-publico', {}, fotoDoc, 'documento');
+  let docToken = null;
+  try { docToken = JSON.parse(leu.corpo).docToken; } catch (e) { docToken = null; }
+  const okLeu = leu.status === 200 && !!docToken && OCR_FALSO.chamadas === 1;
+  if (!okLeu) ruins += 1;
+  console.log(`${okLeu ? '✓' : '✗'} link público: "Ler meu documento" devolve token da leitura: HTTP ${leu.status} chamadas=${OCR_FALSO.chamadas} ${leu.corpo.slice(0, 70)}`);
+
+  // envio SEM reenviar a foto - so o token. Tem que gravar a ficha com o
+  // nome LIDO (nao com o que a tela mandou) e sem pagar leitura nova.
+  const comToken = await postarMultipart('/api/rh/cadastro-publico',
+    { unidade: 'Dominos Tirol', tipoCadastro: 'extra', contato: '84999990000', cargoFuncao: 'Atendente',
+      nome: 'NOME QUE A TELA MANDOU', docToken },
+    { nome: 'cv.pdf', tipo: 'application/pdf', buffer: Buffer.from('%PDF-1.4 teste') }, 'curriculo');
+  let corpoToken = {};
+  try { corpoToken = JSON.parse(comToken.corpo); } catch (e) { corpoToken = {}; }
+  const okComToken = comToken.status === 200 && corpoToken.nome === 'Maria da Leitura' && OCR_FALSO.chamadas === 1;
+  if (!okComToken) ruins += 1;
+  console.log(`${okComToken ? '✓' : '✗'} link público: envio reaproveita a leitura (1 upload, 1 leitura): HTTP ${comToken.status} chamadas=${OCR_FALSO.chamadas} ${comToken.corpo.slice(0, 80)}`);
+
+  // token gasto/expirado precisa de uma frase que diga o que fazer - o
+  // token some depois do cadastro, entao este mesmo ja nao vale mais
+  const gasto = await postarMultipart('/api/rh/cadastro-publico',
+    { unidade: 'Dominos Tirol', tipoCadastro: 'extra', contato: '84999990000', cargoFuncao: 'Atendente', docToken },
+    { nome: 'cv.pdf', tipo: 'application/pdf', buffer: Buffer.from('%PDF-1.4 teste') }, 'curriculo');
+  const okGasto = gasto.status === 400 && /expirou/i.test(gasto.corpo) && /Ler meu documento/i.test(gasto.corpo);
+  if (!okGasto) ruins += 1;
+  console.log(`${okGasto ? '✓' : '✗'} link público: token usado/expirado explica o que fazer: HTTP ${gasto.status} ${gasto.corpo.slice(0, 90)}`);
+
+  // caminho antigo (tela sem token, ou quem nunca clicou em ler) continua
+  // valendo: manda a foto no proprio envio e o servidor le na hora
+  OCR_FALSO.resposta = { ...OCR_FALSO.resposta, nome: 'Joao Sem Token' };
+  const semNada = await postarMultipart('/api/rh/cadastro-publico',
+    { unidade: 'Dominos Tirol', tipoCadastro: 'extra', contato: '84999990001', cargoFuncao: 'Atendente' },
+    [{ nome: 'cv.pdf', tipo: 'application/pdf', buffer: Buffer.from('%PDF-1.4 teste') }], 'curriculo');
+  // (esse primeiro sem documento nenhum tem que ser recusado)
+  const okSemNada = semNada.status === 400 && /documento de identidade/i.test(semNada.corpo);
+  if (!okSemNada) ruins += 1;
+  console.log(`${okSemNada ? '✓' : '✗'} link público sem token E sem foto é recusado: HTTP ${semNada.status} ${semNada.corpo.slice(0, 80)}`);
+
+  const antesDoAntigo = OCR_FALSO.chamadas;
+  const caminhoAntigo = await postarMultipart('/api/rh/cadastro-publico',
+    { unidade: 'Dominos Tirol', tipoCadastro: 'extra', contato: '84999990001', cargoFuncao: 'Atendente' },
+    fotoDoc, 'documento');
+  // sem currículo o cadastro para em outra trava, mas a leitura JÁ rodou -
+  // é ela que este teste está medindo
+  const okAntigo = OCR_FALSO.chamadas === antesDoAntigo + 1;
+  if (!okAntigo) ruins += 1;
+  console.log(`${okAntigo ? '✓' : '✗'} link público sem token ainda lê a foto do próprio envio: chamadas=${OCR_FALSO.chamadas} (antes ${antesDoAntigo}) HTTP ${caminhoAntigo.status}`);
+  // A leitura guardada segura foto de documento em MEMORIA (ate 3 arquivos de
+  // 10 MB cada). Um teto so por quantidade seria uma armadilha: "200 leituras"
+  // parece inofensivo e vale 6 GB de RAM - derrubaria o processo do mesmo
+  // jeito que o upload dobrado derrubava a requisicao. Confere por leitura de
+  // fonte porque o teto real so apareceria com dezenas de MB de upload, e o
+  // proprio teto por IP da rota (20/h) impede chegar la pelo HTTP.
+  const srcGuarda = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+  const okTeto = /LEITURAS_MAX_BYTES\s*=/.test(srcGuarda)
+    && /pesoGuardado\(\) \+ peso > LEITURAS_MAX_BYTES/.test(srcGuarda)
+    && /LEITURAS_GUARDADAS\.delete\(LEITURAS_GUARDADAS\.keys\(\)\.next\(\)\.value\)/.test(srcGuarda);
+  if (!okTeto) ruins += 1;
+  console.log(`${okTeto ? '✓' : '✗'} link público: leitura guardada tem teto de MEMÓRIA (bytes), não só de quantidade`);
+  OCR_FALSO.ligado = false;
 
   // A config de campos digitados na mão é lida ANTES do login: as duas telas
   // de cadastro (a interna e o link público) montam o formulário com ela, e
