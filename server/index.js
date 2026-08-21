@@ -1295,6 +1295,63 @@ app.post('/api/rh/publico/:token/checkin/saida', upload.single('foto'), async (r
 // campos vem da leitura do documento anexado (ver documentoIdentidadeOcr.js).
 // A rota so LE - nada e gravado aqui; o cadastro em si continua sendo o
 // POST separado, com o arquivo indo junto.
+// Guarda-leitura: quando alguem clica em "Ler meu documento", a foto sobe e
+// o modelo le. Antes, ENVIAR o cadastro subia a MESMA foto de novo e chamava
+// o modelo DE NOVO - o dobro de upload no 4G da loja, o dobro de espera e o
+// dobro de custo por cadastro. Era o pedido mais pesado do app inteiro, e era
+// ele que morria antes de responder (o "Failed to fetch" que o usuario viu:
+// fetch so rejeita assim quando a conexao cai sem resposta nenhuma).
+//
+// Agora a leitura fica guardada aqui com um token opaco, e o envio so
+// referencia esse token. O SERVIDOR continua dono dos campos - a tela nunca
+// manda o que o documento diz, so o token. E a garantia que existia antes
+// (reler em vez de confiar na tela) continua de pe.
+//
+// Em memoria de proposito: e um estado de minutos, entre dois passos do mesmo
+// formulario. Se o processo reiniciar no meio, o token some e a tela pede pra
+// ler de novo - com essa mensagem, nao com um erro seco.
+const LEITURAS_GUARDADAS = new Map();
+const LEITURA_TTL_MS = 30 * 60 * 1000;
+const LEITURAS_MAX = 60;
+// Teto por BYTES, e nao so por quantidade: o que fica guardado aqui e foto de
+// documento (ate 10 MB cada, ate 3 por leitura). Contar so entradas deixaria
+// um numero inocente como 200 valer 6 GB de RAM e derrubar o processo inteiro
+// - a mesma queda que este fix veio evitar, so que do outro lado.
+const LEITURAS_MAX_BYTES = 120 * 1024 * 1024;
+function pesoDaLeitura(reg) {
+  return (reg.arquivos || []).reduce((t, a) => t + (a.buffer ? a.buffer.length : 0), 0);
+}
+function pesoGuardado() {
+  let t = 0;
+  for (const v of LEITURAS_GUARDADAS.values()) t += pesoDaLeitura(v);
+  return t;
+}
+
+function guardarLeitura(dados) {
+  const agora = Date.now();
+  for (const [k, v] of LEITURAS_GUARDADAS) {
+    if (agora - v.em > LEITURA_TTL_MS) LEITURAS_GUARDADAS.delete(k);
+  }
+  // teto duro: sem isso um robo batendo na rota publica encheria a memoria.
+  // Descarta sempre a leitura MAIS ANTIGA (o Map itera na ordem de insercao):
+  // quem acabou de fotografar o documento e quem esta prestes a enviar.
+  const novo = { ...dados, em: agora };
+  const peso = pesoDaLeitura(novo);
+  while (LEITURAS_GUARDADAS.size
+    && (LEITURAS_GUARDADAS.size >= LEITURAS_MAX || pesoGuardado() + peso > LEITURAS_MAX_BYTES)) {
+    LEITURAS_GUARDADAS.delete(LEITURAS_GUARDADAS.keys().next().value);
+  }
+  const token = crypto.randomBytes(18).toString('hex');
+  LEITURAS_GUARDADAS.set(token, novo);
+  return token;
+}
+function pegarLeitura(token) {
+  const reg = token && LEITURAS_GUARDADAS.get(String(token));
+  if (!reg) return null;
+  if (Date.now() - reg.em > LEITURA_TTL_MS) { LEITURAS_GUARDADAS.delete(String(token)); return null; }
+  return reg;
+}
+
 async function responderLeituraDocumento(req, res) {
   try {
     const arquivos = (req.files || []).map((f) => ({ buffer: f.buffer, mimeType: f.mimetype }));
@@ -1303,7 +1360,10 @@ async function responderLeituraDocumento(req, res) {
       return res.status(400).json({ error: 'Leitura automática de documento não está configurada neste servidor.' });
     }
     const camposLidos = await rhCamposConfig.camposLidosDoDocumento();
-    res.json(await documentoIdentidadeOcr.lerDocumento({ arquivos, camposLidos }));
+    const leitura = await documentoIdentidadeOcr.lerDocumento({ arquivos, camposLidos });
+    // guarda a leitura E os arquivos pro envio não precisar subir tudo de novo
+    const docToken = guardarLeitura({ leitura, camposLidos, arquivos: req.files || [] });
+    res.json({ ...leitura, docToken });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -1360,18 +1420,29 @@ app.post('/api/rh/ler-documento-publico', tetoLeituraDocumento, uploadDocumentoI
 // Checagem barata, ANTES de qualquer upload: sem ela o currículo ia pro
 // Storage e só então rh.criar recusava por falta de documento - gravando
 // lixo pra uma requisição que nunca ia virar cadastro.
-function exigeDocumentoIdentidade(tipoCadastro, arquivosDoc) {
+function exigeDocumentoIdentidade(tipoCadastro, arquivosDoc, guardado = null) {
   const tipo = tipoCadastro === 'candidato' ? 'candidato' : (tipoCadastro || 'extra');
   if (!['extra', 'candidato'].includes(tipo)) return null;
+  // ja tem documento: ou veio agora no envio, ou ficou guardado do passo
+  // "Ler meu documento" - nos dois casos o servidor tem a foto na mao
   if ((arquivosDoc || []).length) return null;
+  if ((guardado?.arquivos || []).length) return null;
   return 'Anexe a foto do documento de identidade (RG, CNH ou CPF) - os dados são preenchidos por ele.';
 }
 
-async function lerEGuardarDocumentoIdentidade(arquivosReq, unidade, digitados = {}) {
-  const arquivos = (arquivosReq || []).map((f) => ({ buffer: f.buffer, mimeType: f.mimetype }));
-  if (!arquivos.length) return null;
-  const camposLidos = await rhCamposConfig.camposLidosDoDocumento();
-  const leitura = await documentoIdentidadeOcr.lerDocumento({ arquivos, camposLidos });
+async function lerEGuardarDocumentoIdentidade(arquivosReq, unidade, digitados = {}, guardado = null) {
+  // Quando a tela ja passou pelo "Ler meu documento", a foto e a resposta do
+  // modelo estao guardadas AQUI (ver LEITURAS_GUARDADAS) e o envio so manda o
+  // token. Reaproveitar corta pela metade o que sobe do celular e paga uma
+  // chamada de modelo em vez de duas - sem afrouxar nada: os campos continuam
+  // saindo de uma leitura feita pelo servidor, nunca do que a tela digitou.
+  // Se o envio trouxe foto propria, ela ganha: e leitura nova, mais recente.
+  const arquivosBase = (arquivosReq || []).length ? arquivosReq : (guardado?.arquivos || []);
+  if (!arquivosBase.length) return null;
+  const deReuso = !(arquivosReq || []).length;
+  const arquivos = arquivosBase.map((f) => ({ buffer: f.buffer, mimeType: f.mimetype }));
+  const camposLidos = deReuso ? guardado.camposLidos : await rhCamposConfig.camposLidosDoDocumento();
+  const leitura = deReuso ? guardado.leitura : await documentoIdentidadeOcr.lerDocumento({ arquivos, camposLidos });
   // so cobra o nome da leitura se o nome for um campo lido: com ele marcado
   // como manual, quem cadastra e que digita, e exigir da leitura travaria o
   // cadastro por um dado que nem foi pedido ao modelo
@@ -1386,12 +1457,12 @@ async function lerEGuardarDocumentoIdentidade(arquivosReq, unidade, digitados = 
   documentoIdentidadeOcr.TODOS_CAMPOS.forEach((c) => {
     campos[c] = camposLidos.includes(c) ? leitura[c] : (digitados[c] ?? null);
   });
-  const primeiro = arquivosReq[0];
+  const primeiro = arquivosBase[0];
   const path = await storage.salvarArquivo(unidade, primeiro, 'rh-documentos');
   return {
     leitura,
     campos,
-    anexo: { path, nomeOriginal: primeiro.originalname, tipo: primeiro.mimetype, paginas: arquivosReq.length },
+    anexo: { path, nomeOriginal: primeiro.originalname, tipo: primeiro.mimetype, paginas: arquivosBase.length },
   };
 }
 
@@ -1402,7 +1473,15 @@ app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCoun
     const mapa = await construirUnidadesMapa();
     if (!unidade || !mapa[unidade]) return res.status(400).json({ error: 'Loja inválida.' });
     if (!(await unidadesExtras.apareceEm(unidade, 'rh'))) return res.status(400).json({ error: 'Essa unidade não tem RH habilitado.' });
-    const faltaDoc = exigeDocumentoIdentidade(tipoCadastro, req.files?.documento);
+    // token do passo "Ler meu documento": a foto ja subiu e ja foi lida, entao
+    // o envio so aponta pra ela em vez de mandar os mesmos megabytes de novo.
+    // Sem token (tela antiga, ou quem preencheu tudo na mao) o caminho de
+    // antes continua valendo, com a foto vindo no proprio envio.
+    const guardado = pegarLeitura(req.body.docToken);
+    if (req.body.docToken && !guardado && !(req.files?.documento || []).length) {
+      return res.status(400).json({ error: 'A leitura do documento expirou. Toque em "Ler meu documento" de novo antes de enviar.' });
+    }
+    const faltaDoc = exigeDocumentoIdentidade(tipoCadastro, req.files?.documento, guardado);
     if (faltaDoc) return res.status(400).json({ error: faltaDoc });
     const arquivoCurriculo = (req.files?.curriculo || [])[0];
     let curriculo = null;
@@ -1412,7 +1491,7 @@ app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCoun
     }
     // nome/nascimento/CPF vem da leitura do documento feita AQUI, nao do
     // que a tela mandou (ver lerEGuardarDocumentoIdentidade)
-    const doc = await lerEGuardarDocumentoIdentidade(req.files?.documento, unidade, req.body);
+    const doc = await lerEGuardarDocumentoIdentidade(req.files?.documento, unidade, req.body, guardado);
     const registro = await rh.criar({
       unidade, contato, cargoFuncao, tipoCadastro,
       ...(doc?.campos || {}),
@@ -1421,6 +1500,10 @@ app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCoun
       curriculo, cadastradoPorId: null, cadastradoPorEmail: 'Auto-cadastro (link público)',
       precisaAprovacao: true,
     });
+    // cadastro gravado: o token nao serve mais pra nada. Apagar aqui evita
+    // que um reenvio acidental (dois toques no botao) vire ficha duplicada
+    // sem foto nova, e libera a memoria antes do TTL.
+    if (guardado) LEITURAS_GUARDADAS.delete(String(req.body.docToken));
     broadcast('rh-funcionario-criado', registro, 'rh');
     push.notifyRhCadastroPendente(registro.nome, registro.unidade);
     res.json({ id: registro.id, nome: registro.nome, linkToken: registro.linkToken });
