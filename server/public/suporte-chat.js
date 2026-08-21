@@ -783,11 +783,23 @@
     if (alarmeVibraTimer) { clearInterval(alarmeVibraTimer); alarmeVibraTimer = null; }
     if (navigator.vibrate) navigator.vibrate(0);
   }
-  alarmeEl.querySelector('.szc-al-silenciar').addEventListener('click', pararAlarmeBeniboy);
+  // atender/silenciar cala o alarme em TODAS as abas do mesmo acesso, não só
+  // nesta - ver alarme-sync.js. propagarSilencio() só é chamado por quem
+  // clicou; quem recebe o aviso apenas para, sem repassar (senão duas abas
+  // ficariam devolvendo a mensagem uma pra outra pra sempre).
+  const propagarSilencio = () => {
+    if (window.ZenithAlarmeSync) window.ZenithAlarmeSync.silenciar();
+  };
+  alarmeEl.querySelector('.szc-al-silenciar').addEventListener('click', () => {
+    pararAlarmeBeniboy();
+    propagarSilencio();
+  });
   alarmeEl.querySelector('.szc-al-atender').addEventListener('click', () => {
     pararAlarmeBeniboy();
+    propagarSilencio();
     location.href = alarmeUrlAtual;
   });
+  if (window.ZenithAlarmeSync) window.ZenithAlarmeSync.aoSilenciar(pararAlarmeBeniboy);
   // notificacao push critica chegou com a pagina ja aberta (em qualquer aba)
   // - o service worker avisa direto, sem esperar clique na notificacao. Vem
   // com titulo/corpo/url reais (ver sw.js) - nao so um aviso generico do
@@ -995,6 +1007,9 @@
           // alarme critico (Beniboy chamou humano): Master + tag Suporte -
           // Admin sem a tag fica de fora de proposito (ver push.js podeReceberCritico)
           ATEND.podeAlarme = me.role === 'master' || secoes.includes('suporte');
+          // identidade do acesso: o alarme só é silenciado por abas/aparelhos
+          // logados com a MESMA conta (ver alarme-sync.js)
+          if (window.ZenithAlarmeSync) window.ZenithAlarmeSync.identificar(me.id);
           btn.title = 'Chats de suporte';
           atualizarNomeFlutuante(); // atendimento nao mostra o nome do Beniboy
           await atendCarregar();
@@ -1030,6 +1045,10 @@
           dispararAlarmeBeniboy({ titulo: '🛡️ Alerta de segurança do chat', corpo, url: '/beniboy.html?chat=' + encodeURIComponent(d.id || '') });
         });
       }
+      // a MESMA pessoa silenciou/atendeu em outro aparelho (celular x
+      // computador) - as abas do mesmo navegador já foram avisadas na hora
+      // pelo BroadcastChannel; este evento cobre o resto
+      es.addEventListener('alarme-silenciado', () => { pararAlarmeBeniboy(); });
       es.addEventListener('pedido-status-mudou', (e) => { mostrarPopupPedido(JSON.parse(e.data)); });
       // chegou mensagem direta: recarrega as conversas (o texto de verdade
       // esta gravado, o evento e so o gatilho) e mostra o convite pra abrir

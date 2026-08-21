@@ -41,6 +41,7 @@
     <button type="button" class="atender" id="btn-atender">🎧 Atender agora</button>
     <button type="button" class="silenciar" id="btn-silenciar">🔕 Silenciar</button>
   </div>
+<script src="/alarme-sync.js"></script>
 <script>
   const params = new URLSearchParams(location.search);
   const chat = params.get('chat') || '';
@@ -103,9 +104,28 @@
     vibraTimer = setInterval(() => { if (ativo) navigator.vibrate([400, 200, 400, 200, 400]); }, 1600);
   }
 
-  document.getElementById('btn-silenciar').addEventListener('click', pararAlarme);
+  // silenciar/atender aqui também cala as outras abas do mesmo acesso, e
+  // vice-versa (ver alarme-sync.js). Esta página costuma ser aberta pelo
+  // toque na notificação, com o Zenith já aberto em outra aba atrás dela.
+  const propagarSilencio = () => { if (window.ZenithAlarmeSync) window.ZenithAlarmeSync.silenciar(); };
+  if (window.ZenithAlarmeSync) {
+    window.ZenithAlarmeSync.aoSilenciar(pararAlarme);
+    // descobre de quem é esta sessão pra não calar alarme de outra conta
+    const tk = localStorage.getItem('authToken');
+    if (tk) {
+      fetch('/api/me', { headers: { Authorization: 'Bearer ' + tk } })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((me) => { if (me && me.id) window.ZenithAlarmeSync.identificar(me.id); })
+        .catch(() => { /* sem identidade: reage a qualquer aviso do mesmo navegador */ });
+    }
+  }
+  document.getElementById('btn-silenciar').addEventListener('click', () => {
+    pararAlarme();
+    propagarSilencio();
+  });
   document.getElementById('btn-atender').addEventListener('click', () => {
     pararAlarme();
+    propagarSilencio();
     // ambos os casos (Beniboy pedindo ajuda ou alerta de seguranca) sao uma
     // conversa especifica do chat de suporte - manda pro Beniboy ja abrindo
     // essa conversa (ver ?chat= em beniboy.html), nunca pro /tecnico.html
