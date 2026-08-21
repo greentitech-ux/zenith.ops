@@ -322,6 +322,28 @@ async function updateEmpresa(id, empresaId) {
   return toPublic(await ref.get());
 }
 
+// quem está vinculado a uma empresa - o Master vê isso ANTES de arquivar ou
+// excluir, pra saber quantos acessos a decisão atinge (ver as rotas de
+// arquivar/excluir empresa em index.js)
+async function listarPorEmpresa(empresaId) {
+  if (!empresaId) return [];
+  return (await list()).filter((u) => u.empresaId === empresaId);
+}
+
+// solta todo mundo que estava preso a uma empresa. Chamado quando a empresa
+// é EXCLUÍDA (não quando é arquivada - arquivar mantém o vínculo gravado
+// justamente pra desarquivar devolver tudo como estava). Sem isso os
+// acessos ficavam apontando pra um id que não existe mais e, como empresa
+// inexistente devolve lista vazia de unidades, a pessoa entrava e não via
+// absolutamente nada - sem nenhuma pista do motivo.
+async function desvincularEmpresa(empresaId) {
+  const presos = await listarPorEmpresa(empresaId);
+  await Promise.all(presos.map((u) => usersRef.doc(u.id).update({ empresaId: null })));
+  presos.forEach((u) => invalidarUsuario(u.id));
+  if (presos.length) usersCache.invalidar();
+  return presos.length;
+}
+
 // libera o Catálogo do Estoque (organizar setor/tipo, ajustar custo de
 // referência, ativar/desativar item) pra um usuário especifico, sem precisar
 // dar Master/Admin pra ele - pensado pra gerente de loja que cuida disso no
@@ -681,6 +703,8 @@ module.exports = {
   updateHorarioPermitido,
   updateIsAdmin,
   updateEmpresa,
+  listarPorEmpresa,
+  desvincularEmpresa,
   updatePodeCatalogoEstoque,
   updatePodeCatalogoInsumos,
   updatePodeCadastrarOperadores,

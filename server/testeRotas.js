@@ -2267,6 +2267,68 @@ setTimeout(async () => {
   if (!okAreasAmpliadas) ruins += 1;
   console.log(`${okAreasAmpliadas ? '✓' : '✗'} Empresas: as 6 áreas sem checagem (RH/NOC/Estoque/Entregas/Parque/Monitor) agora bloqueiam de verdade`);
 
+  // ------------------------------------------------------------------
+  // Arquivar / excluir empresa: o Master pediu que as duas ações fossem só
+  // dele e SEMPRE com senha. O que precisa ficar provado aqui é que a senha
+  // é uma trava de verdade (não só um campo na tela) e que arquivar tem
+  // efeito real - empresa arquivada deixa de ser dona das unidades dela.
+  let okEmpresaArquivar = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const SENHA = process.env.MASTER_PASSWORD;
+    const empresasMod = require('/home/user/adyen-monitor/server/empresas.js');
+
+    const criada = await postarJson('/api/empresas', {
+      nome: 'Empresa Descartavel', tipoNegocio: 'alimentacao', unidades: ['MVPAR_TESTE'],
+    }, cab);
+    const idNova = criada.status === 200 ? JSON.parse(criada.corpo).id : null;
+
+    // antes de arquivar, ela é a dona da unidade
+    const donaAntes = await empresasMod.empresaDaUnidade('MVPAR_TESTE');
+
+    const semSenha = await postarJson(`/api/empresas/${idNova}/arquivar`, {}, cab);
+    const senhaErrada = await postarJson(`/api/empresas/${idNova}/arquivar`, { password: 'nao-e-essa' }, cab);
+    const arquivou = await postarJson(`/api/empresas/${idNova}/arquivar`, { password: SENHA }, cab);
+
+    empresasMod.invalidarCache();
+    const donaDepois = await empresasMod.empresaDaUnidade('MVPAR_TESTE');
+    const unidadesDepois = await empresasMod.unidadesDaEmpresa(idNova);
+    const listaComArquivada = JSON.parse((await pedir('/api/empresas', cab)).corpo);
+
+    const desarquivou = await postarJson(`/api/empresas/${idNova}/desarquivar`, { password: SENHA }, cab);
+    empresasMod.invalidarCache();
+    const donaVoltou = await empresasMod.empresaDaUnidade('MVPAR_TESTE');
+
+    // excluir: sem senha recusa; com senha apaga
+    const excluirSemSenha = await enviarJson('DELETE', `/api/empresas/${idNova}`, {}, cab);
+    const excluiu = await enviarJson('DELETE', `/api/empresas/${idNova}`, { password: SENHA }, cab);
+    empresasMod.invalidarCache();
+    const sumiu = !(await empresasMod.list()).some((e) => e.id === idNova);
+
+    const impacto = await pedir(`/api/empresas/${idNova}/impacto`, cab);
+
+    const conferencias = {
+      'arquivar sem senha nenhuma é recusado': semSenha.status === 400 && /Senha incorreta/.test(semSenha.corpo),
+      'arquivar com senha errada é recusado': senhaErrada.status === 400 && /Senha incorreta/.test(senhaErrada.corpo),
+      'recusa vem como 400, não 401 (401 desloga a sessão à toa)': senhaErrada.status === 400,
+      'arquivar com a senha certa funciona': arquivou.status === 200 && JSON.parse(arquivou.corpo).arquivada === true,
+      'antes de arquivar a empresa era dona da unidade': donaAntes && donaAntes.nome === 'Empresa Descartavel',
+      'empresa ARQUIVADA deixa de ser dona da unidade (a unidade fica sem dono)': donaDepois === null,
+      'empresa arquivada não dá escopo nenhum a quem estava vinculado': Array.isArray(unidadesDepois) && unidadesDepois.length === 0,
+      'a arquivada continua na lista de gestão (senão não dava pra desarquivar)':
+        listaComArquivada.some((e) => e.id === idNova && e.arquivada === true),
+      'desarquivar devolve a empresa como dona': desarquivou.status === 200 && donaVoltou && donaVoltou.nome === 'Empresa Descartavel',
+      'excluir sem senha é recusado': excluirSemSenha.status === 400 && /Senha incorreta/.test(excluirSemSenha.corpo),
+      'excluir com a senha certa apaga de verdade': excluiu.status === 200 && sumiu,
+      'impacto de empresa inexistente responde 404 em vez de estourar': impacto.status === 404,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okEmpresaArquivar = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okEmpresaArquivar = false; console.log('  erro: ' + e.message); }
+  if (!okEmpresaArquivar) ruins += 1;
+  console.log(`${okEmpresaArquivar ? '✓' : '✗'} Empresa: arquivar/excluir só com Master + senha, e arquivada deixa de ser dona das unidades`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

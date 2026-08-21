@@ -129,23 +129,65 @@ async function remove(id) {
   empresasCache.invalidar();
 }
 
+// ARQUIVAR: a saída reversível, e a que o Master deve preferir. A empresa
+// para de existir pra todo efeito prático - deixa de ser dona das unidades
+// dela (elas viram "sem empresa": só Master e suporte enxergam) e quem
+// estiver vinculado a ela fica sem enxergar nada, até ser movido pra outra
+// empresa. O que ela NÃO faz é apagar o registro: o nome, a lista de
+// unidades e o vínculo dos acessos continuam gravados, então desarquivar
+// devolve tudo exatamente como estava. É por isso que arquivar é o caminho
+// certo pra "essa empresa saiu do grupo" e excluir é só pra cadastro que
+// nunca deveria ter existido.
+async function arquivar(id, { porEmail } = {}) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Empresa não encontrada.');
+  const patch = {
+    arquivada: true,
+    arquivadaEm: new Date().toISOString(),
+    arquivadaPorEmail: porEmail || null,
+  };
+  await ref.update(patch);
+  empresasCache.invalidar();
+  return { ...snap.data(), ...patch };
+}
+
+async function desarquivar(id) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Empresa não encontrada.');
+  const patch = { arquivada: false, arquivadaEm: null, arquivadaPorEmail: null };
+  await ref.update(patch);
+  empresasCache.invalidar();
+  return { ...snap.data(), ...patch };
+}
+
+// só as que valem pra decidir quem enxerga o quê. A tela de gestão continua
+// usando list() (precisa mostrar a arquivada pra dar pra desarquivar); todo
+// o resto do sistema passa por aqui, e é isso que faz o arquivamento ter
+// efeito de verdade em vez de ser só um rótulo na tela.
+async function listAtivas() {
+  return (await list()).filter((e) => !e.arquivada);
+}
+
 // empresa dona de um código de unidade, ou null se ninguém listou esse
 // código. null NÃO é erro nem "cai no padrão": é uma unidade que ainda não
-// tem dono, e que por isso só aparece pro Master e pro suporte.
+// tem dono, e que por isso só aparece pro Master e pro suporte. Empresa
+// arquivada não conta como dona - as unidades dela voltam pro limbo.
 async function empresaDaUnidade(unidade) {
   const codigo = String(unidade == null ? '' : unidade).trim();
   if (!codigo) return null;
-  const empresas = await list();
+  const empresas = await listAtivas();
   return empresas.find((e) => (e.unidades || []).includes(codigo)) || null;
 }
 
 // todos os códigos de unidade de uma empresa (é o que limita o que o Admin
-// dela enxerga - ver escopoDeUnidades em auth.js). Empresa inexistente ou
-// sem unidade devolve [], nunca null: "não achei" e "não tem nenhuma" dão
-// no mesmo aqui, e nos dois casos o certo é não mostrar nada.
+// dela enxerga - ver escopoDeUnidades em auth.js). Empresa inexistente,
+// arquivada ou sem unidade devolve [], nunca null: nos três casos o certo
+// é não mostrar nada.
 async function unidadesDaEmpresa(empresaId) {
   if (!empresaId) return [];
-  const empresas = await list();
+  const empresas = await listAtivas();
   const empresa = empresas.find((e) => e.id === empresaId);
   return empresa ? (empresa.unidades || []).slice() : [];
 }
@@ -193,7 +235,7 @@ async function ensureEmpresasSeed() {
 
 module.exports = {
   TIPOS_NEGOCIO_VALIDOS, UNIDADES_GBE, UNIDADES_ARCFOOD,
-  list, create, update, remove,
+  list, listAtivas, create, update, remove, arquivar, desarquivar,
   empresaDaUnidade, unidadesDaEmpresa, ensureEmpresasSeed,
   invalidarCache: empresasCache.invalidar,
 };
