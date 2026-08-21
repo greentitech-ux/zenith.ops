@@ -2117,6 +2117,114 @@ setTimeout(async () => {
   if (!okCelularNoc) ruins += 1;
   console.log(`${okCelularNoc ? '✓' : '✗'} NOC: celular fechando o navegador não dispara alarme de loja caída`);
 
+  // ------------------------------------------------------------------
+  // Empresas (ver server/empresas.js): a camada de isolamento acima do
+  // Grupo, pedido do usuário - "quero expandir trazer mais empresas...
+  // porém preciso que elas não vejam uma as coisas do outro, exceto
+  // suporte, que precisa ter acesso a tudo". Confere: (a) o seed de boot
+  // cria MVPar (padrão) e Arcfood (lista fechada dos 4 códigos), (b)
+  // empresaDaUnidade resolve os dois lados corretamente - explícito
+  // (Arcfood) e "resto cai no padrão" (MVPar), (c) GET /api/meta/unidades
+  // devolve o nome da empresa junto de cada unidade (usuarios.html usa
+  // isso pro aviso de acesso cruzado), (d) ehTimeSuporte (consolidado em
+  // auth.js) segue atravessando tudo pra quem tem a seção 'suporte',
+  // mesmo sem ser Master, e (e) os 3 lugares que reimplementavam essa
+  // checagem na mão (index.js local, usuarioLogadoDoHeader, loja-status.html)
+  // agora usam todos a mesma fonte.
+  let okEmpresas = false;
+  try {
+    const empresasMod = require('/home/user/adyen-monitor/server/empresas.js');
+    const authMod = require('/home/user/adyen-monitor/server/auth.js');
+    await empresasMod.ensureEmpresasSeed();
+    const todas = await empresasMod.list();
+    const mvpar = todas.find((e) => e.nome === 'MVPar');
+    const arcfood = todas.find((e) => e.nome === 'Arcfood');
+
+    const donaArcfood = await empresasMod.empresaDaUnidade('19821');
+    const donaResto = await empresasMod.empresaDaUnidade('Dominos Bessa');
+    const donaInexistente = await empresasMod.empresaDaUnidade('CodigoQueNaoExiste123');
+
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const listaUnidades = await pedir('/api/meta/unidades', cab);
+    const dUnidades = listaUnidades.status === 200 ? JSON.parse(listaUnidades.corpo) : [];
+    const itemArcfood = dUnidades.find((u) => u.codigo === '19821');
+    const itemBessa = dUnidades.find((u) => u.codigo === 'Dominos Bessa');
+
+    const suporteAtravessa = authMod.ehTimeSuporte({ isMaster: false, isAdmin: false, permissions: { sections: ['suporte'] } });
+    const semSuporteNaoAtravessa = authMod.ehTimeSuporte({ isMaster: false, isAdmin: false, permissions: { sections: [] } });
+    const adminAtravessa = authMod.ehTimeSuporte({ isMaster: false, isAdmin: true, permissions: { sections: [] } });
+
+    const fs4 = require('fs');
+    const srcIndex4 = fs4.readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
+    const srcLojaStatus = fs4.readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+
+    const conferencias = {
+      'o seed cria MVPar como empresa padrão': !!mvpar && mvpar.padrao === true,
+      'o seed cria Arcfood com os 4 códigos fechados': !!arcfood && arcfood.padrao === false
+        && ['19821', '19855', '19888', '19889'].every((c) => arcfood.unidades.includes(c)),
+      'empresaDaUnidade acha a Arcfood pelo código explícito': donaArcfood && donaArcfood.nome === 'Arcfood',
+      'empresaDaUnidade joga o resto pra empresa padrão (MVPar)': donaResto && donaResto.nome === 'MVPar',
+      'código totalmente desconhecido também cai no padrão (nunca fica órfão)': donaInexistente && donaInexistente.nome === 'MVPar',
+      'GET /api/meta/unidades expõe a empresa de cada unidade': itemArcfood && itemArcfood.empresa === 'Arcfood'
+        && itemBessa && itemBessa.empresa === 'MVPar',
+      'ehTimeSuporte deixa passar quem tem a seção suporte (sem ser Master)': suporteAtravessa === true,
+      'ehTimeSuporte recusa quem não é Master/Admin/suporte': semSuporteNaoAtravessa === false,
+      'ehTimeSuporte também deixa passar Admin': adminAtravessa === true,
+      'index.js não reimplementa mais a função local (usa auth.ehTimeSuporte)': /const ehTimeSuporte = auth\.ehTimeSuporte;/.test(srcIndex4)
+        && !/function ehTimeSuporte\(req\) \{/.test(srcIndex4),
+      'loja-status.html usa o campo do servidor em vez de re-derivar': /if\(!me\.ehTimeSuporte\)/.test(srcLojaStatus)
+        && !/secoes\.includes\('suporte'\)/.test(srcLojaStatus),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okEmpresas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okEmpresas = false; console.log('  erro: ' + e.message); }
+  if (!okEmpresas) ruins += 1;
+  console.log(`${okEmpresas ? '✓' : '✗'} Empresas: isolamento entre negócios (seed MVPar/Arcfood, empresaDaUnidade, suporte atravessa tudo)`);
+
+  // ------------------------------------------------------------------
+  // Empresas: as 6 áreas que existiam no cadastro (unidades.js) mas não
+  // bloqueavam nada (RH/NOC/Estoque/Entregas/Parque/Monitor) - decisão do
+  // usuário ao ser perguntado: "ampliar as 6 áreas também". Reaproveita o
+  // MVPAR_TESTE já criado num teste anterior (areas: ['rh','noc',
+  // 'solicitacoes']) - tem que deixar passar RH/NOC e recusar
+  // Estoque/Parque (não estão na lista); pra Entregas/Monitor (rotas mais
+  // caras de montar - multipart/dados do Monitor) confere por leitura de
+  // fonte, no ponto exato onde a checagem foi inserida.
+  let okAreasAmpliadas = false;
+  try {
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const nocOk = await postarJson('/api/loja-status/MVPAR_TESTE/computadores', { nome: 'PC Teste', tipo: 'interno' }, cab);
+    const nocRecusado = await postarJson('/api/loja-status/19821/computadores', { nome: 'PC Teste', tipo: 'interno' }, cab);
+    const estoqueRecusado = await postarJson('/api/inventario/recebimentos', {
+      unidade: 'MVPAR_TESTE', setor: 'Teste', tipo: 'Teste', itens: [],
+    }, cab);
+    const parqueRecusado = await postarJson('/api/parque/checkins', {
+      unidade: 'MVPAR_TESTE', unidadeNome: 'MVPar Teste', responsavel: { nome: 'Teste', cpf: '00000000000' },
+      dataUtilizacao: '2026-08-20', tempoMinutos: 60,
+    }, cab);
+
+    const fs5 = require('fs');
+    const srcIndex5 = fs5.readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
+
+    const conferencias = {
+      'NOC: unidade COM a área (MVPAR_TESTE) deixa cadastrar computador': nocOk.status === 200,
+      'NOC: unidade SEM a área (19821, só tem "rh") é recusada': nocRecusado.status === 400 && /NOC/.test(nocRecusado.corpo),
+      'Estoque: unidade sem a área é recusada no recebimento': estoqueRecusado.status === 400 && /Estoque/.test(estoqueRecusado.corpo),
+      'Parque: unidade sem a área é recusada no check-in': parqueRecusado.status === 400 && /Parque/.test(parqueRecusado.corpo),
+      'RH: a checagem de área está nos 2 pontos de criação de funcionário':
+        (srcIndex5.match(/apareceEm\(unidade, 'rh'\)/g) || []).length === 2,
+      'Entregas: a checagem de área está no lançamento': /apareceEm\(unidade, 'entregas'\)/.test(srcIndex5),
+      'Monitor: as 4 listas principais (transações/pedidos/pedidos mudados/chargebacks) filtram por área':
+        (srcIndex5.match(/await filtrarPorAreaMonitor\(/g) || []).length === 4,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okAreasAmpliadas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (noc-ok ${nocOk.status}, noc-recusa ${nocRecusado.status} ${nocRecusado.corpo.slice(0, 80)}, estoque ${estoqueRecusado.status} ${estoqueRecusado.corpo.slice(0, 80)}, parque ${parqueRecusado.status} ${parqueRecusado.corpo.slice(0, 80)})`);
+  } catch (e) { okAreasAmpliadas = false; console.log('  erro: ' + e.message); }
+  if (!okAreasAmpliadas) ruins += 1;
+  console.log(`${okAreasAmpliadas ? '✓' : '✗'} Empresas: as 6 áreas sem checagem (RH/NOC/Estoque/Entregas/Parque/Monitor) agora bloqueiam de verdade`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
