@@ -22,7 +22,7 @@ const ticketCounter = require('./ticketCounter');
 
 const COLLECTION = db.collection('formularios');
 // memoria de FAVORECIDO por documento (CPF do favorecido no Reembolso,
-// CNPJ do fornecedor no Avulso): todo formulario criado grava/atualiza os
+// CNPJ do favorecido no Avulso): todo formulario criado grava/atualiza os
 // dados bancarios daquele documento, e a tela preenche sozinha quando o
 // mesmo CPF/CNPJ for digitado de novo (pedido do Master: "quando o CPF foi
 // inserido ja, deixar salvo")
@@ -69,8 +69,8 @@ const TIPOS = {
     titulo: 'SOLICITAÇÃO DE PAGAMENTO AVULSO',
     cabecalho: [
       { key: 'cnpj', label: 'CNPJ' },
-      { key: 'fornecedor', label: 'FAVORECIDO' },
-      { key: 'cnpjFornecedor', label: 'CNPJ DO FAVORECIDO' },
+      { key: 'favorecido', label: 'FAVORECIDO' },
+      { key: 'cnpjFavorecido', label: 'CNPJ DO FAVORECIDO' },
       { key: 'banco', label: 'BANCO' },
       { key: 'agencia', label: 'AGÊNCIA' },
       { key: 'conta', label: 'CONTA COM DÍGITO' },
@@ -83,7 +83,7 @@ const TIPOS = {
     ],
     totalRotulo: 'VALOR TOTAL (R$)',
     assinantes: [
-      { papel: 'fornecedor', rotulo: 'Favorecido' },
+      { papel: 'favorecido', rotulo: 'Favorecido' },
       { papel: 'gerente', rotulo: 'Gerente da unidade' },
     ],
   },
@@ -92,7 +92,7 @@ const TIPOS = {
     titulo: 'SOLICITAÇÃO DE REEMBOLSO',
     cabecalho: [
       { key: 'cnpj', label: 'CNPJ' },
-      { key: 'colaborador', label: 'NOME DO FAVORECIDO' },
+      { key: 'favorecido', label: 'NOME DO FAVORECIDO' },
       { key: 'cpf', label: 'CPF' },
       { key: 'banco', label: 'BANCO' },
       { key: 'agencia', label: 'AGÊNCIA' },
@@ -110,13 +110,15 @@ const TIPOS = {
     ],
     totalRotulo: 'VALOR TOTAL (R$)',
     assinantes: [
-      // as CHAVES ('colaborador'/'gestor') ficam como estão de propósito:
-      // formulário já gravado guarda campos.colaborador e
-      // assinaturas.colaborador/gestor - renomear a chave desligaria o
-      // valor e a assinatura dos registros antigos. O que o Master pediu
-      // pra trocar é o que aparece na tela e no PDF, e é só isso que muda.
-      { papel: 'colaborador', rotulo: 'Favorecido' },
-      { papel: 'gestor', rotulo: 'Responsável' },
+      // a CHAVE acompanha o rótulo ('favorecido'/'responsavel'). Isso foi
+      // adiado uma vez porque renomear a chave desliga o valor e a
+      // assinatura dos formulários JÁ gravados (que guardam
+      // campos.colaborador e assinaturas.colaborador/gestor); o Master
+      // liberou depois - "pode mudar, os registros antigos foram testes".
+      // Registro velho que sobre não quebra: rotuloDoSlot() cai no rótulo
+      // gravado quando o papel não existe mais no modelo.
+      { papel: 'favorecido', rotulo: 'Favorecido' },
+      { papel: 'responsavel', rotulo: 'Responsável' },
     ],
     obs: 'OBS.: Todos os comprovantes das despesas devem estar devidamente rubricados e anexados a este formulário.',
   },
@@ -152,13 +154,13 @@ function soDigitos(v) { return String(v || '').replace(/\D/g, ''); }
 async function salvarFavorecido(campos) {
   try {
     const cpf = soDigitos(campos.cpf);
-    const cnpj = soDigitos(campos.cnpjFornecedor);
+    const cnpj = soDigitos(campos.cnpjFavorecido);
     const chave = cpf.length === 11 ? cpf : (cnpj.length === 14 ? cnpj : null);
     if (!chave) return;
     const dados = {
       doc: chave,
-      nome: campos.colaborador || campos.fornecedor || null,
-      cpf: campos.cpf || null, cnpjFornecedor: campos.cnpjFornecedor || null,
+      nome: campos.favorecido || null,
+      cpf: campos.cpf || null, cnpjFavorecido: campos.cnpjFavorecido || null,
       banco: campos.banco || null, agencia: campos.agencia || null, conta: campos.conta || null,
       chavePix: campos.chavePix || null,
       atualizadoEm: new Date().toISOString(),

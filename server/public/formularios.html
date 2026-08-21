@@ -140,7 +140,7 @@ function escolherTipo(tipo){
     `<div><label>${escapeHtml(c.label)}</label><input type="text" data-campo="${escapeHtml(c.key)}"></div>`).join('');
   // memória de favorecido: terminou de digitar um CPF/CNPJ já usado antes ->
   // puxa nome + dados bancários salvos e preenche o que estiver vazio
-  document.querySelectorAll('#campos input[data-campo="cpf"], #campos input[data-campo="cnpjFornecedor"]')
+  document.querySelectorAll('#campos input[data-campo="cpf"], #campos input[data-campo="cnpjFavorecido"]')
     .forEach(el=> el.addEventListener('input', ()=>buscarFavorecido(el)));
   document.getElementById('f-anexos').value = '';
   atualizarUnidadeInfo();
@@ -196,7 +196,7 @@ function addLinha(){
 }
 
 // pra cada campo do formulário, qual campo do favorecido salvo o preenche
-const CAMPOS_FAVORECIDO = { colaborador:'nome', fornecedor:'nome', banco:'banco', agencia:'agencia', conta:'conta', chavePix:'chavePix' };
+const CAMPOS_FAVORECIDO = { favorecido:'nome', banco:'banco', agencia:'agencia', conta:'conta', chavePix:'chavePix' };
 async function buscarFavorecido(el){
   const dig = String(el.value||'').replace(/\D/g,'');
   if(dig.length!==11 && dig.length!==14) return;

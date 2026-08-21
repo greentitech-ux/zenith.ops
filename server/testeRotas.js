@@ -2013,18 +2013,18 @@ setTimeout(async () => {
       tipo: 'avulso', unidade: "Domino's Bessa - João Pessoa",
       // o cnpj mandado aqui é ERRADO de propósito: o servidor tem que
       // ignorar e usar o do cadastro fixo (UNIDADES_FORM)
-      campos: { cnpj: '99.999.999/9999-99', fornecedor: 'Padaria Central', chavePix: 'pix@padaria.com' },
+      campos: { cnpj: '99.999.999/9999-99', favorecido: 'Padaria Central', chavePix: 'pix@padaria.com' },
       linhas: [{ data: '20/08/2026', descricao: 'Pães para evento', valor: '150,50' }, { data: '20/08/2026', descricao: 'Bolo', valor: '87,22' }],
     }, cab);
     const f = criado.status === 200 ? JSON.parse(criado.corpo) : {};
     const linkDe = (papel) => (f.assinaturas || []).find((a) => a.chave === papel);
     const tokenDoLink = (papel) => new URLSearchParams(String(linkDe(papel).link).split('?')[1]).get('t');
 
-    const vista = await pedir(`/api/formularios-publico/${f.id}?token=${tokenDoLink('fornecedor')}`);
+    const vista = await pedir(`/api/formularios-publico/${f.id}?token=${tokenDoLink('favorecido')}`);
     const dVista = vista.status === 200 ? JSON.parse(vista.corpo) : {};
     const tokenErrado = await pedir(`/api/formularios-publico/${f.id}?token=naoexiste`);
 
-    const ass1 = await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tokenDoLink('fornecedor'), nome: 'João Padeiro', imagem: PNG });
+    const ass1 = await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tokenDoLink('favorecido'), nome: 'João Padeiro', imagem: PNG });
     const ass2 = await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tokenDoLink('gerente'), nome: 'Marcela', imagem: PNG });
     const dAss2 = ass2.status === 200 ? JSON.parse(ass2.corpo) : {};
     const repetida = await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tokenDoLink('gerente'), nome: 'Marcela', imagem: PNG });
@@ -2046,12 +2046,12 @@ setTimeout(async () => {
     const srcFormularios = fs.readFileSync(require('path').join(__dirname, 'formularios.js'), 'utf8');
     const conferencias = {
       'criar devolve um link de assinatura por papel': criado.status === 200
-        && !!(linkDe('fornecedor') && linkDe('fornecedor').link) && !!(linkDe('gerente') && linkDe('gerente').link),
+        && !!(linkDe('favorecido') && linkDe('favorecido').link) && !!(linkDe('gerente') && linkDe('gerente').link),
       'o total soma a coluna de valor (pt-BR)': f.valorTotal === 237.72,
       'CNPJ e razão social vêm do cadastro fixo (ignora o que o navegador mandou)':
         f.campos && f.campos.cnpj === '59.449.391/0001-79' && f.razaoSocial === 'America Bessa',
       'unidade fora do cadastro é recusada': (await postarJson('/api/formularios', { tipo: 'avulso', unidade: 'Loja Inventada', campos: {}, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }, cab)).status === 400,
-      'o link público mostra o formulário e o papel de quem abriu': vista.status === 200 && dVista.meuPapel === 'fornecedor' && dVista.jaAssinei === false,
+      'o link público mostra o formulário e o papel de quem abriu': vista.status === 200 && dVista.meuPapel === 'favorecido' && dVista.jaAssinei === false,
       'token errado é recusado': tokenErrado.status === 404,
       'as duas assinaturas completam o formulário': ass1.status === 200 && ass2.status === 200 && dAss2.completo === true,
       'assinar duas vezes é recusado': repetida.status === 400,
@@ -2097,7 +2097,7 @@ setTimeout(async () => {
     const cab = token ? { Authorization: 'Bearer ' + token } : {};
     const reemb = await postarJson('/api/formularios', {
       tipo: 'reembolso', unidade: 'Spoleto Shopping Recife',
-      campos: { colaborador: 'Sidney Ferreira de Lima', cpf: '092.055.424-58', banco: 'Santander', agencia: '0001', conta: '12345-6', chavePix: 'sidney@pix.com' },
+      campos: { favorecido: 'Sidney Ferreira de Lima', cpf: '092.055.424-58', banco: 'Santander', agencia: '0001', conta: '12345-6', chavePix: 'sidney@pix.com' },
       linhas: [{ data: '19/08/2026', fornecedor: 'Posto BR', descricao: 'Combustível', valor: '80,00' }],
     }, cab);
     const fR = reemb.status === 200 ? JSON.parse(reemb.corpo) : {};
@@ -2110,7 +2110,7 @@ setTimeout(async () => {
 
     // multipart SEM arquivo tem que criar igual (é como a tela manda agora)
     const viaMultipart = await postarMultipart('/api/formularios', {
-      payload: JSON.stringify({ tipo: 'avulso', unidade: 'Spoleto Tacaruna', campos: { fornecedor: 'X' }, linhas: [{ data: 'x', descricao: 'y', valor: '10' }] }),
+      payload: JSON.stringify({ tipo: 'avulso', unidade: 'Spoleto Tacaruna', campos: { favorecido: 'X' }, linhas: [{ data: 'x', descricao: 'y', valor: '10' }] }),
     }, null, 'anexos', cab);
     // arquivo que não é PDF nem imagem é barrado ANTES de tocar no storage
     const tipoRuim = await postarMultipart('/api/formularios', {
@@ -2118,7 +2118,7 @@ setTimeout(async () => {
     }, { nome: 'nota.txt', tipo: 'text/plain', buffer: Buffer.from('oi') }, 'anexos', cab);
 
     // rotas de anexo: índice inexistente e token errado caem em 404
-    const tokenAss = new URLSearchParams(String((fR.assinaturas.find((a) => a.chave === 'colaborador') || {}).link).split('?')[1]).get('t');
+    const tokenAss = new URLSearchParams(String((fR.assinaturas.find((a) => a.chave === 'favorecido') || {}).link).split('?')[1]).get('t');
     const anexoForaDoIndice = await pedir(`/api/formularios/${fR.id}/anexo/0?token=${encodeURIComponent(token)}`);
     const anexoPublicoForaDoIndice = await pedir(`/api/formularios-publico/${fR.id}/anexo/0?token=${tokenAss}`);
     const anexoTokenErrado = await pedir(`/api/formularios-publico/${fR.id}/anexo/0?token=naoexiste`);
@@ -2600,22 +2600,35 @@ setTimeout(async () => {
     const form = require('/home/user/adyen-monitor/server/formularios.js');
     const novo = await form.criar({
       tipo: 'reembolso', unidade: 'São Braz Ilha do Leite',
-      campos: { colaborador: 'Fulano' }, linhas: [{ descricao: 'X', valor: '10,00' }],
+      campos: { favorecido: 'Fulano' }, linhas: [{ descricao: 'X', valor: '10,00' }],
       criadoPorEmail: 'teste@teste.local',
     });
 
     // simula um formulário criado ANTES da renomeação: rótulos velhos gravados
     const antigo = JSON.parse(JSON.stringify(DOCS.get('formularios/' + novo.id)));
     antigo.id = 'form-rotulo-antigo';
-    antigo.assinaturas.colaborador.rotulo = 'Colaborador';
-    antigo.assinaturas.gestor.rotulo = 'Gestor imediato';
+    antigo.assinaturas.favorecido.rotulo = 'Colaborador';
+    antigo.assinaturas.responsavel.rotulo = 'Gestor imediato';
     DOCS.set('formularios/form-rotulo-antigo', antigo);
+
+    // e um formulário de ANTES da renomeação das CHAVES (o Master liberou
+    // mexer nelas: "os registros antigos foram testes"). Aqui o papel nem
+    // existe mais no modelo - o esperado é NÃO quebrar: cai no rótulo que
+    // está gravado, em vez de sumir com a assinatura.
+    const legado = JSON.parse(JSON.stringify(antigo));
+    legado.id = 'form-chave-antiga';
+    legado.assinaturas = {
+      colaborador: { ...antigo.assinaturas.favorecido, chave: 'colaborador', rotulo: 'Colaborador' },
+      gestor: { ...antigo.assinaturas.responsavel, chave: 'gestor', rotulo: 'Gestor imediato' },
+    };
+    DOCS.set('formularios/form-chave-antiga', legado);
     form.invalidarCacheTeste && form.invalidarCacheTeste();
 
-    const tokenColab = novo.assinaturas.find((a) => a.chave === 'colaborador').token;
+    const tokenColab = novo.assinaturas.find((a) => a.chave === 'favorecido').token;
     const vistaAss = await pedir(`/api/formularios-publico/${novo.id}?token=${tokenColab}`);
     const dv = vistaAss.status === 200 ? JSON.parse(vistaAss.corpo) : {};
     const detAntigo = await form.detalhar('form-rotulo-antigo');
+    const detLegado = await form.detalhar('form-chave-antiga');
     const pdf = await pedirBinario(`/api/formularios/${novo.id}/pdf`, cab);
     const textoPdf = pdf.status === 200 ? textoDoPdf(pdf.buffer) : '';
     const fonte = require('fs').readFileSync(require('path').join(__dirname, 'formularios.js'), 'utf8');
@@ -2624,26 +2637,37 @@ setTimeout(async () => {
     const conferencias = {
       'o campo do Reembolso diz FAVORECIDO, não COLABORADOR':
         /NOME DO FAVORECIDO/.test(fonte) && !/NOME DO COLABORADOR/.test(fonte),
-      'a assinatura do favorecido chama "Favorecido"': rot(novo, 'colaborador') === 'Favorecido',
-      'a outra assinatura chama "Responsável", não "Gestor imediato"': rot(novo, 'gestor') === 'Responsável',
+      'a assinatura do favorecido chama "Favorecido"': rot(novo, 'favorecido') === 'Favorecido',
+      'a outra assinatura chama "Responsável", não "Gestor imediato"': rot(novo, 'responsavel') === 'Responsável',
       'a tela pública de assinatura também mostra o nome novo':
         vistaAss.status === 200 && dv.meuRotulo === 'Favorecido'
         && (dv.assinaturas || []).some((a) => a.rotulo === 'Responsável'),
       'formulário ANTIGO (rótulo velho gravado) passa a exibir o novo':
-        rot(detAntigo, 'colaborador') === 'Favorecido' && rot(detAntigo, 'gestor') === 'Responsável',
+        rot(detAntigo, 'favorecido') === 'Favorecido' && rot(detAntigo, 'responsavel') === 'Responsável',
       'o PDF sai com os nomes novos':
         textoPdf.includes('Favorecido') && textoPdf.includes('Responsável')
         && !textoPdf.includes('Gestor imediato'),
       // Avulso: quem recebe também é "Favorecido" agora (era "Fornecedor")
       'no Avulso, o campo e a assinatura de quem recebe também dizem Favorecido':
         /label: 'FAVORECIDO'/.test(fonte) && /label: 'CNPJ DO FAVORECIDO'/.test(fonte)
-        && /papel: 'fornecedor', rotulo: 'Favorecido'/.test(fonte),
+        && /papel: 'favorecido', rotulo: 'Favorecido'/.test(fonte),
       // mas a COLUNA do Reembolso segue "FORNECEDOR": ali é o estabelecimento
       // de cada despesa, não quem recebe - trocar apagaria essa distinção
       'a coluna de despesa do Reembolso continua FORNECEDOR (é o estabelecimento, não quem recebe)':
         /label: 'NOME DO FORNECEDOR'/.test(fonte),
-      'as CHAVES não mudaram (registro antigo continua ligado ao campo/assinatura)':
-        !!novo.assinaturas.find((a) => a.chave === 'colaborador') && !!novo.assinaturas.find((a) => a.chave === 'gestor'),
+      // as CHAVES acompanharam o rótulo: o que o código chama é o que a tela
+      // mostra. Antes eram 'colaborador'/'gestor'/'fornecedor'.
+      'as CHAVES internas também são favorecido/responsavel':
+        !!novo.assinaturas.find((a) => a.chave === 'favorecido')
+        && !!novo.assinaturas.find((a) => a.chave === 'responsavel')
+        && !novo.assinaturas.find((a) => a.chave === 'colaborador' || a.chave === 'gestor')
+        && /key: 'favorecido'/.test(fonte) && /key: 'cnpjFavorecido'/.test(fonte)
+        && !/key: 'colaborador'/.test(fonte) && !/papel: 'gestor'/.test(fonte),
+      // registro gravado com a chave velha não pode sumir da tela - fica com
+      // o rótulo que ele mesmo gravou (aceito: eram registros de teste)
+      'registro com a CHAVE velha continua aparecendo, com o rótulo que gravou':
+        (detLegado.assinaturas || []).length === (detAntigo.assinaturas || []).length
+        && rot(detLegado, 'colaborador') === 'Colaborador',
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okRotulos = !falhas.length;
