@@ -81,7 +81,21 @@ function fakeDoc(caminho) {
 }
 const fakeDb = {
   collection: (n) => fakeQuery(n),
-  batch: () => ({ set() {}, update() {}, delete() {}, commit: async () => {} }),
+  // batch GRAVA de verdade. Era no-op, e isso fazia o fake mentir do mesmo
+  // jeito que o set()/update() mentiam antes (ver runTransaction abaixo):
+  // qualquer semente ou escrita em lote passava batido, o teste via a
+  // coleção vazia e o defeito só aparecia em produção. Acumula as operações
+  // e aplica no commit, como o Firestore de verdade.
+  batch: () => {
+    const ops = [];
+    const b = {
+      set: (r, d, o) => { ops.push(() => { const c = r.path || ''; DOCS.set(c, o && o.merge ? { ...(DOCS.get(c) || {}), ...d } : d); }); return b; },
+      update: (r, d) => { ops.push(() => { const c = r.path || ''; DOCS.set(c, { ...(DOCS.get(c) || {}), ...d }); }); return b; },
+      delete: (r) => { ops.push(() => DOCS.delete(r.path || '')); return b; },
+      commit: async () => { ops.forEach((f) => f()); ops.length = 0; },
+    };
+    return b;
+  },
   // set/update GRAVAM de verdade - eram no-op, e isso fazia o fake mentir:
   // ticketCounter.proximoTicket() grava o próximo número DENTRO da
   // transação, então com set() vazio todo mundo lia 10000 e o teste não
@@ -470,6 +484,123 @@ setTimeout(async () => {
   const okLerDoc = lerDoc.status === 400 && /não está configurada/i.test(lerDoc.corpo);
   if (!okLerDoc) ruins += 1;
   console.log(`${okLerDoc ? '✓' : '✗'} ler documento sem ANTHROPIC_API_KEY é recusado: HTTP ${lerDoc.status} ${lerDoc.corpo.slice(0, 80)}`);
+
+  // ---- FORMULÁRIOS: o seletor de Unidade respeita quem foi liberado ----
+  // O Master libera uma pessoa pra UMA loja e o seletor mostrava TODAS -
+  // gerente de uma loja via (e podia emitir) formulário de pagamento de
+  // outra empresa. A causa: a lista de unidades do formulário era escrita à
+  // mão ("Domino's Caruaru") e não batia com o código que as permissões
+  // usam ("Dominos Caruaru"), então não havia com o que casar. As duas
+  // pontas do mesmo defeito - a LISTA de formulários, que compara igual,
+  // vinha vazia pra quem não é Master.
+  let okFormUnidades = false;
+  try {
+    const bcrypt = require('bcryptjs');
+    const senhaHash = bcrypt.hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-form-caruaru', {
+      passwordHash: senhaHash, role: 'user', active: true,
+      email: 'form-caruaru@teste.local', username: 'formcaruaru',
+      permissions: { sections: ['formularios'], unidades: ['Dominos Caruaru'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const tk = (await auth.login('form-caruaru@teste.local', 'SenhaDeTeste!2026')).token;
+    const cab = { Authorization: 'Bearer ' + tk };
+    const cabMaster = token ? { Authorization: 'Bearer ' + token } : {};
+
+    const dela = JSON.parse((await pedir('/api/formularios/unidades', cab)).corpo);
+    const doMaster = JSON.parse((await pedir('/api/formularios/unidades', cabMaster)).corpo);
+
+    // ela vê SÓ a dela; o Master continua vendo tudo
+    const soADela = dela.length === 1 && dela[0].unidade === "Domino's Caruaru";
+    const masterVeTudo = doMaster.length > dela.length;
+    // e a razão social/CNPJ continuam vindo travados do cadastro
+    const temCadastro = soADela && dela[0].razaoSocial === 'America Caruaru' && /50\.724\.770/.test(dela[0].cnpj);
+    // a unidade nova que faltava (só existia CNPJ no papel) agora está lá
+    const temSaltiverso = doMaster.some((u) => u.unidade === 'Saltiverso Patteo' && /66\.644\.523/.test(u.cnpj));
+    // cadastro sem unidade vinculada não vaza: falha fechada, só o Master
+    const semVinculoSoMaster = !dela.some((u) => u.unidade === 'Big Brother - Recife')
+      && doMaster.some((u) => u.unidade === 'Big Brother - Recife');
+
+    // a trava de verdade é no servidor: mandar a unidade na requisição, sem
+    // passar pelo seletor, tem que tomar 403
+    const forjado = await postarJson('/api/formularios', {
+      tipo: 'reembolso', unidade: 'Spoleto Shopping Recife', campos: {}, linhas: [],
+    }, cab);
+    const recusaForjado = forjado.status === 403 && /não tem acesso a essa unidade/i.test(forjado.corpo);
+    const forjadoLink = await postarJson('/api/formularios/link-preenchimento', {
+      tipo: 'reembolso', unidade: 'Spoleto Shopping Recife',
+    }, cab);
+    const recusaLink = forjadoLink.status === 403;
+
+    // e o caminho legítimo, na unidade dela, continua funcionando
+    const legitimo = await postarJson('/api/formularios', {
+      tipo: 'reembolso', unidade: "Domino's Caruaru",
+      campos: { favorecido: 'Fulano', descricao: 'Teste' },
+      linhas: [{ descricao: 'Item de teste', valor: '10,00' }],
+    }, cab);
+    const criou = legitimo.status === 200;
+    // ...e aparece na lista DELA (era isso que vinha vazio: o registro guarda
+    // o rótulo, a permissão fala em código - agora grava os dois)
+    const lista = JSON.parse((await pedir('/api/formularios', cab)).corpo);
+    const veOProprio = Array.isArray(lista) && lista.some((f) => f.unidade === "Domino's Caruaru");
+
+    okFormUnidades = soADela && masterVeTudo && temCadastro && temSaltiverso
+      && semVinculoSoMaster && recusaForjado && recusaLink && criou && veOProprio;
+    if (!okFormUnidades) {
+      console.log(`  detalhe: soADela=${soADela} masterVeTudo=${masterVeTudo} cadastro=${temCadastro} saltiverso=${temSaltiverso} semVinculo=${semVinculoSoMaster} forjado=${recusaForjado} link=${recusaLink} criou=${criou}(${legitimo.corpo.slice(0, 90)}) veOProprio=${veOProprio}`);
+    }
+  } catch (e) { okFormUnidades = false; console.log('  erro: ' + e.message); }
+  if (!okFormUnidades) ruins += 1;
+  console.log(`${okFormUnidades ? '✓' : '✗'} Formulários: o seletor de Unidade mostra só o que foi liberado (e o servidor recusa o resto)`);
+
+  // O cadastro de unidade saiu do código pra uma tela do Master: CNPJ muda
+  // por decisão de contabilidade, não por deploy. E CNPJ entra travado no
+  // PDF - um dígito trocado só aparece quando alguém tenta conciliar.
+  let okFormCadastro = false;
+  try {
+    const cabMaster = token ? { Authorization: 'Bearer ' + token } : {};
+    const cnpjTorto = await postarJson('/api/formularios/cadastro-unidades', {
+      unidade: 'Loja Nova Teste', razaoSocial: 'Nova Teste LTDA', cnpj: '11.111.111/1111-11',
+    }, cabMaster);
+    const recusouCnpj = cnpjTorto.status === 400 && /d[ií]gito verificador|inv[áa]lido/i.test(cnpjTorto.corpo);
+
+    const nova = await postarJson('/api/formularios/cadastro-unidades', {
+      unidade: 'Loja Nova Teste', razaoSocial: 'Nova Teste LTDA',
+      cnpj: '66644523000189', codigo: 'Dominos Bessa',
+    }, cabMaster);
+    const criou = nova.status === 200;
+    const novaId = criou ? JSON.parse(nova.corpo).id : null;
+    // CNPJ digitado só com números sai formatado - é assim que entra no PDF
+    const formatou = criou && JSON.parse(nova.corpo).cnpj === '66.644.523/0001-89';
+
+    const repetida = await postarJson('/api/formularios/cadastro-unidades', {
+      unidade: 'Loja Nova Teste', razaoSocial: 'Outra', cnpj: '50.625.368/0001-13',
+    }, cabMaster);
+    const recusouDuplicada = repetida.status === 400 && /já existe/i.test(repetida.corpo);
+
+    // desativar tira do seletor SEM apagar: formulário já emitido tem que
+    // continuar abrindo com a razão social e o CNPJ de quando foi assinado
+    await putJson(`/api/formularios/cadastro-unidades/${novaId}/ativo`, { ativo: false }, cabMaster);
+    const depois = JSON.parse((await pedir('/api/formularios/unidades', cabMaster)).corpo);
+    const sumiuDoSeletor = !depois.some((u) => u.unidade === 'Loja Nova Teste');
+    const continuaNoCadastro = JSON.parse((await pedir('/api/formularios/cadastro-unidades', cabMaster)).corpo)
+      .some((u) => u.unidade === 'Loja Nova Teste');
+
+    // e ninguém além do Master mexe nisso
+    const tkOutro = (await auth.login('form-caruaru@teste.local', 'SenhaDeTeste!2026')).token;
+    const intruso = await postarJson('/api/formularios/cadastro-unidades', {
+      unidade: 'Invadida', razaoSocial: 'X', cnpj: '50.625.368/0001-13',
+    }, { Authorization: 'Bearer ' + tkOutro });
+    const soMaster = intruso.status === 403;
+
+    okFormCadastro = recusouCnpj && criou && formatou && recusouDuplicada
+      && sumiuDoSeletor && continuaNoCadastro && soMaster;
+    if (!okFormCadastro) {
+      console.log(`  detalhe: cnpjTorto=${recusouCnpj} criou=${criou}(${nova.corpo.slice(0, 80)}) formatou=${formatou} duplicada=${recusouDuplicada} sumiu=${sumiuDoSeletor} continua=${continuaNoCadastro} soMaster=${soMaster}`);
+    }
+  } catch (e) { okFormCadastro = false; console.log('  erro: ' + e.message); }
+  if (!okFormCadastro) ruins += 1;
+  console.log(`${okFormCadastro ? '✓' : '✗'} Formulários: Master cadastra/corrige/desativa unidade sem deploy (CNPJ conferido pelo dígito)`);
 
   // ---- LINK PUBLICO DE CADASTRO (EXTRA): a foto sobe UMA vez ----
   // O envio estava dando "Failed to fetch" no celular da loja. Nao era erro

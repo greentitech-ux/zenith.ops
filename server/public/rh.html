@@ -741,6 +741,9 @@ function aplicarModoDocumento(tipo){
     const el = document.getElementById(id);
     if(!el) return;
     const travar = exige && !ehManual(campo);
+    // tipo que NÃO exige documento (efetivado) tem os campos digitados na
+    // mão: solta a trava da leitura, senão o guarda repunha o valor antigo
+    if(!travar) destravarCampoLido(el);
     el.readOnly = travar;
     el.classList.toggle('campo-do-documento', travar);
     el.title = travar ? 'Vem do documento anexado - não é digitado'
@@ -796,6 +799,32 @@ async function salvarCamposConfig(){
     setTimeout(()=>{ msg.textContent = ''; }, 2500);
   }catch(err){ msg.textContent = err.message; }
 }
+// ---- trava dos campos que vieram da LEITURA ----
+// readonly segura a digitação no desktop, mas não é garantia em todo
+// navegador: no <input type="date"> o seletor nativo (iOS em especial) abre
+// pelo ícone e grava o valor sem passar pelo teclado. Como esses campos são
+// do DOCUMENTO e não da pessoa - o servidor relê o documento na hora de
+// gravar e ignora o que a tela mandar -, deixar a tela aceitar uma edição
+// que depois é descartada só cria a impressão de que dá pra corrigir ali.
+// Aqui o valor volta sozinho se algo mudar, em qualquer navegador.
+const VALOR_LIDO = {};
+function travarCampoLido(el, valor){
+  if(!el) return;
+  el.value = valor;
+  VALOR_LIDO[el.id] = valor;
+  el.readOnly = true;
+  if(el.dataset.travadoLeitura) return; // um ouvinte só por campo
+  el.dataset.travadoLeitura = '1';
+  const repor = ()=>{
+    const esperado = VALOR_LIDO[el.id];
+    if(esperado !== undefined && el.value !== esperado) el.value = esperado;
+  };
+  el.addEventListener('input', repor);
+  el.addEventListener('change', repor);
+  el.addEventListener('keydown', (e)=>{ if(e.key !== 'Tab') e.preventDefault(); });
+}
+function destravarCampoLido(el){ if(el) delete VALOR_LIDO[el.id]; }
+
 function limparLeituraDocumento(){
   DOC_LIDO = null;
   // só limpa o que veio da leitura - campo digitado na mão não é dela pra
@@ -803,6 +832,8 @@ function limparLeituraDocumento(){
   ['cpf','rg','nomeMae'].forEach(campo=>{
     if(ehManual(campo)) return;
     const el = document.getElementById(INPUT_DO_CAMPO[campo]);
+    // solta a trava ANTES de limpar, senão o próprio guarda repõe o valor
+    destravarCampoLido(el);
     if(el) el.value = '';
   });
   document.getElementById('doc-campos-lidos').classList.toggle('hidden', !['cpf','rg'].some(ehManual));
@@ -836,8 +867,7 @@ async function lerDocumentoCadastro(){
     const porFora = { nome: data.nome, dataNascimento: data.dataNascimento || '', cpf: formatarCpf(data.cpf), rg: data.rg || '', nomeMae: data.nomeMae || '' };
     Object.entries(INPUT_DO_CAMPO).forEach(([campo, id])=>{
       if(ehManual(campo)) return;
-      const el = document.getElementById(id);
-      if(el) el.value = porFora[campo];
+      travarCampoLido(document.getElementById(id), porFora[campo]);
     });
     document.getElementById('doc-campos-lidos').classList.remove('hidden');
     document.getElementById('doc-mae-wrap').classList.toggle('hidden', !(data.nomeMae || ehManual('nomeMae')));

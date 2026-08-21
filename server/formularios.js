@@ -17,6 +17,7 @@
 const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
 const db = require('./firestore');
+const formulariosUnidades = require('./formulariosUnidades');
 const { createCache } = require('./liveCache');
 const ticketCounter = require('./ticketCounter');
 const storage = require('./storage');
@@ -151,6 +152,11 @@ const TIPOS = {
 // em 20/08/2026). O formulário nasce com esses dados já preenchidos e SEM
 // edição: quem cria só escolhe a unidade - o CNPJ que o navegador mandar é
 // IGNORADO de propósito (a fonte é este cadastro, não o formulário).
+// MOVIDO PARA CADASTRO. A razão social e o CNPJ de cada unidade agora ficam
+// em formulariosUnidades.js (Firestore, editável pelo Master) - trocar um
+// CNPJ é decisão de contabilidade, não deploy. Esta constante ficou só como
+// a semente daquela migração e não é mais consultada em runtime; quem manda
+// é o cadastro. Ver o comentário no topo de formulariosUnidades.js.
 const UNIDADES_FORM = [
   { unidade: 'Spoleto Shopping Recife', razaoSocial: 'Trigo Recife', cnpj: '50.625.368/0001-13' },
   { unidade: "Domino's Caruaru", razaoSocial: 'America Caruaru', cnpj: '50.724.770/0001-55' },
@@ -323,7 +329,7 @@ async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criad
   if (!modelo) throw new Error('Tipo de formulário inválido.');
   const unidadeOk = limpar(unidade, 80);
   if (!unidadeOk) throw new Error('Informe a unidade.');
-  const cadastro = UNIDADES_FORM.find((u) => u.unidade === unidadeOk);
+  const cadastro = await formulariosUnidades.obterPorUnidade(unidadeOk);
   if (!cadastro) throw new Error('Unidade inválida - escolha uma das unidades cadastradas.');
 
   const { camposOk, linhasOk, valorTotal } = montarConteudo(modelo, cadastro, campos, linhas);
@@ -341,7 +347,8 @@ async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criad
 
   const doc = COLLECTION.doc();
   const registro = {
-    id: doc.id, tipo, unidade: unidadeOk, razaoSocial: cadastro.razaoSocial,
+    id: doc.id, tipo, unidade: unidadeOk, unidadeCodigo: cadastro.codigo || null,
+    razaoSocial: cadastro.razaoSocial,
     campos: camposOk, linhas: linhasOk, valorTotal, anexos: anexosOk,
     assinaturas, status: 'PENDENTE',
     // MESMA sequência dos tickets da Central (#10000+), não um contador
@@ -391,7 +398,7 @@ async function criarParaPreenchimento({ tipo, unidade, criadoPorId, criadoPorEma
   // nesse tipo é o de ASSINATURA, que sai depois de criado.
   if (modelo.soAnexo) throw new Error('Esse tipo não tem campos pro solicitante preencher - anexe o documento aqui e mande o link de assinatura depois.');
   const unidadeOk = limpar(unidade, 80);
-  const cadastro = UNIDADES_FORM.find((u) => u.unidade === unidadeOk);
+  const cadastro = await formulariosUnidades.obterPorUnidade(unidadeOk);
   if (!cadastro) throw new Error('Unidade inválida - escolha uma das unidades cadastradas.');
 
   const jaExiste = (await cache.cached()).find((r) => r.status === STATUS_AGUARDANDO
@@ -401,7 +408,8 @@ async function criarParaPreenchimento({ tipo, unidade, criadoPorId, criadoPorEma
 
   const doc = COLLECTION.doc();
   const registro = {
-    id: doc.id, tipo, unidade: unidadeOk, razaoSocial: cadastro.razaoSocial,
+    id: doc.id, tipo, unidade: unidadeOk, unidadeCodigo: cadastro.codigo || null,
+    razaoSocial: cadastro.razaoSocial,
     campos: { cnpj: cadastro.cnpj }, linhas: [], valorTotal: 0, anexos: [],
     // sem slot de assinatura ainda - só dá pra montar quando houver linhas
     assinaturas: {}, status: STATUS_AGUARDANDO,
@@ -459,7 +467,7 @@ async function salvarPreenchimento(token, { campos, linhas }) {
   if (!r) throw new Error('Link de preenchimento inválido.');
   if (r.status !== STATUS_AGUARDANDO) throw new Error('Esse formulário já foi preenchido.');
   const modelo = TIPOS[r.tipo];
-  const cadastro = UNIDADES_FORM.find((u) => u.unidade === r.unidade);
+  const cadastro = await formulariosUnidades.obterPorUnidade(r.unidade);
 
   const { camposOk, linhasOk, valorTotal } = montarConteudo(modelo, cadastro, campos, linhas);
   await COLLECTION.doc(r.id).update({
@@ -541,7 +549,7 @@ async function editar(id, { campos, linhas, porEmail } = {}) {
   if (r.status === STATUS_CANCELADO) throw new Error('Formulário cancelado não pode ser editado.');
   const modelo = TIPOS[r.tipo];
   if (!modelo) throw new Error('Tipo de formulário inválido.');
-  const cadastro = UNIDADES_FORM.find((u) => u.unidade === r.unidade);
+  const cadastro = await formulariosUnidades.obterPorUnidade(r.unidade);
   if (!cadastro) throw new Error('A unidade desse formulário não está mais cadastrada.');
 
   const { camposOk, linhasOk, valorTotal } = montarConteudo(modelo, cadastro, campos, linhas);

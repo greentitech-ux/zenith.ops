@@ -234,6 +234,32 @@ async function postarArquivos(url, fd, tempoMs){
   }finally{ clearTimeout(relogio); }
 }
 
+// ---- trava dos campos que vieram da LEITURA ----
+// readonly segura a digitação no desktop, mas não é garantia em todo
+// navegador: no <input type="date"> o seletor nativo (iOS em especial) abre
+// pelo ícone e grava o valor sem passar pelo teclado. Como esses campos são
+// do DOCUMENTO e não da pessoa - o servidor relê o documento na hora de
+// gravar e ignora o que a tela mandar -, deixar a tela aceitar uma edição
+// que depois é descartada só cria a impressão de que dá pra corrigir ali.
+// Aqui o valor volta sozinho se algo mudar, em qualquer navegador.
+const VALOR_LIDO = {};
+function travarCampoLido(el, valor){
+  if(!el) return;
+  el.value = valor;
+  VALOR_LIDO[el.id] = valor;
+  el.readOnly = true;
+  if(el.dataset.travadoLeitura) return; // um ouvinte só por campo
+  el.dataset.travadoLeitura = '1';
+  const repor = ()=>{
+    const esperado = VALOR_LIDO[el.id];
+    if(esperado !== undefined && el.value !== esperado) el.value = esperado;
+  };
+  el.addEventListener('input', repor);
+  el.addEventListener('change', repor);
+  el.addEventListener('keydown', (e)=>{ if(e.key !== 'Tab') e.preventDefault(); });
+}
+function destravarCampoLido(el){ if(el) delete VALOR_LIDO[el.id]; }
+
 function formatarCpf(d){
   const s = String(d||'').replace(/\D/g,'');
   return s.length === 11 ? `${s.slice(0,3)}.${s.slice(3,6)}.${s.slice(6,9)}-${s.slice(9)}` : '';
@@ -244,6 +270,8 @@ function limparLeituraDoc(){
   Object.entries(INPUT_DO_CAMPO).forEach(([campo, id])=>{
     if(ehManual(campo)) return;
     const el = document.getElementById(id);
+    // solta a trava ANTES de limpar, senão o próprio guarda repõe o valor
+    destravarCampoLido(el);
     if(el) el.value = '';
   });
   document.getElementById('doc-campos-lidos').classList.toggle('hidden', !['cpf','rg'].some(ehManual));
@@ -268,8 +296,7 @@ document.getElementById('btn-ler-doc').addEventListener('click', async ()=>{
     const porFora = { nome: data.nome, dataNascimento: data.dataNascimento || '', cpf: formatarCpf(data.cpf), rg: data.rg || '' };
     Object.entries(INPUT_DO_CAMPO).forEach(([campo, id])=>{
       if(ehManual(campo)) return;
-      const el = document.getElementById(id);
-      if(el) el.value = porFora[campo];
+      travarCampoLido(document.getElementById(id), porFora[campo]);
     });
     document.getElementById('doc-campos-lidos').classList.remove('hidden');
     const partes = [`<b>✔ ${escapeHtml(data.tipoDocumento||'Documento')} lido.</b> Confira se está tudo certo antes de enviar.`];

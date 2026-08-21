@@ -45,6 +45,7 @@ const ifoodStore = require('./ifoodStore');
 const ifoodSync = require('./ifoodSync');
 const solicitacoes = require('./solicitacoes');
 const formularios = require('./formularios');
+const formulariosUnidades = require('./formulariosUnidades');
 const comprasAcompanhamento = require('./comprasAcompanhamento');
 const chamadosTI = require('./chamadosTI');
 const chamadoRelatorio = require('./chamadoRelatorio');
@@ -3067,8 +3068,45 @@ function formularioComLinks(f) {
   };
 }
 
+// QUEM pode emitir formulário pra qual unidade. Tres coisas somadas, e as
+// tres precisam valer:
+//   1. o cadastro está ativo (unidade que fechou some do seletor, mas os
+//      formulários dela continuam abrindo);
+//   2. a unidade aparece na área "Formulários" do perfil dela (ver
+//      unidades.js) - mesma regra das outras áreas;
+//   3. a pessoa tem essa unidade liberada no acesso dela.
+// O Master atravessa tudo. Cadastro ainda SEM unidade vinculada (codigo
+// null) só aparece pro Master de propósito: sem código não dá pra dizer de
+// quem é, e mostrar pra todo mundo era justamente o defeito - o gerente de
+// uma loja via o formulário de pagamento de outra empresa.
+async function unidadesDeFormularioPara(req) {
+  const cadastros = await formulariosUnidades.listarAtivas();
+  if (req.isMaster) return cadastros;
+  const liberadas = new Set(req.permissions?.unidades || []);
+  const permitidas = [];
+  for (const c of cadastros) {
+    if (!c.codigo || !liberadas.has(c.codigo)) continue;
+    if (!(await unidadesExtras.apareceEm(c.codigo, 'formularios'))) continue;
+    permitidas.push(c);
+  }
+  return permitidas;
+}
+
+// o formulário guarda o RÓTULO da unidade; a permissão fala em CÓDIGO. Os
+// registros novos já gravam os dois (unidadeCodigo), os antigos são
+// resolvidos pelo cadastro na hora de filtrar.
+async function filtrarFormulariosPorUnidade(req, lista) {
+  if (req.isMaster) return lista;
+  const liberadas = new Set(req.permissions?.unidades || []);
+  const porRotulo = await formulariosUnidades.mapaRotuloParaCodigo();
+  return lista.filter((f) => {
+    const codigo = f.unidadeCodigo || porRotulo[f.unidade];
+    return codigo && liberadas.has(codigo);
+  });
+}
+
 app.get('/api/formularios', requireSection('formularios'), async (req, res) => {
-  res.json(auth.filterByUnidade(req, await formularios.listar()));
+  res.json(await filtrarFormulariosPorUnidade(req, await formularios.listar()));
 });
 
 app.get('/api/formularios/tipos', requireSection('formularios'), (req, res) => {
@@ -3079,9 +3117,43 @@ app.get('/api/formularios/tipos', requireSection('formularios'), (req, res) => {
   })));
 });
 
-// cadastro fixo unidade -> razão social + CNPJ (preenchimento sem edição)
-app.get('/api/formularios/unidades', requireSection('formularios'), (req, res) => {
-  res.json(formularios.UNIDADES_FORM);
+// cadastro unidade -> razão social + CNPJ (preenchimento sem edição),
+// já cortado pelo que ESTA pessoa pode emitir
+app.get('/api/formularios/unidades', requireSection('formularios'), async (req, res) => {
+  res.json(await unidadesDeFormularioPara(req));
+});
+
+// ---- cadastro das unidades do formulário (Master) ----
+// Registrado ACIMA de /api/formularios/:id pra não ser engolido pela rota
+// de detalhe, mesmo motivo do /favorecido logo abaixo.
+app.get('/api/formularios/cadastro-unidades', auth.requireMaster, async (req, res) => {
+  res.json(await formulariosUnidades.listar());
+});
+
+app.post('/api/formularios/cadastro-unidades', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await formulariosUnidades.criar(req.body, req.user.email));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/formularios/cadastro-unidades/:id', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await formulariosUnidades.atualizar(req.params.id, req.body, req.user.email));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// sem DELETE de propósito: formulário já emitido tem que continuar abrindo
+// com a razão social e o CNPJ que valiam quando foi assinado
+app.put('/api/formularios/cadastro-unidades/:id/ativo', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await formulariosUnidades.alternarAtivo(req.params.id, req.body.ativo, req.user.email));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // memória de favorecido: digitou um CPF/CNPJ já usado antes -> devolve os
@@ -3093,9 +3165,29 @@ app.get('/api/formularios/favorecido', requireSection('formularios'), async (req
   res.json(achado);
 });
 
+// a trava de verdade é esta, não o seletor: esconder a opção na tela evita
+// o erro honesto, não quem monta a requisição na mão.
+// Tres respostas diferentes de propósito - dizer "você não tem acesso" pra
+// uma unidade que simplesmente não existe manda a pessoa (ou o Master)
+// procurar permissão onde o problema é outro:
+async function recusarUnidadeDeFormulario(req, unidade) {
+  const permitidas = await unidadesDeFormularioPara(req);
+  if (permitidas.some((u) => u.unidade === unidade)) return null;
+  // não está no cadastro: deixa passar pro formularios.criar dizer que a
+  // unidade é inválida (400), que é o que de fato aconteceu
+  const cadastro = await formulariosUnidades.obterPorUnidade(unidade);
+  if (!cadastro) return null;
+  if (cadastro.ativo === false) {
+    return { status: 400, error: `A unidade "${cadastro.unidade}" está desativada no cadastro de formulários. Reative no cadastro (só Master) antes de emitir.` };
+  }
+  return { status: 403, error: 'Você não tem acesso a essa unidade para emitir formulário. Peça ao Master pra liberar essa unidade no seu acesso.' };
+}
+
 app.post('/api/formularios', requireSection('formularios'), upload.array('anexos', 5), async (req, res) => {
   try {
     const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
+    const recusa = await recusarUnidadeDeFormulario(req, payload.unidade);
+    if (recusa) return res.status(recusa.status).json({ error: recusa.error });
     const anexos = [];
     for (const file of req.files || []) {
       const tipoOk = /^image\//.test(file.mimetype || '') || file.mimetype === 'application/pdf';
@@ -3117,6 +3209,8 @@ app.post('/api/formularios', requireSection('formularios'), upload.array('anexos
 // gerar o link pro próprio solicitante preencher
 app.post('/api/formularios/link-preenchimento', requireSection('formularios'), async (req, res) => {
   try {
+    const recusa = await recusarUnidadeDeFormulario(req, req.body.unidade);
+    if (recusa) return res.status(recusa.status).json({ error: recusa.error });
     res.json(await formularios.criarParaPreenchimento({
       tipo: req.body.tipo, unidade: req.body.unidade,
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
