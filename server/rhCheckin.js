@@ -35,6 +35,30 @@ const COLLECTION = db.collection('rhCheckins');
 
 const LIMITE_CHECKINS_SEMANA_EXTRA = 3;
 
+// Jornada aberta demais: passou disso sem check-out, o app passa a cobrar.
+// Vale igual pra extra e pra candidato em teste - os dois usam o mesmo
+// registro de ponto. Não é bloqueio: a pessoa continua podendo fechar
+// normalmente, só para de ficar em silêncio.
+//
+// O primeiro aviso sai na hora em que estoura, seja lá que horas forem - é
+// justamente o esquecimento noturno que precisa aparecer. As REPETIÇÕES é
+// que respeitam silêncio noturno (ver rodarAlertaCheckoutRh em index.js):
+// insistir de madrugada não faz ninguém bater ponto, só queima o alerta.
+const LIMITE_CHECKOUT_HORAS = Number(process.env.RH_LIMITE_CHECKOUT_HORAS) > 0
+  ? Number(process.env.RH_LIMITE_CHECKOUT_HORAS)
+  : 9;
+const REPETE_ALERTA_CHECKOUT_HORAS = 2;
+
+// horas decorridas desde a entrada, com 1 casa - null se o registro não tem
+// entrada (não deveria acontecer, mas não vale quebrar a varredura por isso)
+function horasEmAberto(checkin, agora = Date.now()) {
+  const inicio = checkin && checkin.entrada && checkin.entrada.horario;
+  if (!inicio) return null;
+  const ms = agora - new Date(inicio).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  return Math.round((ms / 3600000) * 10) / 10;
+}
+
 function hojeBrasilia() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 }
@@ -213,6 +237,39 @@ async function listAbertos(unidades) {
   return todos.filter((c) => alvo.has(c.unidade));
 }
 
+// Quem já passou do limite de jornada sem bater o check-out. Devolve só os
+// que estão VENCIDOS PRA AVISAR: o primeiro aviso quando estoura o limite, e
+// depois um a cada REPETE_ALERTA_CHECKOUT_HORAS enquanto continuar aberto -
+// avisar uma vez só e calar não resolve, quem esqueceu continua esquecido.
+async function verificarCheckoutsAtrasados() {
+  const agora = Date.now();
+  return (await listAll())
+    .filter((c) => c.status === 'aberto')
+    .map((c) => ({ registro: c, horas: horasEmAberto(c, agora) }))
+    .filter(({ registro, horas }) => {
+      if (horas === null || horas < LIMITE_CHECKOUT_HORAS) return false;
+      const ultimo = registro.alertaCheckoutEm ? new Date(registro.alertaCheckoutEm).getTime() : null;
+      if (!ultimo) return true;
+      return agora - ultimo >= REPETE_ALERTA_CHECKOUT_HORAS * 3600000;
+    })
+    .map(({ registro, horas }) => ({
+      ...registro,
+      horasEmAberto: horas,
+      // primeiro aviso desse check-in? o job usa isso pra decidir se pode
+      // furar o silêncio noturno
+      primeiroAviso: !registro.alertaCheckoutEm,
+    }));
+}
+
+// grava que o aviso saiu - sem isso a varredura repetiria o mesmo alerta a
+// cada rodada. Não invalida o cache de propósito: é campo de controle de
+// alerta, ninguém lê ele em tela, e invalidar forçaria uma releitura da
+// coleção inteira a cada aviso.
+async function marcarAlertaCheckout(id) {
+  const agora = new Date().toISOString();
+  await COLLECTION.doc(id).update({ alertaCheckoutEm: agora, atualizadoEm: agora });
+}
+
 // pedidos de check-in aguardando aprovacao do RH/Admin/Master (extra que
 // passou do limite semanal, candidato com teste vencido sem decisao)
 async function listPendentesAprovacao(unidades) {
@@ -343,7 +400,8 @@ async function contagemPorFuncionario(unidades) {
 }
 
 module.exports = {
-  LIMITE_CHECKINS_SEMANA_EXTRA,
+  LIMITE_CHECKINS_SEMANA_EXTRA, LIMITE_CHECKOUT_HORAS,
+  horasEmAberto, verificarCheckoutsAtrasados, marcarAlertaCheckout,
   registrarEntrada, registrarSaida, buscarAbertoDoFuncionario, listPorFuncionario,
   listByUnidadesData, listAbertos, listPendentesAprovacao, resumoSemana, contagemPorFuncionario,
   aprovarPendencia, recusarPendencia, editarHorarios, encerrarManual, remover, getOne, hojeBrasilia,

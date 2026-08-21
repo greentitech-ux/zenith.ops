@@ -1412,6 +1412,17 @@ function renderAtestados(){
 
 function fmtHora(iso){ if(!iso) return ''; return new Date(iso).toLocaleTimeString('pt-BR', { timeZone: FUSO_BR, hour:'2-digit', minute:'2-digit' }); }
 
+async // mesma regra do servidor (LIMITE_CHECKOUT_HORAS em rhCheckin.js): quem
+// passou disso sem bater o check-out entra em cobrança. Aqui é só exibição -
+// quem dispara o alerta de verdade é o job do servidor.
+const LIMITE_CHECKOUT_HORAS = 9;
+function horasAberto(c){
+  const inicio = c && c.entrada && c.entrada.horario;
+  if(!inicio) return null;
+  const ms = Date.now() - new Date(inicio).getTime();
+  return (Number.isFinite(ms) && ms >= 0) ? ms / 3600000 : null;
+}
+
 async function carregarCheckins(){
   const [abertos, historico, resumo, contagem] = await Promise.all([
     fetch('/api/rh/checkins/abertos').then(r=>r.ok?r.json():[]).catch(()=>[]),
@@ -1450,12 +1461,20 @@ async function carregarCheckins(){
   const linkLocalizacao = (loc, rotulo) => (IS_MASTER && loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng))
     ? `<a class="link-btn" href="https://www.google.com/maps?q=${loc.lat},${loc.lng}" target="_blank" rel="noopener">📍 local ${rotulo}</a>` : '';
 
-  elAbertos.innerHTML = abertosFiltrados.length ? abertosFiltrados.map(c=>`
-    <div class="card">
-      <div class="linha1"><span>${escapeHtml(c.funcionarioNome)}</span><span class="badge ok">na loja</span></div>
-      <div class="sub">${escapeHtml(UNIDADES_NOMES[c.unidade]||c.unidade)} · entrou às ${fmtHora(c.entrada.horario)}</div>
+  // ordena pelo mais antigo em aberto: quem está esquecido há mais tempo é o
+  // que precisa de ação, então sobe pro topo da lista em vez de se perder
+  const abertosOrdenados = [...abertosFiltrados].sort((a,b)=>String(a.entrada?.horario||'').localeCompare(String(b.entrada?.horario||'')));
+  elAbertos.innerHTML = abertosOrdenados.length ? abertosOrdenados.map(c=>{
+    const h = horasAberto(c);
+    const atrasado = h !== null && h >= LIMITE_CHECKOUT_HORAS;
+    return `<div class="card">
+      <div class="linha1"><span>${escapeHtml(c.funcionarioNome)}</span>${atrasado
+        ? `<span class="badge warn">⏰ ${Math.floor(h)}h sem check-out</span>`
+        : '<span class="badge ok">na loja</span>'}</div>
+      <div class="sub">${escapeHtml(UNIDADES_NOMES[c.unidade]||c.unidade)} · entrou às ${fmtHora(c.entrada.horario)}${h!==null?` · ${h.toFixed(1).replace('.',',')}h em aberto`:''}</div>
       <div class="acoes">${linkLocalizacao(c.entrada?.localizacao, 'entrada')}${acaoEncerrar(c)}${acoesMaster(c)}</div>
-    </div>`).join('') : '<div class="empty">ninguém na loja agora.</div>';
+    </div>`;
+  }).join('') : '<div class="empty">ninguém na loja agora.</div>';
 
   const elHist = document.getElementById('lista-checkins-historico');
   // so 'fechado' (entrada+saida no mesmo card) - quem ainda esta 'aberto' ja

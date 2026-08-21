@@ -1228,7 +1228,15 @@ app.get('/api/rh/publico/:token', async (req, res) => {
   const funcionario = await rh.buscarPorToken(req.params.token);
   if (!funcionario) return res.status(404).json({ error: 'Link inválido.' });
   const aberto = await rhCheckin.buscarAbertoDoFuncionario(funcionario.id);
-  res.json({ ...funcionarioPublico(funcionario), checkinAberto: aberto ? { id: aberto.id, entrada: aberto.entrada.horario } : null });
+  res.json({
+    ...funcionarioPublico(funcionario),
+    // horas em aberto e o limite vão junto pra tela poder cobrar o check-out
+    // sem ter que saber a regra: quem define o limite é o servidor
+    limiteCheckoutHoras: rhCheckin.LIMITE_CHECKOUT_HORAS,
+    checkinAberto: aberto
+      ? { id: aberto.id, entrada: aberto.entrada.horario, horasEmAberto: rhCheckin.horasEmAberto(aberto) }
+      : null,
+  });
 });
 
 app.post('/api/rh/publico/:token/checkin', upload.single('foto'), async (req, res) => {
@@ -10892,6 +10900,31 @@ function aquecerBoot(promessa, ms) {
     rodarAlertaTesteRh().catch((err) => console.error('Erro no alerta de teste do RH:', err.message));
     setInterval(() => {
       rodarAlertaTesteRh().catch((err) => console.error('Erro no alerta de teste do RH:', err.message));
+    }, 60 * 60 * 1000);
+
+    // RH: ponto aberto além da jornada (ver LIMITE_CHECKOUT_HORAS em
+    // rhCheckin.js). Roda de hora em hora; quem decide se cada registro está
+    // vencido é a própria varredura, que já respeita o intervalo entre
+    // repetições.
+    //
+    // O PRIMEIRO aviso de cada check-in sai a qualquer hora - esquecer o
+    // check-out às 23h é exatamente o caso que precisa aparecer. As
+    // repetições ficam em silêncio das 23h às 6h: insistir de madrugada não
+    // faz ninguém bater ponto, só ensina a ignorar o alerta.
+    const rodarAlertaCheckoutRh = async () => {
+      const h = horaBrasilia();
+      const noturno = h >= 23 || h < 6;
+      const atrasados = await rhCheckin.verificarCheckoutsAtrasados();
+      for (const c of atrasados) {
+        if (noturno && !c.primeiroAviso) continue;
+        push.notifyRhCheckoutAtrasado(c, c.horasEmAberto);
+        broadcast('rh-checkin-atualizado', { id: c.id, unidade: c.unidade }, 'rh');
+        await rhCheckin.marcarAlertaCheckout(c.id);
+      }
+    };
+    rodarAlertaCheckoutRh().catch((err) => console.error('Erro no alerta de check-out do RH:', err.message));
+    setInterval(() => {
+      rodarAlertaCheckoutRh().catch((err) => console.error('Erro no alerta de check-out do RH:', err.message));
     }, 60 * 60 * 1000);
 
     // RH: experiencia formal (CLT, 30+60 dias) perto do prazo - avisos

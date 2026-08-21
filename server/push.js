@@ -582,6 +582,36 @@ const MOTIVO_PENDENCIA_LABEL = {
 
 // extra alem do limite semanal OU candidato com teste vencido tentou fazer
 // check-in - fica pendente ate alguem aprovar (ver rhCheckin.js)
+// RH: alguém está com o ponto aberto há mais tempo que a jornada esperada
+// (ver LIMITE_CHECKOUT_HORAS em rhCheckin.js) e não bateu o check-out. Mesmo
+// público do alerta de teste: Master, Gerente/Ass.Gerente DA UNIDADE e o
+// time de RH. Não é crítico: ninguém está em risco, é cobrança de registro -
+// marcar como crítico aqui gastaria a atenção que os alertas críticos têm.
+async function notifyRhCheckoutAtrasado(checkin, horas) {
+  const h = Math.floor(horas);
+  const dados = {
+    title: '⏰ RH · check-out não registrado',
+    body: `${checkin.funcionarioNome} (${checkin.unidade}) está com o ponto aberto há ${h}h - precisa bater o check-out.`,
+    tag: `rh-checkout-${checkin.id}`,
+    critical: false,
+    url: '/rh.html',
+  };
+  await alertasCentral.registrar({ tipo: 'rh-checkout-atrasado', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberAlertaRh(sub, checkin.unidade)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      }
+    }
+  }
+}
+
 async function notifyRhAprovacaoPendente(funcionarioNome, unidade, motivoPendencia) {
   await notifyAprovacaoRh(
     '🧑‍💼 RH · check-in aguardando aprovação',
@@ -956,7 +986,7 @@ module.exports = {
   addSubscription, migrarSubscricao, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
   notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
-  notifyRhCadastroPendente, notifyRhCadastroReprovado,
+  notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
   notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
   notifyAbastecimentoDivergencia, PUBLIC_KEY,

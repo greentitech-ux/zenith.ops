@@ -35,7 +35,17 @@
   .btn-acao{width:100%;padding:20px;border-radius:12px;border:none;font-size:17px;font-weight:700;cursor:pointer;font-family:var(--sans);}
   .btn-acao.entrada{background:var(--accent);color:#06202b;}
   .btn-acao.saida{background:var(--warn);color:#241a00;}
+  .badge.atrasado{background:rgba(255,138,0,.18);color:var(--warn);border:1px solid var(--warn);}
   .btn-acao:disabled{opacity:.5;cursor:default;}
+  /* cobrança do check-out esquecido: some sozinha quando a pessoa fecha o
+     ponto. Pulsa devagar (2s) de propósito - o objetivo é ser impossível de
+     não ver, não fazer a tela piscar na cara de quem está trabalhando. */
+  .aviso-checkout{background:rgba(255,138,0,.14);border:1px solid var(--warn);color:var(--warn);
+    border-radius:12px;padding:14px 16px;margin-bottom:14px;font-size:14px;line-height:1.5;
+    animation:pulsaAviso 2s ease-in-out infinite;}
+  .aviso-checkout b{display:block;font-size:15px;margin-bottom:4px;}
+  @keyframes pulsaAviso{0%,100%{opacity:1;}50%{opacity:.72;}}
+  @media (prefers-reduced-motion: reduce){ .aviso-checkout{animation:none;} }
   .sucesso{text-align:center;padding:20px 4px;}
   .sucesso .icone{font-size:44px;margin-bottom:8px;}
   .sucesso h2{font-size:18px;margin:0 0 4px;}
@@ -76,6 +86,7 @@
     </div>
     <span class="badge" id="ponto-badge"></span>
   </div>
+  <div class="aviso-checkout hidden" id="aviso-checkout"></div>
   <button type="button" class="btn-acao" id="btn-ponto" onclick="tirarFotoEEnviar()"></button>
   <div class="msg err hidden" id="ponto-msg"></div>
 </div>
@@ -100,17 +111,42 @@ function fmtHora(iso){ if(!iso) return ''; return new Date(iso).toLocaleTimeStri
 const TOKEN = new URLSearchParams(location.search).get('token');
 let FUNCIONARIO = null;
 let CHECKIN_ABERTO = null;
+// o servidor manda o limite junto com o estado (ver /api/rh/publico/:token) -
+// o 9 aqui é só o que vale se a resposta vier sem ele; a regra é do servidor
+let LIMITE_CHECKOUT_HORAS = 9;
+
+function horasAbertoAgora(){
+  if(!CHECKIN_ABERTO || !CHECKIN_ABERTO.entrada) return null;
+  const ms = Date.now() - new Date(CHECKIN_ABERTO.entrada).getTime();
+  if(!Number.isFinite(ms) || ms < 0) return null;
+  return ms / 3600000;
+}
 
 function renderPonto(){
   document.getElementById('ponto-nome').textContent = FUNCIONARIO.nome;
   document.getElementById('ponto-sub').textContent = FUNCIONARIO.unidade || '';
   const badge = document.getElementById('ponto-badge');
   const btn = document.getElementById('btn-ponto');
+  const aviso = document.getElementById('aviso-checkout');
+  aviso.classList.add('hidden');
   if(CHECKIN_ABERTO){
-    badge.className = 'badge aberto';
-    badge.textContent = `na loja desde ${fmtHora(CHECKIN_ABERTO.entrada)}`;
+    // as horas são recalculadas na tela (e não só as que vieram do servidor)
+    // pra continuar contando com a página aberta - senão um celular deixado
+    // ligado mostraria pra sempre o valor do momento em que carregou
+    const horas = horasAbertoAgora();
+    const estourou = horas !== null && horas >= LIMITE_CHECKOUT_HORAS;
+    badge.className = estourou ? 'badge atrasado' : 'badge aberto';
+    badge.textContent = estourou
+      ? `há ${Math.floor(horas)}h sem check-out`
+      : `na loja desde ${fmtHora(CHECKIN_ABERTO.entrada)}`;
     btn.textContent = '🚪 Fazer check-out';
     btn.className = 'btn-acao saida';
+    if(estourou){
+      aviso.innerHTML = `<b>⏰ Faça seu check-out</b>Você entrou às ${fmtHora(CHECKIN_ABERTO.entrada)} e já está `
+        + `há <b style="display:inline">${Math.floor(horas)}h</b> com o ponto aberto. `
+        + `Toque no botão abaixo pra registrar a saída - precisa da foto e da localização, igual na entrada.`;
+      aviso.classList.remove('hidden');
+    }
   }else{
     badge.className = 'badge fechado';
     badge.textContent = 'fora';
@@ -188,6 +224,7 @@ async function carregarEstado(){
   const data = await resp.json();
   FUNCIONARIO = data;
   CHECKIN_ABERTO = data.checkinAberto || null;
+  if(Number(data.limiteCheckoutHoras) > 0) LIMITE_CHECKOUT_HORAS = Number(data.limiteCheckoutHoras);
   return true;
 }
 
@@ -203,6 +240,12 @@ async function boot(){
   }
   document.getElementById('root').classList.remove('hidden');
   renderPonto();
+  // redesenha de minuto em minuto: quem deixa a tela aberta atravessa o
+  // limite SEM recarregar nada, e o aviso tem que aparecer sozinho na hora
+  // em que estoura - não só no próximo acesso
+  setInterval(() => { if(!document.hidden && CHECKIN_ABERTO) renderPonto(); }, 60 * 1000);
+  // voltar pro app depois de um tempo em segundo plano também recalcula
+  document.addEventListener('visibilitychange', () => { if(!document.hidden && CHECKIN_ABERTO) renderPonto(); });
 }
 
 boot();
