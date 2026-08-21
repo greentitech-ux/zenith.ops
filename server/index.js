@@ -10770,8 +10770,18 @@ function aquecerBoot(promessa, ms) {
         // (ver quedaDeCelular em lojaStatus.js) - o NOC mostra a transição,
         // mas ninguém é acordado com push por causa disso
         if (t.celular) continue;
-        if (t.tipo === 'offline') push.notifyLojaOffline(nome, t.codigo, t.nome, t.posto).catch((err) => console.error('Erro no push de loja offline:', err.message));
-        else push.notifyLojaVoltou(nome, t.codigo, t.nome, t.posto).catch((err) => console.error('Erro no push de loja online:', err.message));
+        // reiniciada PELO NOC e não voltou na janela: incidente de verdade,
+        // com causa provável conhecida - não passa pelo caminho de "caiu"
+        if (t.tipo === 'reinicio-nao-voltou') {
+          push.notifyReinicioNaoVoltou(nome, t.codigo, t.nome, t.posto, t.minutos)
+            .catch((err) => console.error('Erro no push de reinício não voltou:', err.message));
+          continue;
+        }
+        // t.reiniciando / t.voltouDeReinicio: o NOC sabe que foi ele quem
+        // mandou reiniciar, então o alerta conta ISSO em vez de mandar
+        // verificar uma internet que não tem problema nenhum
+        if (t.tipo === 'offline') push.notifyLojaOffline(nome, t.codigo, t.nome, t.posto, t.reiniciando).catch((err) => console.error('Erro no push de loja offline:', err.message));
+        else push.notifyLojaVoltou(nome, t.codigo, t.nome, t.posto, t.voltouDeReinicio).catch((err) => console.error('Erro no push de loja online:', err.message));
       }
     };
     setInterval(() => {

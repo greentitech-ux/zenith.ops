@@ -970,6 +970,25 @@ const COMANDO_ABORTAR_REINICIO = [
 // mecânica do enfileirarComandoEmTodos - e em paralelo pelo mesmo motivo:
 // em série, algumas dezenas de máquinas estouravam o tempo do navegador e
 // metade da frota ficava sem o comando.
+// Quanto tempo uma máquina pode ficar fora depois de NÓS mandarmos
+// reiniciar antes de virar problema de verdade. 2 min de aviso na tela +
+// desligar + subir o Windows + o agente subir e bater: 8 min é folgado pra
+// uma máquina saudável e curto o bastante pra não esconder uma que não
+// voltou.
+const JANELA_REINICIO_MS = 8 * 60 * 1000;
+
+// O NOC sabe quando ele mesmo mandou reiniciar - e usar isso muda o que o
+// alerta diz. Antes, a máquina sumia e o push mandava "verifique a
+// internet/computador da loja" mesmo tendo sido o próprio NOC quem pediu o
+// reinício: afirmava como causa justamente o que a gente sabia ser falso.
+async function marcarReinicioComandado(codigo, posto) {
+  await COLLECTION.doc(docIdFor(codigo, posto)).set({
+    reinicioComandadoEm: Date.now(), reinicioNaoVoltouAvisado: false,
+  }, { merge: true });
+  invalidarEspelho();
+  cache.invalidar();
+}
+
 async function enfileirarComandoEmAlvos(alvos, comando, opcoes) {
   const docs = await listUncached();
   const querido = new Set((alvos || []).map((a) => `${a.codigo}|${a.posto}`));
@@ -978,6 +997,7 @@ async function enfileirarComandoEmAlvos(alvos, comando, opcoes) {
     const base = { codigo: doc.codigo, posto: doc.posto, nome: doc.nome };
     try {
       await enfileirarComando(doc.codigo, doc.posto, comando, opcoes);
+      if ((opcoes || {}).origem === 'manutencao-reiniciar') await marcarReinicioComandado(doc.codigo, doc.posto);
       return { ...base, ok: true };
     } catch (err) {
       const jaTinha = /comando pendente/i.test(err.message || '');
@@ -1271,6 +1291,12 @@ async function varrerAlertas() {
       // QUANDO CAIU (pedido do Master: "qual era o IP quando perdeu conexao")
       // - se a maquina voltar com IP novo, o evento preserva o antigo mesmo
       // que o campo vivo do doc seja sobrescrito
+      // foi o NOC que mandou reiniciar há pouco? Então isto NÃO é "loja sem
+      // conexão" - é a máquina cumprindo o que a gente pediu. Dizer
+      // "verifique a internet" aqui seria afirmar como causa justamente o
+      // que o sistema sabe ser falso.
+      const reiniciandoPorNos = !!doc.reinicioComandadoEm
+        && (Date.now() - doc.reinicioComandadoEm) < JANELA_REINICIO_MS;
       const evento = {
         tipo: 'offline', em: doc.ultimoHeartbeatEm,
         ...(doc.ip ? { ip: doc.ip } : {}), ...(doc.ipLocal ? { ipLocal: doc.ipLocal } : {}),
@@ -1278,6 +1304,7 @@ async function varrerAlertas() {
         // separa "arrancaram o cabo" de "o provedor caiu" na hora de
         // olhar o registro depois
         ...(doc.link ? { link: doc.link.tipo } : {}),
+        ...(reiniciandoPorNos ? { motivo: 'reinicio-comandado' } : {}),
       };
       await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({
         avisadoOffline: true,
@@ -1289,7 +1316,10 @@ async function varrerAlertas() {
         offlineDesde: doc.ultimoHeartbeatEm,
         eventos: [...(doc.eventos || []), evento].slice(-EVENTOS_MAX),
       });
-      transicoes.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'offline', celular: quedaDeCelular(doc) });
+      transicoes.push({
+        codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'offline',
+        celular: quedaDeCelular(doc), reiniciando: reiniciandoPorNos,
+      });
     } else if (online && doc.avisadoOffline) {
       // no retorno o doc ja tem o IP NOVO (o heartbeat que provou que voltou
       // tambem gravou o ip) - junto com o retrato do evento 'offline', o
@@ -1298,11 +1328,30 @@ async function varrerAlertas() {
         tipo: 'online', em: Date.now(), duracaoMs: doc.offlineDesde ? (Date.now() - doc.offlineDesde) : null,
         ...(doc.ip ? { ip: doc.ip } : {}), ...(doc.ipLocal ? { ipLocal: doc.ipLocal } : {}),
       };
+      // voltou: a janela de reinício comandado se encerra aqui, tenha ela
+      // sido usada ou não. Sem isso, uma queda de verdade horas depois
+      // ainda seria contada como "estava reiniciando".
+      const voltouDeReinicio = !!doc.reinicioComandadoEm;
       await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({
         avisadoOffline: false, offlineDesde: null,
+        reinicioComandadoEm: null, reinicioNaoVoltouAvisado: false,
         eventos: [...(doc.eventos || []), evento].slice(-EVENTOS_MAX),
       });
-      transicoes.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'online', celular: quedaDeCelular(doc) });
+      transicoes.push({
+        codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'online',
+        celular: quedaDeCelular(doc), voltouDeReinicio,
+      });
+    } else if (!online && doc.reinicioComandadoEm && !doc.reinicioNaoVoltouAvisado
+        && (Date.now() - doc.reinicioComandadoEm) >= JANELA_REINICIO_MS) {
+      // mandamos reiniciar e ela não voltou na janela. ISSO é problema - e
+      // é um alerta diferente do "caiu", porque aqui a gente sabe a causa
+      // provável (o reinício não completou: travou no boot, desligou de
+      // vez, ou perdeu a rede ao subir).
+      await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({ reinicioNaoVoltouAvisado: true });
+      transicoes.push({
+        codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'reinicio-nao-voltou',
+        minutos: Math.round((Date.now() - doc.reinicioComandadoEm) / 60000),
+      });
     }
   }
   if (transicoes.length) cache.invalidar();
@@ -1373,6 +1422,13 @@ module.exports = {
   heartbeat, listar, listarResumo, detalhar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR, ehCelular,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
+  // SÓ pra testeRotas: DESCARTA o espelho em vez de só vencer a validade.
+  // invalidarEspelho() de propósito guarda o mapa (o comentário lá explica:
+  // é o que impede uma edição de nome derrubar um heartbeat ainda não
+  // gravado). O teste precisa do contrário - escrever direto no Firestore
+  // falso e ser levado a sério, inclusive pra ENVELHECER a última batida,
+  // que é como se simula uma máquina que saiu do ar.
+  descartarEspelhoTeste: () => { espelho = null; espelhoEm = 0; cache.invalidar(); },
   enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos,
   COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO,
   ESTADOS, estadoDe, motivosDeDegradacao,

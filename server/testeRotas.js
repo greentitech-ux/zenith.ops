@@ -99,6 +99,12 @@ process.env.DASHBOARD_USER = 'x';
 process.env.DASHBOARD_PASS = 'x';
 process.env.MASTER_EMAIL = 'master@teste.local';
 process.env.MASTER_PASSWORD = 'SenhaDeTeste!2026';
+// A varredura tem 2min de carência depois do boot do processo (ver
+// CARENCIA_POS_BOOT_MS em lojaStatus.js): logo após subir, ela não anuncia
+// queda de máquina cuja última batida é anterior ao boot, pra não inventar
+// alarme com timestamp velho vindo do banco. O teste inteiro roda dentro
+// desses 2min, então sem zerar isso nenhuma queda simulada seria avaliada.
+process.env.LOJA_STATUS_CARENCIA_BOOT_MS = '0';
 
 // Storage de mentira EM MEMÓRIA. Antes ele só estourava, o que bastava
 // enquanto nenhum teste precisava LER um anexo de volta - o Ass. Boleto
@@ -3048,6 +3054,81 @@ setTimeout(async () => {
   } catch (e) { okLogos = false; console.log('  erro: ' + e.message); }
   if (!okLogos) ruins += 1;
   console.log(`${okLogos ? '✓' : '✗'} Login: Master sobe/remove as logos das empresas do rodapé (sem deploy, sem vazar caminho de arquivo)`);
+
+  // ------------------------------------------------------------------
+  // A máquina que o NOC mandou reiniciar sai do ar - e o alerta dizia
+  // "Loja sem conexão - verifique a internet/computador da loja". Ou seja:
+  // afirmava como causa exatamente aquilo que o sistema sabia ser falso, e
+  // mandava alguém procurar um problema que não existe. Aqui fica provado
+  // que o NOC conta a verdade: reiniciando é reiniciando; e se NÃO voltar
+  // na janela, aí sim vira incidente - com a causa provável já conhecida.
+  let okReinicioAlerta = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const UNI = 'NOCREBOOT';
+    await ls.cadastrarComputador(UNI, 'PDV-REBOOT', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-REBOOT').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    const BOOT = Date.now() - 3600 * 1000;
+    await ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0', bootEm: BOOT }, tk);
+
+    // o Master manda reiniciar
+    const mandou = await postarJson('/api/loja-status/manutencao/reiniciar',
+      { alvos: [{ codigo: UNI, posto }], password: process.env.MASTER_PASSWORD }, cab);
+
+    // a máquina some do ar (simula o reboot: última batida fica velha)
+    const idDoc = `lojaStatus/${UNI}__${posto}`;
+    const antes = DOCS.get(idDoc);
+    DOCS.set(idDoc, { ...antes, ultimoHeartbeatEm: Date.now() - 5 * 60 * 1000 });
+    ls.descartarEspelhoTeste();
+    const quedaReinicio = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'offline');
+
+    // ela volta: o reinício se encerra
+    await ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0', bootEm: Date.now() }, tk);
+    const volta = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'online');
+    const depoisDeVoltar = await ls.detalhar(UNI, posto);
+
+    // agora um caso em que ela NÃO volta: reinício comandado há muito tempo
+    const doc2 = DOCS.get(idDoc);
+    DOCS.set(idDoc, {
+      ...doc2,
+      ultimoHeartbeatEm: Date.now() - 20 * 60 * 1000,
+      reinicioComandadoEm: Date.now() - 15 * 60 * 1000,
+      reinicioNaoVoltouAvisado: false, avisadoOffline: true,
+    });
+    ls.descartarEspelhoTeste();
+    const naoVoltou = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'reinicio-nao-voltou');
+
+    // e uma queda COMUM (sem reinício comandado) continua sendo queda
+    const doc3 = DOCS.get(idDoc);
+    DOCS.set(idDoc, {
+      ...doc3, ultimoHeartbeatEm: Date.now() - 5 * 60 * 1000,
+      reinicioComandadoEm: null, avisadoOffline: false,
+    });
+    ls.descartarEspelhoTeste();
+    const quedaComum = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'offline');
+
+    const conferencias = {
+      'o comando de reinício sai': mandou.status === 200,
+      'sumir logo após o reinício NÃO é tratado como queda de internet':
+        !!quedaReinicio && quedaReinicio.reiniciando === true,
+      'o registro guarda que a saída foi reinício comandado':
+        (depoisDeVoltar.eventos || []).some((e) => e.tipo === 'offline' && e.motivo === 'reinicio-comandado'),
+      'quando volta, o alerta diz que voltou DO REINÍCIO': !!volta && volta.voltouDeReinicio === true,
+      'voltar limpa a marca (queda futura não é mais "reiniciando")':
+        !depoisDeVoltar.reinicioComandadoEm,
+      'reiniciada e NÃO voltou na janela vira incidente próprio':
+        !!naoVoltou && naoVoltou.minutos >= 8,
+      'queda comum continua sendo queda comum':
+        !!quedaComum && !quedaComum.reiniciando,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okReinicioAlerta = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okReinicioAlerta = false; console.log('  erro: ' + e.message); }
+  if (!okReinicioAlerta) ruins += 1;
+  console.log(`${okReinicioAlerta ? '✓' : '✗'} NOC: máquina que NÓS mandamos reiniciar aparece como "reiniciando", não como "sem conexão"`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

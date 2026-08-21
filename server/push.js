@@ -810,16 +810,32 @@ async function notifyReinicioPendente(unidadeNome, codigo, computadorNome, posto
   }
 }
 
-async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto) {
+// `reiniciando` = foi o PRÓPRIO NOC quem mandou reiniciar essa máquina há
+// pouco (ver JANELA_REINICIO_MS em lojaStatus.js). Nesse caso ela sumir do
+// ar é o esperado, não um incidente - e mandar "verifique a internet"
+// afirmaria como causa exatamente o que o sistema sabe ser falso, além de
+// fazer alguém sair atrás de um problema que não existe. Some com o alarme
+// crítico também: ninguém precisa ser acordado por um reinício que nós
+// mesmos agendamos.
+async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto, reiniciando) {
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
-  const dados = {
+  const dados = reiniciando ? {
+    title: '🔄 Reiniciando (manutenção)',
+    body: `${prefixo}${unidadeNome || codigo} saiu do ar pra reiniciar - foi o NOC que mandou. Volta em ~2 min; se não voltar, você é avisado.`,
+    tag: `loja-status-${codigo}-${posto || 'principal'}`,
+    critical: false,
+    url: '/loja-status.html',
+  } : {
     title: '🔴 Loja sem conexão',
     body: `${prefixo}${unidadeNome || codigo} parou de responder - verifique a internet/computador da loja.`,
     tag: `loja-status-${codigo}-${posto || 'principal'}`,
     critical: true,
     url: '/loja-status.html',
   };
-  await alertasCentral.registrar({ tipo: 'noc-offline', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
+  await alertasCentral.registrar({
+    tipo: reiniciando ? 'noc-reiniciando' : 'noc-offline',
+    titulo: dados.title, resumo: dados.body, url: dados.url, critico: !reiniciando,
+  });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const payload = JSON.stringify(dados);
   const subs = await loadSubs();
@@ -839,11 +855,40 @@ async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto) {
 
 // computador da loja voltou a responder depois de ter caido - aviso
 // tranquilo (sem alarme), mesmo publico do alerta de queda
-async function notifyLojaVoltou(unidadeNome, codigo, computadorNome, posto) {
+// mandamos reiniciar e a máquina NÃO voltou na janela. Isso sim é
+// incidente, e com uma causa provável já conhecida - o que é bem mais útil
+// pra quem vai atender do que um "sem conexão" genérico.
+async function notifyReinicioNaoVoltou(unidadeNome, codigo, computadorNome, posto, minutos) {
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const dados = {
-    title: '🟢 Loja reconectou',
-    body: `${prefixo}${unidadeNome || codigo} voltou a responder.`,
+    title: '⚠️ Não voltou do reinício',
+    body: `${prefixo}${unidadeNome || codigo}: reiniciada pelo NOC há ${minutos} min e ainda não subiu. Pode ter travado no boot, desligado de vez ou perdido a rede ao subir.`,
+    tag: `noc-reinicio-falhou-${codigo}-${posto || 'principal'}`,
+    critical: true,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-reinicio-falhou', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload, { urgency: 'high' });
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+      else console.error('Erro ao enviar push (reinício não voltou):', err.message);
+    }
+  }
+}
+
+async function notifyLojaVoltou(unidadeNome, codigo, computadorNome, posto, voltouDeReinicio) {
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const dados = {
+    title: voltouDeReinicio ? '🟢 Voltou do reinício' : '🟢 Loja reconectou',
+    body: voltouDeReinicio
+      ? `${prefixo}${unidadeNome || codigo} reiniciou e já está no ar de novo.`
+      : `${prefixo}${unidadeNome || codigo} voltou a responder.`,
     tag: `loja-status-${codigo}-${posto || 'principal'}`,
     url: '/loja-status.html',
   };
@@ -912,7 +957,7 @@ module.exports = {
   notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado,
-  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado,
+  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
   notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
   notifyAbastecimentoDivergencia, PUBLIC_KEY,
 };
