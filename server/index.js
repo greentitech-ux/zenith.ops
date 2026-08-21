@@ -809,6 +809,25 @@ app.get('/api/formularios-publico/:id', async (req, res) => {
   res.json(vista);
 });
 
+// PREENCHIMENTO POR LINK: o solicitante abre por um token e preenche os
+// dados dele. A unidade já está travada no registro - o link não deixa
+// escolher loja, só preencher o que falta.
+app.get('/api/formularios-publico/preencher/:token', async (req, res) => {
+  const vista = await formularios.vistaPreenchimento(req.params.token);
+  if (!vista) return res.status(404).json({ error: 'Link de preenchimento inválido.' });
+  res.json(vista);
+});
+
+app.post('/api/formularios-publico/preencher/:token', async (req, res) => {
+  try {
+    const r = await formularios.salvarPreenchimento(req.params.token, { campos: req.body.campos, linhas: req.body.linhas });
+    broadcast('formulario-preenchido', { id: r.id }, 'solicitacoes');
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/formularios-publico/:id/assinar', async (req, res) => {
   try {
     const resultado = await formularios.assinar(req.params.id, req.body.token, { nome: req.body.nome, imagem: req.body.imagem });
@@ -2969,6 +2988,19 @@ app.post('/api/formularios', requireSection('formularios'), upload.array('anexos
       criadoPorId: req.user.id, criadoPorEmail: req.user.email,
     });
     res.json(formularioComLinks(criado));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// a unidade escolhe: preencher agora (POST /api/formularios, acima) ou
+// gerar o link pro próprio solicitante preencher
+app.post('/api/formularios/link-preenchimento', requireSection('formularios'), async (req, res) => {
+  try {
+    res.json(await formularios.criarParaPreenchimento({
+      tipo: req.body.tipo, unidade: req.body.unidade,
+      criadoPorId: req.user.id, criadoPorEmail: req.user.email,
+    }));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

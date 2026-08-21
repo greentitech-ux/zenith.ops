@@ -1515,6 +1515,9 @@ setTimeout(async () => {
   const PAGINAS_PUBLICAS = [
     'atendimento.html', 'decidir.html', 'estorno-cliente.html', 'rh-cadastro.html',
     'rh-colaborador.html', 'solicitacao-publica.html', 'ticket-publico.html', 'assinar.html',
+    // preencher.html: o solicitante preenche por um link, sem login - o
+    // token de preenchimento na URL É a credencial (mesmo caso do assinar)
+    'preencher.html',
   ];
   const dirPublico = require('path').join(__dirname, 'public');
   const semToken = require('fs').readdirSync(dirPublico)
@@ -2501,6 +2504,59 @@ setTimeout(async () => {
   } catch (e) { okTicketFormulario = false; console.log('  erro: ' + e.message); }
   if (!okTicketFormulario) ruins += 1;
   console.log(`${okTicketFormulario ? '✓' : '✗'} Formulários: todo formulário nasce com Ticket # da MESMA sequência da Central (vira solicitação de Pagamento sem trocar de número)`);
+
+  // ------------------------------------------------------------------
+  // Link de preenchimento: pedido do Master - duas portas, ou a unidade
+  // preenche tudo, ou manda o link pro próprio solicitante preencher os
+  // dados dele (no Reembolso, quem sabe CPF/banco/agência/conta/PIX é ele).
+  let okLinkPreencher = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const criado = await postarJson('/api/formularios/link-preenchimento', {
+      tipo: 'reembolso', unidade: 'São Braz Ilha do Leite',
+    }, cab);
+    const d = criado.status === 200 ? JSON.parse(criado.corpo) : {};
+    const tk = d.tokenPreenchimento;
+
+    // o link é PÚBLICO (não exige login nem Basic Auth) e já traz a unidade
+    const vista = await pedir(`/api/formularios-publico/preencher/${tk}`);
+    const dv = vista.status === 200 ? JSON.parse(vista.corpo) : {};
+    const tokenInvalido = await pedir('/api/formularios-publico/preencher/naoexiste123');
+
+    const enviou = await postarJson(`/api/formularios-publico/preencher/${tk}`, {
+      campos: { nome: 'Fulano de Tal', cpf: '12345678901', banco: 'Nubank', agencia: '0001', conta: '123456-7', pix: 'fulano@x.com' },
+      linhas: [{ data: '20/08', fornecedor: 'Posto X', descricao: 'Combustível', valor: '120,50' }],
+    });
+
+    // depois de enviado: sai do "aguardando", ganha assinaturas e o MESMO ticket
+    const depois = JSON.parse((await pedir('/api/formularios', cab)).corpo).find((x) => x.id === d.id) || {};
+    const reenvio = await postarJson(`/api/formularios-publico/preencher/${tk}`, {
+      campos: { nome: 'Outro' }, linhas: [{ descricao: 'x', valor: '1,00' }],
+    });
+    const vazio = await postarJson('/api/formularios-publico/preencher/' + tk, { campos: {}, linhas: [] });
+
+    const conferencias = {
+      'a unidade gera o link já com Ticket #': criado.status === 200 && Number.isFinite(d.numeroTicket) && !!tk,
+      'nasce aguardando preenchimento, sem assinatura nenhuma':
+        d.status === 'AGUARDANDO_PREENCHIMENTO' && (d.assinaturas || []).length === 0,
+      'o link abre sem login e já vem com a unidade travada':
+        vista.status === 200 && dv.unidade === 'São Braz Ilha do Leite' && dv.razaoSocial === 'Cafe SBI',
+      'o link traz os campos do modelo pro solicitante preencher': (dv.cabecalho || []).length > 0 && (dv.colunas || []).length > 0,
+      'token inválido não abre nada': tokenInvalido.status === 404,
+      'o solicitante consegue enviar': enviou.status === 200,
+      'depois de enviado sai de "aguardando" e entra no fluxo normal': depois.status === 'PENDENTE',
+      'só AÍ nascem os slots de assinatura (antes não havia linha pra assinar)': (depois.assinaturas || []).length > 0,
+      'o valor preenchido pelo solicitante é o que vale': depois.valorTotal === 120.5,
+      'o Ticket # continua o MESMO do momento em que o link foi gerado': depois.numeroTicket === d.numeroTicket,
+      'o mesmo link não serve pra preencher duas vezes': reenvio.status === 400 && /já foi preenchido/.test(reenvio.corpo),
+      'envio sem nenhuma linha é recusado': vazio.status === 400,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okLinkPreencher = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (criar ${criado.status}, vista ${vista.status}, enviar ${enviou.status} ${enviou.corpo.slice(0, 90)})`);
+  } catch (e) { okLinkPreencher = false; console.log('  erro: ' + e.message); }
+  if (!okLinkPreencher) ruins += 1;
+  console.log(`${okLinkPreencher ? '✓' : '✗'} Formulários: link pro próprio solicitante preencher (a unidade escolhe: preenche ou envia o link)`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

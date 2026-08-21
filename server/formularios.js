@@ -215,17 +215,11 @@ async function detalhar(id) {
   return base;
 }
 
-// numeroTicket: aceita um número pronto de fora pelo MESMO motivo que
-// solicitacoes.js/refunds.js aceitam - quando um registro vira outro, ele
-// carrega o número em vez de tirar outro da fila (ver ticketCounter.js).
-async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criadoPorEmail, numeroTicket }) {
-  const modelo = TIPOS[tipo];
-  if (!modelo) throw new Error('Tipo de formulário inválido.');
-  const unidadeOk = limpar(unidade, 80);
-  if (!unidadeOk) throw new Error('Informe a unidade.');
-  const cadastro = UNIDADES_FORM.find((u) => u.unidade === unidadeOk);
-  if (!cadastro) throw new Error('Unidade inválida - escolha uma das unidades cadastradas.');
-
+// valida/normaliza o conteúdo do formulário. Extraído de criar() porque o
+// preenchimento por LINK (ver salvarPreenchimento) tem que passar pelas
+// MESMAS regras - se as duas portas de entrada validassem cada uma do seu
+// jeito, o que entra pelo link acabaria diferente do que a unidade digita.
+function montarConteudo(modelo, cadastro, campos, linhas) {
   const camposOk = {};
   modelo.cabecalho.forEach((c) => { camposOk[c.key] = limpar((campos || {})[c.key], 160); });
   // Nome/CNPJ vem do cadastro fixo, nunca do formulário (pedido do Master:
@@ -245,9 +239,15 @@ async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criad
 
   const colunaValor = modelo.colunas.find((c) => c.valor);
   const valorTotal = linhasOk.reduce((s, l) => s + (colunaValor ? l[colunaValor.key] : 0), 0);
+  return { camposOk, linhasOk, valorTotal };
+}
 
-  // um slot de assinatura por papel do modelo + (nas diárias) um por linha,
-  // cada um com um token próprio - o token é o link daquela pessoa
+// um slot de assinatura por papel do modelo + (nas diárias) um por linha,
+// cada um com um token próprio - o token é o link daquela pessoa. Só dá pra
+// montar DEPOIS de existirem linhas, e é por isso que o formulário criado
+// pra preenchimento por link nasce sem assinatura nenhuma: os slots saem no
+// momento em que o solicitante envia o preenchimento.
+function montarAssinaturas(modelo, linhasOk) {
   const assinaturas = {};
   const slot = (chave, rotulo) => {
     assinaturas[chave] = { rotulo, token: crypto.randomBytes(18).toString('hex'), nome: null, imagem: null, assinadoEm: null };
@@ -256,6 +256,22 @@ async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criad
     linhasOk.forEach((l, i) => slot(`linha-${i}`, `Assinatura · ${l.nome || `linha ${i + 1}`}`));
   }
   modelo.assinantes.forEach((a) => slot(a.papel, a.rotulo));
+  return assinaturas;
+}
+
+// numeroTicket: aceita um número pronto de fora pelo MESMO motivo que
+// solicitacoes.js/refunds.js aceitam - quando um registro vira outro, ele
+// carrega o número em vez de tirar outro da fila (ver ticketCounter.js).
+async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criadoPorEmail, numeroTicket }) {
+  const modelo = TIPOS[tipo];
+  if (!modelo) throw new Error('Tipo de formulário inválido.');
+  const unidadeOk = limpar(unidade, 80);
+  if (!unidadeOk) throw new Error('Informe a unidade.');
+  const cadastro = UNIDADES_FORM.find((u) => u.unidade === unidadeOk);
+  if (!cadastro) throw new Error('Unidade inválida - escolha uma das unidades cadastradas.');
+
+  const { camposOk, linhasOk, valorTotal } = montarConteudo(modelo, cadastro, campos, linhas);
+  const assinaturas = montarAssinaturas(modelo, linhasOk);
 
   // comprovantes da solicitacao (PDF/imagem) - ja salvos no Storage pela
   // rota, aqui entra so a referencia
@@ -280,6 +296,86 @@ async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criad
   cache.invalidar();
   await salvarFavorecido(camposOk);
   return detalhar(doc.id);
+}
+
+// ---------------------------------------------------------------------
+// PREENCHIMENTO POR LINK. Pedido do Master: duas portas de entrada, não
+// uma - ou a unidade preenche tudo (criar, acima), ou manda o link pro
+// próprio solicitante preencher os dados dele. Faz diferença real no
+// Reembolso: quem sabe o CPF, o banco, a agência, a conta e a chave PIX é
+// o colaborador, não a loja - hoje a loja tem que perguntar tudo por fora
+// e digitar no lugar dele, e é aí que entra dado errado.
+//
+// O formulário nasce aqui já com Ticket # e já com a unidade travada (o
+// solicitante não escolhe de qual unidade é, senão o link viraria uma
+// porta pra lançar em qualquer loja). O que falta - cabeçalho e linhas -
+// é o que ele preenche.
+const STATUS_AGUARDANDO = 'AGUARDANDO_PREENCHIMENTO';
+
+async function criarParaPreenchimento({ tipo, unidade, criadoPorId, criadoPorEmail, numeroTicket }) {
+  const modelo = TIPOS[tipo];
+  if (!modelo) throw new Error('Tipo de formulário inválido.');
+  const unidadeOk = limpar(unidade, 80);
+  const cadastro = UNIDADES_FORM.find((u) => u.unidade === unidadeOk);
+  if (!cadastro) throw new Error('Unidade inválida - escolha uma das unidades cadastradas.');
+
+  const doc = COLLECTION.doc();
+  const registro = {
+    id: doc.id, tipo, unidade: unidadeOk, razaoSocial: cadastro.razaoSocial,
+    campos: { cnpj: cadastro.cnpj }, linhas: [], valorTotal: 0, anexos: [],
+    // sem slot de assinatura ainda - só dá pra montar quando houver linhas
+    assinaturas: {}, status: STATUS_AGUARDANDO,
+    tokenPreenchimento: crypto.randomBytes(18).toString('hex'),
+    numeroTicket: numeroTicket != null ? numeroTicket : await ticketCounter.proximoTicket(),
+    criadoEm: new Date().toISOString(), criadoPorId: criadoPorId || null, criadoPorEmail: criadoPorEmail || null,
+  };
+  await doc.set(registro);
+  cache.invalidar();
+  return detalhar(doc.id);
+}
+
+async function porTokenPreenchimento(token) {
+  if (!token) return null;
+  const todos = await cache.cached();
+  return todos.find((r) => r.tokenPreenchimento && r.tokenPreenchimento === token) || null;
+}
+
+// o que a página pública de preenchimento enxerga: o modelo (pra montar os
+// campos), a unidade JÁ definida e nada de token de assinatura - quem
+// preenche não é necessariamente quem assina.
+async function vistaPreenchimento(token) {
+  const r = await porTokenPreenchimento(token);
+  if (!r) return null;
+  const modelo = TIPOS[r.tipo];
+  return {
+    id: r.id, tipo: r.tipo, rotulo: modelo.rotulo, titulo: modelo.titulo,
+    unidade: r.unidade, razaoSocial: r.razaoSocial, cnpj: r.campos.cnpj,
+    numeroTicket: r.numeroTicket,
+    cabecalho: modelo.cabecalho, colunas: modelo.colunas,
+    jaPreenchido: r.status !== STATUS_AGUARDANDO,
+    campos: r.campos, linhas: r.linhas,
+  };
+}
+
+// o solicitante enviou: valida pelas MESMAS regras da unidade, cria os
+// slots de assinatura (agora que existem linhas) e o formulário entra no
+// fluxo normal, como se tivesse sido preenchido na loja.
+async function salvarPreenchimento(token, { campos, linhas }) {
+  const r = await porTokenPreenchimento(token);
+  if (!r) throw new Error('Link de preenchimento inválido.');
+  if (r.status !== STATUS_AGUARDANDO) throw new Error('Esse formulário já foi preenchido.');
+  const modelo = TIPOS[r.tipo];
+  const cadastro = UNIDADES_FORM.find((u) => u.unidade === r.unidade);
+
+  const { camposOk, linhasOk, valorTotal } = montarConteudo(modelo, cadastro, campos, linhas);
+  await COLLECTION.doc(r.id).update({
+    campos: camposOk, linhas: linhasOk, valorTotal,
+    assinaturas: montarAssinaturas(modelo, linhasOk),
+    status: 'PENDENTE', preenchidoEm: new Date().toISOString(),
+  });
+  cache.invalidar();
+  await salvarFavorecido(camposOk);
+  return { ok: true, id: r.id };
 }
 
 // acha a qual slot um token pertence (ou null) - é a autorização inteira do
@@ -515,4 +611,6 @@ function gerarPdf(r, res) {
   doc.end();
 }
 
-module.exports = { TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, remover, gerarPdf, chaveDoToken, parseValor };
+module.exports = { TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, remover, gerarPdf, chaveDoToken, parseValor,
+  criarParaPreenchimento, vistaPreenchimento, salvarPreenchimento,
+};
