@@ -74,7 +74,20 @@
 </div>
 
 <script>
-const TOKEN = location.pathname.split('/').pop() || new URLSearchParams(location.search).get('token') || '';
+// O token vem no ?token= (é assim que o botão "Enviar link" monta a URL,
+// ver gerarLinkPreenchimento em formularios.html). A ORDEM aqui importa e
+// já quebrou uma vez: lendo o caminho primeiro, /preencher.html devolvia a
+// string "preencher.html" - que é truthy - e o || nunca chegava na query.
+// Resultado: TODO link caía em "link inválido". O caminho fica como plano
+// B, e só quando a URL é mesmo do formato /preencher/<token>.
+function lerToken(){
+  const daQuery = new URLSearchParams(location.search).get('token');
+  if (daQuery) return daQuery.trim();
+  const partes = location.pathname.split('/').filter(Boolean);
+  const ultima = partes[partes.length - 1] || '';
+  return /\.html?$/i.test(ultima) ? '' : ultima;
+}
+const TOKEN = lerToken();
 let MODELO = null;
 let LINHAS = [{}];
 

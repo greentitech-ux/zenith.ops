@@ -2862,6 +2862,55 @@ setTimeout(async () => {
   if (!okBoleto) ruins += 1;
   console.log(`${okBoleto ? '✓' : '✗'} Ass. Boleto: anexo assinado vira PDF com a assinatura DENTRO do próprio documento`);
 
+  // ------------------------------------------------------------------
+  // O link de preenchimento tem que ABRIR. Parece óbvio demais pra virar
+  // teste - e foi exatamente por isso que quebrou: a página lia o token do
+  // CAMINHO da URL antes da query, e "/preencher.html" devolvia a string
+  // "preencher.html" (truthy), então o ?token= nunca era lido e TODO link
+  // gerado caía em "Link inválido". O servidor estava certo o tempo todo.
+  // Este teste roda a MESMA função de leitura que está na página.
+  let okTokenLink = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const gerado = await postarJson('/api/formularios/link-preenchimento',
+      { tipo: 'reembolso', unidade: 'Spoleto Shopping Recife' }, cab);
+    const g = gerado.status === 200 ? JSON.parse(gerado.corpo) : {};
+
+    // extrai lerToken() da página e roda contra a URL de verdade
+    const fs = require('fs');
+    const pagina = fs.readFileSync(require('path').join(__dirname, 'public', 'preencher.html'), 'utf8');
+    const trecho = (pagina.match(/function lerToken\(\)\{[\s\S]*?\n\}/) || [])[0];
+    let lerToken = null;
+    if (trecho) {
+      // location falso: é o que a página enxerga com o link real na mão
+      const fabricar = new Function('location', `${trecho}; return lerToken;`);
+      lerToken = (url) => {
+        const u = new URL(url);
+        return fabricar({ search: u.search, pathname: u.pathname })();
+      };
+    }
+    const linkReal = `https://adyen-monitor.onrender.com/preencher.html?token=${g.tokenPreenchimento}`;
+    const lido = lerToken ? lerToken(linkReal) : null;
+    // e o servidor tem que aceitar exatamente o que a página leu
+    const abriu = await pedir(`/api/formularios-publico/preencher/${encodeURIComponent(lido || 'vazio')}`);
+    const dAbriu = abriu.status === 200 ? JSON.parse(abriu.corpo) : {};
+    const tokenErrado = await pedir('/api/formularios-publico/preencher/preencher.html');
+
+    const conferencias = {
+      'gerar o link devolve um token': gerado.status === 200 && !!g.tokenPreenchimento,
+      'a página lê o token do ?token= (e não a string "preencher.html")':
+        lido === g.tokenPreenchimento,
+      'o link real abre o formulário no servidor':
+        abriu.status === 200 && dAbriu.numeroTicket === g.numeroTicket && dAbriu.jaPreenchido === false,
+      'token inventado continua sendo recusado': tokenErrado.status === 404,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okTokenLink = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTokenLink = false; console.log('  erro: ' + e.message); }
+  if (!okTokenLink) ruins += 1;
+  console.log(`${okTokenLink ? '✓' : '✗'} Link de preenchimento: a URL que vai pro WhatsApp abre de verdade (token lido do ?token=)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
