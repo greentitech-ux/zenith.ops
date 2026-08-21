@@ -317,6 +317,17 @@ function filterByUnidade(req, list) {
   return list.filter((item) => item.unidade && allowed.has(item.unidade));
 }
 
+// time de suporte: atravessa TODA unidade/empresa de proposito (precisa
+// atender qualquer loja, de qualquer empresa cadastrada no Zenith) - unica
+// fonte de verdade, antes reimplementada 3x (index.js local, o objeto de
+// usuarioLogadoDoHeader, e de novo solta em loja-status.html). Recebe um
+// objeto simples (nao precisa ser o `req` inteiro) pra dar pra chamar tanto
+// com `req` quanto com um usuario avulso.
+function ehTimeSuporte(ctx) {
+  if (!ctx) return false;
+  return !!ctx.isMaster || !!ctx.isAdmin || (ctx.permissions?.sections || []).includes('suporte');
+}
+
 module.exports = {
   ensureMaster,
   login,
@@ -329,6 +340,7 @@ module.exports = {
   requireMasterOrAdmin,
   requireMasterOuCatalogoEstoque,
   hasSection,
+  ehTimeSuporte,
   filterByUnidade,
   emptyPermissions,
   dentroDoHorarioPermitido,

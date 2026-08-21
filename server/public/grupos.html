@@ -161,6 +161,40 @@
 
 
 
+  <!-- EMPRESAS (ver server/empresas.js): camada acima do Grupo, o limite de
+       isolamento entre negócios diferentes hospedados no Zenith (ex: MVPar
+       x Arcfood hoje; uma clínica ou escola amanhã). Toda unidade cai em
+       alguma empresa - a marcada "padrão" pega qualquer código não listado
+       explicitamente em outra, pra loja nova nunca ficar sem empresa. -->
+  <div class="panel">
+    <h2>🏢 Empresas</h2>
+    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">O limite que separa um negócio do outro dentro do Zenith - usuário de uma empresa nunca vê dado de outra (exceto o time de Suporte, que atravessa tudo de propósito). A empresa marcada <b>padrão</b> é dona de qualquer unidade que não estiver listada explicitamente em nenhuma outra - assim uma loja nova nunca fica sem empresa.</p>
+    <div id="empresas-lista" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;"></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;border-top:1px solid var(--line);padding-top:10px;">
+      <label style="flex:1;min-width:160px;font-size:11.5px;color:var(--muted);">Nome da empresa
+        <input type="text" id="emp-nome" placeholder="ex: Arcfood" style="width:100%;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;">
+      </label>
+      <label style="min-width:160px;font-size:11.5px;color:var(--muted);">Tipo de negócio
+        <select id="emp-tipo" style="width:100%;margin-top:4px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;">
+          <option value="alimentacao">Alimentação</option>
+        </select>
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text);white-space:nowrap;">
+        <input type="checkbox" id="emp-padrao" style="width:auto;margin:0;"> é a empresa padrão
+      </label>
+      <button type="button" class="primary" style="padding:8px 14px;" onclick="salvarEmpresa()">+ Cadastrar empresa</button>
+    </div>
+    <fieldset style="margin-top:10px;">
+      <legend>Unidades desta empresa <span style="font-weight:400;color:var(--muted);">(deixe vazio se for a empresa padrão)</span></legend>
+      <div style="display:flex;gap:10px;margin-bottom:6px;">
+        <button type="button" class="btn-add" onclick="marcarTodosChecks('emp-unidades', true)">marcar todas</button>
+        <button type="button" class="btn-add" onclick="marcarTodosChecks('emp-unidades', false)">desmarcar todas</button>
+      </div>
+      <div id="emp-unidades" style="display:flex;flex-direction:column;gap:5px;max-height:220px;overflow-y:auto;"></div>
+    </fieldset>
+    <p class="err hidden" id="emp-err"></p>
+  </div>
+
   <!-- PEDIDO SEMANAL (ver server/pedidoSemanal.js): a cobrança é por REGRA -
        cada uma vale pra um grupo inteiro ou pras lojas escolhidas, com dia
        da semana próprio. Fica em Grupos porque é a página onde já se decide
@@ -878,6 +912,79 @@ async function recarregarUnidades(){
   await carregarUnidadesExtras();
   UNIDADES = TODAS_UNIDADES;
   document.getElementById('c-unidades').innerHTML = unidadesChecksHtml('unidades', new Set());
+  document.getElementById('emp-unidades').innerHTML = unidadesChecksHtml('emp-unidades', new Set());
+}
+
+// ---------- Empresas (ver server/empresas.js) - o limite de isolamento
+// acima do Grupo. EDITANDO_EMPRESA_ID != null enquanto o form estiver
+// editando uma empresa existente (em vez de criar uma nova) ----------
+let EMPRESAS = [];
+let EDITANDO_EMPRESA_ID = null;
+async function carregarEmpresas(){
+  EMPRESAS = await fetch('/api/empresas').then(r=>r.json()).catch(()=>[]);
+  renderEmpresasLista();
+}
+function renderEmpresasLista(){
+  const el = document.getElementById('empresas-lista');
+  if(!EMPRESAS.length){ el.innerHTML = '<span style="color:var(--muted);font-size:11.5px;">Nenhuma empresa cadastrada ainda.</span>'; return; }
+  el.innerHTML = EMPRESAS.map(e=>{
+    const qtdUnidades = (e.unidades||[]).length;
+    const escopo = e.padrao ? 'padrão · dona de qualquer unidade não listada em outra empresa' : `${qtdUnidades} unidade(s) listada(s)`;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:12.5px;">
+      <span style="flex:1;"><b>${escapeHtml(e.nome)}</b> <span style="color:var(--muted);font-size:11px;">· ${escapeHtml(e.tipoNegocio)} · ${escapeHtml(escopo)}</span></span>
+      <button type="button" class="back btn-editar-empresa" style="cursor:pointer;" data-id="${escapeHtml(e.id)}">✏️ editar</button>
+      <button type="button" class="back btn-excluir-empresa" style="cursor:pointer;color:var(--bad);" data-id="${escapeHtml(e.id)}" data-nome="${escapeHtml(e.nome)}">🗑️ excluir</button>
+    </div>`;
+  }).join('');
+}
+document.getElementById('empresas-lista').addEventListener('click', (e)=>{
+  const btnEditar = e.target.closest('.btn-editar-empresa');
+  if(btnEditar){ abrirEdicaoEmpresa(btnEditar.dataset.id); return; }
+  const btnExcluir = e.target.closest('.btn-excluir-empresa');
+  if(btnExcluir){ excluirEmpresa(btnExcluir.dataset.id, btnExcluir.dataset.nome); }
+});
+function abrirEdicaoEmpresa(id){
+  const emp = EMPRESAS.find(x=>x.id===id);
+  if(!emp) return;
+  EDITANDO_EMPRESA_ID = id;
+  document.getElementById('emp-nome').value = emp.nome;
+  document.getElementById('emp-tipo').value = emp.tipoNegocio;
+  document.getElementById('emp-padrao').checked = !!emp.padrao;
+  document.getElementById('emp-unidades').innerHTML = unidadesChecksHtml('emp-unidades', new Set(emp.unidades||[]));
+  document.getElementById('emp-nome').scrollIntoView({ behavior:'smooth', block:'center' });
+}
+async function excluirEmpresa(id, nome){
+  if(!confirm(`Excluir a empresa "${nome}"? As unidades dela ficam sem empresa explícita (caem na empresa padrão, se houver uma).`)) return;
+  const resp = await fetch(`/api/empresas/${id}`, { method:'DELETE' });
+  if(!resp.ok){ alert('Erro ao excluir.'); return; }
+  if(EDITANDO_EMPRESA_ID===id) limparFormEmpresa();
+  await carregarEmpresas();
+}
+function limparFormEmpresa(){
+  EDITANDO_EMPRESA_ID = null;
+  document.getElementById('emp-nome').value = '';
+  document.getElementById('emp-tipo').value = 'alimentacao';
+  document.getElementById('emp-padrao').checked = false;
+  document.getElementById('emp-unidades').innerHTML = unidadesChecksHtml('emp-unidades', new Set());
+}
+async function salvarEmpresa(){
+  const err = document.getElementById('emp-err');
+  err.classList.add('hidden');
+  const payload = {
+    nome: document.getElementById('emp-nome').value,
+    tipoNegocio: document.getElementById('emp-tipo').value,
+    padrao: document.getElementById('emp-padrao').checked,
+    unidades: readChecked(document.getElementById('emp-unidades')),
+  };
+  try{
+    const resp = EDITANDO_EMPRESA_ID
+      ? await fetch(`/api/empresas/${EDITANDO_EMPRESA_ID}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
+      : await fetch('/api/empresas', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
+    limparFormEmpresa();
+    await carregarEmpresas();
+  }catch(e){ err.textContent = e.message; err.classList.remove('hidden'); }
 }
 
 async function criarUnidadeExtra(){
@@ -1079,7 +1186,9 @@ async function boot(){
 
   UNIDADES = await fetch('/api/meta/unidades').then(r=>r.json());
   document.getElementById('c-unidades').innerHTML = unidadesChecksHtml('unidades', new Set());
+  document.getElementById('emp-unidades').innerHTML = unidadesChecksHtml('emp-unidades', new Set());
   carregarUnidadesExtras();
+  carregarEmpresas();
   carregarRegrasPedido();
 
   const todosUsuarios = await fetch('/api/users').then(r=>r.json());

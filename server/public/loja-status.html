@@ -1899,8 +1899,7 @@ async function boot(){
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   const me = await res.json();
-  const secoes = (me.permissions && me.permissions.sections) || [];
-  if(!(me.role === 'master' || me.isAdmin || secoes.includes('suporte'))){
+  if(!me.ehTimeSuporte){
     document.getElementById('sem-acesso').classList.remove('hidden');
     return;
   }

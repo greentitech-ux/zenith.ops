@@ -496,23 +496,87 @@ function accordionChecklist({ id, titulo, name, itens, checkedSet, ajuda }){
   const inner = `${ajuda ? `<div class="ajuda-fieldset">${ajuda}</div>` : ''}<div class="checks az-list ${comScroll?'az-scroll':''}" id="${id}">${corpo}</div>`;
   return accordionWrap(titulo, headerExtra, inner);
 }
+// a qual vertical de negócio cada seção pertence - espelha
+// users.SECTION_VERTICAIS no servidor. Usado só pra agrupar visualmente o
+// checklist (Geral primeiro, depois cada vertical) - com só "alimentacao"
+// existindo hoje isso já ajuda pouco, mas é o que evita a lista virar uma
+// parede de 20+ caixinhas quando a 1a empresa de outra vertical (clínica,
+// escola...) for cadastrada e ganhar seções próprias
+const SECTION_VERTICAIS = {
+  monitor:['alimentacao'], disputas:['alimentacao'], fechamentos:['alimentacao'],
+  lancamento:['alimentacao'], sangria:['alimentacao'], entregas:['alimentacao'],
+  'entregas-lancamento':['alimentacao'], ifood:['alimentacao'], inventario:['alimentacao'],
+  parque:['alimentacao'], 'parque-checkin':['alimentacao'], 'parque-loja':['alimentacao'],
+  festas:['alimentacao'], 'abastecimento-carrinho':['alimentacao'], 'abastecimento-loja':['alimentacao'],
+  cofre:['*'], solicitacoes:['*'], tecnico:['*'], suporte:['*'], manutencao:['*'],
+  'ativos-ti':['*'], 'central-solucoes':['*'], rh:['*'], formularios:['*'],
+};
+const NOME_VERTICAL = { alimentacao: 'Alimentação' };
+function rotuloVertical(v){ return v==='*' ? 'Geral (qualquer empresa)' : (NOME_VERTICAL[v]||v); }
+
+// variante agrupada por vertical do accordionChecklist genérico - mesmo id
+// final (`${prefixo}-sections`) que o submit já lê via readChecked, só o
+// CORPO interno vira sub-blocos em vez de uma lista A-Z só
+function accordionChecklistSecoes(prefixo, checkedSet){
+  const id = `${prefixo}-sections`;
+  const porVertical = {};
+  SECTIONS.forEach(([v,l])=>{
+    (SECTION_VERTICAIS[v]||['*']).forEach(vert=>{ (porVertical[vert]=porVertical[vert]||[]).push({value:v,label:l}); });
+  });
+  const ordem = ['*', ...Object.keys(porVertical).filter(v=>v!=='*').sort()];
+  const corpo = ordem.filter(v=>porVertical[v]&&porVertical[v].length).map(v=>{
+    const itens = [...porVertical[v]].sort((a,b)=>letraChave(a.label).localeCompare(letraChave(b.label),'pt-BR',{sensitivity:'base'}));
+    const linhas = itens.map(it=>{
+      const checked = checkedSet.has(it.value) ? 'checked' : '';
+      return `<label><input type="checkbox" name="sections" value="${escapeHtml(it.value)}" ${checked}><span>${escapeHtml(it.label)}</span></label>`;
+    }).join('');
+    return `<div class="group-heading" style="margin-top:8px;">${escapeHtml(rotuloVertical(v))}</div><div class="checks">${linhas}</div>`;
+  }).join('');
+  const n = checkedSet.size;
+  const headerExtra = `<span class="accordion-badge">${n?n+' selecionad'+(n===1?'a':'as'):''}</span>` +
+    `<span class="legend-actions" onclick="event.stopPropagation()"><button type="button" onclick="marcarTodos('${id}',true)">Marcar todos</button><button type="button" onclick="marcarTodos('${id}',false)">Desmarcar todos</button></span>`;
+  return accordionWrap('Seções', headerExtra, `<div id="${id}">${corpo}</div>`);
+}
+// pedido do Master: acesso cruzando mais de uma empresa só se ELE escolher
+// isso de propósito - não é bloqueio de servidor (o Master já tem godmode
+// sobre tudo), é uma confirmação pra não cruzar empresa sem perceber. Marca
+// uma unidade de uma 2a empresa diferente das já marcadas -> confirma ou
+// desmarca de volta.
+function wireUnidadesEmpresaGate(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.addEventListener('change', (ev)=>{
+    const cb = ev.target;
+    if(!cb || cb.tagName!=='INPUT' || cb.type!=='checkbox' || !cb.checked) return;
+    const unidade = UNIDADES.find(u=>u.codigo===cb.value);
+    if(!unidade || !unidade.empresa) return;
+    const outrasEmpresas = new Set(
+      [...el.querySelectorAll('input[type=checkbox]:checked')]
+        .filter(i=>i!==cb)
+        .map(i=>{ const u=UNIDADES.find(x=>x.codigo===i.value); return u&&u.empresa; })
+        .filter(Boolean)
+    );
+    if(outrasEmpresas.size && !outrasEmpresas.has(unidade.empresa)){
+      if(!confirm(`Esse acesso vai enxergar dados de mais de uma empresa (${[...outrasEmpresas].join(', ')} e ${unidade.empresa}). Confirma?`)){
+        cb.checked = false;
+      }
+    }
+  });
+}
 // monta as 5 categorias (Seções/Unidades/Cofre/Tipo de solicitação/Tags) de
 // uma vez, tanto pro form de criação (prefixo "c") quanto pro modal de
 // permissões (prefixo "p") - cada `perms`/`tagsAtuais` null = tudo
 // desmarcado (formulário de criação em branco)
 function renderCategoriasPermissao(prefixo, perms, tagsAtuais){
   perms = perms || { sections:[], unidades:[], vaultSubgroups:[], tiposSolicitacao:[] };
-  document.getElementById(`${prefixo}-sections-wrap`).innerHTML = accordionChecklist({
-    id: `${prefixo}-sections`, titulo: 'Seções', name: 'sections',
-    itens: SECTIONS.map(([v,l])=>({ value:v, label:l })),
-    checkedSet: new Set(perms.sections),
-  });
+  document.getElementById(`${prefixo}-sections-wrap`).innerHTML = accordionChecklistSecoes(prefixo, new Set(perms.sections));
   document.getElementById(`${prefixo}-unidades-wrap`).innerHTML = accordionChecklist({
     id: `${prefixo}-unidades`, titulo: 'Unidades', name: 'unidades',
-    itens: UNIDADES.map(u=>({ value:u.codigo, label:u.nome, sufixoTexto:(u.secao||'')+(u.grupo&&u.grupo!=='—'?' · '+u.grupo:'') })),
+    itens: UNIDADES.map(u=>({ value:u.codigo, label:u.nome, sufixoTexto:(u.empresa?u.empresa+' · ':'')+(u.secao||'')+(u.grupo&&u.grupo!=='—'?' · '+u.grupo:'') })),
     checkedSet: new Set(perms.unidades),
     ajuda: 'vale pra monitor, disputas, fechamentos, lançamento, sangria/depósito e entregas. Chamados de TI e Manutenção não dependem de unidade (marca todas automaticamente - a pessoa vê os chamados atribuídos a ela em qualquer loja).',
   });
+  wireUnidadesEmpresaGate(`${prefixo}-unidades`);
   document.getElementById(`${prefixo}-groups-wrap`).innerHTML = accordionChecklist({
     id: `${prefixo}-groups`, titulo: 'Cofre (subgrupos)', name: null,
     itens: VAULT_SUBGROUPS.map(s=>({ value:s.id, label:s.name, sufixoTexto:(VAULT_GROUPS.find(g=>g.id===s.groupId)||{}).name||'' })),

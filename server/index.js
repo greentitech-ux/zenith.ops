@@ -61,6 +61,7 @@ const abastecimentoPrevisao = require('./abastecimentoPrevisao');
 const ativosTI = require('./ativosTI');
 const centralChat = require('./centralChat');
 const grupos = require('./grupos');
+const empresas = require('./empresas');
 const redes = require('./redes');
 const vendasRecordes = require('./vendasRecordes');
 const inventario = require('./inventario');
@@ -863,7 +864,7 @@ async function usuarioLogadoDoHeader(req) {
     // desbloquear o login pelo chat - usado por desbloquear_login
     // (suporteBot.js) pra dispensar a checagem de "contato bate com o email"
     // que protege o autoatendimento anonimo contra desbloquear conta alheia
-    ehTimeSuporte: isMaster || !!user.isAdmin || (user.permissions?.sections || []).includes('suporte'),
+    ehTimeSuporte: auth.ehTimeSuporte({ isMaster, isAdmin: !!user.isAdmin, permissions: user.permissions }),
   };
 }
 
@@ -1359,6 +1360,7 @@ app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCoun
     const tipoCadastro = req.body.tipoCadastro === 'candidato' ? 'candidato' : 'extra';
     const mapa = await construirUnidadesMapa();
     if (!unidade || !mapa[unidade]) return res.status(400).json({ error: 'Loja inválida.' });
+    if (!(await unidadesExtras.apareceEm(unidade, 'rh'))) return res.status(400).json({ error: 'Essa unidade não tem RH habilitado.' });
     const faltaDoc = exigeDocumentoIdentidade(tipoCadastro, req.files?.documento);
     if (faltaDoc) return res.status(400).json({ error: faltaDoc });
     const arquivoCurriculo = (req.files?.curriculo || [])[0];
@@ -1438,7 +1440,19 @@ app.put('/api/preferencias/:chave', async (req, res) => {
   }
 });
 
-app.get('/api/me', (req, res) => {
+app.get('/api/me', async (req, res) => {
+  const ehSuporte = auth.ehTimeSuporte(req);
+  // vertical(is) de negocio das empresas donas das unidades desse usuario -
+  // usada pelo nav-menu.js/usuarios.html pra nao mostrar modulo de outra
+  // vertical (ex: usuario so de unidade "alimentacao" nunca ve item de
+  // menu marcado so pra "saude"). null = sem restricao (Master/suporte, que
+  // atravessam toda empresa de proposito)
+  let verticaisDoUsuario = null;
+  if (!req.isMaster && !ehSuporte) {
+    const unidades = req.permissions.unidades || [];
+    const donas = await Promise.all(unidades.map((u) => empresas.empresaDaUnidade(u)));
+    verticaisDoUsuario = [...new Set(donas.filter(Boolean).map((e) => e.tipoNegocio))];
+  }
   res.json({
     id: req.user.id,
     email: req.user.email,
@@ -1455,6 +1469,8 @@ app.get('/api/me', (req, res) => {
     precisaTrocarSenha: !!req.user.precisaTrocarSenha,
     isQaMaster: req.isQaMaster,
     isQaUser: req.isQaUser,
+    ehTimeSuporte: ehSuporte,
+    verticaisDoUsuario,
   });
 });
 
@@ -1788,8 +1804,20 @@ app.post('/webhooks/adyen', async (req, res) => {
 });
 
 // ---------- API para o dashboard (secao "monitor") ----------
-app.get('/api/transactions', requireSection('monitor'), (req, res) => {
-  res.json(auth.filterByUnidade(req, store.allTransactions()));
+// unidade sem area 'monitor' habilitada nao aparece nas telas de Monitor -
+// diferente dos outros modulos (que bloqueiam o LANCAMENTO de um registro
+// novo), aqui nao ha "lancamento": a transacao chega sozinha pelo webhook
+// da Adyen e nunca pode ser recusada (perderia o dado). O gate certo e na
+// LEITURA - a unidade so some das listas, o webhook continua gravando
+// normalmente
+async function filtrarPorAreaMonitor(lista) {
+  const restritos = new Set(await unidadesExtras.codigosRestritosDe('monitor'));
+  if (!restritos.size) return lista;
+  return lista.filter((item) => !restritos.has(item.unidade));
+}
+
+app.get('/api/transactions', requireSection('monitor'), async (req, res) => {
+  res.json(await filtrarPorAreaMonitor(auth.filterByUnidade(req, store.allTransactions())));
 });
 
 app.get('/api/clients/:key', requireSection('monitor'), (req, res) => {
@@ -1809,16 +1837,16 @@ app.patch('/api/transactions/:pspReference/:eventCode/comentario', requireSectio
   res.json(tx);
 });
 
-app.get('/api/orders', requireSection('monitor'), (req, res) => {
-  res.json(auth.filterByUnidade(req, store.allOrders()));
+app.get('/api/orders', requireSection('monitor'), async (req, res) => {
+  res.json(await filtrarPorAreaMonitor(auth.filterByUnidade(req, store.allOrders())));
 });
 
-app.get('/api/orders/changed', requireSection('monitor'), (req, res) => {
-  res.json(auth.filterByUnidade(req, store.ordersChanged()));
+app.get('/api/orders/changed', requireSection('monitor'), async (req, res) => {
+  res.json(await filtrarPorAreaMonitor(auth.filterByUnidade(req, store.ordersChanged())));
 });
 
-app.get('/api/chargebacks', requireSection('monitor'), (req, res) => {
-  res.json(auth.filterByUnidade(req, store.chargebacks()));
+app.get('/api/chargebacks', requireSection('monitor'), async (req, res) => {
+  res.json(await filtrarPorAreaMonitor(auth.filterByUnidade(req, store.chargebacks())));
 });
 
 // ---------- relatorios (CSV/PDF) dos paineis do Monitor de transacoes:
@@ -2273,9 +2301,15 @@ app.get('/api/meta/unidades', auth.requireMaster, async (req, res) => {
       .filter((codigo) => !codigoEhFixo(codigo)),
   );
   const SECAO_ORDEM = ['Fechamento', 'Entregas', 'Monitor / Disputas (Adyen)', 'iFood'];
-  const lista = Object.entries(mapa)
-    .map(([codigo, nome]) => ({
+  // empresa dona de cada unidade - o Master ve isso no checklist pra saber
+  // que dar acesso cruzando esse nome vai atravessar empresa (usuarios.html
+  // confirma antes de deixar, ver confirmarCrossEmpresa)
+  const entradas = Object.entries(mapa);
+  const nomesEmpresa = await Promise.all(entradas.map(([codigo]) => empresas.empresaDaUnidade(codigo)));
+  const lista = entradas
+    .map(([codigo, nome], i) => ({
       codigo, nome,
+      empresa: nomesEmpresa[i] ? nomesEmpresa[i].nome : null,
       ...(codigosExtras.has(codigo) ? { secao: 'Fechamento', grupo: 'Cadastradas no sistema' } : classificarUnidade(codigo)),
     }))
     .sort((a, b) =>
@@ -2715,6 +2749,7 @@ function urlComputador(codigo, posto, tipo) {
 // colar/salvar naquele computador
 app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), async (req, res) => {
   try {
+    if (!(await unidadesExtras.apareceEm(req.params.codigo, 'noc'))) return res.status(400).json({ error: 'Essa unidade não tem NOC habilitado.' });
     const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo);
     const url = urlComputador(req.params.codigo, registro.posto, registro.tipo);
     res.json({ ...registro, url });
@@ -3421,6 +3456,9 @@ const EXECUTORES_QA = {
   'rh.camposConfig': (p) => rhCamposConfig.salvar(p.camposManuais, { porEmail: 'aprovação QA' }),
   'grupos.editar': (p) => grupos.update(p.id, p.dados),
   'grupos.excluir': (p) => grupos.remove(p.id),
+  'empresas.criar': (p) => empresas.create(p),
+  'empresas.editar': (p) => empresas.update(p.id, p.dados),
+  'empresas.excluir': (p) => empresas.remove(p.id),
   'unidadesExtras.criar': (p) => unidadesExtras.criar(p.dados, codigosUnidadesFixas()),
   'unidadesExtras.editar': (p) => unidadesExtras.atualizar(p.id, { nome: p.nome, areas: p.areas, tiposSolicitacao: p.tiposSolicitacao }),
   'unidadesExtras.excluir': (p) => unidadesExtras.remover(p.id),
@@ -4537,6 +4575,44 @@ app.delete('/api/grupos/:id', auth.requireMaster, async (req, res) => {
   }
 });
 
+// ---------- Empresas: camada de isolamento acima do Grupo (Empresa -> Grupo
+// -> Unidade) - cada empresa e a fronteira que separa uma rede de outra
+// (ex: MVPar/Grupo Bravo x Arcfood), pra quando o Zenith hospedar empresas
+// de negocios diferentes (ver empresaDaUnidade em empresas.js, e
+// verticaisDoUsuario em GET /api/me pra saber quais modulos cabem em cada
+// vertical) ----------
+app.get('/api/empresas', auth.requireMaster, async (req, res) => {
+  res.json(await empresas.list());
+});
+
+app.post('/api/empresas', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'empresas.criar', `Criar empresa: ${req.body?.nome || ''}`, req.body)) return;
+    res.json(await empresas.create(req.body));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/empresas/:id', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'empresas.editar', `Editar empresa ${req.params.id}`, { id: req.params.id, dados: req.body })) return;
+    res.json(await empresas.update(req.params.id, req.body));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/empresas/:id', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'empresas.excluir', `Excluir empresa ${req.params.id}`, { id: req.params.id })) return;
+    await empresas.remove(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---------- Inventario (contagem fisica, recebimento de mercadoria e CMV -
 // por enquanto so as lojas Domino's, ver INVENTARIO_UNIDADES_NOMES acima).
 // Secao propria "inventario"; qualquer um com a secao pode lançar contagem/
@@ -4689,6 +4765,7 @@ app.get('/api/inventario/recebimentos', requireSection('inventario'), async (req
 app.post('/api/inventario/recebimentos', requireSection('inventario'), async (req, res) => {
   try {
     if (!podeUnidadeInventario(req, req.body.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    if (!(await unidadesExtras.apareceEm(req.body.unidade, 'estoque'))) return res.status(400).json({ error: 'Essa unidade não tem Estoque habilitado.' });
     const registro = await inventario.criarRecebimento({ ...req.body, criadoPorId: req.user.id, criadoPorEmail: req.user.email });
     res.json(registro);
   } catch (err) {
@@ -4720,6 +4797,7 @@ app.get('/api/inventario/saidas', requireSection('inventario'), async (req, res)
 app.post('/api/inventario/saidas', requireSection('inventario'), async (req, res) => {
   try {
     if (!podeUnidadeInventario(req, req.body.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    if (!(await unidadesExtras.apareceEm(req.body.unidade, 'estoque'))) return res.status(400).json({ error: 'Essa unidade não tem Estoque habilitado.' });
     const registro = await inventario.criarSaida({ ...req.body, criadoPorId: req.user.id, criadoPorEmail: req.user.email });
     res.json(registro);
   } catch (err) {
@@ -4916,6 +4994,7 @@ app.post('/api/parque/checkins', requireSection('parque-checkin'), async (req, r
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
+    if (!(await unidadesExtras.apareceEm(unidade, 'parque'))) return res.status(400).json({ error: 'Essa unidade não tem Parque habilitado.' });
     // credito de tempo guardado de um checkout antecipado anterior (ver
     // parque.checkout) - consome antes de criar, pra nao aplicar minutos
     // que na verdade nao estavam mais disponiveis
@@ -5698,6 +5777,7 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'c
     if (!podeAcessarUnidadeRh(req, unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
+    if (!(await unidadesExtras.apareceEm(unidade, 'rh'))) return res.status(400).json({ error: 'Essa unidade não tem RH habilitado.' });
     if (tipoCadastro === 'efetivado' && !podeCadastrarEfetivado(req)) {
       return res.status(403).json({ error: 'Só o RH pode cadastrar alguém já efetivado direto. Cadastre como Extra ou Candidato (teste de 5 dias).' });
     }
@@ -7672,9 +7752,9 @@ async function processarAssinatura(file, chamadoId, pastaStorage) {
 // "tecnico") ve so os atribuidos a ele. Nasce vinculado a uma solicitacao
 // de Suporte de TI aprovada (rota acima) ou aberto direto pelo
 // Master/Admin/Suporte (POST abaixo) ----------
-function ehTimeSuporte(req) {
-  return req.isMaster || req.isAdmin || auth.hasSection(req, 'suporte');
-}
+// consolidado em auth.js (era reimplementado aqui, no objeto de
+// usuarioLogadoDoHeader e de novo em loja-status.html - unica fonte agora)
+const ehTimeSuporte = auth.ehTimeSuporte;
 
 app.get('/api/chamados', requireAnySection('tecnico', 'suporte'), async (req, res) => {
   const todos = await chamadosTI.listAll();
@@ -9818,6 +9898,7 @@ app.post('/api/entregas/lancar', requireSection('entregas-lancamento'), upload.s
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
+    if (!(await unidadesExtras.apareceEm(unidade, 'entregas'))) return res.status(400).json({ error: 'Essa unidade não tem Entregas habilitado.' });
     const registro = await entregasLive.create({
       unidade, unidadeNome, data, entregador, campos, obsRetorno, obsExtra, observacao, camposRemovidos, motivoRemocaoCampos,
       etiquetaFile: req.file || null,
@@ -10189,6 +10270,7 @@ function aquecerBoot(promessa, ms) {
     await tarefaDeBoot(() => store.init(), 'carregar histórico do Firestore');
     await tarefaDeBoot(() => auth.ensureMaster(), 'garantir usuário Master');
     await tarefaDeBoot(() => grupos.ensureGrupoSaltiverso(), 'garantir grupo do Saltiverso Patteo');
+    await tarefaDeBoot(() => empresas.ensureEmpresasSeed(), 'garantir empresas MVPar/Arcfood');
   })();
   await aquecerBoot(aquecimento, BOOT_AQUECIMENTO_MS);
 

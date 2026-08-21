@@ -340,11 +340,23 @@
     return (((me.permissions && me.permissions.sections) || []).includes(s));
   }
 
+  // vertical de negocio do item (ex: 'alimentacao') bate com a(s) vertical(is)
+  // do usuario - Master/suporte (verticaisDoUsuario null em GET /api/me)
+  // atravessam tudo de proposito. Item sem `verticais` sempre aparece (nao
+  // muda nada pra nenhum item existente hoje - so passa a valer quando um
+  // item novo marcar `verticais: ['saude']` etc, ver users.SECTION_VERTICAIS)
+  function temVertical(me, it) {
+    if (!it.verticais) return true;
+    if (!me.verticaisDoUsuario) return true;
+    return it.verticais.some((v) => me.verticaisDoUsuario.includes(v));
+  }
+
   function podeVer(it, me) {
     const isMaster = me.role === 'master';
     const isAdmin = isMaster || !!me.isAdmin;
     if (it.master) return isMaster;
     if (it.admin) return isAdmin;
+    if (!temVertical(me, it)) return false;
     if (it.secoes) return it.secoes.some((s) => temSecao(me, s));
     return true;
   }

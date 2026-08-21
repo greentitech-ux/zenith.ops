@@ -15,6 +15,33 @@ const usersRef = db.collection('users');
 
 const VALID_SECTIONS = ['monitor', 'disputas', 'cofre', 'fechamentos', 'lancamento', 'sangria', 'entregas', 'entregas-lancamento', 'ifood', 'solicitacoes', 'tecnico', 'suporte', 'manutencao', 'inventario', 'parque', 'parque-checkin', 'parque-loja', 'festas', 'abastecimento-carrinho', 'abastecimento-loja', 'ativos-ti', 'central-solucoes', 'rh', 'formularios'];
 
+// a qual vertical de negocio (empresas.TIPOS_NEGOCIO_VALIDOS) cada secao
+// pertence - usado pra nao mostrar (no checklist de permissoes e no menu)
+// modulo que nao faz sentido pra empresa daquele tipo, ex: uma clinica nao
+// vai ver "Sangria" nem uma franquia de comida vai ver "Prontuario" quando
+// esse tipo de negocio existir. '*' = secao "de infra", relevante pra
+// QUALQUER vertical (suporte, chamados, cofre, formularios administrativos
+// etc) - toda secao nova PRECISA entrar aqui tambem, ou fica invisivel pro
+// filtro de vertical mesmo estando em VALID_SECTIONS (falha "escondendo",
+// nao "vazando" - de proposito).
+const SECTION_VERTICAIS = {
+  monitor: ['alimentacao'], disputas: ['alimentacao'], fechamentos: ['alimentacao'],
+  lancamento: ['alimentacao'], sangria: ['alimentacao'], entregas: ['alimentacao'],
+  'entregas-lancamento': ['alimentacao'], ifood: ['alimentacao'], inventario: ['alimentacao'],
+  parque: ['alimentacao'], 'parque-checkin': ['alimentacao'], 'parque-loja': ['alimentacao'],
+  festas: ['alimentacao'], 'abastecimento-carrinho': ['alimentacao'], 'abastecimento-loja': ['alimentacao'],
+  cofre: ['*'], solicitacoes: ['*'], tecnico: ['*'], suporte: ['*'], manutencao: ['*'],
+  'ativos-ti': ['*'], 'central-solucoes': ['*'], rh: ['*'], formularios: ['*'],
+};
+function secoesDaVertical(tipoNegocio) {
+  return Object.entries(SECTION_VERTICAIS)
+    .filter(([, vs]) => vs.includes('*') || vs.includes(tipoNegocio))
+    .map(([s]) => s);
+}
+function verticalDaSecao(secao) {
+  return SECTION_VERTICAIS[secao] || ['*'];
+}
+
 // os 7 tipos de card que aparecem na Central - mesma lista de TIPOS_INFO em
 // central.html/central-historico.html. Igual ao cofre (vaultSubgroups) e
 // unidades: em branco significa SEM restrição (vê todos) - diferente do
@@ -617,6 +644,9 @@ async function criarCopiandoDe({ modeloId, email, username, senha }) {
 
 module.exports = {
   VALID_SECTIONS,
+  SECTION_VERTICAIS,
+  secoesDaVertical,
+  verticalDaSecao,
   separarNome,
   sugerirAcesso,
   criarCopiandoDe,
