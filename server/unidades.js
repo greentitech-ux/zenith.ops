@@ -26,7 +26,7 @@ const COLLECTION = db.collection('unidadesExtras');
 // "sem restrição". As unidades que já existem não têm esses campos e
 // continuam aparecendo em tudo, exatamente como antes.
 // ---------------------------------------------------------------
-const AREAS_VALIDAS = ['fechamento', 'entregas', 'estoque', 'parque', 'rh', 'noc', 'solicitacoes', 'monitor'];
+const AREAS_VALIDAS = ['fechamento', 'entregas', 'estoque', 'parque', 'rh', 'noc', 'solicitacoes', 'monitor', 'formularios'];
 const TIPOS_SOLICITACAO_VALIDOS = ['estorno', 'ajuste-fechamento', 'compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota'];
 
 function sanitizarLista(entrada, validos) {

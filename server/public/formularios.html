@@ -124,6 +124,48 @@
     <h3>Formulários</h3>
     <div id="lista"><div class="vazio">carregando...</div></div>
   </div>
+
+  <!-- Cadastro das unidades (só Master). Razão social e CNPJ entram travados
+       no documento, e mudam por decisão de contabilidade - antes isso era
+       constante no código e exigia deploy pra corrigir um dígito. -->
+  <div class="panel hidden" id="painel-cadastro">
+    <h3>🏢 Unidades do formulário <span style="font-size:11px;color:var(--muted);font-weight:400;">(só Master)</span></h3>
+    <p class="fi-sub" style="margin:-4px 0 10px;">Razão social e CNPJ que entram travados no documento. Vincule cada uma à unidade do Zenith — é isso que decide quem pode emitir formulário por ela.</p>
+    <div id="cad-lista"><div class="vazio">carregando...</div></div>
+    <div style="margin-top:10px;"><button type="button" class="btn-ghost" onclick="abrirCadastro(null)">➕ Nova unidade</button></div>
+  </div>
+</div>
+
+<div id="cad-overlay" class="ov hidden">
+  <div class="ov-box" style="max-width:520px;">
+    <h3 id="cad-titulo">Nova unidade de formulário</h3>
+    <div class="grade-campos">
+      <div class="fi">
+        <label>Nome como aparece no formulário</label>
+        <input type="text" id="cad-unidade" placeholder="Ex: Saltiverso Patteo">
+        <span class="fi-sub">É o rótulo do seletor e do PDF. Formulários já emitidos guardam o nome de quando foram assinados.</span>
+      </div>
+      <div class="fi">
+        <label>Razão social</label>
+        <input type="text" id="cad-razao" placeholder="Ex: CIA ENTRETENIMENTO PATTEO OLINDA LTDA">
+      </div>
+      <div class="fi">
+        <label>CNPJ</label>
+        <input type="text" id="cad-cnpj" placeholder="00.000.000/0000-00">
+        <span class="fi-sub">Conferido pelo dígito verificador antes de salvar.</span>
+      </div>
+      <div class="fi">
+        <label>Unidade do Zenith</label>
+        <select id="cad-codigo"></select>
+        <span class="fi-sub">Quem tiver essa unidade liberada no acesso passa a ver esta opção. Sem vincular, só o Master enxerga.</span>
+      </div>
+    </div>
+    <div class="msg err hidden" id="cad-erro"></div>
+    <div class="acoes-form">
+      <button type="button" class="btn" onclick="salvarCadastro()">💾 Salvar</button>
+      <button type="button" class="btn-ghost" onclick="document.getElementById('cad-overlay').classList.add('hidden')">Fechar</button>
+    </div>
+  </div>
 </div>
 
 <!-- assinar sem sair da tela. O link por WhatsApp continua existindo pra
@@ -653,7 +695,109 @@ function atualizarUnidadeInfo(){
   const u = UNIDADES.find(x=>x.unidade===document.getElementById('f-unidade').value);
   document.getElementById('unidade-info').innerHTML = u
     ? `<b style="color:var(--text);">${escapeHtml(u.razaoSocial)}</b> · CNPJ <span style="font-family:var(--mono);color:var(--text);">${escapeHtml(u.cnpj)}</span> <span style="font-size:11px;">(preenchido automaticamente, sem edição)</span>`
-    : '';
+    : (UNIDADES.length ? '' : '<span style="color:var(--warn);">Nenhuma unidade liberada pra você emitir formulário. Peça ao Master pra liberar a sua unidade no seu acesso.</span>');
+}
+
+// ---- cadastro das unidades do formulário (só Master) ----
+let CADASTRO = [];
+let UNIDADES_ZENITH = [];
+let EDITANDO_CADASTRO = null;
+
+async function carregarCadastro(){
+  const [cadR, uniR] = await Promise.all([
+    fetch('/api/formularios/cadastro-unidades'),
+    fetch('/api/meta/unidades'),
+  ]);
+  if(!cadR.ok) return;
+  CADASTRO = await cadR.json();
+  UNIDADES_ZENITH = uniR.ok ? await uniR.json() : [];
+  renderCadastro();
+}
+
+function nomeDaUnidadeZenith(codigo){
+  const u = UNIDADES_ZENITH.find(x=>String(x.codigo)===String(codigo));
+  return u ? u.nome : codigo;
+}
+
+function renderCadastro(){
+  const el = document.getElementById('cad-lista');
+  if(!CADASTRO.length){ el.innerHTML = '<div class="vazio">nenhuma unidade cadastrada</div>'; return; }
+  el.innerHTML = CADASTRO.map(c=>{
+    // sem vínculo = ninguém além do Master consegue usar. Fica dito na cara,
+    // não escondido num tooltip - é o que faz o seletor da gerente ficar vazio
+    const vinculo = c.codigo
+      ? `<span style="color:var(--ok);">↔ ${escapeHtml(nomeDaUnidadeZenith(c.codigo))}</span>`
+      : '<span style="color:var(--warn);">⚠ sem unidade vinculada — só o Master vê</span>';
+    return `<div class="form-item${c.ativo===false?' cancelado':''}">
+      <div class="fi-titulo">${escapeHtml(c.unidade)} ${c.ativo===false?'<span class="badge cancelado">inativa</span>':''}</div>
+      <div class="fi-sub">${escapeHtml(c.razaoSocial)} · CNPJ ${escapeHtml(c.cnpj)}</div>
+      <div class="fi-sub">${vinculo}</div>
+      <div class="acoes-form">
+        <button type="button" class="btn-ghost" onclick="abrirCadastro('${c.id}')">✏️ editar</button>
+        <button type="button" class="btn-ghost" onclick="alternarCadastro('${c.id}', ${c.ativo===false})">${c.ativo===false?'✅ reativar':'🚫 desativar'}</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function abrirCadastro(id){
+  EDITANDO_CADASTRO = id;
+  const c = id ? CADASTRO.find(x=>x.id===id) : null;
+  document.getElementById('cad-titulo').textContent = c ? ('Editar · ' + c.unidade) : 'Nova unidade de formulário';
+  document.getElementById('cad-unidade').value = c ? c.unidade : '';
+  document.getElementById('cad-razao').value = c ? c.razaoSocial : '';
+  document.getElementById('cad-cnpj').value = c ? c.cnpj : '';
+  document.getElementById('cad-codigo').innerHTML = '<option value="">— sem vínculo (só o Master vê) —</option>' +
+    UNIDADES_ZENITH.map(u=>`<option value="${escapeHtml(u.codigo)}"${c && String(c.codigo)===String(u.codigo)?' selected':''}>${escapeHtml(u.nome)}${u.empresa?' · '+escapeHtml(u.empresa):''}</option>`).join('');
+  document.getElementById('cad-erro').classList.add('hidden');
+  document.getElementById('cad-overlay').classList.remove('hidden');
+}
+
+async function salvarCadastro(){
+  const err = document.getElementById('cad-erro');
+  const corpo = {
+    unidade: document.getElementById('cad-unidade').value,
+    razaoSocial: document.getElementById('cad-razao').value,
+    cnpj: document.getElementById('cad-cnpj').value,
+    codigo: document.getElementById('cad-codigo').value || null,
+  };
+  const url = EDITANDO_CADASTRO ? `/api/formularios/cadastro-unidades/${EDITANDO_CADASTRO}` : '/api/formularios/cadastro-unidades';
+  try{
+    const r = await fetch(url, { method: EDITANDO_CADASTRO?'PUT':'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo) });
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.error || 'Erro ao salvar.');
+    document.getElementById('cad-overlay').classList.add('hidden');
+    await carregarCadastro();
+    await recarregarUnidadesDoSeletor();
+  }catch(e){ err.textContent = e.message; err.classList.remove('hidden'); }
+}
+
+async function alternarCadastro(id, ativo){
+  const r = await fetch(`/api/formularios/cadastro-unidades/${id}/ativo`, {
+    method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ativo }),
+  });
+  if(!r.ok){ const d = await r.json().catch(()=>({})); alert(d.error || 'Não consegui salvar.'); return; }
+  await carregarCadastro();
+  await recarregarUnidadesDoSeletor();
+}
+
+// o seletor de unidade tem que refletir o cadastro na hora, sem F5 - quem
+// acabou de cadastrar quer emitir o formulário em seguida
+async function recarregarUnidadesDoSeletor(){
+  const r = await fetch('/api/formularios/unidades');
+  UNIDADES = r.ok ? await r.json() : [];
+  preencherSeletorUnidades();
+}
+
+function preencherSeletorUnidades(){
+  const sel = document.getElementById('f-unidade');
+  sel.innerHTML = UNIDADES.map(u=>`<option value="${escapeHtml(u.unidade)}">${escapeHtml(u.unidade)}</option>`).join('');
+  // seletor vazio não pode ser um select em branco: quem abre a tela precisa
+  // saber que é falta de liberação, e a quem pedir
+  const semUnidade = !UNIDADES.length;
+  sel.disabled = semUnidade;
+  if(semUnidade) sel.innerHTML = '<option value="">nenhuma unidade liberada pra você</option>';
+  atualizarUnidadeInfo();
 }
 
 async function boot(){
@@ -669,10 +813,13 @@ async function boot(){
   // (auth.requireMaster) - aqui é pra não mostrar botão que ia dar 403
   SOU_MASTER = meR.ok ? ((await meR.json()).role === 'master') : false;
   document.getElementById('raiz').classList.remove('hidden');
-  document.getElementById('f-unidade').innerHTML = UNIDADES.map(u=>`<option value="${escapeHtml(u.unidade)}">${escapeHtml(u.unidade)}</option>`).join('');
-  atualizarUnidadeInfo();
+  preencherSeletorUnidades();
   renderTipos();
   carregarLista();
+  if(SOU_MASTER){
+    document.getElementById('painel-cadastro').classList.remove('hidden');
+    carregarCadastro();
+  }
 }
 boot();
 </script>
