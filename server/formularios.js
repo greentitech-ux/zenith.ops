@@ -477,6 +477,71 @@ async function assinar(id, token, { nome, imagem } = {}) {
   return { ok: true, chave, completo };
 }
 
+// ---------------------------------------------------------------------
+// CORREÇÃO E CANCELAMENTO (só Master). Antes disso, formulário lançado
+// errado não tinha saída nenhuma pela tela: o jeito era deixar lá parado
+// pra sempre ou apagar por fora. As duas ações abaixo são diferentes de
+// propósito - editar CORRIGE o conteúdo, cancelar TIRA DE CIRCULAÇÃO sem
+// apagar o registro (o Ticket # continua existindo e continua ligado a
+// esse formulário; um número de ticket que some vira buraco na sequência
+// da Central).
+const STATUS_CANCELADO = 'CANCELADO';
+
+// A regra que manda aqui: assinatura vale pelo conteúdo que a pessoa VIU
+// na hora de assinar. Se o Master muda valor, favorecido ou linha depois,
+// a assinatura que já estava lá passaria a cobrir um documento diferente
+// do que foi assinado - o que é justamente o que um formulário de
+// pagamento não pode fazer. Então mudança de conteúdo DESCARTA as
+// assinaturas e gera links novos; quem já assinou assina de novo.
+// Salvar sem mudar nada não mexe em assinatura nenhuma (senão abrir pra
+// conferir e fechar já custaria as assinaturas coletadas).
+async function editar(id, { campos, linhas, porEmail } = {}) {
+  const r = await getOne(id);
+  if (!r) throw new Error('Formulário não encontrado.');
+  if (r.status === STATUS_AGUARDANDO) throw new Error('Esse formulário ainda está esperando o solicitante preencher - não há conteúdo pra editar. Cancele o link se precisar refazer.');
+  if (r.status === STATUS_CANCELADO) throw new Error('Formulário cancelado não pode ser editado.');
+  const modelo = TIPOS[r.tipo];
+  if (!modelo) throw new Error('Tipo de formulário inválido.');
+  const cadastro = UNIDADES_FORM.find((u) => u.unidade === r.unidade);
+  if (!cadastro) throw new Error('A unidade desse formulário não está mais cadastrada.');
+
+  const { camposOk, linhasOk, valorTotal } = montarConteudo(modelo, cadastro, campos, linhas);
+  const mudou = JSON.stringify([camposOk, linhasOk]) !== JSON.stringify([r.campos, r.linhas]);
+  if (!mudou) return { ...(await detalhar(id)), assinaturasDescartadas: 0, semMudanca: true };
+
+  const descartadas = Object.values(r.assinaturas || {}).filter((a) => a.imagem).length;
+  await COLLECTION.doc(id).update({
+    campos: camposOk, linhas: linhasOk, valorTotal,
+    assinaturas: montarAssinaturas(modelo, linhasOk),
+    status: 'PENDENTE',
+    editadoEm: new Date().toISOString(), editadoPorEmail: porEmail || null,
+  });
+  cache.invalidar();
+  await salvarFavorecido(camposOk);
+  return { ...(await detalhar(id)), assinaturasDescartadas: descartadas, semMudanca: false };
+}
+
+// cancelar não apaga: o registro fica, com motivo e autor, e some do
+// caminho de quem ia assinar. Zerar o token de cada slot é o que mata o
+// link que já foi pro WhatsApp de alguém - sem token, chaveDoToken não
+// acha o slot e a página pública devolve "link inválido ou revogado",
+// exatamente como um formulário que nunca existiu.
+async function cancelar(id, { motivo, porEmail } = {}) {
+  const r = await getOne(id);
+  if (!r) throw new Error('Formulário não encontrado.');
+  if (r.status === STATUS_AGUARDANDO) throw new Error('Esse é um link de preenchimento - use "Cancelar link".');
+  if (r.status === STATUS_CANCELADO) throw new Error('Esse formulário já está cancelado.');
+  const assinaturas = {};
+  Object.entries(r.assinaturas || {}).forEach(([chave, a]) => { assinaturas[chave] = { ...a, token: null }; });
+  await COLLECTION.doc(id).update({
+    assinaturas, status: STATUS_CANCELADO,
+    canceladoEm: new Date().toISOString(), canceladoPorEmail: porEmail || null,
+    motivoCancelamento: limpar(motivo, 200) || null,
+  });
+  cache.invalidar();
+  return { id, status: STATUS_CANCELADO };
+}
+
 // só Master apaga (formulário financeiro é registro - apagar é exceção)
 async function remover(id) {
   await COLLECTION.doc(id).delete();
@@ -586,6 +651,16 @@ function gerarPdf(r, res) {
   }
   y += 22;
 
+  // formulário cancelado sai carimbado: o PDF circula por fora do sistema
+  // (WhatsApp, email, impresso), então quem receber uma cópia antiga tem
+  // que enxergar na cara que aquele documento não vale mais
+  if (r.status === STATUS_CANCELADO) {
+    doc.rect(X, y, LARGURA, 16).fillAndStroke('#7a1d1d', '#7a1d1d');
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#fff')
+      .text(`CANCELADO${r.motivoCancelamento ? ` · ${r.motivoCancelamento}` : ''}`, X, y + 4, { width: LARGURA, align: 'center' });
+    y += 16;
+  }
+
   // larguras das colunas: VALOR fixa, ASSINATURA (diárias) fixa, DESCRIÇÃO
   // ganha o dobro do peso, o resto divide por igual
   const colunas = [...modelo.colunas];
@@ -666,6 +741,6 @@ function gerarPdf(r, res) {
   doc.end();
 }
 
-module.exports = { TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, remover, gerarPdf, chaveDoToken, parseValor,
+module.exports = { TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, editar, cancelar, remover, gerarPdf, chaveDoToken, parseValor,
   criarParaPreenchimento, vistaPreenchimento, salvarPreenchimento, cancelarPreenchimento,
 };

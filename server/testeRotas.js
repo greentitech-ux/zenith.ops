@@ -2676,6 +2676,77 @@ setTimeout(async () => {
   if (!okRotulos) ruins += 1;
   console.log(`${okRotulos ? '✓' : '✗'} Formulários: "Favorecido"/"Responsável" em tudo - tela, assinatura e PDF, inclusive nos já criados`);
 
+  // ------------------------------------------------------------------
+  // Master corrige ou cancela um formulário já lançado (pedido do Master:
+  // "como master posso editar ou cancelar"). O que precisa ficar provado
+  // aqui não é o CRUD - é o efeito colateral que importa: cancelar tem que
+  // MATAR o link de assinatura que já foi pro WhatsApp de alguém, e editar
+  // tem que DESCARTAR assinatura já coletada (assinatura vale pelo
+  // documento que a pessoa viu).
+  let okEditarCancelar = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const form = require('/home/user/adyen-monitor/server/formularios.js');
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const criado = await postarJson('/api/formularios', {
+      tipo: 'avulso', unidade: 'Spoleto Tacaruna',
+      campos: { favorecido: 'Padaria X', chavePix: 'p@x' },
+      linhas: [{ data: '21/08', descricao: 'Pão', valor: '70,00' }],
+    }, cab);
+    const f = criado.status === 200 ? JSON.parse(criado.corpo) : {};
+    // a rota nunca devolve o token cru - só o LINK com ele dentro (é o que
+    // vai por WhatsApp). E cada edição gera token novo, então o token tem
+    // que ser relido depois de cada uma.
+    const tk = (lista, chave) => new URLSearchParams(String((lista.find((a) => a.chave === chave) || {}).link).split('?')[1]).get('t');
+
+    // corrigir o valor: a assinatura do favorecido, já coletada, cai fora
+    await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tk(f.assinaturas, 'favorecido'), nome: 'João', imagem: PNG });
+    const editado = await putJson(`/api/formularios/${f.id}`, {
+      campos: { favorecido: 'Padaria X', chavePix: 'p@x' },
+      linhas: [{ data: '21/08', descricao: 'Pão', valor: '90,00' }],
+    }, cab);
+    const dEdit = editado.status === 200 ? JSON.parse(editado.corpo) : {};
+    const depoisDaEdicao = await form.detalhar(f.id);
+
+    // salvar sem mudar nada não pode custar as assinaturas que sobraram
+    await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tk(dEdit.assinaturas, 'favorecido'), nome: 'João', imagem: PNG });
+    const semMudanca = await putJson(`/api/formularios/${f.id}`, {
+      campos: { favorecido: 'Padaria X', chavePix: 'p@x' },
+      linhas: [{ data: '21/08', descricao: 'Pão', valor: '90,00' }],
+    }, cab);
+    const dSem = semMudanca.status === 200 ? JSON.parse(semMudanca.corpo) : {};
+
+    // cancelar: o link do gerente (que nunca assinou) morre na hora
+    const tokenGerente = tk(dEdit.assinaturas, 'gerente');
+    const antesDoCancelamento = await pedir(`/api/formularios-publico/${f.id}?token=${tokenGerente}`);
+    const cancelado = await postarJson(`/api/formularios/${f.id}/cancelar`, { motivo: 'lançado em duplicidade' }, cab);
+    const depoisDoCancelamento = await pedir(`/api/formularios-publico/${f.id}?token=${tokenGerente}`);
+    const assinarDepois = await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tokenGerente, nome: 'Marcela', imagem: PNG });
+    const dCancelado = await form.detalhar(f.id);
+    const editarCancelado = await putJson(`/api/formularios/${f.id}`, { campos: {}, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }, cab);
+    const pdfCancelado = await pedirBinario(`/api/formularios/${f.id}/pdf`, cab);
+
+    const conferencias = {
+      'editar recalcula o total': editado.status === 200 && depoisDaEdicao.valorTotal === 90,
+      'editar descarta a assinatura que já estava lá': dEdit.assinaturasDescartadas === 1
+        && depoisDaEdicao.assinaturas.every((a) => !a.assinado),
+      'salvar sem mudar nada NÃO descarta assinatura': dSem.semMudanca === true
+        && (await form.detalhar(f.id)).assinaturas.filter((a) => a.assinado).length === 1,
+      'antes de cancelar, o link de assinatura funciona': antesDoCancelamento.status === 200,
+      'cancelar mata o link que já estava na mão de alguém': cancelado.status === 200
+        && depoisDoCancelamento.status === 404 && assinarDepois.status !== 200,
+      'o registro fica gravado, com motivo e Ticket #': dCancelado.status === 'CANCELADO'
+        && dCancelado.motivoCancelamento === 'lançado em duplicidade' && dCancelado.numeroTicket != null,
+      'formulário cancelado não pode ser editado': editarCancelado.status === 400,
+      'o PDF do cancelado sai carimbado': pdfCancelado.status === 200 && textoDoPdf(pdfCancelado.buffer).includes('CANCELADO'),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okEditarCancelar = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okEditarCancelar = false; console.log('  erro: ' + e.message); }
+  if (!okEditarCancelar) ruins += 1;
+  console.log(`${okEditarCancelar ? '✓' : '✗'} Formulários: Master corrige (descartando assinatura) ou cancela (matando o link) sem apagar o registro`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

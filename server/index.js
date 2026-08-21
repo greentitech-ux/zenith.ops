@@ -3033,6 +3033,29 @@ app.get('/api/formularios/:id/anexo/:indice', requireSection('formularios'), asy
   storage.streamArquivo(anexo.path, anexo.tipo, res);
 });
 
+// correção e cancelamento, só Master (ver formularios.js): editar refaz o
+// conteúdo e descarta as assinaturas já coletadas - assinatura vale pelo
+// que a pessoa viu; cancelar tira de circulação sem apagar o registro.
+app.put('/api/formularios/:id', auth.requireMaster, async (req, res) => {
+  try {
+    const dados = { campos: req.body.campos, linhas: req.body.linhas, porEmail: req.user.email };
+    if (await desviarSeQaMaster(req, res, 'formularios.editar', `Editar formulário ${req.params.id}`, { id: req.params.id, ...dados })) return;
+    res.json(formularioComLinks(await formularios.editar(req.params.id, dados)));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/formularios/:id/cancelar', auth.requireMaster, async (req, res) => {
+  try {
+    const dados = { motivo: req.body.motivo, porEmail: req.user.email };
+    if (await desviarSeQaMaster(req, res, 'formularios.cancelar', `Cancelar formulário ${req.params.id}`, { id: req.params.id, ...dados })) return;
+    res.json(await formularios.cancelar(req.params.id, dados));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.delete('/api/formularios/:id', auth.requireMaster, async (req, res) => {
   if (await desviarSeQaMaster(req, res, 'formularios.remover', `Excluir formulário ${req.params.id}`, { id: req.params.id })) return;
   res.json(await formularios.remover(req.params.id));
@@ -3482,6 +3505,8 @@ app.get('/api/users/relatorio.:formato(csv|pdf)', auth.requireMaster, async (req
 // ação sobrevive até um restart do servidor (fica só o tipo+payload
 // salvos, nunca uma função/closure).
 const EXECUTORES_QA = {
+  'formularios.editar': (p) => formularios.editar(p.id, { campos: p.campos, linhas: p.linhas, porEmail: p.porEmail }),
+  'formularios.cancelar': (p) => formularios.cancelar(p.id, { motivo: p.motivo, porEmail: p.porEmail }),
   'formularios.remover': (p) => formularios.remover(p.id),
   'pedidoSemanal.criarRegra': (p) => pedidoSemanal.criarRegra(p),
   'pedidoSemanal.editarRegra': (p) => pedidoSemanal.atualizarRegra(p.id, p),
