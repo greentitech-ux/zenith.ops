@@ -3006,6 +3006,14 @@ app.post('/api/formularios/link-preenchimento', requireSection('formularios'), a
   }
 });
 
+app.delete('/api/formularios/link-preenchimento/:id', requireSection('formularios'), async (req, res) => {
+  try {
+    res.json(await formularios.cancelarPreenchimento(req.params.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/formularios/:id', requireSection('formularios'), async (req, res) => {
   const f = await formularios.detalhar(req.params.id);
   if (!f) return res.status(404).json({ error: 'Formulário não encontrado.' });

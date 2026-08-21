@@ -2518,6 +2518,20 @@ setTimeout(async () => {
     const d = criado.status === 200 ? JSON.parse(criado.corpo) : {};
     const tk = d.tokenPreenchimento;
 
+    // clicar no botão de novo NÃO pode criar outro formulário nem queimar
+    // outro número de ticket - tem que devolver o mesmo link
+    const segundoClique = await postarJson('/api/formularios/link-preenchimento', {
+      tipo: 'reembolso', unidade: 'São Braz Ilha do Leite',
+    }, cab);
+    const d2 = segundoClique.status === 200 ? JSON.parse(segundoClique.corpo) : {};
+
+    // e cancelar o link tem que sumir com o formulário fantasma
+    const paraCancelar = JSON.parse((await postarJson('/api/formularios/link-preenchimento', {
+      tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
+    }, cab)).corpo);
+    const cancelou = await enviarJson('DELETE', `/api/formularios/link-preenchimento/${paraCancelar.id}`, {}, cab);
+    const listaPosCancel = JSON.parse((await pedir('/api/formularios', cab)).corpo);
+
     // o link é PÚBLICO (não exige login nem Basic Auth) e já traz a unidade
     const vista = await pedir(`/api/formularios-publico/preencher/${tk}`);
     const dv = vista.status === 200 ? JSON.parse(vista.corpo) : {};
@@ -2537,6 +2551,13 @@ setTimeout(async () => {
 
     const conferencias = {
       'a unidade gera o link já com Ticket #': criado.status === 200 && Number.isFinite(d.numeroTicket) && !!tk,
+      'clicar no botão de novo devolve O MESMO link (não cria formulário repetido)':
+        segundoClique.status === 200 && d2.id === d.id && d2.tokenPreenchimento === tk,
+      'e NÃO queima outro número de ticket': d2.numeroTicket === d.numeroTicket,
+      'o reaproveitamento é avisado, pra tela não fingir que gerou outro': d2.reaproveitado === true,
+      'dá pra cancelar um link ainda não preenchido': cancelou.status === 200,
+      'o formulário fantasma some da lista depois de cancelado':
+        !listaPosCancel.some((x) => x.id === paraCancelar.id),
       'nasce aguardando preenchimento, sem assinatura nenhuma':
         d.status === 'AGUARDANDO_PREENCHIMENTO' && (d.assinaturas || []).length === 0,
       'o link abre sem login e já vem com a unidade travada':
@@ -2550,6 +2571,10 @@ setTimeout(async () => {
       'o Ticket # continua o MESMO do momento em que o link foi gerado': depois.numeroTicket === d.numeroTicket,
       'o mesmo link não serve pra preencher duas vezes': reenvio.status === 400 && /já foi preenchido/.test(reenvio.corpo),
       'envio sem nenhuma linha é recusado': vazio.status === 400,
+      'depois de preenchido não dá mais pra "cancelar o link" (já é formulário de verdade)':
+        (await enviarJson('DELETE', `/api/formularios/link-preenchimento/${d.id}`, {}, cab)).status === 400,
+      'com o link já preenchido, o botão volta a gerar um link NOVO':
+        JSON.parse((await postarJson('/api/formularios/link-preenchimento', { tipo: 'reembolso', unidade: 'São Braz Ilha do Leite' }, cab)).corpo).id !== d.id,
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okLinkPreencher = !falhas.length;

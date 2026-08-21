@@ -169,10 +169,22 @@ async function gerarLinkPreenchimento(){
     if(!r.ok){ alert(d.error||'Não consegui gerar o link.'); return; }
     const link = location.origin + '/preencher.html?token=' + encodeURIComponent(d.tokenPreenchimento);
     const msg = `Preencha os dados do formulário aqui (Ticket #${d.numeroTicket}): ${link}`;
-    if(confirm(`Link gerado (Ticket #${d.numeroTicket}).\n\nOK = abrir o WhatsApp com a mensagem pronta.\nCancelar = só copiar o link.`)) whatsapp(msg);
+    // reaproveitado = já existia um link vivo pra esse tipo/unidade. Dizemos
+    // isso na cara: senão a pessoa acha que gerou outro e fica esperando um
+    // segundo formulário que não existe.
+    const cabecalho = d.reaproveitado
+      ? `Já existia um link aberto pra esse formulário (Ticket #${d.numeroTicket}) - é ele que vai de novo, pra não criar formulário repetido nem queimar outro número de ticket.`
+      : `Link gerado (Ticket #${d.numeroTicket}).`;
+    if(confirm(`${cabecalho}\n\nOK = abrir o WhatsApp com a mensagem pronta.\nCancelar = só copiar o link.`)) whatsapp(msg);
     else copiar(link);
     carregarLista();
   } finally { btn.disabled = false; btn.textContent = '🔗 Enviar link para o solicitante preencher'; }
+}
+async function cancelarLink(id, rotulo){
+  if(!confirm(`Cancelar o link de "${rotulo}"?\n\nO formulário some da lista e o número de ticket dele é descartado. Use isso quando gerou o link sem querer, ou quando precisa mandar um link novo pra outra pessoa.`)) return;
+  const r = await fetch('/api/formularios/link-preenchimento/'+encodeURIComponent(id), { method:'DELETE' });
+  if(!r.ok){ const d = await r.json().catch(()=>({})); alert(d.error||'Não consegui cancelar.'); return; }
+  carregarLista();
 }
 function addLinha(){
   const m = modelo();
@@ -280,6 +292,22 @@ function renderLista(){
   alvo.innerHTML = LISTA.map(f=>{
     const t = TIPOS.find(x=>x.tipo===f.tipo);
     const pendentes = f.assinaturas.filter(a=>!a.assinado).length;
+    // link gerado e ainda não preenchido: não tem linha, valor nem
+    // assinatura pra mostrar - o que importa é reenviar ou cancelar
+    if(f.status==='AGUARDANDO_PREENCHIMENTO'){
+      const link = location.origin + '/preencher.html?token=' + encodeURIComponent(f.tokenPreenchimento||'');
+      return `<div class="form-item" style="border-style:dashed;">
+        <div class="fi-titulo">${escapeHtml(t?t.rotulo:f.tipo)} · ${escapeHtml(f.unidade)}
+          <span class="badge" style="background:#1a2230;color:var(--muted);">#${f.numeroTicket ?? '—'}</span>
+          <span class="badge pendente">🔗 aguardando o solicitante preencher</span></div>
+        <div class="fi-sub">${fmtData(f.criadoEm)} · link enviado por ${escapeHtml(f.criadoPorEmail||'')}</div>
+        <div class="acoes-form">
+          <button type="button" class="btn-ghost" onclick="copiar('${link}')">🔗 Copiar link</button>
+          <button type="button" class="btn-ghost" onclick="whatsapp('Preencha os dados do formulário aqui (Ticket #${f.numeroTicket}): '+'${link}')">💬 WhatsApp</button>
+          <button type="button" class="btn-ghost" style="color:var(--bad);" onclick="cancelarLink('${f.id}','${escapeHtml(t?t.rotulo:f.tipo)}')">✕ Cancelar link</button>
+        </div>
+      </div>`;
+    }
     return `<div class="form-item">
       <div class="fi-titulo">${escapeHtml(t?t.rotulo:f.tipo)} · ${escapeHtml(f.unidade)}
         <span class="badge" style="background:#1a2230;color:var(--muted);">#${f.numeroTicket ?? '—'}</span>
