@@ -436,6 +436,7 @@ const SECTIONS = [ ['monitor','Monitor'], ['disputas','Relatórios/Disputas'], [
 const TIPOS_SOLICITACAO = [ ['estorno','💳 Estorno'], ['ajuste-fechamento','🧾 Ajuste de fechamento'], ['compra','🛒 Compra'], ['manutencao','🔧 Manutenção'], ['suporte-ti','💻 Suporte de TI'], ['pagamento','💸 Pagamento (despesa)'], ['nota','📄 Solicitação de Nota'], ['quebra-caixa','⚠️ Quebra de caixa'], ['desvio-estoque','📦⚠️ Desvio de estoque'] ];
 const UNIDADES_NOMES = {}; // preenchido no boot() a partir de /api/meta/unidades
 let UNIDADES = [];
+let EMPRESAS = []; // /api/empresas - ver server/empresas.js
 let VAULT_GROUPS = [];
 let VAULT_SUBGROUPS = [];
 let USERS = [];
@@ -537,19 +538,37 @@ function accordionChecklistSecoes(prefixo, checkedSet){
     `<span class="legend-actions" onclick="event.stopPropagation()"><button type="button" onclick="marcarTodos('${id}',true)">Marcar todos</button><button type="button" onclick="marcarTodos('${id}',false)">Desmarcar todos</button></span>`;
   return accordionWrap('Seções', headerExtra, `<div id="${id}">${corpo}</div>`);
 }
-// pedido do Master: acesso cruzando mais de uma empresa só se ELE escolher
-// isso de propósito - não é bloqueio de servidor (o Master já tem godmode
-// sobre tudo), é uma confirmação pra não cruzar empresa sem perceber. Marca
-// uma unidade de uma 2a empresa diferente das já marcadas -> confirma ou
-// desmarca de volta.
+// avisa quando a marcação de unidades cruza empresa. Dois casos, com pesos
+// bem diferentes:
+//
+//  1. o acesso TEM empresa vinculada (o seletor acima) e a unidade marcada é
+//     de outra: aí não é só um alerta - o servidor recorta essa unidade no
+//     login (ver requireAuth em auth.js), então marcar não adianta nada.
+//     Desmarca de volta e explica, em vez de deixar uma marcação que mente.
+//  2. o acesso NÃO tem empresa: a marcação vale, mas juntar unidade de duas
+//     empresas no mesmo acesso é coisa que o Master tem que querer de
+//     propósito - pede confirmação e segue o que ele responder.
 function wireUnidadesEmpresaGate(id){
   const el = document.getElementById(id);
   if(!el) return;
+  const prefixo = id.replace(/-unidades$/,'');
   el.addEventListener('change', (ev)=>{
     const cb = ev.target;
     if(!cb || cb.tagName!=='INPUT' || cb.type!=='checkbox' || !cb.checked) return;
     const unidade = UNIDADES.find(u=>u.codigo===cb.value);
     if(!unidade || !unidade.empresa) return;
+
+    const empresaEscolhidaId = (document.getElementById(prefixo+'-empresa')||{}).value || '';
+    if(empresaEscolhidaId){
+      const nomeEscolhida = (EMPRESAS.find(e=>e.id===empresaEscolhidaId)||{}).nome || '';
+      if(nomeEscolhida && unidade.empresa !== nomeEscolhida){
+        alert(`"${unidade.nome}" é da empresa ${unidade.empresa}, e esse acesso está vinculado à ${nomeEscolhida}.\n\nO servidor ignora unidade de fora da empresa vinculada, então marcar aqui não teria efeito. Se essa pessoa é da ${unidade.empresa}, mude a empresa no seletor acima.`);
+        cb.checked = false;
+        return;
+      }
+      return;
+    }
+
     const outrasEmpresas = new Set(
       [...el.querySelectorAll('input[type=checkbox]:checked')]
         .filter(i=>i!==cb)
@@ -609,7 +628,7 @@ function caminhoSubgrupo(id){
 // Acoes marcar cada tag uma por uma ----------
 const CARGOS = [ ['','Sem cargo'], ['loja','🏬 Loja'], ['gerente','👔 Gerente'], ['assistente-gerente','🧑‍💼 Ass. Ger'], ['tecnico','🔧 Técnico'], ['suporte','🎧 Suporte'], ['manutencao','🛠️ Manutenção'], ['operador','👷 Operador'] ];
 function tagsFieldsetHtml(prefixo, tags){
-  tags = tags || { cargo:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, podeRhTodasUnidades:false, podeRhCadastrarEfetivado:false, sessaoLonga:false, qaUser:false };
+  tags = tags || { cargo:null, empresaId:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, podeRhTodasUnidades:false, podeRhCadastrarEfetivado:false, sessaoLonga:false, qaUser:false };
   const cargoHtml = CARGOS.map(([v,l])=>{
     const marcado = (tags.cargo||'')===v;
     return `<label><input type="radio" name="${prefixo}-cargo" value="${v}" ${marcado?'checked':''}> ${l}</label>`;
@@ -617,6 +636,14 @@ function tagsFieldsetHtml(prefixo, tags){
   return `
     <div class="group-heading">Cargo <span style="text-transform:none;color:var(--muted);">— rótulo + tela inicial ao entrar</span></div>
     <div class="checks">${cargoHtml}</div>
+    <div class="group-heading" style="margin-top:10px;">Empresa <span style="text-transform:none;color:var(--muted);">— até onde vai o "vê tudo" do Admin</span></div>
+    <div style="margin:4px 0 2px;">
+      <select id="${prefixo}-empresa" style="width:100%;max-width:340px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;">
+        <option value="">— sem empresa (enxerga só as unidades marcadas abaixo) —</option>
+        ${EMPRESAS.map(e=>`<option value="${e.id}" ${tags.empresaId===e.id?'selected':''}>${e.nome}</option>`).join('')}
+      </select>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px;">Vinculando a uma empresa, esse acesso passa a enxergar <b>só</b> as unidades dela — inclusive se for Admin. Unidade marcada abaixo que não pertença a essa empresa é ignorada pelo servidor.</div>
+    </div>
     <div class="group-heading" style="margin-top:10px;">Acessos extras <span style="text-transform:none;color:var(--muted);">— liberam uma ação sem precisar dar Admin</span></div>
     <div class="checks">
       <label><input type="checkbox" id="${prefixo}-tag-admin" ${tags.isAdmin?'checked':''}> ⭐ Admin (aprova/recusa na Central)</label>
@@ -632,6 +659,7 @@ function tagsFieldsetHtml(prefixo, tags){
 function lerTagsForm(prefixo){
   return {
     cargo: (document.querySelector(`input[name="${prefixo}-cargo"]:checked`)||{}).value || null,
+    empresaId: (document.getElementById(prefixo+'-empresa')||{}).value || null,
     isAdmin: document.getElementById(prefixo+'-tag-admin').checked,
     podeCatalogoEstoque: document.getElementById(prefixo+'-tag-catalogo-estoque').checked,
     podeCatalogoInsumos: document.getElementById(prefixo+'-tag-catalogo-insumos').checked,
@@ -650,6 +678,7 @@ async function salvarTagsUsuario(id, tags){
   const respostas = await Promise.all([
     fetch('/api/users/'+id+'/cargo', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cargo: tags.cargo})}),
     fetch('/api/users/'+id+'/is-admin', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({isAdmin: tags.isAdmin})}),
+    fetch('/api/users/'+id+'/empresa', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({empresaId: tags.empresaId})}),
     fetch('/api/users/'+id+'/catalogo-estoque', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeCatalogoEstoque: tags.podeCatalogoEstoque})}),
     fetch('/api/users/'+id+'/catalogo-insumos', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeCatalogoInsumos: tags.podeCatalogoInsumos})}),
     fetch('/api/users/'+id+'/cadastrar-operadores', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeCadastrarOperadores: tags.podeCadastrarOperadores})}),
@@ -680,12 +709,14 @@ async function boot(){
     carregarAprovacoesQa();
   }
 
-  const [unidades, groups, subgroups] = await Promise.all([
+  const [unidades, groups, subgroups, empresas] = await Promise.all([
     fetch('/api/meta/unidades').then(r=>r.json()),
     fetch('/api/vault/groups').then(r=>r.json()),
     fetch('/api/vault/subgroups').then(r=>r.json()),
+    fetch('/api/empresas').then(r=>r.json()).catch(()=>[]),
   ]);
   UNIDADES = unidades; VAULT_GROUPS = groups; VAULT_SUBGROUPS = subgroups;
+  EMPRESAS = Array.isArray(empresas) ? empresas : [];
   UNIDADES.forEach(u=>{ UNIDADES_NOMES[u.codigo] = u.nome; });
 
   renderCategoriasPermissao('c', null, null);
@@ -1029,6 +1060,10 @@ function renderUsers(){
     if (u.qaUser) tags.push(`<span class="badge qa" title="Sempre vê/cria todos os tipos de solicitação na Central; tudo que criar sai marcado TESTE">🧪 QA User</span>`);
     if (u.cargo) tags.push(`<span class="badge ${u.cargo}" title="Tag de cargo - também define a tela inicial da pessoa ao entrar no app">${({loja:'🏬 loja', gerente:'👔 gerente', tecnico:'🔧 técnico', suporte:'🎧 suporte', manutencao:'🛠️ manutenção'})[u.cargo]||u.cargo}</span>`);
     if (u.isAdmin) tags.push(`<span class="badge admin" title="Pode aprovar/rejeitar solicitações da Central, junto com o Master">⭐ admin</span>`);
+    if (u.empresaId) {
+      const nomeEmp = (EMPRESAS.find(e=>e.id===u.empresaId)||{}).nome || u.empresaId;
+      tags.push(`<span class="badge" title="Só enxerga as unidades dessa empresa - inclusive se for Admin">🏢 ${nomeEmp}</span>`);
+    }
     if (u.podeCatalogoEstoque) tags.push(`<span class="badge catalogo" title="Pode gerenciar o Catálogo do Estoque">📦 catálogo</span>`);
     if (u.podeCatalogoInsumos) tags.push(`<span class="badge catalogo" title="Pode gerenciar o cadastro de insumos do Abastecimento do Carrinho">🥤 insumos</span>`);
     if (u.podeCadastrarOperadores) tags.push(`<span class="badge catalogo" title="Pode cadastrar operadores (login local) do Abastecimento do Carrinho">👥 operadores</span>`);
@@ -1311,7 +1346,7 @@ function editarPermissoes(id){
   EDITING_USER = id;
   document.getElementById('perm-title').textContent = 'Permissões de ' + u.email;
   const perms = u.permissions || {sections:[],unidades:[],vaultSubgroups:[],tiposSolicitacao:[]};
-  renderCategoriasPermissao('p', perms, { cargo: u.cargo||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeRhTodasUnidades: !!u.podeRhTodasUnidades, podeRhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado, sessaoLonga: !!u.sessaoLonga });
+  renderCategoriasPermissao('p', perms, { cargo: u.cargo||null, empresaId: u.empresaId||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeRhTodasUnidades: !!u.podeRhTodasUnidades, podeRhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado, sessaoLonga: !!u.sessaoLonga });
   document.getElementById('perm-err').classList.add('hidden');
   permOverlay.classList.add('show');
 }

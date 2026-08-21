@@ -1471,6 +1471,12 @@ app.get('/api/me', async (req, res) => {
     isQaUser: req.isQaUser,
     ehTimeSuporte: ehSuporte,
     verticaisDoUsuario,
+    empresaId: req.empresaId,
+    // nome da empresa pra tela mostrar de quem esse acesso é (null = sem
+    // empresa vinculada, que hoje significa "enxerga como sempre enxergou")
+    empresaNome: req.empresaId
+      ? ((await empresas.list()).find((e) => e.id === req.empresaId) || {}).nome || null
+      : null,
   });
 });
 
@@ -2445,7 +2451,7 @@ async function contextoPedidoSemanal() {
 // demais so veem as unidades do proprio acesso - o lembrete e uma cobranca
 // da loja, nao um placar publico
 function filtrarUnidadesDoUsuario(req, lista) {
-  if (req.isMaster || req.isAdmin) return lista;
+  if (req.isMaster || req.isAdmin) return auth.filtrarPorEmpresa(req, lista, 'codigo');
   const permitidas = new Set((req.permissions && req.permissions.unidades) || []);
   return lista.filter((u) => permitidas.has(u.codigo));
 }
@@ -2496,8 +2502,9 @@ app.post('/api/pedido-semanal/:codigo/confirmar', uploadPedidoSemanal.single('ar
 app.get('/api/pedido-semanal/:codigo/arquivo', async (req, res) => {
   const registro = await pedidoSemanal.buscarConfirmacao(req.params.codigo, String(req.query.data || ''));
   if (!registro || !registro.arquivo) return res.sendStatus(404);
-  const podeVer = req.isMaster || req.isAdmin
-    || ((req.permissions && req.permissions.unidades) || []).includes(registro.unidade);
+  const podeVer = auth.filtrarPorEmpresa(req, [registro]).length
+    && (req.isMaster || req.isAdmin
+      || ((req.permissions && req.permissions.unidades) || []).includes(registro.unidade));
   if (!podeVer) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
   storage.streamArquivo(registro.arquivo.path, registro.arquivo.tipo, res);
 });
@@ -3439,6 +3446,7 @@ const EXECUTORES_QA = {
   'usuarios.ativo': (p) => users.setActive(p.id, p.active),
   'usuarios.horario': (p) => users.updateHorarioPermitido(p.id, p.horarioPermitido),
   'usuarios.isAdmin': (p) => users.updateIsAdmin(p.id, p.isAdmin),
+  'usuarios.empresa': (p) => users.updateEmpresa(p.id, p.empresaId),
   'usuarios.qaUser': (p) => users.updateQaUser(p.id, p.qaUser),
   'usuarios.catalogoEstoque': (p) => users.updatePodeCatalogoEstoque(p.id, p.valor),
   'usuarios.catalogoInsumos': (p) => users.updatePodeCatalogoInsumos(p.id, p.valor),
@@ -3745,6 +3753,20 @@ app.put('/api/users/:id/is-admin', auth.requireMaster, async (req, res) => {
   try {
     if (await desviarSeQaMaster(req, res, 'usuarios.isAdmin', `${req.body.isAdmin ? 'Dar' : 'Tirar'} Admin do acesso ${req.params.id}`, { id: req.params.id, isAdmin: req.body.isAdmin })) return;
     res.json(await users.updateIsAdmin(req.params.id, req.body.isAdmin));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// vincula o acesso a uma empresa - e o que limita ate onde vai o "ve tudo"
+// de um Admin (ver escopoDeUnidades em auth.js). Vazio desvincula.
+app.put('/api/users/:id/empresa', auth.requireMaster, async (req, res) => {
+  try {
+    const empresaId = req.body.empresaId || null;
+    const nome = empresaId ? ((await empresas.list()).find((e) => e.id === empresaId) || {}).nome : null;
+    const resumo = empresaId ? `Vincular o acesso ${req.params.id} à empresa ${nome || empresaId}` : `Desvincular o acesso ${req.params.id} de qualquer empresa`;
+    if (await desviarSeQaMaster(req, res, 'usuarios.empresa', resumo, { id: req.params.id, empresaId })) return;
+    res.json(await users.updateEmpresa(req.params.id, empresaId));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -5446,7 +5468,7 @@ app.post('/api/parque/checkins/:id/solicitar-edicao', requireAnySection('parque'
 
 app.get('/api/parque/checkins/edicoes', requireSection('parque'), async (req, res) => {
   const todas = await parque.listarEdicoes();
-  if (req.isMaster || req.isAdmin) return res.json(todas);
+  if (req.isMaster || req.isAdmin) return res.json(auth.filtrarPorEmpresa(req, todas));
   // Gerente ve os pedidos das unidades dele (pra poder decidir); os demais
   // acompanham so os proprios pedidos
   if (req.user && users.ehCargoGerente(req.user.cargo)) {
@@ -5538,7 +5560,9 @@ const METODOS_PARQUE_LABEL = { dinheiro: 'Dinheiro', pix: 'Pix', debito: 'Débit
 app.get('/api/parque/financeiro.:formato(csv|pdf)', requireSection('parque'), async (req, res) => {
   const ehGestor = req.isMaster || req.isAdmin || (req.user && users.ehCargoGerente(req.user.cargo));
   if (!ehGestor) return res.status(403).json({ error: 'Só o Gerente da unidade ou o Master/Admin acessam o financeiro.' });
-  let lista = (req.isMaster || req.isAdmin) ? await parque.listAll() : await parque.listByUnidades(req.permissions.unidades || []);
+  let lista = (req.isMaster || req.isAdmin)
+    ? auth.filtrarPorEmpresa(req, await parque.listAll())
+    : await parque.listByUnidades(req.permissions.unidades || []);
   const { unidade, inicio, fim } = req.query;
   lista = lista
     .filter((c) => (!unidade || c.unidade === unidade) && (!inicio || c.dataUtilizacao >= inicio) && (!fim || c.dataUtilizacao <= fim))
@@ -5844,7 +5868,7 @@ app.post('/api/rh/funcionarios/mesclar-duplicados', auth.requireMaster, async (r
 });
 
 app.get('/api/rh/funcionarios', requireSection('rh'), async (req, res) => {
-  if (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) return res.json(await rh.listAll());
+  if (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) return res.json(auth.filtrarPorEmpresa(req, await rh.listAll()));
   res.json(await rh.listByUnidades(req.permissions.unidades || []));
 });
 
@@ -6223,26 +6247,26 @@ app.delete('/api/rh/checkins/:id', auth.requireMaster, async (req, res) => {
 app.get('/api/rh/checkins', requireSection('rh'), async (req, res) => {
   // Master/Admin/RH-todas-unidades: null = sem filtro de unidade (ver
   // rhCheckin.listByUnidadesData)
-  const unidades = (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) ? null : (req.permissions.unidades || []);
+  const unidades = (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) ? auth.escopoDeUnidades(req) : (req.permissions.unidades || []);
   const lista = await rhCheckin.listByUnidadesData(unidades, req.query.data);
   res.json(lista.map((c) => sanitizarCheckin(c, req.isMaster)));
 });
 
 app.get('/api/rh/checkins/abertos', requireSection('rh'), async (req, res) => {
-  const unidades = (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) ? null : (req.permissions.unidades || []);
+  const unidades = (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) ? auth.escopoDeUnidades(req) : (req.permissions.unidades || []);
   const lista = await rhCheckin.listAbertos(unidades);
   res.json(lista.map((c) => sanitizarCheckin(c, req.isMaster)));
 });
 
 app.get('/api/rh/checkins/resumo', requireSection('rh'), async (req, res) => {
-  const unidades = (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) ? null : (req.permissions.unidades || []);
+  const unidades = (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) ? auth.escopoDeUnidades(req) : (req.permissions.unidades || []);
   res.json(await rhCheckin.resumoSemana(unidades));
 });
 
 // contador individual (semana + total) por pessoa - usado nos cards de "Por
 // Unidade" e "Extras", separado do resumo global acima
 app.get('/api/rh/checkins/contagem-por-funcionario', requireSection('rh'), async (req, res) => {
-  const unidades = (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) ? null : (req.permissions.unidades || []);
+  const unidades = (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) ? auth.escopoDeUnidades(req) : (req.permissions.unidades || []);
   res.json(await rhCheckin.contagemPorFuncionario(unidades));
 });
 
@@ -6328,7 +6352,7 @@ app.post('/api/rh/advertencias', requireSection('rh'), upload.array('evidencias'
 });
 
 app.get('/api/rh/advertencias', requireSection('rh'), async (req, res) => {
-  if (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) return res.json(await rhAdvertencias.listAll());
+  if (req.isMaster || req.isAdmin || req.podeRhTodasUnidades) return res.json(auth.filtrarPorEmpresa(req, await rhAdvertencias.listAll()));
   res.json(await rhAdvertencias.listByUnidades(req.permissions.unidades || []));
 });
 
@@ -6893,7 +6917,7 @@ app.delete('/api/fechamentos/:id', auth.requireMaster, async (req, res) => {
 // pediu pode acompanhar o status do proprio pedido
 app.get('/api/fechamentos/edicoes', requireSection('lancamento'), async (req, res) => {
   const todas = await fechamentosLive.listarEdicoes();
-  if (req.isMaster || req.isAdmin) return res.json(todas);
+  if (req.isMaster || req.isAdmin) return res.json(auth.filtrarPorEmpresa(req, todas));
   res.json(todas.filter((p) => p.solicitadoPorId === req.user.id));
 });
 
@@ -7757,7 +7781,7 @@ async function processarAssinatura(file, chamadoId, pastaStorage) {
 const ehTimeSuporte = auth.ehTimeSuporte;
 
 app.get('/api/chamados', requireAnySection('tecnico', 'suporte'), async (req, res) => {
-  const todos = await chamadosTI.listAll();
+  const todos = auth.filtrarPorEmpresa(req, await chamadosTI.listAll());
   if (req.isMaster || req.isAdmin) return res.json(todos);
   if (auth.hasSection(req, 'suporte')) {
     return res.json(todos.filter((c) => chamadosTI.modalidadeDe(c) === 'remoto' || c.tecnicoId === req.user.id));
@@ -9578,7 +9602,7 @@ function ehResponsavelManutencao(chamado, userId) {
 }
 
 app.get('/api/chamados-manutencao', requireSection('manutencao'), async (req, res) => {
-  const todos = await chamadosManutencao.listAll();
+  const todos = auth.filtrarPorEmpresa(req, await chamadosManutencao.listAll());
   // Master e Admin veem TODOS os chamados (sem depender de estarem na lista
   // de responsaveis); quem executa ve so o que foi atribuido a ele
   if (req.isMaster || req.isAdmin) return res.json(todos);

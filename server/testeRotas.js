@@ -2137,11 +2137,11 @@ setTimeout(async () => {
     const authMod = require('/home/user/adyen-monitor/server/auth.js');
     await empresasMod.ensureEmpresasSeed();
     const todas = await empresasMod.list();
-    const mvpar = todas.find((e) => e.nome === 'MVPar');
+    const gbe = todas.find((e) => e.nome === 'GBE');
     const arcfood = todas.find((e) => e.nome === 'Arcfood');
 
     const donaArcfood = await empresasMod.empresaDaUnidade('19821');
-    const donaResto = await empresasMod.empresaDaUnidade('Dominos Bessa');
+    const donaGbe = await empresasMod.empresaDaUnidade('Dominos Bessa');
     const donaInexistente = await empresasMod.empresaDaUnidade('CodigoQueNaoExiste123');
 
     const cab = token ? { Authorization: 'Bearer ' + token } : {};
@@ -2152,35 +2152,63 @@ setTimeout(async () => {
 
     const suporteAtravessa = authMod.ehTimeSuporte({ isMaster: false, isAdmin: false, permissions: { sections: ['suporte'] } });
     const semSuporteNaoAtravessa = authMod.ehTimeSuporte({ isMaster: false, isAdmin: false, permissions: { sections: [] } });
-    const adminAtravessa = authMod.ehTimeSuporte({ isMaster: false, isAdmin: true, permissions: { sections: [] } });
 
     const fs4 = require('fs');
     const srcIndex4 = fs4.readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
     const srcLojaStatus = fs4.readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
 
     const conferencias = {
-      'o seed cria MVPar como empresa padrão': !!mvpar && mvpar.padrao === true,
-      'o seed cria Arcfood com os 4 códigos fechados': !!arcfood && arcfood.padrao === false
-        && ['19821', '19855', '19888', '19889'].every((c) => arcfood.unidades.includes(c)),
+      'o seed cria GBE com as unidades escolhidas uma a uma (sem catch-all)': !!gbe
+        && !gbe.padrao
+        && ['Dominos Bessa', 'Spoleto Shopping Recife', 'Saltiverso Patteo'].every((c) => gbe.unidades.includes(c)),
+      'GBE também lista os códigos da Adyen/Entregas das mesmas lojas (senão o Monitor sai vazio)':
+        !!gbe && ['DOM_19706', 'MMTirol Natal', 'Tirol Natal'].every((c) => gbe.unidades.includes(c)),
+      'o seed cria Arcfood com os códigos dela (Fechamento + Adyen)': !!arcfood && !arcfood.padrao
+        && ['19821', '19855', '19888', '19889', 'Mooca', 'DOM__19821'].every((c) => arcfood.unidades.includes(c)),
+      'nenhuma empresa é "padrão"/catch-all': todas.every((e) => !e.padrao),
       'empresaDaUnidade acha a Arcfood pelo código explícito': donaArcfood && donaArcfood.nome === 'Arcfood',
-      'empresaDaUnidade joga o resto pra empresa padrão (MVPar)': donaResto && donaResto.nome === 'MVPar',
-      'código totalmente desconhecido também cai no padrão (nunca fica órfão)': donaInexistente && donaInexistente.nome === 'MVPar',
+      'empresaDaUnidade acha o GBE pelo código explícito': donaGbe && donaGbe.nome === 'GBE',
+      'código que ninguém listou NÃO cai em empresa nenhuma (não entra no GBE por acidente)': donaInexistente === null,
       'GET /api/meta/unidades expõe a empresa de cada unidade': itemArcfood && itemArcfood.empresa === 'Arcfood'
-        && itemBessa && itemBessa.empresa === 'MVPar',
+        && itemBessa && itemBessa.empresa === 'GBE',
       'ehTimeSuporte deixa passar quem tem a seção suporte (sem ser Master)': suporteAtravessa === true,
       'ehTimeSuporte recusa quem não é Master/Admin/suporte': semSuporteNaoAtravessa === false,
-      'ehTimeSuporte também deixa passar Admin': adminAtravessa === true,
       'index.js não reimplementa mais a função local (usa auth.ehTimeSuporte)': /const ehTimeSuporte = auth\.ehTimeSuporte;/.test(srcIndex4)
         && !/function ehTimeSuporte\(req\) \{/.test(srcIndex4),
       'loja-status.html usa o campo do servidor em vez de re-derivar': /if\(!me\.ehTimeSuporte\)/.test(srcLojaStatus)
         && !/secoes\.includes\('suporte'\)/.test(srcLojaStatus),
+
+      // ---- o pedido central do Master: o Admin manda DENTRO da empresa dele
+      // e não enxerga a outra. Master e suporte seguem atravessando tudo.
+      'Master não tem teto de empresa': authMod.escopoDeUnidades({ isMaster: true }) === null,
+      'suporte não tem teto de empresa (atende loja de qualquer empresa)':
+        authMod.escopoDeUnidades({ permissions: { sections: ['suporte'] }, unidadesDaEmpresa: ['19821'] }) === null,
+      'Admin de uma empresa fica preso às unidades dela':
+        JSON.stringify(authMod.escopoDeUnidades({ isAdmin: true, permissions: { sections: [] }, unidadesDaEmpresa: ['19821'] })) === '["19821"]',
+      'acesso sem empresa vinculada continua como sempre foi (deploy não quebra ninguém)':
+        authMod.escopoDeUnidades({ isAdmin: true, permissions: { sections: [] }, unidadesDaEmpresa: null }) === null,
+      'Admin do GBE não vê dado da Arcfood, e vice-versa': (() => {
+        const dados = [{ unidade: '19821' }, { unidade: 'Dominos Bessa' }];
+        const comoArcfood = authMod.filtrarPorEmpresa({ isAdmin: true, permissions: { sections: [] }, unidadesDaEmpresa: arcfood.unidades }, dados);
+        const comoGbe = authMod.filtrarPorEmpresa({ isAdmin: true, permissions: { sections: [] }, unidadesDaEmpresa: gbe.unidades }, dados);
+        return comoArcfood.length === 1 && comoArcfood[0].unidade === '19821'
+          && comoGbe.length === 1 && comoGbe[0].unidade === 'Dominos Bessa';
+      })(),
+      'registro sem unidade não vaza pelo filtro':
+        authMod.filtrarPorEmpresa({ isAdmin: true, permissions: { sections: [] }, unidadesDaEmpresa: ['19821'] }, [{ semUnidade: 1 }]).length === 0,
+      'as rotas que davam a lista inteira pro Admin agora passam pelo filtro de empresa':
+        (srcIndex4.match(/auth\.filtrarPorEmpresa\(req,/g) || []).length >= 8,
+      'as 4 rotas de check-in do RH respeitam a empresa em vez de mandar null':
+        (srcIndex4.match(/req\.podeRhTodasUnidades\) \? auth\.escopoDeUnidades\(req\)/g) || []).length === 4,
+      'existe rota pro Master vincular um acesso a uma empresa': /\/api\/users\/:id\/empresa'/.test(srcIndex4)
+        && /'usuarios\.empresa':/.test(srcIndex4),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okEmpresas = !falhas.length;
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
   } catch (e) { okEmpresas = false; console.log('  erro: ' + e.message); }
   if (!okEmpresas) ruins += 1;
-  console.log(`${okEmpresas ? '✓' : '✗'} Empresas: isolamento entre negócios (seed MVPar/Arcfood, empresaDaUnidade, suporte atravessa tudo)`);
+  console.log(`${okEmpresas ? '✓' : '✗'} Empresas: isolamento entre negócios (GBE/Arcfood escolhidas a dedo, Admin preso à empresa dele, suporte atravessa tudo)`);
 
   // ------------------------------------------------------------------
   // Empresas: as 6 áreas que existiam no cadastro (unidades.js) mas não
