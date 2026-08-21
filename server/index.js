@@ -1581,6 +1581,21 @@ function broadcastParaUsuario(userId, event, data) {
   }
 }
 
+// Silenciar/atender o alarme crítico numa tela cala o alarme nas OUTRAS
+// sessões da MESMA pessoa (celular x computador). Entre abas do mesmo
+// navegador quem resolve é o BroadcastChannel, sem passar por aqui - esta
+// rota existe só pro caso de aparelhos diferentes (ver alarme-sync.js).
+//
+// broadcastParaUsuario filtra por req.user.id: eu só calo o MEU alarme.
+// Silenciar o de outra pessoa seria um jeito silencioso de fazer um alerta
+// crítico desaparecer da tela de quem deveria atender.
+//
+// Não grava nada: é um aviso ao vivo, sem estado pra guardar.
+app.post('/api/alarme/silenciado', (req, res) => {
+  broadcastParaUsuario(req.user.id, 'alarme-silenciado', { em: Date.now() });
+  res.json({ ok: true });
+});
+
 app.get('/api/stream', (req, res) => {
   res.set({
     'Content-Type': 'text/event-stream',
