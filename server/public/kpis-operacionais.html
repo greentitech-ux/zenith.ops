@@ -36,6 +36,15 @@
   .back{background:var(--panel2);border:1px solid var(--line);color:var(--muted);text-decoration:none;cursor:pointer;font-family:var(--sans);}
   .back:hover{color:var(--text);border-color:var(--accent);}
   .hidden{display:none!important;}
+  .ofensor{display:block;width:100%;text-align:left;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer;font-family:inherit;color:inherit;}
+  .ofensor:hover{border-color:var(--accent);}
+  .ofensor-topo{display:flex;justify-content:space-between;align-items:baseline;gap:10px;}
+  .ofensor-kpi{font-weight:700;font-size:13px;}
+  .ofensor-pct{font-family:var(--mono);font-size:13px;font-weight:800;}
+  .ofensor-barra{height:6px;background:var(--line);border-radius:99px;overflow:hidden;margin:7px 0 6px;}
+  .ofensor-barra i{display:block;height:100%;border-radius:99px;}
+  .ofensor-pe{font-size:11.5px;color:var(--muted);font-family:var(--mono);}
+  .ofensor-med{opacity:.75;}
   .empty{color:var(--muted);font-size:13px;padding:26px;text-align:center;border:1px dashed var(--line);border-radius:10px;background:var(--panel);}
 
   .painel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px;}
@@ -120,8 +129,22 @@
     </select>
   </div>
 
+  <!-- Ofensores primeiro: com 19 KPI's x 5 lojas, a matriz responde
+       "quanto deu cada coisa", mas não responde "onde eu olho primeiro".
+       Este painel responde só isso. -->
   <div class="painel">
-    <h2>Comparativo por loja <span class="n" id="matriz-info"></span></h2>
+    <h2>🔥 Indicadores mais ofensivos <span class="n" id="ofensores-info"></span></h2>
+    <div class="sub" style="margin-bottom:10px;" id="ofensores-legenda"></div>
+    <div id="ofensores"></div>
+  </div>
+
+  <div class="painel">
+    <h2>Comparativo por loja <span class="n" id="matriz-info"></span>
+      <span style="float:right;display:inline-flex;gap:6px;">
+        <button type="button" class="preset" onclick="exportar('csv')" title="Baixa a matriz do período em CSV">⬇️ CSV</button>
+        <button type="button" class="preset" onclick="exportar('pdf')" title="Baixa a matriz do período em PDF, com os ofensores no topo">📄 PDF</button>
+      </span>
+    </h2>
     <div class="sub" style="margin-bottom:10px;">Clique num KPI pra ver a evolução dele dia a dia no gráfico abaixo. <b>Tempo</b>, <b>OTD</b>, <b>Taxa</b> e <b>Média</b> são agregados por <b>média</b> do período; o resto por <b>soma</b> — a coluna diz qual foi usada.</div>
     <div class="rolagem"><table id="matriz"></table></div>
   </div>
@@ -161,6 +184,7 @@ let FECHAMENTOS = [];
 let CORES = {};         // unidade -> cor (fixa, atribuída na troca de grupo)
 let KPI_SEL = null;     // campo do KPI mostrado no gráfico
 let PRESET = 'mes';
+let OFENSORES = [];     // ranking calculado no último render (usado no export)
 
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent = s==null?'':String(s); return d.innerHTML; }
@@ -250,6 +274,143 @@ function renderMatriz(){
 }
 
 function escolherKpi(campo){ KPI_SEL = campo; render(); }
+
+// ---------------------------------------------------------------------
+// OFENSORES. Com 19 KPI's x 5 lojas a matriz mostra tudo e não aponta
+// nada. Aqui a pergunta é uma só: onde olhar primeiro.
+//
+// "Ofensivo" só tem sentido preciso quando se sabe pra que lado o KPI é
+// ruim - cancelamento alto é problema, OTD alto é ótimo, e o nome não
+// resolve isso. Por isso a direção é cadastrada no KPI (ver grupos.html).
+// Quando ela existe, o ranking aponta a loja com o PIOR desempenho.
+// Quando não existe ('neutro' - o caso de todo KPI antigo), o ranking cai
+// pra um critério que não depende dela e continua útil: qual loja está
+// mais LONGE da mediana do grupo. Isso não é o mesmo que "pior", e por
+// isso a legenda diz qual dos dois está valendo.
+//
+// Mediana e não média: uma loja muito fora puxaria a própria referência
+// que a gente usa pra medir o quanto ela está fora.
+function mediana(nums){
+  if(!nums.length) return null;
+  const ord = [...nums].sort((a,b)=>a-b);
+  const m = Math.floor(ord.length/2);
+  return ord.length % 2 ? ord[m] : (ord[m-1]+ord[m])/2;
+}
+
+function calcularOfensores(){
+  const linhas = linhasFiltradas();
+  const lojas = unidadesDoGrupo();
+  const out = [];
+  kpisDoGrupo().forEach(def => {
+    const modo = modoAgregacao(def);
+    const porLoja = valoresPorLoja(def.campo, linhas);
+    // só entra loja que preencheu: quem não lançou não é "pior", é ausente
+    const vals = lojas.map(u => ({ loja: u, v: agregar(porLoja[u], modo) })).filter(x => x.v != null);
+    if(vals.length < 2) return;   // sem comparação não há ofensor
+    const med = mediana(vals.map(x => x.v));
+    if(med == null) return;
+    const direcao = def.direcao || 'neutro';
+    let pior;
+    if(direcao === 'menor-melhor') pior = vals.reduce((a,b)=> b.v > a.v ? b : a);
+    else if(direcao === 'maior-melhor') pior = vals.reduce((a,b)=> b.v < a.v ? b : a);
+    else pior = vals.reduce((a,b)=> Math.abs(b.v-med) > Math.abs(a.v-med) ? b : a);
+    // base zero (mediana 0) não tem percentual que signifique alguma coisa:
+    // 0 -> 3 é "infinito por cento". Fica de fora em vez de virar um número
+    // enorme e falso no topo do ranking.
+    if(!med) return;
+    const desvio = Math.abs(pior.v - med) / Math.abs(med) * 100;
+    if(!Number.isFinite(desvio) || desvio < 1) return;
+    out.push({
+      campo: def.campo, kpi: def.label, loja: pior.loja, valor: pior.v,
+      mediana: med, desvio, direcao, modo,
+      acima: pior.v > med,
+    });
+  });
+  return out.sort((a,b) => b.desvio - a.desvio).slice(0, 8);
+}
+
+function renderOfensores(){
+  const alvo = document.getElementById('ofensores');
+  const info = document.getElementById('ofensores-info');
+  const legenda = document.getElementById('ofensores-legenda');
+  const lista = calcularOfensores();
+  OFENSORES = lista;
+
+  const comDirecao = kpisDoGrupo().filter(k => k.direcao && k.direcao !== 'neutro').length;
+  legenda.innerHTML = comDirecao
+    ? `Ordenado pelo <b>pior desempenho</b> de cada indicador, comparado à mediana das lojas do grupo. ${comDirecao} de ${kpisDoGrupo().length} KPI's têm a direção cadastrada — os demais entram por <b>divergência</b>.`
+    : `Nenhum KPI tem a direção cadastrada, então isto mostra <b>quem mais diverge da mediana</b> do grupo — não necessariamente quem está pior. Pra virar "pior de verdade", marque em <b>Grupos</b> se cada indicador é ruim quando sobe ou quando cai.`;
+
+  if(!lista.length){
+    info.textContent = '';
+    alvo.innerHTML = '<div class="empty">Sem divergência relevante no período — ou não há lojas suficientes com lançamento pra comparar.</div>';
+    return;
+  }
+  info.textContent = `top ${lista.length}`;
+
+  const maxD = Math.max(...lista.map(x => x.desvio));
+  alvo.innerHTML = lista.map(o => {
+    const larg = Math.max(4, (o.desvio / maxD) * 100);
+    const seta = o.acima ? '▲' : '▼';
+    const cor = o.direcao === 'neutro' ? 'var(--accent)' : '#ff6b6b';
+    return `<button type="button" class="ofensor" onclick="escolherKpi('${escapeHtml(o.campo)}')" title="Ver a evolução diária desse KPI">
+      <div class="ofensor-topo">
+        <span class="ofensor-kpi">${escapeHtml(o.kpi)}</span>
+        <span class="ofensor-pct">${seta} ${o.desvio.toFixed(0)}%</span>
+      </div>
+      <div class="ofensor-barra"><i style="width:${larg.toFixed(1)}%;background:${cor};"></i></div>
+      <div class="ofensor-pe">
+        <span style="color:${CORES[o.loja]||'var(--muted)'};">■</span> ${escapeHtml(o.loja)}
+        · ${escapeHtml(fmtValor(o.valor, o.modo))} <span class="ofensor-med">(mediana ${escapeHtml(fmtValor(o.mediana, o.modo))})</span>
+      </div>
+    </button>`;
+  }).join('');
+}
+
+// ---- exportar: manda a matriz JÁ CALCULADA pro servidor. O valor de cada
+// célula depende de escolhas que moram aqui (média x soma, override do
+// seletor, período) - recalcular no servidor criaria uma segunda fonte de
+// verdade, e o relatório poderia discordar da tela que a pessoa vê.
+async function exportar(formato){
+  const linhas = linhasFiltradas();
+  const lojas = unidadesDoGrupo();
+  const corpo = {
+    formato,
+    grupo: (GRUPO_ATUAL && GRUPO_ATUAL.nome) || 'Grupo',
+    inicio: document.getElementById('f-inicio').value,
+    fim: document.getElementById('f-fim').value,
+    lancamentos: linhas.length,
+    lojas,
+    linhas: kpisDoGrupo().map(def => {
+      const modo = modoAgregacao(def);
+      const porLoja = valoresPorLoja(def.campo, linhas);
+      return {
+        kpi: def.label,
+        agregacao: modo === 'media' ? 'média' : 'soma',
+        valores: lojas.map(u => fmtValor(agregar(porLoja[u], modo), modo) ?? ''),
+      };
+    }),
+    ofensores: (OFENSORES || []).slice(0, 3).map(o => ({
+      kpi: o.kpi, loja: o.loja, texto: `${o.acima ? '▲' : '▼'} ${o.desvio.toFixed(0)}%`,
+    })),
+  };
+  try{
+    const r = await fetch(`/api/kpis-operacionais/relatorio?formato=${encodeURIComponent(formato)}`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo),
+    });
+    if(!r.ok){ const d = await r.json().catch(()=>({})); alert(d.error || 'Não consegui gerar o arquivo.'); return; }
+    // blob + link temporário: o fetch já vai com o Authorization do wrapper,
+    // então não dá pra simplesmente abrir a URL numa aba nova
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (r.headers.get('Content-Disposition')||'').match(/filename="([^"]+)"/)?.[1]
+      || `kpis.${formato}`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }catch(e){ alert('Não consegui gerar o arquivo. Verifique a conexão.'); }
+}
 
 // linha por loja ao longo dos dias. Um eixo só (nunca dois) - se um dia
 // alguém quiser comparar dois KPI's de escalas diferentes, são dois
@@ -355,7 +516,7 @@ function ligarHover(alvo, ctx){
 }
 function maxDecimais(v){ return Number.isInteger(v) ? 0 : 1; }
 
-function render(){ renderMatriz(); renderTendencia(); }
+function render(){ renderMatriz(); renderOfensores(); renderTendencia(); }
 
 function marcarPresetManual(){
   PRESET = null;

@@ -60,6 +60,14 @@ const SOMA_EM_VALIDAS = new Set(['nao', 'faturamento', 'totalDeclarado']);
 // recomputarTotais em fechamentosLive.js, que e quem realmente aplica isso.
 const OPERACOES_VALIDAS = new Set(['soma', 'subtrai']);
 
+// pra que lado esse KPI é RUIM. Sem isso, "indicador mais ofensivo" não
+// tem como ser calculado: cancelamento alto é problema, OTD alto é ótimo, e
+// o sistema não tem como adivinhar qual é qual pelo nome. 'neutro' (padrão,
+// e o que todo KPI já cadastrado tem) significa "não sei a direção" - aí o
+// ranking de ofensores cai pra um critério que não depende dela: qual loja
+// está mais longe da mediana do grupo.
+const DIRECOES_VALIDAS = new Set(['neutro', 'maior-melhor', 'menor-melhor']);
+
 // usado pras 3 listas de campos extras (kpisExtras, canaisVendaExtras,
 // formasPagamentoExtras) - mesmo formato, mesma validacao. "tipo" so e
 // gravado quando informado (canais/formas nunca mandam, entao continuam sem
@@ -84,6 +92,7 @@ function sanitizarCamposExtras(lista) {
       usados.add(campo);
       const item = { campo, label };
       if (k?.tipo != null) item.tipo = TIPOS_KPI_VALIDOS.has(k.tipo) ? k.tipo : 'quantidade';
+      if (k?.direcao != null) item.direcao = DIRECOES_VALIDAS.has(k.direcao) ? k.direcao : 'neutro';
       if (k?.operacao != null) item.operacao = OPERACOES_VALIDAS.has(k.operacao) ? k.operacao : 'soma';
       if (k?.tambemNoOutroTotal != null) item.tambemNoOutroTotal = !!k.tambemNoOutroTotal;
       // campo que NAO sai no relatorio do PDV (Pix CNPJ, Outros...): mesmo na
