@@ -2071,8 +2071,13 @@ setTimeout(async () => {
         /'BRAVO'/.test(srcFormularios) && /'EMPRESARIAL'/.test(srcFormularios),
       'Banco/Agência/Conta viram UMA linha "DADOS BANCÁRIOS" no cabeçalho (igual ao papel), não 3 linhas soltas':
         /label: 'DADOS BANCÁRIOS'/.test(srcFormularios) && /combo:/.test(srcFormularios),
-      'o rótulo do Reembolso bate com o papel original ("NOME DO COLABORADOR", não "FAVORECIDO")':
-        /'NOME DO COLABORADOR'/.test(srcFormularios) && !/label: 'FAVORECIDO'/.test(srcFormularios),
+      // Esta conferência era o OPOSTO: exigia "NOME DO COLABORADOR", por
+      // fidelidade ao papel original. O Master mandou trocar depois - é
+      // "Favorecido" em todo formulário, inclusive na assinatura. A regra
+      // nova está no bloco de rótulos, mais abaixo; aqui fica só a trava de
+      // que o termo velho não volta por descuido.
+      'o Reembolso não usa mais "COLABORADOR" (virou Favorecido, por decisão do Master)':
+        !/'NOME DO COLABORADOR'/.test(srcFormularios),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okFormularios = !falhas.length;
@@ -2582,6 +2587,62 @@ setTimeout(async () => {
   } catch (e) { okLinkPreencher = false; console.log('  erro: ' + e.message); }
   if (!okLinkPreencher) ruins += 1;
   console.log(`${okLinkPreencher ? '✓' : '✗'} Formulários: link pro próprio solicitante preencher (a unidade escolhe: preenche ou envia o link)`);
+
+  // ------------------------------------------------------------------
+  // Nomenclatura dos formulários (pedido do Master): é "Favorecido", nunca
+  // "Colaborador", e "Responsável" no lugar de "Gestor imediato" - inclusive
+  // na assinatura. O ponto que exige cuidado: formulário JÁ GRAVADO
+  // congelou o rótulo antigo, então o teste cria um registro com o rótulo
+  // velho na mão e confere que ele passa a exibir o novo mesmo assim.
+  let okRotulos = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const form = require('/home/user/adyen-monitor/server/formularios.js');
+    const novo = await form.criar({
+      tipo: 'reembolso', unidade: 'São Braz Ilha do Leite',
+      campos: { colaborador: 'Fulano' }, linhas: [{ descricao: 'X', valor: '10,00' }],
+      criadoPorEmail: 'teste@teste.local',
+    });
+
+    // simula um formulário criado ANTES da renomeação: rótulos velhos gravados
+    const antigo = JSON.parse(JSON.stringify(DOCS.get('formularios/' + novo.id)));
+    antigo.id = 'form-rotulo-antigo';
+    antigo.assinaturas.colaborador.rotulo = 'Colaborador';
+    antigo.assinaturas.gestor.rotulo = 'Gestor imediato';
+    DOCS.set('formularios/form-rotulo-antigo', antigo);
+    form.invalidarCacheTeste && form.invalidarCacheTeste();
+
+    const tokenColab = novo.assinaturas.find((a) => a.chave === 'colaborador').token;
+    const vistaAss = await pedir(`/api/formularios-publico/${novo.id}?token=${tokenColab}`);
+    const dv = vistaAss.status === 200 ? JSON.parse(vistaAss.corpo) : {};
+    const detAntigo = await form.detalhar('form-rotulo-antigo');
+    const pdf = await pedirBinario(`/api/formularios/${novo.id}/pdf`, cab);
+    const textoPdf = pdf.status === 200 ? textoDoPdf(pdf.buffer) : '';
+    const fonte = require('fs').readFileSync(require('path').join(__dirname, 'formularios.js'), 'utf8');
+
+    const rot = (d, chave) => (d.assinaturas.find((a) => a.chave === chave) || {}).rotulo;
+    const conferencias = {
+      'o campo do Reembolso diz FAVORECIDO, não COLABORADOR':
+        /NOME DO FAVORECIDO/.test(fonte) && !/NOME DO COLABORADOR/.test(fonte),
+      'a assinatura do favorecido chama "Favorecido"': rot(novo, 'colaborador') === 'Favorecido',
+      'a outra assinatura chama "Responsável", não "Gestor imediato"': rot(novo, 'gestor') === 'Responsável',
+      'a tela pública de assinatura também mostra o nome novo':
+        vistaAss.status === 200 && dv.meuRotulo === 'Favorecido'
+        && (dv.assinaturas || []).some((a) => a.rotulo === 'Responsável'),
+      'formulário ANTIGO (rótulo velho gravado) passa a exibir o novo':
+        rot(detAntigo, 'colaborador') === 'Favorecido' && rot(detAntigo, 'gestor') === 'Responsável',
+      'o PDF sai com os nomes novos':
+        textoPdf.includes('Favorecido') && textoPdf.includes('Responsável')
+        && !textoPdf.includes('Gestor imediato'),
+      'as CHAVES não mudaram (registro antigo continua ligado ao campo/assinatura)':
+        !!novo.assinaturas.find((a) => a.chave === 'colaborador') && !!novo.assinaturas.find((a) => a.chave === 'gestor'),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okRotulos = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okRotulos = false; console.log('  erro: ' + e.message); }
+  if (!okRotulos) ruins += 1;
+  console.log(`${okRotulos ? '✓' : '✗'} Formulários: "Favorecido"/"Responsável" em tudo - tela, assinatura e PDF, inclusive nos já criados`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

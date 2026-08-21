@@ -3,7 +3,7 @@
 // Diárias, Pagamento Avulso, Reembolso) - reprodução dos formulários em
 // papel do "BESSA DOM FORMS" (AppSheet), só que com o problema central
 // resolvido DENTRO do app: a ASSINATURA. Cada papel que precisa assinar
-// (gerente, fornecedor, colaborador, e no caso das diárias cada diarista da
+// (gerente, fornecedor, favorecido, e no caso das diárias cada diarista da
 // tabela) ganha um LINK próprio (token de uso pessoal, mesmo espírito do
 // linkAcao dos tickets): a pessoa abre no celular onde estiver, desenha a
 // assinatura na tela (assinar.html) e ela entra na POSIÇÃO CERTA do PDF
@@ -21,7 +21,7 @@ const { createCache } = require('./liveCache');
 const ticketCounter = require('./ticketCounter');
 
 const COLLECTION = db.collection('formularios');
-// memoria de FAVORECIDO por documento (CPF do colaborador no Reembolso,
+// memoria de FAVORECIDO por documento (CPF do favorecido no Reembolso,
 // CNPJ do fornecedor no Avulso): todo formulario criado grava/atualiza os
 // dados bancarios daquele documento, e a tela preenche sozinha quando o
 // mesmo CPF/CNPJ for digitado de novo (pedido do Master: "quando o CPF foi
@@ -92,7 +92,7 @@ const TIPOS = {
     titulo: 'SOLICITAÇÃO DE REEMBOLSO',
     cabecalho: [
       { key: 'cnpj', label: 'CNPJ' },
-      { key: 'colaborador', label: 'NOME DO COLABORADOR' },
+      { key: 'colaborador', label: 'NOME DO FAVORECIDO' },
       { key: 'cpf', label: 'CPF' },
       { key: 'banco', label: 'BANCO' },
       { key: 'agencia', label: 'AGÊNCIA' },
@@ -107,8 +107,13 @@ const TIPOS = {
     ],
     totalRotulo: 'VALOR TOTAL (R$)',
     assinantes: [
-      { papel: 'colaborador', rotulo: 'Colaborador' },
-      { papel: 'gestor', rotulo: 'Gestor imediato' },
+      // as CHAVES ('colaborador'/'gestor') ficam como estão de propósito:
+      // formulário já gravado guarda campos.colaborador e
+      // assinaturas.colaborador/gestor - renomear a chave desligaria o
+      // valor e a assinatura dos registros antigos. O que o Master pediu
+      // pra trocar é o que aparece na tela e no PDF, e é só isso que muda.
+      { papel: 'colaborador', rotulo: 'Favorecido' },
+      { papel: 'gestor', rotulo: 'Responsável' },
     ],
     obs: 'OBS.: Todos os comprovantes das despesas devem estar devidamente rubricados e anexados a este formulário.',
   },
@@ -192,9 +197,24 @@ async function getOne(id) {
 
 // vista SEM segredo nem peso: tokens nunca saem numa listagem, e as imagens
 // das assinaturas (base64) só viajam dentro do PDF
+// O rótulo de cada papel vem do MODELO na hora de ler, não do que ficou
+// gravado quando o formulário nasceu. Motivo prático: quando o Master
+// renomeia um papel (foi o caso de "Colaborador" -> "Favorecido" e "Gestor
+// imediato" -> "Responsável"), os formulários que já existiam continuariam
+// exibindo o nome velho pra sempre, inclusive na tela de assinatura e no
+// PDF. Assim o nome novo vale pra todo mundo, sem migração.
+// Exceção: slot por linha (diárias) tem rótulo próprio, montado com o nome
+// da pessoa daquela linha - esse não existe no modelo e continua vindo do
+// registro.
+function rotuloDoSlot(tipo, chave, rotuloGravado) {
+  const modelo = TIPOS[tipo];
+  const doModelo = modelo && (modelo.assinantes || []).find((a) => a.papel === chave);
+  return doModelo ? doModelo.rotulo : rotuloGravado;
+}
+
 function resumo(r) {
   const assinaturas = Object.entries(r.assinaturas || {}).map(([chave, a]) => ({
-    chave, rotulo: a.rotulo, assinado: !!a.imagem, nome: a.nome || null, assinadoEm: a.assinadoEm || null,
+    chave, rotulo: rotuloDoSlot(r.tipo, chave, a.rotulo), assinado: !!a.imagem, nome: a.nome || null, assinadoEm: a.assinadoEm || null,
   }));
   const { assinaturas: _, ...resto } = r;
   return { ...resto, assinaturas };
@@ -303,7 +323,7 @@ async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criad
 // uma - ou a unidade preenche tudo (criar, acima), ou manda o link pro
 // próprio solicitante preencher os dados dele. Faz diferença real no
 // Reembolso: quem sabe o CPF, o banco, a agência, a conta e a chave PIX é
-// o colaborador, não a loja - hoje a loja tem que perguntar tudo por fora
+// o favorecido, não a loja - hoje a loja tem que perguntar tudo por fora
 // e digitar no lugar dele, e é aí que entra dado errado.
 //
 // O formulário nasce aqui já com Ticket # e já com a unidade travada (o
@@ -430,8 +450,8 @@ async function vistaPublica(id, token) {
     colunas: TIPOS[r.tipo].colunas, cabecalho: TIPOS[r.tipo].cabecalho,
     status: r.status, criadoEm: r.criadoEm,
     anexos: (r.anexos || []).map((an, i) => ({ nome: an.nome, indice: i })),
-    meuPapel: chave, meuRotulo: a.rotulo, jaAssinei: !!a.imagem,
-    assinaturas: Object.values(r.assinaturas).map((s) => ({ rotulo: s.rotulo, assinado: !!s.imagem })),
+    meuPapel: chave, meuRotulo: rotuloDoSlot(r.tipo, chave, a.rotulo), jaAssinei: !!a.imagem,
+    assinaturas: Object.entries(r.assinaturas).map(([k, s]) => ({ rotulo: rotuloDoSlot(r.tipo, k, s.rotulo), assinado: !!s.imagem })),
   };
 }
 
