@@ -842,7 +842,13 @@ app.post('/api/formularios-publico/:id/assinar', async (req, res) => {
 app.get('/api/formularios-publico/:id/pdf', async (req, res) => {
   const registro = await formularios.getOne(req.params.id);
   if (!registro || !formularios.chaveDoToken(registro, req.query.token)) return res.status(404).json({ error: 'Link inválido ou revogado.' });
-  formularios.gerarPdf(registro, res);
+  // gerarPdf virou async por causa do Ass. Boleto (lê o anexo do Storage
+  // e copia as páginas dele) - sem o await, um erro lá vira unhandled
+  // rejection e derruba o processo
+  try { await formularios.gerarPdf(registro, res); } catch (err) {
+    console.error('Erro ao gerar PDF do formulário:', err.message);
+    if (!res.headersSent) res.status(500).json({ error: 'Não consegui montar o PDF agora.' });
+  }
 });
 
 // comprovantes anexados na criação - o assinante confere antes de assinar
@@ -2956,6 +2962,7 @@ app.get('/api/formularios/tipos', requireSection('formularios'), (req, res) => {
   res.json(Object.entries(formularios.TIPOS).map(([tipo, m]) => ({
     tipo, rotulo: m.rotulo, cabecalho: m.cabecalho, colunas: m.colunas,
     assinantes: m.assinantes, assinaturaPorLinha: !!m.assinaturaPorLinha,
+    soAnexo: !!m.soAnexo, anexoObrigatorio: !!m.anexoObrigatorio,
   })));
 });
 
@@ -3023,7 +3030,10 @@ app.get('/api/formularios/:id', requireSection('formularios'), async (req, res) 
 app.get('/api/formularios/:id/pdf', requireSection('formularios'), async (req, res) => {
   const registro = await formularios.getOne(req.params.id);
   if (!registro) return res.status(404).json({ error: 'Formulário não encontrado.' });
-  formularios.gerarPdf(registro, res);
+  try { await formularios.gerarPdf(registro, res); } catch (err) {
+    console.error('Erro ao gerar PDF do formulário:', err.message);
+    if (!res.headersSent) res.status(500).json({ error: 'Não consegui montar o PDF agora.' });
+  }
 });
 
 app.get('/api/formularios/:id/anexo/:indice', requireSection('formularios'), async (req, res) => {

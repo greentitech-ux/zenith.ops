@@ -19,6 +19,7 @@ const PDFDocument = require('pdfkit');
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
 const ticketCounter = require('./ticketCounter');
+const storage = require('./storage');
 
 const COLLECTION = db.collection('formularios');
 // memoria de FAVORECIDO por documento (CPF do favorecido no Reembolso,
@@ -121,6 +122,28 @@ const TIPOS = {
       { papel: 'responsavel', rotulo: 'Responsável' },
     ],
     obs: 'OBS.: Todos os comprovantes das despesas devem estar devidamente rubricados e anexados a este formulário.',
+  },
+  // O único tipo que NÃO é um formulário de papel transcrito: aqui o
+  // documento é o arquivo anexado (um boleto, em geral), e o que a gente
+  // produz é esse mesmo arquivo com a assinatura CARIMBADA dentro dele -
+  // não um formulário separado que "fala sobre" o boleto. Por isso
+  // soAnexo: sem tabela de itens, sem total somado de linha, e o anexo é
+  // obrigatório - sem ele não existe o que assinar.
+  assBoleto: {
+    rotulo: 'Ass. Boleto',
+    titulo: 'VALIDAÇÃO DE BOLETO / DOCUMENTO',
+    soAnexo: true,
+    anexoObrigatorio: true,
+    cabecalho: [
+      { key: 'cnpj', label: 'CNPJ' },
+      { key: 'favorecido', label: 'FAVORECIDO' },
+      { key: 'descricao', label: 'DESCRIÇÃO' },
+      { key: 'vencimento', label: 'VENCIMENTO' },
+      // o valor vem daqui em vez de somar linha - ver montarConteudo
+      { key: 'valor', label: 'VALOR (R$)', valor: true },
+    ],
+    colunas: [],
+    assinantes: [{ papel: 'responsavel', rotulo: 'Responsável' }],
   },
 };
 
@@ -251,6 +274,14 @@ function montarConteudo(modelo, cadastro, campos, linhas) {
   // "já preenchido e sem edição")
   camposOk.cnpj = cadastro.cnpj;
 
+  // tipo só-anexo (Ass. Boleto): não existe tabela de itens - exigir linha
+  // aqui deixaria o formulário impossível de criar. O valor, quando o
+  // modelo marca um campo do cabeçalho como valor, sai dali.
+  if (modelo.soAnexo) {
+    const campoValor = modelo.cabecalho.find((c) => c.valor);
+    return { camposOk, linhasOk: [], valorTotal: campoValor ? parseValor(camposOk[campoValor.key]) : 0 };
+  }
+
   const linhasOk = (Array.isArray(linhas) ? linhas : []).slice(0, MAX_LINHAS)
     .map((l) => {
       const linha = {};
@@ -304,6 +335,10 @@ async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criad
     .map((a) => ({ nome: limpar(a.nome, 120) || 'anexo', path: String(a.path || ''), tipo: limpar(a.tipo, 80) }))
     .filter((a) => a.path);
 
+  if (modelo.anexoObrigatorio && !anexosOk.length) {
+    throw new Error('Anexe o boleto (PDF ou imagem) - é ele que vai ser assinado.');
+  }
+
   const doc = COLLECTION.doc();
   const registro = {
     id: doc.id, tipo, unidade: unidadeOk, razaoSocial: cadastro.razaoSocial,
@@ -351,6 +386,10 @@ const STATUS_AGUARDANDO = 'AGUARDANDO_PREENCHIMENTO';
 async function criarParaPreenchimento({ tipo, unidade, criadoPorId, criadoPorEmail, numeroTicket }) {
   const modelo = TIPOS[tipo];
   if (!modelo) throw new Error('Tipo de formulário inválido.');
+  // no Ass. Boleto não há o que o solicitante preencher: o conteúdo é o
+  // arquivo anexado, e quem anexa é quem lança. O link que faz sentido
+  // nesse tipo é o de ASSINATURA, que sai depois de criado.
+  if (modelo.soAnexo) throw new Error('Esse tipo não tem campos pro solicitante preencher - anexe o documento aqui e mande o link de assinatura depois.');
   const unidadeOk = limpar(unidade, 80);
   const cadastro = UNIDADES_FORM.find((u) => u.unidade === unidadeOk);
   if (!cadastro) throw new Error('Unidade inválida - escolha uma das unidades cadastradas.');
@@ -567,8 +606,125 @@ const AZUL_ESCURO = '#1F4E79';
 const AZUL_CLARO = '#DCE6F1';
 const BORDA = '#8EA9C7';
 
-function gerarPdf(r, res) {
+// ---------------------------------------------------------------
+// Ass. Boleto: o PDF não é um formulário "sobre" o documento - é o PRÓPRIO
+// arquivo anexado com a assinatura carimbada dentro dele. É isso que
+// valida o boleto pra quem receber o arquivo por fora do sistema.
+//
+// pdfkit não sabe abrir um PDF que já existe (só cria do zero), então aqui
+// entra o pdf-lib, que copia as páginas do anexo. A assinatura é desenhada
+// numa FAIXA no rodapé, nunca por cima do miolo: carimbar no meio de um
+// boleto poderia cobrir o código de barras ou a linha digitável.
+// ---------------------------------------------------------------
+const FAIXA_H = 74; // altura da faixa de assinatura no rodapé
+
+function assinaturasAssinadas(r) {
+  return Object.entries(r.assinaturas || {})
+    .filter(([, a]) => a.imagem)
+    .map(([chave, a]) => ({ chave, rotulo: rotuloDoSlot(r.tipo, chave, a.rotulo), nome: a.nome, assinadoEm: a.assinadoEm, imagem: a.imagem }));
+}
+
+async function desenharFaixa(out, pagina, r, fonte, negrito, assinadas, comAssinatura) {
+  const { rgb } = require('pdf-lib');
+  const { width } = pagina.getSize();
+  const alt = comAssinatura ? FAIXA_H : 20;
+  // fundo branco: sem ele o texto cairia em cima do que já está desenhado
+  pagina.drawRectangle({ x: 0, y: 0, width, height: alt, color: rgb(1, 1, 1) });
+  pagina.drawLine({ start: { x: 0, y: alt }, end: { x: width, y: alt }, thickness: 0.8, color: rgb(0.15, 0.3, 0.5) });
+
+  const rodape = `Zenith Ops · ${r.unidade} · Ticket #${r.numeroTicket ?? '—'}`
+    + (r.status === 'CANCELADO' ? ' · CANCELADO' : (assinadas.length ? '' : ' · AGUARDANDO ASSINATURA'));
+  pagina.drawText(rodape, { x: 14, y: 7, size: 7.5, font: fonte, color: rgb(0.25, 0.25, 0.25) });
+
+  if (!comAssinatura || !assinadas.length) return;
+  let x = 14;
+  for (const a of assinadas) {
+    let img = null;
+    try {
+      const bruto = Buffer.from(String(a.imagem).split(',')[1] || '', 'base64');
+      img = /^data:image\/png/.test(a.imagem) ? await out.embedPng(bruto) : await out.embedJpg(bruto);
+    } catch (e) { img = null; }
+    if (img) {
+      const escala = Math.min(150 / img.width, 34 / img.height);
+      pagina.drawImage(img, { x, y: 26, width: img.width * escala, height: img.height * escala });
+    }
+    pagina.drawLine({ start: { x, y: 24 }, end: { x: x + 150, y: 24 }, thickness: 0.6, color: rgb(0.3, 0.3, 0.3) });
+    pagina.drawText(`${a.rotulo}${a.nome ? ` · ${a.nome}` : ''}`, { x, y: 16, size: 7, font: negrito, color: rgb(0.1, 0.1, 0.1) });
+    x += 168;
+    if (x + 150 > width) break;
+  }
+}
+
+async function gerarPdfAnexoAssinado(r, res) {
+  const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
+  const out = await PDFDocument.create();
+  const fonte = await out.embedFont(StandardFonts.Helvetica);
+  const negrito = await out.embedFont(StandardFonts.HelveticaBold);
+  const assinadas = assinaturasAssinadas(r);
   const modelo = TIPOS[r.tipo];
+
+  for (const anexo of r.anexos || []) {
+    const bytes = await storage.baixarArquivo(anexo.path);
+    if (!bytes) {
+      const p = out.addPage();
+      p.drawText(`Anexo indisponível: ${anexo.nome}`, { x: 40, y: p.getSize().height - 60, size: 12, font: negrito, color: rgb(0.6, 0.1, 0.1) });
+      continue;
+    }
+    if ((anexo.tipo || '').includes('pdf')) {
+      try {
+        // ignoreEncryption: boleto de banco costuma vir com dono/senha vazia
+        const origem = await PDFDocument.load(bytes, { ignoreEncryption: true });
+        const paginas = await out.copyPages(origem, origem.getPageIndices());
+        paginas.forEach((p) => out.addPage(p));
+      } catch (e) {
+        const p = out.addPage();
+        p.drawText(`Não consegui abrir o PDF anexado (${anexo.nome}).`, { x: 40, y: p.getSize().height - 60, size: 11, font: negrito, color: rgb(0.6, 0.1, 0.1) });
+      }
+    } else {
+      let img = null;
+      try { img = (anexo.tipo || '').includes('png') ? await out.embedPng(bytes) : await out.embedJpg(bytes); } catch (e) { img = null; }
+      const p = out.addPage([595.28, 841.89]);
+      if (img) {
+        // encaixa a imagem ACIMA da faixa - assim a assinatura nunca cobre
+        // o documento, ela fica embaixo dele
+        const larguraUtil = 595.28 - 60;
+        const alturaUtil = 841.89 - 60 - FAIXA_H;
+        const escala = Math.min(larguraUtil / img.width, alturaUtil / img.height, 1);
+        p.drawImage(img, {
+          x: (595.28 - img.width * escala) / 2,
+          y: FAIXA_H + 20 + (alturaUtil - img.height * escala) / 2,
+          width: img.width * escala, height: img.height * escala,
+        });
+      } else {
+        p.drawText(`Imagem em formato não suportado: ${anexo.nome}`, { x: 40, y: 800, size: 11, font: negrito, color: rgb(0.6, 0.1, 0.1) });
+      }
+    }
+  }
+
+  if (!out.getPageCount()) {
+    const p = out.addPage();
+    p.drawText(modelo.titulo, { x: 40, y: p.getSize().height - 60, size: 13, font: negrito });
+    p.drawText('Nenhum anexo neste formulário.', { x: 40, y: p.getSize().height - 84, size: 11, font: fonte });
+  }
+
+  const paginas = out.getPages();
+  for (let i = 0; i < paginas.length; i++) {
+    // a assinatura em si vai na ÚLTIMA página; as outras levam só a
+    // tarja de origem, pra folha solta não circular sem identificação
+    await desenharFaixa(out, paginas[i], r, fonte, negrito, assinadas, i === paginas.length - 1);
+  }
+
+  const bytes = Buffer.from(await out.save());
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="boleto-assinado-${r.numeroTicket || r.id}.pdf"`);
+  res.end(bytes);
+}
+
+async function gerarPdf(r, res) {
+  const modelo = TIPOS[r.tipo];
+  // tipo só-anexo sai por outro caminho: o documento é o arquivo anexado,
+  // não um formulário desenhado aqui
+  if (modelo && modelo.soAnexo) return gerarPdfAnexoAssinado(r, res);
   const doc = new PDFDocument({ margin: 40, size: 'A4' });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${r.tipo}-${r.unidade.replace(/[^a-zA-Z0-9-]+/g, '_')}.pdf"`);
