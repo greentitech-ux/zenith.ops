@@ -499,6 +499,7 @@
   </div>
 </div>
 
+<script src="/kpi-tempo.js"></script>
 <script>
 // sinaliza pro notif-central.js (carregado no fim da pagina) que essa
 // pagina ja tem a sua propria versao do toast+som de solicitacao nova
@@ -1840,17 +1841,12 @@ function fmtData(d){ if(!d) return '—'; const [y,m,dd]=d.split('-'); return `$
 // tipos, ver sanitizarMapaExtras em fechamentosLive.js) - o Master digita/vê
 // min:seg na edição direta (mm:ss <-> segundos)
 function tempoParaSegundos(txt){
-  const partes = String(txt||'').trim().split(':').map(p=>parseInt(p,10));
-  if(partes.some(isNaN) || !partes.length) return 0;
-  let seg = 0;
-  partes.forEach(p=>{ seg = seg*60 + p; });
-  return seg;
+  // uma conversão só pro app inteiro (ver public/kpi-tempo.js): aceita tanto
+  // "9,66" (minutos, como vem do relatório) quanto "9:40" (minuto:segundo)
+  return window.ZenithKpiTempo.paraSegundos(txt);
 }
 function segundosParaTempo(seg){
-  const s = Math.max(0, Math.round(num(seg)));
-  const m = Math.floor(s/60);
-  const r = s%60;
-  return `${m}:${String(r).padStart(2,'0')}`;
+  return window.ZenithKpiTempo.paraTexto(seg);
 }
 const CAMPOS_NUMERICOS_FECHAMENTO = ['caixaInicial','caixaFinal','delivery','carryout','pickup','loja','adyen','adyenPos','ifood','food99','pix','pixCnpj','outros','totalSaida','faturamento','totalDeclarado','quebra','tc','cancelados','entradaDinheiro','deposito'];
 const NOMES_CAMPOS_FECHAMENTO = { caixaInicial:'Caixa inicial', caixaFinal:'Caixa final', delivery:'Delivery', carryout:'Carryout', pickup:'Pickup', loja:'Loja (salão)', adyen:'Maquininhas (total)', adyenPos:'Maquininha POS 01 (pós meia-noite)', ifood:'Ifood', food99:'99Food', pix:'Adyen', pixCnpj:'Pix CNPJ', outros:'Outros', totalSaida:'Total de saída', faturamento:'Faturamento total', totalDeclarado:'Total declarado', quebra:'Quebra de caixa', tc:'TC', cancelados:'Cancelados', entradaDinheiro:'Entrada em dinheiro', deposito:'Depósito' };
@@ -2131,11 +2127,14 @@ function abrirEditarMasterFechamento(id){
       return `<div><label>${escapeHtml(k.label)}</label><input type="text" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="texto" class="mf-kpi-extra-input" value="${escapeHtml(atual||'')}"></div>`;
     }
     if(tipo === 'tempo'){
-      return `<div><label>${escapeHtml(k.label)} (min:seg)</label><input type="text" placeholder="mm:ss" pattern="[0-9]{1,4}:[0-5][0-9]" inputmode="numeric" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="tempo" class="mf-kpi-extra-input" value="${segundosParaTempo(atual)}"></div>`;
+      return `<div><label>${escapeHtml(k.label)} (min:seg ou minutos)</label><input type="text" placeholder="9,66 ou 9:40" inputmode="decimal" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="tempo" class="mf-kpi-extra-input kpi-extra-tempo" value="${segundosParaTempo(atual)}"></div>`;
     }
     const step = tipo === 'quantidade' ? '1' : (tipo === 'kg' ? '0.001' : '0.01');
     return `<div><label>${escapeHtml(k.label)}</label><input type="number" step="${step}" inputmode="decimal" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="${tipo}" class="mf-kpi-extra-input" value="${num(atual)}"></div>`;
   }).join('');
+  // liga a conferência do campo de tempo (aceita 9,66 e 9:40, e mostra na
+  // tela o que entendeu) - ver public/kpi-tempo.js
+  window.ZenithKpiTempo.ligarTodos('.kpi-extra-tempo');
   const canaisDef = grupoKpi ? (grupoKpi.canaisVendaExtras||[]) : [];
   document.getElementById('mf-canais-extras').innerHTML = canaisDef.map(k=>
     `<div><label>${escapeHtml(k.label)}</label><input type="number" step="0.01" inputmode="decimal" data-canal-campo="${escapeHtml(k.campo)}" class="mf-canal-extra-input" value="${num((f.canaisVendaExtras||{})[k.campo])}"></div>`
