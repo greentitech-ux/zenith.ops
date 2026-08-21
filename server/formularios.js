@@ -3,7 +3,7 @@
 // Diárias, Pagamento Avulso, Reembolso) - reprodução dos formulários em
 // papel do "BESSA DOM FORMS" (AppSheet), só que com o problema central
 // resolvido DENTRO do app: a ASSINATURA. Cada papel que precisa assinar
-// (gerente, fornecedor, favorecido, e no caso das diárias cada diarista da
+// (gerente, favorecido, e no caso das diárias cada diarista da
 // tabela) ganha um LINK próprio (token de uso pessoal, mesmo espírito do
 // linkAcao dos tickets): a pessoa abre no celular onde estiver, desenha a
 // assinatura na tela (assinar.html) e ela entra na POSIÇÃO CERTA do PDF
@@ -69,8 +69,8 @@ const TIPOS = {
     titulo: 'SOLICITAÇÃO DE PAGAMENTO AVULSO',
     cabecalho: [
       { key: 'cnpj', label: 'CNPJ' },
-      { key: 'fornecedor', label: 'FORNECEDOR' },
-      { key: 'cnpjFornecedor', label: 'CNPJ DO FORNECEDOR' },
+      { key: 'fornecedor', label: 'FAVORECIDO' },
+      { key: 'cnpjFornecedor', label: 'CNPJ DO FAVORECIDO' },
       { key: 'banco', label: 'BANCO' },
       { key: 'agencia', label: 'AGÊNCIA' },
       { key: 'conta', label: 'CONTA COM DÍGITO' },
@@ -83,7 +83,7 @@ const TIPOS = {
     ],
     totalRotulo: 'VALOR TOTAL (R$)',
     assinantes: [
-      { papel: 'fornecedor', rotulo: 'Fornecedor' },
+      { papel: 'fornecedor', rotulo: 'Favorecido' },
       { papel: 'gerente', rotulo: 'Gerente da unidade' },
     ],
   },
@@ -101,6 +101,9 @@ const TIPOS = {
     ],
     colunas: [
       { key: 'data', label: 'DATA DA DESPESA' },
+      // continua FORNECEDOR de propósito: aqui é coluna da tabela - o
+      // estabelecimento onde CADA despesa foi feita, não quem recebe o
+      // dinheiro. O favorecido do Reembolso é o do cabeçalho acima.
       { key: 'fornecedor', label: 'NOME DO FORNECEDOR' },
       { key: 'descricao', label: 'DESCRIÇÃO', larga: true },
       { key: 'valor', label: 'VALOR (R$)', valor: true },

@@ -2634,6 +2634,14 @@ setTimeout(async () => {
       'o PDF sai com os nomes novos':
         textoPdf.includes('Favorecido') && textoPdf.includes('Responsável')
         && !textoPdf.includes('Gestor imediato'),
+      // Avulso: quem recebe também é "Favorecido" agora (era "Fornecedor")
+      'no Avulso, o campo e a assinatura de quem recebe também dizem Favorecido':
+        /label: 'FAVORECIDO'/.test(fonte) && /label: 'CNPJ DO FAVORECIDO'/.test(fonte)
+        && /papel: 'fornecedor', rotulo: 'Favorecido'/.test(fonte),
+      // mas a COLUNA do Reembolso segue "FORNECEDOR": ali é o estabelecimento
+      // de cada despesa, não quem recebe - trocar apagaria essa distinção
+      'a coluna de despesa do Reembolso continua FORNECEDOR (é o estabelecimento, não quem recebe)':
+        /label: 'NOME DO FORNECEDOR'/.test(fonte),
       'as CHAVES não mudaram (registro antigo continua ligado ao campo/assinatura)':
         !!novo.assinaturas.find((a) => a.chave === 'colaborador') && !!novo.assinaturas.find((a) => a.chave === 'gestor'),
     };
