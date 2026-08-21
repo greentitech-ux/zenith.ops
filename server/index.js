@@ -62,6 +62,7 @@ const ativosTI = require('./ativosTI');
 const centralChat = require('./centralChat');
 const grupos = require('./grupos');
 const empresas = require('./empresas');
+const mensagensDiretas = require('./mensagensDiretas');
 const redes = require('./redes');
 const vendasRecordes = require('./vendasRecordes');
 const inventario = require('./inventario');
@@ -9118,15 +9119,71 @@ app.get('/api/mensagens/usuarios-alvo', auth.requireAuth, async (req, res) => {
     .map((u) => ({ id: u.id, email: u.email, username: u.username, unidades: (u.permissions && u.permissions.unidades) || null })));
 });
 
+// Mensagem direta agora é CONVERSA gravada (ver mensagensDiretas.js), não
+// mais um aviso que sumia da tela em 20s: fica esperando a pessoa abrir a
+// caixa de diálogo, e ela responde por dentro. O broadcast + push continuam,
+// só que agora avisando que existe conversa pra abrir, em vez de serem a
+// única entrega da mensagem.
 app.post('/api/mensagens/enviar', auth.requireAuth, async (req, res) => {
   if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
-  const texto = String(req.body.texto || '').trim().slice(0, 500);
-  const userId = String(req.body.userId || '').trim();
-  if (!userId || !texto) return res.status(400).json({ error: 'Selecione o usuário e escreva a mensagem.' });
-  broadcastParaUsuario(userId, 'mensagem-direta', { texto, deEmail: req.user.email, em: Date.now() });
-  push.notifyUsuario(userId, `Mensagem de ${req.user.email}`, texto, 'mensagem-direta-' + Date.now(), '/painel.html')
+  try {
+    const userId = String(req.body.userId || '').trim();
+    const alvo = userId ? await auth.getUserById(userId) : null;
+    if (!alvo) return res.status(400).json({ error: 'Selecione quem vai receber.' });
+    const conversa = await mensagensDiretas.enviar({
+      deId: req.user.id, deEmail: req.user.email,
+      paraId: userId, paraEmail: alvo.email,
+      texto: req.body.texto,
+    });
+    avisarMensagemDireta(userId, conversa.id, req.user.email, req.body.texto);
+    res.json({ ok: true, id: conversa.id });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// aviso de "tem conversa pra abrir" - as duas entregas de sempre (SSE pra
+// quem está com o Zenith aberto em qualquer tela, push pra quem fechou o
+// app). O texto vai junto só pra prévia; a mensagem de verdade está gravada.
+function avisarMensagemDireta(userId, conversaId, deEmail, texto) {
+  const previa = String(texto || '').trim().slice(0, 140);
+  broadcastParaUsuario(userId, 'mensagem-direta', { conversaId, previa, deEmail, em: Date.now() });
+  push.notifyUsuario(userId, `Mensagem de ${deEmail}`, previa, 'mensagem-direta-' + conversaId, '/painel.html')
     .catch((err) => console.error('Erro no push de mensagem direta:', err.message));
-  res.json({ ok: true });
+}
+
+// as conversas de QUEM ESTÁ LOGADO - qualquer acesso, não só o time de
+// suporte: quem recebeu um recado precisa poder abrir e responder
+app.get('/api/mensagens/minhas', auth.requireAuth, async (req, res) => {
+  res.json(await mensagensDiretas.listarDoUsuario(req.user.id));
+});
+
+app.get('/api/mensagens/:id', auth.requireAuth, async (req, res) => {
+  const conversa = await mensagensDiretas.obter(req.params.id, req.user.id);
+  if (!conversa) return res.status(404).json({ error: 'Conversa não encontrada.' });
+  res.json(conversa);
+});
+
+app.post('/api/mensagens/:id/responder', auth.requireAuth, async (req, res) => {
+  try {
+    const conversa = await mensagensDiretas.responder(req.params.id, {
+      deId: req.user.id, deEmail: req.user.email, texto: req.body.texto,
+    });
+    // avisa o outro lado do mesmo jeito - resposta também é mensagem direta
+    const outro = (conversa.participantes || []).find((p) => p !== String(req.user.id));
+    if (outro) avisarMensagemDireta(outro, conversa.id, req.user.email, req.body.texto);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/mensagens/:id/lida', auth.requireAuth, async (req, res) => {
+  try {
+    res.json(await mensagensDiretas.marcarLida(req.params.id, req.user.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // ----- lado do atendimento -----
