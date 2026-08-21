@@ -14,7 +14,11 @@
 const { buscarAba, buscarLinhasNovas, parseMoneyBR, criarPersistenciaEstado } = require('./sheetsSync');
 
 const SPREADSHEET_ID = process.env.SHEET_ID_ENTREGAS || '14qb8V0fCqgGFmHDISm4HIArAmDZ0QJN8uD7B6zRIYTk';
-const ABAS = (process.env.SHEET_ABAS_ENTREGAS || 'Garanhuns,Bessa,Caruaru,Tirol,MMTirol')
+// a aba "MMTirol" saiu: era a unica de "MMTirol Natal", unidade que o
+// Master excluiu em definitivo (ver CODIGOS_REMOVIDOS em
+// migracaoUnidades.js). Sem tirar daqui, cada sync trazia as linhas de
+// volta e o codigo reaparecia na montagem do mapa de unidades.
+const ABAS = (process.env.SHEET_ABAS_ENTREGAS || 'Garanhuns,Bessa,Caruaru,Tirol')
   .split(',').map((s) => s.trim()).filter(Boolean);
 
 const MESES_PT = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };
