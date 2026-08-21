@@ -5618,33 +5618,17 @@ app.post('/api/parque/checkins/:id/retomar-checkout', requireAnySection('parque'
   }
 });
 
-// resumo legivel de um check-in do parque / de uma proposta de alteracao,
-// pro texto do Ticket de correcao (o Master le tudo na Central)
-function resumoCheckinParque(c) {
-  const criancas = (c.criancas || []).map((cr) => cr.nome).join(', ') || '—';
-  return `${c.responsavel?.nome || '—'} · ${reportUtil.fmtDataBR(c.dataUtilizacao)} · ${c.tempoMinutos}min · ${reportUtil.fmtMoneyBR(parque.valorDoCheckin(c))} (${c.metodoPagamento || 'sem método'}) · previsto ${(c.horarioPrevisto || '').slice(0, 5) || '—'} · A.C. ${c.adultoCortesia ? 'x' + (c.quantAC || 1) : 'não'} · crianças: ${criancas}${c.observacao ? ' · obs: ' + c.observacao : ''}`;
-}
-function resumoPropostaParque(p) {
-  const partes = [];
-  if (p.responsavel?.nome !== undefined) partes.push(`nome → ${p.responsavel.nome}`);
-  if (p.responsavel?.contato !== undefined) partes.push(`contato → ${p.responsavel.contato || '—'}`);
-  if (p.dataUtilizacao !== undefined) partes.push(`data → ${reportUtil.fmtDataBR(p.dataUtilizacao)}`);
-  if (p.tempoMinutos !== undefined) partes.push(`tempo → ${p.tempoMinutos}min`);
-  if (p.horarioPrevisto !== undefined) partes.push(`previsto → ${(p.horarioPrevisto || '').slice(0, 5) || '—'}`);
-  if (p.metodoPagamento !== undefined) partes.push(`método → ${p.metodoPagamento || '—'}`);
-  if (p.adultoCortesia !== undefined) partes.push(`A.C. → ${p.adultoCortesia ? 'x' + (p.quantAC || 1) : 'não'}`);
-  if (p.criancas !== undefined) partes.push(`crianças → ${p.criancas.map((cr) => cr.nome).join(', ')}`);
-  if (p.observacao !== undefined) partes.push(`obs → ${p.observacao || '—'}`);
-  return partes.join(' · ') || '—';
-}
-
 // depois de enviado, um check-in nao pode mais ser mexido direto - correcao
 // (alterar dados/criancas ou excluir) vira um pedido que o Gerente da
-// unidade ou o Master/Admin aprova, mesmo fluxo do fechamento de caixa e do
-// Abastecimento. Todo pedido tambem abre um Ticket na Central: mesmo quando
-// o Gerente aprova pra agilizar, ele presta contas e o Master da a palavra
-// final concluindo o ticket. Sem push - Master/Admin nao recebem
-// notificacao dessas correcoes, veem na Central quando abrirem
+// unidade ou o Master/Admin aprova na propria aba Parque.
+//
+// NAO abre Ticket na Central (pedido explicito do usuario). Abria antes,
+// pra "prestacao de contas" do Gerente, mas na pratica virava um card que
+// nascia ja resolvido: a decisao acontece aqui, aplica na hora, e o ticket
+// so ficava aberto esperando alguem fechar. O rastro (quem pediu, o que
+// propos, quem decidiu e quando) mora no proprio pedido e aparece no
+// historico do painel do Parque - ver renderEdicoes em parque.html.
+// Sem push, como antes.
 app.post('/api/parque/checkins/:id/solicitar-edicao', requireAnySection('parque', 'parque-checkin'), async (req, res) => {
   try {
     const atual = await parque.getOne(req.params.id);
@@ -5660,27 +5644,15 @@ app.post('/api/parque/checkins/:id/solicitar-edicao', requireAnySection('parque'
     if (jaPendente) return res.status(400).json({ error: 'Já existe um pedido de correção pendente para esse check-in.' });
     const tipoCorrecao = req.body.tipoCorrecao === 'alterar' ? 'alterar' : 'excluir';
     const proposta = tipoCorrecao === 'alterar' ? parque.validarPropostaEdicao(req.body.proposta) : null;
-    const propostaTxt = tipoCorrecao === 'excluir' ? 'EXCLUIR o check-in inteiro' : resumoPropostaParque(proposta);
-    const ticket = await solicitacoes.create({
-      tipo: 'suporte-ti',
-      unidade: atual.unidade,
-      unidadeNome: atual.unidadeNome || atual.unidade,
-      titulo: `Parque: correção solicitada (${atual.responsavel?.nome || 'check-in'} · ${reportUtil.fmtDataBR(atual.dataUtilizacao)})`,
-      observacao: `Correção pedida por ${req.user.username || req.user.email}.\n\nCadastrado: ${resumoCheckinParque(atual)}\nProposta: ${propostaTxt}\n\nJustificativa: ${motivo}\n\nO Gerente da unidade pode aprovar/rejeitar na tela do Parque pra agilizar; a palavra final (prestação de contas) é do Master, concluindo este ticket.`,
-      prioridade: 'alta',
-      criadoPorId: req.user.id,
-      criadoPorEmail: req.user.email,
-      direcionadoParaId: null,
-      direcionadoParaEmail: null,
-    });
-    broadcast('solicitacao-criada', ticket, 'solicitacoes');
     const pedido = await parque.solicitarEdicao({
       checkinId: req.params.id,
       tipoCorrecao,
       proposta,
       motivo,
-      numeroTicket: ticket.numeroTicket,
-      ticketId: ticket.id,
+      // pedidos antigos guardam o ticket que existia na epoca; os novos
+      // nascem sem - a tela mostra o link so quando tem
+      numeroTicket: null,
+      ticketId: null,
       solicitadoPorId: req.user.id,
       solicitadoPorEmail: req.user.email,
     });
@@ -5729,8 +5701,10 @@ app.patch('/api/parque/checkins/edicoes/:id', requireAnySection('parque', 'parqu
       broadcast('parque-checkin-excluido', { id: pedido.checkinId }, 'parque');
       broadcast('parque-checkin-excluido', { id: pedido.checkinId }, 'parque-checkin');
     }
-    // prestacao de contas no ticket: registra quem decidiu e o que mudou,
-    // pro Master revisar e concluir (nao notifica ninguem por push)
+    // Pedido novo não tem ticket (ver rota de solicitar-edicao). Este bloco
+    // sobrevive só pros pedidos ANTIGOS, criados quando a correção ainda
+    // abria um card na Central: eles continuam recebendo a nota da decisão,
+    // pra quem for fechar aquele card saber o que aconteceu.
     if (pedido.ticketId) {
       try {
         const t = await solicitacoes.getOne(pedido.ticketId);
