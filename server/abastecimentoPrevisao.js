@@ -108,6 +108,11 @@ function montarCiclos(regs) {
       rotulo: `${diaDe(abre.criadoEm) === diaDe(fecha.criadoEm) ? '' : diaDe(abre.criadoEm).slice(5).split('-').reverse().join('/') + ' '}${horaDe(abre.criadoEm)} → ${horaDe(fecha.criadoEm)}`,
       horas: Math.max(0, (new Date(fecha.criadoEm) - new Date(abre.criadoEm)) / 3600000),
       envios: dentro.length,
+      // quem contou/enviou nesse turno - pro relatorio escrito de
+      // desvios apontar com QUEM conferir, nao so "o item X deu -8"
+      abreOperador: abre.operadorNome || abre.criadoPorNome || null,
+      fechaOperador: fecha.operadorNome || fecha.criadoPorNome || null,
+      enviosOperadores: [...new Set(dentro.map((e) => e.operadorNome || e.criadoPorNome).filter(Boolean))],
       itens: [...itens.values()].map((i) => ({ ...i, saida: i.saldoInicial + i.entradas - i.saldoFinal })),
     });
   }
