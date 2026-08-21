@@ -77,11 +77,23 @@
       <div class="zn-titulo">🔔 Nova solicitação</div>
       <div class="zn-corpo">${ICONES_TIPO[card.tipo] || '📋'} ${escapeHtml(LABELS_TIPO[card.tipo] || card.tipo)} · ${escapeHtml(card.unidadeNome || card.unidade || '—')}<br>${escapeHtml(card.titulo || '')}</div>
       ${(card.atribuidosEmails && card.atribuidosEmails.length) ? `<div class="zn-direcionado">👤 atribuído a ${escapeHtml(card.atribuidosEmails.join(', '))}</div>` : (card.direcionadoParaEmail ? `<div class="zn-direcionado">👤 direcionado a ${escapeHtml(card.direcionadoParaEmail)}</div>` : '')}
-      <button type="button" class="zn-ok">✓ Sinalizar (já vi)</button>
+      <button type="button" class="zn-ok">👁️ Visualizar</button>
     `;
-    el.querySelector('.zn-ok').addEventListener('click', () => marcarVistoNotificacao(card.tipo, card.id));
+    // "Visualizar" faz as duas coisas: marca como vista E leva pro conteúdo.
+    // Antes era só "já vi" - a pessoa tirava o alerta da tela e depois tinha
+    // que procurar a solicitação na mão pra saber do que se tratava.
+    el.querySelector('.zn-ok').addEventListener('click', () => abrirSolicitacao(card.tipo, card.id));
     wrap.appendChild(el);
     tocarSomSolicitacao();
+  }
+
+  // marca como vista e navega pro card aberto no Histórico da Central. O
+  // marcar-visto é disparado sem esperar de propósito: se a gente aguardasse
+  // a resposta pra navegar, uma rede lenta faria o botão parecer travado.
+  // Perder essa marcação é barato - a notificação volta na próxima visita.
+  function abrirSolicitacao(tipo, id) {
+    marcarVistoNotificacao(tipo, id);
+    location.href = `/central-historico.html?tipo=${encodeURIComponent(tipo)}&id=${encodeURIComponent(id)}`;
   }
 
   async function marcarVistoNotificacao(tipo, id) {
