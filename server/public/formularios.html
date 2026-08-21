@@ -255,6 +255,7 @@ function renderLista(){
     const pendentes = f.assinaturas.filter(a=>!a.assinado).length;
     return `<div class="form-item">
       <div class="fi-titulo">${escapeHtml(t?t.rotulo:f.tipo)} · ${escapeHtml(f.unidade)}
+        <span class="badge" style="background:#1a2230;color:var(--muted);">#${f.numeroTicket ?? '—'}</span>
         <span class="badge ${f.status==='ASSINADO'?'assinado':'pendente'}">${f.status==='ASSINADO'?'✅ assinado':`✍️ falta(m) ${pendentes}`}</span></div>
       <div class="fi-sub">${fmtData(f.criadoEm)} · ${f.linhas.length} linha(s) · total ${fmtMoney(f.valorTotal)} · por ${escapeHtml(f.criadoPorEmail||'')}</div>
       ${(f.anexos||[]).length ? `<div class="fi-sub">📎 ${f.anexos.map((an,i)=>`<a href="/api/formularios/${f.id}/anexo/${i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" style="color:var(--accent);">${escapeHtml(an.nome)}</a>`).join(' · ')}</div>` : ''}

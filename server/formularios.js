@@ -18,6 +18,7 @@ const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
+const ticketCounter = require('./ticketCounter');
 
 const COLLECTION = db.collection('formularios');
 // memoria de FAVORECIDO por documento (CPF do colaborador no Reembolso,
@@ -214,7 +215,10 @@ async function detalhar(id) {
   return base;
 }
 
-async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criadoPorEmail }) {
+// numeroTicket: aceita um número pronto de fora pelo MESMO motivo que
+// solicitacoes.js/refunds.js aceitam - quando um registro vira outro, ele
+// carrega o número em vez de tirar outro da fila (ver ticketCounter.js).
+async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criadoPorEmail, numeroTicket }) {
   const modelo = TIPOS[tipo];
   if (!modelo) throw new Error('Tipo de formulário inválido.');
   const unidadeOk = limpar(unidade, 80);
@@ -264,6 +268,12 @@ async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criad
     id: doc.id, tipo, unidade: unidadeOk, razaoSocial: cadastro.razaoSocial,
     campos: camposOk, linhas: linhasOk, valorTotal, anexos: anexosOk,
     assinaturas, status: 'PENDENTE',
+    // MESMA sequência dos tickets da Central (#10000+), não um contador
+    // próprio: o formulário vira uma solicitação de Pagamento depois de
+    // assinado, e tem que chegar lá com o número que já nasceu com ele -
+    // é a mesma razão pela qual o contador é compartilhado entre os outros
+    // módulos (ver ticketCounter.js).
+    numeroTicket: numeroTicket != null ? numeroTicket : await ticketCounter.proximoTicket(),
     criadoEm: new Date().toISOString(), criadoPorId: criadoPorId || null, criadoPorEmail: criadoPorEmail || null,
   };
   await doc.set(registro);
@@ -416,6 +426,13 @@ function gerarPdf(r, res) {
   // barra de título, largura cheia, igual ao papel
   doc.rect(X, y, LARGURA, 22).fillAndStroke(AZUL_ESCURO, AZUL_ESCURO);
   doc.font('Helvetica-Bold').fontSize(11).fillColor('#fff').text(modelo.titulo, X, y + 6, { width: LARGURA, align: 'center' });
+  // Ticket # encostado à direita DENTRO da mesma barra: o título continua
+  // centralizado na largura cheia, igual ao papel original, e o número não
+  // empurra nada. É o mesmo número que a solicitação de Pagamento vai ter.
+  if (r.numeroTicket != null) {
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#cfe3ff')
+      .text(`Ticket #${r.numeroTicket}`, X, y + 7.5, { width: LARGURA - 8, align: 'right' });
+  }
   y += 22;
 
   // larguras das colunas: VALOR fixa, ASSINATURA (diárias) fixa, DESCRIÇÃO

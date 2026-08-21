@@ -82,7 +82,16 @@ function fakeDoc(caminho) {
 const fakeDb = {
   collection: (n) => fakeQuery(n),
   batch: () => ({ set() {}, update() {}, delete() {}, commit: async () => {} }),
-  runTransaction: async (fn) => fn({ get: async (r) => snapDoc(r.path || ''), set() {}, update() {}, delete() {} }),
+  // set/update GRAVAM de verdade - eram no-op, e isso fazia o fake mentir:
+  // ticketCounter.proximoTicket() grava o próximo número DENTRO da
+  // transação, então com set() vazio todo mundo lia 10000 e o teste não
+  // conseguia enxergar número repetido nem sequência quebrada.
+  runTransaction: async (fn) => fn({
+    get: async (r) => snapDoc(r.path || ''),
+    set: (r, d, o) => { const c = r.path || ''; DOCS.set(c, o && o.merge ? { ...(DOCS.get(c) || {}), ...d } : d); },
+    update: (r, d) => { const c = r.path || ''; DOCS.set(c, { ...(DOCS.get(c) || {}), ...d }); },
+    delete: (r) => { DOCS.delete(r.path || ''); },
+  }),
 };
 
 process.env.PORT = '8899';
@@ -109,6 +118,38 @@ const auth = require('/home/user/adyen-monitor/server/auth.js');
 const store = require('/home/user/adyen-monitor/server/store.js');
 const parque = require('/home/user/adyen-monitor/server/parque.js');
 const sheetsSync = require('/home/user/adyen-monitor/server/sheetsSync.js');
+
+// PDF chega como binário e o pdfkit ainda comprime os streams - juntar
+// chunks numa string (como o `pedir` faz) corrompe os bytes. Este aqui
+// preserva o buffer, e textoDoPdf desinfla e remonta o texto pra dar pra
+// conferir o que foi realmente IMPRESSO, não só que a rota respondeu 200.
+function pedirBinario(caminho, headers = {}) {
+  return new Promise((resolve) => {
+    const req = http.request({ host: '127.0.0.1', port: 8899, path: caminho, headers }, (res) => {
+      const pedacos = [];
+      res.on('data', (c) => pedacos.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, buffer: Buffer.concat(pedacos) }));
+    });
+    req.on('error', () => resolve({ status: 0, buffer: Buffer.alloc(0) }));
+    req.setTimeout(8000, () => { req.destroy(); resolve({ status: -1, buffer: Buffer.alloc(0) }); });
+    req.end();
+  });
+}
+function textoDoPdf(b) {
+  const zlib = require('zlib');
+  let bruto = ''; let i = 0;
+  while ((i = b.indexOf('stream', i)) >= 0) {
+    let ini = i + 6; if (b[ini] === 13) ini += 1; if (b[ini] === 10) ini += 1;
+    const fim = b.indexOf('endstream', ini); if (fim < 0) break;
+    try { bruto += zlib.inflateSync(b.subarray(ini, fim)).toString('latin1'); } catch (e) { /* stream não comprimido (imagem etc) */ }
+    i = fim + 9;
+  }
+  // cada [<hex> num <hex> ...] TJ é UMA palavra fatiada pelo kerning: junta
+  // só os pedaços hex e ignora os números de espaçamento entre eles
+  return bruto.replace(/\[([^\]]*)\]\s*TJ/g, (_, dentro) =>
+    (dentro.match(/<([0-9A-Fa-f]*)>/g) || [])
+      .map((h) => Buffer.from(h.slice(1, -1), 'hex').toString('latin1')).join('') + ' ');
+}
 
 function pedir(caminho, headers = {}) {
   return new Promise((resolve) => {
@@ -2400,6 +2441,66 @@ setTimeout(async () => {
   } catch (e) { okMensagemDireta = false; console.log('  erro: ' + e.message); }
   if (!okMensagemDireta) ruins += 1;
   console.log(`${okMensagemDireta ? '✓' : '✗'} Mensagem direta: virou conversa gravada que a pessoa abre e responde (não some mais da tela)`);
+
+  // ------------------------------------------------------------------
+  // Ticket # no formulário: pedido do Master - todo formulário nasce com
+  // número, porque depois de assinado ele vira uma solicitação de Pagamento
+  // e tem que chegar lá com o MESMO número. Por isso sai da sequência
+  // compartilhada do ticketCounter, não de um contador próprio.
+  let okTicketFormulario = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const form = require('/home/user/adyen-monitor/server/formularios.js');
+    const solicitacoes = require('/home/user/adyen-monitor/server/solicitacoes.js');
+
+    const f1 = await form.criar({
+      tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
+      campos: {}, linhas: [{ descricao: 'Serviço X', valor: '150,00' }],
+      criadoPorEmail: 'teste@teste.local',
+    });
+    // um ticket da Central logo depois: tem que ser o PRÓXIMO número, provando
+    // que os dois bebem da mesma sequência (e não que cada um conta sozinho)
+    const s1 = await solicitacoes.create({
+      tipo: 'pagamento', unidade: 'São Braz Ilha do Leite', titulo: 'Pagamento X',
+      criadoPorEmail: 'teste@teste.local',
+    });
+    const f2 = await form.criar({
+      tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
+      campos: {}, linhas: [{ descricao: 'Serviço Y', valor: '90,00' }],
+      criadoPorEmail: 'teste@teste.local',
+    });
+
+    // o número tem que sobreviver até a tela (listar) e até o PDF
+    const listaForm = await pedir('/api/formularios', cab);
+    const naLista = (listaForm.status === 200 ? JSON.parse(listaForm.corpo) : []).find((x) => x.id === f1.id) || {};
+    const pdf = await pedirBinario(`/api/formularios/${f1.id}/pdf`, cab);
+    const textoPdf = pdf.status === 200 ? textoDoPdf(pdf.buffer) : '';
+
+    // e um formulário que já vem com número (o caso de "virou outra coisa")
+    // reaproveita em vez de tirar outro da fila
+    const f3 = await form.criar({
+      tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
+      campos: {}, linhas: [{ descricao: 'Herdado', valor: '10,00' }],
+      criadoPorEmail: 'teste@teste.local', numeroTicket: f1.numeroTicket,
+    });
+
+    const conferencias = {
+      'o formulário nasce com número de ticket': Number.isFinite(f1.numeroTicket),
+      'segue o padrão da casa (#10000 em diante)': f1.numeroTicket >= 10000,
+      'é a MESMA sequência da Central (o ticket seguinte é o próximo número)':
+        s1.numeroTicket === f1.numeroTicket + 1 && f2.numeroTicket === s1.numeroTicket + 1,
+      'dois formulários nunca repetem número': f1.numeroTicket !== f2.numeroTicket,
+      'o número chega na tela (listagem)': naLista.numeroTicket === f1.numeroTicket,
+      'o PDF sai com o número impresso': pdf.status === 200 && textoPdf.includes(`Ticket #${f1.numeroTicket}`),
+      'número recebido de fora é reaproveitado (vira outra coisa sem trocar de número)':
+        f3.numeroTicket === f1.numeroTicket,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okTicketFormulario = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (f1 ${f1.numeroTicket}, s1 ${s1.numeroTicket}, f2 ${f2.numeroTicket}, pdf ${pdf.status})`);
+  } catch (e) { okTicketFormulario = false; console.log('  erro: ' + e.message); }
+  if (!okTicketFormulario) ruins += 1;
+  console.log(`${okTicketFormulario ? '✓' : '✗'} Formulários: todo formulário nasce com Ticket # da MESMA sequência da Central (vira solicitação de Pagamento sem trocar de número)`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
