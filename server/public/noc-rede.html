@@ -76,6 +76,11 @@
   .leg-item.espesso .leg-marca{height:5px;}
 
   .grafico-wrap{overflow-x:auto;}
+  /* o viewBox do gráfico de linhas é remontado em PIXEIS REAIS a cada
+     render (ver renderLinhas): sem isso o SVG esticava o desenho todo
+     pela largura da tela - num monitor largo o texto de 10px virava
+     ~24px e o gráfico passava de 600px de altura. Por isso height é
+     definido inline, em px, e não 'auto'. */
   svg.gr{display:block;width:100%;height:auto;touch-action:pan-y;}
   .gr text{font-family:var(--sans);}
   .gr .tick{fill:var(--tinta-fraca);font-size:10px;}
@@ -302,9 +307,28 @@ function render(){
   document.getElementById('gr-linhas').classList.remove('hidden');
   document.getElementById('legenda').classList.remove('hidden');
   document.getElementById('gr-vazio').classList.add('hidden');
+  ULTIMA_SERIE = { rotulos, porComputador, frota };
   renderLinhas(rotulos, porComputador, frota);
   renderMini(rotulos, porComputador);
 }
+
+// o gráfico é desenhado no tamanho real da caixa, então mudar a largura da
+// janela (ou abrir/fechar o menu lateral) exige redesenhar - senão ele fica
+// com a largura antiga. Só largura: no celular, esconder a barra de endereço
+// dispara resize de ALTURA o tempo todo, e redesenhar ali seria puro tremor.
+let ULTIMA_SERIE = null;
+let larguraAnterior = window.innerWidth;
+let tarefaResize = null;
+window.addEventListener('resize', () => {
+  if(window.innerWidth === larguraAnterior) return;
+  larguraAnterior = window.innerWidth;
+  clearTimeout(tarefaResize);
+  tarefaResize = setTimeout(() => {
+    if(!ULTIMA_SERIE) return;
+    if(document.getElementById('gr-linhas').classList.contains('hidden')) return;
+    renderLinhas(ULTIMA_SERIE.rotulos, ULTIMA_SERIE.porComputador, ULTIMA_SERIE.frota);
+  }, 150);
+});
 
 function renderTiles(porComputador, frota){
   const atual = frota.filter(v=>v!==null).slice(-1)[0] || null;
@@ -328,8 +352,18 @@ function renderTiles(porComputador, frota){
 }
 
 function renderLinhas(rotulos, porComputador, frota){
-  const L=52, R=18, T=14, B=30, W=860, H=300;
+  const el = document.getElementById('gr-linhas');
+  // 1 unidade do viewBox = 1 pixel na tela. Fixar W=860 e deixar o SVG
+  // esticar (width:100%) escalava TUDO junto - texto, espessura de linha,
+  // altura - então em tela larga o gráfico saía estourado. Medindo a caixa
+  // e desenhando no tamanho real, 10px continua 10px em qualquer monitor.
+  const caixa = el.parentElement ? el.parentElement.clientWidth : 0;
+  const W = Math.max(360, Math.round(caixa || 860));
+  const H = W < 560 ? 230 : 300;
+  const L=52, R=18, T=14, B=30;
   const larg = W-L-R, alt = H-T-B;
+  el.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  el.style.height = H + 'px';
   // as 3 piores por latência média do dia; o resto fica fora do overlay (vai
   // nos small multiples) - nunca gerar cor nova pra uma 4a, 5a série
   const destaques = porComputador
@@ -372,14 +406,13 @@ function renderLinhas(rotulos, porComputador, frota){
 
   svg += `<line class="cruz hidden" id="cruz" x1="0" y1="${T}" x2="0" y2="${T+alt}"></line>`;
   svg += `<rect id="captura" x="${L}" y="${T}" width="${larg}" height="${alt}" fill="transparent"></rect>`;
-  const el = document.getElementById('gr-linhas');
   el.innerHTML = svg;
 
   document.getElementById('legenda').innerHTML =
     `<span class="leg-item espesso"><span class="leg-marca" style="background:${CORES[0]}"></span>Mediana da frota</span>` +
     destaques.map((c,i)=>`<span class="leg-item"><span class="leg-marca" style="background:${CORES[i+1]}"></span>${escapeHtml(c.nome)}</span>`).join('');
 
-  ligarHover(el, { rotulos, frota, destaques, x, L, larg });
+  ligarHover(el, { rotulos, frota, destaques, x, L, larg, W });
 }
 
 function ligarHover(el, ctx){
@@ -390,7 +423,7 @@ function ligarHover(el, ctx){
   const mover = (ev) => {
     const p = ev.touches ? ev.touches[0] : ev;
     const cx = el.getBoundingClientRect();
-    const escala = 860 / cx.width;
+    const escala = ctx.W / cx.width;
     const vx = (p.clientX - cx.left) * escala;
     const i = Math.max(0, Math.min(ctx.rotulos.length-1,
       Math.round(((vx - ctx.L) / ctx.larg) * (ctx.rotulos.length-1))));
