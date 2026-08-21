@@ -927,9 +927,14 @@ function renderEmpresasLista(){
   el.innerHTML = EMPRESAS.map(e=>{
     const qtdUnidades = (e.unidades||[]).length;
     const escopo = qtdUnidades ? `${qtdUnidades} unidade(s)` : 'nenhuma unidade marcada ainda';
-    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:12.5px;">
-      <span style="flex:1;"><b>${escapeHtml(e.nome)}</b> <span style="color:var(--muted);font-size:11px;">· ${escapeHtml(e.tipoNegocio)} · ${escapeHtml(escopo)}</span></span>
+    // arquivada continua na lista (é o único jeito de desarquivar), mas
+    // apagada e com o selo, pra não passar por empresa ativa de relance
+    const arq = !!e.arquivada;
+    const selo = arq ? ' <span style="color:var(--warn);font-size:10.5px;border:1px solid var(--warn);border-radius:4px;padding:1px 5px;">ARQUIVADA</span>' : '';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:12.5px;${arq?'opacity:.6;':''}">
+      <span style="flex:1;"><b>${escapeHtml(e.nome)}</b>${selo} <span style="color:var(--muted);font-size:11px;">· ${escapeHtml(e.tipoNegocio)} · ${escapeHtml(escopo)}</span></span>
       <button type="button" class="back btn-editar-empresa" style="cursor:pointer;" data-id="${escapeHtml(e.id)}">✏️ editar</button>
+      <button type="button" class="back btn-arquivar-empresa" style="cursor:pointer;" data-id="${escapeHtml(e.id)}" data-nome="${escapeHtml(e.nome)}" data-acao="${arq?'desarquivar':'arquivar'}">${arq?'♻️ desarquivar':'📦 arquivar'}</button>
       <button type="button" class="back btn-excluir-empresa" style="cursor:pointer;color:var(--bad);" data-id="${escapeHtml(e.id)}" data-nome="${escapeHtml(e.nome)}">🗑️ excluir</button>
     </div>`;
   }).join('');
@@ -937,8 +942,10 @@ function renderEmpresasLista(){
 document.getElementById('empresas-lista').addEventListener('click', (e)=>{
   const btnEditar = e.target.closest('.btn-editar-empresa');
   if(btnEditar){ abrirEdicaoEmpresa(btnEditar.dataset.id); return; }
+  const btnArquivar = e.target.closest('.btn-arquivar-empresa');
+  if(btnArquivar){ abrirConfirmacaoEmpresa(btnArquivar.dataset.acao, btnArquivar.dataset.id, btnArquivar.dataset.nome); return; }
   const btnExcluir = e.target.closest('.btn-excluir-empresa');
-  if(btnExcluir){ excluirEmpresa(btnExcluir.dataset.id, btnExcluir.dataset.nome); }
+  if(btnExcluir){ abrirConfirmacaoEmpresa('excluir', btnExcluir.dataset.id, btnExcluir.dataset.nome); }
 });
 function abrirEdicaoEmpresa(id){
   const emp = EMPRESAS.find(x=>x.id===id);
@@ -949,12 +956,80 @@ function abrirEdicaoEmpresa(id){
   document.getElementById('emp-unidades').innerHTML = unidadesChecksHtml('emp-unidades', new Set(emp.unidades||[]));
   document.getElementById('emp-nome').scrollIntoView({ behavior:'smooth', block:'center' });
 }
-async function excluirEmpresa(id, nome){
-  if(!confirm(`Excluir a empresa "${nome}"? As unidades dela ficam sem empresa nenhuma - somem pra todo mundo menos Master e Suporte até você colocar cada uma numa empresa de novo.`)) return;
-  const resp = await fetch(`/api/empresas/${id}`, { method:'DELETE' });
-  if(!resp.ok){ alert('Erro ao excluir.'); return; }
-  if(EDITANDO_EMPRESA_ID===id) limparFormEmpresa();
-  await carregarEmpresas();
+// Arquivar / desarquivar / excluir empresa. As três passam pelo MESMO modal,
+// que faz duas coisas antes de deixar confirmar: mostra o impacto real
+// (quantas unidades e quantos acessos a decisão atinge, vindo do servidor) e
+// exige a senha do Master de novo. O servidor confere as duas coisas outra
+// vez - isto aqui é a explicação, não a trava.
+let EMPRESA_ACAO = null; // { acao, id, nome }
+const TEXTO_ACAO_EMPRESA = {
+  arquivar: {
+    titulo: '📦 Arquivar empresa',
+    botao: 'Arquivar',
+    aviso: 'A empresa some do sistema como se não existisse: as unidades dela ficam sem dono (só Master e Suporte enxergam) e quem estiver vinculado a ela para de ver qualquer coisa até ser movido pra outra empresa. <b>Nada é apagado</b> - dá pra desarquivar depois e tudo volta exatamente como estava.',
+  },
+  desarquivar: {
+    titulo: '♻️ Desarquivar empresa',
+    botao: 'Desarquivar',
+    aviso: 'A empresa volta a valer: as unidades dela voltam a ter dono e quem estava vinculado volta a enxergar o que via antes.',
+  },
+  excluir: {
+    titulo: '🗑️ Excluir empresa',
+    botao: 'Excluir em definitivo',
+    aviso: 'O cadastro é <b>apagado pra sempre</b>, sem desfazer. As unidades ficam sem empresa nenhuma e quem estava vinculado é solto (volta a valer pelas unidades marcadas no próprio acesso). Se a ideia é só tirar a empresa de circulação, <b>arquive</b> em vez de excluir.',
+  },
+};
+async function abrirConfirmacaoEmpresa(acao, id, nome){
+  EMPRESA_ACAO = { acao, id, nome };
+  const cfg = TEXTO_ACAO_EMPRESA[acao];
+  document.getElementById('emp-conf-titulo').textContent = cfg.titulo;
+  document.getElementById('emp-conf-nome').textContent = nome;
+  document.getElementById('emp-conf-aviso').innerHTML = cfg.aviso;
+  document.getElementById('emp-conf-ok').textContent = cfg.botao;
+  document.getElementById('emp-conf-ok').style.background = acao==='excluir' ? 'var(--bad)' : '';
+  document.getElementById('emp-conf-senha').value = '';
+  document.getElementById('emp-conf-erro').textContent = '';
+  document.getElementById('emp-conf-impacto').textContent = 'carregando impacto...';
+  document.getElementById('emp-conf-overlay').style.display = 'flex';
+  document.getElementById('emp-conf-senha').focus();
+  try{
+    const r = await fetch(`/api/empresas/${id}/impacto`);
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'falhou');
+    const quemTxt = d.acessos ? ` · ${d.acessos} acesso(s) vinculado(s)${d.acessosNomes.length?': '+d.acessosNomes.map(escapeHtml).join(', '):''}` : ' · nenhum acesso vinculado';
+    document.getElementById('emp-conf-impacto').innerHTML = `Atinge <b>${d.unidades}</b> unidade(s)${quemTxt}.`;
+  }catch(err){
+    document.getElementById('emp-conf-impacto').textContent = 'Não consegui carregar o impacto (a ação continua disponível).';
+  }
+}
+function fecharConfirmacaoEmpresa(){
+  document.getElementById('emp-conf-overlay').style.display = 'none';
+  EMPRESA_ACAO = null;
+}
+async function confirmarAcaoEmpresa(){
+  if(!EMPRESA_ACAO) return;
+  const { acao, id } = EMPRESA_ACAO;
+  const senha = document.getElementById('emp-conf-senha').value;
+  const erroEl = document.getElementById('emp-conf-erro');
+  if(!senha){ erroEl.textContent = 'Digite sua senha pra confirmar.'; return; }
+  const btn = document.getElementById('emp-conf-ok');
+  btn.disabled = true; erroEl.textContent = '';
+  try{
+    const url = acao==='excluir' ? `/api/empresas/${id}` : `/api/empresas/${id}/${acao}`;
+    const resp = await fetch(url, {
+      method: acao==='excluir' ? 'DELETE' : 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ password: senha }),
+    });
+    const dados = await resp.json().catch(()=>({}));
+    if(!resp.ok){ erroEl.textContent = dados.error || 'Não consegui concluir.'; return; }
+    // 202 = QA Master, foi pra fila de aprovação em vez de valer na hora
+    if(resp.status===202){ alert('Enviado pra aprovação de um Master de verdade (acesso QA).'); }
+    else if(acao==='excluir' && dados.acessosDesvinculados){ alert(`Empresa excluída. ${dados.acessosDesvinculados} acesso(s) foram desvinculados e voltaram a valer pelas unidades marcadas neles.`); }
+    if(EDITANDO_EMPRESA_ID===id && acao==='excluir') limparFormEmpresa();
+    fecharConfirmacaoEmpresa();
+    await carregarEmpresas();
+  } finally { btn.disabled = false; }
 }
 function limparFormEmpresa(){
   EDITANDO_EMPRESA_ID = null;
@@ -1197,5 +1272,24 @@ boot();
 <script src="/notif-central.js"></script>
 <script src="/suporte-chat.js"></script>
 <script src="/nav-menu.js"></script>
+<!-- confirmação de arquivar/desarquivar/excluir empresa: mostra o impacto
+     real e exige a senha do Master de novo (o servidor confere as duas
+     coisas outra vez - ver exigirSenhaDoMaster em index.js) -->
+<div class="overlay" id="emp-conf-overlay" style="z-index:60;">
+  <form class="modal" style="max-width:460px;" onsubmit="event.preventDefault();confirmarAcaoEmpresa();">
+    <h3 id="emp-conf-titulo">Confirmar</h3>
+    <p style="font-size:13px;margin:0 0 10px;">Empresa: <b id="emp-conf-nome"></b></p>
+    <p id="emp-conf-impacto" style="font-size:11.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin:0 0 10px;"></p>
+    <p id="emp-conf-aviso" style="font-size:11.5px;color:var(--muted);margin:0 0 12px;line-height:1.5;"></p>
+    <label style="font-size:11.5px;color:var(--muted);">Confirme sua senha de Master</label>
+    <input type="password" id="emp-conf-senha" autocomplete="current-password" style="width:100%;margin:4px 0 6px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;">
+    <p id="emp-conf-erro" style="font-size:11.5px;color:var(--bad);margin:0 0 10px;min-height:14px;"></p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button type="button" class="back" onclick="fecharConfirmacaoEmpresa()">Cancelar</button>
+      <button type="submit" class="primary" id="emp-conf-ok">Confirmar</button>
+    </div>
+  </form>
+</div>
+
 </body>
 </html>

@@ -3472,7 +3472,9 @@ const EXECUTORES_QA = {
   'grupos.excluir': (p) => grupos.remove(p.id),
   'empresas.criar': (p) => empresas.create(p),
   'empresas.editar': (p) => empresas.update(p.id, p.dados),
-  'empresas.excluir': (p) => empresas.remove(p.id),
+  'empresas.excluir': async (p) => { await users.desvincularEmpresa(p.id); return empresas.remove(p.id); },
+  'empresas.arquivar': (p) => empresas.arquivar(p.id, { porEmail: p.porEmail }),
+  'empresas.desarquivar': (p) => empresas.desarquivar(p.id),
   'unidadesExtras.criar': (p) => unidadesExtras.criar(p.dados, codigosUnidadesFixas()),
   'unidadesExtras.editar': (p) => unidadesExtras.atualizar(p.id, { nome: p.nome, areas: p.areas, tiposSolicitacao: p.tiposSolicitacao }),
   'unidadesExtras.excluir': (p) => unidadesExtras.remover(p.id),
@@ -4631,11 +4633,75 @@ app.put('/api/empresas/:id', auth.requireMaster, async (req, res) => {
   }
 });
 
+// ARQUIVAR / EXCLUIR EMPRESA - as duas ações destrutivas do cadastro de
+// empresas. Regra do Master, valendo pras duas: só o acesso Master, e
+// SEMPRE reconfirmando a senha, mesmo com a sessão aberta. auth.requireMaster
+// já barra qualquer um que não seja Master; a senha é a segunda camada,
+// contra o caso real de alguém mexer numa máquina que ficou logada.
+//
+// Devolve 400 (não 401) quando a senha está errada: o wrapper de fetch das
+// páginas desloga em qualquer 401, e senha de confirmação errada não
+// significa sessão inválida (mesmo motivo comentado na rota de sangria).
+async function exigirSenhaDoMaster(req, res) {
+  const senhaOk = await auth.verifyPassword(req.user.id, req.body?.password);
+  if (!senhaOk) {
+    res.status(400).json({ error: 'Senha incorreta.' });
+    return false;
+  }
+  return true;
+}
+
+// quantos acessos e unidades a decisão atinge - a tela mostra isso ANTES de
+// pedir a senha, pra a escolha entre arquivar e excluir ser informada em vez
+// de às cegas
+app.get('/api/empresas/:id/impacto', auth.requireMaster, async (req, res) => {
+  try {
+    const empresa = (await empresas.list()).find((e) => e.id === req.params.id);
+    if (!empresa) return res.status(404).json({ error: 'Empresa não encontrada.' });
+    const vinculados = await users.listarPorEmpresa(req.params.id);
+    res.json({
+      nome: empresa.nome,
+      arquivada: !!empresa.arquivada,
+      unidades: (empresa.unidades || []).length,
+      acessos: vinculados.length,
+      acessosNomes: vinculados.slice(0, 20).map((u) => u.username || u.email),
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/empresas/:id/arquivar', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    if (await desviarSeQaMaster(req, res, 'empresas.arquivar', `Arquivar empresa ${req.params.id}`, { id: req.params.id, porEmail: req.user.email })) return;
+    res.json(await empresas.arquivar(req.params.id, { porEmail: req.user.email }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/empresas/:id/desarquivar', auth.requireMaster, async (req, res) => {
+  try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    if (await desviarSeQaMaster(req, res, 'empresas.desarquivar', `Desarquivar empresa ${req.params.id}`, { id: req.params.id })) return;
+    res.json(await empresas.desarquivar(req.params.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.delete('/api/empresas/:id', auth.requireMaster, async (req, res) => {
   try {
+    if (!(await exigirSenhaDoMaster(req, res))) return;
     if (await desviarSeQaMaster(req, res, 'empresas.excluir', `Excluir empresa ${req.params.id}`, { id: req.params.id })) return;
+    // solta quem estava vinculado ANTES de apagar: acesso apontando pra uma
+    // empresa que não existe mais fica sem enxergar nada (empresa inexistente
+    // = lista de unidades vazia) e sem nenhuma pista do porquê. Soltando, a
+    // pessoa volta a valer pelas unidades marcadas no próprio acesso.
+    const soltos = await users.desvincularEmpresa(req.params.id);
     await empresas.remove(req.params.id);
-    res.json({ ok: true });
+    res.json({ ok: true, acessosDesvinculados: soltos });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
