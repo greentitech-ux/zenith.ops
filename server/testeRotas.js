@@ -232,6 +232,10 @@ function putJson(caminho, corpoObj, headers = {}) {
 function postarJson(caminho, corpoObj, headers = {}) {
   return enviarJson('POST', caminho, corpoObj, headers);
 }
+// DELETE autenticado - o suite só tinha GET/POST/PUT até aqui
+function pedirJsonDelete(caminho, headers = {}) {
+  return enviarJson('DELETE', caminho, {}, headers);
+}
 function enviarJson(metodo, caminho, corpoObj, headers = {}) {
   const corpo = Buffer.from(JSON.stringify(corpoObj));
   return new Promise((resolve) => {
@@ -2992,6 +2996,58 @@ setTimeout(async () => {
   } catch (e) { okNoc = false; console.log('  erro: ' + e.message); }
   if (!okNoc) ruins += 1;
   console.log(`${okNoc ? '✓' : '✗'} NOC: Ethernet caída vira DEGRADADO, reinício é detectado pelo boot, e o Master reinicia o parque com senha`);
+
+  // ------------------------------------------------------------------
+  // Logos das empresas do grupo no rodapé do login. Antes era UMA imagem
+  // fixa no código: empresa entrava ou saía do grupo e só dava pra
+  // refletir isso com deploy. O que precisa ficar provado: o Master
+  // cadastra/remove, e a rota PÚBLICA (lida pela tela de login, antes de
+  // existir sessão) nunca devolve o caminho do arquivo no Storage.
+  let okLogos = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+
+    const semArquivo = await postarMultipart('/api/login-custom/logos', { nome: 'Sem imagem' }, null, 'logo', cab);
+    const naoImagem = await postarMultipart('/api/login-custom/logos', { nome: 'PDF' },
+      { nome: 'x.pdf', tipo: 'application/pdf', buffer: Buffer.from('%PDF-1.4') }, 'logo', cab);
+
+    const criada = await postarMultipart('/api/login-custom/logos', { nome: 'Grupo Bravo' },
+      { nome: 'bravo.png', tipo: 'image/png', buffer: PNG }, 'logo', cab);
+    const dCriada = criada.status === 200 ? JSON.parse(criada.corpo) : {};
+    const logo = (dCriada.logos || [])[0] || {};
+
+    // a tela de login lê ESTA rota, sem token nenhum
+    const publico = await pedir('/api/login-custom');
+    const dPublico = publico.status === 200 ? JSON.parse(publico.corpo) : {};
+    const imagem = await pedirBinario(`/api/login-custom/logo/${encodeURIComponent(logo.id || 'x')}`);
+    const inexistente = await pedir('/api/login-custom/logo/naoexiste');
+
+    const removida = await pedirJsonDelete(`/api/login-custom/logos/${encodeURIComponent(logo.id)}`, cab);
+    const dRemovida = removida.status === 200 ? JSON.parse(removida.corpo) : {};
+    const removerDeNovo = await pedirJsonDelete(`/api/login-custom/logos/${encodeURIComponent(logo.id)}`, cab);
+
+    const conferencias = {
+      'sem arquivo é recusado': semArquivo.status === 400,
+      'arquivo que não é imagem é recusado': naoImagem.status === 400,
+      'Master cadastra a logo com nome': criada.status === 200 && logo.nome === 'Grupo Bravo' && !!logo.id,
+      'a tela de login (sem sessão) enxerga a logo cadastrada':
+        publico.status === 200 && (dPublico.logos || []).some((l) => l.id === logo.id),
+      'a rota pública NUNCA devolve o caminho do arquivo no Storage':
+        !/login-custom\//.test(publico.corpo) && (dPublico.logos || []).every((l) => l.arquivo === undefined)
+        && dPublico.fundoArquivo === undefined,
+      'a imagem sai pela rota pública': imagem.status === 200 && imagem.buffer.length > 0,
+      'id inexistente devolve 404': inexistente.status === 404,
+      'Master remove e a lista fica vazia de novo':
+        removida.status === 200 && (dRemovida.logos || []).length === 0,
+      'remover a mesma logo duas vezes é recusado': removerDeNovo.status === 400,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okLogos = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okLogos = false; console.log('  erro: ' + e.message); }
+  if (!okLogos) ruins += 1;
+  console.log(`${okLogos ? '✓' : '✗'} Login: Master sobe/remove as logos das empresas do rodapé (sem deploy, sem vazar caminho de arquivo)`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
