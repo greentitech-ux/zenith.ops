@@ -1986,6 +1986,7 @@ setTimeout(async () => {
     const fs = require('fs');
     const htmlAssinar = fs.readFileSync(require('path').join(__dirname, 'public', 'assinar.html'), 'utf8');
     const htmlForms = fs.readFileSync(require('path').join(__dirname, 'public', 'formularios.html'), 'utf8');
+    const srcFormularios = fs.readFileSync(require('path').join(__dirname, 'formularios.js'), 'utf8');
     const conferencias = {
       'criar devolve um link de assinatura por papel': criado.status === 200
         && !!(linkDe('fornecedor') && linkDe('fornecedor').link) && !!(linkDe('gerente') && linkDe('gerente').link),
@@ -2003,6 +2004,18 @@ setTimeout(async () => {
         diarias.status === 200 && ['linha-0', 'linha-1', 'gerente'].every((c) => (dDiarias.assinaturas || []).some((a) => a.chave === c)),
       'a página de assinar tem o quadro de desenho': /canvas id="pad"/.test(htmlAssinar) && /toDataURL\('image\/png'\)/.test(htmlAssinar),
       'a tela de formulários gera links por papel': /Copiar link/.test(htmlForms) && /assinar\.html/.test(require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8')),
+      // pedido do Master ao ver o PDF pela primeira vez: "transformar no
+      // mesmo formato do formulario dos exemplos que enviei" - o PDF tinha
+      // virado texto puro preto/branco; confere que a paleta e a
+      // identidade do papel original (Grupo Bravo Empresarial) voltaram
+      'o PDF usa a paleta do papel original (azul escuro dos rótulos/título + azul claro da tabela/total)':
+        /AZUL_ESCURO = '#1F4E79'/.test(srcFormularios) && /AZUL_CLARO = '#DCE6F1'/.test(srcFormularios),
+      'o PDF traz o bloco de identidade fixo do Grupo Bravo Empresarial (mesmo texto em toda unidade)':
+        /'BRAVO'/.test(srcFormularios) && /'EMPRESARIAL'/.test(srcFormularios),
+      'Banco/Agência/Conta viram UMA linha "DADOS BANCÁRIOS" no cabeçalho (igual ao papel), não 3 linhas soltas':
+        /label: 'DADOS BANCÁRIOS'/.test(srcFormularios) && /combo:/.test(srcFormularios),
+      'o rótulo do Reembolso bate com o papel original ("NOME DO COLABORADOR", não "FAVORECIDO")':
+        /'NOME DO COLABORADOR'/.test(srcFormularios) && !/label: 'FAVORECIDO'/.test(srcFormularios),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okFormularios = !falhas.length;

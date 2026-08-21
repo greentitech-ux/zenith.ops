@@ -91,7 +91,7 @@ const TIPOS = {
     titulo: 'SOLICITAÇÃO DE REEMBOLSO',
     cabecalho: [
       { key: 'cnpj', label: 'CNPJ' },
-      { key: 'colaborador', label: 'FAVORECIDO' },
+      { key: 'colaborador', label: 'NOME DO COLABORADOR' },
       { key: 'cpf', label: 'CPF' },
       { key: 'banco', label: 'BANCO' },
       { key: 'agencia', label: 'AGÊNCIA' },
@@ -332,6 +332,15 @@ function imagemBuffer(dataUrl) {
   try { return Buffer.from(String(dataUrl).split(',')[1], 'base64'); } catch (e) { return null; }
 }
 
+// cores fiéis ao papel original do Grupo Bravo Empresarial (a holding
+// administrativa por trás de todas as unidades - por isso o bloco de
+// identidade no canto é sempre o mesmo, independente de qual unidade foi
+// escolhida): faixa azul-escura nos rótulos/título, azul-clara no
+// cabeçalho da tabela e na linha de total, grade em azul-acinzentado
+const AZUL_ESCURO = '#1F4E79';
+const AZUL_CLARO = '#DCE6F1';
+const BORDA = '#8EA9C7';
+
 function gerarPdf(r, res) {
   const modelo = TIPOS[r.tipo];
   const doc = new PDFDocument({ margin: 40, size: 'A4' });
@@ -343,20 +352,71 @@ function gerarPdf(r, res) {
   const LARGURA = doc.page.width - X * 2;
   let y = doc.page.margins.top;
 
-  // cabeçalho: UNIDADE + campos do modelo, um por linha (igual ao papel)
-  const linhaCabecalho = (label, valor) => {
-    doc.font('Helvetica-Bold').fontSize(10).fillColor('#000').text(`${label}: `, X, y, { continued: true });
-    doc.font('Helvetica').text(valor || ' ');
-    y += 20;
-  };
-  linhaCabecalho('UNIDADE', r.unidade);
-  if (r.razaoSocial && r.razaoSocial !== r.unidade) linhaCabecalho('RAZÃO SOCIAL', r.razaoSocial);
-  modelo.cabecalho.forEach((c) => linhaCabecalho(c.label, r.campos[c.key]));
+  // bloco de cabeçalho: faixa de campos (rótulo azul + valor) à esquerda,
+  // logo do grupo à direita - mesma diagramação do papel original
+  const LOGO_W = 130;
+  const CAMPOS_W = LARGURA - LOGO_W;
+  const LABEL_W = CAMPOS_W * 0.28;
+  const VALUE_W = CAMPOS_W - LABEL_W;
+  const ROW_H = 24;
+  const ROW_H_COMBO = 30;
 
-  // título centralizado
-  y += 14;
-  doc.font('Helvetica-Bold').fontSize(13).text(modelo.titulo, X, y, { width: LARGURA, align: 'center' });
-  y += 30;
+  // Banco/Agência/Conta viram UMA linha "DADOS BANCÁRIOS" com 3 sub-campos
+  // lado a lado (igual ao papel), em vez de 3 linhas separadas
+  const linhasCabecalho = [{ label: 'UNIDADE', valor: r.unidade, h: ROW_H }];
+  if (r.razaoSocial && r.razaoSocial !== r.unidade) linhasCabecalho.push({ label: 'RAZÃO SOCIAL', valor: r.razaoSocial, h: ROW_H });
+  const campos = [...modelo.cabecalho];
+  for (let i = 0; i < campos.length; i++) {
+    const c = campos[i];
+    if (c.key === 'banco' && campos[i + 1] && campos[i + 1].key === 'agencia' && campos[i + 2] && campos[i + 2].key === 'conta') {
+      linhasCabecalho.push({
+        label: 'DADOS BANCÁRIOS', h: ROW_H_COMBO,
+        combo: [
+          { label: 'Banco:', valor: r.campos.banco },
+          { label: 'Agência:', valor: r.campos.agencia },
+          { label: 'Conta com dígito:', valor: r.campos.conta },
+        ],
+      });
+      i += 2;
+      continue;
+    }
+    linhasCabecalho.push({ label: c.label, valor: r.campos[c.key], h: ROW_H });
+  }
+
+  let ry = y;
+  linhasCabecalho.forEach((linha) => {
+    doc.rect(X, ry, LABEL_W, linha.h).fillAndStroke(AZUL_ESCURO, AZUL_ESCURO);
+    doc.font('Helvetica-Bold').fontSize(8).fillColor('#fff').text(linha.label, X + 6, ry + linha.h / 2 - 4, { width: LABEL_W - 10, ellipsis: true });
+    if (linha.combo) {
+      const subW = VALUE_W / linha.combo.length;
+      linha.combo.forEach((s, i) => {
+        const sx = X + LABEL_W + subW * i;
+        doc.rect(sx, ry, subW, linha.h).stroke(BORDA);
+        doc.font('Helvetica-Bold').fontSize(6.5).fillColor('#555').text(s.label, sx + 5, ry + 5, { width: subW - 10, ellipsis: true });
+        doc.font('Helvetica').fontSize(8.5).fillColor('#000').text(s.valor || '', sx + 5, ry + 16, { width: subW - 10, ellipsis: true });
+      });
+    } else {
+      doc.rect(X + LABEL_W, ry, VALUE_W, linha.h).stroke(BORDA);
+      doc.font('Helvetica').fontSize(9).fillColor('#000').text(linha.valor || '', X + LABEL_W + 6, ry + linha.h / 2 - 4, { width: VALUE_W - 12, ellipsis: true });
+    }
+    ry += linha.h;
+  });
+
+  // logo/identidade do grupo (fixa, não muda por unidade)
+  const alturaHeader = ry - y;
+  const logoX = X + CAMPOS_W;
+  doc.rect(logoX, y, LOGO_W, alturaHeader).stroke(AZUL_ESCURO);
+  const cy = y + alturaHeader / 2;
+  doc.font('Helvetica').fontSize(7).fillColor('#8a8a8a').text('GRUPO', logoX, cy - 20, { width: LOGO_W, align: 'center', characterSpacing: 2 });
+  doc.font('Helvetica-Bold').fontSize(17).fillColor('#1a1a1a').text('BRAVO', logoX, cy - 11, { width: LOGO_W, align: 'center' });
+  doc.font('Helvetica').fontSize(6).fillColor('#8a8a8a').text('EMPRESARIAL', logoX, cy + 10, { width: LOGO_W, align: 'center', characterSpacing: 1.5 });
+
+  y = ry + 10;
+
+  // barra de título, largura cheia, igual ao papel
+  doc.rect(X, y, LARGURA, 22).fillAndStroke(AZUL_ESCURO, AZUL_ESCURO);
+  doc.font('Helvetica-Bold').fontSize(11).fillColor('#fff').text(modelo.titulo, X, y + 6, { width: LARGURA, align: 'center' });
+  y += 22;
 
   // larguras das colunas: VALOR fixa, ASSINATURA (diárias) fixa, DESCRIÇÃO
   // ganha o dobro do peso, o resto divide por igual
@@ -369,7 +429,8 @@ function gerarPdf(r, res) {
 
   const alturaLinha = modelo.assinaturaPorLinha ? 40 : 26;
   const celula = (texto, x, yy, w, h, opts = {}) => {
-    doc.rect(x, yy, w, h).stroke('#444');
+    if (opts.fill) doc.rect(x, yy, w, h).fillAndStroke(opts.fill, BORDA);
+    else doc.rect(x, yy, w, h).stroke(BORDA);
     doc.font(opts.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(8.5).fillColor('#000')
       .text(String(texto == null ? '' : texto), x + 4, yy + (opts.meio ? (h - 9) / 2 : 5), { width: w - 8, height: h - 8, ellipsis: true, align: opts.align || 'left' });
   };
@@ -377,7 +438,7 @@ function gerarPdf(r, res) {
   // cabeçalho da tabela
   let x = X;
   colunas.forEach((c, i) => {
-    doc.rect(x, y, larguras[i], 22).fillAndStroke('#eeeeee', '#444');
+    doc.rect(x, y, larguras[i], 22).fillAndStroke(AZUL_CLARO, BORDA);
     doc.font('Helvetica-Bold').fontSize(8).fillColor('#000').text(c.label, x + 3, y + 7, { width: larguras[i] - 6, align: 'center', height: 14, ellipsis: true });
     x += larguras[i];
   });
@@ -404,8 +465,8 @@ function gerarPdf(r, res) {
   const larguraValor = larguras[colunas.findIndex((c) => c.valor)];
   const larguraRotulo = 200;
   const xValor = X + larguras.slice(0, colunas.findIndex((c) => c.valor)).reduce((s, w) => s + w, 0);
-  celula(modelo.totalRotulo, xValor - larguraRotulo, y, larguraRotulo, 24, { bold: true, meio: true, align: 'right' });
-  celula(fmtMoney(r.valorTotal), xValor, y, larguraValor, 24, { bold: true, meio: true, align: 'right' });
+  celula(modelo.totalRotulo, xValor - larguraRotulo, y, larguraRotulo, 24, { bold: true, meio: true, align: 'right', fill: AZUL_CLARO });
+  celula(fmtMoney(r.valorTotal), xValor, y, larguraValor, 24, { bold: true, meio: true, align: 'right', fill: AZUL_CLARO });
   y += 60;
 
   // assinaturas do rodapé: 1 centralizada ou 2 lado a lado, imagem em cima
