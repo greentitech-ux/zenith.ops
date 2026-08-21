@@ -726,6 +726,64 @@ async function notifyDiscoAlerta(unidadeNome, codigo, computadorNome, posto, niv
 // máquina passou de mais uma semana sem reiniciar. Mesmo público e mesmo
 // espírito do alerta de disco: não é crítico, é lembrete de manutenção -
 // alguém precisa reiniciar aquele computador quando a loja fechar.
+// máquina reiniciou/desligou (pedido do Master). Separa os dois casos que
+// importam pra quem opera: reinício NORMAL (alguém reiniciou, manutenção,
+// update do Windows) e reinício INESPERADO (o Windows registrou queda
+// anormal - falta de luz, travamento, botão segurado). O segundo é o que
+// merece alguém ir olhar a loja.
+async function notifyMaquinaReiniciou(unidadeNome, codigo, computadorNome, posto, inesperado) {
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const dados = {
+    title: inesperado ? '⚡ Desligamento inesperado' : '🔄 Computador reiniciou',
+    body: inesperado
+      ? `${prefixo}${unidadeNome || codigo}: voltou depois de um desligamento anormal (queda de energia ou travamento).`
+      : `${prefixo}${unidadeNome || codigo}: reiniciou e voltou ao ar.`,
+    tag: `noc-reiniciou-${codigo}-${posto || 'principal'}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-reiniciou', titulo: dados.title, resumo: dados.body, url: dados.url, critico: !!inesperado });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+      else console.error('Erro ao enviar push (máquina reiniciou):', err.message);
+    }
+  }
+}
+
+// caiu a Ethernet, mas a máquina continua no ar (pelo Wi-Fi). Não é queda -
+// é DEGRADAÇÃO, e sem esse aviso ninguém descobria até a loja reclamar de
+// lentidão, porque o painel continuava verde.
+async function notifyLinkDegradado(unidadeNome, codigo, computadorNome, posto, linkTipo, ethernetCaida) {
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const dados = {
+    title: ethernetCaida ? '🔌 Ethernet caiu' : '📶 Caiu para o Wi-Fi',
+    body: ethernetCaida
+      ? `${prefixo}${unidadeNome || codigo}: a placa de rede está sem link (cabo solto, switch ou porta). Segue no ar por ${linkTipo === 'wifi' ? 'Wi-Fi' : 'outro caminho'}.`
+      : `${prefixo}${unidadeNome || codigo}: saiu do cabo e está no Wi-Fi.`,
+    tag: `noc-link-${codigo}-${posto || 'principal'}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-link', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+      else console.error('Erro ao enviar push (link degradado):', err.message);
+    }
+  }
+}
+
 async function notifyReinicioPendente(unidadeNome, codigo, computadorNome, posto, dias) {
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const dados = {
@@ -854,7 +912,7 @@ module.exports = {
   notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado,
-  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente,
+  notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado,
   notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
   notifyAbastecimentoDivergencia, PUBLIC_KEY,
 };

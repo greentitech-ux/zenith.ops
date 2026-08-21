@@ -2911,6 +2911,88 @@ setTimeout(async () => {
   if (!okTokenLink) ruins += 1;
   console.log(`${okTokenLink ? '✓' : '✗'} Link de preenchimento: a URL que vai pro WhatsApp abre de verdade (token lido do ?token=)`);
 
+  // ------------------------------------------------------------------
+  // NOC: Ethernet, reinício e janela de manutenção.
+  // Pergunta que originou tudo isso: "por que estão ficando OFF se o
+  // computador tem REDE?". A resposta é que "offline" só quer dizer
+  // "parou de falar" - e três coisas MUITO diferentes caíam no mesmo
+  // ponto vermelho. O que este teste tem que provar é a separação delas.
+  let okNoc = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const UNI = 'NOCTESTE';
+    await ls.cadastrarComputador(UNI, 'PDV-NOC', 'interno');
+    const postoNoc = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-NOC').posto;
+    const tk = await ls.garantirAgentToken(UNI, postoNoc);
+
+    const bater = (extra) => ls.heartbeat(UNI, postoNoc, { userAgent: 'NOCZenith/1.0', ...extra }, tk);
+    const doc = async () => (await ls.detalhar(UNI, postoNoc));
+
+    // 1) primeira batida: no cabo, tudo certo
+    const BOOT1 = Date.now() - 3 * 3600 * 1000;
+    await bater({ bootEm: BOOT1, link: { tipo: 'ethernet', nome: 'Ethernet', mbps: 1000 } });
+    const noCabo = await doc();
+
+    // 2) o cabo cai e ela segue viva pelo Wi-Fi: NÃO é queda, é degradação
+    await bater({ bootEm: BOOT1, link: { tipo: 'wifi', nome: 'Wi-Fi', mbps: 130, ethernetCaida: true } });
+    const noWifi = await doc();
+    const alertasLink = await ls.varrerAlertas();
+    const alertaLink = alertasLink.find((t) => t.tipo === 'link' && t.codigo === UNI);
+
+    // 3) a máquina reinicia: o LastBootUpTime muda. Isso é detectado mesmo
+    //    sem ela ter sumido do painel - é a diferença entre "reiniciou" e
+    //    "caiu a rede", que antes não existia.
+    await bater({ bootEm: Date.now(), desligamentoInesperado: true, link: { tipo: 'ethernet', nome: 'Ethernet', mbps: 1000 } });
+    const depoisDoBoot = await doc();
+    const alertasBoot = await ls.varrerAlertas();
+    const alertaBoot = alertasBoot.find((t) => t.tipo === 'reiniciou' && t.codigo === UNI);
+
+    // 4) máquina cadastrada que NUNCA bateu: 'sem-agente', não 'indisponível'
+    await ls.cadastrarComputador(UNI, 'NUNCA-INSTALOU', 'interno');
+    const semAgente = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'NUNCA-INSTALOU');
+
+    // 5) janela de manutenção: exige senha, e o comando é fixo no servidor
+    const semSenha = await postarJson('/api/loja-status/manutencao/reiniciar',
+      { alvos: [{ codigo: UNI, posto: postoNoc }] }, cab);
+    const senhaErrada = await postarJson('/api/loja-status/manutencao/reiniciar',
+      { alvos: [{ codigo: UNI, posto: postoNoc }], password: 'errada' }, cab);
+    const comSenha = await postarJson('/api/loja-status/manutencao/reiniciar',
+      { alvos: [{ codigo: UNI, posto: postoNoc }], password: process.env.MASTER_PASSWORD }, cab);
+    const dReinicio = comSenha.status === 200 ? JSON.parse(comSenha.corpo) : {};
+    // a máquina recebe o comando na batida seguinte
+    const entrega = await bater({ bootEm: Date.now(), link: { tipo: 'ethernet' } });
+
+    const conferencias = {
+      'no cabo = operacional, e o painel mostra a velocidade':
+        noCabo.estado === 'operacional' && noCabo.link.tipo === 'ethernet' && noCabo.link.mbps === 1000,
+      'caiu a Ethernet mas segue no ar = DEGRADADO (não offline)':
+        noWifi.online === true && noWifi.estado === 'degradado'
+        && noWifi.degradacao.includes('Ethernet caída'),
+      'a queda de Ethernet vira alerta próprio': !!alertaLink && alertaLink.ethernetCaida === true,
+      'reinício é detectado pelo boot, não por ausência de heartbeat':
+        !!alertaBoot && alertaBoot.inesperado === true,
+      'o reinício fica no registro do computador':
+        (depoisDoBoot.eventos || []).some((e) => e.tipo === 'reiniciou' && e.inesperado),
+      'a queda de link também fica no registro':
+        (depoisDoBoot.eventos || []).some((e) => e.tipo === 'link' && e.ethernetCaida),
+      'voltar pro cabo tira a máquina de degradado': depoisDoBoot.estado === 'operacional',
+      'máquina que nunca bateu é "sem agente", não "indisponível"':
+        semAgente.estado === 'sem-agente' && semAgente.online === false,
+      'reiniciar sem senha é recusado': semSenha.status === 400,
+      'reiniciar com senha errada é recusado': senhaErrada.status === 400,
+      'reiniciar com a senha certa enfileira o comando':
+        comSenha.status === 200 && dReinicio.enfileirados === 1 && dReinicio.abortavelPorSegundos === 120,
+      'a máquina recebe o comando de reinício na batida seguinte':
+        !!entrega.comandoPendente && /shutdown \/r \/t 120/.test(entrega.comandoPendente.comando),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okNoc = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okNoc = false; console.log('  erro: ' + e.message); }
+  if (!okNoc) ruins += 1;
+  console.log(`${okNoc ? '✓' : '✗'} NOC: Ethernet caída vira DEGRADADO, reinício é detectado pelo boot, e o Master reinicia o parque com senha`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
