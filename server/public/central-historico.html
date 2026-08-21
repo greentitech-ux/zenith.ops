@@ -2279,10 +2279,23 @@ async function boot(){
   // link "Tickets dessa conversa" da Central do Beniboy (?ticket=NUMERO) -
   // abre o detalhe direto, sem precisar procurar na lista (pedido explicito
   // do usuario: "o numero do ticket... ser clicável e direcionar até o ticket")
-  const numeroTicketAbrir = new URLSearchParams(location.search).get('ticket');
+  const params = new URLSearchParams(location.search);
+  const numeroTicketAbrir = params.get('ticket');
   if (numeroTicketAbrir) {
     const alvo = CARDS.find(c => String(c.numeroTicket) === numeroTicketAbrir);
     if (alvo) abrirDetalhe(alvo.tipo, alvo.id);
+  }
+  // "Visualizar" da notificação de nova solicitação (ver notif-central.js e
+  // painel.html) manda tipo+id - o alerta agora LEVA até o conteúdo em vez de
+  // só sumir da tela. Limpa os parâmetros depois de abrir: senão um F5 mais
+  // tarde reabriria o mesmo card do nada.
+  const tipoAbrir = params.get('tipo');
+  const idAbrir = params.get('id');
+  if (tipoAbrir && idAbrir) {
+    const alvo = CARDS.find(c => c.tipo === tipoAbrir && c.id === idAbrir);
+    if (alvo) abrirDetalhe(alvo.tipo, alvo.id);
+    else alert('Essa solicitação não está mais na sua lista - pode ter sido resolvida ou não estar entre os tipos que você acompanha.');
+    history.replaceState(null, '', location.pathname);
   }
 
   // secao "Fechamentos" - so pra quem tem a secao "lancamento" (mesma
@@ -2372,9 +2385,14 @@ function mostrarNotificacaoSolicitacao(card){
     <div class="ns-titulo">🔔 Nova solicitação</div>
     <div class="ns-corpo">${iconeTipo(card.tipo)} ${escapeHtml(TIPOS_INFO[card.tipo]?.label||card.tipo)} · ${escapeHtml(card.unidadeNome||card.unidade||'—')}<br>${escapeHtml(card.titulo||'')}</div>
     ${(card.atribuidosEmails && card.atribuidosEmails.length) ? `<div class="ns-direcionado">👤 atribuído a ${escapeHtml(card.atribuidosEmails.join(', '))}</div>` : (card.direcionadoParaEmail ? `<div class="ns-direcionado">👤 direcionado a ${escapeHtml(card.direcionadoParaEmail)}</div>` : '')}
-    <button type="button" class="ns-ok">✓ Visualizado</button>
+    <button type="button" class="ns-ok">👁️ Visualizar</button>
   `;
-  el.querySelector('.ns-ok').addEventListener('click', ()=>marcarVistoNotificacao(card.tipo, card.id));
+  // aqui já estamos no Histórico: abre o detalhe na hora, sem recarregar a
+  // página (nas outras telas o mesmo botão navega pra cá - ver notif-central.js)
+  el.querySelector('.ns-ok').addEventListener('click', ()=>{
+    marcarVistoNotificacao(card.tipo, card.id);
+    abrirDetalhe(card.tipo, card.id);
+  });
   wrap.appendChild(el);
   tocarSomNotificacao();
 }
