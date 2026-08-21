@@ -339,6 +339,15 @@
       </span>
     </div>
   </h2>
+  <!-- periodo customizado: os presets acima cobrem o uso comum (ultima
+       semana/mes); quando o periodo que interessa nao bate com nenhum dos
+       dois (ex: so a semana passada, so o dia 10 ao 15), escolhe aqui -->
+  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:-2px 0 10px;">
+    <input type="date" id="periodo-inicio" style="width:132px;padding:6px 8px;font-size:11.5px;margin:0;">
+    <span style="font-family:var(--mono);font-size:10.5px;color:var(--muted);">até</span>
+    <input type="date" id="periodo-fim" style="width:132px;padding:6px 8px;font-size:11.5px;margin:0;">
+    <button type="button" class="fluxo-preset" onclick="aplicarPeriodoCustom()">Aplicar período</button>
+  </div>
   <div class="sub" id="fluxo-sub" style="margin:-4px 0 10px;"></div>
   <div class="resumo-grid" id="fluxo-kpis"></div>
   <div id="fluxo-itens"></div>
@@ -355,6 +364,18 @@
     <button type="button" class="link-badge-btn" id="btn-turnos" onclick="alternarTurnos()">mostrar turnos</button>
   </div>
   <div id="fluxo-dias"></div>
+
+  <!-- RELATORIO ESCRITO: um paragrafo por turno com divergencia, explicando
+       o que aconteceu e QUEM esteve envolvido (quem contou/enviou) - pedido
+       do Master: "relatório escrito explicando os possíveis ajustes e
+       desvios/erros operacionais, informando usuário do envio". Monta do
+       MESMO ciclos ja carregado (sem leitura extra) - só o PDF bate no
+       servidor de novo, pra gerar o arquivo. -->
+  <div class="dd-titulo" style="margin-top:18px;">
+    <span>📝 Relatório escrito de desvios</span>
+    <button type="button" class="link-badge-btn" onclick="baixarRelatorioEscrito()">📄 PDF</button>
+  </div>
+  <div id="relatorio-escrito"></div>
 </div>
 
 <!-- capacidade do carrinho: o que cabe nas 2 geladeiras, por item. E o que
@@ -460,13 +481,29 @@ async function carregarComparativoFechamento(data){
 // saldo final = saida apurada) + os sinais de controle: perda em transito
 // (enviado x recebido), avarias declaradas e cobertura de contagem
 let FLUXO_DIAS = 7;
-async function carregarFluxo(dias){
-  if(dias) FLUXO_DIAS = dias;
-  const painel = document.getElementById('painel-fluxo');
-  document.getElementById('fluxo-p7').classList.toggle('ativo', FLUXO_DIAS===7);
-  document.getElementById('fluxo-p30').classList.toggle('ativo', FLUXO_DIAS===30);
+// periodo customizado (datas escolhidas a mao) - quando preenchido, manda
+// nos presets de 7/30 dias; null volta a valer o preset
+let PERIODO_CUSTOM = null;
+function periodoAtual(){
+  if(PERIODO_CUSTOM) return PERIODO_CUSTOM;
   const fim = dataBrasilia(new Date().toISOString());
   const inicio = dataBrasilia(new Date(Date.now() - (FLUXO_DIAS-1)*86400000).toISOString());
+  return { inicio, fim };
+}
+function aplicarPeriodoCustom(){
+  const inicio = document.getElementById('periodo-inicio').value;
+  const fim = document.getElementById('periodo-fim').value;
+  if(!inicio || !fim){ alert('Escolha as duas datas.'); return; }
+  if(inicio > fim){ alert('A data de início não pode ser depois da data de fim.'); return; }
+  PERIODO_CUSTOM = { inicio, fim };
+  carregarFluxo();
+}
+async function carregarFluxo(dias){
+  if(dias){ FLUXO_DIAS = dias; PERIODO_CUSTOM = null; }
+  const painel = document.getElementById('painel-fluxo');
+  document.getElementById('fluxo-p7').classList.toggle('ativo', !PERIODO_CUSTOM && FLUXO_DIAS===7);
+  document.getElementById('fluxo-p30').classList.toggle('ativo', !PERIODO_CUSTOM && FLUXO_DIAS===30);
+  const { inicio, fim } = periodoAtual();
   try{
     const d = await fetch(`/api/abastecimento/fluxo?inicio=${inicio}&fim=${fim}`).then(r=>{ if(!r.ok) throw new Error('Erro ao carregar fluxo.'); return r.json(); });
     painel.classList.remove('hidden');
@@ -518,6 +555,7 @@ async function carregarFluxo(dias){
       : '';
 
     renderDias(d);
+    renderRelatorioEscrito(d);
     renderCapacidades(d.capacidades || []);
   }catch(err){
     painel.classList.add('hidden');
@@ -595,16 +633,58 @@ function baixarPdfTurno(){
   window.open(`/api/abastecimento/turno/${encodeURIComponent(TURNO_ATE)}/relatorio.pdf?token=${encodeURIComponent(token)}`, '_blank');
 }
 
-// baixa o PDF do mesmo período que a tela está mostrando (7 ou 30 dias).
-// window.open não passa pelo wrapper de fetch, então o token do login vai
-// na URL - a autenticação da rota aceita ?token= (ver requireAuth). Respeita
-// o toggle "só divergências" - o PDF sai igual ao que está na tela
+// baixa o PDF do mesmo período que a tela está mostrando (preset ou
+// período customizado, ver periodoAtual()). window.open não passa pelo
+// wrapper de fetch, então o token do login vai na URL - a autenticação da
+// rota aceita ?token= (ver requireAuth). Respeita o toggle "só
+// divergências" - o PDF sai igual ao que está na tela
 function baixarPdfDias(){
-  const fim = dataBrasilia(new Date().toISOString());
-  const inicio = dataBrasilia(new Date(Date.now() - (FLUXO_DIAS-1)*86400000).toISOString());
+  const { inicio, fim } = periodoAtual();
   const token = localStorage.getItem('authToken') || '';
   const flag = SO_DIVERGENCIAS ? '&divergencias=1' : '';
   window.open(`/api/abastecimento/fluxo/relatorio.pdf?inicio=${inicio}&fim=${fim}${flag}&token=${encodeURIComponent(token)}`, '_blank');
+}
+
+// ---------- relatório escrito de ajustes/desvios (prosa, com QUEM contou/
+// enviou em cada turno) - pedido do Master: "relatório escrito explicando
+// os possíveis ajustes e desvios/erros operacionais, informando usuário do
+// envio". Monta do MESMO ciclos já carregado por carregarFluxo - zero
+// leitura extra; só o PDF bate no servidor de novo pra gerar o arquivo. ----------
+function renderRelatorioEscrito(d){
+  const alvo = document.getElementById('relatorio-escrito');
+  const divergentes = (d.ciclos || []).filter(c => c.itens.some(i => i.saida < 0)).sort((a,b)=>a.de.localeCompare(b.de));
+  if(!divergentes.length){
+    alvo.innerHTML = '<div class="sub" style="margin-top:8px;color:var(--ok);">✓ Nenhuma divergência no período - nada a explicar.</div>';
+    return;
+  }
+  alvo.innerHTML = divergentes.map((c,idx)=>{
+    const negativos = c.itens.filter(i=>i.saida<0);
+    const abre = c.abreOperador || 'não identificado';
+    const fecha = c.fechaOperador || 'não identificado';
+    const envioTxt = c.enviosOperadores && c.enviosOperadores.length
+      ? `Envios no turno, feitos por: <b>${c.enviosOperadores.map(escapeHtml).join(', ')}</b>.`
+      : 'Nenhum envio registrado nesse turno.';
+    const causaTxt = c.enviosOperadores && c.enviosOperadores.length
+      ? `Possível causa: contagem de abertura ou fechamento incorreta (conferir com ${escapeHtml(abre)} e ${escapeHtml(fecha)}), ou envio lançado com quantidade errada (conferir com ${c.enviosOperadores.map(escapeHtml).join(', ')}).`
+      : `Possível causa: como não houve envio nesse turno, o mais provável é erro na contagem de abertura ou fechamento - conferir com ${escapeHtml(abre)} e ${escapeHtml(fecha)}.`;
+    const itensTxt = negativos.map(i=>{
+      const un = i.tipo==='pizza' ? '' : ' un';
+      return `<div style="color:var(--bad);font-size:12px;margin-top:2px;">⚠ ${escapeHtml(i.nome)}: sobrou ${Math.abs(i.saida)}${un} a mais do que o esperado</div>`;
+    }).join('');
+    return `<div class="fluxo-item" style="border-color:rgba(255,92,92,.4);">
+      <div style="font-weight:700;font-size:13px;">${idx+1}. Turno ${escapeHtml(c.rotulo)} <span class="sub" style="display:inline;">(${fmtDia(c.dia)})</span></div>
+      <div class="sub" style="margin-top:4px;">Contagem de abertura: <b style="color:var(--text);">${escapeHtml(abre)}</b> · Contagem de fechamento: <b style="color:var(--text);">${escapeHtml(fecha)}</b></div>
+      <div class="sub" style="margin-top:2px;">${envioTxt}</div>
+      ${itensTxt}
+      <div class="sub" style="margin-top:6px;color:var(--muted);">${causaTxt}</div>
+    </div>`;
+  }).join('');
+}
+
+function baixarRelatorioEscrito(){
+  const { inicio, fim } = periodoAtual();
+  const token = localStorage.getItem('authToken') || '';
+  window.open(`/api/abastecimento/divergencias/relatorio-escrito.pdf?inicio=${inicio}&fim=${fim}&token=${encodeURIComponent(token)}`, '_blank');
 }
 
 function alternarTurnos(){

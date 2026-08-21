@@ -1710,6 +1710,49 @@ setTimeout(async () => {
   console.log(`${okExplicacaoTurno ? '✓' : '✗'} Carrinho: explicação de UMA divergência + PDF de apresentação`);
 
   // ------------------------------------------------------------------
+  // Carrinho: período customizado + relatório ESCRITO de desvios - pedido do
+  // usuário: "preciso escolher periodo e tambem ter um relatorio escrito
+  // explicando os possíveis ajustes e desvios erros operacionais informando
+  // usuário do envio". O turno fechado negativo nos testes anteriores (abre
+  // com 'Ana' via ct1, fecha com 'Ana Teste' via a CONTAGEM criada acima,
+  // sem ENVIO no meio) tem que sair atribuído a essas pessoas, e o PDF
+  // narrativo tem que existir tanto pra um período com divergência quanto
+  // pra um período limpo (sem cair pra 404/500).
+  let okRelatorioEscrito = false;
+  try {
+    const abastecimentoCarrinho = require('/home/user/adyen-monitor/server/abastecimentoCarrinho.js');
+    const abastecimentoPrevisao = require('/home/user/adyen-monitor/server/abastecimentoPrevisao.js');
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const ciclos = abastecimentoPrevisao.montarCiclos(await abastecimentoCarrinho.listAll());
+    const ultimo = ciclos[ciclos.length - 1] || {};
+
+    const hoje = new Date().toISOString().slice(0, 10);
+    const pdfComDivergencia = await pedir(`/api/abastecimento/divergencias/relatorio-escrito.pdf?inicio=${hoje}&fim=${hoje}&token=${encodeURIComponent(token)}`, cab);
+    const pdfPeriodoLimpo = await pedir(`/api/abastecimento/divergencias/relatorio-escrito.pdf?inicio=2000-01-01&fim=2000-01-02&token=${encodeURIComponent(token)}`, cab);
+
+    const srcPrevisao = require('fs').readFileSync(require('path').join(__dirname, 'abastecimentoPrevisao.js'), 'utf8');
+    const srcIndex = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'abastecimento-relatorios.html'), 'utf8');
+
+    const conferencias = {
+      'o ciclo sabe quem abriu o turno (contagem inicial)': ultimo.abreOperador === 'Ana',
+      'o ciclo sabe quem fechou o turno (contagem final)': ultimo.fechaOperador === 'Ana Teste',
+      'o ciclo lista os operadores de envio (vazio aqui, sem ENVIO no meio)': Array.isArray(ultimo.enviosOperadores) && ultimo.enviosOperadores.length === 0,
+      'o PDF narrativo sai válido num período com divergência': pdfComDivergencia.status === 200 && pdfComDivergencia.corpo.startsWith('%PDF'),
+      'o PDF narrativo sai válido num período limpo (sem divergência)': pdfPeriodoLimpo.status === 200 && pdfPeriodoLimpo.corpo.startsWith('%PDF'),
+      'a rota nova está gated por Master': /divergencias\/relatorio-escrito\.pdf', auth\.requireMaster/.test(srcIndex),
+      'a tela tem o seletor de período customizado': /periodo-inicio/.test(html) && /periodo-fim/.test(html) && /function aplicarPeriodoCustom/.test(html),
+      'a tela monta o relatório escrito na hora, do que já foi carregado': /function renderRelatorioEscrito/.test(html) && /abreOperador/.test(html) && /enviosOperadores/.test(html),
+      'a tela tem o botão de baixar o relatório escrito em PDF': /function baixarRelatorioEscrito/.test(html) && /divergencias\/relatorio-escrito\.pdf/.test(html),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okRelatorioEscrito = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (abre=${ultimo.abreOperador}, fecha=${ultimo.fechaOperador}, envios=${JSON.stringify(ultimo.enviosOperadores)}, pdf1 ${pdfComDivergencia.status}, pdf2 ${pdfPeriodoLimpo.status})`);
+  } catch (e) { okRelatorioEscrito = false; console.log('  erro: ' + e.message); }
+  if (!okRelatorioEscrito) ruins += 1;
+  console.log(`${okRelatorioEscrito ? '✓' : '✗'} Carrinho: período customizado + relatório escrito de desvios (com quem abriu/fechou/enviou)`);
+
+  // ------------------------------------------------------------------
   // Chamados de TI: triagem em duas etapas (N1 -> N2 -> presencial) -
   // pedido do usuário: "quebra de caixa, desbloqueio, entre tantos outros
   // são apenas chamados Remoto N1 só evolui para N2 só depois de evoluir

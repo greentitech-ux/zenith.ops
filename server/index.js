@@ -8614,6 +8614,73 @@ app.get('/api/abastecimento/fluxo/relatorio.pdf', auth.requireMaster, async (req
   }
 });
 
+// relatorio ESCRITO de ajustes/desvios: paragrafo por paragrafo, apontando
+// QUEM contou/enviou em cada turno com divergencia - pedido do Master:
+// "relatorio escrito explicando os possiveis ajustes e desvios erros
+// operacionais informando usuario do envio". Diferente dos PDFs tabulares
+// acima (Dia a dia / so divergencias): aqui e prosa, pronta pra ler e agir.
+app.get('/api/abastecimento/divergencias/relatorio-escrito.pdf', auth.requireMaster, async (req, res) => {
+  try {
+    const hoje = hojeBrasiliaISO();
+    const fim = req.query.fim || hoje;
+    const inicio = req.query.inicio || (() => {
+      const d = new Date(`${fim}T00:00:00`);
+      d.setDate(d.getDate() - 6);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    })();
+    const dataOk = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    if (!dataOk(inicio) || !dataOk(fim) || inicio > fim) return res.status(400).json({ error: 'Período inválido.' });
+
+    const diaDe = (iso) => new Date(iso).toLocaleDateString('sv-SE', { timeZone: FUSO_BR });
+    const regs = await abastecimentoCarrinho.listAll();
+    const noPeriodo = regs.filter((r) => { const d = diaDe(r.criadoEm); return d >= inicio && d <= fim; });
+    const ciclos = abastecimentoPrevisao.montarCiclos(noPeriodo).filter((c) => c.dia >= inicio && c.dia <= fim);
+    const divergentes = ciclos.filter((c) => c.itens.some((i) => i.saida < 0)).sort((a, b) => a.de.localeCompare(b.de));
+
+    const PDFDocument = require('pdfkit');
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="carrinho-relatorio-desvios-${inicio}-a-${fim}.pdf"`);
+    doc.pipe(res);
+
+    doc.fontSize(8).fillColor('#5b6470').text('SOLUTIONS TI TECH · ZENITH OPS', { characterSpacing: 1 });
+    doc.moveDown(0.3);
+    doc.fontSize(16).fillColor('#111').text('Relatório de ajustes e desvios — Relatórios do Carrinho');
+    doc.fontSize(9).fillColor('#666').text(`Período ${reportUtil.fmtDataBR(inicio)} a ${reportUtil.fmtDataBR(fim)} · gerado em ${reportUtil.agoraBrasiliaFmt()}`);
+    doc.moveDown(1);
+
+    if (!divergentes.length) {
+      doc.fontSize(11).fillColor('#222').text('Nenhuma divergência encontrada no período. 🎉');
+    } else {
+      doc.fontSize(10).fillColor('#444').text(`${divergentes.length} turno(s) com divergência no período - abaixo, o que aconteceu em cada um e quem esteve envolvido.`);
+      doc.moveDown(1);
+      divergentes.forEach((c, idx) => {
+        if (doc.y > 680) doc.addPage();
+        const negativos = c.itens.filter((i) => i.saida < 0);
+        doc.fontSize(12).fillColor('#111').text(`${idx + 1}. Turno ${c.rotulo} (${reportUtil.fmtDataBR(c.dia)})`);
+        doc.fontSize(9.5).fillColor('#444');
+        doc.text(`Contagem de abertura: ${c.abreOperador || 'não identificado'} · Contagem de fechamento: ${c.fechaOperador || 'não identificado'}`);
+        doc.text(c.enviosOperadores.length ? `Envios no turno, feitos por: ${c.enviosOperadores.join(', ')}` : 'Nenhum envio registrado nesse turno.');
+        doc.moveDown(0.3);
+        negativos.forEach((i) => {
+          const un = i.tipo === 'pizza' ? '' : ' un';
+          doc.fontSize(9.5).fillColor('#b91c1c').text(`⚠ ${i.nome}: sobrou ${Math.abs(i.saida)}${un} a mais do que o esperado`);
+        });
+        doc.fontSize(9).fillColor('#555').text(
+          c.enviosOperadores.length
+            ? `Possível causa: contagem de abertura ou fechamento incorreta (conferir com ${c.abreOperador || '?'} e ${c.fechaOperador || '?'}), ou envio lançado com quantidade errada (conferir com ${c.enviosOperadores.join(', ')}).`
+            : `Possível causa: como não houve envio registrado nesse turno, o mais provável é erro na contagem de abertura ou fechamento - conferir com ${c.abreOperador || '?'} e ${c.fechaOperador || '?'}.`,
+          { width: 490 }
+        );
+        doc.moveDown(1);
+      });
+    }
+    doc.end();
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // explicacao de UM turno especifico - a tela usa isso pra montar o card
 // "o que aconteceu" quando chega pelo link da notificacao de divergencia
 app.get('/api/abastecimento/turno/:ate', auth.requireMaster, async (req, res) => {
