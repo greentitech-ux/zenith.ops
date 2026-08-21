@@ -164,6 +164,59 @@ function comMudancaDeIp(historico, tipo, de, para) {
   return [...lista, { tipo, de: de || null, para, em: Date.now() }].slice(-IP_HISTORICO_MAX);
 }
 
+// ---------------------------------------------------------------------
+// ESTADO DO ATIVO NO PARQUE. Antes só existiam dois: online e offline - e
+// era exatamente isso que fazia o Master olhar uma máquina "offline" com
+// rede boa e não entender nada, porque três situações MUITO diferentes
+// pintavam o mesmo ponto vermelho:
+//   - a máquina nunca teve o NOCZenith instalado (nunca bateu na vida);
+//   - a máquina bate, mas está sem Ethernet (só no Wi-Fi) ou com disco ruim;
+//   - a máquina realmente parou de falar.
+// Separar os três é o que transforma o painel em NOC de verdade: cada um
+// tem uma AÇÃO diferente (instalar o agente / mandar técnico no cabo /
+// investigar queda).
+const ESTADOS = {
+  OPERACIONAL: 'operacional',     // batendo, sem ressalva
+  DEGRADADO: 'degradado',         // batendo, mas com defeito conhecido
+  INDISPONIVEL: 'indisponivel',   // já bateu antes e parou
+  SEM_AGENTE: 'sem-agente',       // nunca bateu: NOCZenith não instalado
+};
+
+// Link físico reportado pelo NOCZenith (ver Medir-Link em vigiaScript.js).
+// Guardado achatado no doc pra caber no espelho em memória sem peso.
+const LINK_TIPOS = ['ethernet', 'wifi', 'outro', 'nenhum'];
+function sanitizarLink(bruto) {
+  if (!bruto || typeof bruto !== 'object') return null;
+  const tipo = LINK_TIPOS.includes(bruto.tipo) ? bruto.tipo : 'outro';
+  const mbps = Number(bruto.mbps);
+  return {
+    tipo,
+    nome: String(bruto.nome || '').trim().slice(0, 80) || null,
+    mbps: Number.isFinite(mbps) && mbps > 0 ? Math.round(mbps) : null,
+    // a máquina tem placa Ethernet mas ela está fora do ar (cabo solto,
+    // switch morto) - o caso que o Master pediu pra alertar. Só é
+    // observável quando existe OUTRO caminho (Wi-Fi) mantendo ela viva;
+    // se a Ethernet era o único caminho, ela some do ar e vira queda.
+    ethernetCaida: !!bruto.ethernetCaida,
+  };
+}
+function mesmoLink(a, b) {
+  if (!a || !b) return a === b;
+  return a.tipo === b.tipo && a.ethernetCaida === b.ethernetCaida && a.mbps === b.mbps;
+}
+
+// Reinício: o agente lê o LastBootUpTime UMA vez, quando sobe, e carrega
+// esse número em todo heartbeat. Se o número muda, a máquina reiniciou -
+// não tem como confundir com queda de rede (numa queda de rede o agente
+// nem morre, e quando volta manda o MESMO bootEm). Tolerância de 60s
+// porque o relógio da loja não é preciso e o valor é recalculado a cada
+// subida do agente.
+const TOLERANCIA_BOOT_MS = 60 * 1000;
+function reiniciouDesde(anteriorBootEm, novoBootEm) {
+  if (!anteriorBootEm || !novoBootEm) return false;
+  return Math.abs(novoBootEm - anteriorBootEm) > TOLERANCIA_BOOT_MS;
+}
+
 function docIdFor(codigo, posto) {
   const limpoCodigo = String(codigo || '').trim().replace(/\//g, '_').slice(0, 200);
   if (!limpoCodigo) throw new Error('Código da unidade é obrigatório.');
@@ -222,6 +275,12 @@ let espelhoEm = 0;
 const CAMPOS_DO_HEARTBEAT = [
   'ultimoHeartbeatEm', 'ip', 'userAgent', 'abertoDesde',
   'redeDia', 'redeHoras', 'redeMinutos', 'redeHistorico',
+  // boot e link: só o heartbeat escreve. Preservar importa mais aqui que
+  // nos outros - se o bootEm rebobinasse pro valor velho do banco, o
+  // heartbeat seguinte veria "mudou" e inventaria um reinício que não houve.
+  // ('eventos' de propósito FORA desta lista: a varredura também escreve
+  // nele, e preservar a cópia da memória apagaria o que ela gravou.)
+  'bootEm', 'link', 'linkEm', 'desligamentoInesperado',
 ];
 
 async function carregarEspelho() {
@@ -383,6 +442,49 @@ async function heartbeat(codigo, posto, info, token) {
     // repete a corrida que avisadoOffline teve com a varredura.
     ...metricasDeRede(atual, dados.rede),
   };
+
+  // ---- boot e link físico (NOCZenith v16+). Máquina com agente antigo não
+  // manda nada disso: os campos ficam como estavam, e o painel mostra
+  // "sem dado" em vez de inventar.
+  const bootEm = Number(dados.bootEm) > 0 ? Number(dados.bootEm) : null;
+  const linkNovo = sanitizarLink(dados.link);
+  const linkAntes = (atual && atual.link) || null;
+  let eventosNovos = [];
+  if (bootEm) {
+    patch.bootEm = bootEm;
+    if (reiniciouDesde(atual && atual.bootEm, bootEm)) {
+      // desligamentoInesperado vem do log de eventos do Windows (6008) e é
+      // o que separa "reiniciaram a máquina" de "faltou luz / travou"
+      patch.reinicioAvisoPendente = {
+        em: bootEm,
+        inesperado: !!dados.desligamentoInesperado,
+      };
+      eventosNovos.push({
+        tipo: 'reiniciou', em: Date.now(), bootEm,
+        inesperado: !!dados.desligamentoInesperado,
+      });
+    }
+  }
+  if (dados.desligamentoInesperado !== undefined) patch.desligamentoInesperado = !!dados.desligamentoInesperado;
+  if (linkNovo) {
+    patch.link = linkNovo;
+    patch.linkEm = Date.now();
+    if (!mesmoLink(linkAntes, linkNovo)) {
+      eventosNovos.push({
+        tipo: 'link', em: Date.now(),
+        de: linkAntes ? linkAntes.tipo : null, para: linkNovo.tipo,
+        ethernetCaida: linkNovo.ethernetCaida, mbps: linkNovo.mbps,
+      });
+      // só vira ALERTA quando piora: cair a Ethernet, ou trocar de cabo pra
+      // Wi-Fi. Voltar pro cabo é boa notícia e entra no registro sem push.
+      const piorou = (linkNovo.ethernetCaida && !(linkAntes && linkAntes.ethernetCaida))
+        || (linkNovo.tipo === 'wifi' && linkAntes && linkAntes.tipo === 'ethernet');
+      if (piorou) patch.linkAvisoPendente = { tipo: linkNovo.tipo, ethernetCaida: linkNovo.ethernetCaida, mbps: linkNovo.mbps };
+    }
+  }
+  if (eventosNovos.length) {
+    patch.eventos = [...((atual && atual.eventos) || []), ...eventosNovos].slice(-EVENTOS_MAX);
+  }
   // so limpa a mensagem quando havia uma pra entregar. Zerar o campo em toda
   // batida abria uma janela pra perder mensagem: se enviarMensagem() gravasse
   // entre a leitura e esta escrita, o null apagava a mensagem que nunca
@@ -415,7 +517,10 @@ async function heartbeat(codigo, posto, info, token) {
     || patch.ip !== anterior.ip
     || patch.userAgent !== anterior.userAgent
     || patch.abertoDesde !== anterior.abertoDesde
-    || patch.redeHistorico !== undefined;     // virada de dia da rede
+    || patch.redeHistorico !== undefined      // virada de dia da rede
+    // reinício e mudança de link são eventos: não podem esperar o
+    // PERSIST_MS, senão um restart do servidor apagaria o rastro
+    || eventosNovos.length > 0;
   const desdeUltimaGravacao = Date.now() - (ultimaGravacaoEm.get(id) || 0);
   const precisaPersistir = mudouAlgoQueImporta || desdeUltimaGravacao >= PERSIST_MS;
 
@@ -423,6 +528,14 @@ async function heartbeat(codigo, posto, info, token) {
     await ref.set(patch, { merge: true });
     ultimaGravacaoEm.set(id, Date.now());
   }
+  // O heartbeat de propósito NÃO invalida o cache de listar() - fazer isso a
+  // cada 25s por máquina multiplicaria as leituras à toa (ver o comentário
+  // no fim desta função). Mas quando ele grava um EVENTO (queda de Ethernet,
+  // reinício), o painel precisa mostrar na hora: são justamente os dois
+  // casos em que o operador está olhando a tela esperando a mudança
+  // aparecer. Raro por natureza, então não recria o custo que a decisão
+  // original evitou.
+  if (eventosNovos.length) cache.invalidar();
   // mantem o espelho em dia sem reler: o heartbeat sabe exatamente o que
   // acabou de gravar (ou o que gravaria). É isso que faz a proxima batida
   // nao custar leitura - e agora, na maioria das vezes, nem escrita.
@@ -455,9 +568,33 @@ async function heartbeat(codigo, posto, info, token) {
   return { mensagemPendente, comandoPendente, chatMensagens };
 }
 
+// motivos que rebaixam uma máquina VIVA pra 'degradado'. Lista, não
+// booleano: o painel mostra o porquê, que é o que decide a ação.
+function motivosDeDegradacao(doc) {
+  const motivos = [];
+  const link = doc.link || null;
+  if (link && link.ethernetCaida) motivos.push('Ethernet caída');
+  if (link && link.tipo === 'wifi' && !link.ethernetCaida) motivos.push('só no Wi-Fi');
+  if (doc.discoNivel === 'critico') motivos.push('disco crítico');
+  else if (doc.discoNivel === 'atencao') motivos.push('disco em atenção');
+  return motivos;
+}
+
+function estadoDe(doc) {
+  // nunca bateu na vida = NOCZenith não instalado. Isto NÃO é queda: pintar
+  // de vermelho junto com queda real foi o que fez o Master procurar
+  // problema de rede numa máquina que nunca teve agente.
+  if (!doc.ultimoHeartbeatEm) return ESTADOS.SEM_AGENTE;
+  const online = (Date.now() - doc.ultimoHeartbeatEm) < LIMIAR_OFFLINE_MS;
+  if (!online) return ESTADOS.INDISPONIVEL;
+  return motivosDeDegradacao(doc).length ? ESTADOS.DEGRADADO : ESTADOS.OPERACIONAL;
+}
+
 function comOnline(doc) {
   const online = !!doc.ultimoHeartbeatEm && (Date.now() - doc.ultimoHeartbeatEm) < LIMIAR_OFFLINE_MS;
-  return { ...doc, online };
+  // 'online' continua saindo igual (várias telas e rotas leem esse campo);
+  // 'estado'/'degradacao' são a leitura nova, mais fina
+  return { ...doc, online, estado: estadoDe(doc), degradacao: online ? motivosDeDegradacao(doc) : [] };
 }
 
 // lista achatada, 1 item por computador (varios por unidade) - quem chama
@@ -680,6 +817,38 @@ async function registrarTelemetria(codigo, posto, dados, token) {
     }
   }
 
+  // boot e link também chegam por aqui, e não só pelo heartbeat. Motivo:
+  // em computador tipo 'atendimento'/'abastecimento' quem bate o heartbeat
+  // é o NAVEGADOR, não o NOCZenith - então o único canal que o agente tem
+  // pra contar que a Ethernet caiu ou que a máquina reiniciou é a
+  // telemetria. Cadência menor (~1h) que no 'interno' (~100s), mas cobre a
+  // frota inteira em vez de uma fatia dela.
+  const bootTelemetria = Number(dados && dados.bootEm) > 0 ? Number(dados.bootEm) : null;
+  if (bootTelemetria) {
+    patch.bootEm = bootTelemetria;
+    if (reiniciouDesde(atual.bootEm, bootTelemetria)) {
+      patch.reinicioAvisoPendente = { em: bootTelemetria, inesperado: !!(dados && dados.desligamentoInesperado) };
+      eventos = [...eventos, { tipo: 'reiniciou', em: agora, bootEm: bootTelemetria, inesperado: !!(dados && dados.desligamentoInesperado) }];
+      patch.eventos = eventos.slice(-EVENTOS_MAX);
+    }
+  }
+  const linkTelemetria = sanitizarLink(dados && dados.link);
+  if (linkTelemetria) {
+    patch.link = linkTelemetria;
+    patch.linkEm = agora;
+    if (!mesmoLink(atual.link, linkTelemetria)) {
+      eventos = [...eventos, {
+        tipo: 'link', em: agora,
+        de: atual.link ? atual.link.tipo : null, para: linkTelemetria.tipo,
+        ethernetCaida: linkTelemetria.ethernetCaida, mbps: linkTelemetria.mbps,
+      }];
+      patch.eventos = eventos.slice(-EVENTOS_MAX);
+      const piorou = (linkTelemetria.ethernetCaida && !(atual.link && atual.link.ethernetCaida))
+        || (linkTelemetria.tipo === 'wifi' && atual.link && atual.link.tipo === 'ethernet');
+      if (piorou) patch.linkAvisoPendente = { tipo: linkTelemetria.tipo, ethernetCaida: linkTelemetria.ethernetCaida, mbps: linkTelemetria.mbps };
+    }
+  }
+
   // há quanto tempo o Windows está sem reiniciar. Regra da casa: reboot 1x
   // por semana (ver UPTIME_REINICIAR_DIAS)
   const uptimeHoras = nocMaquina.sanitizarUptime(dados && dados.uptimeHoras);
@@ -778,6 +947,50 @@ const COMANDO_LIMPAR_TRAVADOS = [
   '  ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $mortos++ } catch {} }',
   '"Processos NOCZenith orfaos encerrados: $mortos"',
 ].join('\n');
+
+// REINICIAR a máquina. Fixo no código pelo mesmo motivo dos outros: uma
+// rota que aceitasse texto livre seria "rodar qualquer coisa em toda a
+// rede". O /t 120 não é enfeite - dá 2 minutos de aviso NA TELA DA LOJA
+// antes de reiniciar, tempo pra quem está no caixa fechar o que estiver
+// aberto e pro NOC abortar se disparou no alvo errado (ver
+// COMANDO_ABORTAR_REINICIO). Com /t > 0 o Windows já força o fechamento no
+// fim da contagem, então /f seria redundante.
+const COMANDO_REINICIAR = [
+  'shutdown /r /t 120 /c "Zenith NOC: manutencao programada. O computador vai reiniciar em 2 minutos. Salve o que estiver aberto."',
+  '"Reinicio agendado para daqui a 2 minutos."',
+].join('\n');
+
+// janela de arrependimento: cancela um reinício que ainda está na contagem
+const COMANDO_ABORTAR_REINICIO = [
+  'try { shutdown /a; "Reinicio abortado." } catch { "Nao havia reinicio em contagem." }',
+].join('\n');
+
+// Dispara um comando fixo numa LISTA de alvos escolhida pelo painel (1
+// máquina, uma unidade inteira, ou várias unidades de uma vez). Mesma
+// mecânica do enfileirarComandoEmTodos - e em paralelo pelo mesmo motivo:
+// em série, algumas dezenas de máquinas estouravam o tempo do navegador e
+// metade da frota ficava sem o comando.
+async function enfileirarComandoEmAlvos(alvos, comando, opcoes) {
+  const docs = await listUncached();
+  const querido = new Set((alvos || []).map((a) => `${a.codigo}|${a.posto}`));
+  const escolhidos = docs.filter((d) => d.tipo === 'interno' && querido.has(`${d.codigo}|${d.posto}`));
+  const resultados = await Promise.all(escolhidos.map(async (doc) => {
+    const base = { codigo: doc.codigo, posto: doc.posto, nome: doc.nome };
+    try {
+      await enfileirarComando(doc.codigo, doc.posto, comando, opcoes);
+      return { ...base, ok: true };
+    } catch (err) {
+      const jaTinha = /comando pendente/i.test(err.message || '');
+      return { ...base, ok: jaTinha, jaTinha, motivo: jaTinha ? null : err.message };
+    }
+  }));
+  // alvo pedido que não existe (ou não é 'interno') volta como recusado, em
+  // vez de sumir em silêncio - senão o painel diz "10 de 10" tendo mandado 7
+  const naoElegiveis = (alvos || [])
+    .filter((a) => !escolhidos.some((d) => d.codigo === a.codigo && d.posto === a.posto))
+    .map((a) => ({ ...a, ok: false, motivo: 'não é um computador interno com NOCZenith' }));
+  return [...resultados, ...naoElegiveis];
+}
 
 // Dispara o MESMO comando pra todos os computadores 'interno' de uma vez.
 // Não recebe o comando de fora: quem chama escolhe entre os comandos fixos
@@ -991,6 +1204,29 @@ async function varrerAlertas() {
         motivos: candidato.discoMotivos || [],
       });
     }
+    // máquina reiniciou/desligou (pedido do Master: "se ele foi reiniciado
+    // ou desligado esse deve ser os alertas"). Quem detecta é o heartbeat,
+    // comparando o LastBootUpTime; aqui é só o aviso, junto com o resto.
+    if (candidato.reinicioAvisoPendente) {
+      await COLLECTION.doc(docIdFor(candidato.codigo, candidato.posto)).update({ reinicioAvisoPendente: null });
+      transicoes.push({
+        codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
+        tipo: 'reiniciou',
+        inesperado: !!candidato.reinicioAvisoPendente.inesperado,
+        bootEm: candidato.reinicioAvisoPendente.em,
+      });
+    }
+    // caiu a Ethernet (ou trocou cabo por Wi-Fi) SEM a máquina sair do ar
+    if (candidato.linkAvisoPendente) {
+      await COLLECTION.doc(docIdFor(candidato.codigo, candidato.posto)).update({ linkAvisoPendente: null });
+      transicoes.push({
+        codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
+        tipo: 'link',
+        linkTipo: candidato.linkAvisoPendente.tipo,
+        ethernetCaida: !!candidato.linkAvisoPendente.ethernetCaida,
+        mbps: candidato.linkAvisoPendente.mbps || null,
+      });
+    }
     // passou de mais uma semana sem reiniciar (ver UPTIME_REINICIAR_DIAS)
     if (candidato.reinicioAlertaPendente) {
       await COLLECTION.doc(docIdFor(candidato.codigo, candidato.posto)).update({ reinicioAlertaPendente: null });
@@ -1038,6 +1274,10 @@ async function varrerAlertas() {
       const evento = {
         tipo: 'offline', em: doc.ultimoHeartbeatEm,
         ...(doc.ip ? { ip: doc.ip } : {}), ...(doc.ipLocal ? { ipLocal: doc.ipLocal } : {}),
+        // por qual meio ela estava falando quando silenciou: é o que
+        // separa "arrancaram o cabo" de "o provedor caiu" na hora de
+        // olhar o registro depois
+        ...(doc.link ? { link: doc.link.tipo } : {}),
       };
       await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({
         avisadoOffline: true,
@@ -1133,7 +1373,9 @@ module.exports = {
   heartbeat, listar, listarResumo, detalhar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR, ehCelular,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
-  enfileirarComando, enfileirarComandoEmTodos, COMANDO_LIMPAR_TRAVADOS,
+  enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO,
+  ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
   saudeMaquinas,
   garantirAgentToken, tokenDoComputador,

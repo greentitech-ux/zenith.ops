@@ -3515,6 +3515,8 @@ app.get('/api/users/relatorio.:formato(csv|pdf)', auth.requireMaster, async (req
 // ação sobrevive até um restart do servidor (fica só o tipo+payload
 // salvos, nunca uma função/closure).
 const EXECUTORES_QA = {
+  'manutencao.reiniciar': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR, { origem: 'manutencao-reiniciar' }),
+  'manutencao.abortarReinicio': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_ABORTAR_REINICIO, { origem: 'manutencao-abortar' }),
   'formularios.editar': (p) => formularios.editar(p.id, { campos: p.campos, linhas: p.linhas, porEmail: p.porEmail }),
   'formularios.cancelar': (p) => formularios.cancelar(p.id, { motivo: p.motivo, porEmail: p.porEmail }),
   'formularios.remover': (p) => formularios.remover(p.id),
@@ -3705,6 +3707,51 @@ app.post('/api/agente/acoes/:id/executar-massa', auth.requireMaster, async (req,
       }
     }
     res.json({ total: internos.length, enfileirados, pulados });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------
+// JANELA DE MANUTENÇÃO: reiniciar máquinas do parque (pedido do Master:
+// "um script (botão) onde apertaremos e reiniciaremos 1 a 1 ou um grupo de
+// computadores, seja da unidade toda ou de várias unidades").
+//
+// Três travas, todas de propósito:
+//  1) só Master (auth.requireMaster);
+//  2) SENHA na hora - reiniciar o caixa de várias lojas no meio do
+//     movimento é irreversível e visível pro cliente final, então segue o
+//     mesmo padrão de excluir empresa: confirma quem está do outro lado;
+//  3) o comando NÃO vem do corpo da requisição. A rota só escolhe entre
+//     dois textos fixos no servidor (reiniciar / abortar) - aceitar texto
+//     livre aqui seria criar um "rodar qualquer coisa em toda a rede".
+//
+// O alvo, sim, vem de fora: uma lista de {codigo, posto}. A tela monta
+// essa lista de um computador só, de uma unidade inteira, ou de várias
+// unidades - pro servidor é tudo a mesma chamada.
+app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req, res) => {
+  try {
+    const alvos = Array.isArray(req.body.alvos) ? req.body.alvos : [];
+    if (!alvos.length) return res.status(400).json({ error: 'Escolha pelo menos um computador.' });
+    if (alvos.length > 200) return res.status(400).json({ error: 'Muitos alvos de uma vez - divida em lotes.' });
+    const abortar = req.body.abortar === true;
+    if (!(await exigirSenhaDoMaster(req, res))) return;
+    const acao = abortar ? 'manutencao.abortarReinicio' : 'manutencao.reiniciar';
+    const resumo = `${abortar ? 'Abortar reinício' : 'Reiniciar'} ${alvos.length} computador(es) do parque`;
+    if (await desviarSeQaMaster(req, res, acao, resumo, { alvos, porEmail: req.user.email })) return;
+    const comando = abortar ? lojaStatus.COMANDO_ABORTAR_REINICIO : lojaStatus.COMANDO_REINICIAR;
+    const resultados = await lojaStatus.enfileirarComandoEmAlvos(alvos, comando, {
+      origem: abortar ? 'manutencao-abortar' : 'manutencao-reiniciar',
+    });
+    const ok = resultados.filter((r) => r.ok);
+    console.log(`[NOC] ${req.user.email} ${abortar ? 'abortou reinício em' : 'reiniciou'} ${ok.length}/${resultados.length} máquina(s)`);
+    res.json({
+      total: resultados.length,
+      enfileirados: ok.length,
+      recusados: resultados.filter((r) => !r.ok),
+      // 2 minutos de contagem na tela da loja - é a janela pra abortar
+      abortavelPorSegundos: abortar ? 0 : 120,
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -10661,6 +10708,20 @@ function aquecerBoot(promessa, ms) {
         if (t.tipo === 'disco') {
           push.notifyDiscoAlerta(nome, t.codigo, t.nome, t.posto, t.nivel, t.motivos)
             .catch((err) => console.error('Erro no push de alerta de disco:', err.message));
+          continue;
+        }
+        // máquina reiniciou/desligou: quem detecta é o agente (comparando o
+        // LastBootUpTime a cada batida), não a ausência de heartbeat
+        if (t.tipo === 'reiniciou') {
+          push.notifyMaquinaReiniciou(nome, t.codigo, t.nome, t.posto, t.inesperado)
+            .catch((err) => console.error('Erro no push de reinício:', err.message));
+          continue;
+        }
+        // caiu a Ethernet mas a máquina segue no ar (Wi-Fi): degradação,
+        // não queda - por isso não passa pelo caminho de offline abaixo
+        if (t.tipo === 'link') {
+          push.notifyLinkDegradado(nome, t.codigo, t.nome, t.posto, t.linkTipo, t.ethernetCaida)
+            .catch((err) => console.error('Erro no push de link degradado:', err.message));
           continue;
         }
         // celular que fechou o navegador num posto 'interno' não é loja caída

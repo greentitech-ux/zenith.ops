@@ -99,6 +99,7 @@
   .kpi-card.kpi-online .kpi-num{color:var(--ok);}
   .kpi-card.kpi-offline .kpi-num{color:var(--bad);}
   .kpi-card.kpi-nunca .kpi-num{color:var(--muted);}
+  .kpi-card.kpi-degradado .kpi-num{color:var(--warn);}
 
   /* ---- filtros ---- */
   .filtro-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px;}
@@ -149,11 +150,13 @@
   .equip-tile.status-online{border-left-color:var(--ok);}
   .equip-tile.status-offline{border-left-color:var(--bad);}
   .equip-tile.status-nunca{border-left-color:var(--line);}
+  .equip-tile.status-degradado{border-left-color:var(--warn);}
   .equip-tile-head{display:flex;align-items:center;gap:7px;}
   .status-dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block;}
   .status-dot.online{background:var(--ok);animation:pulse-online 2s infinite;}
   .status-dot.offline{background:var(--bad);}
   .status-dot.nunca{background:var(--muted);}
+  .status-dot.degradado{background:var(--warn);}
   @keyframes pulse-online{0%{box-shadow:0 0 0 0 rgba(61,220,151,.5);}70%{box-shadow:0 0 0 6px rgba(61,220,151,0);}100%{box-shadow:0 0 0 0 rgba(61,220,151,0);}}
   @media(prefers-reduced-motion:reduce){ .status-dot.online{animation:none;} }
   .equip-tile-nome{font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0;}
@@ -175,6 +178,7 @@
   .equip-tile-status.online{color:var(--ok);}
   .equip-tile-status.offline{color:var(--bad);}
   .equip-tile-status.nunca{color:var(--muted);}
+  .equip-tile-status.degradado{color:var(--warn);}
   /* faixa de métricas do card compacto: disco, temperatura e tempo sem
      reiniciar (ver nocMaquina.js). Ocupa o espaço vazio que sobrava embaixo
      do nome e responde de relance "essa máquina está bem?", sem abrir o
@@ -287,6 +291,7 @@
     </div>
     <div class="header-nav">
       <span class="ultima-atualizacao" id="ultima-atualizacao"></span>
+      <button class="back hidden" id="btn-manutencao" onclick="abrirManutencao()" title="Reiniciar computadores do parque - um, uma unidade inteira ou várias unidades">🔁 Reiniciar máquinas</button>
       <button class="back hidden" id="btn-limpar-travados" onclick="limparTravados()" title="Manda todos os computadores fecharem processos travados do NOCZenith">🧹 Destravar lojas</button>
       <!-- atalho pra central de HD/temperatura/reboot: o card daqui mostra o
            computador que voce ja escolheu; la e a frota inteira de uma vez -->
@@ -314,15 +319,19 @@
     </button>
     <button type="button" class="kpi-card kpi-online" id="kpi-online" onclick="setFiltroStatus('online')">
       <div class="kpi-num" id="kpi-num-online">0</div>
-      <div class="kpi-label">🟢 Online</div>
+      <div class="kpi-label">🟢 Operacional</div>
+    </button>
+    <button type="button" class="kpi-card kpi-degradado" id="kpi-degradado" onclick="setFiltroStatus('degradado')" title="No ar, mas com defeito: Ethernet caída, só no Wi-Fi ou disco em risco">
+      <div class="kpi-num" id="kpi-num-degradado">0</div>
+      <div class="kpi-label">🟡 Degradado</div>
     </button>
     <button type="button" class="kpi-card kpi-offline" id="kpi-offline" onclick="setFiltroStatus('offline')">
       <div class="kpi-num" id="kpi-num-offline">0</div>
-      <div class="kpi-label">🔴 Offline</div>
+      <div class="kpi-label">🔴 Indisponível</div>
     </button>
-    <button type="button" class="kpi-card kpi-nunca" id="kpi-nunca" onclick="setFiltroStatus('nunca')">
+    <button type="button" class="kpi-card kpi-nunca" id="kpi-nunca" onclick="setFiltroStatus('nunca')" title="Cadastrado no parque mas o NOCZenith nunca foi instalado - nunca bateu uma vez sequer">
       <div class="kpi-num" id="kpi-num-nunca">0</div>
-      <div class="kpi-label">⚪ Nunca conectou</div>
+      <div class="kpi-label">⚪ Sem agente</div>
     </button>
   </div>
 
@@ -467,6 +476,36 @@
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharRodarAcao()">Cancelar</button>
       <button type="button" class="btn-primary" id="rodar-acao-btn" onclick="rodarAcaoConfirmar()">▶️ Rodar aqui</button>
+    </div>
+  </div>
+</div>
+
+<!-- Janela de Manutenção: reinício em massa do parque. O alvo é montado
+     aqui (uma máquina, uma unidade, várias unidades) e vai como lista pro
+     servidor; o COMANDO em si é fixo lá (ver COMANDO_REINICIAR) - a tela
+     nunca manda texto de comando. -->
+<div class="overlay hidden" id="manut-overlay">
+  <div class="modal" style="max-width:640px;">
+    <h3>🔁 Janela de Manutenção · reiniciar máquinas</h3>
+    <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">
+      Só entra na lista computador <b>interno</b> com NOCZenith instalado - é quem sabe receber comando.
+      Cada máquina pega o comando na próxima batida (até ~25s) e mostra um aviso de <b>2 minutos</b> na tela da loja antes de reiniciar.
+      Máquina indisponível recebe quando voltar.
+    </div>
+    <div class="modal-acoes" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:0 0 8px;">
+      <button type="button" class="btn-mini" onclick="manutSelecionar('todos')">Marcar tudo</button>
+      <button type="button" class="btn-mini" onclick="manutSelecionar('nenhum')">Limpar</button>
+      <button type="button" class="btn-mini" onclick="manutSelecionar('operacional')">Só os operacionais</button>
+      <span class="sub" id="manut-contagem" style="align-self:center;font-family:var(--mono);font-size:11px;"></span>
+    </div>
+    <div id="manut-lista" style="max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;"></div>
+    <label style="margin-top:10px;">Sua senha de Master (confirma quem está mandando reiniciar)</label>
+    <input type="password" id="manut-senha" autocomplete="current-password" placeholder="senha">
+    <div class="msg hidden" id="manut-status"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn-ghost" onclick="fecharManutencao()">Fechar</button>
+      <button type="button" class="btn-ghost" id="manut-abortar" onclick="manutEnviar(true)" title="Cancela um reinício que ainda está na contagem de 2 minutos">🛑 Abortar reinício</button>
+      <button type="button" class="btn-primary" id="manut-confirmar" onclick="manutEnviar(false)">🔁 Reiniciar selecionados</button>
     </div>
   </div>
 </div>
@@ -630,9 +669,46 @@ function tempoRelativo(quando){
   return `há ${Math.floor(s/86400)}d`;
 }
 
+// Estado do ativo no parque. São QUATRO, não dois - e essa é a mudança que
+// responde ao "por que está offline se o computador tem rede":
+//   nunca      = NOCZenith nunca foi instalado. Nunca bateu na vida. Não é
+//                queda: é máquina que ninguém colocou no monitoramento.
+//   offline    = já bateu antes e parou de falar. Aí sim é queda.
+//   degradado  = está falando, mas com defeito conhecido (Ethernet caiu e
+//                ela seguiu no Wi-Fi, disco em risco). Antes ficava verde.
+//   online     = operacional, sem ressalva.
+// As chaves continuam sendo as antigas de propósito: são o sufixo das
+// classes de CSS e o valor do filtro, e trocar isso mexeria em tudo sem
+// necessidade. Quem muda é o RÓTULO (ESTADO_LABEL), que é o que se lê.
+const ESTADO_LABEL = {
+  online: 'Operacional',
+  degradado: 'Degradado',
+  offline: 'Indisponível',
+  nunca: 'Sem agente',
+};
 function statusDe(c){
   if(!c.ultimoHeartbeatEm) return 'nunca';
-  return c.online ? 'online' : 'offline';
+  if(!c.online) return 'offline';
+  return (c.degradacao && c.degradacao.length) ? 'degradado' : 'online';
+}
+// como a máquina está falando com a gente agora (link físico do NOCZenith)
+function linkTexto(c){
+  const l = c && c.link;
+  if(!l) return '';
+  if(l.tipo === 'ethernet') return `🔌 cabo${l.mbps ? ` ${l.mbps >= 1000 ? (l.mbps/1000)+' Gbps' : l.mbps+' Mbps'}` : ''}`;
+  if(l.tipo === 'wifi') return l.ethernetCaida ? '📶 Wi-Fi (Ethernet caiu)' : '📶 Wi-Fi';
+  if(l.tipo === 'nenhum') return '⛔ sem placa de rede ativa';
+  return '🔗 outro meio';
+}
+// a linha de status do card. "Sem agente" existe pra parar de tratar
+// máquina nunca instalada como máquina caída - eram as duas pintadas de
+// vermelho, e é o que fazia procurar problema de rede onde não havia.
+function textoDeEstado(c, status){
+  if(status === 'nunca') return 'sem agente · NOCZenith nunca instalado aqui';
+  if(status === 'offline') return `indisponível · calada há ${tempoRelativo(c.ultimoHeartbeatEm)}`;
+  if(status === 'degradado') return `degradado · ${(c.degradacao||[]).join(' · ')}`;
+  const l = linkTexto(c);
+  return l ? `operacional · ${l}` : 'operacional';
 }
 // data/hora absoluta (Brasília) pro registro de atividades
 function fmtDataHora(ms){
@@ -725,7 +801,7 @@ function metricasTileHtml(c){
 function equipTileHtml(codigo, c){
   const nomeOk = escapeHtml(c.nome || '(sem nome)');
   const status = statusDe(c);
-  const statusTexto = status==='nunca' ? 'nunca conectou' : (status==='online' ? 'online' : `offline · ${tempoRelativo(c.ultimoHeartbeatEm)}`);
+  const statusTexto = textoDeEstado(c, status);
   const btnAnydesk = c.anydeskId
     ? `<a class="btn-anydesk" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk" onclick="event.stopPropagation()">🖥️</a>`
     : `<span class="btn-anydesk btn-anydesk-off" title="Sem AnyDesk cadastrado">🖥️</span>`;
@@ -748,7 +824,7 @@ function equipTileHtml(codigo, c){
 // precisar fechar e reabrir
 function atualizarConteudoDetalhe(codigo, c){
   const status = statusDe(c);
-  const statusTexto = status==='nunca' ? 'nunca conectou' : (status==='online' ? 'online' : `offline · ${tempoRelativo(c.ultimoHeartbeatEm)}`);
+  const statusTexto = textoDeEstado(c, status);
   const nomeJs = escapeJs(c.nome||'');
   document.getElementById('detalhe-comp-dot').className = `status-dot ${status}`;
   document.getElementById('detalhe-comp-nome').textContent = c.nome || '(sem nome)';
@@ -898,7 +974,24 @@ function linhaEvento(ev){
   if(ev.ipLocal) ips.push(`🏠 ${escapeHtml(ev.ipLocal)}`);
   const sufixoIp = ips.length ? ` · <span style="color:var(--muted);font-size:11px;">${ips.join(' · ')}</span>` : '';
   if(ev.tipo==='offline'){
-    return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Caiu</b> · ${fmtDataHora(ev.em)}${sufixoIp}</div>`;
+    // por qual meio ela estava falando quando silenciou: separa "arrancaram
+    // o cabo" de "o provedor caiu" sem ter que adivinhar depois
+    const meio = ev.link ? ` · <span style="color:var(--muted);font-size:11px;">estava ${ev.link==='ethernet'?'no cabo':(ev.link==='wifi'?'no Wi-Fi':escapeHtml(ev.link))}</span>` : '';
+    return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Caiu</b> · ${fmtDataHora(ev.em)}${sufixoIp}${meio}</div>`;
+  }
+  // reinício detectado pelo agente (LastBootUpTime mudou), não por ausência
+  // de heartbeat - por isso aparece mesmo quando a máquina nem chegou a
+  // sumir do painel
+  if(ev.tipo==='reiniciou'){
+    return `<div class="ev-linha"><span class="ev-dot ${ev.inesperado?'bad':'warn'}"></span><b>${ev.inesperado?'⚡ Desligamento inesperado':'🔄 Reiniciou'}</b> · ${fmtDataHora(ev.em)}${ev.inesperado?' · <span style="color:var(--muted);font-size:11px;">queda de energia ou travamento</span>':''}</div>`;
+  }
+  if(ev.tipo==='link'){
+    const nome = (t) => t==='ethernet' ? 'cabo' : (t==='wifi' ? 'Wi-Fi' : (t==='nenhum' ? 'sem rede' : (t||'—')));
+    const detalhe = ev.ethernetCaida
+      ? '<b>🔌 Ethernet caiu</b> · seguiu por ' + escapeHtml(nome(ev.para))
+      : `<b>🔗 Link mudou</b> · ${escapeHtml(nome(ev.de))} → <b>${escapeHtml(nome(ev.para))}</b>`;
+    const vel = ev.mbps ? ` · <span style="color:var(--muted);font-size:11px;">${ev.mbps >= 1000 ? (ev.mbps/1000)+' Gbps' : ev.mbps+' Mbps'}</span>` : '';
+    return `<div class="ev-linha"><span class="ev-dot warn"></span>${detalhe} · ${fmtDataHora(ev.em)}${vel}</div>`;
   }
   if(ev.tipo==='ip'){
     const qual = ev.ipTipo==='local' ? '🏠 IP local' : '🌐 IP público';
@@ -998,13 +1091,15 @@ function renderKpis(){
   const reais = computadoresReais();
   const total = reais.length;
   const online = reais.filter(c => statusDe(c)==='online').length;
+  const degradado = reais.filter(c => statusDe(c)==='degradado').length;
   const offline = reais.filter(c => statusDe(c)==='offline').length;
   const nunca = reais.filter(c => statusDe(c)==='nunca').length;
   document.getElementById('kpi-num-total').textContent = total;
   document.getElementById('kpi-num-online').textContent = online;
+  document.getElementById('kpi-num-degradado').textContent = degradado;
   document.getElementById('kpi-num-offline').textContent = offline;
   document.getElementById('kpi-num-nunca').textContent = nunca;
-  ['total','online','offline','nunca'].forEach(k => {
+  ['total','online','degradado','offline','nunca'].forEach(k => {
     document.getElementById('kpi-'+k).classList.toggle('ativo', FILTRO_STATUS === (k==='total' ? '' : k));
   });
 }
@@ -1018,7 +1113,7 @@ function renderUnidades(){
   const porUni = {};
   computadoresReais().forEach(c => {
     const cod = c.codigo;
-    if(!porUni[cod]) porUni[cod] = { online:0, offline:0, nunca:0, total:0 };
+    if(!porUni[cod]) porUni[cod] = { online:0, degradado:0, offline:0, nunca:0, total:0 };
     porUni[cod][statusDe(c)]++;
     porUni[cod].total++;
   });
@@ -1036,6 +1131,7 @@ function renderUnidades(){
       <div class="uni-card-nome" title="${nome}">${nome}</div>
       <div class="uni-card-stats">
         <span class="uni-stat on">🟢 <b>${s.online}</b></span>
+        ${s.degradado ? `<span class="uni-stat" style="color:var(--warn);">🟡 <b>${s.degradado}</b></span>` : ''}
         <span class="uni-stat off">🔴 <b>${s.offline}</b></span>
         ${s.nunca ? `<span class="uni-stat nv">⚪ <b>${s.nunca}</b></span>` : ''}
       </div>
@@ -1072,7 +1168,10 @@ function render(){
     });
   }
   lista.sort((a,b) => {
-    const rank = (c) => (statusDe(c)==='offline') ? 0 : (statusDe(c)==='online' ? 1 : 2);
+    // pior primeiro: quem caiu, depois quem está degradado, depois quem
+    // nunca teve agente (é trabalho pendente), e por último o que está bem
+    const ORDEM = { offline:0, degradado:1, nunca:2, online:3 };
+    const rank = (c) => ORDEM[statusDe(c)] ?? 9;
     return rank(a) - rank(b) || (a.nome||'').localeCompare(b.nome||'', 'pt-BR');
   });
   if(!lista.length){
@@ -1102,7 +1201,7 @@ function adivinharDuplicado(fantasma, reaisDaUnidade){
 
 function fantasmaTileHtml(codigo, c, duplicadoDe){
   const status = statusDe(c);
-  const statusTexto = status==='nunca' ? 'nunca conectou' : (status==='online' ? 'online' : `offline · ${tempoRelativo(c.ultimoHeartbeatEm)}`);
+  const statusTexto = textoDeEstado(c, status);
   const bits = [];
   if(c.ip) bits.push(`🌐 ${escapeHtml(c.ip)}`);
   if(c.abertoDesde) bits.push(`aberto há ${tempoRelativo(c.abertoDesde)}`);
@@ -1179,6 +1278,125 @@ async function carregar(){
     // busca o dado pesado fresco só daquela(s) máquina(s)
     atualizarDetalheExtraDosModais();
   }catch(e){ /* mantem a ultima lista carregada na tela */ }
+}
+
+// ---------------------------------------------------------------------
+// JANELA DE MANUTENÇÃO. A tela monta o ALVO (quem reinicia); o comando em
+// si mora no servidor e não sai daqui - ver a rota
+// /api/loja-status/manutencao/reiniciar.
+let MANUT_MARCADOS = new Set();
+const manutChave = (c) => `${c.codigo}|${c.posto}`;
+function manutElegiveis(){
+  return computadoresReais()
+    .filter(c => c.tipo === 'interno')
+    .sort((a,b) =>
+      (UNIDADES_NOMES[a.codigo]||a.codigo).localeCompare(UNIDADES_NOMES[b.codigo]||b.codigo,'pt-BR')
+      || (a.nome||'').localeCompare(b.nome||'','pt-BR'));
+}
+
+function abrirManutencao(){
+  MANUT_MARCADOS = new Set();
+  document.getElementById('manut-senha').value = '';
+  document.getElementById('manut-status').classList.add('hidden');
+  renderManutLista();
+  document.getElementById('manut-overlay').classList.remove('hidden');
+}
+function fecharManutencao(){ document.getElementById('manut-overlay').classList.add('hidden'); }
+
+// agrupado por unidade, com um checkbox no cabeçalho de cada uma - é isso
+// que dá "a unidade toda" e "várias unidades" sem inventar outra tela
+function renderManutLista(){
+  const alvo = document.getElementById('manut-lista');
+  const lista = manutElegiveis();
+  if(!lista.length){
+    alvo.innerHTML = '<div class="empty">Nenhum computador interno com NOCZenith. Só esse tipo recebe comando.</div>';
+    atualizarContagemManut();
+    return;
+  }
+  const porUni = {};
+  lista.forEach(c => { (porUni[c.codigo] = porUni[c.codigo] || []).push(c); });
+  alvo.innerHTML = Object.keys(porUni).map(cod => {
+    const doUni = porUni[cod];
+    const todosMarcados = doUni.every(c => MANUT_MARCADOS.has(manutChave(c)));
+    return `<div style="margin-bottom:10px;">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:12.5px;margin:0 0 4px;cursor:pointer;">
+        <input type="checkbox" style="width:auto;" ${todosMarcados?'checked':''} onchange="manutToggleUnidade('${escapeJs(cod)}', this.checked)">
+        📍 ${escapeHtml(UNIDADES_NOMES[cod] || cod)} <span style="color:var(--muted);font-weight:400;">(${doUni.length})</span>
+      </label>
+      ${doUni.map(c => {
+        const st = statusDe(c);
+        const marcado = MANUT_MARCADOS.has(manutChave(c));
+        return `<label style="display:flex;align-items:center;gap:8px;font-size:12px;padding:3px 0 3px 22px;cursor:pointer;">
+          <input type="checkbox" style="width:auto;" ${marcado?'checked':''} onchange="manutToggleUm('${escapeJs(c.codigo)}','${escapeJs(c.posto)}', this.checked)">
+          <span class="status-dot ${st}"></span>
+          <span>${escapeHtml(c.nome || c.posto)}</span>
+          <span style="color:var(--muted);font-size:10.5px;font-family:var(--mono);">${escapeHtml(ESTADO_LABEL[st]||st)}${linkTexto(c) ? ' · ' + escapeHtml(linkTexto(c)) : ''}</span>
+        </label>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+  atualizarContagemManut();
+}
+
+function manutToggleUm(codigo, posto, marcado){
+  const k = `${codigo}|${posto}`;
+  if(marcado) MANUT_MARCADOS.add(k); else MANUT_MARCADOS.delete(k);
+  atualizarContagemManut();
+}
+function manutToggleUnidade(codigo, marcado){
+  manutElegiveis().filter(c => c.codigo === codigo).forEach(c => {
+    if(marcado) MANUT_MARCADOS.add(manutChave(c)); else MANUT_MARCADOS.delete(manutChave(c));
+  });
+  renderManutLista();
+}
+function manutSelecionar(modo){
+  const lista = manutElegiveis();
+  MANUT_MARCADOS = new Set();
+  if(modo === 'todos') lista.forEach(c => MANUT_MARCADOS.add(manutChave(c)));
+  // "só os operacionais": reiniciar quem já está caído não adianta nada -
+  // o comando fica na fila esperando ela voltar, e aí reinicia de novo uma
+  // máquina que acabou de subir
+  if(modo === 'operacional') lista.filter(c => c.online).forEach(c => MANUT_MARCADOS.add(manutChave(c)));
+  renderManutLista();
+}
+function atualizarContagemManut(){
+  const n = MANUT_MARCADOS.size;
+  document.getElementById('manut-contagem').textContent = n ? `${n} selecionado(s)` : 'nenhum selecionado';
+  document.getElementById('manut-confirmar').disabled = !n;
+  document.getElementById('manut-abortar').disabled = !n;
+}
+
+async function manutEnviar(abortar){
+  const alvos = [...MANUT_MARCADOS].map(k => { const [codigo, posto] = k.split('|'); return { codigo, posto }; });
+  if(!alvos.length) return;
+  const senha = document.getElementById('manut-senha').value;
+  const st = document.getElementById('manut-status');
+  if(!senha){ st.textContent = 'Digite sua senha de Master.'; st.className='msg err'; st.classList.remove('hidden'); return; }
+  if(!abortar){
+    const unidades = new Set(alvos.map(a => a.codigo)).size;
+    if(!confirm(`Reiniciar ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nCada tela mostra um aviso de 2 minutos antes de reiniciar. Se errou o alvo, dá pra usar "Abortar reinício" dentro dessa janela.`)) return;
+  }
+  const btn = document.getElementById(abortar ? 'manut-abortar' : 'manut-confirmar');
+  btn.disabled = true;
+  st.textContent = 'enviando...'; st.className='msg'; st.classList.remove('hidden');
+  try{
+    const r = await fetch('/api/loja-status/manutencao/reiniciar', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ alvos, abortar, password: senha }),
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || 'Não consegui enviar.');
+    if(d.pendenteAprovacao){ st.textContent = 'Enviado pra aprovação do Master.'; st.className='msg ok'; return; }
+    let msg = `✅ ${abortar?'Abort':'Reinício'} enfileirado em ${d.enfileirados}/${d.total} máquina(s). Cada uma executa na próxima batida (até ~25s).`;
+    if((d.recusados||[]).length){
+      msg += `<br><span style="color:var(--warn);">Recusados ${d.recusados.length}: ` +
+        d.recusados.slice(0,5).map(x => `${escapeHtml(x.nome||x.posto)} (${escapeHtml(x.motivo||'—')})`).join(', ') +
+        (d.recusados.length>5?'…':'') + '</span>';
+    }
+    st.innerHTML = msg; st.className='msg ok';
+    document.getElementById('manut-senha').value = '';
+  }catch(e){ st.textContent = e.message; st.className='msg err'; }
+  finally{ btn.disabled = false; atualizarContagemManut(); }
 }
 
 // Ferramenta de incidente: manda todo computador 'interno' encerrar processos
@@ -1915,6 +2133,7 @@ async function boot(){
   if(me.role === 'master'){
     document.getElementById('agente-root').classList.remove('hidden');
     document.getElementById('btn-limpar-travados').classList.remove('hidden');
+    document.getElementById('btn-manutencao').classList.remove('hidden');
     document.getElementById('btn-push-ar').classList.remove('hidden');
     carregarConfigPushAr();
     await carregarAgente();
