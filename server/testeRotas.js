@@ -82,7 +82,16 @@ function fakeDoc(caminho) {
 const fakeDb = {
   collection: (n) => fakeQuery(n),
   batch: () => ({ set() {}, update() {}, delete() {}, commit: async () => {} }),
-  runTransaction: async (fn) => fn({ get: async (r) => snapDoc(r.path || ''), set() {}, update() {}, delete() {} }),
+  // set/update GRAVAM de verdade - eram no-op, e isso fazia o fake mentir:
+  // ticketCounter.proximoTicket() grava o próximo número DENTRO da
+  // transação, então com set() vazio todo mundo lia 10000 e o teste não
+  // conseguia enxergar número repetido nem sequência quebrada.
+  runTransaction: async (fn) => fn({
+    get: async (r) => snapDoc(r.path || ''),
+    set: (r, d, o) => { const c = r.path || ''; DOCS.set(c, o && o.merge ? { ...(DOCS.get(c) || {}), ...d } : d); },
+    update: (r, d) => { const c = r.path || ''; DOCS.set(c, { ...(DOCS.get(c) || {}), ...d }); },
+    delete: (r) => { DOCS.delete(r.path || ''); },
+  }),
 };
 
 process.env.PORT = '8899';
@@ -109,6 +118,38 @@ const auth = require('/home/user/adyen-monitor/server/auth.js');
 const store = require('/home/user/adyen-monitor/server/store.js');
 const parque = require('/home/user/adyen-monitor/server/parque.js');
 const sheetsSync = require('/home/user/adyen-monitor/server/sheetsSync.js');
+
+// PDF chega como binário e o pdfkit ainda comprime os streams - juntar
+// chunks numa string (como o `pedir` faz) corrompe os bytes. Este aqui
+// preserva o buffer, e textoDoPdf desinfla e remonta o texto pra dar pra
+// conferir o que foi realmente IMPRESSO, não só que a rota respondeu 200.
+function pedirBinario(caminho, headers = {}) {
+  return new Promise((resolve) => {
+    const req = http.request({ host: '127.0.0.1', port: 8899, path: caminho, headers }, (res) => {
+      const pedacos = [];
+      res.on('data', (c) => pedacos.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, buffer: Buffer.concat(pedacos) }));
+    });
+    req.on('error', () => resolve({ status: 0, buffer: Buffer.alloc(0) }));
+    req.setTimeout(8000, () => { req.destroy(); resolve({ status: -1, buffer: Buffer.alloc(0) }); });
+    req.end();
+  });
+}
+function textoDoPdf(b) {
+  const zlib = require('zlib');
+  let bruto = ''; let i = 0;
+  while ((i = b.indexOf('stream', i)) >= 0) {
+    let ini = i + 6; if (b[ini] === 13) ini += 1; if (b[ini] === 10) ini += 1;
+    const fim = b.indexOf('endstream', ini); if (fim < 0) break;
+    try { bruto += zlib.inflateSync(b.subarray(ini, fim)).toString('latin1'); } catch (e) { /* stream não comprimido (imagem etc) */ }
+    i = fim + 9;
+  }
+  // cada [<hex> num <hex> ...] TJ é UMA palavra fatiada pelo kerning: junta
+  // só os pedaços hex e ignora os números de espaçamento entre eles
+  return bruto.replace(/\[([^\]]*)\]\s*TJ/g, (_, dentro) =>
+    (dentro.match(/<([0-9A-Fa-f]*)>/g) || [])
+      .map((h) => Buffer.from(h.slice(1, -1), 'hex').toString('latin1')).join('') + ' ');
+}
 
 function pedir(caminho, headers = {}) {
   return new Promise((resolve) => {
@@ -1474,6 +1515,9 @@ setTimeout(async () => {
   const PAGINAS_PUBLICAS = [
     'atendimento.html', 'decidir.html', 'estorno-cliente.html', 'rh-cadastro.html',
     'rh-colaborador.html', 'solicitacao-publica.html', 'ticket-publico.html', 'assinar.html',
+    // preencher.html: o solicitante preenche por um link, sem login - o
+    // token de preenchimento na URL É a credencial (mesmo caso do assinar)
+    'preencher.html',
   ];
   const dirPublico = require('path').join(__dirname, 'public');
   const semToken = require('fs').readdirSync(dirPublico)
@@ -2400,6 +2444,119 @@ setTimeout(async () => {
   } catch (e) { okMensagemDireta = false; console.log('  erro: ' + e.message); }
   if (!okMensagemDireta) ruins += 1;
   console.log(`${okMensagemDireta ? '✓' : '✗'} Mensagem direta: virou conversa gravada que a pessoa abre e responde (não some mais da tela)`);
+
+  // ------------------------------------------------------------------
+  // Ticket # no formulário: pedido do Master - todo formulário nasce com
+  // número, porque depois de assinado ele vira uma solicitação de Pagamento
+  // e tem que chegar lá com o MESMO número. Por isso sai da sequência
+  // compartilhada do ticketCounter, não de um contador próprio.
+  let okTicketFormulario = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const form = require('/home/user/adyen-monitor/server/formularios.js');
+    const solicitacoes = require('/home/user/adyen-monitor/server/solicitacoes.js');
+
+    const f1 = await form.criar({
+      tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
+      campos: {}, linhas: [{ descricao: 'Serviço X', valor: '150,00' }],
+      criadoPorEmail: 'teste@teste.local',
+    });
+    // um ticket da Central logo depois: tem que ser o PRÓXIMO número, provando
+    // que os dois bebem da mesma sequência (e não que cada um conta sozinho)
+    const s1 = await solicitacoes.create({
+      tipo: 'pagamento', unidade: 'São Braz Ilha do Leite', titulo: 'Pagamento X',
+      criadoPorEmail: 'teste@teste.local',
+    });
+    const f2 = await form.criar({
+      tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
+      campos: {}, linhas: [{ descricao: 'Serviço Y', valor: '90,00' }],
+      criadoPorEmail: 'teste@teste.local',
+    });
+
+    // o número tem que sobreviver até a tela (listar) e até o PDF
+    const listaForm = await pedir('/api/formularios', cab);
+    const naLista = (listaForm.status === 200 ? JSON.parse(listaForm.corpo) : []).find((x) => x.id === f1.id) || {};
+    const pdf = await pedirBinario(`/api/formularios/${f1.id}/pdf`, cab);
+    const textoPdf = pdf.status === 200 ? textoDoPdf(pdf.buffer) : '';
+
+    // e um formulário que já vem com número (o caso de "virou outra coisa")
+    // reaproveita em vez de tirar outro da fila
+    const f3 = await form.criar({
+      tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
+      campos: {}, linhas: [{ descricao: 'Herdado', valor: '10,00' }],
+      criadoPorEmail: 'teste@teste.local', numeroTicket: f1.numeroTicket,
+    });
+
+    const conferencias = {
+      'o formulário nasce com número de ticket': Number.isFinite(f1.numeroTicket),
+      'segue o padrão da casa (#10000 em diante)': f1.numeroTicket >= 10000,
+      'é a MESMA sequência da Central (o ticket seguinte é o próximo número)':
+        s1.numeroTicket === f1.numeroTicket + 1 && f2.numeroTicket === s1.numeroTicket + 1,
+      'dois formulários nunca repetem número': f1.numeroTicket !== f2.numeroTicket,
+      'o número chega na tela (listagem)': naLista.numeroTicket === f1.numeroTicket,
+      'o PDF sai com o número impresso': pdf.status === 200 && textoPdf.includes(`Ticket #${f1.numeroTicket}`),
+      'número recebido de fora é reaproveitado (vira outra coisa sem trocar de número)':
+        f3.numeroTicket === f1.numeroTicket,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okTicketFormulario = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (f1 ${f1.numeroTicket}, s1 ${s1.numeroTicket}, f2 ${f2.numeroTicket}, pdf ${pdf.status})`);
+  } catch (e) { okTicketFormulario = false; console.log('  erro: ' + e.message); }
+  if (!okTicketFormulario) ruins += 1;
+  console.log(`${okTicketFormulario ? '✓' : '✗'} Formulários: todo formulário nasce com Ticket # da MESMA sequência da Central (vira solicitação de Pagamento sem trocar de número)`);
+
+  // ------------------------------------------------------------------
+  // Link de preenchimento: pedido do Master - duas portas, ou a unidade
+  // preenche tudo, ou manda o link pro próprio solicitante preencher os
+  // dados dele (no Reembolso, quem sabe CPF/banco/agência/conta/PIX é ele).
+  let okLinkPreencher = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const criado = await postarJson('/api/formularios/link-preenchimento', {
+      tipo: 'reembolso', unidade: 'São Braz Ilha do Leite',
+    }, cab);
+    const d = criado.status === 200 ? JSON.parse(criado.corpo) : {};
+    const tk = d.tokenPreenchimento;
+
+    // o link é PÚBLICO (não exige login nem Basic Auth) e já traz a unidade
+    const vista = await pedir(`/api/formularios-publico/preencher/${tk}`);
+    const dv = vista.status === 200 ? JSON.parse(vista.corpo) : {};
+    const tokenInvalido = await pedir('/api/formularios-publico/preencher/naoexiste123');
+
+    const enviou = await postarJson(`/api/formularios-publico/preencher/${tk}`, {
+      campos: { nome: 'Fulano de Tal', cpf: '12345678901', banco: 'Nubank', agencia: '0001', conta: '123456-7', pix: 'fulano@x.com' },
+      linhas: [{ data: '20/08', fornecedor: 'Posto X', descricao: 'Combustível', valor: '120,50' }],
+    });
+
+    // depois de enviado: sai do "aguardando", ganha assinaturas e o MESMO ticket
+    const depois = JSON.parse((await pedir('/api/formularios', cab)).corpo).find((x) => x.id === d.id) || {};
+    const reenvio = await postarJson(`/api/formularios-publico/preencher/${tk}`, {
+      campos: { nome: 'Outro' }, linhas: [{ descricao: 'x', valor: '1,00' }],
+    });
+    const vazio = await postarJson('/api/formularios-publico/preencher/' + tk, { campos: {}, linhas: [] });
+
+    const conferencias = {
+      'a unidade gera o link já com Ticket #': criado.status === 200 && Number.isFinite(d.numeroTicket) && !!tk,
+      'nasce aguardando preenchimento, sem assinatura nenhuma':
+        d.status === 'AGUARDANDO_PREENCHIMENTO' && (d.assinaturas || []).length === 0,
+      'o link abre sem login e já vem com a unidade travada':
+        vista.status === 200 && dv.unidade === 'São Braz Ilha do Leite' && dv.razaoSocial === 'Cafe SBI',
+      'o link traz os campos do modelo pro solicitante preencher': (dv.cabecalho || []).length > 0 && (dv.colunas || []).length > 0,
+      'token inválido não abre nada': tokenInvalido.status === 404,
+      'o solicitante consegue enviar': enviou.status === 200,
+      'depois de enviado sai de "aguardando" e entra no fluxo normal': depois.status === 'PENDENTE',
+      'só AÍ nascem os slots de assinatura (antes não havia linha pra assinar)': (depois.assinaturas || []).length > 0,
+      'o valor preenchido pelo solicitante é o que vale': depois.valorTotal === 120.5,
+      'o Ticket # continua o MESMO do momento em que o link foi gerado': depois.numeroTicket === d.numeroTicket,
+      'o mesmo link não serve pra preencher duas vezes': reenvio.status === 400 && /já foi preenchido/.test(reenvio.corpo),
+      'envio sem nenhuma linha é recusado': vazio.status === 400,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okLinkPreencher = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (criar ${criado.status}, vista ${vista.status}, enviar ${enviou.status} ${enviou.corpo.slice(0, 90)})`);
+  } catch (e) { okLinkPreencher = false; console.log('  erro: ' + e.message); }
+  if (!okLinkPreencher) ruins += 1;
+  console.log(`${okLinkPreencher ? '✓' : '✗'} Formulários: link pro próprio solicitante preencher (a unidade escolhe: preenche ou envia o link)`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

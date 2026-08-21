@@ -88,6 +88,11 @@
 
       <div class="msg err hidden" id="msg-criar"></div>
       <button type="button" class="btn" id="btn-criar" style="margin-top:12px;width:100%;" onclick="criar()">💾 Criar formulário e gerar links de assinatura</button>
+      <!-- 2ª porta de entrada (pedido do Master): em vez de a unidade digitar
+           os dados do solicitante, manda o link pra ele mesmo preencher -
+           quem sabe CPF/banco/agência/conta/PIX é ele, não a loja -->
+      <button type="button" class="btn-ghost" id="btn-link-preencher" style="margin-top:8px;width:100%;" onclick="gerarLinkPreenchimento()">🔗 Enviar link para o solicitante preencher</button>
+      <p style="font-size:11px;color:var(--muted);margin:6px 0 0;line-height:1.5;">Escolha a unidade e o tipo acima. O link já vai com a unidade travada e com o Ticket # - o solicitante só preenche os dados dele.</p>
     </div>
   </div>
 
@@ -147,6 +152,28 @@ function escolherTipo(tipo){
   atualizarTotal();
 }
 
+// gera o link de preenchimento e entrega pronto pra mandar (copiar ou
+// WhatsApp) - reusa copiar()/whatsapp(), que já existem pros links de
+// assinatura, pra ser o mesmo gesto que a pessoa já conhece
+async function gerarLinkPreenchimento(){
+  const tipo = TIPO_ATUAL;
+  const unidade = document.getElementById('f-unidade').value;
+  if(!tipo || !unidade){ alert('Escolha o tipo e a unidade antes de gerar o link.'); return; }
+  const btn = document.getElementById('btn-link-preencher');
+  btn.disabled = true; btn.textContent = 'Gerando...';
+  try{
+    const r = await fetch('/api/formularios/link-preenchimento', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tipo, unidade }),
+    });
+    const d = await r.json();
+    if(!r.ok){ alert(d.error||'Não consegui gerar o link.'); return; }
+    const link = location.origin + '/preencher.html?token=' + encodeURIComponent(d.tokenPreenchimento);
+    const msg = `Preencha os dados do formulário aqui (Ticket #${d.numeroTicket}): ${link}`;
+    if(confirm(`Link gerado (Ticket #${d.numeroTicket}).\n\nOK = abrir o WhatsApp com a mensagem pronta.\nCancelar = só copiar o link.`)) whatsapp(msg);
+    else copiar(link);
+    carregarLista();
+  } finally { btn.disabled = false; btn.textContent = '🔗 Enviar link para o solicitante preencher'; }
+}
 function addLinha(){
   const m = modelo();
   const tr = document.createElement('tr');
@@ -255,6 +282,7 @@ function renderLista(){
     const pendentes = f.assinaturas.filter(a=>!a.assinado).length;
     return `<div class="form-item">
       <div class="fi-titulo">${escapeHtml(t?t.rotulo:f.tipo)} · ${escapeHtml(f.unidade)}
+        <span class="badge" style="background:#1a2230;color:var(--muted);">#${f.numeroTicket ?? '—'}</span>
         <span class="badge ${f.status==='ASSINADO'?'assinado':'pendente'}">${f.status==='ASSINADO'?'✅ assinado':`✍️ falta(m) ${pendentes}`}</span></div>
       <div class="fi-sub">${fmtData(f.criadoEm)} · ${f.linhas.length} linha(s) · total ${fmtMoney(f.valorTotal)} · por ${escapeHtml(f.criadoPorEmail||'')}</div>
       ${(f.anexos||[]).length ? `<div class="fi-sub">📎 ${f.anexos.map((an,i)=>`<a href="/api/formularios/${f.id}/anexo/${i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" style="color:var(--accent);">${escapeHtml(an.nome)}</a>`).join(' · ')}</div>` : ''}
