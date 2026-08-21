@@ -162,13 +162,13 @@
 
 
   <!-- EMPRESAS (ver server/empresas.js): camada acima do Grupo, o limite de
-       isolamento entre negócios diferentes hospedados no Zenith (ex: MVPar
-       x Arcfood hoje; uma clínica ou escola amanhã). Toda unidade cai em
-       alguma empresa - a marcada "padrão" pega qualquer código não listado
-       explicitamente em outra, pra loja nova nunca ficar sem empresa. -->
+       isolamento entre negócios diferentes hospedados no Zenith (ex: GBE
+       x Arcfood hoje; uma clínica ou escola amanhã). NÃO existe empresa
+       "padrão": cada unidade tem que ser escolhida a dedo, pra loja nova
+       nunca cair numa empresa por acidente. -->
   <div class="panel">
     <h2>🏢 Empresas</h2>
-    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">O limite que separa um negócio do outro dentro do Zenith - usuário de uma empresa nunca vê dado de outra (exceto o time de Suporte, que atravessa tudo de propósito). A empresa marcada <b>padrão</b> é dona de qualquer unidade que não estiver listada explicitamente em nenhuma outra - assim uma loja nova nunca fica sem empresa.</p>
+    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">O limite que separa um negócio do outro dentro do Zenith - usuário de uma empresa nunca vê dado de outra, <b>nem o Admin dela</b> (a única exceção é o time de Suporte, que atravessa tudo de propósito). Cada unidade precisa ser <b>marcada</b> na empresa dona dela: unidade que ninguém marcou não entra em empresa nenhuma e só aparece pro Master e pro Suporte, até você decidir de quem ela é.</p>
     <div id="empresas-lista" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;"></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;border-top:1px solid var(--line);padding-top:10px;">
       <label style="flex:1;min-width:160px;font-size:11.5px;color:var(--muted);">Nome da empresa
@@ -179,13 +179,10 @@
           <option value="alimentacao">Alimentação</option>
         </select>
       </label>
-      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text);white-space:nowrap;">
-        <input type="checkbox" id="emp-padrao" style="width:auto;margin:0;"> é a empresa padrão
-      </label>
       <button type="button" class="primary" style="padding:8px 14px;" onclick="salvarEmpresa()">+ Cadastrar empresa</button>
     </div>
     <fieldset style="margin-top:10px;">
-      <legend>Unidades desta empresa <span style="font-weight:400;color:var(--muted);">(deixe vazio se for a empresa padrão)</span></legend>
+      <legend>Unidades desta empresa <span style="font-weight:400;color:var(--muted);">(marque todas que pertencem a ela)</span></legend>
       <div style="display:flex;gap:10px;margin-bottom:6px;">
         <button type="button" class="btn-add" onclick="marcarTodosChecks('emp-unidades', true)">marcar todas</button>
         <button type="button" class="btn-add" onclick="marcarTodosChecks('emp-unidades', false)">desmarcar todas</button>
@@ -929,7 +926,7 @@ function renderEmpresasLista(){
   if(!EMPRESAS.length){ el.innerHTML = '<span style="color:var(--muted);font-size:11.5px;">Nenhuma empresa cadastrada ainda.</span>'; return; }
   el.innerHTML = EMPRESAS.map(e=>{
     const qtdUnidades = (e.unidades||[]).length;
-    const escopo = e.padrao ? 'padrão · dona de qualquer unidade não listada em outra empresa' : `${qtdUnidades} unidade(s) listada(s)`;
+    const escopo = qtdUnidades ? `${qtdUnidades} unidade(s)` : 'nenhuma unidade marcada ainda';
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:12.5px;">
       <span style="flex:1;"><b>${escapeHtml(e.nome)}</b> <span style="color:var(--muted);font-size:11px;">· ${escapeHtml(e.tipoNegocio)} · ${escapeHtml(escopo)}</span></span>
       <button type="button" class="back btn-editar-empresa" style="cursor:pointer;" data-id="${escapeHtml(e.id)}">✏️ editar</button>
@@ -949,12 +946,11 @@ function abrirEdicaoEmpresa(id){
   EDITANDO_EMPRESA_ID = id;
   document.getElementById('emp-nome').value = emp.nome;
   document.getElementById('emp-tipo').value = emp.tipoNegocio;
-  document.getElementById('emp-padrao').checked = !!emp.padrao;
   document.getElementById('emp-unidades').innerHTML = unidadesChecksHtml('emp-unidades', new Set(emp.unidades||[]));
   document.getElementById('emp-nome').scrollIntoView({ behavior:'smooth', block:'center' });
 }
 async function excluirEmpresa(id, nome){
-  if(!confirm(`Excluir a empresa "${nome}"? As unidades dela ficam sem empresa explícita (caem na empresa padrão, se houver uma).`)) return;
+  if(!confirm(`Excluir a empresa "${nome}"? As unidades dela ficam sem empresa nenhuma - somem pra todo mundo menos Master e Suporte até você colocar cada uma numa empresa de novo.`)) return;
   const resp = await fetch(`/api/empresas/${id}`, { method:'DELETE' });
   if(!resp.ok){ alert('Erro ao excluir.'); return; }
   if(EDITANDO_EMPRESA_ID===id) limparFormEmpresa();
@@ -964,7 +960,6 @@ function limparFormEmpresa(){
   EDITANDO_EMPRESA_ID = null;
   document.getElementById('emp-nome').value = '';
   document.getElementById('emp-tipo').value = 'alimentacao';
-  document.getElementById('emp-padrao').checked = false;
   document.getElementById('emp-unidades').innerHTML = unidadesChecksHtml('emp-unidades', new Set());
 }
 async function salvarEmpresa(){
@@ -973,7 +968,6 @@ async function salvarEmpresa(){
   const payload = {
     nome: document.getElementById('emp-nome').value,
     tipoNegocio: document.getElementById('emp-tipo').value,
-    padrao: document.getElementById('emp-padrao').checked,
     unidades: readChecked(document.getElementById('emp-unidades')),
   };
   try{

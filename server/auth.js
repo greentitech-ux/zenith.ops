@@ -10,6 +10,7 @@ const jwt = require('jsonwebtoken');
 const db = require('./firestore');
 const { createKeyedCache } = require('./liveCache');
 const sessions = require('./sessions');
+const empresas = require('./empresas');
 
 const JWT_SECRET = process.env.JWT_SECRET || '';
 if (!JWT_SECRET) {
@@ -252,7 +253,7 @@ function requireAuth(req, res, next) {
   // tokens emitidos antes da sessao existir (sem "sid") continuam validos
   // ate expirar sozinhos - so passam a exigir sessao ativa os novos logins
   Promise.all([getUserById(payload.sub), payload.sid ? sessions.existeEValida(payload.sid) : true])
-    .then(([user, sessaoValida]) => {
+    .then(async ([user, sessaoValida]) => {
       if (!user || user.active === false) return res.status(401).json({ error: 'Acesso inválido ou desativado.' });
       if (!sessaoValida) return res.status(401).json({ error: 'Sessão encerrada, faça login novamente.' });
       if (user.role !== 'master' && !dentroDoHorarioPermitido(user.horarioPermitido)) {
@@ -277,6 +278,27 @@ function requireAuth(req, res, next) {
       req.podeRhTodasUnidades = !!user.podeRhTodasUnidades;
       req.podeRhCadastrarEfetivado = !!user.podeRhCadastrarEfetivado;
       req.permissions = req.isMaster ? null : user.permissions || emptyPermissions();
+
+      // EMPRESA do acesso (ver empresas.js). Duas coisas saem daqui:
+      //
+      // 1. req.unidadesDaEmpresa - o teto do Admin: ele manda na empresa
+      //    inteira e não enxerga nada fora dela (ver escopoDeUnidades).
+      // 2. o recorte das unidades marcadas no proprio acesso pelo que a
+      //    empresa realmente tem. Isso e a trava dura do isolamento: se
+      //    sobrou (ou alguem marcou) uma unidade de outra empresa no
+      //    checklist, ela morre aqui, antes de qualquer rota - a tela de
+      //    Usuarios so avisa, quem impede de valer e este recorte.
+      req.empresaId = req.isMaster ? null : user.empresaId || null;
+      req.unidadesDaEmpresa = null;
+      if (req.empresaId) {
+        const daEmpresa = await empresas.unidadesDaEmpresa(req.empresaId);
+        req.unidadesDaEmpresa = daEmpresa;
+        const permitidas = new Set(daEmpresa);
+        req.permissions = {
+          ...req.permissions,
+          unidades: (req.permissions.unidades || []).filter((u) => permitidas.has(u)),
+        };
+      }
       next();
     })
     .catch(next);
@@ -328,6 +350,39 @@ function ehTimeSuporte(ctx) {
   return !!ctx.isMaster || !!ctx.isAdmin || (ctx.permissions?.sections || []).includes('suporte');
 }
 
+// ATE ONDE vai quem tem poder de "ver tudo" numa tela (Master ou Admin).
+// Devolve null = sem limite, ou a lista de codigos de unidade que ele pode
+// enxergar. As tres respostas possiveis, na ordem em que sao decididas:
+//
+//   Master ................. null, atravessa toda empresa por definicao
+//   secao 'suporte' ........ null, atravessa de proposito - o time de
+//                            suporte atende loja de qualquer empresa
+//   Admin de uma empresa ... as unidades daquela empresa, e so
+//   sem empresa vinculada .. null, continua como sempre foi
+//
+// O ultimo caso e o que faz esta camada entrar no ar sem quebrar ninguem:
+// enquanto o Master nao disser de que empresa cada Admin e, todo mundo
+// enxerga o que enxergava antes. O isolamento comeca a valer acesso a
+// acesso, no momento em que a empresa e escolhida na tela de Usuarios.
+function escopoDeUnidades(req) {
+  if (req.isMaster) return null;
+  if ((req.permissions?.sections || []).includes('suporte')) return null;
+  return req.unidadesDaEmpresa;
+}
+
+// filtra uma lista pelo escopo de empresa de quem esta pedindo. Pra Master
+// e pro suporte e no-op (escopo null), entao da pra aplicar direto em cima
+// dos `if (req.isMaster || req.isAdmin) return tudo` que ja existiam, sem
+// mudar nada pra eles. Item sem o campo de unidade fica de fora: registro
+// sem unidade nao da pra dizer de que empresa e, e deixar passar seria
+// justamente o vazamento que essa camada existe pra evitar.
+function filtrarPorEmpresa(req, lista, campo = 'unidade') {
+  const escopo = escopoDeUnidades(req);
+  if (!escopo) return lista;
+  const permitidas = new Set(escopo);
+  return (lista || []).filter((item) => item && permitidas.has(item[campo]));
+}
+
 module.exports = {
   ensureMaster,
   login,
@@ -341,6 +396,8 @@ module.exports = {
   requireMasterOuCatalogoEstoque,
   hasSection,
   ehTimeSuporte,
+  escopoDeUnidades,
+  filtrarPorEmpresa,
   filterByUnidade,
   emptyPermissions,
   dentroDoHorarioPermitido,

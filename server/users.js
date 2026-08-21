@@ -305,6 +305,23 @@ async function updateIsAdmin(id, isAdmin) {
   return toPublic(await ref.get());
 }
 
+// vincula o acesso a uma EMPRESA (ver empresas.js). É o que limita até onde
+// o poder de "ver tudo" de um Admin alcança: Admin da Arcfood manda na
+// Arcfood inteira e não enxerga o GBE, e vice-versa. Vazio = sem empresa:
+// o acesso volta a valer só pelas unidades marcadas nele, sem atalho
+// nenhum (é o lado seguro pra errar - ver escopoDeUnidades em auth.js).
+// Não vale pro Master, que atravessa empresa por definição.
+async function updateEmpresa(id, empresaId) {
+  const ref = usersRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  if (snap.data().role === 'master') throw new Error('O acesso Master enxerga todas as empresas, não fica preso a uma.');
+  await ref.update({ empresaId: empresaId ? String(empresaId) : null });
+  invalidarUsuario(id);
+  usersCache.invalidar();
+  return toPublic(await ref.get());
+}
+
 // libera o Catálogo do Estoque (organizar setor/tipo, ajustar custo de
 // referência, ativar/desativar item) pra um usuário especifico, sem precisar
 // dar Master/Admin pra ele - pensado pra gerente de loja que cuida disso no
@@ -521,6 +538,7 @@ function toPublic(doc) {
     permissions: data.role === 'master' ? null : data.permissions || emptyPermissions(),
     horarioPermitido: data.role === 'master' ? null : data.horarioPermitido || { ativo: false, inicio: '', fim: '' },
     isAdmin: data.role === 'master' ? null : !!data.isAdmin,
+    empresaId: data.role === 'master' ? null : data.empresaId || null,
     podeCatalogoEstoque: data.role === 'master' ? null : !!data.podeCatalogoEstoque,
     podeCatalogoInsumos: data.role === 'master' ? null : !!data.podeCatalogoInsumos,
     podeCadastrarOperadores: data.role === 'master' ? null : !!data.podeCadastrarOperadores,
@@ -662,6 +680,7 @@ module.exports = {
   setActive,
   updateHorarioPermitido,
   updateIsAdmin,
+  updateEmpresa,
   updatePodeCatalogoEstoque,
   updatePodeCatalogoInsumos,
   updatePodeCadastrarOperadores,
