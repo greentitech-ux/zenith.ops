@@ -3330,6 +3330,67 @@ setTimeout(async () => {
   if (!okPontoRh) ruins += 1;
   console.log(`${okPontoRh ? '✓' : '✗'} RH: ponto sem foto/localização é recusado (extra e teste) e ponto aberto demais vira cobrança de check-out`);
 
+  // ---- Parque: correção que não corrige nada é recusada na origem ----
+  // Caso real: a pessoa escreveu "Trocar o tempo de 30 minutos Para 1 hora"
+  // na JUSTIFICATIVA e não mexeu no seletor de Tempo. A proposta foi enviada
+  // com tempo → 30min (igual ao cadastrado), alguém aprovou de boa fé, e o
+  // sistema aplicou fielmente o mesmo valor de antes - parecendo que aprovar
+  // não funcionava. O motor sempre funcionou; o que faltava era recusar a
+  // proposta vazia ANTES de virar pedido.
+  let okCorrecaoParque = false;
+  try {
+    const pq = require('/home/user/adyen-monitor/server/parque.js');
+    const base = {
+      id: 'pc1', unidade: 'SALT', unidadeNome: 'Saltiverso Patteo',
+      responsavel: { nome: 'Aline Bezerra', contato: '8199431-0362' },
+      dataUtilizacao: '2026-08-21', tempoMinutos: 30, metodoPagamento: 'Dinheiro',
+      criancas: [{ nome: 'Arthur Xavier', meia: true }], adultoCortesia: false, quantAC: 0,
+      iniciado: true, timeInicial: '13:05', timeFinal: '13:35', minutosExtras: 0, minutosAdicionados: 0,
+    };
+    DOCS.set('parqueCheckins/pc1', base);
+
+    // (1) proposta idêntica (o que realmente aconteceu) não vira pedido
+    const igual = await pq.solicitarEdicao({
+      checkinId: 'pc1', tipoCorrecao: 'alterar', motivo: 'Trocar o tempo de 30 minutos Para 1 hora',
+      proposta: { responsavel: { nome: 'Aline Bezerra', contato: '8199431-0362' }, dataUtilizacao: '2026-08-21', tempoMinutos: 30 },
+      solicitadoPorEmail: 'op@teste.local',
+    }).then(() => null).catch((e) => e.message);
+
+    // (2) proposta com a mudança de verdade passa e, aprovada, muda tempo/horário/valor
+    const valorAntes = pq.valorDoCheckin(DOCS.get('parqueCheckins/pc1'));
+    const pedido = await pq.solicitarEdicao({
+      checkinId: 'pc1', tipoCorrecao: 'alterar', motivo: 'Trocar o tempo de 30 minutos Para 1 hora',
+      proposta: { tempoMinutos: 60 }, solicitadoPorEmail: 'op@teste.local',
+    });
+    await pq.decidirEdicao(pedido.id, 'APROVADO', { decididoPorEmail: 'gerente@teste.local' });
+    const depois = DOCS.get('parqueCheckins/pc1');
+    const valorDepois = pq.valorDoCheckin(depois);
+
+    // (3) o comparador enxerga mudança em outros campos, não só no tempo
+    const soNome = pq.propostaMudaAlgo({ responsavel: { nome: 'Aline B. Xavier' } }, base);
+    const soCrianca = pq.propostaMudaAlgo({ criancas: [{ nome: 'Arthur Xavier', meia: false }] }, base);
+    const mesmaCriancaOrdemTrocada = pq.propostaMudaAlgo(
+      { criancas: [{ nome: 'Arthur Xavier', meia: true }] }, base,
+    );
+
+    const conferencias = {
+      'proposta igual ao cadastrado é recusada': /nenhum campo foi alterado/i.test(igual || ''),
+      'e o erro diz que justificativa não altera o check-in': /justificativa/i.test(igual || ''),
+      'proposta com mudança de verdade é aceita': !!pedido && pedido.status === 'PENDENTE',
+      'aprovar troca o tempo': Number(depois.tempoMinutos) === 60,
+      'aprovar recalcula o horário de saída': String(depois.timeFinal).startsWith('14:05'),
+      'aprovar muda o valor': valorDepois > valorAntes,
+      'mudar só o nome conta como mudança': soNome === true,
+      'mudar só a meia de uma criança conta como mudança': soCrianca === true,
+      'criança idêntica NÃO conta como mudança': mesmaCriancaOrdemTrocada === false,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okCorrecaoParque = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okCorrecaoParque = false; console.log('  erro: ' + e.message); }
+  if (!okCorrecaoParque) ruins += 1;
+  console.log(`${okCorrecaoParque ? '✓' : '✗'} Parque: correção sem mudança nenhuma é recusada (e a que muda de verdade altera tempo, horário e valor)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

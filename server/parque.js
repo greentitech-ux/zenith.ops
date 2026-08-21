@@ -972,6 +972,28 @@ async function remover(id) {
 // monta a proposta de alteracao com os mesmos criterios de atualizar() -
 // validar aqui (na hora do pedido) evita aprovar uma proposta que depois
 // falharia na aplicacao. Devolve so os campos que a proposta realmente muda
+// A proposta traz TODOS os campos do formulário (a tela pré-preenche com o
+// que está cadastrado hoje), então "tem campo" não quer dizer "mudou algo" -
+// é preciso comparar de verdade com o check-in atual.
+function propostaMudaAlgo(p, atual) {
+  if (!p || !atual) return true; // sem base pra comparar: não bloqueia
+  const txt = (v) => String(v == null ? '' : v).trim();
+  const listaCriancas = (cs) => (Array.isArray(cs) ? cs : [])
+    .map((c) => `${txt(c.nome).toLowerCase()}|${txt(c.dataNascimento).slice(0, 10)}|${c.meia !== false}`)
+    .sort().join(';');
+  if (p.responsavel?.nome !== undefined && txt(p.responsavel.nome) !== txt(atual.responsavel?.nome)) return true;
+  if (p.responsavel?.contato !== undefined && txt(p.responsavel.contato) !== txt(atual.responsavel?.contato)) return true;
+  if (p.dataUtilizacao !== undefined && txt(p.dataUtilizacao) !== txt(atual.dataUtilizacao)) return true;
+  if (p.tempoMinutos !== undefined && Number(p.tempoMinutos) !== Number(atual.tempoMinutos)) return true;
+  if (p.horarioPrevisto !== undefined && txt(p.horarioPrevisto).slice(0, 5) !== txt(atual.horarioPrevisto).slice(0, 5)) return true;
+  if (p.metodoPagamento !== undefined && txt(p.metodoPagamento) !== txt(atual.metodoPagamento)) return true;
+  if (p.observacao !== undefined && txt(p.observacao) !== txt(atual.observacao)) return true;
+  if (p.adultoCortesia !== undefined && (p.adultoCortesia === true) !== (atual.adultoCortesia === true)) return true;
+  if (p.adultoCortesia === true && p.quantAC !== undefined && Number(p.quantAC) !== Number(atual.quantAC || 0)) return true;
+  if (p.criancas !== undefined && listaCriancas(p.criancas) !== listaCriancas(atual.criancas)) return true;
+  return false;
+}
+
 function validarPropostaEdicao(proposta, tabela) {
   if (!proposta || typeof proposta !== 'object') throw new Error('Preencha a proposta de alteração.');
   const p = {};
@@ -1026,6 +1048,15 @@ async function solicitarEdicao({ checkinId, tipoCorrecao, proposta, motivo, nume
   if (!motivo || !String(motivo).trim()) throw new Error('Descreva o motivo da correção.');
   const tipo = tipoCorrecao === 'alterar' ? 'alterar' : 'excluir';
   const propostaOk = tipo === 'alterar' ? validarPropostaEdicao(proposta, await getConfigPrecos()) : null;
+  // Correção que não corrige nada não vira pedido. Sem esta trava, quem
+  // escreve a mudança na JUSTIFICATIVA e esquece de mexer no campo manda uma
+  // proposta idêntica ao check-in: o pedido entra na fila, alguém aprova de
+  // boa fé, e o sistema aplica fielmente... o mesmo valor de antes. O
+  // resultado é "aprovei e não mudou nada", que parece defeito do motor e não
+  // é. A tela também avisa antes de enviar, mas quem decide é aqui.
+  if (tipo === 'alterar' && !propostaMudaAlgo(propostaOk, atual)) {
+    throw new Error('Essa proposta é igual ao que já está cadastrado - nenhum campo foi alterado. Mude o campo que precisa corrigir (tempo, valor, nome...); escrever a mudança só na justificativa não altera o check-in.');
+  }
   const pendentes = await listarEdicoes();
   if (pendentes.some((p) => p.checkinId === checkinId && p.status === 'PENDENTE')) {
     throw new Error('Já existe um pedido de correção pendente para esse check-in.');
@@ -1450,7 +1481,7 @@ module.exports = {
   criar, checkin, listAll, listByUnidades, resumoDoDia, getOne, atualizar, buscarPorCpf, separarCepEndereco, rodarAutoCheckins,
   adicionarTempo, relancar, visitaHojePorCpf, remover,
   decidirCortesia, encerrarCortesia, ehAdminCortesia,
-  solicitarEdicao, listarEdicoes, decidirEdicao, validarPropostaEdicao,
+  solicitarEdicao, listarEdicoes, decidirEdicao, validarPropostaEdicao, propostaMudaAlgo,
   checkout, aprovarCheckout, retomarCheckout, creditoPorCpf, usarCredito,
   invalidar: () => parqueCache.invalidar(),
 };

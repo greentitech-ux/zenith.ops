@@ -365,6 +365,14 @@ let IS_ADMIN = false;
 let UNIDADES_NOMES = { ...PARQUE_UNIDADES_NOMES };
 let TODOS = [];
 let EDICOES = [];
+// tempos vendáveis, da tabela de preços do Parque (Master edita em
+// parque-checkin.html). Fallback só pro caso da rota falhar - a tela ainda
+// precisa abrir o formulário de correção.
+let TEMPOS_TABELA = [30, 60, 90, 120];
+fetch('/api/parque/tabela').then(r=>r.ok?r.json():null).then(t=>{
+  const lista = (t && Array.isArray(t.tempos) ? t.tempos : []).map(x=>Number(x.minutos)).filter(Boolean);
+  if(lista.length) TEMPOS_TABELA = lista;
+}).catch(()=>{});
 let EDITANDO_ID = null;
 let CORRIGINDO_ID = null;
 
@@ -641,9 +649,16 @@ function abrirCorrecao(id){
   document.getElementById('cor-nome').value = c.responsavel?.nome || '';
   document.getElementById('cor-contato').value = c.responsavel?.contato || '';
   document.getElementById('cor-data').value = c.dataUtilizacao || '';
+  // Os tempos vêm da TABELA DE PREÇOS configurada, não de uma lista fixa.
+  // Com [30,60,90,120] no código, um check-in de tempo fora dessa lista (a
+  // tabela é editável) não casava com nenhuma opção e o select caía
+  // silenciosamente na primeira - propondo baixar o tempo do cliente sem
+  // ninguém pedir. O tempo do próprio check-in entra na lista mesmo se não
+  // estiver mais à venda (o servidor aceita "tempo oculto" na correção).
   const sel = document.getElementById('cor-tempo');
-  sel.innerHTML = [30,60,90,120].map(t=>`<option value="${t}">${t} min</option>`).join('');
-  sel.value = String(c.tempoMinutos || 60);
+  const tempos = [...new Set([...TEMPOS_TABELA, Number(c.tempoMinutos) || 0].filter(Boolean))].sort((a,b)=>a-b);
+  sel.innerHTML = tempos.map(t=>`<option value="${t}">${t} min</option>`).join('');
+  sel.value = String(c.tempoMinutos || tempos[0]);
   preencherSelectSlots('cor-previsto', (c.horarioPrevisto||'').slice(0,5));
   document.getElementById('cor-metodo').value = c.metodoPagamento || '';
   document.getElementById('cor-ac').checked = !!c.adultoCortesia;
@@ -698,6 +713,27 @@ function abrirVer(id){
 }
 function fecharVer(){ document.getElementById('overlay-ver').classList.add('hidden'); }
 
+// espelha propostaMudaAlgo do parque.js: compara o que está no formulário
+// com o check-in atual, campo a campo
+function formularioMudouAlgo(c){
+  const v = (id)=>String(document.getElementById(id).value||'').trim();
+  const criancasForm = [...document.querySelectorAll('#cor-criancas .crianca-linha')].map(l=>
+    `${(l.querySelector('.cor-cr-nome').value||'').trim().toLowerCase()}|${(l.querySelector('.cor-cr-nasc').value||'').slice(0,10)}|${l.querySelector('.cor-cr-meia').checked}`).sort().join(';');
+  const criancasAtual = (c.criancas||[]).map(cr=>
+    `${(cr.nome||'').trim().toLowerCase()}|${(cr.dataNascimento||'').slice(0,10)}|${cr.meia!==false}`).sort().join(';');
+  const acForm = document.getElementById('cor-ac').checked;
+  return v('cor-nome') !== String(c.responsavel?.nome||'').trim()
+    || v('cor-contato') !== String(c.responsavel?.contato||'').trim()
+    || v('cor-data') !== String(c.dataUtilizacao||'').trim()
+    || Number(v('cor-tempo')) !== Number(c.tempoMinutos)
+    || v('cor-previsto').slice(0,5) !== String(c.horarioPrevisto||'').slice(0,5)
+    || v('cor-metodo') !== String(c.metodoPagamento||'').trim()
+    || v('cor-observacao') !== String(c.observacao||'').trim()
+    || acForm !== (c.adultoCortesia===true)
+    || (acForm && Number(v('cor-ac-quant')) !== Number(c.quantAC||0))
+    || criancasForm !== criancasAtual;
+}
+
 document.getElementById('form-correcao').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
   const msg = document.getElementById('msg-correcao');
@@ -705,6 +741,13 @@ document.getElementById('form-correcao').addEventListener('submit', async (ev)=>
   try{
     const body = { tipoCorrecao: CORRECAO_ABA, motivo: document.getElementById('cor-motivo').value };
     if(CORRECAO_ABA==='alterar'){
+      // erro clássico: descrever a mudança na justificativa e não mexer no
+      // campo. O servidor recusa de qualquer jeito (ver propostaMudaAlgo em
+      // parque.js); aqui é só pra pessoa entender na hora, sem round-trip
+      const atual = TODOS.find(x=>x.id===CORRIGINDO_ID);
+      if(atual && !formularioMudouAlgo(atual)){
+        throw new Error('Nenhum campo foi alterado - a proposta está igual ao que já está cadastrado. Mude o campo que precisa corrigir (o Tempo, por exemplo); escrever a mudança só na justificativa não altera o check-in.');
+      }
       body.proposta = {
         responsavel: { nome: document.getElementById('cor-nome').value, contato: document.getElementById('cor-contato').value },
         dataUtilizacao: document.getElementById('cor-data').value,
