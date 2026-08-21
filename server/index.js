@@ -842,7 +842,13 @@ app.post('/api/formularios-publico/:id/assinar', async (req, res) => {
 app.get('/api/formularios-publico/:id/pdf', async (req, res) => {
   const registro = await formularios.getOne(req.params.id);
   if (!registro || !formularios.chaveDoToken(registro, req.query.token)) return res.status(404).json({ error: 'Link inválido ou revogado.' });
-  formularios.gerarPdf(registro, res);
+  // gerarPdf virou async por causa do Ass. Boleto (lê o anexo do Storage
+  // e copia as páginas dele) - sem o await, um erro lá vira unhandled
+  // rejection e derruba o processo
+  try { await formularios.gerarPdf(registro, res); } catch (err) {
+    console.error('Erro ao gerar PDF do formulário:', err.message);
+    if (!res.headersSent) res.status(500).json({ error: 'Não consegui montar o PDF agora.' });
+  }
 });
 
 // comprovantes anexados na criação - o assinante confere antes de assinar
@@ -2956,6 +2962,7 @@ app.get('/api/formularios/tipos', requireSection('formularios'), (req, res) => {
   res.json(Object.entries(formularios.TIPOS).map(([tipo, m]) => ({
     tipo, rotulo: m.rotulo, cabecalho: m.cabecalho, colunas: m.colunas,
     assinantes: m.assinantes, assinaturaPorLinha: !!m.assinaturaPorLinha,
+    soAnexo: !!m.soAnexo, anexoObrigatorio: !!m.anexoObrigatorio,
   })));
 });
 
@@ -3023,7 +3030,10 @@ app.get('/api/formularios/:id', requireSection('formularios'), async (req, res) 
 app.get('/api/formularios/:id/pdf', requireSection('formularios'), async (req, res) => {
   const registro = await formularios.getOne(req.params.id);
   if (!registro) return res.status(404).json({ error: 'Formulário não encontrado.' });
-  formularios.gerarPdf(registro, res);
+  try { await formularios.gerarPdf(registro, res); } catch (err) {
+    console.error('Erro ao gerar PDF do formulário:', err.message);
+    if (!res.headersSent) res.status(500).json({ error: 'Não consegui montar o PDF agora.' });
+  }
 });
 
 app.get('/api/formularios/:id/anexo/:indice', requireSection('formularios'), async (req, res) => {
@@ -3031,6 +3041,29 @@ app.get('/api/formularios/:id/anexo/:indice', requireSection('formularios'), asy
   const anexo = registro && (registro.anexos || [])[Number(req.params.indice)];
   if (!anexo) return res.sendStatus(404);
   storage.streamArquivo(anexo.path, anexo.tipo, res);
+});
+
+// correção e cancelamento, só Master (ver formularios.js): editar refaz o
+// conteúdo e descarta as assinaturas já coletadas - assinatura vale pelo
+// que a pessoa viu; cancelar tira de circulação sem apagar o registro.
+app.put('/api/formularios/:id', auth.requireMaster, async (req, res) => {
+  try {
+    const dados = { campos: req.body.campos, linhas: req.body.linhas, porEmail: req.user.email };
+    if (await desviarSeQaMaster(req, res, 'formularios.editar', `Editar formulário ${req.params.id}`, { id: req.params.id, ...dados })) return;
+    res.json(formularioComLinks(await formularios.editar(req.params.id, dados)));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/formularios/:id/cancelar', auth.requireMaster, async (req, res) => {
+  try {
+    const dados = { motivo: req.body.motivo, porEmail: req.user.email };
+    if (await desviarSeQaMaster(req, res, 'formularios.cancelar', `Cancelar formulário ${req.params.id}`, { id: req.params.id, ...dados })) return;
+    res.json(await formularios.cancelar(req.params.id, dados));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.delete('/api/formularios/:id', auth.requireMaster, async (req, res) => {
@@ -3482,6 +3515,8 @@ app.get('/api/users/relatorio.:formato(csv|pdf)', auth.requireMaster, async (req
 // ação sobrevive até um restart do servidor (fica só o tipo+payload
 // salvos, nunca uma função/closure).
 const EXECUTORES_QA = {
+  'formularios.editar': (p) => formularios.editar(p.id, { campos: p.campos, linhas: p.linhas, porEmail: p.porEmail }),
+  'formularios.cancelar': (p) => formularios.cancelar(p.id, { motivo: p.motivo, porEmail: p.porEmail }),
   'formularios.remover': (p) => formularios.remover(p.id),
   'pedidoSemanal.criarRegra': (p) => pedidoSemanal.criarRegra(p),
   'pedidoSemanal.editarRegra': (p) => pedidoSemanal.atualizarRegra(p.id, p),

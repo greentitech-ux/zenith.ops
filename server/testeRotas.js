@@ -100,9 +100,29 @@ process.env.DASHBOARD_PASS = 'x';
 process.env.MASTER_EMAIL = 'master@teste.local';
 process.env.MASTER_PASSWORD = 'SenhaDeTeste!2026';
 
+// Storage de mentira EM MEMÓRIA. Antes ele só estourava, o que bastava
+// enquanto nenhum teste precisava LER um anexo de volta - o Ass. Boleto
+// precisa: o PDF dele é o arquivo anexado com a assinatura carimbada
+// dentro, então sem storage não dá pra provar nada do que importa.
+const ARQUIVOS = new Map();
+const bucketFake = {
+  file: (caminho) => ({
+    save: async (buffer) => { ARQUIVOS.set(caminho, Buffer.from(buffer)); },
+    download: async () => {
+      if (!ARQUIVOS.has(caminho)) throw new Error('arquivo não existe: ' + caminho);
+      return [ARQUIVOS.get(caminho)];
+    },
+    createReadStream: () => {
+      const { Readable } = require('stream');
+      return Readable.from([ARQUIVOS.get(caminho) || Buffer.alloc(0)]);
+    },
+    delete: async () => { ARQUIVOS.delete(caminho); },
+  }),
+};
+
 Module._load = function (req, parent, isMain) {
   if (req === './firestore') return fakeDb;
-  if (req === './storageBucket') return { resolverBucket: async () => { throw new Error('sem storage no teste'); } };
+  if (req === './storageBucket') return { resolverBucket: async () => bucketFake, comBucket: async (fn) => fn(bucketFake) };
   return origLoad.apply(this, arguments);
 };
 
@@ -141,14 +161,27 @@ function textoDoPdf(b) {
   while ((i = b.indexOf('stream', i)) >= 0) {
     let ini = i + 6; if (b[ini] === 13) ini += 1; if (b[ini] === 10) ini += 1;
     const fim = b.indexOf('endstream', ini); if (fim < 0) break;
-    try { bruto += zlib.inflateSync(b.subarray(ini, fim)).toString('latin1'); } catch (e) { /* stream não comprimido (imagem etc) */ }
+    const cru = b.subarray(ini, fim);
+    try { bruto += zlib.inflateSync(cru).toString('latin1'); } catch (e) {
+      // stream sem compressão: é o caso do pdf-lib (Ass. Boleto). Só entra
+      // se parecer conteúdo de página - stream de imagem viraria lixo.
+      const txt = cru.toString('latin1');
+      if (/\bBT\b|\bTj\b|\bTJ\b/.test(txt)) bruto += txt;
+    }
     i = fim + 9;
   }
-  // cada [<hex> num <hex> ...] TJ é UMA palavra fatiada pelo kerning: junta
-  // só os pedaços hex e ignora os números de espaçamento entre eles
-  return bruto.replace(/\[([^\]]*)\]\s*TJ/g, (_, dentro) =>
-    (dentro.match(/<([0-9A-Fa-f]*)>/g) || [])
-      .map((h) => Buffer.from(h.slice(1, -1), 'hex').toString('latin1')).join('') + ' ');
+  // três formas de texto convivem aqui: o pdfkit escreve
+  // [<hex> num <hex>] TJ (uma palavra fatiada pelo kerning - junta os
+  // pedaços hex e ignora os números de espaçamento); o pdf-lib (Ass.
+  // Boleto) escreve <hex> Tj; e (texto) Tj literal aparece em PDF de
+  // outras origens.
+  const deHex = (h) => Buffer.from(h, 'hex').toString('latin1');
+  return bruto
+    .replace(/\[([^\]]*)\]\s*TJ/g, (_, dentro) =>
+      (dentro.match(/<([0-9A-Fa-f]*)>/g) || []).map((h) => deHex(h.slice(1, -1))).join('') + ' ')
+    .replace(/<([0-9A-Fa-f]+)>\s*Tj/g, (_, hex) => deHex(hex) + ' ')
+    .replace(/\(((?:\\.|[^\\)])*)\)\s*Tj/g, (_, dentro) =>
+      dentro.replace(/\\([()\\])/g, '$1') + ' ');
 }
 
 function pedir(caminho, headers = {}) {
@@ -2675,6 +2708,159 @@ setTimeout(async () => {
   } catch (e) { okRotulos = false; console.log('  erro: ' + e.message); }
   if (!okRotulos) ruins += 1;
   console.log(`${okRotulos ? '✓' : '✗'} Formulários: "Favorecido"/"Responsável" em tudo - tela, assinatura e PDF, inclusive nos já criados`);
+
+  // ------------------------------------------------------------------
+  // Master corrige ou cancela um formulário já lançado (pedido do Master:
+  // "como master posso editar ou cancelar"). O que precisa ficar provado
+  // aqui não é o CRUD - é o efeito colateral que importa: cancelar tem que
+  // MATAR o link de assinatura que já foi pro WhatsApp de alguém, e editar
+  // tem que DESCARTAR assinatura já coletada (assinatura vale pelo
+  // documento que a pessoa viu).
+  let okEditarCancelar = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const form = require('/home/user/adyen-monitor/server/formularios.js');
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const criado = await postarJson('/api/formularios', {
+      tipo: 'avulso', unidade: 'Spoleto Tacaruna',
+      campos: { favorecido: 'Padaria X', chavePix: 'p@x' },
+      linhas: [{ data: '21/08', descricao: 'Pão', valor: '70,00' }],
+    }, cab);
+    const f = criado.status === 200 ? JSON.parse(criado.corpo) : {};
+    // a rota nunca devolve o token cru - só o LINK com ele dentro (é o que
+    // vai por WhatsApp). E cada edição gera token novo, então o token tem
+    // que ser relido depois de cada uma.
+    const tk = (lista, chave) => new URLSearchParams(String((lista.find((a) => a.chave === chave) || {}).link).split('?')[1]).get('t');
+
+    // corrigir o valor: a assinatura do favorecido, já coletada, cai fora
+    await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tk(f.assinaturas, 'favorecido'), nome: 'João', imagem: PNG });
+    const editado = await putJson(`/api/formularios/${f.id}`, {
+      campos: { favorecido: 'Padaria X', chavePix: 'p@x' },
+      linhas: [{ data: '21/08', descricao: 'Pão', valor: '90,00' }],
+    }, cab);
+    const dEdit = editado.status === 200 ? JSON.parse(editado.corpo) : {};
+    const depoisDaEdicao = await form.detalhar(f.id);
+
+    // salvar sem mudar nada não pode custar as assinaturas que sobraram
+    await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tk(dEdit.assinaturas, 'favorecido'), nome: 'João', imagem: PNG });
+    const semMudanca = await putJson(`/api/formularios/${f.id}`, {
+      campos: { favorecido: 'Padaria X', chavePix: 'p@x' },
+      linhas: [{ data: '21/08', descricao: 'Pão', valor: '90,00' }],
+    }, cab);
+    const dSem = semMudanca.status === 200 ? JSON.parse(semMudanca.corpo) : {};
+
+    // cancelar: o link do gerente (que nunca assinou) morre na hora
+    const tokenGerente = tk(dEdit.assinaturas, 'gerente');
+    const antesDoCancelamento = await pedir(`/api/formularios-publico/${f.id}?token=${tokenGerente}`);
+    const cancelado = await postarJson(`/api/formularios/${f.id}/cancelar`, { motivo: 'lançado em duplicidade' }, cab);
+    const depoisDoCancelamento = await pedir(`/api/formularios-publico/${f.id}?token=${tokenGerente}`);
+    const assinarDepois = await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tokenGerente, nome: 'Marcela', imagem: PNG });
+    const dCancelado = await form.detalhar(f.id);
+    const editarCancelado = await putJson(`/api/formularios/${f.id}`, { campos: {}, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }, cab);
+    const pdfCancelado = await pedirBinario(`/api/formularios/${f.id}/pdf`, cab);
+
+    const conferencias = {
+      'editar recalcula o total': editado.status === 200 && depoisDaEdicao.valorTotal === 90,
+      'editar descarta a assinatura que já estava lá': dEdit.assinaturasDescartadas === 1
+        && depoisDaEdicao.assinaturas.every((a) => !a.assinado),
+      'salvar sem mudar nada NÃO descarta assinatura': dSem.semMudanca === true
+        && (await form.detalhar(f.id)).assinaturas.filter((a) => a.assinado).length === 1,
+      'antes de cancelar, o link de assinatura funciona': antesDoCancelamento.status === 200,
+      'cancelar mata o link que já estava na mão de alguém': cancelado.status === 200
+        && depoisDoCancelamento.status === 404 && assinarDepois.status !== 200,
+      'o registro fica gravado, com motivo e Ticket #': dCancelado.status === 'CANCELADO'
+        && dCancelado.motivoCancelamento === 'lançado em duplicidade' && dCancelado.numeroTicket != null,
+      'formulário cancelado não pode ser editado': editarCancelado.status === 400,
+      'o PDF do cancelado sai carimbado': pdfCancelado.status === 200 && textoDoPdf(pdfCancelado.buffer).includes('CANCELADO'),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okEditarCancelar = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okEditarCancelar = false; console.log('  erro: ' + e.message); }
+  if (!okEditarCancelar) ruins += 1;
+  console.log(`${okEditarCancelar ? '✓' : '✗'} Formulários: Master corrige (descartando assinatura) ou cancela (matando o link) sem apagar o registro`);
+
+  // ------------------------------------------------------------------
+  // Ass. Boleto (pedido do Master): anexa um boleto (PDF ou imagem), abre
+  // a caixa de assinatura, e o PDF que sai é O PRÓPRIO ARQUIVO com a
+  // assinatura dentro - não um formulário separado falando sobre ele.
+  // É esse "dentro" que o teste tem que provar: o PDF de saída precisa
+  // conter as PÁGINAS DO ORIGINAL, não uma folha nova.
+  let okBoleto = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const { PDFDocument } = require('pdf-lib');
+
+    // um "boleto" de 2 páginas com uma marca reconhecível dentro
+    const origem = await PDFDocument.create();
+    origem.addPage().drawText('BOLETO ORIGINAL 12345', { x: 50, y: 700, size: 14 });
+    origem.addPage().drawText('SEGUNDA VIA DO BOLETO', { x: 50, y: 700, size: 14 });
+    const boletoPdf = Buffer.from(await origem.save());
+
+    const payload = (extra = {}) => JSON.stringify({
+      tipo: 'assBoleto', unidade: 'Spoleto Tacaruna',
+      campos: { favorecido: 'Energisa', descricao: 'Conta de luz', vencimento: '30/08/2026', valor: '1.234,56' },
+      ...extra,
+    });
+
+    // sem anexo não existe o que assinar - tem que barrar
+    const semAnexo = await postarMultipart('/api/formularios', { payload: payload() }, null, 'anexos', cab);
+    // e o link de "solicitante preenche" não faz sentido nesse tipo
+    const linkPreench = await postarJson('/api/formularios/link-preenchimento', { tipo: 'assBoleto', unidade: 'Spoleto Tacaruna' }, cab);
+
+    const criado = await postarMultipart('/api/formularios', { payload: payload() },
+      { nome: 'boleto.pdf', tipo: 'application/pdf', buffer: boletoPdf }, 'anexos', cab);
+    const f = criado.status === 200 ? JSON.parse(criado.corpo) : {};
+    const tk = (lista, chave) => new URLSearchParams(String((lista.find((a) => a.chave === chave) || {}).link).split('?')[1]).get('t');
+
+    // PDF ANTES de assinar: já sai (pra conferência), com as páginas do original
+    const pdfAntes = await pedirBinario(`/api/formularios/${f.id}/pdf`, cab);
+    const docAntes = pdfAntes.status === 200 ? await PDFDocument.load(pdfAntes.buffer) : null;
+
+    // "só abrir a caixa de assinatura e realizar": a tela manda pra MESMA
+    // rota pública do link, com o token do slot
+    const assinou = await postarJson(`/api/formularios-publico/${f.id}/assinar`,
+      { token: tk(f.assinaturas, 'responsavel'), nome: 'Thiago Silva', imagem: PNG });
+    const dAss = assinou.status === 200 ? JSON.parse(assinou.corpo) : {};
+
+    const pdfDepois = await pedirBinario(`/api/formularios/${f.id}/pdf`, cab);
+    const docDepois = pdfDepois.status === 200 ? await PDFDocument.load(pdfDepois.buffer) : null;
+    const textoDepois = pdfDepois.status === 200 ? textoDoPdf(pdfDepois.buffer) : '';
+
+    // imagem também vira documento assinável (1 página, a foto dentro)
+    const umPixel = Buffer.from(String(PNG).split(',')[1], 'base64');
+    const criadoImg = await postarMultipart('/api/formularios', { payload: payload() },
+      { nome: 'boleto.png', tipo: 'image/png', buffer: umPixel }, 'anexos', cab);
+    const fImg = criadoImg.status === 200 ? JSON.parse(criadoImg.corpo) : {};
+    const pdfImg = criadoImg.status === 200 ? await pedirBinario(`/api/formularios/${fImg.id}/pdf`, cab) : { status: 0 };
+
+    const conferencias = {
+      'sem anexo o formulário nem é criado': semAnexo.status === 400 && /Anexe o boleto/.test(semAnexo.corpo),
+      'não oferece link de preenchimento (não há o que preencher)': linkPreench.status === 400,
+      'criar com o boleto anexado funciona e já nasce com Ticket #':
+        criado.status === 200 && f.numeroTicket != null && (f.anexos || []).length === 1,
+      'não exige linha de tabela (o documento é o anexo)': f.linhas.length === 0 && f.valorTotal === 1234.56,
+      'tem UM slot de assinatura, o Responsável':
+        f.assinaturas.length === 1 && f.assinaturas[0].chave === 'responsavel',
+      'o PDF traz as páginas DO ORIGINAL, não uma folha nova':
+        !!docAntes && docAntes.getPageCount() === 2 && !!docDepois && docDepois.getPageCount() === 2,
+      'assinar pela própria tela (mesma rota do link) fecha o documento':
+        assinou.status === 200 && dAss.completo === true,
+      'o PDF assinado identifica unidade, ticket e quem assinou':
+        textoDepois.includes('Ticket #') && textoDepois.includes('Thiago Silva')
+        && textoDepois.includes('Responsável') && !textoDepois.includes('AGUARDANDO ASSINATURA'),
+      'antes de assinar o PDF avisa que está sem assinatura':
+        textoDoPdf(pdfAntes.buffer).includes('AGUARDANDO ASSINATURA'),
+      'anexo em imagem também vira PDF assinável': pdfImg.status === 200
+        && (await PDFDocument.load(pdfImg.buffer)).getPageCount() === 1,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okBoleto = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okBoleto = false; console.log('  erro: ' + e.message); }
+  if (!okBoleto) ruins += 1;
+  console.log(`${okBoleto ? '✓' : '✗'} Ass. Boleto: anexo assinado vira PDF com a assinatura DENTRO do próprio documento`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

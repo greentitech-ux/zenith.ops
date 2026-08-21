@@ -52,6 +52,13 @@
   .ass-linha .rot{flex:1;min-width:140px;}
   .acoes-form{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
   .vazio{color:var(--muted);font-size:12.5px;padding:8px 0;}
+  .badge.cancelado{background:#3a1616;color:var(--bad);}
+  .form-item.cancelado{opacity:.72;border-style:dashed;}
+  .ov{position:fixed;inset:0;background:rgba(0,0,0,.66);z-index:60;display:flex;align-items:flex-start;justify-content:center;padding:14px;overflow:auto;}
+  .ov-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;width:100%;max-width:620px;margin:auto;}
+  .msg.warn{background:var(--warn-dim);color:var(--warn);}
+  .pad-wrap{margin-top:6px;border-radius:10px;overflow:hidden;border:2px dashed var(--accent);background:#fff;touch-action:none;}
+  #ass-pad{display:block;width:100%;height:190px;background:#fff;}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -79,11 +86,16 @@
       <div id="unidade-info" style="margin-top:8px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12.5px;color:var(--muted);"></div>
       <div class="grade-campos" id="campos"></div>
 
-      <div class="tabela-wrap"><table id="tabela"><thead id="tabela-head"></thead><tbody id="tabela-corpo"></tbody></table></div>
-      <div style="margin-top:8px;"><button type="button" class="btn-ghost" onclick="addLinha()">➕ Adicionar linha</button></div>
-      <div class="total" id="total">Total: R$ 0,00</div>
+      <!-- o Ass. Boleto não tem tabela de itens: o documento anexado É o
+           conteúdo. Esconder o bloco inteiro (em vez de deixar a tabela
+           vazia) é o que evita a pessoa achar que faltou preencher algo -->
+      <div id="bloco-tabela">
+        <div class="tabela-wrap"><table id="tabela"><thead id="tabela-head"></thead><tbody id="tabela-corpo"></tbody></table></div>
+        <div style="margin-top:8px;"><button type="button" class="btn-ghost" onclick="addLinha()">➕ Adicionar linha</button></div>
+        <div class="total" id="total">Total: R$ 0,00</div>
+      </div>
 
-      <label>📎 Comprovantes da solicitação (PDF ou imagem, até 5 — opcional)</label>
+      <label id="lbl-anexos">📎 Comprovantes da solicitação (PDF ou imagem, até 5 — opcional)</label>
       <input type="file" id="f-anexos" multiple accept="image/*,application/pdf">
 
       <div class="msg err hidden" id="msg-criar"></div>
@@ -99,6 +111,49 @@
   <div class="panel">
     <h3>Formulários</h3>
     <div id="lista"><div class="vazio">carregando...</div></div>
+  </div>
+</div>
+
+<!-- assinar sem sair da tela. O link por WhatsApp continua existindo pra
+     quem assina de fora; isto aqui é pro caso em que a pessoa está do lado
+     (pedido do Master no Ass. Boleto: "ou só abrir a caixa de assinatura e
+     realizar"). Usa a MESMA rota pública de assinatura, com o token do
+     slot - nada de caminho paralelo. -->
+<div id="ass-overlay" class="ov hidden">
+  <div class="ov-box">
+    <h3 id="ass-titulo">Assinar</h3>
+    <label>Nome de quem está assinando</label>
+    <input type="text" id="ass-nome" autocomplete="off" placeholder="Nome completo">
+    <label>Assinatura — desenhe com o dedo ou o mouse</label>
+    <div class="pad-wrap"><canvas id="ass-pad"></canvas></div>
+    <div class="msg err hidden" id="ass-erro"></div>
+    <div class="acoes-form">
+      <button type="button" class="btn" id="ass-salvar" onclick="assSalvar()">✍️ Assinar</button>
+      <button type="button" class="btn-ghost" onclick="assLimpar()">Limpar</button>
+      <button type="button" class="btn-ghost" onclick="fecharAssinatura()">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- correção de formulário já lançado (só Master). Fica fora do #raiz do
+     editor de criação de propósito: são dois estados diferentes, e misturar
+     os dois no mesmo formulário já deu confusão em outras telas -->
+<div id="ed-overlay" class="ov hidden">
+  <div class="ov-box">
+    <h3 id="ed-titulo">Editar formulário</h3>
+    <div class="msg warn hidden" id="ed-aviso"></div>
+    <div class="grade-campos" id="ed-campos"></div>
+    <div id="ed-bloco-tabela">
+      <div class="tabela-wrap"><table><thead id="ed-head"></thead><tbody id="ed-corpo"></tbody></table></div>
+      <div style="margin-top:8px;"><button type="button" class="btn-ghost" onclick="edAddLinha()">➕ Adicionar linha</button></div>
+      <div class="total" id="ed-total">Total: R$ 0,00</div>
+    </div>
+    <p id="ed-obs-anexo" class="fi-sub hidden">O documento anexado não muda por aqui - pra trocar o arquivo, cancele este e lance outro.</p>
+    <div class="msg err hidden" id="ed-erro"></div>
+    <div class="acoes-form">
+      <button type="button" class="btn" id="ed-salvar" onclick="salvarEdicao()">💾 Salvar correção</button>
+      <button type="button" class="btn-ghost" onclick="fecharEdicao()">Fechar sem salvar</button>
+    </div>
   </div>
 </div>
 
@@ -118,6 +173,7 @@ const fmtMoney = (v) => 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFr
 const fmtData = (iso) => iso ? new Date(iso).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
 
 let TIPOS = [];
+let SOU_MASTER = false;
 let TIPO_ATUAL = null;
 let UNIDADES = [];
 let LISTA = [];
@@ -143,13 +199,22 @@ function escolherTipo(tipo){
   document.querySelectorAll('#campos input[data-campo="cpf"], #campos input[data-campo="cnpjFavorecido"]')
     .forEach(el=> el.addEventListener('input', ()=>buscarFavorecido(el)));
   document.getElementById('f-anexos').value = '';
+  // Ass. Boleto: sem tabela, anexo obrigatório e sem link de preenchimento
+  // (não há o que o solicitante preencher - o que ele faz é ASSINAR)
+  document.getElementById('bloco-tabela').classList.toggle('hidden', !!m.soAnexo);
+  document.getElementById('btn-link-preencher').classList.toggle('hidden', !!m.soAnexo);
+  document.getElementById('lbl-anexos').textContent = m.anexoObrigatorio
+    ? '📎 Boleto ou documento a assinar (PDF ou imagem) — obrigatório'
+    : '📎 Comprovantes da solicitação (PDF ou imagem, até 5 — opcional)';
+  document.getElementById('btn-criar').textContent = m.soAnexo
+    ? '💾 Criar e gerar o link de assinatura'
+    : '💾 Criar formulário e gerar links de assinatura';
   atualizarUnidadeInfo();
   // cabeçalho da tabela + 1 linha inicial (a coluna de assinatura das
   // diárias não é digitada aqui - nasce sozinha, um link por linha)
   document.getElementById('tabela-head').innerHTML = '<tr>' + m.colunas.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('') + '<th></th></tr>';
   document.getElementById('tabela-corpo').innerHTML = '';
-  addLinha();
-  atualizarTotal();
+  if(!m.soAnexo){ addLinha(); atualizarTotal(); }
 }
 
 // gera o link de preenchimento e entrega pronto pra mandar (copiar ou
@@ -220,7 +285,8 @@ function valorBR(s){
 
 function atualizarTotal(){
   const m = modelo(); if(!m) return;
-  const colValor = m.colunas.find(c=>c.valor);
+  const colValor = (m.colunas||[]).find(c=>c.valor);
+  if(!colValor) return;
   let total = 0;
   document.querySelectorAll('#tabela-corpo tr').forEach(tr=>{
     const el = tr.querySelector(`input[data-col="${colValor.key}"]`);
@@ -241,13 +307,19 @@ async function criar(){
     tr.querySelectorAll('input[data-col]').forEach(el=>{ l[el.dataset.col] = el.value; });
     return l;
   });
+  const arquivos = document.getElementById('f-anexos').files;
+  if(m.anexoObrigatorio && !arquivos.length){
+    msg.textContent = 'Anexe o boleto (PDF ou imagem) - é ele que vai ser assinado.';
+    msg.classList.remove('hidden');
+    return;
+  }
   btn.disabled = true;
   try{
     // multipart: payload em JSON + anexos; sem Content-Type manual pro
     // navegador colocar o boundary (o wrapper de fetch só soma Authorization)
     const fd = new FormData();
     fd.append('payload', JSON.stringify({ tipo: TIPO_ATUAL, unidade: document.getElementById('f-unidade').value, campos, linhas }));
-    for(const arq of document.getElementById('f-anexos').files) fd.append('anexos', arq);
+    for(const arq of arquivos) fd.append('anexos', arq);
     const r = await fetch('/api/formularios', { method:'POST', body: fd });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error || ('erro '+r.status));
@@ -270,6 +342,11 @@ function baixarPdf(id){
   window.open(`/api/formularios/${encodeURIComponent(id)}/pdf?token=${encodeURIComponent(AUTH_TOKEN)}`, '_blank');
 }
 
+// o token do slot só chega dentro do LINK (a rota nunca devolve ele cru)
+function tokenDoLink(link){
+  try{ return new URLSearchParams(String(link).split('?')[1]).get('t'); }catch(e){ return null; }
+}
+
 async function abrirLinks(id){
   try{
     const r = await fetch(`/api/formularios/${encodeURIComponent(id)}`);
@@ -280,10 +357,210 @@ async function abrirLinks(id){
       <div class="ass-linha">
         <span class="rot">${a.assinado?'✅':'✍️'} ${escapeHtml(a.rotulo)}${a.nome?` · <span style="color:var(--muted);">${escapeHtml(a.nome)}</span>`:''}</span>
         ${a.assinado ? `<span style="color:var(--ok);font-size:11.5px;">assinado ${fmtData(a.assinadoEm)}</span>` : `
+          <button type="button" class="btn-mini" onclick="abrirAssinatura('${id}','${tokenDoLink(a.link)}','${escapeHtml(a.rotulo)}')">✍️ Assinar aqui</button>
           <button type="button" class="btn-mini" onclick="copiar('${a.link}')">🔗 Copiar link</button>
           <button type="button" class="btn-mini" onclick="whatsapp('Assine o formulário aqui: '+'${a.link}')">💬 WhatsApp</button>`}
       </div>`).join('');
   }catch(e){ alert(e.message); }
+}
+
+// ---------------------------------------------------------------------
+// Quadro de assinatura na própria tela (mesmo canvas do assinar.html).
+// Manda pra rota PÚBLICA de assinatura com o token do slot: é o mesmo
+// caminho de quem assina pelo link, então a regra de "cada papel assina o
+// seu" continua sendo uma só.
+let ASS = null;
+let assCtx = null;
+let assDesenhou = false;
+
+function abrirAssinatura(id, token, rotulo){
+  if(!token || token==='null'){ alert('Esse slot não tem link ativo (formulário cancelado?).'); return; }
+  ASS = { id, token };
+  assDesenhou = false;
+  document.getElementById('ass-titulo').textContent = 'Assinar como ' + rotulo;
+  document.getElementById('ass-nome').value = '';
+  document.getElementById('ass-erro').classList.add('hidden');
+  document.getElementById('ass-overlay').classList.remove('hidden');
+  // o canvas só tem largura depois de visível - por isso o preparo vem aqui
+  assPreparar();
+}
+
+function assPreparar(){
+  const canvas = document.getElementById('ass-pad');
+  const largura = canvas.clientWidth || 500;
+  canvas.width = largura * 2; canvas.height = 380;
+  assCtx = canvas.getContext('2d');
+  assCtx.fillStyle = '#fff'; assCtx.fillRect(0,0,canvas.width,canvas.height);
+  assCtx.strokeStyle = '#111'; assCtx.lineWidth = 3.2; assCtx.lineCap = 'round'; assCtx.lineJoin = 'round';
+  if(canvas.dataset.ligado) return;
+  canvas.dataset.ligado = '1';
+  let tracando = false;
+  const ponto = (e)=>{
+    const r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) };
+  };
+  canvas.addEventListener('pointerdown', (e)=>{ e.preventDefault(); canvas.setPointerCapture(e.pointerId); tracando=true; assDesenhou=true; const p=ponto(e); assCtx.beginPath(); assCtx.moveTo(p.x,p.y); assCtx.lineTo(p.x+.1,p.y+.1); assCtx.stroke(); });
+  canvas.addEventListener('pointermove', (e)=>{ if(!tracando) return; e.preventDefault(); const p=ponto(e); assCtx.lineTo(p.x,p.y); assCtx.stroke(); });
+  const soltar = ()=>{ tracando = false; };
+  canvas.addEventListener('pointerup', soltar);
+  canvas.addEventListener('pointercancel', soltar);
+}
+
+function assLimpar(){
+  const canvas = document.getElementById('ass-pad');
+  assCtx.fillStyle = '#fff'; assCtx.fillRect(0,0,canvas.width,canvas.height);
+  assCtx.strokeStyle = '#111';
+  assDesenhou = false;
+}
+
+function fecharAssinatura(){ ASS = null; document.getElementById('ass-overlay').classList.add('hidden'); }
+
+async function assSalvar(){
+  if(!ASS) return;
+  const erro = document.getElementById('ass-erro');
+  const nome = document.getElementById('ass-nome').value.trim();
+  erro.classList.add('hidden');
+  if(!nome){ erro.textContent = 'Escreva o nome de quem está assinando.'; erro.classList.remove('hidden'); return; }
+  if(!assDesenhou){ erro.textContent = 'Desenhe a assinatura no quadro.'; erro.classList.remove('hidden'); return; }
+  const btn = document.getElementById('ass-salvar');
+  btn.disabled = true;
+  try{
+    const r = await fetch(`/api/formularios-publico/${encodeURIComponent(ASS.id)}/assinar`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token: ASS.token, nome, imagem: document.getElementById('ass-pad').toDataURL('image/png') }),
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||('erro '+r.status));
+    const id = ASS.id;
+    fecharAssinatura();
+    await carregarLista();
+    await abrirLinks(id);
+    alert(d.completo
+      ? 'Assinado! O documento está completo - baixe o PDF com a assinatura nele.'
+      : 'Assinado! Ainda falta assinatura de outra pessoa.');
+  }catch(e){ erro.textContent = e.message; erro.classList.remove('hidden'); }
+  finally{ btn.disabled = false; }
+}
+
+// ---------------------------------------------------------------------
+// Correção e cancelamento (só Master). Antes disso, formulário lançado
+// errado ficava parado na lista pra sempre: não dava pra arrumar um valor
+// nem tirar de circulação por dentro da tela.
+let ED = null;
+const edFmtNum = (v) => (v==null||v==='') ? '' : (Number(v)||0).toFixed(2).replace('.',',');
+function edModelo(){ return ED ? TIPOS.find(t=>t.tipo===ED.tipo) : null; }
+
+function edAddLinha(l){
+  const m = edModelo(); if(!m) return;
+  const tr = document.createElement('tr');
+  tr.innerHTML = m.colunas.map(c=>{
+    const v = l ? (c.valor ? edFmtNum(l[c.key]) : (l[c.key]||'')) : '';
+    return `<td><input type="text" data-ed-col="${escapeHtml(c.key)}" value="${escapeHtml(v)}"`
+      + (c.valor?' inputmode="decimal" oninput="edTotal()" style="width:90px;text-align:right;"':'') + '></td>';
+  }).join('') + '<td><button type="button" class="btn-mini" onclick="this.closest(\'tr\').remove();edTotal()">✕</button></td>';
+  document.getElementById('ed-corpo').appendChild(tr);
+  edTotal();
+}
+
+function edTotal(){
+  const m = edModelo(); if(!m) return;
+  const colValor = (m.colunas||[]).find(c=>c.valor);
+  let total = 0;
+  if(colValor) document.querySelectorAll(`#ed-corpo input[data-ed-col="${colValor.key}"]`).forEach(el=>{ total += valorBR(el.value); });
+  document.getElementById('ed-total').textContent = 'Total: ' + fmtMoney(total);
+}
+
+function abrirEdicao(id){
+  const f = LISTA.find(x=>x.id===id);
+  const m = f && TIPOS.find(t=>t.tipo===f.tipo);
+  if(!m){ alert('Não achei o modelo desse formulário.'); return; }
+  ED = { id, tipo: f.tipo };
+  document.getElementById('ed-titulo').textContent = `Editar · ${m.rotulo} · ${f.unidade} · #${f.numeroTicket ?? '—'}`;
+  // aviso só quando existe assinatura a perder - avisar sempre vira ruído
+  // e a pessoa para de ler
+  const assinadas = (f.assinaturas||[]).filter(a=>a.assinado).length;
+  const aviso = document.getElementById('ed-aviso');
+  aviso.classList.toggle('hidden', !assinadas);
+  if(assinadas) aviso.textContent = `⚠️ ${assinadas} assinatura(s) já coletada(s). Se o conteúdo mudar, elas são descartadas e os links precisam ser enviados de novo — a assinatura vale pelo documento que a pessoa viu na hora de assinar.`;
+  document.getElementById('ed-erro').classList.add('hidden');
+  // CNPJ não entra: vem travado do cadastro fixo, igual na criação
+  document.getElementById('ed-campos').innerHTML = m.cabecalho.filter(c=>c.key!=='cnpj').map(c=>
+    `<div><label>${escapeHtml(c.label)}</label><input type="text" data-ed-campo="${escapeHtml(c.key)}" value="${escapeHtml((f.campos||{})[c.key]||'')}"></div>`).join('');
+  document.getElementById('ed-head').innerHTML = '<tr>' + m.colunas.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('') + '<th></th></tr>';
+  document.getElementById('ed-corpo').innerHTML = '';
+  // tipo só-anexo (Ass. Boleto) não tem tabela: dá pra corrigir só o
+  // cabeçalho (valor, vencimento, favorecido). O arquivo em si não é
+  // editável - trocar o documento assinado seria outro documento.
+  document.getElementById('ed-bloco-tabela').classList.toggle('hidden', !!m.soAnexo);
+  document.getElementById('ed-obs-anexo').classList.toggle('hidden', !m.soAnexo);
+  if(!m.soAnexo){
+    const linhas = f.linhas||[];
+    if(linhas.length) linhas.forEach(l=>edAddLinha(l)); else edAddLinha();
+  }
+  document.getElementById('ed-overlay').classList.remove('hidden');
+}
+
+function fecharEdicao(){ ED = null; document.getElementById('ed-overlay').classList.add('hidden'); }
+
+async function salvarEdicao(){
+  const m = edModelo(); if(!m || !ED) return;
+  const btn = document.getElementById('ed-salvar');
+  const erro = document.getElementById('ed-erro');
+  erro.classList.add('hidden');
+  const campos = {};
+  document.querySelectorAll('#ed-campos input[data-ed-campo]').forEach(el=>{ campos[el.dataset.edCampo] = el.value; });
+  const linhas = [...document.querySelectorAll('#ed-corpo tr')].map(tr=>{
+    const l = {};
+    tr.querySelectorAll('input[data-ed-col]').forEach(el=>{ l[el.dataset.edCol] = el.value; });
+    return l;
+  });
+  btn.disabled = true;
+  try{
+    const r = await fetch('/api/formularios/'+encodeURIComponent(ED.id), {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ campos, linhas }),
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||('erro '+r.status));
+    fecharEdicao();
+    await carregarLista();
+    if(d.pendenteAprovacao) alert('Correção enviada pra aprovação do Master.');
+    else if(d.semMudanca) alert('Nada mudou - as assinaturas continuam como estavam.');
+    else if(d.assinaturasDescartadas) alert(`Formulário corrigido. ${d.assinaturasDescartadas} assinatura(s) foram descartadas - abra "Assinaturas e links" e mande os links novos.`);
+    else alert('Formulário corrigido.');
+  }catch(e){ erro.textContent = e.message; erro.classList.remove('hidden'); }
+  finally{ btn.disabled = false; }
+}
+
+// o rótulo NÃO vem por parâmetro de propósito: nome de unidade tem
+// apóstrofo ("Domino's"), e passar isso dentro do onclick='...' quebra a
+// string JS. Aqui a gente busca na LISTA, que é a mesma fonte.
+function rotuloDe(id){
+  const f = LISTA.find(x=>x.id===id); if(!f) return 'formulário';
+  const t = TIPOS.find(x=>x.tipo===f.tipo);
+  return `${t?t.rotulo:f.tipo} · ${f.unidade} · #${f.numeroTicket ?? '—'}`;
+}
+
+async function cancelarFormulario(id){
+  const rotulo = rotuloDe(id);
+  const motivo = prompt(`Cancelar "${rotulo}"?\n\nO formulário fica gravado (com o Ticket #), mas sai de circulação: os links de assinatura param de funcionar na hora e o PDF sai carimbado como CANCELADO.\n\nMotivo:`);
+  if(motivo === null) return;
+  const r = await fetch(`/api/formularios/${encodeURIComponent(id)}/cancelar`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ motivo }),
+  });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ alert(d.error||'Não consegui cancelar.'); return; }
+  await carregarLista();
+  if(d.pendenteAprovacao) alert('Cancelamento enviado pra aprovação do Master.');
+}
+
+async function excluirFormulario(id){
+  const rotulo = rotuloDe(id);
+  if(!confirm(`Apagar "${rotulo}" de vez?\n\nIsso some com o registro e com o Ticket # dele - não dá pra desfazer. Só faz sentido pra formulário de teste; pra desfazer um lançamento de verdade, o certo é o cancelamento (que deixa o rastro).`)) return;
+  const r = await fetch('/api/formularios/'+encodeURIComponent(id), { method:'DELETE' });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ alert(d.error||'Não consegui excluir.'); return; }
+  await carregarLista();
+  if(d.pendenteAprovacao) alert('Exclusão enviada pra aprovação do Master.');
 }
 
 function renderLista(){
@@ -308,15 +585,21 @@ function renderLista(){
         </div>
       </div>`;
     }
-    return `<div class="form-item">
+    const cancelado = f.status==='CANCELADO';
+    return `<div class="form-item${cancelado?' cancelado':''}">
       <div class="fi-titulo">${escapeHtml(t?t.rotulo:f.tipo)} · ${escapeHtml(f.unidade)}
         <span class="badge" style="background:#1a2230;color:var(--muted);">#${f.numeroTicket ?? '—'}</span>
-        <span class="badge ${f.status==='ASSINADO'?'assinado':'pendente'}">${f.status==='ASSINADO'?'✅ assinado':`✍️ falta(m) ${pendentes}`}</span></div>
-      <div class="fi-sub">${fmtData(f.criadoEm)} · ${f.linhas.length} linha(s) · total ${fmtMoney(f.valorTotal)} · por ${escapeHtml(f.criadoPorEmail||'')}</div>
+        <span class="badge ${cancelado?'cancelado':(f.status==='ASSINADO'?'assinado':'pendente')}">${cancelado?'🚫 cancelado':(f.status==='ASSINADO'?'✅ assinado':`✍️ falta(m) ${pendentes}`)}</span></div>
+      <div class="fi-sub">${fmtData(f.criadoEm)} · ${t && t.soAnexo ? `${(f.anexos||[]).length} documento(s)` : `${f.linhas.length} linha(s)`} · total ${fmtMoney(f.valorTotal)} · por ${escapeHtml(f.criadoPorEmail||'')}</div>
+      ${cancelado ? `<div class="fi-sub" style="color:var(--bad);">cancelado ${fmtData(f.canceladoEm)} por ${escapeHtml(f.canceladoPorEmail||'')}${f.motivoCancelamento?` · ${escapeHtml(f.motivoCancelamento)}`:''}</div>` : ''}
+      ${f.editadoEm && !cancelado ? `<div class="fi-sub" style="color:var(--warn);">corrigido ${fmtData(f.editadoEm)} por ${escapeHtml(f.editadoPorEmail||'')}</div>` : ''}
       ${(f.anexos||[]).length ? `<div class="fi-sub">📎 ${f.anexos.map((an,i)=>`<a href="/api/formularios/${f.id}/anexo/${i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" style="color:var(--accent);">${escapeHtml(an.nome)}</a>`).join(' · ')}</div>` : ''}
       <div class="acoes-form">
-        <button type="button" class="btn-ghost" onclick="abrirLinks('${f.id}')">✍️ Assinaturas e links</button>
-        <button type="button" class="btn-ghost" onclick="baixarPdf('${f.id}')">📄 PDF</button>
+        ${cancelado ? '' : `<button type="button" class="btn-ghost" onclick="abrirLinks('${f.id}')">✍️ Assinaturas e links</button>`}
+        <button type="button" class="btn-ghost" onclick="baixarPdf('${f.id}')">${t && t.soAnexo ? '📄 PDF assinado' : '📄 PDF'}</button>
+        ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" onclick="abrirEdicao('${f.id}')">✏️ Editar</button>` : ''}
+        ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" style="color:var(--bad);" onclick="cancelarFormulario('${f.id}')">🚫 Cancelar</button>` : ''}
+        ${SOU_MASTER && cancelado ? `<button type="button" class="btn-ghost" style="color:var(--bad);" onclick="excluirFormulario('${f.id}')">🗑️ Excluir de vez</button>` : ''}
       </div>
       <div id="links-${f.id}"></div>
     </div>`;
@@ -340,13 +623,17 @@ function atualizarUnidadeInfo(){
 }
 
 async function boot(){
-  const [tiposR, unidadesR] = await Promise.all([
+  const [tiposR, unidadesR, meR] = await Promise.all([
     fetch('/api/formularios/tipos'),
     fetch('/api/formularios/unidades'),
+    fetch('/api/me'),
   ]);
   if(tiposR.status===403){ document.getElementById('sem-acesso').classList.remove('hidden'); return; }
   TIPOS = await tiposR.json();
   UNIDADES = unidadesR.ok ? await unidadesR.json() : [];
+  // gate só da TELA: corrigir/cancelar/excluir é Master no servidor
+  // (auth.requireMaster) - aqui é pra não mostrar botão que ia dar 403
+  SOU_MASTER = meR.ok ? ((await meR.json()).role === 'master') : false;
   document.getElementById('raiz').classList.remove('hidden');
   document.getElementById('f-unidade').innerHTML = UNIDADES.map(u=>`<option value="${escapeHtml(u.unidade)}">${escapeHtml(u.unidade)}</option>`).join('');
   atualizarUnidadeInfo();
