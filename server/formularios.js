@@ -312,12 +312,28 @@ async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criad
 // é o que ele preenche.
 const STATUS_AGUARDANDO = 'AGUARDANDO_PREENCHIMENTO';
 
+// O link é ÚNICO por tipo+unidade+quem gerou, enquanto não for preenchido:
+// clicar no botão de novo devolve O MESMO link e O MESMO Ticket #, em vez
+// de criar outro formulário. Sem isso, cada clique nascia com número de
+// ticket próprio - quem clicasse duas vezes (ou gerasse o link e não
+// mandasse) deixava formulário fantasma na lista e queimava número da
+// sequência da Central pra sempre.
+//
+// Pra mandar DOIS links ao mesmo tempo pro mesmo tipo/unidade (duas
+// pessoas diferentes), cancele o pendente primeiro (cancelarPreenchimento)
+// - assim continua valendo "um link vivo de cada vez", que é o que evita
+// dois destinatários brigando pelo mesmo formulário.
 async function criarParaPreenchimento({ tipo, unidade, criadoPorId, criadoPorEmail, numeroTicket }) {
   const modelo = TIPOS[tipo];
   if (!modelo) throw new Error('Tipo de formulário inválido.');
   const unidadeOk = limpar(unidade, 80);
   const cadastro = UNIDADES_FORM.find((u) => u.unidade === unidadeOk);
   if (!cadastro) throw new Error('Unidade inválida - escolha uma das unidades cadastradas.');
+
+  const jaExiste = (await cache.cached()).find((r) => r.status === STATUS_AGUARDANDO
+    && r.tipo === tipo && r.unidade === unidadeOk
+    && (r.criadoPorId || null) === (criadoPorId || null));
+  if (jaExiste) return { ...(await detalhar(jaExiste.id)), reaproveitado: true };
 
   const doc = COLLECTION.doc();
   const registro = {
@@ -332,6 +348,20 @@ async function criarParaPreenchimento({ tipo, unidade, criadoPorId, criadoPorEma
   await doc.set(registro);
   cache.invalidar();
   return detalhar(doc.id);
+}
+
+// desiste do link antes de alguém preencher. O formulário é apagado (não
+// vira histórico de nada - nunca teve conteúdo), e com ele some o número
+// de ticket reservado. Só vale enquanto está aguardando: depois de
+// preenchido, ele já é um formulário de verdade e sai pelo caminho normal
+// (remover, que é Master).
+async function cancelarPreenchimento(id) {
+  const r = await getOne(id);
+  if (!r) throw new Error('Formulário não encontrado.');
+  if (r.status !== STATUS_AGUARDANDO) throw new Error('Esse formulário já foi preenchido - não dá mais pra cancelar o link.');
+  await COLLECTION.doc(id).delete();
+  cache.invalidar();
+  return { id };
 }
 
 async function porTokenPreenchimento(token) {
@@ -612,5 +642,5 @@ function gerarPdf(r, res) {
 }
 
 module.exports = { TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, remover, gerarPdf, chaveDoToken, parseValor,
-  criarParaPreenchimento, vistaPreenchimento, salvarPreenchimento,
+  criarParaPreenchimento, vistaPreenchimento, salvarPreenchimento, cancelarPreenchimento,
 };
