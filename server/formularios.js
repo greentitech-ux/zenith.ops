@@ -655,7 +655,15 @@ async function desenharFaixa(out, pagina, r, fonte, negrito, assinadas, comAssin
   }
 }
 
-async function gerarPdfAnexoAssinado(r, res) {
+// disposicao: 'inline' abre no visualizador do navegador, 'attachment' baixa.
+// Ver e baixar sao coisas diferentes: quem so quer conferir nao devia acabar
+// com uma pasta de Downloads cheia de PDF que olhou uma vez.
+function dispPdf(res, nome, inline) {
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${nome}.pdf"`);
+}
+
+async function gerarPdfAnexoAssinado(r, res, opcoes) {
   const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
   const out = await PDFDocument.create();
   const fonte = await out.embedFont(StandardFonts.Helvetica);
@@ -715,19 +723,17 @@ async function gerarPdfAnexoAssinado(r, res) {
   }
 
   const bytes = Buffer.from(await out.save());
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="boleto-assinado-${r.numeroTicket || r.id}.pdf"`);
+  dispPdf(res, `boleto-assinado-${r.numeroTicket || r.id}`, opcoes && opcoes.inline);
   res.end(bytes);
 }
 
-async function gerarPdf(r, res) {
+async function gerarPdf(r, res, opcoes) {
   const modelo = TIPOS[r.tipo];
   // tipo só-anexo sai por outro caminho: o documento é o arquivo anexado,
   // não um formulário desenhado aqui
-  if (modelo && modelo.soAnexo) return gerarPdfAnexoAssinado(r, res);
+  if (modelo && modelo.soAnexo) return gerarPdfAnexoAssinado(r, res, opcoes);
   const doc = new PDFDocument({ margin: 40, size: 'A4' });
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="${r.tipo}-${r.unidade.replace(/[^a-zA-Z0-9-]+/g, '_')}.pdf"`);
+  dispPdf(res, `${r.tipo}-${r.unidade.replace(/[^a-zA-Z0-9-]+/g, '_')}`, opcoes && opcoes.inline);
   doc.pipe(res);
 
   const X = doc.page.margins.left;

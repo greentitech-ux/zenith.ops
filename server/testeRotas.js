@@ -174,10 +174,12 @@ function pedirBinario(caminho, headers = {}) {
     const req = http.request({ host: '127.0.0.1', port: 8899, path: caminho, headers }, (res) => {
       const pedacos = [];
       res.on('data', (c) => pedacos.push(c));
-      res.on('end', () => resolve({ status: res.statusCode, buffer: Buffer.concat(pedacos) }));
+      // headers junto: o "Ver x Baixar" do PDF é só o Content-Disposition
+      // (inline x attachment), então sem ler o header não dá pra testar
+      res.on('end', () => resolve({ status: res.statusCode, buffer: Buffer.concat(pedacos), headers: res.headers }));
     });
-    req.on('error', () => resolve({ status: 0, buffer: Buffer.alloc(0) }));
-    req.setTimeout(8000, () => { req.destroy(); resolve({ status: -1, buffer: Buffer.alloc(0) }); });
+    req.on('error', () => resolve({ status: 0, buffer: Buffer.alloc(0), headers: {} }));
+    req.setTimeout(8000, () => { req.destroy(); resolve({ status: -1, buffer: Buffer.alloc(0), headers: {} }); });
     req.end();
   });
 }
@@ -2546,6 +2548,10 @@ setTimeout(async () => {
     const naLista = (listaForm.status === 200 ? JSON.parse(listaForm.corpo) : []).find((x) => x.id === f1.id) || {};
     const pdf = await pedirBinario(`/api/formularios/${f1.id}/pdf`, cab);
     const textoPdf = pdf.status === 200 ? textoDoPdf(pdf.buffer) : '';
+    // "Ver" (?inline=1) e "Baixar" são a MESMA rota: muda só o
+    // Content-Disposition. Conferir os dois porque só o header separa abrir
+    // no visualizador de encher a pasta de Downloads.
+    const pdfVer = await pedirBinario(`/api/formularios/${f1.id}/pdf?inline=1`, cab);
 
     // e um formulário que já vem com número (o caso de "virou outra coisa")
     // reaproveita em vez de tirar outro da fila
@@ -2557,6 +2563,9 @@ setTimeout(async () => {
 
     const conferencias = {
       'o formulário nasce com número de ticket': Number.isFinite(f1.numeroTicket),
+      'PDF sem inline vem pra BAIXAR': /^attachment/.test(pdf.headers['content-disposition'] || ''),
+      'PDF com ?inline=1 vem pra VER no navegador': /^inline/.test(pdfVer.headers['content-disposition'] || ''),
+      'e os dois entregam o mesmo documento': pdfVer.status === 200 && pdfVer.buffer.length === pdf.buffer.length,
       'segue o padrão da casa (#10000 em diante)': f1.numeroTicket >= 10000,
       'é a MESMA sequência da Central (o ticket seguinte é o próximo número)':
         s1.numeroTicket === f1.numeroTicket + 1 && f2.numeroTicket === s1.numeroTicket + 1,
