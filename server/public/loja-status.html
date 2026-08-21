@@ -87,7 +87,6 @@
   .nav-drawer.hidden{display:none!important;}
   .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
   .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
-  .info-box{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:18px;line-height:1.5;}
 
   /* ---- KPIs ---- */
   .kpi-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px;}
@@ -127,7 +126,16 @@
   }
   /* Painel Por unidade */
   .uni-panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:18px;}
-  .uni-panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:12px;font-weight:700;font-size:14px;}
+  /* o cabeçalho virou botão (recolher/expandir) - mantém a mesma aparência
+     de antes, mas com cursor e alvo de clique de botão de verdade, pra
+     funcionar no teclado e no leitor de tela também */
+  .uni-panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:12px;font-weight:700;font-size:14px;
+    width:100%;background:none;border:none;padding:0;color:inherit;font-family:inherit;cursor:pointer;text-align:left;}
+  .uni-panel-head:hover{color:var(--accent);}
+  .uni-caret{display:inline-block;font-size:11px;color:var(--muted);transition:transform .15s ease;}
+  .uni-panel.recolhido .uni-caret{transform:rotate(-90deg);}
+  .uni-panel.recolhido .uni-panel-head{margin-bottom:0;}
+  .uni-panel.recolhido .uni-grid{display:none;}
   .uni-panel-sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);font-weight:400;text-transform:uppercase;letter-spacing:.04em;}
   .uni-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;}
   .uni-card{background:var(--bg,#0f1115);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;text-align:left;font-family:inherit;color:inherit;transition:border-color .15s ease,background .15s ease;}
@@ -308,10 +316,6 @@
 <div id="sem-acesso" class="empty hidden">Você não tem acesso a essa página. Fale com o administrador (Master).</div>
 
 <div id="root" class="hidden">
-  <div class="info-box">
-    Cada unidade pode ter <b>vários computadores</b> cadastrados (um por caixa, PDV, balcão, servidor etc). Escolha o tipo ao cadastrar: <b>🤖 atendimento</b> mostra o chat do Beniboy (pro tablet/quiosque que o cliente usa) e <b>🔒 interno</b> mostra a tela normal de login do Zenith (pro servidor/PC de escritório que só precisa ficar monitorado). Um computador aparece "online" enquanto essa aba estiver aberta - ela avisa o Zenith a cada ~25s, junto com IP, dispositivo e há quanto tempo está aberta sem fechar. Se ficar mais de ~90s em silêncio, o Master e o time de Suporte recebem um alerta automático. Arraste o canto de qualquer card pra redimensionar do seu jeito - o tamanho fica salvo nesse navegador.
-  </div>
-
   <div class="kpi-row">
     <button type="button" class="kpi-card" id="kpi-total" onclick="setFiltroStatus('')">
       <div class="kpi-num" id="kpi-num-total">0</div>
@@ -338,10 +342,10 @@
   <!-- Painel por unidade: cada unidade com quantos computadores online/offline.
        Clicar numa unidade filtra a grade de baixo por ela. -->
   <div class="uni-panel">
-    <div class="uni-panel-head">
-      <span>📍 Por unidade</span>
+    <button type="button" class="uni-panel-head" id="uni-panel-toggle" onclick="alternarPainelUnidades()" aria-expanded="true" aria-controls="grid-unidades">
+      <span><span class="uni-caret" id="uni-caret">▾</span> 📍 Por unidade</span>
       <span class="uni-panel-sub" id="uni-panel-sub"></span>
-    </div>
+    </button>
     <div id="grid-unidades" class="uni-grid"></div>
   </div>
 
@@ -1104,6 +1108,32 @@ function renderKpis(){
   });
 }
 
+// Recolher/expandir o painel Por unidade. Com 15+ unidades ele empurra a
+// grade de computadores pra bem longe do topo; quem já sabe qual loja quer
+// olhar prefere ele fechado. A escolha fica salva NESTE navegador (mesma
+// ideia do tamanho dos cards), pra não ter que fechar de novo a cada carga.
+const CHAVE_UNI_RECOLHIDO = 'noc-unidades-recolhido';
+function aplicarPainelUnidades(recolhido){
+  const painel = document.querySelector('.uni-panel');
+  if(!painel) return;
+  painel.classList.toggle('recolhido', recolhido);
+  const btn = document.getElementById('uni-panel-toggle');
+  if(btn) btn.setAttribute('aria-expanded', recolhido ? 'false' : 'true');
+  const caret = document.getElementById('uni-caret');
+  if(caret) caret.textContent = recolhido ? '▸' : '▾';
+}
+function alternarPainelUnidades(){
+  const painel = document.querySelector('.uni-panel');
+  const recolhido = !painel.classList.contains('recolhido');
+  aplicarPainelUnidades(recolhido);
+  try{ localStorage.setItem(CHAVE_UNI_RECOLHIDO, recolhido ? '1' : '0'); }catch(e){ /* navegador sem storage: só não lembra */ }
+}
+function restaurarPainelUnidades(){
+  let recolhido = false;
+  try{ recolhido = localStorage.getItem(CHAVE_UNI_RECOLHIDO) === '1'; }catch(e){ recolhido = false; }
+  aplicarPainelUnidades(recolhido);
+}
+
 // painel Por unidade: agrupa os computadores por unidade e conta online/
 // offline/nunca. Clicar numa unidade liga/desliga o filtro por ela (mesmo
 // FILTRO_UNIDADE do select), pra a grade de baixo mostrar so os dela.
@@ -1120,7 +1150,10 @@ function renderUnidades(){
   const codigos = Object.keys(porUni).sort((a,b) =>
     (porUni[b].offline - porUni[a].offline) // mais offline primeiro (chama atencao)
     || (UNIDADES_NOMES[a]||a).localeCompare(UNIDADES_NOMES[b]||b, 'pt-BR'));
-  sub.textContent = `${codigos.length} unidade${codigos.length===1?'':'s'}`;
+  // com o painel fechado, o subtítulo é a única pista de que tem conteúdo
+  // ali - por isso ele diz o que está escondido, não só a contagem
+  const recolhido = document.querySelector('.uni-panel')?.classList.contains('recolhido');
+  sub.textContent = `${codigos.length} unidade${codigos.length===1?'':'s'}${recolhido ? ' · clique pra expandir' : ''}`;
   if(!codigos.length){ grid.innerHTML = '<div class="empty" style="width:100%;">nenhuma unidade com computador cadastrado.</div>'; return; }
   grid.innerHTML = codigos.map(cod => {
     const s = porUni[cod];
@@ -2123,6 +2156,9 @@ async function boot(){
   }
   document.getElementById('root').classList.remove('hidden');
   document.getElementById('rede-root').classList.remove('hidden');
+  // antes do primeiro carregar(): o render do painel lê o estado recolhido
+  // pra montar o subtítulo certo já na primeira pintura
+  restaurarPainelUnidades();
   await carregar();
   carregarRede();
   // deep link vindo de outra tela (ex: painel de conversa do Beniboy, quando
