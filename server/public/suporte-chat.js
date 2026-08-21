@@ -124,6 +124,36 @@
   .szc-pp-fechar{position:absolute;top:8px;right:8px;background:none;border:none;color:#7d8896;font-size:14px;cursor:pointer;}
   @keyframes szc-pp-in{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:translateY(0);}}
   @media (prefers-reduced-motion:reduce){ .szc-pp-card{animation:none;} }
+  /* MENSAGEM DIRETA: caixa de dialogo de verdade, nao um aviso que some.
+     Fica por cima de qualquer tela do Zenith e so sai quando a pessoa
+     fecha - e dentro dela da pra responder (ver mensagensDiretas.js) */
+  .szc-dm-fundo{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:none;
+    align-items:center;justify-content:center;padding:16px;
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;}
+  .szc-dm-fundo.szc-dm-on{display:flex;}
+  .szc-dm-cx{background:#12161b;color:#e7ecf1;border:1px solid #2a3340;border-radius:14px;width:100%;max-width:420px;
+    max-height:86vh;display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(0,0,0,.6);overflow:hidden;}
+  .szc-dm-topo{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #2a3340;}
+  .szc-dm-topo b{font-size:14px;}
+  .szc-dm-de{font-size:11.5px;color:#8fa0b4;}
+  .szc-dm-x{margin-left:auto;background:none;border:none;color:#7d8896;font-size:18px;cursor:pointer;line-height:1;}
+  .szc-dm-corpo{padding:12px 14px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;min-height:90px;}
+  .szc-dm-msg{max-width:85%;padding:8px 11px;border-radius:12px;font-size:13px;line-height:1.45;white-space:pre-wrap;word-break:break-word;}
+  .szc-dm-deles{background:#1b2330;border:1px solid #2a3340;align-self:flex-start;border-bottom-left-radius:4px;}
+  .szc-dm-minha{background:#1d4ed8;color:#fff;align-self:flex-end;border-bottom-right-radius:4px;}
+  .szc-dm-hora{font-size:10px;color:#8fa0b4;margin-top:3px;}
+  .szc-dm-pe{display:flex;gap:8px;padding:10px 12px;border-top:1px solid #2a3340;}
+  .szc-dm-pe textarea{flex:1;background:#0d1116;border:1px solid #2a3340;color:#e7ecf1;border-radius:9px;padding:8px 10px;
+    font-size:13px;font-family:inherit;resize:none;min-height:40px;max-height:110px;box-sizing:border-box;}
+  .szc-dm-enviar{background:#5cc8ff;color:#04202e;border:none;border-radius:9px;padding:0 16px;font-weight:700;font-size:13px;cursor:pointer;}
+  .szc-dm-enviar:disabled{opacity:.6;cursor:default;}
+  .szc-dm-lista{display:flex;flex-direction:column;gap:6px;padding:12px 14px;overflow-y:auto;}
+  .szc-dm-item{display:flex;align-items:center;gap:8px;background:#1b2330;border:1px solid #2a3340;border-radius:10px;
+    padding:9px 11px;cursor:pointer;text-align:left;color:inherit;font:inherit;width:100%;}
+  .szc-dm-item:hover{border-color:#5cc8ff;}
+  .szc-dm-item .szc-dm-nome{flex:1;font-size:13px;font-weight:600;}
+  .szc-dm-item .szc-dm-previa{font-size:11px;color:#8fa0b4;display:block;font-weight:400;margin-top:2px;}
+  .szc-dm-pino{background:#ff5c5c;color:#fff;font-size:10.5px;font-weight:700;border-radius:10px;padding:1px 6px;font-family:ui-monospace,monospace;}
   `;
 
   function el(html) {
@@ -794,17 +824,162 @@
   // Master/Suporte manda proativamente (ver POST /api/mensagens/enviar).
   // Fica em cima de QUALQUER tela do Zenith, igual ao de pedido; com o app
   // fechado o mesmo aviso chega por push (push.notifyUsuario) ----------
-  function mostrarPopupMensagem(d) {
-    const card = el(`<div class="szc-pp-card">
-      <button type="button" class="szc-pp-fechar" title="Fechar">✕</button>
-      <div class="szc-pp-titulo">💬 Mensagem de ${esc(d.deEmail || 'Suporte')}</div>
-      <div class="szc-pp-corpo">${esc(d.texto || '')}</div>
-    </div>`);
-    pedidoPopupEl.appendChild(card);
-    const remover = () => { if (card.parentNode) card.parentNode.removeChild(card); };
-    card.querySelector('.szc-pp-fechar').addEventListener('click', remover);
-    setTimeout(remover, 20000);
+  // ---------------- MENSAGEM DIRETA (mensagensDiretas.js) ----------------
+  // Antes isso era um cartaozinho que sumia sozinho em 20s: quem nao estava
+  // olhando pra tela naquele segundo perdia o recado, e nao dava pra
+  // responder. Agora e conversa gravada e uma caixa de dialogo que a pessoa
+  // ABRE - com historico e resposta por dentro.
+  const DM = { conversas: [], abertaId: null };
+  const dmFundo = el(`<div class="szc-dm-fundo"><div class="szc-dm-cx">
+    <div class="szc-dm-topo">
+      <button type="button" class="szc-dm-voltar" style="background:none;border:none;color:#7d8896;font-size:15px;cursor:pointer;display:none;" title="Voltar">←</button>
+      <div><b class="szc-dm-titulo">Mensagens</b><div class="szc-dm-de"></div></div>
+      <button type="button" class="szc-dm-x" title="Fechar">✕</button>
+    </div>
+    <div class="szc-dm-lista"></div>
+    <div class="szc-dm-corpo" style="display:none;"></div>
+    <div class="szc-dm-pe" style="display:none;">
+      <textarea class="szc-dm-texto" rows="1" placeholder="Escreva sua resposta..." maxlength="1000"></textarea>
+      <button type="button" class="szc-dm-enviar">Enviar</button>
+    </div>
+  </div></div>`);
+  document.body.appendChild(dmFundo);
+  const dmLista = dmFundo.querySelector('.szc-dm-lista');
+  const dmCorpo = dmFundo.querySelector('.szc-dm-corpo');
+  const dmPe = dmFundo.querySelector('.szc-dm-pe');
+  const dmTexto = dmFundo.querySelector('.szc-dm-texto');
+  const dmTitulo = dmFundo.querySelector('.szc-dm-titulo');
+  const dmDe = dmFundo.querySelector('.szc-dm-de');
+  const dmVoltar = dmFundo.querySelector('.szc-dm-voltar');
+
+  function dmFechar() { dmFundo.classList.remove('szc-dm-on'); DM.abertaId = null; }
+  dmFundo.querySelector('.szc-dm-x').addEventListener('click', dmFechar);
+  dmFundo.addEventListener('click', (e) => { if (e.target === dmFundo) dmFechar(); });
+  dmVoltar.addEventListener('click', () => dmMostrarLista());
+
+  function dmHora(iso) {
+    try { return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+    catch (e) { return ''; }
   }
+
+  async function dmCarregar() {
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    try {
+      const r = await rawFetch('/api/mensagens/minhas', { headers: { Authorization: 'Bearer ' + token } });
+      if (!r.ok) return;
+      DM.conversas = await r.json();
+      dmAtualizarAviso();
+      if (dmFundo.classList.contains('szc-dm-on') && !DM.abertaId) dmMostrarLista();
+      if (DM.abertaId) dmMostrarConversa(DM.abertaId, { jaLida: true });
+    } catch (e) { /* sem rede: o push cobre */ }
+  }
+
+  // o "tem recado esperando": um cartao que NAO some sozinho, com botao pra
+  // abrir a caixa de dialogo. E o que o Master pediu - o aviso nao e a
+  // mensagem, e o convite pra abrir a conversa.
+  let dmCardAviso = null;
+  function dmAtualizarAviso() {
+    const total = DM.conversas.reduce((n, c) => n + (c.naoLidas || 0), 0);
+    if (dmCardAviso && dmCardAviso.parentNode) dmCardAviso.parentNode.removeChild(dmCardAviso);
+    dmCardAviso = null;
+    if (!total || dmFundo.classList.contains('szc-dm-on')) return;
+    const quem = DM.conversas.filter((c) => c.naoLidas).map((c) => (c.com && c.com.email) || 'Suporte');
+    dmCardAviso = el(`<div class="szc-pp-card" style="border-color:#ff5c5c;">
+      <button type="button" class="szc-pp-fechar" title="Fechar">✕</button>
+      <div class="szc-pp-titulo">💬 ${total} mensagem(ns) esperando você</div>
+      <div class="szc-pp-corpo">De: ${esc(quem.slice(0, 3).join(', '))}</div>
+      <button type="button" class="szc-dm-abrir" style="margin-top:8px;background:#5cc8ff;color:#04202e;border:none;border-radius:8px;padding:7px 12px;font-weight:700;font-size:12px;cursor:pointer;">Abrir conversa</button>
+    </div>`);
+    pedidoPopupEl.appendChild(dmCardAviso);
+    dmCardAviso.querySelector('.szc-pp-fechar').addEventListener('click', () => {
+      if (dmCardAviso && dmCardAviso.parentNode) dmCardAviso.parentNode.removeChild(dmCardAviso);
+      dmCardAviso = null;
+    });
+    dmCardAviso.querySelector('.szc-dm-abrir').addEventListener('click', () => dmAbrir());
+  }
+
+  function dmAbrir() {
+    dmFundo.classList.add('szc-dm-on');
+    if (dmCardAviso && dmCardAviso.parentNode) { dmCardAviso.parentNode.removeChild(dmCardAviso); dmCardAviso = null; }
+    // uma conversa so com pendencia: abre direto nela, sem passo extra
+    const pendentes = DM.conversas.filter((c) => c.naoLidas);
+    if (pendentes.length === 1) dmMostrarConversa(pendentes[0].id);
+    else dmMostrarLista();
+  }
+
+  function dmMostrarLista() {
+    DM.abertaId = null;
+    dmVoltar.style.display = 'none';
+    dmTitulo.textContent = 'Mensagens';
+    dmDe.textContent = '';
+    dmCorpo.style.display = 'none';
+    dmPe.style.display = 'none';
+    dmLista.style.display = 'flex';
+    if (!DM.conversas.length) {
+      dmLista.innerHTML = '<div style="font-size:12.5px;color:#8fa0b4;padding:10px 2px;">Nenhuma conversa por aqui ainda.</div>';
+      return;
+    }
+    dmLista.innerHTML = '';
+    DM.conversas.forEach((c) => {
+      const ultima = (c.mensagens || [])[c.mensagens.length - 1] || {};
+      const item = el(`<button type="button" class="szc-dm-item">
+        <span class="szc-dm-nome">${esc((c.com && c.com.email) || 'Suporte')}
+          <span class="szc-dm-previa">${esc(String(ultima.texto || '').slice(0, 60))}</span></span>
+        ${c.naoLidas ? `<span class="szc-dm-pino">${c.naoLidas}</span>` : ''}
+      </button>`);
+      item.addEventListener('click', () => dmMostrarConversa(c.id));
+      dmLista.appendChild(item);
+    });
+  }
+
+  async function dmMostrarConversa(id, opcoes) {
+    const conversa = DM.conversas.find((c) => c.id === id);
+    if (!conversa) return;
+    DM.abertaId = id;
+    dmVoltar.style.display = DM.conversas.length > 1 ? 'block' : 'none';
+    dmTitulo.textContent = (conversa.com && conversa.com.email) || 'Suporte';
+    dmDe.textContent = 'Mensagem direta';
+    dmLista.style.display = 'none';
+    dmCorpo.style.display = 'flex';
+    dmPe.style.display = 'flex';
+    dmCorpo.innerHTML = '';
+    (conversa.mensagens || []).forEach((m) => {
+      const minha = m.de !== (conversa.com && conversa.com.id);
+      const bolha = el(`<div class="szc-dm-msg ${minha ? 'szc-dm-minha' : 'szc-dm-deles'}">${esc(m.texto || '')}<div class="szc-dm-hora">${esc(dmHora(m.em))}</div></div>`);
+      dmCorpo.appendChild(bolha);
+    });
+    dmCorpo.scrollTop = dmCorpo.scrollHeight;
+    // abriu = leu (o servidor guarda o instante, ver marcarLida)
+    if (!(opcoes && opcoes.jaLida) && conversa.naoLidas) {
+      const token = localStorage.getItem('authToken');
+      try {
+        await rawFetch(`/api/mensagens/${encodeURIComponent(id)}/lida`, { method: 'POST', headers: { Authorization: 'Bearer ' + token } });
+        conversa.naoLidas = 0;
+        dmAtualizarAviso();
+      } catch (e) { /* segue - na proxima carga marca de novo */ }
+    }
+  }
+
+  async function dmResponder() {
+    const texto = dmTexto.value.trim();
+    if (!texto || !DM.abertaId) return;
+    const btn = dmFundo.querySelector('.szc-dm-enviar');
+    btn.disabled = true;
+    try {
+      const token = localStorage.getItem('authToken');
+      const r = await rawFetch(`/api/mensagens/${encodeURIComponent(DM.abertaId)}/responder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ texto }),
+      });
+      if (r.ok) { dmTexto.value = ''; await dmCarregar(); }
+    } finally { btn.disabled = false; }
+  }
+  dmFundo.querySelector('.szc-dm-enviar').addEventListener('click', dmResponder);
+  dmTexto.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dmResponder(); }
+  });
 
   async function atendInit() {
     const token = localStorage.getItem('authToken');
@@ -856,10 +1031,15 @@
         });
       }
       es.addEventListener('pedido-status-mudou', (e) => { mostrarPopupPedido(JSON.parse(e.data)); });
-      es.addEventListener('mensagem-direta', (e) => { mostrarPopupMensagem(JSON.parse(e.data)); });
+      // chegou mensagem direta: recarrega as conversas (o texto de verdade
+      // esta gravado, o evento e so o gatilho) e mostra o convite pra abrir
+      es.addEventListener('mensagem-direta', () => { dmCarregar(); });
     } catch (e) { /* sem SSE, sem alerta ao vivo aqui - o push cobre com o app fechado */ }
   }
   atendInit();
+  // carrega as conversas ao abrir qualquer tela: recado que chegou enquanto
+  // a pessoa estava fora nao se perde mais - fica esperando ela abrir
+  dmCarregar();
 
   // pagina dedicada de atendimento (atendimento.html) marca esse flag ANTES
   // de carregar esse script - abre a conversa direto, sem a pessoa precisar

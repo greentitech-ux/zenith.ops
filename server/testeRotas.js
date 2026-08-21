@@ -2329,6 +2329,78 @@ setTimeout(async () => {
   if (!okEmpresaArquivar) ruins += 1;
   console.log(`${okEmpresaArquivar ? '✓' : '✗'} Empresa: arquivar/excluir só com Master + senha, e arquivada deixa de ser dona das unidades`);
 
+  // ------------------------------------------------------------------
+  // Mensagem direta: o Master disse que aviso que some da tela não serve -
+  // tem que ser caixa de diálogo que a pessoa ABRE, e ela responde por
+  // dentro. Prova aqui: a mensagem FICA GRAVADA (não depende de a pessoa
+  // estar olhando a tela na hora), conta como não lida até ser aberta, e a
+  // resposta volta pro remetente na mesma conversa.
+  let okMensagemDireta = false;
+  try {
+    const cabMaster = { Authorization: 'Bearer ' + token };
+    const md = require('/home/user/adyen-monitor/server/mensagensDiretas.js');
+
+    // acesso comum pra ser o destinatário - semeado direto e logado pelo
+    // auth.login, mesmo padrão dos outros blocos deste arquivo
+    const bcryptMsg = require('bcryptjs');
+    const alvoId = 'u-destino-msg';
+    DOCS.set('users/' + alvoId, {
+      email: 'destino.msg@teste.local', username: 'destinomsg',
+      passwordHash: bcryptMsg.hashSync('SenhaAlvo!2026', 4), role: 'user', active: true,
+      permissions: { sections: [], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const tokenAlvo = (await auth.login('destino.msg@teste.local', 'SenhaAlvo!2026')).token;
+    const cabAlvo = { Authorization: 'Bearer ' + tokenAlvo };
+
+    const enviou = await postarJson('/api/mensagens/enviar', { userId: alvoId, texto: 'Confere o caixa de ontem, por favor.' }, cabMaster);
+    const conversaId = enviou.status === 200 ? JSON.parse(enviou.corpo).id : null;
+
+    // o destinatário vê a conversa esperando, com a mensagem gravada
+    const minhas = await pedir('/api/mensagens/minhas', cabAlvo);
+    const dMinhas = minhas.status === 200 ? JSON.parse(minhas.corpo) : [];
+    const conv = dMinhas.find((c) => c.id === conversaId) || {};
+
+    // quem não é participante não enxerga nem lendo direto pelo id
+    const deOutro = await pedir(`/api/mensagens/${conversaId}`, cabAlvo);
+    const respostaIntrusa = await postarJson(`/api/mensagens/${md.idDoPar('xxx', 'yyy')}/responder`, { texto: 'oi' }, cabAlvo);
+
+    // abriu = leu
+    await postarJson(`/api/mensagens/${conversaId}/lida`, {}, cabAlvo);
+    const depoisDeLer = JSON.parse((await pedir('/api/mensagens/minhas', cabAlvo)).corpo).find((c) => c.id === conversaId) || {};
+
+    // responde, e o remetente recebe na MESMA conversa
+    const respondeu = await postarJson(`/api/mensagens/${conversaId}/responder`, { texto: 'Conferido, estava certo.' }, cabAlvo);
+    const doMaster = JSON.parse((await pedir('/api/mensagens/minhas', cabMaster)).corpo).find((c) => c.id === conversaId) || {};
+
+    // mandar de novo pra mesma pessoa continua a mesma conversa
+    await postarJson('/api/mensagens/enviar', { userId: alvoId, texto: 'Obrigado!' }, cabMaster);
+    const doMaster2 = JSON.parse((await pedir('/api/mensagens/minhas', cabMaster)).corpo);
+    const conversasComAlvo = doMaster2.filter((c) => c.com && c.com.id === alvoId);
+
+    const conferencias = {
+      'a mensagem fica GRAVADA (não depende de estar com a tela aberta)':
+        !!conv.id && (conv.mensagens || []).some((m) => m.texto === 'Confere o caixa de ontem, por favor.'),
+      'chega marcada como não lida (é o que faz a caixa de diálogo aparecer)': conv.naoLidas === 1,
+      'o destinatário vê de quem é': conv.com && conv.com.id,
+      'ler pelo id funciona pra quem é da conversa': deOutro.status === 200,
+      'quem não é da conversa não consegue responder nela': respostaIntrusa.status === 400,
+      'depois de aberta, zera as não lidas': depoisDeLer.naoLidas === 0,
+      'a resposta volta pro remetente na mesma conversa': respondeu.status === 200
+        && (doMaster.mensagens || []).some((m) => m.texto === 'Conferido, estava certo.'),
+      'a resposta conta como não lida pro remetente': doMaster.naoLidas === 1,
+      'mandar de novo continua a MESMA conversa (não abre outra)': conversasComAlvo.length === 1,
+      'mensagem vazia é recusada': (await postarJson('/api/mensagens/enviar', { userId: alvoId, texto: '   ' }, cabMaster)).status === 400,
+      'não dá pra mandar mensagem pra si mesmo': /pra você mesmo/.test(
+        (await postarJson('/api/mensagens/enviar', { userId: JSON.parse((await pedir('/api/me', cabMaster)).corpo).id, texto: 'eu' }, cabMaster)).corpo),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okMensagemDireta = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okMensagemDireta = false; console.log('  erro: ' + e.message); }
+  if (!okMensagemDireta) ruins += 1;
+  console.log(`${okMensagemDireta ? '✓' : '✗'} Mensagem direta: virou conversa gravada que a pessoa abre e responde (não some mais da tela)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
