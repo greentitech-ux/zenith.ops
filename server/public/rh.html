@@ -986,6 +986,20 @@ function asoBadgeCli(f){
   return '';
 }
 
+// Ações que valem pra QUALQUER cadastro, seja colaborador, extra ou
+// candidato em teste: editar, currículo e o link de auto-atendimento. Ficam
+// aqui fora porque a aba "Acompanh. de Teste" monta o card dela por conta
+// própria (badge de dia do teste + decisão) e antes disso não oferecia NADA
+// - nem o link, que é justamente como o candidato bate ponto nos 5 dias.
+function acoesDeCadastroHtml(f){
+  return [
+    IS_MASTER ? `<button type="button" class="link-btn" onclick="abrirEditar('${f.id}')">✏️ editar</button>` : '',
+    f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 currículo</a>` : '',
+    f.status!=='inativo' ? `<button type="button" class="link-btn" onclick="copiarLinkColaborador('${f.id}')">🔗 link de auto-atendimento</button>` : '',
+    f.status!=='inativo' ? `<button type="button" class="link-btn" onclick="gerarNovoLinkColaborador('${f.id}')">🔄 gerar novo link</button>` : '',
+  ].filter(Boolean).join('\n      ');
+}
+
 function cardAtivoHtml(f){
   const badges = [
     f.status==='candidato' ? '<span class="badge warn">candidato</span>' : (f.status==='inativo' ? '<span class="badge muted">desligado</span>' : '<span class="badge ok">ativo</span>'),
@@ -1002,10 +1016,7 @@ function cardAtivoHtml(f){
     <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · desde ${fmtData(f.dataAdmissao)}${tempo?` · ⏱️ ${tempo} de casa`:''}${f.contato?' · '+escapeHtml(f.contato):''}</div>
     <div class="sub">📸 ${totalCheckins} check-in${totalCheckins===1?'':'s'} no total${f.status==='inativo'&&f.desligadoEm?` · 🚪 desligado em ${fmtData(f.desligadoEm.slice(0,10))}${f.motivoDesligamento?' ('+escapeHtml(f.motivoDesligamento)+')':''}`:''}</div>
     <div class="acoes">
-      ${IS_MASTER ? `<button type="button" class="link-btn" onclick="abrirEditar('${f.id}')">✏️ editar</button>` : ''}
-      ${f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 currículo</a>` : ''}
-      ${f.status!=='inativo' ? `<button type="button" class="link-btn" onclick="copiarLinkColaborador('${f.id}')">🔗 link de auto-atendimento</button>` : ''}
-      ${f.status!=='inativo' ? `<button type="button" class="link-btn" onclick="gerarNovoLinkColaborador('${f.id}')">🔄 gerar novo link</button>` : ''}
+      ${acoesDeCadastroHtml(f)}
       ${f.status==='ativo' && f.tipoCadastro!=='extra' && !f.emAtestado ? `<button type="button" class="link-btn" onclick="abrirAtestado('${f.id}')">🩺 registrar atestado</button>` : ''}
       ${f.emAtestado ? `<button type="button" class="link-btn" onclick="marcarRetorno('${f.id}')">✅ registrar retorno</button>` : ''}
       ${f.status==='ativo' && f.tipoCadastro!=='extra' ? `<button type="button" class="link-btn" onclick="abrirAdvertencia('${f.id}')">📋 solicitar advertência</button>` : ''}
@@ -1218,11 +1229,18 @@ function renderTeste(){
   el.innerHTML = lista.length ? lista.map(f=>{
     const dias = diasDesde(f.dataAdmissao);
     const vencido = dias>=5;
+    const nEsc = escapeHtml(f.nome).replace(/'/g,"\\'");
+    // check-ins aparecem aqui porque no teste de 5 dias eles SÃO a avaliação:
+    // "veio quantos dias?" é metade da decisão de efetivar ou não
+    const totalCheckins = (CONTAGEM_CHECKINS[f.id]||{}).total || 0;
     return `<div class="card">
       <div class="linha1"><span class="nome-clicavel" onclick="abrirDetalheFuncionario('${f.id}')">${escapeHtml(f.nome)}</span>${vencido?'<span class="badge bad">decidir hoje</span>':`<span class="badge warn">dia ${dias}</span>`}</div>
-      <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · desde ${fmtData(f.dataAdmissao)} (${dias} dia${dias===1?'':'s'})</div>
+      <div class="sub">${escapeHtml(UNIDADES_NOMES[f.unidade]||f.unidade)} · ${escapeHtml(f.cargoFuncao||'—')} · desde ${fmtData(f.dataAdmissao)} (${dias} dia${dias===1?'':'s'})${f.contato?' · '+escapeHtml(f.contato):''}</div>
+      <div class="sub">📸 ${totalCheckins} check-in${totalCheckins===1?'':'s'} nos ${dias} dia${dias===1?'':'s'} de teste</div>
       <div class="acoes">
         <button type="button" class="btn-secundario" onclick="abrirDecisao('${f.id}')">📝 Registrar decisão</button>
+        ${acoesDeCadastroHtml(f)}
+        ${IS_MASTER ? `<button type="button" class="link-btn" style="color:var(--bad);" onclick="excluirFuncionario('${f.id}','${nEsc}')">🗑️ excluir</button>` : ''}
       </div>
     </div>`;
   }).join('') : '<div class="empty">ninguém em período de teste agora.</div>';
@@ -1833,7 +1851,15 @@ async function abrirDetalheFuncionario(id){
 
   const curriculo = f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 ver currículo</a>` : '<div class="sub" style="color:var(--muted)">sem currículo anexado.</div>';
 
-  const acoes = IS_MASTER ? `<div class="acoes" style="margin-top:12px;"><button type="button" class="btn-secundario" onclick="fecharDetalheFuncionario();abrirEditar('${f.id}')">✏️ editar cadastro</button></div>` : '';
+  // o link de auto-atendimento entra aqui também: esta é a tela que a pessoa
+  // abre pra "ver a ficha", e era o lugar mais óbvio pra procurar o link -
+  // ficava só nas listas de Colaboradores/Extras, e o candidato em teste não
+  // aparece em nenhuma das duas
+  const acoes = [
+    IS_MASTER ? `<button type="button" class="btn-secundario" onclick="fecharDetalheFuncionario();abrirEditar('${f.id}')">✏️ editar cadastro</button>` : '',
+    f.status!=='inativo' ? `<button type="button" class="btn-secundario" onclick="copiarLinkColaborador('${f.id}')">🔗 copiar link de check-in</button>` : '',
+  ].filter(Boolean).join(' ');
+  const acoesHtml = acoes ? `<div class="acoes" style="margin-top:12px;">${acoes}</div>` : '';
 
   corpo.innerHTML = `
     <div style="font-weight:600;font-size:15px;">${escapeHtml(f.nome)}</div>
@@ -1846,7 +1872,7 @@ async function abrirDetalheFuncionario(id){
     ${secao('📸 Check-ins', ckHtml)}
     ${secao('🪪 Documento de identidade', docIdentidadeHtml(f))}
     ${secao('📄 Currículo', curriculo)}
-    ${acoes}
+    ${acoesHtml}
   `;
 }
 function fecharDetalheFuncionario(){ document.getElementById('overlay-funcionario-detalhe').classList.add('hidden'); }
