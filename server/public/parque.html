@@ -149,7 +149,11 @@
 
 <div class="panel hidden" id="edicoes-panel">
   <h2>Pedidos de correção</h2>
+  <div class="sub" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:-4px 0 10px;">aprovar aplica a correção no check-in na hora - a decisão é toda aqui, não abre chamado</div>
   <div id="edicoes-lista" style="display:flex;flex-direction:column;gap:10px;"></div>
+  <div id="edicoes-vazio" class="sub hidden" style="color:var(--muted);">nenhum pedido aguardando decisão.</div>
+  <div id="edicoes-decididos-titulo" class="hidden" style="font-size:12px;font-weight:600;color:var(--muted);margin:14px 0 8px;">Já decididos</div>
+  <div id="edicoes-decididos" style="display:flex;flex-direction:column;gap:8px;"></div>
 </div>
 
 <div class="panel hidden" id="painel-importar">
@@ -537,9 +541,39 @@ function resumoDiffProposta(pedido){
   return html;
 }
 
+// Pedido de correção não abre mais card na Central (era um ticket que já
+// nascia resolvido - ver a rota solicitar-edicao em index.js). Como a
+// decisão acontece só aqui, o rastro tem que ficar visível AQUI: quem pediu,
+// o que propôs, quem decidiu e quando. Sem isso, aprovar faria o pedido
+// simplesmente sumir da tela e não sobraria registro em lugar nenhum.
+const DECIDIDOS_VISIVEIS = 15;
+function linhaDecisao(p){
+  if(p.status==='PENDENTE') return '';
+  const quando = p.decididoEm ? new Date(p.decididoEm).toLocaleString('pt-BR',{timeZone:FUSO_BR}) : '';
+  const cor = p.status==='APROVADO' ? 'var(--ok)' : 'var(--bad)';
+  const rotulo = p.status==='APROVADO' ? '✓ aprovado' : '✕ rejeitado';
+  return `<div class="sub" style="margin-top:6px;color:${cor};">${rotulo} por ${escapeHtml(p.decididoPorEmail||'—')}${p.decididoPorGerente?' (Gerente da unidade)':''}${quando?' em '+quando:''}`
+    + `${p.motivoDecisao?` — ${escapeHtml(p.motivoDecisao)}`:''}</div>`;
+}
+
 function renderEdicoes(){
   const pendentes = EDICOES.filter(e=>e.status==='PENDENTE');
-  document.getElementById('edicoes-panel').classList.toggle('hidden', pendentes.length===0);
+  const decididos = EDICOES.filter(e=>e.status!=='PENDENTE')
+    .sort((a,b)=>String(b.decididoEm||b.criadoEm||'').localeCompare(String(a.decididoEm||a.criadoEm||'')))
+    .slice(0, DECIDIDOS_VISIVEIS);
+  document.getElementById('edicoes-panel').classList.toggle('hidden', pendentes.length===0 && decididos.length===0);
+  const elDec = document.getElementById('edicoes-decididos');
+  elDec.innerHTML = decididos.length ? decididos.map(p=>{
+    const ehAlterar = p.tipoCorrecao==='alterar';
+    return `<div style="border:1px solid var(--line);border-radius:8px;padding:9px 12px;opacity:.85;">
+      <div style="font-size:12px;font-weight:600;">${escapeHtml(p.responsavelNome)} · ${escapeHtml(p.unidadeNome||p.unidade)} · ${fmtData(p.dataUtilizacao)}${p.numeroTicket?` · <span style="color:var(--accent);">Ticket #${p.numeroTicket}</span>`:''}</div>
+      <div class="sub" style="margin:2px 0 0;">${ehAlterar?'✏️ alterar dados':'🗑️ excluir o check-in'} · pedido por ${escapeHtml(p.solicitadoPorEmail||'—')} em ${new Date(p.criadoEm).toLocaleString('pt-BR',{timeZone:FUSO_BR})}</div>
+      <div class="sub" style="margin:3px 0 0;color:var(--text);white-space:pre-wrap;">${escapeHtml(p.motivo||'')}</div>
+      ${linhaDecisao(p)}
+    </div>`;
+  }).join('') : '';
+  document.getElementById('edicoes-decididos-titulo').classList.toggle('hidden', decididos.length===0);
+  document.getElementById('edicoes-vazio').classList.toggle('hidden', pendentes.length>0);
   document.getElementById('edicoes-lista').innerHTML = pendentes.map(p=>{
     const ehAlterar = p.tipoCorrecao==='alterar';
     const podeDecidir = podeAprovarCheckout(p.unidade);
