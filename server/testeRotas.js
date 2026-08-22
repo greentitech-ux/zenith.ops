@@ -628,6 +628,72 @@ setTimeout(async () => {
   if (!okSoma) ruins += 1;
   console.log(`${okSoma ? '✓' : '✗'} Leitura por foto: a soma das parcelas x o total impresso pega o desalinhamento (69 ≠ 64)`);
 
+  // ---- LEITURA DUPLA: só entra sozinho o valor em que as duas concordam ----
+  // O caso real (21/08, 2ª ocorrência): o Service Times Summary foi lido com
+  // tudo deslocado uma linha - Leg Time recebeu 23,6 (valor do Run Time),
+  // Tempo de Espera recebeu 8,91 (valor do Leg Time), Produção recebeu 5,09
+  // (valor do Avg Carryout Load Time) - e NENHUMA trava alcançou: o quadro
+  // não imprime total (a soma não confere) e o modelo escreveu textoOrigem
+  // coerente com o próprio erro (o rótulo confere). Mas reler dava OUTRO
+  // resultado: a instabilidade é mensurável. Aqui, os números exatos.
+  let okConsenso = false;
+  try {
+    const ocr = require('/home/user/adyen-monitor/server/canaisVendaOcr.js');
+    const item = (campo, valor) => ({ secao: 'kpi', campo, label: campo, valor, textoOrigem: `${campo} ${valor}` });
+    const base = { suspeitos: [], somasRuins: [], naoIdentificados: [], data: '2026-08-21' };
+    // leitura A: a CERTA (bate com o relatório impresso)
+    const A = { ...base,
+      itens: [item('atendimento', 2.31), item('producao', 5.27), item('espera', 3.54),
+        item('otd', 15.84), item('legtime', 8.91), item('runtime', 23.6)],
+      faltando: [{ secao: 'kpi', campo: 'extremo', label: 'Extremo' }],
+    };
+    // leitura B: a DESLOCADA (o que apareceu na tela da loja)
+    const B = { ...base,
+      itens: [item('atendimento', 2.31), item('producao', 5.09), item('espera', 8.91),
+        item('otd', 8.91), item('legtime', 23.6)],
+      faltando: [{ secao: 'kpi', campo: 'runtime', label: 'runtime' }, { secao: 'kpi', campo: 'extremo', label: 'Extremo' }],
+    };
+    const r = ocr.reconciliarLeituras(A, B);
+    const soCampo = (lista) => lista.map((x) => x.campo).sort().join(',');
+    const casos = {
+      'só o campo em que as duas concordaram entra sozinho': soCampo(r.itens) === 'atendimento',
+      'os 4 deslocados viram suspeitos com os dois valores': r.suspeitos.filter((x) => /não bateram/.test(x.motivo || '')).length === 4,
+      'campo que só apareceu numa leitura vira suspeito, não item':
+        r.suspeitos.some((x) => x.campo === 'runtime' && /só apareceu/.test(x.motivo || '')),
+      'nenhum valor deslocado entrou como item': !r.itens.some((x) => ['producao','espera','otd','legtime'].includes(x.campo)),
+      'faltando nas duas continua faltando': soCampo(r.faltando) === 'extremo',
+      // as duas iguais = tudo entra, zero suspeito (o caso normal não pode piorar)
+      'duas leituras iguais preenchem tudo sem suspeita': (() => {
+        const rr = ocr.reconciliarLeituras(A, JSON.parse(JSON.stringify(A)));
+        return soCampo(rr.itens) === soCampo(A.itens) && rr.suspeitos.length === 0 && rr.data === '2026-08-21';
+      })(),
+      // suspeito de UMA leitura (rótulo/taxa/soma) segue suspeito mesmo se a
+      // outra trouxe o campo como item - uma desconfiar já basta
+      'suspeito de uma leitura rebaixa o item da outra': (() => {
+        const A2 = { ...base, itens: [item('extremo', 2)], faltando: [] };
+        const B2 = { ...base, itens: [], suspeitos: [{ secao: 'kpi', campo: 'extremo', label: 'Extremo', valor: 43.48, motivo: 'taxa em campo de quantidade' }], faltando: [] };
+        const rr = ocr.reconciliarLeituras(A2, B2);
+        return rr.itens.length === 0 && rr.suspeitos.length >= 1;
+      })(),
+      'datas divergentes não escolhem uma no chute': ocr.reconciliarLeituras({ ...base, itens: [], faltando: [] }, { ...base, data: '2026-08-20', itens: [], faltando: [] }).data === null,
+    };
+    const falhas = Object.entries(casos).filter(([, ok]) => !ok).map(([n]) => n);
+    okConsenso = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okConsenso = false; console.log('  erro: ' + e.message); }
+  if (!okConsenso) ruins += 1;
+  console.log(`${okConsenso ? '✓' : '✗'} Leitura por foto: leitura dupla - só preenche sozinho o valor em que as DUAS leituras bateram`);
+
+  // e a leitura de fato roda duas vezes (fonte): sem isso o consenso é teatro
+  let okDupla = false;
+  try {
+    const src = require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8');
+    okDupla = /Promise\.allSettled\(\[umaLeitura\(\), umaLeitura\(\)\]\)/.test(src)
+      && /reconciliarLeituras\(ra\.value, rb\.value\)/.test(src);
+  } catch (e) { okDupla = false; }
+  if (!okDupla) ruins += 1;
+  console.log(`${okDupla ? '✓' : '✗'} Leitura por foto: a leitura roda DUAS vezes em paralelo antes de preencher`);
+
   // O fechamento completo (5 fotos: cartão, resumo de pedidos, service
   // times, taxa...) estourava o teto de resposta de 8000 tokens depois que a
   // resposta ganhou textoOrigem por campo e a transcrição dos quadros - e a
