@@ -263,6 +263,80 @@ const numeroOuNull = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v)
 // "2,05" minutos), sem forcar conversao numerica
 const textoOuNull = (v) => { const s = String(v == null ? '' : v).trim().slice(0, 200); return s || null; };
 
+// ------------------------------------------------- consenso de 2 leituras
+//
+// Regra unica: um valor so entra sozinho no formulario se as DUAS leituras o
+// trouxeram como item confiavel, com o MESMO valor. Qualquer outra situacao
+// (divergiu, so apareceu numa, uma das duas marcou suspeito) vira suspeito,
+// com o motivo dito em portugues - o campo fica liberado e quem lanca decide
+// olhando o relatorio. Concordancia por acaso existe, mas exige as duas
+// leituras errarem IGUAL; o deslocamento de linha que motivou isto e
+// instavel justamente por natureza, entao errar igual duas vezes e raro.
+const chaveDoItem = (x) => `${x.secao}.${x.campo}`;
+const valoresIguais = (a, b) => (
+  typeof a === 'string' || typeof b === 'string'
+    ? String(a).trim() === String(b).trim()
+    : Number(a) === Number(b)
+);
+
+function reconciliarLeituras(a, b) {
+  const iA = new Map((a.itens || []).map((x) => [chaveDoItem(x), x]));
+  const iB = new Map((b.itens || []).map((x) => [chaveDoItem(x), x]));
+  const itens = [];
+  const suspeitos = [];
+  const decididos = new Set();
+
+  for (const [k, xa] of iA) {
+    const xb = iB.get(k);
+    if (xb && valoresIguais(xa.valor, xb.valor)) {
+      itens.push(xa);
+    } else if (xb) {
+      suspeitos.push({ ...xa, motivo: `li duas vezes e os valores não bateram (1ª leitura: ${xa.valor} · 2ª: ${xb.valor})` });
+    } else {
+      suspeitos.push({ ...xa, motivo: `só apareceu numa das duas leituras (valor lido: ${xa.valor})` });
+    }
+    decididos.add(k);
+  }
+  for (const [k, xb] of iB) {
+    if (decididos.has(k)) continue;
+    suspeitos.push({ ...xb, motivo: `só apareceu numa das duas leituras (valor lido: ${xb.valor})` });
+    decididos.add(k);
+  }
+  // suspeito de QUALQUER uma das leituras continua suspeito - inclusive se a
+  // outra trouxe o campo como item: uma leitura desconfiar ja basta
+  [...(a.suspeitos || []), ...(b.suspeitos || [])].forEach((sp) => {
+    const k = chaveDoItem(sp);
+    const idx = itens.findIndex((x) => chaveDoItem(x) === k);
+    if (idx >= 0) {
+      suspeitos.push({ ...itens[idx], motivo: sp.motivo || 'uma das leituras marcou este campo como suspeito' });
+      itens.splice(idx, 1);
+      return;
+    }
+    if (!decididos.has(k)) { suspeitos.push(sp); decididos.add(k); }
+  });
+
+  // universo de campos = particao de qualquer leitura individual
+  const defs = new Map();
+  [...(a.itens || []), ...(a.suspeitos || []), ...(a.faltando || [])]
+    .forEach((c) => defs.set(chaveDoItem(c), { secao: c.secao, campo: c.campo, label: c.label }));
+  const cobertos = new Set([...itens, ...suspeitos].map(chaveDoItem));
+  const faltando = [...defs.values()].filter((c) => !cobertos.has(chaveDoItem(c)));
+
+  const somasRuins = [];
+  [...(a.somasRuins || []), ...(b.somasRuins || [])].forEach((sr) => {
+    if (!somasRuins.some((x) => x.titulo === sr.titulo && x.total === sr.total && x.soma === sr.soma)) somasRuins.push(sr);
+  });
+  const naoIdentificados = [];
+  [...(a.naoIdentificados || []), ...(b.naoIdentificados || [])].forEach((n) => {
+    if (!naoIdentificados.some((x) => x.textoOrigem === n.textoOrigem)) naoIdentificados.push(n);
+  });
+
+  return {
+    data: a.data === b.data ? a.data : null,
+    itens, suspeitos, somasRuins, naoIdentificados, faltando,
+  };
+}
+
 const MAX_ARQUIVOS = 5;
 
 async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
@@ -289,6 +363,10 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
       : { type: 'image', source: { type: 'base64', media_type: f.mimeType, data: f.buffer.toString('base64') } });
   });
   blocos.push({ type: 'text', text: montarPrompt(listaCanais, listaFormas, listaKpis, dica, fotos.length) });
+
+  // Uma passada completa: chamada, parse e as conferencias. Fica numa funcao
+  // porque a leitura roda DUAS vezes (ver o consenso no fim de lerCanais).
+  async function umaLeitura() {
   // .stream() em vez de .create(): com max_tokens alto o SDK RECUSA a chamada
   // sem streaming ("Streaming is required for operations that may take longer
   // than 10 minutes") - uma resposta desse tamanho poderia demorar mais que
@@ -394,6 +472,27 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
       .filter((c) => !vistos.has(chaveDe(c.secao, c.campo)))
       .map((c) => ({ secao: c.secao, campo: c.campo, label: c.label })),
   };
+  }
+
+  // LEITURA DUPLA. O caso que forcou isso: o Service Times Summary foi lido
+  // com tudo deslocado uma linha (Leg Time recebeu o valor do Run Time, Tempo
+  // de Espera o do Leg Time...) e NENHUMA das outras travas alcancou - o
+  // quadro nao imprime total (a soma nao confere nada) e o modelo escreveu
+  // textoOrigem coerente com o proprio erro (o rotulo confere e passa). So
+  // que reler a mesma foto dava outro resultado: o desalinhamento nao e
+  // estavel, e essa instabilidade e um sinal que da pra medir. Duas leituras
+  // independentes em PARALELO (a latencia nao dobra); so entra sozinho no
+  // formulario o valor em que as DUAS concordaram - o resto fica liberado
+  // pra digitar, com as duas leituras a mostra. Custa duas chamadas por
+  // clique, de proposito: um numero errado num KPI que a rede cobra vale
+  // mais caro que a segunda chamada.
+  const [ra, rb] = await Promise.allSettled([umaLeitura(), umaLeitura()]);
+  if (ra.status === 'rejected' && rb.status === 'rejected') throw ra.reason;
+  // uma das duas falhou (rede, corte...): a que sobrou vale sozinha - sem
+  // consenso, mas melhor que jogar fora uma leitura boa por azar da outra
+  if (ra.status === 'rejected') return rb.value;
+  if (rb.status === 'rejected') return ra.value;
+  return reconciliarLeituras(ra.value, rb.value);
 }
 
-module.exports = { ativo, lerCanais, extrairJson, rotuloBateComOrigem, normalizarTexto, conferirSomas, valorDeTaxaEmCampoDeContagem };
+module.exports = { ativo, lerCanais, extrairJson, rotuloBateComOrigem, normalizarTexto, conferirSomas, valorDeTaxaEmCampoDeContagem, reconciliarLeituras };

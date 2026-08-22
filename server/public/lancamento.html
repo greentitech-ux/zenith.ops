@@ -886,7 +886,9 @@ async function realizarLeituraRelatorio(){
       el.readOnly = false;
       el.classList.remove('campo-automatico');
       el.style.borderColor = 'var(--bad)';
-      el.title = `A foto trouxe um valor pra este campo, mas ele veio da linha "${sp.textoOrigem||'?'}" — confira no relatório e digite.`;
+      el.title = sp.motivo
+        ? `${sp.motivo} — confira no relatório e digite.`
+        : `A foto trouxe um valor pra este campo, mas ele veio da linha "${sp.textoOrigem||'?'}" — confira no relatório e digite.`;
     });
     (data.faltando||[]).forEach(f=>{
       const el = elDoItem(f);
@@ -919,8 +921,8 @@ async function realizarLeituraRelatorio(){
     if((data.suspeitos||[]).length){
       // vem ANTES dos outros avisos de proposito: e o unico que diz que a
       // leitura errou, e errar calado num fechamento e o pior desfecho
-      partes.push(`<span style="color:var(--bad);"><b>⚠ Não preenchi ${data.suspeitos.length} campo(s) porque o valor não bateu com a linha do relatório:</b> `
-        + data.suspeitos.map(sp=>`${escapeHtml(sp.label)} (o número ${sp.valor} veio da linha "${escapeHtml(sp.textoOrigem||'?')}")`).join('; ')
+      partes.push(`<span style="color:var(--bad);"><b>⚠ Não preenchi ${data.suspeitos.length} campo(s) porque a leitura não deu certeza:</b> `
+        + data.suspeitos.map(sp=>`${escapeHtml(sp.label)} (${sp.motivo ? escapeHtml(sp.motivo) : `o número ${sp.valor} veio da linha "${escapeHtml(sp.textoOrigem||'?')}"`})`).join('; ')
         + `. Confira no relatório e digite à mão — os campos foram liberados.</span>`);
     }
     if(zerados){
