@@ -138,12 +138,13 @@ async function lerDocumento({ arquivos, camposLidos }) {
   if (!fotos.length) throw new Error('Anexe a foto do documento.');
   if (fotos.length > MAX_ARQUIVOS) throw new Error(`Envie no máximo ${MAX_ARQUIVOS} imagens do documento.`);
 
+  validarArquivosDocumento(fotos);
   const blocos = [];
   fotos.forEach((f, i) => {
     if (fotos.length > 1) blocos.push({ type: 'text', text: `Imagem ${i + 1} de ${fotos.length}:` });
     blocos.push(f.mimeType === 'application/pdf'
       ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.buffer.toString('base64') } }
-      : { type: 'image', source: { type: 'base64', media_type: f.mimeType, data: f.buffer.toString('base64') } });
+      : { type: 'image', source: { type: 'base64', media_type: normalizarTipoImagem(f.mimeType), data: f.buffer.toString('base64') } });
   });
   blocos.push({ type: 'text', text: montarPrompt(fotos.length, campos) });
 
@@ -194,4 +195,35 @@ async function lerDocumento({ arquivos, camposLidos }) {
   };
 }
 
-module.exports = { ativo, lerDocumento, cpfValido, MAX_ARQUIVOS, TODOS_CAMPOS };
+// ---------------------------------------------------------------------------
+// Validação dos anexos ANTES de qualquer coisa cara. O media_type ia CRU pro
+// modelo - foto HEIC do iPhone (compartilhada pelo WhatsApp/Arquivos, que a
+// compressão do navegador nem sempre consegue converter) ou o "image/jpg"
+// fora do padrão de alguns Android viravam um erro críptico da API na cara
+// do candidato ("não conseguem anexar, dá erro"). Aqui o tipo é normalizado
+// quando dá, e quando não dá a recusa explica O QUE FAZER.
+// ---------------------------------------------------------------------------
+const TIPOS_IMAGEM_ACEITOS = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const APELIDOS_DE_TIPO = { 'image/jpg': 'image/jpeg', 'image/pjpeg': 'image/jpeg' };
+
+function normalizarTipoImagem(mime) {
+  const limpo = String(mime || '').toLowerCase().split(';')[0].trim();
+  const oficial = APELIDOS_DE_TIPO[limpo] || limpo;
+  if (TIPOS_IMAGEM_ACEITOS.includes(oficial)) return oficial;
+  if (/heic|heif/.test(oficial)) {
+    throw new Error('A foto veio em HEIC (formato do iPhone) e a leitura não aceita esse formato. Tire a foto pela câmera aqui no próprio formulário, ou mude em Ajustes → Câmera → Formatos → "Mais compatível" e tente de novo.');
+  }
+  throw new Error(`O arquivo do documento veio num formato que a leitura não aceita (${oficial || 'desconhecido'}). Envie foto em JPG/PNG ou o PDF do documento.`);
+}
+
+// usada pela ROTA antes de gastar teto/modelo, e de novo dentro de
+// lerDocumento (defesa em profundidade - a rota pode esquecer de chamar)
+function validarArquivosDocumento(arquivos) {
+  (Array.isArray(arquivos) ? arquivos : []).forEach((f) => {
+    const tipo = String(f.mimeType || f.mimetype || '').toLowerCase();
+    if (tipo === 'application/pdf') return;
+    normalizarTipoImagem(tipo); // estoura com mensagem clara se não servir
+  });
+}
+
+module.exports = { ativo, lerDocumento, cpfValido, MAX_ARQUIVOS, TODOS_CAMPOS, normalizarTipoImagem, validarArquivosDocumento };

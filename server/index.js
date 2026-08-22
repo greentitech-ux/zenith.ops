@@ -1358,6 +1358,9 @@ async function responderLeituraDocumento(req, res) {
   try {
     const arquivos = (req.files || []).map((f) => ({ buffer: f.buffer, mimeType: f.mimetype }));
     if (!arquivos.length) return res.status(400).json({ error: 'Anexe a foto do documento.' });
+    // valida formato ANTES de gastar teto/modelo: HEIC do iPhone ou tipo fora
+    // do padrão viravam erro críptico da API na cara do candidato
+    documentoIdentidadeOcr.validarArquivosDocumento(arquivos);
     if (!documentoIdentidadeOcr.ativo()) {
       return res.status(400).json({ error: 'Leitura automática de documento não está configurada neste servidor.' });
     }
@@ -1422,6 +1425,16 @@ app.post('/api/rh/ler-documento-publico', tetoLeituraDocumento, uploadDocumentoI
 // Checagem barata, ANTES de qualquer upload: sem ela o currículo ia pro
 // Storage e só então rh.criar recusava por falta de documento - gravando
 // lixo pra uma requisição que nunca ia virar cadastro.
+// O currículo aceita PDF (o normal), foto ou Word - qualquer outra coisa é
+// quase certeza de arquivo errado selecionado no celular, e recusar AQUI com
+// frase clara é melhor que estourar depois no Storage/leitura sem explicação
+function validarTipoCurriculo(arquivo) {
+  if (!arquivo) return null;
+  const tipo = String(arquivo.mimetype || '').toLowerCase();
+  if (/^(application\/pdf|image\/|application\/msword|application\/vnd\.openxmlformats)/.test(tipo)) return null;
+  return `O currículo precisa ser PDF, foto ou documento do Word - o arquivo enviado veio como "${tipo || 'tipo desconhecido'}". Salve como PDF e tente de novo.`;
+}
+
 function exigeDocumentoIdentidade(tipoCadastro, arquivosDoc, guardado = null) {
   const tipo = tipoCadastro === 'candidato' ? 'candidato' : (tipoCadastro || 'extra');
   if (!['extra', 'candidato'].includes(tipo)) return null;
@@ -1483,9 +1496,15 @@ app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCoun
     if (req.body.docToken && !guardado && !(req.files?.documento || []).length) {
       return res.status(400).json({ error: 'A leitura do documento expirou. Toque em "Ler meu documento" de novo antes de enviar.' });
     }
+    // valida TODOS os anexos ANTES de qualquer outra coisa - erro de formato
+    // tem que voltar com frase clara, não estourar no meio do envio
+    const docsEnviados = (req.files?.documento || []).map((f) => ({ mimeType: f.mimetype }));
+    if (docsEnviados.length) documentoIdentidadeOcr.validarArquivosDocumento(docsEnviados);
+    const arquivoCurriculo = (req.files?.curriculo || [])[0];
+    const erroCurriculo = validarTipoCurriculo(arquivoCurriculo);
+    if (erroCurriculo) return res.status(400).json({ error: erroCurriculo });
     const faltaDoc = exigeDocumentoIdentidade(tipoCadastro, req.files?.documento, guardado);
     if (faltaDoc) return res.status(400).json({ error: faltaDoc });
-    const arquivoCurriculo = (req.files?.curriculo || [])[0];
     let curriculo = null;
     if (arquivoCurriculo) {
       const path = await storage.salvarArquivo(unidade, arquivoCurriculo, 'rh-curriculos');
@@ -6214,7 +6233,12 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'c
     }
     const faltaDoc = exigeDocumentoIdentidade(tipoCadastro, req.files?.documento);
     if (faltaDoc) return res.status(400).json({ error: faltaDoc });
+    // mesma validação de formato do link público (ver cadastro-publico)
+    const docsInternos = (req.files?.documento || []).map((f) => ({ mimeType: f.mimetype }));
+    if (docsInternos.length) documentoIdentidadeOcr.validarArquivosDocumento(docsInternos);
     const arquivoCurriculo = (req.files?.curriculo || [])[0];
+    const erroCurriculo = validarTipoCurriculo(arquivoCurriculo);
+    if (erroCurriculo) return res.status(400).json({ error: erroCurriculo });
     let curriculo = null;
     if (arquivoCurriculo) {
       const path = await storage.salvarArquivo(unidade || 'geral', arquivoCurriculo, 'rh-curriculos');
@@ -10822,7 +10846,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use((err, req, res, next) => {
   if (err && err.name === 'MulterError') {
     const mensagens = {
-      LIMIT_FILE_SIZE: 'Arquivo muito grande (máximo 50MB por anexo).',
+      LIMIT_FILE_SIZE: 'Arquivo muito grande pra este envio. Diminua a foto (ou salve o PDF em qualidade menor) e tente de novo.',
       LIMIT_FILE_COUNT: 'Muitos arquivos de uma vez (máximo 8 anexos por registro).',
       LIMIT_UNEXPECTED_FILE: 'Campo de arquivo inesperado no envio.',
     };

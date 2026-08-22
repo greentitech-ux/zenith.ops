@@ -1069,6 +1069,40 @@ setTimeout(async () => {
   // fonte porque o teto real so apareceria com dezenas de MB de upload, e o
   // proprio teto por IP da rota (20/h) impede chegar la pelo HTTP.
   const srcGuarda = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+  // ---- VALIDAÇÃO DOS ANEXOS (caso real: "não conseguem anexar, dá erro").
+  // O media_type ia CRU pro modelo: foto HEIC do iPhone ou o "image/jpg"
+  // fora do padrão de alguns Android viravam erro críptico da API na cara
+  // do candidato. Agora: HEIC é recusado ANTES do modelo com frase que diz
+  // o que fazer; "image/jpg" é normalizado e passa; arquivo grande demais
+  // volta como JSON claro (não um HTML 500); currículo de tipo errado é
+  // recusado com explicação. ----
+  const antesHeic = OCR_FALSO.chamadas;
+  const heic = await postarMultipart('/api/rh/ler-documento-publico', {},
+    { nome: 'rg.heic', tipo: 'image/heic', buffer: pngFalso }, 'documento');
+  const okHeic = heic.status === 400 && /HEIC/.test(heic.corpo) && /Mais compatível/.test(heic.corpo)
+    && OCR_FALSO.chamadas === antesHeic; // recusa ANTES de gastar modelo
+  if (!okHeic) ruins += 1;
+  console.log(`${okHeic ? '✓' : '✗'} anexos: HEIC do iPhone é recusado ANTES do modelo, com frase que diz o que fazer: HTTP ${heic.status} ${heic.corpo.slice(0, 80)}`);
+
+  const jpgTorto = await postarMultipart('/api/rh/ler-documento-publico', {},
+    { nome: 'rg.jpg', tipo: 'image/jpg', buffer: pngFalso }, 'documento');
+  const okJpgTorto = jpgTorto.status === 200 && /docToken/.test(jpgTorto.corpo);
+  if (!okJpgTorto) ruins += 1;
+  console.log(`${okJpgTorto ? '✓' : '✗'} anexos: "image/jpg" fora do padrão é normalizado e a leitura segue: HTTP ${jpgTorto.status}`);
+
+  const gigante = await postarMultipart('/api/rh/ler-documento-publico', {},
+    { nome: 'rg.png', tipo: 'image/png', buffer: Buffer.alloc(11 * 1024 * 1024) }, 'documento');
+  const okGigante = gigante.status === 400 && /muito grande/i.test(gigante.corpo);
+  if (!okGigante) ruins += 1;
+  console.log(`${okGigante ? '✓' : '✗'} anexos: arquivo acima do limite volta como JSON claro ("muito grande"), não erro mudo: HTTP ${gigante.status} ${gigante.corpo.slice(0, 70)}`);
+
+  const cvErrado = await postarMultipart('/api/rh/cadastro-publico',
+    { unidade: 'Dominos Tirol', tipoCadastro: 'extra', contato: '84999990002', cargoFuncao: 'Atendente' },
+    { nome: 'curriculo.exe', tipo: 'application/x-msdownload', buffer: Buffer.from('MZ') }, 'curriculo');
+  const okCvErrado = cvErrado.status === 400 && /currículo precisa ser PDF/i.test(cvErrado.corpo);
+  if (!okCvErrado) ruins += 1;
+  console.log(`${okCvErrado ? '✓' : '✗'} anexos: currículo de tipo errado é recusado com explicação (antes de qualquer upload): HTTP ${cvErrado.status} ${cvErrado.corpo.slice(0, 80)}`);
+
   const okTeto = /LEITURAS_MAX_BYTES\s*=/.test(srcGuarda)
     && /pesoGuardado\(\) \+ peso > LEITURAS_MAX_BYTES/.test(srcGuarda)
     && /LEITURAS_GUARDADAS\.delete\(LEITURAS_GUARDADAS\.keys\(\)\.next\(\)\.value\)/.test(srcGuarda);
