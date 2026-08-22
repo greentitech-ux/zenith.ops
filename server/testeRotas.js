@@ -950,6 +950,56 @@ setTimeout(async () => {
   if (!okOrfaos) ruins += 1;
   console.log(`${okOrfaos ? '✓' : '✗'} Páginas: nenhum async órfão deixado por edição (o que deixou o RH de tela branca)`);
 
+  // ---- SEÇÕES RECOLHÍVEIS: toda página do app carrega recolher.js ----
+  // Pedido do usuário: "tudo que tiver consumindo espaço na tela" recolhe pro
+  // título. O contrato aqui é de ROLLOUT: página interna (tem o menu,
+  // nav-menu.js) sem recolher.js é página que ficou de fora - inclusive as
+  // que forem criadas daqui pra frente.
+  {
+    let semRecolher = [];
+    try {
+      const fs3 = require('fs');
+      const dirPub3 = require('path').join(__dirname, 'public');
+      fs3.readdirSync(dirPub3).filter((f) => f.endsWith('.html')).forEach((f) => {
+        const html = fs3.readFileSync(`${dirPub3}/${f}`, 'utf8');
+        if (html.includes('/nav-menu.js') && !html.includes('/recolher.js')) semRecolher.push(f);
+      });
+    } catch (e) { semRecolher = ['erro: ' + e.message]; }
+    const okRecolher = semRecolher.length === 0;
+    if (!okRecolher) { ruins += 1; console.log('  sem recolher.js: ' + semRecolher.join(', ')); }
+    console.log(`${okRecolher ? '✓' : '✗'} Páginas do app: todas carregam recolher.js (seções recolhem pro título)`);
+  }
+
+  // ---- RH: saída depois da meia-noite é o MESMO turno ----
+  // Caso real: entrada 15:07, check-out automático 00:30 já com data do dia
+  // seguinte - "ainda faz parte do dia vigente". A tela de edição tem UMA
+  // data (a do dia trabalhado); a saída "menor" que a entrada rola pro dia
+  // seguinte no relógio, o registro continua no dia da ENTRADA, e turno que
+  // ficaria com mais de 18h volta pra conferência (digitação trocada).
+  DOCS.set('rhCheckins/ckvirada', {
+    id: 'ckvirada', funcionarioId: 'f-virada', funcionarioNome: 'Teste Virada', unidade: 'Dominos Caruaru',
+    data: '2026-08-21', status: 'aberto',
+    entrada: { horario: '2026-08-21T18:07:00.000Z' }, // 15:07 em Brasília
+    saida: { horario: '2026-08-21T20:00:00.000Z' },
+  });
+  const virada = await enviarJson('PATCH', '/api/rh/checkins/ckvirada', {
+    entradaData: '2026-08-21', entradaHora: '15:07', saidaData: '2026-08-21', saidaHora: '00:30',
+  }, { Authorization: 'Bearer ' + token });
+  const docVirada = DOCS.get('rhCheckins/ckvirada') || {};
+  const okVirada = virada.status === 200
+    && docVirada.saida && docVirada.saida.horario === '2026-08-22T03:30:00.000Z' // 00:30 de Brasília do dia SEGUINTE
+    && docVirada.saida.viradaDeDia === true
+    && docVirada.data === '2026-08-21'; // o dia vigente continua o da entrada
+  if (!okVirada) ruins += 1;
+  console.log(`${okVirada ? '✓' : '✗'} RH: saída 00:30 com entrada 15:07 vira madrugada do dia seguinte, no mesmo turno: HTTP ${virada.status} saida=${docVirada.saida && docVirada.saida.horario}`);
+
+  const viradaLonga = await enviarJson('PATCH', '/api/rh/checkins/ckvirada', {
+    entradaData: '2026-08-21', entradaHora: '15:07', saidaData: '2026-08-21', saidaHora: '14:00',
+  }, { Authorization: 'Bearer ' + token });
+  const okViradaLonga = viradaLonga.status === 400 && /mais de 18h/.test(viradaLonga.corpo);
+  if (!okViradaLonga) ruins += 1;
+  console.log(`${okViradaLonga ? '✓' : '✗'} RH: saída que daria turno de 23h volta pra conferência em vez de gravar: HTTP ${viradaLonga.status} ${viradaLonga.corpo.slice(0, 80)}`);
+
   // ---- LINK PUBLICO DE CADASTRO (EXTRA): a foto sobe UMA vez ----
   // O envio estava dando "Failed to fetch" no celular da loja. Nao era erro
   // do servidor: a MESMA foto de 6 MB subia duas vezes (uma pra ler o

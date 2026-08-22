@@ -326,8 +326,22 @@ async function editarHorarios(id, { entradaData, entradaHora, saidaData, saidaHo
     merge.saida = { ...atual.saida, horario: horarioBrasiliaISO(saidaData, saidaHora), editadoPorEmail: porEmail || null };
   }
   const entradaFinal = (merge.entrada || atual.entrada).horario;
-  const saidaFinal = (merge.saida || atual.saida || {}).horario;
-  if (saidaFinal && saidaFinal < entradaFinal) throw new Error('A saída não pode ser antes da entrada.');
+  let saidaFinal = (merge.saida || atual.saida || {}).horario;
+  // Saída "antes" da entrada no MESMO formulário quase sempre é turno que
+  // virou a madrugada: a tela tem UMA data (a do dia trabalhado) e o
+  // fechamento sai depois das 00h - entrada 15:07, saída 00:30. O dia
+  // vigente continua sendo o da ENTRADA (o campo `data` do registro não
+  // muda); só a saída rola pro dia seguinte no relógio.
+  if (saidaFinal && saidaFinal <= entradaFinal) {
+    const rolada = new Date(new Date(saidaFinal).getTime() + 24 * 60 * 60 * 1000).toISOString();
+    const horas = (new Date(rolada) - new Date(entradaFinal)) / (60 * 60 * 1000);
+    // teto de sanidade: virada de madrugada dá turno curto; passar de 18h é
+    // quase certeza de digitação trocada (saída 14:00 querendo dizer outra
+    // coisa) - melhor devolver pra conferir do que gravar um turno de 23h
+    if (horas > 18) throw new Error('A saída ficou antes da entrada. Se o turno virou a madrugada, confira as horas - do jeito que está daria um turno de mais de 18h.');
+    saidaFinal = rolada;
+    merge.saida = { ...(merge.saida || atual.saida), horario: rolada, editadoPorEmail: porEmail || null, viradaDeDia: true };
+  }
   await ref.update(merge);
   checkinCache.invalidar();
   return { ...atual, ...merge };
