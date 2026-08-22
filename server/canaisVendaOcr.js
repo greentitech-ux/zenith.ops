@@ -114,6 +114,9 @@ Regras:
 - Não invente campo: se um campo da lista não aparece no relatório, simplesmente não o inclua no JSON (não mande com valor 0, porque 0 é uma informação diferente de "não apareceu"). Se ele aparece no relatório valendo 0,00 de verdade, aí sim mande 0.
 - "naoIdentificados" existe pra não perder dinheiro de vista: se o relatório mostra uma linha com valor que não casa com nenhuma chave cadastrada, ela vai pra lá e o gerente decide. É melhor mostrar "sobrou R$ 320 que não sei onde colocar" do que ignorar em silêncio.
 - Ignore linhas que claramente não são canal, forma de pagamento nem KPI cadastrado: total geral, subtotal, vendas totais/líquidas/royalty, imposto, número de clientes, mão de obra, cupom, fundo de caixa. EXCEÇÃO: se uma dessas linhas (ex: "quantidade de pedidos", "ticket médio", "quilometragem") tiver o mesmo nome/sentido de um KPI cadastrado na lista de KPI's acima, ela NÃO é ruído - extraia normalmente pra chave daquele KPI. Só ignore o que não está em nenhuma das 3 listas.
+- LAYOUT EM DUAS COLUNAS: é comum o relatório imprimir DOIS pares "nome valor" lado a lado na mesma linha (ex: "Delivery 46    Delivery Agendado 1"). O valor de um nome é o número IMEDIATAMENTE à direita DELE — nunca o último número da linha, nunca o da coluna vizinha. Antes de responder, confira nome por nome: se o número que você ia mandar pertence ao nome do lado, você desalinhou as colunas.
+- ZERO NÃO SE PULA: linha que vale 0 é informação, e omitir ela desalinha tudo que vem depois. Se "Pick Up" está impresso valendo 0, mande 0 nesse campo — não deixe o 0 de fora e não passe pra ele o valor da linha de baixo.
+- "textoOrigem" tem que ser a linha REAL de onde o número saiu, copiada como está impressa, COM o nome junto (ex: "Dine In 6"). O servidor confere o nome do campo contra esse texto pra detectar troca de coluna, então textoOrigem que não bate com o campo faz a leitura ser recusada — copiar a linha certa é parte da resposta, não enfeite.
 - PORCENTAGEM NUNCA É O VALOR. É comum a linha ter o nome, depois a participação em % e só então o valor em dinheiro (ex: "CarryOut 17,7% R$515,20" → o valor é 515.20, nunca 17.7). Qualquer número acompanhado de "%" deve ser ignorado.
 - DUAS LINHAS PARECIDAS: o mesmo canal pode aparecer em mais de uma linha, variantes do mesmo nome (ex: dois tipos de Delivery, um por tipo de entregador), e normalmente só uma delas é usada - a outra fica zerada o tempo todo. Quando duas linhas parecidas disputam a mesma chave da lista e só uma tem valor, mande a que tem valor. Se as duas tiverem valor, não escolha no chute: mande as duas pra "naoIdentificados" com o texto de origem de cada uma, pro gerente decidir.
 - IMPORTANTE: os números estão em formato brasileiro (ponto separa milhar, vírgula separa decimal - ex: "1.234,56"). Converta todo valor para o padrão JSON: só ponto decimal, sem separador de milhar (ex: 1234.56). Nunca escreva número com vírgula no JSON - isso quebra o formato.
@@ -147,6 +150,50 @@ function extrairJson(texto) {
   limpo = limpo.replace(/:(\s*)(-?)((?:\d{1,3}(?:\.\d{3})+|\d+)),(\d{1,2})(?=\s*[,}\]])/g,
     (m, esp, sinal, inteiro, dec) => `:${esp}${sinal}${inteiro.replace(/\./g, '')}.${dec}`);
   return JSON.parse(limpo);
+}
+
+// ---------------------------------------------- conferência da leitura
+//
+// O caso real que motivou isto: num "Resumo de Pedidos" impresso em DUAS
+// colunas, o modelo devolveu Cancelado=6 (que era o valor de Dine In),
+// PickUp=4 (valor de "Editado", a coluna da direita) e Retornado=1 - com
+// Dine In vazio. Os três campos errados eram justamente os que valiam 0 no
+// relatório. Reler a mesma foto deu um resultado DIFERENTE, também errado:
+// não é foto ruim, é desalinhamento de coluna, e ele não é estável.
+//
+// O que salva sem custar nada: o modelo já devolve `textoOrigem`, a linha de
+// onde tirou o número. Se o nome do campo não aparece nessa linha, o par
+// nome↔valor está trocado - e isso dá pra conferir aqui, de forma
+// determinística, sem uma segunda chamada ao modelo.
+//
+// Conservador de propósito: só acusa quando NÃO HÁ nenhuma correspondência.
+// Alarme falso é pior que silêncio aqui - ele treina quem lança a ignorar o
+// aviso, e aí o aviso não serve pra nada no dia em que estiver certo.
+function normalizarTexto(txt) {
+  return String(txt == null ? '' : txt)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')   // tira acento
+    .toLowerCase()
+    .replace(/\((?:r\$|kg|calc|otd|un|min)\)/g, ' ')     // sufixo de unidade do cadastro
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function rotuloBateComOrigem(label, textoOrigem) {
+  const orig = normalizarTexto(textoOrigem);
+  const rot = normalizarTexto(label);
+  // sem letra pra comparar (origem só com o número, ou vazia) não dá pra
+  // conferir - não acusa, porque não saber não é o mesmo que estar errado
+  if (!/[a-z]/.test(orig) || !/[a-z]/.test(rot)) return true;
+  const semEspaco = (t) => t.replace(/ /g, '');
+  const cr = semEspaco(rot);
+  const co = semEspaco(orig);
+  if (!cr) return true;
+  // "PickUp" (cadastro) x "Pick Up 0" (relatório): o nome é o mesmo, o
+  // espaço é que muda - comparar sem espaço resolve os dois sentidos
+  if (co.includes(cr) || cr.includes(co.replace(/[0-9]+/g, ''))) return true;
+  // rótulo composto casa por palavra: "Media Saida de Loja (OTD)" contra uma
+  // linha que imprime só parte do nome
+  return rot.split(' ').filter((p) => p.length >= 4).some((p) => co.includes(p));
 }
 
 const numeroOuNull = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
@@ -217,6 +264,7 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
   const porChave = new Map(todos.map((c) => [chaveDe(c.secao, c.campo), c]));
   const vistos = new Set();
   const itens = [];
+  const suspeitos = [];
   (Array.isArray(dados.campos) ? dados.campos : []).forEach((c) => {
     const chave = String((c && c.chave) || '');
     const def = porChave.get(chave);
@@ -226,13 +274,13 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
     const valor = (def.secao === 'kpi' && def.tipo === 'texto') ? textoOuNull(c && c.valor) : numeroOuNull(c && c.valor);
     if (valor == null || vistos.has(chave)) return;
     vistos.add(chave);
-    itens.push({
-      secao: def.secao,
-      campo: def.campo,
-      label: def.label,
-      valor,
-      textoOrigem: c.textoOrigem ? String(c.textoOrigem).slice(0, 80) : null,
-    });
+    const textoOrigem = c.textoOrigem ? String(c.textoOrigem).slice(0, 80) : null;
+    const item = { secao: def.secao, campo: def.campo, label: def.label, valor, textoOrigem };
+    // valor cuja linha de origem não menciona o campo: NÃO preenche sozinho.
+    // Um campo vazio quem lança preenche olhando a foto; um valor errado só
+    // é notado por quem conferir tudo de novo - e o fechamento do dia já foi.
+    if (rotuloBateComOrigem(def.label, textoOrigem)) itens.push(item);
+    else suspeitos.push(item);
   });
 
   const naoIdentificados = (Array.isArray(dados.naoIdentificados) ? dados.naoIdentificados : [])
@@ -242,6 +290,9 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
   return {
     data: /^\d{4}-\d{2}-\d{2}$/.test(dados.data) ? dados.data : null,
     itens,
+    // leitura recusada pela conferência: a tela mostra campo x linha de
+    // origem e deixa quem lança digitar, em vez de preencher errado calado
+    suspeitos,
     naoIdentificados,
     // campos que a loja tem mas nao apareceram na imagem: a tela avisa quais
     // continuam pra preencher na mao, em vez de deixar o gerente descobrir
@@ -252,4 +303,4 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
   };
 }
 
-module.exports = { ativo, lerCanais, extrairJson };
+module.exports = { ativo, lerCanais, extrairJson, rotuloBateComOrigem, normalizarTexto };

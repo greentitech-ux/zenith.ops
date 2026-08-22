@@ -859,7 +859,14 @@ async function realizarLeituraRelatorio(){
       // canal zerado no relatorio fica EM BRANCO, nao "0": em branco o campo
       // continua legivel de longe como "nao teve venda aqui", e o fechamento
       // trata vazio como zero do mesmo jeito
-      if(Number(it.valor) === 0){ el.value=''; el.style.borderColor=''; zerados++; return; }
+      if(Number(it.valor) === 0){
+        el.value=''; el.style.borderColor='';
+        // vazio-porque-leu-zero e vazio-porque-nao-achou ficavam IDENTICOS na
+        // tela. Isso invertia o sinal de confianca: a leitura certa (0) some,
+        // e a errada aparece preenchida e verde, parecendo mais confiavel.
+        el.title = 'Lido no relatório como zero — em branco conta como zero.';
+        zerados++; return;
+      }
       el.value = it.valor;
       el.style.borderColor = 'var(--ok)'; // marca o que veio da foto, pra conferir
       if(it.secao === 'forma') formasOk++; else if(it.secao === 'kpi') kpisOk++; else canaisOk++;
@@ -869,6 +876,18 @@ async function realizarLeituraRelatorio(){
     // já preencheu fica travado com aquele valor, sem liberar por engano; um
     // campo que a loja já liberou e digitou numa tentativa anterior também
     // não é mexido de novo aqui.
+    // Leitura que a conferencia recusou (o nome do campo nao aparece na linha
+    // de onde o numero saiu - ver rotuloBateComOrigem em canaisVendaOcr.js).
+    // Libera pra digitar na mao, do mesmo jeito que campo nao encontrado: o
+    // valor existe, mas nao da pra confiar em qual campo ele e.
+    (data.suspeitos||[]).forEach(sp=>{
+      const el = elDoItem(sp);
+      if(!el) return;
+      el.readOnly = false;
+      el.classList.remove('campo-automatico');
+      el.style.borderColor = 'var(--bad)';
+      el.title = `A foto trouxe um valor pra este campo, mas ele veio da linha "${sp.textoOrigem||'?'}" — confira no relatório e digite.`;
+    });
     (data.faltando||[]).forEach(f=>{
       const el = elDoItem(f);
       if(!el || !el.readOnly || el.value) return;
@@ -887,6 +906,13 @@ async function realizarLeituraRelatorio(){
     const partes = [resumo.length
       ? `<b style="color:var(--ok);">✔ Preenchido ${origem}: ${resumo.join(', ')}.</b> Confira valor por valor antes de enviar — se algum estiver errado, tire a foto de novo.`
       : `<b style="color:var(--warn);">Não consegui preencher nenhum campo com ${plural ? 'essas fotos' : 'essa foto'}.</b> Confira se o relatório está inteiro e legível na imagem.`];
+    if((data.suspeitos||[]).length){
+      // vem ANTES dos outros avisos de proposito: e o unico que diz que a
+      // leitura errou, e errar calado num fechamento e o pior desfecho
+      partes.push(`<span style="color:var(--bad);"><b>⚠ Não preenchi ${data.suspeitos.length} campo(s) porque o valor não bateu com a linha do relatório:</b> `
+        + data.suspeitos.map(sp=>`${escapeHtml(sp.label)} (o número ${sp.valor} veio da linha "${escapeHtml(sp.textoOrigem||'?')}")`).join('; ')
+        + `. Confira no relatório e digite à mão — os campos foram liberados.</span>`);
+    }
     if(zerados){
       partes.push(`<span style="color:var(--muted);">${zerados} campo(s) vieram zerados no relatório e ficaram em branco — em branco conta como zero.</span>`);
     }
