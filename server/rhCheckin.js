@@ -347,6 +347,18 @@ async function editarHorarios(id, { entradaData, entradaHora, saidaData, saidaHo
   return { ...atual, ...merge };
 }
 
+// marca cada check-in como "diária já lançada", apontando pro formulário de
+// pagamento gerado - é essa marca que impede a MESMA diária de entrar em dois
+// formulários (pagamento em dobro). Quem confere a marca antes de gerar é a
+// rota (ver gerar-formulario-diarias em index.js); aqui só grava o vínculo.
+async function vincularFormularioDiarias(ids, formularioId) {
+  const agora = new Date().toISOString();
+  for (const id of ids) {
+    await COLLECTION.doc(String(id)).update({ diariaFormularioId: formularioId, diariaVinculadaEm: agora, atualizadoEm: agora });
+  }
+  checkinCache.invalidar();
+}
+
 async function remover(id) {
   const snap = await COLLECTION.doc(id).get();
   if (!snap.exists) throw new Error('Check-in não encontrado.');
@@ -419,5 +431,6 @@ module.exports = {
   registrarEntrada, registrarSaida, buscarAbertoDoFuncionario, listPorFuncionario,
   listByUnidadesData, listAbertos, listPendentesAprovacao, resumoSemana, contagemPorFuncionario,
   aprovarPendencia, recusarPendencia, editarHorarios, encerrarManual, remover, getOne, hojeBrasilia,
+  vincularFormularioDiarias,
   invalidar: () => checkinCache.invalidar(),
 };

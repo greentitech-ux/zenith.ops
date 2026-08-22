@@ -66,6 +66,35 @@ const TIPOS = {
     totalRotulo: 'VALOR TOTAL (R$)',
     assinantes: [{ papel: 'gerente', rotulo: 'Gerente da unidade' }],
   },
+  // Variante das diárias gerada pelo RH a partir dos CHECK-INS de um extra/
+  // candidato em teste (1 check-in = 1 diária = 1 linha). Difere do "diarias"
+  // de papel em dois pontos, os dois de propósito:
+  // - o favorecido é UMA pessoa só (a do cadastro RH), então os dados de
+  //   pagamento (CPF/PIX/banco) moram no cabeçalho, não por linha;
+  // - assina o par Favorecido + Responsável (pedido do Master: "gerando só o
+  //   link de assinatura do responsável e do Favorecido"), em vez de uma
+  //   assinatura por linha + gerente.
+  diariasRh: {
+    rotulo: 'Diárias por check-in (RH)',
+    titulo: 'PAGAMENTO DE DIÁRIA',
+    cabecalho: [
+      { key: 'cnpj', label: 'CNPJ' },
+      { key: 'favorecido', label: 'FAVORECIDO' },
+      { key: 'cpf', label: 'CPF' },
+      { key: 'banco', label: 'BANCO' },
+      { key: 'chavePix', label: 'CHAVE PIX' },
+    ],
+    colunas: [
+      { key: 'data', label: 'DATA DA DIÁRIA' },
+      { key: 'nome', label: 'NOME' },
+      { key: 'valor', label: 'VALOR (R$)', valor: true },
+    ],
+    totalRotulo: 'VALOR TOTAL (R$)',
+    assinantes: [
+      { papel: 'favorecido', rotulo: 'Favorecido' },
+      { papel: 'responsavel', rotulo: 'Responsável' },
+    ],
+  },
   avulso: {
     rotulo: 'Pagamento Avulso',
     titulo: 'SOLICITAÇÃO DE PAGAMENTO AVULSO',

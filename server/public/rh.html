@@ -263,6 +263,16 @@
           <input type="text" id="c-cargo" maxlength="60" placeholder="Ex: Atendente, Cozinha, Entregador">
         </div>
       </div>
+      <div class="grid2">
+        <div>
+          <label>Chave PIX (pagamento das diárias)</label>
+          <input type="text" id="c-chave-pix" maxlength="120" placeholder="CPF, celular ou e-mail">
+        </div>
+        <div>
+          <label>Banco</label>
+          <input type="text" id="c-banco" maxlength="80" placeholder="Ex: Nubank, Caixa">
+        </div>
+      </div>
       <div class="grid2 hidden" id="doc-campos-lidos">
         <div>
           <label>CPF</label>
@@ -437,6 +447,16 @@
       </div>
       <div class="grid2">
         <div>
+          <label>Chave PIX (diárias)</label>
+          <input type="text" id="ed-chave-pix" maxlength="120">
+        </div>
+        <div>
+          <label>Banco</label>
+          <input type="text" id="ed-banco" maxlength="80">
+        </div>
+      </div>
+      <div class="grid2">
+        <div>
           <label>Data de nascimento 🎂</label>
           <input type="date" id="ed-nascimento">
         </div>
@@ -476,6 +496,45 @@
         <div class="msg hidden" id="msg-doc"></div>
         <div id="ed-docs-lista"></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- pagamento de diárias por check-in (Master) -->
+<div class="overlay hidden" id="overlay-diarias">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharDiarias()">✕</span>
+    <div class="sheet">
+      <h3>💵 Pagar diárias</h3>
+      <div class="sub" id="di-sub"></div>
+      <div id="di-corpo">
+        <label>Check-ins ainda não pagos (1 check-in = 1 diária = 1 linha do formulário)</label>
+        <div id="di-lista" style="display:flex;flex-direction:column;gap:4px;margin:4px 0 10px;"></div>
+        <div class="grid2">
+          <div>
+            <label>Valor da diária (R$)</label>
+            <input type="text" id="di-valor" inputmode="decimal" placeholder="Ex: 120,00">
+          </div>
+          <div>
+            <label>Unidade do formulário</label>
+            <select id="di-unidade"></select>
+          </div>
+        </div>
+        <div class="grid2">
+          <div>
+            <label>Chave PIX do favorecido</label>
+            <input type="text" id="di-chave-pix" maxlength="120" placeholder="CPF, celular ou e-mail">
+          </div>
+          <div>
+            <label>Banco</label>
+            <input type="text" id="di-banco" maxlength="80" placeholder="Ex: Nubank, Caixa">
+          </div>
+        </div>
+        <div class="sub" style="font-size:10.5px;margin-top:2px;">a chave PIX e o banco ficam salvos na ficha da pessoa - o próximo pagamento já vem preenchido.</div>
+        <div class="msg hidden" id="msg-diarias"></div>
+        <button class="btn-primary" type="button" id="btn-gerar-diarias" onclick="gerarFormularioDiarias()">Gerar formulário de pagamento</button>
+      </div>
+      <div id="di-resultado" class="hidden"></div>
     </div>
   </div>
 </div>
@@ -1027,6 +1086,10 @@ function acoesDeCadastroHtml(f){
     f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 currículo</a>` : '',
     f.status!=='inativo' ? `<button type="button" class="link-btn" onclick="copiarLinkColaborador('${f.id}')">🔗 link de auto-atendimento</button>` : '',
     f.status!=='inativo' ? `<button type="button" class="link-btn" onclick="gerarNovoLinkColaborador('${f.id}')">🔄 gerar novo link</button>` : '',
+    // extra e candidato em teste recebem por DIÁRIA (1 check-in = 1 diária):
+    // o Master gera daqui o formulário de pagamento já com os links de
+    // assinatura do Favorecido e do Responsável
+    IS_MASTER && f.status!=='inativo' && f.tipoCadastro!=='efetivado' ? `<button type="button" class="link-btn" style="color:var(--ok);" onclick="abrirDiarias('${f.id}')">💵 pagar diárias</button>` : '',
   ].filter(Boolean).join('\n      ');
 }
 
@@ -1860,6 +1923,7 @@ async function abrirDetalheFuncionario(id){
     linha('Status', esc(STATUS_FUNCIONARIO_LABEL[f.status]||f.status)),
     linha('Cargo/função', esc(f.cargoFuncao)),
     linha('Contato', esc(f.contato)),
+    linha('Chave PIX (diárias)', esc(f.chavePix ? `${f.chavePix}${f.banco?' · '+f.banco:''}` : '')),
     linha('Nascimento', `${fmtData(f.dataNascimento)}${f.dataNascimento?` 🎂 ${escapeHtml(MESES_NOMES[Number(f.dataNascimento.slice(5,7))-1]||'')}`:''}`),
     linha(labelDataAdmissaoOuInicio(f.tipoCadastro), `${fmtData(f.dataAdmissao)}${tempoCasaTextoCli(f.dataAdmissao)?` · ⏱️ ${tempoCasaTextoCli(f.dataAdmissao)} de casa`:''}`),
   ];
@@ -1988,6 +2052,100 @@ async function copiarLinkColaborador(id){
   }
 }
 
+// ---------- pagamento de diárias por check-in (Master) ----------
+// 1 check-in = 1 diária = 1 linha no formulário de Pagamento de Diária.
+// O servidor devolve os DOIS links de assinatura (Favorecido + Responsável)
+// na hora - é só mandar cada um pro WhatsApp da pessoa certa.
+let DIARIAS_FUNC_ID = null;
+let LINKS_DIARIAS = [];
+function fmtHoraBr(iso){
+  if(!iso) return '';
+  try{ return new Date(iso).toLocaleTimeString('pt-BR',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; }
+}
+async function abrirDiarias(id){
+  DIARIAS_FUNC_ID = id;
+  const msg = document.getElementById('msg-diarias');
+  msg.classList.add('hidden');
+  const res = document.getElementById('di-resultado');
+  res.classList.add('hidden'); res.innerHTML='';
+  document.getElementById('di-corpo').classList.remove('hidden');
+  document.getElementById('di-sub').textContent = 'Carregando...';
+  document.getElementById('di-lista').innerHTML = '';
+  document.getElementById('overlay-diarias').classList.remove('hidden');
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${id}/diarias-pendentes`);
+    const d = await resp.json();
+    if(!resp.ok) throw new Error(d.error||'Erro ao carregar.');
+    document.getElementById('di-sub').textContent = `${d.funcionario.nome} · ${UNIDADES_NOMES[d.funcionario.unidade]||d.funcionario.unidade}`;
+    const lista = document.getElementById('di-lista');
+    if(!d.checkins.length){
+      lista.innerHTML = '<div class="sub">Nenhum check-in pendente de pagamento - os check-ins dessa pessoa já entraram em formulário (ou ainda não houve check-in).</div>';
+    } else {
+      lista.innerHTML = d.checkins.map(c=>`<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+        <input type="checkbox" value="${escapeHtml(c.id)}" checked style="width:auto;margin:0;">
+        <span>${fmtData(c.data)} · ${fmtHoraBr(c.entrada)}${c.saida?` → ${fmtHoraBr(c.saida)}`:' (ponto ainda aberto)'}</span>
+      </label>`).join('');
+    }
+    document.getElementById('btn-gerar-diarias').disabled = !d.checkins.length;
+    document.getElementById('di-chave-pix').value = d.funcionario.chavePix||'';
+    document.getElementById('di-banco').value = d.funcionario.banco||'';
+    const sel = document.getElementById('di-unidade');
+    sel.innerHTML = '<option value="">— escolha a empresa que paga —</option>' +
+      d.unidadesFormulario.map(u=>`<option value="${escapeHtml(u.unidade)}">${escapeHtml(u.unidade)}</option>`).join('');
+    if(d.unidadeFormularioSugerida) sel.value = d.unidadeFormularioSugerida;
+  }catch(err){
+    document.getElementById('di-sub').textContent = '';
+    msg.textContent = err.message; msg.className='msg err'; msg.classList.remove('hidden');
+  }
+}
+function fecharDiarias(){ document.getElementById('overlay-diarias').classList.add('hidden'); DIARIAS_FUNC_ID=null; }
+async function gerarFormularioDiarias(){
+  const msg = document.getElementById('msg-diarias');
+  msg.classList.add('hidden');
+  const ids = Array.from(document.querySelectorAll('#di-lista input[type=checkbox]:checked')).map(el=>el.value);
+  const btn = document.getElementById('btn-gerar-diarias');
+  btn.disabled = true;
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${DIARIAS_FUNC_ID}/gerar-formulario-diarias`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        checkinIds: ids,
+        valorDiaria: document.getElementById('di-valor').value,
+        chavePix: document.getElementById('di-chave-pix').value,
+        banco: document.getElementById('di-banco').value,
+        unidadeFormulario: document.getElementById('di-unidade').value,
+      }),
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error||'Erro ao gerar o formulário.');
+    LINKS_DIARIAS = (data.assinaturas||[]).filter(a=>a.link);
+    const total = (Number(data.valorTotal)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const res = document.getElementById('di-resultado');
+    res.innerHTML = `<div class="msg ok">✅ Formulário Ticket #${data.numeroTicket} gerado: ${(data.linhas||[]).length} diária(s) · total R$ ${total}.</div>
+      <div class="sub" style="margin:10px 0 6px;">Agora é só mandar cada link pra pessoa certa assinar pelo celular. O PDF (com as assinaturas) sai na página Formulários.</div>
+      ${LINKS_DIARIAS.map((a,i)=>`<div style="margin:8px 0;">
+        <b style="font-size:12.5px;">${escapeHtml(a.rotulo)}</b>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:3px;">
+          <input type="text" readonly value="${escapeHtml(a.link)}" style="flex:1;font-size:11px;" onclick="this.select()">
+          <button type="button" class="btn-secundario" style="padding:6px 12px;" onclick="copiarLinkDiarias(${i})">copiar</button>
+        </div>
+      </div>`).join('')}
+      <a class="link-btn" href="/formularios.html">📄 abrir página Formulários</a>`;
+    document.getElementById('di-corpo').classList.add('hidden');
+    res.classList.remove('hidden');
+    carregar().catch(()=>{});
+  }catch(err){
+    msg.textContent = err.message; msg.className='msg err'; msg.classList.remove('hidden');
+    btn.disabled = false;
+  }
+}
+async function copiarLinkDiarias(i){
+  const a = LINKS_DIARIAS[i];
+  if(!a) return;
+  try{ await navigator.clipboard.writeText(a.link); alert(`Link de assinatura (${a.rotulo}) copiado!`); }
+  catch(e){ prompt('Copie o link abaixo:', a.link); }
+}
+
 // invalida o link atual e gera outro - quem tinha o link antigo perde o
 // acesso na hora (uso: link vazou, foi parar em grupo errado etc)
 async function gerarNovoLinkColaborador(id){
@@ -2047,6 +2205,8 @@ document.getElementById('form-cadastrar').addEventListener('submit', async (e)=>
     docs.forEach(d=>fd.append('documento', d));
     fd.append('contato', document.getElementById('c-contato').value);
     fd.append('cargoFuncao', document.getElementById('c-cargo').value);
+    fd.append('chavePix', document.getElementById('c-chave-pix').value);
+    fd.append('banco', document.getElementById('c-banco').value);
     fd.append('dataNascimento', document.getElementById('c-nascimento').value);
     fd.append('dataAdmissao', document.getElementById('c-admissao').value);
     fd.append('tipoCadastro', TIPO_CADASTRO);
@@ -2088,6 +2248,8 @@ function abrirEditar(id){
   document.getElementById('ed-nome').value = f.nome||'';
   document.getElementById('ed-contato').value = f.contato||'';
   document.getElementById('ed-cargo').value = f.cargoFuncao||'';
+  document.getElementById('ed-chave-pix').value = f.chavePix||'';
+  document.getElementById('ed-banco').value = f.banco||'';
   document.getElementById('ed-nascimento').value = f.dataNascimento||'';
   document.getElementById('ed-admissao').value = f.dataAdmissao||'';
   document.getElementById('ed-status').value = f.status||'ativo';
@@ -2108,6 +2270,8 @@ async function salvarEdicao(){
       nome: document.getElementById('ed-nome').value,
       contato: document.getElementById('ed-contato').value,
       cargoFuncao: document.getElementById('ed-cargo').value,
+      chavePix: document.getElementById('ed-chave-pix').value,
+      banco: document.getElementById('ed-banco').value,
       dataNascimento: document.getElementById('ed-nascimento').value || null,
       dataAdmissao: document.getElementById('ed-admissao').value,
       status: document.getElementById('ed-status').value,

@@ -113,6 +113,12 @@
   <label>Cargo / função</label>
   <input type="text" id="cargo" maxlength="60" placeholder="Ex: Atendente, Cozinha, Entregador">
 
+  <label>Chave PIX pra receber as diárias</label>
+  <input type="text" id="chave-pix" maxlength="120" placeholder="CPF, celular ou e-mail">
+
+  <label>Banco da chave PIX</label>
+  <input type="text" id="banco" maxlength="80" placeholder="Ex: Nubank, Caixa, Itaú">
+
   <div class="grid2-doc hidden" id="doc-campos-lidos">
     <div>
       <label>CPF</label>
@@ -401,6 +407,8 @@ document.getElementById('curriculo').addEventListener('change', ()=>{
     fd.append('nome', document.getElementById('nome').value);
     fd.append('contato', document.getElementById('contato').value);
     fd.append('cargoFuncao', document.getElementById('cargo').value);
+    fd.append('chavePix', document.getElementById('chave-pix').value);
+    fd.append('banco', document.getElementById('banco').value);
     fd.append('dataNascimento', document.getElementById('nascimento').value);
     fd.append('curriculo', await comprimirImagem(arquivo));
     // só o que foi liberado pra digitação vai no corpo; o resto o servidor
