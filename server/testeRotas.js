@@ -4143,6 +4143,52 @@ setTimeout(async () => {
     console.log(`${errosVigia.length ? '✗' : '✓'} NOC: NOCZenith v17 blindado contra reinício (tarefa de boot SYSTEM + cedência + sem limite de 72h)${errosVigia.length ? ' - FALHOU: ' + errosVigia.join(' | ') : ''}`);
   }
 
+  // ---- CENTRAL DE ALERTAS: threads por máquina (como as fraudes do Monitor) ----
+  // O NOC repetia o par "sem conexão"/"reconectou" a cada oscilação da mesma
+  // máquina e a Central virava um paredão de cards iguais. A página agrupa em
+  // threads: mesmo tipo + mesma máquina, o mais novo à mostra e os anteriores
+  // recolhidos. A lógica é pura (marcada com [THREAD-PURO-*] no HTML) - este
+  // teste extrai o trecho e roda o agrupamento de verdade, com o mesmo
+  // formato de resumo que o push.js grava.
+  {
+    const htmlCa = require('fs').readFileSync(__dirname + '/public/central-alertas.html', 'utf8');
+    // o marcador de início fica no meio de um comentário - corta a partir da
+    // linha SEGUINTE a ele, senão o resto da frase entra como código solto
+    const m = /\[THREAD-PURO-INICIO\][^\n]*\n([\s\S]*?)\/\/ \[THREAD-PURO-FIM\]/.exec(htmlCa);
+    let okThreads = false;
+    let detalheThreads = 'trecho [THREAD-PURO] não encontrado na página';
+    if (m) {
+      try {
+        const mod = new Function(m[1] + '\nreturn { chaveThread, agruparEmThreads };')();
+        const alerta = (id, tipo, resumo, criadoEm) => ({ id, tipo, resumo, criadoEm, atendidoEm: null });
+        // ordem decrescente de criadoEm, como a API devolve
+        const itens = [
+          alerta('a6', 'noc-online', 'AEROCar-ATM01 · Dom Car Aero Recife voltou a responder.', '2026-08-22T16:10:00Z'),
+          alerta('a5', 'noc-offline', 'AEROCar-ATM01 · Dom Car Aero Recife parou de responder - verifique.', '2026-08-22T16:05:00Z'),
+          alerta('a4', 'noc-online', 'AEROCar-ATM01 · Dom Car Aero Recife voltou a responder.', '2026-08-22T15:49:00Z'),
+          alerta('a3', 'noc-offline', 'AEROCar-ATM01 · Dom Car Aero Recife parou de responder - verifique.', '2026-08-22T15:47:00Z'),
+          alerta('a2', 'noc-offline', 'DomCG-DISP · Dom Campina Grande parou de responder - verifique.', '2026-08-22T15:40:00Z'),
+          alerta('a1', 'rh-cadastro-pendente', 'Fulano · Dom Bessa aguardando aprovação.', '2026-08-22T15:30:00Z'),
+        ];
+        const ent = mod.agruparEmThreads(itens);
+        okThreads = ent.length === 4 // 6 cards viram 4 entradas
+          // thread de "reconectou" da ATM01: o das 16:10 na frente, o das 15:49 recolhido
+          && ent[0].principal.id === 'a6' && ent[0].antigos.length === 1 && ent[0].antigos[0].id === 'a4'
+          // thread de "sem conexão" da ATM01: 16:05 na frente, 15:47 recolhido
+          && ent[1].principal.id === 'a5' && ent[1].antigos.length === 1 && ent[1].antigos[0].id === 'a3'
+          // máquina DIFERENTE não entra no thread da ATM01
+          && ent[2].principal.id === 'a2' && ent[2].antigos.length === 0
+          // tipo que não é NOC segue solto, sem chave de thread
+          && ent[3].principal.id === 'a1' && ent[3].chave === null
+          // e a ordem da lista continua a cronológica dos mais novos
+          && ent.map((e) => e.principal.id).join(',') === 'a6,a5,a2,a1';
+        detalheThreads = ent.map((e) => `${e.principal.id}+${e.antigos.length}`).join(' ');
+      } catch (e) { detalheThreads = e.message; }
+    }
+    if (!okThreads) ruins += 1;
+    console.log(`${okThreads ? '✓' : '✗'} Central de Alertas: oscilações da mesma máquina viram THREAD (mais novo à mostra, anteriores recolhidos): ${detalheThreads}`);
+  }
+
   // ---- KPI's operacionais: exportar a matriz + ranking de ofensores ----
   // O que importa provar aqui: (1) o CSV/PDF sai com EXATAMENTE a matriz que
   // a tela mandou (a conta e feita no navegador de proposito - ver o
