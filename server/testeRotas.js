@@ -1124,6 +1124,49 @@ setTimeout(async () => {
   console.log(`${okTeto ? '✓' : '✗'} link público: leitura guardada tem teto de MEMÓRIA (bytes), não só de quantidade`);
   OCR_FALSO.ligado = false;
 
+  // ---- LEITURA HÍBRIDA: PDF digital (gov.br) é lido LOCAL, sem modelo ----
+  // Estes testes rodam com o OCR falso DESLIGADO e sem ANTHROPIC_API_KEY no
+  // ambiente: se a leitura do PDF digital passasse pelo modelo, daria erro de
+  // configuração. Passar aqui PROVA que o caminho local não custa nada.
+  const PDFKit = require('pdfkit');
+  const gerarPdfTexto = (linhas) => new Promise((resolve) => {
+    const doc = new PDFKit();
+    const parts = [];
+    doc.on('data', (c) => parts.push(c));
+    doc.on('end', () => resolve(Buffer.concat(parts)));
+    linhas.forEach((l) => doc.text(l));
+    doc.end();
+  });
+  const pdfCnhDigital = await gerarPdfTexto([
+    'CARTEIRA NACIONAL DE HABILITACAO', 'NOME', 'MARIA DA EXTRACAO LOCAL',
+    'CPF 111.444.777-35', 'DATA NASCIMENTO 12/08/1996',
+  ]);
+  const leuLocal = await postarMultipart('/api/rh/ler-documento-publico', {},
+    { nome: 'cnh-digital.pdf', tipo: 'application/pdf', buffer: pdfCnhDigital }, 'documento');
+  let corpoLocal = {};
+  try { corpoLocal = JSON.parse(leuLocal.corpo); } catch (e) { corpoLocal = {}; }
+  const okLeuLocal = leuLocal.status === 200 && corpoLocal.origemLeitura === 'pdf-local'
+    && corpoLocal.nome === 'MARIA DA EXTRACAO LOCAL' && corpoLocal.cpf === '11144477735'
+    && corpoLocal.dataNascimento === '1996-08-12' && !!corpoLocal.docToken;
+  if (!okLeuLocal) ruins += 1;
+  console.log(`${okLeuLocal ? '✓' : '✗'} híbrido: CNH digital (PDF com texto) é lida LOCAL, de graça e sem API key: HTTP ${leuLocal.status} ${leuLocal.corpo.slice(0, 110)}`);
+
+  // PDF SEM camada de texto útil não pode "chutar": cai no modelo - e sem
+  // API key no ambiente, isso vira o erro de configuração (comportamento
+  // conservador provado: local só assume com nome + CPF/nascimento validados)
+  const pdfSemTexto = await postarMultipart('/api/rh/ler-documento-publico', {},
+    { nome: 'escaneado.pdf', tipo: 'application/pdf', buffer: Buffer.from('%PDF-1.4 sem camada de texto') }, 'documento');
+  const okPdfSemTexto = pdfSemTexto.status === 400 && /não está configurada/i.test(pdfSemTexto.corpo);
+  if (!okPdfSemTexto) ruins += 1;
+  console.log(`${okPdfSemTexto ? '✓' : '✗'} híbrido: PDF sem texto extraível NÃO é chutado - cai no modelo (aqui, sem key, erro de config): HTTP ${pdfSemTexto.status} ${pdfSemTexto.corpo.slice(0, 80)}`);
+
+  // foto continua exigindo o modelo (comportamento de antes preservado)
+  const fotoSemKey = await postarMultipart('/api/rh/ler-documento-publico', {},
+    { nome: 'rg.png', tipo: 'image/png', buffer: pngFalso }, 'documento');
+  const okFotoSemKey = fotoSemKey.status === 400 && /não está configurada/i.test(fotoSemKey.corpo);
+  if (!okFotoSemKey) ruins += 1;
+  console.log(`${okFotoSemKey ? '✓' : '✗'} híbrido: foto sem API key ainda dá o mesmo erro de configuração de antes: HTTP ${fotoSemKey.status} ${fotoSemKey.corpo.slice(0, 80)}`);
+
   // A config de campos digitados na mão é lida ANTES do login: as duas telas
   // de cadastro (a interna e o link público) montam o formulário com ela, e
   // o link público não tem sessão. Precisa responder sem token.
