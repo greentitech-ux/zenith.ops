@@ -129,7 +129,6 @@ const texto = (v, max) => {
 // nem no "naoLidos", senao a tela cobraria da leitura um campo que ela nao
 // foi encarregada de trazer.
 async function lerDocumento({ arquivos, camposLidos }) {
-  if (!ativo()) throw new Error('Leitura automática de documento não está configurada neste servidor.');
   const campos = Array.isArray(camposLidos) && camposLidos.length
     ? TODOS_CAMPOS.filter((c) => camposLidos.includes(c))
     : TODOS_CAMPOS;
@@ -139,6 +138,14 @@ async function lerDocumento({ arquivos, camposLidos }) {
   if (fotos.length > MAX_ARQUIVOS) throw new Error(`Envie no máximo ${MAX_ARQUIVOS} imagens do documento.`);
 
   validarArquivosDocumento(fotos);
+  // HÍBRIDO: PDF do gov.br (CNH/RG digital) tem camada de texto - extrai
+  // LOCAL, de graça e determinístico, sem chamar o modelo. Foto/escaneado
+  // (ou PDF cujo texto não deu o essencial com prova) cai no modelo abaixo.
+  // Roda ANTES do gate da API key de propósito: PDF digital funciona até em
+  // servidor sem ANTHROPIC_API_KEY configurada.
+  const local = await tentarLeituraLocal(fotos, campos);
+  if (local) return local;
+  if (!ativo()) throw new Error('Leitura automática de documento não está configurada neste servidor.');
   const blocos = [];
   fotos.forEach((f, i) => {
     if (fotos.length > 1) blocos.push({ type: 'text', text: `Imagem ${i + 1} de ${fotos.length}:` });
@@ -164,7 +171,83 @@ async function lerDocumento({ arquivos, camposLidos }) {
     throw new Error('Não consegui ler esse documento. Tente uma foto mais nítida, com o documento inteiro e sem reflexo.');
   }
   if (dados.erro) throw new Error(String(dados.erro).slice(0, 200));
+  return montarResultado(dados, campos);
+}
 
+// ---------------------------------------------------------------------------
+// Extração LOCAL de PDF com camada de texto (o "híbrido"). Só assume a
+// leitura quando consegue o ESSENCIAL com prova: nome plausível E (CPF que
+// fecha o dígito OU nascimento com idade plausível). Qualquer dúvida devolve
+// null e o modelo assume - errado aqui vira ficha trabalhista errada.
+// ---------------------------------------------------------------------------
+let pdfjsPromise = null;
+function getPdfjs() {
+  if (!pdfjsPromise) pdfjsPromise = import('pdfjs-dist/legacy/build/pdf.mjs');
+  return pdfjsPromise;
+}
+
+async function extrairTextoPdf(buffer) {
+  try {
+    const { getDocument } = await getPdfjs();
+    const doc = await getDocument({ data: new Uint8Array(buffer), isEvalSupported: false, disableFontFace: true }).promise;
+    let texto = '';
+    for (let i = 1; i <= doc.numPages; i += 1) {
+      const tc = await (await doc.getPage(i)).getTextContent();
+      texto += tc.items.map((it) => it.str).join('\n') + '\n';
+    }
+    return texto;
+  } catch (e) {
+    return ''; // PDF escaneado/protegido: sem texto, o modelo assume
+  }
+}
+
+const MAIUSCULAS = "A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ";
+function camposDoTexto(textoPdf) {
+  const t = '\n' + String(textoPdf || '').replace(/\r/g, '') + '\n';
+  const out = { nome: null, dataNascimento: null, cpf: null, rg: null, nomeMae: null, tipoDocumento: null };
+  if (/CARTEIRA NACIONAL DE HABILITA/i.test(t)) out.tipoDocumento = 'CNH';
+  else if (/IDENTIDADE NACIONAL|CARTEIRA DE IDENTIDADE|C[ÉE]DULA DE IDENTIDADE/i.test(t)) out.tipoDocumento = 'RG';
+  // CPF: se houver mais de um CPF VÁLIDO diferente no texto, é ambíguo - null
+  const cpfs = [...new Set((t.match(/\d{3}\.?\d{3}\.?\d{3}[-.]?\d{2}/g) || []).map((x) => x.replace(/\D/g, '')).filter(cpfValido))];
+  if (cpfs.length === 1) out.cpf = cpfs[0];
+  const paraISO = (d, m, a) => `${a}-${m}-${d}`;
+  // nascimento: primeiro pelo RÓTULO; sem rótulo, só se EXATAMENTE uma data
+  // do texto tiver idade plausível (emissão é recente e validade é futura,
+  // então quase nunca competem)
+  const porRotulo = t.match(/NASC\w*\.?\s*[:\-]?\s*\n?\s*(\d{2})[\/.](\d{2})[\/.](\d{4})/i);
+  if (porRotulo) out.dataNascimento = nascimentoOuNull(paraISO(porRotulo[1], porRotulo[2], porRotulo[3]));
+  if (!out.dataNascimento) {
+    const plausiveis = [...new Set((t.match(/\b\d{2}[\/.]\d{2}[\/.]\d{4}\b/g) || [])
+      .map((s) => { const [d, m, a] = s.split(/[\/.]/); return nascimentoOuNull(paraISO(d, m, a)); })
+      .filter(Boolean))];
+    if (plausiveis.length === 1) out.dataNascimento = plausiveis[0];
+  }
+  // nome: o que vem depois do rótulo NOME (nunca FILIAÇÃO), na mesma linha ou
+  // na seguinte - e cortado em qualquer palavra que denuncie o rótulo seguinte
+  const mNome = t.match(new RegExp(`\\bNOME(?:\\s+COMPLETO)?\\s*[:\\-]?\\s*\\n?\\s*([${MAIUSCULAS}][${MAIUSCULAS}' ]{4,})`));
+  if (mNome) {
+    const corte = mNome[1].replace(/\s+/g, ' ')
+      .split(/\b(?:FILIA|DOC|CPF|NASC|DATA|REGISTRO|VALIDADE|HABILITA|CAT|IDENTIDADE|ORG|EMISS|NACIONALIDADE|NATURALIDADE|ASSINATURA|SEXO)\w*\b/)[0].trim();
+    if (new RegExp(`^[${MAIUSCULAS}' ]+$`).test(corte) && corte.split(' ').length >= 2 && corte.length <= 150) out.nome = corte;
+  }
+  return out;
+}
+
+async function tentarLeituraLocal(fotos, campos) {
+  if (!fotos.every((f) => String(f.mimeType || '').toLowerCase() === 'application/pdf')) return null;
+  let textoTudo = '';
+  for (const f of fotos) textoTudo += await extrairTextoPdf(f.buffer) + '\n';
+  if (textoTudo.replace(/\s+/g, '').length < 60) return null; // escaneado sem texto de verdade
+  const d = camposDoTexto(textoTudo);
+  if (!d.nome || (!d.cpf && !d.dataNascimento)) return null; // sem o essencial provado, modelo assume
+  return { ...montarResultado(d, campos), origemLeitura: 'pdf-local' };
+}
+
+// monta a resposta final a partir dos dados crus - MESMO pos-processamento
+// pros dois caminhos (modelo e extração local de PDF): CPF só entra com
+// dígito verificador fechando, nascimento só com idade plausível, campo não
+// pedido volta null, e naoLidos diz à tela o que faltou
+function montarResultado(dados, campos) {
   const cpfDigitos = String(dados.cpf || '').replace(/\D/g, '');
   const cpf = cpfValido(cpfDigitos) ? cpfDigitos : null;
   const dataNascimento = nascimentoOuNull(dados.dataNascimento);

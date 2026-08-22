@@ -1361,9 +1361,8 @@ async function responderLeituraDocumento(req, res) {
     // valida formato ANTES de gastar teto/modelo: HEIC do iPhone ou tipo fora
     // do padrão viravam erro críptico da API na cara do candidato
     documentoIdentidadeOcr.validarArquivosDocumento(arquivos);
-    if (!documentoIdentidadeOcr.ativo()) {
-      return res.status(400).json({ error: 'Leitura automática de documento não está configurada neste servidor.' });
-    }
+    // sem checagem de ativo() aqui: PDF digital é lido localmente dentro de
+    // lerDocumento mesmo sem API key - só foto/escaneado exige o modelo
     const camposLidos = await rhCamposConfig.camposLidosDoDocumento();
     const leitura = await documentoIdentidadeOcr.lerDocumento({ arquivos, camposLidos });
     // guarda a leitura E os arquivos pro envio não precisar subir tudo de novo
