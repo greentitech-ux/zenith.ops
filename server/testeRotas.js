@@ -537,6 +537,37 @@ setTimeout(async () => {
   if (!okOcrConfere) ruins += 1;
   console.log(`${okOcrConfere ? '✓' : '✗'} Leitura por foto: valor cuja linha de origem não menciona o campo é recusado (troca de coluna)`);
 
+  // O quadro "Extreme Late Deliveries" imprime as DUAS coisas: a contagem por
+  // faixa (coluna #) e, na última linha, a taxa por mil. Com o campo "Extremo"
+  // guardando quantidade, pegar a linha da taxa troca "2 pedidos" por "43,48"
+  // - números que não se parecem, mas que ninguém nota trocados no formulário.
+  let okTaxa = false;
+  try {
+    const ocr = require('/home/user/adyen-monitor/server/canaisVendaOcr.js');
+    const taxaEmContagem = ocr.valorDeTaxaEmCampoDeContagem;
+    const casos = {
+      'campo de contagem recebendo "Per 1000" é recusado':
+        taxaEmContagem('Extremo', 'Per 1000* 43,48') === true,
+      'variação em português também é pega':
+        taxaEmContagem('Extremo', 'Extremos por mil 43,48') === true,
+      'a contagem da faixa passa': taxaEmContagem('Extremo', '40-45 Min 1') === false,
+      // o campo que PEDE a taxa continua aceitando a linha da taxa - senão o
+      // aviso dispararia justamente onde a leitura está certa
+      'campo cujo nome fala em por mil aceita a taxa':
+        taxaEmContagem('Extremos por mil', 'Per 1000* 43,48') === false,
+      'campo "Per 1000" aceita a taxa':
+        taxaEmContagem('Extreme Lates Per 1000', 'Per 1000* 43,48') === false,
+      // linha comum não pode virar suspeita por acaso
+      'linha normal não vira suspeita': taxaEmContagem('Delivery', 'Delivery 46') === false,
+      'origem vazia não vira suspeita': taxaEmContagem('Extremo', null) === false,
+    };
+    const falhas = Object.entries(casos).filter(([, ok]) => !ok).map(([n]) => n);
+    okTaxa = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTaxa = false; console.log('  erro: ' + e.message); }
+  if (!okTaxa) ruins += 1;
+  console.log(`${okTaxa ? '✓' : '✗'} Leitura por foto: taxa ("Per 1000") não entra em campo que pede quantidade`);
+
   // A prova está impressa no próprio relatório: o quadro "Resumo de Pedidos"
   // lista as parcelas e o Total. No dia do erro a leitura somava 69 e o
   // relatório dizia 64 - a conta não fechava, e ninguém fazia a conta.
@@ -605,7 +636,8 @@ setTimeout(async () => {
     const src = require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8');
     okPromptColunas = /DUAS COLUNAS/.test(src) && /ZERO NÃO SE PULA/.test(src)
       && /textoOrigem" tem que ser a linha REAL/.test(src)
-      && /"conferencias": quando o relatório imprime um TOTAL/.test(src);
+      && /"conferencias": quando o relatório imprime um TOTAL/.test(src)
+      && /TAXA NÃO É QUANTIDADE/.test(src);
   } catch (e) { okPromptColunas = false; }
   if (!okPromptColunas) ruins += 1;
   console.log(`${okPromptColunas ? '✓' : '✗'} Leitura por foto: o prompt avisa do layout em 2 colunas, do zero que não se pula e do textoOrigem conferido`);

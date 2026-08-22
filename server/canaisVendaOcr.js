@@ -118,6 +118,7 @@ Regras:
 - Não invente campo: se um campo da lista não aparece no relatório, simplesmente não o inclua no JSON (não mande com valor 0, porque 0 é uma informação diferente de "não apareceu"). Se ele aparece no relatório valendo 0,00 de verdade, aí sim mande 0.
 - "naoIdentificados" existe pra não perder dinheiro de vista: se o relatório mostra uma linha com valor que não casa com nenhuma chave cadastrada, ela vai pra lá e o gerente decide. É melhor mostrar "sobrou R$ 320 que não sei onde colocar" do que ignorar em silêncio.
 - Ignore linhas que claramente não são canal, forma de pagamento nem KPI cadastrado: total geral, subtotal, vendas totais/líquidas/royalty, imposto, número de clientes, mão de obra, cupom, fundo de caixa. EXCEÇÃO: se uma dessas linhas (ex: "quantidade de pedidos", "ticket médio", "quilometragem") tiver o mesmo nome/sentido de um KPI cadastrado na lista de KPI's acima, ela NÃO é ruído - extraia normalmente pra chave daquele KPI. Só ignore o que não está em nenhuma das 3 listas.
+- TAXA NÃO É QUANTIDADE. Linha de "Per 1000", "por mil", "a cada 1000" e QUALQUER coluna de % são TAXA, não contagem. Um mesmo quadro costuma imprimir as duas (o "Extreme Late Deliveries" lista as faixas com a contagem na coluna "#" e, na última linha, a taxa por mil). Se o campo cadastrado pede quantidade, o valor é a CONTAGEM - some a coluna "#" das faixas do quadro - e nunca a linha da taxa. Só mande a taxa se o próprio nome do campo falar em "por mil"/"per 1000"/"%".
 - "conferencias": quando o relatório imprime um TOTAL com as parcelas dele logo acima (ex: o quadro "Resumo de Pedidos" imprime Delivery, Carry Out, Pick Up, Dine In, Cancelado, Retornado e depois "Total"), transcreva esse quadro aqui: o total e TODAS as parcelas dele, com o valor de cada uma, na ordem impressa. Inclua a parcela mesmo que valha 0 e mesmo que ela não seja um campo cadastrado (nesse caso "chave": null) - o servidor SOMA as parcelas e compara com o total pra saber se a leitura desalinhou. Só transcreva quadro em que o total impresso é de fato a soma das parcelas listadas; se for total de dinheiro de um quadro e as parcelas de outro, não invente relação, deixe "conferencias" vazio.
 - LAYOUT EM DUAS COLUNAS: é comum o relatório imprimir DOIS pares "nome valor" lado a lado na mesma linha (ex: "Delivery 46    Delivery Agendado 1"). O valor de um nome é o número IMEDIATAMENTE à direita DELE — nunca o último número da linha, nunca o da coluna vizinha. Antes de responder, confira nome por nome: se o número que você ia mandar pertence ao nome do lado, você desalinhou as colunas.
 - ZERO NÃO SE PULA: linha que vale 0 é informação, e omitir ela desalinha tudo que vem depois. Se "Pick Up" está impresso valendo 0, mande 0 nesse campo — não deixe o 0 de fora e não passe pra ele o valor da linha de baixo.
@@ -181,6 +182,19 @@ function normalizarTexto(txt) {
     .replace(/\((?:r\$|kg|calc|otd|un|min)\)/g, ' ')     // sufixo de unidade do cadastro
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+}
+
+// "Per 1000" / "por mil" / "a cada 1000": a linha é uma TAXA. O quadro imprime
+// a contagem e a taxa lado a lado, então pegar a linha errada troca "2
+// pedidos" por "43,48" no mesmo campo - dois números que não se parecem, mas
+// que ninguém percebe trocados olhando só o formulário.
+// A exceção é o campo que PEDE a taxa: se o nome dele fala em por mil/%, a
+// linha da taxa é a certa e não há o que acusar.
+const MARCA_DE_TAXA = /(per\s*1000|por\s*mil|a\s*cada\s*(?:1000|mil)|\/\s*1000|per\s*thousand)/i;
+const pareceTaxa = (txt) => MARCA_DE_TAXA.test(String(txt == null ? '' : txt));
+
+function valorDeTaxaEmCampoDeContagem(label, textoOrigem) {
+  return pareceTaxa(textoOrigem) && !pareceTaxa(label);
 }
 
 function rotuloBateComOrigem(label, textoOrigem) {
@@ -326,7 +340,9 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
     // valor cuja linha de origem não menciona o campo: NÃO preenche sozinho.
     // Um campo vazio quem lança preenche olhando a foto; um valor errado só
     // é notado por quem conferir tudo de novo - e o fechamento do dia já foi.
-    if (rotuloBateComOrigem(def.label, textoOrigem)) itens.push(item);
+    const confiavel = rotuloBateComOrigem(def.label, textoOrigem)
+      && !valorDeTaxaEmCampoDeContagem(def.label, textoOrigem);
+    if (confiavel) itens.push(item);
     else suspeitos.push(item);
   });
 
@@ -366,4 +382,4 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
   };
 }
 
-module.exports = { ativo, lerCanais, extrairJson, rotuloBateComOrigem, normalizarTexto, conferirSomas };
+module.exports = { ativo, lerCanais, extrairJson, rotuloBateComOrigem, normalizarTexto, conferirSomas, valorDeTaxaEmCampoDeContagem };
