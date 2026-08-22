@@ -4107,6 +4107,42 @@ setTimeout(async () => {
   if (!okOscilacao) ruins += 1;
   console.log(`${okOscilacao ? '✓' : '✗'} NOC: oscilação de 1-3min não apita (painel registra, push só com queda confirmada; notebook nunca apita)`);
 
+  // ---- NOC: vigia BLINDADO contra reinício (NOCZenith v17) ----
+  // O que derrubou o parque em ago/2026: a tarefa agendada só disparava no
+  // LOGIN, então cada máquina reiniciada (lembrete semanal + botão da
+  // manutenção) ficava muda até alguém logar. Este bloco protege as peças
+  // da correção no script gerado - se alguém remover a tarefa de boot, o
+  // limite de execução ou a cedência entre instâncias, acusa aqui.
+  {
+    const vg = require('./vigiaScript.js');
+    const sInt = vg.montarScriptVigia({ codigo: 'DomCG', posto: 'GER', tipo: 'interno', agentToken: 'ab12' });
+    const sAt = vg.montarScriptVigia({ codigo: 'DomCG', posto: 'CX1', tipo: 'atendimento', agentToken: 'ab12' });
+    const htmlNoc = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const confVigia = {
+      'instala tarefa de BOOT (SYSTEM, -AtStartup) quando roda como Admin':
+        sInt.includes('-AtStartup') && sInt.includes('New-ScheduledTaskPrincipal -UserId "SYSTEM"') && sInt.includes('-Loop -Servico'),
+      'sem o limite de 72h do Windows que matava a tarefa em silêncio':
+        sInt.includes('-ExecutionTimeLimit (New-TimeSpan -Seconds 0)') && sInt.includes('MultipleInstances IgnoreNew'),
+      'instância de boot cede a vez pra de login (sem heartbeat/comando dobrado)':
+        sInt.includes('Marcar-UiAtiva') && sInt.includes('UiEstaAtiva') && sInt.includes('$EmEsperaServico'),
+      'auto-update repassa o -Servico (a de boot renasce como boot)':
+        sInt.includes('if ($Servico) { $argsNovo += " -Servico" }'),
+      'boot (SYSTEM) não abre janela de chat nem navegador':
+        sInt.includes('if (-not $Servico) { try { Iniciar-JanelaChat }') && sAt.includes('if (-not $Servico) {'),
+      'blindagem vale também pro tipo atendimento':
+        sAt.includes('-AtStartup') && sAt.includes('UiEstaAtiva'),
+      'versão bumpada (sem bump, nenhum agente vivo atualiza)':
+        vg.VERSAO_VIGIA >= 17,
+      'modal de reinício avisa que máquina sem Admin precisa de login':
+        /como Administrador/.test(htmlNoc) && /alguém fizer login no Windows/.test(htmlNoc),
+      'typo "calada há há" corrigido no card':
+        !htmlNoc.includes('calada há ${'),
+    };
+    const errosVigia = Object.entries(confVigia).filter(([, ok]) => !ok).map(([k]) => k);
+    if (errosVigia.length) ruins += 1;
+    console.log(`${errosVigia.length ? '✗' : '✓'} NOC: NOCZenith v17 blindado contra reinício (tarefa de boot SYSTEM + cedência + sem limite de 72h)${errosVigia.length ? ' - FALHOU: ' + errosVigia.join(' | ') : ''}`);
+  }
+
   // ---- KPI's operacionais: exportar a matriz + ranking de ofensores ----
   // O que importa provar aqui: (1) o CSV/PDF sai com EXATAMENTE a matriz que
   // a tela mandou (a conta e feita no navegador de proposito - ver o
