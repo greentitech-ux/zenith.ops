@@ -684,6 +684,73 @@ setTimeout(async () => {
   if (!okConsenso) ruins += 1;
   console.log(`${okConsenso ? '✓' : '✗'} Leitura por foto: leitura dupla - só preenche sozinho o valor em que as DUAS leituras bateram`);
 
+  // ---- DESEMPATE: 3ª leitura com modelo mais forte, só na divergência ----
+  // "Aumentar o modelo" do jeito barato: em vez de pagar o modelo caro em
+  // toda leitura, ele entra APENAS nos campos em que as duas leituras normais
+  // discordaram - melhor de 3. E maioria não revoga regra: suspeito
+  // determinístico (rótulo/taxa/soma) não é desempatável.
+  let okDesempate = false;
+  try {
+    const ocr = require('/home/user/adyen-monitor/server/canaisVendaOcr.js');
+    const item = (campo, valor) => ({ secao: 'kpi', campo, label: campo, valor, textoOrigem: `${campo} ${valor}` });
+    const consensoBase = {
+      itens: [item('atendimento', 2.31)],
+      suspeitos: [
+        { ...item('legtime', 8.91), candidatos: [8.91, 23.6], motivo: 'li duas vezes e os valores não bateram (1ª leitura: 8.91 · 2ª: 23.6)' },
+        { ...item('runtime', 23.6), candidatos: [23.6], motivo: 'só apareceu numa das duas leituras (valor lido: 23.6)' },
+        { ...item('extremo', 43.48), motivo: 'taxa em campo de quantidade' }, // determinístico: SEM candidatos
+      ],
+      somasRuins: [], naoIdentificados: [], faltando: [], data: '2026-08-21',
+    };
+    const clonar = () => JSON.parse(JSON.stringify(consensoBase));
+    const casos = {
+      'desempate confirma um dos candidatos: o campo entra com o vencedor': (() => {
+        const r = ocr.desempatar(clonar(), { itens: [item('legtime', 8.91), item('runtime', 23.6)] });
+        return r.itens.some((x) => x.campo === 'legtime' && x.valor === 8.91)
+          && r.itens.some((x) => x.campo === 'runtime' && x.valor === 23.6)
+          && !r.suspeitos.some((x) => x.campo === 'legtime');
+      })(),
+      'desempate traz um TERCEIRO valor: continua suspeito, com os três à mostra': (() => {
+        const r = ocr.desempatar(clonar(), { itens: [item('legtime', 15.84)] });
+        const sp = r.suspeitos.find((x) => x.campo === 'legtime');
+        return !!sp && /TERCEIRO valor \(15.84\)/.test(sp.motivo) && !r.itens.some((x) => x.campo === 'legtime');
+      })(),
+      'desempate não achou o campo: continua suspeito, dizendo isso': (() => {
+        const r = ocr.desempatar(clonar(), { itens: [] });
+        const sp = r.suspeitos.find((x) => x.campo === 'legtime');
+        return !!sp && /também não deu certeza/.test(sp.motivo);
+      })(),
+      'suspeito determinístico (taxa/rótulo/soma) NÃO é desempatável': (() => {
+        // o desempate "confirma" 43.48 - e mesmo assim o campo não entra:
+        // maioria de leituras não revoga a regra que o recusou
+        const r = ocr.desempatar(clonar(), { itens: [item('extremo', 43.48)] });
+        return !r.itens.some((x) => x.campo === 'extremo') && r.suspeitos.some((x) => x.campo === 'extremo');
+      })(),
+      'o que já estava verde não é tocado': (() => {
+        const r = ocr.desempatar(clonar(), { itens: [item('atendimento', 9.99)] });
+        return r.itens.find((x) => x.campo === 'atendimento').valor === 2.31;
+      })(),
+    };
+    const falhas = Object.entries(casos).filter(([, ok]) => !ok).map(([n]) => n);
+    okDesempate = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDesempate = false; console.log('  erro: ' + e.message); }
+  if (!okDesempate) ruins += 1;
+  console.log(`${okDesempate ? '✓' : '✗'} Leitura por foto: desempate (melhor de 3) com modelo forte só nos campos divergentes`);
+
+  // fonte: o desempate SÓ roda quando há divergência (o dia normal não paga a
+  // 3ª chamada), e os modelos saem de env var (trocar sem mexer em código)
+  let okDesempateFonte = false;
+  try {
+    const src = require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8');
+    okDesempateFonte = /process\.env\.OCR_MODELO \|\| 'claude-sonnet-5'/.test(src)
+      && /process\.env\.OCR_MODELO_DESEMPATE \|\| 'claude-opus-5'/.test(src)
+      && /if \(!pendentes\.length\) return consenso;/.test(src)
+      && /desempatar\(consenso, await umaLeitura\(MODELO_DESEMPATE\)\)/.test(src);
+  } catch (e) { okDesempateFonte = false; }
+  if (!okDesempateFonte) ruins += 1;
+  console.log(`${okDesempateFonte ? '✓' : '✗'} Leitura por foto: desempate só na divergência + modelos configuráveis por env`);
+
   // e a leitura de fato roda duas vezes (fonte): sem isso o consenso é teatro
   let okDupla = false;
   try {

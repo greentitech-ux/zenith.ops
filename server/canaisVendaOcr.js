@@ -32,8 +32,15 @@ function getCliente() {
 
 // Mesmo modelo da leitura de nota: relatorio de PDV e texto denso, em
 // tabela, com formato diferente por sistema (Domino's, Spoleto, cada PDV
-// imprime do seu jeito) - e o numero lido aqui vai direto pro Faturamento
-const MODELO = 'claude-sonnet-5';
+// imprime do seu jeito) - e o numero lido aqui vai direto pro Faturamento.
+// Configuravel por env pra trocar sem deploy de codigo (so redeploy de
+// config no Render): OCR_MODELO troca o modelo das 2 leituras normais.
+const MODELO = process.env.OCR_MODELO || 'claude-sonnet-5';
+// O DESEMPATE usa um modelo mais forte, e SO roda quando as duas leituras
+// normais discordaram - o dia normal nao paga por ele. E a versao barata de
+// "aumentar o modelo": em vez de pagar 5x em toda leitura, paga so no campo
+// e no dia em que o modelo normal tropecou.
+const MODELO_DESEMPATE = process.env.OCR_MODELO_DESEMPATE || 'claude-opus-5';
 
 // A chave que vai pro modelo e prefixada pela secao ("canal." / "forma.")
 // porque os dois cadastros sao independentes e podem ter o mesmo campo: uma
@@ -291,15 +298,17 @@ function reconciliarLeituras(a, b) {
     if (xb && valoresIguais(xa.valor, xb.valor)) {
       itens.push(xa);
     } else if (xb) {
-      suspeitos.push({ ...xa, motivo: `li duas vezes e os valores não bateram (1ª leitura: ${xa.valor} · 2ª: ${xb.valor})` });
+      // `candidatos` guarda os valores em disputa como DADO - e o que permite
+      // o desempate decidir por maioria sem interpretar texto de motivo
+      suspeitos.push({ ...xa, candidatos: [xa.valor, xb.valor], motivo: `li duas vezes e os valores não bateram (1ª leitura: ${xa.valor} · 2ª: ${xb.valor})` });
     } else {
-      suspeitos.push({ ...xa, motivo: `só apareceu numa das duas leituras (valor lido: ${xa.valor})` });
+      suspeitos.push({ ...xa, candidatos: [xa.valor], motivo: `só apareceu numa das duas leituras (valor lido: ${xa.valor})` });
     }
     decididos.add(k);
   }
   for (const [k, xb] of iB) {
     if (decididos.has(k)) continue;
-    suspeitos.push({ ...xb, motivo: `só apareceu numa das duas leituras (valor lido: ${xb.valor})` });
+    suspeitos.push({ ...xb, candidatos: [xb.valor], motivo: `só apareceu numa das duas leituras (valor lido: ${xb.valor})` });
     decididos.add(k);
   }
   // suspeito de QUALQUER uma das leituras continua suspeito - inclusive se a
@@ -337,6 +346,40 @@ function reconciliarLeituras(a, b) {
   };
 }
 
+// ------------------------------------------------------------- desempate
+//
+// Terceira leitura, com modelo mais forte, SOBRE os campos em que as duas
+// primeiras discordaram. Melhor de 3: o valor do desempate so vence se
+// coincidir com um dos candidatos (2 votos em 3). Um TERCEIRO valor
+// diferente nao decide nada - tres leituras, tres numeros, e o campo fica
+// pra pessoa, com os tres a mostra.
+//
+// Suspeito SEM candidatos nao entra aqui de proposito: ele foi recusado por
+// uma regra deterministica (rotulo nao bate com a linha, taxa em campo de
+// quantidade, soma que nao fecha) - maioria de leituras nao revoga regra.
+function desempatar(consenso, leituraDesempate) {
+  const cItens = new Map((leituraDesempate.itens || []).map((x) => [chaveDoItem(x), x]));
+  const itens = [...consenso.itens];
+  const suspeitos = [];
+  (consenso.suspeitos || []).forEach((sp) => {
+    if (!Array.isArray(sp.candidatos)) { suspeitos.push(sp); return; }
+    const c = cItens.get(chaveDoItem(sp));
+    if (c && sp.candidatos.some((v) => valoresIguais(v, c.valor))) {
+      // 2 de 3 concordam: entra com o valor vencedor
+      const { candidatos, motivo, ...base } = sp;
+      itens.push({ ...base, valor: c.valor, textoOrigem: c.textoOrigem || sp.textoOrigem });
+      return;
+    }
+    suspeitos.push({
+      ...sp,
+      motivo: c
+        ? `${sp.motivo} · a 3ª leitura (desempate) trouxe um TERCEIRO valor (${c.valor}) - três leituras, três números`
+        : `${sp.motivo} · a 3ª leitura (desempate) também não deu certeza`,
+    });
+  });
+  return { ...consenso, itens, suspeitos };
+}
+
 const MAX_ARQUIVOS = 5;
 
 async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
@@ -366,7 +409,7 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
 
   // Uma passada completa: chamada, parse e as conferencias. Fica numa funcao
   // porque a leitura roda DUAS vezes (ver o consenso no fim de lerCanais).
-  async function umaLeitura() {
+  async function umaLeitura(modelo = MODELO) {
   // .stream() em vez de .create(): com max_tokens alto o SDK RECUSA a chamada
   // sem streaming ("Streaming is required for operations that may take longer
   // than 10 minutes") - uma resposta desse tamanho poderia demorar mais que
@@ -374,7 +417,7 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
   // finalMessage() remonta: mesmo objeto de resposta, mesmo custo, so muda o
   // transporte. Nada abaixo desta chamada percebe a diferenca.
   const resp = await getCliente().messages.stream({
-    model: MODELO,
+    model: modelo,
     // relatorio com muito KPI cadastrado (Service Times Summary do PDV da
     // Domino's, por exemplo, passa de 15 metricas) gera um JSON grande - com
     // textoOrigem de cada campo, o array de "campos" sozinho ja pode passar
@@ -492,7 +535,19 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
   // consenso, mas melhor que jogar fora uma leitura boa por azar da outra
   if (ra.status === 'rejected') return rb.value;
   if (rb.status === 'rejected') return ra.value;
-  return reconciliarLeituras(ra.value, rb.value);
+  const consenso = reconciliarLeituras(ra.value, rb.value);
+  // desempate SO quando houve divergencia de consenso (campo com candidatos):
+  // o dia em que as duas leituras batem nao paga a terceira chamada
+  const pendentes = (consenso.suspeitos || []).filter((sp) => Array.isArray(sp.candidatos));
+  if (!pendentes.length) return consenso;
+  try {
+    return desempatar(consenso, await umaLeitura(MODELO_DESEMPATE));
+  } catch (e) {
+    // desempate falhou (rede, corte): o consenso ja e um resultado seguro -
+    // os divergentes ficam liberados pra digitar, como estavam
+    console.error('canaisVendaOcr: desempate falhou, mantendo o consenso. %s', e.message);
+    return consenso;
+  }
 }
 
-module.exports = { ativo, lerCanais, extrairJson, rotuloBateComOrigem, normalizarTexto, conferirSomas, valorDeTaxaEmCampoDeContagem, reconciliarLeituras };
+module.exports = { ativo, lerCanais, extrairJson, rotuloBateComOrigem, normalizarTexto, conferirSomas, valorDeTaxaEmCampoDeContagem, reconciliarLeituras, desempatar };
