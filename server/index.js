@@ -28,6 +28,7 @@ const vaultEntries = require('./vaultEntries');
 const vaultExport = require('./vaultExport');
 const refunds = require('./refunds');
 const fechamentosLive = require('./fechamentosLive');
+const liveCacheUtil = require('./liveCache');
 const fechamentosReport = require('./fechamentosReport');
 const monitorReport = require('./monitorReport');
 const reportUtil = require('./reportUtil');
@@ -2381,7 +2382,7 @@ function resolverUnidadesPorIdPulse(idPulse) {
 // pode "vazar" e sobrescrever o nome bonito que ja temos fixo aqui; o
 // unidadeNome do documento so serve de fallback pra codigo que ainda nao
 // esta em nenhum mapa fixo (unidade nova, ainda sem apelido cadastrado)
-async function construirUnidadesMapa() {
+async function construirUnidadesMapaSemCache() {
   const mapa = {};
   store.allTransactions().forEach((t) => { if (t.unidade) mapa[t.unidade] = mapa[t.unidade] || t.unidade; });
   Object.entries(FECHAMENTO_UNIDADES_NOMES).forEach(([codigo, nome]) => { mapa[codigo] = nome; });
@@ -2419,6 +2420,36 @@ async function construirUnidadesMapa() {
   // tirar só da lista fixa fazia ele voltar sem nome na próxima montagem.
   migracaoUnidades.CODIGOS_REMOVIDOS.forEach((codigo) => { delete mapa[codigo]; });
   return mapa;
+}
+// A montagem acima refaz, EM CADA CHAMADA, um fold sobre todas as transações
+// Adyen em memória + os históricos de fechamento/entrega - e ela roda em rota
+// quente (Painel, formulários públicos, Beniboy) e dentro de job de minuto.
+// As fontes Firestore por baixo já são cacheadas (liveCache), então o que se
+// paga aqui é CPU pura repetindo o mesmo resultado. Unidade nova só nasce por
+// cadastro (invalidado abaixo, aparece na hora) ou por dado importado - pra
+// esse segundo caso o TTL de 60s é mais que suficiente. Ninguém fora da
+// montagem escreve no objeto devolvido (conferido caller a caller), então
+// compartilhar a mesma referência entre chamadores é seguro.
+// TTL configurável só por causa do testeRotas: vários testes de lá mudam o
+// dado por baixo (DOCS.set / store.addOrUpdate) e conferem o mapa em seguida
+// - com memo ativo eles passariam OLHANDO PRO MAPA VELHO, virando teste de
+// nada. A suíte roda com UNIDADES_MAPA_TTL_MS=0 (sem memo); produção usa 60s.
+const UNIDADES_MAPA_TTL_MS = process.env.UNIDADES_MAPA_TTL_MS !== undefined
+  ? Number(process.env.UNIDADES_MAPA_TTL_MS) : 60 * 1000;
+const unidadesMapaCache = liveCacheUtil.createCache(construirUnidadesMapaSemCache, UNIDADES_MAPA_TTL_MS);
+// TTL zerado desliga o memo DE VERDADE (createCache com TTL 0 ainda devolve
+// o valor velho uma vez, pelo stale-while-revalidate - não serve pro teste)
+const construirUnidadesMapa = UNIDADES_MAPA_TTL_MS > 0
+  ? () => unidadesMapaCache.cached()
+  : construirUnidadesMapaSemCache;
+// derruba o cache junto com qualquer mudança de cadastro de unidade - quem
+// acabou de cadastrar/renomear precisa ver o resultado na tela SEGUINTE, não
+// dali a um minuto. Envolve a promessa da mutação (rota direta do Master e
+// executor da aprovação QA usam o mesmo embrulho).
+async function invalidandoUnidadesMapa(promessa) {
+  const r = await promessa;
+  unidadesMapaCache.invalidar();
+  return r;
 }
 
 // diagnostico de anexos (Master): testa um upload real em cada bucket
@@ -2521,7 +2552,7 @@ app.post('/api/meta/unidades-extras', auth.requireMaster, async (req, res) => {
       areas: req.body.areas, tiposSolicitacao: req.body.tiposSolicitacao,
     };
     if (await desviarSeQaMaster(req, res, 'unidadesExtras.criar', `Cadastrar unidade: ${req.body?.nome || req.body?.codigo || ''}`, { dados })) return;
-    res.json(await unidadesExtras.criar(dados, codigosUnidadesFixas()));
+    res.json(await invalidandoUnidadesMapa(unidadesExtras.criar(dados, codigosUnidadesFixas())));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -2531,7 +2562,7 @@ app.patch('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res) 
   try {
     const patch = { nome: req.body.nome, areas: req.body.areas, tiposSolicitacao: req.body.tiposSolicitacao };
     if (await desviarSeQaMaster(req, res, 'unidadesExtras.editar', `Editar unidade ${req.params.id}`, { id: req.params.id, ...patch })) return;
-    res.json(await unidadesExtras.atualizar(req.params.id, patch));
+    res.json(await invalidandoUnidadesMapa(unidadesExtras.atualizar(req.params.id, patch)));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -2546,7 +2577,7 @@ app.put('/api/meta/unidades/:codigo/perfil', auth.requireMaster, async (req, res
   try {
     const patch = { nome: req.body.nome, areas: req.body.areas, tiposSolicitacao: req.body.tiposSolicitacao, porEmail: req.user.email };
     if (await desviarSeQaMaster(req, res, 'unidadesExtras.perfil', `Definir perfil da unidade ${req.params.codigo}`, { codigo: req.params.codigo, ...patch })) return;
-    res.json(await unidadesExtras.upsertPerfil(req.params.codigo, patch));
+    res.json(await invalidandoUnidadesMapa(unidadesExtras.upsertPerfil(req.params.codigo, patch)));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -2555,7 +2586,7 @@ app.put('/api/meta/unidades/:codigo/perfil', auth.requireMaster, async (req, res
 app.delete('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res) => {
   try {
     if (await desviarSeQaMaster(req, res, 'unidadesExtras.excluir', `Excluir unidade ${req.params.id}`, { id: req.params.id })) return;
-    res.json(await unidadesExtras.remover(req.params.id));
+    res.json(await invalidandoUnidadesMapa(unidadesExtras.remover(req.params.id)));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -3760,10 +3791,10 @@ const EXECUTORES_QA = {
   'empresas.excluir': async (p) => { await users.desvincularEmpresa(p.id); return empresas.remove(p.id); },
   'empresas.arquivar': (p) => empresas.arquivar(p.id, { porEmail: p.porEmail }),
   'empresas.desarquivar': (p) => empresas.desarquivar(p.id),
-  'unidadesExtras.criar': (p) => unidadesExtras.criar(p.dados, codigosUnidadesFixas()),
-  'unidadesExtras.editar': (p) => unidadesExtras.atualizar(p.id, { nome: p.nome, areas: p.areas, tiposSolicitacao: p.tiposSolicitacao }),
-  'unidadesExtras.excluir': (p) => unidadesExtras.remover(p.id),
-  'unidadesExtras.perfil': (p) => unidadesExtras.upsertPerfil(p.codigo, { nome: p.nome, areas: p.areas, tiposSolicitacao: p.tiposSolicitacao, porEmail: p.porEmail }),
+  'unidadesExtras.criar': (p) => invalidandoUnidadesMapa(unidadesExtras.criar(p.dados, codigosUnidadesFixas())),
+  'unidadesExtras.editar': (p) => invalidandoUnidadesMapa(unidadesExtras.atualizar(p.id, { nome: p.nome, areas: p.areas, tiposSolicitacao: p.tiposSolicitacao })),
+  'unidadesExtras.excluir': (p) => invalidandoUnidadesMapa(unidadesExtras.remover(p.id)),
+  'unidadesExtras.perfil': (p) => invalidandoUnidadesMapa(unidadesExtras.upsertPerfil(p.codigo, { nome: p.nome, areas: p.areas, tiposSolicitacao: p.tiposSolicitacao, porEmail: p.porEmail })),
   'vaultGroups.criar': (p) => vaultGroups.create(p.name),
   'vaultGroups.editar': (p) => vaultGroups.rename(p.id, p.name),
   'vaultGroups.excluir': (p) => vaultGroups.remove(p.id),

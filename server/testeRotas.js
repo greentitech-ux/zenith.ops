@@ -119,6 +119,11 @@ process.env.MASTER_PASSWORD = 'SenhaDeTeste!2026';
 // alarme com timestamp velho vindo do banco. O teste inteiro roda dentro
 // desses 2min, então sem zerar isso nenhuma queda simulada seria avaliada.
 process.env.LOJA_STATUS_CARENCIA_BOOT_MS = '0';
+// memo do mapa de unidades DESLIGADO na suíte: vários testes daqui mudam o
+// dado por baixo (DOCS.set / store.addOrUpdate) e conferem o mapa em seguida
+// - com memo ativo eles passariam olhando pro mapa velho, sem provar nada.
+// A fiação do memo em produção é conferida por teste de fonte (ver adiante).
+process.env.UNIDADES_MAPA_TTL_MS = '0';
 
 // Storage de mentira EM MEMÓRIA. Antes ele só estourava, o que bastava
 // enquanto nenhum teste precisava LER um anexo de volta - o Ass. Boleto
@@ -1232,6 +1237,27 @@ setTimeout(async () => {
   } catch (e) { okTirolNatalRemovida = false; }
   if (!okTirolNatalRemovida) ruins += 1;
   console.log(`${okTirolNatalRemovida ? '✓' : '✗'} "MMTirol Natal"/"Tirol Natal" excluída em definitivo: não volta nem pelo dado em cache nem por cadastro manual: HTTP ${unidadesTirolNatalRemovida.status}`);
+
+  // ---- MEMO do mapa de unidades (varredura de sábado): construirUnidadesMapa
+  // refazia o fold sobre TODAS as transações + históricos a cada chamada, em
+  // rota quente e em job de minuto - CPU pura repetindo o mesmo resultado.
+  // A suíte roda com UNIDADES_MAPA_TTL_MS=0 (memo desligado, ver topo do
+  // arquivo), então o comportamento com memo não dá pra exercitar por HTTP
+  // aqui - o contrato é conferido na FONTE:
+  //  1. produção usa o cache (só o TTL zerado desliga);
+  //  2. TODA mutação de unidade (rota direta E executor da aprovação QA)
+  //     derruba o cache - sem isso o Master cadastra uma unidade e ela só
+  //     aparece na tela dali a um minuto, que foi o bug que o memo podia criar.
+  {
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const wraps = (srcIdx.match(/invalidandoUnidadesMapa\(unidadesExtras\./g) || []).length;
+    const okMemoUnidades = /const unidadesMapaCache = liveCacheUtil\.createCache\(construirUnidadesMapaSemCache, UNIDADES_MAPA_TTL_MS\)/.test(srcIdx)
+      && /UNIDADES_MAPA_TTL_MS > 0\s*\n?\s*\? \(\) => unidadesMapaCache\.cached\(\)/.test(srcIdx)
+      && /unidadesMapaCache\.invalidar\(\);/.test(srcIdx)
+      && wraps >= 8; // 4 rotas do Master + 4 executores da aprovação QA
+    if (!okMemoUnidades) ruins += 1;
+    console.log(`${okMemoUnidades ? '✓' : '✗'} mapa de unidades tem memo em produção e TODA mutação de unidade invalida (${wraps} pontos embrulhados)`);
+  }
 
   // ---- colunas do Fechamento unificadas por NOME (ver colunasValores em
   // public/fechamentos.html e unificarPorNome em fechamentosReport.js): a
