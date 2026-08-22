@@ -1,9 +1,12 @@
 // firestore.js
 // Conexao com o Cloud Firestore (Firebase) - persiste dados fora do disco local,
 // para nao perder historico quando o servidor reinicia/redeploya (ex: no Render).
-const admin = require('firebase-admin');
+// firebase-admin 14 aposentou a API "namespaced" (admin.firestore(),
+// admin.credential.cert...) - agora cada pedaço sai do seu submódulo
+const { initializeApp, getApps, cert } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
 
-if (!admin.apps.length) {
+if (!getApps().length) {
   const projectId = process.env.FIREBASE_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
@@ -14,12 +17,12 @@ if (!admin.apps.length) {
     );
   }
 
-  admin.initializeApp({
-    credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
+  initializeApp({
+    credential: cert({ projectId, clientEmail, privateKey }),
   });
 }
 
-const db = admin.firestore();
+const db = getFirestore();
 
 // ---------------------------------------------------------------------------
 // Contador de LEITURAS (diagnostico de custo do Firestore)

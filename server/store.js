@@ -3,7 +3,7 @@
 // consultas sincronas que o resto do app espera) e persiste cada transacao
 // como um documento na colecao "transactions", em segundo plano.
 
-const admin = require('firebase-admin');
+const { Timestamp, FieldValue } = require('firebase-admin/firestore');
 const db = require('./firestore');
 const { resolverBucket } = require('./storageBucket');
 const COLLECTION = db.collection('transactions');
@@ -74,7 +74,7 @@ async function init() {
   if (snapshot) {
     cache = snapshot.transacoes;
     try {
-      const desde = admin.firestore.Timestamp.fromDate(new Date(snapshot.savedAt));
+      const desde = Timestamp.fromDate(new Date(snapshot.savedAt));
       const novos = await buscarGravadosApos(desde);
       for (const tx of novos) {
         const idx = cache.findIndex((t) => t.pspReference === tx.pspReference && t.eventCode === tx.eventCode);
@@ -167,7 +167,7 @@ function addOrUpdate(tx) {
     cache.push(merged);
   }
   COLLECTION.doc(docId(merged))
-    .set({ ...merged, _syncEm: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
+    .set({ ...merged, _syncEm: FieldValue.serverTimestamp() }, { merge: true })
     .catch((err) => console.error('Erro ao salvar transacao no Firestore:', err.message));
   return merged;
 }
@@ -196,7 +196,7 @@ async function renomearUnidades(mapaAntigoParaNovo, { executar = false } = {}) {
     const lote = afetadas.slice(i, i + 450);
     const batch = db.batch();
     for (const t of lote) {
-      batch.update(COLLECTION.doc(docId(t)), { unidade: t.unidade, _syncEm: admin.firestore.FieldValue.serverTimestamp() });
+      batch.update(COLLECTION.doc(docId(t)), { unidade: t.unidade, _syncEm: FieldValue.serverTimestamp() });
     }
     await batch.commit();
   }
@@ -214,7 +214,7 @@ function setComentario(pspReference, eventCode, comentario) {
   const atualizado = { ...cache[idx], comentario, comentarioEm: new Date().toISOString() };
   cache[idx] = atualizado;
   COLLECTION.doc(docId(atualizado))
-    .set({ ...atualizado, _syncEm: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
+    .set({ ...atualizado, _syncEm: FieldValue.serverTimestamp() }, { merge: true })
     .catch((err) => console.error('Erro ao salvar comentario no Firestore:', err.message));
   return atualizado;
 }
