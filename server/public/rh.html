@@ -1442,7 +1442,7 @@ function renderAtestados(){
 
 function fmtHora(iso){ if(!iso) return ''; return new Date(iso).toLocaleTimeString('pt-BR', { timeZone: FUSO_BR, hour:'2-digit', minute:'2-digit' }); }
 
-async // mesma regra do servidor (LIMITE_CHECKOUT_HORAS em rhCheckin.js): quem
+// mesma regra do servidor (LIMITE_CHECKOUT_HORAS em rhCheckin.js): quem
 // passou disso sem bater o check-out entra em cobrança. Aqui é só exibição -
 // quem dispara o alerta de verdade é o job do servidor.
 const LIMITE_CHECKOUT_HORAS = 9;

@@ -918,6 +918,33 @@ setTimeout(async () => {
   if (!okFormCadastro) ruins += 1;
   console.log(`${okFormCadastro ? '✓' : '✗'} Formulários: Master cadastra/corrige/desativa unidade sem deploy (CNPJ conferido pelo dígito)`);
 
+  // ---- ÓRFÃOS DE EDIÇÃO NAS PÁGINAS: sintaxe válida, execução morta ----
+  // O RH ficou de TELA BRANCA em produção por um `async` órfão: uma edição
+  // inseriu um bloco entre o `async` e o `function carregarCheckins`, e o
+  // `async` sozinho virou referência a uma variável inexistente. `node
+  // --check` NÃO pega (é sintaxe válida - ASI transforma em `async;`), o
+  // erro só existe em runtime, e ele mata o script inteiro da página: o
+  // cabeçalho carrega e o corpo nunca renderiza. Este pente varre TODAS as
+  // páginas atrás desse resíduo de edição.
+  let okOrfaos = false;
+  try {
+    const fs2 = require('fs');
+    const dirPub = __dirname + '/public';
+    const problemas = [];
+    fs2.readdirSync(dirPub).filter((f) => f.endsWith('.html') || f.endsWith('.js')).forEach((f) => {
+      const linhas = fs2.readFileSync(`${dirPub}/${f}`, 'utf8').split('\n');
+      linhas.forEach((l, i) => {
+        // `async` sozinho na linha (com ou sem comentário depois): nunca é
+        // código intencional - `async function`/`async (` ficam na mesma linha
+        if (/^\s*async\s*(\/\/.*)?$/.test(l)) problemas.push(`${f}:${i + 1}`);
+      });
+    });
+    okOrfaos = problemas.length === 0;
+    if (problemas.length) console.log(`  async órfão em: ${problemas.join(', ')}`);
+  } catch (e) { okOrfaos = false; console.log('  erro: ' + e.message); }
+  if (!okOrfaos) ruins += 1;
+  console.log(`${okOrfaos ? '✓' : '✗'} Páginas: nenhum async órfão deixado por edição (o que deixou o RH de tela branca)`);
+
   // ---- LINK PUBLICO DE CADASTRO (EXTRA): a foto sobe UMA vez ----
   // O envio estava dando "Failed to fetch" no celular da loja. Nao era erro
   // do servidor: a MESMA foto de 6 MB subia duas vezes (uma pra ler o
