@@ -628,6 +628,27 @@ setTimeout(async () => {
   if (!okSoma) ruins += 1;
   console.log(`${okSoma ? '✓' : '✗'} Leitura por foto: a soma das parcelas x o total impresso pega o desalinhamento (69 ≠ 64)`);
 
+  // O fechamento completo (5 fotos: cartão, resumo de pedidos, service
+  // times, taxa...) estourava o teto de resposta de 8000 tokens depois que a
+  // resposta ganhou textoOrigem por campo e a transcrição dos quadros - e a
+  // loja via "campos demais pra processar" num relatório de tamanho normal,
+  // sendo mandada fazer leituras separadas por um limite NOSSO. Teto de
+  // resposta não é teto de custo (só se paga pelo que o modelo escreve),
+  // então ele fica alto E a resposta fica enxuta - as duas coisas, porque
+  // qualquer uma sozinha pode não bastar num relatório maior que este.
+  let okTetoResposta = false;
+  try {
+    const src = require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8');
+    const m = src.match(/max_tokens:\s*(\d+)/);
+    okTetoResposta = !!m && Number(m[1]) >= 32000
+      && /Mantenha CURTO: só o par nome\+valor/.test(src)          // textoOrigem enxuto
+      && /PELO MENOS UM campo da lista cadastrada/.test(src)        // conferencias só onde conferem algo
+      && /No máximo 4 quadros/.test(src)
+      && /stop_reason === 'max_tokens'/.test(src);                  // o último recurso continua explicado
+  } catch (e) { okTetoResposta = false; }
+  if (!okTetoResposta) ruins += 1;
+  console.log(`${okTetoResposta ? '✓' : '✗'} Leitura por foto: 5 fotos do fechamento completo cabem numa leitura só (teto alto + resposta enxuta)`);
+
   // O prompt precisa dizer as três coisas que o relatório em duas colunas
   // exige - sem elas o modelo desalinha de novo e a conferência vira o único
   // freio, em vez do segundo
