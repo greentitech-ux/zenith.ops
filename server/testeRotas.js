@@ -644,7 +644,12 @@ setTimeout(async () => {
       && /Mantenha CURTO: só o par nome\+valor/.test(src)          // textoOrigem enxuto
       && /PELO MENOS UM campo da lista cadastrada/.test(src)        // conferencias só onde conferem algo
       && /No máximo 4 quadros/.test(src)
-      && /stop_reason === 'max_tokens'/.test(src);                  // o último recurso continua explicado
+      && /stop_reason === 'max_tokens'/.test(src)                   // o último recurso continua explicado
+      // com teto alto o SDK RECUSA chamada sem streaming ("Streaming is
+      // required for operations that may take longer than 10 minutes") -
+      // foi o erro que a loja viu na tela. Voltar pra .create() reintroduz.
+      && /messages\.stream\(/.test(src) && /\.finalMessage\(\)/.test(src)
+      && !/messages\.create\(/.test(src);
   } catch (e) { okTetoResposta = false; }
   if (!okTetoResposta) ruins += 1;
   console.log(`${okTetoResposta ? '✓' : '✗'} Leitura por foto: 5 fotos do fechamento completo cabem numa leitura só (teto alto + resposta enxuta)`);
