@@ -6927,7 +6927,14 @@ app.post('/api/saltiverso/vendas', requireSection('parque-loja'), async (req, re
 app.get('/api/saltiverso/vendas', requireSection('parque-loja'), async (req, res) => {
   const { unidade, data } = req.query;
   if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
-  res.json(await saltiversoVendas.listVendasDoDia(unidade, data));
+  const vendas = await saltiversoVendas.listVendasDoDia(unidade, data);
+  // a lista COMPLETA do dia (toda venda, com valor e forma) é o faturado de
+  // bandeja: somando os cards, o atendente sabia exatamente quanto declarar
+  // no caixa cego e a conferência não provava nada. Atendente comum só vê as
+  // PRÓPRIAS vendas (que ele mesmo digitou - não há segredo nelas); a lista
+  // do dia inteiro fica pra Gerente/Master, igual ao faturado do fechamento.
+  res.json(podeVerFaturadoSaltiverso(req, unidade) ? vendas
+    : vendas.filter((v) => v.criadoPorId === req.user.id));
 });
 
 app.delete('/api/saltiverso/vendas/:id', auth.requireMaster, async (req, res) => {
