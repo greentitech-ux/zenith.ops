@@ -1534,7 +1534,26 @@ function abrirEditarCheckin(id){
   if(temSaida) document.getElementById('cked-hora-saida').value = fmtHora(c.saida.horario);
   document.getElementById('msg-editar-checkin').classList.add('hidden');
   document.getElementById('overlay-editar-checkin').classList.remove('hidden');
+  conferirViradaCheckin();
 }
+// saída "menor" que a entrada = turno que virou a madrugada (saiu depois das
+// 00h). O servidor grava a saída no dia seguinte e o registro continua
+// contando no dia da ENTRADA - este aviso só explica isso ANTES do salvar,
+// pra pessoa não achar que digitou errado.
+function conferirViradaCheckin(){
+  const msg = document.getElementById('msg-editar-checkin');
+  const ent = document.getElementById('cked-hora-entrada').value;
+  const sai = document.getElementById('cked-hora-saida').value;
+  const temSaida = !document.getElementById('cked-saida-wrap').classList.contains('hidden');
+  if(temSaida && ent && sai && sai <= ent){
+    msg.textContent = '🌙 Saída depois da meia-noite: será gravada na madrugada do dia seguinte, mas o registro continua contando no dia da entrada.';
+    msg.className = 'msg'; msg.style.color = 'var(--muted)'; msg.classList.remove('hidden');
+  } else if(msg.textContent.startsWith('🌙')){
+    msg.classList.add('hidden'); msg.style.color = '';
+  }
+}
+document.getElementById('cked-hora-entrada').addEventListener('input', conferirViradaCheckin);
+document.getElementById('cked-hora-saida').addEventListener('input', conferirViradaCheckin);
 function fecharEditarCheckin(){ document.getElementById('overlay-editar-checkin').classList.add('hidden'); EDITANDO_CHECKIN_ID=null; }
 async function salvarEditarCheckin(){
   const msg = document.getElementById('msg-editar-checkin');
@@ -2434,6 +2453,7 @@ boot();
 <script src="/notif-central.js"></script>
 <script src="/alarme-sync.js"></script>
 <script src="/suporte-chat.js"></script>
+<script src="/recolher.js"></script>
 <script src="/nav-menu.js"></script>
 </body>
 </html>
