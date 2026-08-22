@@ -14,7 +14,8 @@
 // feita executando a OPERACAO REAL contra cada candidato (comBucket): se o
 // erro for "bucket nao existe", tenta o proximo; o primeiro que funcionar
 // fica fixado pro resto do processo.
-const admin = require('firebase-admin');
+const { getStorage } = require('firebase-admin/storage');
+require('./firestore'); // garante que o app do firebase-admin ja foi inicializado
 
 let bucketFixado = null; // primeiro bucket que completou uma operacao real
 
@@ -40,7 +41,7 @@ async function comBucket(op) {
   const tentativas = [];
   let ultimoErro = null;
   for (const nome of candidatos()) {
-    const bucket = admin.storage().bucket(nome);
+    const bucket = getStorage().bucket(nome);
     try {
       const resultado = await op(bucket);
       bucketFixado = bucket;
@@ -65,7 +66,7 @@ async function comBucket(op) {
 async function resolverBucket() {
   if (bucketFixado) return bucketFixado;
   for (const nome of candidatos()) {
-    const bucket = admin.storage().bucket(nome);
+    const bucket = getStorage().bucket(nome);
     try {
       const [existe] = await bucket.exists();
       if (existe) {
@@ -76,7 +77,7 @@ async function resolverBucket() {
       // sem permissao pra sondar (storage.buckets.get) - tenta o proximo
     }
   }
-  return admin.storage().bucket(candidatos()[0]);
+  return getStorage().bucket(candidatos()[0]);
 }
 
 // testa um upload minusculo de verdade em cada bucket candidato e devolve o
@@ -87,7 +88,7 @@ async function resolverBucket() {
 async function diagnostico() {
   const resultados = [];
   for (const nome of candidatos()) {
-    const bucket = admin.storage().bucket(nome);
+    const bucket = getStorage().bucket(nome);
     const caminhoTeste = `diagnostico/teste-${Date.now()}.txt`;
     try {
       await bucket.file(caminhoTeste).save('teste de upload do diagnóstico', { contentType: 'text/plain' });

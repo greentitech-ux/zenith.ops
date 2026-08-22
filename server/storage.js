@@ -3,7 +3,6 @@
 // audio de ligacao, etc.) no Firebase Cloud Storage (mesmo projeto/credenciais
 // do Firestore) - nao expomos URL publica, os arquivos sao servidos via
 // streaming pelo proprio backend (index.js).
-const admin = require('firebase-admin');
 require('./firestore'); // garante que o app do firebase-admin ja foi inicializado
 const { resolverBucket, comBucket } = require('./storageBucket');
 
