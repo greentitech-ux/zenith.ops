@@ -3800,7 +3800,13 @@ const EXECUTORES_QA = {
   'usuarios.rhCadastrarEfetivado': (p) => users.updatePodeRhCadastrarEfetivado(p.id, p.valor),
   'usuarios.cargo': (p) => users.updateCargo(p.id, p.cargo),
   'usuarios.resetSenha': (p) => users.resetPassword(p.id, p.password),
-  'usuarios.desbloquear': (p) => users.desbloquear(p.id, { pedirTrocaSenha: p.pedirTrocaSenha }),
+  // depois de desbloquear, o aviso pra pessoa sai igual ao caminho direto -
+  // aqui sem aprovador identificado no payload, então vai só o push
+  'usuarios.desbloquear': async (p) => {
+    const r = await users.desbloquear(p.id, { pedirTrocaSenha: p.pedirTrocaSenha });
+    avisarLoginDesbloqueado(p.id, { pedirTrocaSenha: !!p.pedirTrocaSenha });
+    return r;
+  },
   'usuarios.username': (p) => users.updateUsername(p.id, p.username),
   'usuarios.usernamesEmMassa': (p) => users.updateUsernamesEmMassa(p.itens),
   'usuarios.excluir': (p) => users.remove(p.id),
@@ -4261,7 +4267,10 @@ app.post('/api/users/:id/reset-password', auth.requireMaster, async (req, res) =
 app.post('/api/users/:id/desbloquear', auth.requireMaster, async (req, res) => {
   try {
     if (await desviarSeQaMaster(req, res, 'usuarios.desbloquear', `Desbloquear acesso ${req.params.id}`, { id: req.params.id, pedirTrocaSenha: !!req.body.pedirTrocaSenha })) return;
-    res.json(await users.desbloquear(req.params.id, { pedirTrocaSenha: !!req.body.pedirTrocaSenha }));
+    const resultado = await users.desbloquear(req.params.id, { pedirTrocaSenha: !!req.body.pedirTrocaSenha });
+    // avisa a pessoa na hora - mesma frase do pop-up de quem desbloqueou
+    avisarLoginDesbloqueado(req.params.id, { porId: req.user.id, porEmail: req.user.email, pedirTrocaSenha: !!req.body.pedirTrocaSenha });
+    res.json(resultado);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -7692,6 +7701,8 @@ app.patch('/api/solicitacoes/:id/status', auth.requireMasterOrAdmin, async (req,
           // ticket) e que tambem forca trocar no proximo login
           await users.desbloquear(atual.criadoPorId, { pedirTrocaSenha: !!req.body.pedirTrocaSenha });
           desbloqueado = true;
+          // avisa a pessoa na hora - mesma frase do pop-up de quem aprovou
+          avisarLoginDesbloqueado(atual.criadoPorId, { porId: req.user.id, porEmail: req.user.email, pedirTrocaSenha: !!req.body.pedirTrocaSenha });
         } catch (e) {
           avisoSenha = `Ticket aprovado, mas não foi possível desbloquear o acesso automaticamente: ${e.message}`;
         }
@@ -9729,6 +9740,38 @@ function avisarMensagemDireta(userId, conversaId, deEmail, texto) {
   broadcastParaUsuario(userId, 'mensagem-direta', { conversaId, previa, deEmail, em: Date.now() });
   push.notifyUsuario(userId, `Mensagem de ${deEmail}`, previa, 'mensagem-direta-' + conversaId, '/painel.html')
     .catch((err) => console.error('Erro no push de mensagem direta:', err.message));
+}
+
+// Aviso pro DONO da conta quando o login dela é desbloqueado - o mesmo texto
+// do pop-up que quem aprovou vê, só que endereçado à pessoa (pedido do
+// Master: "quando aprovado, enviar mensagem para o cliente do jeito que está
+// nesse pop-up"). Sai pelos dois canais de sempre: mensagem direta gravada
+// (a caixa de diálogo abre assim que ela entrar de novo, e dá pra responder)
+// e push no celular - que é o canal que chega ANTES do login, o estado
+// provável de quem estava bloqueado. Nunca derruba o desbloqueio: avisar é
+// bônus, a conta já está aberta.
+async function avisarLoginDesbloqueado(userId, { porId, porEmail, pedirTrocaSenha } = {}) {
+  if (!userId) return;
+  const texto = pedirTrocaSenha
+    ? '🔓 Login desbloqueado! Você já pode entrar de novo - na entrada, o sistema vai pedir pra você definir uma senha nova.'
+    : '🔓 Login desbloqueado! Você já pode entrar de novo com a mesma senha de sempre.';
+  try {
+    // a mensagem sai em nome de quem aprovou (a pessoa pode responder);
+    // sem aprovador identificado (ex: fila QA) fica só o push abaixo
+    if (porId && String(porId) !== String(userId)) {
+      const alvo = await auth.getUserById(userId).catch(() => null);
+      const conversa = await mensagensDiretas.enviar({
+        deId: porId, deEmail: porEmail || null,
+        paraId: userId, paraEmail: (alvo && alvo.email) || null,
+        texto,
+      });
+      broadcastParaUsuario(userId, 'mensagem-direta', { conversaId: conversa.id, previa: texto.slice(0, 140), deEmail: porEmail || null, em: Date.now() });
+    }
+  } catch (e) {
+    console.error('Aviso de desbloqueio (mensagem direta) não foi:', e.message);
+  }
+  push.notifyUsuario(userId, '🔓 Login desbloqueado', texto, 'desbloqueio-' + userId, '/')
+    .catch((err) => console.error('Aviso de desbloqueio (push) não foi:', err.message));
 }
 
 // as conversas de QUEM ESTÁ LOGADO - qualquer acesso, não só o time de
