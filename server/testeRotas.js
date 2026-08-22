@@ -537,6 +537,66 @@ setTimeout(async () => {
   if (!okOcrConfere) ruins += 1;
   console.log(`${okOcrConfere ? '✓' : '✗'} Leitura por foto: valor cuja linha de origem não menciona o campo é recusado (troca de coluna)`);
 
+  // A prova está impressa no próprio relatório: o quadro "Resumo de Pedidos"
+  // lista as parcelas e o Total. No dia do erro a leitura somava 69 e o
+  // relatório dizia 64 - a conta não fechava, e ninguém fazia a conta.
+  // Modelo transcreve o quadro (ler layout), servidor soma (aritmética).
+  let okSoma = false;
+  try {
+    const ocr = require('/home/user/adyen-monitor/server/canaisVendaOcr.js');
+    const parte = (t, v, k) => ({ textoOrigem: t, valor: v, chave: k });
+    // ---- o quadro do print, lido ERRADO (foi o que aconteceu)
+    const errado = ocr.conferirSomas([{
+      titulo: 'Resumo de Pedidos', totalTexto: 'Total 64', totalValor: 64,
+      partes: [
+        parte('Delivery 46', 46, 'kpi.delivery'), parte('Carry Out 12', 12, 'kpi.carryout'),
+        parte('Pick Up 4', 4, 'kpi.pickup'), parte('Dine In 0', 0, 'kpi.dinein'),
+        parte('Cancelado 6', 6, 'kpi.cancelado'), parte('Retornado 1', 1, 'kpi.retornado'),
+      ],
+    }]);
+    // ---- o MESMO quadro lido certo
+    const certo = ocr.conferirSomas([{
+      titulo: 'Resumo de Pedidos', totalTexto: 'Total 64', totalValor: 64,
+      partes: [
+        parte('Delivery 46', 46, 'kpi.delivery'), parte('Carry Out 12', 12, 'kpi.carryout'),
+        parte('Pick Up 0', 0, 'kpi.pickup'), parte('Dine In 6', 6, 'kpi.dinein'),
+        parte('Cancelado 0', 0, 'kpi.cancelado'), parte('Retornado 0', 0, 'kpi.retornado'),
+      ],
+    }]);
+    const casos = {
+      'a leitura errada do print é pega pela soma': errado.length === 1 && errado[0].soma === 69 && errado[0].total === 64,
+      'a soma acusa TODAS as parcelas do quadro, não adivinha qual errou':
+        errado.length === 1 && errado[0].chaves.length === 6,
+      'a leitura certa do MESMO quadro passa': certo.length === 0,
+      // parcela que não é campo cadastrado entra na SOMA mesmo assim - senão
+      // um quadro com uma linha a mais nunca fecharia e o aviso viraria ruído
+      // 3 parcelas de propósito: com 2 a guarda de "quadro pequeno demais"
+      // mascararia o defeito de tirar a parcela não cadastrada da soma
+      'parcela sem campo cadastrado ainda entra na conta': ocr.conferirSomas([{
+        titulo: 'x', totalValor: 100,
+        partes: [parte('A 30', 30, 'kpi.a'), parte('B 30', 30, 'kpi.b'), parte('Linha nao cadastrada 40', 40, null)],
+      }]).length === 0,
+      // dinheiro: centavo de arredondamento não é erro de leitura
+      'diferença de centavo por arredondamento não vira alarme': ocr.conferirSomas([{
+        titulo: 'x', totalValor: 100.00,
+        partes: [parte('A 33,33', 33.33, 'k.a'), parte('B 33,33', 33.33, 'k.b'), parte('C 33,34', 33.34, 'k.c')],
+      }]).length === 0,
+      'diferença de verdade em dinheiro é pega': ocr.conferirSomas([{
+        titulo: 'x', totalValor: 100,
+        partes: [parte('A 33,33', 33.33, 'k.a'), parte('B 33,33', 33.33, 'k.b')],
+      }]).length === 1,
+      // quadro que não prova nada não pode gerar aviso
+      'quadro sem total não vira alarme': ocr.conferirSomas([{ titulo: 'x', partes: [parte('A 1', 1, 'k.a'), parte('B 2', 2, 'k.b')] }]).length === 0,
+      'quadro com uma parcela só não vira alarme': ocr.conferirSomas([{ titulo: 'x', totalValor: 9, partes: [parte('A 1', 1, 'k.a')] }]).length === 0,
+      'conferencias ausente não quebra': ocr.conferirSomas(undefined).length === 0,
+    };
+    const falhas = Object.entries(casos).filter(([, ok]) => !ok).map(([n]) => n);
+    okSoma = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okSoma = false; console.log('  erro: ' + e.message); }
+  if (!okSoma) ruins += 1;
+  console.log(`${okSoma ? '✓' : '✗'} Leitura por foto: a soma das parcelas x o total impresso pega o desalinhamento (69 ≠ 64)`);
+
   // O prompt precisa dizer as três coisas que o relatório em duas colunas
   // exige - sem elas o modelo desalinha de novo e a conferência vira o único
   // freio, em vez do segundo
@@ -544,7 +604,8 @@ setTimeout(async () => {
   try {
     const src = require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8');
     okPromptColunas = /DUAS COLUNAS/.test(src) && /ZERO NÃO SE PULA/.test(src)
-      && /textoOrigem" tem que ser a linha REAL/.test(src);
+      && /textoOrigem" tem que ser a linha REAL/.test(src)
+      && /"conferencias": quando o relatório imprime um TOTAL/.test(src);
   } catch (e) { okPromptColunas = false; }
   if (!okPromptColunas) ruins += 1;
   console.log(`${okPromptColunas ? '✓' : '✗'} Leitura por foto: o prompt avisa do layout em 2 colunas, do zero que não se pula e do textoOrigem conferido`);

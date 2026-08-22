@@ -103,6 +103,10 @@ Devolva SOMENTE um JSON válido, sem nenhum texto antes ou depois, exatamente ne
   "campos": [
     { "chave": "chave exata da lista acima, com prefixo", "textoOrigem": "como a linha está escrita no relatório", "valor": numero (ou texto, só pra chave marcada "texto livre" na lista de KPI's) }
   ],
+  "conferencias": [
+    { "titulo": "nome do quadro (ex: Resumo de Pedidos)", "totalTexto": "linha do total como está impressa", "totalValor": numero,
+      "partes": [ { "textoOrigem": "linha da parte como está impressa", "valor": numero, "chave": "chave da lista acima se essa parte for um campo cadastrado, senão null" } ] }
+  ],
   "naoIdentificados": [
     { "textoOrigem": "linha do relatório que tem valor mas você não conseguiu casar com nenhuma chave da lista", "valor": numero }
   ]
@@ -114,6 +118,7 @@ Regras:
 - Não invente campo: se um campo da lista não aparece no relatório, simplesmente não o inclua no JSON (não mande com valor 0, porque 0 é uma informação diferente de "não apareceu"). Se ele aparece no relatório valendo 0,00 de verdade, aí sim mande 0.
 - "naoIdentificados" existe pra não perder dinheiro de vista: se o relatório mostra uma linha com valor que não casa com nenhuma chave cadastrada, ela vai pra lá e o gerente decide. É melhor mostrar "sobrou R$ 320 que não sei onde colocar" do que ignorar em silêncio.
 - Ignore linhas que claramente não são canal, forma de pagamento nem KPI cadastrado: total geral, subtotal, vendas totais/líquidas/royalty, imposto, número de clientes, mão de obra, cupom, fundo de caixa. EXCEÇÃO: se uma dessas linhas (ex: "quantidade de pedidos", "ticket médio", "quilometragem") tiver o mesmo nome/sentido de um KPI cadastrado na lista de KPI's acima, ela NÃO é ruído - extraia normalmente pra chave daquele KPI. Só ignore o que não está em nenhuma das 3 listas.
+- "conferencias": quando o relatório imprime um TOTAL com as parcelas dele logo acima (ex: o quadro "Resumo de Pedidos" imprime Delivery, Carry Out, Pick Up, Dine In, Cancelado, Retornado e depois "Total"), transcreva esse quadro aqui: o total e TODAS as parcelas dele, com o valor de cada uma, na ordem impressa. Inclua a parcela mesmo que valha 0 e mesmo que ela não seja um campo cadastrado (nesse caso "chave": null) - o servidor SOMA as parcelas e compara com o total pra saber se a leitura desalinhou. Só transcreva quadro em que o total impresso é de fato a soma das parcelas listadas; se for total de dinheiro de um quadro e as parcelas de outro, não invente relação, deixe "conferencias" vazio.
 - LAYOUT EM DUAS COLUNAS: é comum o relatório imprimir DOIS pares "nome valor" lado a lado na mesma linha (ex: "Delivery 46    Delivery Agendado 1"). O valor de um nome é o número IMEDIATAMENTE à direita DELE — nunca o último número da linha, nunca o da coluna vizinha. Antes de responder, confira nome por nome: se o número que você ia mandar pertence ao nome do lado, você desalinhou as colunas.
 - ZERO NÃO SE PULA: linha que vale 0 é informação, e omitir ela desalinha tudo que vem depois. Se "Pick Up" está impresso valendo 0, mande 0 nesse campo — não deixe o 0 de fora e não passe pra ele o valor da linha de baixo.
 - "textoOrigem" tem que ser a linha REAL de onde o número saiu, copiada como está impressa, COM o nome junto (ex: "Dine In 6"). O servidor confere o nome do campo contra esse texto pra detectar troca de coluna, então textoOrigem que não bate com o campo faz a leitura ser recusada — copiar a linha certa é parte da resposta, não enfeite.
@@ -194,6 +199,48 @@ function rotuloBateComOrigem(label, textoOrigem) {
   // rótulo composto casa por palavra: "Media Saida de Loja (OTD)" contra uma
   // linha que imprime só parte do nome
   return rot.split(' ').filter((p) => p.length >= 4).some((p) => co.includes(p));
+}
+
+// ------------------------------------------------ conferência pela soma
+//
+// O relatório já traz a prova: o quadro "Resumo de Pedidos" imprime as
+// parcelas e o Total. No dia do erro a leitura deu Delivery 46, Carry Out 12,
+// PickUp 4, Dine In 0, Cancelado 6, Retornado 1 - que somam 69, e o relatório
+// dizia Total 64. A conta não fechava, e ninguém fazia a conta.
+//
+// A divisão de trabalho aqui é de propósito: o MODELO transcreve o quadro
+// (ler layout é o que ele faz bem) e o SERVIDOR soma (aritmética é onde ele
+// erra). Somar aqui não custa chamada nenhuma e não depende de o Master
+// cadastrar o que soma com o quê - o quadro impresso já diz.
+//
+// A soma usa os valores TRANSCRITOS, inclusive de parcela que não é campo
+// cadastrado: senão um quadro com uma linha a mais nunca fecharia e o aviso
+// viraria ruído permanente.
+const TOLERANCIA_SOMA = 0.011; // centavo de arredondamento, não erro de leitura
+
+function conferirSomas(conferencias) {
+  const blocos = [];
+  (Array.isArray(conferencias) ? conferencias : []).slice(0, 6).forEach((c) => {
+    const total = numeroOuNull(c && c.totalValor);
+    const partes = (Array.isArray(c && c.partes) ? c.partes : [])
+      .map((p) => ({
+        chave: p && p.chave ? String(p.chave) : null,
+        valor: numeroOuNull(p && p.valor),
+        textoOrigem: p && p.textoOrigem ? String(p.textoOrigem).slice(0, 60) : null,
+      }))
+      .filter((p) => p.valor != null);
+    // quadro sem total ou com uma parcela só não prova nada
+    if (total == null || partes.length < 2) return;
+    const soma = partes.reduce((t, p) => t + p.valor, 0);
+    if (Math.abs(soma - total) <= TOLERANCIA_SOMA) return;
+    blocos.push({
+      titulo: c && c.titulo ? String(c.titulo).slice(0, 60) : 'quadro do relatório',
+      total, soma: Math.round(soma * 100) / 100,
+      chaves: partes.map((p) => p.chave).filter(Boolean),
+      partes,
+    });
+  });
+  return blocos;
 }
 
 const numeroOuNull = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
@@ -283,6 +330,19 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
     else suspeitos.push(item);
   });
 
+  // quadro cuja soma não bate com o total impresso: TODO campo dele vira
+  // suspeito, mesmo o que passou na conferência de rótulo. Quando a conta não
+  // fecha não dá pra dizer QUAL parcela está errada - só que uma está, e
+  // preencher as outras seria fingir precisão que a leitura não tem.
+  const somasRuins = conferirSomas(dados.conferencias);
+  if (somasRuins.length) {
+    const suspeitas = new Set();
+    somasRuins.forEach((b) => b.chaves.forEach((k) => suspeitas.add(k)));
+    for (let i = itens.length - 1; i >= 0; i -= 1) {
+      if (suspeitas.has(chaveDe(itens[i].secao, itens[i].campo))) suspeitos.push(...itens.splice(i, 1));
+    }
+  }
+
   const naoIdentificados = (Array.isArray(dados.naoIdentificados) ? dados.naoIdentificados : [])
     .map((n) => ({ textoOrigem: String((n && n.textoOrigem) || '').slice(0, 80), valor: numeroOuNull(n && n.valor) }))
     .filter((n) => n.textoOrigem && n.valor != null);
@@ -293,6 +353,9 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
     // leitura recusada pela conferência: a tela mostra campo x linha de
     // origem e deixa quem lança digitar, em vez de preencher errado calado
     suspeitos,
+    // quadros do relatório em que a soma das parcelas não fechou com o total
+    // impresso - a tela mostra a conta, que é a explicação mais curta possível
+    somasRuins,
     naoIdentificados,
     // campos que a loja tem mas nao apareceram na imagem: a tela avisa quais
     // continuam pra preencher na mao, em vez de deixar o gerente descobrir
@@ -303,4 +366,4 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
   };
 }
 
-module.exports = { ativo, lerCanais, extrairJson, rotuloBateComOrigem, normalizarTexto };
+module.exports = { ativo, lerCanais, extrairJson, rotuloBateComOrigem, normalizarTexto, conferirSomas };
