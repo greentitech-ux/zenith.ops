@@ -289,7 +289,13 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
       : { type: 'image', source: { type: 'base64', media_type: f.mimeType, data: f.buffer.toString('base64') } });
   });
   blocos.push({ type: 'text', text: montarPrompt(listaCanais, listaFormas, listaKpis, dica, fotos.length) });
-  const resp = await getCliente().messages.create({
+  // .stream() em vez de .create(): com max_tokens alto o SDK RECUSA a chamada
+  // sem streaming ("Streaming is required for operations that may take longer
+  // than 10 minutes") - uma resposta desse tamanho poderia demorar mais que
+  // uma conexao HTTP parada aguenta. O streaming entrega em pedacos e o
+  // finalMessage() remonta: mesmo objeto de resposta, mesmo custo, so muda o
+  // transporte. Nada abaixo desta chamada percebe a diferenca.
+  const resp = await getCliente().messages.stream({
     model: MODELO,
     // relatorio com muito KPI cadastrado (Service Times Summary do PDV da
     // Domino's, por exemplo, passa de 15 metricas) gera um JSON grande - com
@@ -307,7 +313,7 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
     // leituras separadas por um limite NOSSO, nao do relatorio dela.
     max_tokens: 32000,
     messages: [{ role: 'user', content: blocos }],
-  });
+  }).finalMessage();
   const texto = (resp.content || []).map((b) => b.text || '').join('');
   let dados;
   try {
