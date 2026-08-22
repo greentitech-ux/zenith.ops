@@ -278,9 +278,22 @@ function limparLeituraDoc(){
   const m = document.getElementById('doc-msg');
   m.classList.add('hidden'); m.innerHTML = '';
 }
-document.getElementById('documento').addEventListener('change', limparLeituraDoc);
+// cópia dos arquivos no momento da escolha: o Safari do iPhone tem casos em
+// que o input mostra "arquivo selecionado" mas o files volta VAZIO na hora
+// do clique (foto do iCloud ainda baixando, captura pela câmera com
+// `multiple`). A cópia feita no evento change é o que vale de fallback.
+let ARQUIVOS_DOC = [];
+document.getElementById('documento').addEventListener('change', ()=>{
+  const agora = Array.from(document.getElementById('documento').files || []);
+  if(agora.length) ARQUIVOS_DOC = agora;
+  limparLeituraDoc();
+});
+function arquivosDocumento(){
+  const doInput = Array.from(document.getElementById('documento').files || []);
+  return doInput.length ? doInput : ARQUIVOS_DOC;
+}
 document.getElementById('btn-ler-doc').addEventListener('click', async ()=>{
-  const arquivos = Array.from(document.getElementById('documento').files || []);
+  const arquivos = arquivosDocumento();
   const msg = document.getElementById('doc-msg');
   msg.classList.remove('hidden');
   if(!arquivos.length){ msg.textContent = 'Escolha a foto do documento primeiro.'; msg.className = 'msg err'; return; }
@@ -359,7 +372,7 @@ document.getElementById('form-cadastro').addEventListener('submit', async (e)=>{
   msg.classList.add('hidden');
   const arquivo = document.getElementById('curriculo').files[0];
   if(!arquivo){ msg.textContent = 'Anexe o currículo (obrigatório).'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
-  const docs = Array.from(document.getElementById('documento').files || []);
+  const docs = arquivosDocumento();
   if(!docs.length){ msg.textContent = 'Anexe a foto do seu documento de identidade.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
   if(!DOC_LIDO){ msg.textContent = 'Clique em "Ler meu documento" e confira os dados antes de enviar.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
   const btn = document.getElementById('btn-enviar');
