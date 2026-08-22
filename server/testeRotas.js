@@ -1068,6 +1068,46 @@ setTimeout(async () => {
     console.log(`${okFicha ? '✓' : '✗'} diárias: a chave PIX fica salva na ficha e os check-ins pagos somem da lista: HTTP ${depois.status} pix=${depoisJ.funcionario && depoisJ.funcionario.chavePix} restam=${(depoisJ.checkins || []).length}`);
   }
 
+  // ---- DESBLOQUEIO AVISA A PESSOA ----
+  // Quando o ticket automático de "Login bloqueado" é aprovado, quem estava
+  // bloqueado recebe a MESMA frase do pop-up de quem aprovou ("Login
+  // desbloqueado! ... mesma senha de sempre"), como mensagem direta gravada
+  // (abre assim que ela entrar de novo) + push. Este bloco protege o canal
+  // gravado: aprova o ticket e confere que a conversa existe, com o texto
+  // certo, em nome de quem aprovou.
+  {
+    const cabM = { Authorization: 'Bearer ' + token };
+    DOCS.set('users/u-bloq-teste', {
+      email: 'bloqueado@teste.local', username: 'bloqueadoteste', passwordHash: 'x', role: 'user', active: true,
+      permissions: { sections: [], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      locked: true, failedAttempts: 3,
+    });
+    const authMod = require('./auth.js');
+    const ticketBloq = await require('./solicitacoes.js').create({
+      tipo: 'suporte-ti', unidade: 'geral', unidadeNome: 'Sem unidade vinculada a este login',
+      titulo: 'Login bloqueado: bloqueado@teste.local',
+      observacao: 'Acesso bloqueado automaticamente após 3 tentativas de senha erradas seguidas.',
+      criadoPorId: 'u-bloq-teste', criadoPorEmail: authMod.ROBO_BLOQUEIO_EMAIL,
+    });
+    const aprova = await enviarJson('PATCH', `/api/solicitacoes/${ticketBloq.id}/status`, { status: 'APROVADO' }, cabM);
+    // o aviso é disparado sem segurar a resposta da aprovação - dá um
+    // instante pra gravação da conversa assentar antes de conferir
+    await new Promise((r) => setTimeout(r, 200));
+    let aprovaJ = {};
+    try { aprovaJ = JSON.parse(aprova.corpo); } catch (e) { aprovaJ = {}; }
+    const userBloq = DOCS.get('users/u-bloq-teste') || {};
+    const conversaBloq = [...DOCS.entries()]
+      .filter(([k]) => k.startsWith('mensagensDiretas/')).map(([, v]) => v)
+      .find((c) => (c.participantes || []).includes('u-bloq-teste'));
+    const ultimaMsg = conversaBloq && conversaBloq.mensagens && conversaBloq.mensagens[conversaBloq.mensagens.length - 1];
+    const okAvisoBloq = aprova.status === 200 && aprovaJ.desbloqueado === true
+      && userBloq.locked === false && userBloq.failedAttempts === 0
+      && !!ultimaMsg && /Login desbloqueado/.test(ultimaMsg.texto) && /mesma senha de sempre/.test(ultimaMsg.texto)
+      && ultimaMsg.deEmail === 'master@teste.local';
+    if (!okAvisoBloq) ruins += 1;
+    console.log(`${okAvisoBloq ? '✓' : '✗'} desbloqueio: aprovar o ticket avisa a PESSOA com a frase do pop-up (mesma senha de sempre): HTTP ${aprova.status} msg=${ultimaMsg ? ultimaMsg.texto.slice(0, 60) : 'NENHUMA'}`);
+  }
+
   // ---- LINK PUBLICO DE CADASTRO (EXTRA): a foto sobe UMA vez ----
   // O envio estava dando "Failed to fetch" no celular da loja. Nao era erro
   // do servidor: a MESMA foto de 6 MB subia duas vezes (uma pra ler o
