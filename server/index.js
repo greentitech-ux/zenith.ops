@@ -1517,6 +1517,7 @@ app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCoun
     const doc = await lerEGuardarDocumentoIdentidade(req.files?.documento, unidade, req.body, guardado);
     const registro = await rh.criar({
       unidade, contato, cargoFuncao, tipoCadastro,
+      chavePix: req.body.chavePix, banco: req.body.banco,
       ...(doc?.campos || {}),
       documentoIdentidade: doc?.anexo || null,
       leituraDocumento: doc?.leitura || null,
@@ -6252,6 +6253,7 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'c
     const doc = await lerEGuardarDocumentoIdentidade(req.files?.documento, unidade || 'geral', req.body);
     const registro = await rh.criar({
       unidade, contato, cargoFuncao, dataAdmissao, tipoCadastro, semExperiencia,
+      chavePix: req.body.chavePix, banco: req.body.banco,
       // sem documento (Efetivado) tudo continua vindo do formulário
       nome, dataNascimento,
       ...(doc?.campos || {}),
@@ -6333,6 +6335,100 @@ app.post('/api/rh/funcionarios/:id/regenerar-link', requireSection('rh'), async 
     }
     const registro = await rh.regenerarLink(req.params.id);
     res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- pagamento de diárias por check-in (Master) ----------
+// Extra e candidato em teste são pagos por DIÁRIA (1 check-in = 1 diária).
+// O Master gera daqui um formulário de Pagamento de Diária (formularios.js,
+// tipo diariasRh) com uma linha por check-in ainda não pago, e recebe na
+// hora os dois links de assinatura (Favorecido + Responsável).
+function dataBrasileira(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || '');
+}
+
+// o que o modal de "pagar diárias" precisa pra abrir: os check-ins que ainda
+// não viraram formulário, os dados de pagamento já salvos na ficha e as
+// unidades de formulário (com a sugestão casada pelo código da unidade)
+app.get('/api/rh/funcionarios/:id/diarias-pendentes', auth.requireMaster, async (req, res) => {
+  try {
+    const f = await rh.getOne(req.params.id);
+    if (!f) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    const checkins = (await rhCheckin.listPorFuncionario(f.id))
+      .filter((c) => (c.status === 'aberto' || c.status === 'fechado') && !c.diariaFormularioId)
+      .sort((a, b) => String(a.data).localeCompare(String(b.data)))
+      .map((c) => ({
+        id: c.id, data: c.data, status: c.status,
+        entrada: c.entrada?.horario || null, saida: c.saida?.horario || null,
+      }));
+    const unidadesForm = await formulariosUnidades.listarAtivas();
+    res.json({
+      funcionario: {
+        id: f.id, nome: f.nome, unidade: f.unidade, tipoCadastro: f.tipoCadastro,
+        cpf: f.cpf || null, chavePix: f.chavePix || null, banco: f.banco || null,
+      },
+      checkins,
+      unidadesFormulario: unidadesForm.map((u) => ({ unidade: u.unidade, codigo: u.codigo || null })),
+      unidadeFormularioSugerida: (unidadesForm.find((u) => u.codigo === f.unidade) || {}).unidade || null,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/rh/funcionarios/:id/gerar-formulario-diarias', auth.requireMaster, async (req, res) => {
+  try {
+    const f = await rh.getOne(req.params.id);
+    if (!f) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    if (f.tipoCadastro === 'efetivado') {
+      return res.status(400).json({ error: 'Diária é pra extra e candidato em teste - efetivado recebe pela folha.' });
+    }
+    const valor = formularios.parseValor(req.body.valorDiaria);
+    if (!(valor > 0)) return res.status(400).json({ error: 'Informe o valor da diária (ex: 120,00).' });
+    const ids = [...new Set((Array.isArray(req.body.checkinIds) ? req.body.checkinIds : []).map(String))];
+    if (!ids.length) return res.status(400).json({ error: 'Selecione ao menos um check-in pra pagar.' });
+    if (ids.length > 20) return res.status(400).json({ error: 'No máximo 20 diárias por formulário - gere em dois.' });
+
+    // chave PIX/banco informados aqui ficam salvos NA FICHA: o próximo
+    // pagamento (e o formulário de Reembolso, via memória de favorecido)
+    // já nasce preenchido
+    const chavePix = String(req.body.chavePix != null ? req.body.chavePix : (f.chavePix || '')).trim();
+    const banco = String(req.body.banco != null ? req.body.banco : (f.banco || '')).trim();
+    if (!chavePix) return res.status(400).json({ error: 'Informe a chave PIX do favorecido - é como a diária vai ser paga (fica salva na ficha pra próxima).' });
+    if (chavePix !== (f.chavePix || '') || banco !== (f.banco || '')) {
+      await rh.atualizar(f.id, { chavePix, banco });
+    }
+
+    const porId = new Map((await rhCheckin.listPorFuncionario(f.id)).map((c) => [c.id, c]));
+    const linhas = [];
+    for (const id of ids) {
+      const c = porId.get(id);
+      if (!c) return res.status(400).json({ error: 'Um dos check-ins selecionados não é dessa pessoa.' });
+      if (!(c.status === 'aberto' || c.status === 'fechado')) {
+        return res.status(400).json({ error: `O check-in de ${dataBrasileira(c.data)} ainda não foi aprovado - não vira diária.` });
+      }
+      // a trava do pagamento em dobro: check-in que já entrou num formulário
+      // não entra em outro (mesmo que o Master clique duas vezes)
+      if (c.diariaFormularioId) {
+        return res.status(400).json({ error: `O check-in de ${dataBrasileira(c.data)} já está em outro formulário de pagamento - diária não é paga duas vezes.` });
+      }
+      linhas.push({ data: c.data, nome: f.nome, valor });
+    }
+    linhas.sort((a, b) => String(a.data).localeCompare(String(b.data)));
+    linhas.forEach((l) => { l.data = dataBrasileira(l.data); });
+
+    const cpfFmt = f.cpf ? `${f.cpf.slice(0, 3)}.${f.cpf.slice(3, 6)}.${f.cpf.slice(6, 9)}-${f.cpf.slice(9)}` : '';
+    const criado = await formularios.criar({
+      tipo: 'diariasRh', unidade: req.body.unidadeFormulario,
+      campos: { favorecido: f.nome, cpf: cpfFmt, banco, chavePix },
+      linhas,
+      criadoPorId: req.user.id, criadoPorEmail: req.user.email,
+    });
+    await rhCheckin.vincularFormularioDiarias(ids, criado.id);
+    res.json(formularioComLinks(criado));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

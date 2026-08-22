@@ -1000,6 +1000,74 @@ setTimeout(async () => {
   if (!okViradaLonga) ruins += 1;
   console.log(`${okViradaLonga ? '✓' : '✗'} RH: saída que daria turno de 23h volta pra conferência em vez de gravar: HTTP ${viradaLonga.status} ${viradaLonga.corpo.slice(0, 80)}`);
 
+  // ---- DIÁRIAS POR CHECK-IN -> FORMULÁRIO DE PAGAMENTO (Master) ----
+  // Extra/candidato em teste recebem por diária (1 check-in = 1 diária = 1
+  // linha). O Master gera o formulário e recebe os links de assinatura do
+  // Favorecido e do Responsável. A trava central que este bloco protege:
+  // check-in que JÁ entrou num formulário não entra em outro (pagar a mesma
+  // diária duas vezes é exatamente a fraude que o fluxo existe pra impedir).
+  {
+    const cabM = { Authorization: 'Bearer ' + token };
+    DOCS.set('rhFuncionarios/f-diarias', {
+      id: 'f-diarias', nome: 'Diarista Da Silva', unidade: 'Dominos Bessa', tipoCadastro: 'extra', status: 'ativo',
+      dataAdmissao: '2026-08-10', criadoEm: '2026-08-10T10:00:00Z', linkToken: 'tok-diarias', cpf: '11144477735',
+    });
+    const mkCk = (id, data, status, extra = {}) => DOCS.set('rhCheckins/' + id, {
+      id, funcionarioId: 'f-diarias', funcionarioNome: 'Diarista Da Silva', unidade: 'Dominos Bessa', data,
+      entrada: { horario: data + 'T12:00:00.000Z' },
+      saida: status === 'fechado' ? { horario: data + 'T20:00:00.000Z' } : null,
+      status, criadoEm: data + 'T12:00:00.000Z', ...extra,
+    });
+    mkCk('ckd1', '2026-08-18', 'fechado');
+    mkCk('ckd2', '2026-08-19', 'fechado');
+    mkCk('ckd3', '2026-08-20', 'pendente_aprovacao'); // não aprovado: não vira diária
+    mkCk('ckd4', '2026-08-17', 'fechado', { diariaFormularioId: 'form-antigo' }); // já pago
+    const rhModDia = require('./rh.js');
+    rhModDia.invalidar && rhModDia.invalidar();
+    require('./rhCheckin.js').invalidar();
+
+    const pend = await pedir('/api/rh/funcionarios/f-diarias/diarias-pendentes', cabM);
+    let pendJ = {};
+    try { pendJ = JSON.parse(pend.corpo); } catch (e) { pendJ = {}; }
+    const idsPend = (pendJ.checkins || []).map((c) => c.id);
+    const okPendDia = pend.status === 200 && idsPend.length === 2 && idsPend.includes('ckd1') && idsPend.includes('ckd2')
+      && pendJ.unidadeFormularioSugerida === "Domino's Bessa - João Pessoa";
+    if (!okPendDia) ruins += 1;
+    console.log(`${okPendDia ? '✓' : '✗'} diárias: só check-in aprovado e ainda não pago entra na lista (e a empresa certa vem sugerida): HTTP ${pend.status} ids=${idsPend.join('|')} sugerida=${pendJ.unidadeFormularioSugerida}`);
+
+    const ger = await postarJson('/api/rh/funcionarios/f-diarias/gerar-formulario-diarias', {
+      checkinIds: ['ckd1', 'ckd2'], valorDiaria: '150,00', chavePix: '83 98888-0000', banco: 'Nubank',
+      unidadeFormulario: "Domino's Bessa - João Pessoa",
+    }, cabM);
+    let gerJ = {};
+    try { gerJ = JSON.parse(ger.corpo); } catch (e) { gerJ = {}; }
+    const chavesAss = (gerJ.assinaturas || []).map((a) => a.chave).sort().join(',');
+    const okGerDia = ger.status === 200 && gerJ.tipo === 'diariasRh'
+      && (gerJ.linhas || []).length === 2 && gerJ.valorTotal === 300
+      && gerJ.linhas[0].data === '18/08/2026' && gerJ.linhas[0].nome === 'Diarista Da Silva'
+      && chavesAss === 'favorecido,responsavel'
+      && (gerJ.assinaturas || []).every((a) => a.link && a.link.includes('/assinar.html?'))
+      && gerJ.campos && gerJ.campos.chavePix === '83 98888-0000' && gerJ.campos.cpf === '111.444.777-35'
+      && gerJ.numeroTicket != null;
+    if (!okGerDia) ruins += 1;
+    console.log(`${okGerDia ? '✓' : '✗'} diárias: 2 check-ins viram formulário com 2 linhas (R$ 300) + links de assinatura Favorecido/Responsável: HTTP ${ger.status} ${ger.corpo.slice(0, 110)}`);
+
+    const dobro = await postarJson('/api/rh/funcionarios/f-diarias/gerar-formulario-diarias', {
+      checkinIds: ['ckd1'], valorDiaria: '150,00', unidadeFormulario: "Domino's Bessa - João Pessoa",
+    }, cabM);
+    const okDobro = dobro.status === 400 && /já está em outro formulário/i.test(dobro.corpo);
+    if (!okDobro) ruins += 1;
+    console.log(`${okDobro ? '✓' : '✗'} diárias: check-in já pago é recusado (diária não sai duas vezes): HTTP ${dobro.status} ${dobro.corpo.slice(0, 90)}`);
+
+    const depois = await pedir('/api/rh/funcionarios/f-diarias/diarias-pendentes', cabM);
+    let depoisJ = {};
+    try { depoisJ = JSON.parse(depois.corpo); } catch (e) { depoisJ = {}; }
+    const okFicha = depois.status === 200 && (depoisJ.checkins || []).length === 0
+      && depoisJ.funcionario && depoisJ.funcionario.chavePix === '83 98888-0000' && depoisJ.funcionario.banco === 'Nubank';
+    if (!okFicha) ruins += 1;
+    console.log(`${okFicha ? '✓' : '✗'} diárias: a chave PIX fica salva na ficha e os check-ins pagos somem da lista: HTTP ${depois.status} pix=${depoisJ.funcionario && depoisJ.funcionario.chavePix} restam=${(depoisJ.checkins || []).length}`);
+  }
+
   // ---- LINK PUBLICO DE CADASTRO (EXTRA): a foto sobe UMA vez ----
   // O envio estava dando "Failed to fetch" no celular da loja. Nao era erro
   // do servidor: a MESMA foto de 6 MB subia duas vezes (uma pra ler o

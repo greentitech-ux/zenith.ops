@@ -130,6 +130,7 @@ async function criar({
   curriculo, cadastradoPorId, cadastradoPorEmail, precisaAprovacao, exigirCurriculo = true,
   dataExamePeriodico, periodicidadeExameMeses, dataUltimasFerias,
   cpf, rg, nomeMae, documentoIdentidade, leituraDocumento, exigirDocumento = true,
+  chavePix, banco,
 }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   const nomeOk = limpar(nome, 150);
@@ -177,6 +178,11 @@ async function criar({
     nome: nomeOk,
     contato: limpar(contato, 40),
     cargoFuncao: limpar(cargoFuncao, 60),
+    // dados de pagamento das diárias (extra/candidato): preenchidos já no
+    // cadastro pra o formulário de pagamento nascer completo, sem caçar a
+    // chave PIX da pessoa por WhatsApp na hora de pagar
+    chavePix: limpar(chavePix, 120) || null,
+    banco: limpar(banco, 80) || null,
     dataNascimento: validarDataOuNull(dataNascimento, 'Data de nascimento'),
     dataAdmissao: dataAdmissaoOk,
     curriculo: curriculo || null,
@@ -333,6 +339,8 @@ async function atualizar(id, patch) {
   }
   if (patch.contato !== undefined) merge.contato = limpar(patch.contato, 40);
   if (patch.cargoFuncao !== undefined) merge.cargoFuncao = limpar(patch.cargoFuncao, 60);
+  if (patch.chavePix !== undefined) merge.chavePix = limpar(patch.chavePix, 120) || null;
+  if (patch.banco !== undefined) merge.banco = limpar(patch.banco, 80) || null;
   // trocar de unidade (ex: consolidar loja antiga "Dominos Natal" -> "Dominos
   // Tirol", que sao a mesma). so o Master edita (rota requireMaster).
   if (patch.unidade !== undefined && String(patch.unidade).trim()) merge.unidade = String(patch.unidade).trim();
