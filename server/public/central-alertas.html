@@ -68,6 +68,14 @@
   .btn-ghost:hover{border-color:var(--accent);}
   .btn-ghost.ok{color:var(--ok);}
   .btn-ghost.ok:hover{border-color:var(--ok);}
+  .thread-barra{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+  .thread-toggle{font-family:var(--mono);font-size:10.5px;color:var(--accent);background:none;border:1px dashed var(--line);border-radius:10px;padding:4px 10px;cursor:pointer;}
+  .thread-toggle:hover{border-color:var(--accent);}
+  .thread-toggle.ok{color:var(--ok);}
+  .thread-toggle.ok:hover{border-color:var(--ok);}
+  .thread-antigos{display:flex;flex-direction:column;gap:6px;margin:0 0 2px 22px;}
+  .thread-antigos .card{opacity:.85;padding:9px 12px;}
+  @media(max-width:640px){ .thread-antigos{margin-left:10px;} }
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -159,6 +167,67 @@ function mudarFiltro(f){
 
 let ALERTAS = [];
 
+// ---------- THREADS (mesmo espírito das fraudes no Monitor) ----------
+// O NOC repete o mesmo par "sem conexão"/"reconectou" a cada oscilação da
+// mesma máquina e a lista virava um paredão de cards iguais. Aqui os
+// alertas do MESMO tipo e da MESMA máquina viram um thread: só o mais
+// recente fica à mostra, os anteriores ficam recolhidos atrás de um
+// contador que expande no clique.
+// [THREAD-PURO-INICIO] - funções puras, sem DOM: a suíte de testes extrai
+// este trecho e roda em Node (ver testeRotas.js) - não referencie nada de
+// navegador aqui dentro.
+function chaveThread(a){
+  // só os alertas do NOC repetem por máquina (offline/reconectou/acesso
+  // remoto/reiniciar...) - os outros tipos seguem soltos, um card cada
+  if(!/^noc-/.test(String(a.tipo||''))) return null;
+  // o resumo do NOC sempre começa com "MÁQUINA · Unidade ..." - a máquina
+  // é a identidade do thread
+  const maquina = String(a.resumo||'').split(' · ')[0].trim();
+  if(!maquina) return null;
+  return a.tipo + '|' + maquina;
+}
+// recebe a lista já em ordem decrescente de criadoEm e devolve entradas
+// { principal, antigos, chave }: o mais novo de cada thread segura a
+// posição na lista e os anteriores se penduram nele
+function agruparEmThreads(itens){
+  const entradas = [];
+  const porChave = {};
+  for(const a of itens){
+    const chave = chaveThread(a);
+    if(chave && porChave[chave]){ porChave[chave].antigos.push(a); continue; }
+    const ent = { principal: a, antigos: [], chave };
+    entradas.push(ent);
+    if(chave) porChave[chave] = ent;
+  }
+  return entradas;
+}
+// [THREAD-PURO-FIM]
+
+let EXPANDIDOS = new Set();     // chaves de thread abertas (sobrevive ao re-render do polling)
+let THREADS_ATUAIS = {};        // chave -> entrada da última renderização (pro "atender todos")
+
+function cardHtml(a){
+  const info = infoTipo(a.tipo);
+  const atendido = !!a.atendidoEm;
+  return `<div class="card ${a.critico ? 'critico' : ''} ${atendido ? 'atendido' : ''}">
+    <div class="icone">${info.icone}</div>
+    <div class="corpo">
+      <div class="titulo-linha">
+        <span class="titulo">${escapeHtml(a.titulo || info.rotulo)}</span>
+        ${a.critico ? '<span class="badge critico">Crítico</span>' : ''}
+        ${atendido ? '<span class="badge ok">Atendido</span>' : ''}
+      </div>
+      ${a.resumo ? `<div class="resumo">${escapeHtml(a.resumo)}</div>` : ''}
+      <div class="meta">${info.rotulo} · ${formatarHorario(a.criadoEm)}${atendido ? ' · atendido por ' + escapeHtml(a.atendidoPorEmail || '') + ' às ' + formatarHorario(a.atendidoEm) : ''}</div>
+      <!-- RODAPE-THREAD -->
+    </div>
+    <div class="card-acoes">
+      ${a.url ? `<button type="button" class="btn-ghost" onclick="irPara('${a.id}','${encodeURIComponent(a.url)}')">↗️ Abrir</button>` : ''}
+      ${!atendido ? `<button type="button" class="btn-ghost ok" onclick="atender('${a.id}')">✅ Atender</button>` : ''}
+    </div>
+  </div>`;
+}
+
 function render(){
   const lista = document.getElementById('lista');
   const itens = FILTRO === 'pendentes' ? ALERTAS.filter(a=>!a.atendidoEm) : ALERTAS;
@@ -166,26 +235,41 @@ function render(){
     lista.innerHTML = `<div class="empty">${FILTRO==='pendentes' ? 'Nenhum alerta pendente. 🎉' : 'Nenhum alerta registrado ainda.'}</div>`;
     return;
   }
-  lista.innerHTML = itens.map(a=>{
-    const info = infoTipo(a.tipo);
-    const atendido = !!a.atendidoEm;
-    return `<div class="card ${a.critico ? 'critico' : ''} ${atendido ? 'atendido' : ''}">
-      <div class="icone">${info.icone}</div>
-      <div class="corpo">
-        <div class="titulo-linha">
-          <span class="titulo">${escapeHtml(a.titulo || info.rotulo)}</span>
-          ${a.critico ? '<span class="badge critico">Crítico</span>' : ''}
-          ${atendido ? '<span class="badge ok">Atendido</span>' : ''}
-        </div>
-        ${a.resumo ? `<div class="resumo">${escapeHtml(a.resumo)}</div>` : ''}
-        <div class="meta">${info.rotulo} · ${formatarHorario(a.criadoEm)}${atendido ? ' · atendido por ' + escapeHtml(a.atendidoPorEmail || '') + ' às ' + formatarHorario(a.atendidoEm) : ''}</div>
-      </div>
-      <div class="card-acoes">
-        ${a.url ? `<button type="button" class="btn-ghost" onclick="irPara('${a.id}','${encodeURIComponent(a.url)}')">↗️ Abrir</button>` : ''}
-        ${!atendido ? `<button type="button" class="btn-ghost ok" onclick="atender('${a.id}')">✅ Atender</button>` : ''}
-      </div>
-    </div>`;
+  const entradas = agruparEmThreads(itens);
+  THREADS_ATUAIS = {};
+  lista.innerHTML = entradas.map(ent=>{
+    const { principal, antigos, chave } = ent;
+    if(chave) THREADS_ATUAIS[chave] = ent;
+    let rodape = '';
+    let corpoAntigos = '';
+    if(antigos.length){
+      const aberto = EXPANDIDOS.has(chave);
+      const chaveEnc = encodeURIComponent(chave);
+      const pendentesNoThread = [principal, ...antigos].filter(x=>!x.atendidoEm).length;
+      rodape = `<div class="thread-barra">
+        <button type="button" class="thread-toggle" onclick="alternarThread('${chaveEnc}')">${aberto ? '▾ recolher' : `▸ +${antigos.length} anterior${antigos.length>1?'es':''} desta máquina`}</button>
+        ${pendentesNoThread > 1 ? `<button type="button" class="thread-toggle ok" onclick="atenderThread('${chaveEnc}')">✅ atender todos (${pendentesNoThread})</button>` : ''}
+      </div>`;
+      if(aberto) corpoAntigos = `<div class="thread-antigos">${antigos.map(cardHtml).join('')}</div>`;
+    }
+    return cardHtml(principal).replace('<!-- RODAPE-THREAD -->', rodape) + corpoAntigos;
   }).join('');
+}
+
+function alternarThread(chaveEnc){
+  const chave = decodeURIComponent(chaveEnc);
+  if(EXPANDIDOS.has(chave)) EXPANDIDOS.delete(chave); else EXPANDIDOS.add(chave);
+  render();
+}
+
+// atende o thread inteiro (o visível + os recolhidos) - sem isso, "reduzir
+// a quantidade" seria só visual: os antigos continuavam pendentes um a um
+async function atenderThread(chaveEnc){
+  const ent = THREADS_ATUAIS[decodeURIComponent(chaveEnc)];
+  if(!ent) return;
+  const pendentes = [ent.principal, ...ent.antigos].filter(x=>!x.atendidoEm);
+  for(const a of pendentes){ await atender(a.id, true); }
+  render();
 }
 
 async function irPara(id, urlEnc){
