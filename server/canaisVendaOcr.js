@@ -119,10 +119,10 @@ Regras:
 - "naoIdentificados" existe pra não perder dinheiro de vista: se o relatório mostra uma linha com valor que não casa com nenhuma chave cadastrada, ela vai pra lá e o gerente decide. É melhor mostrar "sobrou R$ 320 que não sei onde colocar" do que ignorar em silêncio.
 - Ignore linhas que claramente não são canal, forma de pagamento nem KPI cadastrado: total geral, subtotal, vendas totais/líquidas/royalty, imposto, número de clientes, mão de obra, cupom, fundo de caixa. EXCEÇÃO: se uma dessas linhas (ex: "quantidade de pedidos", "ticket médio", "quilometragem") tiver o mesmo nome/sentido de um KPI cadastrado na lista de KPI's acima, ela NÃO é ruído - extraia normalmente pra chave daquele KPI. Só ignore o que não está em nenhuma das 3 listas.
 - TAXA NÃO É QUANTIDADE. Linha de "Per 1000", "por mil", "a cada 1000" e QUALQUER coluna de % são TAXA, não contagem. Um mesmo quadro costuma imprimir as duas (o "Extreme Late Deliveries" lista as faixas com a contagem na coluna "#" e, na última linha, a taxa por mil). Se o campo cadastrado pede quantidade, o valor é a CONTAGEM - some a coluna "#" das faixas do quadro - e nunca a linha da taxa. Só mande a taxa se o próprio nome do campo falar em "por mil"/"per 1000"/"%".
-- "conferencias": quando o relatório imprime um TOTAL com as parcelas dele logo acima (ex: o quadro "Resumo de Pedidos" imprime Delivery, Carry Out, Pick Up, Dine In, Cancelado, Retornado e depois "Total"), transcreva esse quadro aqui: o total e TODAS as parcelas dele, com o valor de cada uma, na ordem impressa. Inclua a parcela mesmo que valha 0 e mesmo que ela não seja um campo cadastrado (nesse caso "chave": null) - o servidor SOMA as parcelas e compara com o total pra saber se a leitura desalinhou. Só transcreva quadro em que o total impresso é de fato a soma das parcelas listadas; se for total de dinheiro de um quadro e as parcelas de outro, não invente relação, deixe "conferencias" vazio.
+- "conferencias": quando o relatório imprime um TOTAL com as parcelas dele logo acima (ex: o quadro "Resumo de Pedidos" imprime Delivery, Carry Out, Pick Up, Dine In, Cancelado, Retornado e depois "Total"), transcreva esse quadro aqui: o total e TODAS as parcelas dele, com o valor de cada uma, na ordem impressa. Inclua a parcela mesmo que valha 0 e mesmo que ela não seja um campo cadastrado (nesse caso "chave": null) - o servidor SOMA as parcelas e compara com o total pra saber se a leitura desalinhou. Só transcreva quadro em que o total impresso é de fato a soma das parcelas listadas; se for total de dinheiro de um quadro e as parcelas de outro, não invente relação, deixe "conferencias" vazio. E só transcreva quadro que contém PELO MENOS UM campo da lista cadastrada — quadro sem nenhum campo cadastrado não confere nada, transcrever ele é só resposta maior. No máximo 4 quadros, e o "textoOrigem" das partes segue a mesma regra do curto.
 - LAYOUT EM DUAS COLUNAS: é comum o relatório imprimir DOIS pares "nome valor" lado a lado na mesma linha (ex: "Delivery 46    Delivery Agendado 1"). O valor de um nome é o número IMEDIATAMENTE à direita DELE — nunca o último número da linha, nunca o da coluna vizinha. Antes de responder, confira nome por nome: se o número que você ia mandar pertence ao nome do lado, você desalinhou as colunas.
 - ZERO NÃO SE PULA: linha que vale 0 é informação, e omitir ela desalinha tudo que vem depois. Se "Pick Up" está impresso valendo 0, mande 0 nesse campo — não deixe o 0 de fora e não passe pra ele o valor da linha de baixo.
-- "textoOrigem" tem que ser a linha REAL de onde o número saiu, copiada como está impressa, COM o nome junto (ex: "Dine In 6"). O servidor confere o nome do campo contra esse texto pra detectar troca de coluna, então textoOrigem que não bate com o campo faz a leitura ser recusada — copiar a linha certa é parte da resposta, não enfeite.
+- "textoOrigem" tem que ser a linha REAL de onde o número saiu, copiada como está impressa, COM o nome junto (ex: "Dine In 6"). O servidor confere o nome do campo contra esse texto pra detectar troca de coluna, então textoOrigem que não bate com o campo faz a leitura ser recusada — copiar a linha certa é parte da resposta, não enfeite. Mantenha CURTO: só o par nome+valor daquela linha (máx ~50 caracteres), nunca a linha vizinha junto.
 - PORCENTAGEM NUNCA É O VALOR. É comum a linha ter o nome, depois a participação em % e só então o valor em dinheiro (ex: "CarryOut 17,7% R$515,20" → o valor é 515.20, nunca 17.7). Qualquer número acompanhado de "%" deve ser ignorado.
 - DUAS LINHAS PARECIDAS: o mesmo canal pode aparecer em mais de uma linha, variantes do mesmo nome (ex: dois tipos de Delivery, um por tipo de entregador), e normalmente só uma delas é usada - a outra fica zerada o tempo todo. Quando duas linhas parecidas disputam a mesma chave da lista e só uma tem valor, mande a que tem valor. Se as duas tiverem valor, não escolha no chute: mande as duas pra "naoIdentificados" com o texto de origem de cada uma, pro gerente decidir.
 - IMPORTANTE: os números estão em formato brasileiro (ponto separa milhar, vírgula separa decimal - ex: "1.234,56"). Converta todo valor para o padrão JSON: só ponto decimal, sem separador de milhar (ex: 1234.56). Nunca escreva número com vírgula no JSON - isso quebra o formato.
@@ -297,7 +297,15 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
     // de 4000 tokens e cortar a resposta no meio (stop_reason:'max_tokens'),
     // o que quebra o JSON.parse do mesmo jeito que foto ruim quebraria, mas
     // por um motivo que reenviar a MESMA foto nunca resolve
-    max_tokens: 8000,
+    // Teto de RESPOSTA, nao de custo: so se paga pelo que o modelo de fato
+    // escreve, entao um teto alto com resposta curta custa exatamente igual.
+    // 8000 parecia folgado ate a resposta ganhar o textoOrigem de cada campo
+    // e a transcricao dos quadros de conferencia ("conferencias") - com 5
+    // fotos do fechamento completo (cartao, resumo de pedidos, service
+    // times, taxa...) o JSON estourava o teto e a loja via "campos demais
+    // pra processar" num relatorio de tamanho normal, sendo mandada fazer
+    // leituras separadas por um limite NOSSO, nao do relatorio dela.
+    max_tokens: 32000,
     messages: [{ role: 'user', content: blocos }],
   });
   const texto = (resp.content || []).map((b) => b.text || '').join('');
@@ -313,7 +321,7 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
     // a resposta cortada no meio (relatorio com muitos campos cadastrados) -
     // mandar refazer a MESMA foto nunca resolve isso, so confunde quem usa
     if (resp.stop_reason === 'max_tokens') {
-      throw new Error('Esse relatório tem campos demais pra eu processar de uma vez (a resposta foi cortada no meio) - não é problema da foto, tirar de novo não resolve. Faça em LEITURAS SEPARADAS: clique em "Preencher por foto" de novo pra cada parte (ex: uma leitura só com a foto de Canais/Formas, outra leitura só com a foto dos indicadores de tempo) - o que uma leitura já preencheu não se perde na próxima.');
+      throw new Error('A resposta da leitura foi cortada no meio mesmo com o limite alto - não é problema da foto, tirar de novo não resolve. Faça em LEITURAS SEPARADAS: clique em "Preencher por foto" de novo pra cada parte (ex: uma leitura só com a foto de Canais/Formas, outra leitura só com a foto dos indicadores de tempo) - o que uma leitura já preencheu não se perde na próxima.');
     }
     throw new Error('Não consegui entender essa imagem. Tente uma foto mais nítida, com o relatório inteiro enquadrado.');
   }
