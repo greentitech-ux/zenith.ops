@@ -496,6 +496,10 @@
       Cada máquina pega o comando na próxima batida (até ~25s) e mostra um aviso de <b>2 minutos</b> na tela da loja antes de reiniciar.
       Máquina indisponível recebe quando voltar.
     </div>
+    <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--warn,#e0a800);margin-bottom:10px;">
+      ⚠️ Máquina com NOCZenith instalado <b>sem Administrador</b> (versões antigas) só volta ao monitoramento quando <b>alguém fizer login no Windows</b> depois do reinício - foi isso que deixou o parque mudo em agosto.
+      Pra ela voltar sozinha, reinstale uma vez pelo "📋 Copiar comando" num PowerShell <b>como Administrador</b> (v17+ cria a tarefa de boot).
+    </div>
     <div class="modal-acoes" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:0 0 8px;">
       <button type="button" class="btn-mini" onclick="manutSelecionar('todos')">Marcar tudo</button>
       <button type="button" class="btn-mini" onclick="manutSelecionar('nenhum')">Limpar</button>
@@ -713,7 +717,8 @@ function linkTexto(c){
 // vermelho, e é o que fazia procurar problema de rede onde não havia.
 function textoDeEstado(c, status){
   if(status === 'nunca') return 'sem agente · NOCZenith nunca instalado aqui';
-  if(status === 'offline') return `indisponível · calada há ${tempoRelativo(c.ultimoHeartbeatEm)}`;
+  // tempoRelativo já devolve com o "há" ("há 2d") - repetir aqui dava "há há 2d"
+  if(status === 'offline') return `indisponível · calada ${tempoRelativo(c.ultimoHeartbeatEm)}`;
   if(status === 'degradado') return `degradado · ${(c.degradacao||[]).join(' · ')}`;
   const l = linkTexto(c);
   return l ? `operacional · ${l}` : 'operacional';
@@ -1697,7 +1702,7 @@ async function baixarVigia(codigo, posto, tipo){
     a.click();
     a.remove();
     URL.revokeObjectURL(a.href);
-    alert(`Script "NOCZenith-${posto}.ps1" baixado.\n\n⚠️ O Windows 11 bloqueia .ps1 baixado (Controle de Aplicativo Inteligente). Se o clique-direito "Executar com o PowerShell" der o aviso de bloqueio, o jeito mais fácil é usar o botão "📋 Copiar comando".\n\nComo instalar por aqui mesmo:\n1) Salve numa pasta qualquer.\n2) Abra o PowerShell e rode (troque pelo caminho onde salvou, com aspas):\n     Unblock-File "C:\\...\\NOCZenith-${posto}.ps1"\n   (tira o selo de "veio da internet" que causa o bloqueio)\n3) Rode:\n     powershell -ExecutionPolicy Bypass -File "C:\\...\\NOCZenith-${posto}.ps1"\n\nEle se instala numa pasta fixa protegida e passa a rodar de lá - então DEPOIS de instalar você PODE APAGAR o arquivo que baixou. Dali pra frente ele se atualiza sozinho.\n\nComputador tipo servidor/escritório: a tarefa roda no PRÓXIMO LOGIN do usuário - deixe a sessão bloqueada/desconectada (nunca "Sair").`);
+    alert(`Script "NOCZenith-${posto}.ps1" baixado.\n\n⚠️ O Windows 11 bloqueia .ps1 baixado (Controle de Aplicativo Inteligente). Se o clique-direito "Executar com o PowerShell" der o aviso de bloqueio, o jeito mais fácil é usar o botão "📋 Copiar comando".\n\nComo instalar por aqui mesmo:\n1) Salve numa pasta qualquer.\n2) Abra o PowerShell e rode (troque pelo caminho onde salvou, com aspas):\n     Unblock-File "C:\\...\\NOCZenith-${posto}.ps1"\n   (tira o selo de "veio da internet" que causa o bloqueio)\n3) Rode:\n     powershell -ExecutionPolicy Bypass -File "C:\\...\\NOCZenith-${posto}.ps1"\n\nEle se instala numa pasta fixa protegida e passa a rodar de lá - então DEPOIS de instalar você PODE APAGAR o arquivo que baixou. Dali pra frente ele se atualiza sozinho.\n\nIMPORTANTE: instale num PowerShell aberto COMO ADMINISTRADOR - assim o NOCZenith também cria a tarefa de BOOT e volta sozinho depois de qualquer reinício, mesmo sem ninguém logar. Sem Administrador, ele só volta no próximo login do usuário.`);
   }catch(e){
     alert(e.message);
   }

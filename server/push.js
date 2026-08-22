@@ -818,7 +818,10 @@ async function notifyReinicioPendente(unidadeNome, codigo, computadorNome, posto
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const dados = {
     title: '🔁 Reiniciar computador',
-    body: `${prefixo}${unidadeNome || codigo}: ligado há ${dias} dias sem reiniciar.`,
+    // o lembrete carrega o aviso que faltou em agosto: reiniciar máquina com
+    // NOCZenith instalado sem Administrador derruba o monitoramento até
+    // alguém logar de novo (a tarefa antiga só dispara no login)
+    body: `${prefixo}${unidadeNome || codigo}: ligado há ${dias} dias sem reiniciar. Após reiniciar, faça um login na máquina (ou reinstale o NOCZenith como Administrador pra ele voltar sozinho).`,
     tag: `noc-reiniciar-${codigo}-${posto || 'principal'}`,
     url: '/loja-status.html',
   };
