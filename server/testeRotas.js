@@ -1472,6 +1472,39 @@ setTimeout(async () => {
   if (!okGateTermos) ruins += 1;
   console.log(`${okGateTermos ? '✓' : '✗'} termos emitidos sem venda: só Master/Gerente vê (atendente com a seção Parque toma 403)`);
 
+  // ---- Saltiverso: caixa CEGO de verdade - a lista de "vendas de hoje"
+  // era o faturado de bandeja (toda venda do dia, com valor e forma, pra
+  // qualquer um com a seção; somando os cards o atendente sabia exatamente
+  // quanto declarar e a conferência não provava nada). Atendente comum só
+  // recebe as PRÓPRIAS vendas; Gerente/Master seguem vendo o dia todo. ----
+  let okVendasCegas = false;
+  try {
+    const bcrypt2 = require('bcryptjs');
+    const baseSalti = {
+      passwordHash: bcrypt2.hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      permissions: { sections: ['parque-loja'], unidades: ['Saltiverso Patteo'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    };
+    DOCS.set('users/u-gerente-salti', { ...baseSalti, email: 'gerente-salti@teste.local', username: 'gerentesalti', cargo: 'gerente' });
+    DOCS.set('users/u-atende-salti', { ...baseSalti, email: 'atende-salti@teste.local', username: 'atendesalti', cargo: null });
+    const vendaBase = { unidade: 'Saltiverso Patteo', unidadeNome: 'Saltiverso Patteo', data: '2026-08-22', itens: [], total: 50, pagamentos: [{ forma: 'pix', valor: 50 }], cancelada: false, criadoEm: new Date().toISOString() };
+    DOCS.set('saltiversoVendas/vs-atende', { ...vendaBase, id: 'vs-atende', criadoPorId: 'u-atende-salti', criadoPorEmail: 'atende-salti@teste.local' });
+    DOCS.set('saltiversoVendas/vs-colega', { ...vendaBase, id: 'vs-colega', total: 80, criadoPorId: 'u-outra-pessoa', criadoPorEmail: 'colega@teste.local' });
+    const tkGerSalti = (await auth.login('gerente-salti@teste.local', 'SenhaDeTeste!2026')).token;
+    const tkAteSalti = (await auth.login('atende-salti@teste.local', 'SenhaDeTeste!2026')).token;
+    const rota = '/api/saltiverso/vendas?unidade=Saltiverso%20Patteo&data=2026-08-22';
+    const comoGerSalti = await pedir(rota, { Authorization: 'Bearer ' + tkGerSalti });
+    const comoAteSalti = await pedir(rota, { Authorization: 'Bearer ' + tkAteSalti });
+    const listaGer = JSON.parse(comoGerSalti.corpo);
+    const listaAte = JSON.parse(comoAteSalti.corpo);
+    okVendasCegas = comoGerSalti.status === 200 && comoAteSalti.status === 200
+      && listaGer.length === 2 // gerente vê o dia inteiro
+      && listaAte.length === 1 && listaAte[0].id === 'vs-atende' // atendente só vê a própria
+      && !JSON.stringify(listaAte).includes('vs-colega');
+  } catch (e) { okVendasCegas = false; }
+  if (!okVendasCegas) ruins += 1;
+  console.log(`${okVendasCegas ? '✓' : '✗'} Saltiverso: atendente só vê as PRÓPRIAS vendas do dia (a lista completa entregava o faturado do caixa cego); gerente vê tudo`);
+
   // ---- Parque: cortesia PCD (5%CP) e cortesia geral agora podem juntar
   // uma criança PAGANTE no MESMO check-in da criança que recebe a
   // gratuidade (checkbox "gratuita" desmarcado) - 1 termo só, em vez de 2

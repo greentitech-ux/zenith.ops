@@ -137,7 +137,8 @@
 </div>
 
 <div class="panel">
-  <h2>Vendas de hoje</h2>
+  <h2 id="titulo-vendas-hoje">Vendas de hoje</h2>
+  <div class="sub hidden" id="aviso-vendas-proprias" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:8px;">você vê só as SUAS vendas - a lista completa do dia é da gerência (é ela que confere o caixa)</div>
   <div id="lista-vendas"><div class="empty">carregando...</div></div>
 </div>
 
@@ -470,6 +471,14 @@ async function boot(){
   ME = await res.json();
   IS_MASTER = ME.role==='master';
   PODE_CATALOGO = IS_MASTER || !!ME.podeCatalogoEstoque;
+  // atendente comum recebe do servidor SÓ as próprias vendas (caixa cego -
+  // a lista completa do dia entregaria o faturado somando os cards); o
+  // título/aviso só explicam o que a resposta já é
+  const veTudo = IS_MASTER || ME.isAdmin || ME.cargo==='gerente' || ME.cargo==='assistente-gerente';
+  if(!veTudo){
+    document.getElementById('titulo-vendas-hoje').textContent = 'Suas vendas de hoje';
+    document.getElementById('aviso-vendas-proprias').classList.remove('hidden');
+  }
   const secoes = IS_MASTER ? ['parque-loja'] : (ME.permissions?.sections||[]);
 
   if(!secoes.includes('parque-loja')){
