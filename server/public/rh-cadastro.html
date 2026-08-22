@@ -128,7 +128,7 @@
   <input type="date" id="nascimento" readonly>
 
   <label>Currículo (PDF, obrigatório)</label>
-  <input type="file" id="curriculo" accept="application/pdf" required>
+  <input type="file" id="curriculo" accept="application/pdf,image/*" required>
 
   <button type="submit" class="btn-primary" id="btn-enviar">Enviar cadastro</button>
   <div id="msg" class="msg hidden"></div>
@@ -294,7 +294,7 @@ document.getElementById('documento').addEventListener('change', ()=>{
   if(bruto.length && !agora.length){
     const m = document.getElementById('doc-msg');
     m.classList.remove('hidden'); m.className = 'msg err';
-    m.textContent = 'O navegador não entregou o arquivo (foto ainda no iCloud?). Abra a foto na galeria primeiro, ou tire a foto agora pela câmera.';
+    m.textContent = 'O arquivo veio vazio - ele ainda está no iCloud. Abra o PDF/foto uma vez no aparelho (pra ele baixar) e anexe de novo.';
   }
 });
 function arquivosDocumento(){
@@ -305,7 +305,7 @@ document.getElementById('btn-ler-doc').addEventListener('click', async ()=>{
   const arquivos = arquivosDocumento();
   const msg = document.getElementById('doc-msg');
   msg.classList.remove('hidden');
-  if(!arquivos.length){ msg.textContent = 'Escolha a foto do documento primeiro. Se já escolheu e continua esta mensagem, tire a foto agora pela câmera (fotos guardadas no iCloud às vezes não chegam).'; msg.className = 'msg err'; return; }
+  if(!arquivos.length){ msg.textContent = 'Anexe o documento primeiro (PDF ou foto). Se já anexou e continua esta mensagem, o arquivo não baixou do iCloud - abra ele uma vez no aparelho e anexe de novo.'; msg.className = 'msg err'; return; }
   const btn = document.getElementById('btn-ler-doc');
   btn.disabled = true; btn.textContent = '🔍 Lendo...';
   msg.className = 'msg'; msg.textContent = 'Lendo o documento... leva alguns segundos.';
@@ -379,6 +379,14 @@ document.getElementById('form-cadastro').addEventListener('submit', async (e)=>{
   e.preventDefault();
   const msg = document.getElementById('msg');
   msg.classList.add('hidden');
+document.getElementById('curriculo').addEventListener('change', ()=>{
+  const f = (document.getElementById('curriculo').files||[])[0];
+  const msg = document.getElementById('msg');
+  if(f && f.size === 0 && msg){
+    msg.classList.remove('hidden'); msg.className = 'msg err';
+    msg.textContent = 'O currículo veio vazio - ele ainda está no iCloud. Abra o arquivo uma vez no aparelho (pra ele baixar) e anexe de novo.';
+  }
+});
   const arquivo = document.getElementById('curriculo').files[0];
   if(!arquivo){ msg.textContent = 'Anexe o currículo (obrigatório).'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
   const docs = arquivosDocumento();

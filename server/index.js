@@ -1430,6 +1430,9 @@ app.post('/api/rh/ler-documento-publico', tetoLeituraDocumento, uploadDocumentoI
 // frase clara é melhor que estourar depois no Storage/leitura sem explicação
 function validarTipoCurriculo(arquivo) {
   if (!arquivo) return null;
+  if (arquivo.buffer && arquivo.buffer.length === 0) {
+    return 'O currículo veio vazio - ele ainda está no iCloud. Abra o arquivo uma vez no aparelho (pra ele baixar) e anexe de novo.';
+  }
   const tipo = String(arquivo.mimetype || '').toLowerCase();
   if (/^(application\/pdf|image\/|application\/msword|application\/vnd\.openxmlformats)/.test(tipo)) return null;
   return `O currículo precisa ser PDF, foto ou documento do Word - o arquivo enviado veio como "${tipo || 'tipo desconhecido'}". Salve como PDF e tente de novo.`;
@@ -1498,7 +1501,7 @@ app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCoun
     }
     // valida TODOS os anexos ANTES de qualquer outra coisa - erro de formato
     // tem que voltar com frase clara, não estourar no meio do envio
-    const docsEnviados = (req.files?.documento || []).map((f) => ({ mimeType: f.mimetype }));
+    const docsEnviados = (req.files?.documento || []).map((f) => ({ mimeType: f.mimetype, buffer: f.buffer }));
     if (docsEnviados.length) documentoIdentidadeOcr.validarArquivosDocumento(docsEnviados);
     const arquivoCurriculo = (req.files?.curriculo || [])[0];
     const erroCurriculo = validarTipoCurriculo(arquivoCurriculo);
@@ -6234,7 +6237,7 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'c
     const faltaDoc = exigeDocumentoIdentidade(tipoCadastro, req.files?.documento);
     if (faltaDoc) return res.status(400).json({ error: faltaDoc });
     // mesma validação de formato do link público (ver cadastro-publico)
-    const docsInternos = (req.files?.documento || []).map((f) => ({ mimeType: f.mimetype }));
+    const docsInternos = (req.files?.documento || []).map((f) => ({ mimeType: f.mimetype, buffer: f.buffer }));
     if (docsInternos.length) documentoIdentidadeOcr.validarArquivosDocumento(docsInternos);
     const arquivoCurriculo = (req.files?.curriculo || [])[0];
     const erroCurriculo = validarTipoCurriculo(arquivoCurriculo);

@@ -1096,6 +1096,20 @@ setTimeout(async () => {
   if (!okGigante) ruins += 1;
   console.log(`${okGigante ? '✓' : '✗'} anexos: arquivo acima do limite volta como JSON claro ("muito grande"), não erro mudo: HTTP ${gigante.status} ${gigante.corpo.slice(0, 70)}`);
 
+  // caminho DIGITAL (o principal, pedido do usuário: "poucos usam documento
+  // físico"): PDF do documento é aceito de ponta a ponta
+  const docPdf = await postarMultipart('/api/rh/ler-documento-publico', {},
+    { nome: 'rg-digital.pdf', tipo: 'application/pdf', buffer: Buffer.from('%PDF-1.4 doc') }, 'documento');
+  const okDocPdf = docPdf.status === 200 && /docToken/.test(docPdf.corpo);
+  if (!okDocPdf) ruins += 1;
+  console.log(`${okDocPdf ? '✓' : '✗'} anexos: PDF do documento (RG/CNH digital) é aceito na leitura: HTTP ${docPdf.status}`);
+
+  const docVazio = await postarMultipart('/api/rh/ler-documento-publico', {},
+    { nome: 'rg.pdf', tipo: 'application/pdf', buffer: Buffer.alloc(0) }, 'documento');
+  const okDocVazio = docVazio.status === 400 && /veio vazio/i.test(docVazio.corpo) && /iCloud/.test(docVazio.corpo);
+  if (!okDocVazio) ruins += 1;
+  console.log(`${okDocVazio ? '✓' : '✗'} anexos: arquivo de 0 byte (placeholder do iCloud) é recusado explicando como resolver: HTTP ${docVazio.status} ${docVazio.corpo.slice(0, 80)}`);
+
   const cvErrado = await postarMultipart('/api/rh/cadastro-publico',
     { unidade: 'Dominos Tirol', tipoCadastro: 'extra', contato: '84999990002', cargoFuncao: 'Atendente' },
     { nome: 'curriculo.exe', tipo: 'application/x-msdownload', buffer: Buffer.from('MZ') }, 'curriculo');

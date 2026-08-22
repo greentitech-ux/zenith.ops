@@ -220,6 +220,12 @@ function normalizarTipoImagem(mime) {
 // lerDocumento (defesa em profundidade - a rota pode esquecer de chamar)
 function validarArquivosDocumento(arquivos) {
   (Array.isArray(arquivos) ? arquivos : []).forEach((f) => {
+    // 0 byte = placeholder do iCloud: o Safari mostra "selecionado" mas o
+    // conteúdo nunca veio - sem esta recusa o arquivo vazio chegava no
+    // modelo/Storage e virava erro sem explicação
+    if (f.buffer && f.buffer.length === 0) {
+      throw new Error('O arquivo do documento veio vazio - ele ainda está no iCloud. Abra o PDF/foto uma vez no aparelho (pra ele baixar) e anexe de novo.');
+    }
     const tipo = String(f.mimeType || f.mimetype || '').toLowerCase();
     if (tipo === 'application/pdf') return;
     normalizarTipoImagem(tipo); // estoura com mensagem clara se não servir
