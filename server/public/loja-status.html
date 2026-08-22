@@ -565,6 +565,10 @@
       <label><input type="radio" name="editar-comp-tipo" value="interno"><span><b>🔒 Computador interno</b><small>tela normal de login do Zenith - pra servidor/PC de escritório, só pro monitoramento</small></span></label>
       <label><input type="radio" name="editar-comp-tipo" value="abastecimento"><span><b>🛒 Abastecimento Carrinho</b><small>tela do Abastecimento (Dom Aeroporto) - pro tablet do carrinho/loja, com monitoramento</small></span></label>
     </div>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;cursor:pointer;">
+      <input type="checkbox" id="editar-comp-notebook" style="margin-top:3px;">
+      <span><b>💤 É notebook</b><small style="display:block;color:var(--muted);">hiberna/dorme fora de hora - as quedas dele aparecem no painel, mas nunca disparam o alerta sonoro/push</small></span>
+    </label>
     <div class="msg hidden" id="editar-comp-status"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharModalEditarComputador()">Cancelar</button>
@@ -954,7 +958,7 @@ function atualizarConteudoDetalhe(codigo, c){
   `;
   document.getElementById('detalhe-comp-editar').onclick = () => {
     fecharDetalheComputador();
-    abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'');
+    abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook);
   };
 }
 
@@ -1701,7 +1705,8 @@ async function baixarVigia(codigo, posto, tipo){
 
 let EDITAR_COMP_CODIGO = null;
 let EDITAR_COMP_POSTO = null;
-function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydeskAtual){
+function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydeskAtual, ehNotebook){
+  document.getElementById('editar-comp-notebook').checked = !!ehNotebook;
   EDITAR_COMP_CODIGO = codigo;
   EDITAR_COMP_POSTO = posto;
   document.getElementById('editar-comp-unidade').textContent = `${nomeAtual || posto} · atualmente em ${UNIDADES_NOMES[codigo] || codigo}`;
@@ -1742,7 +1747,7 @@ async function salvarEdicaoComputador(){
     }
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(EDITAR_COMP_CODIGO)}/computadores/${encodeURIComponent(EDITAR_COMP_POSTO)}`, {
       method: 'PUT', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ nome, tipo }),
+      body: JSON.stringify({ nome, tipo, ehNotebook: document.getElementById('editar-comp-notebook').checked }),
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');

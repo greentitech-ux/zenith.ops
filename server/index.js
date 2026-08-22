@@ -2944,7 +2944,7 @@ app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), asy
 
 app.put('/api/loja-status/:codigo/computadores/:posto', requireSection('suporte'), async (req, res) => {
   try {
-    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo);
+    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook);
     const url = urlComputador(req.params.codigo, req.params.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
@@ -11060,9 +11060,10 @@ function aquecerBoot(promessa, ms) {
           continue;
         }
         // celular que fechou o navegador num posto 'interno' não é loja caída
-        // (ver quedaDeCelular em lojaStatus.js) - o NOC mostra a transição,
-        // mas ninguém é acordado com push por causa disso
-        if (t.celular) continue;
+        // (ver quedaDeCelular em lojaStatus.js), e notebook marcado no
+        // cadastro hiberna/dorme fora de hora - o NOC mostra a transição nos
+        // dois casos, mas ninguém é acordado com push por causa disso
+        if (t.celular || t.ehNotebook) continue;
         // reiniciada PELO NOC e não voltou na janela: incidente de verdade,
         // com causa provável conhecida - não passa pelo caminho de "caiu"
         if (t.tipo === 'reinicio-nao-voltou') {
@@ -11072,9 +11073,20 @@ function aquecerBoot(promessa, ms) {
         }
         // t.reiniciando / t.voltouDeReinicio: o NOC sabe que foi ele quem
         // mandou reiniciar, então o alerta conta ISSO em vez de mandar
-        // verificar uma internet que não tem problema nenhum
-        if (t.tipo === 'offline') push.notifyLojaOffline(nome, t.codigo, t.nome, t.posto, t.reiniciando).catch((err) => console.error('Erro no push de loja offline:', err.message));
-        else push.notifyLojaVoltou(nome, t.codigo, t.nome, t.posto, t.voltouDeReinicio).catch((err) => console.error('Erro no push de loja online:', err.message));
+        // verificar uma internet que não tem problema nenhum.
+        // t.confirmada / 'offline-confirmada' / t.quedaCurta: o push crítico
+        // (sonoro) só sai com a queda CONFIRMADA (silêncio além de
+        // CONFIRMACAO_QUEDA_MS em lojaStatus.js) - oscilação que cai e volta
+        // em poucos minutos fica só no painel/histórico, sem apitar ninguém
+        if (t.tipo === 'offline') {
+          if (t.reiniciando || t.confirmada) {
+            push.notifyLojaOffline(nome, t.codigo, t.nome, t.posto, t.reiniciando).catch((err) => console.error('Erro no push de loja offline:', err.message));
+          }
+        } else if (t.tipo === 'offline-confirmada') {
+          push.notifyLojaOffline(nome, t.codigo, t.nome, t.posto, false).catch((err) => console.error('Erro no push de loja offline:', err.message));
+        } else if (t.tipo === 'online' && !t.quedaCurta) {
+          push.notifyLojaVoltou(nome, t.codigo, t.nome, t.posto, t.voltouDeReinicio).catch((err) => console.error('Erro no push de loja online:', err.message));
+        }
       }
     };
     setInterval(() => {
