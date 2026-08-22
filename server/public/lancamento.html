@@ -906,6 +906,16 @@ async function realizarLeituraRelatorio(){
     const partes = [resumo.length
       ? `<b style="color:var(--ok);">✔ Preenchido ${origem}: ${resumo.join(', ')}.</b> Confira valor por valor antes de enviar — se algum estiver errado, tire a foto de novo.`
       : `<b style="color:var(--warn);">Não consegui preencher nenhum campo com ${plural ? 'essas fotos' : 'essa foto'}.</b> Confira se o relatório está inteiro e legível na imagem.`];
+    if((data.somasRuins||[]).length){
+      // a conta é a explicação mais curta que existe: "46+12+4+0+6+1 = 69,
+      // mas o relatório diz 64". Ninguém precisa entender de OCR pra ver isso
+      partes.push(`<span style="color:var(--bad);"><b>⚠ A conta do relatório não fechou na leitura:</b> `
+        + data.somasRuins.map(b=>{
+            const conta = b.partes.map(p=>p.valor).join(' + ');
+            return `em "${escapeHtml(b.titulo)}", ${escapeHtml(conta)} = ${b.soma}, mas o relatório diz total ${b.total}`;
+          }).join('; ')
+        + `. Alguma parcela foi lida errada, então não preenchi nenhuma delas — confira no relatório e digite.</span>`);
+    }
     if((data.suspeitos||[]).length){
       // vem ANTES dos outros avisos de proposito: e o unico que diz que a
       // leitura errou, e errar calado num fechamento e o pior desfecho
