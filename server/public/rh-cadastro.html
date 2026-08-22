@@ -284,19 +284,28 @@ function limparLeituraDoc(){
 // `multiple`). A cópia feita no evento change é o que vale de fallback.
 let ARQUIVOS_DOC = [];
 document.getElementById('documento').addEventListener('change', ()=>{
-  const agora = Array.from(document.getElementById('documento').files || []);
+  // arquivo de 0 byte e o "placeholder" do iCloud: o Safari mostra o nome
+  // como selecionado, mas o conteudo nao veio - avisa NA HORA, em vez de
+  // deixar a pessoa descobrir num erro mudo la na frente
+  const agora = Array.from(document.getElementById('documento').files || []).filter(f=>f && f.size > 0);
   if(agora.length) ARQUIVOS_DOC = agora;
   limparLeituraDoc();
+  const bruto = document.getElementById('documento').files || [];
+  if(bruto.length && !agora.length){
+    const m = document.getElementById('doc-msg');
+    m.classList.remove('hidden'); m.className = 'msg err';
+    m.textContent = 'O navegador não entregou o arquivo (foto ainda no iCloud?). Abra a foto na galeria primeiro, ou tire a foto agora pela câmera.';
+  }
 });
 function arquivosDocumento(){
-  const doInput = Array.from(document.getElementById('documento').files || []);
+  const doInput = Array.from(document.getElementById('documento').files || []).filter(f=>f && f.size > 0);
   return doInput.length ? doInput : ARQUIVOS_DOC;
 }
 document.getElementById('btn-ler-doc').addEventListener('click', async ()=>{
   const arquivos = arquivosDocumento();
   const msg = document.getElementById('doc-msg');
   msg.classList.remove('hidden');
-  if(!arquivos.length){ msg.textContent = 'Escolha a foto do documento primeiro.'; msg.className = 'msg err'; return; }
+  if(!arquivos.length){ msg.textContent = 'Escolha a foto do documento primeiro. Se já escolheu e continua esta mensagem, tire a foto agora pela câmera (fotos guardadas no iCloud às vezes não chegam).'; msg.className = 'msg err'; return; }
   const btn = document.getElementById('btn-ler-doc');
   btn.disabled = true; btn.textContent = '🔍 Lendo...';
   msg.className = 'msg'; msg.textContent = 'Lendo o documento... leva alguns segundos.';
