@@ -6933,8 +6933,20 @@ app.get('/api/saltiverso/vendas', requireSection('parque-loja'), async (req, res
   // no caixa cego e a conferência não provava nada. Atendente comum só vê as
   // PRÓPRIAS vendas (que ele mesmo digitou - não há segredo nelas); a lista
   // do dia inteiro fica pra Gerente/Master, igual ao faturado do fechamento.
-  res.json(podeVerFaturadoSaltiverso(req, unidade) ? vendas
-    : vendas.filter((v) => v.criadoPorId === req.user.id));
+  if (podeVerFaturadoSaltiverso(req, unidade)) return res.json(vendas);
+  // ...e mesmo as PRÓPRIAS vendas escondem o VALOR depois de 2h (pedido do
+  // usuário): a janela recente existe pra conferir/apontar erro de digitação
+  // na hora; depois dela o card continua lá (hora, itens, forma) mas sem
+  // número, senão bastava rolar a lista no fim do dia e somar. Poda em
+  // memória sobre a resposta já montada - custo zero de Firestore.
+  const corte = Date.now() - 2 * 60 * 60 * 1000;
+  res.json(vendas
+    .filter((v) => v.criadoPorId === req.user.id)
+    .map((v) => (new Date(v.criadoEm).getTime() >= corte ? v : {
+      ...v, total: null, valorOculto: true,
+      itens: (v.itens || []).map(({ nome, quantidade }) => ({ nome, quantidade })),
+      pagamentos: (v.pagamentos || []).map(({ forma }) => ({ forma })),
+    })));
 });
 
 app.delete('/api/saltiverso/vendas/:id', auth.requireMaster, async (req, res) => {

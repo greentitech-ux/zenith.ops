@@ -1490,6 +1490,10 @@ setTimeout(async () => {
     const vendaBase = { unidade: 'Saltiverso Patteo', unidadeNome: 'Saltiverso Patteo', data: '2026-08-22', itens: [], total: 50, pagamentos: [{ forma: 'pix', valor: 50 }], cancelada: false, criadoEm: new Date().toISOString() };
     DOCS.set('saltiversoVendas/vs-atende', { ...vendaBase, id: 'vs-atende', criadoPorId: 'u-atende-salti', criadoPorEmail: 'atende-salti@teste.local' });
     DOCS.set('saltiversoVendas/vs-colega', { ...vendaBase, id: 'vs-colega', total: 80, criadoPorId: 'u-outra-pessoa', criadoPorEmail: 'colega@teste.local' });
+    // venda do PRÓPRIO atendente com mais de 2h: continua na lista dele, mas
+    // SEM valor (total/pagamentos podados) - senão bastava rolar a lista no
+    // fim do dia e somar as próprias vendas
+    DOCS.set('saltiversoVendas/vs-antiga', { ...vendaBase, id: 'vs-antiga', total: 70, criadoPorId: 'u-atende-salti', criadoPorEmail: 'atende-salti@teste.local', criadoEm: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() });
     const tkGerSalti = (await auth.login('gerente-salti@teste.local', 'SenhaDeTeste!2026')).token;
     const tkAteSalti = (await auth.login('atende-salti@teste.local', 'SenhaDeTeste!2026')).token;
     const rota = '/api/saltiverso/vendas?unidade=Saltiverso%20Patteo&data=2026-08-22';
@@ -1497,10 +1501,16 @@ setTimeout(async () => {
     const comoAteSalti = await pedir(rota, { Authorization: 'Bearer ' + tkAteSalti });
     const listaGer = JSON.parse(comoGerSalti.corpo);
     const listaAte = JSON.parse(comoAteSalti.corpo);
+    const minhaRecente = listaAte.find((v) => v.id === 'vs-atende');
+    const minhaAntiga = listaAte.find((v) => v.id === 'vs-antiga');
+    const antigaDoGerente = listaGer.find((v) => v.id === 'vs-antiga');
     okVendasCegas = comoGerSalti.status === 200 && comoAteSalti.status === 200
-      && listaGer.length === 2 // gerente vê o dia inteiro
-      && listaAte.length === 1 && listaAte[0].id === 'vs-atende' // atendente só vê a própria
-      && !JSON.stringify(listaAte).includes('vs-colega');
+      && listaGer.length === 3 // gerente vê o dia inteiro, com valores (até a antiga)
+      && antigaDoGerente && antigaDoGerente.total === 70 && !antigaDoGerente.valorOculto
+      && listaAte.length === 2 && !listaAte.some((v) => v.id === 'vs-colega') // atendente só vê as próprias
+      && minhaRecente && minhaRecente.total === 50 // recente (menos de 2h): valor visível pra conferir na hora
+      && minhaAntiga && minhaAntiga.valorOculto === true && minhaAntiga.total === null // +2h: sem valor
+      && !(minhaAntiga.pagamentos || []).some((p) => p.valor !== undefined);
   } catch (e) { okVendasCegas = false; }
   if (!okVendasCegas) ruins += 1;
   console.log(`${okVendasCegas ? '✓' : '✗'} Saltiverso: atendente só vê as PRÓPRIAS vendas do dia (a lista completa entregava o faturado do caixa cego); gerente vê tudo`);
