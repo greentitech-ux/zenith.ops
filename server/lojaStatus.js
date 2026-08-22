@@ -140,6 +140,14 @@ function semSegredo(doc) {
 // heartbeat a cada ~25s (ver atendimento.html) - 90s da margem pra 2
 // heartbeats perdidos por jitter de rede antes de considerar offline
 const LIMIAR_OFFLINE_MS = 90 * 1000;
+// Quanto tempo de silêncio separa "oscilou e voltou" de "caiu de verdade".
+// Pedido do usuário: conexão que cai e volta em 1-3 minutos NÃO é queda -
+// o painel continua acusando na hora (estado INDISPONÍVEL + evento no
+// histórico), mas o push CRÍTICO (o que dispara o alarme sonoro) só sai se
+// o silêncio passar deste teto. Env pra ajustar sem deploy.
+const CONFIRMACAO_QUEDA_MS = Number(process.env.LOJA_STATUS_CONFIRMACAO_QUEDA_MS) >= 0
+  ? Number(process.env.LOJA_STATUS_CONFIRMACAO_QUEDA_MS)
+  : 4 * 60 * 1000;
 // registro de atividades por computador: guarda as ultimas N transicoes
 // online<->offline (ver varrerAlertas), pra auditar quedas de conexao sem
 // depender de print. Capado pra o documento nao crescer sem limite.
@@ -689,13 +697,15 @@ async function cadastrarComputador(codigo, nome, tipo) {
 
 // edita nome e/ou tipo de um computador ja cadastrado - o "posto" (id do
 // link/QR) nunca muda, so o que aparece na tela e qual tela o link abre
-async function editarComputador(codigo, posto, nome, tipo) {
+async function editarComputador(codigo, posto, nome, tipo, ehNotebook) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador.');
   const id = docIdFor(codigo, posto);
   const snap = await COLLECTION.doc(id).get();
   if (!snap.exists) throw new Error('Computador não encontrado.');
-  const registro = { nome: nomeOk, tipo: tipoValido(tipo) };
+  // notebook hiberna/dorme fora de hora - a "queda" dele aparece no painel,
+  // mas nunca vira push crítico (ver rodarVarreduraLojaStatus em index.js)
+  const registro = { nome: nomeOk, tipo: tipoValido(tipo), ehNotebook: !!ehNotebook };
   await COLLECTION.doc(id).update(registro);
   cache.invalidar();
   return { codigo, posto, ...registro };
@@ -1306,6 +1316,14 @@ async function varrerAlertas() {
         ...(doc.link ? { link: doc.link.tipo } : {}),
         ...(reiniciandoPorNos ? { motivo: 'reinicio-comandado' } : {}),
       };
+      // queda CONFIRMADA x oscilação: o painel acusa nas duas (esta
+      // transição + evento no histórico), mas o push crítico (sonoro) só sai
+      // com o silêncio já passado de CONFIRMACAO_QUEDA_MS. Se ainda não
+      // passou, fica pendente e o tick seguinte decide (ver o ramo
+      // 'offline-confirmada' abaixo). Reinício comandado não espera - a
+      // causa é conhecida e o aviso dele nem é crítico.
+      const confirmada = reiniciandoPorNos
+        || (Date.now() - doc.ultimoHeartbeatEm) >= CONFIRMACAO_QUEDA_MS;
       await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({
         avisadoOffline: true,
         // offlineDesde = quando de fato SILENCIOU, nao a hora da deteccao.
@@ -1314,11 +1332,22 @@ async function varrerAlertas() {
         // fazia o painel subnotificar toda queda nesse tanto - dava "7min"
         // numa parada real de 9min.
         offlineDesde: doc.ultimoHeartbeatEm,
+        quedaPushPendente: !confirmada,
         eventos: [...(doc.eventos || []), evento].slice(-EVENTOS_MAX),
       });
       transicoes.push({
         codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'offline',
-        celular: quedaDeCelular(doc), reiniciando: reiniciandoPorNos,
+        celular: quedaDeCelular(doc), ehNotebook: !!doc.ehNotebook,
+        reiniciando: reiniciandoPorNos, confirmada,
+      });
+    } else if (!online && doc.avisadoOffline && doc.quedaPushPendente
+        && (Date.now() - (doc.offlineDesde || doc.ultimoHeartbeatEm)) >= CONFIRMACAO_QUEDA_MS) {
+      // continuou fora depois da janela de oscilação: AGORA é queda de
+      // verdade - o push crítico sai daqui, uma vez só
+      await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({ quedaPushPendente: false });
+      transicoes.push({
+        codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'offline-confirmada',
+        celular: quedaDeCelular(doc), ehNotebook: !!doc.ehNotebook,
       });
     } else if (online && doc.avisadoOffline) {
       // no retorno o doc ja tem o IP NOVO (o heartbeat que provou que voltou
@@ -1332,14 +1361,21 @@ async function varrerAlertas() {
       // sido usada ou não. Sem isso, uma queda de verdade horas depois
       // ainda seria contada como "estava reiniciando".
       const voltouDeReinicio = !!doc.reinicioComandadoEm;
+      // voltou ANTES do push crítico sair = oscilação (caiu e voltou em
+      // poucos minutos). Fica no histórico do painel como qualquer
+      // queda/volta, mas nenhum push é disparado - nem o de "voltou",
+      // senão o celular do Master apitava justamente pelo que pedimos
+      // pra ignorar
+      const quedaCurta = !!doc.quedaPushPendente;
       await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({
-        avisadoOffline: false, offlineDesde: null,
+        avisadoOffline: false, offlineDesde: null, quedaPushPendente: false,
         reinicioComandadoEm: null, reinicioNaoVoltouAvisado: false,
         eventos: [...(doc.eventos || []), evento].slice(-EVENTOS_MAX),
       });
       transicoes.push({
         codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'online',
-        celular: quedaDeCelular(doc), voltouDeReinicio,
+        celular: quedaDeCelular(doc), ehNotebook: !!doc.ehNotebook,
+        voltouDeReinicio, quedaCurta,
       });
     } else if (!online && doc.reinicioComandadoEm && !doc.reinicioNaoVoltouAvisado
         && (Date.now() - doc.reinicioComandadoEm) >= JANELA_REINICIO_MS) {

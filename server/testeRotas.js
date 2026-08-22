@@ -2920,7 +2920,9 @@ setTimeout(async () => {
       'desktop NÃO é celular (queda real continua alertando)': lojaStatusMod.ehCelular('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36') === false,
       'o vigia NÃO é celular (queda com vigia continua alertando)': lojaStatusMod.ehCelular('NOCZenith/1.0 (Windows NT; PowerShell)') === false,
       'a varredura marca a transição vinda de celular': /celular: quedaDeCelular\(doc\)/.test(srcLoja) && /tipo === 'interno' && ehCelular\(doc\.userAgent\)/.test(srcLoja),
-      'o push de loja offline/online pula transição de celular': /if \(t\.celular\) continue;/.test(srcIndex),
+      // o pulo agora cobre celular E notebook (mesma linha, ver o teste de
+      // oscilação adiante) - o que este teste protege é o celular estar nela
+      'o push de loja offline/online pula transição de celular': /if \(t\.celular \|\| t\.ehNotebook\) continue;/.test(srcIndex),
       'a tela de login não monitora em celular e apaga a configuração gravada':
         /Mobile/.test(htmlLogin) && /removeItem\('zenithMonitorFixo'\)/.test(htmlLogin),
     };
@@ -3845,6 +3847,66 @@ setTimeout(async () => {
   } catch (e) { okReinicioAlerta = false; console.log('  erro: ' + e.message); }
   if (!okReinicioAlerta) ruins += 1;
   console.log(`${okReinicioAlerta ? '✓' : '✗'} NOC: máquina que NÓS mandamos reiniciar aparece como "reiniciando", não como "sem conexão"`);
+
+  // ---- NOC: oscilação NÃO é queda (pedido do usuário: "cai e volta em
+  // 1-2-3 minutos, será que é queda?"). O painel acusa na hora, mas o push
+  // crítico (o sonoro) só sai com a queda CONFIRMADA (silêncio além de
+  // CONFIRMACAO_QUEDA_MS, 4min). Notebook marcado no cadastro nunca apita
+  // (hiberna fora de hora). ----
+  let okOscilacao = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const UNI = 'NOCOSCILA';
+    await ls.cadastrarComputador(UNI, 'PDV-OSCILA', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-OSCILA').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    await ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0' }, tk);
+    const idDoc = `lojaStatus/${UNI}__${posto}`;
+
+    // 1) some por 2min (menos que a confirmação): painel acusa, push ainda não
+    DOCS.set(idDoc, { ...DOCS.get(idDoc), ultimoHeartbeatEm: Date.now() - 2 * 60 * 1000, avisadoOffline: false, quedaPushPendente: false });
+    ls.descartarEspelhoTeste();
+    const caiu = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'offline');
+    // 2) volta antes de confirmar: transição marcada como quedaCurta (o job
+    //    de push pula tanto o "caiu" quanto o "voltou")
+    await ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0' }, tk);
+    const voltou = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'online');
+    // 3) cai de novo e FICA fora: detecta sem apitar, e o tick com o silêncio
+    //    já além de 4min emite a confirmação - UMA vez só
+    DOCS.set(idDoc, { ...DOCS.get(idDoc), ultimoHeartbeatEm: Date.now() - 2 * 60 * 1000, avisadoOffline: false, quedaPushPendente: false });
+    ls.descartarEspelhoTeste();
+    const caiu2 = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'offline');
+    DOCS.set(idDoc, { ...DOCS.get(idDoc), ultimoHeartbeatEm: Date.now() - 5 * 60 * 1000, offlineDesde: Date.now() - 5 * 60 * 1000 });
+    ls.descartarEspelhoTeste();
+    const confirmou = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'offline-confirmada');
+    const confirmouDeNovo = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'offline-confirmada');
+    // 4) notebook: até queda longa carrega a marca, e o job de push pula
+    await ls.editarComputador(UNI, posto, 'PDV-OSCILA', 'interno', true);
+    DOCS.set(idDoc, { ...DOCS.get(idDoc), ultimoHeartbeatEm: Date.now() - 10 * 60 * 1000, avisadoOffline: false, quedaPushPendente: false });
+    ls.descartarEspelhoTeste();
+    const notebook = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'offline');
+    // fiação do job: celular E notebook são pulados antes de qualquer push,
+    // e o push de offline só sai com reiniciando/confirmada
+    const srcIdx2 = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const okFiacao = /if \(t\.celular \|\| t\.ehNotebook\) continue;/.test(srcIdx2)
+      && /if \(t\.reiniciando \|\| t\.confirmada\)/.test(srcIdx2)
+      && /t\.tipo === 'offline-confirmada'/.test(srcIdx2)
+      && /t\.tipo === 'online' && !t\.quedaCurta/.test(srcIdx2);
+
+    const conferencias = {
+      'queda curta é detectada mas SEM confirmação (sem push)': !!caiu && caiu.confirmada === false,
+      'volta rápida vem marcada como quedaCurta (nem o "voltou" apita)': !!voltou && voltou.quedaCurta === true,
+      'segunda queda também começa sem apitar': !!caiu2 && caiu2.confirmada === false,
+      'passou de 4min fora: confirmação sai UMA vez': !!confirmou && !confirmouDeNovo,
+      'notebook marcado carrega a marca até em queda longa': !!notebook && notebook.ehNotebook === true && notebook.confirmada === true,
+      'o job de push pula celular/notebook e só apita queda confirmada': okFiacao,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okOscilacao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okOscilacao = false; console.log('  erro: ' + e.message); }
+  if (!okOscilacao) ruins += 1;
+  console.log(`${okOscilacao ? '✓' : '✗'} NOC: oscilação de 1-3min não apita (painel registra, push só com queda confirmada; notebook nunca apita)`);
 
   // ---- KPI's operacionais: exportar a matriz + ranking de ofensores ----
   // O que importa provar aqui: (1) o CSV/PDF sai com EXATAMENTE a matriz que
