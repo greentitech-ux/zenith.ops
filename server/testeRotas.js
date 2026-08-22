@@ -485,6 +485,70 @@ setTimeout(async () => {
   if (!okLerDoc) ruins += 1;
   console.log(`${okLerDoc ? '✓' : '✗'} ler documento sem ANTHROPIC_API_KEY é recusado: HTTP ${lerDoc.status} ${lerDoc.corpo.slice(0, 80)}`);
 
+  // ---- LEITURA DA FOTO DO RELATÓRIO: valor tem que bater com a linha ----
+  // Caso real (21/08): num "Resumo de Pedidos" impresso em DUAS colunas, a
+  // leitura devolveu Cancelado=6 (era o valor de Dine In), PickUp=4 (valor de
+  // "Editado", coluna da direita) e Retornado=1, com Dine In vazio. Os três
+  // errados eram justamente os que valiam 0 no relatório. Reler a MESMA foto
+  // deu outro resultado, também errado - não é foto ruim, é desalinhamento de
+  // coluna, e ele não é estável.
+  //
+  // A conferência não depende do modelo acertar: ele já diz de que linha tirou
+  // cada número (textoOrigem), e o servidor confere o nome do campo contra
+  // essa linha. Aqui os pares REAIS daquele relatório.
+  let okOcrConfere = false;
+  try {
+    const ocr = require('/home/user/adyen-monitor/server/canaisVendaOcr.js');
+    const bate = ocr.rotuloBateComOrigem;
+    const casos = {
+      // ---- os três que passaram errado naquele dia: têm que ser recusados
+      'Cancelado com o valor de Dine In é recusado': bate('Cancelado', 'Dine In 6') === false,
+      'PickUp com o valor de Editado é recusado': bate('PickUp (R$)', 'Editado 4') === false,
+      'Retornado com o valor de Delivery <=10 é recusado': bate('Retornado (R$)', 'Delivery <=10 1') === false,
+      // ---- e os certos do MESMO relatório têm que passar (alarme falso aqui
+      // treina quem lança a ignorar o aviso, e aí ele não serve pra nada)
+      'Delivery na própria linha passa': bate('Delivery', 'Delivery 46') === true,
+      'Carryout x "Carry Out" (espaço só no relatório) passa': bate('Carryout', 'Carry Out 12') === true,
+      'PickUp x "Pick Up 0" passa': bate('PickUp (R$)', 'Pick Up 0') === true,
+      'Dine In (R$) x "Dine In 6" passa': bate('Dine In (R$)', 'Dine In 6') === true,
+      'Total x "Total 64" passa': bate('Total', 'Total 64') === true,
+      'Taxa de Entrega passa': bate('Taxa de Entrega', 'Taxa de Entrega 386,10') === true,
+      // acento no relatório e não no cadastro (e vice-versa)
+      'Media Saida de Loja (OTD) x "Média Saída de Loja 15,84" passa':
+        bate('Media Saida de Loja (OTD)', 'Média Saída de Loja 15,84') === true,
+      'Avg Delivery Time (Calc) x "Avg Delivery Time 26.64" passa':
+        bate('Avg Delivery Time (Calc)', 'Avg Delivery Time 26.64') === true,
+      // sigla de 3 letras (OTD, ADT, DOT) é o nome inteiro do KPI nesse
+      // relatório - se ela não casar, todo indicador de tempo vira suspeito
+      'OTD x "OTD 15,84" passa': bate('OTD', 'OTD 15,84') === true,
+      'ADT x "ADT 2,31" passa': bate('ADT', 'ADT 2,31') === true,
+      'OTD com o valor de outra linha é recusado': bate('OTD', 'Leg Time 8,91') === false,
+      // sem texto pra comparar não é motivo pra acusar: não saber é diferente
+      // de estar errado, e alarme falso aqui custa a credibilidade do aviso
+      'origem só com o número não vira suspeita': bate('Cancelado', '6') === true,
+      'origem vazia não vira suspeita': bate('Cancelado', null) === true,
+      // troca entre canais parecidos, que é o outro jeito de errar
+      'Delivery com o valor de iFood é recusado': bate('Delivery', 'iFood 320,50') === false,
+    };
+    const falhas = Object.entries(casos).filter(([, ok]) => !ok).map(([n]) => n);
+    okOcrConfere = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okOcrConfere = false; console.log('  erro: ' + e.message); }
+  if (!okOcrConfere) ruins += 1;
+  console.log(`${okOcrConfere ? '✓' : '✗'} Leitura por foto: valor cuja linha de origem não menciona o campo é recusado (troca de coluna)`);
+
+  // O prompt precisa dizer as três coisas que o relatório em duas colunas
+  // exige - sem elas o modelo desalinha de novo e a conferência vira o único
+  // freio, em vez do segundo
+  let okPromptColunas = false;
+  try {
+    const src = require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8');
+    okPromptColunas = /DUAS COLUNAS/.test(src) && /ZERO NÃO SE PULA/.test(src)
+      && /textoOrigem" tem que ser a linha REAL/.test(src);
+  } catch (e) { okPromptColunas = false; }
+  if (!okPromptColunas) ruins += 1;
+  console.log(`${okPromptColunas ? '✓' : '✗'} Leitura por foto: o prompt avisa do layout em 2 colunas, do zero que não se pula e do textoOrigem conferido`);
+
   // ---- FORMULÁRIOS: o seletor de Unidade respeita quem foi liberado ----
   // O Master libera uma pessoa pra UMA loja e o seletor mostrava TODAS -
   // gerente de uma loja via (e podia emitir) formulário de pagamento de
