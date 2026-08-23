@@ -4974,6 +4974,52 @@ setTimeout(async () => {
   if (!okFechReal) ruins += 1;
   console.log(`${okFechReal ? '\u2713' : '\u2717'} Fechamentos: linha de total e quem nao lancou, sem badge inventado`);
 
+  // ---------- Lancamento: a foto do relatorio ----------
+  // O mockup 2h desenha a leitura por foto como se fosse nova - ela ja existe
+  // e faz MAIS do que o desenho (varias fotos, campo suspeito liberado, soma
+  // que nao fecha, zero em branco). Do mockup entrou so o que faltava: o chip
+  // "da foto" por secao e a hora da leitura.
+  // O que NAO pode acontecer: cravar a lista de campos do desenho (Delivery,
+  // Carryout, Adyen, Pix CNPJ...). Esses campos sao CADASTRADOS por grupo em
+  // /grupos.html - cravar a lista do Domino's apagaria os canais e formas de
+  // toda franquia que nao e Domino's. Ver CLAUDE.md secao 6.
+  let okLancFoto = false;
+  try {
+    const fsL = require('fs'), pathL = require('path');
+    const lanc = fsL.readFileSync(pathL.join(__dirname, 'public', 'lancamento.html'), 'utf8');
+    const semComentarioL = lanc
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '')).join('\n');
+
+    const confL = {
+      'os campos continuam vindo do grupo, nao cravados no HTML':
+        /canais-extras-container/.test(lanc) && /formas-extras-container/.test(lanc)
+        && /kpis-extras-container/.test(lanc)
+        && !/<label>\s*Carryout\s*<\/label>/.test(semComentarioL)
+        && !/<label>\s*Pix CNPJ\s*<\/label>/.test(semComentarioL),
+      'o chip conta o DOM, nao a ultima leitura (varias fotos em rodadas)':
+        /input\.campo-automatico\[readonly\]/.test(lanc)
+        && /function pintarChipsFoto\(\)/.test(lanc),
+      'a leitura diz a hora (senao nao da pra saber se e desta rodada)':
+        /Lido \u00e0s \$\{hora\}/.test(lanc)
+        && /toLocaleTimeString\('pt-BR'/.test(lanc),
+      'campo achado pela foto continua travado (a trava e a garantia)':
+        /el\.readOnly = true;/.test(lanc)
+        && /campo-automatico'\);/.test(lanc),
+      'campo que a leitura nao confirmou continua sendo liberado':
+        /\(data\.suspeitos\|\|\[\]\)\.forEach/.test(lanc)
+        && /\(data\.faltando\|\|\[\]\)\.forEach/.test(lanc),
+      'o chip usa token de cor, nao hex cravado':
+        /\.chip-foto\{[^}]*var\(--ok\)/.test(lanc)
+        && !/\.chip-foto\{[^}]*#[0-9a-fA-F]{6}/.test(lanc),
+    };
+    const ruinsL = Object.entries(confL).filter(([, ok]) => !ok).map(([n]) => n);
+    okLancFoto = !ruinsL.length;
+    if (ruinsL.length) console.log(`  falhou em: ${ruinsL.join(' \u00b7 ')}`);
+  } catch (e) { okLancFoto = false; console.log('  erro: ' + e.message); }
+  if (!okLancFoto) ruins += 1;
+  console.log(`${okLancFoto ? '\u2713' : '\u2717'} Lancamento: campos vem do grupo e a foto continua travando o que leu`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
