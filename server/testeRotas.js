@@ -4163,7 +4163,7 @@ setTimeout(async () => {
     };
     const errosVigia = Object.entries(confVigia).filter(([, ok]) => !ok).map(([k]) => k);
     if (errosVigia.length) ruins += 1;
-    console.log(`${errosVigia.length ? '✗' : '✓'} NOC: NOCZenith v17 blindado contra reinício (tarefa de boot SYSTEM + cedência + sem limite de 72h)${errosVigia.length ? ' - FALHOU: ' + errosVigia.join(' | ') : ''}`);
+    console.log(`${errosVigia.length ? '✗' : '✓'} NOC: NOCZenith blindado contra reinício (tarefa de boot SYSTEM + cedência + sem limite de 72h)${errosVigia.length ? ' - FALHOU: ' + errosVigia.join(' | ') : ''}`);
   }
 
   // ---- CENTRAL DE ALERTAS: threads por máquina (como as fraudes do Monitor) ----
