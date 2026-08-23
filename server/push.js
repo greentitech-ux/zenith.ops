@@ -985,6 +985,54 @@ async function notifyAcessoRemotoDetectado(unidadeNome, codigo, computadorNome, 
   }
 }
 
+// fechamento do dia lançado por uma loja (POST /api/fechamentos/lancar) -
+// pedido do Master: "quero receber notificação quando os fechamentos forem
+// realizados". E AVISO DE ROTINA, nunca alarme: chega um por loja por dia, e
+// sirene em coisa esperada so ensina a ignorar sirene.
+//
+// Publico pelo mesmo criterio do resto do dia a dia (podeReceber): o Master
+// ve tudo; quem tem a secao "fechamentos" recebe das unidades que ja enxerga
+// - assim um supervisor regional so e' avisado das lojas dele.
+//
+// A diferenca de caixa vai no corpo porque e' ela que decide se vale abrir
+// agora ou so olhar depois. Quando passa do limite, o ticket de Quebra de
+// caixa continua avisando em separado (ver create em fechamentosLive.js) -
+// aquilo pede acao, isto so informa que o dia fechou.
+function fmtMoedaFech(v) {
+  return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+async function notifyFechamentoLancado(registro, { exceptUserId } = {}) {
+  if (!registro) return;
+  const dataBr = /^\d{4}-\d{2}-\d{2}$/.test(String(registro.data || ''))
+    ? `${registro.data.slice(8, 10)}/${registro.data.slice(5, 7)}`
+    : String(registro.data || '');
+  const diferenca = Number(registro.diferenca) || 0;
+  // menos de 1 centavo e' arredondamento, nao divergencia
+  const resumoCaixa = Math.abs(diferenca) < 0.01
+    ? 'caixa bateu certinho'
+    : `diferença de ${fmtMoedaFech(diferenca)}`;
+  const title = '🧾 Fechamento lançado';
+  const body = `${registro.unidadeNome || registro.unidade} · ${dataBr} · faturamento ${fmtMoedaFech(registro.faturamento)} · ${resumoCaixa}${registro.gerente ? ` · por ${registro.gerente}` : ''}`;
+  const url = '/fechamentos.html';
+  await alertasCentral.registrar({ tipo: 'fechamento', titulo: title, resumo: body, url });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify({ title, body, tag: `fechamento-${registro.id}`, url });
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceber(sub, { unidade: registro.unidade, section: 'fechamentos' })) continue;
+    // quem acabou de lançar nao precisa de push do proprio lançamento - ele
+    // ja viu a tela de confirmacao
+    if (exceptUserId && sub.meta && String(sub.meta.userId) === String(exceptUserId)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+      else console.error('Erro ao enviar push (fechamento lançado):', err.message);
+    }
+  }
+}
+
 module.exports = {
   addSubscription, migrarSubscricao, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
   notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
@@ -992,5 +1040,5 @@ module.exports = {
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
   notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
-  notifyAbastecimentoDivergencia, PUBLIC_KEY,
+  notifyAbastecimentoDivergencia, notifyFechamentoLancado, PUBLIC_KEY,
 };

@@ -4855,6 +4855,12 @@ app.post('/api/fechamentos/lancar', requireSection('lancamento'), upload.any(), 
       criadoPorEmail: req.user.email,
     });
     broadcast('fechamento-lancado', registro, 'lancamento');
+    // aviso de rotina de que a loja fechou o dia (pedido do Master: "quero
+    // receber notificação quando os fechamentos forem realizados"). Nao
+    // segura a resposta e nunca derruba o lançamento: o fechamento ja esta
+    // gravado, o push e' bonus
+    push.notifyFechamentoLancado(registro, { exceptUserId: req.user.id })
+      .catch((err) => console.error('Erro no push de fechamento lançado:', err.message));
     // diferença passou do limite (ver fechamentosLive.LIMITE_QUEBRA_CAIXA) -
     // ticket automatico de "Quebra de caixa" ja nasceu junto, so falta
     // avisar a Central igual qualquer solicitacao nova
