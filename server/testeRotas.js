@@ -4693,6 +4693,69 @@ setTimeout(async () => {
   if (!okIsolamentoUnidade) ruins += 1;
   console.log(`${okIsolamentoUnidade ? '✓' : '✗'} Unidade: Tatuapé não vê NADA da Mooca (mesmo grupo, mesma empresa) - nem no cadastro do grupo, nem no dado, nem trocando a URL`);
 
+  // ---------- Marca NoPulso: o acento NAO pode ficar cravado no CSS ----------
+  // O limao #b8ff3c so funciona no tema Escuro. No tema Claro o tema.js
+  // troca o --accent por #5b8c00, porque limao puro sobre branco e
+  // ilegivel. Quem escreve a cor direto no CSS escapa dessa troca e a tela
+  // quebra pra quem usa o modo Claro - foi exatamente o que aconteceu no
+  // suporte-chat.js (14 ocorrencias) na primeira leva do rebranding.
+  // Aceito: a declaracao do token em :root e o fallback var(--accent,#b8ff3c),
+  // que so entra em pagina que nao declara :root (alerta-beniboy.html).
+  let okAcentoTokenizado = false;
+  try {
+    const fsA = require('fs'), pathA = require('path');
+    const dirA = pathA.join(__dirname, 'public');
+    const cravadas = [];
+    for (const arq of fsA.readdirSync(dirA).filter((f) => /\.(html|js)$/.test(f))) {
+      const src = fsA.readFileSync(pathA.join(dirA, arq), 'utf8');
+      src.split('\n').forEach((linha, i) => {
+        if (!linha.includes('#b8ff3c')) return;
+        // tira o que e legitimo antes de procurar sobra
+        const limpa = linha
+          .replace(/var\(--accent2?\s*,\s*#b8ff3c\)/g, '')
+          .replace(/--accent\s*:\s*#b8ff3c/g, '')
+          .replace(/\/\/.*$/, '');           // comentario de linha
+        if (limpa.includes('#b8ff3c')) cravadas.push(`${arq}:${i + 1}`);
+      });
+    }
+    okAcentoTokenizado = cravadas.length === 0;
+    if (cravadas.length) console.log(`  acento cravado em: ${cravadas.slice(0, 8).join(' · ')}${cravadas.length > 8 ? ` (+${cravadas.length - 8})` : ''}`);
+  } catch (e) { okAcentoTokenizado = false; console.log('  erro: ' + e.message); }
+  if (!okAcentoTokenizado) ruins += 1;
+  console.log(`${okAcentoTokenizado ? '\u2713' : '\u2717'} Marca: o acento limao passa sempre pelo token (nao quebra o tema Claro)`);
+
+  // ---------- Fontes servidas pelo proprio app ----------
+  // As lojas tem piso de latencia alto e algumas ficam atras de rede
+  // restrita: uma fonte vinda do CDN do Google e ponto de falha externo.
+  let okFontesLocais = false;
+  try {
+    const fsF = require('fs'), pathF = require('path');
+    const dirF = pathF.join(__dirname, 'public');
+    const tema = fsF.readFileSync(pathF.join(dirF, 'tema.js'), 'utf8');
+    const cssF = fsF.readFileSync(pathF.join(dirF, 'fontes', 'fontes.css'), 'utf8');
+    const arquivos = ['archivo-latin.woff2', 'archivo-latin-ext.woff2',
+                      'jetbrainsmono-latin.woff2', 'jetbrainsmono-latin-ext.woff2'];
+    const conf = {
+      'o tema.js injeta /fontes/fontes.css': /href *= *'\/fontes\/fontes\.css'/.test(tema),
+      'e nao busca mais no CDN do Google':
+        !/href *= *['"`]https:\/\/fonts\.(googleapis|gstatic)/.test(tema),
+      'o css aponta so pra arquivos locais':
+        /url\(\/fontes\//.test(cssF) && !/url\(https:/.test(cssF),
+      'as 4 woff2 existem e nao estao vazias':
+        arquivos.every((a) => {
+          const st = fsF.statSync(pathF.join(dirF, 'fontes', a));
+          return st.size > 5000;
+        }),
+      'font-display:swap (texto aparece antes da fonte chegar)':
+        (cssF.match(/font-display: *swap/g) || []).length >= 4,
+    };
+    const falhasF = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okFontesLocais = !falhasF.length;
+    if (falhasF.length) console.log(`  falhou em: ${falhasF.join(' \u00b7 ')}`);
+  } catch (e) { okFontesLocais = false; console.log('  erro: ' + e.message); }
+  if (!okFontesLocais) ruins += 1;
+  console.log(`${okFontesLocais ? '\u2713' : '\u2717'} Fontes: Archivo/JetBrains Mono saem do proprio servidor, sem depender do Google`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

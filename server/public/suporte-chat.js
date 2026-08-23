@@ -36,9 +36,9 @@
   .szc-label{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:#7d8896;margin:2px 0 -4px;}
   .szc-input,.szc-textarea{width:100%;box-sizing:border-box;background:#181d24;border:1px solid #232a33;color:#e7ecf1;
     border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;}
-  .szc-input:focus,.szc-textarea:focus{outline:none;border-color:#b8ff3c;}
+  .szc-input:focus,.szc-textarea:focus{outline:none;border-color:var(--accent,#b8ff3c);}
   .szc-textarea{resize:vertical;min-height:56px;}
-  .szc-enviar{background:#b8ff3c;color:#0b0d10;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;}
+  .szc-enviar{background:var(--accent,#b8ff3c);color:#0b0d10;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;}
   .szc-enviar:disabled{opacity:.5;cursor:default;}
   .szc-msg{max-width:85%;padding:8px 10px;border-radius:10px;font-size:12.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word;}
   .szc-msg.visitante{align-self:flex-end;background:#12303a;color:#cfeeff;border:1px solid rgba(184, 255, 60,.25);}
@@ -50,23 +50,23 @@
   .szc-aviso{font-size:11.5px;color:#7d8896;text-align:center;}
   .szc-erro{font-size:11.5px;color:#ff5c5c;}
   .szc-fim{background:#181d24;border:1px dashed #232a33;color:#7d8896;border-radius:8px;padding:8px;font-size:11.5px;text-align:center;}
-  .szc-link{background:none;border:none;color:#b8ff3c;font-size:12px;cursor:pointer;padding:0;}
+  .szc-link{background:none;border:none;color:var(--accent,#b8ff3c);font-size:12px;cursor:pointer;padding:0;}
   /* anexo (foto/PDF) no chat - pedido explicito do usuario: "precisa
      permitir enviar foto e anexos no chat" */
   .szc-anexo-btn{display:flex;align-items:center;justify-content:center;width:36px;flex-shrink:0;
     cursor:pointer;font-size:17px;color:#7d8896;border-radius:8px;}
-  .szc-anexo-btn:hover{color:#b8ff3c;}
-  .szc-anexo-btn.szc-anexo-tem{color:#b8ff3c;}
+  .szc-anexo-btn:hover{color:var(--accent,#b8ff3c);}
+  .szc-anexo-btn.szc-anexo-tem{color:var(--accent,#b8ff3c);}
   /* anexo no FORMULARIO DE ABERTURA: quem abre o chamado normalmente já está
      com o print na mão - mandar depois numa segunda mensagem se perdia */
   .szc-anexo-abrir{display:flex;align-items:center;gap:8px;width:100%;padding:9px 11px;margin-bottom:10px;
     border:1px dashed #2c3542;border-radius:8px;background:#12161b;color:#7d8896;font-size:12.5px;
     cursor:pointer;transition:border-color .15s ease,color .15s ease;}
-  .szc-anexo-abrir:hover{border-color:#b8ff3c;color:#e7ecf1;}
-  .szc-anexo-abrir.szc-anexo-tem{border-style:solid;border-color:#b8ff3c;color:#e7ecf1;}
+  .szc-anexo-abrir:hover{border-color:var(--accent,#b8ff3c);color:#e7ecf1;}
+  .szc-anexo-abrir.szc-anexo-tem{border-style:solid;border-color:var(--accent,#b8ff3c);color:#e7ecf1;}
   .szc-anexo-abrir span:last-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .szc-msg img.szc-anexo-img{max-width:180px;max-height:180px;border-radius:8px;border:1px solid #232a33;margin-top:4px;display:block;}
-  .szc-msg a.szc-anexo-arq{display:inline-block;margin-top:4px;color:#b8ff3c;font-size:12px;}
+  .szc-msg a.szc-anexo-arq{display:inline-block;margin-top:4px;color:var(--accent,#b8ff3c);font-size:12px;}
   /* cabeça de robo (Beniboy) dentro do botao - olhos brilham/piscam, bracos acenam */
   .szc-btn svg{overflow:visible;}
   .szc-bot-eyes{transform-box:fill-box;transform-origin:center;animation:szc-blink 4.6s ease-in-out infinite;}
@@ -116,7 +116,7 @@
      CIMA de qualquer tela do NoPulso que a pessoa estiver, independente do
      chat estar aberto ou nao */
   .szc-pedido-popup{position:fixed;top:16px;right:16px;z-index:99998;display:flex;flex-direction:column;gap:8px;max-width:320px;}
-  .szc-pp-card{background:#12161b;color:#e7ecf1;border:1px solid #b8ff3c;border-radius:12px;padding:12px 34px 12px 14px;
+  .szc-pp-card{background:#12161b;color:#e7ecf1;border:1px solid var(--accent,#b8ff3c);border-radius:12px;padding:12px 34px 12px 14px;
     position:relative;box-shadow:0 10px 30px rgba(0,0,0,.5);font-family:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
     animation:szc-pp-in .25s ease;}
   .szc-pp-titulo{font-size:13px;font-weight:700;margin-bottom:4px;}
@@ -145,12 +145,12 @@
   .szc-dm-pe{display:flex;gap:8px;padding:10px 12px;border-top:1px solid #2a3340;}
   .szc-dm-pe textarea{flex:1;background:#0d1116;border:1px solid #2a3340;color:#e7ecf1;border-radius:9px;padding:8px 10px;
     font-size:13px;font-family:inherit;resize:none;min-height:40px;max-height:110px;box-sizing:border-box;}
-  .szc-dm-enviar{background:#b8ff3c;color:#04202e;border:none;border-radius:9px;padding:0 16px;font-weight:700;font-size:13px;cursor:pointer;}
+  .szc-dm-enviar{background:var(--accent,#b8ff3c);color:#0b0d10;border:none;border-radius:9px;padding:0 16px;font-weight:700;font-size:13px;cursor:pointer;}
   .szc-dm-enviar:disabled{opacity:.6;cursor:default;}
   .szc-dm-lista{display:flex;flex-direction:column;gap:6px;padding:12px 14px;overflow-y:auto;}
   .szc-dm-item{display:flex;align-items:center;gap:8px;background:#1b2330;border:1px solid #2a3340;border-radius:10px;
     padding:9px 11px;cursor:pointer;text-align:left;color:inherit;font:inherit;width:100%;}
-  .szc-dm-item:hover{border-color:#b8ff3c;}
+  .szc-dm-item:hover{border-color:var(--accent,#b8ff3c);}
   .szc-dm-item .szc-dm-nome{flex:1;font-size:13px;font-weight:600;}
   .szc-dm-item .szc-dm-previa{font-size:11px;color:#8fa0b4;display:block;font-weight:400;margin-top:2px;}
   .szc-dm-pino{background:#ff5c5c;color:#fff;font-size:10.5px;font-weight:700;border-radius:10px;padding:1px 6px;font-family:ui-monospace,monospace;}
@@ -324,7 +324,7 @@
     // (?unidade=) - so pra CONFIRMAR pro cliente que a loja certa foi
     // reconhecida (o dado em si ja vai junto no /iniciar, ver iniciarConversa)
     const lojaTag = window.__zenithLojaContexto
-      ? `<div class="szc-aviso" style="color:#b8ff3c;">🏬 Loja: ${esc(window.__zenithLojaContexto)}</div>` : '';
+      ? `<div class="szc-aviso" style="color:var(--accent,#b8ff3c);">🏬 Loja: ${esc(window.__zenithLojaContexto)}</div>` : '';
     corpo.innerHTML = `
       <div class="szc-aviso">Conte pra gente o que está acontecendo — problema no computador, no sistema ou de acesso. Não precisa estar logado.</div>
       ${lojaTag}
@@ -406,7 +406,7 @@
     // um numero pra referenciar desde o 1o contato, viraz ou nao um chamado
     // de verdade depois (pedido explicito do usuario)
     const protocoloTag = chat.numeroTicket
-      ? `<div class="szc-aviso" style="color:#b8ff3c;">🎫 Protocolo #${chat.numeroTicket} · <button type="button" class="szc-link" id="szc-pdf">📄 baixar PDF da conversa</button></div>`
+      ? `<div class="szc-aviso" style="color:var(--accent,#b8ff3c);">🎫 Protocolo #${chat.numeroTicket} · <button type="button" class="szc-link" id="szc-pdf">📄 baixar PDF da conversa</button></div>`
       : '';
     // m.bot = resposta do Beniboy (assistente automático) - identificado
     // pra pessoa saber que ainda não é um humano falando
@@ -901,7 +901,7 @@
       <button type="button" class="szc-pp-fechar" title="Fechar">✕</button>
       <div class="szc-pp-titulo">💬 ${total} mensagem(ns) esperando você</div>
       <div class="szc-pp-corpo">De: ${esc(quem.slice(0, 3).join(', '))}</div>
-      <button type="button" class="szc-dm-abrir" style="margin-top:8px;background:#b8ff3c;color:#04202e;border:none;border-radius:8px;padding:7px 12px;font-weight:700;font-size:12px;cursor:pointer;">Abrir conversa</button>
+      <button type="button" class="szc-dm-abrir" style="margin-top:8px;background:var(--accent,#b8ff3c);color:#0b0d10;border:none;border-radius:8px;padding:7px 12px;font-weight:700;font-size:12px;cursor:pointer;">Abrir conversa</button>
     </div>`);
     pedidoPopupEl.appendChild(dmCardAviso);
     dmCardAviso.querySelector('.szc-pp-fechar').addEventListener('click', () => {

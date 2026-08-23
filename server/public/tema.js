@@ -17,25 +17,21 @@
 
   // ---- fontes da marca (NoPulso) ----
   // Nao ha build no projeto: em vez de repetir o <link> nas 53 paginas, o
-  // tema.js (que ja e carregado no <head> de todas) injeta o Google Fonts
-  // aqui. Archivo = titulos/corpo (--sans), JetBrains Mono = numeros,
-  // rotulos e badges (--mono, que ja estava declarado mas caia no fallback
-  // do sistema porque a fonte nunca era baixada). O preconnect vem antes
-  // pra o navegador abrir a conexao com o gstatic enquanto ainda le o CSS.
-  // display=swap: o texto aparece na fonte do sistema e troca quando a
-  // fonte chega - nada de tela em branco se o Google demorar.
+  // tema.js (que ja e carregado no <head> de todas) injeta o CSS das
+  // fontes aqui. Archivo = titulos/corpo (--sans), JetBrains Mono =
+  // numeros, rotulos e badges (--mono, que ja estava declarado mas caia no
+  // fallback do sistema porque a fonte nunca era baixada).
+  //
+  // Servido pelo PROPRIO app (/fontes/), nao pelo CDN do Google: as lojas
+  // tem piso de latencia alto e algumas ficam atras de rede restrita - uma
+  // fonte que depende de fonts.gstatic.com e um ponto de falha externo num
+  // app que roda o dia inteiro em maquina de balcao. Ver fontes/fontes.css.
   (function fontes() {
     if (document.getElementById('nopulso-fontes')) return;
-    var pre1 = document.createElement('link');
-    pre1.rel = 'preconnect'; pre1.href = 'https://fonts.googleapis.com';
-    var pre2 = document.createElement('link');
-    pre2.rel = 'preconnect'; pre2.href = 'https://fonts.gstatic.com'; pre2.crossOrigin = 'anonymous';
     var css = document.createElement('link');
     css.id = 'nopulso-fontes';
     css.rel = 'stylesheet';
-    css.href = 'https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap';
-    document.head.appendChild(pre1);
-    document.head.appendChild(pre2);
+    css.href = '/fontes/fontes.css';
     document.head.appendChild(css);
   })();
 
