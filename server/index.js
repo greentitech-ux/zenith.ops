@@ -18,6 +18,7 @@ const fraudMarks = require('./fraudMarks');
 const fraudReport = require('./fraudReport');
 const alertReport = require('./alertReport');
 const fraudIdentity = require('./fraudIdentity');
+const pixRepetido = require('./pixRepetido');
 const storage = require('./storage');
 const auth = require('./auth');
 const users = require('./users');
@@ -1836,6 +1837,40 @@ app.post('/webhooks/adyen', async (req, res) => {
     // abaixo (mesmo calculo usado no resto do arquivo)
     const pedidoIdAtual = tx.merchantReference || tx.originalReference || tx.pspReference;
 
+    // ---------- Pix: regra propria (decisao do Master) ----------
+    // Pix NAO recebe tag de FRAUDE nem de SUSPEITO pelas regras de cartao -
+    // elas nao se aplicam (nao ha cartao, nao ha final de cartao, nao ha
+    // chargeback). A unica marca possivel e SUSPEITO/"Repetido", quando o
+    // mesmo cliente paga por Pix mais de uma vez na janela curta - mesmo
+    // criterio da secao "Pedidos repetidos" do Monitor. Ver pixRepetido.js.
+    if (pixRepetido.ehPix(tx)) {
+      const repetido = pixRepetido.registrarPix(tx);
+      if (repetido) {
+        try {
+          const clienteNome = tx.nomeCliente || tx.cardHolder || null;
+          const registro = await fraudMarks.marcar({
+            pedidoId: pedidoIdAtual,
+            unidade: tx.unidade,
+            nivel: 'SUSPEITO',
+            motivo: `${pixRepetido.MOTIVO_REPETIDO}: ${repetido.repeticoes} Pix do mesmo cliente em ${repetido.janelaMinutos} min.`,
+            clienteChave: clienteNome ? `nome:${clienteNome}` : null,
+            clienteNome,
+            statusPedido: tx.status,
+            valor: tx.valor,
+            marcadoPorEmail: 'deteccao-automatica@sistema',
+          });
+          broadcast('fraude-marcada', registro, 'monitor');
+        } catch (err) {
+          console.error('Erro ao marcar Pix repetido:', err.message);
+        }
+      }
+    }
+    // trava do resto do bloco de fraude: nenhuma regra de cartao encosta num
+    // Pix. NAO da pra usar `continue` aqui - o resto do laco ainda precisa
+    // rodar pro Pix (mudanca de status, chargeback, alerta de pedido que
+    // alguem esta acompanhando pelo Beniboy).
+    const ehPixTx = pixRepetido.ehPix(tx);
+
     // cruza o nome do cliente (shopper) com o nome impresso no cartao pra
     // ligar pedidos de nomes "diferentes" que na verdade sao o mesmo anel
     // de fraude (ex real: um pedido tem nomeCliente "Thais Mendes" e
@@ -1843,7 +1878,11 @@ app.post('/webhooks/adyen', async (req, res) => {
     // cardHolder "Thais M Mendes" - os nomes se cruzam entre os campos).
     // Todo o resto do bloco usa esse cluster como identidade, em vez de so
     // o nome exato - ver fraudIdentity.js
-    const clusterInfo = fraudIdentity.registrarPedido(pedidoIdAtual, tx.nomeCliente, tx.cardHolder);
+    // a unidade escopa a malha de identidades: sem isso um sobrenome comum
+    // ("Silva") ligava cliente de Recife com cliente de Sao Paulo
+    const clusterInfo = ehPixTx
+      ? null
+      : fraudIdentity.registrarPedido(pedidoIdAtual, tx.nomeCliente, tx.cardHolder, tx.unidade);
 
     // a propria Adyen ja marca o pedido como suspeito de fraude
     // (fraudResultType/totalFraudScore) - nesse caso NAO colocamos nossa
@@ -1863,7 +1902,7 @@ app.post('/webhooks/adyen', async (req, res) => {
     // logo abaixo, sem precisar de um motivo detalhado pra cada uma -
     // e qualquer SUSPEITO ja existente no mesmo cluster de nomes escala
     // pra FRAUDE junto (o padrao "intensificou" pro grupo inteiro)
-    if ((tx.status === 'RECUSADO' || tx.status === 'APROVADO') && !jaFraudeNativaAdyen) {
+    if ((tx.status === 'RECUSADO' || tx.status === 'APROVADO') && !jaFraudeNativaAdyen && !ehPixTx) {
       // conta cartoes distintos pelo CLUSTER (nomes cruzados), nao so pelo
       // nome exato desse pedido - assim um ataque que troca de nome a cada
       // tentativa (alem do cartao) tambem cruza o limiar
@@ -1908,7 +1947,7 @@ app.post('/webhooks/adyen', async (req, res) => {
     // escala qualquer SUSPEITO residual do mesmo grupo junto. Preferimos
     // alertar demais a deixar passar batido - o Master sempre pode
     // remover a marcacao de um pedido especifico se for engano.
-    if (clusterInfo) {
+    if (clusterInfo && !ehPixTx) {
       try {
         const marcasExistentes = await fraudMarks.listAllCached();
         const jaMarcadoNesse = marcasExistentes.some((m) => m.pedidoId === pedidoIdAtual);
@@ -1941,7 +1980,11 @@ app.post('/webhooks/adyen', async (req, res) => {
             );
           }
           await escalarClusterParaFraude(clusterInfo.nomes, 'Escalado: outro pedido do mesmo grupo já confirmado como fraude.');
-        } else if (!jaMarcadoNesse && clusterInfo.totalPedidos >= 2) {
+        } else if (!jaMarcadoNesse && clusterInfo.nomesDistintos >= 2) {
+          // o sinal e o CRUZAMENTO de nomes diferentes na mesma identidade,
+          // nao o cliente que pediu duas vezes. Antes a condicao era
+          // totalPedidos >= 2, o que marcava SUSPEITO todo cliente fiel que
+          // pedisse duas vezes no mesmo dia.
           const registro = await fraudMarks.marcar({
             pedidoId: pedidoIdAtual,
             unidade: tx.unidade,
@@ -2210,6 +2253,40 @@ app.delete('/api/fraude/:pedidoId', requireSection('monitor'), async (req, res) 
 // ---------- relatorio de fraude (Master) - resumo por cliente pra
 // apresentar incidentes (quantidade, se algum pedido passou, acao tomada) -
 // usa o historico completo (inclui marcacoes ja removidas) ----------
+// ---------- limpeza das marcacoes automaticas (so Master) ----------
+// A deteccao por nome marcou em massa cliente legitimo (ver fraudIdentity.js:
+// medido em 98,5% de falso positivo antes do conserto). Estas duas rotas
+// tiram do painel o que ela deixou pra tras.
+//
+// GET  = so conta, nao mexe em nada (o Master ve o numero antes de decidir)
+// POST = remove de verdade, e SO com { confirmar: true } no corpo
+//
+// Duas travas de proposito: nunca toca em marcacao que um humano criou ou
+// confirmou (ver ehAutomaticaIntocada em fraudMarks.js), e o "remover" e
+// soft delete - o Relatorio de Fraude continua enxergando tudo.
+app.get('/api/fraude/limpeza-automatica', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await fraudMarks.contarAutomaticasAtivas());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/fraude/limpeza-automatica', auth.requireMaster, async (req, res) => {
+  if (req.body?.confirmar !== true) {
+    return res.status(400).json({ error: 'Confirmação obrigatória: mande { "confirmar": true }.' });
+  }
+  try {
+    const antes = await fraudMarks.contarAutomaticasAtivas();
+    const r = await fraudMarks.removerAutomaticasAtivas(req.user?.email || 'master');
+    console.log(`[fraude] limpeza automatica por ${req.user?.email}: ${r.removidas} removida(s), ${r.falhas} falha(s)`);
+    broadcast('fraude-limpeza', { removidas: r.removidas }, 'monitor');
+    res.json({ ...r, antes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/fraude/relatorio.csv', auth.requireMaster, async (req, res) => {
   const { inicio, fim } = req.query;
   const historico = await fraudMarks.listHistorico();

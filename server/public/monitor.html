@@ -189,6 +189,9 @@
   .multiselect-panel label span{overflow:hidden;text-overflow:ellipsis;}
   .multiselect-panel label.all-option{font-weight:600;border-bottom:1px solid var(--line);border-radius:0;margin-bottom:2px;padding-bottom:8px;}
   .multiselect-panel label.group-option{font-weight:600;color:var(--accent);}
+  .group-option.vazio{opacity:.55;cursor:not-allowed;}
+  .group-option.vazio .sem-dado{font-style:normal;font-family:var(--mono);font-size:9.5px;
+    color:var(--muted);margin-left:6px;text-transform:none;letter-spacing:0;}
   .multiselect-panel .group-sep{border-bottom:1px solid var(--line);margin-bottom:2px;padding-bottom:6px;}
   .multiselect-panel input[type=checkbox]{accent-color:var(--accent);}
   .empty{padding:24px;text-align:center;color:var(--muted);font-size:13px;}
@@ -1305,10 +1308,20 @@ function renderMultiselectOptions(key, options, selectedSet, allLabel, singularL
   const btn = document.getElementById('ms-'+key+'-btn');
   // remove selecoes de opcoes que nao existem mais nos dados
   for(const v of [...selectedSet]) if(!options.includes(v)) selectedSet.delete(v);
+  // Grupo cujas lojas nao aparecem NENHUMA vez nos dados carregados fica
+  // desabilitado e explicado. Antes ele era desenhado igual aos outros, mas
+  // clicar nao fazia nada (membros=[] -> nao ha o que selecionar) - a tela
+  // oferecia um filtro que nao existia e parecia travada.
   const groupsHtml = groups ? '<div class="group-sep">' + Object.entries(groups).map(([nome, nums])=>{
     const membros = options.filter(o=>nums.includes(o));
+    const vazio = membros.length===0;
     const marcado = membros.length>0 && membros.every(o=>selectedSet.has(o));
-    return `<label class="group-option" data-group="${nome}"><span>${nome}</span><input type="checkbox" data-group-cb value="${nome}" ${marcado?'checked':''}></label>`;
+    const titulo = vazio
+      ? `Nenhuma transação de ${nome} no período/filtro carregado — ou o seu acesso não inclui as lojas desse grupo.`
+      : `${membros.length} loja(s) de ${nome}`;
+    return `<label class="group-option${vazio?' vazio':''}" data-group="${nome}" title="${titulo}">`
+      + `<span>${nome}${vazio?' <i class="sem-dado">sem transação no período</i>':''}</span>`
+      + `<input type="checkbox" data-group-cb value="${nome}" ${marcado?'checked':''} ${vazio?'disabled':''}></label>`;
   }).join('') + '</div>' : '';
   panel.innerHTML = `
     <label class="all-option"><span>${allLabel}</span><input type="checkbox" data-all ${selectedSet.size===0?'checked':''}></label>
