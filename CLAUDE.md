@@ -29,7 +29,22 @@ Rótulo na tela pode mudar; **o identificador não**.
 | `adyen-monitor.onrender.com` | — | os 52 agentes apontam pra lá e o link já foi mandado pra cliente |
 | seção "NOC Zenith" | `loja-status.html` | é nome de seção interna, não marca de produto — fica |
 | `start_url: "/"` | `manifest.json` | o heartbeat depende de reabrir a raiz e ler a unidade salva no navegador — `name`/`short_name`/ícones podem mudar |
-| `normalizarCodigoUnidade()`, `UNIDADES_APELIDOS`, `merchantAccountCode` | `migracaoUnidades.js`, Adyen | espaços de código de unidade. Rebranding é visual; o dado continua igual |
+| `normalizarCodigoUnidade()`, `UNIDADES_APELIDOS`, `merchantAccountCode` | `migracaoUnidades.js`, Adyen | espaços de código de unidade. Rebranding é visual; o dado continua igual — inclui os 3 testes de fold do `testeRotas.js`, que são a prova de que o histórico antigo ainda é encontrado |
+
+### Decisão fechada: mapa da planilha e códigos de unidade
+
+Decisão do Master, **não reabrir**:
+
+- `AdyenV2` da planilha cai no campo `pix` e aparece rotulado **"Adyen"**
+  (`bravoImport.js`, `sheetsSync.js`). Está certo assim.
+- As colunas de máquina somam em `adyen`, rotulado **"Maquininhas (total)"**
+  (`somarMaquininhas`, `bravoImport.js`).
+- A unificação dos códigos de unidade está encerrada.
+
+Não mudar mapeamento, rótulo ou destino de campo, e **não escrever migração
+nova sobre dado antigo** — o histórico precisa continuar legível exatamente
+como está. Um nome de campo que parece errado provavelmente é uma dessas
+decisões: pergunte antes de "consertar".
 
 ---
 
