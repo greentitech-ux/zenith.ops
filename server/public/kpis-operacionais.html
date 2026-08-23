@@ -181,6 +181,9 @@ const PALETA_CATEGORICA = ['#3987e5','#d95926','#199e70','#c98500','#d55181','#3
 let GRUPOS = [];        // grupos que têm KPI cadastrado
 let GRUPO_ATUAL = null;
 let FECHAMENTOS = [];
+// null = ve todas (so Master). Senao, o Set exato das lojas do acesso -
+// ver unidadesDoGrupo() logo abaixo
+let UNIDADES_PERMITIDAS = null;
 let CORES = {};         // unidade -> cor (fixa, atribuída na troca de grupo)
 let KPI_SEL = null;     // campo do KPI mostrado no gráfico
 let PRESET = 'mes';
@@ -209,7 +212,17 @@ function fmtValor(v, modo){
   return modo === 'media' ? v.toFixed(1) : String(Math.round(v));
 }
 
-function unidadesDoGrupo(){ return (GRUPO_ATUAL && GRUPO_ATUAL.unidades) || []; }
+// SÓ as lojas do grupo que ESTE acesso pode ver. Toda a tela (colunas da
+// matriz, séries do gráfico, ranking de ofensores) é montada a partir daqui,
+// então esse recorte é o que impede o Tatuapé de ver "Mooca" no comparativo.
+// O servidor já devolve o grupo recortado (ver recortarGruposPorUnidade em
+// index.js) - a checagem aqui é a segunda tranca, pra tela nunca depender
+// só do que veio na resposta.
+function unidadesDoGrupo(){
+  const doGrupo = (GRUPO_ATUAL && GRUPO_ATUAL.unidades) || [];
+  if(!UNIDADES_PERMITIDAS) return doGrupo;           // null = Master
+  return doGrupo.filter(u => UNIDADES_PERMITIDAS.has(u));
+}
 function kpisDoGrupo(){ return (GRUPO_ATUAL && GRUPO_ATUAL.kpisExtras) || []; }
 
 // linhas do período, só das lojas do grupo escolhido
@@ -551,6 +564,7 @@ async function boot(){
   if(!res.ok){ logout(); return; }
   const me = await res.json();
   const isMaster = me.role === 'master';
+  UNIDADES_PERMITIDAS = isMaster ? null : new Set(me.permissions?.unidades || []);
   const secoes = isMaster ? ['fechamentos'] : (me.permissions?.sections || []);
   if(!secoes.includes('fechamentos')){
     document.getElementById('sem-acesso').classList.remove('hidden');
@@ -565,9 +579,14 @@ async function boot(){
   FECHAMENTOS = Array.isArray(fechamentos) ? fechamentos : [];
   // só grupo que TEM KPI cadastrado - grupo sem KPI não tem o que mostrar
   // aqui, e deixá-lo no seletor só rende tela vazia
-  GRUPOS = (Array.isArray(gruposTodos) ? gruposTodos : []).filter(g => (g.kpisExtras||[]).length);
+  // grupo precisa ter KPI cadastrado E pelo menos uma loja que ESTE acesso
+  // enxerga - grupo sem nenhuma das duas coisas so renderia tela vazia (no
+  // segundo caso, com o nome de uma operacao que nem e dele)
+  GRUPOS = (Array.isArray(gruposTodos) ? gruposTodos : [])
+    .filter(g => (g.kpisExtras||[]).length)
+    .filter(g => !UNIDADES_PERMITIDAS || (g.unidades||[]).some(u => UNIDADES_PERMITIDAS.has(u)));
   if(!GRUPOS.length){
-    document.getElementById('root').innerHTML = '<div class="empty">Nenhum grupo tem KPI cadastrado ainda. O Master cadastra em <b>Grupos</b> → KPI\'s.</div>';
+    document.getElementById('root').innerHTML = '<div class="empty">Nenhum grupo com KPI cadastrado nas suas lojas. Se você acha que deveria ver algum aqui, peça ao Master pra conferir suas unidades no acesso.</div>';
     return;
   }
   document.getElementById('f-grupo').innerHTML = GRUPOS

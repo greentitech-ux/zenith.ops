@@ -1619,6 +1619,16 @@ app.get('/api/me', async (req, res) => {
     isQaUser: req.isQaUser,
     ehTimeSuporte: ehSuporte,
     verticaisDoUsuario,
+    // REDE(S) das lojas desse acesso (ARCFOOD / GBE, ver redes.js). O menu
+    // usa isso pra so mostrar "Fechamentos Arcfood" pra quem tem loja
+    // ARCFOOD e "Fechamentos GBE" pra quem tem loja do Grupo Bravo - antes
+    // os dois itens apareciam pra qualquer um com a seção 'fechamentos',
+    // levando a uma tela vazia da operacao do vizinho. null = sem recorte
+    // (so Master). Sai das MESMAS unidades que filtram os dados
+    // (auth.filterByUnidade), pra menu e dado nunca discordarem.
+    redesDoUsuario: req.isMaster
+      ? null
+      : [...new Set((req.permissions.unidades || []).map((u) => redes.redeDaUnidade(u)).filter(Boolean))],
     empresaId: req.empresaId,
     // nome da empresa pra tela mostrar de quem esse acesso é (null = sem
     // empresa vinculada, que hoje significa "enxerga como sempre enxergou")
@@ -3215,6 +3225,19 @@ app.put('/api/formularios/cadastro-unidades/:id/ativo', auth.requireMaster, asyn
 app.get('/api/formularios/favorecido', requireSection('formularios'), async (req, res) => {
   const achado = await formularios.buscarFavorecido(req.query.doc);
   if (!achado) return res.status(404).json({ error: 'Nenhum favorecido salvo com esse documento.' });
+  // a memoria de favorecido e indexada so por CPF/CNPJ (nao tem unidade
+  // dentro), entao sem esta checagem quem soubesse o CPF de alguem lia o
+  // banco/agencia/conta/PIX dele mesmo que o pagamento tenha sido de outra
+  // loja. A prova de que a pessoa "conhece" esse favorecido e ja ter emitido
+  // um formulário pra ele numa unidade que ela ve - o Master atravessa
+  // (filtrarFormulariosPorUnidade nao recorta pra ele).
+  const meus = await filtrarFormulariosPorUnidade(req, await formularios.listar());
+  const doc = String(achado.doc || '');
+  const jaUsou = meus.some((f) => {
+    const c = f.campos || {};
+    return [c.cpf, c.cnpjFavorecido].some((v) => String(v || '').replace(/\D/g, '') === doc);
+  });
+  if (!jaUsou) return res.status(404).json({ error: 'Nenhum favorecido salvo com esse documento.' });
   res.json(achado);
 });
 
@@ -4888,6 +4911,21 @@ app.get('/api/fechamentos/meus', requireSection('lancamento'), async (req, res) 
 // extras no fechamento (ver grupos.js). Leitura liberada pra quem lanca
 // fechamento (precisa saber quais campos extras preencher) ou corrige
 // (central.html); so o Master cria/edita/apaga grupo ----------
+// RECORTE POR UNIDADE do cadastro de grupos (ver "A REGRA DA UNIDADE" em
+// auth.js). O cadastro do grupo e global, mas a LISTA DE LOJAS dele nao
+// pode sair inteira pra quem so manda numa: a tela de KPI's monta as
+// colunas/series a partir deste campo, entao o Tatuape via "Mooca" no
+// grafico (vazio, porque /api/fechamentos ja filtra - mas via). Grupo onde
+// a pessoa nao tem NENHUMA loja nao volta: sem unidade nenhuma dentro, ele
+// so renderia tela vazia com o nome de uma operacao que nao e dela.
+function recortarGruposPorUnidade(req, lista) {
+  const visiveis = auth.unidadesVisiveis(req);
+  if (!visiveis) return lista;
+  return (lista || [])
+    .map((g) => ({ ...g, unidades: (g.unidades || []).filter((u) => visiveis.has(u)) }))
+    .filter((g) => g.unidades.length);
+}
+
 app.get('/api/grupos', requireAnySection('lancamento', 'fechamentos', 'solicitacoes'), async (req, res) => {
   const lista = await grupos.list();
   // "lerCanaisDisponivel" e derivado, nao cadastro: o Master pode ter ligado
@@ -4897,7 +4935,15 @@ app.get('/api/grupos', requireAnySection('lancamento', 'fechamentos', 'solicitac
   // bloqueados e nenhuma forma de preenche-los. grupos.html ignora esse campo
   // (o toggle de cadastro continua sendo lerCanaisPorImagem).
   const ocrLigado = canaisVendaOcr.ativo();
-  res.json(lista.map((g) => ({ ...g, lerCanaisDisponivel: g.lerCanaisPorImagem === true && ocrLigado })));
+  // RECORTE POR UNIDADE (ver "A REGRA DA UNIDADE" em auth.js). O cadastro
+  // do grupo e global, mas a LISTA DE LOJAS dele nao pode sair inteira pra
+  // quem so manda numa: a tela de KPI's monta as colunas/series a partir
+  // deste campo, entao o Tatuape via "Mooca" no grafico (vazio, porque
+  // /api/fechamentos ja filtra - mas via). Grupo onde a pessoa nao tem
+  // NENHUMA loja nao volta: sem unidade nenhuma dentro, ele so renderia
+  // tela vazia com o nome de uma operacao que nao e dela.
+  res.json(recortarGruposPorUnidade(req, lista)
+    .map((g) => ({ ...g, lerCanaisDisponivel: g.lerCanaisPorImagem === true && ocrLigado })));
 });
 
 // so id+email de quem pode ser "responsavel" por uma solicitação - usado
@@ -4918,6 +4964,10 @@ app.get('/api/grupos', requireAnySection('lancamento', 'fechamentos', 'solicitac
 app.get('/api/grupos/responsaveis', requireSection('solicitacoes'), async (req, res) => {
   const { unidade } = req.query;
   if (!unidade) return res.status(400).json({ error: 'Informe a unidade.' });
+  // sem isso dava pra descobrir quem responde pelas solicitações de uma loja
+  // que nao e sua so trocando ?unidade= na URL (ver "A REGRA DA UNIDADE" em
+  // auth.js) - a tela nunca ofereceu, mas a rota aceitava
+  if (!auth.podeVerUnidade(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
   const grupo = await grupos.grupoDaUnidade(unidade);
   const unidadesDoGrupo = new Set(grupo ? grupo.unidades || [] : [unidade]);
   const idsConfigurados = new Set(grupo ? grupo.responsaveis || [] : []);
@@ -4962,7 +5012,7 @@ app.get('/api/grupos/relatorio.:formato(csv|pdf)', requireAnySection('lancamento
     { key: 'canais', label: 'Canais de venda extras' }, { key: 'formas', label: 'Formas de pagamento extras' }, { key: 'kpis', label: 'KPIs extras' },
   ];
   const listaExtras = (lista) => (lista || []).map((k) => k.label).join(', ') || '—';
-  const linhas = (await grupos.list()).map((g) => ({
+  const linhas = recortarGruposPorUnidade(req, await grupos.list()).map((g) => ({
     nome: g.nome,
     unidades: (g.unidades || []).map((u) => unidadesMapa[u] || u).join(', ') || '—',
     canais: listaExtras(g.canaisVendaExtras), formas: listaExtras(g.formasPagamentoExtras), kpis: listaExtras(g.kpisExtras),
