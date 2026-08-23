@@ -4928,6 +4928,52 @@ setTimeout(async () => {
   if (!okPainelReal) ruins += 1;
   console.log(`${okPainelReal ? '\u2713' : '\u2717'} Painel: desenho novo do mockup sem inventar numero que o sistema nao tem`);
 
+  // ---------- Fechamentos: linha de total e quem nao lancou ----------
+  // Do mockup 1c ficou o que o dado sustenta: a linha "Total do grupo" no
+  // rodape da tabela e o aviso de quem nao lancou. Ficaram DE FORA os badges
+  // CONFERIDO/TRATATIVA - a tela nao tem conferencia nem tratativa; "diferenca
+  // zero" nao e a mesma coisa que "alguem conferiu", e chamar assim faria a
+  // operacao confiar numa checagem que ninguem fez. Ver CLAUDE.md secao 6.
+  let okFechReal = false;
+  try {
+    const fsF = require('fs'), pathF = require('path');
+    const fech = fsF.readFileSync(pathF.join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+    const semComentarioF = fech
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '')).join('\n');
+
+    // a linha do previsao dentro do array `defs` - ela NAO pode ganhar `soma`
+    const linhaPrevisao = (fech.split('\n').find((l) => /key:'previsao'/.test(l)) || '');
+
+    const confF = {
+      'a linha de total sai do MESMO defs do thead/tbody (nao pode desalinhar)':
+        /const tfoot = defs\.map\(/.test(fech) && /<tfoot><tr>\$\{tfoot\}<\/tr><\/tfoot>/.test(fech),
+      'a previsao do dia seguinte fica fora do total':
+        !!linhaPrevisao && !/soma:/.test(linhaPrevisao),
+      'o total soma faturamento, declarado e diferenca':
+        /soma:d=>d\.faturamento/.test(fech) && /soma:d=>d\.totalDeclarado/.test(fech)
+        && /soma:d=>d\.diferenca/.test(fech),
+      'as colunas de canal/forma tambem entram no total':
+        /soma:d=>valorColuna\(d, c\)/.test(fech),
+      'nao inventa badge de conferencia nem de tratativa':
+        !/CONFERIDO/.test(semComentarioF) && !/TRATATIVA/i.test(semComentarioF),
+      'o aviso diz "nenhum lancamento no periodo", nao "nao lancou"':
+        /nenhum lan\u00e7amento no per\u00edodo/.test(semComentarioF)
+        && /\.filter\(c=>!lancaram\.has\(c\)\)/.test(fech),
+      'o aviso usa o mesmo cruzamento de filtros da tabela':
+        /const semLancamento = unidadesEfetivasParaRelatorio\(\)/.test(fech),
+      'os 6 KPIs reais continuam de pe (o mockup 1c apagava 4 deles)':
+        /lbl:'Fechamentos', val:`\$\{lojasFecharam\} de \$\{roster\.length\}`/.test(fech)
+        && /lbl:'Total declarado'/.test(fech) && /lbl:'TC total'/.test(fech)
+        && /lbl:'Cancelados'/.test(fech) && /delta:deltaFat/.test(fech),
+    };
+    const ruinsF = Object.entries(confF).filter(([, ok]) => !ok).map(([n]) => n);
+    okFechReal = !ruinsF.length;
+    if (ruinsF.length) console.log(`  falhou em: ${ruinsF.join(' \u00b7 ')}`);
+  } catch (e) { okFechReal = false; console.log('  erro: ' + e.message); }
+  if (!okFechReal) ruins += 1;
+  console.log(`${okFechReal ? '\u2713' : '\u2717'} Fechamentos: linha de total e quem nao lancou, sem badge inventado`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

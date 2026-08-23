@@ -49,10 +49,12 @@
   .hidden{display:none!important;}
   .sub{color:var(--muted);font-size:12px;margin-top:4px;font-family:var(--mono);}
 
-  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px;}
-  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;}
-  .kpi .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-family:var(--mono);}
-  .kpi .val{font-family:var(--mono);font-size:24px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums;}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px;}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0;}
+  .kpi .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-family:var(--mono);line-height:1.35;}
+  /* nowrap + a coluna com folga: sem isso "R$ 68.437,95" quebrava entre o
+     "R$" e o numero, e valor de milhao quebrava no meio do proprio numero */
+  .kpi .val{font-family:var(--mono);font-size:20px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums;white-space:nowrap;}
   .kpi .val.ok{color:var(--ok);} .kpi .val.bad{color:var(--bad);} .kpi .val.warn{color:var(--warn);}
   /* quando a Diferenca de caixa esta negativa o card inteiro ganha borda
      vermelha, pra saltar no meio dos outros 5 KPIs (pedido do handoff de
@@ -110,6 +112,20 @@
   .valor{font-family:var(--mono);font-variant-numeric:tabular-nums;}
   .truncate{max-width:160px;overflow:hidden;text-overflow:ellipsis;}
   .tablewrap{max-height:360px;overflow:auto;}
+  /* linha de total do grupo: fica colada no rodape enquanto as linhas rolam
+     (a .tablewrap rola na vertical), pra o total nunca sair de vista */
+  tfoot td{padding:8px 10px;border-top:2px solid var(--line);background:var(--panel);
+    font-family:var(--mono);font-weight:600;font-variant-numeric:tabular-nums;
+    white-space:nowrap;position:sticky;bottom:0;}
+  tfoot td.rot{text-transform:uppercase;font-size:9px;
+    letter-spacing:.06em;color:var(--muted);font-weight:500;}
+  /* unidades do filtro que nao lancaram NADA no periodo - o KPI "Fechamentos
+     X de Y" ja dizia quantas faltavam, mas nao QUAIS */
+  .fech-faltando{display:flex;flex-wrap:wrap;align-items:center;gap:6px;
+    font-size:12px;color:var(--warn);margin:4px 2px 10px;}
+  .fech-faltando b{font-weight:600;}
+  .fech-faltando span{font-family:var(--mono);font-size:11px;color:var(--warn);
+    background:var(--warn-dim);border-radius:20px;padding:2px 8px;}
   .empty{padding:24px;text-align:center;color:var(--muted);font-size:13px;}
   .fech-grupo-titulo{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;margin:16px 2px 8px;}
   #fechamentos-tabelas > .fech-grupo-titulo:first-child{margin-top:4px;}
@@ -2105,13 +2121,13 @@ function tabelaFechamentosHtml(rows){
     { key:'unidadeNome', label:'Unid.', td:d=>`<td>${escapeHtml(UNIDADES_NOMES[d.unidade]||d.unidade)}</td>` },
     { key:'gerente', label:'Responsável', td:d=>`<td class="truncate" title="${escapeHtml(d.gerente||'')}">${escapeHtml(d.gerente||'—')}</td>` },
     { key:'previsao', label:'Previsão (dia seguinte)', td:d=>{ const p = previsaoDiaSeguinte(d.unidade, d.data); return `<td class="valor" style="color:var(--accent);">${p==null ? '—' : fmtMoney(p)}</td>`; } },
-    { key:'faturamento', label:'Faturamento', td:d=>`<td class="valor">${fmtMoney(d.faturamento)}</td>` },
-    { key:'totalDeclarado', label:'Total declarado', td:d=>`<td class="valor">${fmtMoney(d.totalDeclarado)}</td>` },
-    { key:'diferenca', label:'Diferença', td:d=>{ const cor = d.diferenca<0?'var(--bad)':(d.diferenca>0?'var(--warn)':'var(--ok)'); return `<td class="valor" style="color:${cor}">${fmtMoney(d.diferenca)}</td>`; } },
-    { key:'quebra', label:'Quebra', td:d=>`<td class="valor">${fmtMoney(d.quebra)}</td>` },
-    { key:'entradaDinheiro', label:'Entrada em dinheiro', td:d=>`<td class="valor">${fmtMoney(d.entradaDinheiro)}</td>` },
-    { key:'totalSaida', label:'Total de saída', td:d=>`<td class="valor">${fmtMoney(d.totalSaida)}</td>` },
-    ...colunasDeValor.map(c=>({ key:c.key, label:c.label, td:d=>`<td class="valor">${fmtMoney(valorColuna(d, c))}</td>` })),
+    { key:'faturamento', label:'Faturamento', soma:d=>d.faturamento, td:d=>`<td class="valor">${fmtMoney(d.faturamento)}</td>` },
+    { key:'totalDeclarado', label:'Total declarado', soma:d=>d.totalDeclarado, td:d=>`<td class="valor">${fmtMoney(d.totalDeclarado)}</td>` },
+    { key:'diferenca', label:'Diferença', soma:d=>d.diferenca, corSoma:true, td:d=>{ const cor = d.diferenca<0?'var(--bad)':(d.diferenca>0?'var(--warn)':'var(--ok)'); return `<td class="valor" style="color:${cor}">${fmtMoney(d.diferenca)}</td>`; } },
+    { key:'quebra', label:'Quebra', soma:d=>d.quebra, td:d=>`<td class="valor">${fmtMoney(d.quebra)}</td>` },
+    { key:'entradaDinheiro', label:'Entrada em dinheiro', soma:d=>d.entradaDinheiro, td:d=>`<td class="valor">${fmtMoney(d.entradaDinheiro)}</td>` },
+    { key:'totalSaida', label:'Total de saída', soma:d=>d.totalSaida, td:d=>`<td class="valor">${fmtMoney(d.totalSaida)}</td>` },
+    ...colunasDeValor.map(c=>({ key:c.key, label:c.label, soma:d=>valorColuna(d, c), td:d=>`<td class="valor">${fmtMoney(valorColuna(d, c))}</td>` })),
     { key:'observacao', label:'Observação', td:d=>`<td class="truncate" title="${escapeHtml(d.observacao||d.obsDif||'')}">${escapeHtml(d.observacao||d.obsDif||'—')}</td>` },
   ]).filter(c=>colVisivel(c.key));
 
@@ -2136,7 +2152,26 @@ function tabelaFechamentosHtml(rows){
       ` : '<span class="sub" style="margin:0;" title="Não lançado pelo sistema - vem de importação/planilha, não pode ser editado aqui">—</span>'}</td>` : ''}</tr>`
   ).join('');
 
-  return `<div class="tablewrap"><table><thead><tr>${thead}</tr></thead><tbody>${corpo}</tbody></table></div>`;
+  // ---- linha de total do grupo ----
+  // Sai do MESMO array `defs` que gerou thead/tbody, entao ela segue o
+  // seletor 🧩 Colunas e o arrasto de coluna sem chance de desalinhar.
+  // So somam as colunas marcadas com `soma` - "Previsão (dia seguinte)" fica
+  // de fora de proposito: cada linha e a previsao do dia SEGUINTE ao daquela
+  // linha, entao somar varios dias daria um numero que ninguem pediu.
+  const total = (c) => +rows.reduce((s,d)=>s+(c.soma(d)||0),0).toFixed(2);
+  let rotuloPosto = false;
+  const tfoot = defs.map(c=>{
+    if(c.soma){
+      const t = total(c);
+      const cor = c.corSoma ? (t<0?'var(--bad)':(t>0?'var(--warn)':'var(--ok)')) : '';
+      return `<td class="valor"${cor?` style="color:${cor}"`:''}>${fmtMoney(t)}</td>`;
+    }
+    if(!rotuloPosto){ rotuloPosto = true; return '<td class="rot">Total do grupo</td>'; }
+    return '<td></td>';
+  }).join('') + (IS_MASTER ? '<td></td>' : '');
+
+  return `<div class="tablewrap"><table><thead><tr>${thead}</tr></thead><tbody>${corpo}</tbody>`
+    + `<tfoot><tr>${tfoot}</tr></tfoot></table></div>`;
 }
 
 // ---------- seletor 🧩 Colunas ----------
@@ -2388,7 +2423,31 @@ function renderTabela(rows){
   // com um bloco só de unidades sem grupo cadastrado, não tem o que separar -
   // renderiza a tabela direto, sem título
   const soSemGrupo = lista.length===1 && lista[0].semGrupo;
-  container.innerHTML = lista.map(b=>{
+
+  // ---- quais unidades nao lancaram NADA no periodo ----
+  // O KPI "Fechamentos X de Y" la em cima ja dizia QUANTAS faltavam; aqui
+  // aparece QUAIS, que e o que a operacao precisa pra ir cobrar. Custo zero:
+  // sai do roster que a tela ja tem em memoria, sem consulta nova.
+  // O roster e o mesmo cruzamento de filtros da tabela (principal ∩ filtro
+  // exclusivo), entao esse numero pode diferir do KPI de cima quando os dois
+  // filtros estao diferentes - e isso esta certo: o aviso e da TABELA.
+  // "nenhum lançamento no período" e literal: quem lancou 3 de 7 dias nao
+  // entra aqui, porque dizer que ela nao lancou seria mentira.
+  const lancaram = new Set(ordenadas.map(d=>d.unidade));
+  const semLancamento = unidadesEfetivasParaRelatorio()
+    .filter(c=>!lancaram.has(c))
+    .map(c=>UNIDADES_NOMES[c]||c)
+    .sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  const avisoFaltando = semLancamento.length
+    ? `<div class="fech-faltando">⚠ <b>${semLancamento.length} `
+      + `${semLancamento.length===1?'unidade sem':'unidades sem'} nenhum lançamento no período:</b> `
+      + semLancamento.slice(0,8).map(n=>`<span>${escapeHtml(n)}</span>`).join('')
+    + (semLancamento.length>8 ? `<span title="${escapeHtml(semLancamento.slice(8).join(' · '))}">`
+        + `+${semLancamento.length-8}</span>` : '')
+    + `</div>`
+    : '';
+
+  container.innerHTML = avisoFaltando + lista.map(b=>{
     const titulo = soSemGrupo ? '' : `<div class="fech-grupo-titulo">🏪 ${escapeHtml(b.nome)} <span class="n">${b.rows.length}</span></div>`;
 
     // UMA tabela por grupo, com lançamento do sistema e histórico de
