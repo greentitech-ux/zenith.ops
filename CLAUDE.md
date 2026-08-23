@@ -93,6 +93,36 @@ diga explicitamente que está *na master, aguardando o deploy dele*.
 
 Não abrir Pull Request sem o usuário pedir.
 
+### Domínio
+
+O endereço público sai de **uma** variável: `APP_BASE_URL` (`index.js`,
+`relatorioMV.js`, `vigiaScript.js`), com fallback pro
+`adyen-monitor.onrender.com`. Trocar de domínio é trocar essa variável no
+Render — não tem URL cravada em lugar nenhum.
+
+Três coisas que quebram se forem ignoradas numa troca de domínio:
+
+1. **O `adyen-monitor.onrender.com` nunca pode ser desligado.** Além dos
+   links já enviados a cliente, é por ele que os 52 agentes descobrem que
+   existe versão nova e baixam o script novo. Máquina que estava desligada
+   migra quando voltar — mas só enquanto o endereço velho responder.
+2. **`VERSAO_VIGIA` tem que subir junto** (`vigiaScript.js`). O agente
+   instalado pergunta a versão no endereço velho, vê um número maior, baixa
+   o `.ps1` (que o servidor gera já com o `APP_BASE_URL` novo), se
+   sobrescreve e reinicia no endereço novo. Sem subir a versão, ninguém
+   migra. E o script baixado **precisa começar com `# NOCZenith`** — é a
+   trava que impede gravar arquivo quebrado por falha de rede.
+3. **`localStorage` é por origem.** Domínio novo = armazenamento vazio, o
+   mesmo efeito de renomear `zenithMonitorFixo`: a máquina esquece a
+   unidade e a loja passa a acusar offline. Vale pras duas telas que fazem
+   heartbeat pelo navegador — `index.html` (PC interno) e
+   `abastecimento.html`. Não troque a URL da máquina de loja na mão; deixe
+   o vigia migrar (ele carrega a unidade dentro do próprio script). Se
+   precisar abrir manualmente, use o link com `?unidade=&posto=`.
+
+Notificação push também é por origem: quem já tinha continua recebendo,
+mas precisa reativar o 🔔 uma vez ao entrar pelo endereço novo.
+
 ---
 
 ## 5. Vocabulário: usar o que já existe no código
