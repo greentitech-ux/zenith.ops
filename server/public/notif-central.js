@@ -11,6 +11,102 @@
   if (window.__ZENITH_NOTIF_CENTRAL__) return;
   window.__ZENITH_NOTIF_CENTRAL__ = true;
 
+  // ---------------------------------------------------------------------
+  // FECHAR ARRASTANDO PRO LADO (pedido do Master: "arrastar para o lado e
+  // ela sair, porém sem marcar como visualizado, apenas fechar"). É o mesmo
+  // gesto da gaveta de notificação do celular, então ninguém precisa
+  // aprender nada.
+  //
+  // A DIFERENÇA QUE IMPORTA: arrastar NÃO marca como vista. O alerta some
+  // da tela agora e volta na próxima visita, porque a solicitação continua
+  // pendente de verdade - quem marca como vista é só o "Visualizar". Sem
+  // isso, "tirar da frente pra ler depois" viraria "some pra sempre".
+  //
+  // Fica aqui (e não em cada página) porque o Painel e o Histórico têm a
+  // própria cópia desse toast, de antes deste arquivo existir - as duas
+  // chamam window.ZenithArrastarParaFechar. Definido ANTES da checagem de
+  // token abaixo pra existir mesmo em página sem sessão.
+  // ---------------------------------------------------------------------
+  // [ARRASTAR-INICIO] (marcador: testeRotas.js recorta daqui até o FIM pra
+  // rodar o gesto em Node, com um elemento de mentira - ver o teste)
+  function arrastarParaFechar(el, aoFechar) {
+    let x0 = 0; let y0 = 0; let dx = 0;
+    let arrastando = false; let ehGesto = false; let saiu = false;
+    const largura = () => el.offsetWidth || 320;
+
+    function inicio(e) {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      x0 = e.clientX; y0 = e.clientY; dx = 0;
+      arrastando = true; ehGesto = false;
+      el.style.transition = 'none';
+    }
+
+    function mover(e) {
+      if (!arrastando) return;
+      const ex = e.clientX - x0;
+      const ey = e.clientY - y0;
+      if (!ehGesto) {
+        // folga de 8px: sem ela, o tremor do dedo no toque do botão
+        // "Visualizar" já contava como arrasto e engolia o clique
+        if (Math.abs(ex) < 8 && Math.abs(ey) < 8) return;
+        // gesto mais vertical que horizontal = a pessoa quer ROLAR a
+        // página, não fechar o alerta - solta o controle e deixa rolar
+        if (Math.abs(ey) > Math.abs(ex)) { arrastando = false; return; }
+        ehGesto = true;
+        // sem capturar o ponteiro, arrastar o mouse pra fora do card
+        // interrompia o gesto no meio
+        try { el.setPointerCapture(e.pointerId); } catch (err) { /* navegador sem captura: segue sem */ }
+      }
+      dx = ex;
+      el.style.transform = 'translateX(' + dx + 'px)';
+      el.style.opacity = String(Math.max(0.15, 1 - (Math.abs(dx) / largura())));
+    }
+
+    function fim() {
+      if (!arrastando) return;
+      arrastando = false;
+      el.style.transition = 'transform .18s ease, opacity .18s ease';
+      const limite = Math.max(56, largura() * 0.28);
+      if (Math.abs(dx) < limite) {
+        // não passou do limite: volta pro lugar, nada acontece
+        el.style.transform = '';
+        el.style.opacity = '';
+        return;
+      }
+      el.style.transform = 'translateX(' + (dx > 0 ? largura() + 60 : -(largura() + 60)) + 'px)';
+      el.style.opacity = '0';
+      const sair = () => {
+        if (saiu) return;
+        saiu = true;
+        el.remove();
+        if (aoFechar) aoFechar();
+      };
+      // o timer é rede de segurança: se a aba estiver em segundo plano o
+      // transitionend pode nunca chegar, e o card ficaria pendurado
+      el.addEventListener('transitionend', sair, { once: true });
+      setTimeout(sair, 320);
+    }
+
+    // pan-y: o navegador continua rolando a página na vertical, mas deixa o
+    // gesto horizontal pra gente (sem isso, no celular o toque vira scroll e
+    // o pointermove nunca chega)
+    el.style.touchAction = 'pan-y';
+    // sem isto o gesto morria no meio no computador: arrastar em cima do
+    // texto do card começa uma SELEÇÃO/arraste nativo do navegador, que
+    // dispara pointercancel e aborta o fechamento (visto no Chromium). Card
+    // de notificação não é texto pra copiar, então desligar a seleção nele
+    // não tira nada de ninguém.
+    el.style.userSelect = 'none';
+    el.style.webkitUserSelect = 'none';
+    el.addEventListener('dragstart', (e) => e.preventDefault());
+    el.addEventListener('pointerdown', inicio);
+    el.addEventListener('pointermove', mover);
+    el.addEventListener('pointerup', fim);
+    el.addEventListener('pointercancel', fim);
+  }
+  // [ARRASTAR-FIM]
+  window.ZenithArrastarParaFechar = arrastarParaFechar;
+
   const AUTH_TOKEN = localStorage.getItem('authToken');
   if (!AUTH_TOKEN) return;
 
@@ -83,6 +179,9 @@
     // Antes era só "já vi" - a pessoa tirava o alerta da tela e depois tinha
     // que procurar a solicitação na mão pra saber do que se tratava.
     el.querySelector('.zn-ok').addEventListener('click', () => abrirSolicitacao(card.tipo, card.id));
+    // arrastar pro lado só tira da tela (não marca como vista - ver
+    // arrastarParaFechar lá em cima)
+    arrastarParaFechar(el);
     wrap.appendChild(el);
     tocarSomSolicitacao();
   }

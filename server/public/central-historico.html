@@ -2392,6 +2392,11 @@ function mostrarNotificacaoSolicitacao(card){
     marcarVistoNotificacao(card.tipo, card.id);
     abrirDetalhe(card.tipo, card.id);
   });
+  // arrastar pro lado só tira da tela, SEM marcar como vista (o alerta volta
+  // na próxima visita, porque a solicitação continua pendente) - ver
+  // ZenithArrastarParaFechar em notif-central.js. O `if` é proposital: se
+  // aquele arquivo não tiver carregado, o toast segue funcionando sem o gesto
+  if (window.ZenithArrastarParaFechar) window.ZenithArrastarParaFechar(el);
   wrap.appendChild(el);
   tocarSomNotificacao();
 }
