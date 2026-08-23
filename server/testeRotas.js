@@ -4842,6 +4842,44 @@ setTimeout(async () => {
   if (!okBeniboy) ruins += 1;
   console.log(`${okBeniboy ? '\u2713' : '\u2717'} Beniboy: um desenho so pros 6 lugares, a linha sempre inteira e a marca batendo junto`);
 
+  // ---------- Aviso de mudanca de endereco ----------
+  // Quem entra pelo endereco antigo precisa saber que o app mudou de casa.
+  // O perigo esta em ONDE esse aviso aparece: index.html na raiz e
+  // abastecimento.html sao as telas que fazem heartbeat pelo navegador na
+  // maquina de loja. localStorage e por origem - um clique ali apaga o
+  // zenithMonitorFixo, a maquina esquece a unidade e a loja acusa offline.
+  // Este teste existe pra ninguem tirar essa trava sem perceber.
+  let okAvisoEndereco = false;
+  try {
+    const fsE = require('fs'), pathE = require('path');
+    const tema = fsE.readFileSync(pathE.join(__dirname, 'public', 'tema.js'), 'utf8');
+    const idx = fsE.readFileSync(pathE.join(__dirname, 'index.js'), 'utf8');
+
+    const rota = await pedir('/api/meta/endereco');
+    let corpoRota = {};
+    try { corpoRota = JSON.parse(rota.corpo); } catch (e) { /* fica vazio */ }
+
+    const conf = {
+      'a rota devolve o endereco oficial (e e publica, sem Firestore)':
+        rota.status === 200 && typeof corpoRota.oficial === 'string' && /^https?:\/\//.test(corpoRota.oficial),
+      'o destino vem do APP_BASE_URL, nao de dominio cravado no JS':
+        /res\.json\(\{ oficial: APP_BASE_URL \}\)/.test(idx)
+        && !/nopulso\.com\.br/.test(tema),
+      'as telas de heartbeat da loja ficam de fora':
+        /TELAS_DE_HEARTBEAT\s*=\s*\['\/', '\/index\.html', '\/abastecimento\.html'\]/.test(tema)
+        && /TELAS_DE_HEARTBEAT\.indexOf\(location\.pathname\) !== -1\) return;/.test(tema),
+      'so aparece pra quem esta logado (cliente em pagina publica nao ve)':
+        /if \(!localStorage\.getItem\('authToken'\)\) return;/.test(tema),
+      'e some sozinho quando ja se esta no endereco certo':
+        /destino\.origin === location\.origin\) return;/.test(tema),
+    };
+    const ruinsE = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okAvisoEndereco = !ruinsE.length;
+    if (ruinsE.length) console.log(`  falhou em: ${ruinsE.join(' · ')}`);
+  } catch (e) { okAvisoEndereco = false; console.log('  erro: ' + e.message); }
+  if (!okAvisoEndereco) ruins += 1;
+  console.log(`${okAvisoEndereco ? '\u2713' : '\u2717'} Mudanca de endereco: avisa quem entra pelo antigo, menos na maquina de loja`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
