@@ -95,13 +95,21 @@ A cor é o estado, e sai sempre do token: `var(--accent)` disponível,
 resolvido. Na tela de alarme o traço fica **inteiro** — em 112px sobre fundo
 vermelho, um traço que some 250ms por ciclo parece defeito.
 
-**A marca bate também** (decisão do Master). O logotipo (`.auth-marca`,
-`.nmz-marca`) leva um pulso claro que **anda por cima** de uma linha de base
-sempre inteira — nunca um traço que some, senão a marca fica ilegível no meio
-do ciclo. Ritmo 3,6s contra os 2,6s do Beniboy, pra o assistente continuar
-sendo quem chama atenção. `prefers-reduced-motion` desliga o pulso e deixa só
-o logotipo limpo. O `testeRotas.js` reprova quem tirar o pulso, quem apagar a
-linha de base ou quem esquecer o reduced-motion.
+**A linha nunca desaparece** — nem no avatar, nem na marca. A base é sólida
+(`.bb-traco`, `.marca-base`) e o que anda é um brilho curto por cima
+(`.bb-brilho` 2,6s, `.marca-brilho` 3,2s). Traçar-e-apagar deixa o desenho
+vazio parte do ciclo: ruim em 112px na tela de alarme, e pior num PDF ou PPTX,
+que congela um frame e mostra a marca pela metade.
+
+O brilho também passa por token: `--pulso-brilho` é `#fff` no Escuro, onde
+branco é mais aceso que o limão, e vira verde escuro no Claro — sobre fundo
+branco, branco vira buraco e o traço parece cortado.
+
+`prefers-reduced-motion` desliga o brilho e some com ele, deixando só o desenho
+limpo. A marca bate no login (2×) e no drawer; **não** animar favicon, ícone de
+app, PDF nem e-mail. O `testeRotas.js` reprova quem voltar o traçar-e-apagar,
+cravar a cor do brilho, tirar o brilho de alguma das 3 marcas ou esquecer o
+reduced-motion.
 
 ---
 

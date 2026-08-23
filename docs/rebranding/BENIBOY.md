@@ -19,8 +19,8 @@ de pulso (mesmos pontos do logotipo, em viewBox 64×64).
   <circle cx="32" cy="32" r="30" fill="var(--panel)"></circle>
   <circle class="bb-nucleo" cx="32" cy="32" r="22" fill="var(--accent)"></circle>
   <circle class="bb-anel"   cx="32" cy="32" r="30" stroke="var(--accent)" stroke-width="2.5" fill="none"></circle>
-  <polyline class="bb-eco"   points="14,34 22,34 27,21 33,45 38,32 50,32" stroke="var(--accent)" stroke-width="6"   stroke-linecap="round" stroke-linejoin="round" fill="none"></polyline>
-  <polyline class="bb-traco" points="14,34 22,34 27,21 33,45 38,32 50,32" stroke="var(--accent)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none"></polyline>
+  <polyline class="bb-traco"  points="14,34 22,34 27,21 33,45 38,32 50,32" stroke="var(--accent)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none"></polyline>
+  <polyline class="bb-brilho" points="14,34 22,34 27,21 33,45 38,32 50,32" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none"></polyline>
 </svg>
 ```
 
@@ -28,14 +28,19 @@ Trocar `width`/`height` conforme o uso; a geometria não muda.
 
 ## 2. O batimento (CSS)
 
+Regra: **a linha nunca desaparece.** A base fica sólida na cor do estado e um
+brilho curto corre por cima — igual ao logotipo. O "traçar e apagar" só vale
+quando o desenho ao vivo É a informação (a conversa em andamento na demo 8a do
+mockup); em cartão de estado, PDF ou PPTX ele deixaria o avatar vazio no frame
+congelado.
+
+
 ```css
 /* Beniboy — avatar do assistente. A cor vem de currentColor/var(--*) no
    próprio SVG; o CSS aqui só cuida do batimento. */
-.beniboy .bb-traco,
-.beniboy .bb-eco   { stroke-dasharray: 96; }
-.beniboy .bb-traco { animation: bb-traco var(--bb-ritmo, 2.6s) linear infinite;
-                     filter: drop-shadow(0 0 5px currentColor); }
-.beniboy .bb-eco   { animation: bb-eco   var(--bb-ritmo, 2.6s) linear .18s infinite; }
+.beniboy .bb-traco { filter: drop-shadow(0 0 5px currentColor); }   /* base sólida */
+.beniboy .bb-brilho{ stroke: #fff; stroke-dasharray: 9 64; opacity: .9;
+                     animation: bb-brilho var(--bb-ritmo, 2.6s) linear infinite; }
 .beniboy .bb-nucleo{ transform-box: fill-box; transform-origin: center;
                      animation: bb-nucleo var(--bb-ritmo, 2.6s) ease-in-out infinite; }
 .beniboy .bb-anel  { animation: bb-anel  var(--bb-ritmo, 2.6s) ease-in-out infinite; }
@@ -45,14 +50,13 @@ Trocar `width`/`height` conforme o uso; a geometria não muda.
 .beniboy.alarme    { --bb-ritmo: 1.1s; }   /* var(--bad) */
 .beniboy.resolvido { --bb-ritmo: 3.6s; }   /* var(--ok)  */
 
-@keyframes bb-traco  { 0%{stroke-dashoffset:96;opacity:.25;} 10%{opacity:1;} 42%{stroke-dashoffset:0;opacity:1;} 60%{stroke-dashoffset:0;opacity:1;} 100%{stroke-dashoffset:-96;opacity:.25;} }
-@keyframes bb-eco    { 0%{stroke-dashoffset:96;opacity:0;} 20%{opacity:.30;} 55%{stroke-dashoffset:0;opacity:.16;} 100%{stroke-dashoffset:-96;opacity:0;} }
+@keyframes bb-brilho { 0%{stroke-dashoffset:73;} 100%{stroke-dashoffset:-73;} }   /* o caminho tem ~72,6px */
 @keyframes bb-nucleo { 0%,100%{transform:scale(.82);opacity:.16;} 42%{transform:scale(1);opacity:.34;} }
 @keyframes bb-anel   { 0%,100%{opacity:.62;} 42%{opacity:1;} }
 
 @media (prefers-reduced-motion: reduce) {
-  .beniboy .bb-traco, .beniboy .bb-eco, .beniboy .bb-nucleo, .beniboy .bb-anel { animation: none; }
-  .beniboy .bb-traco { stroke-dasharray: none; }
+  .beniboy .bb-brilho { animation: none; opacity: 0; }
+  .beniboy .bb-nucleo, .beniboy .bb-anel { animation: none; }
 }
 ```
 
@@ -123,3 +127,34 @@ Demonstração funcional do fluxo e dos ritmos: turno **8a** do mockup.
 
 Fato, número e próximo passo. Sem emoji na fala do bot (os emojis dos botões
 existentes — 🎧 🔕 — permanecem).
+
+
+---
+
+## 8. Marca viva — brilho correndo no logotipo
+
+O logotipo **nunca** desaparece: a linha fica sólida e um brilho curto corre por
+cima dela, a cada 3,2s. (Traçar-e-apagar é só do avatar do Beniboy, onde o
+desenho da linha É o estado; no logotipo isso deixaria a marca incompleta na
+maior parte do tempo — e num PDF ou PPTX, que congela um frame, ela sairia pela
+metade.)
+
+Vale onde a marca aparece parada e grande: **tela de login**, **topo do drawer**
+(`nav-menu.js`, `.nmz-marca`) e material de apresentação. Não animar em favicon,
+ícone de app, PDF nem e-mail.
+
+```html
+<!-- base sólida + brilho por cima, mesma geometria -->
+<polyline class="marca-base"   points="2,26 14,26 21,10 29,32 36,20 62,20"
+  stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"></polyline>
+<polyline class="marca-brilho" points="2,26 14,26 21,10 29,32 36,20 62,20"
+  stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"></polyline>
+```
+
+```css
+.marca-brilho { stroke-dasharray: 12 82; opacity: .85; animation: marca-brilho 3.2s linear infinite; }
+@keyframes marca-brilho { 0% { stroke-dashoffset: 94; } 100% { stroke-dashoffset: -94; } }
+@media (prefers-reduced-motion: reduce) { .marca-brilho { animation: none; opacity: 0; } }
+```
+
+O caminho tem ~93px (viewBox 64×40) — daí o `94` e o traço de `12`.

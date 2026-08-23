@@ -3,7 +3,7 @@ branch: master
 path: server/public
 
 ## Last sync
-date: 2026-08-23T17:54:13Z
+date: 2026-08-23T18:20:00Z
 
 ### Updated in this project
 - Mockups NoPulso criados a partir do design atual do Zenith Ops (tokens dark, KPIs em mono, painéis, tabela densa).
@@ -42,6 +42,12 @@ date: 2026-08-23T17:54:13Z
 ### Turnos 7 e 8 — Beniboy
 - 7a/7b alternativas de recipiente (balão de conversa, pastilha) ao lado do avatar circular de 6a; prós e contras anotados.
 - 8a demo interativa (logica no DC): sinal vital com ritmo por estado, alternância sem login × logado — fluxo real de atendimento.html/suporte-chat.js (?unidade= no link/QR entrega o nome da loja; link solto, o bot pergunta).
+
+### Última atualização enviada ao Claude Code
+- Beniboy fechado na opção 1 (avatar circular). Alternativas 7a/7b marcadas como "não escolhida" no mockup.
+- Animação: linha base SÓLIDA + brilho curto correndo (logotipo e cartões de estado). O traçar-e-apagar ficou só na demo ao vivo 8a. CSS pronto no BENIBOY.md §2 e §8.
+- Login perde o robô; o balão de mensagem fica.
+- Apresentação de lançamento (15 slides) + assets inclusos no pacote.
 
 ## Screen map
 | Tela no projeto | Arquivos do repo |
