@@ -403,6 +403,9 @@ const cache = {
 // heartbeat. Devolve {} quando nao ha nada novo, pra nao reescrever campo a
 // toa (nem apagar o acumulado do dia quando chega um beat sem medicao - o
 // caso do computador que ainda esta com a versao velha do agente).
+// coleta da serie de 5 minutos - desligada por padrao (ver metricasDeRede)
+const REDE_5MIN_LIGADA = process.env.NOC_REDE_5MIN === '1';
+
 function metricasDeRede(atual, rede) {
   const amostra = redeDiagnostico.sanitizarAmostra(rede);
   const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
@@ -421,10 +424,25 @@ function metricasDeRede(atual, rede) {
     campos.redeHoras = redeDiagnostico.acumularHora(
       (atual && atual.redeHoras) || [], amostra, redeDiagnostico.horaDe(Date.now()),
     );
-    // camada de 5min, pra janela de "últimos 60 minutos" (ver redeDiagnostico)
-    campos.redeMinutos = redeDiagnostico.acumularMinuto(
-      (atual && atual.redeMinutos) || [], amostra, Date.now(),
-    );
+    // CAMADA DE 5 MIN: DESLIGADA (23/08/2026). Era o maior array dentro de
+    // cada documento do NOC - e o documento inteiro e lido toda vez que o
+    // espelho recarrega, entao ela pesava em leitura, escrita e trafego,
+    // 24h por dia, multiplicada por computador. Na pratica ninguem usava a
+    // janela de 60 minutos: quem investiga rede olha 24h ou 7 dias.
+    // A serie por HORA (redeHoras) continua, e e ela que responde "as duas
+    // lojas ficaram lentas ao mesmo tempo?".
+    // Pra religar: NOC_REDE_5MIN=1 (e devolver o botao "60 min" em
+    // noc-rede.html, ver PERIODOS la).
+    if (REDE_5MIN_LIGADA) {
+      campos.redeMinutos = redeDiagnostico.acumularMinuto(
+        (atual && atual.redeMinutos) || [], amostra, Date.now(),
+      );
+    } else if (atual && atual.redeMinutos !== undefined) {
+      // limpeza do que ja esta gravado: sem isso o array antigo ficaria
+      // pendurado pra sempre em cada documento, continuando a custar
+      // leitura e trafego mesmo com a coleta desligada
+      campos.redeMinutos = null;
+    }
   }
   return campos;
 }
@@ -1272,6 +1290,23 @@ function quedaDeCelular(doc) {
   return doc.tipo === 'interno' && ehCelular(doc.userAgent);
 }
 
+// grava um patch num computador E aplica o mesmo patch no espelho.
+//
+// POR QUE (custo): a varredura monta a lista de candidatos a partir do
+// espelho e, quando decidia "esta caida", gravava avisadoOffline:true SO no
+// Firestore. O espelho seguia sem o campo - entao no minuto seguinte a
+// mesma maquina aparecia como "caida e ainda nao avisada" de novo, e o
+// codigo relia o documento dela pra confirmar. De novo. E de novo. Uma
+// maquina fora do ar custava uma leitura + uma escrita POR MINUTO, pra
+// sempre. Com 22 maquinas fora (o cenario real de 23/08), isso sozinho dava
+// ~32 mil leituras e ~32 mil escritas por dia sem servir pra nada.
+async function gravarEEspelhar(codigo, posto, patch) {
+  const id = docIdFor(codigo, posto);
+  await COLLECTION.doc(id).update(patch);
+  aplicarNoEspelho(id, patch);
+  cacheBase.invalidar();
+}
+
 async function varrerAlertas() {
   const docs = await listUncached();
   const transicoes = [];
@@ -1280,7 +1315,7 @@ async function varrerAlertas() {
     // que so marca a flag; quem avisa e aqui, junto com o resto - assim o push
     // sai de UM lugar so e uma falha de push nunca derruba o caminho do agente
     if (candidato.discoAlertaPendente) {
-      await COLLECTION.doc(docIdFor(candidato.codigo, candidato.posto)).update({ discoAlertaPendente: null });
+      await gravarEEspelhar(candidato.codigo, candidato.posto, { discoAlertaPendente: null });
       transicoes.push({
         codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
         tipo: 'disco', nivel: candidato.discoAlertaPendente,
@@ -1291,7 +1326,7 @@ async function varrerAlertas() {
     // ou desligado esse deve ser os alertas"). Quem detecta é o heartbeat,
     // comparando o LastBootUpTime; aqui é só o aviso, junto com o resto.
     if (candidato.reinicioAvisoPendente) {
-      await COLLECTION.doc(docIdFor(candidato.codigo, candidato.posto)).update({ reinicioAvisoPendente: null });
+      await gravarEEspelhar(candidato.codigo, candidato.posto, { reinicioAvisoPendente: null });
       transicoes.push({
         codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
         tipo: 'reiniciou',
@@ -1301,7 +1336,7 @@ async function varrerAlertas() {
     }
     // caiu a Ethernet (ou trocou cabo por Wi-Fi) SEM a máquina sair do ar
     if (candidato.linkAvisoPendente) {
-      await COLLECTION.doc(docIdFor(candidato.codigo, candidato.posto)).update({ linkAvisoPendente: null });
+      await gravarEEspelhar(candidato.codigo, candidato.posto, { linkAvisoPendente: null });
       transicoes.push({
         codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
         tipo: 'link',
@@ -1312,7 +1347,7 @@ async function varrerAlertas() {
     }
     // passou de mais uma semana sem reiniciar (ver UPTIME_REINICIAR_DIAS)
     if (candidato.reinicioAlertaPendente) {
-      await COLLECTION.doc(docIdFor(candidato.codigo, candidato.posto)).update({ reinicioAlertaPendente: null });
+      await gravarEEspelhar(candidato.codigo, candidato.posto, { reinicioAlertaPendente: null });
       transicoes.push({
         codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
         tipo: 'reiniciar', dias: candidato.reinicioAlertaPendente,
@@ -1377,7 +1412,7 @@ async function varrerAlertas() {
       // causa é conhecida e o aviso dele nem é crítico.
       const confirmada = reiniciandoPorNos
         || (Date.now() - doc.ultimoHeartbeatEm) >= CONFIRMACAO_QUEDA_MS;
-      await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({
+      await gravarEEspelhar(doc.codigo, doc.posto, {
         avisadoOffline: true,
         // offlineDesde = quando de fato SILENCIOU, nao a hora da deteccao.
         // A deteccao chega ate ~2,5min depois (limiar de 90s + tick de 1min),
@@ -1397,7 +1432,7 @@ async function varrerAlertas() {
         && (Date.now() - (doc.offlineDesde || doc.ultimoHeartbeatEm)) >= CONFIRMACAO_QUEDA_MS) {
       // continuou fora depois da janela de oscilação: AGORA é queda de
       // verdade - o push crítico sai daqui, uma vez só
-      await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({ quedaPushPendente: false });
+      await gravarEEspelhar(doc.codigo, doc.posto, { quedaPushPendente: false });
       transicoes.push({
         codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'offline-confirmada',
         celular: quedaDeCelular(doc), ehNotebook: !!doc.ehNotebook,
@@ -1420,7 +1455,7 @@ async function varrerAlertas() {
       // senão o celular do Master apitava justamente pelo que pedimos
       // pra ignorar
       const quedaCurta = !!doc.quedaPushPendente;
-      await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({
+      await gravarEEspelhar(doc.codigo, doc.posto, {
         avisadoOffline: false, offlineDesde: null, quedaPushPendente: false,
         reinicioComandadoEm: null, reinicioNaoVoltouAvisado: false,
         eventos: [...(doc.eventos || []), evento].slice(-EVENTOS_MAX),
@@ -1436,7 +1471,7 @@ async function varrerAlertas() {
       // é um alerta diferente do "caiu", porque aqui a gente sabe a causa
       // provável (o reinício não completou: travou no boot, desligou de
       // vez, ou perdeu a rede ao subir).
-      await COLLECTION.doc(docIdFor(doc.codigo, doc.posto)).update({ reinicioNaoVoltouAvisado: true });
+      await gravarEEspelhar(doc.codigo, doc.posto, { reinicioNaoVoltouAvisado: true });
       transicoes.push({
         codigo: doc.codigo, posto: doc.posto, nome: doc.nome, tipo: 'reinicio-nao-voltou',
         minutos: Math.round((Date.now() - doc.reinicioComandadoEm) / 60000),

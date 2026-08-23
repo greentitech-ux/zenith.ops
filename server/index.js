@@ -11310,9 +11310,15 @@ function aquecerBoot(promessa, ms) {
         }
       }
     };
+    // 2min (era 1min). O limiar de queda é 90s e o push crítico só sai depois
+    // da janela de confirmação, então o que muda de fato é a detecção chegar
+    // até 1min mais tarde numa queda - contra metade das varreduras por dia.
+    // NOC_VARREDURA_MS ajusta sem deploy.
+    const VARREDURA_MS = Number(process.env.NOC_VARREDURA_MS) > 0
+      ? Number(process.env.NOC_VARREDURA_MS) : 2 * 60 * 1000;
     setInterval(() => {
       rodarVarreduraLojaStatus().catch((err) => console.error('Erro na varredura de conectividade das lojas:', err.message));
-    }, 60 * 1000);
+    }, VARREDURA_MS);
 
     // reforco do alarme critico do Beniboy (ver reforcarAlarmesBeniboy) -
     // roda a cada 15s, so repete de fato quem passou de REALERTA_MS (30s)

@@ -508,7 +508,9 @@ function analisarComputador(doc, dia, frota) {
     // as três camadas vão juntas: o filtro da tela escolhe qual usar sem
     // precisar de outra ida ao servidor
     serie: serieHoraria(doc.redeHoras),
-    serieMin: serieMinutos(doc.redeMinutos),
+    // serieMin saiu junto com a coleta de 5 minutos (ver metricasDeRede em
+    // lojaStatus.js) - mandar array vazio em todo diagnóstico só gastaria banda
+    ...(doc.redeMinutos ? { serieMin: serieMinutos(doc.redeMinutos) } : {}),
     serieDia: serieDias(doc, dia),
     quedas: quedas.slice(0, HISTORICO_DIAS_MAX),
   };
