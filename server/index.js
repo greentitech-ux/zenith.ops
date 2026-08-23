@@ -257,6 +257,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/solicitacao-publica.html',
   '/atendimento.html',
   '/api/meta/unidades-publico',
+  '/api/meta/endereco',
   '/api/refund-requests/publico',
   '/api/solicitacoes/publico',
   '/api/bot/solicitacoes',
@@ -425,6 +426,16 @@ async function listaUnidadesPublicas() {
 
 app.get('/api/meta/unidades-publico', async (req, res) => {
   res.json(await listaUnidadesPublicas());
+});
+
+// Endereco oficial do app, pra tela avisar quem ainda entra pelo antigo.
+// Publica e sem Firestore: e so devolver o APP_BASE_URL que ja esta em
+// memoria, entao nao custa leitura nenhuma. Existe porque o tema.js e
+// servido como arquivo estatico e nao tem como saber o endereco sozinho -
+// e cravar o dominio novo no JS quebraria a regra de que APP_BASE_URL e a
+// UNICA fonte do endereco (ver CLAUDE.md secao 4).
+app.get('/api/meta/endereco', (req, res) => {
+  res.json({ oficial: APP_BASE_URL });
 });
 
 // personalizacao da tela de login (fundo + balao do robo, ver loginCustom.js

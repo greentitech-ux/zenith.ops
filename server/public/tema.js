@@ -129,6 +129,79 @@
       + '</svg>';
   };
 
+  // ---- aviso de mudanca de endereco ----
+  // Quem entra pelo endereco antigo (adyen-monitor.onrender.com) precisa
+  // saber que o NoPulso mudou de casa - senao continua usando o velho pra
+  // sempre, com o atalho antigo na tela inicial. O endereco de destino vem
+  // do servidor (/api/meta/endereco), que devolve o APP_BASE_URL: cravar o
+  // dominio novo aqui quebraria a regra de que ele e a UNICA fonte.
+  //
+  // DUAS TELAS FICAM DE FORA, DE PROPOSITO: index.html na raiz e
+  // abastecimento.html sao as que fazem heartbeat pelo navegador na maquina
+  // de loja. localStorage e por origem - se alguem clicar no aviso ali, o
+  // zenithMonitorFixo some, a maquina esquece que unidade monitora e a loja
+  // passa a acusar offline no NOC. Nessas o vigia migra sozinho.
+  //
+  // Tambem so aparece pra quem tem authToken: cliente em pagina publica
+  // (atendimento, estorno) nao ve. Se visse e clicasse, perderia a conversa
+  // em andamento, que tambem mora no localStorage da origem antiga.
+  var HOST_ANTIGO = 'adyen-monitor.onrender.com';
+  var TELAS_DE_HEARTBEAT = ['/', '/index.html', '/abastecimento.html'];
+
+  function avisarEnderecoNovo() {
+    if (location.hostname !== HOST_ANTIGO) return;
+    if (TELAS_DE_HEARTBEAT.indexOf(location.pathname) !== -1) return;
+    try {
+      if (!localStorage.getItem('authToken')) return;
+      if (sessionStorage.getItem('nopulsoAvisoEndereco') === 'fechado') return;
+    } catch (e) { return; }
+
+    fetch('/api/meta/endereco').then(function (r) { return r.json(); }).then(function (d) {
+      var oficial = (d && d.oficial) || '';
+      if (!oficial) return;
+      var destino;
+      try { destino = new URL(oficial); } catch (e) { return; }
+      if (destino.origin === location.origin) return;   // ja esta no endereco certo
+
+      var st = document.createElement('style');
+      st.textContent = [
+        '#nopulso-mudou{position:fixed;left:0;right:0;bottom:0;z-index:99998;',
+        '  background:var(--panel2,#181d24);border-top:2px solid var(--accent,#b8ff3c);',
+        '  color:var(--text,#e7ecf1);padding:14px 16px;display:flex;gap:14px;',
+        '  align-items:center;justify-content:center;flex-wrap:wrap;',
+        "  font-family:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;",
+        '  box-shadow:0 -6px 20px rgba(0,0,0,.35);}',
+        '#nopulso-mudou .txt{font-size:13.5px;line-height:1.45;max-width:56ch;}',
+        '#nopulso-mudou b{color:var(--accent,#b8ff3c);}',
+        '#nopulso-mudou .acoes{display:flex;gap:8px;flex-wrap:wrap;}',
+        '#nopulso-mudou a.ir{background:var(--accent,#b8ff3c);color:#0b0d10;text-decoration:none;',
+        '  border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;white-space:nowrap;}',
+        '#nopulso-mudou button.depois{background:none;border:1px solid var(--line,#232a33);',
+        '  color:var(--muted,#7d8896);border-radius:8px;padding:9px 14px;font-size:13px;cursor:pointer;}',
+        '@media(max-width:520px){#nopulso-mudou{flex-direction:column;align-items:stretch;text-align:center;}',
+        '  #nopulso-mudou .acoes{justify-content:center;}}'
+      ].join('\n');
+      document.head.appendChild(st);
+
+      var barra = document.createElement('div');
+      barra.id = 'nopulso-mudou';
+      barra.setAttribute('role', 'status');
+      barra.innerHTML =
+        '<div class="txt">O NoPulso mudou de endereço para <b>' + destino.host + '</b>. '
+        + 'Entre por lá e reinstale o atalho na tela inicial — o ícone e o nome antigos só trocam '
+        + 'depois de reinstalar. O 🔔 precisa ser ativado uma vez no endereço novo.</div>'
+        + '<div class="acoes">'
+        + '<a class="ir" href="' + destino.origin + '">Abrir no endereço novo</a>'
+        + '<button type="button" class="depois">Agora não</button>'
+        + '</div>';
+      document.body.appendChild(barra);
+      barra.querySelector('.depois').addEventListener('click', function () {
+        try { sessionStorage.setItem('nopulsoAvisoEndereco', 'fechado'); } catch (e) {}
+        barra.remove();
+      });
+    }).catch(function () { /* sem aviso e melhor que erro na tela */ });
+  }
+
   var LS_TEMA = 'zenithTema';   // 'escuro' (padrao) | 'claro'
   var LS_FONTE = 'zenithFonte'; // percentual: 80..150 (padrao 100)
   var FONTE_MIN = 80, FONTE_MAX = 150, FONTE_PASSO = 10;
@@ -276,7 +349,7 @@
     new MutationObserver(montarControles).observe(drawer, { childList: true });
   }
 
-  function iniciar() { montarControles(); vigiarDrawer(); }
+  function iniciar() { montarControles(); vigiarDrawer(); avisarEnderecoNovo(); }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);
   else iniciar();
