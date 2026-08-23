@@ -1379,6 +1379,29 @@ setTimeout(async () => {
   if (!okGerenteTravado) ruins += 1;
   console.log(`${okGerenteTravado ? '✓' : '✗'} "Responsável" do fechamento ignora o texto do body e trava no usuário logado: HTTP ${lancouComGerenteForjado.status} ${lancouComGerenteForjado.corpo.slice(0, 90)}`);
 
+  // ---- FECHAMENTO LANÇADO AVISA (pedido do Master: "quero receber
+  // notificação quando os fechamentos forem realizados"). O push em si não
+  // sai aqui (a suíte roda sem chave VAPID), mas o MESMO caminho grava o
+  // aviso na Central de Alertas - que é justamente o canal que sobra quando
+  // o celular estava no bolso. Aproveita o fechamento que acabou de ser
+  // lançado logo acima (Dom Carrão, 19/08).
+  // O aviso sai FORA da resposta da rota (não segura o lançamento), então
+  // dá um instante pra ele assentar antes de conferir.
+  await new Promise((r) => setTimeout(r, 250));
+  const alertaFech = [...DOCS.entries()]
+    .filter(([k]) => k.startsWith('alertasCentral/'))
+    .map(([, v]) => v)
+    .find((a) => a && a.tipo === 'fechamento');
+  const okAvisoFech = !!alertaFech
+    && /Fechamento lançado/.test(alertaFech.titulo || '')
+    && /Dom Carrão/.test(alertaFech.resumo || '')
+    && /19\/08/.test(alertaFech.resumo || '')
+    && alertaFech.url === '/fechamentos.html'
+    // rotina NUNCA toca sirene - só alerta de urgência é critico
+    && alertaFech.critico === false;
+  if (!okAvisoFech) ruins += 1;
+  console.log(`${okAvisoFech ? '✓' : '✗'} fechamento lançado vira aviso (Central de Alertas + push), sem sirene: ${alertaFech ? String(alertaFech.resumo).slice(0, 95) : 'NENHUM AVISO'}`);
+
   // ---- PERFIL POR CODIGO em unidade FIXA (loja Adyen/planilha, código que
   // nunca muda) - a mesma "unificação" pedida pelo usuário: toda unidade,
   // fixa ou cadastrada em runtime, pode ganhar o perfil que a MVPar tem ----
