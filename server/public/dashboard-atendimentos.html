@@ -236,11 +236,18 @@ function renderChartDia(porDia){
   const labels = porDia.map(d=>d.dia.slice(5).split('-').reverse().join('/'));
   const dados = porDia.map(d=>d.total);
   if(CHART_DIA) CHART_DIA.destroy();
+  // O Chart.js recebe cor por JS, entao nao da pra usar var(--accent2) direto:
+  // le o token do :root na hora de montar. Sem isso o ciano ficava cravado e o
+  // grafico nao acompanhava o tema Claro (onde --accent2 vira #0d7ac2, porque
+  // o ciano some no fundo branco). Serie de grafico e dado tecnico - fica no
+  // --accent2, nao no limao da marca, que e cor de acao.
+  const corSerie = getComputedStyle(document.documentElement)
+    .getPropertyValue('--accent2').trim() || '#5cc8ff';
   CHART_DIA = new Chart(ctx, {
     type:'line',
     data:{ labels, datasets:[{
-      label:'Atendimentos', data: dados, borderColor:'#5cc8ff', backgroundColor:'rgba(92,200,255,.12)',
-      tension:.35, fill:true, pointRadius:3, pointBackgroundColor:'#5cc8ff',
+      label:'Atendimentos', data: dados, borderColor:corSerie, backgroundColor:corSerie+'1f',
+      tension:.35, fill:true, pointRadius:3, pointBackgroundColor:corSerie,
     }]},
     options:{
       responsive:true, maintainAspectRatio:false,

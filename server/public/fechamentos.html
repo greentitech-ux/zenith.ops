@@ -54,6 +54,11 @@
   .kpi .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-family:var(--mono);}
   .kpi .val{font-family:var(--mono);font-size:24px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums;}
   .kpi .val.ok{color:var(--ok);} .kpi .val.bad{color:var(--bad);} .kpi .val.warn{color:var(--warn);}
+  /* quando a Diferenca de caixa esta negativa o card inteiro ganha borda
+     vermelha, pra saltar no meio dos outros 5 KPIs (pedido do handoff de
+     design). So no caso 'bad': com diferenca zerada a borda vermelha seria
+     alarme falso, e cor semantica aqui quer dizer alguma coisa. */
+  .kpi.alerta{border-color:rgba(255,92,92,.35);}
   .kpi .delta{font-family:var(--mono);font-size:11px;margin-top:4px;font-variant-numeric:tabular-nums;}
   .kpi .delta.ok{color:var(--ok);} .kpi .delta.bad{color:var(--bad);} .kpi .delta.muted{color:var(--muted);}
 
@@ -1558,7 +1563,7 @@ function renderKpis(rows){
       const nota = aparado ? ' (mesmo nº de dias)' : '';
       deltaHtml = `<div class="delta ${cls}">${seta} ${Math.abs(k.delta).toFixed(1)}% vs período anterior${nota}</div>`;
     }
-    return `<div class="kpi"><div class="lbl">${k.lbl}</div><div class="val ${k.cls}">${k.val}</div>${deltaHtml}</div>`;
+    return `<div class="kpi${k.cls==='bad'?' alerta':''}"><div class="lbl">${k.lbl}</div><div class="val ${k.cls}">${k.val}</div>${deltaHtml}</div>`;
   }).join('');
 }
 
