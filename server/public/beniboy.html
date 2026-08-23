@@ -142,7 +142,7 @@
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
         <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
-        <h1>🐝 Central do Beniboy</h1>
+        <h1><span id="bb-marca" style="display:inline-flex;vertical-align:-12px;margin-right:8px;"></span>Central do Beniboy</h1>
       </div>
     </div>
     <div class="header-nav">
@@ -275,7 +275,7 @@ function nivelDe(chat){ return chat.nivel || (chat.atendidoPorEmail ? 2 : 1); }
 function ultimaMsg(chat){
   const m = (chat.mensagens||[])[(chat.mensagens||[]).length-1];
   if(!m) return null;
-  return { de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'🤖 Beniboy':'Suporte'), texto: m.texto, em: m.em };
+  return { de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'Beniboy':'Suporte'), texto: m.texto, em: m.em };
 }
 
 function passaFiltro(chat){
@@ -329,7 +329,7 @@ function cardHtml(chat){
     <div class="kcard-assunto">${escapeHtml(chat.assunto || 'Suporte geral')}</div>
     <div class="kcard-prev">${um ? escapeHtml(um.de)+': '+escapeHtml(um.texto||'(sem texto)') : 'Sem mensagens.'}</div>
     <div class="kcard-meta">
-      <span>${chat.responsavel ? '👤 '+escapeHtml(chat.responsavel.nome||chat.responsavel.email||'') : (nivel===1 ? '🤖 Beniboy' : '—')}</span>
+      <span>${chat.responsavel ? '👤 '+escapeHtml(chat.responsavel.nome||chat.responsavel.email||'') : (nivel===1 ? (window.beniboySVG ? window.beniboySVG(20)+' Beniboy' : 'Beniboy') : '—')}</span>
       <span>${tempoRelativo(chat.atualizadoEm)}</span>
     </div>
   </div>`;
@@ -542,7 +542,7 @@ function painelHtml(chat){
     if(codigoNoc) acoes.push(`<a class="btn-ghost" style="text-decoration:none;display:inline-flex;align-items:center;" href="/loja-status.html?unidade=${encodeURIComponent(codigoNoc)}" target="_blank" rel="noopener">🖥️ Ir para o NOC</a>`);
   }
 
-  const msgs = (chat.mensagens||[]).map(m=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'🤖 Beniboy':'Suporte'), texto: m.texto, em: m.em }));
+  const msgs = (chat.mensagens||[]).map(m=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'Beniboy':'Suporte'), texto: m.texto, em: m.em }));
   const msgsHtml = msgs.length ? msgs.map(m=>`
       <div class="msg-item">
         <div class="m-cab"><span>${escapeHtml(m.de)}</span><span>${fmtDataHora(m.em)}</span></div>
@@ -734,6 +734,11 @@ boot();
 </script>
 <script src="/notif-central.js"></script>
 <script src="/recolher.js"></script>
+<script>
+  // marca do assistente no cabecalho da Central (48px, BENIBOY.md)
+  (function(){ var m=document.getElementById('bb-marca');
+    if (m && window.beniboySVG) m.innerHTML = window.beniboySVG(48); })();
+</script>
 <script src="/nav-menu.js"></script>
 </body>
 </html>

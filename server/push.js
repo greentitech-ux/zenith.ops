@@ -288,6 +288,7 @@ async function notifyBeniboyEscalonamento(chat, motivo, opts) {
     url: '/loja-status.html',
   } : {
     title: '🚨 Beniboy precisa de você',
+    icone: '/beniboy-192.png',
     body: `${(chat && chat.nome) || 'Visitante'}${motivo ? ' · ' + motivo : ''}`.slice(0, 150),
     tag: 'beniboy-' + chatId,
     critical: true,

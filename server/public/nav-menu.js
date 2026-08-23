@@ -68,7 +68,7 @@
       { id: 'nav-noc-maquinas', href: '/noc-maquinas.html', icone: '💽', rotulo: 'Saúde das Máquinas', secoes: ['suporte'] },
     ] },
     { grupo: 'Atendimento', itens: [
-      { id: 'nav-beniboy', href: '/beniboy.html', icone: '🐝', rotulo: 'Central do Beniboy', secoes: ['suporte'] },
+      { id: 'nav-beniboy', href: '/beniboy.html', icone: (window.beniboySVG ? window.beniboySVG(20) : '🐝'), rotulo: 'Central do Beniboy', secoes: ['suporte'] },
       { id: 'nav-dashboard-atendimentos', href: '/dashboard-atendimentos.html', icone: '📊', rotulo: 'Dashboard de Atendimentos', secoes: ['suporte'] },
       { id: 'nav-central-solucoes', href: '/central-solucoes.html', icone: '💬', rotulo: 'Central de Soluções', secoes: ['central-solucoes'] },
     ] },

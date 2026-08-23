@@ -33,7 +33,11 @@
 <script src="/tema.js"></script>
 </head>
 <body>
-  <div class="icone" id="icone">🚨</div>
+  <!-- avatar do Beniboy em 112px (BENIBOY.md): no fundo vermelho do alarme
+       ele vai em branco. A variante ?tipo=seguranca troca por 🛡️ mais
+       abaixo via textContent - por isso o .icone mantem o font-size do
+       emoji, que continua valendo pra esse caso. -->
+  <div class="icone" id="icone"></div>
   <h1 id="titulo">Beniboy precisa de você</h1>
   <div class="corpo" id="corpo">O assistente não conseguiu resolver sozinho.</div>
   <div class="aviso-mudo hidden" id="aviso-mudo">Toque em qualquer lugar pra ativar o som do alerta.</div>
@@ -43,6 +47,8 @@
   </div>
 <script src="/alarme-sync.js"></script>
 <script>
+  document.getElementById('icone').innerHTML = window.beniboySVG
+    ? window.beniboySVG(112, 'alarme no-vermelho') : '🚨';
   const params = new URLSearchParams(location.search);
   const chat = params.get('chat') || '';
   const nome = params.get('nome') || '';

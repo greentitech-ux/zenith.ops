@@ -4756,6 +4756,72 @@ setTimeout(async () => {
   if (!okFontesLocais) ruins += 1;
   console.log(`${okFontesLocais ? '\u2713' : '\u2717'} Fontes: Archivo/JetBrains Mono saem do proprio servidor, sem depender do Google`);
 
+  // ---------- Beniboy: um desenho so, servido pelo tema.js ----------
+  // O avatar do assistente (BENIBOY.md) aparece em 6 lugares: widget de
+  // chat, atendimento publico, Central, item do menu, tela de alarme e o
+  // icone do push. Antes cada um tinha o SEU emoji ou o SEU SVG - a cabeca
+  // de robo do login e a do widget eram DUAS copias diferentes do mesmo
+  // desenho, e ja tinham divergido. Agora sai tudo de window.beniboySVG no
+  // tema.js.
+  //
+  // Este teste reprova se alguem: (a) tirar o helper do tema.js, (b)
+  // trouxer de volta o robo antigo, (c) voltar a cravar o emoji num dos
+  // pontos de aplicacao, ou (d) animar a MARCA junto com o avatar - a
+  // polyline do logotipo (.auth-marca / .nmz-marca) e identidade, fica
+  // parada; quem bate e o Beniboy.
+  let okBeniboy = false;
+  try {
+    const fsB = require('fs'), pathB = require('path');
+    const dirB = pathB.join(__dirname, 'public');
+    const ler = (f) => fsB.readFileSync(pathB.join(dirB, f), 'utf8');
+    const tema = ler('tema.js');
+    const widget = ler('suporte-chat.js');
+    const login = ler('index.html');
+    const nav = ler('nav-menu.js');
+    const alarme = ler('alerta-beniboy.html');
+    const atend = ler('atendimento.html');
+    const central = ler('beniboy.html');
+    const sw = ler('sw.js');
+    const push = fsB.readFileSync(pathB.join(__dirname, 'push.js'), 'utf8');
+
+    const conf = {
+      'tema.js expoe o desenho pra todo mundo':
+        /window\.beniboySVG\s*=\s*function/.test(tema) && /class="beniboy/.test(tema),
+      'a cor do avatar sai do token (nao quebra o tema Claro)':
+        /\.beniboy\{[^}]*color:var\(--accent/.test(tema)
+        && /\.beniboy\.pensando\{[^}]*var\(--accent2/.test(tema)
+        && /\.beniboy\.alarme\{[^}]*var\(--bad/.test(tema)
+        && /\.beniboy\.resolvido\{[^}]*var\(--ok/.test(tema),
+      'no alarme o traco fica inteiro (112px em tela cheia nao pode piscar vazio)':
+        /\.beniboy\.alarme \.bb-traco\{stroke-dasharray:none/.test(tema),
+      'reduced-motion desliga o batimento':
+        /prefers-reduced-motion:reduce[\s\S]{0,200}bb-traco/.test(tema),
+      'o robo antigo do login foi embora (markup e keyframes)':
+        !/login-bot|login-float|login-blink|login-arml|login-armr/.test(login),
+      'o robo antigo do widget foi embora':
+        !/szc-bot-eyes|szc-bot-arm-l|szc-bot-arm-r/.test(widget),
+      'widget, atendimento, Central, menu e alarme usam o mesmo helper':
+        /beniboySVG\(40\)/.test(widget) && /beniboySVG\(112, 'alarme no-vermelho'\)/.test(widget)
+        && /beniboySVG\(64\)/.test(atend)
+        && /beniboySVG\(48\)/.test(central)
+        && /beniboySVG\(20\)/.test(nav)
+        && /beniboySVG\(112, 'alarme no-vermelho'\)/.test(alarme),
+      'o item do menu continua com o id da permissao':
+        /id: 'nav-beniboy'/.test(nav),
+      'o push do Beniboy tem icone proprio e o sw sabe usar':
+        /icone: '\/beniboy-192\.png'/.test(push)
+        && /icon: data\.icone \|\| '\/icon-192\.png'/.test(sw)
+        && fsB.existsSync(pathB.join(dirB, 'beniboy-192.png')),
+      'a MARCA nao anima junto (o logotipo fica parado)':
+        !/\.(auth|nmz)-marca[^{]*\{[^}]*animation/.test(login + nav + tema),
+    };
+    const ruinsB = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okBeniboy = !ruinsB.length;
+    if (ruinsB.length) console.log(`  falhou em: ${ruinsB.join(' · ')}`);
+  } catch (e) { okBeniboy = false; console.log('  erro: ' + e.message); }
+  if (!okBeniboy) ruins += 1;
+  console.log(`${okBeniboy ? '\u2713' : '\u2717'} Beniboy: um desenho so pros 6 lugares, com a cor no token e a marca parada`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

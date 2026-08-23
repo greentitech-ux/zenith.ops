@@ -82,6 +82,23 @@ Relatórios e e-mails têm hex próprio e **não** são afetados pelo CSS:
 O `tema.js` é carregado por **todas** as páginas. Página nova precisa da
 tag `<script src="/tema.js"></script>` no `<head>`.
 
+### O Beniboy
+
+O avatar do assistente é **um desenho só**, servido por
+`window.beniboySVG(px, estado)` no `tema.js` — usado no widget de chat, no
+`atendimento.html`, na Central, no item `nav-beniboy` do menu, na tela de
+alarme e no ícone de push (`beniboy-192.png`). Não copie o SVG pra dentro de
+uma página: já houve duas cópias divergentes do robô antigo (login e widget).
+
+A cor é o estado, e sai sempre do token: `var(--accent)` disponível,
+`var(--accent2)` verificando, `var(--bad)` chamou um humano, `var(--ok)`
+resolvido. Na tela de alarme o traço fica **inteiro** — em 112px sobre fundo
+vermelho, um traço que some 250ms por ciclo parece defeito.
+
+**A marca não bate.** A polyline do logotipo (`.auth-marca`, `.nmz-marca`) é
+identidade e fica parada; quem pulsa é o Beniboy. O `testeRotas.js` reprova
+se alguém animar as duas.
+
 ---
 
 ## 3. Custo do Firestore

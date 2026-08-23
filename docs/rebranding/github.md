@@ -3,7 +3,7 @@ branch: master
 path: server/public
 
 ## Last sync
-date: 2026-08-23T16:52:00Z
+date: 2026-08-23T17:54:13Z
 
 ### Updated in this project
 - Mockups NoPulso criados a partir do design atual do Zenith Ops (tokens dark, KPIs em mono, painéis, tabela densa).
@@ -34,6 +34,14 @@ date: 2026-08-23T16:52:00Z
 - 5b Central de Soluções (kanban por assunto, origem 💬 Widget site / 🎫 Solicitação·Chamado, ABERTO/FINALIZADO) + Dashboard de Atendimentos (Total, Humanizados, Via Beniboy, Em aberto agora, tempo médio de resposta/resolução, por dia, por hora, por atendente, por assunto) — páginas lidas.
 - 5c Saúde das Máquinas (barra de volume crítico, 🌡️ temperatura, 🔁 sem reiniciar Xd, ⏳ anos de disco, 🕐 medido há, detalhes do disco) + alerta do Beniboy (gradiente vermelho, "Beniboy precisa de você", 🎧 Atender agora / 🔕 Silenciar, variante ?tipo=seguranca) — páginas lidas.
 - 5d Fechamento do balcão + ticket público + auto-cadastro do RH — saltiverso-fechamento.html, ticket-publico.html, rh-cadastro.html, documentoIdentidadeOcr.js.
+
+### Turno 6 — Beniboy
+- 6a marca do assistente: avatar circular com a polyline da marca, 4 estados por cor, escala de tamanhos, ícone de push e regra de tom de voz.
+- 6b aplicações: widget de chat, avatar de mensagem, menu e cabeçalho da Central, tela de alarme, e o login sem o robô.
+
+### Turnos 7 e 8 — Beniboy
+- 7a/7b alternativas de recipiente (balão de conversa, pastilha) ao lado do avatar circular de 6a; prós e contras anotados.
+- 8a demo interativa (logica no DC): sinal vital com ritmo por estado, alternância sem login × logado — fluxo real de atendimento.html/suporte-chat.js (?unidade= no link/QR entrega o nome da loja; link solto, o bot pergunta).
 
 ## Screen map
 | Tela no projeto | Arquivos do repo |

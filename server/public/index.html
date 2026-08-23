@@ -87,14 +87,6 @@
     box-shadow: 0 8px 28px rgba(0,0,0,.5);
   }
   .login-hero{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;text-align:center;}
-  .login-bot{position:relative;animation:login-float 4s ease-in-out infinite;flex:none;}
-  @keyframes login-float{0%,100%{transform:translateY(0);}50%{transform:translateY(-8px);}}
-  .login-bot .login-eyes{transform-box:fill-box;transform-origin:center;animation:login-blink 4.6s ease-in-out infinite;}
-  @keyframes login-blink{0%,92%,100%{transform:scaleY(1);}95%{transform:scaleY(.15);}}
-  .login-bot .login-arm-l{transform-box:fill-box;transform-origin:50% 8%;animation:login-arml 3.6s ease-in-out infinite;}
-  .login-bot .login-arm-r{transform-box:fill-box;transform-origin:50% 8%;animation:login-armr 3.6s ease-in-out .3s infinite;}
-  @keyframes login-arml{0%,100%{transform:rotate(0deg);}50%{transform:rotate(-16deg);}}
-  @keyframes login-armr{0%,100%{transform:rotate(0deg);}50%{transform:rotate(16deg);}}
   .login-bubble{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:10px 16px;max-width:240px;text-align:left;}
   .login-bubble b{font-size:14px;color:#ffd9a0;}
   .login-bubble small{display:block;font-weight:500;color:var(--muted);font-size:11.5px;margin-top:3px;}
@@ -104,10 +96,7 @@
   /* várias logos lado a lado (empresas do grupo, cadastradas em
      login-custom.html) - quebra linha sozinho quando não couber */
   .login-logos{display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;}
-  @media (prefers-reduced-motion:reduce){
-    .login-bot,.login-bot .login-eyes,.login-bot .login-arm-l,.login-bot .login-arm-r{animation:none!important;}
-  }
-  /* ===== fim login: robô + balão ===== */
+  /* ===== fim login: balão ===== */
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -115,44 +104,6 @@
 
 <section id="auth-screen" class="auth-screen">
   <div class="login-hero">
-    <div class="login-bot">
-      <svg viewBox="0 0 220 260" width="96" height="112" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <defs>
-          <linearGradient id="login-shell" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#f8fbfd"/>
-            <stop offset="100%" stop-color="#c7d7e2"/>
-          </linearGradient>
-          <radialGradient id="login-eyeglow" cx="35%" cy="30%" r="75%">
-            <stop offset="0%" stop-color="#e9feff"/>
-            <stop offset="45%" stop-color="#3ce0ff"/>
-            <stop offset="100%" stop-color="#0a9fce"/>
-          </radialGradient>
-          <radialGradient id="login-chest" cx="35%" cy="30%" r="75%">
-            <stop offset="0%" stop-color="#eafcff"/>
-            <stop offset="100%" stop-color="#2bb9e8"/>
-          </radialGradient>
-        </defs>
-        <rect class="login-arm-l" x="40" y="150" width="26" height="50" rx="13" fill="url(#login-shell)" stroke="#7d97a8" stroke-width="2.4"/>
-        <rect class="login-arm-r" x="154" y="150" width="26" height="50" rx="13" fill="url(#login-shell)" stroke="#7d97a8" stroke-width="2.4"/>
-        <path d="M62,145 C62,120 158,120 158,145 L172,222 C172,246 142,258 110,258 C78,258 48,246 48,222 Z"
-          fill="url(#login-shell)" stroke="#7d97a8" stroke-width="2.4"/>
-        <circle cx="110" cy="180" r="14" fill="url(#login-chest)" stroke="#0a7ea3" stroke-width="1.6"/>
-        <rect x="42" y="42" width="136" height="112" rx="52" fill="url(#login-shell)" stroke="#7d97a8" stroke-width="3"/>
-        <circle cx="32" cy="90" r="10" fill="#3d99dd" stroke="#1c6ba8" stroke-width="2"/>
-        <circle cx="188" cy="90" r="10" fill="#3d99dd" stroke="#1c6ba8" stroke-width="2"/>
-        <rect x="68" y="66" width="84" height="62" rx="26" fill="#0c1e2c"/>
-        <g class="login-eyes">
-          <circle cx="92" cy="97" r="15" fill="url(#login-eyeglow)"/>
-          <circle cx="128" cy="97" r="15" fill="url(#login-eyeglow)"/>
-        </g>
-        <g stroke="#8fe9ff" stroke-width="3" stroke-linecap="round" fill="none" opacity=".85">
-          <path d="M76,73 v-7 h7"/>
-          <path d="M144,73 v-7 h-7"/>
-          <path d="M76,120 v7 h7"/>
-          <path d="M144,120 v7 h-7"/>
-        </g>
-      </svg>
-    </div>
     <div class="login-bubble" id="login-bubble">
       <b id="login-bubble-titulo">Bem-vindo(a) de volta! 👋</b>
       <small id="login-bubble-texto">Bom trabalho hoje.</small>

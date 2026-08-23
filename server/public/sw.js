@@ -17,7 +17,9 @@ self.addEventListener('push', (event) => {
     (async () => {
       await self.registration.showNotification(data.title, {
         body: data.body,
-        icon: '/icon-192.png',
+        // o servidor pode mandar um icone proprio do evento (o Beniboy tem
+        // o dele, /beniboy-192.png); sem isso, o icone do app
+        icon: data.icone || '/icon-192.png',
         badge: '/favicon-32.png',
         tag: data.tag,
         vibrate,
