@@ -4880,6 +4880,54 @@ setTimeout(async () => {
   if (!okAvisoEndereco) ruins += 1;
   console.log(`${okAvisoEndereco ? '\u2713' : '\u2717'} Mudanca de endereco: avisa quem entra pelo antigo, menos na maquina de loja`);
 
+  // ---------- Painel: o desenho novo sem inventar dado ----------
+  // O mockup 1b trazia "Meta do mes 71,2%" e "Faturamento hoje +8,4%" - dois
+  // numeros que NAO existem no sistema (nao ha meta em lugar nenhum, e o
+  // fechamento so e lancado quando a loja fecha, entao "hoje" nao tem dado).
+  // A linguagem visual foi aproveitada; os numeros falsos, nao. Ver CLAUDE.md
+  // secao 6. Este teste existe pra ninguem "completar" o painel depois
+  // colando esses campos de volta.
+  let okPainelReal = false;
+  try {
+    const fsP = require('fs'), pathP = require('path');
+    const painel = fsP.readFileSync(pathP.join(__dirname, 'public', 'painel.html'), 'utf8');
+
+    // o intervalo que o indicador "ao vivo" promete tem que ser o mesmo que o
+    // codigo realmente usa - numero de tela batendo com o comportamento
+    const promete = (painel.match(/ao vivo · (\d+)s/) || [])[1];
+    const real = (painel.match(/renderizarCards\(\); \}, (\d+)\)/) || [])[1];
+
+    // Tira comentario antes de procurar: o proprio codigo EXPLICA por que a
+    // "meta do mes" ficou de fora, e essa explicacao nao pode reprovar o
+    // teste. O que vale e o que a tela mostra, nao o que o codigo comenta.
+    const semComentario = painel
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').map(l => l.replace(/^\s*\/\/.*$/, '')).join('\n');
+
+    const conf = {
+      'nao inventa meta nem faturamento de hoje':
+        !/Meta do m[êe]s/i.test(semComentario) && !/Faturamento hoje/i.test(semComentario),
+      'o card de Alertas e so do Master (a rota e requireMaster)':
+        /\{ chave:'alertas', soMaster:true, build:cardAlertas \}/.test(painel)
+        && /app\.get\('\/api\/alertas-central', auth\.requireMaster/.test(
+             fsP.readFileSync(pathP.join(__dirname, 'index.js'), 'utf8')),
+      'o "ao vivo" promete o intervalo que o codigo cumpre':
+        !!promete && !!real && Number(promete) * 1000 === Number(real),
+      'chips por unidade saem do fechamento de ontem':
+        /class="punidade"/.test(painel) && /d\.unidadeNome\|\|d\.unidade/.test(painel),
+      'diferenca de caixa vem do campo quebra, nao de conta inventada':
+        /d\.quebra\|\|0/.test(painel),
+      'alerta usa cor semantica, nao a cor da marca':
+        /\.palerta\.bad > \.sev\{background:var\(--bad\)/.test(painel)
+        && !/\.palerta[^{]*\{[^}]*var\(--accent\)/.test(painel),
+    };
+    const ruinsP = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okPainelReal = !ruinsP.length;
+    if (ruinsP.length) console.log(`  falhou em: ${ruinsP.join(' · ')}`);
+  } catch (e) { okPainelReal = false; console.log('  erro: ' + e.message); }
+  if (!okPainelReal) ruins += 1;
+  console.log(`${okPainelReal ? '\u2713' : '\u2717'} Painel: desenho novo do mockup sem inventar numero que o sistema nao tem`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

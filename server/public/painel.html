@@ -107,11 +107,46 @@
   .pcard-body{flex:1;display:flex;flex-direction:column;justify-content:center;gap:12px;min-height:0;}
   .pstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:10px;}
   .pstat.wide{grid-column:1 / -1;}
-  .pstat .lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-family:var(--mono);}
-  .pstat .val{font-family:var(--mono);font-size:19px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums;}
+  /* KPI no formato do mockup 1b: cada numero na propria caixa, rotulo em
+     mono maiusculo e valor tabular. Antes eram numeros soltos no fundo do
+     card - o tile separa um do outro sem precisar de divisoria. */
+  .pstat{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;min-width:0;}
+  .pstat .lbl{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-family:var(--mono);line-height:1.35;}
+  /* NUNCA quebrar no meio do numero: "R$ 61.837,00" partido em duas linhas
+     ("R$ 61.837" / ",00") e ilegivel - apareceu na primeira renderizacao
+     com 3 tiles espremidos num card estreito. Por isso nowrap aqui e um
+     flex-basis maior no .pstats-row abaixo, que faz caber 2 por linha em vez
+     de forcar 3. */
+  .pstat .val{font-family:var(--mono);font-size:19px;font-weight:600;margin-top:5px;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  /* linha de apoio embaixo do numero (comparativo, recorte) - cor semantica */
+  .pstat .delta{font-family:var(--mono);font-size:10.5px;margin-top:4px;color:var(--muted);}
+  .pstat .delta.ok{color:var(--ok);} .pstat .delta.bad{color:var(--bad);} .pstat .delta.warn{color:var(--warn);}
+  /* barra de progresso. Nasceu da "meta do mes" do mockup, que NAO existe no
+     sistema - o desenho foi reaproveitado num numero que existe de verdade:
+     quantas lojas lancaram de quantas deviam (ver CLAUDE.md secao 6). */
+  .pbarra{height:5px;border-radius:3px;background:var(--line);margin-top:8px;overflow:hidden;}
+  .pbarra > i{display:block;height:100%;background:var(--accent);border-radius:3px;transition:width .3s ease;}
+  .pbarra.bad > i{background:var(--bad);} .pbarra.warn > i{background:var(--warn);}
+  /* chips de unidade (Fechamento de ontem por unidade, mockup 1b) */
+  .punidades{display:flex;flex-wrap:wrap;gap:8px;}
+  .punidade{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;flex:1 1 130px;min-width:0;}
+  .punidade .nome{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .punidade .valor{font-family:var(--mono);font-size:16px;font-weight:600;margin-top:4px;color:var(--ok);font-variant-numeric:tabular-nums;}
+  .punidade.faltando{border-color:rgba(255,92,92,.35);}
+  .punidade.faltando .valor{color:var(--bad);font-size:13px;}
+  /* alerta com barra de severidade a esquerda (mockup 1b). A cor vem do
+     --ok/--warn/--bad: e leitura de gravidade, nao marca (CLAUDE.md 2). */
+  .palertas{display:flex;flex-direction:column;}
+  .palerta{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);}
+  .palerta:last-child{border-bottom:none;}
+  .palerta > .sev{width:3px;flex:none;border-radius:2px;background:var(--muted);}
+  .palerta.bad > .sev{background:var(--bad);} .palerta.warn > .sev{background:var(--warn);} .palerta.ok > .sev{background:var(--ok);}
+  .palerta .txt{min-width:0;}
+  .palerta .tit{font-size:12.5px;font-weight:600;line-height:1.35;}
+  .palerta .sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:3px;line-height:1.4;}
   .pstats-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;}
   .pstats-row:first-child{margin-top:0;}
-  .pstats-row .pstat{flex:1 1 100px;max-width:160px;}
+  .pstats-row .pstat{flex:1 1 132px;max-width:none;}
   .pstats-row.center{justify-content:center;}
   .pstats-row.center .pstat{flex:0 1 130px;text-align:center;}
   .pstat .val.ok{color:var(--ok);} .pstat .val.bad{color:var(--bad);} .pstat .val.warn{color:var(--warn);}
@@ -177,6 +212,9 @@
   .painel-saudacao .ps-ola{font-size:20px;font-weight:700;letter-spacing:-.01em;}
   .painel-saudacao .ps-ola b{color:var(--accent);}
   .painel-saudacao .ps-data{font-size:12.5px;color:var(--muted);margin-top:3px;text-transform:capitalize;}
+  /* "ao vivo" com o intervalo REAL (60s, ver o setInterval de renderizarCards).
+     O mockup trazia 25s; numero de tela tem que bater com o codigo. */
+  .painel-saudacao .ps-vivo{font-family:var(--mono);font-size:10.5px;color:var(--ok);margin-top:4px;white-space:nowrap;}
   .painel-saudacao .ps-dir{display:flex;align-items:center;gap:20px;}
   .painel-saudacao .ps-relogio{font-family:var(--mono);font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1;}
   .painel-saudacao .ps-areas{font-size:11px;color:var(--muted);font-family:var(--mono);text-align:right;line-height:1.4;}
@@ -245,6 +283,7 @@
   <div class="ps-dir">
     <div class="ps-relogio" id="ps-relogio">--:--</div>
     <div class="ps-areas" id="ps-areas"></div>
+    <div class="ps-vivo" id="ps-vivo" title="Os cards se atualizam sozinhos a cada 60 segundos, enquanto esta aba estiver visível">● ao vivo · 60s</div>
   </div>
 </div>
 
@@ -649,15 +688,71 @@ async function cardMonitor(){
   `);
 }
 
+// Alertas recentes (mockup 1b). O dado ja existe: alertasCentral.js registra
+// TODO alerta do sistema (NOC, Beniboy, seguranca, QA, RH, fraude) e o
+// listar() ja passa por createCache de 60s - o mesmo ritmo do painel, entao
+// nao acrescenta pressao no Firestore (o proprio modulo documenta o incidente
+// de 72 mil leituras/hora que esse cache resolveu).
+//
+// So Master: a rota /api/alertas-central e requireMaster. Nao e escolha de
+// layout - Admin tomaria 403 aqui.
+const ALERTA_SEVERIDADE = { 'noc-loja-offline': 'bad', 'noc-loja-offline-conversa': 'bad',
+  beniboy: 'bad', seguranca: 'bad', fraude: 'bad', 'quebra-caixa': 'warn', rh: 'warn', qa: 'warn' };
+
+async function cardAlertas(){
+  const lista = await fetch('/api/alertas-central').then(r=>r.ok?r.json():[]).catch(()=>[]);
+  const abertos = lista.filter(a=>!a.atendidoEm);
+  if(!abertos.length){
+    return pcardWrap('🔔','Alertas','/central-alertas.html',
+      '<div class="pcard-vazio">Nenhum alerta em aberto.</div>');
+  }
+  const linhas = abertos.slice(0, 5).map(a=>{
+    const sev = a.critico ? 'bad' : (ALERTA_SEVERIDADE[a.tipo] || 'warn');
+    return `<div class="palerta ${sev}"><div class="sev"></div><div class="txt">
+      <div class="tit">${escapeHtml(a.titulo||'Alerta')}</div>
+      ${a.resumo?`<div class="sub">${escapeHtml(a.resumo)}</div>`:''}
+    </div></div>`;
+  }).join('');
+  const sobra = abertos.length - 5;
+  return pcardWrap('🔔','Alertas','/central-alertas.html', `<div class="palertas">${linhas}</div>
+    ${sobra>0?`<div class="pcard-nota">+${sobra} ${sobra===1?'alerta':'alertas'} em aberto na Central.</div>`:''}`);
+}
+
 async function cardFechamentos(){
   const ontem = ontemBrasilia();
   const rows = await fetch('/api/fechamentos').then(r=>r.json());
   const doDia = rows.filter(d=>d.data===ontem);
   const faturamento = +doDia.reduce((s,d)=>s+(d.faturamento||0),0).toFixed(2);
-  return pcardWrap('💰','Fechamentos (ontem)','/fechamentos.html', `<div class="pstats">
-    ${statRow('Lojas lançadas', doDia.length)}
-    ${statRow('Faturamento', fmtMoney(faturamento))}
-  </div>`);
+  // Diferenca de caixa: o campo 'quebra' ja vem no fechamento (ver
+  // NOMES_CAMPOS_FECHAMENTO). Negativo = faltou dinheiro; e a informacao que
+  // manda alguem abrir tratativa, entao entra com cor semantica.
+  const quebra = +doDia.reduce((s,d)=>s+(d.quebra||0),0).toFixed(2);
+  const unidadesComQuebra = doDia.filter(d=>(d.quebra||0)<0).length;
+
+  // Chips por unidade (mockup 1b). Mostra QUEM lancou e quanto - o "de
+  // quantas deviam" NAO entra aqui de proposito: esse denominador tem regra
+  // propria em fechamentos.html (unidade administrativa fora, restrita fora)
+  // e recalcular por aqui faria as duas telas darem numeros diferentes pro
+  // mesmo dado. O link "Abrir →" leva pra tela que tem a conta certa.
+  const chips = doDia
+    .slice()
+    .sort((a,b)=>(b.faturamento||0)-(a.faturamento||0))
+    .map(d=>`<div class="punidade">
+      <div class="nome" title="${escapeHtml(d.unidadeNome||d.unidade||'')}">${escapeHtml(d.unidadeNome||d.unidade||'—')}</div>
+      <div class="valor">${fmtMoney(d.faturamento||0)}</div>
+    </div>`).join('');
+
+  const deltaQuebra = quebra < 0
+    ? `<div class="delta bad">${unidadesComQuebra} ${unidadesComQuebra===1?'unidade':'unidades'} · exige tratativa</div>`
+    : '<div class="delta ok">caixa bateu</div>';
+
+  return pcardWrap('💰','Fechamentos (ontem)','/fechamentos.html', `<div class="pstats-row">
+      ${statRow('Lojas lançadas', doDia.length)}
+      ${statRow('Faturamento', fmtMoney(faturamento))}
+      <div class="pstat"><div class="lbl">Diferença de caixa</div>
+        <div class="val ${quebra<0?'bad':'ok'}">${fmtMoney(quebra)}</div>${deltaQuebra}</div>
+    </div>
+    ${chips ? `<div class="punidades" style="margin-top:10px;">${chips}</div>` : '<div class="pcard-vazio">Nenhuma loja lançou ontem.</div>'}`);
 }
 
 // mesmo roster hardcoded de entregas.html (dominio proprio de Entregas, com
@@ -1251,6 +1346,7 @@ const CARDS_POR_SECAO = [
   // pode ver os tempos monitorados)
   { chave:'abastecimento', soMasterAdmin:true, build:cardAbastecimento },
   { chave:'tecnico', secao:'tecnico', build:cardChamados },
+  { chave:'alertas', soMaster:true, build:cardAlertas },
   { chave:'noc', secao:'suporte', build:cardNoc },
   // tecnico/manutencao tambem podem ter cards da Central atribuidos a eles
   // (ver "Atribuir responsável" em central-historico.html) - por isso o
@@ -1402,7 +1498,9 @@ function montarSaudacao(){
   document.getElementById('ps-ola').innerHTML = primeiro
     ? `${cumprimento}, <b>${primeiro}</b>` : `${cumprimento}`;
 
-  const qtd = CARDS_POR_SECAO.filter(c=>c.soMasterAdmin
+  const qtd = CARDS_POR_SECAO.filter(c=>c.soMaster
+    ? IS_MASTER_GLOBAL
+    : c.soMasterAdmin
     ? (IS_MASTER_GLOBAL || IS_ADMIN_GLOBAL)
     : (c.secoes||[c.secao]).some(s=>SECOES_GLOBAL.includes(s))).length;
   document.getElementById('ps-areas').innerHTML = qtd
@@ -1434,7 +1532,9 @@ function tickRelogioSaudacao(){
 // enquanto a pessoa esta arrastando um card pra nao interromper o gesto.
 async function renderizarCards(){
   if(PAINEL_ARRASTANDO) return;
-  const aplicaveis = ordenarCards(CARDS_POR_SECAO.filter(c=>c.soMasterAdmin
+  const aplicaveis = ordenarCards(CARDS_POR_SECAO.filter(c=>c.soMaster
+    ? IS_MASTER_GLOBAL
+    : c.soMasterAdmin
     ? (IS_MASTER_GLOBAL || IS_ADMIN_GLOBAL)
     : (c.secoes||[c.secao]).some(s=>SECOES_GLOBAL.includes(s))));
 
