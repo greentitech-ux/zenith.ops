@@ -4,6 +4,12 @@ services:
     runtime: node
     plan: free
     rootDir: server
+    # AUTO-DEPLOY DESLIGADO (23/08/2026). Todo push na master subia sozinho,
+    # e todo boot custa ~5 mil leituras no Firestore - num dia de trabalho
+    # foram 33 deploys. Agora a subida é um clique em "Manual Deploy" no
+    # painel do Render, quando VOCÊ decidir: no horário combinado, ou na
+    # hora, se a operação estiver parada. Ver server/DESENVOLVIMENTO.md.
+    autoDeploy: false
     buildCommand: npm install
     startCommand: npm start
     envVars:

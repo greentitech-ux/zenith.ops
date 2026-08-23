@@ -11,15 +11,23 @@ if (!getApps().length) {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
 
-  if (!projectId || !clientEmail || !privateKey) {
+  if (process.env.FIRESTORE_EMULATOR_HOST) {
+    // EMULADOR LOCAL: o SDK fala com o Firestore que roda na propria maquina.
+    // Sem credencial, sem tocar no banco de producao e sem gerar UMA leitura
+    // cobrada - e o caminho pra testar de verdade antes de subir (ver
+    // server/DESENVOLVIMENTO.md). O firebase-admin le essa variavel sozinho;
+    // aqui so dispensamos a exigencia de credencial, que no emulador nao ha.
+    initializeApp({ projectId: projectId || 'zenith-local' });
+    console.log(`[firestore] EMULADOR LOCAL em ${process.env.FIRESTORE_EMULATOR_HOST} - producao NAO sera tocada.`);
+  } else if (!projectId || !clientEmail || !privateKey) {
     throw new Error(
       'Credenciais do Firebase ausentes. Configure FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL e FIREBASE_PRIVATE_KEY (veja server/.env.example).'
     );
+  } else {
+    initializeApp({
+      credential: cert({ projectId, clientEmail, privateKey }),
+    });
   }
-
-  initializeApp({
-    credential: cert({ projectId, clientEmail, privateKey }),
-  });
 }
 
 const db = getFirestore();

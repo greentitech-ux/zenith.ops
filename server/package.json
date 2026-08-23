@@ -6,7 +6,10 @@
   "type": "commonjs",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "local": "node local.js",
+    "teste": "node testeRotas.js",
+    "emulador": "firebase emulators:start --only firestore"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
