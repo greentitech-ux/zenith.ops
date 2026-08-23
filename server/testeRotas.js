@@ -5020,6 +5020,113 @@ setTimeout(async () => {
   if (!okLancFoto) ruins += 1;
   console.log(`${okLancFoto ? '\u2713' : '\u2717'} Lancamento: campos vem do grupo e a foto continua travando o que leu`);
 
+  // ---------- Fraude: a deteccao nao pode marcar loja inteira ----------
+  // A malha de identidade ligava dois pedidos por UM termo de 3+ letras em
+  // comum. Com nome brasileiro ("Silva" ~10% da populacao) isso juntava o dia
+  // inteiro num cluster so: medido, 98,5% dos pedidos LEGITIMOS viravam
+  // FRAUDE. Este teste roda os modulos reais contra trafego legitimo gerado
+  // aqui e reprova se a taxa voltar a subir - e confere que o ataque de
+  // verdade continua sendo pego (senao a gente so troca um problema por
+  // outro).
+  let okFraude = false;
+  try {
+    const fi = require('./fraudIdentity');
+    const ch = require('./cardHopping');
+    const pix = require('./pixRepetido');
+
+    // gerador deterministico (mesma semente sempre) - teste nao pode variar
+    let semente = 20260823;
+    const rnd = () => { semente = (semente * 1103515245 + 12345) % 2147483648; return semente / 2147483648; };
+    const SOBRE = ['Silva','Santos','Oliveira','Souza','Rodrigues','Ferreira','Alves','Pereira','Lima','Costa','Gomes','Ribeiro'];
+    const PRE = ['Maria','Jose','Ana','Joao','Carlos','Paulo','Lucas','Bruno','Juliana','Camila','Rafael','Felipe'];
+    const nomeBr = () => `${PRE[Math.floor(rnd() * PRE.length)]} ${SOBRE[Math.floor(rnd() * SOBRE.length)]} ${SOBRE[Math.floor(rnd() * SOBRE.length)]}`;
+    const UNI = ['DOM_19706', 'DOM_19798', 'Mooca', 'Carrao'];
+
+    const marcas = new Map();
+    const norm = (n) => String(n || '').trim().toLowerCase();
+    function processa(tx, id) {
+      if (pix.ehPix(tx)) { if (pix.registrarPix(tx)) marcas.set(id, { nivel: 'SUSPEITO', nome: tx.nomeCliente }); return; }
+      const info = fi.registrarPedido(id, tx.nomeCliente, tx.cardHolder, tx.unidade);
+      if (ch.registrarTentativa(tx, info ? `${tx.unidade}:cluster:${info.clusterId}` : undefined)) {
+        marcas.set(id, { nivel: 'FRAUDE', nome: tx.nomeCliente }); return;
+      }
+      if (!info) return;
+      const set = new Set(info.nomes.map(norm));
+      if ([...marcas.values()].some((m) => m.nivel === 'FRAUDE' && set.has(norm(m.nome)))) {
+        marcas.set(id, { nivel: 'FRAUDE', nome: tx.nomeCliente });
+      } else if (info.nomesDistintos >= 2) {
+        marcas.set(id, { nivel: 'SUSPEITO', nome: tx.nomeCliente });
+      }
+    }
+
+    const legitimos = [];
+    for (let i = 0; i < 250; i++) {
+      const nome = nomeBr();
+      const id = 'L' + i; legitimos.push(id);
+      processa({ unidade: UNI[i % UNI.length], nomeCliente: nome, cardHolder: nome, metodo: 'mc',
+        last4: String(1000 + Math.floor(rnd() * 9000)), status: rnd() < 0.12 ? 'RECUSADO' : 'APROVADO' }, id);
+    }
+    const fraudeFalsa = legitimos.filter((id) => marcas.get(id) && marcas.get(id).nivel === 'FRAUDE').length;
+    const marcadoTotal = legitimos.filter((id) => marcas.has(id)).length;
+
+    // ataque real: mesma pessoa, 5 cartoes distintos, mesma loja, em minutos
+    const ataque = [];
+    for (let k = 0; k < 5; k++) {
+      const id = 'ATQ' + k; ataque.push(id);
+      processa({ unidade: 'DOM_19706', nomeCliente: 'Thalyson Bergamini', cardHolder: 'Thalyson Bergamini',
+        metodo: 'visa', last4: String(7770 + k), status: 'RECUSADO' }, id);
+    }
+    const pegou = ataque.some((id) => marcas.get(id) && marcas.get(id).nivel === 'FRAUDE');
+
+    // anel que cruza nome do cliente x nome do cartao (o caso do comentario)
+    const anel = [['Thais Bergamini', 'Luciano Wanderlei'], ['Luciano Bergamini', 'Thais Wanderlei'], ['Thais Wanderlei', 'Luciano Bergamini']];
+    let pegouAnel = false;
+    anel.forEach((par, k) => {
+      const id = 'ANEL' + k;
+      processa({ unidade: 'Mooca', nomeCliente: par[0], cardHolder: par[1], metodo: 'visa', last4: String(4440 + k), status: 'RECUSADO' }, id);
+      if (marcas.has(id)) pegouAnel = true;
+    });
+
+    // Pix: nunca FRAUDE; repetido vira SUSPEITO/"Repetido"
+    const pixIds = [];
+    for (let k = 0; k < 3; k++) {
+      const id = 'PIX' + k; pixIds.push(id);
+      processa({ unidade: 'Carrao', nomeCliente: 'Joana Prestes', cardHolder: null, metodo: 'pix', last4: null, status: 'APROVADO' }, id);
+    }
+    const pixFraude = pixIds.some((id) => marcas.get(id) && marcas.get(id).nivel === 'FRAUDE');
+    const pixSuspeito = pixIds.some((id) => marcas.get(id) && marcas.get(id).nivel === 'SUSPEITO');
+
+    const fonteFi = require('fs').readFileSync(require('path').join(__dirname, 'fraudIdentity.js'), 'utf8');
+    const fonteIdx = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
+
+    const conf = {
+      'nenhum pedido legitimo vira FRAUDE': fraudeFalsa === 0,
+      'ruido total nos legitimos fica abaixo de 10%': marcadoTotal / 250 < 0.10,
+      'ataque de troca de cartao continua sendo pego': pegou,
+      'anel com nomes cruzados continua sendo pego': pegouAnel,
+      'Pix nunca leva FRAUDE': !pixFraude,
+      'Pix repetido leva SUSPEITO': pixSuspeito,
+      'Pix nao entra na malha de identidade nem no cardHopping':
+        /const clusterInfo = ehPixTx/.test(fonteIdx) && /&& !ehPixTx\) \{/.test(fonteIdx),
+      'a malha e escopada por unidade': /chaveEscopo\(unidade, t\)/.test(fonteFi)
+        && /registrarPedido\(pedidoIdAtual, tx\.nomeCliente, tx\.cardHolder, tx\.unidade\)/.test(fonteIdx),
+      'termo comum nao liga sozinho': /TERMOS_COMUNS\.has\(token\)/.test(fonteFi),
+      'cluster que explode para de valer como identidade': /MAX_PEDIDOS_CLUSTER/.test(fonteFi)
+        && /cluster\.saturado = true/.test(fonteFi),
+      'SUSPEITO exige nomes CRUZADOS, nao cliente que pediu 2x':
+        /clusterInfo\.nomesDistintos >= 2/.test(fonteIdx),
+      'a limpeza nunca apaga marcacao que humano criou ou confirmou':
+        /m\.criadoPorEmail === EMAIL_DETECCAO && m\.atualizadoPorEmail === EMAIL_DETECCAO/
+          .test(require('fs').readFileSync(require('path').join(__dirname, 'fraudMarks.js'), 'utf8')),
+      'a limpeza exige confirmacao explicita': /confirmar !== true/.test(fonteIdx),
+    };
+    const ruinsF = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okFraude = !ruinsF.length;
+    if (ruinsF.length) console.log(`  falhou em: ${ruinsF.join(' \u00b7 ')} (falso FRAUDE: ${fraudeFalsa}/250, ruido: ${marcadoTotal}/250)`);
+  } catch (e) { okFraude = false; console.log('  erro: ' + e.message); }
+  if (!okFraude) ruins += 1;
+  console.log(`${okFraude ? '\u2713' : '\u2717'} Fraude: cliente legitimo nao vira fraudador, ataque continua pego, Pix so "Repetido"`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

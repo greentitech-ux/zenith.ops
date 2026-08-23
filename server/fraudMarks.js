@@ -110,6 +110,59 @@ async function listAllCached() {
 }
 
 
+// e-mail que a deteccao automatica usa pra assinar as marcacoes (index.js)
+const EMAIL_DETECCAO = 'deteccao-automatica@sistema';
+
+// Marcacao que a deteccao automatica criou E que nenhum humano encostou
+// depois. As duas condicoes importam: marcar() preserva o criadoPorEmail
+// original, entao uma marca que nasceu automatica e o Master CONFIRMOU
+// continua com criadoPorEmail automatico - o que muda e o atualizadoPorEmail.
+// Exigir os dois e o que garante que a limpeza nunca apague decisao de gente.
+function ehAutomaticaIntocada(m) {
+  return m.criadoPorEmail === EMAIL_DETECCAO && m.atualizadoPorEmail === EMAIL_DETECCAO;
+}
+
+// Conta quantas seriam removidas, sem remover nada - o Master ve o numero
+// antes de decidir.
+async function contarAutomaticasAtivas() {
+  const marcas = await listAll(); // listAll ja filtra as removidas
+  const alvo = marcas.filter(ehAutomaticaIntocada);
+  const porNivel = {};
+  alvo.forEach((m) => { porNivel[m.nivel] = (porNivel[m.nivel] || 0) + 1; });
+  return { total: alvo.length, porNivel, totalAtivas: marcas.length };
+}
+
+// Remove (soft delete) as marcacoes automaticas intocadas. NAO apaga
+// documento: `removido:true` mantem tudo legivel no Relatorio de Fraude
+// (listHistorico), entao o registro do que a deteccao errada fez continua
+// existindo - a limpeza tira do painel, nao da historia.
+// Usa update() em serie de proposito, o mesmo primitivo do remover() acima:
+// e uma acao pontual de Master, nao caminho quente, e assim nao depende de
+// batch() (que o Firestore falso do testeRotas.js pode nao ter).
+async function removerAutomaticasAtivas(removidoPorEmail) {
+  const marcas = await listAll();
+  const alvo = marcas.filter(ehAutomaticaIntocada);
+  const agora = new Date().toISOString();
+  let removidas = 0;
+  let falhas = 0;
+  for (const m of alvo) {
+    try {
+      await COLLECTION.doc(docId(m.pedidoId)).update({
+        removido: true,
+        removidoEm: agora,
+        removidoPorEmail: removidoPorEmail || null,
+        motivoRemocao: 'Limpeza das marcações automáticas (falso positivo da detecção por nome).',
+      });
+      removidas += 1;
+    } catch (err) {
+      falhas += 1;
+      console.error('[fraudMarks] falha ao limpar', m.pedidoId, err.message);
+    }
+  }
+  invalidarCache();
+  return { removidas, falhas, alvo: alvo.length };
+}
+
 // historico completo, incluindo as removidas - so pro Relatorio de Fraude
 async function listHistorico() {
   const snap = await COLLECTION.orderBy('criadoEm', 'desc').get();
@@ -139,6 +192,7 @@ async function listFraudeNomes() {
 
 module.exports = {
   NIVEIS, marcar, remover, listAll, listAllCached, listHistorico, listFraudeNomes, normalizarNome,
+  EMAIL_DETECCAO, contarAutomaticasAtivas, removerAutomaticasAtivas,
   invalidar: invalidarCache,
 };
 
