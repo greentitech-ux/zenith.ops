@@ -3,7 +3,7 @@ branch: master
 path: server/public
 
 ## Last sync
-date: 2026-08-23T15:52:00Z
+date: 2026-08-23T16:52:00Z
 
 ### Updated in this project
 - Mockups NoPulso criados a partir do design atual do Zenith Ops (tokens dark, KPIs em mono, painéis, tabela densa).
@@ -22,6 +22,18 @@ date: 2026-08-23T15:52:00Z
 
 ## Sync history
 - 2026-08-23T14:52:00Z — primeira leitura (docs, index.html, entregas.html) e criação dos mockups.
+
+### Turno 4
+- 4a detalhe do card da Central (conversa do card, anexos, decidir, link público) — central-historico.html, solicitacoes.js, decidir.html.
+- 4b estados de exceção com as mensagens reais (vazio, carregando, sem permissão).
+- 4c Abastecimento Carrinho: pré-envio pós-contagem, Pedido/Envio/Contagem, avarias, popups de recebimento e de contagem — abastecimento.html, ajuda.html.
+- 2h ganhou o bloco "📷 Preencher por foto do relatório do PDV" (canaisVendaOcr.js): campos travados com fundo cinza, ✏️ para manual, aviso de divergência.
+
+### Turno 5 (menu 100% coberto)
+- 5a Lançar entrega + Regras de Entregas — entrega-lancamento.html (NOMES_CAMPOS), entregas-regras.html (campos de valor, destinos, modo Plataforma).
+- 5b Central de Soluções (kanban por assunto, origem 💬 Widget site / 🎫 Solicitação·Chamado, ABERTO/FINALIZADO) + Dashboard de Atendimentos (Total, Humanizados, Via Beniboy, Em aberto agora, tempo médio de resposta/resolução, por dia, por hora, por atendente, por assunto) — páginas lidas.
+- 5c Saúde das Máquinas (barra de volume crítico, 🌡️ temperatura, 🔁 sem reiniciar Xd, ⏳ anos de disco, 🕐 medido há, detalhes do disco) + alerta do Beniboy (gradiente vermelho, "Beniboy precisa de você", 🎧 Atender agora / 🔕 Silenciar, variante ?tipo=seguranca) — páginas lidas.
+- 5d Fechamento do balcão + ticket público + auto-cadastro do RH — saltiverso-fechamento.html, ticket-publico.html, rh-cadastro.html, documentoIdentidadeOcr.js.
 
 ## Screen map
 | Tela no projeto | Arquivos do repo |
