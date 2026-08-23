@@ -2185,7 +2185,11 @@ async function boot(){
     await carregarAgente();
   }
   conectarStream();
-  setInterval(() => { if(!document.hidden) carregar(); }, 30000);
+  // 60s (era 30s). Cada poll relê o parque inteiro no servidor; com o painel
+  // aberto o dia todo em 2-3 abas, essa linha sozinha respondia por metade
+  // das leituras do NOC. A batida da máquina é a cada 25s e o limiar de
+  // queda é 90s, então 60s não atrasa nada que já não fosse aguardado.
+  setInterval(() => { if(!document.hidden) carregar(); }, 60000);
   // a rede muda numa escala de minutos (e o acumulado e do dia inteiro),
   // entao nao precisa do mesmo ritmo da grade de presenca
   setInterval(() => { if(!document.hidden) carregarRede(); }, 120000);

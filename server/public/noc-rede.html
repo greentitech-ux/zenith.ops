@@ -211,7 +211,10 @@ let DADOS = null;
 // gráfico que muda de resolução em silêncio faz o leitor comparar coisas
 // diferentes achando que são iguais.
 const PERIODOS = [
-  { id: '60min', rotulo: '60 min',  camada: 'min', pontos: 12, gran: 'cada ponto = 5 minutos', retencao: 'A camada de 5 min guarda ~3h.' },
+  // 60min SAIU (23/08/2026): a camada de 5 minutos era o maior array dentro
+  // de cada documento do NOC, custava leitura/escrita/tráfego 24h por dia por
+  // computador, e ninguém usava essa janela. A menor resolução agora é 1 hora.
+  // Pra voltar: NOC_REDE_5MIN=1 no servidor + esta linha de volta aqui.
   { id: '24h',   rotulo: '24 horas',camada: 'hora',pontos: 24, gran: 'cada ponto = 1 hora',    retencao: 'A camada por hora guarda 48h.' },
   { id: '7d',    rotulo: '7 dias',  camada: 'dia', pontos: 7,  gran: 'cada ponto = 1 dia',     retencao: 'O histórico diário guarda 35 dias.' },
   { id: '15d',   rotulo: '15 dias', camada: 'dia', pontos: 15, gran: 'cada ponto = 1 dia',     retencao: 'O histórico diário guarda 35 dias.' },
