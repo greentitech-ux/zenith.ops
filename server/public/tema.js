@@ -35,6 +35,78 @@
     document.head.appendChild(css);
   })();
 
+  // ---- Beniboy: o avatar do assistente ----
+  // Direcao aprovada no handoff de design (BENIBOY.md): circulo com o sinal
+  // vital da marca - a MESMA polyline do logotipo NoPulso. Sem rosto, sem
+  // olhos: o que "vive" e a linha de pulso. Substitui a cabeca de robo que
+  // existia no widget e os emojis 🤖/🐝/🚨 espalhados pelas telas.
+  //
+  // Mora aqui pelo mesmo motivo das fontes: sao 6 lugares diferentes usando
+  // o mesmo desenho (widget, atendimento, Central, menu, alarme) e o
+  // tema.js ja e carregado por todas as paginas. Duplicar o SVG em 6
+  // arquivos e o caminho mais curto pra eles divergirem na proxima mexida.
+  //
+  // A cor NUNCA e cravada: vem de var(--accent)/var(--accent2)/var(--bad)/
+  // var(--ok), senao o tema Claro quebra (limao puro sobre branco e
+  // ilegivel). A classe de estado troca so a cor e o ritmo.
+  (function beniboy() {
+    if (document.getElementById('nopulso-beniboy')) return;
+    var st = document.createElement('style');
+    st.id = 'nopulso-beniboy';
+    st.textContent = [
+      '.beniboy{flex:none;overflow:visible;color:var(--accent,#b8ff3c);}',
+      '.beniboy .bb-nucleo,.beniboy .bb-anel,.beniboy .bb-eco,.beniboy .bb-traco{',
+      '  stroke:currentColor;}',
+      '.beniboy .bb-nucleo{fill:currentColor;stroke:none;}',
+      '.beniboy .bb-fundo{fill:var(--panel,#12161b);}',
+      '.beniboy .bb-traco,.beniboy .bb-eco{stroke-dasharray:96;}',
+      '.beniboy .bb-traco{animation:bb-traco var(--bb-ritmo,2.6s) linear infinite;',
+      '  filter:drop-shadow(0 0 5px currentColor);}',
+      '.beniboy .bb-eco{animation:bb-eco var(--bb-ritmo,2.6s) linear .18s infinite;}',
+      '.beniboy .bb-nucleo{transform-box:fill-box;transform-origin:center;',
+      '  animation:bb-nucleo var(--bb-ritmo,2.6s) ease-in-out infinite;}',
+      '.beniboy .bb-anel{animation:bb-anel var(--bb-ritmo,2.6s) ease-in-out infinite;}',
+      /* estados: so a cor e o ritmo mudam - o desenho e sempre o mesmo */
+      '.beniboy.pensando{--bb-ritmo:1.7s;color:var(--accent2,#5cc8ff);}',
+      '.beniboy.alarme{--bb-ritmo:1.1s;color:var(--bad,#ff5c5c);}',
+      '.beniboy.resolvido{--bb-ritmo:3.6s;color:var(--ok,#3ddc97);}',
+      /* no alarme em tela cheia o fundo ja e vermelho: o avatar vai em branco */
+      '.beniboy.no-vermelho{color:#fff;}',
+      '.beniboy.no-vermelho .bb-fundo{fill:rgba(255,255,255,.10);}',
+      /* No alarme em tela cheia o traco NAO some. Medido: no ritmo de
+         1,1s a linha passa ~250ms de cada ciclo com menos de 10%
+         desenhada - num avatar de 40px no canto isso e o batimento,
+         em 112px no meio de uma tela vermelha parece defeito. Aqui o
+         traco fica inteiro e quem se mexe e o eco, o anel e o nucleo. */
+      '.beniboy.alarme .bb-traco{stroke-dasharray:none;animation:bb-alarme-brilho var(--bb-ritmo,1.1s) ease-in-out infinite;}',
+      '@keyframes bb-alarme-brilho{0%,100%{opacity:.72;}42%{opacity:1;}}',
+      '@keyframes bb-traco{0%{stroke-dashoffset:96;opacity:.25;}10%{opacity:1;}42%{stroke-dashoffset:0;opacity:1;}60%{stroke-dashoffset:0;opacity:1;}100%{stroke-dashoffset:-96;opacity:.25;}}',
+      '@keyframes bb-eco{0%{stroke-dashoffset:96;opacity:0;}20%{opacity:.30;}55%{stroke-dashoffset:0;opacity:.16;}100%{stroke-dashoffset:-96;opacity:0;}}',
+      '@keyframes bb-nucleo{0%,100%{transform:scale(.82);opacity:.16;}42%{transform:scale(1);opacity:.34;}}',
+      '@keyframes bb-anel{0%,100%{opacity:.62;}42%{opacity:1;}}',
+      '@media (prefers-reduced-motion:reduce){',
+      '  .beniboy .bb-traco,.beniboy .bb-eco,.beniboy .bb-nucleo,.beniboy .bb-anel{animation:none;}',
+      '  .beniboy .bb-traco{stroke-dasharray:none;}}'
+    ].join('\n');
+    document.head.appendChild(st);
+  })();
+
+  // Devolve o SVG do Beniboy no tamanho pedido. `classes` aceita o estado
+  // ('pensando', 'alarme', 'resolvido') e o 'no-vermelho' da tela de alarme.
+  // Geometria fixa em viewBox 64x64 - so width/height mudam.
+  window.beniboySVG = function (px, classes) {
+    var t = px || 48;
+    var pts = '14,34 22,34 27,21 33,45 38,32 50,32';
+    return '<svg width="' + t + '" height="' + t + '" viewBox="0 0 64 64" fill="none"'
+      + ' class="beniboy' + (classes ? ' ' + classes : '') + '" aria-hidden="true">'
+      + '<circle class="bb-fundo" cx="32" cy="32" r="30"></circle>'
+      + '<circle class="bb-nucleo" cx="32" cy="32" r="22"></circle>'
+      + '<circle class="bb-anel" cx="32" cy="32" r="30" stroke-width="2.5" fill="none"></circle>'
+      + '<polyline class="bb-eco" points="' + pts + '" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"></polyline>'
+      + '<polyline class="bb-traco" points="' + pts + '" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none"></polyline>'
+      + '</svg>';
+  };
+
   var LS_TEMA = 'zenithTema';   // 'escuro' (padrao) | 'claro'
   var LS_FONTE = 'zenithFonte'; // percentual: 80..150 (padrao 100)
   var FONTE_MIN = 80, FONTE_MAX = 150, FONTE_PASSO = 10;

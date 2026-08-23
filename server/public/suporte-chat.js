@@ -67,14 +67,11 @@
   .szc-anexo-abrir span:last-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .szc-msg img.szc-anexo-img{max-width:180px;max-height:180px;border-radius:8px;border:1px solid #232a33;margin-top:4px;display:block;}
   .szc-msg a.szc-anexo-arq{display:inline-block;margin-top:4px;color:var(--accent,#b8ff3c);font-size:12px;}
-  /* cabeça de robo (Beniboy) dentro do botao - olhos brilham/piscam, bracos acenam */
+  /* avatar do Beniboy dentro do botao - o desenho e o batimento vem do
+     tema.js (window.beniboySVG + a classe .beniboy), que ja e carregado por
+     todas as paginas. Aqui so o que e do widget. */
   .szc-btn svg{overflow:visible;}
-  .szc-bot-eyes{transform-box:fill-box;transform-origin:center;animation:szc-blink 4.6s ease-in-out infinite;}
-  @keyframes szc-blink{0%,92%,100%{transform:scaleY(1);}95%{transform:scaleY(.15);}}
-  .szc-bot-arm-l{transform-box:fill-box;transform-origin:50% 8%;animation:szc-bot-arm-l 3.6s ease-in-out infinite;}
-  .szc-bot-arm-r{transform-box:fill-box;transform-origin:50% 8%;animation:szc-bot-arm-r 3.6s ease-in-out .3s infinite;}
-  @keyframes szc-bot-arm-l{0%,100%{transform:rotate(0deg);}50%{transform:rotate(-14deg);}}
-  @keyframes szc-bot-arm-r{0%,100%{transform:rotate(0deg);}50%{transform:rotate(14deg);}}
+  .szc-quem .beniboy{vertical-align:-8px;margin-right:5px;}
   /* nome do bot flutuando ao lado do botao - so aparece pro visitante (o
      atendimento usa o mesmo icone com outro sentido, ver atualizarNomeFlutuante) */
   .szc-bot-nome-wrap{position:fixed;right:74px;bottom:20px;z-index:8999;pointer-events:none;
@@ -87,7 +84,7 @@
   @keyframes szc-bn-in{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
   @keyframes szc-bn-float{0%,100%{transform:translateY(0);}50%{transform:translateY(-5px);}}
   @media (prefers-reduced-motion:reduce){
-    .szc-bot-eyes,.szc-bot-nome,.szc-bot-arm-l,.szc-bot-arm-r{animation:none;}
+    .szc-bot-nome{animation:none;}
     .szc-bot-nome-wrap{animation:none;opacity:1;}
   }
   @media (max-width:480px){ .szc-panel{right:8px;bottom:72px;} .szc-btn{right:12px;bottom:12px;}
@@ -217,53 +214,27 @@
   style.textContent = css;
   document.head.appendChild(style);
 
-  // cabeça de robo (Beniboy) desenhada em SVG multi-cor (casco branco/prata,
-  // orelhas e detalhes azuis, tela escura com olhos ciano brilhantes e
-  // marcações de canto tipo mira) em vez do emoji 💬, com olhos piscando via
-  // CSS acima
-  const btn = el(`<button type="button" class="szc-btn" title="Falar com o Suporte" aria-label="Falar com o Suporte">
-    <svg viewBox="0 0 48 48" width="40" height="40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <defs>
-        <linearGradient id="szc-bot-shell" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#f8fbfd"/>
-          <stop offset="100%" stop-color="#c7d7e2"/>
-        </linearGradient>
-        <radialGradient id="szc-bot-eye-glow" cx="35%" cy="30%" r="75%">
-          <stop offset="0%" stop-color="#e9feff"/>
-          <stop offset="45%" stop-color="#3ce0ff"/>
-          <stop offset="100%" stop-color="#0a9fce"/>
-        </radialGradient>
-        <radialGradient id="szc-bot-chest" cx="35%" cy="30%" r="75%">
-          <stop offset="0%" stop-color="#eafcff"/>
-          <stop offset="100%" stop-color="#2bb9e8"/>
-        </radialGradient>
-        <filter id="szc-bot-shadow" x="-50%" y="-50%" width="200%" height="200%">
-          <feDropShadow dx="0" dy="2" stdDeviation="2.4" flood-color="#000" flood-opacity=".5"/>
-        </filter>
-      </defs>
-      <g filter="url(#szc-bot-shadow)">
-        <rect class="szc-bot-arm-l" x="9" y="30" width="6" height="11" rx="3" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
-        <rect class="szc-bot-arm-r" x="33" y="30" width="6" height="11" rx="3" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
-        <path d="M14,29 C14,26 34,26 34,29 L36.5,43 C36.5,45.8 31,47 24,47 C17,47 11.5,45.8 11.5,43 Z"
-          fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.4"/>
-        <circle cx="24" cy="36.5" r="3.1" fill="url(#szc-bot-chest)" stroke="#0a7ea3" stroke-width=".8"/>
-        <rect x="9.5" y="7" width="29" height="24" rx="11.5" fill="url(#szc-bot-shell)" stroke="#7d97a8" stroke-width="1.6"/>
-        <circle cx="8" cy="19" r="2.3" fill="#3d99dd" stroke="#1c6ba8" stroke-width="1"/>
-        <circle cx="40" cy="19" r="2.3" fill="#3d99dd" stroke="#1c6ba8" stroke-width="1"/>
-        <rect x="14.5" y="12.5" width="19" height="14" rx="6" fill="#0c1e2c"/>
-        <g class="szc-bot-eyes">
-          <circle cx="20" cy="19.5" r="3.3" fill="url(#szc-bot-eye-glow)"/>
-          <circle cx="28" cy="19.5" r="3.3" fill="url(#szc-bot-eye-glow)"/>
-        </g>
-        <g stroke="#8fe9ff" stroke-width="1.1" stroke-linecap="round" fill="none" opacity=".85">
-          <path d="M16,14.5 v-1.5 h1.5"/>
-          <path d="M32,14.5 v-1.5 h-1.5"/>
-          <path d="M16,24.5 v1.5 h1.5"/>
-          <path d="M32,24.5 v1.5 h-1.5"/>
-        </g>
-      </g>
-    </svg>
+  // O Beniboy: avatar circular com o sinal vital da marca (BENIBOY.md).
+  // Substituiu a cabeca de robo multi-cor que existia aqui - nao e mascote
+  // com rosto, o que "vive" e a linha de pulso, a mesma do logotipo. O
+  // desenho vem do tema.js pra nao existir uma copia por tela.
+  const btn = el(`<button type="button" class="szc-btn" title="Falar com o Beniboy" aria-label="Falar com o Beniboy">
+    ${window.beniboySVG ? window.beniboySVG(40) : ''}
   </button>`);
+  // Estado do avatar: a cor E a mensagem (BENIBOY.md secao 3). O lado
+  // publico nao recebe o statusAtendimento de proposito (getPublico em
+  // suporteChat.js nao expoe dado do atendente), entao o estado sai do que
+  // o widget ja sabe sozinho: esperando resposta = verificando, conversa
+  // finalizada = resolvido.
+  function estadoBeniboy(estado) {
+    const svg = btn.querySelector('.beniboy');
+    if (!svg) return;
+    svg.classList.remove('pensando', 'alarme', 'resolvido');
+    if (estado) svg.classList.add(estado);
+    btn.title = btn.getAttribute('aria-label')
+      + (estado === 'pensando' ? ' (verificando...)' : estado === 'resolvido' ? ' (resolvido)' : '');
+  }
+
   const panel = el(`
     <div class="szc-panel szc-hidden" role="dialog" aria-label="Chat de suporte">
       <div class="szc-head">
@@ -414,7 +385,7 @@
       const anexoUrl = m.anexo && salvo ? `/api/suporte-chat/${encodeURIComponent(salvo.id)}/anexo/${i}?token=${encodeURIComponent(salvo.token)}` : '';
       return `
       <div class="szc-msg ${m.de === 'visitante' ? 'visitante' : 'suporte'}">
-        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Você') : (m.bot ? '🤖 Beniboy · assistente virtual' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}${anexoHtml(m.anexo, anexoUrl)}
+        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Você') : (m.bot ? (window.beniboySVG ? window.beniboySVG(32) : '') + 'Beniboy · assistente virtual' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}${anexoHtml(m.anexo, anexoUrl)}
       </div>`;
     }).join('') || '<div class="szc-aviso">Sem mensagens ainda.</div>');
     const pdfBtn = corpo.querySelector('#szc-pdf');
@@ -424,6 +395,7 @@
         if (salvo) baixarPdf(`/api/suporte-chat/${encodeURIComponent(salvo.id)}/pdf?token=${encodeURIComponent(salvo.token)}`);
       });
     }
+    estadoBeniboy(chat.status !== 'ABERTO' ? 'resolvido' : null);
     if (chat.status !== 'ABERTO') {
       corpo.insertAdjacentHTML('beforeend', `<div class="szc-fim">Conversa finalizada pelo Suporte. Precisa de mais ajuda?<br><button type="button" class="szc-link" id="szc-nova-conversa">Iniciar nova conversa</button></div>`);
       corpo.querySelector('#szc-nova-conversa').addEventListener('click', async () => {
@@ -724,7 +696,7 @@
   let alarmeVibraTimer = null;
   let alarmeUrlAtual = '/beniboy.html'; // pra onde "Atender agora" leva - cada tipo de alerta manda a sua (ver dispararAlarmeBeniboy)
   const alarmeEl = el(`<div class="szc-alarme" role="alertdialog" aria-label="Alerta do Beniboy">
-    <div class="szc-al-icone">🚨</div>
+    <div class="szc-al-icone">${window.beniboySVG ? window.beniboySVG(112, 'alarme no-vermelho') : '🚨'}</div>
     <div class="szc-al-titulo" id="szc-al-titulo">Beniboy precisa de você</div>
     <div class="szc-al-corpo" id="szc-al-corpo">O assistente não conseguiu resolver sozinho.</div>
     <div class="szc-al-botoes">
