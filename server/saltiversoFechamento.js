@@ -222,7 +222,7 @@ async function getCaixa(id) {
 async function lancarCaixa({ unidade, unidadeNome, data, declarado, observacao, origem, operadorId, operadorEmail, operadorNome }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!data || !DATA_RE.test(data)) throw new Error('Data inválida.');
-  if (!operadorId) throw new Error('Operador não identificado (faça login no Zenith).');
+  if (!operadorId) throw new Error('Operador não identificado (faça login no NoPulso).');
   if (await getOne(docId(unidade, data))) throw new Error('O dia já foi fechado. Peça uma alteração ao Master.');
   const origemOk = normalizarOrigem(origem);
   const id = caixaDocId(unidade, data, operadorId, origemOk);

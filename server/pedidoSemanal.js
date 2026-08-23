@@ -2,7 +2,7 @@
 // Lembrete do PEDIDO SEMANAL de insumos que cada loja precisa fazer.
 //
 // O problema que isso resolve: o pedido semanal e uma tarefa que nao tem tela
-// nenhuma no Zenith - e feito fora, no sistema do fornecedor. Quem esquece so
+// nenhuma no NoPulso - e feito fora, no sistema do fornecedor. Quem esquece so
 // descobre na semana seguinte, quando falta produto. Nao da pra "puxar" essa
 // informacao de lugar nenhum, entao o desenho e o inverso: o sistema cobra, e
 // a loja responde ANEXANDO o pedido. O anexo e o que transforma um lembrete

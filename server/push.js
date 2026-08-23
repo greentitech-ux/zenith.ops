@@ -349,7 +349,7 @@ async function notifySegurancaChat(chat, detalhe) {
 // alerta pra UMA pessoa especifica (userId), independente de secao/unidade -
 // usado pelo "vigia de pedido" do Beniboy (pedidoWatch.js): quando o status
 // de um pedido muda depois que o bot ja respondeu, so quem perguntou recebe
-// o aviso, mesmo com o Zenith fechado (SSE cobre com o app aberto - ver
+// o aviso, mesmo com o NoPulso fechado (SSE cobre com o app aberto - ver
 // broadcastParaUsuario em index.js; isso aqui cobre com o app fechado)
 async function notifyUsuario(userId, title, body, tag, url) {
   if (!PUBLIC_KEY || !PRIVATE_KEY || !userId) return;

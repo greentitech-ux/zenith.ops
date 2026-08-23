@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Estoque / Inventário · Zenith Ops</title>
+<title>Estoque / Inventário · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -16,9 +16,9 @@
     --ok:#3ddc97; --ok-dim:#1c3a2e;
     --warn:#f2b33d; --warn-dim:#3a2e14;
     --bad:#ff5c5c; --bad-dim:#3a1616;
-    --accent:#5cc8ff;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;min-width:0;}
   html{overflow-x:hidden;}
@@ -33,7 +33,7 @@
   .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
   a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;transition:border-color .15s ease,color .15s ease,background .15s ease;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
-  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
   .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,color .15s ease;}
   .btn-notif:hover{border-color:var(--accent);color:var(--text);}
@@ -52,7 +52,7 @@
   .pestoque-chip{font-family:var(--mono);font-size:11px;padding:5px 9px;border-radius:14px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;transition:border-color .15s ease,color .15s ease;}
   .pestoque-chip:hover{border-color:var(--accent);color:var(--text);}
   .pestoque-chip.ok{color:var(--ok);}
-  .pestoque-chip.ativo{border-color:var(--accent);color:var(--text);background:rgba(92,200,255,.1);}
+  .pestoque-chip.ativo{border-color:var(--accent);color:var(--text);background:rgba(184, 255, 60,.1);}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:16px;}
   @media(max-width:640px){ .panel{padding:12px;} }
   label{display:block;font-size:11.5px;color:var(--muted);margin:10px 0 4px;font-family:var(--mono);}
@@ -64,7 +64,7 @@
   @media(min-width:520px){ .grid2{grid-template-columns:1fr 1fr;} }
   .grid3{display:grid;grid-template-columns:1fr;gap:0 10px;}
   @media(min-width:640px){ .grid3{grid-template-columns:1fr 1fr 1fr;} }
-  .btn-primary{background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:11px 16px;font-size:13.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .btn-primary{background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:11px 16px;font-size:13.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
   .btn-primary:disabled{opacity:.5;cursor:default;}
   .btn-add{margin-top:8px;background:var(--panel2);border:1px dashed var(--line);color:var(--accent);border-radius:8px;padding:8px 10px;font-size:12px;font-family:var(--sans);cursor:pointer;}
   .btn-add:hover{border-color:var(--accent);}
@@ -77,10 +77,10 @@
   .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 16px;}
   .tab-btn{font-family:var(--sans);font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:20px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;transition:border-color .15s ease,color .15s ease;}
   .tab-btn:hover{color:var(--text);}
-  .tab-btn.active{color:#06202b;background:var(--accent);border-color:var(--accent);}
+  .tab-btn.active{color:#0b0d10;background:var(--accent);border-color:var(--accent);}
   .preset-btn{font-family:var(--sans);font-size:12px;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;}
   .preset-btn:hover{border-color:var(--accent);}
-  .preset-btn.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);}
+  .preset-btn.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);}
   .presets{display:flex;gap:6px;flex-wrap:wrap;}
   .daterange{display:flex;align-items:center;gap:6px;}
   .daterange input{width:140px;}
@@ -100,7 +100,7 @@
   .c-filtros{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 8px;}
   .c-filtros input{flex:1;min-width:170px;}
   .c-chip{font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:16px;padding:6px 12px;cursor:pointer;white-space:nowrap;}
-  .c-chip.ativo{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .c-chip.ativo{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .btn-fav{background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:2px 4px;flex:none;color:var(--muted);}
   .btn-fav.ativo{color:var(--warn);}
   .linha-contagem{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid #1a1f26;flex-wrap:wrap;}
@@ -155,7 +155,7 @@
   .modal h3{margin:0 0 12px;font-size:14px;}
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;}
   .modal-actions button{font-family:var(--sans);font-size:12.5px;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;}
-  .modal-actions button.primary{border:none;background:var(--accent);color:#06121a;font-weight:600;}
+  .modal-actions button.primary{border:none;background:var(--accent);color:#0b0d10;font-weight:600;}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -166,7 +166,7 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
         <h1>📦 Estoque / Inventário</h1>
       </div>
     </div>
@@ -279,7 +279,7 @@
 <div class="panel tab-content hidden" id="tab-recebimento">
   <div class="panel" style="margin-bottom:14px;">
     <h2>📎 Anexar nota fiscal (opcional)</h2>
-    <div class="sub" style="margin-bottom:10px;">Anexe a foto ou o PDF da nota que o Zenith tenta ler os itens sozinho - você confere e confirma antes de lançar, nada é gravado automaticamente.</div>
+    <div class="sub" style="margin-bottom:10px;">Anexe a foto ou o PDF da nota que o NoPulso tenta ler os itens sozinho - você confere e confirma antes de lançar, nada é gravado automaticamente.</div>
     <input type="file" id="rn-arquivo" accept="image/*,application/pdf">
     <button type="button" class="btn-secundario" style="margin-top:10px;" id="btn-ler-nota" onclick="lerNotaFiscal()">🔎 Ler nota automaticamente</button>
     <div class="msg hidden" id="msg-ler-nota"></div>
@@ -287,7 +287,7 @@
 
   <div class="panel hidden" id="painel-revisao-nota" style="margin-bottom:14px;">
     <h2>Confira antes de lançar</h2>
-    <div class="sub" style="margin-bottom:10px;">O Zenith leu a nota e tentou casar cada item com o catálogo - confira/ajuste e desmarque o que não quiser lançar.</div>
+    <div class="sub" style="margin-bottom:10px;">O NoPulso leu a nota e tentou casar cada item com o catálogo - confira/ajuste e desmarque o que não quiser lançar.</div>
     <div class="grid2">
       <div><label>Data</label><input type="date" id="rn-data"></div>
       <div><label>Fornecedor</label><input type="text" id="rn-fornecedor" list="datalist-fornecedores"></div>
@@ -1210,7 +1210,7 @@ document.getElementById('form-recebimento').addEventListener('submit', async (ev
 });
 
 // ---------- Leitura automática de nota fiscal ----------
-// gerente anexa a foto/PDF, o Zenith (Claude com visão) le e devolve um
+// gerente anexa a foto/PDF, o NoPulso (Claude com visão) le e devolve um
 // RASCUNHO - nada e lançado sozinho, o gerente confere linha por linha no
 // painel de revisão antes de confirmar (ver server/inventarioNotaOcr.js)
 let RASCUNHO_NOTA = null;

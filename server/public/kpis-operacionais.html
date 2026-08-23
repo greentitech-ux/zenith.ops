@@ -3,20 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KPI's operacionais · Zenith Ops</title>
+<title>KPI's operacionais · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#0b0d10">
+<script src="/tema.js"></script>
 <style>
   :root{
     --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
     --text:#e7ecf1; --muted:#7d8896;
     --ok:#3ddc97; --warn:#f2b33d; --bad:#ff5c5c;
-    --accent:#5cc8ff;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;}
   html{overflow-x:hidden;}
@@ -96,7 +97,7 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow" id="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <div class="eyebrow" id="eyebrow">NoPulso · Solutions Ti Tech</div>
         <h1>KPI's operacionais</h1>
       </div>
     </div>
@@ -555,7 +556,7 @@ function trocarGrupo(){
   unidadesDoGrupo().forEach((u,i) => { CORES[u] = PALETA_CATEGORICA[i % PALETA_CATEGORICA.length]; });
   const kpis = kpisDoGrupo();
   KPI_SEL = kpis.length ? kpis[0].campo : null;
-  document.getElementById('eyebrow').textContent = 'Zenith Ops · ' + (GRUPO_ATUAL ? GRUPO_ATUAL.nome : 'Solutions Ti Tech');
+  document.getElementById('eyebrow').textContent = 'NoPulso · ' + (GRUPO_ATUAL ? GRUPO_ATUAL.nome : 'Solutions Ti Tech');
   render();
 }
 

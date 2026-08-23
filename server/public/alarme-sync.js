@@ -1,6 +1,6 @@
 // alarme-sync.js
 // Silenciar/atender o alarme critico numa aba tem que calar TODAS as abas do
-// MESMO acesso - senao quem deixa 5 telas do Zenith abertas silencia uma e
+// MESMO acesso - senao quem deixa 5 telas do NoPulso abertas silencia uma e
 // continua com 4 sirenes tocando, e acaba tendo que cacar aba por aba.
 //
 // Tres caminhos, de proposito, porque cobrem situacoes diferentes:

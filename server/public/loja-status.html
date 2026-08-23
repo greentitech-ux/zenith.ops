@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>NOC Zenith · Zenith Ops</title>
+<title>NOC Zenith · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -16,9 +16,9 @@
     --ok:#3ddc97; --ok-dim:#1c3a2e;
     --warn:#f2b33d; --warn-dim:#3a2e14;
     --bad:#ff5c5c; --bad-dim:#3a1616;
-    --accent:#5cc8ff;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;min-width:0;}
   html{overflow-x:hidden;}
@@ -33,7 +33,7 @@
   .ultima-atualizacao{font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap;}
   a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;transition:border-color .15s ease,color .15s ease,background .15s ease;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
-  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,color .15s ease;}
   .btn-notif:hover{border-color:var(--accent);color:var(--text);}
   .btn-sair{color:var(--bad);}
@@ -59,7 +59,7 @@
   .rede-nota{margin-left:auto;font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:14px;white-space:nowrap;}
   .rede-nota.critico{background:var(--bad-dim);color:var(--bad);}
   .rede-nota.instavel{background:var(--warn-dim);color:var(--warn);}
-  .rede-nota.aceitavel{background:rgba(92,200,255,.14);color:var(--accent);}
+  .rede-nota.aceitavel{background:rgba(184, 255, 60,.14);color:var(--accent);}
   .rede-nota.bom{background:var(--ok-dim);color:var(--ok);}
   .rede-nota.sem-dados{background:var(--panel2);color:var(--muted);}
   .rede-metricas{display:flex;gap:14px;flex-wrap:wrap;margin-top:9px;font-family:var(--mono);font-size:10.5px;color:var(--muted);}
@@ -72,7 +72,7 @@
   .rede-veredito.wan .rede-veredito-titulo,.rede-veredito.ambos .rede-veredito-titulo{color:var(--bad);}
   .rede-veredito.ok .rede-veredito-titulo{color:var(--ok);}
   .rede-veredito.servidor .rede-veredito-titulo{color:var(--accent);}
-  .rede-global{border:1px solid var(--accent);background:rgba(92,200,255,.08);border-radius:10px;padding:12px 14px;margin-bottom:14px;}
+  .rede-global{border:1px solid var(--accent);background:rgba(184, 255, 60,.08);border-radius:10px;padding:12px 14px;margin-bottom:14px;}
   .rede-global-titulo{font-weight:700;font-size:13px;color:var(--accent);margin-bottom:4px;}
   .rede-global-detalhe{font-size:11.5px;line-height:1.55;color:var(--text);}
   .rede-veredito-detalhe{color:var(--muted);}
@@ -92,7 +92,7 @@
   .kpi-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px;}
   .kpi-card{flex:1 1 140px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;cursor:pointer;transition:border-color .15s ease,background .15s ease;text-align:left;font-family:inherit;color:inherit;}
   .kpi-card:hover{border-color:var(--accent);}
-  .kpi-card.ativo{border-color:var(--accent);background:rgba(92,200,255,.07);}
+  .kpi-card.ativo{border-color:var(--accent);background:rgba(184, 255, 60,.07);}
   .kpi-num{font-size:26px;font-weight:800;line-height:1;font-family:var(--mono);}
   .kpi-label{font-size:10.5px;color:var(--muted);margin-top:6px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.04em;}
   .kpi-card.kpi-online .kpi-num{color:var(--ok);}
@@ -105,7 +105,7 @@
   .filtro-bar input[type=text]{flex:1 1 220px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font-size:13px;font-family:var(--sans);}
   .filtro-bar input[type=text]:focus{outline:none;border-color:var(--accent);}
   .filtro-bar select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:12.5px;font-family:var(--sans);}
-  .btn-primary{background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
+  .btn-primary{background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
   .btn-primary:disabled{opacity:.5;cursor:default;}
   .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);}
 
@@ -140,7 +140,7 @@
   .uni-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;}
   .uni-card{background:var(--bg,#0f1115);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;text-align:left;font-family:inherit;color:inherit;transition:border-color .15s ease,background .15s ease;}
   .uni-card:hover{border-color:var(--accent);}
-  .uni-card.ativo{border-color:var(--accent);background:rgba(92,200,255,.07);}
+  .uni-card.ativo{border-color:var(--accent);background:rgba(184, 255, 60,.07);}
   .uni-card-nome{font-weight:700;font-size:12.5px;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .uni-card-stats{display:flex;gap:12px;align-items:baseline;font-family:var(--mono);font-size:12px;}
   .uni-stat{display:flex;align-items:center;gap:4px;}
@@ -293,7 +293,7 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
         <h1>📡 NOC Zenith</h1>
       </div>
     </div>
@@ -408,7 +408,7 @@
 
   <div class="agente-secao">
     <h3>🧠 Conhecimento e orientação (vale pra qualquer pessoa que falar com ele)</h3>
-    <div class="agente-sub" style="margin-bottom:8px;">Texto livre, sem estrutura fixa - ensine tudo que achar útil: o que o Zenith faz, como resolver cada tipo de pedido, dados pra ele repassar (endereço de loja, telefone), o que nunca revelar pra cliente final, quando resolver sozinho vs quando só te chamar.</div>
+    <div class="agente-sub" style="margin-bottom:8px;">Texto livre, sem estrutura fixa - ensine tudo que achar útil: o que o NoPulso faz, como resolver cada tipo de pedido, dados pra ele repassar (endereço de loja, telefone), o que nunca revelar pra cliente final, quando resolver sozinho vs quando só te chamar.</div>
     <textarea id="agente-contexto-texto" maxlength="12000" style="min-height:220px;" placeholder="Ex: quando pedirem reset de senha, confirme o nome completo e a unidade antes de qualquer coisa. Cadastro de usuário novo sempre passa por aprovação, mesmo que pareça simples..." oninput="atualizarContadorContexto()"></textarea>
     <div id="agente-contexto-contador" style="font-family:var(--mono);font-size:10.5px;color:var(--muted);text-align:right;margin-top:4px;">0 / 12000</div>
     <div class="msg hidden" id="agente-contexto-status"></div>
@@ -438,7 +438,7 @@
     <label>O que essa ação faz</label>
     <div class="radio-tipo">
       <label><input type="radio" name="acao-tipo" value="comando_maquina" checked onchange="onMudaTipoAcao()"><span><b>💻 Rodar comando no computador</b><small>PowerShell fixo, roda via NOCZenith num computador tipo interno</small></span></label>
-      <label><input type="radio" name="acao-tipo" value="acao_sistema" onchange="onMudaTipoAcao()"><span><b>⚙️ Ação de sistema</b><small>uma função pronta do Zenith - hoje só "criar usuário"</small></span></label>
+      <label><input type="radio" name="acao-tipo" value="acao_sistema" onchange="onMudaTipoAcao()"><span><b>⚙️ Ação de sistema</b><small>uma função pronta do NoPulso - hoje só "criar usuário"</small></span></label>
     </div>
     <div id="acao-campo-comando">
       <label>Comando PowerShell</label>
@@ -447,7 +447,7 @@
     <div id="acao-campo-sistema" class="hidden">
       <label>Ação de sistema</label>
       <select id="acao-executor-sistema">
-        <option value="criar_usuario_zenith">Criar usuário do Zenith</option>
+        <option value="criar_usuario_zenith">Criar usuário do NoPulso</option>
       </select>
     </div>
     <label class="check-linha"><input type="checkbox" id="acao-requer-aprovacao" checked> Precisa de aprovação do Master antes de executar</label>
@@ -542,7 +542,7 @@
     <label>O que o link desse computador mostra</label>
     <div class="radio-tipo">
       <label><input type="radio" name="novo-comp-tipo" value="atendimento" checked><span><b>🤖 Atendimento ao cliente</b><small>chat do Beniboy - pra tablet/quiosque na entrada da loja</small></span></label>
-      <label><input type="radio" name="novo-comp-tipo" value="interno"><span><b>🔒 Computador interno</b><small>tela normal de login do Zenith - pra servidor/PC de escritório, só pro monitoramento</small></span></label>
+      <label><input type="radio" name="novo-comp-tipo" value="interno"><span><b>🔒 Computador interno</b><small>tela normal de login do NoPulso - pra servidor/PC de escritório, só pro monitoramento</small></span></label>
       <label><input type="radio" name="novo-comp-tipo" value="abastecimento"><span><b>🛒 Abastecimento Carrinho</b><small>tela do Abastecimento (Dom Aeroporto) - pro tablet do carrinho/loja, com monitoramento</small></span></label>
     </div>
     <div class="msg hidden" id="novo-comp-status"></div>
@@ -566,7 +566,7 @@
     <label>O que o link desse computador mostra</label>
     <div class="radio-tipo">
       <label><input type="radio" name="editar-comp-tipo" value="atendimento"><span><b>🤖 Atendimento ao cliente</b><small>chat do Beniboy - pra tablet/quiosque na entrada da loja</small></span></label>
-      <label><input type="radio" name="editar-comp-tipo" value="interno"><span><b>🔒 Computador interno</b><small>tela normal de login do Zenith - pra servidor/PC de escritório, só pro monitoramento</small></span></label>
+      <label><input type="radio" name="editar-comp-tipo" value="interno"><span><b>🔒 Computador interno</b><small>tela normal de login do NoPulso - pra servidor/PC de escritório, só pro monitoramento</small></span></label>
       <label><input type="radio" name="editar-comp-tipo" value="abastecimento"><span><b>🛒 Abastecimento Carrinho</b><small>tela do Abastecimento (Dom Aeroporto) - pro tablet do carrinho/loja, com monitoramento</small></span></label>
     </div>
     <label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;cursor:pointer;">
@@ -1530,7 +1530,7 @@ function renderRede(dados){
     const mediana = lat.length ? lat[Math.floor(lat.length/2)] : 0;
     gl.innerHTML = `<div class="rede-global-titulo">⚠️ O gargalo está no servidor, não nas lojas</div>
       <div class="rede-global-detalhe">${culpaServidor.length} computador(es) em ${unidadesAfetadas.size} unidades diferentes estão lentos ao mesmo tempo —
-      todos com o ping até a internet normal. Links independentes não ficam ruins juntos: o que eles têm em comum é o Zenith.
+      todos com o ping até a internet normal. Links independentes não ficam ruins juntos: o que eles têm em comum é o NoPulso.
       Mediana de resposta: <b>${mediana}ms</b>. Não abra chamado na operadora dessas lojas.</div>`;
     gl.classList.remove('hidden');
   } else { gl.classList.add('hidden'); }

@@ -327,7 +327,7 @@ if (DASHBOARD_USER && DASHBOARD_PASSWORD) {
       const pass = rest.join(':');
       if (senhasIguais(user, DASHBOARD_USER) && senhasIguais(pass, DASHBOARD_PASSWORD)) return next();
     }
-    res.set('WWW-Authenticate', 'Basic realm="Zenith Ops"');
+    res.set('WWW-Authenticate', 'Basic realm="NoPulso"');
     res.status(401).send('Autenticação necessária.');
   });
 } else {
@@ -447,7 +447,7 @@ app.get('/api/login-custom/logo/:id', async (req, res) => {
 });
 
 // dominio publico do app - usado pra montar links completos (clicaveis fora
-// do Zenith, ex: mandados pelo Beniboy no chat pro colaborador repassar pro
+// do NoPulso, ex: mandados pelo Beniboy no chat pro colaborador repassar pro
 // cliente por WhatsApp). Mesmo padrao ja usado em relatorioMV.js.
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -507,7 +507,7 @@ app.post('/api/refund-requests/publico', upload.array('anexos', 5), async (req, 
 });
 
 // ---------- solicitacao generica (compra/manutencao/suporte-ti/pagamento/
-// nota) preenchida por QUEM NAO TEM login no Zenith - pensado pro Beniboy
+// nota) preenchida por QUEM NAO TEM login no NoPulso - pensado pro Beniboy
 // (agente de suporte) mandar esse link quando o atendimento chegar num ponto
 // que precisa de outra acao, sem precisar ensinar a pessoa a usar o sistema
 // inteiro. Vira uma solicitacao normal na Central, so que sem criadoPorId
@@ -1208,7 +1208,7 @@ app.get('/api/loja-status/:codigo/computadores/:posto/comando-instalacao', auth.
 
 // ---------- RH: link de auto-atendimento (rh-colaborador.html) - o proprio
 // colaborador preenche os dados e bate ponto por foto pelo celular, sem
-// login no Zenith (pedido do usuario: "link onde sera enviado ao colaborador
+// login no NoPulso (pedido do usuario: "link onde sera enviado ao colaborador
 // pra ele preencher os dados e fazer o check-in todos os dias"). O token
 // (rh.buscarPorToken) e o unico "login" desse fluxo - por isso essas rotas
 // ficam ACIMA do app.use('/api', auth.requireAuth) logo abaixo, junto dos
@@ -1289,7 +1289,7 @@ app.post('/api/rh/publico/:token/checkin/saida', upload.single('foto'), async (r
 // nada por ele. So libera 'extra'/'candidato' (nunca 'efetivado' - contratacao
 // direta continua exigindo Master/Admin/tag, ver podeCadastrarEfetivado) e
 // nunca aceita semExperiencia, pelo mesmo motivo: essas duas coisas so fazem
-// sentido decididas por quem tem acesso ao Zenith, nao por quem preenche um
+// sentido decididas por quem tem acesso ao NoPulso, nao por quem preenche um
 // link publico. Devolve o linkToken de auto-atendimento (rh-colaborador.html)
 // que rh.criar() ja gera sozinho, pra pessoa poder bater ponto na hora. ----------
 // ---------- leitura do documento de identidade no cadastro de RH ----------
@@ -1686,7 +1686,7 @@ function broadcast(event, data, section) {
   }
 }
 
-// alerta pra UMA pessoa especifica, independente da tela do Zenith que ela
+// alerta pra UMA pessoa especifica, independente da tela do NoPulso que ela
 // estiver com aberta (nao filtra por secao/unidade - se e pra ELA, e pra
 // ela em qualquer tela) - usado pelo vigia de pedido do Beniboy
 // (pedidoWatch.js). So cobre quem esta com o app ABERTO agora; pra quem
@@ -2626,7 +2626,7 @@ app.delete('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res)
 
 // ---------- PEDIDO SEMANAL (pedidoSemanal.js) ----------
 // Lembrete do pedido de insumos que cada loja faz uma vez por semana, FORA
-// do Zenith (no sistema do fornecedor). A loja confirma anexando o pedido -
+// do NoPulso (no sistema do fornecedor). A loja confirma anexando o pedido -
 // o anexo e o que separa "cliquei pra sumir o aviso" de "o pedido existiu".
 //
 // A cobranca e por REGRA: cada regra vale pra um GRUPO (franquia inteira) ou
@@ -2909,7 +2909,7 @@ app.get('/api/loja-status/maquinas', requireSection('suporte'), async (req, res)
 // computadores, ou todos, pra dar o alerta"). Diferente do alerta de fraude
 // de push.js (que avisa o TIME por push), isso avisa os COMPUTADORES da
 // loja direto na tela deles, reusando o mesmo canal de mensagem do NOC
-// Zenith (lojaStatus.enviarMensagem -> mensagemPendente -> banner no
+// NoPulso (lojaStatus.enviarMensagem -> mensagemPendente -> banner no
 // proximo heartbeat, ver atendimento.html). Gate so por 'monitor' (nao
 // 'suporte') - quem ve o Monitor tem que poder mandar esse alerta, mesmo
 // sem acesso ao NOC Zenith.
@@ -2953,7 +2953,7 @@ app.post('/api/monitor/alertar-loja', requireSection('monitor'), async (req, res
 });
 
 // tipo 'interno' (computador de escritorio/servidor, so pro monitoramento)
-// aponta pra tela normal de login do Zenith; 'atendimento' (o default,
+// aponta pra tela normal de login do NoPulso; 'atendimento' (o default,
 // tablet/quiosque na entrada da loja) aponta pro chat publico do Beniboy -
 // ver comentario de TIPOS_COMPUTADOR em lojaStatus.js
 function urlComputador(codigo, posto, tipo) {
@@ -4117,7 +4117,7 @@ app.post('/api/users/criar-copiando', auth.requireMaster, async (req, res) => {
           autorId: req.user.id,
           autorEmail: req.user.email,
           autorUsername: req.user.username || null,
-          texto: `👤 Acesso criado no Zenith: ${resultado.usuario.email} (usuário: ${resultado.usuario.username}), permissões copiadas de ${resultado.copiadoDe.username || resultado.copiadoDe.email}. A senha foi entregue pelo Master por fora do app e será trocada no primeiro login.`,
+          texto: `👤 Acesso criado no NoPulso: ${resultado.usuario.email} (usuário: ${resultado.usuario.username}), permissões copiadas de ${resultado.copiadoDe.username || resultado.copiadoDe.email}. A senha foi entregue pelo Master por fora do app e será trocada no primeiro login.`,
         });
       } catch (err) {
         console.error('Acesso criado, mas falhou registrar no chat do ticket:', err.message);
@@ -4731,7 +4731,7 @@ app.post('/api/fechamentos/bravo/importar', auth.requireMaster, async (req, res)
   try {
     if (acao === 'simular') return res.json({ acao, ...(await bravoImport.simular()), campos: await bravoImport.conferirCampos() });
     if (acao === 'cadastrar-campos') return res.json({ acao, ...(await bravoImport.cadastrarCampos()) });
-    // Conferência de COLUNAS: mostra o que a planilha tem, o que o Zenith já
+    // Conferência de COLUNAS: mostra o que a planilha tem, o que o NoPulso já
     // conhece e o que é parecido o suficiente pra valer uma pergunta. Não grava.
     if (acao === 'analisar-colunas') return res.json({ acao, ...(await bravoImport.analisarColunas()) });
     // Grava as decisões do Master (unificar / criar / ignorar). A partir daqui
@@ -5055,7 +5055,7 @@ app.delete('/api/grupos/:id', auth.requireMaster, async (req, res) => {
 
 // ---------- Empresas: camada de isolamento acima do Grupo (Empresa -> Grupo
 // -> Unidade) - cada empresa e a fronteira que separa uma rede de outra
-// (ex: MVPar/Grupo Bravo x Arcfood), pra quando o Zenith hospedar empresas
+// (ex: MVPar/Grupo Bravo x Arcfood), pra quando o NoPulso hospedar empresas
 // de negocios diferentes (ver empresaDaUnidade em empresas.js, e
 // verticaisDoUsuario em GET /api/me pra saber quais modulos cabem em cada
 // vertical) ----------
@@ -6244,7 +6244,7 @@ app.get('/api/festas/relatorio.:formato(csv|pdf)', requireSection('festas'), asy
 });
 
 // ---------- RH: ficha de funcionarios (extras e efetivos), independente de
-// login no Zenith - cadastro no 1o dia (nome/contato/curriculo), acompanha-
+// login no NoPulso - cadastro no 1o dia (nome/contato/curriculo), acompanha-
 // mento de teste com alerta automatico no 5o dia (ver rodarAlertaTesteRh
 // mais abaixo) e aniversariante do dia (calculado no front sobre a mesma
 // lista, ver rh.aniversariantesHoje) ----------
@@ -6340,7 +6340,7 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'c
 // backfill em lote (Master) - cadastra varias pessoas de uma vez ja como
 // efetivado, cada uma na etapa/prazo de experiencia informados; usado
 // quando um grupo de gente que ja trabalha ha tempo nunca foi cadastrada
-// no RH (ex: planilha de RH externa sendo migrada pro Zenith)
+// no RH (ex: planilha de RH externa sendo migrada pro NoPulso)
 app.post('/api/rh/funcionarios/importar-lote', auth.requireMaster, async (req, res) => {
   try {
     const linhas = Array.isArray(req.body.linhas) ? req.body.linhas : [];
@@ -6569,7 +6569,7 @@ app.post('/api/rh/funcionarios/:id/decisao-experiencia', requireSection('rh'), a
 
 // ajuste manual (Master) do estagio de experiencia - so pra backfill/
 // correcao (ex: colaborador que ja estava em experiencia antes dessa
-// feature existir no Zenith, vindo de relatorio externo da folha)
+// feature existir no NoPulso, vindo de relatorio externo da folha)
 app.post('/api/rh/funcionarios/:id/experiencia', auth.requireMaster, async (req, res) => {
   try {
     const atual = await rh.getOne(req.params.id);
@@ -9726,7 +9726,7 @@ async function reforcarAlarmesBeniboy() {
 
 // confere se alguem esta de olho nesse pedido (vigia gravado pelo Beniboy em
 // pedidoWatch.js quando respondeu consultar_pedido) e, se o status mudou
-// desde aquela resposta, avisa a pessoa - SSE se o Zenith estiver aberto
+// desde aquela resposta, avisa a pessoa - SSE se o NoPulso estiver aberto
 // agora (qualquer tela, ver broadcastParaUsuario) + push se estiver fechado
 // (pedido explicito do usuario: "precisa alcançar mesmo com o app fechado").
 // Chamado a cada evento do webhook da Adyen; alerta e de uso unico (dispara
@@ -9755,7 +9755,7 @@ async function verificarAlertaPedido(order) {
 // ---------- mensagem direta (Master/Suporte -> usuario logado) - pedido do
 // usuario: poder AVISAR proativamente um funcionario, nao so responder quem
 // chama no chat de suporte. Reusa a mesma entrega dupla do vigia de pedido
-// acima (broadcastParaUsuario p/ quem esta com o Zenith aberto, qualquer
+// acima (broadcastParaUsuario p/ quem esta com o NoPulso aberto, qualquer
 // tela, + push.notifyUsuario p/ quem fechou o app) ----------
 app.get('/api/mensagens/usuarios-alvo', auth.requireAuth, async (req, res) => {
   if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
@@ -9789,7 +9789,7 @@ app.post('/api/mensagens/enviar', auth.requireAuth, async (req, res) => {
 });
 
 // aviso de "tem conversa pra abrir" - as duas entregas de sempre (SSE pra
-// quem está com o Zenith aberto em qualquer tela, push pra quem fechou o
+// quem está com o NoPulso aberto em qualquer tela, push pra quem fechou o
 // app). O texto vai junto só pra prévia; a mensagem de verdade está gravada.
 function avisarMensagemDireta(userId, conversaId, deEmail, texto) {
   const previa = String(texto || '').trim().slice(0, 140);
@@ -10333,7 +10333,7 @@ app.get('/api/chamados/:id/evidencia-foto/:indice/:fotoIndice', requireAnySectio
 // Relatorio do atendimento em PDF: o chamado inteiro num arquivo so, com as
 // fotos EMBUTIDAS (ver chamadoRelatorio.js). E o que vai anexado numa
 // cobranca, mandado pro franqueado ou guardado como comprovante do servico -
-// tudo isso por gente que nao tem acesso ao Zenith, entao link nao serve.
+// tudo isso por gente que nao tem acesso ao NoPulso, entao link nao serve.
 // Aberto numa aba nova (<a href>), por isso a autenticacao vem no ?token=
 // (auth.js:242 ja aceita) em vez de header.
 app.get('/api/chamados/:id/relatorio.pdf', requireAnySection('tecnico', 'suporte'), async (req, res) => {
@@ -11106,7 +11106,7 @@ function aquecerBoot(promessa, ms) {
   await aquecerBoot(aquecimento, BOOT_AQUECIMENTO_MS);
 
   app.listen(PORT, async () => {
-    console.log(`Zenith Ops rodando em http://localhost:${PORT}`);
+    console.log(`NoPulso rodando em http://localhost:${PORT}`);
     // status do atendente virtual do chat de suporte (ver suporteBot.js) -
     // uma linha no log do Render pra conferir na hora se a env var pegou
     console.log(suporteBot.ativo()

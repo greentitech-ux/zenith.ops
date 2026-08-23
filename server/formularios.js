@@ -669,7 +669,7 @@ async function desenharFaixa(out, pagina, r, fonte, negrito, assinadas, comAssin
   pagina.drawRectangle({ x: 0, y: 0, width, height: alt, color: rgb(1, 1, 1) });
   pagina.drawLine({ start: { x: 0, y: alt }, end: { x: width, y: alt }, thickness: 0.8, color: rgb(0.15, 0.3, 0.5) });
 
-  const rodape = `Zenith Ops · ${r.unidade} · Ticket #${r.numeroTicket ?? '—'}`
+  const rodape = `NoPulso · ${r.unidade} · Ticket #${r.numeroTicket ?? '—'}`
     + (r.status === 'CANCELADO' ? ' · CANCELADO' : (assinadas.length ? '' : ' · AGUARDANDO ASSINATURA'));
   pagina.drawText(rodape, { x: 14, y: 7, size: 7.5, font: fonte, color: rgb(0.25, 0.25, 0.25) });
 

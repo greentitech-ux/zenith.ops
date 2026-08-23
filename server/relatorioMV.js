@@ -1,6 +1,6 @@
 // relatorioMV.js
 // Relatorio diario por e-mail das solicitacoes direcionadas ao MV (Grupo
-// Bravo) + aprovar/recusar direto no e-mail, sem precisar logar no Zenith.
+// Bravo) + aprovar/recusar direto no e-mail, sem precisar logar no NoPulso.
 //
 // PARTE A (relatorio): reaproveita centralCards.listarTodos() - a mesma
 // fonte de dados do GET /api/central - filtrando por quem e "do gatilho"
@@ -89,7 +89,7 @@ const configCache = createCache(async () => {
     : DIAS_SEMANA_PADRAO;
   const alvo = await users.findByIdentifier(usuarioGatilho);
   // Se o gatilho configurado JA E um e-mail, ele vale como identidade mesmo
-  // sem acesso no Zenith. Quem recebe os tickets nem sempre tem login: o
+  // sem acesso no NoPulso. Quem recebe os tickets nem sempre tem login: o
   // ticket e direcionado pro endereco, e antes disso o relatorio dessa
   // pessoa ficava eternamente zerado porque nao havia usuario pra resolver.
   const emailDoIdentificador = usuarioGatilho.includes('@') ? usuarioGatilho.toLowerCase() : null;
@@ -145,7 +145,7 @@ async function salvarConfig({ emailDestino, emailCopia, usuarioGatilho, horaEnvi
   const usuarioLimpo = String(usuarioGatilho || '').trim();
   if (!usuarioLimpo) throw new Error('Informe o usuário que vai disparar os e-mails.');
   const alvo = await users.findByIdentifier(usuarioLimpo);
-  // e-mail sem acesso no Zenith e legitimo (ver getConfig) - o que nao pode
+  // e-mail sem acesso no NoPulso e legitimo (ver getConfig) - o que nao pode
   // passar e um APELIDO que nao resolve, que e sempre erro de digitacao e
   // deixaria o relatorio zerado pra sempre sem ninguem entender por que
   if (!alvo && !usuarioLimpo.includes('@')) throw new Error(`Não encontrei nenhum usuário com "${usuarioLimpo}".`);
@@ -319,7 +319,7 @@ function montarHtml({ grupos, total }) {
       ${htmlSecao('REJEITADO', grupos.REJEITADO)}
     </div>
     <div style="font-family:Arial,sans-serif;font-size:11px;color:#999;text-align:center;margin-top:14px;">
-      Zenith Ops · gerado automaticamente
+      NoPulso · gerado automaticamente
     </div>
   </div>`;
 }
@@ -335,7 +335,7 @@ function montarHtmlCardUnico(card, titulo) {
       ${htmlCard(card)}
     </div>
     <div style="font-family:Arial,sans-serif;font-size:11px;color:#999;text-align:center;margin-top:14px;">
-      Zenith Ops · gerado automaticamente
+      NoPulso · gerado automaticamente
     </div>
   </div>`;
 }
@@ -355,7 +355,7 @@ function montarHtmlCards(cards, titulo) {
       ${cards.map(htmlCard).join('')}
     </div>
     <div style="font-family:Arial,sans-serif;font-size:11px;color:#999;text-align:center;margin-top:14px;">
-      Zenith Ops · enviado manualmente
+      NoPulso · enviado manualmente
     </div>
   </div>`;
 }
@@ -374,9 +374,9 @@ async function enviarCardsPorEmail(cards, destinatario) {
   for (const c of cards) cardsParaEnvio.push(await prepararCardParaEmail(c));
   const titulo = cards.length === 1
     ? `Ticket #${cards[0].numeroTicket ?? '—'} · ${cards[0].titulo || ''}`
-    : `${cards.length} tickets · Zenith Ops`;
+    : `${cards.length} tickets · NoPulso`;
   await enviarComFallback({
-    from: `Zenith Ops <${process.env.RELATORIO_EMAIL_USER}>`,
+    from: `NoPulso <${process.env.RELATORIO_EMAIL_USER}>`,
     to: destinatario,
     subject: titulo,
     html: montarHtmlCards(cardsParaEnvio, titulo),
@@ -399,7 +399,7 @@ async function notificarCardMV(card) {
 
   const titulo = `Nova solicitação · MV`;
   await enviarComFallback({
-    from: `Zenith Ops <${process.env.RELATORIO_EMAIL_USER}>`,
+    from: `NoPulso <${process.env.RELATORIO_EMAIL_USER}>`,
     to,
     subject: `${titulo} - #${cardParaEnviar.numeroTicket ?? '—'} - ${cardParaEnviar.titulo || ''}`,
     html: montarHtmlCardUnico(cardParaEnviar, titulo),
@@ -562,7 +562,7 @@ async function enviarRelatorio({ origem = 'agendado', porEmail = null, paraOverr
   };
   try {
     await enviarComFallback({
-      from: `Zenith Ops <${process.env.RELATORIO_EMAIL_USER}>`,
+      from: `NoPulso <${process.env.RELATORIO_EMAIL_USER}>`,
       to,
       cc,
       subject: `Relatório de Solicitações - MV - ${dataHojeBR()}`,

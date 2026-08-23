@@ -1,6 +1,6 @@
 # Mapa de páginas — onde está cada coisa no código
 
-Documento de referência rápida: para cada tela do Zenith Ops, onde fica o
+Documento de referência rápida: para cada tela do NoPulso, onde fica o
 arquivo, qual seção de permissão libera o acesso, e quais módulos do
 backend ela consome. Serve pra achar rápido "onde mexo pra alterar a tela
 X" sem precisar abrir `server/index.js` (quase 40 mil linhas) do zero.

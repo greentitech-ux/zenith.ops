@@ -10,7 +10,7 @@
 //
 // As FOTOS entram embutidas no documento, nao como link: um link exige
 // login e morre se o arquivo mudar de lugar; o PDF tem que continuar valendo
-// como prova daqui a um ano, aberto por quem nao tem acesso ao Zenith.
+// como prova daqui a um ano, aberto por quem nao tem acesso ao NoPulso.
 const PDFDocument = require('pdfkit');
 const storage = require('./storage');
 
@@ -321,7 +321,7 @@ function gerarPDF(res, chamado, { fotos, geradoPor, nomeArquivo }) {
   if (fotos.cortadas) {
     doc.moveDown(0.8);
     doc.fontSize(8.5).fillColor('#a0522d')
-      .text(`Obs.: este chamado tem mais fotos do que cabe num relatório (${fotos.cortadas} não incluída(s)). As demais continuam no chamado, dentro do Zenith.`, x, doc.y, { width: largura });
+      .text(`Obs.: este chamado tem mais fotos do que cabe num relatório (${fotos.cortadas} não incluída(s)). As demais continuam no chamado, dentro do NoPulso.`, x, doc.y, { width: largura });
   }
 
   // ---------- rodape em todas as paginas ----------

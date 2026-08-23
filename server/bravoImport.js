@@ -358,7 +358,7 @@ function avaliarLinha(header, linha, unidade, mapa = {}) {
 
   // Decisões do Master (bravoMapa) por cima do que o modelo fixo já cobre.
   // É isto que faz uma coluna renomeada na planilha continuar caindo no campo
-  // certo do Zenith sem precisar de deploy: "unificar" manda o valor pro campo
+  // certo do NoPulso sem precisar de deploy: "unificar" manda o valor pro campo
   // que já existe, "criar" abre um campo novo, "ignorar" descarta de propósito.
   const doMapa = { canal: {}, forma: {}, kpi: {} };
   header.forEach((coluna) => {
@@ -551,7 +551,7 @@ function resolverUnidade(bruto) {
 }
 
 // ---------------------------------------------------------------------------
-// Conferência de COLUNAS: o que a planilha tem x o que o Zenith já conhece
+// Conferência de COLUNAS: o que a planilha tem x o que o NoPulso já conhece
 // ---------------------------------------------------------------------------
 // Colunas que nunca viram campo: são estrutura da linha, não valor de venda.
 const COLUNAS_ESTRUTURAIS = new Set(['ID', 'Unidade', 'Data', 'Nome', 'Observação', 'Observacao']);
@@ -631,7 +631,7 @@ async function analisarColunas() {
     });
   }
 
-  // o que o Zenith já conhece, pra cada grupo que tem loja do Bravo
+  // o que o NoPulso já conhece, pra cada grupo que tem loja do Bravo
   // grupos.js exporta list(), nao listar() - ver module.exports la
   const todosGrupos = await grupos.list();
   const conhecidos = []; // { campo, label, destino, grupoNome }

@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Formulários · Zenith Ops</title>
+<title>Formulários · NoPulso</title>
 <style>
   :root{
     --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
     --text:#e7ecf1; --muted:#7d8896;
-    --ok:#3ddc97; --ok-dim:#1c3a2e; --warn:#f2b33d; --warn-dim:#3a2e14; --bad:#ff5c5c; --accent:#5cc8ff;
+    --ok:#3ddc97; --ok-dim:#1c3a2e; --warn:#f2b33d; --warn-dim:#3a2e14; --bad:#ff5c5c; --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;min-width:0;}
   html{overflow-x:hidden;}
@@ -47,7 +47,7 @@
   .item-card input{width:100%;}
   .item-card .item-rm{position:absolute;top:7px;right:8px;background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;line-height:1;padding:2px 6px;}
   .item-card .item-rm:hover{color:var(--bad);}
-  .btn{background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:11px 16px;font-size:13.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .btn{background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:11px 16px;font-size:13.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
   .btn:disabled{opacity:.5;cursor:default;}
   .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:var(--sans);}
   .btn-mini{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 9px;font-size:11.5px;cursor:pointer;font-family:var(--sans);}
@@ -79,7 +79,7 @@
   <div class="header-top">
     <button class="hamburger-btn" id="nav-toggle" aria-label="Menu">☰</button>
     <div style="flex:1;min-width:0;">
-      <div class="eyebrow">Zenith Ops · Solutions TI Tech</div>
+      <div class="eyebrow">NoPulso · Solutions TI Tech</div>
       <h1>🖊️ Formulários</h1>
     </div>
   </div>
@@ -130,7 +130,7 @@
        constante no código e exigia deploy pra corrigir um dígito. -->
   <div class="panel hidden" id="painel-cadastro">
     <h3>🏢 Unidades do formulário <span style="font-size:11px;color:var(--muted);font-weight:400;">(só Master)</span></h3>
-    <p class="fi-sub" style="margin:-4px 0 10px;">Razão social e CNPJ que entram travados no documento. Vincule cada uma à unidade do Zenith — é isso que decide quem pode emitir formulário por ela.</p>
+    <p class="fi-sub" style="margin:-4px 0 10px;">Razão social e CNPJ que entram travados no documento. Vincule cada uma à unidade do NoPulso — é isso que decide quem pode emitir formulário por ela.</p>
     <div id="cad-lista"><div class="vazio">carregando...</div></div>
     <div style="margin-top:10px;"><button type="button" class="btn-ghost" onclick="abrirCadastro(null)">➕ Nova unidade</button></div>
   </div>
@@ -155,7 +155,7 @@
         <span class="fi-sub">Conferido pelo dígito verificador antes de salvar.</span>
       </div>
       <div class="fi">
-        <label>Unidade do Zenith</label>
+        <label>Unidade do NoPulso</label>
         <select id="cad-codigo"></select>
         <span class="fi-sub">Quem tiver essa unidade liberada no acesso passa a ver esta opção. Sem vincular, só o Master enxerga.</span>
       </div>

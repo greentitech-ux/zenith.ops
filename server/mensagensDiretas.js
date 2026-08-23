@@ -1,5 +1,5 @@
 // mensagensDiretas.js
-// Conversa 1-a-1 entre gente de DENTRO do Zenith (o time de Suporte/Master
+// Conversa 1-a-1 entre gente de DENTRO do NoPulso (o time de Suporte/Master
 // avisando alguém, e a pessoa respondendo). Não confundir com suporteChat.js,
 // que é o chat PÚBLICO do visitante com o Beniboy - lá existe token de
 // visitante, funil de triagem e bot; aqui não, são dois acessos logados

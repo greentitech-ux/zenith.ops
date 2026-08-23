@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Alerta do Beniboy · Zenith Ops</title>
+<title>Alerta do Beniboy · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -13,7 +13,7 @@
   html,body{height:100%;margin:0;}
   body{
     background:linear-gradient(160deg,#3a0a0a,#7a1414);
-    color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    color:#fff;font-family:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
     text-align:center;padding:24px;animation:flash 1s ease-in-out infinite;
   }
@@ -106,7 +106,7 @@
 
   // silenciar/atender aqui também cala as outras abas do mesmo acesso, e
   // vice-versa (ver alarme-sync.js). Esta página costuma ser aberta pelo
-  // toque na notificação, com o Zenith já aberto em outra aba atrás dela.
+  // toque na notificação, com o NoPulso já aberto em outra aba atrás dela.
   const propagarSilencio = () => { if (window.ZenithAlarmeSync) window.ZenithAlarmeSync.silenciar(); };
   if (window.ZenithAlarmeSync) {
     window.ZenithAlarmeSync.aoSilenciar(pararAlarme);

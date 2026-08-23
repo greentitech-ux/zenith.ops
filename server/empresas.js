@@ -1,5 +1,5 @@
 // empresas.js
-// Camada de ISOLAMENTO entre as empresas donas de unidades - o Zenith
+// Camada de ISOLAMENTO entre as empresas donas de unidades - o NoPulso
 // hospeda mais de uma empresa, cada uma com seu tipo de negócio (hoje só
 // "alimentacao"; amanhã uma clínica, uma escola...). Uma unidade pertence
 // a NO MÁXIMO uma empresa, e essa é a fronteira que não pode vazar:

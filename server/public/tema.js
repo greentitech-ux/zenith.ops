@@ -1,5 +1,5 @@
 // tema.js
-// Aparência do Zenith por navegador (cada pessoa no seu aparelho): tema
+// Aparência do NoPulso por navegador (cada pessoa no seu aparelho): tema
 // Escuro/Claro e tamanho da fonte. Carregado no <head> de TODAS as paginas
 // (antes do body renderizar, pra nao "piscar" o tema errado). Os controles
 // ficam numa secao "Aparência" no fim do menu ☰; a escolha e salva em
@@ -14,6 +14,30 @@
 (function () {
   if (window.__zenithTema) return;
   window.__zenithTema = true;
+
+  // ---- fontes da marca (NoPulso) ----
+  // Nao ha build no projeto: em vez de repetir o <link> nas 53 paginas, o
+  // tema.js (que ja e carregado no <head> de todas) injeta o Google Fonts
+  // aqui. Archivo = titulos/corpo (--sans), JetBrains Mono = numeros,
+  // rotulos e badges (--mono, que ja estava declarado mas caia no fallback
+  // do sistema porque a fonte nunca era baixada). O preconnect vem antes
+  // pra o navegador abrir a conexao com o gstatic enquanto ainda le o CSS.
+  // display=swap: o texto aparece na fonte do sistema e troca quando a
+  // fonte chega - nada de tela em branco se o Google demorar.
+  (function fontes() {
+    if (document.getElementById('nopulso-fontes')) return;
+    var pre1 = document.createElement('link');
+    pre1.rel = 'preconnect'; pre1.href = 'https://fonts.googleapis.com';
+    var pre2 = document.createElement('link');
+    pre2.rel = 'preconnect'; pre2.href = 'https://fonts.gstatic.com'; pre2.crossOrigin = 'anonymous';
+    var css = document.createElement('link');
+    css.id = 'nopulso-fontes';
+    css.rel = 'stylesheet';
+    css.href = 'https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap';
+    document.head.appendChild(pre1);
+    document.head.appendChild(pre2);
+    document.head.appendChild(css);
+  })();
 
   var LS_TEMA = 'zenithTema';   // 'escuro' (padrao) | 'claro'
   var LS_FONTE = 'zenithFonte'; // percentual: 80..150 (padrao 100)
@@ -39,7 +63,14 @@
     '  --ok:#0e8a5f; --ok-dim:#dcf3e9;',
     '  --warn:#8f6400; --warn-dim:#faeccb;',
     '  --bad:#c62f2f; --bad-dim:#fbe3e3;',
-    '  --accent:#0d7ac2;',
+    // limao escurecido: o #b8ff3c da marca e ilegivel como TEXTO sobre
+    // branco. Este tom mantem a familia da marca e da ~5:1 contra o branco
+    // (texto) e ~5:1 contra o #0b0d10 (label de botao), no mesmo patamar do
+    // azul que estava aqui antes.
+    '  --accent:#5b8c00;',
+    // --accent2 (dado tecnico) tambem precisa de versao clara: o ciano
+    // #5cc8ff some no fundo branco. Reaproveita o azul que era o --accent.
+    '  --accent2:#0d7ac2;',
     // variaveis proprias do Abastecimento (balões/botões de PEDIDO x ENVIO
     // da "Conversa do pedido") - sem isso o balão ficava escuro com texto
     // escuro no tema claro (ilegivel, reportado em 2026-08-09)
@@ -87,7 +118,7 @@
       '#zenith-aparencia .ztema-linha{display:flex;gap:6px;align-items:center;}',
       '#zenith-aparencia button{background:var(--panel2,#181d24);border:1px solid var(--line,#232a33);color:var(--text,#e7ecf1);',
       '  border-radius:8px;padding:7px 10px;font-size:12px;cursor:pointer;flex:1;font-family:inherit;}',
-      '#zenith-aparencia button.ztema-ativo{border-color:var(--accent,#5cc8ff);color:var(--accent,#5cc8ff);font-weight:700;}',
+      '#zenith-aparencia button.ztema-ativo{border-color:var(--accent,#b8ff3c);color:var(--accent,#b8ff3c);font-weight:700;}',
       '#zenith-aparencia .ztema-passo{flex:none;width:40px;font-weight:700;}',
       '#zenith-aparencia #ztema-fonte-pct{flex:1;text-align:center;font-family:var(--mono,monospace);font-size:11.5px;color:var(--muted,#7d8896);}',
     ].join('\n');

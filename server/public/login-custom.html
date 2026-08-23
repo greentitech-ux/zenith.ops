@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Tela de Login · Zenith Ops</title>
+<title>Tela de Login · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -16,9 +16,9 @@
     --ok:#3ddc97; --ok-dim:#1c3a2e;
     --warn:#f2b33d; --warn-dim:#3a2e14;
     --bad:#ff5c5c; --bad-dim:#3a1616;
-    --accent:#5cc8ff;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;min-width:0;}
   html{overflow-x:hidden;}
@@ -32,7 +32,7 @@
   .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
   a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;transition:border-color .15s ease,color .15s ease,background .15s ease;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
-  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
   .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,color .15s ease;}
   .btn-notif:hover{border-color:var(--accent);color:var(--text);}
@@ -58,7 +58,7 @@
   .toggle-linha input{width:auto;}
   .toggle-linha span{font-size:13px;color:var(--text);}
   .contador{font-size:11px;color:var(--muted);text-align:right;margin-top:4px;}
-  .btn-primary{background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);margin-top:16px;}
+  .btn-primary{background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);margin-top:16px;}
   .btn-primary:disabled{opacity:.5;cursor:default;}
   .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 14px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:var(--sans);}
   .btn-ghost:hover{border-color:var(--accent);}
@@ -92,7 +92,7 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
         <h1>🎨 Tela de Login</h1>
       </div>
     </div>
@@ -111,7 +111,7 @@
 <div id="root" class="hidden">
   <div class="panel">
     <h2>Empresas do grupo (logos do rodapé)</h2>
-    <div class="sub">São as logos que aparecem embaixo de "Zenith Ops faz parte do", na tela de login. Suba quando uma empresa entrar no grupo e remova quando sair - sem precisar de deploy. Enquanto não houver nenhuma cadastrada aqui, a tela continua mostrando a logo fixa do Grupo Bravo.</div>
+    <div class="sub">São as logos que aparecem embaixo de "NoPulso faz parte do", na tela de login. Suba quando uma empresa entrar no grupo e remova quando sair - sem precisar de deploy. Enquanto não houver nenhuma cadastrada aqui, a tela continua mostrando a logo fixa do Grupo Bravo.</div>
     <div class="sub" style="margin-top:6px;">Melhor formato: <b>PNG com fundo transparente</b>, deitado (mais largo que alto). O rodapé mostra todas na mesma altura e quebra linha sozinho quando não couberem.</div>
     <div class="logo-grid" id="logo-grid"></div>
     <div class="fundo-acoes">
@@ -145,7 +145,7 @@
     <input type="text" id="f-titulo" maxlength="80" placeholder="ex: Feliz Dia dos Pais! 🎉" oninput="atualizarPreview()">
 
     <label>Texto do balão</label>
-    <textarea id="f-texto" maxlength="240" placeholder="ex: De toda a equipe Zenith Ops pros pais que também tocam o dia a dia da operação." oninput="atualizarPreview()"></textarea>
+    <textarea id="f-texto" maxlength="240" placeholder="ex: De toda a equipe NoPulso pros pais que também tocam o dia a dia da operação." oninput="atualizarPreview()"></textarea>
     <div class="contador"><span id="contador-texto">0</span>/240</div>
 
     <div class="sub" style="margin:10px 0 0;">Pré-visualização:</div>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cofre de senhas · Zenith Ops</title>
+<title>Cofre de senhas · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -16,9 +16,9 @@
     --ok:#3ddc97; --ok-dim:#1c3a2e;
     --warn:#f2b33d; --warn-dim:#3a2e14;
     --bad:#ff5c5c; --bad-dim:#3a1616;
-    --accent:#5cc8ff;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;}
   html{overflow-x:hidden;}
@@ -33,7 +33,7 @@
   @media(max-width:640px){ .header-nav{flex-direction:column;align-items:stretch;} .nav-actions{justify-content:flex-end;} }
   .back{font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;transition:border-color .15s ease,color .15s ease,background .15s ease;}
   .back:hover{color:var(--text);border-color:var(--accent);}
-  .back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .back.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
   .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
   .hamburger-btn:hover{border-color:var(--accent);}
@@ -54,7 +54,7 @@
   .item-list{list-style:none;margin:0 0 10px;padding:0;}
   .item-list li{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:7px 8px;border-radius:8px;cursor:pointer;font-size:12.5px;}
   .item-list li:hover{background:var(--panel2);}
-  .item-list li.active{background:var(--accent);color:#06121a;font-weight:600;}
+  .item-list li.active{background:var(--accent);color:#0b0d10;font-weight:600;}
   .item-list li .iname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .item-list li .iactions{display:none;gap:4px;}
   .item-list li:hover .iactions{display:flex;}
@@ -68,7 +68,7 @@
   .subgroup-list{list-style:none;margin:0;padding:0;}
   .subgroup-list li{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:6px 8px 6px 18px;border-radius:8px;cursor:pointer;font-size:12px;}
   .subgroup-list li:hover{background:var(--panel2);}
-  .subgroup-list li.active{background:var(--accent);color:#06121a;font-weight:600;}
+  .subgroup-list li.active{background:var(--accent);color:#0b0d10;font-weight:600;}
   .subgroup-list li .sname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .subgroup-list li .sactions{display:none;gap:4px;}
   .subgroup-list li:hover .sactions{display:flex;}
@@ -79,7 +79,7 @@
   .main{flex:1;min-width:0;}
   .toolbar{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
   .toolbar input{flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;}
-  button.primary{font-family:var(--sans);font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:8px;border:none;background:var(--accent);color:#06121a;cursor:pointer;white-space:nowrap;}
+  button.primary{font-family:var(--sans);font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:8px;border:none;background:var(--accent);color:#0b0d10;cursor:pointer;white-space:nowrap;}
   #current-path{font-size:12px;color:var(--muted);margin:0 0 12px;}
   .entries{display:flex;flex-direction:column;gap:8px;}
   .entry{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:12px;}
@@ -109,7 +109,7 @@
   .genpanel button{width:100%;margin-top:8px;padding:8px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--accent);cursor:pointer;font-size:12px;}
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
   .modal-actions button{font-family:var(--sans);font-size:12.5px;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;}
-  .modal-actions button.primary{border:none;background:var(--accent);color:#06121a;font-weight:600;}
+  .modal-actions button.primary{border:none;background:var(--accent);color:#0b0d10;font-weight:600;}
   .err{color:var(--bad);font-size:11.5px;margin-top:8px;}
   @media(max-width:760px){.layout{flex-direction:column;} .sidebar{width:100%;}}
 </style>
@@ -122,7 +122,7 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
         <h1>Cofre de senhas</h1>
       </div>
     </div>

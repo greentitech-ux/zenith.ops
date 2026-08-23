@@ -354,7 +354,7 @@ function veredito(resumo, frota) {
   const wifiFraco = resumo.conexao === 'wifi' && resumo.sinalWifiMin !== null && resumo.sinalWifiMin < SINAL_WIFI_BAIXO;
 
   // O caso que a primeira versao errava: a loja pinga a internet em 33ms mas
-  // a resposta do Zenith leva 1457ms. Os dois numeros estao certos - eles
+  // a resposta do NoPulso leva 1457ms. Os dois numeros estao certos - eles
   // medem coisas diferentes. O ping mede o caminho ate a operadora; a
   // latencia mede o caminho INTEIRO, incluindo o servidor da aplicacao. Se o
   // ping esta bom e a latencia nao, o gargalo esta depois do link: e o
@@ -373,8 +373,8 @@ function veredito(resumo, frota) {
     return {
       culpa: 'local',
       titulo: 'Só este computador está lento',
-      detalhe: `A resposta do Zenith aqui está em ${resumo.latenciaMedia}ms, mas o resto da frota está em `
-        + `${baseline}ms pelo MESMO servidor. Então o problema é deste ponto, não do Zenith. `
+      detalhe: `A resposta do NoPulso aqui está em ${resumo.latenciaMedia}ms, mas o resto da frota está em `
+        + `${baseline}ms pelo MESMO servidor. Então o problema é deste ponto, não do NoPulso. `
         + 'O ping parece bom porque são 2 pacotes a cada 5 minutos — ele não pega os momentos ruins; '
         + 'já a conexão do sistema acontece a cada 25s e pega. Link intermitente (4G/5G, wi-fi oscilando '
         + 'ou cabo com mau contato) se comporta exatamente assim.',
@@ -383,7 +383,7 @@ function veredito(resumo, frota) {
   if (appLento && frotaLenta) {
     return {
       culpa: 'servidor',
-      titulo: 'A frota inteira está lenta — é o Zenith',
+      titulo: 'A frota inteira está lenta — é o NoPulso',
       detalhe: `Esta máquina está em ${resumo.latenciaMedia}ms e a mediana da frota em ${baseline}ms — `
         + 'lojas diferentes, links independentes, todas lentas ao mesmo tempo. O que elas têm em comum é o servidor. '
         + 'Não abra chamado na operadora.',
@@ -396,7 +396,7 @@ function veredito(resumo, frota) {
       culpa: 'indefinido',
       titulo: 'Lento, mas ainda sem base de comparação',
       detalhe: `A loja alcança a internet em ${resumo.wanMedia}ms`
-        + `${temLan ? ` e o roteador em ${resumo.gatewayMedia}ms` : ''}, mas o Zenith responde em `
+        + `${temLan ? ` e o roteador em ${resumo.gatewayMedia}ms` : ''}, mas o NoPulso responde em `
         + `${resumo.latenciaMedia}ms. Com menos de 3 computadores medindo não dá pra dizer se é este ponto ou o `
         + 'servidor — assim que mais máquinas reportarem, a comparação resolve isso sozinha.',
     };
@@ -439,9 +439,9 @@ function veredito(resumo, frota) {
       culpa: 'indefinido',
       titulo: appLento ? 'Resposta lenta, origem não isolada' : 'Só temos latência do sistema',
       detalhe: (appLento
-        ? `A resposta do Zenith está em ${resumo.latenciaMedia}ms. `
+        ? `A resposta do NoPulso está em ${resumo.latenciaMedia}ms. `
         : '')
-        + 'Esse computador reporta pelo navegador, então mede o tempo de resposta do Zenith mas não separa rede interna, '
+        + 'Esse computador reporta pelo navegador, então mede o tempo de resposta do NoPulso mas não separa rede interna, '
         + 'link e servidor. Instalar o NOCZenith nele destrava a medição completa.',
     };
   }
@@ -449,7 +449,7 @@ function veredito(resumo, frota) {
     return {
       culpa: 'indefinido',
       titulo: 'Lento, e o link não explica',
-      detalhe: `A rede da loja responde bem, mas o Zenith está levando ${resumo.latenciaMedia}ms. `
+      detalhe: `A rede da loja responde bem, mas o NoPulso está levando ${resumo.latenciaMedia}ms. `
         + 'O ping é uma amostra de 2 pacotes a cada 5 minutos e não pega oscilação curta — compare com as outras '
         + 'unidades na lista para saber se é só aqui ou geral.',
     };

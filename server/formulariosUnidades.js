@@ -13,7 +13,7 @@
 //     formulário, sem nenhum lugar pra cadastrar.
 //  3. E o mais grave: os nomes daquela lista ("Domino's Caruaru") eram
 //     escritos a mão e NÃO batiam com os códigos de unidade que o resto do
-//     Zenith usa ("Dominos Caruaru"). Como as permissões por unidade
+//     NoPulso usa ("Dominos Caruaru"). Como as permissões por unidade
 //     comparam justamente por esse código, nada casava: o seletor mostrava
 //     TODAS as unidades pra qualquer pessoa com a seção, e a lista de
 //     formulários de quem não é Master vinha vazia. As duas pontas do

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Acompanhamento de Compras · Zenith Ops</title>
+<title>Acompanhamento de Compras · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -16,9 +16,9 @@
     --ok:#3ddc97; --ok-dim:#1c3a2e;
     --warn:#f2b33d; --warn-dim:#3a2e14;
     --bad:#ff5c5c; --bad-dim:#3a1616;
-    --accent:#5cc8ff;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;min-width:0;}
   html{overflow-x:hidden;}
@@ -29,7 +29,7 @@
   header{position:sticky;top:0;z-index:40;background:var(--bg);margin-left:-12px;margin-right:-12px;margin-top:-16px;padding-left:12px;padding-right:12px;padding-top:12px;padding-bottom:12px;display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px;}
   a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
-  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .hidden{display:none!important;}
   .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
   .hamburger-btn:hover{border-color:var(--accent);}
@@ -54,7 +54,7 @@
   .chips{display:flex;gap:6px;flex-wrap:wrap;}
   .chip{font-family:var(--mono);font-size:11px;padding:6px 11px;border-radius:20px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;white-space:nowrap;}
   .chip:hover{color:var(--text);border-color:var(--accent);}
-  .chip.ativo{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .chip.ativo{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .chip .n{opacity:.7;margin-left:3px;}
 
   .compra{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;transition:border-color .15s ease;}
@@ -65,7 +65,7 @@
   .compra-sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:3px;}
   .badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;display:inline-block;white-space:nowrap;flex:none;}
   .badge.aguardando{background:var(--warn-dim);color:var(--warn);}
-  .badge.aprovada,.badge.comprada{background:rgba(92,200,255,.12);color:var(--accent);}
+  .badge.aprovada,.badge.comprada{background:rgba(184, 255, 60,.12);color:var(--accent);}
   .badge.entregue{background:var(--ok-dim);color:var(--ok);}
   .badge.recusada,.badge.convertida{background:var(--panel2);color:var(--muted);}
   .badge.travada{background:var(--bad-dim);color:var(--bad);font-weight:700;}
@@ -73,7 +73,7 @@
   .tl-etapa{display:flex;align-items:center;gap:5px;flex:none;}
   .tl-ponto{width:8px;height:8px;border-radius:50%;background:var(--line);flex:none;}
   .tl-ponto.feita{background:var(--ok);}
-  .tl-ponto.atual{background:var(--accent);box-shadow:0 0 0 3px rgba(92,200,255,.18);}
+  .tl-ponto.atual{background:var(--accent);box-shadow:0 0 0 3px rgba(184, 255, 60,.18);}
   .tl-ponto.atual.travada{background:var(--bad);box-shadow:0 0 0 3px rgba(255,92,92,.18);}
   .tl-rotulo{font-family:var(--mono);font-size:9.5px;color:var(--muted);white-space:nowrap;}
   .tl-rotulo.feita{color:var(--text);}
@@ -95,7 +95,7 @@
   <div style="display:flex;align-items:center;gap:10px;min-width:0;">
     <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
     <div style="min-width:0;">
-      <div class="eyebrow">Zenith Ops · Solicitações</div>
+      <div class="eyebrow">NoPulso · Solicitações</div>
       <h1>Acompanhamento de Compras</h1>
     </div>
   </div>

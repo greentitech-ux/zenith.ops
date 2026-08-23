@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Relatórios do Carrinho · Zenith Ops</title>
+<title>Relatórios do Carrinho · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -27,11 +27,11 @@
     --ok:#3ddc97; --ok-dim:#1c3a2e;
     --warn:#f2b33d; --warn-dim:#3a2e14;
     --bad:#ff5c5c; --bad-dim:#3a1616;
-    --accent:#5cc8ff;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
     --pedido:#ff8a80; --pedido-dim:#3a1d1a;
     --envio:#8ab4f8; --envio-dim:#1a2540;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;min-width:0;}
   html{overflow-x:hidden;}
@@ -53,7 +53,7 @@
   .header-nav{display:flex;align-items:center;gap:6px;flex:none;}
   a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
-  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;}
   .btn-notif:hover{border-color:var(--accent);color:var(--text);}
   .btn-sair{color:var(--bad);}
@@ -149,7 +149,7 @@
 
   .filtros-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
   .filtro-chip{font-family:var(--mono);font-size:10.5px;color:var(--muted);padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
-  .filtro-chip.ativo{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .filtro-chip.ativo{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   /* linha separada dos filtros de verdade - esses botoes nao filtram a
      lista, abrem outro painel (cadastro/operadores); o rotulo deixa isso
      visualmente claro em vez de parecerem mais um filtro */
@@ -161,7 +161,7 @@
   /* paginacao do historico antigo (mais de 12h - ver renderLista/PAGINA_HISTORICO) */
   .paginacao{display:flex;justify-content:center;flex-wrap:wrap;gap:6px;margin-top:14px;}
   .pagina-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;min-width:32px;height:32px;padding:0 8px;font-size:12.5px;font-family:var(--mono);cursor:pointer;}
-  .pagina-btn.ativo{border-color:var(--accent);color:var(--accent);background:rgba(138,180,248,.12);font-weight:700;}
+  .pagina-btn.ativo{border-color:var(--accent);color:var(--accent);background:rgba(184,255,60,.12);font-weight:700;}
   /* grupo "Pendentes" (so aparece em telas largas, ver renderLista) usa a
      mesma cor de aviso do badge "aguardando" pra chamar atencao primeiro */
   .dia-header.pendentes-header{color:var(--warn);}
@@ -261,7 +261,7 @@
   .tab-switch.off{color:var(--bad);border-color:rgba(255,92,92,.5);}
   .btn-remover{background:var(--bad-dim);color:var(--bad);border:none;border-radius:6px;width:32px;height:36px;font-size:15px;cursor:pointer;flex:none;}
   .btn-add{margin-top:8px;background:var(--panel2);border:1px dashed var(--line);color:var(--accent);border-radius:8px;padding:8px 10px;font-size:12px;font-family:var(--sans);cursor:pointer;width:100%;}
-  .btn-primary{width:100%;margin-top:16px;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);background:var(--accent);color:#06202b;}
+  .btn-primary{width:100%;margin-top:16px;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);background:var(--accent);color:#0b0d10;}
   .btn-primary:disabled{opacity:.5;cursor:default;}
 </style>
 <script src="/tema.js"></script>
@@ -273,7 +273,7 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow">Zenith Ops · Dominos Aeroporto</div>
+        <div class="eyebrow">NoPulso · Dominos Aeroporto</div>
         <h1>📊 Relatórios do Carrinho</h1>
       </div>
     </div>

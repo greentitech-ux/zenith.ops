@@ -2,7 +2,7 @@
 // Personalizacao do fundo e do balao de mensagem da tela de login
 // (index.html), editavel pelo Master (ver painel em login-custom.html).
 // Por pedido explicito do usuario, o que fica FIXO e nao mexe aqui: a logo
-// do Grupo Bravo e a frase "Zenith Ops faz parte do..." acima dela, o
+// do Grupo Bravo e a frase "NoPulso faz parte do..." acima dela, o
 // proprio card de login, e o robo em si (so o texto do balao dele muda). So
 // e customizavel: o fundo da tela e o texto que aparece dentro do balao -
 // pra dar pra escrever mensagens carinhosas em datas especiais (aniversario
@@ -13,7 +13,7 @@ const DOC = db.collection('loginCustomConfig').doc('config');
 
 const PADRAO = { ativo: false, bubbleTitulo: '', bubbleTexto: '', fundoArquivo: null, logos: [] };
 
-// Logos das empresas que fazem parte do Zenith, no rodapé da tela de login.
+// Logos das empresas que fazem parte do NoPulso, no rodapé da tela de login.
 // Antes era UMA imagem fixa no código (/grupo-bravo.png): toda vez que uma
 // empresa entrasse ou saísse do grupo, era preciso mexer em código e subir
 // deploy. Agora é cadastro - o Master sobe e remove pela tela.
