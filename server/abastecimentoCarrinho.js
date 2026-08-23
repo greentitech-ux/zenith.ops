@@ -114,7 +114,7 @@ async function salvarConfig({ horasContagem, alertaPedidoMin, alertaEnvioMin, al
 //   seguidas -> bloqueado; SO O MASTER desbloqueia (redefinindo a senha),
 //   igual ao desbloqueio do login principal.
 // Esse login NAO da acesso a nada alem de assinar pedido/envio - a pagina
-// continua atras do login normal do Zenith + secoes por ponta.
+// continua atras do login normal do NoPulso + secoes por ponta.
 const PAPEIS_OPERADOR = ['pedido', 'envio'];
 const MAX_TENTATIVAS_OPERADOR = 3;
 

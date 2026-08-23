@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Zenith Ops · ao vivo</title>
+<title>NoPulso · ao vivo</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -16,9 +16,9 @@
     --ok:#3ddc97; --ok-dim:#1c3a2e;
     --warn:#f2b33d; --warn-dim:#3a2e14;
     --bad:#ff5c5c; --bad-dim:#3a1616;
-    --accent:#5cc8ff;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;}
   html{overflow-x:hidden;}
@@ -80,8 +80,8 @@
   tbody tr.row-alerta{background:var(--warn-dim);}
   tbody tr.row-alerta:hover{background:var(--warn-dim);filter:brightness(1.15);}
   tbody tr{transition:background-color .8s ease;}
-  tbody tr.row-novo{background:rgba(92,200,255,.22);}
-  tbody tr.row-novo:hover{background:rgba(92,200,255,.3);}
+  tbody tr.row-novo{background:rgba(184, 255, 60,.22);}
+  tbody tr.row-novo:hover{background:rgba(184, 255, 60,.3);}
   /* recusado agora fica vermelho de forma permanente (nao so nos primeiros
      minutos), igual a intensidade que o fraude tinha antes */
   tbody tr.row-recusado{background:rgba(255,92,92,.34);}
@@ -101,8 +101,8 @@
   .tx-comentario-edit button{font-size:10px;padding:1px 5px;border-radius:4px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;line-height:1.4;}
   .tx-comentario-edit button:hover{border-color:var(--accent);}
   .alert,.order-row{transition:background-color .8s ease;}
-  .alert.item-novo,.order-row.item-novo{background:rgba(92,200,255,.14);}
-  .flag.novo{color:var(--accent);border-color:#1e4a63;background:rgba(92,200,255,.12);}
+  .alert.item-novo,.order-row.item-novo{background:rgba(184, 255, 60,.14);}
+  .flag.novo{color:var(--accent);border-color:#1e4a63;background:rgba(184, 255, 60,.12);}
   .tablewrap{max-height:520px;overflow:auto;}
   .badge{font-family:var(--mono);font-size:10.5px;padding:2px 8px;border-radius:20px;display:inline-block;}
   /* colunas de texto longo (nome do cartão, banco) e a de status (que pode
@@ -136,7 +136,7 @@
   .btn-disputa{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);color:var(--accent);cursor:pointer;margin-left:6px;}
   .btn-disputa:hover{border-color:var(--accent);}
   .back{font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;transition:border-color .15s ease,color .15s ease,background .15s ease;}
-  .back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .back.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
   .back:hover{color:var(--text);border-color:var(--accent);}
   .dispute-item{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:8px;}
@@ -227,7 +227,7 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
         <h1>Monitor de transações</h1>
       </div>
     </div>

@@ -1,7 +1,7 @@
 // suporteBot.js
 // "Beniboy" - atendente virtual do chat de suporte (widget 💬). Quando
 // NENHUM humano assumiu a conversa, ele responde sozinho usando a API da
-// Claude (Anthropic): tira duvidas rapidas sobre o Zenith, CRIA TICKET na
+// Claude (Anthropic): tira duvidas rapidas sobre o NoPulso, CRIA TICKET na
 // Central direto pela conversa (compra/manutencao/TI/pagamento/nota),
 // consulta o andamento de um ticket pelo numero e chama um atendente humano
 // quando o assunto foge do alcance dele. Diretrizes de produto: atende
@@ -67,7 +67,7 @@ function getCliente() {
 // cada mensagem da mesma conversa (so a lista de unidades e o "logado"
 // variam, e raramente mudam no meio de uma mesma conversa)
 // texto livre de conhecimento/orientacao (editado pelo Master no painel NOC
-// Zenith, ver agenteAcoes.js) - pedido explicito do usuario: "ensine tudo a
+// NoPulso, ver agenteAcoes.js) - pedido explicito do usuario: "ensine tudo a
 // ele pra que ele possa ensinar as pessoas que procurarem ajuda". SEM gate
 // de logado/isMaster de proposito: só EDITAR o texto é Master-only (rota
 // PUT /api/agente/contexto), mas o CONTEUDO precisa chegar em QUALQUER
@@ -97,9 +97,9 @@ ${listaAcoes}`;
 async function montarSystem(unidades, logado) {
   const temFerramentaPedido = !!(logado && logado.temMonitor);
   const [blocoConhecimento, blocoAgente] = await Promise.all([montarBlocoConhecimento(), montarBlocoAgente(logado)]);
-  const texto = `Você é o Beniboy, atendente virtual do chat de suporte do Zenith Ops.
+  const texto = `Você é o Beniboy, atendente virtual do chat de suporte do NoPulso.
 
-O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Milky Moo, São Braz e o parque Saltiverso). Quem fala com você pode ser um funcionário/parceiro das lojas OU o CLIENTE FINAL de uma loja (o comprador, ex: alguém que quer um estorno) - na maioria das vezes de estorno é o próprio cliente falando direto com você, não um funcionário repassando. Não assuma qual dos dois é sem contexto - se não estiver claro, pergunte. De qualquer forma, a pessoa pode estar deslogada.
+O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Milky Moo, São Braz e o parque Saltiverso). Quem fala com você pode ser um funcionário/parceiro das lojas OU o CLIENTE FINAL de uma loja (o comprador, ex: alguém que quer um estorno) - na maioria das vezes de estorno é o próprio cliente falando direto com você, não um funcionário repassando. Não assuma qual dos dois é sem contexto - se não estiver claro, pergunte. De qualquer forma, a pessoa pode estar deslogada.
 
 ## Estilo (obrigatório)
 - Respostas CURTAS e objetivas: 1 a 4 frases, sem enrolação, sem repetir o que a pessoa disse.
@@ -108,8 +108,8 @@ O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, 
 - NUNCA diga que "chamou", "chamei", "acionei" ou "notifiquei" um atendente/time humano sem ter chamado a ferramenta chamar_atendente NESSA MESMA resposta - isso dispara um alarme real pro time, então a frase e a ação têm que andar sempre juntas. Se ainda não chamou a ferramenta, chame agora ou fale só no futuro ("posso chamar um atendente", "vou chamar um atendente").
 - Nunca invente informação sobre o sistema. Se não souber ou o assunto for sensível (senha de outra pessoa, dados financeiros, urgência grave), use chamar_atendente.
 
-## O que você sabe do Zenith
-- Login bloqueado (3 senhas erradas seguidas): SEMPRE use desbloquear_login pra resolver na hora, nunca chame um atendente pra isso - vale tanto pro login principal do Zenith quanto pro login de operador do Abastecimento do Carrinho (balcão, 4 letras + 4 números). A pessoa volta a entrar com a MESMA senha de sempre; só se o mesmo acesso travar de novo é que entra uma senha nova (ver ferramenta abaixo).
+## O que você sabe do NoPulso
+- Login bloqueado (3 senhas erradas seguidas): SEMPRE use desbloquear_login pra resolver na hora, nunca chame um atendente pra isso - vale tanto pro login principal do NoPulso quanto pro login de operador do Abastecimento do Carrinho (balcão, 4 letras + 4 números). A pessoa volta a entrar com a MESMA senha de sempre; só se o mesmo acesso travar de novo é que entra uma senha nova (ver ferramenta abaixo).
 - Estorno: NÃO dá pra você abrir esse ticket direto (exige login com acesso ao Monitor) - em vez disso, pergunte em qual loja foi a compra (pule essa pergunta se já souber pela "loja" do início da conversa) e use gerar_link_estorno_cliente. Se quem fala com você É o cliente (o mais comum), mande o link JÁ NESSA CONVERSA pra ele clicar e preencher ali mesmo - não precisa de WhatsApp nem de mais ninguém no meio. Se for um funcionário pedindo em nome de um cliente que não está no chat, aí sim ele repassa o link pro cliente por onde for mais fácil (WhatsApp é uma opção, não a única).
 - Acessos/permissões por tela (Fechamentos, Entregas, Estoque, Central, Chamados, Parque...) são liberados pelo Master na tela Usuários.
 - Central de Solicitações: pedidos de compra, manutenção, suporte de TI, pagamento (boleto/despesa) e nota fiscal viram tickets numerados (#10000 em diante) que o Master aprova ou rejeita. Depois de aprovado, o andamento aparece no ticket.
@@ -124,7 +124,7 @@ O Zenith Ops é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, 
 - chamar_atendente: acione quando a pessoa pedir um humano, quando você não souber resolver, ou quando o assunto for sensível. ANTES de chamar, use registrar_nota_interna com um resumo (situacao PENDENTE) pra o humano já chegar sabendo. Avise que o time já foi chamado e responde ali mesmo na conversa.
 - registrar_nota_interna: deixa um resumo interno do atendimento (só o time vê, nunca a pessoa). Use principalmente ANTES de chamar_atendente (o que ficou pendente) e sempre que valer registrar o que foi feito. Não fala com a pessoa nem encerra a conversa.
 - encerrar_atendimento: encerra a conversa como RESOLVIDA. Use SÓ quando a pessoa confirmar, com clareza, que resolveu / não precisa de mais nada - nunca pra passar pra um humano (isso é chamar_atendente) nem com algo ainda pendente. Depois de chamar, mande UMA mensagem curta de despedida; a conversa fecha em seguida.
-- desbloquear_login: destrava um acesso bloqueado (3 senhas erradas) - login principal do Zenith OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão mantém a MESMA senha - nunca invente nem envie senha nenhuma nessa primeira chamada. Se travar de novo: no login principal, PERGUNTE "você lembra da sua senha atual?" antes de chamar de novo com lembraSenha=true/false (só com false uma senha padrão é definida, e a pessoa é obrigada a cadastrar uma própria no próximo login); no operador do Abastecimento, a ferramenta já reseta pra uma senha nova sozinha - é só repassar a senha que ela devolver.${temFerramentaPedido ? `
+- desbloquear_login: destrava um acesso bloqueado (3 senhas erradas) - login principal do NoPulso OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão mantém a MESMA senha - nunca invente nem envie senha nenhuma nessa primeira chamada. Se travar de novo: no login principal, PERGUNTE "você lembra da sua senha atual?" antes de chamar de novo com lembraSenha=true/false (só com false uma senha padrão é definida, e a pessoa é obrigada a cadastrar uma própria no próximo login); no operador do Abastecimento, a ferramenta já reseta pra uma senha nova sozinha - é só repassar a senha que ela devolver.${temFerramentaPedido ? `
 - consultar_pedido: consulta o status de UM pedido específico no Monitor (aprovado, recusado, estornado, fraude suspeita). Peça os 3 dados ANTES de chamar (uma pergunta por vez, o que faltar): o código da loja (IDPULSE, a mesma coluna "Unidade" do Fechamento), o nome do cliente e o valor do pedido. A busca já vem limitada às lojas que essa pessoa tem acesso - se não achar, pode ser de outra loja, não assuma fraude/erro. Nunca invente status; se a ferramenta não achar nada, diga isso e ofereça chamar_atendente. Se o status desse pedido mudar depois da sua resposta, a pessoa é avisada automaticamente - não precisa te perguntar de novo.` : `
 - Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora (só quem está logado com permissão de Monitor). Use chamar_atendente.`}${(logado && logado.isMaster) ? `
 - executar_acao_agente: executa uma ação do catálogo NOC Zenith (veja a lista mais abaixo). Use SÓ pra ações que estão nessa lista - nunca invente uma ação nem tente rodar algo fora do catálogo. Se a ação precisar de aprovação, avise que mandou pro Master aprovar; se não precisar, informe o resultado direto.` : ''}
@@ -138,7 +138,7 @@ ${logado ? `\n## Quem fala com você agora\nConta logada: ${logado.username}${lo
 const TOOLS_BASE = [
   {
     name: 'criar_ticket',
-    description: 'Cria uma solicitação (ticket) na Central do Zenith. Use somente depois que a pessoa confirmar o resumo do pedido.',
+    description: 'Cria uma solicitação (ticket) na Central do NoPulso. Use somente depois que a pessoa confirmar o resumo do pedido.',
     input_schema: {
       type: 'object',
       properties: {
@@ -170,7 +170,7 @@ const TOOLS_BASE = [
   },
   {
     name: 'desbloquear_login',
-    description: 'Desbloqueia um login que travou após 3 senhas erradas - do Zenith Ops OU um operador do Abastecimento do Carrinho (login de balcão, 4 letras + 4 números) - por padrão SEM mudar a senha (a pessoa volta a entrar com a mesma de sempre). Peça o nome de usuário antes de chamar. Se a ferramenta pedir, pergunte se a pessoa lembra a senha e chame de novo com lembraSenha preenchido (só existe pro login principal - operador do Abastecimento já reseta direto na segunda vez).',
+    description: 'Desbloqueia um login que travou após 3 senhas erradas - do NoPulso OU um operador do Abastecimento do Carrinho (login de balcão, 4 letras + 4 números) - por padrão SEM mudar a senha (a pessoa volta a entrar com a mesma de sempre). Peça o nome de usuário antes de chamar. Se a ferramenta pedir, pergunte se a pessoa lembra a senha e chame de novo com lembraSenha preenchido (só existe pro login principal - operador do Abastecimento já reseta direto na segunda vez).',
     input_schema: {
       type: 'object',
       properties: {
@@ -244,7 +244,7 @@ const TOOL_EXECUTAR_ACAO_AGENTE = {
     type: 'object',
     properties: {
       acaoId: { type: 'string', description: 'O [id] exato da ação, copiado da lista do prompt.' },
-      parametros: { type: 'object', description: 'Dados que essa ação específica precisa (ver a descrição dela no prompt) - ex: codigo/posto pra comando de máquina, ou email/username/permissions pra criar um usuário do Zenith.' },
+      parametros: { type: 'object', description: 'Dados que essa ação específica precisa (ver a descrição dela no prompt) - ex: codigo/posto pra comando de máquina, ou email/username/permissions pra criar um usuário do NoPulso.' },
       resumo: { type: 'string', description: 'Resumo de 1 linha do que vai ser feito, pro card de aprovação (se precisar) ou pro registro do que foi executado.' },
     },
     required: ['acaoId', 'resumo'],
@@ -364,9 +364,9 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       return `Prontinho! Defini a senha padrão "${SENHA_PADRAO_BOT}" pra esse acesso - a pessoa entra com ela e é OBRIGADA a cadastrar uma senha própria na hora. Avise a pessoa.`;
     }
 
-    // nao achou no login principal do Zenith - tenta o login de operador do
+    // nao achou no login principal do NoPulso - tenta o login de operador do
     // Abastecimento do Carrinho (balcao, 4 letras + 4 numeros). Esse login ja
-    // fica atras do login normal do Zenith + secao de abastecimento (nao da
+    // fica atras do login normal do NoPulso + secao de abastecimento (nao da
     // acesso a mais nada sozinho, ver abastecimentoCarrinho.js), entao aqui
     // nao exige a mesma checagem de identidade do login principal - alias,
     // operador nao tem e-mail cadastrado pra comparar de qualquer forma
@@ -430,7 +430,7 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       .slice(0, 5);
     if (!encontrados.length) return 'Nenhum pedido encontrado com esses dados nas lojas que essa pessoa tem acesso (confira o código da loja, o nome e o valor - ou pode ser de outra loja, ou já saiu da retenção do Monitor).';
     // registra o "retrato" do status visto agora - se mudar depois, a pessoa
-    // e avisada sozinha (SSE com o Zenith aberto + push com fechado), sem
+    // e avisada sozinha (SSE com o NoPulso aberto + push com fechado), sem
     // precisar voltar aqui perguntar de novo (ver pedidoWatch.js/index.js)
     for (const o of encontrados) {
       pedidoWatch.registrar({ pedidoId: o.pedidoId, userId: chat.logado.id, unidade: o.unidade, statusVisto: o.statusAtual, chatId: chat.id }).catch(() => {});

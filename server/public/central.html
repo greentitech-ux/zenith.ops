@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Central de Solicitações · Zenith Ops</title>
+<title>Central de Solicitações · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -16,9 +16,9 @@
     --ok:#3ddc97; --ok-dim:#1c3a2e;
     --warn:#f2b33d; --warn-dim:#3a2e14;
     --bad:#ff5c5c; --bad-dim:#3a1616;
-    --accent:#5cc8ff;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;min-width:0;}
   html{overflow-x:hidden;}
@@ -33,7 +33,7 @@
   .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
   a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;transition:border-color .15s ease,color .15s ease,background .15s ease;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
-  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
   .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,color .15s ease;}
   .btn-notif:hover{border-color:var(--accent);color:var(--text);}
@@ -64,7 +64,7 @@
   .btn-remover{background:var(--bad-dim);color:var(--bad);border:none;border-radius:6px;width:32px;height:36px;font-size:15px;cursor:pointer;flex:none;}
   .btn-add{margin-top:8px;background:var(--panel2);border:1px dashed var(--line);color:var(--accent);border-radius:8px;padding:8px 10px;font-size:12px;font-family:var(--sans);cursor:pointer;width:100%;}
   .btn-add:hover{border-color:var(--accent);}
-  .btn-primary{width:100%;margin-top:16px;background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .btn-primary{width:100%;margin-top:16px;background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);}
   .btn-primary:disabled{opacity:.5;cursor:default;}
   .msg{margin-top:10px;font-size:12.5px;padding:10px 12px;border-radius:8px;word-break:break-word;}
   .msg.ok{background:var(--ok-dim);color:var(--ok);}
@@ -80,11 +80,11 @@
   .sheet .sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px;}
   .tipos{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;}
   .tipo-btn{font-family:var(--sans);font-size:12px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
-  .tipo-btn.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .tipo-btn.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .link-cliente-box{background:var(--panel2);border:1px dashed var(--accent);border-radius:10px;padding:10px 12px;margin-bottom:12px;}
   .link-cliente-titulo{font-size:12.5px;font-weight:600;margin-bottom:4px;}
   .link-cliente-sub{font-size:11.5px;color:var(--muted);line-height:1.4;margin-bottom:8px;}
-  .btn-link-cliente{font-family:var(--sans);font-size:12.5px;font-weight:600;padding:9px 12px;border-radius:8px;border:none;background:var(--accent);color:#06202b;cursor:pointer;width:100%;}
+  .btn-link-cliente{font-family:var(--sans);font-size:12.5px;font-weight:600;padding:9px 12px;border-radius:8px;border:none;background:var(--accent);color:#0b0d10;cursor:pointer;width:100%;}
   #link-cliente-msg{margin-top:8px;font-size:11px;font-family:var(--mono);color:var(--ok);word-break:break-all;}
   .hero{max-width:640px;margin:0 auto;text-align:center;padding:36px 20px;}
   .hero .icone{font-size:34px;margin-bottom:10px;}
@@ -104,7 +104,7 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
         <h1>Central de Solicitações</h1>
       </div>
     </div>
@@ -215,7 +215,7 @@
       <div id="campos-gerais" class="hidden">
         <div class="link-cliente-box">
           <div class="link-cliente-titulo">📱 Prefere mandar um link pra outra pessoa preencher?</div>
-          <div class="link-cliente-sub">Gera um link (com a loja e o tipo já pré-preenchidos) - útil pra passar pro Beniboy mandar num atendimento, ou pra alguém preencher sem precisar de acesso ao Zenith.</div>
+          <div class="link-cliente-sub">Gera um link (com a loja e o tipo já pré-preenchidos) - útil pra passar pro Beniboy mandar num atendimento, ou pra alguém preencher sem precisar de acesso ao NoPulso.</div>
           <button type="button" class="btn-link-cliente" onclick="copiarLinkSolicitacaoPublica()">🔗 Copiar link</button>
           <div id="link-solicitacao-msg" class="hidden"></div>
         </div>

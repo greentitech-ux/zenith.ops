@@ -1,6 +1,6 @@
 // rh.js
 // Modulo de RH: ficha de funcionarios (extras e efetivos) por loja, sem
-// exigir login no Zenith - a maioria de quem trabalha na loja (extra,
+// exigir login no NoPulso - a maioria de quem trabalha na loja (extra,
 // cozinha, entregador) nunca acessa o sistema, entao esse cadastro e
 // independente de users.js. Cobre as frentes pedidas pelo usuario:
 // - Cadastro no 1o dia (nome, contato, curriculo), com 2 tipos (tipoCadastro):
@@ -231,7 +231,7 @@ async function criar({
     experiencia: tipo === 'efetivado' ? calcularExperienciaInicial(dataAdmissaoOk, semExperienciaOk) : null,
     historicoExperiencia: [],
     // token permanente do link de auto-atendimento (rh-colaborador.html) -
-    // a pessoa bate ponto sem precisar de login no Zenith (ver
+    // a pessoa bate ponto sem precisar de login no NoPulso (ver
     // buscarPorToken); nao expira sozinho, so quem tem acesso a unidade
     // pode regenerar (ver regenerarLink) se o link vazar
     linkToken: crypto.randomBytes(24).toString('hex'),
@@ -495,7 +495,7 @@ async function registrarDecisaoExperiencia(id, { decisao, observacao, porEmail }
 }
 
 // ajuste manual (Master) do estagio de experiencia - pra backfill de quem
-// ja estava em experiencia formal antes dessa feature existir no Zenith
+// ja estava em experiencia formal antes dessa feature existir no NoPulso
 // (ex: importar de um relatorio da folha de pagamento) ou pra corrigir um
 // prazo lancado errado. Sobrescreve a experiencia atual direto, sem passar
 // pelo fluxo normal de decisao - fica registrado no historico com

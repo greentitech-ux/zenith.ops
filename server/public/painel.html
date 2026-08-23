@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Painel · Zenith Ops</title>
+<title>Painel · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -16,9 +16,9 @@
     --ok:#3ddc97; --ok-dim:#1c3a2e;
     --warn:#f2b33d; --warn-dim:#3a2e14;
     --bad:#ff5c5c; --bad-dim:#3a1616;
-    --accent:#5cc8ff;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;}
   html{overflow-x:hidden;}
@@ -39,7 +39,7 @@
   @media(max-width:640px){ .header-nav{flex-direction:row;align-items:center;} .nav-actions{justify-content:flex-end;} }
   a.back,button.back{font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;transition:border-color .15s ease,color .15s ease,background .15s ease;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
-  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
   .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
   .hamburger-btn:hover{border-color:var(--accent);}
@@ -127,7 +127,7 @@
   .pestoque-chip{font-family:var(--mono);font-size:11px;padding:5px 9px;border-radius:14px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;transition:border-color .15s ease,color .15s ease;}
   .pestoque-chip:hover{border-color:var(--accent);color:var(--text);}
   .pestoque-chip.ok{color:var(--ok);}
-  .pestoque-chip.ativo{border-color:var(--accent);color:var(--text);background:rgba(92,200,255,.1);}
+  .pestoque-chip.ativo{border-color:var(--accent);color:var(--text);background:rgba(184, 255, 60,.1);}
   .pestoque-tabela-wrap{max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;}
   table.pestoque-tabela{width:100%;border-collapse:collapse;font-size:12px;}
   table.pestoque-tabela th{position:sticky;top:0;background:var(--panel2);text-align:left;padding:6px 8px;font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
@@ -140,7 +140,7 @@
   .pweek-titulo b{font-family:var(--mono);color:var(--text);font-size:13px;}
   .pweekstrip{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
   .pweekday{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 4px;text-align:center;}
-  .pweekday.hoje{border-color:var(--accent);background:rgba(92,200,255,.08);}
+  .pweekday.hoje{border-color:var(--accent);background:rgba(184, 255, 60,.08);}
   .pweekday .dia{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;}
   .pweekday.hoje .dia{color:var(--accent);}
   .pweekday .qtd{font-size:16px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums;color:var(--muted);}
@@ -201,7 +201,7 @@
   .notif-solicitacao .ns-titulo{font-size:13px;font-weight:700;}
   .notif-solicitacao .ns-corpo{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.4;}
   .notif-solicitacao .ns-direcionado{font-size:11px;color:var(--accent);margin-top:6px;font-family:var(--mono);}
-  .notif-solicitacao button.ns-ok{margin-top:10px;width:100%;background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .notif-solicitacao button.ns-ok{margin-top:10px;width:100%;background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
   @keyframes notif-pulse{0%,100%{border-color:var(--warn);}50%{border-color:var(--accent);}}
   @keyframes notif-in{from{opacity:0;transform:translateX(16px);}to{opacity:1;transform:translateX(0);}}
 </style>
@@ -216,7 +216,7 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
         <h1>Painel</h1>
       </div>
     </div>
@@ -272,7 +272,7 @@
     <p id="ts2-msg" class="ts-msg hidden"></p>
     <div style="display:flex;gap:8px;margin-top:14px;">
       <button type="button" class="btn-secundario-full" onclick="fecharResetSenha()" style="background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:13px;cursor:pointer;flex:1;">Cancelar</button>
-      <button type="submit" id="ts2-btn" style="background:var(--accent);color:#06121a;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;flex:1;">Salvar</button>
+      <button type="submit" id="ts2-btn" style="background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;flex:1;">Salvar</button>
     </div>
   </form>
 </div>

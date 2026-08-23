@@ -28,7 +28,7 @@
 // POST /api/loja-status/:codigo/computadores em index.js): 'atendimento'
 // mostra o chat publico do Beniboy (pro cliente falar com a loja, ver
 // atendimento.html) - o caso original, pensado pra tablet/quiosque na
-// entrada; 'interno' mostra a tela normal de login do Zenith (index.html) -
+// entrada; 'interno' mostra a tela normal de login do NoPulso (index.html) -
 // pra computador de escritorio/servidor que so precisa ficar "vivo" pro
 // monitoramento; 'abastecimento' mostra a tela do Abastecimento Carrinho
 // (abastecimento.html, Dom Aeroporto) - pro tablet do carrinho/loja que
@@ -1034,7 +1034,7 @@ const COMANDO_LIMPAR_TRAVADOS = [
 // COMANDO_ABORTAR_REINICIO). Com /t > 0 o Windows já força o fechamento no
 // fim da contagem, então /f seria redundante.
 const COMANDO_REINICIAR = [
-  'shutdown /r /t 120 /c "Zenith NOC: manutencao programada. O computador vai reiniciar em 2 minutos. Salve o que estiver aberto."',
+  'shutdown /r /t 120 /c "NoPulso NOC: manutencao programada. O computador vai reiniciar em 2 minutos. Salve o que estiver aberto."',
   '"Reinicio agendado para daqui a 2 minutos."',
 ].join('\n');
 
@@ -1276,7 +1276,7 @@ async function responderChat(codigo, posto, texto, token) {
 // Celular navegando não é máquina de loja. Num posto 'interno', a batida
 // certa vem do computador de verdade (navegador desktop) ou do vigia
 // ("NOCZenith/1.0 (Windows NT; PowerShell)") - se a ÚLTIMA batida veio de um
-// navegador de CELULAR, foi alguém abrindo o Zenith no telefone com o
+// navegador de CELULAR, foi alguém abrindo o NoPulso no telefone com o
 // monitoramento fixo gravado, e a "queda" é só a pessoa fechando o navegador
 // ou bloqueando a tela. Registra o evento normalmente (fica no histórico do
 // NOC), mas a transição sai marcada pra NÃO virar push de "Loja sem conexão".

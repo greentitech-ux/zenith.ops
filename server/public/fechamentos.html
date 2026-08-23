@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fechamentos de caixa · Zenith Ops</title>
+<title>Fechamentos de caixa · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -16,9 +16,9 @@
     --ok:#3ddc97; --ok-dim:#1c3a2e;
     --warn:#f2b33d; --warn-dim:#3a2e14;
     --bad:#ff5c5c; --bad-dim:#3a1616;
-    --accent:#5cc8ff;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;}
   html{overflow-x:hidden;}
@@ -33,7 +33,7 @@
   @media(max-width:640px){ .header-nav{flex-direction:column;align-items:stretch;} .nav-actions{justify-content:flex-end;} }
   a.back,button.back{font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;transition:border-color .15s ease,color .15s ease,background .15s ease;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
-  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
   .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
   .hamburger-btn:hover{border-color:var(--accent);}
@@ -219,7 +219,7 @@
      Some sozinho quando não houver mais nada pra importar (ver
      carregarImportBravo) - é uma tarefa com fim, não um painel permanente. -->
 <div class="panel hidden" id="import-bravo-panel">
-  <h2><div class="title-group"><span>📥 Trazer o histórico da planilha pro Zenith</span></div></h2>
+  <h2><div class="title-group"><span>📥 Trazer o histórico da planilha pro NoPulso</span></div></h2>
   <div style="padding:12px 16px;">
     <div class="sub" style="margin-bottom:12px;">
       A planilha do Grupo Bravo foi aposentada. Os lançamentos antigos dela ainda não estão aqui —
@@ -426,7 +426,7 @@
     <textarea id="ef-motivo"></textarea>
 
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
-      <button type="button" class="back" style="background:var(--accent);color:#06202b;border-color:var(--accent);cursor:pointer;" onclick="salvarEdicaoFechamento()">💾 Salvar</button>
+      <button type="button" class="back" style="background:var(--accent);color:#0b0d10;border-color:var(--accent);cursor:pointer;" onclick="salvarEdicaoFechamento()">💾 Salvar</button>
       <button type="button" class="back" style="cursor:pointer;" onclick="fecharEdicaoFechamento()">Cancelar</button>
       <button type="button" class="back" style="cursor:pointer;color:var(--bad);border-color:var(--bad);margin-left:auto;" onclick="excluirFechamento(FECHAMENTO_EDITANDO_ID)">🗑️ Remover fechamento</button>
     </div>
@@ -453,7 +453,7 @@
       <input type="text" id="se-descricao">
       <div class="fech-msg hidden" id="msg-sangria-editar"></div>
       <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
-        <button type="submit" class="back" style="background:var(--accent);color:#06202b;border-color:var(--accent);cursor:pointer;">💾 Salvar</button>
+        <button type="submit" class="back" style="background:var(--accent);color:#0b0d10;border-color:var(--accent);cursor:pointer;">💾 Salvar</button>
         <button type="button" class="back" style="cursor:pointer;" onclick="fecharEditarSangria()">Cancelar</button>
         <button type="button" class="back" style="cursor:pointer;color:var(--bad);border-color:var(--bad);margin-left:auto;" onclick="excluirSangria()">🗑️ Excluir</button>
       </div>
@@ -604,7 +604,7 @@ function atualizarVisibilidadeGrupos(){
     document.getElementById('fech-grupo').value = GRUPO_FIXO;
     document.getElementById('f-grupo').classList.add('hidden');
     document.getElementById('fech-grupo').classList.add('hidden');
-    document.title = `Fechamentos ${NOME_GRUPO_FIXO[GRUPO_FIXO]} · Zenith Ops`;
+    document.title = `Fechamentos ${NOME_GRUPO_FIXO[GRUPO_FIXO]} · NoPulso`;
     document.querySelector('h1').textContent = `Fechamentos de caixa · ${NOME_GRUPO_FIXO[GRUPO_FIXO]}`;
   }
 

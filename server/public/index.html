@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Zenith Ops</title>
+<title>NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -14,8 +14,8 @@
     --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
     --text:#e7ecf1; --muted:#7d8896;
     --bad:#ff5c5c;
-    --accent:#5cc8ff;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;}
   html{overflow-x:hidden;}
@@ -24,10 +24,19 @@
   .auth-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
   .auth-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:28px;width:100%;max-width:360px;}
   .auth-logo{display:block;width:72px;height:72px;margin:0 auto 14px;border-radius:50%;}
-  .auth-card h1{font-size:16px;margin:0 0 4px;}
+  /* Logotipo NoPulso: marca grafica (polyline de sinal vital) + wordmark
+     "No" no texto normal e "Pulso" no acento. E SVG inline de proposito -
+     nao depende de /logo.png (que era a arte antiga) e acompanha o tema
+     claro/escuro sozinho, porque le as variaveis de cor. */
+  .auth-marca{display:flex;align-items:center;justify-content:center;gap:10px;margin:0 0 14px;}
+  .auth-wordmark{font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1;color:var(--text);}
+  .auth-wordmark b{color:var(--accent);font-weight:800;}
+  .auth-eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--accent);text-align:center;margin:0 0 6px;}
+  .auth-card h1{font-size:18px;font-weight:700;letter-spacing:-.01em;margin:0 0 4px;}
   .auth-card label{display:block;margin-top:14px;font-size:12px;color:var(--muted);}
   .auth-card input{width:100%;margin-top:5px;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-family:var(--sans);font-size:13px;}
-  .auth-card button{width:100%;margin-top:18px;padding:10px;border-radius:8px;border:none;background:var(--accent);color:#06121a;font-weight:700;font-size:13px;cursor:pointer;}
+  .auth-card button{width:100%;margin-top:18px;padding:10px;border-radius:8px;border:none;background:var(--accent);color:#0b0d10;font-weight:700;font-size:13px;cursor:pointer;}
   .auth-card button:disabled{opacity:.6;cursor:default;}
   .auth-error{color:var(--bad);font-size:12px;margin-top:10px;}
   .auth-suporte{font-size:11px;color:var(--muted);text-align:center;margin-top:16px;}
@@ -49,8 +58,8 @@
   #auth-screen.auth-screen::before{
     content:'';position:absolute;inset:0;z-index:0;pointer-events:none;
     background:
-      radial-gradient(ellipse 640px 380px at 50% 0%, rgba(255,183,94,.11), transparent 60%),
-      radial-gradient(ellipse 520px 520px at 92% 100%, rgba(92,200,255,.08), transparent 65%);
+      radial-gradient(ellipse 640px 380px at 50% 0%, rgba(184,255,60,.10), transparent 60%),
+      radial-gradient(ellipse 520px 520px at 92% 100%, rgba(92,200,255,.07), transparent 65%);
   }
   /* Com imagem de campanha, a arte aparece LIMPA. Antes havia uma cortina
      escura de 55%-75% por cima dela: existia pra garantir contraste do
@@ -151,9 +160,9 @@
   </div>
 
   <form id="auth-form" class="auth-card">
-    <img src="/logo.png" alt="Zenith Ops" class="auth-logo">
-    <h1 style="text-align:center;">Zenith Ops</h1>
-    <p style="font-size:12px;margin:2px 0 0;text-align:center;color:var(--muted);">Entre com seu acesso</p>
+    <div class="auth-marca"><svg width="64" height="40" viewBox="0 0 64 40" fill="none" aria-hidden="true"><polyline points="2,26 14,26 21,10 29,32 36,20 62,20" stroke="var(--accent)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="auth-wordmark" style="font-size:30px;">No<b>Pulso</b></span></div>
+    <div class="auth-eyebrow">Central de controle operacional</div>
+    <h1 style="text-align:center;">Entre com seu acesso</h1>
     <label>Usuário ou email
       <input type="text" id="auth-email" required autocomplete="username">
     </label>
@@ -166,7 +175,7 @@
   </form>
 
   <div class="login-footer">
-    <span>Zenith Ops faz parte do</span>
+    <span>NoPulso faz parte do</span>
     <!-- Conteúdo inicial = a logo fixa do Grupo Bravo. Se o Master
          cadastrar logos em login-custom.html, elas SUBSTITUEM isto (ver
          carregarLoginCustom). Manter o fixo como ponto de partida é o que
@@ -180,7 +189,7 @@
 
 <section id="trocar-senha-screen" class="auth-screen hidden">
   <form id="trocar-senha-form" class="auth-card">
-    <img src="/logo.png" alt="Zenith Ops" class="auth-logo">
+    <div class="auth-marca"><svg width="48" height="30" viewBox="0 0 64 40" fill="none" aria-hidden="true"><polyline points="2,26 14,26 21,10 29,32 36,20 62,20" stroke="var(--accent)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="auth-wordmark" style="font-size:22px;">No<b>Pulso</b></span></div>
     <h1 style="text-align:center;">Atualize sua senha</h1>
     <p style="font-size:12px;margin:2px 0 0;text-align:center;color:var(--muted);">Por segurança, defina uma nova senha antes de continuar.</p>
     <label>Nova senha
@@ -388,7 +397,7 @@ async function heartbeatLoja(codigo, posto){
 // em diante, mesmo se o icone reabrir a URL pelada, o monitoramento
 // continua vindo do que foi salvo nesse mesmo computador/perfil do Chrome
 function iniciarHeartbeatLoja(){
-  // celular NUNCA vira monitor de presença: quem abre o Zenith no celular é
+  // celular NUNCA vira monitor de presença: quem abre o NoPulso no celular é
   // uma pessoa navegando, que fecha o navegador/bloqueia a tela toda hora -
   // se o aparelho gravar o zenithMonitorFixo (bastava abrir UM link com
   // ?unidade=&posto=), cada bloqueio vira alarme falso de "loja sem

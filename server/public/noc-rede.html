@@ -8,9 +8,9 @@
   :root{
     --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
     --text:#e7ecf1; --muted:#7d8896;
-    --ok:#3ddc97; --warn:#f2b33d; --bad:#ff5c5c; --accent:#5cc8ff;
+    --ok:#3ddc97; --warn:#f2b33d; --bad:#ff5c5c; --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
 
     /* Paleta categórica (coluna dark do sistema de dataviz), validada contra
        ESTA superfície (#12161b) e não contra a padrão: banda de luminosidade,
@@ -47,7 +47,7 @@
     border:1px solid var(--line);border-radius:16px;padding:6px 12px;cursor:pointer;white-space:nowrap;
     transition:border-color .15s ease,color .15s ease,background .15s ease;}
   .filtro-btn:hover{color:var(--text);border-color:var(--accent);}
-  .filtro-btn.sel{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.12);font-weight:600;}
+  .filtro-btn.sel{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.12);font-weight:600;}
   .filtro-gran{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-left:auto;white-space:nowrap;}
   @media(max-width:640px){ .filtro-gran{margin-left:0;width:100%;} }
   /* aviso de cobertura parcial: honestidade sobre até onde o dado existe */
@@ -127,7 +127,7 @@
   <div class="header-top">
     <button class="hamburger-btn" id="nav-toggle" aria-label="Menu">☰</button>
     <div style="flex:1;min-width:0;">
-      <div class="eyebrow">Zenith Ops · Solutions TI Tech</div>
+      <div class="eyebrow">NoPulso · Solutions TI Tech</div>
       <h1>📈 Análise de Rede</h1>
     </div>
   </div>

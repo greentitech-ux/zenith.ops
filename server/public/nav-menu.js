@@ -1,5 +1,5 @@
 // nav-menu.js
-// FONTE UNICA do menu lateral (hamburguer) de todo o Zenith Ops: a
+// FONTE UNICA do menu lateral (hamburguer) de todo o NoPulso: a
 // definicao dos itens, a montagem do HTML, a regra de quem ve o que, o
 // acordeao dos grupos, o realce da pagina atual e o visual.
 //
@@ -175,8 +175,15 @@
         padding:14px 14px 10px; border-bottom:1px solid var(--line,#232a33);
         flex:none; display:flex; align-items:center; gap:10px;
       }
-      .nmz-marca{ font-family:var(--mono,monospace); font-size:11px; color:var(--accent,#5cc8ff);
-        text-transform:uppercase; letter-spacing:.12em; font-weight:700; line-height:1.3; }
+      /* logotipo NoPulso: "No" no texto normal + "Pulso" no acento, com a
+         marca grafica de sinal vital a esquerda (mesma polyline do login,
+         so que em 30x20). Antes era o nome em mono/caixa-alta; virou
+         wordmark em Archivo 800 pra bater com a identidade nova. */
+      .nmz-marca{ display:flex; align-items:center; gap:7px; min-width:0;
+        font-family:var(--sans,sans-serif); font-size:16px; font-weight:800;
+        letter-spacing:-.02em; line-height:1.15; color:var(--text,#e7ecf1); }
+      .nmz-marca svg{ flex:none; display:block; }
+      .nmz-marca b{ color:var(--accent,#b8ff3c); font-weight:800; }
       .nmz-quem{ font-size:11px; color:var(--muted,#7d8896); margin-top:2px;
         overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px; }
       .nmz-fechar{
@@ -184,7 +191,7 @@
         color:var(--muted,#7d8896); border-radius:8px; width:30px; height:30px;
         font-size:15px; line-height:1; cursor:pointer; transition:.15s;
       }
-      .nmz-fechar:hover{ color:var(--text,#e7ecf1); border-color:var(--accent,#5cc8ff); }
+      .nmz-fechar:hover{ color:var(--text,#e7ecf1); border-color:var(--accent,#b8ff3c); }
 
       .nmz-corpo{ flex:1 1 auto; overflow-y:auto; padding:8px; }
       .nmz-corpo::-webkit-scrollbar{ width:8px; }
@@ -215,12 +222,12 @@
       #nav-drawer .nmz-item:hover{ background:var(--panel2,#181d24); }
       #nav-drawer .nmz-item:hover .nmz-ico{ filter:none; }
       #nav-drawer a.nmz-item.active{
-        background:rgba(92,200,255,.13); color:var(--accent,#5cc8ff); font-weight:600;
+        background:rgba(184, 255, 60,.13); color:var(--accent,#b8ff3c); font-weight:600;
       }
       #nav-drawer a.nmz-item.active .nmz-ico{ filter:none; }
       #nav-drawer a.nmz-item.active::before{
         content:""; position:absolute; left:0; top:6px; bottom:6px; width:3px;
-        border-radius:0 3px 3px 0; background:var(--accent,#5cc8ff);
+        border-radius:0 3px 3px 0; background:var(--accent,#b8ff3c);
       }
       #nav-drawer a.nmz-item.hidden, #nav-drawer .nmz-grupo.hidden{ display:none!important; }
 
@@ -233,7 +240,7 @@
       }
       #nav-drawer .nmz-rodape .nmz-sair{ color:var(--bad,#ff5c5c); }
       #nav-drawer .nmz-rodape .nmz-sair:hover{ background:rgba(255,92,92,.1); }
-      #nav-drawer .nmz-rodape .nmz-suporte{ color:var(--accent,#5cc8ff); }
+      #nav-drawer .nmz-rodape .nmz-suporte{ color:var(--accent,#b8ff3c); }
 
       @media (max-width:420px){ #nav-drawer{ width:86vw; } }
 
@@ -247,7 +254,7 @@
         color:var(--text,#e7ecf1); text-decoration:none;
         font-size:12.5px; line-height:1; white-space:nowrap; transition:.15s;
       }
-      .nmz-voltar:hover{ border-color:var(--accent,#5cc8ff); color:var(--accent,#5cc8ff); }
+      .nmz-voltar:hover{ border-color:var(--accent,#b8ff3c); color:var(--accent,#b8ff3c); }
       .nmz-voltar.hidden{ display:none!important; }
       .nmz-voltar .nmz-vseta{ font-size:15px; line-height:1; opacity:.8; }
       /* no celular sobra so a seta - o titulo da tela e mais importante
@@ -285,7 +292,7 @@
     nav.innerHTML = `
       <div class="nmz-topo">
         <div style="min-width:0;">
-          <div class="nmz-marca">Zenith Ops</div>
+          <div class="nmz-marca"><svg width="30" height="20" viewBox="0 0 64 40" fill="none" aria-hidden="true"><polyline points="2,26 14,26 21,10 29,32 36,20 62,20" stroke="var(--accent,#b8ff3c)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>No<b>Pulso</b></span></div>
           <div class="nmz-quem" id="nmz-quem"></div>
         </div>
         <button type="button" class="nmz-fechar" id="nmz-fechar" aria-label="Fechar menu" title="Fechar">✕</button>

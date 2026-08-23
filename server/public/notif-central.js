@@ -121,7 +121,7 @@
     .zn-notif .zn-titulo{font-size:13px;font-weight:700;color:var(--text);}
     .zn-notif .zn-corpo{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.4;}
     .zn-notif .zn-direcionado{font-size:11px;color:var(--accent);margin-top:6px;font-family:var(--mono);}
-    .zn-notif button.zn-ok{margin-top:10px;width:100%;background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+    .zn-notif button.zn-ok{margin-top:10px;width:100%;background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
     @keyframes zn-notif-pulse{0%,100%{border-color:var(--warn);}50%{border-color:var(--accent);}}
     @keyframes zn-notif-in{from{opacity:0;transform:translateX(16px);}to{opacity:1;transform:translateX(0);}}
 

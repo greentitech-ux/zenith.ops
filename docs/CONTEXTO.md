@@ -1,4 +1,4 @@
-# Zenith Ops — contexto do projeto
+# NoPulso — contexto do projeto
 
 Documento de partida pra quem (pessoa ou IA) vai mexer no código sem ter
 acompanhado o histórico. Diz o que o sistema é, como ele foi construído,
@@ -14,7 +14,7 @@ aqui diz **por que** as coisas são do jeito que são.
 Painel operacional multi-empresa de um grupo de franquias. Nasceu como
 monitor de transações da Adyen (daí o nome do repositório,
 `adyen-monitor`) e virou o sistema que a operação inteira usa. O nome do
-produto é **Zenith Ops**.
+produto é **NoPulso**.
 
 O grupo opera em frentes bem diferentes, e o sistema cobre todas:
 

@@ -1,6 +1,6 @@
 // bravoMapa.js
 // Decisoes do Master sobre CADA COLUNA da planilha do Grupo Bravo: criar campo
-// novo no Zenith, unificar com um campo que ja existe (mesmo com nome
+// novo no NoPulso, unificar com um campo que ja existe (mesmo com nome
 // diferente/parecido), ou ignorar.
 //
 // Existe porque a lista de colunas do importador era 100% fixa no codigo

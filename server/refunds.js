@@ -251,7 +251,7 @@ async function buscarPorLinkAcao(id, link) {
 
 // decide (aprova/recusa) via o link de acao - mesma logica de updateStatus,
 // so que autorizando pelo link em vez de sessao, e aceitando um nome livre
-// (quem abriu o link pode nao ter conta no Zenith)
+// (quem abriu o link pode nao ter conta no NoPulso)
 async function decidirComLink(id, link, { acao, motivoDecisao, comprovante, autorNome }) {
   const registro = await buscarPorLinkAcao(id, link);
   if (!registro) throw new Error('Link inválido ou revogado.');

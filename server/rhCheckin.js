@@ -12,7 +12,7 @@
 // So faz check-in aqui quem AINDA NAO tem vinculo formal - extra (avulso) e
 // candidato em teste de 5 dias (ver elegivelParaCheckin). Colaborador
 // efetivado (direto ou promovido do teste) NAO usa esse quiosque - ele bate
-// o ponto no sistema de ponto de verdade, fora do Zenith.
+// o ponto no sistema de ponto de verdade, fora do NoPulso.
 //
 // Dois freios pedidos pelo usuario, resolvidos com uma pendencia de
 // aprovacao (status 'pendente_aprovacao') em vez de bloquear liso:

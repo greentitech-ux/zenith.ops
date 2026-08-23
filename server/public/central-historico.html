@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Histórico de Solicitações · Zenith Ops</title>
+<title>Histórico de Solicitações · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -16,9 +16,9 @@
     --ok:#3ddc97; --ok-dim:#1c3a2e;
     --warn:#f2b33d; --warn-dim:#3a2e14;
     --bad:#ff5c5c; --bad-dim:#3a1616;
-    --accent:#5cc8ff;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;min-width:0;}
   html{overflow-x:hidden;}
@@ -32,7 +32,7 @@
   .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
   a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;transition:border-color .15s ease,color .15s ease,background .15s ease;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
-  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
   .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,color .15s ease;}
   .btn-notif:hover{border-color:var(--accent);color:var(--text);}
@@ -72,7 +72,7 @@
   .card .sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:2px;word-break:break-word;}
   .card .valores{display:flex;gap:12px;margin-top:8px;font-size:12px;flex-wrap:wrap;}
   .card .valores b{color:var(--text);}
-  .btn-primary{width:100%;margin-top:16px;background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .btn-primary{width:100%;margin-top:16px;background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);}
   .btn-primary:disabled{opacity:.5;cursor:default;}
   .msg{margin-top:10px;font-size:12.5px;padding:10px 12px;border-radius:8px;word-break:break-word;}
   .msg.ok{background:var(--ok-dim);color:var(--ok);}
@@ -91,7 +91,7 @@
   .sec-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;}
   .sec-tab{font-family:var(--sans);font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:20px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;transition:border-color .15s ease,color .15s ease;}
   .sec-tab:hover{color:var(--text);}
-  .sec-tab.active{color:#06202b;background:var(--accent);border-color:var(--accent);}
+  .sec-tab.active{color:#0b0d10;background:var(--accent);border-color:var(--accent);}
   .sec-tab .sec-count{font-family:var(--mono);font-weight:400;opacity:.8;}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;z-index:50;}
   .overlay.hidden{display:none!important;}
@@ -131,7 +131,7 @@
   .kcard-check{position:absolute;top:8px;right:8px;width:18px;height:18px;cursor:pointer;accent-color:var(--accent);z-index:2;}
   .barra-selecao{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:40;background:var(--panel);border:1px solid var(--accent);border-radius:12px;padding:10px 14px;box-shadow:0 10px 30px rgba(0,0,0,.55);display:flex;align-items:center;gap:12px;font-size:12.5px;}
   .barra-selecao button{font-family:var(--sans);font-size:12px;padding:7px 12px;border-radius:7px;border:none;cursor:pointer;}
-  .barra-selecao .bs-enviar{background:var(--accent);color:#06202b;font-weight:700;}
+  .barra-selecao .bs-enviar{background:var(--accent);color:#0b0d10;font-weight:700;}
   .barra-selecao .bs-cancelar{background:var(--panel2);color:var(--muted);border:1px solid var(--line);}
   .notif-chat .notif-corpo{font-size:11.5px;color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
   @keyframes notif-in{from{opacity:0;transform:translateX(16px);}to{opacity:1;transform:translateX(0);}}
@@ -140,20 +140,20 @@
   .notif-solicitacao .ns-titulo{font-size:13px;font-weight:700;}
   .notif-solicitacao .ns-corpo{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.4;}
   .notif-solicitacao .ns-direcionado{font-size:11px;color:var(--accent);margin-top:6px;font-family:var(--mono);}
-  .notif-solicitacao button.ns-ok{margin-top:10px;width:100%;background:var(--accent);color:#06202b;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .notif-solicitacao button.ns-ok{margin-top:10px;width:100%;background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
   @keyframes notif-pulse{0%,100%{border-color:var(--warn);}50%{border-color:var(--accent);}}
   @media(max-width:760px){ .kanban-col{min-width:82vw;max-height:none;} }
   .tipo-filtro-row{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;justify-content:flex-start;margin-top:12px;padding-bottom:4px;-webkit-overflow-scrolling:touch;scrollbar-width:thin;}
   .tipo-filtro-btn{position:relative;flex:none;font-family:var(--sans);font-size:10.5px;padding:6px 10px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:92px;transition:border-color .15s ease,background .15s ease;}
   .tipo-filtro-btn:hover{border-color:var(--accent);}
-  .tipo-filtro-btn.active{border-color:var(--accent);background:rgba(92,200,255,.1);}
+  .tipo-filtro-btn.active{border-color:var(--accent);background:rgba(184, 255, 60,.1);}
   /* check discreto no canto superior direito de cada tipo: marca varios
      tipos de uma vez (uniao), sem precisar do "Todas" nem de trocar de
      um em um - contorno preto apagado de proposito pra nao brigar com o
      conteudo do botao */
   .tf-check{position:absolute;top:4px;right:4px;width:15px;height:15px;border-radius:4px;border:1px solid rgba(0,0,0,.6);background:rgba(0,0,0,.25);color:transparent;font-size:10px;line-height:13px;text-align:center;cursor:pointer;transition:border-color .15s ease,color .15s ease;}
   .tf-check:hover{border-color:var(--muted);}
-  .tf-check.checked{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.12);}
+  .tf-check.checked{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.12);}
   .tipo-filtro-btn .tf-label{font-weight:600;white-space:nowrap;}
   .tipo-filtro-btn .tf-counts{font-family:var(--mono);font-size:10px;white-space:nowrap;}
   .tipo-filtro-btn .tf-counts b{font-weight:600;}
@@ -170,7 +170,7 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
         <h1>Histórico de Solicitações</h1>
       </div>
     </div>
@@ -442,7 +442,7 @@
   <button type="button" class="bs-cancelar" onclick="toggleModoSelecao()">Cancelar</button>
 </div>
 
-<!-- Criar acesso no Zenith direto do ticket de Suporte de TI. Abre JA
+<!-- Criar acesso no NoPulso direto do ticket de Suporte de TI. Abre JA
      PREENCHIDO (email/usuário/senha sugeridos pelo servidor) e o Master
      confirma - o nome vem de texto livre escrito pelo Beniboy, então
      revisar antes de gravar evita nascer um acesso torto. -->
@@ -450,8 +450,8 @@
   <div class="sheet-wrap" style="max-width:520px;">
     <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharCriarAcesso()">✕</span>
     <div class="sheet">
-      <h3 style="margin:0 0 4px;">👤 Criar acesso no Zenith</h3>
-      <div class="sub" style="margin-bottom:12px;">Isso cria só o <b>acesso ao Zenith</b>. A caixa de e-mail de verdade continua sendo criada por fora, pelo Master.</div>
+      <h3 style="margin:0 0 4px;">👤 Criar acesso no NoPulso</h3>
+      <div class="sub" style="margin-bottom:12px;">Isso cria só o <b>acesso ao NoPulso</b>. A caixa de e-mail de verdade continua sendo criada por fora, pelo Master.</div>
 
       <label>Nome completo da pessoa</label>
       <input type="text" id="ca-nome" placeholder="ex: Priscila Pereira" oninput="agendarSugestao()">
@@ -477,7 +477,7 @@
 
       <label style="margin-top:8px;">Senha provisória</label>
       <input type="text" id="ca-senha" placeholder="gerada sozinha">
-      <div class="sub" style="margin-top:4px;">Anote e repasse por fora do app. O Zenith obriga a trocar no primeiro login.</div>
+      <div class="sub" style="margin-top:4px;">Anote e repasse por fora do app. O NoPulso obriga a trocar no primeiro login.</div>
 
       <div class="msg hidden" id="msg-criar-acesso"></div>
       <button type="button" class="btn-primary" style="margin-top:12px;" onclick="confirmarCriarAcesso()" id="btn-confirmar-criar-acesso">Criar acesso</button>
@@ -1020,7 +1020,7 @@ function abrirDetalhe(tipo, id){
       <div><b>Decisão:</b> <span class="badge ${c.status}">${c.status}</span> · ${escapeHtml(c.decididoPorEmail||'')} · ${fmtDataHora(c.decididoEm)}</div>
       ${c.motivoDecisao ? `<div style="white-space:pre-wrap;margin-top:4px;">${escapeHtml(c.motivoDecisao)}</div>` : ''}
       ${c.chamadoId ? `<div style="margin-top:4px;color:var(--ok);">🔧 Chamado de ${c.tipo==='manutencao'?'Manutenção':'TI'} criado</div>` : ''}
-      ${podeCriarAcesso(c) ? `<button type="button" class="link-btn" style="margin-top:6px;padding:0;" onclick="abrirCriarAcesso()">👤 Criar acesso no Zenith</button>` : ''}
+      ${podeCriarAcesso(c) ? `<button type="button" class="link-btn" style="margin-top:6px;padding:0;" onclick="abrirCriarAcesso()">👤 Criar acesso no NoPulso</button>` : ''}
     </div>`;
   }
   document.getElementById('d-corpo').innerHTML = corpo;
@@ -1107,7 +1107,7 @@ function renderAndamento(c){
     const info = ANDAMENTO_INFO[st];
     const ativo = st===atual;
     const estilo = ativo
-      ? `${estiloBase}border:1px solid var(--accent);background:rgba(92,200,255,.12);color:var(--text);font-weight:600;`
+      ? `${estiloBase}border:1px solid var(--accent);background:rgba(184, 255, 60,.12);color:var(--text);font-weight:600;`
       : `${estiloBase}border:1px solid var(--line);background:var(--panel2);color:${podeMudar?'var(--text)':'var(--muted)'};`;
     return `<button type="button" ${podeMudar && !ativo ? `onclick="salvarAndamento('${st}')"` : 'disabled'} style="${estilo}">${info.icone} ${info.label}</button>`;
   }).join('');
@@ -1378,7 +1378,7 @@ async function desmarcarComprada(){
 }
 function fecharDetalhe(){ document.getElementById('overlay-detalhe').classList.add('hidden'); DETALHE_ATUAL = null; }
 
-// ---------- Criar acesso no Zenith a partir do ticket ----------
+// ---------- Criar acesso no NoPulso a partir do ticket ----------
 // Ticket de Suporte de TI ja aprovado, so pro Master. A checagem de
 // permissao de verdade esta na rota (auth.requireMaster); isso aqui so
 // evita mostrar um botao que ia dar 403.
@@ -1764,7 +1764,7 @@ async function excluirCard(){
 }
 
 // gera o link publico pra outra pessoa resolver esse ticket sem precisar de
-// conta no Zenith (ver ticket-publico.html / moduloTicket em index.js) -
+// conta no NoPulso (ver ticket-publico.html / moduloTicket em index.js) -
 // mostra num prompt pra copiar/colar (o navegador nao deixa a gente copiar
 // pra area de transferencia sem clique explicito em alguns contextos, entao
 // o prompt ja seleciona o texto sozinho, so precisa Ctrl+C)

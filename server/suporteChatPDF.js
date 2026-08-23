@@ -25,7 +25,7 @@ function gerarChatPDF(res, chat) {
   const x = doc.page.margins.left;
   const largura = doc.page.width - doc.page.margins.left - doc.page.margins.right;
 
-  doc.fontSize(8).fillColor('#5b6470').text('Zenith Ops · Solutions TI Tech', x, doc.y, { characterSpacing: 0.5 });
+  doc.fontSize(8).fillColor('#5b6470').text('NoPulso · Solutions TI Tech', x, doc.y, { characterSpacing: 0.5 });
   doc.moveDown(0.3);
   doc.fontSize(17).fillColor('#111').text('Conversa de Suporte', x, doc.y);
   doc.fontSize(12).fillColor('#666').text(`Protocolo #${chat.numeroTicket || '—'}`, x, doc.y);

@@ -3,7 +3,7 @@
 // consultar_pedido pra alguem logado, grava aqui qual status a pessoa VIU.
 // O webhook da Adyen (index.js) confere esse retrato a cada evento novo do
 // mesmo pedido - se o status mudou depois da resposta, a pessoa recebe um
-// alerta (SSE se estiver com o Zenith aberto, push se nao estiver - ver
+// alerta (SSE se estiver com o NoPulso aberto, push se nao estiver - ver
 // verificarAlertaPedido em index.js). Usa o mesmo padrao de cache em memoria
 // (createCache) dos outros modulos "live", pra nao adicionar uma leitura de
 // Firestore por webhook - foi exatamente esse tipo de leitura repetida que

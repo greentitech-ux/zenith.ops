@@ -332,7 +332,7 @@ function hasSection(req, section) {
 }
 
 // ---------------------------------------------------------------------
-// A REGRA DA UNIDADE - vale pra TODO o Zenith, sem excecao por modulo:
+// A REGRA DA UNIDADE - vale pra TODO o NoPulso, sem excecao por modulo:
 //
 //   uma unidade so enxerga a PROPRIA unidade. Nem a vizinha do mesmo
 //   grupo, nem a irma da mesma empresa. Quem manda em mais de uma loja
@@ -374,7 +374,7 @@ function filterByUnidade(req, list) {
 }
 
 // time de suporte: atravessa TODA unidade/empresa de proposito (precisa
-// atender qualquer loja, de qualquer empresa cadastrada no Zenith) - unica
+// atender qualquer loja, de qualquer empresa cadastrada no NoPulso) - unica
 // fonte de verdade, antes reimplementada 3x (index.js local, o objeto de
 // usuarioLogadoDoHeader, e de novo solta em loja-status.html). Recebe um
 // objeto simples (nao precisa ser o `req` inteiro) pra dar pra chamar tanto

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Grupos (franquias) · Zenith Ops</title>
+<title>Grupos (franquias) · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -16,9 +16,9 @@
     --ok:#3ddc97; --ok-dim:#1c3a2e;
     --warn:#f2b33d; --warn-dim:#3a2e14;
     --bad:#ff5c5c; --bad-dim:#3a1616;
-    --accent:#5cc8ff;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;}
   html{overflow-x:hidden;}
@@ -34,7 +34,7 @@
   @media(max-width:640px){ .header-nav{flex-direction:column;align-items:stretch;} .nav-actions{justify-content:flex-end;} }
   .back{font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;transition:border-color .15s ease,color .15s ease,background .15s ease;}
   .back:hover{color:var(--text);border-color:var(--accent);}
-  .back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  .back.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
   .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
   .hamburger-btn:hover{border-color:var(--accent);}
@@ -67,7 +67,7 @@
   .grupo-secao-titulo{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px;}
   .grupo-extras-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;}
   .grupo-extras-grid .tags{max-width:none;}
-  .tag.kpi{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.08);}
+  .tag.kpi{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.08);}
   .rowacts{display:flex;gap:6px;flex-wrap:wrap;}
   .rowacts button{font-family:var(--sans);font-size:11px;padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;}
   .rowacts button:hover{border-color:var(--accent);}
@@ -84,7 +84,7 @@
   .unidades-secao-titulo{font-family:var(--mono);font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--line);}
   .unidades-grupo-titulo{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 4px;}
   .unidades-grupo-titulo:first-of-type{margin-top:0;}
-  button.primary{font-family:var(--sans);font-size:12.5px;font-weight:600;padding:9px 14px;border-radius:8px;border:none;background:var(--accent);color:#06121a;cursor:pointer;align-self:flex-start;}
+  button.primary{font-family:var(--sans);font-size:12.5px;font-weight:600;padding:9px 14px;border-radius:8px;border:none;background:var(--accent);color:#0b0d10;cursor:pointer;align-self:flex-start;}
   .err{color:var(--bad);font-size:11.5px;}
   .ok-msg{color:var(--ok);font-size:11.5px;}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto;z-index:50;}
@@ -93,7 +93,7 @@
   .modal h3{margin:0 0 14px;font-size:14px;}
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
   .modal-actions button{font-family:var(--sans);font-size:12.5px;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;}
-  .modal-actions button.primary{border:none;background:var(--accent);color:#06121a;font-weight:600;}
+  .modal-actions button.primary{border:none;background:var(--accent);color:#0b0d10;font-weight:600;}
   .linha-kpi{display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center;margin-top:6px;}
   .linha-kpi.com-tipo{grid-template-columns:auto 1fr 170px auto;}
   .linha-kpi.com-opcoes{row-gap:6px;}
@@ -120,7 +120,7 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
         <h1>Grupos (franquias)</h1>
       </div>
     </div>
@@ -162,13 +162,13 @@
 
 
   <!-- EMPRESAS (ver server/empresas.js): camada acima do Grupo, o limite de
-       isolamento entre negócios diferentes hospedados no Zenith (ex: GBE
+       isolamento entre negócios diferentes hospedados no NoPulso (ex: GBE
        x Arcfood hoje; uma clínica ou escola amanhã). NÃO existe empresa
        "padrão": cada unidade tem que ser escolhida a dedo, pra loja nova
        nunca cair numa empresa por acidente. -->
   <div class="panel">
     <h2>🏢 Empresas</h2>
-    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">O limite que separa um negócio do outro dentro do Zenith - usuário de uma empresa nunca vê dado de outra, <b>nem o Admin dela</b> (a única exceção é o time de Suporte, que atravessa tudo de propósito). Cada unidade precisa ser <b>marcada</b> na empresa dona dela: unidade que ninguém marcou não entra em empresa nenhuma e só aparece pro Master e pro Suporte, até você decidir de quem ela é.</p>
+    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">O limite que separa um negócio do outro dentro do NoPulso - usuário de uma empresa nunca vê dado de outra, <b>nem o Admin dela</b> (a única exceção é o time de Suporte, que atravessa tudo de propósito). Cada unidade precisa ser <b>marcada</b> na empresa dona dela: unidade que ninguém marcou não entra em empresa nenhuma e só aparece pro Master e pro Suporte, até você decidir de quem ela é.</p>
     <div id="empresas-lista" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;"></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;border-top:1px solid var(--line);padding-top:10px;">
       <label style="flex:1;min-width:160px;font-size:11.5px;color:var(--muted);">Nome da empresa
@@ -198,7 +198,7 @@
        o que cada loja vê no fechamento. -->
   <div class="panel">
     <h2>📦 Pedido semanal</h2>
-    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">Cobra das lojas o pedido semanal de insumos - que é feito fora do Zenith, no sistema do fornecedor. Cada <b>regra</b> vale pra um <b>grupo inteiro</b> ou pras <b>lojas que você escolher</b>, com o dia da semana dela. O lembrete aparece no <b>Fechamento do dia</b> e no <b>Painel</b>, e a loja só tira ele da tela <b>anexando o arquivo do pedido</b>. Loja que não está em regra nenhuma não é cobrada.</p>
+    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">Cobra das lojas o pedido semanal de insumos - que é feito fora do NoPulso, no sistema do fornecedor. Cada <b>regra</b> vale pra um <b>grupo inteiro</b> ou pras <b>lojas que você escolher</b>, com o dia da semana dela. O lembrete aparece no <b>Fechamento do dia</b> e no <b>Painel</b>, e a loja só tira ele da tela <b>anexando o arquivo do pedido</b>. Loja que não está em regra nenhuma não é cobrada.</p>
     <div id="ps-regras" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;"></div>
     <button type="button" class="primary" style="padding:9px 16px;" onclick="novaRegraPedido()">+ Nova regra</button>
     <p class="err hidden" id="ps-err"></p>

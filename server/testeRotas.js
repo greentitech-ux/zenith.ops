@@ -3122,7 +3122,7 @@ setTimeout(async () => {
   console.log(`${okFavorecido ? '✓' : '✗'} Formulários: favorecido lembrado pelo CPF + anexos de comprovante`);
 
   // ------------------------------------------------------------------
-  // NOC - alarme falso de celular: quem abre o Zenith no CELULAR com o
+  // NOC - alarme falso de celular: quem abre o NoPulso no CELULAR com o
   // monitoramento fixo gravado (zenithMonitorFixo) virava "computador da
   // loja"; cada bloqueio de tela disparava push de "Loja sem conexão".
   // Agora: (1) a tela de login não manda heartbeat de celular e apaga a

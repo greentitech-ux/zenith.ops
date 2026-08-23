@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ajuda · Zenith Ops</title>
+<title>Ajuda · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -16,9 +16,9 @@
     --ok:#3ddc97; --ok-dim:#1c3a2e;
     --warn:#f2b33d; --warn-dim:#3a2e14;
     --bad:#ff5c5c; --bad-dim:#3a1616;
-    --accent:#5cc8ff;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   }
   *{box-sizing:border-box;}
   html{overflow-x:hidden;}
@@ -35,7 +35,7 @@
   @media(max-width:640px){ .header-nav{flex-direction:column;align-items:stretch;} .nav-actions{justify-content:flex-end;} }
   a.back,button.back{font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;transition:border-color .15s ease,color .15s ease,background .15s ease;}
   a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
-  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(92,200,255,.1);font-weight:600;}
+  a.back.active{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
   .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
   .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
   .hamburger-btn:hover{border-color:var(--accent);}
@@ -84,7 +84,7 @@
     <div style="display:flex;align-items:center;gap:10px;min-width:0;">
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
-        <div class="eyebrow">Zenith Ops · Solutions Ti Tech</div>
+        <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
         <h1>❓ Ajuda</h1>
       </div>
     </div>
@@ -133,7 +133,7 @@ function fecharMenu(){}
 // enxerga tudo que e pertinente ao Master aqui na Ajuda)
 const TOPICOS = [
   { id:'primeiros-passos', icone:'🚀', secoes:null, titulo:'Primeiros passos (comece por aqui)', corpo:`
-    <p>O Zenith Ops é o sistema único da operação: fechamentos de caixa, entregas, estoque, monitor de pagamentos, solicitações/tickets, chamados de TI e manutenção, abastecimento do carrinho e o Saltiverso (parque, festas, mensalistas). Cada pessoa só enxerga as telas que o Master liberou pro acesso dela — se uma tela citada aqui não aparece pra você, é permissão, não defeito.</p>
+    <p>O NoPulso é o sistema único da operação: fechamentos de caixa, entregas, estoque, monitor de pagamentos, solicitações/tickets, chamados de TI e manutenção, abastecimento do carrinho e o Saltiverso (parque, festas, mensalistas). Cada pessoa só enxerga as telas que o Master liberou pro acesso dela — se uma tela citada aqui não aparece pra você, é permissão, não defeito.</p>
     <h3>O caminho básico de qualquer tarefa</h3>
     <ol>
       <li><b>Entre</b> com seu usuário (ou e-mail) e senha.</li>
@@ -153,7 +153,7 @@ const TOPICOS = [
   { id:'login', icone:'🔑', secoes:null, titulo:'Como entrar no sistema', corpo:`
     <h3>Passo a passo</h3>
     <ol>
-      <li>Acesse o endereço do Zenith Ops no navegador.</li>
+      <li>Acesse o endereço do NoPulso no navegador.</li>
       <li>Informe o <b>usuário</b> (se o Master cadastrou um pra você) <b>ou o e-mail</b>, e a senha.</li>
       <li>Clique em <b>Entrar</b>.</li>
     </ol>
@@ -166,7 +166,7 @@ const TOPICOS = [
     <p>Master e Admin encontram no menu (☰) do Painel a opção <b>🔑 Reset Senha</b> - um jeito rápido de redefinir a senha de qualquer acesso, sem precisar abrir a tela de Usuários: basta informar o usuário (login) ou e-mail da pessoa, digitar a senha nova e confirmar. A pessoa é obrigada a trocar por uma senha própria no próximo login, e os outros locais logados com a senha antiga são desconectados.</p>
   `},
   { id:'chat-suporte', icone:'💬', secoes:null, titulo:'Chat de suporte (balãozinho 💬)', corpo:`
-    <p>Em toda tela do Zenith - inclusive na tela de login - existe um balãozinho <b>💬 no canto inferior direito</b>. É o canal direto com o time de Suporte pra qualquer problema de <b>computador, sistema ou acesso</b>.</p>
+    <p>Em toda tela do NoPulso - inclusive na tela de login - existe um balãozinho <b>💬 no canto inferior direito</b>. É o canal direto com o time de Suporte pra qualquer problema de <b>computador, sistema ou acesso</b>.</p>
     <ol>
       <li>Clique no 💬 e conte o que está acontecendo (nome, contato e mensagem - <b>não precisa estar logado</b>; logado, nome e e-mail já vêm preenchidos).</li>
       <li>Quem responde primeiro é o <b>🤖 Beniboy</b>, o assistente virtual: ele tira dúvidas rápidas, <b>abre ticket na Central pela própria conversa</b> (compra, manutenção, TI, pagamento, nota - ele confirma antes e te passa o número) e consulta o andamento de um ticket pelo número.</li>
@@ -176,7 +176,7 @@ const TOPICOS = [
     </ol>
     <div class="dica"><b>Não consegue nem entrar?</b> É exatamente pra isso que o chat funciona sem login - use o balãozinho na tela de entrada.</div>
     <h3>🚨 Alerta crítico pro Master e Suporte</h3>
-    <p>O Beniboy é feito pra resolver pouca coisa sozinho: colher as primeiras informações, abrir um ticket se der, e chamar um humano quando não souber. Toda vez que ele chama o atendente, o <b>Master</b> e todo mundo com a <b>tag Suporte</b> recebem um <b>alarme sonoro em tela cheia</b> que insiste (som + vibração, em loop) até ser silenciado - em <b>todos os acessos logados</b> dessa pessoa (cada celular/computador com notificações push ativadas, 🔔 no Painel), ele chega mesmo com o celular travado ou em outro app; com o Zenith já aberto em alguma aba, ele dispara na hora. Se ninguém mexer no card (Central do Beniboy) em até 3 minutos, o alarme <b>dispara de novo sozinho</b> - e continua repetindo até alguém assumir a conversa.</p>
+    <p>O Beniboy é feito pra resolver pouca coisa sozinho: colher as primeiras informações, abrir um ticket se der, e chamar um humano quando não souber. Toda vez que ele chama o atendente, o <b>Master</b> e todo mundo com a <b>tag Suporte</b> recebem um <b>alarme sonoro em tela cheia</b> que insiste (som + vibração, em loop) até ser silenciado - em <b>todos os acessos logados</b> dessa pessoa (cada celular/computador com notificações push ativadas, 🔔 no Painel), ele chega mesmo com o celular travado ou em outro app; com o NoPulso já aberto em alguma aba, ele dispara na hora. Se ninguém mexer no card (Central do Beniboy) em até 3 minutos, o alarme <b>dispara de novo sozinho</b> - e continua repetindo até alguém assumir a conversa.</p>
   `},
   { id:'painel', icone:'🏠', secoes:null, titulo:'Painel (visão geral)', corpo:`
     <p>É a primeira tela depois do login: um cartão-resumo pra cada área que você tem acesso. Ninguém precisa "caçar" número — o Painel mostra o essencial e leva pra tela completa em um clique.</p>
@@ -241,7 +241,7 @@ const TOPICOS = [
     <div class="dica">Errou algo depois de já ter lançado? Não dá pra editar direto - abra <b>Central</b> → <b>Histórico</b> → aba <b>🧾 Fechamentos</b> → <b>Pedir correção</b>. A aba concentra todos os fechamentos lançados num lugar só (e mostra quantos pedidos de correção ainda estão pendentes). Dá pra <b>corrigir um valor digitado</b>, <b>adicionar um item que faltou</b> (maquininha, maquininha POS ou saída de caixa), corrigir a data do lançamento ou até pedir pra excluir o lançamento inteiro. <b>Comportamento:</b> a lista de campos mostra só o que foi <b>digitado</b> no lançamento — inclusive o que ficou em branco (pra completar o que esqueceu) e os canais/formas/KPIs do seu grupo. Os <b>totais automáticos</b> (Maquininhas total, Total de saída, Faturamento, Total declarado, Quebra) não aparecem: eles se <b>recalculam sozinhos</b> quando a correção é aprovada. Errou <b>mais de um valor</b>? Use <b>+ Corrigir mais um campo no mesmo pedido</b> e mande tudo numa correção só. Qualquer pedido entra na fila de aprovação do Master/Admin - nada muda antes de decidir, o ticket mostra o <b>de → para</b> de cada campo, e só pode existir <b>1 correção pendente por lançamento</b> (espere a decisão pra pedir outra).</div>
   `},
   { id:'pedido-semanal', icone:'📦', secoes:['lancamento','fechamentos'], titulo:'Pedido semanal (lembrete + comprovante)', corpo:`
-    <p>O pedido semanal de insumos é feito <b>fora do Zenith</b>, no sistema do fornecedor - o sistema não tem como saber sozinho se você fez. Por isso ele <b>cobra</b>, e você responde <b>anexando o pedido</b>.</p>
+    <p>O pedido semanal de insumos é feito <b>fora do NoPulso</b>, no sistema do fornecedor - o sistema não tem como saber sozinho se você fez. Por isso ele <b>cobra</b>, e você responde <b>anexando o pedido</b>.</p>
     <h3>Como funciona pra loja</h3>
     <ol>
       <li>Abra o <b>Fechamento do dia</b>. Se o pedido da semana está próximo, aparece uma faixa <b>📦 Pedido semanal</b> no topo da tela.</li>
@@ -294,7 +294,7 @@ const TOPICOS = [
     </ol>
     <h3>⏱️ Prioridade e prazo (SLA)</h3>
     <p>Ao lançar, escolha a <b>Prioridade</b> - ela define o prazo-alvo de resolução: 🔴 Crítica 4h · 🟠 Alta 8h · 🟡 Média 24h (padrão) · 🟢 Baixa 72h. No Histórico, cada card mostra o chip da prioridade e o relógio do SLA ("⏳ SLA 5h" / "🔥 SLA estourado"), e a fila de cada coluna ordena os mais urgentes primeiro. Use a prioridade com critério: Crítica é pra operação parada.</p>
-    <h3>🔗 Link público (pra quem não tem acesso ao Zenith)</h3>
+    <h3>🔗 Link público (pra quem não tem acesso ao NoPulso)</h3>
     <p>No formulário de Estorno, Compra, Manutenção, Suporte de TI, Pagamento ou Nota tem um botão <b>"🔗 Copiar link"</b> - gera um link (já com a loja e o tipo selecionados) que qualquer pessoa consegue preencher sem precisar de login. Útil pra mandar pro cliente preencher o pedido de estorno sozinho, ou pro Beniboy (ou outro atendimento) mandar quando o assunto precisar virar um ticket de verdade, sem ter que ensinar a pessoa a usar o sistema inteiro. A solicitação cai na Central normalmente, marcada como vinda do formulário público.</p>
     <h3>Acompanhar (página Histórico)</h3>
     <ul>
@@ -316,7 +316,7 @@ const TOPICOS = [
     <h3>📍 Andamento (depois de aprovado)</h3>
     <p>Pra Compra, Manutenção, Suporte de TI, Pagamento e Nota, depois de <b>Aprovado</b> o ticket ganha uma seção <b>"Andamento"</b> no detalhe: Master e Admin marcam se está <b>Pendente</b>, <b>Em andamento</b> ou <b>Finalizado</b>, pra acompanhar a execução de verdade (ex: um Suporte de TI aprovado que ainda não teve o técnico despachado, está com o técnico a caminho, ou já foi resolvido). Todo ticket aprovado começa como Pendente.</p>
     <h3>🔓 Login bloqueado</h3>
-    <p>Quando um acesso é bloqueado automaticamente (3 tentativas de senha erradas seguidas), o Zenith cria sozinho um ticket de <b>Suporte de TI</b> chamado "Login bloqueado: &lt;email&gt;" na Central, e Master/Admin recebem a notificação normalmente. Esse ticket é diferente dos outros de Suporte de TI: ao <b>aprovar</b>, não precisa escolher técnico - o acesso é desbloqueado e a senha é redefinida direto para <b>"inicial1"</b>, já obrigando a pessoa a trocar por uma senha própria no próximo login. É só avisar pra ela entrar com essa senha padrão.</p>
+    <p>Quando um acesso é bloqueado automaticamente (3 tentativas de senha erradas seguidas), o NoPulso cria sozinho um ticket de <b>Suporte de TI</b> chamado "Login bloqueado: &lt;email&gt;" na Central, e Master/Admin recebem a notificação normalmente. Esse ticket é diferente dos outros de Suporte de TI: ao <b>aprovar</b>, não precisa escolher técnico - o acesso é desbloqueado e a senha é redefinida direto para <b>"inicial1"</b>, já obrigando a pessoa a trocar por uma senha própria no próximo login. É só avisar pra ela entrar com essa senha padrão.</p>
     <h3>👤 Trocar o agente responsável</h3>
     <p>Master e Admin podem abrir qualquer solicitação (de qualquer tipo, em qualquer status) e, na seção <b>"Agente responsável"</b> do detalhe, escolher outra pessoa pra cuidar do ticket - útil quando o pedido foi direcionado a alguém de folga ou outro Admin precisa assumir.</p>
     <h3>🔧 Atribuir Técnico</h3>
@@ -413,11 +413,11 @@ const TOPICOS = [
     <h3>Níveis N1/N2/N3</h3>
     <p>Todo card nasce <b>N1</b> (só o Beniboy). Assumir ou transferir sobe pra <b>N2</b> (agente do time de Suporte) ou <b>N3</b> (Master) - o badge no card mostra o nível atual.</p>
     <h3>🔓 Desbloqueios</h3>
-    <p>Toda vez que o Beniboy resolve um login bloqueado (Zenith ou operador do Abastecimento) sozinho, o card ganha a etiqueta <b>🔓 Desbloqueio</b> - use o filtro no topo da página pra ver só esses casos.</p>
+    <p>Toda vez que o Beniboy resolve um login bloqueado (NoPulso ou operador do Abastecimento) sozinho, o card ganha a etiqueta <b>🔓 Desbloqueio</b> - use o filtro no topo da página pra ver só esses casos.</p>
     <div class="dica">Quem acessa: Master/Admin e quem tem a seção <b>Suporte</b>. Responder, mover e ver o histórico de mensagens funciona direto dali - não precisa ir em Chamados TI pra isso (mas gerar chamado técnico continua lá).</div>
   `},
   { id:'loja-status', icone:'📡', secoes:['suporte'], titulo:'NOC Zenith (conectividade, Mensagem direta e Ações do agente)', corpo:`
-    <p>Monitora se a internet/computador de cada loja está respondendo, no estilo de uma ferramenta de RMM (Atera etc), sem precisar instalar nenhum agente: a própria tela de <b>atendimento.html?unidade=&lt;código&gt;</b> (o mesmo link/QR code que a loja já usa pra falar com o Beniboy), deixada aberta numa aba, avisa o Zenith a cada ~25 segundos que está viva.</p>
+    <p>Monitora se a internet/computador de cada loja está respondendo, no estilo de uma ferramenta de RMM (Atera etc), sem precisar instalar nenhum agente: a própria tela de <b>atendimento.html?unidade=&lt;código&gt;</b> (o mesmo link/QR code que a loja já usa pra falar com o Beniboy), deixada aberta numa aba, avisa o NoPulso a cada ~25 segundos que está viva.</p>
     <ul>
       <li>🟢 <b>Online</b> - recebeu sinal há pouco tempo.</li>
       <li>🔴 <b>Offline</b> - ficou mais de ~90s em silêncio; o Master e quem tem a seção <b>Suporte</b> recebem um alerta automático (push + aviso na tela), e outro quando ela reconecta.</li>
@@ -427,11 +427,11 @@ const TOPICOS = [
     <h3>🖥️ AnyDesk</h3>
     <p>Cadastre o ID do AnyDesk de cada loja direto na tabela - um botão abre o app do AnyDesk (se estiver instalado no seu computador) já apontando pra aquela loja, sem precisar procurar o ID em outro lugar.</p>
     <h3>💬 Mensagem direta</h3>
-    <p>Pra avisar uma loja específica (ex: "reiniciem o roteador"), use o botão 💬 na linha da unidade - a mensagem aparece em tela cheia assim que aquela tela do atendimento atualizar. Pra avisar uma <b>pessoa</b> específica (Master/Admin também pelo botão 💬 no topo da Central do Beniboy, ou em Usuários → Ações → Mandar mensagem), ela recebe na hora se estiver com o Zenith aberto (qualquer tela) ou por notificação push se estiver com o app fechado.</p>
+    <p>Pra avisar uma loja específica (ex: "reiniciem o roteador"), use o botão 💬 na linha da unidade - a mensagem aparece em tela cheia assim que aquela tela do atendimento atualizar. Pra avisar uma <b>pessoa</b> específica (Master/Admin também pelo botão 💬 no topo da Central do Beniboy, ou em Usuários → Ações → Mandar mensagem), ela recebe na hora se estiver com o NoPulso aberto (qualquer tela) ou por notificação push se estiver com o app fechado.</p>
     <h3>🤖 Ações do Agente (Master)</h3>
     <p>No fim da página, só visível pra quem tem acesso Master, fica o painel que ensina o Beniboy a agir sozinho:</p>
     <ul>
-      <li><b>Catálogo de ações</b> - cada ação é ou um <b>comando PowerShell fixo</b> (roda num computador tipo interno através do NOCZenith instalado nele) ou uma <b>ação de sistema</b> pronta (hoje só "criar usuário do Zenith"). O Beniboy nunca escreve o comando - ele só escolhe entre o que já está cadastrado aqui.</li>
+      <li><b>Catálogo de ações</b> - cada ação é ou um <b>comando PowerShell fixo</b> (roda num computador tipo interno através do NOCZenith instalado nele) ou uma <b>ação de sistema</b> pronta (hoje só "criar usuário do NoPulso"). O Beniboy nunca escreve o comando - ele só escolhe entre o que já está cadastrado aqui.</li>
       <li><b>Contexto</b> - um texto livre pra orientar como ele deve se comportar (o que perguntar antes, quando resolver sozinho vs quando só te chamar).</li>
       <li><b>Aprovação</b> - por padrão toda ação que o Beniboy dispara fica esperando um Master aprovar (mesma fila de "Aprovações pendentes" de Usuários); desmarque "precisa de aprovação" numa ação só se ela for óbvia o bastante pra rodar direto.</li>
     </ul>
@@ -480,7 +480,7 @@ const TOPICOS = [
     <p><b>Comportamento:</b> os números vêm do relatório financeiro do iFood, que só consolida de vez em D+1/D+2 — o dia de hoje pode mudar até fechar. A sincronização é automática, não precisa apertar nada.</p>
   `},
   { id:'abastecimento', icone:'🛒', secoes:['abastecimento-carrinho'], titulo:'Abastecimento do Carrinho (Dom Aeroporto)', corpo:`
-    <p>Controle do abastecimento entre a <b>loja</b> da Dominos Aeroporto e o <b>carrinho</b>: o carrinho pede, a loja envia — tudo registrado com hora e quem fez (substitui a planilha/AppSheet antigos, sem precisar de usuário e senha à parte: seu login do Zenith já identifica você).</p>
+    <p>Controle do abastecimento entre a <b>loja</b> da Dominos Aeroporto e o <b>carrinho</b>: o carrinho pede, a loja envia — tudo registrado com hora e quem fez (substitui a planilha/AppSheet antigos, sem precisar de usuário e senha à parte: seu login do NoPulso já identifica você).</p>
     <h3>🛒 Pedido (quem está no carrinho)</h3>
     <ol>
       <li>Clique em <b>🛒 Novo pedido</b>.</li>
@@ -658,7 +658,7 @@ const TOPICOS = [
     <p>Quem tem acesso a Festas vê no <b>Painel</b> o card <b>🎉 Festas (calendário)</b>: o mês inteiro com os dias de festa marcados (com a quantidade em cada dia) e as setas ‹ › pra navegar entre os meses. <b>Comportamento:</b> toque num dia marcado pra abrir a lista das festas dele (cliente, código, pacote, horário e valor, em ordem de horário); toque de novo pra fechar. Festa cancelada não aparece no calendário.</p>
   `},
   { id:'rh', icone:'🧑‍💼', secoes:['rh'], titulo:'BigBrother · RH (colaboradores, extras, teste, atestado e advertências)', corpo:`
-    <p>Ficha de funcionários das lojas - independente de ter login no Zenith (a maioria de quem trabalha na loja não acessa o sistema). No menu lateral esse módulo fica dentro do grupo <b>BigBrother</b>. Quem tem a tag <b>RH</b> vê e cadastra só as unidades liberadas pra ele; <b>Master, Admin</b> e quem tem a tag extra <b>🧑‍💼 RH (todas as unidades)</b> (atribuída pelo Master em Usuários) têm visão de todas as unidades do grupo, inclusive no cadastro. A tag extra <b>🧑‍💼 RH: pode cadastrar efetivado direto</b> (também em Usuários) libera cadastrar alguém já efetivado sem passar pelo teste de 5 dias.</p>
+    <p>Ficha de funcionários das lojas - independente de ter login no NoPulso (a maioria de quem trabalha na loja não acessa o sistema). No menu lateral esse módulo fica dentro do grupo <b>BigBrother</b>. Quem tem a tag <b>RH</b> vê e cadastra só as unidades liberadas pra ele; <b>Master, Admin</b> e quem tem a tag extra <b>🧑‍💼 RH (todas as unidades)</b> (atribuída pelo Master em Usuários) têm visão de todas as unidades do grupo, inclusive no cadastro. A tag extra <b>🧑‍💼 RH: pode cadastrar efetivado direto</b> (também em Usuários) libera cadastrar alguém já efetivado sem passar pelo teste de 5 dias.</p>
     <p><b>3 categorias de pessoa, bem separadas em abas próprias</b> - nada de tudo misturado numa lista só:</p>
     <ul>
       <li><b>👷 Extras:</b> avulso, trabalho pontual - sem período de teste, sem atestado, sem advertência.</li>
@@ -675,7 +675,7 @@ const TOPICOS = [
     <p>Preencha unidade, nome completo, contato, cargo/função, data de nascimento e a data de admissão/início (já vem com hoje), e anexe o <b>currículo em PDF</b> se houver.</p>
     <p><b>Por que cadastrar no 1º dia:</b> é assim que dá pra saber exatamente quem está atuando em cada loja - e cobrar o gerente que deixar alguém sem cadastrar.</p>
     <h3>🔗 Link de auto-atendimento</h3>
-    <p>Pra facilitar o 1º dia, cada pessoa cadastrada (extra, candidato ou efetivado) ganha um <b>link próprio e permanente</b> - em qualquer card, use <b>🔗 link de auto-atendimento</b> pra copiar a URL e mandar pro celular da pessoa (WhatsApp, SMS, o que for). Sem precisar de login no Zenith, ela mesma:</p>
+    <p>Pra facilitar o 1º dia, cada pessoa cadastrada (extra, candidato ou efetivado) ganha um <b>link próprio e permanente</b> - em qualquer card, use <b>🔗 link de auto-atendimento</b> pra copiar a URL e mandar pro celular da pessoa (WhatsApp, SMS, o que for). Sem precisar de login no NoPulso, ela mesma:</p>
     <ul>
       <li><b>Preenche/corrige os próprios dados</b> - nome, contato, cargo/função, data de nascimento e currículo (PDF).</li>
       <li><b>Bate o ponto todo dia</b> - um botão só, que vira "✅ Fazer check-in" ou "🚪 Fazer check-out" conforme o estado atual, com foto e localização (mesma regra de privacidade do quiosque: localização só aparece pro Master).</li>
@@ -706,7 +706,7 @@ const TOPICOS = [
     <p>Resolve o problema dos extras que só trabalham alguns dias da semana: em vez de depender da memória do gerente pra saber quem apareceu, a própria pessoa se identifica sozinha, todo dia, num dispositivo fixo instalado na entrada da loja (tablet, celular antigo ou PC com webcam).</p>
     <p><b>Como montar o dispositivo na loja:</b></p>
     <ol>
-      <li>No dispositivo que vai ficar fixo na entrada, faça login normalmente no Zenith com uma conta que tenha acesso ao RH (o gerente da loja já serve).</li>
+      <li>No dispositivo que vai ficar fixo na entrada, faça login normalmente no NoPulso com uma conta que tenha acesso ao RH (o gerente da loja já serve).</li>
       <li>Abra <b>RH → aba 📸 Check-ins → "📸 Abrir tela de check-in (quiosque)"</b>, ou acesse direto <code>/rh-checkin.html</code>. Deixe essa aba aberta o dia inteiro no dispositivo.</li>
       <li>Se a conta tiver acesso a mais de uma unidade, escolha em qual unidade esse dispositivo específico está instalado (fica salvo no aparelho, não precisa escolher de novo).</li>
     </ol>
@@ -716,7 +716,7 @@ const TOPICOS = [
       <li>Confirma <b>"✅ Fazer check-in"</b> e tira uma foto na hora (o navegador abre a câmera do dispositivo diretamente).</li>
       <li>No fim do turno, repete o processo: procura o próprio nome (agora aparece marcado como "na loja") e confirma <b>"🚪 Fazer check-out"</b>, tirando outra foto.</li>
     </ol>
-    <p><b>Colaborador efetivado não aparece nessa lista</b> - seja efetivado direto ou candidato que foi aprovado no teste, ele já bate o ponto no sistema de ponto de verdade, fora do Zenith. Esse quiosque é só pra quem ainda não tem vínculo formal.</p>
+    <p><b>Colaborador efetivado não aparece nessa lista</b> - seja efetivado direto ou candidato que foi aprovado no teste, ele já bate o ponto no sistema de ponto de verdade, fora do NoPulso. Esse quiosque é só pra quem ainda não tem vínculo formal.</p>
     <p><b>Sem reconhecimento facial:</b> o sistema não identifica ninguém automaticamente pela foto - a identificação é a própria pessoa escolhendo o nome dela na lista; a foto (com horário) é só o registro/prova visual de quem esteve na loja e quando, útil em caso de dúvida ou divergência. Cada pessoa só pode ter <b>1 check-in aberto por vez</b> - precisa fazer o check-out antes de abrir outro.</p>
     <p><b>Localização (só Master):</b> junto com a foto, o navegador captura a localização do dispositivo no momento do check-in/check-out (usando o próprio recurso de localização do navegador - se a pessoa recusar a permissão, o registro segue normalmente, só sem localização). Esse dado <b>não aparece pra ninguém além do Master</b> - nem Admin, nem RH, nem quem tem a tag "RH todas as unidades" vê o link de localização; pro resto do time o check-in aparece normal, só sem esse dado extra.</p>
     <p><b>Visão pra quem administra:</b> a aba <b>📸 Check-ins</b> em <code>/rh.html</code> mostra "🟢 Na loja agora" (quem já fez check-in mas ainda não fez check-out) e o histórico do dia (ou de qualquer data escolhida), com link pra ver as fotos de entrada e saída de cada check-in. O <b>Painel</b> também mostra a contagem de "Na loja agora" no card de RH.</p>

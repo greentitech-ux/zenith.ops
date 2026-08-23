@@ -1,6 +1,6 @@
 // saltiversoImport.js
 // Importa os dados historicos da planilha Google Sheets que a Saltiverso
-// Patteo usava antes do Zenith Ops (abas "Entradas" e "Vendas de Festa") pro
+// Patteo usava antes do NoPulso (abas "Entradas" e "Vendas de Festa") pro
 // Firestore (colecoes parqueCheckins/festas). Reaproveita a autenticacao ja
 // configurada em sheetsSync.js (mesma service account do Firestore - a
 // planilha precisa estar compartilhada com esse email como leitor).
