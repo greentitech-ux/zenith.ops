@@ -78,6 +78,12 @@
   /* campo preenchido pela foto do relatorio: nao se digita nele. O readonly
      ja bloqueia o teclado, mas o input number continua mostrando as setinhas
      de +/- (que no Chrome ainda mudam o valor no clique) - por isso somem. */
+  /* chip no titulo da secao: diz que aqueles campos vieram da foto e QUANTOS.
+     Antes isso so aparecia num paragrafo de texto corrido la em cima - a
+     loja rolava a tela e perdia de vista de onde o numero tinha saido. */
+  .chip-foto{font-family:var(--mono);font-size:10px;font-weight:400;
+    color:var(--ok);background:var(--ok-dim);border-radius:20px;padding:2px 8px;
+    margin-left:8px;vertical-align:middle;white-space:nowrap;}
   .campo-automatico{cursor:not-allowed;background:var(--panel);}
   .campo-automatico::-webkit-outer-spin-button,
   .campo-automatico::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
@@ -230,7 +236,7 @@
     </div>
 
     <div class="secao">
-      <div class="secao-titulo">Canais de venda</div>
+      <div class="secao-titulo">Canais de venda<span class="chip-foto hidden" id="chip-foto-canais"></span></div>
       <!-- so aparece pra loja cujo GRUPO tem lerCanaisPorImagem ligado (o
            Master ativa em /grupos.html) - ver atualizarBotaoLerCanais.
            Fica aqui em cima mas preenche as DUAS secoes (Canais e Formas de
@@ -259,7 +265,7 @@
     </div>
 
     <div class="secao">
-      <div class="secao-titulo">Formas de pagamento</div>
+      <div class="secao-titulo">Formas de pagamento<span class="chip-foto hidden" id="chip-foto-formas"></span></div>
       <div class="grid2 hidden" id="formas-extras-container" style="margin-top:6px;"></div>
       <div class="sub hidden" id="formas-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
     </div>
@@ -290,7 +296,7 @@
     </div>
 
     <div class="secao">
-      <div class="secao-titulo">KPI's</div>
+      <div class="secao-titulo">KPI's<span class="chip-foto hidden" id="chip-foto-kpis"></span></div>
       <div class="grid2 hidden" id="kpis-extras-container" style="margin-top:6px;"></div>
       <div class="sub hidden" id="kpis-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
       <div class="resumo">
@@ -816,6 +822,27 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', (ev)=>{
   msg.innerHTML = `<span style="color:var(--muted);">Confira as fotos e clique em <b>Realizar leitura</b>. Nada foi enviado ainda.</span>`;
 });
 
+// Conta, POR SECAO, quantos campos estao travados pela foto AGORA - e nao
+// quantos a ultima leitura trouxe. A diferenca importa: da pra mandar varias
+// fotos em rodadas, e um campo que a 1a foto achou continua valendo na 2a.
+// Contar o DOM e o unico jeito do chip nunca discordar do que esta na tela.
+function pintarChipsFoto(){
+  [['canais','canais-extras-container'],
+   ['formas','formas-extras-container'],
+   ['kpis','kpis-extras-container']].forEach(([chave, containerId])=>{
+    const chip = document.getElementById('chip-foto-'+chave);
+    const container = document.getElementById(containerId);
+    if(!chip || !container) return;
+    const n = container.querySelectorAll('input.campo-automatico[readonly]').length;
+    if(!n){ chip.classList.add('hidden'); chip.textContent = ''; return; }
+    chip.classList.remove('hidden');
+    chip.textContent = `📷 ${n} da foto`;
+    chip.title = n === 1
+      ? 'Esse campo veio da foto do relatório e não é digitado.'
+      : `${n} campos desta seção vieram da foto do relatório e não são digitados.`;
+  });
+}
+
 async function realizarLeituraRelatorio(){
   const arquivos = ARQUIVOS_RELATORIO.slice();
   const botao = document.getElementById('btn-ler-canais');
@@ -899,14 +926,18 @@ async function realizarLeituraRelatorio(){
       el.style.borderColor = 'var(--warn)';
     });
     atualizarResumo();
+    pintarChipsFoto();
 
     const resumo = [];
     if(canaisOk) resumo.push(`${canaisOk} em Canais de venda`);
     if(formasOk) resumo.push(`${formasOk} em Formas de pagamento`);
     if(kpisOk) resumo.push(`${kpisOk} em KPI's`);
     const origem = plural ? `pelas ${arquivos.length} fotos` : 'pela foto';
+    // a hora e o unico jeito da loja saber se o que esta na tela e desta
+    // leitura ou de uma rodada anterior, antes de ela ter trocado as fotos
+    const hora = new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
     const partes = [resumo.length
-      ? `<b style="color:var(--ok);">✔ Preenchido ${origem}: ${resumo.join(', ')}.</b> Confira valor por valor antes de enviar — se algum estiver errado, tire a foto de novo.`
+      ? `<b style="color:var(--ok);">✔ Lido às ${hora} · preenchido ${origem}: ${resumo.join(', ')}.</b> Confira valor por valor antes de enviar — se algum estiver errado, tire a foto de novo.`
       : `<b style="color:var(--warn);">Não consegui preencher nenhum campo com ${plural ? 'essas fotos' : 'essa foto'}.</b> Confira se o relatório está inteiro e legível na imagem.`];
     if((data.somasRuins||[]).length){
       // a conta é a explicação mais curta que existe: "46+12+4+0+6+1 = 69,
