@@ -4812,15 +4812,26 @@ setTimeout(async () => {
         /icone: '\/beniboy-192\.png'/.test(push)
         && /icon: data\.icone \|\| '\/icon-192\.png'/.test(sw)
         && fsB.existsSync(pathB.join(dirB, 'beniboy-192.png')),
-      'a MARCA nao anima junto (o logotipo fica parado)':
-        !/\.(auth|nmz)-marca[^{]*\{[^}]*animation/.test(login + nav + tema),
+      // Decisao do usuario: o sinal vital se mexe onde quer que apareca,
+      // logotipo incluido. O que NAO pode e o logotipo sumir - por isso a
+      // linha de base continua inteira e quem anda e o pulso por cima.
+      'a marca tambem bate, com um pulso que anda por cima da linha':
+        /\.marca-pulso\{[^}]*animation:marca-pulso/.test(tema)
+        && /@keyframes marca-pulso/.test(tema)
+        && (login.match(/class="marca-pulso"/g) || []).length === 2
+        && /class="marca-pulso"/.test(nav),
+      'a linha de base do logotipo nunca some (so o pulso e que anda)':
+        !/\.marca-pulso\{[^}]*stroke-dasharray:96[^0-9]/.test(tema)
+        && (login.match(/stroke-linejoin="round" opacity="\.55"/g) || []).length === 2,
+      'reduced-motion tambem desliga o pulso da marca':
+        /prefers-reduced-motion:reduce[\s\S]{0,120}\.marca-pulso\{animation:none/.test(tema),
     };
     const ruinsB = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okBeniboy = !ruinsB.length;
     if (ruinsB.length) console.log(`  falhou em: ${ruinsB.join(' · ')}`);
   } catch (e) { okBeniboy = false; console.log('  erro: ' + e.message); }
   if (!okBeniboy) ruins += 1;
-  console.log(`${okBeniboy ? '\u2713' : '\u2717'} Beniboy: um desenho so pros 6 lugares, com a cor no token e a marca parada`);
+  console.log(`${okBeniboy ? '\u2713' : '\u2717'} Beniboy: um desenho so pros 6 lugares, com a cor no token e a marca batendo junto`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

@@ -91,6 +91,29 @@
     document.head.appendChild(st);
   })();
 
+  // ---- a marca tambem bate ----
+  // Decisao do usuario: onde tiver o sinal vital, ele se mexe - inclusive no
+  // logotipo. Mas logotipo que SOME nao serve: a linha de base fica sempre
+  // inteira e o que anda e um pulso claro por cima dela, como o cursor de um
+  // monitor cardiaco. Assim a marca se move sem nunca ficar ilegivel.
+  //
+  // O ritmo e mais lento que o do Beniboy (3,6s x 2,6s) de proposito: as duas
+  // coisas se mexem, mas quem chama atencao continua sendo o assistente.
+  //
+  // Comprimento real da polyline do logotipo: ~92,8 no viewBox 64x40 - o
+  // dasharray de 96 cobre ela inteira com folga.
+  (function marcaViva() {
+    if (document.getElementById('nopulso-marca-viva')) return;
+    var st = document.createElement('style');
+    st.id = 'nopulso-marca-viva';
+    st.textContent = [
+      '.marca-pulso{stroke-dasharray:13 96;animation:marca-pulso var(--marca-ritmo,3.6s) linear infinite;}',
+      '@keyframes marca-pulso{from{stroke-dashoffset:96;}to{stroke-dashoffset:-13;}}',
+      '@media (prefers-reduced-motion:reduce){ .marca-pulso{animation:none;opacity:0;} }'
+    ].join('\n');
+    document.head.appendChild(st);
+  })();
+
   // Devolve o SVG do Beniboy no tamanho pedido. `classes` aceita o estado
   // ('pensando', 'alarme', 'resolvido') e o 'no-vermelho' da tela de alarme.
   // Geometria fixa em viewBox 64x64 - so width/height mudam.
