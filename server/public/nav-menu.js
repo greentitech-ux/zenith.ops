@@ -292,7 +292,7 @@
     nav.innerHTML = `
       <div class="nmz-topo">
         <div style="min-width:0;">
-          <div class="nmz-marca"><svg width="30" height="20" viewBox="0 0 64 40" fill="none" aria-hidden="true"><polyline points="2,26 14,26 21,10 29,32 36,20 62,20" stroke="var(--accent,#b8ff3c)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity=".55"/><polyline class="marca-pulso" points="2,26 14,26 21,10 29,32 36,20 62,20" stroke="var(--accent,#b8ff3c)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>No<b>Pulso</b></span></div>
+          <div class="nmz-marca"><svg width="30" height="20" viewBox="0 0 64 40" fill="none" aria-hidden="true"><polyline class="marca-base" points="2,26 14,26 21,10 29,32 36,20 62,20" stroke="var(--accent,#b8ff3c)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/><polyline class="marca-brilho" points="2,26 14,26 21,10 29,32 36,20 62,20" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg><span>No<b>Pulso</b></span></div>
           <div class="nmz-quem" id="nmz-quem"></div>
         </div>
         <button type="button" class="nmz-fechar" id="nmz-fechar" aria-label="Fechar menu" title="Fechar">✕</button>

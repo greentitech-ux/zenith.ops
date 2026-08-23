@@ -59,10 +59,15 @@
       '  stroke:currentColor;}',
       '.beniboy .bb-nucleo{fill:currentColor;stroke:none;}',
       '.beniboy .bb-fundo{fill:var(--panel,#12161b);}',
-      '.beniboy .bb-traco,.beniboy .bb-eco{stroke-dasharray:96;}',
-      '.beniboy .bb-traco{animation:bb-traco var(--bb-ritmo,2.6s) linear infinite;',
-      '  filter:drop-shadow(0 0 5px currentColor);}',
-      '.beniboy .bb-eco{animation:bb-eco var(--bb-ritmo,2.6s) linear .18s infinite;}',
+      /* A LINHA NUNCA DESAPARECE. A base fica solida na cor do estado e um
+         brilho curto corre por cima. O "tracar e apagar" que existia aqui
+         deixava o avatar vazio ~250ms por ciclo - em 40px no canto isso e
+         batimento, em 112px numa tela de alarme parece defeito, e num PDF
+         ou PPTX, que congela um frame, sai pela metade. Mesma mecanica do
+         logotipo (ver marcaViva abaixo). */
+      '.beniboy .bb-traco{filter:drop-shadow(0 0 5px currentColor);}',
+      '.beniboy .bb-brilho{stroke:var(--pulso-brilho,#fff);stroke-dasharray:9 64;opacity:.9;',
+      '  animation:bb-brilho var(--bb-ritmo,2.6s) linear infinite;}',
       '.beniboy .bb-nucleo{transform-box:fill-box;transform-origin:center;',
       '  animation:bb-nucleo var(--bb-ritmo,2.6s) ease-in-out infinite;}',
       '.beniboy .bb-anel{animation:bb-anel var(--bb-ritmo,2.6s) ease-in-out infinite;}',
@@ -73,20 +78,13 @@
       /* no alarme em tela cheia o fundo ja e vermelho: o avatar vai em branco */
       '.beniboy.no-vermelho{color:#fff;}',
       '.beniboy.no-vermelho .bb-fundo{fill:rgba(255,255,255,.10);}',
-      /* No alarme em tela cheia o traco NAO some. Medido: no ritmo de
-         1,1s a linha passa ~250ms de cada ciclo com menos de 10%
-         desenhada - num avatar de 40px no canto isso e o batimento,
-         em 112px no meio de uma tela vermelha parece defeito. Aqui o
-         traco fica inteiro e quem se mexe e o eco, o anel e o nucleo. */
-      '.beniboy.alarme .bb-traco{stroke-dasharray:none;animation:bb-alarme-brilho var(--bb-ritmo,1.1s) ease-in-out infinite;}',
-      '@keyframes bb-alarme-brilho{0%,100%{opacity:.72;}42%{opacity:1;}}',
-      '@keyframes bb-traco{0%{stroke-dashoffset:96;opacity:.25;}10%{opacity:1;}42%{stroke-dashoffset:0;opacity:1;}60%{stroke-dashoffset:0;opacity:1;}100%{stroke-dashoffset:-96;opacity:.25;}}',
-      '@keyframes bb-eco{0%{stroke-dashoffset:96;opacity:0;}20%{opacity:.30;}55%{stroke-dashoffset:0;opacity:.16;}100%{stroke-dashoffset:-96;opacity:0;}}',
+      '.beniboy.no-vermelho .bb-brilho{stroke:#0b0d10;opacity:.5;}',
+      '@keyframes bb-brilho{0%{stroke-dashoffset:73;}100%{stroke-dashoffset:-73;}}',
       '@keyframes bb-nucleo{0%,100%{transform:scale(.82);opacity:.16;}42%{transform:scale(1);opacity:.34;}}',
       '@keyframes bb-anel{0%,100%{opacity:.62;}42%{opacity:1;}}',
       '@media (prefers-reduced-motion:reduce){',
-      '  .beniboy .bb-traco,.beniboy .bb-eco,.beniboy .bb-nucleo,.beniboy .bb-anel{animation:none;}',
-      '  .beniboy .bb-traco{stroke-dasharray:none;}}'
+      '  .beniboy .bb-brilho{animation:none;opacity:0;}',
+      '  .beniboy .bb-nucleo,.beniboy .bb-anel{animation:none;}}'
     ].join('\n');
     document.head.appendChild(st);
   })();
@@ -107,9 +105,10 @@
     var st = document.createElement('style');
     st.id = 'nopulso-marca-viva';
     st.textContent = [
-      '.marca-pulso{stroke-dasharray:13 96;animation:marca-pulso var(--marca-ritmo,3.6s) linear infinite;}',
-      '@keyframes marca-pulso{from{stroke-dashoffset:96;}to{stroke-dashoffset:-13;}}',
-      '@media (prefers-reduced-motion:reduce){ .marca-pulso{animation:none;opacity:0;} }'
+      '.marca-brilho{stroke:var(--pulso-brilho,#fff);stroke-dasharray:12 82;opacity:.85;',
+      '  animation:marca-brilho 3.2s linear infinite;}',
+      '@keyframes marca-brilho{0%{stroke-dashoffset:94;}100%{stroke-dashoffset:-94;}}',
+      '@media (prefers-reduced-motion:reduce){ .marca-brilho{animation:none;opacity:0;} }'
     ].join('\n');
     document.head.appendChild(st);
   })();
@@ -125,8 +124,8 @@
       + '<circle class="bb-fundo" cx="32" cy="32" r="30"></circle>'
       + '<circle class="bb-nucleo" cx="32" cy="32" r="22"></circle>'
       + '<circle class="bb-anel" cx="32" cy="32" r="30" stroke-width="2.5" fill="none"></circle>'
-      + '<polyline class="bb-eco" points="' + pts + '" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"></polyline>'
       + '<polyline class="bb-traco" points="' + pts + '" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none"></polyline>'
+      + '<polyline class="bb-brilho" points="' + pts + '" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none"></polyline>'
       + '</svg>';
   };
 
@@ -162,6 +161,12 @@
     // --accent2 (dado tecnico) tambem precisa de versao clara: o ciano
     // #5cc8ff some no fundo branco. Reaproveita o azul que era o --accent.
     '  --accent2:#0d7ac2;',
+    // O brilho que corre pelo traco (marca e Beniboy) e BRANCO no Escuro,
+    // onde ele e mais claro que o limao. Sobre fundo branco, branco vira
+    // buraco: o traco parece cortado em vez de aceso. No Claro ele vira um
+    // verde bem mais escuro que o --accent, que e o que 'mais aceso'
+    // significa nesse fundo. Mesma logica do --accent virar #5b8c00.
+    '  --pulso-brilho:#1f3300;',
     // variaveis proprias do Abastecimento (balões/botões de PEDIDO x ENVIO
     // da "Conversa do pedido") - sem isso o balão ficava escuro com texto
     // escuro no tema claro (ilegivel, reportado em 2026-08-09)

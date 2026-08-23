@@ -110,6 +110,11 @@ Nada novo. As telas consomem o que já existe: `/api/me`, `/api/fechamentos*`, `
 6. Rodar `server/testeRotas.js` (inclui a trava que varre todos os `.html`) antes de qualquer merge; sem CI, esse teste é a rede.
 
 ## Arquivos deste pacote
+
+- `PLANO_DE_SUBIDA.md` — checklist executável, passo a passo, para o Claude Code.
+- `BENIBOY.md` — especificação fechada do novo avatar do assistente (SVG, CSS do batimento, estados, tamanhos, arquivos a mexer, tom de voz).
+- `CLAUDE.md.trecho.md` — colar no CLAUDE.md do repositório.
+- `NoPulso Apresentacao.dc.html` + `deck-stage.js` — apresentação de lançamento para gerentes (16 slides).
 - `NoPulso Mockups.dc.html` — 12 telas. Turno 1: 1a login, 1b painel + drawer, 1c fechamento, 1d celular + tablet do carrinho. Turno 2: 2a Central·Histórico (kanban), 2b Chamados TI, 2c Monitor, 2d Entregas, 2e Estoque, 2f RH, 2g NOC, 2h Lançamento. Turno 3 (menu completo): 3a Central, 3b Manutenção, 3c Compras, 3d Beniboy, 3e Disputas, 3f iFood, 3g KPI's + Recordes, 3h Cofre + Ativos TI, 3i Formulários, 3j Saltiverso, 3k Quiosques (parque, ponto por foto, balcão), 3l Relatórios do Carrinho + Análise de Rede, 3m Usuários + Grupos, 3n Alertas + E-mail + Tela de Login, 3o páginas públicas, 3p Ajuda. Turno 4: 4a detalhe do card da Central, 4b estados de exceção, 4c Abastecimento Carrinho (tela de operação + popups). Turno 5: 5a Lançar entrega + Regras de Entregas, 5b Central de Soluções + Dashboard de Atendimentos, 5c Saúde das Máquinas + alarme, 5d Fechamento do balcão + ticket público + auto-cadastro do RH — com isso todo item do MENU e toda página pública têm mockup. O 2h inclui a leitura por foto do relatório do PDV (canaisVendaOcr.js) preenchendo Canais de venda, Formas de pagamento e KPI's. Abre direto no navegador.
 - `github.md` — associação com o repositório e mapa tela → arquivos de origem.
 
@@ -133,6 +138,11 @@ Nada novo. As telas consomem o que já existe: `/api/me`, `/api/fechamentos*`, `
 9. **Archivo é mais larga que a fonte de sistema.** As telas medem tudo em px e o A+/A− aplica `zoom` no `<html>`. Teste `fechamentos.html` (10 colunas + `white-space:nowrap`) e `monitor.html` a 1366×768 com fonte em 100% e 130% antes de subir — é o único risco funcional real da troca de tipografia.
 10. **Nada de backend muda.** Sem rota nova, sem coleção nova, sem leitura extra no Firestore — logo, sem risco de `RESOURCE_EXHAUSTED`. Ainda assim, rode `server/testeRotas.js` (ele varre todos os `.html` e falha se alguma página autenticada perder o token) antes de qualquer merge.
 11. **Não tocar nos espaços de código de unidade** (`migracaoUnidades.js`, `normalizarCodigoUnidade()`, `UNIDADES_APELIDOS`, `merchantAccountCode` da Adyen). É rebranding visual; o dado continua igual.
+
+### Beniboy — novo visual (turno 6 do mockup)
+Avatar circular: círculo de fundo `var(--panel)`, anel de 2,5px e a MESMA polyline de pulso da marca (viewBox 64×64, pontos `14,34 22,34 27,21 33,45 38,32 50,32`, `stroke-width:3.2`, cap/join round). Sem rosto. A cor do traço e do anel é o estado: disponível `var(--accent)`, pensando `var(--accent2)`, precisa de humano `var(--bad)`, resolvido `var(--ok)`. Tamanhos: 20 (item de menu), 32 (avatar de mensagem), 48 (cabeçalho e balãozinho), 64 (widget), 112 (alarme); ícone de push é o avatar em `#0b0d10` sobre quadrado limão de raio 14px. No alarme, avatar em branco sobre `rgba(255,255,255,.10)`.
+Aplicar em: `atendimento.html` (widget e avatar das mensagens), `beniboy.html` (cabeçalho e itens), `nav-menu.js` (item "Central do Beniboy"), `alerta-beniboy.html` (no lugar do 🚨), `push.js` (ícone).
+**Login:** remover o robô SVG de `index.html` (`.login-bot` e os keyframes `login-float`/`login-blink`/`login-arml`/`login-armr`). O balão de mensagem permanece — é o que o Master personaliza em Tela de Login. Tom do bot: colega técnico e direto ("Abri o chamado #4821 como crítico…"), nunca fofo.
 
 ### Decisões fechadas — não reabrir
 O mapeamento de campos da planilha (AdyenV2 → `pix` / "Adyen"; máquinas somadas em "Maquininhas (total)") e a unificação dos códigos de unidade estão resolvidos por decisão do Master e ficam como estão. O dado histórico precisa continuar legível do mesmo jeito — nenhuma migração nova, nenhum rótulo ou destino de campo alterado. (A nota "pergunta pendente" na §10 do `docs/CONTEXTO.md` descreve comportamento antigo e não vale mais; deixe como está, não é ação.)

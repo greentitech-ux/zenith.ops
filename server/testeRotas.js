@@ -4792,10 +4792,21 @@ setTimeout(async () => {
         && /\.beniboy\.pensando\{[^}]*var\(--accent2/.test(tema)
         && /\.beniboy\.alarme\{[^}]*var\(--bad/.test(tema)
         && /\.beniboy\.resolvido\{[^}]*var\(--ok/.test(tema),
-      'no alarme o traco fica inteiro (112px em tela cheia nao pode piscar vazio)':
-        /\.beniboy\.alarme \.bb-traco\{stroke-dasharray:none/.test(tema),
+      // A regra que vale em TODO lugar (BENIBOY.md secoes 2 e 8): a linha e
+      // solida e o que anda e um brilho curto por cima. O "tracar e apagar"
+      // deixava o desenho vazio parte do ciclo - ruim em 112px na tela de
+      // alarme e pior ainda num PDF/PPTX, que congela um frame.
+      'a linha nunca desaparece: a base e solida, quem anda e o brilho':
+        !/\.bb-traco\{[^}]*stroke-dasharray/.test(tema)
+        && !/\.marca-base\{[^}]*stroke-dasharray/.test(tema)
+        && /\.beniboy \.bb-brilho\{[^}]*stroke-dasharray:9 64/.test(tema)
+        && /\.marca-brilho\{[^}]*stroke-dasharray:12 82/.test(tema),
+      'o brilho tambem passa pelo token (branco sobre fundo branco vira buraco)':
+        /stroke:var\(--pulso-brilho,#fff\)/.test(tema)
+        && (tema.match(/stroke:var\(--pulso-brilho,#fff\)/g) || []).length === 2
+        && /--pulso-brilho:#[0-9a-f]{6};/.test(tema),
       'reduced-motion desliga o batimento':
-        /prefers-reduced-motion:reduce[\s\S]{0,200}bb-traco/.test(tema),
+        /prefers-reduced-motion:reduce[\s\S]{0,200}bb-brilho\{animation:none/.test(tema),
       'o robo antigo do login foi embora (markup e keyframes)':
         !/login-bot|login-float|login-blink|login-arml|login-armr/.test(login),
       'o robo antigo do widget foi embora':
@@ -4815,23 +4826,21 @@ setTimeout(async () => {
       // Decisao do usuario: o sinal vital se mexe onde quer que apareca,
       // logotipo incluido. O que NAO pode e o logotipo sumir - por isso a
       // linha de base continua inteira e quem anda e o pulso por cima.
-      'a marca tambem bate, com um pulso que anda por cima da linha':
-        /\.marca-pulso\{[^}]*animation:marca-pulso/.test(tema)
-        && /@keyframes marca-pulso/.test(tema)
-        && (login.match(/class="marca-pulso"/g) || []).length === 2
-        && /class="marca-pulso"/.test(nav),
-      'a linha de base do logotipo nunca some (so o pulso e que anda)':
-        !/\.marca-pulso\{[^}]*stroke-dasharray:96[^0-9]/.test(tema)
-        && (login.match(/stroke-linejoin="round" opacity="\.55"/g) || []).length === 2,
-      'reduced-motion tambem desliga o pulso da marca':
-        /prefers-reduced-motion:reduce[\s\S]{0,120}\.marca-pulso\{animation:none/.test(tema),
+      'a marca tambem bate, nas 3 aparicoes (login x2 e drawer)':
+        /\.marca-brilho\{[^}]*animation:marca-brilho/.test(tema)
+        && /@keyframes marca-brilho/.test(tema)
+        && (login.match(/class="marca-brilho"/g) || []).length === 2
+        && (login.match(/class="marca-base"/g) || []).length === 2
+        && /class="marca-brilho"/.test(nav) && /class="marca-base"/.test(nav),
+      'reduced-motion tambem desliga o brilho da marca':
+        /prefers-reduced-motion:reduce[\s\S]{0,120}\.marca-brilho\{animation:none/.test(tema),
     };
     const ruinsB = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okBeniboy = !ruinsB.length;
     if (ruinsB.length) console.log(`  falhou em: ${ruinsB.join(' · ')}`);
   } catch (e) { okBeniboy = false; console.log('  erro: ' + e.message); }
   if (!okBeniboy) ruins += 1;
-  console.log(`${okBeniboy ? '\u2713' : '\u2717'} Beniboy: um desenho so pros 6 lugares, com a cor no token e a marca batendo junto`);
+  console.log(`${okBeniboy ? '\u2713' : '\u2717'} Beniboy: um desenho so pros 6 lugares, a linha sempre inteira e a marca batendo junto`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
