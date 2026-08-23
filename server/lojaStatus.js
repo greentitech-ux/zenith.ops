@@ -329,6 +329,49 @@ async function garantirEspelho() {
 // anunciava uma queda que nunca houve.
 function invalidarEspelho() { espelhoEm = 0; }
 
+// ---------------------------------------------------------------------
+// POR QUE ISSO EXISTE (custo do Firestore):
+//
+// invalidarEspelho() zera a validade, e a proxima leitura roda
+// carregarEspelho(), que le a COLECAO INTEIRA - hoje 52 documentos. Como
+// cache.invalidar() derruba o espelho junto, TODA escrita de UMA maquina
+// (uma batida com evento novo, uma amostra de rede, um IP que mudou, uma
+// mensagem no chat) obrigava a proxima leitura a reler as 52. Com o painel
+// do NOC perguntando de 30 em 30s e maquina escrevendo o tempo todo, isso
+// virou a maior fatia da conta de leitura - e piorava a cada computador
+// novo instalado, porque o preco da releitura e o parque inteiro.
+//
+// Estes caminhos ja SABEM o que escreveram e em qual documento. Entao em
+// vez de jogar o espelho fora, aplicam o mesmo patch nele e seguem: zero
+// leitura no Firestore, e o espelho continua valendo pros outros 51.
+//
+// Quem NAO usa isto (de proposito): cadastrar/editar/remover/mover
+// computador. Essas mudam a FORMA do parque (documento entra ou sai), sao
+// raras - algumas vezes por semana - e ali reler tudo e o certo.
+// ---------------------------------------------------------------------
+function aplicarNoEspelho(id, patch) {
+  // sem espelho carregado ainda nao ha o que atualizar - a proxima leitura
+  // ja vai buscar tudo do banco de qualquer jeito
+  if (!espelho) return;
+  const atual = espelho.get(id);
+  if (!atual) {
+    // documento que o espelho ainda nao conhece (maquina que acabou de
+    // aparecer): ai sim precisa reler, pra nao inventar um registro pela
+    // metade a partir de um patch parcial
+    invalidarEspelho();
+    return;
+  }
+  espelho.set(id, { ...atual, ...patch });
+}
+
+// o par certo pra quem chamava cache.invalidar() depois de escrever UM
+// documento conhecido: atualiza o espelho na memoria e derruba so a lista
+// derivada (que e recalculada a partir do espelho, sem tocar no Firestore)
+function espelharEscrita(id, patch) {
+  aplicarNoEspelho(id, patch);
+  cacheBase.invalidar();
+}
+
 async function listUncached() {
   return [...(await garantirEspelho()).values()];
 }
@@ -543,11 +586,17 @@ async function heartbeat(codigo, posto, info, token) {
   // casos em que o operador está olhando a tela esperando a mudança
   // aparecer. Raro por natureza, então não recria o custo que a decisão
   // original evitou.
-  if (eventosNovos.length) cache.invalidar();
   // mantem o espelho em dia sem reler: o heartbeat sabe exatamente o que
   // acabou de gravar (ou o que gravaria). É isso que faz a proxima batida
   // nao custar leitura - e agora, na maioria das vezes, nem escrita.
   memoria.set(id, { ...anterior, ...patch });
+  // Evento novo (queda de Ethernet, reinício) tem que aparecer no painel na
+  // hora. ANTES isso era cache.invalidar(), que derruba o espelho junto - e
+  // o espelho é a coleção INTEIRA: um evento numa máquina obrigava a próxima
+  // leitura a reler as 52. Como o espelho acabou de ser atualizado na linha
+  // acima com o que esta batida gravou, basta derrubar a LISTA derivada:
+  // ela é recalculada a partir da memória, sem tocar no Firestore.
+  if (eventosNovos.length) cacheBase.invalidar();
   // token confere? (maquina legada sem token cadastrado nunca passa aqui -
   // recebe comando/chat vazios ate reinstalar o NOCZenith com o token assado)
   const tokenOk = !!(atual && atual.agentToken && tokensBatem(token, atual.agentToken));
@@ -748,8 +797,9 @@ async function moverComputador(codigoAtual, posto, codigoNovo) {
 async function definirAnydeskId(codigo, posto, anydeskId) {
   const id = docIdFor(codigo, posto);
   const limpo = String(anydeskId || '').trim().slice(0, 40);
-  await COLLECTION.doc(id).set({ codigo, posto, anydeskId: limpo || null }, { merge: true });
-  cache.invalidar();
+  const patchAnydesk = { codigo, posto, anydeskId: limpo || null };
+  await COLLECTION.doc(id).set(patchAnydesk, { merge: true });
+  espelharEscrita(id, patchAnydesk);
   return { codigo, posto, anydeskId: limpo || null };
 }
 
@@ -784,7 +834,7 @@ async function atualizarIpLocal(codigo, posto, ip, token) {
     patch.ipHistorico = comMudancaDeIp(atual && atual.ipHistorico, 'local', atual && atual.ipLocal, limpo);
   }
   await COLLECTION.doc(id).set(patch, { merge: true });
-  cache.invalidar();
+  espelharEscrita(id, patch);
   return { codigo, posto, ipLocal: limpo };
 }
 
@@ -895,7 +945,7 @@ async function registrarTelemetria(codigo, posto, dados, token) {
 
   if (!Object.keys(patch).length) return { ok: false, motivo: 'nada útil na telemetria' };
   await COLLECTION.doc(id).set(patch, { merge: true });
-  cache.invalidar();
+  espelharEscrita(id, patch);
   return {
     ok: true,
     disco: patch.discoNivel || null,
@@ -930,7 +980,7 @@ async function registrarAcessoRemoto(codigo, posto, detalhe, token) {
   const patch = { codigo, posto, ultimoAcessoRemotoEm: agora, ultimoAcessoRemotoDetalhe: limpo };
   if (!repetido) patch.eventos = [...eventosAtuais, { tipo: 'acesso-remoto', em: agora, detalhe: limpo }].slice(-EVENTOS_MAX);
   await COLLECTION.doc(id).set(patch, { merge: true });
-  cache.invalidar();
+  espelharEscrita(id, patch);
   return { codigo, posto, nome: atual && atual.nome, ultimoAcessoRemotoDetalhe: limpo };
 }
 
@@ -1154,8 +1204,9 @@ async function adicionarNoChat(codigo, posto, entrada) {
   const snap = await COLLECTION.doc(id).get();
   const atual = snap.exists ? snap.data() : null;
   const thread = [...((atual && atual.chatMensagens) || []), entrada].slice(-CHAT_MAX_MENSAGENS);
-  await COLLECTION.doc(id).set({ codigo, posto, chatMensagens: thread }, { merge: true });
-  cache.invalidar();
+  const patchChat = { codigo, posto, chatMensagens: thread };
+  await COLLECTION.doc(id).set(patchChat, { merge: true });
+  espelharEscrita(id, patchChat);
   return thread;
 }
 
@@ -1174,11 +1225,13 @@ async function enviarMensagem(codigo, posto, texto, deEmail) {
     codigo, posto,
     mensagemPendente: { texto: textoLimpo, deEmail: deEmail || null, em: Date.now() },
   }, { merge: true });
-  // explicito de proposito: sem isso o heartbeat seguiria lendo o espelho
-  // antigo (sem a mensagem) e ela nunca seria entregue. Hoje o
-  // adicionarNoChat abaixo tambem invalida, mas depender do efeito colateral
-  // dele deixaria uma falha silenciosa esperando alguem mexer naquela funcao.
-  cache.invalidar();
+  espelharEscrita(id, { codigo, posto, mensagemPendente: { texto: textoLimpo, deEmail: deEmail || null, em: Date.now() } });
+  // o espelho e' atualizado na linha acima (espelharEscrita), nao invalidado:
+  // sem isso o heartbeat seguiria lendo o espelho antigo (sem a mensagem) e
+  // ela nunca seria entregue - mas jogar a coleção inteira fora pra entregar
+  // UMA mensagem era o que custava caro. O adicionarNoChat logo abaixo faz o
+  // mesmo pela thread; os dois sao explicitos de proposito, pra ninguem
+  // depender do efeito colateral do outro.
   await adicionarNoChat(codigo, posto, { de: 'master', texto: textoLimpo, deEmail: deEmail || null, em: Date.now() });
   return { codigo, posto, texto: textoLimpo };
 }
