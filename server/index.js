@@ -11163,14 +11163,32 @@ function aquecerBoot(promessa, ms) {
     // colecoes na frente dele - o "delay pra carregar" relatado em
     // 2026-08-09. Com o stale-while-revalidate do liveCache, depois desta
     // carga inicial nenhuma requisicao volta a esperar releitura de cache.
-    Promise.allSettled([
-      fechamentosLive.listAll(), entregasLive.listAll(), solicitacoes.listAll(),
-      parque.listAll(), festas.listAll(), mensalistas.listAll(),
-      chamadosTI.listAll(), sangrias.listAll(),
-    ]).then((r) => {
-      const falhas = r.filter((x) => x.status === 'rejected').length;
-      console.log(`Caches pré-aquecidos (${r.length - falhas}/${r.length} coleções).`);
-    });
+    // PRÉ-AQUECIMENTO: DESLIGADO por padrão (23/08/2026).
+    //
+    // Ele lê 8 coleções INTEIRAS a cada boot, só pra que o primeiro visitante
+    // depois de um deploy não espere a leitura. Com o consumo em regime já
+    // perto de zero (ver o espelho do NOC em lojaStatus.js), isso passou a
+    // ser o MAIOR custo restante: cada deploy custava ~5 mil leituras, e num
+    // dia de trabalho são dezenas de deploys. O gráfico do Firebase em 23/08
+    // mostrava exatamente isso - piso no chão e um pico a cada subida.
+    //
+    // Sem ele, quem abrir primeiro paga a leitura uma vez (a mesma que ia
+    // acontecer no pré-aquecimento) e todo mundo depois pega do cache. A
+    // diferença é uma tela um pouco mais lenta pra UMA pessoa, uma vez por
+    // deploy - contra ler tudo em toda subida, sempre, mesmo quando ninguém
+    // abre o app (madrugada, fim de semana).
+    //
+    // PRE_AQUECER_CACHES=1 religa.
+    if (process.env.PRE_AQUECER_CACHES === '1') {
+      Promise.allSettled([
+        fechamentosLive.listAll(), entregasLive.listAll(), solicitacoes.listAll(),
+        parque.listAll(), festas.listAll(), mensalistas.listAll(),
+        chamadosTI.listAll(), sangrias.listAll(),
+      ]).then((r) => {
+        const falhas = r.filter((x) => x.status === 'rejected').length;
+        console.log(`Caches pré-aquecidos (${r.length - falhas}/${r.length} coleções).`);
+      });
+    }
 
     // sincroniza as vendas do iFood (Sales API - so leitura, ver
     // server/ifoodClient.js): roda no start e depois periodicamente. Padrao
