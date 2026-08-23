@@ -4453,6 +4453,118 @@ setTimeout(async () => {
   if (!okCorrecaoParque) ruins += 1;
   console.log(`${okCorrecaoParque ? '✓' : '✗'} Parque: correção sem mudança nenhuma é recusada (e a que muda de verdade altera tempo, horário e valor)`);
 
+  // ---- Toast de solicitação: arrastar pro lado fecha SEM marcar como vista ----
+  // O pedido era "arrastar pra sair, porém sem marcar como visualizado".
+  // Duas coisas podem quebrar isso sem ninguém perceber: (1) o gesto em si
+  // (limiar, direção, o `pointercancel` que o Chromium dispara quando o
+  // arrasto começa em cima de texto selecionável - foi exatamente isso que
+  // quebrou na primeira versão), e (2) alguém "consertar" o fechamento
+  // pendurando o marcar-visto nele, que é o oposto do pedido. Por isso o
+  // teste roda a função de verdade (recortada do arquivo pelos marcadores)
+  // num elemento de mentira, e confere as duas cópias do toast que vivem
+  // fora do notif-central.js (Painel e Histórico têm a sua, de antes dele).
+  let okArrastar = false;
+  try {
+    const fsA = require('fs'); const pathA = require('path');
+    const dirPub = pathA.join(__dirname, 'public');
+    const fonteNotif = fsA.readFileSync(pathA.join(dirPub, 'notif-central.js'), 'utf8');
+    const recorte = fonteNotif.match(/\[ARRASTAR-INICIO\][^\n]*\n[\s\S]*?\n([\s\S]*?)\n  \/\/ \[ARRASTAR-FIM\]/);
+    if (!recorte) throw new Error('marcadores [ARRASTAR-INICIO]/[ARRASTAR-FIM] sumiram do notif-central.js');
+    // eslint-disable-next-line no-new-func
+    const arrastarParaFechar = new Function(`${recorte[1]}\nreturn arrastarParaFechar;`)();
+
+    function elementoFalso(largura) {
+      const ouvintes = {};
+      return {
+        offsetWidth: largura, style: {}, removido: false, capturou: false,
+        dragstartsBarrados: 0,
+        addEventListener(nome, fn) { (ouvintes[nome] = ouvintes[nome] || []).push(fn); },
+        removeEventListener(nome, fn) {
+          ouvintes[nome] = (ouvintes[nome] || []).filter((f) => f !== fn);
+        },
+        setPointerCapture() { this.capturou = true; },
+        remove() { this.removido = true; },
+        disparar(nome, ev) { (ouvintes[nome] || []).slice().forEach((fn) => fn(ev || {})); },
+      };
+    }
+    function gesto(el, passos) {
+      el.disparar('pointerdown', { pointerId: 1, pointerType: 'touch', button: 0, clientX: 200, clientY: 100 });
+      passos.forEach(([dx, dy]) => {
+        el.disparar('pointermove', { pointerId: 1, clientX: 200 + dx, clientY: 100 + dy });
+      });
+      el.disparar('pointerup', { pointerId: 1 });
+    }
+
+    // (1) arrasto horizontal decidido: sai da tela e chama o callback
+    const forte = elementoFalso(320);
+    let fechouCallback = 0;
+    arrastarParaFechar(forte, () => { fechouCallback += 1; });
+    gesto(forte, [[20, 2], [90, 4], [180, 6]]);
+    forte.disparar('transitionend');
+
+    // (2) arrasto curto (abaixo do limite): volta pro lugar, NÃO some
+    const curto = elementoFalso(320);
+    arrastarParaFechar(curto, () => { fechouCallback += 1; });
+    gesto(curto, [[20, 1], [40, 2]]);
+    curto.disparar('transitionend');
+
+    // (3) rolagem vertical não pode ser confundida com o gesto lateral
+    const vertical = elementoFalso(320);
+    arrastarParaFechar(vertical, () => { fechouCallback += 1; });
+    gesto(vertical, [[3, 40], [200, 160]]);
+
+    // (4) arrastar pro outro lado também fecha (o gesto é dos dois lados)
+    const paraEsquerda = elementoFalso(320);
+    arrastarParaFechar(paraEsquerda);
+    gesto(paraEsquerda, [[-20, 2], [-95, 3], [-200, 5]]);
+    paraEsquerda.disparar('transitionend');
+
+    // (5) sem transitionend (transição cortada pelo navegador), o setTimeout
+    //     de segurança ainda tira o card - senão ele ficaria invisível e vivo
+    const semTransicao = elementoFalso(320);
+    arrastarParaFechar(semTransicao);
+    gesto(semTransicao, [[20, 0], [90, 0], [180, 0]]);
+    const sumiuSozinho = await new Promise((r) => setTimeout(() => r(semTransicao.removido), 420));
+
+    const htmlPainel = fsA.readFileSync(pathA.join(dirPub, 'painel.html'), 'utf8');
+    const htmlHist = fsA.readFileSync(pathA.join(dirPub, 'central-historico.html'), 'utf8');
+    // o marcar-visto tem que continuar preso ao botão Visualizar, e o gesto
+    // não pode aparecer perto dele em nenhuma das cópias
+    const gestoNaoMarca = [fonteNotif, htmlPainel, htmlHist].every((src) => {
+      const i = src.indexOf('ZenithArrastarParaFechar');
+      if (i < 0) return true; // ausência é problema de outra conferência, não desta
+      return !/marcar-visto/.test(src.slice(i, i + 400));
+    });
+
+    const conferencias = {
+      'arrastar de verdade tira o card da tela': forte.removido === true,
+      'e avisa quem pediu (callback)': fechouCallback === 1,
+      'o card é levado pra fora, não só apagado': /translateX\(3\d\d/.test(String(forte.style.transform || '')),
+      'arrasto curto NÃO fecha': curto.removido === false,
+      'e o arrasto curto volta pro lugar': curto.style.transform === '' && curto.style.opacity === '',
+      'rolagem vertical NÃO fecha': vertical.removido === false,
+      'arrastar pro outro lado também fecha': paraEsquerda.removido === true,
+      'sem transitionend, a rede de segurança ainda fecha': sumiuSozinho === true,
+      'o gesto pede captura do ponteiro (não perde o dedo no caminho)': forte.capturou === true,
+      'a rolagem vertical da página continua livre': forte.style.touchAction === 'pan-y',
+      'seleção de texto travada (senão o Chromium cancela o gesto)':
+        forte.style.userSelect === 'none' && forte.style.webkitUserSelect === 'none',
+      'notif-central publica o gesto pras outras páginas':
+        /window\.ZenithArrastarParaFechar\s*=/.test(fonteNotif),
+      'o Painel usa o mesmo gesto': /window\.ZenithArrastarParaFechar\(/.test(htmlPainel),
+      'o Histórico usa o mesmo gesto': /window\.ZenithArrastarParaFechar\(/.test(htmlHist),
+      'e as duas cópias chamam com guarda (página sem o arquivo não quebra)':
+        /if \(window\.ZenithArrastarParaFechar\)/.test(htmlPainel)
+        && /if \(window\.ZenithArrastarParaFechar\)/.test(htmlHist),
+      'arrastar NÃO marca a solicitação como vista': gestoNaoMarca,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okArrastar = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okArrastar = false; console.log('  erro: ' + e.message); }
+  if (!okArrastar) ruins += 1;
+  console.log(`${okArrastar ? '✓' : '✗'} Notificação: arrastar pro lado fecha o toast SEM marcar como visualizado`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
