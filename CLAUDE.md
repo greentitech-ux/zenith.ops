@@ -205,7 +205,44 @@ tela → arquivo) está em **`docs/rebranding/`**.
 
 ---
 
-## 6. Antes de qualquer merge
+## 6. Mockup não é especificação: separe antes de construir
+
+Regra do Master, vale para **todo** design que chegar de fora (Claude Design,
+referência, print de concorrente). Quem desenha vê a tela; só quem está no
+código sabe o que existe atrás dela. **Nunca implemente um mockup ao pé da
+letra.** Antes de escrever a primeira linha, separe em três:
+
+1. **Real** — o dado existe e a permissão permite. Faça, e faça bonito.
+2. **Real com ressalva** — o dado existe mas custa leitura no Firestore, ou
+   cruza duas permissões, ou depende de feature que não existe. Traga o
+   problema e o custo antes.
+3. **Ficção** — o número foi inventado pra encher a tela. Não construa.
+   Diga qual é, e o que seria preciso pra existir de verdade.
+
+Depois junte: pegue a **linguagem visual** do que é ficção (o tile, a barra,
+a hierarquia) e aplique num dado que **existe**. O painel fica igualmente
+bonito e para de mentir.
+
+Exemplos reais desta separação (mockup 1b, Painel):
+
+| Proposto | Veredito |
+|---|---|
+| "Meta do mês · 71,2%" com barra | ficção — não há meta em lugar nenhum do sistema |
+| "Faturamento hoje +8,4% vs. terça" | ficção — fechamento é lançado quando a loja fecha; "hoje" não tem dado |
+| "Chamados: 3 TI · 4 manutenção" | ressalva — junta duas seções de permissão diferentes |
+| Chips por unidade com "Não lançou" | real — `doDia` já traz unidade e valor |
+| "● ao vivo · 25s" | real com número errado — o painel recarrega a cada **60s** |
+
+A barra limão da "meta" foi reaproveitada em **"8 de 14 lançaram"**, que é o
+mesmo desenho sobre um número verdadeiro.
+
+**Nunca invente rótulo, número ou estado que o código não produz.** Uma tela
+que mostra dado falso é pior que uma tela feia: a operação decide em cima
+dela.
+
+---
+
+## 7. Antes de qualquer merge
 
 ```bash
 cd server && JWT_SECRET=t \
