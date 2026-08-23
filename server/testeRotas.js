@@ -4565,6 +4565,134 @@ setTimeout(async () => {
   if (!okArrastar) ruins += 1;
   console.log(`${okArrastar ? '✓' : '✗'} Notificação: arrastar pro lado fecha o toast SEM marcar como visualizado`);
 
+  // ---- A REGRA DA UNIDADE: Tatuapé não vê nada da Mooca (nem no mesmo grupo) ----
+  // O pedido foi literal: "uma unidade não pode ter acesso a dados da outra
+  // mesmo que ela esteja dentro do mesmo grupo, da mesma empresa. Tatuapé não
+  // pode ver nada da Mooca". As duas SÃO da Arcfood e SÃO do mesmo grupo de
+  // KPI's - é o caso mais difícil, porque tudo que separa por empresa ou por
+  // rede deixa essas duas juntas. O furo real era o cadastro do grupo: ele
+  // saía inteiro em /api/grupos, e a tela de KPI's monta as colunas/séries a
+  // partir dele - então o Tatuapé via "Mooca" no comparativo. Este teste usa
+  // dois acessos DE VERDADE (login, HTTP), não um mock de permissão.
+  let okIsolamentoUnidade = false;
+  try {
+    const bcrypt = require('bcryptjs');
+    const senhaHash = bcrypt.hashSync('SenhaDeTeste!2026', 4);
+    const criarAcesso = async (id, email, unidades) => {
+      DOCS.set('users/' + id, {
+        passwordHash: senhaHash, role: 'user', active: true,
+        email, username: id,
+        permissions: { sections: ['fechamentos', 'solicitacoes'], unidades, vaultSubgroups: [], tiposSolicitacao: [] },
+        createdAt: new Date().toISOString(),
+      });
+      const tk = (await auth.login(email, 'SenhaDeTeste!2026')).token;
+      return { Authorization: 'Bearer ' + tk };
+    };
+    // 19889 = Tatuapé, 19888 = Mooca (ver CODIGOS_ARCFOOD em redes.js)
+    const cabTatuape = await criarAcesso('u-tatuape', 'tatuape@teste.local', ['19889']);
+    const cabMooca = await criarAcesso('u-mooca', 'mooca@teste.local', ['19888']);
+    // quem manda nas duas continua vendo as duas - a regra é "só as que
+    // estiverem no acesso", não "só uma"
+    const cabAmbas = await criarAcesso('u-ambas', 'ambas@teste.local', ['19888', '19889']);
+    const cabMaster = token ? { Authorization: 'Bearer ' + token } : {};
+
+    // um grupo de KPI com AS DUAS lojas dentro (o cenário do pedido)
+    await postarJson('/api/grupos', {
+      nome: 'Arcfood SP Teste',
+      unidades: ['19888', '19889'],
+      kpisExtras: [{ label: 'Tempo de forno', tipo: 'tempo' }],
+    }, cabMaster);
+
+    const gruposDe = async (cab) => {
+      const r = await pedir('/api/grupos', cab);
+      const lista = r.status === 200 ? JSON.parse(r.corpo) : [];
+      return lista.find((g) => g.nome === 'Arcfood SP Teste') || null;
+    };
+    const gTatuape = await gruposDe(cabTatuape);
+    const gMooca = await gruposDe(cabMooca);
+    const gAmbas = await gruposDe(cabAmbas);
+    const gMaster = await gruposDe(cabMaster);
+
+    // fechamento de CADA loja, pra provar que o dado também não atravessa
+    DOCS.set('fechamentosLive/f-tat', { id: 'f-tat', unidade: '19889', unidadeNome: 'Dom Tatuape', data: '2026-08-20', faturamento: 1000 });
+    DOCS.set('fechamentosLive/f-moo', { id: 'f-moo', unidade: '19888', unidadeNome: 'Dom Mooca', data: '2026-08-20', faturamento: 2000 });
+    const fechDe = async (cab) => {
+      const r = await pedir('/api/fechamentos', cab);
+      return (r.status === 200 ? JSON.parse(r.corpo) : []).map((f) => f.unidade);
+    };
+    const fTatuape = await fechDe(cabTatuape);
+    const fMooca = await fechDe(cabMooca);
+
+    // trocar ?unidade= na URL não pode revelar quem responde pela loja vizinha
+    const respVizinha = await pedir('/api/grupos/responsaveis?unidade=' + encodeURIComponent('19888'), cabTatuape);
+    const respPropria = await pedir('/api/grupos/responsaveis?unidade=' + encodeURIComponent('19889'), cabTatuape);
+
+    const authMod = require('/home/user/adyen-monitor/server/auth.js');
+    const srcNav = require('fs').readFileSync(require('path').join(__dirname, 'public', 'nav-menu.js'), 'utf8');
+    const srcKpis = require('fs').readFileSync(require('path').join(__dirname, 'public', 'kpis-operacionais.html'), 'utf8');
+
+    const conferencias = {
+      // ---- o furo do pedido: a lista de lojas do grupo
+      'o grupo chega no Tatuapé só com o Tatuapé dentro':
+        !!gTatuape && JSON.stringify(gTatuape.unidades) === '["19889"]',
+      'e chega na Mooca só com a Mooca': !!gMooca && JSON.stringify(gMooca.unidades) === '["19888"]',
+      'quem tem as DUAS lojas continua vendo as duas':
+        !!gAmbas && gAmbas.unidades.length === 2
+        && gAmbas.unidades.includes('19888') && gAmbas.unidades.includes('19889'),
+      'o Master segue vendo o grupo inteiro': !!gMaster && gMaster.unidades.length === 2,
+
+      // ---- e o dado em si
+      'o Tatuapé só recebe fechamento do Tatuapé':
+        fTatuape.length > 0 && fTatuape.every((u) => u === '19889'),
+      'a Mooca só recebe fechamento da Mooca':
+        fMooca.length > 0 && fMooca.every((u) => u === '19888'),
+
+      // ---- trocar a unidade na URL na mão
+      'pedir os responsáveis da loja vizinha é recusado (403)': respVizinha.status === 403,
+      'e os da própria loja continuam respondendo': respPropria.status === 200,
+
+      // ---- a fonte única da regra (auth.js), exercitada direto
+      'Master não tem recorte de unidade': authMod.unidadesVisiveis({ isMaster: true }) === null,
+      'ser Admin NÃO dá unidade de brinde':
+        authMod.podeVerUnidade({ isAdmin: true, permissions: { unidades: ['19889'] } }, '19888') === false,
+      'ser do time de suporte também não':
+        authMod.podeVerUnidade({ permissions: { sections: ['suporte'], unidades: ['19889'] } }, '19888') === false,
+      'registro sem unidade nunca passa':
+        authMod.podeVerUnidade({ permissions: { unidades: ['19889'] } }, '') === false
+        && authMod.filterByUnidade({ permissions: { unidades: ['19889'] } }, [{ semUnidade: 1 }]).length === 0,
+
+      // ---- as duas abas de Fechamento por rede
+      'o menu marca "Fechamentos Arcfood" como item da rede ARCFOOD':
+        /nav-fechamentos-arcfood[\s\S]{0,220}?redes: \['ARCFOOD'\]/.test(srcNav),
+      'e "Fechamentos GBE" como item da rede GBE':
+        /nav-fechamentos-gbe[\s\S]{0,200}?redes: \['GBE'\]/.test(srcNav),
+      'o menu esconde item de rede que não é do usuário': (() => {
+        const m = eval('(' + (srcNav.match(/function temRede\(me, it\) \{[\s\S]*?\n  \}/) || [''])[0].replace(/^function temRede/, 'function temRede') + ')');
+        const soGbe = { redesDoUsuario: ['GBE'] };
+        const soArc = { redesDoUsuario: ['ARCFOOD'] };
+        const master = { redesDoUsuario: null };
+        const arcfood = { redes: ['ARCFOOD'] };
+        const semRede = { rotulo: 'Entregas' };
+        return m(soGbe, arcfood) === false && m(soArc, arcfood) === true
+          && m(master, arcfood) === true && m(soGbe, semRede) === true;
+      })(),
+      'o servidor manda a(s) rede(s) do acesso no /api/me':
+        /redesDoUsuario: req\.isMaster/.test(require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8')),
+
+      // ---- a tela de KPI's, que era o sintoma relatado
+      'a tela de KPI\'s recorta as lojas do grupo pelo acesso':
+        /return doGrupo\.filter\(u => UNIDADES_PERMITIDAS\.has\(u\)\);/.test(srcKpis)
+        && /if\(!UNIDADES_PERMITIDAS\) return doGrupo;/.test(srcKpis),
+      'e derruba grupo onde a pessoa não tem loja nenhuma':
+        /\.filter\(g => !UNIDADES_PERMITIDAS \|\| \(g\.unidades\|\|\[\]\)\.some/.test(srcKpis),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okIsolamentoUnidade = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okIsolamentoUnidade = false; console.log('  erro: ' + e.message); }
+  if (!okIsolamentoUnidade) ruins += 1;
+  console.log(`${okIsolamentoUnidade ? '✓' : '✗'} Unidade: Tatuapé não vê NADA da Mooca (mesmo grupo, mesma empresa) - nem no cadastro do grupo, nem no dado, nem trocando a URL`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

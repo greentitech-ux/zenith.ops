@@ -331,12 +331,46 @@ function hasSection(req, section) {
   return req.isMaster || (req.permissions.sections || []).includes(section);
 }
 
+// ---------------------------------------------------------------------
+// A REGRA DA UNIDADE - vale pra TODO o Zenith, sem excecao por modulo:
+//
+//   uma unidade so enxerga a PROPRIA unidade. Nem a vizinha do mesmo
+//   grupo, nem a irma da mesma empresa. Quem manda em mais de uma loja
+//   enxerga mais de uma - exatamente as que estiverem marcadas no acesso
+//   dele em /usuarios.html, nem uma a mais.
+//
+// So o Master atravessa isso (e por isso `unidadesVisiveis` devolve null
+// pra ele: null = sem recorte, nao "nenhuma"). Ser Admin, ser do time de
+// suporte ou ter a secao liberada NAO da unidade nenhuma de brinde - essas
+// coisas dizem O QUE a pessoa pode fazer, nunca EM QUAL loja.
+//
+// Essas duas funcoes sao a fonte unica dessa regra. `filterByUnidade`
+// (lista) e `podeVerUnidade` (item unico) sao as duas formas de aplicar:
+// use uma delas em vez de reescrever `permissions.unidades` na mao, senao
+// a regra vira 40 regras parecidas e uma delas fica pra tras.
+// ---------------------------------------------------------------------
+
+// null = ve tudo (so Master). Senao, o Set exato das unidades do acesso.
+function unidadesVisiveis(req) {
+  if (req.isMaster) return null;
+  return new Set((req.permissions && req.permissions.unidades) || []);
+}
+
+// essa pessoa pode ver ESTA unidade? Unidade vazia/indefinida e sempre
+// nao: registro sem unidade nao da pra dizer de quem e, e deixar passar
+// seria justamente o vazamento que isso existe pra evitar.
+function podeVerUnidade(req, unidade) {
+  const visiveis = unidadesVisiveis(req);
+  if (!visiveis) return true;
+  return !!unidade && visiveis.has(unidade);
+}
+
 // filtra uma lista de itens com campo `unidade` pelas unidades permitidas
 // (Master ve tudo, sem filtro)
 function filterByUnidade(req, list) {
-  if (req.isMaster) return list;
-  const allowed = new Set(req.permissions.unidades || []);
-  return list.filter((item) => item.unidade && allowed.has(item.unidade));
+  const visiveis = unidadesVisiveis(req);
+  if (!visiveis) return list;
+  return list.filter((item) => item.unidade && visiveis.has(item.unidade));
 }
 
 // time de suporte: atravessa TODA unidade/empresa de proposito (precisa
@@ -399,6 +433,8 @@ module.exports = {
   escopoDeUnidades,
   filtrarPorEmpresa,
   filterByUnidade,
+  unidadesVisiveis,
+  podeVerUnidade,
   emptyPermissions,
   dentroDoHorarioPermitido,
   invalidarUsuario,

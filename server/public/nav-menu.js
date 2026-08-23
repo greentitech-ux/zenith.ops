@@ -48,8 +48,8 @@
       // vez - por isso 2 itens de menu, cada um mandando pra ca com
       // ?grupo=ARCFOOD/BRAVO ja fixado (a pagina trava o seletor sozinha
       // quando ve o parametro, ver GRUPO_FIXO em fechamentos.html)
-      { id: 'nav-fechamentos-arcfood', href: '/fechamentos.html?grupo=ARCFOOD', icone: '💰', rotulo: 'Fechamentos Arcfood', secoes: ['fechamentos'] },
-      { id: 'nav-fechamentos-gbe', href: '/fechamentos.html?grupo=BRAVO', icone: '💰', rotulo: 'Fechamentos GBE', secoes: ['fechamentos'] },
+      { id: 'nav-fechamentos-arcfood', href: '/fechamentos.html?grupo=ARCFOOD', icone: '💰', rotulo: 'Fechamentos Arcfood', secoes: ['fechamentos'], redes: ['ARCFOOD'] },
+      { id: 'nav-fechamentos-gbe', href: '/fechamentos.html?grupo=BRAVO', icone: '💰', rotulo: 'Fechamentos GBE', secoes: ['fechamentos'], redes: ['GBE'] },
       { id: 'nav-kpis-operacionais', href: '/kpis-operacionais.html', icone: '⏱️', rotulo: "KPI's operacionais", secoes: ['fechamentos'] },
       { id: 'nav-vendas-recordes', href: '/vendas-recordes.html', icone: '🏆', rotulo: 'Recordes de Venda', secoes: ['fechamentos'] },
       { id: 'nav-entregas', href: '/entregas.html', icone: '🛵', rotulo: 'Entregas', secoes: ['entregas'] },
@@ -351,12 +351,27 @@
     return it.verticais.some((v) => me.verticaisDoUsuario.includes(v));
   }
 
+  // REDE do item (ARCFOOD / GBE, ver server/redes.js) bate com a(s) rede(s)
+  // das lojas do usuario. Existe pra "Fechamentos Arcfood" e "Fechamentos
+  // GBE": os dois apareciam pra qualquer um com a seção 'fechamentos', e
+  // quem so tem loja do Grupo Bravo clicava em Arcfood pra cair numa tela
+  // vazia da operacao do vizinho. redesDoUsuario vem do /api/me e sai das
+  // MESMAS unidades que filtram os dados; null = Master, atravessa tudo.
+  // Item sem `redes` continua aparecendo pra todo mundo (a esmagadora
+  // maioria - isso nao e um filtro geral, e a regra desses dois itens).
+  function temRede(me, it) {
+    if (!it.redes) return true;
+    if (!me.redesDoUsuario) return true;
+    return it.redes.some((r) => me.redesDoUsuario.includes(r));
+  }
+
   function podeVer(it, me) {
     const isMaster = me.role === 'master';
     const isAdmin = isMaster || !!me.isAdmin;
     if (it.master) return isMaster;
     if (it.admin) return isAdmin;
     if (!temVertical(me, it)) return false;
+    if (!temRede(me, it)) return false;
     if (it.secoes) return it.secoes.some((s) => temSecao(me, s));
     return true;
   }
