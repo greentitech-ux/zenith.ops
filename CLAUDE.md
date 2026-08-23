@@ -23,11 +23,13 @@ Rótulo na tela pode mudar; **o identificador não**.
 |---|---|---|
 | `NOCZenith` | `vigiaScript.js`, `lojaStatus.js` | é o nome da pasta em `%LOCALAPPDATA%` e da tarefa agendada em 52 máquinas — renomear = 52 reinstalações na mão |
 | `zenithMonitorFixo`, `zenithAbertoDesde` | `localStorage` | o computador da loja esquece qual unidade monitora e passa a acusar loja offline |
-| `authToken`, `zenithTema`, `zenithFonte` | `localStorage` | derruba a sessão e a preferência de todo mundo |
+| `authToken`, `zenithTema`, `zenithFonte`, `centralSecao` | `localStorage` | derruba a sessão, a preferência de tema e a aba lembrada da Central |
 | ids `nav-*` (42 deles) | `nav-menu.js` | é a chave da permissão em `aplicarRegras()`; o rótulo ao lado pode mudar à vontade |
 | `zenith-ops` | `render.yaml` | nome do serviço no Render — mudar cria serviço novo |
 | `adyen-monitor.onrender.com` | — | os 52 agentes apontam pra lá e o link já foi mandado pra cliente |
 | seção "NOC Zenith" | `loja-status.html` | é nome de seção interna, não marca de produto — fica |
+| `start_url: "/"` | `manifest.json` | o heartbeat depende de reabrir a raiz e ler a unidade salva no navegador — `name`/`short_name`/ícones podem mudar |
+| `normalizarCodigoUnidade()`, `UNIDADES_APELIDOS`, `merchantAccountCode` | `migracaoUnidades.js`, Adyen | espaços de código de unidade. Rebranding é visual; o dado continua igual |
 
 ---
 
@@ -51,6 +53,16 @@ Fontes (Archivo + JetBrains Mono) são servidas pelo **próprio app**, em
 latência alto e algumas ficam atrás de rede restrita. São variable fonts:
 um `.woff2` por subset cobre a faixa inteira de peso. O `tema.js` injeta
 o CSS uma vez, para todas as 53 páginas.
+
+**Cor semântica não é marca.** `--ok` / `--warn` / `--bad` e os marcadores
+🟢🟡🔴 do NOC e dos alertas ficam como estão. Repintar status com o limão
+apaga a leitura de gravidade — que é exatamente o que a operação usa pra
+decidir. `<meta name="theme-color">` continua `#0b0d10` (a exceção é
+`alerta-beniboy.html`, vermelho de propósito).
+
+Relatórios e e-mails têm hex próprio e **não** são afetados pelo CSS:
+`relatorioMV.js` (`STATUS_COR`), `fechamentosReport.js`, `fraudReport.js`,
+`vaultExport.js`. Rebrandeá-los é opcional e independente.
 
 O `tema.js` é carregado por **todas** as páginas. Página nova precisa da
 tag `<script src="/tema.js"></script>` no `<head>`.
@@ -83,7 +95,43 @@ Não abrir Pull Request sem o usuário pedir.
 
 ---
 
-## 5. Antes de qualquer merge
+## 5. Vocabulário: usar o que já existe no código
+
+Ao mexer em qualquer tela, status, coluna e verbo vêm do próprio código —
+**nunca inventar rótulo novo**:
+
+- **Solicitações/estornos**: `PENDENTE`, `APROVADO`, `REJEITADO`,
+  `CONVERTIDO` (`solicitacoes.js`, `refunds.js`)
+- **Chamados de TI**: `ABERTO`, `INICIADO`, `CONCLUIDO`, `CANCELADO`, mais
+  remoto × presencial e triagem N1/N2 (`chamadosTI.js`, `tecnico.html`)
+- **Manutenção**: Aguardando aceite / Recusado / Aceito / Em execução / Em
+  espera / Finalizado / Cancelado (`manutencao.html`, `STATUS_LABEL`)
+- **Compras**: `aguardando` → `aprovada` → `comprada` → `entregue`
+  (`compras.html`)
+- **Disputas**: `MONITORANDO`, `ABERTA`, `ENVIADA`, `GANHA`, `PERDIDA`,
+  `ERRO_SISTEMA` (`disputes.js`)
+- **Beniboy**: `PENDENTE`, `EM_ATENDIMENTO`, `TRANSFERIDO`,
+  `TICKET_CRIADO`, `RESOLVIDO`, `SEM_SOLUCAO` (`suporteChat.js`)
+- **NOC**: `nunca` / Operacional / Degradado / Indisponível — quatro
+  estados disjuntos (`loja-status.html`, `statusDe()`)
+- **Fechamento**: campos de `NOMES_CAMPOS_FECHAMENTO`. Correção só por
+  Central → Histórico → 🧾 Fechamentos → Pedir correção
+- **Monitor**: colunas de `reportExport.js`; unidade no espaço Adyen
+  (`DOM_19706`, `Mooca`)
+- **Tipos de solicitação** com ícone: `usuarios.html`, `TIPOS_SOLICITACAO`.
+  Áreas: `grupos.html`, `AREAS_LABEL`
+
+**Tom de voz** em notificação e alerta: direto e específico, sempre com o
+fato e o número — "Diferença de caixa detectada", "3 de 14 unidades
+faltando lançar", "Latência acima de 1000ms em 8 máquinas". Nunca "Ops,
+algo deu errado".
+
+O pacote de design completo (tokens, as 28 telas em mockup e o mapa
+tela → arquivo) está em **`docs/rebranding/`**.
+
+---
+
+## 6. Antes de qualquer merge
 
 ```bash
 cd server && JWT_SECRET=t \
