@@ -841,9 +841,23 @@ app.get('/api/formularios-publico/preencher/:token', async (req, res) => {
   res.json(vista);
 });
 
-app.post('/api/formularios-publico/preencher/:token', async (req, res) => {
+// upload.array() só mexe quando o content-type é multipart (Ass. Boleto,
+// que precisa mandar o arquivo do documento); requisição JSON pura (os
+// outros tipos, sem anexo) passa direto - mesma convivência dos dois
+// formatos na mesma rota já usada em /api/abastecimento.
+app.post('/api/formularios-publico/preencher/:token', upload.array('anexos', 5), async (req, res) => {
   try {
-    const r = await formularios.salvarPreenchimento(req.params.token, { campos: req.body.campos, linhas: req.body.linhas });
+    const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
+    const vista = await formularios.vistaPreenchimento(req.params.token);
+    if (!vista) return res.status(404).json({ error: 'Link de preenchimento inválido.' });
+    const anexos = [];
+    for (const file of req.files || []) {
+      const tipoOk = /^image\//.test(file.mimetype || '') || file.mimetype === 'application/pdf';
+      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF nem imagem.` });
+      const path = await storage.salvarArquivo(vista.id, file, 'formularios');
+      anexos.push({ nome: file.originalname, path, tipo: file.mimetype });
+    }
+    const r = await formularios.salvarPreenchimento(req.params.token, { campos: payload.campos, linhas: payload.linhas, anexos });
     broadcast('formulario-preenchido', { id: r.id }, 'solicitacoes');
     res.json(r);
   } catch (err) {
@@ -3444,6 +3458,50 @@ app.post('/api/formularios/:id/cancelar', auth.requireMaster, async (req, res) =
 app.delete('/api/formularios/:id', auth.requireMaster, async (req, res) => {
   if (await desviarSeQaMaster(req, res, 'formularios.remover', `Excluir formulário ${req.params.id}`, { id: req.params.id })) return;
   res.json(await formularios.remover(req.params.id));
+});
+
+// Formulário assinado -> ticket de Pagamento na Central, com os mesmos
+// anexos (comprovantes, ou o boleto no Ass. Boleto) e o MESMO Ticket # -
+// o formulário já nasce com esse número (ver criar()/criarParaPreenchimento
+// em formularios.js), então os dois lados da mesma solicitação
+// compartilham a numeração, igual à cobrança de chamado de TI/Manutenção
+// (ver enviarCobrancaChamado acima).
+app.post('/api/formularios/:id/enviar-pagamento', requireSection('formularios'), async (req, res) => {
+  try {
+    const registro = await formularios.getOne(req.params.id);
+    if (!registro) return res.status(404).json({ error: 'Formulário não encontrado.' });
+    if (!req.isMaster) {
+      const liberadas = new Set(req.permissions?.unidades || []);
+      const porRotulo = await formulariosUnidades.mapaRotuloParaCodigo();
+      const codigo = registro.unidadeCodigo || porRotulo[registro.unidade];
+      if (!codigo || !liberadas.has(codigo)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    if (registro.status !== 'ASSINADO') return res.status(400).json({ error: 'Só dá pra enviar como Pagamento depois que todas as assinaturas estiverem completas.' });
+    if (registro.enviadoPagamento) return res.status(400).json({ error: `Esse formulário já foi enviado como Pagamento (Ticket #${registro.numeroTicket}).` });
+    const modelo = formularios.TIPOS[registro.tipo];
+    const ticket = await solicitacoes.create({
+      tipo: 'pagamento',
+      numeroTicket: registro.numeroTicket,
+      unidade: registro.unidadeCodigo || registro.unidade,
+      unidadeNome: registro.unidade,
+      titulo: `${modelo.rotulo} · ${registro.unidade}`,
+      valorEstimado: registro.valorTotal,
+      observacao: `Gerado do formulário ${modelo.rotulo} (Ticket #${registro.numeroTicket}, ${registro.unidade}), já assinado.\n\nOs dois tickets compartilham a numeração #${registro.numeroTicket}.`,
+      itens: [],
+      anexos: registro.anexos || [],
+      ehOrcamento: false,
+      criadoPorId: req.user.id,
+      criadoPorEmail: req.user.email,
+      direcionadoParaId: null,
+      direcionadoParaEmail: null,
+    });
+    await formularios.marcarEnviadoPagamento(req.params.id, { pagamentoId: ticket.id });
+    broadcast('solicitacao-criada', ticket, 'solicitacoes');
+    push.notifySolicitacao(`Ticket #${ticket.numeroTicket} · Pagamento (formulário)`, `${modelo.rotulo} · ${registro.unidade} · R$ ${Number(registro.valorTotal || 0).toFixed(2)}`, ticket.id);
+    res.json({ ticket });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // ---------- notificacoes push (estorno, estorno agendado, chargeback, fraude) ----------

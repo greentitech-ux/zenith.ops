@@ -406,6 +406,15 @@ async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criad
 // solicitante não escolhe de qual unidade é, senão o link viraria uma
 // porta pra lançar em qualquer loja). O que falta - cabeçalho e linhas -
 // é o que ele preenche.
+//
+// No Ass. Boleto (soAnexo) o mesmo link também serve pra isso: o
+// "preenchimento" ali é o favorecido anexar o boleto e digitar
+// favorecido/descrição/vencimento/valor (tudo cabeçalho, sem tabela -
+// montarConteudo já trata soAnexo sem exigir linha). O ponto importante é
+// a ORDEM que isso garante de graça: como montarAssinaturas só roda
+// dentro de salvarPreenchimento (abaixo), o slot do Responsável nem
+// EXISTE enquanto o favorecido não manda o anexo - não tem como gerar o
+// link de assinatura cedo demais, porque não tem link nenhum até lá.
 const STATUS_AGUARDANDO = 'AGUARDANDO_PREENCHIMENTO';
 
 // O link é ÚNICO por tipo+unidade+quem gerou, enquanto não for preenchido:
@@ -422,10 +431,6 @@ const STATUS_AGUARDANDO = 'AGUARDANDO_PREENCHIMENTO';
 async function criarParaPreenchimento({ tipo, unidade, criadoPorId, criadoPorEmail, numeroTicket }) {
   const modelo = TIPOS[tipo];
   if (!modelo) throw new Error('Tipo de formulário inválido.');
-  // no Ass. Boleto não há o que o solicitante preencher: o conteúdo é o
-  // arquivo anexado, e quem anexa é quem lança. O link que faz sentido
-  // nesse tipo é o de ASSINATURA, que sai depois de criado.
-  if (modelo.soAnexo) throw new Error('Esse tipo não tem campos pro solicitante preencher - anexe o documento aqui e mande o link de assinatura depois.');
   const unidadeOk = limpar(unidade, 80);
   const cadastro = await formulariosUnidades.obterPorUnidade(unidadeOk);
   if (!cadastro) throw new Error('Unidade inválida - escolha uma das unidades cadastradas.');
@@ -483,6 +488,10 @@ async function vistaPreenchimento(token) {
     unidade: r.unidade, razaoSocial: r.razaoSocial, cnpj: r.campos.cnpj,
     numeroTicket: r.numeroTicket,
     cabecalho: modelo.cabecalho, colunas: modelo.colunas,
+    // soAnexo (Ass. Boleto): sem tabela de itens - o preenchimento inclui
+    // anexar o próprio documento, e essa é a informação que a tela pública
+    // usa pra trocar a lista de "Itens" por um campo de arquivo
+    soAnexo: !!modelo.soAnexo, anexoObrigatorio: !!modelo.anexoObrigatorio,
     jaPreenchido: r.status !== STATUS_AGUARDANDO,
     campos: r.campos, linhas: r.linhas,
   };
@@ -491,7 +500,9 @@ async function vistaPreenchimento(token) {
 // o solicitante enviou: valida pelas MESMAS regras da unidade, cria os
 // slots de assinatura (agora que existem linhas) e o formulário entra no
 // fluxo normal, como se tivesse sido preenchido na loja.
-async function salvarPreenchimento(token, { campos, linhas }) {
+// anexos: só usado pelo soAnexo (Ass. Boleto) - nos outros tipos vem vazio
+// e o formulário segue sem anexo nenhum, igual sempre foi.
+async function salvarPreenchimento(token, { campos, linhas, anexos } = {}) {
   const r = await porTokenPreenchimento(token);
   if (!r) throw new Error('Link de preenchimento inválido.');
   if (r.status !== STATUS_AGUARDANDO) throw new Error('Esse formulário já foi preenchido.');
@@ -499,8 +510,19 @@ async function salvarPreenchimento(token, { campos, linhas }) {
   const cadastro = await formulariosUnidades.obterPorUnidade(r.unidade);
 
   const { camposOk, linhasOk, valorTotal } = montarConteudo(modelo, cadastro, campos, linhas);
+
+  const anexosOk = (Array.isArray(anexos) ? anexos : []).slice(0, 5)
+    .map((a) => ({ nome: limpar(a.nome, 120) || 'anexo', path: String(a.path || ''), tipo: limpar(a.tipo, 80) }))
+    .filter((a) => a.path);
+  if (modelo.anexoObrigatorio && !anexosOk.length) {
+    throw new Error('Anexe o boleto (PDF ou imagem) - é ele que vai ser assinado.');
+  }
+
   await COLLECTION.doc(r.id).update({
-    campos: camposOk, linhas: linhasOk, valorTotal,
+    campos: camposOk, linhas: linhasOk, valorTotal, anexos: anexosOk,
+    // as assinaturas só nascem AQUI - é o que garante que o Responsável não
+    // tem link nenhum antes do favorecido mandar o anexo (ver comentário
+    // acima de STATUS_AGUARDANDO)
     assinaturas: montarAssinaturas(modelo, linhasOk),
     status: 'PENDENTE', preenchidoEm: new Date().toISOString(),
   });
@@ -616,6 +638,23 @@ async function cancelar(id, { motivo, porEmail } = {}) {
   });
   cache.invalidar();
   return { id, status: STATUS_CANCELADO };
+}
+
+// ---------------------------------------------------------------------
+// ENVIAR COMO TICKET DE PAGAMENTO. O formulário já nasce com Ticket # da
+// MESMA sequência da Central (ver criar()/criarParaPreenchimento acima) -
+// esta função é o que faz esse número virar de fato uma solicitação de
+// Pagamento, levando junto os anexos do formulário (comprovantes, ou o
+// próprio boleto no Ass. Boleto). Quem chama isso (index.js) já garante
+// que só roda com o formulário ASSINADO - marcarEnviadoPagamento só
+// registra o vínculo pra não deixar mandar duas vezes.
+async function marcarEnviadoPagamento(id, { pagamentoId } = {}) {
+  const r = await getOne(id);
+  if (!r) throw new Error('Formulário não encontrado.');
+  if (r.enviadoPagamento) throw new Error('Esse formulário já foi enviado como Pagamento.');
+  await COLLECTION.doc(id).update({ enviadoPagamento: { em: new Date().toISOString(), pagamentoId: pagamentoId || null } });
+  cache.invalidar();
+  return detalhar(id);
 }
 
 // só Master apaga (formulário financeiro é registro - apagar é exceção)
@@ -941,5 +980,5 @@ async function gerarPdf(r, res, opcoes) {
 }
 
 module.exports = { TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, editar, cancelar, remover, gerarPdf, chaveDoToken, parseValor,
-  criarParaPreenchimento, vistaPreenchimento, salvarPreenchimento, cancelarPreenchimento,
+  criarParaPreenchimento, vistaPreenchimento, salvarPreenchimento, cancelarPreenchimento, marcarEnviadoPagamento,
 };

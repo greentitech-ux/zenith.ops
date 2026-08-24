@@ -3756,7 +3756,9 @@ setTimeout(async () => {
 
     // sem anexo não existe o que assinar - tem que barrar
     const semAnexo = await postarMultipart('/api/formularios', { payload: payload() }, null, 'anexos', cab);
-    // e o link de "solicitante preenche" não faz sentido nesse tipo
+    // o link de "solicitante preenche" também vale pro Ass. Boleto agora
+    // (ver o teste dedicado logo abaixo) - aqui só confere que a unidade
+    // ainda consegue anexar direto, sem passar pelo link
     const linkPreench = await postarJson('/api/formularios/link-preenchimento', { tipo: 'assBoleto', unidade: 'Spoleto Tacaruna' }, cab);
 
     const criado = await postarMultipart('/api/formularios', { payload: payload() },
@@ -3787,7 +3789,7 @@ setTimeout(async () => {
 
     const conferencias = {
       'sem anexo o formulário nem é criado': semAnexo.status === 400 && /Anexe o boleto/.test(semAnexo.corpo),
-      'não oferece link de preenchimento (não há o que preencher)': linkPreench.status === 400,
+      'link de preenchimento também funciona nesse tipo': linkPreench.status === 200,
       'criar com o boleto anexado funciona e já nasce com Ticket #':
         criado.status === 200 && f.numeroTicket != null && (f.anexos || []).length === 1,
       'não exige linha de tabela (o documento é o anexo)': f.linhas.length === 0 && f.valorTotal === 1234.56,
@@ -3811,6 +3813,125 @@ setTimeout(async () => {
   } catch (e) { okBoleto = false; console.log('  erro: ' + e.message); }
   if (!okBoleto) ruins += 1;
   console.log(`${okBoleto ? '✓' : '✗'} Ass. Boleto: anexo assinado vira PDF com a assinatura DENTRO do próprio documento`);
+
+  // ------------------------------------------------------------------
+  // Pedido do Master: no Ass. Boleto, o link de preenchimento também serve
+  // pro FAVORECIDO anexar o boleto e preencher os dados dele - e o
+  // Responsável só pode receber o link de ASSINATURA depois que isso
+  // acontece (não pode assinar um documento que ainda nem chegou).
+  let okBoletoLink = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const { PDFDocument } = require('pdf-lib');
+    const form = require('/home/user/adyen-monitor/server/formularios.js');
+
+    const origem = await PDFDocument.create();
+    origem.addPage().drawText('BOLETO VIA LINK 999', { x: 50, y: 700, size: 14 });
+    const boletoPdf = Buffer.from(await origem.save());
+    const camposFavorecido = { favorecido: 'Energisa 2', descricao: 'Conta de água', vencimento: '15/09/2026', valor: '500,00' };
+
+    const gerado = await postarJson('/api/formularios/link-preenchimento', { tipo: 'assBoleto', unidade: 'Spoleto Tacaruna' }, cab);
+    const dGerado = gerado.status === 200 ? JSON.parse(gerado.corpo) : {};
+    const tokenPreench = dGerado.tokenPreenchimento;
+
+    // a vista pública já avisa que é soAnexo/anexoObrigatorio - é o que a
+    // tela usa pra trocar a tabela de Itens pelo campo de arquivo
+    const vista = tokenPreench ? await pedir(`/api/formularios-publico/preencher/${tokenPreench}`) : { status: 0 };
+    const dVista = vista.status === 200 ? JSON.parse(vista.corpo) : {};
+
+    // ANTES do favorecido mandar o anexo, não existe token de assinatura
+    // nenhum - o slot do Responsável só nasce dentro de salvarPreenchimento
+    const semTokenAntes = dVista.id ? await pedir(`/api/formularios-publico/${dVista.id}?token=qualquercoisa`) : { status: 0 };
+
+    // mandar sem anexo tem que barrar, igual na criação direta
+    const preenchSemAnexo = tokenPreench ? await postarMultipart(`/api/formularios-publico/preencher/${tokenPreench}`,
+      { payload: JSON.stringify({ campos: camposFavorecido }) }, null, 'anexos') : { status: 0 };
+
+    const preenchido = tokenPreench ? await postarMultipart(`/api/formularios-publico/preencher/${tokenPreench}`,
+      { payload: JSON.stringify({ campos: camposFavorecido }) },
+      { nome: 'boleto-link.pdf', tipo: 'application/pdf', buffer: boletoPdf }, 'anexos') : { status: 0 };
+
+    const fDepois = dVista.id ? await form.detalhar(dVista.id) : null;
+    const tokenResponsavel = fDepois ? (fDepois.assinaturas.find((a) => a.chave === 'responsavel') || {}).token : null;
+
+    // agora sim - o Responsável assina o boleto que o favorecido mandou
+    const assinou = tokenResponsavel ? await postarJson(`/api/formularios-publico/${dVista.id}/assinar`,
+      { token: tokenResponsavel, nome: 'Marcela Costa', imagem: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' }) : { status: 0 };
+
+    const conferencias = {
+      'gera o link e já com Ticket #': gerado.status === 200 && dGerado.numeroTicket != null,
+      'a vista pública avisa que é soAnexo/anexoObrigatorio': dVista.soAnexo === true && dVista.anexoObrigatorio === true,
+      'antes do favorecido mandar, nenhum token de assinatura existe ainda': semTokenAntes.status === 404,
+      'sem anexo o preenchimento é recusado': preenchSemAnexo.status === 400 && /Anexe o boleto/.test(preenchSemAnexo.corpo),
+      'com o boleto anexado, o preenchimento é aceito': preenchido.status === 200,
+      'DEPOIS do preenchimento, o slot do Responsável nasce com token': !!tokenResponsavel,
+      'o formulário sai de AGUARDANDO e já tem o anexo do favorecido': !!fDepois && fDepois.status === 'PENDENTE' && (fDepois.anexos || []).length === 1,
+      'o Responsável consegue assinar o documento que o favorecido mandou': assinou.status === 200,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okBoletoLink = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okBoletoLink = false; console.log('  erro: ' + e.message); }
+  if (!okBoletoLink) ruins += 1;
+  console.log(`${okBoletoLink ? '✓' : '✗'} Ass. Boleto por link: favorecido anexa e preenche, Responsável só assina depois`);
+
+  // ------------------------------------------------------------------
+  // Pedido do usuário: formulário assinado precisa virar um ticket de
+  // Pagamento na Central, com os MESMOS anexos - e o formulário já nasce
+  // com Ticket # da mesma sequência, então os dois lados compartilham o
+  // número (ver enviarCobrancaChamado, mesmo padrão pra chamados de TI).
+  let okEnviarPagamento = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const solicitacoesMod = require('/home/user/adyen-monitor/server/solicitacoes.js');
+    const form = require('/home/user/adyen-monitor/server/formularios.js');
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+    const criado = await postarMultipart('/api/formularios', {
+      payload: JSON.stringify({
+        tipo: 'reembolso', unidade: 'São Braz Ilha do Leite',
+        campos: { favorecido: 'Marina Alves', cpf: '111.222.333-44', banco: 'Nubank', agencia: '0001', conta: '99887-6', chavePix: 'marina@pix.com' },
+        linhas: [{ data: '20/08/2026', fornecedor: 'Papelaria Central', descricao: 'Material de escritório', valor: '210,50' }],
+      }),
+    }, { nome: 'nota-fiscal.pdf', tipo: 'application/pdf', buffer: Buffer.from('%PDF-1.4 comprovante') }, 'anexos', cab);
+    const f = criado.status === 200 ? JSON.parse(criado.corpo) : {};
+    const tk = (lista, chave) => new URLSearchParams(String((lista.find((a) => a.chave === chave) || {}).link).split('?')[1]).get('t');
+
+    // ainda não assinado - tem que barrar
+    const cedoDemais = await postarJson(`/api/formularios/${f.id}/enviar-pagamento`, {}, cab);
+
+    await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tk(f.assinaturas, 'favorecido'), nome: 'Marina Alves', imagem: PNG });
+    await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tk(f.assinaturas, 'responsavel'), nome: 'Gerente São Braz', imagem: PNG });
+
+    const enviado = await postarJson(`/api/formularios/${f.id}/enviar-pagamento`, {}, cab);
+    const dEnviado = enviado.status === 200 ? JSON.parse(enviado.corpo) : {};
+    const ticketCriado = dEnviado.ticket ? await solicitacoesMod.getOne(dEnviado.ticket.id) : null;
+    const fDepois = await form.detalhar(f.id);
+
+    // não pode mandar duas vezes (senão duplicava o ticket na Central) -
+    // confere pela CONTAGEM, não só pelo status: a trava tem que impedir
+    // ANTES de criar outro ticket, não só devolver erro depois de já ter
+    // criado um segundo
+    const denovo = await postarJson(`/api/formularios/${f.id}/enviar-pagamento`, {}, cab);
+    const ticketsComEsseNumero = (await solicitacoesMod.listAll()).filter((s) => s.numeroTicket === f.numeroTicket && s.tipo === 'pagamento');
+
+    const conferencias = {
+      'formulário ainda não assinado é recusado': cedoDemais.status === 400,
+      'assinado, o envio funciona e devolve o ticket': enviado.status === 200 && !!dEnviado.ticket,
+      'o ticket de Pagamento nasce com o MESMO Ticket # do formulário':
+        !!ticketCriado && ticketCriado.numeroTicket === f.numeroTicket && ticketCriado.tipo === 'pagamento',
+      'o ticket leva os anexos do formulário (o comprovante)':
+        !!ticketCriado && ticketCriado.anexos.length === 1 && ticketCriado.anexos[0].nome === 'nota-fiscal.pdf',
+      'o formulário fica marcado como enviado - não dá pra mandar de novo':
+        !!fDepois.enviadoPagamento && denovo.status === 400,
+      'mandar de novo não cria um SEGUNDO ticket com o mesmo número': ticketsComEsseNumero.length === 1,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okEnviarPagamento = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okEnviarPagamento = false; console.log('  erro: ' + e.message); }
+  if (!okEnviarPagamento) ruins += 1;
+  console.log(`${okEnviarPagamento ? '✓' : '✗'} Formulários: assinado vira ticket de Pagamento com o mesmo Ticket # e os anexos`);
 
   // ------------------------------------------------------------------
   // O link de preenchimento tem que ABRIR. Parece óbvio demais pra virar
