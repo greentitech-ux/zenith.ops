@@ -214,10 +214,13 @@
 
       <div class="panel">
         <h2>Resultado</h2>
+        <div class="msg err hidden" id="ap-revisao-aviso"></div>
         <div class="cards" id="ap-resultado-cards"></div>
         <div id="ap-colab-nominal"></div>
         <button type="button" class="btn-primary" id="ap-btn-salvar" onclick="salvarApuracao()">💾 Salvar</button>
         <button type="button" class="btn-bad hidden" id="ap-btn-fechar" onclick="fecharApuracao()" style="margin-left:8px;">🔒 Fechar apuração</button>
+        <button type="button" class="btn-ghost hidden" id="ap-btn-resetar" onclick="resetarApuracao()" style="margin-left:8px;">🔁 Resetar apuração</button>
+        <button type="button" class="btn-ghost hidden" id="ap-btn-pedir-revisao" onclick="pedirRevisao()" style="margin-left:8px;">🚩 Pedir revisão</button>
         <div class="msg hidden" id="ap-msg"></div>
       </div>
     </div>
@@ -558,28 +561,45 @@ async function salvarExcluirBonificacao(input){
 
 function renderApuracao(a){
   const fechado = a.status==='fechado';
+  const souMasterOuAdmin = ME.role==='master' || ME.isAdmin;
+  // pedido do Master: fechada não trava mais a edição PRA ELE - só pra
+  // quem não é Master/Admin, que aí só sobra pedir revisão (ver abaixo)
+  const podeEditar = !fechado || souMasterOuAdmin;
   const cards = [];
   if(a.faturamento!=null) cards.push({rotulo:'Faturamento do mês (Fechamento)', valor: fmtMoney(a.faturamento)});
   cards.push({rotulo:'Colaboradores ativos', valor: String(a.colaboradoresResumo ? a.colaboradoresResumo.quantidade : 0)});
   if(a.pool!=null) cards.push({rotulo:'Pool do mês', valor: fmtMoney(a.pool)});
   document.getElementById('ap-cards').innerHTML = cards.map(c=>`<div class="card"><div class="rotulo">${escapeHtml(c.rotulo)}</div><div class="valor">${c.valor}</div></div>`).join('');
-  document.getElementById('ap-status-linha').innerHTML = `Perfil: <b>${escapeHtml(a.perfilNome)}</b> · <span class="badge ${fechado?'fechado':'rascunho'}">${fechado?'fechado':'rascunho'}</span>${fechado&&a.fechadoPorEmail?` · fechado por ${escapeHtml(a.fechadoPorEmail)}`:''}`;
+  let statusLinha = `Perfil: <b>${escapeHtml(a.perfilNome)}</b> · <span class="badge ${fechado?'fechado':'rascunho'}">${fechado?'fechado':'rascunho'}</span>`;
+  if(fechado && a.fechadoPorEmail) statusLinha += ` · fechado por ${escapeHtml(a.fechadoPorEmail)}`;
+  if(a.editadoPorEmail) statusLinha += ` · <span style="color:var(--warn);">corrigido depois de fechada por ${escapeHtml(a.editadoPorEmail)}</span>`;
+  document.getElementById('ap-status-linha').innerHTML = statusLinha;
 
   document.getElementById('ap-bloco-gerente').style.display = a.temGerente===false && !a.metricasGerente.length ? 'none' : '';
   document.getElementById('ap-gerente-vazio-msg').classList.toggle('hidden', !!(a.metricasGerente||[]).length);
-  document.getElementById('ap-gerente-lista').innerHTML = renderCompletionInputs(a.metricasGerente, a.completionsGerente, a.sugestaoAssiduidade, 'ger', fechado);
+  document.getElementById('ap-gerente-lista').innerHTML = renderCompletionInputs(a.metricasGerente, a.completionsGerente, a.sugestaoAssiduidade, 'ger', !podeEditar);
 
   document.getElementById('ap-bloco-colab').style.display = !a.metricasColaboradores.length ? 'none' : '';
   document.getElementById('ap-colab-vazio-msg').classList.toggle('hidden', !!(a.metricasColaboradores||[]).length);
-  document.getElementById('ap-colab-lista').innerHTML = renderCompletionInputs(a.metricasColaboradores, a.completionsColaboradores, a.sugestaoAssiduidade, 'col', fechado);
+  document.getElementById('ap-colab-lista').innerHTML = renderCompletionInputs(a.metricasColaboradores, a.completionsColaboradores, a.sugestaoAssiduidade, 'col', !podeEditar);
 
   renderResultado(a);
 
-  document.getElementById('ap-btn-salvar').classList.toggle('hidden', fechado);
-  document.getElementById('ap-btn-fechar').classList.toggle('hidden', fechado || !(ME.role==='master'||ME.isAdmin));
+  const revisaoBox = document.getElementById('ap-revisao-aviso');
+  if(a.revisaoPedida){
+    revisaoBox.classList.remove('hidden');
+    revisaoBox.textContent = `🚩 Revisão pedida por ${a.revisaoPedida.porNome||a.revisaoPedida.porEmail||'alguém'}${a.revisaoPedida.motivo?': '+a.revisaoPedida.motivo:''}`;
+  } else {
+    revisaoBox.classList.add('hidden');
+  }
+
+  document.getElementById('ap-btn-salvar').classList.toggle('hidden', !podeEditar);
+  document.getElementById('ap-btn-fechar').classList.toggle('hidden', fechado || !souMasterOuAdmin);
+  document.getElementById('ap-btn-resetar').classList.toggle('hidden', !souMasterOuAdmin);
+  document.getElementById('ap-btn-pedir-revisao').classList.toggle('hidden', !fechado || souMasterOuAdmin);
   document.getElementById('ap-msg').classList.add('hidden');
 }
-function renderCompletionInputs(metricas, completions, sugestaoAssiduidade, prefixo, fechado){
+function renderCompletionInputs(metricas, completions, sugestaoAssiduidade, prefixo, travado){
   const mapa = new Map((completions||[]).map(c=>[c.campo, c.percentual]));
   return (metricas||[]).map(m=>{
     const ehAssiduidade = m.campo==='assiduidade';
@@ -590,8 +610,8 @@ function renderCompletionInputs(metricas, completions, sugestaoAssiduidade, pref
     const marcado = valorSalvo >= 70;
     return `<div class="completion-linha">
       <div><div class="nome">${escapeHtml(m.label)}</div><div class="peso">peso ${m.peso}%${ehAssiduidade?' · sugestão a partir dos atestados do mês - ajuste se precisar':''}</div></div>
-      <label class="atende-toggle ${marcado?'on':''}" ${fechado?'data-disabled="1"':''}>
-        <input type="checkbox" data-campo="${escapeHtml(m.campo)}" class="completion-${prefixo}" ${marcado?'checked':''} ${fechado?'disabled':''} onchange="atualizarToggleAtende(this); renderResultado(APURACAO_ATUAL, true)">
+      <label class="atende-toggle ${marcado?'on':''}" ${travado?'data-disabled="1"':''}>
+        <input type="checkbox" data-campo="${escapeHtml(m.campo)}" class="completion-${prefixo}" ${marcado?'checked':''} ${travado?'disabled':''} onchange="atualizarToggleAtende(this); salvarApuracao()">
         <span>${marcado?'✅ Atende':'❌ Não atende'}</span>
       </label>
     </div>`;
@@ -605,24 +625,12 @@ function atualizarToggleAtende(input){
 function lerCompletions(prefixo){
   return [...document.querySelectorAll('.completion-'+prefixo)].map(i=>({ campo: i.dataset.campo, percentual: i.checked ? 100 : 0 }));
 }
-// recalcula ao vivo enquanto a pessoa digita, sem esperar o Salvar - a
-// mecânica é pura (mesma fórmula de bonificacao.js/calcular), então dá pra
-// espelhar aqui sem chamada nenhuma ao servidor
-function calcularLocal(a, completionsGerente, completionsColaboradores){
-  const taxa = (metricas, completions)=>{
-    if(!metricas || !metricas.length) return 0;
-    const mapa = new Map(completions.map(c=>[c.campo, c.percentual]));
-    return metricas.reduce((s,m)=>{ const pct = Number(mapa.get(m.campo)); const ok = Number.isFinite(pct) ? Math.max(0,Math.min(100,pct)) : 0; return s + (ok*m.peso)/100; }, 0);
-  };
-  const taxaGerente = taxa(a.metricasGerente, completionsGerente);
-  const taxaColab = taxa(a.metricasColaboradores, completionsColaboradores);
-  const pool = a.pool!=null ? a.pool : null;
-  return { taxaGerente, taxaColab };
-}
-function renderResultado(a, aoVivo){
+// os números (taxa/valor) só existem de verdade depois que o servidor
+// calcula - por isso cada toggle de Atende chama salvarApuracao() na hora
+// (ver renderCompletionInputs), em vez de fingir um recálculo local que
+// pode divergir da fórmula de bonificacao.js/calcular
+function renderResultado(a){
   if(!a) return;
-  const completionsGerente = lerCompletions('ger');
-  const completionsColaboradores = lerCompletions('col');
   const podeVerTotal = a.faturamento!=null;
   const cards = [];
   cards.push({rotulo:'Gerente recebe', valor: fmtMoney(a.gerenteRecebe), destaque:true});
@@ -639,7 +647,6 @@ function renderResultado(a, aoVivo){
   if(a.colaboradores && a.colaboradores.length){
     nominal.innerHTML = `<div class="sub" style="margin-top:10px;">Nome a nome</div>` + a.colaboradores.map(c=>`<div class="colab-linha"><span>${escapeHtml(c.nome)}</span><b>${fmtMoney(c.valor)}</b></div>`).join('');
   } else { nominal.innerHTML = ''; }
-  if(aoVivo){ /* recálculo ao vivo é só visual - o valor de verdade sai do servidor quando salva */ }
 }
 
 async function salvarApuracao(){
@@ -658,6 +665,7 @@ async function salvarApuracao(){
       }),
     });
     const data = await resp.json();
+    if(resp.status===202){ msg.textContent = '⏳ Enviado pra aprovação (QA Master).'; msg.className = 'msg ok'; msg.classList.remove('hidden'); return; }
     if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
     APURACAO_ATUAL = data;
     renderApuracao(data);
@@ -679,6 +687,59 @@ async function fecharApuracao(){
     if(!resp.ok) throw new Error(data.error || 'Erro ao fechar.');
     APURACAO_ATUAL = data;
     renderApuracao(data);
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+}
+
+// "reseta em caso de erro" (Master/Admin) - apaga o que foi salvo (rascunho
+// ou fechada) e volta pro estado limpo, com a sugestão de Assiduidade
+// recalculada na hora. Não dá pra desfazer, por isso o confirm reforça.
+async function resetarApuracao(){
+  const unidade = document.getElementById('ap-unidade').value;
+  const mes = document.getElementById('ap-mes').value;
+  if(!confirm(`Resetar a apuração de ${mesLabel(mes)} pra essa unidade?\n\nApaga tudo que foi marcado (mesmo se já estava fechada) e volta pro início, como se nunca tivesse sido apurada. Não dá pra desfazer.`)) return;
+  const msg = document.getElementById('ap-msg');
+  try{
+    const resp = await fetch('/api/bonificacao/resetar', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ unidade, mes }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if(resp.status===202){ msg.textContent = '⏳ Enviado pra aprovação (QA Master).'; msg.className = 'msg ok'; msg.classList.remove('hidden'); return; }
+    if(!resp.ok) throw new Error(data.error || 'Erro ao resetar.');
+    APURACAO_ATUAL = data;
+    renderApuracao(data);
+    msg.textContent = '🔁 Apuração resetada.'; msg.className = 'msg ok'; msg.classList.remove('hidden');
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+}
+function mesLabel(mes){
+  const [ano,m] = String(mes||'').split('-');
+  const nomes = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+  return m ? `${nomes[Number(m)-1]}/${ano}` : mes;
+}
+
+// quem não é Master/Admin não edita uma apuração já fechada - se discorda
+// de algo, pede revisão aqui. Vira aviso na tela do Master (ap-revisao-
+// aviso) + push, e some sozinho quando o Master corrigir.
+async function pedirRevisao(){
+  const unidade = document.getElementById('ap-unidade').value;
+  const mes = document.getElementById('ap-mes').value;
+  const motivo = prompt('O que você acha que está errado nessa apuração? (opcional, ajuda o Master a entender antes de mexer)');
+  if(motivo === null) return;
+  const msg = document.getElementById('ap-msg');
+  try{
+    const resp = await fetch('/api/bonificacao/pedir-revisao', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ unidade, mes, motivo }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok) throw new Error(data.error || 'Erro ao pedir revisão.');
+    APURACAO_ATUAL = data;
+    renderApuracao(data);
+    msg.textContent = '🚩 Revisão pedida - o Master foi avisado.'; msg.className = 'msg ok'; msg.classList.remove('hidden');
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
   }

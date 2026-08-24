@@ -3960,6 +3960,8 @@ const EXECUTORES_QA = {
   'bonificacao.editarPerfil': (p) => bonificacaoPerfis.atualizar(p.id, p.dados),
   'bonificacao.excluirPerfil': (p) => bonificacaoPerfis.remover(p.id),
   'bonificacao.fechar': (p) => bonificacao.fechar(p.unidade, p.mes, null),
+  'bonificacao.editarFechada': (p) => bonificacao.salvarCompletions(p.unidade, p.mes, { completionsGerente: p.completionsGerente, completionsColaboradores: p.completionsColaboradores }, null, { podeEditarFechada: true }),
+  'bonificacao.resetar': (p) => bonificacao.resetarApuracao(p.unidade, p.mes, null),
   'bonificacao.excluirDaEquipe': (p) => rh.atualizarExcluirBonificacao(p.id, p.excluir),
   'usuarios.criar': (p) => users.create(p),
   'usuarios.criarCopiando': (p) => users.criarCopiandoDe(p),
@@ -5294,7 +5296,17 @@ app.put('/api/bonificacao', requireSection('bonificacao'), async (req, res) => {
   try {
     const { unidade, mes, completionsGerente, completionsColaboradores } = req.body;
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.sendStatus(404);
-    const apuracao = await bonificacao.salvarCompletions(unidade, mes, { completionsGerente, completionsColaboradores }, req.user.email);
+    // corrigir uma apuração já FECHADA é privilégio de Master/Admin (mesma
+    // régua de quem pode fechar) - só nesse caso passa pelo desvio de QA
+    // Master, senão todo clique de checkbox de todo mundo virava aprovação
+    const podeEditarFechada = req.isMaster || req.isAdmin;
+    if (podeEditarFechada) {
+      const atual = await bonificacao.obterOuCriarRascunho(unidade, mes);
+      if (atual.status === 'fechado') {
+        if (await desviarSeQaMaster(req, res, 'bonificacao.editarFechada', `Editar apuração de bonificação já fechada ${unidade} (${mes})`, { unidade, mes, completionsGerente, completionsColaboradores })) return;
+      }
+    }
+    const apuracao = await bonificacao.salvarCompletions(unidade, mes, { completionsGerente, completionsColaboradores }, req.user.email, { podeEditarFechada });
     res.json(bonificacao.montarRespostaPorPermissao(apuracao, {
       podeVerTotal: req.isMaster || req.isAdmin || req.podeBonifVerValorTotal,
       podeVerColaboradores: req.isMaster || req.isAdmin || req.podeBonifVerColaboradores,
@@ -5310,6 +5322,42 @@ app.post('/api/bonificacao/fechar', requireSection('bonificacao'), auth.requireM
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.sendStatus(404);
     if (await desviarSeQaMaster(req, res, 'bonificacao.fechar', `Fechar apuração de bonificação ${unidade} (${mes})`, { unidade, mes })) return;
     const apuracao = await bonificacao.fechar(unidade, mes, req.user.email);
+    res.json(bonificacao.montarRespostaPorPermissao(apuracao, {
+      podeVerTotal: req.isMaster || req.isAdmin || req.podeBonifVerValorTotal,
+      podeVerColaboradores: req.isMaster || req.isAdmin || req.podeBonifVerColaboradores,
+    }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// "reseta em caso de erro" (pedido do Master) - mesma régua de quem fecha
+// (Master/Admin): apaga a apuração salva e devolve o estado limpo que
+// obterOuCriarRascunho monta na hora.
+app.post('/api/bonificacao/resetar', requireSection('bonificacao'), auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    const { unidade, mes } = req.body;
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.sendStatus(404);
+    if (await desviarSeQaMaster(req, res, 'bonificacao.resetar', `Resetar apuração de bonificação ${unidade} (${mes})`, { unidade, mes })) return;
+    const apuracao = await bonificacao.resetarApuracao(unidade, mes, req.user.email);
+    res.json(bonificacao.montarRespostaPorPermissao(apuracao, {
+      podeVerTotal: req.isMaster || req.isAdmin || req.podeBonifVerValorTotal,
+      podeVerColaboradores: req.isMaster || req.isAdmin || req.podeBonifVerColaboradores,
+    }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// quem não pode editar uma apuração já fechada (não é Master/Admin) e
+// discorda de algo pede revisão aqui - vira aviso na tela do Master +
+// push (mesmo canal de solicitação da Central)
+app.post('/api/bonificacao/pedir-revisao', requireSection('bonificacao'), async (req, res) => {
+  try {
+    const { unidade, mes, motivo } = req.body;
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.sendStatus(404);
+    const apuracao = await bonificacao.pedirRevisao(unidade, mes, { motivo, porEmail: req.user.email, porNome: req.user.username || req.user.email });
+    push.notifySolicitacao('Bonificação: pedido de revisão', `${unidade} · ${mes} · por ${req.user.username || req.user.email}${motivo ? ' · ' + motivo : ''}`, `bonif-revisao-${unidade}-${mes}`, '/bonificacao.html');
     res.json(bonificacao.montarRespostaPorPermissao(apuracao, {
       podeVerTotal: req.isMaster || req.isAdmin || req.podeBonifVerValorTotal,
       podeVerColaboradores: req.isMaster || req.isAdmin || req.podeBonifVerColaboradores,

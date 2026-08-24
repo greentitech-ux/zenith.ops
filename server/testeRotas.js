@@ -5494,9 +5494,36 @@ setTimeout(async () => {
     const rFechar = await postarJson('/api/bonificacao/fechar', { unidade: 'TESTE_HTTP_UN', mes: '2026-08' }, cabMasterBonif);
     const apuracaoFechada = JSON.parse(rFechar.corpo || '{}');
 
-    const rSalvarDepoisDeFechado = await putJson('/api/bonificacao', {
+    // quem NÃO é Master/Admin continua travado depois de fechada - a trava
+    // só abriu pra Master/Admin corrigir (ver salvarCompletions abaixo)
+    const rSalvarFechadaNaoMaster = await putJson('/api/bonificacao', {
       unidade: 'TESTE_HTTP_UN', mes: '2026-08', completionsGerente: [], completionsColaboradores: [],
+    }, cabLimitado);
+
+    // quem não pode editar pede revisão - vira aviso visível na apuração
+    // (ap-revisao-aviso na tela) + push pro Master
+    const rPedirRevisao = await postarJson('/api/bonificacao/pedir-revisao', {
+      unidade: 'TESTE_HTTP_UN', mes: '2026-08', motivo: 'taxa do gerente parece errada',
+    }, cabLimitado);
+    const apuracaoComRevisao = JSON.parse((await pedir('/api/bonificacao?unidade=TESTE_HTTP_UN&mes=2026-08', cabMasterBonif)).corpo || '{}');
+
+    // resetar é Master/Admin, mesma régua de fechar - usuário comum toma 403
+    const rResetarSemAdmin = await postarJson('/api/bonificacao/resetar', { unidade: 'TESTE_HTTP_UN', mes: '2026-08' }, cabLimitado);
+
+    // Master CORRIGE mesmo com a apuração fechada - continua fechada
+    // (não reabre sozinha), ganha editadoPorEmail, e o pedido de revisão
+    // pendente é dado como resolvido
+    const rSalvarDepoisDeFechado = await putJson('/api/bonificacao', {
+      unidade: 'TESTE_HTTP_UN', mes: '2026-08',
+      completionsGerente: [{ campo: 'faturamento', percentual: 50 }],
+      completionsColaboradores: [{ campo: 'assiduidade', percentual: 50 }],
     }, cabMasterBonif);
+    const apuracaoCorrigida = JSON.parse(rSalvarDepoisDeFechado.corpo || '{}');
+
+    // "reseta em caso de erro" - some com o que foi salvo, volta pro
+    // estado limpo (rascunho, sem editadoPorEmail/fechadoPorEmail)
+    const rResetar = await postarJson('/api/bonificacao/resetar', { unidade: 'TESTE_HTTP_UN', mes: '2026-08' }, cabMasterBonif);
+    const apuracaoResetada = JSON.parse(rResetar.corpo || '{}');
 
     const rSemAuth = await pedir('/api/bonificacao?unidade=TESTE_HTTP_UN&mes=2026-08');
 
@@ -5518,7 +5545,16 @@ setTimeout(async () => {
       'GET equipe reflete a marcação': equipeDepois.find((f) => f.id === 'f-bonif-gerente').excluirBonificacao === true,
       'depois de marcar, só o colaborador comum conta na divisão (não recebe 2x)': apuracaoDepoisExcluir.colaboradoresResumo.quantidade === 1,
       'POST fechar muda o status pra fechado': rFechar.status === 200 && apuracaoFechada.status === 'fechado',
-      'depois de fechada, PUT é recusado (não silenciosamente ignorado)': rSalvarDepoisDeFechado.status === 400,
+      'quem não é Master/Admin continua travado depois de fechada': rSalvarFechadaNaoMaster.status === 400,
+      'pedir revisão funciona e fica visível na apuração': rPedirRevisao.status === 200
+        && !!apuracaoComRevisao.revisaoPedida && apuracaoComRevisao.revisaoPedida.motivo === 'taxa do gerente parece errada',
+      'resetar é Master/Admin - usuário comum toma 403': rResetarSemAdmin.status === 403,
+      'Master CORRIGE mesmo com a apuração fechada (continua fechada, recalcula)':
+        rSalvarDepoisDeFechado.status === 200 && apuracaoCorrigida.status === 'fechado' && apuracaoCorrigida.taxaGerente === 50,
+      'a correção registra quem editou depois de fechada': !!apuracaoCorrigida.editadoPorEmail,
+      'a correção dá o pedido de revisão pendente como resolvido': apuracaoCorrigida.revisaoPedida === null,
+      'resetar apaga tudo e volta pra rascunho limpo': rResetar.status === 200
+        && apuracaoResetada.status === 'rascunho' && apuracaoResetada.taxaGerente === 0 && apuracaoResetada.editadoPorEmail === null,
       'sem token nenhum, a rota exige login (401)': rSemAuth.status === 401,
       'DELETE remove o perfil de teste (limpeza)': rExcluir.status === 200,
     };
