@@ -8742,6 +8742,46 @@ function filtrarCardsCentral(cards, req) {
   });
 }
 
+// Relatório de chamados (central-historico.html): filtro dedicado por cima
+// de filtrarCardsCentral, com Ticket #, Status e duas janelas de data que
+// dataDe/dataAte (abertura) nao cobre - fechamento (decididoEm) e
+// interacao (mensagens do chat, via centralChat). A janela de interacao
+// precisa cruzar com centralChat.listAllCached() porque a data/autor de
+// quem conversou nao mora no card - so nas mensagens vinculadas a ele.
+async function cardsFiltradosRelatorio(req) {
+  let cards = filtrarCardsCentral(await todosCardsCentral(req), req);
+  const { ticket, status, fechamentoDe, fechamentoAte, interacaoDe, interacaoAte, interacaoUsuario } = req.query;
+  if (ticket) {
+    const alvo = String(ticket).trim();
+    cards = cards.filter((c) => String(c.numeroTicket != null ? c.numeroTicket : '').includes(alvo));
+  }
+  if (status) cards = cards.filter((c) => c.status === status);
+  if (fechamentoDe || fechamentoAte) {
+    cards = cards.filter((c) => {
+      const d = (c.decididoEm || '').slice(0, 10);
+      if (!d) return false;
+      return (!fechamentoDe || d >= fechamentoDe) && (!fechamentoAte || d <= fechamentoAte);
+    });
+  }
+  if (interacaoDe || interacaoAte || interacaoUsuario) {
+    const mensagens = await centralChat.listAllCached();
+    const alvoUsuario = interacaoUsuario ? String(interacaoUsuario).trim().toLowerCase() : '';
+    const chavesOk = new Set();
+    for (const m of mensagens) {
+      const d = (m.criadoEm || '').slice(0, 10);
+      if (interacaoDe && d < interacaoDe) continue;
+      if (interacaoAte && d > interacaoAte) continue;
+      if (alvoUsuario) {
+        const bate = (m.autorEmail || '').toLowerCase().includes(alvoUsuario) || (m.autorUsername || '').toLowerCase().includes(alvoUsuario);
+        if (!bate) continue;
+      }
+      chavesOk.add(`${m.tipo}:${m.cardId}`);
+    }
+    cards = cards.filter((c) => chavesOk.has(`${c.tipo}:${c.id}`));
+  }
+  return cards;
+}
+
 // junta os itens da lista de compra (descricao + qtd) numa unica string pra
 // caber numa celula de tabela - mesmo formato "descricao · qtd. N" usado no
 // modal de detalhe (central-historico.html), so que numa linha so
@@ -8777,8 +8817,9 @@ const LARGURAS_RELATORIO_CENTRAL = {
   criadoPor: 80, criadoEm: 60, decididoPor: 50, decididoEm: 42, motivoDecisao: 40,
 };
 
-app.get('/api/central/relatorio.:formato(csv|pdf)', requireSection('solicitacoes'), async (req, res) => {
-  const cards = filtrarCardsCentral(await todosCardsCentral(req), req);
+app.get('/api/central/relatorio.:formato(csv|pdf|json)', requireSection('solicitacoes'), async (req, res) => {
+  const cards = await cardsFiltradosRelatorio(req);
+  if (req.params.formato === 'json') return res.json(cards);
   const { colunas, linhas } = prepararRelatorioCentral(cards);
   // nome do arquivo reflete o filtro de tipo ativo na tela (ex: "Compra" ->
   // solicitacoes-compra-2026-08-07.csv), nao um "central-solicitacoes.csv"
