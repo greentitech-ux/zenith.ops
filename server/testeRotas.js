@@ -5127,6 +5127,68 @@ setTimeout(async () => {
   if (!okFraude) ruins += 1;
   console.log(`${okFraude ? '\u2713' : '\u2717'} Fraude: cliente legitimo nao vira fraudador, ataque continua pego, Pix so "Repetido"`);
 
+  // ---------- Termo do parque: direito de NAO autorizar imagem ----------
+  // O corpo do termo diz "autorizo ... a fazer uso das imagens". Sem uma
+  // opcao de recusa, assinar era condicao pra entrar - e consentimento sob
+  // essa condicao nao e livre (LGPD, Lei 13.709). O termo IMPRESSO que o
+  // parque usa ja tem o quadrado; o PDF gerado aqui nao tinha.
+  // Este teste gera o PDF de verdade e le o texto de dentro dele.
+  let okTermo = false;
+  try {
+    const { PassThrough } = require('stream');
+    const termo = require('./termoResponsabilidade');
+    const pedacos = [];
+    const fake = new PassThrough();
+    fake.setHeader = () => {};
+    fake.on('data', (d) => pedacos.push(d));
+    const pronto = new Promise((r) => fake.on('end', r));
+    termo.gerarTermoPDF(fake, {
+      responsavel: { nome: 'Teste da Silva', cpf: '000.000.000-00' },
+      dataUtilizacao: '2026-08-23',
+      criancas: [{ nome: 'Filho de Teste' }],
+      // de proposito SEM tempoMinutos: e o caso que imprimia "(undefined min)"
+    });
+    await pronto;
+    // o pdfkit guarda o texto em streams comprimidos; o suficiente pra este
+    // teste e conferir a FONTE, que e o que o Master vai ler e manter
+    const fonteBruta = require('fs').readFileSync(require('path').join(__dirname, 'termoResponsabilidade.js'), 'utf8');
+    // sem comentario: comentar a chamada com "//" deixava a string no arquivo
+    // e o teste passava com o bloco desligado
+    const fonte = fonteBruta
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '')).join('\n');
+    const pdfBytes = Buffer.concat(pedacos).length;
+    // procura a CHAMADA, nao a definicao: 'renderOpcaoImagem(doc, x, largura)'
+    // aparece nas duas, e casar com a definicao fazia o teste passar mesmo com
+    // a chamada comentada ou apagada
+    const posChamada = fonte.search(/^\s*renderOpcaoImagem\(doc, x, largura\);/m);
+    const posAssinatura = fonte.indexOf('const yAssinatura');
+
+    const conf = {
+      'o PDF continua sendo gerado': pdfBytes > 2000,
+      'existe a opcao de NAO autorizar o uso de imagem':
+        /Não autorizo o WOW PARK a fazer uso da minha imagem/.test(fonte)
+        && /function renderOpcaoImagem/.test(fonte),
+      // >= 0 importa: com a chamada apagada, indexOf devolve -1 e -1 < qualquer
+      // coisa passava - o teste dizia OK com o bloco fora do PDF
+      'o bloco e mesmo CHAMADO, e antes da assinatura':
+        posChamada >= 0 && posAssinatura >= 0 && posChamada < posAssinatura,
+      'tem quadrado de marcar, nao so texto': /doc\.rect\(x, yTopo \+ 1, lado, lado\)/.test(fonte),
+      'explica que marcar = recusar e branco = autorizar':
+        /Marque o quadrado acima apenas se NÃO autorizar/.test(fonte),
+      'nao imprime "(undefined min)" quando nao ha tempo':
+        /Number\(checkin\.tempoMinutos\) > 0 \? /.test(fonte)
+        && !/\$\{checkin\.tempoMinutos\} min/.test(fonte),
+      'o espaco depois do nome em negrito nao e comido pelo pdfkit':
+        /proximo\.startsWith\(' '\) \? EMPRESA_NOME_MAIUSCULO \+ ' '/.test(fonte),
+    };
+    const ruinsT = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okTermo = !ruinsT.length;
+    if (ruinsT.length) console.log(`  falhou em: ${ruinsT.join(' \u00b7 ')}`);
+  } catch (e) { okTermo = false; console.log('  erro: ' + e.message); }
+  if (!okTermo) ruins += 1;
+  console.log(`${okTermo ? '\u2713' : '\u2717'} Termo do parque: da pra NAO autorizar o uso de imagem, e sem "undefined" impresso`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
