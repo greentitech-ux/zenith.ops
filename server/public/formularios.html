@@ -71,6 +71,30 @@
   .msg.warn{background:var(--warn-dim);color:var(--warn);}
   .pad-wrap{margin-top:6px;border-radius:10px;overflow:hidden;border:2px dashed var(--accent);background:#fff;touch-action:none;}
   #ass-pad{display:block;width:100%;height:190px;background:#fff;}
+  /* organização da lista de Formulários (mesmo desenho da Central/
+     Solicitações): chips de tipo com contagem + filtro de loja/busca +
+     Triagem em kanban por status - só o que precisa de alguém agora fica
+     em destaque, o resto mora na aba do próprio tipo */
+  .filtros-compactos{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;}
+  .filtros-compactos>div{flex:1 1 130px;min-width:110px;max-width:220px;}
+  .filtros-compactos label{margin:0 0 4px;font-size:11px;}
+  .tipo-filtro-row{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;margin-top:10px;padding-bottom:4px;-webkit-overflow-scrolling:touch;scrollbar-width:thin;}
+  .tipo-filtro-btn{flex:none;font-family:var(--sans);font-size:10.5px;padding:6px 10px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:92px;}
+  .tipo-filtro-btn:hover{border-color:var(--accent);}
+  .tipo-filtro-btn.active{border-color:var(--accent);background:rgba(184,255,60,.1);}
+  .tipo-filtro-btn .tf-label{font-weight:600;white-space:nowrap;}
+  .tipo-filtro-btn .tf-counts{font-family:var(--mono);font-size:10px;white-space:nowrap;}
+  .tipo-filtro-btn .tf-counts b{font-weight:600;}
+  .triagem-nota{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:10px 0;}
+  .triagem-nota b{color:var(--text);}
+  .kanban-board{display:flex;gap:14px;overflow-x:auto;padding-bottom:6px;align-items:flex-start;margin-top:10px;}
+  .kanban-col{background:var(--panel2);border:1px solid var(--line);border-radius:12px;flex:1 1 300px;min-width:270px;max-width:420px;display:flex;flex-direction:column;max-height:70vh;min-height:180px;}
+  @media(max-width:760px){ .kanban-col{min-width:82vw;max-height:none;} }
+  .kanban-col-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 12px 10px;border-bottom:1px solid var(--line);flex:none;font-weight:700;font-size:12.5px;}
+  .kanban-count{font-family:var(--mono);color:var(--muted);font-size:11.5px;font-weight:400;}
+  .kanban-cards{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:8px;}
+  .kanban-cards .form-item{margin-top:0;}
+  .kanban-empty{padding:20px 10px;text-align:center;color:var(--muted);font-size:12px;}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -123,7 +147,13 @@
   </div>
 
   <div class="panel">
-    <h3>Formulários</h3>
+    <h3>Formulários <span id="lista-count" style="font-weight:400;"></span></h3>
+    <div class="tipo-filtro-row" id="tipo-filtro-row"></div>
+    <div class="filtros-compactos">
+      <div><label>Unidade</label><select id="filtro-unidade-lista" onchange="aplicarFiltrosLista()"><option value="">Todas</option></select></div>
+      <div><label>Pesquisar</label><input type="search" id="filtro-busca-lista" placeholder="🔍 ticket #, unidade..." oninput="aplicarFiltrosLista()"></div>
+    </div>
+    <div class="triagem-nota hidden" id="triagem-nota-form">📥 <b>Triagem</b> — só o que ainda precisa de alguém (preencher ou assinar), mais o que foi assinado hoje. O histórico completo de um tipo (inclusive cancelados e assinados antigos) fica na aba dele, aqui em cima.</div>
     <div id="lista"><div class="vazio">carregando...</div></div>
   </div>
 
@@ -240,6 +270,13 @@ let SOU_MASTER = false;
 let TIPO_ATUAL = null;
 let UNIDADES = [];
 let LISTA = [];
+
+// organização da lista (mesmo desenho da Central/Solicitações): tipo
+// selecionado ('' = Triagem) + filtro de loja/busca, aplicados por cima de
+// LISTA antes de decidir kanban (Triagem) ou lista simples (aba de um tipo)
+let TIPO_FILTRO_LISTA = '';
+let FILTRO_UNIDADE_LISTA = '';
+let FILTRO_BUSCA_LISTA = '';
 
 function modelo(){ return TIPOS.find(t=>t.tipo===TIPO_ATUAL); }
 
@@ -667,50 +704,166 @@ async function excluirFormulario(id){
   if(d.pendenteAprovacao) alert('Exclusão enviada pra aprovação do Master.');
 }
 
-function renderLista(){
-  const alvo = document.getElementById('lista');
-  if(!LISTA.length){ alvo.innerHTML = '<div class="vazio">Nenhum formulário ainda - crie o primeiro acima.</div>'; return; }
-  alvo.innerHTML = LISTA.map(f=>{
-    const t = TIPOS.find(x=>x.tipo===f.tipo);
-    const pendentes = f.assinaturas.filter(a=>!a.assinado).length;
-    // link gerado e ainda não preenchido: não tem linha, valor nem
-    // assinatura pra mostrar - o que importa é reenviar ou cancelar
-    if(f.status==='AGUARDANDO_PREENCHIMENTO'){
-      const link = location.origin + '/preencher.html?token=' + encodeURIComponent(f.tokenPreenchimento||'');
-      return `<div class="form-item" style="border-style:dashed;">
-        <div class="fi-titulo">${escapeHtml(t?t.rotulo:f.tipo)} · ${escapeHtml(f.unidade)}
-          <span class="badge" style="background:#1a2230;color:var(--muted);">#${f.numeroTicket ?? '—'}</span>
-          <span class="badge pendente">🔗 aguardando o solicitante preencher</span></div>
-        <div class="fi-sub">${fmtData(f.criadoEm)} · link enviado por ${escapeHtml(f.criadoPorEmail||'')}</div>
-        <div class="acoes-form">
-          <button type="button" class="btn-ghost" onclick="copiar('${link}')">🔗 Copiar link</button>
-          <button type="button" class="btn-ghost" onclick="whatsapp('Preencha os dados do formulário aqui (Ticket #${f.numeroTicket}): '+'${link}')">💬 WhatsApp</button>
-          <button type="button" class="btn-ghost" style="color:var(--bad);" onclick="cancelarLink('${f.id}','${escapeHtml(t?t.rotulo:f.tipo)}')">✕ Cancelar link</button>
-        </div>
-      </div>`;
-    }
-    const cancelado = f.status==='CANCELADO';
-    return `<div class="form-item${cancelado?' cancelado':''}">
+function cardHtml(f){
+  const t = TIPOS.find(x=>x.tipo===f.tipo);
+  const pendentes = f.assinaturas.filter(a=>!a.assinado).length;
+  // link gerado e ainda não preenchido: não tem linha, valor nem
+  // assinatura pra mostrar - o que importa é reenviar ou cancelar
+  if(f.status==='AGUARDANDO_PREENCHIMENTO'){
+    const link = location.origin + '/preencher.html?token=' + encodeURIComponent(f.tokenPreenchimento||'');
+    return `<div class="form-item" style="border-style:dashed;">
       <div class="fi-titulo">${escapeHtml(t?t.rotulo:f.tipo)} · ${escapeHtml(f.unidade)}
         <span class="badge" style="background:#1a2230;color:var(--muted);">#${f.numeroTicket ?? '—'}</span>
-        <span class="badge ${cancelado?'cancelado':(f.status==='ASSINADO'?'assinado':'pendente')}">${cancelado?'🚫 cancelado':(f.status==='ASSINADO'?'✅ assinado':`✍️ falta(m) ${pendentes}`)}</span></div>
-      <div class="fi-sub">${fmtData(f.criadoEm)} · ${t && t.soAnexo ? `${(f.anexos||[]).length} documento(s)` : `${f.linhas.length} linha(s)`} · total ${fmtMoney(f.valorTotal)} · por ${escapeHtml(f.criadoPorEmail||'')}</div>
-      ${cancelado ? `<div class="fi-sub" style="color:var(--bad);">cancelado ${fmtData(f.canceladoEm)} por ${escapeHtml(f.canceladoPorEmail||'')}${f.motivoCancelamento?` · ${escapeHtml(f.motivoCancelamento)}`:''}</div>` : ''}
-      ${f.editadoEm && !cancelado ? `<div class="fi-sub" style="color:var(--warn);">corrigido ${fmtData(f.editadoEm)} por ${escapeHtml(f.editadoPorEmail||'')}</div>` : ''}
-      ${(f.anexos||[]).length ? `<div class="fi-sub">📎 ${f.anexos.map((an,i)=>`<a href="/api/formularios/${f.id}/anexo/${i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" style="color:var(--accent);">${escapeHtml(an.nome)}</a>`).join(' · ')}</div>` : ''}
-      ${f.enviadoPagamento ? `<div class="fi-sub" style="color:var(--ok);">💰 enviado como Pagamento ${fmtData(f.enviadoPagamento.em)} - mesmo Ticket #${f.numeroTicket ?? '—'} na Central</div>` : ''}
+        <span class="badge pendente">🔗 aguardando o solicitante preencher</span></div>
+      <div class="fi-sub">${fmtData(f.criadoEm)} · link enviado por ${escapeHtml(f.criadoPorEmail||'')}</div>
       <div class="acoes-form">
-        ${cancelado ? '' : `<button type="button" class="btn-ghost" onclick="abrirLinks('${f.id}')">✍️ Assinaturas e links</button>`}
-        <button type="button" class="btn-ghost" onclick="verPdf('${f.id}')" title="Abrir o PDF pra conferir, sem baixar">👁️ Ver</button>
-        <button type="button" class="btn-ghost" onclick="baixarPdf('${f.id}')" title="Salvar o arquivo no aparelho">⬇️ ${t && t.soAnexo ? 'Baixar assinado' : 'Baixar PDF'}</button>
-        ${!cancelado && f.status==='ASSINADO' && !f.enviadoPagamento ? `<button type="button" class="btn-ghost" style="color:var(--ok);" onclick="enviarComoPagamento('${f.id}')">💰 Enviar como Pagamento</button>` : ''}
-        ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" onclick="abrirEdicao('${f.id}')">✏️ Editar</button>` : ''}
-        ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" style="color:var(--bad);" onclick="cancelarFormulario('${f.id}')">🚫 Cancelar</button>` : ''}
-        ${SOU_MASTER && cancelado ? `<button type="button" class="btn-ghost" style="color:var(--bad);" onclick="excluirFormulario('${f.id}')">🗑️ Excluir de vez</button>` : ''}
+        <button type="button" class="btn-ghost" onclick="copiar('${link}')">🔗 Copiar link</button>
+        <button type="button" class="btn-ghost" onclick="whatsapp('Preencha os dados do formulário aqui (Ticket #${f.numeroTicket}): '+'${link}')">💬 WhatsApp</button>
+        <button type="button" class="btn-ghost" style="color:var(--bad);" onclick="cancelarLink('${f.id}','${escapeHtml(t?t.rotulo:f.tipo)}')">✕ Cancelar link</button>
       </div>
-      <div id="links-${f.id}"></div>
     </div>`;
-  }).join('');
+  }
+  const cancelado = f.status==='CANCELADO';
+  return `<div class="form-item${cancelado?' cancelado':''}">
+    <div class="fi-titulo">${escapeHtml(t?t.rotulo:f.tipo)} · ${escapeHtml(f.unidade)}
+      <span class="badge" style="background:#1a2230;color:var(--muted);">#${f.numeroTicket ?? '—'}</span>
+      <span class="badge ${cancelado?'cancelado':(f.status==='ASSINADO'?'assinado':'pendente')}">${cancelado?'🚫 cancelado':(f.status==='ASSINADO'?'✅ assinado':`✍️ falta(m) ${pendentes}`)}</span></div>
+    <div class="fi-sub">${fmtData(f.criadoEm)} · ${t && t.soAnexo ? `${(f.anexos||[]).length} documento(s)` : `${f.linhas.length} linha(s)`} · total ${fmtMoney(f.valorTotal)} · por ${escapeHtml(f.criadoPorEmail||'')}</div>
+    ${cancelado ? `<div class="fi-sub" style="color:var(--bad);">cancelado ${fmtData(f.canceladoEm)} por ${escapeHtml(f.canceladoPorEmail||'')}${f.motivoCancelamento?` · ${escapeHtml(f.motivoCancelamento)}`:''}</div>` : ''}
+    ${f.editadoEm && !cancelado ? `<div class="fi-sub" style="color:var(--warn);">corrigido ${fmtData(f.editadoEm)} por ${escapeHtml(f.editadoPorEmail||'')}</div>` : ''}
+    ${(f.anexos||[]).length ? `<div class="fi-sub">📎 ${f.anexos.map((an,i)=>`<a href="/api/formularios/${f.id}/anexo/${i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" style="color:var(--accent);">${escapeHtml(an.nome)}</a>`).join(' · ')}</div>` : ''}
+    ${f.enviadoPagamento ? `<div class="fi-sub" style="color:var(--ok);">💰 enviado como Pagamento ${fmtData(f.enviadoPagamento.em)} - mesmo Ticket #${f.numeroTicket ?? '—'} na Central</div>` : ''}
+    <div class="acoes-form">
+      ${cancelado ? '' : `<button type="button" class="btn-ghost" onclick="abrirLinks('${f.id}')">✍️ Assinaturas e links</button>`}
+      <button type="button" class="btn-ghost" onclick="verPdf('${f.id}')" title="Abrir o PDF pra conferir, sem baixar">👁️ Ver</button>
+      <button type="button" class="btn-ghost" onclick="baixarPdf('${f.id}')" title="Salvar o arquivo no aparelho">⬇️ ${t && t.soAnexo ? 'Baixar assinado' : 'Baixar PDF'}</button>
+      ${!cancelado && f.status==='ASSINADO' && !f.enviadoPagamento ? `<button type="button" class="btn-ghost" style="color:var(--ok);" onclick="enviarComoPagamento('${f.id}')">💰 Enviar como Pagamento</button>` : ''}
+      ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" onclick="abrirEdicao('${f.id}')">✏️ Editar</button>` : ''}
+      ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" style="color:var(--bad);" onclick="cancelarFormulario('${f.id}')">🚫 Cancelar</button>` : ''}
+      ${SOU_MASTER && cancelado ? `<button type="button" class="btn-ghost" style="color:var(--bad);" onclick="excluirFormulario('${f.id}')">🗑️ Excluir de vez</button>` : ''}
+    </div>
+    <div id="links-${f.id}"></div>
+  </div>`;
+}
+
+// ---------------------------------------------------------------------
+// Organização da lista (mesmo desenho da Central/Solicitações): status
+// visual (independente do texto exato que o servidor grava), Triagem por
+// kanban (só o que precisa de alguém agora + o que foi assinado HOJE) e
+// aba por tipo (mostra o histórico completo daquele tipo, sem esse corte -
+// mesma regra já usada em central-historico.html)
+const FUSO_BR_LISTA = 'America/Sao_Paulo';
+function dataBrasiliaLista(iso){
+  if(!iso) return '';
+  const partes = new Intl.DateTimeFormat('en-US', { timeZone:FUSO_BR_LISTA, year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(new Date(iso));
+  const o = {}; partes.forEach(p=>{ if(p.type!=='literal') o[p.type]=p.value; });
+  return `${o.year}-${o.month}-${o.day}`;
+}
+function hojeBRLista(){ return dataBrasiliaLista(new Date().toISOString()); }
+function statusVisual(f){
+  if(f.status==='CANCELADO') return 'CANCELADO';
+  if(f.status==='AGUARDANDO_PREENCHIMENTO') return 'AGUARDANDO_PREENCHIMENTO';
+  if(f.status==='ASSINADO') return 'ASSINADO';
+  return 'PENDENTE'; // lançado, ainda falta assinatura de alguém
+}
+// quando o formulário TERMINOU de ser assinado - o maior assinadoEm entre os
+// slots (não existe um campo "concluidoEm" próprio no registro)
+function assinadoCompletoEm(f){
+  if(f.status!=='ASSINADO') return null;
+  const datas = (f.assinaturas||[]).map(a=>a.assinadoEm).filter(Boolean).sort();
+  return datas.length ? datas[datas.length-1] : f.criadoEm;
+}
+function assinadoHoje(f){ const em = assinadoCompletoEm(f); return !!em && dataBrasiliaLista(em)===hojeBRLista(); }
+// Triagem: cancelado nunca entra (fica só na aba do tipo, é passado); o que
+// já foi assinado só entra se foi HOJE (senão a Triagem também empilharia
+// pra sempre); o resto (aguardando preenchimento/assinatura) sempre entra
+function passaTriagemForm(f){
+  const sv = statusVisual(f);
+  if(sv==='CANCELADO') return false;
+  if(sv==='ASSINADO') return assinadoHoje(f);
+  return true;
+}
+function passaBuscaForm(f){
+  if(!FILTRO_BUSCA_LISTA) return true;
+  const t = TIPOS.find(x=>x.tipo===f.tipo);
+  const alvo = [f.numeroTicket!=null?('#'+f.numeroTicket):'', f.numeroTicket, f.unidade, t?t.rotulo:f.tipo, f.criadoPorEmail]
+    .filter(v=>v!=null).join(' ').toLowerCase();
+  return FILTRO_BUSCA_LISTA.split(/\s+/).every(p=>alvo.includes(p));
+}
+function contagemStatusForm(lista){
+  return {
+    P: lista.filter(f=>{ const s=statusVisual(f); return s==='AGUARDANDO_PREENCHIMENTO' || s==='PENDENTE'; }).length,
+    A: lista.filter(f=>statusVisual(f)==='ASSINADO').length,
+    C: lista.filter(f=>statusVisual(f)==='CANCELADO').length,
+  };
+}
+function renderTipoFiltroRowForm(base){
+  const botaoHtml = (tipo, label, contagem) => `
+    <button type="button" class="tipo-filtro-btn ${tipo===TIPO_FILTRO_LISTA?'active':''}" onclick="selecionarTipoFiltroLista('${tipo}')">
+      <span class="tf-label">${label}</span>
+      <span class="tf-counts"><b style="color:var(--warn);">${contagem.P}</b> pend · <b style="color:var(--ok);">${contagem.A}</b> assin · <b style="color:var(--bad);">${contagem.C}</b> canc</span>
+    </button>`;
+  const tiposComItens = TIPOS.filter(t=>base.some(f=>f.tipo===t.tipo));
+  document.getElementById('tipo-filtro-row').innerHTML =
+    botaoHtml('', '📥 Triagem', contagemStatusForm(base.filter(passaTriagemForm))) +
+    tiposComItens.map(t=>botaoHtml(t.tipo, escapeHtml(t.rotulo), contagemStatusForm(base.filter(f=>f.tipo===t.tipo)))).join('');
+}
+function selecionarTipoFiltroLista(tipo){ TIPO_FILTRO_LISTA = tipo; renderLista(); }
+function aplicarFiltrosLista(){
+  FILTRO_UNIDADE_LISTA = document.getElementById('filtro-unidade-lista').value;
+  FILTRO_BUSCA_LISTA = document.getElementById('filtro-busca-lista').value.trim().toLowerCase();
+  renderLista();
+}
+// deriva as opções de loja do que realmente existe na lista - sem lista
+// fixa: uma unidade sem formulário nenhum não teria o que filtrar mesmo
+function montarFiltroUnidadeLista(){
+  const atual = document.getElementById('filtro-unidade-lista').value;
+  const nomes = [...new Set(LISTA.map(f=>f.unidade).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  document.getElementById('filtro-unidade-lista').innerHTML = '<option value="">Todas</option>' +
+    nomes.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
+  if(nomes.includes(atual)) document.getElementById('filtro-unidade-lista').value = atual;
+}
+
+function renderLista(){
+  const alvo = document.getElementById('lista');
+  montarFiltroUnidadeLista();
+  if(!LISTA.length){
+    document.getElementById('tipo-filtro-row').innerHTML = '';
+    document.getElementById('lista-count').textContent = '';
+    document.getElementById('triagem-nota-form').classList.add('hidden');
+    alvo.innerHTML = '<div class="vazio">Nenhum formulário ainda - crie o primeiro acima.</div>';
+    return;
+  }
+  const base = LISTA.filter(f=>(!FILTRO_UNIDADE_LISTA || f.unidade===FILTRO_UNIDADE_LISTA) && passaBuscaForm(f));
+  renderTipoFiltroRowForm(base);
+  const emTriagem = TIPO_FILTRO_LISTA==='';
+  const filtradas = TIPO_FILTRO_LISTA ? base.filter(f=>f.tipo===TIPO_FILTRO_LISTA) : base;
+  const visiveis = emTriagem ? filtradas.filter(passaTriagemForm) : filtradas;
+  document.getElementById('lista-count').textContent = visiveis.length ? `(${visiveis.length})` : '';
+  document.getElementById('triagem-nota-form').classList.toggle('hidden', !emTriagem);
+
+  if(!visiveis.length){ alvo.innerHTML = '<div class="vazio">Nenhum formulário aqui.</div>'; return; }
+
+  if(!emTriagem){
+    // aba de um tipo específico: histórico completo dele, lista simples
+    // (LISTA já vem mais recente primeiro do servidor)
+    alvo.innerHTML = visiveis.map(cardHtml).join('');
+    return;
+  }
+
+  // Triagem: kanban por status - cada card sabe pra qual coluna vai sozinho
+  const COLUNAS = [
+    { status:'AGUARDANDO_PREENCHIMENTO', titulo:'🔗 Aguardando preenchimento' },
+    { status:'PENDENTE', titulo:'✍️ Aguardando assinatura' },
+    { status:'ASSINADO', titulo:'✅ Assinado hoje' },
+  ];
+  alvo.innerHTML = '<div class="kanban-board">' + COLUNAS.map(col=>{
+    const doColuna = visiveis.filter(f=>statusVisual(f)===col.status);
+    return `<div class="kanban-col">
+      <div class="kanban-col-header"><span>${col.titulo}</span><span class="kanban-count">${doColuna.length}</span></div>
+      <div class="kanban-cards">${doColuna.length ? doColuna.map(cardHtml).join('') : '<div class="kanban-empty">Nada aqui.</div>'}</div>
+    </div>`;
+  }).join('') + '</div>';
 }
 
 async function carregarLista(){

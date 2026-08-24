@@ -6006,6 +6006,37 @@ setTimeout(async () => {
   if (!okSaidasPainel) ruins += 1;
   console.log(`${okSaidasPainel ? '✓' : '✗'} Painel de Saídas: Sangria/Depósito + outras saídas unificadas, verificação Master/Admin, isolamento por grupo`);
 
+  // ------------------------------------------------------------------
+  // Formulários: a lista tinha virado um monte só se amontoando (pedido do
+  // usuário) - organização de fonte, no mesmo desenho já usado em
+  // Central/Solicitações (central-historico.html): chips de tipo com
+  // contagem, Triagem em kanban por status (só o que precisa de alguém
+  // agora + o que foi assinado HOJE, cancelado nunca entra) e a aba de um
+  // tipo mostra o histórico completo dele, sem esse corte.
+  let okFormulariosOrganizacao = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'formularios.html'), 'utf8');
+    const conf = {
+      'chips de tipo com contagem existem': /id="tipo-filtro-row"/.test(html) && /function renderTipoFiltroRowForm/.test(html),
+      'Triagem exclui cancelado e só deixa assinado de HOJE': (() => {
+        const i = html.indexOf('function passaTriagemForm');
+        const trecho = html.slice(i, i + 400);
+        return i >= 0 && /CANCELADO.*return false/.test(trecho) && /ASSINADO.*return assinadoHoje/.test(trecho);
+      })(),
+      'kanban da Triagem tem as 3 colunas certas': /AGUARDANDO_PREENCHIMENTO.*Aguardando preenchimento/.test(html)
+        && /status:'PENDENTE', titulo:'✍️ Aguardando assinatura'/.test(html)
+        && /status:'ASSINADO', titulo:'✅ Assinado hoje'/.test(html),
+      'aba de um tipo específico ignora a Triagem (mostra o histórico completo)':
+        /if\(!emTriagem\)\{[\s\S]{0,200}alvo\.innerHTML = visiveis\.map\(cardHtml\)\.join\(''\);/.test(html),
+      'filtro de loja/busca existe': /id="filtro-unidade-lista"/.test(html) && /id="filtro-busca-lista"/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okFormulariosOrganizacao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okFormulariosOrganizacao = false; console.log('  erro: ' + e.message); }
+  if (!okFormulariosOrganizacao) ruins += 1;
+  console.log(`${okFormulariosOrganizacao ? '✓' : '✗'} Formulários: lista organizada por tipo (chips+contagem) e Triagem em kanban por status, igual Solicitações`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
