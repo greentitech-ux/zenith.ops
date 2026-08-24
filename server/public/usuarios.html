@@ -636,7 +636,7 @@ function caminhoSubgrupo(id){
 // Acoes marcar cada tag uma por uma ----------
 const CARGOS = [ ['','Sem cargo'], ['loja','🏬 Loja'], ['gerente','👔 Gerente'], ['assistente-gerente','🧑‍💼 Ass. Ger'], ['tecnico','🔧 Técnico'], ['suporte','🎧 Suporte'], ['manutencao','🛠️ Manutenção'], ['operador','👷 Operador'] ];
 function tagsFieldsetHtml(prefixo, tags){
-  tags = tags || { cargo:null, empresaId:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, podeRhTodasUnidades:false, podeRhCadastrarEfetivado:false, sessaoLonga:false, qaUser:false };
+  tags = tags || { cargo:null, empresaId:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, podeRhTodasUnidades:false, podeRhCadastrarEfetivado:false, podeBonifVerValorTotal:false, podeBonifVerColaboradores:false, sessaoLonga:false, qaUser:false };
   const cargoHtml = CARGOS.map(([v,l])=>{
     const marcado = (tags.cargo||'')===v;
     return `<label><input type="radio" name="${prefixo}-cargo" value="${v}" ${marcado?'checked':''}> ${l}</label>`;
@@ -660,6 +660,8 @@ function tagsFieldsetHtml(prefixo, tags){
       <label><input type="checkbox" id="${prefixo}-tag-operadores" ${tags.podeCadastrarOperadores?'checked':''}> 👥 Operadores (Abastec. Carrinho)</label>
       <label><input type="checkbox" id="${prefixo}-tag-rh-todas-unidades" ${tags.podeRhTodasUnidades?'checked':''}> 🧑‍💼 RH (todas as unidades)</label>
       <label><input type="checkbox" id="${prefixo}-tag-rh-cadastrar-efetivado" ${tags.podeRhCadastrarEfetivado?'checked':''}> 🧑‍💼 RH: pode cadastrar efetivado direto</label>
+      <label title="Sem esta tag, quem tem a seção Bonificação vê só o próprio card - com ela, vê faturamento/pool/taxas por trás da conta"><input type="checkbox" id="${prefixo}-tag-bonif-valor-total" ${tags.podeBonifVerValorTotal?'checked':''}> 🏆 Bonificação: ver valor total</label>
+      <label title="Sem esta tag, a equipe aparece só como agregado (quantidade + total) - com ela, aparece nome a nome"><input type="checkbox" id="${prefixo}-tag-bonif-colaboradores" ${tags.podeBonifVerColaboradores?'checked':''}> 🏆 Bonificação: ver colaboradores</label>
       <label><input type="checkbox" id="${prefixo}-tag-sessao-longa" ${tags.sessaoLonga?'checked':''}> 🔒 Manter sempre conectado (30 dias — login de loja/terminal)</label>
       <label title="Sempre vê/cria todos os tipos de solicitação na Central, e tudo que criar sai marcado TESTE"><input type="checkbox" id="${prefixo}-tag-qa-user" ${tags.qaUser?'checked':''}> 🧪 QA User (testes na Central, marca TESTE)</label>
     </div>`;
@@ -674,6 +676,8 @@ function lerTagsForm(prefixo){
     podeCadastrarOperadores: document.getElementById(prefixo+'-tag-operadores').checked,
     podeRhTodasUnidades: document.getElementById(prefixo+'-tag-rh-todas-unidades').checked,
     podeRhCadastrarEfetivado: document.getElementById(prefixo+'-tag-rh-cadastrar-efetivado').checked,
+    podeBonifVerValorTotal: document.getElementById(prefixo+'-tag-bonif-valor-total').checked,
+    podeBonifVerColaboradores: document.getElementById(prefixo+'-tag-bonif-colaboradores').checked,
     sessaoLonga: document.getElementById(prefixo+'-tag-sessao-longa').checked,
     qaUser: document.getElementById(prefixo+'-tag-qa-user').checked,
   };
@@ -692,6 +696,8 @@ async function salvarTagsUsuario(id, tags){
     fetch('/api/users/'+id+'/cadastrar-operadores', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeCadastrarOperadores: tags.podeCadastrarOperadores})}),
     fetch('/api/users/'+id+'/rh-todas-unidades', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeRhTodasUnidades: tags.podeRhTodasUnidades})}),
     fetch('/api/users/'+id+'/rh-cadastrar-efetivado', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeRhCadastrarEfetivado: tags.podeRhCadastrarEfetivado})}),
+    fetch('/api/users/'+id+'/bonif-ver-valor-total', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeBonifVerValorTotal: tags.podeBonifVerValorTotal})}),
+    fetch('/api/users/'+id+'/bonif-ver-colaboradores', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeBonifVerColaboradores: tags.podeBonifVerColaboradores})}),
     fetch('/api/users/'+id+'/sessao-longa', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({sessaoLonga: tags.sessaoLonga})}),
     fetch('/api/users/'+id+'/qa-user', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({qaUser: tags.qaUser})}),
   ]);
@@ -1019,6 +1025,7 @@ function passaBuscaUsuario(u){
     u.podeCatalogoInsumos?'insumos':'', u.podeCadastrarOperadores?'operadores':'',
     u.podeRhTodasUnidades?'rh todas unidades':'',
     u.podeRhCadastrarEfetivado?'rh cadastrar efetivado':'',
+    u.podeBonifVerValorTotal?'bonificação valor total':'', u.podeBonifVerColaboradores?'bonificação colaboradores':'',
   ];
   const alvo = [u.email, u.username, ...tags, ...(perms.sections||[]), ...secoesLabels, ...(perms.unidades||[]), ...unidadesLabels]
     .filter(Boolean).join(' ').toLowerCase();
@@ -1070,6 +1077,8 @@ function renderUsers(){
     if (u.podeCadastrarOperadores) tags.push(`<span class="badge catalogo" title="Pode cadastrar operadores (login local) do Abastecimento do Carrinho">👥 operadores</span>`);
     if (u.podeRhTodasUnidades) tags.push(`<span class="badge catalogo" title="Vê e cadastra/decide RH de todas as unidades do grupo, não só das próprias permissões">🧑‍💼 RH todas unidades</span>`);
     if (u.podeRhCadastrarEfetivado) tags.push(`<span class="badge catalogo" title="Pode cadastrar alguém já efetivado direto no RH, sem passar pelo teste de 5 dias">🧑‍💼 RH efetivado direto</span>`);
+    if (u.podeBonifVerValorTotal) tags.push(`<span class="badge catalogo" title="Vê faturamento/pool/taxas por trás da conta de Bonificação">🏆 bonif. valor total</span>`);
+    if (u.podeBonifVerColaboradores) tags.push(`<span class="badge catalogo" title="Vê os colaboradores da Bonificação nome a nome, não só o agregado">🏆 bonif. colaboradores</span>`);
     if (u.sessaoLonga) tags.push(`<span class="badge catalogo" title="Sessão dura 30 dias em vez de 8h (login de loja/terminal)">🔒 sempre conectado</span>`);
     if (horario && horario.ativo) tags.push(`<span class="badge horario" title="Acesso liberado só nesse intervalo, todo dia">🕐 ${horario.inicio}–${horario.fim}</span>`);
     tags.push(`<span class="badge ${u.online?'on':'off'}" style="cursor:pointer;" onclick="abrirSessoes('${u.id}')" title="${u.ultimaAtividadeEm ? 'Última atividade: '+formatarRelativo(u.ultimaAtividadeEm) : 'Nunca fez login'} - clique pra ver os locais">${u.online?'🟢':'⚪'} ${u.sessoesAtivas} ${u.sessoesAtivas===1?'local':'locais'}</span>`);
@@ -1384,7 +1393,7 @@ function editarPermissoes(id){
   EDITING_USER = id;
   document.getElementById('perm-title').textContent = 'Permissões de ' + u.email;
   const perms = u.permissions || {sections:[],unidades:[],vaultSubgroups:[],tiposSolicitacao:[]};
-  renderCategoriasPermissao('p', perms, { cargo: u.cargo||null, empresaId: u.empresaId||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeRhTodasUnidades: !!u.podeRhTodasUnidades, podeRhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado, sessaoLonga: !!u.sessaoLonga });
+  renderCategoriasPermissao('p', perms, { cargo: u.cargo||null, empresaId: u.empresaId||null, isAdmin: !!u.isAdmin, podeCatalogoEstoque: !!u.podeCatalogoEstoque, podeCatalogoInsumos: !!u.podeCatalogoInsumos, podeCadastrarOperadores: !!u.podeCadastrarOperadores, podeRhTodasUnidades: !!u.podeRhTodasUnidades, podeRhCadastrarEfetivado: !!u.podeRhCadastrarEfetivado, podeBonifVerValorTotal: !!u.podeBonifVerValorTotal, podeBonifVerColaboradores: !!u.podeBonifVerColaboradores, sessaoLonga: !!u.sessaoLonga });
   document.getElementById('perm-err').classList.add('hidden');
   permOverlay.classList.add('show');
 }
