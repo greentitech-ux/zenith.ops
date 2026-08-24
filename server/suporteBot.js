@@ -48,7 +48,8 @@ const ESCALACAO_ALVO_RE = /\b(atendente|humano|suporte|time)\b/i;
 
 // tipos que o bot pode abrir na Central (mesma lista do formulario publico -
 // estorno e ajuste de fechamento ficam de fora, tem fluxo proprio com login)
-const TIPOS_TICKET = ['compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota'];
+const TIPOS_TICKET = ['compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota', 'acesso-pessoa'];
+const MOTIVOS_ACESSO_TICKET = ['desligamento', 'ferias'];
 
 let cliente = null;
 function ativo() {
@@ -142,11 +143,15 @@ const TOOLS_BASE = [
     input_schema: {
       type: 'object',
       properties: {
-        tipo: { type: 'string', enum: TIPOS_TICKET, description: 'compra = comprar algo pra loja; manutencao = consertar algo físico; suporte-ti = problema de computador/sistema/acesso; pagamento = boleto/despesa pro financeiro; nota = pedido de nota fiscal' },
+        tipo: { type: 'string', enum: TIPOS_TICKET, description: 'compra = comprar algo pra loja; manutencao = consertar algo físico; suporte-ti = problema de computador/sistema/acesso; pagamento = boleto/despesa pro financeiro; nota = pedido de nota fiscal; acesso-pessoa = gerente avisando desligamento ou férias de alguém, pra bloquear os acessos dela' },
         unidade: { type: 'string', description: 'Nome da unidade/loja, exatamente como na lista do prompt' },
-        titulo: { type: 'string', description: 'Resumo curto do pedido (até 200 caracteres)' },
+        titulo: { type: 'string', description: 'Resumo curto do pedido (até 200 caracteres) - pra tipo acesso-pessoa não precisa perguntar, é montado sozinho' },
         descricao: { type: 'string', description: 'Detalhes relevantes que a pessoa passou' },
         prioridade: { type: 'string', enum: ['critica', 'alta', 'media', 'baixa'], description: 'Padrão: media. Só suba se a pessoa indicar urgência real.' },
+        nomePessoa: { type: 'string', description: 'SÓ pra tipo acesso-pessoa: nome completo de quem foi desligado ou saiu de férias.' },
+        motivoAcesso: { type: 'string', enum: MOTIVOS_ACESSO_TICKET, description: 'SÓ pra tipo acesso-pessoa: desligamento ou ferias.' },
+        dataEfetiva: { type: 'string', description: 'SÓ pra tipo acesso-pessoa: último dia trabalhado (desligamento) ou início das férias, formato AAAA-MM-DD.' },
+        dataRetornoPrevista: { type: 'string', description: 'SÓ pra tipo acesso-pessoa com motivoAcesso=ferias: previsão de volta, formato AAAA-MM-DD. Obrigatório nesse caso.' },
       },
       required: ['tipo', 'unidade', 'titulo'],
     },
@@ -281,18 +286,33 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
   if (nome === 'criar_ticket') {
     const tipo = TIPOS_TICKET.includes(input.tipo) ? input.tipo : null;
     if (!tipo) return 'Erro: tipo inválido.';
+    if (tipo === 'acesso-pessoa') {
+      if (!input.nomePessoa || !String(input.nomePessoa).trim()) return 'Erro: informe o nome completo da pessoa antes de criar o ticket.';
+      if (!MOTIVOS_ACESSO_TICKET.includes(input.motivoAcesso)) return 'Erro: motivoAcesso precisa ser "desligamento" ou "ferias".';
+      if (!input.dataEfetiva) return 'Erro: informe a data efetiva (AAAA-MM-DD).';
+      if (input.motivoAcesso === 'ferias' && !input.dataRetornoPrevista) return 'Erro: férias precisa da previsão de retorno (AAAA-MM-DD).';
+    }
     const quem = [chat.nome, chat.contato].filter(Boolean).join(' · ');
+    // titulo de acesso-pessoa nasce sozinho (mesmo padrao do formulario da
+    // Central) - nao depende do modelo escrever certo
+    const titulo = tipo === 'acesso-pessoa'
+      ? `${input.motivoAcesso === 'ferias' ? 'Férias' : 'Desligamento'} — ${String(input.nomePessoa).trim()}`
+      : String(input.titulo || '').trim();
     const registro = await solicitacoes.create({
       tipo,
       unidade: String(input.unidade || '').trim(),
       unidadeNome: String(input.unidade || '').trim(),
-      titulo: String(input.titulo || '').trim(),
+      titulo,
       observacao: [String(input.descricao || '').trim(), `Aberto pelo Beniboy (chat de suporte)${quem ? ' — ' + quem : ''}.`].filter(Boolean).join('\n\n'),
       itens: [], anexos: [], ehOrcamento: false,
       prioridade: input.prioridade,
       criadoPorId: null,
       criadoPorEmail: `Beniboy (chat de suporte)${quem ? ' — ' + quem : ''}`,
       direcionadoParaId: null, direcionadoParaEmail: null,
+      nomePessoa: tipo === 'acesso-pessoa' ? String(input.nomePessoa).trim() : undefined,
+      motivoAcesso: tipo === 'acesso-pessoa' ? input.motivoAcesso : undefined,
+      dataEfetiva: tipo === 'acesso-pessoa' ? input.dataEfetiva : undefined,
+      dataRetornoPrevista: tipo === 'acesso-pessoa' ? input.dataRetornoPrevista : undefined,
       // o ticket herda o MESMO numero do protocolo dessa conversa, em vez de
       // tirar um novo da sequencia - pedido explicito do usuario: "o numero
       // do ticket sempre sera o mesmo do protocolo... o proximo ticket tem

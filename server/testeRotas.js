@@ -5692,6 +5692,213 @@ setTimeout(async () => {
   if (!okInicioWidget) ruins += 1;
   console.log(`${okInicioWidget ? '✓' : '✗'} Início: widget pessoal (por status/unidade + meus abertos/concluídos) fica ligado ao kanban`);
 
+  // ---------- rh.js: férias como estado ATIVO (novo, reversível) ----------
+  // dataUltimasFerias so alimenta o alerta de vencimento (NR-7) - nunca foi
+  // um estado "de ferias AGORA". Este par (registrarFerias/
+  // registrarRetornoFerias) e novo, mesmo desenho reversivel do atestado,
+  // so que com retorno OBRIGATORIO (pedido do usuario: ferias sempre tem
+  // data de volta) e sem restricao de tipoCadastro (atestado so vale pra
+  // quem nao e extra; ferias vale pra qualquer ativo).
+  let okFeriasRh = false;
+  try {
+    const rh = require('./rh');
+    DOCS.set('rhFuncionarios/f-ferias-1', {
+      id: 'f-ferias-1', unidade: 'TESTE_FERIAS_UN', nome: 'Beltrano Ferias', tipoCadastro: 'extra',
+      status: 'ativo', atestados: [], emAtestado: false, atestadoAtual: null,
+      ferias: [], emFerias: false, feriasAtual: null, criadoEm: new Date().toISOString(),
+    });
+    DOCS.set('rhFuncionarios/f-ferias-inativo', {
+      id: 'f-ferias-inativo', unidade: 'TESTE_FERIAS_UN', nome: 'Inativo Teste',
+      status: 'inativo', atestados: [], emAtestado: false, atestadoAtual: null,
+      ferias: [], emFerias: false, feriasAtual: null, criadoEm: new Date().toISOString(),
+    });
+    rh.invalidar();
+
+    const semRetorno = await rh.registrarFerias('f-ferias-1', { inicio: '2026-08-01', retornoPrevisto: '', porEmail: 'teste@local' }).then(() => true).catch(() => false);
+    const emInativo = await rh.registrarFerias('f-ferias-inativo', { inicio: '2026-08-01', retornoPrevisto: '2026-08-15', porEmail: 'teste@local' }).then(() => true).catch(() => false);
+    const registrado = await rh.registrarFerias('f-ferias-1', { inicio: '2026-08-01', retornoPrevisto: '2026-08-15', porEmail: 'teste@local' });
+    const dupla = await rh.registrarFerias('f-ferias-1', { inicio: '2026-08-02', retornoPrevisto: '2026-08-16', porEmail: 'teste@local' }).then(() => true).catch(() => false);
+    const retornoEmQuemNaoEsta = await rh.registrarRetornoFerias('f-ferias-inativo', { porEmail: 'teste@local' }).then(() => true).catch(() => false);
+    const retornou = await rh.registrarRetornoFerias('f-ferias-1', { porEmail: 'teste@local' });
+
+    // sabotagem-alvo: desligar() enquanto ainda de ferias tem que zerar o
+    // flag tambem - senao uma reativacao futura volta com ferias fantasma
+    await rh.registrarFerias('f-ferias-1', { inicio: '2026-09-01', retornoPrevisto: '2026-09-15', porEmail: 'teste@local' });
+    const desligadoDeFerias = await rh.desligar('f-ferias-1', { motivo: 'teste', porEmail: 'teste@local' });
+
+    const conf = {
+      'retorno vazio é recusado (obrigatório, diferente do atestado)': semRetorno === false,
+      'registrar férias em inativo é recusado': emInativo === false,
+      'registrar férias grava emFerias sem mudar status, mesmo pra tipoCadastro extra': registrado.emFerias === true && registrado.status === 'ativo' && registrado.feriasAtual.retornoPrevisto === '2026-08-15',
+      'dupla férias é recusada': dupla === false,
+      'retorno em quem não está de férias é recusado': retornoEmQuemNaoEsta === false,
+      'retorno limpa o estado e empurra pro histórico': retornou.emFerias === false && retornou.feriasAtual === null && retornou.ferias.length === 1 && !!retornou.ferias[0].retorno,
+      'desligar() enquanto em férias também zera emFerias/feriasAtual': desligadoDeFerias.emFerias === false && desligadoDeFerias.feriasAtual === null && desligadoDeFerias.status === 'inativo',
+    };
+    const ruinsFR = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okFeriasRh = !ruinsFR.length;
+    if (ruinsFR.length) console.log(`  falhou em: ${ruinsFR.join(' · ')}`);
+  } catch (e) { okFeriasRh = false; console.log('  erro: ' + e.message); }
+  if (!okFeriasRh) ruins += 1;
+  console.log(`${okFeriasRh ? '✓' : '✗'} RH: férias é estado reversível (retorno obrigatório) e desligar() zera férias fantasma`);
+
+  // ---------- Acesso de pessoa (tipo 'acesso-pessoa'): checklist com confirmação humana ----------
+  // Gerente avisa desligamento/férias (Central ou Beniboy) - o ticket vira
+  // um checklist de 3 sistemas (login/RH/operador do Abastecimento) que o
+  // Master confirma um a um. NUNCA bloqueia sozinho: o login não guarda o
+  // nome da pessoa (só email/username), então os candidatos são só
+  // sugestão (ver acessosPessoa.js). Cobre o ciclo completo e o ponto de
+  // sincronia do perfil por unidade (unidades.js TIPOS_SOLICITACAO_VALIDOS
+  // - sem ele, uma unidade com perfil restrito não consegue nem cadastrar
+  // 'acesso-pessoa' na própria lista de tipos aceitos).
+  let okAcessoPessoa = false;
+  try {
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const rh = require('./rh');
+    const users = require('./users');
+    const unidades = require('./unidades');
+    const abastecimentoCarrinho = require('./abastecimentoCarrinho');
+    const bcrypt = require('bcryptjs');
+
+    const semRetorno = await postarJson('/api/solicitacoes', {
+      tipo: 'acesso-pessoa', unidade: 'TESTE_ACESSO_UN', unidadeNome: 'Teste Acesso',
+      titulo: 'x', nomePessoa: 'Fulano Testado', motivoAcesso: 'ferias', dataEfetiva: '2026-08-01',
+    }, cab);
+    const motivoInvalido = await postarJson('/api/solicitacoes', {
+      tipo: 'acesso-pessoa', unidade: 'TESTE_ACESSO_UN', unidadeNome: 'Teste Acesso',
+      titulo: 'x', nomePessoa: 'Fulano Testado', motivoAcesso: 'demissao', dataEfetiva: '2026-08-01',
+    }, cab);
+
+    const criarFerias = await postarJson('/api/solicitacoes', {
+      tipo: 'acesso-pessoa', unidade: 'TESTE_ACESSO_UN', unidadeNome: 'Teste Acesso',
+      titulo: 'Férias — Fulano Testado', nomePessoa: 'Fulano Testado', motivoAcesso: 'ferias',
+      dataEfetiva: '2026-08-01', dataRetornoPrevista: '2026-08-15',
+    }, cab);
+    const ticketFerias = JSON.parse(criarFerias.corpo || '{}');
+
+    const criarDesligamento = await postarJson('/api/solicitacoes', {
+      tipo: 'acesso-pessoa', unidade: 'TESTE_ACESSO_UN', unidadeNome: 'Teste Acesso',
+      titulo: 'Desligamento — Ciclano Sumido', nomePessoa: 'Ciclano Sumido', motivoAcesso: 'desligamento',
+      dataEfetiva: '2026-08-01',
+    }, cab);
+    const ticketDesligamento = JSON.parse(criarDesligamento.corpo || '{}');
+
+    const criarPendente = await postarJson('/api/solicitacoes', {
+      tipo: 'acesso-pessoa', unidade: 'TESTE_ACESSO_UN', unidadeNome: 'Teste Acesso',
+      titulo: 'Desligamento — Nunca Aprovado', nomePessoa: 'Nunca Aprovado', motivoAcesso: 'desligamento', dataEfetiva: '2026-08-01',
+    }, cab);
+    const ticketPendente = JSON.parse(criarPendente.corpo || '{}');
+
+    const criarCompraQualquer = await postarJson('/api/solicitacoes', {
+      tipo: 'compra', unidade: 'TESTE_ACESSO_UN', unidadeNome: 'Teste Acesso', titulo: 'Compra qualquer', valorEstimado: 1,
+    }, cab);
+    const ticketCompraQualquer = JSON.parse(criarCompraQualquer.corpo || '{}');
+
+    // candidatos: RH (nome+unidade), login (heurística nome->username, MESMA
+    // unidade) e operador do Abastecimento (só nome, sem unidade - o cadastro
+    // não tem esse campo)
+    DOCS.set('rhFuncionarios/f-acesso-1', {
+      id: 'f-acesso-1', unidade: 'TESTE_ACESSO_UN', nome: 'Fulano Testado',
+      status: 'ativo', atestados: [], emAtestado: false, atestadoAtual: null,
+      ferias: [], emFerias: false, feriasAtual: null, criadoEm: new Date().toISOString(),
+    });
+    rh.invalidar();
+    DOCS.set('users/u-acesso-dentro', {
+      passwordHash: bcrypt.hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      email: 'fulano.testado@teste.local', username: 'fulano',
+      permissions: { sections: ['solicitacoes'], unidades: ['TESTE_ACESSO_UN'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    // MESMO username (bate na heurística), unidade DIFERENTE - prova que o
+    // filtro de unidade é real, não só o nome
+    DOCS.set('users/u-acesso-fora', {
+      passwordHash: bcrypt.hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      email: 'outrafulano@teste.local', username: 'fulano',
+      permissions: { sections: ['solicitacoes'], unidades: ['TESTE_ACESSO_OUTRA_UN'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    users.invalidar();
+    const operador = await abastecimentoCarrinho.criarOperador({ usuario: 'tstx', senha: '1234', nome: 'Fulano Testado', papel: 'pedido', criadoPorEmail: 'teste@local' });
+
+    const candidatosAntesAprovar = await pedir(`/api/solicitacoes/${ticketFerias.id}/acesso-candidatos`, cab);
+    const candidatosTipoErrado = await pedir(`/api/solicitacoes/${ticketCompraQualquer.id}/acesso-candidatos`, cab);
+
+    await enviarJson('PATCH', `/api/solicitacoes/${ticketFerias.id}/status`, { status: 'APROVADO', motivoDecisao: 'ok' }, cab);
+    await enviarJson('PATCH', `/api/solicitacoes/${ticketDesligamento.id}/status`, { status: 'APROVADO', motivoDecisao: 'ok' }, cab);
+
+    const rCandidatos = await pedir(`/api/solicitacoes/${ticketFerias.id}/acesso-candidatos`, cab);
+    const candidatos = JSON.parse(rCandidatos.corpo || '{}');
+
+    // confirmar os 3 sistemas do ticket de FÉRIAS - bloqueio reversível
+    const rConfirmarLogin = await enviarJson('PATCH', `/api/solicitacoes/${ticketFerias.id}/acesso/users`, { acao: 'confirmar', alvoId: 'u-acesso-dentro' }, cab);
+    const loginAposConfirmar = await auth.login('fulano.testado@teste.local', 'SenhaDeTeste!2026').then(() => true).catch(() => false);
+
+    const rConfirmarRh = await enviarJson('PATCH', `/api/solicitacoes/${ticketFerias.id}/acesso/rh`, { acao: 'confirmar', alvoId: 'f-acesso-1' }, cab);
+    const funcionarioAposConfirmar = await rh.getOne('f-acesso-1');
+
+    const rConfirmarAbastecimento = await enviarJson('PATCH', `/api/solicitacoes/${ticketFerias.id}/acesso/abastecimento`, { acao: 'confirmar', alvoId: operador.id }, cab);
+    const operadorAposConfirmar = (await abastecimentoCarrinho.listarOperadores()).find((o) => o.id === operador.id);
+
+    // "não encontrado" no ticket de DESLIGAMENTO - não desliga nada, só anota
+    const rNaoEncontrado = await enviarJson('PATCH', `/api/solicitacoes/${ticketDesligamento.id}/acesso/rh`, { acao: 'nao-encontrado' }, cab);
+    const naoEncontrado = JSON.parse(rNaoEncontrado.corpo || '{}');
+
+    const concluirSemAprovar = await enviarJson('PATCH', `/api/solicitacoes/${ticketPendente.id}/acesso-concluido`, {}, cab);
+    const concluirFerias = await enviarJson('PATCH', `/api/solicitacoes/${ticketFerias.id}/acesso-concluido`, {}, cab);
+
+    const reativarDesligamento = await postarJson(`/api/solicitacoes/${ticketDesligamento.id}/acesso-reativar-tudo`, {}, cab);
+    const reativarFerias = await postarJson(`/api/solicitacoes/${ticketFerias.id}/acesso-reativar-tudo`, {}, cab);
+    const loginAposReativar = await auth.login('fulano.testado@teste.local', 'SenhaDeTeste!2026').then(() => true).catch(() => false);
+    const funcionarioAposReativar = await rh.getOne('f-acesso-1');
+    const operadorAposReativar = (await abastecimentoCarrinho.listarOperadores()).find((o) => o.id === operador.id);
+
+    // ponto de sincronia: perfil de unidade restrito PRECISA aceitar
+    // 'acesso-pessoa' explicitamente pra Master conseguir cadastrar o tipo
+    // na própria lista aceita da unidade (unidades.js:TIPOS_SOLICITACAO_VALIDOS)
+    const perfilRestrito = await unidades.upsertPerfil('TESTE_ACESSO_RESTRITA_UN', { nome: 'Restrita Teste', tiposSolicitacao: ['compra', 'acesso-pessoa'], porEmail: 'teste@local' });
+    const rCriarNaRestritaPermitido = await postarJson('/api/solicitacoes', {
+      tipo: 'acesso-pessoa', unidade: 'TESTE_ACESSO_RESTRITA_UN', unidadeNome: 'Restrita', titulo: 'x',
+      nomePessoa: 'Fulano', motivoAcesso: 'desligamento', dataEfetiva: '2026-08-01',
+    }, cab);
+    const rCriarNaRestritaBloqueado = await postarJson('/api/solicitacoes', {
+      tipo: 'manutencao', unidade: 'TESTE_ACESSO_RESTRITA_UN', unidadeNome: 'Restrita', titulo: 'x',
+    }, cab);
+
+    const conf = {
+      'férias sem previsão de retorno é recusado (obrigatório)': semRetorno.status === 400,
+      'motivoAcesso fora do enum é recusado': motivoInvalido.status === 400,
+      'desligamento não exige data de retorno': criarDesligamento.status === 200 && !ticketDesligamento.dataRetornoPrevista,
+      'título nasce sozinho, sem o gerente digitar': ticketFerias.titulo === 'Férias — Fulano Testado',
+      'ticket nasce com acessoChecklist "tudo pendente"':
+        ticketFerias.acessoChecklist.users.status === 'pendente' && ticketFerias.acessoChecklist.rh.status === 'pendente'
+        && ticketFerias.acessoChecklist.abastecimento.status === 'pendente' && ticketFerias.acessoChecklist.concluido === false,
+      'busca de candidatos funciona mesmo antes de Aprovado (é só leitura, sem mutação)': candidatosAntesAprovar.status === 200,
+      'acesso-candidatos só funciona nesse tipo (400 pra compra)': candidatosTipoErrado.status === 400,
+      'candidato de RH aparece por nome+unidade, entre os ativos': candidatos.rh.some((f) => f.id === 'f-acesso-1'),
+      'candidato de login aparece pela heurística nome→username, MESMA unidade': candidatos.users.some((u) => u.id === 'u-acesso-dentro'),
+      'usuário de OUTRA unidade não aparece, mesmo com username idêntico': !candidatos.users.some((u) => u.id === 'u-acesso-fora'),
+      'candidato do Abastecimento aparece só por nome (sem unidade)': candidatos.abastecimento.some((o) => o.id === operador.id),
+      'confirmar login bloqueia de verdade (login para de autenticar)': rConfirmarLogin.status === 200 && loginAposConfirmar === false,
+      'confirmar RH com motivo férias marca emFerias (não desliga)': rConfirmarRh.status === 200 && funcionarioAposConfirmar.emFerias === true && funcionarioAposConfirmar.status === 'ativo',
+      'confirmar Abastecimento com motivo férias só desativa (continua na lista)': rConfirmarAbastecimento.status === 200 && !!operadorAposConfirmar && operadorAposConfirmar.ativo === false,
+      '"não encontrado" não desliga nada, só grava o estado': rNaoEncontrado.status === 200 && naoEncontrado.acessoChecklist.rh.status === 'nao-encontrado',
+      'acesso-concluido exige status Aprovado': concluirSemAprovar.status === 400,
+      'acesso-concluido funciona no ticket Aprovado': concluirFerias.status === 200,
+      'reativar-tudo é recusado pra ticket de desligamento (só férias)': reativarDesligamento.status === 400,
+      'reativar-tudo (férias) reativa o login': reativarFerias.status === 200 && loginAposReativar === true,
+      'reativar-tudo (férias) encerra a férias no RH': funcionarioAposReativar.emFerias === false,
+      'reativar-tudo (férias) reativa o operador do Abastecimento': !!operadorAposReativar && operadorAposReativar.ativo === true,
+      'perfil restrito da unidade GUARDA acesso-pessoa na lista aceita (não filtra por engano)': perfilRestrito.tiposSolicitacao.includes('acesso-pessoa'),
+      'unidade com perfil restrito, mas COM acesso-pessoa na lista, aceita criar': rCriarNaRestritaPermitido.status === 200,
+      'a MESMA unidade restrita bloqueia um tipo que não está na lista (manutenção)': rCriarNaRestritaBloqueado.status === 400,
+    };
+    const ruinsAP = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okAcessoPessoa = !ruinsAP.length;
+    if (ruinsAP.length) console.log(`  falhou em: ${ruinsAP.join(' · ')}`);
+  } catch (e) { okAcessoPessoa = false; console.log('  erro: ' + e.message); }
+  if (!okAcessoPessoa) ruins += 1;
+  console.log(`${okAcessoPessoa ? '✓' : '✗'} Acesso de pessoa: checklist com confirmação humana bloqueia/reativa os 3 sistemas de verdade`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

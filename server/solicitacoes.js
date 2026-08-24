@@ -26,7 +26,13 @@ const COLLECTION = db.collection('solicitacoes');
 // manualmente) - nasce sozinho quando uma contagem de estoque (ver
 // inventario.upsertContagem) apura falta acima de
 // inventario.LIMITE_DESVIO_ESTOQUE, pra alguem investigar/justificar
-const TIPOS = ['compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota', 'quebra-caixa', 'desvio-estoque'];
+// 'acesso-pessoa': gerente avisa desligamento/ferias de alguem, pra Master/RH
+// revisar e bloquear os acessos (login, RH, operador do Abastecimento) num
+// checklist com confirmacao humana - ver acessosPessoa.js. Payload proprio
+// (nomePessoa/motivoAcesso/datas), nao entra em TIPOS_GERAIS (nao e trocavel
+// de tipo nem vira Estorno, mesmo motivo de quebra-caixa/ajuste-fechamento)
+const TIPOS = ['compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota', 'quebra-caixa', 'desvio-estoque', 'acesso-pessoa'];
+const MOTIVOS_ACESSO = ['desligamento', 'ferias'];
 // 'CONVERTIDO': o ticket saiu desse tipo/colecao e virou um Estorno (ver
 // converterParaEstorno) - o registro fica de historico, quem continua a
 // historia e o novo registro em refunds.js (convertidoParaId)
@@ -55,11 +61,23 @@ function sanitizarItens(lista) {
     .filter((item) => item.descricao);
 }
 
-async function create({ tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, anexos, ehOrcamento, fornecedor, vencimento, criadoPorId, criadoPorEmail, direcionadoParaId, direcionadoParaEmail, numeroTicket, convertidoDeTipo, convertidoDeId, fechamentoId, prioridade, teste }) {
+async function create({ tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, anexos, ehOrcamento, fornecedor, vencimento, criadoPorId, criadoPorEmail, direcionadoParaId, direcionadoParaEmail, numeroTicket, convertidoDeTipo, convertidoDeId, fechamentoId, prioridade, teste, nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista }) {
   if (!TIPOS.includes(tipo)) throw new Error('Tipo de solicitação inválido.');
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!titulo || !String(titulo).trim()) throw new Error('Descreva o que está sendo pedido.');
   if (vencimento && !DATA_RE.test(vencimento)) throw new Error('Vencimento inválido (use AAAA-MM-DD).');
+  // 'acesso-pessoa': payload proprio - ver TIPOS_MOTIVOS_ACESSO acima e
+  // acessosPessoa.js. Retorno so e obrigatorio pra ferias (desligamento e
+  // definitivo, nao tem volta pra marcar)
+  if (tipo === 'acesso-pessoa') {
+    if (!nomePessoa || !String(nomePessoa).trim()) throw new Error('Informe o nome da pessoa.');
+    if (!MOTIVOS_ACESSO.includes(motivoAcesso)) throw new Error('Motivo inválido (use "desligamento" ou "ferias").');
+    if (!dataEfetiva || !DATA_RE.test(dataEfetiva)) throw new Error('Data efetiva inválida (use AAAA-MM-DD).');
+    if (motivoAcesso === 'ferias') {
+      if (!dataRetornoPrevista || !DATA_RE.test(dataRetornoPrevista)) throw new Error('Informe a previsão de retorno (use AAAA-MM-DD).');
+      if (dataRetornoPrevista <= dataEfetiva) throw new Error('A previsão de retorno tem que ser depois da data efetiva.');
+    }
+  }
 
   const doc = COLLECTION.doc();
   const agora = new Date().toISOString();
@@ -107,6 +125,20 @@ async function create({ tipo, unidade, unidadeNome, titulo, valorEstimado, obser
     // so pra tipo 'quebra-caixa' - referencia do fechamento que gerou esse
     // ticket automaticamente (ver fechamentosLive.create())
     fechamentoId: fechamentoId || null,
+    // so pra tipo 'acesso-pessoa' - ver acessosPessoa.js. acessoChecklist
+    // nasce "tudo pendente"; quem grava/le os 3 sub-status e SEMPRE
+    // acessosPessoa.js, nunca este modulo, mesma separacao que chamadoId/
+    // comprada ja tem de solicitacoes.js
+    nomePessoa: tipo === 'acesso-pessoa' ? String(nomePessoa).trim().slice(0, 80) : null,
+    motivoAcesso: tipo === 'acesso-pessoa' ? motivoAcesso : null,
+    dataEfetiva: tipo === 'acesso-pessoa' ? dataEfetiva : null,
+    dataRetornoPrevista: tipo === 'acesso-pessoa' && motivoAcesso === 'ferias' ? dataRetornoPrevista : null,
+    acessoChecklist: tipo === 'acesso-pessoa' ? {
+      users: { status: 'pendente', alvoId: null, executadoPorEmail: null, executadoEm: null },
+      rh: { status: 'pendente', alvoId: null, executadoPorEmail: null, executadoEm: null },
+      abastecimento: { status: 'pendente', alvoId: null, executadoPorEmail: null, executadoEm: null },
+      concluido: false, concluidoPorEmail: null, concluidoEm: null,
+    } : null,
     status: 'PENDENTE',
     // prioridade + prazo-alvo de resolucao (SLA) - ver prioridades.js. O
     // kanban usa slaPrazo pra pintar "vence em"/"estourado" e ordenar a fila
@@ -447,6 +479,44 @@ async function desmarcarComprada(id) {
   return getOne(id);
 }
 
+// checklist do tipo 'acesso-pessoa' (ver acessosPessoa.js): quem EXECUTA o
+// bloqueio (setActive/desligar/removerOperador) e o modulo acessosPessoa.js,
+// mas quem grava o estado no ticket continua sendo solicitacoes.js - mesma
+// separacao que marcarComprada/vincularChamado ja mantem
+const SISTEMAS_ACESSO = ['users', 'rh', 'abastecimento'];
+async function atualizarAcessoChecklist(id, sistema, { status, alvoId, executadoPorEmail }) {
+  if (!SISTEMAS_ACESSO.includes(sistema)) throw new Error('Sistema inválido.');
+  if (!['confirmado', 'nao-encontrado'].includes(status)) throw new Error('Status inválido.');
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Solicitação não encontrada.');
+  const atual = snap.data();
+  if (atual.tipo !== 'acesso-pessoa') throw new Error('Esse ticket não é de bloqueio de acesso.');
+  const patch = {
+    acessoChecklist: {
+      ...atual.acessoChecklist,
+      [sistema]: { status, alvoId: alvoId || null, executadoPorEmail: executadoPorEmail || null, executadoEm: new Date().toISOString() },
+    },
+  };
+  await ref.update(patch);
+  solicitacoesCache.invalidar();
+  return getOne(id);
+}
+
+async function marcarAcessoConcluido(id, porEmail) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Solicitação não encontrada.');
+  const atual = snap.data();
+  if (atual.tipo !== 'acesso-pessoa') throw new Error('Esse ticket não é de bloqueio de acesso.');
+  if (atual.status !== 'APROVADO') throw new Error('Só tickets já Aprovados podem ter o checklist concluído.');
+  await ref.update({
+    acessoChecklist: { ...atual.acessoChecklist, concluido: true, concluidoPorEmail: porEmail, concluidoEm: new Date().toISOString() },
+  });
+  solicitacoesCache.invalidar();
+  return getOne(id);
+}
+
 // edicao direta pelo Master - poder de corrigir qualquer campo do pedido
 // (titulo, valor, observacao, itens, unidade), independente do status.
 // So atualiza o que vier em `campos`, sem mexer em status/decisao/chamado.
@@ -575,9 +645,11 @@ async function converterParaEstorno(id, dadosEstorno, porEmail) {
 }
 
 module.exports = {
-  TIPOS, STATUSES, EXECUCAO_STATUSES, create, listAll, getOne, updateStatus, vincularChamado, update, remove,
+  TIPOS, MOTIVOS_ACESSO, STATUSES, EXECUCAO_STATUSES, create, listAll, getOne, updateStatus, vincularChamado, update, remove,
   marcarNotificacaoVista, marcarComprada, desmarcarComprada, redirecionar, mudarTipo, converterParaEstorno,
   atualizarExecucao, atualizarPrioridade, gerarTokenAcao, validarToken, decidirPorToken,
   buscarEstadoPorToken, podeDecidirComToken, podeAgirComLink, gerarLinkAcao, revogarLinkAcao,
   buscarPorLinkAcao, decidirComLink, atualizarExecucaoComLink, marcarCompradaComLink,
+  atualizarAcessoChecklist, marcarAcessoConcluido,
+  invalidar: () => solicitacoesCache.invalidar(),
 };

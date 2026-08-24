@@ -487,6 +487,11 @@
       <div class="sub" style="margin:-2px 0 8px;">Este ticket pode mudar de categoria ou virar Estorno conforme o atendimento evolui.</div>
       <div id="d-tipo-corpo"></div>
     </div>
+    <div id="d-acesso-checklist" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px;">
+      <div class="secao-titulo">🔐 Checklist de acesso</div>
+      <div class="sub" style="margin:-2px 0 8px;">Confira cada sistema antes de bloquear - o login não guarda o nome da pessoa, então os candidatos são só sugestão.</div>
+      <div id="d-acesso-checklist-corpo"></div>
+    </div>
     <div class="msg hidden" id="msg-detalhe"></div>
     </div>
   </div>
@@ -684,6 +689,7 @@ const TIPOS_INFO = {
   // acima do limite - mesmo criterio de quebra-caixa (nao entra em
   // TIPOS_GERAIS, nao troca de tipo/converte)
   'desvio-estoque': { label:'Desvio de estoque', secaoNecessaria:'inventario' },
+  'acesso-pessoa': { label:'Acesso de pessoa', secaoNecessaria:null },
 };
 // os 5 tipos gerais que trocam de tipo entre si (mudarTipo) ou viram Estorno
 // (converterParaEstorno) - Estorno tambem pode virar um desses 5 (converter,
@@ -766,7 +772,7 @@ function ehBloqueioLogin(c){
 }
 
 function iconeTipo(tipo){
-  return { estorno:'💳', 'ajuste-fechamento':'🧾', compra:'🛒', manutencao:'🔧', 'suporte-ti':'💻', pagamento:'💸', nota:'📄', 'quebra-caixa':'⚠️', 'desvio-estoque':'📦⚠️' }[tipo] || '📋';
+  return { estorno:'💳', 'ajuste-fechamento':'🧾', compra:'🛒', manutencao:'🔧', 'suporte-ti':'💻', pagamento:'💸', nota:'📄', 'quebra-caixa':'⚠️', 'desvio-estoque':'📦⚠️', 'acesso-pessoa':'🔐' }[tipo] || '📋';
 }
 
 // badge de vencimento pra demanda de pagamento - vermelho se ja venceu e
@@ -1289,6 +1295,7 @@ function abrirDetalhe(tipo, id){
   const c = CARDS.find(x=>x.tipo===tipo && x.id===id);
   if(!c) return;
   DETALHE_ATUAL = c;
+  ACESSO_CANDIDATOS = null;
   document.getElementById('d-titulo').textContent = `${iconeTipo(c.tipo)} ${TIPOS_INFO[c.tipo]?.label||c.tipo} · Ticket #${c.numeroTicket ?? '—'}`;
   const atribuidosTxt = (c.atribuidosEmails && c.atribuidosEmails.length) ? c.atribuidosEmails.join(', ') : (c.direcionadoParaEmail || '');
   document.getElementById('d-sub').textContent = `${c.unidadeNome||c.unidade||'—'} · ${c.criadoPorEmail||''} · ${fmtDataHora(c.criadoEm)}` + (atribuidosTxt ? ` · atribuído a ${atribuidosTxt}` : '');
@@ -1403,6 +1410,7 @@ function abrirDetalhe(tipo, id){
 
   renderComprada(c);
   renderAndamento(c);
+  renderAcessoChecklist(c);
 
   document.getElementById('overlay-detalhe').classList.remove('hidden');
   carregarChat(c.tipo, c.id);
@@ -1700,6 +1708,124 @@ async function desmarcarComprada(){
   }catch(err){ alert(err.message); }
 }
 function fecharDetalhe(){ document.getElementById('overlay-detalhe').classList.add('hidden'); DETALHE_ATUAL = null; }
+
+// ---------- checklist de acesso (tipo 'acesso-pessoa') ----------
+// login nao guarda o nome da pessoa (so email/username) - por isso os
+// candidatos sao so SUGESTAO (ver acessosPessoa.js), e cada linha precisa
+// de confirmacao humana antes de bloquear de verdade. Mesmo espirito do
+// bloco "Comprada" acima: acao manual, no ritmo do Master, dentro do
+// mesmo painel de detalhe - so que com 3 linhas em vez de 1 marcador.
+let ACESSO_CANDIDATOS = null;
+const ACESSO_SISTEMA_LABEL = { users: '💻 Login do sistema', rh: '🧑‍💼 Cadastro RH', abastecimento: '🛒 Operador Abastecimento' };
+function renderAcessoChecklist(c){
+  const wrap = document.getElementById('d-acesso-checklist');
+  const podeVer = c.tipo==='acesso-pessoa' && c.status==='APROVADO';
+  wrap.classList.toggle('hidden', !podeVer);
+  if(!podeVer) return;
+  const corpo = document.getElementById('d-acesso-checklist-corpo');
+  const podeAgir = IS_MASTER;
+  const cabecalho = `<div class="sub">
+    <b>${escapeHtml(c.nomePessoa||'')}</b> · ${c.motivoAcesso==='ferias'?'Férias':'Desligamento'}
+    · ${c.motivoAcesso==='ferias'?'início':'último dia'} ${fmtData(c.dataEfetiva)}
+    ${c.motivoAcesso==='ferias' && c.dataRetornoPrevista ? ` · retorno previsto ${fmtData(c.dataRetornoPrevista)}` : ''}
+  </div>`;
+  if(ACESSO_CANDIDATOS===null){
+    corpo.innerHTML = cabecalho + '<div class="sub" style="margin-top:6px;">Buscando candidatos...</div>';
+    carregarAcessoCandidatos(c.id);
+    return;
+  }
+  const linhas = ['users','rh','abastecimento'].map(sistema=>renderLinhaAcesso(c, sistema, podeAgir)).join('');
+  const chk = c.acessoChecklist || {};
+  const rodape = !podeAgir ? '' : chk.concluido
+    ? `<div class="sub" style="margin-top:8px;">✅ concluído por ${escapeHtml(chk.concluidoPorEmail||'')} · ${fmtDataHora(chk.concluidoEm)}</div>`
+    : `<button type="button" class="btn-primary" style="margin-top:8px;" onclick="marcarAcessoConcluido()">✅ Marcar checklist como concluído</button>`;
+  const temConfirmado = ['users','rh','abastecimento'].some(s=>chk[s] && chk[s].status==='confirmado');
+  const reativar = (podeAgir && c.motivoAcesso==='ferias' && temConfirmado)
+    ? `<button type="button" class="link-btn" style="margin-top:8px;display:block;" onclick="reativarAcessoTudo()">↩️ Reativar acessos</button>` : '';
+  corpo.innerHTML = cabecalho + linhas + rodape + reativar;
+}
+async function carregarAcessoCandidatos(id){
+  try{
+    const resp = await fetch(`/api/solicitacoes/${id}/acesso-candidatos`);
+    ACESSO_CANDIDATOS = resp.ok ? await resp.json() : { users:[], rh:[], abastecimento:[] };
+  }catch(e){ ACESSO_CANDIDATOS = { users:[], rh:[], abastecimento:[] }; }
+  if(DETALHE_ATUAL && DETALHE_ATUAL.id===id) renderAcessoChecklist(DETALHE_ATUAL);
+}
+function renderLinhaAcesso(c, sistema, podeAgir){
+  const linha = (c.acessoChecklist && c.acessoChecklist[sistema]) || { status:'pendente' };
+  const label = ACESSO_SISTEMA_LABEL[sistema];
+  if(linha.status==='confirmado'){
+    return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);">
+      <div><b>${label}</b> · <span style="color:var(--ok);">✅ confirmado</span></div>
+      <div class="sub">por ${escapeHtml(linha.executadoPorEmail||'')} · ${fmtDataHora(linha.executadoEm)}</div>
+    </div>`;
+  }
+  if(linha.status==='nao-encontrado'){
+    return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);">
+      <div><b>${label}</b> · <span style="color:var(--muted);">➖ não encontrado</span></div>
+    </div>`;
+  }
+  const candidatos = (ACESSO_CANDIDATOS && ACESSO_CANDIDATOS[sistema]) || [];
+  const listaCandidatos = candidatos.map(cand=>{
+    const rotulo = sistema==='users' ? `${escapeHtml(cand.username||'')} · ${escapeHtml(cand.email||'')}`
+      : sistema==='rh' ? `${escapeHtml(cand.nome)} · ${escapeHtml(UNIDADES_NOMES[cand.unidade]||cand.unidade)}`
+      : `${escapeHtml(cand.nome)} · ${escapeHtml(cand.usuario||'')}`;
+    return `<div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+      <span style="flex:1;">${rotulo}</span>
+      ${podeAgir ? `<button type="button" class="link-btn" onclick="confirmarAcesso('${sistema}','${cand.id}')">Confirmar e bloquear</button>` : ''}
+    </div>`;
+  }).join('') || '<div class="sub">nenhum candidato encontrado automaticamente</div>';
+  return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);">
+    <div><b>${label}</b></div>
+    ${listaCandidatos}
+    ${podeAgir ? `<button type="button" class="link-btn" style="margin-top:4px;" onclick="marcarAcessoNaoEncontrado('${sistema}')">Marcar como não existe</button>` : ''}
+  </div>`;
+}
+async function confirmarAcesso(sistema, alvoId){
+  if(!DETALHE_ATUAL) return;
+  if(!confirm('Confirma esse candidato? Isso já bloqueia o acesso de verdade.')) return;
+  try{
+    const resp = await fetch(`/api/solicitacoes/${DETALHE_ATUAL.id}/acesso/${sistema}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'confirmar', alvoId }) });
+    const atualizado = await resp.json();
+    if(!resp.ok) throw new Error(atualizado.error || 'Erro ao confirmar.');
+    DETALHE_ATUAL = { ...DETALHE_ATUAL, ...atualizado };
+    renderAcessoChecklist(DETALHE_ATUAL);
+    await carregarCentral();
+  }catch(err){ alert(err.message); }
+}
+async function marcarAcessoNaoEncontrado(sistema){
+  if(!DETALHE_ATUAL) return;
+  try{
+    const resp = await fetch(`/api/solicitacoes/${DETALHE_ATUAL.id}/acesso/${sistema}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'nao-encontrado' }) });
+    const atualizado = await resp.json();
+    if(!resp.ok) throw new Error(atualizado.error || 'Erro ao marcar.');
+    DETALHE_ATUAL = { ...DETALHE_ATUAL, ...atualizado };
+    renderAcessoChecklist(DETALHE_ATUAL);
+    await carregarCentral();
+  }catch(err){ alert(err.message); }
+}
+async function marcarAcessoConcluido(){
+  if(!DETALHE_ATUAL) return;
+  try{
+    const resp = await fetch(`/api/solicitacoes/${DETALHE_ATUAL.id}/acesso-concluido`, { method:'PATCH' });
+    const atualizado = await resp.json();
+    if(!resp.ok) throw new Error(atualizado.error || 'Erro ao concluir.');
+    DETALHE_ATUAL = { ...DETALHE_ATUAL, ...atualizado };
+    renderAcessoChecklist(DETALHE_ATUAL);
+    await carregarCentral();
+  }catch(err){ alert(err.message); }
+}
+async function reativarAcessoTudo(){
+  if(!DETALHE_ATUAL) return;
+  if(!confirm('Reativar os acessos confirmados dessa pessoa?')) return;
+  try{
+    const resp = await fetch(`/api/solicitacoes/${DETALHE_ATUAL.id}/acesso-reativar-tudo`, { method:'POST' });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao reativar.');
+    alert('Reativado.');
+    await carregarCentral();
+  }catch(err){ alert(err.message); }
+}
 
 // ---------- Criar acesso no NoPulso a partir do ticket ----------
 // Ticket de Suporte de TI ja aprovado, so pro Master. A checagem de
