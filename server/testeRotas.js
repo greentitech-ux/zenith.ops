@@ -5323,6 +5323,32 @@ setTimeout(async () => {
     }, cabMasterBonif);
     const apuracaoSalva = JSON.parse(rSalvar.corpo || '{}');
 
+    // ---- gerente/assistente não pode receber a bonificação 2x ----
+    // dois funcionários ativos na unidade: um "colaborador" comum e um que
+    // vai virar "gerente" (marcado excluirBonificacao) - antes de marcar,
+    // os dois contam na divisão; depois, só o comum conta
+    DOCS.set('rhFuncionarios/f-bonif-colab', {
+      id: 'f-bonif-colab', unidade: 'TESTE_HTTP_UN', nome: 'Colaborador Comum',
+      status: 'ativo', atestados: [], emAtestado: false, atestadoAtual: null, criadoEm: new Date().toISOString(),
+    });
+    DOCS.set('rhFuncionarios/f-bonif-gerente', {
+      id: 'f-bonif-gerente', unidade: 'TESTE_HTTP_UN', nome: 'Gerente da Unidade', cargoFuncao: 'Gerente',
+      status: 'ativo', atestados: [], emAtestado: false, atestadoAtual: null, criadoEm: new Date().toISOString(),
+    });
+    // DOCS.set() escreve direto no Firestore falso, por fora do módulo -
+    // sem invalidar, o cache de 60s do rh.js (já aquecido pelos testes de
+    // RH anteriores nesta mesma suíte) continuava devolvendo a lista velha
+    require('./rh').invalidar();
+    const apuracaoAntesExcluir = JSON.parse((await pedir('/api/bonificacao?unidade=TESTE_HTTP_UN&mes=2026-08', cabMasterBonif)).corpo || '{}');
+
+    const rEquipeAntes = await pedir('/api/bonificacao/equipe?unidade=TESTE_HTTP_UN', cabMasterBonif);
+    const equipeAntes = JSON.parse(rEquipeAntes.corpo || '[]');
+
+    const rMarcarGerente = await putJson('/api/bonificacao/equipe/f-bonif-gerente/excluir', { excluir: true }, cabMasterBonif);
+    const rEquipeDepois = await pedir('/api/bonificacao/equipe?unidade=TESTE_HTTP_UN', cabMasterBonif);
+    const equipeDepois = JSON.parse(rEquipeDepois.corpo || '[]');
+    const apuracaoDepoisExcluir = JSON.parse((await pedir('/api/bonificacao?unidade=TESTE_HTTP_UN&mes=2026-08', cabMasterBonif)).corpo || '{}');
+
     const rResumo = await pedir('/api/bonificacao/resumo?mes=2026-08', cabMasterBonif);
     const resumo = JSON.parse(rResumo.corpo || '{}');
 
@@ -5340,6 +5366,9 @@ setTimeout(async () => {
     const cabLimitado = { Authorization: 'Bearer ' + tokenBonifLimitado };
     const rDentro = await pedir('/api/bonificacao?unidade=TESTE_HTTP_UN&mes=2026-08', cabLimitado);
     const rUnidadeFora = await pedir('/api/bonificacao?unidade=UNIDADE_QUE_NAO_TA_NO_ACESSO&mes=2026-08', cabLimitado);
+    // usuário comum (sem Admin) não vê nem mexe na equipe - é decisão
+    // administrativa, mesma régua de Perfis (requireMasterOrAdmin)
+    const rEquipeSemAdmin = await pedir('/api/bonificacao/equipe?unidade=TESTE_HTTP_UN', cabLimitado);
 
     const rFechar = await postarJson('/api/bonificacao/fechar', { unidade: 'TESTE_HTTP_UN', mes: '2026-08' }, cabMasterBonif);
     const apuracaoFechada = JSON.parse(rFechar.corpo || '{}');
@@ -5361,6 +5390,12 @@ setTimeout(async () => {
       'GET resumo do mês inclui a unidade': (resumo.porUnidade || []).some((u) => u.unidade === 'TESTE_HTTP_UN'),
       'usuário comum com a unidade no acesso consegue ler a própria apuração': rDentro.status === 200,
       'o MESMO usuário não alcança unidade fora do próprio acesso (404)': rUnidadeFora.status === 404,
+      'usuário comum (sem Admin) não acessa a equipe (403)': rEquipeSemAdmin.status === 403,
+      'antes de marcar, os 2 funcionários contam na divisão de colaboradores': apuracaoAntesExcluir.colaboradoresResumo.quantidade === 2,
+      'GET equipe lista os 2, nenhum marcado ainda': equipeAntes.length === 2 && equipeAntes.every((f) => !f.excluirBonificacao),
+      'PUT marca o gerente como excluído': rMarcarGerente.status === 200,
+      'GET equipe reflete a marcação': equipeDepois.find((f) => f.id === 'f-bonif-gerente').excluirBonificacao === true,
+      'depois de marcar, só o colaborador comum conta na divisão (não recebe 2x)': apuracaoDepoisExcluir.colaboradoresResumo.quantidade === 1,
       'POST fechar muda o status pra fechado': rFechar.status === 200 && apuracaoFechada.status === 'fechado',
       'depois de fechada, PUT é recusado (não silenciosamente ignorado)': rSalvarDepoisDeFechado.status === 400,
       'sem token nenhum, a rota exige login (401)': rSemAuth.status === 401,

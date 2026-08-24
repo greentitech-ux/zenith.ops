@@ -74,9 +74,23 @@ async function faturamentoDoMes(unidade, mes) {
     .reduce((s, l) => s + (Number(l.faturamento) || 0), 0);
 }
 
+// exclui quem já é remunerado pela fatia de gerente (ver
+// rh.atualizarExcluirBonificacao) - sem isso, gerente/assistente aparecia
+// TAMBÉM na divisão de colaboradores, recebendo a bonificação 2x
 async function funcionariosAtivosDaUnidade(unidade) {
   const todos = await rh.listByUnidades([unidade]);
-  return todos.filter((f) => f.status === 'ativo');
+  return todos.filter((f) => f.status === 'ativo' && !f.excluirBonificacao);
+}
+
+// lista de gestão (Master/Admin) - TODOS os ativos da unidade, incluindo os
+// já marcados como excluídos, pra dar pra marcar/desmarcar quem é gerente/
+// assistente. Ao contrário de funcionariosAtivosDaUnidade acima, não filtra
+// ninguém - é essa lista que alimenta o toggle, não a apuração em si.
+async function equipeDaUnidade(unidade) {
+  const todos = await rh.listByUnidades([unidade]);
+  return todos
+    .filter((f) => f.status === 'ativo')
+    .map((f) => ({ id: f.id, nome: f.nome, cargoFuncao: f.cargoFuncao || null, excluirBonificacao: !!f.excluirBonificacao }));
 }
 
 function taxaCumprimento(metricas, completions) {
@@ -297,6 +311,6 @@ async function resumoMes(unidades, mes) {
 
 module.exports = {
   calcular, obterOuCriarRascunho, salvarCompletions, fechar,
-  montarRespostaPorPermissao, resumoMes, listarTodas,
+  montarRespostaPorPermissao, resumoMes, listarTodas, equipeDaUnidade,
   diasAtestadoNoMes, limitesDoMes, diasDeSobreposicao,
 };

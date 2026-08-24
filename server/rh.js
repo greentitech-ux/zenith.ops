@@ -405,6 +405,22 @@ async function atualizar(id, patch) {
   return getOne(id);
 }
 
+// marca que essa pessoa (gerente/assistente de gerente, normalmente) NÃO
+// entra na divisão de colaboradores da Bonificação (ver
+// bonificacao.js/funcionariosAtivosDaUnidade) - ela já é remunerada pela
+// fatia de gerente, contar ela também como colaborador pagaria 2x. Fica
+// gravado na própria ficha (não por mês) porque é uma característica da
+// função da pessoa, não da apuração - uma vez marcado, vale pra todo mês
+// seguinte sem precisar reconfigurar.
+async function atualizarExcluirBonificacao(id, valor) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  await ref.update({ excluirBonificacao: !!valor, atualizadoEm: new Date().toISOString() });
+  rhCache.invalidar();
+  return getOne(id);
+}
+
 // gera um token novo pro link de auto-atendimento, invalidando o antigo -
 // usado se o link vazar (a pessoa perdeu o celular, mandou pro grupo errado
 // etc): quem tinha o link velho perde o acesso, o gerente manda o novo
@@ -1030,7 +1046,7 @@ module.exports = {
   criar, listAll, listByUnidades, getOne, atualizar, remover, mesclarDuplicados,
   desligar, reativar, registrarExamePeriodico, adicionarDocumento, removerDocumento,
   situacaoLegal, tempoDeCasaMeses, tempoDeCasaTexto, alertasTrabalhistas, metricas,
-  buscarPorToken, regenerarLink,
+  buscarPorToken, regenerarLink, atualizarExcluirBonificacao,
   listPendentesAprovacaoCadastro, aprovarCadastro, reprovarCadastro,
   registrarDecisaoTeste, verificarTestesVencidos, marcarAlertaTesteEnviado,
   registrarAtestado, registrarRetornoAtestado,

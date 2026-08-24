@@ -3898,6 +3898,11 @@ const EXECUTORES_QA = {
   'pedidoSemanal.criarRegra': (p) => pedidoSemanal.criarRegra(p),
   'pedidoSemanal.editarRegra': (p) => pedidoSemanal.atualizarRegra(p.id, p),
   'pedidoSemanal.excluirRegra': (p) => pedidoSemanal.removerRegra(p.id),
+  'bonificacao.criarPerfil': (p) => bonificacaoPerfis.criar(p),
+  'bonificacao.editarPerfil': (p) => bonificacaoPerfis.atualizar(p.id, p.dados),
+  'bonificacao.excluirPerfil': (p) => bonificacaoPerfis.remover(p.id),
+  'bonificacao.fechar': (p) => bonificacao.fechar(p.unidade, p.mes, null),
+  'bonificacao.excluirDaEquipe': (p) => rh.atualizarExcluirBonificacao(p.id, p.excluir),
   'usuarios.criar': (p) => users.create(p),
   'usuarios.criarCopiando': (p) => users.criarCopiandoDe(p),
   'usuarios.criarQaMaster': (p) => users.createQaMaster(p),
@@ -5269,6 +5274,29 @@ app.get('/api/bonificacao/resumo', requireSection('bonificacao'), async (req, re
       ? (await bonificacaoPerfis.listar()).flatMap((p) => p.unidades || [])
       : (req.permissions.unidades || []);
     res.json(await bonificacao.resumoMes([...new Set(unidades)], mes));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// equipe da unidade (Master/Admin) - pra marcar quem é gerente/assistente e
+// não deve entrar na divisão de colaboradores (já é remunerado pela fatia
+// de gerente). É uma decisão administrativa por pessoa, não por mês - por
+// isso fica igual à régua de Perfis (Master/Admin), não pra todo mundo com
+// a seção 'bonificacao'.
+app.get('/api/bonificacao/equipe', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    const { unidade } = req.query;
+    res.json(await bonificacao.equipeDaUnidade(unidade));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/bonificacao/equipe/:id/excluir', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'bonificacao.excluirDaEquipe', `Marcar funcionário ${req.params.id} como fora da divisão de colaboradores da Bonificação`, { id: req.params.id, excluir: req.body.excluir })) return;
+    res.json(await rh.atualizarExcluirBonificacao(req.params.id, req.body.excluir));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

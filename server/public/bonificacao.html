@@ -106,11 +106,14 @@
   .card .valor{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;}
   .card.destaque{border-color:var(--accent);}
   .card.destaque .valor{color:var(--accent);}
-  .completion-linha{display:grid;grid-template-columns:1fr 90px;gap:10px;align-items:center;margin-top:8px;}
+  .completion-linha{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:8px;}
   .completion-linha:first-of-type{margin-top:0;}
   .completion-linha .nome{font-size:12.5px;}
   .completion-linha .peso{font-size:10.5px;color:var(--muted);}
-  .completion-linha input{padding:8px 9px;font-size:12.5px;text-align:right;}
+  .atende-toggle{display:flex;align-items:center;gap:7px;flex:none;font-family:var(--sans);font-size:12px;font-weight:600;padding:7px 12px;border-radius:20px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;user-select:none;}
+  .atende-toggle input{width:auto;margin:0;accent-color:var(--ok);}
+  .atende-toggle.on{border-color:var(--ok);color:var(--ok);background:var(--ok-dim);}
+  .atende-toggle[data-disabled="1"]{cursor:default;opacity:.7;}
   .colab-linha{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1a1f26;font-size:12.5px;}
   .colab-linha:last-child{border-bottom:none;}
   .aviso-box{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;line-height:1.5;}
@@ -201,6 +204,12 @@
         <h2>Métricas dos colaboradores</h2>
         <div class="sub" id="ap-colab-vazio-msg">Este perfil não bonifica colaboradores.</div>
         <div id="ap-colab-lista"></div>
+      </div>
+
+      <div class="panel hidden" id="ap-bloco-equipe">
+        <h2>⚙️ Gerente/Assistente da unidade</h2>
+        <div class="sub">Quem já é remunerado pela fatia de gerente não pode também entrar na divisão de colaboradores - marque aqui quem é gerente/assistente pra tirar da conta abaixo. Fica salvo na ficha da pessoa, não precisa marcar de novo todo mês.</div>
+        <div id="ap-equipe-lista"></div>
       </div>
 
       <div class="panel">
@@ -512,6 +521,39 @@ async function carregarApuracao(){
   }
   renderApuracao(data);
   document.getElementById('ap-conteudo').classList.remove('hidden');
+  if(ME.role==='master' || ME.isAdmin) carregarEquipe(unidade);
+}
+
+// lista de gestão (Master/Admin): quem é gerente/assistente e não deve
+// entrar na divisão de colaboradores - ver rh.atualizarExcluirBonificacao.
+// Separada da lista nominal de "Resultado" de propósito: aqui aparece TODO
+// mundo ativo da unidade (mesmo os já marcados), pra dar pra desmarcar
+async function carregarEquipe(unidade){
+  const painel = document.getElementById('ap-bloco-equipe');
+  let equipe = [];
+  try{ equipe = await fetch('/api/bonificacao/equipe?unidade='+encodeURIComponent(unidade)).then(r=>r.ok?r.json():[]); }catch(e){ equipe = []; }
+  painel.classList.toggle('hidden', !equipe.length);
+  document.getElementById('ap-equipe-lista').innerHTML = equipe.map(f=>`
+    <label class="atende-toggle ${f.excluirBonificacao?'on':''}" style="margin:4px 6px 4px 0;">
+      <input type="checkbox" data-id="${escapeHtml(f.id)}" ${f.excluirBonificacao?'checked':''} onchange="salvarExcluirBonificacao(this)">
+      <span>${f.excluirBonificacao?'🚫':'👤'} ${escapeHtml(f.nome)}${f.cargoFuncao?' · '+escapeHtml(f.cargoFuncao):''}</span>
+    </label>`).join('');
+}
+async function salvarExcluirBonificacao(input){
+  const id = input.dataset.id;
+  const excluir = input.checked;
+  const unidade = document.getElementById('ap-unidade').value;
+  input.disabled = true;
+  try{
+    const resp = await fetch('/api/bonificacao/equipe/'+id+'/excluir', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ excluir }) });
+    if(!resp.ok && resp.status!==202){ const d = await resp.json().catch(()=>({})); throw new Error(d.error || 'Erro ao salvar.'); }
+    await carregarApuracao(); // redesenha a lista + recalcula a divisão de colaboradores sem essa pessoa
+  }catch(err){
+    alert(err.message);
+    carregarEquipe(unidade); // redesenha do jeito que estava no servidor
+  }finally{
+    input.disabled = false;
+  }
 }
 
 function renderApuracao(a){
@@ -541,15 +583,27 @@ function renderCompletionInputs(metricas, completions, sugestaoAssiduidade, pref
   const mapa = new Map((completions||[]).map(c=>[c.campo, c.percentual]));
   return (metricas||[]).map(m=>{
     const ehAssiduidade = m.campo==='assiduidade';
-    const valor = mapa.has(m.campo) ? mapa.get(m.campo) : (ehAssiduidade && sugestaoAssiduidade!=null ? sugestaoAssiduidade : 0);
+    // limiar de 70% só decide o check JÁ MARCADO na primeira vez que a
+    // apuração é aberta (a partir da sugestão de atestados) - depois disso
+    // o valor salvo manda, não a sugestão
+    const valorSalvo = mapa.has(m.campo) ? mapa.get(m.campo) : (ehAssiduidade && sugestaoAssiduidade!=null ? sugestaoAssiduidade : 0);
+    const marcado = valorSalvo >= 70;
     return `<div class="completion-linha">
       <div><div class="nome">${escapeHtml(m.label)}</div><div class="peso">peso ${m.peso}%${ehAssiduidade?' · sugestão a partir dos atestados do mês - ajuste se precisar':''}</div></div>
-      <input type="number" min="0" max="100" step="1" data-campo="${escapeHtml(m.campo)}" class="completion-${prefixo}" value="${valor}" ${fechado?'disabled':''} oninput="renderResultado(APURACAO_ATUAL, true)">
+      <label class="atende-toggle ${marcado?'on':''}" ${fechado?'data-disabled="1"':''}>
+        <input type="checkbox" data-campo="${escapeHtml(m.campo)}" class="completion-${prefixo}" ${marcado?'checked':''} ${fechado?'disabled':''} onchange="atualizarToggleAtende(this); renderResultado(APURACAO_ATUAL, true)">
+        <span>${marcado?'✅ Atende':'❌ Não atende'}</span>
+      </label>
     </div>`;
   }).join('');
 }
+function atualizarToggleAtende(input){
+  const label = input.closest('.atende-toggle');
+  label.classList.toggle('on', input.checked);
+  label.querySelector('span').textContent = input.checked ? '✅ Atende' : '❌ Não atende';
+}
 function lerCompletions(prefixo){
-  return [...document.querySelectorAll('.completion-'+prefixo)].map(i=>({ campo: i.dataset.campo, percentual: Number(i.value)||0 }));
+  return [...document.querySelectorAll('.completion-'+prefixo)].map(i=>({ campo: i.dataset.campo, percentual: i.checked ? 100 : 0 }));
 }
 // recalcula ao vivo enquanto a pessoa digita, sem esperar o Salvar - a
 // mecânica é pura (mesma fórmula de bonificacao.js/calcular), então dá pra
