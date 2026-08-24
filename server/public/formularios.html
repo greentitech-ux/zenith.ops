@@ -114,9 +114,11 @@
       <button type="button" class="btn" id="btn-criar" style="margin-top:12px;width:100%;" onclick="criar()">💾 Criar formulário e gerar links de assinatura</button>
       <!-- 2ª porta de entrada (pedido do Master): em vez de a unidade digitar
            os dados do solicitante, manda o link pra ele mesmo preencher -
-           quem sabe CPF/banco/agência/conta/PIX é ele, não a loja -->
+           quem sabe CPF/banco/agência/conta/PIX é ele, não a loja. No Ass.
+           Boleto o mesmo link serve pro favorecido anexar o boleto - as
+           assinaturas só nascem depois que ele manda (ver formularios.js). -->
       <button type="button" class="btn-ghost" id="btn-link-preencher" style="margin-top:8px;width:100%;" onclick="gerarLinkPreenchimento()">🔗 Enviar link para o solicitante preencher</button>
-      <p style="font-size:11px;color:var(--muted);margin:6px 0 0;line-height:1.5;">Escolha a unidade e o tipo acima. O link já vai com a unidade travada e com o Ticket # - o solicitante só preenche os dados dele.</p>
+      <p style="font-size:11px;color:var(--muted);margin:6px 0 0;line-height:1.5;" id="txt-link-preencher">Escolha a unidade e o tipo acima. O link já vai com a unidade travada e com o Ticket # - o solicitante só preenche os dados dele.</p>
     </div>
   </div>
 
@@ -253,16 +255,20 @@ function escolherTipo(tipo){
   document.querySelectorAll('#campos input[data-campo="cpf"], #campos input[data-campo="cnpjFavorecido"]')
     .forEach(el=> el.addEventListener('input', ()=>buscarFavorecido(el)));
   document.getElementById('f-anexos').value = '';
-  // Ass. Boleto: sem tabela, anexo obrigatório e sem link de preenchimento
-  // (não há o que o solicitante preencher - o que ele faz é ASSINAR)
+  // Ass. Boleto: sem tabela de itens (o documento anexado É o conteúdo).
+  // O link de preenchimento continua disponível pros dois casos: aqui é a
+  // loja que já tem o boleto em mãos e anexa direto; lá é o favorecido que
+  // recebe o link, anexa o boleto e preenche os dados dele mesmo.
   document.getElementById('bloco-tabela').classList.toggle('hidden', !!m.soAnexo);
-  document.getElementById('btn-link-preencher').classList.toggle('hidden', !!m.soAnexo);
   document.getElementById('lbl-anexos').textContent = m.anexoObrigatorio
     ? '📎 Boleto ou documento a assinar (PDF ou imagem) — obrigatório'
     : '📎 Comprovantes da solicitação (PDF ou imagem, até 5 — opcional)';
   document.getElementById('btn-criar').textContent = m.soAnexo
     ? '💾 Criar e gerar o link de assinatura'
     : '💾 Criar formulário e gerar links de assinatura';
+  document.getElementById('txt-link-preencher').textContent = m.soAnexo
+    ? 'Escolha a unidade acima. O favorecido abre o link, anexa o boleto e preenche os dados dele - o Responsável só recebe o link de assinatura DEPOIS que ele mandar.'
+    : 'Escolha a unidade e o tipo acima. O link já vai com a unidade travada e com o Ticket # - o solicitante só preenche os dados dele.';
   atualizarUnidadeInfo();
   // cabeçalho da tabela + 1 linha inicial (a coluna de assinatura das
   // diárias não é digitada aqui - nasce sozinha, um link por linha)
@@ -628,6 +634,18 @@ async function cancelarFormulario(id){
   if(d.pendenteAprovacao) alert('Cancelamento enviado pra aprovação do Master.');
 }
 
+// leva o formulário assinado pra Central como ticket de Pagamento, com os
+// mesmos anexos e o MESMO Ticket # (ver enviar-pagamento em formularios.js)
+async function enviarComoPagamento(id){
+  const rotulo = rotuloDe(id);
+  if(!confirm(`Enviar "${rotulo}" como ticket de Pagamento?\n\nO ticket nasce na Central com o MESMO número e leva junto os anexos deste formulário. Não dá pra desfazer por aqui.`)) return;
+  const r = await fetch(`/api/formularios/${encodeURIComponent(id)}/enviar-pagamento`, { method:'POST' });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ alert(d.error||'Não consegui enviar.'); return; }
+  await carregarLista();
+  alert(`Enviado! Ticket #${d.ticket.numeroTicket} agora está na Central como Pagamento, com os anexos.`);
+}
+
 async function excluirFormulario(id){
   const rotulo = rotuloDe(id);
   if(!confirm(`Apagar "${rotulo}" de vez?\n\nIsso some com o registro e com o Ticket # dele - não dá pra desfazer. Só faz sentido pra formulário de teste; pra desfazer um lançamento de verdade, o certo é o cancelamento (que deixa o rastro).`)) return;
@@ -669,10 +687,12 @@ function renderLista(){
       ${cancelado ? `<div class="fi-sub" style="color:var(--bad);">cancelado ${fmtData(f.canceladoEm)} por ${escapeHtml(f.canceladoPorEmail||'')}${f.motivoCancelamento?` · ${escapeHtml(f.motivoCancelamento)}`:''}</div>` : ''}
       ${f.editadoEm && !cancelado ? `<div class="fi-sub" style="color:var(--warn);">corrigido ${fmtData(f.editadoEm)} por ${escapeHtml(f.editadoPorEmail||'')}</div>` : ''}
       ${(f.anexos||[]).length ? `<div class="fi-sub">📎 ${f.anexos.map((an,i)=>`<a href="/api/formularios/${f.id}/anexo/${i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" style="color:var(--accent);">${escapeHtml(an.nome)}</a>`).join(' · ')}</div>` : ''}
+      ${f.enviadoPagamento ? `<div class="fi-sub" style="color:var(--ok);">💰 enviado como Pagamento ${fmtData(f.enviadoPagamento.em)} - mesmo Ticket #${f.numeroTicket ?? '—'} na Central</div>` : ''}
       <div class="acoes-form">
         ${cancelado ? '' : `<button type="button" class="btn-ghost" onclick="abrirLinks('${f.id}')">✍️ Assinaturas e links</button>`}
         <button type="button" class="btn-ghost" onclick="verPdf('${f.id}')" title="Abrir o PDF pra conferir, sem baixar">👁️ Ver</button>
         <button type="button" class="btn-ghost" onclick="baixarPdf('${f.id}')" title="Salvar o arquivo no aparelho">⬇️ ${t && t.soAnexo ? 'Baixar assinado' : 'Baixar PDF'}</button>
+        ${!cancelado && f.status==='ASSINADO' && !f.enviadoPagamento ? `<button type="button" class="btn-ghost" style="color:var(--ok);" onclick="enviarComoPagamento('${f.id}')">💰 Enviar como Pagamento</button>` : ''}
         ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" onclick="abrirEdicao('${f.id}')">✏️ Editar</button>` : ''}
         ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" style="color:var(--bad);" onclick="cancelarFormulario('${f.id}')">🚫 Cancelar</button>` : ''}
         ${SOU_MASTER && cancelado ? `<button type="button" class="btn-ghost" style="color:var(--bad);" onclick="excluirFormulario('${f.id}')">🗑️ Excluir de vez</button>` : ''}

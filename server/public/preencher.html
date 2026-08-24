@@ -54,15 +54,23 @@
       <div id="cabecalho"></div>
     </div>
 
-    <div class="painel">
+    <div class="painel" id="itens-painel">
       <div style="font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Itens</div>
       <div id="linhas"></div>
       <button type="button" class="btn btn-add" id="btn-add">+ Adicionar linha</button>
       <div class="total"><span>Total</span><span id="total">R$ 0,00</span></div>
     </div>
 
+    <!-- só pro Ass. Boleto (soAnexo): não tem itens, o documento anexado É
+         o conteúdo - a mecânica é a mesma dos outros tipos, só troca a
+         tabela por um campo de arquivo -->
+    <div class="painel" id="anexo-painel" style="display:none;">
+      <label id="lbl-anexo" style="margin-top:0;">Boleto ou documento a assinar</label>
+      <input type="file" id="f-anexo" accept="image/*,application/pdf" multiple>
+    </div>
+
     <button type="button" class="btn btn-ok" id="btn-enviar">Enviar</button>
-    <p style="font-size:11.5px;color:var(--muted);text-align:center;margin:10px 0 0;line-height:1.5;">
+    <p style="font-size:11.5px;color:var(--muted);text-align:center;margin:10px 0 0;line-height:1.5;" id="txt-rodape">
       Depois de enviar, o formulário segue para assinatura e vira uma solicitação de pagamento.
     </p>
   </div>
@@ -161,7 +169,20 @@ async function carregar(){
     document.getElementById('empresa').innerHTML =
       `<b>${esc(d.razaoSocial)}</b> · CNPJ ${esc(d.cnpj)}<span class="obs">preenchido automaticamente, sem edição</span>`;
     renderCabecalho();
-    renderLinhas();
+    // soAnexo (Ass. Boleto): não tem tabela de itens - o documento anexado
+    // É o conteúdo, e o Responsável só recebe o link de assinatura DEPOIS
+    // que este envio acontecer (ver formularios.js: montarAssinaturas só
+    // roda dentro de salvarPreenchimento)
+    document.getElementById('itens-painel').style.display = d.soAnexo ? 'none' : 'block';
+    document.getElementById('anexo-painel').style.display = d.soAnexo ? 'block' : 'none';
+    if(d.soAnexo){
+      document.getElementById('lbl-anexo').textContent = d.anexoObrigatorio
+        ? 'Boleto ou documento a assinar (PDF ou imagem) — obrigatório'
+        : 'Documento (PDF ou imagem, opcional)';
+      document.getElementById('txt-rodape').textContent = 'Depois de enviar, o Responsável recebe o link pra assinar o documento.';
+    } else {
+      renderLinhas();
+    }
     document.getElementById('form-area').style.display='block';
   }catch(e){
     document.getElementById('titulo').textContent='Erro';
@@ -173,18 +194,36 @@ document.getElementById('btn-enviar').addEventListener('click', async ()=>{
   limparAviso();
   const campos = {};
   document.querySelectorAll('.campo-cab').forEach(i=>{ campos[i.dataset.key]=i.value; });
+  const arquivos = MODELO.soAnexo ? document.getElementById('f-anexo').files : null;
+  if(MODELO.soAnexo && MODELO.anexoObrigatorio && (!arquivos || !arquivos.length)){
+    avisar('Anexe o boleto (PDF ou imagem) - é ele que vai ser assinado.');
+    return;
+  }
   const btn = document.getElementById('btn-enviar');
   btn.disabled = true; btn.textContent = 'Enviando...';
   try{
-    const r = await fetch(`/api/formularios-publico/preencher/${encodeURIComponent(TOKEN)}`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ campos, linhas: LINHAS }),
-    });
+    let r;
+    if(MODELO.soAnexo){
+      // multipart: payload em JSON + anexo(s), mesma convenção da tela da
+      // unidade (formularios.html) - sem Content-Type manual pro navegador
+      // colocar o boundary
+      const fd = new FormData();
+      fd.append('payload', JSON.stringify({ campos, linhas: [] }));
+      for(const arq of arquivos) fd.append('anexos', arq);
+      r = await fetch(`/api/formularios-publico/preencher/${encodeURIComponent(TOKEN)}`, { method:'POST', body: fd });
+    } else {
+      r = await fetch(`/api/formularios-publico/preencher/${encodeURIComponent(TOKEN)}`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ campos, linhas: LINHAS }),
+      });
+    }
     const d = await r.json();
     if(!r.ok){ avisar(d.error||'Não consegui enviar.'); return; }
     document.getElementById('form-area').style.display='none';
     document.getElementById('fim').style.display='block';
-    document.getElementById('fim-txt').textContent = `Ticket #${MODELO.numeroTicket} · seus dados foram enviados e o formulário segue para assinatura.`;
+    document.getElementById('fim-txt').textContent = MODELO.soAnexo
+      ? `Ticket #${MODELO.numeroTicket} · recebemos o documento. O Responsável já pode assinar.`
+      : `Ticket #${MODELO.numeroTicket} · seus dados foram enviados e o formulário segue para assinatura.`;
   }catch(e){
     avisar('Não consegui enviar. Verifique sua conexão e tente de novo.');
   }finally{
