@@ -6156,6 +6156,52 @@ setTimeout(async () => {
   if (!okSaidasMultiselect) ruins += 1;
   console.log(`${okSaidasMultiselect ? '✓' : '✗'} Painel de Saídas: filtro de Loja é multiselect com checkbox (1, 2, 3 ou todas), sempre restrito ao Grupo escolhido`);
 
+  // ------------------------------------------------------------------
+  // Relatórios em PDF: a coluna Descrição não pode sair cortada com "..."
+  // (print do usuário mostrando "uber para pegar nutella e..." truncado no
+  // PDF do Painel de Saídas). reportUtil.writePDF já tinha esse recurso
+  // (linhasDinamicas: a linha cresce pra baixo e quebra o texto) mas era
+  // opt-in - só 2 relatórios usavam. Virou o padrão pra TODOS os relatórios
+  // que passam por reportUtil (é sempre melhor: nunca corta informação, e
+  // só cresce a linha quando o texto realmente não cabe). O Painel de
+  // Saídas também ganhou larguras explícitas dando mais espaço pra
+  // Descrição, tirado das colunas curtas (Data/Valor/Verificada), sem
+  // encolher "Verificada por" (email + data/hora, também precisa de espaço).
+  let okPdfSemCorte = false;
+  try {
+    const src = require('fs').readFileSync(require('path').join(__dirname, 'reportUtil.js'), 'utf8');
+    const srcIndex = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
+    const iRota = srcIndex.indexOf("saidas-painel/relatorio");
+    const trechoRota = srcIndex.slice(iRota, iRota + 1400);
+
+    // exercita de verdade: um item com descrição bem comprida tem que virar
+    // um PDF válido (a troca de ellipsis por quebra de linha não pode
+    // quebrar a geração)
+    const cabMaster = { Authorization: 'Bearer ' + token };
+    const descLonga = 'uber para pegar nutella e ingredientes que faltaram de última hora pro bolo de aniversário da equipe';
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: 'TESTE_SAIDA_DESC', unidadeNome: 'Loja Teste Descrição', grupo: 'ARCFOOD', data: '2026-08-21', campos: {},
+      detalhesSaidas: [{ descricao: descLonga, valor: 19 }],
+    }, cabMaster);
+    const pdfResp = await pedirBinario(`/api/saidas-painel/relatorio.pdf?inicio=2026-08-21&fim=2026-08-21&grupo=ARCFOOD`, cabMaster);
+
+    const conf = {
+      'linhasDinamicas (quebra em vez de cortar) é o padrão do writePDF, não opt-in':
+        /const dinamico = linhasDinamicas !== false;/.test(src),
+      'com o padrão ligado, a célula nunca usa ellipsis (só quando alguém desligar de propósito)':
+        /const opcoesCelula = dinamico[\s\S]{0,120}: \{ width: [\s\S]{0,60}ellipsis: true \};/.test(src),
+      'o Painel de Saídas dá largura explícita maior pra Descrição, tirada das colunas curtas':
+        /descricao: 236/.test(trechoRota) && /LARGURAS_SAIDAS_PAINEL/.test(trechoRota),
+      'o relatório PDF sai válido com descrição comprida (a quebra de linha não quebra o PDF)':
+        pdfResp.status === 200 && pdfResp.buffer.slice(0, 4).toString() === '%PDF',
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okPdfSemCorte = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (PDF status ${pdfResp.status})`);
+  } catch (e) { okPdfSemCorte = false; console.log('  erro: ' + e.message); }
+  if (!okPdfSemCorte) ruins += 1;
+  console.log(`${okPdfSemCorte ? '✓' : '✗'} Relatórios PDF: Descrição nunca sai cortada com "..." (quebra de linha é o padrão em todos os relatórios)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

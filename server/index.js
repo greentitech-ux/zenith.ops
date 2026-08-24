@@ -7813,10 +7813,17 @@ app.get('/api/saidas-painel/relatorio.:formato(csv|pdf)', requireAnySection('lan
     return res.send(reportUtil.toCSV(colunas, linhas));
   }
   const periodo = inicio || fim ? ` · período: ${inicio || 'início'} a ${fim || 'hoje'}` : '';
+  // Descrição é a coluna que mais precisa de espaço (texto livre) - as
+  // outras 6 colunas são curtas (data, valor, sim/não...) e sobram pra ela
+  // sem precisar cortar largura de ninguém. A quebra de linha (padrão do
+  // writePDF) cobre o resto se ainda assim não couber numa linha só.
+  const LARGURAS_SAIDAS_PAINEL = {
+    unidade: 110, origem: 85, data: 55, descricao: 236, valor: 70, verificada: 65, verificadaPor: 140,
+  };
   reportUtil.writePDF(res, {
     titulo: 'Painel de Saídas · Sangria/Depósito',
     subtitulo: `Exportado em ${reportUtil.agoraBrasiliaFmt()}${periodo} · ${linhas.length} item(ns)`,
-    colunas, linhas,
+    colunas, linhas, larguras: LARGURAS_SAIDAS_PAINEL,
     nomeArquivo: reportUtil.nomeArquivoComData('saidas-painel'),
   });
 });

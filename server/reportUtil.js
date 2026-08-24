@@ -84,6 +84,12 @@ function largurasPadrao(colunas) {
 }
 
 function writePDF(res, { titulo, subtitulo, colunas, linhas, resumo, larguras, semDadosMsg, nomeArquivo, cabecalho, linhasDinamicas }) {
+  // padrao é a linha crescer pra baixo e quebrar o texto (nunca corta com
+  // "...") - pedido do usuario ao ver a coluna Descrição cortada no PDF do
+  // Painel de Saídas: "sempre necessário que a descrição apareça toda".
+  // Nenhum relatório de hoje precisa do corte fixo, mas o "!== false" deixa
+  // a porta aberta pra um caso futuro que precise mesmo de altura fixa.
+  const dinamico = linhasDinamicas !== false;
   const doc = new PDFDocument({ margin: 36, size: 'A4', layout: 'landscape' });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo || slugify(titulo)}.pdf"`);
@@ -138,7 +144,7 @@ function writePDF(res, { titulo, subtitulo, colunas, linhas, resumo, larguras, s
     // que a linha fique bem maior que as outras (ex: lista de itens de uma
     // Compra no relatorio da Central)
     let alturaLinha = alturaLinhaMin;
-    if (linhasDinamicas) {
+    if (dinamico) {
       for (const c of colunas) {
         const h = doc.heightOfString(String(linha[c.key] ?? ''), { width: (larg[c.key] || 60) - 8 }) + 10;
         if (h > alturaLinha) alturaLinha = h;
@@ -157,7 +163,7 @@ function writePDF(res, { titulo, subtitulo, colunas, linhas, resumo, larguras, s
     }
     let x = tableX;
     for (const c of colunas) {
-      const opcoesCelula = linhasDinamicas
+      const opcoesCelula = dinamico
         ? { width: (larg[c.key] || 60) - 8 }
         : { width: (larg[c.key] || 60) - 8, height: alturaLinha - 4, ellipsis: true };
       doc.text(String(linha[c.key] ?? ''), x + 4, y + 5, opcoesCelula);
