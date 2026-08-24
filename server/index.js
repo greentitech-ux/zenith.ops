@@ -34,6 +34,7 @@ const fechamentosReport = require('./fechamentosReport');
 const monitorReport = require('./monitorReport');
 const reportUtil = require('./reportUtil');
 const sangrias = require('./sangrias');
+const saidasPainel = require('./saidasPainel');
 const entregasLive = require('./entregasLive');
 const entregasRegras = require('./entregasRegras');
 const backup = require('./backup');
@@ -7749,6 +7750,74 @@ app.get('/api/sangrias/do-dia', requireAnySection('lancamento', 'sangria'), asyn
   }
   const todas = await sangrias.listByUnidades([unidade]);
   res.json(todas.filter((s) => s.data === data));
+});
+
+// ---------- Painel de Saidas: Sangria/Deposito + as "outras saidas" avulsas
+// do Fechamento, unificadas com estado de "verificada" (ver saidasPainel.js).
+// Mesma dupla de secoes que ja mexe com saida de caixa hoje (sangria e/ou
+// lancamento); "verificar" e mais restrito (Master ou Admin) - decisao
+// explicita do usuario, a propria loja nao confere a propria sangria ----------
+app.get('/api/saidas-painel', requireAnySection('lancamento', 'sangria'), async (req, res) => {
+  const { unidades, grupo, inicio, fim } = req.query;
+  const todas = auth.filterByUnidade(req, await saidasPainel.listar());
+  const unidadesSet = unidades ? String(unidades).split(',').filter(Boolean) : null;
+  res.json(saidasPainel.filtrar(todas, { unidades: unidadesSet, grupo, inicio, fim }));
+});
+
+app.patch('/api/saidas-painel/verificar', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    const { chave, verificada } = req.body;
+    const registro = await saidasPainel.marcarVerificada(chave, { verificada, porId: req.user.id, porEmail: req.user.email });
+    broadcast('saida-verificada', registro, 'lancamento');
+    broadcast('saida-verificada', registro, 'sangria');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// mesmas colunas do painel na tela (server/public/saidas.html) - usado
+// pelos dois formatos de relatorio abaixo
+function prepararSaidasPainel(rows) {
+  const colunas = [
+    { key: 'unidade', label: 'Unidade' }, { key: 'origem', label: 'Origem' },
+    { key: 'data', label: 'Data' }, { key: 'descricao', label: 'Descrição' },
+    { key: 'valor', label: 'Valor' }, { key: 'verificada', label: 'Verificada' },
+    { key: 'verificadaPor', label: 'Verificada por' },
+  ];
+  const linhas = rows
+    .slice()
+    .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
+    .map((r) => ({
+      unidade: r.unidadeNome || r.unidade,
+      origem: r.origem === 'sangria' ? 'Sangria/Depósito' : 'Saída avulsa',
+      data: reportUtil.fmtDataBR(r.data),
+      descricao: r.descricao,
+      valor: reportUtil.fmtMoneyBR(r.valor),
+      verificada: r.verificada ? 'Sim' : 'Não',
+      verificadaPor: r.verificada ? `${r.verificadaPorEmail || '—'} em ${reportUtil.fmtDataHoraBR(r.verificadaEm)}` : '—',
+    }));
+  return { colunas, linhas };
+}
+
+app.get('/api/saidas-painel/relatorio.:formato(csv|pdf)', requireAnySection('lancamento', 'sangria'), async (req, res) => {
+  const { unidades, grupo, inicio, fim } = req.query;
+  const todas = auth.filterByUnidade(req, await saidasPainel.listar());
+  const unidadesSet = unidades ? String(unidades).split(',').filter(Boolean) : null;
+  const filtradas = saidasPainel.filtrar(todas, { unidades: unidadesSet, grupo, inicio, fim });
+  const { colunas, linhas } = prepararSaidasPainel(filtradas);
+  if (req.params.formato === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${reportUtil.nomeArquivoComData('saidas-painel')}.csv"`);
+    return res.send(reportUtil.toCSV(colunas, linhas));
+  }
+  const periodo = inicio || fim ? ` · período: ${inicio || 'início'} a ${fim || 'hoje'}` : '';
+  reportUtil.writePDF(res, {
+    titulo: 'Painel de Saídas · Sangria/Depósito',
+    subtitulo: `Exportado em ${reportUtil.agoraBrasiliaFmt()}${periodo} · ${linhas.length} item(ns)`,
+    colunas, linhas,
+    nomeArquivo: reportUtil.nomeArquivoComData('saidas-painel'),
+  });
 });
 
 app.post('/api/fechamentos/:id/solicitar-edicao', requireSection('lancamento'), upload.array('anexos', 4), async (req, res) => {

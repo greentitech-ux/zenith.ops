@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Painel de Saídas · NoPulso</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;overflow-x:clip;overflow-y:clip;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 16px;padding:12px 32px 12px;border-bottom:1px solid var(--line);}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:12px;padding-bottom:12px;} h1{font-size:17px;} .eyebrow{font-size:8px;} }
+  h2{font-size:13.5px;font-weight:700;margin:0 0 4px;}
+  .header-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+  .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  .nav-divider{width:1px;align-self:stretch;background:var(--line);margin:2px 2px;}
+  .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;}
+  .btn-notif:hover{border-color:var(--accent);color:var(--text);}
+  .btn-sair{color:var(--bad);}
+  .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
+  .hidden{display:none!important;}
+  .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+  label{display:block;font-size:11.5px;color:var(--muted);margin:0 0 4px;font-family:var(--mono);}
+  select,input[type=date]{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:13px;font-family:var(--sans);}
+  select:focus,input:focus{outline:none;border-color:var(--accent);}
+  .filtros{display:flex;flex-wrap:wrap;gap:10px;align-items:end;}
+  .filtros>div{flex:1 1 160px;min-width:140px;max-width:220px;}
+  .presets{display:flex;gap:4px;flex-wrap:wrap;}
+  .preset-btn{font-family:var(--mono);font-size:10.5px;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
+  .preset-btn:hover{color:var(--text);border-color:var(--accent);}
+  .preset-btn.active{color:#0b0d10;background:var(--accent);border-color:var(--accent);font-weight:600;}
+  .link-btn{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0;font-family:var(--sans);}
+  .export-btn{font-family:var(--mono);font-size:11px;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
+  .export-btn:hover{color:var(--text);border-color:var(--accent);}
+  .tipo-badge{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;}
+  .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px;}
+  @media(min-width:640px){ .kpis{grid-template-columns:repeat(4,1fr);} }
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;}
+  .kpi .valor{font-size:20px;font-weight:700;letter-spacing:-.02em;}
+  .kpi .valor.bad{color:var(--bad);}
+  .kpi .valor.ok{color:var(--ok);}
+  .kpi .rotulo{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;}
+  .kanban-2col{display:grid;grid-template-columns:1fr;gap:14px;}
+  @media(min-width:760px){ .kanban-2col{grid-template-columns:1fr 1fr;} }
+  .kanban-col{background:var(--panel2);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;max-height:70vh;min-height:220px;}
+  .kanban-col-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 12px 10px;border-bottom:1px solid var(--line);flex:none;font-weight:700;font-size:13px;}
+  .kanban-col-header .n{font-family:var(--mono);color:var(--muted);font-weight:400;font-size:11.5px;}
+  .kanban-cards{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:8px;}
+  .kanban-empty{padding:20px 10px;text-align:center;color:var(--muted);font-size:12px;}
+  .saida-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;overflow-wrap:anywhere;min-width:0;}
+  .saida-topo{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;}
+  .saida-desc{font-size:12.5px;font-weight:600;}
+  .saida-valor{font-size:15px;font-weight:700;font-family:var(--mono);margin-top:2px;}
+  .saida-sub{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px;}
+  .saida-acoes{margin-top:8px;}
+  .btn-verificar{font-family:var(--sans);font-size:12px;font-weight:700;padding:7px 12px;border-radius:8px;border:none;background:var(--accent);color:#0b0d10;cursor:pointer;}
+  .btn-verificar:hover{opacity:.9;}
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <div style="min-width:0;">
+        <div class="eyebrow">NoPulso · Fechamento</div>
+        <h1>Painel de Saídas</h1>
+      </div>
+    </div>
+    <div class="header-nav">
+      <button class="btn-notif" onclick="carregar()" title="Atualizar">🔄</button>
+      <div class="nav-divider"></div>
+      <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
+    </div>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso a essa tela.</div>
+
+<div id="root" class="hidden">
+
+  <div class="panel">
+    <div class="filtros">
+      <div>
+        <label>Grupo</label>
+        <select id="f-grupo" onchange="aoMudarFiltro()">
+          <option value="">Todos</option>
+          <option value="ARCFOOD">ARCFOOD</option>
+          <option value="BRAVO">Grupo Bravo (GBE)</option>
+        </select>
+      </div>
+      <div>
+        <label>Loja</label>
+        <select id="f-unidade" onchange="aoMudarFiltro()"><option value="">Todas as unidades</option></select>
+      </div>
+      <div>
+        <label>De</label>
+        <input type="date" id="f-data-de" onchange="aoMudarFiltroData()">
+      </div>
+      <div>
+        <label>Até</label>
+        <input type="date" id="f-data-ate" onchange="aoMudarFiltroData()">
+      </div>
+    </div>
+    <div class="presets" id="presets" style="margin-top:10px;"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-top:10px;">
+      <button type="button" class="link-btn" onclick="limparFiltros()">Limpar filtros</button>
+      <span style="display:flex;gap:6px;">
+        <button type="button" class="export-btn" onclick="baixarRelatorio('csv')">📄 Relatório CSV</button>
+        <button type="button" class="export-btn" onclick="baixarRelatorio('pdf')">📄 Relatório PDF</button>
+      </span>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="valor bad" id="kpi-saidas">—</div><div class="rotulo">Saídas avulsas</div></div>
+    <div class="kpi"><div class="valor bad" id="kpi-sangrias">—</div><div class="rotulo">Sangria/Depósito</div></div>
+    <div class="kpi"><div class="valor" id="kpi-pendentes">—</div><div class="rotulo">Pendentes de verificar</div></div>
+    <div class="kpi"><div class="valor ok" id="kpi-verificadas">—</div><div class="rotulo">Verificadas</div></div>
+  </div>
+
+  <h2>🧾 Conferência</h2>
+  <div class="kanban-2col">
+    <div class="kanban-col">
+      <div class="kanban-col-header"><span>🔴 Saídas</span><span class="n" id="n-pendentes">0</span></div>
+      <div class="kanban-cards" id="col-pendentes"></div>
+    </div>
+    <div class="kanban-col">
+      <div class="kanban-col-header"><span>✅ Verificadas</span><span class="n" id="n-verificadas">0</span></div>
+      <div class="kanban-cards" id="col-verificadas"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+const FUSO_BR = 'America/Sao_Paulo';
+function fmtData(iso){ if(!iso) return '—'; const [y,m,d] = String(iso).split('-'); return d ? `${d}/${m}/${y}` : iso; }
+function fmtDataHora(iso){ if(!iso) return '—'; return new Date(iso).toLocaleString('pt-BR',{timeZone:FUSO_BR}); }
+function pad2(n){ return String(n).padStart(2,'0'); }
+function isoLocal(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
+// Date "falso" cujos getters locais ja refletem o horario de Sao Paulo,
+// independente do fuso do navegador/servidor (mesmo helper de fechamentos.html)
+function agoraBrasilia(){
+  const partes = new Intl.DateTimeFormat('en-US', {
+    timeZone:FUSO_BR, year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false,
+  }).formatToParts(new Date());
+  const o = {}; partes.forEach(p=>{ if(p.type!=='literal') o[p.type]=p.value; });
+  const hora = o.hour==='24' ? '00' : o.hour;
+  return new Date(`${o.year}-${o.month}-${o.day}T${hora}:${o.minute}:${o.second}`);
+}
+
+function calcularPreset(tipo, refIso){
+  const ref = new Date(refIso+'T00:00:00');
+  if(tipo==='ontem'){
+    const ontem = new Date(ref); ontem.setDate(ontem.getDate()-1);
+    return {inicio:isoLocal(ontem), fim:isoLocal(ontem)};
+  }
+  if(tipo==='7dias'){
+    const inicio = new Date(ref); inicio.setDate(inicio.getDate()-6);
+    return {inicio:isoLocal(inicio), fim:isoLocal(ref)};
+  }
+  // mes: mes corrente inteiro (dia 1 ao ultimo dia), mesmo criterio de
+  // fechamentos.html - o filtro so restringe o que ja foi lancado, dia
+  // futuro dentro do mesmo mes simplesmente nao traz nada
+  const inicio = new Date(ref.getFullYear(), ref.getMonth(), 1);
+  const fim = new Date(ref.getFullYear(), ref.getMonth()+1, 0);
+  return {inicio:isoLocal(inicio), fim:isoLocal(fim)};
+}
+
+let ME = null;
+let IS_MASTER = false;
+let IS_ADMIN = false;
+let ITENS = []; // lista bruta do periodo (inicio/fim), sem filtro de loja/grupo - esses dois filtram em memoria (ver renderTudo)
+let presetAtivo = 'mes';
+
+function setupPresets(){
+  const presets = [ {lbl:'Ontem', tipo:'ontem'}, {lbl:'7 dias', tipo:'7dias'}, {lbl:'Mês', tipo:'mes'} ];
+  const cont = document.getElementById('presets');
+  cont.innerHTML = presets.map(p=>`<button type="button" class="preset-btn" data-tipo="${p.tipo}">${p.lbl}</button>`).join('');
+  cont.querySelectorAll('.preset-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>aplicarPreset(btn.dataset.tipo));
+  });
+}
+function aplicarPreset(tipo){
+  presetAtivo = tipo;
+  document.querySelectorAll('#presets .preset-btn').forEach(b=>b.classList.toggle('active', b.dataset.tipo===tipo));
+  const range = calcularPreset(tipo, isoLocal(agoraBrasilia()));
+  document.getElementById('f-data-de').value = range.inicio;
+  document.getElementById('f-data-ate').value = range.fim;
+  carregar();
+}
+function aoMudarFiltroData(){
+  presetAtivo = null;
+  document.querySelectorAll('#presets .preset-btn').forEach(b=>b.classList.remove('active'));
+  carregar();
+}
+function aoMudarFiltro(){ renderTudo(); }
+function limparFiltros(){
+  document.getElementById('f-grupo').value = '';
+  document.getElementById('f-unidade').value = '';
+  aplicarPreset('mes');
+}
+
+// monta o seletor de loja a partir das unidades que de fato aparecem no
+// periodo carregado - nao ha lista fixa aqui (ver fechamentos.html pra
+// ARCFOOD/BRAVO fixos): uma loja sem nenhuma saida no periodo nao teria o
+// que filtrar mesmo
+function montarSeletorUnidade(){
+  const atual = document.getElementById('f-unidade').value;
+  const porCodigo = new Map();
+  ITENS.forEach(it=>{ if(it.unidade && !porCodigo.has(it.unidade)) porCodigo.set(it.unidade, it.unidadeNome||it.unidade); });
+  const unidades = [...porCodigo.entries()].sort((a,b)=>a[1].localeCompare(b[1],'pt-BR'));
+  document.getElementById('f-unidade').innerHTML = '<option value="">Todas as unidades</option>' +
+    unidades.map(([cod,nome])=>`<option value="${escapeHtml(cod)}">${escapeHtml(nome)}</option>`).join('');
+  if(unidades.some(([cod])=>cod===atual)) document.getElementById('f-unidade').value = atual;
+}
+
+async function carregar(){
+  const inicio = document.getElementById('f-data-de').value;
+  const fim = document.getElementById('f-data-ate').value;
+  const params = new URLSearchParams();
+  if(inicio) params.set('inicio', inicio);
+  if(fim) params.set('fim', fim);
+  ITENS = await fetch('/api/saidas-painel?'+params.toString()).then(r=>r.json());
+  montarSeletorUnidade();
+  renderTudo();
+}
+
+function itensFiltrados(){
+  const grupo = document.getElementById('f-grupo').value;
+  const unidade = document.getElementById('f-unidade').value;
+  return ITENS.filter(it => (!grupo || it.grupo===grupo) && (!unidade || it.unidade===unidade));
+}
+
+function cardHtml(it){
+  const podeVerificar = IS_MASTER || IS_ADMIN;
+  const origemLabel = it.origem==='sangria' ? '💰 Sangria/Depósito' : '💸 Saída avulsa';
+  let acao = '';
+  if(it.verificada){
+    acao = podeVerificar ? `<button type="button" class="link-btn" onclick="toggleVerificar('${it.chave}',false)">↩️ Desfazer</button>` : '';
+  } else if(podeVerificar){
+    acao = `<button type="button" class="btn-verificar" onclick="toggleVerificar('${it.chave}',true)">✅ Verificar</button>`;
+  }
+  return `<div class="saida-card">
+    <div class="saida-topo">
+      <span class="tipo-badge">${origemLabel}</span>
+      <span class="tipo-badge" style="background:#181d24;color:var(--muted);">${escapeHtml(it.unidadeNome||it.unidade||'—')}</span>
+    </div>
+    <div class="saida-desc">${escapeHtml(it.descricao)}</div>
+    <div class="saida-valor">${fmtMoney(it.valor)}</div>
+    <div class="saida-sub">${fmtData(it.data)} · ${escapeHtml(it.criadoPorEmail||'—')}</div>
+    ${it.verificada ? `<div class="saida-sub" style="color:var(--ok);">verificada por ${escapeHtml(it.verificadaPorEmail||'—')} em ${fmtDataHora(it.verificadaEm)}</div>` : ''}
+    ${acao ? `<div class="saida-acoes">${acao}</div>` : ''}
+  </div>`;
+}
+
+function renderTudo(){
+  const filtrados = itensFiltrados();
+  const pendentes = filtrados.filter(it=>!it.verificada).sort((a,b)=>String(b.data||'').localeCompare(String(a.data||'')));
+  const verificadas = filtrados.filter(it=>it.verificada).sort((a,b)=>String(b.verificadaEm||'').localeCompare(String(a.verificadaEm||'')));
+
+  const totalSaidas = filtrados.filter(it=>it.origem==='saida').reduce((s,it)=>s+(it.valor||0),0);
+  const totalSangrias = filtrados.filter(it=>it.origem==='sangria').reduce((s,it)=>s+(it.valor||0),0);
+  document.getElementById('kpi-saidas').textContent = fmtMoney(totalSaidas);
+  document.getElementById('kpi-sangrias').textContent = fmtMoney(totalSangrias);
+  document.getElementById('kpi-pendentes').textContent = pendentes.length;
+  document.getElementById('kpi-verificadas').textContent = verificadas.length;
+
+  document.getElementById('n-pendentes').textContent = pendentes.length;
+  document.getElementById('n-verificadas').textContent = verificadas.length;
+  document.getElementById('col-pendentes').innerHTML = pendentes.length
+    ? pendentes.map(cardHtml).join('')
+    : '<div class="kanban-empty">Nada aguardando conferência. 🎉</div>';
+  document.getElementById('col-verificadas').innerHTML = verificadas.length
+    ? verificadas.map(cardHtml).join('')
+    : '<div class="kanban-empty">Nenhuma verificada ainda nesse período.</div>';
+}
+
+async function toggleVerificar(chave, verificada){
+  try{
+    const res = await fetch('/api/saidas-painel/verificar', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({chave, verificada}) });
+    if(!res.ok){ const e = await res.json().catch(()=>({})); alert(e.error || 'Falha ao atualizar.'); return; }
+    const atualizado = await res.json();
+    const alvo = ITENS.find(it=>it.chave===chave);
+    if(alvo){ alvo.verificada = atualizado.verificada; alvo.verificadaPorEmail = atualizado.verificadaPorEmail; alvo.verificadaEm = atualizado.verificadaEm; }
+    renderTudo();
+  }catch(e){ alert('Falha ao atualizar.'); }
+}
+
+function baixarRelatorio(formato){
+  const grupo = document.getElementById('f-grupo').value;
+  const unidade = document.getElementById('f-unidade').value;
+  const inicio = document.getElementById('f-data-de').value;
+  const fim = document.getElementById('f-data-ate').value;
+  const params = new URLSearchParams({ token: AUTH_TOKEN });
+  if(grupo) params.set('grupo', grupo);
+  if(unidade) params.set('unidades', unidade);
+  if(inicio) params.set('inicio', inicio);
+  if(fim) params.set('fim', fim);
+  window.location.href = `/api/saidas-painel/relatorio.${formato}?${params.toString()}`;
+}
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  ME = await res.json();
+  IS_MASTER = ME.role==='master';
+  IS_ADMIN = !!ME.isAdmin;
+  const secoes = IS_MASTER ? [] : (ME.permissions?.sections||[]);
+  const temAcesso = IS_MASTER || secoes.includes('lancamento') || secoes.includes('sangria');
+  if(!temAcesso){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('root').classList.remove('hidden');
+  setupPresets();
+  aplicarPreset('mes');
+}
+boot();
+</script>
+<script src="/notif-central.js"></script>
+<script src="/alarme-sync.js"></script>
+<script src="/suporte-chat.js"></script>
+<script src="/recolher.js"></script>
+<script src="/nav-menu.js"></script>
+</body>
+</html>

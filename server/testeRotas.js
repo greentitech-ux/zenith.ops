@@ -5903,6 +5903,109 @@ setTimeout(async () => {
   if (!okAcessoPessoa) ruins += 1;
   console.log(`${okAcessoPessoa ? '✓' : '✗'} Acesso de pessoa: checklist com confirmação humana bloqueia/reativa os 3 sistemas de verdade`);
 
+  // ------------------------------------------------------------------
+  // Painel de Saidas (Sangria/Deposito + "outras saidas" avulsas do
+  // Fechamento, unificadas com estado de verificacao - ver saidasPainel.js).
+  // Cobre: as duas fontes aparecem juntas, so Master/Admin verifica (nao a
+  // propria loja), a chave de uma "saida avulsa" e validada contra o
+  // fechamento de verdade (nao aceita indice inventado), verificar pode ser
+  // desfeito, e o isolamento por grupo continua valendo (a rota so usa
+  // auth.filterByUnidade, igual /api/fechamentos - "1 grupo não vê o outro"
+  // era o pedido explícito do usuário).
+  let okSaidasPainel = false;
+  try {
+    const bcrypt = require('bcryptjs');
+    const cabMaster = { Authorization: 'Bearer ' + token };
+
+    const fech = await postarJson('/api/fechamentos/lancar', {
+      unidade: 'TESTE_SAIDA_ARC', unidadeNome: 'Loja Teste ARC', grupo: 'ARCFOOD', data: '2026-08-20', campos: {},
+      detalhesSaidas: [{ descricao: 'Motoboy extra (painel saidas)', valor: 37.5 }, { descricao: 'Compra de gelo (painel saidas)', valor: 12 }],
+    }, cabMaster);
+    const fechData = JSON.parse(fech.corpo);
+
+    const sangria = await postarJson('/api/sangrias', {
+      unidade: 'TESTE_SAIDA_BRAVO', unidadeNome: 'Loja Teste BRAVO', grupo: 'BRAVO', data: '2026-08-20',
+      valor: 250, descricao: 'Sangria painel teste', periodoInicio: '2026-08-20', periodoFim: '2026-08-20',
+      nomeDepositante: 'Fulano Teste', password: process.env.MASTER_PASSWORD,
+    }, cabMaster);
+    const sangriaData = JSON.parse(sangria.corpo);
+
+    const senhaHash = bcrypt.hashSync('SenhaDeTeste!2026', 4);
+    // loja: so a unidade ARCFOOD, secao sangria (nao lancamento) - ve a
+    // lista mas nao consegue verificar (so Master/Admin, decisao do usuario)
+    DOCS.set('users/u-saidas-loja', {
+      passwordHash: senhaHash, role: 'user', active: true,
+      email: 'saidas-loja@teste.local', username: 'saidasloja',
+      permissions: { sections: ['sangria'], unidades: ['TESTE_SAIDA_ARC'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const tkLoja = (await auth.login('saidas-loja@teste.local', 'SenhaDeTeste!2026')).token;
+    const cabLoja = { Authorization: 'Bearer ' + tkLoja };
+
+    // Admin (nao Master, sem unidade nenhuma marcada) - prova que "Master OU
+    // Admin" verifica de verdade
+    DOCS.set('users/u-saidas-admin', {
+      passwordHash: senhaHash, role: 'user', isAdmin: true, active: true,
+      email: 'saidas-admin@teste.local', username: 'saidasadmin',
+      permissions: { sections: ['lancamento', 'sangria'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const tkAdmin = (await auth.login('saidas-admin@teste.local', 'SenhaDeTeste!2026')).token;
+    const cabAdmin = { Authorization: 'Bearer ' + tkAdmin };
+
+    // BRAVO: so a unidade da sangria - prova o isolamento (nao ve a saida
+    // avulsa da unidade ARCFOOD)
+    DOCS.set('users/u-saidas-bravo', {
+      passwordHash: senhaHash, role: 'user', active: true,
+      email: 'saidas-bravo@teste.local', username: 'saidasbravo',
+      permissions: { sections: ['sangria'], unidades: ['TESTE_SAIDA_BRAVO'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const tkBravo = (await auth.login('saidas-bravo@teste.local', 'SenhaDeTeste!2026')).token;
+    const cabBravo = { Authorization: 'Bearer ' + tkBravo };
+
+    const params = 'inicio=2026-08-20&fim=2026-08-20';
+    const listaMaster = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabMaster)).corpo);
+    const itemSaida = listaMaster.find((it) => it.descricao === 'Motoboy extra (painel saidas)');
+    const itemSangria = listaMaster.find((it) => it.chave === `sangria::${sangriaData.id}`);
+
+    const listaBravo = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabBravo)).corpo);
+    const listaGrupoArcfood = JSON.parse((await pedir(`/api/saidas-painel?${params}&grupo=ARCFOOD`, cabMaster)).corpo);
+    const listaGrupoBravo = JSON.parse((await pedir(`/api/saidas-painel?${params}&grupo=BRAVO`, cabMaster)).corpo);
+
+    const rVerificarLoja = await enviarJson('PATCH', '/api/saidas-painel/verificar', { chave: itemSaida.chave, verificada: true }, cabLoja);
+    const rChaveFalsa = await enviarJson('PATCH', '/api/saidas-painel/verificar', { chave: `${fechData.id}::99`, verificada: true }, cabAdmin);
+    const rVerificarAdmin = await enviarJson('PATCH', '/api/saidas-painel/verificar', { chave: itemSaida.chave, verificada: true }, cabAdmin);
+    const verificadaAdmin = JSON.parse(rVerificarAdmin.corpo);
+    const rVerificarSangria = await enviarJson('PATCH', '/api/saidas-painel/verificar', { chave: itemSangria.chave, verificada: true }, cabMaster);
+    const rDesfazerSangria = await enviarJson('PATCH', '/api/saidas-painel/verificar', { chave: itemSangria.chave, verificada: false }, cabMaster);
+    const desfeita = JSON.parse(rDesfazerSangria.corpo);
+
+    const listaDepois = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabMaster)).corpo);
+    const itemSaidaDepois = listaDepois.find((it) => it.chave === itemSaida.chave);
+
+    const conf = {
+      'as duas fontes aparecem juntas pro Master (sangria + saída avulsa)': !!itemSaida && !!itemSangria,
+      'nasce tudo com verificada:false': itemSaida.verificada === false && itemSangria.verificada === false,
+      '1 grupo não vê o outro: loja BRAVO não vê a saída avulsa do ARCFOOD':
+        !listaBravo.some((it) => it.chave === itemSaida.chave),
+      'filtro por grupo (query) bate com a franquia certa':
+        listaGrupoArcfood.some((it) => it.chave === itemSaida.chave) && !listaGrupoArcfood.some((it) => it.chave === itemSangria.chave)
+        && listaGrupoBravo.some((it) => it.chave === itemSangria.chave) && !listaGrupoBravo.some((it) => it.chave === itemSaida.chave),
+      'loja (não Master/Admin) vê a lista mas não consegue verificar': listaBravo.length >= 0 && rVerificarLoja.status === 403,
+      'chave inventada (índice que não existe nesse fechamento) é recusada': rChaveFalsa.status === 400,
+      'Admin (não Master) consegue verificar - decisão explícita do usuário': rVerificarAdmin.status === 200 && verificadaAdmin.verificada === true,
+      'verificar guarda quem verificou': verificadaAdmin.verificadaPorEmail === 'saidas-admin@teste.local' && !!verificadaAdmin.verificadaEm,
+      'dá pra desfazer a verificação (não é só ida sem volta)': rVerificarSangria.status === 200 && rDesfazerSangria.status === 200 && desfeita.verificada === false,
+      'o item verificado pelo Admin continua marcado numa leitura nova': !!itemSaidaDepois && itemSaidaDepois.verificada === true,
+    };
+    const ruinsSP = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okSaidasPainel = !ruinsSP.length;
+    if (ruinsSP.length) console.log(`  falhou em: ${ruinsSP.join(' · ')}`);
+  } catch (e) { okSaidasPainel = false; console.log('  erro: ' + e.message); }
+  if (!okSaidasPainel) ruins += 1;
+  console.log(`${okSaidasPainel ? '✓' : '✗'} Painel de Saídas: Sangria/Depósito + outras saídas unificadas, verificação Master/Admin, isolamento por grupo`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
