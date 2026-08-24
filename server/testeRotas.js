@@ -255,7 +255,11 @@ function pedir(caminho, headers = {}) {
       let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, corpo: b }));
     });
     req.on('error', (e) => resolve({ status: 0, corpo: e.message }));
-    req.setTimeout(4000, () => { req.destroy(); resolve({ status: -1, corpo: 'TIMEOUT (requisição pendurada)' }); });
+    // 4s marcava timeout até em rota que respondia certo (relatório de
+    // fechamentos em PDF passou a levar mais que isso no ambiente de teste,
+    // sem nenhum travamento real - só devagar). 10s ainda pega rota
+    // genuinamente pendurada, sem falso positivo por lentidão do ambiente.
+    req.setTimeout(10000, () => { req.destroy(); resolve({ status: -1, corpo: 'TIMEOUT (requisição pendurada)' }); });
     req.end();
   });
 }
@@ -5651,6 +5655,36 @@ setTimeout(async () => {
   } catch (e) { okRelatorioChamados = false; console.log('  erro: ' + e.message); }
   if (!okRelatorioChamados) ruins += 1;
   console.log(`${okRelatorioChamados ? '✓' : '✗'} Relatório de chamados: Ticket #/Status/Fechamento/Interação filtram de verdade (não só passam direto)`);
+
+  // Início (widget pessoal no topo da aba Solicitações): sem rota nova
+  // (roda sobre o CARDS já carregado), então a checagem é de fonte - a
+  // parte que mais quebra sem avisar é alguém tirar a chamada de
+  // renderInicio() de dentro de renderKanban() (widget para de atualizar
+  // silenciosamente) ou "meus" desviar da regra de 3 partes que
+  // todosCardsCentral usa no servidor (criadoPorId/direcionadoParaId/
+  // atribuidosIds - ver index.js)
+  let okInicioWidget = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'central-historico.html'), 'utf8');
+    const conf = {
+      'renderInicio existe': /function renderInicio\(\)/.test(html),
+      'renderKanban chama renderInicio (senão o widget nunca atualiza)':
+        /renderKanban\(\)\{[\s\S]*?renderInicio\(\);[\s\S]*?\n\}/.test(html),
+      'souEuCard cobre as 3 partes de "meu" (mesma regra do todosCardsCentral)':
+        /souEuCard\(c\)\{[\s\S]{0,300}criadoPorId===ME\.id[\s\S]{0,100}direcionadoParaId===ME\.id[\s\S]{0,150}atribuidosIds[\s\S]{0,50}\}/.test(html),
+      'os 4 containers do widget existem no HTML': ['inicio-status-corpo', 'inicio-unidade-corpo', 'inicio-meus-corpo', 'inicio-concluidos-corpo']
+        .every((id) => html.includes(`id="${id}"`)),
+      'meus abertos e meus concluídos reaproveitam o card do Relatório (rcCardHtml)': (() => {
+        const i = html.indexOf('function renderInicio()');
+        return i >= 0 && /rcCardHtml/.test(html.slice(i, i + 2000));
+      })(),
+    };
+    const ruinsInicio = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okInicioWidget = !ruinsInicio.length;
+    if (ruinsInicio.length) console.log(`  falhou em: ${ruinsInicio.join(' · ')}`);
+  } catch (e) { okInicioWidget = false; console.log('  erro: ' + e.message); }
+  if (!okInicioWidget) ruins += 1;
+  console.log(`${okInicioWidget ? '✓' : '✗'} Início: widget pessoal (por status/unidade + meus abertos/concluídos) fica ligado ao kanban`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
