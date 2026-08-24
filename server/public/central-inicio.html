@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Início · NoPulso</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:16px 12px 60px;max-width:1100px;margin-inline:auto;overflow-x:clip;overflow-y:clip;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin-left:-12px;margin-right:-12px;margin-top:-16px;padding-left:12px;padding-right:12px;padding-top:12px;padding-bottom:12px;display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px;border-bottom:1px solid var(--line);}
+  h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  a.back,button.back{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-decoration:none;padding:5px 9px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
+  a.back:hover,button.back:hover{color:var(--text);border-color:var(--accent);}
+  .hidden{display:none!important;}
+  .hamburger-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+  .badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;display:inline-block;white-space:nowrap;}
+  .badge.PENDENTE{background:var(--warn-dim);color:var(--warn);}
+  .badge.APROVADO{background:var(--ok-dim);color:var(--ok);}
+  .badge.REJEITADO{background:var(--bad-dim);color:var(--bad);}
+  .tipo-badge{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;}
+  /* bloco "Início": resumo por status/unidade (tabela) e meus abertos/concluídos
+     (cards, reaproveita .rel-card - mesmo visual do Relatório de chamados do
+     Histórico). Cada seção vive dentro de um .panel com .rel-header
+     [data-recolher-titulo] como título, pra recolher.js (carregado no fim da
+     página) dar o recolher/expandir de graça - mesmo mecanismo que qualquer
+     outro .panel do app já usa, sem reinventar nada aqui. */
+  .rel-header{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 14px;margin-bottom:14px;font-weight:700;font-size:13px;}
+  .rel-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;cursor:pointer;transition:border-color .15s ease;overflow-wrap:anywhere;min-width:0;}
+  .rel-card:hover{border-color:var(--accent);}
+  .rel-card-topo{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;}
+  .rel-campo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 16px;font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:8px 0;overflow-wrap:anywhere;}
+  .rel-campo-grid b{display:block;color:var(--text);font-family:var(--sans);font-weight:600;font-size:12.5px;margin-top:2px;overflow-wrap:anywhere;}
+  .rel-box{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;margin-top:8px;overflow-wrap:anywhere;}
+  .rel-box-titulo{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
+  .sla-bar-track{background:var(--bg);border:1px solid var(--line);border-radius:5px;height:6px;overflow:hidden;margin-top:4px;}
+  .sla-bar-fill{height:100%;}
+  .inicio-grid{display:grid;grid-template-columns:1fr;gap:14px;}
+  @media(min-width:760px){ .inicio-grid{grid-template-columns:1fr 1fr;} }
+  .inicio-col{display:flex;flex-direction:column;gap:14px;min-width:0;}
+  .inicio-col .panel{margin-bottom:0;}
+  .inicio-tabela{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .inicio-tabela th{text-align:left;font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:6px 8px;border-bottom:1px solid var(--line);}
+  .inicio-tabela td{padding:7px 8px;border-bottom:1px solid var(--line);}
+  .inicio-tabela tr:last-child td{border-bottom:none;font-weight:700;}
+  .inicio-cards{max-height:420px;overflow-y:auto;overflow-x:hidden;padding-right:2px;}
+  .inicio-vazio{padding:16px;text-align:center;color:var(--muted);font-size:12px;}
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+    <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+    <div style="min-width:0;">
+      <div class="eyebrow">NoPulso · Solicitações</div>
+      <h1>Início</h1>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;">
+    <a class="back" href="/central-historico.html">📜 Histórico completo</a>
+    <button class="back" onclick="location.reload()" title="Atualizar">🔄</button>
+    <button class="back" onclick="logout()">🚪 Sair</button>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso à Central de Solicitações. Fale com o administrador (Master).</div>
+
+<div id="root" class="hidden">
+  <div class="inicio-grid">
+    <div class="inicio-col">
+      <div class="panel">
+        <div class="rel-header" data-recolher-titulo>📊 Chamados em aberto (por status)</div>
+        <div id="inicio-status-corpo"></div>
+      </div>
+      <div class="panel">
+        <div class="rel-header" data-recolher-titulo>🏬 Chamados em aberto (por unidade)</div>
+        <div id="inicio-unidade-corpo"></div>
+      </div>
+    </div>
+    <div class="inicio-col">
+      <div class="panel">
+        <div class="rel-header" data-recolher-titulo>📋 Meus chamados em aberto <span class="tipo-badge" id="inicio-meus-count" style="margin-left:auto;"></span></div>
+        <div id="inicio-meus-corpo" class="inicio-cards"></div>
+      </div>
+      <div class="panel">
+        <div class="rel-header" data-recolher-titulo>✅ Meus últimos concluídos</div>
+        <div id="inicio-concluidos-corpo" class="inicio-cards"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+
+// cópia própria (mesmo padrão do resto do app - cada página tem a sua) só
+// do que este resumo precisa: rótulo do tipo. secaoNecessaria não entra
+// aqui porque /api/central já devolve só o que a permissão do usuário deixa ver.
+const TIPOS_INFO = {
+  'estorno': { label:'Estorno' },
+  'ajuste-fechamento': { label:'Ajuste de fechamento' },
+  'compra': { label:'Compra' },
+  'manutencao': { label:'Manutenção' },
+  'suporte-ti': { label:'Suporte de TI' },
+  'pagamento': { label:'Pagamento' },
+  'nota': { label:'Nota' },
+  'quebra-caixa': { label:'Quebra de caixa' },
+  'desvio-estoque': { label:'Desvio de estoque' },
+  'acesso-pessoa': { label:'Acesso de pessoa' },
+};
+function iconeTipo(tipo){
+  return { estorno:'💳', 'ajuste-fechamento':'🧾', compra:'🛒', manutencao:'🔧', 'suporte-ti':'💻', pagamento:'💸', nota:'📄', 'quebra-caixa':'⚠️', 'desvio-estoque':'📦⚠️', 'acesso-pessoa':'🔐' }[tipo] || '📋';
+}
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+const FUSO_BR = 'America/Sao_Paulo';
+function fmtDataHora(iso){ if(!iso) return '—'; return new Date(iso).toLocaleString('pt-BR',{timeZone:FUSO_BR}); }
+
+const PRIORIDADES_INFO = { critica:{label:'Crítica',icone:'🔴'}, alta:{label:'Alta',icone:'🟠'}, media:{label:'Média',icone:'🟡'}, baixa:{label:'Baixa',icone:'🟢'} };
+function slaAtivo(c){
+  if(c.status==='PENDENTE') return true;
+  if(c.status==='APROVADO') return (c.execucaoStatus||'PENDENTE')!=='FINALIZADO';
+  return false;
+}
+function slaEstourado(c){ return !!c.slaPrazo && slaAtivo(c) && new Date(c.slaPrazo).getTime() <= Date.now(); }
+function chipPrioridade(c){
+  const info = PRIORIDADES_INFO[c.prioridade];
+  if(!info) return '';
+  const cores = { critica:'background:var(--bad-dim);color:var(--bad);', alta:'background:#3a2314;color:#ff9d5c;', media:'background:var(--warn-dim);color:var(--warn);', baixa:'background:#181d24;color:var(--muted);' };
+  return `<span class="tipo-badge" style="${cores[c.prioridade]}">${info.icone} ${info.label}</span>`;
+}
+function chipSla(c){
+  if(!c.slaPrazo || !slaAtivo(c)) return '';
+  const prazo = new Date(c.slaPrazo).getTime();
+  const criado = new Date(c.criadoEm||Date.now()).getTime();
+  const resta = prazo - Date.now();
+  const fmt = (ms)=>{ const h = Math.abs(ms)/3600000; return h>=48 ? Math.round(h/24)+'d' : h>=1 ? Math.round(h)+'h' : Math.max(1,Math.round(Math.abs(ms)/60000))+'min'; };
+  if(resta <= 0) return `<span class="tipo-badge" style="background:var(--bad-dim);color:var(--bad);font-weight:700;">🔥 SLA estourado há ${fmt(resta)}</span>`;
+  const perto = resta < (prazo - criado) * 0.25;
+  return `<span class="tipo-badge" style="${perto?'background:var(--warn-dim);color:var(--warn);':'background:#181d24;color:var(--muted);'}">⏳ SLA ${fmt(resta)}</span>`;
+}
+function slaUtilizadoPct(c){
+  if(!c.slaPrazo || !c.criadoEm) return null;
+  const criado = new Date(c.criadoEm).getTime();
+  const prazo = new Date(c.slaPrazo).getTime();
+  const total = prazo - criado;
+  if(total<=0) return null;
+  const fim = slaAtivo(c) ? Date.now() : new Date(c.decididoEm || c.criadoEm).getTime();
+  return Math.max(0, Math.round((fim-criado)/total*100));
+}
+function corSlaBar(c, pct){
+  if(slaEstourado(c)) return 'var(--bad)';
+  if(pct!=null && pct>=75) return 'var(--warn)';
+  return 'var(--ok)';
+}
+function ultimaAlteracaoRelatorio(c){
+  return [c.criadoEm, c.decididoEm].filter(Boolean).sort().pop();
+}
+// clique no card leva pro Histórico já com o ticket aberto (?tipo=&id= é o
+// mesmo deep-link que a notificação de nova solicitação já usa em
+// central-historico.html - ver boot() lá) - o detalhe completo (chat,
+// atribuir responsável, aprovar/rejeitar) mora só lá, uma fonte só
+function rcCardHtml(c){
+  const pct = slaUtilizadoPct(c);
+  const atribuidosTxt = (c.atribuidosEmails && c.atribuidosEmails.length) ? c.atribuidosEmails.join(', ') : (c.direcionadoParaEmail || '—');
+  const temDecisao = c.status!=='PENDENTE' && c.status!=='CONVERTIDO';
+  return `<div class="rel-card" onclick="location.href='/central-historico.html?tipo=${encodeURIComponent(c.tipo)}&id=${encodeURIComponent(c.id)}'">
+    <div class="rel-card-topo">
+      <span class="tipo-badge">${iconeTipo(c.tipo)} #${c.numeroTicket ?? '—'}</span>
+      <span class="badge ${c.status}">${c.status}</span>
+      ${chipPrioridade(c)}
+      ${chipSla(c)}
+    </div>
+    <div style="font-weight:700;font-size:13px;">${escapeHtml(c.unidadeNome||c.unidade||'—')} <span style="color:var(--muted);font-weight:400;">· ${escapeHtml(TIPOS_INFO[c.tipo]?.label||c.tipo)}</span></div>
+    <div class="rel-campo-grid">
+      <div>DATA ABERTURA<b>${fmtDataHora(c.criadoEm)}</b></div>
+      <div>USUÁRIO ABERTURA<b>${escapeHtml(c.criadoPorEmail||'—')}</b></div>
+      <div>ATRIBUÍDO A<b>${escapeHtml(atribuidosTxt)}</b></div>
+      <div>ÚLTIMA ALTERAÇÃO<b>${fmtDataHora(ultimaAlteracaoRelatorio(c))}</b></div>
+    </div>
+    ${pct!=null ? `<div style="font-family:var(--mono);font-size:10px;color:var(--muted);">SLA UTILIZADO · ${pct}%</div><div class="sla-bar-track"><div class="sla-bar-fill" style="width:${Math.min(100,pct)}%;background:${corSlaBar(c,pct)};"></div></div>` : ''}
+    <div class="rel-box">
+      <div class="rel-box-titulo">📝 Descrição abertura</div>
+      <div>${escapeHtml(c.titulo||'')}</div>
+      ${c.observacao ? `<div style="white-space:pre-wrap;color:var(--muted);margin-top:4px;">${escapeHtml(c.observacao)}</div>` : ''}
+    </div>
+    ${temDecisao ? `<div class="rel-box">
+      <div class="rel-box-titulo">✅ Conclusão</div>
+      <div>Data: <b>${fmtDataHora(c.decididoEm)}</b> · por ${escapeHtml(c.decididoPorEmail||'—')}</div>
+      ${c.motivoDecisao ? `<div style="white-space:pre-wrap;margin-top:4px;">${escapeHtml(c.motivoDecisao)}</div>` : ''}
+    </div>` : ''}
+  </div>`;
+}
+
+let ME = null;
+let CARDS = [];
+const STATUS_LABEL_INICIO = { PENDENTE:'Pendente', APROVADO:'Aprovado', REJEITADO:'Rejeitado', CONVERTIDO:'Convertido' };
+// "meu" ticket = mesma regra de visibilidade não-Master do todosCardsCentral
+// (index.js): quem criou, quem foi direcionado, ou está entre os atribuídos
+function souEuCard(c){
+  return !!ME && (c.criadoPorId===ME.id || c.direcionadoParaId===ME.id || (Array.isArray(c.atribuidosIds) && c.atribuidosIds.includes(ME.id)));
+}
+
+// "Em aberto" usa slaAtivo() - a mesma regra que já decide se o SLA ainda
+// conta (Pendente sempre; Aprovado até o andamento virar Finalizado)
+function renderInicio(){
+  if(!ME) return;
+  const abertos = CARDS.filter(slaAtivo);
+
+  const porStatus = {};
+  abertos.forEach(c=>{ porStatus[c.status] = (porStatus[c.status]||0) + 1; });
+  const linhasStatus = Object.entries(porStatus).sort((a,b)=>b[1]-a[1]).map(([s,q])=>
+    `<tr><td>${STATUS_LABEL_INICIO[s]||s}</td><td>${q}</td><td>${Math.round(q/abertos.length*100)}%</td></tr>`).join('');
+  document.getElementById('inicio-status-corpo').innerHTML = abertos.length
+    ? `<table class="inicio-tabela"><thead><tr><th>Status</th><th>Qtd.</th><th>%</th></tr></thead><tbody>${linhasStatus}<tr><td>Total</td><td>${abertos.length}</td><td>100%</td></tr></tbody></table>`
+    : '<div class="inicio-vazio">Nenhum chamado em aberto.</div>';
+
+  const porUnidade = {};
+  abertos.forEach(c=>{ const u = c.unidadeNome || c.unidade || '—'; porUnidade[u] = (porUnidade[u]||0) + 1; });
+  const linhasUnidade = Object.entries(porUnidade).sort((a,b)=>b[1]-a[1]).map(([u,q])=>
+    `<tr><td>${escapeHtml(u)}</td><td>${q}</td><td>${Math.round(q/abertos.length*100)}%</td></tr>`).join('');
+  document.getElementById('inicio-unidade-corpo').innerHTML = abertos.length
+    ? `<table class="inicio-tabela"><thead><tr><th>Unidade</th><th>Qtd.</th><th>%</th></tr></thead><tbody>${linhasUnidade}</tbody></table>`
+    : '<div class="inicio-vazio">Nenhum chamado em aberto.</div>';
+
+  const meusAbertos = abertos.filter(souEuCard);
+  document.getElementById('inicio-meus-count').textContent = meusAbertos.length;
+  document.getElementById('inicio-meus-corpo').innerHTML = meusAbertos.length
+    ? meusAbertos.map(rcCardHtml).join('')
+    : '<div class="inicio-vazio">Nenhum chamado seu em aberto agora.</div>';
+
+  const meusConcluidos = CARDS.filter(c=>(c.status==='APROVADO' || c.status==='REJEITADO') && souEuCard(c))
+    .sort((a,b)=>(b.decididoEm||'').localeCompare(a.decididoEm||'')).slice(0, 7);
+  document.getElementById('inicio-concluidos-corpo').innerHTML = meusConcluidos.length
+    ? meusConcluidos.map(rcCardHtml).join('')
+    : '<div class="inicio-vazio">Nenhum chamado seu concluído ainda.</div>';
+}
+
+async function carregarCentral(){
+  CARDS = await fetch('/api/central').then(r=>r.json());
+  renderInicio();
+}
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  ME = await res.json();
+  const secoes = ME.role==='master' ? [] : (ME.permissions?.sections||[]);
+  const temAcesso = ME.role==='master' || secoes.includes('solicitacoes') || secoes.includes('manutencao') || secoes.includes('tecnico');
+  if(!temAcesso){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('root').classList.remove('hidden');
+  await carregarCentral();
+  // atualiza sozinho a cada 60s, mesmo intervalo de recarga que o resto do
+  // app usa pra painel/listas ao vivo - sem SSE aqui, é só um resumo
+  setInterval(()=>{ carregarCentral().catch(()=>{}); }, 60000);
+}
+boot();
+</script>
+<script src="/notif-central.js"></script>
+<script src="/alarme-sync.js"></script>
+<script src="/suporte-chat.js"></script>
+<script src="/recolher.js"></script>
+<script src="/nav-menu.js"></script>
+</body>
+</html>

@@ -75,6 +75,10 @@
     { grupo: 'Solicitações', itens: [
       { id: 'nav-solicitacoes', href: '/central.html', icone: '📋', rotulo: 'Central', secoes: ['solicitacoes'] },
       { id: 'nav-compras', href: '/compras.html', icone: '🛍️', rotulo: 'Acompanhar Compras', secoes: ['solicitacoes'] },
+      // resumo pessoal (por status/unidade + meus abertos/concluidos) que
+      // antes vivia dentro do Historico - separado em pagina propria porque
+      // misturado com o quadro do Historico ficava bagunçado
+      { id: 'nav-inicio-solicitacoes', href: '/central-inicio.html', icone: '📊', rotulo: 'Início', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
       // o Historico tambem serve pra quem RECEBE card atribuido
       { id: 'nav-historico', href: '/central-historico.html', icone: '📜', rotulo: 'Histórico', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
       { id: 'nav-tecnico', href: '/tecnico.html', icone: '🔧', rotulo: 'Chamados TI', secoes: ['tecnico', 'suporte'] },
