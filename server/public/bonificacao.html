@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Bonificação · NoPulso</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
+    --text:#e7ecf1; --muted:#7d8896;
+    --ok:#3ddc97; --ok-dim:#1c3a2e;
+    --warn:#f2b33d; --warn-dim:#3a2e14;
+    --bad:#ff5c5c; --bad-dim:#3a1616;
+    --accent:#b8ff3c; --accent2:#5cc8ff;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+  }
+  *{box-sizing:border-box;min-width:0;}
+  html{overflow-x:hidden;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:28px 32px 60px;}
+  header{position:sticky;top:0;z-index:40;background:var(--bg);margin:-28px -32px 16px;padding:12px 32px 12px;border-bottom:1px solid var(--line);}
+  h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  @media(max-width:640px){ body{padding:16px 14px 40px;} header{margin-left:-14px;margin-right:-14px;margin-top:-16px;padding-left:14px;padding-right:14px;padding-top:12px;padding-bottom:12px;} h1{font-size:17px;} .eyebrow{font-size:8px;} }
+  .header-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+  .header-nav{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  .btn-notif{font-size:14px;line-height:1;width:30px;height:30px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,color .15s ease;}
+  .btn-notif:hover{border-color:var(--accent);color:var(--text);}
+  .btn-sair{color:var(--bad);}
+  .btn-sair:hover{border-color:var(--bad);color:var(--bad);}
+  .hidden{display:none!important;}
+  .hamburger-btn{position:sticky;top:14px;z-index:997;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;transition:border-color .15s ease;}
+  .hamburger-btn:hover{border-color:var(--accent);}
+  .nav-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:998;}
+  .nav-drawer-overlay.hidden{display:none!important;}
+  .nav-drawer{position:fixed;top:0;left:0;bottom:0;width:250px;max-width:82vw;background:var(--panel);border-right:1px solid var(--line);z-index:999;padding:14px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+  .nav-drawer.hidden{display:none!important;}
+  .nav-drawer a.back,.nav-drawer button.back{display:flex;align-items:center;gap:8px;width:100%;border-radius:8px;text-align:left;padding:9px 10px;font-size:12.5px;box-sizing:border-box;}
+  .back{font-family:var(--mono);font-size:11px;color:var(--muted);text-decoration:none;padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;}
+  .back:hover{color:var(--text);border-color:var(--accent);}
+  .empty{padding:40px;text-align:center;color:var(--muted);font-size:13px;background:var(--panel);border:1px solid var(--line);border-radius:12px;}
+  .tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;}
+  .tab-btn{background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:20px;padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+  .tab-btn.active{background:rgba(184, 255, 60,.12);border-color:var(--accent);color:var(--accent);}
+  .tab-pane.hidden{display:none!important;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:16px;}
+  @media(max-width:640px){ .panel{padding:14px;} }
+  .panel h2{font-size:14px;margin:0 0 4px;}
+  .sub{font-size:12px;color:var(--muted);margin-bottom:14px;}
+  label{display:block;font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:14px 0 6px;}
+  label:first-of-type{margin-top:0;}
+  input,select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
+  input:focus,select:focus{outline:none;border-color:var(--accent);}
+  .linha2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .linha4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+  @media(max-width:640px){ .linha4{grid-template-columns:1fr 1fr;} }
+  .btn-primary{background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .btn-primary:disabled{opacity:.5;cursor:default;}
+  .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 14px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+  .btn-ghost:hover{border-color:var(--accent);}
+  .btn-bad{background:var(--bad-dim);border:1px solid var(--bad);color:var(--bad);border-radius:8px;padding:9px 14px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+  .msg{font-size:12.5px;padding:9px 12px;border-radius:8px;margin-top:12px;}
+  .msg.ok{background:var(--ok-dim);color:var(--ok);}
+  .msg.err{background:var(--bad-dim);color:var(--bad);}
+  .tablewrap{overflow-x:auto;}
+  table{width:100%;min-width:560px;border-collapse:collapse;font-size:12.5px;}
+  thead th{text-align:left;font-family:var(--mono);font-weight:500;color:var(--muted);text-transform:uppercase;font-size:9.5px;letter-spacing:.02em;padding:8px 10px;border-bottom:1px solid var(--line);}
+  tbody td{padding:9px 10px;border-bottom:1px solid #1a1f26;vertical-align:middle;font-variant-numeric:tabular-nums;}
+  .rowacts{display:flex;gap:6px;flex-wrap:wrap;}
+  .rowacts button{font-family:var(--sans);font-size:11px;padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;}
+  .rowacts button:hover{border-color:var(--accent);}
+  .badge{font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);color:var(--text);white-space:nowrap;}
+  .badge.ativa{color:var(--ok);border-color:var(--ok);background:var(--ok-dim);}
+  .badge.inativa{color:var(--muted);}
+  .badge.fechado{color:var(--ok);border-color:var(--ok);background:var(--ok-dim);}
+  .badge.rascunho{color:var(--warn);border-color:var(--warn);background:var(--warn-dim);}
+  .checks{display:flex;flex-wrap:wrap;gap:10px;}
+  .checks label{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text);white-space:nowrap;font-family:var(--sans);text-transform:none;letter-spacing:0;margin:0;}
+  .checks input{width:auto;margin:0;}
+  .unidades-box{max-height:220px;overflow-y:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;}
+  .unidade-ocupada{color:var(--warn);font-size:10.5px;margin-left:4px;}
+  fieldset{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:14px 0 0;}
+  legend{font-family:var(--mono);font-size:10.5px;color:var(--accent);text-transform:uppercase;padding:0 6px;}
+  .linha-metrica{display:grid;grid-template-columns:auto 1fr 90px auto;gap:8px;align-items:center;margin-top:8px;}
+  .linha-metrica:first-of-type{margin-top:0;}
+  .linha-metrica input{padding:8px 9px;font-size:12.5px;}
+  .linha-metrica-mover{display:flex;flex-direction:column;gap:2px;}
+  .btn-mover{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:5px;width:22px;height:17px;font-size:9px;line-height:1;cursor:pointer;padding:0;}
+  .btn-mover:disabled{opacity:.3;cursor:default;}
+  .btn-remover{background:var(--bad-dim);color:var(--bad);border:none;border-radius:6px;width:30px;height:32px;font-size:14px;cursor:pointer;flex:none;}
+  .btn-add{margin-top:8px;background:var(--panel2);border:1px dashed var(--line);color:var(--accent);border-radius:8px;padding:8px 10px;font-size:12px;font-family:var(--sans);cursor:pointer;width:100%;}
+  .nota-assiduidade{grid-column:1/-1;font-size:10.5px;color:var(--accent2);margin-top:-4px;}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto;z-index:50;}
+  .overlay.show{display:flex;}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;width:100%;max-width:620px;max-height:88vh;overflow-y:auto;}
+  .modal h3{margin:0 0 14px;font-size:14px;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:14px;}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;}
+  .card .rotulo{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;}
+  .card .valor{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;}
+  .card.destaque{border-color:var(--accent);}
+  .card.destaque .valor{color:var(--accent);}
+  .completion-linha{display:grid;grid-template-columns:1fr 90px;gap:10px;align-items:center;margin-top:8px;}
+  .completion-linha:first-of-type{margin-top:0;}
+  .completion-linha .nome{font-size:12.5px;}
+  .completion-linha .peso{font-size:10.5px;color:var(--muted);}
+  .completion-linha input{padding:8px 9px;font-size:12.5px;text-align:right;}
+  .colab-linha{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1a1f26;font-size:12.5px;}
+  .colab-linha:last-child{border-bottom:none;}
+  .aviso-box{font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;line-height:1.5;}
+</style>
+<script src="/tema.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="header-top">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+      <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
+      <div style="min-width:0;">
+        <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
+        <h1>🏆 Bonificação</h1>
+      </div>
+    </div>
+    <div class="header-nav">
+      <button class="btn-notif" onclick="location.reload()" title="Atualizar página">🔄</button>
+      <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
+    </div>
+  </div>
+</header>
+
+<div class="nav-drawer-overlay hidden" id="nav-drawer-overlay" onclick="fecharMenu()"></div>
+<nav class="nav-drawer hidden" id="nav-drawer"></nav>
+
+<div id="sem-acesso" class="empty hidden">Você não tem acesso a essa página.</div>
+
+<div id="root" class="hidden">
+  <div class="tabs">
+    <button type="button" class="tab-btn hidden" id="btn-aba-perfis" data-tab="perfis" onclick="trocarAba('perfis')">⚙️ Perfis</button>
+    <button type="button" class="tab-btn active" data-tab="apurar" onclick="trocarAba('apurar')">🧮 Apurar</button>
+    <button type="button" class="tab-btn" data-tab="historico" onclick="trocarAba('historico')">📜 Histórico</button>
+  </div>
+
+  <!-- ===================== ABA PERFIS (Master/Admin) ===================== -->
+  <div class="tab-pane hidden" id="aba-perfis">
+    <div class="panel">
+      <h2>Perfis de bonificação</h2>
+      <div class="sub">Cada perfil salva os percentuais e as métricas de uma marca/operação (ex: "Domino's", "Domino's Caruaru", "Spoleto") - aplicados a uma lista de unidades. Uma unidade só pertence a um perfil por vez: marcar ela num perfil novo tira automaticamente do perfil antigo.</div>
+      <button type="button" class="btn-primary" onclick="abrirModalPerfil(null)">+ Novo perfil</button>
+      <div class="tablewrap" style="margin-top:14px;">
+        <table>
+          <thead><tr><th>Nome</th><th>Unidades</th><th>% Pool</th><th>Métricas</th><th>Status</th><th>Ações</th></tr></thead>
+          <tbody id="tbody-perfis"></tbody>
+        </table>
+      </div>
+      <div id="perfis-vazio" class="sub hidden">Nenhum perfil cadastrado ainda - sem perfil, nenhuma unidade consegue apurar bonificação.</div>
+    </div>
+  </div>
+
+  <!-- ===================== ABA APURAR ===================== -->
+  <div class="tab-pane" id="aba-apurar">
+    <div class="panel">
+      <h2>Apurar o mês</h2>
+      <div class="linha2">
+        <div>
+          <label>Unidade</label>
+          <select id="ap-unidade" onchange="carregarApuracao()"></select>
+        </div>
+        <div>
+          <label>Mês</label>
+          <input type="month" id="ap-mes" onchange="carregarApuracao()">
+        </div>
+      </div>
+    </div>
+
+    <div id="ap-sem-perfil" class="panel hidden">
+      <div class="aviso-box">⚠️ Nenhum perfil de bonificação configurado pra esta unidade.
+        <span id="ap-sem-perfil-atalho" class="hidden"> <button type="button" class="back" onclick="trocarAba('perfis')">ir pra aba Perfis →</button></span>
+      </div>
+    </div>
+
+    <div id="ap-conteudo" class="hidden">
+      <div class="panel">
+        <div class="cards" id="ap-cards"></div>
+        <div id="ap-status-linha" class="sub"></div>
+      </div>
+
+      <div class="panel" id="ap-bloco-gerente">
+        <h2>Métricas do gerente</h2>
+        <div class="sub" id="ap-gerente-vazio-msg">Este perfil não bonifica gerente.</div>
+        <div id="ap-gerente-lista"></div>
+      </div>
+
+      <div class="panel" id="ap-bloco-colab">
+        <h2>Métricas dos colaboradores</h2>
+        <div class="sub" id="ap-colab-vazio-msg">Este perfil não bonifica colaboradores.</div>
+        <div id="ap-colab-lista"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Resultado</h2>
+        <div class="cards" id="ap-resultado-cards"></div>
+        <div id="ap-colab-nominal"></div>
+        <button type="button" class="btn-primary" id="ap-btn-salvar" onclick="salvarApuracao()">💾 Salvar</button>
+        <button type="button" class="btn-bad hidden" id="ap-btn-fechar" onclick="fecharApuracao()" style="margin-left:8px;">🔒 Fechar apuração</button>
+        <div class="msg hidden" id="ap-msg"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== ABA HISTÓRICO ===================== -->
+  <div class="tab-pane hidden" id="aba-historico">
+    <div class="panel">
+      <h2>Histórico</h2>
+      <label>Mês</label>
+      <input type="month" id="hist-mes" onchange="carregarHistorico()" style="max-width:220px;">
+    </div>
+
+    <div id="hist-sem-permissao" class="panel hidden">
+      <div class="aviso-box">O resumo agregado é visível só pra quem tem a permissão de ver o valor total. Use a aba Apurar pra ver a sua unidade.</div>
+    </div>
+
+    <div id="hist-conteudo" class="hidden">
+      <div class="panel">
+        <div class="cards" id="hist-cards"></div>
+      </div>
+      <div class="panel">
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Unidade</th><th>Perfil</th><th>Status</th><th>Gerente recebe</th><th>Colaboradores (total)</th></tr></thead>
+            <tbody id="tbody-historico"></tbody>
+          </table>
+        </div>
+        <div id="hist-vazio" class="sub hidden">Nenhuma unidade com perfil de bonificação configurado.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MODAL PERFIL ===================== -->
+<div class="overlay" id="modal-perfil-overlay">
+  <div class="modal">
+    <h3 id="modal-perfil-titulo">Novo perfil</h3>
+    <form onsubmit="return false;">
+      <label>Nome do perfil</label>
+      <input type="text" id="pf-nome" placeholder="ex: Domino's, Domino's Caruaru, Spoleto...">
+
+      <label style="margin-top:14px;">Unidades</label>
+      <div class="unidades-box" id="pf-unidades"></div>
+
+      <label class="checks" style="margin-top:14px;"><input type="checkbox" id="pf-ativa" checked style="text-transform:none;"> Perfil ativo</label>
+
+      <div class="linha4" style="margin-top:14px;">
+        <div><label>% do faturamento (pool)</label><input type="number" id="pf-percentualPool" step="0.01" min="0" max="100" value="1"></div>
+        <div><label>% do pool em Metas</label><input type="number" id="pf-splitMetasOutras" step="1" min="0" max="100" value="70"></div>
+        <div><label>% de Metas p/ gerente</label><input type="number" id="pf-splitGerente" step="1" min="0" max="100" value="60"></div>
+        <div><label>% de Outras p/ gerente</label><input type="number" id="pf-splitGerenteOutras" step="1" min="0" max="100" value="25"></div>
+      </div>
+
+      <fieldset>
+        <legend>Métricas do gerente</legend>
+        <div id="pf-metricas-gerente"></div>
+        <button type="button" class="btn-add" onclick="adicionarMetrica('pf-metricas-gerente')">+ métrica do gerente</button>
+      </fieldset>
+
+      <fieldset>
+        <legend>Métricas dos colaboradores</legend>
+        <div id="pf-metricas-colab"></div>
+        <button type="button" class="btn-add" onclick="adicionarMetrica('pf-metricas-colab')">+ métrica dos colaboradores</button>
+      </fieldset>
+
+      <div class="msg hidden" id="modal-perfil-msg"></div>
+    </form>
+    <div class="modal-actions">
+      <button type="button" class="btn-ghost" onclick="fecharModalPerfil()">Cancelar</button>
+      <button type="button" class="btn-primary" onclick="salvarPerfil()">Salvar perfil</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) logout(); return res; });
+};
+function logout(){ localStorage.removeItem('authToken'); location.href = '/'; }
+function abrirMenu(){}
+function fecharMenu(){}
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+// mesma lista fixa usada em rh.html/central.html, mesclada com as unidades
+// dinâmicas cadastradas pelo Master (grupos.html) - assim resolve nome sem
+// precisar de /api/meta/unidades, que é Master-only
+const UNIDADES_NOMES = {
+  "Domino's Carrinho Aeroporto Recife": 'Dom Car Aero Recife',
+  'Dominos Bessa': 'Dom Bessa',
+  'Dominos Campina Grande': 'Dom Campina Grande',
+  'Dominos Caruaru': 'Dom Caruaru',
+  'Dominos Garanhuns': 'Dom Garanhuns',
+  'Dominos Praça Aeroporto Recife': 'Dom Praça Aero Recife',
+  'Dominos Tirol': 'Dom Tirol',
+  'Milky Moo Tirol': 'MilkyMoo Tirol',
+  'Spoleto Praça Aeroporto Recife': 'Spo Praça Aero Recife',
+  'Spoleto Shopping Recife': 'Spo Shop Recife',
+  'Spoleto Shopping Tacaruna': 'Spo Shop Tacaruna',
+  'São Braz IL': 'Sao Braz Ilha',
+  'Spo Shop Midway': 'Spo Shop Midway',
+  'Saltiverso Patteo': 'Saltiverso Patteo',
+  Administrativa: 'Administrativa',
+};
+async function mesclarUnidadesExtras(){
+  try{ Object.assign(UNIDADES_NOMES, await (await fetch('/api/meta/unidades-extras')).json()); }catch(e){}
+}
+function nomeUnidade(codigo){ return UNIDADES_NOMES[codigo] || codigo; }
+
+function mesAtualRecife(){
+  return new Date().toLocaleDateString('sv-SE', { timeZone:'America/Recife' }).slice(0,7);
+}
+// mesmo slug do backend (bonificacaoPerfis.js/sanitizarMetricas) - só pra
+// mostrar a nota de "puxa atestado automaticamente" no formulário; quem
+// decide de verdade é sempre o servidor
+function slugCampo(label){
+  return String(label||'').trim().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-zA-Z0-9]+/g,'').toLowerCase() || 'metrica';
+}
+
+let ME = null;
+let UNIDADES_PERMITIDAS = [];
+let UNIDADES_TODAS = [];
+let PERFIS = [];
+let EDITANDO_PERFIL_ID = null;
+let APURACAO_ATUAL = null;
+
+function trocarAba(nome){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===nome));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.add('hidden'));
+  document.getElementById('aba-'+nome).classList.remove('hidden');
+  if(nome==='perfis') carregarPerfis();
+  if(nome==='historico') carregarHistorico();
+}
+
+// ---------------------------------------------------------------- Perfis
+async function carregarPerfis(){
+  try{
+    PERFIS = await fetch('/api/bonificacao/perfis').then(r=>r.ok?r.json():[]);
+  }catch(e){ PERFIS = []; }
+  renderPerfis();
+}
+function renderPerfis(){
+  const tbody = document.getElementById('tbody-perfis');
+  document.getElementById('perfis-vazio').classList.toggle('hidden', PERFIS.length>0);
+  tbody.innerHTML = PERFIS.map(p=>{
+    const unidadesTxt = (p.unidades||[]).length
+      ? (p.unidades||[]).slice(0,3).map(nomeUnidade).join(', ') + ((p.unidades||[]).length>3 ? ` +${p.unidades.length-3}` : '')
+      : '<span style="color:var(--muted);">nenhuma</span>';
+    const nMetricas = (p.metricasGerente||[]).length + (p.metricasColaboradores||[]).length;
+    return `<tr>
+      <td><b>${escapeHtml(p.nome)}</b></td>
+      <td>${unidadesTxt}</td>
+      <td>${Number(p.percentualPool||0)}%</td>
+      <td>${(p.metricasGerente||[]).length} gerente · ${(p.metricasColaboradores||[]).length} colab.${nMetricas===0?' <span style="color:var(--warn);">(sem métrica nenhuma)</span>':''}</td>
+      <td><span class="badge ${p.ativa!==false?'ativa':'inativa'}">${p.ativa!==false?'ativa':'inativa'}</span></td>
+      <td><div class="rowacts">
+        <button type="button" onclick="abrirModalPerfil('${p.id}')">✏️ Editar</button>
+        <button type="button" onclick="excluirPerfil('${p.id}','${escapeHtml(p.nome).replace(/'/g,"\\'")}')">🗑️ Excluir</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+function unidadesBoxHtml(unidadesMarcadas){
+  if(!UNIDADES_TODAS.length) return '<span style="color:var(--muted);font-size:11.5px;">Nenhuma unidade disponível.</span>';
+  const marcado = new Set(unidadesMarcadas||[]);
+  const donoDe = new Map();
+  PERFIS.forEach(p=>{ if(p.id!==EDITANDO_PERFIL_ID) (p.unidades||[]).forEach(u=>donoDe.set(u, p.nome)); });
+  return `<div class="checks">${UNIDADES_TODAS.map(u=>{
+    const checked = marcado.has(u.codigo) ? 'checked' : '';
+    const dono = donoDe.get(u.codigo);
+    return `<label><input type="checkbox" name="pf-unidade" value="${escapeHtml(u.codigo)}" ${checked}> ${escapeHtml(u.nome)}${dono?`<span class="unidade-ocupada" title="Sai do perfil '${escapeHtml(dono)}' se marcada aqui">⚠️ ${escapeHtml(dono)}</span>`:''}</label>`;
+  }).join('')}</div>`;
+}
+
+function linhaMetricaHtml(label, peso){
+  return `<div class="linha-metrica">
+    <div class="linha-metrica-mover">
+      <button type="button" class="btn-mover" onclick="moverMetrica(this,-1)" title="Mover pra cima">▲</button>
+      <button type="button" class="btn-mover" onclick="moverMetrica(this,1)" title="Mover pra baixo">▼</button>
+    </div>
+    <input type="text" class="metrica-label" value="${escapeHtml(label||'')}" placeholder="ex: Assiduidade, Documentação, Comportamento..." oninput="atualizarNotaAssiduidade(this)">
+    <input type="number" class="metrica-peso" value="${peso!=null?peso:0}" min="0" max="100" step="1" title="Peso (%)">
+    <button type="button" class="btn-remover" onclick="this.closest('.linha-metrica').remove()">✕</button>
+  </div>`;
+}
+function adicionarMetrica(containerId, label, peso){
+  document.getElementById(containerId).insertAdjacentHTML('beforeend', linhaMetricaHtml(label, peso));
+}
+function moverMetrica(btn, direcao){
+  const linha = btn.closest('.linha-metrica');
+  const vizinha = direcao<0 ? linha.previousElementSibling : linha.nextElementSibling;
+  if(!vizinha) return;
+  if(direcao<0) linha.parentNode.insertBefore(linha, vizinha);
+  else linha.parentNode.insertBefore(vizinha, linha);
+}
+function atualizarNotaAssiduidade(input){
+  const linha = input.closest('.linha-metrica');
+  linha.querySelectorAll('.nota-assiduidade').forEach(n=>n.remove());
+  if(slugCampo(input.value)==='assiduidade'){
+    linha.insertAdjacentHTML('beforeend', '<div class="nota-assiduidade">puxa os dias de atestado automaticamente na apuração - continua editável lá</div>');
+  }
+}
+function lerMetricas(containerId){
+  return [...document.querySelectorAll('#'+containerId+' .linha-metrica')].map(l=>({
+    label: l.querySelector('.metrica-label').value.trim(),
+    peso: Number(l.querySelector('.metrica-peso').value)||0,
+  })).filter(m=>m.label);
+}
+
+function abrirModalPerfil(id){
+  EDITANDO_PERFIL_ID = id;
+  const p = id ? PERFIS.find(x=>x.id===id) : null;
+  document.getElementById('modal-perfil-titulo').textContent = p ? `Editar perfil: ${p.nome}` : 'Novo perfil';
+  document.getElementById('pf-nome').value = p ? p.nome : '';
+  document.getElementById('pf-ativa').checked = p ? p.ativa!==false : true;
+  document.getElementById('pf-percentualPool').value = p ? p.percentualPool : 1;
+  document.getElementById('pf-splitMetasOutras').value = p ? p.splitMetasOutras : 70;
+  document.getElementById('pf-splitGerente').value = p ? p.splitGerente : 60;
+  document.getElementById('pf-splitGerenteOutras').value = p ? p.splitGerenteOutras : 25;
+  document.getElementById('pf-unidades').innerHTML = unidadesBoxHtml(p ? p.unidades : []);
+  document.getElementById('pf-metricas-gerente').innerHTML = '';
+  document.getElementById('pf-metricas-colab').innerHTML = '';
+  (p ? p.metricasGerente||[] : []).forEach(m=>adicionarMetrica('pf-metricas-gerente', m.label, m.peso));
+  (p ? p.metricasColaboradores||[] : []).forEach(m=>adicionarMetrica('pf-metricas-colab', m.label, m.peso));
+  document.querySelectorAll('#pf-metricas-gerente .metrica-label, #pf-metricas-colab .metrica-label').forEach(atualizarNotaAssiduidade);
+  document.getElementById('modal-perfil-msg').classList.add('hidden');
+  document.getElementById('modal-perfil-overlay').classList.add('show');
+}
+function fecharModalPerfil(){ document.getElementById('modal-perfil-overlay').classList.remove('show'); }
+
+async function salvarPerfil(){
+  const msg = document.getElementById('modal-perfil-msg');
+  msg.classList.add('hidden');
+  const corpo = {
+    nome: document.getElementById('pf-nome').value.trim(),
+    unidades: [...document.querySelectorAll('#pf-unidades input:checked')].map(i=>i.value),
+    ativa: document.getElementById('pf-ativa').checked,
+    percentualPool: Number(document.getElementById('pf-percentualPool').value),
+    splitMetasOutras: Number(document.getElementById('pf-splitMetasOutras').value),
+    splitGerente: Number(document.getElementById('pf-splitGerente').value),
+    splitGerenteOutras: Number(document.getElementById('pf-splitGerenteOutras').value),
+    metricasGerente: lerMetricas('pf-metricas-gerente'),
+    metricasColaboradores: lerMetricas('pf-metricas-colab'),
+  };
+  if(!corpo.nome){ msg.textContent = 'Informe o nome do perfil.'; msg.className = 'msg err'; msg.classList.remove('hidden'); return; }
+  try{
+    const resp = await fetch(EDITANDO_PERFIL_ID ? '/api/bonificacao/perfis/'+EDITANDO_PERFIL_ID : '/api/bonificacao/perfis', {
+      method: EDITANDO_PERFIL_ID ? 'PUT' : 'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if(resp.status===202){ fecharModalPerfil(); await carregarPerfis(); return; }
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar o perfil.');
+    fecharModalPerfil();
+    await carregarPerfis();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+}
+async function excluirPerfil(id, nome){
+  if(!confirm(`Excluir o perfil "${nome}"? As unidades dele ficam sem configuração até entrarem em outro perfil.`)) return;
+  try{
+    const resp = await fetch('/api/bonificacao/perfis/'+id, { method:'DELETE' });
+    if(resp.status===202){ await carregarPerfis(); return; }
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok) throw new Error(data.error || 'Erro ao excluir.');
+    await carregarPerfis();
+  }catch(err){ alert(err.message); }
+}
+
+// ---------------------------------------------------------------- Apurar
+function popularSeletorUnidades(){
+  const sel = document.getElementById('ap-unidade');
+  sel.innerHTML = UNIDADES_PERMITIDAS.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(nomeUnidade(c))}</option>`).join('');
+}
+
+async function carregarApuracao(){
+  const unidade = document.getElementById('ap-unidade').value;
+  const mes = document.getElementById('ap-mes').value;
+  document.getElementById('ap-sem-perfil').classList.add('hidden');
+  document.getElementById('ap-conteudo').classList.add('hidden');
+  if(!unidade || !mes) return;
+  let data;
+  try{
+    data = await fetch(`/api/bonificacao?unidade=${encodeURIComponent(unidade)}&mes=${encodeURIComponent(mes)}`).then(r=>r.json());
+  }catch(e){ return; }
+  APURACAO_ATUAL = data;
+  if(data.semPerfil){
+    document.getElementById('ap-sem-perfil-atalho').classList.toggle('hidden', !(ME.role==='master'||ME.isAdmin));
+    document.getElementById('ap-sem-perfil').classList.remove('hidden');
+    return;
+  }
+  renderApuracao(data);
+  document.getElementById('ap-conteudo').classList.remove('hidden');
+}
+
+function renderApuracao(a){
+  const fechado = a.status==='fechado';
+  const cards = [];
+  if(a.faturamento!=null) cards.push({rotulo:'Faturamento do mês (Fechamento)', valor: fmtMoney(a.faturamento)});
+  cards.push({rotulo:'Colaboradores ativos', valor: String(a.colaboradoresResumo ? a.colaboradoresResumo.quantidade : 0)});
+  if(a.pool!=null) cards.push({rotulo:'Pool do mês', valor: fmtMoney(a.pool)});
+  document.getElementById('ap-cards').innerHTML = cards.map(c=>`<div class="card"><div class="rotulo">${escapeHtml(c.rotulo)}</div><div class="valor">${c.valor}</div></div>`).join('');
+  document.getElementById('ap-status-linha').innerHTML = `Perfil: <b>${escapeHtml(a.perfilNome)}</b> · <span class="badge ${fechado?'fechado':'rascunho'}">${fechado?'fechado':'rascunho'}</span>${fechado&&a.fechadoPorEmail?` · fechado por ${escapeHtml(a.fechadoPorEmail)}`:''}`;
+
+  document.getElementById('ap-bloco-gerente').style.display = a.temGerente===false && !a.metricasGerente.length ? 'none' : '';
+  document.getElementById('ap-gerente-vazio-msg').classList.toggle('hidden', !!(a.metricasGerente||[]).length);
+  document.getElementById('ap-gerente-lista').innerHTML = renderCompletionInputs(a.metricasGerente, a.completionsGerente, a.sugestaoAssiduidade, 'ger', fechado);
+
+  document.getElementById('ap-bloco-colab').style.display = !a.metricasColaboradores.length ? 'none' : '';
+  document.getElementById('ap-colab-vazio-msg').classList.toggle('hidden', !!(a.metricasColaboradores||[]).length);
+  document.getElementById('ap-colab-lista').innerHTML = renderCompletionInputs(a.metricasColaboradores, a.completionsColaboradores, a.sugestaoAssiduidade, 'col', fechado);
+
+  renderResultado(a);
+
+  document.getElementById('ap-btn-salvar').classList.toggle('hidden', fechado);
+  document.getElementById('ap-btn-fechar').classList.toggle('hidden', fechado || !(ME.role==='master'||ME.isAdmin));
+  document.getElementById('ap-msg').classList.add('hidden');
+}
+function renderCompletionInputs(metricas, completions, sugestaoAssiduidade, prefixo, fechado){
+  const mapa = new Map((completions||[]).map(c=>[c.campo, c.percentual]));
+  return (metricas||[]).map(m=>{
+    const ehAssiduidade = m.campo==='assiduidade';
+    const valor = mapa.has(m.campo) ? mapa.get(m.campo) : (ehAssiduidade && sugestaoAssiduidade!=null ? sugestaoAssiduidade : 0);
+    return `<div class="completion-linha">
+      <div><div class="nome">${escapeHtml(m.label)}</div><div class="peso">peso ${m.peso}%${ehAssiduidade?' · sugestão a partir dos atestados do mês - ajuste se precisar':''}</div></div>
+      <input type="number" min="0" max="100" step="1" data-campo="${escapeHtml(m.campo)}" class="completion-${prefixo}" value="${valor}" ${fechado?'disabled':''} oninput="renderResultado(APURACAO_ATUAL, true)">
+    </div>`;
+  }).join('');
+}
+function lerCompletions(prefixo){
+  return [...document.querySelectorAll('.completion-'+prefixo)].map(i=>({ campo: i.dataset.campo, percentual: Number(i.value)||0 }));
+}
+// recalcula ao vivo enquanto a pessoa digita, sem esperar o Salvar - a
+// mecânica é pura (mesma fórmula de bonificacao.js/calcular), então dá pra
+// espelhar aqui sem chamada nenhuma ao servidor
+function calcularLocal(a, completionsGerente, completionsColaboradores){
+  const taxa = (metricas, completions)=>{
+    if(!metricas || !metricas.length) return 0;
+    const mapa = new Map(completions.map(c=>[c.campo, c.percentual]));
+    return metricas.reduce((s,m)=>{ const pct = Number(mapa.get(m.campo)); const ok = Number.isFinite(pct) ? Math.max(0,Math.min(100,pct)) : 0; return s + (ok*m.peso)/100; }, 0);
+  };
+  const taxaGerente = taxa(a.metricasGerente, completionsGerente);
+  const taxaColab = taxa(a.metricasColaboradores, completionsColaboradores);
+  const pool = a.pool!=null ? a.pool : null;
+  return { taxaGerente, taxaColab };
+}
+function renderResultado(a, aoVivo){
+  if(!a) return;
+  const completionsGerente = lerCompletions('ger');
+  const completionsColaboradores = lerCompletions('col');
+  const podeVerTotal = a.faturamento!=null;
+  const cards = [];
+  cards.push({rotulo:'Gerente recebe', valor: fmtMoney(a.gerenteRecebe), destaque:true});
+  if(a.colaboradoresResumo){
+    cards.push({rotulo:'Equipe recebe (total)', valor: fmtMoney(a.colaboradoresResumo.totalRecebem)});
+    cards.push({rotulo:'Por pessoa', valor: fmtMoney(a.colaboradoresResumo.porPessoa)});
+  }
+  if(podeVerTotal){
+    cards.push({rotulo:'Taxa gerente', valor: (a.taxaGerente||0)+'%'});
+    cards.push({rotulo:'Taxa colaboradores', valor: (a.taxaColab||0)+'%'});
+  }
+  document.getElementById('ap-resultado-cards').innerHTML = cards.map(c=>`<div class="card${c.destaque?' destaque':''}"><div class="rotulo">${escapeHtml(c.rotulo)}</div><div class="valor">${c.valor}</div></div>`).join('');
+  const nominal = document.getElementById('ap-colab-nominal');
+  if(a.colaboradores && a.colaboradores.length){
+    nominal.innerHTML = `<div class="sub" style="margin-top:10px;">Nome a nome</div>` + a.colaboradores.map(c=>`<div class="colab-linha"><span>${escapeHtml(c.nome)}</span><b>${fmtMoney(c.valor)}</b></div>`).join('');
+  } else { nominal.innerHTML = ''; }
+  if(aoVivo){ /* recálculo ao vivo é só visual - o valor de verdade sai do servidor quando salva */ }
+}
+
+async function salvarApuracao(){
+  const msg = document.getElementById('ap-msg');
+  const btn = document.getElementById('ap-btn-salvar');
+  msg.classList.add('hidden');
+  btn.disabled = true;
+  try{
+    const resp = await fetch('/api/bonificacao', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        unidade: document.getElementById('ap-unidade').value,
+        mes: document.getElementById('ap-mes').value,
+        completionsGerente: lerCompletions('ger'),
+        completionsColaboradores: lerCompletions('col'),
+      }),
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
+    APURACAO_ATUAL = data;
+    renderApuracao(data);
+    msg.textContent = '✅ Salvo!'; msg.className = 'msg ok'; msg.classList.remove('hidden');
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{ btn.disabled = false; }
+}
+async function fecharApuracao(){
+  if(!confirm('Fechar essa apuração? Depois de fechada, ninguém mais edita as métricas desse mês pra essa unidade.')) return;
+  const msg = document.getElementById('ap-msg');
+  try{
+    const resp = await fetch('/api/bonificacao/fechar', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ unidade: document.getElementById('ap-unidade').value, mes: document.getElementById('ap-mes').value }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if(resp.status===202){ msg.textContent = '⏳ Enviado pra aprovação (QA Master).'; msg.className = 'msg ok'; msg.classList.remove('hidden'); return; }
+    if(!resp.ok) throw new Error(data.error || 'Erro ao fechar.');
+    APURACAO_ATUAL = data;
+    renderApuracao(data);
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+}
+
+// ---------------------------------------------------------------- Histórico
+async function carregarHistorico(){
+  const mes = document.getElementById('hist-mes').value;
+  if(!mes) return;
+  const resp = await fetch('/api/bonificacao/resumo?mes='+encodeURIComponent(mes));
+  if(resp.status===403){
+    document.getElementById('hist-sem-permissao').classList.remove('hidden');
+    document.getElementById('hist-conteudo').classList.add('hidden');
+    return;
+  }
+  document.getElementById('hist-sem-permissao').classList.add('hidden');
+  const data = await resp.json();
+  document.getElementById('hist-conteudo').classList.remove('hidden');
+  document.getElementById('hist-cards').innerHTML = [
+    {rotulo:'Unidades com perfil', valor: `${data.unidadesComPerfil} / ${data.totalUnidades}`},
+    {rotulo:'Faturamento total', valor: fmtMoney(data.faturamentoTotal)},
+    {rotulo:'Gerentes recebem', valor: fmtMoney(data.gerentesRecebem)},
+    {rotulo:'Colaboradores recebem', valor: fmtMoney(data.colaboradoresRecebem)},
+    {rotulo:'Apurações fechadas', valor: `${data.fechadas} / ${data.unidadesComPerfil}`},
+  ].map(c=>`<div class="card"><div class="rotulo">${escapeHtml(c.rotulo)}</div><div class="valor">${c.valor}</div></div>`).join('');
+  document.getElementById('hist-vazio').classList.toggle('hidden', (data.porUnidade||[]).length>0);
+  document.getElementById('tbody-historico').innerHTML = (data.porUnidade||[]).map(u=>`<tr>
+    <td>${escapeHtml(nomeUnidade(u.unidade))}</td>
+    <td>${escapeHtml(u.perfilNome)}</td>
+    <td><span class="badge ${u.status==='fechado'?'fechado':'rascunho'}">${u.status}</span></td>
+    <td>${fmtMoney(u.gerenteRecebe)}</td>
+    <td>${fmtMoney(u.colabTotal)}</td>
+  </tr>`).join('');
+}
+
+async function boot(){
+  const res = await fetch('/api/me');
+  if(!res.ok){ logout(); return; }
+  ME = await res.json();
+  const temSecao = ME.role==='master' || (ME.permissions && (ME.permissions.sections||[]).includes('bonificacao'));
+  if(!temSecao){
+    document.getElementById('sem-acesso').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('root').classList.remove('hidden');
+  await mesclarUnidadesExtras();
+
+  UNIDADES_PERMITIDAS = ME.role==='master' ? [] : (ME.permissions.unidades||[]);
+  // a lista completa (codigo->nome) sai do MESMO mapa usado pra resolver
+  // nome (estático + extras dinâmicas) - /api/meta/unidades é Master-only e
+  // um Admin (que também mexe em Perfis, ver rota no index.js) não alcança
+  UNIDADES_TODAS = Object.entries(UNIDADES_NOMES).map(([codigo,nome])=>({codigo,nome}));
+  if(ME.role==='master' || ME.isAdmin){
+    document.getElementById('btn-aba-perfis').classList.remove('hidden');
+    if(ME.role==='master' && !UNIDADES_PERMITIDAS.length) UNIDADES_PERMITIDAS = UNIDADES_TODAS.map(u=>u.codigo);
+  }
+  popularSeletorUnidades();
+  document.getElementById('ap-mes').value = mesAtualRecife();
+  document.getElementById('hist-mes').value = mesAtualRecife();
+  carregarApuracao();
+}
+boot();
+</script>
+<script src="/recolher.js"></script>
+<script src="/nav-menu.js"></script>
+</body>
+</html>

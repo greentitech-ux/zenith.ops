@@ -5290,6 +5290,89 @@ setTimeout(async () => {
   if (!okBonificacao) ruins += 1;
   console.log(`${okBonificacao ? '✓' : '✗'} Bonificação: motor bate com a conta na mão, unidade só num perfil por vez, permissão poda o payload`);
 
+  // ---------- Bonificação: as ROTAS de verdade (não só o módulo) ----------
+  // O bloco acima chama bonificacao.js/bonificacaoPerfis.js direto - prova a
+  // mecânica, mas não passa pelo Express (auth, requireSection,
+  // desviarSeQaMaster, parsing do corpo). Aqui bate em CADA rota pela porta
+  // 8899 de verdade, como Master, do jeito que o resto da suíte já faz.
+  const cabMasterBonif = token ? { Authorization: 'Bearer ' + token } : {};
+  let okBonifRotas = false;
+  try {
+    const rCriar = await postarJson('/api/bonificacao/perfis', {
+      nome: 'TESTE HTTP Perfil', unidades: ['TESTE_HTTP_UN'],
+      percentualPool: 1, splitMetasOutras: 70, splitGerente: 60, splitGerenteOutras: 25,
+      metricasGerente: [{ label: 'Faturamento', peso: 100 }],
+      metricasColaboradores: [{ label: 'Assiduidade', peso: 100 }],
+    }, cabMasterBonif);
+    const perfilCriado = JSON.parse(rCriar.corpo || '{}');
+
+    const rLista = await pedir('/api/bonificacao/perfis', cabMasterBonif);
+    const lista = JSON.parse(rLista.corpo || '[]');
+
+    const rApuracao1 = await pedir('/api/bonificacao?unidade=TESTE_HTTP_UN&mes=2026-08', cabMasterBonif);
+    const apuracao1 = JSON.parse(rApuracao1.corpo || '{}');
+    // unidade sem NENHUM perfil configurado (Master, então passa do guard de
+    // unidade - o que muda aqui é só a resposta de "sem perfil")
+    const rSemPerfilNenhum = await pedir('/api/bonificacao?unidade=TESTE_HTTP_UN_SEM_PERFIL&mes=2026-08', cabMasterBonif);
+    const semPerfilNenhum = JSON.parse(rSemPerfilNenhum.corpo || '{}');
+
+    const rSalvar = await putJson('/api/bonificacao', {
+      unidade: 'TESTE_HTTP_UN', mes: '2026-08',
+      completionsGerente: [{ campo: 'faturamento', percentual: 90 }],
+      completionsColaboradores: [{ campo: 'assiduidade', percentual: 80 }],
+    }, cabMasterBonif);
+    const apuracaoSalva = JSON.parse(rSalvar.corpo || '{}');
+
+    const rResumo = await pedir('/api/bonificacao/resumo?mes=2026-08', cabMasterBonif);
+    const resumo = JSON.parse(rResumo.corpo || '{}');
+
+    // usuário comum, só com a seção e a PRÓPRIA unidade - prova que a rota
+    // usa permissions.unidades igual o resto do app (sem bypass de Admin
+    // "vê tudo", que era o bug original desta rota antes de revisar)
+    const bcrypt = require('bcryptjs');
+    DOCS.set('users/u-bonif-teste', {
+      passwordHash: bcrypt.hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      email: 'bonif-teste@teste.local', username: 'bonifteste',
+      permissions: { sections: ['bonificacao'], unidades: ['TESTE_HTTP_UN'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const tokenBonifLimitado = (await auth.login('bonif-teste@teste.local', 'SenhaDeTeste!2026')).token;
+    const cabLimitado = { Authorization: 'Bearer ' + tokenBonifLimitado };
+    const rDentro = await pedir('/api/bonificacao?unidade=TESTE_HTTP_UN&mes=2026-08', cabLimitado);
+    const rUnidadeFora = await pedir('/api/bonificacao?unidade=UNIDADE_QUE_NAO_TA_NO_ACESSO&mes=2026-08', cabLimitado);
+
+    const rFechar = await postarJson('/api/bonificacao/fechar', { unidade: 'TESTE_HTTP_UN', mes: '2026-08' }, cabMasterBonif);
+    const apuracaoFechada = JSON.parse(rFechar.corpo || '{}');
+
+    const rSalvarDepoisDeFechado = await putJson('/api/bonificacao', {
+      unidade: 'TESTE_HTTP_UN', mes: '2026-08', completionsGerente: [], completionsColaboradores: [],
+    }, cabMasterBonif);
+
+    const rSemAuth = await pedir('/api/bonificacao?unidade=TESTE_HTTP_UN&mes=2026-08');
+
+    const rExcluir = await pedirJsonDelete('/api/bonificacao/perfis/' + perfilCriado.id, cabMasterBonif);
+
+    const conf = {
+      'POST cria o perfil e devolve o id': rCriar.status === 200 && !!perfilCriado.id,
+      'GET lista traz o perfil criado': lista.some((p) => p.id === perfilCriado.id),
+      'GET apuração acha o perfil pela unidade': apuracao1.perfilNome === 'TESTE HTTP Perfil' && apuracao1.status === 'rascunho',
+      'unidade sem perfil nenhum devolve semPerfil (não inventa default)': semPerfilNenhum.semPerfil === true,
+      'PUT grava as completions e recalcula (90% de taxa)': apuracaoSalva.taxaGerente === 90 && apuracaoSalva.status === 'rascunho',
+      'GET resumo do mês inclui a unidade': (resumo.porUnidade || []).some((u) => u.unidade === 'TESTE_HTTP_UN'),
+      'usuário comum com a unidade no acesso consegue ler a própria apuração': rDentro.status === 200,
+      'o MESMO usuário não alcança unidade fora do próprio acesso (404)': rUnidadeFora.status === 404,
+      'POST fechar muda o status pra fechado': rFechar.status === 200 && apuracaoFechada.status === 'fechado',
+      'depois de fechada, PUT é recusado (não silenciosamente ignorado)': rSalvarDepoisDeFechado.status === 400,
+      'sem token nenhum, a rota exige login (401)': rSemAuth.status === 401,
+      'DELETE remove o perfil de teste (limpeza)': rExcluir.status === 200,
+    };
+    const ruinsBR = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okBonifRotas = !ruinsBR.length;
+    if (ruinsBR.length) console.log(`  falhou em: ${ruinsBR.join(' · ')}`);
+  } catch (e) { okBonifRotas = false; console.log('  erro: ' + e.message); }
+  if (!okBonifRotas) ruins += 1;
+  console.log(`${okBonifRotas ? '✓' : '✗'} Bonificação: as rotas de verdade (perfil → apuração → fechar → resumo) respondem pela porta`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

@@ -93,6 +93,9 @@
     { grupo: 'BigBrother', itens: [
       { id: 'nav-rh', href: '/rh.html', icone: '🧑‍💼', rotulo: 'RH', secoes: ['rh'] },
     ] },
+    { grupo: 'Bonificação', itens: [
+      { id: 'nav-bonificacao', href: '/bonificacao.html', icone: '🏆', rotulo: 'Bonificação', secoes: ['bonificacao'] },
+    ] },
     { grupo: 'Administração', itens: [
       { id: 'nav-usuarios', href: '/usuarios.html', icone: '👤', rotulo: 'Usuários', master: true },
       { id: 'nav-grupos', href: '/grupos.html', icone: '🏷️', rotulo: 'Grupos', master: true },
