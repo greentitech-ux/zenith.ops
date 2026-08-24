@@ -5189,6 +5189,190 @@ setTimeout(async () => {
   if (!okTermo) ruins += 1;
   console.log(`${okTermo ? '\u2713' : '\u2717'} Termo do parque: da pra NAO autorizar o uso de imagem, e sem "undefined" impresso`);
 
+  // ---------- Bonificação: motor de cálculo + perfis salvos + visibilidade ----------
+  // Mecânica portada de um simulador solto do Master (bônus de gerente/
+  // equipe em cima do faturamento) - aqui é só a fórmula pura, testada com
+  // números fixos conferidos na mão (mesmo espírito do motor de
+  // inventario.js). Cobre também o invariante "unidade pertence a 1 perfil
+  // por vez" (mesma ideia de grupoDaUnidade em grupos.js) e a poda de campos
+  // por permissão - pedido explícito do usuário foi "nunca mostrar todos pra
+  // todo mundo", e isso tem que acontecer no SERVIDOR, antes de sair pro
+  // navegador, não escondido só no CSS.
+  let okBonificacao = false;
+  try {
+    const bonificacaoPerfis = require('./bonificacaoPerfis');
+    const bonificacao = require('./bonificacao');
+
+    // ---- 1) motor puro: números fixos conferidos na mão ----
+    const perfilExemplo = {
+      percentualPool: 1, splitMetasOutras: 70, splitGerente: 60, splitGerenteOutras: 25,
+      metricasGerente: [
+        { campo: 'faturamento', peso: 40 }, { campo: 'documentacao', peso: 35 }, { campo: 'gestaoPessoal', peso: 25 },
+      ],
+      metricasColaboradores: [
+        { campo: 'assiduidade', peso: 40 }, { campo: 'treinamentos', peso: 30 }, { campo: 'comportamento', peso: 20 }, { campo: 'iniciativas', peso: 10 },
+      ],
+    };
+    const completionsGerenteEx = [
+      { campo: 'faturamento', percentual: 95 }, { campo: 'documentacao', percentual: 100 }, { campo: 'gestaoPessoal', percentual: 88 },
+    ];
+    const completionsColabEx = [
+      { campo: 'assiduidade', percentual: 100 }, { campo: 'treinamentos', percentual: 80 }, { campo: 'comportamento', percentual: 95 }, { campo: 'iniciativas', percentual: 70 },
+    ];
+    const r1 = bonificacao.calcular(perfilExemplo, 100000, 12, completionsGerenteEx, completionsColabEx);
+
+    // ---- 2) casos de borda ----
+    const rFatZero = bonificacao.calcular(perfilExemplo, 0, 12, completionsGerenteEx, completionsColabEx);
+    const rSemFuncionario = bonificacao.calcular(perfilExemplo, 100000, 0, completionsGerenteEx, completionsColabEx);
+    const rSoColab = bonificacao.calcular({ ...perfilExemplo, metricasGerente: [] }, 100000, 12, [], completionsColabEx);
+    const rSoGerente = bonificacao.calcular({ ...perfilExemplo, metricasColaboradores: [] }, 100000, 12, completionsGerenteEx, []);
+    // pesos que NÃO somam 100% (40+30=70) - a taxa fica proporcional ao peso
+    // usado, sem normalizar pro que faltou: o sistema não inventa os 30% que
+    // não foram configurados (mesma lógica de "não inventar rótulo/número"
+    // do CLAUDE.md §6, aplicada ao motor de cálculo)
+    const rPesoIncompleto = bonificacao.calcular(
+      { ...perfilExemplo, metricasGerente: [{ campo: 'a', peso: 40 }, { campo: 'b', peso: 30 }], metricasColaboradores: [] },
+      100000, 12, [{ campo: 'a', percentual: 100 }, { campo: 'b', percentual: 100 }], [],
+    );
+
+    // ---- 3) perfis: uma unidade só pertence a 1 perfil por vez ----
+    const perfilA = await bonificacaoPerfis.criar({ nome: 'TESTE Domino\'s', unidades: ['TESTE_UN_X', 'TESTE_UN_Y'], criadoPorEmail: 'teste@local' });
+    const perfilB = await bonificacaoPerfis.criar({ nome: 'TESTE Domino\'s Caruaru', unidades: ['TESTE_UN_Y', 'TESTE_UN_Z'], criadoPorEmail: 'teste@local' });
+    const perfilARelido = await bonificacaoPerfis.obter(perfilA.id);
+    const perfilDaUnidadeY = await bonificacaoPerfis.perfilDaUnidade('TESTE_UN_Y');
+    const perfilDaUnidadeSemDono = await bonificacaoPerfis.perfilDaUnidade('TESTE_UN_NUNCA_CONFIGURADA');
+
+    // ---- 4) visibilidade: a mesma apuração, 3 combinações de permissão ----
+    const apuracaoFake = {
+      semPerfil: false, unidade: 'TESTE_UN_X', mes: '2026-08', status: 'rascunho', perfilNome: 'TESTE Domino\'s',
+      temGerente: true, temColab: true, gerenteRecebe: 470.25,
+      colabTotal: 454.5, colabPorPessoa: 37.88,
+      fechadoPorEmail: null, fechadoEm: null,
+      metricasGerente: perfilExemplo.metricasGerente, metricasColaboradores: perfilExemplo.metricasColaboradores,
+      completionsGerente: completionsGerenteEx, completionsColaboradores: completionsColabEx,
+      sugestaoAssiduidade: 96,
+      faturamento: 100000, pool: 1000, metas: 700, outras: 300, taxaGerente: 95, taxaColab: 90,
+      funcionarios: [{ id: 'f1', nome: 'Colaborador Teste' }],
+    };
+    const semNada = bonificacao.montarRespostaPorPermissao(apuracaoFake, { podeVerTotal: false, podeVerColaboradores: false });
+    const soTotal = bonificacao.montarRespostaPorPermissao(apuracaoFake, { podeVerTotal: true, podeVerColaboradores: false });
+    const soColab = bonificacao.montarRespostaPorPermissao(apuracaoFake, { podeVerTotal: false, podeVerColaboradores: true });
+
+    const conf = {
+      // motor puro
+      'taxa do gerente bate com a conta na mão (95%)': r1.taxaGerente === 95,
+      'taxa dos colaboradores bate com a conta na mão (90%)': r1.taxaColab === 90,
+      'gerente recebe exatamente R$470,25': r1.gerenteRecebe === 470.25,
+      'colaboradores recebem R$454,50 no total': r1.colabTotal === 454.5,
+      'e R$37,88 por pessoa (454,50 / 12)': r1.colabPorPessoa === 37.88,
+      'faturamento zero zera tudo (não gera bônus do nada)': rFatZero.gerenteRecebe === 0 && rFatZero.colabTotal === 0,
+      'zero funcionário ativo não quebra a divisão (por pessoa = 0)': rSemFuncionario.colabPorPessoa === 0,
+      'perfil só-colaborador não bonifica gerente': rSoColab.gerenteRecebe === 0 && rSoColab.colabTotal > 0,
+      'perfil só-gerente não bonifica colaborador': rSoGerente.colabTotal === 0 && rSoGerente.gerenteRecebe > 0,
+      'pesos que não somam 100% não são normalizados (fica no que foi configurado)': rPesoIncompleto.taxaGerente === 70,
+      // perfis nomeados e salvos
+      'perfil B "rouba" a unidade Y do perfil A ao ser criado': perfilARelido.unidades.includes('TESTE_UN_X') && !perfilARelido.unidades.includes('TESTE_UN_Y'),
+      'perfilDaUnidade acha o dono certo (perfil B, não A)': !!perfilDaUnidadeY && perfilDaUnidadeY.id === perfilB.id,
+      'unidade nunca configurada não devolve perfil nenhum (não inventa default)': perfilDaUnidadeSemDono === null,
+      // visibilidade - a poda tem que acontecer ANTES de sair pro navegador
+      'sem nenhuma das 2 flags: não vaza faturamento': semNada.faturamento === undefined,
+      'sem nenhuma das 2 flags: não vaza lista nominal': semNada.colaboradores === undefined,
+      'sem nenhuma das 2 flags: ainda mostra o agregado dos colaboradores': !!semNada.colaboradoresResumo && semNada.colaboradoresResumo.porPessoa === 37.88,
+      'com podeVerValorTotal: mostra faturamento/pool/taxas': soTotal.faturamento === 100000 && soTotal.pool === 1000 && soTotal.taxaGerente === 95,
+      'com podeVerValorTotal (sem verColaboradores): continua sem nome': soTotal.colaboradores === undefined,
+      'com podeVerColaboradores: mostra nome a nome': Array.isArray(soColab.colaboradores) && soColab.colaboradores[0].nome === 'Colaborador Teste',
+      'com podeVerColaboradores (sem verValorTotal): continua sem faturamento': soColab.faturamento === undefined,
+    };
+    const ruinsB = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okBonificacao = !ruinsB.length;
+    if (ruinsB.length) console.log(`  falhou em: ${ruinsB.join(' · ')} (taxaGerente=${r1.taxaGerente} gerenteRecebe=${r1.gerenteRecebe} colabTotal=${r1.colabTotal} colabPorPessoa=${r1.colabPorPessoa})`);
+  } catch (e) { okBonificacao = false; console.log('  erro: ' + e.message); }
+  if (!okBonificacao) ruins += 1;
+  console.log(`${okBonificacao ? '✓' : '✗'} Bonificação: motor bate com a conta na mão, unidade só num perfil por vez, permissão poda o payload`);
+
+  // ---------- Bonificação: as ROTAS de verdade (não só o módulo) ----------
+  // O bloco acima chama bonificacao.js/bonificacaoPerfis.js direto - prova a
+  // mecânica, mas não passa pelo Express (auth, requireSection,
+  // desviarSeQaMaster, parsing do corpo). Aqui bate em CADA rota pela porta
+  // 8899 de verdade, como Master, do jeito que o resto da suíte já faz.
+  const cabMasterBonif = token ? { Authorization: 'Bearer ' + token } : {};
+  let okBonifRotas = false;
+  try {
+    const rCriar = await postarJson('/api/bonificacao/perfis', {
+      nome: 'TESTE HTTP Perfil', unidades: ['TESTE_HTTP_UN'],
+      percentualPool: 1, splitMetasOutras: 70, splitGerente: 60, splitGerenteOutras: 25,
+      metricasGerente: [{ label: 'Faturamento', peso: 100 }],
+      metricasColaboradores: [{ label: 'Assiduidade', peso: 100 }],
+    }, cabMasterBonif);
+    const perfilCriado = JSON.parse(rCriar.corpo || '{}');
+
+    const rLista = await pedir('/api/bonificacao/perfis', cabMasterBonif);
+    const lista = JSON.parse(rLista.corpo || '[]');
+
+    const rApuracao1 = await pedir('/api/bonificacao?unidade=TESTE_HTTP_UN&mes=2026-08', cabMasterBonif);
+    const apuracao1 = JSON.parse(rApuracao1.corpo || '{}');
+    // unidade sem NENHUM perfil configurado (Master, então passa do guard de
+    // unidade - o que muda aqui é só a resposta de "sem perfil")
+    const rSemPerfilNenhum = await pedir('/api/bonificacao?unidade=TESTE_HTTP_UN_SEM_PERFIL&mes=2026-08', cabMasterBonif);
+    const semPerfilNenhum = JSON.parse(rSemPerfilNenhum.corpo || '{}');
+
+    const rSalvar = await putJson('/api/bonificacao', {
+      unidade: 'TESTE_HTTP_UN', mes: '2026-08',
+      completionsGerente: [{ campo: 'faturamento', percentual: 90 }],
+      completionsColaboradores: [{ campo: 'assiduidade', percentual: 80 }],
+    }, cabMasterBonif);
+    const apuracaoSalva = JSON.parse(rSalvar.corpo || '{}');
+
+    const rResumo = await pedir('/api/bonificacao/resumo?mes=2026-08', cabMasterBonif);
+    const resumo = JSON.parse(rResumo.corpo || '{}');
+
+    // usuário comum, só com a seção e a PRÓPRIA unidade - prova que a rota
+    // usa permissions.unidades igual o resto do app (sem bypass de Admin
+    // "vê tudo", que era o bug original desta rota antes de revisar)
+    const bcrypt = require('bcryptjs');
+    DOCS.set('users/u-bonif-teste', {
+      passwordHash: bcrypt.hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      email: 'bonif-teste@teste.local', username: 'bonifteste',
+      permissions: { sections: ['bonificacao'], unidades: ['TESTE_HTTP_UN'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const tokenBonifLimitado = (await auth.login('bonif-teste@teste.local', 'SenhaDeTeste!2026')).token;
+    const cabLimitado = { Authorization: 'Bearer ' + tokenBonifLimitado };
+    const rDentro = await pedir('/api/bonificacao?unidade=TESTE_HTTP_UN&mes=2026-08', cabLimitado);
+    const rUnidadeFora = await pedir('/api/bonificacao?unidade=UNIDADE_QUE_NAO_TA_NO_ACESSO&mes=2026-08', cabLimitado);
+
+    const rFechar = await postarJson('/api/bonificacao/fechar', { unidade: 'TESTE_HTTP_UN', mes: '2026-08' }, cabMasterBonif);
+    const apuracaoFechada = JSON.parse(rFechar.corpo || '{}');
+
+    const rSalvarDepoisDeFechado = await putJson('/api/bonificacao', {
+      unidade: 'TESTE_HTTP_UN', mes: '2026-08', completionsGerente: [], completionsColaboradores: [],
+    }, cabMasterBonif);
+
+    const rSemAuth = await pedir('/api/bonificacao?unidade=TESTE_HTTP_UN&mes=2026-08');
+
+    const rExcluir = await pedirJsonDelete('/api/bonificacao/perfis/' + perfilCriado.id, cabMasterBonif);
+
+    const conf = {
+      'POST cria o perfil e devolve o id': rCriar.status === 200 && !!perfilCriado.id,
+      'GET lista traz o perfil criado': lista.some((p) => p.id === perfilCriado.id),
+      'GET apuração acha o perfil pela unidade': apuracao1.perfilNome === 'TESTE HTTP Perfil' && apuracao1.status === 'rascunho',
+      'unidade sem perfil nenhum devolve semPerfil (não inventa default)': semPerfilNenhum.semPerfil === true,
+      'PUT grava as completions e recalcula (90% de taxa)': apuracaoSalva.taxaGerente === 90 && apuracaoSalva.status === 'rascunho',
+      'GET resumo do mês inclui a unidade': (resumo.porUnidade || []).some((u) => u.unidade === 'TESTE_HTTP_UN'),
+      'usuário comum com a unidade no acesso consegue ler a própria apuração': rDentro.status === 200,
+      'o MESMO usuário não alcança unidade fora do próprio acesso (404)': rUnidadeFora.status === 404,
+      'POST fechar muda o status pra fechado': rFechar.status === 200 && apuracaoFechada.status === 'fechado',
+      'depois de fechada, PUT é recusado (não silenciosamente ignorado)': rSalvarDepoisDeFechado.status === 400,
+      'sem token nenhum, a rota exige login (401)': rSemAuth.status === 401,
+      'DELETE remove o perfil de teste (limpeza)': rExcluir.status === 200,
+    };
+    const ruinsBR = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okBonifRotas = !ruinsBR.length;
+    if (ruinsBR.length) console.log(`  falhou em: ${ruinsBR.join(' · ')}`);
+  } catch (e) { okBonifRotas = false; console.log('  erro: ' + e.message); }
+  if (!okBonifRotas) ruins += 1;
+  console.log(`${okBonifRotas ? '✓' : '✗'} Bonificação: as rotas de verdade (perfil → apuração → fechar → resumo) respondem pela porta`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

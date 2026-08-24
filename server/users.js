@@ -13,7 +13,7 @@ const sessions = require('./sessions');
 
 const usersRef = db.collection('users');
 
-const VALID_SECTIONS = ['monitor', 'disputas', 'cofre', 'fechamentos', 'lancamento', 'sangria', 'entregas', 'entregas-lancamento', 'ifood', 'solicitacoes', 'tecnico', 'suporte', 'manutencao', 'inventario', 'parque', 'parque-checkin', 'parque-loja', 'festas', 'abastecimento-carrinho', 'abastecimento-loja', 'ativos-ti', 'central-solucoes', 'rh', 'formularios'];
+const VALID_SECTIONS = ['monitor', 'disputas', 'cofre', 'fechamentos', 'lancamento', 'sangria', 'entregas', 'entregas-lancamento', 'ifood', 'solicitacoes', 'tecnico', 'suporte', 'manutencao', 'inventario', 'parque', 'parque-checkin', 'parque-loja', 'festas', 'abastecimento-carrinho', 'abastecimento-loja', 'ativos-ti', 'central-solucoes', 'rh', 'formularios', 'bonificacao'];
 
 // a qual vertical de negocio (empresas.TIPOS_NEGOCIO_VALIDOS) cada secao
 // pertence - usado pra nao mostrar (no checklist de permissoes e no menu)
@@ -359,6 +359,33 @@ async function updatePodeCatalogoEstoque(id, valor) {
   return toPublic(await ref.get());
 }
 
+// as 2 flags da Bonificação (ver bonificacao.js/bonificacaoPerfis.js): quem
+// só tem a seção vê o próprio card ("você recebe R$X"); estas duas abrem
+// visão ALÉM disso - faturamento/pool/taxas por trás da conta, e a lista de
+// colaboradores nome a nome. Pedido explícito do usuário foi "nunca mostrar
+// todos pra todo mundo" - por isso são 2 flags separadas, não uma só.
+async function updatePodeBonifVerValorTotal(id, valor) {
+  const ref = usersRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  if (snap.data().role === 'master') throw new Error('O acesso Master já pode tudo, não precisa dessa permissão.');
+  await ref.update({ podeBonifVerValorTotal: !!valor });
+  invalidarUsuario(id);
+  usersCache.invalidar();
+  return toPublic(await ref.get());
+}
+
+async function updatePodeBonifVerColaboradores(id, valor) {
+  const ref = usersRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  if (snap.data().role === 'master') throw new Error('O acesso Master já pode tudo, não precisa dessa permissão.');
+  await ref.update({ podeBonifVerColaboradores: !!valor });
+  invalidarUsuario(id);
+  usersCache.invalidar();
+  return toPublic(await ref.get());
+}
+
 // "manter sempre conectado": a sessao dessa conta passa a durar 30 dias em
 // vez das 8h padrao (ver auth.js/sessions.js). Pensado originalmente pra
 // login compartilhado de loja/terminal, mas tambem vale pro Master (ex:
@@ -566,6 +593,8 @@ function toPublic(doc) {
     podeCadastrarOperadores: data.role === 'master' ? null : !!data.podeCadastrarOperadores,
     podeRhTodasUnidades: data.role === 'master' ? null : !!data.podeRhTodasUnidades,
     podeRhCadastrarEfetivado: data.role === 'master' ? null : !!data.podeRhCadastrarEfetivado,
+    podeBonifVerValorTotal: data.role === 'master' ? null : !!data.podeBonifVerValorTotal,
+    podeBonifVerColaboradores: data.role === 'master' ? null : !!data.podeBonifVerColaboradores,
     sessaoLonga: !!data.sessaoLonga,
     cargo: data.role === 'master' ? null : data.cargo || null,
     qaMaster: data.role === 'master' ? !!data.qaMaster : null,
@@ -710,6 +739,8 @@ module.exports = {
   updatePodeCadastrarOperadores,
   updatePodeRhTodasUnidades,
   updatePodeRhCadastrarEfetivado,
+  updatePodeBonifVerValorTotal,
+  updatePodeBonifVerColaboradores,
   updateSessaoLonga,
   updateCargo,
   updateUsername,

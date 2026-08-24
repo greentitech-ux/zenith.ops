@@ -84,6 +84,8 @@ const centralCards = require('./centralCards');
 const relatorioMV = require('./relatorioMV');
 const rh = require('./rh');
 const rhCheckin = require('./rhCheckin');
+const bonificacaoPerfis = require('./bonificacaoPerfis');
+const bonificacao = require('./bonificacao');
 const rhAdvertencias = require('./rhAdvertencias');
 const unidadesExtras = require('./unidades');
 const migracaoUnidades = require('./migracaoUnidades');
@@ -1626,6 +1628,8 @@ app.get('/api/me', async (req, res) => {
     podeCadastrarOperadores: req.podeCadastrarOperadores,
     podeRhTodasUnidades: req.podeRhTodasUnidades,
     podeRhCadastrarEfetivado: req.podeRhCadastrarEfetivado,
+    podeBonifVerValorTotal: req.podeBonifVerValorTotal,
+    podeBonifVerColaboradores: req.podeBonifVerColaboradores,
     precisaTrocarSenha: !!req.user.precisaTrocarSenha,
     isQaMaster: req.isQaMaster,
     isQaUser: req.isQaUser,
@@ -3909,6 +3913,8 @@ const EXECUTORES_QA = {
   'usuarios.cadastrarOperadores': (p) => users.updatePodeCadastrarOperadores(p.id, p.valor),
   'usuarios.rhTodasUnidades': (p) => users.updatePodeRhTodasUnidades(p.id, p.valor),
   'usuarios.rhCadastrarEfetivado': (p) => users.updatePodeRhCadastrarEfetivado(p.id, p.valor),
+  'usuarios.bonifVerValorTotal': (p) => users.updatePodeBonifVerValorTotal(p.id, p.valor),
+  'usuarios.bonifVerColaboradores': (p) => users.updatePodeBonifVerColaboradores(p.id, p.valor),
   'usuarios.cargo': (p) => users.updateCargo(p.id, p.cargo),
   'usuarios.resetSenha': (p) => users.resetPassword(p.id, p.password),
   // depois de desbloquear, o aviso pra pessoa sai igual ao caminho direto -
@@ -4346,6 +4352,27 @@ app.put('/api/users/:id/rh-cadastrar-efetivado', auth.requireMaster, async (req,
   try {
     if (await desviarSeQaMaster(req, res, 'usuarios.rhCadastrarEfetivado', `Editar permissão RH (cadastrar efetivado) do acesso ${req.params.id}`, { id: req.params.id, valor: req.body.podeRhCadastrarEfetivado })) return;
     res.json(await users.updatePodeRhCadastrarEfetivado(req.params.id, req.body.podeRhCadastrarEfetivado));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// as 2 flags da Bonificação (ver users.js) - quem só tem a seção 'bonificacao'
+// vê o próprio card; estas abrem faturamento/pool/taxas e a lista nominal de
+// colaboradores. Nunca mostrar todos pra todo mundo (pedido do Master).
+app.put('/api/users/:id/bonif-ver-valor-total', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.bonifVerValorTotal', `Editar permissão Bonificação (ver valor total) do acesso ${req.params.id}`, { id: req.params.id, valor: req.body.podeBonifVerValorTotal })) return;
+    res.json(await users.updatePodeBonifVerValorTotal(req.params.id, req.body.podeBonifVerValorTotal));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/users/:id/bonif-ver-colaboradores', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.bonifVerColaboradores', `Editar permissão Bonificação (ver colaboradores) do acesso ${req.params.id}`, { id: req.params.id, valor: req.body.podeBonifVerColaboradores })) return;
+    res.json(await users.updatePodeBonifVerColaboradores(req.params.id, req.body.podeBonifVerColaboradores));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -5136,6 +5163,112 @@ app.delete('/api/grupos/:id', auth.requireMaster, async (req, res) => {
     if (await desviarSeQaMaster(req, res, 'grupos.excluir', `Excluir grupo ${req.params.id}`, { id: req.params.id })) return;
     await grupos.remove(req.params.id);
     res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- Bonificação: perfis salvos (Master/Admin) + apuração mensal ----------
+// Perfis (percentuais + métricas com peso, por lista de unidades) - ver
+// bonificacaoPerfis.js. Mesma régua de quem mexe em grupos.js: Master ou
+// Admin (a rede inteira, não "por unidade" - quem só tem a seção
+// 'bonificacao' nunca chega nessas rotas, só na apuração abaixo).
+app.get('/api/bonificacao/perfis', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    res.json(await bonificacaoPerfis.listar());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/bonificacao/perfis', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'bonificacao.criarPerfil', `Criar perfil de bonificação: ${req.body?.nome || ''}`, req.body)) return;
+    res.json(await bonificacaoPerfis.criar({ ...req.body, criadoPorEmail: req.user.email }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/bonificacao/perfis/:id', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'bonificacao.editarPerfil', `Editar perfil de bonificação ${req.params.id}`, { id: req.params.id, dados: req.body })) return;
+    res.json(await bonificacaoPerfis.atualizar(req.params.id, { ...req.body, atualizadoPorEmail: req.user.email }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/bonificacao/perfis/:id', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'bonificacao.excluirPerfil', `Excluir perfil de bonificação ${req.params.id}`, { id: req.params.id })) return;
+    await bonificacaoPerfis.remover(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Apuração do mês - a unidade pedida tem que estar no acesso de quem pede
+// (mesmo guard de rh.js/fechamentosLive.js). A resposta sempre passa por
+// montarRespostaPorPermissao antes de sair - nunca manda faturamento/nome
+// de colaborador pra quem não tem a flag, mesmo que a pessoa edite a URL.
+app.get('/api/bonificacao', requireSection('bonificacao'), async (req, res) => {
+  try {
+    const { unidade, mes } = req.query;
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.sendStatus(404);
+    const apuracao = await bonificacao.obterOuCriarRascunho(unidade, mes);
+    res.json(bonificacao.montarRespostaPorPermissao(apuracao, {
+      podeVerTotal: req.isMaster || req.isAdmin || req.podeBonifVerValorTotal,
+      podeVerColaboradores: req.isMaster || req.isAdmin || req.podeBonifVerColaboradores,
+    }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/bonificacao', requireSection('bonificacao'), async (req, res) => {
+  try {
+    const { unidade, mes, completionsGerente, completionsColaboradores } = req.body;
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.sendStatus(404);
+    const apuracao = await bonificacao.salvarCompletions(unidade, mes, { completionsGerente, completionsColaboradores }, req.user.email);
+    res.json(bonificacao.montarRespostaPorPermissao(apuracao, {
+      podeVerTotal: req.isMaster || req.isAdmin || req.podeBonifVerValorTotal,
+      podeVerColaboradores: req.isMaster || req.isAdmin || req.podeBonifVerColaboradores,
+    }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/bonificacao/fechar', requireSection('bonificacao'), auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    const { unidade, mes } = req.body;
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) return res.sendStatus(404);
+    if (await desviarSeQaMaster(req, res, 'bonificacao.fechar', `Fechar apuração de bonificação ${unidade} (${mes})`, { unidade, mes })) return;
+    const apuracao = await bonificacao.fechar(unidade, mes, req.user.email);
+    res.json(bonificacao.montarRespostaPorPermissao(apuracao, {
+      podeVerTotal: req.isMaster || req.isAdmin || req.podeBonifVerValorTotal,
+      podeVerColaboradores: req.isMaster || req.isAdmin || req.podeBonifVerColaboradores,
+    }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// resumo agregado (aba Histórico) - só quem enxerga o valor total (Master/
+// Admin/flag); sem parâmetro de unidade, agrega só o que o próprio acesso
+// tem permissão de ver (nunca "todas do sistema" pra quem não é Master/Admin)
+app.get('/api/bonificacao/resumo', requireSection('bonificacao'), async (req, res) => {
+  try {
+    if (!req.isMaster && !req.isAdmin && !req.podeBonifVerValorTotal) {
+      return res.status(403).json({ error: 'Você não tem permissão pra ver o resumo de bonificação.' });
+    }
+    const { mes } = req.query;
+    const unidades = req.isMaster
+      ? (await bonificacaoPerfis.listar()).flatMap((p) => p.unidades || [])
+      : (req.permissions.unidades || []);
+    res.json(await bonificacao.resumoMes([...new Set(unidades)], mes));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

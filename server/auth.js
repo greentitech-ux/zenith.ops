@@ -277,6 +277,8 @@ function requireAuth(req, res, next) {
       req.podeCadastrarOperadores = !!user.podeCadastrarOperadores;
       req.podeRhTodasUnidades = !!user.podeRhTodasUnidades;
       req.podeRhCadastrarEfetivado = !!user.podeRhCadastrarEfetivado;
+      req.podeBonifVerValorTotal = !!user.podeBonifVerValorTotal;
+      req.podeBonifVerColaboradores = !!user.podeBonifVerColaboradores;
       req.permissions = req.isMaster ? null : user.permissions || emptyPermissions();
 
       // EMPRESA do acesso (ver empresas.js). Duas coisas saem daqui:
