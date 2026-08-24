@@ -47,13 +47,72 @@ function renderTextoComEmpresa(doc, x, largura) {
   partes.forEach((parte, i) => {
     const primeira = i === 0;
     const ultima = i === partes.length - 1;
-    doc.font('Helvetica').text(parte, ...(primeira ? [x, doc.y] : []), {
+    // o pdfkit COME o espaco inicial de um trecho "continued" - saia
+    // "SALTIVERSO PATTEOa fazer uso", "SALTIVERSO PATTEOnao se responsabiliza".
+    // A correcao e mover o espaco pro fim do trecho em negrito, que o pdfkit
+    // preserva. So quando o proximo trecho realmente comeca com espaco: em
+    // "... PARK (parque de trampolins)" e "... PARK," nao pode entrar espaco.
+    const texto = primeira || !parte.startsWith(' ') ? parte : parte.slice(1);
+    doc.font('Helvetica').text(texto, ...(primeira ? [x, doc.y] : []), {
       width: largura, align: 'justify', lineGap: 3, continued: !ultima,
     });
     if (!ultima) {
-      doc.font('Helvetica-Bold').text(EMPRESA_NOME_MAIUSCULO, { continued: true });
+      const proximo = partes[i + 1] || '';
+      const emenda = proximo.startsWith(' ') ? EMPRESA_NOME_MAIUSCULO + ' ' : EMPRESA_NOME_MAIUSCULO;
+      doc.font('Helvetica-Bold').text(emenda, { continued: true });
     }
   });
+  doc.font('Helvetica');
+}
+
+// ---------- direito de NAO autorizar o uso de imagem ----------
+// O corpo do termo diz "autorizo o ... a fazer uso das imagens". Sozinho,
+// isso e consentimento sem saida: quem nao quer aparecer em foto nao tinha
+// onde dizer isso, e assinar o termo era condicao pra entrar no parque. A
+// LGPD (Lei 13.709) trata consentimento como manifestacao LIVRE - e nao ha
+// escolha livre quando so existe a opcao de concordar.
+//
+// O termo IMPRESSO que o parque ja usa tem esse quadrado; o PDF gerado aqui
+// nao tinha. Este bloco repoe a mesma redacao do impresso, logo acima da
+// assinatura - a pessoa marca com caneta ANTES de assinar, entao a recusa
+// fica coberta pela mesma assinatura que valida o resto do documento.
+//
+// ATENCAO: marcar aqui e so o registro em PAPEL. Enquanto a escolha nao for
+// gravada no check-in (parque.js), o sistema NAO sabe quem recusou - pra
+// achar, alguem tem que procurar no termo assinado. Ver a conversa sobre
+// registrar o campo.
+const TEXTO_NAO_AUTORIZO = 'Não autorizo o WOW PARK a fazer uso da minha imagem em filmagens, gravações ou '
+  + 'fotografias captadas dentro do seu ambiente, para fins de direito ou de divulgação publicitária, '
+  + 'sem que caracterize uso indevido de imagem ou qualquer violação de direitos.';
+
+function renderOpcaoImagem(doc, x, largura) {
+  doc.moveDown(1);
+
+  // quadrado de marcar: desenhado como retangulo de verdade (nao o caractere
+  // "( )"), pra sair do mesmo tamanho em qualquer visualizador de PDF e
+  // sobrar espaco real pra caneta
+  const lado = 11;
+  const yTopo = doc.y;
+  doc.rect(x, yTopo + 1, lado, lado).strokeColor('#333').lineWidth(1).stroke();
+
+  const recuo = lado + 8;
+  const [antes, depois] = TEXTO_NAO_AUTORIZO.split('WOW PARK');
+  // mesmo cuidado com o espaco comido do renderTextoComEmpresa
+  const emenda = depois.startsWith(' ') ? EMPRESA_NOME_MAIUSCULO + ' ' : EMPRESA_NOME_MAIUSCULO;
+  doc.font('Helvetica-Bold').fontSize(10).fillColor('#111')
+    .text(antes, x + recuo, yTopo, {
+      width: largura - recuo, align: 'justify', lineGap: 3, continued: true,
+    });
+  doc.font('Helvetica-Bold').text(emenda, { continued: true });
+  doc.font('Helvetica-Bold').text(depois.startsWith(' ') ? depois.slice(1) : depois, {
+    width: largura - recuo, align: 'justify', lineGap: 3,
+  });
+
+  doc.moveDown(0.4);
+  doc.font('Helvetica-Oblique').fontSize(8.5).fillColor('#666')
+    .text('Marque o quadrado acima apenas se NÃO autorizar o uso de imagem. Deixar em branco '
+      + 'mantém a autorização descrita no texto acima. A escolha vale para o responsável e para '
+      + 'os beneficiários listados neste termo.', x, doc.y, { width: largura, align: 'left', lineGap: 2 });
   doc.font('Helvetica');
 }
 
@@ -96,7 +155,11 @@ function gerarTermoPDF(res, checkin) {
   const horarioTexto = checkin.iniciado
     ? `${fmtHora(checkin.timeInicial)} às ${fmtHora(checkin.timeFinal)}`
     : 'horário definido no check-in';
-  linhaCampo('Data de utilização', `${fmtDataBR(checkin.dataUtilizacao)} · ${horarioTexto} (${checkin.tempoMinutos} min)`);
+  // sem tempo definido, NAO escreve "(undefined min)" - isso ja saiu impresso
+  // num documento que a pessoa assina. Campo que nao existe simplesmente nao
+  // aparece; e melhor faltar do que sair lixo num termo com valor legal.
+  const tempoTexto = Number(checkin.tempoMinutos) > 0 ? ` (${Number(checkin.tempoMinutos)} min)` : '';
+  linhaCampo('Data de utilização', `${fmtDataBR(checkin.dataUtilizacao)} · ${horarioTexto}${tempoTexto}`);
   if (checkin.adultoCortesia) {
     linhaCampo('Adulto cortesia (A.C.)', `Sim — ${checkin.quantAC || 1} adulto(s) com entrada permitida`);
   }
@@ -114,6 +177,8 @@ function gerarTermoPDF(res, checkin) {
   doc.moveDown(0.8);
 
   renderTextoComEmpresa(doc, x, largura);
+
+  renderOpcaoImagem(doc, x, largura);
 
   doc.moveDown(1.5);
   doc.fontSize(10).fillColor('#333').text(dataPorExtenso(new Date()), x, doc.y);
