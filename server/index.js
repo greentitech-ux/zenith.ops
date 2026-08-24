@@ -3774,7 +3774,7 @@ function notificarSeDirecionadoAoMV(tipo, registroCru) {
 // ---------- solicitacoes de estorno (usuario Leitor pede, Master aprova/rejeita) ----------
 app.post('/api/refund-requests', requireSection('monitor'), async (req, res) => {
   try {
-    const { pedidoId, unidade, observacao, password, direcionadoParaId, direcionadoParaEmail } = req.body;
+    const { pedidoId, unidade, unidadeNome, observacao, password, direcionadoParaId, direcionadoParaEmail } = req.body;
     if (!req.isMaster && unidade && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
@@ -3784,6 +3784,7 @@ app.post('/api/refund-requests', requireSection('monitor'), async (req, res) => 
     const registro = await refunds.create({
       pedidoId,
       unidade,
+      unidadeNome,
       observacao,
       requestedById: req.user.id,
       requestedByEmail: req.user.email,

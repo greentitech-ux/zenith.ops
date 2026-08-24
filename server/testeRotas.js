@@ -29,7 +29,13 @@ const DOCS = new Map(); // caminho -> dados (o que o teste semear fica aqui)
 const LEITURAS = { docs: 0 };
 function snapDoc(caminho) {
   const dados = DOCS.get(caminho);
-  return { exists: dados !== undefined, id: caminho.split('/').pop(), data: () => dados, ref: { path: caminho } };
+  // ref precisa ser um doc de verdade (update/set/delete), não só {path} -
+  // vários módulos (auth.js/sessions.js/centralChat.js/parque.js/
+  // vaultSubgroups.js) chamam doc.ref.update(...)/.delete(...) em cima de
+  // resultado de query; sem isso o fake não pegava esse padrão nenhuma vez
+  // (throw silencioso engolido por quem chamava), mesmo em código de
+  // produção que depende dele - ver auth.js:154/162 (bloqueio de senha)
+  return { exists: dados !== undefined, id: caminho.split('/').pop(), data: () => dados, ref: fakeDoc(caminho) };
 }
 function fakeQuery(caminho, filtros = [], ordem = null, lim = null) {
   const q = {
@@ -6036,6 +6042,119 @@ setTimeout(async () => {
   } catch (e) { okFormulariosOrganizacao = false; console.log('  erro: ' + e.message); }
   if (!okFormulariosOrganizacao) ruins += 1;
   console.log(`${okFormulariosOrganizacao ? '✓' : '✗'} Formulários: lista organizada por tipo (chips+contagem) e Triagem em kanban por status, igual Solicitações`);
+
+  // ------------------------------------------------------------------
+  // Duplicação de loja no "Chamados em aberto (por unidade)" (Histórico):
+  // o estorno criado pela Central não mandava unidadeNome nenhum - o
+  // fallback de refunds.js (unidadeNome || unidade || null) gravava o
+  // CÓDIGO interno cru como se fosse nome de exibição, duplicando a mesma
+  // loja na tabela (ex: "Dominos Bessa" vs o nome já normalizado "Dom
+  // Bessa"). A correção é só mandar/repassar o unidadeNome que a Central já
+  // calcula (UNIDADES_NOMES) - não mexe em normalizarCodigoUnidade() nem em
+  // nenhuma das decisões fechadas de código de unidade do CLAUDE.md, é uma
+  // camada anterior (ticket nasce com o nome certo, em vez de nascer errado
+  // e precisar de correção depois).
+  let okEstornoUnidadeNome = false;
+  try {
+    const cabMaster = { Authorization: 'Bearer ' + token };
+    const r = await postarJson('/api/refund-requests', {
+      pedidoId: 'PEDIDO-TESTE-UNIDADENOME',
+      unidade: 'DOM_BESSA_COD_INTERNO',
+      unidadeNome: 'Dom Bessa',
+      observacao: 'Teste de forwarding de unidadeNome',
+      password: process.env.MASTER_PASSWORD,
+    }, cabMaster);
+    const criado = r.status === 200 ? JSON.parse(r.corpo) : {};
+    const htmlCentral = require('fs').readFileSync(require('path').join(__dirname, 'public', 'central.html'), 'utf8');
+    const iEstorno = htmlCentral.indexOf("TIPO_SELECIONADO === 'estorno'");
+    const trechoEstorno = htmlCentral.slice(iEstorno, iEstorno + 400);
+    const conf = {
+      'a rota cria o ticket normalmente': r.status === 200,
+      'grava o nome canônico enviado, não o código interno': criado.unidadeNome === 'Dom Bessa',
+      'o código interno continua guardado separado (unidade)': criado.unidade === 'DOM_BESSA_COD_INTERNO',
+      'a Central manda unidadeNome no POST de estorno (não só unidade)':
+        iEstorno >= 0 && /unidadeNome: UNIDADES_NOMES\[/.test(trechoEstorno),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okEstornoUnidadeNome = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (status ${r.status} ${r.corpo.slice(0, 150)})`);
+  } catch (e) { okEstornoUnidadeNome = false; console.log('  erro: ' + e.message); }
+  if (!okEstornoUnidadeNome) ruins += 1;
+  console.log(`${okEstornoUnidadeNome ? '✓' : '✗'} Estorno: ticket grava o unidadeNome canônico (nome de exibição), não o código interno cru`);
+
+  // ------------------------------------------------------------------
+  // Duplicação de loja (parte 2): o chamado automático de bloqueio de senha
+  // (criarChamadoBloqueio em auth.js) juntava TODAS as unidades do login
+  // num único unidadeNome (ex: "Loja A, Loja B, Loja C") - isso nunca bate
+  // com nenhuma unidade de verdade e polui a contagem "por unidade" com uma
+  // loja fantasma por combinação. A correção usa só a primeira unidade no
+  // campo estruturado; a lista completa continua na observação, pra quem
+  // aprova ver todas as unidades do login. Dispara o fluxo de VERDADE (3
+  // senhas erradas via auth.login), não um ticket seedado à mão.
+  let okBloqueioUnidadeNome = false;
+  try {
+    const bcrypt = require('bcryptjs');
+    const senhaHash = bcrypt.hashSync('SenhaCerta!2026', 4);
+    DOCS.set('users/u-bloq-multi-unidade', {
+      email: 'bloqmulti@teste.local', username: 'bloqmulti', passwordHash: senhaHash, role: 'user', active: true,
+      permissions: { sections: [], unidades: ['Dominos Bessa', 'Dominos Tirol'], vaultSubgroups: [], tiposSolicitacao: [] },
+      failedAttempts: 0, locked: false,
+    });
+    for (let i = 0; i < 3; i++) {
+      try { await auth.login('bloqmulti@teste.local', 'SenhaErrada!Nope'); } catch (e) { /* esperado */ }
+    }
+    // criarChamadoBloqueio dispara sem segurar a resposta do login - dá um
+    // instante pra gravação assentar antes de conferir
+    await new Promise((r) => setTimeout(r, 200));
+    const ticket = [...DOCS.entries()]
+      .filter(([k]) => k.startsWith('solicitacoes/')).map(([, v]) => v)
+      .find((t) => t.titulo === 'Login bloqueado: bloqmulti@teste.local');
+    const conf = {
+      'o chamado automático foi criado': !!ticket,
+      'unidadeNome NÃO junta as unidades (era o bug)': !!ticket && ticket.unidadeNome === 'Dominos Bessa',
+      'unidade (código) é a primeira da lista, igual unidadeNome': !!ticket && ticket.unidade === 'Dominos Bessa',
+      'a lista completa continua na observação, pra quem aprova ver todas as unidades':
+        !!ticket && /Dominos Bessa, Dominos Tirol/.test(ticket.observacao || ''),
+      'o login foi bloqueado de verdade (3 tentativas)': (DOCS.get('users/u-bloq-multi-unidade') || {}).locked === true,
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okBloqueioUnidadeNome = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okBloqueioUnidadeNome = false; console.log('  erro: ' + e.message); }
+  if (!okBloqueioUnidadeNome) ruins += 1;
+  console.log(`${okBloqueioUnidadeNome ? '✓' : '✗'} Bloqueio automático: chamado usa só a primeira unidade em unidadeNome (não junta todas), evitando loja "fantasma" no Histórico por unidade`);
+
+  // ------------------------------------------------------------------
+  // Painel de Saídas: o filtro de Loja virou um multiselect com checkbox
+  // (pedido do usuário: "um check para selecionar 1 ou 2 ou 3 ou todas as
+  // unidades"), no lugar do <select> de escolha única. Continua restrito ao
+  // Grupo escolhido (ARCFOOD não oferece loja do GBE pra marcar, e
+  // vice-versa - mesmo pedido de isolamento já coberto na rota
+  // /api/saidas-painel).
+  let okSaidasMultiselect = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'saidas.html'), 'utf8');
+    const conf = {
+      'a Loja virou multiselect com checkbox, não mais <select> de escolha única':
+        /id="ms-unidade-btn"/.test(html) && /id="ms-unidade-panel"/.test(html) && !/<select id="f-unidade"/.test(html),
+      'as opções da Loja são filtradas pelo Grupo escolhido (não lista loja de fora do grupo)': (() => {
+        const i = html.indexOf('function paresUnidadeDoGrupo');
+        const trecho = html.slice(i, i + 300);
+        return i >= 0 && /it\.grupo===grupo/.test(trecho);
+      })(),
+      'trocar o Grupo atualiza o painel de checkboxes da Loja':
+        /function aoMudarFiltro\(\)\{ renderUnidadePanel\(\); renderTudo\(\); \}/.test(html),
+      'o filtro em memória aceita 0 (todas), 1, 2 ou N unidades marcadas ao mesmo tempo':
+        /SEL_UNIDADE\.size===0 \|\| SEL_UNIDADE\.has\(it\.unidade\)/.test(html),
+      'o relatório (CSV/PDF) manda todas as unidades marcadas, não só uma':
+        /params\.set\('unidades', \[\.\.\.SEL_UNIDADE\]\.join\(','\)\)/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okSaidasMultiselect = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okSaidasMultiselect = false; console.log('  erro: ' + e.message); }
+  if (!okSaidasMultiselect) ruins += 1;
+  console.log(`${okSaidasMultiselect ? '✓' : '✗'} Painel de Saídas: filtro de Loja é multiselect com checkbox (1, 2, 3 ou todas), sempre restrito ao Grupo escolhido`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

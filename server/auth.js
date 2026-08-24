@@ -32,7 +32,14 @@ function criarChamadoBloqueio(email, userId, unidadesUsuario) {
   const solicitacoes = require('./solicitacoes');
   const unidades = Array.isArray(unidadesUsuario) ? unidadesUsuario.filter(Boolean) : [];
   const unidade = unidades[0] || 'geral';
-  const unidadeNome = unidades.length ? unidades.join(', ') : 'Sem unidade vinculada a este login';
+  // o campo estruturado (unidade/unidadeNome) e usado pra agrupar/filtrar
+  // chamados por loja (ver "por unidade" em central-inicio.html) - juntar
+  // TODAS as unidades do login aqui virava uma "loja" fantasma por
+  // combinação (ex: "Loja A, Loja B, Loja C"), que nunca bate com nenhuma
+  // unidade de verdade e polui a contagem por loja. A lista completa
+  // continua na observação, pra quem aprova ver todas as unidades do login.
+  const unidadeNome = unidades.length ? unidade : 'Sem unidade vinculada a este login';
+  const unidadesTexto = unidades.length ? unidades.join(', ') : 'nenhuma';
   const agora = new Intl.DateTimeFormat('pt-BR', {
     timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short',
   }).format(new Date());
@@ -42,7 +49,7 @@ function criarChamadoBloqueio(email, userId, unidadesUsuario) {
       unidade,
       unidadeNome,
       titulo: `Login bloqueado: ${email}`,
-      observacao: `Acesso bloqueado automaticamente após 3 tentativas de senha erradas seguidas.\n\nLogin: ${email}\nUnidade(s) vinculada(s): ${unidadeNome}\nBloqueado em: ${agora}\n\nAo aprovar este ticket, o acesso é desbloqueado com a MESMA senha de sempre (a pessoa não precisa trocar nada). Se quiser pedir pra ela cadastrar uma senha nova mesmo assim, marque a opção "pedir pra atualizar a senha" ao aprovar.`,
+      observacao: `Acesso bloqueado automaticamente após 3 tentativas de senha erradas seguidas.\n\nLogin: ${email}\nUnidade(s) vinculada(s): ${unidadesTexto}\nBloqueado em: ${agora}\n\nAo aprovar este ticket, o acesso é desbloqueado com a MESMA senha de sempre (a pessoa não precisa trocar nada). Se quiser pedir pra ela cadastrar uma senha nova mesmo assim, marque a opção "pedir pra atualizar a senha" ao aprovar.`,
       criadoPorId: userId,
       criadoPorEmail: ROBO_BLOQUEIO_EMAIL,
     })

@@ -82,6 +82,16 @@
   .saida-acoes{margin-top:8px;}
   .btn-verificar{font-family:var(--sans);font-size:12px;font-weight:700;padding:7px 12px;border-radius:8px;border:none;background:var(--accent);color:#0b0d10;cursor:pointer;}
   .btn-verificar:hover{opacity:.9;}
+  .multiselect{position:relative;}
+  .multiselect-btn{width:100%;text-align:left;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:13px;font-family:var(--sans);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .multiselect-btn:hover{border-color:var(--accent);}
+  .multiselect-btn:focus{outline:none;border-color:var(--accent);}
+  .multiselect-panel{display:none;position:fixed;z-index:1000;background:var(--panel2);border:1px solid var(--line);border-radius:8px;min-width:200px;max-height:260px;overflow-y:auto;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.5);}
+  .multiselect-panel.open{display:block;}
+  .multiselect-panel label{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 8px;font-size:12px;border-radius:5px;cursor:pointer;white-space:nowrap;}
+  .multiselect-panel label:hover{background:var(--panel);}
+  .multiselect-panel label.all-option{font-weight:600;border-bottom:1px solid var(--line);border-radius:0;margin-bottom:2px;padding-bottom:8px;}
+  .multiselect-panel input[type=checkbox]{accent-color:var(--accent);}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -123,7 +133,10 @@
       </div>
       <div>
         <label>Loja</label>
-        <select id="f-unidade" onchange="aoMudarFiltro()"><option value="">Todas as unidades</option></select>
+        <div class="multiselect" id="ms-unidade">
+          <button type="button" class="multiselect-btn" id="ms-unidade-btn">Todas as unidades</button>
+          <div class="multiselect-panel" id="ms-unidade-panel"></div>
+        </div>
       </div>
       <div>
         <label>De</label>
@@ -242,25 +255,74 @@ function aoMudarFiltroData(){
   document.querySelectorAll('#presets .preset-btn').forEach(b=>b.classList.remove('active'));
   carregar();
 }
-function aoMudarFiltro(){ renderTudo(); }
+// mudar o Grupo tem que atualizar o painel de Loja pro mesmo grupo (só as
+// unidades daquela franquia) - senão o filtro de loja continua oferecendo
+// unidade de fora do grupo escolhido
+function aoMudarFiltro(){ renderUnidadePanel(); renderTudo(); }
 function limparFiltros(){
   document.getElementById('f-grupo').value = '';
-  document.getElementById('f-unidade').value = '';
+  SEL_UNIDADE.clear();
   aplicarPreset('mes');
 }
 
-// monta o seletor de loja a partir das unidades que de fato aparecem no
-// periodo carregado - nao ha lista fixa aqui (ver fechamentos.html pra
-// ARCFOOD/BRAVO fixos): uma loja sem nenhuma saida no periodo nao teria o
-// que filtrar mesmo
-function montarSeletorUnidade(){
-  const atual = document.getElementById('f-unidade').value;
+let SEL_UNIDADE = new Set();
+let renderUnidadePanel = () => {};
+
+// pares [codigo,nome] a partir das unidades que de fato aparecem no periodo
+// carregado, filtradas pelo Grupo escolhido - nao ha lista fixa aqui (ver
+// fechamentos.html pra ARCFOOD/BRAVO fixos): uma loja sem nenhuma saida no
+// periodo nao teria o que filtrar mesmo
+function paresUnidadeDoGrupo(){
+  const grupo = document.getElementById('f-grupo').value;
   const porCodigo = new Map();
-  ITENS.forEach(it=>{ if(it.unidade && !porCodigo.has(it.unidade)) porCodigo.set(it.unidade, it.unidadeNome||it.unidade); });
-  const unidades = [...porCodigo.entries()].sort((a,b)=>a[1].localeCompare(b[1],'pt-BR'));
-  document.getElementById('f-unidade').innerHTML = '<option value="">Todas as unidades</option>' +
-    unidades.map(([cod,nome])=>`<option value="${escapeHtml(cod)}">${escapeHtml(nome)}</option>`).join('');
-  if(unidades.some(([cod])=>cod===atual)) document.getElementById('f-unidade').value = atual;
+  ITENS.filter(it=>!grupo || it.grupo===grupo)
+    .forEach(it=>{ if(it.unidade && !porCodigo.has(it.unidade)) porCodigo.set(it.unidade, it.unidadeNome||it.unidade); });
+  return [...porCodigo.entries()].sort((a,b)=>a[1].localeCompare(b[1],'pt-BR'));
+}
+
+// multiselect de Loja com checkbox (1, 2, 3 ou todas as unidades de uma vez)
+// - mesmo componente ja usado em fechamentos.html (.multiselect/.multiselect-panel)
+function setupMultiselectUnidade(){
+  const btn = document.getElementById('ms-unidade-btn');
+  const panel = document.getElementById('ms-unidade-panel');
+  document.body.appendChild(panel);
+  function posicionar(){
+    const r = btn.getBoundingClientRect();
+    panel.style.top = (r.bottom+4)+'px';
+    panel.style.left = r.left+'px';
+  }
+  renderUnidadePanel = function(){
+    const pares = paresUnidadeDoGrupo();
+    const codigos = pares.map(([cod])=>cod);
+    // a loja marcada pode não pertencer mais ao grupo escolhido (o próprio
+    // Grupo acabou de mudar) - nesse caso sai da seleção
+    for(const v of [...SEL_UNIDADE]) if(!codigos.includes(v)) SEL_UNIDADE.delete(v);
+    panel.innerHTML = `
+      <label class="all-option"><span>Todas as unidades</span><input type="checkbox" data-all ${SEL_UNIDADE.size===0?'checked':''}></label>
+      ${pares.map(([cod,nome])=>`<label><span>${escapeHtml(nome)}</span><input type="checkbox" value="${escapeHtml(cod)}" ${SEL_UNIDADE.has(cod)?'checked':''}></label>`).join('')}
+    `;
+    panel.querySelector('[data-all]').addEventListener('change', ()=>{ SEL_UNIDADE.clear(); renderUnidadePanel(); renderTudo(); });
+    panel.querySelectorAll('input[type=checkbox]:not([data-all])').forEach(cb=>{
+      cb.addEventListener('change', ()=>{
+        if(cb.checked) SEL_UNIDADE.add(cb.value); else SEL_UNIDADE.delete(cb.value);
+        renderUnidadePanel(); renderTudo();
+      });
+    });
+    const nomePorCodigo = new Map(pares);
+    btn.textContent = SEL_UNIDADE.size===0 ? 'Todas as unidades'
+      : SEL_UNIDADE.size===1 ? (nomePorCodigo.get([...SEL_UNIDADE][0]) || [...SEL_UNIDADE][0])
+      : `${SEL_UNIDADE.size} unidades selecionadas`;
+  };
+  btn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    const abrindo = !panel.classList.contains('open');
+    panel.classList.remove('open');
+    if(abrindo){ posicionar(); panel.classList.add('open'); }
+  });
+  document.addEventListener('click', (e)=>{
+    if(!panel.contains(e.target) && e.target!==btn) panel.classList.remove('open');
+  });
+  renderUnidadePanel();
 }
 
 async function carregar(){
@@ -270,14 +332,13 @@ async function carregar(){
   if(inicio) params.set('inicio', inicio);
   if(fim) params.set('fim', fim);
   ITENS = await fetch('/api/saidas-painel?'+params.toString()).then(r=>r.json());
-  montarSeletorUnidade();
+  renderUnidadePanel();
   renderTudo();
 }
 
 function itensFiltrados(){
   const grupo = document.getElementById('f-grupo').value;
-  const unidade = document.getElementById('f-unidade').value;
-  return ITENS.filter(it => (!grupo || it.grupo===grupo) && (!unidade || it.unidade===unidade));
+  return ITENS.filter(it => (!grupo || it.grupo===grupo) && (SEL_UNIDADE.size===0 || SEL_UNIDADE.has(it.unidade)));
 }
 
 function cardHtml(it){
@@ -337,12 +398,11 @@ async function toggleVerificar(chave, verificada){
 
 function baixarRelatorio(formato){
   const grupo = document.getElementById('f-grupo').value;
-  const unidade = document.getElementById('f-unidade').value;
   const inicio = document.getElementById('f-data-de').value;
   const fim = document.getElementById('f-data-ate').value;
   const params = new URLSearchParams({ token: AUTH_TOKEN });
   if(grupo) params.set('grupo', grupo);
-  if(unidade) params.set('unidades', unidade);
+  if(SEL_UNIDADE.size) params.set('unidades', [...SEL_UNIDADE].join(','));
   if(inicio) params.set('inicio', inicio);
   if(fim) params.set('fim', fim);
   window.location.href = `/api/saidas-painel/relatorio.${formato}?${params.toString()}`;
@@ -362,6 +422,7 @@ async function boot(){
   }
   document.getElementById('root').classList.remove('hidden');
   setupPresets();
+  setupMultiselectUnidade();
   aplicarPreset('mes');
 }
 boot();
