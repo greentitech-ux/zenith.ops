@@ -228,6 +228,13 @@ const escapeHtml = (s) => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&am
 const fmtMoney = (v) => 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtData = (iso) => iso ? new Date(iso).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
 
+// <input type="date"> só entende/devolve AAAA-MM-DD (ISO) - o resto do
+// sistema (PDF, tabela, formulário em papel) sempre foi DD/MM/AAAA.
+// Converte nas duas pontas pra ninguém perceber a troca por baixo do pano.
+function isoParaBR(iso){ const m = String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : ''; }
+function brParaIso(br){ const m = String(br||'').match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : ''; }
+const valorCampo = (el) => el.type==='date' ? isoParaBR(el.value) : el.value;
+
 let TIPOS = [];
 let SOU_MASTER = false;
 let TIPO_ATUAL = null;
@@ -249,7 +256,7 @@ function escolherTipo(tipo){
   // CNPJ não é digitado: vem travado do cadastro fixo (ver UNIDADES_FORM
   // no servidor) - o input nem existe, e o servidor ignora se alguém mandar
   document.getElementById('campos').innerHTML = m.cabecalho.filter(c=>c.key!=='cnpj').map(c=>
-    `<div><label>${escapeHtml(c.label)}</label><input type="text" data-campo="${escapeHtml(c.key)}"></div>`).join('');
+    `<div><label>${escapeHtml(c.label)}</label><input type="${c.data?'date':'text'}" data-campo="${escapeHtml(c.key)}"></div>`).join('');
   // memória de favorecido: terminou de digitar um CPF/CNPJ já usado antes ->
   // puxa nome + dados bancários salvos e preenche o que estiver vazio
   document.querySelectorAll('#campos input[data-campo="cpf"], #campos input[data-campo="cnpjFavorecido"]')
@@ -325,7 +332,7 @@ function addLinha(){
     + '<button type="button" class="item-rm" title="Remover item" onclick="this.closest(\'.item-card\').remove();renumerarItens(\'tabela-corpo\');atualizarTotal()">✕</button>'
     + m.colunas.map(c=>
       `<label>${escapeHtml(c.label)}</label>`
-      + `<input type="text" data-col="${escapeHtml(c.key)}" ${c.valor?'inputmode="decimal" placeholder="0,00" oninput="atualizarTotal()"':'autocomplete="off"'}>`).join('');
+      + `<input type="${c.data?'date':'text'}" data-col="${escapeHtml(c.key)}" ${c.valor?'inputmode="decimal" placeholder="0,00" oninput="atualizarTotal()"':'autocomplete="off"'}>`).join('');
   document.getElementById('tabela-corpo').appendChild(div);
   renumerarItens('tabela-corpo');
 }
@@ -371,10 +378,10 @@ async function criar(){
   const msg = document.getElementById('msg-criar');
   msg.classList.add('hidden');
   const campos = {};
-  document.querySelectorAll('#campos input[data-campo]').forEach(el=>{ campos[el.dataset.campo] = el.value; });
+  document.querySelectorAll('#campos input[data-campo]').forEach(el=>{ campos[el.dataset.campo] = valorCampo(el); });
   const linhas = [...document.querySelectorAll('#tabela-corpo .item-card')].map(card=>{
     const l = {};
-    card.querySelectorAll('input[data-col]').forEach(el=>{ l[el.dataset.col] = el.value; });
+    card.querySelectorAll('input[data-col]').forEach(el=>{ l[el.dataset.col] = valorCampo(el); });
     return l;
   });
   const arquivos = document.getElementById('f-anexos').files;
@@ -534,9 +541,10 @@ function edAddLinha(l){
   div.innerHTML = '<div class="item-num"></div>'
     + '<button type="button" class="item-rm" title="Remover item" onclick="this.closest(\'.item-card\').remove();renumerarItens(\'ed-corpo\');edTotal()">✕</button>'
     + m.colunas.map(c=>{
-      const v = l ? (c.valor ? edFmtNum(l[c.key]) : (l[c.key]||'')) : '';
+      let v = l ? (c.valor ? edFmtNum(l[c.key]) : (l[c.key]||'')) : '';
+      if(l && c.data) v = brParaIso(v);
       return `<label>${escapeHtml(c.label)}</label>`
-        + `<input type="text" data-ed-col="${escapeHtml(c.key)}" value="${escapeHtml(v)}"`
+        + `<input type="${c.data?'date':'text'}" data-ed-col="${escapeHtml(c.key)}" value="${escapeHtml(v)}"`
         + (c.valor?' inputmode="decimal" oninput="edTotal()"':' autocomplete="off"') + '>';
     }).join('');
   document.getElementById('ed-corpo').appendChild(div);
@@ -566,8 +574,11 @@ function abrirEdicao(id){
   if(assinadas) aviso.textContent = `⚠️ ${assinadas} assinatura(s) já coletada(s). Se o conteúdo mudar, elas são descartadas e os links precisam ser enviados de novo — a assinatura vale pelo documento que a pessoa viu na hora de assinar.`;
   document.getElementById('ed-erro').classList.add('hidden');
   // CNPJ não entra: vem travado do cadastro fixo, igual na criação
-  document.getElementById('ed-campos').innerHTML = m.cabecalho.filter(c=>c.key!=='cnpj').map(c=>
-    `<div><label>${escapeHtml(c.label)}</label><input type="text" data-ed-campo="${escapeHtml(c.key)}" value="${escapeHtml((f.campos||{})[c.key]||'')}"></div>`).join('');
+  document.getElementById('ed-campos').innerHTML = m.cabecalho.filter(c=>c.key!=='cnpj').map(c=>{
+    const bruto = (f.campos||{})[c.key]||'';
+    const v = c.data ? brParaIso(bruto) : bruto;
+    return `<div><label>${escapeHtml(c.label)}</label><input type="${c.data?'date':'text'}" data-ed-campo="${escapeHtml(c.key)}" value="${escapeHtml(v)}"></div>`;
+  }).join('');
   document.getElementById('ed-corpo').innerHTML = '';
   // tipo só-anexo (Ass. Boleto) não tem tabela: dá pra corrigir só o
   // cabeçalho (valor, vencimento, favorecido). O arquivo em si não é
@@ -589,10 +600,10 @@ async function salvarEdicao(){
   const erro = document.getElementById('ed-erro');
   erro.classList.add('hidden');
   const campos = {};
-  document.querySelectorAll('#ed-campos input[data-ed-campo]').forEach(el=>{ campos[el.dataset.edCampo] = el.value; });
+  document.querySelectorAll('#ed-campos input[data-ed-campo]').forEach(el=>{ campos[el.dataset.edCampo] = valorCampo(el); });
   const linhas = [...document.querySelectorAll('#ed-corpo .item-card')].map(card=>{
     const l = {};
-    card.querySelectorAll('input[data-ed-col]').forEach(el=>{ l[el.dataset.edCol] = el.value; });
+    card.querySelectorAll('input[data-ed-col]').forEach(el=>{ l[el.dataset.edCol] = valorCampo(el); });
     return l;
   });
   btn.disabled = true;

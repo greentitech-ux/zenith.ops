@@ -201,28 +201,80 @@ async function obterOuCriarRascunho(unidade, mes) {
     status: salvoData?.status || 'rascunho',
     fechadoPorEmail: salvoData?.fechadoPorEmail || null,
     fechadoEm: salvoData?.fechadoEm || null,
+    // correção feita DEPOIS de fechada (ver salvarCompletions,
+    // podeEditarFechada) - separado de fechadoPorEmail/fechadoEm de
+    // propósito: aquele é quem fechou originalmente, este é quem corrigiu
+    editadoPorEmail: salvoData?.editadoPorEmail || null,
+    editadoEm: salvoData?.editadoEm || null,
+    // pedido de quem discorda de uma apuração já fechada e não pode editar
+    // ela mesma (ver pedirRevisao) - some sozinho na próxima correção
+    revisaoPedida: salvoData?.revisaoPedida || null,
     ...resultado,
   };
 }
 
-async function salvarCompletions(unidade, mes, { completionsGerente, completionsColaboradores }, porEmail) {
+// podeEditarFechada: só Master/Admin (ver index.js) - dá pra corrigir uma
+// métrica errada sem precisar resetar a apuração inteira. Continua
+// FECHADA (fechadoPorEmail/fechadoEm do fechamento original não mudam) -
+// só ganha editadoPorEmail/editadoEm da correção, e o pedido de revisão
+// pendente (se houver) é dado como resolvido.
+async function salvarCompletions(unidade, mes, { completionsGerente, completionsColaboradores }, porEmail, { podeEditarFechada } = {}) {
   const atual = await obterOuCriarRascunho(unidade, mes);
   if (atual.semPerfil) throw new Error('Nenhum perfil de bonificação configurado pra esta unidade.');
-  if (atual.status === 'fechado') throw new Error('Essa apuração já foi fechada - não pode mais ser editada.');
+  if (atual.status === 'fechado' && !podeEditarFechada) throw new Error('Essa apuração já foi fechada - não pode mais ser editada.');
 
+  const editandoFechada = atual.status === 'fechado' && !!podeEditarFechada;
   const ref = COLLECTION.doc(docId(unidade, mes));
   const agora = new Date().toISOString();
   const snap = await ref.get();
+  const dados = snap.exists ? snap.data() : null;
   await ref.set({
     id: ref.id, unidade, mes,
     completionsGerente: Array.isArray(completionsGerente) ? completionsGerente : atual.completionsGerente,
     completionsColaboradores: Array.isArray(completionsColaboradores) ? completionsColaboradores : atual.completionsColaboradores,
-    status: 'rascunho',
-    fechadoPorEmail: null, fechadoEm: null,
-    criadoPorEmail: snap.exists ? snap.data().criadoPorEmail : porEmail,
-    criadoEm: snap.exists ? snap.data().criadoEm : agora,
+    status: editandoFechada ? 'fechado' : 'rascunho',
+    fechadoPorEmail: editandoFechada ? (dados?.fechadoPorEmail || null) : null,
+    fechadoEm: editandoFechada ? (dados?.fechadoEm || null) : null,
+    editadoPorEmail: editandoFechada ? porEmail : (dados?.editadoPorEmail || null),
+    editadoEm: editandoFechada ? agora : (dados?.editadoEm || null),
+    revisaoPedida: null,
+    criadoPorEmail: dados ? dados.criadoPorEmail : porEmail,
+    criadoEm: dados ? dados.criadoEm : agora,
     atualizadoPorEmail: porEmail, atualizadoEm: agora,
   });
+  apuracoesCache.invalidar();
+  return obterOuCriarRascunho(unidade, mes);
+}
+
+// "reseta em caso de erro" (pedido do Master): apaga o rascunho/fechamento
+// salvo por inteiro - a próxima leitura (obterOuCriarRascunho) monta um
+// estado limpo de novo, com a sugestão de Assiduidade recalculada na hora.
+// Diferente de editar: isso não corrige um valor, começa do zero.
+async function resetarApuracao(unidade, mes, porEmail) {
+  const atual = await obterOuCriarRascunho(unidade, mes);
+  if (atual.semPerfil) throw new Error('Nenhum perfil de bonificação configurado pra esta unidade.');
+  await COLLECTION.doc(docId(unidade, mes)).delete();
+  apuracoesCache.invalidar();
+  console.log(`[Bonificação] apuração ${unidade} (${mes}) resetada por ${porEmail || '?'}`);
+  return obterOuCriarRascunho(unidade, mes);
+}
+
+// quem não pode editar uma apuração fechada (não é Master/Admin) mas
+// discorda de algo pede revisão aqui - vira um aviso visível pro Master na
+// própria tela, mais um push (mesmo canal de solicitação da Central). Só
+// faz sentido depois de fechada: em rascunho a própria pessoa já edita.
+async function pedirRevisao(unidade, mes, { motivo, porEmail, porNome } = {}) {
+  const atual = await obterOuCriarRascunho(unidade, mes);
+  if (atual.semPerfil) throw new Error('Nenhum perfil de bonificação configurado pra esta unidade.');
+  if (atual.status !== 'fechado') throw new Error('Só dá pra pedir revisão de uma apuração já fechada - enquanto está em rascunho, dá pra editar direto.');
+
+  const ref = COLLECTION.doc(docId(unidade, mes));
+  const revisaoPedida = {
+    motivo: String(motivo || '').trim().slice(0, 300) || null,
+    porEmail: porEmail || null, porNome: porNome || null,
+    em: new Date().toISOString(),
+  };
+  await ref.update({ revisaoPedida });
   apuracoesCache.invalidar();
   return obterOuCriarRascunho(unidade, mes);
 }
@@ -260,6 +312,8 @@ function montarRespostaPorPermissao(apuracao, { podeVerTotal, podeVerColaborador
     temGerente: apuracao.temGerente, temColab: apuracao.temColab,
     gerenteRecebe: apuracao.gerenteRecebe,
     fechadoPorEmail: apuracao.fechadoPorEmail, fechadoEm: apuracao.fechadoEm,
+    editadoPorEmail: apuracao.editadoPorEmail, editadoEm: apuracao.editadoEm,
+    revisaoPedida: apuracao.revisaoPedida,
     metricasGerente: apuracao.metricasGerente,
     metricasColaboradores: apuracao.metricasColaboradores,
     completionsGerente: apuracao.completionsGerente,
@@ -310,7 +364,7 @@ async function resumoMes(unidades, mes) {
 }
 
 module.exports = {
-  calcular, obterOuCriarRascunho, salvarCompletions, fechar,
+  calcular, obterOuCriarRascunho, salvarCompletions, fechar, resetarApuracao, pedirRevisao,
   montarRespostaPorPermissao, resumoMes, listarTodas, equipeDaUnidade,
   diasAtestadoNoMes, limitesDoMes, diasDeSobreposicao,
 };
