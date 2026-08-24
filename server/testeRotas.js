@@ -5567,6 +5567,12 @@ setTimeout(async () => {
       'unidade sem perfil nenhum devolve semPerfil (não inventa default)': semPerfilNenhum.semPerfil === true,
       'PUT grava as completions e recalcula (90% de taxa)': apuracaoSalva.taxaGerente === 90 && apuracaoSalva.status === 'rascunho',
       'GET resumo do mês inclui a unidade': (resumo.porUnidade || []).some((u) => u.unidade === 'TESTE_HTTP_UN'),
+      // Histórico mostra por colaborador/quantidade/total (não só o total) -
+      // aqui a exclusão do gerente já rodou (linha 5499), então só 1 conta
+      'GET resumo traz por colaborador/quantidade junto do total, batendo com a divisão': (() => {
+        const u = (resumo.porUnidade || []).find((x) => x.unidade === 'TESTE_HTTP_UN');
+        return !!u && u.colabQuantidade === 1 && Math.abs(u.colabPorPessoa * u.colabQuantidade - u.colabTotal) < 0.02;
+      })(),
       'usuário comum com a unidade no acesso consegue ler a própria apuração': rDentro.status === 200,
       'o MESMO usuário não alcança unidade fora do próprio acesso (404)': rUnidadeFora.status === 404,
       'usuário comum (sem Admin) não acessa a equipe (403)': rEquipeSemAdmin.status === 403,

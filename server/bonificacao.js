@@ -359,6 +359,7 @@ async function resumoMes(unidades, mes) {
     porUnidade: validas.map((a) => ({
       unidade: a.unidade, perfilNome: a.perfilNome, status: a.status,
       gerenteRecebe: a.gerenteRecebe, colabTotal: a.colabTotal,
+      colabPorPessoa: a.colabPorPessoa, colabQuantidade: a.funcionarios.length,
     })),
   };
 }
