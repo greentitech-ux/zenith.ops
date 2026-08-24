@@ -565,6 +565,7 @@ document.getElementById('form-nova').addEventListener('submit', async (ev)=>{
       resp = await fetch('/api/refund-requests', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
         pedidoId: document.getElementById('e-pedidoId').value,
         unidade: document.getElementById('f-unidade').value,
+        unidadeNome: UNIDADES_NOMES[document.getElementById('f-unidade').value] || document.getElementById('f-unidade').value,
         observacao: document.getElementById('e-observacao').value,
         password: document.getElementById('e-senha').value,
         direcionadoParaId, direcionadoParaEmail,
