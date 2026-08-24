@@ -5592,6 +5592,66 @@ setTimeout(async () => {
   if (!okBonifRotas) ruins += 1;
   console.log(`${okBonifRotas ? '✓' : '✗'} Bonificação: as rotas de verdade (perfil → apuração → fechar → resumo) respondem pela porta`);
 
+  // ------------------------------------------------------------------
+  // Relatório de chamados (central-historico.html): filtro dedicado por
+  // Ticket #, Status, e as janelas de data que dataDe/dataAte (abertura) não
+  // cobria - Fechamento (decididoEm) e Interação (mensagens do chat, via
+  // centralChat). Isola por numeroTicket (globalmente único) em vez de
+  // depender de "nenhum outro ticket bate" - a suíte inteira já criou muita
+  // coisa até aqui.
+  let okRelatorioChamados = false;
+  try {
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const hoje = new Date().toISOString().slice(0, 10);
+    const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+
+    const criarA = await postarJson('/api/solicitacoes', {
+      tipo: 'compra', unidade: 'AERO', unidadeNome: 'Aeroporto', titulo: 'Relatório teste A', valorEstimado: 10,
+    }, cab);
+    const ticketA = JSON.parse(criarA.corpo || '{}');
+    await enviarJson('PATCH', `/api/solicitacoes/${ticketA.id}/status`, { status: 'APROVADO', motivoDecisao: 'ok compra' }, cab);
+    await postarJson(`/api/central/compra/${ticketA.id}/chat`, { texto: 'mensagem de teste' }, cab);
+
+    const criarB = await postarJson('/api/solicitacoes', {
+      tipo: 'compra', unidade: 'AERO', unidadeNome: 'Aeroporto', titulo: 'Relatório teste B', valorEstimado: 20,
+    }, cab);
+    const ticketB = JSON.parse(criarB.corpo || '{}');
+
+    const buscar = (qs) => pedir(`/api/central/relatorio.json?${qs}`, cab).then((r) => ({ status: r.status, itens: JSON.parse(r.corpo || '[]') }));
+
+    const rTicketA = await buscar(`ticket=${ticketA.numeroTicket}`);
+    const rTicketAStatusErrado = await buscar(`ticket=${ticketA.numeroTicket}&status=REJEITADO`);
+    const rTicketB = await buscar(`ticket=${ticketB.numeroTicket}`);
+    const rFechamentoSemDecisao = await buscar(`ticket=${ticketB.numeroTicket}&fechamentoDe=${hoje}`);
+    // só fechamentoAte (sem De): ticket sem decisão tem decididoEm='' - sem
+    // a trava explícita, '' <= qualquer data bate por comparação de string
+    const rFechamentoAteSemDecisao = await buscar(`ticket=${ticketB.numeroTicket}&fechamentoAte=${amanha}`);
+    const rFechamentoNoRange = await buscar(`ticket=${ticketA.numeroTicket}&fechamentoDe=${hoje}&fechamentoAte=${hoje}`);
+    const rInteracaoBate = await buscar(`ticket=${ticketA.numeroTicket}&interacaoUsuario=${encodeURIComponent('master')}`);
+    const rInteracaoSemChat = await buscar(`ticket=${ticketB.numeroTicket}&interacaoUsuario=${encodeURIComponent('master')}`);
+    const rInteracaoForaDaData = await buscar(`ticket=${ticketA.numeroTicket}&interacaoDe=${amanha}`);
+    const rSemFiltro = await pedir('/api/central/relatorio.json', cab);
+
+    const conf = {
+      'formato json existe e devolve o ticket certo pelo número, já aprovado': rTicketA.status === 200 && rTicketA.itens.length === 1
+        && rTicketA.itens[0].id === ticketA.id && rTicketA.itens[0].status === 'APROVADO',
+      'status errado some com o resultado (filtro de fato filtra)': rTicketAStatusErrado.itens.length === 0,
+      'ticket pendente sem decisão aparece sozinho': rTicketB.status === 200 && rTicketB.itens.length === 1 && rTicketB.itens[0].status === 'PENDENTE',
+      'ticket sem decisão some quando filtra por fechamento': rFechamentoSemDecisao.itens.length === 0,
+      'ticket sem decisão some mesmo só com fechamentoAte (sem De)': rFechamentoAteSemDecisao.itens.length === 0,
+      'ticket decidido hoje aparece na janela de fechamento hoje': rFechamentoNoRange.itens.length === 1,
+      'usuário da interação bate com quem mandou mensagem no chat': rInteracaoBate.itens.length === 1,
+      'ticket sem NENHUMA mensagem some do filtro de interação': rInteracaoSemChat.itens.length === 0,
+      'interação fora da data (amanhã) não bate com mensagem de hoje': rInteracaoForaDaData.itens.length === 0,
+      'sem filtro nenhum, exige pelo menos um antes de exportar CSV/PDF - mas json não bloqueia, é só a tela que valida': rSemFiltro.status === 200,
+    };
+    const ruinsRC = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okRelatorioChamados = !ruinsRC.length;
+    if (ruinsRC.length) console.log(`  falhou em: ${ruinsRC.join(' · ')}`);
+  } catch (e) { okRelatorioChamados = false; console.log('  erro: ' + e.message); }
+  if (!okRelatorioChamados) ruins += 1;
+  console.log(`${okRelatorioChamados ? '✓' : '✗'} Relatório de chamados: Ticket #/Status/Fechamento/Interação filtram de verdade (não só passam direto)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

@@ -156,6 +156,31 @@
   .tf-check.checked{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.12);}
   .tipo-filtro-btn .tf-label{font-weight:600;white-space:nowrap;}
   .tipo-filtro-btn .tf-counts{font-family:var(--mono);font-size:10px;white-space:nowrap;}
+  /* Relatório de chamados (filtro dedicado + resultado em cards) - mesmos
+     tokens do resto do app, so com um cabecalho de secao mais forte que o
+     .secao-titulo discreto de sempre, pra separar visualmente Filtro de
+     Resultado dentro do mesmo painel largo */
+  .rel-header{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 14px;margin-bottom:14px;font-weight:700;font-size:13px;}
+  .rel-grid{display:grid;grid-template-columns:1fr;gap:0 14px;}
+  @media(min-width:620px){ .rel-grid{grid-template-columns:1fr 1fr;} }
+  .rel-grid label{margin-top:12px;}
+  .rel-grid>div:nth-child(-n+2) label{margin-top:0;}
+  .rel-periodo{border-top:1px solid var(--line);margin-top:14px;padding-top:12px;}
+  .rel-periodo-linha{display:grid;grid-template-columns:1fr;gap:0 14px;}
+  @media(min-width:620px){ .rel-periodo-linha{grid-template-columns:1fr 1fr;} }
+  .rel-periodo-linha label{margin-top:0;}
+  .presets{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;}
+  .preset-btn{font-family:var(--mono);font-size:10.5px;padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
+  .preset-btn:hover{color:var(--text);border-color:var(--accent);}
+  .rel-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;cursor:pointer;transition:border-color .15s ease;}
+  .rel-card:hover{border-color:var(--accent);}
+  .rel-card-topo{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;}
+  .rel-campo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 16px;font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:8px 0;}
+  .rel-campo-grid b{display:block;color:var(--text);font-family:var(--sans);font-weight:600;font-size:12.5px;margin-top:2px;}
+  .rel-box{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;margin-top:8px;}
+  .rel-box-titulo{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
+  .sla-bar-track{background:var(--bg);border:1px solid var(--line);border-radius:5px;height:6px;overflow:hidden;margin-top:4px;}
+  .sla-bar-fill{height:100%;}
   .tipo-filtro-btn .tf-counts b{font-weight:600;}
 </style>
 <script src="/tema.js"></script>
@@ -206,6 +231,7 @@
       <button type="button" class="export-btn hidden" id="btn-selecionar-todos" onclick="toggleSelecionarTodos()">☑️ Selecionar todos</button>
       <button type="button" class="export-btn" onclick="baixarRelatorioCentral('csv')">📄 Relatório CSV</button>
       <button type="button" class="export-btn" onclick="baixarRelatorioCentral('pdf')">📄 Relatório PDF</button>
+      <button type="button" class="export-btn" onclick="abrirRelatorioChamados()">📋 Relatório de chamados</button>
     </span>
   </h2>
   <div class="filtros-compactos" id="filtros-extra" style="margin-bottom:10px;">
@@ -432,6 +458,73 @@
       <div id="d-tipo-corpo"></div>
     </div>
     <div class="msg hidden" id="msg-detalhe"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Relatório de chamados: filtro dedicado (ticket, tipo, status, unidade e
+     3 janelas de data independentes - abertura/fechamento/interação) com
+     "Exibir na tela" (cards, reaproveitando os mesmos badges/chips do
+     kanban) e "Gerar CSV/PDF" (mesma rota /api/central/relatorio.:formato,
+     só que agora aceita esses filtros extras - ver cardsFiltradosRelatorio
+     em index.js). Sem essa tela dava pra isolar abertura OU fechamento,
+     nunca as duas janelas junto com quem interagiu no chat. -->
+<div class="overlay hidden" id="overlay-relatorio-chamados">
+  <div class="sheet-wrap" style="max-width:920px;">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharRelatorioChamados()">✕</span>
+    <div class="sheet" style="max-width:920px;">
+      <div class="rel-header">📋 Relatório de chamados</div>
+      <div class="rel-grid">
+        <div><label>Ticket #</label><input type="text" id="rc-ticket" placeholder="ex: 10456"></div>
+        <div><label>Tipo</label><select id="rc-tipo"><option value="">Todos</option></select></div>
+        <div><label>Status</label><select id="rc-status">
+          <option value="">Todos</option>
+          <option value="PENDENTE">Pendente</option>
+          <option value="APROVADO">Aprovado</option>
+          <option value="REJEITADO">Rejeitado</option>
+          <option value="CONVERTIDO">Convertido</option>
+        </select></div>
+        <div><label>Unidade</label><select id="rc-unidade"><option value="">Todas</option></select></div>
+      </div>
+
+      <div class="rel-periodo">
+        <div class="rel-periodo-linha">
+          <div><label>Abertura de</label><input type="date" id="rc-abertura-de"></div>
+          <div><label>Abertura até</label><input type="date" id="rc-abertura-ate"></div>
+        </div>
+        <div class="presets" id="rc-presets-abertura"></div>
+      </div>
+
+      <div class="rel-periodo">
+        <div class="rel-periodo-linha">
+          <div><label>Fechamento de</label><input type="date" id="rc-fechamento-de"></div>
+          <div><label>Fechamento até</label><input type="date" id="rc-fechamento-ate"></div>
+        </div>
+        <div class="presets" id="rc-presets-fechamento"></div>
+      </div>
+
+      <div class="rel-periodo">
+        <div class="rel-periodo-linha">
+          <div><label>Data de interação inicial</label><input type="date" id="rc-interacao-de"></div>
+          <div><label>Data de interação final</label><input type="date" id="rc-interacao-ate"></div>
+        </div>
+        <div class="presets" id="rc-presets-interacao"></div>
+        <label>Usuário da interação (e-mail ou usuário)</label>
+        <input type="text" id="rc-interacao-usuario" placeholder="ex: suporte ou nome@empresa.com">
+      </div>
+
+      <div class="msg hidden" id="msg-rc" style="margin-top:10px;"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
+        <button type="button" class="btn-primary" style="margin-top:0;width:auto;padding:10px 16px;" onclick="exibirRelatorioChamados()">📋 Exibir na tela</button>
+        <button type="button" class="export-btn" onclick="baixarRelatorioChamados('csv')">📄 Gerar CSV</button>
+        <button type="button" class="export-btn" onclick="baixarRelatorioChamados('pdf')">📄 Gerar PDF</button>
+        <button type="button" class="link-btn" style="color:var(--bad);margin-left:auto;" onclick="limparRelatorioChamados()">✕ Limpar</button>
+      </div>
+
+      <div id="rc-resultado-wrap" class="hidden" style="margin-top:18px;">
+        <div class="rel-header">📋 Resultado <span class="tipo-badge" id="rc-resultado-count" style="margin-left:auto;"></span></div>
+        <div id="rc-resultado-lista"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -939,6 +1032,161 @@ function baixarRelatorioCentral(formato){
   if(FILTRO_DATA_ATE) params.set('dataAte', FILTRO_DATA_ATE);
   if(FILTRO_TIPOS.size) params.set('tipo', [...FILTRO_TIPOS].join(','));
   window.location.href = `/api/central/relatorio.${formato}?${params.toString()}`;
+}
+
+// ---------------------------------------------------------------------
+// Relatório de chamados: filtro dedicado com 3 janelas de data
+// independentes (abertura/fechamento/interação) + resultado em cards.
+// Server-side em index.js (cardsFiltradosRelatorio) - a mesma rota
+// /api/central/relatorio.:formato ganhou o formato "json" pra alimentar
+// essa tela sem duplicar a lógica de filtro do CSV/PDF.
+let RESULTADO_RELATORIO = [];
+
+function aplicarPresetData(inputDeId, inputAteId, tipo){
+  const brDate = (d) => d.toLocaleDateString('sv-SE', { timeZone: FUSO_BR });
+  const hoje = new Date();
+  let de = brDate(hoje), ate = brDate(hoje);
+  if(tipo==='ontem'){ const o=new Date(hoje); o.setDate(o.getDate()-1); de=ate=brDate(o); }
+  else if(tipo==='mes'){ const p=new Date(hoje.getFullYear(), hoje.getMonth(), 1); de=brDate(p); }
+  else if(tipo==='30d'){ const p=new Date(hoje); p.setDate(p.getDate()-30); de=brDate(p); }
+  else if(tipo==='12m'){ const p=new Date(hoje); p.setFullYear(p.getFullYear()-1); de=brDate(p); }
+  document.getElementById(inputDeId).value = de;
+  document.getElementById(inputAteId).value = ate;
+}
+function montarPresetsRelatorio(containerId, deId, ateId){
+  const presets = [
+    {tipo:'hoje', lbl:'Hoje'}, {tipo:'ontem', lbl:'Ontem'}, {tipo:'mes', lbl:'Mês atual'},
+    {tipo:'30d', lbl:'Últimos 30 dias'}, {tipo:'12m', lbl:'Últimos 12 meses'},
+  ];
+  document.getElementById(containerId).innerHTML = presets.map(p=>
+    `<button type="button" class="preset-btn" onclick="aplicarPresetData('${deId}','${ateId}','${p.tipo}')">${p.lbl}</button>`).join('');
+}
+
+function abrirRelatorioChamados(){
+  document.getElementById('rc-tipo').innerHTML = '<option value="">Todos</option>' +
+    TIPOS_DISPONIVEIS.map(t=>`<option value="${t}">${escapeHtml(TIPOS_INFO[t].label)}</option>`).join('');
+  document.getElementById('rc-unidade').innerHTML = document.getElementById('filtro-unidade').innerHTML;
+  montarPresetsRelatorio('rc-presets-abertura','rc-abertura-de','rc-abertura-ate');
+  montarPresetsRelatorio('rc-presets-fechamento','rc-fechamento-de','rc-fechamento-ate');
+  montarPresetsRelatorio('rc-presets-interacao','rc-interacao-de','rc-interacao-ate');
+  document.getElementById('overlay-relatorio-chamados').classList.remove('hidden');
+}
+function fecharRelatorioChamados(){
+  document.getElementById('overlay-relatorio-chamados').classList.add('hidden');
+}
+function limparRelatorioChamados(){
+  ['rc-ticket','rc-abertura-de','rc-abertura-ate','rc-fechamento-de','rc-fechamento-ate',
+    'rc-interacao-de','rc-interacao-ate','rc-interacao-usuario'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('rc-tipo').value = '';
+  document.getElementById('rc-status').value = '';
+  document.getElementById('rc-unidade').value = '';
+  document.getElementById('rc-resultado-wrap').classList.add('hidden');
+  document.getElementById('msg-rc').classList.add('hidden');
+}
+
+function paramsRelatorioChamados(){
+  const p = new URLSearchParams();
+  const add = (key, id) => { const v = document.getElementById(id).value.trim(); if(v) p.set(key, v); };
+  add('ticket', 'rc-ticket');
+  add('tipo', 'rc-tipo');
+  add('status', 'rc-status');
+  add('unidade', 'rc-unidade');
+  add('dataDe', 'rc-abertura-de'); add('dataAte', 'rc-abertura-ate');
+  add('fechamentoDe', 'rc-fechamento-de'); add('fechamentoAte', 'rc-fechamento-ate');
+  add('interacaoDe', 'rc-interacao-de'); add('interacaoAte', 'rc-interacao-ate');
+  add('interacaoUsuario', 'rc-interacao-usuario');
+  return p;
+}
+
+async function exibirRelatorioChamados(){
+  const msg = document.getElementById('msg-rc');
+  const params = paramsRelatorioChamados();
+  if(![...params.keys()].length){
+    msg.textContent = 'Preencha pelo menos um filtro.'; msg.className = 'msg err'; msg.classList.remove('hidden');
+    return;
+  }
+  msg.classList.add('hidden');
+  try{
+    const resp = await fetch(`/api/central/relatorio.json?${params.toString()}`);
+    if(!resp.ok) throw new Error('Erro ao gerar o relatório.');
+    RESULTADO_RELATORIO = await resp.json();
+    renderResultadoRelatorio();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }
+}
+function baixarRelatorioChamados(formato){
+  const msg = document.getElementById('msg-rc');
+  const params = paramsRelatorioChamados();
+  if(![...params.keys()].length){
+    msg.textContent = 'Preencha pelo menos um filtro.'; msg.className = 'msg err'; msg.classList.remove('hidden');
+    return;
+  }
+  msg.classList.add('hidden');
+  params.set('token', AUTH_TOKEN);
+  window.location.href = `/api/central/relatorio.${formato}?${params.toString()}`;
+}
+
+// SLA utilizado (%): contado do mesmo jeito que chipSla, so que como
+// percentual do prazo inteiro em vez de "falta Xh" - usa slaPrazo/criadoEm
+// reais (prioridades.js no servidor), nunca um numero inventado
+function slaUtilizadoPct(c){
+  if(!c.slaPrazo || !c.criadoEm) return null;
+  const criado = new Date(c.criadoEm).getTime();
+  const prazo = new Date(c.slaPrazo).getTime();
+  const total = prazo - criado;
+  if(total<=0) return null;
+  const fim = slaAtivo(c) ? Date.now() : new Date(c.decididoEm || c.criadoEm).getTime();
+  return Math.max(0, Math.round((fim-criado)/total*100));
+}
+function corSlaBar(c, pct){
+  if(slaEstourado(c)) return 'var(--bad)';
+  if(pct!=null && pct>=75) return 'var(--warn)';
+  return 'var(--ok)';
+}
+// "ultima alteracao" real: o mais recente entre abertura e decisao (nao
+// inclui mensagem de chat - o card nao carrega isso, so o filtro de
+// interacao consulta o chat no servidor)
+function ultimaAlteracaoRelatorio(c){
+  return [c.criadoEm, c.decididoEm].filter(Boolean).sort().pop();
+}
+function rcCardHtml(c){
+  const pct = slaUtilizadoPct(c);
+  const atribuidosTxt = (c.atribuidosEmails && c.atribuidosEmails.length) ? c.atribuidosEmails.join(', ') : (c.direcionadoParaEmail || '—');
+  const temDecisao = c.status!=='PENDENTE' && c.status!=='CONVERTIDO';
+  return `<div class="rel-card" onclick="fecharRelatorioChamados();abrirDetalhe('${c.tipo}','${c.id}')">
+    <div class="rel-card-topo">
+      <span class="tipo-badge">${iconeTipo(c.tipo)} #${c.numeroTicket ?? '—'}</span>
+      <span class="badge ${c.status}">${c.status}</span>
+      ${chipPrioridade(c)}
+      ${chipSla(c)}
+    </div>
+    <div style="font-weight:700;font-size:13px;">${escapeHtml(c.unidadeNome||c.unidade||'—')} <span style="color:var(--muted);font-weight:400;">· ${escapeHtml(TIPOS_INFO[c.tipo]?.label||c.tipo)}</span></div>
+    <div class="rel-campo-grid">
+      <div>DATA ABERTURA<b>${fmtDataHora(c.criadoEm)}</b></div>
+      <div>USUÁRIO ABERTURA<b>${escapeHtml(c.criadoPorEmail||'—')}</b></div>
+      <div>ATRIBUÍDO A<b>${escapeHtml(atribuidosTxt)}</b></div>
+      <div>ÚLTIMA ALTERAÇÃO<b>${fmtDataHora(ultimaAlteracaoRelatorio(c))}</b></div>
+    </div>
+    ${pct!=null ? `<div style="font-family:var(--mono);font-size:10px;color:var(--muted);">SLA UTILIZADO · ${pct}%</div><div class="sla-bar-track"><div class="sla-bar-fill" style="width:${Math.min(100,pct)}%;background:${corSlaBar(c,pct)};"></div></div>` : ''}
+    <div class="rel-box">
+      <div class="rel-box-titulo">📝 Descrição abertura</div>
+      <div>${escapeHtml(c.titulo||'')}</div>
+      ${c.observacao ? `<div style="white-space:pre-wrap;color:var(--muted);margin-top:4px;">${escapeHtml(c.observacao)}</div>` : ''}
+    </div>
+    ${temDecisao ? `<div class="rel-box">
+      <div class="rel-box-titulo">✅ Conclusão</div>
+      <div>Data: <b>${fmtDataHora(c.decididoEm)}</b> · por ${escapeHtml(c.decididoPorEmail||'—')}</div>
+      ${c.motivoDecisao ? `<div style="white-space:pre-wrap;margin-top:4px;">${escapeHtml(c.motivoDecisao)}</div>` : ''}
+    </div>` : ''}
+  </div>`;
+}
+function renderResultadoRelatorio(){
+  document.getElementById('rc-resultado-wrap').classList.remove('hidden');
+  document.getElementById('rc-resultado-count').textContent = RESULTADO_RELATORIO.length;
+  document.getElementById('rc-resultado-lista').innerHTML = RESULTADO_RELATORIO.length
+    ? RESULTADO_RELATORIO.map(rcCardHtml).join('')
+    : '<div class="empty">Nenhum chamado encontrado com esses filtros.</div>';
 }
 
 async function carregarCentral(){
