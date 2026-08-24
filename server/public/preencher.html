@@ -114,11 +114,20 @@ function parseValor(v){
 }
 function fmtMoney(n){ return (n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
 
+// <input type="date"> só entende/devolve AAAA-MM-DD (ISO) - o resto do
+// sistema (PDF, tabela, formulário em papel) sempre foi DD/MM/AAAA.
+// Converte nas duas pontas pra ninguém perceber a troca por baixo do pano.
+function isoParaBR(iso){ const m = String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : ''; }
+function brParaIso(br){ const m = String(br||'').match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : ''; }
+const valorCampo = (el) => el.type==='date' ? isoParaBR(el.value) : el.value;
+
 function renderCabecalho(){
-  document.getElementById('cabecalho').innerHTML = MODELO.cabecalho.map(c=>
-    `<label for="cab-${esc(c.key)}">${esc(c.label)}</label>
-     <input id="cab-${esc(c.key)}" data-key="${esc(c.key)}" class="campo-cab" value="${esc((MODELO.campos||{})[c.key]||'')}" autocomplete="off">`
-  ).join('');
+  document.getElementById('cabecalho').innerHTML = MODELO.cabecalho.map(c=>{
+    const bruto = (MODELO.campos||{})[c.key]||'';
+    const v = c.data ? brParaIso(bruto) : esc(bruto);
+    return `<label for="cab-${esc(c.key)}">${esc(c.label)}</label>
+     <input id="cab-${esc(c.key)}" data-key="${esc(c.key)}" class="campo-cab" type="${c.data?'date':'text'}" value="${v}" autocomplete="off">`;
+  }).join('');
 }
 
 function renderLinhas(){
@@ -129,7 +138,7 @@ function renderLinhas(){
       ${LINHAS.length>1?`<button type="button" class="rm" data-rm="${i}" title="Remover">✕</button>`:''}
       ${MODELO.colunas.map(c=>`
         <label>${esc(c.label)}</label>
-        <input data-linha="${i}" data-col="${esc(c.key)}" value="${esc(l[c.key]||'')}"
+        <input data-linha="${i}" data-col="${esc(c.key)}" type="${c.data?'date':'text'}" value="${c.data ? brParaIso(l[c.key]||'') : esc(l[c.key]||'')}"
           ${c.valor?'inputmode="decimal" placeholder="0,00"':'autocomplete="off"'}>
       `).join('')}
     </div>`).join('');
@@ -144,7 +153,7 @@ function atualizarTotal(){
 
 document.addEventListener('input', (e)=>{
   const t = e.target;
-  if(t.dataset.linha!=null){ LINHAS[+t.dataset.linha][t.dataset.col] = t.value; atualizarTotal(); }
+  if(t.dataset.linha!=null){ LINHAS[+t.dataset.linha][t.dataset.col] = valorCampo(t); atualizarTotal(); }
 });
 document.addEventListener('click', (e)=>{
   const rm = e.target.closest('[data-rm]');
@@ -193,7 +202,7 @@ async function carregar(){
 document.getElementById('btn-enviar').addEventListener('click', async ()=>{
   limparAviso();
   const campos = {};
-  document.querySelectorAll('.campo-cab').forEach(i=>{ campos[i.dataset.key]=i.value; });
+  document.querySelectorAll('.campo-cab').forEach(i=>{ campos[i.dataset.key]=valorCampo(i); });
   const arquivos = MODELO.soAnexo ? document.getElementById('f-anexo').files : null;
   if(MODELO.soAnexo && MODELO.anexoObrigatorio && (!arquivos || !arquivos.length)){
     avisar('Anexe o boleto (PDF ou imagem) - é ele que vai ser assinado.');

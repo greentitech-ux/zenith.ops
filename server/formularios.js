@@ -32,6 +32,13 @@ const FAVORECIDOS = db.collection('formularioFavorecidos');
 
 // Modelo de cada tipo: campos do cabeçalho, colunas da tabela e quem
 // assina - transcrição fiel dos 4 PDFs originais enviados pelo Master.
+// `data: true` marca um campo/coluna como data de verdade (uma data só,
+// não texto livre) - é o que faz formularios.html/preencher.html trocarem
+// o input por um seletor de calendário de verdade em vez de caixa de
+// texto. "DATA(S)" das diárias fica de fora de propósito: aceita mais de
+// uma data junto (ex: "12/08, 13/08"), não dá pra representar num só
+// calendário. O valor sempre chega e sai daqui em DD/MM/AAAA - é o
+// navegador que converte de/pra ISO, o servidor nunca vê o formato ISO.
 const TIPOS = {
   deposito: {
     rotulo: 'Depósito de Caixa',
@@ -41,7 +48,7 @@ const TIPOS = {
       { key: 'nomeGerente', label: 'NOME DO GERENTE' },
     ],
     colunas: [
-      { key: 'data', label: 'DATA DO DEPÓSITO' },
+      { key: 'data', label: 'DATA DO DEPÓSITO', data: true },
       { key: 'periodo', label: 'PERÍODO DO CAIXA' },
       { key: 'envelope', label: 'Nº DO ENVELOPE' },
       { key: 'valor', label: 'VALOR (R$)', valor: true },
@@ -85,7 +92,7 @@ const TIPOS = {
       { key: 'chavePix', label: 'CHAVE PIX' },
     ],
     colunas: [
-      { key: 'data', label: 'DATA DA DIÁRIA' },
+      { key: 'data', label: 'DATA DA DIÁRIA', data: true },
       { key: 'nome', label: 'NOME' },
       { key: 'valor', label: 'VALOR (R$)', valor: true },
     ],
@@ -108,7 +115,7 @@ const TIPOS = {
       { key: 'chavePix', label: 'CHAVE PIX' },
     ],
     colunas: [
-      { key: 'data', label: 'DATA' },
+      { key: 'data', label: 'DATA', data: true },
       { key: 'descricao', label: 'DESCRIÇÃO', larga: true },
       { key: 'valor', label: 'VALOR (R$)', valor: true },
     ],
@@ -131,7 +138,7 @@ const TIPOS = {
       { key: 'chavePix', label: 'CHAVE PIX' },
     ],
     colunas: [
-      { key: 'data', label: 'DATA DA DESPESA' },
+      { key: 'data', label: 'DATA DA DESPESA', data: true },
       // continua FORNECEDOR de propósito: aqui é coluna da tabela - o
       // estabelecimento onde CADA despesa foi feita, não quem recebe o
       // dinheiro. O favorecido do Reembolso é o do cabeçalho acima.
@@ -168,7 +175,7 @@ const TIPOS = {
       { key: 'cnpj', label: 'CNPJ' },
       { key: 'favorecido', label: 'FAVORECIDO' },
       { key: 'descricao', label: 'DESCRIÇÃO' },
-      { key: 'vencimento', label: 'VENCIMENTO' },
+      { key: 'vencimento', label: 'VENCIMENTO', data: true },
       // o valor vem daqui em vez de somar linha - ver montarConteudo
       { key: 'valor', label: 'VALOR (R$)', valor: true },
     ],

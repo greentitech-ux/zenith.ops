@@ -874,6 +874,33 @@ setTimeout(async () => {
   if (!okFormUnidades) ruins += 1;
   console.log(`${okFormUnidades ? '✓' : '✗'} Formulários: o seletor de Unidade mostra só o que foi liberado (e o servidor recusa o resto)`);
 
+  // ------------------------------------------------------------------
+  // Pedido do usuário: campo de data tem que abrir o calendário de
+  // verdade, não caixa de texto. A marca `data:true` no modelo (ver
+  // formularios.js TIPOS) é o que a tela usa pra trocar o input - aqui só
+  // confere que ela sai na rota que a tela consulta, nos campos certos e
+  // SÓ neles (ex: "DATA(S)" das diárias, que aceita mais de uma data
+  // junta, tem que continuar de fora).
+  let okCamposData = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const tipos = JSON.parse((await pedir('/api/formularios/tipos', cab)).corpo || '[]');
+    const acha = (tipo) => tipos.find((t) => t.tipo === tipo);
+    const campoData = (modelo, lista, key) => {
+      const c = (modelo[lista] || []).find((x) => x.key === key);
+      return c ? !!c.data : null;
+    };
+    okCamposData = campoData(acha('deposito'), 'colunas', 'data') === true
+      && campoData(acha('diariasRh'), 'colunas', 'data') === true
+      && campoData(acha('avulso'), 'colunas', 'data') === true
+      && campoData(acha('reembolso'), 'colunas', 'data') === true
+      && campoData(acha('assBoleto'), 'cabecalho', 'vencimento') === true
+      // "DATA(S)" das diárias fica de fora de propósito (mais de uma data junta)
+      && campoData(acha('diarias'), 'colunas', 'datas') !== true;
+  } catch (e) { okCamposData = false; console.log('  erro: ' + e.message); }
+  if (!okCamposData) ruins += 1;
+  console.log(`${okCamposData ? '✓' : '✗'} Formulários: campos de data vêm marcados pro seletor de calendário (e só eles)`);
+
   // O cadastro de unidade saiu do código pra uma tela do Master: CNPJ muda
   // por decisão de contabilidade, não por deploy. E CNPJ entra travado no
   // PDF - um dígito trocado só aparece quando alguém tenta conciliar.
