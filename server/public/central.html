@@ -249,6 +249,25 @@
         </div>
       </div>
 
+      <!-- ACESSO DE PESSOA (desligamento/ferias) -->
+      <div id="campos-acesso-pessoa" class="hidden">
+        <label>Nome completo da pessoa</label>
+        <input type="text" id="ap-nome" placeholder="ex: Priscila Pereira">
+        <label>Motivo</label>
+        <div class="tipos">
+          <button type="button" class="tipo-btn active" data-motivoacesso="desligamento" onclick="selecionarMotivoAcesso('desligamento')">Desligamento</button>
+          <button type="button" class="tipo-btn" data-motivoacesso="ferias" onclick="selecionarMotivoAcesso('ferias')">Férias</button>
+        </div>
+        <label id="ap-data-label">Último dia trabalhado</label>
+        <input type="date" id="ap-data-efetiva">
+        <div id="ap-wrap-retorno" class="hidden">
+          <label>Previsão de retorno</label>
+          <input type="date" id="ap-data-retorno">
+        </div>
+        <label>Observação (opcional)</label>
+        <textarea id="ap-observacao" placeholder="algo mais que o Master precise saber"></textarea>
+      </div>
+
       <div id="campos-anexo">
         <label>Anexar foto/arquivo (opcional)</label>
         <input type="file" id="f-anexos" multiple accept="image/*,application/pdf">
@@ -336,6 +355,7 @@ const TIPOS_INFO = {
   'suporte-ti': { label:'Suporte de TI', secaoNecessaria:null },
   'pagamento': { label:'Pagamento (despesa)', secaoNecessaria:null },
   'nota': { label:'Solicitação de Nota', secaoNecessaria:null },
+  'acesso-pessoa': { label:'Acesso de pessoa (desligamento/férias)', secaoNecessaria:null },
 };
 
 let ME = null;
@@ -343,6 +363,7 @@ let IS_MASTER = false;
 let SECOES = [];
 let MEUS_FECHAMENTOS = [];
 let TIPO_SELECIONADO = 'compra';
+let MOTIVO_ACESSO = 'desligamento';
 let TIPO_CORRECAO = 'campo';
 let ITEM_TIPO = 'maquininha';
 let ITENS_COMPRA = [];
@@ -351,7 +372,7 @@ let SEQ_ITEM_COMPRA = 0;
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 function iconeTipo(tipo){
-  return { estorno:'💳', 'ajuste-fechamento':'🧾', compra:'🛒', manutencao:'🔧', 'suporte-ti':'💻', pagamento:'💸', nota:'📄' }[tipo] || '📋';
+  return { estorno:'💳', 'ajuste-fechamento':'🧾', compra:'🛒', manutencao:'🔧', 'suporte-ti':'💻', pagamento:'💸', nota:'📄', 'acesso-pessoa':'🔐' }[tipo] || '📋';
 }
 
 // monta o link da pagina de atendimento (server/public/atendimento.html) -
@@ -432,6 +453,7 @@ function selecionarTipo(tipo){
   document.getElementById('campos-estorno').classList.toggle('hidden', tipo!=='estorno');
   document.getElementById('campos-ajuste').classList.toggle('hidden', tipo!=='ajuste-fechamento');
   document.getElementById('campos-gerais').classList.toggle('hidden', !['compra','manutencao','suporte-ti','pagamento','nota'].includes(tipo));
+  document.getElementById('campos-acesso-pessoa').classList.toggle('hidden', tipo!=='acesso-pessoa');
   document.getElementById('campos-comuns').classList.toggle('hidden', tipo==='ajuste-fechamento');
   document.getElementById('compra-itens').classList.toggle('hidden', tipo!=='compra');
   // fornecedor/vencimento so pra demandas do financeiro (vencimento so em
@@ -478,6 +500,13 @@ function renderItensCompra(){
       <input type="number" step="1" min="0" value="${i.quantidade}" oninput="ITENS_COMPRA.find(x=>x.id===${i.id}).quantidade=this.value" placeholder="qtd.">
       <button type="button" class="btn-remover" onclick="removerItemCompra(${i.id})">✕</button>
     </div>`).join('') || '<div style="color:var(--muted);font-size:12px;">Nenhum item adicionado.</div>';
+}
+
+function selecionarMotivoAcesso(motivo){
+  MOTIVO_ACESSO = motivo;
+  document.querySelectorAll('#campos-acesso-pessoa [data-motivoacesso]').forEach(b=>b.classList.toggle('active', b.dataset.motivoacesso===motivo));
+  document.getElementById('ap-data-label').textContent = motivo==='ferias' ? 'Início das férias' : 'Último dia trabalhado';
+  document.getElementById('ap-wrap-retorno').classList.toggle('hidden', motivo!=='ferias');
 }
 
 function selecionarTipoCorrecao(tipo){
@@ -553,6 +582,26 @@ document.getElementById('form-nova').addEventListener('submit', async (ev)=>{
       fd.append('payload', JSON.stringify(payload));
       for(const file of anexosInput.files) fd.append('anexos', file);
       resp = await fetch(`/api/fechamentos/${fechamentoId}/solicitar-edicao`, { method:'POST', body: fd });
+    } else if(TIPO_SELECIONADO === 'acesso-pessoa'){
+      const nomePessoa = document.getElementById('ap-nome').value.trim();
+      const dataEfetiva = document.getElementById('ap-data-efetiva').value;
+      const dataRetornoPrevista = MOTIVO_ACESSO==='ferias' ? document.getElementById('ap-data-retorno').value : null;
+      if(!nomePessoa) throw new Error('Informe o nome da pessoa.');
+      if(!dataEfetiva) throw new Error('Informe a data.');
+      if(MOTIVO_ACESSO==='ferias' && !dataRetornoPrevista) throw new Error('Informe a previsão de retorno.');
+      const fd = new FormData();
+      fd.append('payload', JSON.stringify({
+        tipo: 'acesso-pessoa',
+        unidade: document.getElementById('f-unidade').value,
+        unidadeNome: UNIDADES_NOMES[document.getElementById('f-unidade').value] || document.getElementById('f-unidade').value,
+        titulo: `${MOTIVO_ACESSO==='ferias'?'Férias':'Desligamento'} — ${nomePessoa}`,
+        observacao: document.getElementById('ap-observacao').value,
+        nomePessoa, motivoAcesso: MOTIVO_ACESSO, dataEfetiva, dataRetornoPrevista,
+        prioridade: document.getElementById('f-prioridade').value,
+        direcionadoParaId, direcionadoParaEmail,
+      }));
+      for(const file of anexosInput.files) fd.append('anexos', file);
+      resp = await fetch('/api/solicitacoes', { method:'POST', body: fd });
     } else {
       const fd = new FormData();
       fd.append('payload', JSON.stringify({

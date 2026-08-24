@@ -48,7 +48,7 @@ function verticalDaSecao(secao) {
 // cofre, aqui em branco = "sem restrição" pra não quebrar o acesso de quem
 // já usava a Central antes dessa permissão existir; o Master so restringe
 // quem precisa ver só alguns tipos (ex: Admin que só cuida de Suporte de TI)
-const TIPOS_SOLICITACAO = ['estorno', 'ajuste-fechamento', 'compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota'];
+const TIPOS_SOLICITACAO = ['estorno', 'ajuste-fechamento', 'compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota', 'acesso-pessoa'];
 
 function sanitizePermissions(input) {
   const p = input || {};
@@ -717,6 +717,7 @@ module.exports = {
   secoesDaVertical,
   verticalDaSecao,
   separarNome,
+  soLetras,
   sugerirAcesso,
   criarCopiandoDe,
   TIPOS_SOLICITACAO,
@@ -749,4 +750,5 @@ module.exports = {
   desbloquear,
   alterarSenhaPropria,
   remove,
+  invalidar: () => usersCache.invalidar(),
 };

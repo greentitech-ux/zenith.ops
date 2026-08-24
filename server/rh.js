@@ -725,6 +725,59 @@ async function registrarRetornoAtestado(id, { porEmail }) {
   return getOne(id);
 }
 
+// ferias como estado ATIVO (diferente de dataUltimasFerias, que so
+// alimenta o alerta de vencimento NR-7) - mesmo par reversivel do
+// atestado, mas com retorno OBRIGATORIO (o pedido de bloqueio de acesso
+// por ferias so faz sentido com uma data de volta pra reativar depois) e
+// sem restricao de tipoCadastro (ferias vale pra qualquer efetivo ativo,
+// nao so quem nao e extra)
+async function registrarFerias(id, { inicio, retornoPrevisto, porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  const atual = snap.data();
+  if (atual.status !== 'ativo') throw new Error('Só dá pra colocar de férias quem está ativo.');
+  if (atual.emFerias) throw new Error('Esse funcionário já está de férias.');
+  const inicioOk = validarDataOuNull(inicio, 'Data de início') || new Date().toISOString().slice(0, 10);
+  const retornoOk = validarDataOuNull(retornoPrevisto, 'Previsão de retorno');
+  if (!retornoOk) throw new Error('Informe a previsão de retorno.');
+  const agora = new Date().toISOString();
+  await ref.update({
+    emFerias: true,
+    feriasAtual: {
+      inicio: inicioOk,
+      retornoPrevisto: retornoOk,
+      registradoPorEmail: porEmail || null,
+      registradoEm: agora,
+    },
+    atualizadoEm: agora,
+  });
+  rhCache.invalidar();
+  return getOne(id);
+}
+
+async function registrarRetornoFerias(id, { porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  const atual = snap.data();
+  if (!atual.emFerias || !atual.feriasAtual) throw new Error('Esse funcionário não está de férias.');
+  const agora = new Date().toISOString();
+  const registroFechado = {
+    ...atual.feriasAtual,
+    retorno: agora.slice(0, 10),
+    marcadoRetornoPorEmail: porEmail || null,
+  };
+  await ref.update({
+    emFerias: false,
+    feriasAtual: null,
+    ferias: [...(atual.ferias || []), registroFechado],
+    atualizadoEm: agora,
+  });
+  rhCache.invalidar();
+  return getOne(id);
+}
+
 function diasDesde(dataIso) {
   if (!dataIso) return 0;
   const inicio = new Date(`${dataIso}T00:00:00`);
@@ -874,6 +927,10 @@ async function desligar(id, { motivo, data, porEmail } = {}) {
     experiencia: null,
     emAtestado: false,
     atestadoAtual: null,
+    // desligar enquanto estava de ferias nao pode deixar o flag preso -
+    // senao uma reativacao futura volta com ferias fantasma
+    emFerias: false,
+    feriasAtual: null,
     atualizadoEm: new Date().toISOString(),
   });
   rhCache.invalidar();
@@ -1050,8 +1107,10 @@ module.exports = {
   listPendentesAprovacaoCadastro, aprovarCadastro, reprovarCadastro,
   registrarDecisaoTeste, verificarTestesVencidos, marcarAlertaTesteEnviado,
   registrarAtestado, registrarRetornoAtestado,
+  registrarFerias, registrarRetornoFerias,
   registrarDecisaoExperiencia, verificarAlertasExperiencia, marcarAlertaExperienciaEnviado, definirExperiencia,
   importarLote,
   diasDesde, diasRestantesAte, aniversariantesHoje,
+  normalizarNome,
   invalidar: () => rhCache.invalidar(),
 };

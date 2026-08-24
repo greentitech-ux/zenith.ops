@@ -46,6 +46,7 @@ const ifoodClient = require('./ifoodClient');
 const ifoodStore = require('./ifoodStore');
 const ifoodSync = require('./ifoodSync');
 const solicitacoes = require('./solicitacoes');
+const acessosPessoa = require('./acessosPessoa');
 const formularios = require('./formularios');
 const formulariosUnidades = require('./formulariosUnidades');
 const comprasAcompanhamento = require('./comprasAcompanhamento');
@@ -7985,7 +7986,7 @@ app.get('/api/compras/acompanhamento', requireSection('solicitacoes'), async (re
 app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anexos', 4), async (req, res) => {
   try {
     const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
-    const { tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, ehOrcamento, fornecedor, vencimento, direcionadoParaId, direcionadoParaEmail, prioridade } = payload;
+    const { tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, ehOrcamento, fornecedor, vencimento, direcionadoParaId, direcionadoParaEmail, prioridade, nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista } = payload;
     if (!req.isMaster && unidade && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
@@ -8016,6 +8017,7 @@ app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anex
       direcionadoParaEmail,
       prioridade,
       teste: req.isQaMaster || req.isQaUser,
+      nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista,
     });
     broadcast('solicitacao-criada', registro, 'solicitacoes');
     push.notifySolicitacao(`Ticket #${registro.numeroTicket} · Nova solicitação`, `${req.user.email} · ${registro.titulo || tipo || ''}`, registro.id);
@@ -8074,6 +8076,106 @@ app.delete('/api/solicitacoes/:id/comprada', auth.requireMasterOrAdmin, async (r
     const registro = await solicitacoes.desmarcarComprada(req.params.id);
     broadcast('solicitacao-decidida', registro, 'solicitacoes');
     res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// checklist de bloqueio/liberacao de acesso (tipo 'acesso-pessoa') - ver
+// acessosPessoa.js e solicitacoes.atualizarAcessoChecklist/marcarAcessoConcluido.
+// So aparece depois de Aprovado, mesmo espirito do "Comprada" acima: uma
+// acao manual, no ritmo do Master, dentro do mesmo painel de detalhe.
+app.get('/api/solicitacoes/:id/acesso-candidatos', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    const registro = await solicitacoes.getOne(req.params.id);
+    if (!registro) return res.status(404).json({ error: 'Solicitação não encontrada.' });
+    if (registro.tipo !== 'acesso-pessoa') return res.status(400).json({ error: 'Esse ticket não é de bloqueio de acesso.' });
+    const candidatos = await acessosPessoa.buscarCandidatos({ nomePessoa: registro.nomePessoa, unidade: registro.unidade });
+    res.json(candidatos);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// executa de verdade - so Master (mais estrito que o resto da Central,
+// porque aqui derruba login/desliga cadastro pra valer, nao so decide um
+// ticket). :sistema em users|rh|abastecimento. acao 'confirmar' precisa de
+// alvoId (o candidato que o Master escolheu); 'nao-encontrado' so anota que
+// aquele sistema nao tem nada pra essa pessoa
+app.patch('/api/solicitacoes/:id/acesso/:sistema', auth.requireMaster, async (req, res) => {
+  try {
+    const { sistema } = req.params;
+    const { acao, alvoId } = req.body;
+    const registro = await solicitacoes.getOne(req.params.id);
+    if (!registro) return res.status(404).json({ error: 'Solicitação não encontrada.' });
+    if (registro.tipo !== 'acesso-pessoa') return res.status(400).json({ error: 'Esse ticket não é de bloqueio de acesso.' });
+    if (registro.status !== 'APROVADO') return res.status(400).json({ error: 'Só tickets já Aprovados têm checklist de acesso.' });
+    if (acao === 'confirmar') {
+      if (!alvoId) return res.status(400).json({ error: 'Informe o candidato confirmado.' });
+      const porEmail = req.user.email;
+      const { motivoAcesso, dataEfetiva, dataRetornoPrevista } = registro;
+      if (sistema === 'users') {
+        await acessosPessoa.bloquearLogin(alvoId, porEmail);
+      } else if (sistema === 'rh') {
+        if (motivoAcesso === 'ferias') await acessosPessoa.marcarFeriasRh(alvoId, { dataEfetiva, dataRetornoPrevista, porEmail });
+        else await acessosPessoa.desligarFuncionarioRh(alvoId, { dataEfetiva, motivoAcesso, porEmail });
+      } else if (sistema === 'abastecimento') {
+        if (motivoAcesso === 'ferias') await acessosPessoa.suspenderOperadorAbastecimento(alvoId, porEmail);
+        else await acessosPessoa.removerOperadorAbastecimento(alvoId, porEmail);
+      } else {
+        return res.status(400).json({ error: 'Sistema inválido.' });
+      }
+    } else if (acao !== 'nao-encontrado') {
+      return res.status(400).json({ error: 'Ação inválida.' });
+    }
+    const atualizado = await solicitacoes.atualizarAcessoChecklist(req.params.id, sistema, {
+      status: acao === 'confirmar' ? 'confirmado' : 'nao-encontrado',
+      alvoId: acao === 'confirmar' ? alvoId : null,
+      executadoPorEmail: req.user.email,
+    });
+    broadcast('solicitacao-decidida', atualizado, 'solicitacoes');
+    res.json(atualizado);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/solicitacoes/:id/acesso-concluido', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    const atualizado = await solicitacoes.marcarAcessoConcluido(req.params.id, req.user.email);
+    broadcast('solicitacao-decidida', atualizado, 'solicitacoes');
+    res.json(atualizado);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// so pra ferias: restaura os sistemas que foram confirmados (login/RH/
+// operador) quando a pessoa volta. Tolera falha parcial linha a linha -
+// mesmo espirito de updateUsernamesEmMassa - pra um erro num sistema nao
+// travar a reativacao dos outros dois
+app.post('/api/solicitacoes/:id/acesso-reativar-tudo', auth.requireMaster, async (req, res) => {
+  try {
+    const registro = await solicitacoes.getOne(req.params.id);
+    if (!registro) return res.status(404).json({ error: 'Solicitação não encontrada.' });
+    if (registro.tipo !== 'acesso-pessoa') return res.status(400).json({ error: 'Esse ticket não é de bloqueio de acesso.' });
+    if (registro.motivoAcesso !== 'ferias') return res.status(400).json({ error: 'Reativar só vale pra ticket de férias.' });
+    const porEmail = req.user.email;
+    const checklist = registro.acessoChecklist || {};
+    const resultados = [];
+    for (const sistema of ['users', 'rh', 'abastecimento']) {
+      const linha = checklist[sistema];
+      if (!linha || linha.status !== 'confirmado') continue;
+      try {
+        if (sistema === 'users') await acessosPessoa.reativarLogin(linha.alvoId, porEmail);
+        else if (sistema === 'rh') await acessosPessoa.encerrarFeriasRh(linha.alvoId, porEmail);
+        else await acessosPessoa.reativarOperadorAbastecimento(linha.alvoId, porEmail);
+        resultados.push({ sistema, ok: true });
+      } catch (err) {
+        resultados.push({ sistema, ok: false, error: err.message });
+      }
+    }
+    res.json({ resultados });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
