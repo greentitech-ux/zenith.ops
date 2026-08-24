@@ -42,6 +42,7 @@
       // Aqui o rotulo certo aparece no menu de qualquer tela.
       { id: 'nav-lancamento', href: '/lancamento.html', icone: '🧾', rotulo: 'Fechamento', secoes: ['lancamento', 'sangria'],
         alt: { quando: (me) => !temSecao(me, 'lancamento') && temSecao(me, 'sangria'), icone: '💰', rotulo: 'Sangria/Depósito' } },
+      { id: 'nav-saidas-painel', href: '/saidas.html', icone: '📤', rotulo: 'Painel de Saídas', secoes: ['lancamento', 'sangria'] },
       { id: 'nav-entrega-lancamento', href: '/entrega-lancamento.html', icone: '📦', rotulo: 'Lançar entrega', secoes: ['entregas-lancamento'] },
       // pagina de Fechamentos e uma so (fechamentos.html), mas cada franquia
       // so quer ver o proprio numero sem lembrar de trocar um filtro toda

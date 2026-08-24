@@ -142,4 +142,24 @@ async function remover(id) {
   sangriasCache.invalidar();
 }
 
-module.exports = { criar, listAll, listByUnidades, comoFechamento, getOne, atualizar, remover };
+// conferencia (Painel de Saídas) - diferente de editar/excluir, que so o
+// Master faz: aqui e Master OU Admin marcando que bateu com o extrato/
+// comprovante. Fica gravado direto no proprio doc (a sangria ja tem id
+// proprio, diferente das "outras saidas" do fechamento - ver
+// verificacoesSaida.js pra aquelas)
+async function marcarVerificada(id, { verificada, porId, porEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Sangria não encontrada.');
+  const patch = {
+    verificada: !!verificada,
+    verificadaPorId: verificada ? porId : null,
+    verificadaPorEmail: verificada ? porEmail : null,
+    verificadaEm: verificada ? new Date().toISOString() : null,
+  };
+  await ref.update(patch);
+  sangriasCache.invalidar();
+  return getOne(id);
+}
+
+module.exports = { criar, listAll, listByUnidades, comoFechamento, getOne, atualizar, remover, marcarVerificada };
