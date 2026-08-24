@@ -93,9 +93,9 @@
   .sec-tab:hover{color:var(--text);}
   .sec-tab.active{color:#0b0d10;background:var(--accent);border-color:var(--accent);}
   .sec-tab .sec-count{font-family:var(--mono);font-weight:400;opacity:.8;}
-  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;z-index:50;}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:22px 14px;}
   .overlay.hidden{display:none!important;}
-  .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px 14px 0 0;padding:16px 14px 22px;width:100%;max-width:640px;max-height:88vh;overflow-y:auto;}
+  .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 14px 22px;width:100%;max-width:640px;max-height:88vh;overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,.5);}
   .sheet h3{margin:0 0 4px;font-size:14px;}
   .sheet .sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px;}
   .anexo-item{display:flex;align-items:center;gap:8px;font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin-top:6px;}
@@ -172,26 +172,15 @@
   .presets{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;}
   .preset-btn{font-family:var(--mono);font-size:10.5px;padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
   .preset-btn:hover{color:var(--text);border-color:var(--accent);}
-  .rel-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;cursor:pointer;transition:border-color .15s ease;}
+  .rel-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;cursor:pointer;transition:border-color .15s ease;overflow-wrap:anywhere;min-width:0;}
   .rel-card:hover{border-color:var(--accent);}
   .rel-card-topo{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;}
-  .rel-campo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 16px;font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:8px 0;}
-  .rel-campo-grid b{display:block;color:var(--text);font-family:var(--sans);font-weight:600;font-size:12.5px;margin-top:2px;}
-  .rel-box{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;margin-top:8px;}
+  .rel-campo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px 16px;font-family:var(--mono);font-size:10.5px;color:var(--muted);margin:8px 0;overflow-wrap:anywhere;}
+  .rel-campo-grid b{display:block;color:var(--text);font-family:var(--sans);font-weight:600;font-size:12.5px;margin-top:2px;overflow-wrap:anywhere;}
+  .rel-box{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;margin-top:8px;overflow-wrap:anywhere;}
   .rel-box-titulo{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
   .sla-bar-track{background:var(--bg);border:1px solid var(--line);border-radius:5px;height:6px;overflow:hidden;margin-top:4px;}
   .sla-bar-fill{height:100%;}
-  /* Início: resumo pessoal no topo da aba Solicitações - por status/unidade
-     (tabela) e meus abertos/concluídos (cards, reaproveita .rel-card) */
-  .inicio-grid{display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:16px;}
-  @media(min-width:760px){ .inicio-grid{grid-template-columns:1fr 1fr;} }
-  .inicio-col{display:flex;flex-direction:column;gap:14px;min-width:0;}
-  .inicio-tabela{width:100%;border-collapse:collapse;font-size:12.5px;}
-  .inicio-tabela th{text-align:left;font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:6px 8px;border-bottom:1px solid var(--line);}
-  .inicio-tabela td{padding:7px 8px;border-bottom:1px solid var(--line);}
-  .inicio-tabela tr:last-child td{border-bottom:none;font-weight:700;}
-  .inicio-cards{max-height:420px;overflow-y:auto;padding-right:2px;}
-  .inicio-vazio{padding:16px;text-align:center;color:var(--muted);font-size:12px;}
   .tipo-filtro-btn .tf-counts b{font-weight:600;}
 </style>
 <script src="/tema.js"></script>
@@ -211,6 +200,7 @@
       </div>
     </div>
     <div class="header-nav">
+      <a class="back" href="/central-inicio.html">📊 Início</a>
       <a class="back" href="/central.html">+ Nova solicitação</a>
       <button class="btn-notif" onclick="location.reload()" title="Atualizar página">🔄</button>
       <div class="nav-divider"></div>
@@ -235,25 +225,6 @@
 </div>
 
 <div class="panel" id="sec-solicitacoes">
-  <!-- Início: resumo pessoal - por status/unidade (todo mundo que o usuario
-       enxerga) e meus abertos/concluidos (so o que e meu, mesma regra de
-       "meus" do todosCardsCentral em index.js). Nao depende dos filtros da
-       lista abaixo - CARDS inteiro, atualizado toda vez que renderKanban()
-       roda (ver renderInicio, chamado no fim de renderKanban) -->
-  <div class="inicio-grid">
-    <div class="inicio-col">
-      <div class="rel-header">📊 Chamados em aberto (por status)</div>
-      <div id="inicio-status-corpo"></div>
-      <div class="rel-header">🏬 Chamados em aberto (por unidade)</div>
-      <div id="inicio-unidade-corpo"></div>
-    </div>
-    <div class="inicio-col">
-      <div class="rel-header">📋 Meus chamados em aberto <span class="tipo-badge" id="inicio-meus-count" style="margin-left:auto;"></span></div>
-      <div id="inicio-meus-corpo" class="inicio-cards"></div>
-      <div class="rel-header">✅ Meus últimos concluídos</div>
-      <div id="inicio-concluidos-corpo" class="inicio-cards"></div>
-    </div>
-  </div>
   <h2 style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
     <span><span id="titulo-lista">Solicitações</span> <span class="sub" id="lista-count" style="font-family:var(--mono);color:var(--muted);"></span></span>
     <span style="display:flex;gap:6px;">
@@ -1051,51 +1022,6 @@ function renderKanban(){
       : `<div class="kanban-empty">${emTriagem && status!=='PENDENTE' ? 'Nada aguardando aqui — tudo em dia! 🎉' : 'Nenhuma aqui.'}</div>`;
   });
   atualizarBarraSelecao();
-  renderInicio();
-}
-
-// "meu" ticket = mesma regra de visibilidade não-Master do todosCardsCentral
-// (index.js): quem criou, quem foi direcionado, ou está entre os atribuídos
-function souEuCard(c){
-  return !!ME && (c.criadoPorId===ME.id || c.direcionadoParaId===ME.id || (Array.isArray(c.atribuidosIds) && c.atribuidosIds.includes(ME.id)));
-}
-const STATUS_LABEL_INICIO = { PENDENTE:'Pendente', APROVADO:'Aprovado', REJEITADO:'Rejeitado', CONVERTIDO:'Convertido' };
-
-// resumo pessoal do topo da aba Solicitações - roda sobre CARDS inteiro
-// (tudo que o usuário enxerga), não sobre os filtros da lista abaixo.
-// "Em aberto" usa slaAtivo() - a mesma regra que já decide se o SLA ainda
-// conta (Pendente sempre; Aprovado até o andamento virar Finalizado)
-function renderInicio(){
-  if(!ME) return;
-  const abertos = CARDS.filter(slaAtivo);
-
-  const porStatus = {};
-  abertos.forEach(c=>{ porStatus[c.status] = (porStatus[c.status]||0) + 1; });
-  const linhasStatus = Object.entries(porStatus).sort((a,b)=>b[1]-a[1]).map(([s,q])=>
-    `<tr><td>${STATUS_LABEL_INICIO[s]||s}</td><td>${q}</td><td>${Math.round(q/abertos.length*100)}%</td></tr>`).join('');
-  document.getElementById('inicio-status-corpo').innerHTML = abertos.length
-    ? `<table class="inicio-tabela"><thead><tr><th>Status</th><th>Qtd.</th><th>%</th></tr></thead><tbody>${linhasStatus}<tr><td>Total</td><td>${abertos.length}</td><td>100%</td></tr></tbody></table>`
-    : '<div class="inicio-vazio">Nenhum chamado em aberto.</div>';
-
-  const porUnidade = {};
-  abertos.forEach(c=>{ const u = c.unidadeNome || c.unidade || '—'; porUnidade[u] = (porUnidade[u]||0) + 1; });
-  const linhasUnidade = Object.entries(porUnidade).sort((a,b)=>b[1]-a[1]).map(([u,q])=>
-    `<tr><td>${escapeHtml(u)}</td><td>${q}</td><td>${Math.round(q/abertos.length*100)}%</td></tr>`).join('');
-  document.getElementById('inicio-unidade-corpo').innerHTML = abertos.length
-    ? `<table class="inicio-tabela"><thead><tr><th>Unidade</th><th>Qtd.</th><th>%</th></tr></thead><tbody>${linhasUnidade}</tbody></table>`
-    : '<div class="inicio-vazio">Nenhum chamado em aberto.</div>';
-
-  const meusAbertos = abertos.filter(souEuCard);
-  document.getElementById('inicio-meus-count').textContent = meusAbertos.length;
-  document.getElementById('inicio-meus-corpo').innerHTML = meusAbertos.length
-    ? meusAbertos.map(rcCardHtml).join('')
-    : '<div class="inicio-vazio">Nenhum chamado seu em aberto agora.</div>';
-
-  const meusConcluidos = CARDS.filter(c=>(c.status==='APROVADO' || c.status==='REJEITADO') && souEuCard(c))
-    .sort((a,b)=>(b.decididoEm||'').localeCompare(a.decididoEm||'')).slice(0, 7);
-  document.getElementById('inicio-concluidos-corpo').innerHTML = meusConcluidos.length
-    ? meusConcluidos.map(rcCardHtml).join('')
-    : '<div class="inicio-vazio">Nenhum chamado seu concluído ainda.</div>';
 }
 
 const ORDEM_ANDAMENTO = { PENDENTE: 0, EM_ANDAMENTO: 1, FINALIZADO: 2 };

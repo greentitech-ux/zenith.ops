@@ -800,9 +800,9 @@ async function gerarPdfAnexoAssinado(r, res, opcoes) {
 
   const paginas = out.getPages();
   for (let i = 0; i < paginas.length; i++) {
-    // a assinatura em si vai na ÚLTIMA página; as outras levam só a
-    // tarja de origem, pra folha solta não circular sem identificação
-    await desenharFaixa(out, paginas[i], r, fonte, negrito, assinadas, i === paginas.length - 1);
+    // a assinatura vai em TODAS as páginas/fotos - com mais de uma, uma
+    // folha ou imagem solta não pode circular sem a assinatura carimbada
+    await desenharFaixa(out, paginas[i], r, fonte, negrito, assinadas, true);
   }
 
   const bytes = Buffer.from(await out.save());
