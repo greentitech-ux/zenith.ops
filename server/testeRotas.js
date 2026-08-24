@@ -5189,6 +5189,107 @@ setTimeout(async () => {
   if (!okTermo) ruins += 1;
   console.log(`${okTermo ? '\u2713' : '\u2717'} Termo do parque: da pra NAO autorizar o uso de imagem, e sem "undefined" impresso`);
 
+  // ---------- Bonificação: motor de cálculo + perfis salvos + visibilidade ----------
+  // Mecânica portada de um simulador solto do Master (bônus de gerente/
+  // equipe em cima do faturamento) - aqui é só a fórmula pura, testada com
+  // números fixos conferidos na mão (mesmo espírito do motor de
+  // inventario.js). Cobre também o invariante "unidade pertence a 1 perfil
+  // por vez" (mesma ideia de grupoDaUnidade em grupos.js) e a poda de campos
+  // por permissão - pedido explícito do usuário foi "nunca mostrar todos pra
+  // todo mundo", e isso tem que acontecer no SERVIDOR, antes de sair pro
+  // navegador, não escondido só no CSS.
+  let okBonificacao = false;
+  try {
+    const bonificacaoPerfis = require('./bonificacaoPerfis');
+    const bonificacao = require('./bonificacao');
+
+    // ---- 1) motor puro: números fixos conferidos na mão ----
+    const perfilExemplo = {
+      percentualPool: 1, splitMetasOutras: 70, splitGerente: 60, splitGerenteOutras: 25,
+      metricasGerente: [
+        { campo: 'faturamento', peso: 40 }, { campo: 'documentacao', peso: 35 }, { campo: 'gestaoPessoal', peso: 25 },
+      ],
+      metricasColaboradores: [
+        { campo: 'assiduidade', peso: 40 }, { campo: 'treinamentos', peso: 30 }, { campo: 'comportamento', peso: 20 }, { campo: 'iniciativas', peso: 10 },
+      ],
+    };
+    const completionsGerenteEx = [
+      { campo: 'faturamento', percentual: 95 }, { campo: 'documentacao', percentual: 100 }, { campo: 'gestaoPessoal', percentual: 88 },
+    ];
+    const completionsColabEx = [
+      { campo: 'assiduidade', percentual: 100 }, { campo: 'treinamentos', percentual: 80 }, { campo: 'comportamento', percentual: 95 }, { campo: 'iniciativas', percentual: 70 },
+    ];
+    const r1 = bonificacao.calcular(perfilExemplo, 100000, 12, completionsGerenteEx, completionsColabEx);
+
+    // ---- 2) casos de borda ----
+    const rFatZero = bonificacao.calcular(perfilExemplo, 0, 12, completionsGerenteEx, completionsColabEx);
+    const rSemFuncionario = bonificacao.calcular(perfilExemplo, 100000, 0, completionsGerenteEx, completionsColabEx);
+    const rSoColab = bonificacao.calcular({ ...perfilExemplo, metricasGerente: [] }, 100000, 12, [], completionsColabEx);
+    const rSoGerente = bonificacao.calcular({ ...perfilExemplo, metricasColaboradores: [] }, 100000, 12, completionsGerenteEx, []);
+    // pesos que NÃO somam 100% (40+30=70) - a taxa fica proporcional ao peso
+    // usado, sem normalizar pro que faltou: o sistema não inventa os 30% que
+    // não foram configurados (mesma lógica de "não inventar rótulo/número"
+    // do CLAUDE.md §6, aplicada ao motor de cálculo)
+    const rPesoIncompleto = bonificacao.calcular(
+      { ...perfilExemplo, metricasGerente: [{ campo: 'a', peso: 40 }, { campo: 'b', peso: 30 }], metricasColaboradores: [] },
+      100000, 12, [{ campo: 'a', percentual: 100 }, { campo: 'b', percentual: 100 }], [],
+    );
+
+    // ---- 3) perfis: uma unidade só pertence a 1 perfil por vez ----
+    const perfilA = await bonificacaoPerfis.criar({ nome: 'TESTE Domino\'s', unidades: ['TESTE_UN_X', 'TESTE_UN_Y'], criadoPorEmail: 'teste@local' });
+    const perfilB = await bonificacaoPerfis.criar({ nome: 'TESTE Domino\'s Caruaru', unidades: ['TESTE_UN_Y', 'TESTE_UN_Z'], criadoPorEmail: 'teste@local' });
+    const perfilARelido = await bonificacaoPerfis.obter(perfilA.id);
+    const perfilDaUnidadeY = await bonificacaoPerfis.perfilDaUnidade('TESTE_UN_Y');
+    const perfilDaUnidadeSemDono = await bonificacaoPerfis.perfilDaUnidade('TESTE_UN_NUNCA_CONFIGURADA');
+
+    // ---- 4) visibilidade: a mesma apuração, 3 combinações de permissão ----
+    const apuracaoFake = {
+      semPerfil: false, unidade: 'TESTE_UN_X', mes: '2026-08', status: 'rascunho', perfilNome: 'TESTE Domino\'s',
+      temGerente: true, temColab: true, gerenteRecebe: 470.25,
+      colabTotal: 454.5, colabPorPessoa: 37.88,
+      fechadoPorEmail: null, fechadoEm: null,
+      metricasGerente: perfilExemplo.metricasGerente, metricasColaboradores: perfilExemplo.metricasColaboradores,
+      completionsGerente: completionsGerenteEx, completionsColaboradores: completionsColabEx,
+      sugestaoAssiduidade: 96,
+      faturamento: 100000, pool: 1000, metas: 700, outras: 300, taxaGerente: 95, taxaColab: 90,
+      funcionarios: [{ id: 'f1', nome: 'Colaborador Teste' }],
+    };
+    const semNada = bonificacao.montarRespostaPorPermissao(apuracaoFake, { podeVerTotal: false, podeVerColaboradores: false });
+    const soTotal = bonificacao.montarRespostaPorPermissao(apuracaoFake, { podeVerTotal: true, podeVerColaboradores: false });
+    const soColab = bonificacao.montarRespostaPorPermissao(apuracaoFake, { podeVerTotal: false, podeVerColaboradores: true });
+
+    const conf = {
+      // motor puro
+      'taxa do gerente bate com a conta na mão (95%)': r1.taxaGerente === 95,
+      'taxa dos colaboradores bate com a conta na mão (90%)': r1.taxaColab === 90,
+      'gerente recebe exatamente R$470,25': r1.gerenteRecebe === 470.25,
+      'colaboradores recebem R$454,50 no total': r1.colabTotal === 454.5,
+      'e R$37,88 por pessoa (454,50 / 12)': r1.colabPorPessoa === 37.88,
+      'faturamento zero zera tudo (não gera bônus do nada)': rFatZero.gerenteRecebe === 0 && rFatZero.colabTotal === 0,
+      'zero funcionário ativo não quebra a divisão (por pessoa = 0)': rSemFuncionario.colabPorPessoa === 0,
+      'perfil só-colaborador não bonifica gerente': rSoColab.gerenteRecebe === 0 && rSoColab.colabTotal > 0,
+      'perfil só-gerente não bonifica colaborador': rSoGerente.colabTotal === 0 && rSoGerente.gerenteRecebe > 0,
+      'pesos que não somam 100% não são normalizados (fica no que foi configurado)': rPesoIncompleto.taxaGerente === 70,
+      // perfis nomeados e salvos
+      'perfil B "rouba" a unidade Y do perfil A ao ser criado': perfilARelido.unidades.includes('TESTE_UN_X') && !perfilARelido.unidades.includes('TESTE_UN_Y'),
+      'perfilDaUnidade acha o dono certo (perfil B, não A)': !!perfilDaUnidadeY && perfilDaUnidadeY.id === perfilB.id,
+      'unidade nunca configurada não devolve perfil nenhum (não inventa default)': perfilDaUnidadeSemDono === null,
+      // visibilidade - a poda tem que acontecer ANTES de sair pro navegador
+      'sem nenhuma das 2 flags: não vaza faturamento': semNada.faturamento === undefined,
+      'sem nenhuma das 2 flags: não vaza lista nominal': semNada.colaboradores === undefined,
+      'sem nenhuma das 2 flags: ainda mostra o agregado dos colaboradores': !!semNada.colaboradoresResumo && semNada.colaboradoresResumo.porPessoa === 37.88,
+      'com podeVerValorTotal: mostra faturamento/pool/taxas': soTotal.faturamento === 100000 && soTotal.pool === 1000 && soTotal.taxaGerente === 95,
+      'com podeVerValorTotal (sem verColaboradores): continua sem nome': soTotal.colaboradores === undefined,
+      'com podeVerColaboradores: mostra nome a nome': Array.isArray(soColab.colaboradores) && soColab.colaboradores[0].nome === 'Colaborador Teste',
+      'com podeVerColaboradores (sem verValorTotal): continua sem faturamento': soColab.faturamento === undefined,
+    };
+    const ruinsB = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okBonificacao = !ruinsB.length;
+    if (ruinsB.length) console.log(`  falhou em: ${ruinsB.join(' · ')} (taxaGerente=${r1.taxaGerente} gerenteRecebe=${r1.gerenteRecebe} colabTotal=${r1.colabTotal} colabPorPessoa=${r1.colabPorPessoa})`);
+  } catch (e) { okBonificacao = false; console.log('  erro: ' + e.message); }
+  if (!okBonificacao) ruins += 1;
+  console.log(`${okBonificacao ? '✓' : '✗'} Bonificação: motor bate com a conta na mão, unidade só num perfil por vez, permissão poda o payload`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
