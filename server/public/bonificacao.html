@@ -245,7 +245,7 @@
       <div class="panel">
         <div class="tablewrap">
           <table>
-            <thead><tr><th>Unidade</th><th>Perfil</th><th>Status</th><th>Gerente recebe</th><th>Colaboradores (total)</th></tr></thead>
+            <thead><tr><th>Unidade</th><th>Perfil</th><th>Status</th><th>Gerente recebe</th><th>Por colaborador</th><th>Quantidade</th><th>Colaboradores (total)</th></tr></thead>
             <tbody id="tbody-historico"></tbody>
           </table>
         </div>
@@ -771,6 +771,8 @@ async function carregarHistorico(){
     <td>${escapeHtml(u.perfilNome)}</td>
     <td><span class="badge ${u.status==='fechado'?'fechado':'rascunho'}">${u.status}</span></td>
     <td>${fmtMoney(u.gerenteRecebe)}</td>
+    <td>${fmtMoney(u.colabPorPessoa)}</td>
+    <td>${u.colabQuantidade}</td>
     <td>${fmtMoney(u.colabTotal)}</td>
   </tr>`).join('');
 }
