@@ -5923,6 +5923,58 @@ setTimeout(async () => {
   if (!okRelatorioChamados) ruins += 1;
   console.log(`${okRelatorioChamados ? '✓' : '✗'} Relatório de chamados: Ticket #/Status/Fechamento/Interação filtram de verdade (não só passam direto)`);
 
+  // ------------------------------------------------------------------
+  // Central -> Histórico: dropdown "Loja" agrupado por nome (não por código).
+  // Uma mesma loja pode ter mais de um código histórico cadastrado (espaços
+  // de código diferentes - ver CLAUDE.md "unificação de unidades", encerrada,
+  // não mexer no mapeamento) - o filtro tinha que ficar preso a UM código só,
+  // fazendo "Dom Bessa" aparecer 2-3 vezes na lista com o mesmo rótulo. O
+  // fix é só de apresentação: o dropdown manda todos os códigos daquele nome
+  // juntos (separados por vírgula, no mesmo "unidade=A,B" que já existe pro
+  // filtro de "tipo"), e filtrarCardsCentral() casa qualquer um deles.
+  let okFiltroUnidadeMultiCodigo = false;
+  try {
+    const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const codA = 'MULTICOD-A', codB = 'MULTICOD-B', codC = 'MULTICOD-C';
+
+    const criarA = await postarJson('/api/solicitacoes', {
+      tipo: 'compra', unidade: codA, unidadeNome: 'Loja Multicódigo', titulo: 'Multicódigo A', valorEstimado: 5,
+    }, cab);
+    const ticketA = JSON.parse(criarA.corpo || '{}');
+    const criarB = await postarJson('/api/solicitacoes', {
+      tipo: 'compra', unidade: codB, unidadeNome: 'Loja Multicódigo', titulo: 'Multicódigo B', valorEstimado: 5,
+    }, cab);
+    const ticketB = JSON.parse(criarB.corpo || '{}');
+    const criarC = await postarJson('/api/solicitacoes', {
+      tipo: 'compra', unidade: codC, unidadeNome: 'Outra Loja', titulo: 'Multicódigo C (loja diferente)', valorEstimado: 5,
+    }, cab);
+    const ticketC = JSON.parse(criarC.corpo || '{}');
+
+    const buscar = (qs) => pedir(`/api/central/relatorio.json?${qs}`, cab).then((r) => JSON.parse(r.corpo || '[]').map((c) => c.id));
+
+    const idsJuntos = await buscar(`unidade=${codA},${codB}`);
+    const idsSoA = await buscar(`unidade=${codA}`);
+    const idsSoC = await buscar(`unidade=${codC}`);
+
+    const htmlCH = require('fs').readFileSync(require('path').join(__dirname, 'public', 'central-historico.html'), 'utf8');
+
+    const conf = {
+      'unidade=A,B (dropdown agrupado por nome) traz os 2 tickets da mesma loja': idsJuntos.includes(ticketA.id) && idsJuntos.includes(ticketB.id),
+      'unidade=A,B não vaza pra loja diferente (C fica de fora)': !idsJuntos.includes(ticketC.id),
+      'unidade=A sozinho continua sem trazer B (não virou "qualquer coisa bate")': idsSoA.includes(ticketA.id) && !idsSoA.includes(ticketB.id),
+      'unidade=C (código isolado) traz só o próprio, sem A nem B': idsSoC.length === 1 && idsSoC[0] === ticketC.id,
+      'dropdown "Loja" agrupa os códigos por nome resolvido (1 <option> por nome, não por código)':
+        /codigosPorNome\.get\(nome\)\.join\(','\)/.test(htmlCH) && /const codigosPorNome = new Map\(\);/.test(htmlCH),
+      'filtro em tela (renderKanban) casa qualquer código do grupo, não só o primeiro selecionado':
+        /const codigosUnidade = FILTRO_UNIDADE\.split\(','\); base = base\.filter\(c=>codigosUnidade\.includes\(c\.unidade\)\);/.test(htmlCH),
+    };
+    const ruinsFU = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okFiltroUnidadeMultiCodigo = !ruinsFU.length;
+    if (ruinsFU.length) console.log(`  falhou em: ${ruinsFU.join(' · ')}`);
+  } catch (e) { okFiltroUnidadeMultiCodigo = false; console.log('  erro: ' + e.message); }
+  if (!okFiltroUnidadeMultiCodigo) ruins += 1;
+  console.log(`${okFiltroUnidadeMultiCodigo ? '✓' : '✗'} Central -> Histórico: filtro "Loja" casa todos os códigos históricos da mesma unidade (dropdown não duplica mais o nome)`);
+
   // Início (resumo pessoal - por status/unidade + meus abertos/concluídos):
   // nasceu dentro do Histórico e foi pra página própria (central-inicio.html)
   // porque misturado com o quadro do Histórico ficava bagunçado (pedido do
