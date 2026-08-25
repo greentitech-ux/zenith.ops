@@ -9097,11 +9097,17 @@ const TIPOS_CENTRAL_LABEL = { estorno: 'Estorno', 'ajuste-fechamento': 'Ajuste d
 function filtrarCardsCentral(cards, req) {
   const { unidade, grupo, dataDe, dataAte, tipo } = req.query;
   // "tipo" aceita 1 ou varios separados por virgula (a tela permite marcar
-  // mais de um tipo ao mesmo tempo pelo check no canto do botao de filtro)
+  // mais de um tipo ao mesmo tempo pelo check no canto do botao de filtro).
+  // "unidade" aceita o mesmo formato: o dropdown "Loja" de central-historico.html
+  // agrupa por nome resolvido e manda TODOS os codigos daquele nome juntos
+  // (uma mesma loja pode ter mais de um codigo historico cadastrado - ver
+  // CLAUDE.md "Nunca renomear"/unificacao de unidades), pra selecionar uma
+  // loja pegar os chamados abertos sob qualquer um dos codigos dela.
   const tipos = tipo ? String(tipo).split(',').filter(Boolean) : [];
+  const unidades = unidade ? String(unidade).split(',').filter(Boolean) : [];
   return cards.filter((c) => {
     const dataBrasilia = (c.criadoEm || '').slice(0, 10);
-    return (!unidade || c.unidade === unidade) &&
+    return (!unidades.length || unidades.includes(c.unidade)) &&
       (!grupo || grupoDaUnidadeServer(c.unidade) === grupo) &&
       (!dataDe || dataBrasilia >= dataDe) &&
       (!dataAte || dataBrasilia <= dataAte) &&

@@ -1054,7 +1054,7 @@ function passaTriagem(c){
 
 function renderKanban(){
   let base = CARDS;
-  if(FILTRO_UNIDADE) base = base.filter(c=>c.unidade===FILTRO_UNIDADE);
+  if(FILTRO_UNIDADE){ const codigosUnidade = FILTRO_UNIDADE.split(','); base = base.filter(c=>codigosUnidade.includes(c.unidade)); }
   if(FILTRO_GRUPO) base = base.filter(c=>grupoDaUnidade(c.unidade)===FILTRO_GRUPO);
   if(FILTRO_DATA_DE) base = base.filter(c=>dataBrasilia(c.criadoEm) >= FILTRO_DATA_DE);
   if(FILTRO_DATA_ATE) base = base.filter(c=>dataBrasilia(c.criadoEm) <= FILTRO_DATA_ATE);
@@ -2752,9 +2752,22 @@ async function boot(){
   document.getElementById('titulo-lista').textContent = IS_MASTER ? 'Solicitações recebidas' : 'Minhas solicitações e atribuídas';
 
   const unidades = (IS_MASTER || IS_ADMIN) ? Object.keys(UNIDADES_NOMES) : (ME.permissions?.unidades||[]).filter(u=>UNIDADES_NOMES[u]);
-  const unidadesOrdenadas = [...unidades].sort((a,b)=>(UNIDADES_NOMES[a]||a).localeCompare(UNIDADES_NOMES[b]||b,'pt-BR'));
+  // Um mesmo ponto físico pode ter mais de um código histórico cadastrado
+  // (espaços de código diferentes - ver CLAUDE.md "Nunca renomear"/unificação
+  // de unidades). Sem agrupar por nome, "Dom Bessa" aparecia 2-3 vezes na
+  // lista com o mesmo rótulo. Agrupa por nome resolvido; o value carrega
+  // TODOS os códigos daquele nome (separados por vírgula, mesmo padrão que
+  // "tipo" já usa em filtrarCardsCentral), então escolher a loja pega
+  // qualquer chamado aberto sob qualquer um dos códigos dela.
+  const codigosPorNome = new Map();
+  unidades.forEach(u=>{
+    const nome = UNIDADES_NOMES[u] || u;
+    if(!codigosPorNome.has(nome)) codigosPorNome.set(nome, []);
+    codigosPorNome.get(nome).push(u);
+  });
+  const nomesOrdenados = [...codigosPorNome.keys()].sort((a,b)=>a.localeCompare(b,'pt-BR'));
   document.getElementById('filtro-unidade').innerHTML = '<option value="">Todas</option>' +
-    unidadesOrdenadas.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('');
+    nomesOrdenados.map(nome=>`<option value="${escapeHtml(codigosPorNome.get(nome).join(','))}">${escapeHtml(nome)}</option>`).join('');
 
   if(IS_MASTER || IS_ADMIN){
     try{
