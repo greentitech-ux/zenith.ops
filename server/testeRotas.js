@@ -7075,6 +7075,46 @@ setTimeout(async () => {
   if (!okDestaqueUnidade) ruins += 1;
   console.log(`${okDestaqueUnidade ? '✓' : '✗'} Nome da unidade em destaque (amarelo/negrito/maior) nos tickets/chamados`);
 
+  // ------------------------------------------------------------------
+  // Central -> Histórico: o botão "Aprovado" só dizia um número solto - o
+  // usuário apontou que aprovar não é fim de linha, tem 3 estágios de
+  // andamento por baixo (Pendente/Em andamento/Finalizado, ver
+  // ANDAMENTO_INFO/renderAndamento já existentes no detalhe do ticket).
+  // Agora o botão mostra a contagem quebrada por estágio, e a lista aberta
+  // vem agrupada com subtítulo por estágio em vez de uma pilha só.
+  let okAprovadoEstagios = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'central-historico.html'), 'utf8');
+    const conf = {
+      'o botão "Aprovado" (e só ele) ganha a quebra por estágio, reaproveitando o ANDAMENTO_INFO que o detalhe já usa':
+        /const subcontagens = status==='APROVADO'/.test(html)
+        && /Object\.keys\(ANDAMENTO_INFO\)\.map\(st=>/.test(html)
+        && /class="stb-subcounts"/.test(html),
+      'Pendente/Rejeitado não ganham a quebra (eles não têm estágio de andamento nenhum)':
+        (() => {
+          const i = html.indexOf("const subcontagens = status==='APROVADO'");
+          const trecho = html.slice(i, i + 400);
+          return /: ''/.test(trecho);
+        })(),
+      'a lista aberta do Aprovado vem agrupada com subtítulo por estágio (não é mais uma pilha só)':
+        /STATUS_ABERTO==='APROVADO' && doColuna\.length/.test(html)
+        && /class="kanban-grupo-titulo"/.test(html),
+      'o agrupamento usa o MESMO ANDAMENTO_INFO do detalhe (não inventa rótulo novo, regra do CLAUDE.md)':
+        (() => {
+          const i = html.indexOf('const ANDAMENTO_INFO');
+          const bloco = html.slice(i, i + 200);
+          return /PENDENTE: \{ label: 'Pendente', icone: '🟡' \}/.test(bloco)
+            && /EM_ANDAMENTO: \{ label: 'Em andamento', icone: '🔵' \}/.test(bloco)
+            && /FINALIZADO: \{ label: 'Finalizado', icone: '✅' \}/.test(bloco);
+        })(),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okAprovadoEstagios = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okAprovadoEstagios = false; console.log('  erro: ' + e.message); }
+  if (!okAprovadoEstagios) ruins += 1;
+  console.log(`${okAprovadoEstagios ? '✓' : '✗'} Central -> Histórico: botão "Aprovado" mostra os 3 estágios de andamento, não só um número`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
