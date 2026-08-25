@@ -7035,6 +7035,46 @@ setTimeout(async () => {
   if (!okEstoqueExport) ruins += 1;
   console.log(`${okEstoqueExport ? '✓' : '✗'} Estoque/Inventário: CSV/PDF em Saída e Histórico de contagens (faltavam)`);
 
+  // ------------------------------------------------------------------
+  // Nome da unidade em destaque proprio (amarelo/negrito/maior) em qualquer
+  // card ou detalhe de ticket/chamado - pedido do usuario ao ver o nome da
+  // loja se misturando com email/data na mesma cor. Token+classe moram no
+  // tema.js (unico arquivo carregado pelas 56 paginas), aplicado nas duas
+  // familias de ticket mostradas nos prints: Central de Solicitacoes
+  // (central-historico.html + ticket-publico.html) e Chamados de TI/
+  // Manutencao (tecnico.html).
+  let okDestaqueUnidade = false;
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const temaJs = fs.readFileSync(path.join(__dirname, 'public', 'tema.js'), 'utf8');
+    const htmlCentral = fs.readFileSync(path.join(__dirname, 'public', 'central-historico.html'), 'utf8');
+    const htmlTicketPublico = fs.readFileSync(path.join(__dirname, 'public', 'ticket-publico.html'), 'utf8');
+    const htmlTecnico = fs.readFileSync(path.join(__dirname, 'public', 'tecnico.html'), 'utf8');
+    const conf = {
+      'tema.js define o token de cor + a classe utilitaria (negrito 800, maior que o texto ao redor)':
+        /--destaque-unidade:#ffd43b;/.test(temaJs)
+        && /\.nome-unidade\{ color:var\(--destaque-unidade,#ffd43b\); font-weight:800; font-size:1\.08em; \}/.test(temaJs),
+      'o token tem versao escura pro tema Claro (amarelo claro sobre fundo branco seria ilegivel)':
+        /:root\[data-tema="claro"\]\{ --destaque-unidade:#8a6300; \}/.test(temaJs),
+      'Central -> Histórico: card da lista usa a classe no nome da unidade':
+        /<div class="sub"><span class="nome-unidade">\$\{escapeHtml\(c\.unidadeNome\|\|c\.unidade\|\|'—'\)\}<\/span>/.test(htmlCentral),
+      'Central -> Histórico: detalhe do ticket (#d-sub) usa a classe, nos dois lugares que escrevem nele (abrir e depois de mudar responsável)':
+        /function fmtDSub\(c, atribuidosTxt\)\{\s*return `<span class="nome-unidade">/.test(htmlCentral)
+        && (htmlCentral.match(/document\.getElementById\('d-sub'\)\.innerHTML = fmtDSub\(/g) || []).length >= 2,
+      'ticket-publico.html (link público) também destaca a unidade':
+        /<span class="nome-unidade">\$\{escapeHtml\(d\.unidadeNome\)\}<\/span>/.test(htmlTicketPublico),
+      'Chamados de TI: card da lista e o detalhe do chamado usam a classe':
+        /<div class="sub"><span class="nome-unidade">\$\{escapeHtml\(c\.unidadeNome\|\|c\.unidade\)\}<\/span>/.test(htmlTecnico)
+        && /<span class="nome-unidade">\$\{escapeHtml\(c\.unidadeNome\|\|c\.unidade\)\}<\/span> · \$\{fmtDataHora\(c\.criadoEm\)\}<div class="chips-linha">/.test(htmlTecnico),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okDestaqueUnidade = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDestaqueUnidade = false; console.log('  erro: ' + e.message); }
+  if (!okDestaqueUnidade) ruins += 1;
+  console.log(`${okDestaqueUnidade ? '✓' : '✗'} Nome da unidade em destaque (amarelo/negrito/maior) nos tickets/chamados`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

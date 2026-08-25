@@ -176,8 +176,8 @@ function apiUrl(sufixo){
 function renderDetalhe(d){
   const linhas = [];
   linhas.push(`<div class="ticket-titulo">#${d.numeroTicket} · ${escapeHtml(TIPOS_LABEL[d.tipo] || d.tipo)}</div>`);
-  const meta = [d.unidadeNome, fmtData(d.criadoEm)].filter(Boolean).join(' · ');
-  linhas.push(`<div class="ticket-meta">${escapeHtml(meta)}</div>`);
+  const metaPartes = [d.unidadeNome ? `<span class="nome-unidade">${escapeHtml(d.unidadeNome)}</span>` : '', escapeHtml(fmtData(d.criadoEm))].filter(Boolean);
+  linhas.push(`<div class="ticket-meta">${metaPartes.join(' · ')}</div>`);
   linhas.push(`<span class="status-badge ${STATUS_CLASSE[d.status] || ''}">${STATUS_LABEL[d.status] || d.status}</span>`);
   if(d.status === 'APROVADO' && d.execucaoStatus && d.tipo !== 'compra'){
     const cls = d.execucaoStatus === 'FINALIZADO' ? 'finalizado' : 'pendente';
