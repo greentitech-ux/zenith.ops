@@ -8931,24 +8931,44 @@ app.post('/api/central/decidir-lote', auth.requireMasterOrAdmin, async (req, res
     const mapa = new Map(visiveis.map((c) => [`${c.tipo}::${c.id}`, c]));
     const pulados = [];
     let decididos = 0;
+    const pendentes = [];
     for (const { tipo, id } of tickets) {
       if (!mapa.has(`${tipo}::${id}`)) { pulados.push({ tipo, id, motivo: 'não encontrado ou sem permissão' }); continue; }
       if (status === 'APROVADO' && (tipo === 'suporte-ti' || tipo === 'manutencao')) {
         pulados.push({ tipo, id, motivo: tipo === 'suporte-ti' ? 'precisa escolher o técnico - decida pelo card' : 'precisa escolher quem vai fazer - decida pelo card' });
         continue;
       }
-      try {
-        if (tipo === 'estorno') {
-          await refunds.updateStatus(id, status, { decidedByEmail: req.user.email });
-        } else if (tipo === 'ajuste-fechamento') {
-          await fechamentosLive.decidirEdicao(id, status, { decididoPorEmail: req.user.email });
-        } else {
-          await solicitacoes.updateStatus(id, status, { decidedByEmail: req.user.email });
+      pendentes.push({ tipo, id });
+    }
+    // decidir um por um, em serie, deixava uma fila grande (o Master relatou
+    // ~1180 tickets de Quebra de caixa selecionados de uma vez) minutos
+    // pendurada - cada ticket faz 2-3 idas ao Firestore (get+update+getOne),
+    // e em serie isso passava do tempo que o navegador/rede movel aguenta
+    // sem soltar a conexao ("Failed to fetch" no fetch(), sem erro nenhum no
+    // servidor - ele so ainda nao tinha terminado). Processa em FATIAS em
+    // paralelo: mesma logica de cada ticket, sem mudar nada nela - só não
+    // espera um terminar pra começar o próximo.
+    const FATIA = 20;
+    for (let i = 0; i < pendentes.length; i += FATIA) {
+      const fatia = pendentes.slice(i, i + FATIA);
+      const resultados = await Promise.all(fatia.map(async ({ tipo, id }) => {
+        try {
+          if (tipo === 'estorno') {
+            await refunds.updateStatus(id, status, { decidedByEmail: req.user.email });
+          } else if (tipo === 'ajuste-fechamento') {
+            await fechamentosLive.decidirEdicao(id, status, { decididoPorEmail: req.user.email });
+          } else {
+            await solicitacoes.updateStatus(id, status, { decidedByEmail: req.user.email });
+          }
+          return { ok: true, tipo, id };
+        } catch (e) {
+          return { ok: false, tipo, id, motivo: e.message };
         }
-        decididos++;
-      } catch (e) {
-        pulados.push({ tipo, id, motivo: e.message });
-      }
+      }));
+      resultados.forEach((r) => {
+        if (r.ok) decididos++;
+        else pulados.push({ tipo: r.tipo, id: r.id, motivo: r.motivo });
+      });
     }
     if (decididos) broadcast('solicitacao-decidida', { lote: true, decididos }, 'solicitacoes');
     res.json({ decididos, pulados });
