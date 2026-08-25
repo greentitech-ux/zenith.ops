@@ -1562,7 +1562,7 @@ function renderKpis(rows){
   const faturamentoAnt = soma(anteriores,'faturamento');
   const declarado = soma(rows,'totalDeclarado');
   const diferenca = soma(rows,'diferenca');
-  const tc = soma(rows,'tc');
+  const tc = +rows.reduce((s,d)=>s+valorTc(d, grupoKpiDaUnidade(d.unidade)),0).toFixed(2);
   const cancelados = soma(rows,'cancelados');
 
   function delta(atual, anterior){
@@ -1671,7 +1671,7 @@ function renderFaturamentoChart(rows, start, end){
   rows.forEach(r=>{
     if(porDiaUnidade[r.unidade] && porDiaUnidade[r.unidade][r.data]!==undefined){
       porDiaUnidade[r.unidade][r.data] += r.faturamento||0;
-      porDiaUnidadeTC[r.unidade][r.data] += r.tc||0;
+      porDiaUnidadeTC[r.unidade][r.data] += valorTc(r, grupoKpiDaUnidade(r.unidade));
     }
   });
 
