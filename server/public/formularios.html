@@ -730,6 +730,19 @@ async function cancelarFormulario(id){
   if(d.pendenteAprovacao) alert('Cancelamento enviado pra aprovação do Master.');
 }
 
+// Ass. Boleto: anexo errado (foto ruim, arquivo de outra unidade) - reabre
+// o MESMO link de preenchimento (mesmo Ticket #) pra mandarem outro
+// arquivo, apagando o anexo atual e as assinaturas já colhidas nele (elas
+// valiam pro documento errado). Ver reabrir-anexo em formularios.js.
+async function reabrirAnexo(id, rotulo){
+  if(!confirm(`Trocar o anexo de "${rotulo}"?\n\nApaga o anexo atual e QUALQUER assinatura já colhida nele, e volta o link de preenchimento a funcionar pra mandarem outro arquivo - o Ticket # continua o mesmo.`)) return;
+  const r = await fetch(`/api/formularios/${encodeURIComponent(id)}/reabrir-anexo`, { method:'POST' });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ alert(d.error||'Não consegui reabrir o anexo.'); return; }
+  await carregarLista();
+  if(d.pendenteAprovacao) alert('Reabertura enviada pra aprovação do Master.');
+}
+
 // leva o formulário assinado pra Central como ticket de Pagamento, com os
 // mesmos anexos e o MESMO Ticket # (ver enviar-pagamento em formularios.js)
 async function enviarComoPagamento(id){
@@ -787,6 +800,7 @@ function cardHtml(f){
       <button type="button" class="btn-ghost" onclick="baixarPdf('${f.id}')" title="Salvar o arquivo no aparelho">⬇️ ${t && t.soAnexo ? 'Baixar assinado' : 'Baixar PDF'}</button>
       ${!cancelado && f.status==='ASSINADO' && !f.enviadoPagamento ? `<button type="button" class="btn-ghost" style="color:var(--ok);" onclick="enviarComoPagamento('${f.id}')">💰 Enviar como Pagamento</button>` : ''}
       ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" onclick="abrirEdicao('${f.id}')">✏️ Editar</button>` : ''}
+      ${SOU_MASTER && !cancelado && t && t.soAnexo ? `<button type="button" class="btn-ghost" style="color:var(--warn);" onclick="reabrirAnexo('${f.id}','${escapeHtml(t.rotulo)}')" title="Apaga o anexo atual e reabre o mesmo link pra mandarem outro, sem perder o Ticket #">🗑️ Trocar anexo</button>` : ''}
       ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" style="color:var(--bad);" onclick="cancelarFormulario('${f.id}')">🚫 Cancelar</button>` : ''}
       ${SOU_MASTER && cancelado ? `<button type="button" class="btn-ghost" style="color:var(--bad);" onclick="excluirFormulario('${f.id}')">🗑️ Excluir de vez</button>` : ''}
     </div>
