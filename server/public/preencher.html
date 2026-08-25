@@ -121,6 +121,18 @@ function isoParaBR(iso){ const m = String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2
 function brParaIso(br){ const m = String(br||'').match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : ''; }
 const valorCampo = (el) => el.type==='date' ? isoParaBR(el.value) : el.value;
 
+// campo de data clica em qualquer lugar do input pra abrir o calendário
+// (nem todo navegador abre sozinho fora do ícone) - pedido do usuário
+document.addEventListener('click', (e)=>{
+  const el = e.target.closest('input[type=date]');
+  if(el && typeof el.showPicker==='function'){ try{ el.showPicker(); }catch(_){} }
+});
+
+// coluna `intervalo` (2 datas De/Até, ex: Período do caixa) grava/lê como
+// UM valor só - "DD/MM/AAAA a DD/MM/AAAA" (ou só um lado, se só um foi
+// preenchido) - mesma convenção DD/MM/AAAA do resto do formulário
+function combinarIntervalo(de, ate){ return de && ate ? `${de} a ${ate}` : (de || ate || ''); }
+
 function renderCabecalho(){
   document.getElementById('cabecalho').innerHTML = MODELO.cabecalho.map(c=>{
     const bruto = (MODELO.campos||{})[c.key]||'';
@@ -136,11 +148,17 @@ function renderLinhas(){
     <div class="linha" data-i="${i}">
       <div class="num">Item ${i+1}</div>
       ${LINHAS.length>1?`<button type="button" class="rm" data-rm="${i}" title="Remover">✕</button>`:''}
-      ${MODELO.colunas.map(c=>`
+      ${MODELO.colunas.map(c=>{
+        if(c.intervalo) return `
+          <label>${esc(c.label)} · de</label>
+          <input data-linha="${i}" data-col="${esc(c.key)}:de" type="date" autocomplete="off">
+          <label>${esc(c.label)} · até</label>
+          <input data-linha="${i}" data-col="${esc(c.key)}:ate" type="date" autocomplete="off">`;
+        return `
         <label>${esc(c.label)}</label>
         <input data-linha="${i}" data-col="${esc(c.key)}" type="${c.data?'date':'text'}" value="${c.data ? brParaIso(l[c.key]||'') : esc(l[c.key]||'')}"
-          ${c.valor?'inputmode="decimal" placeholder="0,00"':'autocomplete="off"'}>
-      `).join('')}
+          ${c.valor?'inputmode="decimal" placeholder="0,00"':'autocomplete="off"'}>`;
+      }).join('')}
     </div>`).join('');
   atualizarTotal();
 }
@@ -153,7 +171,19 @@ function atualizarTotal(){
 
 document.addEventListener('input', (e)=>{
   const t = e.target;
-  if(t.dataset.linha!=null){ LINHAS[+t.dataset.linha][t.dataset.col] = valorCampo(t); atualizarTotal(); }
+  if(t.dataset.linha==null) return;
+  const linha = LINHAS[+t.dataset.linha];
+  // "chave:de"/"chave:ate" (coluna intervalo) juntam num valor só na
+  // própria chave - o resto do formulário (e o servidor) só conhece "chave"
+  if(t.dataset.col.endsWith(':de') || t.dataset.col.endsWith(':ate')){
+    const base = t.dataset.col.replace(/:(de|ate)$/, '');
+    const de = document.querySelector(`[data-linha="${t.dataset.linha}"][data-col="${base}:de"]`);
+    const ate = document.querySelector(`[data-linha="${t.dataset.linha}"][data-col="${base}:ate"]`);
+    linha[base] = combinarIntervalo(de?valorCampo(de):'', ate?valorCampo(ate):'');
+  } else {
+    linha[t.dataset.col] = valorCampo(t);
+  }
+  atualizarTotal();
 });
 document.addEventListener('click', (e)=>{
   const rm = e.target.closest('[data-rm]');

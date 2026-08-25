@@ -265,6 +265,35 @@ function isoParaBR(iso){ const m = String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2
 function brParaIso(br){ const m = String(br||'').match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : ''; }
 const valorCampo = (el) => el.type==='date' ? isoParaBR(el.value) : el.value;
 
+// campo de data clica em qualquer lugar do input pra abrir o calendário
+// (nem todo navegador abre sozinho fora do ícone) - pedido do usuário
+document.addEventListener('click', (e)=>{
+  const el = e.target.closest('input[type=date]');
+  if(el && typeof el.showPicker==='function'){ try{ el.showPicker(); }catch(_){} }
+});
+
+// coluna `intervalo` (2 datas De/Até, ex: Período do caixa) grava/lê como
+// UM valor só - "DD/MM/AAAA a DD/MM/AAAA" (ou só um lado, se só um foi
+// preenchido) - mesma convenção DD/MM/AAAA do resto do formulário
+function combinarIntervalo(de, ate){ return de && ate ? `${de} a ${ate}` : (de || ate || ''); }
+function separarIntervalo(v){
+  const m = String(v||'').match(/^(\d{2}\/\d{2}\/\d{4})\s+a\s+(\d{2}\/\d{2}\/\d{4})$/);
+  return m ? { de: m[1], ate: m[2] } : { de: '', ate: '' };
+}
+// os inputs De/Até nascem com data-col/data-ed-col composto ("chave:de" /
+// "chave:ate") - depois de ler tudo do DOM, isso junta as duas chaves numa
+// só antes de mandar pro servidor (que não sabe que existem 2 campos)
+function combinarIntervalosDaLinha(l){
+  Object.keys(l).forEach(k=>{
+    if(!k.endsWith(':de')) return;
+    const base = k.slice(0,-3);
+    const de = l[k], ate = l[base+':ate'];
+    delete l[k]; delete l[base+':ate'];
+    l[base] = combinarIntervalo(de, ate);
+  });
+  return l;
+}
+
 let TIPOS = [];
 let SOU_MASTER = false;
 let TIPO_ATUAL = null;
@@ -367,9 +396,14 @@ function addLinha(){
   div.className = 'item-card';
   div.innerHTML = '<div class="item-num"></div>'
     + '<button type="button" class="item-rm" title="Remover item" onclick="this.closest(\'.item-card\').remove();renumerarItens(\'tabela-corpo\');atualizarTotal()">✕</button>'
-    + m.colunas.map(c=>
-      `<label>${escapeHtml(c.label)}</label>`
-      + `<input type="${c.data?'date':'text'}" data-col="${escapeHtml(c.key)}" ${c.valor?'inputmode="decimal" placeholder="0,00" oninput="atualizarTotal()"':'autocomplete="off"'}>`).join('');
+    + m.colunas.map(c=>{
+        if(c.intervalo) return `<label>${escapeHtml(c.label)} · de</label>`
+          + `<input type="date" data-col="${escapeHtml(c.key)}:de" autocomplete="off">`
+          + `<label>${escapeHtml(c.label)} · até</label>`
+          + `<input type="date" data-col="${escapeHtml(c.key)}:ate" autocomplete="off">`;
+        return `<label>${escapeHtml(c.label)}</label>`
+          + `<input type="${c.data?'date':'text'}" data-col="${escapeHtml(c.key)}" ${c.valor?'inputmode="decimal" placeholder="0,00" oninput="atualizarTotal()"':'autocomplete="off"'}>`;
+      }).join('');
   document.getElementById('tabela-corpo').appendChild(div);
   renumerarItens('tabela-corpo');
 }
@@ -419,7 +453,7 @@ async function criar(){
   const linhas = [...document.querySelectorAll('#tabela-corpo .item-card')].map(card=>{
     const l = {};
     card.querySelectorAll('input[data-col]').forEach(el=>{ l[el.dataset.col] = valorCampo(el); });
-    return l;
+    return combinarIntervalosDaLinha(l);
   });
   const arquivos = document.getElementById('f-anexos').files;
   if(m.anexoObrigatorio && !arquivos.length){
@@ -578,6 +612,13 @@ function edAddLinha(l){
   div.innerHTML = '<div class="item-num"></div>'
     + '<button type="button" class="item-rm" title="Remover item" onclick="this.closest(\'.item-card\').remove();renumerarItens(\'ed-corpo\');edTotal()">✕</button>'
     + m.colunas.map(c=>{
+      if(c.intervalo){
+        const { de, ate } = separarIntervalo(l ? l[c.key] : '');
+        return `<label>${escapeHtml(c.label)} · de</label>`
+          + `<input type="date" data-ed-col="${escapeHtml(c.key)}:de" value="${escapeHtml(brParaIso(de))}" autocomplete="off">`
+          + `<label>${escapeHtml(c.label)} · até</label>`
+          + `<input type="date" data-ed-col="${escapeHtml(c.key)}:ate" value="${escapeHtml(brParaIso(ate))}" autocomplete="off">`;
+      }
       let v = l ? (c.valor ? edFmtNum(l[c.key]) : (l[c.key]||'')) : '';
       if(l && c.data) v = brParaIso(v);
       return `<label>${escapeHtml(c.label)}</label>`
@@ -641,7 +682,7 @@ async function salvarEdicao(){
   const linhas = [...document.querySelectorAll('#ed-corpo .item-card')].map(card=>{
     const l = {};
     card.querySelectorAll('input[data-ed-col]').forEach(el=>{ l[el.dataset.edCol] = valorCampo(el); });
-    return l;
+    return combinarIntervalosDaLinha(l);
   });
   btn.disabled = true;
   try{

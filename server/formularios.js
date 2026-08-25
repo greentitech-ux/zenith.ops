@@ -37,8 +37,11 @@ const FAVORECIDOS = db.collection('formularioFavorecidos');
 // o input por um seletor de calendário de verdade em vez de caixa de
 // texto. "DATA(S)" das diárias fica de fora de propósito: aceita mais de
 // uma data junto (ex: "12/08, 13/08"), não dá pra representar num só
-// calendário. O valor sempre chega e sai daqui em DD/MM/AAAA - é o
-// navegador que converte de/pra ISO, o servidor nunca vê o formato ISO.
+// calendário. `intervalo: true` é a variante de 2 datas (De/Até, ex: o
+// Período do caixa do Depósito) - a tela troca por 2 seletores e junta num
+// valor só antes de mandar. Os dois flags sempre chegam e saem daqui em
+// DD/MM/AAAA (ou "DD/MM/AAAA a DD/MM/AAAA" no intervalo) - é o navegador
+// que converte de/pra ISO, o servidor nunca vê o formato ISO.
 const TIPOS = {
   deposito: {
     rotulo: 'Depósito de Caixa',
@@ -49,7 +52,11 @@ const TIPOS = {
     ],
     colunas: [
       { key: 'data', label: 'DATA DO DEPÓSITO', data: true },
-      { key: 'periodo', label: 'PERÍODO DO CAIXA' },
+      // intervalo: true = 2 datas (De/Até) em vez de texto livre - a tela
+      // troca por 2 seletores de calendário e junta como "DD/MM/AAAA a
+      // DD/MM/AAAA" antes de mandar pro servidor (mesma convenção DD/MM/AAAA
+      // dos campos `data`, o servidor nunca vê ISO nem sabe que são 2 inputs)
+      { key: 'periodo', label: 'PERÍODO DO CAIXA', intervalo: true },
       { key: 'envelope', label: 'Nº DO ENVELOPE' },
       { key: 'valor', label: 'VALOR (R$)', valor: true },
     ],
