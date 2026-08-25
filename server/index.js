@@ -8659,6 +8659,7 @@ function sanitizarMatrizKpi(body) {
     kpi: texto(l && l.kpi, 80),
     agregacao: texto(l && l.agregacao, 10),
     valores: (Array.isArray(l && l.valores) ? l.valores : []).slice(0, 30).map((v) => texto(v, 20)),
+    total: texto(l && l.total, 20),
   })).filter((l) => l.kpi);
   const ofensores = (Array.isArray(body.ofensores) ? body.ofensores : []).slice(0, 3).map((o) => ({
     kpi: texto(o && o.kpi, 40), loja: texto(o && o.loja, 40), texto: texto(o && o.texto, 24),
@@ -8679,10 +8680,12 @@ app.post('/api/kpis-operacionais/relatorio', requireSection('fechamentos'), asyn
       { key: 'kpi', label: 'KPI' },
       { key: 'agregacao', label: 'Agreg.' },
       ...d.lojas.map((u, i) => ({ key: 'l' + i, label: u })),
+      { key: 'total', label: 'Total' },
     ];
     const linhas = d.linhas.map((l) => {
       const linha = { kpi: l.kpi, agregacao: l.agregacao };
       d.lojas.forEach((_, i) => { linha['l' + i] = l.valores[i] == null || l.valores[i] === '' ? '—' : l.valores[i]; });
+      linha.total = l.total == null || l.total === '' ? '—' : l.total;
       return linha;
     });
     const periodo = `${reportUtil.fmtDataBR(d.inicio)} a ${reportUtil.fmtDataBR(d.fim)}`;

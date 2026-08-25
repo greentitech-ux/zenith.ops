@@ -71,6 +71,10 @@
   tr.kpi-linha.sel td:first-child{box-shadow:inset 3px 0 0 var(--accent);}
   .vazio-cel{color:var(--muted);}
   .rolagem{overflow-x:auto;}
+  /* Total: soma/média de TODAS as lojas do grupo, não a soma das células já
+     arredondadas da tela - senão o total desvia do valor real em KPI de
+     casas decimais */
+  td.total-col,th.total-col{border-left:2px solid var(--accent);font-weight:700;}
 
   /* legenda: identidade nunca é só cor - tem o nome do lado da marca */
   .legenda{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin-bottom:8px;}
@@ -251,6 +255,14 @@ function agregar(lista, modo){
   const soma = lista.reduce((s,x) => s + x.valor, 0);
   return modo === 'media' ? soma/lista.length : soma;
 }
+// Total da linha: recalcula sobre TODOS os lançamentos das lojas juntos, não
+// soma as células já arredondadas - no modo média isso dá a média real
+// ponderada do grupo, não a média das médias por loja. Usado na tela e no
+// export (CSV/PDF), pra não ter dois jeitos de calcular o mesmo número.
+function totalLinha(porLoja, lojas, modo){
+  const todos = lojas.flatMap(u => porLoja[u]);
+  return fmtValor(agregar(todos, modo), modo);
+}
 
 function renderMatriz(){
   const linhas = linhasFiltradas();
@@ -268,7 +280,7 @@ function renderMatriz(){
 
   const cab = ['<tr><th>KPI</th><th>Agreg.</th>' +
     lojas.map(u => `<th><span style="display:inline-flex;align-items:center;gap:6px;"><i style="width:9px;height:9px;border-radius:2px;background:${CORES[u]};display:inline-block;"></i>${escapeHtml(u)}</span></th>`).join('') +
-    '</tr>'];
+    '<th class="total-col">Total</th></tr>'];
 
   const corpo = kpis.map(def => {
     const modo = modoAgregacao(def);
@@ -278,11 +290,13 @@ function renderMatriz(){
       const txt = fmtValor(v, modo);
       return `<td class="valor">${txt === null ? '<span class="vazio-cel">—</span>' : escapeHtml(txt)}</td>`;
     }).join('');
+    const txtTotal = totalLinha(porLoja, lojas, modo);
+    const celTotal = `<td class="valor total-col">${txtTotal === null ? '<span class="vazio-cel">—</span>' : escapeHtml(txtTotal)}</td>`;
     const sel = KPI_SEL === def.campo ? ' sel' : '';
     return `<tr class="kpi-linha${sel}" onclick="escolherKpi('${escapeHtml(def.campo)}')">` +
       `<td>${escapeHtml(def.label)}</td>` +
       `<td class="valor vazio-cel" style="font-size:10.5px;">${modo === 'media' ? 'média' : 'soma'}</td>` +
-      celulas + '</tr>';
+      celulas + celTotal + '</tr>';
   });
   tabela.innerHTML = cab.concat(corpo).join('');
 }
@@ -402,6 +416,7 @@ async function exportar(formato){
         kpi: def.label,
         agregacao: modo === 'media' ? 'média' : 'soma',
         valores: lojas.map(u => fmtValor(agregar(porLoja[u], modo), modo) ?? ''),
+        total: totalLinha(porLoja, lojas, modo) ?? '',
       };
     }),
     ofensores: (OFENSORES || []).slice(0, 3).map(o => ({
