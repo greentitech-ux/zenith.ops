@@ -87,14 +87,18 @@
   .tipo-filtro-btn .tf-counts b{font-weight:600;}
   .triagem-nota{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:10px 0;}
   .triagem-nota b{color:var(--text);}
-  .kanban-board{display:flex;gap:14px;overflow-x:auto;padding-bottom:6px;align-items:flex-start;margin-top:10px;}
-  .kanban-col{background:var(--panel2);border:1px solid var(--line);border-radius:12px;flex:1 1 300px;min-width:270px;max-width:420px;display:flex;flex-direction:column;max-height:70vh;min-height:180px;}
-  @media(max-width:760px){ .kanban-col{min-width:82vw;max-height:none;} }
-  .kanban-col-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 12px 10px;border-bottom:1px solid var(--line);flex:none;font-weight:700;font-size:12.5px;}
-  .kanban-count{font-family:var(--mono);color:var(--muted);font-size:11.5px;font-weight:400;}
-  .kanban-cards{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:8px;}
-  .kanban-cards .form-item{margin-top:0;}
   .kanban-empty{padding:20px 10px;text-align:center;color:var(--muted);font-size:12px;}
+  /* Triagem virou 3 botões (mesmo desenho do .tipo-card de "Novo formulário")
+     em vez de 3 colunas sempre visíveis - clica e a lista daquele status
+     aparece embaixo, só uma aberta por vez (pedido do usuário) */
+  .status-toggle-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-top:10px;}
+  .status-toggle-btn{background:var(--panel2);border:2px solid var(--line);border-radius:10px;padding:14px 12px;cursor:pointer;font-weight:700;font-size:13px;text-align:center;color:var(--text);font-family:var(--sans);display:flex;flex-direction:column;gap:4px;align-items:center;}
+  .status-toggle-btn:hover{border-color:var(--accent);}
+  .status-toggle-btn.aberto{border-color:var(--accent);color:var(--accent);}
+  .status-toggle-btn .stb-count{font-family:var(--mono);font-weight:400;font-size:11px;color:var(--muted);}
+  .status-toggle-btn.aberto .stb-count{color:var(--accent);}
+  .status-toggle-cards{margin-top:12px;display:flex;flex-direction:column;gap:8px;}
+  .status-toggle-cards .form-item{margin-top:0;}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -306,6 +310,9 @@ let LISTA = [];
 let TIPO_FILTRO_LISTA = '';
 let FILTRO_UNIDADE_LISTA = '';
 let FILTRO_BUSCA_LISTA = '';
+// qual status da Triagem está expandido agora (null = nenhum, botões
+// fechados) - reseta pra fechado quando a Triagem sai/entra de novo
+let TRIAGEM_STATUS_ABERTO = null;
 
 function modelo(){ return TIPOS.find(t=>t.tipo===TIPO_ATUAL); }
 
@@ -892,19 +899,32 @@ function renderLista(){
     return;
   }
 
-  // Triagem: kanban por status - cada card sabe pra qual coluna vai sozinho
+  // Triagem: cada status vira um botão (mesmo desenho do "Novo formulário"
+  // lá em cima) em vez de 3 colunas sempre visíveis - clica e a lista daquele
+  // status aparece embaixo, só uma aberta por vez (pedido do usuário)
   const COLUNAS = [
-    { status:'AGUARDANDO_PREENCHIMENTO', titulo:'🔗 Aguardando preenchimento' },
-    { status:'PENDENTE', titulo:'✍️ Aguardando assinatura' },
-    { status:'ASSINADO', titulo:'✅ Assinado hoje' },
+    { status:'AGUARDANDO_PREENCHIMENTO', titulo:'Aguardando preenchimento', icone:'🔗' },
+    { status:'PENDENTE', titulo:'Aguardando assinatura', icone:'✍️' },
+    { status:'ASSINADO', titulo:'Assinado hoje', icone:'✅' },
   ];
-  alvo.innerHTML = '<div class="kanban-board">' + COLUNAS.map(col=>{
-    const doColuna = visiveis.filter(f=>statusVisual(f)===col.status);
-    return `<div class="kanban-col">
-      <div class="kanban-col-header"><span>${col.titulo}</span><span class="kanban-count">${doColuna.length}</span></div>
-      <div class="kanban-cards">${doColuna.length ? doColuna.map(cardHtml).join('') : '<div class="kanban-empty">Nada aqui.</div>'}</div>
-    </div>`;
-  }).join('') + '</div>';
+  // a coluna aberta pode ter esvaziado (última pendência daquele status
+  // resolvida) - nesse caso volta a nada selecionado, não trava numa coluna
+  // vazia sem o usuário ter clicado em nada
+  if(TRIAGEM_STATUS_ABERTO && !visiveis.some(f=>statusVisual(f)===TRIAGEM_STATUS_ABERTO)) TRIAGEM_STATUS_ABERTO = null;
+  const botoes = COLUNAS.map(col=>{
+    const n = visiveis.filter(f=>statusVisual(f)===col.status).length;
+    return `<button type="button" class="status-toggle-btn ${TRIAGEM_STATUS_ABERTO===col.status?'aberto':''}" onclick="toggleStatusTriagem('${col.status}')">
+      <span>${col.icone} ${escapeHtml(col.titulo)}</span><span class="stb-count">${n}</span>
+    </button>`;
+  }).join('');
+  const cardsAbertos = TRIAGEM_STATUS_ABERTO ? visiveis.filter(f=>statusVisual(f)===TRIAGEM_STATUS_ABERTO) : null;
+  alvo.innerHTML = `<div class="status-toggle-row">${botoes}</div>`
+    + (cardsAbertos ? `<div class="status-toggle-cards">${cardsAbertos.length ? cardsAbertos.map(cardHtml).join('') : '<div class="kanban-empty">Nada aqui.</div>'}</div>` : '');
+}
+
+function toggleStatusTriagem(status){
+  TRIAGEM_STATUS_ABERTO = (TRIAGEM_STATUS_ABERTO===status) ? null : status;
+  renderLista();
 }
 
 async function carregarLista(){
