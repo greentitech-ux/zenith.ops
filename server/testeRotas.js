@@ -6216,6 +6216,97 @@ setTimeout(async () => {
   console.log(`${okSaidasWiring ? '✓' : '✗'} Painel de Saídas: as 3 rotas (listar, relatório, verificar) passam o snapshot da planilha pro módulo`);
 
   // ------------------------------------------------------------------
+  // Pedido real do Master: "a coluna TC ela hoje se chama Total nos KPIs...
+  // preciso que esses dados apareçam, pois ela só fica zerada... e remover
+  // a coluna cancelado ao lado de TC". Causa raiz: TC deixou de ser um campo
+  // fixo digitado - hoje é um KPI Extra dinâmico (grupos.html) chamado
+  // "Total"; o campo legado `tc` só é preenchido por linha de planilha
+  // antiga. prepararFechamentosPorUnidade (relatorio-unidades.csv/pdf) tem
+  // que somar os dois, casando por NOME (campoTcDoGrupo/chaveLabel) - e
+  // Cancelados sai de vez (o Master pediu pra tirar). Também: a planilha
+  // pode ter chamado essa coluna de "TC" OU "Quantidade de Pedidos".
+  let okTcComparativo = false;
+  try {
+    const sheetsSyncMod = require('/home/user/adyen-monitor/server/sheetsSync.js');
+    // 'Mooca' é uma das 4 lojas de verdade da ARCFOOD (ver ARCFOOD_UNIDADES_POR_NOME)
+    // - linhaParaFechamento descarta linha de unidade desconhecida
+    const fechQtdPedidos = sheetsSyncMod.linhaParaFechamento(
+      'ARCFOOD',
+      ['ID', 'Unidade', 'Data', 'Faturam.', 'Quantidade de Pedidos'],
+      ['pl-tc-1', 'Mooca', '01/08/2026', 'R$ 100,00', '7'],
+    );
+
+    DOCS.set('grupos/g-tc-teste', {
+      id: 'g-tc-teste', nome: 'Grupo TC teste', unidades: ['UnidTCTeste'],
+      kpisExtras: [{ label: 'Total', campo: 'total', tipo: 'quantidade' }],
+      canaisVendaExtras: [], formasPagamentoExtras: [],
+    });
+    // linha "legado" (schema antigo, tc digitado direto - planilha) e linha
+    // "sistema" (kpisExtras.total, o jeito atual) no MESMO comparativo - o
+    // relatorio tem que somar as duas, nao escolher uma
+    DOCS.set('fechamentosLive/UnidTCTeste__2026-08-01', {
+      id: 'UnidTCTeste__2026-08-01', unidade: 'UnidTCTeste', unidadeNome: 'Unidade TC Teste',
+      grupo: 'ARCFOOD', data: '2026-08-01', faturamento: 1000, totalDeclarado: 1000, diferenca: 0,
+      tc: 4, cancelados: 9, kpisExtras: {},
+    });
+    DOCS.set('fechamentosLive/UnidTCTeste__2026-08-02', {
+      id: 'UnidTCTeste__2026-08-02', unidade: 'UnidTCTeste', unidadeNome: 'Unidade TC Teste',
+      grupo: 'ARCFOOD', data: '2026-08-02', faturamento: 2000, totalDeclarado: 2000, diferenca: 0,
+      tc: 0, cancelados: 0, kpisExtras: { total: 12 },
+    });
+    // DOCS.set grava direto no Firestore falso, por fora de grupos.js/
+    // fechamentosLive.js - os caches deles (TTL de 5min/6h, ver createCache)
+    // ja estao quentes a essa altura da suite (testes anteriores ja leram
+    // /api/grupos e /api/fechamentos), entao sem invalidar explicitamente a
+    // rota abaixo devolveria o snapshot ANTIGO, sem as linhas que acabei de
+    // semear
+    require('/home/user/adyen-monitor/server/grupos.js').invalidarCache();
+    require('/home/user/adyen-monitor/server/fechamentosLive.js').invalidarCache();
+
+    const r = await pedir(
+      '/api/fechamentos/relatorio-unidades.csv?unidades=UnidTCTeste&inicio=2026-08-01&fim=2026-08-02',
+      token ? { Authorization: 'Bearer ' + token } : {},
+    );
+
+    const conferencias = {
+      'linhaParaFechamento lê TC pela coluna "Quantidade de Pedidos" quando não tem "TC"': fechQtdPedidos.tc === 7,
+      'rota /relatorio-unidades.csv respondeu 200': r.status === 200,
+      'TC total soma o campo legado (tc:4) com o KPI Extra "Total" do grupo (kpisExtras.total:12) = 16': /,16(\r?\n|,)/.test(r.corpo),
+      'coluna Cancelados não existe mais no cabeçalho': !/Cancelados/i.test(r.corpo),
+      'coluna TC total continua no cabeçalho': /TC total/.test(r.corpo),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okTcComparativo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} · corpo: ${r.corpo.slice(0, 300)}`);
+  } catch (e) { okTcComparativo = false; console.log('  erro: ' + e.message); }
+  if (!okTcComparativo) ruins += 1;
+  console.log(`${okTcComparativo ? '✓' : '✗'} Comparativo por unidade: TC soma campo legado + KPI Extra "Total" (novo nome do TC), Cancelados removido`);
+
+  // mesmo pedido, do lado da TELA (fechamentos.html): seletor 🧩 Colunas
+  // próprio pro "Comparativo por unidade" (pedido: "eu possa escolher quais
+  // dados fazem parte dessa tabela"), Cancelados fora do cabeçalho fixo, TC
+  // lido via valorTc (campo legado `tc` + KPI Extra "Total" do grupo)
+  let okTcComparativoTela = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+    const conf = {
+      'renderUnidadesTable não soma mais "cancelados"': !/c\.cancelados/.test(html),
+      'renderUnidadesTable lê TC via valorTc(r, grupo), não r.tc direto': /c\.tc \+= valorTc\(r, grupoKpiDaUnidade\(r\.unidade\)\)/.test(html),
+      'campoTcDoGrupo casa o KPI Extra por nome ("Total"), igual à unificação de Canais/Formas': /function campoTcDoGrupo\(grupo\)\{[\s\S]{0,300}chaveLabel\('Total'\)/.test(html),
+      'cabeçalho fixo do HTML não tem mais <th>Cancelados</th>': !/<th>Cancelados<\/th>/.test(html),
+      'botão 🧩 Colunas do Comparativo por unidade existe': /abrirSeletorColunasUnidades\(\)/.test(html) && /Comparativo por unidade/.test(html),
+      'seletor tem Salvar gravando no servidor (preferência própria, não a da tabela principal)':
+        /const PREF_COLUNAS_UNIDADES = 'fechamentoColunasUnidades'/.test(html)
+        && /function salvarColunasUnidades\(\)/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okTcComparativoTela = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTcComparativoTela = false; console.log('  erro: ' + e.message); }
+  if (!okTcComparativoTela) ruins += 1;
+  console.log(`${okTcComparativoTela ? '✓' : '✗'} Comparativo por unidade (tela): seletor de colunas próprio + TC unificado + Cancelados fora`);
+
+  // ------------------------------------------------------------------
   // Formulários: a lista tinha virado um monte só se amontoando (pedido do
   // usuário) - organização de fonte, no mesmo desenho já usado em
   // Central/Solicitações (central-historico.html): chips de tipo com

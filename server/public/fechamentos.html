@@ -329,13 +329,14 @@
   <h2>
     <div class="title-group"><span>Comparativo por unidade</span><span class="n" id="unidades-count"></span></div>
     <div style="display:flex;gap:8px;">
+      <button type="button" class="preset-btn" onclick="abrirSeletorColunasUnidades()" title="Escolher quais dados aparecem nesta tabela">🧩 Colunas</button>
       <button type="button" class="preset-btn" onclick="baixarRelatorioFechamentosUnidades('csv')">📄 Relatório CSV</button>
       <button type="button" class="preset-btn" onclick="baixarRelatorioFechamentosUnidades('pdf')">📄 Relatório PDF</button>
     </div>
   </h2>
   <div class="tablewrap" style="max-height:none;overflow-x:auto;overflow-y:visible;">
     <table>
-      <thead><tr><th>Unid.</th><th>Previsão (mês)</th><th>Fechamentos</th><th>Faturamento</th><th>Diferença</th><th>TC total</th><th>Cancelados</th></tr></thead>
+      <thead><tr id="unidades-thead"><th>Unid.</th><th>Previsão (mês)</th><th>Fechamentos</th><th>Faturamento</th><th>Diferença</th><th>TC total</th></tr></thead>
       <tbody id="unidades-body"></tbody>
     </table>
   </div>
@@ -390,6 +391,20 @@
       <button type="button" class="preset-btn" onclick="fecharSeletorColunas()">Cancelar</button>
       <button type="button" class="preset-btn" onclick="restaurarColunas()" title="Voltar a mostrar todas as colunas na tela e no relatório">Mostrar todas</button>
       <button type="button" class="preset-btn" onclick="salvarColunas()" style="color:var(--accent);">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- seletor de colunas do "Comparativo por unidade" - so visibilidade (Unid.
+     e ancora, sempre exibida), ver abrirSeletorColunasUnidades -->
+<div class="fech-overlay hidden" id="colunas-unidades-overlay">
+  <div class="fech-modal" style="max-width:360px;">
+    <h3>🧩 Colunas · Comparativo por unidade</h3>
+    <div class="sub">Escolha quais dados aparecem nesta tabela. Unidade é sempre exibida.</div>
+    <div id="colunas-unidades-lista" style="display:flex;flex-direction:column;gap:4px;margin:12px 0;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button type="button" class="preset-btn" onclick="fecharSeletorColunasUnidades()">Cancelar</button>
+      <button type="button" class="preset-btn" onclick="salvarColunasUnidades()" style="color:var(--accent);">Salvar</button>
     </div>
   </div>
 </div>
@@ -1892,22 +1907,44 @@ function previsaoDiaSeguinte(unidade, dataIso){
   return historico.reduce((s,d)=>s+(d.faturamento||0),0)/historico.length;
 }
 
+// colunas opcionais do Comparativo por unidade - "Unid." e ancora, sempre
+// visivel, nem entra nesta lista (mesma regra do seletor 🧩 Colunas da
+// tabela principal). Ver seletor proprio abaixo (abrirSeletorColunasUnidades)
+function opcoesColunasUnidades(){
+  return [
+    {key:'previsao', label:'Previsão (mês)'},
+    {key:'qtd', label:'Fechamentos'},
+    {key:'faturamento', label:'Faturamento'},
+    {key:'diferenca', label:'Diferença'},
+    {key:'tc', label:'TC total'},
+  ];
+}
+let UNID_COLUNAS_OCULTAS = new Set();
+try{ UNID_COLUNAS_OCULTAS = new Set(JSON.parse(localStorage.getItem('fechColunasUnidadesOcultas')||'[]')); }catch(e){}
+function colVisivelUnidades(key){ return !UNID_COLUNAS_OCULTAS.has(key); }
+
 function renderUnidadesTable(rows){
   const refIso = document.getElementById('f-date-end').value;
   const porUnidade = {};
   rows.forEach(r=>{
-    const c = (porUnidade[r.unidade] ||= {qtd:0, faturamento:0, diferenca:0, tc:0, cancelados:0});
+    const c = (porUnidade[r.unidade] ||= {qtd:0, faturamento:0, diferenca:0, tc:0});
     c.qtd++;
     c.faturamento += r.faturamento||0;
     c.diferenca += r.diferenca||0;
-    c.tc += r.tc||0;
-    c.cancelados += r.cancelados||0;
+    c.tc += valorTc(r, grupoKpiDaUnidade(r.unidade));
   });
   const linhas = Object.entries(porUnidade).sort((a,b)=>b[1].faturamento-a[1].faturamento);
   document.getElementById('unidades-count').textContent = linhas.length;
+  const colunas = opcoesColunasUnidades().filter(o=>colVisivelUnidades(o.key));
+  document.getElementById('unidades-thead').innerHTML = '<th>Unid.</th>' + colunas.map(o=>`<th>${escapeHtml(o.label)}</th>`).join('');
+  const celulas = {
+    previsao: (u,c)=>{ const previsao = previsaoMensal(u, refIso); return `<td class="valor" style="color:var(--accent);">${previsao==null ? '—' : fmtMoney(previsao)}</td>`; },
+    qtd: (u,c)=>`<td class="valor">${c.qtd}</td>`,
+    faturamento: (u,c)=>`<td class="valor">${fmtMoney(c.faturamento)}</td>`,
+    diferenca: (u,c)=>{ const cor = c.diferenca<0?'var(--bad)':(c.diferenca>0?'var(--warn)':'var(--ok)'); return `<td class="valor" style="color:${cor}">${fmtMoney(c.diferenca)}</td>`; },
+    tc: (u,c)=>`<td class="valor">${c.tc.toFixed(0)}</td>`,
+  };
   document.getElementById('unidades-body').innerHTML = linhas.length ? linhas.map(([u,c])=>{
-    const cor = c.diferenca<0?'var(--bad)':(c.diferenca>0?'var(--warn)':'var(--ok)');
-    const previsao = previsaoMensal(u, refIso);
     // so mostra um subtitulo quando ele agrega informacao de verdade (o
     // codigo IDPULSE, seja o proprio "u" quando ele ja e numerico - unidades
     // ARCFOOD - ou o apelido de UNIDADES_IDPULSE pras unidades do Grupo
@@ -1916,14 +1953,44 @@ function renderUnidadesTable(rows){
     const codigoIdpulse = UNIDADES_IDPULSE[u] || (/^\d+$/.test(u) ? u : null);
     return `<tr>
       <td>${escapeHtml(UNIDADES_NOMES[u]||u)}${codigoIdpulse ? ` <span style="color:var(--muted);font-family:var(--mono);font-size:10px;">${escapeHtml(codigoIdpulse)}</span>` : ''}</td>
-      <td class="valor" style="color:var(--accent);">${previsao==null ? '—' : fmtMoney(previsao)}</td>
-      <td class="valor">${c.qtd}</td>
-      <td class="valor">${fmtMoney(c.faturamento)}</td>
-      <td class="valor" style="color:${cor}">${fmtMoney(c.diferenca)}</td>
-      <td class="valor">${c.tc.toFixed(0)}</td>
-      <td class="valor">${c.cancelados.toFixed(0)}</td>
+      ${colunas.map(o=>celulas[o.key](u,c)).join('')}
     </tr>`;
-  }).join('') : '<tr><td colspan="7" class="empty">Sem dados no período.</td></tr>';
+  }).join('') : `<tr><td colspan="${1+colunas.length}" class="empty">Sem dados no período.</td></tr>`;
+}
+
+// ---------- seletor 🧩 Colunas do Comparativo por unidade ----------
+// mesma ideia do seletor da tabela principal (opcoesColunas/abrirSeletorColunas
+// mais abaixo), so que so com visibilidade (sem reordenar/relatorio separado
+// - esta tabela tem so 5 colunas opcionais, nao precisa da maquina inteira)
+function abrirSeletorColunasUnidades(){
+  document.getElementById('colunas-unidades-lista').innerHTML = opcoesColunasUnidades().map(o=>`
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:2px 4px;cursor:pointer;" data-coluna="${escapeHtml(o.key)}">
+      <input type="checkbox" data-check ${colVisivelUnidades(o.key)?'checked':''} style="flex:none;width:auto;margin:0;">
+      <span>${escapeHtml(o.label)}</span>
+    </label>`).join('');
+  document.getElementById('colunas-unidades-overlay').classList.remove('hidden');
+}
+function fecharSeletorColunasUnidades(){ document.getElementById('colunas-unidades-overlay').classList.add('hidden'); }
+function salvarColunasUnidades(){
+  const linhas = [...document.querySelectorAll('#colunas-unidades-lista label')];
+  UNID_COLUNAS_OCULTAS = new Set(linhas.filter(l=>!l.querySelector('input[data-check]').checked).map(l=>l.dataset.coluna));
+  try{ localStorage.setItem('fechColunasUnidadesOcultas', JSON.stringify([...UNID_COLUNAS_OCULTAS])); }catch(e){}
+  fecharSeletorColunasUnidades();
+  renderUnidadesTable(filtrar());
+  fetch('/api/preferencias/'+PREF_COLUNAS_UNIDADES, {
+    keepalive: true, method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ valor: { ocultas: [...UNID_COLUNAS_OCULTAS] } }),
+  }).then(r=>{ if(!r.ok) throw new Error(); })
+    .catch(()=>alert('A escolha valeu nesta tela, mas não deu pra salvar como padrão no servidor. Confira a conexão e clique em Salvar de novo pra ela valer nos outros aparelhos.'));
+}
+const PREF_COLUNAS_UNIDADES = 'fechamentoColunasUnidades';
+async function carregarPreferenciaColunasUnidades(){
+  let salvo = null;
+  try{ salvo = await fetch('/api/preferencias/'+PREF_COLUNAS_UNIDADES).then(r=>r.ok?r.json():null); }catch(e){ return; }
+  const v = salvo && salvo.valor;
+  if(!v || !Array.isArray(v.ocultas)) return;
+  UNID_COLUNAS_OCULTAS = new Set(v.ocultas);
+  try{ localStorage.setItem('fechColunasUnidadesOcultas', JSON.stringify([...UNID_COLUNAS_OCULTAS])); }catch(e){}
 }
 
 // intervalo efetivo desta tabela: o periodo principal (f-date-start/f-date-end),
@@ -2006,6 +2073,20 @@ function valorColuna(d, col){
 // fixo > canal > forma - nunca da ordem em que os dados apareceram, senão a
 // mesma coluna mudaria de key conforme o filtro da tela e a preferência
 // salva pararia de valer.
+// acha, no grupo, o KPI extra cadastrado com o nome "Total" - e o que hoje
+// representa TC no Comparativo por unidade (o campo fixo antigo `tc` da
+// planilha nao e mais preenchido por lancamento do sistema, so por KPI's
+// Extras dinamico de /grupos.html). Mesmo casamento por nome (chaveLabel)
+// que colunasValores usa pra unificar Canais/Formas por baixo.
+function campoTcDoGrupo(grupo){
+  const alvo = chaveLabel('Total');
+  const k = grupo && (grupo.kpisExtras||[]).find(x=>chaveLabel(x.label)===alvo);
+  return k ? k.campo : null;
+}
+function valorTc(d, grupo){
+  const campo = campoTcDoGrupo(grupo);
+  return Number(d.tc||0) + (campo ? Number((d.kpisExtras||{})[campo]||0) : 0);
+}
 function colunasValores(rows, grupo){
   const porNome = new Map();
   const add = (label, fonte) => {
@@ -2852,6 +2933,7 @@ async function boot(){
   document.getElementById('root').classList.remove('hidden');
   // antes do primeiro render: a ordem/visibilidade salva no servidor manda
   await carregarPreferenciaColunas();
+  await carregarPreferenciaColunasUnidades();
   await carregar();
   if(isMaster) await carregarEdicoes();
 }
