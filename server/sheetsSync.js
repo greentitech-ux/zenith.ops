@@ -65,6 +65,28 @@ function normalizarTexto(s) {
   return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 }
 
+// Comparacao de nome de COLUNA sem acento/caixa/pontuacao - mesmo fix (e
+// mesmo motivo) do chaveCol/indiceDaColuna em bravoImport.js: a leitura
+// usava header.indexOf(nome), que e exato, e "Saida Dinheiro" no codigo nao
+// batia com "Saida Dinheiro" (com acento) na planilha (a aba foi editada
+// por gente diferente ao longo dos anos, entao o acento nem sempre e
+// consistente coluna a coluna) - a coluna inteira desaparecia em silencio.
+// Foi o que fez o Painel de Saidas so mostrar ALGUMAS das saidas itemizadas
+// da planilha antiga da ARCFOOD (os pares "Saida Dinheiro NN" cujo
+// cabecalho batia por coincidencia, os outros ficavam de fora sem erro).
+function chaveCol(s) {
+  return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, ' ').trim().toLowerCase();
+}
+function indiceDaColuna(header, nome) {
+  const alvo = chaveCol(nome);
+  if (!alvo) return -1;
+  for (let i = 0; i < header.length; i++) {
+    if (chaveCol(header[i]) === alvo) return i;
+  }
+  return -1;
+}
+
 // "R$ 9.619,89" -> 9619.89 · "R$ (1,91)" -> -1.91 · "R$ -" / "" -> 0
 function parseMoneyBR(raw) {
   if (raw == null) return 0;
@@ -244,7 +266,7 @@ async function buscarAba(spreadsheetId, aba) {
 
 function linhaParaFechamento(grupo, header, linha) {
   const get = (nome) => {
-    const i = header.indexOf(nome);
+    const i = indiceDaColuna(header, nome);
     return i >= 0 ? linha[i] : undefined;
   };
 

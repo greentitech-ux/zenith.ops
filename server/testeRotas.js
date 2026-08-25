@@ -6443,6 +6443,16 @@ setTimeout(async () => {
       'R$ 37,50', 'Motoboy planilha', 'R$ 50,00', 'Compra de gelo planilha', '', ''];
     const fechPlanilha = sheetsSyncMod.linhaParaFechamento('ARCFOOD', header, linha);
 
+    // mesma linha, mas com o cabeçalho como ele realmente aparece na planilha
+    // historica da ARCFOOD depois de anos de edição manual: "Saída Dinheiro"
+    // com acento, "Descrição Saída" com acento e caixa diferente na 2ª saída
+    // - o Master reportou que só ALGUMAS saídas apareciam, exatamente porque
+    // header.indexOf('Saida Dinheiro') (sem acento, no código) não batia com
+    // a coluna acentuada da planilha
+    const headerAcentuado = ['ID', 'Nome', 'Unidade', 'Data', 'Faturam.', 'Total Saida',
+      'Saída Dinheiro', 'Descrição Saída', 'saída dinheiro 02', 'DESCRIÇÃO SAÍDA 02', 'Saida Dinheiro 03', 'Descricao Saida 03'];
+    const fechPlanilhaAcentuada = sheetsSyncMod.linhaParaFechamento('ARCFOOD', headerAcentuado, linha);
+
     // duas linhas do MESMO dia/unidade (fechamento principal + uma linha de
     // sangria separada, cada uma com seu proprio item de saida) - o merge
     // tem que concatenar os dois, nao ficar só com o da linha "principal"
@@ -6472,6 +6482,13 @@ setTimeout(async () => {
         && fechPlanilha.detalhesSaidas.some((d) => d.valor === 37.5 && d.descricao === 'Motoboy planilha')
         && fechPlanilha.detalhesSaidas.some((d) => d.valor === 50 && d.descricao === 'Compra de gelo planilha'),
       'pares vazios (Saida Dinheiro 03) não viram item fantasma': fechPlanilha.detalhesSaidas.every((d) => d.descricao !== ''),
+      'cabeçalho com acento/caixa diferente ("Saída Dinheiro", "saída dinheiro 02") lê as mesmas 2 saídas':
+        fechPlanilhaAcentuada.detalhesSaidas.length === 2
+        && fechPlanilhaAcentuada.detalhesSaidas.some((d) => d.valor === 37.5 && d.descricao === 'Motoboy planilha')
+        && fechPlanilhaAcentuada.detalhesSaidas.some((d) => d.valor === 50 && d.descricao === 'Compra de gelo planilha'),
+      'cabeçalho acentuado também lê ID/Unidade/Faturam. certos (get() não quebrou os outros campos)':
+        fechPlanilhaAcentuada.id === fechPlanilha.id && fechPlanilhaAcentuada.unidade === fechPlanilha.unidade
+        && fechPlanilhaAcentuada.faturamento === fechPlanilha.faturamento,
       'Grupo Bravo não lê ARCFOOD_SAIDA_SLOTS (formato de coluna é só da ARCFOOD)':
         sheetsSyncMod.linhaParaFechamento('BRAVO', ['ID', 'Unidade', 'Data', 'Faturam.'], ['pl-b1', 'Dominos Bessa', '15/08/2026', 'R$ 100,00']).detalhesSaidas.length === 0,
       'mesclar do mesmo dia CONCATENA detalhesSaidas das 2 linhas (não fica só com o da principal)':
@@ -7016,6 +7033,34 @@ setTimeout(async () => {
   } catch (e) { okSaidasConferencia3col = false; console.log('  erro: ' + e.message); }
   if (!okSaidasConferencia3col) ruins += 1;
   console.log(`${okSaidasConferencia3col ? '✓' : '✗'} Painel de Saídas: Conferência em 3 colunas por tipo (Sangria/Depósito · Saída avulsa), Verificadas continua junta`);
+
+  // ------------------------------------------------------------------
+  // Pedido real do Master: "lancei uma sangria dia 20, teve entrada de
+  // dinheiro naquele dia, então a próxima sangria já inicia com o De em
+  // dia 20, só preenchendo o Até" - o "De" do período nasce igual ao "Até"
+  // da ÚLTIMA sangria/depósito lançada pra unidade escolhida, em vez de
+  // vir sempre em branco.
+  let okSangriaAutoDe = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'lancamento.html'), 'utf8');
+    const i = html.indexOf('function preencherPeriodoSangria(){');
+    const trecho = html.slice(i, i + 400);
+    const conf = {
+      'select de unidade chama preencherPeriodoSangria() ao trocar': /id="s-unidade" required onchange="preencherPeriodoSangria\(\)"/.test(html),
+      'acha a ÚLTIMA sangria/depósito da unidade escolhida (SANGRIAS já vem ordenado por data desc)':
+        /const ultima = unidade \? \(SANGRIAS\|\|\[\]\)\.find\(s=>s\.unidade===unidade\) : null;/.test(trecho),
+      '"De" recebe o "Até" (periodoFim) da última - não a data crua do lançamento':
+        /document\.getElementById\('s-periodo-inicio'\)\.value = ultima \? \(ultima\.periodoFim \|\| ultima\.data \|\| ''\) : '';/.test(trecho),
+      'roda de novo no boot (unidade já vem pré-selecionada ao abrir a tela)': /if\(podeSangria\)\{ await carregarSangrias\(\); preencherPeriodoSangria\(\); \}/.test(html),
+      'roda de novo depois de registrar uma sangria (a PRÓXIMA já nasce preenchida, sem esperar reload)':
+        /await carregarSangrias\(\);\s*\n\s*preencherPeriodoSangria\(\);\s*\n\s*\}catch/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okSangriaAutoDe = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okSangriaAutoDe = false; console.log('  erro: ' + e.message); }
+  if (!okSangriaAutoDe) ruins += 1;
+  console.log(`${okSangriaAutoDe ? '✓' : '✗'} Sangria/Depósito: "De" nasce com o "Até" da última sangria da unidade, atualiza ao trocar unidade e após lançar`);
 
   // ------------------------------------------------------------------
   // Relatórios em PDF: a coluna Descrição não pode sair cortada com "..."
