@@ -887,6 +887,68 @@ async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto, rei
   }
 }
 
+// dispositivo de rede MARCADO (impressora Zebra/Bematech, VM do servidor -
+// ver definirApelidoDispositivo em lojaStatus.js) sumiu da varredura ARP
+// por tempo demais (ver DISPOSITIVO_OFFLINE_LIMIAR_MS). Mesmo publico e
+// mesma urgencia do alerta de loja offline: pedido explicito do Master pra
+// esse equipamento especifico ("caso esses equipamentos percam rede
+// precisa alarmar").
+async function notifyDispositivoOffline(unidadeNome, codigo, apelido, tipoDispositivo, mac) {
+  const nome = apelido || mac;
+  const icone = tipoDispositivo === 'vm' ? '🖥️' : '🖨️';
+  const dados = {
+    title: tipoDispositivo === 'vm' ? `${icone} VM sem rede` : `${icone} Impressora sem rede`,
+    body: `${nome} (${unidadeNome || codigo}) sumiu da rede - verifique cabo/energia do equipamento.`,
+    tag: `noc-dispositivo-${codigo}-${mac}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-dispositivo-offline', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload, { urgency: 'high' });
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (dispositivo offline):', err.message);
+      }
+    }
+  }
+}
+
+// dispositivo monitorado voltou a aparecer na varredura - aviso tranquilo
+// (sem alarme sonoro), mesmo publico do alerta de queda
+async function notifyDispositivoOnline(unidadeNome, codigo, apelido, tipoDispositivo, mac) {
+  const nome = apelido || mac;
+  const icone = tipoDispositivo === 'vm' ? '🖥️' : '🖨️';
+  const dados = {
+    title: `${icone} Voltou à rede`,
+    body: `${nome} (${unidadeNome || codigo}) voltou a responder na rede.`,
+    tag: `noc-dispositivo-${codigo}-${mac}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-dispositivo-online', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (dispositivo voltou):', err.message);
+      }
+    }
+  }
+}
+
 // computador da loja voltou a responder depois de ter caido - aviso
 // tranquilo (sem alarme), mesmo publico do alerta de queda
 // mandamos reiniciar e a máquina NÃO voltou na janela. Isso sim é
@@ -1040,6 +1102,7 @@ module.exports = {
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
+  notifyDispositivoOffline, notifyDispositivoOnline,
   notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
   notifyAbastecimentoDivergencia, notifyFechamentoLancado, PUBLIC_KEY,
 };

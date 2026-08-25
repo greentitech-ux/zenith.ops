@@ -90,19 +90,51 @@ async function getApelidos() {
   return apelidosCache;
 }
 
+// "tipo" decide se o dispositivo pode ser MONITORADO (alarme de rede - ver
+// varrerAlertas): pedido do Master pra impressoras (Zebra/Bematech) e VMs
+// do servidor local perderem rede sem que ninguém precise ficar rodando um
+// scanner externo pra descobrir. Vocabulário do próprio Master, não em
+// inglês.
+const TIPOS_DISPOSITIVO = ['impressora', 'vm'];
+
+// cada MAC em apelidosRede começou como STRING pura (só o nome). Ganhou
+// "tipo"/"monitorar" depois, sem migração em massa: um valor antigo (string)
+// continua lendo certo aqui, e só vira o formato novo quando alguém EDITA
+// aquele MAC pela tela - o resto do documento fica como estava.
+function normalizarEntradaApelido(valor) {
+  if (typeof valor === 'string') return { apelido: valor || null, tipo: null, monitorar: false };
+  if (valor && typeof valor === 'object') {
+    return {
+      apelido: typeof valor.apelido === 'string' && valor.apelido ? valor.apelido : null,
+      tipo: TIPOS_DISPOSITIVO.includes(valor.tipo) ? valor.tipo : null,
+      monitorar: !!valor.monitorar,
+    };
+  }
+  return { apelido: null, tipo: null, monitorar: false };
+}
+
 // o nome que a pessoa dá vence o que o DNS respondeu: quem batizou de
-// "Impressora da cozinha" sabe melhor que o hostname "BRWA4-2B-B0"
-async function definirApelidoDispositivo(codigo, mac, apelido) {
+// "Impressora da cozinha" sabe melhor que o hostname "BRWA4-2B-B0".
+// aceita tanto a chamada antiga (apelido como string solta) quanto a nova
+// ({apelido, tipo, monitorar}) - campo omitido = não mexe no que já tinha.
+async function definirApelidoDispositivo(codigo, mac, entrada) {
   const macOk = String(mac || '').trim().toLowerCase();
   if (!/^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(macOk)) throw new Error('MAC inválido.');
   if (!codigo) throw new Error('Unidade é obrigatória.');
+  const corpo = typeof entrada === 'string' ? { apelido: entrada } : (entrada || {});
   const atuais = await getApelidos();
   const daUnidade = { ...(atuais[codigo] || {}) };
-  const limpo = String(apelido || '').trim().slice(0, 40);
-  if (limpo) daUnidade[macOk] = limpo; else delete daUnidade[macOk];
+  const anterior = normalizarEntradaApelido(daUnidade[macOk]);
+  const limpo = String(corpo.apelido != null ? corpo.apelido : (anterior.apelido || '')).trim().slice(0, 40);
+  const tipo = corpo.tipo !== undefined
+    ? (TIPOS_DISPOSITIVO.includes(corpo.tipo) ? corpo.tipo : null)
+    : anterior.tipo;
+  const monitorar = corpo.monitorar !== undefined ? !!corpo.monitorar : anterior.monitorar;
+  if (!limpo && !tipo && !monitorar) delete daUnidade[macOk];
+  else daUnidade[macOk] = { apelido: limpo || null, tipo, monitorar };
   await APELIDOS_DOC.set({ unidades: { ...atuais, [codigo]: daUnidade } }, { merge: false });
   apelidosCache = null;
-  return { codigo, mac: macOk, apelido: limpo || null };
+  return { codigo, mac: macOk, apelido: limpo || null, tipo, monitorar };
 }
 
 const TIPOS_COMPUTADOR = ['atendimento', 'interno', 'abastecimento'];
@@ -148,6 +180,17 @@ const LIMIAR_OFFLINE_MS = 90 * 1000;
 const CONFIRMACAO_QUEDA_MS = Number(process.env.LOJA_STATUS_CONFIRMACAO_QUEDA_MS) >= 0
   ? Number(process.env.LOJA_STATUS_CONFIRMACAO_QUEDA_MS)
   : 4 * 60 * 1000;
+// mesma ideia do CONFIRMACAO_QUEDA_MS acima, mas NÃO pode reusar o valor: a
+// varredura de dispositivos de rede (Varrer-RedeLocal, vigiaScript.js) roda
+// so 1x por HORA, e mesclarDispositivos ja marca ativo:false no primeiro
+// scan em que o MAC nao aparece, sem folga nenhuma - "4 minutos de
+// silencio" sempre estaria satisfeito no instante em que a queda e vista,
+// nao confirma nada. Exige ~2 ciclos de scan sem aparecer (2h, com folga de
+// jitter) antes de considerar queda de verdade - 1 scan perdido e normal
+// (cache ARP, DHCP renovando, impressora ociosa).
+const DISPOSITIVO_OFFLINE_LIMIAR_MS = Number(process.env.LOJA_STATUS_DISPOSITIVO_OFFLINE_MS) >= 0
+  ? Number(process.env.LOJA_STATUS_DISPOSITIVO_OFFLINE_MS)
+  : 2 * 60 * 60 * 1000;
 // registro de atividades por computador: guarda as ultimas N transicoes
 // online<->offline (ver varrerAlertas), pra auditar quedas de conexao sem
 // depender de print. Capado pra o documento nao crescer sem limite.
@@ -684,7 +727,13 @@ async function listar() {
     // fabricante resolvido na hora pelo prefixo do MAC (ver ouiFabricantes) -
     // nao e gravado no doc de proposito: a tabela pode ser atualizada e o
     // dado ja existente ganha o nome novo sem migracao nenhuma
-    return { ...d, dispositivos: d.dispositivos.map((x) => ({ ...x, apelido: daUnidade[x.mac] || null, fabricante: ouiFabricantes.fabricanteDe(x.mac) })) };
+    return {
+      ...d,
+      dispositivos: d.dispositivos.map((x) => {
+        const cfg = normalizarEntradaApelido(daUnidade[x.mac]);
+        return { ...x, apelido: cfg.apelido, tipo: cfg.tipo, monitorar: cfg.monitorar, fabricante: ouiFabricantes.fabricanteDe(x.mac) };
+      }),
+    };
   });
 }
 
@@ -1309,8 +1358,41 @@ async function gravarEEspelhar(codigo, posto, patch) {
 
 async function varrerAlertas() {
   const docs = await listUncached();
+  const apelidosTodos = await getApelidos();
   const transicoes = [];
   for (const candidato of docs) {
+    // dispositivo de rede marcado como MONITORADO (impressora/VM - pedido do
+    // Master: "perdeu rede, precisa alarmar"). Reaproveita a varredura ARP
+    // passiva que ja existe (Varrer-RedeLocal -> mesclarDispositivos) - so
+    // acrescenta o alarme por cima de quem foi marcado explicitamente pela
+    // tela, nunca por padrao (ver definirApelidoDispositivo).
+    if (candidato.dispositivos && candidato.dispositivos.length) {
+      const daUnidade = apelidosTodos[candidato.codigo] || {};
+      const alarmeAtual = candidato.dispositivosAlarme || {};
+      let alarmePatch = null;
+      for (const disp of candidato.dispositivos) {
+        const cfg = normalizarEntradaApelido(daUnidade[disp.mac]);
+        if (!cfg.monitorar) continue;
+        const estado = alarmeAtual[disp.mac] || null;
+        const semVerHaMs = Date.now() - (disp.visto || 0);
+        if (!disp.ativo && semVerHaMs >= DISPOSITIVO_OFFLINE_LIMIAR_MS && !(estado && estado.avisadoOffline)) {
+          alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { avisadoOffline: true, offlineDesde: disp.visto } };
+          transicoes.push({
+            codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
+            tipo: 'dispositivo-offline', mac: disp.mac,
+            apelido: cfg.apelido, tipoDispositivo: cfg.tipo,
+          });
+        } else if (disp.ativo && estado && estado.avisadoOffline) {
+          alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { avisadoOffline: false, offlineDesde: null } };
+          transicoes.push({
+            codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
+            tipo: 'dispositivo-online', mac: disp.mac,
+            apelido: cfg.apelido, tipoDispositivo: cfg.tipo,
+          });
+        }
+      }
+      if (alarmePatch) await gravarEEspelhar(candidato.codigo, candidato.posto, { dispositivosAlarme: alarmePatch });
+    }
     // alerta de HD: quem detecta e a telemetria do agente (registrarTelemetria),
     // que so marca a flag; quem avisa e aqui, junto com o resto - assim o push
     // sai de UM lugar so e uma falha de push nunca derruba o caminho do agente
