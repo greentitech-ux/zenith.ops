@@ -6307,6 +6307,86 @@ setTimeout(async () => {
   console.log(`${okTcComparativoTela ? '✓' : '✗'} Comparativo por unidade (tela): seletor de colunas próprio + TC unificado + Cancelados fora`);
 
   // ------------------------------------------------------------------
+  // Bug relatado pelo usuário: "botão de aprovar selecionados deu erro" -
+  // alert "Failed to fetch" no celular ao selecionar ~1180 tickets de Quebra
+  // de caixa e clicar "Aprovar selecionados". Causa raiz: /api/central/
+  // decidir-lote decidia um ticket de cada vez, em SÉRIE - cada um faz 2-3
+  // idas ao Firestore (get+update+getOne), e em série isso passa longe do
+  // tempo que o navegador/rede móvel aguenta sem soltar a conexão (o
+  // servidor nem quebrava - só ainda não tinha terminado quando o fetch()
+  // desistiu). Fix: processa em FATIAS paralelas (Promise.all) - mesma
+  // lógica de decisão por ticket, sem mudar nada nela, só sem esperar um
+  // terminar pra começar o próximo. O teste aqui cobre a preocupação real
+  // de paralelizar: a contagem (decididos/pulados) não pode embaralhar nem
+  // "perder" ticket com várias fatias em voo ao mesmo tempo.
+  let okDecidirLoteParalelo = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const solicitacoesMod = require('/home/user/adyen-monitor/server/solicitacoes.js');
+    const fechamentosLiveMod = require('/home/user/adyen-monitor/server/fechamentosLive.js');
+    const N = 45; // mais de 2 fatias de 20, pra provar que o loop ENTRE fatias também funciona
+    const criados = [];
+    for (let i = 0; i < N; i++) {
+      criados.push(await solicitacoesMod.create({
+        tipo: 'quebra-caixa', unidade: 'São Braz Ilha do Leite', titulo: `Quebra lote ${i}`,
+        criadoPorEmail: 'teste@teste.local',
+      }));
+    }
+    // suporte-ti fica de fora do lote de propósito (precisa escolher técnico
+    // pelo card) e um id que não existe - os dois têm que sobrar em
+    // "pulados" pelo filtro ANTES do processamento em paralelo
+    const foraDoLote = await solicitacoesMod.create({
+      tipo: 'suporte-ti', unidade: 'São Braz Ilha do Leite', titulo: 'Chamado TI lote',
+      criadoPorEmail: 'teste@teste.local',
+    });
+    // ajuste de fechamento JÁ DECIDIDO antes do lote - esse é o caso que
+    // exercita o try/catch DENTRO do Promise.all (não o filtro de cima): o
+    // card continua visível/apto (mapa.has() bate), mas decidirEdicao
+    // recusa em runtime ("Esse pedido já foi decidido") - prova que um erro
+    // de UM ticket, no meio de uma fatia paralela, cai em "pulados" sem
+    // derrubar a fatia inteira nem os outros 45
+    DOCS.set('fechamentosLive/sabotagem-lote-fech', {
+      id: 'sabotagem-lote-fech', unidade: 'UnidLoteTeste', unidadeNome: 'Unidade Lote Teste',
+      grupo: 'ARCFOOD', data: '2026-08-01', faturamento: 100, totalDeclarado: 100, diferenca: 0,
+    });
+    fechamentosLiveMod.invalidarCache();
+    const edicaoJaDecidida = await fechamentosLiveMod.solicitarEdicao({
+      fechamentoId: 'sabotagem-lote-fech', tipoCorrecao: 'excluir', motivo: 'teste sabotagem lote',
+      solicitadoPorEmail: 'teste@teste.local',
+    });
+    await fechamentosLiveMod.decidirEdicao(edicaoJaDecidida.id, 'APROVADO', { decididoPorEmail: 'teste@teste.local' });
+
+    const tickets = [
+      ...criados.map((s) => ({ tipo: s.tipo, id: s.id })),
+      { tipo: 'suporte-ti', id: foraDoLote.id },
+      { tipo: 'compra', id: 'id-que-nao-existe-no-lote' },
+      { tipo: 'ajuste-fechamento', id: edicaoJaDecidida.id },
+    ];
+    const r = await postarJson('/api/central/decidir-lote', { tickets, status: 'APROVADO' }, cab);
+    const data = r.status === 200 ? JSON.parse(r.corpo) : {};
+    // confere no banco de verdade, não só na resposta - paralelismo mal
+    // feito poderia, em tese, deixar alguma escrita pra trás sem que a
+    // contagem devolvida acusasse
+    const conferidos = await Promise.all(criados.map((s) => solicitacoesMod.getOne(s.id)));
+
+    const conferencias = {
+      'rota respondeu 200': r.status === 200,
+      'decididos = 45 (nem mais, nem menos, mesmo processando em paralelo)': data.decididos === N,
+      'os 45 de verdade viraram APROVADO no banco': conferidos.every((c) => c && c.status === 'APROVADO'),
+      'suporte-ti ficou de fora (filtro antes do lote)': !!(data.pulados && data.pulados.some((p) => p.id === foraDoLote.id)),
+      'id inexistente aparece em pulados, sem quebrar o lote inteiro': !!(data.pulados && data.pulados.some((p) => p.id === 'id-que-nao-existe-no-lote')),
+      'ajuste já decidido falha DENTRO da fatia paralela e cai em pulados (não derruba os outros 45)':
+        !!(data.pulados && data.pulados.some((p) => p.id === edicaoJaDecidida.id && /já foi decidido/i.test(p.motivo || ''))),
+      'pulados tem exatamente os 3 esperados, nada a mais nem a menos': data.pulados && data.pulados.length === 3,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okDecidirLoteParalelo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDecidirLoteParalelo = false; console.log('  erro: ' + e.message); }
+  if (!okDecidirLoteParalelo) ruins += 1;
+  console.log(`${okDecidirLoteParalelo ? '✓' : '✗'} Central: aprovar em lote processa em fatias paralelas sem perder, duplicar nem embaralhar ticket`);
+
+  // ------------------------------------------------------------------
   // Formulários: a lista tinha virado um monte só se amontoando (pedido do
   // usuário) - organização de fonte, no mesmo desenho já usado em
   // Central/Solicitações (central-historico.html): chips de tipo com
