@@ -604,13 +604,22 @@
         <input type="text" class="szc-input" id="szc-atend-msg" placeholder="responder..." maxlength="1000" style="flex:1;">
         <button type="button" class="szc-enviar" id="szc-atend-enviar">➤</button>
       </div>
-      ${ATEND.ehMaster ? `<button type="button" class="szc-link" id="szc-atend-pdf" style="margin-top:4px;">📄 baixar PDF da conversa</button>` : ''}`;
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
+        ${ATEND.ehMaster ? `<button type="button" class="szc-link" id="szc-atend-pdf">📄 baixar PDF da conversa</button>` : '<span></span>'}
+        <button type="button" class="szc-link" id="szc-atend-beniboy">Central do Beniboy →</button>
+      </div>`;
     ligarBotaoAnexo(corpo.querySelector('#szc-atend-anexo'), corpo.querySelector('#szc-atend-anexo-icone'));
     atendMarcarVisto(chat);
     atendAtualizarBadge();
     corpo.querySelector('#szc-atend-voltar').addEventListener('click', () => {
       if (ATEND.ehMaster) atendRenderLista();
       else { aberto = false; panel.classList.add('szc-hidden'); }
+    });
+    // pedido do Master: de dentro da conversa (Master ou Suporte), tem que
+    // dar pra ir direto pra Central do Beniboy - antes só existia esse link
+    // na LISTA de conversas (atendRenderLista), não dentro de uma já aberta
+    corpo.querySelector('#szc-atend-beniboy').addEventListener('click', () => {
+      location.href = '/beniboy.html?chat=' + encodeURIComponent(chat.id);
     });
     // botao de PDF so existe no DOM quando ATEND.ehMaster (rota tambem e
     // Master-only no backend - pedido explicito do usuario: "so o master

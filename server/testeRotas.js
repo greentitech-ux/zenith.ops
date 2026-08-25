@@ -7313,6 +7313,36 @@ setTimeout(async () => {
   if (!okAprovadoEstagios) ruins += 1;
   console.log(`${okAprovadoEstagios ? '✓' : '✗'} Central -> Histórico: botão "Aprovado" mostra os 3 estágios de andamento, não só um número`);
 
+  // ------------------------------------------------------------------
+  // Pedido do Master: dentro do widget de chat, quando Master ou Suporte
+  // está DENTRO de uma conversa aberta (atendRenderConversa), precisa ter
+  // um jeito de ir pra Central do Beniboy - antes esse link só existia na
+  // LISTA de conversas (atendRenderLista), então quem estava respondendo
+  // uma conversa (aberta direto por um popup de alarme, por exemplo) tinha
+  // que voltar pra lista antes de conseguir chegar na Central.
+  let okChatLinkBeniboy = false;
+  try {
+    const src = require('fs').readFileSync(require('path').join(__dirname, 'public', 'suporte-chat.js'), 'utf8');
+    const i = src.indexOf('function atendRenderConversa(chat, manterScroll) {');
+    const trecho = src.slice(i, i + 2500);
+    // o botao de PDF fica dentro do ramo verdadeiro do ternario ATEND.ehMaster
+    // ? `...` : '<span></span>' - extrai só esse ramo (sem cruzar a crase de
+    // fechamento) pra provar que o botao do Beniboy está FORA dele
+    const ramoSoMaster = (trecho.match(/ATEND\.ehMaster \? `([^`]*)`/) || [])[1] || '';
+    const conf = {
+      'a conversa aberta tem um botão pra Central do Beniboy': /id="szc-atend-beniboy"/.test(trecho),
+      'não fica escondido atrás do "só Master" do botão de PDF (Suporte não-Master também tem que ver)':
+        !ramoSoMaster.includes('szc-atend-beniboy'),
+      'manda pro beniboy.html JÁ na conversa certa (?chat=)':
+        /location\.href = '\/beniboy\.html\?chat=' \+ encodeURIComponent\(chat\.id\)/.test(trecho),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okChatLinkBeniboy = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okChatLinkBeniboy = false; console.log('  erro: ' + e.message); }
+  if (!okChatLinkBeniboy) ruins += 1;
+  console.log(`${okChatLinkBeniboy ? '✓' : '✗'} Chat de suporte: Master/Suporte tem link pra Central do Beniboy de dentro da conversa aberta, não só na lista`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
