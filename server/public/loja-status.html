@@ -206,6 +206,11 @@
   .disp-rede{font-family:var(--mono);font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .disp-editar{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:4px;flex:none;min-width:28px;}
   .disp-editar:hover{color:var(--accent);}
+  /* dispositivo marcado (impressora/VM monitorada - pedido do Master: alarma
+     se perder rede) - o mesmo chip 🔔 aparece na linha e no modal de edição */
+  .disp-monitor-chip{flex:none;font-size:11px;}
+  .disp-monitorar-linha{display:flex;align-items:center;gap:8px;font-size:13px;margin:10px 0 4px;cursor:pointer;}
+  .disp-monitorar-linha input{margin:0;}
   .tile-metricas{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px;}
   /* apertado de propósito: as três métricas precisam caber em UMA linha na
      coluna estreita do celular (~159px), senão o card cresce e a promessa de
@@ -553,6 +558,27 @@
   </div>
 </div>
 
+<div class="overlay hidden" id="disp-overlay">
+  <div class="modal">
+    <h3>📡 Aparelho da rede</h3>
+    <div class="sub" id="disp-modal-mac"></div>
+    <label>Nome</label>
+    <input type="text" id="disp-apelido" maxlength="40" placeholder="Ex: Impressora Zebra, VM PULSE">
+    <label>Tipo</label>
+    <select id="disp-tipo">
+      <option value="">— nenhum —</option>
+      <option value="impressora">🖨️ Impressora</option>
+      <option value="vm">🖥️ VM</option>
+    </select>
+    <label class="disp-monitorar-linha"><input type="checkbox" id="disp-monitorar"> Monitorar (alarma se esse aparelho perder rede)</label>
+    <div class="msg hidden" id="disp-modal-status"></div>
+    <div class="modal-acoes">
+      <button type="button" class="btn-ghost" onclick="fecharModalDispositivo()">Cancelar</button>
+      <button type="button" class="btn-primary" id="disp-salvar" onclick="salvarDispositivo()">Salvar</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay hidden" id="editar-comp-overlay">
   <div class="modal">
     <h3>✏️ Editar computador</h3>
@@ -764,21 +790,43 @@ function resumoDispositivo(ua){
   return [so, nav].filter(Boolean).join(' · ') || null;
 }
 
-// batiza um aparelho da rede ("Impressora da cozinha"). O nome vale pra
-// UNIDADE inteira - se dois computadores da loja enxergam a mesma impressora,
-// ela fica com o mesmo nome nos dois. Apagar o texto remove o apelido e volta
-// a mostrar o que o DNS/NetBIOS respondeu.
-async function renomearDispositivo(codigo, mac, atual){
-  const nome = prompt(`Nome desse aparelho (${mac}):\n\nDeixe vazio pra voltar ao nome que a rede informa.`, atual || '');
-  if(nome === null) return;
+// batiza um aparelho da rede ("Impressora da cozinha") e decide se ele entra
+// no alarme de rede (pedido do Master: impressora Zebra/Bematech e VM do
+// servidor perderem rede tem que avisar). O nome vale pra UNIDADE inteira -
+// se dois computadores da loja enxergam a mesma impressora, ela fica com o
+// mesmo nome/tipo/monitorar nos dois.
+let DISP_CODIGO = null, DISP_MAC = null;
+function abrirModalDispositivo(codigo, mac, d){
+  DISP_CODIGO = codigo; DISP_MAC = mac;
+  document.getElementById('disp-modal-mac').textContent = mac;
+  document.getElementById('disp-apelido').value = (d && d.apelido) || '';
+  document.getElementById('disp-tipo').value = (d && d.tipo) || '';
+  document.getElementById('disp-monitorar').checked = !!(d && d.monitorar);
+  document.getElementById('disp-modal-status').classList.add('hidden');
+  document.getElementById('disp-overlay').classList.remove('hidden');
+}
+function fecharModalDispositivo(){
+  document.getElementById('disp-overlay').classList.add('hidden');
+  DISP_CODIGO = null; DISP_MAC = null;
+}
+async function salvarDispositivo(){
+  if(!DISP_CODIGO || !DISP_MAC) return;
+  const statusEl = document.getElementById('disp-modal-status');
+  statusEl.classList.add('hidden');
   try{
-    const r = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/dispositivos/${encodeURIComponent(mac)}/apelido`, {
-      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ apelido: nome }),
+    const r = await fetch(`/api/loja-status/${encodeURIComponent(DISP_CODIGO)}/dispositivos/${encodeURIComponent(DISP_MAC)}/apelido`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        apelido: document.getElementById('disp-apelido').value,
+        tipo: document.getElementById('disp-tipo').value || null,
+        monitorar: document.getElementById('disp-monitorar').checked,
+      }),
     });
     const data = await r.json();
     if(!r.ok) throw new Error(data.error||'Erro ao salvar.');
+    fecharModalDispositivo();
     await carregar();
-  }catch(e){ alert(e.message); }
+  }catch(e){ statusEl.textContent = e.message; statusEl.className = 'msg err'; }
 }
 
 // as tres metricas que cabem num card estreito e que decidem manutencao:
@@ -913,17 +961,21 @@ function atualizarConteudoDetalhe(codigo, c){
       // o "visto ha X" fica na linha do nome, nao na do IP: no celular a linha
       // de IP+MAC ja ocupa a largura toda e o texto extra era cortado com "..."
       const quando = d.ativo === false ? `<span class="disp-visto">visto ${escapeHtml(tempoRelativo(d.visto))}</span>` : '';
+      // 🔔 = monitorado (alarme de rede ligado - pedido do Master); sem isso
+      // ninguém confere pelo painel o que está armado sem abrir cada aparelho
+      const monitorChip = d.monitorar ? `<span class="disp-monitor-chip" title="Monitorado: alarma se perder rede">🔔</span>` : '';
       return `<div class="disp-linha">
         <span class="disp-dot ${d.ativo === false ? 'off' : 'on'}"></span>
         <div style="flex:1;min-width:0;">
           <div class="disp-topo">
             <div class="disp-nome ${temNome?'':'anon'}" title="${escapeHtml(nome)}">${escapeHtml(nome)}</div>
+            ${monitorChip}
             ${quando}
           </div>
           <div class="disp-rede">${escapeHtml(d.ip)} · ${escapeHtml(d.mac)}</div>
         </div>
-        <button type="button" class="disp-editar" title="Dar um nome a esse aparelho"
-          onclick="event.stopPropagation();renomearDispositivo('${escapeJs(codigo)}','${escapeJs(d.mac)}','${escapeJs(d.apelido||'')}')">✏️</button>
+        <button type="button" class="disp-editar" title="Editar nome/tipo/monitoramento"
+          onclick='event.stopPropagation();abrirModalDispositivo(${JSON.stringify(codigo)},${JSON.stringify(d.mac)},${JSON.stringify({apelido:d.apelido||null,tipo:d.tipo||null,monitorar:!!d.monitorar})})'>✏️</button>
       </div>`;
     };
     // TODOS os aparelhos, numa janela de ~5 linhas com rolagem interna -

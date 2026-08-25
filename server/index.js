@@ -2986,9 +2986,12 @@ app.get('/api/loja-status/rede', requireSection('suporte'), async (req, res) => 
 // Batiza um aparelho da rede da loja ("Impressora da cozinha"). O nome vale
 // pra UNIDADE inteira, nao pro computador que por acaso enxergou aquele MAC -
 // por isso a rota e por codigo de unidade. Mesmo gate do painel.
+// Aceita {apelido, tipo, monitorar} (pedido do Master: alarme quando uma
+// impressora/VM marcada perde rede) - campo omitido nao mexe no que ja
+// tinha (ver definirApelidoDispositivo).
 app.put('/api/loja-status/:codigo/dispositivos/:mac/apelido', requireSection('suporte'), async (req, res) => {
   try {
-    res.json(await lojaStatus.definirApelidoDispositivo(req.params.codigo, req.params.mac, req.body.apelido));
+    res.json(await lojaStatus.definirApelidoDispositivo(req.params.codigo, req.params.mac, req.body));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -12105,6 +12108,19 @@ function aquecerBoot(promessa, ms) {
         if (t.tipo === 'disco') {
           push.notifyDiscoAlerta(nome, t.codigo, t.nome, t.posto, t.nivel, t.motivos)
             .catch((err) => console.error('Erro no push de alerta de disco:', err.message));
+          continue;
+        }
+        // dispositivo de rede marcado (impressora/VM) sumiu/voltou (ver
+        // varrerAlertas em lojaStatus.js) - pedido do Master, alarme por
+        // equipamento específico, não pelo computador que o enxergou
+        if (t.tipo === 'dispositivo-offline') {
+          push.notifyDispositivoOffline(nome, t.codigo, t.apelido, t.tipoDispositivo, t.mac)
+            .catch((err) => console.error('Erro no push de dispositivo offline:', err.message));
+          continue;
+        }
+        if (t.tipo === 'dispositivo-online') {
+          push.notifyDispositivoOnline(nome, t.codigo, t.apelido, t.tipoDispositivo, t.mac)
+            .catch((err) => console.error('Erro no push de dispositivo voltou:', err.message));
           continue;
         }
         // máquina reiniciou/desligou: quem detecta é o agente (comparando o

@@ -441,6 +441,16 @@ setTimeout(async () => {
   if (!okApelido) ruins += 1;
   console.log(`${okApelido ? '✓' : '✗'} apelido de aparelho da rede: HTTP ${apelido.status} ${apelido.corpo.slice(0, 90)}`);
 
+  // pedido do Master: impressora/VM marcada como "monitorar" entra no alarme
+  // de rede (ver varrerAlertas em lojaStatus.js) - a rota tem que aceitar e
+  // devolver tipo+monitorar, não só o apelido
+  const apelidoTipo = await putJson('/api/loja-status/AERO/dispositivos/a4:2b:b0:11:22:33/apelido',
+    { apelido: 'Impressora Zebra Caixa', tipo: 'impressora', monitorar: true },
+    token ? { Authorization: 'Bearer ' + token } : {});
+  const okApelidoTipo = apelidoTipo.status === 200 && /"tipo":"impressora"/.test(apelidoTipo.corpo) && /"monitorar":true/.test(apelidoTipo.corpo);
+  if (!okApelidoTipo) ruins += 1;
+  console.log(`${okApelidoTipo ? '✓' : '✗'} apelido de aparelho aceita tipo+monitorar (alarme de rede): HTTP ${apelidoTipo.status} ${apelidoTipo.corpo.slice(0, 90)}`);
+
   // Leitura de Canais de venda por foto (ver canaisVendaOcr.js): a rota so
   // responde pra loja cujo GRUPO tem o recurso ligado. Sem grupo configurado
   // no teste, o esperado e a recusa explicando onde ativar - e isso que
@@ -4513,6 +4523,104 @@ setTimeout(async () => {
   if (!okOscilacao) ruins += 1;
   console.log(`${okOscilacao ? '✓' : '✗'} NOC: oscilação de 1-3min não apita (painel registra, push só com queda confirmada; notebook nunca apita)`);
 
+  // ------------------------------------------------------------------
+  // Pedido do Master: impressoras (Zebra/Bematech) e VMs do servidor que já
+  // aparecem na varredura de rede de cada loja (Varrer-RedeLocal, roda 1x
+  // por hora) precisam alarmar quando perdem rede - mas só os equipamentos
+  // MARCADOS como monitorados (ver definirApelidoDispositivo), e só depois
+  // de ficarem ausentes por tempo real: 1 scan perdido é normal (cache ARP,
+  // DHCP renovando), então NÃO pode reusar o debounce de 4min do computador
+  // (que roda a cada 25s) - aqui exige ~2 ciclos de scan sem aparecer.
+  let okDispositivoAlarme = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const UNI = 'NOCDISP';
+    await ls.cadastrarComputador(UNI, 'PDV-DISP', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-DISP').posto;
+    const idDoc = `lojaStatus/${UNI}__${posto}`;
+    const MAC_ZEBRA = 'a4:2b:b0:11:22:44';
+    const MAC_NAO_MONITORADO = 'a4:2b:b0:11:22:55';
+
+    // marca a Zebra como monitorada (impressora)
+    await ls.definirApelidoDispositivo(UNI, MAC_ZEBRA, { apelido: 'Impressora Zebra Caixa', tipo: 'impressora', monitorar: true });
+    // e injeta um apelido no formato LEGADO (string pura, como o doc já
+    // gravava antes de tipo/monitorar existirem) direto no Firestore falso -
+    // sem passar por definirApelidoDispositivo, pra provar que a leitura
+    // antiga continua funcionando sem migração nenhuma
+    const apelidosAtuais = DOCS.get('lojaStatusConfig/apelidosRede') || { unidades: {} };
+    DOCS.set('lojaStatusConfig/apelidosRede', {
+      unidades: { ...apelidosAtuais.unidades, [UNI]: { ...(apelidosAtuais.unidades[UNI] || {}), [MAC_NAO_MONITORADO]: 'Bematech (nome antigo)' } },
+    });
+
+    const base = DOCS.get(idDoc);
+    DOCS.set(idDoc, {
+      ...base,
+      dispositivos: [
+        { mac: MAC_ZEBRA, ip: '10.161.117.215', nome: 'ZEBRA', desde: Date.now() - 86400000, visto: Date.now() - 70 * 60 * 1000, ativo: false },
+        { mac: MAC_NAO_MONITORADO, ip: '10.161.117.201', nome: 'BEMATECH', desde: Date.now() - 86400000, visto: Date.now() - 5 * 3600 * 1000, ativo: false },
+      ],
+    });
+    ls.descartarEspelhoTeste();
+
+    // apelido legado (string) continua lendo certo, e NÃO vira monitorado sozinho
+    const dispLegado = (await ls.listar()).find((c) => c.codigo === UNI).dispositivos.find((d) => d.mac === MAC_NAO_MONITORADO);
+
+    // 1 scan perdido (70min < limiar de ~2h): ainda não confirma queda
+    const semAlarmeCedo = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'dispositivo-offline');
+
+    // passou do limiar (~2h ausente): confirma queda
+    const base2 = DOCS.get(idDoc);
+    DOCS.set(idDoc, { ...base2, dispositivos: base2.dispositivos.map((d) => (d.mac === MAC_ZEBRA ? { ...d, visto: Date.now() - 130 * 60 * 1000 } : d)) });
+    ls.descartarEspelhoTeste();
+    const caiu = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'dispositivo-offline');
+    // segunda passada, sem mudar nada: não duplica o alarme
+    const caiuDeNovo = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'dispositivo-offline');
+    // o Bematech (legado, NÃO monitorado) nunca alarma, mesmo ausente há muito mais tempo
+    const naoMonitoradoAlarmou = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.mac === MAC_NAO_MONITORADO);
+
+    // volta: gera dispositivo-online e limpa o flag
+    const base3 = DOCS.get(idDoc);
+    DOCS.set(idDoc, { ...base3, dispositivos: base3.dispositivos.map((d) => (d.mac === MAC_ZEBRA ? { ...d, ativo: true, visto: Date.now() } : d)) });
+    ls.descartarEspelhoTeste();
+    const voltou = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'dispositivo-online');
+
+    // flag REALMENTE resetado: uma queda nova depois de voltar alarma de novo
+    const base4 = DOCS.get(idDoc);
+    DOCS.set(idDoc, { ...base4, dispositivos: base4.dispositivos.map((d) => (d.mac === MAC_ZEBRA ? { ...d, ativo: false, visto: Date.now() - 130 * 60 * 1000 } : d)) });
+    ls.descartarEspelhoTeste();
+    const caiuOutraVez = (await ls.varrerAlertas()).find((t) => t.codigo === UNI && t.tipo === 'dispositivo-offline');
+
+    // wiring: index.js despacha pro push.notifyDispositivo* certo, e o push
+    // usa o MESMO gate crítico (Master + tag suporte) dos outros alarmes NOC
+    const srcIdxDisp = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const srcPushDisp = require('fs').readFileSync(__dirname + '/push.js', 'utf8');
+    const okWiring = /t\.tipo === 'dispositivo-offline'/.test(srcIdxDisp)
+      && /push\.notifyDispositivoOffline\(/.test(srcIdxDisp)
+      && /t\.tipo === 'dispositivo-online'/.test(srcIdxDisp)
+      && /push\.notifyDispositivoOnline\(/.test(srcIdxDisp);
+    const iNotify = srcPushDisp.indexOf('async function notifyDispositivoOffline');
+    const okGateCritico = /podeReceberCritico\(sub\)/.test(srcPushDisp.slice(iNotify, iNotify + 900));
+
+    const conferencias = {
+      'apelido legado (string) continua lendo certo, sem virar monitorado sozinho':
+        !!dispLegado && dispLegado.apelido === 'Bematech (nome antigo)' && dispLegado.tipo === null && dispLegado.monitorar === false,
+      '1 scan perdido (70min) ainda não confirma queda': !semAlarmeCedo,
+      'passou do limiar (~2h): confirma queda com apelido/tipo certos':
+        !!caiu && caiu.apelido === 'Impressora Zebra Caixa' && caiu.tipoDispositivo === 'impressora',
+      'confirma UMA vez só (idempotente)': !caiuDeNovo,
+      'dispositivo NÃO monitorado nunca alarma, mesmo ausente por muito mais tempo': !naoMonitoradoAlarmou,
+      'volta gera dispositivo-online': !!voltou && voltou.apelido === 'Impressora Zebra Caixa',
+      'depois de voltar, uma queda NOVA alarma de novo (flag realmente resetado)': !!caiuOutraVez,
+      'index.js despacha pro push.notifyDispositivo* certo': okWiring,
+      'o push de dispositivo offline usa o mesmo gate crítico dos outros alarmes NOC': okGateCritico,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okDispositivoAlarme = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDispositivoAlarme = false; console.log('  erro: ' + e.message); }
+  if (!okDispositivoAlarme) ruins += 1;
+  console.log(`${okDispositivoAlarme ? '✓' : '✗'} NOC: impressora/VM marcada como monitorada alarma ao perder rede (só depois de ~2 scans ausentes), nunca pra quem não foi marcado`);
+
   // ---- NOC: vigia BLINDADO contra reinício (NOCZenith v17) ----
   // O que derrubou o parque em ago/2026: a tarefa agendada só disparava no
   // LOGIN, então cada máquina reiniciada (lembrete semanal + botão da
@@ -7342,6 +7450,32 @@ setTimeout(async () => {
   } catch (e) { okChatLinkBeniboy = false; console.log('  erro: ' + e.message); }
   if (!okChatLinkBeniboy) ruins += 1;
   console.log(`${okChatLinkBeniboy ? '✓' : '✗'} Chat de suporte: Master/Suporte tem link pra Central do Beniboy de dentro da conversa aberta, não só na lista`);
+
+  // ------------------------------------------------------------------
+  // Status das Lojas: editar um dispositivo da rede virou um modal (apelido +
+  // tipo + monitorar), não mais um prompt() de uma linha só - pedido do
+  // Master pra marcar impressora/VM como monitorada. Dispositivo marcado tem
+  // que mostrar um indicador (🔔) na lista, senão ninguém confere pelo
+  // painel o que está armado sem abrir cada aparelho.
+  let okModalDispositivo = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const conf = {
+      'modal de dispositivo existe (não é mais prompt())': /id="disp-overlay"/.test(html) && !/function renomearDispositivo/.test(html),
+      'tem campo de tipo (Impressora/VM)': /id="disp-tipo"/.test(html) && /value="impressora"/.test(html) && /value="vm"/.test(html),
+      'tem checkbox de monitorar': /id="disp-monitorar"/.test(html),
+      'salvar manda apelido+tipo+monitorar pro PUT existente':
+        /apelido: document\.getElementById\('disp-apelido'\)\.value/.test(html)
+        && /tipo: document\.getElementById\('disp-tipo'\)\.value \|\| null/.test(html)
+        && /monitorar: document\.getElementById\('disp-monitorar'\)\.checked/.test(html),
+      'dispositivo monitorado mostra o chip 🔔 na linha': /d\.monitorar \? `<span class="disp-monitor-chip"/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okModalDispositivo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okModalDispositivo = false; console.log('  erro: ' + e.message); }
+  if (!okModalDispositivo) ruins += 1;
+  console.log(`${okModalDispositivo ? '✓' : '✗'} Status das Lojas: editar dispositivo vira modal (apelido+tipo+monitorar) com chip 🔔 pro que está armado`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
