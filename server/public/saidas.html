@@ -67,8 +67,8 @@
   .kpi .valor.bad{color:var(--bad);}
   .kpi .valor.ok{color:var(--ok);}
   .kpi .rotulo{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;}
-  .kanban-2col{display:grid;grid-template-columns:1fr;gap:14px;}
-  @media(min-width:760px){ .kanban-2col{grid-template-columns:1fr 1fr;} }
+  .kanban-3col{display:grid;grid-template-columns:1fr;gap:14px;}
+  @media(min-width:760px){ .kanban-3col{grid-template-columns:1fr 1fr 1fr;} }
   .kanban-col{background:var(--panel2);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;max-height:70vh;min-height:220px;}
   .kanban-col-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 12px 10px;border-bottom:1px solid var(--line);flex:none;font-weight:700;font-size:13px;}
   .kanban-col-header .n{font-family:var(--mono);color:var(--muted);font-weight:400;font-size:11.5px;}
@@ -165,10 +165,14 @@
   </div>
 
   <h2>🧾 Conferência</h2>
-  <div class="kanban-2col">
+  <div class="kanban-3col">
     <div class="kanban-col">
-      <div class="kanban-col-header"><span>🔴 Saídas</span><span class="n" id="n-pendentes">0</span></div>
-      <div class="kanban-cards" id="col-pendentes"></div>
+      <div class="kanban-col-header"><span>💰 Sangria/Depósito</span><span class="n" id="n-pendentes-sangria">0</span></div>
+      <div class="kanban-cards" id="col-pendentes-sangria"></div>
+    </div>
+    <div class="kanban-col">
+      <div class="kanban-col-header"><span>💸 Saída avulsa</span><span class="n" id="n-pendentes-saida">0</span></div>
+      <div class="kanban-cards" id="col-pendentes-saida"></div>
     </div>
     <div class="kanban-col">
       <div class="kanban-col-header"><span>✅ Verificadas</span><span class="n" id="n-verificadas">0</span></div>
@@ -366,6 +370,8 @@ function cardHtml(it){
 function renderTudo(){
   const filtrados = itensFiltrados();
   const pendentes = filtrados.filter(it=>!it.verificada).sort((a,b)=>String(b.data||'').localeCompare(String(a.data||'')));
+  const pendentesSangria = pendentes.filter(it=>it.origem==='sangria');
+  const pendentesSaida = pendentes.filter(it=>it.origem!=='sangria');
   const verificadas = filtrados.filter(it=>it.verificada).sort((a,b)=>String(b.verificadaEm||'').localeCompare(String(a.verificadaEm||'')));
 
   const totalSaidas = filtrados.filter(it=>it.origem==='saida').reduce((s,it)=>s+(it.valor||0),0);
@@ -375,10 +381,14 @@ function renderTudo(){
   document.getElementById('kpi-pendentes').textContent = pendentes.length;
   document.getElementById('kpi-verificadas').textContent = verificadas.length;
 
-  document.getElementById('n-pendentes').textContent = pendentes.length;
+  document.getElementById('n-pendentes-sangria').textContent = pendentesSangria.length;
+  document.getElementById('n-pendentes-saida').textContent = pendentesSaida.length;
   document.getElementById('n-verificadas').textContent = verificadas.length;
-  document.getElementById('col-pendentes').innerHTML = pendentes.length
-    ? pendentes.map(cardHtml).join('')
+  document.getElementById('col-pendentes-sangria').innerHTML = pendentesSangria.length
+    ? pendentesSangria.map(cardHtml).join('')
+    : '<div class="kanban-empty">Nada aguardando conferência. 🎉</div>';
+  document.getElementById('col-pendentes-saida').innerHTML = pendentesSaida.length
+    ? pendentesSaida.map(cardHtml).join('')
     : '<div class="kanban-empty">Nada aguardando conferência. 🎉</div>';
   document.getElementById('col-verificadas').innerHTML = verificadas.length
     ? verificadas.map(cardHtml).join('')

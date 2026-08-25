@@ -6647,6 +6647,34 @@ setTimeout(async () => {
   console.log(`${okSaidasMultiselect ? '✓' : '✗'} Painel de Saídas: filtro de Loja é multiselect com checkbox (1, 2, 3 ou todas), sempre restrito ao Grupo escolhido`);
 
   // ------------------------------------------------------------------
+  // Painel de Saídas: Conferência virou 3 colunas por TIPO (Sangria/Depósito
+  // · Saída avulsa) em vez de 2 colunas por status - pedido do Master. A
+  // coluna Verificadas continua junta (mistura os 2 tipos), só as
+  // pendentes é que se separam.
+  let okSaidasConferencia3col = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'saidas.html'), 'utf8');
+    const conf = {
+      'o grid vira 3 colunas (não mais 2)': /\.kanban-3col\{display:grid;grid-template-columns:1fr;gap:14px;\}/.test(html)
+        && /@media\(min-width:760px\)\{ \.kanban-3col\{grid-template-columns:1fr 1fr 1fr;\} \}/.test(html),
+      'coluna própria de Sangria/Depósito pendente': /id="col-pendentes-sangria"/.test(html),
+      'coluna própria de Saída avulsa pendente': /id="col-pendentes-saida"/.test(html),
+      'coluna Verificadas continua existindo (junta os 2 tipos)': /id="col-verificadas"/.test(html),
+      'renderTudo separa pendentes por origem (sangria x resto)': (() => {
+        const i = html.indexOf('function renderTudo(){');
+        const trecho = html.slice(i, i + 900);
+        return /pendentesSangria = pendentes\.filter\(it=>it\.origem==='sangria'\)/.test(trecho)
+          && /pendentesSaida = pendentes\.filter\(it=>it\.origem!=='sangria'\)/.test(trecho);
+      })(),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okSaidasConferencia3col = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okSaidasConferencia3col = false; console.log('  erro: ' + e.message); }
+  if (!okSaidasConferencia3col) ruins += 1;
+  console.log(`${okSaidasConferencia3col ? '✓' : '✗'} Painel de Saídas: Conferência em 3 colunas por tipo (Sangria/Depósito · Saída avulsa), Verificadas continua junta`);
+
+  // ------------------------------------------------------------------
   // Relatórios em PDF: a coluna Descrição não pode sair cortada com "..."
   // (print do usuário mostrando "uber para pegar nutella e..." truncado no
   // PDF do Painel de Saídas). reportUtil.writePDF já tinha esse recurso
