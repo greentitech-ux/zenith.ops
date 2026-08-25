@@ -6029,9 +6029,15 @@ setTimeout(async () => {
         const trecho = html.slice(i, i + 400);
         return i >= 0 && /CANCELADO.*return false/.test(trecho) && /ASSINADO.*return assinadoHoje/.test(trecho);
       })(),
-      'kanban da Triagem tem as 3 colunas certas': /AGUARDANDO_PREENCHIMENTO.*Aguardando preenchimento/.test(html)
-        && /status:'PENDENTE', titulo:'✍️ Aguardando assinatura'/.test(html)
-        && /status:'ASSINADO', titulo:'✅ Assinado hoje'/.test(html),
+      'Triagem tem os 3 status certos (viraram botão, não coluna sempre visível)':
+        /status:'AGUARDANDO_PREENCHIMENTO', titulo:'Aguardando preenchimento'/.test(html)
+        && /status:'PENDENTE', titulo:'Aguardando assinatura'/.test(html)
+        && /status:'ASSINADO', titulo:'Assinado hoje'/.test(html),
+      // pedido do usuário: nada de coluna sempre aberta - clica no botão do
+      // status e a lista aparece embaixo dele, só uma aberta por vez
+      'clicar no botão de status alterna (mesmo clique fecha de novo) e só mostra a lista de quem está aberto':
+        /function toggleStatusTriagem\(status\)\{\s*TRIAGEM_STATUS_ABERTO = \(TRIAGEM_STATUS_ABERTO===status\) \? null : status;/.test(html)
+        && /const cardsAbertos = TRIAGEM_STATUS_ABERTO \? visiveis\.filter/.test(html),
       'aba de um tipo específico ignora a Triagem (mostra o histórico completo)':
         /if\(!emTriagem\)\{[\s\S]{0,200}alvo\.innerHTML = visiveis\.map\(cardHtml\)\.join\(''\);/.test(html),
       'filtro de loja/busca existe': /id="filtro-unidade-lista"/.test(html) && /id="filtro-busca-lista"/.test(html),
