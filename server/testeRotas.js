@@ -6132,6 +6132,90 @@ setTimeout(async () => {
   console.log(`${okSaidasPainel ? '✓' : '✗'} Painel de Saídas: Sangria/Depósito + outras saídas unificadas, verificação Master/Admin, isolamento por grupo`);
 
   // ------------------------------------------------------------------
+  // Pedido real do Master: "tem muitas saídas que vieram da planilha e
+  // percebi que não aparece aqui, só as lançadas no próprio sistema". Causa
+  // raiz dupla: (1) linhaParaFechamento (leitura da planilha ARCFOOD) nunca
+  // lia os pares "Saida Dinheiro N"/"Descricao Saida N" pra dentro de
+  // detalhesSaidas - só guardava o TOTAL (totalSaida); (2) mesmo corrigido
+  // isso, /api/saidas-painel só olhava fechamentosLive.listAll() (Firestore)
+  // - o fechamento importado da planilha nunca é gravado lá, vive só em
+  // memória (fechamentosData, ver index.js) - então nunca apareceria de
+  // qualquer forma. As duas pontas têm que estar certas.
+  let okSaidasPlanilha = false;
+  try {
+    const sheetsSyncMod = require('/home/user/adyen-monitor/server/sheetsSync.js');
+    const saidasPainelMod = require('/home/user/adyen-monitor/server/saidasPainel.js');
+
+    // linha real de planilha ARCFOOD, com 2 saidas preenchidas e 3 vazias -
+    // as vazias nao podem virar item fantasma no painel
+    const header = ['ID', 'Nome', 'Unidade', 'Data', 'Faturam.', 'Total Saida',
+      'Saida Dinheiro', 'Descricao Saida', 'Saida Dinheiro 02', 'Descricao Saida 02', 'Saida Dinheiro 03', 'Descricao Saida 03'];
+    const linha = ['pl-teste-01', 'Gerente Planilha', 'Sao Miguel', '15/08/26', 'R$ 1.000,00', 'R$ 87,50',
+      'R$ 37,50', 'Motoboy planilha', 'R$ 50,00', 'Compra de gelo planilha', '', ''];
+    const fechPlanilha = sheetsSyncMod.linhaParaFechamento('ARCFOOD', header, linha);
+
+    // duas linhas do MESMO dia/unidade (fechamento principal + uma linha de
+    // sangria separada, cada uma com seu proprio item de saida) - o merge
+    // tem que concatenar os dois, nao ficar só com o da linha "principal"
+    const linhaSangriaMesmoDia = { ...fechPlanilha, id: 'pl-teste-02', faturamento: 0, totalSaida: 20, detalhesSaidas: [{ valor: 20, descricao: 'Sangria planilha' }] };
+    const mescladas = sheetsSyncMod.mesclarLancamentosDoMesmoDia([fechPlanilha, linhaSangriaMesmoDia]);
+    const fechMesclado = mescladas.find((f) => f.unidade === fechPlanilha.unidade && f.data === fechPlanilha.data);
+
+    // saidasPainel.listar/marcarVerificada aceitando um fechamento que NAO
+    // esta no Firestore (fechamentosLive) - simula o que index.js passa como
+    // fechamentosData
+    const listaComExtra = await saidasPainelMod.listar([fechPlanilha]);
+    const itemPlanilha = listaComExtra.find((it) => it.descricao === 'Motoboy planilha');
+    const listaSemExtra = await saidasPainelMod.listar([]);
+    const semExtraSomeu = !listaSemExtra.some((it) => it.descricao === 'Motoboy planilha');
+
+    const verificado = itemPlanilha
+      ? await saidasPainelMod.marcarVerificada(itemPlanilha.chave, { verificada: true, porId: 'u-teste', porEmail: 'teste@teste.local' }, [fechPlanilha])
+      : null;
+    let semExtraRecusa = false;
+    try {
+      if (itemPlanilha) await saidasPainelMod.marcarVerificada(itemPlanilha.chave, { verificada: true, porId: 'u-teste', porEmail: 'teste@teste.local' }, []);
+    } catch (e) { semExtraRecusa = /não encontrada/i.test(e.message); }
+
+    const conferencias = {
+      'a leitura da planilha ARCFOOD lê os 2 pares preenchidos de Saida Dinheiro/Descricao Saida':
+        fechPlanilha.detalhesSaidas.length === 2
+        && fechPlanilha.detalhesSaidas.some((d) => d.valor === 37.5 && d.descricao === 'Motoboy planilha')
+        && fechPlanilha.detalhesSaidas.some((d) => d.valor === 50 && d.descricao === 'Compra de gelo planilha'),
+      'pares vazios (Saida Dinheiro 03) não viram item fantasma': fechPlanilha.detalhesSaidas.every((d) => d.descricao !== ''),
+      'Grupo Bravo não lê ARCFOOD_SAIDA_SLOTS (formato de coluna é só da ARCFOOD)':
+        sheetsSyncMod.linhaParaFechamento('BRAVO', ['ID', 'Unidade', 'Data', 'Faturam.'], ['pl-b1', 'Dominos Bessa', '15/08/2026', 'R$ 100,00']).detalhesSaidas.length === 0,
+      'mesclar do mesmo dia CONCATENA detalhesSaidas das 2 linhas (não fica só com o da principal)':
+        !!fechMesclado && fechMesclado.detalhesSaidas.length === 3
+        && fechMesclado.detalhesSaidas.some((d) => d.descricao === 'Sangria planilha'),
+      'saidasPainel.listar(extras) inclui o item da planilha (que não está no Firestore)': !!itemPlanilha,
+      'sem passar os extras, o item da planilha não aparece (prova que veio do parâmetro, não de outro lugar)': semExtraSomeu,
+      'marcarVerificada aceita a chave de um fechamento só-em-memória quando os extras são passados':
+        !!verificado && verificado.verificada === true,
+      'sem os extras, a MESMA chave é recusada (não é "sempre aceita")': semExtraRecusa,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okSaidasPlanilha = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okSaidasPlanilha = false; console.log('  erro: ' + e.message); }
+  if (!okSaidasPlanilha) ruins += 1;
+  console.log(`${okSaidasPlanilha ? '✓' : '✗'} Painel de Saídas: saída itemizada importada da planilha ARCFOOD também aparece (antes só a lançada no app)`);
+
+  // wiring: index.js precisa passar fechamentosData pros 3 pontos que usam
+  // saidasPainel (listar x2 + marcarVerificada) - sem isso, o fix acima fica
+  // só no módulo e nunca chega no que a tela de verdade chama
+  let okSaidasWiring = false;
+  try {
+    const src = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
+    const ocorrenciasListar = (src.match(/saidasPainel\.listar\(fechamentosData\)/g) || []).length;
+    const ocorrenciasVerificar = /saidasPainel\.marcarVerificada\([^)]*fechamentosData\)/.test(src);
+    okSaidasWiring = ocorrenciasListar >= 2 && ocorrenciasVerificar;
+    if (!okSaidasWiring) console.log(`  listar(fechamentosData): ${ocorrenciasListar}x, marcarVerificada com fechamentosData: ${ocorrenciasVerificar}`);
+  } catch (e) { okSaidasWiring = false; console.log('  erro: ' + e.message); }
+  if (!okSaidasWiring) ruins += 1;
+  console.log(`${okSaidasWiring ? '✓' : '✗'} Painel de Saídas: as 3 rotas (listar, relatório, verificar) passam o snapshot da planilha pro módulo`);
+
+  // ------------------------------------------------------------------
   // Formulários: a lista tinha virado um monte só se amontoando (pedido do
   // usuário) - organização de fonte, no mesmo desenho já usado em
   // Central/Solicitações (central-historico.html): chips de tipo com
