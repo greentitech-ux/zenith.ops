@@ -6298,13 +6298,21 @@ setTimeout(async () => {
       'seletor tem Salvar gravando no servidor (preferência própria, não a da tabela principal)':
         /const PREF_COLUNAS_UNIDADES = 'fechamentoColunasUnidades'/.test(html)
         && /function salvarColunasUnidades\(\)/.test(html),
+      // mesmo bug apontado pelo usuário no tooltip do gráfico de Faturamento
+      // por unidade ("este TC que aparece aqui precisa ajustar também") - o
+      // gráfico e o card "TC total" de cima (renderKpis) somavam o campo
+      // legado `tc` direto, igual a tabela já corrigida acima
+      'gráfico de Faturamento por unidade lê TC via valorTc (não r.tc direto)':
+        /porDiaUnidadeTC\[r\.unidade\]\[r\.data\] \+= valorTc\(r, grupoKpiDaUnidade\(r\.unidade\)\)/.test(html),
+      'card "TC total" do topo (renderKpis) também lê TC via valorTc por linha':
+        /const tc = \+rows\.reduce\(\(s,d\)=>s\+valorTc\(d, grupoKpiDaUnidade\(d\.unidade\)\),0\)\.toFixed\(2\)/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okTcComparativoTela = !falhas.length;
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
   } catch (e) { okTcComparativoTela = false; console.log('  erro: ' + e.message); }
   if (!okTcComparativoTela) ruins += 1;
-  console.log(`${okTcComparativoTela ? '✓' : '✗'} Comparativo por unidade (tela): seletor de colunas próprio + TC unificado + Cancelados fora`);
+  console.log(`${okTcComparativoTela ? '✓' : '✗'} Comparativo por unidade (tela): seletor de colunas próprio + TC unificado (tabela+gráfico+card) + Cancelados fora`);
 
   // ------------------------------------------------------------------
   // Bug relatado pelo usuário: "botão de aprovar selecionados deu erro" -
