@@ -4622,11 +4622,13 @@ setTimeout(async () => {
       inicio: '2026-08-01', fim: '2026-08-20', lancamentos: 12,
       lojas: ['Dom Aeroporto', 'Dom Tirol'],
       linhas: [
-        { kpi: 'Tempo de entrega', agregacao: 'média', valores: ['42:00', '31:00'] },
-        // celula vazia tem que virar tracinho, nao "undefined" nem sumir
+        { kpi: 'Tempo de entrega', agregacao: 'média', valores: ['42:00', '31:00'], total: '36:30' },
+        // celula vazia tem que virar tracinho, nao "undefined" nem sumir - e
+        // total ausente (tela antiga, ou antes do deploy) tambem cai pro
+        // mesmo tracinho, nunca "undefined"
         { kpi: 'Nota do cliente', agregacao: 'média', valores: ['4,1', ''] },
         // KPI com nome que o Excel executaria como formula
-        { kpi: '=SOMA(A1:A9)', agregacao: 'soma', valores: ['10', '20'] },
+        { kpi: '=SOMA(A1:A9)', agregacao: 'soma', valores: ['10', '20'], total: '30' },
       ],
       ofensores: [
         { kpi: 'Tempo de entrega', loja: 'Dom Aeroporto', texto: '+35% vs mediana' },
@@ -4647,12 +4649,12 @@ setTimeout(async () => {
         porLabel['Inventado']?.direcao === 'neutro',
       'KPI sem direcao nao ganha o campo do nada':
         porLabel['Sem direcao'] && porLabel['Sem direcao'].direcao === undefined,
-      'CSV sai com uma coluna por loja, na ordem da tela':
-        linhasCsv[0] === 'KPI,Agreg.,Dom Aeroporto,Dom Tirol',
-      'CSV leva os valores exatamente como a tela calculou':
-        linhasCsv[1] === 'Tempo de entrega,média,42:00,31:00',
-      'loja sem valor no periodo sai como tracinho, nao vazia':
-        linhasCsv[2] === 'Nota do cliente,média,"4,1",—',
+      'CSV sai com uma coluna por loja, na ordem da tela, e Total no fim':
+        linhasCsv[0] === 'KPI,Agreg.,Dom Aeroporto,Dom Tirol,Total',
+      'CSV leva os valores exatamente como a tela calculou, incluindo o Total':
+        linhasCsv[1] === 'Tempo de entrega,média,42:00,31:00,36:30',
+      'loja sem valor no periodo sai como tracinho, nao vazia - e Total ausente tambem':
+        linhasCsv[2] === 'Nota do cliente,média,"4,1",—,—',
       'nome de KPI que parece formula nao e executado pelo Excel':
         linhasCsv[3].startsWith("'=SOMA"),
       'PDF responde de verdade': pdf.status === 200,
@@ -4668,6 +4670,34 @@ setTimeout(async () => {
   } catch (e) { okKpiRelatorio = false; console.log('  erro: ' + e.message); }
   if (!okKpiRelatorio) ruins += 1;
   console.log(`${okKpiRelatorio ? '✓' : '✗'} KPI's operacionais: matriz da tela vira CSV/PDF e o PDF abre pelos indicadores mais ofensivos`);
+
+  // ------------------------------------------------------------------
+  // KPI's operacionais: coluna Total no Comparativo por loja - pedido do
+  // Master ("quero o total pra ter visão rápida de como foi em todas as
+  // unidades"). A tela recalcula sobre TODOS os lançamentos das lojas
+  // juntos (não soma as células já arredondadas), pra não dar número
+  // errado nos KPI's agregados por média (Tempo/OTD/Taxa) - ver
+  // totalLinha() em kpis-operacionais.html.
+  let okKpiTotal = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'kpis-operacionais.html'), 'utf8');
+    const conf = {
+      'existe uma função só pra calcular o Total, usada na tela E no export (não duas contas separadas)':
+        /function totalLinha\(porLoja, lojas, modo\)\{/.test(html)
+        && (html.match(/totalLinha\(porLoja, lojas, modo\)/g) || []).length >= 3, // a definição + os 2 usos
+      'a função recombina TODOS os lançamentos das lojas antes de agregar (não soma médias já arredondadas)':
+        /const todos = lojas\.flatMap\(u => porLoja\[u\]\);\s*\n\s*return fmtValor\(agregar\(todos, modo\), modo\);/.test(html),
+      'o cabeçalho da matriz ganha a coluna Total, no fim': /<th class="total-col">Total<\/th>/.test(html),
+      'a tela usa totalLinha pra preencher a célula da linha': /const txtTotal = totalLinha\(porLoja, lojas, modo\);/.test(html),
+      'o export (CSV/PDF) manda o total calculado pela MESMA função, não recalcula na mão':
+        /total: totalLinha\(porLoja, lojas, modo\) \?\? ''/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okKpiTotal = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okKpiTotal = false; console.log('  erro: ' + e.message); }
+  if (!okKpiTotal) ruins += 1;
+  console.log(`${okKpiTotal ? '✓' : '✗'} KPI's operacionais: coluna Total no Comparativo por loja, recalculada sobre os lançamentos (não soma célula arredondada)`);
 
   // ---- RH: foto+localização obrigatórias e cobrança do check-out ----
   // Duas regras juntas porque valem pro MESMO registro de ponto, seja extra
