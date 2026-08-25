@@ -559,7 +559,7 @@ function cardChamadoHtml(c){
         <span class="badge ${c.status}">${c.status}</span>
       </div>
       <div class="chips-linha">${chipModalidade(c)}${chipPrioridade(c)}${chipSla(c)}${c.resolvidoNaAbertura?'<span class="badge CONCLUIDO">✅ resolvido na abertura</span>':''}${c.cobranca&&c.cobranca.enviadaEm?'<span class="badge visto" style="background:var(--warn-dim);color:var(--warn);">💰 cobrança enviada</span>':''}</div>
-      <div class="sub">${escapeHtml(c.unidadeNome||c.unidade)} · ${fmtDataHora(c.criadoEm)}${c.tecnicoEmail?(' · '+escapeHtml(c.tecnicoEmail)):''}</div>
+      <div class="sub"><span class="nome-unidade">${escapeHtml(c.unidadeNome||c.unidade)}</span> · ${fmtDataHora(c.criadoEm)}${c.tecnicoEmail?(' · '+escapeHtml(c.tecnicoEmail)):''}</div>
     </div>`;
 }
 function renderLista(){
@@ -688,7 +688,7 @@ function abrirDetalhe(id){
   DETALHE_ATUAL = c;
   const ehRemoto = modalidadeDe(c)==='remoto';
   document.getElementById('d-titulo').textContent = c.titulo;
-  document.getElementById('d-sub').innerHTML = `${c.numeroTicket!=null?`<span style="font-family:var(--mono);color:var(--accent);">Ticket #${c.numeroTicket}</span> · `:''}${escapeHtml(c.unidadeNome||c.unidade)} · ${fmtDataHora(c.criadoEm)}<div class="chips-linha">${chipModalidade(c)}${chipPrioridade(c)}${chipSla(c)}${c.resolvidoNaAbertura?'<span class="badge CONCLUIDO">✅ resolvido na abertura</span>':''}</div>`;
+  document.getElementById('d-sub').innerHTML = `${c.numeroTicket!=null?`<span style="font-family:var(--mono);color:var(--accent);">Ticket #${c.numeroTicket}</span> · `:''}<span class="nome-unidade">${escapeHtml(c.unidadeNome||c.unidade)}</span> · ${fmtDataHora(c.criadoEm)}<div class="chips-linha">${chipModalidade(c)}${chipPrioridade(c)}${chipSla(c)}${c.resolvidoNaAbertura?'<span class="badge CONCLUIDO">✅ resolvido na abertura</span>':''}</div>`;
   document.getElementById('d-descricao').textContent = c.descricao || '';
   // link direto (abre em aba nova), então a autenticação vai no ?token= -
   // o interceptador de fetch não alcança um <a href>

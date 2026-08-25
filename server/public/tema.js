@@ -35,6 +35,30 @@
     document.head.appendChild(css);
   })();
 
+  // ---- destaque do nome da unidade (loja) em tickets/chamados ----
+  // Pedido do usuario: em qualquer card ou detalhe de ticket/chamado que
+  // mostra o nome da unidade, ele tem que se destacar do resto da linha
+  // (email, data, tipo) - antes tudo saia no mesmo tom, sem hierarquia
+  // nenhuma, e o nome da loja se perdia no meio de metadado. Cor propria
+  // (nao e o --accent da marca nem o --warn de severidade) porque isso aqui
+  // nao e nem branding nem status - e "ONDE aconteceu", o dado que mais
+  // importa pra quem esta escaneando uma lista de chamados de varias lojas.
+  // Mora aqui (nao em cada pagina) pelo mesmo motivo das fontes/Beniboy:
+  // tema.js e o UNICO arquivo carregado pelas 56 paginas.
+  (function destaqueUnidade() {
+    if (document.getElementById('zenith-destaque-unidade')) return;
+    var css = document.createElement('style');
+    css.id = 'zenith-destaque-unidade';
+    css.textContent = [
+      ':root{ --destaque-unidade:#ffd43b; }',
+      // sobre fundo branco o amarelo claro quase some - versao escura
+      // (mesma logica do --accent virar #5b8c00 no tema Claro)
+      ':root[data-tema="claro"]{ --destaque-unidade:#8a6300; }',
+      '.nome-unidade{ color:var(--destaque-unidade,#ffd43b); font-weight:800; font-size:1.08em; }',
+    ].join('\n');
+    document.head.appendChild(css);
+  })();
+
   // ---- Beniboy: o avatar do assistente ----
   // Direcao aprovada no handoff de design (BENIBOY.md): circulo com o sinal
   // vital da marca - a MESMA polyline do logotipo NoPulso. Sem rosto, sem

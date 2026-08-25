@@ -832,7 +832,7 @@ function kcardHtml(c){
         ${badgeVencimento(c)}
       </div>
       <div style="font-size:12.5px;font-weight:600;margin-top:4px;">${escapeHtml(c.titulo)}</div>
-      <div class="sub">${escapeHtml(c.unidadeNome||c.unidade||'—')} · ${escapeHtml(c.criadoPorEmail||'')} · ${fmtDataHora(c.criadoEm)}</div>
+      <div class="sub"><span class="nome-unidade">${escapeHtml(c.unidadeNome||c.unidade||'—')}</span> · ${escapeHtml(c.criadoPorEmail||'')} · ${fmtDataHora(c.criadoEm)}</div>
       ${(c.atribuidosEmails && c.atribuidosEmails.length) ? `<div class="sub" style="color:var(--accent);">👤 atribuído a ${escapeHtml(c.atribuidosEmails.join(', '))}</div>` : (c.direcionadoParaEmail ? `<div class="sub" style="color:var(--accent);">👤 direcionado a ${escapeHtml(c.direcionadoParaEmail)}</div>` : '')}
     </div>`;
 }
@@ -1251,7 +1251,7 @@ function rcCardHtml(c){
       ${chipPrioridade(c)}
       ${chipSla(c)}
     </div>
-    <div style="font-weight:700;font-size:13px;">${escapeHtml(c.unidadeNome||c.unidade||'—')} <span style="color:var(--muted);font-weight:400;">· ${escapeHtml(TIPOS_INFO[c.tipo]?.label||c.tipo)}</span></div>
+    <div style="font-size:13px;"><span class="nome-unidade">${escapeHtml(c.unidadeNome||c.unidade||'—')}</span> <span style="color:var(--muted);font-weight:400;">· ${escapeHtml(TIPOS_INFO[c.tipo]?.label||c.tipo)}</span></div>
     <div class="rel-campo-grid">
       <div>DATA ABERTURA<b>${fmtDataHora(c.criadoEm)}</b></div>
       <div>USUÁRIO ABERTURA<b>${escapeHtml(c.criadoPorEmail||'—')}</b></div>
@@ -1300,6 +1300,12 @@ async function mudarPrioridade(tipo, id, prioridade){
   }
 }
 
+// nome da unidade sempre com destaque proprio (token --destaque-unidade, ver
+// tema.js) em vez de se misturar com email/data - pedido do usuario ao ver o
+// nome da loja "sumindo" no meio da linha de metadados dos tickets
+function fmtDSub(c, atribuidosTxt){
+  return `<span class="nome-unidade">${escapeHtml(c.unidadeNome||c.unidade||'—')}</span> · ${escapeHtml(c.criadoPorEmail||'')} · ${escapeHtml(fmtDataHora(c.criadoEm))}` + (atribuidosTxt ? ` · atribuído a ${escapeHtml(atribuidosTxt)}` : '');
+}
 function abrirDetalhe(tipo, id){
   const c = CARDS.find(x=>x.tipo===tipo && x.id===id);
   if(!c) return;
@@ -1307,7 +1313,7 @@ function abrirDetalhe(tipo, id){
   ACESSO_CANDIDATOS = null;
   document.getElementById('d-titulo').textContent = `${iconeTipo(c.tipo)} ${TIPOS_INFO[c.tipo]?.label||c.tipo} · Ticket #${c.numeroTicket ?? '—'}`;
   const atribuidosTxt = (c.atribuidosEmails && c.atribuidosEmails.length) ? c.atribuidosEmails.join(', ') : (c.direcionadoParaEmail || '');
-  document.getElementById('d-sub').textContent = `${c.unidadeNome||c.unidade||'—'} · ${c.criadoPorEmail||''} · ${fmtDataHora(c.criadoEm)}` + (atribuidosTxt ? ` · atribuído a ${atribuidosTxt}` : '');
+  document.getElementById('d-sub').innerHTML = fmtDSub(c, atribuidosTxt);
 
   let corpo = c.ehOrcamento ? `<div style="color:#e0b84c;font-weight:600;">💰 É um orçamento — precisa de aprovação de um Admin ou Master.</div>` : '';
   if(ehBloqueioLogin(c) && c.status==='PENDENTE'){
@@ -1612,7 +1618,7 @@ async function salvarResponsavel(){
     const atualizado = await resp.json();
     if(!resp.ok) throw new Error(atualizado.error || 'Erro ao salvar responsável.');
     DETALHE_ATUAL = { ...DETALHE_ATUAL, ...atualizado };
-    document.getElementById('d-sub').textContent = `${DETALHE_ATUAL.unidadeNome||DETALHE_ATUAL.unidade||'—'} · ${DETALHE_ATUAL.criadoPorEmail||''} · ${fmtDataHora(DETALHE_ATUAL.criadoEm)}` + (atribuidosEmails.length ? ` · atribuído a ${atribuidosEmails.join(', ')}` : '');
+    document.getElementById('d-sub').innerHTML = fmtDSub(DETALHE_ATUAL, atribuidosEmails.join(', '));
     await carregarCentral();
   }catch(err){ alert(err.message); }
 }
@@ -2841,7 +2847,7 @@ function mostrarNotificacaoSolicitacao(card){
   el.id = elId;
   el.innerHTML = `
     <div class="ns-titulo">🔔 Nova solicitação</div>
-    <div class="ns-corpo">${iconeTipo(card.tipo)} ${escapeHtml(TIPOS_INFO[card.tipo]?.label||card.tipo)} · ${escapeHtml(card.unidadeNome||card.unidade||'—')}<br>${escapeHtml(card.titulo||'')}</div>
+    <div class="ns-corpo">${iconeTipo(card.tipo)} ${escapeHtml(TIPOS_INFO[card.tipo]?.label||card.tipo)} · <span class="nome-unidade">${escapeHtml(card.unidadeNome||card.unidade||'—')}</span><br>${escapeHtml(card.titulo||'')}</div>
     ${(card.atribuidosEmails && card.atribuidosEmails.length) ? `<div class="ns-direcionado">👤 atribuído a ${escapeHtml(card.atribuidosEmails.join(', '))}</div>` : (card.direcionadoParaEmail ? `<div class="ns-direcionado">👤 direcionado a ${escapeHtml(card.direcionadoParaEmail)}</div>` : '')}
     <button type="button" class="ns-ok">👁️ Visualizar</button>
   `;
