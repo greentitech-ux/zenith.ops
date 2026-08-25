@@ -36,6 +36,14 @@
   .fim .ic{font-size:44px;}
   .fim h2{font-size:17px;margin:10px 0 6px;}
   .fim p{font-size:13px;color:var(--muted);margin:0;line-height:1.5;}
+  /* quadro de assinatura, mesmo desenho de assinar.html - fundo BRANCO de
+     propósito, é o que vai pro PDF */
+  .meu-papel{background:rgba(242,179,61,.12);color:#f2b33d;border-radius:8px;padding:10px 12px;font-size:13px;font-weight:700;margin-bottom:4px;}
+  .pad-wrap{margin-top:6px;border-radius:10px;overflow:hidden;border:2px dashed var(--accent);background:#fff;touch-action:none;}
+  canvas#pad{display:block;width:100%;height:190px;background:#fff;}
+  .pad-acoes{display:flex;gap:10px;margin-top:8px;}
+  .pad-acoes .btn{flex:1;margin:0;}
+  .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:12px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}
 </style>
 </head>
 <body>
@@ -75,9 +83,25 @@
     </p>
   </div>
 
+  <!-- só aparece quando quem preenche é o MESMO papel que assina esse tipo
+       (TIPOS.*.preenchedorAssina em formularios.js) - evita mandar um
+       segundo link de assinatura pra mesma pessoa -->
+  <div id="assinar-area" class="painel" style="display:none;">
+    <div class="meu-papel" id="meu-papel"></div>
+    <label style="margin-top:6px;">Seu nome completo</label>
+    <input type="text" id="ass-nome" placeholder="Nome de quem está assinando" maxlength="80">
+    <label>Assine no quadro abaixo (com o dedo ou caneta)</label>
+    <div class="pad-wrap"><canvas id="pad"></canvas></div>
+    <div class="pad-acoes">
+      <button type="button" class="btn-ghost" id="btn-limpar-pad">🧹 Limpar</button>
+      <button type="button" class="btn btn-ok" id="btn-assinar">✍️ Confirmar assinatura</button>
+    </div>
+    <div id="ass-aviso" class="aviso" style="margin-top:10px;"></div>
+  </div>
+
   <div id="fim" class="fim" style="display:none;">
     <div class="ic">✅</div>
-    <h2>Recebemos seus dados</h2>
+    <h2 id="fim-h2">Recebemos seus dados</h2>
     <p id="fim-txt"></p>
   </div>
 </div>
@@ -191,6 +215,69 @@ document.addEventListener('click', (e)=>{
 });
 document.getElementById('btn-add').addEventListener('click', ()=>{ LINHAS.push({}); renderLinhas(); });
 
+// ---- assinatura na sequência do preenchimento (mesmo pad de assinar.html) ----
+// só existe quando o /preencher devolveu preenchedorAssina - guardado aqui
+// pra saber, depois do envio, se mostra o quadro ou já vai pro "fim"
+let ASSINATURA = null; // {formId, token, rotulo}
+let padCtx = null, padDesenhou = false;
+
+function prepararPad(){
+  const canvas = document.getElementById('pad');
+  const largura = canvas.clientWidth || 500;
+  canvas.width = largura * 2; canvas.height = 380;
+  padCtx = canvas.getContext('2d');
+  padCtx.fillStyle = '#fff'; padCtx.fillRect(0,0,canvas.width,canvas.height);
+  padCtx.strokeStyle = '#111'; padCtx.lineWidth = 4; padCtx.lineCap = 'round'; padCtx.lineJoin = 'round';
+  let tracando = false;
+  const ponto = (e) => {
+    const r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) };
+  };
+  canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); canvas.setPointerCapture(e.pointerId); tracando = true; padDesenhou = true; const p = ponto(e); padCtx.beginPath(); padCtx.moveTo(p.x, p.y); padCtx.lineTo(p.x + .1, p.y + .1); padCtx.stroke(); });
+  canvas.addEventListener('pointermove', (e) => { if(!tracando) return; e.preventDefault(); const p = ponto(e); padCtx.lineTo(p.x, p.y); padCtx.stroke(); });
+  const soltar = () => { tracando = false; };
+  canvas.addEventListener('pointerup', soltar);
+  canvas.addEventListener('pointercancel', soltar);
+}
+function limparPad(){
+  const canvas = document.getElementById('pad');
+  padCtx.fillStyle = '#fff'; padCtx.fillRect(0,0,canvas.width,canvas.height);
+  padDesenhou = false;
+}
+document.getElementById('btn-limpar-pad').addEventListener('click', limparPad);
+
+function mostrarFim(texto){
+  document.getElementById('assinar-area').style.display='none';
+  document.getElementById('fim').style.display='block';
+  document.getElementById('fim-txt').textContent = texto;
+}
+
+document.getElementById('btn-assinar').addEventListener('click', async ()=>{
+  const aviso = document.getElementById('ass-aviso');
+  aviso.className='aviso';
+  const nome = document.getElementById('ass-nome').value.trim();
+  if(!nome){ aviso.className='aviso erro'; aviso.textContent='Escreva seu nome completo.'; return; }
+  if(!padDesenhou){ aviso.className='aviso erro'; aviso.textContent='Assine no quadro antes de confirmar.'; return; }
+  const btn = document.getElementById('btn-assinar');
+  btn.disabled = true; btn.textContent = 'Enviando...';
+  try{
+    const imagem = document.getElementById('pad').toDataURL('image/png');
+    const r = await fetch(`/api/formularios-publico/${encodeURIComponent(ASSINATURA.formId)}/assinar`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token: ASSINATURA.token, nome, imagem }),
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || 'Não foi possível registrar a assinatura.');
+    document.getElementById('fim-h2').textContent = 'Recebemos e assinamos!';
+    mostrarFim(d.completo
+      ? `Ticket #${MODELO.numeroTicket} · sua assinatura foi registrada e o formulário está completo.`
+      : `Ticket #${MODELO.numeroTicket} · sua assinatura foi registrada. Ainda há assinatura(s) pendente(s) de outra(s) pessoa(s).`);
+  }catch(e){
+    aviso.className='aviso erro'; aviso.textContent = e.message;
+    btn.disabled = false; btn.textContent = '✍️ Confirmar assinatura';
+  }
+});
+
 async function carregar(){
   try{
     const r = await fetch(`/api/formularios-publico/preencher/${encodeURIComponent(TOKEN)}`);
@@ -259,6 +346,16 @@ document.getElementById('btn-enviar').addEventListener('click', async ()=>{
     const d = await r.json();
     if(!r.ok){ avisar(d.error||'Não consegui enviar.'); return; }
     document.getElementById('form-area').style.display='none';
+    // MODELO.preenchedorAssina + d.meuToken juntos = quem preencheu é a
+    // mesma pessoa que assina esse papel - segue direto pro quadro de
+    // assinatura em vez de mandar um segundo link por fora
+    if(MODELO.preenchedorAssina && d.meuToken){
+      ASSINATURA = { formId: d.id, token: d.meuToken, rotulo: d.meuRotulo };
+      document.getElementById('meu-papel').textContent = `✍️ Falta só a sua assinatura, como ${d.meuRotulo}:`;
+      document.getElementById('assinar-area').style.display='block';
+      prepararPad();
+      return;
+    }
     document.getElementById('fim').style.display='block';
     document.getElementById('fim-txt').textContent = MODELO.soAnexo
       ? `Ticket #${MODELO.numeroTicket} · recebemos o documento. O Responsável já pode assinar.`

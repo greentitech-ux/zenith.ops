@@ -3609,6 +3609,99 @@ setTimeout(async () => {
   console.log(`${okLinkPreencher ? '✓' : '✗'} Formulários: link pro próprio solicitante preencher (a unidade escolhe: preenche ou envia o link)`);
 
   // ------------------------------------------------------------------
+  // Pedido do Master: "no link de preenchimento já aparecer também a opção
+  // de assinatura, evitando o envio de 2 links" - quando quem preenche pelo
+  // link é a MESMA pessoa que assina (TIPOS.*.preenchedorAssina), a resposta
+  // do preenchimento já traz o token do slot dela, pra tela pública seguir
+  // direto pro quadro de assinatura. No Reembolso o favorecido preenche E
+  // assina (o Responsável continua com o link dele à parte); no Depósito o
+  // gerente é preenchedor E o ÚNICO assinante, então assinar já fecha tudo.
+  let okPreencherJaAssina = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    // token de verdade não sai por API nenhuma (formularioComLinks troca por
+    // link em /api/formularios/:id, e a listagem nem inclui) - só o próprio
+    // módulo (getOne) enxerga o valor bruto gravado, é o mesmo recurso que
+    // o teste "okRotulos" logo abaixo já usa
+    const form = require('/home/user/adyen-monitor/server/formularios.js');
+
+    // --- Reembolso: favorecido preenche e assina, responsavel só assina ---
+    const linkReemb = JSON.parse((await postarJson('/api/formularios/link-preenchimento', {
+      tipo: 'reembolso', unidade: 'São Braz Ilha do Leite',
+    }, cab)).corpo);
+    const vistaReemb = JSON.parse((await pedir(`/api/formularios-publico/preencher/${linkReemb.tokenPreenchimento}`)).corpo);
+    const envioReemb = await postarJson(`/api/formularios-publico/preencher/${linkReemb.tokenPreenchimento}`, {
+      campos: { favorecido: 'Fulano de Tal', cpf: '12345678901', banco: 'Nubank', agencia: '0001', conta: '123456-7', chavePix: 'fulano@x.com' },
+      linhas: [{ data: '20/08', fornecedor: 'Posto X', descricao: 'Combustível', valor: '120,50' }],
+    });
+    const dReemb = envioReemb.status === 200 ? JSON.parse(envioReemb.corpo) : {};
+    // token devolvido tem que ser MESMO do slot 'favorecido' que nasceu -
+    // confere contra o registro bruto (getOne), não só confia na resposta
+    // do próprio preenchimento
+    const registroReemb = dReemb.id ? await form.getOne(dReemb.id) : null;
+    const tokenFavorecidoReal = registroReemb && registroReemb.assinaturas && registroReemb.assinaturas.favorecido;
+    const tokenResponsavelReal = registroReemb && registroReemb.assinaturas && registroReemb.assinaturas.responsavel;
+    const assinouFavorecido = await postarJson(`/api/formularios-publico/${dReemb.id}/assinar`, {
+      token: dReemb.meuToken, nome: 'Fulano de Tal', imagem: PNG,
+    });
+    const dAssinouFavorecido = assinouFavorecido.status === 200 ? JSON.parse(assinouFavorecido.corpo) : {};
+    // o token do favorecido não pode ser o mesmo do responsavel - senão a
+    // mesma pessoa que preencheu conseguiria assinar os dois papéis
+    const assinarDeNovoComMesmoToken = await postarJson(`/api/formularios-publico/${dReemb.id}/assinar`, {
+      token: dReemb.meuToken, nome: 'Fulano de Novo', imagem: PNG,
+    });
+
+    // --- Depósito: gerente preenche E é o ÚNICO assinante -> assinar já fecha tudo ---
+    const linkDep = JSON.parse((await postarJson('/api/formularios/link-preenchimento', {
+      tipo: 'deposito', unidade: 'Spoleto Tacaruna',
+    }, cab)).corpo);
+    const vistaDep = JSON.parse((await pedir(`/api/formularios-publico/preencher/${linkDep.tokenPreenchimento}`)).corpo);
+    const envioDep = await postarJson(`/api/formularios-publico/preencher/${linkDep.tokenPreenchimento}`, {
+      campos: { nomeGerente: 'Marcela' },
+      linhas: [{ data: '20/08', periodo: '20/08 a 21/08', envelope: '001', valor: '500,00' }],
+    });
+    const dDep = envioDep.status === 200 ? JSON.parse(envioDep.corpo) : {};
+    const assinouGerente = dDep.meuToken ? await postarJson(`/api/formularios-publico/${dDep.id}/assinar`, {
+      token: dDep.meuToken, nome: 'Marcela', imagem: PNG,
+    }) : { status: 0, corpo: '' };
+    const dAssinouGerente = assinouGerente.status === 200 ? JSON.parse(assinouGerente.corpo) : {};
+
+    // --- Diárias (assinaturaPorLinha) e Ass. Boleto (favorecido preenche
+    // mas NÃO assina - só o responsavel) não têm preenchedorAssina de
+    // propósito - a resposta do preenchimento não pode inventar um token ---
+    const linkDiarias = JSON.parse((await postarJson('/api/formularios/link-preenchimento', {
+      tipo: 'diarias', unidade: 'Spoleto Tacaruna',
+    }, cab)).corpo);
+    const envioDiarias = await postarJson(`/api/formularios-publico/preencher/${linkDiarias.tokenPreenchimento}`, {
+      campos: {}, linhas: [{ nome: 'João', datas: '20/08', chavePix: 'joao@x.com', banco: 'Nubank', valor: '100,00' }],
+    });
+    const dDiarias = envioDiarias.status === 200 ? JSON.parse(envioDiarias.corpo) : {};
+
+    const conferencias = {
+      'preencher.html sabe de antemão (via vista) que o favorecido do Reembolso também assina': vistaReemb.preenchedorAssina === 'favorecido',
+      'preencher.html sabe que o gerente do Depósito também assina': vistaDep.preenchedorAssina === 'gerente',
+      'salvarPreenchimento devolve o token do papel certo (Reembolso)': !!dReemb.meuToken && dReemb.meuPapel === 'favorecido',
+      'e é exatamente o token que nasceu pro slot favorecido, não outro qualquer': tokenFavorecidoReal && dReemb.meuToken === tokenFavorecidoReal.token,
+      'assinar com esse token direto, sem precisar de um segundo link, funciona': assinouFavorecido.status === 200 && dAssinouFavorecido.chave === 'favorecido',
+      'com o Responsável ainda sem assinar, o formulário não fecha sozinho': dAssinouFavorecido.completo === false,
+      'o token do favorecido é diferente do token do responsavel (cada papel só assina com o token dele)':
+        !!tokenFavorecidoReal && !!tokenResponsavelReal && tokenFavorecidoReal.token !== tokenResponsavelReal.token,
+      'usar o token do favorecido de novo não assina duas vezes (a assinatura já estava registrada)':
+        assinarDeNovoComMesmoToken.status === 400 && /já foi registrada/.test(assinarDeNovoComMesmoToken.corpo),
+      'Depósito: token devolvido é do gerente': dDep.meuPapel === 'gerente' && !!dDep.meuToken,
+      'Depósito: como o gerente é o ÚNICO assinante, essa assinatura sozinha já fecha o formulário': assinouGerente.status === 200 && dAssinouGerente.completo === true,
+      'Diárias (assinatura por linha) não devolve token nenhum - não é um caso preenchedor=assinante':
+        dDiarias.meuToken === undefined && dDiarias.meuPapel === undefined,
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okPreencherJaAssina = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okPreencherJaAssina = false; console.log('  erro: ' + e.message); }
+  if (!okPreencherJaAssina) ruins += 1;
+  console.log(`${okPreencherJaAssina ? '✓' : '✗'} Formulários: link de preenchimento já oferece a assinatura pro mesmo papel, sem precisar de um segundo link`);
+
+  // ------------------------------------------------------------------
   // Nomenclatura dos formulários (pedido do Master): é "Favorecido", nunca
   // "Colaborador", e "Responsável" no lugar de "Gestor imediato" - inclusive
   // na assinatura. O ponto que exige cuidado: formulário JÁ GRAVADO

@@ -62,6 +62,14 @@ const TIPOS = {
     ],
     totalRotulo: 'VALOR TOTAL DEPOSITADO (R$)',
     assinantes: [{ papel: 'gerente', rotulo: 'Gerente da unidade' }],
+    // preenchedorAssina: quem abre o link de PREENCHIMENTO é a MESMA pessoa
+    // que assina esse papel - a tela pública (preencher.html) já mostra o
+    // quadro de assinatura na sequência do envio, em vez de mandar um
+    // segundo link de assinatura pro mesmo destinatário (pedido do Master:
+    // "no link de preenchimento já aparecer também a opção de assinatura").
+    // Só marca quando isso é verdade estruturalmente: no Depósito só existe
+    // UM assinante (o gerente) e é ele quem preenche.
+    preenchedorAssina: 'gerente',
   },
   diarias: {
     rotulo: 'Pagamento de Diárias',
@@ -108,6 +116,10 @@ const TIPOS = {
       { papel: 'favorecido', rotulo: 'Favorecido' },
       { papel: 'responsavel', rotulo: 'Responsável' },
     ],
+    // quem preenche por link é o próprio favorecido (é dele o CPF/PIX/banco
+    // do cabeçalho) - o Responsável continua recebendo o link de assinatura
+    // dele à parte, esse não muda
+    preenchedorAssina: 'favorecido',
   },
   avulso: {
     rotulo: 'Pagamento Avulso',
@@ -131,6 +143,9 @@ const TIPOS = {
       { papel: 'favorecido', rotulo: 'Favorecido' },
       { papel: 'gerente', rotulo: 'Gerente da unidade' },
     ],
+    // idem diariasRh: o link de preenchimento vai pro favorecido (dados
+    // bancários dele no cabeçalho) - o Gerente continua com o link dele
+    preenchedorAssina: 'favorecido',
   },
   reembolso: {
     rotulo: 'Reembolso',
@@ -166,6 +181,7 @@ const TIPOS = {
       { papel: 'responsavel', rotulo: 'Responsável' },
     ],
     obs: 'OBS.: Todos os comprovantes das despesas devem estar devidamente rubricados e anexados a este formulário.',
+    preenchedorAssina: 'favorecido',
   },
   // O único tipo que NÃO é um formulário de papel transcrito: aqui o
   // documento é o arquivo anexado (um boleto, em geral), e o que a gente
@@ -508,6 +524,10 @@ async function vistaPreenchimento(token) {
     soAnexo: !!modelo.soAnexo, anexoObrigatorio: !!modelo.anexoObrigatorio,
     jaPreenchido: r.status !== STATUS_AGUARDANDO,
     campos: r.campos, linhas: r.linhas,
+    // avisa a tela pública se, ao enviar, ela deve seguir direto pra
+    // assinatura (ver salvarPreenchimento) em vez de mostrar só "recebemos
+    // seus dados" - null quando esse tipo não tem preenchedor=assinante
+    preenchedorAssina: modelo.preenchedorAssina || null,
   };
 }
 
@@ -532,17 +552,28 @@ async function salvarPreenchimento(token, { campos, linhas, anexos } = {}) {
     throw new Error('Anexe o boleto (PDF ou imagem) - é ele que vai ser assinado.');
   }
 
+  const assinaturas = montarAssinaturas(modelo, linhasOk);
   await COLLECTION.doc(r.id).update({
     campos: camposOk, linhas: linhasOk, valorTotal, anexos: anexosOk,
     // as assinaturas só nascem AQUI - é o que garante que o Responsável não
     // tem link nenhum antes do favorecido mandar o anexo (ver comentário
     // acima de STATUS_AGUARDANDO)
-    assinaturas: montarAssinaturas(modelo, linhasOk),
+    assinaturas,
     status: 'PENDENTE', preenchidoEm: new Date().toISOString(),
   });
   cache.invalidar();
   await salvarFavorecido(camposOk);
-  return { ok: true, id: r.id };
+  const resultado = { ok: true, id: r.id };
+  // quem preencheu é o mesmo papel que assina esse tipo (ver
+  // TIPOS.*.preenchedorAssina): devolve o token do slot dele pra
+  // preencher.html seguir direto pro quadro de assinatura, sem precisar de
+  // um segundo link mandado por fora
+  if (modelo.preenchedorAssina && assinaturas[modelo.preenchedorAssina]) {
+    resultado.meuPapel = modelo.preenchedorAssina;
+    resultado.meuToken = assinaturas[modelo.preenchedorAssina].token;
+    resultado.meuRotulo = assinaturas[modelo.preenchedorAssina].rotulo;
+  }
+  return resultado;
 }
 
 // acha a qual slot um token pertence (ou null) - é a autorização inteira do
