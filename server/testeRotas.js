@@ -6660,6 +6660,66 @@ setTimeout(async () => {
   console.log(`${okCentralHistoricoPeriodo ? '✓' : '✗'} Central -> Histórico: filtros de tempo (Hoje/Ontem/Semana/Mês) por cima do De/Até`);
 
   // ------------------------------------------------------------------
+  // Chamados de TI/Manutenção (tecnico.html): os 5 chips mutuamente
+  // exclusivos (todos/ativos/remoto/presencial/concluidos) viraram o mesmo
+  // padrão de botão-por-status de formularios.html/central-historico.html.
+  // Modalidade saiu do chip e virou filtro à parte, combinável com
+  // qualquer status (antes "ativos" e "presencial" eram mutuamente
+  // exclusivos - não dava pra ver os dois juntos).
+  let okTecnicoBotoes = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tecnico.html'), 'utf8');
+    const conf = {
+      'os chips antigos (filtros-chips/filtro-chip) saíram da tela':
+        !/class="filtros-chips"/.test(html) && !/class="filtro-chip/.test(html),
+      'viraram botão clicável, mesmo padrão de formularios.html/central-historico.html':
+        /id="status-toggle-row"/.test(html) && /function toggleStatusTecnico\(chave\)\{/.test(html),
+      'clicar no botão de status alterna (mesmo clique fecha de novo)':
+        /STATUS_ABERTO_TECNICO = \(STATUS_ABERTO_TECNICO===chave\) \? null : chave;/.test(html),
+      'os 3 buckets certos, Ativos juntando ABERTO+INICIADO (mesmo agrupamento de sempre)':
+        /pertence: c => c\.status==='ABERTO' \|\| c\.status==='INICIADO'/.test(html)
+        && /pertence: c => c\.status==='CONCLUIDO'/.test(html)
+        && /pertence: c => c\.status==='CANCELADO'/.test(html),
+      'modalidade virou filtro à parte, aplicado na MESMA base que os status (combina com qualquer um)':
+        /const base = CHAMADOS\.filter\(passaBusca\)\.filter\(passaModalidade\)\.filter\(passaPeriodoTecnico\);/.test(html),
+      'a cor semântica do status (badge ABERTO/INICIADO/CONCLUIDO/CANCELADO) continua no card':
+        /<span class="badge \$\{c\.status\}">\$\{c\.status\}<\/span>/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okTecnicoBotoes = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTecnicoBotoes = false; console.log('  erro: ' + e.message); }
+  if (!okTecnicoBotoes) ruins += 1;
+  console.log(`${okTecnicoBotoes ? '✓' : '✗'} Chamados de TI: chips de status viraram botão (clica e abre embaixo), modalidade virou filtro combinável`);
+
+  // ------------------------------------------------------------------
+  // Chamados de TI: ganhou os mesmos presets de tempo (Hoje/Ontem/Semana/
+  // Mês) por cima de um De/Até que não existia antes nessa tela.
+  let okTecnicoPeriodo = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tecnico.html'), 'utf8');
+    const conf = {
+      'inputs De/Até + presets existem na tela': /id="filtro-data-de-tecnico"/.test(html) && /id="filtro-data-ate-tecnico"/.test(html)
+        && /id="presets-periodo-tecnico"/.test(html),
+      'os 5 presets certos (Todos/Hoje/Ontem/Semana/Mês)':
+        /\{lbl:'Todos', tipo:'todos'\}, \{lbl:'Hoje', tipo:'hoje'\}, \{lbl:'Ontem', tipo:'ontem'\}, \{lbl:'Semana', tipo:'semana'\}, \{lbl:'Mês', tipo:'mes'\}/.test(html),
+      'sem filtro nenhum (Todos) não restringe nada - chamado antigo não some da lista':
+        /function passaPeriodoTecnico\(c\)\{\s*if\(!FILTRO_DATA_DE_TECNICO && !FILTRO_DATA_ATE_TECNICO\) return true;/.test(html),
+      'o período é calculado em Brasília (não no fuso do navegador/servidor)':
+        /toLocaleDateString\('sv-SE', \{ timeZone: FUSO_BR \}\)/.test(html),
+      'editar a data na mão limpa o preset ativo (não fica um botão marcado com data diferente)':
+        /function aoMudarPeriodoTecnico\(manteveFocoPreset\)\{\s*if\(!manteveFocoPreset\) document\.querySelectorAll\('#presets-periodo-tecnico \.preset-btn'\)\.forEach\(b=>b\.classList\.remove\('active'\)\);/.test(html),
+      'presets são montados no boot (não fica em branco até o primeiro clique)':
+        /montarPresetsPeriodoTecnico\(\);\s*await carregarChamados\(\);/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okTecnicoPeriodo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTecnicoPeriodo = false; console.log('  erro: ' + e.message); }
+  if (!okTecnicoPeriodo) ruins += 1;
+  console.log(`${okTecnicoPeriodo ? '✓' : '✗'} Chamados de TI: filtros de tempo (Hoje/Ontem/Semana/Mês/De-Até), sem restringir por padrão`);
+
+  // ------------------------------------------------------------------
   // Duplicação de loja no "Chamados em aberto (por unidade)" (Histórico):
   // o estorno criado pela Central não mandava unidadeNome nenhum - o
   // fallback de refunds.js (unidadeNome || unidade || null) gravava o

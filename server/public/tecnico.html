@@ -88,9 +88,26 @@
   .badge.sla-perto{background:var(--warn-dim);color:var(--warn);}
   .badge.sla-vencido{background:var(--bad-dim);color:var(--bad);}
   .chips-linha{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px;}
-  .filtros-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
-  .filtro-chip{font-family:var(--mono);font-size:10.5px;color:var(--muted);padding:5px 10px;border-radius:16px;border:1px solid var(--line);background:none;cursor:pointer;white-space:nowrap;}
-  .filtro-chip.ativo{color:var(--accent);border-color:var(--accent);background:rgba(184, 255, 60,.1);font-weight:600;}
+  /* status vira botão (mesmo desenho de formularios.html/central-historico.html)
+     em vez de chips misturando status com modalidade - clica e a lista
+     daquele status aparece embaixo, só um aberto por vez (pedido do
+     usuário); modalidade virou filtro à parte, que pode combinar com
+     qualquer status (antes era mutuamente exclusivo com status) */
+  .status-toggle-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:4px;}
+  .status-toggle-btn{background:var(--panel2);border:2px solid var(--line);border-radius:10px;padding:14px 12px;cursor:pointer;font-weight:700;font-size:13px;text-align:center;color:var(--text);font-family:var(--sans);display:flex;flex-direction:column;gap:4px;align-items:center;}
+  .status-toggle-btn:hover{border-color:var(--accent);}
+  .status-toggle-btn.aberto{border-color:var(--accent);color:var(--accent);}
+  .status-toggle-btn .stb-count{font-family:var(--mono);font-weight:400;font-size:11px;color:var(--muted);}
+  .status-toggle-btn.aberto .stb-count{color:var(--accent);}
+  .status-toggle-cards{margin-top:12px;}
+  .filtros-compactos{display:flex;flex-wrap:wrap;gap:10px;}
+  .filtros-compactos>div{flex:1 1 130px;min-width:110px;max-width:220px;}
+  .filtros-compactos label{display:block;font-size:11px;color:var(--muted);margin:0 0 4px;font-family:var(--mono);}
+  .filtros-compactos select,.filtros-compactos input{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:12.5px;font-family:var(--sans);}
+  .presets{display:flex;gap:4px;flex-wrap:wrap;margin:8px 0 10px;}
+  .preset-btn{font-family:var(--mono);font-size:10.5px;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
+  .preset-btn:hover{color:var(--text);border-color:var(--accent);}
+  .preset-btn.active{color:#0b0d10;background:var(--accent);border-color:var(--accent);font-weight:600;}
   .btn-abrir-chamado{font-family:var(--sans);font-size:12px;font-weight:700;color:#0b0d10;background:var(--accent);border:none;border-radius:16px;padding:6px 12px;cursor:pointer;white-space:nowrap;}
   .check-linha{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;cursor:pointer;}
   .check-linha input{width:auto;}
@@ -138,15 +155,19 @@
     <h2 style="margin:0;">Chamados <span class="sub" id="lista-count" style="font-family:var(--mono);color:var(--muted);"></span></h2>
     <button type="button" class="btn-abrir-chamado hidden" id="btn-abrir-chamado" onclick="abrirFormChamado()">➕ Abrir chamado</button>
   </div>
-  <div class="filtros-chips" id="filtros-chips">
-    <button type="button" class="filtro-chip ativo" data-filtro="todos" onclick="filtrarChamados('todos')">Todos</button>
-    <button type="button" class="filtro-chip" data-filtro="ativos" onclick="filtrarChamados('ativos')">⏳ Ativos</button>
-    <button type="button" class="filtro-chip" data-filtro="remoto" onclick="filtrarChamados('remoto')">🎧 Triagem (remoto)</button>
-    <button type="button" class="filtro-chip" data-filtro="presencial" onclick="filtrarChamados('presencial')">🚗 Escalados (presencial)</button>
-    <button type="button" class="filtro-chip" data-filtro="concluidos" onclick="filtrarChamados('concluidos')">✓ Concluídos</button>
+  <div class="status-toggle-row" id="status-toggle-row"></div>
+  <div class="filtros-compactos" style="margin-top:10px;">
+    <div><label>Modalidade</label><select id="filtro-modalidade-tecnico" onchange="renderLista()">
+      <option value="">Todas</option>
+      <option value="remoto">🎧 Remoto</option>
+      <option value="presencial">🚗 Presencial</option>
+    </select></div>
+    <div><label>De</label><input type="date" id="filtro-data-de-tecnico" onchange="aoMudarPeriodoTecnico()"></div>
+    <div><label>Até</label><input type="date" id="filtro-data-ate-tecnico" onchange="aoMudarPeriodoTecnico()"></div>
+    <div><label>Pesquisar</label><input type="search" id="busca-chamados" placeholder="🔍 título, loja, ticket #, descrição..." oninput="renderLista()"></div>
   </div>
-  <input type="search" id="busca-chamados" placeholder="🔍 pesquisar por palavra (título, loja, ticket #, descrição...)" style="margin:8px 0 4px;font-size:12.5px;" oninput="renderLista()">
-  <div id="lista-cards"><div class="empty">carregando...</div></div>
+  <div class="presets" id="presets-periodo-tecnico"></div>
+  <div id="status-toggle-cards-wrap"><div class="empty">carregando...</div></div>
 </div>
 </div>
 
@@ -454,14 +475,8 @@ function chipSla(c){
   return `<span class="badge ${perto?'sla-perto':'sla-ok'}">⏳ SLA vence em ${fmt(resta)}</span>`;
 }
 
-let FILTRO_ATUAL = 'todos';
-function filtrarChamados(f){
-  FILTRO_ATUAL = f;
-  document.querySelectorAll('#filtros-chips .filtro-chip').forEach(b=>b.classList.toggle('ativo', b.dataset.filtro===f));
-  renderLista();
-}
-// busca por palavra em cima do filtro ativo (titulo, descricao, loja,
-// responsavel, ticket #...) - ajuda quando a fila esta grande
+// busca por palavra (titulo, descricao, loja, responsavel, ticket #...) -
+// ajuda quando a fila esta grande
 function passaBusca(c){
   const q = (document.getElementById('busca-chamados')?.value || '').trim().toLowerCase();
   if(!q) return true;
@@ -469,19 +484,75 @@ function passaBusca(c){
     .filter(v=>v!=null).join(' ').toLowerCase();
   return q.split(/\s+/).every(p=>alvo.includes(p));
 }
-function passaFiltro(c){
-  if(!passaBusca(c)) return false;
-  if(FILTRO_ATUAL==='ativos') return c.status==='ABERTO' || c.status==='INICIADO';
-  if(FILTRO_ATUAL==='concluidos') return c.status==='CONCLUIDO';
-  if(FILTRO_ATUAL==='presencial') return modalidadeDe(c)==='presencial';
-  if(FILTRO_ATUAL==='remoto') return modalidadeDe(c)==='remoto';
+// modalidade virou filtro à parte (antes era mutuamente exclusivo com
+// status - não dava pra ver "ativos E presencial" junto): combina com
+// qualquer status aberto agora
+function passaModalidade(c){
+  const v = document.getElementById('filtro-modalidade-tecnico')?.value || '';
+  return !v || modalidadeDe(c)===v;
+}
+function dataBrasiliaTecnico(iso){
+  if(!iso) return '';
+  const partes = new Intl.DateTimeFormat('en-US', { timeZone:FUSO_BR, year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(new Date(iso));
+  const o = {}; partes.forEach(p=>{ if(p.type!=='literal') o[p.type]=p.value; });
+  return `${o.year}-${o.month}-${o.day}`;
+}
+let FILTRO_DATA_DE_TECNICO = '';
+let FILTRO_DATA_ATE_TECNICO = '';
+function passaPeriodoTecnico(c){
+  if(!FILTRO_DATA_DE_TECNICO && !FILTRO_DATA_ATE_TECNICO) return true;
+  const d = dataBrasiliaTecnico(c.criadoEm);
+  if(FILTRO_DATA_DE_TECNICO && d < FILTRO_DATA_DE_TECNICO) return false;
+  if(FILTRO_DATA_ATE_TECNICO && d > FILTRO_DATA_ATE_TECNICO) return false;
   return true;
 }
+// presets de período (Hoje/Ontem/Semana/Mês) - mesmo desenho já usado em
+// formularios.html/central-historico.html, calculado em Brasília
+function calcularPresetPeriodoTecnico(tipo){
+  const brDate = (d) => d.toLocaleDateString('sv-SE', { timeZone: FUSO_BR });
+  const hoje = new Date();
+  if(tipo==='hoje') return { de: brDate(hoje), ate: brDate(hoje) };
+  if(tipo==='ontem'){ const o=new Date(hoje); o.setDate(o.getDate()-1); return { de: brDate(o), ate: brDate(o) }; }
+  if(tipo==='semana'){ const o=new Date(hoje); o.setDate(o.getDate()-6); return { de: brDate(o), ate: brDate(hoje) }; }
+  if(tipo==='mes'){ const p=new Date(hoje.getFullYear(), hoje.getMonth(), 1); return { de: brDate(p), ate: brDate(hoje) }; }
+  return { de:'', ate:'' }; // 'todos' - sem restrição
+}
+function aplicarPresetPeriodoTecnico(tipo){
+  const {de, ate} = calcularPresetPeriodoTecnico(tipo);
+  document.getElementById('filtro-data-de-tecnico').value = de;
+  document.getElementById('filtro-data-ate-tecnico').value = ate;
+  document.querySelectorAll('#presets-periodo-tecnico .preset-btn').forEach(b=>b.classList.toggle('active', b.dataset.tipo===tipo));
+  aoMudarPeriodoTecnico(true);
+}
+function aoMudarPeriodoTecnico(manteveFocoPreset){
+  if(!manteveFocoPreset) document.querySelectorAll('#presets-periodo-tecnico .preset-btn').forEach(b=>b.classList.remove('active'));
+  FILTRO_DATA_DE_TECNICO = document.getElementById('filtro-data-de-tecnico').value;
+  FILTRO_DATA_ATE_TECNICO = document.getElementById('filtro-data-ate-tecnico').value;
+  renderLista();
+}
+function montarPresetsPeriodoTecnico(){
+  const presets = [ {lbl:'Todos', tipo:'todos'}, {lbl:'Hoje', tipo:'hoje'}, {lbl:'Ontem', tipo:'ontem'}, {lbl:'Semana', tipo:'semana'}, {lbl:'Mês', tipo:'mes'} ];
+  document.getElementById('presets-periodo-tecnico').innerHTML = presets.map(p=>
+    `<button type="button" class="preset-btn ${p.tipo==='todos'?'active':''}" data-tipo="${p.tipo}" onclick="aplicarPresetPeriodoTecnico('${p.tipo}')">${p.lbl}</button>`).join('');
+}
 
-function renderLista(){
-  const visiveis = CHAMADOS.filter(passaFiltro);
-  document.getElementById('lista-count').textContent = visiveis.length;
-  document.getElementById('lista-cards').innerHTML = visiveis.length ? visiveis.map(c=>`
+// status vira botão (mesmo desenho de formularios.html) em vez de chip
+// misturado com modalidade - clica e a lista daquele status aparece
+// embaixo, só um aberto por vez. "Ativos" junta ABERTO+INICIADO (mesmo
+// agrupamento de sempre - a fila de atendimento não separa os dois).
+const STATUS_BUCKETS_TECNICO = [
+  { chave:'ATIVOS', titulo:'Ativos', icone:'⏳', pertence: c => c.status==='ABERTO' || c.status==='INICIADO' },
+  { chave:'CONCLUIDO', titulo:'Concluídos', icone:'✓', pertence: c => c.status==='CONCLUIDO' },
+  { chave:'CANCELADO', titulo:'Cancelados', icone:'🚫', pertence: c => c.status==='CANCELADO' },
+];
+let STATUS_ABERTO_TECNICO = null;
+function toggleStatusTecnico(chave){
+  STATUS_ABERTO_TECNICO = (STATUS_ABERTO_TECNICO===chave) ? null : chave;
+  renderLista();
+}
+
+function cardChamadoHtml(c){
+  return `
     <div class="card" onclick="abrirDetalhe('${c.id}')">
       <div class="linha1">
         <span>${c.numeroTicket!=null?`<span style="font-family:var(--mono);color:var(--accent);">#${c.numeroTicket}</span> `:''}${escapeHtml(c.titulo)}</span>
@@ -489,7 +560,26 @@ function renderLista(){
       </div>
       <div class="chips-linha">${chipModalidade(c)}${chipPrioridade(c)}${chipSla(c)}${c.resolvidoNaAbertura?'<span class="badge CONCLUIDO">✅ resolvido na abertura</span>':''}${c.cobranca&&c.cobranca.enviadaEm?'<span class="badge visto" style="background:var(--warn-dim);color:var(--warn);">💰 cobrança enviada</span>':''}</div>
       <div class="sub">${escapeHtml(c.unidadeNome||c.unidade)} · ${fmtDataHora(c.criadoEm)}${c.tecnicoEmail?(' · '+escapeHtml(c.tecnicoEmail)):''}</div>
-    </div>`).join('') : '<div class="empty">Nenhum chamado nesse filtro.</div>';
+    </div>`;
+}
+function renderLista(){
+  const base = CHAMADOS.filter(passaBusca).filter(passaModalidade).filter(passaPeriodoTecnico);
+  document.getElementById('lista-count').textContent = base.length;
+  const bucketAberto = STATUS_ABERTO_TECNICO && STATUS_BUCKETS_TECNICO.find(b=>b.chave===STATUS_ABERTO_TECNICO);
+  if(bucketAberto && !base.some(bucketAberto.pertence)) STATUS_ABERTO_TECNICO = null;
+  document.getElementById('status-toggle-row').innerHTML = STATUS_BUCKETS_TECNICO.map(b=>{
+    const n = base.filter(b.pertence).length;
+    return `<button type="button" class="status-toggle-btn ${STATUS_ABERTO_TECNICO===b.chave?'aberto':''}" onclick="toggleStatusTecnico('${b.chave}')">
+      <span>${b.icone} ${b.titulo}</span><span class="stb-count">${n}</span>
+    </button>`;
+  }).join('');
+  if(STATUS_ABERTO_TECNICO){
+    const bucket = STATUS_BUCKETS_TECNICO.find(b=>b.chave===STATUS_ABERTO_TECNICO);
+    const visiveis = base.filter(bucket.pertence);
+    document.getElementById('status-toggle-cards-wrap').innerHTML = `<div class="status-toggle-cards">${visiveis.length ? visiveis.map(cardChamadoHtml).join('') : '<div class="empty">Nenhum chamado nesse filtro.</div>'}</div>`;
+  } else {
+    document.getElementById('status-toggle-cards-wrap').innerHTML = '';
+  }
 }
 
 // fila de atendimento: quem esta em aberto vem primeiro, ordenado por
@@ -1173,6 +1263,7 @@ async function boot(){
   const selUnidadeNovo = document.getElementById('n-unidade');
   if(selUnidadeNovo) selUnidadeNovo.addEventListener('change', ()=>{ if(EH_GESTOR) carregarResponsaveisNovo(); });
   document.getElementById('root').classList.remove('hidden');
+  montarPresetsPeriodoTecnico();
   await carregarChamados();
   iniciarStreamChamados();
   // link "Tickets dessa conversa" da Central do Beniboy (?ticket=NUMERO) -
