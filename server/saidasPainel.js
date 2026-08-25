@@ -60,14 +60,21 @@ function linhasDeFechamento(f, mapaVerif) {
   });
 }
 
-async function listar() {
+// extrasFechamentos: fechamentos que NÃO moram na coleção fechamentosLive -
+// hoje só um caso, o snapshot em memória sincronizado da planilha ARCFOOD
+// (ver sheetsSync.js/index.js, fechamentosData). Sem isso, o painel só
+// mostrava a saída avulsa lançada direto no app - a itemizada que veio da
+// planilha (mesmo já convertida em detalhesSaidas, ver sheetsSync.js)
+// nunca aparecia, porque fechamentosLive.listAll() só lê o Firestore.
+async function listar(extrasFechamentos = []) {
   const [fechamentos, listaSangrias, mapaVerif] = await Promise.all([
     fechamentosLive.listAll(),
     sangrias.listAll(),
     verificacoesSaida.mapaDeChaves(),
   ]);
   const deSangria = listaSangrias.map(linhaDeSangria);
-  const deFechamento = fechamentos.flatMap((f) => linhasDeFechamento(f, mapaVerif));
+  const todosFechamentos = [...fechamentos, ...(Array.isArray(extrasFechamentos) ? extrasFechamentos : [])];
+  const deFechamento = todosFechamentos.flatMap((f) => linhasDeFechamento(f, mapaVerif));
   return [...deSangria, ...deFechamento];
 }
 
@@ -88,7 +95,7 @@ function filtrar(itens, { unidades, grupo, inicio, fim } = {}) {
 // valida que a chave aponta pra algo que existe de verdade (sem isso,
 // qualquer chave inventada criaria um registro orfao em
 // verificacoesSaidasFechamento)
-async function marcarVerificada(chave, { verificada, porId, porEmail }) {
+async function marcarVerificada(chave, { verificada, porId, porEmail }, extrasFechamentos = []) {
   if (typeof chave !== 'string' || !chave) throw new Error('Chave inválida.');
   if (chave.startsWith('sangria::')) {
     const id = chave.slice('sangria::'.length);
@@ -98,7 +105,12 @@ async function marcarVerificada(chave, { verificada, porId, porEmail }) {
   const partes = chave.split('::');
   const idx = Number(partes.pop());
   const fechamentoId = partes.join('::');
-  const f = await fechamentosLive.getOne(fechamentoId);
+  // o fechamento pode não estar no Firestore (fechamentosLive) - é o caso do
+  // snapshot sincronizado da planilha ARCFOOD, que só existe em memória (ver
+  // listar() acima) - cai pra ele antes de recusar como "não encontrado"
+  const f = (await fechamentosLive.getOne(fechamentoId))
+    || (Array.isArray(extrasFechamentos) ? extrasFechamentos : []).find((x) => x.id === fechamentoId)
+    || null;
   if (!f || !Number.isInteger(idx) || !(f.detalhesSaidas || [])[idx]) {
     throw new Error('Saída não encontrada nesse fechamento.');
   }

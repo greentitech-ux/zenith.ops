@@ -299,7 +299,23 @@ function linhaParaFechamento(grupo, header, linha) {
     quebra: parseMoneyBR(get('Quebra')),
     tc: parseMoneyBR(get('TC')),
     cancelados: parseMoneyBR(get('Cancelados') ?? get('Cancelado')),
+    // itemizado da ARCFOOD (ate 5 pares "Saida Dinheiro N"/"Descricao Saida
+    // N" - ver ARCFOOD_SAIDA_SLOTS mais abaixo, o mesmo par que o caminho de
+    // VOLTA usa em novaLinhaPlanilha/valuesBatchUpdate). Sem ler isso aqui, o
+    // registro so carregava o TOTAL (totalSaida) sem o item que compoe ele,
+    // e o Painel de Saidas (que so lista ITEM por item) nunca mostrava a
+    // saida importada da planilha - so a lancada direto no app.
+    detalhesSaidas: grupo === 'ARCFOOD' ? detalhesSaidasArcfood(get) : [],
   };
+}
+
+function detalhesSaidasArcfood(get) {
+  return ARCFOOD_SAIDA_SLOTS
+    .map(([colValor, colDescricao]) => ({
+      valor: parseMoneyBR(get(colValor)),
+      descricao: String(get(colDescricao) || '').trim(),
+    }))
+    .filter((s) => s.valor || s.descricao);
 }
 
 // campos monetarios/contagem que sao seguros de somar quando ha mais de um
@@ -350,6 +366,11 @@ function mesclarLancamentosDoMesmoDia(fechamentos) {
       mesclado[campo] = +linhas.reduce((s, l) => s + (l[campo] || 0), 0).toFixed(2);
     });
     mesclado.observacao = linhas.map((l) => l.observacao).filter(Boolean).join(' · ') || null;
+    // idem observacao: cada linha do dia pode trazer o proprio item de saida
+    // (ex: a linha de sangria separada) - concatena em vez de ficar so com o
+    // da linha "principal", senao o Painel de Saidas perderia o item da(s)
+    // outra(s) linha(s) mesmo com o totalSaida somado corretamente acima
+    mesclado.detalhesSaidas = linhas.flatMap((l) => l.detalhesSaidas || []);
     resultado.push(mesclado);
   }
   return resultado;
@@ -695,5 +716,5 @@ async function enviarFechamentoPlanilha(f, grupo) {
 
 module.exports = {
   sincronizar, parseMoneyBR, parseDataArcfood, parseDataBravo, getAccessToken, buscarAba, buscarLinhasNovas, buscarAbaPorCandidatos, mesclarLancamentosDoMesmoDia, criarPersistenciaEstado,
-  enviarFechamentoPlanilha, BRAVO_UNIDADES, SHEET_ID_BRAVO, listarAbas,
+  enviarFechamentoPlanilha, BRAVO_UNIDADES, SHEET_ID_BRAVO, listarAbas, linhaParaFechamento,
 };

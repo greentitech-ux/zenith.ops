@@ -7760,7 +7760,12 @@ app.get('/api/sangrias/do-dia', requireAnySection('lancamento', 'sangria'), asyn
 // explicita do usuario, a propria loja nao confere a propria sangria ----------
 app.get('/api/saidas-painel', requireAnySection('lancamento', 'sangria'), async (req, res) => {
   const { unidades, grupo, inicio, fim } = req.query;
-  const todas = auth.filterByUnidade(req, await saidasPainel.listar());
+  // fechamentosData: snapshot em memória sincronizado da planilha ARCFOOD
+  // (ver /api/fechamentos acima) - saidasPainel.listar so le fechamentosLive
+  // (Firestore) por padrão, e o fechamento importado da planilha nunca
+  // grava lá. Sem passar isso, a saída itemizada que veio da planilha
+  // nunca aparecia aqui, só a lançada direto no app.
+  const todas = auth.filterByUnidade(req, await saidasPainel.listar(fechamentosData));
   const unidadesSet = unidades ? String(unidades).split(',').filter(Boolean) : null;
   res.json(saidasPainel.filtrar(todas, { unidades: unidadesSet, grupo, inicio, fim }));
 });
@@ -7768,7 +7773,7 @@ app.get('/api/saidas-painel', requireAnySection('lancamento', 'sangria'), async 
 app.patch('/api/saidas-painel/verificar', auth.requireMasterOrAdmin, async (req, res) => {
   try {
     const { chave, verificada } = req.body;
-    const registro = await saidasPainel.marcarVerificada(chave, { verificada, porId: req.user.id, porEmail: req.user.email });
+    const registro = await saidasPainel.marcarVerificada(chave, { verificada, porId: req.user.id, porEmail: req.user.email }, fechamentosData);
     broadcast('saida-verificada', registro, 'lancamento');
     broadcast('saida-verificada', registro, 'sangria');
     res.json(registro);
@@ -7803,7 +7808,7 @@ function prepararSaidasPainel(rows) {
 
 app.get('/api/saidas-painel/relatorio.:formato(csv|pdf)', requireAnySection('lancamento', 'sangria'), async (req, res) => {
   const { unidades, grupo, inicio, fim } = req.query;
-  const todas = auth.filterByUnidade(req, await saidasPainel.listar());
+  const todas = auth.filterByUnidade(req, await saidasPainel.listar(fechamentosData));
   const unidadesSet = unidades ? String(unidades).split(',').filter(Boolean) : null;
   const filtradas = saidasPainel.filtrar(todas, { unidades: unidadesSet, grupo, inicio, fim });
   const { colunas, linhas } = prepararSaidasPainel(filtradas);
