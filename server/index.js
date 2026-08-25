@@ -3477,12 +3477,15 @@ app.delete('/api/formularios/:id', auth.requireMaster, async (req, res) => {
   res.json(await formularios.remover(req.params.id));
 });
 
-// Formulário assinado -> ticket de Pagamento na Central, com os mesmos
-// anexos (comprovantes, ou o boleto no Ass. Boleto) e o MESMO Ticket # -
-// o formulário já nasce com esse número (ver criar()/criarParaPreenchimento
-// em formularios.js), então os dois lados da mesma solicitação
-// compartilham a numeração, igual à cobrança de chamado de TI/Manutenção
-// (ver enviarCobrancaChamado acima).
+// Formulário assinado -> ticket na Central, com os mesmos anexos
+// (comprovantes, ou o boleto no Ass. Boleto) e o MESMO Ticket # - o
+// formulário já nasce com esse número (ver criar()/criarParaPreenchimento em
+// formularios.js), então os dois lados da mesma solicitação compartilham a
+// numeração, igual à cobrança de chamado de TI/Manutenção (ver
+// enviarCobrancaChamado acima). Vira tipo 'pagamento' pra todo mundo, EXCETO
+// Adiantamento: esse vira tipo 'adiantamento' de propósito - ele não fecha
+// só por ser aprovado, precisa da prestação de contas (ver
+// solicitacoes.registrarPrestacaoContas / rotas logo abaixo)
 app.post('/api/formularios/:id/enviar-pagamento', requireSection('formularios'), async (req, res) => {
   try {
     const registro = await formularios.getOne(req.params.id);
@@ -3496,8 +3499,9 @@ app.post('/api/formularios/:id/enviar-pagamento', requireSection('formularios'),
     if (registro.status !== 'ASSINADO') return res.status(400).json({ error: 'Só dá pra enviar como Pagamento depois que todas as assinaturas estiverem completas.' });
     if (registro.enviadoPagamento) return res.status(400).json({ error: `Esse formulário já foi enviado como Pagamento (Ticket #${registro.numeroTicket}).` });
     const modelo = formularios.TIPOS[registro.tipo];
+    const tipoTicket = registro.tipo === 'adiantamento' ? 'adiantamento' : 'pagamento';
     const ticket = await solicitacoes.create({
-      tipo: 'pagamento',
+      tipo: tipoTicket,
       numeroTicket: registro.numeroTicket,
       unidade: registro.unidadeCodigo || registro.unidade,
       unidadeNome: registro.unidade,
@@ -3514,7 +3518,7 @@ app.post('/api/formularios/:id/enviar-pagamento', requireSection('formularios'),
     });
     await formularios.marcarEnviadoPagamento(req.params.id, { pagamentoId: ticket.id });
     broadcast('solicitacao-criada', ticket, 'solicitacoes');
-    push.notifySolicitacao(`Ticket #${ticket.numeroTicket} · Pagamento (formulário)`, `${modelo.rotulo} · ${registro.unidade} · R$ ${Number(registro.valorTotal || 0).toFixed(2)}`, ticket.id);
+    push.notifySolicitacao(`Ticket #${ticket.numeroTicket} · ${modelo.rotulo} (formulário)`, `${modelo.rotulo} · ${registro.unidade} · R$ ${Number(registro.valorTotal || 0).toFixed(2)}`, ticket.id);
     res.json({ ticket });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -8241,6 +8245,18 @@ app.get('/api/solicitacoes/:id/comprovante', requireSection('solicitacoes'), asy
   storage.streamArquivo(registro.comprovante.path, registro.comprovante.tipo, res);
 });
 
+// nota fiscal da prestação de contas do Adiantamento - comprovante mora
+// dentro de prestacaoContas, não no campo comprovante genérico acima (esse
+// é o do 'compra'/marcarComprada, coisa diferente)
+app.get('/api/solicitacoes/:id/prestacao-contas/comprovante', requireSection('solicitacoes'), async (req, res) => {
+  const registro = await solicitacoes.getOne(req.params.id);
+  if (!registro) return res.sendStatus(404);
+  if (!podeVerCard(req, registro)) return res.sendStatus(404);
+  const comprovante = registro.prestacaoContas && registro.prestacaoContas.comprovante;
+  if (!comprovante) return res.sendStatus(404);
+  storage.streamArquivo(comprovante.path, comprovante.tipo, res);
+});
+
 // marcar/desmarcar Comprada - so pedidos de Compra ja Aprovados, Master ou
 // Admin, com data de entrega prevista e/ou print do comprovante da compra
 // (os dois opcionais, ver solicitacoes.marcarComprada)
@@ -8270,6 +8286,44 @@ app.patch('/api/solicitacoes/:id/comprada', auth.requireMasterOrAdmin, upload.si
 app.delete('/api/solicitacoes/:id/comprada', auth.requireMasterOrAdmin, async (req, res) => {
   try {
     const registro = await solicitacoes.desmarcarComprada(req.params.id);
+    broadcast('solicitacao-decidida', registro, 'solicitacoes');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// prestação de contas do Adiantamento - so tickets ja Aprovados, Master ou
+// Admin, com o valor GASTO de verdade + nota fiscal (comprovante opcional,
+// o valor não é - ver solicitacoes.registrarPrestacaoContas). É o único
+// jeito de finalizar um Adiantamento, mesmo espírito do "Comprada" acima:
+// uma ação manual, no ritmo do Master, dentro do mesmo painel de detalhe.
+app.patch('/api/solicitacoes/:id/prestacao-contas', auth.requireMasterOrAdmin, upload.single('comprovante'), async (req, res) => {
+  try {
+    const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
+    const atual = await solicitacoes.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Solicitação não encontrada.' });
+    if (tipoBloqueado(req, atual.tipo)) return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
+    let comprovante = null;
+    if (req.file) {
+      const path = await storage.salvarArquivo(atual.unidade || 'geral', req.file, 'solicitacoes');
+      comprovante = { nome: req.file.originalname, path, tipo: req.file.mimetype || 'application/octet-stream' };
+    }
+    const registro = await solicitacoes.registrarPrestacaoContas(req.params.id, {
+      valorGasto: payload.valorGasto,
+      comprovante,
+      registradoPorEmail: req.user.email,
+    });
+    broadcast('solicitacao-decidida', registro, 'solicitacoes');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/solicitacoes/:id/prestacao-contas', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    const registro = await solicitacoes.desfazerPrestacaoContas(req.params.id);
     broadcast('solicitacao-decidida', registro, 'solicitacoes');
     res.json(registro);
   } catch (err) {

@@ -147,6 +147,39 @@ const TIPOS = {
     // bancários dele no cabeçalho) - o Gerente continua com o link dele
     preenchedorAssina: 'favorecido',
   },
+  // Pedido de adiantamento (compra emergencial ou qualquer pagamento cujo
+  // valor exato só se sabe depois) - o formulário/assinatura autorizam o
+  // valor a sair, mas o ticket que nasce dele na Central (ver
+  // enviar-pagamento em index.js, que manda esse tipo pra
+  // solicitacoes.js em vez de 'pagamento') só fecha depois que alguém
+  // anexa a nota e informa o valor GASTO de verdade - ver
+  // solicitacoes.registrarPrestacaoContas. O formulário em si é idêntico
+  // ao Avulso (mesmos dados bancários, mesma dupla de assinantes); a
+  // diferença inteira mora do lado da Central, não aqui.
+  adiantamento: {
+    rotulo: 'Adiantamento',
+    titulo: 'SOLICITAÇÃO DE ADIANTAMENTO',
+    cabecalho: [
+      { key: 'cnpj', label: 'CNPJ' },
+      { key: 'favorecido', label: 'FAVORECIDO' },
+      { key: 'cnpjFavorecido', label: 'CNPJ DO FAVORECIDO' },
+      { key: 'banco', label: 'BANCO' },
+      { key: 'agencia', label: 'AGÊNCIA' },
+      { key: 'conta', label: 'CONTA COM DÍGITO' },
+      { key: 'chavePix', label: 'CHAVE PIX' },
+    ],
+    colunas: [
+      { key: 'data', label: 'DATA', data: true },
+      { key: 'descricao', label: 'DESCRIÇÃO', larga: true },
+      { key: 'valor', label: 'VALOR (R$)', valor: true },
+    ],
+    totalRotulo: 'VALOR ADIANTADO (R$)',
+    assinantes: [
+      { papel: 'favorecido', rotulo: 'Favorecido' },
+      { papel: 'gerente', rotulo: 'Gerente da unidade' },
+    ],
+    preenchedorAssina: 'favorecido',
+  },
   reembolso: {
     rotulo: 'Reembolso',
     titulo: 'SOLICITAÇÃO DE REEMBOLSO',

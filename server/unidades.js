@@ -27,7 +27,7 @@ const COLLECTION = db.collection('unidadesExtras');
 // continuam aparecendo em tudo, exatamente como antes.
 // ---------------------------------------------------------------
 const AREAS_VALIDAS = ['fechamento', 'entregas', 'estoque', 'parque', 'rh', 'noc', 'solicitacoes', 'monitor', 'formularios'];
-const TIPOS_SOLICITACAO_VALIDOS = ['estorno', 'ajuste-fechamento', 'compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota', 'acesso-pessoa'];
+const TIPOS_SOLICITACAO_VALIDOS = ['estorno', 'ajuste-fechamento', 'compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota', 'acesso-pessoa', 'adiantamento'];
 
 function sanitizarLista(entrada, validos) {
   if (!Array.isArray(entrada)) return [];
