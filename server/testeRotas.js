@@ -6202,6 +6202,50 @@ setTimeout(async () => {
   if (!okPdfSemCorte) ruins += 1;
   console.log(`${okPdfSemCorte ? '✓' : '✗'} Relatórios PDF: Descrição nunca sai cortada com "..." (quebra de linha é o padrão em todos os relatórios)`);
 
+  // ------------------------------------------------------------------
+  // Formulários - campo de data clica em qualquer lugar (não só no ícone) +
+  // Período do caixa (Depósito) virou 2 seletores De/Até em vez de texto
+  // livre. Pedido do usuário. O servidor nunca sabe que existem 2 inputs -
+  // a tela junta num valor só ("DD/MM/AAAA a DD/MM/AAAA") antes de mandar,
+  // mesma convenção DD/MM/AAAA que os campos `data` já usavam.
+  let okDataClicavel = false;
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const htmlForms = fs.readFileSync(path.join(__dirname, 'public', 'formularios.html'), 'utf8');
+    const htmlPreencher = fs.readFileSync(path.join(__dirname, 'public', 'preencher.html'), 'utf8');
+    const srcForms = fs.readFileSync(path.join(__dirname, 'formularios.js'), 'utf8');
+    const cabMaster = { Authorization: 'Bearer ' + token };
+    const tipos = JSON.parse((await pedir('/api/formularios/tipos', cabMaster)).corpo || '[]');
+    const depositoPeriodo = (tipos.find((t) => t.tipo === 'deposito').colunas || []).find((c) => c.key === 'periodo');
+    const conf = {
+      'o schema marca Período do caixa como intervalo (2 datas), não texto livre':
+        /key: 'periodo', label: 'PERÍODO DO CAIXA', intervalo: true/.test(srcForms),
+      'a rota que a tela consulta expõe esse flag pro cliente': depositoPeriodo && depositoPeriodo.intervalo === true,
+      'formularios.html clica em qualquer lugar do campo de data (showPicker)':
+        /input\[type=date\]/.test(htmlForms) && /showPicker/.test(htmlForms),
+      'preencher.html (link público) tem o mesmo clique em qualquer lugar':
+        /input\[type=date\]/.test(htmlPreencher) && /showPicker/.test(htmlPreencher),
+      // também tem que estar nos DOIS lugares que desenham a linha (criar E
+      // editar) - senão abrir pra corrigir um Depósito antigo mostra o
+      // Período do caixa como texto livre de novo
+      'formularios.html: renderiza De/Até pro intervalo tanto ao criar quanto ao editar um item':
+        (htmlForms.match(/if\(c\.intervalo\)/g) || []).length >= 2 && /data-col="\$\{escapeHtml\(c\.key\)\}:de"/.test(htmlForms) && /data-ed-col="\$\{escapeHtml\(c\.key\)\}:de"/.test(htmlForms),
+      // tem que juntar nos DOIS caminhos que coletam linha (criar E editar) -
+      // não só num deles, senão corrigir um Depósito perde o intervalo
+      'formularios.html: junta De/Até num valor só antes de mandar, tanto ao criar quanto ao editar':
+        /function combinarIntervalosDaLinha/.test(htmlForms)
+        && (htmlForms.match(/return combinarIntervalosDaLinha\(l\);/g) || []).length >= 2,
+      'preencher.html: o mesmo formulário público também junta De/Até':
+        /function combinarIntervalo/.test(htmlPreencher) && /c\.intervalo/.test(htmlPreencher),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okDataClicavel = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDataClicavel = false; console.log('  erro: ' + e.message); }
+  if (!okDataClicavel) ruins += 1;
+  console.log(`${okDataClicavel ? '✓' : '✗'} Formulários: data clica em qualquer lugar do campo + Período do caixa virou 2 seletores De/Até`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

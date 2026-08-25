@@ -8889,6 +8889,52 @@ app.post('/api/central/enviar-email', auth.requireMasterOrAdmin, async (req, res
   }
 });
 
+// decisao em lote (Master/Admin): aprova ou rejeita varios tickets de uma
+// vez, selecionados na barra de selecao - pedido do usuario diante de uma
+// fila de ~1180 tickets de Quebra de caixa: "precisam ser dado como
+// concluido de uma vez". Reusa os MESMOS caminhos de decisao de 1 ticket
+// (refunds.updateStatus / fechamentosLive.decidirEdicao /
+// solicitacoes.updateStatus), so iterando - nao duplica regra nenhuma.
+// Suporte de TI e Manutencao ficam de fora do "aprovar em lote" porque essa
+// decisao exige escolher tecnico/responsavel na hora (so tem esse seletor
+// no card individual); REJEITAR nao tem essa exigencia, entao funciona pra
+// qualquer tipo. Cada ticket succeeds/fails independente (falha parcial
+// linha a linha, mesmo espirito de updateUsernamesEmMassa).
+app.post('/api/central/decidir-lote', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    const { tickets, status } = req.body;
+    if (!['APROVADO', 'REJEITADO'].includes(status)) return res.status(400).json({ error: 'Status inválido.' });
+    if (!Array.isArray(tickets) || !tickets.length) return res.status(400).json({ error: 'Selecione ao menos um ticket.' });
+    const visiveis = await todosCardsCentral(req);
+    const mapa = new Map(visiveis.map((c) => [`${c.tipo}::${c.id}`, c]));
+    const pulados = [];
+    let decididos = 0;
+    for (const { tipo, id } of tickets) {
+      if (!mapa.has(`${tipo}::${id}`)) { pulados.push({ tipo, id, motivo: 'não encontrado ou sem permissão' }); continue; }
+      if (status === 'APROVADO' && (tipo === 'suporte-ti' || tipo === 'manutencao')) {
+        pulados.push({ tipo, id, motivo: tipo === 'suporte-ti' ? 'precisa escolher o técnico - decida pelo card' : 'precisa escolher quem vai fazer - decida pelo card' });
+        continue;
+      }
+      try {
+        if (tipo === 'estorno') {
+          await refunds.updateStatus(id, status, { decidedByEmail: req.user.email });
+        } else if (tipo === 'ajuste-fechamento') {
+          await fechamentosLive.decidirEdicao(id, status, { decididoPorEmail: req.user.email });
+        } else {
+          await solicitacoes.updateStatus(id, status, { decidedByEmail: req.user.email });
+        }
+        decididos++;
+      } catch (e) {
+        pulados.push({ tipo, id, motivo: e.message });
+      }
+    }
+    if (decididos) broadcast('solicitacao-decidida', { lote: true, decididos }, 'solicitacoes');
+    res.json({ decididos, pulados });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // apagar mensagem - so o Master (nao o Admin, que so participa da conversa)
 app.delete('/api/central/:tipo/:id/chat/:messageId', auth.requireMaster, async (req, res) => {
   try {
