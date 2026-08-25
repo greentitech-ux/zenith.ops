@@ -2414,6 +2414,32 @@ setTimeout(async () => {
   console.log(`${okDoisPassosFoto ? '✓' : '✗'} Foto do relatório: escolher e ler são dois passos (escolher não envia nada)`);
 
   // ------------------------------------------------------------------
+  // Foto do relatório de PDV pesa 5-8MB de celular, e até 5 delas por
+  // leitura - o que sobe pro servidor (e dali pro Claude) é o gargalo real
+  // da demora que o Master reportou ("a leitura esta lenta"), não o modelo
+  // em si. Mesmo remédio já usado no documento de identidade do RH
+  // (rh-cadastro.html): reduzir ANTES de subir, uma vez só, guardando o
+  // arquivo já reduzido em ARQUIVOS_RELATORIO - a leitura em si nem sabe
+  // que isso aconteceu.
+  let okComprimeFotoRelatorio = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'lancamento.html'), 'utf8');
+    const listener = (html.match(/addEventListener\('change',[\s\S]*?\n\}\);/) || [''])[0];
+    const conferencias = {
+      'existe a função de comprimir o lote de fotos escolhidas': /async function comprimirVariasRelatorio\(/.test(html),
+      'PDF sobe inteiro (comprimir só mexe em imagem)': /function comprimirImagemRelatorio\([\s\S]{0,200}return file;.*PDF sobe inteiro/.test(html),
+      'a compressão nunca trava a leitura por conta própria (qualquer erro devolve o arquivo original)': /catch\(e\)\{\s*\n\s*return file; \/\/ qualquer tropeço/.test(html),
+      'o listener de change chama a compressão antes de guardar o arquivo': !!listener && /ARQUIVOS_RELATORIO\s*=\s*await comprimirVariasRelatorio\(arquivos\)/.test(listener),
+      'o listener continua recusando mais que o teto de fotos (a checagem não sumiu com a mudança)': !!listener && /arquivos\.length > MAX_FOTOS_RELATORIO/.test(listener),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okComprimeFotoRelatorio = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okComprimeFotoRelatorio = false; console.log('  erro: ' + e.message); }
+  if (!okComprimeFotoRelatorio) ruins += 1;
+  console.log(`${okComprimeFotoRelatorio ? '✓' : '✗'} Foto do relatório: reduzida no navegador ANTES de subir (upload mais rápido, mesma leitura)`);
+
+  // ------------------------------------------------------------------
   // Gravar do Bravo tem que RECONCILIAR, nao "inserir se nao existir". As
   // primeiras importacoes (antes das correcoes de ordem de aba, timeout e
   // mescla) deixaram dias gravados pela metade; numa segunda passada esses
