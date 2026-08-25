@@ -4032,6 +4032,108 @@ setTimeout(async () => {
   console.log(`${okBoletoLink ? '✓' : '✗'} Ass. Boleto por link: favorecido anexa e preenche, Responsável só assina depois`);
 
   // ------------------------------------------------------------------
+  // Pedido do usuário: "preciso que o master consiga deletar o anexo para
+  // que coloquem outro" - print mostrando o Ass. Boleto já com o anexo
+  // errado, esperando assinatura. Antes disso a única saída era Cancelar +
+  // lançar outro (perde o Ticket #, some da fila de Triagem). Reabrir volta
+  // o MESMO link ao estado "aguardando o anexo", com o MESMO Ticket #.
+  let okReabrirAnexo = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const form = require('/home/user/adyen-monitor/server/formularios.js');
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+    const payload = JSON.stringify({
+      tipo: 'assBoleto', unidade: 'Spoleto Tacaruna',
+      campos: { favorecido: 'Energisa Reabrir', descricao: 'Conta errada anexada', vencimento: '30/08/2026', valor: '999,00' },
+    });
+    const criado = await postarMultipart('/api/formularios', { payload },
+      { nome: 'boleto-errado.pdf', tipo: 'application/pdf', buffer: Buffer.from('%PDF-1.4 boleto errado') }, 'anexos', cab);
+    const f = criado.status === 200 ? JSON.parse(criado.corpo) : {};
+    const tk = (lista, chave) => new URLSearchParams(String((lista.find((a) => a.chave === chave) || {}).link).split('?')[1]).get('t');
+
+    // alguém já assinou o documento ERRADO - tem que sumir junto com o anexo
+    await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tk(f.assinaturas, 'responsavel'), nome: 'Assinou o Errado', imagem: PNG });
+    const antesDeReabrir = await form.getOne(f.id);
+
+    // sabotagem de cenário, não de código: tenta reabrir tipo que não é
+    // soAnexo - tem que recusar (não faz sentido "reabrir anexo" de um
+    // Reembolso, que nem tem anexo obrigatório nesse fluxo)
+    const outroTipo = await postarMultipart('/api/formularios', {
+      payload: JSON.stringify({
+        tipo: 'reembolso', unidade: 'São Braz Ilha do Leite',
+        campos: { favorecido: 'Não Anexo', cpf: '000.000.000-00', banco: 'Banco', agencia: '0001', conta: '1-2', chavePix: 'x@x.com' },
+        linhas: [{ data: '20/08/2026', fornecedor: 'Fornecedor', descricao: 'Item', valor: '10,00' }],
+      }),
+    }, null, 'anexos', cab);
+    const fOutroTipo = outroTipo.status === 200 ? JSON.parse(outroTipo.corpo) : {};
+    const recusaOutroTipo = fOutroTipo.id ? await postarJson(`/api/formularios/${fOutroTipo.id}/reabrir-anexo`, {}, cab) : { status: 0 };
+
+    // reabrir um link que NUNCA foi preenchido (ainda AGUARDANDO) não faz
+    // sentido - já está exatamente no estado que reabrir devolveria
+    const linkVazio = await postarJson('/api/formularios/link-preenchimento', { tipo: 'assBoleto', unidade: 'Spoleto Tacaruna' }, cab);
+    const dLinkVazio = linkVazio.status === 200 ? JSON.parse(linkVazio.corpo) : {};
+    const recusaJaAguardando = dLinkVazio.id ? await postarJson(`/api/formularios/${dLinkVazio.id}/reabrir-anexo`, {}, cab) : { status: 0 };
+
+    const r = await postarJson(`/api/formularios/${f.id}/reabrir-anexo`, {}, cab);
+    const dReaberto = r.status === 200 ? JSON.parse(r.corpo) : {};
+    const depoisDeReabrir = await form.getOne(f.id);
+
+    // este formulário nasceu pelo caminho "unidade anexa direto" (sem link
+    // de preenchimento) - por isso não tinha tokenPreenchimento nenhum
+    // antes. Reabrir tem que CRIAR um, senão o Master não teria como
+    // reenviar pro favorecido depois de apagar o anexo errado. Com o link
+    // recém-criado, a tela pública tem que aceitar preenchimento de novo.
+    const vistaDeNovo = depoisDeReabrir.tokenPreenchimento
+      ? await pedir(`/api/formularios-publico/preencher/${depoisDeReabrir.tokenPreenchimento}`) : { status: 0 };
+    const dVistaDeNovo = vistaDeNovo.status === 200 ? JSON.parse(vistaDeNovo.corpo) : {};
+
+    // segundo cenário: um Ass. Boleto que JÁ nasceu por link (favorecido
+    // preencheu, já tem tokenPreenchimento de verdade) - reabrir tem que
+    // PRESERVAR esse link (é o que já está na mão do favorecido), não
+    // trocar por outro
+    const linkComAnexo = await postarJson('/api/formularios/link-preenchimento', { tipo: 'assBoleto', unidade: 'Spoleto Tacaruna' }, cab);
+    const dLinkComAnexo = linkComAnexo.status === 200 ? JSON.parse(linkComAnexo.corpo) : {};
+    const tokenAntesDoPreench = dLinkComAnexo.tokenPreenchimento;
+    if (tokenAntesDoPreench) {
+      await form.salvarPreenchimento(tokenAntesDoPreench, {
+        campos: { favorecido: 'Via link', descricao: 'Boleto via link', vencimento: '10/09/2026', valor: '77,00' },
+        anexos: [{ nome: 'boleto-via-link.pdf', path: 'anexos-teste/boleto-via-link.pdf', tipo: 'application/pdf' }],
+      });
+    }
+    const rLink = dLinkComAnexo.id ? await postarJson(`/api/formularios/${dLinkComAnexo.id}/reabrir-anexo`, {}, cab) : { status: 0 };
+    const dReabertoLink = rLink.status === 200 ? JSON.parse(rLink.corpo) : {};
+
+    const conferencias = {
+      'antes de reabrir: tem 1 anexo e 1 assinatura já colhida (o cenário do bug)':
+        (antesDeReabrir.anexos || []).length === 1 && !!antesDeReabrir.assinaturas.responsavel?.imagem,
+      'tipo sem soAnexo é recusado (não faz sentido reabrir anexo de quem não tem)':
+        recusaOutroTipo.status === 400 && /soAnexo|Ass\. Boleto/.test(recusaOutroTipo.corpo),
+      'link que nunca foi preenchido (ainda aguardando) é recusado': recusaJaAguardando.status === 400,
+      'reabrir responde 200 e devolve status de volta pra aguardando': r.status === 200 && dReaberto.status === 'AGUARDANDO_PREENCHIMENTO',
+      'o anexo errado SOME de verdade no banco': (depoisDeReabrir.anexos || []).length === 0,
+      'a assinatura já colhida (no documento errado) também some': Object.keys(depoisDeReabrir.assinaturas || {}).length === 0,
+      'o Ticket # é o MESMO de antes (não vira outro formulário)': depoisDeReabrir.numeroTicket === f.numeroTicket,
+      'criado direto (sem link antes) - reabrir GERA um link novo pra reenviar': !!depoisDeReabrir.tokenPreenchimento,
+      'com o link recém-criado, a tela pública aceita preenchimento (jaPreenchido some)': dVistaDeNovo.jaPreenchido === false,
+      'criado por link (já tinha token de verdade) - reabrir PRESERVA o mesmo link':
+        rLink.status === 200 && !!tokenAntesDoPreench && dReabertoLink.tokenPreenchimento === tokenAntesDoPreench,
+      'a tela (formularios.html) tem o botão "Trocar anexo", só pro soAnexo e só Master': (() => {
+        const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'formularios.html'), 'utf8');
+        return /onclick="reabrirAnexo\('\$\{f\.id\}','[^']*'\)"/.test(html)
+          && /t && t\.soAnexo \? `<button[^`]*onclick="reabrirAnexo/.test(html)
+          && /async function reabrirAnexo\(id, rotulo\)\{[\s\S]{0,400}\/reabrir-anexo/.test(html);
+      })(),
+      'os campos que o favorecido já tinha digitado continuam lá (só troca o arquivo)': depoisDeReabrir.campos.favorecido === 'Energisa Reabrir',
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okReabrirAnexo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okReabrirAnexo = false; console.log('  erro: ' + e.message); }
+  if (!okReabrirAnexo) ruins += 1;
+  console.log(`${okReabrirAnexo ? '✓' : '✗'} Ass. Boleto: Master reabre o anexo errado (mesmo link, mesmo Ticket #) pra trocarem por outro`);
+
+  // ------------------------------------------------------------------
   // Pedido do usuário: formulário assinado precisa virar um ticket de
   // Pagamento na Central, com os MESMOS anexos - e o formulário já nasce
   // com Ticket # da mesma sequência, então os dois lados compartilham o

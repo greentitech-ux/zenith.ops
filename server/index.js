@@ -3447,6 +3447,21 @@ app.put('/api/formularios/:id', auth.requireMaster, async (req, res) => {
   }
 });
 
+// Ass. Boleto (soAnexo): anexo errado (foto ruim, boleto de outra unidade)
+// não tinha correção - só dava pra Cancelar e lançar outro, perdendo o
+// Ticket #. Reabrir volta o MESMO link pro estado "aguardando o anexo",
+// zerando o arquivo e as assinaturas que já tinham sido colhidas (ver
+// formularios.js/reabrirAnexo).
+app.post('/api/formularios/:id/reabrir-anexo', auth.requireMaster, async (req, res) => {
+  try {
+    const dados = { porEmail: req.user.email };
+    if (await desviarSeQaMaster(req, res, 'formularios.reabrirAnexo', `Reabrir anexo do formulário ${req.params.id}`, { id: req.params.id, ...dados })) return;
+    res.json(formularioComLinks(await formularios.reabrirAnexo(req.params.id, dados)));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/formularios/:id/cancelar', auth.requireMaster, async (req, res) => {
   try {
     const dados = { motivo: req.body.motivo, porEmail: req.user.email };
@@ -3955,6 +3970,7 @@ const EXECUTORES_QA = {
   'manutencao.abortarReinicio': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_ABORTAR_REINICIO, { origem: 'manutencao-abortar' }),
   'formularios.editar': (p) => formularios.editar(p.id, { campos: p.campos, linhas: p.linhas, porEmail: p.porEmail }),
   'formularios.cancelar': (p) => formularios.cancelar(p.id, { motivo: p.motivo, porEmail: p.porEmail }),
+  'formularios.reabrirAnexo': (p) => formularios.reabrirAnexo(p.id, { porEmail: p.porEmail }),
   'formularios.remover': (p) => formularios.remover(p.id),
   'pedidoSemanal.criarRegra': (p) => pedidoSemanal.criarRegra(p),
   'pedidoSemanal.editarRegra': (p) => pedidoSemanal.atualizarRegra(p.id, p),

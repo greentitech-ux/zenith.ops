@@ -664,6 +664,37 @@ async function editar(id, { campos, linhas, porEmail } = {}) {
   return { ...(await detalhar(id)), assinaturasDescartadas: descartadas, semMudanca: false };
 }
 
+// reabre o preenchimento do Ass. Boleto (soAnexo) pra trocar um anexo
+// errado (foto borrada, boleto de outra unidade) - pedido do Master: hoje
+// a única saída era Cancelar e lançar outro, o que queima o Ticket # e
+// perde o histórico. Volta pro estado "aguardando" com o MESMO link
+// (tokenPreenchimento) e o MESMO Ticket #: zera só o anexo e as
+// assinaturas já colhidas (elas valiam pro documento errado, não fazem
+// mais sentido pro novo) - campos (favorecido/descrição/vencimento/valor)
+// ficam como estavam, então quem reenviar só precisa trocar o arquivo, não
+// redigitar tudo (preencher.html pré-preenche a partir de MODELO.campos
+// independente do formulário estar "aguardando" de novo ou não).
+// tokenPreenchimento: um Ass. Boleto criado direto pela unidade (upload na
+// hora, sem passar por link) nunca teve um - gera um novo AQUI pra sempre
+// existir um link pra mandar depois de reabrir, mesmo quando não tinha
+// nenhum antes. Se já existia (criado por link), preserva o mesmo - é o
+// que já estava na mão do favorecido, não precisa mandar de novo.
+async function reabrirAnexo(id, { porEmail } = {}) {
+  const r = await getOne(id);
+  if (!r) throw new Error('Formulário não encontrado.');
+  const modelo = TIPOS[r.tipo];
+  if (!modelo || !modelo.soAnexo) throw new Error('Só dá pra reabrir o anexo de formulários do tipo Ass. Boleto.');
+  if (r.status === STATUS_AGUARDANDO) throw new Error('Esse link já está aguardando o anexo - não precisa reabrir.');
+  if (r.status === 'CANCELADO') throw new Error('Formulário cancelado não pode ser reaberto - lance outro.');
+  await COLLECTION.doc(id).update({
+    anexos: [], assinaturas: {}, status: STATUS_AGUARDANDO,
+    tokenPreenchimento: r.tokenPreenchimento || crypto.randomBytes(18).toString('hex'),
+    anexoReabertoEm: new Date().toISOString(), anexoReabertoPorEmail: porEmail || null,
+  });
+  cache.invalidar();
+  return detalhar(id);
+}
+
 // cancelar não apaga: o registro fica, com motivo e autor, e some do
 // caminho de quem ia assinar. Zerar o token de cada slot é o que mata o
 // link que já foi pro WhatsApp de alguém - sem token, chaveDoToken não
@@ -1026,4 +1057,5 @@ async function gerarPdf(r, res, opcoes) {
 
 module.exports = { TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, editar, cancelar, remover, gerarPdf, chaveDoToken, parseValor,
   criarParaPreenchimento, vistaPreenchimento, salvarPreenchimento, cancelarPreenchimento, marcarEnviadoPagamento,
+  reabrirAnexo,
 };
