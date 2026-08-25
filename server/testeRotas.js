@@ -6530,11 +6530,12 @@ setTimeout(async () => {
   // Formulários: a lista tinha virado um monte só se amontoando (pedido do
   // usuário) - organização de fonte, no mesmo desenho já usado em
   // Central/Solicitações (central-historico.html): chips de tipo com
-  // contagem, Triagem em kanban por status (só o que precisa de alguém
-  // agora + o que foi assinado HOJE + TODOS os cancelados, numa coluna
-  // própria pra não precisar abrir aba por aba de tipo pra achar um
-  // cancelado - pedido do usuário) e a aba de um tipo mostra o histórico
-  // completo dele (inclusive assinados de dias anteriores), sem esse corte.
+  // contagem, e o MESMO padrão de botões por status (clica e a lista
+  // aparece embaixo, só um aberto por vez) tanto na Triagem (só o que
+  // precisa de alguém agora + o que foi assinado HOJE + TODOS os
+  // cancelados) quanto na aba de um tipo específico (histórico completo,
+  // sem esse corte de "hoje" no Assinado) - pedido do usuário: aplicar o
+  // mesmo estilo também nas abas de tipo, não só na Triagem.
   let okFormulariosOrganizacao = false;
   try {
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'formularios.html'), 'utf8');
@@ -6545,18 +6546,23 @@ setTimeout(async () => {
         const trecho = html.slice(i, i + 400);
         return i >= 0 && !/CANCELADO.*return false/.test(trecho) && /ASSINADO.*return assinadoHoje/.test(trecho);
       })(),
-      'Triagem tem os 4 status certos (viraram botão, não coluna sempre visível), incluindo Cancelados':
+      'os 4 status certos existem (viraram botão, não coluna sempre visível), incluindo Cancelados':
         /status:'AGUARDANDO_PREENCHIMENTO', titulo:'Aguardando preenchimento'/.test(html)
         && /status:'PENDENTE', titulo:'Aguardando assinatura'/.test(html)
-        && /status:'ASSINADO', titulo:'Assinado hoje'/.test(html)
+        && /status:'ASSINADO', titulo: emTriagem \? 'Assinado hoje' : 'Assinado'/.test(html)
         && /status:'CANCELADO', titulo:'Cancelados'/.test(html),
       // pedido do usuário: nada de coluna sempre aberta - clica no botão do
       // status e a lista aparece embaixo dele, só uma aberta por vez
       'clicar no botão de status alterna (mesmo clique fecha de novo) e só mostra a lista de quem está aberto':
         /function toggleStatusTriagem\(status\)\{\s*TRIAGEM_STATUS_ABERTO = \(TRIAGEM_STATUS_ABERTO===status\) \? null : status;/.test(html)
         && /const cardsAbertos = TRIAGEM_STATUS_ABERTO \? visiveis\.filter/.test(html),
-      'aba de um tipo específico ignora a Triagem (mostra o histórico completo)':
-        /if\(!emTriagem\)\{[\s\S]{0,200}alvo\.innerHTML = visiveis\.map\(cardHtml\)\.join\(''\);/.test(html),
+      'aba de um tipo específico usa o MESMO padrão de botões (não voltou a ser lista corrida)':
+        !/alvo\.innerHTML = visiveis\.map\(cardHtml\)\.join\(''\);/.test(html)
+        && /const COLUNAS = \[/.test(html),
+      'só muda o rótulo do Assinado entre Triagem (hoje) e aba de tipo (histórico completo)':
+        /titulo: emTriagem \? 'Assinado hoje' : 'Assinado'/.test(html),
+      'trocar de aba de tipo fecha o status que estava aberto (não carrega estado de uma aba pra outra)':
+        /function selecionarTipoFiltroLista\(tipo\)\{ TIPO_FILTRO_LISTA = tipo; TRIAGEM_STATUS_ABERTO = null; renderLista\(\); \}/.test(html),
       'filtro de loja/busca existe': /id="filtro-unidade-lista"/.test(html) && /id="filtro-busca-lista"/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
@@ -6564,7 +6570,36 @@ setTimeout(async () => {
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
   } catch (e) { okFormulariosOrganizacao = false; console.log('  erro: ' + e.message); }
   if (!okFormulariosOrganizacao) ruins += 1;
-  console.log(`${okFormulariosOrganizacao ? '✓' : '✗'} Formulários: lista organizada por tipo (chips+contagem) e Triagem em kanban por status, igual Solicitações`);
+  console.log(`${okFormulariosOrganizacao ? '✓' : '✗'} Formulários: lista organizada por tipo (chips+contagem) e botões por status também na aba de tipo, igual Triagem`);
+
+  // ------------------------------------------------------------------
+  // Formulários: filtros de tempo (Hoje/Ontem/Semana/Mês + De-Até) sobre a
+  // lista - pedido do usuário. Sem restrição por padrão (uma pendência
+  // antiga não pode sumir da Triagem só por estar fora do período).
+  let okFormulariosPeriodo = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'formularios.html'), 'utf8');
+    const conf = {
+      'inputs De/Até + presets existem na tela': /id="filtro-data-de-lista"/.test(html) && /id="filtro-data-ate-lista"/.test(html)
+        && /id="presets-periodo-lista"/.test(html),
+      'os 5 presets certos (Todos/Hoje/Ontem/Semana/Mês)':
+        /\{lbl:'Todos', tipo:'todos'\}, \{lbl:'Hoje', tipo:'hoje'\}, \{lbl:'Ontem', tipo:'ontem'\}, \{lbl:'Semana', tipo:'semana'\}, \{lbl:'Mês', tipo:'mes'\}/.test(html),
+      'sem filtro nenhum (Todos) não restringe nada - pendência antiga não some da Triagem': (() => {
+        const i = html.indexOf('function passaPeriodoForm');
+        const trecho = html.slice(i, i + 200);
+        return i >= 0 && /if\(!FILTRO_DATA_DE_LISTA && !FILTRO_DATA_ATE_LISTA\) return true;/.test(trecho);
+      })(),
+      'o filtro de período é aplicado na mesma base que unidade/busca (afeta Triagem e abas de tipo)':
+        /passaBuscaForm\(f\) && passaPeriodoForm\(f\)/.test(html),
+      'o período é calculado em Brasília (não no fuso do navegador/servidor)':
+        /toLocaleDateString\('sv-SE', \{ timeZone: FUSO_BR_LISTA \}\)/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okFormulariosPeriodo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okFormulariosPeriodo = false; console.log('  erro: ' + e.message); }
+  if (!okFormulariosPeriodo) ruins += 1;
+  console.log(`${okFormulariosPeriodo ? '✓' : '✗'} Formulários: filtros de tempo (Hoje/Ontem/Semana/Mês/De-Até) sobre a lista, sem restringir por padrão`);
 
   // ------------------------------------------------------------------
   // Duplicação de loja no "Chamados em aberto (por unidade)" (Histórico):
