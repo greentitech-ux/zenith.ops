@@ -31,7 +31,12 @@ const COLLECTION = db.collection('solicitacoes');
 // checklist com confirmacao humana - ver acessosPessoa.js. Payload proprio
 // (nomePessoa/motivoAcesso/datas), nao entra em TIPOS_GERAIS (nao e trocavel
 // de tipo nem vira Estorno, mesmo motivo de quebra-caixa/ajuste-fechamento)
-const TIPOS = ['compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota', 'quebra-caixa', 'desvio-estoque', 'acesso-pessoa'];
+// 'adiantamento': nasce do formulário de mesmo nome (formularios.js), já
+// assinado - favorecido+gerente autorizaram o valor a sair, mas o ticket só
+// pode FINALIZAR depois que alguém anexa a nota e informa o valor GASTO de
+// verdade (ver EXECUCAO_STATUSES/registrarPrestacaoContas mais abaixo) -
+// pedido explícito do Master pra não ficar "no ar" sem prestação de contas
+const TIPOS = ['compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota', 'quebra-caixa', 'desvio-estoque', 'acesso-pessoa', 'adiantamento'];
 const MOTIVOS_ACESSO = ['desligamento', 'ferias'];
 // 'CONVERTIDO': o ticket saiu desse tipo/colecao e virou um Estorno (ver
 // converterParaEstorno) - o registro fica de historico, quem continua a
@@ -138,6 +143,14 @@ async function create({ tipo, unidade, unidadeNome, titulo, valorEstimado, obser
       rh: { status: 'pendente', alvoId: null, executadoPorEmail: null, executadoEm: null },
       abastecimento: { status: 'pendente', alvoId: null, executadoPorEmail: null, executadoEm: null },
       concluido: false, concluidoPorEmail: null, concluidoEm: null,
+    } : null,
+    // so pra tipo 'adiantamento' - a prestacao de contas (nota + valor
+    // gasto de verdade) que fecha o ticket, ver registrarPrestacaoContas.
+    // Nasce "pendente" pra sempre existir um objeto pra ler, mesmo antes de
+    // qualquer coisa acontecer (mesmo espirito do acessoChecklist acima)
+    prestacaoContas: tipo === 'adiantamento' ? {
+      valorGasto: null, diferenca: null, comprovante: null,
+      registradoPorEmail: null, registradoEm: null,
     } : null,
     status: 'PENDENTE',
     // prioridade + prazo-alvo de resolucao (SLA) - ver prioridades.js. O
@@ -340,7 +353,24 @@ async function atualizarExecucao(id, execucaoStatus, { porNome } = {}) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Solicitação não encontrada.');
-  if (snap.data().status !== 'APROVADO') throw new Error('Só é possível atualizar o andamento de um ticket já aprovado.');
+  const atual = snap.data();
+  if (atual.status !== 'APROVADO') throw new Error('Só é possível atualizar o andamento de um ticket já aprovado.');
+  // Adiantamento só finaliza pela prestação de contas (nota + valor gasto) -
+  // sem essa trava, dava pra marcar Finalizado igual a qualquer outro ticket
+  // e o adiantamento nunca seria cobrado de verdade (ver
+  // registrarPrestacaoContas mais abaixo, unico caminho pra FINALIZADO aqui).
+  // Depois de já registrada, também trava QUALQUER mudança por aqui (não só
+  // pra FINALIZADO de novo) - senão dava pra reabrir escondido (voltar pra
+  // Pendente/Em andamento) sem passar por desfazerPrestacaoContas, deixando
+  // valorGasto/diferença velhos pendurados num ticket que "parece" reaberto
+  if (atual.tipo === 'adiantamento') {
+    if (execucaoStatus === 'FINALIZADO') {
+      throw new Error('Adiantamento só finaliza registrando a prestação de contas (nota + valor gasto), não por aqui.');
+    }
+    if (atual.prestacaoContas && atual.prestacaoContas.valorGasto != null) {
+      throw new Error('Esse adiantamento já tem prestação de contas registrada - desfaça-a antes de mudar o andamento.');
+    }
+  }
   const patch = { execucaoStatus };
   if (porNome) patch.execucaoPorNome = porNome;
   await ref.update(patch);
@@ -474,6 +504,53 @@ async function desmarcarComprada(id) {
   await ref.update({
     comprada: false, dataEntregaPrevista: null, comprovante: null,
     marcadoCompradoPorEmail: null, marcadoCompradoEm: null,
+  });
+  solicitacoesCache.invalidar();
+  return getOne(id);
+}
+
+// fecha um Adiantamento (ver TIPOS acima): valor GASTO de verdade + nota
+// fiscal, comparados contra o valorEstimado que saiu na hora do adiantamento
+// - "diferenca" positiva é sobra (gastou menos que adiantado), negativa é
+// falta (gastou mais, alguém tem que cobrir). É o UNICO caminho pra
+// execucaoStatus virar FINALIZADO nesse tipo (ver atualizarExecucao acima)
+async function registrarPrestacaoContas(id, { valorGasto, comprovante, registradoPorEmail }) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Solicitação não encontrada.');
+  const atual = snap.data();
+  if (atual.tipo !== 'adiantamento') throw new Error('Só tickets de Adiantamento têm prestação de contas.');
+  if (atual.status !== 'APROVADO') throw new Error('Só um adiantamento já Aprovado pode ter a prestação de contas registrada.');
+  if (valorGasto == null || valorGasto === '' || Number.isNaN(Number(valorGasto))) throw new Error('Informe o valor gasto.');
+  const gasto = Number(valorGasto);
+  const patch = {
+    execucaoStatus: 'FINALIZADO',
+    prestacaoContas: {
+      valorGasto: gasto,
+      diferenca: (Number(atual.valorEstimado) || 0) - gasto,
+      comprovante: comprovante || atual.prestacaoContas?.comprovante || null,
+      registradoPorEmail,
+      registradoEm: new Date().toISOString(),
+    },
+  };
+  await ref.update(patch);
+  solicitacoesCache.invalidar();
+  return getOne(id);
+}
+
+// desfaz uma prestação de contas lançada errada (nota trocada, valor digitado
+// errado) - mesmo espírito de desmarcarComprada. Volta pra Em andamento (não
+// Pendente: o ticket já estava sendo tratado, só a prestação de contas em si
+// que precisa ser refeita)
+async function desfazerPrestacaoContas(id) {
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Solicitação não encontrada.');
+  const atual = snap.data();
+  if (atual.tipo !== 'adiantamento') throw new Error('Só tickets de Adiantamento têm prestação de contas.');
+  await ref.update({
+    execucaoStatus: 'EM_ANDAMENTO',
+    prestacaoContas: { valorGasto: null, diferenca: null, comprovante: null, registradoPorEmail: null, registradoEm: null },
   });
   solicitacoesCache.invalidar();
   return getOne(id);
@@ -650,6 +727,6 @@ module.exports = {
   atualizarExecucao, atualizarPrioridade, gerarTokenAcao, validarToken, decidirPorToken,
   buscarEstadoPorToken, podeDecidirComToken, podeAgirComLink, gerarLinkAcao, revogarLinkAcao,
   buscarPorLinkAcao, decidirComLink, atualizarExecucaoComLink, marcarCompradaComLink,
-  atualizarAcessoChecklist, marcarAcessoConcluido,
+  atualizarAcessoChecklist, marcarAcessoConcluido, registrarPrestacaoContas, desfazerPrestacaoContas,
   invalidar: () => solicitacoesCache.invalidar(),
 };

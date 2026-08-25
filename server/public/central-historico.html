@@ -453,6 +453,11 @@
       <div class="sub" style="margin:-2px 0 8px;">Depois de aprovado, acompanhe a execução de verdade do ticket.</div>
       <div id="d-andamento-corpo"></div>
     </div>
+    <div id="d-prestacao-contas" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px;">
+      <div class="secao-titulo">💵 Prestação de contas</div>
+      <div class="sub" style="margin:-2px 0 8px;">Só finaliza depois que a nota e o valor gasto de verdade forem anexados aqui.</div>
+      <div id="d-prestacao-contas-corpo"></div>
+    </div>
     <div id="d-tipo-acoes" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px;">
       <div class="secao-titulo">🔀 Categoria do ticket</div>
       <div class="sub" style="margin:-2px 0 8px;">Este ticket pode mudar de categoria ou virar Estorno conforme o atendimento evolui.</div>
@@ -662,6 +667,10 @@ const TIPOS_INFO = {
   // TIPOS_GERAIS, nao troca de tipo/converte)
   'desvio-estoque': { label:'Desvio de estoque', secaoNecessaria:'inventario' },
   'acesso-pessoa': { label:'Acesso de pessoa', secaoNecessaria:null },
+  // nasce do formulário "Adiantamento" (formularios.js), já assinado - não
+  // entra em TIPOS_GERAIS de propósito (payload próprio, prestacaoContas,
+  // mesmo critério de acesso-pessoa: não troca de tipo nem vira Estorno)
+  'adiantamento': { label:'Adiantamento', secaoNecessaria:null },
 };
 // os 5 tipos gerais que trocam de tipo entre si (mudarTipo) ou viram Estorno
 // (converterParaEstorno) - Estorno tambem pode virar um desses 5 (converter,
@@ -776,7 +785,7 @@ function ehBloqueioLogin(c){
 }
 
 function iconeTipo(tipo){
-  return { estorno:'💳', 'ajuste-fechamento':'🧾', compra:'🛒', manutencao:'🔧', 'suporte-ti':'💻', pagamento:'💸', nota:'📄', 'quebra-caixa':'⚠️', 'desvio-estoque':'📦⚠️', 'acesso-pessoa':'🔐' }[tipo] || '📋';
+  return { estorno:'💳', 'ajuste-fechamento':'🧾', compra:'🛒', manutencao:'🔧', 'suporte-ti':'💻', pagamento:'💸', nota:'📄', 'quebra-caixa':'⚠️', 'desvio-estoque':'📦⚠️', 'acesso-pessoa':'🔐', adiantamento:'💵' }[tipo] || '📋';
 }
 
 // badge de vencimento pra demanda de pagamento - vermelho se ja venceu e
@@ -1453,6 +1462,7 @@ function abrirDetalhe(tipo, id){
 
   renderComprada(c);
   renderAndamento(c);
+  renderPrestacaoContas(c);
   renderAcessoChecklist(c);
 
   document.getElementById('overlay-detalhe').classList.remove('hidden');
@@ -1470,14 +1480,24 @@ const ANDAMENTO_INFO = {
 };
 function renderAndamento(c){
   const wrap = document.getElementById('d-andamento');
-  const podeVer = (TIPOS_GERAIS.includes(c.tipo) || c.tipo==='estorno') && c.status==='APROVADO';
+  // Adiantamento com prestação de contas já registrada some daqui - o
+  // painel "Prestação de contas" logo abaixo já mostra o estado final, e o
+  // servidor trava qualquer mudança de andamento nesse ponto mesmo (ver
+  // atualizarExecucao em solicitacoes.js) - mostrar botões clicáveis que só
+  // dão erro seria pior do que não mostrar
+  const jaPrestouContas = c.tipo==='adiantamento' && c.prestacaoContas && c.prestacaoContas.valorGasto != null;
+  const podeVer = (TIPOS_GERAIS.includes(c.tipo) || c.tipo==='estorno' || c.tipo==='adiantamento') && c.status==='APROVADO' && !jaPrestouContas;
   wrap.classList.toggle('hidden', !podeVer);
   if(!podeVer) return;
   const atual = c.execucaoStatus || 'PENDENTE';
   const podeMudar = IS_MASTER || IS_ADMIN;
+  // Adiantamento não finaliza clicando aqui - só pela prestação de contas
+  // (nota + valor gasto, ver d-prestacao-contas/renderPrestacaoContas) - o
+  // botão Finalizado some pra não parecer um jeito de pular essa etapa
+  const ehAdiantamento = c.tipo==='adiantamento';
   const corpo = document.getElementById('d-andamento-corpo');
   const estiloBase = 'font-family:var(--sans);font-size:12px;padding:8px 12px;border-radius:10px;cursor:pointer;';
-  const botoes = Object.keys(ANDAMENTO_INFO).map(st=>{
+  const botoes = Object.keys(ANDAMENTO_INFO).filter(st=>!(ehAdiantamento && st==='FINALIZADO')).map(st=>{
     const info = ANDAMENTO_INFO[st];
     const ativo = st===atual;
     const estilo = ativo
@@ -1486,6 +1506,84 @@ function renderAndamento(c){
     return `<button type="button" ${podeMudar && !ativo ? `onclick="salvarAndamento('${st}')"` : 'disabled'} style="${estilo}">${info.icone} ${info.label}</button>`;
   }).join('');
   corpo.innerHTML = `<div style="display:flex;gap:8px;flex-wrap:wrap;">${botoes}</div>`;
+}
+
+// prestação de contas do Adiantamento - so tickets Aprovados, visivel pra
+// Master/Admin registrar (valor gasto obrigatorio + nota opcional) ou
+// desfazer; quem nao decide (loja) so ve o resultado. Mesmo desenho de
+// renderComprada acima, so que o valor GASTO e obrigatorio (sem ele nao da
+// pra calcular a diferenca) e finaliza o Andamento junto (ver
+// solicitacoes.registrarPrestacaoContas no servidor)
+function renderPrestacaoContas(c){
+  const wrap = document.getElementById('d-prestacao-contas');
+  const podeVer = c.tipo==='adiantamento' && c.status==='APROVADO';
+  wrap.classList.toggle('hidden', !podeVer);
+  if(!podeVer) return;
+  const podeMarcar = IS_MASTER || IS_ADMIN;
+  const corpo = document.getElementById('d-prestacao-contas-corpo');
+  const pc = c.prestacaoContas || {};
+  if(pc.valorGasto != null){
+    const diferenca = Number(pc.diferenca || 0);
+    const corDif = diferenca > 0 ? 'var(--ok)' : (diferenca < 0 ? 'var(--bad)' : 'var(--muted)');
+    const textoDif = diferenca > 0 ? `sobrou ${fmtMoney(diferenca)}` : (diferenca < 0 ? `faltou ${fmtMoney(-diferenca)}` : 'bateu certinho');
+    corpo.innerHTML = `
+      <div style="color:var(--ok);font-weight:600;">✅ Prestação de contas registrada</div>
+      <div>Adiantado: <b>${fmtMoney(c.valorEstimado||0)}</b> · Gasto: <b>${fmtMoney(pc.valorGasto)}</b></div>
+      <div style="color:${corDif};font-weight:600;">${textoDif}</div>
+      ${pc.comprovante ? `<div class="anexo-item">📎 <a href="/api/solicitacoes/${c.id}/prestacao-contas/comprovante?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">${escapeHtml(pc.comprovante.nome)}</a></div>` : ''}
+      <div class="sub" style="margin-top:2px;">registrado por ${escapeHtml(pc.registradoPorEmail||'')} · ${fmtDataHora(pc.registradoEm)}</div>
+      ${podeMarcar ? `<button type="button" class="link-btn" style="margin-top:6px;" onclick="desfazerPrestacaoContas()">Desfazer</button>` : ''}
+    `;
+    return;
+  }
+  if(!podeMarcar){
+    corpo.innerHTML = `<div class="sub">Ainda não foi registrada.</div>`;
+    return;
+  }
+  corpo.innerHTML = `
+    <div class="sub" style="margin:-2px 0 6px;">Adiantado: <b>${fmtMoney(c.valorEstimado||0)}</b></div>
+    <label>Valor gasto de verdade (R$)</label>
+    <input type="number" step="0.01" min="0" id="pc-valor-gasto">
+    <label>Nota fiscal / comprovante (opcional)</label>
+    <input type="file" id="pc-arquivo" accept="image/*,.pdf">
+    <button type="button" class="btn-primary" style="margin-top:8px;" onclick="registrarPrestacaoContas()">✅ Registrar e finalizar</button>
+  `;
+}
+async function registrarPrestacaoContas(){
+  if(!DETALHE_ATUAL) return;
+  const valorGasto = document.getElementById('pc-valor-gasto').value;
+  if(valorGasto===''){ alert('Informe o valor gasto.'); return; }
+  const arquivo = document.getElementById('pc-arquivo').files[0];
+  try{
+    let resp;
+    if(arquivo){
+      const fd = new FormData();
+      fd.append('payload', JSON.stringify({ valorGasto }));
+      fd.append('comprovante', arquivo);
+      resp = await fetch(`/api/solicitacoes/${DETALHE_ATUAL.id}/prestacao-contas`, { method:'PATCH', body: fd });
+    }else{
+      resp = await fetch(`/api/solicitacoes/${DETALHE_ATUAL.id}/prestacao-contas`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ valorGasto }) });
+    }
+    const atualizado = await resp.json();
+    if(!resp.ok) throw new Error(atualizado.error || 'Erro ao registrar a prestação de contas.');
+    DETALHE_ATUAL = { ...DETALHE_ATUAL, ...atualizado };
+    renderPrestacaoContas(DETALHE_ATUAL);
+    renderAndamento(DETALHE_ATUAL);
+    await carregarCentral();
+  }catch(err){ alert(err.message); }
+}
+async function desfazerPrestacaoContas(){
+  if(!DETALHE_ATUAL) return;
+  if(!confirm('Desfazer a prestação de contas? O ticket volta pra "Em andamento".')) return;
+  try{
+    const resp = await fetch(`/api/solicitacoes/${DETALHE_ATUAL.id}/prestacao-contas`, { method:'DELETE' });
+    const atualizado = await resp.json();
+    if(!resp.ok) throw new Error(atualizado.error || 'Erro ao desfazer.');
+    DETALHE_ATUAL = { ...DETALHE_ATUAL, ...atualizado };
+    renderPrestacaoContas(DETALHE_ATUAL);
+    renderAndamento(DETALHE_ATUAL);
+    await carregarCentral();
+  }catch(err){ alert(err.message); }
 }
 async function salvarAndamento(novoStatus){
   const c = DETALHE_ATUAL;

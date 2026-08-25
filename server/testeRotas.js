@@ -6217,6 +6217,107 @@ setTimeout(async () => {
   console.log(`${okAcessoPessoa ? '✓' : '✗'} Acesso de pessoa: checklist com confirmação humana bloqueia/reativa os 3 sistemas de verdade`);
 
   // ------------------------------------------------------------------
+  // Adiantamento: formulário assinado (formularios.js) -> ticket 'adiantamento'
+  // na Central (NÃO 'pagamento', ver enviar-pagamento em index.js) -> só
+  // finaliza pela prestação de contas (nota + valor gasto), nunca clicando
+  // direto em "Finalizado" no Andamento. Cobre o pedido do usuário: "não
+  // pode ficar no ar" sem alguém prestar contas do dinheiro adiantado.
+  let okAdiantamento = false;
+  try {
+    const cab = { Authorization: 'Bearer ' + token };
+    const solicitacoesMod = require('/home/user/adyen-monitor/server/solicitacoes.js');
+    const form = require('/home/user/adyen-monitor/server/formularios.js');
+    const bcrypt = require('bcryptjs');
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+    // acesso comum (não Master, não Admin) - só pra provar que a prestação
+    // de contas é MESMO Master/Admin-only, não basta ter a seção formularios
+    DOCS.set('users/u-adiant-comum', {
+      passwordHash: bcrypt.hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      email: 'comum.adiantamento@teste.local', username: 'comumadiant',
+      permissions: { sections: ['formularios', 'solicitacoes'], unidades: ['São Braz Ilha do Leite'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    require('/home/user/adyen-monitor/server/users.js').invalidar();
+    const loginComum = await auth.login('comum.adiantamento@teste.local', 'SenhaDeTeste!2026');
+    const cabComum = { Authorization: 'Bearer ' + loginComum.token };
+
+    const criado = await postarMultipart('/api/formularios', {
+      payload: JSON.stringify({
+        tipo: 'adiantamento', unidade: 'São Braz Ilha do Leite',
+        campos: { favorecido: 'Roberto Adiantado', cnpjFavorecido: '', banco: 'Nubank', agencia: '0001', conta: '55443-2', chavePix: 'roberto@pix.com' },
+        linhas: [{ data: '20/08/2026', descricao: 'Compra emergencial de gás', valor: '500,00' }],
+      }),
+    }, null, 'anexos', cab);
+    const f = criado.status === 200 ? JSON.parse(criado.corpo) : {};
+    const tk = (lista, chave) => new URLSearchParams(String((lista.find((a) => a.chave === chave) || {}).link).split('?')[1]).get('t');
+
+    await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tk(f.assinaturas, 'favorecido'), nome: 'Roberto Adiantado', imagem: PNG });
+    await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tk(f.assinaturas, 'gerente'), nome: 'Gerente São Braz', imagem: PNG });
+
+    const enviado = await postarJson(`/api/formularios/${f.id}/enviar-pagamento`, {}, cab);
+    const dEnviado = enviado.status === 200 ? JSON.parse(enviado.corpo) : {};
+    const ticketId = dEnviado.ticket && dEnviado.ticket.id;
+
+    const ticketAntesAprovar = ticketId ? await solicitacoesMod.getOne(ticketId) : null;
+
+    // tentar finalizar direto (via /execucao) antes de aprovar - e depois de
+    // aprovado, mas SEM prestação de contas - os dois têm que ser recusados
+    const finalizarPendente = ticketId ? await enviarJson('PATCH', `/api/solicitacoes/${ticketId}/execucao`, { execucaoStatus: 'FINALIZADO' }, cab) : { status: 0 };
+
+    await enviarJson('PATCH', `/api/solicitacoes/${ticketId}/status`, { status: 'APROVADO', motivoDecisao: 'ok adiantamento' }, cab);
+
+    const finalizarDireto = await enviarJson('PATCH', `/api/solicitacoes/${ticketId}/execucao`, { execucaoStatus: 'FINALIZADO' }, cab);
+    const dFinalizarDireto = JSON.parse(finalizarDireto.corpo || '{}');
+    const andamentoOk = await enviarJson('PATCH', `/api/solicitacoes/${ticketId}/execucao`, { execucaoStatus: 'EM_ANDAMENTO' }, cab);
+
+    // prestação de contas: acesso comum é recusado (403), mesmo tendo a
+    // seção formularios/solicitacoes - a rota é Master/Admin-only
+    const pcComum = await enviarJson('PATCH', `/api/solicitacoes/${ticketId}/prestacao-contas`, { valorGasto: 480 }, cabComum);
+
+    // tipo errado (compra) é recusado
+    const compraQualquer = await postarJson('/api/solicitacoes', { tipo: 'compra', unidade: 'São Braz Ilha do Leite', titulo: 'Compra qualquer', valorEstimado: 1 }, cab);
+    const dCompraQualquer = JSON.parse(compraQualquer.corpo || '{}');
+    const pcTipoErrado = await enviarJson('PATCH', `/api/solicitacoes/${dCompraQualquer.id}/prestacao-contas`, { valorGasto: 1 }, cab);
+
+    // sem valorGasto é recusado
+    const pcSemValor = await enviarJson('PATCH', `/api/solicitacoes/${ticketId}/prestacao-contas`, {}, cab);
+
+    // registra com sobra (gastou menos que os R$500 adiantados)
+    const pcOk = await enviarJson('PATCH', `/api/solicitacoes/${ticketId}/prestacao-contas`, { valorGasto: 480 }, cab);
+    const dPcOk = JSON.parse(pcOk.corpo || '{}');
+
+    // agora SIM finaliza direto é recusado de novo (já tá finalizado, mas
+    // por outro motivo - continua não sendo esse o caminho)
+    const finalizarDepoisDeFechado = await enviarJson('PATCH', `/api/solicitacoes/${ticketId}/execucao`, { execucaoStatus: 'PENDENTE' }, cab);
+
+    const desfazer = await enviarJson('DELETE', `/api/solicitacoes/${ticketId}/prestacao-contas`, {}, cab);
+    const dDesfazer = JSON.parse(desfazer.corpo || '{}');
+
+    const conf = {
+      'formulário de Adiantamento existe e assina como Favorecido+Gerente (igual Avulso)': enviado.status === 200 && !!dEnviado.ticket,
+      'vira ticket tipo "adiantamento" na Central, NÃO "pagamento"': !!ticketAntesAprovar && ticketAntesAprovar.tipo === 'adiantamento',
+      'ticket nasce com valorEstimado = valor total do formulário (R$500)': !!ticketAntesAprovar && Number(ticketAntesAprovar.valorEstimado) === 500,
+      'ticket nasce com prestacaoContas "pendente" (valorGasto null)': !!ticketAntesAprovar && ticketAntesAprovar.prestacaoContas && ticketAntesAprovar.prestacaoContas.valorGasto === null,
+      'finalizar direto (/execucao) antes de aprovar é recusado (nem chega na trava de tipo)': finalizarPendente.status === 400,
+      'finalizar direto (/execucao) depois de Aprovado é recusado - só pela prestação de contas': finalizarDireto.status === 400 && /prestação de contas/.test(dFinalizarDireto.error || ''),
+      'Em Andamento continua liberado pelo /execucao normal (só Finalizado é travado)': andamentoOk.status === 200,
+      'prestação de contas: acesso comum (não Master/Admin) é recusado, 403': pcComum.status === 403,
+      'prestação de contas: tipo errado (compra) é recusado': pcTipoErrado.status === 400,
+      'prestação de contas: sem valorGasto é recusado': pcSemValor.status === 400,
+      'prestação de contas: registra e finaliza o Andamento sozinho': pcOk.status === 200 && dPcOk.execucaoStatus === 'FINALIZADO',
+      'prestação de contas: diferença calculada certa (500 adiantado - 480 gasto = 20 de sobra)': Number(dPcOk.prestacaoContas.diferenca) === 20,
+      'depois de fechado, /execucao continua recusando mudar (mesma trava, não é caso especial)': finalizarDepoisDeFechado.status === 400,
+      'desfazer prestação de contas volta pra Em Andamento e limpa o valor': desfazer.status === 200 && dDesfazer.execucaoStatus === 'EM_ANDAMENTO' && dDesfazer.prestacaoContas.valorGasto === null,
+    };
+    const ruinsAD = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okAdiantamento = !ruinsAD.length;
+    if (ruinsAD.length) console.log(`  falhou em: ${ruinsAD.join(' · ')}`);
+  } catch (e) { okAdiantamento = false; console.log('  erro: ' + e.message); }
+  if (!okAdiantamento) ruins += 1;
+  console.log(`${okAdiantamento ? '✓' : '✗'} Adiantamento: vira ticket próprio (não Pagamento) e só finaliza pela prestação de contas`);
+
+  // ------------------------------------------------------------------
   // Painel de Saidas (Sangria/Deposito + "outras saidas" avulsas do
   // Fechamento, unificadas com estado de verificacao - ver saidasPainel.js).
   // Cobre: as duas fontes aparecem juntas, so Master/Admin verifica (nao a
