@@ -78,6 +78,12 @@
   .filtros-compactos{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;}
   .filtros-compactos>div{flex:1 1 130px;min-width:110px;max-width:220px;}
   .filtros-compactos label{margin:0 0 4px;font-size:11px;}
+  /* presets de período (Hoje/Ontem/Semana/Mês) - mesmo desenho já usado em
+     saidas.html/fechamentos.html, pra filtrar a lista por data de criação */
+  .presets{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px;}
+  .preset-btn{font-family:var(--mono);font-size:10.5px;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
+  .preset-btn:hover{color:var(--text);border-color:var(--accent);}
+  .preset-btn.active{color:#0b0d10;background:var(--accent);border-color:var(--accent);font-weight:600;}
   .tipo-filtro-row{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;margin-top:10px;padding-bottom:4px;-webkit-overflow-scrolling:touch;scrollbar-width:thin;}
   .tipo-filtro-btn{flex:none;font-family:var(--sans);font-size:10.5px;padding:6px 10px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:92px;}
   .tipo-filtro-btn:hover{border-color:var(--accent);}
@@ -156,7 +162,10 @@
     <div class="filtros-compactos">
       <div><label>Unidade</label><select id="filtro-unidade-lista" onchange="aplicarFiltrosLista()"><option value="">Todas</option></select></div>
       <div><label>Pesquisar</label><input type="search" id="filtro-busca-lista" placeholder="🔍 ticket #, unidade..." oninput="aplicarFiltrosLista()"></div>
+      <div><label>De</label><input type="date" id="filtro-data-de-lista" onchange="aoMudarPeriodoLista()"></div>
+      <div><label>Até</label><input type="date" id="filtro-data-ate-lista" onchange="aoMudarPeriodoLista()"></div>
     </div>
+    <div class="presets" id="presets-periodo-lista"></div>
     <div class="triagem-nota hidden" id="triagem-nota-form">📥 <b>Triagem</b> — só o que ainda precisa de alguém (preencher ou assinar), o que foi assinado hoje, e todos os cancelados. Assinados de dias anteriores ficam no histórico da aba do tipo, aqui em cima. (Excluído de vez some pra sempre - não fica em lugar nenhum.)</div>
     <div id="lista"><div class="vazio">carregando...</div></div>
   </div>
@@ -310,8 +319,14 @@ let LISTA = [];
 let TIPO_FILTRO_LISTA = '';
 let FILTRO_UNIDADE_LISTA = '';
 let FILTRO_BUSCA_LISTA = '';
-// qual status da Triagem está expandido agora (null = nenhum, botões
-// fechados) - reseta pra fechado quando a Triagem sai/entra de novo
+// período (Hoje/Ontem/Semana/Mês/De-Até) sobre criadoEm - vazio = sem
+// restrição (padrão), pra uma pendência antiga não sumir da Triagem só
+// porque é de fora do período escolhido
+let FILTRO_DATA_DE_LISTA = '';
+let FILTRO_DATA_ATE_LISTA = '';
+// qual status está expandido agora (null = nenhum, botões fechados) - vale
+// tanto pra Triagem quanto pra aba de um tipo específico (mesmo desenho nas
+// duas, pedido do usuário); reseta pra fechado ao trocar de aba/status sair
 let TRIAGEM_STATUS_ABERTO = null;
 
 function modelo(){ return TIPOS.find(t=>t.tipo===TIPO_ATUAL); }
@@ -853,6 +868,40 @@ function passaBuscaForm(f){
     .filter(v=>v!=null).join(' ').toLowerCase();
   return FILTRO_BUSCA_LISTA.split(/\s+/).every(p=>alvo.includes(p));
 }
+function passaPeriodoForm(f){
+  if(!FILTRO_DATA_DE_LISTA && !FILTRO_DATA_ATE_LISTA) return true;
+  const d = dataBrasiliaLista(f.criadoEm);
+  if(FILTRO_DATA_DE_LISTA && d < FILTRO_DATA_DE_LISTA) return false;
+  if(FILTRO_DATA_ATE_LISTA && d > FILTRO_DATA_ATE_LISTA) return false;
+  return true;
+}
+// presets de período (Hoje/Ontem/Semana/Mês) - mesmo desenho de
+// saidas.html, calculado em Brasília (não no fuso do navegador/servidor)
+function calcularPresetPeriodoLista(tipo){
+  const brDate = (d) => d.toLocaleDateString('sv-SE', { timeZone: FUSO_BR_LISTA });
+  const hoje = new Date();
+  if(tipo==='hoje') return { de: brDate(hoje), ate: brDate(hoje) };
+  if(tipo==='ontem'){ const o=new Date(hoje); o.setDate(o.getDate()-1); return { de: brDate(o), ate: brDate(o) }; }
+  if(tipo==='semana'){ const o=new Date(hoje); o.setDate(o.getDate()-6); return { de: brDate(o), ate: brDate(hoje) }; }
+  if(tipo==='mes'){ const p=new Date(hoje.getFullYear(), hoje.getMonth(), 1); return { de: brDate(p), ate: brDate(hoje) }; }
+  return { de:'', ate:'' }; // 'todos' - sem restrição
+}
+function aplicarPresetPeriodoLista(tipo){
+  const {de, ate} = calcularPresetPeriodoLista(tipo);
+  document.getElementById('filtro-data-de-lista').value = de;
+  document.getElementById('filtro-data-ate-lista').value = ate;
+  document.querySelectorAll('#presets-periodo-lista .preset-btn').forEach(b=>b.classList.toggle('active', b.dataset.tipo===tipo));
+  aplicarFiltrosLista();
+}
+function aoMudarPeriodoLista(){
+  document.querySelectorAll('#presets-periodo-lista .preset-btn').forEach(b=>b.classList.remove('active'));
+  aplicarFiltrosLista();
+}
+function montarPresetsPeriodoLista(){
+  const presets = [ {lbl:'Todos', tipo:'todos'}, {lbl:'Hoje', tipo:'hoje'}, {lbl:'Ontem', tipo:'ontem'}, {lbl:'Semana', tipo:'semana'}, {lbl:'Mês', tipo:'mes'} ];
+  document.getElementById('presets-periodo-lista').innerHTML = presets.map(p=>
+    `<button type="button" class="preset-btn ${p.tipo==='todos'?'active':''}" data-tipo="${p.tipo}" onclick="aplicarPresetPeriodoLista('${p.tipo}')">${p.lbl}</button>`).join('');
+}
 function contagemStatusForm(lista){
   return {
     P: lista.filter(f=>{ const s=statusVisual(f); return s==='AGUARDANDO_PREENCHIMENTO' || s==='PENDENTE'; }).length,
@@ -871,10 +920,12 @@ function renderTipoFiltroRowForm(base){
     botaoHtml('', '📥 Triagem', contagemStatusForm(base.filter(passaTriagemForm))) +
     tiposComItens.map(t=>botaoHtml(t.tipo, escapeHtml(t.rotulo), contagemStatusForm(base.filter(f=>f.tipo===t.tipo)))).join('');
 }
-function selecionarTipoFiltroLista(tipo){ TIPO_FILTRO_LISTA = tipo; renderLista(); }
+function selecionarTipoFiltroLista(tipo){ TIPO_FILTRO_LISTA = tipo; TRIAGEM_STATUS_ABERTO = null; renderLista(); }
 function aplicarFiltrosLista(){
   FILTRO_UNIDADE_LISTA = document.getElementById('filtro-unidade-lista').value;
   FILTRO_BUSCA_LISTA = document.getElementById('filtro-busca-lista').value.trim().toLowerCase();
+  FILTRO_DATA_DE_LISTA = document.getElementById('filtro-data-de-lista').value;
+  FILTRO_DATA_ATE_LISTA = document.getElementById('filtro-data-ate-lista').value;
   renderLista();
 }
 // deriva as opções de loja do que realmente existe na lista - sem lista
@@ -897,7 +948,7 @@ function renderLista(){
     alvo.innerHTML = '<div class="vazio">Nenhum formulário ainda - crie o primeiro acima.</div>';
     return;
   }
-  const base = LISTA.filter(f=>(!FILTRO_UNIDADE_LISTA || f.unidade===FILTRO_UNIDADE_LISTA) && passaBuscaForm(f));
+  const base = LISTA.filter(f=>(!FILTRO_UNIDADE_LISTA || f.unidade===FILTRO_UNIDADE_LISTA) && passaBuscaForm(f) && passaPeriodoForm(f));
   renderTipoFiltroRowForm(base);
   const emTriagem = TIPO_FILTRO_LISTA==='';
   const filtradas = TIPO_FILTRO_LISTA ? base.filter(f=>f.tipo===TIPO_FILTRO_LISTA) : base;
@@ -907,20 +958,16 @@ function renderLista(){
 
   if(!visiveis.length){ alvo.innerHTML = '<div class="vazio">Nenhum formulário aqui.</div>'; return; }
 
-  if(!emTriagem){
-    // aba de um tipo específico: histórico completo dele, lista simples
-    // (LISTA já vem mais recente primeiro do servidor)
-    alvo.innerHTML = visiveis.map(cardHtml).join('');
-    return;
-  }
-
-  // Triagem: cada status vira um botão (mesmo desenho do "Novo formulário"
-  // lá em cima) em vez de 3 colunas sempre visíveis - clica e a lista daquele
-  // status aparece embaixo, só uma aberta por vez (pedido do usuário)
+  // Cada status vira um botão (mesmo desenho do "Novo formulário" lá em
+  // cima), tanto na Triagem quanto na aba de um tipo específico (pedido do
+  // usuário) - clica e a lista daquele status aparece embaixo, só uma
+  // aberta por vez. Só muda o rótulo do Assinado: na Triagem é "hoje" (pra
+  // não empilhar pra sempre); na aba de tipo é o histórico completo, sem
+  // esse corte.
   const COLUNAS = [
     { status:'AGUARDANDO_PREENCHIMENTO', titulo:'Aguardando preenchimento', icone:'🔗' },
     { status:'PENDENTE', titulo:'Aguardando assinatura', icone:'✍️' },
-    { status:'ASSINADO', titulo:'Assinado hoje', icone:'✅' },
+    { status:'ASSINADO', titulo: emTriagem ? 'Assinado hoje' : 'Assinado', icone:'✅' },
     { status:'CANCELADO', titulo:'Cancelados', icone:'🚫' },
   ];
   // a coluna aberta pode ter esvaziado (última pendência daquele status
@@ -1076,6 +1123,7 @@ async function boot(){
   document.getElementById('raiz').classList.remove('hidden');
   preencherSeletorUnidades();
   renderTipos();
+  montarPresetsPeriodoLista();
   carregarLista();
   if(SOU_MASTER){
     document.getElementById('painel-cadastro').classList.remove('hidden');
