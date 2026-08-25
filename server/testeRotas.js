@@ -6531,22 +6531,25 @@ setTimeout(async () => {
   // usuário) - organização de fonte, no mesmo desenho já usado em
   // Central/Solicitações (central-historico.html): chips de tipo com
   // contagem, Triagem em kanban por status (só o que precisa de alguém
-  // agora + o que foi assinado HOJE, cancelado nunca entra) e a aba de um
-  // tipo mostra o histórico completo dele, sem esse corte.
+  // agora + o que foi assinado HOJE + TODOS os cancelados, numa coluna
+  // própria pra não precisar abrir aba por aba de tipo pra achar um
+  // cancelado - pedido do usuário) e a aba de um tipo mostra o histórico
+  // completo dele (inclusive assinados de dias anteriores), sem esse corte.
   let okFormulariosOrganizacao = false;
   try {
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'formularios.html'), 'utf8');
     const conf = {
       'chips de tipo com contagem existem': /id="tipo-filtro-row"/.test(html) && /function renderTipoFiltroRowForm/.test(html),
-      'Triagem exclui cancelado e só deixa assinado de HOJE': (() => {
+      'Triagem deixa passar cancelado (coluna própria) e só o assinado de HOJE': (() => {
         const i = html.indexOf('function passaTriagemForm');
         const trecho = html.slice(i, i + 400);
-        return i >= 0 && /CANCELADO.*return false/.test(trecho) && /ASSINADO.*return assinadoHoje/.test(trecho);
+        return i >= 0 && !/CANCELADO.*return false/.test(trecho) && /ASSINADO.*return assinadoHoje/.test(trecho);
       })(),
-      'Triagem tem os 3 status certos (viraram botão, não coluna sempre visível)':
+      'Triagem tem os 4 status certos (viraram botão, não coluna sempre visível), incluindo Cancelados':
         /status:'AGUARDANDO_PREENCHIMENTO', titulo:'Aguardando preenchimento'/.test(html)
         && /status:'PENDENTE', titulo:'Aguardando assinatura'/.test(html)
-        && /status:'ASSINADO', titulo:'Assinado hoje'/.test(html),
+        && /status:'ASSINADO', titulo:'Assinado hoje'/.test(html)
+        && /status:'CANCELADO', titulo:'Cancelados'/.test(html),
       // pedido do usuário: nada de coluna sempre aberta - clica no botão do
       // status e a lista aparece embaixo dele, só uma aberta por vez
       'clicar no botão de status alterna (mesmo clique fecha de novo) e só mostra a lista de quem está aberto':

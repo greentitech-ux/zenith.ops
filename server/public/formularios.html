@@ -157,7 +157,7 @@
       <div><label>Unidade</label><select id="filtro-unidade-lista" onchange="aplicarFiltrosLista()"><option value="">Todas</option></select></div>
       <div><label>Pesquisar</label><input type="search" id="filtro-busca-lista" placeholder="🔍 ticket #, unidade..." oninput="aplicarFiltrosLista()"></div>
     </div>
-    <div class="triagem-nota hidden" id="triagem-nota-form">📥 <b>Triagem</b> — só o que ainda precisa de alguém (preencher ou assinar), mais o que foi assinado hoje. O histórico completo de um tipo (inclusive cancelados e assinados antigos) fica na aba dele, aqui em cima.</div>
+    <div class="triagem-nota hidden" id="triagem-nota-form">📥 <b>Triagem</b> — só o que ainda precisa de alguém (preencher ou assinar), o que foi assinado hoje, e todos os cancelados. Assinados de dias anteriores ficam no histórico da aba do tipo, aqui em cima. (Excluído de vez some pra sempre - não fica em lugar nenhum.)</div>
     <div id="lista"><div class="vazio">carregando...</div></div>
   </div>
 
@@ -836,12 +836,13 @@ function assinadoCompletoEm(f){
   return datas.length ? datas[datas.length-1] : f.criadoEm;
 }
 function assinadoHoje(f){ const em = assinadoCompletoEm(f); return !!em && dataBrasiliaLista(em)===hojeBRLista(); }
-// Triagem: cancelado nunca entra (fica só na aba do tipo, é passado); o que
-// já foi assinado só entra se foi HOJE (senão a Triagem também empilharia
-// pra sempre); o resto (aguardando preenchimento/assinatura) sempre entra
+// Triagem: cancelado sempre entra (tem coluna própria "Cancelados" - pedido
+// do usuário, um local fixo pra achar o que foi cancelado sem precisar abrir
+// aba por aba de tipo); o que já foi assinado só entra se foi HOJE (senão a
+// Triagem também empilharia pra sempre); o resto (aguardando
+// preenchimento/assinatura, cancelado) sempre entra
 function passaTriagemForm(f){
   const sv = statusVisual(f);
-  if(sv==='CANCELADO') return false;
   if(sv==='ASSINADO') return assinadoHoje(f);
   return true;
 }
@@ -920,6 +921,7 @@ function renderLista(){
     { status:'AGUARDANDO_PREENCHIMENTO', titulo:'Aguardando preenchimento', icone:'🔗' },
     { status:'PENDENTE', titulo:'Aguardando assinatura', icone:'✍️' },
     { status:'ASSINADO', titulo:'Assinado hoje', icone:'✅' },
+    { status:'CANCELADO', titulo:'Cancelados', icone:'🚫' },
   ];
   // a coluna aberta pode ter esvaziado (última pendência daquele status
   // resolvida) - nesse caso volta a nada selecionado, não trava numa coluna
