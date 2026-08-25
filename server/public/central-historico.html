@@ -115,6 +115,13 @@
      modo Triagem, explica por que a contagem ficou menor que o total real
      daquele status (ver renderKanban) */
   .stb-hint{font-family:var(--mono);font-size:9.5px;color:var(--muted);font-weight:400;}
+  /* "Aprovado" não é um fim de linha - por baixo dele tem 3 estágios de
+     andamento (mesmo vocabulário/ícone do painel ANDAMENTO no detalhe, ver
+     ANDAMENTO_INFO). Sem isso o botão só dizia "6" e escondia que, por
+     exemplo, nenhum desses 6 tinha sequer começado a ser atendido. */
+  .stb-subcounts{font-family:var(--mono);font-size:10px;color:var(--muted);display:flex;gap:6px;}
+  .kanban-grupo-titulo{font-family:var(--mono);font-size:10.5px;color:var(--muted);font-weight:700;padding:2px 2px 0;display:flex;align-items:center;gap:6px;}
+  .kanban-grupo-titulo:not(:first-child){margin-top:4px;padding-top:8px;border-top:1px solid var(--line);}
   .status-toggle-cards{margin-top:4px;display:flex;flex-direction:column;gap:8px;max-height:calc(100vh - 340px);overflow-y:auto;}
   .kcard{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;transition:border-color .15s ease;}
   .kcard:hover{border-color:var(--accent);}
@@ -1075,10 +1082,20 @@ function renderKanban(){
   if(STATUS_ABERTO && !visiveis.some(c=>c.status===STATUS_ABERTO)) STATUS_ABERTO = null;
   document.getElementById('status-toggle-row').innerHTML = STATUS_COLUNAS.map(status=>{
     const n = visiveis.filter(c=>c.status===status).length;
+    // "Aprovado" não é fim de linha - por baixo dele tem 3 estágios de
+    // andamento (mesmo vocabulário do painel ANDAMENTO no detalhe, ver
+    // ANDAMENTO_INFO). Sem isso o botão só dizia "6" e escondia que, por
+    // exemplo, nenhum desses 6 tinha sequer começado a ser atendido.
+    const subcontagens = status==='APROVADO'
+      ? `<span class="stb-subcounts">${Object.keys(ANDAMENTO_INFO).map(st=>
+          `<span title="${ANDAMENTO_INFO[st].label}">${ANDAMENTO_INFO[st].icone} ${visiveis.filter(c=>c.status==='APROVADO' && (c.execucaoStatus||'PENDENTE')===st).length}</span>`
+        ).join('')}</span>`
+      : '';
     return `<button type="button" class="status-toggle-btn ${STATUS_ABERTO===status?'aberto':''}" onclick="toggleStatusCentral('${status}')">
       <span class="badge ${status}">${LABEL_STATUS[status]}</span>
       ${HINT_STATUS[status] ? `<span class="stb-hint">${HINT_STATUS[status]}</span>` : ''}
       <span class="stb-count">${n}</span>
+      ${subcontagens}
     </button>`;
   }).join('');
   if(STATUS_ABERTO){
@@ -1093,8 +1110,19 @@ function renderKanban(){
       .sort((a,b)=> (ordemAndamento(a)-ordemAndamento(b))
         || (ordemPrioridade(a)-ordemPrioridade(b))
         || String(a.slaPrazo||a.criadoEm||'').localeCompare(String(b.slaPrazo||b.criadoEm||'')));
+    // "Aprovado" ganha subtítulo por estágio de andamento (mesma ordem do
+    // sort acima: Pendente, Em andamento, Finalizado) - só listar os 6 sem
+    // dizer em que pé cada um está era o problema que o usuário apontou
+    const corpoDoColuna = STATUS_ABERTO==='APROVADO' && doColuna.length
+      ? Object.keys(ANDAMENTO_INFO).map(st=>{
+          const doEstagio = doColuna.filter(c=>(c.execucaoStatus||'PENDENTE')===st);
+          if(!doEstagio.length) return '';
+          const info = ANDAMENTO_INFO[st];
+          return `<div class="kanban-grupo-titulo">${info.icone} ${info.label} · ${doEstagio.length}</div>` + doEstagio.map(kcardHtml).join('');
+        }).join('')
+      : doColuna.map(kcardHtml).join('');
     document.getElementById('status-toggle-cards-wrap').innerHTML = `<div class="status-toggle-cards">${doColuna.length
-      ? doColuna.map(kcardHtml).join('')
+      ? corpoDoColuna
       : `<div class="kanban-empty">${emTriagem && STATUS_ABERTO!=='PENDENTE' ? 'Nada aguardando aqui — tudo em dia! 🎉' : 'Nenhuma aqui.'}</div>`}</div>`;
   } else {
     document.getElementById('status-toggle-cards-wrap').innerHTML = '';
