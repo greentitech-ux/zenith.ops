@@ -381,7 +381,16 @@
   </form>
 </div>
 <div class="panel tab-content hidden" id="tab-saida-lista">
-  <h2>Últimas saídas</h2>
+  <h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <span>Últimas saídas</span>
+      <span style="display:flex;gap:8px;">
+        <button type="button" class="preset-btn" onclick="baixarRelatorioSaidas('csv')">📄 CSV</button>
+        <button type="button" class="preset-btn" onclick="baixarRelatorioSaidas('pdf')">📄 PDF</button>
+      </span>
+    </div>
+  </h2>
+  <div class="sub" style="margin:-4px 0 12px;">Aqui embaixo só as últimas 30 - o relatório sai com o histórico completo da unidade.</div>
   <div class="tablewrap">
     <table>
       <thead><tr><th>Data</th><th>Item</th><th>Tipo</th><th>Qtd</th><th>Motivo</th><th></th></tr></thead>
@@ -424,7 +433,15 @@
 
 <!-- ---------- Histórico de contagens (planilha: itens x dias) ---------- -->
 <div class="panel tab-content hidden" id="tab-historico">
-  <h2>Histórico de contagens</h2>
+  <h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <span>Histórico de contagens</span>
+      <span style="display:flex;gap:8px;">
+        <button type="button" class="preset-btn" onclick="baixarRelatorioHistorico('csv')">📄 CSV</button>
+        <button type="button" class="preset-btn" onclick="baixarRelatorioHistorico('pdf')">📄 PDF</button>
+      </span>
+    </div>
+  </h2>
   <div class="sub" style="margin-top:4px;margin-bottom:10px;max-width:680px;">
     Cada dia contado vira uma coluna. Abaixo da contagem, a <b>saída</b> do dia = contagem do dia anterior − contagem do dia (o que saiu do estoque entre as duas contagens). É uma leitura só das contagens — não desconta recebimento (pra isso use a aba Diferenças).
   </div>
@@ -1405,6 +1422,12 @@ async function excluirSaida(id){
   renderSaidas();
 }
 async function carregarSaidas(){ SAIDAS = await fetch('/api/inventario/saidas').then(r=>r.json()); }
+// relatorio do HISTORICO INTEIRO da unidade (a tela so mostra as ultimas 30
+// - ver renderSaidas) - mesmo padrao de baixarRelatorioRecebimentos/Diferencas
+function baixarRelatorioSaidas(formato){
+  const params = new URLSearchParams({ token: AUTH_TOKEN, unidade: unidadeAtual() });
+  window.location.href = `/api/inventario/saidas/relatorio.${formato}?${params.toString()}`;
+}
 
 document.getElementById('form-saida').addEventListener('keydown', (ev)=>{
   if(ev.key==='Enter' && (ev.target.tagName||'').toUpperCase()!=='TEXTAREA') ev.preventDefault();
@@ -1532,6 +1555,17 @@ function renderHistorico(){
       <td style="text-align:center;font-family:var(--mono);font-weight:700;">${temSaida?fmtNum(Math.round(saidaTotal*1000)/1000):'—'}</td>
     </tr>`;
   }).join('');
+}
+// mesma janela (unidade/inicio/fim/setor) que a tela ta mostrando - o
+// relatorio sai exatamente com o que ta na tabela, nao com "tudo"
+function baixarRelatorioHistorico(formato){
+  const params = new URLSearchParams({
+    token: AUTH_TOKEN, unidade: unidadeAtual(),
+    inicio: document.getElementById('h-inicio').value, fim: document.getElementById('h-fim').value,
+  });
+  const setor = document.getElementById('h-setor').value;
+  if(setor) params.set('setor', setor);
+  window.location.href = `/api/inventario/historico-contagens/relatorio.${formato}?${params.toString()}`;
 }
 
 let DIFERENCAS_ATUAL = null;

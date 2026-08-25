@@ -91,8 +91,6 @@
   .tipo-filtro-btn .tf-label{font-weight:600;white-space:nowrap;}
   .tipo-filtro-btn .tf-counts{font-family:var(--mono);font-size:10px;white-space:nowrap;}
   .tipo-filtro-btn .tf-counts b{font-weight:600;}
-  .triagem-nota{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:10px 0;}
-  .triagem-nota b{color:var(--text);}
   .kanban-empty{padding:20px 10px;text-align:center;color:var(--muted);font-size:12px;}
   /* Triagem virou 3 botões (mesmo desenho do .tipo-card de "Novo formulário")
      em vez de 3 colunas sempre visíveis - clica e a lista daquele status
@@ -166,7 +164,6 @@
       <div><label>Até</label><input type="date" id="filtro-data-ate-lista" onchange="aoMudarPeriodoLista()"></div>
     </div>
     <div class="presets" id="presets-periodo-lista"></div>
-    <div class="triagem-nota hidden" id="triagem-nota-form">📥 <b>Triagem</b> — só o que ainda precisa de alguém (preencher ou assinar), o que foi assinado hoje, e todos os cancelados. Assinados de dias anteriores ficam no histórico da aba do tipo, aqui em cima. (Excluído de vez some pra sempre - não fica em lugar nenhum.)</div>
     <div id="lista"><div class="vazio">carregando...</div></div>
   </div>
 
@@ -944,7 +941,6 @@ function renderLista(){
   if(!LISTA.length){
     document.getElementById('tipo-filtro-row').innerHTML = '';
     document.getElementById('lista-count').textContent = '';
-    document.getElementById('triagem-nota-form').classList.add('hidden');
     alvo.innerHTML = '<div class="vazio">Nenhum formulário ainda - crie o primeiro acima.</div>';
     return;
   }
@@ -954,7 +950,6 @@ function renderLista(){
   const filtradas = TIPO_FILTRO_LISTA ? base.filter(f=>f.tipo===TIPO_FILTRO_LISTA) : base;
   const visiveis = emTriagem ? filtradas.filter(passaTriagemForm) : filtradas;
   document.getElementById('lista-count').textContent = visiveis.length ? `(${visiveis.length})` : '';
-  document.getElementById('triagem-nota-form').classList.toggle('hidden', !emTriagem);
 
   if(!visiveis.length){ alvo.innerHTML = '<div class="vazio">Nenhum formulário aqui.</div>'; return; }
 
