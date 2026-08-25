@@ -275,13 +275,6 @@ function isoParaBR(iso){ const m = String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2
 function brParaIso(br){ const m = String(br||'').match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : ''; }
 const valorCampo = (el) => el.type==='date' ? isoParaBR(el.value) : el.value;
 
-// campo de data clica em qualquer lugar do input pra abrir o calendário
-// (nem todo navegador abre sozinho fora do ícone) - pedido do usuário
-document.addEventListener('click', (e)=>{
-  const el = e.target.closest('input[type=date]');
-  if(el && typeof el.showPicker==='function'){ try{ el.showPicker(); }catch(_){} }
-});
-
 // coluna `intervalo` (2 datas De/Até, ex: Período do caixa) grava/lê como
 // UM valor só - "DD/MM/AAAA a DD/MM/AAAA" (ou só um lado, se só um foi
 // preenchido) - mesma convenção DD/MM/AAAA do resto do formulário

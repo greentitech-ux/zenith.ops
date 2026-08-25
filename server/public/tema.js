@@ -353,4 +353,19 @@
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);
   else iniciar();
+
+  // ---- campo de data: clique em qualquer parte do campo abre o seletor ----
+  // Por padrao o navegador so abre o calendario clicando bem no iconezinho
+  // (uns 20px) - nas 53 telas isso passava despercebido. Pedido do usuario:
+  // "onde for data em todo o sistema ao clicar precisa abrir a opcao de
+  // escolher a data". Delegado no document (nao precisa de DOMContentLoaded,
+  // e pega campo de data criado depois via innerHTML, ja que boa parte das
+  // telas monta filtro/formulario dinamicamente) e centralizado aqui - so
+  // esse arquivo e' carregado por TODAS as paginas, entao um lugar so cobre
+  // o sistema inteiro em vez de repetir o listener pagina a pagina (isso
+  // ja existia solto, duplicado, em formularios.html e preencher.html).
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest && e.target.closest('input[type=date]');
+    if (el && typeof el.showPicker === 'function') { try { el.showPicker(); } catch (_) {} }
+  });
 })();

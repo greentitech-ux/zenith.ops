@@ -6923,6 +6923,7 @@ setTimeout(async () => {
     const htmlForms = fs.readFileSync(path.join(__dirname, 'public', 'formularios.html'), 'utf8');
     const htmlPreencher = fs.readFileSync(path.join(__dirname, 'public', 'preencher.html'), 'utf8');
     const srcForms = fs.readFileSync(path.join(__dirname, 'formularios.js'), 'utf8');
+    const temaJs = fs.readFileSync(path.join(__dirname, 'public', 'tema.js'), 'utf8');
     const cabMaster = { Authorization: 'Bearer ' + token };
     const tipos = JSON.parse((await pedir('/api/formularios/tipos', cabMaster)).corpo || '[]');
     const depositoPeriodo = (tipos.find((t) => t.tipo === 'deposito').colunas || []).find((c) => c.key === 'periodo');
@@ -6930,10 +6931,13 @@ setTimeout(async () => {
       'o schema marca Período do caixa como intervalo (2 datas), não texto livre':
         /key: 'periodo', label: 'PERÍODO DO CAIXA', intervalo: true/.test(srcForms),
       'a rota que a tela consulta expõe esse flag pro cliente': depositoPeriodo && depositoPeriodo.intervalo === true,
-      'formularios.html clica em qualquer lugar do campo de data (showPicker)':
-        /input\[type=date\]/.test(htmlForms) && /showPicker/.test(htmlForms),
-      'preencher.html (link público) tem o mesmo clique em qualquer lugar':
-        /input\[type=date\]/.test(htmlPreencher) && /showPicker/.test(htmlPreencher),
+      // clique-em-qualquer-lugar-do-campo virou global (tema.js, carregado por
+      // TODAS as 56 páginas) em vez de duplicado por tela - formularios.html/
+      // preencher.html não têm mais listener próprio disso
+      'formularios.html não duplica mais o listener (cobertura virou global)':
+        !/input\[type=date\]/.test(htmlForms) && !/showPicker/.test(htmlForms),
+      'preencher.html (link público) também não duplica mais':
+        !/input\[type=date\]/.test(htmlPreencher) && !/showPicker/.test(htmlPreencher),
       // também tem que estar nos DOIS lugares que desenham a linha (criar E
       // editar) - senão abrir pra corrigir um Depósito antigo mostra o
       // Período do caixa como texto livre de novo
@@ -6953,6 +6957,36 @@ setTimeout(async () => {
   } catch (e) { okDataClicavel = false; console.log('  erro: ' + e.message); }
   if (!okDataClicavel) ruins += 1;
   console.log(`${okDataClicavel ? '✓' : '✗'} Formulários: data clica em qualquer lugar do campo + Período do caixa virou 2 seletores De/Até`);
+
+  // ------------------------------------------------------------------
+  // "onde for data em todo o sistema ao clicar precisa abrir a opção de
+  // escolher a data" - pedido do usuário depois de ver o filtro de
+  // Relatório de chamados (central-historico.html) sem esse comportamento.
+  // Antes só formularios.html/preencher.html tinham o listener (duplicado,
+  // local); agora mora em tema.js, o ÚNICO arquivo carregado pelas 56
+  // páginas, então cobre o sistema inteiro de uma vez - inclusive telas
+  // futuras, sem precisar lembrar de colar o snippet de novo.
+  let okDataClicavelGlobal = false;
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const temaJs = fs.readFileSync(path.join(__dirname, 'public', 'tema.js'), 'utf8');
+    const paginas = fs.readdirSync(path.join(__dirname, 'public')).filter((f) => f.endsWith('.html'));
+    const semTema = paginas.filter((f) => !/src="\/tema\.js"/.test(fs.readFileSync(path.join(__dirname, 'public', f), 'utf8')));
+    const conf = {
+      'tema.js delega o clique em qualquer input[type=date] pro showPicker':
+        /document\.addEventListener\('click', function \(e\) \{\s*var el = e\.target\.closest && e\.target\.closest\('input\[type=date\]'\);\s*if \(el && typeof el\.showPicker === 'function'\)/.test(temaJs),
+      'todas as páginas carregam tema.js (senão a cobertura não é global de verdade)':
+        semTema.length === 0,
+      'central-historico.html (Relatório de chamados, onde o usuário viu o problema) carrega tema.js':
+        /src="\/tema\.js"/.test(fs.readFileSync(path.join(__dirname, 'public', 'central-historico.html'), 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okDataClicavelGlobal = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}${semTema.length ? ` (sem tema.js: ${semTema.join(', ')})` : ''}`);
+  } catch (e) { okDataClicavelGlobal = false; console.log('  erro: ' + e.message); }
+  if (!okDataClicavelGlobal) ruins += 1;
+  console.log(`${okDataClicavelGlobal ? '✓' : '✗'} Todo o sistema: campo de data clica em qualquer lugar (centralizado em tema.js, não mais por página)`);
 
   // ------------------------------------------------------------------
   // Formulários (Triagem): a nota explicativa fixa acima dos botões de
