@@ -767,6 +767,49 @@ function renderCanaisExtras(unidade){
 // escolher a MESMA foto de novo, depois de um erro, nao dispara evento nenhum.
 let ARQUIVOS_RELATORIO = [];
 
+// Foto de relatório de PDV tirada de celular sai com 5-8 MB, e até 5 delas
+// numa leitura só - o que sobe pro servidor (e dali pro Claude) é o gargalo
+// real da demora, não o modelo em si. Mesmo remédio do rh-cadastro.html
+// (documento de identidade): reduzir a imagem ANTES de subir. 2000px de lado
+// maior é mais folgado que o 1600 da identidade de propósito - aqui o
+// relatório é uma tabela DENSA de números pequenos, não um documento com
+// letra grande.
+const LADO_MAX_RELATORIO = 2000;
+const QUALIDADE_RELATORIO = 0.85;
+const JA_PEQUENA_RELATORIO = 1500000; // ~1,5 MB: nao vale mexer, so perderia nitidez
+function carregarViaImgRelatorio(file){
+  return new Promise((ok, falha)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{ URL.revokeObjectURL(url); ok(img); };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); falha(new Error('imagem ilegível')); };
+    img.src = url;
+  });
+}
+async function comprimirImagemRelatorio(file){
+  if(!file || !/^image\//.test(file.type||'')) return file; // PDF sobe inteiro
+  try{
+    const img = window.createImageBitmap ? await createImageBitmap(file) : await carregarViaImgRelatorio(file);
+    const lado = Math.max(img.width, img.height);
+    const escala = Math.min(1, LADO_MAX_RELATORIO / lado);
+    if(escala === 1 && file.size <= JA_PEQUENA_RELATORIO) return file;
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.width * escala);
+    c.height = Math.round(img.height * escala);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise(r=>c.toBlob(r, 'image/jpeg', QUALIDADE_RELATORIO));
+    if(!blob || blob.size >= file.size) return file; // se nao melhorou, fica o original
+    return new File([blob], String(file.name||'foto').replace(/\.[^.]+$/,'') + '.jpg', { type:'image/jpeg' });
+  }catch(e){
+    return file; // qualquer tropeço na compressão manda o original; nunca trava a leitura
+  }
+}
+async function comprimirVariasRelatorio(lista){
+  const saida = [];
+  for(const f of lista) saida.push(await comprimirImagemRelatorio(f));
+  return saida;
+}
+
 function atualizarBotaoLerCanais(unidade){
   const grupo = grupoKpiDaUnidade(unidade);
   // basta ter campo cadastrado em UMA das tres frentes: tem relatorio que so
@@ -805,7 +848,7 @@ function limparSelecaoRelatorio(){
   esconderMsgLerCanais();
 }
 
-document.getElementById('ler-canais-arquivo').addEventListener('change', (ev)=>{
+document.getElementById('ler-canais-arquivo').addEventListener('change', async (ev)=>{
   const arquivos = Array.from(ev.target.files || []);
   ev.target.value = ''; // permite escolher a MESMA foto de novo depois de um erro
   if(!arquivos.length) return;
@@ -817,7 +860,11 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', (ev)=>{
     msg.innerHTML = `<span style="color:var(--bad);">Você escolheu ${arquivos.length} arquivos. Mande no máximo ${MAX_FOTOS_RELATORIO} por leitura.</span>`;
     return;
   }
-  ARQUIVOS_RELATORIO = arquivos;
+  // reduz ANTES de guardar - é o que sobe pro servidor quando clicar em
+  // Realizar leitura, e reduzir aqui (uma vez) é mais rápido que deixar a
+  // foto original de celular pesar a leitura toda vez que o botão for clicado
+  msg.innerHTML = `<span style="color:var(--muted);">Preparando ${arquivos.length > 1 ? 'as fotos' : 'a foto'}...</span>`;
+  ARQUIVOS_RELATORIO = await comprimirVariasRelatorio(arquivos);
   pintarSelecaoRelatorio();
   msg.innerHTML = `<span style="color:var(--muted);">Confira as fotos e clique em <b>Realizar leitura</b>. Nada foi enviado ainda.</span>`;
 });
