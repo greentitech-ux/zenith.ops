@@ -297,7 +297,9 @@ function linhaParaFechamento(grupo, header, linha) {
     obsDif: get('Obs. Dif') || null,
     observacao: get('Observação') || null,
     quebra: parseMoneyBR(get('Quebra')),
-    tc: parseMoneyBR(get('TC')),
+    // a coluna pode ter vindo com qualquer um dos dois nomes na planilha
+    // (ver pedido do Master) - mesmo padrao do AdyenV2/Adyen acima
+    tc: parseMoneyBR(get('TC') ?? get('Quantidade de Pedidos')),
     cancelados: parseMoneyBR(get('Cancelados') ?? get('Cancelado')),
     // itemizado da ARCFOOD (ate 5 pares "Saida Dinheiro N"/"Descricao Saida
     // N" - ver ARCFOOD_SAIDA_SLOTS mais abaixo, o mesmo par que o caminho de

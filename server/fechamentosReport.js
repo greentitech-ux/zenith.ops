@@ -399,4 +399,4 @@ function writePDF(res, { titulo, subtitulo, colunas, linhas, secoes, nomeArquivo
   doc.end();
 }
 
-module.exports = { slugify, prepararRelatorio, dividirPorRede, somar, toCSV, writePDF };
+module.exports = { slugify, chaveLabel, prepararRelatorio, dividirPorRede, somar, toCSV, writePDF };

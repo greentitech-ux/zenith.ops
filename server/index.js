@@ -4790,16 +4790,32 @@ async function montarRelatorioFechamentos(req) {
 // com uma linha de subtotal, e o total geral no fim. Sao duas operacoes com
 // contabilidade separada - a lista unica ordenada por faturamento misturava
 // as duas e obrigava a somar na mao.
-function prepararFechamentosPorUnidade(rows) {
+// acha, no grupo da unidade, o KPI extra cadastrado com o nome "Total" -
+// e o que hoje representa TC (ver pedido do Master: o campo fixo antigo
+// `tc`/`cancelados` da planilha nao e mais preenchido por lancamento do
+// sistema, so por KPI's Extras dinamico de /grupos.html). Mesmo casamento
+// por nome (chaveLabel) usado pra unificar Canais/Formas na tela e no
+// relatorio principal - sem grupo, ou sem KPI com esse nome, cai so no
+// campo legado (fechamento antigo vindo de planilha).
+function campoTcDoGrupo(grupo) {
+  const alvo = fechamentosReport.chaveLabel('Total');
+  const k = grupo && (grupo.kpisExtras || []).find((x) => fechamentosReport.chaveLabel(x.label) === alvo);
+  return k ? k.campo : null;
+}
+
+function prepararFechamentosPorUnidade(rows, listaGrupos) {
   const colunas = [
     { key: 'rede', label: 'Rede' },
     { key: 'unidade', label: 'Unid.' }, { key: 'qtd', label: 'Fechamentos' }, { key: 'faturamento', label: 'Faturamento' },
-    { key: 'diferenca', label: 'Diferença' }, { key: 'tc', label: 'TC total' }, { key: 'cancelados', label: 'Cancelados' },
+    { key: 'diferenca', label: 'Diferença' }, { key: 'tc', label: 'TC total' },
   ];
+  const grupoDe = (u) => (listaGrupos || []).find((g) => (g.unidades || []).includes(u)) || null;
   const porUnidade = {};
   rows.forEach((r) => {
-    const c = (porUnidade[r.unidade] ||= { codigo: r.unidade, nome: r.unidadeNome || r.unidade, qtd: 0, faturamento: 0, diferenca: 0, tc: 0, cancelados: 0 });
-    c.qtd++; c.faturamento += r.faturamento || 0; c.diferenca += r.diferenca || 0; c.tc += r.tc || 0; c.cancelados += r.cancelados || 0;
+    const c = (porUnidade[r.unidade] ||= { codigo: r.unidade, nome: r.unidadeNome || r.unidade, qtd: 0, faturamento: 0, diferenca: 0, tc: 0 });
+    const campoTc = campoTcDoGrupo(grupoDe(r.unidade));
+    c.qtd++; c.faturamento += r.faturamento || 0; c.diferenca += r.diferenca || 0;
+    c.tc += Number(r.tc || 0) + (campoTc ? Number((r.kpisExtras || {})[campoTc] || 0) : 0);
   });
   const agregados = Object.values(porUnidade);
   // a linha ja vem formatada (string) pro reportUtil generico - por isso o
@@ -4807,7 +4823,7 @@ function prepararFechamentosPorUnidade(rows) {
   const comoLinha = (c, rede) => ({
     rede, unidade: c.nome, qtd: c.qtd,
     faturamento: reportUtil.fmtMoneyBR(c.faturamento), diferenca: reportUtil.fmtMoneyBR(c.diferenca),
-    tc: c.tc.toFixed(0), cancelados: c.cancelados.toFixed(0),
+    tc: c.tc.toFixed(0),
   });
 
   const grupos = redes.agruparPorRede(agregados, 'codigo');
@@ -4822,16 +4838,16 @@ function prepararFechamentosPorUnidade(rows) {
     });
     const soma = g.itens.reduce((acc, c) => ({
       qtd: acc.qtd + c.qtd, faturamento: acc.faturamento + c.faturamento, diferenca: acc.diferenca + c.diferenca,
-      tc: acc.tc + c.tc, cancelados: acc.cancelados + c.cancelados,
-    }), { qtd: 0, faturamento: 0, diferenca: 0, tc: 0, cancelados: 0 });
+      tc: acc.tc + c.tc,
+    }), { qtd: 0, faturamento: 0, diferenca: 0, tc: 0 });
     linhas.push(comoLinha({ ...soma, nome: `SUBTOTAL (${g.itens.length} unidade(s))` }, g.nome));
   });
   // com uma rede so, o total geral repetiria o subtotal logo acima
   if (grupos.length > 1) {
     const geral = agregados.reduce((acc, c) => ({
       qtd: acc.qtd + c.qtd, faturamento: acc.faturamento + c.faturamento, diferenca: acc.diferenca + c.diferenca,
-      tc: acc.tc + c.tc, cancelados: acc.cancelados + c.cancelados,
-    }), { qtd: 0, faturamento: 0, diferenca: 0, tc: 0, cancelados: 0 });
+      tc: acc.tc + c.tc,
+    }), { qtd: 0, faturamento: 0, diferenca: 0, tc: 0 });
     // consolidado em folha propria - no pe da ultima rede seria lido como
     // total daquela rede
     linhas.push({ ...comoLinha({ ...geral, nome: 'TOTAL GERAL' }, 'Consolidado'), _novaPagina: true });
@@ -4840,7 +4856,8 @@ function prepararFechamentosPorUnidade(rows) {
 }
 
 app.get('/api/fechamentos/relatorio-unidades.:formato(csv|pdf)', requireSection('fechamentos'), async (req, res) => {
-  const { colunas, linhas, unidades } = prepararFechamentosPorUnidade(await fechamentosFiltrados(req));
+  const [linhasFiltradas, listaGrupos] = await Promise.all([fechamentosFiltrados(req), grupos.list()]);
+  const { colunas, linhas, unidades } = prepararFechamentosPorUnidade(linhasFiltradas, listaGrupos);
   if (req.params.formato === 'csv') {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${reportUtil.nomeArquivoComData('fechamentos-por-unidade')}.csv"`);
