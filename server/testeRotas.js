@@ -6602,6 +6602,64 @@ setTimeout(async () => {
   console.log(`${okFormulariosPeriodo ? '✓' : '✗'} Formulários: filtros de tempo (Hoje/Ontem/Semana/Mês/De-Até) sobre a lista, sem restringir por padrão`);
 
   // ------------------------------------------------------------------
+  // Central -> Histórico (Solicitações): o kanban de 3 colunas SEMPRE
+  // visíveis lado a lado (Pendente/Aprovado/Rejeitado) virou o mesmo padrão
+  // de botões por status de formularios.html - clica e a lista aparece
+  // embaixo, só um aberto por vez. Também ganhou os presets de tempo
+  // (Hoje/Ontem/Semana/Mês) por cima do De/Até que já existia.
+  let okCentralHistoricoBotoes = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'central-historico.html'), 'utf8');
+    const conf = {
+      'as 3 colunas sempre visíveis (kanban-board/kanban-col) saíram da tela':
+        !/class="kanban-board"/.test(html) && !/class="kanban-col"/.test(html),
+      'viraram botão clicável, mesmo padrão de formularios.html':
+        /id="status-toggle-row"/.test(html) && /function toggleStatusCentral\(status\)\{/.test(html),
+      'clicar no botão de status alterna (mesmo clique fecha de novo)':
+        /STATUS_ABERTO = \(STATUS_ABERTO===status\) \? null : status;/.test(html),
+      'trocar de tipo (Triagem <-> aba de um assunto) fecha o status que estava aberto':
+        /function selecionarFiltroTipo\(tipo\)\{\s*FILTRO_TIPOS = tipo \? new Set\(\[tipo\]\) : new Set\(\);\s*STATUS_ABERTO = null;/.test(html)
+        && /function toggleFiltroTipoMulti\(tipo\)\{[\s\S]{0,120}STATUS_ABERTO = null;/.test(html),
+      'a cor semântica de cada status (badge PENDENTE/APROVADO/REJEITADO) continua no botão':
+        /<span class="badge \$\{status\}">\$\{LABEL_STATUS\[status\]\}<\/span>/.test(html),
+      'o hint (aguardando início / hoje) só aparece em Triagem, não na aba de um assunto':
+        /const HINT_STATUS = emTriagem \? \{ APROVADO:'· aguardando início', REJEITADO:'· hoje' \} : \{\};/.test(html),
+      'a seleção em lote (CHAVES_VISIVEIS) continua sobre TODOS os status, não só o aberto':
+        /CHAVES_VISIVEIS = visiveis\.map\(c=>c\.tipo\+'::'\+c\.id\);/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okCentralHistoricoBotoes = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okCentralHistoricoBotoes = false; console.log('  erro: ' + e.message); }
+  if (!okCentralHistoricoBotoes) ruins += 1;
+  console.log(`${okCentralHistoricoBotoes ? '✓' : '✗'} Central -> Histórico: kanban de status virou botão (clica e abre embaixo), igual Formulários`);
+
+  // ------------------------------------------------------------------
+  // Central -> Histórico: presets de tempo (Hoje/Ontem/Semana/Mês) por cima
+  // do filtro De/Até que já existia - calculados em Brasília.
+  let okCentralHistoricoPeriodo = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'central-historico.html'), 'utf8');
+    const conf = {
+      'presets existem por cima do De/Até que já existia': /id="presets-periodo-central"/.test(html)
+        && /id="filtro-data-de"/.test(html) && /id="filtro-data-ate"/.test(html),
+      'os 5 presets certos (Todos/Hoje/Ontem/Semana/Mês)':
+        /\{lbl:'Todos', tipo:'todos'\}, \{lbl:'Hoje', tipo:'hoje'\}, \{lbl:'Ontem', tipo:'ontem'\}, \{lbl:'Semana', tipo:'semana'\}, \{lbl:'Mês', tipo:'mes'\}/.test(html),
+      'o período é calculado em Brasília (não no fuso do navegador/servidor)':
+        /toLocaleDateString\('sv-SE', \{ timeZone: FUSO_BR \}\)/.test(html),
+      'editar a data na mão limpa o preset ativo (não fica um botão marcado com data diferente)':
+        /function aoMudarPeriodoCentral\(\)\{\s*document\.querySelectorAll\('#presets-periodo-central \.preset-btn'\)\.forEach\(b=>b\.classList\.remove\('active'\)\);/.test(html),
+      'Limpar filtros também limpa o preset (volta pro Todos)':
+        /function limparFiltrosExtra\(\)\{[\s\S]{0,500}b\.dataset\.tipo==='todos'/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okCentralHistoricoPeriodo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okCentralHistoricoPeriodo = false; console.log('  erro: ' + e.message); }
+  if (!okCentralHistoricoPeriodo) ruins += 1;
+  console.log(`${okCentralHistoricoPeriodo ? '✓' : '✗'} Central -> Histórico: filtros de tempo (Hoje/Ontem/Semana/Mês) por cima do De/Até`);
+
+  // ------------------------------------------------------------------
   // Duplicação de loja no "Chamados em aberto (por unidade)" (Histórico):
   // o estorno criado pela Central não mandava unidadeNome nenhum - o
   // fallback de refunds.js (unidadeNome || unidade || null) gravava o
