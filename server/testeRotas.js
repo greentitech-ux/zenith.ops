@@ -374,6 +374,10 @@ setTimeout(async () => {
     ['/api/fechamentos/recordes', 'recordes de venda (maior/menor dia e semana)'],
     ['/api/inventario/recebimentos/relatorio.csv?unidade=19821', 'relatório de recebimentos - inventário (CSV)'],
     ['/api/inventario/recebimentos/relatorio.pdf?unidade=19821', 'relatório de recebimentos - inventário (PDF)'],
+    ['/api/inventario/saidas/relatorio.csv?unidade=19821', 'relatório de saídas - inventário (CSV)'],
+    ['/api/inventario/saidas/relatorio.pdf?unidade=19821', 'relatório de saídas - inventário (PDF)'],
+    ['/api/inventario/historico-contagens/relatorio.csv?unidade=19821&inicio=2020-01-01&fim=2030-01-01', 'relatório de histórico de contagens - inventário (CSV)'],
+    ['/api/inventario/historico-contagens/relatorio.pdf?unidade=19821&inicio=2020-01-01&fim=2030-01-01', 'relatório de histórico de contagens - inventário (PDF)'],
   ];
   let ruins = 0;
   for (const [rota, nome] of casos) {
@@ -6949,6 +6953,53 @@ setTimeout(async () => {
   } catch (e) { okDataClicavel = false; console.log('  erro: ' + e.message); }
   if (!okDataClicavel) ruins += 1;
   console.log(`${okDataClicavel ? '✓' : '✗'} Formulários: data clica em qualquer lugar do campo + Período do caixa virou 2 seletores De/Até`);
+
+  // ------------------------------------------------------------------
+  // Formulários (Triagem): a nota explicativa fixa acima dos botões de
+  // status foi removida a pedido do usuário ("não precisa") - os botões já
+  // são autoexplicativos (nome + contagem), a nota só duplicava informação.
+  let okTriagemSemNota = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'formularios.html'), 'utf8');
+    const conf = {
+      'a nota fixa (div/CSS/toggle) não existe mais na tela':
+        !/triagem-nota/.test(html),
+      'os 4 botões de status continuam lá (não é a linha inteira que sumiu)':
+        /COLUNAS = \[/.test(html) && /AGUARDANDO_PREENCHIMENTO/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okTriagemSemNota = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTriagemSemNota = false; console.log('  erro: ' + e.message); }
+  if (!okTriagemSemNota) ruins += 1;
+  console.log(`${okTriagemSemNota ? '✓' : '✗'} Formulários: nota fixa da Triagem removida, botões de status continuam`);
+
+  // ------------------------------------------------------------------
+  // Estoque/Inventário: CSV/PDF nas duas tabelas de números que ainda não
+  // tinham (Saída e Histórico de contagens) - pedido do usuário ("emitir
+  // CSV e PDF de tudo que for tabela numeros, dados relevantes"). As rotas
+  // em si já são batidas por HTTP na lista "casos" lá em cima; aqui só
+  // confere que a tela realmente oferece o botão (senão a rota existir
+  // sozinha não ajuda ninguém).
+  let okEstoqueExport = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'estoque.html'), 'utf8');
+    const conf = {
+      'Saída: botões CSV/PDF chamando a rota certa':
+        /onclick="baixarRelatorioSaidas\('csv'\)"/.test(html) && /onclick="baixarRelatorioSaidas\('pdf'\)"/.test(html)
+        && /function baixarRelatorioSaidas\(formato\)\{[\s\S]{0,200}\/api\/inventario\/saidas\/relatorio\.\$\{formato\}/.test(html),
+      'Histórico de contagens: botões CSV/PDF chamando a rota certa':
+        /onclick="baixarRelatorioHistorico\('csv'\)"/.test(html) && /onclick="baixarRelatorioHistorico\('pdf'\)"/.test(html)
+        && /function baixarRelatorioHistorico\(formato\)\{[\s\S]{0,400}\/api\/inventario\/historico-contagens\/relatorio\.\$\{formato\}/.test(html),
+      'o relatório do Histórico respeita o filtro de setor que já existe na tela (não exporta tudo se a tela tá filtrada)':
+        /const setor = document\.getElementById\('h-setor'\)\.value;\s*if\(setor\) params\.set\('setor', setor\);/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okEstoqueExport = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okEstoqueExport = false; console.log('  erro: ' + e.message); }
+  if (!okEstoqueExport) ruins += 1;
+  console.log(`${okEstoqueExport ? '✓' : '✗'} Estoque/Inventário: CSV/PDF em Saída e Histórico de contagens (faltavam)`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

@@ -5899,6 +5899,87 @@ app.get('/api/inventario/recebimentos/relatorio.:formato(csv|pdf)', requireSecti
   }
 });
 
+// relatorio (CSV/PDF) das saidas de estoque (venda/desperdicio/outra) - a
+// tela so mostra as ultimas 30 (ver renderSaidas em estoque.html), mesmo
+// padrao de recebimentos/relatorio
+const NOMES_TIPO_SAIDA_INVENTARIO = { VENDA: 'Venda', DESPERDICIO: 'Desperdício', OUTRA: 'Outra' };
+app.get('/api/inventario/saidas/relatorio.:formato(csv|pdf)', requireSection('inventario'), async (req, res) => {
+  try {
+    const { unidade, inicio, fim } = req.query;
+    if (!unidade) return res.status(400).json({ error: 'Informe a unidade.' });
+    if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const todos = await inventario.listSaidas();
+    const linhas = todos
+      .filter((s) => s.unidade === unidade && (!inicio || (s.data || '') >= inicio) && (!fim || (s.data || '') <= fim))
+      .sort((a, b) => (b.data || '').localeCompare(a.data || ''))
+      .map((s) => ({
+        data: reportUtil.fmtDataBR(s.data), item: s.itemNome, tipo: NOMES_TIPO_SAIDA_INVENTARIO[s.tipo] || s.tipo,
+        quantidade: s.quantidade, motivo: s.motivo || '—',
+      }));
+    const colunas = [
+      { key: 'data', label: 'Data' }, { key: 'item', label: 'Item' }, { key: 'tipo', label: 'Tipo' },
+      { key: 'quantidade', label: 'Quantidade' }, { key: 'motivo', label: 'Motivo' },
+    ];
+    const nomeArquivo = reportUtil.nomeArquivoComData(`inventario-saidas-${unidade}`);
+    if (req.params.formato === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}.csv"`);
+      return res.send(reportUtil.toCSV(colunas, linhas));
+    }
+    const periodo = inicio || fim ? ` · período: ${inicio || 'início'} a ${fim || 'hoje'}` : ' · histórico completo';
+    reportUtil.writePDF(res, {
+      titulo: 'Inventário - Saídas (venda/desperdício)',
+      subtitulo: `${INVENTARIO_UNIDADES_NOMES[unidade] || unidade}${periodo} · ${linhas.length} saída(s)`,
+      colunas, linhas, nomeArquivo,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// relatorio (CSV/PDF) do Historico de contagens (planilha itens x dias) -
+// mesma tabela que a aba Historico mostra na tela (ver renderHistorico em
+// estoque.html), so que exportavel; "setor" opcional espelha o filtro que
+// ja existe na tela
+app.get('/api/inventario/historico-contagens/relatorio.:formato(csv|pdf)', requireSection('inventario'), async (req, res) => {
+  try {
+    const { unidade, inicio, fim, setor } = req.query;
+    if (!unidade || !inicio || !fim) return res.status(400).json({ error: 'Informe unidade, início e fim.' });
+    if (!podeUnidadeInventario(req, unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    const { datas, itens: todosItens } = await inventario.historicoContagens(unidade, inicio, fim);
+    const itens = setor ? todosItens.filter((i) => i.setor === setor) : todosItens;
+    const colunas = [
+      { key: 'item', label: 'Item' }, { key: 'setor', label: 'Setor' },
+      ...datas.map((d) => ({ key: `d_${d}`, label: reportUtil.fmtDataBR(d) })),
+      { key: 'saidaTotal', label: 'Saída total' },
+    ];
+    const linhas = itens.map((item) => {
+      const linha = { item: item.nome, setor: inventario.SETORES[item.setor] || item.setor || '' };
+      let saidaTotal = 0, temSaida = false;
+      datas.forEach((d) => {
+        const v = item.valores[d];
+        linha[`d_${d}`] = v ? String(v.contagem) : '—';
+        if (v && v.saida != null) { temSaida = true; saidaTotal += v.saida; }
+      });
+      linha.saidaTotal = temSaida ? String(Math.round(saidaTotal * 1000) / 1000) : '—';
+      return linha;
+    });
+    const nomeArquivo = reportUtil.nomeArquivoComData(`inventario-historico-${unidade}`);
+    if (req.params.formato === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}.csv"`);
+      return res.send(reportUtil.toCSV(colunas, linhas));
+    }
+    reportUtil.writePDF(res, {
+      titulo: 'Inventário - Histórico de contagens',
+      subtitulo: `${INVENTARIO_UNIDADES_NOMES[unidade] || unidade} · ${reportUtil.fmtDataBR(inicio)} a ${reportUtil.fmtDataBR(fim)}`,
+      colunas, linhas, nomeArquivo,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---------- Saltiverso Patteo (parque de trampolins): controle de entrada
 // (check-ins) e reservas de festa. Duas secoes de checkin/painel (mesmo
 // padrao entregas/entregas-lancamento) + uma secao de festas ----------
