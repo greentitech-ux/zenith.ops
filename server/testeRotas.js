@@ -7477,6 +7477,82 @@ setTimeout(async () => {
   if (!okModalDispositivo) ruins += 1;
   console.log(`${okModalDispositivo ? '✓' : '✗'} Status das Lojas: editar dispositivo vira modal (apelido+tipo+monitorar) com chip 🔔 pro que está armado`);
 
+  // ------------------------------------------------------------------
+  // Pedido do Master: "preciso ser avisado sempre que tiver alguem no chat
+  // aguardando ser atendido / o alerta insista ate que algum atendente
+  // assuma". Antes o reforço do alarme SÓ pegava conversa que o Beniboy
+  // tinha escalado (botDesativado) - quem estava esperando com o bot ainda
+  // ligado (bot travado, sem chave, ou respondendo sem resolver) não gerava
+  // alarme nenhum, só o push comum. É por isso que "chegava notificação mas
+  // não o alerta". Agora entra também quem falou por último e está esperando
+  // além da carência, e continua insistindo até sair do PENDENTE.
+  let okAlarmeAguardando = false;
+  try {
+    const sc = require('/home/user/adyen-monitor/server/suporteChat.js');
+    const agora = Date.now();
+    const iso = (msAtras) => new Date(agora - msAtras).toISOString();
+    const chatDoc = (id, extra) => {
+      DOCS.set(`suporteChats/${id}`, {
+        id, nome: 'Visitante ' + id, status: 'ABERTO', statusAtendimento: 'PENDENTE',
+        criadoEm: iso(30 * 60 * 1000), atualizadoEm: iso(30 * 60 * 1000),
+        ...extra,
+      });
+    };
+    // limpa qualquer chat que outro bloco tenha deixado ABERTO+PENDENTE,
+    // senão ele entra na varredura e polui a contagem deste teste
+    [...DOCS.keys()].filter((k) => k.startsWith('suporteChats/')).forEach((k) => {
+      const d = DOCS.get(k);
+      if (d && d.status === 'ABERTO' && d.statusAtendimento === 'PENDENTE') DOCS.delete(k);
+    });
+
+    // 1) Beniboy escalou: alarma na hora (comportamento que já existia)
+    chatDoc('esc1', { botDesativado: true, ultimoAlertaEm: iso(5 * 60 * 1000),
+      mensagens: [{ de: 'visitante', texto: 'me ajuda', em: iso(10 * 60 * 1000) }] });
+    // 2) visitante falou por último e espera há 12min, bot AINDA ligado -
+    //    é o caso que antes não alarmava nunca
+    chatDoc('esperando', { botDesativado: false, ultimoAlertaEm: iso(5 * 60 * 1000),
+      mensagens: [{ de: 'visitante', texto: 'alguem ai?', em: iso(12 * 60 * 1000) }] });
+    // 3) visitante acabou de escrever (30s): dentro da carência, NÃO alarma
+    chatDoc('recente', { botDesativado: false, ultimoAlertaEm: iso(5 * 60 * 1000),
+      mensagens: [{ de: 'visitante', texto: 'oi', em: iso(30 * 1000) }] });
+    // 4) o bot respondeu por último: ninguém está esperando, NÃO alarma
+    chatDoc('respondido', { botDesativado: false, ultimoAlertaEm: iso(5 * 60 * 1000),
+      mensagens: [{ de: 'visitante', texto: 'oi', em: iso(20 * 60 * 1000) },
+        { de: 'suporte', texto: 'resolvido?', em: iso(15 * 60 * 1000) }] });
+    // 5) alguém ASSUMIU (saiu do PENDENTE): silencia, mesmo esperando muito
+    chatDoc('assumido', { botDesativado: true, statusAtendimento: 'EM_ATENDIMENTO',
+      ultimoAlertaEm: iso(5 * 60 * 1000),
+      mensagens: [{ de: 'visitante', texto: 'oi', em: iso(40 * 60 * 1000) }] });
+    // 6) já alarmou há 5s: respeita o REALERTA_MS (30s) e não repete agora
+    chatDoc('recemAlertado', { botDesativado: true, ultimoAlertaEm: iso(5 * 1000),
+      mensagens: [{ de: 'visitante', texto: 'oi', em: iso(20 * 60 * 1000) }] });
+
+    const ids = (await sc.listarParaReforcarAlarme()).map((c) => c.id).sort();
+    const esperando = (await sc.listarParaReforcarAlarme()).find((c) => c.id === 'esperando');
+
+    // wiring: o job tem que mandar o tempo de espera no texto do push de
+    // quem entrou por espera (e não por escalação do Beniboy)
+    const srcIdxAl = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const okTextoEspera = /aguardando atendimento há \$\{chat\.esperaMin\} min/.test(srcIdxAl)
+      && /push\.notifyBeniboyEscalonamento\(chat, motivo\)/.test(srcIdxAl);
+
+    const conf = {
+      'conversa escalada pelo Beniboy continua alarmando': ids.includes('esc1'),
+      'quem está esperando há 12min alarma mesmo SEM o Beniboy ter escalado': ids.includes('esperando'),
+      'visitante que acabou de escrever (30s) NÃO alarma - carência pro bot responder': !ids.includes('recente'),
+      'conversa cuja última palavra é do atendente/bot NÃO alarma (ninguém esperando)': !ids.includes('respondido'),
+      'depois que alguém ASSUME (sai do PENDENTE) o alarme para': !ids.includes('assumido'),
+      'respeita o intervalo de re-alerta (não repete 5s depois)': !ids.includes('recemAlertado'),
+      'o push de quem esperou carrega os minutos de espera': !!esperando && esperando.esperaMin >= 11 && esperando.esperaMin <= 13,
+      'index.js manda o tempo de espera no texto do push': okTextoEspera,
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okAlarmeAguardando = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okAlarmeAguardando = false; console.log('  erro: ' + e.message); }
+  if (!okAlarmeAguardando) ruins += 1;
+  console.log(`${okAlarmeAguardando ? '✓' : '✗'} Chat: alarme insiste por QUEM ESTÁ ESPERANDO (não só quando o Beniboy escala) e só para quando alguém assume`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

@@ -10544,8 +10544,14 @@ async function reforcarAlarmesBeniboy() {
       await suporteChat.marcarAlertaEnviado(chat.id);
       continue;
     }
-    push.notifyBeniboyEscalonamento(chat, null);
-    broadcast('beniboy-escalonamento', { chatId: chat.id, nome: chat.nome || '', motivo: '' }, 'suporte');
+    // quem entrou por ESPERA (visitante falou por ultimo e ninguem assumiu)
+    // e nao por escalacao do Beniboy carrega o tempo de espera no texto - e
+    // a diferenca entre "o bot desistiu" e "tem gente esperando ha 12min"
+    const motivo = !chat.botDesativado && chat.esperaMin
+      ? `aguardando atendimento há ${chat.esperaMin} min`
+      : null;
+    push.notifyBeniboyEscalonamento(chat, motivo);
+    broadcast('beniboy-escalonamento', { chatId: chat.id, nome: chat.nome || '', motivo: motivo || '' }, 'suporte');
     await suporteChat.marcarAlertaEnviado(chat.id);
   }
 }
@@ -12183,7 +12189,7 @@ function aquecerBoot(promessa, ms) {
     // pra nao empilhar atraso em cima do atraso (senao o reforco "de 30s"
     // virava de fato ~1min30 esperando o proximo tick de 1min)
     // ...mas so enquanto HA alguem esperando. A consulta e sempre filtrada
-    // (ABERTO + bot desativado + PENDENTE), so que uma consulta que nao acha
+    // (ABERTO + PENDENTE), so que uma consulta que nao acha
     // nada ainda custa 1 leitura no Firestore: de 15 em 15s isso dava 5.760
     // leituras/dia pra descobrir, quase sempre, que nao ha nada a fazer. Sem
     // ninguem escalado, o ritmo cai pra 2min (8 ticks); a escalacao nova

@@ -487,32 +487,62 @@ async function estatisticas({ de, ate } = {}) {
 // pra 30s (2o pedido do usuario: o reforco demorava demais pra insistir)
 const REALERTA_MS = 30 * 1000;
 
-// candidatas a repetir o alarme critico: o Beniboy ja escalou (botDesativado)
-// e NINGUEM do time mexeu no card ainda (statusAtendimento continua
-// PENDENTE - sair do PENDENTE, mesmo sem mandar mensagem, ja conta como
-// "alguem assumiu" e silencia o reforco). So entram as que passaram
-// REALERTA_MS desde o ultimo alerta (ver marcarAlertaEnviado) - a varredura
-// de ociosos (40min sem nenhuma mensagem nova) acaba encerrando sozinha
-// quem ficou mesmo abandonada, entao o reforco nao roda pra sempre.
+// Carencia antes de o alarme comecar quando o Beniboy NAO escalou sozinho.
+// Pedido do Master: "preciso ser avisado sempre que tiver alguem no chat
+// aguardando ser atendido" - nao so quando o bot desiste. Antes disso o
+// reforco exigia botDesativado, entao quem estava esperando com o bot ainda
+// "no comando" (bot travado, sem chave de API, ou respondendo sem resolver)
+// nunca gerava alarme nenhum - so o push comum. Essa carencia e o que
+// impede o outro extremo: alarmar toda conversa no segundo em que nasce,
+// inclusive as que o bot resolve sozinho em 20s.
+const ESPERA_SEM_ESCALAR_MS = Number(process.env.SUPORTE_ESPERA_SEM_ESCALAR_MS) >= 0
+  ? Number(process.env.SUPORTE_ESPERA_SEM_ESCALAR_MS)
+  : 3 * 60 * 1000;
+
+// ha quanto tempo o VISITANTE falou por ultimo sem ninguem responder. null
+// quando a ultima palavra e do bot/atendente - ai nao ha ninguem esperando.
+function esperaDoVisitante(chat, agora) {
+  const msgs = chat.mensagens || [];
+  const ultima = msgs[msgs.length - 1];
+  if (!ultima || ultima.de !== 'visitante') return null;
+  const ms = agora - new Date(ultima.em).getTime();
+  return ms > 0 ? ms : 0;
+}
+
+// candidatas a repetir o alarme critico: NINGUEM do time mexeu no card ainda
+// (statusAtendimento continua PENDENTE - sair do PENDENTE, mesmo sem mandar
+// mensagem, ja conta como "alguem assumiu" e silencia o reforco). Duas
+// portas de entrada: (1) o Beniboy escalou (botDesativado) - alarme imediato,
+// como sempre foi; (2) o visitante falou por ultimo e esta esperando ha mais
+// que ESPERA_SEM_ESCALAR_MS, mesmo com o bot ainda ligado. So entram as que
+// passaram REALERTA_MS desde o ultimo alerta (ver marcarAlertaEnviado) - a
+// varredura de ociosos (40min sem nenhuma mensagem nova) acaba encerrando
+// sozinha quem ficou mesmo abandonada, entao o reforco nao roda pra sempre.
 // consulta filtrada (nao listAllUncached()) de proposito: esse job roda a
 // cada 15s o dia inteiro (ver reforcarAlarmesBeniboy em index.js) - baixar a
 // colecao INTEIRA (todo o historico de chats ja finalizados) a cada 15s
 // custava uma leitura por documento existente, a cada tick, pra sempre.
-// Filtrando os 3 campos direto no Firestore (todos com "==", nao precisa de
-// indice composto), so vem os poucos chats que realmente podem estar
-// esperando reforco - normalmente 0 a poucos, nao o historico inteiro.
+// Filtrando os 2 campos direto no Firestore (os dois com "==", nao precisa
+// de indice composto), so vem os poucos chats que podem estar esperando -
+// ABERTO+PENDENTE e um punhado, nao o historico inteiro.
 async function listarParaReforcarAlarme() {
   const snap = await COLLECTION
     .where('status', '==', 'ABERTO')
-    .where('botDesativado', '==', true)
     .where('statusAtendimento', '==', 'PENDENTE')
     .get();
-  const chats = snap.docs.map((d) => d.data());
   const agora = Date.now();
-  return chats.filter((c) => {
-    const desde = new Date(c.ultimoAlertaEm || c.atualizadoEm || c.criadoEm).getTime();
-    return agora - desde >= REALERTA_MS;
-  });
+  const out = [];
+  for (const c of snap.docs.map((d) => d.data())) {
+    const desdeAlerta = new Date(c.ultimoAlertaEm || c.atualizadoEm || c.criadoEm).getTime();
+    if (agora - desdeAlerta < REALERTA_MS) continue;
+    const espera = esperaDoVisitante(c, agora);
+    const esperandoDemais = espera != null && espera >= ESPERA_SEM_ESCALAR_MS;
+    if (!c.botDesativado && !esperandoDemais) continue;
+    // minutos que a pessoa ja esperou - entra no texto do push pra quem
+    // recebe saber se e "acabou de chegar" ou "esta la ha 40min"
+    out.push({ ...c, esperaMin: espera != null ? Math.max(1, Math.round(espera / 60000)) : null });
+  }
+  return out;
 }
 
 async function marcarAlertaEnviado(id) {
