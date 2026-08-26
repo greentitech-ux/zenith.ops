@@ -49,6 +49,10 @@
      de onde veio aquele dado sem precisar clicar. */
   input[readonly], .campo-do-documento{background:var(--panel);opacity:.85;cursor:not-allowed;}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  /* nascimento digitado fora do calendario (31/02, ano no futuro): cor
+     semantica, o mesmo vermelho dos outros erros - a pessoa ve o problema
+     enquanto digita, nao so ao tentar salvar (ver data-br.js) */
+  input.data-invalida{border-color:var(--bad);}
   textarea{resize:vertical;min-height:56px;}
   .grid2{display:grid;grid-template-columns:1fr;gap:0 10px;}
   @media(min-width:440px){ .grid2{grid-template-columns:1fr 1fr;} }
@@ -95,6 +99,7 @@
   .aniver-icone{font-size:20px;flex:none;}
 </style>
 <script src="/tema.js"></script>
+<script src="/data-br.js"></script>
 </head>
 <body>
 
@@ -290,7 +295,7 @@
       <div class="grid2">
         <div>
           <label>Data de nascimento</label>
-          <input type="date" id="c-nascimento">
+          <input type="text" id="c-nascimento" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" oninput="mascararDataBR(this)">
         </div>
         <div>
           <label id="c-admissao-label">Data Início Extra</label>
@@ -458,7 +463,7 @@
       <div class="grid2">
         <div>
           <label>Data de nascimento 🎂</label>
-          <input type="date" id="ed-nascimento">
+          <input type="text" id="ed-nascimento" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" oninput="mascararDataBR(this)">
         </div>
         <div id="campo-ed-admissao">
           <label id="ed-admissao-label">Data de admissão</label>
@@ -923,7 +928,7 @@ async function lerDocumentoCadastro(){
 
     DOC_LIDO = data;
     // campo manual não é tocado: o que foi digitado é a fonte dele
-    const porFora = { nome: data.nome, dataNascimento: data.dataNascimento || '', cpf: formatarCpf(data.cpf), rg: data.rg || '', nomeMae: data.nomeMae || '' };
+    const porFora = { nome: data.nome, dataNascimento: isoParaDataBR(data.dataNascimento), cpf: formatarCpf(data.cpf), rg: data.rg || '', nomeMae: data.nomeMae || '' };
     Object.entries(INPUT_DO_CAMPO).forEach(([campo, id])=>{
       if(ehManual(campo)) return;
       travarCampoLido(document.getElementById(id), porFora[campo]);
@@ -2207,7 +2212,10 @@ document.getElementById('form-cadastrar').addEventListener('submit', async (e)=>
     fd.append('cargoFuncao', document.getElementById('c-cargo').value);
     fd.append('chavePix', document.getElementById('c-chave-pix').value);
     fd.append('banco', document.getElementById('c-banco').value);
-    fd.append('dataNascimento', document.getElementById('c-nascimento').value);
+    fd.append('dataNascimento', dataBRparaISO(document.getElementById('c-nascimento').value) || '');
+    // campo travado pela leitura do documento nunca cai aqui (o valor vem
+    // do OCR, já em formato válido); isso pega o digitado na mão
+    if(dataBRInvalida(document.getElementById('c-nascimento'))) throw new Error('Data de nascimento inválida. Use dd/mm/aaaa (ex: 05/03/1990).');
     fd.append('dataAdmissao', document.getElementById('c-admissao').value);
     fd.append('tipoCadastro', TIPO_CADASTRO);
     if(TIPO_CADASTRO==='efetivado') fd.append('semExperiencia', document.getElementById('c-sem-experiencia').checked);
@@ -2250,7 +2258,7 @@ function abrirEditar(id){
   document.getElementById('ed-cargo').value = f.cargoFuncao||'';
   document.getElementById('ed-chave-pix').value = f.chavePix||'';
   document.getElementById('ed-banco').value = f.banco||'';
-  document.getElementById('ed-nascimento').value = f.dataNascimento||'';
+  document.getElementById('ed-nascimento').value = isoParaDataBR(f.dataNascimento);
   document.getElementById('ed-admissao').value = f.dataAdmissao||'';
   document.getElementById('ed-status').value = f.status||'ativo';
   document.getElementById('ed-aso-data').value = f.dataExamePeriodico||'';
@@ -2262,6 +2270,10 @@ function abrirEditar(id){
 }
 function fecharEditar(){ document.getElementById('overlay-editar').classList.add('hidden'); EDITANDO_ID=null; }
 async function salvarEdicao(){
+  if(dataBRInvalida(document.getElementById('ed-nascimento'))){
+    alert('Data de nascimento inválida. Use dd/mm/aaaa (ex: 05/03/1990), ou deixe em branco.');
+    return;
+  }
   const msg = document.getElementById('msg-editar');
   try{
     const per = document.getElementById('ed-aso-periodicidade').value;
@@ -2272,7 +2284,7 @@ async function salvarEdicao(){
       cargoFuncao: document.getElementById('ed-cargo').value,
       chavePix: document.getElementById('ed-chave-pix').value,
       banco: document.getElementById('ed-banco').value,
-      dataNascimento: document.getElementById('ed-nascimento').value || null,
+      dataNascimento: dataBRparaISO(document.getElementById('ed-nascimento').value),
       dataAdmissao: document.getElementById('ed-admissao').value,
       status: document.getElementById('ed-status').value,
       dataExamePeriodico: document.getElementById('ed-aso-data').value || null,

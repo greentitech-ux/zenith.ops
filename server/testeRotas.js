@@ -7500,6 +7500,80 @@ setTimeout(async () => {
   console.log(`${okColunaItemTravada ? '✓' : '✗'} Estoque/Histórico: coluna do item travada com margem quase zero (cabe no celular sem cortar os números)`);
 
   // ------------------------------------------------------------------
+  // Data de NASCIMENTO digitada (dd/mm/aaaa) em vez de <input type="date">
+  // em TODA tela onde a pessoa digita - pedido do Master ("sempre que for
+  // data de nascimento deixar digitável"). O seletor nativo abre no mês atual
+  // e obriga a navegar ano a ano pra trás.
+  //
+  // Exceção pedida por ele também: nascimento que vem do ESCANEAMENTO do
+  // documento continua como está (rh-cadastro), porque ali não se digita - o
+  // servidor relê o documento e ignora o que a tela mandar.
+  let okNascimentoDigitado = false;
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const dir = (f) => path.join(__dirname, 'public', f);
+    const compartilhado = fs.readFileSync(dir('data-br.js'), 'utf8');
+    // eslint-disable-next-line no-new-func
+    const api = new Function(`${compartilhado}; return { dataBRparaISO, isoParaDataBR, mascararDataBR, dataBRInvalida };`)();
+    const { dataBRparaISO, isoParaDataBR, mascararDataBR, dataBRInvalida } = api;
+
+    const campo = { value: '05032019', classList: { toggle() {} } };
+    mascararDataBR(campo);
+
+    const telas = ['parque-checkin.html', 'parque.html', 'mensalistas.html', 'rh.html'];
+    const htmls = Object.fromEntries(telas.map((f) => [f, fs.readFileSync(dir(f), 'utf8')]));
+    const cadastroRh = fs.readFileSync(dir('rh-cadastro.html'), 'utf8');
+
+    const conf = {
+      'as 4 telas com nascimento digitável carregam o mesmo arquivo':
+        telas.every((f) => /<script src="\/data-br\.js"><\/script>/.test(htmls[f])),
+      'nenhum campo de nascimento ficou como seletor de data':
+        !/type="date"[^>]*(crianca-nasc|cor-cr-nasc|ms-crianca-nasc|id="c-nascimento"|id="ed-nascimento")/.test(Object.values(htmls).join('\n'))
+        // 6 campos: 2 no check-in do parque (nova criança e correção), 1 no
+        // painel do parque, 1 em mensalistas, 2 no RH (cadastro e edição)
+        && (Object.values(htmls).join('\n').match(/oninput="mascararDataBR\(this\)"/g) || []).length === 6,
+      // o Master pediu explicitamente pra deixar como está o que vem do
+      // documento - ali não se digita, o servidor relê o documento
+      'nascimento lido do documento (rh-cadastro) continua como está':
+        /<input type="date" id="nascimento" readonly>/.test(cadastroRh) && !/data-br\.js/.test(cadastroRh),
+      'a máscara monta dd/mm/aaaa enquanto a pessoa digita só números': campo.value === '05/03/2019',
+      'data digitada vira ISO pro servidor': dataBRparaISO('05/03/2019') === '2019-03-05',
+      'bissexto de verdade passa': dataBRparaISO('29/02/2020') === '2020-02-29',
+      // o Date "conserta" 31/02 pra 02/03 sozinho - sem checar de volta, a
+      // pessoa nasceria em outro dia sem ninguém perceber
+      'data que não existe no calendário é recusada (não vira outro dia)':
+        dataBRparaISO('31/02/2020') === null && dataBRparaISO('29/02/2021') === null
+        && dataBRparaISO('31/04/2020') === null && dataBRparaISO('00/01/2020') === null,
+      'mês inválido e formato incompleto são recusados':
+        dataBRparaISO('05/13/2019') === null && dataBRparaISO('5/3/2019') === null && dataBRparaISO('05/03/201') === null,
+      'nascimento no futuro ou antes de 1900 é recusado':
+        dataBRparaISO(`05/03/${new Date().getFullYear() + 1}`) === null && dataBRparaISO('05/03/1899') === null,
+      'o que já está salvo (ISO) volta pra tela em dd/mm/aaaa': isoParaDataBR('2019-03-05') === '05/03/2019',
+      'campo vazio não é inválido (nascimento é opcional)':
+        dataBRInvalida({ value: '' }) === false && dataBRInvalida({ value: '31/02/2020' }) === true,
+      'todo lugar que envia converte pra ISO, ninguém manda o texto cru':
+        // 5 coletores; o 6º campo (cadastro do RH) manda por FormData, logo abaixo
+        (Object.values(htmls).join('\n').match(/dataNascimento: dataBRparaISO\(/g) || []).length === 5
+        && /fd\.append\('dataNascimento', dataBRparaISO\(/.test(htmls['rh.html']),
+      'o que vem da leitura do documento é mostrado em dd/mm/aaaa':
+        /dataNascimento: isoParaDataBR\(data\.dataNascimento\)/.test(htmls['rh.html']),
+      // campo é opcional, mas texto inválido não pode virar null em silêncio:
+      // o desconto de aniversário depende dele
+      'texto inválido trava o envio nas 4 telas, em vez de virar null':
+        /criancasComNascimentoInvalido\('#lista-criancas/.test(htmls['parque-checkin.html'])
+        && /camposDataBRInvalidos\(document\.getElementById\('cor-criancas'\)\)/.test(htmls['parque.html'])
+        && /camposDataBRInvalidos\(document\.getElementById\('form-mensalista'\)\)/.test(htmls['mensalistas.html'])
+        && (htmls['rh.html'].match(/dataBRInvalida\(document\.getElementById\('(c|ed)-nascimento'\)\)/g) || []).length === 2,
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okNascimentoDigitado = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okNascimentoDigitado = false; console.log('  erro: ' + e.message); }
+  if (!okNascimentoDigitado) ruins += 1;
+  console.log(`${okNascimentoDigitado ? '✓' : '✗'} Nascimento é digitado (dd/mm/aaaa) em toda tela que digita, vira ISO pro servidor e recusa data que não existe`);
+
+  // ------------------------------------------------------------------
   // Pedido real do Master: "lancei uma sangria dia 20, teve entrada de
   // dinheiro naquele dia, então a próxima sangria já inicia com o De em
   // dia 20, só preenchendo o Até" - o "De" do período nasce igual ao "Até"
