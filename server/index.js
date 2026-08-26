@@ -2983,12 +2983,24 @@ app.get('/api/loja-status/rede', requireSection('suporte'), async (req, res) => 
   }
 });
 
+// Tipos de aparelho pro select da tela: os fixos (Impressora, VM Host,
+// PULSE, GCOM, VM) mais os que o Master criou pelo "+ Novo tipo". Sai do
+// mesmo documento ja cacheado dos apelidos - nao e leitura nova no Firestore.
+app.get('/api/loja-status/tipos-dispositivo', requireSection('suporte'), async (req, res) => {
+  try {
+    res.json(await lojaStatus.listarTiposDispositivo());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Batiza um aparelho da rede da loja ("Impressora da cozinha"). O nome vale
 // pra UNIDADE inteira, nao pro computador que por acaso enxergou aquele MAC -
 // por isso a rota e por codigo de unidade. Mesmo gate do painel.
-// Aceita {apelido, tipo, monitorar} (pedido do Master: alarme quando uma
-// impressora/VM marcada perde rede) - campo omitido nao mexe no que ja
-// tinha (ver definirApelidoDispositivo).
+// Aceita {apelido, tipo, tipoNovo, monitorar} (pedido do Master: alarme
+// quando uma impressora/VM marcada perde rede) - campo omitido nao mexe no
+// que ja tinha (ver definirApelidoDispositivo). 'tipoNovo' e o texto do
+// botao "+ Novo tipo" da tela e passa a valer pra rede toda.
 app.put('/api/loja-status/:codigo/dispositivos/:mac/apelido', requireSection('suporte'), async (req, res) => {
   try {
     res.json(await lojaStatus.definirApelidoDispositivo(req.params.codigo, req.params.mac, req.body));
@@ -12120,12 +12132,12 @@ function aquecerBoot(promessa, ms) {
         // varrerAlertas em lojaStatus.js) - pedido do Master, alarme por
         // equipamento específico, não pelo computador que o enxergou
         if (t.tipo === 'dispositivo-offline') {
-          push.notifyDispositivoOffline(nome, t.codigo, t.apelido, t.tipoDispositivo, t.mac)
+          push.notifyDispositivoOffline(nome, t.codigo, t.apelido, t.tipoDispositivo, t.mac, t.tipoRotulo)
             .catch((err) => console.error('Erro no push de dispositivo offline:', err.message));
           continue;
         }
         if (t.tipo === 'dispositivo-online') {
-          push.notifyDispositivoOnline(nome, t.codigo, t.apelido, t.tipoDispositivo, t.mac)
+          push.notifyDispositivoOnline(nome, t.codigo, t.apelido, t.tipoDispositivo, t.mac, t.tipoRotulo)
             .catch((err) => console.error('Erro no push de dispositivo voltou:', err.message));
           continue;
         }
