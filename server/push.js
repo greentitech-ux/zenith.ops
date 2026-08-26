@@ -887,17 +887,26 @@ async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto, rei
   }
 }
 
+// o tipo do aparelho e' aberto (a tela cria tipo novo - ver
+// listarTiposDispositivo em lojaStatus.js), entao o titulo vem do ROTULO que
+// a pessoa deu ("GCOM sem rede", "VM Host sem rede") em vez de uma lista
+// fechada aqui dentro. So o icone continua sendo decidido por tipo.
+function rotuloTipoDispositivo(tipoDispositivo, tipoRotulo) {
+  const icone = tipoDispositivo === 'impressora' ? '🖨️' : (tipoDispositivo ? '🖥️' : '📡');
+  return { icone, rotulo: tipoRotulo || 'Aparelho' };
+}
+
 // dispositivo de rede MARCADO (impressora Zebra/Bematech, VM do servidor -
 // ver definirApelidoDispositivo em lojaStatus.js) sumiu da varredura ARP
 // por tempo demais (ver DISPOSITIVO_OFFLINE_LIMIAR_MS). Mesmo publico e
 // mesma urgencia do alerta de loja offline: pedido explicito do Master pra
 // esse equipamento especifico ("caso esses equipamentos percam rede
 // precisa alarmar").
-async function notifyDispositivoOffline(unidadeNome, codigo, apelido, tipoDispositivo, mac) {
+async function notifyDispositivoOffline(unidadeNome, codigo, apelido, tipoDispositivo, mac, tipoRotulo) {
   const nome = apelido || mac;
-  const icone = tipoDispositivo === 'vm' ? '🖥️' : '🖨️';
+  const { icone, rotulo } = rotuloTipoDispositivo(tipoDispositivo, tipoRotulo);
   const dados = {
-    title: tipoDispositivo === 'vm' ? `${icone} VM sem rede` : `${icone} Impressora sem rede`,
+    title: `${icone} ${rotulo} sem rede`,
     body: `${nome} (${unidadeNome || codigo}) sumiu da rede - verifique cabo/energia do equipamento.`,
     tag: `noc-dispositivo-${codigo}-${mac}`,
     url: '/loja-status.html',
@@ -922,9 +931,9 @@ async function notifyDispositivoOffline(unidadeNome, codigo, apelido, tipoDispos
 
 // dispositivo monitorado voltou a aparecer na varredura - aviso tranquilo
 // (sem alarme sonoro), mesmo publico do alerta de queda
-async function notifyDispositivoOnline(unidadeNome, codigo, apelido, tipoDispositivo, mac) {
+async function notifyDispositivoOnline(unidadeNome, codigo, apelido, tipoDispositivo, mac, tipoRotulo) {
   const nome = apelido || mac;
-  const icone = tipoDispositivo === 'vm' ? '🖥️' : '🖨️';
+  const { icone } = rotuloTipoDispositivo(tipoDispositivo, tipoRotulo);
   const dados = {
     title: `${icone} Voltou à rede`,
     body: `${nome} (${unidadeNome || codigo}) voltou a responder na rede.`,

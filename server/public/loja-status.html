@@ -209,6 +209,7 @@
   /* dispositivo marcado (impressora/VM monitorada - pedido do Master: alarma
      se perder rede) - o mesmo chip 🔔 aparece na linha e no modal de edição */
   .disp-monitor-chip{flex:none;font-size:11px;}
+  .disp-tipo-chip{flex:none;font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 5px;white-space:nowrap;}
   .disp-monitorar-linha{display:flex;align-items:center;gap:8px;font-size:13px;margin:10px 0 4px;cursor:pointer;}
   .disp-monitorar-linha input{margin:0;}
   .tile-metricas{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px;}
@@ -240,6 +241,11 @@
 
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
   .overlay.hidden{display:none!important;}
+  /* o modal do aparelho e' aberto DE DENTRO do modal de detalhe do computador
+     (o lapis fica na lista de aparelhos). Com o mesmo z-index dos outros, ele
+     ficava ATRAS de quem o chamou - so a ordem no HTML decidia, e o detalhe
+     vem depois. */
+  #disp-overlay{z-index:60;}
   .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto;}
   .modal h3{margin:0 0 4px;font-size:15px;}
   .modal .sub{font-size:11.5px;color:var(--muted);margin-bottom:14px;}
@@ -565,11 +571,10 @@
     <label>Nome</label>
     <input type="text" id="disp-apelido" maxlength="40" placeholder="Ex: Impressora Zebra, VM PULSE">
     <label>Tipo</label>
-    <select id="disp-tipo">
-      <option value="">— nenhum —</option>
-      <option value="impressora">🖨️ Impressora</option>
-      <option value="vm">🖥️ VM</option>
-    </select>
+    <select id="disp-tipo" onchange="dispTipoMudou()"></select>
+    <div id="disp-tipo-novo-linha" class="hidden">
+      <input type="text" id="disp-tipo-novo" maxlength="24" placeholder="Nome do tipo novo. Ex: Roteador, Balança">
+    </div>
     <label class="disp-monitorar-linha"><input type="checkbox" id="disp-monitorar"> Monitorar (alarma se esse aparelho perder rede)</label>
     <div class="msg hidden" id="disp-modal-status"></div>
     <div class="modal-acoes">
@@ -796,11 +801,43 @@ function resumoDispositivo(ua){
 // se dois computadores da loja enxergam a mesma impressora, ela fica com o
 // mesmo nome/tipo/monitorar nos dois.
 let DISP_CODIGO = null, DISP_MAC = null;
+// tipos de aparelho: os fixos vem do servidor junto com os que alguem criou
+// pelo "+ Novo tipo" (ver listarTiposDispositivo em lojaStatus.js). Carrega
+// uma vez no boot - nao entra no poll de 60s.
+let TIPOS_DISP = [];
+async function carregarTiposDispositivo(){
+  try{
+    const r = await fetch('/api/loja-status/tipos-dispositivo');
+    if(r.ok) TIPOS_DISP = await r.json();
+  }catch(e){ /* sem a lista o select ainda abre com "nenhum" e o "+ Novo tipo" */ }
+}
+function preencherSelectTipos(selecionado){
+  const sel = document.getElementById('disp-tipo');
+  const op = ['<option value="">— nenhum —</option>'];
+  for(const t of TIPOS_DISP){
+    op.push(`<option value="${escapeHtml(t.id)}">${escapeHtml((t.icone ? t.icone+' ' : '')+t.rotulo)}</option>`);
+  }
+  // tipo ja gravado que sumiu da lista continua selecionavel - abrir o
+  // aparelho pra editar o nome nao pode apagar o tipo dele em silencio
+  if(selecionado && !TIPOS_DISP.some(t=>t.id===selecionado)){
+    op.push(`<option value="${escapeHtml(selecionado)}">${escapeHtml(selecionado)}</option>`);
+  }
+  op.push('<option value="__novo__">➕ Novo tipo…</option>');
+  sel.innerHTML = op.join('');
+  sel.value = selecionado || '';
+}
+function dispTipoMudou(){
+  const novo = document.getElementById('disp-tipo').value === '__novo__';
+  document.getElementById('disp-tipo-novo-linha').classList.toggle('hidden', !novo);
+  if(novo) document.getElementById('disp-tipo-novo').focus();
+}
 function abrirModalDispositivo(codigo, mac, d){
   DISP_CODIGO = codigo; DISP_MAC = mac;
   document.getElementById('disp-modal-mac').textContent = mac;
   document.getElementById('disp-apelido').value = (d && d.apelido) || '';
-  document.getElementById('disp-tipo').value = (d && d.tipo) || '';
+  preencherSelectTipos((d && d.tipo) || '');
+  document.getElementById('disp-tipo-novo').value = '';
+  document.getElementById('disp-tipo-novo-linha').classList.add('hidden');
   document.getElementById('disp-monitorar').checked = !!(d && d.monitorar);
   document.getElementById('disp-modal-status').classList.add('hidden');
   document.getElementById('disp-overlay').classList.remove('hidden');
@@ -813,17 +850,27 @@ async function salvarDispositivo(){
   if(!DISP_CODIGO || !DISP_MAC) return;
   const statusEl = document.getElementById('disp-modal-status');
   statusEl.classList.add('hidden');
+  const escolhido = document.getElementById('disp-tipo').value;
+  const tipoNovo = escolhido === '__novo__' ? document.getElementById('disp-tipo-novo').value.trim() : '';
+  if(escolhido === '__novo__' && !tipoNovo){
+    statusEl.textContent = 'Dê um nome ao tipo novo.'; statusEl.className = 'msg err';
+    return;
+  }
   try{
+    const corpo = {
+      apelido: document.getElementById('disp-apelido').value,
+      tipo: escolhido === '__novo__' ? null : (escolhido || null),
+      monitorar: document.getElementById('disp-monitorar').checked,
+    };
+    if(tipoNovo) corpo.tipoNovo = tipoNovo;
     const r = await fetch(`/api/loja-status/${encodeURIComponent(DISP_CODIGO)}/dispositivos/${encodeURIComponent(DISP_MAC)}/apelido`, {
       method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        apelido: document.getElementById('disp-apelido').value,
-        tipo: document.getElementById('disp-tipo').value || null,
-        monitorar: document.getElementById('disp-monitorar').checked,
-      }),
+      body: JSON.stringify(corpo),
     });
     const data = await r.json();
     if(!r.ok) throw new Error(data.error||'Erro ao salvar.');
+    // tipo criado agora passa a existir pros outros aparelhos
+    if(tipoNovo) await carregarTiposDispositivo();
     fecharModalDispositivo();
     await carregar();
   }catch(e){ statusEl.textContent = e.message; statusEl.className = 'msg err'; }
@@ -964,11 +1011,15 @@ function atualizarConteudoDetalhe(codigo, c){
       // 🔔 = monitorado (alarme de rede ligado - pedido do Master); sem isso
       // ninguém confere pelo painel o que está armado sem abrir cada aparelho
       const monitorChip = d.monitorar ? `<span class="disp-monitor-chip" title="Monitorado: alarma se perder rede">🔔</span>` : '';
+      // o tipo escolhido fica visivel na propria linha: sem isso so da pra
+      // saber o que e' cada MAC abrindo aparelho por aparelho
+      const tipoChip = d.tipoRotulo ? `<span class="disp-tipo-chip">${escapeHtml(d.tipoRotulo)}</span>` : '';
       return `<div class="disp-linha">
         <span class="disp-dot ${d.ativo === false ? 'off' : 'on'}"></span>
         <div style="flex:1;min-width:0;">
           <div class="disp-topo">
             <div class="disp-nome ${temNome?'':'anon'}" title="${escapeHtml(nome)}">${escapeHtml(nome)}</div>
+            ${tipoChip}
             ${monitorChip}
             ${quando}
           </div>
@@ -2222,6 +2273,7 @@ async function boot(){
   // pra montar o subtítulo certo já na primeira pintura
   restaurarPainelUnidades();
   await carregar();
+  carregarTiposDispositivo();
   carregarRede();
   // deep link vindo de outra tela (ex: painel de conversa do Beniboy, quando
   // a loja já foi identificada e tem computador com acesso remoto) - filtra

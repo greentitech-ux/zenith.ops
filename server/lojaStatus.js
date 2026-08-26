@@ -79,15 +79,24 @@ async function pushAcessoRemotoAtivo() {
   return c.pushAcessoRemoto === true; // default false
 }
 
-// mesma ideia do configCache: o painel lê isso a cada 30s e quase nunca muda
+// mesma ideia do configCache: o painel lê isso a cada 30s e quase nunca muda.
+// O cache guarda o DOCUMENTO inteiro (unidades + tipos criados na tela), pra
+// que listar os tipos não custe uma leitura a mais do Firestore (§3).
 let apelidosCache = null;
 let apelidosCacheEm = 0;
-async function getApelidos() {
+async function getApelidosDoc() {
   if (apelidosCache && (Date.now() - apelidosCacheEm) < 30 * 1000) return apelidosCache;
   const snap = await APELIDOS_DOC.get();
-  apelidosCache = snap.exists ? (snap.data().unidades || {}) : {};
+  const dados = snap.exists ? (snap.data() || {}) : {};
+  apelidosCache = {
+    unidades: dados.unidades || {},
+    tipos: Array.isArray(dados.tipos) ? dados.tipos : [],
+  };
   apelidosCacheEm = Date.now();
   return apelidosCache;
+}
+async function getApelidos() {
+  return (await getApelidosDoc()).unidades;
 }
 
 // "tipo" decide se o dispositivo pode ser MONITORADO (alarme de rede - ver
@@ -95,7 +104,51 @@ async function getApelidos() {
 // do servidor local perderem rede sem que ninguém precise ficar rodando um
 // scanner externo pra descobrir. Vocabulário do próprio Master, não em
 // inglês.
-const TIPOS_DISPOSITIVO = ['impressora', 'vm'];
+// A lista base sai do vocabulário do próprio Master (o que ele enxerga no
+// scanner da loja): impressora, VM Host do servidor, PULSE, GCOM. 'vm' fica
+// porque já foi gravado em aparelho de loja - tirar da lista apagaria o tipo
+// de quem já estava marcado.
+const TIPOS_DISPOSITIVO_BASE = [
+  { id: 'impressora', rotulo: 'Impressora', icone: '🖨️' },
+  { id: 'vmhost', rotulo: 'VM Host', icone: '🖥️' },
+  { id: 'pulse', rotulo: 'PULSE', icone: '🖥️' },
+  { id: 'gcom', rotulo: 'GCOM', icone: '🖥️' },
+  { id: 'vm', rotulo: 'VM', icone: '🖥️' },
+];
+
+// tipo criado pela tela ("+ Novo tipo") vira um id em slug. O id é o que fica
+// gravado no aparelho; o rótulo é só o que se lê. Por isso a validação na
+// LEITURA é o formato do slug, e não a lista - um tipo removido da lista não
+// pode apagar o tipo dos aparelhos que já o usam.
+function idDoTipoDispositivo(texto) {
+  return String(texto || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24);
+}
+
+// base + os criados na tela, sem duplicar id. Não custa leitura nova: sai do
+// mesmo documento já cacheado dos apelidos.
+async function listarTiposDispositivo() {
+  const { tipos } = await getApelidosDoc();
+  const saida = TIPOS_DISPOSITIVO_BASE.map((t) => ({ ...t }));
+  const vistos = new Set(saida.map((t) => t.id));
+  for (const t of tipos) {
+    const id = idDoTipoDispositivo(t && t.id);
+    if (!id || vistos.has(id)) continue;
+    vistos.add(id);
+    saida.push({ id, rotulo: String((t && t.rotulo) || id).slice(0, 24), icone: '📡' });
+  }
+  return saida;
+}
+
+function rotuloDoTipoDispositivo(id, lista) {
+  if (!id) return null;
+  const achado = (lista || TIPOS_DISPOSITIVO_BASE).find((t) => t.id === id);
+  return achado ? achado.rotulo : id;
+}
 
 // cada MAC em apelidosRede começou como STRING pura (só o nome). Ganhou
 // "tipo"/"monitorar" depois, sem migração em massa: um valor antigo (string)
@@ -106,7 +159,7 @@ function normalizarEntradaApelido(valor) {
   if (valor && typeof valor === 'object') {
     return {
       apelido: typeof valor.apelido === 'string' && valor.apelido ? valor.apelido : null,
-      tipo: TIPOS_DISPOSITIVO.includes(valor.tipo) ? valor.tipo : null,
+      tipo: idDoTipoDispositivo(valor.tipo) || null,
       monitorar: !!valor.monitorar,
     };
   }
@@ -122,17 +175,34 @@ async function definirApelidoDispositivo(codigo, mac, entrada) {
   if (!/^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(macOk)) throw new Error('MAC inválido.');
   if (!codigo) throw new Error('Unidade é obrigatória.');
   const corpo = typeof entrada === 'string' ? { apelido: entrada } : (entrada || {});
-  const atuais = await getApelidos();
+  const { unidades: atuais, tipos: extras } = await getApelidosDoc();
   const daUnidade = { ...(atuais[codigo] || {}) };
   const anterior = normalizarEntradaApelido(daUnidade[macOk]);
   const limpo = String(corpo.apelido != null ? corpo.apelido : (anterior.apelido || '')).trim().slice(0, 40);
-  const tipo = corpo.tipo !== undefined
-    ? (TIPOS_DISPOSITIVO.includes(corpo.tipo) ? corpo.tipo : null)
-    : anterior.tipo;
+  // "tipoNovo" é o texto do botão "+ Novo tipo" da tela: vence o select, vira
+  // slug e passa a existir pra TODA a rede (é assim que o tipo criado numa
+  // loja aparece no aparelho da outra) - sem endpoint separado só pra isso.
+  let extrasNovos = extras;
+  let tipo;
+  const rotuloNovo = String(corpo.tipoNovo || '').trim().slice(0, 24);
+  if (rotuloNovo) {
+    const id = idDoTipoDispositivo(rotuloNovo);
+    if (!id) throw new Error('Nome do tipo inválido.');
+    tipo = id;
+    const conhecidos = new Set([
+      ...TIPOS_DISPOSITIVO_BASE.map((t) => t.id),
+      ...extras.map((t) => idDoTipoDispositivo(t && t.id)),
+    ]);
+    if (!conhecidos.has(id)) extrasNovos = [...extras, { id, rotulo: rotuloNovo }];
+  } else if (corpo.tipo !== undefined) {
+    tipo = idDoTipoDispositivo(corpo.tipo) || null;
+  } else {
+    tipo = anterior.tipo;
+  }
   const monitorar = corpo.monitorar !== undefined ? !!corpo.monitorar : anterior.monitorar;
   if (!limpo && !tipo && !monitorar) delete daUnidade[macOk];
   else daUnidade[macOk] = { apelido: limpo || null, tipo, monitorar };
-  await APELIDOS_DOC.set({ unidades: { ...atuais, [codigo]: daUnidade } }, { merge: false });
+  await APELIDOS_DOC.set({ unidades: { ...atuais, [codigo]: daUnidade }, tipos: extrasNovos }, { merge: false });
   apelidosCache = null;
   return { codigo, mac: macOk, apelido: limpo || null, tipo, monitorar };
 }
@@ -718,7 +788,7 @@ function comOnline(doc) {
 // lista achatada, 1 item por computador (varios por unidade) - quem chama
 // (index.js/loja-status.html) agrupa por codigo pra exibir por unidade
 async function listar() {
-  const [docs, apelidos] = await Promise.all([cache.cached(), getApelidos()]);
+  const [docs, apelidos, tipos] = await Promise.all([cache.cached(), getApelidos(), listarTiposDispositivo()]);
   return docs.map(comOnline).map(semSegredo).map((d) => {
     // apelido é por UNIDADE, não por computador: se dois computadores da loja
     // enxergam a mesma impressora, ela tem o mesmo nome nos dois
@@ -731,7 +801,11 @@ async function listar() {
       ...d,
       dispositivos: d.dispositivos.map((x) => {
         const cfg = normalizarEntradaApelido(daUnidade[x.mac]);
-        return { ...x, apelido: cfg.apelido, tipo: cfg.tipo, monitorar: cfg.monitorar, fabricante: ouiFabricantes.fabricanteDe(x.mac) };
+        return {
+          ...x,
+          apelido: cfg.apelido, tipo: cfg.tipo, tipoRotulo: rotuloDoTipoDispositivo(cfg.tipo, tipos),
+          monitorar: cfg.monitorar, fabricante: ouiFabricantes.fabricanteDe(x.mac),
+        };
       }),
     };
   });
@@ -1359,6 +1433,7 @@ async function gravarEEspelhar(codigo, posto, patch) {
 async function varrerAlertas() {
   const docs = await listUncached();
   const apelidosTodos = await getApelidos();
+  const tiposDispositivo = await listarTiposDispositivo();
   const transicoes = [];
   for (const candidato of docs) {
     // dispositivo de rede marcado como MONITORADO (impressora/VM - pedido do
@@ -1381,6 +1456,7 @@ async function varrerAlertas() {
             codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
             tipo: 'dispositivo-offline', mac: disp.mac,
             apelido: cfg.apelido, tipoDispositivo: cfg.tipo,
+            tipoRotulo: rotuloDoTipoDispositivo(cfg.tipo, tiposDispositivo),
           });
         } else if (disp.ativo && estado && estado.avisadoOffline) {
           alarmePatch = { ...(alarmePatch || alarmeAtual), [disp.mac]: { avisadoOffline: false, offlineDesde: null } };
@@ -1388,6 +1464,7 @@ async function varrerAlertas() {
             codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
             tipo: 'dispositivo-online', mac: disp.mac,
             apelido: cfg.apelido, tipoDispositivo: cfg.tipo,
+            tipoRotulo: rotuloDoTipoDispositivo(cfg.tipo, tiposDispositivo),
           });
         }
       }
@@ -1628,6 +1705,7 @@ module.exports = {
   heartbeat, listar, listarResumo, detalhar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR, ehCelular,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
+  listarTiposDispositivo, idDoTipoDispositivo, TIPOS_DISPOSITIVO_BASE,
   // SÓ pra testeRotas: DESCARTA o espelho em vez de só vencer a validade.
   // invalidarEspelho() de propósito guarda o mapa (o comentário lá explica:
   // é o que impede uma edição de nome derrubar um heartbeat ainda não

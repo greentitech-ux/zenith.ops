@@ -4621,6 +4621,80 @@ setTimeout(async () => {
   if (!okDispositivoAlarme) ruins += 1;
   console.log(`${okDispositivoAlarme ? '✓' : '✗'} NOC: impressora/VM marcada como monitorada alarma ao perder rede (só depois de ~2 scans ausentes), nunca pra quem não foi marcado`);
 
+  // ---- NOC: tipos de aparelho abertos (Impressora, VM Host, PULSE, GCOM + "+ Novo") ----
+  // Pedido do Master: a lista fechada em 2 tipos não cobria o que ele enxerga
+  // na loja. O tipo criado numa unidade tem que valer pra rede toda, e um
+  // tipo já gravado num aparelho NUNCA pode sumir por não estar mais na lista.
+  let okTiposDispositivo = false;
+  try {
+    const ls = require('./lojaStatus');
+    const UNI = 'DOM_19706';
+    const OUTRA = 'DOM_19798';
+    const MAC_HOST = 'a4:2b:b0:11:22:66';
+    const MAC_ROTEADOR = 'a4:2b:b0:11:22:77';
+
+    const idsBase = (await ls.listarTiposDispositivo()).map((t) => t.id);
+
+    // tipo da lista base (o que o Master nomeia no scanner da loja). Também
+    // derruba o cache de 30s dos apelidos, pra injeção logo abaixo valer.
+    const comHost = await ls.definirApelidoDispositivo(UNI, MAC_HOST, { apelido: 'VM19798HOST1', tipo: 'vmhost', monitorar: true });
+
+    // aparelho com um tipo que NÃO está em lista nenhuma (o tipo saiu da lista
+    // depois de já estar gravado) - injetado direto no Firestore falso, sem
+    // passar pela API, que é como isso aconteceria de verdade
+    const docApelidos = DOCS.get('lojaStatusConfig/apelidosRede') || { unidades: {} };
+    DOCS.set('lojaStatusConfig/apelidosRede', {
+      unidades: {
+        ...docApelidos.unidades,
+        [UNI]: {
+          ...(docApelidos.unidades[UNI] || {}),
+          [MAC_ROTEADOR]: { apelido: 'Roteador do balcão', tipo: 'roteador-legado', monitorar: false },
+        },
+      },
+      tipos: [],
+    });
+    const listaSemExtras = await ls.listarTiposDispositivo();
+    // editar SÓ o nome não pode apagar o tipo que a lista não conhece mais
+    const soRenomeado = await ls.definirApelidoDispositivo(UNI, MAC_ROTEADOR, { apelido: 'Roteador do balcão 2' });
+
+    // "+ Novo tipo" da tela: texto livre vira slug e passa a existir
+    const comNovo = await ls.definirApelidoDispositivo(OUTRA, MAC_ROTEADOR, { apelido: 'Roteador da sala', tipoNovo: 'Roteador Wi-Fi' });
+    const criado = (await ls.listarTiposDispositivo()).find((t) => t.id === 'roteador-wi-fi');
+
+    // criar o MESMO tipo de novo não pode empilhar cópia atrás de cópia NO
+    // DOCUMENTO (a lista de saída dedupla sozinha e esconderia o vazamento -
+    // o que cresceria sem parar é o doc gravado, uma linha por vez que
+    // alguém escolhesse o tipo já existente)
+    await ls.definirApelidoDispositivo(UNI, MAC_HOST, { tipoNovo: 'Roteador Wi-Fi' });
+    await ls.definirApelidoDispositivo(OUTRA, MAC_ROTEADOR, { tipoNovo: 'Roteador Wi-Fi' });
+    const gravados = (DOCS.get('lojaStatusConfig/apelidosRede') || {}).tipos || [];
+    const semDuplicar = gravados.filter((t) => t.id === 'roteador-wi-fi').length;
+
+    const srcPushTipo = require('fs').readFileSync(__dirname + '/push.js', 'utf8');
+
+    const conf = {
+      'lista base cobre o que o Master enxerga na loja (impressora/VM Host/PULSE/GCOM)':
+        ['impressora', 'vmhost', 'pulse', 'gcom'].every((id) => idsBase.includes(id)),
+      "'vm' antigo continua na lista (aparelho já marcado não perde o tipo)": idsBase.includes('vm'),
+      'tipo da lista grava normal': comHost.tipo === 'vmhost',
+      '"+ Novo tipo" vira slug e fica gravado no aparelho': comNovo.tipo === 'roteador-wi-fi',
+      'tipo criado numa unidade passa a existir pra rede toda, com o rótulo digitado':
+        !!criado && criado.rotulo === 'Roteador Wi-Fi',
+      'escolher de novo um tipo que já existe não empilha cópia no documento': semDuplicar === 1,
+      'tipo fora de qualquer lista sobrevive a uma edição de nome':
+        !listaSemExtras.some((t) => t.id === 'roteador-legado')
+        && soRenomeado.tipo === 'roteador-legado' && soRenomeado.apelido === 'Roteador do balcão 2',
+      'o push usa o RÓTULO do tipo no título, não uma lista fechada':
+        /const \{ icone, rotulo \} = rotuloTipoDispositivo\(tipoDispositivo, tipoRotulo\)/.test(srcPushTipo)
+        && /title: `\$\{icone\} \$\{rotulo\} sem rede`/.test(srcPushTipo),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okTiposDispositivo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTiposDispositivo = false; console.log('  erro: ' + e.message); }
+  if (!okTiposDispositivo) ruins += 1;
+  console.log(`${okTiposDispositivo ? '✓' : '✗'} NOC: tipo de aparelho aberto - base (Impressora/VM Host/PULSE/GCOM) + "+ Novo tipo" valendo pra rede toda`);
+
   // ---- NOC: vigia BLINDADO contra reinício (NOCZenith v17) ----
   // O que derrubou o parque em ago/2026: a tarefa agendada só disparava no
   // LOGIN, então cada máquina reiniciada (lembrete semanal + botão da
@@ -7462,13 +7536,30 @@ setTimeout(async () => {
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
     const conf = {
       'modal de dispositivo existe (não é mais prompt())': /id="disp-overlay"/.test(html) && !/function renomearDispositivo/.test(html),
-      'tem campo de tipo (Impressora/VM)': /id="disp-tipo"/.test(html) && /value="impressora"/.test(html) && /value="vm"/.test(html),
+      // o select e' montado pela lista do servidor (Impressora, VM Host,
+      // PULSE, GCOM + o que o Master criar) - opcao cravada aqui volta a
+      // limitar o Master a 2 tipos
+      'select de tipo e dinamico (nada cravado no HTML)':
+        /<select id="disp-tipo" onchange="dispTipoMudou\(\)"><\/select>/.test(html)
+        && /TIPOS_DISP\.some/.test(html)
+        && !/<option value="impressora"/.test(html),
+      'tem o "+ Novo tipo" e o campo do nome dele':
+        /<option value="__novo__">/.test(html) && /id="disp-tipo-novo"/.test(html),
       'tem checkbox de monitorar': /id="disp-monitorar"/.test(html),
       'salvar manda apelido+tipo+monitorar pro PUT existente':
         /apelido: document\.getElementById\('disp-apelido'\)\.value/.test(html)
-        && /tipo: document\.getElementById\('disp-tipo'\)\.value \|\| null/.test(html)
-        && /monitorar: document\.getElementById\('disp-monitorar'\)\.checked/.test(html),
+        && /tipo: escolhido === '__novo__' \? null : \(escolhido \|\| null\)/.test(html)
+        && /monitorar: document\.getElementById\('disp-monitorar'\)\.checked/.test(html)
+        && /corpo\.tipoNovo = tipoNovo/.test(html),
+      // o modal do aparelho abre DE DENTRO do modal de detalhe (o lapis fica
+      // na lista de aparelhos). Sem z-index proprio ele nasce ATRAS de quem
+      // o chamou - foi exatamente o que o Master reportou
+      'modal do aparelho fica na frente do modal de detalhe':
+        /#disp-overlay\{z-index:(\d+);\}/.test(html)
+        && Number(html.match(/#disp-overlay\{z-index:(\d+);\}/)[1])
+           > Number(html.match(/\.overlay\{[^}]*z-index:(\d+)/)[1]),
       'dispositivo monitorado mostra o chip 🔔 na linha': /d\.monitorar \? `<span class="disp-monitor-chip"/.test(html),
+      'tipo do aparelho aparece na propria linha': /d\.tipoRotulo \? `<span class="disp-tipo-chip"/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okModalDispositivo = !falhas.length;
