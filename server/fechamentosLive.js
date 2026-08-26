@@ -390,6 +390,15 @@ async function montarResumoMudancas(pedido, atual) {
       `${NOMES_CAMPOS_RESUMO[totalAlvo]}: ${fmtMoneyQuebra(num(atual[totalAlvo]))} → ${fmtMoneyQuebra(num(atual[totalAlvo]) + num(valor))}`,
     ];
   }
+  if (pedido.tipoCorrecao === 'saida-item') {
+    const { indice, descricao, valor } = pedido.itemNovo || {};
+    const antigo = (atual.detalhesSaidas || [])[Number(indice)] || {};
+    return [
+      `Saída "${antigo.descricao || '(sem descrição)'}" → "${descricao || '(sem descrição)'}"`,
+      `Valor da saída: ${fmtMoneyQuebra(num(antigo.valor))} → ${fmtMoneyQuebra(num(valor))}`,
+      `${NOMES_CAMPOS_RESUMO.totalSaida}: ${fmtMoneyQuebra(num(atual.totalSaida))} → ${fmtMoneyQuebra(num(atual.totalSaida) - num(antigo.valor) + num(valor))}`,
+    ];
+  }
   if (pedido.tipoCorrecao === 'excluir') {
     return [
       `EXCLUIR o lançamento inteiro de ${fmtDataBRResumo(atual.data)} (${atual.unidadeNome || atual.unidade})`,
@@ -449,7 +458,7 @@ async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, mudancasC
     unidade: atual.unidade,
     unidadeNome: atual.unidadeNome,
     data: atual.data,
-    tipoCorrecao: ['item', 'excluir', 'data'].includes(tipoCorrecao) ? tipoCorrecao : 'campo',
+    tipoCorrecao: ['item', 'excluir', 'data', 'saida-item'].includes(tipoCorrecao) ? tipoCorrecao : 'campo',
     mudancas: {},
     // patches dos mapas extras do grupo (canais de venda/formas de
     // pagamento/KPIs definidos em grupos.html) - mesmo formato campo:valor
@@ -490,6 +499,18 @@ async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, mudancasC
     const valor = num(itemNovo.valor);
     if (valor <= 0) throw new Error('Informe o valor do item.');
     pedido.itemNovo = { tipo: itemNovo.tipo, descricao: String(itemNovo.descricao || '').slice(0, 200), valor };
+  } else if (pedido.tipoCorrecao === 'saida-item') {
+    // corrigir uma saida que JA existe (o "item" acima e pra ACRESCENTAR
+    // uma). Guarda o indice, e a checagem de que o indice existe e refeita
+    // na aprovacao - o fechamento pode mudar entre pedir e aprovar
+    const atualSaida = await getOne(fechamentoId);
+    const i = Number(itemNovo && itemNovo.indice);
+    if (!atualSaida || !Number.isInteger(i) || !((atualSaida.detalhesSaidas || [])[i])) {
+      throw new Error('Saída não encontrada nesse fechamento.');
+    }
+    const valor = num(itemNovo.valor);
+    if (valor < 0) throw new Error('O valor da saída não pode ser negativo.');
+    pedido.itemNovo = { indice: i, descricao: String(itemNovo.descricao || '').slice(0, 200), valor };
   } else if (pedido.tipoCorrecao === 'excluir') {
     // nada mais pra validar - so o motivo, ja exigido acima. A exclusao de
     // fato so acontece se o Master aprovar (ver decidirEdicao); ate la o
@@ -619,6 +640,98 @@ async function editarDireto({ fechamentoId, mudancas, mudancasKpis, mudancasCana
   return { ...atual, ...novosValores, historico };
 }
 
+
+// EDITAR UMA saida avulsa que ja esta lancada (pedido do Master: "um local
+// pra clicar e editar a Saida em caso de erro"). Mexe num item de
+// detalhesSaidas e ajusta o totalSaida pela DIFERENCA - nunca recalcula o
+// total pela soma dos itens, porque totalSaida pode ter parcela que nao esta
+// itemizada (fechamento antigo, planilha) e a soma zeraria essa parcela.
+//
+// Mesma logica do editarDireto: aplicado na hora, com registro no historico
+// do proprio fechamento. Quem NAO pode editar direto passa por
+// solicitarEdicao({tipoCorrecao:'saida-item'}), que aplica isto na aprovacao.
+async function editarItemSaida({ fechamentoId, indice, descricao, valor, motivo, editadoPorEmail }) {
+  const atual = await getOne(fechamentoId);
+  if (!atual) throw new Error('Fechamento não encontrado.');
+  const itens = [...(atual.detalhesSaidas || [])];
+  const i = Number(indice);
+  if (!Number.isInteger(i) || !itens[i]) throw new Error('Saída não encontrada nesse fechamento.');
+
+  const antigo = itens[i];
+  const desc = String(descricao != null ? descricao : (antigo.descricao || '')).trim().slice(0, 300);
+  const novoValor = valor != null ? num(valor) : num(antigo.valor);
+  if (novoValor < 0) throw new Error('O valor da saída não pode ser negativo.');
+  if (desc === String(antigo.descricao || '').trim() && novoValor === num(antigo.valor)) {
+    throw new Error('Nada mudou nessa saída.');
+  }
+  itens[i] = { descricao: desc, valor: novoValor };
+  // ajuste pela DIFERENCA, com piso em zero. No lancamento o totalSaida e
+  // DIGITADO a parte (os itens de detalhesSaidas sao a memoria de calculo, e
+  // podem nao somar exatamente o total). Quando o total nao incluia esse
+  // item, subtrair o valor antigo levaria o total pra negativo - e total de
+  // saida negativo nao quer dizer nada.
+  const totalSaida = Math.max(0, +(num(atual.totalSaida) - num(antigo.valor) + novoValor).toFixed(2));
+
+  const merged = { ...atual, detalhesSaidas: itens, totalSaida };
+  recomputarTotais(merged, { totalSaida }, await defsExtrasDaUnidade(atual.unidade));
+  const novosValores = {
+    detalhesSaidas: itens,
+    totalSaida,
+    faturamento: merged.faturamento,
+    totalDeclarado: merged.totalDeclarado,
+    diferenca: merged.diferenca,
+  };
+  const historico = [...(atual.historico || []), {
+    em: new Date().toISOString(),
+    por: editadoPorEmail,
+    motivo: (motivo && String(motivo).trim()) || '(saída editada no Painel de Saídas)',
+    valoresAnteriores: { saida: `${antigo.descricao || '(sem descrição)'}: ${num(antigo.valor)}`, totalSaida: num(atual.totalSaida) },
+    valoresNovos: { saida: `${desc || '(sem descrição)'}: ${novoValor}`, totalSaida },
+  }];
+  await COLLECTION.doc(fechamentoId).update({ ...novosValores, historico, atualizadoEm: new Date().toISOString() });
+  fechamentosCache.invalidar();
+  return { ...atual, ...novosValores, historico };
+}
+
+// ACRESCENTAR uma saida avulsa em qualquer data (pedido do Master, so ele e
+// o Admin). A saida vive DENTRO do fechamento do dia daquela unidade - por
+// isso o fechamento precisa existir. Nao criamos um fechamento so pra
+// pendurar uma saida: um fechamento com faturamento zero apareceria na tela
+// de Fechamentos como se a loja tivesse fechado o dia com R$0.
+async function adicionarSaidaDireto({ unidade, data, descricao, valor, motivo, editadoPorEmail }) {
+  if (!unidade) throw new Error('Escolha a unidade.');
+  if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) throw new Error('Data inválida.');
+  const v = num(valor);
+  if (v <= 0) throw new Error('Informe o valor da saída.');
+  const desc = String(descricao || '').trim().slice(0, 300);
+  if (!desc) throw new Error('Descreva a saída (ex: uber, compra de gelo).');
+
+  const id = docId(unidade, data);
+  const atual = await getOne(id);
+  if (!atual) throw new Error('Não há fechamento lançado nessa data pra essa unidade - a saída avulsa mora dentro do fechamento do dia.');
+
+  const itens = [...(atual.detalhesSaidas || []), { descricao: desc, valor: v }];
+  const totalSaida = +(num(atual.totalSaida) + v).toFixed(2);
+  const merged = { ...atual, detalhesSaidas: itens, totalSaida };
+  recomputarTotais(merged, { totalSaida }, await defsExtrasDaUnidade(unidade));
+  const novosValores = {
+    detalhesSaidas: itens,
+    totalSaida,
+    faturamento: merged.faturamento,
+    totalDeclarado: merged.totalDeclarado,
+    diferenca: merged.diferenca,
+  };
+  const historico = [...(atual.historico || []), {
+    em: new Date().toISOString(),
+    por: editadoPorEmail,
+    motivo: (motivo && String(motivo).trim()) || '(saída acrescentada no Painel de Saídas)',
+    valoresAnteriores: { totalSaida: num(atual.totalSaida) },
+    valoresNovos: { saida: `${desc}: ${v}`, totalSaida },
+  }];
+  await COLLECTION.doc(id).update({ ...novosValores, historico, atualizadoEm: new Date().toISOString() });
+  fechamentosCache.invalidar();
+  return { ...atual, ...novosValores, historico };
+}
 
 // exclui o fechamento lançado de vez - poder do Master, mesma logica de
 // editarDireto (aplicado na hora, sem passar por fila de aprovacao)
@@ -774,6 +887,21 @@ async function decidirEdicao(id, status, { decididoPorEmail, motivoDecisao }) {
         return { ...pedido, status };
       }
 
+      // saida-item grava por conta propria (editarItemSaida ja escreve o
+      // documento e o historico) - por isso retorna aqui em vez de cair no
+      // bloco comum lá embaixo, que gravaria de novo por cima
+      if (pedido.tipoCorrecao === 'saida-item') {
+        await editarItemSaida({
+          fechamentoId: pedido.fechamentoId,
+          indice: pedido.itemNovo.indice,
+          descricao: pedido.itemNovo.descricao,
+          valor: pedido.itemNovo.valor,
+          motivo: `Ticket #${pedido.numeroTicket} · ${pedido.motivo || ''}`.trim(),
+          editadoPorEmail: decididoPorEmail,
+        });
+        return { ...pedido, status };
+      }
+
       if (pedido.tipoCorrecao === 'data') {
         const novoId = docId(pedido.unidade, pedido.novaData);
         const historico = [...(atual.historico || []), {
@@ -860,6 +988,7 @@ function invalidarCache() {
 }
 
 module.exports = {
+  editarItemSaida, adicionarSaidaDireto,
   CAMPOS_NUMERICOS, create, listAll, listByUnidades, getOne, solicitarEdicao, listarEdicoes, getEdicao,
   decidirEdicao, editarDireto, moverFechamento, removerEdicao, remove, invalidarCache, marcarNotificacaoVistaEdicao, redirecionarEdicao,
   suspenderInvalidacao, retomarInvalidacao,

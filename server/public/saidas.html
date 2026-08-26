@@ -63,6 +63,14 @@
   /* diferenca de caixa apurada na sangria: cor semantica, o mesmo vermelho
      dos outros estados ruins do sistema */
   .tipo-badge.dif{color:var(--bad);border-color:var(--bad);}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
+  .overlay.hidden{display:none!important;}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;width:100%;max-width:440px;max-height:86vh;overflow-y:auto;}
+  .modal h3{margin:0 0 2px;font-size:15px;}
+  .modal label{display:block;font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:12px 0 4px;}
+  .modal input,.modal select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
+  .modal input:focus,.modal select:focus{outline:none;border-color:var(--accent);}
+  .modal-acoes{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
   .dif-motivo{color:var(--bad);}
   /* auto-fit em vez de contagem fixa: a mesma grade serve pros 4 cards da
      loja e pros 6 de quem ve Entrada/Saldo, sem sobrar coluna vazia */
@@ -94,6 +102,8 @@
   .saida-sub{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px;}
   .saida-acoes{margin-top:8px;}
   .btn-verificar{font-family:var(--sans);font-size:12px;font-weight:700;padding:7px 12px;border-radius:8px;border:none;background:var(--accent);color:#0b0d10;cursor:pointer;}
+  .msg{margin-top:10px;font-size:12.5px;padding:9px 11px;border-radius:8px;word-break:break-word;}
+  .msg.err{background:#3a1616;color:var(--bad);}
   .btn-verificar:hover{opacity:.9;}
   .multiselect{position:relative;}
   .multiselect-btn{width:100%;text-align:left;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:13px;font-family:var(--sans);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -163,7 +173,12 @@
     <div class="presets" id="presets" style="margin-top:10px;"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-top:10px;">
       <button type="button" class="link-btn" onclick="limparFiltros()">Limpar filtros</button>
-      <span style="display:flex;gap:6px;">
+      <span style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button type="button" class="export-btn hidden" id="btn-add-saida" onclick="abrirNovaSaida()">➕ Adicionar saída</button>
+        <!-- a sangria tem formulário próprio no Lançamento, com a conferência
+             de caixa (esperado x retirado x motivo da divergência). Duplicar
+             um formulário simplificado aqui perderia essa conferência. -->
+        <a class="export-btn hidden" id="btn-add-sangria" href="/lancamento.html#painel-sangria" style="text-decoration:none;">💰 Adicionar sangria</a>
         <button type="button" class="export-btn" onclick="baixarRelatorio('csv')">📄 Relatório CSV</button>
         <button type="button" class="export-btn" onclick="baixarRelatorio('pdf')">📄 Relatório PDF</button>
       </span>
@@ -202,6 +217,46 @@
     </div>
   </div>
 
+</div>
+
+<div class="overlay hidden" id="ed-saida-overlay">
+  <div class="modal">
+    <h3 id="ed-saida-titulo">✏️ Editar saída</h3>
+    <div class="sub" id="ed-saida-sub"></div>
+    <label>Descrição</label>
+    <input type="text" id="ed-saida-descricao" maxlength="300">
+    <label>Valor (R$)</label>
+    <input type="number" step="0.01" inputmode="decimal" id="ed-saida-valor">
+    <div id="ed-saida-motivo-bloco" class="hidden">
+      <label>Motivo da correção</label>
+      <input type="text" id="ed-saida-motivo" maxlength="300" placeholder="ex: digitei o valor errado">
+    </div>
+    <div class="msg hidden" id="ed-saida-msg"></div>
+    <div class="modal-acoes">
+      <button type="button" class="link-btn" onclick="fecharEditarSaida()">Cancelar</button>
+      <button type="button" class="btn-verificar" id="ed-saida-salvar" onclick="salvarEditarSaida()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="nova-saida-overlay">
+  <div class="modal">
+    <h3>➕ Adicionar saída</h3>
+    <div class="sub">A saída avulsa mora dentro do fechamento do dia — o dia precisa ter fechamento lançado.</div>
+    <label>Unidade</label>
+    <select id="ns-unidade"></select>
+    <label>Data</label>
+    <input type="date" id="ns-data">
+    <label>Descrição</label>
+    <input type="text" id="ns-descricao" maxlength="300" placeholder="ex: uber, compra de gelo">
+    <label>Valor (R$)</label>
+    <input type="number" step="0.01" inputmode="decimal" id="ns-valor">
+    <div class="msg hidden" id="ns-msg"></div>
+    <div class="modal-acoes">
+      <button type="button" class="link-btn" onclick="fecharNovaSaida()">Cancelar</button>
+      <button type="button" class="btn-verificar" id="ns-salvar" onclick="salvarNovaSaida()">Adicionar</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -400,6 +455,15 @@ function cardHtml(it){
       ? `<button type="button" class="link-btn" onclick="moverOrigem('${it.chave}',null)">↩️ Voltar pra Saída avulsa</button>`
       : `<button type="button" class="link-btn" onclick="moverOrigem('${it.chave}','sangria')">💰 Mover pra Sangria</button>`;
   }
+  // corrigir uma saída lançada errado. Master/Admin muda na hora; as demais
+  // tags pedem correção pela MESMA fila do fechamento (decisão do Master).
+  // Sangria não entra: ela já se edita em Fechamentos.
+  let corrigir = '';
+  if(it.origem === 'saida' && !it.chave.startsWith('sangria::')){
+    corrigir = PODE_CONFERIR
+      ? `<button type="button" class="link-btn" onclick='abrirEditarSaida(${JSON.stringify(it)})'>✏️ Editar</button>`
+      : `<button type="button" class="link-btn" onclick='abrirEditarSaida(${JSON.stringify(it)})'>✏️ Pedir correção</button>`;
+  }
   return `<div class="saida-card">
     <div class="saida-topo">
       <span class="tipo-badge">${origemLabel}</span>
@@ -412,7 +476,7 @@ function cardHtml(it){
     <div class="saida-sub">${fmtData(it.data)} · ${escapeHtml(it.criadoPorEmail||'—')}</div>
     ${it.temDivergencia ? `<div class="saida-sub dif-motivo">esperado ${fmtMoney(it.esperado)} · ${escapeHtml(it.motivoDivergencia || 'sem motivo informado')}${(it.extra&&it.extra.diasSemFechamento) ? ` · ${it.extra.diasSemFechamento} dia(s) sem fechamento na hora` : ''}</div>` : ''}
     ${it.verificada ? `<div class="saida-sub" style="color:var(--ok);">verificada por ${escapeHtml(it.verificadaPorEmail||'—')} em ${fmtDataHora(it.verificadaEm)}</div>` : ''}
-    ${acao || mover ? `<div class="saida-acoes">${acao}${mover}</div>` : ''}
+    ${acao || mover || corrigir ? `<div class="saida-acoes">${acao}${mover}${corrigir}</div>` : ''}
   </div>`;
 }
 
@@ -460,6 +524,107 @@ function renderTudo(){
   document.getElementById('col-verificadas').innerHTML = verificadas.length
     ? verificadas.map(cardHtml).join('')
     : '<div class="kanban-empty">Nenhuma verificada ainda nesse período.</div>';
+}
+
+// ---- corrigir uma saída lançada errado ----
+// Master/Admin muda na hora (PATCH direto). As demais tags mandam pela MESMA
+// fila de correção do fechamento (tipoCorrecao 'saida-item'), que o Master
+// aprova na Central - decisão do Master: "as demais tags pedem correção da
+// mesma forma do fechamento".
+let ED_SAIDA = null;
+function abrirEditarSaida(it){
+  ED_SAIDA = it;
+  document.getElementById('ed-saida-titulo').textContent = PODE_CONFERIR ? '✏️ Editar saída' : '✏️ Pedir correção da saída';
+  document.getElementById('ed-saida-sub').textContent = `${it.unidadeNome||it.unidade||''} · ${fmtData(it.data)}`;
+  document.getElementById('ed-saida-descricao').value = it.descricao || '';
+  document.getElementById('ed-saida-valor').value = it.valor != null ? it.valor : '';
+  document.getElementById('ed-saida-motivo').value = '';
+  // pra quem pede correção o motivo é obrigatório: é o que o Master lê na
+  // Central pra decidir. Pra quem edita direto, é opcional e vai pro histórico.
+  document.getElementById('ed-saida-motivo-bloco').classList.remove('hidden');
+  document.getElementById('ed-saida-salvar').textContent = PODE_CONFERIR ? 'Salvar' : 'Pedir correção';
+  document.getElementById('ed-saida-msg').classList.add('hidden');
+  document.getElementById('ed-saida-overlay').classList.remove('hidden');
+}
+function fecharEditarSaida(){
+  document.getElementById('ed-saida-overlay').classList.add('hidden');
+  ED_SAIDA = null;
+}
+async function salvarEditarSaida(){
+  if(!ED_SAIDA) return;
+  const msg = document.getElementById('ed-saida-msg');
+  const btn = document.getElementById('ed-saida-salvar');
+  msg.classList.add('hidden');
+  const descricao = document.getElementById('ed-saida-descricao').value.trim();
+  const valor = Number(document.getElementById('ed-saida-valor').value);
+  const motivo = document.getElementById('ed-saida-motivo').value.trim();
+  if(!descricao){ msg.textContent = 'Descreva a saída.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  if(!Number.isFinite(valor) || valor < 0){ msg.textContent = 'Informe um valor válido.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  if(!PODE_CONFERIR && !motivo){ msg.textContent = 'Escreva o motivo — é o que o Master lê pra aprovar.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  // a chave da saída avulsa é `${fechamentoId}::${indice}` (ver saidasPainel.js)
+  const partes = ED_SAIDA.chave.split('::');
+  const indice = partes.pop();
+  const fechamentoId = partes.join('::');
+  btn.disabled = true;
+  try{
+    let res;
+    if(PODE_CONFERIR){
+      res = await fetch(`/api/fechamentos/${encodeURIComponent(fechamentoId)}/saidas/${encodeURIComponent(indice)}`, {
+        method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ descricao, valor, motivo }),
+      });
+    } else {
+      res = await fetch(`/api/fechamentos/${encodeURIComponent(fechamentoId)}/solicitar-edicao`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ tipoCorrecao:'saida-item', itemNovo:{ indice: Number(indice), descricao, valor }, motivo }),
+      });
+    }
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || 'Erro ao salvar.');
+    fecharEditarSaida();
+    if(!PODE_CONFERIR) alert(`Pedido de correção enviado — Ticket #${data.numeroTicket}. O Master revisa na Central.`);
+    await carregar();
+  }catch(e){
+    msg.textContent = e.message; msg.className='msg err'; msg.classList.remove('hidden');
+  }finally{ btn.disabled = false; }
+}
+
+// ---- acrescentar saída em qualquer data (Master/Admin) ----
+function abrirNovaSaida(){
+  const sel = document.getElementById('ns-unidade');
+  // as unidades que a pessoa enxerga saem do que já está carregado na tela -
+  // sem pedir outra lista pro servidor
+  const vistas = [...new Map(ITENS.map(it=>[it.unidade, it.unidadeNome||it.unidade])).entries()].sort((a,b)=>a[1].localeCompare(b[1]));
+  sel.innerHTML = vistas.map(([cod,nome])=>`<option value="${escapeHtml(cod)}">${escapeHtml(nome)}</option>`).join('');
+  document.getElementById('ns-data').value = document.getElementById('f-data-ate').value || '';
+  document.getElementById('ns-descricao').value = '';
+  document.getElementById('ns-valor').value = '';
+  document.getElementById('ns-msg').classList.add('hidden');
+  document.getElementById('nova-saida-overlay').classList.remove('hidden');
+}
+function fecharNovaSaida(){ document.getElementById('nova-saida-overlay').classList.add('hidden'); }
+async function salvarNovaSaida(){
+  const msg = document.getElementById('ns-msg');
+  const btn = document.getElementById('ns-salvar');
+  msg.classList.add('hidden');
+  btn.disabled = true;
+  try{
+    const res = await fetch('/api/fechamentos/saidas', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        unidade: document.getElementById('ns-unidade').value,
+        data: document.getElementById('ns-data').value,
+        descricao: document.getElementById('ns-descricao').value,
+        valor: Number(document.getElementById('ns-valor').value),
+      }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || 'Erro ao adicionar.');
+    fecharNovaSaida();
+    await carregar();
+  }catch(e){
+    msg.textContent = e.message; msg.className='msg err'; msg.classList.remove('hidden');
+  }finally{ btn.disabled = false; }
 }
 
 async function moverOrigem(chave, origem){
@@ -547,6 +712,8 @@ async function boot(){
     document.getElementById('card-saldo').classList.remove('hidden');
     document.getElementById('card-verificadas').classList.remove('hidden');
     document.getElementById('col-verificadas-wrap').classList.remove('hidden');
+    document.getElementById('btn-add-saida').classList.remove('hidden');
+    document.getElementById('btn-add-sangria').classList.remove('hidden');
   } else {
     document.querySelector('.kanban-3col').classList.add('sem-verificadas');
   }

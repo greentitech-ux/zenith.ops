@@ -7874,7 +7874,7 @@ app.get('/api/sangrias/minhas', requireSection('sangria'), async (req, res) => {
 // (o fechamento so a enxerga mesclada na leitura), entao editar/excluir
 // aqui ja reflete automaticamente em qualquer lugar que mostra o
 // fechamento mesclado (fechamentos.html, "Faturamento" do dia, etc)
-app.patch('/api/sangrias/:id', auth.requireMaster, async (req, res) => {
+app.patch('/api/sangrias/:id', auth.requireMasterOrAdmin, async (req, res) => {
   try {
     const registro = await sangrias.atualizar(req.params.id, req.body);
     broadcast('sangria-atualizada', registro, 'sangria');
@@ -7886,7 +7886,7 @@ app.patch('/api/sangrias/:id', auth.requireMaster, async (req, res) => {
   }
 });
 
-app.delete('/api/sangrias/:id', auth.requireMaster, async (req, res) => {
+app.delete('/api/sangrias/:id', auth.requireMasterOrAdmin, async (req, res) => {
   try {
     await sangrias.remover(req.params.id);
     broadcast('sangria-excluida', { id: req.params.id }, 'sangria');
@@ -7988,6 +7988,59 @@ app.post('/api/saidas-painel/reclassificar-sangrias', auth.requireMaster, async 
     broadcast('saida-verificada', { movidas: alvos.length }, 'lancamento');
     broadcast('saida-verificada', { movidas: alvos.length }, 'sangria');
     res.json({ movidas: alvos.length });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// EDITAR uma saida avulsa ja lancada, direto (Master/Admin - decisao do
+// Master: "ADMIN e MASTER edita e as demais tags pedem correcao"). Quem nao
+// e Master/Admin usa a MESMA fila de correcao do fechamento, com
+// tipoCorrecao 'saida-item' (ver /api/fechamentos/:id/solicitar-edicao).
+app.patch('/api/fechamentos/:id/saidas/:indice', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    const atual = await fechamentosLive.getOne(req.params.id);
+    if (!atual) {
+      // saida que veio da planilha ARCFOOD vive so em memoria (fechamentosData,
+      // ver /api/saidas-painel) - corrigir ali e' na planilha, nao aqui
+      return res.status(404).json({ error: 'Esse lançamento não está no sistema (veio da planilha) - a correção é na própria planilha.' });
+    }
+    if (!auth.podeVerUnidade(req, atual.unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    const registro = await fechamentosLive.editarItemSaida({
+      fechamentoId: req.params.id,
+      indice: req.params.indice,
+      descricao: req.body.descricao,
+      valor: req.body.valor,
+      motivo: req.body.motivo,
+      editadoPorEmail: req.user.email,
+    });
+    broadcast('saida-verificada', { chave: `${req.params.id}::${req.params.indice}` }, 'lancamento');
+    broadcast('saida-verificada', { chave: `${req.params.id}::${req.params.indice}` }, 'sangria');
+    broadcast('fechamento-atualizado', registro, 'fechamentos');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ACRESCENTAR saida avulsa em qualquer data (Master/Admin). Ela mora dentro
+// do fechamento do dia - se o dia nao tiver fechamento lancado, a rota
+// recusa com o motivo, em vez de criar um fechamento fantasma de R$0.
+app.post('/api/fechamentos/saidas', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    const { unidade, data, descricao, valor, motivo } = req.body;
+    if (!auth.podeVerUnidade(req, unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    const registro = await fechamentosLive.adicionarSaidaDireto({
+      unidade, data, descricao, valor, motivo, editadoPorEmail: req.user.email,
+    });
+    broadcast('saida-verificada', { unidade, data }, 'lancamento');
+    broadcast('saida-verificada', { unidade, data }, 'sangria');
+    broadcast('fechamento-atualizado', registro, 'fechamentos');
+    res.json(registro);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

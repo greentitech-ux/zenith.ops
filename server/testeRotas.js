@@ -7461,6 +7461,101 @@ setTimeout(async () => {
   console.log(`${okCaixaSangria ? '✓' : '✗'} Sangria: confere o caixa (entrada − saídas − sangrias), exige motivo na divergência e alarma o Master`);
 
   // ------------------------------------------------------------------
+  // Pedido urgente do Master: "um local pra clicar e Editar a Saída em caso
+  // de erro. ADMIN e MASTER edita e as demais tags pedem correção da mesma
+  // forma do fechamento". Mais: acrescentar saída em qualquer data, também
+  // só Master/Admin.
+  let okEditarSaida = false;
+  try {
+    const cabMaster = { Authorization: 'Bearer ' + token };
+    const UNI = 'TESTE_EDITA_SAIDA';
+
+    const fech = await postarJson('/api/fechamentos/lancar', {
+      unidade: UNI, unidadeNome: 'Loja Edita Saída', grupo: 'ARCFOOD', data: '2026-09-10',
+      campos: { entradaDinheiro: 900, totalSaida: 230 },
+      detalhesSaidas: [{ descricao: 'Uber com valor errado', valor: 200 }, { descricao: 'Gelo', valor: 30 }],
+    }, cabMaster);
+    const fechId = JSON.parse(fech.corpo).id;
+    const totalAntes = JSON.parse(fech.corpo).totalSaida;
+
+    // Master corrige o valor errado (200 -> 20)
+    const rEdita = await enviarJson('PATCH', `/api/fechamentos/${fechId}/saidas/0`,
+      { descricao: 'Uber', valor: 20, motivo: 'valor digitado errado' }, cabMaster);
+    const depois = JSON.parse(rEdita.corpo);
+
+    // índice que não existe é recusado (não cria item fantasma)
+    const rIndiceRuim = await enviarJson('PATCH', `/api/fechamentos/${fechId}/saidas/9`, { valor: 10 }, cabMaster);
+    // saída da planilha não está no Firestore - a correção é na planilha
+    const rDaPlanilha = await enviarJson('PATCH', '/api/fechamentos/arcfood-999/saidas/0', { valor: 10 }, cabMaster);
+
+    // loja (nem Master nem Admin) não edita direto - pede correção
+    const senhaHash = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-edita-loja', {
+      passwordHash: senhaHash, role: 'user', active: true,
+      email: 'edita-loja@teste.local', username: 'editaloja',
+      permissions: { sections: ['lancamento'], unidades: [UNI], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabLojaEd = { Authorization: 'Bearer ' + (await auth.login('edita-loja@teste.local', 'SenhaDeTeste!2026')).token };
+    const rLojaEdita = await enviarJson('PATCH', `/api/fechamentos/${fechId}/saidas/1`, { valor: 5 }, cabLojaEd);
+    const rLojaPede = await postarJson(`/api/fechamentos/${fechId}/solicitar-edicao`, {
+      tipoCorrecao: 'saida-item', itemNovo: { indice: 1, descricao: 'Gelo (2 sacos)', valor: 45 }, motivo: 'faltou um saco',
+    }, cabLojaEd);
+    const pedido = JSON.parse(rLojaPede.corpo);
+    // enquanto PENDENTE o fechamento não muda
+    const fl = require('./fechamentosLive');
+    const durantePendente = await fl.getOne(fechId);
+    const rAprova = await enviarJson('PATCH', `/api/fechamentos/edicoes/${pedido.id}`, { status: 'APROVADO' }, cabMaster);
+    const aposAprovar = await fl.getOne(fechId);
+
+    // acrescentar saída em qualquer data (Master/Admin)
+    const rAdd = await postarJson('/api/fechamentos/saidas',
+      { unidade: UNI, data: '2026-09-10', descricao: 'Estacionamento', valor: 15 }, cabMaster);
+    const rAddLoja = await postarJson('/api/fechamentos/saidas',
+      { unidade: UNI, data: '2026-09-10', descricao: 'x', valor: 1 }, cabLojaEd);
+    const rAddSemFechamento = await postarJson('/api/fechamentos/saidas',
+      { unidade: UNI, data: '2026-09-30', descricao: 'x', valor: 1 }, cabMaster);
+
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'saidas.html'), 'utf8');
+
+    const conf = {
+      'Master edita a saída na hora e o totalSaida acompanha (230 → 50)':
+        rEdita.status === 200 && totalAntes === 230 && depois.totalSaida === 50
+        && depois.detalhesSaidas[0].descricao === 'Uber' && depois.detalhesSaidas[0].valor === 20,
+      // recalcular o total pela SOMA dos itens zeraria a parcela não
+      // itemizada; por isso o ajuste é pela diferença
+      'a outra saída do mesmo fechamento não é tocada': depois.detalhesSaidas[1].valor === 30,
+      'índice que não existe é recusado': rIndiceRuim.status === 400,
+      'saída vinda da planilha diz que a correção é na planilha':
+        rDaPlanilha.status === 404 && /planilha/i.test(rDaPlanilha.corpo),
+      'loja não edita direto (403)': rLojaEdita.status === 403,
+      'loja pede correção pela mesma fila do fechamento': rLojaPede.status === 200 && !!pedido.numeroTicket,
+      'enquanto pendente, a saída continua como estava': durantePendente.detalhesSaidas[1].valor === 30,
+      'aprovado, a correção é aplicada na saída certa':
+        rAprova.status === 200 && aposAprovar.detalhesSaidas[1].descricao === 'Gelo (2 sacos)'
+        && aposAprovar.detalhesSaidas[1].valor === 45 && aposAprovar.totalSaida === 65,
+      'Master acrescenta saída em qualquer data': rAdd.status === 200 && JSON.parse(rAdd.corpo).totalSaida === 80,
+      'loja não acrescenta (403)': rAddLoja.status === 403,
+      // não criar fechamento fantasma de R$0 só pra pendurar uma saída
+      'dia sem fechamento lançado recusa com o motivo':
+        rAddSemFechamento.status === 400 && /fechamento lançado/i.test(rAddSemFechamento.corpo),
+      'a tela tem Editar pra quem confere e Pedir correção pras demais tags':
+        /PODE_CONFERIR\s*\n?\s*\? `<button[^`]*✏️ Editar/.test(html) && /✏️ Pedir correção/.test(html),
+      'os dois botões de adicionar só aparecem pra Master/Admin':
+        /id="btn-add-saida"[^>]*class="export-btn hidden"|class="export-btn hidden" id="btn-add-saida"/.test(html)
+        && /btn-add-saida'\)\.classList\.remove\('hidden'\)/.test(html)
+        && /btn-add-sangria'\)\.classList\.remove\('hidden'\)/.test(html),
+      'Adicionar sangria leva pro formulário que tem a conferência de caixa':
+        /href="\/lancamento\.html#painel-sangria"/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okEditarSaida = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okEditarSaida = false; console.log('  erro: ' + e.message); }
+  if (!okEditarSaida) ruins += 1;
+  console.log(`${okEditarSaida ? '✓' : '✗'} Painel de Saídas: Master/Admin edita e acrescenta saída; as demais tags pedem correção pela fila do fechamento`);
+
+  // ------------------------------------------------------------------
   // Estoque > Histórico: a coluna do item fica TRAVADA na esquerda enquanto
   // as datas rolam. No celular ela comia a largura toda e os números saíam
   // da tela (print do Master). Duas armadilhas que o teste fixa:
