@@ -47,6 +47,10 @@
   label:first-child{margin-top:0;}
   input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  /* nascimento digitado fora do calendario (31/02, ano no futuro): cor
+     semantica, o mesmo vermelho dos outros erros - e a pessoa ve o problema
+     enquanto digita, nao so ao tentar salvar */
+  input.data-invalida{border-color:var(--bad);}
   textarea{resize:vertical;min-height:56px;}
   .grid2{display:grid;grid-template-columns:1fr;gap:0 10px;}
   @media(min-width:440px){ .grid2{grid-template-columns:1fr 1fr;} }
@@ -97,6 +101,7 @@
   .resumo .linha{display:flex;justify-content:space-between;gap:8px;}
 </style>
 <script src="/tema.js"></script>
+<script src="/data-br.js"></script>
 </head>
 <body>
 
@@ -519,6 +524,15 @@ let ADDTEMPO_ID = null;   // check-in alvo do overlay de adicionar tempo
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function fmtData(d){ if(!d) return '—'; const [y,m,dd]=d.split('-'); return `${dd}/${m}/${y}`; }
+
+// nomes das crianças com nascimento digitado errado - o campo é opcional,
+// mas texto inválido nao pode virar null em silencio: o desconto de Niver
+// depende dele e a pessoa acharia que salvou
+function criancasComNascimentoInvalido(seletor){
+  return [...document.querySelectorAll(seletor)]
+    .filter((l) => dataBRInvalida(l.querySelector('.crianca-nasc, .cor-cr-nasc')))
+    .map((l, i) => (l.querySelector('.crianca-nome, .cor-cr-nome') || {}).value || `criança ${i + 1}`);
+}
 const FUSO_BR = 'America/Sao_Paulo';
 function agoraBrasilia(){
   const partes = new Intl.DateTimeFormat('en-US', {
@@ -1009,7 +1023,7 @@ function adicionarCrianca(){
   div.innerHTML = `
     <div><label style="margin-top:0;">Nome da criança</label><input type="text" class="crianca-nome" required></div>
     <div class="crianca-linha-nasc">
-      <div><label style="margin-top:0;">Nascimento</label><input type="date" class="crianca-nasc"></div>
+      <div><label style="margin-top:0;">Nascimento</label><input type="text" class="crianca-nasc" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" oninput="mascararDataBR(this)"></div>
       <button type="button" class="btn-remover-crianca" onclick="document.getElementById('${id}').remove(); atualizarPreviewPulseiras();" title="Remover">✕</button>
     </div>
     <label class="crianca-meia-wrap" style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
@@ -1023,7 +1037,7 @@ function adicionarCrianca(){
   `;
   document.getElementById('lista-criancas').appendChild(div);
   div.querySelector('.crianca-nome').addEventListener('input', atualizarPreviewPulseiras);
-  div.querySelector('.crianca-nasc').addEventListener('change', atualizarPreviewValor);
+  div.querySelector('.crianca-nasc').addEventListener('input', atualizarPreviewValor);
   atualizarVisibilidadeGratuidade();
 }
 // escopado no #lista-criancas: o overlay de correção tem linhas de criança
@@ -1038,7 +1052,7 @@ function coletarCriancas(){
     const chkGratuita = div.querySelector('.crianca-gratuita');
     return {
       nome: div.querySelector('.crianca-nome').value.trim(),
-      dataNascimento: div.querySelector('.crianca-nasc').value || null,
+      dataNascimento: dataBRparaISO(div.querySelector('.crianca-nasc').value),
       meia: div.querySelector('.crianca-meia').checked,
       gratuita: chkGratuita ? chkGratuita.checked : true,
     };
@@ -1305,7 +1319,7 @@ function corAddCrianca(nome, nasc, meia){
   div.className = 'crianca-linha';
   div.innerHTML = `<input type="text" placeholder="Nome da criança" class="cor-cr-nome">
     <div class="crianca-linha-nasc">
-      <div><input type="date" class="cor-cr-nasc"></div>
+      <div><input type="text" class="cor-cr-nasc" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" oninput="mascararDataBR(this)"></div>
       <button type="button" class="btn-remover-crianca" title="Remover criança" onclick="this.closest('.crianca-linha').remove()">🗑</button>
     </div>
     <label style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
@@ -1313,7 +1327,7 @@ function corAddCrianca(nome, nasc, meia){
     </label>
     <div class="sub" style="grid-column:1 / -1;font-size:11px;color:var(--muted);margin-top:2px;">🎂 O desconto de Niver (50%) é calculado sozinho pela data de nascimento x data de utilização - não precisa marcar nada aqui.</div>`;
   div.querySelector('.cor-cr-nome').value = nome||'';
-  div.querySelector('.cor-cr-nasc').value = (nasc||'').slice(0,10);
+  div.querySelector('.cor-cr-nasc').value = isoParaDataBR(nasc);
   document.getElementById('cor-criancas').appendChild(div);
 }
 
@@ -1368,10 +1382,14 @@ document.getElementById('form-correcao').addEventListener('submit', async (ev)=>
         quantAC: Number(document.getElementById('cor-ac-quant').value)||1,
         criancas: [...document.querySelectorAll('#cor-criancas .crianca-linha')].map(l=>({
           nome: l.querySelector('.cor-cr-nome').value,
-          dataNascimento: l.querySelector('.cor-cr-nasc').value || null,
+          dataNascimento: dataBRparaISO(l.querySelector('.cor-cr-nasc').value),
           meia: l.querySelector('.cor-cr-meia').checked,
         })),
       };
+    }
+    const nascRuinsCor = criancasComNascimentoInvalido('#cor-criancas .crianca-linha');
+    if(nascRuinsCor.length){
+      throw new Error(`Data de nascimento inválida em: ${nascRuinsCor.join(', ')}. Use dd/mm/aaaa, ou deixe em branco.`);
     }
     const res = await fetch(`/api/parque/checkins/${CORRIGINDO_ID}/solicitar-edicao`, {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -1565,6 +1583,11 @@ document.getElementById('form-checkin').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
   const criancas = coletarCriancas();
   if(!criancas.length){ alert('Cadastre pelo menos uma criança.'); return; }
+  const nascRuins = criancasComNascimentoInvalido('#lista-criancas .crianca-linha');
+  if(nascRuins.length){
+    alert(`Data de nascimento inválida em: ${nascRuins.join(', ')}.\n\nUse dd/mm/aaaa (ex: 05/03/2019), ou deixe o campo em branco.`);
+    return;
+  }
   const cortesia = document.getElementById('f-cortesia').checked;
   const total = calcularTotalAtual();
   // 5%CP (PCD-cortesia) e cortesia geral zeram normalmente, mas agora

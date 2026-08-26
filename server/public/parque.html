@@ -44,6 +44,10 @@
   label:first-child{margin-top:0;}
   input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  /* nascimento digitado fora do calendario (31/02, ano no futuro): cor
+     semantica, o mesmo vermelho dos outros erros - a pessoa ve o problema
+     enquanto digita, nao so ao tentar salvar (ver data-br.js) */
+  input.data-invalida{border-color:var(--bad);}
   .filtros{display:grid;grid-template-columns:1fr;gap:0 10px;}
   @media(min-width:560px){ .filtros{grid-template-columns:1fr 1fr 1fr;} }
   .filtros-acoes{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
@@ -108,6 +112,7 @@
   .dif-linha{font-size:12px;color:var(--warn);}
 </style>
 <script src="/tema.js"></script>
+<script src="/data-br.js"></script>
 </head>
 <body>
 
@@ -628,7 +633,7 @@ function corAddCrianca(nome, nasc, meia){
   div.className = 'crianca-linha';
   div.innerHTML = `<input type="text" placeholder="Nome da criança" class="cor-cr-nome">
     <div class="crianca-linha-nasc">
-      <div><input type="date" class="cor-cr-nasc"></div>
+      <div><input type="text" class="cor-cr-nasc" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" oninput="mascararDataBR(this)"></div>
       <button type="button" class="btn-remover-crianca" title="Remover criança" onclick="this.closest('.crianca-linha').remove()">🗑</button>
     </div>
     <label style="grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-family:var(--sans);color:var(--text);text-transform:none;margin:4px 0 0;font-size:12.5px;">
@@ -636,7 +641,7 @@ function corAddCrianca(nome, nasc, meia){
     </label>
     <div class="sub" style="grid-column:1 / -1;font-size:11px;color:var(--muted);margin-top:2px;">🎂 O desconto de Niver (50%) é calculado sozinho pela data de nascimento x data de utilização - não precisa marcar nada aqui.</div>`;
   div.querySelector('.cor-cr-nome').value = nome||'';
-  div.querySelector('.cor-cr-nasc').value = (nasc||'').slice(0,10);
+  div.querySelector('.cor-cr-nasc').value = isoParaDataBR(nasc);
   document.getElementById('cor-criancas').appendChild(div);
 }
 
@@ -718,7 +723,7 @@ function fecharVer(){ document.getElementById('overlay-ver').classList.add('hidd
 function formularioMudouAlgo(c){
   const v = (id)=>String(document.getElementById(id).value||'').trim();
   const criancasForm = [...document.querySelectorAll('#cor-criancas .crianca-linha')].map(l=>
-    `${(l.querySelector('.cor-cr-nome').value||'').trim().toLowerCase()}|${(l.querySelector('.cor-cr-nasc').value||'').slice(0,10)}|${l.querySelector('.cor-cr-meia').checked}`).sort().join(';');
+    `${(l.querySelector('.cor-cr-nome').value||'').trim().toLowerCase()}|${dataBRparaISO(l.querySelector('.cor-cr-nasc').value)||''}|${l.querySelector('.cor-cr-meia').checked}`).sort().join(';');
   const criancasAtual = (c.criancas||[]).map(cr=>
     `${(cr.nome||'').trim().toLowerCase()}|${(cr.dataNascimento||'').slice(0,10)}|${cr.meia!==false}`).sort().join(';');
   const acForm = document.getElementById('cor-ac').checked;
@@ -759,10 +764,14 @@ document.getElementById('form-correcao').addEventListener('submit', async (ev)=>
         quantAC: Number(document.getElementById('cor-ac-quant').value)||1,
         criancas: [...document.querySelectorAll('#cor-criancas .crianca-linha')].map(l=>({
           nome: l.querySelector('.cor-cr-nome').value,
-          dataNascimento: l.querySelector('.cor-cr-nasc').value || null,
+          dataNascimento: dataBRparaISO(l.querySelector('.cor-cr-nasc').value),
           meia: l.querySelector('.cor-cr-meia').checked,
         })),
       };
+    }
+    const ruinsNasc = camposDataBRInvalidos(document.getElementById('cor-criancas'));
+    if(ruinsNasc.length){
+      throw new Error(`Data de nascimento inválida: ${ruinsNasc.map(e=>e.value).join(', ')}. Use dd/mm/aaaa, ou deixe em branco.`);
     }
     const res = await fetch(`/api/parque/checkins/${CORRIGINDO_ID}/solicitar-edicao`, {
       method:'POST', headers:{'Content-Type':'application/json'},

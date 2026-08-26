@@ -44,6 +44,10 @@
   label:first-child{margin-top:0;}
   input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 11px;font-size:14px;font-family:var(--sans);}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  /* nascimento digitado fora do calendario (31/02, ano no futuro): cor
+     semantica, o mesmo vermelho dos outros erros - a pessoa ve o problema
+     enquanto digita, nao so ao tentar salvar (ver data-br.js) */
+  input.data-invalida{border-color:var(--bad);}
   .btn-primary{background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:11px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);}
   .card{border-top:1px solid var(--line);padding:12px 0;}
   .card:first-child{border-top:none;padding-top:0;}
@@ -69,6 +73,7 @@
   .btn-remover-crianca{background:none;border:1px solid var(--line);color:var(--bad);border-radius:8px;height:44px;width:38px;flex:none;cursor:pointer;font-size:14px;}
 </style>
 <script src="/tema.js"></script>
+<script src="/data-br.js"></script>
 </head>
 <body>
 
@@ -210,7 +215,7 @@ function adicionarCriancaMensalista(){
   div.innerHTML = `
     <div><label style="margin-top:0;">Nome da criança</label><input type="text" class="ms-crianca-nome"></div>
     <div class="crianca-linha-nasc">
-      <div><label style="margin-top:0;">Nascimento</label><input type="date" class="ms-crianca-nasc"></div>
+      <div><label style="margin-top:0;">Nascimento</label><input type="text" class="ms-crianca-nasc" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" oninput="mascararDataBR(this)"></div>
       <button type="button" class="btn-remover-crianca" onclick="document.getElementById('${id}').remove();" title="Remover">✕</button>
     </div>
   `;
@@ -219,7 +224,7 @@ function adicionarCriancaMensalista(){
 function coletarCriancasMensalista(){
   return [...document.querySelectorAll('#ms-lista-criancas .crianca-linha')].map(div=>({
     nome: div.querySelector('.ms-crianca-nome').value.trim(),
-    dataNascimento: div.querySelector('.ms-crianca-nasc').value || null,
+    dataNascimento: dataBRparaISO(div.querySelector('.ms-crianca-nasc').value),
   })).filter(c=>c.nome);
 }
 
@@ -240,6 +245,13 @@ document.getElementById('ms-data-inicial').addEventListener('input', atualizarVa
 
 document.getElementById('form-mensalista').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
+  {
+    const ruins = camposDataBRInvalidos(document.getElementById('form-mensalista'));
+    if(ruins.length){
+      alert(`Data de nascimento inválida: ${ruins.map(e=>e.value).join(', ')}.\n\nUse dd/mm/aaaa (ex: 05/03/2019), ou deixe o campo em branco.`);
+      return;
+    }
+  }
   const msg = document.getElementById('msg-mensalista');
   msg.classList.add('hidden');
   try{
