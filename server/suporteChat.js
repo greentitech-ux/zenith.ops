@@ -86,6 +86,11 @@ async function criar({ nome, contato, texto, assunto, logado, lojaContexto, anex
     lojaContexto: lojaContextoLimpa || null,
     status: 'ABERTO',
     mensagens: [{ de: 'visitante', texto: textoLimpo, em: agora, ...(anexo ? { anexo } : {}) }],
+    // toda conversa nasce com alguem esperando resposta (a 1a mensagem e do
+    // visitante). E o que a varredura de reforco filtra direto no Firestore,
+    // pra nao ter que baixar toda conversa aberta a cada tick so pra
+    // descobrir quem falou por ultimo (ver listarParaReforcarAlarme)
+    aguardandoHumano: true,
     // registro interno de tentativas suspeitas nessa conversa (texto tipo
     // comando/script, ou arquivo bloqueado no upload - ver segurancaChat.js)
     // - nunca sai na visao publica (getPublico), so no atendimento
@@ -163,6 +168,12 @@ async function adicionarMensagem(id, { de, texto, autorEmail, token, bot, anexo 
   const mensagens = [...(chat.mensagens || []), { de, texto: textoLimpo, em: agora, ...(de === 'suporte' ? { autorEmail: autorEmail || null } : {}), ...(bot ? { bot: true } : {}), ...(anexo ? { anexo } : {}) }];
   const patch = { mensagens, atualizadoEm: agora };
   if (de === 'suporte' && !bot && !chat.atendidoPorEmail) patch.atendidoPorEmail = autorEmail || null;
+  // "tem gente esperando um humano?" gravado no proprio doc (ver
+  // aguardandoHumano e listarParaReforcarAlarme). Visitante falou = esta
+  // esperando; humano respondeu = nao esta mais. Resposta do BOT nao zera se
+  // ele ja tinha desistido (botDesativado) - nesse caso quem a pessoa espera
+  // e um humano, e o bot falar por ultimo nao muda isso.
+  patch.aguardandoHumano = de === 'visitante' ? true : (bot ? !!chat.botDesativado : false);
   await COLLECTION.doc(id).update(patch);
   chatsCache.invalidar();
   return getOne(id);
@@ -200,7 +211,11 @@ async function finalizar(id, { autorEmail }) {
 // tira o bot da conversa em definitivo (chamado pela tool chamar_atendente
 // do proprio bot) - dali em diante so humano responde
 async function desativarBot(id) {
-  await COLLECTION.doc(id).update({ botDesativado: true, atualizadoEm: new Date().toISOString() });
+  // o bot desistiu: dali em diante a pessoa espera um HUMANO, mesmo que a
+  // ultima mensagem da conversa seja do proprio bot ("ja chamei um
+  // atendente"). Sem marcar aqui, a conversa escalada sairia da varredura
+  // de reforco (ver listarParaReforcarAlarme) e o alarme morreria calado.
+  await COLLECTION.doc(id).update({ botDesativado: true, aguardandoHumano: true, atualizadoEm: new Date().toISOString() });
   chatsCache.invalidar();
   return getOne(id);
 }
@@ -522,13 +537,20 @@ function esperaDoVisitante(chat, agora) {
 // cada 15s o dia inteiro (ver reforcarAlarmesBeniboy em index.js) - baixar a
 // colecao INTEIRA (todo o historico de chats ja finalizados) a cada 15s
 // custava uma leitura por documento existente, a cada tick, pra sempre.
-// Filtrando os 2 campos direto no Firestore (os dois com "==", nao precisa
-// de indice composto), so vem os poucos chats que podem estar esperando -
-// ABERTO+PENDENTE e um punhado, nao o historico inteiro.
+//
+// CUSTO (CLAUDE.md §3): o Firestore cobra por DOCUMENTO DEVOLVIDO, entao o
+// filtro tem que ser feito no banco, nao em memoria. Filtrar so por
+// ABERTO+PENDENTE traria TODA conversa viva a cada tick (com 8 conversas
+// abertas e o tick rapido ligado, ~26 mil leituras/dia so pra descobrir que
+// a maioria nem esta esperando). Por isso `aguardandoHumano` e gravado no
+// proprio doc (ver adicionarMensagem/desativarBot): com ele a consulta volta
+// a ter 3 campos "==" (nao precisa de indice composto) e devolve SO quem de
+// fato espera - que e exatamente quem vai virar alarme. Nada vem a toa.
 async function listarParaReforcarAlarme() {
   const snap = await COLLECTION
     .where('status', '==', 'ABERTO')
     .where('statusAtendimento', '==', 'PENDENTE')
+    .where('aguardandoHumano', '==', true)
     .get();
   const agora = Date.now();
   const out = [];

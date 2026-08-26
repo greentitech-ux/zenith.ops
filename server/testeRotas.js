@@ -7491,10 +7491,18 @@ setTimeout(async () => {
     const sc = require('/home/user/adyen-monitor/server/suporteChat.js');
     const agora = Date.now();
     const iso = (msAtras) => new Date(agora - msAtras).toISOString();
+    // `aguardandoHumano` é gravado pelo próprio código (criar/adicionarMensagem/
+    // desativarBot) - aqui o fixture reproduz o que a produção grava, senão o
+    // teste não estaria testando a mesma coisa que roda de verdade
     const chatDoc = (id, extra) => {
+      const msgs = (extra && extra.mensagens) || [];
+      const ultima = msgs[msgs.length - 1];
       DOCS.set(`suporteChats/${id}`, {
         id, nome: 'Visitante ' + id, status: 'ABERTO', statusAtendimento: 'PENDENTE',
         criadoEm: iso(30 * 60 * 1000), atualizadoEm: iso(30 * 60 * 1000),
+        aguardandoHumano: ultima
+          ? (ultima.de === 'visitante' ? true : !!(extra && extra.botDesativado))
+          : true,
         ...extra,
       });
     };
@@ -7526,9 +7534,40 @@ setTimeout(async () => {
     // 6) já alarmou há 5s: respeita o REALERTA_MS (30s) e não repete agora
     chatDoc('recemAlertado', { botDesativado: true, ultimoAlertaEm: iso(5 * 1000),
       mensagens: [{ de: 'visitante', texto: 'oi', em: iso(20 * 60 * 1000) }] });
+    // 7) conversa do formato ANTIGO (aberta antes deste deploy, sem o campo
+    //    aguardandoHumano): não alarma. É um transitório conhecido - a
+    //    próxima mensagem grava o campo e a varredura de ociosos (40min)
+    //    encerra quem ficou parado. Documentado aqui pra ninguém "consertar"
+    //    isso voltando a filtrar em memória, que é o que custava caro.
+    DOCS.set('suporteChats/formatoAntigo', {
+      id: 'formatoAntigo', nome: 'Visitante antigo', status: 'ABERTO',
+      statusAtendimento: 'PENDENTE', botDesativado: true,
+      criadoEm: iso(30 * 60 * 1000), atualizadoEm: iso(30 * 60 * 1000),
+      ultimoAlertaEm: iso(5 * 60 * 1000),
+      mensagens: [{ de: 'visitante', texto: 'oi', em: iso(20 * 60 * 1000) }],
+    });
 
     const ids = (await sc.listarParaReforcarAlarme()).map((c) => c.id).sort();
     const esperando = (await sc.listarParaReforcarAlarme()).find((c) => c.id === 'esperando');
+
+    // CUSTO (CLAUDE.md §3): o Firestore cobra por documento DEVOLVIDO, e essa
+    // varredura roda o dia inteiro. A propriedade que importa não é "devolve
+    // poucos", é "NÃO cresce com o volume de conversas". Mede antes e depois
+    // de jogar 10 conversas vivas em que o bot JÁ respondeu (o caso comum
+    // quando o Beniboy está funcionando): o custo tem que ficar igual, senão
+    // o filtro voltou pra memória e cada tick paga por toda conversa aberta.
+    const antesLeituras = LEITURAS.docs;
+    await sc.listarParaReforcarAlarme();
+    const custoPorTick = LEITURAS.docs - antesLeituras;
+
+    for (let i = 0; i < 10; i++) {
+      chatDoc('botRespondeu' + i, { botDesativado: false, ultimoAlertaEm: iso(5 * 60 * 1000),
+        mensagens: [{ de: 'visitante', texto: 'oi', em: iso(20 * 60 * 1000) },
+          { de: 'suporte', texto: 'posso ajudar?', em: iso(19 * 60 * 1000), bot: true }] });
+    }
+    const antesCom10 = LEITURAS.docs;
+    await sc.listarParaReforcarAlarme();
+    const custoCom10AMais = LEITURAS.docs - antesCom10;
 
     // wiring: o job tem que mandar o tempo de espera no texto do push de
     // quem entrou por espera (e não por escalação do Beniboy)
@@ -7545,6 +7584,12 @@ setTimeout(async () => {
       'respeita o intervalo de re-alerta (não repete 5s depois)': !ids.includes('recemAlertado'),
       'o push de quem esperou carrega os minutos de espera': !!esperando && esperando.esperaMin >= 11 && esperando.esperaMin <= 13,
       'index.js manda o tempo de espera no texto do push': okTextoEspera,
+      // 6 chats no cenário, 2 realmente esperando: a consulta filtra no
+      // BANCO (aguardandoHumano), não em memória - senão os 6 viriam a cada
+      // tick, o dia inteiro (ver o comentário de custo em suporteChat.js)
+      [`o custo NÃO cresce com o volume: +10 conversas onde o bot respondeu manteve ${custoPorTick} -> ${custoCom10AMais} leitura(s) por tick`]:
+        custoCom10AMais === custoPorTick,
+      'conversa do formato antigo (sem o campo) não alarma - transitório conhecido do deploy': !ids.includes('formatoAntigo'),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okAlarmeAguardando = !falhas.length;
