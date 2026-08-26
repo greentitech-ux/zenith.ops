@@ -76,4 +76,33 @@ async function reclassificar(chave, { origem, porId, porEmail }) {
   return registro;
 }
 
-module.exports = { listAll, mapaDeChaves, marcar, reclassificar, ORIGENS_MANUAIS };
+// CORRECAO de uma saida que veio da PLANILHA. O fechamento importado vive so
+// em memoria (fechamentosData, ver sheetsSync.js) - nao da pra editar o
+// documento porque nao existe documento. Em vez de mandar a pessoa corrigir
+// na planilha (era o que a rota fazia, e o Master pediu pra funcionar aqui),
+// a correcao fica AQUI, ao lado da verificacao e da reclassificacao, e a
+// leitura do painel aplica por cima do que veio da planilha.
+//
+// A planilha continua intacta: ela e' a origem do historico e nao pode ser
+// reescrita por nos (CLAUDE.md §1). Se a linha da planilha mudar depois, a
+// correcao continua valendo por cima dela - e' o que o Master decidiu que
+// vale.
+async function corrigirItem(chave, { descricao, valor, porId, porEmail }) {
+  if (!chave || typeof chave !== 'string') throw new Error('Chave inválida.');
+  const v = Number(valor);
+  if (!Number.isFinite(v) || v < 0) throw new Error('Informe um valor válido para a saída.');
+  const desc = String(descricao || '').trim().slice(0, 300);
+  if (!desc) throw new Error('Descreva a saída.');
+  const registro = {
+    chave,
+    correcao: { descricao: desc, valor: +v.toFixed(2) },
+    corrigidoPorId: porId,
+    corrigidoPorEmail: porEmail,
+    corrigidoEm: new Date().toISOString(),
+  };
+  await COLLECTION.doc(chave).set(registro, { merge: true });
+  cache.invalidar();
+  return registro;
+}
+
+module.exports = { listAll, mapaDeChaves, marcar, reclassificar, corrigirItem, ORIGENS_MANUAIS };

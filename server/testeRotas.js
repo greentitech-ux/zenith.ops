@@ -7485,8 +7485,33 @@ setTimeout(async () => {
 
     // índice que não existe é recusado (não cria item fantasma)
     const rIndiceRuim = await enviarJson('PATCH', `/api/fechamentos/${fechId}/saidas/9`, { valor: 10 }, cabMaster);
-    // saída da planilha não está no Firestore - a correção é na planilha
-    const rDaPlanilha = await enviarJson('PATCH', '/api/fechamentos/arcfood-999/saidas/0', { valor: 10 }, cabMaster);
+
+    // ---- saída que veio da PLANILHA. Pedido do Master: "PRECISO que seja
+    // autorizado e atualizado o valor quando editado mesmo que o valor tenha
+    // vindo da planilha". Antes a rota recusava com 404 ("a correção é na
+    // própria planilha") porque o fechamento importado não tem documento no
+    // Firestore pra editar - ele vive só no snapshot em memória.
+    // fechamentosData (index.js) NASCE como require('./fechamentos-snapshot.json')
+    // e só é substituído por uma sincronização bem-sucedida (que não roda no
+    // teste), então este require devolve o MESMO array (cache de módulo do
+    // Node) e o push aqui é exatamente o que a planilha produziria.
+    const snapshotPlanilha = require('./fechamentos-snapshot.json');
+    snapshotPlanilha.push({
+      id: 'pl-edita-01', grupo: 'ARCFOOD', unidade: UNI, unidadeNome: 'Loja Edita Saída',
+      data: '2026-09-11', faturamento: 1000, entradaDinheiro: 500, totalSaida: 87.5,
+      gerente: 'gerente@planilha',
+      detalhesSaidas: [{ descricao: 'Motoboy planilha', valor: 37.5 }, { descricao: 'Gelo planilha', valor: 50 }],
+    });
+    const rPlanilhaEdita = await enviarJson('PATCH', '/api/fechamentos/pl-edita-01/saidas/0',
+      { descricao: 'Motoboy (valor certo)', valor: 3.75, motivo: 'digitaram 37,50 na planilha' }, cabMaster);
+    const painelPlanilha = JSON.parse((await pedir('/api/saidas-painel?inicio=2026-09-11&fim=2026-09-11', cabMaster)).corpo).itens;
+    const itemCorrigido = painelPlanilha.find((it) => it.chave === 'pl-edita-01::0');
+    const itemVizinho = painelPlanilha.find((it) => it.chave === 'pl-edita-01::1');
+    // a planilha é a origem do histórico (CLAUDE.md §1): a correção mora ao
+    // lado do item, o dado importado continua exatamente como veio
+    const linhaOriginal = snapshotPlanilha.find((f) => f.id === 'pl-edita-01');
+    const rPlanilhaIndiceRuim = await enviarJson('PATCH', '/api/fechamentos/pl-edita-01/saidas/7', { descricao: 'x', valor: 1 }, cabMaster);
+    const rPlanilhaInexistente = await enviarJson('PATCH', '/api/fechamentos/arcfood-999/saidas/0', { descricao: 'x', valor: 10 }, cabMaster);
 
     // loja (nem Master nem Admin) não edita direto - pede correção
     const senhaHash = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
@@ -7498,6 +7523,7 @@ setTimeout(async () => {
     });
     const cabLojaEd = { Authorization: 'Bearer ' + (await auth.login('edita-loja@teste.local', 'SenhaDeTeste!2026')).token };
     const rLojaEdita = await enviarJson('PATCH', `/api/fechamentos/${fechId}/saidas/1`, { valor: 5 }, cabLojaEd);
+    const rLojaEditaPlanilha = await enviarJson('PATCH', '/api/fechamentos/pl-edita-01/saidas/1', { descricao: 'x', valor: 5 }, cabLojaEd);
     const rLojaPede = await postarJson(`/api/fechamentos/${fechId}/solicitar-edicao`, {
       tipoCorrecao: 'saida-item', itemNovo: { indice: 1, descricao: 'Gelo (2 sacos)', valor: 45 }, motivo: 'faltou um saco',
     }, cabLojaEd);
@@ -7526,8 +7552,26 @@ setTimeout(async () => {
       // itemizada; por isso o ajuste é pela diferença
       'a outra saída do mesmo fechamento não é tocada': depois.detalhesSaidas[1].valor === 30,
       'índice que não existe é recusado': rIndiceRuim.status === 400,
-      'saída vinda da planilha diz que a correção é na planilha':
-        rDaPlanilha.status === 404 && /planilha/i.test(rDaPlanilha.corpo),
+      'Master corrige saída que veio da PLANILHA (antes era 404 "corrija na planilha")':
+        rPlanilhaEdita.status === 200 && JSON.parse(rPlanilhaEdita.corpo).daPlanilha === true,
+      'o Painel de Saídas passa a mostrar o valor corrigido, guardando o original':
+        !!itemCorrigido && itemCorrigido.valor === 3.75 && itemCorrigido.corrigida === true
+        && itemCorrigido.descricao === 'Motoboy (valor certo)' && itemCorrigido.valorOriginal === 37.5
+        && itemCorrigido.descricaoOriginal === 'Motoboy planilha',
+      'a outra saída da mesma linha de planilha não é tocada':
+        !!itemVizinho && itemVizinho.valor === 50 && itemVizinho.corrigida === false,
+      'a planilha importada continua com o valor original (correção mora ao lado, não reescreve o histórico)':
+        !!linhaOriginal && linhaOriginal.detalhesSaidas[0].valor === 37.5
+        && linhaOriginal.detalhesSaidas[0].descricao === 'Motoboy planilha',
+      'índice que não existe na linha da planilha é recusado': rPlanilhaIndiceRuim.status === 400,
+      'id que não está nem no Firestore nem na planilha continua 404': rPlanilhaInexistente.status === 404,
+      'loja não corrige saída da planilha (403)': rLojaEditaPlanilha.status === 403,
+      // sem isso o card mostraria o número novo sem dizer que foi corrigido -
+      // quem confere não teria como cruzar com a planilha que ficou intacta
+      'o card marca "corrigida" e mostra o valor de antes e quem corrigiu':
+        /it\.corrigida \? `<span class="tipo-badge"[^`]*corrigida<\/span>/.test(html)
+        && /antes: \$\{escapeHtml\(it\.descricaoOriginal/.test(html)
+        && /corrigida por \$\{escapeHtml\(it\.corrigidaPorEmail/.test(html),
       'loja não edita direto (403)': rLojaEdita.status === 403,
       'loja pede correção pela mesma fila do fechamento': rLojaPede.status === 200 && !!pedido.numeroTicket,
       'enquanto pendente, a saída continua como estava': durantePendente.detalhesSaidas[1].valor === 30,

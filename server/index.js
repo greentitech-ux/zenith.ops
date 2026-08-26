@@ -8001,9 +8001,24 @@ app.patch('/api/fechamentos/:id/saidas/:indice', auth.requireMasterOrAdmin, asyn
   try {
     const atual = await fechamentosLive.getOne(req.params.id);
     if (!atual) {
-      // saida que veio da planilha ARCFOOD vive so em memoria (fechamentosData,
-      // ver /api/saidas-painel) - corrigir ali e' na planilha, nao aqui
-      return res.status(404).json({ error: 'Esse lançamento não está no sistema (veio da planilha) - a correção é na própria planilha.' });
+      // Saida que veio da PLANILHA: o fechamento importado vive so em memoria
+      // (fechamentosData), nao ha documento pra editar. Em vez de recusar, a
+      // correcao e' gravada ao lado do item (mesma colecao da verificacao) e
+      // a leitura do painel aplica por cima. A planilha nao e' reescrita - ela
+      // e' a origem do historico (CLAUDE.md §1).
+      const daPlanilha = (fechamentosData || []).find((f) => f.id === req.params.id);
+      if (!daPlanilha) return res.status(404).json({ error: 'Lançamento não encontrado.' });
+      if (!auth.podeVerUnidade(req, daPlanilha.unidade)) {
+        return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+      }
+      const chave = `${req.params.id}::${req.params.indice}`;
+      const corrigido = await saidasPainel.corrigirItemPlanilha(chave, {
+        descricao: req.body.descricao, valor: req.body.valor,
+        porId: req.user.id, porEmail: req.user.email,
+      }, fechamentosData);
+      broadcast('saida-verificada', { chave }, 'lancamento');
+      broadcast('saida-verificada', { chave }, 'sangria');
+      return res.json({ ...corrigido, daPlanilha: true });
     }
     if (!auth.podeVerUnidade(req, atual.unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
@@ -8187,7 +8202,7 @@ app.patch('/api/fechamentos/:id/mover', auth.requireMaster, async (req, res) => 
   }
 });
 
-app.patch('/api/fechamentos/:id/editar-direto', auth.requireMaster, upload.any(), async (req, res) => {
+app.patch('/api/fechamentos/:id/editar-direto', auth.requireMasterOrAdmin, upload.any(), async (req, res) => {
   try {
     const body = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
     const arquivosKpi = await uploadArquivosKpi(req.files, req.params.id);
