@@ -468,12 +468,14 @@ function cardHtml(it){
     <div class="saida-topo">
       <span class="tipo-badge">${origemLabel}</span>
       ${it.reclassificada ? '<span class="tipo-badge" style="background:#181d24;color:var(--muted);" title="Era saída avulsa, movida à mão pra Sangria">movida</span>' : ''}
+      ${it.corrigida ? `<span class="tipo-badge" title="Valor corrigido no NoPulso - a planilha continua com o original">corrigida</span>` : ''}
       ${it.temDivergencia ? `<span class="tipo-badge dif" title="O valor retirado não bateu com o esperado em caixa">${it.divergencia < 0 ? 'falta' : 'sobra'} ${fmtMoney(Math.abs(it.divergencia))}</span>` : ''}
       <span class="tipo-badge" style="background:#181d24;color:var(--muted);">${escapeHtml(it.unidadeNome||it.unidade||'—')}</span>
     </div>
     <div class="saida-desc">${escapeHtml(it.descricao)}</div>
     <div class="saida-valor">${fmtMoney(it.valor)}</div>
     <div class="saida-sub">${fmtData(it.data)} · ${escapeHtml(it.criadoPorEmail||'—')}</div>
+    ${it.corrigida ? `<div class="saida-sub">antes: ${escapeHtml(it.descricaoOriginal||'')} · ${fmtMoney(it.valorOriginal)} · corrigida por ${escapeHtml(it.corrigidaPorEmail||'—')}</div>` : ''}
     ${it.temDivergencia ? `<div class="saida-sub dif-motivo">esperado ${fmtMoney(it.esperado)} · ${escapeHtml(it.motivoDivergencia || 'sem motivo informado')}${(it.extra&&it.extra.diasSemFechamento) ? ` · ${it.extra.diasSemFechamento} dia(s) sem fechamento na hora` : ''}</div>` : ''}
     ${it.verificada ? `<div class="saida-sub" style="color:var(--ok);">verificada por ${escapeHtml(it.verificadaPorEmail||'—')} em ${fmtDataHora(it.verificadaEm)}</div>` : ''}
     ${acao || mover || corrigir ? `<div class="saida-acoes">${acao}${mover}${corrigir}</div>` : ''}

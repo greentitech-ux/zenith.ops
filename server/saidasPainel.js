@@ -52,17 +52,26 @@ function linhasDeFechamento(f, mapaVerif) {
     const chave = `${f.id}::${idx}`;
     const v = mapaVerif[chave];
     const reclassificada = !!(v && v.origemManual === 'sangria');
+    // correcao aplicada por cima do item (ver corrigirItem em
+    // verificacoesSaida.js). E' o caminho da saida que veio da PLANILHA, que
+    // nao tem documento pra editar - a planilha fica intacta e a leitura aqui
+    // passa a mostrar o valor corrigido.
+    const correcao = (v && v.correcao) || null;
     return {
       chave,
       origem: reclassificada ? 'sangria' : 'saida',
       reclassificada,
+      corrigida: !!correcao,
+      corrigidaPorEmail: (v && v.corrigidoPorEmail) || null,
+      valorOriginal: correcao ? item.valor : null,
+      descricaoOriginal: correcao ? (item.descricao || null) : null,
       reclassificadaPorEmail: (v && v.origemManualPorEmail) || null,
       unidade: f.unidade,
       unidadeNome: f.unidadeNome,
       grupo: f.grupo,
       data: f.data,
-      descricao: item.descricao || 'Saída avulsa',
-      valor: item.valor,
+      descricao: (correcao ? correcao.descricao : item.descricao) || 'Saída avulsa',
+      valor: correcao ? correcao.valor : item.valor,
       criadoPorEmail: f.gerente || f.criadoPorEmail,
       criadoEm: f.criadoEm,
       verificada: !!(v && v.verificada),
@@ -211,6 +220,23 @@ async function reclassificar(chave, { origem, porId, porEmail }, extrasFechament
   return { chave, origem: r.origemManual ? 'sangria' : 'saida', reclassificada: !!r.origemManual };
 }
 
+// Corrige uma saida que veio da PLANILHA. Nao ha documento pra editar (o
+// fechamento importado vive so em memoria), entao a correcao fica ao lado do
+// item, na mesma colecao da verificacao, e linhasDeFechamento aplica por
+// cima. A planilha continua intacta.
+async function corrigirItemPlanilha(chave, { descricao, valor, porId, porEmail }, extrasFechamentos = []) {
+  if (typeof chave !== 'string' || !chave.includes('::')) throw new Error('Chave inválida.');
+  const partes = chave.split('::');
+  const idx = Number(partes.pop());
+  const fechamentoId = partes.join('::');
+  const f = (Array.isArray(extrasFechamentos) ? extrasFechamentos : []).find((x) => x.id === fechamentoId);
+  if (!f || !Number.isInteger(idx) || !((f.detalhesSaidas || [])[idx])) {
+    throw new Error('Saída não encontrada nesse lançamento.');
+  }
+  const r = await verificacoesSaida.corrigirItem(chave, { descricao, valor, porId, porEmail });
+  return { chave, unidade: f.unidade, ...r };
+}
+
 // "tem o nome Sangria na descricao" - o caso da planilha antiga da ARCFOOD,
 // onde a sangria virava uma linha de saida com esse texto. Sem acento/caixa,
 // mesma tolerancia do resto do sistema.
@@ -247,4 +273,4 @@ async function marcarVerificada(chave, { verificada, porId, porEmail }, extrasFe
   return { chave, verificada: r.verificada, verificadaPorEmail: r.verificadaPorEmail, verificadaEm: r.verificadaEm };
 }
 
-module.exports = { listar, listarEntradas, calcularSaldoCaixa, filtrar, marcarVerificada, reclassificar, pareceSangria };
+module.exports = { listar, listarEntradas, calcularSaldoCaixa, filtrar, marcarVerificada, reclassificar, corrigirItemPlanilha, pareceSangria };
