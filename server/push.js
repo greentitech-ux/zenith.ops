@@ -887,6 +887,41 @@ async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto, rei
   }
 }
 
+// Diferenca de caixa apurada na hora da sangria (ver sangrias.js). Pedido do
+// Master: quer saber na hora, no celular. Mesmo publico e mesma urgencia dos
+// outros alarmes criticos. Tom do §5: o fato e o numero, nunca "algo deu
+// errado" - e quando ha fechamento pendente isso vai junto, porque e' o que
+// explica a maior parte das sobras.
+async function notifyDivergenciaCaixa(unidadeNome, sangria) {
+  const dif = Number(sangria.divergencia) || 0;
+  const abs = Math.abs(dif).toFixed(2).replace('.', ',');
+  const pendentes = Number(sangria.diasSemFechamento) || 0;
+  const dados = {
+    title: dif < 0 ? '💸 Falta dinheiro no caixa' : '💰 Sobra de dinheiro no caixa',
+    body: `${unidadeNome} · R$ ${abs} ${dif < 0 ? 'a menos' : 'a mais'} na sangria de ${sangria.nomeDepositante || 'quem lançou'}`
+      + (pendentes ? ` · ${pendentes} dia(s) sem fechamento lançado` : '')
+      + (sangria.motivoDivergencia ? ` · motivo: ${sangria.motivoDivergencia}` : ''),
+    tag: `caixa-divergencia-${sangria.id}`,
+    url: '/saidas.html',
+  };
+  await alertasCentral.registrar({ tipo: 'caixa-divergencia', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload, { urgency: 'high' });
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (divergência de caixa):', err.message);
+      }
+    }
+  }
+}
+
 // o tipo do aparelho e' aberto (a tela cria tipo novo - ver
 // listarTiposDispositivo em lojaStatus.js), entao o titulo vem do ROTULO que
 // a pessoa deu ("GCOM sem rede", "VM Host sem rede") em vez de uma lista
@@ -1111,7 +1146,8 @@ module.exports = {
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
-  notifyDispositivoOffline, notifyDispositivoOnline,
+  notifyDispositivoOffline,
+  notifyDivergenciaCaixa, notifyDispositivoOnline,
   notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
   notifyAbastecimentoDivergencia, notifyFechamentoLancado, PUBLIC_KEY,
 };

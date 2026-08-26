@@ -7337,6 +7337,130 @@ setTimeout(async () => {
   console.log(`${okSaidasSaldoUi ? '✓' : '✗'} Painel de Saídas: Entrada em dinheiro + Dinheiro em loja (entrada − saídas − sangria), só pra Master/Admin`);
 
   // ------------------------------------------------------------------
+  // CONFERENCIA DE CAIXA NA SANGRIA. Pedido do Master: "uma lógica eficaz
+  // que leve em consideração o movimento de dinheiro físico; se tiver
+  // divergência na hora da sangria ter um local para informar".
+  //
+  // O fundo de caixa é FIXO (decisão do Master), então ele se cancela na
+  // conta: o que deveria estar sobrando pra retirar é só o dinheiro que
+  // entrou e ainda não saiu. É SALDO CORRIDO, não janela por ciclo - é o que
+  // impede dia contado duas vezes (o "De" da sangria repete o "Até" da
+  // anterior) e impede fechamento lançado com atraso cair num buraco.
+  let okCaixaSangria = false;
+  try {
+    const cabMaster = { Authorization: 'Bearer ' + token };
+    const UNI = 'TESTE_CAIXA';
+
+    // 2 dias de fechamento: entrou 1000, saiu 150 em saída avulsa
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-01',
+      campos: { entradaDinheiro: 600 },
+      detalhesSaidas: [{ descricao: 'Motoboy', valor: 50 }],
+    }, cabMaster);
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-02',
+      campos: { entradaDinheiro: 400 },
+      detalhesSaidas: [{ descricao: 'Gelo', valor: 100 }],
+    }, cabMaster);
+
+    const esperado1 = JSON.parse((await pedir(`/api/sangrias/esperado?unidade=${UNI}&ate=2026-09-02`, cabMaster)).corpo);
+
+    // sangria batendo exatamente: nao pede motivo
+    const certa = await postarJson('/api/sangrias', {
+      unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-02',
+      valor: 850, periodoInicio: '2026-09-01', periodoFim: '2026-09-02',
+      nomeDepositante: 'Gerente Teste', password: process.env.MASTER_PASSWORD,
+    }, cabMaster);
+    const certaData = JSON.parse(certa.corpo);
+
+    // depois dela, o esperado zera - e a prova do saldo corrido
+    const esperado2 = JSON.parse((await pedir(`/api/sangrias/esperado?unidade=${UNI}&ate=2026-09-02`, cabMaster)).corpo);
+
+    // dia novo: entra mais 300, ninguem retirou
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-03',
+      campos: { entradaDinheiro: 300 }, detalhesSaidas: [],
+    }, cabMaster);
+
+    // retirar 200 quando deveriam ser 300 = falta 100 -> SEM motivo, recusa
+    const semMotivo = await postarJson('/api/sangrias', {
+      unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-03',
+      valor: 200, periodoInicio: '2026-09-02', periodoFim: '2026-09-03',
+      nomeDepositante: 'Gerente Teste', password: process.env.MASTER_PASSWORD,
+    }, cabMaster);
+
+    // dentro da tolerancia (R$ 2) nao pede nada
+    const dentroTolerancia = await postarJson('/api/sangrias', {
+      unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-03',
+      valor: 298.5, periodoInicio: '2026-09-02', periodoFim: '2026-09-03',
+      nomeDepositante: 'Gerente Teste', password: process.env.MASTER_PASSWORD,
+    }, cabMaster);
+    const toleradaData = JSON.parse(dentroTolerancia.corpo);
+
+    // agora com motivo, a divergencia salva e fica registrada
+    const comMotivo = await postarJson('/api/sangrias', {
+      unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-04',
+      valor: 100, periodoInicio: '2026-09-03', periodoFim: '2026-09-04',
+      nomeDepositante: 'Gerente Teste', motivoDivergencia: 'erro de troco no turno da tarde',
+      password: process.env.MASTER_PASSWORD,
+    }, cabMaster);
+    const divergenteData = JSON.parse(comMotivo.corpo);
+
+    // o painel marca a sangria divergente
+    const noPainel = JSON.parse((await pedir('/api/saidas-painel?inicio=2026-09-01&fim=2026-09-04', cabMaster)).corpo).itens
+      .find((it) => it.chave === `sangria::${divergenteData.id}`);
+
+    // unidade que nunca teve entrada em dinheiro lancada
+    const semBase = JSON.parse((await pedir('/api/sangrias/esperado?unidade=TESTE_CAIXA_VAZIO&ate=2026-09-04', cabMaster)).corpo);
+    const sangriaSemBase = await postarJson('/api/sangrias', {
+      unidade: 'TESTE_CAIXA_VAZIO', unidadeNome: 'Loja Sem Base', grupo: 'ARCFOOD', data: '2026-09-04',
+      valor: 500, periodoInicio: '2026-09-03', periodoFim: '2026-09-04',
+      nomeDepositante: 'Gerente Teste', password: process.env.MASTER_PASSWORD,
+    }, cabMaster);
+
+    const srcPushCaixa = require('fs').readFileSync(__dirname + '/push.js', 'utf8');
+    const iCaixa = srcPushCaixa.indexOf('async function notifyDivergenciaCaixa');
+    const srcIdxCaixa = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+
+    const conf = {
+      'esperado = entradas − saídas − sangrias (1000 − 150 − 0 = 850)': esperado1.esperado === 850,
+      'a conta vem quebrada, pra dar pra conferir de onde saiu':
+        esperado1.entradas === 1000 && esperado1.saidas === 150 && esperado1.sangrias === 0,
+      'sangria que bate salva sem motivo e guarda divergência 0':
+        certa.status === 200 && certaData.divergencia === 0 && certaData.motivoDivergencia === null,
+      'saldo corrido: depois de retirar tudo, o esperado zera': esperado2.esperado === 0,
+      'diferença acima da tolerância SEM motivo é recusada':
+        semMotivo.status === 400 && /motivo da diverg/i.test(semMotivo.corpo),
+      'diferença dentro da tolerância (R$ 1,50) passa sem motivo':
+        dentroTolerancia.status === 200 && toleradaData.divergencia === -1.5,
+      'com motivo, salva e guarda esperado + diferença + motivo':
+        comMotivo.status === 200 && divergenteData.esperado === 1.5
+        && divergenteData.divergencia === 98.5
+        && divergenteData.motivoDivergencia === 'erro de troco no turno da tarde',
+      'o Painel de Saídas marca a sangria divergente com o valor e o motivo':
+        !!noPainel && noPainel.temDivergencia === true && noPainel.divergencia === 98.5
+        && noPainel.motivoDivergencia === 'erro de troco no turno da tarde',
+      'o esperado é calculado no SERVIDOR, nunca aceito do corpo da requisição':
+        /const caixa = await saidasPainel\.calcularSaldoCaixa\(\{ unidade, ate: periodoFim \|\| data \}/.test(srcIdxCaixa)
+        && !/esperado: req\.body/.test(srcIdxCaixa),
+      // sem entrada em dinheiro lancada, nao ha com o que comparar: falta de
+      // dado nao pode virar divergencia e travar a sangria da loja
+      'unidade sem entrada em dinheiro nenhuma: conferência fica indisponível, não vira divergência':
+        semBase.temBase === false && semBase.esperado === null
+        && sangriaSemBase.status === 200 && JSON.parse(sangriaSemBase.corpo).divergencia === null,
+      'divergência dispara push crítico pro Master':
+        /if \(sangrias\.temDivergencia\(registro\)\)/.test(srcIdxCaixa)
+        && /push\.notifyDivergenciaCaixa\(/.test(srcIdxCaixa)
+        && /podeReceberCritico\(sub\)/.test(srcPushCaixa.slice(iCaixa, iCaixa + 1200)),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okCaixaSangria = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okCaixaSangria = false; console.log('  erro: ' + e.message); }
+  if (!okCaixaSangria) ruins += 1;
+  console.log(`${okCaixaSangria ? '✓' : '✗'} Sangria: confere o caixa (entrada − saídas − sangrias), exige motivo na divergência e alarma o Master`);
+
+  // ------------------------------------------------------------------
   // Pedido real do Master: "lancei uma sangria dia 20, teve entrada de
   // dinheiro naquele dia, então a próxima sangria já inicia com o De em
   // dia 20, só preenchendo o Até" - o "De" do período nasce igual ao "Até"

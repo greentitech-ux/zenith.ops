@@ -30,13 +30,37 @@ function validarNomeDepositante(nomeDepositante) {
   return nome.slice(0, 120);
 }
 
-async function criar({ unidade, unidadeNome, grupo, data, valor, descricao, periodoInicio, periodoFim, nomeDepositante, criadoPorId, criadoPorEmail }) {
+// Diferenca que a operacao ignora - centavo de arredondamento nao e' furo de
+// caixa. Acima disso o motivo passa a ser OBRIGATORIO.
+const TOLERANCIA_DIVERGENCIA = Number(process.env.SANGRIA_TOLERANCIA_DIVERGENCIA) >= 0
+  ? Number(process.env.SANGRIA_TOLERANCIA_DIVERGENCIA)
+  : 2;
+
+// esperado vem de fora (saidasPainel.calcularSaldoCaixa, chamado pela rota):
+// este modulo nao pode requerer o saidasPainel, que ja requer este aqui.
+// A REGRA mora aqui, junto das outras validacoes da sangria; so o numero e'
+// que vem do chamador.
+//
+// divergencia > 0 = retirou MAIS do que o sistema conhece (tipico quando o
+// fechamento do dia ainda nao foi lancado); < 0 = faltou dinheiro.
+function avaliarDivergencia({ valor, esperado, motivoDivergencia }) {
+  if (esperado == null || !Number.isFinite(Number(esperado))) return null;
+  const dif = Number((num(valor) - Number(esperado)).toFixed(2));
+  const motivo = String(motivoDivergencia || '').trim().slice(0, 300);
+  if (Math.abs(dif) > TOLERANCIA_DIVERGENCIA && !motivo) {
+    throw new Error(`Diferença de ${dif < 0 ? 'falta' : 'sobra'} de R$ ${Math.abs(dif).toFixed(2).replace('.', ',')} no caixa. Informe o motivo da divergência para salvar.`);
+  }
+  return { esperado: Number(Number(esperado).toFixed(2)), divergencia: dif, motivoDivergencia: motivo || null };
+}
+
+async function criar({ unidade, unidadeNome, grupo, data, valor, descricao, periodoInicio, periodoFim, nomeDepositante, esperado, motivoDivergencia, diasSemFechamento, criadoPorId, criadoPorEmail }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) throw new Error('Data inválida.');
   const v = num(valor);
   if (v <= 0) throw new Error('Informe o valor retirado.');
   const periodo = validarPeriodo(periodoInicio, periodoFim);
   const nome = validarNomeDepositante(nomeDepositante);
+  const caixa = avaliarDivergencia({ valor: v, esperado, motivoDivergencia });
 
   const ref = COLLECTION.doc();
   const registro = {
@@ -50,6 +74,14 @@ async function criar({ unidade, unidadeNome, grupo, data, valor, descricao, peri
     periodoInicio: periodo.periodoInicio,
     periodoFim: periodo.periodoFim,
     nomeDepositante: nome,
+    // fotografia do caixa NO MOMENTO da sangria: fechamento corrigido depois
+    // nao pode reescrever a diferenca que a pessoa viu e justificou na hora
+    esperado: caixa ? caixa.esperado : null,
+    divergencia: caixa ? caixa.divergencia : null,
+    motivoDivergencia: caixa ? caixa.motivoDivergencia : null,
+    // quantos dias sem fechamento lancado havia na hora - e' o que explica a
+    // maior parte das "sobras", e sem isso a diferenca fica sem contexto
+    diasSemFechamento: Number(diasSemFechamento) || 0,
     criadoPorId,
     criadoPorEmail,
     criadoEm: new Date().toISOString(),
@@ -74,6 +106,12 @@ async function listByUnidades(unidades) {
   if (!unidades || !unidades.length) return [];
   const alvo = new Set(unidades);
   return (await listAll()).filter((r) => alvo.has(r.unidade));
+}
+
+// diferenca que passou da tolerancia - o que o Painel de Saidas marca e o
+// que dispara o alerta pro Master
+function temDivergencia(s) {
+  return s && s.divergencia != null && Math.abs(Number(s.divergencia)) > TOLERANCIA_DIVERGENCIA;
 }
 
 // formata a sangria como um "fechamento" mínimo (mesmo formato usado no
@@ -162,4 +200,4 @@ async function marcarVerificada(id, { verificada, porId, porEmail }) {
   return getOne(id);
 }
 
-module.exports = { criar, listAll, listByUnidades, comoFechamento, getOne, atualizar, remover, marcarVerificada };
+module.exports = { criar, listAll, listByUnidades, comoFechamento, getOne, atualizar, remover, marcarVerificada, temDivergencia, TOLERANCIA_DIVERGENCIA };
