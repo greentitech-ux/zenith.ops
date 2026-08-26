@@ -73,6 +73,7 @@ const vendasRecordes = require('./vendasRecordes');
 const inventario = require('./inventario');
 const inventarioNotaOcr = require('./inventarioNotaOcr');
 const canaisVendaOcr = require('./canaisVendaOcr');
+const ocrUso = require('./ocrUso');
 const documentoIdentidadeOcr = require('./documentoIdentidadeOcr');
 const rhCamposConfig = require('./rhCamposConfig');
 const parque = require('./parque');
@@ -1394,7 +1395,7 @@ async function responderLeituraDocumento(req, res) {
     // sem checagem de ativo() aqui: PDF digital é lido localmente dentro de
     // lerDocumento mesmo sem API key - só foto/escaneado exige o modelo
     const camposLidos = await rhCamposConfig.camposLidosDoDocumento();
-    const leitura = await documentoIdentidadeOcr.lerDocumento({ arquivos, camposLidos });
+    const leitura = await documentoIdentidadeOcr.lerDocumento({ arquivos, camposLidos, usuarioId: req.user?.id, usuarioEmail: req.user?.email });
     // guarda a leitura E os arquivos pro envio não precisar subir tudo de novo
     const docToken = guardarLeitura({ leitura, camposLidos, arquivos: req.files || [] });
     res.json({ ...leitura, docToken });
@@ -1477,7 +1478,7 @@ function exigeDocumentoIdentidade(tipoCadastro, arquivosDoc, guardado = null) {
   return 'Anexe a foto do documento de identidade (RG, CNH ou CPF) - os dados são preenchidos por ele.';
 }
 
-async function lerEGuardarDocumentoIdentidade(arquivosReq, unidade, digitados = {}, guardado = null) {
+async function lerEGuardarDocumentoIdentidade(arquivosReq, unidade, digitados = {}, guardado = null, quem = {}) {
   // Quando a tela ja passou pelo "Ler meu documento", a foto e a resposta do
   // modelo estao guardadas AQUI (ver LEITURAS_GUARDADAS) e o envio so manda o
   // token. Reaproveitar corta pela metade o que sobe do celular e paga uma
@@ -1489,7 +1490,7 @@ async function lerEGuardarDocumentoIdentidade(arquivosReq, unidade, digitados = 
   const deReuso = !(arquivosReq || []).length;
   const arquivos = arquivosBase.map((f) => ({ buffer: f.buffer, mimeType: f.mimetype }));
   const camposLidos = deReuso ? guardado.camposLidos : await rhCamposConfig.camposLidosDoDocumento();
-  const leitura = deReuso ? guardado.leitura : await documentoIdentidadeOcr.lerDocumento({ arquivos, camposLidos });
+  const leitura = deReuso ? guardado.leitura : await documentoIdentidadeOcr.lerDocumento({ arquivos, camposLidos, unidade, usuarioId: quem.usuarioId, usuarioEmail: quem.usuarioEmail });
   // so cobra o nome da leitura se o nome for um campo lido: com ele marcado
   // como manual, quem cadastra e que digita, e exigir da leitura travaria o
   // cadastro por um dado que nem foi pedido ao modelo
@@ -1544,7 +1545,7 @@ app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCoun
     }
     // nome/nascimento/CPF vem da leitura do documento feita AQUI, nao do
     // que a tela mandou (ver lerEGuardarDocumentoIdentidade)
-    const doc = await lerEGuardarDocumentoIdentidade(req.files?.documento, unidade, req.body, guardado);
+    const doc = await lerEGuardarDocumentoIdentidade(req.files?.documento, unidade, req.body, guardado, { usuarioEmail: 'link-publico' });
     const registro = await rh.criar({
       unidade, contato, cargoFuncao, tipoCadastro,
       chavePix: req.body.chavePix, banco: req.body.banco,
@@ -5034,6 +5035,15 @@ async function uploadArquivosKpi(files, ownerId) {
 // (lerCanaisPorImagem, marcado pelo Master em /grupos.html). O formato do
 // relatorio muda de PDV pra PDV: liberar pra todo mundo de uma vez seria
 // entregar leitura ruim pra lojas que nem foram testadas.
+// Quanto a leitura por imagem custou HOJE, por quem e por unidade. Sem isso
+// a unica resposta pra "o consumo esta alto" era o painel da Anthropic, que
+// mostra o total e nao diz de qual loja veio nem quantas vezes a mesma
+// pessoa refez a mesma foto. Mora so em memoria (ver ocrUso.js): reinicio
+// do Render zera, e isso esta certo - o log estruturado e' o historico.
+app.get('/api/ocr/uso', auth.requireMaster, (req, res) => {
+  res.json(ocrUso.resumoDoDia(req.query.dia));
+});
+
 app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRelatorioPdv.array('imagem', 5), async (req, res) => {
   try {
     const unidade = req.body.unidade;
@@ -5048,6 +5058,15 @@ app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRela
     if (!grupo || grupo.lerCanaisPorImagem !== true) {
       return res.status(400).json({ error: 'Essa loja não usa leitura de Canais por imagem. O Master ativa em Grupos.' });
     }
+    // Teto por pessoa/dia. Cada clique aqui custa 2 chamadas de modelo (3 com
+    // desempate) carregando ate 5 fotos - repetir a MESMA foto ruim nunca
+    // muda o resultado, so gasta. O Master fica de fora: e' ele quem testa
+    // formato novo de relatorio, e travar isso trava a configuracao da loja.
+    if (!req.isMaster) {
+      const bloqueio = ocrUso.motivoDeBloqueio(req.user.id);
+      if (bloqueio) return res.status(429).json({ error: bloqueio });
+    }
+    ocrUso.registrarLeitura({ usuarioId: req.user.id, unidade });
     // le as duas secoes na mesma passada: o relatorio do PDV mostra os canais
     // e as formas de pagamento no mesmo print, e mandar a imagem duas vezes
     // custaria o dobro pra ler exatamente a mesma coisa
@@ -5071,6 +5090,7 @@ app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRela
       formas: paraLeitura(grupo.formasPagamentoExtras),
       kpis: paraLeitura(kpisOcrElegiveis),
       dica: grupo.dicaLeituraCanais,
+      unidade, usuarioId: req.user.id, usuarioEmail: req.user.email,
     });
     res.json(rascunho);
   } catch (err) {
@@ -5702,7 +5722,7 @@ app.post('/api/inventario/recebimentos/ler-nota', requireSection('inventario'), 
     const catalogo = (await inventario.listCatalogo(unidade))
       .filter((i) => i.ativo !== false)
       .map((i) => ({ id: i.id, nome: i.nome, unidadeMedida: i.unidadeMedida }));
-    const rascunho = await inventarioNotaOcr.lerNota({ buffer: req.file.buffer, mimeType: req.file.mimetype, catalogo });
+    const rascunho = await inventarioNotaOcr.lerNota({ buffer: req.file.buffer, mimeType: req.file.mimetype, catalogo, unidade: req.body.unidade, usuarioId: req.user.id, usuarioEmail: req.user.email });
     rascunho.notaArquivo = notaArquivo;
     res.json(rascunho);
   } catch (err) {
@@ -6806,7 +6826,7 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'c
     // Extra e Candidato so entram com documento, e os dados vem da leitura
     // dele. Efetivado (contratacao formal pelo RH) segue digitado - la o
     // pacote de documentos e outro e mais completo (DOCUMENTOS_OBRIGATORIOS)
-    const doc = await lerEGuardarDocumentoIdentidade(req.files?.documento, unidade || 'geral', req.body);
+    const doc = await lerEGuardarDocumentoIdentidade(req.files?.documento, unidade || 'geral', req.body, null, { usuarioId: req.user?.id, usuarioEmail: req.user?.email });
     const registro = await rh.criar({
       unidade, contato, cargoFuncao, dataAdmissao, tipoCadastro, semExperiencia,
       chavePix: req.body.chavePix, banco: req.body.banco,

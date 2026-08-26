@@ -71,12 +71,14 @@ Regras:
 - Se a imagem não for uma nota fiscal/comprovante de recebimento, devolva {"erro": "descrição curta do que você viu"} em vez do formato acima.`;
 }
 
+const ocrUso = require('./ocrUso');
+
 function extrairJson(texto) {
   const limpo = String(texto || '').trim().replace(/^```(json)?/i, '').replace(/```\s*$/i, '').trim();
   return JSON.parse(limpo);
 }
 
-async function lerNota({ buffer, mimeType, catalogo }) {
+async function lerNota({ buffer, mimeType, catalogo, unidade, usuarioId, usuarioEmail }) {
   if (!ativo()) throw new Error('Leitura automática de nota não está configurada neste servidor.');
   const ehPdf = mimeType === 'application/pdf';
   const bloco = ehPdf
@@ -87,6 +89,12 @@ async function lerNota({ buffer, mimeType, catalogo }) {
     max_tokens: 8000,
     messages: [{ role: 'user', content: [bloco, { type: 'text', text: montarPrompt(catalogo) }] }],
   });
+  try {
+    ocrUso.registrarChamada({
+      fluxo: 'nota-estoque', modelo: MODELO, usage: resp.usage,
+      unidade, usuarioId, usuarioEmail, fotos: 1, bytes: buffer ? buffer.length : 0,
+    });
+  } catch (e) { console.error('ocrUso: falha ao registrar (leitura segue). %s', e.message); }
   const texto = (resp.content || []).map((b) => b.text || '').join('');
   let dados;
   try {

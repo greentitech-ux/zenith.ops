@@ -8185,6 +8185,97 @@ setTimeout(async () => {
   if (!okAlarmeAguardando) ruins += 1;
   console.log(`${okAlarmeAguardando ? '✓' : '✗'} Chat: alarme insiste por QUEM ESTÁ ESPERANDO (não só quando o Beniboy escala) e só para quando alguém assume`);
 
+  // ------------------------------------------------------------------
+  // CUSTO DA LEITURA POR IMAGEM. Pedido do Master: "o consumo está alto,
+  // verifique se existe possibilidade de economizar SEM PERDER A QUALIDADE
+  // na leitura... as pessoas ainda não sabem realizar leitura, então vamos
+  // limitar". Os 3 leitores de imagem não registravam nada - dava pra ver o
+  // total no painel da Anthropic, mas não QUEM gastou nem quantas vezes a
+  // mesma pessoa refez a mesma foto. Sem medida não dá pra decidir o que
+  // cortar, e cortar no escuro é exatamente o que arriscaria a qualidade.
+  let okOcrUso = false;
+  try {
+    const ocrUso = require('./ocrUso');
+    const srcOcr = require('fs').readFileSync(require('path').join(__dirname, 'canaisVendaOcr.js'), 'utf8');
+    const srcIdx = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
+
+    // custo de UMA chamada, conferido na mão contra a tabela pública:
+    // Sonnet 5 = US$2/MTok entrada, US$10/MTok saída.
+    // 20.000 entrada -> 0,04 ; 3.000 saída -> 0,03 ; total 0,07
+    const c = ocrUso.custoDaChamada('claude-sonnet-5', { input_tokens: 20000, output_tokens: 3000 });
+    // cache: leitura custa 0,1x a entrada, escrita 1,25x
+    const cCache = ocrUso.custoDaChamada('claude-sonnet-5', {
+      input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 10000, cache_creation_input_tokens: 10000,
+    });
+    // modelo fora da tabela NÃO pode virar custo inventado - alguém decidiria
+    // em cima de um número que ninguém calculou
+    const cDesconhecido = ocrUso.custoDaChamada('modelo-que-nao-existe', { input_tokens: 1000, output_tokens: 100 });
+
+    // o desempate roda no modelo forte: a MESMA chamada custa 2,5x
+    const cDesempate = ocrUso.custoDaChamada('claude-opus-5', { input_tokens: 20000, output_tokens: 3000 });
+
+    // contagem por usuário e o limite
+    const antes = ocrUso.leiturasDoUsuarioHoje('u-ocr-teste');
+    for (let i = 0; i < ocrUso.LIMITE_DIA_USUARIO; i += 1) {
+      ocrUso.registrarLeitura({ usuarioId: 'u-ocr-teste', unidade: 'UNI_OCR' });
+    }
+    const bloqueado = ocrUso.motivoDeBloqueio('u-ocr-teste');
+    const outroLivre = ocrUso.motivoDeBloqueio('u-ocr-outro');
+
+    ocrUso.registrarChamada({
+      fluxo: 'fechamento', modelo: 'claude-sonnet-5',
+      usage: { input_tokens: 20000, output_tokens: 3000 },
+      unidade: 'UNI_OCR', usuarioId: 'u-ocr-teste', usuarioEmail: 'ocr@teste.local', fotos: 5, bytes: 5 * 1024 * 1024,
+    });
+    const resumo = ocrUso.resumoDoDia();
+
+    const conf = {
+      'o custo sai da tabela de preço real (Sonnet 5: 20k entrada + 3k saída = US$ 0,07)':
+        Math.abs(c.custoUsd - 0.07) < 1e-9,
+      'cache entra com o fator certo (leitura 0,1x, escrita 1,25x)':
+        Math.abs(cCache.custoUsd - ((10000 * 2 * 0.1 + 10000 * 2 * 1.25) / 1e6)) < 1e-9,
+      'modelo fora da tabela devolve custo null (não inventa preço) mas ainda conta os tokens':
+        cDesconhecido.custoUsd === null && cDesconhecido.entrada === 1000,
+      // é o que justifica o desempate rodar SÓ na divergência: a terceira
+      // chamada sozinha custa mais que as duas leituras normais juntas
+      'a chamada de desempate (Opus 5) custa 2,5x a leitura normal':
+        Math.abs(cDesempate.custoUsd - c.custoUsd * 2.5) < 1e-9,
+      'tokens de cache contam como entrada no total (não somem da medição)':
+        cCache.entrada === 20000,
+      'conta leitura por usuário e bloqueia ao bater o limite':
+        antes === 0 && !!bloqueado && /limite/i.test(bloqueado),
+      'a mensagem do bloqueio diz o que fazer agora (digitar à mão), não só "limite atingido"':
+        /à mão|a mão/i.test(bloqueado),
+      'o limite é por PESSOA - outro usuário continua liberado': outroLivre === null,
+      'o resumo do dia soma tokens, custo e separa por unidade/usuário/fluxo':
+        resumo.tokensEntrada >= 20000 && resumo.custoUsd > 0
+        && !!resumo.porUnidade.UNI_OCR && !!resumo.porUsuario['u-ocr-teste'] && !!resumo.porFluxo.fechamento,
+      'o resumo converte pra R$ (quem decide lê em real, a API cobra em dólar)':
+        resumo.custoBrl > resumo.custoUsd && resumo.cotacao > 0,
+      // as 2 leituras + o desempate têm que ser medidos SEPARADAMENTE: medir
+      // só o clique esconderia que a 3a chamada é a cara
+      'a leitura do fechamento registra CADA chamada, marcando o desempate à parte':
+        /ocrUso\.registrarChamada\(/.test(srcOcr)
+        && /fluxo: modelo === MODELO_DESEMPATE \? 'fechamento-desempate' : 'fechamento'/.test(srcOcr),
+      'falha na medição não derruba a leitura (o gerente não perde o fechamento por causa do log)':
+        /catch \(e\) \{ console\.error\('ocrUso: falha ao registrar \(leitura segue\)/.test(srcOcr),
+      'a rota do fechamento aplica o limite e isenta o Master (é quem testa relatório novo)':
+        /if \(!req\.isMaster\) \{\s*\n\s*const bloqueio = ocrUso\.motivoDeBloqueio\(req\.user\.id\);/.test(srcIdx)
+        // a CONDIÇÃO tem que estar viva: só conferir que a linha do 429 existe
+        // deixaria passar um `if (false)` com o teto desligado na prática
+        && /\n\s*if \(bloqueio\) return res\.status\(429\)\.json\(\{ error: bloqueio \}\);/.test(srcIdx),
+      'os 3 leitores de imagem estão medidos (fechamento, nota do Estoque, documento do RH)':
+        ['canaisVendaOcr.js', 'inventarioNotaOcr.js', 'documentoIdentidadeOcr.js']
+          .every((f) => /ocrUso\.registrarChamada\(/.test(require('fs').readFileSync(require('path').join(__dirname, f), 'utf8'))),
+      'o resumo do gasto é só do Master': /app\.get\('\/api\/ocr\/uso', auth\.requireMaster/.test(srcIdx),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okOcrUso = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okOcrUso = false; console.log('  erro: ' + e.message); }
+  if (!okOcrUso) ruins += 1;
+  console.log(`${okOcrUso ? '✓' : '✗'} Leitura por imagem: custo medido por chamada/unidade/pessoa e teto diário por usuário (Master isento)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
