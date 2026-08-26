@@ -6514,8 +6514,15 @@ setTimeout(async () => {
     const cabMaster = { Authorization: 'Bearer ' + token };
 
     const fech = await postarJson('/api/fechamentos/lancar', {
-      unidade: 'TESTE_SAIDA_ARC', unidadeNome: 'Loja Teste ARC', grupo: 'ARCFOOD', data: '2026-08-20', campos: {},
-      detalhesSaidas: [{ descricao: 'Motoboy extra (painel saidas)', valor: 37.5 }, { descricao: 'Compra de gelo (painel saidas)', valor: 12 }],
+      unidade: 'TESTE_SAIDA_ARC', unidadeNome: 'Loja Teste ARC', grupo: 'ARCFOOD', data: '2026-08-20',
+      campos: { entradaDinheiro: 500 },
+      detalhesSaidas: [
+        { descricao: 'Motoboy extra (painel saidas)', valor: 37.5 },
+        { descricao: 'Compra de gelo (painel saidas)', valor: 12 },
+        // era assim que a planilha antiga da ARCFOOD lancava sangria: uma
+        // "outra saida" com o texto na descricao (com acento, inclusive)
+        { descricao: 'Sangriá do turno da noite', valor: 80 },
+      ],
     }, cabMaster);
     const fechData = JSON.parse(fech.corpo);
 
@@ -6549,6 +6556,18 @@ setTimeout(async () => {
     const tkAdmin = (await auth.login('saidas-admin@teste.local', 'SenhaDeTeste!2026')).token;
     const cabAdmin = { Authorization: 'Bearer ' + tkAdmin };
 
+    // Admin COM a unidade ARC: o Admin acima tem unidades:[] de proposito
+    // (prova que Admin verifica sem ter unidade), mas por isso mesmo nao
+    // enxerga linha nenhuma - nao serve pra provar o gate de Entrada/Saldo
+    DOCS.set('users/u-saidas-admin-arc', {
+      passwordHash: senhaHash, role: 'user', isAdmin: true, active: true,
+      email: 'saidas-admin-arc@teste.local', username: 'saidasadminarc',
+      permissions: { sections: ['lancamento', 'sangria'], unidades: ['TESTE_SAIDA_ARC'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const tkAdminArc = (await auth.login('saidas-admin-arc@teste.local', 'SenhaDeTeste!2026')).token;
+    const cabAdminArc = { Authorization: 'Bearer ' + tkAdminArc };
+
     // BRAVO: so a unidade da sangria - prova o isolamento (nao ve a saida
     // avulsa da unidade ARCFOOD)
     DOCS.set('users/u-saidas-bravo', {
@@ -6561,13 +6580,26 @@ setTimeout(async () => {
     const cabBravo = { Authorization: 'Bearer ' + tkBravo };
 
     const params = 'inicio=2026-08-20&fim=2026-08-20';
-    const listaMaster = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabMaster)).corpo);
+    // a rota devolve {itens, entradas} - "entradas" so vem preenchido pra
+    // Master/Admin (base do Saldo, ver /api/saidas-painel)
+    const respMaster = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabMaster)).corpo);
+    const listaMaster = respMaster.itens;
     const itemSaida = listaMaster.find((it) => it.descricao === 'Motoboy extra (painel saidas)');
     const itemSangria = listaMaster.find((it) => it.chave === `sangria::${sangriaData.id}`);
 
-    const listaBravo = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabBravo)).corpo);
-    const listaGrupoArcfood = JSON.parse((await pedir(`/api/saidas-painel?${params}&grupo=ARCFOOD`, cabMaster)).corpo);
-    const listaGrupoBravo = JSON.parse((await pedir(`/api/saidas-painel?${params}&grupo=BRAVO`, cabMaster)).corpo);
+    const respBravo = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabBravo)).corpo);
+    const listaBravo = respBravo.itens;
+    const respAdminArc = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabAdminArc)).corpo);
+    // a loja TEM a unidade ARC (e ve as saidas dela) - se nao vier entrada
+    // nenhuma, foi o gate de papel que barrou, nao o filtro de unidade
+    const respLoja = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabLoja)).corpo);
+    const listaGrupoArcfood = JSON.parse((await pedir(`/api/saidas-painel?${params}&grupo=ARCFOOD`, cabMaster)).corpo).itens;
+    const listaGrupoBravo = JSON.parse((await pedir(`/api/saidas-painel?${params}&grupo=BRAVO`, cabMaster)).corpo).itens;
+
+    // a conta do Saldo: entrada - saidas avulsas - sangria
+    const somar = (arr) => arr.reduce((t, x) => t + (x.valor || 0), 0);
+    const entradaArc = somar(respMaster.entradas.filter((e) => e.unidade === 'TESTE_SAIDA_ARC' && e.data === '2026-08-20'));
+    const saidasArc = somar(listaMaster.filter((it) => it.origem === 'saida' && it.unidade === 'TESTE_SAIDA_ARC'));
 
     const rVerificarLoja = await enviarJson('PATCH', '/api/saidas-painel/verificar', { chave: itemSaida.chave, verificada: true }, cabLoja);
     const rChaveFalsa = await enviarJson('PATCH', '/api/saidas-painel/verificar', { chave: `${fechData.id}::99`, verificada: true }, cabAdmin);
@@ -6577,8 +6609,36 @@ setTimeout(async () => {
     const rDesfazerSangria = await enviarJson('PATCH', '/api/saidas-painel/verificar', { chave: itemSangria.chave, verificada: false }, cabMaster);
     const desfeita = JSON.parse(rDesfazerSangria.corpo);
 
-    const listaDepois = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabMaster)).corpo);
+    const listaDepois = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabMaster)).corpo).itens;
     const itemSaidaDepois = listaDepois.find((it) => it.chave === itemSaida.chave);
+
+    // ---- mover saida avulsa -> Sangria/Deposito (pedido do Master) ----
+    const itemFalsaSangria = listaMaster.find((it) => it.descricao === 'Sangriá do turno da noite');
+    const nasceComoSaida = itemFalsaSangria.origem === 'saida' && !itemFalsaSangria.reclassificada;
+    // Admin nao move: o Master pediu "so o master ter acesso"
+    const rMoverAdmin = await enviarJson('PATCH', '/api/saidas-painel/reclassificar', { chave: itemFalsaSangria.chave, origem: 'sangria' }, cabAdminArc);
+    // sangria de verdade (colecao propria) nao tem pra onde ir
+    const rMoverSangriaReal = await enviarJson('PATCH', '/api/saidas-painel/reclassificar', { chave: itemSangria.chave, origem: 'sangria' }, cabMaster);
+    const rMover = await enviarJson('PATCH', '/api/saidas-painel/reclassificar', { chave: itemFalsaSangria.chave, origem: 'sangria' }, cabMaster);
+    const aposMover = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabMaster)).corpo).itens
+      .find((it) => it.chave === itemFalsaSangria.chave);
+    // mover nao pode apagar a verificacao ja feita (e vice-versa): os dois
+    // estados moram no MESMO documento
+    const rVerificarMovida = await enviarJson('PATCH', '/api/saidas-painel/verificar', { chave: itemFalsaSangria.chave, verificada: true }, cabMaster);
+    const aposVerificar = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabMaster)).corpo).itens
+      .find((it) => it.chave === itemFalsaSangria.chave);
+    // desfazer volta pra saida avulsa sem perder a verificacao
+    await enviarJson('PATCH', '/api/saidas-painel/reclassificar', { chave: itemFalsaSangria.chave, origem: null }, cabMaster);
+    const aposDesfazer = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabMaster)).corpo).itens
+      .find((it) => it.chave === itemFalsaSangria.chave);
+
+    // em lote: "as que tem Sangria na descricao", dentro do filtro da tela
+    const rLoteAdmin = await enviarJson('POST', '/api/saidas-painel/reclassificar-sangrias', { inicio: '2026-08-20', fim: '2026-08-20' }, cabAdminArc);
+    const rLote = await enviarJson('POST', '/api/saidas-painel/reclassificar-sangrias', { inicio: '2026-08-20', fim: '2026-08-20' }, cabMaster);
+    const loteData = JSON.parse(rLote.corpo);
+    const aposLote = JSON.parse((await pedir(`/api/saidas-painel?${params}`, cabMaster)).corpo).itens;
+    const movidaNoLote = aposLote.find((it) => it.chave === itemFalsaSangria.chave);
+    const naoMexeuNoResto = aposLote.find((it) => it.chave === itemSaida.chave);
 
     const conf = {
       'as duas fontes aparecem juntas pro Master (sangria + saída avulsa)': !!itemSaida && !!itemSangria,
@@ -6594,6 +6654,29 @@ setTimeout(async () => {
       'verificar guarda quem verificou': verificadaAdmin.verificadaPorEmail === 'saidas-admin@teste.local' && !!verificadaAdmin.verificadaEm,
       'dá pra desfazer a verificação (não é só ida sem volta)': rVerificarSangria.status === 200 && rDesfazerSangria.status === 200 && desfeita.verificada === false,
       'o item verificado pelo Admin continua marcado numa leitura nova': !!itemSaidaDepois && itemSaidaDepois.verificada === true,
+      'Master recebe a entrada em dinheiro do fechamento (base do Saldo)': entradaArc === 500,
+      'Admin também recebe as entradas (das unidades dele)':
+        respAdminArc.entradas.some((e) => e.unidade === 'TESTE_SAIDA_ARC' && e.valor === 500),
+      // o gate e' no SERVIDOR: esconder o card no HTML deixaria o numero
+      // viajar pro navegador da loja do mesmo jeito
+      'loja (nem Master nem Admin) não recebe entrada nenhuma, mesmo tendo a unidade e vendo as saídas dela':
+        respLoja.itens.some((it) => it.unidade === 'TESTE_SAIDA_ARC')
+        && Array.isArray(respLoja.entradas) && respLoja.entradas.length === 0,
+      'a conta fecha: entrada 500 − saídas 129,50 = 370,50 na unidade ARC':
+        Math.round(saidasArc * 100) === 12950 && Math.round((entradaArc - saidasArc) * 100) === 37050,
+      'saída com "Sangria" na descrição nasce como saída avulsa (nada muda sozinho)': nasceComoSaida,
+      'só o Master move - Admin é recusado nas duas rotas': rMoverAdmin.status === 403 && rLoteAdmin.status === 403,
+      'Sangria/Depósito de verdade (coleção própria) não tem pra onde ir': rMoverSangriaReal.status === 400,
+      'mover leva o item pra coluna Sangria e marca que foi movido à mão':
+        rMover.status === 200 && !!aposMover && aposMover.origem === 'sangria' && aposMover.reclassificada === true,
+      'verificar depois de mover não desfaz a mudança (os dois estados no mesmo doc)':
+        rVerificarMovida.status === 200 && aposVerificar.origem === 'sangria' && aposVerificar.verificada === true,
+      'desfazer volta pra saída avulsa SEM perder a verificação':
+        !!aposDesfazer && aposDesfazer.origem === 'saida' && aposDesfazer.reclassificada === false && aposDesfazer.verificada === true,
+      'em lote move só as que têm "Sangria" na descrição (acento não atrapalha)':
+        rLote.status === 200 && loteData.movidas === 1
+        && !!movidaNoLote && movidaNoLote.origem === 'sangria'
+        && !!naoMexeuNoResto && naoMexeuNoResto.origem === 'saida',
     };
     const ruinsSP = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okSaidasPainel = !ruinsSP.length;
@@ -7217,6 +7300,43 @@ setTimeout(async () => {
   console.log(`${okSaidasConferencia3col ? '✓' : '✗'} Painel de Saídas: Conferência em 3 colunas por tipo (Sangria/Depósito · Saída avulsa), Verificadas continua junta`);
 
   // ------------------------------------------------------------------
+  // Painel de Saídas, tela: os indicadores novos (Entrada em dinheiro e
+  // Dinheiro em loja) e o gate deles. Pedido do Master: "entrada menos
+  // saídas avulsas menos sangria = quanto de dinheiro tem em loja", e
+  // "Saldo e a coluna de Verificadas só aparece para Master e Admin".
+  let okSaidasSaldoUi = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'saidas.html'), 'utf8');
+    const conf = {
+      'os dois cards novos existem': /id="kpi-entrada"/.test(html) && /id="kpi-saldo"/.test(html),
+      'a fórmula fica escrita no card (ninguém precisa adivinhar de onde vem)':
+        /entrada − saídas − sangria/.test(html),
+      'a conta é entrada − saídas − sangria, nessa ordem':
+        /const saldo = totalEntrada - totalSaidas - totalSangrias;/.test(html),
+      // vermelho e' cor semantica (saiu mais do que entrou), nao decoracao
+      'saldo negativo fica vermelho': /elSaldo\.classList\.toggle\('bad', saldo < 0\)/.test(html),
+      'Saldo, Entrada e Verificadas nascem escondidos e só aparecem pra quem confere':
+        /id="card-saldo"[^>]*class="[^"]*hidden|class="kpi destaque hidden" id="card-saldo"/.test(html)
+        && /PODE_CONFERIR = IS_MASTER \|\| IS_ADMIN;/.test(html)
+        && /card-saldo'\)\.classList\.remove\('hidden'\)/.test(html)
+        && /col-verificadas-wrap'\)\.classList\.remove\('hidden'\)/.test(html),
+      'sem a coluna Verificadas, as 2 que sobram ocupam a largura': /sem-verificadas/.test(html),
+      'mover pra Sangria é botão de Master, item a item, com desfazer':
+        /IS_MASTER && !it\.chave\.startsWith\('sangria::'\)/.test(html)
+        && /moverOrigem\('\$\{it\.chave\}','sangria'\)/.test(html)
+        && /moverOrigem\('\$\{it\.chave\}',null\)/.test(html),
+      'o botão em lote só aparece pro Master e só quando há o que mover':
+        /const candidatas = IS_MASTER \? filtrados\.filter\(pareceSangria\)\.length : 0;/.test(html)
+        && /btnMover\.classList\.toggle\('hidden', !candidatas\)/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okSaidasSaldoUi = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okSaidasSaldoUi = false; console.log('  erro: ' + e.message); }
+  if (!okSaidasSaldoUi) ruins += 1;
+  console.log(`${okSaidasSaldoUi ? '✓' : '✗'} Painel de Saídas: Entrada em dinheiro + Dinheiro em loja (entrada − saídas − sangria), só pra Master/Admin`);
+
+  // ------------------------------------------------------------------
   // Pedido real do Master: "lancei uma sangria dia 20, teve entrada de
   // dinheiro naquele dia, então a próxima sangria já inicia com o De em
   // dia 20, só preenchendo o Até" - o "De" do período nasce igual ao "Até"
@@ -7260,7 +7380,7 @@ setTimeout(async () => {
     const src = require('fs').readFileSync(require('path').join(__dirname, 'reportUtil.js'), 'utf8');
     const srcIndex = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
     const iRota = srcIndex.indexOf("saidas-painel/relatorio");
-    const trechoRota = srcIndex.slice(iRota, iRota + 1400);
+    const trechoRota = srcIndex.slice(iRota, iRota + 2200);
 
     // exercita de verdade: um item com descrição bem comprida tem que virar
     // um PDF válido (a troca de ellipsis por quebra de linha não pode

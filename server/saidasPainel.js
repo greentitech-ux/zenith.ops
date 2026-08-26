@@ -37,13 +37,20 @@ function linhaDeSangria(s) {
   };
 }
 
+// "Sangria" que a planilha antiga lancou como uma "outra saida" qualquer
+// (ver reclassificar em verificacoesSaida.js): o item continua sendo linha do
+// fechamento, so a leitura aqui passa a trata-lo como Sangria/Deposito, pra
+// ele cair na coluna certa do painel e no total certo.
 function linhasDeFechamento(f, mapaVerif) {
   return (f.detalhesSaidas || []).map((item, idx) => {
     const chave = `${f.id}::${idx}`;
     const v = mapaVerif[chave];
+    const reclassificada = !!(v && v.origemManual === 'sangria');
     return {
       chave,
-      origem: 'saida',
+      origem: reclassificada ? 'sangria' : 'saida',
+      reclassificada,
+      reclassificadaPorEmail: (v && v.origemManualPorEmail) || null,
       unidade: f.unidade,
       unidadeNome: f.unidadeNome,
       grupo: f.grupo,
@@ -78,6 +85,31 @@ async function listar(extrasFechamentos = []) {
   return [...deSangria, ...deFechamento];
 }
 
+// ENTRADA em dinheiro do periodo - a outra ponta da conta que o Master pediu
+// ("entrada menos saidas avulsas menos sangria = quanto de dinheiro tem em
+// loja"). Sai do campo entradaDinheiro do MESMO fechamento de onde ja saem as
+// saidas avulsas, entao nao custa leitura nova: fechamentosLive.listAll() e
+// cacheado e ja foi chamado no listar() acima.
+//
+// Uma linha por fechamento (nao por unidade+dia): quem soma e' quem consome,
+// e assim o filtro de unidade/grupo/periodo e o mesmo `filtrar` das saidas.
+// Nao passa por mesclarLancamentosDoMesmoDia de proposito - a mescla SOMA
+// entradaDinheiro (esta em CAMPOS_SOMA, ver sheetsSync.js), entao o total
+// daria exatamente igual, so mais caro.
+async function listarEntradas(extrasFechamentos = []) {
+  const fechamentos = await fechamentosLive.listAll();
+  const todos = [...fechamentos, ...(Array.isArray(extrasFechamentos) ? extrasFechamentos : [])];
+  return todos
+    .map((f) => ({
+      unidade: f.unidade,
+      unidadeNome: f.unidadeNome,
+      grupo: f.grupo,
+      data: f.data,
+      valor: Number(f.entradaDinheiro) || 0,
+    }))
+    .filter((e) => e.valor);
+}
+
 // mesmo formato de filtro usado em fechamentosFiltrados (index.js): unidades
 // (array de codigos, vazio/null = todas), grupo (ARCFOOD|BRAVO, vazio =
 // os dois), inicio/fim (AAAA-MM-DD, vazio = sem limite daquele lado)
@@ -88,6 +120,33 @@ function filtrar(itens, { unidades, grupo, inicio, fim } = {}) {
     (!grupo || it.grupo === grupo) &&
     (!inicio || (it.data || '') >= inicio) &&
     (!fim || (it.data || '') <= fim));
+}
+
+// so o Master move (decisao explicita do Master: "1 opcao e so o master ter
+// acesso"). A chave e' sempre de saida avulsa - uma Sangria/Deposito de
+// verdade (colecao propria) nao tem pra onde ir.
+async function reclassificar(chave, { origem, porId, porEmail }, extrasFechamentos = []) {
+  if (typeof chave !== 'string' || !chave) throw new Error('Chave inválida.');
+  if (chave.startsWith('sangria::')) throw new Error('Sangria/Depósito lançada no app já está no lugar certo.');
+  const partes = chave.split('::');
+  const idx = Number(partes.pop());
+  const fechamentoId = partes.join('::');
+  const f = (await fechamentosLive.getOne(fechamentoId))
+    || (Array.isArray(extrasFechamentos) ? extrasFechamentos : []).find((x) => x.id === fechamentoId)
+    || null;
+  if (!f || !Number.isInteger(idx) || !(f.detalhesSaidas || [])[idx]) {
+    throw new Error('Saída não encontrada nesse fechamento.');
+  }
+  const r = await verificacoesSaida.reclassificar(chave, { origem, porId, porEmail });
+  return { chave, origem: r.origemManual ? 'sangria' : 'saida', reclassificada: !!r.origemManual };
+}
+
+// "tem o nome Sangria na descricao" - o caso da planilha antiga da ARCFOOD,
+// onde a sangria virava uma linha de saida com esse texto. Sem acento/caixa,
+// mesma tolerancia do resto do sistema.
+function pareceSangria(item) {
+  return item.origem === 'saida'
+    && /sangria/i.test(String(item.descricao || '').normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
 }
 
 // resolve a chave pra sangria (id proprio na colecao sangrias) ou pra saida
@@ -118,4 +177,4 @@ async function marcarVerificada(chave, { verificada, porId, porEmail }, extrasFe
   return { chave, verificada: r.verificada, verificadaPorEmail: r.verificadaPorEmail, verificadaEm: r.verificadaEm };
 }
 
-module.exports = { listar, filtrar, marcarVerificada };
+module.exports = { listar, listarEntradas, filtrar, marcarVerificada, reclassificar, pareceSangria };
