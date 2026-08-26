@@ -36,6 +36,8 @@ function getCliente() {
 
 // Documento de identidade e denso e mal fotografado (plastificado brilhando,
 // papel gasto, foto torta) - e o dado lido vai pra ficha trabalhista
+const ocrUso = require('./ocrUso');
+
 const MODELO = 'claude-sonnet-5';
 
 const MAX_ARQUIVOS = 3; // frente + verso + eventual segunda via
@@ -128,7 +130,7 @@ const texto = (v, max) => {
 // como "digitado na mão" (ver rhCamposConfig.js) nao entra - nem no prompt
 // nem no "naoLidos", senao a tela cobraria da leitura um campo que ela nao
 // foi encarregada de trazer.
-async function lerDocumento({ arquivos, camposLidos }) {
+async function lerDocumento({ arquivos, camposLidos, unidade, usuarioId, usuarioEmail }) {
   const campos = Array.isArray(camposLidos) && camposLidos.length
     ? TODOS_CAMPOS.filter((c) => camposLidos.includes(c))
     : TODOS_CAMPOS;
@@ -160,6 +162,16 @@ async function lerDocumento({ arquivos, camposLidos }) {
     max_tokens: 1500,
     messages: [{ role: 'user', content: blocos }],
   });
+  // so chega aqui quando a leitura LOCAL do PDF nao resolveu - o caminho
+  // gratuito ja retornou antes e, de proposito, nao entra na medicao: ele
+  // nao gasta token nenhum.
+  try {
+    ocrUso.registrarChamada({
+      fluxo: 'documento-rh', modelo: MODELO, usage: resp.usage,
+      unidade, usuarioId, usuarioEmail, fotos: fotos.length,
+      bytes: fotos.reduce((t, f) => t + (f.buffer ? f.buffer.length : 0), 0),
+    });
+  } catch (e) { console.error('ocrUso: falha ao registrar (leitura segue). %s', e.message); }
   const bruto = (resp.content || []).map((b) => b.text || '').join('');
   let dados;
   try {

@@ -47,6 +47,8 @@ const MODELO_DESEMPATE = process.env.OCR_MODELO_DESEMPATE || 'claude-opus-5';
 // loja com "AdyenV2" nos dois lugares mandaria o valor pro campo errado se a
 // chave fosse so o campo. Uma string so tambem e mais robusta que um campo
 // "secao" separado - o modelo nao tem como acertar metade dela.
+const ocrUso = require('./ocrUso');
+
 const chaveDe = (secao, campo) => `${secao}.${campo}`;
 
 // KPI (diferente de canal/forma) nem sempre e dinheiro - moeda/kg/quantidade
@@ -382,7 +384,7 @@ function desempatar(consenso, leituraDesempate) {
 
 const MAX_ARQUIVOS = 5;
 
-async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
+async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuarioId, usuarioEmail }) {
   if (!ativo()) throw new Error('Leitura automática por imagem não está configurada neste servidor.');
   const fotos = (Array.isArray(arquivos) ? arquivos : []).filter((a) => a && a.buffer);
   if (!fotos.length) throw new Error('Anexe a foto do relatório de vendas.');
@@ -435,6 +437,17 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica }) {
     max_tokens: 32000,
     messages: [{ role: 'user', content: blocos }],
   }).finalMessage();
+  // medicao: o custo desta tela nasce aqui, e sao 2 chamadas por clique (3
+  // com desempate). Registrar por CHAMADA, nao por clique, e' o que deixa
+  // ver que o desempate no modelo forte pesa mais que as duas leituras.
+  try {
+    ocrUso.registrarChamada({
+      fluxo: modelo === MODELO_DESEMPATE ? 'fechamento-desempate' : 'fechamento',
+      modelo, usage: resp.usage, unidade, usuarioId, usuarioEmail,
+      fotos: fotos.length,
+      bytes: fotos.reduce((t, f) => t + (f.buffer ? f.buffer.length : 0), 0),
+    });
+  } catch (e) { console.error('ocrUso: falha ao registrar (leitura segue). %s', e.message); }
   const texto = (resp.content || []).map((b) => b.text || '').join('');
   let dados;
   try {
