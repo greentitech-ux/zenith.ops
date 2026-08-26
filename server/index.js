@@ -7900,7 +7900,14 @@ app.get('/api/saidas-painel', requireAnySection('lancamento', 'sangria'), async 
   // nunca aparecia aqui, só a lançada direto no app.
   const todas = auth.filterByUnidade(req, await saidasPainel.listar(fechamentosData));
   const unidadesSet = unidades ? String(unidades).split(',').filter(Boolean) : null;
-  res.json(saidasPainel.filtrar(todas, { unidades: unidadesSet, grupo, inicio, fim }));
+  const itens = saidasPainel.filtrar(todas, { unidades: unidadesSet, grupo, inicio, fim });
+  // "entradas" (e o Saldo que a tela calcula em cima delas) e' visao de
+  // Master/Admin - a mesma regra de quem pode CONFERIR. Nao e' so esconder
+  // o card: sem o gate aqui, o numero viajaria pro navegador da loja de
+  // qualquer jeito.
+  if (!(req.isMaster || req.isAdmin)) return res.json({ itens, entradas: [] });
+  const entradas = auth.filterByUnidade(req, await saidasPainel.listarEntradas(fechamentosData));
+  res.json({ itens, entradas: saidasPainel.filtrar(entradas, { unidades: unidadesSet, grupo, inicio, fim }) });
 });
 
 app.patch('/api/saidas-painel/verificar', auth.requireMasterOrAdmin, async (req, res) => {
@@ -7910,6 +7917,51 @@ app.patch('/api/saidas-painel/verificar', auth.requireMasterOrAdmin, async (req,
     broadcast('saida-verificada', registro, 'lancamento');
     broadcast('saida-verificada', registro, 'sangria');
     res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Mover uma saida avulsa pra Sangria/Deposito (e desfazer). So o Master -
+// pedido explicito dele. Nao reescreve o fechamento: a reclassificacao mora
+// na colecao de verificacoes, ao lado do "verificada" (ver
+// verificacoesSaida.js/reclassificar).
+app.patch('/api/saidas-painel/reclassificar', auth.requireMaster, async (req, res) => {
+  try {
+    const { chave, origem } = req.body;
+    const registro = await saidasPainel.reclassificar(
+      chave, { origem: origem === 'sangria' ? 'sangria' : null, porId: req.user.id, porEmail: req.user.email },
+      fechamentosData,
+    );
+    broadcast('saida-verificada', registro, 'lancamento');
+    broadcast('saida-verificada', registro, 'sangria');
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// O caso que motivou tudo: a planilha antiga lancava sangria como saida
+// avulsa com "Sangria" na descricao, e sao muitas pra mover uma a uma. Move
+// TODAS as que estao no filtro atual (periodo/unidade/grupo) de uma vez -
+// escopo igual ao que o Master esta vendo na tela, nada de silenciosamente
+// mexer no que esta fora da tela. Reversivel item a item pela rota acima.
+app.post('/api/saidas-painel/reclassificar-sangrias', auth.requireMaster, async (req, res) => {
+  try {
+    const { unidades, grupo, inicio, fim } = req.body || {};
+    const unidadesSet = unidades ? String(unidades).split(',').filter(Boolean) : null;
+    const todas = auth.filterByUnidade(req, await saidasPainel.listar(fechamentosData));
+    const alvos = saidasPainel
+      .filtrar(todas, { unidades: unidadesSet, grupo, inicio, fim })
+      .filter(saidasPainel.pareceSangria);
+    for (const item of alvos) {
+      await saidasPainel.reclassificar(
+        item.chave, { origem: 'sangria', porId: req.user.id, porEmail: req.user.email }, fechamentosData,
+      );
+    }
+    broadcast('saida-verificada', { movidas: alvos.length }, 'lancamento');
+    broadcast('saida-verificada', { movidas: alvos.length }, 'sangria');
+    res.json({ movidas: alvos.length });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -7951,6 +8003,19 @@ app.get('/api/saidas-painel/relatorio.:formato(csv|pdf)', requireAnySection('lan
     return res.send(reportUtil.toCSV(colunas, linhas));
   }
   const periodo = inicio || fim ? ` · período: ${inicio || 'início'} a ${fim || 'hoje'}` : '';
+  // mesma conta e mesmo gate da tela: entrada - saidas avulsas - sangria.
+  // So Master/Admin ve o saldo, inclusive no PDF exportado.
+  let saldoLinha = '';
+  if (req.isMaster || req.isAdmin) {
+    const entradas = saidasPainel.filtrar(
+      auth.filterByUnidade(req, await saidasPainel.listarEntradas(fechamentosData)),
+      { unidades: unidadesSet, grupo, inicio, fim },
+    );
+    const soma = (arr, f) => arr.reduce((t, x) => t + (f ? f(x) : 0), 0);
+    const entrada = soma(entradas, (e) => e.valor);
+    const saiu = soma(filtradas, (r) => r.valor);
+    saldoLinha = ` · Entrada ${reportUtil.fmtMoneyBR(entrada)} · Saídas+Sangria ${reportUtil.fmtMoneyBR(saiu)} · Saldo ${reportUtil.fmtMoneyBR(entrada - saiu)}`;
+  }
   // Descrição é a coluna que mais precisa de espaço (texto livre) - as
   // outras 6 colunas são curtas (data, valor, sim/não...) e sobram pra ela
   // sem precisar cortar largura de ninguém. A quebra de linha (padrão do
@@ -7960,7 +8025,7 @@ app.get('/api/saidas-painel/relatorio.:formato(csv|pdf)', requireAnySection('lan
   };
   reportUtil.writePDF(res, {
     titulo: 'Painel de Saídas · Sangria/Depósito',
-    subtitulo: `Exportado em ${reportUtil.agoraBrasiliaFmt()}${periodo} · ${linhas.length} item(ns)`,
+    subtitulo: `Exportado em ${reportUtil.agoraBrasiliaFmt()}${periodo} · ${linhas.length} item(ns)${saldoLinha}`,
     colunas, linhas, larguras: LARGURAS_SAIDAS_PAINEL,
     nomeArquivo: reportUtil.nomeArquivoComData('saidas-painel'),
   });

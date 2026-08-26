@@ -60,15 +60,24 @@
   .export-btn{font-family:var(--mono);font-size:11px;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
   .export-btn:hover{color:var(--text);border-color:var(--accent);}
   .tipo-badge{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;}
-  .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px;}
-  @media(min-width:640px){ .kpis{grid-template-columns:repeat(4,1fr);} }
+  /* auto-fit em vez de contagem fixa: a mesma grade serve pros 4 cards da
+     loja e pros 6 de quem ve Entrada/Saldo, sem sobrar coluna vazia */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px;}
   .kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;}
   .kpi .valor{font-size:20px;font-weight:700;letter-spacing:-.02em;}
   .kpi .valor.bad{color:var(--bad);}
   .kpi .valor.ok{color:var(--ok);}
+  /* o Saldo e' a leitura principal da tela ("quanto de dinheiro tem em loja"),
+     entao ganha borda; a COR continua semantica - vermelho so quando saiu mais
+     do que entrou. Verde aqui daria a entender que "muito dinheiro em loja" e'
+     bom, e nao e' isso que o numero diz. */
+  .kpi.destaque{border-color:var(--accent);}
+  .kpi .formula{font-family:var(--mono);font-size:9.5px;color:var(--muted);margin-top:3px;}
   .kpi .rotulo{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;}
   .kanban-3col{display:grid;grid-template-columns:1fr;gap:14px;}
   @media(min-width:760px){ .kanban-3col{grid-template-columns:1fr 1fr 1fr;} }
+  /* sem a coluna Verificadas (loja), as duas que sobram ocupam a largura */
+  @media(min-width:760px){ .kanban-3col.sem-verificadas{grid-template-columns:1fr 1fr;} }
   .kanban-col{background:var(--panel2);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;max-height:70vh;min-height:220px;}
   .kanban-col-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 12px 10px;border-bottom:1px solid var(--line);flex:none;font-weight:700;font-size:13px;}
   .kanban-col-header .n{font-family:var(--mono);color:var(--muted);font-weight:400;font-size:11.5px;}
@@ -158,13 +167,22 @@
   </div>
 
   <div class="kpis">
+    <div class="kpi hidden" id="card-entrada"><div class="valor ok" id="kpi-entrada">—</div><div class="rotulo">Entrada em dinheiro</div></div>
     <div class="kpi"><div class="valor bad" id="kpi-saidas">—</div><div class="rotulo">Saídas avulsas</div></div>
     <div class="kpi"><div class="valor bad" id="kpi-sangrias">—</div><div class="rotulo">Sangria/Depósito</div></div>
+    <div class="kpi destaque hidden" id="card-saldo">
+      <div class="valor" id="kpi-saldo">—</div>
+      <div class="rotulo">Dinheiro em loja</div>
+      <div class="formula">entrada − saídas − sangria</div>
+    </div>
     <div class="kpi"><div class="valor" id="kpi-pendentes">—</div><div class="rotulo">Pendentes de verificar</div></div>
-    <div class="kpi"><div class="valor ok" id="kpi-verificadas">—</div><div class="rotulo">Verificadas</div></div>
+    <div class="kpi hidden" id="card-verificadas"><div class="valor ok" id="kpi-verificadas">—</div><div class="rotulo">Verificadas</div></div>
   </div>
 
-  <h2>🧾 Conferência</h2>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+    <h2 style="margin:0;">🧾 Conferência</h2>
+    <button type="button" class="export-btn hidden" id="btn-mover-sangrias" onclick="moverTodasSangrias()"></button>
+  </div>
   <div class="kanban-3col">
     <div class="kanban-col">
       <div class="kanban-col-header"><span>💰 Sangria/Depósito</span><span class="n" id="n-pendentes-sangria">0</span></div>
@@ -174,7 +192,7 @@
       <div class="kanban-col-header"><span>💸 Saída avulsa</span><span class="n" id="n-pendentes-saida">0</span></div>
       <div class="kanban-cards" id="col-pendentes-saida"></div>
     </div>
-    <div class="kanban-col">
+    <div class="kanban-col hidden" id="col-verificadas-wrap">
       <div class="kanban-col-header"><span>✅ Verificadas</span><span class="n" id="n-verificadas">0</span></div>
       <div class="kanban-cards" id="col-verificadas"></div>
     </div>
@@ -235,6 +253,10 @@ function calcularPreset(tipo, refIso){
 let ME = null;
 let IS_MASTER = false;
 let IS_ADMIN = false;
+// Entrada/Saldo e a coluna Verificadas sao visao de conferencia (Master ou
+// Admin) - a loja ve o que saiu, nao o caixa consolidado
+let PODE_CONFERIR = false;
+let ENTRADAS = [];
 let ITENS = []; // lista bruta do periodo (inicio/fim), sem filtro de loja/grupo - esses dois filtram em memoria (ver renderTudo)
 let presetAtivo = 'mes';
 
@@ -335,18 +357,30 @@ async function carregar(){
   const params = new URLSearchParams();
   if(inicio) params.set('inicio', inicio);
   if(fim) params.set('fim', fim);
-  ITENS = await fetch('/api/saidas-painel?'+params.toString()).then(r=>r.json());
+  // a rota passou a devolver {itens, entradas} - "entradas" so vem preenchido
+  // pra Master/Admin (o gate e' no servidor, ver /api/saidas-painel)
+  const resp = await fetch('/api/saidas-painel?'+params.toString()).then(r=>r.json());
+  ITENS = resp.itens || [];
+  ENTRADAS = resp.entradas || [];
   renderUnidadePanel();
   renderTudo();
 }
 
+// o periodo ja veio filtrado do servidor; grupo e unidade sao filtro de tela
+function passaNoFiltro(it, grupo){
+  return (!grupo || it.grupo===grupo) && (SEL_UNIDADE.size===0 || SEL_UNIDADE.has(it.unidade));
+}
 function itensFiltrados(){
   const grupo = document.getElementById('f-grupo').value;
-  return ITENS.filter(it => (!grupo || it.grupo===grupo) && (SEL_UNIDADE.size===0 || SEL_UNIDADE.has(it.unidade)));
+  return ITENS.filter(it => passaNoFiltro(it, grupo));
+}
+function entradasFiltradas(){
+  const grupo = document.getElementById('f-grupo').value;
+  return ENTRADAS.filter(e => passaNoFiltro(e, grupo));
 }
 
 function cardHtml(it){
-  const podeVerificar = IS_MASTER || IS_ADMIN;
+  const podeVerificar = PODE_CONFERIR;
   const origemLabel = it.origem==='sangria' ? '💰 Sangria/Depósito' : '💸 Saída avulsa';
   let acao = '';
   if(it.verificada){
@@ -354,16 +388,25 @@ function cardHtml(it){
   } else if(podeVerificar){
     acao = `<button type="button" class="btn-verificar" onclick="toggleVerificar('${it.chave}',true)">✅ Verificar</button>`;
   }
+  // saida avulsa -> Sangria/Deposito (e de volta). So o Master, e so pra item
+  // que vive dentro do fechamento - Sangria lancada no app ja esta no lugar.
+  let mover = '';
+  if(IS_MASTER && !it.chave.startsWith('sangria::')){
+    mover = it.reclassificada
+      ? `<button type="button" class="link-btn" onclick="moverOrigem('${it.chave}',null)">↩️ Voltar pra Saída avulsa</button>`
+      : `<button type="button" class="link-btn" onclick="moverOrigem('${it.chave}','sangria')">💰 Mover pra Sangria</button>`;
+  }
   return `<div class="saida-card">
     <div class="saida-topo">
       <span class="tipo-badge">${origemLabel}</span>
+      ${it.reclassificada ? '<span class="tipo-badge" style="background:#181d24;color:var(--muted);" title="Era saída avulsa, movida à mão pra Sangria">movida</span>' : ''}
       <span class="tipo-badge" style="background:#181d24;color:var(--muted);">${escapeHtml(it.unidadeNome||it.unidade||'—')}</span>
     </div>
     <div class="saida-desc">${escapeHtml(it.descricao)}</div>
     <div class="saida-valor">${fmtMoney(it.valor)}</div>
     <div class="saida-sub">${fmtData(it.data)} · ${escapeHtml(it.criadoPorEmail||'—')}</div>
     ${it.verificada ? `<div class="saida-sub" style="color:var(--ok);">verificada por ${escapeHtml(it.verificadaPorEmail||'—')} em ${fmtDataHora(it.verificadaEm)}</div>` : ''}
-    ${acao ? `<div class="saida-acoes">${acao}</div>` : ''}
+    ${acao || mover ? `<div class="saida-acoes">${acao}${mover}</div>` : ''}
   </div>`;
 }
 
@@ -381,6 +424,24 @@ function renderTudo(){
   document.getElementById('kpi-pendentes').textContent = pendentes.length;
   document.getElementById('kpi-verificadas').textContent = verificadas.length;
 
+  // a conta que o Master pediu: o que entrou em dinheiro no periodo menos o
+  // que saiu (saida avulsa + sangria/deposito) = quanto de dinheiro sobrou
+  // em loja. Vermelho so quando saiu mais do que entrou.
+  if(PODE_CONFERIR){
+    const totalEntrada = entradasFiltradas().reduce((s,e)=>s+(e.valor||0),0);
+    const saldo = totalEntrada - totalSaidas - totalSangrias;
+    document.getElementById('kpi-entrada').textContent = fmtMoney(totalEntrada);
+    const elSaldo = document.getElementById('kpi-saldo');
+    elSaldo.textContent = fmtMoney(saldo);
+    elSaldo.classList.toggle('bad', saldo < 0);
+  }
+
+  // o botao de mover em lote so existe quando ha o que mover (e so pro Master)
+  const btnMover = document.getElementById('btn-mover-sangrias');
+  const candidatas = IS_MASTER ? filtrados.filter(pareceSangria).length : 0;
+  btnMover.classList.toggle('hidden', !candidatas);
+  if(candidatas) btnMover.textContent = `💰 Mover ${candidatas} com "Sangria" na descrição`;
+
   document.getElementById('n-pendentes-sangria').textContent = pendentesSangria.length;
   document.getElementById('n-pendentes-saida').textContent = pendentesSaida.length;
   document.getElementById('n-verificadas').textContent = verificadas.length;
@@ -393,6 +454,49 @@ function renderTudo(){
   document.getElementById('col-verificadas').innerHTML = verificadas.length
     ? verificadas.map(cardHtml).join('')
     : '<div class="kanban-empty">Nenhuma verificada ainda nesse período.</div>';
+}
+
+async function moverOrigem(chave, origem){
+  try{
+    const res = await fetch('/api/saidas-painel/reclassificar', {
+      method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ chave, origem }),
+    });
+    if(!res.ok) throw new Error((await res.json()).error||'Erro ao mover.');
+    await carregar();
+  }catch(e){ alert(e.message); }
+}
+
+// atalho pro caso que originou isso: a planilha antiga lancava sangria como
+// saida avulsa com "Sangria" na descricao, e sao muitas pra mover uma a uma.
+// Move so o que esta no filtro atual - o mesmo que o Master ve na tela.
+async function moverTodasSangrias(){
+  const quantas = itensFiltrados().filter(pareceSangria).length;
+  if(!quantas) return;
+  if(!confirm(`Mover ${quantas} saída(s) com "Sangria" na descrição para Sangria/Depósito?\n\nSó vale pro filtro que está na tela. Dá pra desfazer uma a uma depois.`)) return;
+  const btn = document.getElementById('btn-mover-sangrias');
+  btn.disabled = true;
+  try{
+    const res = await fetch('/api/saidas-painel/reclassificar-sangrias', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        grupo: document.getElementById('f-grupo').value || '',
+        unidades: SEL_UNIDADE.size ? [...SEL_UNIDADE].join(',') : '',
+        inicio: document.getElementById('f-data-de').value,
+        fim: document.getElementById('f-data-ate').value,
+      }),
+    });
+    if(!res.ok) throw new Error((await res.json()).error||'Erro ao mover.');
+    await carregar();
+  }catch(e){ alert(e.message); }
+  finally{ btn.disabled = false; }
+}
+
+// mesma regra do servidor (pareceSangria em saidasPainel.js): sem acento e
+// sem caixa, so pra decidir se o botao de mover em lote aparece
+function pareceSangria(it){
+  return it.origem === 'saida'
+    && /sangria/i.test(String(it.descricao||'').normalize('NFD').replace(/[\u0300-\u036f]/g,''));
 }
 
 async function toggleVerificar(chave, verificada){
@@ -431,6 +535,15 @@ async function boot(){
     return;
   }
   document.getElementById('root').classList.remove('hidden');
+  PODE_CONFERIR = IS_MASTER || IS_ADMIN;
+  if(PODE_CONFERIR){
+    document.getElementById('card-entrada').classList.remove('hidden');
+    document.getElementById('card-saldo').classList.remove('hidden');
+    document.getElementById('card-verificadas').classList.remove('hidden');
+    document.getElementById('col-verificadas-wrap').classList.remove('hidden');
+  } else {
+    document.querySelector('.kanban-3col').classList.add('sem-verificadas');
+  }
   setupPresets();
   setupMultiselectUnidade();
   aplicarPreset('mes');

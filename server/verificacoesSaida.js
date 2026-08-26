@@ -35,6 +35,9 @@ async function mapaDeChaves() {
   return out;
 }
 
+// merge:true nos dois writes de proposito: verificacao e reclassificacao sao
+// dois estados INDEPENDENTES do mesmo item, e cada um mexe so no que e' dele.
+// Com set() cheio, verificar apagaria a reclassificacao (e vice-versa).
 async function marcar(chave, { verificada, porId, porEmail }) {
   if (!chave || typeof chave !== 'string') throw new Error('Chave inválida.');
   const registro = {
@@ -44,9 +47,33 @@ async function marcar(chave, { verificada, porId, porEmail }) {
     verificadaPorEmail: verificada ? porEmail : null,
     verificadaEm: verificada ? new Date().toISOString() : null,
   };
-  await COLLECTION.doc(chave).set(registro);
+  await COLLECTION.doc(chave).set(registro, { merge: true });
   cache.invalidar();
   return registro;
 }
 
-module.exports = { listAll, mapaDeChaves, marcar };
+// Pedido do Master: a planilha antiga lancava a sangria como uma "outra
+// saida" qualquer (descricao com "Sangria"), entao ela cai na coluna errada
+// do painel. Em vez de reescrever o fechamento historico (o dado antigo tem
+// que continuar legivel exatamente como esta), a reclassificacao mora AQUI,
+// ao lado da verificacao: o item continua sendo uma linha do fechamento e so
+// a LEITURA do painel passa a trata-lo como Sangria/Deposito.
+//
+// origem: 'sangria' pra mover, null pra desfazer.
+const ORIGENS_MANUAIS = ['sangria'];
+async function reclassificar(chave, { origem, porId, porEmail }) {
+  if (!chave || typeof chave !== 'string') throw new Error('Chave inválida.');
+  if (origem !== null && !ORIGENS_MANUAIS.includes(origem)) throw new Error('Origem inválida.');
+  const registro = {
+    chave,
+    origemManual: origem,
+    origemManualPorId: origem ? porId : null,
+    origemManualPorEmail: origem ? porEmail : null,
+    origemManualEm: origem ? new Date().toISOString() : null,
+  };
+  await COLLECTION.doc(chave).set(registro, { merge: true });
+  cache.invalidar();
+  return registro;
+}
+
+module.exports = { listAll, mapaDeChaves, marcar, reclassificar, ORIGENS_MANUAIS };
