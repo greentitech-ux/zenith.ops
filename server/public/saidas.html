@@ -60,6 +60,10 @@
   .export-btn{font-family:var(--mono);font-size:11px;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
   .export-btn:hover{color:var(--text);border-color:var(--accent);}
   .tipo-badge{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;}
+  /* diferenca de caixa apurada na sangria: cor semantica, o mesmo vermelho
+     dos outros estados ruins do sistema */
+  .tipo-badge.dif{color:var(--bad);border-color:var(--bad);}
+  .dif-motivo{color:var(--bad);}
   /* auto-fit em vez de contagem fixa: a mesma grade serve pros 4 cards da
      loja e pros 6 de quem ve Entrada/Saldo, sem sobrar coluna vazia */
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px;}
@@ -400,11 +404,13 @@ function cardHtml(it){
     <div class="saida-topo">
       <span class="tipo-badge">${origemLabel}</span>
       ${it.reclassificada ? '<span class="tipo-badge" style="background:#181d24;color:var(--muted);" title="Era saída avulsa, movida à mão pra Sangria">movida</span>' : ''}
+      ${it.temDivergencia ? `<span class="tipo-badge dif" title="O valor retirado não bateu com o esperado em caixa">${it.divergencia < 0 ? 'falta' : 'sobra'} ${fmtMoney(Math.abs(it.divergencia))}</span>` : ''}
       <span class="tipo-badge" style="background:#181d24;color:var(--muted);">${escapeHtml(it.unidadeNome||it.unidade||'—')}</span>
     </div>
     <div class="saida-desc">${escapeHtml(it.descricao)}</div>
     <div class="saida-valor">${fmtMoney(it.valor)}</div>
     <div class="saida-sub">${fmtData(it.data)} · ${escapeHtml(it.criadoPorEmail||'—')}</div>
+    ${it.temDivergencia ? `<div class="saida-sub dif-motivo">esperado ${fmtMoney(it.esperado)} · ${escapeHtml(it.motivoDivergencia || 'sem motivo informado')}${(it.extra&&it.extra.diasSemFechamento) ? ` · ${it.extra.diasSemFechamento} dia(s) sem fechamento na hora` : ''}</div>` : ''}
     ${it.verificada ? `<div class="saida-sub" style="color:var(--ok);">verificada por ${escapeHtml(it.verificadaPorEmail||'—')} em ${fmtDataHora(it.verificadaEm)}</div>` : ''}
     ${acao || mover ? `<div class="saida-acoes">${acao}${mover}</div>` : ''}
   </div>`;

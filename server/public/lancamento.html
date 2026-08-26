@@ -103,6 +103,16 @@
   .btn-primary{width:100%;margin-top:16px;background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);}
   .btn-primary:disabled{opacity:.5;cursor:default;}
   .msg{margin-top:10px;font-size:12.5px;padding:10px 12px;border-radius:8px;word-break:break-word;}
+  /* conferencia de caixa na sangria: o esperado e a diferenca ficam ACIMA do
+     botao, pra pessoa ver antes de salvar, nao depois */
+  .caixa-box{margin:12px 0 4px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);}
+  .caixa-linha{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12.5px;padding:2px 0;}
+  .caixa-linha span{color:var(--muted);}
+  .caixa-linha b{font-variant-numeric:tabular-nums;}
+  /* cor semantica, nao marca: vermelho so quando passou da tolerancia */
+  .caixa-dif-ok{color:var(--ok);}
+  .caixa-dif-ruim{color:var(--bad);}
+  .caixa-aviso{margin-top:8px;font-size:11.5px;line-height:1.4;color:var(--warn);}
   .msg.ok{background:var(--ok-dim);color:var(--ok);}
   .msg.err{background:var(--bad-dim);color:var(--bad);}
   .card{border-top:1px solid var(--line);padding:12px 0;}
@@ -178,6 +188,18 @@
     <div class="grid2">
       <div><label>De</label><input type="date" id="s-periodo-inicio" required></div>
       <div><label>Até</label><input type="date" id="s-periodo-fim" required></div>
+    </div>
+    <!-- conferencia de caixa: quanto o sistema diz que deveria estar sobrando
+         pra retirar, e a diferenca pro valor que a pessoa esta retirando.
+         Aparece assim que a unidade e escolhida e recalcula ao digitar. -->
+    <div class="caixa-box hidden" id="s-caixa">
+      <div class="caixa-linha"><span>Deveria ter pra retirar</span><b id="s-caixa-esperado">—</b></div>
+      <div class="caixa-linha"><span>Diferença</span><b id="s-caixa-dif">—</b></div>
+      <div class="caixa-aviso hidden" id="s-caixa-aviso"></div>
+    </div>
+    <div class="hidden" id="s-motivo-bloco">
+      <label id="s-motivo-label">Motivo da divergência</label>
+      <input type="text" id="s-motivo" maxlength="300" placeholder="ex: faltou lançar o fechamento de ontem / erro de troco">
     </div>
     <label>Nome de quem depositou</label>
     <input type="text" id="s-nome-depositante" placeholder="ex: João (gerente)" required>
@@ -1098,6 +1120,76 @@ function preencherPeriodoSangria(){
   const unidade = document.getElementById('s-unidade').value;
   const ultima = unidade ? (SANGRIAS||[]).find(s=>s.unidade===unidade) : null;
   document.getElementById('s-periodo-inicio').value = ultima ? (ultima.periodoFim || ultima.data || '') : '';
+  carregarEsperadoCaixa();
+}
+
+// CONFERENCIA DE CAIXA
+// O fundo de caixa e fixo (a loja sempre deixa o mesmo valor na gaveta), entao
+// ele se cancela na conta: o que deveria estar sobrando pra retirar e so o
+// dinheiro que entrou e ainda nao saiu.
+//
+//   esperado = entradas em dinheiro - saidas avulsas - sangrias ja feitas
+//
+// E saldo CORRIDO (tudo ate a data), nao por ciclo: fechamento lancado com
+// atraso entra na proxima sangria em vez de sumir num buraco entre periodos.
+// Quem calcula e o servidor (/api/sangrias/esperado) - aqui e so a leitura.
+let CAIXA = null;
+async function carregarEsperadoCaixa(){
+  const unidade = document.getElementById('s-unidade').value;
+  const ate = document.getElementById('s-periodo-fim').value || document.getElementById('s-data').value;
+  const box = document.getElementById('s-caixa');
+  CAIXA = null;
+  if(!unidade){ box.classList.add('hidden'); atualizarDivergencia(); return; }
+  try{
+    const p = new URLSearchParams({ unidade });
+    if(ate) p.set('ate', ate);
+    const r = await fetch('/api/sangrias/esperado?'+p.toString());
+    if(!r.ok) throw new Error('sem esperado');
+    CAIXA = await r.json();
+    // sem entrada em dinheiro lancada pra essa unidade nao ha com o que
+    // comparar - a tela diz isso em vez de inventar um esperado de R$ 0,00
+    document.getElementById('s-caixa-esperado').textContent = CAIXA.temBase ? fmtMoney(CAIXA.esperado) : 'sem base de cálculo';
+    // fechamento nao lancado e a explicacao mais comum de "sobra" - dizer
+    // isso aqui evita que a pessoa procure dinheiro que nao sumiu
+    const aviso = document.getElementById('s-caixa-aviso');
+    if(!CAIXA.temBase){
+      aviso.textContent = 'ℹ️ Nenhuma entrada em dinheiro lançada pra essa unidade ainda — não dá pra conferir a sangria contra o esperado. A conferência liga sozinha assim que o primeiro fechamento com entrada em dinheiro for lançado.';
+      aviso.classList.remove('hidden');
+    } else if(CAIXA.diasSemFechamento > 0){
+      aviso.textContent = `⚠️ ${CAIXA.diasSemFechamento} dia(s) sem fechamento lançado depois de `
+        + fmtData(CAIXA.ultimoFechamentoEm) + '. O dinheiro desses dias ainda não está no esperado.';
+      aviso.classList.remove('hidden');
+    } else {
+      aviso.classList.add('hidden');
+    }
+    box.classList.remove('hidden');
+  }catch(e){ box.classList.add('hidden'); }
+  atualizarDivergencia();
+}
+
+// tolerancia igual a do servidor (SANGRIA_TOLERANCIA_DIVERGENCIA em
+// sangrias.js): acima disso o motivo e obrigatorio. O servidor recusa de
+// qualquer jeito - isso aqui e so pra pessoa nao descobrir no erro.
+const TOLERANCIA_CAIXA = 2;
+function atualizarDivergencia(){
+  const bloco = document.getElementById('s-motivo-bloco');
+  const elDif = document.getElementById('s-caixa-dif');
+  const valor = Number(document.getElementById('s-valor').value);
+  if(!CAIXA || !CAIXA.temBase || !Number.isFinite(valor) || !document.getElementById('s-valor').value){
+    elDif.textContent = '—'; elDif.className = '';
+    bloco.classList.add('hidden');
+    document.getElementById('s-motivo').required = false;
+    return;
+  }
+  const dif = Math.round((valor - CAIXA.esperado) * 100) / 100;
+  const passou = Math.abs(dif) > TOLERANCIA_CAIXA;
+  elDif.textContent = (dif > 0 ? '+' : '') + fmtMoney(dif) + (passou ? (dif < 0 ? ' (falta)' : ' (sobra)') : '');
+  elDif.className = passou ? 'caixa-dif-ruim' : 'caixa-dif-ok';
+  bloco.classList.toggle('hidden', !passou);
+  document.getElementById('s-motivo').required = passou;
+  document.getElementById('s-motivo-label').textContent = dif < 0
+    ? `Motivo da falta de ${fmtMoney(Math.abs(dif))}`
+    : `Motivo da sobra de ${fmtMoney(Math.abs(dif))}`;
 }
 
 // mesmo motivo do form de fechamento acima: campos soltos de texto/numero -
@@ -1108,6 +1200,10 @@ document.getElementById('form-sangria').addEventListener('keydown', (ev)=>{
   if((ev.target.tagName||'').toUpperCase() === 'TEXTAREA') return;
   ev.preventDefault();
 });
+
+document.getElementById('s-valor').addEventListener('input', atualizarDivergencia);
+document.getElementById('s-data').addEventListener('change', carregarEsperadoCaixa);
+document.getElementById('s-periodo-fim').addEventListener('change', carregarEsperadoCaixa);
 
 document.getElementById('form-sangria').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
@@ -1132,6 +1228,7 @@ document.getElementById('form-sangria').addEventListener('submit', async (ev)=>{
       periodoInicio: document.getElementById('s-periodo-inicio').value,
       periodoFim: document.getElementById('s-periodo-fim').value,
       nomeDepositante: document.getElementById('s-nome-depositante').value,
+      motivoDivergencia: document.getElementById('s-motivo').value,
       password: document.getElementById('s-password').value,
     };
     const res = await fetch('/api/sangrias', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -1140,6 +1237,7 @@ document.getElementById('form-sangria').addEventListener('submit', async (ev)=>{
     msg.textContent = 'Sangria/depósito registrada com sucesso.'; msg.className = 'msg ok';
     document.getElementById('form-sangria').reset();
     document.getElementById('s-data').value = hojeBrasilia();
+    document.getElementById('s-motivo-bloco').classList.add('hidden');
     await carregarSangrias();
     preencherPeriodoSangria();
   }catch(err){

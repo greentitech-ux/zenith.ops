@@ -7814,9 +7814,24 @@ app.delete('/api/mensalistas/:id', auth.requireMaster, async (req, res) => {
 // Secao propria "sangria" (independente de "lancamento") - permite liberar
 // alguem so pra registrar sangria, em unidades especificas, sem dar acesso
 // as demais secoes do Fechamento (Faturamento, Declarado, etc) ----------
+// Quanto DEVERIA estar sobrando na gaveta pra retirar agora (ver
+// calcularSaldoCaixa em saidasPainel.js). A tela da sangria le isso ao
+// escolher a unidade, pra mostrar o esperado e a diferenca antes de salvar.
+app.get('/api/sangrias/esperado', requireSection('sangria'), async (req, res) => {
+  try {
+    const { unidade, ate } = req.query;
+    if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
+      return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    }
+    res.json(await saidasPainel.calcularSaldoCaixa({ unidade, ate }, fechamentosData));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/sangrias', requireSection('sangria'), async (req, res) => {
   try {
-    const { unidade, unidadeNome, grupo, data, valor, descricao, periodoInicio, periodoFim, nomeDepositante, password } = req.body;
+    const { unidade, unidadeNome, grupo, data, valor, descricao, periodoInicio, periodoFim, nomeDepositante, motivoDivergencia, password } = req.body;
     if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
@@ -7825,11 +7840,22 @@ app.post('/api/sangrias', requireSection('sangria'), async (req, res) => {
     // aqui nao significa que a sessao do usuario esta invalida
     const senhaOk = await auth.verifyPassword(req.user.id, password);
     if (!senhaOk) return res.status(400).json({ error: 'Senha incorreta.' });
+    // o esperado e calculado AQUI, nunca aceito do cliente: e o numero que
+    // decide se a sangria precisa de justificativa pra salvar
+    const caixa = await saidasPainel.calcularSaldoCaixa({ unidade, ate: periodoFim || data }, fechamentosData);
     const registro = await sangrias.criar({
       unidade, unidadeNome, grupo, data, valor, descricao, periodoInicio, periodoFim, nomeDepositante,
+      esperado: caixa.esperado,
+      motivoDivergencia,
+      diasSemFechamento: caixa.diasSemFechamento,
       criadoPorId: req.user.id,
       criadoPorEmail: req.user.email,
     });
+    if (sangrias.temDivergencia(registro)) {
+      const mapa = await construirUnidadesMapa();
+      push.notifyDivergenciaCaixa(mapa[unidade] || registro.unidadeNome || unidade, registro)
+        .catch((err) => console.error('Erro no push de divergência de caixa:', err.message));
+    }
     broadcast('sangria-lancada', registro, 'sangria');
     broadcast('sangria-lancada', registro, 'lancamento');
     broadcast('sangria-lancada', registro, 'fechamentos');

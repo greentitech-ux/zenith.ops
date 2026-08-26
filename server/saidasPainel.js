@@ -33,7 +33,13 @@ function linhaDeSangria(s) {
     verificada: !!s.verificada,
     verificadaPorEmail: s.verificadaPorEmail || null,
     verificadaEm: s.verificadaEm || null,
-    extra: { periodoInicio: s.periodoInicio, periodoFim: s.periodoFim, nomeDepositante: s.nomeDepositante },
+    // diferenca de caixa apurada na hora da sangria (ver sangrias.js) - vem
+    // junto pro painel poder marcar em vermelho o que nao bateu
+    esperado: s.esperado != null ? s.esperado : null,
+    divergencia: s.divergencia != null ? s.divergencia : null,
+    motivoDivergencia: s.motivoDivergencia || null,
+    temDivergencia: sangrias.temDivergencia(s),
+    extra: { periodoInicio: s.periodoInicio, periodoFim: s.periodoFim, nomeDepositante: s.nomeDepositante, diasSemFechamento: s.diasSemFechamento || 0 },
   };
 }
 
@@ -110,6 +116,70 @@ async function listarEntradas(extrasFechamentos = []) {
     .filter((e) => e.valor);
 }
 
+// SALDO DE CAIXA DA UNIDADE - a conta que decide se a sangria bate.
+//
+// O fundo de caixa e' FIXO (decisao do Master): a loja sempre deixa o mesmo
+// valor na gaveta. Isso faz o fundo se CANCELAR na conta - o que deveria
+// estar sobrando pra retirar e' so o dinheiro que entrou e ainda nao saiu:
+//
+//   esperado retirar = entradas em dinheiro - saidas avulsas - sangrias ja feitas
+//
+// De proposito e' SALDO CORRIDO (tudo ate a data), nao uma janela por ciclo:
+// fechamento lancado com atraso entra na proxima sangria em vez de cair num
+// buraco entre dois periodos, e nao existe dia contado duas vezes quando o
+// "De" de uma sangria repete o "Ate" da anterior (que e' como o formulario
+// preenche). Nada de boundary pra errar.
+//
+// Nao custa leitura nova: as duas fontes ja sao as mesmas (e cacheadas) do
+// resto do painel.
+async function calcularSaldoCaixa({ unidade, ate, ignorarSangriaId }, extrasFechamentos = []) {
+  if (!unidade) throw new Error('Unidade é obrigatória.');
+  const limite = ate && /^\d{4}-\d{2}-\d{2}$/.test(ate) ? ate : null;
+  const [itens, entradasTodas] = await Promise.all([
+    listar(extrasFechamentos),
+    listarEntradas(extrasFechamentos),
+  ]);
+  const daUnidade = (arr) => arr.filter((x) => x.unidade === unidade && (!limite || (x.data || '') <= limite));
+  const somar = (arr) => arr.reduce((t, x) => t + (Number(x.valor) || 0), 0);
+
+  const entradas = daUnidade(entradasTodas);
+  const doPainel = daUnidade(itens).filter((it) => it.chave !== `sangria::${ignorarSangriaId}`);
+  // saida avulsa que o Master moveu pra Sangria conta como sangria aqui
+  // tambem - senao as duas telas contariam a mesma retirada de jeitos
+  // diferentes (ver reclassificar)
+  const totalEntradas = somar(entradas);
+  const totalSaidas = somar(doPainel.filter((it) => it.origem === 'saida'));
+  const totalSangrias = somar(doPainel.filter((it) => it.origem === 'sangria'));
+
+  // ate quando o dinheiro esta contabilizado: se a loja ainda nao lancou o
+  // fechamento de hoje, o dinheiro de hoje NAO esta no esperado - e isso
+  // explica sozinho a maior parte das "sobras". Melhor dizer isso na tela do
+  // que deixar a pessoa achar que achou dinheiro.
+  const datas = entradas.map((e) => e.data).filter(Boolean).sort();
+  const ultimoFechamentoEm = datas.length ? datas[datas.length - 1] : null;
+  const diasSemFechamento = limite && ultimoFechamentoEm
+    ? Math.max(0, Math.round((Date.parse(limite + 'T00:00:00Z') - Date.parse(ultimoFechamentoEm + 'T00:00:00Z')) / 86400000))
+    : 0;
+
+  // SEM BASE = nenhuma entrada em dinheiro lancada pra essa unidade ate aqui.
+  // Nesse caso nao da pra dizer que a sangria "nao bateu": nao ha com o que
+  // bater. Devolver esperado 0 transformaria falta de dado em divergencia
+  // gigante e travaria a operacao (§6 - dado que nao existe nao vira numero).
+  // Quem consome trata esperado null como "conferencia indisponivel".
+  const temBase = totalEntradas > 0;
+  return {
+    unidade,
+    ate: limite,
+    temBase,
+    entradas: totalEntradas,
+    saidas: totalSaidas,
+    sangrias: totalSangrias,
+    esperado: temBase ? Number((totalEntradas - totalSaidas - totalSangrias).toFixed(2)) : null,
+    ultimoFechamentoEm,
+    diasSemFechamento,
+  };
+}
+
 // mesmo formato de filtro usado em fechamentosFiltrados (index.js): unidades
 // (array de codigos, vazio/null = todas), grupo (ARCFOOD|BRAVO, vazio =
 // os dois), inicio/fim (AAAA-MM-DD, vazio = sem limite daquele lado)
@@ -177,4 +247,4 @@ async function marcarVerificada(chave, { verificada, porId, porEmail }, extrasFe
   return { chave, verificada: r.verificada, verificadaPorEmail: r.verificadaPorEmail, verificadaEm: r.verificadaEm };
 }
 
-module.exports = { listar, listarEntradas, filtrar, marcarVerificada, reclassificar, pareceSangria };
+module.exports = { listar, listarEntradas, calcularSaldoCaixa, filtrar, marcarVerificada, reclassificar, pareceSangria };
