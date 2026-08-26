@@ -7461,6 +7461,45 @@ setTimeout(async () => {
   console.log(`${okCaixaSangria ? '✓' : '✗'} Sangria: confere o caixa (entrada − saídas − sangrias), exige motivo na divergência e alarma o Master`);
 
   // ------------------------------------------------------------------
+  // Estoque > Histórico: a coluna do item fica TRAVADA na esquerda enquanto
+  // as datas rolam. No celular ela comia a largura toda e os números saíam
+  // da tela (print do Master). Duas armadilhas que o teste fixa:
+  //   1. max-width em célula de tabela com layout automático é IGNORADO -
+  //      quem limita/garante largura ali é min-width.
+  //   2. sem um PISO, o word-break deixa o navegador espremer a coluna a
+  //      31px e quebrar o nome letra a letra quando há muitas datas.
+  let okColunaItemTravada = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'estoque.html'), 'utf8');
+    // As declarações da coluna do item, em ordem: a primeira é a base, a
+    // última é a do mobile (vem depois no arquivo). Pegar o corpo direto
+    // evita casar com o texto "max-width" do @media ou dos comentários -
+    // é isso que a asserção do min-width precisa distinguir.
+    const decls = [...html.matchAll(/#h-tabela td:first-child\{([^}]*)\}/g)].map((m) => m[1]);
+    const regraBase = decls[0] || '';
+    const regraMobile = decls[decls.length - 1] || '';
+    const conf = {
+      'a coluna do item tem padding quase zero (era 10px de cada lado)':
+        decls.length >= 2
+        && /^padding-left:6px;padding-right:6px;/.test(regraBase)
+        && /^padding-left:2px;padding-right:5px;/.test(regraMobile),
+      'a unidade (KG) sai da linha do nome, pra coluna não precisar ser larga':
+        /#h-tabela td:first-child \.un\{display:block;/.test(html)
+        && /<span class="sub un">/.test(html),
+      'o piso da coluna é min-width (max-width em célula de tabela é ignorado)':
+        /min-width:104px/.test(regraMobile) && !/max-width/.test(regraMobile),
+      'com poucas datas a tabela não força rolagem horizontal à toa':
+        /#h-tabela\{min-width:0;\}/.test(html),
+      'a coluna travada tem borda, pra se ler como coluna fixa': /border-right:1px solid var\(--line\)/.test(regraBase),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okColunaItemTravada = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okColunaItemTravada = false; console.log('  erro: ' + e.message); }
+  if (!okColunaItemTravada) ruins += 1;
+  console.log(`${okColunaItemTravada ? '✓' : '✗'} Estoque/Histórico: coluna do item travada com margem quase zero (cabe no celular sem cortar os números)`);
+
+  // ------------------------------------------------------------------
   // Pedido real do Master: "lancei uma sangria dia 20, teve entrada de
   // dinheiro naquele dia, então a próxima sangria já inicia com o De em
   // dia 20, só preenchendo o Até" - o "De" do período nasce igual ao "Até"
