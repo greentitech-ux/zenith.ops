@@ -82,6 +82,30 @@ function linhasDeFechamento(f, mapaVerif) {
   });
 }
 
+// O MESMO fechamento pode existir NAS DUAS fontes, e isso nao e' acidente:
+// a loja lanca no app (Firestore) e o Master manda esse mesmo fechamento pra
+// planilha ARCFOOD (enviarFechamentoPlanilha, sheetsSync.js), que a
+// sincronizacao seguinte le de volta pro snapshot em memoria. Juntar as duas
+// listas cruas trata um lancamento so como dois: a entrada em dinheiro do dia
+// aparecia dobrada e a mesma saida avulsa era listada duas vezes.
+//
+// Aqui a linha da planilha e' DESCARTADA quando ja existe fechamento no app
+// pra mesma unidade+data. O Firestore vence porque e' o registro nativo - e'
+// onde a loja lancou, onde o Master edita direto e onde a correcao mora; a
+// linha da planilha e' copia gravada pelo proprio app. A planilha continua
+// sendo a unica fonte dos dias que nunca passaram pelo app (o historico
+// antigo), que e' justamente o que ela existe pra trazer.
+//
+// Descartar, e nao somar: somar so faz sentido entre linhas da MESMA fonte
+// (a planilha lanca sangria em linha separada do fechamento do dia) - e essa
+// soma continua acontecendo normalmente, porque as duas linhas sobrevivem
+// juntas a este filtro.
+function semDuplicataDaPlanilha(doApp, daPlanilha) {
+  if (!Array.isArray(daPlanilha) || !daPlanilha.length) return [];
+  const noApp = new Set(doApp.map((f) => `${f.unidade}::${f.data}`));
+  return daPlanilha.filter((f) => !noApp.has(`${f.unidade}::${f.data}`));
+}
+
 // extrasFechamentos: fechamentos que NÃO moram na coleção fechamentosLive -
 // hoje só um caso, o snapshot em memória sincronizado da planilha ARCFOOD
 // (ver sheetsSync.js/index.js, fechamentosData). Sem isso, o painel só
@@ -95,7 +119,7 @@ async function listar(extrasFechamentos = []) {
     verificacoesSaida.mapaDeChaves(),
   ]);
   const deSangria = listaSangrias.map(linhaDeSangria);
-  const todosFechamentos = [...fechamentos, ...(Array.isArray(extrasFechamentos) ? extrasFechamentos : [])];
+  const todosFechamentos = [...fechamentos, ...semDuplicataDaPlanilha(fechamentos, extrasFechamentos)];
   const deFechamento = todosFechamentos.flatMap((f) => linhasDeFechamento(f, mapaVerif));
   return [...deSangria, ...deFechamento];
 }
@@ -113,7 +137,10 @@ async function listar(extrasFechamentos = []) {
 // daria exatamente igual, so mais caro.
 async function listarEntradas(extrasFechamentos = []) {
   const fechamentos = await fechamentosLive.listAll();
-  const todos = [...fechamentos, ...(Array.isArray(extrasFechamentos) ? extrasFechamentos : [])];
+  // mesmo descarte de duplicata das saidas (ver semDuplicataDaPlanilha): sem
+  // ele o dia lancado no app E enviado pra planilha somava a entrada duas
+  // vezes - foi o que o Master viu ("01/08 consta como 524 porem foi metade")
+  const todos = [...fechamentos, ...semDuplicataDaPlanilha(fechamentos, extrasFechamentos)];
   return todos
     .map((f) => ({
       unidade: f.unidade,
@@ -126,16 +153,19 @@ async function listarEntradas(extrasFechamentos = []) {
 }
 
 // Entrada em dinheiro DIA A DIA por unidade. listarEntradas devolve uma
-// linha por FECHAMENTO, e as duas fontes se sobrepoem: o Firestore recusa
-// dois lancamentos na mesma unidade+data (fechamentosLive.create), mas o
-// snapshot da planilha ARCFOOD e' fonte independente - o mesmo dia pode vir
-// pelos dois caminhos e apareceria duas vezes na coluna e no relatorio.
-// Aqui o dia vira UMA linha com a soma, que e' como o Master le ("quanto
-// entrou de dinheiro nessa loja nesse dia").
+// linha por FECHAMENTO, e o mesmo dia ainda pode ter mais de uma linha DENTRO
+// da mesma fonte: a planilha ARCFOOD lanca a sangria/retirada como linha
+// separada do fechamento do dia (ver mesclarLancamentosDoMesmoDia em
+// sheetsSync.js). Aqui o dia vira UMA linha com a soma, que e' como o Master
+// le ("quanto entrou de dinheiro nessa loja nesse dia").
 //
-// Somar e' o mesmo criterio que /api/fechamentos ja usa pro dia repetido
-// (mesclarLancamentosDoMesmoDia soma entradaDinheiro, que esta em
-// CAMPOS_SOMA) - entao a coluna nao inventa uma conta propria.
+// O que esta soma NAO faz e' juntar app + planilha: o mesmo fechamento nas
+// duas fontes e' um lancamento so, e ja foi descartado em listarEntradas (ver
+// semDuplicataDaPlanilha). Somar ali dobrava a entrada do dia.
+//
+// Somar dentro da fonte e' o mesmo criterio que /api/fechamentos ja usa pro
+// dia repetido (entradaDinheiro esta em CAMPOS_SOMA) - a coluna nao inventa
+// uma conta propria.
 //
 // O total nao muda: somar as linhas por fechamento ou os dias agregados da
 // o mesmo numero - por isso o KPI de Entrada continua batendo.
@@ -306,4 +336,4 @@ async function marcarVerificada(chave, { verificada, porId, porEmail }, extrasFe
   return { chave, verificada: r.verificada, verificadaPorEmail: r.verificadaPorEmail, verificadaEm: r.verificadaEm };
 }
 
-module.exports = { listar, listarEntradas, listarEntradasPorDia, calcularSaldoCaixa, filtrar, marcarVerificada, reclassificar, corrigirItemPlanilha, pareceSangria };
+module.exports = { listar, listarEntradas, semDuplicataDaPlanilha, listarEntradasPorDia, calcularSaldoCaixa, filtrar, marcarVerificada, reclassificar, corrigirItemPlanilha, pareceSangria };
