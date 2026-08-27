@@ -848,16 +848,25 @@ function dispPdf(res, nome, inline) {
   res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${nome}.pdf"`);
 }
 
-async function gerarPdfAnexoAssinado(r, res, opcoes) {
-  const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
-  const out = await PDFDocument.create();
-  const fonte = await out.embedFont(StandardFonts.Helvetica);
-  const negrito = await out.embedFont(StandardFonts.HelveticaBold);
-  const assinadas = assinaturasAssinadas(r);
-  const modelo = TIPOS[r.tipo];
-
-  for (const anexo of r.anexos || []) {
-    const bytes = await storage.baixarArquivo(anexo.path);
+// Cola os anexos como paginas de um documento pdf-lib. Usada por DOIS
+// caminhos: o tipo so-anexo (o anexo E' o documento) e o formulario comum,
+// onde os anexos entram DEPOIS do formulario desenhado - pedido do Master:
+// "quando tiver anexo, juntar os anexos ao PDF do formulario".
+//
+// Nunca lanca: anexo que sumiu do storage, PDF corrompido ou formato que nem
+// e' imagem viram uma pagina dizendo o que houve, em vez de derrubar o PDF
+// inteiro. Um formulario assinado nao pode ficar impossivel de baixar por
+// causa de um arquivo ruim que alguem anexou.
+//
+// reservarRodape: altura (pt) que a imagem deve evitar embaixo, pra faixa de
+// assinatura carimbada depois nao cobrir o documento. No formulario comum
+// nao ha faixa, entao vai 0 e a imagem usa a pagina inteira.
+async function anexarDocumentos(out, anexos, negrito, opts) {
+  const { PDFDocument, rgb } = require('pdf-lib');
+  const rodape = (opts && opts.reservarRodape) || 0;
+  for (const anexo of anexos || []) {
+    let bytes = null;
+    try { bytes = await storage.baixarArquivo(anexo.path); } catch (e) { bytes = null; }
     if (!bytes) {
       const p = out.addPage();
       p.drawText(`Anexo indisponível: ${anexo.nome}`, { x: 40, y: p.getSize().height - 60, size: 12, font: negrito, color: rgb(0.6, 0.1, 0.1) });
@@ -878,21 +887,30 @@ async function gerarPdfAnexoAssinado(r, res, opcoes) {
       try { img = (anexo.tipo || '').includes('png') ? await out.embedPng(bytes) : await out.embedJpg(bytes); } catch (e) { img = null; }
       const p = out.addPage([595.28, 841.89]);
       if (img) {
-        // encaixa a imagem ACIMA da faixa - assim a assinatura nunca cobre
-        // o documento, ela fica embaixo dele
         const larguraUtil = 595.28 - 60;
-        const alturaUtil = 841.89 - 60 - FAIXA_H;
+        const alturaUtil = 841.89 - 60 - rodape;
         const escala = Math.min(larguraUtil / img.width, alturaUtil / img.height, 1);
         p.drawImage(img, {
           x: (595.28 - img.width * escala) / 2,
-          y: FAIXA_H + 20 + (alturaUtil - img.height * escala) / 2,
+          y: rodape + 20 + (alturaUtil - img.height * escala) / 2,
           width: img.width * escala, height: img.height * escala,
         });
       } else {
-        p.drawText(`Imagem em formato não suportado: ${anexo.nome}`, { x: 40, y: 800, size: 11, font: negrito, color: rgb(0.6, 0.1, 0.1) });
+        p.drawText(`Arquivo anexado em formato que não entra no PDF: ${anexo.nome}`, { x: 40, y: 800, size: 11, font: negrito, color: rgb(0.6, 0.1, 0.1) });
       }
     }
   }
+}
+
+async function gerarPdfAnexoAssinado(r, res, opcoes) {
+  const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
+  const out = await PDFDocument.create();
+  const fonte = await out.embedFont(StandardFonts.Helvetica);
+  const negrito = await out.embedFont(StandardFonts.HelveticaBold);
+  const assinadas = assinaturasAssinadas(r);
+  const modelo = TIPOS[r.tipo];
+
+  await anexarDocumentos(out, r.anexos, negrito, { reservarRodape: FAIXA_H });
 
   if (!out.getPageCount()) {
     const p = out.addPage();
@@ -919,7 +937,17 @@ async function gerarPdf(r, res, opcoes) {
   if (modelo && modelo.soAnexo) return gerarPdfAnexoAssinado(r, res, opcoes);
   const doc = new PDFDocument({ margin: 40, size: 'A4' });
   dispPdf(res, `${r.tipo}-${r.unidade.replace(/[^a-zA-Z0-9-]+/g, '_')}`, opcoes && opcoes.inline);
-  doc.pipe(res);
+  // SEM anexo: streaming direto pro navegador, como sempre foi - nao ha
+  // motivo pra segurar o PDF inteiro na memoria.
+  // COM anexo: precisa juntar as paginas depois (pdfkit so escreve, quem
+  // cola documento e' o pdf-lib), entao o formulario e' montado num buffer
+  // primeiro. Pedido do Master: "quando tiver anexo, juntar os anexos ao PDF
+  // do formulario" - antes o PDF so listava os nomes no rodape e quem ia
+  // pagar tinha que baixar cada arquivo por fora.
+  const comAnexos = (r.anexos || []).length > 0;
+  const pedacos = [];
+  if (comAnexos) doc.on('data', (c) => pedacos.push(c));
+  else doc.pipe(res);
 
   const X = doc.page.margins.left;
   const LARGURA = doc.page.width - X * 2;
@@ -1082,13 +1110,39 @@ async function gerarPdf(r, res, opcoes) {
   }
   if ((r.anexos || []).length) {
     doc.font('Helvetica').fontSize(8).fillColor('#333')
-      .text(`Anexos (${r.anexos.length}): ${r.anexos.map((a) => a.nome).join(' · ')}`, X, yAssin + (modelo.obs ? 62 : 40), { width: LARGURA });
+      .text(`Anexos (${r.anexos.length}) nas páginas seguintes: ${r.anexos.map((a) => a.nome).join(' · ')}`, X, yAssin + (modelo.obs ? 62 : 40), { width: LARGURA });
   }
 
   doc.end();
+  if (!comAnexos) return;
+
+  // espera o pdfkit fechar antes de abrir o resultado com o pdf-lib
+  await new Promise((ok, falhou) => { doc.on('end', ok); doc.on('error', falhou); });
+  const formulario = Buffer.concat(pedacos);
+  try {
+    const { PDFDocument, StandardFonts } = require('pdf-lib');
+    const out = await PDFDocument.load(formulario);
+    const negrito = await out.embedFont(StandardFonts.HelveticaBold);
+    // rodape 0: aqui nao ha faixa de assinatura carimbada (as assinaturas ja
+    // estao desenhadas na pagina do formulario), entao o anexo usa a folha
+    // inteira
+    await anexarDocumentos(out, r.anexos, negrito, { reservarRodape: 0 });
+    return res.end(Buffer.from(await out.save()));
+  } catch (e) {
+    // juntar falhou (PDF de origem estranho, storage fora): entrega o
+    // formulario sozinho. Perder o anexo e' ruim; perder o formulario
+    // assinado por causa do anexo seria pior - a loja ficaria sem o
+    // documento que ela precisa pra pagar.
+    console.error('formularios: não consegui juntar os anexos ao PDF (%s) - enviando só o formulário. %s', r.id, e.message);
+    return res.end(formulario);
+  }
 }
 
 module.exports = { TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, editar, cancelar, remover, gerarPdf, chaveDoToken, parseValor,
   criarParaPreenchimento, vistaPreenchimento, salvarPreenchimento, cancelarPreenchimento, marcarEnviadoPagamento,
   reabrirAnexo,
+  // mesma saida que parque.js expoe: quem escreve o documento por fora do
+  // modulo (teste, restauracao de backup) precisa poder derrubar o cache de
+  // 60s, senao a leitura seguinte devolve o estado velho
+  invalidar: () => cache.invalidar(),
 };
