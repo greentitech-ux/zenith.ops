@@ -7955,7 +7955,19 @@ app.get('/api/saidas-painel', requireAnySection('lancamento', 'sangria'), async 
   // agregada por unidade+dia: e' assim que a coluna "Entrada de dinheiro"
   // da tela e o relatorio mostram (um dia = uma linha). O total nao muda.
   const entradas = auth.filterByUnidade(req, await saidasPainel.listarEntradasPorDia(fechamentosData));
-  res.json({ itens, entradas: saidasPainel.filtrar(entradas, { unidades: unidadesSet, grupo, inicio, fim }) });
+  // "dinheiro em loja" NAO usa o periodo do filtro de proposito: e' quanto tem
+  // na gaveta hoje, contado desde a ultima retirada de cada unidade (mesma
+  // regua da conferencia, ver dinheiroEmLoja). So o recorte de unidade/grupo
+  // da tela se aplica - o de datas nao.
+  const caixa = saidasPainel.dinheiroEmLoja(
+    saidasPainel.filtrar(todas, { unidades: unidadesSet, grupo }),
+    saidasPainel.filtrar(auth.filterByUnidade(req, await saidasPainel.listarEntradas(fechamentosData)), { unidades: unidadesSet, grupo }),
+  );
+  res.json({
+    itens,
+    entradas: saidasPainel.filtrar(entradas, { unidades: unidadesSet, grupo, inicio, fim }),
+    caixa,
+  });
 });
 
 // Editar (ou zerar, que e' o "excluir" da tela) a ENTRADA em dinheiro de um
