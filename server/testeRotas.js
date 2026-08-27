@@ -8276,6 +8276,71 @@ setTimeout(async () => {
   if (!okOcrUso) ruins += 1;
   console.log(`${okOcrUso ? '✓' : '✗'} Leitura por imagem: custo medido por chamada/unidade/pessoa e teto diário por usuário (Master isento)`);
 
+  // ------------------------------------------------------------------
+  // CHECK-IN DO PARQUE TRAVADO (vídeo do Master). Sintoma: digitando o total
+  // que a tela mostrava (R$150), o servidor recusava dizendo que o total era
+  // R$140; digitando R$140, a própria tela recusava dizendo que era R$150.
+  // Laço sem saída - nenhum valor salvava o check-in.
+  //
+  // Causa: o campo de nascimento virou DIGITADO (dd/mm/aaaa, ver data-br.js),
+  // mas contarNiver/valorEntradasPreview continuaram lendo o valor CRU da
+  // tela e entregando "22/08/2006" pro ehNiverAuto. new Date('22/08/2006
+  // T00:00:00') é Invalid Date -> a TELA nunca via o aniversariante. O
+  // servidor recebe ISO (coletarCriancas converte no envio) e SEMPRE via.
+  // Os dois totais passaram a discordar exatamente pelo desconto de niver.
+  //
+  // Esta é uma regressão introduzida junto com o campo digitável - por isso o
+  // teste compara TELA x SERVIDOR em vez de conferir só um dos lados: um
+  // lado sozinho continuaria "passando" com a tela cega.
+  let okNiverDigitado = false;
+  try {
+    const fs = require('fs'); const path = require('path');
+    const parqueMod = require('./parque');
+    const htmlCk = fs.readFileSync(path.join(__dirname, 'public', 'parque-checkin.html'), 'utf8');
+    const dataBrSrc = fs.readFileSync(path.join(__dirname, 'public', 'data-br.js'), 'utf8');
+    // monta um sandbox com o ehNiverAuto REAL da tela (recortado do arquivo)
+    // + o data-br.js REAL - assim o teste roda o código que vai pra produção,
+    // não uma cópia que pode divergir depois
+    const mNiver = /const NIVER_JANELA_DIAS = \d+;/.exec(htmlCk);
+    const mFn = /function ehNiverAuto\(dataNascimento, dataUtilizacao\)\{[\s\S]*?\n\}/.exec(htmlCk);
+    if (!mNiver || !mFn) throw new Error('não achei ehNiverAuto/NIVER_JANELA_DIAS em parque-checkin.html');
+    const telaEhNiver = new Function(`${dataBrSrc}\n${mNiver[0]}\n${mFn[0]}\nreturn ehNiverAuto;`)();
+
+    const dataUso = '2026-08-26';
+    // a criança do vídeo: nasceu 22/08, entrou dia 26/08 - 4 dias, dentro da
+    // janela de 7. É aniversariante pros dois lados, ou não é pra nenhum.
+    const telaBR = telaEhNiver('22/08/2006', dataUso);
+    const telaISO = telaEhNiver('2006-08-22', dataUso);
+    const servidor = parqueMod.ehNiver('2006-08-22', dataUso);
+    // criança fora da janela continua fora dos dois lados (o conserto não
+    // pode virar "todo mundo é aniversariante")
+    const foraTelaBR = telaEhNiver('05/04/2009', dataUso);
+    const foraServidor = parqueMod.ehNiver('2009-04-05', dataUso);
+    // data que não existe no calendário não pode virar aniversariante
+    const invalida = telaEhNiver('31/02/2010', dataUso);
+    const vazio = telaEhNiver('', dataUso);
+
+    const conf = {
+      'a TELA reconhece o aniversariante lendo o campo digitado (dd/mm/aaaa)': telaBR === true,
+      'a TELA e o SERVIDOR concordam sobre a MESMA criança (era isso que travava)':
+        telaBR === servidor && servidor === true,
+      'a tela continua aceitando ISO (o valor já salvo, vindo de outra rota)': telaISO === true,
+      'criança fora da janela não vira aniversariante em nenhum dos dois lados':
+        foraTelaBR === false && foraServidor === false,
+      'data que não existe no calendário (31/02) não vira aniversariante': invalida === false,
+      'campo em branco não vira aniversariante': vazio === false,
+      // sem isto o conserto seria só no ehNiverAuto e os dois pontos que leem
+      // o campo continuariam entregando texto cru pra outra função qualquer
+      'os dois pontos que calculam o total leem o MESMO campo de nascimento':
+        (htmlCk.match(/ehNiverAuto\(l\.querySelector\('\.crianca-nasc'\)\.value/g) || []).length === 2,
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okNiverDigitado = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okNiverDigitado = false; console.log('  erro: ' + e.message); }
+  if (!okNiverDigitado) ruins += 1;
+  console.log(`${okNiverDigitado ? '✓' : '✗'} Check-in do Parque: tela e servidor calculam o MESMO total com nascimento digitado (aniversariante não trava mais o check-in)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
