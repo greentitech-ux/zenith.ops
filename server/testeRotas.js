@@ -6901,6 +6901,141 @@ setTimeout(async () => {
   console.log(`${okDuplicataEntreAbas ? '✓' : '✗'} ARCFOOD: dia presente na aba BD e na aba de histórico para de ser contado duas vezes (entrada/faturamento/saídas)`);
 
   // ------------------------------------------------------------------
+  // Master/Admin edita E exclui a Entrada de dinheiro e a Sangria/Depósito
+  // direto no Painel de Saídas, e TUDO se reajusta junto. Pedido do Master:
+  // "como master e ADMIN precisamos ter como editar a entrada de dinheiro e
+  // editar a sangria também", "não só poder editar como excluir também" e
+  // "tudo precisa refletir, tudo precisa auto ajustar".
+  //
+  // O "auto ajuste" é o que este bloco protege de verdade: `esperado` e
+  // `divergencia` da sangria eram calculados UMA vez, no lançamento, e ficavam
+  // gravados. Corrigir a entrada depois não mexia neles - a tela seguia
+  // acusando uma falta que já não existia. Agora a conta é refeita na leitura
+  // (recalcularDivergencias), e o valor da hora fica em esperadoNaHora.
+  let okEditarEntradaSangria = false;
+  try {
+    const cabMaster = { Authorization: 'Bearer ' + token };
+    const UNI = 'TESTE_EDITA_CAIXA';
+
+    // dia 1: entra 1000, sai 100 -> sobra 900 pra sangrar
+    const f1 = JSON.parse((await postarJson('/api/fechamentos/lancar', {
+      unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-01',
+      campos: { entradaDinheiro: 1000 }, detalhesSaidas: [{ descricao: 'Motoboy', valor: 100 }],
+    }, cabMaster)).corpo);
+    const sg = JSON.parse((await postarJson('/api/sangrias', {
+      unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-01',
+      valor: 900, descricao: 'Sangria do dia', periodoInicio: '2026-11-01', periodoFim: '2026-11-01',
+      nomeDepositante: 'Fulano Teste', password: process.env.MASTER_PASSWORD,
+    }, cabMaster)).corpo);
+
+    const periodo = 'inicio=2026-11-01&fim=2026-11-30';
+    const ler = async () => JSON.parse((await pedir(`/api/saidas-painel?${periodo}`, cabMaster)).corpo);
+    const sangriaDe = (r) => (r.itens || []).find((it) => it.chave === `sangria::${sg.id}`);
+    const entradaDe = (r) => (r.entradas || []).find((e) => e.unidade === UNI && e.data === '2026-11-01');
+
+    const inicial = await ler();
+    const sgInicial = sangriaDe(inicial);
+    const entInicial = entradaDe(inicial);
+
+    // ---- editar a ENTRADA: 1000 -> 600. O esperado da sangria tem que cair
+    // junto (600 - 100 = 500), e a sangria de 900 passa a ser SOBRA de 400
+    const rEditaEntrada = await enviarJson('PATCH', '/api/saidas-painel/entrada',
+      { fechamentoId: entInicial.fechamentoId, valor: 600, motivo: 'contagem refeita' }, cabMaster);
+    const aposEntrada = await ler();
+    const sgAposEntrada = sangriaDe(aposEntrada);
+    const entAposEntrada = entradaDe(aposEntrada);
+
+    // ---- editar a SANGRIA: 900 -> 500, que é exatamente o esperado agora
+    const rEditaSangria = await enviarJson('PATCH', `/api/sangrias/${sg.id}`, { valor: 500 }, cabMaster);
+    const aposSangria = await ler();
+    const sgAposSangria = sangriaDe(aposSangria);
+
+    // ---- SEGUNDA sangria, em outro dia: o esperado dela só pode ser o que a
+    // primeira deixou. Entradas até 02/11 = 600 + 300 = 900; saídas = 100;
+    // já retirado na sangria anterior = 500 -> esperado 300.
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-02',
+      campos: { entradaDinheiro: 300 },
+    }, cabMaster);
+    const sg2 = JSON.parse((await postarJson('/api/sangrias', {
+      unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-02',
+      valor: 300, descricao: 'Sangria do dia 2', periodoInicio: '2026-11-02', periodoFim: '2026-11-02',
+      nomeDepositante: 'Fulano Teste', password: process.env.MASTER_PASSWORD,
+    }, cabMaster)).corpo);
+    const comDuas = await ler();
+    const sg2Lida = (comDuas.itens || []).find((it) => it.chave === `sangria::${sg2.id}`);
+
+    // ---- loja comum não edita nem exclui nada disso
+    const senhaHash = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-edita-caixa-loja', {
+      passwordHash: senhaHash, role: 'user', active: true,
+      email: 'edita-caixa@teste.local', username: 'editacaixa',
+      permissions: { sections: ['lancamento', 'sangria'], unidades: [UNI], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabLoja = { Authorization: 'Bearer ' + (await auth.login('edita-caixa@teste.local', 'SenhaDeTeste!2026')).token };
+    const rLojaEntrada = await enviarJson('PATCH', '/api/saidas-painel/entrada', { fechamentoId: f1.id, valor: 1, motivo: 'x' }, cabLoja);
+    const rLojaSangria = await enviarJson('PATCH', `/api/sangrias/${sg.id}`, { valor: 1 }, cabLoja);
+    const rLojaExcluiSangria = await enviarJson('DELETE', `/api/sangrias/${sg.id}`, {}, cabLoja);
+
+    // ---- valor inválido é recusado
+    const rNegativo = await enviarJson('PATCH', '/api/saidas-painel/entrada', { fechamentoId: f1.id, valor: -5 }, cabMaster);
+    const rSemLancamento = await enviarJson('PATCH', '/api/saidas-painel/entrada', { valor: 10 }, cabMaster);
+
+    // ---- EXCLUIR a entrada (valor 0): some da coluna, o fechamento fica
+    const rExcluiEntrada = await enviarJson('PATCH', '/api/saidas-painel/entrada',
+      { fechamentoId: entInicial.fechamentoId, valor: 0, motivo: 'lançada em duplicidade' }, cabMaster);
+    const semEntrada = await ler();
+    const fechamentoAindaExiste = JSON.parse((await pedir(`/api/fechamentos`, cabMaster)).corpo)
+      .some((f) => f.id === f1.id);
+
+    // ---- EXCLUIR a sangria: some do painel
+    const rExcluiSangria = await enviarJson('DELETE', `/api/sangrias/${sg.id}`, {}, cabMaster);
+    const semSangria = await ler();
+
+    const htmlSaidas = require('fs').readFileSync(require('path').join(__dirname, 'public', 'saidas.html'), 'utf8');
+    const cem = (v) => Math.round((v || 0) * 100);
+    const conf = {
+      'a sangria nasce batendo com o caixa (1000 − 100 = 900 esperado, sem divergência)':
+        !!sgInicial && cem(sgInicial.esperado) === 90000 && sgInicial.temDivergencia === false,
+      'Master/Admin edita a entrada de dinheiro pelo painel': rEditaEntrada.status === 200 && !!entAposEntrada && cem(entAposEntrada.valor) === 60000,
+      'AUTO-AJUSTE: baixar a entrada recalcula o esperado da sangria (600 − 100 = 500)':
+        !!sgAposEntrada && cem(sgAposEntrada.esperado) === 50000,
+      'AUTO-AJUSTE: a sangria de 900 vira sobra de 400 e passa a acusar divergência':
+        !!sgAposEntrada && cem(sgAposEntrada.divergencia) === 40000 && sgAposEntrada.temDivergencia === true,
+      'o que o sistema disse NA HORA não se perde (esperadoNaHora continua 900)':
+        !!sgAposEntrada && cem(sgAposEntrada.esperadoNaHora) === 90000,
+      'Master/Admin edita o valor da sangria': rEditaSangria.status === 200,
+      'AUTO-AJUSTE: com a sangria em 500 a divergência zera sozinha':
+        !!sgAposSangria && cem(sgAposSangria.valor) === 50000 && cem(sgAposSangria.divergencia) === 0 && sgAposSangria.temDivergencia === false,
+      'a 2ª sangria só espera o que a 1ª deixou (900 − 100 − 500 já retirado = 300)':
+        !!sg2Lida && cem(sg2Lida.esperado) === 30000 && cem(sg2Lida.divergencia) === 0 && sg2Lida.temDivergencia === false,
+      'loja (nem Master nem Admin) não edita entrada nem sangria, e não exclui sangria':
+        rLojaEntrada.status === 403 && rLojaSangria.status === 403 && rLojaExcluiSangria.status === 403,
+      'entrada negativa é recusada': rNegativo.status === 400,
+      'sem informar o lançamento é recusado, e a mensagem diz o que falta':
+        rSemLancamento.status === 400 && /Informe o lançamento/.test(JSON.parse(rSemLancamento.corpo || '{}').error || ''),
+      'excluir a entrada (valor 0) tira o dia da coluna': rExcluiEntrada.status === 200 && !entradaDe(semEntrada),
+      'excluir a entrada NÃO apaga o fechamento (só a entrada em dinheiro)': fechamentoAindaExiste,
+      'Master/Admin exclui a sangria e ela some do painel': rExcluiSangria.status === 200 && !sangriaDe(semSangria),
+      'a tela recarrega tudo do servidor depois de editar/excluir (KPIs e colunas juntos)':
+        /async function salvarEditarEntrada\(\)[\s\S]{0,1400}await carregar\(\);/.test(htmlSaidas)
+        && /async function salvarEditarSangria\(\)[\s\S]{0,1400}await carregar\(\);/.test(htmlSaidas)
+        && /async function excluirDoModal\(\)[\s\S]{0,1800}await carregar\(\);/.test(htmlSaidas),
+      'o botão Excluir fica DENTRO do modal, ao lado do valor que ele apaga (não solto no card)':
+        /id="ed-saida-excluir"[^>]*onclick="excluirDoModal\(\)"/.test(htmlSaidas)
+        && /getElementById\('ed-saida-excluir'\)\.classList\.add\('hidden'\)/.test(htmlSaidas),
+      'excluir pede confirmação antes (é ação que não desfaz)':
+        /async function excluirDoModal\(\)[\s\S]{0,900}confirm\(/.test(htmlSaidas),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okEditarEntradaSangria = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okEditarEntradaSangria = false; console.log('  erro: ' + e.message); }
+  if (!okEditarEntradaSangria) ruins += 1;
+  console.log(`${okEditarEntradaSangria ? '✓' : '✗'} Painel de Saídas: Master/Admin edita e exclui Entrada e Sangria, e a conferência de caixa se reajusta sozinha`);
+
+  // ------------------------------------------------------------------
   // Pedido real do Master: "tem muitas saídas que vieram da planilha e
   // percebi que não aparece aqui, só as lançadas no próprio sistema". Causa
   // raiz dupla: (1) linhaParaFechamento (leitura da planilha ARCFOOD) nunca

@@ -105,4 +105,29 @@ async function corrigirItem(chave, { descricao, valor, porId, porEmail }) {
   return registro;
 }
 
-module.exports = { listAll, mapaDeChaves, marcar, reclassificar, corrigirItem, ORIGENS_MANUAIS };
+// ENTRADA em dinheiro corrigida a mao pelo Master/Admin, para o fechamento
+// que veio da PLANILHA e por isso nao tem documento no Firestore pra editar
+// (mesmo caminho de corrigirItem acima: a planilha fica intacta, a leitura do
+// painel passa a mostrar o valor corrigido). Chave: `entrada::${fechamentoId}`.
+//
+// valor 0 e' o "excluir" da tela - a entrada do dia deixa de existir na
+// leitura (listarEntradas descarta valor zero) sem apagar o fechamento, que
+// continua com faturamento, saidas e o resto. Por isso 0 e' aceito aqui e
+// negativo nao: entrada negativa nao existe na operacao.
+async function corrigirEntrada(chave, { valor, porId, porEmail }) {
+  if (!chave || typeof chave !== 'string') throw new Error('Chave inválida.');
+  const v = Number(valor);
+  if (!Number.isFinite(v) || v < 0) throw new Error('Informe um valor válido para a entrada.');
+  const registro = {
+    chave,
+    correcaoEntrada: { valor: +v.toFixed(2) },
+    corrigidoPorId: porId,
+    corrigidoPorEmail: porEmail,
+    corrigidoEm: new Date().toISOString(),
+  };
+  await COLLECTION.doc(chave).set(registro, { merge: true });
+  cache.invalidar();
+  return registro;
+}
+
+module.exports = { listAll, mapaDeChaves, marcar, reclassificar, corrigirItem, corrigirEntrada, ORIGENS_MANUAIS };

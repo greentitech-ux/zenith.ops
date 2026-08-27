@@ -239,8 +239,10 @@
   <div class="modal">
     <h3 id="ed-saida-titulo">✏️ Editar saída</h3>
     <div class="sub" id="ed-saida-sub"></div>
-    <label>Descrição</label>
-    <input type="text" id="ed-saida-descricao" maxlength="300">
+    <div id="ed-saida-descricao-bloco">
+      <label>Descrição</label>
+      <input type="text" id="ed-saida-descricao" maxlength="300">
+    </div>
     <label>Valor (R$)</label>
     <input type="number" step="0.01" inputmode="decimal" id="ed-saida-valor">
     <div id="ed-saida-motivo-bloco" class="hidden">
@@ -250,6 +252,10 @@
     <div class="msg hidden" id="ed-saida-msg"></div>
     <div class="modal-acoes">
       <button type="button" class="link-btn" onclick="fecharEditarSaida()">Cancelar</button>
+      <!-- Excluir mora DENTRO do modal, ao lado do valor que ele apaga: no
+           card, ao lado de Editar, um toque errado apaga sem a pessoa ter
+           visto o que ia embora. -->
+      <button type="button" class="link-btn hidden" id="ed-saida-excluir" onclick="excluirDoModal()" style="color:var(--bad);">🗑️ Excluir</button>
       <button type="button" class="btn-verificar" id="ed-saida-salvar" onclick="salvarEditarSaida()">Salvar</button>
     </div>
   </div>
@@ -474,6 +480,13 @@ function cardHtml(it){
   // corrigir uma saída lançada errado. Master/Admin muda na hora; as demais
   // tags pedem correção pela MESMA fila do fechamento (decisão do Master).
   // Sangria não entra: ela já se edita em Fechamentos.
+  // Sangria/Depósito lançada no app: Master/Admin edita e exclui aqui mesmo.
+  // Pedido do Master: "precisamos ter como editar a entrada de dinheiro e
+  // editar a sangria também ... não só poder editar como excluir também".
+  let corrigirSangria = '';
+  if(PODE_CONFERIR && it.chave.startsWith('sangria::')){
+    corrigirSangria = `<button type="button" class="link-btn" onclick='abrirEditarSangria(${JSON.stringify(it)})'>✏️ Editar</button>`;
+  }
   let corrigir = '';
   if(it.origem === 'saida' && !it.chave.startsWith('sangria::')){
     corrigir = PODE_CONFERIR
@@ -494,7 +507,7 @@ function cardHtml(it){
     ${it.corrigida ? `<div class="saida-sub">antes: ${escapeHtml(it.descricaoOriginal||'')} · ${fmtMoney(it.valorOriginal)} · corrigida por ${escapeHtml(it.corrigidaPorEmail||'—')}</div>` : ''}
     ${it.temDivergencia ? `<div class="saida-sub dif-motivo">esperado ${fmtMoney(it.esperado)} · ${escapeHtml(it.motivoDivergencia || 'sem motivo informado')}${(it.extra&&it.extra.diasSemFechamento) ? ` · ${it.extra.diasSemFechamento} dia(s) sem fechamento na hora` : ''}</div>` : ''}
     ${it.verificada ? `<div class="saida-sub" style="color:var(--ok);">verificada por ${escapeHtml(it.verificadaPorEmail||'—')} em ${fmtDataHora(it.verificadaEm)}</div>` : ''}
-    ${acao || mover || corrigir ? `<div class="saida-acoes">${acao}${mover}${corrigir}</div>` : ''}
+    ${acao || mover || corrigir || corrigirSangria ? `<div class="saida-acoes">${acao}${mover}${corrigir}${corrigirSangria}</div>` : ''}
   </div>`;
 }
 
@@ -509,6 +522,8 @@ function entradaCardHtml(e){
     </div>
     <div class="saida-desc">${fmtData(e.data)}</div>
     <div class="saida-valor">${fmtMoney(e.valor)}</div>
+    ${e.corrigida ? `<div class="saida-sub">antes: ${fmtMoney(e.valorOriginal)} · corrigida por ${escapeHtml(e.corrigidaPorEmail||'—')}</div>` : ''}
+    ${PODE_CONFERIR ? `<div class="saida-acoes"><button type="button" class="link-btn" onclick='abrirEditarEntrada(${JSON.stringify(e)})'>✏️ Editar</button></div>` : ''}
   </div>`;
 }
 
@@ -573,7 +588,13 @@ function renderTudo(){
 // mesma forma do fechamento".
 let ED_SAIDA = null;
 function abrirEditarSaida(it){
+  ED_TIPO = 'saida';
   ED_SAIDA = it;
+  restaurarBlocoDescricao();
+  document.getElementById('ed-saida-descricao-bloco').classList.remove('hidden');
+  // saída avulsa não se exclui por aqui: ela é linha do fechamento, e apagar
+  // uma linha é correção do fechamento (fila da Central), não ação de painel
+  document.getElementById('ed-saida-excluir').classList.add('hidden');
   document.getElementById('ed-saida-titulo').textContent = PODE_CONFERIR ? '✏️ Editar saída' : '✏️ Pedir correção da saída';
   document.getElementById('ed-saida-sub').textContent = `${it.unidadeNome||it.unidade||''} · ${fmtData(it.data)}`;
   document.getElementById('ed-saida-descricao').value = it.descricao || '';
@@ -589,8 +610,112 @@ function abrirEditarSaida(it){
 function fecharEditarSaida(){
   document.getElementById('ed-saida-overlay').classList.add('hidden');
   ED_SAIDA = null;
+  ED_TIPO = 'saida';
+}
+
+// O MESMO modal serve aos três: saída avulsa, Sangria/Depósito e Entrada de
+// dinheiro. ED_TIPO diz qual rota o Salvar/Excluir chama e quais campos ficam
+// visíveis - três modais quase iguais divergiriam na primeira mudança.
+let ED_TIPO = 'saida';
+let ED_ENTRADA = null;
+// o bloco de Descrição é trocado por um seletor quando a entrada do dia tem
+// mais de um lançamento; guardar o original é o que devolve o campo de texto
+// na próxima vez que o modal abrir como saída ou sangria
+const DESC_BLOCO_PADRAO = document.getElementById('ed-saida-descricao-bloco').innerHTML;
+function restaurarBlocoDescricao(){
+  const bloco = document.getElementById('ed-saida-descricao-bloco');
+  if(!document.getElementById('ed-saida-descricao')) bloco.innerHTML = DESC_BLOCO_PADRAO;
+}
+
+function abrirEditarSangria(it){
+  ED_TIPO = 'sangria';
+  ED_SAIDA = it;
+  restaurarBlocoDescricao();
+  document.getElementById('ed-saida-titulo').textContent = '✏️ Editar Sangria/Depósito';
+  document.getElementById('ed-saida-sub').textContent = `${it.unidadeNome||it.unidade||''} · ${fmtData(it.data)}`;
+  document.getElementById('ed-saida-descricao-bloco').classList.remove('hidden');
+  document.getElementById('ed-saida-descricao').value = it.descricao || '';
+  document.getElementById('ed-saida-valor').value = it.valor != null ? it.valor : '';
+  document.getElementById('ed-saida-motivo-bloco').classList.add('hidden');
+  document.getElementById('ed-saida-salvar').textContent = 'Salvar';
+  document.getElementById('ed-saida-excluir').classList.remove('hidden');
+  document.getElementById('ed-saida-msg').classList.add('hidden');
+  document.getElementById('ed-saida-overlay').classList.remove('hidden');
+}
+
+// A entrada é do DIA, mas quem se edita é o LANÇAMENTO. Num dia com mais de um
+// (ver `origens`), o modal pede qual - somar tudo num campo só faria o Master
+// escolher no escuro qual lançamento receberia a diferença.
+function abrirEditarEntrada(e){
+  ED_TIPO = 'entrada';
+  ED_ENTRADA = e;
+  const origens = e.origens || [];
+  document.getElementById('ed-saida-titulo').textContent = '✏️ Editar entrada de dinheiro';
+  document.getElementById('ed-saida-sub').textContent = `${e.unidadeNome||e.unidade||''} · ${fmtData(e.data)}`
+    + (origens.length > 1 ? ` · ${origens.length} lançamentos nesse dia` : '');
+  const bloco = document.getElementById('ed-saida-descricao-bloco');
+  if(origens.length > 1){
+    bloco.classList.remove('hidden');
+    bloco.innerHTML = '<label>Qual lançamento</label><select id="ed-entrada-origem">'
+      + origens.map((o,i)=>`<option value="${i}">${fmtMoney(o.valor)}</option>`).join('') + '</select>';
+    document.getElementById('ed-entrada-origem').addEventListener('change', (ev)=>{
+      document.getElementById('ed-saida-valor').value = origens[Number(ev.target.value)].valor;
+    });
+    document.getElementById('ed-saida-valor').value = origens[0].valor;
+  } else {
+    bloco.classList.add('hidden');
+    document.getElementById('ed-saida-valor').value = e.valor != null ? e.valor : '';
+  }
+  document.getElementById('ed-saida-motivo-bloco').classList.remove('hidden');
+  document.getElementById('ed-saida-motivo').value = '';
+  document.getElementById('ed-saida-salvar').textContent = 'Salvar';
+  document.getElementById('ed-saida-excluir').classList.remove('hidden');
+  document.getElementById('ed-saida-msg').classList.add('hidden');
+  document.getElementById('ed-saida-overlay').classList.remove('hidden');
+}
+
+function origemEntradaSelecionada(){
+  const origens = (ED_ENTRADA && ED_ENTRADA.origens) || [];
+  if(origens.length <= 1) return origens[0] || { fechamentoId: ED_ENTRADA && ED_ENTRADA.fechamentoId };
+  const sel = document.getElementById('ed-entrada-origem');
+  return origens[Number(sel ? sel.value : 0)] || origens[0];
+}
+
+// Excluir = a entrada/sangria do dia deixa de existir. Na entrada isso é o
+// valor virar 0: o fechamento continua com faturamento, saídas e o resto -
+// some só o dinheiro que entrou, que é o que o card representa.
+async function excluirDoModal(){
+  const msg = document.getElementById('ed-saida-msg');
+  const btn = document.getElementById('ed-saida-excluir');
+  if(ED_TIPO === 'sangria'){
+    if(!confirm(`Excluir a Sangria/Depósito de ${fmtMoney(ED_SAIDA.valor)}?\n\nO valor volta a contar como dinheiro em loja.`)) return;
+  } else if(ED_TIPO === 'entrada'){
+    const o = origemEntradaSelecionada();
+    if(!confirm(`Excluir a entrada de ${fmtMoney(o.valor)} do dia ${fmtData(ED_ENTRADA.data)}?\n\nO fechamento continua; some só a entrada em dinheiro.`)) return;
+  } else return;
+  btn.disabled = true;
+  try{
+    let res;
+    if(ED_TIPO === 'sangria'){
+      res = await fetch('/api/sangrias/' + ED_SAIDA.chave.replace('sangria::',''), { method:'DELETE' });
+    } else {
+      const o = origemEntradaSelecionada();
+      res = await fetch('/api/saidas-painel/entrada', { method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ fechamentoId: o.fechamentoId, valor: 0, motivo: document.getElementById('ed-saida-motivo').value.trim() }) });
+    }
+    if(!res.ok){ const e = await res.json().catch(()=>({})); msg.textContent = e.error || 'Falha ao excluir.'; msg.classList.remove('hidden'); return; }
+    fecharEditarSaida();
+    // recarrega TUDO do servidor: KPIs, saldo, as 4 colunas e a divergência
+    // das sangrias (que é recalculada no servidor sobre o dado novo)
+    await carregar();
+  }catch(e){ msg.textContent = 'Falha ao excluir.'; msg.classList.remove('hidden'); }
+  finally{ btn.disabled = false; }
 }
 async function salvarEditarSaida(){
+  // os três tipos passam pelo mesmo botão; sangria e entrada saem antes,
+  // cada uma pra sua rota (ver abrirEditarSangria/abrirEditarEntrada)
+  if(ED_TIPO === 'sangria') return salvarEditarSangria();
+  if(ED_TIPO === 'entrada') return salvarEditarEntrada();
   if(!ED_SAIDA) return;
   const msg = document.getElementById('ed-saida-msg');
   const btn = document.getElementById('ed-saida-salvar');
@@ -627,6 +752,49 @@ async function salvarEditarSaida(){
   }catch(e){
     msg.textContent = e.message; msg.className='msg err'; msg.classList.remove('hidden');
   }finally{ btn.disabled = false; }
+}
+
+async function salvarEditarSangria(){
+  const msg = document.getElementById('ed-saida-msg');
+  const btn = document.getElementById('ed-saida-salvar');
+  msg.classList.add('hidden');
+  const descricao = document.getElementById('ed-saida-descricao').value.trim();
+  const valor = Number(document.getElementById('ed-saida-valor').value);
+  if(!Number.isFinite(valor) || valor <= 0){ msg.textContent = 'Informe o valor retirado.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  btn.disabled = true;
+  try{
+    const res = await fetch('/api/sangrias/' + ED_SAIDA.chave.replace('sangria::',''), {
+      method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ valor, descricao }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || 'Erro ao salvar.');
+    fecharEditarSaida();
+    await carregar();
+  }catch(e){ msg.textContent = e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
+  finally{ btn.disabled = false; }
+}
+
+async function salvarEditarEntrada(){
+  const msg = document.getElementById('ed-saida-msg');
+  const btn = document.getElementById('ed-saida-salvar');
+  msg.classList.add('hidden');
+  const valor = Number(document.getElementById('ed-saida-valor').value);
+  if(!Number.isFinite(valor) || valor < 0){ msg.textContent = 'Informe um valor válido.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  const origem = origemEntradaSelecionada();
+  if(!origem || !origem.fechamentoId){ msg.textContent = 'Não achei o lançamento dessa entrada.'; msg.className='msg err'; msg.classList.remove('hidden'); return; }
+  btn.disabled = true;
+  try{
+    const res = await fetch('/api/saidas-painel/entrada', {
+      method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ fechamentoId: origem.fechamentoId, valor, motivo: document.getElementById('ed-saida-motivo').value.trim() }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || 'Erro ao salvar.');
+    fecharEditarSaida();
+    await carregar();
+  }catch(e){ msg.textContent = e.message; msg.className='msg err'; msg.classList.remove('hidden'); }
+  finally{ btn.disabled = false; }
 }
 
 // ---- acrescentar saída em qualquer data (Master/Admin) ----
