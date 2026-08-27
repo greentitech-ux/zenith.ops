@@ -340,13 +340,25 @@ function dinheiroEmLoja(itens, entradas) {
   let total = 0;
   for (const g of porUnidade.values()) {
     const desde = inicioDaJanela(g.sangrias);
-    const naJanela = (x) => !desde || (x.data || '') > desde;
+    // SEM SANGRIA LANCADA = sem inicio de janela = SEM BASE. A mesma regra da
+    // conferencia (§6: dado que nao existe nao vira numero) - e o mesmo erro
+    // ja quebrou DUAS vezes por caminhos diferentes: contar "desde sempre"
+    // fez uma sangria de R$ 540 esperar R$ 19.745,52, e aqui somou o
+    // historico inteiro das lojas Bravo (que nunca lancaram sangria no app)
+    // num "dinheiro em loja" de R$ 490 mil. Loja sem retirada lancada fica
+    // fora do total e a tela diz o porque, em vez de afirmar um numero que
+    // nao mede gaveta nenhuma.
+    if (!desde) {
+      linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, desde: null, semBase: true, entrou: null, saiu: null, valor: null });
+      continue;
+    }
+    const naJanela = (x) => (x.data || '') > desde;
     const somar = (lista) => lista.reduce((t, x) => t + (naJanela(x) ? (Number(x.valor) || 0) : 0), 0);
     const entrou = +somar(g.entradas).toFixed(2);
     const saiu = +somar(g.saidas).toFixed(2);
     const valor = +(entrou - saiu).toFixed(2);
     total += valor;
-    linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, desde, entrou, saiu, valor });
+    linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, desde, semBase: false, entrou, saiu, valor });
   }
   linhas.sort((a, b) => String(a.unidadeNome || '').localeCompare(String(b.unidadeNome || ''), 'pt-BR'));
   return { total: +total.toFixed(2), porUnidade: linhas };

@@ -563,12 +563,18 @@ function renderTudo(){
     elSaldo.classList.toggle('bad', (CAIXA.total || 0) < 0);
     // a conta aberta: sem ela, quando o número não bate com a gaveta não há
     // como saber desde quando o sistema está contando
-    const det = (CAIXA.porUnidade || []).filter(u => u.entrou || u.saiu || u.valor);
-    document.getElementById('kpi-saldo-detalhe').innerHTML = det.length
-      ? det.map(u => `${escapeHtml(u.unidadeNome||u.unidade)}: ${fmtMoney(u.valor)}`
-          + `<br><span style="opacity:.75">${u.desde ? `desde a sangria de ${fmtData(u.desde)}` : 'sem sangria lançada'}`
-          + ` · entrou ${fmtMoney(u.entrou)} · saiu ${fmtMoney(u.saiu)}</span>`).join('<br>')
-      : 'nada movimentado desde a última sangria';
+    // loja SEM sangria lançada não tem janela nem base (ver dinheiroEmLoja):
+    // ela sai do total e vira uma nota, em vez de somar o histórico inteiro
+    // como se fosse gaveta - foi o que inflou o card pra R$ 490 mil
+    const comBase = (CAIXA.porUnidade || []).filter(u => !u.semBase && (u.entrou || u.saiu || u.valor));
+    const semBase = (CAIXA.porUnidade || []).filter(u => u.semBase);
+    const linhasDet = comBase.map(u => `${escapeHtml(u.unidadeNome||u.unidade)}: ${fmtMoney(u.valor)}`
+      + `<br><span style="opacity:.75">desde a sangria de ${fmtData(u.desde)}`
+      + ` · entrou ${fmtMoney(u.entrou)} · saiu ${fmtMoney(u.saiu)}</span>`);
+    if(semBase.length){
+      linhasDet.push(`<span style="opacity:.75">sem sangria lançada (sem base pra medir a gaveta): ${semBase.map(u=>escapeHtml(u.unidadeNome||u.unidade)).join(', ')}</span>`);
+    }
+    document.getElementById('kpi-saldo-detalhe').innerHTML = linhasDet.join('<br>') || 'nada movimentado desde a última sangria';
   }
 
   // o botao de mover em lote so existe quando ha o que mover (e so pro Master)
