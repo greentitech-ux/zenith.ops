@@ -306,6 +306,52 @@ function recalcularDivergencias(itens, entradas) {
   return itens;
 }
 
+// DINHEIRO EM LOJA AGORA, pela mesma regua da conferencia: o que entrou menos
+// o que saiu DESDE A ULTIMA RETIRADA de cada unidade.
+//
+// O card antes fazia "entrada do periodo - saidas do periodo - sangrias do
+// periodo", que nao e' dinheiro em loja: e' o saldo do FILTRO. Com o filtro no
+// mes, uma sangria do dia 2 que fechou o caixa de julho entra na conta contra
+// a entrada de agosto, e o numero deixa de significar o que o rotulo promete.
+//
+// Aqui a janela recomeca na ultima retirada de cada unidade, exatamente como
+// em inicioDaJanela. Nao depende do periodo filtrado de proposito - "quanto
+// tem na gaveta" e' estado de hoje, nao recorte de tela.
+//
+// Devolve a conta ABERTA (desde/entrou/saiu) porque um numero sozinho aqui nao
+// da pra conferir: quando ele nao bate com a gaveta, o que resolve e' ver
+// desde quando o sistema esta contando e o que ele viu no meio.
+function dinheiroEmLoja(itens, entradas) {
+  const porUnidade = new Map();
+  const alvo = (u, nome) => {
+    if (!porUnidade.has(u)) porUnidade.set(u, { unidade: u, unidadeNome: nome || u, entradas: [], saidas: [], sangrias: [] });
+    const g = porUnidade.get(u);
+    if (nome && !g.unidadeNome) g.unidadeNome = nome;
+    return g;
+  };
+  entradas.forEach((e) => { if (e.unidade) alvo(e.unidade, e.unidadeNome).entradas.push(e); });
+  itens.forEach((it) => {
+    if (!it.unidade) return;
+    const g = alvo(it.unidade, it.unidadeNome);
+    (it.origem === 'sangria' ? g.sangrias : g.saidas).push(it);
+  });
+
+  const linhas = [];
+  let total = 0;
+  for (const g of porUnidade.values()) {
+    const desde = inicioDaJanela(g.sangrias);
+    const naJanela = (x) => !desde || (x.data || '') > desde;
+    const somar = (lista) => lista.reduce((t, x) => t + (naJanela(x) ? (Number(x.valor) || 0) : 0), 0);
+    const entrou = +somar(g.entradas).toFixed(2);
+    const saiu = +somar(g.saidas).toFixed(2);
+    const valor = +(entrou - saiu).toFixed(2);
+    total += valor;
+    linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, desde, entrou, saiu, valor });
+  }
+  linhas.sort((a, b) => String(a.unidadeNome || '').localeCompare(String(b.unidadeNome || ''), 'pt-BR'));
+  return { total: +total.toFixed(2), porUnidade: linhas };
+}
+
 // SALDO DE CAIXA DA UNIDADE - a conta que decide se a sangria bate.
 //
 // O fundo de caixa e' FIXO (decisao do Master): a loja sempre deixa o mesmo
@@ -471,4 +517,4 @@ async function marcarVerificada(chave, { verificada, porId, porEmail }, extrasFe
   return { chave, verificada: r.verificada, verificadaPorEmail: r.verificadaPorEmail, verificadaEm: r.verificadaEm };
 }
 
-module.exports = { listar, listarEntradas, semDuplicataDaPlanilha, listarEntradasPorDia, calcularSaldoCaixa, filtrar, marcarVerificada, reclassificar, corrigirItemPlanilha, corrigirEntradaPlanilha, pareceSangria };
+module.exports = { listar, listarEntradas, dinheiroEmLoja, semDuplicataDaPlanilha, listarEntradasPorDia, calcularSaldoCaixa, filtrar, marcarVerificada, reclassificar, corrigirItemPlanilha, corrigirEntradaPlanilha, pareceSangria };

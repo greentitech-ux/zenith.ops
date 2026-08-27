@@ -199,7 +199,8 @@
     <div class="kpi destaque hidden" id="card-saldo">
       <div class="valor" id="kpi-saldo">—</div>
       <div class="rotulo">Dinheiro em loja</div>
-      <div class="formula">entrada − saídas − sangria</div>
+      <div class="formula">desde a última sangria de cada loja</div>
+      <div class="formula" id="kpi-saldo-detalhe" style="margin-top:6px;line-height:1.5;"></div>
     </div>
     <div class="kpi"><div class="valor" id="kpi-pendentes">—</div><div class="rotulo">Pendentes de verificar</div></div>
     <div class="kpi hidden" id="card-verificadas"><div class="valor ok" id="kpi-verificadas">—</div><div class="rotulo">Verificadas</div></div>
@@ -338,6 +339,7 @@ let IS_ADMIN = false;
 // Admin) - a loja ve o que saiu, nao o caixa consolidado
 let PODE_CONFERIR = false;
 let ENTRADAS = [];
+let CAIXA = { total: 0, porUnidade: [] };
 let ITENS = []; // lista bruta do periodo (inicio/fim), sem filtro de loja/grupo - esses dois filtram em memoria (ver renderTudo)
 let presetAtivo = 'mes';
 
@@ -443,6 +445,7 @@ async function carregar(){
   const resp = await fetch('/api/saidas-painel?'+params.toString()).then(r=>r.json());
   ITENS = resp.itens || [];
   ENTRADAS = resp.entradas || [];
+  CAIXA = resp.caixa || { total: 0, porUnidade: [] };
   renderUnidadePanel();
   renderTudo();
 }
@@ -549,11 +552,23 @@ function renderTudo(){
   // em loja. Vermelho so quando saiu mais do que entrou.
   if(PODE_CONFERIR){
     const totalEntrada = entradas.reduce((s,e)=>s+(e.valor||0),0);
-    const saldo = totalEntrada - totalSaidas - totalSangrias;
     document.getElementById('kpi-entrada').textContent = fmtMoney(totalEntrada);
+    // Dinheiro em loja vem PRONTO do servidor, contado desde a última retirada
+    // de cada unidade (ver dinheiroEmLoja). Não é "entrada − saídas − sangria
+    // do período": com o filtro no mês, uma sangria que fechou o caixa do mês
+    // anterior entrava contra a entrada deste, e o número deixava de ser o que
+    // o rótulo promete.
     const elSaldo = document.getElementById('kpi-saldo');
-    elSaldo.textContent = fmtMoney(saldo);
-    elSaldo.classList.toggle('bad', saldo < 0);
+    elSaldo.textContent = fmtMoney(CAIXA.total || 0);
+    elSaldo.classList.toggle('bad', (CAIXA.total || 0) < 0);
+    // a conta aberta: sem ela, quando o número não bate com a gaveta não há
+    // como saber desde quando o sistema está contando
+    const det = (CAIXA.porUnidade || []).filter(u => u.entrou || u.saiu || u.valor);
+    document.getElementById('kpi-saldo-detalhe').innerHTML = det.length
+      ? det.map(u => `${escapeHtml(u.unidadeNome||u.unidade)}: ${fmtMoney(u.valor)}`
+          + `<br><span style="opacity:.75">${u.desde ? `desde a sangria de ${fmtData(u.desde)}` : 'sem sangria lançada'}`
+          + ` · entrou ${fmtMoney(u.entrou)} · saiu ${fmtMoney(u.saiu)}</span>`).join('<br>')
+      : 'nada movimentado desde a última sangria';
   }
 
   // o botao de mover em lote so existe quando ha o que mover (e so pro Master)

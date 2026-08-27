@@ -6943,6 +6943,7 @@ setTimeout(async () => {
       unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-02',
       campos: { entradaDinheiro: 300 },
     }, cabMaster)).corpo);
+    const inicial2 = await ler();
     const sg2 = JSON.parse((await postarJson('/api/sangrias', {
       unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-02',
       valor: 300, descricao: 'Sangria do dia 2', periodoInicio: '2026-11-02', periodoFim: '2026-11-02',
@@ -6953,6 +6954,11 @@ setTimeout(async () => {
     const comDuas = await ler();
     const sg2Lida = sangria2De(comDuas);
     const ent2 = entrada2De(comDuas);
+    const daUni = (r) => ((r.caixa || {}).porUnidade || []).find((u) => u.unidade === UNI);
+    const linhaCaixa = daUni(comDuas);
+    // estado ANTES da 2ª sangria: a janela abre na 1ª (01/11) e enxerga só os
+    // 300 que entraram no dia 02 - nada do dia 01
+    const linhaCaixaAntes = daUni(inicial2);
 
     // ---- editar a ENTRADA do dia 02: 300 -> 200. O esperado da 2ª sangria
     // tem que cair junto, e a retirada de 300 vira SOBRA de 100.
@@ -7022,6 +7028,21 @@ setTimeout(async () => {
       'entrada negativa é recusada': rNegativo.status === 400,
       'sem informar o lançamento é recusado, e a mensagem diz o que falta':
         rSemLancamento.status === 400 && /Informe o lançamento/.test(JSON.parse(rSemLancamento.corpo || '{}').error || ''),
+      // DINHEIRO EM LOJA pela mesma régua: o que entrou menos o que saiu DESDE
+      // A ÚLTIMA RETIRADA. Antes o card fazia "entrada − saídas − sangria do
+      // PERÍODO", que com o filtro no mês somava contra a entrada do mês uma
+      // sangria que tinha fechado o caixa do mês anterior. Aqui: depois da 2ª
+      // sangria (02/11) não entrou mais nada, então a gaveta está zerada.
+      'dinheiro em loja é contado desde a última retirada, não pelo período do filtro':
+        !!linhaCaixa && cem(linhaCaixa.valor) === 0 && linhaCaixa.desde === '2026-11-02',
+      'a conta vem aberta (desde quando, quanto entrou, quanto saiu) pra dar pra conferir':
+        !!linhaCaixa && cem(linhaCaixa.entrou) === 0 && cem(linhaCaixa.saiu) === 0,
+      // o card antigo fazia "entrada − saídas − sangria do PERÍODO": no mês
+      // inteiro daria 1000 + 300 − 100 − 900 − 300 = 0 por coincidência aqui,
+      // então o que prova a régua nova é a janela abrir na sangria de 02/11 e
+      // ignorar tudo que veio antes dela
+      'a janela ignora o que é anterior à última retirada (não é o saldo do mês)':
+        !!linhaCaixaAntes && linhaCaixaAntes.desde === '2026-11-01' && cem(linhaCaixaAntes.entrou) === 30000,
       'excluir a entrada (valor 0) tira o dia da coluna': rExcluiEntrada.status === 200 && !entrada2De(semEntrada),
       'excluir a entrada NÃO apaga o fechamento (só a entrada em dinheiro)': fechamentoAindaExiste,
       'Master/Admin exclui a sangria e ela some do painel': rExcluiSangria.status === 200 && !sangria2De(semSangria),
@@ -7666,12 +7687,17 @@ setTimeout(async () => {
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'saidas.html'), 'utf8');
     const conf = {
       'os dois cards novos existem': /id="kpi-entrada"/.test(html) && /id="kpi-saldo"/.test(html),
-      'a fórmula fica escrita no card (ninguém precisa adivinhar de onde vem)':
-        /entrada − saídas − sangria/.test(html),
-      'a conta é entrada − saídas − sangria, nessa ordem':
-        /const saldo = totalEntrada - totalSaidas - totalSangrias;/.test(html),
+      'a régua fica escrita no card (ninguém precisa adivinhar de onde vem)':
+        /desde a última sangria de cada loja/.test(html),
+      // a conta NAO e' mais "entrada - saidas - sangria do periodo": esse era
+      // o saldo do FILTRO, nao o dinheiro na gaveta (ver dinheiroEmLoja)
+      'o valor vem pronto do servidor, pela janela desde a última retirada':
+        /elSaldo\.textContent = fmtMoney\(CAIXA\.total \|\| 0\)/.test(html)
+        && !/const saldo = totalEntrada - totalSaidas - totalSangrias;/.test(html),
+      'a conta aparece aberta no card (desde quando, entrou, saiu)':
+        /id="kpi-saldo-detalhe"/.test(html) && /desde a sangria de/.test(html),
       // vermelho e' cor semantica (saiu mais do que entrou), nao decoracao
-      'saldo negativo fica vermelho': /elSaldo\.classList\.toggle\('bad', saldo < 0\)/.test(html),
+      'saldo negativo fica vermelho': /elSaldo\.classList\.toggle\('bad', \(CAIXA\.total \|\| 0\) < 0\)/.test(html),
       'Saldo, Entrada e Verificadas nascem escondidos e só aparecem pra quem confere':
         /id="card-saldo"[^>]*class="[^"]*hidden|class="kpi destaque hidden" id="card-saldo"/.test(html)
         && /PODE_CONFERIR = IS_MASTER \|\| IS_ADMIN;/.test(html)
