@@ -33,18 +33,20 @@ function linhaDeSangria(s) {
     verificada: !!s.verificada,
     verificadaPorEmail: s.verificadaPorEmail || null,
     verificadaEm: s.verificadaEm || null,
-    // diferenca de caixa apurada NA HORA da sangria (ver sangrias.js). Fica
-    // gravada no documento e nunca e' reescrita - e' registro historico do que
-    // o sistema disse pra quem retirou o dinheiro (CLAUDE.md §1).
-    // recalcularDivergencias() logo abaixo sobrescreve estes tres campos NA
-    // LEITURA com a conta refeita sobre o dado de hoje, e guarda o valor da
-    // hora em `esperadoNaHora`/`divergenciaNaHora`.
+    // diferenca de caixa apurada na hora da sangria (ver sangrias.js) - vem
+    // junto pro painel poder marcar em vermelho o que nao bateu.
+    //
+    // NAO e' recalculado na leitura. Ja foi tentado (saldo corrido: entradas -
+    // saidas - sangrias anteriores, a mesma regra do calcularSaldoCaixa) e o
+    // resultado foi PIOR: sem o historico completo de sangrias lancado, o
+    // acumulado inteiro da unidade vira "esperado" - uma sangria de R$ 540
+    // apareceu esperando R$ 19.745,52. Enquanto a regra certa de auto-ajuste
+    // nao estiver definida com o Master, o numero exibido continua sendo o que
+    // o sistema apurou na hora, que e' o que a loja assinou.
     esperado: s.esperado != null ? s.esperado : null,
     divergencia: s.divergencia != null ? s.divergencia : null,
     motivoDivergencia: s.motivoDivergencia || null,
     temDivergencia: sangrias.temDivergencia(s),
-    esperadoNaHora: s.esperado != null ? s.esperado : null,
-    divergenciaNaHora: s.divergencia != null ? s.divergencia : null,
     extra: { periodoInicio: s.periodoInicio, periodoFim: s.periodoFim, nomeDepositante: s.nomeDepositante, diasSemFechamento: s.diasSemFechamento || 0 },
   };
 }
@@ -112,66 +114,6 @@ function semDuplicataDaPlanilha(doApp, daPlanilha) {
   return daPlanilha.filter((f) => !noApp.has(`${f.unidade}::${f.data}`));
 }
 
-// AUTO-AJUSTE da conferencia de caixa. Pedido do Master: "se e editado precisa
-// ter auto ajustes ... tudo precisa refletir".
-//
-// O problema concreto: `esperado` e `divergencia` sao calculados uma vez, no
-// momento em que a sangria e' lancada, e ficam gravados no documento. Se
-// depois alguem corrigir a entrada em dinheiro do dia, ou uma saida, ou o
-// valor da propria sangria, aquele numero continua o mesmo - a tela passa a
-// mostrar uma falta que ja nao existe (foi o que o Master viu: "FALTA
-// R$ 946,23" num caixa que ja tinha sido acertado).
-//
-// Aqui a conta e' REFEITA na leitura, com a mesma regra do calcularSaldoCaixa:
-//
-//   esperado da sangria = entradas ate a data - saidas ate a data - sangrias anteriores
-//
-// Saldo CORRIDO, igual ao resto do modulo - nada de janela por periodo, entao
-// nao existe dia contado duas vezes nem buraco entre dois ciclos.
-//
-// O valor da hora nao se perde: fica em esperadoNaHora/divergenciaNaHora, pra
-// tela poder mostrar "na hora dizia X" quando os dois nao batem mais.
-//
-// Nao custa leitura nova: recebe as listas que o chamador ja tem em maos.
-function recalcularDivergencias(itens, entradas) {
-  const porUnidade = new Map();
-  const daUnidade = (u) => {
-    if (!porUnidade.has(u)) porUnidade.set(u, { entradas: [], saidas: [], sangrias: [] });
-    return porUnidade.get(u);
-  };
-  entradas.forEach((e) => daUnidade(e.unidade).entradas.push(e));
-  itens.forEach((it) => {
-    if (!it.unidade) return;
-    (it.origem === 'sangria' ? daUnidade(it.unidade).sangrias : daUnidade(it.unidade).saidas).push(it);
-  });
-
-  for (const grupo of porUnidade.values()) {
-    // duas sangrias no mesmo dia: a segunda so pode esperar o que a primeira
-    // deixou, entao desempata por criadoEm (a ordem em que foram feitas)
-    grupo.sangrias.sort((a, b) => String(a.data || '').localeCompare(String(b.data || ''))
-      || String(a.criadoEm || '').localeCompare(String(b.criadoEm || '')));
-    const somaAte = (lista, ate) => lista.reduce((t, x) => t + ((x.data || '') <= ate ? (Number(x.valor) || 0) : 0), 0);
-    let jaRetirado = 0;
-    for (const sg of grupo.sangrias) {
-      const base = somaAte(grupo.entradas, sg.data) - somaAte(grupo.saidas, sg.data);
-      // SEM BASE = nenhuma entrada lancada ate aqui. Mesma decisao do
-      // calcularSaldoCaixa (§6): falta de dado nao vira divergencia gigante -
-      // sem base nao da pra dizer que a sangria "nao bateu".
-      if (somaAte(grupo.entradas, sg.data) <= 0) {
-        sg.esperado = null; sg.divergencia = null; sg.temDivergencia = false;
-        jaRetirado += Number(sg.valor) || 0;
-        continue;
-      }
-      const esperado = +(base - jaRetirado).toFixed(2);
-      sg.esperado = esperado;
-      sg.divergencia = +((Number(sg.valor) || 0) - esperado).toFixed(2);
-      sg.temDivergencia = Math.abs(sg.divergencia) > sangrias.TOLERANCIA_DIVERGENCIA;
-      jaRetirado += Number(sg.valor) || 0;
-    }
-  }
-  return itens;
-}
-
 // extrasFechamentos: fechamentos que NÃO moram na coleção fechamentosLive -
 // hoje só um caso, o snapshot em memória sincronizado da planilha ARCFOOD
 // (ver sheetsSync.js/index.js, fechamentosData). Sem isso, o painel só
@@ -187,10 +129,7 @@ async function listar(extrasFechamentos = []) {
   const deSangria = listaSangrias.map(linhaDeSangria);
   const todosFechamentos = [...fechamentos, ...semDuplicataDaPlanilha(fechamentos, extrasFechamentos)];
   const deFechamento = todosFechamentos.flatMap((f) => linhasDeFechamento(f, mapaVerif));
-  const itens = [...deSangria, ...deFechamento];
-  // refaz esperado/divergencia sobre o dado de HOJE - sem isso, corrigir a
-  // entrada ou a saida deixava a sangria acusando uma falta que ja nao existe
-  return recalcularDivergencias(itens, await listarEntradas(extrasFechamentos));
+  return [...deSangria, ...deFechamento];
 }
 
 // ENTRADA em dinheiro do periodo - a outra ponta da conta que o Master pediu
@@ -445,4 +384,4 @@ async function marcarVerificada(chave, { verificada, porId, porEmail }, extrasFe
   return { chave, verificada: r.verificada, verificadaPorEmail: r.verificadaPorEmail, verificadaEm: r.verificadaEm };
 }
 
-module.exports = { listar, listarEntradas, recalcularDivergencias, semDuplicataDaPlanilha, listarEntradasPorDia, calcularSaldoCaixa, filtrar, marcarVerificada, reclassificar, corrigirItemPlanilha, corrigirEntradaPlanilha, pareceSangria };
+module.exports = { listar, listarEntradas, semDuplicataDaPlanilha, listarEntradasPorDia, calcularSaldoCaixa, filtrar, marcarVerificada, reclassificar, corrigirItemPlanilha, corrigirEntradaPlanilha, pareceSangria };
