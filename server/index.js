@@ -10340,7 +10340,9 @@ app.get('/api/abastecimento/fluxo', auth.requireMaster, async (req, res) => {
       perdaTransito: i.enviado - i.recebido,
       saidaApurada: reconciliavel ? i.saldoInicial + i.entradas - i.saldoFinal : null,
     })).filter((i) => i.tipo === 'pizza' || i.enviado || i.avarias || i.saldoInicial || i.saldoFinal)
-      .sort((a, b) => (a.tipo === b.tipo ? a.nome.localeCompare(b.nome, 'pt-BR') : (a.tipo === 'pizza' ? -1 : 1)));
+      // maior diferenca primeiro, zerados/sem apuracao no fim em ordem
+      // normal (ver ordenarPorDiferenca em abastecimentoPrevisao.js)
+      .sort(abastecimentoPrevisao.ordenarPorDiferenca('saidaApurada'));
 
     const diasNoPeriodo = Math.round((new Date(`${fim}T00:00:00`) - new Date(`${inicio}T00:00:00`)) / 86400000) + 1;
     const diasComContagem = new Set(contagens.map((c) => diaDe(c.criadoEm))).size;

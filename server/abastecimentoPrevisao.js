@@ -296,6 +296,36 @@ function sugerirEnvio(regs, { capacidadesManuais = {}, ciclos = null } = {}) {
 // saida: so dos ciclos que FECHARAM naquele dia - dia sem segunda contagem
 // fica com saida null, e a tela diz "sem contagem de fechamento" em vez de
 // mostrar zero, que seria mentira.
+// ORDEM DO RELATORIO. Pedido do Master: "nao precisa ficar na ordem, sempre
+// mostrar da maior diferenca para menor diferenca, depois mostra normal".
+// Quem abre o relatorio esta procurando o que saiu do lugar - em ordem
+// alfabetica era preciso varrer os ~27 itens pra achar os 3 que importam.
+//
+// Compara pelo MODULO de proposito: "sobrou 6" e "saiu 6" sao diferencas do
+// mesmo tamanho, e a negativa ainda e a mais grave das duas (e erro de
+// contagem ou envio nao lancado, ver a flag de saida negativa). Ordenar pelo
+// numero com sinal jogaria justamente o erro pro fim da lista.
+//
+// Item sem diferenca (0) e item sem conta fechada (null, periodo nao
+// reconciliavel) caem no fim, na ordem NORMAL de sempre - e o "depois mostra
+// normal" do pedido.
+function ordemNormal(a, b) {
+  if (a.tipo !== b.tipo) return a.tipo === 'pizza' ? -1 : 1;
+  return String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR');
+}
+// campo: 'saida' no dia a dia, 'saidaApurada' no fluxo do periodo - o mesmo
+// numero com nome diferente em cada montagem
+function ordenarPorDiferenca(campo) {
+  return (a, b) => {
+    // null (sem conta fechada) fica ATRAS ate do zero: nao da pra dizer que
+    // nao houve diferenca, so que nao foi possivel apurar
+    const da = Number.isFinite(a[campo]) ? Math.abs(a[campo]) : -1;
+    const db = Number.isFinite(b[campo]) ? Math.abs(b[campo]) : -1;
+    if (da !== db) return db - da;
+    return ordemNormal(a, b);
+  };
+}
+
 function resumoPorDia(regs, { inicio, fim, ciclos = null }) {
   const dentro = (iso) => { const d = diaDe(iso); return d >= inicio && d <= fim; };
   const envios = regs.filter((r) => r.tipo === 'ENVIO' && dentro(r.criadoEm));
@@ -332,11 +362,12 @@ function resumoPorDia(regs, { inicio, fim, ciclos = null }) {
       ...d,
       itens: [...d.itens.values()]
         .filter((i) => i.entradas || i.saida != null)
-        .sort((a, b) => (a.tipo === b.tipo ? a.nome.localeCompare(b.nome, 'pt-BR') : (a.tipo === 'pizza' ? -1 : 1))),
+        .sort(ordenarPorDiferenca('saida')),
     }));
 }
 
 module.exports = {
   diaDe, horaDe, inteiro, emUnidades, itensDe, entradasDe,
   montarCiclos, estimarCapacidades, sugerirEnvio, resumoPorDia,
+  ordemNormal, ordenarPorDiferenca,
 };
