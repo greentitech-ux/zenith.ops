@@ -482,8 +482,19 @@ const PRECO_MEIA = 25;
 // em parque.js). Nunca se aplica com categoria PCD selecionada.
 const NIVER_JANELA_DIAS = 7;
 function ehNiverAuto(dataNascimento, dataUtilizacao){
-  if(!dataNascimento || !dataUtilizacao) return false;
-  const nasc = new Date(dataNascimento+'T00:00:00');
+  // O campo de nascimento e' DIGITADO em dd/mm/aaaa (ver data-br.js). Quem
+  // chama aqui le o valor CRU da tela, entao ele chega no formato brasileiro
+  // - mas o servidor recebe ISO (coletarCriancas converte no envio) e calcula
+  // o niver em cima do ISO. Sem normalizar, new Date('22/08/2006T00:00:00')
+  // e' Invalid Date: a TELA nunca via o aniversariante e o SERVIDOR sempre
+  // via. Os dois totais discordavam pelo desconto e o check-in ficava
+  // impossivel de salvar - digitar o total da tela batia com o erro do
+  // servidor e vice-versa, num laco sem saida (relatado em video pelo Master).
+  const nascISO = /^\d{4}-\d{2}-\d{2}$/.test(String(dataNascimento||'').trim())
+    ? String(dataNascimento).trim()
+    : dataBRparaISO(dataNascimento);
+  if(!nascISO || !dataUtilizacao) return false;
+  const nasc = new Date(nascISO+'T00:00:00');
   const uso = new Date(dataUtilizacao+'T00:00:00');
   if(isNaN(nasc.getTime()) || isNaN(uso.getTime())) return false;
   for(const deltaAno of [-1,0,1]){

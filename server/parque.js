@@ -1474,6 +1474,9 @@ async function emissoesParaAlertar() {
 
 module.exports = {
   METODOS_PAGAMENTO, FORMAS_PAGAMENTO_SPLIT, PRECO_MEIA, valorPorTempo, valorDoCheckin,
+  // exportado pro teste conferir que a TELA e o SERVIDOR enxergam o mesmo
+  // aniversariante - foi a divergencia dos dois que travou o check-in
+  ehNiver, NIVER_JANELA_DIAS,
   TERMO_STATUS, criarEmissaoTermo, finalizarEmissaoTermo, finalizarEmissoesDoAtendimento,
   cancelarEmissaoTermo, listarEmissoesTermo, chaveAtendimento, pendentesDoAtendimento,
   TERMO_ALERTA_HORAS, emissoesParaAlertar,
