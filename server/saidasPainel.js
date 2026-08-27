@@ -33,20 +33,16 @@ function linhaDeSangria(s) {
     verificada: !!s.verificada,
     verificadaPorEmail: s.verificadaPorEmail || null,
     verificadaEm: s.verificadaEm || null,
-    // diferenca de caixa apurada na hora da sangria (ver sangrias.js) - vem
-    // junto pro painel poder marcar em vermelho o que nao bateu.
-    //
-    // NAO e' recalculado na leitura. Ja foi tentado (saldo corrido: entradas -
-    // saidas - sangrias anteriores, a mesma regra do calcularSaldoCaixa) e o
-    // resultado foi PIOR: sem o historico completo de sangrias lancado, o
-    // acumulado inteiro da unidade vira "esperado" - uma sangria de R$ 540
-    // apareceu esperando R$ 19.745,52. Enquanto a regra certa de auto-ajuste
-    // nao estiver definida com o Master, o numero exibido continua sendo o que
-    // o sistema apurou na hora, que e' o que a loja assinou.
+    // esperado/divergencia sao SOBRESCRITOS por recalcularDivergencias na
+    // leitura (janela desde a retirada anterior). O que fica aqui e' o que o
+    // sistema apurou NA HORA - preservado em esperadoNaHora/divergenciaNaHora,
+    // porque e' o numero que a loja assinou e o documento nunca e' reescrito.
     esperado: s.esperado != null ? s.esperado : null,
     divergencia: s.divergencia != null ? s.divergencia : null,
     motivoDivergencia: s.motivoDivergencia || null,
     temDivergencia: sangrias.temDivergencia(s),
+    esperadoNaHora: s.esperado != null ? s.esperado : null,
+    divergenciaNaHora: s.divergencia != null ? s.divergencia : null,
     extra: { periodoInicio: s.periodoInicio, periodoFim: s.periodoFim, nomeDepositante: s.nomeDepositante, diasSemFechamento: s.diasSemFechamento || 0 },
   };
 }
@@ -129,7 +125,10 @@ async function listar(extrasFechamentos = []) {
   const deSangria = listaSangrias.map(linhaDeSangria);
   const todosFechamentos = [...fechamentos, ...semDuplicataDaPlanilha(fechamentos, extrasFechamentos)];
   const deFechamento = todosFechamentos.flatMap((f) => linhasDeFechamento(f, mapaVerif));
-  return [...deSangria, ...deFechamento];
+  const itens = [...deSangria, ...deFechamento];
+  // refaz a conferência sobre o dado de HOJE, com a janela desde a retirada
+  // anterior (ver recalcularDivergencias)
+  return recalcularDivergencias(itens, await listarEntradas(extrasFechamentos));
 }
 
 // ENTRADA em dinheiro do periodo - a outra ponta da conta que o Master pediu
@@ -236,6 +235,77 @@ async function corrigirEntradaPlanilha(fechamentoId, { valor, porId, porEmail },
   return verificacoesSaida.corrigirEntrada(`entrada::${fechamentoId}`, { valor, porId, porEmail });
 }
 
+// A JANELA da conferência de caixa: desde a RETIRADA ANTERIOR.
+//
+// Decisão do Master, depois de a régua anterior dar errado em produção: o
+// esperado de uma sangria é o que entrou menos o que saiu DESDE A ÚLTIMA
+// retirada - não o acumulado da loja desde sempre.
+//
+// A régua antiga era saldo corrido ("tudo até a data"), que só fecha se todo o
+// histórico de sangrias estiver lançado. Onde não está, o acumulado inteiro da
+// unidade vira "esperado": uma sangria de R$ 540 apareceu esperando
+// R$ 19.745,52. Cada retirada zera o caixa, então a janela recomeça nela.
+//
+// `desde` é EXCLUSIVO: o dia da retirada anterior já foi conferido por ela.
+// Duas sangrias no mesmo dia deixam a segunda com janela vazia - correto, a
+// primeira levou tudo.
+//
+// Sem retirada anterior devolve null, e quem chama trata como SEM BASE: não dá
+// pra dizer desde quando o dinheiro está acumulando, e chutar "desde sempre" é
+// justamente o erro que se está corrigindo (§6 - dado que não existe não vira
+// número).
+function inicioDaJanela(sangriasDaUnidade, { ate, ignorarChave } = {}) {
+  const anteriores = sangriasDaUnidade
+    .filter((sg) => sg.chave !== ignorarChave && (!ate || (sg.data || '') <= ate))
+    .sort((a, b) => String(a.data || '').localeCompare(String(b.data || ''))
+      || String(a.criadoEm || '').localeCompare(String(b.criadoEm || '')));
+  const ultima = anteriores[anteriores.length - 1];
+  return ultima ? (ultima.data || null) : null;
+}
+
+// Refaz esperado/divergencia de cada sangria NA LEITURA, com a janela acima.
+// Pedido do Master: "tudo precisa refletir, tudo precisa auto ajustar" - sem
+// isso, corrigir a entrada de um dia deixava a sangria acusando uma falta que
+// já não existe.
+//
+// O que o sistema apurou NA HORA continua gravado no documento e vem em
+// esperadoNaHora/divergenciaNaHora: é o registro do que a loja assinou, e não
+// é reescrito nunca (CLAUDE.md §1).
+//
+// Não custa leitura nova: recebe as listas que o chamador já tem em mãos.
+function recalcularDivergencias(itens, entradas) {
+  const porUnidade = new Map();
+  const daUnidade = (u) => {
+    if (!porUnidade.has(u)) porUnidade.set(u, { entradas: [], saidas: [], sangrias: [] });
+    return porUnidade.get(u);
+  };
+  entradas.forEach((e) => daUnidade(e.unidade).entradas.push(e));
+  itens.forEach((it) => {
+    if (!it.unidade) return;
+    (it.origem === 'sangria' ? daUnidade(it.unidade).sangrias : daUnidade(it.unidade).saidas).push(it);
+  });
+
+  for (const grupo of porUnidade.values()) {
+    for (const sg of grupo.sangrias) {
+      const desde = inicioDaJanela(grupo.sangrias, { ate: sg.data, ignorarChave: sg.chave });
+      const naJanela = (x) => (!desde || (x.data || '') > desde) && (x.data || '') <= (sg.data || '');
+      const somar = (lista) => lista.reduce((t, x) => t + (naJanela(x) ? (Number(x.valor) || 0) : 0), 0);
+      const entrou = somar(grupo.entradas);
+      // sem retirada anterior, ou sem entrada nenhuma na janela: não há com o
+      // que bater. Melhor não afirmar nada do que afirmar um número inventado.
+      if (!desde || entrou <= 0) {
+        sg.esperado = null; sg.divergencia = null; sg.temDivergencia = false;
+        continue;
+      }
+      const esperado = +(entrou - somar(grupo.saidas)).toFixed(2);
+      sg.esperado = esperado;
+      sg.divergencia = +((Number(sg.valor) || 0) - esperado).toFixed(2);
+      sg.temDivergencia = Math.abs(sg.divergencia) > sangrias.TOLERANCIA_DIVERGENCIA;
+    }
+  }
+  return itens;
+}
+
 // SALDO DE CAIXA DA UNIDADE - a conta que decide se a sangria bate.
 //
 // O fundo de caixa e' FIXO (decisao do Master): a loja sempre deixa o mesmo
@@ -262,14 +332,22 @@ async function calcularSaldoCaixa({ unidade, ate, ignorarSangriaId }, extrasFech
   const daUnidade = (arr) => arr.filter((x) => x.unidade === unidade && (!limite || (x.data || '') <= limite));
   const somar = (arr) => arr.reduce((t, x) => t + (Number(x.valor) || 0), 0);
 
-  const entradas = daUnidade(entradasTodas);
   const doPainel = daUnidade(itens).filter((it) => it.chave !== `sangria::${ignorarSangriaId}`);
   // saida avulsa que o Master moveu pra Sangria conta como sangria aqui
   // tambem - senao as duas telas contariam a mesma retirada de jeitos
   // diferentes (ver reclassificar)
+  const sangriasDaUnidade = doPainel.filter((it) => it.origem === 'sangria');
+  // MESMA janela que o painel usa na leitura (ver inicioDaJanela): o esperado
+  // e' o que entrou desde a ULTIMA RETIRADA, nao o acumulado da loja desde
+  // sempre. Os dois lugares tem que usar a mesma regua - com reguas
+  // diferentes, o numero que o formulario sugere na hora nunca bateria com o
+  // que o painel mostra depois.
+  const desde = inicioDaJanela(sangriasDaUnidade, { ate: limite, ignorarChave: `sangria::${ignorarSangriaId}` });
+  const naJanela = (x) => !!desde && (x.data || '') > desde;
+  const entradas = daUnidade(entradasTodas).filter(naJanela);
   const totalEntradas = somar(entradas);
-  const totalSaidas = somar(doPainel.filter((it) => it.origem === 'saida'));
-  const totalSangrias = somar(doPainel.filter((it) => it.origem === 'sangria'));
+  const totalSaidas = somar(doPainel.filter((it) => it.origem === 'saida' && naJanela(it)));
+  const totalSangrias = somar(sangriasDaUnidade.filter(naJanela));
 
   // ate quando o dinheiro esta contabilizado: se a loja ainda nao lancou o
   // fechamento de hoje, o dinheiro de hoje NAO esta no esperado - e isso
@@ -281,12 +359,17 @@ async function calcularSaldoCaixa({ unidade, ate, ignorarSangriaId }, extrasFech
     ? Math.max(0, Math.round((Date.parse(limite + 'T00:00:00Z') - Date.parse(ultimoFechamentoEm + 'T00:00:00Z')) / 86400000))
     : 0;
 
-  // SEM BASE = nenhuma entrada em dinheiro lancada pra essa unidade ate aqui.
-  // Nesse caso nao da pra dizer que a sangria "nao bateu": nao ha com o que
-  // bater. Devolver esperado 0 transformaria falta de dado em divergencia
-  // gigante e travaria a operacao (§6 - dado que nao existe nao vira numero).
-  // Quem consome trata esperado null como "conferencia indisponivel".
-  const temBase = totalEntradas > 0;
+  // SEM BASE = nao ha retirada anterior pra abrir a janela, ou nao entrou
+  // dinheiro nenhum dentro dela. Nos dois casos nao da pra dizer que a sangria
+  // "nao bateu": nao ha com o que bater.
+  //
+  // Sem retirada anterior o sistema NAO chuta "desde sempre". Foi justamente
+  // esse chute que quebrou em producao: numa loja cuja primeira sangria estava
+  // sendo lancada agora, o acumulado inteiro virou esperado - R$ 19.745,52
+  // numa retirada de R$ 540. Melhor a conferencia ficar indisponivel na
+  // primeira retirada da unidade do que afirmar um numero inventado
+  // (§6 - dado que nao existe nao vira numero).
+  const temBase = !!desde && totalEntradas > 0;
   return {
     unidade,
     ate: limite,
@@ -294,7 +377,11 @@ async function calcularSaldoCaixa({ unidade, ate, ignorarSangriaId }, extrasFech
     entradas: totalEntradas,
     saidas: totalSaidas,
     sangrias: totalSangrias,
-    esperado: temBase ? Number((totalEntradas - totalSaidas - totalSangrias).toFixed(2)) : null,
+    // sem as sangrias: a janela ja comeca DEPOIS da ultima retirada, entao
+    // descontar de novo o que ja foi retirado tiraria o mesmo dinheiro duas
+    // vezes. totalSangrias segue no retorno so como informacao da janela.
+    esperado: temBase ? Number((totalEntradas - totalSaidas).toFixed(2)) : null,
+    desde,
     ultimoFechamentoEm,
     diasSemFechamento,
   };
