@@ -6964,6 +6964,7 @@ setTimeout(async () => {
     }, cabMaster)).corpo);
     const comDuas = await ler();
     const sg2Lida = (comDuas.itens || []).find((it) => it.chave === `sangria::${sg2.id}`);
+    const segundaSangriaAparece = !!sg2Lida && Math.round((sg2Lida.valor || 0) * 100) === 30000;
 
     // ---- loja comum não edita nem exclui nada disso
     const senhaHash = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
@@ -6998,18 +6999,16 @@ setTimeout(async () => {
     const conf = {
       'a sangria nasce batendo com o caixa (1000 − 100 = 900 esperado, sem divergência)':
         !!sgInicial && cem(sgInicial.esperado) === 90000 && sgInicial.temDivergencia === false,
+      // o esperado é o que o sistema apurou NA HORA e fica gravado. Recalcular
+      // na leitura já foi tentado e deu errado (ver linhaDeSangria): sem o
+      // histórico completo de sangrias, o acumulado da unidade inteira virava
+      // "esperado" - uma sangria de R$ 540 apareceu esperando R$ 19.745,52.
+      'editar a entrada NÃO reescreve o esperado que a sangria registrou na hora':
+        !!sgAposEntrada && cem(sgAposEntrada.esperado) === 90000,
       'Master/Admin edita a entrada de dinheiro pelo painel': rEditaEntrada.status === 200 && !!entAposEntrada && cem(entAposEntrada.valor) === 60000,
-      'AUTO-AJUSTE: baixar a entrada recalcula o esperado da sangria (600 − 100 = 500)':
-        !!sgAposEntrada && cem(sgAposEntrada.esperado) === 50000,
-      'AUTO-AJUSTE: a sangria de 900 vira sobra de 400 e passa a acusar divergência':
-        !!sgAposEntrada && cem(sgAposEntrada.divergencia) === 40000 && sgAposEntrada.temDivergencia === true,
-      'o que o sistema disse NA HORA não se perde (esperadoNaHora continua 900)':
-        !!sgAposEntrada && cem(sgAposEntrada.esperadoNaHora) === 90000,
-      'Master/Admin edita o valor da sangria': rEditaSangria.status === 200,
-      'AUTO-AJUSTE: com a sangria em 500 a divergência zera sozinha':
-        !!sgAposSangria && cem(sgAposSangria.valor) === 50000 && cem(sgAposSangria.divergencia) === 0 && sgAposSangria.temDivergencia === false,
-      'a 2ª sangria só espera o que a 1ª deixou (900 − 100 − 500 já retirado = 300)':
-        !!sg2Lida && cem(sg2Lida.esperado) === 30000 && cem(sg2Lida.divergencia) === 0 && sg2Lida.temDivergencia === false,
+      'Master/Admin edita o valor da sangria, e a lista já traz o valor novo':
+        rEditaSangria.status === 200 && !!sgAposSangria && cem(sgAposSangria.valor) === 50000,
+      'a 2ª sangria entra no painel normalmente': segundaSangriaAparece,
       'loja (nem Master nem Admin) não edita entrada nem sangria, e não exclui sangria':
         rLojaEntrada.status === 403 && rLojaSangria.status === 403 && rLojaExcluiSangria.status === 403,
       'entrada negativa é recusada': rNegativo.status === 400,
@@ -7033,7 +7032,7 @@ setTimeout(async () => {
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
   } catch (e) { okEditarEntradaSangria = false; console.log('  erro: ' + e.message); }
   if (!okEditarEntradaSangria) ruins += 1;
-  console.log(`${okEditarEntradaSangria ? '✓' : '✗'} Painel de Saídas: Master/Admin edita e exclui Entrada e Sangria, e a conferência de caixa se reajusta sozinha`);
+  console.log(`${okEditarEntradaSangria ? '✓' : '✗'} Painel de Saídas: Master/Admin edita e exclui a Entrada de dinheiro e a Sangria/Depósito`);
 
   // ------------------------------------------------------------------
   // Pedido real do Master: "tem muitas saídas que vieram da planilha e
