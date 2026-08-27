@@ -263,6 +263,25 @@ function inicioDaJanela(sangriasDaUnidade, { ate, ignorarChave } = {}) {
   return ultima ? (ultima.data || null) : null;
 }
 
+// Decisão do Master (27/08/2026): a conta de dinheiro em loja DESCONSIDERA os
+// meses anteriores a agosto/2026 - "seguiremos com o mês de agosto apenas pra
+// frente". Antes de agosto havia retirada sem sangria lançada em várias
+// unidades, e contar esse passado transforma cada retirada não lançada numa
+// "sobra" eterna no card.
+//
+// O piso tem a MESMA semântica exclusiva do `desde` (o dia do piso não conta),
+// então '2026-07-31' faz a contagem começar em 01/08/2026.
+const PISO_JANELA = process.env.DINHEIRO_LOJA_INICIO || '2026-07-31';
+
+// Aplica o piso sobre a última retirada: a janela começa no que for MAIS
+// recente entre a última sangria e 31/07. Sem sangria nenhuma, a janela ainda
+// existe - começa no piso - porque agora há uma data de corte declarada pelo
+// Master, e não mais um "desde sempre" chutado (o erro do §6 que este arquivo
+// já pagou duas vezes).
+function comPiso(desde) {
+  return desde && desde > PISO_JANELA ? desde : PISO_JANELA;
+}
+
 // Refaz esperado/divergencia de cada sangria NA LEITURA, com a janela acima.
 // Pedido do Master: "tudo precisa refletir, tudo precisa auto ajustar" - sem
 // isso, corrigir a entrada de um dia deixava a sangria acusando uma falta que
@@ -287,13 +306,14 @@ function recalcularDivergencias(itens, entradas) {
 
   for (const grupo of porUnidade.values()) {
     for (const sg of grupo.sangrias) {
-      const desde = inicioDaJanela(grupo.sangrias, { ate: sg.data, ignorarChave: sg.chave });
-      const naJanela = (x) => (!desde || (x.data || '') > desde) && (x.data || '') <= (sg.data || '');
+      const desde = comPiso(inicioDaJanela(grupo.sangrias, { ate: sg.data, ignorarChave: sg.chave }));
+      const naJanela = (x) => (x.data || '') > desde && (x.data || '') <= (sg.data || '');
       const somar = (lista) => lista.reduce((t, x) => t + (naJanela(x) ? (Number(x.valor) || 0) : 0), 0);
       const entrou = somar(grupo.entradas);
-      // sem retirada anterior, ou sem entrada nenhuma na janela: não há com o
-      // que bater. Melhor não afirmar nada do que afirmar um número inventado.
-      if (!desde || entrou <= 0) {
+      // sem entrada nenhuma na janela não há com o que bater - inclui sangria
+      // anterior ao piso (janela vazia por definição). Melhor não afirmar nada
+      // do que afirmar um número inventado.
+      if (entrou <= 0) {
         sg.esperado = null; sg.divergencia = null; sg.temDivergencia = false;
         continue;
       }
@@ -340,23 +360,28 @@ function dinheiroEmLoja(itens, entradas) {
   const linhas = [];
   let total = 0;
   for (const g of porUnidade.values()) {
-    const desde = inicioDaJanela(g.sangrias);
-    // SEM SANGRIA LANCADA = sem inicio de janela = SEM BASE. A mesma regra da
-    // conferencia (§6: dado que nao existe nao vira numero) - e o mesmo erro
-    // ja quebrou DUAS vezes por caminhos diferentes: contar "desde sempre"
-    // fez uma sangria de R$ 540 esperar R$ 19.745,52, e aqui somou o
-    // historico inteiro das lojas Bravo (que nunca lancaram sangria no app)
-    // num "dinheiro em loja" de R$ 490 mil. Loja sem retirada lancada fica
-    // fora do total e a tela diz o porque, em vez de afirmar um numero que
-    // nao mede gaveta nenhuma.
-    if (!desde) {
-      linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, grupo: g.grupo, desde: null, semBase: true, entrou: null, saiu: null, valor: null });
-      continue;
-    }
+    const ultimaRetirada = inicioDaJanela(g.sangrias);
+    const desde = comPiso(ultimaRetirada);
     const naJanela = (x) => (x.data || '') > desde;
     const somar = (lista) => lista.reduce((t, x) => t + (naJanela(x) ? (Number(x.valor) || 0) : 0), 0);
     const entrou = +somar(g.entradas).toFixed(2);
     const saiu = +somar(g.saidas).toFixed(2);
+    // A janela agora SEMPRE existe (piso de agosto/2026), mas ha' dois jeitos
+    // de nao ter numero honesto pra mostrar:
+    //
+    // - loja que ja fez retirada: apos a sangria a gaveta volta ao fundo fixo,
+    //   entao "R$ 0,00 desde a retirada" e' verdade - mostra o numero.
+    // - loja SEM NENHUMA retirada lancada e sem movimento de caixa desde o
+    //   piso: o sistema nao viu dinheiro nenhum, e R$ 0,00 afirmaria gaveta
+    //   vazia sem evidencia (§6: dado que nao existe nao vira numero). Essas
+    //   ficam SEM BASE, fora do total, ate' o primeiro lancamento.
+    //
+    // O "desde sempre" que somou R$ 490 mil das lojas Bravo nao volta: o piso
+    // corta tudo antes de 01/08/2026 por decisao explicita do Master.
+    if (!ultimaRetirada && entrou <= 0 && saiu <= 0) {
+      linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, grupo: g.grupo, desde: null, semBase: true, entrou: null, saiu: null, valor: null });
+      continue;
+    }
     const valor = +(entrou - saiu).toFixed(2);
     total += valor;
     linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, grupo: g.grupo, desde, semBase: false, entrou, saiu, valor });
@@ -401,8 +426,8 @@ async function calcularSaldoCaixa({ unidade, ate, ignorarSangriaId }, extrasFech
   // sempre. Os dois lugares tem que usar a mesma regua - com reguas
   // diferentes, o numero que o formulario sugere na hora nunca bateria com o
   // que o painel mostra depois.
-  const desde = inicioDaJanela(sangriasDaUnidade, { ate: limite, ignorarChave: `sangria::${ignorarSangriaId}` });
-  const naJanela = (x) => !!desde && (x.data || '') > desde;
+  const desde = comPiso(inicioDaJanela(sangriasDaUnidade, { ate: limite, ignorarChave: `sangria::${ignorarSangriaId}` }));
+  const naJanela = (x) => (x.data || '') > desde;
   const entradas = daUnidade(entradasTodas).filter(naJanela);
   const totalEntradas = somar(entradas);
   const totalSaidas = somar(doPainel.filter((it) => it.origem === 'saida' && naJanela(it)));
@@ -418,17 +443,12 @@ async function calcularSaldoCaixa({ unidade, ate, ignorarSangriaId }, extrasFech
     ? Math.max(0, Math.round((Date.parse(limite + 'T00:00:00Z') - Date.parse(ultimoFechamentoEm + 'T00:00:00Z')) / 86400000))
     : 0;
 
-  // SEM BASE = nao ha retirada anterior pra abrir a janela, ou nao entrou
-  // dinheiro nenhum dentro dela. Nos dois casos nao da pra dizer que a sangria
-  // "nao bateu": nao ha com o que bater.
-  //
-  // Sem retirada anterior o sistema NAO chuta "desde sempre". Foi justamente
-  // esse chute que quebrou em producao: numa loja cuja primeira sangria estava
-  // sendo lancada agora, o acumulado inteiro virou esperado - R$ 19.745,52
-  // numa retirada de R$ 540. Melhor a conferencia ficar indisponivel na
-  // primeira retirada da unidade do que afirmar um numero inventado
-  // (§6 - dado que nao existe nao vira numero).
-  const temBase = !!desde && totalEntradas > 0;
+  // SEM BASE = nao entrou dinheiro nenhum dentro da janela: nao ha com o que
+  // bater. A janela em si sempre existe agora - comeca na ultima retirada ou
+  // no piso de agosto/2026 (comPiso), o que for mais recente. O "desde sempre"
+  // que fez uma sangria de R$ 540 esperar R$ 19.745,52 nao volta: o piso e'
+  // uma data de corte declarada pelo Master, nao um chute.
+  const temBase = totalEntradas > 0;
   return {
     unidade,
     ate: limite,

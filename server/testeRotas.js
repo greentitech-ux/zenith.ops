@@ -6946,8 +6946,8 @@ setTimeout(async () => {
     const inicial = await ler();
     const sgInicial = sangriaDe(inicial);
 
-    // ---- 2º dia + 2ª sangria. É NELA que a conferência existe: a 1ª sangria
-    // da unidade não tem retirada anterior, então não há janela pra abrir.
+    // ---- 2º dia + 2ª sangria. A 1ª sangria confere contra o piso de agosto;
+    // a 2ª contra a retirada anterior (01/11).
     // Dia 02: entram 300, não sai nada -> a 2ª sangria espera exatamente 300.
     const f2 = JSON.parse((await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-02',
@@ -6961,14 +6961,41 @@ setTimeout(async () => {
     }, cabMaster)).corpo);
     const sangria2De = (r) => (r.itens || []).find((it) => it.chave === `sangria::${sg2.id}`);
     const entrada2De = (r) => (r.entradas || []).find((e) => e.unidade === UNI && e.data === '2026-11-02');
+    // loja cujo movimento e' TODO anterior ao piso de agosto/2026 (decisao do
+    // Master: "quero que na coluna Dinheiro em Loja desconsidere meses para
+    // tras! seguiremos com o mes de Agosto apenas pra frente") - o card nao
+    // pode ressuscitar esse passado como gaveta
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: 'TESTE_CAIXA_ANTIGO', unidadeNome: 'Loja Movimento Antigo', grupo: 'ARCFOOD', data: '2026-06-15',
+      campos: { entradaDinheiro: 800 }, detalhesSaidas: [{ descricao: 'Gás', valor: 50 }],
+    }, cabMaster);
+    // loja com sangria ANTIGA (junho) e entrada de julho: a janela NÃO pode
+    // voltar até a sangria de junho (traria os 300 de julho) - ela abre no
+    // piso e conta só os 60 de agosto
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: 'TESTE_SANGRIA_ANTIGA', unidadeNome: 'Loja Sangria Antiga', grupo: 'ARCFOOD', data: '2026-07-10',
+      campos: { entradaDinheiro: 300 },
+    }, cabMaster);
+    await postarJson('/api/sangrias', {
+      unidade: 'TESTE_SANGRIA_ANTIGA', unidadeNome: 'Loja Sangria Antiga', grupo: 'ARCFOOD', data: '2026-06-20',
+      valor: 100, descricao: 'Sangria antiga', periodoInicio: '2026-06-01', periodoFim: '2026-06-20',
+      nomeDepositante: 'Fulano Teste', password: process.env.MASTER_PASSWORD,
+    }, cabMaster);
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: 'TESTE_SANGRIA_ANTIGA', unidadeNome: 'Loja Sangria Antiga', grupo: 'ARCFOOD', data: '2026-08-05',
+      campos: { entradaDinheiro: 60 },
+    }, cabMaster);
     const comDuas = await ler();
     const sg2Lida = sangria2De(comDuas);
     const ent2 = entrada2De(comDuas);
     const daUni = (r) => ((r.caixa || {}).porUnidade || []).find((u) => u.unidade === UNI);
     const linhaCaixa = daUni(comDuas);
-    // TESTE_ENTRADA_DIA (bloco anterior) tem entradas lançadas e NENHUMA
-    // sangria - é o caso das lojas Bravo que inflou o card pra R$ 490 mil
-    const linhaSemBase = ((comDuas.caixa || {}).porUnidade || []).find((u) => u.unidade === 'TESTE_ENTRADA_DIA');
+    // TESTE_ENTRADA_DIA (bloco anterior) tem entradas de outubro e NENHUMA
+    // sangria: com o piso de agosto ela ganha base (conta desde 01/08).
+    // TESTE_CAIXA_ANTIGO só tem movimento de junho: fica SEM base.
+    const linhaPiso = ((comDuas.caixa || {}).porUnidade || []).find((u) => u.unidade === 'TESTE_ENTRADA_DIA');
+    const linhaAntiga = ((comDuas.caixa || {}).porUnidade || []).find((u) => u.unidade === 'TESTE_CAIXA_ANTIGO');
+    const linhaSangriaAntiga = ((comDuas.caixa || {}).porUnidade || []).find((u) => u.unidade === 'TESTE_SANGRIA_ANTIGA');
     // estado ANTES da 2ª sangria: a janela abre na 1ª (01/11) e enxerga só os
     // 300 que entraram no dia 02 - nada do dia 01
     const linhaCaixaAntes = daUni(inicial2);
@@ -7017,8 +7044,10 @@ setTimeout(async () => {
     const htmlSaidas = require('fs').readFileSync(require('path').join(__dirname, 'public', 'saidas.html'), 'utf8');
     const cem = (v) => Math.round((v || 0) * 100);
     const conf = {
-      'a 1ª sangria da unidade fica SEM conferência (não há retirada anterior pra abrir a janela)':
-        !!sgInicial && sgInicial.esperado === null && sgInicial.temDivergencia === false,
+      // com o piso de agosto/2026 a 1ª sangria JÁ tem base: a janela abre no
+      // piso e enxerga os 1000 que entraram menos os 100 que saíram (01/11)
+      'a 1ª sangria da unidade confere contra o que entrou desde o PISO de agosto (não fica mais sem base)':
+        !!sgInicial && cem(sgInicial.esperado) === 90000 && sgInicial.temDivergencia === false,
       'AUTO-AJUSTE: baixar a entrada do dia 02 de 300 pra 200 recalcula o esperado da 2ª sangria':
         !!sgAposEntrada && cem(sgAposEntrada.esperado) === 20000,
       'AUTO-AJUSTE: a retirada de 300 vira sobra de 100 e passa a acusar divergência':
@@ -7056,11 +7085,15 @@ setTimeout(async () => {
       // ignorar tudo que veio antes dela
       'a janela ignora o que é anterior à última retirada (não é o saldo do mês)':
         !!linhaCaixaAntes && linhaCaixaAntes.desde === '2026-11-01' && cem(linhaCaixaAntes.entrou) === 30000,
-      // o erro que fez o card mostrar R$ 490.806,62: loja que nunca lançou
-      // sangria não tem início de janela, e "desde sempre" soma o histórico
-      // inteiro como se fosse gaveta. Sem base = fora do total, com o motivo.
-      'loja que NUNCA lançou sangria fica sem base (não soma o histórico inteiro como gaveta)':
-        !!linhaSemBase && linhaSemBase.semBase === true && linhaSemBase.valor === null,
+      // decisão do Master (27/08): "desconsidere meses para trás! seguiremos
+      // com o mês de Agosto apenas pra frente". O R$ 490.806,62 não volta: o
+      // que é anterior a 01/08/2026 nunca entra na conta da gaveta.
+      'o card DESCONSIDERA meses pra trás: loja cujo movimento é todo anterior a agosto fica sem base':
+        !!linhaAntiga && linhaAntiga.semBase === true && linhaAntiga.valor === null,
+      'loja sem sangria mas COM movimento desde agosto conta a partir do piso (01/08), não "desde sempre"':
+        !!linhaPiso && linhaPiso.semBase === false && linhaPiso.desde === '2026-07-31' && cem(linhaPiso.valor) === 45000,
+      'sangria antiga (junho) NÃO arrasta a janela pra trás do piso: só os 60 de agosto contam, não os 300 de julho':
+        !!linhaSangriaAntiga && linhaSangriaAntiga.desde === '2026-07-31' && cem(linhaSangriaAntiga.valor) === 6000,
       'o total soma só as lojas com base (a sem sangria não infla o número)':
         cem((comDuas.caixa || {}).total) === cem(((comDuas.caixa || {}).porUnidade || [])
           .reduce((t, u) => t + (u.semBase ? 0 : (u.valor || 0)), 0)),
@@ -7787,12 +7820,12 @@ setTimeout(async () => {
       detalhesSaidas: [{ descricao: 'Gelo', valor: 100 }],
     }, cabMaster);
 
-    // ANTES da primeira retirada nao ha janela: o sistema nao chuta "desde
-    // sempre" (ver calcularSaldoCaixa). Regua definida pelo Master: o esperado
-    // e' o que entrou DESDE A RETIRADA ANTERIOR.
+    // ANTES da primeira retirada a janela abre no PISO de agosto/2026 (decisao
+    // do Master: "desconsidere meses para tras"), nunca em "desde sempre".
+    // Aqui: entrou 600+400, saiu 50+100 -> esperado 850 desde o piso.
     const esperado1 = JSON.parse((await pedir(`/api/sangrias/esperado?unidade=${UNI}&ate=2026-09-02`, cabMaster)).corpo);
 
-    // primeira sangria da unidade: sem base pra conferir, salva sem motivo
+    // primeira sangria da unidade: bate com o esperado do piso, salva sem motivo
     const certa = await postarJson('/api/sangrias', {
       unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-02',
       valor: 850, periodoInicio: '2026-09-01', periodoFim: '2026-09-02',
@@ -7856,9 +7889,9 @@ setTimeout(async () => {
     const srcIdxCaixa = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
 
     const conf = {
-      'sem retirada anterior não há janela: a conferência fica indisponível, não chuta o acumulado':
-        esperado1.esperado === null && esperado1.temBase === false && !esperado1.desde,
-      'a primeira sangria da unidade salva sem exigir motivo (não há com o que bater)':
+      'sem retirada anterior a janela abre no PISO de agosto/2026, não em "desde sempre" (600+400−50−100 = 850)':
+        esperado1.esperado === 850 && esperado1.temBase === true && esperado1.desde === '2026-07-31',
+      'a primeira sangria bate com o esperado do piso (850) e salva sem motivo':
         certa.status === 200 && certaData.motivoDivergencia === null,
       'depois da 1ª retirada a janela abre: esperado = o que entrou DESDE ela (300 do dia 03)':
         esperado2.esperado === 300 && esperado2.temBase === true && esperado2.desde === '2026-09-02',
