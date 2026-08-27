@@ -2530,6 +2530,74 @@ setTimeout(async () => {
   console.log(`${okTempoNaLeitura ? '✓' : '✗'} Foto do relatório: indicadores de tempo (Leg Time, Run Time, ADT, OTD...) entram na leitura em minutos decimais`);
 
   // ------------------------------------------------------------------
+  // A SANGRIA DA PLANILHA SUMIA QUANDO O APP TINHA O FECHAMENTO DO DIA.
+  // Master, com o PDF do próprio painel na mão: "falta uma sangria de 675 no
+  // dia 05/08 que nao consta no NoPulse".
+  //
+  // Carrão 05/08: o app tinha um fechamento (entrada 107 + 3 saídas) e a
+  // planilha tinha, no MESMO dia, a linha separada "SAngria André 05/08" de
+  // R$ 675,00. semDuplicataDaPlanilha descartava a linha da planilha por
+  // unidade+data - e levava a sangria junto. Nos dias em que o app não tinha
+  // fechamento (02/08, 10/08, 14/08) as sangrias da planilha apareciam
+  // normalmente: era essa assimetria que denunciava o problema.
+  //
+  // Agora o descarte é da linha que TRAZ O FECHAMENTO, não do dia inteiro.
+  let okSangriaPlanilhaNoDiaDoApp = false;
+  try {
+    const cabMaster = { Authorization: 'Bearer ' + token };
+    const UNI = 'TESTE_SANGRIA_SUMIDA';
+    // dia 05: o app tem o fechamento (é o "Dom Carrão" do PDF)
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: UNI, unidadeNome: 'Loja Sangria Sumida', grupo: 'ARCFOOD', data: '2026-08-05',
+      campos: { entradaDinheiro: 107 },
+      detalhesSaidas: [{ descricao: 'oleo de soja', valor: 29.12 }, { descricao: 'copo descartavel', valor: 21.59 }],
+    }, cabMaster);
+    require('./fechamentos-snapshot.json').push(
+      // a MESMA linha do fechamento, que a planilha recebeu de volta do app:
+      // essa É duplicata e tem que continuar sendo descartada
+      {
+        id: 'pl-sangria-sumida-05-fech', grupo: 'ARCFOOD', unidade: UNI, unidadeNome: 'Loja Sangria Sumida',
+        data: '2026-08-05', faturamento: 3011.75, entradaDinheiro: 107, gerente: 'gerente@planilha',
+        detalhesSaidas: [{ descricao: 'oleo de soja', valor: 29.12 }],
+      },
+      // a linha SEPARADA da sangria, que só existe na planilha
+      {
+        id: 'pl-sangria-sumida-05-sangria', grupo: 'ARCFOOD', unidade: UNI, unidadeNome: 'Loja Sangria Sumida',
+        data: '2026-08-05', faturamento: 0, entradaDinheiro: 0, gerente: 'André SangriaC',
+        detalhesSaidas: [{ descricao: 'SAngria André 05/08', valor: 675 }],
+      },
+      // dia que o app NÃO tem: sempre funcionou, e tem que continuar
+      {
+        id: 'pl-sangria-sumida-10', grupo: 'ARCFOOD', unidade: UNI, unidadeNome: 'Loja Sangria Sumida',
+        data: '2026-08-10', faturamento: 0, entradaDinheiro: 0, gerente: 'André SangriaC',
+        detalhesSaidas: [{ descricao: 'sangria andre', valor: 195 }],
+      },
+    );
+    const resp = JSON.parse((await pedir('/api/saidas-painel?inicio=2026-08-01&fim=2026-08-31', cabMaster)).corpo);
+    const daLoja = (resp.itens || []).filter((it) => it.unidade === UNI);
+    const valores = daLoja.map((it) => Math.round((it.valor || 0) * 100));
+    const entradasDia05 = (resp.entradas || []).filter((e) => e.unidade === UNI && e.data === '2026-08-05');
+
+    const conf = {
+      'a sangria de R$ 675,00 do dia 05/08 aparece no painel': valores.includes(67500),
+      'a sangria de R$ 195,00 do dia 10/08 continua aparecendo (não regrediu)': valores.includes(19500),
+      'a saída do app continua aparecendo': valores.includes(2912),
+      // o que a correção NÃO pode ter quebrado: a linha da planilha que é
+      // cópia do fechamento do app segue descartada, senão a entrada do dia
+      // dobra (foi o bug do "01/08 consta como 524")
+      'a entrada do dia 05 NÃO dobra: continua 107, não 214':
+        entradasDia05.length === 1 && Math.round(entradasDia05[0].valor * 100) === 10700,
+      'a saída "oleo de soja" não vira duas linhas (a cópia da planilha segue descartada)':
+        valores.filter((v) => v === 2912).length === 1,
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okSangriaPlanilhaNoDiaDoApp = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okSangriaPlanilhaNoDiaDoApp = false; console.log('  erro: ' + e.message); }
+  if (!okSangriaPlanilhaNoDiaDoApp) ruins += 1;
+  console.log(`${okSangriaPlanilhaNoDiaDoApp ? '✓' : '✗'} Painel de Saídas: sangria lançada em linha separada da planilha não some quando o app tem o fechamento do dia`);
+
+  // ------------------------------------------------------------------
   // Gravar do Bravo tem que RECONCILIAR, nao "inserir se nao existir". As
   // primeiras importacoes (antes das correcoes de ordem de aba, timeout e
   // mescla) deixaram dias gravados pela metade; numa segunda passada esses
