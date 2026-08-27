@@ -60,6 +60,12 @@
   .form-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px;}
   .form-item .fi-titulo{font-weight:700;font-size:13.5px;}
   .fi-sub{font-size:11.5px;color:var(--muted);margin-top:3px;font-family:var(--mono);}
+  /* Favorecido: quem RECEBE o dinheiro. Fica em linha própria e com peso
+     porque é por ele que se procura o formulário na lista ("o pagamento do
+     fulano"), não pelo número do ticket - pedido do Master. Cor de texto
+     normal, não o acento: o limão é de ação/marca, isto aqui é dado. */
+  .fi-favorecido{font-size:12.5px;color:var(--txt);margin-top:3px;font-weight:600;}
+  .fi-favorecido .rot{color:var(--muted);font-weight:400;font-family:var(--mono);font-size:11px;}
   .ass-linha{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;font-size:12.5px;}
   .ass-linha .rot{flex:1;min-width:140px;}
   .acoes-form{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
@@ -159,7 +165,7 @@
     <div class="tipo-filtro-row" id="tipo-filtro-row"></div>
     <div class="filtros-compactos">
       <div><label>Unidade</label><select id="filtro-unidade-lista" onchange="aplicarFiltrosLista()"><option value="">Todas</option></select></div>
-      <div><label>Pesquisar</label><input type="search" id="filtro-busca-lista" placeholder="🔍 ticket #, unidade..." oninput="aplicarFiltrosLista()"></div>
+      <div><label>Pesquisar</label><input type="search" id="filtro-busca-lista" placeholder="🔍 favorecido, ticket #, unidade..." oninput="aplicarFiltrosLista()"></div>
       <div><label>De</label><input type="date" id="filtro-data-de-lista" onchange="aoMudarPeriodoLista()"></div>
       <div><label>Até</label><input type="date" id="filtro-data-ate-lista" onchange="aoMudarPeriodoLista()"></div>
     </div>
@@ -770,6 +776,13 @@ async function excluirFormulario(id){
   if(d.pendenteAprovacao) alert('Exclusão enviada pra aprovação do Master.');
 }
 
+// quem recebe o dinheiro. Todo tipo que paga alguém guarda isso em
+// campos.favorecido (ver TIPOS em formularios.js) - o Ass. Boleto e outros
+// só-anexo não têm, e aí a linha simplesmente não aparece.
+function favorecidoDe(f){
+  return String((f.campos && f.campos.favorecido) || '').trim();
+}
+
 function cardHtml(f){
   const t = TIPOS.find(x=>x.tipo===f.tipo);
   const pendentes = f.assinaturas.filter(a=>!a.assinado).length;
@@ -794,6 +807,7 @@ function cardHtml(f){
     <div class="fi-titulo">${escapeHtml(t?t.rotulo:f.tipo)} · ${escapeHtml(f.unidade)}
       <span class="badge" style="background:#1a2230;color:var(--muted);">#${f.numeroTicket ?? '—'}</span>
       <span class="badge ${cancelado?'cancelado':(f.status==='ASSINADO'?'assinado':'pendente')}">${cancelado?'🚫 cancelado':(f.status==='ASSINADO'?'✅ assinado':`✍️ falta(m) ${pendentes}`)}</span></div>
+    ${favorecidoDe(f) ? `<div class="fi-favorecido"><span class="rot">favorecido</span> ${escapeHtml(favorecidoDe(f))}</div>` : ''}
     <div class="fi-sub">${fmtData(f.criadoEm)} · ${t && t.soAnexo ? `${(f.anexos||[]).length} documento(s)` : `${f.linhas.length} linha(s)`} · total ${fmtMoney(f.valorTotal)} · por ${escapeHtml(f.criadoPorEmail||'')}</div>
     ${cancelado ? `<div class="fi-sub" style="color:var(--bad);">cancelado ${fmtData(f.canceladoEm)} por ${escapeHtml(f.canceladoPorEmail||'')}${f.motivoCancelamento?` · ${escapeHtml(f.motivoCancelamento)}`:''}</div>` : ''}
     ${f.editadoEm && !cancelado ? `<div class="fi-sub" style="color:var(--warn);">corrigido ${fmtData(f.editadoEm)} por ${escapeHtml(f.editadoPorEmail||'')}</div>` : ''}
@@ -854,7 +868,10 @@ function passaTriagemForm(f){
 function passaBuscaForm(f){
   if(!FILTRO_BUSCA_LISTA) return true;
   const t = TIPOS.find(x=>x.tipo===f.tipo);
-  const alvo = [f.numeroTicket!=null?('#'+f.numeroTicket):'', f.numeroTicket, f.unidade, t?t.rotulo:f.tipo, f.criadoPorEmail]
+  // o favorecido entra na busca junto com ticket/unidade/tipo: procurar
+  // "pagamento do fulano" é o caso real de quem usa a tela, e o número do
+  // ticket é justamente o que ninguém lembra de cabeça
+  const alvo = [f.numeroTicket!=null?('#'+f.numeroTicket):'', f.numeroTicket, f.unidade, t?t.rotulo:f.tipo, f.criadoPorEmail, favorecidoDe(f)]
     .filter(v=>v!=null).join(' ').toLowerCase();
   return FILTRO_BUSCA_LISTA.split(/\s+/).every(p=>alvo.includes(p));
 }

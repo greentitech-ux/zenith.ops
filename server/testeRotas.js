@@ -3775,7 +3775,7 @@ setTimeout(async () => {
       gestor: { ...antigo.assinaturas.responsavel, chave: 'gestor', rotulo: 'Gestor imediato' },
     };
     DOCS.set('formularios/form-chave-antiga', legado);
-    form.invalidarCacheTeste && form.invalidarCacheTeste();
+    form.invalidar();
 
     const tokenColab = novo.assinaturas.find((a) => a.chave === 'favorecido').token;
     const vistaAss = await pedir(`/api/formularios-publico/${novo.id}?token=${tokenColab}`);
@@ -8340,6 +8340,91 @@ setTimeout(async () => {
   } catch (e) { okNiverDigitado = false; console.log('  erro: ' + e.message); }
   if (!okNiverDigitado) ruins += 1;
   console.log(`${okNiverDigitado ? '✓' : '✗'} Check-in do Parque: tela e servidor calculam o MESMO total com nascimento digitado (aniversariante não trava mais o check-in)`);
+
+  // ------------------------------------------------------------------
+  // FORMULÁRIOS, dois pedidos do Master na mesma tela:
+  // 1. "interessante que tenha o nome do Favorecido para identificação clara
+  //    e possíveis pesquisas" - o card só mostrava tipo/unidade/ticket, e o
+  //    número do ticket é justamente o que ninguém lembra de cabeça.
+  // 2. "quando tiver anexo, juntar os anexos ao PDF do formulário" - antes o
+  //    PDF só LISTAVA os nomes dos anexos no rodapé; quem ia pagar tinha que
+  //    baixar cada arquivo por fora e juntar na mão.
+  let okFormFavorecidoAnexo = false;
+  try {
+    const form = require('./formularios');
+    const cab = { Authorization: 'Bearer ' + token };
+    const { PDFDocument } = require('pdf-lib');
+    const htmlForm = require('fs').readFileSync(require('path').join(__dirname, 'public', 'formularios.html'), 'utf8');
+
+    // um PDF de 2 páginas de verdade pra servir de anexo
+    const anexoDoc = await PDFDocument.create();
+    anexoDoc.addPage(); anexoDoc.addPage();
+    const anexoBytes = Buffer.from(await anexoDoc.save());
+    ARQUIVOS.set('anexos/nota-teste.pdf', anexoBytes);
+
+    const semAnexo = await form.criar({
+      tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
+      campos: { favorecido: 'Maria Aparecida Fornecedora ME' },
+      linhas: [{ descricao: 'Serviço', valor: '100,00' }],
+      criadoPorEmail: 'teste@teste.local',
+    });
+    const comAnexo = await form.criar({
+      tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
+      campos: { favorecido: 'Maria Aparecida Fornecedora ME' },
+      linhas: [{ descricao: 'Serviço', valor: '100,00' }],
+      anexos: [{ nome: 'nota-teste.pdf', path: 'anexos/nota-teste.pdf', tipo: 'application/pdf' }],
+      criadoPorEmail: 'teste@teste.local',
+    });
+    // anexo cujo arquivo sumiu do storage: não pode derrubar o PDF de um
+    // formulário já assinado - a loja ficaria sem o documento pra pagar
+    const anexoSumido = await form.criar({
+      tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
+      campos: { favorecido: 'Fulano Sumido' },
+      linhas: [{ descricao: 'Serviço', valor: '10,00' }],
+      anexos: [{ nome: 'nao-existe.pdf', path: 'anexos/nao-existe.pdf', tipo: 'application/pdf' }],
+      criadoPorEmail: 'teste@teste.local',
+    });
+
+    const pdfSem = await pedirBinario(`/api/formularios/${semAnexo.id}/pdf`, cab);
+    const pdfCom = await pedirBinario(`/api/formularios/${comAnexo.id}/pdf`, cab);
+    const pdfSumido = await pedirBinario(`/api/formularios/${anexoSumido.id}/pdf`, cab);
+    const pagsSem = pdfSem.status === 200 ? (await PDFDocument.load(pdfSem.buffer)).getPageCount() : -1;
+    const pagsCom = pdfCom.status === 200 ? (await PDFDocument.load(pdfCom.buffer)).getPageCount() : -1;
+    const pagsSumido = pdfSumido.status === 200 ? (await PDFDocument.load(pdfSumido.buffer)).getPageCount() : -1;
+    const textoCom = pdfCom.status === 200 ? textoDoPdf(pdfCom.buffer) : '';
+    // o favorecido tem que chegar na tela: sem isso o card não teria o que
+    // mostrar nem o que procurar
+    const listaF = await pedir('/api/formularios', cab);
+    const naListaF = (listaF.status === 200 ? JSON.parse(listaF.corpo) : []).find((x) => x.id === comAnexo.id) || {};
+
+    const conf = {
+      'o PDF com anexo ganha as páginas do anexo (2 páginas a mais)':
+        pagsSem > 0 && pagsCom === pagsSem + 2,
+      'o PDF sem anexo continua do mesmo tamanho de sempre (nada mudou pra quem não anexa)':
+        pdfSem.status === 200 && pagsSem >= 1,
+      'o rodapé avisa que o anexo vem nas páginas seguintes, em vez de só listar o nome':
+        /nas p.ginas seguintes/i.test(textoCom),
+      // um arquivo ruim não pode custar o formulário inteiro
+      'anexo que sumiu do storage vira uma página avisando, e o PDF continua saindo':
+        pdfSumido.status === 200 && pagsSumido >= 2,
+      'o favorecido chega na listagem (é dele que o card e a busca vivem)':
+        (naListaF.campos || {}).favorecido === 'Maria Aparecida Fornecedora ME',
+      'o card mostra o favorecido em linha própria': /class="fi-favorecido"/.test(htmlForm)
+        && /favorecidoDe\(f\)/.test(htmlForm),
+      'a busca da lista procura por favorecido, não só ticket/unidade':
+        /const alvo = \[[^\]]*favorecidoDe\(f\)\]/.test(htmlForm)
+        && /placeholder="🔍 favorecido/.test(htmlForm),
+      // §2 do CLAUDE.md: o limão é de ação/marca. Favorecido é DADO - pintar
+      // de acento apagaria a leitura do que é clicável na tela
+      'o favorecido não rouba o acento limão (é dado, não ação)':
+        !/\.fi-favorecido\{[^}]*var\(--accent\)/.test(htmlForm),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okFormFavorecidoAnexo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (páginas: sem=${pagsSem} com=${pagsCom} sumido=${pagsSumido})`);
+  } catch (e) { okFormFavorecidoAnexo = false; console.log('  erro: ' + e.message); }
+  if (!okFormFavorecidoAnexo) ruins += 1;
+  console.log(`${okFormFavorecidoAnexo ? '✓' : '✗'} Formulários: Favorecido no card e na busca; anexos entram no PDF do formulário`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
