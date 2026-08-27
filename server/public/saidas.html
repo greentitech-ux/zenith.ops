@@ -200,7 +200,6 @@
       <div class="valor" id="kpi-saldo">—</div>
       <div class="rotulo">Dinheiro em loja</div>
       <div class="formula">desde a última sangria de cada loja</div>
-      <div class="formula" id="kpi-saldo-detalhe" style="margin-top:6px;line-height:1.5;"></div>
     </div>
     <div class="kpi"><div class="valor" id="kpi-pendentes">—</div><div class="rotulo">Pendentes de verificar</div></div>
     <div class="kpi hidden" id="card-verificadas"><div class="valor ok" id="kpi-verificadas">—</div><div class="rotulo">Verificadas</div></div>
@@ -553,28 +552,25 @@ function renderTudo(){
   if(PODE_CONFERIR){
     const totalEntrada = entradas.reduce((s,e)=>s+(e.valor||0),0);
     document.getElementById('kpi-entrada').textContent = fmtMoney(totalEntrada);
-    // Dinheiro em loja vem PRONTO do servidor, contado desde a última retirada
-    // de cada unidade (ver dinheiroEmLoja). Não é "entrada − saídas − sangria
-    // do período": com o filtro no mês, uma sangria que fechou o caixa do mês
-    // anterior entrava contra a entrada deste, e o número deixava de ser o que
-    // o rótulo promete.
+    // Dinheiro em loja: o servidor manda a janela POR LOJA (desde a última
+    // sangria de cada uma, ver dinheiroEmLoja) e o card soma SÓ as lojas do
+    // filtro da tela - o MESMO recorte de Grupo/Loja que as colunas usam.
+    // Pedido do Master: "preciso que seja o valor de cada loja quando
+    // filtrado" - antes o total era fixo porque Grupo/Loja filtram em
+    // memória e nunca chegam ao servidor.
+    const grupoSel = document.getElementById('f-grupo').value;
+    const caixaDoFiltro = (CAIXA.porUnidade || []).filter(u =>
+      (!grupoSel || u.grupo === grupoSel) && (SEL_UNIDADE.size === 0 || SEL_UNIDADE.has(u.unidade)));
+    // loja sem sangria lançada não tem janela nem base (ver dinheiroEmLoja):
+    // fica fora da soma - contar o histórico inteiro como gaveta foi o que
+    // inflou o card pra R$ 490 mil
+    const caixaComBase = caixaDoFiltro.filter(u => !u.semBase);
+    const saldo = caixaComBase.reduce((t, u) => t + (u.valor || 0), 0);
     const elSaldo = document.getElementById('kpi-saldo');
-    elSaldo.textContent = fmtMoney(CAIXA.total || 0);
-    elSaldo.classList.toggle('bad', (CAIXA.total || 0) < 0);
-    // a conta aberta: sem ela, quando o número não bate com a gaveta não há
-    // como saber desde quando o sistema está contando
-    // loja SEM sangria lançada não tem janela nem base (ver dinheiroEmLoja):
-    // ela sai do total e vira uma nota, em vez de somar o histórico inteiro
-    // como se fosse gaveta - foi o que inflou o card pra R$ 490 mil
-    const comBase = (CAIXA.porUnidade || []).filter(u => !u.semBase && (u.entrou || u.saiu || u.valor));
-    const semBase = (CAIXA.porUnidade || []).filter(u => u.semBase);
-    const linhasDet = comBase.map(u => `${escapeHtml(u.unidadeNome||u.unidade)}: ${fmtMoney(u.valor)}`
-      + `<br><span style="opacity:.75">desde a sangria de ${fmtData(u.desde)}`
-      + ` · entrou ${fmtMoney(u.entrou)} · saiu ${fmtMoney(u.saiu)}</span>`);
-    if(semBase.length){
-      linhasDet.push(`<span style="opacity:.75">sem sangria lançada (sem base pra medir a gaveta): ${semBase.map(u=>escapeHtml(u.unidadeNome||u.unidade)).join(', ')}</span>`);
-    }
-    document.getElementById('kpi-saldo-detalhe').innerHTML = linhasDet.join('<br>') || 'nada movimentado desde a última sangria';
+    // filtro só com loja sem sangria lançada: não há o que medir, e um zero
+    // aqui mentiria - o traço diz "sem base", não "gaveta vazia"
+    elSaldo.textContent = caixaComBase.length ? fmtMoney(saldo) : '—';
+    elSaldo.classList.toggle('bad', caixaComBase.length > 0 && saldo < 0);
   }
 
   // o botao de mover em lote so existe quando ha o que mover (e so pro Master)

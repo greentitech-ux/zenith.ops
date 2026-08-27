@@ -7054,8 +7054,8 @@ setTimeout(async () => {
       'o total soma só as lojas com base (a sem sangria não infla o número)':
         cem((comDuas.caixa || {}).total) === cem(((comDuas.caixa || {}).porUnidade || [])
           .reduce((t, u) => t + (u.semBase ? 0 : (u.valor || 0)), 0)),
-      'a tela separa quem tem base de quem não tem (a sem sangria vira nota, não valor)':
-        /u\.semBase/.test(htmlSaidas) && /sem sangria lançada \(sem base pra medir a gaveta\)/.test(htmlSaidas),
+      'porUnidade traz o grupo de cada loja (é o que deixa o filtro de Grupo recortar o card)':
+        !!linhaCaixa && linhaCaixa.grupo === 'ARCFOOD',
       'excluir a entrada (valor 0) tira o dia da coluna': rExcluiEntrada.status === 200 && !entrada2De(semEntrada),
       'excluir a entrada NÃO apaga o fechamento (só a entrada em dinheiro)': fechamentoAindaExiste,
       'Master/Admin exclui a sangria e ela some do painel': rExcluiSangria.status === 200 && !sangria2De(semSangria),
@@ -7702,15 +7702,21 @@ setTimeout(async () => {
       'os dois cards novos existem': /id="kpi-entrada"/.test(html) && /id="kpi-saldo"/.test(html),
       'a régua fica escrita no card (ninguém precisa adivinhar de onde vem)':
         /desde a última sangria de cada loja/.test(html),
-      // a conta NAO e' mais "entrada - saidas - sangria do periodo": esse era
-      // o saldo do FILTRO, nao o dinheiro na gaveta (ver dinheiroEmLoja)
-      'o valor vem pronto do servidor, pela janela desde a última retirada':
-        /elSaldo\.textContent = fmtMoney\(CAIXA\.total \|\| 0\)/.test(html)
+      // pedido do Master: "preciso que seja o valor de cada loja quando
+      // filtrado" - o card soma as lojas do MESMO recorte de Grupo/Loja das
+      // colunas, a partir do porUnidade que o servidor manda
+      'o card acompanha o filtro de Grupo e de Loja da tela (não é um total fixo)':
+        /const caixaDoFiltro = \(CAIXA\.porUnidade \|\| \[\]\)\.filter\(u =>/.test(html)
+        && /SEL_UNIDADE\.size === 0 \|\| SEL_UNIDADE\.has\(u\.unidade\)/.test(html)
+        && /u\.grupo === grupoSel/.test(html)
         && !/const saldo = totalEntrada - totalSaidas - totalSangrias;/.test(html),
-      'a conta aparece aberta no card (desde quando, entrou, saiu)':
-        /id="kpi-saldo-detalhe"/.test(html) && /desde a sangria de/.test(html),
+      // pedido do Master: "sem legenda do jeito que esta esta errado"
+      'a legenda por loja saiu do card': !/kpi-saldo-detalhe/.test(html) && !/desde a sangria de \$/.test(html),
+      'loja sem sangria lançada fica fora da soma, e filtro só com elas mostra o traço':
+        /caixaDoFiltro\.filter\(u => !u\.semBase\)/.test(html)
+        && /caixaComBase\.length \? fmtMoney\(saldo\) : '—'/.test(html),
       // vermelho e' cor semantica (saiu mais do que entrou), nao decoracao
-      'saldo negativo fica vermelho': /elSaldo\.classList\.toggle\('bad', \(CAIXA\.total \|\| 0\) < 0\)/.test(html),
+      'saldo negativo fica vermelho': /elSaldo\.classList\.toggle\('bad', caixaComBase\.length > 0 && saldo < 0\)/.test(html),
       'Saldo, Entrada e Verificadas nascem escondidos e só aparecem pra quem confere':
         /id="card-saldo"[^>]*class="[^"]*hidden|class="kpi destaque hidden" id="card-saldo"/.test(html)
         && /PODE_CONFERIR = IS_MASTER \|\| IS_ADMIN;/.test(html)
