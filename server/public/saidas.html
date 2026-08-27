@@ -137,7 +137,7 @@
       </div>
     </div>
     <div class="header-nav">
-      <button class="btn-notif" onclick="carregar()" title="Atualizar">🔄</button>
+      <button class="btn-notif" onclick="atualizarTudo(this)" title="Atualizar">🔄</button>
       <div class="nav-divider"></div>
       <button class="btn-notif btn-sair" onclick="logout()" title="Sair">🚪</button>
     </div>
@@ -196,11 +196,7 @@
     <div class="kpi hidden" id="card-entrada"><div class="valor ok" id="kpi-entrada">—</div><div class="rotulo">Entrada em dinheiro</div></div>
     <div class="kpi"><div class="valor bad" id="kpi-saidas">—</div><div class="rotulo">Saídas avulsas</div></div>
     <div class="kpi"><div class="valor bad" id="kpi-sangrias">—</div><div class="rotulo">Sangria/Depósito</div></div>
-    <div class="kpi destaque hidden" id="card-saldo">
-      <div class="valor" id="kpi-saldo">—</div>
-      <div class="rotulo">Dinheiro em loja</div>
-      <div class="formula">desde a última sangria de cada loja</div>
-    </div>
+    <div class="kpi destaque hidden" id="card-saldo"><div class="valor" id="kpi-saldo">—</div><div class="rotulo">Dinheiro em loja</div></div>
     <div class="kpi"><div class="valor" id="kpi-pendentes">—</div><div class="rotulo">Pendentes de verificar</div></div>
     <div class="kpi hidden" id="card-verificadas"><div class="valor ok" id="kpi-verificadas">—</div><div class="rotulo">Verificadas</div></div>
   </div>
@@ -433,6 +429,27 @@ function setupMultiselectUnidade(){
   renderUnidadePanel();
 }
 
+// O 🔄 de verdade. Antes ele só chamava carregar(), que relê o que o
+// servidor JÁ TEM em memória - o lançamento que acabou de entrar na planilha
+// não aparecia, e qualquer falha de rede/sessão morria em silêncio: o botão
+// parecia não funcionar. Agora, pro Master, ele pede ao servidor pra reler a
+// planilha ARCFOOD primeiro (leitura incremental: só as linhas novas, ver
+// sheetsSync.js), mostra ⏳ enquanto roda e AVISA quando falha.
+async function atualizarTudo(btn){
+  if(btn){ btn.disabled = true; btn.textContent = '⏳'; }
+  try{
+    if(IS_MASTER){
+      // sync com problema não trava o refresh - o painel recarrega com o que há
+      await fetch('/api/fechamentos/sincronizar-planilhas', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' }).catch(()=>{});
+    }
+    await carregar();
+  }catch(e){
+    alert(`Não consegui atualizar (${e.message || 'falha de rede'}). Recarregue a página se persistir.`);
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = '🔄'; }
+  }
+}
+
 async function carregar(){
   const inicio = document.getElementById('f-data-de').value;
   const fim = document.getElementById('f-data-ate').value;
@@ -441,7 +458,9 @@ async function carregar(){
   if(fim) params.set('fim', fim);
   // a rota passou a devolver {itens, entradas} - "entradas" so vem preenchido
   // pra Master/Admin (o gate e' no servidor, ver /api/saidas-painel)
-  const resp = await fetch('/api/saidas-painel?'+params.toString()).then(r=>r.json());
+  const res = await fetch('/api/saidas-painel?'+params.toString());
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  const resp = await res.json();
   ITENS = resp.itens || [];
   ENTRADAS = resp.entradas || [];
   CAIXA = resp.caixa || { total: 0, porUnidade: [] };

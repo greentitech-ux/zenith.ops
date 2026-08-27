@@ -7700,8 +7700,11 @@ setTimeout(async () => {
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'saidas.html'), 'utf8');
     const conf = {
       'os dois cards novos existem': /id="kpi-entrada"/.test(html) && /id="kpi-saldo"/.test(html),
-      'a régua fica escrita no card (ninguém precisa adivinhar de onde vem)':
-        /desde a última sangria de cada loja/.test(html),
+      // pedido do Master: "apenas o valor e abaixo o nome Dinheiro Em Loja" -
+      // o card e' igual aos outros KPIs, sem linha de formula nem legenda
+      'o card é só o valor + rótulo, sem linha de fórmula':
+        /id="card-saldo"><div class="valor" id="kpi-saldo">—<\/div><div class="rotulo">Dinheiro em loja<\/div><\/div>/.test(html)
+        && !/desde a última sangria de cada loja/.test(html),
       // pedido do Master: "preciso que seja o valor de cada loja quando
       // filtrado" - o card soma as lojas do MESMO recorte de Grupo/Loja das
       // colunas, a partir do porUnidade que o servidor manda
@@ -7717,6 +7720,15 @@ setTimeout(async () => {
         && /caixaComBase\.length \? fmtMoney\(saldo\) : '—'/.test(html),
       // vermelho e' cor semantica (saiu mais do que entrou), nao decoracao
       'saldo negativo fica vermelho': /elSaldo\.classList\.toggle\('bad', caixaComBase\.length > 0 && saldo < 0\)/.test(html),
+      // pedido do Master: "o botão atualizar não está funcionando". Ele só
+      // relia a memória do servidor e engolia erro - agora pede a releitura
+      // incremental da planilha (Master) e avisa quando falha
+      'o 🔄 pede a releitura da planilha antes de recarregar, com ⏳ enquanto roda':
+        /onclick="atualizarTudo\(this\)"/.test(html)
+        && /sincronizar-planilhas/.test(html)
+        && /btn\.textContent = '⏳'/.test(html),
+      'falha ao atualizar AVISA em vez de morrer em silêncio':
+        /Não consegui atualizar/.test(html) && /if\(!res\.ok\) throw new Error\('HTTP '\+res\.status\)/.test(html),
       'Saldo, Entrada e Verificadas nascem escondidos e só aparecem pra quem confere':
         /id="card-saldo"[^>]*class="[^"]*hidden|class="kpi destaque hidden" id="card-saldo"/.test(html)
         && /PODE_CONFERIR = IS_MASTER \|\| IS_ADMIN;/.test(html)
