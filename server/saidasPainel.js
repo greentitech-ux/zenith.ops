@@ -125,6 +125,39 @@ async function listarEntradas(extrasFechamentos = []) {
     .filter((e) => e.valor);
 }
 
+// Entrada em dinheiro DIA A DIA por unidade. listarEntradas devolve uma
+// linha por FECHAMENTO, e as duas fontes se sobrepoem: o Firestore recusa
+// dois lancamentos na mesma unidade+data (fechamentosLive.create), mas o
+// snapshot da planilha ARCFOOD e' fonte independente - o mesmo dia pode vir
+// pelos dois caminhos e apareceria duas vezes na coluna e no relatorio.
+// Aqui o dia vira UMA linha com a soma, que e' como o Master le ("quanto
+// entrou de dinheiro nessa loja nesse dia").
+//
+// Somar e' o mesmo criterio que /api/fechamentos ja usa pro dia repetido
+// (mesclarLancamentosDoMesmoDia soma entradaDinheiro, que esta em
+// CAMPOS_SOMA) - entao a coluna nao inventa uma conta propria.
+//
+// O total nao muda: somar as linhas por fechamento ou os dias agregados da
+// o mesmo numero - por isso o KPI de Entrada continua batendo.
+//
+// Nao custa leitura nova: reusa exatamente a mesma fonte de listarEntradas.
+async function listarEntradasPorDia(extrasFechamentos = []) {
+  const porChave = new Map();
+  for (const e of await listarEntradas(extrasFechamentos)) {
+    const chave = `${e.unidade}::${e.data}`;
+    const atual = porChave.get(chave);
+    if (atual) {
+      atual.valor = +(atual.valor + e.valor).toFixed(2);
+      atual.lancamentos += 1;
+      continue;
+    }
+    porChave.set(chave, { chave, ...e, lancamentos: 1 });
+  }
+  // mais recente primeiro, igual a lista de saidas do painel
+  return [...porChave.values()].sort((a, b) => String(b.data || '').localeCompare(String(a.data || ''))
+    || String(a.unidadeNome || a.unidade || '').localeCompare(String(b.unidadeNome || b.unidade || ''), 'pt-BR'));
+}
+
 // SALDO DE CAIXA DA UNIDADE - a conta que decide se a sangria bate.
 //
 // O fundo de caixa e' FIXO (decisao do Master): a loja sempre deixa o mesmo
@@ -273,4 +306,4 @@ async function marcarVerificada(chave, { verificada, porId, porEmail }, extrasFe
   return { chave, verificada: r.verificada, verificadaPorEmail: r.verificadaPorEmail, verificadaEm: r.verificadaEm };
 }
 
-module.exports = { listar, listarEntradas, calcularSaldoCaixa, filtrar, marcarVerificada, reclassificar, corrigirItemPlanilha, pareceSangria };
+module.exports = { listar, listarEntradas, listarEntradasPorDia, calcularSaldoCaixa, filtrar, marcarVerificada, reclassificar, corrigirItemPlanilha, pareceSangria };

@@ -7952,7 +7952,9 @@ app.get('/api/saidas-painel', requireAnySection('lancamento', 'sangria'), async 
   // o card: sem o gate aqui, o numero viajaria pro navegador da loja de
   // qualquer jeito.
   if (!(req.isMaster || req.isAdmin)) return res.json({ itens, entradas: [] });
-  const entradas = auth.filterByUnidade(req, await saidasPainel.listarEntradas(fechamentosData));
+  // agregada por unidade+dia: e' assim que a coluna "Entrada de dinheiro"
+  // da tela e o relatorio mostram (um dia = uma linha). O total nao muda.
+  const entradas = auth.filterByUnidade(req, await saidasPainel.listarEntradasPorDia(fechamentosData));
   res.json({ itens, entradas: saidasPainel.filtrar(entradas, { unidades: unidadesSet, grupo, inicio, fim }) });
 });
 
@@ -8083,25 +8085,44 @@ app.post('/api/fechamentos/saidas', auth.requireMasterOrAdmin, async (req, res) 
 
 // mesmas colunas do painel na tela (server/public/saidas.html) - usado
 // pelos dois formatos de relatorio abaixo
-function prepararSaidasPainel(rows) {
+// entradas: a linha de ENTRADA de dinheiro do dia (uma por unidade/dia).
+// Vem junto no MESMO quadro em vez de numa tabela separada porque a conta
+// que o Master faz e' uma so - entrada menos saida menos sangria - e com as
+// duas metades no mesmo arquivo o CSV fecha sozinho. A coluna Origem e' o
+// que separa. Sem elas o relatorio so mostrava o que SAIU, e conferir com a
+// planilha exigia abrir a planilha do lado.
+function prepararSaidasPainel(rows, entradas = []) {
   const colunas = [
     { key: 'unidade', label: 'Unidade' }, { key: 'origem', label: 'Origem' },
     { key: 'data', label: 'Data' }, { key: 'descricao', label: 'Descrição' },
     { key: 'valor', label: 'Valor' }, { key: 'verificada', label: 'Verificada' },
     { key: 'verificadaPor', label: 'Verificada por' },
   ];
-  const linhas = rows
-    .slice()
-    .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
-    .map((r) => ({
-      unidade: r.unidadeNome || r.unidade,
-      origem: r.origem === 'sangria' ? 'Sangria/Depósito' : 'Saída avulsa',
-      data: reportUtil.fmtDataBR(r.data),
-      descricao: r.descricao,
-      valor: reportUtil.fmtMoneyBR(r.valor),
-      verificada: r.verificada ? 'Sim' : 'Não',
-      verificadaPor: r.verificada ? `${r.verificadaPorEmail || '—'} em ${reportUtil.fmtDataHoraBR(r.verificadaEm)}` : '—',
-    }));
+  const deSaida = (r) => ({
+    data: r.data,
+    unidade: r.unidadeNome || r.unidade,
+    origem: r.origem === 'sangria' ? 'Sangria/Depósito' : 'Saída avulsa',
+    descricao: r.descricao,
+    valor: reportUtil.fmtMoneyBR(r.valor),
+    verificada: r.verificada ? 'Sim' : 'Não',
+    verificadaPor: r.verificada ? `${r.verificadaPorEmail || '—'} em ${reportUtil.fmtDataHoraBR(r.verificadaEm)}` : '—',
+  });
+  // entrada nao passa por conferencia (ela vem do fechamento que a loja ja
+  // lancou, nao de um comprovante avulso) - por isso "—" no lugar do Sim/Nao,
+  // em vez de um "Nao" que sugeriria pendencia
+  const deEntrada = (e) => ({
+    data: e.data,
+    unidade: e.unidadeNome || e.unidade,
+    origem: 'Entrada de dinheiro',
+    descricao: e.lancamentos > 1 ? `entrada do dia (${e.lancamentos} lançamentos)` : 'entrada do dia',
+    valor: reportUtil.fmtMoneyBR(e.valor),
+    verificada: '—',
+    verificadaPor: '—',
+  });
+  const linhas = [...rows.map(deSaida), ...(entradas || []).map(deEntrada)]
+    .sort((a, b) => String(b.data || '').localeCompare(String(a.data || ''))
+      || String(a.unidade || '').localeCompare(String(b.unidade || ''), 'pt-BR'))
+    .map((l) => ({ ...l, data: reportUtil.fmtDataBR(l.data) }));
   return { colunas, linhas };
 }
 
@@ -8110,7 +8131,16 @@ app.get('/api/saidas-painel/relatorio.:formato(csv|pdf)', requireAnySection('lan
   const todas = auth.filterByUnidade(req, await saidasPainel.listar(fechamentosData));
   const unidadesSet = unidades ? String(unidades).split(',').filter(Boolean) : null;
   const filtradas = saidasPainel.filtrar(todas, { unidades: unidadesSet, grupo, inicio, fim });
-  const { colunas, linhas } = prepararSaidasPainel(filtradas);
+  // MESMO gate da tela e do KPI: entrada em dinheiro e' visao de Master/Admin.
+  // Sem isso o relatorio seria a porta dos fundos pro numero que o painel
+  // esconde da loja.
+  const entradas = (req.isMaster || req.isAdmin)
+    ? saidasPainel.filtrar(
+      auth.filterByUnidade(req, await saidasPainel.listarEntradasPorDia(fechamentosData)),
+      { unidades: unidadesSet, grupo, inicio, fim },
+    )
+    : [];
+  const { colunas, linhas } = prepararSaidasPainel(filtradas, entradas);
   if (req.params.formato === 'csv') {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${reportUtil.nomeArquivoComData('saidas-painel')}.csv"`);
@@ -8121,10 +8151,6 @@ app.get('/api/saidas-painel/relatorio.:formato(csv|pdf)', requireAnySection('lan
   // So Master/Admin ve o saldo, inclusive no PDF exportado.
   let saldoLinha = '';
   if (req.isMaster || req.isAdmin) {
-    const entradas = saidasPainel.filtrar(
-      auth.filterByUnidade(req, await saidasPainel.listarEntradas(fechamentosData)),
-      { unidades: unidadesSet, grupo, inicio, fim },
-    );
     const soma = (arr, f) => arr.reduce((t, x) => t + (f ? f(x) : 0), 0);
     const entrada = soma(entradas, (e) => e.valor);
     const saiu = soma(filtradas, (r) => r.valor);
@@ -8139,7 +8165,7 @@ app.get('/api/saidas-painel/relatorio.:formato(csv|pdf)', requireAnySection('lan
   };
   reportUtil.writePDF(res, {
     titulo: 'Painel de Saídas · Sangria/Depósito',
-    subtitulo: `Exportado em ${reportUtil.agoraBrasiliaFmt()}${periodo} · ${linhas.length} item(ns)${saldoLinha}`,
+    subtitulo: `Exportado em ${reportUtil.agoraBrasiliaFmt()}${periodo} · ${filtradas.length} saída(s)/sangria${entradas.length ? ` · ${entradas.length} dia(s) com entrada` : ''}${saldoLinha}`,
     colunas, linhas, larguras: LARGURAS_SAIDAS_PAINEL,
     nomeArquivo: reportUtil.nomeArquivoComData('saidas-painel'),
   });

@@ -90,6 +90,13 @@
   @media(min-width:760px){ .kanban-3col{grid-template-columns:1fr 1fr 1fr;} }
   /* sem a coluna Verificadas (loja), as duas que sobram ocupam a largura */
   @media(min-width:760px){ .kanban-3col.sem-verificadas{grid-template-columns:1fr 1fr;} }
+  /* com a coluna Entrada de dinheiro (Master/Admin) sao 4. Em 760px quatro
+     colunas espremem o valor em duas linhas - entao 2x2 ate 1200px, e so
+     depois a fileira unica. O nome da classe continua .kanban-3col: e' o
+     seletor que o resto do arquivo usa, e trocar so pra ficar bonito
+     custaria mexer em 3 lugares sem ganhar nada. */
+  @media(min-width:760px){ .kanban-3col.com-entradas{grid-template-columns:1fr 1fr;} }
+  @media(min-width:1200px){ .kanban-3col.com-entradas{grid-template-columns:1fr 1fr 1fr 1fr;} }
   .kanban-col{background:var(--panel2);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;max-height:70vh;min-height:220px;}
   .kanban-col-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 12px 10px;border-bottom:1px solid var(--line);flex:none;font-weight:700;font-size:13px;}
   .kanban-col-header .n{font-family:var(--mono);color:var(--muted);font-weight:400;font-size:11.5px;}
@@ -214,6 +221,15 @@
     <div class="kanban-col hidden" id="col-verificadas-wrap">
       <div class="kanban-col-header"><span>✅ Verificadas</span><span class="n" id="n-verificadas">0</span></div>
       <div class="kanban-cards" id="col-verificadas"></div>
+    </div>
+    <!-- Entrada de dinheiro dia a dia. Fica na MESMA grade das saidas de
+         proposito: a conta do Master e' entrada - saida - sangria, e com as
+         duas metades lado a lado da pra conferir o dia sem abrir a planilha.
+         Nao tem botao de conferir: entrada vem do fechamento que a loja ja
+         lancou, nao de um comprovante avulso. -->
+    <div class="kanban-col hidden" id="col-entradas-wrap">
+      <div class="kanban-col-header"><span>💵 Entrada de dinheiro</span><span class="n" id="n-entradas">0</span></div>
+      <div class="kanban-cards" id="col-entradas"></div>
     </div>
   </div>
 
@@ -482,12 +498,29 @@ function cardHtml(it){
   </div>`;
 }
 
+// um card por unidade+dia (o servidor ja agrega os fechamentos do mesmo dia
+// em listarEntradasPorDia) - sem acao, so leitura
+function entradaCardHtml(e){
+  return `<div class="saida-card">
+    <div class="saida-topo">
+      <span class="tipo-badge">💵 Entrada de dinheiro</span>
+      ${e.lancamentos > 1 ? `<span class="tipo-badge" style="background:#181d24;color:var(--muted);" title="A loja lançou ${e.lancamentos} fechamentos nesse dia; o card soma os dois">${e.lancamentos} lançamentos</span>` : ''}
+      <span class="tipo-badge" style="background:#181d24;color:var(--muted);">${escapeHtml(e.unidadeNome||e.unidade||'—')}</span>
+    </div>
+    <div class="saida-desc">${fmtData(e.data)}</div>
+    <div class="saida-valor">${fmtMoney(e.valor)}</div>
+  </div>`;
+}
+
 function renderTudo(){
   const filtrados = itensFiltrados();
   const pendentes = filtrados.filter(it=>!it.verificada).sort((a,b)=>String(b.data||'').localeCompare(String(a.data||'')));
   const pendentesSangria = pendentes.filter(it=>it.origem==='sangria');
   const pendentesSaida = pendentes.filter(it=>it.origem!=='sangria');
   const verificadas = filtrados.filter(it=>it.verificada).sort((a,b)=>String(b.verificadaEm||'').localeCompare(String(a.verificadaEm||'')));
+  // ENTRADAS chega vazia pra quem nao pode conferir (o gate e' no servidor).
+  // O mesmo array alimenta o KPI de Entrada/Saldo e a coluna de cards.
+  const entradas = entradasFiltradas();
 
   const totalSaidas = filtrados.filter(it=>it.origem==='saida').reduce((s,it)=>s+(it.valor||0),0);
   const totalSangrias = filtrados.filter(it=>it.origem==='sangria').reduce((s,it)=>s+(it.valor||0),0);
@@ -500,7 +533,7 @@ function renderTudo(){
   // que saiu (saida avulsa + sangria/deposito) = quanto de dinheiro sobrou
   // em loja. Vermelho so quando saiu mais do que entrou.
   if(PODE_CONFERIR){
-    const totalEntrada = entradasFiltradas().reduce((s,e)=>s+(e.valor||0),0);
+    const totalEntrada = entradas.reduce((s,e)=>s+(e.valor||0),0);
     const saldo = totalEntrada - totalSaidas - totalSangrias;
     document.getElementById('kpi-entrada').textContent = fmtMoney(totalEntrada);
     const elSaldo = document.getElementById('kpi-saldo');
@@ -526,6 +559,11 @@ function renderTudo(){
   document.getElementById('col-verificadas').innerHTML = verificadas.length
     ? verificadas.map(cardHtml).join('')
     : '<div class="kanban-empty">Nenhuma verificada ainda nesse período.</div>';
+
+  document.getElementById('n-entradas').textContent = entradas.length;
+  document.getElementById('col-entradas').innerHTML = entradas.length
+    ? entradas.map(entradaCardHtml).join('')
+    : '<div class="kanban-empty">Nenhuma entrada em dinheiro nesse período.</div>';
 }
 
 // ---- corrigir uma saída lançada errado ----
@@ -714,6 +752,8 @@ async function boot(){
     document.getElementById('card-saldo').classList.remove('hidden');
     document.getElementById('card-verificadas').classList.remove('hidden');
     document.getElementById('col-verificadas-wrap').classList.remove('hidden');
+    document.getElementById('col-entradas-wrap').classList.remove('hidden');
+    document.querySelector('.kanban-3col').classList.add('com-entradas');
     document.getElementById('btn-add-saida').classList.remove('hidden');
     document.getElementById('btn-add-sangria').classList.remove('hidden');
   } else {
