@@ -6814,6 +6814,93 @@ setTimeout(async () => {
   console.log(`${okEntradaDiaADia ? '✓' : '✗'} Painel de Saídas: Entrada de dinheiro dia a dia (coluna na tela + linha no CSV/PDF, com o mesmo gate de Master/Admin)`);
 
   // ------------------------------------------------------------------
+  // Entrada/faturamento DOBRADOS na ARCFOOD. O Master viu São Miguel 01/08
+  // com R$ 524,00 e disse "foi metade o valor duplicou". Conferido nas duas
+  // planilhas: a aba BD tem UMA linha, de R$ 262,00 - e a aba SMIGUEL do
+  // arquivo de histórico tem a MESMA linha, também R$ 262,00. O mesmo vale
+  // pra 04/08 (175), 07/08 (67,45) e 08/08 (143).
+  //
+  // Causa: sincronizar() lê 5 fontes (a aba BD viva + 4 abas de histórico,
+  // uma por loja) e empilhava todas juntas antes de
+  // mesclarLancamentosDoMesmoDia, que SOMA os campos monetários do mesmo
+  // dia+loja. O próprio código previa isso ("se um dia passar a haver
+  // sobreposição real, precisa revisitar") - o arquivo de histórico passou a
+  // conter também os dias recentes, e a sobreposição virou real.
+  //
+  // Não dobrava só a entrada: faturamento, total de saída e os detalhesSaidas
+  // (que o painel lista item a item) vinham em dobro pelo mesmo caminho.
+  let okDuplicataEntreAbas = false;
+  try {
+    const sheets = require('/home/user/adyen-monitor/server/sheetsSync.js');
+
+    // exatamente o caso real: o mesmo dia+loja nas duas abas, mesmo valor
+    const naBD = {
+      unidade: '19821', unidadeNome: 'São Miguel', grupo: 'ARCFOOD', data: '2026-08-01',
+      entradaDinheiro: 262, faturamento: 7997, totalSaida: 30,
+      detalhesSaidas: [{ descricao: 'Motoboy', valor: 30 }],
+    };
+    const noHistorico = { ...naBD, detalhesSaidas: [{ descricao: 'Motoboy', valor: 30 }] };
+    // dia que SÓ o histórico tem - é pra isso que ele existe, não pode sumir
+    const soNoHistorico = {
+      unidade: '19821', unidadeNome: 'São Miguel', grupo: 'ARCFOOD', data: '2025-03-14',
+      entradaDinheiro: 90, faturamento: 1200, totalSaida: 0, detalhesSaidas: [],
+    };
+    // duas linhas do mesmo dia DENTRO da mesma aba: é assim que a ARCFOOD
+    // lança a sangria (linha própria, faturamento zero). Essas SOMAM.
+    const sangriaNaBD = {
+      unidade: '19855', unidadeNome: 'Carrão', grupo: 'ARCFOOD', data: '2026-08-02',
+      entradaDinheiro: 0, faturamento: 0, totalSaida: 405,
+      detalhesSaidas: [{ descricao: 'sangria andre', valor: 405 }],
+    };
+    const fechamentoNaBD = {
+      unidade: '19855', unidadeNome: 'Carrão', grupo: 'ARCFOOD', data: '2026-08-02',
+      entradaDinheiro: 335, faturamento: 5000, totalSaida: 0, detalhesSaidas: [],
+    };
+
+    const fontes = [
+      { principal: true, brutos: [naBD, fechamentoNaBD, sangriaNaBD] },
+      { principal: false, brutos: [noHistorico, soNoHistorico] },
+    ];
+    const dedup = sheets.deduplicarEntreFontes(fontes);
+    const mesclado = sheets.mesclarLancamentosDoMesmoDia(dedup);
+    const smiguel0108 = mesclado.find((f) => f.unidade === '19821' && f.data === '2026-08-01');
+    const smiguelAntigo = mesclado.find((f) => f.unidade === '19821' && f.data === '2025-03-14');
+    const carrao0208 = mesclado.find((f) => f.unidade === '19855' && f.data === '2026-08-02');
+
+    // sem o dedup (o comportamento antigo) o mesmo dado dobra - é a prova de
+    // que o teste está olhando pro lugar certo
+    const semDedup = sheets.mesclarLancamentosDoMesmoDia([...fontes[0].brutos, ...fontes[1].brutos])
+      .find((f) => f.unidade === '19821' && f.data === '2026-08-01');
+
+    const srcSync = require('fs').readFileSync(require('path').join(__dirname, 'sheetsSync.js'), 'utf8');
+
+    const conf = {
+      'o mesmo dia nas duas abas NÃO soma: 262 continua 262 (não 524)':
+        !!smiguel0108 && Math.round(smiguel0108.entradaDinheiro * 100) === 26200,
+      'o faturamento do mesmo dia também para de dobrar (7997, não 15994)':
+        !!smiguel0108 && Math.round(smiguel0108.faturamento * 100) === 799700,
+      'a saída avulsa não aparece duas vezes no dia': !!smiguel0108 && (smiguel0108.detalhesSaidas || []).length === 1,
+      'sem o dedup o mesmo dado dobraria (o teste está medindo o que deve)':
+        !!semDedup && Math.round(semDedup.entradaDinheiro * 100) === 52400,
+      'dia que só existe no histórico continua vindo (é pra isso que a aba existe)':
+        !!smiguelAntigo && Math.round(smiguelAntigo.entradaDinheiro * 100) === 9000,
+      'duas linhas do mesmo dia DENTRO da mesma aba continuam somando (fechamento + sangria)':
+        !!carrao0208 && Math.round(carrao0208.entradaDinheiro * 100) === 33500
+        && Math.round(carrao0208.totalSaida * 100) === 40500
+        && (carrao0208.detalhesSaidas || []).length === 1,
+      'a aba BD é a fonte principal declarada (é ela que manda no empate)':
+        /aba: SHEET_ABA_ARCFOOD, principal: true/.test(srcSync),
+      'a sincronização deduplica ANTES de mesclar (senão a soma já veio dobrada)':
+        /mesclarLancamentosDoMesmoDia\(deduplicarEntreFontes\(porFonte\)\)/.test(srcSync),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okDuplicataEntreAbas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDuplicataEntreAbas = false; console.log('  erro: ' + e.message); }
+  if (!okDuplicataEntreAbas) ruins += 1;
+  console.log(`${okDuplicataEntreAbas ? '✓' : '✗'} ARCFOOD: dia presente na aba BD e na aba de histórico para de ser contado duas vezes (entrada/faturamento/saídas)`);
+
+  // ------------------------------------------------------------------
   // Pedido real do Master: "tem muitas saídas que vieram da planilha e
   // percebi que não aparece aqui, só as lançadas no próprio sistema". Causa
   // raiz dupla: (1) linhaParaFechamento (leitura da planilha ARCFOOD) nunca

@@ -32,10 +32,15 @@ const SHEET_ABA_ARCFOOD = process.env.SHEET_ABA_ARCFOOD || 'BD';
 // historico antigo da ARCFOOD: 4 abas, uma por loja (MOOCA/TATUAPE/CARRAO/
 // SMIGUEL), com os lancamentos legados (a aba BD costumava ter uma query
 // puxando delas - hoje nao puxa mais, entao esse historico nao aparecia no
-// painel). Entram como fontes SO DE LEITURA adicionais, somadas ao BD - por
-// enquanto as datas de cada fonte nao se sobrepoem (BD = recente, essas 4 =
-// mais antigas), entao mesclarLancamentosDoMesmoDia nao soma fechamento em
-// dobro; se um dia passar a haver sobreposicao real, precisa revisitar isso.
+// painel). Entram como fontes SO DE LEITURA adicionais.
+//
+// A SOBREPOSICAO PREVISTA ACONTECEU: este arquivo passou a conter tambem os
+// dias recentes, os mesmos que estao na aba BD. Como mesclarLancamentosDoMesmoDia
+// SOMA os campos monetarios do mesmo dia+loja, cada dia presente nas duas
+// fontes vinha dobrado - entrada em dinheiro, faturamento, total de saida - e
+// a saida avulsa aparecia duas vezes (o Master viu Sao Miguel 01/08 com
+// R$ 524,00 quando a planilha tem uma linha so, de R$ 262,00).
+// Por isso deduplicarEntreFontes roda ANTES da mescla.
 const SHEET_ID_ARCFOOD_HISTORICO = process.env.SHEET_ID_ARCFOOD_HISTORICO || '1F-FnLydHOfeiMJexjO2RJOwn88O6uUt_PeVH0PjoKYs';
 
 // planilha (aposentada) do Grupo Bravo - fica aqui so pro importador de uma
@@ -43,8 +48,12 @@ const SHEET_ID_ARCFOOD_HISTORICO = process.env.SHEET_ID_ARCFOOD_HISTORICO || '1F
 const SHEET_ID_BRAVO = process.env.SHEET_ID_BRAVO || '1dObCSsx4BYDGSQG81KLIOtFSNNs18mVOD5GfYzRIZcM';
 const ARCFOOD_ABAS_HISTORICO = ['MOOCA', 'TATUAPE', 'CARRAO', 'SMIGUEL'];
 
+// `principal: true` marca a fonte que MANDA quando o mesmo dia aparece em mais
+// de uma: a aba BD e' a planilha viva (e' nela que o AppSheet lanca e que o app
+// grava de volta). As 4 abas de historico entram so pra trazer o dia que a BD
+// nao tem - ver deduplicarEntreFontes.
 const PLANILHAS = [
-  { grupo: 'ARCFOOD', id: SHEET_ID_ARCFOOD, aba: SHEET_ABA_ARCFOOD },
+  { grupo: 'ARCFOOD', id: SHEET_ID_ARCFOOD, aba: SHEET_ABA_ARCFOOD, principal: true },
   ...ARCFOOD_ABAS_HISTORICO.map((aba) => ({ grupo: 'ARCFOOD', id: SHEET_ID_ARCFOOD_HISTORICO, aba })),
 ];
 
@@ -370,6 +379,30 @@ const CAMPOS_SOMA = [
 // isso deixa a funcao reutilizavel tambem pra mesclar sangrias lancadas
 // direto no sistema (server/sangrias.js), cujo campo "grupo" pode nao bater
 // 100% com o do fechamento se alguem digitar/computar diferente
+// O mesmo dia+loja pode vir de DUAS fontes diferentes (a aba BD e a aba de
+// historico da mesma loja) - e ai as duas linhas sao a MESMA coisa, nao dois
+// lancamentos. Somar dobra tudo; por isso aqui a linha da fonte secundaria e'
+// descartada quando a principal ja tem aquele dia+loja.
+//
+// Repare no que este filtro NAO faz: duas linhas do mesmo dia DENTRO da mesma
+// fonte continuam vivas (e' assim que a ARCFOOD lanca a sangria, em linha
+// separada do fechamento) - elas seguem pra mescla e somam normalmente, que e'
+// o comportamento correto e o motivo de mesclarLancamentosDoMesmoDia existir.
+//
+// `fontes`: [{ principal, brutos }] na ordem de PLANILHAS.
+function deduplicarEntreFontes(fontes) {
+  const daPrincipal = new Set();
+  fontes.filter((f) => f.principal).forEach((f) => {
+    f.brutos.forEach((x) => daPrincipal.add(`${x.unidade}__${x.data}`));
+  });
+  const saida = [];
+  fontes.forEach((f) => {
+    if (f.principal) { saida.push(...f.brutos); return; }
+    saida.push(...f.brutos.filter((x) => !daPrincipal.has(`${x.unidade}__${x.data}`)));
+  });
+  return saida;
+}
+
 function mesclarLancamentosDoMesmoDia(fechamentos) {
   const grupos = new Map();
   fechamentos.forEach((f) => {
@@ -451,7 +484,9 @@ const persistenciaFechamentos = criarPersistenciaEstado('sync-estado/fechamentos
 async function sincronizar({ completa = false } = {}) {
   if (!completa) await persistenciaFechamentos.carregar();
   const planilhas = PLANILHAS;
-  const resultado = [];
+  // por FONTE, nao numa pilha so: deduplicarEntreFontes precisa saber de onde
+  // veio cada linha pra decidir qual sobrevive quando o dia aparece nas duas
+  const porFonte = [];
   let linhasNovas = 0;
   for (const planilha of planilhas) {
     const chave = `${planilha.id}__${planilha.aba}`;
@@ -478,7 +513,7 @@ async function sincronizar({ completa = false } = {}) {
         estado.linhasLidas += novas.length;
         linhasNovas += novas.length;
       }
-      resultado.push(...estado.brutos);
+      porFonte.push({ principal: planilha.principal === true, brutos: estado.brutos });
     } catch (e) {
       // uma fonte com problema (nao compartilhada, aba renomeada, etc) nao
       // pode derrubar a sincronizacao inteira - registra e segue pras outras
@@ -486,7 +521,7 @@ async function sincronizar({ completa = false } = {}) {
     }
   }
   if (linhasNovas > 0) await persistenciaFechamentos.salvar();
-  const lista = mesclarLancamentosDoMesmoDia(resultado);
+  const lista = mesclarLancamentosDoMesmoDia(deduplicarEntreFontes(porFonte));
   lista.linhasNovas = linhasNovas;
   return lista;
 }
@@ -739,6 +774,6 @@ async function enviarFechamentoPlanilha(f, grupo) {
 }
 
 module.exports = {
-  sincronizar, parseMoneyBR, parseDataArcfood, parseDataBravo, getAccessToken, buscarAba, buscarLinhasNovas, buscarAbaPorCandidatos, mesclarLancamentosDoMesmoDia, criarPersistenciaEstado,
+  sincronizar, parseMoneyBR, parseDataArcfood, parseDataBravo, getAccessToken, buscarAba, buscarLinhasNovas, buscarAbaPorCandidatos, mesclarLancamentosDoMesmoDia, deduplicarEntreFontes, criarPersistenciaEstado,
   enviarFechamentoPlanilha, BRAVO_UNIDADES, SHEET_ID_BRAVO, listarAbas, linhaParaFechamento,
 };
