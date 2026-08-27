@@ -619,10 +619,18 @@ function renderExtrasGrupo(unidade, chaveGrupo, containerId, vazioId, classe){
   // campo marcado como "digitado na mao" no Grupo (Pix CNPJ, Outros...) segue
   // editavel mesmo na loja automatica: ele nao sai no relatorio do PDV, entao
   // travar seria deixar um campo vazio que ninguem tem como preencher
-  const travar = (k) => automatico && k.manual !== true;
+  // MASTER NUNCA E' TRAVADO. Pedido do Master: "como master eu tenho que
+  // poder digitar evitando estar escaneando". A leitura por foto continua
+  // disponivel pra ele - o que sai e' a espera obrigatoria: sem foto na mao
+  // (ou com foto que a camera nao pega), o fechamento parava de poder ser
+  // lancado. A trava existe pra loja, que nao deve reescrever o relatorio do
+  // PDV; o Master ja edita fechamento lancado pela Central, entao trava-lo
+  // aqui so atrasava o mesmo resultado.
+  const travar = (k) => automatico && !IS_MASTER && k.manual !== true;
   const algumTravado = campos.some(travar);
   const algumManual = automatico && campos.some((k) => k.manual === true);
   const avisos = [];
+  if(automatico && IS_MASTER) avisos.push('🔓 Master: a leitura da foto preenche os campos, mas nenhum fica travado — dá pra digitar direto.');
   if(algumTravado) avisos.push('🔒 Os campos com fundo cinza vêm da foto do relatório e não são digitados. Valor zerado no relatório fica em branco.');
   if(algumManual) avisos.push('✏️ Os demais não saem no relatório — esses você digita normalmente.');
   const aviso = avisos.length
@@ -701,7 +709,8 @@ function renderKpisExtras(unidade){
   // mesma logica de travamento de renderExtrasGrupo (Canais/Formas): loja
   // automatica trava so os KPI's que a foto realmente pode ler
   const automatico = leituraPorFoto(unidade);
-  const travar = (k) => automatico && kpiOcrElegivel(k) && k.manual !== true;
+  // mesma regra do bloco acima: Master digita sempre, sem esperar leitura
+  const travar = (k) => automatico && !IS_MASTER && kpiOcrElegivel(k) && k.manual !== true;
   const algumTravado = campos.some(travar);
   const algumManual = automatico && campos.some(k=>kpiOcrElegivel(k) && k.manual===true);
   const avisos = [];
@@ -949,9 +958,15 @@ async function realizarLeituraRelatorio(){
       // essa foto ACHOU esse campo agora - trava de novo (mesmo que uma
       // tentativa anterior tivesse liberado ele por nao achar, ver bloco
       // "faltando" abaixo) e sobrescreve com a leitura mais recente
-      el.readOnly = true;
-      el.classList.add('campo-automatico');
-      el.title = 'Preenchido pela foto do relatório - não editável';
+      // pro Master o campo e' PREENCHIDO, nunca travado (ver travar()): a
+      // foto adianta a digitacao dele em vez de substituir
+      if(!IS_MASTER){
+        el.readOnly = true;
+        el.classList.add('campo-automatico');
+      }
+      el.title = IS_MASTER
+        ? 'Veio da foto do relatório — confira e edite se precisar.'
+        : 'Preenchido pela foto do relatório - não editável';
       // canal zerado no relatorio fica EM BRANCO, nao "0": em branco o campo
       // continua legivel de longe como "nao teve venda aqui", e o fechamento
       // trata vazio como zero do mesmo jeito

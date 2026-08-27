@@ -2454,6 +2454,42 @@ setTimeout(async () => {
   console.log(`${okComprimeFotoRelatorio ? '✓' : '✗'} Foto do relatório: reduzida no navegador ANTES de subir (upload mais rápido, mesma leitura)`);
 
   // ------------------------------------------------------------------
+  // MASTER DIGITA SEM ESPERAR A LEITURA. Pedido do Master: "como master eu
+  // tenho que poder digitar evitando estar escaneando". No modo automático
+  // (grupo com leitura por foto ligada) os campos de Canais/Formas/KPI's
+  // nascem readonly e só a foto os preenche - o que prendia o Master quando
+  // não havia foto à mão, ou quando a câmera não pegava o relatório.
+  //
+  // A trava continua valendo pra LOJA (é ela que não deve reescrever o
+  // relatório do PDV). O Master já edita fechamento lançado pela Central,
+  // então travá-lo no formulário só atrasava o mesmo resultado.
+  let okMasterDigitaSemLeitura = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'lancamento.html'), 'utf8');
+    const iCanais = html.indexOf('function renderExtrasGrupo(');
+    const blocoCanais = html.slice(iCanais, iCanais + 2000);
+    const iKpi = html.indexOf('function renderKpisExtras(');
+    const blocoKpi = html.slice(iKpi, iKpi + 2000);
+    const iLeitura = html.indexOf('async function realizarLeituraRelatorio(');
+    const blocoLeitura = html.slice(iLeitura, iLeitura + 4000);
+    const conferencias = {
+      'Canais/Formas: o travamento exclui o Master': /const travar = \(k\) => automatico && !IS_MASTER && k\.manual !== true;/.test(blocoCanais),
+      "KPI's extras: o travamento exclui o Master": /const travar = \(k\) => automatico && !IS_MASTER && kpiOcrElegivel\(k\) && k\.manual !== true;/.test(blocoKpi),
+      'depois da leitura o campo NÃO é retravado pro Master': /if\(!IS_MASTER\)\{[\s\S]{0,160}el\.readOnly = true;[\s\S]{0,120}campo-automatico/.test(blocoLeitura),
+      'a foto continua PREENCHENDO o campo do Master (só não trava)': /el\.value = it\.valor;/.test(blocoLeitura),
+      'a tela avisa o Master que nada fica travado': /🔓 Master: a leitura da foto preenche os campos, mas nenhum fica travado/.test(html),
+      'a trava continua existindo pra loja (o aviso de cadeado não sumiu)': /🔒 Os campos com fundo cinza vêm da foto do relatório e não são digitados/.test(html),
+      'IS_MASTER é definido no boot, antes de qualquer campo ser montado':
+        html.indexOf('IS_MASTER = isMaster;') > 0 && html.indexOf('IS_MASTER = isMaster;') < html.indexOf('boot();'),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okMasterDigitaSemLeitura = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okMasterDigitaSemLeitura = false; console.log('  erro: ' + e.message); }
+  if (!okMasterDigitaSemLeitura) ruins += 1;
+  console.log(`${okMasterDigitaSemLeitura ? '✓' : '✗'} Lançamento: Master digita em qualquer campo sem esperar a leitura da foto (a trava continua pra loja)`);
+
+  // ------------------------------------------------------------------
   // Gravar do Bravo tem que RECONCILIAR, nao "inserir se nao existir". As
   // primeiras importacoes (antes das correcoes de ordem de aba, timeout e
   // mescla) deixaram dias gravados pela metade; numa segunda passada esses
