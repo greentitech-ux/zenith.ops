@@ -6935,36 +6935,37 @@ setTimeout(async () => {
 
     const inicial = await ler();
     const sgInicial = sangriaDe(inicial);
-    const entInicial = entradaDe(inicial);
 
-    // ---- editar a ENTRADA: 1000 -> 600. O esperado da sangria tem que cair
-    // junto (600 - 100 = 500), e a sangria de 900 passa a ser SOBRA de 400
-    const rEditaEntrada = await enviarJson('PATCH', '/api/saidas-painel/entrada',
-      { fechamentoId: entInicial.fechamentoId, valor: 600, motivo: 'contagem refeita' }, cabMaster);
-    const aposEntrada = await ler();
-    const sgAposEntrada = sangriaDe(aposEntrada);
-    const entAposEntrada = entradaDe(aposEntrada);
-
-    // ---- editar a SANGRIA: 900 -> 500, que é exatamente o esperado agora
-    const rEditaSangria = await enviarJson('PATCH', `/api/sangrias/${sg.id}`, { valor: 500 }, cabMaster);
-    const aposSangria = await ler();
-    const sgAposSangria = sangriaDe(aposSangria);
-
-    // ---- SEGUNDA sangria, em outro dia: o esperado dela só pode ser o que a
-    // primeira deixou. Entradas até 02/11 = 600 + 300 = 900; saídas = 100;
-    // já retirado na sangria anterior = 500 -> esperado 300.
-    await postarJson('/api/fechamentos/lancar', {
+    // ---- 2º dia + 2ª sangria. É NELA que a conferência existe: a 1ª sangria
+    // da unidade não tem retirada anterior, então não há janela pra abrir.
+    // Dia 02: entram 300, não sai nada -> a 2ª sangria espera exatamente 300.
+    const f2 = JSON.parse((await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-02',
       campos: { entradaDinheiro: 300 },
-    }, cabMaster);
+    }, cabMaster)).corpo);
     const sg2 = JSON.parse((await postarJson('/api/sangrias', {
       unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-02',
       valor: 300, descricao: 'Sangria do dia 2', periodoInicio: '2026-11-02', periodoFim: '2026-11-02',
       nomeDepositante: 'Fulano Teste', password: process.env.MASTER_PASSWORD,
     }, cabMaster)).corpo);
+    const sangria2De = (r) => (r.itens || []).find((it) => it.chave === `sangria::${sg2.id}`);
+    const entrada2De = (r) => (r.entradas || []).find((e) => e.unidade === UNI && e.data === '2026-11-02');
     const comDuas = await ler();
-    const sg2Lida = (comDuas.itens || []).find((it) => it.chave === `sangria::${sg2.id}`);
-    const segundaSangriaAparece = !!sg2Lida && Math.round((sg2Lida.valor || 0) * 100) === 30000;
+    const sg2Lida = sangria2De(comDuas);
+    const ent2 = entrada2De(comDuas);
+
+    // ---- editar a ENTRADA do dia 02: 300 -> 200. O esperado da 2ª sangria
+    // tem que cair junto, e a retirada de 300 vira SOBRA de 100.
+    const rEditaEntrada = await enviarJson('PATCH', '/api/saidas-painel/entrada',
+      { fechamentoId: ent2.fechamentoId, valor: 200, motivo: 'contagem refeita' }, cabMaster);
+    const aposEntrada = await ler();
+    const sgAposEntrada = sangria2De(aposEntrada);
+    const entAposEntrada = entrada2De(aposEntrada);
+
+    // ---- editar a SANGRIA: 300 -> 200, que é exatamente o esperado agora
+    const rEditaSangria = await enviarJson('PATCH', `/api/sangrias/${sg2.id}`, { valor: 200 }, cabMaster);
+    const aposSangria = await ler();
+    const sgAposSangria = sangria2De(aposSangria);
 
     // ---- loja comum não edita nem exclui nada disso
     const senhaHash = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
@@ -6985,38 +6986,45 @@ setTimeout(async () => {
 
     // ---- EXCLUIR a entrada (valor 0): some da coluna, o fechamento fica
     const rExcluiEntrada = await enviarJson('PATCH', '/api/saidas-painel/entrada',
-      { fechamentoId: entInicial.fechamentoId, valor: 0, motivo: 'lançada em duplicidade' }, cabMaster);
+      { fechamentoId: f2.id, valor: 0, motivo: 'lançada em duplicidade' }, cabMaster);
     const semEntrada = await ler();
     const fechamentoAindaExiste = JSON.parse((await pedir(`/api/fechamentos`, cabMaster)).corpo)
-      .some((f) => f.id === f1.id);
+      .some((f) => f.id === f2.id);
 
     // ---- EXCLUIR a sangria: some do painel
-    const rExcluiSangria = await enviarJson('DELETE', `/api/sangrias/${sg.id}`, {}, cabMaster);
+    const rExcluiSangria = await enviarJson('DELETE', `/api/sangrias/${sg2.id}`, {}, cabMaster);
     const semSangria = await ler();
 
     const htmlSaidas = require('fs').readFileSync(require('path').join(__dirname, 'public', 'saidas.html'), 'utf8');
     const cem = (v) => Math.round((v || 0) * 100);
     const conf = {
-      'a sangria nasce batendo com o caixa (1000 − 100 = 900 esperado, sem divergência)':
-        !!sgInicial && cem(sgInicial.esperado) === 90000 && sgInicial.temDivergencia === false,
-      // o esperado é o que o sistema apurou NA HORA e fica gravado. Recalcular
-      // na leitura já foi tentado e deu errado (ver linhaDeSangria): sem o
-      // histórico completo de sangrias, o acumulado da unidade inteira virava
-      // "esperado" - uma sangria de R$ 540 apareceu esperando R$ 19.745,52.
-      'editar a entrada NÃO reescreve o esperado que a sangria registrou na hora':
-        !!sgAposEntrada && cem(sgAposEntrada.esperado) === 90000,
-      'Master/Admin edita a entrada de dinheiro pelo painel': rEditaEntrada.status === 200 && !!entAposEntrada && cem(entAposEntrada.valor) === 60000,
+      'a 1ª sangria da unidade fica SEM conferência (não há retirada anterior pra abrir a janela)':
+        !!sgInicial && sgInicial.esperado === null && sgInicial.temDivergencia === false,
+      'AUTO-AJUSTE: baixar a entrada do dia 02 de 300 pra 200 recalcula o esperado da 2ª sangria':
+        !!sgAposEntrada && cem(sgAposEntrada.esperado) === 20000,
+      'AUTO-AJUSTE: a retirada de 300 vira sobra de 100 e passa a acusar divergência':
+        !!sgAposEntrada && cem(sgAposEntrada.divergencia) === 10000 && sgAposEntrada.temDivergencia === true,
+      'o que o sistema apurou NA HORA continua guardado (esperadoNaHora = 300)':
+        !!sgAposEntrada && cem(sgAposEntrada.esperadoNaHora) === 30000,
+      'Master/Admin edita a entrada de dinheiro pelo painel': rEditaEntrada.status === 200 && !!entAposEntrada && cem(entAposEntrada.valor) === 20000,
       'Master/Admin edita o valor da sangria, e a lista já traz o valor novo':
-        rEditaSangria.status === 200 && !!sgAposSangria && cem(sgAposSangria.valor) === 50000,
-      'a 2ª sangria entra no painel normalmente': segundaSangriaAparece,
+        rEditaSangria.status === 200 && !!sgAposSangria && cem(sgAposSangria.valor) === 20000,
+      // ESTA é a régua que o Master definiu: "desde a retirada anterior".
+      // A 1ª sangria (01/11) zerou o caixa; no dia 02/11 entraram 300 e não
+      // saiu nada, então o esperado da 2ª é 300 - e NÃO o acumulado da loja,
+      // que foi o erro que tirou R$ 19.745,52 de uma sangria de R$ 540.
+      'a 2ª sangria espera só o que entrou DESDE a 1ª (300 do dia 02, não o acumulado)':
+        !!sg2Lida && cem(sg2Lida.esperado) === 30000 && cem(sg2Lida.divergencia) === 0 && sg2Lida.temDivergencia === false,
+      'AUTO-AJUSTE: acertar a sangria pro esperado zera a divergência sozinha':
+        !!sgAposSangria && cem(sgAposSangria.divergencia) === 0 && sgAposSangria.temDivergencia === false,
       'loja (nem Master nem Admin) não edita entrada nem sangria, e não exclui sangria':
         rLojaEntrada.status === 403 && rLojaSangria.status === 403 && rLojaExcluiSangria.status === 403,
       'entrada negativa é recusada': rNegativo.status === 400,
       'sem informar o lançamento é recusado, e a mensagem diz o que falta':
         rSemLancamento.status === 400 && /Informe o lançamento/.test(JSON.parse(rSemLancamento.corpo || '{}').error || ''),
-      'excluir a entrada (valor 0) tira o dia da coluna': rExcluiEntrada.status === 200 && !entradaDe(semEntrada),
+      'excluir a entrada (valor 0) tira o dia da coluna': rExcluiEntrada.status === 200 && !entrada2De(semEntrada),
       'excluir a entrada NÃO apaga o fechamento (só a entrada em dinheiro)': fechamentoAindaExiste,
-      'Master/Admin exclui a sangria e ela some do painel': rExcluiSangria.status === 200 && !sangriaDe(semSangria),
+      'Master/Admin exclui a sangria e ela some do painel': rExcluiSangria.status === 200 && !sangria2De(semSangria),
       'a tela recarrega tudo do servidor depois de editar/excluir (KPIs e colunas juntos)':
         /async function salvarEditarEntrada\(\)[\s\S]{0,1400}await carregar\(\);/.test(htmlSaidas)
         && /async function salvarEditarSangria\(\)[\s\S]{0,1400}await carregar\(\);/.test(htmlSaidas)
@@ -7712,9 +7720,12 @@ setTimeout(async () => {
       detalhesSaidas: [{ descricao: 'Gelo', valor: 100 }],
     }, cabMaster);
 
+    // ANTES da primeira retirada nao ha janela: o sistema nao chuta "desde
+    // sempre" (ver calcularSaldoCaixa). Regua definida pelo Master: o esperado
+    // e' o que entrou DESDE A RETIRADA ANTERIOR.
     const esperado1 = JSON.parse((await pedir(`/api/sangrias/esperado?unidade=${UNI}&ate=2026-09-02`, cabMaster)).corpo);
 
-    // sangria batendo exatamente: nao pede motivo
+    // primeira sangria da unidade: sem base pra conferir, salva sem motivo
     const certa = await postarJson('/api/sangrias', {
       unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-02',
       valor: 850, periodoInicio: '2026-09-01', periodoFim: '2026-09-02',
@@ -7722,14 +7733,13 @@ setTimeout(async () => {
     }, cabMaster);
     const certaData = JSON.parse(certa.corpo);
 
-    // depois dela, o esperado zera - e a prova do saldo corrido
-    const esperado2 = JSON.parse((await pedir(`/api/sangrias/esperado?unidade=${UNI}&ate=2026-09-02`, cabMaster)).corpo);
-
-    // dia novo: entra mais 300, ninguem retirou
+    // dia novo: entra mais 300, ninguem retirou. Agora HA retirada anterior
+    // (02/09), entao a janela abre e o esperado passa a existir.
     await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-03',
       campos: { entradaDinheiro: 300 }, detalhesSaidas: [],
     }, cabMaster);
+    const esperado2 = JSON.parse((await pedir(`/api/sangrias/esperado?unidade=${UNI}&ate=2026-09-03`, cabMaster)).corpo);
 
     // retirar 200 quando deveriam ser 300 = falta 100 -> SEM motivo, recusa
     const semMotivo = await postarJson('/api/sangrias', {
@@ -7746,7 +7756,14 @@ setTimeout(async () => {
     }, cabMaster);
     const toleradaData = JSON.parse(dentroTolerancia.corpo);
 
-    // agora com motivo, a divergencia salva e fica registrada
+    // mais um dia com entrada, pra abrir janela nova depois da retirada de 03/09
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-04',
+      campos: { entradaDinheiro: 200 }, detalhesSaidas: [],
+    }, cabMaster);
+
+    // agora com motivo, a divergencia salva e fica registrada: esperado 200
+    // (o que entrou no 04/09), retirado 100 -> falta 100
     const comMotivo = await postarJson('/api/sangrias', {
       unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-04',
       valor: 100, periodoInicio: '2026-09-03', periodoFim: '2026-09-04',
@@ -7772,22 +7789,24 @@ setTimeout(async () => {
     const srcIdxCaixa = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
 
     const conf = {
-      'esperado = entradas − saídas − sangrias (1000 − 150 − 0 = 850)': esperado1.esperado === 850,
+      'sem retirada anterior não há janela: a conferência fica indisponível, não chuta o acumulado':
+        esperado1.esperado === null && esperado1.temBase === false && !esperado1.desde,
+      'a primeira sangria da unidade salva sem exigir motivo (não há com o que bater)':
+        certa.status === 200 && certaData.motivoDivergencia === null,
+      'depois da 1ª retirada a janela abre: esperado = o que entrou DESDE ela (300 do dia 03)':
+        esperado2.esperado === 300 && esperado2.temBase === true && esperado2.desde === '2026-09-02',
       'a conta vem quebrada, pra dar pra conferir de onde saiu':
-        esperado1.entradas === 1000 && esperado1.saidas === 150 && esperado1.sangrias === 0,
-      'sangria que bate salva sem motivo e guarda divergência 0':
-        certa.status === 200 && certaData.divergencia === 0 && certaData.motivoDivergencia === null,
-      'saldo corrido: depois de retirar tudo, o esperado zera': esperado2.esperado === 0,
+        esperado2.entradas === 300 && esperado2.saidas === 0,
       'diferença acima da tolerância SEM motivo é recusada':
         semMotivo.status === 400 && /motivo da diverg/i.test(semMotivo.corpo),
       'diferença dentro da tolerância (R$ 1,50) passa sem motivo':
         dentroTolerancia.status === 200 && toleradaData.divergencia === -1.5,
       'com motivo, salva e guarda esperado + diferença + motivo':
-        comMotivo.status === 200 && divergenteData.esperado === 1.5
-        && divergenteData.divergencia === 98.5
+        comMotivo.status === 200 && divergenteData.esperado === 200
+        && divergenteData.divergencia === -100
         && divergenteData.motivoDivergencia === 'erro de troco no turno da tarde',
       'o Painel de Saídas marca a sangria divergente com o valor e o motivo':
-        !!noPainel && noPainel.temDivergencia === true && noPainel.divergencia === 98.5
+        !!noPainel && noPainel.temDivergencia === true && noPainel.divergencia === -100
         && noPainel.motivoDivergencia === 'erro de troco no turno da tarde',
       'o esperado é calculado no SERVIDOR, nunca aceito do corpo da requisição':
         /const caixa = await saidasPainel\.calcularSaldoCaixa\(\{ unidade, ate: periodoFim \|\| data \}/.test(srcIdxCaixa)
