@@ -6956,6 +6956,9 @@ setTimeout(async () => {
     const ent2 = entrada2De(comDuas);
     const daUni = (r) => ((r.caixa || {}).porUnidade || []).find((u) => u.unidade === UNI);
     const linhaCaixa = daUni(comDuas);
+    // TESTE_ENTRADA_DIA (bloco anterior) tem entradas lançadas e NENHUMA
+    // sangria - é o caso das lojas Bravo que inflou o card pra R$ 490 mil
+    const linhaSemBase = ((comDuas.caixa || {}).porUnidade || []).find((u) => u.unidade === 'TESTE_ENTRADA_DIA');
     // estado ANTES da 2ª sangria: a janela abre na 1ª (01/11) e enxerga só os
     // 300 que entraram no dia 02 - nada do dia 01
     const linhaCaixaAntes = daUni(inicial2);
@@ -7043,6 +7046,16 @@ setTimeout(async () => {
       // ignorar tudo que veio antes dela
       'a janela ignora o que é anterior à última retirada (não é o saldo do mês)':
         !!linhaCaixaAntes && linhaCaixaAntes.desde === '2026-11-01' && cem(linhaCaixaAntes.entrou) === 30000,
+      // o erro que fez o card mostrar R$ 490.806,62: loja que nunca lançou
+      // sangria não tem início de janela, e "desde sempre" soma o histórico
+      // inteiro como se fosse gaveta. Sem base = fora do total, com o motivo.
+      'loja que NUNCA lançou sangria fica sem base (não soma o histórico inteiro como gaveta)':
+        !!linhaSemBase && linhaSemBase.semBase === true && linhaSemBase.valor === null,
+      'o total soma só as lojas com base (a sem sangria não infla o número)':
+        cem((comDuas.caixa || {}).total) === cem(((comDuas.caixa || {}).porUnidade || [])
+          .reduce((t, u) => t + (u.semBase ? 0 : (u.valor || 0)), 0)),
+      'a tela separa quem tem base de quem não tem (a sem sangria vira nota, não valor)':
+        /u\.semBase/.test(htmlSaidas) && /sem sangria lançada \(sem base pra medir a gaveta\)/.test(htmlSaidas),
       'excluir a entrada (valor 0) tira o dia da coluna': rExcluiEntrada.status === 200 && !entrada2De(semEntrada),
       'excluir a entrada NÃO apaga o fechamento (só a entrada em dinheiro)': fechamentoAindaExiste,
       'Master/Admin exclui a sangria e ela some do painel': rExcluiSangria.status === 200 && !sangria2De(semSangria),
