@@ -10340,9 +10340,10 @@ app.get('/api/abastecimento/fluxo', auth.requireMaster, async (req, res) => {
       perdaTransito: i.enviado - i.recebido,
       saidaApurada: reconciliavel ? i.saldoInicial + i.entradas - i.saldoFinal : null,
     })).filter((i) => i.tipo === 'pizza' || i.enviado || i.avarias || i.saldoInicial || i.saldoFinal)
-      // maior diferenca primeiro, zerados/sem apuracao no fim em ordem
-      // normal (ver ordenarPorDiferenca em abastecimentoPrevisao.js)
-      .sort(abastecimentoPrevisao.ordenarPorDiferenca('saidaApurada'));
+      // item COM divergencia primeiro (sobrou, ou perdeu no transito), o
+      // resto na ordem de sempre - ver ordenarDivergenciaPrimeiro em
+      // abastecimentoPrevisao.js
+      .sort(abastecimentoPrevisao.ordenarDivergenciaPrimeiro('saidaApurada'));
 
     const diasNoPeriodo = Math.round((new Date(`${fim}T00:00:00`) - new Date(`${inicio}T00:00:00`)) / 86400000) + 1;
     const diasComContagem = new Set(contagens.map((c) => diaDe(c.criadoEm))).size;

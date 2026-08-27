@@ -8427,59 +8427,72 @@ setTimeout(async () => {
   console.log(`${okFormFavorecidoAnexo ? '✓' : '✗'} Formulários: Favorecido no card e na busca; anexos entram no PDF do formulário`);
 
   // ------------------------------------------------------------------
-  // ORDEM DO RELATÓRIO DO CARRINHO. Pedido do Master: "não precisa ficar na
-  // ordem no relatório, sempre mostrar da maior diferença para menor
-  // diferença, depois mostra normal". Em ordem alfabética era preciso varrer
-  // os ~27 itens do carrinho pra achar os 3 que saíram do lugar.
+  // ------------------------------------------------------------------
+  // ORDEM DO RELATÓRIO DO CARRINHO. Pedido do Master: "o item que tiver
+  // diferença positiva ou negativa apareça no início, assim ele não precisa
+  // PROCURAR onde está o erro; os demais seguem a ordem que já existe".
+  //
+  // São dois blocos, não ordenação por tamanho: quem tem divergência sobe,
+  // o resto fica exatamente como estava. O exemplo do próprio Master é a
+  // Fanta Laranja Zero (insumo, sobrou 6) tendo que aparecer ANTES da
+  // Calabresa - ou seja, a divergência sobe até acima das pizzas.
   let okOrdemFluxo = false;
   try {
     const prev = require('./abastecimentoPrevisao');
     const srcIdx = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
+    const srcPrev = require('fs').readFileSync(require('path').join(__dirname, 'abastecimentoPrevisao.js'), 'utf8');
 
-    // os números são os do print do Master, incluindo a Fanta Laranja Zero
-    // que veio NEGATIVA (sobrou 6 - contagem ou envio não lançado)
+    // números do print do Master
     const itens = [
       { nome: 'Guardanapos', tipo: 'insumo', saida: 0 },
       { nome: 'Copos', tipo: 'insumo', saida: 1 },
-      { nome: 'Fanta Laranja Zero', tipo: 'insumo', saida: -6 },
-      { nome: 'Coca-Cola Zero', tipo: 'insumo', saida: 10 },
+      { nome: 'Fanta Laranja Zero', tipo: 'insumo', saida: -6 },   // sobrou: divergência
+      { nome: 'Coca-Cola Zero', tipo: 'insumo', saida: 10 },       // consumo alto, mas NÃO é erro
       { nome: 'Fanta Uva', tipo: 'insumo', saida: 0 },
-      { nome: 'Fanta Laranja', tipo: 'insumo', saida: 1 },
       { nome: 'Água', tipo: 'insumo', saida: 5 },
       { nome: 'Calabresa', tipo: 'pizza', saida: 0 },
+      { nome: 'Sprite', tipo: 'insumo', saida: 3, perdaTransito: 2 }, // sumiu no caminho: divergência
+      { nome: 'Mostarda', tipo: 'insumo', saida: 2, avarias: 4 },   // avaria declarada: NÃO é erro pra procurar
       { nome: 'Sem apuração', tipo: 'insumo', saida: null },
     ];
-    const ordenado = [...itens].sort(prev.ordenarPorDiferenca('saida')).map((i) => i.nome);
+    const ordenado = [...itens].sort(prev.ordenarDivergenciaPrimeiro('saida')).map((i) => i.nome);
+    const posicao = (n) => ordenado.indexOf(n);
 
     const conf = {
-      'a maior diferença vem primeiro': ordenado[0] === 'Coca-Cola Zero',
-      // sem o módulo, "sobrou 6" (negativo) iria pro FIM da lista - justo o
-      // item que tem erro de contagem e é o que mais precisa ser visto
-      'a saída negativa entra pelo tamanho da diferença, não pelo sinal':
-        ordenado[1] === 'Fanta Laranja Zero',
-      'depois vem a diferença 5, e só então as de 1': ordenado[2] === 'Água'
-        && ordenado[3] === 'Copos' && ordenado[4] === 'Fanta Laranja',
-      // "depois mostra normal": zerados no fim, pizza antes de insumo e
-      // alfabético dentro de cada, como sempre foi
-      'os zerados caem no fim, na ordem normal (pizza antes de insumo, alfabético)':
-        ordenado[5] === 'Calabresa' && ordenado[6] === 'Fanta Uva' && ordenado[7] === 'Guardanapos',
-      'item sem conta fechada fica atrás até do zerado (não dá pra dizer que não houve diferença)':
-        ordenado[8] === 'Sem apuração',
+      // o caso literal do pedido: insumo com divergência acima de uma pizza
+      'a saída negativa vai pro início, ACIMA até das pizzas (Fanta Laranja Zero antes da Calabresa)':
+        posicao('Fanta Laranja Zero') < posicao('Calabresa'),
+      // Sprite é INSUMO: no alfabético normal ele fica lá embaixo, depois de
+      // toda pizza. Se está acima da Calabresa, foi a promoção que o levou
+      'perda em trânsito também é diferença e sobe junto': posicao('Sprite') < posicao('Calabresa'),
+      // os dois divergentes ocupam as 2 primeiras posições, na ordem normal
+      // entre si (pizza antes de insumo) - não por tamanho
+      'só os divergentes ficam no bloco de cima':
+        ordenado.slice(0, 2).sort().join('|') === ['Sprite', 'Fanta Laranja Zero'].sort().join('|'),
+      // era o erro da versão anterior: ordenar por tamanho jogava a
+      // Coca-Cola Zero (consumo normal de 10) pra frente do item com erro
+      'consumo alto NÃO é diferença - Coca-Cola Zero (10 un) fica no bloco de baixo':
+        posicao('Coca-Cola Zero') > 1,
+      'avaria declarada não conta como erro pra procurar (veio explicada)':
+        posicao('Mostarda') > 1,
+      // "os demais seguem a ordem que já existe": pizza antes de insumo,
+      // alfabético dentro de cada
+      'o resto mantém a ordem de sempre (pizza antes de insumo, alfabético)':
+        ordenado.slice(2).join(' > ') === 'Calabresa > Água > Coca-Cola Zero > Copos > Fanta Uva > Guardanapos > Mostarda > Sem apuração',
       'nenhum item some na reordenação': ordenado.length === itens.length,
       // as duas telas mostram o MESMO tipo de card - ordenar só uma deixaria
-      // o dia a dia contradizendo o período
+      // uma contradizendo a outra
       'o fluxo do período usa o mesmo comparador':
-        /\.sort\(abastecimentoPrevisao\.ordenarPorDiferenca\('saidaApurada'\)\)/.test(srcIdx),
+        /\.sort\(abastecimentoPrevisao\.ordenarDivergenciaPrimeiro\('saidaApurada'\)\)/.test(srcIdx),
       'o dia a dia usa o mesmo comparador':
-        /\.sort\(ordenarPorDiferenca\('saida'\)\)/.test(
-          require('fs').readFileSync(require('path').join(__dirname, 'abastecimentoPrevisao.js'), 'utf8')),
+        /\.sort\(ordenarDivergenciaPrimeiro\('saida'\)\)/.test(srcPrev),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okOrdemFluxo = !falhas.length;
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}\n  ordem obtida: ${ordenado.join(' > ')}`);
   } catch (e) { okOrdemFluxo = false; console.log('  erro: ' + e.message); }
   if (!okOrdemFluxo) ruins += 1;
-  console.log(`${okOrdemFluxo ? '✓' : '✗'} Relatórios do Carrinho: itens saem da maior diferença pra menor, zerados no fim em ordem normal`);
+  console.log(`${okOrdemFluxo ? '✓' : '✗'} Relatórios do Carrinho: item com divergência sobe pro início; o resto mantém a ordem de sempre`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
