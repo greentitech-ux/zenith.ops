@@ -6985,6 +6985,24 @@ setTimeout(async () => {
       unidade: 'TESTE_SANGRIA_ANTIGA', unidadeNome: 'Loja Sangria Antiga', grupo: 'ARCFOOD', data: '2026-08-05',
       campos: { entradaDinheiro: 60 },
     }, cabMaster);
+    // O CASO SAO MIGUEL (27/08): sangria lancada num dia, cobrindo o periodo
+    // que terminou no dia ANTERIOR. O dinheiro que entrou no dia da retirada
+    // fica na gaveta - o Master: "ontem foi feita a sangria de R$ 540,
+    // deixando em loja so o que entrou no dia - R$ 91".
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: 'TESTE_SOBRA_DO_DIA', unidadeNome: 'Loja Sobra do Dia', grupo: 'ARCFOOD', data: '2026-08-25',
+      campos: { entradaDinheiro: 450 },
+    }, cabMaster);
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: 'TESTE_SOBRA_DO_DIA', unidadeNome: 'Loja Sobra do Dia', grupo: 'ARCFOOD', data: '2026-08-26',
+      campos: { entradaDinheiro: 91 },
+    }, cabMaster);
+    const sgSobra = JSON.parse((await postarJson('/api/sangrias', {
+      unidade: 'TESTE_SOBRA_DO_DIA', unidadeNome: 'Loja Sobra do Dia', grupo: 'ARCFOOD', data: '2026-08-26',
+      valor: 450, descricao: 'Sangria do caixa de ontem',
+      periodoInicio: '2026-08-25', periodoFim: '2026-08-25',
+      nomeDepositante: 'Fulano Teste', password: process.env.MASTER_PASSWORD,
+    }, cabMaster)).corpo);
     const comDuas = await ler();
     const sg2Lida = sangria2De(comDuas);
     const ent2 = entrada2De(comDuas);
@@ -6996,6 +7014,11 @@ setTimeout(async () => {
     const linhaPiso = ((comDuas.caixa || {}).porUnidade || []).find((u) => u.unidade === 'TESTE_ENTRADA_DIA');
     const linhaAntiga = ((comDuas.caixa || {}).porUnidade || []).find((u) => u.unidade === 'TESTE_CAIXA_ANTIGO');
     const linhaSangriaAntiga = ((comDuas.caixa || {}).porUnidade || []).find((u) => u.unidade === 'TESTE_SANGRIA_ANTIGA');
+    const linhaSobra = ((comDuas.caixa || {}).porUnidade || []).find((u) => u.unidade === 'TESTE_SOBRA_DO_DIA');
+    // `ler()` filtra novembro; a sangria da sobra é de agosto, então precisa
+    // da leitura do período dela pra conferir o esperado recalculado
+    const emAgosto = JSON.parse((await pedir('/api/saidas-painel?inicio=2026-08-01&fim=2026-08-31', cabMaster)).corpo);
+    const sgSobraLida = (emAgosto.itens || []).find((it) => it.chave === `sangria::${sgSobra.id}`);
     // estado ANTES da 2ª sangria: a janela abre na 1ª (01/11) e enxerga só os
     // 300 que entraram no dia 02 - nada do dia 01
     const linhaCaixaAntes = daUni(inicial2);
@@ -7094,6 +7117,14 @@ setTimeout(async () => {
         !!linhaPiso && linhaPiso.semBase === false && linhaPiso.desde === '2026-07-31' && cem(linhaPiso.valor) === 45000,
       'sangria antiga (junho) NÃO arrasta a janela pra trás do piso: só os 60 de agosto contam, não os 300 de julho':
         !!linhaSangriaAntiga && linhaSangriaAntiga.desde === '2026-07-31' && cem(linhaSangriaAntiga.valor) === 6000,
+      // o card zerou em São Miguel porque a janela cortava pela DATA da
+      // sangria (26/08), engolindo a entrada daquele mesmo dia. O corte é o
+      // fim do PERÍODO que ela declarou levar (25/08), então os R$ 91,00 que
+      // entraram em 26/08 continuam na gaveta.
+      'sangria lançada em 26/08 cobrindo até 25/08 deixa na gaveta o que entrou em 26/08 (R$ 91, não R$ 0)':
+        !!linhaSobra && linhaSobra.semBase === false && linhaSobra.desde === '2026-08-25' && cem(linhaSobra.valor) === 9100,
+      'e a conferência dessa mesma sangria fecha no fim do período (450 de 25/08), sem puxar os 91 do dia seguinte':
+        !!sgSobraLida && cem(sgSobraLida.esperado) === 45000 && sgSobraLida.temDivergencia === false,
       'o total soma só as lojas com base (a sem sangria não infla o número)':
         cem((comDuas.caixa || {}).total) === cem(((comDuas.caixa || {}).porUnidade || [])
           .reduce((t, u) => t + (u.semBase ? 0 : (u.valor || 0)), 0)),

@@ -246,21 +246,41 @@ async function corrigirEntradaPlanilha(fechamentoId, { valor, porId, porEmail },
 // unidade vira "esperado": uma sangria de R$ 540 apareceu esperando
 // R$ 19.745,52. Cada retirada zera o caixa, então a janela recomeça nela.
 //
-// `desde` é EXCLUSIVO: o dia da retirada anterior já foi conferido por ela.
-// Duas sangrias no mesmo dia deixam a segunda com janela vazia - correto, a
-// primeira levou tudo.
+// `desde` é EXCLUSIVO: o período que a retirada anterior declarou levar já foi
+// conferido por ela.
 //
 // Sem retirada anterior devolve null, e quem chama trata como SEM BASE: não dá
 // pra dizer desde quando o dinheiro está acumulando, e chutar "desde sempre" é
 // justamente o erro que se está corrigindo (§6 - dado que não existe não vira
 // número).
+//
+// O corte NAO e' a data em que a sangria foi lancada, e' o FIM DO PERIODO que
+// ela declara ter retirado (o "Ate" do formulario). Os dois quase sempre
+// diferem: a loja fecha o caixa de ontem e leva o dinheiro hoje. Usar a data
+// do lancamento joga fora o dinheiro que entrou no proprio dia da retirada -
+// foi o que zerou o card de Sao Miguel, que tinha R$ 91,00 em gaveta: sangria
+// de R$ 540,00 lancada em 26/08 cobrindo ate 25/08, e a entrada de 26/08
+// (R$ 91,00) ficou de fora dos dois lados da conta.
+//
+// Pelo fim do periodo, os ciclos se encaixam sem buraco e sem sobreposicao: o
+// que uma sangria declarou nao ter levado continua na gaveta e entra inteiro
+// na conferencia da proxima.
+function fimDoCiclo(sg) {
+  const pf = sg && sg.extra ? sg.extra.periodoFim : null;
+  if (pf && /^\d{4}-\d{2}-\d{2}$/.test(pf)) return pf;
+  return sg && sg.data ? sg.data : null;
+}
+
+// O maior fim de periodo, e nao o da sangria mais recente: e' ate' onde o
+// dinheiro comprovadamente ja saiu da gaveta. Duas sangrias lancadas fora de
+// ordem nao abrem buraco.
 function inicioDaJanela(sangriasDaUnidade, { ate, ignorarChave } = {}) {
   const anteriores = sangriasDaUnidade
     .filter((sg) => sg.chave !== ignorarChave && (!ate || (sg.data || '') <= ate))
-    .sort((a, b) => String(a.data || '').localeCompare(String(b.data || ''))
-      || String(a.criadoEm || '').localeCompare(String(b.criadoEm || '')));
-  const ultima = anteriores[anteriores.length - 1];
-  return ultima ? (ultima.data || null) : null;
+    .map(fimDoCiclo)
+    .filter(Boolean)
+    .sort();
+  return anteriores.length ? anteriores[anteriores.length - 1] : null;
 }
 
 // Decisão do Master (27/08/2026): a conta de dinheiro em loja DESCONSIDERA os
@@ -307,7 +327,11 @@ function recalcularDivergencias(itens, entradas) {
   for (const grupo of porUnidade.values()) {
     for (const sg of grupo.sangrias) {
       const desde = comPiso(inicioDaJanela(grupo.sangrias, { ate: sg.data, ignorarChave: sg.chave }));
-      const naJanela = (x) => (x.data || '') > desde && (x.data || '') <= (sg.data || '');
+      // a janela FECHA no fim do periodo que esta sangria declara ter levado,
+      // nao no dia em que ela foi lancada (ver fimDoCiclo): o dinheiro que
+      // entrou depois do periodo ainda esta na gaveta e e' da proxima
+      const ate = fimDoCiclo(sg) || '';
+      const naJanela = (x) => (x.data || '') > desde && (x.data || '') <= ate;
       const somar = (lista) => lista.reduce((t, x) => t + (naJanela(x) ? (Number(x.valor) || 0) : 0), 0);
       const entrou = somar(grupo.entradas);
       // sem entrada nenhuma na janela não há com o que bater - inclui sangria
