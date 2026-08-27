@@ -323,16 +323,17 @@ function recalcularDivergencias(itens, entradas) {
 // desde quando o sistema esta contando e o que ele viu no meio.
 function dinheiroEmLoja(itens, entradas) {
   const porUnidade = new Map();
-  const alvo = (u, nome) => {
-    if (!porUnidade.has(u)) porUnidade.set(u, { unidade: u, unidadeNome: nome || u, entradas: [], saidas: [], sangrias: [] });
+  const alvo = (u, nome, grupo) => {
+    if (!porUnidade.has(u)) porUnidade.set(u, { unidade: u, unidadeNome: nome || u, grupo: grupo || null, entradas: [], saidas: [], sangrias: [] });
     const g = porUnidade.get(u);
     if (nome && !g.unidadeNome) g.unidadeNome = nome;
+    if (grupo && !g.grupo) g.grupo = grupo;
     return g;
   };
-  entradas.forEach((e) => { if (e.unidade) alvo(e.unidade, e.unidadeNome).entradas.push(e); });
+  entradas.forEach((e) => { if (e.unidade) alvo(e.unidade, e.unidadeNome, e.grupo).entradas.push(e); });
   itens.forEach((it) => {
     if (!it.unidade) return;
-    const g = alvo(it.unidade, it.unidadeNome);
+    const g = alvo(it.unidade, it.unidadeNome, it.grupo);
     (it.origem === 'sangria' ? g.sangrias : g.saidas).push(it);
   });
 
@@ -349,7 +350,7 @@ function dinheiroEmLoja(itens, entradas) {
     // fora do total e a tela diz o porque, em vez de afirmar um numero que
     // nao mede gaveta nenhuma.
     if (!desde) {
-      linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, desde: null, semBase: true, entrou: null, saiu: null, valor: null });
+      linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, grupo: g.grupo, desde: null, semBase: true, entrou: null, saiu: null, valor: null });
       continue;
     }
     const naJanela = (x) => (x.data || '') > desde;
@@ -358,7 +359,7 @@ function dinheiroEmLoja(itens, entradas) {
     const saiu = +somar(g.saidas).toFixed(2);
     const valor = +(entrou - saiu).toFixed(2);
     total += valor;
-    linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, desde, semBase: false, entrou, saiu, valor });
+    linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, grupo: g.grupo, desde, semBase: false, entrou, saiu, valor });
   }
   linhas.sort((a, b) => String(a.unidadeNome || '').localeCompare(String(b.unidadeNome || ''), 'pt-BR'));
   return { total: +total.toFixed(2), porUnidade: linhas };
