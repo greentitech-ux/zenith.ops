@@ -6686,6 +6686,109 @@ setTimeout(async () => {
   console.log(`${okSaidasPainel ? '✓' : '✗'} Painel de Saídas: Sangria/Depósito + outras saídas unificadas, verificação Master/Admin, isolamento por grupo`);
 
   // ------------------------------------------------------------------
+  // Pedido do Master: "crie uma coluna de Entrada de dinheiro dia a dia de
+  // forma que consigamos exportar tambem relatorio". Antes disso a Entrada
+  // so existia como um TOTAL no KPI - o relatorio exportado listava
+  // exclusivamente o que SAIU, e conferir com a planilha exigia abrir a
+  // planilha do lado (foi exatamente o que travou a comparacao loja a loja
+  // que ele pediu antes).
+  //
+  // Duas coisas que este bloco protege:
+  //   1. DIA A DIA de verdade: dois fechamentos no mesmo dia (turno +
+  //      madrugada, ou um lancamento corrigido depois) viram UMA linha
+  //      somada, senao o mesmo dia apareceria duas vezes na coluna;
+  //   2. o gate: entrada em dinheiro e' visao de Master/Admin. O relatorio
+  //      seria a porta dos fundos pro numero que a tela esconde da loja.
+  let okEntradaDiaADia = false;
+  try {
+    const cabMaster = { Authorization: 'Bearer ' + token };
+    const bcrypt = require('bcryptjs');
+    const senhaHash = bcrypt.hashSync('SenhaDeTeste!2026', 4);
+
+    // o MESMO dia pelas duas fontes - e' o caso que duplicava a linha:
+    // o Firestore recusa dois lancamentos na mesma unidade+data, mas o
+    // snapshot da planilha ARCFOOD e' fonte independente e nao sabe o que
+    // ja foi lancado no app. (Sobre o require do snapshot devolver o MESMO
+    // array que o index.js segura: ver o bloco de correcao de saida da
+    // planilha, mais abaixo.)
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: 'TESTE_ENTRADA_DIA', unidadeNome: 'Loja Entrada Dia', grupo: 'ARCFOOD', data: '2026-10-05',
+      campos: { entradaDinheiro: 300 }, detalhesSaidas: [{ descricao: 'Saída do dia 05', valor: 40 }],
+    }, cabMaster);
+    require('./fechamentos-snapshot.json').push({
+      id: 'pl-entrada-dia-05', grupo: 'ARCFOOD', unidade: 'TESTE_ENTRADA_DIA', unidadeNome: 'Loja Entrada Dia',
+      data: '2026-10-05', faturamento: 800, entradaDinheiro: 120.5, gerente: 'gerente@planilha',
+    });
+    // outro dia da mesma loja - tem que continuar sendo linha separada
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: 'TESTE_ENTRADA_DIA', unidadeNome: 'Loja Entrada Dia', grupo: 'ARCFOOD', data: '2026-10-06',
+      campos: { entradaDinheiro: 90 },
+    }, cabMaster);
+
+    const periodo = 'inicio=2026-10-05&fim=2026-10-06';
+    const resp = JSON.parse((await pedir(`/api/saidas-painel?${periodo}`, cabMaster)).corpo);
+    const daLoja = (resp.entradas || []).filter((e) => e.unidade === 'TESTE_ENTRADA_DIA');
+    const dia05 = daLoja.filter((e) => e.data === '2026-10-05');
+    const dia06 = daLoja.filter((e) => e.data === '2026-10-06');
+
+    // o total NAO pode mudar por causa da agregacao - e' o mesmo numero do
+    // KPI de Entrada, que a tela calcula em cima deste array
+    const painelSaidas = require('/home/user/adyen-monitor/server/saidasPainel.js');
+    // mesma fonte que a rota usa: Firestore + snapshot da planilha
+    const porFechamento = await painelSaidas.listarEntradas(require('./fechamentos-snapshot.json'));
+    const somar = (arr) => Math.round(arr.reduce((t, x) => t + (x.valor || 0), 0) * 100);
+    const totalCru = somar(porFechamento.filter((e) => e.unidade === 'TESTE_ENTRADA_DIA'));
+    const totalAgregado = somar(daLoja);
+
+    // loja comum (nem Master nem Admin), COM a unidade - ve as saidas dela
+    DOCS.set('users/u-entrada-loja', {
+      passwordHash: senhaHash, role: 'user', active: true,
+      email: 'entrada-loja@teste.local', username: 'entradaloja',
+      permissions: { sections: ['lancamento'], unidades: ['TESTE_ENTRADA_DIA'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabLoja = { Authorization: 'Bearer ' + (await auth.login('entrada-loja@teste.local', 'SenhaDeTeste!2026')).token };
+
+    const csvMaster = await pedir(`/api/saidas-painel/relatorio.csv?${periodo}&grupo=ARCFOOD`, cabMaster);
+    const csvLoja = await pedir(`/api/saidas-painel/relatorio.csv?${periodo}&grupo=ARCFOOD`, cabLoja);
+    const linhasEntradaMaster = csvMaster.corpo.split('\n').map((l) => l.replace(/\r$/, ''))
+      .filter((l) => l.includes('Entrada de dinheiro'));
+    const pdfResp = await pedirBinario(`/api/saidas-painel/relatorio.pdf?${periodo}&grupo=ARCFOOD`, cabMaster);
+    const textoPdf = textoDoPdf(pdfResp.buffer);
+
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'saidas.html'), 'utf8');
+
+    const conf = {
+      'o mesmo dia vindo do app E da planilha vira UMA linha (não duplica o dia na coluna)': dia05.length === 1,
+      'a linha do dia soma as duas fontes (300 no app + 120,50 na planilha = 420,50)': dia05.length === 1 && Math.round(dia05[0].valor * 100) === 42050,
+      'a linha diz quantos lançamentos entraram nela (pra ninguém achar que faltou um)': dia05.length === 1 && dia05[0].lancamentos === 2,
+      'dia seguinte continua sendo linha própria, com 1 lançamento': dia06.length === 1 && Math.round(dia06[0].valor * 100) === 9000 && dia06[0].lancamentos === 1,
+      'agregar não muda o total (o KPI de Entrada continua batendo)': totalCru === totalAgregado && totalCru === 51050,
+      'a coluna vem mais recente primeiro, igual às saídas': daLoja.length === 2 && daLoja[0].data === '2026-10-06',
+      'o CSV exporta a entrada como linha própria, com Origem "Entrada de dinheiro"': csvMaster.status === 200 && linhasEntradaMaster.length === 2,
+      'no CSV o dia com 2 lançamentos diz isso na Descrição': linhasEntradaMaster.some((l) => /2 lançamentos/.test(l)),
+      'entrada não entra na conferência: sai "—" no Verificada, não um "Não" que sugeriria pendência':
+        linhasEntradaMaster.length === 2 && linhasEntradaMaster.every((l) => /,—,—$/.test(l)),
+      'as saídas continuam no MESMO relatório (a entrada não substituiu nada)': /Saída avulsa/.test(csvMaster.corpo),
+      'gate no relatório: loja com a unidade exporta as saídas dela mas NENHUMA entrada':
+        csvLoja.status === 200 && /Saída do dia 05/.test(csvLoja.corpo) && !/Entrada de dinheiro/.test(csvLoja.corpo),
+      'o PDF sai válido e traz as entradas': pdfResp.status === 200 && /Entrada de dinheiro/.test(textoPdf),
+      'o subtítulo do PDF separa saídas de dias com entrada': /dia\(s\) com entrada/.test(textoPdf),
+      'a tela tem a coluna Entrada de dinheiro e ela só aparece pra quem pode conferir':
+        /id="col-entradas"/.test(html)
+        && /if\(PODE_CONFERIR\)\{[\s\S]{0,400}getElementById\('col-entradas-wrap'\)\.classList\.remove\('hidden'\)/.test(html),
+      'a grade vira 4 colunas quando a Entrada aparece (senão o quadro cai por cima das saídas)':
+        /\.kanban-3col\.com-entradas\{grid-template-columns:1fr 1fr 1fr 1fr;\}/.test(html)
+        && /classList\.add\('com-entradas'\)/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okEntradaDiaADia = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okEntradaDiaADia = false; console.log('  erro: ' + e.message); }
+  if (!okEntradaDiaADia) ruins += 1;
+  console.log(`${okEntradaDiaADia ? '✓' : '✗'} Painel de Saídas: Entrada de dinheiro dia a dia (coluna na tela + linha no CSV/PDF, com o mesmo gate de Master/Admin)`);
+
+  // ------------------------------------------------------------------
   // Pedido real do Master: "tem muitas saídas que vieram da planilha e
   // percebi que não aparece aqui, só as lançadas no próprio sistema". Causa
   // raiz dupla: (1) linhaParaFechamento (leitura da planilha ARCFOOD) nunca
@@ -7756,7 +7859,7 @@ setTimeout(async () => {
     const src = require('fs').readFileSync(require('path').join(__dirname, 'reportUtil.js'), 'utf8');
     const srcIndex = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
     const iRota = srcIndex.indexOf("saidas-painel/relatorio");
-    const trechoRota = srcIndex.slice(iRota, iRota + 2200);
+    const trechoRota = srcIndex.slice(iRota, iRota + 3400);
 
     // exercita de verdade: um item com descrição bem comprida tem que virar
     // um PDF válido (a troca de ellipsis por quebra de linha não pode
