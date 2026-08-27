@@ -296,32 +296,43 @@ function sugerirEnvio(regs, { capacidadesManuais = {}, ciclos = null } = {}) {
 // saida: so dos ciclos que FECHARAM naquele dia - dia sem segunda contagem
 // fica com saida null, e a tela diz "sem contagem de fechamento" em vez de
 // mostrar zero, que seria mentira.
-// ORDEM DO RELATORIO. Pedido do Master: "nao precisa ficar na ordem, sempre
-// mostrar da maior diferenca para menor diferenca, depois mostra normal".
-// Quem abre o relatorio esta procurando o que saiu do lugar - em ordem
-// alfabetica era preciso varrer os ~27 itens pra achar os 3 que importam.
+// ORDEM DO RELATORIO. Pedido do Master: "o item que tiver diferenca positiva
+// ou negativa aparece no inicio, assim ele nao precisa PROCURAR onde esta o
+// erro; os demais seguem a ordem que ja existe".
 //
-// Compara pelo MODULO de proposito: "sobrou 6" e "saiu 6" sao diferencas do
-// mesmo tamanho, e a negativa ainda e a mais grave das duas (e erro de
-// contagem ou envio nao lancado, ver a flag de saida negativa). Ordenar pelo
-// numero com sinal jogaria justamente o erro pro fim da lista.
+// Sao dois blocos, nao uma ordenacao por tamanho: primeiro tudo que tem
+// divergencia, depois todo o resto na ordem de sempre. O que manda pro topo
+// e' TER divergencia, nao o tamanho dela - um item que sobrou 1 un e' tao
+// erro quanto um que sobrou 51, e o Master quer os dois na primeira tela.
 //
-// Item sem diferenca (0) e item sem conta fechada (null, periodo nao
-// reconciliavel) caem no fim, na ordem NORMAL de sempre - e o "depois mostra
-// normal" do pedido.
+// A divergencia sobe ACIMA ATE DAS PIZZAS: o exemplo do proprio Master e' a
+// Fanta Laranja Zero (insumo, sobrou 6) tendo que aparecer antes da
+// Calabresa. Por isso o bloco quebra o agrupamento pizza/insumo de proposito
+// - dentro de cada bloco o agrupamento volta a valer.
 function ordemNormal(a, b) {
   if (a.tipo !== b.tipo) return a.tipo === 'pizza' ? -1 : 1;
   return String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR');
 }
-// campo: 'saida' no dia a dia, 'saidaApurada' no fluxo do periodo - o mesmo
-// numero com nome diferente em cada montagem
-function ordenarPorDiferenca(campo) {
+// O que conta como divergencia e' o que a tela ja marca de vermelho:
+// - saida NEGATIVA: sobrou mais do que entrou (contagem ou envio nao lancado)
+// - perda em transito POSITIVA: saiu mais do que chegou
+// Avaria NAO entra: ela e' declarada de proposito por quem enviou, entao nao
+// e' erro pra procurar - e' informacao que ja veio explicada.
+// Item sem conta fechada (saida null, periodo nao reconciliavel) tambem nao
+// entra: nao da pra afirmar que ha divergencia, so que nao deu pra apurar.
+function temDivergencia(item, campoSaida) {
+  const saida = item[campoSaida];
+  if (Number.isFinite(saida) && saida < 0) return true;
+  if (Number.isFinite(item.perdaTransito) && item.perdaTransito > 0) return true;
+  return false;
+}
+// campoSaida: 'saida' no dia a dia, 'saidaApurada' no fluxo do periodo - o
+// mesmo numero com nome diferente em cada montagem
+function ordenarDivergenciaPrimeiro(campoSaida) {
   return (a, b) => {
-    // null (sem conta fechada) fica ATRAS ate do zero: nao da pra dizer que
-    // nao houve diferenca, so que nao foi possivel apurar
-    const da = Number.isFinite(a[campo]) ? Math.abs(a[campo]) : -1;
-    const db = Number.isFinite(b[campo]) ? Math.abs(b[campo]) : -1;
-    if (da !== db) return db - da;
+    const da = temDivergencia(a, campoSaida);
+    const db = temDivergencia(b, campoSaida);
+    if (da !== db) return da ? -1 : 1;
     return ordemNormal(a, b);
   };
 }
@@ -362,12 +373,12 @@ function resumoPorDia(regs, { inicio, fim, ciclos = null }) {
       ...d,
       itens: [...d.itens.values()]
         .filter((i) => i.entradas || i.saida != null)
-        .sort(ordenarPorDiferenca('saida')),
+        .sort(ordenarDivergenciaPrimeiro('saida')),
     }));
 }
 
 module.exports = {
   diaDe, horaDe, inteiro, emUnidades, itensDe, entradasDe,
   montarCiclos, estimarCapacidades, sugerirEnvio, resumoPorDia,
-  ordemNormal, ordenarPorDiferenca,
+  ordemNormal, temDivergencia, ordenarDivergenciaPrimeiro,
 };
