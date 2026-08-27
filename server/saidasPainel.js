@@ -104,10 +104,31 @@ function linhasDeFechamento(f, mapaVerif) {
 // (a planilha lanca sangria em linha separada do fechamento do dia) - e essa
 // soma continua acontecendo normalmente, porque as duas linhas sobrevivem
 // juntas a este filtro.
+//
+// O QUE SE DESCARTA E' O FECHAMENTO DO DIA, NAO O DIA INTEIRO. A ARCFOOD
+// lanca a sangria numa LINHA SEPARADA da planilha, com faturamento zerado -
+// e' so a retirada. Descartar por unidade+data levava essa linha junto quando
+// o app tinha o fechamento daquele dia, e a sangria sumia sem deixar rastro:
+// Carrao 05/08 tinha no app um fechamento (entrada 107) e na planilha a linha
+// "SAngria Andre 05/08" de R$ 675,00 - a sangria nao aparecia no painel. Nos
+// dias em que o app NAO tinha fechamento (02/08, 10/08, 14/08) as sangrias da
+// planilha entravam normalmente, o que e' exatamente a assimetria que
+// denunciou o problema.
+//
+// A linha que duplica e' a que TRAZ O FECHAMENTO (faturamento, entrada em
+// dinheiro ou total declarado). Linha sem nenhum desses e' lancamento extra
+// do dia - existe so na planilha, o app nao tem copia dela, e por isso ela
+// sobrevive.
+function trazFechamentoDoDia(f) {
+  return (Number(f.faturamento) || 0) > 0
+    || (Number(f.entradaDinheiro) || 0) > 0
+    || (Number(f.totalDeclarado) || 0) > 0;
+}
+
 function semDuplicataDaPlanilha(doApp, daPlanilha) {
   if (!Array.isArray(daPlanilha) || !daPlanilha.length) return [];
   const noApp = new Set(doApp.map((f) => `${f.unidade}::${f.data}`));
-  return daPlanilha.filter((f) => !noApp.has(`${f.unidade}::${f.data}`));
+  return daPlanilha.filter((f) => !noApp.has(`${f.unidade}::${f.data}`) || !trazFechamentoDoDia(f));
 }
 
 // extrasFechamentos: fechamentos que NÃO moram na coleção fechamentosLive -
