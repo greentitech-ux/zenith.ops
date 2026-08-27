@@ -62,6 +62,13 @@ function unidadeHintKpi(tipo) {
   if (tipo === 'moeda') return ' (em R$)';
   if (tipo === 'kg') return ' (em Kg)';
   if (tipo === 'texto') return ' (texto livre - copie exatamente como está escrito no relatório, não precisa ser um número redondo)';
+  // TEMPO: o relatorio do PDV imprime esses indicadores (Leg Time, Run Time,
+  // Avg Delivery Time, Tempo de Atendimento/Producao/Espera, Saida de Loja
+  // OTD) em MINUTOS DECIMAIS - "2,32", nao "2:19". O campo da tela aceita as
+  // duas formas (ver public/kpi-tempo.js), entao o modelo nao precisa
+  // converter nada: copiar o numero impresso e' o caminho mais curto e o que
+  // menos erra.
+  if (tipo === 'tempo') return ' (tempo em MINUTOS decimais - copie o número exatamente como está impresso, ex: 2,32; NÃO converta pra minuto:segundo)';
   return ' (quantidade, sem unidade/dinheiro)';
 }
 
@@ -272,6 +279,25 @@ const numeroOuNull = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v)
 // "2,05" minutos), sem forcar conversao numerica
 const textoOuNull = (v) => { const s = String(v == null ? '' : v).trim().slice(0, 200); return s || null; };
 
+// pro KPI de TEMPO: o modelo devolve os minutos decimais como o relatorio
+// imprime, e isso chega tanto como numero (2.32) quanto como string com
+// virgula ("2,32"). Normaliza pra NUMERO aqui, antes do consenso das duas
+// leituras - senao 2.32 e "2,32" seriam tratados como valores diferentes e
+// todo campo de tempo viraria "divergiu" sem ter divergido.
+const minutosOuNull = (v) => {
+  if (v == null) return null;
+  const bruto = String(v).trim();
+  if (!bruto) return null;
+  // "2:19" (se o modelo converter mesmo assim) -> 2.32 minutos
+  if (bruto.includes(':')) {
+    const partes = bruto.split(':').map((x) => parseInt(x, 10));
+    if (partes.some((x) => Number.isNaN(x))) return null;
+    return Number((partes.reduce((seg, x) => seg * 60 + x, 0) / 60).toFixed(2));
+  }
+  const n = Number(bruto.replace(',', '.'));
+  return Number.isFinite(n) && n >= 0 ? n : null;
+};
+
 // ------------------------------------------------- consenso de 2 leituras
 //
 // Regra unica: um valor so entra sozinho no formulario se as DUAS leituras o
@@ -391,8 +417,9 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
   if (fotos.length > MAX_ARQUIVOS) throw new Error(`Envie no máximo ${MAX_ARQUIVOS} fotos por leitura.`);
   const listaCanais = (Array.isArray(canais) ? canais : []).map((c) => ({ ...c, secao: 'canal' }));
   const listaFormas = (Array.isArray(formas) ? formas : []).map((c) => ({ ...c, secao: 'forma' }));
-  // so os KPI's numericos (quantidade/moeda/kg) chegam aqui - tempo/texto/
-  // arquivo ja saem filtrados de index.js, antes de chamar essa funcao
+  // KPI de arquivo ja sai filtrado de index.js, antes de chamar essa funcao
+  // (arquivo nao e' leitura de valor, e' upload de anexo). Tempo entra: o
+  // relatorio imprime em minutos decimais e o campo da tela aceita isso
   const listaKpis = (Array.isArray(kpis) ? kpis : []).map((c) => ({ ...c, secao: 'kpi' }));
   const todos = [...listaCanais, ...listaFormas, ...listaKpis];
   if (!todos.length) {
@@ -480,7 +507,10 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
     if (!def) return;
     // KPI "texto livre" aceita a resposta como string (ex: "2,05") - os
     // outros (canal/forma/kpi numerico) continuam exigindo numero de verdade
-    const valor = (def.secao === 'kpi' && def.tipo === 'texto') ? textoOuNull(c && c.valor) : numeroOuNull(c && c.valor);
+    let valor;
+    if (def.secao === 'kpi' && def.tipo === 'texto') valor = textoOuNull(c && c.valor);
+    else if (def.secao === 'kpi' && def.tipo === 'tempo') valor = minutosOuNull(c && c.valor);
+    else valor = numeroOuNull(c && c.valor);
     if (valor == null || vistos.has(chave)) return;
     vistos.add(chave);
     const textoOrigem = c.textoOrigem ? String(c.textoOrigem).slice(0, 80) : null;
@@ -563,4 +593,4 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
   }
 }
 
-module.exports = { ativo, lerCanais, extrairJson, rotuloBateComOrigem, normalizarTexto, conferirSomas, valorDeTaxaEmCampoDeContagem, reconciliarLeituras, desempatar };
+module.exports = { ativo, lerCanais, extrairJson, rotuloBateComOrigem, normalizarTexto, conferirSomas, valorDeTaxaEmCampoDeContagem, reconciliarLeituras, desempatar, minutosOuNull, unidadeHintKpi };

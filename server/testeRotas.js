@@ -2454,6 +2454,82 @@ setTimeout(async () => {
   console.log(`${okComprimeFotoRelatorio ? '✓' : '✗'} Foto do relatório: reduzida no navegador ANTES de subir (upload mais rápido, mesma leitura)`);
 
   // ------------------------------------------------------------------
+  // MASTER DIGITA SEM ESPERAR A LEITURA. Pedido do Master: "como master eu
+  // tenho que poder digitar evitando estar escaneando". No modo automático
+  // (grupo com leitura por foto ligada) os campos de Canais/Formas/KPI's
+  // nascem readonly e só a foto os preenche - o que prendia o Master quando
+  // não havia foto à mão, ou quando a câmera não pegava o relatório.
+  //
+  // A trava continua valendo pra LOJA (é ela que não deve reescrever o
+  // relatório do PDV). O Master já edita fechamento lançado pela Central,
+  // então travá-lo no formulário só atrasava o mesmo resultado.
+  let okMasterDigitaSemLeitura = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'lancamento.html'), 'utf8');
+    const iCanais = html.indexOf('function renderExtrasGrupo(');
+    const blocoCanais = html.slice(iCanais, iCanais + 2000);
+    const iKpi = html.indexOf('function renderKpisExtras(');
+    const blocoKpi = html.slice(iKpi, iKpi + 2000);
+    const iLeitura = html.indexOf('async function realizarLeituraRelatorio(');
+    const blocoLeitura = html.slice(iLeitura, iLeitura + 4000);
+    const conferencias = {
+      'Canais/Formas: o travamento exclui o Master': /const travar = \(k\) => automatico && !IS_MASTER && k\.manual !== true;/.test(blocoCanais),
+      "KPI's extras: o travamento exclui o Master": /const travar = \(k\) => automatico && !IS_MASTER && kpiOcrElegivel\(k\) && k\.manual !== true;/.test(blocoKpi),
+      'depois da leitura o campo NÃO é retravado pro Master': /if\(!IS_MASTER\)\{[\s\S]{0,160}el\.readOnly = true;[\s\S]{0,120}campo-automatico/.test(blocoLeitura),
+      'a foto continua PREENCHENDO o campo do Master (só não trava)': /el\.value = it\.valor;/.test(blocoLeitura),
+      'a tela avisa o Master que nada fica travado': /🔓 Master: a leitura da foto preenche os campos, mas nenhum fica travado/.test(html),
+      'a trava continua existindo pra loja (o aviso de cadeado não sumiu)': /🔒 Os campos com fundo cinza vêm da foto do relatório e não são digitados/.test(html),
+      'IS_MASTER é definido no boot, antes de qualquer campo ser montado':
+        html.indexOf('IS_MASTER = isMaster;') > 0 && html.indexOf('IS_MASTER = isMaster;') < html.indexOf('boot();'),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okMasterDigitaSemLeitura = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okMasterDigitaSemLeitura = false; console.log('  erro: ' + e.message); }
+  if (!okMasterDigitaSemLeitura) ruins += 1;
+  console.log(`${okMasterDigitaSemLeitura ? '✓' : '✗'} Lançamento: Master digita em qualquer campo sem esperar a leitura da foto (a trava continua pra loja)`);
+
+  // ------------------------------------------------------------------
+  // OS INDICADORES DE TEMPO PASSAM A SER LIDOS DA FOTO. Master: "os dados de
+  // LEG TIME, RUN TIME, AVG DELIVERY TIME (CALC), TEMPO DE ATENDIMENTO,
+  // TEMPO DE PRODUCAO, TEMPO DE ESPERA, MEDIA SAIDA DE LOJA OTD ele nao ler".
+  //
+  // Não era falha de leitura: KPI do tipo Tempo era excluído da lista mandada
+  // ao modelo, dos dois lados. O motivo era o campo da tela só aceitar mm:ss -
+  // formato rígido demais pra exigir do modelo. Isso mudou quando o campo
+  // passou a aceitar minutos decimais ("9,66", ver public/kpi-tempo.js), que é
+  // EXATAMENTE como o relatório do PDV imprime esses indicadores. Agora o
+  // modelo só copia o número impresso e a tela converte pra segundos, igual a
+  // quem digita à mão.
+  let okTempoNaLeitura = false;
+  try {
+    const ocr = require('./canaisVendaOcr.js');
+    const srcIndex = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const htmlLanc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'lancamento.html'), 'utf8');
+    const iFill = htmlLanc.indexOf('el.value = it.valor;');
+    const conferencias = {
+      'o servidor manda os KPI de tempo pro modelo': /\['quantidade', 'moeda', 'kg', 'texto', 'tempo'\]\.includes\(k\.tipo \|\| 'quantidade'\)/.test(srcIndex),
+      'arquivo continua FORA da leitura (é upload, não valor)': !/'arquivo'\]\.includes\(k\.tipo/.test(srcIndex),
+      'a tela também considera tempo elegível': /\['quantidade','moeda','kg','texto','tempo'\]\.includes\(k\.tipo\|\|'quantidade'\)/.test(htmlLanc),
+      'o modelo é instruído a copiar minutos decimais, sem converter':
+        /MINUTOS decimais/.test(ocr.unidadeHintKpi('tempo')) && /NÃO converta/.test(ocr.unidadeHintKpi('tempo')),
+      'vírgula do relatório vira número (2,32 → 2.32)': ocr.minutosOuNull('2,32') === 2.32,
+      'número puro passa igual (2.32)': ocr.minutosOuNull(2.32) === 2.32,
+      'se o modelo converter mesmo assim, mm:ss vira minutos (2:19 → 2.32)': ocr.minutosOuNull('2:19') === 2.32,
+      'vazio/lixo/negativo não viram valor': ocr.minutosOuNull('') === null && ocr.minutosOuNull('abc') === null
+        && ocr.minutosOuNull('-3') === null && ocr.minutosOuNull(null) === null,
+      'zero continua sendo zero (não vira "não leu")': ocr.minutosOuNull('0') === 0,
+      'preencher pela foto dispara o input, pra a conferência do campo de tempo atualizar':
+        iFill > 0 && /el\.dispatchEvent\(new Event\('input', \{ bubbles: true \}\)\);/.test(htmlLanc.slice(iFill, iFill + 700)),
+    };
+    const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
+    okTempoNaLeitura = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okTempoNaLeitura = false; console.log('  erro: ' + e.message); }
+  if (!okTempoNaLeitura) ruins += 1;
+  console.log(`${okTempoNaLeitura ? '✓' : '✗'} Foto do relatório: indicadores de tempo (Leg Time, Run Time, ADT, OTD...) entram na leitura em minutos decimais`);
+
+  // ------------------------------------------------------------------
   // Gravar do Bravo tem que RECONCILIAR, nao "inserir se nao existir". As
   // primeiras importacoes (antes das correcoes de ordem de aba, timeout e
   // mescla) deixaram dias gravados pela metade; numa segunda passada esses
