@@ -6857,9 +6857,13 @@ setTimeout(async () => {
       entradaDinheiro: 335, faturamento: 5000, totalSaida: 0, detalhesSaidas: [],
     };
 
+    // papeis conforme a decisao do Master (2026-08-27): a planilha por loja
+    // ("Copia para Claude") e' a VERDADE e MANDA no empate; a BD so preenche
+    // o que ela nao tem. A auditoria completa (806 dias-loja) achou 27 dias
+    // em que a BD divergia - em todos, o certo era a planilha por loja.
     const fontes = [
-      { principal: true, brutos: [naBD, fechamentoNaBD, sangriaNaBD] },
-      { principal: false, brutos: [noHistorico, soNoHistorico] },
+      { principal: false, brutos: [naBD, fechamentoNaBD, sangriaNaBD] },
+      { principal: true, brutos: [noHistorico, soNoHistorico] },
     ];
     const dedup = sheets.deduplicarEntreFontes(fontes);
     const mesclado = sheets.mesclarLancamentosDoMesmoDia(dedup);
@@ -6888,8 +6892,14 @@ setTimeout(async () => {
         !!carrao0208 && Math.round(carrao0208.entradaDinheiro * 100) === 33500
         && Math.round(carrao0208.totalSaida * 100) === 40500
         && (carrao0208.detalhesSaidas || []).length === 1,
-      'a aba BD é a fonte principal declarada (é ela que manda no empate)':
-        /aba: SHEET_ABA_ARCFOOD, principal: true/.test(srcSync),
+      'a planilha por loja é a fonte principal declarada (decisão do Master: segui-la FIELMENTE)':
+        /SHEET_ID_ARCFOOD_HISTORICO, aba, principal: true/.test(srcSync)
+        && !/aba: SHEET_ABA_ARCFOOD, principal: true/.test(srcSync),
+      'data que não existe no calendário (31/04) é descartada, não vira fechamento fantasma':
+        sheets.parseDataArcfood('31/04/2026') === null
+        && sheets.parseDataArcfood('30/04/2026') === '2026-04-30'
+        && sheets.parseDataArcfood('29/02/2025') === null
+        && sheets.parseDataArcfood('29/02/2024') === '2024-02-29',
       'a sincronização deduplica ANTES de mesclar (senão a soma já veio dobrada)':
         /mesclarLancamentosDoMesmoDia\(deduplicarEntreFontes\(porFonte\)\)/.test(srcSync),
     };

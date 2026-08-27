@@ -48,13 +48,19 @@ const SHEET_ID_ARCFOOD_HISTORICO = process.env.SHEET_ID_ARCFOOD_HISTORICO || '1F
 const SHEET_ID_BRAVO = process.env.SHEET_ID_BRAVO || '1dObCSsx4BYDGSQG81KLIOtFSNNs18mVOD5GfYzRIZcM';
 const ARCFOOD_ABAS_HISTORICO = ['MOOCA', 'TATUAPE', 'CARRAO', 'SMIGUEL'];
 
-// `principal: true` marca a fonte que MANDA quando o mesmo dia aparece em mais
-// de uma: a aba BD e' a planilha viva (e' nela que o AppSheet lanca e que o app
-// grava de volta). As 4 abas de historico entram so pra trazer o dia que a BD
-// nao tem - ver deduplicarEntreFontes.
+// `principal: true` marca a fonte que MANDA quando o mesmo dia aparece em
+// mais de uma (ver deduplicarEntreFontes).
+//
+// DECISAO DO MASTER (2026-08-27): a planilha por loja (MOOCA/TATUAPE/CARRAO/
+// SMIGUEL) e' a VERDADE - "use os dados dessa planilha FIELMENTE". A
+// auditoria completa achou 27 dias em que a aba BD divergia dela (faturamento
+// dobrado em Carrao no comeco de abril, itens de saida a mais em Sao Miguel):
+// em todos, o numero certo era o da planilha por loja. Por isso ELA e' a
+// principal; a aba BD (viva, onde o AppSheet lanca) so preenche os dias que a
+// planilha por loja nao tem - inclusive todos os dias novos daqui pra frente.
 const PLANILHAS = [
-  { grupo: 'ARCFOOD', id: SHEET_ID_ARCFOOD, aba: SHEET_ABA_ARCFOOD, principal: true },
-  ...ARCFOOD_ABAS_HISTORICO.map((aba) => ({ grupo: 'ARCFOOD', id: SHEET_ID_ARCFOOD_HISTORICO, aba })),
+  { grupo: 'ARCFOOD', id: SHEET_ID_ARCFOOD, aba: SHEET_ABA_ARCFOOD },
+  ...ARCFOOD_ABAS_HISTORICO.map((aba) => ({ grupo: 'ARCFOOD', id: SHEET_ID_ARCFOOD_HISTORICO, aba, principal: true })),
 ];
 
 // mesmas unidades usadas no resto do app (fechamentos.html/lancamento.html) -
@@ -116,6 +122,15 @@ const MESES_PT = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 
 // ja reorganizadas, sem coluna "Mes"): "Data" já vem completa ("31/08/2026")
 // - tenta esse formato primeiro, cai pro antigo (dataStr+mesStr) se a Data
 // não tiver o ano.
+// data que nao existe no calendario (31/04, 30/02...) devolve null e a linha
+// e' descartada: a BD ja teve um "31/04/2026" digitado que virava fechamento
+// fantasma. new Date normaliza (31/04 -> 01/05), entao a checagem e' de
+// round-trip: so passa se o ISO montado for um dia de verdade.
+function dataValida(iso) {
+  const d = new Date(iso + 'T00:00:00Z');
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso;
+}
+
 function parseDataArcfood(dataStr, mesStr) {
   const partes = String(dataStr || '').split('/');
   if (partes.length === 3) {
@@ -124,13 +139,15 @@ function parseDataArcfood(dataStr, mesStr) {
     const mes = parseInt(mm, 10);
     if (dia && mes && anoRaw) {
       const ano = anoRaw.length === 2 ? '20' + anoRaw : anoRaw;
-      return `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+      const iso = `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+      return dataValida(iso) ? iso : null;
     }
   }
   const dia = parseInt(partes[0], 10);
   const m = String(mesStr || '').toLowerCase().match(/([a-z]{3})\.?\/(\d{4})/);
   if (!dia || !m || !MESES_PT[m[1]]) return null;
-  return `${m[2]}-${String(MESES_PT[m[1]]).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+  const iso = `${m[2]}-${String(MESES_PT[m[1]]).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+  return dataValida(iso) ? iso : null;
 }
 
 // planilha Grupo Bravo: coluna "Data" ja vem completa ("01/08/26")
