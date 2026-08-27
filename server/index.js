@@ -7958,6 +7958,50 @@ app.get('/api/saidas-painel', requireAnySection('lancamento', 'sangria'), async 
   res.json({ itens, entradas: saidasPainel.filtrar(entradas, { unidades: unidadesSet, grupo, inicio, fim }) });
 });
 
+// Editar (ou zerar, que e' o "excluir" da tela) a ENTRADA em dinheiro de um
+// dia. Pedido do Master: "como master e ADMIN precisamos ter como editar a
+// entrada de dinheiro e editar a sangria tambem ... nao so poder editar como
+// excluir tambem".
+//
+// Uma rota so pros DOIS caminhos, porque a tela nao tem como saber de onde
+// veio o fechamento (e nao deveria precisar saber):
+//   - lancado no app  -> edita o proprio documento (editarDireto), que ja
+//     recomputa faturamento/total declarado/diferenca por tabela;
+//   - vindo da planilha -> nao ha documento pra editar, entao a correcao mora
+//     ao lado e a leitura aplica por cima (corrigirEntradaPlanilha).
+//
+// Excluir = valor 0. NAO apaga o fechamento: o dia continua com faturamento,
+// saidas e o resto - some so a entrada em dinheiro, que e' o que o card
+// representa. Apagar o lancamento inteiro tem caminho proprio, com backup.
+app.patch('/api/saidas-painel/entrada', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    const { fechamentoId, valor, motivo } = req.body || {};
+    if (!fechamentoId) return res.status(400).json({ error: 'Informe o lançamento.' });
+    const v = Number(valor);
+    if (!Number.isFinite(v) || v < 0) return res.status(400).json({ error: 'Informe um valor válido para a entrada.' });
+
+    const noApp = await fechamentosLive.getOne(fechamentoId);
+    if (noApp) {
+      const registro = await fechamentosLive.editarDireto({
+        fechamentoId,
+        mudancas: { entradaDinheiro: v },
+        motivo: motivo || 'Entrada em dinheiro ajustada pelo Painel de Saídas',
+        editadoPorEmail: req.user.email,
+      });
+      broadcast('fechamento-editado-direto', registro, 'lancamento');
+      broadcast('fechamento-editado-direto', registro, 'fechamentos');
+      return res.json({ ok: true, origem: 'app', entradaDinheiro: v });
+    }
+    const registro = await saidasPainel.corrigirEntradaPlanilha(fechamentoId,
+      { valor: v, porId: req.user.id, porEmail: req.user.email }, fechamentosData);
+    broadcast('saida-verificada', registro, 'lancamento');
+    broadcast('saida-verificada', registro, 'sangria');
+    res.json({ ok: true, origem: 'planilha', entradaDinheiro: v });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.patch('/api/saidas-painel/verificar', auth.requireMasterOrAdmin, async (req, res) => {
   try {
     const { chave, verificada } = req.body;
