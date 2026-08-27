@@ -698,7 +698,12 @@ function somaExtrasComSinal(classe, defs, { soCruzado } = {}){
 // aceita mm:ss). Tempo (mm:ss) e arquivo continuam sempre digitados/
 // anexados na mao - mm:ss exigiria o modelo acertar um formato rigido, e
 // arquivo nem e leitura de valor
-function kpiOcrElegivel(k){ return ['quantidade','moeda','kg','texto'].includes(k.tipo||'quantidade'); }
+// Tempo entra na leitura: o relatório imprime em minutos decimais ("2,32") e
+// este campo aceita exatamente isso (ver public/kpi-tempo.js) - é o formato
+// dos indicadores Leg Time, Run Time, Avg Delivery Time, Tempo de
+// Atendimento/Produção/Espera e Saída de Loja (OTD). Arquivo fica de fora:
+// não é leitura de valor, é upload de anexo.
+function kpiOcrElegivel(k){ return ['quantidade','moeda','kg','texto','tempo'].includes(k.tipo||'quantidade'); }
 function renderKpisExtras(unidade){
   const grupo = grupoKpiDaUnidade(unidade);
   const campos = grupo ? (grupo.kpisExtras||[]) : [];
@@ -979,6 +984,12 @@ async function realizarLeituraRelatorio(){
         zerados++; return;
       }
       el.value = it.valor;
+      // campo de tempo mostra ao lado o que entendeu ("= 2:19 (min:seg)") e
+      // valida o formato - mas isso está preso ao evento 'input', que não
+      // dispara quando o valor entra por código. Sem isso a leitura enchia o
+      // campo e a conferência ficava em branco, justo no indicador em que o
+      // formato é a dúvida.
+      el.dispatchEvent(new Event('input', { bubbles: true }));
       el.style.borderColor = 'var(--ok)'; // marca o que veio da foto, pra conferir
       if(it.secao === 'forma') formasOk++; else if(it.secao === 'kpi') kpisOk++; else canaisOk++;
     });

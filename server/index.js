@@ -5075,12 +5075,18 @@ app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRela
     // modelo a chance de casar uma linha qualquer com ele
     const paraLeitura = (lista) => (lista || []).filter((c) => c.manual !== true).map((c) => ({ campo: c.campo, label: c.label, tipo: c.tipo }));
     // KPI entra na leitura quando o valor cabe numa resposta simples: numero
-    // (quantidade/moeda/kg) OU texto solto (ex: "2,05" - metrica de tempo em
-    // minutos DECIMAL que o Master cadastrou como "Texto Livre" porque o
-    // tipo "Tempo" da tela so aceita mm:ss). Tempo (mm:ss) e arquivo ficam de
-    // fora: mm:ss exigiria o modelo acertar um formato rigido, e arquivo nem
-    // e leitura de valor (e upload de anexo)
-    const kpisOcrElegiveis = (grupo.kpisExtras || []).filter((k) => ['quantidade', 'moeda', 'kg', 'texto'].includes(k.tipo || 'quantidade'));
+    // (quantidade/moeda/kg), texto solto, ou TEMPO em minutos decimais.
+    //
+    // Tempo ficava de fora porque o campo da tela so aceitava mm:ss, e exigir
+    // esse formato rigido do modelo era pedir erro. Nao e' mais o caso: o
+    // campo aceita "9,66" (minutos decimais) desde public/kpi-tempo.js, que e'
+    // exatamente como o relatorio do PDV imprime Leg Time, Run Time, Avg
+    // Delivery Time, Tempo de Atendimento/Producao/Espera e Saida de Loja
+    // OTD. O modelo copia o numero impresso e a tela converte pra segundos,
+    // igualzinho ao que acontece quando alguem digita a mao.
+    //
+    // Arquivo continua de fora: nao e' leitura de valor, e upload de anexo.
+    const kpisOcrElegiveis = (grupo.kpisExtras || []).filter((k) => ['quantidade', 'moeda', 'kg', 'texto', 'tempo'].includes(k.tipo || 'quantidade'));
     // a dica e escrita pelo Master no cadastro do grupo: cada PDV imprime de
     // um jeito (ordem das linhas, coluna que vale) e isso nao cabe no codigo
     // sem virar um "if" por bandeira
