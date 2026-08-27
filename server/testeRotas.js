@@ -6705,31 +6705,51 @@ setTimeout(async () => {
     const bcrypt = require('bcryptjs');
     const senhaHash = bcrypt.hashSync('SenhaDeTeste!2026', 4);
 
-    // o MESMO dia pelas duas fontes - e' o caso que duplicava a linha:
-    // o Firestore recusa dois lancamentos na mesma unidade+data, mas o
-    // snapshot da planilha ARCFOOD e' fonte independente e nao sabe o que
-    // ja foi lancado no app. (Sobre o require do snapshot devolver o MESMO
-    // array que o index.js segura: ver o bloco de correcao de saida da
-    // planilha, mais abaixo.)
+    // O MESMO fechamento nas DUAS fontes: a loja lanca no app e o Master manda
+    // esse mesmo fechamento pra planilha (enviarFechamentoPlanilha), que a
+    // sincronizacao le de volta pro snapshot. E' um lancamento so - somar
+    // dobrava a entrada do dia e listava a mesma saida duas vezes. Foi
+    // exatamente o que o Master viu em producao: "01/08 consta como 524 porem
+    // foi metade" (a planilha tem 262,00 numa linha unica pra Sao Miguel).
+    // (Sobre o require do snapshot devolver o MESMO array que o index.js
+    // segura: ver o bloco de correcao de saida da planilha, mais abaixo.)
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_ENTRADA_DIA', unidadeNome: 'Loja Entrada Dia', grupo: 'ARCFOOD', data: '2026-10-05',
       campos: { entradaDinheiro: 300 }, detalhesSaidas: [{ descricao: 'Saída do dia 05', valor: 40 }],
     }, cabMaster);
     require('./fechamentos-snapshot.json').push({
       id: 'pl-entrada-dia-05', grupo: 'ARCFOOD', unidade: 'TESTE_ENTRADA_DIA', unidadeNome: 'Loja Entrada Dia',
-      data: '2026-10-05', faturamento: 800, entradaDinheiro: 120.5, gerente: 'gerente@planilha',
+      data: '2026-10-05', faturamento: 800, entradaDinheiro: 300, gerente: 'gerente@planilha',
+      detalhesSaidas: [{ descricao: 'Saída do dia 05', valor: 40 }],
     });
+    // dia que existe SO na planilha, com DUAS linhas (e' assim que a ARCFOOD
+    // lanca: o fechamento e, separada, a linha da sangria do dia) - essas
+    // somam, porque sao dois lancamentos de verdade na MESMA fonte
+    require('./fechamentos-snapshot.json').push(
+      {
+        id: 'pl-entrada-dia-07a', grupo: 'ARCFOOD', unidade: 'TESTE_ENTRADA_DIA', unidadeNome: 'Loja Entrada Dia',
+        data: '2026-10-07', faturamento: 900, entradaDinheiro: 80, gerente: 'gerente@planilha',
+      },
+      {
+        id: 'pl-entrada-dia-07b', grupo: 'ARCFOOD', unidade: 'TESTE_ENTRADA_DIA', unidadeNome: 'Loja Entrada Dia',
+        data: '2026-10-07', faturamento: 0, entradaDinheiro: 20, gerente: 'gerente@planilha SangriaX',
+      },
+    );
     // outro dia da mesma loja - tem que continuar sendo linha separada
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_ENTRADA_DIA', unidadeNome: 'Loja Entrada Dia', grupo: 'ARCFOOD', data: '2026-10-06',
       campos: { entradaDinheiro: 90 },
     }, cabMaster);
 
-    const periodo = 'inicio=2026-10-05&fim=2026-10-06';
+    const periodo = 'inicio=2026-10-05&fim=2026-10-07';
     const resp = JSON.parse((await pedir(`/api/saidas-painel?${periodo}`, cabMaster)).corpo);
     const daLoja = (resp.entradas || []).filter((e) => e.unidade === 'TESTE_ENTRADA_DIA');
     const dia05 = daLoja.filter((e) => e.data === '2026-10-05');
     const dia06 = daLoja.filter((e) => e.data === '2026-10-06');
+    const dia07 = daLoja.filter((e) => e.data === '2026-10-07');
+    // a saida do 05 tambem existe nas duas fontes - nao pode virar 2 cards
+    const saidasDo05 = (resp.itens || [])
+      .filter((it) => it.unidade === 'TESTE_ENTRADA_DIA' && it.data === '2026-10-05');
 
     // o total NAO pode mudar por causa da agregacao - e' o mesmo numero do
     // KPI de Entrada, que a tela calcula em cima deste array
@@ -6759,16 +6779,21 @@ setTimeout(async () => {
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'saidas.html'), 'utf8');
 
     const conf = {
-      'o mesmo dia vindo do app E da planilha vira UMA linha (não duplica o dia na coluna)': dia05.length === 1,
-      'a linha do dia soma as duas fontes (300 no app + 120,50 na planilha = 420,50)': dia05.length === 1 && Math.round(dia05[0].valor * 100) === 42050,
-      'a linha diz quantos lançamentos entraram nela (pra ninguém achar que faltou um)': dia05.length === 1 && dia05[0].lancamentos === 2,
-      'dia seguinte continua sendo linha própria, com 1 lançamento': dia06.length === 1 && Math.round(dia06[0].valor * 100) === 9000 && dia06[0].lancamentos === 1,
-      'agregar não muda o total (o KPI de Entrada continua batendo)': totalCru === totalAgregado && totalCru === 51050,
-      'a coluna vem mais recente primeiro, igual às saídas': daLoja.length === 2 && daLoja[0].data === '2026-10-06',
-      'o CSV exporta a entrada como linha própria, com Origem "Entrada de dinheiro"': csvMaster.status === 200 && linhasEntradaMaster.length === 2,
+      'o mesmo fechamento no app E na planilha vira UMA linha (não duplica o dia na coluna)': dia05.length === 1,
+      'e NÃO soma as duas fontes: 300 lançado no app continua 300, não 600 (bug do "01/08 = 524")':
+        dia05.length === 1 && Math.round(dia05[0].valor * 100) === 30000 && dia05[0].lancamentos === 1,
+      'a mesma saída avulsa nas duas fontes também não vira 2 cards no painel': saidasDo05.length === 1,
+      'dois lançamentos de verdade na MESMA fonte (fechamento + sangria da planilha) continuam somando':
+        dia07.length === 1 && Math.round(dia07[0].valor * 100) === 10000 && dia07[0].lancamentos === 2,
+      'dia só do app continua sendo linha própria, com 1 lançamento': dia06.length === 1 && Math.round(dia06[0].valor * 100) === 9000 && dia06[0].lancamentos === 1,
+      'agregar não muda o total (o KPI de Entrada continua batendo)': totalCru === totalAgregado && totalCru === 49000,
+      'a coluna vem mais recente primeiro, igual às saídas': daLoja.length === 3 && daLoja[0].data === '2026-10-07',
+      'o CSV exporta a entrada como linha própria, com Origem "Entrada de dinheiro"': csvMaster.status === 200 && linhasEntradaMaster.length === 3,
       'no CSV o dia com 2 lançamentos diz isso na Descrição': linhasEntradaMaster.some((l) => /2 lançamentos/.test(l)),
+      'no CSV o dia que veio das duas fontes NÃO diz "2 lançamentos" (é um lançamento só)':
+        linhasEntradaMaster.filter((l) => /2 lançamentos/.test(l)).length === 1,
       'entrada não entra na conferência: sai "—" no Verificada, não um "Não" que sugeriria pendência':
-        linhasEntradaMaster.length === 2 && linhasEntradaMaster.every((l) => /,—,—$/.test(l)),
+        linhasEntradaMaster.length === 3 && linhasEntradaMaster.every((l) => /,—,—$/.test(l)),
       'as saídas continuam no MESMO relatório (a entrada não substituiu nada)': /Saída avulsa/.test(csvMaster.corpo),
       'gate no relatório: loja com a unidade exporta as saídas dela mas NENHUMA entrada':
         csvLoja.status === 200 && /Saída do dia 05/.test(csvLoja.corpo) && !/Entrada de dinheiro/.test(csvLoja.corpo),
