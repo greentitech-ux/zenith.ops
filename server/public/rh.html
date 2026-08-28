@@ -744,6 +744,29 @@ async function mesclarUnidadesExtras(){
   try{ Object.assign(UNIDADES_NOMES, await (await fetch('/api/meta/unidades-extras')).json()); }catch(e){}
 }
 
+// Dois CÓDIGOS diferentes com o MESMO nome aparecem como duas linhas
+// idênticas no seletor - foi o "Dom Bessa" três vezes que o Master viu.
+// O servidor agora impede que nasça duplicata nova (ver unidades.js), mas
+// as que já existem continuam aí, e o código é identidade: fundir na tela
+// esconderia o problema e ainda faria o cadastro novo cair num código só,
+// deixando os registros do outro fora de qualquer filtro.
+//
+// Então aqui a tela para de MENTIR: quando o nome se repete, o código vai
+// junto. Continua dando pra escolher - e agora dá pra saber qual é qual.
+function nomesRepetidosDeUnidade(){
+  const vistos = new Map();
+  Object.values(UNIDADES_NOMES).forEach((n)=>{
+    const chave = String(n||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+    vistos.set(chave, (vistos.get(chave)||0) + 1);
+  });
+  return vistos;
+}
+function rotuloUnidade(codigo){
+  const nome = UNIDADES_NOMES[codigo] || codigo;
+  const chave = String(nome).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+  return (nomesRepetidosDeUnidade().get(chave) || 0) > 1 ? `${nome} · ${codigo}` : nome;
+}
+
 let ME = null;
 let IS_MASTER = false;
 let IS_ADMIN = false;
@@ -2251,7 +2274,7 @@ function abrirEditar(id){
   const selUn = document.getElementById('ed-unidade');
   const codigos = Object.keys(UNIDADES_NOMES);
   if(f.unidade && !codigos.includes(f.unidade)) codigos.unshift(f.unidade);
-  selUn.innerHTML = codigos.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('');
+  selUn.innerHTML = codigos.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(rotuloUnidade(u))}</option>`).join('');
   selUn.value = f.unidade || '';
   document.getElementById('ed-nome').value = f.nome||'';
   document.getElementById('ed-contato').value = f.contato||'';
@@ -2587,7 +2610,7 @@ async function boot(){
   // backend (podeAcessarUnidadeRh em index.js), pra dar pro time de RH
   // acesso a todas as unidades do grupo direto no cadastro
   const unidades = (isMaster || ME.isAdmin || ME.podeRhTodasUnidades) ? Object.keys(UNIDADES_NOMES) : (ME.permissions?.unidades||[]).filter(u=>UNIDADES_NOMES[u]);
-  const optsUnidades = unidades.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('');
+  const optsUnidades = unidades.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(rotuloUnidade(u))}</option>`).join('');
   document.getElementById('c-unidade').innerHTML = optsUnidades || '<option value="" disabled selected>nenhuma unidade liberada</option>';
   document.getElementById('co-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);
   document.getElementById('ex-filtro-unidade').insertAdjacentHTML('beforeend', optsUnidades);

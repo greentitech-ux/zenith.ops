@@ -9735,6 +9735,74 @@ setTimeout(async () => {
   if (!okNomePdf) ruins += 1;
   console.log(`${okNomePdf ? '✓' : '✗'} Formulários: PDF sai com tipo/unidade/beneficiário/data/hora/Ticket no nome, e os anexos somam em vez de trocar`);
 
+  // ------------------------------------------------------------------
+  // Pedido do Master: "preciso que seja resolvido em definitivo essa
+  // situacao de ter varios nomess da unidade" - o seletor do RH mostrava
+  // "Dom Bessa" três vezes. O guard de CÓDIGO nunca pegou isso: os códigos
+  // eram diferentes, o que se repetia era o rótulo.
+  let okUnidadeDup = false;
+  try {
+    const fsU = require('fs');
+    const pathU = require('path');
+    const uni = require('./unidades');
+    const htmlRh = fsU.readFileSync(pathU.join(__dirname, 'public', 'rh.html'), 'utf8');
+    const fixas = { 'Dominos Bessa': 'Dom Bessa', 'Dominos Caruaru': 'Dom Caruaru' };
+    const nomesFixos = new Set(Object.values(fixas).map(uni.nomeNormalizado));
+
+    // (1) nome igual ao de uma unidade FIXA é recusado
+    let barrouFixa = false;
+    try { await uni.criar({ codigo: 'Dom_Caruaru_2', nome: 'Dom Caruaru', porEmail: 'm@t' }, new Set(), nomesFixos); }
+    catch (e) { barrouFixa = /Já existe uma unidade chamada/i.test(e.message); }
+
+    // (2) nome igual ao de outra CADASTRADA é recusado - inclusive com
+    // acento/caixa diferente, que é como a duplicata entra sem ninguém ver
+    await uni.criar({ codigo: 'UNI_DUP_A', nome: 'Loja Teste Dup', porEmail: 'm@t' }, new Set(), nomesFixos);
+    let barrouExtra = false;
+    try { await uni.criar({ codigo: 'UNI_DUP_B', nome: '  lója  teste dup ', porEmail: 'm@t' }, new Set(), nomesFixos); }
+    catch (e) { barrouExtra = /Já existe uma unidade cadastrada com o nome/i.test(e.message); }
+
+    // (3) e a renomeação não pode ser a porta dos fundos
+    const outra = await uni.criar({ codigo: 'UNI_DUP_C', nome: 'Outra Loja Teste', porEmail: 'm@t' }, new Set(), nomesFixos);
+    let barrouRename = false;
+    try { await uni.atualizar(outra.id, { nome: 'Loja Teste Dup' }, nomesFixos); }
+    catch (e) { barrouRename = /Já existe outra unidade com o nome/i.test(e.message); }
+    // renomear pra um nome livre continua funcionando
+    const renomeouOk = (await uni.atualizar(outra.id, { nome: 'Outra Loja Teste 2' }, nomesFixos)).nome === 'Outra Loja Teste 2';
+
+    // (4) o diagnóstico enxerga a duplicata que JÁ existe (fixa + cadastrada)
+    await uni.criar({ codigo: 'DOM_BESSA_ANTIGO', nome: 'Dom Bessa', porEmail: 'm@t' }, new Set(), null);
+    const dup = await uni.diagnosticarNomesRepetidos(fixas);
+    const grupoBessa = dup.find((g) => uni.nomeNormalizado(g.nome) === 'dom bessa') || { codigos: [] };
+
+    const conf = {
+      'nome igual ao de uma unidade fixa é recusado': barrouFixa,
+      'nome igual (com acento/caixa diferente) ao de outra cadastrada é recusado': barrouExtra,
+      'renomear pra um nome já usado é recusado': barrouRename,
+      'renomear pra um nome livre continua funcionando': renomeouOk,
+      // o Master precisa VER as que já existem pra decidir qual apagar -
+      // fundir sozinho seria migração sobre dado antigo (CLAUDE.md §1)
+      'o diagnóstico acha o nome repetido entre fixa e cadastrada':
+        grupoBessa.codigos.length === 2
+        && grupoBessa.codigos.some((c) => c.origem === 'fixa')
+        && grupoBessa.codigos.some((c) => c.origem === 'cadastrada'),
+      'nome que aparece uma vez só NÃO entra no diagnóstico':
+        !dup.some((g) => uni.nomeNormalizado(g.nome) === 'outra loja teste 2'),
+      'a rota de diagnóstico existe e é Master':
+        /app\.get\('\/api\/meta\/unidades-duplicadas', auth\.requireMaster/.test(
+          fsU.readFileSync(pathU.join(__dirname, 'index.js'), 'utf8')),
+      // e a tela para de mostrar duas linhas iguais sem jeito de diferenciar
+      'o seletor do RH mostra o código quando o nome se repete':
+        /function rotuloUnidade\(codigo\)/.test(htmlRh)
+        && /\$\{nome\} · \$\{codigo\}/.test(htmlRh)
+        && !/<option value="\$\{escapeHtml\(u\)\}">\$\{escapeHtml\(UNIDADES_NOMES\[u\]\|\|u\)\}<\/option>/.test(htmlRh),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okUnidadeDup = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okUnidadeDup = false; console.log('  erro: ' + e.message); }
+  if (!okUnidadeDup) ruins += 1;
+  console.log(`${okUnidadeDup ? '✓' : '✗'} Unidades: nome repetido é barrado no cadastro, as duplicatas antigas ficam visíveis e o seletor mostra o código pra diferenciar`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
