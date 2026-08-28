@@ -2681,6 +2681,70 @@ setTimeout(async () => {
   console.log(`${okFiltroLojaCompleto ? '✓' : '✗'} Painel de Saídas: filtro de Loja lista também a unidade que só teve entrada no período (a Mooca sumia)`);
 
   // ------------------------------------------------------------------
+  // ORDENAR A TABELA CLICANDO NO CABEÇALHO (fechamentos.html). Pedido do
+  // Master: "se eu clicar 1 vez no nome faturamento ele vai alinhar todos os
+  // fechamentos pelo maior faturamento até o menor; se eu clicar de novo ele
+  // alinha do menor para o maior; se eu clicar em qualquer nome da coluna ele
+  // passa a fazer o mesmo por ele".
+  //
+  // Este bloco não olha só o HTML: ele EXECUTA a ordenação de verdade,
+  // recortando ordenarLinhas/valorDeOrdem da página. Regex confirmaria que o
+  // código existe; só rodar confirma que ele ordena certo.
+  let okOrdenarColuna = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+    const ini = html.indexOf('function valorDeOrdem(');
+    const fim = html.indexOf('function ordenarPorColuna(');
+    const fonte = (ini > 0 && fim > ini) ? html.slice(ini, fim) : '';
+    const fabricar = new Function(`let ORDEM_TABELA = { key:null, dir:'desc' };
+      ${fonte}
+      return (ordem, rows, defs) => { ORDEM_TABELA = ordem; return ordenarLinhas(rows, defs); };`);
+    const ordenar = fabricar();
+    const defs = [
+      { key:'faturamento', label:'Faturamento', soma:d=>d.faturamento },
+      { key:'previsao', label:'Previsão (dia seguinte)', ord:d=>d.previsao },
+      { key:'gerente', label:'Responsável', ord:d=>d.gerente||'' },
+    ];
+    const linhas = [
+      { id:'b', faturamento:2000, previsao:50, gerente:'Bruna' },
+      { id:'c', faturamento:3000, previsao:null, gerente:'Carlos' },
+      { id:'a', faturamento:1000, previsao:10, gerente:'Ana' },
+    ];
+    const ids = (arr) => arr.map(x=>x.id).join('');
+    const semOrdem = ordenar({ key:null, dir:'desc' }, linhas, defs);
+    const desc = ordenar({ key:'faturamento', dir:'desc' }, linhas, defs);
+    const asc = ordenar({ key:'faturamento', dir:'asc' }, linhas, defs);
+    const prevDesc = ordenar({ key:'previsao', dir:'desc' }, linhas, defs);
+    const prevAsc = ordenar({ key:'previsao', dir:'asc' }, linhas, defs);
+    const txtDesc = ordenar({ key:'gerente', dir:'desc' }, linhas, defs);
+    const txtAsc = ordenar({ key:'gerente', dir:'asc' }, linhas, defs);
+
+    const conf = {
+      '1º clique em Faturamento: do MAIOR para o menor': ids(desc) === 'cba',
+      '2º clique em Faturamento: do MENOR para o maior': ids(asc) === 'abc',
+      'a mesma regra vale em outra coluna (Previsão), não só em Faturamento':
+        ids(prevDesc).startsWith('ba') && ids(prevAsc).startsWith('ab'),
+      'linha SEM valor fica no fim nos DOIS sentidos (não vira "a menor de todas")':
+        ids(prevDesc).endsWith('c') && ids(prevAsc).endsWith('c'),
+      'coluna de texto ordena Z→A e A→Z': ids(txtDesc) === 'cba' && ids(txtAsc) === 'abc',
+      'sem coluna escolhida a ordem original (por data) é preservada': ids(semOrdem) === ids(linhas),
+      'ordenar não altera a lista original (a tabela reordena, o dado não muda)': ids(linhas) === 'bca',
+      // amarra na tela: cabeçalho clicável, seta do sentido e a trava do arrasto
+      'o cabeçalho chama a ordenação no clique': /onclick="ordenarPorColuna\('/.test(html),
+      'a coluna ordenada mostra a seta do sentido (▼ maior→menor, ▲ menor→maior)':
+        /ORDEM_TABELA\.dir==='desc' \? ' ▼' : ' ▲'/.test(html),
+      'arrastar coluna NÃO ordena junto (o clique do fim do arrasto é ignorado)':
+        /if\(ARRASTOU_COLUNA\) return;/.test(html) && /ARRASTOU_COLUNA = true;/.test(html),
+      'o corpo da tabela usa a lista ordenada': /const linhas = ordenarLinhas\(rows, defs\);/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okOrdenarColuna = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okOrdenarColuna = false; console.log('  erro: ' + e.message); }
+  if (!okOrdenarColuna) ruins += 1;
+  console.log(`${okOrdenarColuna ? '✓' : '✗'} Fechamentos: clicar no nome da coluna ordena do maior pro menor, e de novo do menor pro maior`);
+
+  // ------------------------------------------------------------------
   // Gravar do Bravo tem que RECONCILIAR, nao "inserir se nao existir". As
   // primeiras importacoes (antes das correcoes de ordem de aba, timeout e
   // mescla) deixaram dias gravados pela metade; numa segunda passada esses
@@ -2725,7 +2789,10 @@ setTimeout(async () => {
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
     const semEspaco = html.replace(/\s+/g, ' ');
     const conferencias = {
-      'o cabeçalho vira arrastável': /class="th-move" draggable="true" data-col=/.test(semEspaco),
+      // a classe ganhou th-ord ao lado de th-move quando o cabeçalho passou a
+      // ordenar no clique (ver o bloco de ordenação mais abaixo) - o que esta
+      // asserção protege é o arrasto, que continua igual
+      'o cabeçalho vira arrastável': /class="th-move th-ord" draggable="true" data-col=/.test(semEspaco),
       'Data e Unid. seguem fora do arrasto': /const fixa = \(k\)=> k==='data' \|\| k==='unidadeNome'/.test(semEspaco),
       'soltar reordena e grava': /function soltarColunaTabela[\s\S]*?persistirColunas\(\)/.test(html),
       'a gravação é compartilhada com o seletor': (html.match(/persistirColunas\(\)/g) || []).length >= 2

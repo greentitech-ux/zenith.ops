@@ -106,6 +106,8 @@
   .legend i{display:inline-block;width:12px;height:2px;border-radius:1px;}
 
   table{border-collapse:collapse;font-size:11px;white-space:nowrap;width:100%;}
+  thead th.th-ord{cursor:pointer;user-select:none;-webkit-user-select:none;}
+  thead th.th-ord:hover{color:var(--accent);}
   thead th{text-align:left;font-family:var(--mono);font-weight:500;color:var(--muted);text-transform:uppercase;font-size:9px;letter-spacing:.02em;padding:8px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);white-space:nowrap;}
   tbody td{padding:6px 10px;border-bottom:1px solid #1a1f26;white-space:nowrap;}
   tbody tr:hover{background:var(--panel2);}
@@ -2190,6 +2192,59 @@ function ordenarPorPreferencia(itens){
   return [...fixas, ...resto];
 }
 
+// ---------- ORDENAR PELA COLUNA (clique no cabeçalho) -------------------
+// Pedido do Master: "se eu clicar 1 vez no nome faturamento ele vai alinhar
+// todos os fechamentos pelo maior faturamento até o menor; se eu clicar de
+// novo ele alinha do menor para o maior; se eu clicar em qualquer nome da
+// coluna ele passa a fazer o mesmo por ele".
+//
+// Primeiro clique = MAIOR PRIMEIRO (é o que se quer ver num painel de
+// dinheiro: quem puxou o mês pra cima ou pra baixo). Segundo clique inverte.
+// Vale pra qualquer coluna, inclusive as de texto (aí é Z→A e A→Z) e as
+// colunas dinâmicas de canal/forma de pagamento do grupo.
+//
+// A ordenação é da TELA, não do dado: não mexe no que o servidor devolveu,
+// nem nos relatórios CSV/PDF (esses seguem a ordem por data, que é a ordem
+// contábil). Some ao trocar filtro/período, como qualquer visão temporária.
+let ORDEM_TABELA = { key: null, dir: 'desc' };
+
+// valor comparável de uma célula. Coluna de dinheiro já sabe se somar
+// (`soma`), então ela é a fonte natural; as outras têm o extrator declarado
+// no próprio def (`ord`). Sem nenhum dos dois, ordena pelo texto da coluna.
+function valorDeOrdem(def, d){
+  if(typeof def.ord === 'function') return def.ord(d);
+  if(typeof def.soma === 'function') return def.soma(d);
+  return null;
+}
+function ordenarLinhas(rows, defs){
+  if(!ORDEM_TABELA.key) return rows;
+  const def = defs.find(c=>c.key===ORDEM_TABELA.key);
+  if(!def) return rows;
+  const sinal = ORDEM_TABELA.dir === 'asc' ? 1 : -1;
+  return [...rows].sort((a,b)=>{
+    const va = valorDeOrdem(def, a);
+    const vb = valorDeOrdem(def, b);
+    // vazio sempre no fim, nos dois sentidos: linha sem valor não é "a
+    // menor de todas", é linha sem dado - e ela no topo esconde o que
+    // interessa (§6: dado que não existe não vira número)
+    const va0 = va === null || va === undefined || va === '';
+    const vb0 = vb === null || vb === undefined || vb === '';
+    if(va0 && vb0) return 0;
+    if(va0) return 1;
+    if(vb0) return -1;
+    if(typeof va === 'number' && typeof vb === 'number') return (va - vb) * sinal;
+    return String(va).localeCompare(String(vb), 'pt-BR', { numeric:true }) * sinal;
+  });
+}
+function ordenarPorColuna(key){
+  // clique que na verdade foi o fim de um arrasto de coluna não ordena
+  if(ARRASTOU_COLUNA) return;
+  ORDEM_TABELA = (ORDEM_TABELA.key === key)
+    ? { key, dir: ORDEM_TABELA.dir === 'desc' ? 'asc' : 'desc' }
+    : { key, dir: 'desc' };
+  renderFechamentos();
+}
+
 function tabelaFechamentosHtml(rows){
   const grupo = grupoKpiDaUnidade((rows[0]||{}).unidade);
   const colunasDeValor = colunasValores(rows, grupo);
@@ -2198,10 +2253,10 @@ function tabelaFechamentosHtml(rows){
   // esconder/mostrar coluna nunca desalinha o cabecalho do corpo
   // ("previsao" e a unica coluna so da tela, o relatorio nao a tem)
   const defs = ordenarPorPreferencia([
-    { key:'data', label:'Data', td:d=>`<td>${fmtData(d.data)}</td>` },
-    { key:'unidadeNome', label:'Unid.', td:d=>`<td>${escapeHtml(UNIDADES_NOMES[d.unidade]||d.unidade)}</td>` },
-    { key:'gerente', label:'Responsável', td:d=>`<td class="truncate" title="${escapeHtml(d.gerente||'')}">${escapeHtml(d.gerente||'—')}</td>` },
-    { key:'previsao', label:'Previsão (dia seguinte)', td:d=>{ const p = previsaoDiaSeguinte(d.unidade, d.data); return `<td class="valor" style="color:var(--accent);">${p==null ? '—' : fmtMoney(p)}</td>`; } },
+    { key:'data', label:'Data', ord:d=>d.data||'', td:d=>`<td>${fmtData(d.data)}</td>` },
+    { key:'unidadeNome', label:'Unid.', ord:d=>UNIDADES_NOMES[d.unidade]||d.unidade||'', td:d=>`<td>${escapeHtml(UNIDADES_NOMES[d.unidade]||d.unidade)}</td>` },
+    { key:'gerente', label:'Responsável', ord:d=>d.gerente||'', td:d=>`<td class="truncate" title="${escapeHtml(d.gerente||'')}">${escapeHtml(d.gerente||'—')}</td>` },
+    { key:'previsao', label:'Previsão (dia seguinte)', ord:d=>previsaoDiaSeguinte(d.unidade, d.data), td:d=>{ const p = previsaoDiaSeguinte(d.unidade, d.data); return `<td class="valor" style="color:var(--accent);">${p==null ? '—' : fmtMoney(p)}</td>`; } },
     { key:'faturamento', label:'Faturamento', soma:d=>d.faturamento, td:d=>`<td class="valor">${fmtMoney(d.faturamento)}</td>` },
     { key:'totalDeclarado', label:'Total declarado', soma:d=>d.totalDeclarado, td:d=>`<td class="valor">${fmtMoney(d.totalDeclarado)}</td>` },
     { key:'diferenca', label:'Diferença', soma:d=>d.diferenca, corSoma:true, td:d=>{ const cor = d.diferenca<0?'var(--bad)':(d.diferenca>0?'var(--warn)':'var(--ok)'); return `<td class="valor" style="color:${cor}">${fmtMoney(d.diferenca)}</td>`; } },
@@ -2209,7 +2264,7 @@ function tabelaFechamentosHtml(rows){
     { key:'entradaDinheiro', label:'Entrada em dinheiro', soma:d=>d.entradaDinheiro, td:d=>`<td class="valor">${fmtMoney(d.entradaDinheiro)}</td>` },
     { key:'totalSaida', label:'Total de saída', soma:d=>d.totalSaida, td:d=>`<td class="valor">${fmtMoney(d.totalSaida)}</td>` },
     ...colunasDeValor.map(c=>({ key:c.key, label:c.label, soma:d=>valorColuna(d, c), td:d=>`<td class="valor">${fmtMoney(valorColuna(d, c))}</td>` })),
-    { key:'observacao', label:'Observação', td:d=>`<td class="truncate" title="${escapeHtml(d.observacao||d.obsDif||'')}">${escapeHtml(d.observacao||d.obsDif||'—')}</td>` },
+    { key:'observacao', label:'Observação', ord:d=>d.observacao||d.obsDif||'', td:d=>`<td class="truncate" title="${escapeHtml(d.observacao||d.obsDif||'')}">${escapeHtml(d.observacao||d.obsDif||'—')}</td>` },
   ]).filter(c=>colVisivel(c.key));
 
   // Cabecalho ARRASTAVEL. A reordenacao ja existia, mas so dentro do modal
@@ -2218,15 +2273,22 @@ function tabelaFechamentosHtml(rows){
   // arrastar. Data e Unid. nao arrastam (sao ancoras da tabela, mesma regra
   // do ordenarPorPreferencia).
   const fixa = (k)=> k==='data' || k==='unidadeNome';
+  // seta do lado do nome: mostra em qual coluna a tabela está ordenada e
+  // pra que lado. Sem ela, duas ordens diferentes ficam com a MESMA cara.
+  const seta = (k)=> ORDEM_TABELA.key===k ? (ORDEM_TABELA.dir==='desc' ? ' ▼' : ' ▲') : '';
+  const dica = (c)=> `Clique para ordenar por ${c.label} — 1º clique do maior para o menor, 2º do menor para o maior`;
   const thead = defs.map(c=>{
-    if(fixa(c.key)) return `<th>${escapeHtml(c.label)}</th>`;
-    return `<th class="th-move" draggable="true" data-col="${escapeHtml(c.key)}"`
+    const rotulo = escapeHtml(c.label) + seta(c.key);
+    if(fixa(c.key)) return `<th class="th-ord" onclick="ordenarPorColuna('${escapeHtml(c.key)}')" title="${escapeHtml(dica(c))}">${rotulo}</th>`;
+    return `<th class="th-move th-ord" draggable="true" data-col="${escapeHtml(c.key)}"`
+      + ` onclick="ordenarPorColuna('${escapeHtml(c.key)}')"`
       + ` ondragstart="arrastarColunaTabela(event)" ondragover="event.preventDefault()"`
       + ` ondrop="soltarColunaTabela(event)" ondragend="fimArrastoColunaTabela(event)"`
-      + ` title="Arraste para mudar a coluna de lugar — a posição vale também nos relatórios CSV/PDF e fica salva">`
-      + `${escapeHtml(c.label)}</th>`;
+      + ` title="${escapeHtml(dica(c))} — ou arraste para mudar a coluna de lugar (a posição vale também nos relatórios CSV/PDF e fica salva)">`
+      + `${rotulo}</th>`;
   }).join('') + (IS_MASTER ? '<th>Ações</th>' : '');
-  const corpo = rows.map(d=>
+  const linhas = ordenarLinhas(rows, defs);
+  const corpo = linhas.map(d=>
     `<tr>${defs.map(c=>c.td(d)).join('')}${IS_MASTER ? `<td>${d.criadoPorId ? `
         <button type="button" class="acao-btn" title="Editar" onclick="abrirEdicaoFechamento('${d.id}')">✏️</button>
         <button type="button" class="acao-btn excluir" title="Excluir" onclick="excluirFechamento('${d.id}')">🗑️</button>
@@ -2426,7 +2488,12 @@ function persistirColunas(){
 
 // ---------- arrastar coluna direto no cabecalho ----------
 let COL_ARRASTADA = null;
+// arrastar e ordenar dividem o mesmo cabeçalho: sem essa marca, soltar a
+// coluna no lugar novo também disparava o clique e reordenava a tabela sem
+// ninguém ter pedido
+let ARRASTOU_COLUNA = false;
 function arrastarColunaTabela(ev){
+  ARRASTOU_COLUNA = true;
   COL_ARRASTADA = ev.currentTarget.dataset.col;
   ev.currentTarget.style.opacity = '.45';
   // sem isso o Firefox nem comeca o arrasto
@@ -2434,6 +2501,8 @@ function arrastarColunaTabela(ev){
   ev.dataTransfer.effectAllowed = 'move';
 }
 function fimArrastoColunaTabela(ev){
+  // o clique chega DEPOIS do dragend - solta a trava no próximo tique
+  setTimeout(()=>{ ARRASTOU_COLUNA = false; }, 0);
   ev.currentTarget.style.opacity = '';
   document.querySelectorAll('th.th-move').forEach(th=>{ th.style.borderLeft=''; });
 }
