@@ -376,11 +376,25 @@ let renderUnidadePanel = () => {};
 // carregado, filtradas pelo Grupo escolhido - nao ha lista fixa aqui (ver
 // fechamentos.html pra ARCFOOD/BRAVO fixos): uma loja sem nenhuma saida no
 // periodo nao teria o que filtrar mesmo
+// A lista do filtro de Loja sai de TUDO que o período trouxe: saídas e
+// sangrias (ITENS), entradas de dinheiro (ENTRADAS) e as linhas do caixa
+// (CAIXA.porUnidade).
+//
+// Antes vinha só de ITENS, e isso escondia loja: a Mooca sumia do seletor
+// num período em que ela só teve ENTRADA de dinheiro, sem saída avulsa nem
+// sangria. O dinheiro dela aparecia no KPI de Entrada e na coluna do dia,
+// mas não dava pra filtrar por ela - parecia que a loja não existia.
 function paresUnidadeDoGrupo(){
   const grupo = document.getElementById('f-grupo').value;
   const porCodigo = new Map();
-  ITENS.filter(it=>!grupo || it.grupo===grupo)
-    .forEach(it=>{ if(it.unidade && !porCodigo.has(it.unidade)) porCodigo.set(it.unidade, it.unidadeNome||it.unidade); });
+  const juntar = (u, nome, g) => {
+    if(!u) return;
+    if(grupo && g !== grupo) return;
+    if(!porCodigo.has(u)) porCodigo.set(u, nome || u);
+  };
+  ITENS.forEach(it=>juntar(it.unidade, it.unidadeNome, it.grupo));
+  ENTRADAS.forEach(e=>juntar(e.unidade, e.unidadeNome, e.grupo));
+  (CAIXA.porUnidade||[]).forEach(u=>juntar(u.unidade, u.unidadeNome, u.grupo));
   return [...porCodigo.entries()].sort((a,b)=>a[1].localeCompare(b[1],'pt-BR'));
 }
 
