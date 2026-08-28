@@ -2648,6 +2648,39 @@ setTimeout(async () => {
   console.log(`${okAlertaQuebraSoEncerra ? '✓' : '✗'} Alerta de Quebra de caixa: "Visto" encerra e pronto - não insiste nem arrasta o Master pra outra tela`);
 
   // ------------------------------------------------------------------
+  // FILTRO DE LOJA ESCONDIA UNIDADE. Master, olhando o seletor do Painel de
+  // Saídas com ARCFOOD escolhido: "por que mooca nao aparece?".
+  //
+  // A lista do filtro saía só de ITENS (saídas avulsas + sangrias). Loja que
+  // no período só teve ENTRADA de dinheiro - nenhuma saída, nenhuma sangria -
+  // não entrava na lista: o dinheiro dela aparecia no KPI de Entrada e na
+  // coluna do dia, mas não dava pra filtrar por ela. Some do seletor a loja
+  // que está justamente sem retirada nenhuma - o caso que mais interessa
+  // olhar.
+  //
+  // Agora a lista é a união do que o período trouxe: saídas/sangrias,
+  // entradas e as linhas de caixa.
+  let okFiltroLojaCompleto = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'saidas.html'), 'utf8');
+    const i = html.indexOf('function paresUnidadeDoGrupo(');
+    const bloco = html.slice(i, i + 900);
+    const conf = {
+      'a lista do filtro considera as saídas/sangrias': /ITENS\.forEach\(it=>juntar\(it\.unidade/.test(bloco),
+      'a lista do filtro considera as ENTRADAS de dinheiro': /ENTRADAS\.forEach\(e=>juntar\(e\.unidade/.test(bloco),
+      'a lista do filtro considera as linhas de caixa': /CAIXA\.porUnidade\|\|\[\]\)\.forEach\(u=>juntar\(u\.unidade/.test(bloco),
+      'o filtro de Grupo continua valendo na lista': /if\(grupo && g !== grupo\) return;/.test(bloco),
+      'unidade repetida entre as fontes entra uma vez só': /if\(!porCodigo\.has\(u\)\)/.test(bloco),
+      'a lista continua ordenada por nome': /localeCompare\(b\[1\],'pt-BR'\)/.test(bloco),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okFiltroLojaCompleto = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okFiltroLojaCompleto = false; console.log('  erro: ' + e.message); }
+  if (!okFiltroLojaCompleto) ruins += 1;
+  console.log(`${okFiltroLojaCompleto ? '✓' : '✗'} Painel de Saídas: filtro de Loja lista também a unidade que só teve entrada no período (a Mooca sumia)`);
+
+  // ------------------------------------------------------------------
   // Gravar do Bravo tem que RECONCILIAR, nao "inserir se nao existir". As
   // primeiras importacoes (antes das correcoes de ordem de aba, timeout e
   // mescla) deixaram dias gravados pela metade; numa segunda passada esses
@@ -7913,8 +7946,12 @@ setTimeout(async () => {
         /id="ms-unidade-btn"/.test(html) && /id="ms-unidade-panel"/.test(html) && !/<select id="f-unidade"/.test(html),
       'as opções da Loja são filtradas pelo Grupo escolhido (não lista loja de fora do grupo)': (() => {
         const i = html.indexOf('function paresUnidadeDoGrupo');
-        const trecho = html.slice(i, i + 300);
-        return i >= 0 && /it\.grupo===grupo/.test(trecho);
+        // o guard passou a ser dentro do `juntar` (a lista agora vem de três
+        // fontes: saídas/sangrias, entradas e caixa - ver o bloco do filtro
+        // de Loja mais abaixo), então a checagem olha o guard, não mais o
+        // `.filter` que existia quando a fonte era só ITENS
+        const trecho = html.slice(i, i + 900);
+        return i >= 0 && /if\(grupo && g !== grupo\) return;/.test(trecho);
       })(),
       'trocar o Grupo atualiza o painel de checkboxes da Loja':
         /function aoMudarFiltro\(\)\{ renderUnidadePanel\(\); renderTudo\(\); \}/.test(html),
