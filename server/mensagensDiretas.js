@@ -43,9 +43,15 @@ function novaMensagem({ deId, deEmail, texto }) {
   return { de: String(deId), deEmail: deEmail || null, texto: limpar(texto), em: new Date().toISOString() };
 }
 
+// como a pessoa aparece na tela. A convencao do sistema e' username com o
+// email de reserva (mesmo `username || email` de index.js) - ninguem
+// reconhece "greentitech@gmail.com" num aviso de recado, e o Master pediu
+// exatamente isso: mostrar o nome do usuario no lugar do email
+function nomeDe(username, email) { return username || email || null; }
+
 // manda (ou continua) uma conversa. Devolve a conversa inteira já atualizada,
 // pra quem chamou não precisar reler.
-async function enviar({ deId, deEmail, paraId, paraEmail, texto }) {
+async function enviar({ deId, deEmail, deUsername, paraId, paraEmail, paraUsername, texto }) {
   const corpo = limpar(texto);
   if (!deId || !paraId) throw new Error('Remetente e destinatário são obrigatórios.');
   if (String(deId) === String(paraId)) throw new Error('Não dá pra mandar mensagem pra você mesmo.');
@@ -62,6 +68,11 @@ async function enviar({ deId, deEmail, paraId, paraEmail, texto }) {
       id,
       participantes: [String(deId), String(paraId)].sort(),
       emails: { [String(deId)]: deEmail || null, [String(paraId)]: paraEmail || null },
+      // mapa SEPARADO do de emails, nao substituto: conversa antiga nao tem
+      // este campo e continua caindo no email (ver outroLado) - dado antigo
+      // segue legivel, e a proxima mensagem na mesma conversa ja grava os
+      // dois nomes
+      usuarios: { [String(deId)]: deUsername || null, [String(paraId)]: paraUsername || null },
       mensagens: [msg],
       // quem escreve já leu o que escreveu - só o outro lado fica devendo
       lidoAte: { [String(deId)]: agora },
@@ -79,6 +90,7 @@ async function enviar({ deId, deEmail, paraId, paraEmail, texto }) {
     atualizadoEm: agora,
     // o email pode ter mudado desde a última vez - mantém o mais recente
     emails: { ...(atual.emails || {}), [String(deId)]: deEmail || null, [String(paraId)]: paraEmail || null },
+    usuarios: { ...(atual.usuarios || {}), [String(deId)]: deUsername || null, [String(paraId)]: paraUsername || null },
     lidoAte: { ...(atual.lidoAte || {}), [String(deId)]: agora },
   };
   await ref.update(patch);
@@ -87,7 +99,7 @@ async function enviar({ deId, deEmail, paraId, paraEmail, texto }) {
 
 // resposta de dentro da conversa. A checagem de participante é o que impede
 // alguém de responder numa conversa que não é dele só sabendo o id.
-async function responder(id, { deId, deEmail, texto }) {
+async function responder(id, { deId, deEmail, deUsername, texto }) {
   const ref = COLLECTION.doc(String(id));
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Conversa não encontrada.');
@@ -101,6 +113,10 @@ async function responder(id, { deId, deEmail, texto }) {
   const patch = {
     mensagens,
     atualizadoEm: agora,
+    // quem responde tambem carimba o proprio nome: sem isto, so quem ABRIU a
+    // conversa apareceria pelo nome e o outro lado ficaria no email pra
+    // sempre
+    usuarios: { ...(atual.usuarios || {}), [String(deId)]: deUsername || (atual.usuarios || {})[String(deId)] || null },
     lidoAte: { ...(atual.lidoAte || {}), [String(deId)]: agora },
   };
   await ref.update(patch);
@@ -110,7 +126,11 @@ async function responder(id, { deId, deEmail, texto }) {
 // quem é o OUTRO lado da conversa, do ponto de vista de quem está olhando
 function outroLado(conversa, userId) {
   const outroId = (conversa.participantes || []).find((p) => p !== String(userId)) || null;
-  return { id: outroId, email: outroId ? (conversa.emails || {})[outroId] : null };
+  const email = outroId ? (conversa.emails || {})[outroId] : null;
+  const username = outroId ? (conversa.usuarios || {})[outroId] : null;
+  // `nome` e' o que a tela mostra; email continua saindo pra quem precisar
+  // do endereco de verdade (e pra conversa antiga, que so tem ele)
+  return { id: outroId, email: email || null, username: username || null, nome: nomeDe(username, email) };
 }
 
 // quantas mensagens do OUTRO lado chegaram depois da última vez que essa

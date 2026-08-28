@@ -3774,6 +3774,49 @@ setTimeout(async () => {
     const doMaster2 = JSON.parse((await pedir('/api/mensagens/minhas', cabMaster)).corpo);
     const conversasComAlvo = doMaster2.filter((c) => c.com && c.com.id === alvoId);
 
+    // Pedido do Master: "no lugar de mostrar o email mostrar o nome do
+    // usuario". Conversa ANTIGA (gravada antes disso) não tem o mapa de
+    // usuarios e tem que continuar legível - caindo no e-mail, que é tudo
+    // que ela guarda.
+    const idAntiga = md.idDoPar('velho-a', 'velho-b');
+    DOCS.set('mensagensDiretas/' + idAntiga, {
+      id: idAntiga, participantes: ['velho-a', String(alvoId)].sort(),
+      emails: { 'velho-a': 'antigo@teste.local', [String(alvoId)]: 'destino.msg@teste.local' },
+      mensagens: [{ de: 'velho-a', texto: 'recado antigo', em: new Date().toISOString() }],
+      lidoAte: {}, criadoEm: new Date().toISOString(), atualizadoEm: new Date().toISOString(),
+    });
+    const listaAlvo = JSON.parse((await pedir('/api/mensagens/minhas', cabAlvo)).corpo);
+    const antiga = listaAlvo.find((c) => c.id === idAntiga) || {};
+
+    // Destinatário que só RECEBE e nunca responde. Isola quem grava o quê:
+    // o nome do alvo de cima também é carimbado pela RESPOSTA dele, então
+    // ele sozinho não prova que o ENVIO grava o nome do destinatário.
+    const soRecebeId = 'u-so-recebe-msg';
+    DOCS.set('users/' + soRecebeId, {
+      email: 'so.recebe@teste.local', username: 'sorecebe',
+      passwordHash: bcryptMsg.hashSync('SenhaAlvo!2026', 4), role: 'user', active: true,
+      permissions: { sections: [], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    await postarJson('/api/mensagens/enviar', { userId: soRecebeId, texto: 'Só um aviso.' }, cabMaster);
+    const comSoRecebe = JSON.parse((await pedir('/api/mensagens/minhas', cabMaster)).corpo)
+      .find((c) => c.com && c.com.id === soRecebeId) || {};
+
+    // E o caminho inverso: conversa que nasceu SEM nome nenhum (antiga) e em
+    // que o outro lado RESPONDE - só a resposta pode carimbar o nome dele
+    const meuId = JSON.parse((await pedir('/api/me', cabMaster)).corpo).id;
+    const idSemNome = md.idDoPar(meuId, alvoId);
+    DOCS.set('mensagensDiretas/' + idSemNome, {
+      id: idSemNome, participantes: [String(meuId), String(alvoId)].sort(),
+      emails: { [String(meuId)]: 'master@teste.local', [String(alvoId)]: 'destino.msg@teste.local' },
+      mensagens: [{ de: String(meuId), texto: 'sem nome gravado', em: new Date().toISOString() }],
+      lidoAte: {}, criadoEm: new Date().toISOString(), atualizadoEm: new Date().toISOString(),
+    });
+    await postarJson(`/api/mensagens/${idSemNome}/responder`, { texto: 'respondi' }, cabAlvo);
+    const depoisDaResposta = JSON.parse((await pedir('/api/mensagens/minhas', cabMaster)).corpo)
+      .find((c) => c.id === idSemNome) || {};
+    const srcChat = require('fs').readFileSync(require('path').join(__dirname, 'public', 'suporte-chat.js'), 'utf8');
+
     const conferencias = {
       'a mensagem fica GRAVADA (não depende de estar com a tela aberta)':
         !!conv.id && (conv.mensagens || []).some((m) => m.texto === 'Confere o caixa de ontem, por favor.'),
@@ -3789,6 +3832,23 @@ setTimeout(async () => {
       'mensagem vazia é recusada': (await postarJson('/api/mensagens/enviar', { userId: alvoId, texto: '   ' }, cabMaster)).status === 400,
       'não dá pra mandar mensagem pra si mesmo': /pra você mesmo/.test(
         (await postarJson('/api/mensagens/enviar', { userId: JSON.parse((await pedir('/api/me', cabMaster)).corpo).id, texto: 'eu' }, cabMaster)).corpo),
+      // o aviso mostra o NOME DE USUÁRIO, não o e-mail
+      'quem manda vê o nome de usuário do destinatário': doMaster.com && doMaster.com.nome === 'destinomsg',
+      'e o e-mail continua vindo, pra quem precisar dele':
+        doMaster.com && doMaster.com.email === 'destino.msg@teste.local',
+      // quem RESPONDE também carimba o próprio nome: sem isso só um lado
+      // apareceria pelo nome
+      'quem só RECEBE já aparece pelo nome (o envio grava os dois lados)':
+        comSoRecebe.com && comSoRecebe.com.nome === 'sorecebe',
+      'quem RESPONDE carimba o próprio nome numa conversa que não tinha':
+        depoisDaResposta.com && depoisDaResposta.com.nome === 'destinomsg',
+      'conversa antiga (sem nome gravado) continua legível pelo e-mail':
+        antiga.com && antiga.com.nome === 'antigo@teste.local',
+      // as 3 telas do widget: aviso, lista e título da conversa
+      'o aviso, a lista e o título usam o nome':
+        (srcChat.match(/c\.com\.nome \|\| c\.com\.email/g) || []).length === 2
+        && /conversa\.com\.nome \|\| conversa\.com\.email/.test(srcChat)
+        && !/\(c\.com && c\.com\.email\)/.test(srcChat),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okMensagemDireta = !falhas.length;
