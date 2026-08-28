@@ -471,7 +471,12 @@ async function calcularSaldoCaixa({ unidade, ate, ignorarSangriaId }, extrasFech
   // sempre. Os dois lugares tem que usar a mesma regua - com reguas
   // diferentes, o numero que o formulario sugere na hora nunca bateria com o
   // que o painel mostra depois.
-  const desde = comPiso(inicioDaJanela(sangriasDaUnidade, { ate: limite, ignorarChave: `sangria::${ignorarSangriaId}` }));
+  const retiradaAnterior = inicioDaJanela(sangriasDaUnidade, { ate: limite, ignorarChave: `sangria::${ignorarSangriaId}` });
+  const desde = comPiso(retiradaAnterior);
+  // a tela precisa saber se `desde` e' uma RETIRADA de verdade ou so o piso
+  // de agosto/2026: "o dia 31/07 ja entrou na retirada anterior" seria
+  // mentira, e e' o tipo de frase que faz procurar dinheiro que nao sumiu
+  const desdeEhRetirada = !!retiradaAnterior && retiradaAnterior >= desde;
   const naJanela = (x) => (x.data || '') > desde;
   const entradas = daUnidade(entradasTodas).filter(naJanela);
   const totalEntradas = somar(entradas);
@@ -506,6 +511,7 @@ async function calcularSaldoCaixa({ unidade, ate, ignorarSangriaId }, extrasFech
     // vezes. totalSangrias segue no retorno so como informacao da janela.
     esperado: temBase ? Number((totalEntradas - totalSaidas).toFixed(2)) : null,
     desde,
+    desdeEhRetirada,
     ultimoFechamentoEm,
     diasSemFechamento,
   };
