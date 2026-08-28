@@ -2598,6 +2598,50 @@ setTimeout(async () => {
   console.log(`${okSangriaPlanilhaNoDiaDoApp ? '✓' : '✗'} Painel de Saídas: sangria lançada em linha separada da planilha não some quando o app tem o fechamento do dia`);
 
   // ------------------------------------------------------------------
+  // ALERTA DE QUEBRA DE CAIXA QUE INSISTE. Master: "quebra de caixa é um
+  // alerta que se jogado para o lado não volta a aparecer".
+  //
+  // Arrastar nunca marcou como visto (isso já era testado e continua). O que
+  // apagava o alerta pra sempre era o "visto" ser GLOBAL: bastava UM
+  // Master/Admin clicar em Visualizar, em qualquer aparelho, pra ele sumir da
+  // tela de todos - mesmo com a quebra ainda PENDENTE. Ver ≠ resolver, e num
+  // alerta de dinheiro essa diferença some com o problema.
+  //
+  // Quebra de caixa e desvio de estoque nascem sozinhos de uma diferença
+  // apurada. Enquanto o ticket estiver PENDENTE, eles voltam a cada
+  // carregamento de página, com ou sem "visto". Decidir na Central é o que
+  // cala o alerta.
+  let okAlertaQuebraInsiste = false;
+  try {
+    const fsA = require('fs'); const pathA = require('path');
+    const arquivos = ['notif-central.js', 'painel.html', 'central-historico.html']
+      .map((n) => [n, fsA.readFileSync(pathA.join(__dirname, 'public', n), 'utf8')]);
+    const conf = {};
+    arquivos.forEach(([nome, src]) => {
+      conf[`${nome}: declara os tipos que insistem (quebra de caixa + desvio de estoque)`] =
+        /TIPOS_ALERTA_INSISTENTE = \['quebra-caixa', 'desvio-estoque'\]/.test(src);
+      conf[`${nome}: "visto" não silencia mais um alerta insistente`] =
+        /notificacaoVista && !alertaInsiste\(card\)/.test(src);
+      conf[`${nome}: a lista de PENDENTES reexibe o alerta insistente mesmo já visto`] =
+        /status ?=== ?'PENDENTE' && \(!c\.notificacaoVista \|\| alertaInsiste\(c\)\)/.test(src);
+      // o alerta só insiste enquanto PENDENTE: decidir na Central tem que calar
+      conf[`${nome}: ticket decidido (não PENDENTE) para de alertar`] =
+        /status ?=== ?'PENDENTE' &&/.test(src);
+    });
+    // e o gesto de arrastar continua SEM marcar como visto (regra antiga)
+    const srcNotif = arquivos[0][1];
+    const iArr = srcNotif.indexOf('[ARRASTAR-INICIO]');
+    const iFim = srcNotif.indexOf('[ARRASTAR-FIM]');
+    conf['arrastar pro lado continua sem marcar como visto'] =
+      iArr > 0 && iFim > iArr && !/marcar-visto/.test(srcNotif.slice(iArr, iFim));
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okAlertaQuebraInsiste = !falhas.length;
+    if (falhas.length) console.log('  falhou em: ' + falhas.join(' · '));
+  } catch (e) { okAlertaQuebraInsiste = false; console.log('  erro: ' + e.message); }
+  if (!okAlertaQuebraInsiste) ruins += 1;
+  console.log(`${okAlertaQuebraInsiste ? '✓' : '✗'} Alerta de Quebra de caixa insiste enquanto o ticket está PENDENTE (o "visto" de um não cala pra todos)`);
+
+  // ------------------------------------------------------------------
   // Gravar do Bravo tem que RECONCILIAR, nao "inserir se nao existir". As
   // primeiras importacoes (antes das correcoes de ordem de aba, timeout e
   // mescla) deixaram dias gravados pela metade; numa segunda passada esses
