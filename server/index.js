@@ -868,9 +868,26 @@ app.post('/api/formularios-publico/preencher/:token', upload.array('anexos', 5),
   }
 });
 
-app.post('/api/formularios-publico/:id/assinar', async (req, res) => {
+// multipart quando quem assina manda COMPROVANTE junto (o depositante do
+// Depósito de Caixa); JSON puro nos outros casos - mesma convivência dos
+// dois formatos da rota de preenchimento logo acima.
+app.post('/api/formularios-publico/:id/assinar', upload.array('anexos', 5), async (req, res) => {
   try {
-    const resultado = await formularios.assinar(req.params.id, req.body.token, { nome: req.body.nome, imagem: req.body.imagem });
+    const corpo = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
+    // o arquivo só vai pro Storage depois do token ser aceito - link
+    // inválido não pode servir de porta pra subir arquivo
+    const registro = await formularios.getOne(req.params.id);
+    if (!registro || !formularios.chaveDoToken(registro, corpo.token)) {
+      return res.status(400).json({ error: 'Link de assinatura inválido ou revogado.' });
+    }
+    const anexos = [];
+    for (const file of req.files || []) {
+      const tipoOk = /^image\//.test(file.mimetype || '') || file.mimetype === 'application/pdf';
+      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF nem imagem.` });
+      const path = await storage.salvarArquivo(req.params.id, file, 'formularios');
+      anexos.push({ nome: file.originalname, path, tipo: file.mimetype });
+    }
+    const resultado = await formularios.assinar(req.params.id, corpo.token, { nome: corpo.nome, imagem: corpo.imagem, anexos });
     broadcast('formulario-assinado', { id: req.params.id }, 'solicitacoes');
     res.json(resultado);
   } catch (err) {
@@ -3479,6 +3496,20 @@ app.put('/api/formularios/:id', auth.requireMaster, async (req, res) => {
 // Ticket #. Reabrir volta o MESMO link pro estado "aguardando o anexo",
 // zerando o arquivo e as assinaturas que já tinham sido colhidas (ver
 // formularios.js/reabrirAnexo).
+// "quem fez o depósito" acrescentado DEPOIS do lançamento (ver
+// pedirComprovanteDeposito): quem lança nem sempre sabe na hora quem vai ao
+// banco. Fica na seção formularios (não é Master-only) porque é a própria
+// unidade que sabe quem levou o dinheiro.
+app.post('/api/formularios/:id/depositante', requireSection('formularios'), async (req, res) => {
+  try {
+    const r = await formularios.pedirComprovanteDeposito(req.params.id, { nome: req.body.nome, porEmail: req.user.email });
+    broadcast('formulario-atualizado', { id: req.params.id }, 'solicitacoes');
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/formularios/:id/reabrir-anexo', auth.requireMaster, async (req, res) => {
   try {
     const dados = { porEmail: req.user.email };

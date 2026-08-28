@@ -49,6 +49,12 @@ const TIPOS = {
     cabecalho: [
       { key: 'cnpj', label: 'CNPJ' },
       { key: 'nomeGerente', label: 'NOME DO GERENTE' },
+      // Quem levou o dinheiro ao banco, quando NAO foi o gerente. Opcional
+      // de proposito: na maioria dos depositos e' o proprio gerente, e
+      // exigir o nome ali criaria assinatura sobrando. Preenchido e
+      // diferente do gerente, vira um segundo assinante - e' ele quem tem o
+      // comprovante na mao (ver assinantesDe/comprovanteObrigatorio)
+      { key: 'depositante', label: 'QUEM FEZ O DEPÓSITO (se não foi o gerente)' },
     ],
     colunas: [
       { key: 'data', label: 'DATA DO DEPÓSITO', data: true },
@@ -70,6 +76,9 @@ const TIPOS = {
     // Só marca quando isso é verdade estruturalmente: no Depósito só existe
     // UM assinante (o gerente) e é ele quem preenche.
     preenchedorAssina: 'gerente',
+    // liga a regra do depositante (ver assinantesDe): so o Deposito tem
+    // "outra pessoa que levou o dinheiro ao banco"
+    papelDepositante: true,
   },
   diarias: {
     rotulo: 'Pagamento de Diárias',
@@ -267,6 +276,9 @@ const MAX_LINHAS = 20;
 // PNG do canvas de assinatura fica em torno de 5-30KB; o cap é folga, não
 // meta - acima disso é foto/arquivo indevido, não um traço de caneta
 const MAX_IMAGEM_CHARS = 300000;
+// teto de anexos por formulario - o mesmo .slice(0, 5) que criar() ja
+// aplicava, agora nomeado porque assinar() tambem acrescenta anexo
+const MAX_ANEXOS = 5;
 
 function limpar(v, max = 120) { return String(v == null ? '' : v).trim().slice(0, max); }
 function soDigitos(v) { return String(v || '').replace(/\D/g, ''); }
@@ -334,7 +346,8 @@ async function getOne(id) {
 // registro.
 function rotuloDoSlot(tipo, chave, rotuloGravado) {
   const modelo = TIPOS[tipo];
-  const doModelo = modelo && (modelo.assinantes || []).find((a) => a.papel === chave);
+  const doModelo = modelo && (modelo.assinantes || []).concat([{ papel: 'depositante', rotulo: 'Quem fez o depósito' }])
+    .find((a) => a.papel === chave);
   return doModelo ? doModelo.rotulo : rotuloGravado;
 }
 
@@ -401,7 +414,42 @@ function montarConteudo(modelo, cadastro, campos, linhas) {
 // montar DEPOIS de existirem linhas, e é por isso que o formulário criado
 // pra preenchimento por link nasce sem assinatura nenhuma: os slots saem no
 // momento em que o solicitante envia o preenchimento.
-function montarAssinaturas(modelo, linhasOk) {
+// Regra do Master: "quando for deposito e for outra pessoa quem fez o
+// deposito, diferente do gerente, preciso que assine e anexe o comprovante".
+// Duas pessoas conferem coisas diferentes e por isso sao dois papeis: o
+// gerente atesta o que saiu do caixa (datas, envelope, valores) e o
+// depositante atesta que o dinheiro entrou no banco - e so ele tem o
+// comprovante.
+//
+// Comparacao por nome normalizado (sem caixa, sem acento, espaco unico):
+// "João" e "joao " sao a mesma pessoa, e criar assinatura sobrando pra
+// diferenca de digitacao seria pior do que nao ter a regra.
+function nomeIgual(a, b) {
+  const limpo = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/\s+/g, ' ').trim();
+  return !!limpo(a) && limpo(a) === limpo(b);
+}
+function temDepositanteProprio(modelo, campos) {
+  if (!modelo || !modelo.papelDepositante) return false;
+  const quem = limpar((campos || {}).depositante, 160);
+  return !!quem && !nomeIgual(quem, (campos || {}).nomeGerente);
+}
+// os assinantes do modelo + o depositante, quando o conteudo pede um. Fica
+// separado de `modelo.assinantes` porque aquilo e' fixo por tipo e isto
+// depende do que foi preenchido
+function assinantesDe(modelo, campos) {
+  const base = modelo.assinantes || [];
+  if (!temDepositanteProprio(modelo, campos)) return base;
+  return [...base, { papel: 'depositante', rotulo: 'Quem fez o depósito' }];
+}
+// com depositante proprio, o formulario NAO fecha sem o comprovante: e' a
+// prova de que o dinheiro chegou ao banco, e o pedido do Master era
+// exatamente que ela viesse junto da assinatura dele
+function comprovanteObrigatorio(r) {
+  return temDepositanteProprio(TIPOS[r.tipo], r.campos);
+}
+
+function montarAssinaturas(modelo, linhasOk, campos) {
   const assinaturas = {};
   const slot = (chave, rotulo) => {
     assinaturas[chave] = { rotulo, token: crypto.randomBytes(18).toString('hex'), nome: null, imagem: null, assinadoEm: null };
@@ -409,7 +457,7 @@ function montarAssinaturas(modelo, linhasOk) {
   if (modelo.assinaturaPorLinha) {
     linhasOk.forEach((l, i) => slot(`linha-${i}`, `Assinatura · ${l.nome || `linha ${i + 1}`}`));
   }
-  modelo.assinantes.forEach((a) => slot(a.papel, a.rotulo));
+  assinantesDe(modelo, campos).forEach((a) => slot(a.papel, a.rotulo));
   return assinaturas;
 }
 
@@ -425,11 +473,11 @@ async function criar({ tipo, unidade, campos, linhas, anexos, criadoPorId, criad
   if (!cadastro) throw new Error('Unidade inválida - escolha uma das unidades cadastradas.');
 
   const { camposOk, linhasOk, valorTotal } = montarConteudo(modelo, cadastro, campos, linhas);
-  const assinaturas = montarAssinaturas(modelo, linhasOk);
+  const assinaturas = montarAssinaturas(modelo, linhasOk, camposOk);
 
   // comprovantes da solicitacao (PDF/imagem) - ja salvos no Storage pela
   // rota, aqui entra so a referencia
-  const anexosOk = (Array.isArray(anexos) ? anexos : []).slice(0, 5)
+  const anexosOk = (Array.isArray(anexos) ? anexos : []).slice(0, MAX_ANEXOS)
     .map((a) => ({ nome: limpar(a.nome, 120) || 'anexo', path: String(a.path || ''), tipo: limpar(a.tipo, 80) }))
     .filter((a) => a.path);
 
@@ -578,14 +626,14 @@ async function salvarPreenchimento(token, { campos, linhas, anexos } = {}) {
 
   const { camposOk, linhasOk, valorTotal } = montarConteudo(modelo, cadastro, campos, linhas);
 
-  const anexosOk = (Array.isArray(anexos) ? anexos : []).slice(0, 5)
+  const anexosOk = (Array.isArray(anexos) ? anexos : []).slice(0, MAX_ANEXOS)
     .map((a) => ({ nome: limpar(a.nome, 120) || 'anexo', path: String(a.path || ''), tipo: limpar(a.tipo, 80) }))
     .filter((a) => a.path);
   if (modelo.anexoObrigatorio && !anexosOk.length) {
     throw new Error('Anexe o boleto (PDF ou imagem) - é ele que vai ser assinado.');
   }
 
-  const assinaturas = montarAssinaturas(modelo, linhasOk);
+  const assinaturas = montarAssinaturas(modelo, linhasOk, camposOk);
   await COLLECTION.doc(r.id).update({
     campos: camposOk, linhas: linhasOk, valorTotal, anexos: anexosOk,
     // as assinaturas só nascem AQUI - é o que garante que o Responsável não
@@ -632,11 +680,21 @@ async function vistaPublica(id, token) {
     status: r.status, criadoEm: r.criadoEm,
     anexos: (r.anexos || []).map((an, i) => ({ nome: an.nome, indice: i })),
     meuPapel: chave, meuRotulo: rotuloDoSlot(r.tipo, chave, a.rotulo), jaAssinei: !!a.imagem,
+    // liga o campo de arquivo na pagina publica: quem depositou anexa o
+    // comprovante no mesmo passo da assinatura (ver assinar). Se o
+    // comprovante ja veio de outro jeito, nao pede de novo
+    exigeComprovante: chave === 'depositante' && !(r.anexos || []).length,
     assinaturas: Object.entries(r.assinaturas).map(([k, s]) => ({ rotulo: rotuloDoSlot(r.tipo, k, s.rotulo), assinado: !!s.imagem })),
   };
 }
 
-async function assinar(id, token, { nome, imagem } = {}) {
+// anexos: quem assina como 'depositante' manda o COMPROVANTE junto (a rota
+// publica ja salvou no Storage e passa so a referencia, igual
+// salvarPreenchimento). Assinatura e comprovante entram na mesma operacao
+// de proposito: sao a mesma prova, e separar em dois passos deixaria o
+// formulario meio fechado - assinado, sem comprovante, e ninguem sabendo de
+// quem cobrar.
+async function assinar(id, token, { nome, imagem, anexos } = {}) {
   const r = await getOne(id);
   const chave = chaveDoToken(r, token);
   if (!chave) throw new Error('Link de assinatura inválido ou revogado.');
@@ -646,11 +704,28 @@ async function assinar(id, token, { nome, imagem } = {}) {
   if (!/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(img)) throw new Error('Assinatura inválida - desenhe no quadro e tente de novo.');
   if (img.length > MAX_IMAGEM_CHARS) throw new Error('Assinatura grande demais - limpe o quadro e assine de novo.');
 
+  const novos = (Array.isArray(anexos) ? anexos : [])
+    .map((an) => ({ nome: limpar(an.nome, 120) || 'comprovante', path: String(an.path || ''), tipo: limpar(an.tipo, 80) }))
+    .filter((an) => an.path);
+  const anexosFinais = [...(r.anexos || []), ...novos].slice(0, MAX_ANEXOS);
+  // o depositante nao assina sem comprovante: e' o unico que tem o
+  // documento do banco na mao, e depois de assinado nao ha mais quem cobrar
+  if (chave === 'depositante' && !anexosFinais.length) {
+    throw new Error('Anexe o comprovante do depósito antes de assinar.');
+  }
+
   const assinaturas = { ...r.assinaturas, [chave]: { ...a, imagem: img, nome: limpar(nome, 80) || null, assinadoEm: new Date().toISOString() } };
-  const completo = Object.values(assinaturas).every((s) => !!s.imagem);
-  await COLLECTION.doc(id).update({ assinaturas, status: completo ? 'ASSINADO' : 'PENDENTE' });
+  // faltando comprovante num deposito com depositante proprio, o formulario
+  // NAO fecha mesmo com todas as assinaturas: e' o que impede seguir pro
+  // pagamento sem a prova de que o dinheiro entrou no banco
+  const todasAssinadas = Object.values(assinaturas).every((s) => !!s.imagem);
+  const completo = todasAssinadas
+    && (!comprovanteObrigatorio(r) || anexosFinais.length > 0);
+  await COLLECTION.doc(id).update({
+    assinaturas, anexos: anexosFinais, status: completo ? 'ASSINADO' : 'PENDENTE',
+  });
   cache.invalidar();
-  return { ok: true, chave, completo };
+  return { ok: true, chave, completo, faltaComprovante: todasAssinadas && !completo };
 }
 
 // ---------------------------------------------------------------------
@@ -688,13 +763,59 @@ async function editar(id, { campos, linhas, porEmail } = {}) {
   const descartadas = Object.values(r.assinaturas || {}).filter((a) => a.imagem).length;
   await COLLECTION.doc(id).update({
     campos: camposOk, linhas: linhasOk, valorTotal,
-    assinaturas: montarAssinaturas(modelo, linhasOk),
+    assinaturas: montarAssinaturas(modelo, linhasOk, camposOk),
     status: 'PENDENTE',
     editadoEm: new Date().toISOString(), editadoPorEmail: porEmail || null,
   });
   cache.invalidar();
   await salvarFavorecido(camposOk);
   return { ...(await detalhar(id)), assinaturasDescartadas: descartadas, semMudanca: false };
+}
+
+// O caso mais comum na pratica, descrito pelo Master: "as vezes lanca
+// primeiro e depois a outra pessoa vai fazer o deposito e pega o comprovante
+// depois e assinaria". Na hora de lancar ninguem sabe ainda quem vai ao
+// banco, entao o formulario nasce so com o gerente. Isto acrescenta o
+// depositante DEPOIS, sem refazer nada.
+//
+// NAO descarta as assinaturas ja colhidas, e essa e' a diferenca proposital
+// em relacao a editar(): la o conteudo muda (valor, linha, favorecido) e a
+// assinatura do gerente passaria a cobrir um documento diferente do que ele
+// viu. Aqui nao muda nada do que ele atestou - datas, envelope e valores
+// continuam iguais. O que entra e' PROVA A MAIS: o nome de quem levou o
+// dinheiro e, junto com a assinatura dele, o comprovante do banco.
+async function pedirComprovanteDeposito(id, { nome, porEmail } = {}) {
+  const r = await getOne(id);
+  if (!r) throw new Error('Formulário não encontrado.');
+  const modelo = TIPOS[r.tipo];
+  if (!modelo || !modelo.papelDepositante) throw new Error('Só o Depósito de Caixa tem "quem fez o depósito".');
+  if (r.status === STATUS_AGUARDANDO) throw new Error('Esse formulário ainda está esperando o preenchimento - mande o link de preenchimento primeiro.');
+  if (r.status === STATUS_CANCELADO) throw new Error('Formulário cancelado não pode receber assinatura - lance outro.');
+  const quem = limpar(nome, 160);
+  if (!quem) throw new Error('Informe o nome de quem fez o depósito.');
+  if (nomeIgual(quem, r.campos.nomeGerente)) {
+    throw new Error('Esse é o próprio gerente - a assinatura dele já está no formulário.');
+  }
+  const jaAssinou = r.assinaturas && r.assinaturas.depositante && r.assinaturas.depositante.imagem;
+  if (jaAssinou) throw new Error('O depósito já foi assinado por quem depositou - para trocar, use Corrigir ou Cancelar.');
+
+  const campos = { ...r.campos, depositante: quem };
+  // slot ja aberto (so trocando o nome) MANTEM o token: o link pode ja ter
+  // ido pro WhatsApp de alguem, e trocar o token quebraria ele sem motivo
+  const atual = (r.assinaturas || {}).depositante;
+  const assinaturas = {
+    ...r.assinaturas,
+    depositante: atual || {
+      rotulo: 'Quem fez o depósito', token: crypto.randomBytes(18).toString('hex'),
+      nome: null, imagem: null, assinadoEm: null,
+    },
+  };
+  await COLLECTION.doc(id).update({
+    campos, assinaturas, status: 'PENDENTE',
+    depositantePedidoEm: new Date().toISOString(), depositantePedidoPorEmail: porEmail || null,
+  });
+  cache.invalidar();
+  return detalhar(id);
 }
 
 // reabre o preenchimento do Ass. Boleto (soAnexo) pra trocar um anexo
@@ -1139,6 +1260,7 @@ async function gerarPdf(r, res, opcoes) {
 }
 
 module.exports = { TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, editar, cancelar, remover, gerarPdf, chaveDoToken, parseValor,
+  pedirComprovanteDeposito, comprovanteObrigatorio, temDepositanteProprio,
   criarParaPreenchimento, vistaPreenchimento, salvarPreenchimento, cancelarPreenchimento, marcarEnviadoPagamento,
   reabrirAnexo,
   // mesma saida que parque.js expoe: quem escreve o documento por fora do

@@ -783,6 +783,38 @@ function favorecidoDe(f){
   return String((f.campos && f.campos.favorecido) || '').trim();
 }
 
+// "quem fez o depósito" (ver assinantesDe em formularios.js): só existe no
+// Depósito e só quando NÃO foi o gerente quem levou o dinheiro ao banco
+function temDepositante(f){
+  return !!(f.assinaturas||[]).find(a=>a.chave==='depositante');
+}
+// assinou tudo mas o comprovante não chegou: o formulário fica PENDENTE de
+// propósito (ver assinar em formularios.js) e a tela tem que dizer por quê,
+// senão vira "está tudo assinado e não fecha, por quê?"
+function faltaComprovanteDeposito(f){
+  return f.tipo==='deposito' && temDepositante(f) && !(f.anexos||[]).length;
+}
+
+// O caso do Master: lançou primeiro, e só depois outra pessoa foi ao banco.
+// Não refaz o formulário nem descarta a assinatura do gerente - só
+// acrescenta o assinante que faltava, com o link pra ele.
+async function pedirDepositante(id){
+  const nome = prompt('Nome de quem fez o depósito (a pessoa que foi ao banco):');
+  if(nome === null) return;
+  if(!nome.trim()){ alert('Escreva o nome de quem fez o depósito.'); return; }
+  try{
+    const r = await fetch(`/api/formularios/${encodeURIComponent(id)}/depositante`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ nome: nome.trim() }),
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||('erro '+r.status));
+    await carregarLista();
+    alert(`Pronto. Abra "✍️ Assinaturas e links" e mande pra ${nome.trim()} o link de "Quem fez o depósito" - lá ele anexa o comprovante e assina no mesmo passo.`);
+    abrirLinks(id);
+  }catch(e){ alert(e.message); }
+}
+
 function cardHtml(f){
   const t = TIPOS.find(x=>x.tipo===f.tipo);
   const pendentes = f.assinaturas.filter(a=>!a.assinado).length;
@@ -813,11 +845,13 @@ function cardHtml(f){
     ${f.editadoEm && !cancelado ? `<div class="fi-sub" style="color:var(--warn);">corrigido ${fmtData(f.editadoEm)} por ${escapeHtml(f.editadoPorEmail||'')}</div>` : ''}
     ${(f.anexos||[]).length ? `<div class="fi-sub">📎 ${f.anexos.map((an,i)=>`<a href="/api/formularios/${f.id}/anexo/${i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" style="color:var(--accent);">${escapeHtml(an.nome)}</a>`).join(' · ')}</div>` : ''}
     ${f.enviadoPagamento ? `<div class="fi-sub" style="color:var(--ok);">💰 enviado como Pagamento ${fmtData(f.enviadoPagamento.em)} - mesmo Ticket #${f.numeroTicket ?? '—'} na Central</div>` : ''}
+    ${faltaComprovanteDeposito(f) ? `<div class="fi-sub" style="color:var(--warn);">⚠️ falta o comprovante de ${escapeHtml(f.campos.depositante)} - o formulário só fecha quando ele anexar e assinar</div>` : ''}
     <div class="acoes-form">
       ${cancelado ? '' : `<button type="button" class="btn-ghost" onclick="abrirLinks('${f.id}')">✍️ Assinaturas e links</button>`}
       <button type="button" class="btn-ghost" onclick="verPdf('${f.id}')" title="Abrir o PDF pra conferir, sem baixar">👁️ Ver</button>
       <button type="button" class="btn-ghost" onclick="baixarPdf('${f.id}')" title="Salvar o arquivo no aparelho">⬇️ ${t && t.soAnexo ? 'Baixar assinado' : 'Baixar PDF'}</button>
       ${!cancelado && f.status==='ASSINADO' && !f.enviadoPagamento ? `<button type="button" class="btn-ghost" style="color:var(--ok);" onclick="enviarComoPagamento('${f.id}')">💰 Enviar como Pagamento</button>` : ''}
+      ${!cancelado && f.tipo==='deposito' && !temDepositante(f) ? `<button type="button" class="btn-ghost" onclick="pedirDepositante('${f.id}')" title="Quando quem levou o dinheiro ao banco não foi o gerente: gera o link pra essa pessoa anexar o comprovante e assinar">👤 Quem fez o depósito</button>` : ''}
       ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" onclick="abrirEdicao('${f.id}')">✏️ Editar</button>` : ''}
       ${SOU_MASTER && !cancelado && t && t.soAnexo ? `<button type="button" class="btn-ghost" style="color:var(--warn);" onclick="reabrirAnexo('${f.id}','${escapeHtml(t.rotulo)}')" title="Apaga o anexo atual e reabre o mesmo link pra mandarem outro, sem perder o Ticket #">🗑️ Trocar anexo</button>` : ''}
       ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" style="color:var(--bad);" onclick="cancelarFormulario('${f.id}')">🚫 Cancelar</button>` : ''}
