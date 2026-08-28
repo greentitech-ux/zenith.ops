@@ -9291,6 +9291,161 @@ setTimeout(async () => {
   if (!okOrdemFluxo) ruins += 1;
   console.log(`${okOrdemFluxo ? '✓' : '✗'} Relatórios do Carrinho: item com divergência sobe pro início; o resto mantém a ordem de sempre`);
 
+  // ------------------------------------------------------------------
+  // Janela de Mensagem do NOC: Enter envia, da pra falar com varios
+  // computadores de uma vez, a thread sai em ordem de relogio e o modal
+  // deixou de abrir ATRAS do modal de detalhe (tudo reportado pelo Master)
+  let okMensagemNoc = false;
+  try {
+    const fsM = require('fs');
+    const pathM = require('path');
+    const lojaM = require('./lojaStatus');
+    const htmlM = fsM.readFileSync(pathM.join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const srcIdxM = fsM.readFileSync(pathM.join(__dirname, 'index.js'), 'utf8');
+
+    // (1) envio pra varios: cada computador recebe na PROPRIA thread, e o
+    // mesmo destino repetido nao vira duas bolhas
+    await lojaM.heartbeat('UNI_MSG', 'pc1', { tipo: 'interno' });
+    await lojaM.heartbeat('UNI_MSG', 'pc2', { tipo: 'interno' });
+    const envio = await lojaM.enviarMensagemMuitos(
+      [{ codigo: 'UNI_MSG', posto: 'pc1' }, { codigo: 'UNI_MSG', posto: 'pc2' }, { codigo: 'UNI_MSG', posto: 'pc1' }],
+      'reiniciem o roteador', 'master@teste.local');
+    const det1 = await lojaM.detalhar('UNI_MSG', 'pc1');
+    const det2 = await lojaM.detalhar('UNI_MSG', 'pc2');
+    const bolhas1 = (det1 && det1.chatMensagens || []).filter(m => m.texto === 'reiniciem o roteador');
+    const bolhas2 = (det2 && det2.chatMensagens || []).filter(m => m.texto === 'reiniciem o roteador');
+
+    // (2) thread fora de ordem de chegada sai ordenada pelo relogio - foi o
+    // que o Master viu (bolha das 09:56 depois da de 09:58)
+    await lojaM.responderChat('UNI_MSG', 'pc2', 'RESPOSTA_ANTIGA');
+    const docRef = fakeDb.collection('lojaStatus').doc('UNI_MSG__pc2');
+    // regrava a thread embaralhada de proposito, com carimbos claros
+    await docRef.set({
+      chatMensagens: [
+        { de: 'master', texto: 'TERCEIRA', em: 3000 },
+        { de: 'computador', texto: 'PRIMEIRA', em: 1000 },
+        { de: 'master', texto: 'SEGUNDA', em: 2000 },
+      ],
+    }, { merge: true });
+    lojaM.descartarEspelhoTeste();
+    const threadOrdenada = await lojaM.responderChat('UNI_MSG', 'pc2', 'QUARTA');
+    const ordem = (threadOrdenada.chatMensagens || []).map(m => m.texto);
+
+    // (3) rota de massa existe e recusa envio sem destino / sem texto
+    let recusouSemDestino = false;
+    try { await lojaM.enviarMensagemMuitos([], 'oi', 'm@t'); } catch (e) { recusouSemDestino = /pelo menos um computador/i.test(e.message); }
+    let recusouSemTexto = false;
+    try { await lojaM.enviarMensagemMuitos([{ codigo: 'UNI_MSG', posto: 'pc1' }], '   ', 'm@t'); } catch (e) { recusouSemTexto = /Escreva a mensagem/i.test(e.message); }
+
+    // (4) Enter envia de verdade: executa teclaNaMensagem recortada do HTML
+    const fnTecla = htmlM.match(/function teclaNaMensagem\(ev\)\{[\s\S]*?\n\}/);
+    let enviouComEnter = false, quebrouComShift = false, barrouDefault = false;
+    if (fnTecla) {
+      let chamou = 0;
+      const rodar = new Function('enviarMensagemLoja', `${fnTecla[0]}; return teclaNaMensagem;`)(() => { chamou += 1; });
+      let previniu = 0;
+      rodar({ key: 'Enter', shiftKey: false, isComposing: false, preventDefault: () => { previniu += 1; } });
+      enviouComEnter = chamou === 1;
+      barrouDefault = previniu === 1;
+      rodar({ key: 'Enter', shiftKey: true, isComposing: false, preventDefault: () => { previniu += 1; } });
+      quebrouComShift = chamou === 1 && previniu === 1; // Shift+Enter nao envia nem bloqueia a quebra
+    }
+
+    const zModal = htmlM.match(/#msg-overlay,#editar-comp-overlay\{z-index:(\d+);\}/);
+    const zBase = htmlM.match(/\.overlay\{[^}]*z-index:(\d+)/);
+
+    const conf = {
+      // cada maquina fica com a mensagem no proprio historico
+      'os 2 computadores receberam': bolhas1.length === 1 && bolhas2.length === 1,
+      'destino repetido nao duplica a bolha': envio.enviados.length === 2,
+      'thread sai em ordem de relogio, nao de chegada':
+        ordem.join('>') === 'PRIMEIRA>SEGUNDA>TERCEIRA>QUARTA',
+      'sem destino é recusado': recusouSemDestino,
+      'sem texto é recusado': recusouSemTexto,
+      'a rota de envio em massa existe e passa pelo gate de suporte':
+        /app\.post\('\/api\/loja-status\/mensagem-massa', requireSection\('suporte'\)/.test(srcIdxM),
+      // a tela usa a rota de massa mesmo com 1 destino: um caminho so
+      'a tela manda a lista de destinos pra rota de massa':
+        /fetch\('\/api\/loja-status\/mensagem-massa'/.test(htmlM) && /destinos: MSG_DESTINOS/.test(htmlM),
+      'Enter envia': enviouComEnter && barrouDefault,
+      'Shift+Enter quebra linha em vez de enviar': quebrouComShift,
+      // era o bug do print: a caixa de mensagem abria ATRAS do detalhe
+      'a janela de mensagem fica na frente do modal de detalhe':
+        !!zModal && !!zBase && Number(zModal[1]) > Number(zBase[1]),
+      'da pra escolher mais computadores na propria janela':
+        /id="msg-picker"/.test(htmlM) && /function marcarDestinosMensagem/.test(htmlM),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okMensagemNoc = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}\n  ordem obtida: ${ordem.join('>')}`);
+  } catch (e) { okMensagemNoc = false; console.log('  erro: ' + e.message); }
+  if (!okMensagemNoc) ruins += 1;
+  console.log(`${okMensagemNoc ? '✓' : '✗'} NOC: mensagem vai pra vários computadores, Enter envia, thread em ordem e a janela não abre mais atrás`);
+
+  // ------------------------------------------------------------------
+  // Abastecimento: card de CONTAGEM em grade retratil. O paragrafo corrido
+  // com 15+ itens era ilegivel; agora e' grade, nasce FECHADO (pra nao
+  // empurrar o feed) e abre no clique
+  let okContagemGrade = false;
+  try {
+    const fsC = require('fs');
+    const pathC = require('path');
+    const htmlC = fsC.readFileSync(pathC.join(__dirname, 'public', 'abastecimento.html'), 'utf8');
+    const recorte = (nome) => {
+      const i = htmlC.indexOf('function ' + nome);
+      if (i < 0) throw new Error('função ' + nome + ' sumiu do abastecimento.html');
+      let d = 0, k = htmlC.indexOf('{', i);
+      for (;; k += 1) {
+        if (htmlC[k] === '{') d += 1;
+        else if (htmlC[k] === '}') { d -= 1; if (!d) break; }
+      }
+      return htmlC.slice(i, k + 1);
+    };
+    const fonte = ['contagemValor', 'contagemNome', 'blocoContagemHtml'].map(recorte).join('\n');
+    const montar = new Function('CONTAGEM_ABERTA', 'SABORES', 'SABOR_LABEL', 'escapeHtml',
+      `${fonte}; return blocoContagemHtml;`);
+    const abertas = new Set();
+    const bloco = montar(abertas, ['calabresa'], { calabresa: 'Calabresa' }, (x) => String(x));
+    const reg = {
+      id: 'reg1',
+      pizzas: { calabresa: 2 },
+      insumos: [
+        { insumoId: 'a', nome: 'Copos', embalagem: 'un', quantidade: 30 },
+        { insumoId: 'b', nome: 'Coca-Cola', embalagem: 'caixa', quantidade: 6, qtdPorCaixa: 12, totalUnidades: 72 },
+        { descricao: 'item antigo sem número', quantidade: 'meia caixa' },
+        { insumoId: 'c', nome: 'Sprite', embalagem: 'un', quantidade: 41 },
+      ],
+    };
+    const fechado = bloco(reg);
+    abertas.add('reg1');
+    const aberto = bloco(reg);
+    const ordemNomes = (aberto.match(/class="nome">([^<]+)</g) || []).map(x => x.replace(/.*">/, '').replace('<', ''));
+
+    const conf = {
+      // fechado: so o titulo com a contagem + as 3 maiores em uma linha
+      'nasce fechado (a grade não aparece)': /cont-grade fechado/.test(fechado),
+      'fechado mostra o resumo das maiores': /cont-resumo/.test(fechado) && /Coca-Cola 72/.test(fechado),
+      'um clique abre a grade': !/cont-grade fechado/.test(aberto) && /class="cont-cel"/.test(aberto),
+      'o título é botão de abrir/fechar': /alternarContagem\('reg1'\)/.test(fechado),
+      // caixa vira total de unidades: e' o que a loja confere na prateleira
+      'caixa vira total de unidades (6 cx de 12 = 72)': /class="num">72<i>un<\/i>/.test(aberto),
+      'maior primeiro': ordemNomes[0] === 'Coca-Cola' && ordemNomes[1] === 'Sprite' && ordemNomes[2] === 'Copos',
+      'item antigo sem número vai pro fim, sem sumir':
+        ordemNomes[ordemNomes.length - 1] === 'item antigo sem número' && ordemNomes.length === 4,
+      'massas continuam em bloco próprio': /cont-massa/.test(fechado),
+      // o estado tem que viver fora do render: o feed se redesenha no poll
+      'o que está aberto sobrevive ao redesenho do feed':
+        /const CONTAGEM_ABERTA = new Set\(\);/.test(htmlC) && /function renderLista\(\)/.test(htmlC),
+      'PEDIDO e ENVIO seguem como estavam':
+        /r\.tipo==='CONTAGEM' \? blocoContagemHtml\(r\) : `<div class="qtd-chips">/.test(htmlC),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okContagemGrade = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}\n  ordem obtida: ${ordemNomes.join(' > ')}`);
+  } catch (e) { okContagemGrade = false; console.log('  erro: ' + e.message); }
+  if (!okContagemGrade) ruins += 1;
+  console.log(`${okContagemGrade ? '✓' : '✗'} Abastecimento: CONTAGEM em grade retrátil (nasce fechada, abre no clique, maior primeiro)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

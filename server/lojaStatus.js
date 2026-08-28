@@ -1344,7 +1344,15 @@ async function adicionarNoChat(codigo, posto, entrada) {
   const id = docIdFor(codigo, posto);
   const snap = await COLLECTION.doc(id).get();
   const atual = snap.exists ? snap.data() : null;
-  const thread = [...((atual && atual.chatMensagens) || []), entrada].slice(-CHAT_MAX_MENSAGENS);
+  // ordena por 'em' ANTES de cortar: a thread ja apareceu fora de ordem no
+  // painel (bolha de 09:56 embaixo da de 09:58), porque a ordem do array era
+  // a ordem de chegada da escrita, nao a do relogio. Duas escritas
+  // concorrentes (Master enviando enquanto a maquina responde) bastam pra
+  // inverter. Ordenar aqui conserta o que ja esta gravado tambem, porque a
+  // proxima mensagem reordena a thread inteira
+  const thread = [...((atual && atual.chatMensagens) || []), entrada]
+    .sort((a, b) => (Number(a && a.em) || 0) - (Number(b && b.em) || 0))
+    .slice(-CHAT_MAX_MENSAGENS);
   const patchChat = { codigo, posto, chatMensagens: thread };
   await COLLECTION.doc(id).set(patchChat, { merge: true });
   espelharEscrita(id, patchChat);
@@ -1375,6 +1383,55 @@ async function enviarMensagem(codigo, posto, texto, deEmail) {
   // depender do efeito colateral do outro.
   await adicionarNoChat(codigo, posto, { de: 'master', texto: textoLimpo, deEmail: deEmail || null, em: Date.now() });
   return { codigo, posto, texto: textoLimpo };
+}
+
+// teto de destinos por envio. Nao e' limite de tela: cada destino custa 1
+// leitura + 2 escritas no Firestore (ver enviarMensagem/adicionarNoChat), e
+// um "manda pra todo mundo" sem teto vira conta cara sem ninguem perceber
+const CHAT_MAX_DESTINOS = 60;
+
+// mesma mensagem para varios computadores de uma vez - pedido do Master:
+// avisar o parque inteiro (ou uma unidade) sem reabrir a janela computador a
+// computador. Nao existe "thread coletiva": cada computador recebe a
+// mensagem na SUA thread, exatamente como se tivesse sido enviada sozinha,
+// entao o historico de cada maquina continua legivel do jeito que sempre foi
+async function enviarMensagemMuitos(destinos, texto, deEmail) {
+  const textoLimpo = String(texto || '').trim().slice(0, 500);
+  if (!textoLimpo) throw new Error('Escreva a mensagem.');
+  const vistos = new Set();
+  const lista = [];
+  for (const d of Array.isArray(destinos) ? destinos : []) {
+    const codigo = d && d.codigo ? String(d.codigo) : '';
+    const posto = d && d.posto ? String(d.posto) : '';
+    if (!codigo || !posto) continue;
+    const chave = `${codigo}|${posto}`;
+    // o mesmo computador escolhido duas vezes geraria duas bolhas iguais na
+    // thread dele - o Master ve isso como bug, nao como envio duplo
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    lista.push({ codigo, posto });
+  }
+  if (!lista.length) throw new Error('Escolha pelo menos um computador.');
+  if (lista.length > CHAT_MAX_DESTINOS) {
+    throw new Error(`Escolha no maximo ${CHAT_MAX_DESTINOS} computadores por envio.`);
+  }
+  const enviados = [];
+  const falhas = [];
+  // sequencial de proposito: 60 enviarMensagem em paralelo e' pico de
+  // escrita no Firestore sem ganho nenhum pra quem esta olhando o modal
+  for (const alvo of lista) {
+    try {
+      await enviarMensagem(alvo.codigo, alvo.posto, textoLimpo, deEmail);
+      enviados.push(alvo);
+    } catch (err) {
+      falhas.push({ ...alvo, erro: err.message });
+    }
+  }
+  // falha parcial NAO derruba o envio: quem recebeu, recebeu. So quando
+  // ninguem recebeu e' que vira erro, senao o painel diria "erro" depois de
+  // ter entregue a mensagem em 59 dos 60 computadores
+  if (!enviados.length) throw new Error(falhas.length ? falhas[0].erro : 'Nenhuma mensagem enviada.');
+  return { texto: textoLimpo, enviados, falhas };
 }
 
 // o NOCZenith reporta o que a pessoa digitou na janela flutuante de chat
@@ -1703,7 +1760,7 @@ async function flushHeartbeatsPendentes() {
 module.exports = {
   flushHeartbeatsPendentes,
   heartbeat, listar, listarResumo, detalhar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
-  definirAnydeskId, enviarMensagem, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR, ehCelular,
+  definirAnydeskId, enviarMensagem, enviarMensagemMuitos, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR, ehCelular,
   getConfig, setConfig, pushAcessoRemotoAtivo, definirApelidoDispositivo,
   listarTiposDispositivo, idDoTipoDispositivo, TIPOS_DISPOSITIVO_BASE,
   // SÓ pra testeRotas: DESCARTA o espelho em vez de só vencer a validade.
