@@ -55,10 +55,54 @@ async function mapa() {
   return out;
 }
 
+// Duas unidades com o MESMO NOME e codigos diferentes eram aceitas ate
+// aqui, e o resultado aparecia no seletor do RH: "Dom Bessa" tres vezes,
+// sem jeito de saber qual e' qual. O guard de codigo (abaixo) nunca pegou
+// isso porque os codigos ERAM diferentes - o que se repetia era o rotulo.
+//
+// O codigo continua sendo a identidade (ja esta gravado em funcionario do
+// RH, permissao de usuario, fechamento), e por isso NAO se funde nada aqui:
+// o que este guard faz e' impedir que NASCA duplicata nova. As que ja
+// existem o Master resolve na tela, apagando o cadastro extra que sobrou -
+// ver diagnosticarNomesRepetidos.
+function nomeNormalizado(v) {
+  return String(v == null ? '' : v)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+// grupos de codigos que compartilham o MESMO nome. `fixas` e' o mapa
+// {codigo: nome} das listas fixas do index.js - a duplicata mais comum e'
+// justamente entre uma fixa e um cadastro extra, entao olhar so a colecao
+// nao acharia nada.
+function agruparPorNome(fixas, extras) {
+  const porNome = new Map();
+  const juntar = (codigo, nome, origem) => {
+    const chave = nomeNormalizado(nome);
+    if (!chave) return;
+    if (!porNome.has(chave)) porNome.set(chave, { nome, codigos: [] });
+    porNome.get(chave).codigos.push({ codigo, origem });
+  };
+  Object.entries(fixas || {}).forEach(([c, n]) => juntar(c, n, 'fixa'));
+  (extras || []).forEach((u) => juntar(u.codigo, u.nome, 'cadastrada'));
+  return porNome;
+}
+
+// o que o Master ve na tela: so os nomes que aparecem mais de uma vez, com
+// os codigos de cada um e de onde vem (fixa nao da pra apagar; cadastrada
+// da). Nao decide nada - quem escolhe qual codigo fica e' ele, porque so
+// ele sabe qual tem lancamento gravado.
+async function diagnosticarNomesRepetidos(fixas) {
+  const grupos = agruparPorNome(fixas, await listAll());
+  return [...grupos.values()]
+    .filter((g) => g.codigos.length > 1)
+    .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+}
+
 // "codigosReservados" vem de index.js (uniao das listas fixas) - um codigo
 // que ja existe fixo nao pode ser recadastrado aqui, senao viravam duas
 // fontes de verdade pro mesmo lugar
-async function criar({ codigo, nome, areas, tiposSolicitacao, porEmail }, codigosReservados) {
+async function criar({ codigo, nome, areas, tiposSolicitacao, porEmail }, codigosReservados, nomesReservados) {
   const nomeLimpo = String(nome || '').trim().slice(0, 60);
   if (!nomeLimpo) throw new Error('Informe o nome da unidade.');
   const codigoLimpo = String(codigo || nomeLimpo).trim().slice(0, 60);
@@ -69,6 +113,16 @@ async function criar({ codigo, nome, areas, tiposSolicitacao, porEmail }, codigo
   const existentes = await listAll();
   if (existentes.some((u) => u.codigo === codigoLimpo)) {
     throw new Error('Já existe uma unidade cadastrada com esse código.');
+  }
+  // nome repetido vira duas linhas iguais em TODO seletor do sistema, e
+  // quem escolhe não tem como saber qual é qual
+  const alvo = nomeNormalizado(nomeLimpo);
+  if (nomesReservados && nomesReservados.has(alvo)) {
+    throw new Error(`Já existe uma unidade chamada "${nomeLimpo}" nas unidades fixas do sistema. Use outro nome, ou edite o nome da unidade existente.`);
+  }
+  const mesmoNome = existentes.find((u) => nomeNormalizado(u.nome) === alvo);
+  if (mesmoNome) {
+    throw new Error(`Já existe uma unidade cadastrada com o nome "${nomeLimpo}" (código ${mesmoNome.codigo}). Dois nomes iguais ficam impossíveis de diferenciar no seletor.`);
   }
   const ref = COLLECTION.doc();
   const registro = {
@@ -87,12 +141,22 @@ async function criar({ codigo, nome, areas, tiposSolicitacao, porEmail }, codigo
 
 // so o NOME e editavel - o codigo e identidade (ja pode estar gravado em
 // funcionarios do RH, permissoes de usuario, fechamentos...)
-async function atualizar(id, { nome, areas, tiposSolicitacao }) {
+async function atualizar(id, { nome, areas, tiposSolicitacao }, nomesReservados) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Unidade não encontrada.');
   const nomeLimpo = String(nome || '').trim().slice(0, 60);
   if (!nomeLimpo) throw new Error('Informe o nome da unidade.');
+  // mesma regra do criar - senão a duplicata que o criar barra entra por
+  // uma renomeação
+  const alvoNome = nomeNormalizado(nomeLimpo);
+  if (nomesReservados && nomesReservados.has(alvoNome)) {
+    throw new Error(`Já existe uma unidade chamada "${nomeLimpo}" nas unidades fixas do sistema. Use outro nome.`);
+  }
+  const outroIgual = (await listAll()).find((u) => u.id !== id && nomeNormalizado(u.nome) === alvoNome);
+  if (outroIgual) {
+    throw new Error(`Já existe outra unidade com o nome "${nomeLimpo}" (código ${outroIgual.codigo}).`);
+  }
   const patch = { nome: nomeLimpo, atualizadoEm: new Date().toISOString() };
   // undefined = não mexeu; array (mesmo vazio) = está definindo
   if (areas !== undefined) patch.areas = listaVaziaOuValida(areas, AREAS_VALIDAS);
@@ -188,6 +252,7 @@ async function remover(id) {
 module.exports = {
   AREAS_VALIDAS, TIPOS_SOLICITACAO_VALIDOS,
   listAll, mapa, criar, atualizar, remover, upsertPerfil,
+  nomeNormalizado, agruparPorNome, diagnosticarNomesRepetidos,
   perfil, apareceEm, aceitaTipo, filtrarMapaPorArea, codigosRestritosDe,
   invalidar: () => cache.invalidar(),
 };

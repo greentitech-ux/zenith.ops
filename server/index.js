@@ -2695,6 +2695,30 @@ function codigosUnidadesFixas() {
   ]);
 }
 
+// o mesmo, mas dos NOMES. O guard de código nunca pegou a duplicata que o
+// Master viu no seletor do RH ("Dom Bessa" três vezes): os códigos eram
+// diferentes - o que se repetia era o rótulo, e é ele que a pessoa lê.
+function mapaUnidadesFixas() {
+  return {
+    ...FECHAMENTO_UNIDADES_NOMES,
+    ...ENTREGAS_UNIDADES_NOMES,
+    ...ifoodClient.IFOOD_UNIDADES_NOMES,
+  };
+}
+function nomesUnidadesFixas() {
+  return new Set(Object.values(mapaUnidadesFixas()).map(unidadesExtras.nomeNormalizado));
+}
+
+// as duplicatas que JÁ existem - o guard acima só impede as novas. Master-only
+// porque é ele quem apaga o cadastro extra que sobrou (em /grupos.html).
+app.get('/api/meta/unidades-duplicadas', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await unidadesExtras.diagnosticarNomesRepetidos(mapaUnidadesFixas()));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/meta/unidades-extras', auth.requireMaster, async (req, res) => {
   try {
     // código excluído em definitivo (ver CODIGOS_REMOVIDOS) não volta por
@@ -2710,7 +2734,7 @@ app.post('/api/meta/unidades-extras', auth.requireMaster, async (req, res) => {
       areas: req.body.areas, tiposSolicitacao: req.body.tiposSolicitacao,
     };
     if (await desviarSeQaMaster(req, res, 'unidadesExtras.criar', `Cadastrar unidade: ${req.body?.nome || req.body?.codigo || ''}`, { dados })) return;
-    res.json(await invalidandoUnidadesMapa(unidadesExtras.criar(dados, codigosUnidadesFixas())));
+    res.json(await invalidandoUnidadesMapa(unidadesExtras.criar(dados, codigosUnidadesFixas(), nomesUnidadesFixas())));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -2720,7 +2744,7 @@ app.patch('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res) 
   try {
     const patch = { nome: req.body.nome, areas: req.body.areas, tiposSolicitacao: req.body.tiposSolicitacao };
     if (await desviarSeQaMaster(req, res, 'unidadesExtras.editar', `Editar unidade ${req.params.id}`, { id: req.params.id, ...patch })) return;
-    res.json(await invalidandoUnidadesMapa(unidadesExtras.atualizar(req.params.id, patch)));
+    res.json(await invalidandoUnidadesMapa(unidadesExtras.atualizar(req.params.id, patch, nomesUnidadesFixas())));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
