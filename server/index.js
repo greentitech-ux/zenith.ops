@@ -3553,6 +3553,24 @@ app.post('/api/formularios/:id/depositante', requireSection('formularios'), asyn
   }
 });
 
+// Anexo em formulário JÁ criado, de qualquer tipo - Master-only, como o
+// Master pediu. Não confundir com /reabrir-anexo, que é o Ass. Boleto
+// TROCANDO o documento que vai ser assinado; aqui só se acrescenta.
+app.post('/api/formularios/:id/anexos', auth.requireMaster, upload.array('anexos', 5), async (req, res) => {
+  try {
+    const anexos = [];
+    for (const file of req.files || []) {
+      const tipoOk = /^image\//.test(file.mimetype || '') || file.mimetype === 'application/pdf';
+      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF nem imagem.` });
+      const path = await storage.salvarArquivo(req.params.id, file, 'formularios');
+      anexos.push({ nome: file.originalname, path, tipo: file.mimetype });
+    }
+    res.json(await formularios.adicionarAnexos(req.params.id, anexos, { porEmail: req.user.email }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/formularios/:id/reabrir-anexo', auth.requireMaster, async (req, res) => {
   try {
     const dados = { porEmail: req.user.email };

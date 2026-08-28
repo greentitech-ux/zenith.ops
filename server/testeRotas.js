@@ -9666,6 +9666,40 @@ setTimeout(async () => {
       'link inválido não serve pra subir arquivo':
         /if \(!registro \|\| !formularios\.chaveDoToken\(registro, corpo\.token\)\) \{[\s\S]{0,120}return res\.status\(400\)/.test(srcIdxD),
       'a lista avisa quando falta o comprovante': /function faltaComprovanteDeposito\(f\)/.test(htmlForms),
+      // Pedido do Master: "todos os formularios ... opcao de adicionar
+      // ANEXO ... so o master tem essa opcao". Até então só dava pra anexar
+      // na criação, e o comprovante que chega depois não tinha onde entrar.
+      'dá pra anexar num formulário já criado, de qualquer tipo':
+        await (async () => {
+          const jaCriado = await forms.criar({ ...baseDep, campos: { nomeGerente: 'Ana Lima' } });
+          const depois = await forms.adicionarAnexos(jaCriado.id, [
+            { nome: 'nota.pdf', path: 'formularios/x/nota.pdf', tipo: 'application/pdf' },
+          ], { porEmail: 'master@teste.local' });
+          const an = (depois.anexos || [])[0] || {};
+          return depois.anexos.length === 1 && an.anexadoPorEmail === 'master@teste.local' && !!an.anexadoEm;
+        })(),
+      'anexar depois NÃO descarta a assinatura já colhida':
+        await (async () => {
+          const f2 = await forms.criar({ ...baseDep, campos: { nomeGerente: 'Ana Lima' } });
+          const g = f2.assinaturas.find((a) => a.chave === 'gerente');
+          await forms.assinar(f2.id, g.token, { nome: 'Ana Lima', imagem: PNG_1PX });
+          const depois = await forms.adicionarAnexos(f2.id, [
+            { nome: 'extra.jpg', path: 'formularios/y/extra.jpg', tipo: 'image/jpeg' },
+          ], { porEmail: 'master@teste.local' });
+          const g2 = depois.assinaturas.find((a) => a.chave === 'gerente');
+          return !!g2 && g2.assinado === true && depois.status === 'ASSINADO';
+        })(),
+      'formulário cancelado não recebe anexo':
+        await (async () => {
+          const f3 = await forms.criar({ ...baseDep, campos: { nomeGerente: 'Ana Lima' } });
+          await forms.cancelar(f3.id, { motivo: 'teste', porEmail: 'm@t' });
+          try { await forms.adicionarAnexos(f3.id, [{ nome: 'x.pdf', path: 'p/x.pdf', tipo: 'application/pdf' }], {}); return false; }
+          catch (e) { return /cancelado não recebe anexo/i.test(e.message); }
+        })(),
+      'a rota de anexo é Master-only':
+        /app\.post\('\/api\/formularios\/:id\/anexos', auth\.requireMaster, upload\.array\('anexos', 5\)/.test(srcIdxD),
+      'o botão de anexar só aparece pro Master, em qualquer tipo':
+        /\$\{SOU_MASTER && !cancelado \? `<button type="button" class="btn-ghost" onclick="escolherAnexoDepois\('\$\{f\.id\}'\)"/.test(htmlForms),
       'o botão de pedir só aparece no Depósito sem depositante':
         /f\.tipo==='deposito' && !temDepositante\(f\)/.test(htmlForms),
     };
