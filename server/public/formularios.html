@@ -52,6 +52,14 @@
   .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:var(--sans);}
   .btn-mini{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 9px;font-size:11.5px;cursor:pointer;font-family:var(--sans);}
   .total{font-family:var(--mono);font-size:13px;margin-top:10px;text-align:right;}
+  .anexos-lista{display:flex;flex-direction:column;gap:5px;margin-top:7px;}
+  .anexo-item{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;padding:6px 9px;font-size:12.5px;}
+  .anexo-item .nome{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .anexo-item .tam{font-family:var(--mono);font-size:10px;color:var(--muted);flex:none;}
+  .anexo-item .tirar{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:0 2px;}
+  .anexo-item .tirar:hover{color:var(--bad);}
+
   .msg{margin-top:10px;font-size:12.5px;padding:10px 12px;border-radius:8px;}
   .msg.err{background:#3a1616;color:var(--bad);}
   .badge{display:inline-block;font-family:var(--mono);font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:99px;}
@@ -146,7 +154,12 @@
       </div>
 
       <label id="lbl-anexos">📎 Comprovantes da solicitação (PDF ou imagem, até 5 — opcional)</label>
-      <input type="file" id="f-anexos" multiple accept="image/*,application/pdf">
+      <!-- o input nativo SUBSTITUI a seleção a cada escolha: pegar um
+           arquivo e depois outro deixava só o último, e no celular (uma foto
+           por vez) era impossível mandar dois. Aqui ele só COLETA - a lista
+           de verdade é ANEXOS_ESCOLHIDOS, que soma. -->
+      <input type="file" id="f-anexos" multiple accept="image/*,application/pdf" onchange="somarAnexos(this)">
+      <div id="anexos-lista" class="anexos-lista"></div>
 
       <div class="msg err hidden" id="msg-criar"></div>
       <button type="button" class="btn" id="btn-criar" style="margin-top:12px;width:100%;" onclick="criar()">💾 Criar formulário e gerar links de assinatura</button>
@@ -346,6 +359,7 @@ function escolherTipo(tipo){
   document.querySelectorAll('#campos input[data-campo="cpf"], #campos input[data-campo="cnpjFavorecido"]')
     .forEach(el=> el.addEventListener('input', ()=>buscarFavorecido(el)));
   document.getElementById('f-anexos').value = '';
+  limparAnexos();
   // Ass. Boleto: sem tabela de itens (o documento anexado É o conteúdo).
   // O link de preenchimento continua disponível pros dois casos: aqui é a
   // loja que já tem o boleto em mãos e anexa direto; lá é o favorecido que
@@ -473,7 +487,7 @@ async function criar(){
     card.querySelectorAll('input[data-col]').forEach(el=>{ l[el.dataset.col] = valorCampo(el); });
     return combinarIntervalosDaLinha(l);
   });
-  const arquivos = document.getElementById('f-anexos').files;
+  const arquivos = ANEXOS_ESCOLHIDOS;
   if(m.anexoObrigatorio && !arquivos.length){
     msg.textContent = 'Anexe o boleto (PDF ou imagem) - é ele que vai ser assinado.';
     msg.classList.remove('hidden');
@@ -496,6 +510,51 @@ async function criar(){
   }catch(e){
     msg.textContent = e.message; msg.classList.remove('hidden');
   }finally{ btn.disabled = false; }
+}
+
+// ---------------------------------------------------------------------
+// ANEXOS QUE SOMAM. O <input type="file"> nativo troca a seleção inteira a
+// cada escolha - quem pegava um comprovante e depois outro ficava só com o
+// último, sem aviso nenhum. E no celular, onde a câmera manda uma foto por
+// vez, mandar dois era simplesmente impossível.
+//
+// Então o input passou a ser só o coletor: o que vale é esta lista, que
+// soma o que chegar e mostra o que já está lá pra conferir antes de salvar.
+const MAX_ANEXOS_TELA = 5;
+let ANEXOS_ESCOLHIDOS = [];
+
+function somarAnexos(input){
+  const msg = document.getElementById('msg-criar');
+  const recusados = [];
+  for(const arq of input.files || []){
+    if(ANEXOS_ESCOLHIDOS.length >= MAX_ANEXOS_TELA){ recusados.push(`${arq.name} (limite de ${MAX_ANEXOS_TELA})`); continue; }
+    const tipoOk = /^image\//.test(arq.type || '') || arq.type === 'application/pdf';
+    if(!tipoOk){ recusados.push(`${arq.name} (não é PDF nem imagem)`); continue; }
+    // mesmo arquivo escolhido duas vezes por engano não vira anexo repetido
+    if(ANEXOS_ESCOLHIDOS.some(a => a.name === arq.name && a.size === arq.size)) continue;
+    ANEXOS_ESCOLHIDOS.push(arq);
+  }
+  // zera o input pra escolher O MESMO arquivo de novo disparar onchange
+  // (sem isso, remover da lista e reescolher não funcionaria)
+  input.value = '';
+  if(recusados.length){
+    msg.textContent = 'Não entrou: ' + recusados.join(' · ');
+    msg.classList.remove('hidden');
+  }else{
+    msg.classList.add('hidden');
+  }
+  renderAnexosEscolhidos();
+}
+function tirarAnexo(i){ ANEXOS_ESCOLHIDOS.splice(i, 1); renderAnexosEscolhidos(); }
+function limparAnexos(){ ANEXOS_ESCOLHIDOS = []; renderAnexosEscolhidos(); }
+function renderAnexosEscolhidos(){
+  const el = document.getElementById('anexos-lista');
+  el.innerHTML = ANEXOS_ESCOLHIDOS.map((a, i) => `<div class="anexo-item">
+    <span>${/^image\//.test(a.type||'') ? '🖼️' : '📄'}</span>
+    <span class="nome">${escapeHtml(a.name)}</span>
+    <span class="tam">${(a.size/1024).toFixed(0)} KB</span>
+    <button type="button" class="tirar" title="Tirar da lista" onclick="tirarAnexo(${i})">✕</button>
+  </div>`).join('');
 }
 
 function copiar(texto){

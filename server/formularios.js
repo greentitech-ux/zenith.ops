@@ -964,6 +964,81 @@ async function desenharFaixa(out, pagina, r, fonte, negrito, assinadas, comAssin
 // disposicao: 'inline' abre no visualizador do navegador, 'attachment' baixa.
 // Ver e baixar sao coisas diferentes: quem so quer conferir nao devia acabar
 // com uma pasta de Downloads cheia de PDF que olhou uma vez.
+// ---------------------------------------------------------------------
+// NOME DO ARQUIVO. Pedido do Master: "sempre que salvar um Formulario,
+// seja ele qual for, apareca o nome do beneficiario/data/hora ... precisa
+// ter um padrao claro e objetivo facil de identificar". Antes saia
+// "deposito-Spoleto_Tacaruna.pdf": dois depositos da mesma loja geravam o
+// MESMO nome, e o navegador ia empilhando (1), (2) - impossivel saber qual
+// era qual sem abrir.
+//
+// O padrao, na ordem em que se le:
+//
+//   Deposito_Spoleto-Tacaruna_Carlos-Souza_2026-08-28_14h32_Ticket-10042.pdf
+//   \_______/ \_____________/ \__________/ \_____________/ \____________/
+//     o que        onde         de quem        quando          qual
+//
+// Cada pedaco existe por um motivo:
+//   - TIPO e UNIDADE: e' o que ja tinha, e continua sendo o primeiro corte
+//     na hora de procurar (e agrupa sozinho na ordem alfabetica da pasta).
+//   - BENEFICIARIO: o pedido em si. Some quando o formulario nao tem um -
+//     "sem-nome" no meio do arquivo seria pior que nada (regra do
+//     CLAUDE.md §6: dado que nao existe nao vira texto).
+//   - DATA e HORA de CRIACAO (nao do download): e' um dado DO documento.
+//     Usar a hora do download faria o mesmo formulario baixar com nomes
+//     diferentes a cada vez, que e' exatamente a duplicata que ele quer
+//     evitar. Em Brasilia, pra bater com o que a tela mostra.
+//   - TICKET: o desambiguador final. Dois lancamentos iguais no mesmo
+//     minuto ainda sao arquivos distintos, e o numero e' a chave que liga
+//     o PDF ao registro na Central.
+const FUSO_BR_ARQUIVO = 'America/Sao_Paulo';
+
+// pedaco seguro de nome de arquivo: sem acento, sem espaco, sem simbolo -
+// so o que qualquer sistema de arquivos e qualquer navegador aceitam
+function pedacoDoNome(v, max = 40) {
+  const limpo = String(v == null ? '' : v)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return limpo.slice(0, max).replace(/-+$/g, '');
+}
+
+// quem é o beneficiário DESTE formulário. Cada tipo guarda isso num campo
+// diferente, e a ordem abaixo é da pessoa mais específica pra menos:
+// favorecido (avulso/RH/boleto) > quem fez o depósito > gerente da unidade.
+function beneficiarioDoFormulario(r) {
+  const c = (r && r.campos) || {};
+  return c.favorecido || c.depositante || c.nomeGerente || '';
+}
+
+function dataHoraDoNome(iso) {
+  const d = iso ? new Date(iso) : null;
+  if (!d || Number.isNaN(d.getTime())) return [];
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: FUSO_BR_ARQUIVO, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(d);
+  const o = {};
+  partes.forEach((x) => { if (x.type !== 'literal') o[x.type] = x.value; });
+  if (!o.year) return [];
+  return [`${o.year}-${o.month}-${o.day}`, `${o.hour}h${o.minute}`];
+}
+
+// UM nome pros dois caminhos de PDF (formulário desenhado e Ass. Boleto):
+// padrão único era o pedido, e dois montadores separados viravam dois
+// padrões na primeira vez que alguém mexesse em um só
+function nomeArquivoPdf(r) {
+  const modelo = TIPOS[r.tipo] || {};
+  const pedacos = [
+    pedacoDoNome(modelo.rotulo || r.tipo, 28),
+    pedacoDoNome(r.unidade, 32),
+    pedacoDoNome(beneficiarioDoFormulario(r), 32),
+    ...dataHoraDoNome(r.criadoEm),
+    r.numeroTicket != null ? `Ticket-${r.numeroTicket}` : pedacoDoNome(r.id, 12),
+  ];
+  return pedacos.filter(Boolean).join('_');
+}
+
 function dispPdf(res, nome, inline) {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${nome}.pdf"`);
@@ -1047,7 +1122,7 @@ async function gerarPdfAnexoAssinado(r, res, opcoes) {
   }
 
   const bytes = Buffer.from(await out.save());
-  dispPdf(res, `boleto-assinado-${r.numeroTicket || r.id}`, opcoes && opcoes.inline);
+  dispPdf(res, nomeArquivoPdf(r), opcoes && opcoes.inline);
   res.end(bytes);
 }
 
@@ -1057,7 +1132,7 @@ async function gerarPdf(r, res, opcoes) {
   // não um formulário desenhado aqui
   if (modelo && modelo.soAnexo) return gerarPdfAnexoAssinado(r, res, opcoes);
   const doc = new PDFDocument({ margin: 40, size: 'A4' });
-  dispPdf(res, `${r.tipo}-${r.unidade.replace(/[^a-zA-Z0-9-]+/g, '_')}`, opcoes && opcoes.inline);
+  dispPdf(res, nomeArquivoPdf(r), opcoes && opcoes.inline);
   // SEM anexo: streaming direto pro navegador, como sempre foi - nao ha
   // motivo pra segurar o PDF inteiro na memoria.
   // COM anexo: precisa juntar as paginas depois (pdfkit so escreve, quem
@@ -1260,6 +1335,7 @@ async function gerarPdf(r, res, opcoes) {
 }
 
 module.exports = { TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, editar, cancelar, remover, gerarPdf, chaveDoToken, parseValor,
+  nomeArquivoPdf, beneficiarioDoFormulario,
   pedirComprovanteDeposito, comprovanteObrigatorio, temDepositanteProprio,
   criarParaPreenchimento, vistaPreenchimento, salvarPreenchimento, cancelarPreenchimento, marcarEnviadoPagamento,
   reabrirAnexo,
