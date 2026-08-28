@@ -10933,11 +10933,11 @@ app.post('/api/mensagens/enviar', auth.requireAuth, async (req, res) => {
     const alvo = userId ? await auth.getUserById(userId) : null;
     if (!alvo) return res.status(400).json({ error: 'Selecione quem vai receber.' });
     const conversa = await mensagensDiretas.enviar({
-      deId: req.user.id, deEmail: req.user.email,
-      paraId: userId, paraEmail: alvo.email,
+      deId: req.user.id, deEmail: req.user.email, deUsername: req.user.username || null,
+      paraId: userId, paraEmail: alvo.email, paraUsername: alvo.username || null,
       texto: req.body.texto,
     });
-    avisarMensagemDireta(userId, conversa.id, req.user.email, req.body.texto);
+    avisarMensagemDireta(userId, conversa.id, req.user.username || req.user.email, req.body.texto);
     res.json({ ok: true, id: conversa.id });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -10947,10 +10947,14 @@ app.post('/api/mensagens/enviar', auth.requireAuth, async (req, res) => {
 // aviso de "tem conversa pra abrir" - as duas entregas de sempre (SSE pra
 // quem está com o NoPulso aberto em qualquer tela, push pra quem fechou o
 // app). O texto vai junto só pra prévia; a mensagem de verdade está gravada.
-function avisarMensagemDireta(userId, conversaId, deEmail, texto) {
+// deNome: como quem mandou aparece pra quem recebe - username com o e-mail
+// de reserva (ver nomeDe em mensagensDiretas.js). O campo do broadcast
+// continua se chamando deEmail porque é o nome que suporte-chat.js já lê;
+// o que mudou é o CONTEÚDO, que virou o nome de usuário.
+function avisarMensagemDireta(userId, conversaId, deNome, texto) {
   const previa = String(texto || '').trim().slice(0, 140);
-  broadcastParaUsuario(userId, 'mensagem-direta', { conversaId, previa, deEmail, em: Date.now() });
-  push.notifyUsuario(userId, `Mensagem de ${deEmail}`, previa, 'mensagem-direta-' + conversaId, '/painel.html')
+  broadcastParaUsuario(userId, 'mensagem-direta', { conversaId, previa, deEmail: deNome, em: Date.now() });
+  push.notifyUsuario(userId, `Mensagem de ${deNome}`, previa, 'mensagem-direta-' + conversaId, '/painel.html')
     .catch((err) => console.error('Erro no push de mensagem direta:', err.message));
 }
 
@@ -10972,12 +10976,16 @@ async function avisarLoginDesbloqueado(userId, { porId, porEmail, pedirTrocaSenh
     // sem aprovador identificado (ex: fila QA) fica só o push abaixo
     if (porId && String(porId) !== String(userId)) {
       const alvo = await auth.getUserById(userId).catch(() => null);
+      // quem aprovou pode vir só com o e-mail (fila QA, ação de agente) -
+      // aí o username sai do próprio cadastro em vez de ficar sem nome
+      const quemAprovou = porId ? await auth.getUserById(porId).catch(() => null) : null;
       const conversa = await mensagensDiretas.enviar({
-        deId: porId, deEmail: porEmail || null,
-        paraId: userId, paraEmail: (alvo && alvo.email) || null,
+        deId: porId, deEmail: porEmail || null, deUsername: (quemAprovou && quemAprovou.username) || null,
+        paraId: userId, paraEmail: (alvo && alvo.email) || null, paraUsername: (alvo && alvo.username) || null,
         texto,
       });
-      broadcastParaUsuario(userId, 'mensagem-direta', { conversaId: conversa.id, previa: texto.slice(0, 140), deEmail: porEmail || null, em: Date.now() });
+      const deNome = (quemAprovou && quemAprovou.username) || porEmail || null;
+      broadcastParaUsuario(userId, 'mensagem-direta', { conversaId: conversa.id, previa: texto.slice(0, 140), deEmail: deNome, em: Date.now() });
     }
   } catch (e) {
     console.error('Aviso de desbloqueio (mensagem direta) não foi:', e.message);
@@ -11001,11 +11009,11 @@ app.get('/api/mensagens/:id', auth.requireAuth, async (req, res) => {
 app.post('/api/mensagens/:id/responder', auth.requireAuth, async (req, res) => {
   try {
     const conversa = await mensagensDiretas.responder(req.params.id, {
-      deId: req.user.id, deEmail: req.user.email, texto: req.body.texto,
+      deId: req.user.id, deEmail: req.user.email, deUsername: req.user.username || null, texto: req.body.texto,
     });
     // avisa o outro lado do mesmo jeito - resposta também é mensagem direta
     const outro = (conversa.participantes || []).find((p) => p !== String(req.user.id));
-    if (outro) avisarMensagemDireta(outro, conversa.id, req.user.email, req.body.texto);
+    if (outro) avisarMensagemDireta(outro, conversa.id, req.user.username || req.user.email, req.body.texto);
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });

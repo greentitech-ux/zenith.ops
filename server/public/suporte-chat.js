@@ -877,7 +877,10 @@
     if (dmCardAviso && dmCardAviso.parentNode) dmCardAviso.parentNode.removeChild(dmCardAviso);
     dmCardAviso = null;
     if (!total || dmFundo.classList.contains('szc-dm-on')) return;
-    const quem = DM.conversas.filter((c) => c.naoLidas).map((c) => (c.com && c.com.email) || 'Suporte');
+    // nome do usuario, nao o e-mail (pedido do Master). `nome` ja vem
+    // resolvido do servidor (username com o e-mail de reserva); conversa
+    // antiga, sem username gravado, continua caindo no e-mail
+    const quem = DM.conversas.filter((c) => c.naoLidas).map((c) => (c.com && (c.com.nome || c.com.email)) || 'Suporte');
     dmCardAviso = el(`<div class="szc-pp-card" style="border-color:#ff5c5c;">
       <button type="button" class="szc-pp-fechar" title="Fechar">✕</button>
       <div class="szc-pp-titulo">💬 ${total} mensagem(ns) esperando você</div>
@@ -917,7 +920,7 @@
     DM.conversas.forEach((c) => {
       const ultima = (c.mensagens || [])[c.mensagens.length - 1] || {};
       const item = el(`<button type="button" class="szc-dm-item">
-        <span class="szc-dm-nome">${esc((c.com && c.com.email) || 'Suporte')}
+        <span class="szc-dm-nome">${esc((c.com && (c.com.nome || c.com.email)) || 'Suporte')}
           <span class="szc-dm-previa">${esc(String(ultima.texto || '').slice(0, 60))}</span></span>
         ${c.naoLidas ? `<span class="szc-dm-pino">${c.naoLidas}</span>` : ''}
       </button>`);
@@ -931,7 +934,7 @@
     if (!conversa) return;
     DM.abertaId = id;
     dmVoltar.style.display = DM.conversas.length > 1 ? 'block' : 'none';
-    dmTitulo.textContent = (conversa.com && conversa.com.email) || 'Suporte';
+    dmTitulo.textContent = (conversa.com && (conversa.com.nome || conversa.com.email)) || 'Suporte';
     dmDe.textContent = 'Mensagem direta';
     dmLista.style.display = 'none';
     dmCorpo.style.display = 'flex';
