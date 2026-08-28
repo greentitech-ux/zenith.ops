@@ -9446,6 +9446,69 @@ setTimeout(async () => {
   if (!okContagemGrade) ruins += 1;
   console.log(`${okContagemGrade ? '✓' : '✗'} Abastecimento: CONTAGEM em grade retrátil (nasce fechada, abre no clique, maior primeiro)`);
 
+  // ------------------------------------------------------------------
+  // Pergunta do Master: "por que esta dando essa divergencia" - formulário
+  // com período 25→27, entradas 66,90 + 0 + 77,80, e o esperado dizendo
+  // R$ 77,80. Não é erro de conta: o "De" do período é a FRONTEIRA (o dia
+  // que a retirada anterior já cobriu), não o primeiro dia contado. O que
+  // faltava era a tela DIZER isso.
+  let okJanelaCaixa = false;
+  try {
+    const fsJ = require('fs');
+    const pathJ = require('path');
+    const htmlJ = fsJ.readFileSync(pathJ.join(__dirname, 'public', 'lancamento.html'), 'utf8');
+    const srcIdxJ = fsJ.readFileSync(pathJ.join(__dirname, 'index.js'), 'utf8');
+    const painel = require('./saidasPainel');
+    const sangriasMod = require('./sangrias');
+
+    // reproduz o caso do print: 3 fechamentos e uma sangria anterior que
+    // fechou o ciclo em 25/08
+    const fechamentosJ = [
+      { id: 'fJ1', unidade: 'UNI_JAN', unidadeNome: 'Spo Tacaruna', data: '2026-08-25', entradaDinheiro: 66.90, faturamento: 2995.99 },
+      { id: 'fJ2', unidade: 'UNI_JAN', unidadeNome: 'Spo Tacaruna', data: '2026-08-26', entradaDinheiro: 0, faturamento: 1166.31 },
+      { id: 'fJ3', unidade: 'UNI_JAN', unidadeNome: 'Spo Tacaruna', data: '2026-08-27', entradaDinheiro: 77.80, faturamento: 4149.61 },
+    ];
+    await sangriasMod.criar({
+      unidade: 'UNI_JAN', unidadeNome: 'Spo Tacaruna', data: '2026-08-24', valor: 500,
+      periodoInicio: '2026-08-20', periodoFim: '2026-08-25',
+      nomeDepositante: 'gerente', criadoPorEmail: 'm@t',
+    });
+    const caixa = await painel.calcularSaldoCaixa({ unidade: 'UNI_JAN', ate: '2026-08-27' }, fechamentosJ);
+
+    // e sem retirada anterior nenhuma, a fronteira é o piso - e aí NÃO pode
+    // dizer "já entrou na retirada anterior", que seria mentira
+    const caixaSemRetirada = await painel.calcularSaldoCaixa({ unidade: 'UNI_JAN2', ate: '2026-08-27' }, [
+      { id: 'fJ4', unidade: 'UNI_JAN2', unidadeNome: 'Outra', data: '2026-08-25', entradaDinheiro: 66.90, faturamento: 100 },
+      { id: 'fJ5', unidade: 'UNI_JAN2', unidadeNome: 'Outra', data: '2026-08-27', entradaDinheiro: 77.80, faturamento: 100 },
+    ]);
+
+    const conf = {
+      // é isto que o Master viu: 77,80, não 144,70
+      'o esperado conta só depois da fronteira (77,80, não 144,70)': caixa.esperado === 77.80,
+      'a fronteira é o fim do período da retirada anterior': caixa.desde === '2026-08-25',
+      'o servidor diz que a fronteira é uma retirada de verdade': caixa.desdeEhRetirada === true,
+      'sem retirada anterior a fronteira é o piso, e não se chama de retirada':
+        caixaSemRetirada.desdeEhRetirada === false && caixaSemRetirada.esperado === 144.70,
+      // a correção desta rodada: a tela passa a escrever a janela
+      'a tela mostra de quando até quando contou': /Contando de <b>\$\{fmtData\(primeiro\)\}<\/b> a <b>\$\{fmtData\(CAIXA\.ate\)\}<\/b>/.test(htmlJ),
+      'o primeiro dia contado é o SEGUINTE à fronteira': /function diaSeguinte\(iso\)/.test(htmlJ)
+        && /const primeiro = diaSeguinte\(CAIXA\.desde\);/.test(htmlJ),
+      'a tela diz onde foi parar o dinheiro do dia da fronteira':
+        /já entrou na retirada anterior/.test(htmlJ),
+      'só diz isso quando a fronteira é retirada de verdade (não no piso)':
+        /if\(CAIXA\.desde && CAIXA\.desdeEhRetirada\)\{/.test(htmlJ),
+      // segunda pergunta do Master: "a entrada de dinheiro nao mostra para
+      // os usuarios por que" - é gate de servidor, não card escondido
+      'entrada em dinheiro só sai do servidor pra Master/Admin':
+        /if \(!\(req\.isMaster \|\| req\.isAdmin\)\) return res\.json\(\{ itens, entradas: \[\] \}\);/.test(srcIdxJ),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okJanelaCaixa = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}\n  esperado=${caixa.esperado} desde=${caixa.desde} ehRetirada=${caixa.desdeEhRetirada}`);
+  } catch (e) { okJanelaCaixa = false; console.log('  erro: ' + e.message); }
+  if (!okJanelaCaixa) ruins += 1;
+  console.log(`${okJanelaCaixa ? '✓' : '✗'} Sangria: a tela diz de quando até quando contou (o "De" é a fronteira, não o 1º dia)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

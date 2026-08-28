@@ -112,6 +112,8 @@
   /* cor semantica, nao marca: vermelho so quando passou da tolerancia */
   .caixa-dif-ok{color:var(--ok);}
   .caixa-dif-ruim{color:var(--bad);}
+  .caixa-janela{display:block!important;font-size:11px;color:var(--muted);line-height:1.45;margin-top:-2px;}
+  .caixa-janela b{color:var(--text);font-weight:600;}
   .caixa-aviso{margin-top:8px;font-size:11.5px;line-height:1.4;color:var(--warn);}
   .msg.ok{background:var(--ok-dim);color:var(--ok);}
   .msg.err{background:var(--bad-dim);color:var(--bad);}
@@ -194,6 +196,11 @@
          Aparece assim que a unidade e escolhida e recalcula ao digitar. -->
     <div class="caixa-box hidden" id="s-caixa">
       <div class="caixa-linha"><span>Deveria ter pra retirar</span><b id="s-caixa-esperado">—</b></div>
+      <!-- de qual janela veio esse número. Sem isto o "De" do período era
+           lido como o primeiro dia contado, quando ele é a FRONTEIRA: o dia
+           que a retirada anterior já cobriu. Daí a pergunta do Master, com
+           o formulário dizendo 25→27 e a conta somando só o 27. -->
+      <div class="caixa-linha caixa-janela hidden" id="s-caixa-janela"></div>
       <div class="caixa-linha"><span>Diferença</span><b id="s-caixa-dif">—</b></div>
       <div class="caixa-aviso hidden" id="s-caixa-aviso"></div>
     </div>
@@ -1175,6 +1182,7 @@ async function carregarEsperadoCaixa(){
     // sem entrada em dinheiro lancada pra essa unidade nao ha com o que
     // comparar - a tela diz isso em vez de inventar um esperado de R$ 0,00
     document.getElementById('s-caixa-esperado').textContent = CAIXA.temBase ? fmtMoney(CAIXA.esperado) : 'sem base de cálculo';
+    mostrarJanelaCaixa();
     // fechamento nao lancado e a explicacao mais comum de "sobra" - dizer
     // isso aqui evita que a pessoa procure dinheiro que nao sumiu
     const aviso = document.getElementById('s-caixa-aviso');
@@ -1191,6 +1199,33 @@ async function carregarEsperadoCaixa(){
     box.classList.remove('hidden');
   }catch(e){ box.classList.add('hidden'); }
   atualizarDivergencia();
+}
+
+// O servidor conta o dinheiro que entrou DEPOIS da última retirada, então o
+// primeiro dia contado é o SEGUINTE ao "De" do período - o "De" é a fronteira,
+// não o primeiro dia. Sem escrever isso na tela, o formulário parecia estar
+// errando: mostrava período 25→27 e somava só o dia 27.
+function diaSeguinte(iso){
+  if(!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+function mostrarJanelaCaixa(){
+  const el = document.getElementById('s-caixa-janela');
+  if(!CAIXA || !CAIXA.temBase){ el.classList.add('hidden'); return; }
+  const primeiro = diaSeguinte(CAIXA.desde);
+  const partes = [];
+  if(primeiro && CAIXA.ate) partes.push(`Contando de <b>${fmtData(primeiro)}</b> a <b>${fmtData(CAIXA.ate)}</b>`);
+  partes.push(`entrou ${fmtMoney(CAIXA.entradas)}` + (CAIXA.saidas ? `, saiu ${fmtMoney(CAIXA.saidas)}` : ''));
+  let texto = partes.join(' · ');
+  // o dia da fronteira e' a duvida concreta de quem olha ("cade a entrada do
+  // dia 25?"). Dizer onde ele foi parar vale mais que o total
+  if(CAIXA.desde && CAIXA.desdeEhRetirada){
+    texto += `<br>O dia ${fmtData(CAIXA.desde)} já entrou na retirada anterior.`;
+  }
+  el.innerHTML = texto;
+  el.classList.remove('hidden');
 }
 
 // tolerancia igual a do servidor (SANGRIA_TOLERANCIA_DIVERGENCIA em
