@@ -162,25 +162,26 @@
   const ICONES_TIPO = { estorno: '💳', 'ajuste-fechamento': '🧾', compra: '🛒', manutencao: '🔧', 'suporte-ti': '💻', pagamento: '💸', nota: '📄', 'quebra-caixa': '⚠️', 'desvio-estoque': '📦⚠️' };
   const LABELS_TIPO = { estorno: 'Estorno', 'ajuste-fechamento': 'Ajuste de fechamento', compra: 'Compra', manutencao: 'Manutenção', 'suporte-ti': 'Suporte TI', pagamento: 'Pagamento', nota: 'Nota fiscal', 'quebra-caixa': 'Quebra de caixa', 'desvio-estoque': 'Desvio de estoque' };
 
-  // ALERTA QUE INSISTE. Pedido do Master: "quebra de caixa e' um alerta que se
-  // jogado para o lado nao volta a aparecer".
+  // ALERTA QUE SO ENCERRA. Pedido do Master, depois de a versao "insistente"
+  // tornar o sistema inusavel no celular ("continua voltando a aparecer
+  // tornando impossivel usar o sistema no celular"): "o alerta aparece, se
+  // clicado em visto ele some, nao leva ate o card de quebra de caixa mais nem
+  // de fechamento, apenas encerra".
   //
-  // Arrastar pro lado nunca marcou como visto - isso esta certo e continua. O
-  // que apagava o alerta pra sempre era o "visto" ser GLOBAL: bastava UM
-  // Master/Admin clicar em Visualizar (em qualquer aparelho) pra ele sumir da
-  // tela de todos, mesmo com a quebra ainda pendente. Ver alguem ver != alguem
-  // resolver, e num alerta de dinheiro essa diferenca custa caro.
+  // Entao pra quebra de caixa o botao NAO navega: marca como visto e fecha, so
+  // isso. Sao muitos alertas de uma vez (um por unidade por dia) e cada clique
+  // arrancava o Master da tela em que ele estava. Os outros tipos continuam
+  // levando ao card - la o alerta e' um por vez e o destino e' util.
   //
-  // Estes dois tipos NASCEM SOZINHOS de uma diferenca apurada (quebra de caixa
-  // no fechamento, desvio na contagem de estoque) - ninguem os abriu de
-  // proposito, e ninguem some com eles sem decidir. Enquanto o ticket estiver
-  // PENDENTE eles voltam a cada carregamento de pagina, com ou sem "visto".
-  // Aprovar/rejeitar na Central e' o que cala o alerta.
-  const TIPOS_ALERTA_INSISTENTE = ['quebra-caixa', 'desvio-estoque'];
-  const alertaInsiste = (c) => TIPOS_ALERTA_INSISTENTE.indexOf(c && c.tipo) !== -1;
+  // A insistencia foi revertida junto: "visto" volta a calar o alerta pra todos,
+  // como em qualquer outro tipo. Quem garante que a quebra nao se perde e' a
+  // fila da Central, que continua com o ticket PENDENTE ate alguem decidir - o
+  // alerta e' aviso, nao e' a pendencia.
+  const TIPOS_ALERTA_SO_ENCERRA = ['quebra-caixa'];
+  const soEncerra = (c) => TIPOS_ALERTA_SO_ENCERRA.indexOf(c && c.tipo) !== -1;
 
   function mostrarNotificacaoSolicitacao(card) {
-    if (card.notificacaoVista && !alertaInsiste(card)) return;
+    if (card.notificacaoVista) return;
     const elId = 'zn-notif-' + card.tipo + '-' + card.id;
     if (document.getElementById(elId)) return;
     const el = document.createElement('div');
@@ -190,12 +191,15 @@
       <div class="zn-titulo">🔔 Nova solicitação</div>
       <div class="zn-corpo">${ICONES_TIPO[card.tipo] || '📋'} ${escapeHtml(LABELS_TIPO[card.tipo] || card.tipo)} · ${escapeHtml(card.unidadeNome || card.unidade || '—')}<br>${escapeHtml(card.titulo || '')}</div>
       ${(card.atribuidosEmails && card.atribuidosEmails.length) ? `<div class="zn-direcionado">👤 atribuído a ${escapeHtml(card.atribuidosEmails.join(', '))}</div>` : (card.direcionadoParaEmail ? `<div class="zn-direcionado">👤 direcionado a ${escapeHtml(card.direcionadoParaEmail)}</div>` : '')}
-      <button type="button" class="zn-ok">👁️ Visualizar</button>
+      <button type="button" class="zn-ok">${soEncerra(card) ? '✓ Visto' : '👁️ Visualizar'}</button>
     `;
     // "Visualizar" faz as duas coisas: marca como vista E leva pro conteúdo.
     // Antes era só "já vi" - a pessoa tirava o alerta da tela e depois tinha
     // que procurar a solicitação na mão pra saber do que se tratava.
-    el.querySelector('.zn-ok').addEventListener('click', () => abrirSolicitacao(card.tipo, card.id));
+    el.querySelector('.zn-ok').addEventListener('click', () => {
+      if (soEncerra(card)) { marcarVistoNotificacao(card.tipo, card.id); return; }
+      abrirSolicitacao(card.tipo, card.id);
+    });
     // arrastar pro lado só tira da tela (não marca como vista - ver
     // arrastarParaFechar lá em cima)
     arrastarParaFechar(el);
@@ -229,7 +233,7 @@
     if (!isMaster && !isAdmin) return;
     try {
       const cards = await fetch('/api/central').then((r) => r.json());
-      cards.filter((c) => c.status === 'PENDENTE' && (!c.notificacaoVista || alertaInsiste(c))).forEach(mostrarNotificacaoSolicitacao);
+      cards.filter((c) => c.status === 'PENDENTE' && !c.notificacaoVista).forEach(mostrarNotificacaoSolicitacao);
     } catch (e) { /* sem dados agora, o SSE ainda pega o que chegar dai pra frente */ }
     ['refund-requested', 'solicitacao-criada', 'fechamento-edicao-solicitada'].forEach((evento) => {
       es.addEventListener(evento, async (e) => {

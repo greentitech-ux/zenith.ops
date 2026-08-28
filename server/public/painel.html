@@ -496,26 +496,27 @@ function tocarSomNotificacao(){
   }catch(e){ /* navegador pode bloquear audio antes de alguma interacao - so nao toca */ }
 }
 
-// ALERTA QUE INSISTE. Pedido do Master: "quebra de caixa e' um alerta que se
-// jogado para o lado nao volta a aparecer".
+// ALERTA QUE SO ENCERRA. Pedido do Master, depois de a versao "insistente"
+// tornar o sistema inusavel no celular ("continua voltando a aparecer
+// tornando impossivel usar o sistema no celular"): "o alerta aparece, se
+// clicado em visto ele some, nao leva ate o card de quebra de caixa mais nem
+// de fechamento, apenas encerra".
 //
-// Arrastar pro lado nunca marcou como visto - isso esta certo e continua. O
-// que apagava o alerta pra sempre era o "visto" ser GLOBAL: bastava UM
-// Master/Admin clicar em Visualizar (em qualquer aparelho) pra ele sumir da
-// tela de todos, mesmo com a quebra ainda pendente. Ver alguem ver != alguem
-// resolver, e num alerta de dinheiro essa diferenca custa caro.
+// Entao pra quebra de caixa o botao NAO navega: marca como visto e fecha, so
+// isso. Sao muitos alertas de uma vez (um por unidade por dia) e cada clique
+// arrancava o Master da tela em que ele estava. Os outros tipos continuam
+// levando ao card - la o alerta e' um por vez e o destino e' util.
 //
-// Estes dois tipos NASCEM SOZINHOS de uma diferenca apurada (quebra de caixa
-// no fechamento, desvio na contagem de estoque) - ninguem os abriu de
-// proposito, e ninguem some com eles sem decidir. Enquanto o ticket estiver
-// PENDENTE eles voltam a cada carregamento de pagina, com ou sem "visto".
-// Aprovar/rejeitar na Central e' o que cala o alerta.
-const TIPOS_ALERTA_INSISTENTE = ['quebra-caixa', 'desvio-estoque'];
-const alertaInsiste = (c) => TIPOS_ALERTA_INSISTENTE.indexOf(c && c.tipo) !== -1;
+// A insistencia foi revertida junto: "visto" volta a calar o alerta pra todos,
+// como em qualquer outro tipo. Quem garante que a quebra nao se perde e' a
+// fila da Central, que continua com o ticket PENDENTE ate alguem decidir - o
+// alerta e' aviso, nao e' a pendencia.
+const TIPOS_ALERTA_SO_ENCERRA = ['quebra-caixa'];
+const soEncerra = (c) => TIPOS_ALERTA_SO_ENCERRA.indexOf(c && c.tipo) !== -1;
 
 function mostrarNotificacaoSolicitacao(card){
   if(!IS_MASTER_GLOBAL && !IS_ADMIN_GLOBAL) return;
-  if(card.notificacaoVista && !alertaInsiste(card)) return;
+  if(card.notificacaoVista) return;
   const wrap = document.getElementById('notif-solicitacao-wrap');
   const elId = 'notif-sol-'+card.tipo+'-'+card.id;
   if(document.getElementById(elId)) return;
@@ -526,12 +527,13 @@ function mostrarNotificacaoSolicitacao(card){
     <div class="ns-titulo">🔔 Nova solicitação</div>
     <div class="ns-corpo">${ICONES_TIPO_CENTRAL[card.tipo]||'📋'} ${escapeHtml(TIPOS_CENTRAL_LABEL[card.tipo]||card.tipo)} · ${escapeHtml(card.unidadeNome||card.unidade||'—')}<br>${escapeHtml(card.titulo||'')}</div>
     ${(card.atribuidosEmails && card.atribuidosEmails.length) ? `<div class="ns-direcionado">👤 atribuído a ${escapeHtml(card.atribuidosEmails.join(', '))}</div>` : (card.direcionadoParaEmail ? `<div class="ns-direcionado">👤 direcionado a ${escapeHtml(card.direcionadoParaEmail)}</div>` : '')}
-    <button type="button" class="ns-ok">👁️ Visualizar</button>
+    <button type="button" class="ns-ok">${soEncerra(card) ? '✓ Visto' : '👁️ Visualizar'}</button>
   `;
   // leva pro card aberto no Histórico, além de marcar como vista - antes o
   // botão só tirava o alerta da tela e deixava a pessoa procurando
   el.querySelector('.ns-ok').addEventListener('click', ()=>{
     marcarVistoNotificacao(card.tipo, card.id);
+    if(soEncerra(card)) return;
     location.href = `/central-historico.html?tipo=${encodeURIComponent(card.tipo)}&id=${encodeURIComponent(card.id)}`;
   });
   // arrastar pro lado só tira da tela, SEM marcar como vista (o alerta volta
@@ -557,7 +559,7 @@ async function iniciarNotificacoesCentral(){
   if(!IS_MASTER_GLOBAL && !IS_ADMIN_GLOBAL) return;
   try{
     const cards = await fetch('/api/central').then(r=>r.json());
-    cards.filter(c=>c.status==='PENDENTE' && (!c.notificacaoVista || alertaInsiste(c))).forEach(mostrarNotificacaoSolicitacao);
+    cards.filter(c=>c.status==='PENDENTE' && !c.notificacaoVista).forEach(mostrarNotificacaoSolicitacao);
   }catch(e){ /* sem dados agora, a proxima visita tenta de novo */ }
 
   const es = new EventSource('/api/stream?token='+encodeURIComponent(AUTH_TOKEN));
