@@ -360,7 +360,10 @@ async function boot(){
     document.querySelectorAll('#tipos-btns .tipo-btn').forEach(b=>b.classList.toggle('active', b.dataset.tipo===tipoFixo));
   }
   try{
-    const unidades = await fetch('/api/meta/unidades-publico').then(r=>r.json());
+    // ?area=rh: a lista já vem sem as lojas que o servidor recusaria no
+    // Enviar. Sem isso a pessoa preenchia tudo - documento, currículo, PIX -
+    // pra descobrir no fim que aquela unidade não tem RH habilitado
+    const unidades = await fetch('/api/meta/unidades-publico?area=rh').then(r=>r.json());
     const sel = document.getElementById('unidade');
     if(unidadeFixa && unidades.some(u=>u.codigo===unidadeFixa)){
       const nome = unidades.find(u=>u.codigo===unidadeFixa).nome;

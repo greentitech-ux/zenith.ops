@@ -415,10 +415,29 @@ app.post('/api/auth/login', async (req, res) => {
 // classificarUnidade). Extraida da rota pra tambem ser usada pelo resolver
 // do Beniboy (resolverUnidadePublica, ver acionarBeniboy) - mesma fonte,
 // nunca duas listas divergentes.
-async function listaUnidadesPublicas() {
+// `area`: o formulario publico que chama isto sabe pra que serve (RH,
+// solicitacao, estorno). Sem ela, a lista sai como sempre saiu.
+//
+// Com ela, duas coisas mudam - e as duas vieram do mesmo defeito reportado
+// pelo Master, que preencheu um cadastro de RH inteiro (documento
+// fotografado, curriculo, PIX) pra receber "Essa unidade não tem RH
+// habilitado" so no Enviar:
+//
+//   1. unidade que NAO aceita a area sai da lista. Oferecer uma loja que o
+//      servidor vai recusar no fim e' desperdicio do trabalho de quem
+//      preencheu - e a pessoa nao tem como adivinhar.
+//   2. o desempate por NOME passa a preferir quem aceita a area. Duas
+//      unidades com o mesmo nome (ver unidades.js) ja eram colapsadas aqui
+//      numa linha so, mas o criterio olhava so a secao: era assim que a
+//      "Dom Bessa" escolhida acabava sendo justamente a que nao tem RH.
+async function listaUnidadesPublicas(area) {
   const mapa = await construirUnidadesMapa();
+  const restritos = area
+    ? new Set(await unidadesExtras.codigosRestritosDe(area).catch(() => []))
+    : new Set();
   const porNome = new Map();
   Object.entries(mapa).forEach(([codigo, nome]) => {
+    if (restritos.has(codigo)) return;
     const secao = classificarUnidade(codigo).secao;
     const atual = porNome.get(nome);
     if (!atual || (secao === 'Fechamento' && atual.secao !== 'Fechamento')) {
@@ -431,7 +450,7 @@ async function listaUnidadesPublicas() {
 }
 
 app.get('/api/meta/unidades-publico', async (req, res) => {
-  res.json(await listaUnidadesPublicas());
+  res.json(await listaUnidadesPublicas(req.query.area));
 });
 
 // Endereco oficial do app, pra tela avisar quem ainda entra pelo antigo.
