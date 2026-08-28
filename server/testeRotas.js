@@ -9676,6 +9676,65 @@ setTimeout(async () => {
   if (!okDepositante) ruins += 1;
   console.log(`${okDepositante ? '✓' : '✗'} Depósito: quem foi ao banco (se não for o gerente) anexa o comprovante e assina - e dá pra pedir isso depois de lançado`);
 
+  // ------------------------------------------------------------------
+  // Pedido do Master: "sempre que salvar um Formulario, seja ele qual for,
+  // apareca o nome do beneficiario/data/hora ... precisa ter um padrao claro
+  // e objetivo facil de identificar" - e, junto, "conseguir salvar mais de
+  // um anexo" (o input nativo trocava a seleção a cada escolha).
+  let okNomePdf = false;
+  try {
+    const fsN = require('fs');
+    const pathN = require('path');
+    const forms = require('./formularios');
+    const htmlN = fsN.readFileSync(pathN.join(__dirname, 'public', 'formularios.html'), 'utf8');
+    const srcForms = fsN.readFileSync(pathN.join(__dirname, 'formularios.js'), 'utf8');
+
+    const base = { unidade: 'Spoleto Tacaruna', criadoEm: '2026-08-28T17:32:10.000Z', numeroTicket: 10042 };
+    const comDepositante = forms.nomeArquivoPdf({ ...base, tipo: 'deposito', campos: { nomeGerente: 'Ana Lima', depositante: 'Carlos Souza' } });
+    const soGerente = forms.nomeArquivoPdf({ ...base, tipo: 'deposito', campos: { nomeGerente: 'Ana Lima' } });
+    const semNinguem = forms.nomeArquivoPdf({ ...base, tipo: 'diarias', campos: {} });
+    const comAcento = forms.nomeArquivoPdf({ ...base, tipo: 'avulso', campos: { favorecido: 'José da Silva & Cia Ltda.' } });
+    // mesmo formulário baixado de novo tem que dar o MESMO nome: o padrão usa
+    // a criação, não a hora do download - senão cada clique vira um arquivo
+    const denovo = forms.nomeArquivoPdf({ ...base, tipo: 'deposito', campos: { nomeGerente: 'Ana Lima', depositante: 'Carlos Souza' } });
+
+    const conf = {
+      // o padrão inteiro, na ordem: o que · onde · de quem · quando · qual
+      'o nome tem tipo, unidade, beneficiário, data, hora e ticket':
+        comDepositante === 'Deposito-de-Caixa_Spoleto-Tacaruna_Carlos-Souza_2026-08-28_14h32_Ticket-10042',
+      // 14h32 e não 17h32: Brasília, batendo com o que a tela mostra
+      'a hora é a de Brasília, não UTC': /_14h32_/.test(comDepositante),
+      'sem depositante, cai no gerente': /_Ana-Lima_/.test(soGerente),
+      'sem ninguém, o pedaço some (não vira "sem-nome")':
+        semNinguem === 'Pagamento-de-Diarias_Spoleto-Tacaruna_2026-08-28_11h05_Ticket-10042'
+        || /^Pagamento-de-Diarias_Spoleto-Tacaruna_2026-08-28_/.test(semNinguem),
+      'acento e símbolo viram nome de arquivo seguro':
+        /_Jose-da-Silva-Cia-Ltda_/.test(comAcento) && !/[^A-Za-z0-9_-]/.test(comAcento),
+      'baixar o mesmo formulário de novo dá o MESMO nome': denovo === comDepositante,
+      // um padrão só: os dois caminhos de PDF (formulário e Ass. Boleto)
+      'os dois caminhos de PDF usam o mesmo montador':
+        (srcForms.match(/dispPdf\(res, nomeArquivoPdf\(r\), opcoes && opcoes\.inline\);/g) || []).length === 2,
+
+      // --- anexos que somam ---
+      'a tela acumula os anexos em vez de trocar a seleção':
+        /let ANEXOS_ESCOLHIDOS = \[\];/.test(htmlN) && /function somarAnexos\(input\)/.test(htmlN)
+        && /const arquivos = ANEXOS_ESCOLHIDOS;/.test(htmlN),
+      'o input é zerado pra dar pra reescolher o mesmo arquivo': /input\.value = '';/.test(htmlN),
+      'respeita o teto de 5 e recusa quem não é PDF nem imagem':
+        /ANEXOS_ESCOLHIDOS\.length >= MAX_ANEXOS_TELA/.test(htmlN)
+        && /não é PDF nem imagem/.test(htmlN),
+      'o mesmo arquivo escolhido duas vezes não duplica':
+        /ANEXOS_ESCOLHIDOS\.some\(a => a\.name === arq\.name && a\.size === arq\.size\)/.test(htmlN),
+      'dá pra tirar um da lista antes de salvar': /function tirarAnexo\(i\)/.test(htmlN),
+      'trocar de tipo limpa a lista junto': /limparAnexos\(\);/.test(htmlN),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okNomePdf = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}\n  nome obtido: ${comDepositante}`);
+  } catch (e) { okNomePdf = false; console.log('  erro: ' + e.message); }
+  if (!okNomePdf) ruins += 1;
+  console.log(`${okNomePdf ? '✓' : '✗'} Formulários: PDF sai com tipo/unidade/beneficiário/data/hora/Ticket no nome, e os anexos somam em vez de trocar`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
