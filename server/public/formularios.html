@@ -512,6 +512,37 @@ async function criar(){
   }finally{ btn.disabled = false; }
 }
 
+// Anexar em formulário JÁ criado (Master). Um input só pra página inteira,
+// guardando de qual formulário é a vez - um input por card seria um
+// elemento de arquivo por linha da lista, à toa.
+//
+// Vale pra QUALQUER tipo e em qualquer estado menos cancelado, inclusive
+// depois de assinado: o comprovante que chega no dia seguinte não tinha
+// onde entrar, e reabrir o formulário só pra isso custaria as assinaturas.
+let ANEXO_DEPOIS_ID = null;
+function escolherAnexoDepois(id){
+  ANEXO_DEPOIS_ID = id;
+  const input = document.getElementById('anexo-depois');
+  input.value = '';
+  input.click();
+}
+async function enviarAnexoDepois(input){
+  const arquivos = [...(input.files || [])];
+  const id = ANEXO_DEPOIS_ID;
+  input.value = '';
+  ANEXO_DEPOIS_ID = null;
+  if(!id || !arquivos.length) return;
+  try{
+    const fd = new FormData();
+    arquivos.forEach(a => fd.append('anexos', a));
+    const r = await fetch(`/api/formularios/${encodeURIComponent(id)}/anexos`, { method:'POST', body: fd });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || ('erro '+r.status));
+    await carregarLista();
+    alert(`${arquivos.length} anexo(s) adicionado(s). Já entram no PDF - as assinaturas já colhidas continuam valendo.`);
+  }catch(e){ alert(e.message); }
+}
+
 // ---------------------------------------------------------------------
 // ANEXOS QUE SOMAM. O <input type="file"> nativo troca a seleção inteira a
 // cada escolha - quem pegava um comprovante e depois outro ficava só com o
@@ -911,6 +942,7 @@ function cardHtml(f){
       <button type="button" class="btn-ghost" onclick="baixarPdf('${f.id}')" title="Salvar o arquivo no aparelho">⬇️ ${t && t.soAnexo ? 'Baixar assinado' : 'Baixar PDF'}</button>
       ${!cancelado && f.status==='ASSINADO' && !f.enviadoPagamento ? `<button type="button" class="btn-ghost" style="color:var(--ok);" onclick="enviarComoPagamento('${f.id}')">💰 Enviar como Pagamento</button>` : ''}
       ${!cancelado && f.tipo==='deposito' && !temDepositante(f) ? `<button type="button" class="btn-ghost" onclick="pedirDepositante('${f.id}')" title="Quando quem levou o dinheiro ao banco não foi o gerente: gera o link pra essa pessoa anexar o comprovante e assinar">👤 Quem fez o depósito</button>` : ''}
+      ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" onclick="escolherAnexoDepois('${f.id}')" title="Anexar comprovante, nota ou qualquer documento a este formulário - entra no PDF, sem mexer nas assinaturas já colhidas">📎 Anexar</button>` : ''}
       ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" onclick="abrirEdicao('${f.id}')">✏️ Editar</button>` : ''}
       ${SOU_MASTER && !cancelado && t && t.soAnexo ? `<button type="button" class="btn-ghost" style="color:var(--warn);" onclick="reabrirAnexo('${f.id}','${escapeHtml(t.rotulo)}')" title="Apaga o anexo atual e reabre o mesmo link pra mandarem outro, sem perder o Ticket #">🗑️ Trocar anexo</button>` : ''}
       ${SOU_MASTER && !cancelado ? `<button type="button" class="btn-ghost" style="color:var(--bad);" onclick="cancelarFormulario('${f.id}')">🚫 Cancelar</button>` : ''}
@@ -1235,5 +1267,7 @@ boot();
 <script src="/suporte-chat.js"></script>
 <script src="/recolher.js"></script>
 <script src="/nav-menu.js"></script>
+<!-- input único de anexo-depois (ver escolherAnexoDepois) -->
+<input type="file" id="anexo-depois" multiple accept="image/*,application/pdf" style="display:none;" onchange="enviarAnexoDepois(this)">
 </body>
 </html>

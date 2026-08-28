@@ -849,6 +849,48 @@ async function reabrirAnexo(id, { porEmail } = {}) {
   return detalhar(id);
 }
 
+// Anexo acrescentado DEPOIS, em formulário de qualquer tipo - pedido do
+// Master: "preciso que todos os formularios tenham a opcao de adicionar
+// ANEXO ... so o master tem essa opcao". Até aqui só dava pra anexar na
+// criação; o comprovante que chega no dia seguinte não tinha onde entrar.
+//
+// NÃO descarta assinatura, e essa é a diferença proposital em relação a
+// editar(): lá o conteúdo muda (valor, favorecido, linha) e a assinatura
+// passaria a cobrir um documento diferente do que a pessoa viu. Aqui não
+// muda nada do que foi atestado - entra PROVA A MAIS, do mesmo jeito que o
+// comprovante do depositante entra junto da assinatura dele (ver assinar).
+//
+// Quem anexou e quando ficam gravados no próprio anexo: num documento
+// financeiro, "de onde veio esse arquivo" é pergunta que aparece depois.
+async function adicionarAnexos(id, anexos, { porEmail } = {}) {
+  const r = await getOne(id);
+  if (!r) throw new Error('Formulário não encontrado.');
+  if (r.status === STATUS_CANCELADO) throw new Error('Formulário cancelado não recebe anexo - lance outro.');
+  const agora = new Date().toISOString();
+  const novos = (Array.isArray(anexos) ? anexos : [])
+    .map((a) => ({
+      nome: limpar(a.nome, 120) || 'anexo', path: String(a.path || ''), tipo: limpar(a.tipo, 80),
+      anexadoEm: agora, anexadoPorEmail: porEmail || null,
+    }))
+    .filter((a) => a.path);
+  if (!novos.length) throw new Error('Escolha o arquivo (PDF ou imagem).');
+  const atuais = r.anexos || [];
+  if (atuais.length >= MAX_ANEXOS) {
+    throw new Error(`Esse formulário já tem ${MAX_ANEXOS} anexos - o limite do PDF.`);
+  }
+  const finais = [...atuais, ...novos].slice(0, MAX_ANEXOS);
+  const patch = { anexos: finais, anexoAdicionadoEm: agora, anexoAdicionadoPorEmail: porEmail || null };
+  // um Depósito que estava travado esperando o comprovante (ver assinar)
+  // FECHA aqui, se as assinaturas já estiverem todas colhidas - o
+  // comprovante era a única coisa que faltava
+  const todasAssinadas = Object.values(r.assinaturas || {}).length > 0
+    && Object.values(r.assinaturas || {}).every((a) => !!a.imagem);
+  if (todasAssinadas && r.status === 'PENDENTE' && comprovanteObrigatorio(r)) patch.status = 'ASSINADO';
+  await COLLECTION.doc(id).update(patch);
+  cache.invalidar();
+  return detalhar(id);
+}
+
 // cancelar não apaga: o registro fica, com motivo e autor, e some do
 // caminho de quem ia assinar. Zerar o token de cada slot é o que mata o
 // link que já foi pro WhatsApp de alguém - sem token, chaveDoToken não
@@ -1337,6 +1379,7 @@ async function gerarPdf(r, res, opcoes) {
 module.exports = { TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, editar, cancelar, remover, gerarPdf, chaveDoToken, parseValor,
   nomeArquivoPdf, beneficiarioDoFormulario,
   pedirComprovanteDeposito, comprovanteObrigatorio, temDepositanteProprio,
+  adicionarAnexos,
   criarParaPreenchimento, vistaPreenchimento, salvarPreenchimento, cancelarPreenchimento, marcarEnviadoPagamento,
   reabrirAnexo,
   // mesma saida que parque.js expoe: quem escreve o documento por fora do
