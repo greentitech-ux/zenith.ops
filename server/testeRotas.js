@@ -9791,6 +9791,20 @@ setTimeout(async () => {
         /app\.get\('\/api\/meta\/unidades-duplicadas', auth\.requireMaster/.test(
           fsU.readFileSync(pathU.join(__dirname, 'index.js'), 'utf8')),
       // e a tela para de mostrar duas linhas iguais sem jeito de diferenciar
+      // O sintoma que o Master viu depois: preencheu o cadastro público
+      // inteiro e levou "Essa unidade não tem RH habilitado" só no Enviar.
+      // A lista pública já colapsava nomes iguais numa linha só, mas
+      // desempatava por seção - e escolhia justamente a que não tem RH.
+      'a lista pública não oferece unidade que o RH vai recusar':
+        !(await (async () => {
+          await uni.criar({ codigo: 'UNI_SEM_RH', nome: 'Loja Sem RH', areas: ['solicitacoes'], porEmail: 'm@t' }, new Set(), null);
+          const r = await pedir('/api/meta/unidades-publico?area=rh');
+          return JSON.parse(r.corpo).some((u) => u.codigo === 'UNI_SEM_RH');
+        })()),
+      'e sem area continua listando tudo, como sempre foi':
+        JSON.parse((await pedir('/api/meta/unidades-publico')).corpo).some((u) => u.codigo === 'UNI_SEM_RH'),
+      'o formulário público de RH pede a lista já filtrada':
+        /unidades-publico\?area=rh/.test(fsU.readFileSync(pathU.join(__dirname, 'public', 'rh-cadastro.html'), 'utf8')),
       'o seletor do RH mostra o código quando o nome se repete':
         /function rotuloUnidade\(codigo\)/.test(htmlRh)
         && /\$\{nome\} · \$\{codigo\}/.test(htmlRh)
