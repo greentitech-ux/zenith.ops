@@ -162,8 +162,25 @@
   const ICONES_TIPO = { estorno: '💳', 'ajuste-fechamento': '🧾', compra: '🛒', manutencao: '🔧', 'suporte-ti': '💻', pagamento: '💸', nota: '📄', 'quebra-caixa': '⚠️', 'desvio-estoque': '📦⚠️' };
   const LABELS_TIPO = { estorno: 'Estorno', 'ajuste-fechamento': 'Ajuste de fechamento', compra: 'Compra', manutencao: 'Manutenção', 'suporte-ti': 'Suporte TI', pagamento: 'Pagamento', nota: 'Nota fiscal', 'quebra-caixa': 'Quebra de caixa', 'desvio-estoque': 'Desvio de estoque' };
 
+  // ALERTA QUE INSISTE. Pedido do Master: "quebra de caixa e' um alerta que se
+  // jogado para o lado nao volta a aparecer".
+  //
+  // Arrastar pro lado nunca marcou como visto - isso esta certo e continua. O
+  // que apagava o alerta pra sempre era o "visto" ser GLOBAL: bastava UM
+  // Master/Admin clicar em Visualizar (em qualquer aparelho) pra ele sumir da
+  // tela de todos, mesmo com a quebra ainda pendente. Ver alguem ver != alguem
+  // resolver, e num alerta de dinheiro essa diferenca custa caro.
+  //
+  // Estes dois tipos NASCEM SOZINHOS de uma diferenca apurada (quebra de caixa
+  // no fechamento, desvio na contagem de estoque) - ninguem os abriu de
+  // proposito, e ninguem some com eles sem decidir. Enquanto o ticket estiver
+  // PENDENTE eles voltam a cada carregamento de pagina, com ou sem "visto".
+  // Aprovar/rejeitar na Central e' o que cala o alerta.
+  const TIPOS_ALERTA_INSISTENTE = ['quebra-caixa', 'desvio-estoque'];
+  const alertaInsiste = (c) => TIPOS_ALERTA_INSISTENTE.indexOf(c && c.tipo) !== -1;
+
   function mostrarNotificacaoSolicitacao(card) {
-    if (card.notificacaoVista) return;
+    if (card.notificacaoVista && !alertaInsiste(card)) return;
     const elId = 'zn-notif-' + card.tipo + '-' + card.id;
     if (document.getElementById(elId)) return;
     const el = document.createElement('div');
@@ -212,7 +229,7 @@
     if (!isMaster && !isAdmin) return;
     try {
       const cards = await fetch('/api/central').then((r) => r.json());
-      cards.filter((c) => c.status === 'PENDENTE' && !c.notificacaoVista).forEach(mostrarNotificacaoSolicitacao);
+      cards.filter((c) => c.status === 'PENDENTE' && (!c.notificacaoVista || alertaInsiste(c))).forEach(mostrarNotificacaoSolicitacao);
     } catch (e) { /* sem dados agora, o SSE ainda pega o que chegar dai pra frente */ }
     ['refund-requested', 'solicitacao-criada', 'fechamento-edicao-solicitada'].forEach((evento) => {
       es.addEventListener(evento, async (e) => {

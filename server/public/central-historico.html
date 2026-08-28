@@ -2975,9 +2975,26 @@ function tocarSomNotificacao(){
   }catch(e){ /* navegador pode bloquear audio antes de alguma interacao - so nao toca */ }
 }
 
+// ALERTA QUE INSISTE. Pedido do Master: "quebra de caixa e' um alerta que se
+// jogado para o lado nao volta a aparecer".
+//
+// Arrastar pro lado nunca marcou como visto - isso esta certo e continua. O
+// que apagava o alerta pra sempre era o "visto" ser GLOBAL: bastava UM
+// Master/Admin clicar em Visualizar (em qualquer aparelho) pra ele sumir da
+// tela de todos, mesmo com a quebra ainda pendente. Ver alguem ver != alguem
+// resolver, e num alerta de dinheiro essa diferenca custa caro.
+//
+// Estes dois tipos NASCEM SOZINHOS de uma diferenca apurada (quebra de caixa
+// no fechamento, desvio na contagem de estoque) - ninguem os abriu de
+// proposito, e ninguem some com eles sem decidir. Enquanto o ticket estiver
+// PENDENTE eles voltam a cada carregamento de pagina, com ou sem "visto".
+// Aprovar/rejeitar na Central e' o que cala o alerta.
+const TIPOS_ALERTA_INSISTENTE = ['quebra-caixa', 'desvio-estoque'];
+const alertaInsiste = (c) => TIPOS_ALERTA_INSISTENTE.indexOf(c && c.tipo) !== -1;
+
 function mostrarNotificacaoSolicitacao(card){
   if(!IS_MASTER && !IS_ADMIN) return;
-  if(card.notificacaoVista) return;
+  if(card.notificacaoVista && !alertaInsiste(card)) return;
   const wrap = document.getElementById('notif-solicitacao-wrap');
   const elId = 'notif-sol-'+card.tipo+'-'+card.id;
   if(document.getElementById(elId)) return;
@@ -3019,7 +3036,7 @@ function removerNotificacaoSolicitacao(tipo, id){
 // ninguém sinalizou ainda - assim a notificação sobrevive a um reload
 function notificarPendentesNaoVistas(){
   if(!IS_MASTER && !IS_ADMIN) return;
-  CARDS.filter(c=>c.status==='PENDENTE' && !c.notificacaoVista).forEach(mostrarNotificacaoSolicitacao);
+  CARDS.filter(c=>c.status==='PENDENTE' && (!c.notificacaoVista || alertaInsiste(c))).forEach(mostrarNotificacaoSolicitacao);
 }
 
 function conectarStreamChat(){
