@@ -241,12 +241,18 @@
 
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
   .overlay.hidden{display:none!important;}
+  /* Mensagem, apelido de dispositivo e editar computador sao abertos DE
+     DENTRO do modal de detalhe. Como todos sao .overlay com o mesmo
+     z-index e o de detalhe e' o ultimo no DOM, eles abriam ATRAS dele */
+  #msg-overlay,#editar-comp-overlay{z-index:60;}
   /* o modal do aparelho e' aberto DE DENTRO do modal de detalhe do computador
      (o lapis fica na lista de aparelhos). Com o mesmo z-index dos outros, ele
      ficava ATRAS de quem o chamou - so a ordem no HTML decidia, e o detalhe
      vem depois. */
   #disp-overlay{z-index:60;}
   .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto;}
+  .modal-msg{max-width:580px;}
+  .modal-msg .hidden{display:none!important;}
   .modal h3{margin:0 0 4px;font-size:15px;}
   .modal .sub{font-size:11.5px;color:var(--muted);margin-bottom:14px;}
   .modal label{display:block;font-size:11.5px;color:var(--muted);margin:14px 0 6px;font-family:var(--mono);}
@@ -266,13 +272,46 @@
   /* thread do chat com o NOCZenith (janela flutuante estilo Splashtop que
      aparece no computador 'interno') - mostra a ida e volta dentro do
      mesmo modal de mensagem, sem precisar de tela separada */
-  .chat-thread{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;margin-bottom:12px;padding-right:2px;}
-  .chat-thread:empty{display:none;}
+  .chat-thread{display:flex;flex-direction:column;gap:6px;min-height:150px;max-height:min(46vh,340px);overflow-y:auto;margin-bottom:10px;padding-right:2px;}
   .chat-bolha{max-width:82%;padding:7px 10px;border-radius:10px;font-size:12.5px;line-height:1.4;word-break:break-word;}
   .chat-bolha .chat-hora{display:block;font-family:var(--mono);font-size:9.5px;color:var(--muted);margin-top:2px;}
   .chat-bolha.de-master{align-self:flex-end;background:var(--accent);color:#06202e;border-bottom-right-radius:3px;}
   .chat-bolha.de-master .chat-hora{color:#06202e;opacity:.65;}
   .chat-bolha.de-computador{align-self:flex-start;background:var(--panel2);border:1px solid var(--line);border-bottom-left-radius:3px;}
+  /* separador de dia: uma thread de 30 mensagens pode pegar varios dias, e
+     so a hora (09:56) nao diz qual */
+  .chat-dia{align-self:center;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:2px 10px;margin:2px 0;}
+  .chat-vazio{align-self:center;text-align:center;color:var(--muted);font-size:12px;line-height:1.5;margin:auto 0;padding:10px;}
+
+  /* ---- destinatarios da mensagem (1 ou varios computadores) ---- */
+  .msg-para{border:1px solid var(--line);border-radius:10px;background:var(--panel2);padding:8px;margin-bottom:10px;}
+  .msg-para-topo{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .msg-chips{display:flex;gap:6px;flex-wrap:wrap;flex:1;min-width:0;}
+  .msg-chip{display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);
+    border-radius:20px;padding:3px 6px 3px 9px;font-size:11.5px;max-width:100%;}
+  .msg-chip .nome{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px;}
+  .msg-chip .tirar{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;line-height:1;padding:0 2px;}
+  .msg-chip .tirar:hover{color:var(--bad);}
+  .msg-chip-vazio{font-size:11.5px;color:var(--muted);font-family:var(--mono);}
+  .msg-atalhos{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+  .msg-picker{margin-top:8px;border-top:1px solid var(--line);padding-top:8px;}
+  .msg-picker.hidden{display:none;}
+  .msg-picker-lista{max-height:190px;overflow-y:auto;margin-top:6px;display:flex;flex-direction:column;gap:1px;}
+  .msg-uni{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+    padding:8px 4px 3px;position:sticky;top:0;background:var(--panel2);}
+  .msg-opt{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:7px;cursor:pointer;font-size:12.5px;}
+  .msg-opt:hover{background:var(--panel);}
+  .msg-opt input{width:auto;margin:0;flex:none;}
+  .msg-opt .nome{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .msg-opt .como{font-family:var(--mono);font-size:9.5px;color:var(--muted);flex:none;}
+  .msg-destinos-lista{max-height:min(38vh,260px);overflow-y:auto;display:flex;flex-direction:column;gap:1px;margin-bottom:10px;}
+  .msg-destino-linha{display:flex;align-items:center;gap:8px;padding:6px;border-radius:7px;background:var(--panel2);font-size:12.5px;}
+  .msg-destino-linha .nome{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .msg-destino-linha .quando{font-family:var(--mono);font-size:9.5px;color:var(--muted);flex:none;}
+  .msg-rodape{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:6px;}
+  .msg-dica{font-family:var(--mono);font-size:9.5px;color:var(--muted);}
+  .msg-dica b{color:var(--text);font-weight:600;}
 
   /* ---- NOC Zenith: painel do agente (Master-only) ---- */
   .agente-titulo{display:flex;align-items:center;gap:8px;margin:32px 0 4px;padding-top:20px;border-top:1px solid var(--line);}
@@ -530,14 +569,41 @@
 </div>
 
 <div class="overlay hidden" id="msg-overlay">
-  <div class="modal">
+  <div class="modal modal-msg">
     <h3>💬 Mensagem</h3>
     <div class="sub" id="msg-modal-loja"></div>
+
+    <!-- destinatarios: 1 computador = thread de conversa; 2+ = envio pra
+         todos de uma vez, cada um recebe na propria thread -->
+    <div class="msg-para">
+      <div class="msg-para-topo">
+        <div class="msg-chips" id="msg-chips"></div>
+        <button type="button" class="btn-mini" id="msg-btn-picker" onclick="alternarPickerMensagem()">＋ Computador</button>
+      </div>
+      <div class="msg-atalhos">
+        <button type="button" class="btn-mini" onclick="marcarDestinosMensagem('unidade')">Toda a unidade</button>
+        <button type="button" class="btn-mini" onclick="marcarDestinosMensagem('online')">Todos operacionais</button>
+        <button type="button" class="btn-mini" onclick="marcarDestinosMensagem('interno')">Só computadores internos</button>
+        <button type="button" class="btn-mini" onclick="marcarDestinosMensagem('limpar')">Limpar</button>
+      </div>
+      <div class="msg-picker hidden" id="msg-picker">
+        <input type="text" id="msg-picker-busca" placeholder="Buscar computador ou unidade..." oninput="renderPickerMensagem()">
+        <div class="msg-picker-lista" id="msg-picker-lista"></div>
+      </div>
+    </div>
+
     <div class="chat-thread" id="msg-modal-thread"></div>
-    <textarea id="msg-texto" maxlength="500" placeholder="Ex: precisamos que reiniciem o roteador, ou qualquer aviso pra tela desse computador"></textarea>
+    <div class="msg-destinos-lista hidden" id="msg-destinos-lista"></div>
+
+    <textarea id="msg-texto" maxlength="500" placeholder="Ex: precisamos que reiniciem o roteador, ou qualquer aviso pra tela desse computador"
+      oninput="atualizarContadorMensagem()" onkeydown="teclaNaMensagem(event)"></textarea>
+    <div class="msg-rodape">
+      <span class="msg-dica"><b>Enter</b> envia · <b>Shift+Enter</b> quebra linha</span>
+      <span class="msg-dica" id="msg-contador">0/500</span>
+    </div>
     <div class="msg hidden" id="msg-modal-status"></div>
     <div class="modal-acoes">
-      <button type="button" class="btn-ghost" onclick="fecharModalMensagem()">Cancelar</button>
+      <button type="button" class="btn-ghost" onclick="fecharModalMensagem()">Fechar</button>
       <button type="button" class="btn-primary" id="msg-modal-enviar" onclick="enviarMensagemLoja()">Enviar</button>
     </div>
   </div>
@@ -688,8 +754,11 @@ async function buscarDetalheComp(codigo, posto){
 async function atualizarDetalheExtraDosModais(){
   const alvos = [];
   if(DETALHE_ATUAL) alvos.push(DETALHE_ATUAL);
-  if(MSG_CODIGO && MSG_POSTO && !(DETALHE_ATUAL && DETALHE_ATUAL.codigo===MSG_CODIGO && DETALHE_ATUAL.posto===MSG_POSTO)){
-    alvos.push({ codigo: MSG_CODIGO, posto: MSG_POSTO });
+  // so a conversa aberta (1 destinatario) precisa do campo pesado; com
+  // varios destinos a tela mostra status, que ja vem no resumo do poll
+  const msgUnico = msgDestinoUnico();
+  if(msgUnico && !(DETALHE_ATUAL && DETALHE_ATUAL.codigo===msgUnico.codigo && DETALHE_ATUAL.posto===msgUnico.posto)){
+    alvos.push(msgUnico);
   }
   if(!alvos.length) return;
   await Promise.all(alvos.map(a => buscarDetalheComp(a.codigo, a.posto)));
@@ -1890,66 +1959,273 @@ async function removerComputador(codigo, posto, nome){
   }catch(e){ alert(e.message); }
 }
 
-let MSG_CODIGO = null;
-let MSG_POSTO = null;
-// desenha a thread de chat (chatMensagens - ver lojaStatus.js) dentro do
-// modal de mensagem. So computador tipo 'interno' responde de verdade (a
-// janela flutuante do NOCZenith - ver vigiaScript.js), mas a thread mostra
-// qualquer coisa que ja tenha sido trocada, independente do tipo
+// Destinatarios da janela de mensagem. Virou LISTA (era um computador so):
+// o Master pediu pra avisar varias maquinas de uma vez, sem reabrir a janela
+// uma por uma. Nao existe "thread coletiva" - cada computador recebe na
+// propria thread (ver enviarMensagemMuitos em lojaStatus.js), entao o
+// historico de cada maquina continua igual ao que sempre foi
+let MSG_DESTINOS = [];      // [{codigo, posto}]
+let MSG_PICKER_ABERTO = false;
+function msgDestinoUnico(){ return MSG_DESTINOS.length === 1 ? MSG_DESTINOS[0] : null; }
+function msgTemDestino(codigo, posto){ return MSG_DESTINOS.some(d => d.codigo===codigo && d.posto===posto); }
+function msgModalAberto(){ return !document.getElementById('msg-overlay').classList.contains('hidden'); }
+
+// o que ACONTECE na maquina quando a mensagem chega - depende do tipo, e a
+// diferenca e real: so o 'interno' roda o NOCZenith com a janela flutuante
+// (ver vigiaScript.js) e consegue responder. Esconder isso faria o Master
+// mandar recado pra tablet de carrinho achando que alguem ia ler
+const MSG_COMO_RECEBE = {
+  interno: { curto: 'janela + responde', longo: 'abre a janela do NOCZenith na tela e a loja pode responder' },
+  atendimento: { curto: 'só aviso', longo: 'aparece como aviso na tela de atendimento (a loja não responde por ali)' },
+  abastecimento: { curto: '⚠ não exibe', longo: 'a tela do Abastecimento não mostra mensagem — vai ficar só no histórico' },
+};
+function comoRecebe(c){ return MSG_COMO_RECEBE[(c && c.tipo) || 'atendimento'] || MSG_COMO_RECEBE.atendimento; }
+function compDe(codigo, posto){ return COMPUTADORES.find(x => x.codigo===codigo && x.posto===posto) || null; }
+function nomeDe(codigo, posto){
+  const c = compDe(codigo, posto);
+  return (c && c.nome) || posto || '(sem nome)';
+}
+
+// ---- thread de chat (1 destinatario) ----
+// data legivel no separador: dentro de 30 mensagens a thread pode pegar
+// varios dias, e so a hora ("09:56") nao diz qual
+function rotuloDoDia(ms){
+  const d = new Date(ms);
+  const hoje = new Date();
+  const soDia = (x) => `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`;
+  if(soDia(d) === soDia(hoje)) return 'hoje';
+  const ontem = new Date(hoje.getTime() - 86400000);
+  if(soDia(d) === soDia(ontem)) return 'ontem';
+  return d.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' });
+}
 function renderChatThread(c){
   const el = document.getElementById('msg-modal-thread');
-  const lista = (c && c.chatMensagens) || [];
+  // ordena por 'em' tambem aqui, nao so no servidor (ver adicionarNoChat em
+  // lojaStatus.js): thread ja gravada fora de ordem continua exibindo certo
+  const lista = [...((c && c.chatMensagens) || [])]
+    .sort((a,b) => (Number(a && a.em)||0) - (Number(b && b.em)||0));
+  if(!lista.length){
+    const como = comoRecebe(c);
+    el.innerHTML = `<div class="chat-vazio">Nenhuma mensagem ainda.<br>O que você escrever ${escapeHtml(como.longo)}.</div>`;
+    return;
+  }
+  let ultimoDia = '';
   el.innerHTML = lista.map(m => {
-    const hora = m.em ? new Date(m.em).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) : '';
+    const ms = Number(m.em) || 0;
+    let sep = '';
+    if(ms){
+      const dia = rotuloDoDia(ms);
+      if(dia !== ultimoDia){ ultimoDia = dia; sep = `<div class="chat-dia">${escapeHtml(dia)}</div>`; }
+    }
+    const hora = ms ? new Date(ms).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}) : '';
     const quem = m.de === 'computador' ? 'de-computador' : 'de-master';
-    return `<div class="chat-bolha ${quem}">${escapeHtml(m.texto||'')}<span class="chat-hora">${escapeHtml(hora)}</span></div>`;
+    // quem do lado do Master mandou - com varias pessoas no suporte, "quem
+    // falou isso com a loja" e' a primeira pergunta que aparece
+    const autor = (m.de !== 'computador' && m.deEmail) ? String(m.deEmail).split('@')[0] + ' · ' : '';
+    return `${sep}<div class="chat-bolha ${quem}">${escapeHtml(m.texto||'')}<span class="chat-hora">${escapeHtml(autor + hora)}</span></div>`;
   }).join('');
   el.scrollTop = el.scrollHeight;
 }
+
+// ---- lista de destinos (2+ destinatarios) ----
+// nao da pra mostrar UMA thread pra varias maquinas, entao no lugar dela vai
+// o que importa antes de apertar Enviar: pra quem vai, se a maquina esta de
+// pe e o que ela faz com a mensagem
+function renderDestinosLista(){
+  const el = document.getElementById('msg-destinos-lista');
+  el.innerHTML = MSG_DESTINOS.map(d => {
+    const c = compDe(d.codigo, d.posto);
+    const est = c ? statusDe(c) : 'nunca';
+    const quando = c && c.ultimoHeartbeatEm ? tempoRelativo(c.ultimoHeartbeatEm) : 'nunca bateu';
+    return `<div class="msg-destino-linha">
+      <span class="status-dot ${est}"></span>
+      <span class="nome">${escapeHtml(nomeDe(d.codigo, d.posto))} <span class="quando">· ${escapeHtml(UNIDADES_NOMES[d.codigo] || d.codigo)}</span></span>
+      <span class="quando">${escapeHtml(comoRecebe(c).curto)} · ${escapeHtml(quando)}</span>
+    </div>`;
+  }).join('');
+}
+
+// ---- chips + picker de destinatarios ----
+function renderChipsMensagem(){
+  const el = document.getElementById('msg-chips');
+  if(!MSG_DESTINOS.length){
+    el.innerHTML = '<span class="msg-chip-vazio">nenhum computador escolhido</span>';
+  }else{
+    el.innerHTML = MSG_DESTINOS.map(d => `<span class="msg-chip">
+      <span class="nome">${escapeHtml(nomeDe(d.codigo, d.posto))}</span>
+      <button type="button" class="tirar" title="Tirar da lista"
+        onclick="toggleDestinoMensagem('${escapeJs(d.codigo)}','${escapeJs(d.posto)}')">×</button>
+    </span>`).join('');
+  }
+  const btn = document.getElementById('msg-modal-enviar');
+  btn.textContent = MSG_DESTINOS.length > 1 ? `Enviar (${MSG_DESTINOS.length})` : 'Enviar';
+  btn.disabled = !MSG_DESTINOS.length;
+}
+function alternarPickerMensagem(){
+  MSG_PICKER_ABERTO = !MSG_PICKER_ABERTO;
+  document.getElementById('msg-picker').classList.toggle('hidden', !MSG_PICKER_ABERTO);
+  if(MSG_PICKER_ABERTO){ renderPickerMensagem(); document.getElementById('msg-picker-busca').focus(); }
+}
+function renderPickerMensagem(){
+  const busca = (document.getElementById('msg-picker-busca').value || '').trim().toLowerCase();
+  const el = document.getElementById('msg-picker-lista');
+  const lista = computadoresReais().filter(c => {
+    if(!busca) return true;
+    return `${c.nome||''} ${UNIDADES_NOMES[c.codigo]||c.codigo}`.toLowerCase().includes(busca);
+  });
+  if(!lista.length){ el.innerHTML = '<div class="msg-uni">nenhum computador encontrado</div>'; return; }
+  const porUnidade = new Map();
+  lista.forEach(c => {
+    const nome = UNIDADES_NOMES[c.codigo] || c.codigo;
+    if(!porUnidade.has(nome)) porUnidade.set(nome, []);
+    porUnidade.get(nome).push(c);
+  });
+  const unidades = [...porUnidade.entries()].sort((a,b) => a[0].localeCompare(b[0], 'pt-BR'));
+  el.innerHTML = unidades.map(([nomeUni, comps]) => {
+    const linhas = comps
+      .sort((a,b) => String(a.nome||'').localeCompare(String(b.nome||''), 'pt-BR'))
+      .map(c => `<label class="msg-opt">
+        <input type="checkbox" ${msgTemDestino(c.codigo, c.posto) ? 'checked' : ''}
+          onchange="toggleDestinoMensagem('${escapeJs(c.codigo)}','${escapeJs(c.posto)}')">
+        <span class="status-dot ${statusDe(c)}"></span>
+        <span class="nome">${escapeHtml(c.nome || c.posto)}</span>
+        <span class="como">${escapeHtml(comoRecebe(c).curto)}</span>
+      </label>`).join('');
+    return `<div class="msg-uni">${escapeHtml(nomeUni)}</div>${linhas}`;
+  }).join('');
+}
+function toggleDestinoMensagem(codigo, posto){
+  if(msgTemDestino(codigo, posto)){
+    MSG_DESTINOS = MSG_DESTINOS.filter(d => !(d.codigo===codigo && d.posto===posto));
+  }else{
+    MSG_DESTINOS = [...MSG_DESTINOS, { codigo, posto }];
+  }
+  atualizarAreaMensagem();
+}
+function marcarDestinosMensagem(modo){
+  if(modo === 'limpar'){ MSG_DESTINOS = []; atualizarAreaMensagem(); return; }
+  let alvos = computadoresReais();
+  if(modo === 'unidade'){
+    // "toda a unidade" e' relativa a quem ja esta na lista - foi de um
+    // computador dessa unidade que o Master abriu a janela
+    const base = MSG_DESTINOS[0] ? MSG_DESTINOS[0].codigo : FILTRO_UNIDADE;
+    if(!base){ alert('Escolha um computador primeiro — "toda a unidade" usa a unidade dele.'); return; }
+    alvos = alvos.filter(c => c.codigo === base);
+  }else if(modo === 'online'){
+    alvos = alvos.filter(c => statusDe(c) === 'online' || statusDe(c) === 'degradado');
+  }else if(modo === 'interno'){
+    alvos = alvos.filter(c => c.tipo === 'interno');
+  }
+  // soma ao que ja estava escolhido (nao substitui): "toda a unidade" +
+  // "só internos" e' uma combinacao que o Master vai querer fazer
+  const novos = alvos.filter(c => !msgTemDestino(c.codigo, c.posto)).map(c => ({ codigo: c.codigo, posto: c.posto }));
+  MSG_DESTINOS = [...MSG_DESTINOS, ...novos];
+  atualizarAreaMensagem();
+}
+
+// alterna entre thread (1 destino) e lista de destinos (2+), e mantem chips,
+// titulo e botao coerentes. Uma funcao so pra nao existir estado meio pronto
+function atualizarAreaMensagem(){
+  const unico = msgDestinoUnico();
+  const thread = document.getElementById('msg-modal-thread');
+  const destinos = document.getElementById('msg-destinos-lista');
+  const sub = document.getElementById('msg-modal-loja');
+  renderChipsMensagem();
+  if(unico){
+    thread.classList.remove('hidden');
+    destinos.classList.add('hidden');
+    const c = compDe(unico.codigo, unico.posto);
+    renderChatThread(c ? compComDetalhe(c) : null);
+    sub.textContent = `${UNIDADES_NOMES[unico.codigo] || unico.codigo} · ${comoRecebe(c).longo}`;
+  }else{
+    thread.classList.add('hidden');
+    destinos.classList.remove('hidden');
+    renderDestinosLista();
+    sub.textContent = MSG_DESTINOS.length
+      ? `${MSG_DESTINOS.length} computadores · cada um recebe na própria conversa`
+      : 'Escolha para quem vai a mensagem.';
+  }
+}
+function atualizarContadorMensagem(){
+  const v = document.getElementById('msg-texto').value || '';
+  document.getElementById('msg-contador').textContent = `${v.length}/500`;
+}
+// Enter envia, Shift+Enter quebra linha - pedido do Master. isComposing
+// protege teclado com acento morto/IME, que dispara Enter pra confirmar
+function teclaNaMensagem(ev){
+  if(ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing){
+    ev.preventDefault();
+    enviarMensagemLoja();
+  }
+}
+
 function abrirModalMensagem(codigo, posto, nomeComputador){
-  MSG_CODIGO = codigo;
-  MSG_POSTO = posto;
-  document.getElementById('msg-modal-loja').textContent = nomeComputador || 'Computador';
+  MSG_DESTINOS = (codigo && posto) ? [{ codigo, posto }] : [];
+  MSG_PICKER_ABERTO = false;
+  document.getElementById('msg-picker').classList.add('hidden');
+  document.getElementById('msg-picker-busca').value = '';
   document.getElementById('msg-texto').value = '';
   document.getElementById('msg-modal-status').classList.add('hidden');
-  const c = COMPUTADORES.find(x => x.codigo===codigo && x.posto===posto);
-  // a thread (chatMensagens) e' campo pesado que nao vem mais na lista - abre
-  // com o que houver em cache e busca o detalhe fresco em paralelo
-  renderChatThread(c ? compComDetalhe(c) : c);
+  atualizarContadorMensagem();
+  atualizarAreaMensagem();
   document.getElementById('msg-overlay').classList.remove('hidden');
-  buscarDetalheComp(codigo, posto).then(d => { if(d) atualizarChatModalSeAberto(); });
+  document.getElementById('msg-texto').focus();
+  // a thread (chatMensagens) e' campo pesado que nao vem mais na lista - a
+  // linha acima abre com o que houver em cache, isto busca o detalhe fresco
+  if(codigo && posto) buscarDetalheComp(codigo, posto).then(d => { if(d) atualizarChatModalSeAberto(); });
 }
-function fecharModalMensagem(){ document.getElementById('msg-overlay').classList.add('hidden'); MSG_CODIGO = null; MSG_POSTO = null; }
+function fecharModalMensagem(){
+  document.getElementById('msg-overlay').classList.add('hidden');
+  MSG_DESTINOS = [];
+  MSG_PICKER_ABERTO = false;
+}
 // chamado no fim de render() - mantem a thread viva enquanto o modal
 // estiver aberto, igual o detalhe do computador (atualizarDetalheSeAberto)
 function atualizarChatModalSeAberto(){
-  if(!MSG_CODIGO || !MSG_POSTO) return;
-  const c = COMPUTADORES.find(x => x.codigo===MSG_CODIGO && x.posto===MSG_POSTO);
-  if(c) renderChatThread(compComDetalhe(c));
+  if(!msgModalAberto()) return;
+  atualizarAreaMensagem();
 }
 async function enviarMensagemLoja(){
   const texto = document.getElementById('msg-texto').value.trim();
   const status = document.getElementById('msg-modal-status');
   status.classList.add('hidden');
-  if(!texto || !MSG_CODIGO || !MSG_POSTO) return;
+  if(!texto || !MSG_DESTINOS.length) return;
   const btn = document.getElementById('msg-modal-enviar');
+  const rotulo = btn.textContent;
   btn.disabled = true;
+  btn.textContent = 'Enviando...';
   try{
-    const resp = await fetch(`/api/loja-status/${encodeURIComponent(MSG_CODIGO)}/computadores/${encodeURIComponent(MSG_POSTO)}/mensagem`, {
+    // sempre pela rota de varios (mesmo com 1 destino): um caminho so, e a
+    // rota antiga por computador continua existindo pra quem ja chamava ela
+    const resp = await fetch('/api/loja-status/mensagem-massa', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ texto }),
+      body: JSON.stringify({ destinos: MSG_DESTINOS, texto }),
     });
-    if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao enviar.');
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao enviar.');
     document.getElementById('msg-texto').value = '';
-    status.textContent = '✅ Enviada! Vai aparecer na tela desse computador assim que ele atualizar (até ~25s se estiver online agora).';
-    status.className = 'msg ok';
+    atualizarContadorMensagem();
+    const n = (data.enviados || []).length;
+    const falhas = (data.falhas || []).length;
+    status.textContent = falhas
+      ? `⚠️ Enviada para ${n} de ${n + falhas} computadores. ${falhas} falharam.`
+      : (n > 1
+          ? `✅ Enviada para ${n} computadores. Aparece na tela de cada um no próximo contato (até ~25s se estiver online agora).`
+          : '✅ Enviada! Vai aparecer na tela desse computador assim que ele atualizar (até ~25s se estiver online agora).');
+    status.className = falhas ? 'msg err' : 'msg ok';
     status.classList.remove('hidden');
-    setTimeout(() => status.classList.add('hidden'), 3000);
+    if(!falhas) setTimeout(() => status.classList.add('hidden'), 4000);
     await carregar();
+    const unico = msgDestinoUnico();
+    if(unico) await buscarDetalheComp(unico.codigo, unico.posto);
+    atualizarChatModalSeAberto();
+    document.getElementById('msg-texto').focus();
   }catch(e){
     status.textContent = e.message; status.className = 'msg err'; status.classList.remove('hidden');
   }finally{
     btn.disabled = false;
+    btn.textContent = rotulo;
+    renderChipsMensagem();
   }
 }
 

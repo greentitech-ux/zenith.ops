@@ -3142,6 +3142,17 @@ app.post('/api/loja-status/:codigo/computadores/:posto/mensagem', requireSection
   }
 });
 
+// mesma mensagem pra varios computadores de uma vez (ver enviarMensagemMuitos
+// em lojaStatus.js). Nao colide com /api/loja-status/:codigo/... porque
+// aquelas rotas tem segmentos a mais depois do codigo
+app.post('/api/loja-status/mensagem-massa', requireSection('suporte'), async (req, res) => {
+  try {
+    res.json(await lojaStatus.enviarMensagemMuitos(req.body.destinos, req.body.texto, req.user.email));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---------- registros de disputa/monitoramento (secao "disputas") ----------
 function disputaPermitida(req, registro) {
   if (!registro) return false;
