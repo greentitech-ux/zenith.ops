@@ -9509,6 +9509,113 @@ setTimeout(async () => {
   if (!okJanelaCaixa) ruins += 1;
   console.log(`${okJanelaCaixa ? '✓' : '✗'} Sangria: a tela diz de quando até quando contou (o "De" é a fronteira, não o 1º dia)`);
 
+  // ------------------------------------------------------------------
+  // Depósito feito por OUTRA pessoa: ela assina e anexa o comprovante.
+  // Pedido do Master, com os dois caminhos que ele descreveu - o nome já
+  // sabido na hora de lançar, e (o mais comum) "às vezes lança primeiro e
+  // depois a outra pessoa vai fazer o depósito e pega o comprovante depois
+  // e assinaria".
+  let okDepositante = false;
+  try {
+    const fsD = require('fs');
+    const pathD = require('path');
+    const forms = require('./formularios');
+    const htmlAssinar = fsD.readFileSync(pathD.join(__dirname, 'public', 'assinar.html'), 'utf8');
+    const htmlForms = fsD.readFileSync(pathD.join(__dirname, 'public', 'formularios.html'), 'utf8');
+    const srcIdxD = fsD.readFileSync(pathD.join(__dirname, 'index.js'), 'utf8');
+    const PNG_1PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+    const unidadeDep = (await require('./formulariosUnidades').listar())[0];
+    const baseDep = {
+      tipo: 'deposito', unidade: unidadeDep.unidade,
+      linhas: [{ data: '25/08/2026', periodo: '20/08/2026 a 25/08/2026', envelope: '123', valor: '490,00' }],
+      criadoPorEmail: 'gerente@teste.local',
+    };
+
+    // (a) mesma pessoa: continua com 1 assinatura só, comprovante opcional
+    const soGerente = await forms.criar({ ...baseDep, campos: { nomeGerente: 'Ana Lima' } });
+    // (b) nome digitado na hora, diferente do gerente: nasce com 2
+    const comOutra = await forms.criar({ ...baseDep, campos: { nomeGerente: 'Ana Lima', depositante: 'Carlos Souza' } });
+    // (c) mesmo nome escrito diferente (acento/caixa) NÃO cria assinante
+    const mesmoNome = await forms.criar({ ...baseDep, campos: { nomeGerente: 'João Silva', depositante: '  joao silva ' } });
+
+    // (d) o caminho do Master: lançou só com o gerente, o gerente assinou, e
+    // só depois apareceu quem foi ao banco
+    const depoisG = soGerente.assinaturas.find((a) => a.chave === 'gerente');
+    await forms.assinar(soGerente.id, depoisG.token, { nome: 'Ana Lima', imagem: PNG_1PX });
+    const comDepositante = await forms.pedirComprovanteDeposito(soGerente.id, { nome: 'Carlos Souza', porEmail: 'm@t' });
+    const gerenteDepois = comDepositante.assinaturas.find((a) => a.chave === 'gerente');
+    const slotDep = comDepositante.assinaturas.find((a) => a.chave === 'depositante');
+
+    // (e) o depositante NÃO assina sem comprovante. Formulário SEPARADO de
+    // propósito: se a trava cair, a assinatura entra, e uma segunda tentativa
+    // no mesmo slot estouraria "já foi registrada" - o teste reprovaria por
+    // efeito colateral em vez de pela asserção que interessa
+    const semComp = await forms.criar({ ...baseDep, campos: { nomeGerente: 'Ana Lima', depositante: 'Carlos Souza' } });
+    const slotSemComp = semComp.assinaturas.find((a) => a.chave === 'depositante');
+    let recusouSemComprovante = false;
+    try { await forms.assinar(semComp.id, slotSemComp.token, { nome: 'Carlos Souza', imagem: PNG_1PX }); }
+    catch (e) { recusouSemComprovante = /comprovante do depósito/i.test(e.message); }
+    // e mesmo que a trava da assinatura caísse, o formulário não pode FECHAR
+    // sem o comprovante - são duas travas, e esta é a que segura o PDF
+    const semCompDepois = await forms.detalhar(semComp.id);
+
+    // (f) com comprovante: assina, o anexo entra e o formulário FECHA
+    const assinouComAnexo = await forms.assinar(soGerente.id, slotDep.token, {
+      nome: 'Carlos Souza', imagem: PNG_1PX,
+      anexos: [{ nome: 'comprovante.jpg', path: 'formularios/x/comprovante.jpg', tipo: 'image/jpeg' }],
+    });
+    const fechado = await forms.detalhar(soGerente.id);
+
+    // (g) formulário do gerente sozinho continua fechando sem anexo nenhum
+    const soGerente2 = await forms.criar({ ...baseDep, campos: { nomeGerente: 'Ana Lima' } });
+    const g2 = soGerente2.assinaturas.find((a) => a.chave === 'gerente');
+    await forms.assinar(soGerente2.id, g2.token, { nome: 'Ana Lima', imagem: PNG_1PX });
+    const fechadoSemAnexo = await forms.detalhar(soGerente2.id);
+
+    const conf = {
+      'depósito do próprio gerente segue com 1 assinatura': soGerente.assinaturas.length === 1,
+      'outra pessoa digitada na hora vira 2ª assinatura':
+        comOutra.assinaturas.length === 2 && !!comOutra.assinaturas.find((a) => a.chave === 'depositante'),
+      'mesmo nome com acento/caixa diferente NÃO cria assinatura sobrando': mesmoNome.assinaturas.length === 1,
+      // o caminho principal: acrescentar depois sem refazer nada
+      'dá pra acrescentar quem depositou DEPOIS de lançado': !!slotDep,
+      'a assinatura do gerente NÃO é descartada nisso': gerenteDepois.assinado === true,
+      'o nome de quem depositou entra no formulário': comDepositante.campos.depositante === 'Carlos Souza',
+      'o depositante não assina sem o comprovante': recusouSemComprovante,
+      'sem comprovante o formulário NÃO fecha': semCompDepois.status !== 'ASSINADO',
+      // a 2ª trava (o formulário não FECHAR sem comprovante) não é
+      // alcançável por fora enquanto a 1ª segura a assinatura - são duas de
+      // propósito. Testa então a regra que segura a 2ª, executando ela
+      'a regra reconhece o depósito que exige comprovante':
+        forms.comprovanteObrigatorio({ tipo: 'deposito', campos: { nomeGerente: 'Ana Lima', depositante: 'Carlos Souza' } }) === true,
+      'e o depósito do próprio gerente não exige':
+        forms.comprovanteObrigatorio({ tipo: 'deposito', campos: { nomeGerente: 'Ana Lima' } }) === false,
+      'com o comprovante ele assina e o formulário fecha':
+        assinouComAnexo.completo === true && fechado.status === 'ASSINADO' && (fechado.anexos || []).length === 1,
+      'depósito sem outra pessoa continua fechando sem anexo': fechadoSemAnexo.status === 'ASSINADO',
+      // as duas pontas da tela
+      'a página pública liga o campo de arquivo pra esse papel':
+        /exigeComprovante: chave === 'depositante'/.test(fsD.readFileSync(pathD.join(__dirname, 'formularios.js'), 'utf8'))
+        && /id="bloco-comprovante"/.test(htmlAssinar)
+        && /DATA\.exigeComprovante && !arquivo/.test(htmlAssinar),
+      'a rota pública de assinar aceita o arquivo':
+        /app\.post\('\/api\/formularios-publico\/:id\/assinar', upload\.array\('anexos', 5\)/.test(srcIdxD),
+      // token conferido ANTES de gravar arquivo: link inválido não pode
+      // virar porta de upload
+      'link inválido não serve pra subir arquivo':
+        /if \(!registro \|\| !formularios\.chaveDoToken\(registro, corpo\.token\)\) \{[\s\S]{0,120}return res\.status\(400\)/.test(srcIdxD),
+      'a lista avisa quando falta o comprovante': /function faltaComprovanteDeposito\(f\)/.test(htmlForms),
+      'o botão de pedir só aparece no Depósito sem depositante':
+        /f\.tipo==='deposito' && !temDepositante\(f\)/.test(htmlForms),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okDepositante = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDepositante = false; console.log('  erro: ' + e.message); }
+  if (!okDepositante) ruins += 1;
+  console.log(`${okDepositante ? '✓' : '✗'} Depósito: quem foi ao banco (se não for o gerente) anexa o comprovante e assina - e dá pra pedir isso depois de lançado`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
