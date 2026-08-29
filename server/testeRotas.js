@@ -9641,6 +9641,13 @@ setTimeout(async () => {
       anexos: [{ nome: 'comprovante.jpg', path: 'formularios/x/comprovante.jpg', tipo: 'image/jpeg' }],
     });
     const fechado = await forms.detalhar(soGerente.id);
+    // (f2) e - o que o Master perguntou olhando a tela - a assinatura dele
+    // TEM que aparecer no PDF. O rodapé desenhava só modelo.assinantes (a
+    // lista FIXA do tipo, que no Depósito é só o gerente), então o
+    // depositante assinava, aparecia assinado na tela, travava o
+    // fechamento... e sumia do papel que vai pro banco.
+    const pdfDep = await pedirBinario(`/api/formularios/${soGerente.id}/pdf`, { Authorization: 'Bearer ' + token });
+    const textoDep = pdfDep.status === 200 ? textoDoPdf(pdfDep.buffer) : '';
 
     // (g) formulário do gerente sozinho continua fechando sem anexo nenhum
     const soGerente2 = await forms.criar({ ...baseDep, campos: { nomeGerente: 'Ana Lima' } });
@@ -9666,6 +9673,17 @@ setTimeout(async () => {
         forms.comprovanteObrigatorio({ tipo: 'deposito', campos: { nomeGerente: 'Ana Lima', depositante: 'Carlos Souza' } }) === true,
       'e o depósito do próprio gerente não exige':
         forms.comprovanteObrigatorio({ tipo: 'deposito', campos: { nomeGerente: 'Ana Lima' } }) === false,
+      // ATENÇÃO ao montar essas duas: o nome do depositante e o rótulo dele
+      // TAMBÉM aparecem no cabeçalho do formulário ("QUEM FEZ O DEPÓSITO" /
+      // "Carlos Souza"), então um teste frouxo passa mesmo sem a assinatura
+      // desenhada. O que só existe no bloco de assinatura é o rótulo em
+      // caixa normal e a linha "nome · data" - é neles que se bate
+      'a assinatura de quem depositou APARECE no PDF, não só na tela':
+        /Quem fez o depósito/.test(textoDep)
+        && /Carlos Souza · \d{2}\/\d{2}\/\d{4}/.test(textoDep),
+      'e a do gerente continua saindo junto (as duas, lado a lado)':
+        /Gerente da unidade/.test(textoDep)
+        && /Ana Lima · \d{2}\/\d{2}\/\d{4}/.test(textoDep),
       'com o comprovante ele assina e o formulário fecha':
         assinouComAnexo.completo === true && fechado.status === 'ASSINADO' && (fechado.anexos || []).length === 1,
       'depósito sem outra pessoa continua fechando sem anexo': fechadoSemAnexo.status === 'ASSINADO',

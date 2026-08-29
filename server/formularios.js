@@ -1386,13 +1386,23 @@ async function gerarPdf(r, res, opcoes) {
   celula(fmtMoney(r.valorTotal), xValor, y, larguraValor, 24, { bold: true, meio: true, align: 'right', fill: AZUL_CLARO });
   y += 60;
 
-  // assinaturas do rodapé: 1 centralizada ou 2 lado a lado, imagem em cima
-  // da linha e o rótulo embaixo - a posição que o formulário em papel usa
-  const papeis = modelo.assinantes;
+  // assinaturas do rodapé: 1 centralizada ou N lado a lado, imagem em cima
+  // da linha e o rótulo embaixo - a posição que o formulário em papel usa.
+  //
+  // assinantesDe, e NÃO modelo.assinantes: o "quem fez o depósito" nasce do
+  // que foi preenchido (ver assinantesDe), não da lista fixa do tipo. Com a
+  // lista fixa aqui, ele assinava, aparecia assinado na tela e travava o
+  // fechamento do formulário - mas a assinatura não saía no PDF, que é
+  // justamente o papel que vai pro banco e pra prestação de contas.
+  const papeis = assinantesDe(modelo, r.campos);
   const larguraBloco = 210;
+  // distribuídos: o primeiro colado na esquerda, o último na direita. Hoje
+  // isso é sempre 1 ou 2 blocos (o Depósito é o único tipo com assinante
+  // variável, e vai a 2 no máximo); um tipo com 3 caberia na conta mas
+  // encostaria os blocos - aí a largura precisa cair junto
   const posicoes = papeis.length === 1
     ? [X + (LARGURA - larguraBloco) / 2]
-    : [X + 20, X + LARGURA - larguraBloco - 20];
+    : papeis.map((_, i) => X + 20 + i * ((LARGURA - 40 - larguraBloco) / (papeis.length - 1)));
   const yAssin = Math.max(y + 40, 620);
   papeis.forEach((p, i) => {
     const bx = posicoes[i];
