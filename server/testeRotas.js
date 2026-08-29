@@ -9614,6 +9614,46 @@ setTimeout(async () => {
   // R$ 77,80. Não é erro de conta: o "De" do período é a FRONTEIRA (o dia
   // que a retirada anterior já cobriu), não o primeiro dia contado. O que
   // faltava era a tela DIZER isso.
+  // ------------------------------------------------------------------
+  // DINHEIRO COM 2 CASAS. Reportado com print: o campo "Maquininhas
+  // (cartão)" mostrava 1531,0500000000002. A soma das maquininhas e feita
+  // na tela em ponto flutuante e chegava assim - e era GRAVADA assim.
+  let okDuasCasas = false;
+  try {
+    const fl = require('./fechamentosLive');
+    const fsD = require('fs'); const pathD = require('path');
+    const htmlFech = fsD.readFileSync(pathD.join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+    const uni = 'DOM_19706';
+    // 1490.15 + 40.90 em float da EXATAMENTE o 1531.0500000000002 do print
+    const somaTorta = 1490.15 + 40.90;
+    const criado = await fl.create({
+      unidade: uni, unidadeNome: 'Teste 2 casas', data: '2026-08-21',
+      campos: { adyen: somaTorta, pix: 0.1 + 0.2, delivery: 114.91, food99: 488 },
+      criadoPorEmail: 'teste@teste.local',
+    });
+    const lido = await fl.getOne(criado.id);
+
+    const conf = {
+      // a prova de que o valor de entrada era torto mesmo
+      'o valor que chegava da tela era mesmo 1531.0500000000002': String(somaTorta) === '1531.0500000000002',
+      'o campo das maquininhas grava 1531.05 redondo': lido.adyen === 1531.05,
+      'e nao sobra dizima em nenhuma casa': String(lido.adyen) === '1531.05',
+      // o classico 0.1+0.2 = 0.30000000000000004
+      'o outro caso classico de float tambem fecha': lido.pix === 0.3,
+      'valor que ja era exato nao muda': lido.delivery === 114.91 && lido.food99 === 488,
+      // fechamento ANTIGO (gravado antes disso) ainda tem a dizima no banco:
+      // a tela de edicao nao pode mostrar ela crua pro Master
+      'a tela de edicao arredonda o que veio do banco':
+        /const duasCasas = \(v\) =>/.test(htmlFech)
+        && /\.value = duasCasas\(d\[c\]\)/.test(htmlFech),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okDuasCasas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (adyen gravado: ${lido && lido.adyen})`);
+  } catch (e) { okDuasCasas = false; console.log('  erro: ' + e.message); }
+  if (!okDuasCasas) ruins += 1;
+  console.log(`${okDuasCasas ? '✓' : '✗'} Fechamento: dinheiro grava com 2 casas (fim do 1531,0500000000002 na tela)`);
+
   let okJanelaCaixa = false;
   try {
     const fsJ = require('fs');

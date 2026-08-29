@@ -2699,7 +2699,10 @@ async function abrirEdicaoFechamento(id){
     `<option value="${escapeHtml(u)}" ${u===d.unidade?'selected':''}>${escapeHtml(UNIDADES_NOMES[u]||u)}</option>`).join('');
   document.getElementById('ef-data').value = d.data || '';
   document.getElementById('ef-gerente').value = d.gerente || '';
-  CAMPOS_EDICAO_FECHAMENTO.forEach(c=>{ document.getElementById('ef-'+c).value = d[c] ?? 0; });
+  // 2 casas: fechamento ANTIGO (gravado antes do arredondamento no servidor)
+  // trazia 1531.0500000000002, e o campo mostrava isso cru pro Master
+  const duasCasas = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0; };
+  CAMPOS_EDICAO_FECHAMENTO.forEach(c=>{ document.getElementById('ef-'+c).value = duasCasas(d[c]); });
   document.getElementById('ef-observacao').value = d.observacao || '';
   document.getElementById('ef-motivo').value = '';
 

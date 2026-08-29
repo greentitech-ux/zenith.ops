@@ -67,9 +67,18 @@ const CAMPOS_NUMERICOS = [
   'entradaDinheiro', 'deposito', 'adyenPos',
 ];
 
+// Dinheiro tem 2 casas. Sem arredondar aqui, a soma feita na tela (ponto
+// flutuante) chegava e era GRAVADA como 1531.0500000000002 - e o Master via
+// isso cru no campo de edicao do fechamento. Arredondar no unico portao por
+// onde TODO campo numerico passa (create + as duas edicoes) mata na origem,
+// em vez de mascarar na exibicao de cada tela.
+//
+// Nao mexe em dado ja gravado: registro antigo so e' normalizado se alguem
+// salvar ele de novo. Os totais (faturamento/totalDeclarado/diferenca) ja
+// eram arredondados na hora do calculo.
 function num(v) {
   const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
 }
 
 // soma um mapa de extras (campo:valor) respeitando o sinal de cada campo
