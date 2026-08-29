@@ -1241,6 +1241,44 @@ async function enfileirarComandoEmTodos(comando, opcoes) {
   return resultados;
 }
 
+// ---------------------------------------------------------------------
+// IP DA IMPRESSORA NO COMANDO
+//
+// Cada loja tem a impressora num IP diferente, e so as Dominos tem Zebra -
+// entao cravar o IP no comando obrigaria uma acao cadastrada POR LOJA, e
+// deixaria a acao rodar no vazio numa loja que nem impressora tem.
+//
+// O comando cadastrado guarda {{IP_IMPRESSORA}}, e aqui isso vira o IP do
+// dispositivo que o Master marcou como tipo 'impressora' NAQUELA unidade
+// (ver definirApelidoDispositivo). Uma acao so, servindo as 14.
+//
+// Unidade sem impressora marcada NAO roda: recusa dizendo o porque, em vez
+// de disparar um comando que ia falhar de um jeito silencioso na loja.
+const PLACEHOLDER_IP_IMPRESSORA = '{{IP_IMPRESSORA}}';
+
+async function resolverIpImpressora(codigo, posto) {
+  const [docs, apelidos] = await Promise.all([cache.cached(), getApelidos()]);
+  const daUnidade = apelidos[codigo] || {};
+  const macsImpressora = new Set(
+    Object.keys(daUnidade).filter((mac) => normalizarEntradaApelido(daUnidade[mac]).tipo === 'impressora')
+  );
+  if (!macsImpressora.size) {
+    throw new Error('Nenhum dispositivo dessa unidade esta marcado como impressora. Abra o Status das Lojas, clique no ✏️ da impressora e marque o tipo antes de rodar essa acao.');
+  }
+  // procura primeiro na lista do PROPRIO computador que vai rodar: e a rede
+  // dele que precisa alcancar a impressora. So depois cai pros outros
+  // computadores da mesma unidade (mesma LAN, e a varredura ARP de um pode
+  // ter pego o que a do outro perdeu).
+  const daMaquina = docs.filter((d) => d.codigo === codigo && d.posto === posto);
+  const outros = docs.filter((d) => d.codigo === codigo && d.posto !== posto);
+  for (const d of [...daMaquina, ...outros]) {
+    for (const disp of d.dispositivos || []) {
+      if (macsImpressora.has(disp.mac) && disp.ip) return disp.ip;
+    }
+  }
+  throw new Error('A impressora dessa unidade esta marcada, mas nenhum computador da loja viu o IP dela na ultima varredura de rede. Confira se ela esta ligada na rede.');
+}
+
 async function enfileirarComando(codigo, posto, comando, opcoes) {
   const id = docIdFor(codigo, posto);
   const ref = COLLECTION.doc(id);
@@ -1255,9 +1293,14 @@ async function enfileirarComando(codigo, posto, comando, opcoes) {
   if (!atual.agentToken) throw new Error('Esse computador precisa reinstalar o NOCZenith (baixar de novo) pra habilitar comandos com segurança.');
   if (atual.comandoPendenteId) throw new Error('Já existe um comando pendente/entregue pra esse computador - aguarde terminar antes de mandar outro.');
   const op = opcoes || {};
+  // troca o placeholder ANTES de gravar: o que fica registrado (e o que o
+  // Master ve no historico) e o comando de verdade que a maquina rodou
+  const comandoFinal = comando.includes(PLACEHOLDER_IP_IMPRESSORA)
+    ? comando.split(PLACEHOLDER_IP_IMPRESSORA).join(await resolverIpImpressora(codigo, posto))
+    : comando;
   const comandoRef = COMANDOS_COLLECTION.doc();
   const registro = {
-    id: comandoRef.id, codigo, posto, comando,
+    id: comandoRef.id, codigo, posto, comando: comandoFinal,
     origem: op.origem || 'agente', acaoId: op.acaoId || null, aprovacaoId: op.aprovacaoId || null,
     status: 'pendente', criadoEm: new Date().toISOString(),
     entregueEm: null, executadoEm: null, resultado: null, erro: null,
@@ -1771,6 +1814,7 @@ module.exports = {
   // que é como se simula uma máquina que saiu do ar.
   descartarEspelhoTeste: () => { espelho = null; espelhoEm = 0; cache.invalidar(); },
   enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos,
+  PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora,
   COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,

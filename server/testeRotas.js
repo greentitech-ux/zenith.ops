@@ -4756,6 +4756,86 @@ setTimeout(async () => {
   // mandava alguém procurar um problema que não existe. Aqui fica provado
   // que o NOC conta a verdade: reiniciando é reiniciando; e se NÃO voltar
   // na janela, aí sim vira incidente - com a causa provável já conhecida.
+  // ------------------------------------------------------------------
+  // IP DA IMPRESSORA NO COMANDO. Pedido do Master: "cada loja tem um ip
+  // diferente a impressora, e nem toda loja tem impressora zebra so as
+  // dominos". Cravar o IP obrigaria uma ação cadastrada POR LOJA - e, pior,
+  // deixaria a ação rodar no vazio numa loja sem impressora. O comando
+  // guarda {{IP_IMPRESSORA}} e o servidor troca pelo IP do dispositivo que o
+  // Master marcou como 'impressora' NAQUELA unidade.
+  let okIpImpressora = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const UNI = 'NOCZEBRA';
+    // OUI real da Zebra (00:07:4D). Nao pode ser um MAC qualquer: o segundo
+    // digito 2/6/a/e marca MAC randomizado e a varredura descarta (macAleatorio)
+    const MAC_IMP = '00:07:4d:11:22:33';
+    await ls.cadastrarComputador(UNI, 'PDV-ZEBRA', 'interno');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-ZEBRA').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    // a máquina enxerga 2 aparelhos na rede: a Zebra e um qualquer
+    await ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0' }, tk);
+    // a varredura de rede chega por registrarTelemetria, nao pelo heartbeat
+    await ls.registrarTelemetria(UNI, posto, { dispositivos: [
+      // o OUTRO vem PRIMEIRO na varredura de proposito: assim o resolvedor
+      // tem que escolher pelo TIPO, e nao acertar pegando o primeiro da lista
+      { mac: 'dd:ee:ff:00:11:22', ip: '10.161.117.9', nome: 'OUTRO' },
+      { mac: MAC_IMP, ip: '10.161.117.215', nome: 'ZEBRA' },
+    ] }, tk);
+
+    const CMD = "Send-ZPL '{{IP_IMPRESSORA}}' '~JC'; 'fim {{IP_IMPRESSORA}}'";
+
+    // (a) ANTES de marcar o tipo: a unidade não tem impressora nenhuma - e
+    // essa é a loja que não é Dominos. Tem que RECUSAR, não rodar no vazio.
+    let recusouSemImpressora = '';
+    try { await ls.enfileirarComando(UNI, posto, CMD, {}); }
+    catch (e) { recusouSemImpressora = e.message; }
+
+    // o OUTRO aparelho tambem tem apelido e tipo - e nomeado ANTES da Zebra.
+    // Sem isso a assercao "pega a Zebra e nao o outro" nao teria como falhar:
+    // um resolvedor que ignorasse o TIPO acharia so um candidato e acertaria
+    // por sorte. Com dois nomeados, ignorar o tipo pega o errado.
+    await ls.definirApelidoDispositivo(UNI, 'dd:ee:ff:00:11:22', { apelido: 'VM do servidor', tipo: 'vm' });
+    // (b) o Master marca o MAC como impressora -> o IP entra sozinho
+    await ls.definirApelidoDispositivo(UNI, MAC_IMP, { apelido: 'Zebra da cozinha', tipo: 'impressora' });
+    const enfileirado = await ls.enfileirarComando(UNI, posto, CMD, {});
+
+    // (c) unidade com impressora marcada mas que ninguém viu na rede
+    const UNI2 = 'NOCZEBRA2';
+    await ls.cadastrarComputador(UNI2, 'PDV-Z2', 'interno');
+    const posto2 = (await ls.listar()).find((c) => c.codigo === UNI2 && c.nome === 'PDV-Z2').posto;
+    const tk2 = await ls.garantirAgentToken(UNI2, posto2);
+    await ls.heartbeat(UNI2, posto2, { userAgent: 'NOCZenith/1.0' }, tk2);
+    await ls.definirApelidoDispositivo(UNI2, 'BB:BB:BB:BB:BB:BB', { apelido: 'Zebra sumida', tipo: 'impressora' });
+    let recusouSemIp = '';
+    try { await ls.enfileirarComando(UNI2, posto2, CMD, {}); }
+    catch (e) { recusouSemIp = e.message; }
+
+    // (d) comando SEM o placeholder segue passando intacto
+    const semPlaceholder = await ls.enfileirarComando(UNI2, posto2, 'Get-Date', {});
+
+    const conf = {
+      'loja sem impressora marcada NÃO roda a ação': /marcado como impressora/i.test(recusouSemImpressora),
+      'a recusa diz o que fazer (marcar o tipo no painel)': /Status das Lojas/.test(recusouSemImpressora),
+      'com a impressora marcada, o IP dela entra no comando':
+        enfileirado.comando === "Send-ZPL '10.161.117.215' '~JC'; 'fim 10.161.117.215'",
+      'troca TODAS as ocorrências, não só a primeira':
+        !enfileirado.comando.includes('{{IP_IMPRESSORA}}'),
+      // o que fica gravado é o comando de verdade - é o que o Master lê no
+      // histórico, e é o que a máquina realmente rodou
+      'o histórico guarda o IP resolvido, não o placeholder':
+        /10\.161\.117\.215/.test(enfileirado.comando),
+      'pega a Zebra e não o outro aparelho da rede': !enfileirado.comando.includes('10.161.117.9'),
+      'impressora marcada que ninguém viu na rede também recusa': /viu o IP dela/i.test(recusouSemIp),
+      'comando sem placeholder passa intacto': semPlaceholder.comando === 'Get-Date',
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okIpImpressora = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (comando: ${enfileirado && enfileirado.comando})`);
+  } catch (e) { okIpImpressora = false; console.log('  erro: ' + e.message); }
+  if (!okIpImpressora) ruins += 1;
+  console.log(`${okIpImpressora ? '✓' : '✗'} NOC: o IP da impressora sai do painel (uma ação serve as 14 lojas) e loja sem Zebra é recusada`);
+
   let okReinicioAlerta = false;
   try {
     const cab = { Authorization: 'Bearer ' + token };
