@@ -178,7 +178,6 @@
 
 <div class="panel" id="painel-sangria">
   <h2>💰 Registrar sangria/depósito</h2>
-  <div class="sub" style="margin:-2px 0 10px;">Pra retiradas de caixa feitas durante o dia, na visita à loja - sem precisar esperar o fechamento sair. Some automático no fechamento do dia.</div>
   <form id="form-sangria">
     <label>Unidade</label>
     <select id="s-unidade" required onchange="preencherPeriodoSangria()"></select>
@@ -286,7 +285,6 @@
           <button type="button" class="btn-add" id="btn-ler-canais" onclick="realizarLeituraRelatorio()" disabled>🔍 Realizar leitura</button>
         </div>
         <div id="ler-canais-selecao" class="sub hidden" style="margin-top:6px;"></div>
-        <div class="sub" style="margin-top:4px;">Preenche os Canais de venda e as Formas de pagamento de uma vez. Pode mandar até 5 fotos do mesmo dia se o relatório não couber numa só. Só depois de clicar em <b>Realizar leitura</b> as fotos são enviadas. Errou algum valor? Escolha as fotos de novo — a leitura recomeça do zero.</div>
         <div id="ler-canais-msg" class="sub hidden" style="margin-top:6px;"></div>
       </div>
       <div class="grid2 hidden" id="canais-extras-container" style="margin-top:6px;"></div>
@@ -307,7 +305,6 @@
 
     <div class="secao hidden" id="secao-maquininhas-pos">
       <div class="secao-titulo">Maquininha POS 01 (vendas após meia-noite) <span id="maq-pos-total" style="color:var(--text);"></span></div>
-      <div class="sub" style="margin:-2px 0 8px;">Só o que foi vendido DEPOIS da meia-noite nessa maquininha. Esse valor soma no fechamento de hoje e é descontado automaticamente no fechamento de amanhã - assim a venda não conta duas vezes quando o lote da maquininha bater amanhã.</div>
       <div id="lista-maquinas-pos"></div>
       <button type="button" class="btn-add" onclick="adicionarMaquinaPos()">+ Adicionar maquininha POS</button>
     </div>
@@ -319,7 +316,6 @@
 
     <div class="secao" id="secao-saidas">
       <div class="secao-titulo">Outras saídas de caixa <span id="saida-total" style="color:var(--text);"></span></div>
-      <div class="sub" style="margin:-2px 0 8px;">Saídas que não passaram pela Sangria/Depósito (ex: pequena despesa paga direto do caixa).</div>
       <div id="lista-saidas"></div>
       <button type="button" class="btn-add" onclick="adicionarSaida()">+ Adicionar saída</button>
     </div>
@@ -635,19 +631,17 @@ function renderExtrasGrupo(unidade, chaveGrupo, containerId, vazioId, classe){
   // aqui so atrasava o mesmo resultado.
   const travar = (k) => automatico && !IS_MASTER && k.manual !== true;
   const algumTravado = campos.some(travar);
-  const algumManual = automatico && campos.some((k) => k.manual === true);
-  const avisos = [];
-  if(automatico && IS_MASTER) avisos.push('🔓 Master: a leitura da foto preenche os campos, mas nenhum fica travado — dá pra digitar direto.');
-  if(algumTravado) avisos.push('🔒 Os campos com fundo cinza vêm da foto do relatório e não são digitados. Valor zerado no relatório fica em branco.');
-  if(algumManual) avisos.push('✏️ Os demais não saem no relatório — esses você digita normalmente.');
-  const aviso = avisos.length
-    ? `<div class="sub" style="grid-column:1/-1;margin:0 0 2px;">${avisos.join(' ')}</div>`
+  // unico texto que sobrou nesta secao, e so quando ha campo travado: sem
+  // ele o campo cinza que nao aceita digitacao parece defeito. Pro Master
+  // nada trava, entao ele nao ve nada disso.
+  const aviso = algumTravado
+    ? '<div class="sub" style="grid-column:1/-1;margin:0 0 2px;">🔒 Os campos com fundo cinza vêm da foto do relatório e não são digitados. Valor zerado no relatório fica em branco.</div>'
     : '';
   container.innerHTML = aviso + campos.map(k=>{
     const attr = travar(k)
       ? ' readonly class="'+classe+' campo-automatico" title="Preenchido pela foto do relatório - não editável"'
       : ' class="'+classe+'"';
-    const marca = travar(k) ? '' : (automatico ? ' <span style="color:var(--muted);font-weight:400;">✏️</span>' : '');
+    const marca = (algumTravado && !travar(k)) ? ' <span style="color:var(--muted);font-weight:400;">✏️</span>' : '';
     return `<div><label>${escapeHtml(k.label)}${marca}</label><input type="number" step="0.01" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}"${attr}></div>`;
   }).join('');
   container.querySelectorAll('.'+classe).forEach(el=>el.addEventListener('input', atualizarResumo));
@@ -724,12 +718,10 @@ function renderKpisExtras(unidade){
   // mesma regra do bloco acima: Master digita sempre, sem esperar leitura
   const travar = (k) => automatico && !IS_MASTER && kpiOcrElegivel(k) && k.manual !== true;
   const algumTravado = campos.some(travar);
-  const algumManual = automatico && campos.some(k=>kpiOcrElegivel(k) && k.manual===true);
-  const avisos = [];
-  if(algumTravado) avisos.push('🔒 Os campos com fundo cinza vêm da foto do relatório e não são digitados. Valor zerado no relatório fica em branco.');
-  if(algumManual) avisos.push('✏️ Os demais não saem no relatório — esses você digita normalmente.');
-  const aviso = avisos.length
-    ? `<div class="sub" style="grid-column:1/-1;margin:0 0 2px;">${avisos.join(' ')}</div>`
+  // mesmo criterio do bloco de Canais/Formas: so o aviso do cadeado fica, e
+  // so quando ha campo travado de verdade
+  const aviso = algumTravado
+    ? '<div class="sub" style="grid-column:1/-1;margin:0 0 2px;">🔒 Os campos com fundo cinza vêm da foto do relatório e não são digitados. Valor zerado no relatório fica em branco.</div>'
     : '';
   container.innerHTML = aviso + campos.map(k=>{
     const tipo = k.tipo || 'quantidade';
@@ -742,7 +734,7 @@ function renderKpisExtras(unidade){
     const bloq = travar(k);
     const classeExtra = bloq ? ' campo-automatico' : '';
     const roAttr = bloq ? ' readonly title="Preenchido pela foto do relatório - não editável"' : '';
-    const marca = (!bloq && automatico && kpiOcrElegivel(k)) ? ' <span style="color:var(--muted);font-weight:400;">✏️</span>' : '';
+    const marca = (algumTravado && !bloq && kpiOcrElegivel(k)) ? ' <span style="color:var(--muted);font-weight:400;">✏️</span>' : '';
     if(tipo === 'texto'){
       return `<div><label>${escapeHtml(k.label)}${marca}</label><input type="text" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
     }
