@@ -2477,8 +2477,15 @@ setTimeout(async () => {
       "KPI's extras: o travamento exclui o Master": /const travar = \(k\) => automatico && !IS_MASTER && kpiOcrElegivel\(k\) && k\.manual !== true;/.test(blocoKpi),
       'depois da leitura o campo NÃO é retravado pro Master': /if\(!IS_MASTER\)\{[\s\S]{0,160}el\.readOnly = true;[\s\S]{0,120}campo-automatico/.test(blocoLeitura),
       'a foto continua PREENCHENDO o campo do Master (só não trava)': /el\.value = it\.valor;/.test(blocoLeitura),
-      'a tela avisa o Master que nada fica travado': /🔓 Master: a leitura da foto preenche os campos, mas nenhum fica travado/.test(html),
+      // o aviso "🔓 Master: ..." saiu da tela a pedido do Master ("remover
+      // esses textos explicando, deixar o mais limpo possivel"). O que
+      // provava a regra continua sendo o comportamento, testado acima -
+      // texto na tela nunca foi a garantia.
       'a trava continua existindo pra loja (o aviso de cadeado não sumiu)': /🔒 Os campos com fundo cinza vêm da foto do relatório e não são digitados/.test(html),
+      // e o cadeado só aparece quando existe campo travado - pro Master,
+      // que nunca tem nenhum, a seção fica sem texto nenhum
+      'o aviso do cadeado é condicionado a haver campo travado':
+        (html.match(/const aviso = algumTravado\n/g) || []).length === 2,
       'IS_MASTER é definido no boot, antes de qualquer campo ser montado':
         html.indexOf('IS_MASTER = isMaster;') > 0 && html.indexOf('IS_MASTER = isMaster;') < html.indexOf('boot();'),
     };
