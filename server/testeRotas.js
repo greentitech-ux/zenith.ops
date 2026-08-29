@@ -9213,9 +9213,14 @@ setTimeout(async () => {
     const { PDFDocument } = require('pdf-lib');
     const htmlForm = require('fs').readFileSync(require('path').join(__dirname, 'public', 'formularios.html'), 'utf8');
 
-    // um PDF de 2 páginas de verdade pra servir de anexo
+    // um PDF de 2 páginas de verdade pra servir de anexo: a primeira
+    // DEITADA e com conteúdo (é o boleto/DANFE que o Master viu sair de
+    // lado), a segunda em branco (o verso não impresso de um scan - ela
+    // não tem /Contents e já derrubou todos os anexos uma vez)
     const anexoDoc = await PDFDocument.create();
-    anexoDoc.addPage(); anexoDoc.addPage();
+    const anexoP1 = anexoDoc.addPage([842, 595]);
+    anexoP1.drawText('BOLETO DEITADO', { x: 40, y: 300, size: 24 });
+    anexoDoc.addPage();
     const anexoBytes = Buffer.from(await anexoDoc.save());
     ARQUIVOS.set('anexos/nota-teste.pdf', anexoBytes);
 
@@ -9248,6 +9253,11 @@ setTimeout(async () => {
     const pagsSem = pdfSem.status === 200 ? (await PDFDocument.load(pdfSem.buffer)).getPageCount() : -1;
     const pagsCom = pdfCom.status === 200 ? (await PDFDocument.load(pdfCom.buffer)).getPageCount() : -1;
     const pagsSumido = pdfSumido.status === 200 ? (await PDFDocument.load(pdfSumido.buffer)).getPageCount() : -1;
+    // as páginas do anexo (as 2 últimas) têm que sair A4 RETRATO, não no
+    // tamanho/orientação em que o arquivo original veio
+    const medidasAnexo = pdfCom.status === 200
+      ? (await PDFDocument.load(pdfCom.buffer)).getPages().slice(-2).map((pg) => pg.getSize())
+      : [];
     const textoCom = pdfCom.status === 200 ? textoDoPdf(pdfCom.buffer) : '';
     // o favorecido tem que chegar na tela: sem isso o card não teria o que
     // mostrar nem o que procurar
@@ -9257,6 +9267,11 @@ setTimeout(async () => {
     const conf = {
       'o PDF com anexo ganha as páginas do anexo (2 páginas a mais)':
         pagsSem > 0 && pagsCom === pagsSem + 2,
+      // reportado com foto: "anexo do formulário de boleto continuam ficando
+      // na horizontal, preciso que mantenham a vertical formato A4"
+      'a página deitada do anexo sai A4 RETRATO no PDF final':
+        medidasAnexo.length === 2
+        && medidasAnexo.every((m) => Math.abs(m.width - 595.28) < 0.5 && Math.abs(m.height - 841.89) < 0.5),
       'o PDF sem anexo continua do mesmo tamanho de sempre (nada mudou pra quem não anexa)':
         pdfSem.status === 200 && pagsSem >= 1,
       'o rodapé avisa que o anexo vem nas páginas seguintes, em vez de só listar o nome':
@@ -9746,6 +9761,48 @@ setTimeout(async () => {
         /_Jose-da-Silva-Cia-Ltda_/.test(comAcento) && !/[^A-Za-z0-9_-]/.test(comAcento),
       'baixar o mesmo formulário de novo dá o MESMO nome': denovo === comDepositante,
       // um padrão só: os dois caminhos de PDF (formulário e Ass. Boleto)
+      // Anexo saindo deitado no PDF (boleto/DANFE) - reportado com foto.
+      // A página do anexo era COPIADA como estava: página landscape (ou com
+      // /Rotate) entrava landscape. Agora tudo é redesenhado numa A4 retrato.
+      'anexo deitado é girado pra preencher a A4 em pé': (() => {
+        const e = forms.encaixeNaA4(1600, 900, 60);
+        // girado, ocupa 900*escala de largura e 1600*escala de altura
+        return e.girar === true
+          && e.height <= 595.28 - 50 && e.width <= 841.89 - 60 - 50
+          && e.x <= 595.28 && e.y >= 60;
+      })(),
+      'anexo em pé NÃO é girado': forms.encaixeNaA4(900, 1400, 60).girar === false,
+      // a faixa de assinatura fica nos 60pt de baixo: o desenho tem que
+      // caber INTEIRO entre ela e a margem de cima - senao vaza a folha
+      'o conteúdo cabe entre a faixa de assinatura e o topo da folha': (() => {
+        const dentro = (origW, origH) => {
+          const e = forms.encaixeNaA4(origW, origH, 60);
+          // girado, o que era largura vira altura na folha
+          const alturaNaFolha = e.girar ? e.width : e.height;
+          const larguraNaFolha = e.girar ? e.height : e.width;
+          const esquerda = e.girar ? e.x - larguraNaFolha : e.x;
+          return e.y >= 60
+            && e.y + alturaNaFolha <= 841.89 - 30 + 0.01
+            && esquerda >= -0.01
+            && esquerda + larguraNaFolha <= 595.28 + 0.01;
+        };
+        return dentro(1600, 900) && dentro(900, 1400) && dentro(2480, 3508);
+      })(),
+      'aproveita a folha: girar dá escala muito maior que encolher': (() => {
+        const girado = forms.encaixeNaA4(1600, 900, 60);
+        // sem girar, um 1600x900 caberia só pela largura - a altura usada
+        // seria ~1/3 da folha. Girado, a altura usada passa de 700pt.
+        const alturaGirada = girado.width; // rotacionado, a largura vira altura
+        return girado.girar && alturaGirada > 700;
+      })(),
+      'as páginas do PDF anexado não são mais copiadas cruas':
+        !/const paginas = await out\.copyPages/.test(srcForms) && /await out\.embedPages\(comConteudo\)/.test(srcForms),
+      // página em branco no PDF anexado derrubava TODOS os anexos: o
+      // embedPages aceita e o save() estoura, sem erro no caminho
+      'página em branco no anexo não derruba os outros anexos':
+        /!!pg\.node\.Contents\(\)/.test(srcForms),
+      'toda página de anexo nasce A4 retrato':
+        (srcForms.match(/out\.addPage\(\[A4_L, A4_A\]\)/g) || []).length >= 4,
       'os dois caminhos de PDF usam o mesmo montador':
         (srcForms.match(/dispPdf\(res, nomeArquivoPdf\(r\), opcoes && opcoes\.inline\);/g) || []).length === 2,
 

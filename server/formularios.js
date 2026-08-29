@@ -1086,6 +1086,51 @@ function dispPdf(res, nome, inline) {
   res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${nome}.pdf"`);
 }
 
+// A4 retrato, sempre. Foi o pedido do Master depois de ver o boleto e a
+// DANFE saindo deitados: "anexo do formulario de boleto continuam ficando
+// na horizontal, preciso que mantenham a vertical formato A4, podendo
+// [en]colher um pouco o anexo para caber sem perder qualidade".
+const A4_L = 595.28;
+const A4_A = 841.89;
+
+// onde e como desenhar um conteudo (pagina de PDF ou imagem) de origW x
+// origH dentro de uma A4 retrato, aproveitando o maximo da folha.
+//
+// Conteudo DEITADO (mais largo que alto) e' girado 90 graus em vez de ser
+// encolhido pra caber na largura: sem girar, um boleto na horizontal vira
+// uma tirinha no meio da folha - "cabe", mas ninguem le. Girado, ele usa a
+// folha inteira, e a escala fica muito maior. E' onde a qualidade e'
+// ganha, nao perdida.
+//
+// Rotacao no pdf-lib gira em torno do ponto (x, y) do desenho: com 90
+// graus, o que crescia pra direita passa a crescer pra cima, e o que
+// crescia pra cima cresce pra esquerda. Por isso o x de destino leva a
+// ALTURA final somada - senao o conteudo sai pra fora da folha, do lado
+// esquerdo.
+function encaixeNaA4(origW, origH, reservarRodape) {
+  const margem = 30;
+  const larguraUtil = A4_L - margem * 2;
+  const alturaUtil = A4_A - margem * 2 - (reservarRodape || 0);
+  const deitado = origW > origH;
+  // girado, o conteudo ocupa origH de largura e origW de altura
+  const escala = deitado
+    ? Math.min(larguraUtil / origH, alturaUtil / origW)
+    : Math.min(larguraUtil / origW, alturaUtil / origH);
+  const w = origW * escala;
+  const h = origH * escala;
+  const larguraFinal = deitado ? h : w;
+  const alturaFinal = deitado ? w : h;
+  const x0 = (A4_L - larguraFinal) / 2;
+  const y0 = (reservarRodape || 0) + margem + (alturaUtil - alturaFinal) / 2;
+  return {
+    girar: deitado,
+    width: w,
+    height: h,
+    x: deitado ? x0 + larguraFinal : x0,
+    y: y0,
+  };
+}
+
 // Cola os anexos como paginas de um documento pdf-lib. Usada por DOIS
 // caminhos: o tipo so-anexo (o anexo E' o documento) e o formulario comum,
 // onde os anexos entram DEPOIS do formulario desenhado - pedido do Master:
@@ -1096,46 +1141,62 @@ function dispPdf(res, nome, inline) {
 // inteiro. Um formulario assinado nao pode ficar impossivel de baixar por
 // causa de um arquivo ruim que alguem anexou.
 //
-// reservarRodape: altura (pt) que a imagem deve evitar embaixo, pra faixa de
-// assinatura carimbada depois nao cobrir o documento. No formulario comum
-// nao ha faixa, entao vai 0 e a imagem usa a pagina inteira.
+// reservarRodape: altura (pt) que o conteudo deve evitar embaixo, pra faixa
+// de assinatura carimbada depois nao cobrir o documento.
+//
+// As paginas do PDF anexado NAO sao mais copiadas como estao (copyPages):
+// pagina deitada entrava deitada, e era exatamente o que o Master via. Agora
+// cada uma e' EMBUTIDA e redesenhada numa A4 retrato (ver encaixeNaA4), o
+// que padroniza o arquivo inteiro - varias folhas de tamanhos diferentes
+// saem todas do mesmo tamanho, na mesma orientacao.
 async function anexarDocumentos(out, anexos, negrito, opts) {
-  const { PDFDocument, rgb } = require('pdf-lib');
+  const { PDFDocument, rgb, degrees } = require('pdf-lib');
   const rodape = (opts && opts.reservarRodape) || 0;
+  const desenhar = (pagina, alvo, encaixe) => {
+    const comum = { x: encaixe.x, y: encaixe.y, width: encaixe.width, height: encaixe.height };
+    const args = encaixe.girar ? { ...comum, rotate: degrees(90) } : comum;
+    if (alvo.embutida) pagina.drawPage(alvo.embutida, args);
+    else pagina.drawImage(alvo.imagem, args);
+  };
   for (const anexo of anexos || []) {
     let bytes = null;
     try { bytes = await storage.baixarArquivo(anexo.path); } catch (e) { bytes = null; }
     if (!bytes) {
-      const p = out.addPage();
-      p.drawText(`Anexo indisponível: ${anexo.nome}`, { x: 40, y: p.getSize().height - 60, size: 12, font: negrito, color: rgb(0.6, 0.1, 0.1) });
+      const p = out.addPage([A4_L, A4_A]);
+      p.drawText(`Anexo indisponível: ${anexo.nome}`, { x: 40, y: A4_A - 60, size: 12, font: negrito, color: rgb(0.6, 0.1, 0.1) });
       continue;
     }
     if ((anexo.tipo || '').includes('pdf')) {
       try {
         // ignoreEncryption: boleto de banco costuma vir com dono/senha vazia
         const origem = await PDFDocument.load(bytes, { ignoreEncryption: true });
-        const paginas = await out.copyPages(origem, origem.getPageIndices());
-        paginas.forEach((p) => out.addPage(p));
+        // pagina SEM /Contents (folha em branco - o verso nao impresso de um
+        // scan, por exemplo) e' aceita pelo embedPages e so estoura no
+        // save(), com "Can't embed page with missing Contents". O PDF inteiro
+        // ia embora por causa dela, sem erro nenhum no caminho: os anexos
+        // simplesmente nao apareciam. Ela vira uma folha em branco, que e'
+        // exatamente o que ela e' - a contagem de paginas do documento
+        // original continua batendo.
+        const paginas = origem.getPages();
+        const comConteudo = paginas.filter((pg) => !!pg.node.Contents());
+        const embutidas = comConteudo.length ? await out.embedPages(comConteudo) : [];
+        let i = 0;
+        for (const pg of paginas) {
+          const p = out.addPage([A4_L, A4_A]);
+          if (!pg.node.Contents()) continue;
+          const embutida = embutidas[i]; i += 1;
+          desenhar(p, { embutida }, encaixeNaA4(embutida.width, embutida.height, rodape));
+        }
       } catch (e) {
-        const p = out.addPage();
-        p.drawText(`Não consegui abrir o PDF anexado (${anexo.nome}).`, { x: 40, y: p.getSize().height - 60, size: 11, font: negrito, color: rgb(0.6, 0.1, 0.1) });
+        const p = out.addPage([A4_L, A4_A]);
+        p.drawText(`Não consegui abrir o PDF anexado (${anexo.nome}).`, { x: 40, y: A4_A - 60, size: 11, font: negrito, color: rgb(0.6, 0.1, 0.1) });
       }
     } else {
       let img = null;
       try { img = (anexo.tipo || '').includes('png') ? await out.embedPng(bytes) : await out.embedJpg(bytes); } catch (e) { img = null; }
-      const p = out.addPage([595.28, 841.89]);
-      if (img) {
-        const larguraUtil = 595.28 - 60;
-        const alturaUtil = 841.89 - 60 - rodape;
-        const escala = Math.min(larguraUtil / img.width, alturaUtil / img.height, 1);
-        p.drawImage(img, {
-          x: (595.28 - img.width * escala) / 2,
-          y: rodape + 20 + (alturaUtil - img.height * escala) / 2,
-          width: img.width * escala, height: img.height * escala,
-        });
-      } else {
-        p.drawText(`Arquivo anexado em formato que não entra no PDF: ${anexo.nome}`, { x: 40, y: 800, size: 11, font: negrito, color: rgb(0.6, 0.1, 0.1) });
-      }
+      const p = out.addPage([A4_L, A4_A]);
+      if (img) desenhar(p, { imagem: img }, encaixeNaA4(img.width, img.height, rodape));
+      else p.drawText(`Arquivo anexado em formato que não entra no PDF: ${anexo.nome}`, { x: 40, y: 800, size: 11, font: negrito, color: rgb(0.6, 0.1, 0.1) });
     }
   }
 }
@@ -1376,7 +1437,8 @@ async function gerarPdf(r, res, opcoes) {
   }
 }
 
-module.exports = { TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, editar, cancelar, remover, gerarPdf, chaveDoToken, parseValor,
+module.exports = {
+  encaixeNaA4, TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, editar, cancelar, remover, gerarPdf, chaveDoToken, parseValor,
   nomeArquivoPdf, beneficiarioDoFormulario,
   pedirComprovanteDeposito, comprovanteObrigatorio, temDepositanteProprio,
   adicionarAnexos,
