@@ -526,6 +526,33 @@ function renderSaidas(){
   atualizarResumo();
 }
 
+// ---------- remakes do dia (KPI que a loja NAO digita) ----------
+// Pizza descartada por falta de qualidade agora e registrada no Carrinho na
+// hora em que acontece (ver abastecimento.html). O KPI do fechamento deixa de
+// ser um numero lembrado no fim do dia e passa a ser a soma do que foi
+// registrado. Vale so pro KPI que o Master marcou em Grupos com
+// origem:'remakesDoDia' - nenhum outro grupo paga leitura por isso.
+// null = nao carregado (ou falhou). Nesse caso o campo NAO trava: melhor
+// deixar digitar do que travar um campo vazio e impedir o lancamento.
+let REMAKES_DO_DIA = null;
+function grupoTemKpiRemake(unidade){
+  const grupo = grupoKpiDaUnidade(unidade);
+  return !!grupo && (grupo.kpisExtras||[]).some(k=>k.origem === 'remakesDoDia');
+}
+async function carregarRemakesDoDia(){
+  const unidade = document.getElementById('f-unidade').value;
+  const data = document.getElementById('f-data').value;
+  REMAKES_DO_DIA = null;
+  if(unidade && data && grupoTemKpiRemake(unidade)){
+    try{
+      const r = await fetch(`/api/abastecimento/remakes?dia=${encodeURIComponent(data)}`);
+      if(r.ok) REMAKES_DO_DIA = await r.json();
+    }catch(e){ REMAKES_DO_DIA = null; }
+  }
+  renderKpisExtras(unidade);
+  atualizarResumo();
+}
+
 // ---------- sangria do dia (leitura automática, ver carregarSangriaDoDia) ----------
 async function carregarSangriaDoDia(){
   const unidade = document.getElementById('f-unidade').value;
@@ -716,7 +743,7 @@ function renderKpisExtras(unidade){
   // automatica trava so os KPI's que a foto realmente pode ler
   const automatico = leituraPorFoto(unidade);
   // mesma regra do bloco acima: Master digita sempre, sem esperar leitura
-  const travar = (k) => automatico && !IS_MASTER && kpiOcrElegivel(k) && k.manual !== true;
+  const travar = (k) => automatico && !IS_MASTER && kpiOcrElegivel(k) && k.manual !== true && k.origem !== 'remakesDoDia';
   const algumTravado = campos.some(travar);
   // mesmo criterio do bloco de Canais/Formas: so o aviso do cadeado fica, e
   // so quando ha campo travado de verdade
@@ -725,6 +752,19 @@ function renderKpisExtras(unidade){
     : '';
   container.innerHTML = aviso + campos.map(k=>{
     const tipo = k.tipo || 'quantidade';
+    // KPI de origem automatica: o valor vem do Carrinho, nao da loja. Com o
+    // total em maos o campo fica travado (mesmo cinza de campo-automatico);
+    // sem conseguir carregar, fica digitavel - travar um campo vazio impediria
+    // o lancamento inteiro por causa de uma leitura que falhou.
+    if(k.origem === 'remakesDoDia'){
+      const carregado = REMAKES_DO_DIA && Number.isFinite(REMAKES_DO_DIA.total);
+      const valor = carregado ? REMAKES_DO_DIA.total : '';
+      const detalhe = carregado
+        ? `<span class="sub" style="display:block;margin-top:3px;">Total registrado no Carrinho neste dia${REMAKES_DO_DIA.registros ? ` · ${REMAKES_DO_DIA.registros} registro(s)` : ''}.</span>`
+        : '<span class="sub" style="display:block;margin-top:3px;">Não deu pra ler o Carrinho agora - digite o total do dia.</span>';
+      const trava = carregado ? ' readonly title="Vem dos Remakes registrados no Carrinho durante o dia"' : '';
+      return `<div><label>🍕 ${escapeHtml(k.label)}</label><input type="number" step="1" inputmode="decimal" value="${valor}" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${carregado ? ' campo-automatico' : ''}"${trava}>${detalhe}</div>`;
+    }
     if(tipo === 'arquivo'){
       return `<div><label>${escapeHtml(k.label)}</label><input type="file" accept="image/*,application/pdf" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-arquivo"></div>`;
     }
@@ -1122,8 +1162,8 @@ function aplicarFranquia(unidade){
   aplicarSecoesGrupo(unidade);
   atualizarResumo();
 }
-document.getElementById('f-unidade').addEventListener('change', (ev)=>{ aplicarFranquia(ev.target.value); carregarSangriaDoDia(); });
-document.getElementById('f-data').addEventListener('input', carregarSangriaDoDia);
+document.getElementById('f-unidade').addEventListener('change', (ev)=>{ aplicarFranquia(ev.target.value); carregarSangriaDoDia(); carregarRemakesDoDia(); });
+document.getElementById('f-data').addEventListener('input', ()=>{ carregarSangriaDoDia(); carregarRemakesDoDia(); });
 
 // ---------- sangria (retirada de caixa) registrada em campo - separado do
 // fechamento em si, soma automatico no fechamento do dia (server junta na
@@ -1318,6 +1358,7 @@ function resetarForm(){
   renderSaidas();
   aplicarFranquia(document.getElementById('f-unidade').value);
   carregarSangriaDoDia();
+  carregarRemakesDoDia();
 }
 
 // o formulario tem varios campos de texto/numero soltos (maquininhas,
@@ -1447,6 +1488,7 @@ async function boot(){
     renderSaidas();
     aplicarFranquia(selUnidade.value);
     await carregarSangriaDoDia();
+    await carregarRemakesDoDia();
   }
 
   if(podeSangria){

@@ -9882,11 +9882,21 @@ async function buscarTurno(ate) {
   return ciclos.find((c) => c.ate === ate) || null;
 }
 
+// Total de pizzas descartadas (Remake) num dia, com a quebra por sabor.
+// E' o que o Lancamento usa pra preencher sozinho o KPI marcado com
+// origem 'remakesDoDia' - o fechamento passa a ser o total do dia, em vez
+// de alguem lembrar o numero na hora de fechar.
+app.get('/api/abastecimento/remakes', auth.requireAuth, async (req, res) => {
+  try {
+    res.json(await abastecimentoCarrinho.remakesDoDia(req.query.dia));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.post('/api/abastecimento', auth.requireAuth, upload.array('fotosAvarias', 20), async (req, res) => {
   try {
     const body = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
     // CONTAGEM e o inventario do turno do carrinho - mesma ponta de quem pede
-    if ((body.tipo === 'PEDIDO' || body.tipo === 'CONTAGEM') && !podePedirAbastecimento(req)) {
+    if ((body.tipo === 'PEDIDO' || body.tipo === 'CONTAGEM' || body.tipo === 'REMAKE') && !podePedirAbastecimento(req)) {
       return res.status(403).json({ error: 'Você não tem a permissão de PEDIDO (lado do carrinho).' });
     }
     if (body.tipo === 'ENVIO' && !podeEnviarAbastecimento(req)) {
@@ -9901,12 +9911,18 @@ app.post('/api/abastecimento', auth.requireAuth, upload.array('fotosAvarias', 20
       papel: body.tipo === 'ENVIO' ? 'envio' : 'pedido',
     });
     const avarias = await processarAvariasComFoto(body.avarias, req.files);
+    // o remake reaproveita o MESMO caminho de foto das avarias (uma foto so,
+    // opcional) - e o mesmo campo multipart, entao nada muda no upload
+    const remake = body.remake
+      ? { ...body.remake, foto: (await processarAvariasComFoto([body.remake], req.files))[0]?.foto || null }
+      : null;
     const registro = await abastecimentoCarrinho.criar({
       operador,
       tipo: body.tipo,
       pizzas: body.pizzas,
       insumos: body.insumos,
       avarias,
+      remake,
       observacao: body.observacao,
       atendePedidoId: body.atendePedidoId,
       jaRecebido: body.jaRecebido,
@@ -9944,7 +9960,11 @@ app.get('/api/abastecimento/avaria-foto/:id/:index', auth.requireAuth, async (re
   if (!podePedirAbastecimento(req) && !podeEnviarAbastecimento(req)) return res.sendStatus(403);
   const registro = await abastecimentoCarrinho.getOne(req.params.id);
   if (!registro) return res.sendStatus(404);
-  const foto = (registro.avarias || [])[Number(req.params.index)]?.foto;
+  // o remake guarda UMA foto (nao uma lista) e reaproveita esta mesma rota
+  // pelo indice 'remake' - a foto vive no mesmo Storage, pelo mesmo caminho
+  const foto = req.params.index === 'remake'
+    ? (registro.remake || {}).foto
+    : (registro.avarias || [])[Number(req.params.index)]?.foto;
   if (!foto) return res.sendStatus(404);
   storage.streamArquivo(foto.path, foto.tipo, res);
 });

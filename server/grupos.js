@@ -77,6 +77,9 @@ const DIRECOES_VALIDAS = new Set(['neutro', 'maior-melhor', 'menor-melhor']);
 // ausencia de tipo) forca 'nao', mesmo que o cliente mande outra coisa
 // (defesa em profundidade - a UI em grupos.html ja desabilita esse seletor
 // pra tipo != moeda, mas o backend nao pode confiar so nisso).
+// de onde o valor de um KPI pode vir sozinho, em vez de digitado
+const ORIGENS_VALIDAS = new Set(['remakesDoDia']);
+
 function sanitizarCamposExtras(lista) {
   if (!Array.isArray(lista)) return [];
   const usados = new Set();
@@ -100,6 +103,16 @@ function sanitizarCamposExtras(lista) {
       // ficaria travado e vazio pra sempre - e ainda entraria na lista mandada
       // pro modelo, convidando a inventar um valor pra ele.
       if (k?.manual != null) item.manual = !!k.manual;
+      // ORIGEM: de onde o valor do KPI vem. Hoje so 'remakesDoDia' - o total
+      // de pizzas descartadas registradas no Carrinho naquele dia (ver
+      // abastecimentoCarrinho.remakesDoDia).
+      //
+      // E' opt-in POR KPI, escolhido pelo Master na tela de Grupos, em vez de
+      // procurar um KPI chamado "Remake" no codigo. Dois motivos: o §1 do
+      // CLAUDE.md diz que rotulo muda e identificador nao (um dia alguem
+      // renomeia "Remake" pra "Refeitas" e o vinculo por nome quebraria em
+      // silencio), e assim qualquer grupo pode usar sem tocar em codigo.
+      if (k?.origem != null) item.origem = ORIGENS_VALIDAS.has(k.origem) ? k.origem : null;
       if (k?.somaEm != null) {
         const valido = SOMA_EM_VALIDAS.has(k.somaEm) ? k.somaEm : 'nao';
         item.somaEm = item.tipo === 'moeda' ? valido : 'nao';
@@ -265,4 +278,4 @@ async function ensureGrupoSaltiverso() {
 // invalidarCache exportado pro teste conseguir trocar os grupos em memoria
 // entre as conferencias (o cache e de 5 min - sem isto o teste media sempre
 // o mesmo estado e passava sem provar nada)
-module.exports = { list, create, update, remove, grupoDaUnidade, ensureGrupoSaltiverso, slugify, invalidarCache: gruposCache.invalidar };
+module.exports = { list, create, update, remove, sanitizarCamposExtras, grupoDaUnidade, ensureGrupoSaltiverso, slugify, invalidarCache: gruposCache.invalidar };
