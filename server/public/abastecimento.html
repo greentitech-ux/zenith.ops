@@ -451,7 +451,7 @@
         <select id="f-atende" onchange="prefillDoPedido()"></select>
       </div>
       <div id="f-bloco-pizzas">
-        <label>Pizzas</label>
+        <label id="f-label-pizzas">Pizzas</label>
         <div class="sabores-grid">
           <div><label>Calabresa</label><input type="number" min="0" inputmode="numeric" id="f-calabresa" placeholder="0"></div>
           <div><label>Pepperoni</label><input type="number" min="0" inputmode="numeric" id="f-pepperoni" placeholder="0"></div>
@@ -469,10 +469,6 @@
            pizza descartada ja saiu do carrinho, subtrair de novo contaria
            duas vezes. -->
       <div id="f-bloco-remake" class="hidden">
-        <div class="sabores-grid" style="grid-template-columns:1fr 1fr;">
-          <div><label>Sabor</label><select id="f-rm-sabor"><option value="calabresa">Calabresa</option><option value="pepperoni">Pepperoni</option><option value="mussarela">Mussarela</option></select></div>
-          <div><label>Quantas pizzas</label><input type="number" min="1" step="1" inputmode="numeric" id="f-rm-qtd" placeholder="1"></div>
-        </div>
         <label>Por que foi descartada? <span style="text-transform:none;letter-spacing:0;color:var(--bad);">(obrigatório)</span></label>
         <textarea id="f-rm-motivo" placeholder="ex: massa queimada / caiu no chão / ficou fria demais pra vender"></textarea>
         <label>Foto <span style="text-transform:none;letter-spacing:0;">(opcional)</span></label>
@@ -487,8 +483,10 @@
         <div id="f-avarias"></div>
         <button type="button" class="btn-add" id="btn-add-avaria" onclick="adicionarAvaria()">+ Adicionar avaria</button>
       </div>
-      <label>Observação</label>
-      <textarea id="f-obs" placeholder="ex: urgência / 1 lata avariada"></textarea>
+      <div id="f-bloco-obs">
+        <label>Observação</label>
+        <textarea id="f-obs" placeholder="ex: urgência / 1 lata avariada"></textarea>
+      </div>
       <!-- lancamento atrasado: o material JA chegou fisicamente mas o pedido
            nao foi registrado na hora (internet/sistema/comunicacao fora) -
            a loja so vai dar baixa, sem preparar nada -->
@@ -808,6 +806,15 @@ let SEQ = 0;
 
 const SABORES = ['calabresa','pepperoni','mussarela'];
 const SABOR_LABEL = { calabresa:'Calabresa', pepperoni:'Pepperoni', mussarela:'Mussarela' };
+// "1 Calabresa, 2 Mussarela". Le tanto o formato novo (pizzas por sabor)
+// quanto o antigo (um sabor so) - ver pizzasDoRemake no abastecimentoCarrinho
+function saboresDoRemake(rm){
+  if(!rm) return '';
+  const pizzas = (rm.pizzas && typeof rm.pizzas === 'object')
+    ? rm.pizzas
+    : (rm.sabor ? { [rm.sabor]: Number(rm.quantidade)||0 } : {});
+  return SABORES.filter(s=>Number(pizzas[s])>0).map(s=>`${pizzas[s]} ${SABOR_LABEL[s]}`).join(', ');
+}
 const FUSO_BR = 'America/Sao_Paulo';
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function dataBrasilia(iso){ return new Date(iso).toLocaleDateString('sv-SE', { timeZone: FUSO_BR }); }
@@ -1264,7 +1271,7 @@ function regCardHtml(r){
   // remake: sabor + quantas + por que, com a foto quando tiver. Mesmo desenho
   // da avaria porque e a mesma leitura - perda registrada com causa.
   const remakeHtml = r.remake
-    ? `<div class="reg-obs" style="border-left:2px solid var(--bad);padding-left:8px;">🍕 <b>${r.remake.quantidade} ${SABOR_LABEL[r.remake.sabor]||escapeHtml(r.remake.sabor)}</b> descartada(s) — ${escapeHtml(r.remake.motivo)}${r.remake.foto?` · <a href="/api/abastecimento/avaria-foto/${r.id}/remake?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">📷 foto</a>`:''}</div>`
+    ? `<div class="reg-obs" style="border-left:2px solid var(--bad);padding-left:8px;">🍕 <b>${escapeHtml(saboresDoRemake(r.remake))}</b> descartada(s) — ${escapeHtml(r.remake.motivo)}${r.remake.foto?` · <a href="/api/abastecimento/avaria-foto/${r.id}/remake?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">📷 foto</a>`:''}</div>`
     : '';
   return `
     <div class="reg-card ${r.tipo}">
@@ -1670,14 +1677,14 @@ function abrirForm(tipo){
     : [];
   document.getElementById('btn-add-insumo').classList.toggle('hidden', tipo==='CONTAGEM');
   renderInsumos();
-  // REMAKE nao tem pizzas por sabor nem insumos: e um evento de descarte, com
-  // um sabor so. Esconder os dois blocos evita que alguem lance uma pizza
-  // descartada como se fosse pedido.
-  document.getElementById('f-bloco-pizzas').classList.toggle('hidden', tipo==='REMAKE');
+  // REMAKE usa a MESMA grade de sabores do pedido - um descarte quase nunca e
+  // de um sabor so ("1 calabresa, 2 mussarela"). O que sai de cena e insumo
+  // (nao se descarta refrigerante como remake) e a Observacao solta, que no
+  // remake vira o campo de motivo, obrigatorio.
+  document.getElementById('f-label-pizzas').textContent = tipo==='REMAKE' ? 'Pizzas descartadas' : 'Pizzas';
   document.getElementById('f-bloco-insumos').classList.toggle('hidden', tipo==='REMAKE');
+  document.getElementById('f-bloco-obs').classList.toggle('hidden', tipo==='REMAKE');
   document.getElementById('f-bloco-remake').classList.toggle('hidden', tipo!=='REMAKE');
-  document.getElementById('f-rm-sabor').value = 'calabresa';
-  document.getElementById('f-rm-qtd').value = '';
   document.getElementById('f-rm-motivo').value = '';
   document.getElementById('f-rm-foto').value = '';
   // avarias so existem na Contagem - reseta a lista toda vez que o form abre
@@ -1743,20 +1750,19 @@ async function salvar(){
     };
     let resp;
     if(TIPO_FORM==='REMAKE'){
-      // as mesmas 3 travas do backend, aqui, pra o operador ver o que falta
+      // as mesmas travas do backend, aqui, pra o operador ver o que falta
       // ANTES de perder o preenchimento numa ida ao servidor
-      const qtd = Number(document.getElementById('f-rm-qtd').value);
+      const pizzas = {};
+      let total = 0;
+      SABORES.forEach(s=>{ const n = Number(document.getElementById('f-'+s).value) || 0; pizzas[s] = n > 0 ? n : 0; total += pizzas[s]; });
       const motivo = document.getElementById('f-rm-motivo').value.trim();
-      if(!Number.isFinite(qtd) || qtd <= 0) throw new Error('Remake: informe quantas pizzas foram descartadas.');
+      if(!total) throw new Error('Remake: informe quantas pizzas foram descartadas (ao menos um sabor).');
       if(!motivo) throw new Error('Remake: descreva por que a pizza foi descartada.');
       const foto = document.getElementById('f-rm-foto').files[0] || null;
+      // as pizzas do remake sao do DESCARTE, nao um pedido - por isso vao
+      // dentro do remake e o registro em si fica sem pizzas/insumos
       body.pizzas = {}; body.insumos = [];
-      body.remake = {
-        sabor: document.getElementById('f-rm-sabor').value,
-        quantidade: qtd,
-        motivo,
-        temFoto: !!foto,
-      };
+      body.remake = { pizzas, motivo, temFoto: !!foto };
       // mesmo campo multipart das avarias (ver processarAvariasComFoto no
       // index.js) - uma foto so, opcional
       const fd = new FormData();

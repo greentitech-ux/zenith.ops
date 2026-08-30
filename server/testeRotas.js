@@ -4782,8 +4782,12 @@ setTimeout(async () => {
     const gr = require('/home/user/adyen-monitor/server/grupos.js');
     const cab = { Authorization: 'Bearer ' + token };
 
-    // (a) sanitizacao: sabor da lista, quantidade > 0, motivo obrigatorio
-    const ok = ab.sanitizarRemake({ sabor: 'calabresa', quantidade: 2, motivo: 'queimou na borda' });
+    // (a) sanitizacao: sabores da lista, ao menos 1 pizza, motivo obrigatorio.
+    // Um descarte quase nunca e de um sabor so - "1 calabresa, 2 mussarela"
+    // tem que caber num registro so, com um motivo so.
+    const ok = ab.sanitizarRemake({ pizzas: { calabresa: 1, mussarela: 2, pepperoni: 1 }, motivo: 'forno desregulado' });
+    // formato antigo (um sabor so) continua sendo lido - nada de migracao
+    const antigo = ab.sanitizarRemake({ sabor: 'calabresa', quantidade: 2, motivo: 'queimou na borda' });
     const erro = (entrada) => { try { ab.sanitizarRemake(entrada); return ''; } catch (e) { return e.message; } };
 
     // (b) o KPI so recebe o total se o Master marcar a origem - nada de
@@ -4796,7 +4800,7 @@ setTimeout(async () => {
     // outro dia nao entra. E' esse numero que cai no KPI do fechamento.
     const hojeBr = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
     const opRemake = { usuario: 'rmk1', nome: 'Op Remake' };
-    await ab.criar({ tipo: 'REMAKE', operador: opRemake, remake: { sabor: 'calabresa', quantidade: 2, motivo: 'massa queimada' } });
+    await ab.criar({ tipo: 'REMAKE', operador: opRemake, remake: { pizzas: { calabresa: 2 }, motivo: 'massa queimada' } });
     await ab.criar({ tipo: 'REMAKE', operador: opRemake, remake: { sabor: 'pepperoni', quantidade: 1, motivo: 'caiu no chao' } });
     const deOutroDia = await ab.criar({ tipo: 'REMAKE', operador: opRemake, remake: { sabor: 'mussarela', quantidade: 9, motivo: 'de ontem' } });
     // empurra o terceiro pro passado direto no doc (o modulo sempre carimba
@@ -4817,8 +4821,11 @@ setTimeout(async () => {
     const htmlGrupos = pub('grupos.html');
 
     const conf = {
-      'o remake guarda sabor, quantidade e motivo':
-        ok.sabor === 'calabresa' && ok.quantidade === 2 && ok.motivo === 'queimou na borda',
+      'um registro so guarda VARIOS sabores, com um motivo so':
+        ok.pizzas.calabresa === 1 && ok.pizzas.mussarela === 2 && ok.pizzas.pepperoni === 1
+        && ok.quantidade === 4 && ok.motivo === 'forno desregulado',
+      'registro no formato antigo (1 sabor) continua legivel':
+        antigo.pizzas.calabresa === 2 && antigo.quantidade === 2,
       'sabor fora dos 3 do carrinho e recusado': /escolha o sabor/i.test(erro({ sabor: 'portuguesa', quantidade: 1, motivo: 'x' })),
       'quantidade zero ou negativa e recusada': /quantas pizzas/i.test(erro({ sabor: 'calabresa', quantidade: 0, motivo: 'x' })),
       // descarte sem motivo e um numero que ninguem consegue usar
@@ -4840,6 +4847,8 @@ setTimeout(async () => {
       // pra quem opera
       'o Carrinho tem o botao de registrar Remake na hora':
         /abrirForm\('REMAKE'\)/.test(htmlCarrinho) && /f-rm-motivo/.test(htmlCarrinho),
+      'a tela do Remake usa a grade dos 3 sabores (nao um sabor so)':
+        /body\.remake = \{ pizzas, motivo/.test(htmlCarrinho) && !/f-rm-sabor/.test(htmlCarrinho),
       'o Master liga o KPI na tela de Grupos (opt-in)':
         /kpi-origem-remake/.test(htmlGrupos) && /remakesDoDia/.test(htmlGrupos),
       'o Lancamento busca o total do dia em vez de pedir pra digitar':
