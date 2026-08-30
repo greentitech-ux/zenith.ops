@@ -1744,6 +1744,92 @@ async function varrerAlertas() {
 // Saude da FROTA: discos com problema (pior primeiro) + quantos aparelhos
 // cada loja enxerga na propria rede. Igual ao diagnosticoRede, sai do MESMO
 // cache de listar() - nao gera leitura extra no Firestore.
+// ---------------------------------------------------------------------
+// QUANTAS VEZES CADA LOJA FICOU SEM CONEXAO, E POR QUANTO TEMPO.
+//
+// Pedido do Master, pra decidir com numero se vale fazer o app funcionar
+// offline: "a queda e frequente ou foi um episodio?". A materia-prima ja
+// existia - varrerAlertas grava um evento 'offline' quando a maquina
+// silencia e um 'online' quando volta, com duracaoMs. So faltava somar.
+//
+// Nao custa leitura nova: le do espelho em memoria, como o resto da tela.
+//
+// Duas coisas que este relatorio NAO conta de proposito, porque contar
+// inflaria o numero e levaria a decisao errada:
+//
+// 1. Reinicio que NOS mandamos (motivo 'reinicio-comandado' no evento de
+//    queda). A maquina sumiu porque pedimos - nao e' problema de link.
+// 2. Notebook (ehNotebook). Ele sai da loja e volta; "ficou fora" ali e'
+//    alguem levando pra casa, nao internet caindo.
+//
+// O par e' feito na ORDEM dos eventos: guarda a queda aberta e fecha no
+// 'online' seguinte. E' o que permite herdar o motivo da queda, que so
+// existe no evento de abertura.
+const QUEDAS_JANELA_PADRAO_DIAS = 30;
+
+function quedasDeUmComputador(doc, desde) {
+  const fora = [];
+  let aberta = null;
+  for (const ev of doc.eventos || []) {
+    if (ev.tipo === 'offline') { aberta = ev; continue; }
+    if (ev.tipo !== 'online') continue;
+    const inicio = aberta ? aberta.em : (ev.em - (ev.duracaoMs || 0));
+    const comandado = !!(aberta && aberta.motivo === 'reinicio-comandado');
+    // por qual meio ela falava quando caiu (cabo/wifi) - so existe no evento
+    // de ABERTURA, entao tem que sair daqui antes de zerar o par
+    const link = (aberta && aberta.link) || null;
+    aberta = null;
+    if (!ev.duracaoMs || ev.em < desde) continue;
+    fora.push({ inicio, fim: ev.em, ms: ev.duracaoMs, comandado, link });
+  }
+  // queda que comecou e ainda nao fechou: a loja pode estar fora AGORA
+  const emAberto = aberta && aberta.em >= desde && aberta.motivo !== 'reinicio-comandado'
+    ? { inicio: aberta.em, ms: Date.now() - aberta.em }
+    : null;
+  return { fora, emAberto };
+}
+
+async function relatorioQuedas(opcoes) {
+  const dias = Math.max(1, Math.min(365, Number((opcoes || {}).dias) || QUEDAS_JANELA_PADRAO_DIAS));
+  const desde = Date.now() - dias * 24 * 60 * 60 * 1000;
+  const docs = (await cache.cached()).map(semSegredo);
+  const porUnidade = new Map();
+  for (const doc of docs) {
+    if (doc.ehNotebook) continue;
+    const { fora, emAberto } = quedasDeUmComputador(doc, desde);
+    const reais = fora.filter((q) => !q.comandado);
+    const u = porUnidade.get(doc.codigo) || {
+      codigo: doc.codigo, computadores: 0, quedas: 0, foraMs: 0,
+      maiorMs: 0, oscilacoes: 0, confirmadas: 0, foraAgora: 0,
+    };
+    u.computadores += 1;
+    u.quedas += reais.length;
+    u.foraMs += reais.reduce((s, q) => s + q.ms, 0);
+    u.maiorMs = Math.max(u.maiorMs, ...reais.map((q) => q.ms), 0);
+    // oscilacao x queda de verdade: e a MESMA regra que decide se o push
+    // critico sai (CONFIRMACAO_QUEDA_MS). Separar importa: 30 piscadas de
+    // 40s nao pedem app offline; 3 quedas de 2h pedem.
+    u.oscilacoes += reais.filter((q) => q.ms < CONFIRMACAO_QUEDA_MS).length;
+    u.confirmadas += reais.filter((q) => q.ms >= CONFIRMACAO_QUEDA_MS).length;
+    if (emAberto) u.foraAgora += 1;
+    porUnidade.set(doc.codigo, u);
+  }
+  const unidades = [...porUnidade.values()]
+    .map((u) => ({ ...u, horasFora: +(u.foraMs / 3600000).toFixed(1), maiorMin: Math.round(u.maiorMs / 60000) }))
+    .sort((a, b) => b.foraMs - a.foraMs);
+  return {
+    dias,
+    // o historico por computador e' capado em EVENTOS_MAX: numa maquina que
+    // oscila muito, queda antiga JA SAIU da lista. O numero e' piso, nao
+    // teto - dizer isso na tela evita concluir "melhorou" de um corte.
+    eventosMaximoPorComputador: EVENTOS_MAX,
+    totalQuedas: unidades.reduce((s, u) => s + u.quedas, 0),
+    totalConfirmadas: unidades.reduce((s, u) => s + u.confirmadas, 0),
+    totalHorasFora: +(unidades.reduce((s, u) => s + u.foraMs, 0) / 3600000).toFixed(1),
+    unidades,
+  };
+}
+
 async function saudeMaquinas() {
   const docs = (await cache.cached()).map(comOnline).map(semSegredo);
   return {
@@ -1815,6 +1901,7 @@ module.exports = {
   descartarEspelhoTeste: () => { espelho = null; espelhoEm = 0; cache.invalidar(); },
   enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos,
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora,
+  relatorioQuedas, quedasDeUmComputador,
   COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
