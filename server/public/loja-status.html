@@ -138,6 +138,17 @@
   .uni-panel.recolhido .uni-grid{display:none;}
   .uni-panel-sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);font-weight:400;text-transform:uppercase;letter-spacing:.04em;}
   .uni-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;}
+  /* tabela de quedas: rolagem propria no celular, pra pagina nunca rolar
+     de lado (a tela e usada no telefone) */
+  .quedas-wrap{overflow-x:auto;}
+  .quedas-tab{width:100%;border-collapse:collapse;font-size:12.5px;min-width:520px;}
+  .quedas-tab th{text-align:right;font-family:var(--mono);font-size:10px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.04em;font-weight:400;padding:0 8px 8px;white-space:nowrap;}
+  .quedas-tab th:first-child,.quedas-tab td:first-child{text-align:left;}
+  .quedas-tab td{text-align:right;padding:7px 8px;border-top:1px solid var(--line);
+    font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .quedas-tab tr.pior td{font-weight:700;}
+  .quedas-nota{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.5;}
   .uni-card{background:var(--bg,#0f1115);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;text-align:left;font-family:inherit;color:inherit;transition:border-color .15s ease,background .15s ease;}
   .uni-card:hover{border-color:var(--accent);}
   .uni-card.ativo{border-color:var(--accent);background:rgba(184, 255, 60,.07);}
@@ -397,6 +408,17 @@
       <span class="uni-panel-sub" id="uni-panel-sub"></span>
     </button>
     <div id="grid-unidades" class="uni-grid"></div>
+  </div>
+
+  <!-- Quedas de conexao por unidade. Existe pra uma decisao concreta: vale
+       ou nao fazer o app funcionar offline? Recolhido por padrao - e' um
+       relatorio de analise, nao a operacao do dia a dia. -->
+  <div class="uni-panel recolhido" id="quedas-panel">
+    <button type="button" class="uni-panel-head" onclick="alternarPainelQuedas()" aria-expanded="false" aria-controls="quedas-corpo">
+      <span><span class="uni-caret">▾</span> 📉 Quedas de conexão</span>
+      <span class="uni-panel-sub" id="quedas-sub">clique para carregar</span>
+    </button>
+    <div id="quedas-corpo" class="uni-grid" style="display:block;"></div>
   </div>
 
   <div class="filtro-bar">
@@ -1364,6 +1386,57 @@ function toggleFiltroUnidade(cod){
   const sel = document.getElementById('filtro-unidade');
   if(sel) sel.value = FILTRO_UNIDADE;
   render();
+}
+
+// ---------------------------------------------------------------------
+// QUEDAS DE CONEXAO POR UNIDADE (ver lojaStatus.relatorioQuedas).
+// So busca quando o Master ABRE o painel: e relatorio de analise, nao
+// precisa entrar no poll de 30s da tela.
+let QUEDAS_CARREGADO = false;
+function alternarPainelQuedas(){
+  const p = document.getElementById('quedas-panel');
+  const abriu = p.classList.toggle('recolhido') === false;
+  p.querySelector('.uni-panel-head').setAttribute('aria-expanded', abriu ? 'true' : 'false');
+  if(abriu && !QUEDAS_CARREGADO) carregarQuedas();
+}
+function fmtHoras(h){ return h >= 1 ? h.toFixed(1).replace('.', ',') + 'h' : Math.round(h * 60) + 'min'; }
+async function carregarQuedas(dias){
+  const corpo = document.getElementById('quedas-corpo');
+  const sub = document.getElementById('quedas-sub');
+  sub.textContent = 'carregando...';
+  corpo.innerHTML = '<div class="quedas-nota">Somando o histórico...</div>';
+  try{
+    const r = await fetch('/api/loja-status/quedas?dias=' + (dias || 30));
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    QUEDAS_CARREGADO = true;
+    const comQueda = (d.unidades || []).filter(u => u.quedas > 0);
+    sub.textContent = `${d.totalQuedas} queda(s) · ${String(d.totalHorasFora).replace('.', ',')}h fora · ${d.dias} dias`;
+    if(!comQueda.length){
+      corpo.innerHTML = '<div class="quedas-nota">Nenhuma queda registrada nesses ' + d.dias + ' dias. Nesse cenário, app offline não se paga.</div>';
+      return;
+    }
+    const linhas = comQueda.map((u, i) => `<tr class="${i === 0 ? 'pior' : ''}">
+      <td>${escapeHtml(u.unidadeNome || u.codigo)}${u.foraAgora ? ' <span style="color:var(--bad);">● fora agora</span>' : ''}</td>
+      <td>${u.quedas}</td><td>${u.confirmadas}</td><td>${u.oscilacoes}</td>
+      <td>${fmtHoras(u.horasFora)}</td><td>${u.maiorMin} min</td></tr>`).join('');
+    corpo.innerHTML = `<div class="quedas-wrap"><table class="quedas-tab">
+      <thead><tr><th>Unidade</th><th>Quedas</th><th>Confirmadas</th><th>Oscilações</th><th>Tempo fora</th><th>Maior</th></tr></thead>
+      <tbody>${linhas}</tbody></table></div>
+      <div class="quedas-nota">
+        <b>Confirmada</b> = ficou fora tempo suficiente pra virar alerta crítico. <b>Oscilação</b> = caiu e voltou em poucos minutos — não pede app offline.<br>
+        Não entram: reinício que o NOC mandou, e notebook (sai da loja e volta).<br>
+        O histórico é limitado a ${d.eventosMaximoPorComputador} eventos por computador — em máquina que oscila muito, queda antiga já saiu da lista. <b>O número é piso, não teto.</b>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="btn-secundario" onclick="carregarQuedas(7)">7 dias</button>
+        <button type="button" class="btn-secundario" onclick="carregarQuedas(30)">30 dias</button>
+        <button type="button" class="btn-secundario" onclick="carregarQuedas(90)">90 dias</button>
+      </div>`;
+  }catch(e){
+    sub.textContent = 'falhou';
+    corpo.innerHTML = '<div class="quedas-nota">Não consegui carregar (' + escapeHtml(e.message) + '). Tente de novo.</div>';
+  }
 }
 
 function render(){
