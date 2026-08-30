@@ -9957,6 +9957,20 @@ setTimeout(async () => {
     await forms.assinar(soGerente2.id, g2.token, { nome: 'Ana Lima', imagem: PNG_1PX });
     const fechadoSemAnexo = await forms.detalhar(soGerente2.id);
 
+    // 12 anexos de verdade pela rota, pra provar que o teto de 5 saiu
+    const { PDFDocument: PDFDocAnexo } = require('pdf-lib');
+    const umPdf = await PDFDocAnexo.create();
+    umPdf.addPage().drawText('ANEXO', { x: 50, y: 700, size: 12 });
+    const bytesAnexo = Buffer.from(await umPdf.save());
+    const doze = Array.from({ length: 12 }, (_, i) => ({ nome: `boleto-${i + 1}.pdf`, tipo: 'application/pdf', buffer: bytesAnexo }));
+    const muitosAnexos = await postarMultipart('/api/formularios', {
+      payload: JSON.stringify({
+        tipo: 'assBoleto', unidade: unidadeDep.unidade,
+        campos: { favorecido: 'Martins Brower', descricao: 'Pedido semanal', vencimento: '14/09/2026', valor: '16.111,44' },
+      }),
+    }, doze, 'anexos', { Authorization: 'Bearer ' + token });
+    const fMuitos = muitosAnexos.status === 200 ? JSON.parse(muitosAnexos.corpo) : {};
+
     const conf = {
       'depósito do próprio gerente segue com 1 assinatura': soGerente.assinaturas.length === 1,
       'outra pessoa digitada na hora vira 2ª assinatura':
@@ -9995,7 +10009,7 @@ setTimeout(async () => {
         && /id="bloco-comprovante"/.test(htmlAssinar)
         && /DATA\.exigeComprovante && !arquivo/.test(htmlAssinar),
       'a rota pública de assinar aceita o arquivo':
-        /app\.post\('\/api\/formularios-publico\/:id\/assinar', upload\.array\('anexos', 5\)/.test(srcIdxD),
+        /app\.post\('\/api\/formularios-publico\/:id\/assinar', uploadAnexosFormulario\.array\('anexos', MAX_ANEXOS_FORMULARIO\)/.test(srcIdxD),
       // token conferido ANTES de gravar arquivo: link inválido não pode
       // virar porta de upload
       'link inválido não serve pra subir arquivo':
@@ -10031,8 +10045,25 @@ setTimeout(async () => {
           try { await forms.adicionarAnexos(f3.id, [{ nome: 'x.pdf', path: 'p/x.pdf', tipo: 'application/pdf' }], {}); return false; }
           catch (e) { return /cancelado não recebe anexo/i.test(e.message); }
         })(),
+      // O TETO DE 5 ANEXOS. Pedido do Master: "alguns PDF precisam ter mais de
+      // 10 anexos pra ser assinado de um dos nossos fornecedores e estamos
+      // com essa limitacao". Boleto de fornecedor vem partido em dezenas de
+      // arquivos - com 5, a tela recusava o resto e o formulario nem ia pra
+      // assinatura. Aqui entra 12 de verdade, pela rota, e sai 12.
+      'passam mais de 10 anexos num formulário só':
+        muitosAnexos.status === 200 && (fMuitos.anexos || []).length === 12,
+      // e o teto que sobra e o de TAMANHO, nao o de contagem: os anexos viram
+      // pagina dentro do PDF final e o pdf-lib segura tudo em memoria de uma
+      // vez. Sem esse guard, 20 arquivos grandes derrubariam a instancia.
+      'o peso do conjunto é conferido nas 4 rotas de anexo':
+        (srcIdxD.match(/conferirTamanhoAnexos\(req\.files\)/g) || []).length === 4
+        && /Os anexos somam \$\{mb\(total\)\} MB/.test(srcIdxD),
+      'o teto da rota é o mesmo teto que o módulo guarda':
+        /const MAX_ANEXOS_FORMULARIO = formularios\.MAX_ANEXOS;/.test(srcIdxD)
+        && forms.MAX_ANEXOS === 20,
+      'a tela deixa escolher os mesmos 20': /const MAX_ANEXOS_TELA = 20;/.test(htmlForms),
       'a rota de anexo é Master-only':
-        /app\.post\('\/api\/formularios\/:id\/anexos', auth\.requireMaster, upload\.array\('anexos', 5\)/.test(srcIdxD),
+        /app\.post\('\/api\/formularios\/:id\/anexos', auth\.requireMaster, uploadAnexosFormulario\.array\('anexos', MAX_ANEXOS_FORMULARIO\)/.test(srcIdxD),
       'o botão de anexar só aparece pro Master, em qualquer tipo':
         /\$\{SOU_MASTER && !cancelado \? `<button type="button" class="btn-ghost" onclick="escolherAnexoDepois\('\$\{f\.id\}'\)"/.test(htmlForms),
       'o botão de pedir só aparece no Depósito sem depositante':

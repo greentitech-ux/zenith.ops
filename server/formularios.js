@@ -276,9 +276,14 @@ const MAX_LINHAS = 20;
 // PNG do canvas de assinatura fica em torno de 5-30KB; o cap é folga, não
 // meta - acima disso é foto/arquivo indevido, não um traço de caneta
 const MAX_IMAGEM_CHARS = 300000;
-// teto de anexos por formulario - o mesmo .slice(0, 5) que criar() ja
-// aplicava, agora nomeado porque assinar() tambem acrescenta anexo
-const MAX_ANEXOS = 5;
+// teto de anexos por formulario. Era 5 e travava boleto de fornecedor que vem
+// partido em dezenas de arquivos - o Master nao conseguia nem mandar pra
+// assinatura. O limite real nao e a contagem, e o TAMANHO: todo anexo vira
+// pagina dentro do PDF final (ver anexarDocumentos), e o pdf-lib segura tudo
+// em memoria. Por isso o index.js confere o peso do conjunto na entrada, e
+// aqui fica so a contagem. Exportado pra que a rota use ESTE numero - dois
+// tetos diferentes deixariam o arquivo entrar e sumir depois, calado.
+const MAX_ANEXOS = 20;
 
 function limpar(v, max = 120) { return String(v == null ? '' : v).trim().slice(0, max); }
 function soDigitos(v) { return String(v || '').replace(/\D/g, ''); }
@@ -1448,6 +1453,7 @@ async function gerarPdf(r, res, opcoes) {
 }
 
 module.exports = {
+  MAX_ANEXOS,
   encaixeNaA4, TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, editar, cancelar, remover, gerarPdf, chaveDoToken, parseValor,
   nomeArquivoPdf, beneficiarioDoFormulario,
   pedirComprovanteDeposito, comprovanteObrigatorio, temDepositanteProprio,
