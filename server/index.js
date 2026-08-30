@@ -2989,6 +2989,18 @@ app.get('/api/loja-status', requireSection('suporte'), async (req, res) => {
   res.json(status.map((s) => ({ ...s, unidadeNome: mapa[s.codigo] || s.codigo })));
 });
 
+// Quantas quedas de conexao cada loja teve e por quanto tempo (ver
+// lojaStatus.relatorioQuedas). Existe pra uma decisao concreta: se vale ou
+// nao fazer o app funcionar offline. Sai do espelho em memoria - nao custa
+// leitura no Firestore.
+app.get('/api/loja-status/quedas', requireSection('suporte'), async (req, res) => {
+  const [rel, mapa] = await Promise.all([
+    lojaStatus.relatorioQuedas({ dias: req.query.dias }),
+    construirUnidadesMapa(),
+  ]);
+  res.json({ ...rel, unidades: rel.unidades.map((u) => ({ ...u, unidadeNome: mapa[u.codigo] || u.codigo })) });
+});
+
 // detalhe completo de UM computador (eventos, aparelhos da rede, chat,
 // series de rede, saida do ultimo comando) - mesmo gate da lista
 app.get('/api/loja-status/:codigo/computadores/:posto/detalhe', requireSection('suporte'), async (req, res) => {

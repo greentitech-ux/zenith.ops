@@ -4763,6 +4763,76 @@ setTimeout(async () => {
   // deixaria a ação rodar no vazio numa loja sem impressora. O comando
   // guarda {{IP_IMPRESSORA}} e o servidor troca pelo IP do dispositivo que o
   // Master marcou como 'impressora' NAQUELA unidade.
+  // ------------------------------------------------------------------
+  // QUANTAS QUEDAS CADA LOJA TEVE. Pedido do Master pra decidir COM NUMERO
+  // se vale fazer o app funcionar offline ("a queda e frequente ou foi um
+  // episodio?"). O dado ja existia nos eventos offline/online de cada
+  // computador - faltava somar por unidade.
+  let okRelQuedas = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const H = 3600 * 1000;
+    const agora = Date.now();
+    const ev = (tipo, em, extra) => ({ tipo, em, ...(extra || {}) });
+    // 2h fora + uma oscilacao de 40s + um reinicio que NOS mandamos
+    const docLoja = {
+      codigo: 'QUEDAS_A', posto: 'p1', eventos: [
+        ev('offline', agora - 10 * H), ev('online', agora - 8 * H, { duracaoMs: 2 * H }),
+        ev('offline', agora - 5 * H), ev('online', agora - 5 * H + 40000, { duracaoMs: 40000 }),
+        ev('offline', agora - 3 * H, { motivo: 'reinicio-comandado' }),
+        ev('online', agora - 3 * H + 120000, { duracaoMs: 120000 }),
+      ],
+    };
+    // notebook: some e volta porque alguem levou pra casa - nao e' link
+    const docNote = {
+      codigo: 'QUEDAS_B', posto: 'p1', ehNotebook: true, eventos: [
+        ev('offline', agora - 20 * H), ev('online', agora - 8 * H, { duracaoMs: 12 * H }),
+      ],
+    };
+    // queda ANTIGA, fora da janela de 30 dias
+    const docVelho = {
+      codigo: 'QUEDAS_C', posto: 'p1', eventos: [
+        ev('offline', agora - 60 * 24 * H), ev('online', agora - 60 * 24 * H + 3 * H, { duracaoMs: 3 * H }),
+      ],
+    };
+
+    const a = ls.quedasDeUmComputador(docLoja, agora - 30 * 24 * H);
+    const b = ls.quedasDeUmComputador(docNote, agora - 30 * 24 * H);
+    const c = ls.quedasDeUmComputador(docVelho, agora - 30 * 24 * H);
+    // queda que abriu e nunca fechou: a loja esta fora AGORA
+    const d = ls.quedasDeUmComputador(
+      { codigo: 'QUEDAS_D', posto: 'p1', eventos: [ev('offline', agora - 2 * H)] },
+      agora - 30 * 24 * H
+    );
+
+    const conf = {
+      'conta as 3 quedas do computador da loja': a.fora.length === 3,
+      // a diferenca que decide tudo: 30 piscadas de 40s NAO pedem app
+      // offline; 3 quedas de 2h pedem
+      'separa reinicio que NOS mandamos das quedas de verdade':
+        a.fora.filter((q) => !q.comandado).length === 2 && a.fora.some((q) => q.comandado),
+      'a queda de 2h entra com a duracao certa': a.fora.some((q) => q.ms === 2 * H),
+      'a oscilacao de 40s tambem e registrada': a.fora.some((q) => q.ms === 40000),
+      'notebook nao vira queda de loja': b.fora.length === 1, // o parser acha, quem filtra e o relatorio
+      'queda fora da janela nao entra': c.fora.length === 0,
+      'queda ainda aberta aparece como "fora agora"': !!d.emAberto && d.emAberto.ms >= 2 * H,
+      'reinicio comandado ainda aberto NAO conta como fora agora':
+        !ls.quedasDeUmComputador(
+          { eventos: [ev('offline', agora - 2 * H, { motivo: 'reinicio-comandado' })] },
+          agora - 30 * 24 * H
+        ).emAberto,
+      // o par tem que herdar o motivo do evento de ABERTURA, que e o unico
+      // que o carrega - sem parear na ordem, o reinicio virava queda
+      'o codigo pareia na ordem em vez de so somar duracaoMs':
+        /let aberta = null;/.test(require('fs').readFileSync('/home/user/adyen-monitor/server/lojaStatus.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okRelQuedas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okRelQuedas = false; console.log('  erro: ' + e.message); }
+  if (!okRelQuedas) ruins += 1;
+  console.log(`${okRelQuedas ? '✓' : '✗'} NOC: relatório de quedas por unidade (separa oscilação, reinício comandado e notebook)`);
+
   let okIpImpressora = false;
   try {
     const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
