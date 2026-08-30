@@ -107,6 +107,30 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024, files: 8 },
 });
 
+// ANEXOS DE FORMULARIO. Um boleto de fornecedor as vezes vem com dezenas de
+// paginas em arquivos separados, e o teto de 5 travava a assinatura. Sobe pra
+// 20 - mas com um teto de TAMANHO junto, que o generico nao tem: os anexos
+// viram paginas dentro do PDF final (ver anexarDocumentos em formularios.js),
+// e o pdf-lib segura tudo em memoria de uma vez. 20 x 50MB do upload generico
+// derrubaria a instancia; 20 x 15MB ja e' folga pra boleto e foto de celular.
+// o numero vem do proprio modulo (formularios.MAX_ANEXOS) - a rota nao pode
+// deixar entrar mais anexo do que o modulo depois guarda
+const MAX_ANEXOS_FORMULARIO = formularios.MAX_ANEXOS;
+const uploadAnexosFormulario = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024, files: MAX_ANEXOS_FORMULARIO },
+});
+// e o teto do CONJUNTO, que o multer nao sabe conferir (ele so olha arquivo a
+// arquivo). Sem isso, 20 arquivos de 15MB passariam - 300MB de uma vez.
+const LIMITE_TOTAL_ANEXOS = 60 * 1024 * 1024;
+function conferirTamanhoAnexos(files) {
+  const total = (files || []).reduce((s, f) => s + (f.size || 0), 0);
+  if (total > LIMITE_TOTAL_ANEXOS) {
+    const mb = (v) => Math.round(v / (1024 * 1024));
+    throw new Error(`Os anexos somam ${mb(total)} MB - o limite por formulário é ${mb(LIMITE_TOTAL_ANEXOS)} MB. Tire ou reduza alguns arquivos.`);
+  }
+}
+
 // anexo do chat de suporte (widget publico, sem login) - so imagem/PDF (ver
 // segurancaChat.validarAnexo), 1 arquivo por mensagem, limite bem mais baixo
 // que o `upload` generico acima de proposito: e a unica rota de upload do
@@ -867,8 +891,9 @@ app.get('/api/formularios-publico/preencher/:token', async (req, res) => {
 // que precisa mandar o arquivo do documento); requisição JSON pura (os
 // outros tipos, sem anexo) passa direto - mesma convivência dos dois
 // formatos na mesma rota já usada em /api/abastecimento.
-app.post('/api/formularios-publico/preencher/:token', upload.array('anexos', 5), async (req, res) => {
+app.post('/api/formularios-publico/preencher/:token', uploadAnexosFormulario.array('anexos', MAX_ANEXOS_FORMULARIO), async (req, res) => {
   try {
+    conferirTamanhoAnexos(req.files);
     const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
     const vista = await formularios.vistaPreenchimento(req.params.token);
     if (!vista) return res.status(404).json({ error: 'Link de preenchimento inválido.' });
@@ -890,8 +915,9 @@ app.post('/api/formularios-publico/preencher/:token', upload.array('anexos', 5),
 // multipart quando quem assina manda COMPROVANTE junto (o depositante do
 // Depósito de Caixa); JSON puro nos outros casos - mesma convivência dos
 // dois formatos da rota de preenchimento logo acima.
-app.post('/api/formularios-publico/:id/assinar', upload.array('anexos', 5), async (req, res) => {
+app.post('/api/formularios-publico/:id/assinar', uploadAnexosFormulario.array('anexos', MAX_ANEXOS_FORMULARIO), async (req, res) => {
   try {
+    conferirTamanhoAnexos(req.files);
     const corpo = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
     // o arquivo só vai pro Storage depois do token ser aceito - link
     // inválido não pode servir de porta pra subir arquivo
@@ -3466,8 +3492,9 @@ async function recusarUnidadeDeFormulario(req, unidade) {
   return { status: 403, error: 'Você não tem acesso a essa unidade para emitir formulário. Peça ao Master pra liberar essa unidade no seu acesso.' };
 }
 
-app.post('/api/formularios', requireSection('formularios'), upload.array('anexos', 5), async (req, res) => {
+app.post('/api/formularios', requireSection('formularios'), uploadAnexosFormulario.array('anexos', MAX_ANEXOS_FORMULARIO), async (req, res) => {
   try {
+    conferirTamanhoAnexos(req.files);
     const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
     const recusa = await recusarUnidadeDeFormulario(req, payload.unidade);
     if (recusa) return res.status(recusa.status).json({ error: recusa.error });
@@ -3568,8 +3595,9 @@ app.post('/api/formularios/:id/depositante', requireSection('formularios'), asyn
 // Anexo em formulário JÁ criado, de qualquer tipo - Master-only, como o
 // Master pediu. Não confundir com /reabrir-anexo, que é o Ass. Boleto
 // TROCANDO o documento que vai ser assinado; aqui só se acrescenta.
-app.post('/api/formularios/:id/anexos', auth.requireMaster, upload.array('anexos', 5), async (req, res) => {
+app.post('/api/formularios/:id/anexos', auth.requireMaster, uploadAnexosFormulario.array('anexos', MAX_ANEXOS_FORMULARIO), async (req, res) => {
   try {
+    conferirTamanhoAnexos(req.files);
     const anexos = [];
     for (const file of req.files || []) {
       const tipoOk = /^image\//.test(file.mimetype || '') || file.mimetype === 'application/pdf';
