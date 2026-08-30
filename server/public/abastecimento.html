@@ -145,6 +145,10 @@
   .reg-card.ENVIO{border-left-color:var(--envio);}
   .reg-card.CONTAGEM{border-left-color:var(--warn);}
   .reg-tipo.CONTAGEM{color:var(--warn);}
+  /* remake = pizza perdida. Cor de gravidade (--bad), igual avaria - nao e
+     marca, e leitura de perda (ver CLAUDE.md secao 2) */
+  .reg-card.REMAKE{border-left-color:var(--bad);}
+  .reg-tipo.REMAKE{color:var(--bad);}
   .reg-linha1{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
   .reg-tipo{font-weight:800;font-size:13px;display:flex;align-items:center;gap:6px;}
   .reg-tipo.PEDIDO{color:var(--pedido);}
@@ -335,6 +339,9 @@
   <button type="button" class="btn-acao pedido" onclick="abrirForm('PEDIDO')">🛒 Novo pedido <span style="font-weight:400;font-size:11px;">(carrinho)</span></button>
   <button type="button" class="btn-acao envio" onclick="abrirForm('ENVIO')">🚚 Registrar envio <span style="font-weight:400;font-size:11px;">(loja)</span></button>
   <button type="button" class="btn-acao" id="btn-contagem" style="background:var(--warn-dim);color:var(--warn);border:1px solid rgba(242,179,61,.4);" onclick="abrirForm('CONTAGEM')">📋 Contagem <span style="font-weight:400;font-size:11px;">(carrinho)</span></button>
+  <!-- REMAKE registrado na HORA em que a pizza e descartada, nao lembrado no
+       fim do dia. O KPI do fechamento passa a ser a soma do dia. -->
+  <button type="button" class="btn-acao" id="btn-remake" style="background:var(--bad-dim);color:var(--bad);border:1px solid rgba(255,90,90,.4);" onclick="abrirForm('REMAKE')">🍕 Remake <span style="font-weight:400;font-size:11px;">(pizza descartada)</span></button>
 </div>
 
 <!-- botoes/filtros ACIMA do painel de Movimentacoes (responsivos, quebram
@@ -348,6 +355,7 @@
   <button type="button" class="filtro-chip" data-filtro="PEDIDO" onclick="filtrar('PEDIDO')">🛒 Pedidos</button>
   <button type="button" class="filtro-chip" data-filtro="ENVIO" onclick="filtrar('ENVIO')">🚚 Envios</button>
   <button type="button" class="filtro-chip" data-filtro="CONTAGEM" onclick="filtrar('CONTAGEM')">📋 Contagens</button>
+  <button type="button" class="filtro-chip" data-filtro="REMAKE" onclick="filtrar('REMAKE')">🍕 Remakes</button>
 </div>
 <div class="admin-chips hidden" id="admin-chips" style="margin-bottom:8px;">
   <span class="admin-chips-rotulo">⚙️ Administração</span>
@@ -442,15 +450,34 @@
         <label>Atende qual pedido? (opcional)</label>
         <select id="f-atende" onchange="prefillDoPedido()"></select>
       </div>
-      <label>Pizzas</label>
-      <div class="sabores-grid">
-        <div><label>Calabresa</label><input type="number" min="0" inputmode="numeric" id="f-calabresa" placeholder="0"></div>
-        <div><label>Pepperoni</label><input type="number" min="0" inputmode="numeric" id="f-pepperoni" placeholder="0"></div>
-        <div><label>Mussarela</label><input type="number" min="0" inputmode="numeric" id="f-mussarela" placeholder="0"></div>
+      <div id="f-bloco-pizzas">
+        <label>Pizzas</label>
+        <div class="sabores-grid">
+          <div><label>Calabresa</label><input type="number" min="0" inputmode="numeric" id="f-calabresa" placeholder="0"></div>
+          <div><label>Pepperoni</label><input type="number" min="0" inputmode="numeric" id="f-pepperoni" placeholder="0"></div>
+          <div><label>Mussarela</label><input type="number" min="0" inputmode="numeric" id="f-mussarela" placeholder="0"></div>
+        </div>
       </div>
-      <label>Insumos (bebidas, embalagens...)</label>
-      <div id="f-insumos"></div>
-      <button type="button" class="btn-add" id="btn-add-insumo" onclick="adicionarInsumo()">+ Adicionar insumo</button>
+      <div id="f-bloco-insumos">
+        <label>Insumos (bebidas, embalagens...)</label>
+        <div id="f-insumos"></div>
+        <button type="button" class="btn-add" id="btn-add-insumo" onclick="adicionarInsumo()">+ Adicionar insumo</button>
+      </div>
+      <!-- REMAKE: uma pizza so, com o sabor, quantas e POR QUE. O motivo e
+           obrigatorio pelo mesmo motivo da avaria - um numero de descarte sem
+           causa nao serve pra ninguem decidir nada. Nao mexe em contagem: a
+           pizza descartada ja saiu do carrinho, subtrair de novo contaria
+           duas vezes. -->
+      <div id="f-bloco-remake" class="hidden">
+        <div class="sabores-grid" style="grid-template-columns:1fr 1fr;">
+          <div><label>Sabor</label><select id="f-rm-sabor"><option value="calabresa">Calabresa</option><option value="pepperoni">Pepperoni</option><option value="mussarela">Mussarela</option></select></div>
+          <div><label>Quantas pizzas</label><input type="number" min="1" step="1" inputmode="numeric" id="f-rm-qtd" placeholder="1"></div>
+        </div>
+        <label>Por que foi descartada? <span style="text-transform:none;letter-spacing:0;color:var(--bad);">(obrigatório)</span></label>
+        <textarea id="f-rm-motivo" placeholder="ex: massa queimada / caiu no chão / ficou fria demais pra vender"></textarea>
+        <label>Foto <span style="text-transform:none;letter-spacing:0;">(opcional)</span></label>
+        <input type="file" accept="image/*" id="f-rm-foto">
+      </div>
       <!-- AVARIAS: so na Contagem - item danificado encontrado no carrinho,
            adicionando de 1 em 1 (mesmo espirito dos insumos). Cada linha tem
            o item, a quantidade e uma foto opcional; a observacao (o que
@@ -1073,7 +1100,7 @@ function filtrar(f){
 }
 function passaFiltro(r){
   if(FILTRO==='pendentes') return pendente(r);
-  if(FILTRO==='PEDIDO' || FILTRO==='ENVIO' || FILTRO==='CONTAGEM') return r.tipo===FILTRO;
+  if(FILTRO==='PEDIDO' || FILTRO==='ENVIO' || FILTRO==='CONTAGEM' || FILTRO==='REMAKE') return r.tipo===FILTRO;
   return true;
 }
 
@@ -1234,13 +1261,18 @@ function regCardHtml(r){
         `${escapeHtml(a.nome)} (${a.quantidade}) — ${escapeHtml(a.observacao)}${a.foto?` · <a href="/api/abastecimento/avaria-foto/${r.id}/${i}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">📷 foto</a>`:''}`
       ).join('<br>')}</div>`
     : '';
+  // remake: sabor + quantas + por que, com a foto quando tiver. Mesmo desenho
+  // da avaria porque e a mesma leitura - perda registrada com causa.
+  const remakeHtml = r.remake
+    ? `<div class="reg-obs" style="border-left:2px solid var(--bad);padding-left:8px;">🍕 <b>${r.remake.quantidade} ${SABOR_LABEL[r.remake.sabor]||escapeHtml(r.remake.sabor)}</b> descartada(s) — ${escapeHtml(r.remake.motivo)}${r.remake.foto?` · <a href="/api/abastecimento/avaria-foto/${r.id}/remake?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank">📷 foto</a>`:''}</div>`
+    : '';
   return `
     <div class="reg-card ${r.tipo}">
       <div class="reg-linha1">
-        <span class="reg-tipo ${r.tipo}">${r.tipo==='PEDIDO'?'🛒 PEDIDO':(r.tipo==='CONTAGEM'?'📋 CONTAGEM':'🚚 ENVIO')} <span style="font-weight:400;font-size:10.5px;color:var(--muted);font-family:var(--mono);">${r.tipo==='ENVIO'?'loja':'carrinho'}</span></span>
+        <span class="reg-tipo ${r.tipo}">${r.tipo==='PEDIDO'?'🛒 PEDIDO':(r.tipo==='CONTAGEM'?'📋 CONTAGEM':(r.tipo==='REMAKE'?'🍕 REMAKE':'🚚 ENVIO'))} <span style="font-weight:400;font-size:10.5px;color:var(--muted);font-family:var(--mono);">${r.tipo==='ENVIO'?'loja':'carrinho'}</span></span>
         <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">${statusBadge}<span class="reg-hora">${fmtHora(r.criadoEm)}</span></span>
       </div>
-      ${r.tipo==='CONTAGEM' ? blocoContagemHtml(r) : `<div class="qtd-chips">${chipsQtd(r)}</div>${insumosHtml}`}
+      ${r.tipo==='REMAKE' ? remakeHtml : (r.tipo==='CONTAGEM' ? blocoContagemHtml(r) : `<div class="qtd-chips">${chipsQtd(r)}</div>${insumosHtml}`)}
       ${avariasHtml}
       ${r.observacao ? (r.tipo==='CONTAGEM'
           ? `<div class="cont-recado"><b>Recado de quem contou</b>${escapeHtml(r.observacao)}</div>`
@@ -1623,10 +1655,12 @@ function abrirForm(tipo){
   document.getElementById('f-titulo').textContent =
     tipo==='PEDIDO' ? '🛒 Novo pedido do carrinho' :
     tipo==='CONTAGEM' ? '📋 Contagem do carrinho' :
+    tipo==='REMAKE' ? '🍕 Remake - pizza descartada' :
     '🚚 Registrar envio da loja';
   document.getElementById('f-sub').textContent =
     tipo==='PEDIDO' ? 'o que o carrinho precisa receber da loja' :
     tipo==='CONTAGEM' ? 'o que TEM no carrinho agora (início do turno) - pode ser tudo zero' :
+    tipo==='REMAKE' ? 'registre agora, na hora do descarte - o fechamento do dia soma tudo sozinho' :
     'o que a loja está mandando pro carrinho';
   ['f-calabresa','f-pepperoni','f-mussarela'].forEach(id=>{ document.getElementById(id).value=''; });
   document.getElementById('f-obs').value = '';
@@ -1636,6 +1670,16 @@ function abrirForm(tipo){
     : [];
   document.getElementById('btn-add-insumo').classList.toggle('hidden', tipo==='CONTAGEM');
   renderInsumos();
+  // REMAKE nao tem pizzas por sabor nem insumos: e um evento de descarte, com
+  // um sabor so. Esconder os dois blocos evita que alguem lance uma pizza
+  // descartada como se fosse pedido.
+  document.getElementById('f-bloco-pizzas').classList.toggle('hidden', tipo==='REMAKE');
+  document.getElementById('f-bloco-insumos').classList.toggle('hidden', tipo==='REMAKE');
+  document.getElementById('f-bloco-remake').classList.toggle('hidden', tipo!=='REMAKE');
+  document.getElementById('f-rm-sabor').value = 'calabresa';
+  document.getElementById('f-rm-qtd').value = '';
+  document.getElementById('f-rm-motivo').value = '';
+  document.getElementById('f-rm-foto').value = '';
   // avarias so existem na Contagem - reseta a lista toda vez que o form abre
   AVARIAS = [];
   document.getElementById('f-bloco-avarias').classList.toggle('hidden', tipo!=='CONTAGEM');
@@ -1645,7 +1689,7 @@ function abrirForm(tipo){
   document.getElementById('f-ja-recebido').checked = false;
   document.getElementById('msg-form').classList.add('hidden');
   document.getElementById('btn-salvar').textContent =
-    tipo==='PEDIDO' ? 'Enviar pedido' : (tipo==='CONTAGEM' ? 'Registrar contagem' : 'Registrar envio');
+    tipo==='PEDIDO' ? 'Enviar pedido' : (tipo==='CONTAGEM' ? 'Registrar contagem' : (tipo==='REMAKE' ? 'Registrar remake' : 'Registrar envio'));
   // lembra so o USUARIO do ultimo operador (a senha nunca fica salva)
   document.getElementById('f-op-usuario').value = localStorage.getItem('abastOperadorUsuario') || '';
   document.getElementById('f-op-senha').value = '';
@@ -1698,7 +1742,28 @@ async function salvar(){
       operadorSenha: document.getElementById('f-op-senha').value.trim(),
     };
     let resp;
-    if(TIPO_FORM==='CONTAGEM'){
+    if(TIPO_FORM==='REMAKE'){
+      // as mesmas 3 travas do backend, aqui, pra o operador ver o que falta
+      // ANTES de perder o preenchimento numa ida ao servidor
+      const qtd = Number(document.getElementById('f-rm-qtd').value);
+      const motivo = document.getElementById('f-rm-motivo').value.trim();
+      if(!Number.isFinite(qtd) || qtd <= 0) throw new Error('Remake: informe quantas pizzas foram descartadas.');
+      if(!motivo) throw new Error('Remake: descreva por que a pizza foi descartada.');
+      const foto = document.getElementById('f-rm-foto').files[0] || null;
+      body.pizzas = {}; body.insumos = [];
+      body.remake = {
+        sabor: document.getElementById('f-rm-sabor').value,
+        quantidade: qtd,
+        motivo,
+        temFoto: !!foto,
+      };
+      // mesmo campo multipart das avarias (ver processarAvariasComFoto no
+      // index.js) - uma foto so, opcional
+      const fd = new FormData();
+      fd.append('payload', JSON.stringify(body));
+      if(foto) fd.append('fotosAvarias', foto);
+      resp = await fetch('/api/abastecimento', { method:'POST', body: fd });
+    } else if(TIPO_FORM==='CONTAGEM'){
       // linha totalmente vazia (adicionou e desistiu) e ignorada; linha com
       // alguma coisa preenchida exige item+qtde+observacao antes de mandar
       const avariasValidas = [];
@@ -2720,6 +2785,8 @@ async function boot(){
   document.getElementById('btn-operadores').classList.toggle('hidden', !podeOperadores);
   document.getElementById('admin-chips').classList.toggle('hidden', !(PODE_CATALOGO || podeOperadores));
   document.getElementById('btn-contagem').classList.toggle('hidden', !TEM_PEDIDO);
+  // remake e do lado do carrinho, igual pedido e contagem
+  document.getElementById('btn-remake').classList.toggle('hidden', !TEM_PEDIDO);
   document.getElementById('root').classList.remove('hidden');
   await carregarConfig();
   await carregarCatalogo();

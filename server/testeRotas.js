@@ -2474,7 +2474,10 @@ setTimeout(async () => {
     const blocoLeitura = html.slice(iLeitura, iLeitura + 4000);
     const conferencias = {
       'Canais/Formas: o travamento exclui o Master': /const travar = \(k\) => automatico && !IS_MASTER && k\.manual !== true;/.test(blocoCanais),
-      "KPI's extras: o travamento exclui o Master": /const travar = \(k\) => automatico && !IS_MASTER && kpiOcrElegivel\(k\) && k\.manual !== true;/.test(blocoKpi),
+      // [^;]* no fim: outras condicoes podem entrar (ex.: KPI de origem
+      // automatica, que nao segue a regra da foto) - o que este teste protege
+      // e' o !IS_MASTER continuar la
+      "KPI's extras: o travamento exclui o Master": /const travar = \(k\) => automatico && !IS_MASTER && kpiOcrElegivel\(k\) && k\.manual !== true[^;]*;/.test(blocoKpi),
       'depois da leitura o campo NÃO é retravado pro Master': /if\(!IS_MASTER\)\{[\s\S]{0,160}el\.readOnly = true;[\s\S]{0,120}campo-automatico/.test(blocoLeitura),
       'a foto continua PREENCHENDO o campo do Master (só não trava)': /el\.value = it\.valor;/.test(blocoLeitura),
       // o aviso "🔓 Master: ..." saiu da tela a pedido do Master ("remover
@@ -4768,6 +4771,87 @@ setTimeout(async () => {
   // se vale fazer o app funcionar offline ("a queda e frequente ou foi um
   // episodio?"). O dado ja existia nos eventos offline/online de cada
   // computador - faltava somar por unidade.
+  // ------------------------------------------------------------------
+  // REMAKE: pizza descartada por falta de qualidade. Pedido do Master: "no
+  // carrinho algumas pizzas viram Remake... preciso sinalizar quando uma
+  // vira remake DURANTE O DIA e nao mais so no fechamento; o fechamento
+  // passa a ser o total do dia".
+  let okRemake = false;
+  try {
+    const ab = require('/home/user/adyen-monitor/server/abastecimentoCarrinho.js');
+    const gr = require('/home/user/adyen-monitor/server/grupos.js');
+    const cab = { Authorization: 'Bearer ' + token };
+
+    // (a) sanitizacao: sabor da lista, quantidade > 0, motivo obrigatorio
+    const ok = ab.sanitizarRemake({ sabor: 'calabresa', quantidade: 2, motivo: 'queimou na borda' });
+    const erro = (entrada) => { try { ab.sanitizarRemake(entrada); return ''; } catch (e) { return e.message; } };
+
+    // (b) o KPI so recebe o total se o Master marcar a origem - nada de
+    // procurar um KPI chamado "Remake" pelo nome
+    const [comOrigem] = gr.sanitizarCamposExtras([{ label: 'Remake', tipo: 'quantidade', origem: 'remakesDoDia' }]);
+    const [semOrigem] = gr.sanitizarCamposExtras([{ label: 'Remake', tipo: 'quantidade' }]);
+    const [origemInvalida] = gr.sanitizarCamposExtras([{ label: 'Remake', origem: 'qualquer-coisa' }]);
+
+    // (c) o total do dia: dois descartes no MESMO dia somam; um descarte de
+    // outro dia nao entra. E' esse numero que cai no KPI do fechamento.
+    const hojeBr = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const opRemake = { usuario: 'rmk1', nome: 'Op Remake' };
+    await ab.criar({ tipo: 'REMAKE', operador: opRemake, remake: { sabor: 'calabresa', quantidade: 2, motivo: 'massa queimada' } });
+    await ab.criar({ tipo: 'REMAKE', operador: opRemake, remake: { sabor: 'pepperoni', quantidade: 1, motivo: 'caiu no chao' } });
+    const deOutroDia = await ab.criar({ tipo: 'REMAKE', operador: opRemake, remake: { sabor: 'mussarela', quantidade: 9, motivo: 'de ontem' } });
+    // empurra o terceiro pro passado direto no doc (o modulo sempre carimba
+    // "agora") - so assim da pra provar que o corte por DIA existe
+    DOCS.get(`abastecimentoCarrinho/${deOutroDia.id}`).criadoEm = '2020-01-05T12:00:00.000Z';
+    const totalHoje = await ab.remakesDoDia(hojeBr);
+    const totalDaquele = await ab.remakesDoDia('2020-01-05');
+    // e pela rota, que e por onde o lancamento.html le
+    const porRota = await pedir(`/api/abastecimento/remakes?dia=${encodeURIComponent(hojeBr)}`, cab);
+    const dRota = porRota.status === 200 ? JSON.parse(porRota.corpo) : {};
+
+    // (d) as duas pontas de tela: registrar no Carrinho e receber no KPI
+    const fs = require('fs');
+    const path = require('path');
+    const pub = (f) => fs.readFileSync(path.join(__dirname, 'public', f), 'utf8');
+    const htmlCarrinho = pub('abastecimento.html');
+    const htmlLancamento = pub('lancamento.html');
+    const htmlGrupos = pub('grupos.html');
+
+    const conf = {
+      'o remake guarda sabor, quantidade e motivo':
+        ok.sabor === 'calabresa' && ok.quantidade === 2 && ok.motivo === 'queimou na borda',
+      'sabor fora dos 3 do carrinho e recusado': /escolha o sabor/i.test(erro({ sabor: 'portuguesa', quantidade: 1, motivo: 'x' })),
+      'quantidade zero ou negativa e recusada': /quantas pizzas/i.test(erro({ sabor: 'calabresa', quantidade: 0, motivo: 'x' })),
+      // descarte sem motivo e um numero que ninguem consegue usar
+      'motivo e obrigatorio, igual nas avarias': /motivo obrigatório/i.test(erro({ sabor: 'calabresa', quantidade: 1 })),
+      'REMAKE e um tipo proprio de registro (da pra lancar durante o dia)':
+        ab.TIPOS.includes('REMAKE'),
+      // §1: rotulo muda, identificador nao. Vincular pelo nome "Remake"
+      // quebraria em silencio no dia em que alguem renomear o KPI.
+      'o KPI recebe o total por OPT-IN do Master, nao pelo nome':
+        comOrigem.origem === 'remakesDoDia' && semOrigem.origem === undefined,
+      'origem desconhecida nao passa': origemInvalida.origem === null,
+      'o total do dia soma os descartes daquele dia': totalHoje.total === 3 && totalHoje.registros === 2,
+      'o total separa por sabor (qual pizza esta falhando)':
+        totalHoje.porSabor.calabresa === 2 && totalHoje.porSabor.pepperoni === 1 && totalHoje.porSabor.mussarela === 0,
+      'descarte de outro dia NAO entra no total de hoje': totalDaquele.total === 9,
+      'a rota devolve o mesmo total que o lancamento vai mostrar':
+        porRota.status === 200 && dRota.total === 3,
+      // sem essas 3 pontas a funcionalidade existe no servidor e nao existe
+      // pra quem opera
+      'o Carrinho tem o botao de registrar Remake na hora':
+        /abrirForm\('REMAKE'\)/.test(htmlCarrinho) && /f-rm-motivo/.test(htmlCarrinho),
+      'o Master liga o KPI na tela de Grupos (opt-in)':
+        /kpi-origem-remake/.test(htmlGrupos) && /remakesDoDia/.test(htmlGrupos),
+      'o Lancamento busca o total do dia em vez de pedir pra digitar':
+        /carregarRemakesDoDia/.test(htmlLancamento) && /api\/abastecimento\/remakes/.test(htmlLancamento),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okRemake = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okRemake = false; console.log('  erro: ' + e.message); }
+  if (!okRemake) ruins += 1;
+  console.log(`${okRemake ? '✓' : '✗'} Carrinho: Remake é registrado durante o dia (sabor + motivo) e o KPI do fechamento é opt-in`);
+
   let okRelQuedas = false;
   try {
     const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');

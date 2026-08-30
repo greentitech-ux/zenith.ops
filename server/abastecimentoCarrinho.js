@@ -20,7 +20,12 @@ const COLLECTION = db.collection('abastecimentoCarrinho');
 const CATALOGO = db.collection('abastecimentoInsumos');
 const OPERADORES = db.collection('abastecimentoOperadores');
 
-const TIPOS = ['PEDIDO', 'ENVIO', 'CONTAGEM'];
+// REMAKE entrou como TIPO proprio, e nao como campo da CONTAGEM (que e' o
+// padrao das avarias), por um motivo operacional: o Master pediu pra
+// "sinalizar quando uma vira remake DURANTE O DIA, e nao mais so no
+// fechamento". Preso a CONTAGEM, o registro so aconteceria na troca de
+// turno - que e' exatamente o que ele quer deixar de fazer.
+const TIPOS = ['PEDIDO', 'ENVIO', 'CONTAGEM', 'REMAKE'];
 const SABORES = ['calabresa', 'pepperoni', 'mussarela'];
 
 // ---------- config do abastecimento (Master) ----------
@@ -464,14 +469,69 @@ async function resolverAvarias(lista) {
   return resultado;
 }
 
-async function criar({ tipo, pizzas, insumos, avarias, observacao, atendePedidoId, jaRecebido, criadoPorId, criadoPorEmail, criadoPorNome, operador }) {
-  if (!TIPOS.includes(tipo)) throw new Error('Tipo inválido (use PEDIDO ou ENVIO).');
+// Uma pizza descartada por falta de qualidade. Guarda o SABOR de proposito:
+// o carrinho ja trabalha com os 3, e os outros 3 KPI's do fechamento sao
+// justamente por sabor - saber QUAL pizza falha custa zero a mais e e' a
+// unica forma de agir sobre a causa. O KPI do fechamento continua sendo o
+// total, entao isso nao muda nada pra quem so olha o numero.
+//
+// Motivo obrigatorio pela mesma razao das avarias: descarte sem motivo e'
+// um numero que ninguem consegue usar pra nada.
+//
+// NAO baixa estoque nem mexe na contagem: a pizza descartada ja nao esta
+// mais no carrinho, entao a contagem seguinte ja a perdeu. Descontar de
+// novo contaria a mesma perda duas vezes.
+function sanitizarRemake(entrada) {
+  const r = entrada || {};
+  const sabor = String(r.sabor || '').trim().toLowerCase();
+  if (!SABORES.includes(sabor)) throw new Error('Remake: escolha o sabor da pizza descartada.');
+  const quantidade = Number(r.quantidade);
+  if (!Number.isFinite(quantidade) || quantidade <= 0) throw new Error('Remake: informe quantas pizzas foram descartadas.');
+  const motivo = String(r.motivo || '').trim().slice(0, 500);
+  if (!motivo) throw new Error('Remake: descreva por que a pizza foi descartada (motivo obrigatório).');
+
+  return {
+    sabor,
+    quantidade: Math.round(quantidade),
+    motivo,
+    foto: r.foto && r.foto.path ? { nome: r.foto.nome || '', path: r.foto.path, tipo: r.foto.tipo || 'application/octet-stream' } : null,
+  };
+}
+
+// dia de Brasilia de um registro - e' por ele que o fechamento do dia soma
+function diaDoRegistro(reg) {
+  const iso = reg && (reg.criadoEm || reg.em);
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+}
+
+// o total que o fechamento passa a usar no KPI de Remake. Sai do cache do
+// modulo (5min) - nao custa leitura nova no Firestore.
+async function remakesDoDia(dia) {
+  const alvo = dia || new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+  const doDia = (await listAll()).filter((r) => r.tipo === 'REMAKE' && diaDoRegistro(r) === alvo);
+  const porSabor = {};
+  for (const sabor of SABORES) porSabor[sabor] = 0;
+  let total = 0;
+  for (const r of doDia) {
+    const q = (r.remake && r.remake.quantidade) || 0;
+    total += q;
+    if (r.remake && porSabor[r.remake.sabor] !== undefined) porSabor[r.remake.sabor] += q;
+  }
+  return { dia: alvo, total, porSabor, registros: doDia.length };
+}
+
+async function criar({ tipo, pizzas, insumos, avarias, remake, observacao, atendePedidoId, jaRecebido, criadoPorId, criadoPorEmail, criadoPorNome, operador }) {
+  if (!TIPOS.includes(tipo)) throw new Error('Tipo inválido (use PEDIDO, ENVIO, CONTAGEM ou REMAKE).');
   const pizzasLimpas = sanitizarPizzas(pizzas);
   const insumosLimpos = await resolverInsumos(insumos);
   const avariasLimpas = tipo === 'CONTAGEM' ? await resolverAvarias(avarias) : [];
+  const remakeLimpo = tipo === 'REMAKE' ? sanitizarRemake(remake) : null;
   const temPizza = SABORES.some((s) => pizzasLimpas[s] > 0);
-  // CONTAGEM pode ser toda zerada (carrinho vazio no inicio do turno)
-  if (tipo !== 'CONTAGEM' && !temPizza && !insumosLimpos.length) throw new Error('Informe ao menos uma pizza ou um insumo.');
+  // CONTAGEM pode ser toda zerada (carrinho vazio no inicio do turno).
+  // REMAKE nao passa por essa regra: o que ele registra e' o descarte, no
+  // campo proprio - as pizzas do carrinho nao mudam por causa dele.
+  if (tipo !== 'CONTAGEM' && tipo !== 'REMAKE' && !temPizza && !insumosLimpos.length) throw new Error('Informe ao menos uma pizza ou um insumo.');
 
   let pedidoAtendido = null;
   if (atendePedidoId) {
@@ -494,6 +554,8 @@ async function criar({ tipo, pizzas, insumos, avarias, observacao, atendePedidoI
     insumos: insumosLimpos,
     // so populado em CONTAGEM - itens danificados encontrados no carrinho
     avarias: avariasLimpas,
+    // so populado em REMAKE - a pizza descartada por falta de qualidade
+    remake: remakeLimpo,
     observacao: String(observacao || '').trim().slice(0, 500),
     // ENVIO -> qual pedido ele atende (opcional); PEDIDO -> qual envio o
     // atendeu (preenchido quando o envio vinculado nasce)
@@ -902,7 +964,7 @@ async function arquivarAntigos() {
 }
 
 module.exports = {
-  TIPOS, SABORES, criar, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, editarDireto, getConfig, salvarConfig, salvarCapacidades, arquivarAntigos,
+  TIPOS, SABORES, criar, remakesDoDia, sanitizarRemake, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, editarDireto, getConfig, salvarConfig, salvarCapacidades, arquivarAntigos,
   listarInsumos, criarInsumo, atualizarInsumo,
   listarOperadores, criarOperador, atualizarOperador, removerOperador, desbloquearOperador, buscarOperadorPorUsuario, validarOperador, validarOperadorQualquerPapel, trocarPapelOperador,
 };

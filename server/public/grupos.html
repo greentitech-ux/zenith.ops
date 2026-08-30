@@ -470,7 +470,7 @@ const DIRECOES_KPI = [
   ['menor-melhor', 'Ruim quando SOBE'],
   ['maior-melhor', 'Ruim quando CAI'],
 ];
-function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, tambemInicial, somaEmInicial, manualInicial, direcaoInicial){
+function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, tambemInicial, somaEmInicial, manualInicial, direcaoInicial, origemInicial){
   const container = document.getElementById(containerId);
   const ehKpi = containerId.includes('kpis');
   const ehCanal = containerId.includes('canais');
@@ -487,6 +487,15 @@ function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, t
     </div>` : '';
   const ehMoedaInicial = (tipoInicial||'quantidade')==='moeda';
   const seletorDirecao = ehKpi ? `<select class="kpi-direcao-select" title="Pra que lado esse indicador é ruim - usado no ranking de ofensores">${DIRECOES_KPI.map(([v,l])=>`<option value="${v}" ${(direcaoInicial||'neutro')===v?'selected':''}>${l}</option>`).join('')}</select>` : '';
+  // Origem do valor: em vez de a loja digitar, o KPI recebe sozinho um numero
+  // que o sistema ja tem. Hoje so o total de Remakes registrados no Carrinho
+  // naquele dia. E' opt-in por KPI porque rotulo muda e identificador nao -
+  // amarrar pelo nome "Remake" quebraria em silencio numa renomeacao.
+  const origemKpi = ehKpi ? `<div class="linha-kpi-opcoes">
+      <label title="O valor deste KPI passa a ser o total de pizzas descartadas registradas no Carrinho durante o dia. A loja não digita.">
+        <input type="checkbox" class="kpi-origem-remake" ${origemInicial==='remakesDoDia'?'checked':''}> 🍕 preencher com o total de Remakes do Carrinho (a loja não digita)
+      </label>
+    </div>` : '';
   const somaEmKpi = ehKpi ? `<label class="linha-kpi-soma-em">Somar em
       <select class="kpi-soma-em-select" ${ehMoedaInicial ? '' : 'disabled'}>
         <option value="nao" ${(somaEmInicial||'nao')==='nao'?'selected':''}>Não somar (só captar o dado)</option>
@@ -503,7 +512,8 @@ function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, t
     ${seletorDirecao}
     <button type="button" class="btn-remover" onclick="this.closest('.linha-kpi').remove()">✕</button>
     ${opcoes}
-    ${somaEmKpi}`;
+    ${somaEmKpi}
+    ${origemKpi}`;
   container.appendChild(div);
 }
 // troca a linha de posição com a vizinha (direcao -1 = sobe, +1 = desce) -
@@ -553,6 +563,8 @@ function lerKpis(containerId){
         item.somaEm = selSoma ? selSoma.value : 'nao';
         const selDir = linha.querySelector('.kpi-direcao-select');
         item.direcao = selDir ? selDir.value : 'neutro';
+        const chkOrigem = linha.querySelector('.kpi-origem-remake');
+        item.origem = (chkOrigem && chkOrigem.checked) ? 'remakesDoDia' : null;
       }
       if(ehCanalOuForma){
         const selOp = linha.querySelector('.extra-operacao-select');
@@ -739,7 +751,7 @@ function abrirEdicaoGrupo(id){
   document.getElementById('e-formas').innerHTML = '';
   (g.formasPagamentoExtras||[]).forEach(k=>adicionarKpi('e-formas', k.label, null, k.operacao, k.tambemNoOutroTotal, null, k.manual));
   document.getElementById('e-kpis').innerHTML = '';
-  (g.kpisExtras||[]).forEach(k=>adicionarKpi('e-kpis', k.label, k.tipo, null, null, k.somaEm, null, k.direcao));
+  (g.kpisExtras||[]).forEach(k=>adicionarKpi('e-kpis', k.label, k.tipo, null, null, k.somaEm, null, k.direcao, k.origem));
   responsaveisChecksHtml('e-responsaveis', new Set(g.responsaveis||[]));
   document.getElementById('grupo-err').classList.add('hidden');
   grupoOverlay.classList.add('show');
