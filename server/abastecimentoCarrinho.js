@@ -481,18 +481,44 @@ async function resolverAvarias(lista) {
 // NAO baixa estoque nem mexe na contagem: a pizza descartada ja nao esta
 // mais no carrinho, entao a contagem seguinte ja a perdeu. Descontar de
 // novo contaria a mesma perda duas vezes.
+// Um descarte quase nunca e de um sabor so ("1 calabresa, 2 mussarela"). O
+// remake guarda a MESMA grade de sabores do pedido, e nao um par
+// sabor+quantidade - obrigar um registro por sabor faria a pessoa repetir o
+// motivo tres vezes e inflaria a contagem de registros do dia.
+//
+// Registro no formato antigo (um sabor so) continua legivel: quem le passa
+// por pizzasDoRemake(), que traduz os dois formatos. Nada de migracao sobre
+// dado antigo (CLAUDE.md secao 1).
+function pizzasDoRemake(remake) {
+  if (!remake) return {};
+  if (remake.pizzas && typeof remake.pizzas === 'object') return remake.pizzas;
+  return remake.sabor ? { [remake.sabor]: Number(remake.quantidade) || 0 } : {};
+}
+
 function sanitizarRemake(entrada) {
   const r = entrada || {};
-  const sabor = String(r.sabor || '').trim().toLowerCase();
-  if (!SABORES.includes(sabor)) throw new Error('Remake: escolha o sabor da pizza descartada.');
-  const quantidade = Number(r.quantidade);
-  if (!Number.isFinite(quantidade) || quantidade <= 0) throw new Error('Remake: informe quantas pizzas foram descartadas.');
+  const bruto = pizzasDoRemake(r);
+  // sabor fora dos 3 do carrinho e recusado em vez de ignorado em silencio -
+  // ignorar faria o total mentir pra menos
+  const desconhecido = Object.keys(bruto).find((k) => k && !SABORES.includes(String(k).trim().toLowerCase()));
+  if (desconhecido) throw new Error('Remake: escolha o sabor da pizza descartada (calabresa, pepperoni ou mussarela).');
+
+  const pizzas = {};
+  let quantidade = 0;
+  for (const sabor of SABORES) {
+    const n = Number(bruto[sabor]);
+    pizzas[sabor] = Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+    quantidade += pizzas[sabor];
+  }
+  if (!quantidade) throw new Error('Remake: informe quantas pizzas foram descartadas (ao menos um sabor).');
+
   const motivo = String(r.motivo || '').trim().slice(0, 500);
   if (!motivo) throw new Error('Remake: descreva por que a pizza foi descartada (motivo obrigatório).');
 
   return {
-    sabor,
-    quantidade: Math.round(quantidade),
+    pizzas,
+    // total do registro, ja somado - e o que o KPI do fechamento usa
+    quantidade,
     motivo,
     foto: r.foto && r.foto.path ? { nome: r.foto.nome || '', path: r.foto.path, tipo: r.foto.tipo || 'application/octet-stream' } : null,
   };
@@ -514,9 +540,12 @@ async function remakesDoDia(dia) {
   for (const sabor of SABORES) porSabor[sabor] = 0;
   let total = 0;
   for (const r of doDia) {
-    const q = (r.remake && r.remake.quantidade) || 0;
-    total += q;
-    if (r.remake && porSabor[r.remake.sabor] !== undefined) porSabor[r.remake.sabor] += q;
+    const pizzas = pizzasDoRemake(r.remake);
+    for (const sabor of SABORES) {
+      const q = Number(pizzas[sabor]) || 0;
+      porSabor[sabor] += q;
+      total += q;
+    }
   }
   return { dia: alvo, total, porSabor, registros: doDia.length };
 }
@@ -964,7 +993,7 @@ async function arquivarAntigos() {
 }
 
 module.exports = {
-  TIPOS, SABORES, criar, remakesDoDia, sanitizarRemake, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, editarDireto, getConfig, salvarConfig, salvarCapacidades, arquivarAntigos,
+  TIPOS, SABORES, criar, remakesDoDia, sanitizarRemake, pizzasDoRemake, getOne, remover, listAll, marcarVisto, marcarPreparo, marcarJaLancado, adicionarMensagem, encerrarConversa, confirmarRecebimento, registrarDivergencia, registrarPedidoCorrecao, decidirCorrecao, editarDireto, getConfig, salvarConfig, salvarCapacidades, arquivarAntigos,
   listarInsumos, criarInsumo, atualizarInsumo,
   listarOperadores, criarOperador, atualizarOperador, removerOperador, desbloquearOperador, buscarOperadorPorUsuario, validarOperador, validarOperadorQualquerPapel, trocarPapelOperador,
 };
