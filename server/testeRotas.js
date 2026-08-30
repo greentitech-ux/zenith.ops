@@ -4823,6 +4823,18 @@ setTimeout(async () => {
         ).emAberto,
       // o par tem que herdar o motivo do evento de ABERTURA, que e o unico
       // que o carrega - sem parear na ordem, o reinicio virava queda
+      // a rota exige token: abrir a URL no navegador devolve 401, entao a
+      // tela E o unico caminho de verdade pro Master ver isso
+      'a tela do NOC tem o painel que busca o relatorio': (() => {
+        const h = require('fs').readFileSync('/home/user/adyen-monitor/server/public/loja-status.html', 'utf8');
+        return /id="quedas-panel"/.test(h)
+          && /fetch\('\/api\/loja-status\/quedas\?dias=' \+/.test(h)
+          && /function alternarPainelQuedas\(\)/.test(h)
+          // so busca quando ABRE: relatorio de analise nao entra no poll de 30s
+          && /if\(abriu && !QUEDAS_CARREGADO\) carregarQuedas\(\);/.test(h)
+          // o limite do historico tem que aparecer PRA QUEM LE, nao so na API
+          && /piso, não teto/.test(h);
+      })(),
       'o codigo pareia na ordem em vez de so somar duracaoMs':
         /let aberta = null;/.test(require('fs').readFileSync('/home/user/adyen-monitor/server/lojaStatus.js', 'utf8')),
     };
