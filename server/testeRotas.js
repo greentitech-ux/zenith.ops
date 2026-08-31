@@ -4963,6 +4963,88 @@ setTimeout(async () => {
   console.log(`${okImpressora ? '✓' : '✗'} NOC: Zebra que responde na rede mas parou de imprimir (sem papel, cabeça aberta, fila travada)`);
 
   // ------------------------------------------------------------------
+  // ALARME FALSO DE "LOJA SEM CONEXAO". O Master recebeu o alarme critico
+  // de DomBessa-GER estando com AnyDesk ABERTO na mesma maquina. Nao era
+  // engano do painel: "offline" no NOC quer dizer "parou de falar COM O
+  // SERVIDOR", e o AnyDesk usa outro caminho - as duas coisas convivem.
+  //
+  // Duas dessas paradas nasciam do NOSSO codigo, e as duas sao fechadas
+  // aqui:
+  //   1) UMA batida perdida = 25s de silencio. O limiar do NOC e 90s, entao
+  //      3 engasgos seguidos ja pintavam a loja de vermelho, e ~9 (pouco
+  //      mais de 4min) disparavam o alarme sonoro. Agora a batida insiste
+  //      3x DENTRO do proprio tick antes de contar como falha.
+  //   2) As auxiliares (ARP ~12s + sonda de impressora + POST de telemetria
+  //      ate 15s) rodam depois do heartbeat e comem o tick - com o sleep de
+  //      25s por cima, a batida seguinte chegava perto dos 90s. Agora, se o
+  //      tick gastou mais de 45s, o agente bate de novo antes de dormir.
+  //
+  // E a terceira parte: quando a maquina VOLTA, o registro passa a dizer o
+  // que aconteceu, em vez de deixar o Master adivinhar. O agente conta as
+  // falhas do lado dele e manda o contador na batida que passa - se ele
+  // tentou, a maquina esteve viva o silencio inteiro e o que falhou foi o
+  // caminho ate o servidor.
+  let okFalsoAlarme = false;
+  try {
+    const vg = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const psInt = vg.montarScriptVigia({ codigo: 'DomBessa', posto: 'GER', tipo: 'interno', agentToken: 'ab12' });
+    const srcLoja = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+    const htmlNoc = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+
+    // --- 1) insistir dentro do tick ---
+    // exige o laco de tentativas E que ele envolva a chamada do heartbeat:
+    // um retry que nao repete o POST nao adianta nada
+    const trechoBeat = psInt.slice(psInt.indexOf('$corpo = @{ unidade'), psInt.indexOf('if ($resp) {'));
+    const insiste = /while \(\$tentativa -lt 3 -and -not \$entregue\)/.test(trechoBeat)
+      && /\$resp = Invoke-RestMethod -Uri \$UrlHeartbeat/.test(trechoBeat)
+      && /if \(-not \$entregue\) \{ throw/.test(trechoBeat);
+
+    // --- 2) tick pesado nao pode virar queda ---
+    const rebate = /\$LimiteTickMs = 45000/.test(psInt)
+      && /function Bater-Rapido/.test(psInt)
+      && /-gt \$LimiteTickMs/.test(psInt) && /\{ Bater-Rapido \}/.test(psInt);
+    // a batida de emergencia tem que vir ANTES do Start-Sleep do loop - se
+    // ficasse depois, ela so aconteceria 25s tarde demais e nao fecharia
+    // buraco nenhum
+    const antesDoSleep = psInt.indexOf('Bater-Rapido }') < psInt.lastIndexOf('Start-Sleep -Seconds $IntervaloSegundos')
+      && psInt.indexOf('Bater-Rapido }') > 0;
+
+    // sem bump, nenhuma das duas correcoes chega nas 52 maquinas instaladas
+    const bump = vg.VERSAO_VIGIA >= 20;
+
+    // --- 3) a volta explica o silencio ---
+    // registrarHeartbeat guarda o contador que o agente manda...
+    await ls.heartbeat('FALSO', 'GER', { userAgent: 'NOCZenith/1.0', rede: { falhasSeguidas: 11 } });
+    const doc = (await ls.listar('FALSO')).find((d) => d.posto === 'GER');
+
+    const conf = {
+      'um engasgo de rede não vira silêncio: a batida insiste 3x no próprio tick': insiste,
+      'tick pesado (ARP + sonda + telemetria) não vira queda falsa': rebate,
+      'a batida de emergência acontece ANTES de dormir os 25s': antesDoSleep,
+      'VERSAO_VIGIA subiu (senão a correção não chega nas 52 máquinas)': bump,
+      'o servidor guarda quantas vezes o agente tentou e não passou':
+        !!doc && doc.agenteFalhasSeguidas === 11,
+      // é ESTE campo que responde "foi a máquina ou foi a conexão?" - sem
+      // ele o registro só sabia dizer "ficou fora 5min"
+      'o evento de volta carrega o que aconteceu no silêncio':
+        /agenteTentou/.test(srcLoja) && /reiniciou: true/.test(srcLoja),
+      'o painel mostra isso na linha "Voltou"':
+        /agenteTentou/.test(htmlNoc) && /estava ligada e tentou/.test(htmlNoc),
+      // o log local é o que diz A CAUSA (DNS? timeout? 502?) na próxima vez.
+      // Com 3 tentativas por tick, o contador de tentativas nunca mais vale
+      // 1 - se o log dependesse dele, a linha sumia justo quando é precisa
+      'a primeira falha continua indo pro log da máquina':
+        /\$TicksFalhandoHeartbeat -eq 1/.test(psInt),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okFalsoAlarme = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okFalsoAlarme = false; console.log('  erro: ' + e.message); }
+  if (!okFalsoAlarme) ruins += 1;
+  console.log(`${okFalsoAlarme ? '✓' : '✗'} NOC: máquina ligada não pode virar "loja sem conexão" - e quando volta, o registro diz o que foi`);
+
+  // ------------------------------------------------------------------
   // TODAS AS DIVERGENCIAS DO CARRINHO, DESDE O INICIO, COM NOME. Pedido do
   // Master: "preciso de relatorios de todas as divergencias do carrinho
   // desde o inicio ate hoje, so as divergencias, separado por turno,

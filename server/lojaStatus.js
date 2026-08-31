@@ -417,6 +417,10 @@ const CAMPOS_DO_HEARTBEAT = [
   // ('eventos' de propósito FORA desta lista: a varredura também escreve
   // nele, e preservar a cópia da memória apagaria o que ela gravou.)
   'bootEm', 'link', 'linkEm', 'desligamentoInesperado',
+  // contador de falhas do proprio agente (ver registrarHeartbeat): so o
+  // heartbeat escreve, e e' o que separa "a loja caiu" de "so o caminho ate
+  // o servidor falhou" na hora que ela volta
+  'agenteFalhasSeguidas',
 ];
 
 async function carregarEspelho() {
@@ -534,6 +538,13 @@ const cache = {
 // coleta da serie de 5 minutos - desligada por padrao (ver metricasDeRede)
 const REDE_5MIN_LIGADA = process.env.NOC_REDE_5MIN === '1';
 
+// falhasSeguidas como o agente (vigiaScript.js) e a aba (index.html) mandam:
+// contador vivo do lado de la. Fora de faixa vira 0 - e entrada de rede.
+function falhasDeQuemBate(rede) {
+  const n = Number(rede && rede.falhasSeguidas);
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.round(n), 100000) : 0;
+}
+
 function metricasDeRede(atual, rede) {
   const amostra = redeDiagnostico.sanitizarAmostra(rede);
   const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
@@ -638,6 +649,13 @@ async function heartbeat(codigo, posto, info, token) {
     // donos do heartbeat (so ele escreve), entao o read-then-write aqui nao
     // repete a corrida que avisadoOffline teve com a varredura.
     ...metricasDeRede(atual, dados.rede),
+    // Quantas batidas seguidas quem bate TENTOU e nao conseguiu entregar
+    // antes desta. Quem conta e o proprio agente/aba (ele incrementa a cada
+    // falha e manda o contador na primeira batida que passa), entao a batida
+    // que ENCERRA um silencio ja chega dizendo se a maquina esteve viva
+    // tentando o tempo todo. E' o unico jeito de saber isso: durante o
+    // silencio, por definicao, nada chega aqui.
+    agenteFalhasSeguidas: falhasDeQuemBate(dados.rede),
   };
 
   // ---- boot e link físico (NOCZenith v16+). Máquina com agente antigo não
@@ -1773,8 +1791,25 @@ async function varrerAlertas() {
       // no retorno o doc ja tem o IP NOVO (o heartbeat que provou que voltou
       // tambem gravou o ip) - junto com o retrato do evento 'offline', o
       // registro mostra se a maquina voltou com outro IP depois da queda
+      // FOI A MAQUINA OU FOI A CONEXAO? Ate aqui o registro dizia so "ficou
+      // fora 5min", e quem estava com AnyDesk aberto na mesma maquina nao
+      // tinha como saber se o alarme fazia sentido. A batida que encerra o
+      // silencio responde as duas metades:
+      //   - agenteTentou: o contador de falhas que o agente trazia. > 0
+      //     significa que ele estava rodando e batendo na porta o tempo todo
+      //     - a maquina nunca parou, o que falhou foi o caminho ate o
+      //     servidor. Zerado significa que ninguem tentou: agente parado,
+      //     reiniciando ou se atualizando.
+      //   - reiniciou: o Windows subiu de novo durante o silencio. Nao e
+      //     deduzido por tempo - registrarHeartbeat ja grava o evento quando
+      //     o bootEm muda, entao aqui e so procurar dentro da janela.
+      const agenteTentou = Number(doc.agenteFalhasSeguidas) || 0;
+      const reiniciouNoSilencio = !!doc.offlineDesde && (doc.eventos || [])
+        .some((ev) => ev && ev.tipo === 'reiniciou' && Number(ev.em) >= doc.offlineDesde);
       const evento = {
         tipo: 'online', em: Date.now(), duracaoMs: doc.offlineDesde ? (Date.now() - doc.offlineDesde) : null,
+        ...(agenteTentou > 0 ? { agenteTentou } : {}),
+        ...(reiniciouNoSilencio ? { reiniciou: true } : {}),
         ...(doc.ip ? { ip: doc.ip } : {}), ...(doc.ipLocal ? { ipLocal: doc.ipLocal } : {}),
       };
       // voltou: a janela de reinício comandado se encerra aqui, tenha ela

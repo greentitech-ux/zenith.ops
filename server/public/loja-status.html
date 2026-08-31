@@ -1249,7 +1249,16 @@ function linhaEvento(ev){
     return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Aparelho novo na rede</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
   }
   const fora = ev.duracaoMs!=null ? ` · ficou fora ${fmtDuracao(ev.duracaoMs)}` : '';
-  return `<div class="ev-linha"><span class="ev-dot ok"></span><b>Voltou</b> · ${fmtDataHora(ev.em)}${fora}${sufixoIp}</div>`;
+  // O QUE REALMENTE ACONTECEU no silêncio (ver varrerAlertas em
+  // lojaStatus.js). Sem isto, "ficou fora 5min" numa máquina em que alguém
+  // estava com AnyDesk aberto parecia alarme falso do sistema - e não dava
+  // pra decidir sem ir na loja. São dois fatos que a máquina reporta, não
+  // dedução: se o agente tentou, e se o Windows reiniciou.
+  const causa = [];
+  if(ev.reiniciou) causa.push('a máquina reiniciou');
+  else if(ev.agenteTentou > 0) causa.push(`a máquina estava ligada e tentou ${ev.agenteTentou}×`);
+  const porque = causa.length ? ` · <span style="color:var(--muted);font-size:11px;">${escapeHtml(causa.join(' · '))}</span>` : '';
+  return `<div class="ev-linha"><span class="ev-dot ok"></span><b>Voltou</b> · ${fmtDataHora(ev.em)}${fora}${porque}${sufixoIp}</div>`;
 }
 function setFiltroEventosData(v){
   EV_FILTRO_DATA = v || '';

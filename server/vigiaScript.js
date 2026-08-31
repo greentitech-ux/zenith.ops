@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 19;
+const VERSAO_VIGIA = 20;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -837,6 +837,30 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '  return $d',
     '}',
     '',
+    // ---- a outra causa de silencio, e essa e culpa NOSSA ----
+    // As auxiliares (varredura ARP, sonda de impressora, telemetria, comando
+    // do Master, medicao de rede) rodam DEPOIS do heartbeat, mas comem tempo
+    // do mesmo tick - e o sleep de 25s vem inteiro por cima. Um tick pesado
+    // (ARP ~12s + sonda de ate 4s por impressora + POST de telemetria ate
+    // 15s) empurra a proxima batida pra perto dos 90s do NOC, e a maquina
+    // aparece "indisponivel" sem nunca ter parado. Uma batida MINIMA (so
+    // presenca) custa nada e fecha o buraco.
+    // Nao leva rede/link/boot de proposito: essas medidas tem dono no beat
+    // normal, e mandar vazio aqui atrapalharia a leitura seguinte. O servidor
+    // preenche o resto do documento com o que ja tinha (merge).
+    '$UltimoBeatOkEm = $null',
+    'function Bater-Rapido {',
+    '  try {',
+    '    $c = @{ unidade = "' + codigoTextoPS + '"; posto = "' + posto + '"; userAgent = "NOCZenith/1.0 (Windows NT; PowerShell)" } | ConvertTo-Json',
+    '    Invoke-RestMethod -Uri $UrlHeartbeat -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $c -TimeoutSec 10 | Out-Null',
+    '    $script:UltimoBeatOkEm = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
+    '  } catch {}',
+    '}',
+    '# quanto tempo o tick pode ter comido antes de valer a pena bater de novo.',
+    '# 45s = metade do limiar de 90s do NOC: sobra folga pra proxima batida',
+    '# normal atrasar tambem sem a maquina piscar no painel.',
+    '$LimiteTickMs = 45000',
+    '',
     'function Rodar-Loop {',
     '  Escrever-Log "NOCZenith iniciado (interno$(if ($Servico) { ", instancia de boot" })) - versao $VersaoScript - ' + codigoTextoPS + '/' + posto + '"',
     '  Reportar-IpLocal',
@@ -846,6 +870,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '  $EmEsperaServico = $false',
     '  $contador = 0',
     '  $FalhasSeguidasHeartbeat = 0',
+    '  $TicksFalhandoHeartbeat = 0',
     '  # baseline do chat vem do TIMESTAMP DO SERVIDOR (em), nao do relogio',
     '  # local - antes usava a hora local do PC, e se o computador estava',
     '  # atrasado (comum), toda mensagem do Master tinha em < hora local e',
@@ -856,6 +881,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '  while ($true) {',
     ...linhasCedencia,
     '    $resp = $null',
+    '    $tentativa = 0',
     '    try {',
     // O bloco `rede` viaja junto no heartbeat que ja existe - o servidor
     // grava tudo na mesma escrita do Firestore, entao a telemetria de link
@@ -875,19 +901,53 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '      if ($Link -ne $null) { $corpo.link = $Link }',
     '      $corpo = $corpo | ConvertTo-Json -Depth 4',
     '      $cronometro = [Diagnostics.Stopwatch]::StartNew()',
-    '      $resp = Invoke-RestMethod -Uri $UrlHeartbeat -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $corpo -TimeoutSec 10',
+    // UMA batida perdida virava 25s de silencio, e o NOC corta em 90s: tres
+    // engasgos seguidos ja pintavam a loja de vermelho, e ~9 (pouco mais de
+    // 4min) disparavam o alarme sonoro numa maquina que nunca desligou. Um
+    // engasgo de rede de poucos segundos e o caso COMUM - fibra renegociando,
+    // DNS lento, o Render acordando. Entao a batida insiste dentro do proprio
+    // tick, em vez de largar e esperar o proximo: 3 tentativas com 4s e 8s de
+    // intervalo. So se as tres falharem o tick conta como falha - e ai e
+    // silencio de verdade, que tem que aparecer mesmo.
+    '      $entregue = $false',
+    '      $tentativa = 0',
+    '      $erroBeat = $null',
+    '      while ($tentativa -lt 3 -and -not $entregue) {',
+    '        $tentativa++',
+    '        if ($tentativa -gt 1) { Start-Sleep -Seconds (4 * ($tentativa - 1)) }',
+    '        try {',
+    '          $resp = Invoke-RestMethod -Uri $UrlHeartbeat -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $corpo -TimeoutSec 10',
+    '          $entregue = $true',
+    '        } catch { $erroBeat = $_ }',
+    '      }',
+    // relanca pro catch de fora - a contabilidade de falha e o log continuam
+    // num lugar so, e o erro que sobe e o da ULTIMA tentativa
+    '      if (-not $entregue) { throw $erroBeat }',
     '      $cronometro.Stop()',
+    '      $script:UltimoBeatOkEm = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
     '      # latencia real de ponta a ponta do jeito que o sistema e usado -',
     '      # vai no PROXIMO beat, ja que so fica conhecida agora',
     '      $UltimaLatenciaMs = [int]$cronometro.ElapsedMilliseconds',
-    '      if ($FalhasSeguidasHeartbeat -gt 0) { Escrever-Log "Heartbeat voltou a funcionar (depois de $FalhasSeguidasHeartbeat falha(s) seguida(s))." }',
+    '      if ($FalhasSeguidasHeartbeat -gt 0) { Escrever-Log "Heartbeat voltou a funcionar (depois de $FalhasSeguidasHeartbeat tentativa(s) seguidas sem passar)." }',
     '      $FalhasSeguidasHeartbeat = 0',
+    '      $TicksFalhandoHeartbeat = 0',
     '    } catch {',
-    '      $FalhasSeguidasHeartbeat++',
-    '      # so loga a 1a falha e depois 1 a cada ~40 tentativas (~17min) - senao',
-    '      # uma internet caida por horas enche o log de linhas repetidas',
-    '      if ($FalhasSeguidasHeartbeat -eq 1 -or ($FalhasSeguidasHeartbeat % 40 -eq 0)) {',
-    '        Escrever-Log "Falha no heartbeat (tentativa $FalhasSeguidasHeartbeat seguida): $($_.Exception.Message)"',
+    // conta TENTATIVAS, nao ticks: o numero viaja pro servidor (rede.
+    // falhasSeguidas) e e o que prova, na volta, que a maquina esteve viva
+    // batendo na porta o silencio inteiro
+    '      $FalhasSeguidasHeartbeat += [Math]::Max(1, $tentativa)',
+    // dois contadores porque medem coisas diferentes: TENTATIVAS e o que vai
+    // pro servidor (e o que prova, na volta, que a maquina esteve viva
+    // batendo na porta); TICKS e o que decide o log. Com 3 tentativas por
+    // tick, "primeira falha" nunca mais seria 1 no contador de tentativas -
+    // e a linha de log que diz A CAUSA (DNS? timeout? 502?) desapareceria
+    // justo no caso que ela existe pra explicar.
+    '      $TicksFalhandoHeartbeat++',
+    '      # so loga o 1o tick que falha e depois 1 a cada ~40 (~45min, ja que',
+    '      # o tick com as 3 tentativas fica mais longo) - senao uma internet',
+    '      # caida por horas enche o log de linhas repetidas',
+    '      if ($TicksFalhandoHeartbeat -eq 1 -or ($TicksFalhandoHeartbeat % 40 -eq 0)) {',
+    '        Escrever-Log "Falha no heartbeat ($tentativa tentativa(s) neste tick, $FalhasSeguidasHeartbeat seguidas): $($_.Exception.Message)"',
     '      }',
     '    }',
     '    if ($resp) {',
@@ -961,6 +1021,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '      if ($discoAgora -or $redeAgora -or $impAgora) { Enviar-Telemetria $discoAgora $redeAgora $impAgora }',
     '    }',
     '    if ($resp -and $contador % $TicksParaVerificarAtualizacao -eq 0) { Verificar-Atualizacao }',
+    '    # tick pesado nao pode virar queda falsa (ver Bater-Rapido)',
+    '    if ($script:UltimoBeatOkEm -ne $null -and (([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $script:UltimoBeatOkEm) -gt $LimiteTickMs)) { Bater-Rapido }',
     '    Start-Sleep -Seconds $IntervaloSegundos',
     '  }',
     '}',
