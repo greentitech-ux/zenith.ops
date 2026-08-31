@@ -63,6 +63,7 @@ const preferencias = require('./preferencias');
 const docsMaster = require('./docsMaster');
 const abastecimentoCarrinho = require('./abastecimentoCarrinho');
 const abastecimentoPrevisao = require('./abastecimentoPrevisao');
+const abastecimentoDivergencias = require('./abastecimentoDivergencias');
 const ativosTI = require('./ativosTI');
 const centralChat = require('./centralChat');
 const grupos = require('./grupos');
@@ -10702,6 +10703,120 @@ app.get('/api/abastecimento/fluxo/relatorio.pdf', auth.requireMaster, async (req
       linhas,
       nomeArquivo: `carrinho-${soDivergencias ? 'divergencias' : 'dia-a-dia'}-${inicio}-a-${fim}`,
       semDadosMsg: soDivergencias ? 'Nenhuma divergência no período. 🎉' : 'Nenhum movimento no período.',
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// HISTORICO COMPLETO DE DIVERGENCIAS, turno a turno, com ranking de quem
+// mais falha no envio. Pedido do Master: "preciso de relatorios de todas as
+// divergencias do carrinho desde o inicio ate hoje, so as divergencias,
+// separado por turno, usuarios que fizeram a contagem e os que fizeram o
+// envio, e os mais ofensivos na falta de envio, pra que eu possa
+// apresentar".
+//
+// Os outros tres relatorios de divergencia (Dia a dia com ?divergencias=1,
+// escrito de desvios, e o de UM turno) nascem olhando 7 dias e nao ranqueiam
+// ninguem. Aqui `inicio` e OPCIONAL: sem ele, vale desde o primeiro registro
+// que existe - "desde o inicio" e o padrao, nao uma opcao escondida.
+app.get('/api/abastecimento/divergencias', auth.requireMaster, async (req, res) => {
+  try {
+    const dataOk = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const inicio = req.query.inicio && dataOk(req.query.inicio) ? req.query.inicio : null;
+    const fim = req.query.fim && dataOk(req.query.fim) ? req.query.fim : hojeBrasiliaISO();
+    if (inicio && inicio > fim) return res.status(400).json({ error: 'Período inválido.' });
+    const regs = await abastecimentoCarrinho.listAll();
+    res.json(abastecimentoDivergencias.relatorioDivergencias(regs, { inicio, fim }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// o mesmo relatorio em PDF - "pra que eu possa apresentar". Tres blocos numa
+// tabela so, separados por linha de titulo: o ranking de quem envia, o de
+// quem conta, e o detalhe turno a turno.
+app.get('/api/abastecimento/divergencias/relatorio.pdf', auth.requireMaster, async (req, res) => {
+  try {
+    const dataOk = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const inicio = req.query.inicio && dataOk(req.query.inicio) ? req.query.inicio : null;
+    const fim = req.query.fim && dataOk(req.query.fim) ? req.query.fim : hojeBrasiliaISO();
+    if (inicio && inicio > fim) return res.status(400).json({ error: 'Período inválido.' });
+    const regs = await abastecimentoCarrinho.listAll();
+    const r = abastecimentoDivergencias.relatorioDivergencias(regs, { inicio, fim });
+
+    const un = (t) => (t === 'pizza' ? '' : ' un');
+    const linhas = [];
+    const titulo = (t) => linhas.push({ quando: t, quem: '', o_que: '', quanto: '', detalhe: '' });
+
+    titulo('▸ QUEM ENVIA — falta no recebimento (a loja lançou X, o carrinho conferiu menos)');
+    if (!r.ofensores.length) linhas.push({ quando: '', quem: '—', o_que: 'nenhum envio no período', quanto: '', detalhe: '' });
+    r.ofensores.forEach((o, i) => linhas.push({
+      quando: `${i + 1}º`,
+      quem: o.nome,
+      o_que: `${o.enviosComFalta} de ${o.conferidos} envio(s) conferido(s) com falta`,
+      quanto: `${o.itensFaltando} item(ns)`,
+      detalhe: `${o.envios} envio(s) no total${o.taxaFalta != null ? ` · ${String(o.taxaFalta).replace('.', ',')}% dos conferidos vieram com falta` : ''}${o.semConferencia ? ` · ${o.semConferencia} envio(s) que ninguém conferiu` : ''}`,
+    }));
+
+    titulo('▸ QUEM CONTA — participação em turno com saída negativa (sobrou mais do que entrou)');
+    if (!r.contadores.length) linhas.push({ quando: '', quem: '—', o_que: 'nenhum turno com saída negativa', quanto: '', detalhe: '' });
+    r.contadores.forEach((c, i) => linhas.push({
+      quando: `${i + 1}º`,
+      quem: c.nome,
+      o_que: `${c.turnosComDivergencia} turno(s) com saída negativa`,
+      quanto: `${c.itensSobrando} item(ns)`,
+      detalhe: `${c.comoAbertura} vez(es) na contagem de abertura · ${c.comoFechamento} na de fechamento. Participação, não culpa: o dado não separa qual das duas contagens errou.`,
+    }));
+
+    titulo('▸ TURNO A TURNO — o que deu errado em cada um');
+    if (!r.turnos.length) linhas.push({ quando: '', quem: '—', o_que: 'nenhuma divergência no período', quanto: '', detalhe: '' });
+    r.turnos.forEach((t) => {
+      const quem = `contou: ${t.contouAbertura} → ${t.contouFechamento}${t.enviaram.length ? ` · enviou: ${t.enviaram.join(', ')}` : ' · sem envio no turno'}`;
+      t.faltas.forEach((f) => f.itens.forEach((i) => linhas.push({
+        quando: `${reportUtil.fmtDataBR(t.dia)} ${t.rotulo}`,
+        quem,
+        o_que: `FALTA NO ENVIO: ${i.nome}`,
+        quanto: `-${i.faltou}${un(i.tipo)}`,
+        detalhe: `Enviado ${i.enviada}${un(i.tipo)}, chegou ${i.recebida}${un(i.tipo)}. Lançado por ${f.enviadoPor}, conferido por ${f.conferidoPor}.`,
+      })));
+      t.negativos.forEach((n) => linhas.push({
+        quando: `${reportUtil.fmtDataBR(t.dia)} ${t.rotulo}`,
+        quem,
+        o_que: `SAÍDA NEGATIVA: ${n.nome}`,
+        quanto: `+${n.sobrou}${un(n.tipo)}`,
+        detalhe: 'Sobrou mais do que entrou: contagem de abertura/fechamento errada, ou envio não lançado nesse turno.',
+      }));
+      if (t.enviosSemConferencia) linhas.push({
+        quando: `${reportUtil.fmtDataBR(t.dia)} ${t.rotulo}`,
+        quem,
+        o_que: 'ENVIO SEM CONFERÊNCIA',
+        quanto: `${t.enviosSemConferencia} envio(s)`,
+        detalhe: 'O carrinho nunca confirmou o recebimento - não dá pra afirmar que faltou algo, só que ninguém conferiu.',
+      });
+    });
+
+    reportUtil.writePDF(res, {
+      titulo: 'Divergências do Carrinho — histórico por turno e por pessoa',
+      subtitulo: `Período ${reportUtil.fmtDataBR(r.periodo.inicio)} a ${reportUtil.fmtDataBR(r.periodo.fim)}${!req.query.inicio ? ' (desde o primeiro registro)' : ''} · gerado em ${reportUtil.agoraBrasiliaFmt()}`,
+      resumo: [
+        [`${r.indicadores.turnosComDivergencia} de ${r.indicadores.turnosFechados}`, 'turnos com divergência'],
+        [r.indicadores.itensFaltando, 'itens faltando no recebimento'],
+        [r.indicadores.itensSobrando, 'itens sobrando (saída negativa)'],
+        [r.indicadores.enviosSemConferencia, 'envios que ninguém conferiu'],
+      ],
+      colunas: [
+        { key: 'quando', label: 'Turno' },
+        { key: 'quem', label: 'Quem contou / quem enviou' },
+        { key: 'o_que', label: 'O que aconteceu' },
+        { key: 'quanto', label: 'Quanto' },
+        { key: 'detalhe', label: 'Detalhe' },
+      ],
+      larguras: { quando: 95, quem: 155, o_que: 130, quanto: 60, detalhe: 261 },
+      linhas,
+      linhasDinamicas: true,
+      nomeArquivo: `carrinho-divergencias-${r.periodo.inicio}-a-${r.periodo.fim}`,
+      semDadosMsg: 'Nenhuma divergência no período. 🎉',
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
