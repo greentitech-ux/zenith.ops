@@ -309,6 +309,44 @@ function sugerirEnvio(regs, { capacidadesManuais = {}, ciclos = null } = {}) {
 // Fanta Laranja Zero (insumo, sobrou 6) tendo que aparecer antes da
 // Calabresa. Por isso o bloco quebra o agrupamento pizza/insumo de proposito
 // - dentro de cada bloco o agrupamento volta a valer.
+// ---------------------------------------------------------------
+// itens que NAO entram em relatorio de divergencia
+// ---------------------------------------------------------------
+// Pedido do Master: "mostarda, ketchup, maionese, guardanapo, talheres,
+// saco de lixo, bobina pequena, bobina grande, perflex - esses itens nao
+// tem muito bem uma quantidade especifica, entao POR HORA fica fora,
+// sempre que for relatorio de divergencia".
+//
+// A razao e' real: sache e guardanapo saem por punhado, ninguem conta um a
+// um. Cobrar divergencia deles enche o relatorio de linha vermelha que
+// ninguem vai investigar - e relatorio que todo mundo ignora nao serve.
+//
+// Eles CONTINUAM aparecendo no "Dia a dia" (que e' movimento, nao
+// divergencia) - so nunca sao marcados como divergencia nem entram no
+// relatorio "so divergencias".
+//
+// A lista sai por env (ITENS_SEM_DIVERGENCIA, separados por virgula) sem
+// deploy. Se ela comecar a mudar toda semana, o lugar certo passa a ser um
+// campo no cadastro do insumo - ai e por item, sem depender de nome.
+const ITENS_SEM_DIVERGENCIA_PADRAO = [
+  'mostarda', 'ketchup', 'maionese', 'guardanapo', 'talheres',
+  'saco de lixo', 'bobina pequena', 'bobina grande', 'perflex',
+];
+const semAcento = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const ITENS_SEM_DIVERGENCIA = (process.env.ITENS_SEM_DIVERGENCIA
+  ? String(process.env.ITENS_SEM_DIVERGENCIA).split(',')
+  : ITENS_SEM_DIVERGENCIA_PADRAO
+).map(semAcento).filter(Boolean);
+
+// casa por SUBSTRING nos dois sentidos: o catalogo tem "Saco de lixo 100L"
+// e "Bobina Pequena 57mm", entao comparar nome exato nao pegaria nenhum dos
+// dois. Pizza nunca entra aqui.
+function foraDaDivergencia(nome) {
+  const n = semAcento(nome);
+  if (!n) return false;
+  return ITENS_SEM_DIVERGENCIA.some((termo) => n.includes(termo) || termo.includes(n));
+}
+
 function ordemNormal(a, b) {
   if (a.tipo !== b.tipo) return a.tipo === 'pizza' ? -1 : 1;
   return String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR');
@@ -321,6 +359,9 @@ function ordemNormal(a, b) {
 // Item sem conta fechada (saida null, periodo nao reconciliavel) tambem nao
 // entra: nao da pra afirmar que ha divergencia, so que nao deu pra apurar.
 function temDivergencia(item, campoSaida) {
+  // item da lista de fora nunca e' divergencia, por mais torta que a conta
+  // fique - ver ITENS_SEM_DIVERGENCIA acima
+  if (item && item.tipo !== 'pizza' && foraDaDivergencia(item.nome)) return false;
   const saida = item[campoSaida];
   if (Number.isFinite(saida) && saida < 0) return true;
   if (Number.isFinite(item.perdaTransito) && item.perdaTransito > 0) return true;
@@ -381,4 +422,5 @@ module.exports = {
   diaDe, horaDe, inteiro, emUnidades, itensDe, entradasDe,
   montarCiclos, estimarCapacidades, sugerirEnvio, resumoPorDia,
   ordemNormal, temDivergencia, ordenarDivergenciaPrimeiro,
+  foraDaDivergencia, ITENS_SEM_DIVERGENCIA,
 };

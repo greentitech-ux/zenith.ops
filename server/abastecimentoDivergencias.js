@@ -64,7 +64,7 @@ function faltasDe(envio) {
     const receb = conv(recebida);
     out.push({ nome: f.item, tipo: 'insumo', enviada: env, recebida: receb, faltou: Math.max(0, env - receb) });
   }
-  return out.filter((f) => f.faltou > 0);
+  return out.filter((f) => f.faltou > 0 && !(f.tipo !== 'pizza' && previsao.foraDaDivergencia(f.nome)));
 }
 
 // ---------------------------------------------------------------
@@ -92,7 +92,10 @@ function relatorioDivergencias(regs, { inicio = null, fim = null } = {}) {
     doTurno.forEach((e) => enviosEmTurno.add(e.id));
 
     const negativos = c.itens
-      .filter((i) => Number.isFinite(i.saida) && i.saida < 0)
+      // item sem quantidade exata (sache, guardanapo, bobina...) fica fora de
+      // TODO relatorio de divergencia - ver ITENS_SEM_DIVERGENCIA
+      .filter((i) => Number.isFinite(i.saida) && i.saida < 0
+        && !(i.tipo !== 'pizza' && previsao.foraDaDivergencia(i.nome)))
       .map((i) => ({ nome: i.nome, tipo: i.tipo, sobrou: Math.abs(i.saida) }));
 
     const faltas = [];

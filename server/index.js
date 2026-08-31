@@ -64,6 +64,7 @@ const docsMaster = require('./docsMaster');
 const abastecimentoCarrinho = require('./abastecimentoCarrinho');
 const abastecimentoPrevisao = require('./abastecimentoPrevisao');
 const abastecimentoDivergencias = require('./abastecimentoDivergencias');
+const abastecimentoComparativo = require('./abastecimentoComparativo');
 const ativosTI = require('./ativosTI');
 const centralChat = require('./centralChat');
 const grupos = require('./grupos');
@@ -10429,56 +10430,158 @@ app.get('/api/abastecimento/comparativo-fechamento', auth.requireMaster, async (
     const dataPedida = req.query.data;
     if (dataPedida && !/^\d{4}-\d{2}-\d{2}$/.test(dataPedida)) return res.status(400).json({ error: 'Data inválida.' });
     const data = dataPedida || ontemBrasiliaISO();
+    // MESMA conta do relatorio por periodo (ver abastecimentoComparativo.js).
+    // A regra de casar sabor com KPI morava aqui dentro; duas copias
+    // divergiriam no primeiro ajuste.
     const regs = await abastecimentoCarrinho.listAll();
-    const enviado = {};
-    abastecimentoCarrinho.SABORES.forEach((s) => { enviado[s] = 0; });
-    regs.forEach((r) => {
-      if (r.tipo !== 'ENVIO') return;
-      const dia = new Date(r.criadoEm).toLocaleDateString('sv-SE', { timeZone: FUSO_BR });
-      if (dia !== data) return;
-      abastecimentoCarrinho.SABORES.forEach((s) => { enviado[s] += Number(r.pizzas && r.pizzas[s]) || 0; });
-    });
-
     const fechamentos = await fechamentosLive.listByUnidades([unidade]);
-    const fechamento = fechamentos.find((f) => f.data === data) || null;
     const grupo = await grupos.grupoDaUnidade(unidade);
-    const kpisDef = (grupo && grupo.kpisExtras) || [];
-    const normalizar = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-    // distancia de edicao (Levenshtein) - o Master digita o rotulo do KPI na
-    // mao em grupos.html, entao um typo (ex: "Calabress" sem o "a" final)
-    // nao pode fazer o comparativo simplesmente nao achar o campo
-    function levenshtein(a, b) {
-      const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
-      for (let j = 0; j <= b.length; j += 1) dp[0][j] = j;
-      for (let i = 1; i <= a.length; i += 1) {
-        for (let j = 1; j <= b.length; j += 1) {
-          dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
-        }
-      }
-      return dp[a.length][b.length];
-    }
-    // bate se o sabor aparece como substring (rotulo mais descritivo, ex:
-    // "Pizza Calabresa Grande") OU se alguma palavra do rotulo/campo esta a
-    // no maximo 2 edicoes do nome do sabor (tolera erro de digitacao)
-    function bateComSabor(texto, sabor) {
-      const norm = normalizar(texto);
-      if (norm.includes(sabor)) return true;
-      return norm.split(/[^a-z0-9]+/).some((palavra) => palavra.length >= 4 && levenshtein(palavra, sabor) <= 2);
-    }
-
-    const comparativo = abastecimentoCarrinho.SABORES.map((sabor) => {
-      const def = kpisDef.find((k) => bateComSabor(k.campo, sabor) || bateComSabor(k.label, sabor));
-      const registrado = (fechamento && def) ? (Number(fechamento.kpisExtras && fechamento.kpisExtras[def.campo]) || 0) : null;
-      return {
-        sabor,
-        enviado: enviado[sabor],
-        registrado,
-        diferenca: registrado != null ? registrado - enviado[sabor] : null,
-        kpiEncontrado: !!def,
-      };
+    const r = abastecimentoComparativo.comparativoPeriodo({
+      regs, fechamentos, kpisDef: (grupo && grupo.kpisExtras) || [],
+      sabores: abastecimentoCarrinho.SABORES, inicio: data, fim: data,
     });
+    const doDia = r.dias[0];
+    res.json({ unidade, data, temFechamento: doDia.temFechamento, comparativo: doDia.itens });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
-    res.json({ unidade, data, temFechamento: !!fechamento, comparativo });
+// COMPARATIVO POR PERIODO, dia a dia, com quem lancou. Pedido do Master:
+// "preciso emitir relatorio dessas divergencias em PDF e CSV, selecionar
+// PERIODO, de forma que se eu selecionar do dia 01/08 a 30/08 vai mostrar
+// os 30 dias 1 abaixo do outro e nao somado, e quem esta no lancamento pois
+// a pessoa do lancamento e responsavel por essa divergencia".
+//
+// NAO soma o periodo: um mes somado esconde o dia em que faltaram 12 - que
+// e' justamente o dia que precisa de conversa.
+async function montarComparativoPeriodo(req) {
+  const unidade = "Domino's Carrinho Aeroporto Recife";
+  const dataOk = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d);
+  const fim = dataOk(req.query.fim) ? req.query.fim : hojeBrasiliaISO();
+  const inicio = dataOk(req.query.inicio) ? req.query.inicio : (() => {
+    const d = new Date(`${fim}T12:00:00`);
+    d.setDate(d.getDate() - 29);
+    return d.toISOString().slice(0, 10);
+  })();
+  if (inicio > fim) throw new Error('Período inválido.');
+  const regs = await abastecimentoCarrinho.listAll();
+  const fechamentos = await fechamentosLive.listByUnidades([unidade]);
+  const grupo = await grupos.grupoDaUnidade(unidade);
+  const r = abastecimentoComparativo.comparativoPeriodo({
+    regs, fechamentos, kpisDef: (grupo && grupo.kpisExtras) || [],
+    sabores: abastecimentoCarrinho.SABORES, inicio, fim,
+  });
+  return { unidade, ...r };
+}
+
+// uma linha por DIA x SABOR - e' o formato que pivota no Excel e que deixa
+// o dia problematico visivel sem somar nada
+function linhasComparativo(r, soDivergencias) {
+  const rotulo = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const linhas = [];
+  for (const d of r.dias) {
+    if (soDivergencias && !d.qtdSaboresDivergentes) continue;
+    const quem = d.quemLancou.assinou || d.quemLancou.logado || (d.temFechamento ? 'não identificado' : '—');
+    for (const i of d.itens) {
+      if (soDivergencias && (i.diferenca == null || i.diferenca === 0)) continue;
+      let situacao;
+      if (!d.temFechamento) situacao = d.totalEnviado > 0 ? 'ENVIOU E NINGUÉM LANÇOU' : 'sem movimento';
+      else if (!i.kpiEncontrado) situacao = 'KPI do sabor não cadastrado no Grupo';
+      else if (i.diferenca === 0) situacao = 'confere';
+      else situacao = i.diferenca > 0 ? 'lançou A MAIS do que saiu' : 'lançou A MENOS do que saiu';
+      linhas.push({
+        data: reportUtil.fmtDataBR(d.dia),
+        sabor: rotulo(i.sabor),
+        enviado: String(i.enviado),
+        fechamento: i.registrado == null ? '—' : String(i.registrado),
+        diferenca: i.diferenca == null ? '—' : (i.diferenca > 0 ? `+${i.diferenca}` : String(i.diferenca)),
+        quem,
+        situacao,
+      });
+    }
+  }
+  return linhas;
+}
+
+app.get('/api/abastecimento/comparativo-fechamento/periodo', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await montarComparativoPeriodo(req));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/abastecimento/comparativo-fechamento/periodo.csv', auth.requireMaster, async (req, res) => {
+  try {
+    const r = await montarComparativoPeriodo(req);
+    const colunas = [
+      { key: 'data', label: 'Data' },
+      { key: 'sabor', label: 'Sabor' },
+      { key: 'enviado', label: 'Enviado ao carrinho' },
+      { key: 'fechamento', label: 'Lançado no fechamento' },
+      { key: 'diferenca', label: 'Diferença' },
+      { key: 'quem', label: 'Quem lançou' },
+      { key: 'situacao', label: 'Situação' },
+    ];
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="carrinho-comparativo-${r.periodo.inicio}-a-${r.periodo.fim}.csv"`);
+    res.send(reportUtil.toCSV(colunas, linhasComparativo(r, req.query.divergencias === '1')));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/abastecimento/comparativo-fechamento/periodo.pdf', auth.requireMaster, async (req, res) => {
+  try {
+    const r = await montarComparativoPeriodo(req);
+    const soDiv = req.query.divergencias === '1';
+    const linhas = [];
+    // o ranking entra ANTES do dia a dia: e' a pergunta que o Master faz
+    // primeiro ("quem?"), e o detalhe existe pra sustentar a resposta
+    linhas.push({ data: '▸ QUEM LANÇOU — no período', sabor: '', enviado: '', fechamento: '', diferenca: '', quem: '', situacao: '' });
+    if (!r.responsaveis.length) {
+      linhas.push({ data: '', sabor: '—', enviado: '', fechamento: '', diferenca: '', quem: 'nenhum fechamento lançado no período', situacao: '' });
+    }
+    r.responsaveis.forEach((p, i) => linhas.push({
+      data: `${i + 1}º`,
+      sabor: '',
+      enviado: '',
+      fechamento: `${p.lancamentos} lanç.`,
+      diferenca: `${p.divergenciaAbsoluta}`,
+      quem: p.nome,
+      situacao: `${p.diasComDivergencia} de ${p.lancamentos} lançamento(s) com divergência`
+        + (p.taxaDivergencia != null ? ` · ${String(p.taxaDivergencia).replace('.', ',')}%` : ''),
+    }));
+    linhas.push({ data: `▸ DIA A DIA${soDiv ? ' — só as divergências' : ''}`, sabor: '', enviado: '', fechamento: '', diferenca: '', quem: '', situacao: '' });
+    const detalhe = linhasComparativo(r, soDiv);
+    if (!detalhe.length) linhas.push({ data: '', sabor: '—', enviado: '', fechamento: '', diferenca: '', quem: '', situacao: 'nenhuma divergência no período' });
+    linhas.push(...detalhe);
+
+    reportUtil.writePDF(res, {
+      titulo: 'Carrinho x Fechamento — divergências dia a dia',
+      subtitulo: `${r.unidade} · ${reportUtil.fmtDataBR(r.periodo.inicio)} a ${reportUtil.fmtDataBR(r.periodo.fim)} · gerado em ${reportUtil.agoraBrasiliaFmt()}`,
+      resumo: [
+        [`${r.indicadores.diasComDivergencia} de ${r.indicadores.diasComFechamento}`, 'dias lançados com divergência'],
+        [r.indicadores.divergenciaAbsoluta, 'pizzas de diferença no total'],
+        [r.indicadores.diasEnviouSemLancar, 'dias que enviou e ninguém lançou'],
+        [r.indicadores.diasComMovimento, 'dias com movimento'],
+      ],
+      colunas: [
+        { key: 'data', label: 'Data' },
+        { key: 'sabor', label: 'Sabor' },
+        { key: 'enviado', label: 'Enviado' },
+        { key: 'fechamento', label: 'Lançado' },
+        { key: 'diferenca', label: 'Dif.' },
+        { key: 'quem', label: 'Quem lançou' },
+        { key: 'situacao', label: 'Situação' },
+      ],
+      larguras: { data: 105, sabor: 70, enviado: 55, fechamento: 55, diferenca: 42, quem: 130, situacao: 244 },
+      linhas,
+      linhasDinamicas: true,
+      nomeArquivo: `carrinho-comparativo-${r.periodo.inicio}-a-${r.periodo.fim}`,
+      semDadosMsg: 'Nenhum movimento no período.',
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -10673,10 +10776,17 @@ app.get('/api/abastecimento/fluxo/relatorio.pdf', auth.requireMaster, async (req
     let divergencias = 0;
     const linhas = [];
     dias.forEach((dia) => {
-      const itensDoDia = soDivergencias ? dia.itens.filter((i) => i.saida != null && i.saida < 0) : dia.itens;
+      // mesmo criterio dos outros relatorios de divergencia: item sem
+      // quantidade exata (sache, guardanapo, bobina...) nao entra - ver
+      // ITENS_SEM_DIVERGENCIA em abastecimentoPrevisao.js
+      const itensDoDia = soDivergencias
+        ? dia.itens.filter((i) => i.saida != null && i.saida < 0
+          && !(i.tipo !== 'pizza' && abastecimentoPrevisao.foraDaDivergencia(i.nome)))
+        : dia.itens;
       itensDoDia.forEach((i, j) => {
         const un = i.tipo === 'pizza' ? '' : ' un';
-        const divergente = i.saida != null && i.saida < 0;
+        const divergente = i.saida != null && i.saida < 0
+          && !(i.tipo !== 'pizza' && abastecimentoPrevisao.foraDaDivergencia(i.nome));
         if (divergente) divergencias += 1;
         linhas.push({
           dia: j === 0 ? reportUtil.fmtDataBR(dia.dia) : '',
@@ -10825,6 +10935,89 @@ app.get('/api/abastecimento/divergencias/relatorio.pdf', auth.requireMaster, asy
       nomeArquivo: `carrinho-divergencias-${r.periodo.inicio}-a-${r.periodo.fim}`,
       semDadosMsg: 'Nenhuma divergência no período. 🎉',
     });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// o MESMO relatorio de divergencias em CSV. Pedido do Master: "esse turno a
+// turno preciso que eu possa tambem gerar PDF e CSV nesse mesmo modelo com
+// os mesmos criterios, sem os itens que nao mais serao divergencias".
+// Uma linha por ocorrencia (turno x item), que e' o que pivota no Excel.
+app.get('/api/abastecimento/divergencias/relatorio.csv', auth.requireMaster, async (req, res) => {
+  try {
+    const dataOk = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const inicio = req.query.inicio && dataOk(req.query.inicio) ? req.query.inicio : null;
+    const fim = req.query.fim && dataOk(req.query.fim) ? req.query.fim : hojeBrasiliaISO();
+    if (inicio && inicio > fim) return res.status(400).json({ error: 'Período inválido.' });
+    const regs = await abastecimentoCarrinho.listAll();
+    const r = abastecimentoDivergencias.relatorioDivergencias(regs, { inicio, fim });
+    const un = (t) => (t === 'pizza' ? '' : ' un');
+
+    const linhas = [];
+    for (const t of r.turnos) {
+      const base = {
+        data: reportUtil.fmtDataBR(t.dia),
+        turno: t.rotulo,
+        contou_abertura: t.contouAbertura,
+        contou_fechamento: t.contouFechamento,
+        enviou: t.enviaram.join(', ') || '—',
+      };
+      for (const f of t.faltas) {
+        for (const i of f.itens) {
+          linhas.push({
+            ...base,
+            tipo: 'FALTA NO ENVIO',
+            item: i.nome,
+            quanto: `-${i.faltou}${un(i.tipo)}`,
+            detalhe: `Enviado ${i.enviada}${un(i.tipo)}, chegou ${i.recebida}${un(i.tipo)}`,
+            responsavel: f.enviadoPor,
+            conferido_por: f.conferidoPor,
+          });
+        }
+      }
+      for (const n of t.negativos) {
+        linhas.push({
+          ...base,
+          tipo: 'SAÍDA NEGATIVA',
+          item: n.nome,
+          quanto: `+${n.sobrou}${un(n.tipo)}`,
+          detalhe: 'Sobrou mais do que entrou: contagem errada ou envio não lançado',
+          // saida negativa nao tem dono - o dado nao separa qual das duas
+          // contagens errou (ver abastecimentoDivergencias.js)
+          responsavel: `${t.contouAbertura} / ${t.contouFechamento} (participação)`,
+          conferido_por: '',
+        });
+      }
+      if (t.enviosSemConferencia) {
+        linhas.push({
+          ...base,
+          tipo: 'ENVIO SEM CONFERÊNCIA',
+          item: '—',
+          quanto: `${t.enviosSemConferencia} envio(s)`,
+          detalhe: 'O carrinho nunca confirmou o recebimento',
+          responsavel: t.enviaram.join(', ') || '—',
+          conferido_por: '',
+        });
+      }
+    }
+
+    const colunas = [
+      { key: 'data', label: 'Data' },
+      { key: 'turno', label: 'Turno' },
+      { key: 'tipo', label: 'Tipo de divergência' },
+      { key: 'item', label: 'Item' },
+      { key: 'quanto', label: 'Quanto' },
+      { key: 'responsavel', label: 'Responsável' },
+      { key: 'contou_abertura', label: 'Contou (abertura)' },
+      { key: 'contou_fechamento', label: 'Contou (fechamento)' },
+      { key: 'enviou', label: 'Enviou no turno' },
+      { key: 'conferido_por', label: 'Conferido por' },
+      { key: 'detalhe', label: 'Detalhe' },
+    ];
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="carrinho-divergencias-${r.periodo.inicio}-a-${r.periodo.fim}.csv"`);
+    res.send(reportUtil.toCSV(colunas, linhas));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

@@ -323,6 +323,24 @@
   </h2>
   <div class="sub" id="comparativo-sub" style="margin:-4px 0 10px;"></div>
   <div class="resumo-grid" id="comparativo-grid"></div>
+
+  <!-- RELATORIO POR PERIODO. O bloco acima e' UM dia; aqui sai o periodo
+       inteiro dia a dia, com quem lancou cada um - pedido do Master: "quem
+       esta no lancamento, pois a pessoa do lancamento e responsavel por
+       essa divergencia". Nao soma o periodo de proposito: um mes somado
+       esconde o dia em que faltaram 12. -->
+  <div class="dd-titulo" style="margin-top:16px;"><span>📄 Relatório por período</span></div>
+  <div class="sub" style="margin:-4px 0 8px;">Dia a dia, um abaixo do outro, com <b>quem lançou</b> cada fechamento e um ranking por pessoa.</div>
+  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+    <input type="date" id="comp-inicio" style="width:132px;padding:6px 8px;font-size:11.5px;margin:0;">
+    <span style="font-family:var(--mono);font-size:10.5px;color:var(--muted);">até</span>
+    <input type="date" id="comp-fim" style="width:132px;padding:6px 8px;font-size:11.5px;margin:0;">
+    <button type="button" class="link-badge-btn" onclick="baixarComparativoPeriodo('pdf')">📄 PDF</button>
+    <button type="button" class="link-badge-btn" onclick="baixarComparativoPeriodo('csv')">📊 CSV</button>
+    <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" id="comp-so-divergencias" style="width:auto;margin:0;"> só as divergências
+    </label>
+  </div>
 </div>
 
 <!-- fluxo de entrada e saida do carrinho - so Master (ver
@@ -393,7 +411,8 @@
         <button type="button" class="fluxo-preset ativo" id="div-tudo" onclick="carregarDivergencias(null)">Desde o início</button>
         <button type="button" class="fluxo-preset" id="div-90" onclick="carregarDivergencias(90)">90 dias</button>
         <button type="button" class="fluxo-preset" id="div-30" onclick="carregarDivergencias(30)">30 dias</button>
-        <button type="button" class="link-badge-btn" onclick="baixarPdfDivergencias()">📄 PDF</button>
+        <button type="button" class="link-badge-btn" onclick="baixarPdfDivergencias('pdf')">📄 PDF</button>
+        <button type="button" class="link-badge-btn" onclick="baixarPdfDivergencias('csv')">📊 CSV</button>
       </span>
     </div>
   </h2>
@@ -808,10 +827,23 @@ function queryDivergencias(){
   const iso = (x)=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   return `?inicio=${iso(d)}`;
 }
-function baixarPdfDivergencias(){
+function baixarPdfDivergencias(formato){
   const token = localStorage.getItem('authToken') || '';
   const q = queryDivergencias();
-  window.open(`/api/abastecimento/divergencias/relatorio.pdf${q ? q + '&' : '?'}token=${encodeURIComponent(token)}`, '_blank');
+  const f = formato === 'csv' ? 'csv' : 'pdf';
+  window.open(`/api/abastecimento/divergencias/relatorio.${f}${q ? q + '&' : '?'}token=${encodeURIComponent(token)}`, '_blank');
+}
+
+// PDF/CSV do comparativo por periodo. Periodo separado do seletor de UM dia
+// acima - sao perguntas diferentes ("como foi ontem?" x "o mes inteiro").
+function baixarComparativoPeriodo(formato){
+  const inicio = document.getElementById('comp-inicio').value;
+  const fim = document.getElementById('comp-fim').value;
+  if(!inicio || !fim){ alert('Escolha as duas datas do período.'); return; }
+  if(inicio > fim){ alert('A data de início não pode ser depois da data de fim.'); return; }
+  const token = localStorage.getItem('authToken') || '';
+  const soDiv = document.getElementById('comp-so-divergencias').checked ? '&divergencias=1' : '';
+  window.open(`/api/abastecimento/comparativo-fechamento/periodo.${formato}?inicio=${inicio}&fim=${fim}${soDiv}&token=${encodeURIComponent(token)}`, '_blank');
 }
 
 function baixarRelatorioEscrito(){
@@ -945,6 +977,12 @@ async function boot(){
   }
   document.getElementById('root').classList.remove('hidden');
   carregarComparativoFechamento();
+  // padrao do periodo: do dia 1 do mes ate hoje - foi o exemplo dele
+  // ("do dia 01/08 a 30/08")
+  const hojeISO = dataBrasilia(new Date().toISOString());
+  document.getElementById('comp-inicio').value = hojeISO.slice(0, 8) + '01';
+  document.getElementById('comp-fim').value = hojeISO;
+  document.getElementById('comp-fim').max = hojeISO;
   carregarFluxo(7);
   // o historico de divergencias nasce mostrando TUDO (nao 7 dias como o
   // fluxo): a pergunta que ele responde e "quem falha mais, desde sempre"

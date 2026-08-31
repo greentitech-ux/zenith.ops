@@ -4772,6 +4772,89 @@ setTimeout(async () => {
   // episodio?"). O dado ja existia nos eventos offline/online de cada
   // computador - faltava somar por unidade.
   // ------------------------------------------------------------------
+  // CARRINHO x FECHAMENTO POR PERIODO. Pedido do Master: "preciso emitir
+  // relatorio dessas divergencias em PDF e CSV, selecionar PERIODO, de
+  // forma que se eu selecionar do dia 01/08 a 30/08 vai mostrar os 30 dias
+  // 1 abaixo do outro e NAO somado, e quem esta no lancamento pois a pessoa
+  // do lancamento e responsavel por essa divergencia".
+  //
+  // Os numeros do cenario abaixo sao os do print que ele mandou:
+  // calabresa 58 enviado / 61 fechamento (+3), pepperoni 57/45 (-12),
+  // mussarela 28/23 (-5).
+  let okComparativo = false;
+  try {
+    const cmp = require('/home/user/adyen-monitor/server/abastecimentoComparativo.js');
+    const cab = { Authorization: 'Bearer ' + token };
+    const sabores = ['calabresa', 'pepperoni', 'mussarela'];
+    // "Peperoni" com 1 p de proposito: o rotulo do KPI e digitado na mao em
+    // grupos.html, e um typo nao pode fazer o comparativo achar que o KPI
+    // nao existe e sumir com a divergencia
+    const kpis = [
+      { campo: 'calabresa', label: 'Calabresa' },
+      { campo: 'peperoni', label: 'Peperoni' },
+      { campo: 'mussarela', label: 'Mussarela' },
+    ];
+    const regsCmp = [
+      { tipo: 'ENVIO', criadoEm: '2026-08-30T15:00:00Z', pizzas: { calabresa: 58, pepperoni: 57, mussarela: 28 } },
+      { tipo: 'ENVIO', criadoEm: '2026-08-29T15:00:00Z', pizzas: { calabresa: 10, pepperoni: 0, mussarela: 0 } },
+    ];
+    const fechCmp = [
+      { data: '2026-08-30', gerente: 'Isaias Alves', criadoPorEmail: 'isaias@t', kpisExtras: { calabresa: 61, peperoni: 45, mussarela: 23 } },
+      // 29/08 enviou 10 e NINGUEM lancou - nao e divergencia, e buraco de
+      // conferencia. Contar como divergencia inflaria o numero de quem nem
+      // chegou a lancar.
+    ];
+    const rc = cmp.comparativoPeriodo({ regs: regsCmp, fechamentos: fechCmp, kpisDef: kpis, sabores, inicio: '2026-08-28', fim: '2026-08-30' });
+    const d30 = rc.dias.find((d) => d.dia === '2026-08-30');
+    const d29 = rc.dias.find((d) => d.dia === '2026-08-29');
+    const d28 = rc.dias.find((d) => d.dia === '2026-08-28');
+    const difDe = (d, sabor) => (d.itens.find((i) => i.sabor === sabor) || {}).diferenca;
+
+    const csv = await pedirBinario(`/api/abastecimento/comparativo-fechamento/periodo.csv?inicio=2026-08-01&fim=2026-08-30&token=${encodeURIComponent(token)}`);
+    const pdf = await pedirBinario(`/api/abastecimento/comparativo-fechamento/periodo.pdf?inicio=2026-08-01&fim=2026-08-30&token=${encodeURIComponent(token)}`);
+    const json = await pedir('/api/abastecimento/comparativo-fechamento/periodo?inicio=2026-08-01&fim=2026-08-30', cab);
+    const dJson = json.status === 200 ? JSON.parse(json.corpo) : {};
+    const semToken = await pedir('/api/abastecimento/comparativo-fechamento/periodo');
+    const periodoRuim = await pedir('/api/abastecimento/comparativo-fechamento/periodo?inicio=2026-08-30&fim=2026-08-01', cab);
+
+    const conf = {
+      // os 3 numeros do print
+      'a diferença bate com a tela (+3 calabresa)': difDe(d30, 'calabresa') === 3,
+      'a diferença bate com a tela (-12 pepperoni, KPI com typo "Peperoni")': difDe(d30, 'pepperoni') === -12,
+      'a diferença bate com a tela (-5 mussarela)': difDe(d30, 'mussarela') === -5,
+      'o dia traz QUEM lançou': d30.quemLancou.assinou === 'Isaias Alves' && d30.quemLancou.logado === 'isaias@t',
+      // +3 num sabor e -3 noutro nao se anulam: sao dois erros
+      'a divergência do dia soma em módulo (3+12+5=20)': d30.divergenciaAbsoluta === 20,
+      // enviou e ninguem lancou NAO e divergencia - e outro problema
+      'enviou e ninguém lançou não vira divergência':
+        d29.divergenciaAbsoluta === 0 && rc.indicadores.diasEnviouSemLancar === 1 && rc.indicadores.diasComDivergencia === 1,
+      'dia sem envio e sem fechamento é "sem movimento", não erro de ninguém':
+        d28.semMovimento === true && d29.semMovimento === false,
+      // "os 30 dias 1 abaixo do outro": dia vazio tambem entra
+      'todo dia do período entra na lista, não só os que tiveram movimento':
+        rc.dias.length === 3 && rc.periodo.dias === 3,
+      'o ranking aponta a pessoa do lançamento':
+        rc.responsaveis[0] && rc.responsaveis[0].nome === 'Isaias Alves'
+        && rc.responsaveis[0].divergenciaAbsoluta === 20 && rc.responsaveis[0].taxaDivergencia === 100,
+      'sai CSV': csv.status === 200 && /Quem lançou/.test(csv.buffer.toString('utf8')),
+      'sai PDF': pdf.status === 200 && pdf.buffer.slice(0, 4).toString() === '%PDF',
+      'a rota JSON responde o período': json.status === 200 && Array.isArray(dJson.dias) && dJson.dias.length === 30,
+      'período invertido é recusado': periodoRuim.status === 400,
+      'é Master-only': semToken.status === 401 || semToken.status === 403,
+      // a regra de casar sabor com KPI ficou num lugar so: a rota de UM dia
+      // passou a usar o modulo em vez de ter a copia dela dentro
+      'a rota de um dia usa o MESMO módulo (sem cópia da regra)':
+        /abastecimentoComparativo\.comparativoPeriodo/.test(require('fs').readFileSync(__dirname + '/index.js', 'utf8'))
+        && !/function levenshtein/.test(require('fs').readFileSync(__dirname + '/index.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okComparativo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okComparativo = false; console.log('  erro: ' + e.message); }
+  if (!okComparativo) ruins += 1;
+  console.log(`${okComparativo ? '✓' : '✗'} Carrinho x Fechamento: relatório por período, dia a dia, com quem lançou (PDF + CSV)`);
+
+  // ------------------------------------------------------------------
   // A IMPRESSORA RESPONDE NA REDE MAS PAROU DE IMPRIMIR. Pergunta do Master
   // ("quanto tempo sem responder e comunicado que a zebra parou") que
   // expos o buraco: o alarme de rede leva ~2h E nao pega sem papel, cabeca
@@ -4892,6 +4975,7 @@ setTimeout(async () => {
   let okDivCarrinho = false;
   try {
     const dv = require('/home/user/adyen-monitor/server/abastecimentoDivergencias.js');
+    const prev = require('/home/user/adyen-monitor/server/abastecimentoPrevisao.js');
     const cab = { Authorization: 'Bearer ' + token };
     // cenario: 3 contagens (2 turnos), com dois enviadores diferentes.
     // Turno 1 fecha certo mas o envio do Bruno chegou faltando 3 latas (1
@@ -4935,6 +5019,7 @@ setTimeout(async () => {
     const rota = await pedir('/api/abastecimento/divergencias', cab);
     const dRota = rota.status === 200 ? JSON.parse(rota.corpo) : {};
     const pdf = await pedirBinario(`/api/abastecimento/divergencias/relatorio.pdf?token=${encodeURIComponent(token)}`);
+    const csvDiv = await pedirBinario(`/api/abastecimento/divergencias/relatorio.csv?token=${encodeURIComponent(token)}`);
     const semToken = await pedir('/api/abastecimento/divergencias');
     // usuario comum, logado: o gate que importa e o de Master, nao o de login
     // (o app.use('/api', requireAuth) ja pega quem nao tem token nenhum -
@@ -4975,6 +5060,43 @@ setTimeout(async () => {
       'sem ?inicio= o relatorio comeca no primeiro registro que existe':
         rota.status === 200 && dRota.periodo.inicio === dRota.periodo.primeiroRegistro,
       'o PDF pra apresentar sai': pdf.status === 200 && pdf.buffer.slice(0, 4).toString() === '%PDF',
+      'o CSV do turno a turno sai, com o responsável em coluna própria':
+        csvDiv.status === 200 && /Respons[aá]vel/.test(csvDiv.buffer.toString('utf8'))
+        && /Tipo de diverg/.test(csvDiv.buffer.toString('utf8')),
+      // ITENS SEM QUANTIDADE EXATA. Pedido do Master: "mostarda, ketchup,
+      // maionese, guardanapo, talheres, saco de lixo, bobina pequena,
+      // bobina grande, perflex - nao tem muito bem uma quantidade
+      // especifica, entao por hora fica fora, sempre que for relatorio de
+      // divergencia". Sache sai por punhado; cobrar divergencia deles enche
+      // o relatorio de linha que ninguem investiga.
+      'os 9 itens sem quantidade exata ficam fora da divergência':
+        ['Mostarda', 'Ketchup sachê', 'Maionese', 'Guardanapo', 'Talheres kit',
+          'Saco de lixo 100L', 'Bobina Pequena 57mm', 'Bobina Grande', 'Perflex']
+          .every((n) => prev.foraDaDivergencia(n)),
+      // o casamento e por substring: o catalogo tem "Saco de lixo 100L", nao
+      // "saco de lixo" exato - comparar nome cheio nao pegaria nenhum
+      'item de verdade continua entrando (não virou filtro guloso)':
+        !prev.foraDaDivergencia('Coca lata') && !prev.foraDaDivergencia('Mussarela')
+        && !prev.foraDaDivergencia('Caixa de pizza'),
+      // pizza com nome DA LISTA de proposito: e' a unica forma de exercitar a
+      // trava `tipo !== 'pizza'`. Sem um caso assim a trava passa despercebida
+      // (nenhum dos 9 itens parece nome de pizza hoje) - mas a lista sai por
+      // env, e o dia em que alguem puser "mussarela" nela, a divergencia de
+      // pizza sumiria calada.
+      'pizza nunca é excluída, mesmo com nome que está na lista':
+        prev.temDivergencia({ nome: 'Perflex', tipo: 'pizza', saida: -4 }, 'saida') === true
+        && prev.temDivergencia({ nome: 'Perflex', tipo: 'insumo', saida: -4 }, 'saida') === false,
+      // as duas pontas do turno a turno: FALTA no envio e SAIDA negativa.
+      // Testar so `foraDaDivergencia` nao provaria que ela foi aplicada nos
+      // dois lugares - a sabotagem de tirar o filtro da falta passaria.
+      'item da lista sai também das FALTAS do turno':
+        dv.faltasDe({ insumos: [{ insumoId: 'g', nome: 'Guardanapo', quantidade: 10, embalagem: 'unidade' }],
+          recebimento: { faltas: [{ item: 'Guardanapo', enviada: 10, recebida: 2 }] } }).length === 0
+        && dv.faltasDe({ insumos: [{ insumoId: 'c', nome: 'Coca lata', quantidade: 10, embalagem: 'unidade' }],
+          recebimento: { faltas: [{ item: 'Coca lata', enviada: 10, recebida: 2 }] } }).length === 1,
+      'item da lista não vira divergência nem com saída negativa':
+        prev.temDivergencia({ nome: 'Guardanapo', tipo: 'insumo', saida: -30 }, 'saida') === false
+        && prev.temDivergencia({ nome: 'Coca lata', tipo: 'insumo', saida: -30 }, 'saida') === true,
       'sem token nenhum a rota nao responde': semToken.status === 401 || semToken.status === 403,
       'usuário de loja logado NÃO vê o relatório (é Master-only)': comoLoja.status === 403,
     };
