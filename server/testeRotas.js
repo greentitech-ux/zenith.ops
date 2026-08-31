@@ -10188,9 +10188,26 @@ setTimeout(async () => {
       'a assinatura de quem depositou APARECE no PDF, não só na tela':
         /Quem fez o depósito/.test(textoDep)
         && /Carlos Souza · \d{2}\/\d{2}\/\d{4}/.test(textoDep),
-      'e a do gerente continua saindo junto (as duas, lado a lado)':
-        /Gerente da unidade/.test(textoDep)
+      // o rotulo virou "Responsável" (pedido do Master: "em todos os
+      // formulários tirar gerente da unidade e colocar Responsável"). O
+      // IDENTIFICADOR continua 'gerente' - e' a chave da assinatura, dos
+      // tokens e dos links ja enviados (§1 do CLAUDE.md)
+      'e a do responsável continua saindo junto (as duas, lado a lado)':
+        /Responsável/.test(textoDep)
+        && !/Gerente da unidade/.test(textoDep)
         && /Ana Lima · \d{2}\/\d{2}\/\d{4}/.test(textoDep),
+      'o identificador da assinatura continua sendo "gerente"':
+        !!comDepositante.assinaturas.find((a) => a.chave === 'gerente'),
+      // o teste acima so olha o PDF do DEPOSITO. Sem esta varredura, um
+      // formulario que ficasse pra tras com o rotulo velho (o Avulso, por
+      // exemplo) passaria batido - foi o que a sabotagem mostrou.
+      'NENHUM formulário ficou com o rótulo antigo':
+        Object.values(forms.TIPOS).every((t) => (t.assinantes || [])
+          .every((a) => a.rotulo !== 'Gerente da unidade')),
+      'todo assinante de papel "gerente" mostra "Responsável"':
+        Object.values(forms.TIPOS).filter((t) => (t.assinantes || []).some((a) => a.papel === 'gerente')).length === 4
+        && Object.values(forms.TIPOS).every((t) => (t.assinantes || [])
+          .every((a) => a.papel !== 'gerente' || a.rotulo === 'Responsável')),
       'com o comprovante ele assina e o formulário fecha':
         assinouComAnexo.completo === true && fechado.status === 'ASSINADO' && (fechado.anexos || []).length === 1,
       'depósito sem outra pessoa continua fechando sem anexo': fechadoSemAnexo.status === 'ASSINADO',

@@ -67,7 +67,7 @@ const TIPOS = {
       { key: 'valor', label: 'VALOR (R$)', valor: true },
     ],
     totalRotulo: 'VALOR TOTAL DEPOSITADO (R$)',
-    assinantes: [{ papel: 'gerente', rotulo: 'Gerente da unidade' }],
+    assinantes: [{ papel: 'gerente', rotulo: 'Responsável' }],
     // preenchedorAssina: quem abre o link de PREENCHIMENTO é a MESMA pessoa
     // que assina esse papel - a tela pública (preencher.html) já mostra o
     // quadro de assinatura na sequência do envio, em vez de mandar um
@@ -95,7 +95,7 @@ const TIPOS = {
     // formulário original) - vira um link de assinatura por linha
     assinaturaPorLinha: true,
     totalRotulo: 'VALOR TOTAL (R$)',
-    assinantes: [{ papel: 'gerente', rotulo: 'Gerente da unidade' }],
+    assinantes: [{ papel: 'gerente', rotulo: 'Responsável' }],
   },
   // Variante das diárias gerada pelo RH a partir dos CHECK-INS de um extra/
   // candidato em teste (1 check-in = 1 diária = 1 linha). Difere do "diarias"
@@ -150,7 +150,7 @@ const TIPOS = {
     totalRotulo: 'VALOR TOTAL (R$)',
     assinantes: [
       { papel: 'favorecido', rotulo: 'Favorecido' },
-      { papel: 'gerente', rotulo: 'Gerente da unidade' },
+      { papel: 'gerente', rotulo: 'Responsável' },
     ],
     // idem diariasRh: o link de preenchimento vai pro favorecido (dados
     // bancários dele no cabeçalho) - o Gerente continua com o link dele
@@ -185,7 +185,7 @@ const TIPOS = {
     totalRotulo: 'VALOR ADIANTADO (R$)',
     assinantes: [
       { papel: 'favorecido', rotulo: 'Favorecido' },
-      { papel: 'gerente', rotulo: 'Gerente da unidade' },
+      { papel: 'gerente', rotulo: 'Responsável' },
     ],
     preenchedorAssina: 'favorecido',
   },
