@@ -4772,6 +4772,112 @@ setTimeout(async () => {
   // episodio?"). O dado ja existia nos eventos offline/online de cada
   // computador - faltava somar por unidade.
   // ------------------------------------------------------------------
+  // TODAS AS DIVERGENCIAS DO CARRINHO, DESDE O INICIO, COM NOME. Pedido do
+  // Master: "preciso de relatorios de todas as divergencias do carrinho
+  // desde o inicio ate hoje, so as divergencias, separado por turno,
+  // usuarios que fizeram a contagem e os que fizeram o envio, e os mais
+  // ofensivos na falta de envio, pra que eu possa apresentar".
+  //
+  // O que ja existia so olhava SAIDA NEGATIVA e nascia em 7 dias. A "falta
+  // de envio" (a loja lancou 10, chegaram 8) nunca tinha entrado em
+  // relatorio nenhum - e e' a unica divergencia que tem dono.
+  let okDivCarrinho = false;
+  try {
+    const dv = require('/home/user/adyen-monitor/server/abastecimentoDivergencias.js');
+    const cab = { Authorization: 'Bearer ' + token };
+    // cenario: 3 contagens (2 turnos), com dois enviadores diferentes.
+    // Turno 1 fecha certo mas o envio do Bruno chegou faltando 3 latas (1
+    // caixa de 12 -> tem que virar 12 unidades, nao 1).
+    // Turno 2 fecha com sobra: saida negativa, sem culpado nomeavel.
+    const iso = (d, h) => `2026-07-${String(d).padStart(2, '0')}T${h}:00:00.000Z`;
+    const ins = (id, nome, qtd, emb, porCaixa) => ({ insumoId: id, nome, quantidade: qtd, embalagem: emb, qtdPorCaixa: porCaixa });
+    const semear = (id, doc) => DOCS.set(`abastecimentoCarrinho/${id}`, { id, ...doc });
+    semear('dvC1', { tipo: 'CONTAGEM', criadoEm: iso(10, '10'), pizzas: { calabresa: 0, pepperoni: 0, mussarela: 0 }, insumos: [], operadorNome: 'Ana' });
+    semear('dvE1', {
+      tipo: 'ENVIO', criadoEm: iso(10, '12'), pizzas: { calabresa: 10, pepperoni: 0, mussarela: 0 },
+      insumos: [ins('coca', 'Coca lata', 2, 'caixa', 12)], operadorNome: 'Bruno',
+      recebidoEm: iso(10, '13'),
+      recebimento: {
+        confere: false, porNome: 'Ana',
+        // a falta do insumo vem na embalagem do lancamento: 2 caixas -> 1
+        faltas: [{ item: 'calabresa', enviada: 10, recebida: 8 }, { item: 'Coca lata', enviada: 2, recebida: 1 }],
+        recebido: { pizzas: { calabresa: 8, pepperoni: 0, mussarela: 0 }, insumos: [{ quantidadeRecebida: 1 }] },
+      },
+    });
+    semear('dvE2', {
+      tipo: 'ENVIO', criadoEm: iso(10, '14'), pizzas: { calabresa: 5, pepperoni: 0, mussarela: 0 },
+      insumos: [], operadorNome: 'Carla', recebidoEm: iso(10, '15'),
+      recebimento: { confere: true, porNome: 'Ana', faltas: [], recebido: { pizzas: { calabresa: 5, pepperoni: 0, mussarela: 0 }, insumos: [] } },
+    });
+    // fecha o turno 1 batendo com o que chegou (8 + 5 = 13, sobrou 13)
+    semear('dvC2', { tipo: 'CONTAGEM', criadoEm: iso(10, '20'), pizzas: { calabresa: 13, pepperoni: 0, mussarela: 0 }, insumos: [], operadorNome: 'Diego' });
+    // turno 2: ninguem enviou nada e a contagem final ficou MAIOR - saida negativa
+    semear('dvC3', { tipo: 'CONTAGEM', criadoEm: iso(11, '10'), pizzas: { calabresa: 20, pepperoni: 0, mussarela: 0 }, insumos: [], operadorNome: 'Diego' });
+    // envio do Bruno que NINGUEM conferiu - nao e falta, e conferencia nao feita
+    semear('dvE3', { tipo: 'ENVIO', criadoEm: iso(11, '12'), pizzas: { calabresa: 4, pepperoni: 0, mussarela: 0 }, insumos: [], operadorNome: 'Bruno' });
+
+    const regs = [...DOCS.entries()].filter(([k]) => k.startsWith('abastecimentoCarrinho/')).map(([, v]) => v);
+    const r = dv.relatorioDivergencias(regs, { inicio: '2026-07-01', fim: '2026-07-31' });
+    const bruno = r.ofensores.find((o) => o.nome === 'Bruno') || {};
+    const carla = r.ofensores.find((o) => o.nome === 'Carla') || {};
+    const t1 = r.turnos.find((t) => t.faltas.length) || {};
+    const t2 = r.turnos.find((t) => t.negativos.length) || {};
+
+    // e pela rota, com o padrao "desde o inicio" (sem ?inicio=)
+    const rota = await pedir('/api/abastecimento/divergencias', cab);
+    const dRota = rota.status === 200 ? JSON.parse(rota.corpo) : {};
+    const pdf = await pedirBinario(`/api/abastecimento/divergencias/relatorio.pdf?token=${encodeURIComponent(token)}`);
+    const semToken = await pedir('/api/abastecimento/divergencias');
+    // usuario comum, logado: o gate que importa e o de Master, nao o de login
+    // (o app.use('/api', requireAuth) ja pega quem nao tem token nenhum -
+    // sem esta linha, tirar o requireMaster da rota passaria batido)
+    const senhaHashDiv = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-div-loja', {
+      passwordHash: senhaHashDiv, role: 'user', active: true,
+      email: 'div-loja@teste.local', username: 'divloja',
+      permissions: { sections: ['abastecimento-carrinho'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabLoja = { Authorization: 'Bearer ' + (await auth.login('div-loja@teste.local', 'SenhaDeTeste!2026')).token };
+    const comoLoja = await pedir('/api/abastecimento/divergencias', cabLoja);
+
+    const conf = {
+      // 2 pizzas + 1 CAIXA de 12 latas = 14 unidades faltando, nao 3
+      'a falta em CAIXA vira unidade antes de somar': bruno.itensFaltando === 14,
+      'o ranking aponta quem ENVIOU, nao quem conferiu':
+        r.ofensores[0] && r.ofensores[0].nome === 'Bruno' && bruno.enviosComFalta === 1,
+      'quem enviou certo aparece com zero, nao some do ranking':
+        carla.nome === 'Carla' && carla.itensFaltando === 0 && carla.enviosComFalta === 0,
+      // 2 envios do Bruno, so 1 conferido - a taxa nao pode usar o nao conferido
+      'a taxa de falta olha so os envios CONFERIDOS':
+        bruno.envios === 2 && bruno.conferidos === 1 && bruno.taxaFalta === 100 && bruno.semConferencia === 1,
+      'envio que ninguem conferiu NAO conta como falta':
+        r.indicadores.enviosSemConferencia === 1 && r.indicadores.itensFaltando === 14,
+      'o turno mostra quem contou na abertura e no fechamento':
+        t1.contouAbertura === 'Ana' && t1.contouFechamento === 'Diego',
+      'o turno mostra quem enviou': (t1.enviaram || []).includes('Bruno') && (t1.enviaram || []).includes('Carla'),
+      'a falta do turno diz quem lancou e quem conferiu':
+        t1.faltas[0] && t1.faltas[0].enviadoPor === 'Bruno' && t1.faltas[0].conferidoPor === 'Ana',
+      'saida negativa entra como divergencia do turno, separada da falta':
+        !!t2.negativos.length && t2.negativos[0].sobrou > 0,
+      // saida negativa nao tem dono: e participacao, nao culpa
+      'o ranking de contagem conta PARTICIPACAO em turno com sobra':
+        r.contadores.length > 0 && r.contadores.every((c) => c.turnosComDivergencia > 0),
+      // "desde o inicio ate hoje": sem ?inicio= o periodo comeca no 1o registro
+      'sem ?inicio= o relatorio comeca no primeiro registro que existe':
+        rota.status === 200 && dRota.periodo.inicio === dRota.periodo.primeiroRegistro,
+      'o PDF pra apresentar sai': pdf.status === 200 && pdf.buffer.slice(0, 4).toString() === '%PDF',
+      'sem token nenhum a rota nao responde': semToken.status === 401 || semToken.status === 403,
+      'usuário de loja logado NÃO vê o relatório (é Master-only)': comoLoja.status === 403,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDivCarrinho = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDivCarrinho = false; console.log('  erro: ' + e.message); }
+  if (!okDivCarrinho) ruins += 1;
+  console.log(`${okDivCarrinho ? '✓' : '✗'} Carrinho: histórico de divergências desde o início, por turno, com ranking de quem mais falha no envio`);
+
+  // ------------------------------------------------------------------
   // REMAKE: pizza descartada por falta de qualidade. Pedido do Master: "no
   // carrinho algumas pizzas viram Remake... preciso sinalizar quando uma
   // vira remake DURANTE O DIA e nao mais so no fechamento; o fechamento

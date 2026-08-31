@@ -378,6 +378,40 @@
   <div id="relatorio-escrito"></div>
 </div>
 
+<!-- HISTORICO DE DIVERGENCIAS, desde o inicio, por turno e por pessoa -
+     ver /api/abastecimento/divergencias em index.js. Painel proprio (e nao
+     mais uma secao do Fluxo) porque o periodo dele e OUTRO: o Fluxo olha 7
+     ou 30 dias, este nasce olhando tudo. Pedido do Master: "todas as
+     divergencias desde o inicio ate hoje, separado por turno, com os
+     usuarios da contagem e do envio, e os mais ofensivos na falta de
+     envio, pra apresentar". -->
+<div class="panel hidden" id="painel-divergencias">
+  <h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <span>🚨 Divergências — histórico completo <span style="font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:400;">só Master</span></span>
+      <span style="display:flex;gap:6px;">
+        <button type="button" class="fluxo-preset ativo" id="div-tudo" onclick="carregarDivergencias(null)">Desde o início</button>
+        <button type="button" class="fluxo-preset" id="div-90" onclick="carregarDivergencias(90)">90 dias</button>
+        <button type="button" class="fluxo-preset" id="div-30" onclick="carregarDivergencias(30)">30 dias</button>
+        <button type="button" class="link-badge-btn" onclick="baixarPdfDivergencias()">📄 PDF</button>
+      </span>
+    </div>
+  </h2>
+  <div class="sub" id="div-sub" style="margin:-4px 0 10px;"></div>
+  <div class="resumo-grid" id="div-kpis"></div>
+
+  <div class="dd-titulo" style="margin-top:14px;"><span>📦 Quem envia — falta no recebimento</span></div>
+  <div class="sub" style="margin:-4px 0 8px;">A loja lançou que mandou X, o carrinho conferiu e chegou menos. É a divergência que <b>tem dono</b>: o envio é assinado por quem o lançou.</div>
+  <div id="div-ofensores"></div>
+
+  <div class="dd-titulo" style="margin-top:18px;"><span>📋 Quem conta — participação em turno com saída negativa</span></div>
+  <div class="sub" style="margin:-4px 0 8px;"><b>Participação, não culpa.</b> Quando sobra mais do que entrou, o dado não separa se errou a contagem de abertura, a de fechamento, ou se um envio não foi lançado.</div>
+  <div id="div-contadores"></div>
+
+  <div class="dd-titulo" style="margin-top:18px;"><span>🕐 Turno a turno</span></div>
+  <div id="div-turnos"></div>
+</div>
+
 <!-- capacidade do carrinho: o que cabe nas 2 geladeiras, por item. E o que
      transforma a contagem em sugestao de envio la na tela de operacao. -->
 <div class="panel hidden" id="painel-capacidade">
@@ -681,6 +715,105 @@ function renderRelatorioEscrito(d){
   }).join('');
 }
 
+// ---------- historico de divergencias (painel proprio) ----------
+// Periodo separado do Fluxo de proposito: aqui o padrao e TUDO (inicio
+// omitido = desde o primeiro registro, ver /api/abastecimento/divergencias).
+let DIV_DIAS = null; // null = desde o inicio
+async function carregarDivergencias(dias){
+  DIV_DIAS = dias || null;
+  document.getElementById('div-tudo').classList.toggle('ativo', !DIV_DIAS);
+  document.getElementById('div-90').classList.toggle('ativo', DIV_DIAS===90);
+  document.getElementById('div-30').classList.toggle('ativo', DIV_DIAS===30);
+  const painel = document.getElementById('painel-divergencias');
+  try{
+    const d = await fetch('/api/abastecimento/divergencias' + queryDivergencias()).then(r=>{ if(!r.ok) throw new Error('Erro ao carregar divergências.'); return r.json(); });
+    painel.classList.remove('hidden');
+    const i = d.indicadores;
+    document.getElementById('div-sub').innerHTML = DIV_DIAS
+      ? `Últimos ${DIV_DIAS} dias (${fmtDia(d.periodo.inicio)} a ${fmtDia(d.periodo.fim)}).`
+      : `Desde o primeiro registro do carrinho (${fmtDia(d.periodo.inicio)}) até ${fmtDia(d.periodo.fim)}.`;
+
+    document.getElementById('div-kpis').innerHTML = `
+      <div class="resumo-card${i.turnosComDivergencia?' pend':''}">
+        <div class="sabor">Turnos com divergência</div>
+        <div class="nums"><span class="hoje">${i.turnosComDivergencia}<span style="font-size:12px;color:var(--muted);">/${i.turnosFechados}</span></span><span class="ontem">turnos fechados</span></div>
+      </div>
+      <div class="resumo-card">
+        <div class="sabor">Faltou no recebimento</div>
+        <div class="nums"><span class="hoje" style="${i.itensFaltando?'color:var(--bad);':''}">${i.itensFaltando}</span><span class="ontem">em ${i.enviosComFalta} de ${i.envios} envio(s)</span></div>
+      </div>
+      <div class="resumo-card">
+        <div class="sabor">Sobrou na contagem</div>
+        <div class="nums"><span class="hoje" style="${i.itensSobrando?'color:var(--warn);':''}">${i.itensSobrando}</span><span class="ontem">${i.turnosComSobra} turno(s)</span></div>
+      </div>
+      <div class="resumo-card">
+        <div class="sabor">Sem conferência</div>
+        <div class="nums"><span class="hoje" style="${i.enviosSemConferencia?'color:var(--warn);':''}">${i.enviosSemConferencia}</span><span class="ontem">envios não conferidos</span></div>
+      </div>`;
+
+    // ranking de quem envia - o que o Master pediu pra apresentar
+    document.getElementById('div-ofensores').innerHTML = d.ofensores.length
+      ? d.ofensores.map((o,idx)=>{
+          const ruim = o.itensFaltando > 0;
+          return `<div class="fluxo-item" style="${ruim?'border-color:rgba(255,92,92,.4);':''}">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;flex-wrap:wrap;">
+              <span style="font-weight:700;font-size:13px;">${idx+1}º ${escapeHtml(o.nome)}</span>
+              <span style="font-family:var(--mono);font-size:13px;${ruim?'color:var(--bad);':'color:var(--ok);'}">${o.itensFaltando} item(ns) faltando</span>
+            </div>
+            <div class="sub" style="margin-top:3px;">${o.enviosComFalta} de ${o.conferidos} envio(s) conferido(s) vieram com falta${o.taxaFalta!=null?` · <b style="color:var(--text);">${String(o.taxaFalta).replace('.',',')}%</b>`:''} · ${o.envios} envio(s) no total</div>
+            ${o.semConferencia?`<div class="sub" style="margin-top:2px;color:var(--warn);">⚠ ${o.semConferencia} envio(s) dele que ninguém conferiu - não dá pra saber se faltou algo.</div>`:''}
+          </div>`;
+        }).join('')
+      : '<div class="sub" style="margin-top:6px;">Nenhum envio no período.</div>';
+
+    // ranking de quem conta - participacao, nao culpa
+    document.getElementById('div-contadores').innerHTML = d.contadores.length
+      ? d.contadores.map((c,idx)=>`<div class="fluxo-item">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;flex-wrap:wrap;">
+            <span style="font-weight:700;font-size:13px;">${idx+1}º ${escapeHtml(c.nome)}</span>
+            <span style="font-family:var(--mono);font-size:13px;color:var(--warn);">${c.turnosComDivergencia} turno(s)</span>
+          </div>
+          <div class="sub" style="margin-top:3px;">${c.comoAbertura} vez(es) na contagem de abertura · ${c.comoFechamento} na de fechamento · ${c.itensSobrando} item(ns) sobrando no total</div>
+        </div>`).join('')
+      : '<div class="sub" style="margin-top:6px;color:var(--ok);">✓ Nenhum turno com saída negativa.</div>';
+
+    // turno a turno
+    document.getElementById('div-turnos').innerHTML = d.turnos.length
+      ? d.turnos.map(t=>{
+          const un = (tipo)=> tipo==='pizza' ? '' : ' un';
+          const faltas = t.faltas.map(f=>f.itens.map(it=>
+            `<div style="color:var(--bad);font-size:12px;margin-top:2px;">📦 ${escapeHtml(it.nome)}: faltou ${it.faltou}${un(it.tipo)} (enviou ${it.enviada}, chegou ${it.recebida}) — lançado por <b>${escapeHtml(f.enviadoPor)}</b>, conferido por <b>${escapeHtml(f.conferidoPor)}</b></div>`
+          ).join('')).join('');
+          const sobras = t.negativos.map(n=>
+            `<div style="color:var(--warn);font-size:12px;margin-top:2px;">⚠ ${escapeHtml(n.nome)}: sobrou ${n.sobrou}${un(n.tipo)} a mais do que o esperado</div>`
+          ).join('');
+          const semConf = t.enviosSemConferencia
+            ? `<div style="color:var(--warn);font-size:12px;margin-top:2px;">⏳ ${t.enviosSemConferencia} envio(s) do turno que ninguém conferiu.</div>` : '';
+          return `<div class="fluxo-item" style="border-color:${t.faltas.length?'rgba(255,92,92,.4)':'rgba(242,179,61,.35)'};">
+            <div style="font-weight:700;font-size:13px;">Turno ${escapeHtml(t.rotulo)} <span class="sub" style="display:inline;">(${fmtDia(t.dia)})</span></div>
+            <div class="sub" style="margin-top:4px;">Contou: <b style="color:var(--text);">${escapeHtml(t.contouAbertura)}</b> → <b style="color:var(--text);">${escapeHtml(t.contouFechamento)}</b>${t.enviaram.length?` · Enviou: <b style="color:var(--text);">${t.enviaram.map(escapeHtml).join(', ')}</b>`:' · sem envio no turno'}</div>
+            ${faltas}${sobras}${semConf}
+          </div>`;
+        }).join('')
+      : '<div class="sub" style="margin-top:6px;color:var(--ok);">✓ Nenhuma divergência no período. 🎉</div>';
+  }catch(err){
+    painel.classList.add('hidden');
+  }
+}
+// inicio omitido = desde o primeiro registro (o servidor resolve) - por isso
+// a query sai vazia no preset "Desde o inicio", em vez de chutar uma data
+function queryDivergencias(){
+  if(!DIV_DIAS) return '';
+  const d = new Date(); d.setDate(d.getDate() - (DIV_DIAS - 1));
+  const iso = (x)=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+  return `?inicio=${iso(d)}`;
+}
+function baixarPdfDivergencias(){
+  const token = localStorage.getItem('authToken') || '';
+  const q = queryDivergencias();
+  window.open(`/api/abastecimento/divergencias/relatorio.pdf${q ? q + '&' : '?'}token=${encodeURIComponent(token)}`, '_blank');
+}
+
 function baixarRelatorioEscrito(){
   const { inicio, fim } = periodoAtual();
   const token = localStorage.getItem('authToken') || '';
@@ -813,6 +946,9 @@ async function boot(){
   document.getElementById('root').classList.remove('hidden');
   carregarComparativoFechamento();
   carregarFluxo(7);
+  // o historico de divergencias nasce mostrando TUDO (nao 7 dias como o
+  // fluxo): a pergunta que ele responde e "quem falha mais, desde sempre"
+  carregarDivergencias(null);
   const turno = new URLSearchParams(location.search).get('turno');
   if(turno) carregarExplicacaoTurno(turno);
 }
