@@ -2765,9 +2765,49 @@ function nomesUnidadesFixas() {
 
 // as duplicatas que JÁ existem - o guard acima só impede as novas. Master-only
 // porque é ele quem apaga o cadastro extra que sobrou (em /grupos.html).
+// Quantos fechamentos cada CODIGO tem. E' a prova de qual duplicata e a
+// vazia - sem ela o Master decide pelo rotulo, e o rotulo e justamente o que
+// esta repetido. Sai da lista JA EM CACHE (fechamentosCacheBase, 6h): contar
+// aqui nao custa leitura nova no Firestore, que cobra por documento
+// devolvido (secao 3 do CLAUDE.md).
+async function contarFechamentosPorCodigo() {
+  const todos = await fechamentosLive.listAll();
+  const conta = new Map();
+  for (const f of todos || []) {
+    const cod = f && f.unidade;
+    if (!cod) continue;
+    const atual = conta.get(cod) || { fechamentos: 0, ultimo: null };
+    atual.fechamentos += 1;
+    if (!atual.ultimo || String(f.data) > atual.ultimo) atual.ultimo = String(f.data);
+    conta.set(cod, atual);
+  }
+  return conta;
+}
+
+// as duplicatas que JÁ existem, agora com O QUE CADA UMA TEM. Master-only
+// porque é ele quem apaga o cadastro extra que sobrou (em /grupos.html).
 app.get('/api/meta/unidades-duplicadas', auth.requireMaster, async (req, res) => {
   try {
-    res.json(await unidadesExtras.diagnosticarNomesRepetidos(mapaUnidadesFixas()));
+    const grupos = await unidadesExtras.diagnosticarNomesRepetidos(mapaUnidadesFixas());
+    const conta = await contarFechamentosPorCodigo();
+    const extras = await unidadesExtras.listAll();
+    const idPorCodigo = new Map((extras || []).map((u) => [u.codigo, u.id]));
+    res.json(grupos.map((g) => ({
+      ...g,
+      codigos: g.codigos.map((c) => {
+        const uso = conta.get(c.codigo) || { fechamentos: 0, ultimo: null };
+        return {
+          ...c,
+          fechamentos: uso.fechamentos,
+          ultimo: uso.ultimo,
+          // id só existe pra cadastrada: unidade FIXA mora no mapa de códigos
+          // do index.js e não se apaga por tela (§1 - o código é a identidade
+          // e some com o histórico de quem já gravou nele)
+          id: c.origem === 'cadastrada' ? (idPorCodigo.get(c.codigo) || null) : null,
+          podeExcluir: c.origem === 'cadastrada' && uso.fechamentos === 0,
+        };
+      }),
+    })));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -2822,7 +2862,13 @@ app.put('/api/meta/unidades/:codigo/perfil', auth.requireMaster, async (req, res
 app.delete('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res) => {
   try {
     if (await desviarSeQaMaster(req, res, 'unidadesExtras.excluir', `Excluir unidade ${req.params.id}`, { id: req.params.id })) return;
-    res.json(await invalidandoUnidadesMapa(unidadesExtras.remover(req.params.id)));
+    // o contador vai junto: unidades.js recusa a exclusão se o código tiver
+    // qualquer lançamento (ver o comentário do remover)
+    const conta = await contarFechamentosPorCodigo();
+    res.json(await invalidandoUnidadesMapa(unidadesExtras.remover(
+      req.params.id,
+      async (codigo) => (conta.get(codigo) || { fechamentos: 0 }).fechamentos,
+    )));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

@@ -241,12 +241,35 @@ async function filtrarMapaPorArea(mapa, area) {
   return out;
 }
 
-async function remover(id) {
+// APAGAR UNIDADE E' A ACAO MAIS CARA DE ERRAR AQUI. O Master pediu pra tirar
+// a "Dom Bessa" que aparece zerada no painel - mas existem DUAS com esse
+// rotulo, e a outra tem R$175 mil e 761 TC de historico. O codigo e a
+// identidade (ja esta gravado em fechamento, funcionario do RH, permissao de
+// usuario), entao apagar o codigo errado nao "some com uma linha da tela":
+// desliga o historico da loja de verdade.
+//
+// Por isso quem chama passa um contador: se o codigo tiver QUALQUER
+// lancamento, a exclusao e recusada com o numero na mensagem. So sai da
+// frente o cadastro que de fato nao tem nada - que e' exatamente o que ele
+// descreveu ("sempre esta ZERADA pois ela nao existe").
+//
+// Nao ha "forcar": um codigo com lancamento nao e duplicata sobrando, e a
+// uniao de codigos de unidade esta encerrada (secao 1 do CLAUDE.md) - o
+// caminho pra esse caso e conversa, nao um parametro.
+async function remover(id, contarRegistros) {
   const snap = await COLLECTION.doc(id).get();
   if (!snap.exists) throw new Error('Unidade não encontrada.');
+  const dados = snap.data();
+  if (typeof contarRegistros === 'function') {
+    const quantos = await contarRegistros(dados.codigo);
+    if (quantos > 0) {
+      throw new Error(`"${dados.nome}" (${dados.codigo}) tem ${quantos} lançamento(s) no histórico `
+        + '- essa não é a duplicata vazia. Confira o código na lista de nomes repetidos antes de excluir.');
+    }
+  }
   await COLLECTION.doc(id).delete();
   cache.invalidar();
-  return snap.data();
+  return dados;
 }
 
 module.exports = {

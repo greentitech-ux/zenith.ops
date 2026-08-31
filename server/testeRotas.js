@@ -10814,6 +10814,90 @@ setTimeout(async () => {
   if (!okUnidadeDup) ruins += 1;
   console.log(`${okUnidadeDup ? '✓' : '✗'} Unidades: nome repetido é barrado no cadastro, as duplicatas antigas ficam visíveis e o seletor mostra o código pra diferenciar`);
 
+  // ------------------------------------------------------------------
+  // APAGAR A DUPLICATA CERTA. O Master viu no painel de Faturamento DOIS
+  // blocos "Dom Bessa": um com R$175.827,42 e 761 TC, outro R$0,00 e 0 TC.
+  // Ele quer o zerado fora - "apenas a que tem registro fica".
+  //
+  // O rotulo NAO desempata (e ele que esta repetido) e o codigo e a
+  // identidade: ja esta gravado em fechamento, funcionario do RH e permissao
+  // de usuario. Apagar o codigo errado nao some com uma linha da tela -
+  // desliga o historico da loja de verdade. Entao a tela mostra QUANTOS
+  // lancamentos cada codigo tem, e o servidor recusa a exclusao de qualquer
+  // codigo que tenha algum.
+  let okDuplicadaExcluir = false;
+  try {
+    const uni = require('/home/user/adyen-monitor/server/unidades.js');
+    const cabD = { Authorization: 'Bearer ' + token };
+    const fsD = require('fs'), pathD = require('path');
+    const htmlG = fsD.readFileSync(pathD.join(__dirname, 'public', 'grupos.html'), 'utf8');
+
+    // Duas unidades com o MESMO nome e codigos diferentes - o cenario dele.
+    // Semeadas direto na colecao de proposito: criar() hoje BARRA nome
+    // repetido (esse guard nasceu justamente por causa disso), entao a
+    // duplicata que existe em producao e ANTIGA, de antes do guard. Passar
+    // por criar() aqui testaria o guard, nao a limpeza.
+    const cheia = { id: 'uniBessaCheia', codigo: 'BESSA_CHEIA', nome: 'Bessa Teste', areas: [], tiposSolicitacao: [] };
+    const vazia = { id: 'uniBessaVazia', codigo: 'BESSA_VAZIA', nome: 'Bessa Teste', areas: [], tiposSolicitacao: [] };
+    DOCS.set('unidadesExtras/uniBessaCheia', cheia);
+    DOCS.set('unidadesExtras/uniBessaVazia', vazia);
+    // so a "cheia" tem lancamento
+    DOCS.set('fechamentosLive/fecBessa1', { id: 'fecBessa1', unidade: 'BESSA_CHEIA', data: '2026-08-30', faturamento: 1000 });
+    DOCS.set('fechamentosLive/fecBessa2', { id: 'fecBessa2', unidade: 'BESSA_CHEIA', data: '2026-08-29', faturamento: 900 });
+    require('/home/user/adyen-monitor/server/fechamentosLive.js').invalidarCache();
+    uni.invalidar();
+
+    const dup = await pedir('/api/meta/unidades-duplicadas', cabD);
+    const lista = dup.status === 200 ? JSON.parse(dup.corpo) : [];
+    const grupoBessa = lista.find((g) => g.nome === 'Bessa Teste') || { codigos: [] };
+    const cCheia = grupoBessa.codigos.find((c) => c.codigo === 'BESSA_CHEIA') || {};
+    const cVazia = grupoBessa.codigos.find((c) => c.codigo === 'BESSA_VAZIA') || {};
+
+    // a que TEM historico nao pode sair, nem por chamada direta na rota
+    const tentouCheia = await pedirJsonDelete(`/api/meta/unidades-extras/${cheia.id}`, cabD);
+    // a vazia sai
+    const tirouVazia = await pedirJsonDelete(`/api/meta/unidades-extras/${vazia.id}`, cabD);
+    const depois = JSON.parse((await pedir('/api/meta/unidades-extras/lista', cabD)).corpo);
+
+    const conf = {
+      'a tela mostra quantos lançamentos cada código tem':
+        cCheia.fechamentos === 2 && cVazia.fechamentos === 0,
+      'a data do último lançamento vem junto (é o que reconhece a loja certa)':
+        cCheia.ultimo === '2026-08-30',
+      'só o código vazio ganha botão de excluir':
+        cVazia.podeExcluir === true && cCheia.podeExcluir === false,
+      // a trava que importa: sem ela, um clique errado apagaria os R$175 mil
+      'o código COM histórico é recusado pela rota, não só escondido na tela':
+        tentouCheia.status === 400 && /lançamento/.test(JSON.parse(tentouCheia.corpo).error || ''),
+      'e a mensagem diz quantos, pra ele conferir que pegou a errada':
+        /2 lançamento/.test(JSON.parse(tentouCheia.corpo).error || ''),
+      'a unidade com histórico continua lá depois da recusa':
+        depois.some((u) => u.codigo === 'BESSA_CHEIA'),
+      'o código vazio sai': tirouVazia.status === 200
+        && !depois.some((u) => u.codigo === 'BESSA_VAZIA'),
+      // unidade FIXA mora no mapa de codigos do index.js: o codigo e a
+      // identidade de quem ja gravou nele (secao 1 do CLAUDE.md)
+      'unidade fixa nunca ganha botão de excluir':
+        lista.every((g) => g.codigos.every((c) => c.origem !== 'fixa' || c.podeExcluir === false)),
+      // Asserção em cima da FUNÇÃO, não do arquivo inteiro: a primeira versão
+      // procurava "nenhum lançamento" em grupos.html e passava mesmo com o
+      // bloco mudo - o texto também existe na confirmação de exclusão, logo
+      // abaixo. Aqui o que se exige é que a tela mostre o NÚMERO e respeite
+      // o podeExcluir do servidor, que é o que impede o clique errado.
+      'a tela de grupos mostra o bloco de nomes repetidos, com a contagem':
+        (() => {
+          const fn = /function renderUnidadesDuplicadas\(\)\{[\s\S]*?\n\}/.exec(htmlG);
+          return !!fn && /c\.fechamentos/.test(fn[0]) && /lançamento\(s\)/.test(fn[0])
+            && /c\.podeExcluir/.test(fn[0]) && /unidades-duplicadas/.test(htmlG);
+        })(),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDuplicadaExcluir = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDuplicadaExcluir = false; console.log('  erro: ' + e.message); }
+  if (!okDuplicadaExcluir) ruins += 1;
+  console.log(`${okDuplicadaExcluir ? '✓' : '✗'} Unidades: dá pra apagar a duplicata ZERADA, e a que tem histórico é recusada`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
