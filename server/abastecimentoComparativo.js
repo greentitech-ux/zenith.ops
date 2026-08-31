@@ -1,11 +1,17 @@
 // abastecimentoComparativo.js
-// PIZZA QUE SAIU DA LOJA x PIZZA QUE A LOJA LANCOU NO FECHAMENTO.
+// PIZZA QUE A LOJA ENVIOU x PIZZA QUE A LOJA LANCOU NO FECHAMENTO.
 //
-// O carrinho recebe pizza da loja (registro ENVIO). No fim do dia a loja
-// lanca no Fechamento quantas pizzas foram pro carrinho (KPI Extra por
-// sabor). Os dois numeros TEM que bater. Quando nao batem, ou o envio nao
-// foi registrado, ou o lancamento saiu errado - e quem lanca e' quem
-// responde por isso.
+// QUEM ENVIA E' A LOJA. Regra do Master, dita assim: "o sistema que faz o
+// envio das pizzas e a LOJA, o carrinho so PEDE - se chegou menos do que o
+// fechamento disse que tinha, e erro da loja que enviou". O carrinho pede
+// (PEDIDO) e confere o que chegou; ele nao manda nada. Por isso os DOIS
+// lados desta conta sao da loja: o ENVIO e o lancamento no Fechamento sao
+// declaracoes dela sobre a mesma pizza, e tem que bater.
+//
+// Isso decide como o relatorio FALA. O texto cobra o ENVIO, com o
+// fechamento como referencia ("a loja enviou 8 a mais do que lancou"), e
+// nao o contrario - cobrar o lancamento sugeriria que o envio e de outra
+// ponta, e ele nao e'.
 //
 // POR QUE ISSO VIROU MODULO: a conta ja existia solta dentro da rota de UM
 // dia (/api/abastecimento/comparativo-fechamento). O Master pediu o mesmo
@@ -23,6 +29,10 @@
 
 const FUSO_BR = 'America/Sao_Paulo';
 const diaDe = (iso) => new Date(iso).toLocaleDateString('sv-SE', { timeZone: FUSO_BR });
+// mesmo formato do reportUtil.fmtDataBR: 'YYYY-MM-DD' -> 'DD/MM/YYYY'.
+// Repetido aqui de proposito pra este modulo nao depender da camada de
+// relatorio - ele e' quem decide a regra, nao quem desenha o PDF.
+const fmtDataBR = (d) => String(d || '').split('-').reverse().join('/');
 
 // ---------------------------------------------------------------
 // casar o sabor com o KPI que o Master cadastrou na mao
@@ -103,6 +113,13 @@ function quemLancou(fechamento) {
 function comparativoPeriodo({ regs, fechamentos, kpisDef, sabores, inicio, fim }) {
   // envios agrupados por dia, numa passada so
   const enviadoPorDia = new Map();
+  // ENVIO que a loja mandou sem pedido nenhum do carrinho. O vinculo e o
+  // campo atendePedidoId (opcional no cadastro, ver abastecimentoCarrinho):
+  // vazio quer dizer que ninguem pediu aquilo. E' a segunda metade do que o
+  // Master cobra da loja - "enviou sem pedido ser feito pelo carrinho" - e
+  // fica em contador PROPRIO, nao somado a diferenca: sao erros diferentes
+  // e um nao explica o outro.
+  const semPedidoPorDia = new Map();
   for (const r of regs || []) {
     if (r.tipo !== 'ENVIO') continue;
     const dia = diaDe(r.criadoEm);
@@ -110,6 +127,7 @@ function comparativoPeriodo({ regs, fechamentos, kpisDef, sabores, inicio, fim }
     if (!enviadoPorDia.has(dia)) enviadoPorDia.set(dia, Object.fromEntries(sabores.map((s) => [s, 0])));
     const alvo = enviadoPorDia.get(dia);
     for (const s of sabores) alvo[s] += Number(r.pizzas && r.pizzas[s]) || 0;
+    if (!r.atendePedidoId) semPedidoPorDia.set(dia, (semPedidoPorDia.get(dia) || 0) + 1);
   }
   const fechamentoPorDia = new Map();
   for (const f of fechamentos || []) {
@@ -135,6 +153,7 @@ function comparativoPeriodo({ regs, fechamentos, kpisDef, sabores, inicio, fim }
       quemLancou: quemLancou(fechamento),
       itens,
       totalEnviado,
+      enviosSemPedido: semPedidoPorDia.get(dia) || 0,
       // soma dos MODULOS: +3 num sabor e -3 noutro nao e' "zero divergencia",
       // sao dois erros que se cancelam por acaso
       divergenciaAbsoluta: comDivergencia.reduce((s, i) => s + Math.abs(i.diferenca), 0),
@@ -183,10 +202,64 @@ function comparativoPeriodo({ regs, fechamentos, kpisDef, sabores, inicio, fim }
       diasEnviouSemLancar: dias.filter((d) => !d.temFechamento && d.totalEnviado > 0).length,
       diasComDivergencia: dias.filter((d) => d.qtdSaboresDivergentes > 0).length,
       divergenciaAbsoluta: dias.reduce((s, d) => s + d.divergenciaAbsoluta, 0),
+      enviosSemPedido: dias.reduce((s, d) => s + d.enviosSemPedido, 0),
     },
   };
 }
 
+// ---------------------------------------------------------------
+// as linhas do relatorio
+// ---------------------------------------------------------------
+// Moram AQUI, e nao na rota, porque o texto da coluna Situacao E' a regra:
+// ele decide quem o relatorio cobra. Com a frase numa rota e a regra noutro
+// arquivo, a primeira mudanca de uma das duas deixaria o documento dizendo
+// uma coisa e o modulo calculando outra - e o documento e o que vai pra
+// reuniao. Aqui tambem da pra testar a frase sem subir rota nenhuma.
+// uma linha por DIA x SABOR - e' o formato que pivota no Excel e que deixa
+// o dia problematico visivel sem somar nada
+function linhasComparativo(r, soDivergencias) {
+  const rotulo = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const linhas = [];
+  for (const d of r.dias) {
+    if (soDivergencias && !d.qtdSaboresDivergentes) continue;
+    const quem = d.quemLancou.assinou || d.quemLancou.logado || (d.temFechamento ? 'não identificado' : '—');
+    for (const i of d.itens) {
+      if (soDivergencias && (i.diferenca == null || i.diferenca === 0)) continue;
+      // QUEM ENVIA E' A LOJA (ver abastecimentoComparativo.js): o carrinho
+      // so pede e confere. Entao o texto cobra o ENVIO, com o fechamento
+      // como referencia. Antes dizia "lancou A MAIS do que saiu", que poe o
+      // lancamento no banco dos reus e deixa o envio parecendo de outra
+      // ponta - e ele e' da loja tambem.
+      let situacao;
+      if (!d.temFechamento) situacao = d.totalEnviado > 0 ? 'A LOJA ENVIOU E NINGUÉM LANÇOU O FECHAMENTO' : 'sem movimento';
+      else if (!i.kpiEncontrado) situacao = 'KPI do sabor não cadastrado no Grupo';
+      else if (i.diferenca === 0) situacao = 'confere';
+      else if (i.diferenca < 0) situacao = `a loja ENVIOU ${Math.abs(i.diferenca)} a MAIS do que lançou no fechamento`;
+      else situacao = `a loja ENVIOU ${i.diferenca} a MENOS do que lançou no fechamento`;
+      // "enviou sem o carrinho pedir" é o outro erro que ele cobra da loja.
+      // Vai só na PRIMEIRA linha do dia: é do dia, não do sabor, e repetir
+      // em cada sabor triplicaria o mesmo aviso.
+      if (d.enviosSemPedido && i.sabor === d.itens[0].sabor) {
+        situacao += ` · ⚠ ${d.enviosSemPedido} envio(s) sem pedido do carrinho`;
+      }
+      linhas.push({
+        data: fmtDataBR(d.dia),
+        sabor: rotulo(i.sabor),
+        enviado: String(i.enviado),
+        fechamento: i.registrado == null ? '—' : String(i.registrado),
+        diferenca: i.diferenca == null ? '—' : (i.diferenca > 0 ? `+${i.diferenca}` : String(i.diferenca)),
+        quem,
+        // por dia, nao por sabor: repete nas 3 linhas do dia de proposito,
+        // pra a planilha conseguir filtrar/pivotar por esse criterio
+        sem_pedido: String(d.enviosSemPedido || 0),
+        situacao,
+      });
+    }
+  }
+  return linhas;
+}
+
 module.exports = {
   comparativoPeriodo, comparativoDoDia, kpiDoSabor, bateComSabor, quemLancou, diaDe,
+  linhasComparativo,
 };

@@ -4795,7 +4795,10 @@ setTimeout(async () => {
       { campo: 'mussarela', label: 'Mussarela' },
     ];
     const regsCmp = [
-      { tipo: 'ENVIO', criadoEm: '2026-08-30T15:00:00Z', pizzas: { calabresa: 58, pepperoni: 57, mussarela: 28 } },
+      // atendePedidoId preenchido = o carrinho PEDIU e a loja atendeu
+      { tipo: 'ENVIO', criadoEm: '2026-08-30T15:00:00Z', atendePedidoId: 'ped1', pizzas: { calabresa: 58, pepperoni: 57, mussarela: 28 } },
+      // sem atendePedidoId = a loja mandou sem ninguem pedir. Palavras do
+      // Master: "e erro da loja que enviou sem pedido ser feito pelo carrinho"
       { tipo: 'ENVIO', criadoEm: '2026-08-29T15:00:00Z', pizzas: { calabresa: 10, pepperoni: 0, mussarela: 0 } },
     ];
     const fechCmp = [
@@ -4809,6 +4812,10 @@ setTimeout(async () => {
     const d29 = rc.dias.find((d) => d.dia === '2026-08-29');
     const d28 = rc.dias.find((d) => d.dia === '2026-08-28');
     const difDe = (d, sabor) => (d.itens.find((i) => i.sabor === sabor) || {}).diferenca;
+
+    const linhasCmp = cmp.linhasComparativo(rc, false);
+    const sitDe = (sabor) => (linhasCmp.find((l) => l.data === '30/08/2026'
+      && l.sabor.toLowerCase() === sabor) || {}).situacao;
 
     const csv = await pedirBinario(`/api/abastecimento/comparativo-fechamento/periodo.csv?inicio=2026-08-01&fim=2026-08-30&token=${encodeURIComponent(token)}`);
     const pdf = await pedirBinario(`/api/abastecimento/comparativo-fechamento/periodo.pdf?inicio=2026-08-01&fim=2026-08-30&token=${encodeURIComponent(token)}`);
@@ -4836,7 +4843,36 @@ setTimeout(async () => {
       'o ranking aponta a pessoa do lançamento':
         rc.responsaveis[0] && rc.responsaveis[0].nome === 'Isaias Alves'
         && rc.responsaveis[0].divergenciaAbsoluta === 20 && rc.responsaveis[0].taxaDivergencia === 100,
-      'sai CSV': csv.status === 200 && /Quem lançou/.test(csv.buffer.toString('utf8')),
+      'sai CSV': csv.status === 200 && /Quem assinou o fechamento/.test(csv.buffer.toString('utf8')),
+      // A LOJA E QUEM ENVIA - correcao do Master: "o sistema que faz o envio
+      // das pizzas e a LOJA, o carrinho so PEDE". O relatorio tem que cobrar
+      // o ENVIO com o fechamento como referencia, e nao o contrario.
+      'o relatório nomeia a LOJA como quem envia':
+        /Enviado pela loja/.test(csv.buffer.toString('utf8'))
+        && !/Enviado ao carrinho/.test(csv.buffer.toString('utf8')),
+      // A frase mora no modulo junto com a regra, entao da pra conferir o
+      // texto exato sem depender de semear fechamento e grupo no Firestore
+      // falso - e e' o texto que vai pra reuniao.
+      'a situação cobra o ENVIO, com o fechamento como referência':
+        sitDe('calabresa') === 'a loja ENVIOU 3 a MENOS do que lançou no fechamento'
+        && sitDe('pepperoni') === 'a loja ENVIOU 12 a MAIS do que lançou no fechamento',
+      'nenhuma linha volta a cobrar o lançamento':
+        !linhasCmp.some((l) => /lançou A (MAIS|MENOS) do que saiu/.test(l.situacao)),
+      'o dia sem fechamento nomeia a LOJA como quem enviou':
+        /^A LOJA ENVIOU E NINGUÉM LANÇOU O FECHAMENTO/
+          .test((linhasCmp.find((l) => l.data === '29/08/2026') || {}).situacao || ''),
+      // o aviso e' do DIA: repetido nos 3 sabores viraria 3 avisos do mesmo
+      // problema na mesma pagina
+      'o aviso de "sem pedido" sai uma vez por dia, não por sabor':
+        linhasCmp.filter((l) => l.data === '29/08/2026' && /sem pedido do carrinho/.test(l.situacao)).length === 1,
+      // o outro erro que ele cobra da loja, e vem de campo que ja existe
+      'envio sem pedido do carrinho é contado à parte':
+        d29.enviosSemPedido === 1 && d30.enviosSemPedido === 0
+        && rc.indicadores.enviosSemPedido === 1,
+      // contador PROPRIO: "enviou sem pedido" nao pode virar pizza de
+      // diferenca, senao dois erros diferentes viram um numero so
+      'enviar sem pedido não mexe na diferença de pizzas':
+        d29.divergenciaAbsoluta === 0 && rc.indicadores.divergenciaAbsoluta === 20,
       'sai PDF': pdf.status === 200 && pdf.buffer.slice(0, 4).toString() === '%PDF',
       'a rota JSON responde o período': json.status === 200 && Array.isArray(dJson.dias) && dJson.dias.length === 30,
       'período invertido é recusado': periodoRuim.status === 400,

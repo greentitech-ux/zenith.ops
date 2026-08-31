@@ -10475,35 +10475,6 @@ async function montarComparativoPeriodo(req) {
   return { unidade, ...r };
 }
 
-// uma linha por DIA x SABOR - e' o formato que pivota no Excel e que deixa
-// o dia problematico visivel sem somar nada
-function linhasComparativo(r, soDivergencias) {
-  const rotulo = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-  const linhas = [];
-  for (const d of r.dias) {
-    if (soDivergencias && !d.qtdSaboresDivergentes) continue;
-    const quem = d.quemLancou.assinou || d.quemLancou.logado || (d.temFechamento ? 'não identificado' : '—');
-    for (const i of d.itens) {
-      if (soDivergencias && (i.diferenca == null || i.diferenca === 0)) continue;
-      let situacao;
-      if (!d.temFechamento) situacao = d.totalEnviado > 0 ? 'ENVIOU E NINGUÉM LANÇOU' : 'sem movimento';
-      else if (!i.kpiEncontrado) situacao = 'KPI do sabor não cadastrado no Grupo';
-      else if (i.diferenca === 0) situacao = 'confere';
-      else situacao = i.diferenca > 0 ? 'lançou A MAIS do que saiu' : 'lançou A MENOS do que saiu';
-      linhas.push({
-        data: reportUtil.fmtDataBR(d.dia),
-        sabor: rotulo(i.sabor),
-        enviado: String(i.enviado),
-        fechamento: i.registrado == null ? '—' : String(i.registrado),
-        diferenca: i.diferenca == null ? '—' : (i.diferenca > 0 ? `+${i.diferenca}` : String(i.diferenca)),
-        quem,
-        situacao,
-      });
-    }
-  }
-  return linhas;
-}
-
 app.get('/api/abastecimento/comparativo-fechamento/periodo', auth.requireMaster, async (req, res) => {
   try {
     res.json(await montarComparativoPeriodo(req));
@@ -10518,15 +10489,16 @@ app.get('/api/abastecimento/comparativo-fechamento/periodo.csv', auth.requireMas
     const colunas = [
       { key: 'data', label: 'Data' },
       { key: 'sabor', label: 'Sabor' },
-      { key: 'enviado', label: 'Enviado ao carrinho' },
-      { key: 'fechamento', label: 'Lançado no fechamento' },
+      { key: 'enviado', label: 'Enviado pela loja' },
+      { key: 'fechamento', label: 'Lançado pela loja no fechamento' },
       { key: 'diferenca', label: 'Diferença' },
-      { key: 'quem', label: 'Quem lançou' },
+      { key: 'quem', label: 'Quem assinou o fechamento' },
+      { key: 'sem_pedido', label: 'Envios sem pedido do carrinho (no dia)' },
       { key: 'situacao', label: 'Situação' },
     ];
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="carrinho-comparativo-${r.periodo.inicio}-a-${r.periodo.fim}.csv"`);
-    res.send(reportUtil.toCSV(colunas, linhasComparativo(r, req.query.divergencias === '1')));
+    res.send(reportUtil.toCSV(colunas, abastecimentoComparativo.linhasComparativo(r, req.query.divergencias === '1')));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -10539,7 +10511,7 @@ app.get('/api/abastecimento/comparativo-fechamento/periodo.pdf', auth.requireMas
     const linhas = [];
     // o ranking entra ANTES do dia a dia: e' a pergunta que o Master faz
     // primeiro ("quem?"), e o detalhe existe pra sustentar a resposta
-    linhas.push({ data: '▸ QUEM LANÇOU — no período', sabor: '', enviado: '', fechamento: '', diferenca: '', quem: '', situacao: '' });
+    linhas.push({ data: '▸ QUEM ASSINOU O FECHAMENTO DA LOJA — no período', sabor: '', enviado: '', fechamento: '', diferenca: '', quem: '', situacao: '' });
     if (!r.responsaveis.length) {
       linhas.push({ data: '', sabor: '—', enviado: '', fechamento: '', diferenca: '', quem: 'nenhum fechamento lançado no período', situacao: '' });
     }
@@ -10554,7 +10526,7 @@ app.get('/api/abastecimento/comparativo-fechamento/periodo.pdf', auth.requireMas
         + (p.taxaDivergencia != null ? ` · ${String(p.taxaDivergencia).replace('.', ',')}%` : ''),
     }));
     linhas.push({ data: `▸ DIA A DIA${soDiv ? ' — só as divergências' : ''}`, sabor: '', enviado: '', fechamento: '', diferenca: '', quem: '', situacao: '' });
-    const detalhe = linhasComparativo(r, soDiv);
+    const detalhe = abastecimentoComparativo.linhasComparativo(r, soDiv);
     if (!detalhe.length) linhas.push({ data: '', sabor: '—', enviado: '', fechamento: '', diferenca: '', quem: '', situacao: 'nenhuma divergência no período' });
     linhas.push(...detalhe);
 
@@ -10564,19 +10536,21 @@ app.get('/api/abastecimento/comparativo-fechamento/periodo.pdf', auth.requireMas
       resumo: [
         [`${r.indicadores.diasComDivergencia} de ${r.indicadores.diasComFechamento}`, 'dias lançados com divergência'],
         [r.indicadores.divergenciaAbsoluta, 'pizzas de diferença no total'],
-        [r.indicadores.diasEnviouSemLancar, 'dias que enviou e ninguém lançou'],
-        [r.indicadores.diasComMovimento, 'dias com movimento'],
+        [r.indicadores.diasEnviouSemLancar, 'dias que a loja enviou e ninguém lançou'],
+        // o outro erro que ele cobra da loja: mandou sem o carrinho ter
+        // pedido (ver enviosSemPedido em abastecimentoComparativo.js)
+        [r.indicadores.enviosSemPedido, 'envios sem pedido do carrinho'],
       ],
       colunas: [
         { key: 'data', label: 'Data' },
         { key: 'sabor', label: 'Sabor' },
-        { key: 'enviado', label: 'Enviado' },
+        { key: 'enviado', label: 'Enviado pela loja' },
         { key: 'fechamento', label: 'Lançado' },
         { key: 'diferenca', label: 'Dif.' },
-        { key: 'quem', label: 'Quem lançou' },
+        { key: 'quem', label: 'Quem assinou' },
         { key: 'situacao', label: 'Situação' },
       ],
-      larguras: { data: 105, sabor: 70, enviado: 55, fechamento: 55, diferenca: 42, quem: 130, situacao: 244 },
+      larguras: { data: 100, sabor: 66, enviado: 52, fechamento: 52, diferenca: 40, quem: 112, situacao: 279 },
       linhas,
       linhasDinamicas: true,
       nomeArquivo: `carrinho-comparativo-${r.periodo.inicio}-a-${r.periodo.fim}`,
