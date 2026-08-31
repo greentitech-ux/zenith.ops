@@ -663,6 +663,18 @@
     <div id="disp-tipo-novo-linha" class="hidden">
       <input type="text" id="disp-tipo-novo" maxlength="24" placeholder="Nome do tipo novo. Ex: Roteador, Balança">
     </div>
+    <!-- MARCA: existe por seguranca, nao por cadastro. A sonda de status
+         manda "~HS" (ZPL) na porta 9100. Zebra responde; Bematech (ESC/POS)
+         trata byte recebido como coisa PRA IMPRIMIR - imprimiria "~HS" num
+         cupom a cada ciclo. Por isso so Zebra e' sondada, e sem marca
+         escolhida nao sonda nada. -->
+    <label style="font-size:12px;color:var(--muted);display:block;margin-top:10px;">Marca (só pra impressora)</label>
+    <select id="disp-marca" style="width:100%;">
+      <option value="">— não sei / não é impressora —</option>
+      <option value="zebra">Zebra (lê status: papel, cabeça, fila)</option>
+      <option value="bematech">Bematech (só alarme de rede, por enquanto)</option>
+      <option value="outra">Outra marca (só alarme de rede)</option>
+    </select>
     <label class="disp-monitorar-linha"><input type="checkbox" id="disp-monitorar"> Monitorar (alarma se esse aparelho perder rede)</label>
     <div class="msg hidden" id="disp-modal-status"></div>
     <div class="modal-acoes">
@@ -930,6 +942,18 @@ function abrirModalDispositivo(codigo, mac, d){
   document.getElementById('disp-tipo-novo').value = '';
   document.getElementById('disp-tipo-novo-linha').classList.add('hidden');
   document.getElementById('disp-monitorar').checked = !!(d && d.monitorar);
+  // marca ainda nao escolhida: sugere pelo FABRICANTE do MAC (o painel ja
+  // resolve isso - ver ouiFabricantes.js). Evita o Master ter que decidir
+  // aparelho por aparelho em 14 lojas, e acerta ate onde o scanner de rede
+  // dele nao identificou. Continua sendo escolha dele: so pre-seleciona.
+  const marcaSugerida = (() => {
+    if (d && d.marca) return d.marca;
+    const f = String((d && d.fabricante) || '').toLowerCase();
+    if (f.includes('zebra')) return 'zebra';
+    if (f.includes('bematech')) return 'bematech';
+    return '';
+  })();
+  document.getElementById('disp-marca').value = marcaSugerida;
   document.getElementById('disp-modal-status').classList.add('hidden');
   document.getElementById('disp-overlay').classList.remove('hidden');
 }
@@ -952,6 +976,7 @@ async function salvarDispositivo(){
       apelido: document.getElementById('disp-apelido').value,
       tipo: escolhido === '__novo__' ? null : (escolhido || null),
       monitorar: document.getElementById('disp-monitorar').checked,
+      marca: document.getElementById('disp-marca').value || null,
     };
     if(tipoNovo) corpo.tipoNovo = tipoNovo;
     const r = await fetch(`/api/loja-status/${encodeURIComponent(DISP_CODIGO)}/dispositivos/${encodeURIComponent(DISP_MAC)}/apelido`, {
@@ -1101,7 +1126,11 @@ function atualizarConteudoDetalhe(codigo, c){
       const quando = d.ativo === false ? `<span class="disp-visto">visto ${escapeHtml(tempoRelativo(d.visto))}</span>` : '';
       // 🔔 = monitorado (alarme de rede ligado - pedido do Master); sem isso
       // ninguém confere pelo painel o que está armado sem abrir cada aparelho
-      const monitorChip = d.monitorar ? `<span class="disp-monitor-chip" title="Monitorado: alarma se perder rede">🔔</span>` : '';
+      const monitorChip = d.monitorar
+        ? (d.marca === 'zebra'
+            ? `<span class="disp-monitor-chip" title="Monitorado + leitura de status (papel, cabeça, fila) a cada ~100s">🔔🖨️</span>`
+            : `<span class="disp-monitor-chip" title="Monitorado: alarma se perder rede">🔔</span>`)
+        : '';
       // o tipo escolhido fica visivel na propria linha: sem isso so da pra
       // saber o que e' cada MAC abrindo aparelho por aparelho
       const tipoChip = d.tipoRotulo ? `<span class="disp-tipo-chip">${escapeHtml(d.tipoRotulo)}</span>` : '';
@@ -1117,7 +1146,7 @@ function atualizarConteudoDetalhe(codigo, c){
           <div class="disp-rede">${escapeHtml(d.ip)} · ${escapeHtml(d.mac)}</div>
         </div>
         <button type="button" class="disp-editar" title="Editar nome/tipo/monitoramento"
-          onclick='event.stopPropagation();abrirModalDispositivo(${JSON.stringify(codigo)},${JSON.stringify(d.mac)},${JSON.stringify({apelido:d.apelido||null,tipo:d.tipo||null,monitorar:!!d.monitorar})})'>✏️</button>
+          onclick='event.stopPropagation();abrirModalDispositivo(${JSON.stringify(codigo)},${JSON.stringify(d.mac)},${JSON.stringify({apelido:d.apelido||null,tipo:d.tipo||null,monitorar:!!d.monitorar,marca:d.marca||null,fabricante:d.fabricante||null})})'>✏️</button>
       </div>`;
     };
     // TODOS os aparelhos, numa janela de ~5 linhas com rolagem interna -

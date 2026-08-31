@@ -4802,6 +4802,18 @@ setTimeout(async () => {
     };
     const nivelDe = (txt) => imp.avaliar(imp.parseStatusZebra(txt));
 
+    // SEGUNDA amostra real, de OUTRA loja e OUTRO firmware (Dom Bessa,
+    // V89.21.39Z contra V89.21.37Z da Caruaru). E' o que prova que o layout
+    // dos campos nao mudou entre revisoes de firmware - e que o parse LE o
+    // campo em vez de ter decorado o numero: aqui a etiqueta e' 0402, la e'
+    // 0394, e as duas tem que sair certas.
+    const BESSA = [
+      linha('030,0,0,0402,000,0,0,0,000,0,0,0'),
+      linha('001,0,0,0,1,2,6,0,00000000,1,000'),
+      linha('0000,0'),
+    ].join('\r\n') + '\r\n';
+    const okBessa = imp.parseStatusZebra(BESSA);
+
     const ok = imp.parseStatusZebra(REAL);
     const semPapel = nivelDe(mexer(0, 1, '1'));
     const cabeca = nivelDe(mexer(1, 2, '1'));
@@ -4827,6 +4839,10 @@ setTimeout(async () => {
       'o parse bate com o ^HH: transferência térmica': ok.transferencia === true,
       'o parse bate com o ^HH: modo tear-off': ok.modoImpressao === 2,
       'a Zebra saudável da Caruaru dá OK (nada de alarme falso)': imp.avaliar(ok).nivel === 'ok',
+      // segunda loja, firmware diferente: o layout dos campos se manteve
+      'o mesmo parse serve outro firmware (Dom Bessa, V89.21.39Z)':
+        okBessa.comprimentoEtiqueta === 402 && okBessa.transferencia === true
+        && okBessa.modoImpressao === 2 && imp.avaliar(okBessa).nivel === 'ok',
       'sem papel é crítico': semPapel.nivel === 'critico' && /Sem papel/.test(semPapel.motivos.join()),
       'cabeça aberta é crítico': cabeca.nivel === 'critico' && /Cabeça aberta/.test(cabeca.motivos.join()),
       // o pedido original do Master ("mais de 3 arquivos"), agora medido na
@@ -4848,6 +4864,13 @@ setTimeout(async () => {
         /sondarImpressoras/.test(ps) && /sondarImpressoras/.test(require('fs').readFileSync(__dirname + '/index.js', 'utf8')),
       'o script gerado continua começando com # NOCZenith': ps.startsWith('# NOCZenith'),
       'o parse mora no servidor, não no agente': !/papelAcabou|cabecaAberta/.test(src),
+      // A TRAVA DA BEMATECH. "~HS" e' ZPL. Zebra responde o status; Bematech
+      // (ESC/POS) trata byte recebido como coisa PRA IMPRIMIR - imprimiria
+      // "~HS" num cupom a cada ciclo da sonda. So marca 'zebra' e' sondada,
+      // e sem marca escolhida nao sonda: marcar como monitorada tem que ser
+      // seguro mesmo sem saber a marca.
+      'só quem é Zebra entra na sonda (Bematech imprimiria o ~HS num cupom)':
+        /c\.marca === 'zebra'/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8')),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okImpressora = !falhas.length;
@@ -9364,7 +9387,12 @@ setTimeout(async () => {
         /#disp-overlay\{z-index:(\d+);\}/.test(html)
         && Number(html.match(/#disp-overlay\{z-index:(\d+);\}/)[1])
            > Number(html.match(/\.overlay\{[^}]*z-index:(\d+)/)[1]),
-      'dispositivo monitorado mostra o chip 🔔 na linha': /d\.monitorar \? `<span class="disp-monitor-chip"/.test(html),
+      // o chip agora distingue quem tem leitura de status (Zebra) de quem so
+      // tem alarme de rede - por isso a condicao deixou de ser uma linha so
+      'dispositivo monitorado mostra o chip 🔔 na linha':
+        /const monitorChip = d\.monitorar/.test(html) && /disp-monitor-chip/.test(html),
+      'o chip separa a Zebra (lê status) de quem só tem alarme de rede':
+        /d\.marca === 'zebra'/.test(html) && /🔔🖨️/.test(html),
       'tipo do aparelho aparece na propria linha': /d\.tipoRotulo \? `<span class="disp-tipo-chip"/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);

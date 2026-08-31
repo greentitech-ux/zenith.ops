@@ -155,16 +155,29 @@ function rotuloDoTipoDispositivo(id, lista) {
 // "tipo"/"monitorar" depois, sem migração em massa: um valor antigo (string)
 // continua lendo certo aqui, e só vira o formato novo quando alguém EDITA
 // aquele MAC pela tela - o resto do documento fica como estava.
+// MARCA da impressora. Existe por um motivo de seguranca, nao de cadastro:
+// a sonda manda "~HS" na porta 9100, que e' ZPL. Uma Zebra responde o
+// status; uma BEMATECH (ESC/POS) trata byte recebido como coisa PRA
+// IMPRIMIR - ela imprimiria "~HS" num cupom a cada ciclo da sonda. Por isso
+// so 'zebra' e' sondada, e o padrao (null) NAO sonda: marcar uma impressora
+// como monitorada tem que ser seguro mesmo sem escolher a marca.
+const MARCAS_IMPRESSORA = new Set(['zebra', 'bematech', 'outra']);
+function idDaMarca(v) {
+  const m = String(v == null ? '' : v).trim().toLowerCase();
+  return MARCAS_IMPRESSORA.has(m) ? m : null;
+}
+
 function normalizarEntradaApelido(valor) {
-  if (typeof valor === 'string') return { apelido: valor || null, tipo: null, monitorar: false };
+  if (typeof valor === 'string') return { apelido: valor || null, tipo: null, monitorar: false, marca: null };
   if (valor && typeof valor === 'object') {
     return {
       apelido: typeof valor.apelido === 'string' && valor.apelido ? valor.apelido : null,
       tipo: idDoTipoDispositivo(valor.tipo) || null,
       monitorar: !!valor.monitorar,
+      marca: idDaMarca(valor.marca),
     };
   }
-  return { apelido: null, tipo: null, monitorar: false };
+  return { apelido: null, tipo: null, monitorar: false, marca: null };
 }
 
 // o nome que a pessoa dá vence o que o DNS respondeu: quem batizou de
@@ -201,11 +214,12 @@ async function definirApelidoDispositivo(codigo, mac, entrada) {
     tipo = anterior.tipo;
   }
   const monitorar = corpo.monitorar !== undefined ? !!corpo.monitorar : anterior.monitorar;
+  const marca = corpo.marca !== undefined ? idDaMarca(corpo.marca) : anterior.marca;
   if (!limpo && !tipo && !monitorar) delete daUnidade[macOk];
-  else daUnidade[macOk] = { apelido: limpo || null, tipo, monitorar };
+  else daUnidade[macOk] = { apelido: limpo || null, tipo, monitorar, marca };
   await APELIDOS_DOC.set({ unidades: { ...atuais, [codigo]: daUnidade }, tipos: extrasNovos }, { merge: false });
   apelidosCache = null;
-  return { codigo, mac: macOk, apelido: limpo || null, tipo, monitorar };
+  return { codigo, mac: macOk, apelido: limpo || null, tipo, monitorar, marca };
 }
 
 const TIPOS_COMPUTADOR = ['atendimento', 'interno', 'abastecimento'];
@@ -805,7 +819,7 @@ async function listar() {
         return {
           ...x,
           apelido: cfg.apelido, tipo: cfg.tipo, tipoRotulo: rotuloDoTipoDispositivo(cfg.tipo, tipos),
-          monitorar: cfg.monitorar, fabricante: ouiFabricantes.fabricanteDe(x.mac),
+          monitorar: cfg.monitorar, marca: cfg.marca, fabricante: ouiFabricantes.fabricanteDe(x.mac),
         };
       }),
     };
@@ -1954,7 +1968,9 @@ async function impressorasPraSondar(codigo) {
   const daUnidade = (await getApelidos())[codigo] || {};
   const marcados = new Set(
     Object.entries(daUnidade)
-      .filter(([, v]) => { const c = normalizarEntradaApelido(v); return c.monitorar && c.tipo === 'impressora'; })
+      // marca === 'zebra' e a trava: mandar ~HS numa Bematech faria ela
+      // IMPRIMIR "~HS" num cupom a cada ciclo. Sem marca escolhida, nao sonda.
+      .filter(([, v]) => { const c = normalizarEntradaApelido(v); return c.monitorar && c.tipo === 'impressora' && c.marca === 'zebra'; })
       .map(([mac]) => mac)
   );
   if (!marcados.size) return [];
