@@ -10536,9 +10536,9 @@ app.get('/api/abastecimento/comparativo-fechamento/periodo.csv', auth.requireMas
       { key: 'data', label: 'Data' },
       { key: 'sabor', label: 'Sabor' },
       { key: 'enviado', label: 'Enviado pela loja' },
-      { key: 'fechamento', label: 'Lançado pela loja no fechamento' },
+      { key: 'fechamento', label: 'Lançado pelo carrinho no fechamento' },
       { key: 'diferenca', label: 'Diferença' },
-      { key: 'quem', label: 'Quem assinou o fechamento' },
+      { key: 'quem', label: 'Quem assinou o fechamento do carrinho' },
       { key: 'sem_pedido', label: 'Envios sem pedido do carrinho (no dia)' },
       { key: 'situacao', label: 'Situação' },
     ];
@@ -10557,7 +10557,7 @@ app.get('/api/abastecimento/comparativo-fechamento/periodo.pdf', auth.requireMas
     const linhas = [];
     // o ranking entra ANTES do dia a dia: e' a pergunta que o Master faz
     // primeiro ("quem?"), e o detalhe existe pra sustentar a resposta
-    linhas.push({ data: '▸ QUEM ASSINOU O FECHAMENTO DA LOJA — no período', sabor: '', enviado: '', fechamento: '', diferenca: '', quem: '', situacao: '' });
+    linhas.push({ data: '▸ QUEM ASSINOU O FECHAMENTO DO CARRINHO — no período', sabor: '', enviado: '', fechamento: '', diferenca: '', quem: '', situacao: '' });
     if (!r.responsaveis.length) {
       linhas.push({ data: '', sabor: '—', enviado: '', fechamento: '', diferenca: '', quem: 'nenhum fechamento lançado no período', situacao: '' });
     }
@@ -10582,7 +10582,7 @@ app.get('/api/abastecimento/comparativo-fechamento/periodo.pdf', auth.requireMas
       resumo: [
         [`${r.indicadores.diasComDivergencia} de ${r.indicadores.diasComFechamento}`, 'dias lançados com divergência'],
         [r.indicadores.divergenciaAbsoluta, 'pizzas de diferença no total'],
-        [r.indicadores.diasEnviouSemLancar, 'dias que a loja enviou e ninguém lançou'],
+        [r.indicadores.diasEnviouSemLancar, 'dias que a loja enviou e o carrinho não lançou'],
         // o outro erro que ele cobra da loja: mandou sem o carrinho ter
         // pedido (ver enviosSemPedido em abastecimentoComparativo.js)
         [r.indicadores.enviosSemPedido, 'envios sem pedido do carrinho'],
@@ -10591,7 +10591,7 @@ app.get('/api/abastecimento/comparativo-fechamento/periodo.pdf', auth.requireMas
         { key: 'data', label: 'Data' },
         { key: 'sabor', label: 'Sabor' },
         { key: 'enviado', label: 'Enviado pela loja' },
-        { key: 'fechamento', label: 'Lançado' },
+        { key: 'fechamento', label: 'Lançado pelo carrinho' },
         { key: 'diferenca', label: 'Dif.' },
         { key: 'quem', label: 'Quem assinou' },
         { key: 'situacao', label: 'Situação' },

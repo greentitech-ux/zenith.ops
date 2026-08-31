@@ -4813,6 +4813,7 @@ setTimeout(async () => {
     const d28 = rc.dias.find((d) => d.dia === '2026-08-28');
     const difDe = (d, sabor) => (d.itens.find((i) => i.sabor === sabor) || {}).diferenca;
 
+    const htmlRel = require('fs').readFileSync(__dirname + '/public/abastecimento-relatorios.html', 'utf8');
     const linhasCmp = cmp.linhasComparativo(rc, false);
     const sitDe = (sabor) => (linhasCmp.find((l) => l.data === '30/08/2026'
       && l.sabor.toLowerCase() === sabor) || {}).situacao;
@@ -4850,16 +4851,31 @@ setTimeout(async () => {
       'o relatório nomeia a LOJA como quem envia':
         /Enviado pela loja/.test(csv.buffer.toString('utf8'))
         && !/Enviado ao carrinho/.test(csv.buffer.toString('utf8')),
+      'e o CARRINHO como quem lança o fechamento':
+        /Lançado pelo carrinho no fechamento/.test(csv.buffer.toString('utf8'))
+        && !/Lançado pela loja/.test(csv.buffer.toString('utf8')),
+      // o card de UM dia dizia so "58 enviado / 61 fechamento" - sem dizer
+      // que sao duas pontas, e' onde a leitura errada comeca
+      'o card do dia diz de quem é cada número':
+        /a loja enviou/.test(htmlRel) && /o carrinho lançou/.test(htmlRel),
       // A frase mora no modulo junto com a regra, entao da pra conferir o
       // texto exato sem depender de semear fechamento e grupo no Firestore
       // falso - e e' o texto que vai pra reuniao.
-      'a situação cobra o ENVIO, com o fechamento como referência':
-        sitDe('calabresa') === 'a loja ENVIOU 3 a MENOS do que lançou no fechamento'
-        && sitDe('pepperoni') === 'a loja ENVIOU 12 a MAIS do que lançou no fechamento',
+      // AS DUAS PONTAS NA MESMA FRASE. Conferido no codigo: `enviado` sai dos
+      // registros ENVIO (origem 'LOJA') e `registrado` sai do KPI Extra do
+      // Fechamento da unidade "Domino's Carrinho Aeroporto Recife" - o
+      // fechamento do CARRINHO. Uma versao anterior deste relatorio dizia so
+      // "do que lançou", que fazia parecer que a loja tinha lançado tambem.
+      'a frase nomeia quem enviou E quem lançou':
+        sitDe('calabresa') === 'a loja ENVIOU 3 a MENOS do que o carrinho lançou no fechamento'
+        && sitDe('pepperoni') === 'a loja ENVIOU 12 a MAIS do que o carrinho lançou no fechamento',
       'nenhuma linha volta a cobrar o lançamento':
         !linhasCmp.some((l) => /lançou A (MAIS|MENOS) do que saiu/.test(l.situacao)),
-      'o dia sem fechamento nomeia a LOJA como quem enviou':
-        /^A LOJA ENVIOU E NINGUÉM LANÇOU O FECHAMENTO/
+      // sem "o carrinho", a frase junta as duas pontas numa so
+      'nenhuma linha deixa o lançamento sem dono':
+        !linhasCmp.some((l) => /ENVIOU \d+ a (MAIS|MENOS) do que lançou/.test(l.situacao)),
+      'o dia sem fechamento separa as duas pontas também':
+        /^A LOJA ENVIOU E O CARRINHO NÃO LANÇOU O FECHAMENTO/
           .test((linhasCmp.find((l) => l.data === '29/08/2026') || {}).situacao || ''),
       // o aviso e' do DIA: repetido nos 3 sabores viraria 3 avisos do mesmo
       // problema na mesma pagina

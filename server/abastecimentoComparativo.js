@@ -1,17 +1,26 @@
 // abastecimentoComparativo.js
-// PIZZA QUE A LOJA ENVIOU x PIZZA QUE A LOJA LANCOU NO FECHAMENTO.
+// PIZZA QUE A LOJA ENVIOU x PIZZA QUE O CARRINHO LANCOU NO FECHAMENTO DELE.
 //
-// QUEM ENVIA E' A LOJA. Regra do Master, dita assim: "o sistema que faz o
-// envio das pizzas e a LOJA, o carrinho so PEDE - se chegou menos do que o
-// fechamento disse que tinha, e erro da loja que enviou". O carrinho pede
-// (PEDIDO) e confere o que chegou; ele nao manda nada. Por isso os DOIS
-// lados desta conta sao da loja: o ENVIO e o lancamento no Fechamento sao
-// declaracoes dela sobre a mesma pizza, e tem que bater.
+// SAO DUAS PONTAS DIFERENTES, e confundi-las ja custou uma versao errada
+// deste comentario. Conferido no codigo, ponta por ponta:
 //
-// Isso decide como o relatorio FALA. O texto cobra o ENVIO, com o
-// fechamento como referencia ("a loja enviou 8 a mais do que lancou"), e
-// nao o contrario - cobrar o lancamento sugeriria que o envio e de outra
-// ponta, e ele nao e'.
+//   ENVIADO  = soma dos registros ENVIO. `origem: 'LOJA'` em
+//              abastecimentoCarrinho.js - quem registra e a LOJA (Dominos
+//              Praca Aeroporto Recife), dizendo o que mandou.
+//   LANCADO  = KPI Extra do Fechamento da unidade "Domino's Carrinho
+//              Aeroporto Recife" - o fechamento do CARRINHO, lancado por
+//              quem fecha o carrinho no fim do dia.
+//
+// O carrinho PEDE (PEDIDO), recebe e confere; ele nao manda nada. Regra do
+// Master sobre de quem se cobra: "o sistema que faz o envio das pizzas e a
+// LOJA, o carrinho so PEDE... sempre iremos cobrar da LOJA os envios
+// corretos pois o carrinho e quem recebe".
+//
+// Isso decide como o relatorio FALA: o texto cobra o ENVIO, tendo o
+// fechamento do carrinho como referencia, e nomeia as DUAS pontas na mesma
+// frase ("a loja ENVIOU 8 a mais do que o carrinho lancou no fechamento").
+// Dizer so "do que lancou" faria parecer que quem lancou tambem foi a loja
+// - que e' exatamente o erro que este cabecalho ja teve.
 //
 // POR QUE ISSO VIROU MODULO: a conta ja existia solta dentro da rota de UM
 // dia (/api/abastecimento/comparativo-fechamento). O Master pediu o mesmo
@@ -92,10 +101,11 @@ function comparativoDoDia({ sabores, enviado, fechamento, kpisDef }) {
   });
 }
 
-// quem responde pelo lancamento daquele dia. Dois nomes porque sao coisas
-// diferentes: `gerente` e' o nome digitado no formulario (quem assina), e
-// `criadoPorEmail` e' quem estava logado no app (quem apertou o botao).
-// Numa cobranca os dois importam, e quase sempre sao a mesma pessoa.
+// quem assinou o fechamento DO CARRINHO naquele dia (nao o da loja - ver o
+// cabecalho). Dois nomes porque sao coisas diferentes: `gerente` e' o nome
+// digitado no formulario (quem assina), e `criadoPorEmail` e' quem estava
+// logado no app (quem apertou o botao). Numa cobranca os dois importam, e
+// quase sempre sao a mesma pessoa.
 function quemLancou(fechamento) {
   if (!fechamento) return { assinou: null, logado: null };
   return {
@@ -231,11 +241,11 @@ function linhasComparativo(r, soDivergencias) {
       // lancamento no banco dos reus e deixa o envio parecendo de outra
       // ponta - e ele e' da loja tambem.
       let situacao;
-      if (!d.temFechamento) situacao = d.totalEnviado > 0 ? 'A LOJA ENVIOU E NINGUÉM LANÇOU O FECHAMENTO' : 'sem movimento';
+      if (!d.temFechamento) situacao = d.totalEnviado > 0 ? 'A LOJA ENVIOU E O CARRINHO NÃO LANÇOU O FECHAMENTO' : 'sem movimento';
       else if (!i.kpiEncontrado) situacao = 'KPI do sabor não cadastrado no Grupo';
       else if (i.diferenca === 0) situacao = 'confere';
-      else if (i.diferenca < 0) situacao = `a loja ENVIOU ${Math.abs(i.diferenca)} a MAIS do que lançou no fechamento`;
-      else situacao = `a loja ENVIOU ${i.diferenca} a MENOS do que lançou no fechamento`;
+      else if (i.diferenca < 0) situacao = `a loja ENVIOU ${Math.abs(i.diferenca)} a MAIS do que o carrinho lançou no fechamento`;
+      else situacao = `a loja ENVIOU ${i.diferenca} a MENOS do que o carrinho lançou no fechamento`;
       // "enviou sem o carrinho pedir" é o outro erro que ele cobra da loja.
       // Vai só na PRIMEIRA linha do dia: é do dia, não do sabor, e repetir
       // em cada sabor triplicaria o mesmo aviso.

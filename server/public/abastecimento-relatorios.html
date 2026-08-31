@@ -330,7 +330,7 @@
        essa divergencia". Nao soma o periodo de proposito: um mes somado
        esconde o dia em que faltaram 12. -->
   <div class="dd-titulo" style="margin-top:16px;"><span>📄 Relatório por período</span></div>
-  <div class="sub" style="margin:-4px 0 8px;">Dia a dia, um abaixo do outro, com <b>quem assinou</b> cada fechamento e um ranking por pessoa. <b>Quem envia é a loja</b> — o carrinho só pede e confere —, então os dois lados da conta são dela: o relatório cobra o <b>envio</b>, com o fechamento como referência, e conta à parte os envios que saíram <b>sem pedido do carrinho</b>.</div>
+  <div class="sub" style="margin:-4px 0 8px;">Dia a dia, um abaixo do outro, com <b>quem assinou</b> cada fechamento e um ranking por pessoa. <b>Enviado</b> = o que a <b>loja</b> registrou como envio. <b>Lançado</b> = o KPI do fechamento do <b>carrinho</b>. São duas pontas diferentes: o carrinho só pede, recebe e confere. O relatório cobra o <b>envio</b>, tendo o fechamento do carrinho como referência, e conta à parte os envios que saíram <b>sem pedido do carrinho</b>.</div>
   <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
     <input type="date" id="comp-inicio" style="width:132px;padding:6px 8px;font-size:11.5px;margin:0;">
     <span style="font-family:var(--mono);font-size:10.5px;color:var(--muted);">até</span>
@@ -491,10 +491,13 @@ function fmtDia(dataSv){
   return `${d}/${m}/${y}`;
 }
 
-// comparativo com o Fechamento (so Master) - quanto foi ENVIADO por sabor x
-// quanto ficou registrado nos KPIs Extras do Fechamento do mesmo dia (ver
-// /api/abastecimento/comparativo-fechamento em index.js) - "data" opcional
-// (YYYY-MM-DD) deixa consultar outro dia; sem ela o backend usa ontem
+// comparativo com o Fechamento (so Master). Duas pontas DIFERENTES, e o
+// card precisa dizer qual e qual - "58 enviado / 61 fechamento" nao dizia:
+//   enviado  = registros ENVIO, que a LOJA lanca (origem 'LOJA')
+//   lancado  = KPI Extra do Fechamento do CARRINHO, do mesmo dia
+// Ver /api/abastecimento/comparativo-fechamento em index.js e o cabecalho
+// de abastecimentoComparativo.js. "data" opcional (YYYY-MM-DD) deixa
+// consultar outro dia; sem ela o backend usa ontem.
 async function carregarComparativoFechamento(data){
   const painel = document.getElementById('painel-comparativo-fechamento');
   const inputData = document.getElementById('comparativo-data');
@@ -518,8 +521,8 @@ async function carregarComparativoFechamento(data){
       <div class="resumo-card">
         <div class="sabor">${SABOR_LABEL[c.sabor]}</div>
         <div class="nums">
-          <span class="hoje">${c.enviado} <small style="font-size:9px;color:var(--muted);">enviado</small></span>
-          <span class="ontem">${c.registrado==null ? (semKpi?'sem KPI cadastrado':'—') : c.registrado+' fechamento'}</span>
+          <span class="hoje">${c.enviado} <small style="font-size:9px;color:var(--muted);">a loja enviou</small></span>
+          <span class="ontem">${c.registrado==null ? (semKpi?'sem KPI cadastrado':'—') : c.registrado+' o carrinho lançou'}</span>
         </div>
         ${diverge ? `<div style="${corDif}font-size:11px;margin-top:2px;">⚠ diferença de ${c.diferenca>0?'+':''}${c.diferenca}</div>` : ''}
       </div>`;
