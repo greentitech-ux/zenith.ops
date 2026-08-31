@@ -964,6 +964,62 @@ async function notifyDispositivoOffline(unidadeNome, codigo, apelido, tipoDispos
   }
 }
 
+// A IMPRESSORA RESPONDE NA REDE MAS PAROU DE IMPRIMIR. Sem papel, cabeca
+// aberta, sem ribbon, ou a fila dela travada (ver impressoraStatus.js). O
+// alarme de rede nao pega nada disso - pra ele a impressora esta "ok".
+// Critico so quando ela realmente parou; fila/pausa e' atencao.
+async function notifyImpressoraProblema(unidadeNome, codigo, apelido, ip, mac, nivel, motivos) {
+  const nome = apelido || ip || mac;
+  const critico = nivel === 'critico';
+  const dados = {
+    title: `${critico ? '🖨️ Impressora parada' : '🖨️ Impressora com pendência'}`,
+    // o fato e o numero, sempre (tom de voz do §5): "Sem papel", "Fila com
+    // 7 trabalho(s) parados" - nunca "algo deu errado"
+    body: `${nome} (${unidadeNome || codigo}): ${motivos.join(' · ')}.`,
+    tag: `noc-impressora-${codigo}-${mac}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-impressora-problema', titulo: dados.title, resumo: dados.body, url: dados.url, critico });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload, critico ? { urgency: 'high' } : {});
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) {
+        await removeSubscription(sub.endpoint);
+      } else {
+        console.error('Erro ao enviar push (impressora):', err.message);
+      }
+    }
+  }
+}
+
+// a impressora voltou a imprimir - fecha o ciclo, sem urgencia
+async function notifyImpressoraNormalizou(unidadeNome, codigo, apelido, ip, mac, de) {
+  const nome = apelido || ip || mac;
+  const dados = {
+    title: '🖨️ Impressora normalizou',
+    body: `${nome} (${unidadeNome || codigo}) voltou a imprimir${(de || []).length ? ` - era: ${de.join(' · ')}` : ''}.`,
+    tag: `noc-impressora-${codigo}-${mac}`,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-impressora-normalizou', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberCritico(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+    }
+  }
+}
+
 // dispositivo monitorado voltou a aparecer na varredura - aviso tranquilo
 // (sem alarme sonoro), mesmo publico do alerta de queda
 async function notifyDispositivoOnline(unidadeNome, codigo, apelido, tipoDispositivo, mac, tipoRotulo) {
@@ -1146,7 +1202,7 @@ module.exports = {
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,
   notifyRhCadastroPendente, notifyRhCadastroReprovado, notifyRhCheckoutAtrasado,
   notifyExperienciaPrazo, notifyExperienciaPrazoGerente, notifyLojaOffline, notifyLojaVoltou, notifyDiscoAlerta, notifyReinicioPendente, notifyMaquinaReiniciou, notifyLinkDegradado, notifyReinicioNaoVoltou,
-  notifyDispositivoOffline,
+  notifyDispositivoOffline, notifyImpressoraProblema, notifyImpressoraNormalizou,
   notifyDivergenciaCaixa, notifyDispositivoOnline,
   notifyQaAprovacaoPendente, notifyAcessoRemotoDetectado, notifySegurancaChat, testarPush,
   notifyAbastecimentoDivergencia, notifyFechamentoLancado, PUBLIC_KEY,

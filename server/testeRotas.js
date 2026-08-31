@@ -4772,6 +4772,91 @@ setTimeout(async () => {
   // episodio?"). O dado ja existia nos eventos offline/online de cada
   // computador - faltava somar por unidade.
   // ------------------------------------------------------------------
+  // A IMPRESSORA RESPONDE NA REDE MAS PAROU DE IMPRIMIR. Pergunta do Master
+  // ("quanto tempo sem responder e comunicado que a zebra parou") que
+  // expos o buraco: o alarme de rede leva ~2h E nao pega sem papel, cabeca
+  // aberta nem fila travada - nesses casos a impressora responde o ping.
+  //
+  // O PARSE VEIO DE UMA RESPOSTA REAL, colhida por ele numa Zebra da
+  // Dominos Caruaru (firmware V89.21.37Z, 832 dots 8/mm). E' a resposta
+  // literal abaixo - se um dia o parse quebrar, este teste aponta onde.
+  let okImpressora = false;
+  try {
+    const imp = require('/home/user/adyen-monitor/server/impressoraStatus.js');
+    const STX = String.fromCharCode(2);
+    const ETX = String.fromCharCode(3);
+    const linha = (t) => STX + t + ETX;
+    const REAL = [
+      linha('030,0,0,0394,000,0,0,0,000,0,0,0'),
+      linha('001,0,0,0,1,2,6,0,00000000,1,000'),
+      linha('0000,0'),
+    ].join('\r\n') + '\r\n';
+    // troca UM campo da resposta real - o resto continua identico ao que a
+    // impressora de verdade devolveu
+    const mexer = (linhaIdx, campoIdx, valor) => {
+      const ls = REAL.split('\r\n');
+      const c = ls[linhaIdx].split(STX).join('').split(ETX).join('').split(',');
+      c[campoIdx] = valor;
+      ls[linhaIdx] = linha(c.join(','));
+      return ls.join('\r\n');
+    };
+    const nivelDe = (txt) => imp.avaliar(imp.parseStatusZebra(txt));
+
+    const ok = imp.parseStatusZebra(REAL);
+    const semPapel = nivelDe(mexer(0, 1, '1'));
+    const cabeca = nivelDe(mexer(1, 2, '1'));
+    const fila7 = nivelDe(mexer(0, 4, '007'));
+    const fila3 = nivelDe(mexer(0, 4, '003'));
+    const lixo = nivelDe('nao sou um HS');
+    const vazio = nivelDe('');
+
+    // maquina de estados: 1 leitura ruim nao alarma, 2 alarmam UMA vez
+    const ruim = imp.avaliar(imp.parseStatusZebra(mexer(0, 1, '1')));
+    const p1 = imp.decidirAviso(null, ruim);
+    const p2 = imp.decidirAviso(p1.estado, ruim);
+    const p3 = imp.decidirAviso(p2.estado, ruim);
+    const volta = imp.decidirAviso(p3.estado, imp.avaliar(ok));
+
+    const src = require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8');
+    const vig = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const ps = vig.montarScriptVigia({ codigo: 'AERO', posto: 'ATM01', tipo: 'interno', unidadeNome: 'T' });
+
+    const conf = {
+      // as 3 ancoras que provam o parse contra o ^HH da MESMA impressora
+      'o parse bate com o ^HH: etiqueta 0394 dots': ok.comprimentoEtiqueta === 394,
+      'o parse bate com o ^HH: transferência térmica': ok.transferencia === true,
+      'o parse bate com o ^HH: modo tear-off': ok.modoImpressao === 2,
+      'a Zebra saudável da Caruaru dá OK (nada de alarme falso)': imp.avaliar(ok).nivel === 'ok',
+      'sem papel é crítico': semPapel.nivel === 'critico' && /Sem papel/.test(semPapel.motivos.join()),
+      'cabeça aberta é crítico': cabeca.nivel === 'critico' && /Cabeça aberta/.test(cabeca.motivos.join()),
+      // o pedido original do Master ("mais de 3 arquivos"), agora medido na
+      // fila DA IMPRESSORA em vez do Spooler do Windows, que nao existe aqui
+      'fila com 7 vira atenção': fila7.nivel === 'atencao' && /7 trabalho/.test(fila7.motivos.join()),
+      'fila com 3 NÃO alarma (o limite é MAIS de 3)': fila3.nivel === 'ok',
+      // resposta ilegivel nunca pode virar alarme - seria o jeito mais rapido
+      // de treinar todo mundo a ignorar o alarme
+      'resposta ilegível vira desconhecido, não alarme': lixo.nivel === 'desconhecido' && vazio.nivel === 'desconhecido',
+      'uma leitura ruim sozinha NÃO avisa': p1.avisar === null,
+      'duas leituras seguidas confirmam e avisam': !!p2.avisar && p2.avisar.nivel === 'critico',
+      'o mesmo problema não avisa de novo na terceira': p3.avisar === null,
+      'voltar ao normal fecha o ciclo': !!volta.normalizou,
+      // sem o bump o agente instalado nunca baixa a versao com a sonda
+      'VERSAO_VIGIA subiu (senão as 52 máquinas não atualizam)': vig.VERSAO_VIGIA >= 19,
+      'o agente pergunta ~HS na 9100 e devolve o texto cru':
+        /Sondar-Impressora/.test(ps) && /~HS/.test(ps) && /statusImpressoras/.test(ps),
+      'a lista de quem sondar vem na resposta da telemetria (sem rota nova)':
+        /sondarImpressoras/.test(ps) && /sondarImpressoras/.test(require('fs').readFileSync(__dirname + '/index.js', 'utf8')),
+      'o script gerado continua começando com # NOCZenith': ps.startsWith('# NOCZenith'),
+      'o parse mora no servidor, não no agente': !/papelAcabou|cabecaAberta/.test(src),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okImpressora = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okImpressora = false; console.log('  erro: ' + e.message); }
+  if (!okImpressora) ruins += 1;
+  console.log(`${okImpressora ? '✓' : '✗'} NOC: Zebra que responde na rede mas parou de imprimir (sem papel, cabeça aberta, fila travada)`);
+
+  // ------------------------------------------------------------------
   // TODAS AS DIVERGENCIAS DO CARRINHO, DESDE O INICIO, COM NOME. Pedido do
   // Master: "preciso de relatorios de todas as divergencias do carrinho
   // desde o inicio ate hoje, so as divergencias, separado por turno,

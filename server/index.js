@@ -1189,9 +1189,16 @@ app.post('/api/loja-status/:codigo/computadores/:posto/comando-resultado', async
 app.post('/api/loja-status/:codigo/computadores/:posto/telemetria', async (req, res) => {
   try {
     const token = req.headers['x-noc-token'] || req.body.token || null;
-    res.json(await lojaStatus.registrarTelemetria(req.params.codigo, req.params.posto, {
+    const r = await lojaStatus.registrarTelemetria(req.params.codigo, req.params.posto, {
       disco: req.body.disco, dispositivos: req.body.dispositivos, uptimeHoras: req.body.uptimeHoras,
-    }, token));
+      statusImpressoras: req.body.statusImpressoras,
+    }, token);
+    // a RESPOSTA leva quais impressoras aquele agente deve sondar no proximo
+    // ciclo. Sem rota nova e sem requisicao extra: a telemetria ja acontece,
+    // e a lista muda raramente. Agente antigo (< v19) ignora o campo.
+    let sondar = [];
+    try { sondar = await lojaStatus.impressorasPraSondar(req.params.codigo); } catch (e) { sondar = []; }
+    res.json({ ...r, sondarImpressoras: sondar });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -12695,6 +12702,19 @@ function aquecerBoot(promessa, ms) {
         if (t.tipo === 'dispositivo-online') {
           push.notifyDispositivoOnline(nome, t.codigo, t.apelido, t.tipoDispositivo, t.mac, t.tipoRotulo)
             .catch((err) => console.error('Erro no push de dispositivo voltou:', err.message));
+          continue;
+        }
+        // impressora respondendo na rede mas parada (sem papel, cabeça aberta,
+        // fila travada) - ver impressoraStatus.js. O alarme de rede não pega
+        // nada disso: pra ele a impressora está "ok"
+        if (t.tipo === 'impressora-problema') {
+          push.notifyImpressoraProblema(nome, t.codigo, t.apelido, t.ip, t.mac, t.nivel, t.motivos)
+            .catch((err) => console.error('Erro no push de impressora:', err.message));
+          continue;
+        }
+        if (t.tipo === 'impressora-normalizou') {
+          push.notifyImpressoraNormalizou(nome, t.codigo, t.apelido, t.ip, t.mac, t.de)
+            .catch((err) => console.error('Erro no push de impressora normalizada:', err.message));
           continue;
         }
         // máquina reiniciou/desligou: quem detecta é o agente (comparando o
