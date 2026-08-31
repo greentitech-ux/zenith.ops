@@ -39,6 +39,7 @@ const db = require('./firestore');
 const { createCache } = require('./liveCache');
 const redeDiagnostico = require('./redeDiagnostico');
 const nocMaquina = require('./nocMaquina');
+const impressoraStatus = require('./impressoraStatus');
 const ouiFabricantes = require('./ouiFabricantes');
 
 const COLLECTION = db.collection('lojaStatus');
@@ -1067,6 +1068,48 @@ async function registrarTelemetria(codigo, posto, dados, token) {
     }
   }
 
+  // STATUS DAS IMPRESSORAS. O agente pergunta ~HS na porta 9100 e devolve o
+  // texto CRU; quem interpreta e' o servidor (ver impressoraStatus.js) - assim
+  // um parse errado se conserta com deploy, e nao com bump de VERSAO_VIGIA nas
+  // 52 maquinas. So alarma problema RECONHECIDO e REPETIDO: leitura que nao
+  // deu pra entender vira 'desconhecido' e nunca notifica.
+  const statusImp = impressoraStatus.sanitizarStatusImpressoras(dados && dados.statusImpressoras);
+  if (statusImp) {
+    const antes = atual.impressoras || {};
+    const depois = { ...antes };
+    const pendentes = [];
+    for (const item of statusImp) {
+      const lido = impressoraStatus.parseStatusZebra(item.bruto);
+      const aval = impressoraStatus.avaliar(lido);
+      const anterior = antes[item.mac] || null;
+      // 'desconhecido' NAO entra na maquina de estados: nao confirma problema
+      // nem cancela um que ja estava valendo. So carimba a ultima tentativa.
+      if (aval.nivel === 'desconhecido') {
+        depois[item.mac] = { ...(anterior || {}), ip: item.ip, nivel: 'desconhecido', em: agora, semRespostaEm: agora };
+        continue;
+      }
+      const d = impressoraStatus.decidirAviso(anterior && anterior.estado, aval);
+      depois[item.mac] = {
+        ip: item.ip, em: agora, nivel: aval.nivel, motivos: aval.motivos,
+        fila: lido.fila, estado: d.estado, semRespostaEm: null,
+      };
+      if (d.avisar) pendentes.push({ mac: item.mac, ip: item.ip, nivel: d.avisar.nivel, motivos: d.avisar.motivos });
+      if (d.normalizou) pendentes.push({ mac: item.mac, ip: item.ip, nivel: 'ok', motivos: [], de: d.normalizou.de });
+    }
+    patch.impressoras = depois;
+    patch.impressorasEm = agora;
+    if (pendentes.length) {
+      // igual disco/link: quem notifica e' a varredura periodica, num lugar
+      // so - uma falha de push nunca pode derrubar o caminho do agente
+      patch.impressoraAlertaPendente = pendentes;
+      eventos = [...eventos, ...pendentes.map((p) => ({
+        tipo: 'impressora', em: agora,
+        detalhe: `${p.ip || p.mac}: ${p.nivel === 'ok' ? 'normalizou' : p.motivos.join(' · ')}`.slice(0, 200),
+      }))];
+      patch.eventos = eventos.slice(-EVENTOS_MAX);
+    }
+  }
+
   const dispositivos = nocMaquina.sanitizarDispositivos(dados && dados.dispositivos);
   if (dispositivos) {
     // a lista guardada acumula histórico: quem veio agora fica `ativo`, quem
@@ -1612,6 +1655,22 @@ async function varrerAlertas() {
         tipo: 'reiniciar', dias: candidato.reinicioAlertaPendente,
       });
     }
+    // impressora com problema confirmado (ver registrarTelemetria) - mesmo
+    // padrao do disco: o agente marca, a varredura notifica
+    if (Array.isArray(candidato.impressoraAlertaPendente) && candidato.impressoraAlertaPendente.length) {
+      const pend = candidato.impressoraAlertaPendente;
+      await gravarEEspelhar(candidato.codigo, candidato.posto, { impressoraAlertaPendente: null });
+      const daUnidade = apelidosTodos[candidato.codigo] || {};
+      for (const p of pend) {
+        const cfg = normalizarEntradaApelido(daUnidade[p.mac]);
+        transicoes.push({
+          codigo: candidato.codigo, posto: candidato.posto, nome: candidato.nome,
+          tipo: p.nivel === 'ok' ? 'impressora-normalizou' : 'impressora-problema',
+          mac: p.mac, ip: p.ip, nivel: p.nivel, motivos: p.motivos, de: p.de || [],
+          apelido: cfg.apelido,
+        });
+      }
+    }
     if (!candidato.ultimoHeartbeatEm) continue;
     let doc = candidato;
     // A lista acima vem do espelho em memoria. Ele e confiavel porque o
@@ -1886,7 +1945,34 @@ async function flushHeartbeatsPendentes() {
   return r.filter((x) => x.status === 'fulfilled').length;
 }
 
+// QUAIS IMPRESSORAS O AGENTE DAQUELA UNIDADE DEVE SONDAR. Vai na RESPOSTA
+// da telemetria (que o agente ja manda de hora em hora) - sem rota nova e
+// sem requisicao extra. So entra quem o Master marcou na tela como
+// tipo:'impressora' + monitorar:true: ninguem e sondado por padrao, e uma
+// impressora que ninguem marcou nunca recebe um pacote a mais.
+async function impressorasPraSondar(codigo) {
+  const daUnidade = (await getApelidos())[codigo] || {};
+  const marcados = new Set(
+    Object.entries(daUnidade)
+      .filter(([, v]) => { const c = normalizarEntradaApelido(v); return c.monitorar && c.tipo === 'impressora'; })
+      .map(([mac]) => mac)
+  );
+  if (!marcados.size) return [];
+  const espelho = [...(await garantirEspelho()).values()];
+  const out = new Map();
+  for (const doc of espelho) {
+    if (doc.codigo !== codigo) continue;
+    for (const d of doc.dispositivos || []) {
+      // sem IP nao da pra sondar; o MAC e' so a identidade
+      if (!marcados.has(d.mac) || !d.ip || out.has(d.mac)) continue;
+      out.set(d.mac, { mac: d.mac, ip: d.ip });
+    }
+  }
+  return [...out.values()];
+}
+
 module.exports = {
+  impressorasPraSondar,
   flushHeartbeatsPendentes,
   heartbeat, listar, listarResumo, detalhar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
   definirAnydeskId, enviarMensagem, enviarMensagemMuitos, varrerAlertas, atualizarIpLocal, TIPOS_COMPUTADOR, ehCelular,
