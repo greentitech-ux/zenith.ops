@@ -1158,7 +1158,7 @@ function baixarRelatorioCentral(formato){
   if(FILTRO_DATA_DE) params.set('dataDe', FILTRO_DATA_DE);
   if(FILTRO_DATA_ATE) params.set('dataAte', FILTRO_DATA_ATE);
   if(FILTRO_TIPOS.size) params.set('tipo', [...FILTRO_TIPOS].join(','));
-  window.location.href = `/api/central/relatorio.${formato}?${params.toString()}`;
+  verRelatorio(`/api/central/relatorio.${formato}?${params.toString()}`, `Relatório da Central · ${formato.toUpperCase()}`);
 }
 
 // ---------------------------------------------------------------------
@@ -1251,7 +1251,7 @@ function baixarRelatorioChamados(formato){
   }
   msg.classList.add('hidden');
   params.set('token', AUTH_TOKEN);
-  window.location.href = `/api/central/relatorio.${formato}?${params.toString()}`;
+  verRelatorio(`/api/central/relatorio.${formato}?${params.toString()}`, `Relatório de chamados · ${formato.toUpperCase()}`);
 }
 
 // SLA utilizado (%): contado do mesmo jeito que chipSla, so que como

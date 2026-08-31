@@ -577,7 +577,7 @@ function baixarExportacao(formato){
   if(scope!=='all' && !id){ errEl.textContent='Nenhum grupo/subgrupo disponível pra exportar.'; errEl.classList.remove('hidden'); return; }
   const params = new URLSearchParams({ scope, token: AUTH_TOKEN });
   if(id) params.set('id', id);
-  window.location.href = `/api/vault/export.${formato}?${params.toString()}`;
+  verRelatorio(`/api/vault/export.${formato}?${params.toString()}`, `Exportação do Cofre · ${formato.toUpperCase()}`);
 }
 document.getElementById('export-csv-btn').addEventListener('click', ()=>baixarExportacao('csv'));
 document.getElementById('export-pdf-btn').addEventListener('click', ()=>baixarExportacao('pdf'));

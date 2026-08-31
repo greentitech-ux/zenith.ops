@@ -1104,7 +1104,7 @@ async function carregarRecebimentos(){ RECEBIMENTOS = await fetch('/api/inventar
 // ultimos 30 - ver renderRecebimentos) - mesmo padrao de baixarRelatorioDiferencas
 function baixarRelatorioRecebimentos(formato){
   const params = new URLSearchParams({ token: AUTH_TOKEN, unidade: unidadeAtual() });
-  window.location.href = `/api/inventario/recebimentos/relatorio.${formato}?${params.toString()}`;
+  verRelatorio(`/api/inventario/recebimentos/relatorio.${formato}?${params.toString()}`, `Recebimentos · ${formato.toUpperCase()}`);
 }
 
 // item medido em KG/G com peso de embalagem cadastrado (ver i-peso-embalagem
@@ -1448,7 +1448,7 @@ async function carregarSaidas(){ SAIDAS = await fetch('/api/inventario/saidas').
 // - ver renderSaidas) - mesmo padrao de baixarRelatorioRecebimentos/Diferencas
 function baixarRelatorioSaidas(formato){
   const params = new URLSearchParams({ token: AUTH_TOKEN, unidade: unidadeAtual() });
-  window.location.href = `/api/inventario/saidas/relatorio.${formato}?${params.toString()}`;
+  verRelatorio(`/api/inventario/saidas/relatorio.${formato}?${params.toString()}`, `Saídas do estoque · ${formato.toUpperCase()}`);
 }
 
 document.getElementById('form-saida').addEventListener('keydown', (ev)=>{
@@ -1587,7 +1587,7 @@ function baixarRelatorioHistorico(formato){
   });
   const setor = document.getElementById('h-setor').value;
   if(setor) params.set('setor', setor);
-  window.location.href = `/api/inventario/historico-contagens/relatorio.${formato}?${params.toString()}`;
+  verRelatorio(`/api/inventario/historico-contagens/relatorio.${formato}?${params.toString()}`, `Histórico de contagens · ${formato.toUpperCase()}`);
 }
 
 let DIFERENCAS_ATUAL = null;
@@ -1696,7 +1696,7 @@ function baixarRelatorioDiferencas(formato){
   const inicio = document.getElementById('d-inicio').value;
   const fim = document.getElementById('d-fim').value;
   const params = new URLSearchParams({ token: AUTH_TOKEN, unidade, inicio, fim });
-  window.location.href = `/api/inventario/relatorio.${formato}?${params.toString()}`;
+  verRelatorio(`/api/inventario/relatorio.${formato}?${params.toString()}`, `Diferenças do inventário · ${formato.toUpperCase()}`);
 }
 
 // ---------- Catálogo (por loja - CATALOGO ja vem so da loja selecionada no topo) ----------

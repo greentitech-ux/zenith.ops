@@ -6421,6 +6421,85 @@ setTimeout(async () => {
   if (!okFontesLocais) ruins += 1;
   console.log(`${okFontesLocais ? '\u2713' : '\u2717'} Fontes: Archivo/JetBrains Mono saem do proprio servidor, sem depender do Google`);
 
+  // ---------- VER ANTES DE BAIXAR ----------
+  // Pedido do Master: "todo relatorio de PDF ou CSV tem que ter o botao de
+  // ver, pra antes de fazer download poder ver antes". Sao 47 rotas e 27
+  // pontos de download em 15 telas - se cada tela resolvesse do seu jeito,
+  // seria o caso do robo antigo de novo (duas copias divergentes).
+  //
+  // Este teste reprova se alguem: (a) tirar o visualizador do tema.js, (b)
+  // voltar a mandar um relatorio direto pro download sem passar por ele,
+  // (c) cravar cor no lugar do token (quebraria o tema Claro, como ja
+  // aconteceu no suporte-chat.js) ou (d) trocar o parser de CSV por um
+  // split(',') - que mostraria coluna trocada em qualquer relatorio com
+  // virgula dentro de um campo, justamente na tela feita pra conferir.
+  let okVerAntes = false;
+  try {
+    const fsV = require('fs'), pathV = require('path');
+    const dirV = pathV.join(__dirname, 'public');
+    const temaV = fsV.readFileSync(pathV.join(dirV, 'tema.js'), 'utf8');
+    const telas = ['abastecimento-relatorios', 'abastecimento', 'assinar', 'central-historico',
+      'cofre', 'entregas', 'estoque', 'fechamentos', 'formularios', 'grupos', 'ifood',
+      'monitor', 'relatorios', 'saidas', 'usuarios'];
+
+    // nenhuma tela pode mandar relatorio direto pro navegador: e' isso que
+    // pulava a conferencia. O baixarPdf() de formularios.html e a UNICA
+    // excecao legitima - ele fica ao lado de um verPdf() que ja abre a tela
+    const escapou = [];
+    for (const t of telas) {
+      const html = fsV.readFileSync(pathV.join(dirV, `${t}.html`), 'utf8');
+      for (const linha of html.split('\n')) {
+        if (!/window\.open\(|location\.href\s*=/.test(linha)) continue;
+        if (!/\/api\//.test(linha)) continue;
+        if (/formularios\/\$\{encodeURIComponent\(id\)\}\/pdf\?token=/.test(linha)) continue;
+        escapou.push(`${t}: ${linha.trim().slice(0, 60)}`);
+      }
+    }
+
+    // o parser de verdade, tirado do proprio tema.js e executado - o que
+    // importa e o comportamento, nao a presenca da funcao
+    const fonteParser = /function lerCSV\(texto\) \{[\s\S]*?\n  \}/.exec(temaV);
+    // eslint-disable-next-line no-new-func
+    const lerCSV = fonteParser ? new Function(`${fonteParser[0]}\nreturn lerCSV;`)() : null;
+    const casos = lerCSV ? lerCSV('a,b\n"Coca, lata",2\n"diz ""oi""",3\n') : null;
+
+    const conf = {
+      'o tema.js expõe o visualizador pras 53 páginas':
+        /window\.verRelatorio\s*=\s*function/.test(temaV),
+      // blob no iframe: e' o que faz o PDF abrir na tela mesmo com o
+      // Content-Disposition: attachment das 42 rotas - sem isso seria
+      // preciso um parametro `inline` em 42 lugares do servidor
+      'o PDF abre do blob (não precisa mexer nas 42 rotas)':
+        /createObjectURL/.test(temaV) && /<iframe title="Relatório">/.test(temaV),
+      // ver e depois baixar nao pode gerar o relatorio DUAS vezes: cada
+      // geracao le Firestore, que cobra por documento (secao 3)
+      'o Baixar sai do mesmo blob, não de uma segunda geração':
+        /a\.href = blobUrl/.test(temaV) && (temaV.match(/fetch\(url\)/g) || []).length === 1,
+      'o blob é liberado ao fechar': /revokeObjectURL/.test(temaV),
+      'a cor sai do token (não quebra o tema Claro)':
+        /background:var\(--accent,#b8ff3c\);color:#0b0d10/.test(temaV),
+      'o erro do servidor aparece na tela, não um "falhou" genérico':
+        /JSON\.parse\(t\)\.error/.test(temaV),
+      'nenhum relatório escapa da conferência': escapou.length === 0,
+      // as duas armadilhas de um split(',')
+      'o CSV entende vírgula dentro do campo':
+        !!casos && casos[1][0] === 'Coca, lata' && casos[1][1] === '2',
+      'o CSV entende aspa escapada':
+        !!casos && casos[2][0] === 'diz "oi"' && casos[2][1] === '3',
+      'o cabeçalho vem separado das linhas':
+        !!casos && casos.length === 3 && casos[0][0] === 'a' && casos[0][1] === 'b',
+      // planilha de 5 mil linhas nao pode virar 5 mil linhas de DOM
+      'planilha grande é cortada na tela, mas o arquivo baixado é inteiro':
+        /CSV_LINHAS_NA_TELA/.test(temaV) && /O arquivo baixado tem todas/.test(temaV),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okVerAntes = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+    if (escapou.length) console.log(`  escaparam: ${escapou.join(' | ')}`);
+  } catch (e) { okVerAntes = false; console.log('  erro: ' + e.message); }
+  if (!okVerAntes) ruins += 1;
+  console.log(`${okVerAntes ? '✓' : '✗'} Relatórios: dá pra VER antes de baixar, em todo PDF e CSV do app`);
+
   // ---------- Beniboy: um desenho so, servido pelo tema.js ----------
   // O avatar do assistente (BENIBOY.md) aparece em 6 lugares: widget de
   // chat, atendimento publico, Central, item do menu, tela de alarme e o

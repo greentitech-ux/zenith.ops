@@ -599,7 +599,7 @@ function whatsapp(texto){ window.open('https://wa.me/?text='+encodeURIComponent(
 // conferir se o formulário estava certo acabava com a pasta de Downloads
 // cheia de PDF olhado uma vez.
 function verPdf(id){
-  window.open(`/api/formularios/${encodeURIComponent(id)}/pdf?inline=1&token=${encodeURIComponent(AUTH_TOKEN)}`, '_blank');
+  verRelatorio(`/api/formularios/${encodeURIComponent(id)}/pdf?inline=1&token=${encodeURIComponent(AUTH_TOKEN)}`, 'Formulário · PDF');
 }
 function baixarPdf(id){
   window.open(`/api/formularios/${encodeURIComponent(id)}/pdf?token=${encodeURIComponent(AUTH_TOKEN)}`, '_blank');

@@ -797,7 +797,7 @@ async function excluirGrupo(id, nome){
 
 function baixarRelatorioGrupos(formato){
   const params = new URLSearchParams({ token: AUTH_TOKEN });
-  window.location.href = `/api/grupos/relatorio.${formato}?${params.toString()}`;
+  verRelatorio(`/api/grupos/relatorio.${formato}?${params.toString()}`, `Grupos · ${formato.toUpperCase()}`);
 }
 
 async function carregarGrupos(){

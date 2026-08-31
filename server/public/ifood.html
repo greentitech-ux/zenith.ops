@@ -250,7 +250,7 @@ function baixarRelatorioIfood(tabela, formato){
   if(inicio) params.set('inicio', inicio);
   if(fim) params.set('fim', fim);
   if(unidades) params.set('unidades', unidades);
-  window.location.href = `/api/ifood/relatorio-${tabela}.${formato}?${params.toString()}`;
+  verRelatorio(`/api/ifood/relatorio-${tabela}.${formato}?${params.toString()}`, `iFood · ${tabela} · ${formato.toUpperCase()}`);
 }
 
 async function carregar(){

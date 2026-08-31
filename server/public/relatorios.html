@@ -189,7 +189,7 @@ function mudarFiltro(t){ FILTRO = t; renderTabs(); render(); }
 function baixarRelatorioDisputas(formato){
   const params = new URLSearchParams({ token: AUTH_TOKEN });
   if(FILTRO && FILTRO!=='TODOS') params.set('status', FILTRO);
-  window.location.href = `/api/disputes/relatorio.${formato}?${params.toString()}`;
+  verRelatorio(`/api/disputes/relatorio.${formato}?${params.toString()}`, `Disputas · ${formato.toUpperCase()}`);
 }
 
 function render(){

@@ -2597,7 +2597,7 @@ function renderConversa(){
 // ---- acoes SO do Master na conversa ----
 function baixarConversaPdf(){
   if(!CONVERSA_PEDIDO_ID) return;
-  window.location.href = `/api/abastecimento/${encodeURIComponent(CONVERSA_PEDIDO_ID)}/conversa.pdf?token=${encodeURIComponent(AUTH_TOKEN)}`;
+  verRelatorio(`/api/abastecimento/${encodeURIComponent(CONVERSA_PEDIDO_ID)}/conversa.pdf?token=${encodeURIComponent(AUTH_TOKEN)}`, 'Conversa do pedido · PDF');
 }
 async function encerrarConversaMaster(){
   if(!CONVERSA_PEDIDO_ID) return;

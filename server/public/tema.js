@@ -153,6 +153,199 @@
       + '</svg>';
   };
 
+  // ---- VER ANTES DE BAIXAR (window.verRelatorio) ----
+  // Pedido do Master: "todo relatorio de PDF ou CSV tem que ter o botao de
+  // ver, pra antes de fazer download poder ver antes". Sao 47 rotas de
+  // relatorio e 63 botoes espalhados por 25 telas - por isso o visualizador
+  // mora AQUI, no unico arquivo que as 53 paginas ja carregam, e nao
+  // copiado tela a tela (foi assim que o robo antigo virou duas copias
+  // divergentes; ver o comentario do Beniboy acima).
+  //
+  // NADA MUDA NO SERVIDOR. O truque e buscar o arquivo por fetch e mostrar
+  // o BLOB: um blob: dentro de um <iframe> abre no leitor de PDF do
+  // navegador mesmo com o Content-Disposition: attachment que as 42 rotas
+  // mandam - o cabecalho so vale pra navegacao, nao pro blob que ja esta
+  // na memoria. Sem isso seria preciso um parametro `inline` em 42 lugares.
+  //
+  // E O BAIXAR SAI DO MESMO BLOB, de proposito: ver e depois baixar
+  // custaria DUAS geracoes do relatorio, e relatorio aqui le Firestore
+  // (que cobra por documento devolvido - ver secao 3 do CLAUDE.md). Assim
+  // ver+baixar custa o mesmo que o download de hoje.
+  var CSV_LINHAS_NA_TELA = 300;
+
+  // parser de CSV de verdade (aspas, aspa dupla escapada, virgula e quebra
+  // de linha DENTRO do campo). Um split(',') mostraria a coluna trocada em
+  // qualquer relatorio com observacao ou nome de item com virgula - e a
+  // tela existe justamente pra conferir antes de mandar pra reuniao.
+  function lerCSV(texto) {
+    var linhas = [];
+    var campo = '';
+    var linha = [];
+    var aspas = false;
+    var t = String(texto || '').replace(/^﻿/, '');
+    for (var i = 0; i < t.length; i += 1) {
+      var c = t[i];
+      if (aspas) {
+        if (c === '"') {
+          if (t[i + 1] === '"') { campo += '"'; i += 1; } else { aspas = false; }
+        } else { campo += c; }
+      } else if (c === '"') { aspas = true; } else if (c === ',') {
+        linha.push(campo); campo = '';
+      } else if (c === '\n' || c === '\r') {
+        if (c === '\r' && t[i + 1] === '\n') i += 1;
+        linha.push(campo); campo = '';
+        linhas.push(linha); linha = [];
+      } else { campo += c; }
+    }
+    if (campo.length || linha.length) { linha.push(campo); linhas.push(linha); }
+    return linhas.filter(function (l) { return l.length > 1 || (l[0] || '').trim() !== ''; });
+  }
+
+  function escaparHtml(v) {
+    return String(v == null ? '' : v)
+      .split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;')
+      .split('"').join('&quot;');
+  }
+
+  // nome do arquivo como o SERVIDOR mandou - as rotas ja montam um nome com
+  // periodo e unidade, e reinventar aqui daria dois nomes pro mesmo arquivo
+  function nomeDoCabecalho(disp, url) {
+    var m = /filename="?([^";]+)"?/.exec(String(disp || ''));
+    if (m) return m[1];
+    var caminho = String(url).split('?')[0].split('/').pop();
+    return caminho || 'relatorio';
+  }
+
+  function estiloVisualizador() {
+    if (document.getElementById('zrel-css')) return;
+    var st = document.createElement('style');
+    st.id = 'zrel-css';
+    // Sem cor cravada: no tema Claro o --accent vira verde escuro (ver
+    // aplicar() abaixo) e um #b8ff3c aqui ficaria ilegivel no branco - foi
+    // exatamente o que aconteceu no suporte-chat.js.
+    st.textContent = ''
+      + '.zrel-fundo{position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.72);'
+      + 'display:flex;align-items:center;justify-content:center;padding:16px;}'
+      + '.zrel-caixa{background:var(--panel,#12161c);border:1px solid var(--line,#232a33);'
+      + 'border-radius:12px;width:min(1100px,100%);height:min(88vh,100%);display:flex;'
+      + 'flex-direction:column;overflow:hidden;box-shadow:0 18px 60px rgba(0,0,0,.5);}'
+      + '.zrel-topo{display:flex;align-items:center;gap:10px;padding:11px 14px;'
+      + 'border-bottom:1px solid var(--line,#232a33);flex-wrap:wrap;}'
+      + '.zrel-titulo{font-family:var(--mono,monospace);font-size:12px;color:var(--text,#e6edf3);'
+      + 'font-weight:700;flex:1;min-width:140px;word-break:break-all;}'
+      + '.zrel-btn{border:1px solid var(--line,#232a33);background:var(--panel2,#181d24);'
+      + 'color:var(--text,#e6edf3);border-radius:8px;padding:7px 13px;font-size:12px;'
+      + 'font-weight:700;cursor:pointer;font-family:var(--sans,sans-serif);}'
+      + '.zrel-btn.baixar{background:var(--accent,#b8ff3c);color:#0b0d10;border-color:transparent;}'
+      + '.zrel-btn[disabled]{opacity:.5;cursor:default;}'
+      + '.zrel-corpo{flex:1;overflow:auto;background:var(--bg,#0b0d10);}'
+      + '.zrel-corpo iframe{width:100%;height:100%;border:0;display:block;background:#fff;}'
+      + '.zrel-aviso{padding:18px;font-size:12.5px;color:var(--muted,#8b949e);'
+      + 'font-family:var(--sans,sans-serif);}'
+      + '.zrel-aviso b{color:var(--bad,#f85149);}'
+      + '.zrel-tab{width:100%;border-collapse:collapse;font-family:var(--mono,monospace);font-size:11.5px;}'
+      + '.zrel-tab th,.zrel-tab td{border-bottom:1px solid var(--line,#232a33);padding:6px 9px;'
+      + 'text-align:left;vertical-align:top;white-space:pre-wrap;color:var(--text,#e6edf3);}'
+      + '.zrel-tab th{position:sticky;top:0;background:var(--panel2,#181d24);color:var(--muted,#8b949e);'
+      + 'font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;z-index:1;}'
+      + '.zrel-tab tr:nth-child(even) td{background:rgba(127,127,127,.05);}';
+    document.head.appendChild(st);
+  }
+
+  // Mostra o relatorio e so depois oferece o download. `url` e a MESMA que o
+  // botao ja usava (com o token na query), entao nenhuma tela precisa saber
+  // como o arquivo e buscado.
+  window.verRelatorio = function (url, titulo) {
+    estiloVisualizador();
+    var ehCsv = /\.csv(\?|$)/i.test(String(url));
+    var blobUrl = null;
+    var fundo = document.createElement('div');
+    fundo.className = 'zrel-fundo';
+    fundo.innerHTML = ''
+      + '<div class="zrel-caixa" role="dialog" aria-modal="true">'
+      + '<div class="zrel-topo">'
+      + '<span class="zrel-titulo">' + escaparHtml(titulo || (ehCsv ? 'Relatório CSV' : 'Relatório PDF')) + '</span>'
+      + '<button type="button" class="zrel-btn baixar" disabled>⬇ Baixar</button>'
+      + '<button type="button" class="zrel-btn fechar">Fechar</button>'
+      + '</div>'
+      + '<div class="zrel-corpo"><div class="zrel-aviso">Gerando o relatório…</div></div>'
+      + '</div>';
+    document.body.appendChild(fundo);
+
+    var corpo = fundo.querySelector('.zrel-corpo');
+    var btnBaixar = fundo.querySelector('.zrel-btn.baixar');
+
+    function fechar() {
+      // solta a memoria do blob: sem isso, abrir dez relatorios grandes numa
+      // sessao deixa dez copias presas ate a aba fechar
+      if (blobUrl) { try { URL.revokeObjectURL(blobUrl); } catch (e) { /* ok */ } }
+      document.removeEventListener('keydown', naTecla);
+      if (fundo.parentNode) fundo.parentNode.removeChild(fundo);
+    }
+    function naTecla(e) { if (e.key === 'Escape') fechar(); }
+    document.addEventListener('keydown', naTecla);
+    fundo.querySelector('.zrel-btn.fechar').addEventListener('click', fechar);
+    // clique no fundo fecha; clique DENTRO da caixa nao
+    fundo.addEventListener('click', function (e) { if (e.target === fundo) fechar(); });
+
+    fetch(url).then(function (r) {
+      if (!r.ok) {
+        // as rotas devolvem { error } com 400 - mostrar a mensagem do
+        // servidor ("Período inválido") vale mais que "falhou"
+        return r.text().then(function (t) {
+          var msg = t;
+          try { msg = JSON.parse(t).error || t; } catch (e) { /* nao era JSON */ }
+          throw new Error(msg || ('Erro ' + r.status));
+        });
+      }
+      var nome = nomeDoCabecalho(r.headers.get('Content-Disposition'), url);
+      return r.blob().then(function (b) { return { blob: b, nome: nome }; });
+    }).then(function (d) {
+      blobUrl = URL.createObjectURL(d.blob);
+      btnBaixar.disabled = false;
+      btnBaixar.addEventListener('click', function () {
+        var a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = d.nome;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      });
+      if (!ehCsv) {
+        corpo.innerHTML = '<iframe title="Relatório"></iframe>';
+        corpo.querySelector('iframe').src = blobUrl;
+        return null;
+      }
+      return d.blob.text().then(function (texto) {
+        var linhas = lerCSV(texto);
+        if (!linhas.length) { corpo.innerHTML = '<div class="zrel-aviso">O relatório saiu vazio.</div>'; return null; }
+        var cab = linhas[0];
+        var dados = linhas.slice(1);
+        // planilha grande nao vira 5 mil linhas de DOM: a tela e pra
+        // conferir, e o arquivo baixado continua completo
+        var mostrar = dados.slice(0, CSV_LINHAS_NA_TELA);
+        var html = '<table class="zrel-tab"><thead><tr>';
+        cab.forEach(function (c) { html += '<th>' + escaparHtml(c) + '</th>'; });
+        html += '</tr></thead><tbody>';
+        mostrar.forEach(function (l) {
+          html += '<tr>';
+          for (var i = 0; i < cab.length; i += 1) html += '<td>' + escaparHtml(l[i]) + '</td>';
+          html += '</tr>';
+        });
+        html += '</tbody></table>';
+        if (dados.length > mostrar.length) {
+          html += '<div class="zrel-aviso">Mostrando ' + mostrar.length + ' de '
+            + dados.length + ' linhas. O arquivo baixado tem todas.</div>';
+        }
+        corpo.innerHTML = html;
+        return null;
+      });
+    }).catch(function (err) {
+      corpo.innerHTML = '<div class="zrel-aviso"><b>Não deu pra gerar o relatório.</b><br>'
+        + escaparHtml(err && err.message ? err.message : 'Tente de novo.') + '</div>';
+    });
+  };
+
   // ---- aviso de mudanca de endereco ----
   // Quem entra pelo endereco antigo (adyen-monitor.onrender.com) precisa
   // saber que o NoPulso mudou de casa - senao continua usando o velho pra

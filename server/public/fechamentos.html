@@ -2951,7 +2951,7 @@ function baixarRelatorioFechamentosUnidades(formato){
   if(fim) params.set('fim', fim);
   if(grupo) params.set('grupo', grupo);
   if(unidades) params.set('unidades', unidades);
-  window.location.href = `/api/fechamentos/relatorio-unidades.${formato}?${params.toString()}`;
+  verRelatorio(`/api/fechamentos/relatorio-unidades.${formato}?${params.toString()}`, `Fechamentos por unidade · ${formato.toUpperCase()}`);
 }
 
 function baixarRelatorioFechamentos(formato){
@@ -2966,7 +2966,7 @@ function baixarRelatorioFechamentos(formato){
   // mesma da tabela
   if(COLUNAS_FORA_RELATORIO.size) params.set('ocultas', [...COLUNAS_FORA_RELATORIO].join(','));
   if(ORDEM_COLUNAS.length) params.set('ordem', ORDEM_COLUNAS.join(','));
-  window.location.href = `/api/fechamentos/relatorio.${formato}?${params.toString()}`;
+  verRelatorio(`/api/fechamentos/relatorio.${formato}?${params.toString()}`, `Relatório de fechamentos · ${formato.toUpperCase()}`);
 }
 
 let resizeTimer = null;

@@ -742,7 +742,7 @@ async function boot(){
 
 function baixarRelatorioUsuarios(formato){
   const params = new URLSearchParams({ token: AUTH_TOKEN });
-  window.location.href = `/api/users/relatorio.${formato}?${params.toString()}`;
+  verRelatorio(`/api/users/relatorio.${formato}?${params.toString()}`, `Usuários · ${formato.toUpperCase()}`);
 }
 
 async function carregarUsuarios(){

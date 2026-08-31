@@ -487,7 +487,7 @@ function aplicarNav(){
 // incidentes de fraude pra diretoria/CEO. So o Master ve o botao.
 function baixarRelatorioFraude(formato){
   const params = new URLSearchParams({ token: AUTH_TOKEN });
-  window.location.href = `/api/fraude/relatorio.${formato}?${params.toString()}`;
+  verRelatorio(`/api/fraude/relatorio.${formato}?${params.toString()}`, `Relatório de fraude · ${formato.toUpperCase()}`);
 }
 
 // relatorio do painel Alertas de falha/fraude (CSV/PDF) - mesmo esquema do
@@ -495,7 +495,7 @@ function baixarRelatorioFraude(formato){
 // fraude suspeita nativa, fim de disputa). So o Master ve o botao.
 function baixarRelatorioAlertas(formato){
   const params = new URLSearchParams({ token: AUTH_TOKEN });
-  window.location.href = `/api/alertas/relatorio.${formato}?${params.toString()}`;
+  verRelatorio(`/api/alertas/relatorio.${formato}?${params.toString()}`, `Alertas de falha/fraude · ${formato.toUpperCase()}`);
 }
 
 // relatorios (CSV/PDF) dos paineis do Monitor de transacoes (Transacoes,
@@ -512,7 +512,7 @@ function baixarRelatorioMonitor(tipo, formato){
   if(fim) params.set('fim', fim);
   if(status) params.set('status', status);
   if(unidades) params.set('unidades', unidades);
-  window.location.href = `/api/monitor/relatorio-${tipo}.${formato}?${params.toString()}`;
+  verRelatorio(`/api/monitor/relatorio-${tipo}.${formato}?${params.toString()}`, `Monitor · ${tipo} · ${formato.toUpperCase()}`);
 }
 
 async function tentarEntrar(){

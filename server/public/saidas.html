@@ -948,7 +948,7 @@ function baixarRelatorio(formato){
   if(SEL_UNIDADE.size) params.set('unidades', [...SEL_UNIDADE].join(','));
   if(inicio) params.set('inicio', inicio);
   if(fim) params.set('fim', fim);
-  window.location.href = `/api/saidas-painel/relatorio.${formato}?${params.toString()}`;
+  verRelatorio(`/api/saidas-painel/relatorio.${formato}?${params.toString()}`, `Saídas · ${formato.toUpperCase()}`);
 }
 
 async function boot(){

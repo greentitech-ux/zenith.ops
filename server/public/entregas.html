@@ -304,7 +304,7 @@ function baixarRelatorioEntregas(tabela, formato){
   if(inicio) params.set('inicio', inicio);
   if(fim) params.set('fim', fim);
   if(unidades) params.set('unidades', unidades);
-  window.location.href = `/api/entregas/relatorio-${tabela}.${formato}?${params.toString()}`;
+  verRelatorio(`/api/entregas/relatorio-${tabela}.${formato}?${params.toString()}`, `Entregas · ${tabela} · ${formato.toUpperCase()}`);
 }
 
 async function carregar(){

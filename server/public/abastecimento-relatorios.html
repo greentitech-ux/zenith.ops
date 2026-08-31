@@ -683,7 +683,7 @@ async function carregarExplicacaoTurno(ate){
 function baixarPdfTurno(){
   if(!TURNO_ATE) return;
   const token = localStorage.getItem('authToken') || '';
-  window.open(`/api/abastecimento/turno/${encodeURIComponent(TURNO_ATE)}/relatorio.pdf?token=${encodeURIComponent(token)}`, '_blank');
+  verRelatorio(`/api/abastecimento/turno/${encodeURIComponent(TURNO_ATE)}/relatorio.pdf?token=${encodeURIComponent(token)}`, 'Divergência do turno · PDF');
 }
 
 // baixa o PDF do mesmo período que a tela está mostrando (preset ou
@@ -695,7 +695,7 @@ function baixarPdfDias(){
   const { inicio, fim } = periodoAtual();
   const token = localStorage.getItem('authToken') || '';
   const flag = SO_DIVERGENCIAS ? '&divergencias=1' : '';
-  window.open(`/api/abastecimento/fluxo/relatorio.pdf?inicio=${inicio}&fim=${fim}${flag}&token=${encodeURIComponent(token)}`, '_blank');
+  verRelatorio(`/api/abastecimento/fluxo/relatorio.pdf?inicio=${inicio}&fim=${fim}${flag}&token=${encodeURIComponent(token)}`, 'Dia a dia do carrinho · PDF');
 }
 
 // ---------- relatório escrito de ajustes/desvios (prosa, com QUEM contou/
@@ -831,7 +831,7 @@ function baixarPdfDivergencias(formato){
   const token = localStorage.getItem('authToken') || '';
   const q = queryDivergencias();
   const f = formato === 'csv' ? 'csv' : 'pdf';
-  window.open(`/api/abastecimento/divergencias/relatorio.${f}${q ? q + '&' : '?'}token=${encodeURIComponent(token)}`, '_blank');
+  verRelatorio(`/api/abastecimento/divergencias/relatorio.${f}${q ? q + '&' : '?'}token=${encodeURIComponent(token)}`, `Divergências do carrinho · ${f.toUpperCase()}`);
 }
 
 // PDF/CSV do comparativo por periodo. Periodo separado do seletor de UM dia
@@ -843,13 +843,13 @@ function baixarComparativoPeriodo(formato){
   if(inicio > fim){ alert('A data de início não pode ser depois da data de fim.'); return; }
   const token = localStorage.getItem('authToken') || '';
   const soDiv = document.getElementById('comp-so-divergencias').checked ? '&divergencias=1' : '';
-  window.open(`/api/abastecimento/comparativo-fechamento/periodo.${formato}?inicio=${inicio}&fim=${fim}${soDiv}&token=${encodeURIComponent(token)}`, '_blank');
+  verRelatorio(`/api/abastecimento/comparativo-fechamento/periodo.${formato}?inicio=${inicio}&fim=${fim}${soDiv}&token=${encodeURIComponent(token)}`, `Carrinho x Fechamento · ${formato.toUpperCase()}`);
 }
 
 function baixarRelatorioEscrito(){
   const { inicio, fim } = periodoAtual();
   const token = localStorage.getItem('authToken') || '';
-  window.open(`/api/abastecimento/divergencias/relatorio-escrito.pdf?inicio=${inicio}&fim=${fim}&token=${encodeURIComponent(token)}`, '_blank');
+  verRelatorio(`/api/abastecimento/divergencias/relatorio-escrito.pdf?inicio=${inicio}&fim=${fim}&token=${encodeURIComponent(token)}`, 'Relatório escrito de desvios · PDF');
 }
 
 function alternarTurnos(){

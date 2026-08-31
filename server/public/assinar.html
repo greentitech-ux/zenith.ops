@@ -187,7 +187,7 @@ async function enviar(){
 }
 
 function baixarPdf(){
-  window.open(`/api/formularios-publico/${encodeURIComponent(FORM)}/pdf?token=${encodeURIComponent(TOKEN)}`, '_blank');
+  verRelatorio(`/api/formularios-publico/${encodeURIComponent(FORM)}/pdf?token=${encodeURIComponent(TOKEN)}`, 'Formulário assinado · PDF');
 }
 
 async function carregar(){
