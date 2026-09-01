@@ -35,12 +35,23 @@ function getCliente() {
 // imprime do seu jeito) - e o numero lido aqui vai direto pro Faturamento.
 // Configuravel por env pra trocar sem deploy de codigo (so redeploy de
 // config no Render): OCR_MODELO troca o modelo das 2 leituras normais.
-const MODELO = process.env.OCR_MODELO || 'claude-sonnet-5';
+const MODELO = process.env.OCR_MODELO || 'claude-haiku-4-5';
 // O DESEMPATE usa um modelo mais forte, e SO roda quando as duas leituras
 // normais discordaram - o dia normal nao paga por ele. E a versao barata de
 // "aumentar o modelo": em vez de pagar 5x em toda leitura, paga so no campo
 // e no dia em que o modelo normal tropecou.
 const MODELO_DESEMPATE = process.env.OCR_MODELO_DESEMPATE || 'claude-opus-5';
+// DESEMPATE DESLIGADO POR PADRAO. Decisao do Master, com a frase dele: "tire
+// o desempate - se der erro eles preenchem a mao". A 3a chamada rodava no
+// modelo forte (Opus custa 5x a entrada do Haiku e 5x a saida) e so pra
+// resolver campo em que as duas leituras discordaram - e o consenso JA
+// deixa esse campo livre pra digitar, com as duas leituras a mostra. Ou
+// seja: sem o desempate ninguem fica sem saida, so digita o campo.
+//
+// Fica atras de env em vez de ser apagado: se a troca pro Haiku fizer as
+// leituras discordarem demais e a digitacao virar peso, OCR_DESEMPATE=1
+// devolve a 3a chamada sem deploy - mesmo espirito do PRE_AQUECER_CACHES.
+const DESEMPATE_LIGADO = process.env.OCR_DESEMPATE === '1';
 
 // A chave que vai pro modelo e prefixada pela secao ("canal." / "forma.")
 // porque os dois cadastros sao independentes e podem ter o mesmo campo: uma
@@ -583,6 +594,11 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
   // o dia em que as duas leituras batem nao paga a terceira chamada
   const pendentes = (consenso.suspeitos || []).filter((sp) => Array.isArray(sp.candidatos));
   if (!pendentes.length) return consenso;
+  // sem desempate, o campo divergente fica exatamente como o consenso o
+  // deixou: liberado pra digitar, com as duas leituras a mostra. Nao e um
+  // erro escondido - e a tela pedindo confirmacao humana no unico campo em
+  // que as duas leituras nao bateram.
+  if (!DESEMPATE_LIGADO) return consenso;
   try {
     return desempatar(consenso, await umaLeitura(MODELO_DESEMPATE));
   } catch (e) {

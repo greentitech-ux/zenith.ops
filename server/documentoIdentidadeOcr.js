@@ -38,7 +38,11 @@ function getCliente() {
 // papel gasto, foto torta) - e o dado lido vai pra ficha trabalhista
 const ocrUso = require('./ocrUso');
 
-const MODELO = 'claude-sonnet-5';
+// Haiku por decisao do Master (custo): metade da entrada e da saida do
+// Sonnet. Leitura que sair errada e corrigida a mao na propria tela - o
+// resultado do OCR sempre foi sugestao pra conferir, nunca valor final.
+// Env pra voltar sem deploy se a qualidade nao servir.
+const MODELO = process.env.OCR_MODELO || 'claude-haiku-4-5';
 
 const MAX_ARQUIVOS = 3; // frente + verso + eventual segunda via
 const IDADE_MIN = 14;   // menor aprendiz (CLT art. 403)

@@ -32,7 +32,11 @@ function getCliente() {
 // bom pra tarefa simples, mas arrisca mais em foto borrada/letra pequena, e
 // esse dado agora tambem alimenta o custo operacional do DRE (ver
 // criarRecebimento em inventario.js), entao a barra de confianca subiu
-const MODELO = 'claude-sonnet-5';
+// Haiku por decisao do Master (custo): metade da entrada e da saida do
+// Sonnet. Leitura que sair errada e corrigida a mao na propria tela - o
+// resultado do OCR sempre foi sugestao pra conferir, nunca valor final.
+// Env pra voltar sem deploy se a qualidade nao servir.
+const MODELO = process.env.OCR_MODELO || 'claude-haiku-4-5';
 
 function montarPrompt(catalogo) {
   const catalogoTexto = catalogo.map((i) => `${i.id} | ${i.nome} | unidade: ${i.unidadeMedida}`).join('\n') || '(catálogo vazio)';

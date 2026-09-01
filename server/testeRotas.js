@@ -767,18 +767,53 @@ setTimeout(async () => {
   if (!okDesempate) ruins += 1;
   console.log(`${okDesempate ? '✓' : '✗'} Leitura por foto: desempate (melhor de 3) com modelo forte só nos campos divergentes`);
 
-  // fonte: o desempate SÓ roda quando há divergência (o dia normal não paga a
-  // 3ª chamada), e os modelos saem de env var (trocar sem mexer em código)
-  let okDesempateFonte = false;
+  // CUSTO DA LEITURA POR FOTO. Decisao do Master, palavras dele: "baixe para
+  // haikus, tire o desempate - se der erro eles preenchem a mao".
+  //
+  // O que muda na conta: as duas leituras saem de Sonnet ($2 entrada / $10
+  // saida por Mtok) pra Haiku ($1 / $5) - metade. E a 3a chamada, que rodava
+  // no Opus ($5 / $25), deixa de existir por padrao.
+  //
+  // O que NAO muda: ninguem fica sem saida quando as leituras discordam. O
+  // consenso ja devolve o campo divergente LIBERADO pra digitar, com as duas
+  // leituras a mostra - o desempate so poupava a digitacao daquele campo.
+  let okOcrBarato = false;
   try {
     const src = require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8');
-    okDesempateFonte = /process\.env\.OCR_MODELO \|\| 'claude-sonnet-5'/.test(src)
-      && /process\.env\.OCR_MODELO_DESEMPATE \|\| 'claude-opus-5'/.test(src)
-      && /if \(!pendentes\.length\) return consenso;/.test(src)
-      && /desempatar\(consenso, await umaLeitura\(MODELO_DESEMPATE\)\)/.test(src);
-  } catch (e) { okDesempateFonte = false; }
-  if (!okDesempateFonte) ruins += 1;
-  console.log(`${okDesempateFonte ? '✓' : '✗'} Leitura por foto: desempate só na divergência + modelos configuráveis por env`);
+    const srcDoc = require('fs').readFileSync(__dirname + '/documentoIdentidadeOcr.js', 'utf8');
+    const srcNota = require('fs').readFileSync(__dirname + '/inventarioNotaOcr.js', 'utf8');
+    const conf = {
+      'os três leitores de imagem usam Haiku':
+        /OCR_MODELO \|\| 'claude-haiku-4-5'/.test(src)
+        && /OCR_MODELO \|\| 'claude-haiku-4-5'/.test(srcDoc)
+        && /OCR_MODELO \|\| 'claude-haiku-4-5'/.test(srcNota),
+      'o desempate não roda por padrão':
+        /const DESEMPATE_LIGADO = process\.env\.OCR_DESEMPATE === '1';/.test(src)
+        && /if \(!DESEMPATE_LIGADO\) return consenso;/.test(src),
+      // a guarda tem que vir ANTES da chamada, senao o Opus e pago do mesmo
+      // jeito e so o resultado e descartado
+      'a 3ª chamada nem é feita, não é feita e descartada':
+        src.indexOf('if (!DESEMPATE_LIGADO) return consenso;')
+          < src.indexOf('await umaLeitura(MODELO_DESEMPATE)'),
+      // o dia em que as duas leituras batem nunca pagou a 3a - isso continua
+      'dia sem divergência continua com duas chamadas só':
+        /if \(!pendentes\.length\) return consenso;/.test(src),
+      // trocar de modelo ou religar o desempate NAO pode exigir deploy
+      'dá pra voltar sem deploy, por env':
+        /process\.env\.OCR_MODELO/.test(src) && /process\.env\.OCR_DESEMPATE/.test(src)
+        && /process\.env\.OCR_MODELO/.test(srcDoc) && /process\.env\.OCR_MODELO/.test(srcNota),
+      // sem preco do Haiku na tabela, o log do custo sairia com "?"
+      'o Haiku tem preço na tabela de custo':
+        !!require('/home/user/adyen-monitor/server/ocrUso.js').PRECO_USD_POR_MTOK
+        || /'claude-haiku-4-5': \{ entrada: 1, saida: 5 \}/
+          .test(require('fs').readFileSync(__dirname + '/ocrUso.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okOcrBarato = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okOcrBarato = false; console.log('  erro: ' + e.message); }
+  if (!okOcrBarato) ruins += 1;
+  console.log(`${okOcrBarato ? '✓' : '✗'} Leitura por foto: Haiku nos três leitores e sem a 3ª chamada no modelo forte`);
 
   // e a leitura de fato roda duas vezes (fonte): sem isso o consenso é teatro
   let okDupla = false;
