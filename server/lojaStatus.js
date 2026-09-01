@@ -1355,6 +1355,7 @@ const COMANDO_REINICIAR_ANYDESK = [
   '  "Nenhum servico do AnyDesk encontrado nesta maquina."',
   '} else {',
   '  $saida = @()',
+  '  $semAdmin = $false',
   '  foreach ($s in $svcs) {',
   '    try {',
   '      Restart-Service -InputObject $s -Force -ErrorAction Stop',
@@ -1369,9 +1370,43 @@ const COMANDO_REINICIAR_ANYDESK = [
   '      $msg = $_.Exception.Message',
   '      if ($msg -match "abrir o servi" -or $msg -match "cannot open .* service" -or $msg -match "Access is denied" -or $msg -match "Acesso negado") {',
   '        $msg = "o NOCZenith desta maquina nao esta como Administrador - reinstale pelo botao Copiar comando num PowerShell como Administrador"',
+  '        $semAdmin = $true',
   '      }',
   '      $saida += "$($s.Name): FALHOU - $msg"',
   '    }',
+  '  }',
+  // SAIDA SEM ADMINISTRADOR. Mexer no SERVICO exige elevacao; matar e
+  // reabrir o PROCESSO do AnyDesk na sessao do usuario, nao. Foi o caso da
+  // STC-Servidor: o comando achou o servico, levou acesso negado, e o
+  // Master ficou sem nenhuma via ate a maquina.
+  //
+  // O QUE ISSO DEVOLVE, E O QUE NAO DEVOLVE: sem o servico de pe, o AnyDesk
+  // roda em modo usuario - a maquina volta a aparecer online e aceita
+  // conexao, mas o acesso NAO ASSISTIDO (entrar sem ninguem confirmar)
+  // continua dependendo do servico. E' um paliativo pra recuperar o acesso
+  // hoje, nao substituto de reinstalar o agente como Administrador - e a
+  // mensagem diz isso, pra ninguem achar que resolveu de vez.
+  //
+  // So roda quando faltou privilegio: se o servico reiniciou, mexer no
+  // processo por cima so atrapalharia.
+  '  if ($semAdmin) {',
+  '    try {',
+  '      $proc = @(Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue)',
+  '      $exe = $null',
+  '      foreach ($p in $proc) { try { if ($p.Path) { $exe = $p.Path } } catch {} }',
+  '      if (-not $exe) {',
+  '        foreach ($c in @("$env:ProgramFiles\\AnyDesk\\AnyDesk.exe", "${env:ProgramFiles(x86)}\\AnyDesk\\AnyDesk.exe", "$env:APPDATA\\AnyDesk\\AnyDesk.exe")) {',
+  '          if (Test-Path $c) { $exe = $c; break }',
+  '        }',
+  '      }',
+  '      if (-not $exe) { $saida += "sem Administrador e nao achei o AnyDesk.exe pra reabrir" }',
+  '      else {',
+  '        foreach ($p in $proc) { try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {} }',
+  '        Start-Sleep -Seconds 2',
+  '        Start-Process -FilePath $exe -ErrorAction Stop',
+  '        $saida += "AnyDesk reaberto na sessao do usuario (acesso nao assistido so volta com o servico - reinstale o NOCZenith como Administrador)"',
+  '      }',
+  '    } catch { $saida += "tentativa sem Administrador falhou: $($_.Exception.Message)" }',
   '  }',
   '  Start-Sleep -Seconds 4',
   '  $depois = @(Get-Service -ErrorAction SilentlyContinue |',

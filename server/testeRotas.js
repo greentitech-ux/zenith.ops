@@ -9165,6 +9165,28 @@ setTimeout(async () => {
         && /Copiar comando/.test(cmd),
       'qualquer outro erro continua voltando inteiro':
         /\$msg = \$_\.Exception\.Message/.test(cmd) && /FALHOU - \$msg/.test(cmd),
+      // SAIDA SEM ADMINISTRADOR: foi o beco da STC-Servidor - o comando achou
+      // o servico, levou acesso negado, e o Master ficou sem nenhuma via ate
+      // a maquina. Mexer no SERVICO exige elevacao; reabrir o PROCESSO na
+      // sessao do usuario, nao.
+      'sem Administrador, tenta reabrir o processo do AnyDesk':
+        /if \(\$semAdmin\) \{/.test(cmd)
+        && /Get-Process -Name "AnyDesk"/.test(cmd)
+        && /Start-Process -FilePath \$exe/.test(cmd),
+      // so quando faltou privilegio: se o servico reiniciou, mexer no
+      // processo por cima so atrapalharia
+      'o paliativo NÃO roda quando o serviço reiniciou normal':
+        cmd.indexOf('$semAdmin = $true') > 0
+        && cmd.indexOf('$semAdmin = $true') < cmd.indexOf('if ($semAdmin)'),
+      // sem o servico, o acesso NAO ASSISTIDO nao volta - dizer isso evita
+      // achar que resolveu de vez e deixar a maquina assim
+      'e diz que isso não substitui reinstalar como Administrador':
+        /acesso nao assistido so volta com o servico/.test(cmd),
+      // caminho muda com o tipo de instalacao (por maquina x por usuario):
+      // procurar num lugar so daria "nao achei" em parte do parque
+      'procura o AnyDesk.exe em mais de um lugar':
+        cmd.includes('ProgramFiles\\AnyDesk') && cmd.includes('APPDATA\\AnyDesk')
+        && cmd.includes('ProgramFiles(x86)'),
       'continua exigindo a senha do Master': semSenha.status === 401 || semSenha.status === 400,
       'a rota enfileira a tarefa do AnyDesk na máquina de verdade':
         enviou.status === 200 && resp.tarefa === 'anydesk'
