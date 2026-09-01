@@ -9039,6 +9039,57 @@ setTimeout(async () => {
   console.log(`${okEstornoFormulario ? '✓' : '✗'} Estorno aprovado vira formulário de pagamento, com favorecido e Pix do que o cliente preencheu`);
 
   // ------------------------------------------------------------------
+  // AS CORRECOES PENDENTES ANTES DO SELETOR DE DIA. A aba dizia "1
+  // pendente", mas a lista de fechamentos mostra UM dia por vez - e nada na
+  // tela dizia QUAL dia. Descobrir era abrir o calendario e ir chutando
+  // data. Pedido do Master: "que as solicitacoes pendentes fiquem acima do
+  // seletor de data pra nao ter que adivinhar qual data tem a solicitacao".
+  //
+  // O dado ja existia todo: o pedido de correcao guarda unidade, data e
+  // numeroTicket (ver solicitarEdicao em fechamentosLive.js). Faltava a
+  // tela mostrar antes de perguntar a data.
+  let okPendentesFech = false;
+  try {
+    const fl = require('/home/user/adyen-monitor/server/fechamentosLive.js');
+    const htmlP = require('fs').readFileSync(require('path').join(__dirname, 'public', 'central-historico.html'), 'utf8');
+    const i = htmlP.indexOf('id="fech-pendentes"');
+    const j = htmlP.indexOf('id="fech-data"');
+    const fn = /function renderPendentesFechamento\(\)\{[\s\S]*?\n\}/.exec(htmlP);
+    const pulo = /function irParaFechamentoPendente\(data, fechamentoId\)\{[\s\S]*?\n\}/.exec(htmlP);
+
+    const conf = {
+      // a ordem na TELA e o pedido inteiro: embaixo do seletor nao resolve
+      'o bloco de pendências vem ANTES do seletor de dia': i > 0 && j > 0 && i < j,
+      'a lista sai dos pedidos com status PENDENTE':
+        !!fn && /EDICOES_FECHAMENTO\.filter\(e=>e\.status==='PENDENTE'\)/.test(fn[0]),
+      // sem a data e a loja na linha, o bloco so repete o que a aba ja dizia
+      'cada pendência mostra a data e a loja':
+        !!fn && /fmtData\(e\.data\)/.test(fn[0]) && /e\.unidadeNome\|\|e\.unidade/.test(fn[0]),
+      'clicar leva pro dia da pendência':
+        !!pulo && /getElementById\('fech-data'\)\.value = data/.test(pulo[0])
+        && /renderListaFechamentos\(\)/.test(pulo[0]),
+      // o dia pode ter varios fechamentos: trocar a data sem apontar qual
+      // deles e devolveria o mesmo "adivinha"
+      'e aponta qual card, não só o dia':
+        !!pulo && /fech-card-'\+fechamentoId/.test(pulo[0])
+        && /id="fech-card-\$\{f\.id\}"/.test(htmlP),
+      'mais antiga primeiro (é a que segura o fechamento do mês)':
+        !!fn && /localeCompare/.test(fn[0]),
+      'sem pendência nenhuma o bloco some da tela':
+        !!fn && /el\.classList\.add\('hidden'\)/.test(fn[0]),
+      // o dado que a tela usa e o que o servidor ja grava - nada inventado
+      'o pedido de correção grava data, unidade e ticket':
+        /data: atual\.data/.test(require('fs').readFileSync(__dirname + '/fechamentosLive.js', 'utf8'))
+        && typeof fl.solicitarEdicao === 'function',
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPendentesFech = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okPendentesFech = false; console.log('  erro: ' + e.message); }
+  if (!okPendentesFech) ruins += 1;
+  console.log(`${okPendentesFech ? '✓' : '✗'} Fechamentos: a correção pendente aparece ANTES do seletor de dia, e leva pro dia dela`);
+
+  // ------------------------------------------------------------------
   // Duplicação de loja (parte 2): o chamado automático de bloqueio de senha
   // (criarChamadoBloqueio em auth.js) juntava TODAS as unidades do login
   // num único unidadeNome (ex: "Loja A, Loja B, Loja C") - isso nunca bate

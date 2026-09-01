@@ -277,6 +277,11 @@
 <div class="panel hidden" id="painel-meus-lancamentos">
   <h2>🧾 Fechamentos lançados</h2>
   <div class="sub" style="font-size:12px;color:var(--muted);margin-bottom:8px;">Fechamentos do dia, da <b>maior diferença negativa pra maior positiva</b> (o que precisa de atenção aparece primeiro). Use <b>Pedir correção</b> pra consertar o que foi digitado errado ou ficou faltando.</div>
+  <!-- O QUE ESPERA DECISAO VEM ANTES DO SELETOR. A aba dizia "1 pendente"
+       mas a lista e de UM dia por vez, entao descobrir QUAL dia era
+       tentativa e erro no calendario. Aqui cada pendencia vira um botao que
+       ja leva pro dia dela. -->
+  <div id="fech-pendentes" class="hidden" style="margin-bottom:10px;"></div>
   <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:8px;">
     <div><label>Dia</label><input type="date" id="fech-data" onchange="renderListaFechamentos()"></div>
     <button type="button" class="export-btn" style="height:34px;" onclick="irOntemFechamentos()">Ontem</button>
@@ -2609,7 +2614,53 @@ async function carregarFechamentos(){
   // o filtro de dia sempre COMEÇA em hoje - da pra olhar outro dia, mas a
   // cada abertura da tela volta pro dia corrente
   if(!document.getElementById('fech-data').value) document.getElementById('fech-data').value = hojeBrasiliaCentral();
+  renderPendentesFechamento();
   renderListaFechamentos();
+}
+
+// As correções esperando decisão, ANTES do seletor de dia. A lista embaixo
+// mostra um dia por vez; sem isto, saber em que dia está a pendência era
+// abrir o calendário e ir chutando data até achar. Cada linha já leva pro
+// dia dela.
+const ROTULO_CORRECAO = {
+  campo: 'corrigir valor', item: 'adicionar item', 'saida-item': 'corrigir saída',
+  data: 'corrigir a data', excluir: 'excluir o lançamento',
+};
+function renderPendentesFechamento(){
+  const el = document.getElementById('fech-pendentes');
+  if(!el) return;
+  // mais antiga primeiro: pendência velha é a que segura o fechamento do mês
+  const pend = EDICOES_FECHAMENTO.filter(e=>e.status==='PENDENTE')
+    .sort((a,b)=>String(a.data||'').localeCompare(String(b.data||'')));
+  if(!pend.length){ el.classList.add('hidden'); el.innerHTML = ''; return; }
+  el.classList.remove('hidden');
+  const linhas = pend.map(e=>{
+    const motivo = String(e.motivo||'').trim();
+    return `<button type="button" class="export-btn" style="display:block;width:100%;text-align:left;margin-bottom:5px;white-space:normal;height:auto;padding:8px 10px;"
+      onclick="irParaFechamentoPendente('${escapeHtml(String(e.data||''))}','${escapeHtml(String(e.fechamentoId||''))}')">
+      <b>${fmtData(e.data)}</b> · ${escapeHtml(e.unidadeNome||e.unidade||'')}${e.numeroTicket?` · <span style="font-family:var(--mono);color:var(--muted);">#${e.numeroTicket}</span>`:''}
+      <div style="font-size:11px;color:var(--muted);margin-top:2px;">${escapeHtml(ROTULO_CORRECAO[e.tipoCorrecao]||'correção')}${motivo?` — ${escapeHtml(motivo.slice(0,90))}${motivo.length>90?'…':''}`:''}</div>
+    </button>`;
+  }).join('');
+  el.innerHTML = `<div style="border:1px solid var(--warn);border-radius:9px;padding:10px 11px;background:var(--panel2);">
+    <div style="font-family:var(--mono);font-size:11px;color:var(--warn);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">
+      ⏳ ${pend.length} correção${pend.length>1?'ões':''} esperando decisão</div>
+    <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px;">Toque numa para abrir o dia dela.</div>
+    ${linhas}
+  </div>`;
+}
+
+function irParaFechamentoPendente(data, fechamentoId){
+  if(data) document.getElementById('fech-data').value = data;
+  renderListaFechamentos();
+  // leva o olho até o card certo - o dia pode ter vários fechamentos, e
+  // trocar a data sem mostrar qual deles é devolveria o mesmo "adivinha"
+  const card = document.getElementById('fech-card-'+fechamentoId);
+  if(card){
+    card.scrollIntoView({ behavior:'smooth', block:'center' });
+    card.style.outline = '2px solid var(--warn)';
+    setTimeout(()=>{ card.style.outline = ''; }, 2500);
+  }
 }
 
 function edicaoFechamentoPendente(fechamentoId){
@@ -2648,7 +2699,7 @@ function renderListaFechamentos(){
     const pendente = edicaoFechamentoPendente(f.id);
     const decidida = !pendente && ultimaDecisaoFechamento(f.id);
     return `
-    <div class="card">
+    <div class="card" id="fech-card-${f.id}">
       <div class="linha1">
         <span>${escapeHtml(f.unidadeNome||f.unidade)} · ${fmtData(f.data)}</span>
         ${pendente?'<span class="badge PENDENTE">correção pendente</span>':''}
