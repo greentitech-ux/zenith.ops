@@ -371,8 +371,112 @@ async function converterParaSolicitacao(id, novoTipo, dadosExtras, porEmail) {
   return novo;
 }
 
+// ---------------------------------------------------------------
+// ESTORNO APROVADO -> FORMULARIO DE PAGAMENTO
+// ---------------------------------------------------------------
+// Pedido do Master: "estorno precisa virar um Formulario, pra ser enviado
+// da mesma forma dos formularios de reembolso - com os dados da unidade e o
+// favorecido tudo certinho, botao de criar formulario atraves da
+// solicitacao".
+//
+// O QUE ESTAVA FALTANDO: aprovar o estorno decide que o cliente recebe de
+// volta, mas nao produz o documento que o financeiro assina e paga. Isso
+// vinha sendo redigitado na mao - e' onde o nome do favorecido e a chave
+// Pix erram, justamente os dois campos que mandam o dinheiro pro lugar
+// certo. Aqui eles saem do que o cliente ja digitou no pedido.
+//
+// NAO E' A CONVERSAO QUE JA EXISTE. converterParaSolicitacao marca
+// CONVERTIDO, que quer dizer "deixou de ser estorno e virou outra
+// categoria". Aqui o estorno CONTINUA sendo estorno - ele so ganhou o
+// documento de pagamento. Reusar CONVERTIDO apagaria essa diferenca e
+// mentiria no historico, entao o vinculo vai em campo proprio
+// (formularioId) e o status nao se mexe. Vocabulario de estorno e' fechado
+// (secao 5 do CLAUDE.md): PENDENTE/APROVADO/REJEITADO/CONVERTIDO.
+//
+// SO ESTORNO APROVADO. Um formulario de pagamento e uma ordem pra alguem
+// pagar; nascer de um pedido ainda pendente seria pagar antes de decidir.
+async function gerarFormulario(id, dados, porEmail) {
+  const formularios = require('./formularios');
+  const ref = refundsRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Solicitação não encontrada.');
+  const atual = snap.data();
+  if (atual.status !== 'APROVADO') {
+    throw new Error(`Só estorno APROVADO vira formulário - este está ${atual.status}.`);
+  }
+  if (atual.formularioId) {
+    throw new Error(`Esse estorno já gerou o formulário #${atual.formularioNumero || ''} `
+      + '- abra o formulário existente em vez de criar outro.');
+  }
+  const d = dados || {};
+  const tipo = d.tipo || 'reembolso';
+  const unidade = String(d.unidade || '').trim();
+  if (!unidade) throw new Error('Escolha a unidade do formulário (a razão social e o CNPJ saem do cadastro dela).');
+
+  // O favorecido e' quem RECEBE o Pix, nao necessariamente quem comprou:
+  // o cliente pode informar a chave de outra pessoa (e no caso real que o
+  // Master mandou, o titular era uma empresa - "SF Comunicacao"). Por isso
+  // o titular do Pix vem primeiro, e o nome do cliente e so o encosto.
+  const favorecido = String(d.favorecido || atual.pixNomeTitular || atual.nomeCliente || '').trim();
+  const descricao = [
+    atual.motivoEstorno === 'Outro' ? atual.motivoOutro : atual.motivoEstorno,
+    atual.observacao,
+  ].map((t) => String(t || '').trim()).filter(Boolean).join(' · ');
+
+  const campos = {
+    favorecido,
+    // cpf/agencia/conta NAO sao inventados: o pedido de estorno nao pergunta
+    // isso. Vao em branco pro financeiro completar se precisar - preencher
+    // com o telefone ou com a chave Pix "pra nao ficar vazio" produziria um
+    // documento de pagamento com dado errado.
+    cpf: String(d.cpf || '').trim(),
+    banco: String(d.banco || atual.pixBanco || '').trim(),
+    agencia: String(d.agencia || '').trim(),
+    conta: String(d.conta || '').trim(),
+    chavePix: String(d.chavePix || atual.pixChave || '').trim(),
+    // tipos que nao tem tabela (assBoleto) leem valor/descricao do cabecalho
+    descricao,
+    valor: atual.valorEstornar,
+    vencimento: '',
+  };
+  const linhas = [{
+    data: atual.dataVenda || '',
+    // coluna FORNECEDOR do Reembolso = onde a despesa aconteceu, e a venda
+    // que esta sendo estornada aconteceu na loja (ver o comentario da
+    // coluna em formularios.js)
+    fornecedor: atual.unidadeNome || atual.unidade || '',
+    descricao: descricao || `Estorno ao cliente ${atual.nomeCliente || ''}`.trim(),
+    valor: atual.valorEstornar,
+  }];
+
+  const form = await formularios.criar({
+    tipo,
+    unidade,
+    campos,
+    linhas,
+    // o comprovante da maquininha que o cliente anexou vai junto: e' a prova
+    // da venda que esta sendo devolvida, e o Reembolso pede comprovante
+    anexos: atual.anexos,
+    criadoPorEmail: porEmail || null,
+    // MESMO numero do estorno, como converterParaSolicitacao ja faz: o
+    // formulario nao e' um pedido novo, e o documento DESTE ticket
+    numeroTicket: atual.numeroTicket,
+  });
+
+  await ref.update({
+    formularioId: form.id,
+    formularioNumero: form.numeroTicket != null ? form.numeroTicket : null,
+    formularioTipo: tipo,
+    formularioEm: new Date().toISOString(),
+    formularioPorEmail: porEmail || null,
+  });
+  refundsCache.invalidar();
+  return form;
+}
+
 module.exports = {
   STATUSES, EXECUCAO_STATUSES, create, listAll, getOne, updateStatus, update, remove, marcarNotificacaoVista,
+  gerarFormulario,
   redirecionar, converterParaSolicitacao, atualizarExecucao, podeAgirComLink, gerarLinkAcao, revogarLinkAcao,
   buscarPorLinkAcao, decidirComLink, atualizarExecucaoComLink,
   invalidar: () => refundsCache.invalidar(),

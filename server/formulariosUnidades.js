@@ -130,6 +130,17 @@ async function obterPorUnidade(rotulo) {
   return (await listar()).find((u) => u.unidade === alvo) || null;
 }
 
+// pelo CODIGO da unidade de verdade, nao pelo rotulo. E' o que liga um
+// estorno (que guarda o codigo) ao cadastro de formulario (que guarda o
+// rotulo que sai impresso) sem casar nome por aproximacao: os dois espacos
+// de nome sao diferentes de proposito e continuam sendo (secao 1 do
+// CLAUDE.md) - o codigo e a unica ponte que ja existe entre eles.
+async function obterPorCodigo(codigo) {
+  const alvo = limpar(codigo, 80);
+  if (!alvo) return null;
+  return (await listar()).find((u) => u.codigo && u.codigo === alvo) || null;
+}
+
 // rótulo -> código da unidade de verdade, pra filtrar por permissão os
 // formulários JÁ gravados (que só tem o rótulo)
 async function mapaRotuloParaCodigo() {
@@ -186,6 +197,6 @@ async function alternarAtivo(id, ativo, porEmail) {
 }
 
 module.exports = {
-  SEMENTE, listar, listarAtivas, obterPorUnidade, mapaRotuloParaCodigo,
+  SEMENTE, listar, listarAtivas, obterPorUnidade, obterPorCodigo, mapaRotuloParaCodigo,
   criar, atualizar, alternarAtivo, cnpjValido, formatarCnpj,
 };

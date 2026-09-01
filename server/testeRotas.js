@@ -8828,6 +8828,110 @@ setTimeout(async () => {
   console.log(`${okEstornoUnidadeNome ? '✓' : '✗'} Estorno: ticket grava o unidadeNome canônico (nome de exibição), não o código interno cru`);
 
   // ------------------------------------------------------------------
+  // ESTORNO APROVADO -> FORMULARIO DE PAGAMENTO. Pedido do Master: "estorno
+  // precisa virar um Formulario, pra ser enviado da mesma forma dos
+  // formularios de reembolso - com os dados da unidade e o favorecido tudo
+  // certinho, botao de criar formulario atraves da solicitacao".
+  //
+  // Os dados abaixo sao os do ticket #11529 que ele mandou: cliente Samila,
+  // R$74,00, Pix 56779183000140 no Inter, titular "SF Comunicacao". O
+  // titular NAO e o cliente - e' o caso que prova por que o favorecido nao
+  // pode sair do nome de quem comprou.
+  let okEstornoFormulario = false;
+  try {
+    const cabM = { Authorization: 'Bearer ' + token };
+    const formsMod = require('/home/user/adyen-monitor/server/formularios.js');
+    const refundsMod = require('/home/user/adyen-monitor/server/refunds.js');
+    const uniForm = require('/home/user/adyen-monitor/server/formulariosUnidades.js');
+
+    // unidade de formulario ligada ao MESMO codigo que o estorno guarda
+    await postarJson('/api/formularios/cadastro-unidades', {
+      unidade: 'Spoleto Praça Aeroporto Recife', razaoSocial: 'Grande Fratello',
+      cnpj: '20182750000139', codigo: 'SPO_AERO_COD',
+    }, cabM);
+
+    // origem 'cliente': e' o formulario publico que traz Pix, valor e nome -
+    // a rota interna (/api/refund-requests) so aceita pedidoId/observacao.
+    // Chamada direta no modulo porque a rota publica exige upload de anexo.
+    const est = await refundsMod.create({
+      origem: 'cliente',
+      unidade: 'SPO_AERO_COD', unidadeNome: 'Spo Praça Aero Recife',
+      observacao: 'Foi pago a pix porém o pedido não foi processado.',
+      motivoEstorno: 'Erro de operação no caixa',
+      valorVenda: 74, valorEstornar: 74, formaPagamento: 'Pix na maquininha',
+      bandeira: 'Pix', dataVenda: '2026-08-29', horaVenda: '09:48',
+      nomeCliente: 'Samila Batista Freire', telefoneCliente: '82999991670',
+      pixChave: '56779183000140', pixNomeTitular: 'SF Comunicacao', pixBanco: 'Inter',
+      anexos: [{ nome: 'comprovante.jpeg', path: 'estornos/comprovante.jpeg', tipo: 'image/jpeg' }],
+    });
+
+    // PENDENTE ainda nao vira formulario: seria mandar pagar antes de decidir
+    const cedoDemais = await postarJson(`/api/refund-requests/${est.id}/formulario`,
+      { unidade: 'Spoleto Praça Aeroporto Recife' }, cabM);
+
+    await enviarJson('PATCH', `/api/refund-requests/${est.id}/status`, { status: 'APROVADO' }, cabM);
+
+    const gerou = await postarJson(`/api/refund-requests/${est.id}/formulario`, {
+      unidade: 'Spoleto Praça Aeroporto Recife',
+    }, cabM);
+    const form = gerou.status === 200 ? JSON.parse(gerou.corpo) : {};
+    const detalhe = form.id ? await formsMod.detalhar(form.id) : {};
+    const linha = (detalhe.linhas || [])[0] || {};
+
+    // segunda tentativa tem que ser recusada - dois formularios de pagamento
+    // pro mesmo estorno e risco de pagar duas vezes
+    const deNovo = await postarJson(`/api/refund-requests/${est.id}/formulario`, {
+      unidade: 'Spoleto Praça Aeroporto Recife',
+    }, cabM);
+
+    const estDepois = JSON.parse((await pedir(`/api/refund-requests`, cabM)).corpo)
+      .find((r) => r.id === est.id) || {};
+    const htmlCH = require('fs').readFileSync(require('path').join(__dirname, 'public', 'central-historico.html'), 'utf8');
+
+    const conf = {
+      'estorno PENDENTE não gera formulário (seria pagar antes de decidir)':
+        cedoDemais.status === 400 && /APROVADO/.test(JSON.parse(cedoDemais.corpo).error || ''),
+      'estorno aprovado gera o formulário': gerou.status === 200 && !!form.id,
+      // o titular do Pix e' quem RECEBE, e nao e' o cliente neste caso real
+      'o favorecido é o titular do Pix, não quem comprou':
+        detalhe.campos && detalhe.campos.favorecido === 'SF Comunicacao',
+      'a chave Pix e o banco vêm do que o cliente preencheu':
+        detalhe.campos.chavePix === '56779183000140' && detalhe.campos.banco === 'Inter',
+      // razao social e CNPJ saem do CADASTRO da unidade, nao do navegador
+      'a razão social vem do cadastro da unidade': detalhe.razaoSocial === 'Grande Fratello',
+      'o valor e a data da venda viram a linha da despesa':
+        Number(linha.valor) === 74 && linha.data === '2026-08-29',
+      'o valor total do formulário é o valor a estornar': Number(detalhe.valorTotal) === 74,
+      // mesmo numero: o formulario nao e um pedido novo, e o documento DESTE
+      'o formulário nasce com o mesmo número do estorno':
+        detalhe.numeroTicket === est.numeroTicket,
+      'o estorno passa a apontar pro formulário':
+        estDepois.formularioId === form.id && estDepois.formularioNumero === detalhe.numeroTicket,
+      // o estorno CONTINUA estorno - CONVERTIDO quer dizer outra coisa
+      'o estorno continua APROVADO (não vira CONVERTIDO)':
+        estDepois.status === 'APROVADO',
+      'não dá pra gerar um segundo formulário do mesmo estorno':
+        deNovo.status === 400 && /já gerou/.test(JSON.parse(deNovo.corpo).error || ''),
+      // cpf/agencia/conta nao existem no pedido de estorno: preencher com
+      // qualquer coisa "pra nao ficar vazio" produz ordem de pagamento errada
+      'o que o estorno não pergunta fica em branco, não inventado':
+        detalhe.campos.cpf === '' && detalhe.campos.agencia === '' && detalhe.campos.conta === '',
+      'a tela do estorno oferece o botão de criar o formulário':
+        /gerarFormularioDoEstorno/.test(htmlCH) && /blocoFormularioDoEstorno/.test(htmlCH),
+      // casar por CODIGO, nao por nome: os dois espacos de nome sao
+      // diferentes de proposito (secao 1 do CLAUDE.md)
+      'o seletor sugere a unidade pelo código, não pelo nome':
+        /u\.codigo === c\.unidade/.test(htmlCH)
+        && typeof uniForm.obterPorCodigo === 'function',
+    };
+    const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
+    okEstornoFormulario = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okEstornoFormulario = false; console.log('  erro: ' + e.message); }
+  if (!okEstornoFormulario) ruins += 1;
+  console.log(`${okEstornoFormulario ? '✓' : '✗'} Estorno aprovado vira formulário de pagamento, com favorecido e Pix do que o cliente preencheu`);
+
+  // ------------------------------------------------------------------
   // Duplicação de loja (parte 2): o chamado automático de bloqueio de senha
   // (criarChamadoBloqueio em auth.js) juntava TODAS as unidades do login
   // num único unidadeNome (ex: "Loja A, Loja B, Loja C") - isso nunca bate

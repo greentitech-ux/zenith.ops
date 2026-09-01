@@ -1774,7 +1774,8 @@ function renderTipoAcoes(c){
   } else if(c.tipo==='estorno'){
     const opcoes = TIPOS_GERAIS.map(t=>`<option value="${t}">${iconeTipo(t)} ${TIPOS_INFO[t].label}</option>`).join('');
     corpo.innerHTML = `
-      <label>Este ticket virou outra categoria</label>
+      ${blocoFormularioDoEstorno(c)}
+      <label style="margin-top:14px;">Este ticket virou outra categoria</label>
       <select id="tipo-conv-select">${opcoes}</select>
       <label>Unidade (código - obrigatório se não veio preenchida)</label>
       <input type="text" id="cv-unidade" value="${escapeHtml(c.unidade||'')}">
@@ -1782,9 +1783,107 @@ function renderTipoAcoes(c){
       <input type="text" id="cv-titulo" value="${escapeHtml(c.observacao||'')}">
       <button type="button" class="btn-primary" style="margin-top:8px;" onclick="salvarConverterTipo()">Confirmar conversão</button>
     `;
+    carregarUnidadesFormulario(c);
   } else {
     document.getElementById('d-tipo-acoes').classList.add('hidden');
   }
+}
+
+// ---- ESTORNO APROVADO -> FORMULARIO DE PAGAMENTO ----
+// Pedido do Master: "estorno precisa virar um Formulario, pra ser enviado da
+// mesma forma dos formularios de reembolso - com os dados da unidade e o
+// favorecido tudo certinho, botao de criar formulario atraves da
+// solicitacao". Aprovar o estorno decide que o cliente recebe de volta; o
+// formulario e o documento que o financeiro assina e paga - e era ele que
+// vinha sendo redigitado na mao, que e onde o nome do favorecido e a chave
+// Pix erram.
+//
+// SO APARECE COM O ESTORNO APROVADO. Formulario de pagamento e ordem pra
+// alguem pagar: sair de um pedido ainda pendente seria pagar antes de
+// decidir. O servidor recusa de qualquer jeito (ver gerarFormulario), aqui
+// e so pra tela nao oferecer o que vai ser negado.
+let UNIDADES_FORMULARIO = null;
+function blocoFormularioDoEstorno(c){
+  if(c.formularioId){
+    return `<div style="padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:12px;">
+      📄 Já virou o formulário <b>#${escapeHtml(String(c.formularioNumero||''))}</b> (${escapeHtml(c.formularioTipo||'')}) — abra em <b>Formulários</b> pra enviar pra assinatura.
+    </div>`;
+  }
+  if(c.status !== 'APROVADO'){
+    return `<div style="font-size:11.5px;color:var(--muted);">📄 O formulário de pagamento nasce depois que o estorno for <b>APROVADO</b>.</div>`;
+  }
+  // favorecido = quem RECEBE o Pix, que nem sempre e quem comprou (no caso
+  // real do Master o titular era uma empresa). Por isso o titular vem antes
+  // do nome do cliente.
+  const favorecido = c.pixNomeTitular || c.nomeCliente || '';
+  return `
+    <button type="button" class="link-btn" style="display:block;" onclick="toggleFormularioEstorno()">📄 Gerar formulário de pagamento deste estorno</button>
+    <div id="form-estorno-bloco" class="hidden" style="margin-top:8px;">
+      <label>Tipo de formulário</label>
+      <select id="fe-tipo">
+        <option value="reembolso">Reembolso</option>
+        <option value="avulso">Pagamento Avulso</option>
+      </select>
+      <label>Unidade do formulário <span style="color:var(--muted);font-weight:400;">(a razão social e o CNPJ saem do cadastro dela)</span></label>
+      <select id="fe-unidade"><option value="">carregando...</option></select>
+      <label>Favorecido (quem recebe)</label>
+      <input type="text" id="fe-favorecido" value="${escapeHtml(favorecido)}">
+      <label>CPF/CNPJ do favorecido <span style="color:var(--muted);font-weight:400;">(o pedido de estorno não pergunta isso)</span></label>
+      <input type="text" id="fe-cpf" placeholder="opcional">
+      <div style="font-size:11.5px;color:var(--muted);margin-top:8px;">
+        Vão junto, do que o cliente já preencheu: chave Pix <b>${escapeHtml(c.pixChave||'—')}</b>,
+        banco <b>${escapeHtml(c.pixBanco||'—')}</b>, valor <b>${fmtMoney(c.valorEstornar||0)}</b>,
+        data da venda <b>${escapeHtml(c.dataVenda||'—')}</b> e o comprovante anexado.
+      </div>
+      <button type="button" class="btn-primary" style="margin-top:8px;" onclick="gerarFormularioDoEstorno()">Criar formulário</button>
+    </div>`;
+}
+function toggleFormularioEstorno(){
+  document.getElementById('form-estorno-bloco').classList.toggle('hidden');
+}
+
+// O seletor nasce JA na unidade certa: o estorno guarda o código da unidade
+// e o cadastro de formulário também tem esse código. Casar por código, e não
+// por nome, é o que evita escolher a empresa errada - os dois espaços de
+// nome são diferentes de propósito (ver seção 1 do CLAUDE.md).
+async function carregarUnidadesFormulario(c){
+  const sel = document.getElementById('fe-unidade');
+  if(!sel) return;
+  if(!UNIDADES_FORMULARIO){
+    UNIDADES_FORMULARIO = await fetch('/api/formularios/unidades').then(r=>r.ok?r.json():[]).catch(()=>[]);
+  }
+  if(!UNIDADES_FORMULARIO.length){
+    sel.innerHTML = '<option value="">nenhuma unidade de formulário liberada pra você</option>';
+    return;
+  }
+  const sugerida = UNIDADES_FORMULARIO.find(u=>u.codigo && u.codigo === c.unidade);
+  sel.innerHTML = UNIDADES_FORMULARIO.map(u=>
+    `<option value="${escapeHtml(u.unidade)}" ${sugerida && u.unidade===sugerida.unidade?'selected':''}>${escapeHtml(u.unidade)}${u.razaoSocial?` · ${escapeHtml(u.razaoSocial)}`:''}</option>`
+  ).join('');
+}
+
+async function gerarFormularioDoEstorno(){
+  const c = DETALHE_ATUAL;
+  if(!c) return;
+  const unidade = document.getElementById('fe-unidade').value;
+  if(!unidade){ alert('Escolha a unidade do formulário.'); return; }
+  const corpo = {
+    tipo: document.getElementById('fe-tipo').value,
+    unidade,
+    favorecido: document.getElementById('fe-favorecido').value,
+    cpf: document.getElementById('fe-cpf').value,
+  };
+  if(!confirm(`Criar o formulário de pagamento do Ticket #${c.numeroTicket}?\n\nEle nasce com o mesmo número e vai pra tela de Formulários, pra enviar pra assinatura como qualquer outro.`)) return;
+  try{
+    const resp = await fetch(`/api/refund-requests/${c.id}/formulario`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo),
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao criar o formulário.');
+    alert(`Formulário #${data.numeroTicket} criado. Abra em Formulários pra enviar pra assinatura.`);
+    await carregarCentral();
+    fecharDetalhe();
+  }catch(err){ alert(err.message); }
 }
 
 function toggleConverterEstorno(){

@@ -4087,6 +4087,30 @@ app.post('/api/refund-requests/:id/converter', auth.requireMasterOrAdmin, async 
   }
 });
 
+// ESTORNO APROVADO -> FORMULARIO DE PAGAMENTO (ver gerarFormulario em
+// refunds.js). Pedido do Master: "botao de criar formulario atraves da
+// solicitacao", com unidade e favorecido ja preenchidos.
+//
+// Duas checagens de acesso, nao uma: quem faz isso precisa poder ver o
+// ESTORNO (dado do cliente) E poder criar FORMULARIO na unidade escolhida -
+// sao duas seções diferentes, e a segunda e a que decide de qual empresa
+// sai o pagamento. A mesma recusa que a rota de criar formulário usa.
+app.post('/api/refund-requests/:id/formulario', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    if (tipoBloqueado(req, 'estorno')) {
+      return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
+    }
+    const dados = req.body || {};
+    const recusa = await recusarUnidadeDeFormulario(req, dados.unidade);
+    if (recusa) return res.status(recusa.status).json({ error: recusa.error });
+    const form = await refunds.gerarFormulario(req.params.id, dados, req.user.email);
+    broadcast('refund-request-changed', await refunds.getOne(req.params.id), 'monitor');
+    res.json(formularioComLinks(form));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // comprovante anexado pelo cliente final no pedido de estorno publico - so
 // o Master ve (dado sensivel do cliente: nome, telefone, foto do comprovante)
 app.get('/api/refund-requests/anexo/:id/:index', auth.requireMasterOrAdmin, async (req, res) => {
