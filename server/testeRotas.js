@@ -9548,6 +9548,57 @@ setTimeout(async () => {
   console.log(`${okRedeDestravar ? '✓' : '✗'} NOC: destravar a rede da máquina, tocando na placa só em último caso`);
 
   // ------------------------------------------------------------------
+  // COBRANCA DO GOOGLE CLOUD SUSPENSA. O log do Render mostrou 403
+  // accountDisabled ("The billing account for the owning project is disabled
+  // in state delinquent") no Storage. Firestore continua funcionando (faixa
+  // gratuita), entao o app inteiro parece bem enquanto SO os anexos falham -
+  // e anexo aqui e comprovante de estorno, boleto pra assinar, nota de
+  // compra.
+  //
+  // A mensagem que existia mandava "tentar novamente em instantes". Tentar
+  // de novo nao resolve: so pagar resolve. Quem estava anexando tentava
+  // cinco vezes, desistia, e ninguem ficava sabendo o motivo.
+  let okStorageCobranca = false;
+  try {
+    const st = require('/home/user/adyen-monitor/server/storage.js');
+    const err403 = Object.assign(new Error('The billing account for the owning project is disabled in state delinquent'), { code: 403 });
+    const errComum = new Error('socket hang up');
+    const err404 = Object.assign(new Error('No such object: bucket/x'), { code: 404 });
+
+    const conf = {
+      'reconhece a cobrança suspensa pelo erro do Google':
+        st.ehCobrancaSuspensa(err403) === true,
+      // erro de rede continua sendo erro de rede: dizer "pague a fatura" pra
+      // um socket caido mandaria o Master pro lugar errado
+      'erro comum não vira "cobrança suspensa"':
+        st.ehCobrancaSuspensa(errComum) === false && st.ehCobrancaSuspensa(err404) === false,
+      'a mensagem diz a causa e que tentar de novo não resolve':
+        /cobrança do projeto suspensa/.test(st.ERRO_COBRANCA)
+        && /tentar de novo não resolve/.test(st.ERRO_COBRANCA),
+      // o que importa e QUAL mensagem chega em quem esta anexando - conferir
+      // so o detector passava mesmo com o upload voltando ao "tente de novo"
+      'quem anexa recebe a mensagem certa, não "tente de novo"':
+        st.erroDeUpload(err403).message === st.ERRO_COBRANCA,
+      'e um erro comum continua com a mensagem de sempre':
+        /Tente novamente em instantes/.test(st.erroDeUpload(errComum).message),
+      // 404 seria mentira: o arquivo existe, bloqueado esta o acesso
+      'ler anexo bloqueado responde 503, não 404':
+        /status\(503\)/.test(require('fs').readFileSync(__dirname + '/storage.js', 'utf8'))
+        && /404 aqui e mentira quando a causa e cobranca/
+          .test(require('fs').readFileSync(__dirname + '/storage.js', 'utf8')),
+      // um 403 desses se repete em toda tentativa: cem linhas iguais
+      // escondem o resto do log
+      'o log grita uma vez, não a cada anexo':
+        /jaGritouCobranca/.test(require('fs').readFileSync(__dirname + '/storage.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okStorageCobranca = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okStorageCobranca = false; console.log('  erro: ' + e.message); }
+  if (!okStorageCobranca) ruins += 1;
+  console.log(`${okStorageCobranca ? '✓' : '✗'} Anexos: cobrança do Google suspensa aparece como o que é, não como "tente de novo"`);
+
+  // ------------------------------------------------------------------
   // Duplicação de loja (parte 2): o chamado automático de bloqueio de senha
   // (criarChamadoBloqueio em auth.js) juntava TODAS as unidades do login
   // num único unidadeNome (ex: "Loja A, Loja B, Loja C") - isso nunca bate
