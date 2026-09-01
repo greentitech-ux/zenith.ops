@@ -1300,7 +1300,17 @@ const COMANDO_REINICIAR_ANYDESK = [
   '      Restart-Service -InputObject $s -Force -ErrorAction Stop',
   '      $saida += "$($s.Name): reiniciado"',
   '    } catch {',
-  '      $saida += "$($s.Name): FALHOU - $($_.Exception.Message)"',
+  // "Nao e possivel abrir o servico X no computador '.'" e como o Windows
+  // diz ACESSO NEGADO. Foi o que voltou da STC-Servidor: o comando ACHOU o
+  // servico e nao teve direito de mexer. Sem traduzir, o Master le uma frase
+  // que parece defeito da maquina e nao tem o que fazer com ela - a acao
+  // concreta e reinstalar o agente como Administrador (v17+ cria a tarefa de
+  // boot, que roda como SYSTEM e tem o direito).
+  '      $msg = $_.Exception.Message',
+  '      if ($msg -match "abrir o servi" -or $msg -match "cannot open .* service" -or $msg -match "Access is denied" -or $msg -match "Acesso negado") {',
+  '        $msg = "o NOCZenith desta maquina nao esta como Administrador - reinstale pelo botao Copiar comando num PowerShell como Administrador"',
+  '      }',
+  '      $saida += "$($s.Name): FALHOU - $msg"',
   '    }',
   '  }',
   '  Start-Sleep -Seconds 4',

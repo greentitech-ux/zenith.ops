@@ -9156,8 +9156,15 @@ setTimeout(async () => {
         /Nenhum servico do AnyDesk encontrado/.test(cmd),
       // reiniciar servico exige Administrador - a mensagem do Windows tem
       // que voltar inteira, senao vira fracasso silencioso
-      'erro do Windows volta inteiro em vez de falhar calado':
-        /FALHOU - \$\(\$_\.Exception\.Message\)/.test(cmd),
+      // Retorno real da STC-Servidor: o comando ACHOU o servico e nao teve
+      // direito de mexer - "Nao e possivel abrir o servico ... no computador
+      // '.'", que e como o Windows diz acesso negado. Solto, isso parece
+      // defeito da maquina e o Master nao tem o que fazer com a frase.
+      'acesso negado vira instrução, não o erro cru do Windows':
+        /abrir o servi/.test(cmd) && /Administrador/.test(cmd)
+        && /Copiar comando/.test(cmd),
+      'qualquer outro erro continua voltando inteiro':
+        /\$msg = \$_\.Exception\.Message/.test(cmd) && /FALHOU - \$msg/.test(cmd),
       'continua exigindo a senha do Master': semSenha.status === 401 || semSenha.status === 400,
       'a rota enfileira a tarefa do AnyDesk na máquina de verdade':
         enviou.status === 200 && resp.tarefa === 'anydesk'
@@ -9373,6 +9380,11 @@ setTimeout(async () => {
       'o heartbeat guarda o estado e o card fica degradado':
         doc.anydeskServico === 'Stopped' && doc.estado === 'degradado'
         && (doc.degradacao || []).includes('AnyDesk parado'),
+      // PowerShell 5.1 manda o corpo em ISO-8859-1 quando o Content-Type nao
+      // diz o charset: "serviço" chegava "servi?o" na tela do NOC
+      'o agente manda o corpo em UTF-8 (senão o acento chega quebrado)':
+        !/-ContentType "application\/json"[^;]/.test(psAd)
+        && /charset=utf-8/.test(psAd),
       'o agente mede o serviço e manda junto':
         /function Medir-AnyDesk/.test(psAd) && /corpo\.anydeskServico = \$AnyDeskSvc/.test(psAd),
       // nome do servico muda com a versao/instalacao - cravar um so faria a
@@ -9382,7 +9394,7 @@ setTimeout(async () => {
       'não instalado devolve null, não "parado"':
         /if \(-not \$svc\) \{ return \$null \}/.test(psAd),
       // sem o bump nenhuma das 52 maquinas passa a reportar
-      'VERSAO_VIGIA subiu': vg.VERSAO_VIGIA >= 21,
+      'VERSAO_VIGIA subiu': vg.VERSAO_VIGIA >= 22,
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okAnydeskEstado = !falhas.length;
@@ -9390,6 +9402,62 @@ setTimeout(async () => {
   } catch (e) { okAnydeskEstado = false; console.log('  erro: ' + e.message); }
   if (!okAnydeskEstado) ruins += 1;
   console.log(`${okAnydeskEstado ? '✓' : '✗'} NOC: máquina no ar com o AnyDesk parado deixa de aparecer como tudo certo`);
+
+  // ------------------------------------------------------------------
+  // AUMENTAR A JANELA DO REGISTRO DE ATIVIDADES. Pedido do Master. O padrao
+  // de 140px cabe ~4 linhas: serve pra espiar, nao pra investigar - e a
+  // maquina dele tinha 201 eventos.
+  let okAlturaRegistro = false;
+  try {
+    const htmlR = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const fonteAlturas = /const EV_ALTURAS = \[[^\]]+\];/.exec(htmlR);
+    // le a lista escrita no HTML sem depender do formato exato dos numeros
+    // eslint-disable-next-line no-new-func
+    const EVAL_ALTURAS = (fonte) => new Function(`${fonte}\nreturn EV_ALTURAS;`)();
+    const fonteCiclo = /function ciclarAlturaEventos\(\)\{[\s\S]*?\n\}/.exec(htmlR);
+    // roda o ciclo de verdade, com um localStorage falso, pra provar que ele
+    // volta ao inicio em vez de travar no maior
+    let render = 0;
+    // eslint-disable-next-line no-new-func
+    const ciclar = (fonteAlturas && fonteCiclo) ? new Function(`
+      ${fonteAlturas[0]}
+      const LS_EV_ALTURA = 'zenithRegistroAltura';
+      const guardado = {};
+      const localStorage = { getItem: (k) => guardado[k] ?? null, setItem: (k, v) => { guardado[k] = v; } };
+      let EV_ALTURA = EV_ALTURAS[0];
+      let vezes = 0;
+      const renderEventosDetalhe = () => { vezes += 1; };
+      ${fonteCiclo[0]}
+      return () => { ciclarAlturaEventos(); return { altura: EV_ALTURA, guardado: guardado[LS_EV_ALTURA], vezes }; };
+    `)() : null;
+    const p1 = ciclar && ciclar();
+    const p2 = ciclar && ciclar();
+    const p3 = ciclar && ciclar();
+
+    const conf = {
+      'o registro tem mais de um tamanho': !!fonteAlturas && EVAL_ALTURAS(fonteAlturas[0]).length >= 3,
+      'o menor continua sendo o de hoje (140px)': !!fonteAlturas && EVAL_ALTURAS(fonteAlturas[0])[0] === 140,
+      'clicar aumenta': !!p1 && p1.altura > 140,
+      'e continua aumentando': !!p2 && p2.altura > p1.altura,
+      // sem voltar ao inicio, quem chegou no maior fica preso nele
+      'do maior, volta pro menor': !!p3 && p3.altura === 140,
+      'a escolha é gravada pra próxima visita': !!p2 && p2.guardado === String(p2.altura),
+      // o modal re-renderiza a cada 30s (poll): sem re-render no clique, o
+      // tamanho novo so apareceria no proximo ciclo
+      'a lista é redesenhada na hora': !!p1 && p1.vezes === 1,
+      // a altura tem que ENTRAR no style da lista, senao o botao nao faz nada
+      'a altura escolhida vai pro style da lista':
+        /max-height:\$\{alturaEventos\(\)\}px/.test(htmlR),
+      // storage bloqueado (janela anônima) nao pode quebrar o botao
+      'storage bloqueado não trava o botão':
+        /catch\(e\)\{ \/\* vale só nesta visita \*\/ \}/.test(htmlR),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAlturaRegistro = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okAlturaRegistro = false; console.log('  erro: ' + e.message); }
+  if (!okAlturaRegistro) ruins += 1;
+  console.log(`${okAlturaRegistro ? '✓' : '✗'} NOC: dá pra aumentar a janela do Registro de atividades, e ela lembra do tamanho`);
 
   // ------------------------------------------------------------------
   // Duplicação de loja (parte 2): o chamado automático de bloqueio de senha

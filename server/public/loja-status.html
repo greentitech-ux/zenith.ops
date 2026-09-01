@@ -1198,6 +1198,34 @@ function atualizarConteudoDetalhe(codigo, c){
 }
 
 // ---- Registro de atividades do detalhe ----
+// ALTURA DA JANELA. O padrão de 140px cabe ~4 linhas: serve pra espiar,
+// não pra investigar - e investigar é pra que o registro existe (201
+// eventos numa máquina com queda frequente). Três passos em vez de um
+// canto arrastável porque o Master abre isso muito no celular, onde
+// arrastar 6px de borda não funciona.
+//
+// A escolha fica gravada: quem aumentou uma vez quer aumentado da próxima,
+// e o modal re-renderiza a cada 30s (poll) - sem guardar, a janela voltava
+// pro tamanho pequeno sozinha no meio da leitura.
+const EV_ALTURAS = [140, 340, 640];
+const LS_EV_ALTURA = 'zenithRegistroAltura';
+// quem manda é a variável; o localStorage só GUARDA entre visitas. Se o
+// navegador barrar o storage (janela anônima, site data bloqueado), o botão
+// continua funcionando - só não lembra da próxima vez.
+let EV_ALTURA = (() => {
+  try{
+    const v = Number(localStorage.getItem(LS_EV_ALTURA));
+    if(EV_ALTURAS.includes(v)) return v;
+  }catch(e){ /* sem storage */ }
+  return EV_ALTURAS[0];
+})();
+function alturaEventos(){ return EV_ALTURA; }
+function ciclarAlturaEventos(){
+  EV_ALTURA = EV_ALTURAS[(EV_ALTURAS.indexOf(EV_ALTURA) + 1) % EV_ALTURAS.length];
+  try{ localStorage.setItem(LS_EV_ALTURA, String(EV_ALTURA)); }catch(e){ /* vale só nesta visita */ }
+  renderEventosDetalhe();
+}
+
 // A lista completa (eventos + trocas de IP) fica aqui fora pra o filtro por
 // data re-renderizar sem esperar o proximo poll; a janela mostra ~5 linhas e
 // o resto rola (pedido do Master: "apenas 5 registros aparecendo, o restante
@@ -1291,8 +1319,9 @@ function renderEventosDetalhe(){
       <input type="date" value="${EV_FILTRO_DATA}" onchange="setFiltroEventosData(this.value)" title="Filtrar registros por data"
         style="background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--text);font-size:11px;padding:2px 6px;font-family:var(--mono);color-scheme:dark;">
       ${EV_FILTRO_DATA?'<button type="button" class="btn-mini" onclick="setFiltroEventosData(\'\')">✕ limpar</button>':''}
+      <button type="button" class="btn-mini" onclick="ciclarAlturaEventos()" title="Aumentar ou diminuir a janela do registro">${alturaEventos()===EV_ALTURAS[EV_ALTURAS.length-1]?'⤡ diminuir':'⤢ aumentar'}</button>
     </div>
-    <div id="ev-lista" style="max-height:140px;overflow-y:auto;overscroll-behavior:contain;">${linhas}</div>`;
+    <div id="ev-lista" style="max-height:${alturaEventos()}px;overflow-y:auto;overscroll-behavior:contain;">${linhas}</div>`;
   const lista = document.getElementById('ev-lista');
   if(lista) lista.scrollTop = scrollAnterior;
 }

@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 21;
+const VERSAO_VIGIA = 22;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -211,7 +211,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '          try {',
     '            $detalhe = "$nomeProc ($($c.RemoteAddress):$($c.RemotePort))"',
     '            $corpoAlerta = @{ detalhe = $detalhe } | ConvertTo-Json',
-    '            Invoke-RestMethod -Uri $UrlAcessoRemoto -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $corpoAlerta -TimeoutSec 10 -ErrorAction SilentlyContinue | Out-Null',
+    '            Invoke-RestMethod -Uri $UrlAcessoRemoto -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $corpoAlerta -TimeoutSec 10 -ErrorAction SilentlyContinue | Out-Null',
     '          } catch {}',
     '        }',
     '      }',
@@ -533,7 +533,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '    # a resposta traz quais impressoras sondar dali pra frente (servidor',
     '    # >= v19). Servidor antigo nao manda o campo e a lista fica vazia -',
     '    # nenhum socket e aberto, nada muda.',
-    '    $r = Invoke-RestMethod -Uri $UrlTelemetria -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $json -TimeoutSec 15',
+    '    $r = Invoke-RestMethod -Uri $UrlTelemetria -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $json -TimeoutSec 15',
     '    if ($r -and $r.sondarImpressoras) { $script:ImpressorasPraSondar = @($r.sondarImpressoras) }',
     '  } catch { Escrever-Log "Falha ao enviar telemetria: $($_.Exception.Message)" }',
     '}',
@@ -804,7 +804,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '    $ip = (Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred -ErrorAction SilentlyContinue |',
     '      Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |',
     '      Select-Object -First 1 -ExpandProperty IPAddress)',
-    '    if ($ip) { Invoke-RestMethod -Uri $UrlReportarIp -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body (@{ ip = $ip } | ConvertTo-Json) -TimeoutSec 10 | Out-Null }',
+    '    if ($ip) { Invoke-RestMethod -Uri $UrlReportarIp -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body (@{ ip = $ip } | ConvertTo-Json) -TimeoutSec 10 | Out-Null }',
     '  } catch { Escrever-Log "Falha ao reportar IP local: $($_.Exception.Message)" }',
     '}',
     '',
@@ -879,7 +879,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     'function Bater-Rapido {',
     '  try {',
     '    $c = @{ unidade = "' + codigoTextoPS + '"; posto = "' + posto + '"; userAgent = "NOCZenith/1.0 (Windows NT; PowerShell)" } | ConvertTo-Json',
-    '    Invoke-RestMethod -Uri $UrlHeartbeat -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $c -TimeoutSec 10 | Out-Null',
+    '    Invoke-RestMethod -Uri $UrlHeartbeat -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $c -TimeoutSec 10 | Out-Null',
     '    $script:UltimoBeatOkEm = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
     '  } catch {}',
     '}',
@@ -944,7 +944,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '        $tentativa++',
     '        if ($tentativa -gt 1) { Start-Sleep -Seconds (4 * ($tentativa - 1)) }',
     '        try {',
-    '          $resp = Invoke-RestMethod -Uri $UrlHeartbeat -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $corpo -TimeoutSec 10',
+    '          $resp = Invoke-RestMethod -Uri $UrlHeartbeat -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $corpo -TimeoutSec 10',
     '          $entregue = $true',
     '        } catch { $erroBeat = $_ }',
     '      }',
@@ -985,13 +985,13 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '          $sb = [scriptblock]::Create($resp.comandoPendente.comando)',
     '          $saidaComando = (& $sb 2>&1 | Out-String)',
     '          $corpoOk = @{ comandoId = $resp.comandoPendente.comandoId; resultado = $saidaComando } | ConvertTo-Json',
-    '          Invoke-RestMethod -Uri $UrlComandoResultado -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $corpoOk -TimeoutSec 10 -ErrorAction SilentlyContinue | Out-Null',
+    '          Invoke-RestMethod -Uri $UrlComandoResultado -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $corpoOk -TimeoutSec 10 -ErrorAction SilentlyContinue | Out-Null',
     '          Escrever-Log "Comando executado (id=$($resp.comandoPendente.comandoId))"',
     '        } catch {',
     '          Escrever-Log "Comando falhou (id=$($resp.comandoPendente.comandoId)): $($_.Exception.Message)"',
     '          try {',
     '            $corpoErro = @{ comandoId = $resp.comandoPendente.comandoId; erro = $_.Exception.Message } | ConvertTo-Json',
-    '            Invoke-RestMethod -Uri $UrlComandoResultado -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $corpoErro -TimeoutSec 10 -ErrorAction SilentlyContinue | Out-Null',
+    '            Invoke-RestMethod -Uri $UrlComandoResultado -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $corpoErro -TimeoutSec 10 -ErrorAction SilentlyContinue | Out-Null',
     '          } catch {}',
     '        }',
     '      }',
@@ -1016,7 +1016,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '      while ($global:FilaChatSaida.Count -gt 0) {',
     '        $textoParaEnviar = $global:FilaChatSaida.Dequeue()',
     '        $corpoChat = @{ texto = $textoParaEnviar } | ConvertTo-Json',
-    '        Invoke-RestMethod -Uri $UrlChatResponder -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body $corpoChat -TimeoutSec 10 | Out-Null',
+    '        Invoke-RestMethod -Uri $UrlChatResponder -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $corpoChat -TimeoutSec 10 | Out-Null',
     '        Escrever-Log "Resposta enviada pela janela de chat."',
     '      }',
     '    } catch {',
@@ -1103,7 +1103,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '      Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |',
     '      Select-Object -First 1 -ExpandProperty IPAddress)',
     '    if ($ip) {',
-    '      Invoke-RestMethod -Uri $UrlReportarIp -Method Post -ContentType "application/json" -Headers $CabecalhosAgente -Body (@{ ip = $ip } | ConvertTo-Json) -TimeoutSec 10 | Out-Null',
+    '      Invoke-RestMethod -Uri $UrlReportarIp -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body (@{ ip = $ip } | ConvertTo-Json) -TimeoutSec 10 | Out-Null',
     '    }',
     '  } catch { Escrever-Log "Falha ao reportar IP local: $($_.Exception.Message)" }',
     '}',
