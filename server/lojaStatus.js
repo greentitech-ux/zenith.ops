@@ -1288,6 +1288,66 @@ const COMANDO_REINICIAR = [
 // roda como SYSTEM e da conta; se so existir a instancia de login sem
 // privilegio, a mensagem de erro do Windows volta inteira em vez de um
 // fracasso silencioso.
+// DESTRAVAR A REDE DA MAQUINA, do mais leve pro mais pesado.
+//
+// A PERGUNTA DO MASTER ERA "como reiniciar a rede remotamente", pensando no
+// TP-Link Load Balance da loja. Reiniciar o ROTEADOR daqui nao da: quando a
+// internet cai, nada chega no agente - o comando so existiria pra um
+// problema que ja impede o comando de chegar. O que DA pra fazer, e resolve
+// boa parte do "a maquina perdeu a rede" com o link ainda de pe, e destravar
+// a pilha de rede do proprio computador.
+//
+// A ORDEM E' A PARTE IMPORTANTE, e ela e' de propósito do mais leve pro mais
+// pesado. Reiniciar a placa de rede derruba a UNICA via que temos ate essa
+// maquina: se ela nao voltar, o computador some do NOC e so alguem indo na
+// loja resolve. Entao a placa so e' tocada se o resto nao resolveu:
+//   1. limpa o cache de DNS (custo zero, resolve "so nao abre site")
+//   2. renova o DHCP (resolve IP perdido/conflito)
+//   3. TESTA - se voltou, para aqui e nao mexe na placa
+//   4. so entao reinicia a placa, espera e testa de novo
+//
+// Mexe so no adaptador que esta REALMENTE em uso (Up, com gateway): num
+// servidor com varias placas, derrubar todas de uma vez pra consertar uma e
+// o jeito de transformar um problema em tres.
+const COMANDO_REDE_DESTRAVAR = [
+  'function Rede-Ok {',
+  '  try {',
+  '    $r = Test-NetConnection -ComputerName "1.1.1.1" -Port 443 -WarningAction SilentlyContinue',
+  '    return $r.TcpTestSucceeded',
+  '  } catch { return $false }',
+  '}',
+  '$log = @()',
+  '# 1) DNS: mais barato de tudo, e resolve o caso "pinga mas nao abre site"',
+  'try { Clear-DnsClientCache; $log += "cache de DNS limpo" } catch { $log += "DNS: $($_.Exception.Message)" }',
+  '# o adaptador que esta REALMENTE carregando a rede: Up e com gateway',
+  '$ativo = Get-NetIPConfiguration -ErrorAction SilentlyContinue |',
+  '  Where-Object { $_.NetAdapter.Status -eq "Up" -and $_.IPv4DefaultGateway } | Select-Object -First 1',
+  'if (-not $ativo) { $log += "nenhum adaptador ativo com gateway - a maquina esta sem rede fisica" }',
+  'else {',
+  '  $nome = $ativo.InterfaceAlias',
+  '  $log += "adaptador em uso: $nome"',
+  '  # 2) DHCP: resolve IP perdido ou conflito, sem derrubar a placa',
+  '  try { ipconfig /release "$nome" | Out-Null; ipconfig /renew "$nome" | Out-Null; $log += "DHCP renovado" }',
+  '  catch { $log += "DHCP: $($_.Exception.Message)" }',
+  '  Start-Sleep -Seconds 5',
+  '  if (Rede-Ok) { $log += "rede respondeu - a placa NAO foi reiniciada" }',
+  '  else {',
+  '    # 3) ultimo recurso: derruba e sobe a placa. E a unica via ate esta',
+  '    # maquina, entao so chega aqui quem ja tentou o resto',
+  '    $log += "ainda sem internet - reiniciando a placa"',
+  '    try { Restart-NetAdapter -Name $nome -Confirm:$false -ErrorAction Stop; $log += "placa reiniciada" }',
+  '    catch {',
+  '      $m = $_.Exception.Message',
+  '      if ($m -match "Access is denied" -or $m -match "Acesso negado") { $m = "o NOCZenith desta maquina nao esta como Administrador - reinstale pelo botao Copiar comando num PowerShell como Administrador" }',
+  '      $log += "placa: FALHOU - $m"',
+  '    }',
+  '    Start-Sleep -Seconds 20',
+  '    if (Rede-Ok) { $log += "voltou" } else { $log += "AINDA SEM INTERNET - o problema esta fora do computador (link/roteador da loja)" }',
+  '  }',
+  '}',
+  '$log -join " | "',
+].join('\n');
+
 const COMANDO_REINICIAR_ANYDESK = [
   '$svcs = @(Get-Service -ErrorAction SilentlyContinue |',
   "  Where-Object { $_.Name -like 'AnyDesk*' -or $_.DisplayName -like 'AnyDesk*' })",
@@ -2205,6 +2265,7 @@ module.exports = {
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora,
   relatorioQuedas, quedasDeUmComputador,
   COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK,
+  COMANDO_REDE_DESTRAVAR,
   comandoResetZebra,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,

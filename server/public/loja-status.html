@@ -590,6 +590,7 @@
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharManutencao()">Fechar</button>
       <button type="button" class="btn-ghost" id="manut-anydesk" onclick="manutEnviar('anydesk')" title="Reinicia só o serviço do AnyDesk, sem reiniciar o computador - leva segundos e não derruba o caixa">🖥️ Reiniciar o AnyDesk</button>
+      <button type="button" class="btn-ghost" id="manut-rede" onclick="manutEnviar('rede')" title="Limpa DNS e renova o DHCP; só reinicia a placa de rede se isso não resolver - não mexe no roteador da loja">🌐 Destravar a rede</button>
       <button type="button" class="btn-ghost" id="manut-zebra" onclick="manutEnviar('zebra')" title="Limpa a fila e reinicia as impressoras Zebra marcadas na unidade, por ZPL - o computador não é tocado">🖨️ Resetar Zebra</button>
       <button type="button" class="btn-ghost" id="manut-abortar" onclick="manutEnviar('abortar')" title="Cancela um reinício que ainda está na contagem de 2 minutos">🛑 Abortar reinício</button>
       <button type="button" class="btn-primary" id="manut-confirmar" onclick="manutEnviar('reiniciar')">🔁 Reiniciar selecionados</button>
@@ -1769,6 +1770,7 @@ function atualizarContagemManut(){
   document.getElementById('manut-abortar').disabled = !n;
   document.getElementById('manut-anydesk').disabled = !n;
   document.getElementById('manut-zebra').disabled = !n;
+  document.getElementById('manut-rede').disabled = !n;
 }
 
 // tarefa: 'reiniciar' (a maquina, com 2min de aviso), 'abortar' ou
@@ -1780,6 +1782,7 @@ const MANUT_TAREFAS = {
   abortar: { botao: 'manut-abortar', rotulo: 'Abort' },
   anydesk: { botao: 'manut-anydesk', rotulo: 'Reinício do AnyDesk' },
   zebra: { botao: 'manut-zebra', rotulo: 'Reset das Zebras' },
+  rede: { botao: 'manut-rede', rotulo: 'Destrave da rede' },
 };
 async function manutEnviar(tarefa){
   // chamada antiga passava booleano - mantido pra nada quebrar
@@ -1793,6 +1796,10 @@ async function manutEnviar(tarefa){
   const unidades = new Set(alvos.map(a => a.codigo)).size;
   if(tarefa === 'reiniciar'){
     if(!confirm(`Reiniciar ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nCada tela mostra um aviso de 2 minutos antes de reiniciar. Se errou o alvo, dá pra usar "Abortar reinício" dentro dessa janela.`)) return;
+  }
+  if(tarefa === 'rede'){
+    // avisa do risco de verdade: a placa e a unica via ate essa maquina
+    if(!confirm(`Destravar a rede de ${alvos.length} computador(es)?\n\nLimpa o DNS e renova o DHCP. Só reinicia a placa de rede se isso não resolver - e aí a máquina fica alguns segundos fora.\n\nNão mexe no roteador da loja.`)) return;
   }
   if(tarefa === 'zebra'){
     // diz o que acontece com a IMPRESSORA e o que NAO acontece com o

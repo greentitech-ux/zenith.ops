@@ -4225,6 +4225,7 @@ const EXECUTORES_QA = {
   'manutencao.reiniciar': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR, { origem: 'manutencao-reiniciar' }),
   'manutencao.abortarReinicio': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_ABORTAR_REINICIO, { origem: 'manutencao-abortar' }),
   'manutencao.reiniciarAnydesk': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_ANYDESK, { origem: 'manutencao-anydesk' }),
+  'manutencao.destravarRede': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REDE_DESTRAVAR, { origem: 'manutencao-rede' }),
   'manutencao.resetZebra': (p) => lojaStatus.enfileirarComandoEmAlvos(
     p.alvos,
     async (doc) => lojaStatus.comandoResetZebra(await lojaStatus.impressorasPraSondar(doc.codigo)),
@@ -4467,7 +4468,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     // e o jeito novo, porque agora sao TRES coisas e nao duas. Lista fechada:
     // o comando em si nunca vem de fora.
     const abortar = req.body.abortar === true;
-    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'zebra'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'zebra', 'rede'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
     const TAREFAS = {
       reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
       abortar: { acao: 'manutencao.abortarReinicio', verbo: 'Abortar reinício em', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
@@ -4479,6 +4480,10 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
       // os IPs das Zebras DAQUELA loja. Os IPs saem de impressorasPraSondar,
       // que so devolve o que o Master marcou como impressora Zebra - e a
       // mesma trava que impede o ZPL de chegar numa Bematech.
+      // destrava a pilha de rede da MAQUINA (nao o roteador da loja - ver o
+      // comentario do comando). Do mais leve pro mais pesado, e a placa so e
+      // tocada se o resto nao resolveu.
+      rede: { acao: 'manutencao.destravarRede', verbo: 'Destravar a rede de', comando: lojaStatus.COMANDO_REDE_DESTRAVAR, origem: 'manutencao-rede' },
       zebra: {
         acao: 'manutencao.resetZebra',
         verbo: 'Resetar as Zebras de',

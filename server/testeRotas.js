@@ -9460,6 +9460,72 @@ setTimeout(async () => {
   console.log(`${okAlturaRegistro ? '✓' : '✗'} NOC: dá pra aumentar a janela do Registro de atividades, e ela lembra do tamanho`);
 
   // ------------------------------------------------------------------
+  // DESTRAVAR A REDE DA MAQUINA. A pergunta do Master era "como reiniciar a
+  // rede remotamente", pensando no TP-Link Load Balance da loja. Reiniciar o
+  // ROTEADOR daqui nao da: quando a internet cai, nada chega no agente. O que
+  // da, e resolve boa parte do "a maquina perdeu a rede" com o link de pe, e
+  // destravar a pilha de rede do proprio computador.
+  //
+  // A ORDEM E' A TRAVA: reiniciar a placa derruba a UNICA via ate essa
+  // maquina. Se ela nao voltar, o computador some do NOC e so alguem indo na
+  // loja resolve - entao a placa so pode ser tocada depois que o resto falhou.
+  let okRedeDestravar = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const cabR = { Authorization: 'Bearer ' + token };
+    const htmlRd = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const cmd = ls.COMANDO_REDE_DESTRAVAR || '';
+
+    const srvR = await ls.cadastrarComputador('REDETESTE', 'SrvRede', 'interno');
+    await ls.heartbeat('REDETESTE', srvR.posto, { userAgent: 'NOCZenith/1.0' });
+    const enviouR = await postarJson('/api/loja-status/manutencao/reiniciar', {
+      alvos: [{ codigo: 'REDETESTE', posto: srvR.posto }], tarefa: 'rede',
+      password: process.env.MASTER_PASSWORD,
+    }, cabR);
+    const respR = enviouR.status === 200 ? JSON.parse(enviouR.corpo) : {};
+    const docR = (await ls.listar('REDETESTE')).find((c) => c.posto === srvR.posto) || {};
+    const naFila = docR.comandoPendenteId ? (DOCS.get(`lojaStatusComandos/${docR.comandoPendenteId}`) || {}) : {};
+
+    const iDns = cmd.indexOf('Clear-DnsClientCache');
+    const iDhcp = cmd.indexOf('ipconfig /renew');
+    const iTeste = cmd.indexOf('if (Rede-Ok)');
+    const iPlaca = cmd.indexOf('Restart-NetAdapter');
+
+    const conf = {
+      // do mais leve pro mais pesado, nesta ordem
+      'limpa o DNS antes de tudo': iDns > 0 && iDns < iDhcp,
+      'renova o DHCP antes de mexer na placa': iDhcp > 0 && iDhcp < iPlaca,
+      // A TRAVA: se a rede voltou, a placa nao e tocada
+      'testa a rede ANTES de reiniciar a placa': iTeste > 0 && iTeste < iPlaca,
+      'se a rede voltou, a placa não é reiniciada':
+        /rede respondeu - a placa NAO foi reiniciada/.test(cmd),
+      // varias placas: derrubar todas pra consertar uma vira tres problemas
+      'mexe só no adaptador em uso (Up e com gateway)':
+        /NetAdapter\.Status -eq "Up" -and \$_\.IPv4DefaultGateway/.test(cmd)
+        && /Select-Object -First 1/.test(cmd),
+      'não reinicia o computador nem mexe em serviço':
+        !/shutdown/i.test(cmd) && !/Restart-Service/.test(cmd),
+      // se nem assim voltou, o problema nao esta na maquina - dizer isso
+      // evita a proxima hora procurando no lugar errado
+      'quando não resolve, aponta pra fora do computador':
+        /o problema esta fora do computador/.test(cmd),
+      'acesso negado vira instrução, como no AnyDesk':
+        /Administrador/.test(cmd) && /Copiar comando/.test(cmd),
+      'a rota enfileira o destrave na máquina de verdade':
+        enviouR.status === 200 && respR.tarefa === 'rede' && respR.enfileirados === 1
+        && /Clear-DnsClientCache/.test(naFila.comando || ''),
+      'a tela avisa que a máquina pode ficar segundos fora':
+        /manutEnviar\('rede'\)/.test(htmlRd) && /segundos fora/.test(htmlRd)
+        && /Não mexe no roteador da loja/.test(htmlRd),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okRedeDestravar = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okRedeDestravar = false; console.log('  erro: ' + e.message); }
+  if (!okRedeDestravar) ruins += 1;
+  console.log(`${okRedeDestravar ? '✓' : '✗'} NOC: destravar a rede da máquina, tocando na placa só em último caso`);
+
+  // ------------------------------------------------------------------
   // Duplicação de loja (parte 2): o chamado automático de bloqueio de senha
   // (criarChamadoBloqueio em auth.js) juntava TODAS as unidades do login
   // num único unidadeNome (ex: "Loja A, Loja B, Loja C") - isso nunca bate
