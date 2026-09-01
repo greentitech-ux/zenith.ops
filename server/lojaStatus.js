@@ -1236,6 +1236,47 @@ const COMANDO_REINICIAR = [
   '"Reinicio agendado para daqui a 2 minutos."',
 ].join('\n');
 
+// REINICIAR O SERVICO DO ANYDESK, sem reiniciar a maquina. Pedido do
+// Master: quando o AnyDesk cai, o acesso remoto some e a unica saida era
+// reiniciar o computador inteiro - o que derruba o caixa junto, por causa de
+// um servico so. Reiniciar o servico leva segundos e nao interrompe ninguem.
+//
+// Fixo no codigo como os outros, pelo mesmo motivo: rota que aceitasse texto
+// livre seria "rodar qualquer coisa em toda a rede".
+//
+// Procura por PADRAO em vez do nome cravado: dependendo da versao e do tipo
+// de instalacao o servico se chama AnyDesk, AnyDeskService ou traz o ID do
+// cliente no nome. Cravar um nome so faria o comando "nao achar" numa parte
+// do parque e ninguem saber por que.
+//
+// E DEVOLVE O ESTADO DEPOIS, nao um "ok": o Master precisa ver que o
+// servico voltou a Running, senao o comando so prova que foi tentado.
+// Reiniciar servico exige Administrador - a instancia de BOOT do NOCZenith
+// roda como SYSTEM e da conta; se so existir a instancia de login sem
+// privilegio, a mensagem de erro do Windows volta inteira em vez de um
+// fracasso silencioso.
+const COMANDO_REINICIAR_ANYDESK = [
+  '$svcs = @(Get-Service -ErrorAction SilentlyContinue |',
+  "  Where-Object { $_.Name -like 'AnyDesk*' -or $_.DisplayName -like 'AnyDesk*' })",
+  'if (-not $svcs) {',
+  '  "Nenhum servico do AnyDesk encontrado nesta maquina."',
+  '} else {',
+  '  $saida = @()',
+  '  foreach ($s in $svcs) {',
+  '    try {',
+  '      Restart-Service -InputObject $s -Force -ErrorAction Stop',
+  '      $saida += "$($s.Name): reiniciado"',
+  '    } catch {',
+  '      $saida += "$($s.Name): FALHOU - $($_.Exception.Message)"',
+  '    }',
+  '  }',
+  '  Start-Sleep -Seconds 4',
+  '  $depois = @(Get-Service -ErrorAction SilentlyContinue |',
+  "    Where-Object { $_.Name -like 'AnyDesk*' } | ForEach-Object { \"$($_.Name)=$($_.Status)\" })",
+  '  ($saida + ("Estado agora: " + ($depois -join ", "))) -join " | "',
+  '}',
+].join('\n');
+
 // janela de arrependimento: cancela um reinício que ainda está na contagem
 const COMANDO_ABORTAR_REINICIO = [
   'try { shutdown /a; "Reinicio abortado." } catch { "Nao havia reinicio em contagem." }',
@@ -2039,7 +2080,7 @@ module.exports = {
   enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos,
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora,
   relatorioQuedas, quedasDeUmComputador,
-  COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO,
+  COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
   saudeMaquinas,

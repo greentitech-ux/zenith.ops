@@ -4224,6 +4224,7 @@ app.get('/api/users/relatorio.:formato(csv|pdf)', auth.requireMaster, async (req
 const EXECUTORES_QA = {
   'manutencao.reiniciar': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR, { origem: 'manutencao-reiniciar' }),
   'manutencao.abortarReinicio': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_ABORTAR_REINICIO, { origem: 'manutencao-abortar' }),
+  'manutencao.reiniciarAnydesk': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_ANYDESK, { origem: 'manutencao-anydesk' }),
   'formularios.editar': (p) => formularios.editar(p.id, { campos: p.campos, linhas: p.linhas, porEmail: p.porEmail }),
   'formularios.cancelar': (p) => formularios.cancelar(p.id, { motivo: p.motivo, porEmail: p.porEmail }),
   'formularios.reabrirAnexo': (p) => formularios.reabrirAnexo(p.id, { porEmail: p.porEmail }),
@@ -4457,23 +4458,37 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     const alvos = Array.isArray(req.body.alvos) ? req.body.alvos : [];
     if (!alvos.length) return res.status(400).json({ error: 'Escolha pelo menos um computador.' });
     if (alvos.length > 200) return res.status(400).json({ error: 'Muitos alvos de uma vez - divida em lotes.' });
+    // `abortar` continua funcionando pra nao quebrar chamada antiga; `tarefa`
+    // e o jeito novo, porque agora sao TRES coisas e nao duas. Lista fechada:
+    // o comando em si nunca vem de fora.
     const abortar = req.body.abortar === true;
+    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const TAREFAS = {
+      reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
+      abortar: { acao: 'manutencao.abortarReinicio', verbo: 'Abortar reinício em', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
+      // reinicia SO o servico do AnyDesk: leva segundos e nao derruba o
+      // caixa, ao contrario de reiniciar a maquina inteira por causa de um
+      // servico so
+      anydesk: { acao: 'manutencao.reiniciarAnydesk', verbo: 'Reiniciar o AnyDesk de', comando: lojaStatus.COMANDO_REINICIAR_ANYDESK, origem: 'manutencao-anydesk' },
+    };
+    const t = TAREFAS[tarefa];
     if (!(await exigirSenhaDoMaster(req, res))) return;
-    const acao = abortar ? 'manutencao.abortarReinicio' : 'manutencao.reiniciar';
-    const resumo = `${abortar ? 'Abortar reinício' : 'Reiniciar'} ${alvos.length} computador(es) do parque`;
-    if (await desviarSeQaMaster(req, res, acao, resumo, { alvos, porEmail: req.user.email })) return;
-    const comando = abortar ? lojaStatus.COMANDO_ABORTAR_REINICIO : lojaStatus.COMANDO_REINICIAR;
-    const resultados = await lojaStatus.enfileirarComandoEmAlvos(alvos, comando, {
-      origem: abortar ? 'manutencao-abortar' : 'manutencao-reiniciar',
+    const resumo = `${t.verbo} ${alvos.length} computador(es) do parque`;
+    if (await desviarSeQaMaster(req, res, t.acao, resumo, { alvos, porEmail: req.user.email })) return;
+    const resultados = await lojaStatus.enfileirarComandoEmAlvos(alvos, t.comando, {
+      origem: t.origem,
     });
     const ok = resultados.filter((r) => r.ok);
-    console.log(`[NOC] ${req.user.email} ${abortar ? 'abortou reinício em' : 'reiniciou'} ${ok.length}/${resultados.length} máquina(s)`);
+    console.log(`[NOC] ${req.user.email} ${t.origem} em ${ok.length}/${resultados.length} máquina(s)`);
     res.json({
       total: resultados.length,
       enfileirados: ok.length,
       recusados: resultados.filter((r) => !r.ok),
-      // 2 minutos de contagem na tela da loja - é a janela pra abortar
-      abortavelPorSegundos: abortar ? 0 : 120,
+      tarefa,
+      // 2 minutos de contagem na tela da loja - é a janela pra abortar. Só
+      // o reinício da MÁQUINA tem contagem; o do AnyDesk é imediato e não
+      // interrompe ninguém, então não há o que abortar.
+      abortavelPorSegundos: tarefa === 'reiniciar' ? 120 : 0,
     });
   } catch (err) {
     res.status(400).json({ error: err.message });

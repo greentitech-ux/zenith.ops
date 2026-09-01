@@ -9108,6 +9108,78 @@ setTimeout(async () => {
   console.log(`${okPendentesFech ? '✓' : '✗'} Fechamentos: a correção pendente aparece ANTES do seletor de dia, e leva pro dia dela`);
 
   // ------------------------------------------------------------------
+  // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o
+  // AnyDesk cai, o acesso remoto some e a unica saida era reiniciar o
+  // computador inteiro - o que derruba o caixa junto, por causa de um
+  // servico so.
+  let okAnydesk = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const cabA = { Authorization: 'Bearer ' + token };
+    const htmlA = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const cmd = ls.COMANDO_REINICIAR_ANYDESK || '';
+
+    // um computador 'interno' de verdade: e o UNICO tipo que processa comando
+    // (ver enfileirarComando). Sem isto o teste passava com ZERO maquinas
+    // enfileiradas - a rota respondia 200 e recusava o alvo em silencio.
+    const srv = await ls.cadastrarComputador('ANYDESKTESTE', 'SrvTeste', 'interno');
+    await ls.heartbeat('ANYDESKTESTE', srv.posto, { userAgent: 'NOCZenith/1.0' });
+    const alvoSrv = [{ codigo: 'ANYDESKTESTE', posto: srv.posto }];
+
+    const semSenha = await postarJson('/api/loja-status/manutencao/reiniciar', {
+      alvos: alvoSrv, tarefa: 'anydesk',
+    }, cabA);
+    const enviou = await postarJson('/api/loja-status/manutencao/reiniciar', {
+      alvos: alvoSrv, tarefa: 'anydesk',
+      password: process.env.MASTER_PASSWORD,
+    }, cabA);
+    const resp = enviou.status === 200 ? JSON.parse(enviou.corpo) : {};
+    // O QUE FOI PARAR NA FILA, e nao so "a rota respondeu 200". Rotear a
+    // tarefa pro comando errado mandaria a loja inteira REINICIAR quando o
+    // Master so queria levantar o AnyDesk - e o 200 seria identico.
+    const doSrv = (await ls.listar('ANYDESKTESTE')).find((c) => c.posto === srv.posto) || {};
+    const naFila = doSrv.comandoPendenteId
+      ? (DOCS.get(`lojaStatusComandos/${doSrv.comandoPendenteId}`) || {})
+      : {};
+
+    const conf = {
+      // NAO pode reiniciar a maquina: o ponto todo e nao derrubar o caixa
+      'o comando mexe só no serviço, não desliga a máquina':
+        /Restart-Service/.test(cmd) && !/shutdown/i.test(cmd),
+      // versao/instalacao mudam o nome do servico; cravar um so faria o
+      // comando "nao achar" em parte do parque sem ninguem saber por que
+      'procura o serviço por padrão, não por nome cravado':
+        /AnyDesk\*/.test(cmd) && /DisplayName -like/.test(cmd),
+      'devolve o estado depois, não um "ok" seco':
+        /Estado agora/.test(cmd) && /Get-Service/.test(cmd),
+      'diz quando não achou o AnyDesk na máquina':
+        /Nenhum servico do AnyDesk encontrado/.test(cmd),
+      // reiniciar servico exige Administrador - a mensagem do Windows tem
+      // que voltar inteira, senao vira fracasso silencioso
+      'erro do Windows volta inteiro em vez de falhar calado':
+        /FALHOU - \$\(\$_\.Exception\.Message\)/.test(cmd),
+      'continua exigindo a senha do Master': semSenha.status === 401 || semSenha.status === 400,
+      'a rota enfileira a tarefa do AnyDesk na máquina de verdade':
+        enviou.status === 200 && resp.tarefa === 'anydesk'
+        && resp.enfileirados === 1 && (resp.recusados || []).length === 0,
+      'o que foi pra fila é o comando do AnyDesk, não o de reiniciar':
+        /Restart-Service/.test(naFila.comando || '')
+        && !/shutdown/i.test(naFila.comando || ''),
+      // so o reinicio da MAQUINA tem contagem de 2min; o do servico e
+      // imediato e nao ha o que abortar
+      'não oferece abortar o que não tem contagem': resp.abortavelPorSegundos === 0,
+      'a tela tem o botão, e ele diz que a máquina NÃO reinicia':
+        /manutEnviar\('anydesk'\)/.test(htmlA) && /Reiniciar o AnyDesk/.test(htmlA)
+        && /computador NÃO reinicia/.test(htmlA),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAnydesk = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (envio ${enviou.status} ${enviou.corpo.slice(0, 120)})`);
+  } catch (e) { okAnydesk = false; console.log('  erro: ' + e.message); }
+  if (!okAnydesk) ruins += 1;
+  console.log(`${okAnydesk ? '✓' : '✗'} NOC: dá pra reiniciar só o AnyDesk, sem derrubar o caixa junto`);
+
+  // ------------------------------------------------------------------
   // Duplicação de loja (parte 2): o chamado automático de bloqueio de senha
   // (criarChamadoBloqueio em auth.js) juntava TODAS as unidades do login
   // num único unidadeNome (ex: "Loja A, Loja B, Loja C") - isso nunca bate

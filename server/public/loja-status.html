@@ -584,8 +584,9 @@
     <div class="msg hidden" id="manut-status"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharManutencao()">Fechar</button>
-      <button type="button" class="btn-ghost" id="manut-abortar" onclick="manutEnviar(true)" title="Cancela um reinício que ainda está na contagem de 2 minutos">🛑 Abortar reinício</button>
-      <button type="button" class="btn-primary" id="manut-confirmar" onclick="manutEnviar(false)">🔁 Reiniciar selecionados</button>
+      <button type="button" class="btn-ghost" id="manut-anydesk" onclick="manutEnviar('anydesk')" title="Reinicia só o serviço do AnyDesk, sem reiniciar o computador - leva segundos e não derruba o caixa">🖥️ Reiniciar o AnyDesk</button>
+      <button type="button" class="btn-ghost" id="manut-abortar" onclick="manutEnviar('abortar')" title="Cancela um reinício que ainda está na contagem de 2 minutos">🛑 Abortar reinício</button>
+      <button type="button" class="btn-primary" id="manut-confirmar" onclick="manutEnviar('reiniciar')">🔁 Reiniciar selecionados</button>
     </div>
   </div>
 </div>
@@ -1689,30 +1690,48 @@ function atualizarContagemManut(){
   document.getElementById('manut-contagem').textContent = n ? `${n} selecionado(s)` : 'nenhum selecionado';
   document.getElementById('manut-confirmar').disabled = !n;
   document.getElementById('manut-abortar').disabled = !n;
+  document.getElementById('manut-anydesk').disabled = !n;
 }
 
-async function manutEnviar(abortar){
+// tarefa: 'reiniciar' (a maquina, com 2min de aviso), 'abortar' ou
+// 'anydesk' (so o servico do acesso remoto). O parametro era um booleano
+// `abortar` - virou nome porque agora sao tres coisas, e "false" nao diz
+// mais qual das duas restantes e.
+const MANUT_TAREFAS = {
+  reiniciar: { botao: 'manut-confirmar', rotulo: 'Reinício' },
+  abortar: { botao: 'manut-abortar', rotulo: 'Abort' },
+  anydesk: { botao: 'manut-anydesk', rotulo: 'Reinício do AnyDesk' },
+};
+async function manutEnviar(tarefa){
+  // chamada antiga passava booleano - mantido pra nada quebrar
+  if(tarefa === true) tarefa = 'abortar';
+  if(tarefa === false || !MANUT_TAREFAS[tarefa]) tarefa = 'reiniciar';
   const alvos = [...MANUT_MARCADOS].map(k => { const [codigo, posto] = k.split('|'); return { codigo, posto }; });
   if(!alvos.length) return;
   const senha = document.getElementById('manut-senha').value;
   const st = document.getElementById('manut-status');
   if(!senha){ st.textContent = 'Digite sua senha de Master.'; st.className='msg err'; st.classList.remove('hidden'); return; }
-  if(!abortar){
-    const unidades = new Set(alvos.map(a => a.codigo)).size;
+  const unidades = new Set(alvos.map(a => a.codigo)).size;
+  if(tarefa === 'reiniciar'){
     if(!confirm(`Reiniciar ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nCada tela mostra um aviso de 2 minutos antes de reiniciar. Se errou o alvo, dá pra usar "Abortar reinício" dentro dessa janela.`)) return;
   }
-  const btn = document.getElementById(abortar ? 'manut-abortar' : 'manut-confirmar');
+  if(tarefa === 'anydesk'){
+    // confirmacao mais leve, e dizendo o que NAO acontece: a duvida de quem
+    // clica e se vai derrubar o caixa junto
+    if(!confirm(`Reiniciar o serviço do AnyDesk em ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nO computador NÃO reinicia e ninguém é interrompido - só o acesso remoto cai por alguns segundos e volta.`)) return;
+  }
+  const btn = document.getElementById(MANUT_TAREFAS[tarefa].botao);
   btn.disabled = true;
   st.textContent = 'enviando...'; st.className='msg'; st.classList.remove('hidden');
   try{
     const r = await fetch('/api/loja-status/manutencao/reiniciar', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ alvos, abortar, password: senha }),
+      body: JSON.stringify({ alvos, tarefa, abortar: tarefa === 'abortar', password: senha }),
     });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error || 'Não consegui enviar.');
     if(d.pendenteAprovacao){ st.textContent = 'Enviado pra aprovação do Master.'; st.className='msg ok'; return; }
-    let msg = `✅ ${abortar?'Abort':'Reinício'} enfileirado em ${d.enfileirados}/${d.total} máquina(s). Cada uma executa na próxima batida (até ~25s).`;
+    let msg = `✅ ${MANUT_TAREFAS[tarefa].rotulo} enfileirado em ${d.enfileirados}/${d.total} máquina(s). Cada uma executa na próxima batida (até ~25s).`;
     if((d.recusados||[]).length){
       msg += `<br><span style="color:var(--warn);">Recusados ${d.recusados.length}: ` +
         d.recusados.slice(0,5).map(x => `${escapeHtml(x.nome||x.posto)} (${escapeHtml(x.motivo||'—')})`).join(', ') +
