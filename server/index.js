@@ -12731,6 +12731,15 @@ app.post('/api/ifood/sincronizar', auth.requireMaster, async (req, res) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ROTA DE API QUE NAO EXISTE RESPONDE JSON, nao a pagina 404 do Express.
+// Todo lugar do app faz `await resp.json()` na resposta - com HTML no corpo,
+// o que a pessoa ve e "Unexpected token '<', "<!DOCTYPE "... is not valid
+// JSON", que nao diz nada sobre o que aconteceu. Precisa vir DEPOIS de todas
+// as rotas e do static, e antes do tratador de erro.
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: `Rota não encontrada: ${req.method} ${req.originalUrl.split('?')[0]}` });
+});
+
 // mensagens amigaveis pros erros mais comuns de upload (arquivo grande demais,
 // anexos demais) em vez de estourar uma pagina de erro generica do Express
 app.use((err, req, res, next) => {
@@ -12741,6 +12750,23 @@ app.use((err, req, res, next) => {
       LIMIT_UNEXPECTED_FILE: 'Campo de arquivo inesperado no envio.',
     };
     return res.status(400).json({ error: mensagens[err.code] || 'Erro ao enviar anexo: ' + err.message });
+  }
+  // QUALQUER outro erro numa rota de /api tambem tem que sair em JSON. Antes
+  // isto caia no tratador padrao do Express, que responde uma PAGINA HTML - e
+  // era isso que virava "Unexpected token '<'" na cara de quem estava
+  // anexando, sem dizer nada do motivo. O motivo de verdade fica no log do
+  // servidor, onde da pra investigar; pro navegador vai uma frase util.
+  if (err && req.path && req.originalUrl.startsWith('/api/')) {
+    console.error(`[API 500] ${req.method} ${req.originalUrl.split('?')[0]}:`, err && (err.stack || err.message || err));
+    if (res.headersSent) return next(err);
+    // upload que estourou o limite do corpo tem codigo proprio e merece
+    // frase propria: "tente de novo" num arquivo grande demais e mentira
+    const grande = err.type === 'entity.too.large' || err.status === 413;
+    return res.status(grande ? 413 : 500).json({
+      error: grande
+        ? 'O envio ficou grande demais. Mande menos arquivos por vez, ou diminua a foto/PDF.'
+        : 'O servidor não conseguiu concluir essa ação. O erro foi registrado no log - se repetir, avise o Master.',
+    });
   }
   next(err);
 });
