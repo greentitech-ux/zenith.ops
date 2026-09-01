@@ -572,10 +572,15 @@
       ⚠️ Máquina com NOCZenith instalado <b>sem Administrador</b> (versões antigas) só volta ao monitoramento quando <b>alguém fizer login no Windows</b> depois do reinício - foi isso que deixou o parque mudo em agosto.
       Pra ela voltar sozinha, reinstale uma vez pelo "📋 Copiar comando" num PowerShell <b>como Administrador</b> (v17+ cria a tarefa de boot).
     </div>
+    <!-- BUSCA. Com o parque inteiro na lista, achar UMA maquina era rolar
+         unidade por unidade. Casa com nome da maquina, unidade, posto e IP
+         local - o Master costuma chegar pelo IP que viu no card. -->
+    <input type="text" id="manut-busca" placeholder="🔎 digite o nome da máquina, a unidade ou o IP..." oninput="manutBuscar(this.value)"
+           style="width:100%;margin:0 0 8px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;">
     <div class="modal-acoes" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:0 0 8px;">
-      <button type="button" class="btn-mini" onclick="manutSelecionar('todos')">Marcar tudo</button>
+      <button type="button" class="btn-mini" onclick="manutSelecionar('todos')" title="Marca o que está aparecendo na lista agora - com filtro digitado, só os que casam">Marcar tudo</button>
       <button type="button" class="btn-mini" onclick="manutSelecionar('nenhum')">Limpar</button>
-      <button type="button" class="btn-mini" onclick="manutSelecionar('operacional')">Só os operacionais</button>
+      <button type="button" class="btn-mini" onclick="manutSelecionar('operacional')" title="Dos que estão aparecendo, só os operacionais">Só os operacionais</button>
       <span class="sub" id="manut-contagem" style="align-self:center;font-family:var(--mono);font-size:11px;"></span>
     </div>
     <div id="manut-lista" style="max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;"></div>
@@ -1620,8 +1625,33 @@ function manutElegiveis(){
       || (a.nome||'').localeCompare(b.nome||'','pt-BR'));
 }
 
+// texto da busca. Fica FORA do MANUT_MARCADOS de proposito: filtrar e' um
+// jeito de OLHAR a lista, nao de escolher - marcar continua sendo o clique.
+let MANUT_BUSCA = '';
+// sem acento e sem caixa: "carrao" acha "Dom Carrão", que e como a pessoa
+// digita com pressa
+const manutNorm = (v) => String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+function manutVisiveis(){
+  const q = manutNorm(MANUT_BUSCA);
+  const lista = manutElegiveis();
+  if(!q) return lista;
+  // cada palavra digitada tem que casar com ALGUM campo - deixa procurar
+  // "carrao atm" sem precisar acertar a ordem
+  const termos = q.split(/\s+/).filter(Boolean);
+  return lista.filter(c => {
+    const campos = manutNorm([c.nome, c.posto, UNIDADES_NOMES[c.codigo] || c.codigo, c.ipLocal, c.ip].filter(Boolean).join(' '));
+    return termos.every(t => campos.includes(t));
+  });
+}
+function manutBuscar(v){
+  MANUT_BUSCA = v || '';
+  renderManutLista();
+}
+
 function abrirManutencao(){
   MANUT_MARCADOS = new Set();
+  MANUT_BUSCA = '';
+  document.getElementById('manut-busca').value = '';
   document.getElementById('manut-senha').value = '';
   document.getElementById('manut-status').classList.add('hidden');
   renderManutLista();
@@ -1633,9 +1663,11 @@ function fecharManutencao(){ document.getElementById('manut-overlay').classList.
 // que dá "a unidade toda" e "várias unidades" sem inventar outra tela
 function renderManutLista(){
   const alvo = document.getElementById('manut-lista');
-  const lista = manutElegiveis();
+  const lista = manutVisiveis();
   if(!lista.length){
-    alvo.innerHTML = '<div class="empty">Nenhum computador interno com NOCZenith. Só esse tipo recebe comando.</div>';
+    alvo.innerHTML = MANUT_BUSCA
+      ? `<div class="empty">Nenhuma máquina com "${escapeHtml(MANUT_BUSCA)}". Apague a busca pra ver o parque inteiro.</div>`
+      : '<div class="empty">Nenhum computador interno com NOCZenith. Só esse tipo recebe comando.</div>';
     atualizarContagemManut();
     return;
   }
@@ -1670,13 +1702,19 @@ function manutToggleUm(codigo, posto, marcado){
   atualizarContagemManut();
 }
 function manutToggleUnidade(codigo, marcado){
-  manutElegiveis().filter(c => c.codigo === codigo).forEach(c => {
+  // so o que esta VISIVEL: com filtro digitado, o checkbox da unidade nao
+  // pode marcar em segredo maquina que a pessoa nao esta vendo
+  manutVisiveis().filter(c => c.codigo === codigo).forEach(c => {
     if(marcado) MANUT_MARCADOS.add(manutChave(c)); else MANUT_MARCADOS.delete(manutChave(c));
   });
   renderManutLista();
 }
 function manutSelecionar(modo){
-  const lista = manutElegiveis();
+  // "Marcar tudo" e "Só os operacionais" agem sobre o que esta na TELA -
+  // marcar o parque inteiro escondido atras de um filtro seria mandar
+  // reiniciar maquina que a pessoa nem viu. "Limpar" continua limpando tudo:
+  // no sentido seguro, o filtro nao restringe.
+  const lista = modo === 'nenhum' ? [] : manutVisiveis();
   MANUT_MARCADOS = new Set();
   if(modo === 'todos') lista.forEach(c => MANUT_MARCADOS.add(manutChave(c)));
   // "só os operacionais": reiniciar quem já está caído não adianta nada -
@@ -1687,7 +1725,16 @@ function manutSelecionar(modo){
 }
 function atualizarContagemManut(){
   const n = MANUT_MARCADOS.size;
-  document.getElementById('manut-contagem').textContent = n ? `${n} selecionado(s)` : 'nenhum selecionado';
+  // MARCADO E ESCONDIDO PELO FILTRO tem que aparecer. Sem isso dava pra
+  // marcar 8 maquinas, digitar uma busca, ver 1 na tela e apertar Reiniciar
+  // achando que ia reiniciar uma - as 8 iriam, porque o envio usa o que
+  // esta MARCADO, nao o que esta visivel.
+  const visiveis = new Set(manutVisiveis().map(manutChave));
+  const escondidos = [...MANUT_MARCADOS].filter(k => !visiveis.has(k)).length;
+  const base = n ? `${n} selecionado(s)` : 'nenhum selecionado';
+  const el = document.getElementById('manut-contagem');
+  el.textContent = escondidos ? `${base} · ⚠ ${escondidos} fora do filtro` : base;
+  el.style.color = escondidos ? 'var(--warn)' : '';
   document.getElementById('manut-confirmar').disabled = !n;
   document.getElementById('manut-abortar').disabled = !n;
   document.getElementById('manut-anydesk').disabled = !n;

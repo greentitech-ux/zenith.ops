@@ -9180,6 +9180,75 @@ setTimeout(async () => {
   console.log(`${okAnydesk ? '✓' : '✗'} NOC: dá pra reiniciar só o AnyDesk, sem derrubar o caixa junto`);
 
   // ------------------------------------------------------------------
+  // BUSCA NA JANELA DE MANUTENCAO. Pedido do Master: "filtro de pesquisa
+  // digitado, a fim de ser mais rapido digitando o nome da maquina e
+  // aparece". Com o parque inteiro na lista, achar UMA maquina era rolar
+  // unidade por unidade.
+  //
+  // O risco que vem junto: o envio usa o que esta MARCADO, nao o que esta
+  // visivel. Dava pra marcar 8, digitar uma busca, ver 1 na tela e apertar
+  // Reiniciar achando que ia reiniciar uma - as 8 iriam.
+  let okBuscaManut = false;
+  try {
+    const htmlB = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const fonteNorm = /const manutNorm = [^;]+;/.exec(htmlB);
+    const fonteVis = /function manutVisiveis\(\)\{[\s\S]*?\n\}/.exec(htmlB);
+    const parque = [
+      { codigo: 'CAR', posto: 'ATM01', nome: 'DomCR-ATM01', ipLocal: '10.0.0.5' },
+      { codigo: 'CAR', posto: 'SRV', nome: 'DomCR-SERV', ipLocal: '10.0.0.6' },
+      { codigo: 'TAC', posto: 'SRV', nome: 'SpoTac-Serv', ipLocal: '192.168.0.109' },
+    ];
+    // eslint-disable-next-line no-new-func
+    const montar = new Function('parque', 'NOMES', `
+      let MANUT_BUSCA = '';
+      const UNIDADES_NOMES = NOMES;
+      const manutElegiveis = () => parque;
+      ${fonteNorm ? fonteNorm[0] : ''}
+      ${fonteVis ? fonteVis[0] : ''}
+      return (q) => { MANUT_BUSCA = q; return manutVisiveis().map(c => c.nome); };
+    `);
+    const buscar = (fonteNorm && fonteVis)
+      ? montar(parque, { CAR: 'Dom Carrão', TAC: 'Spo Shop Tacaruna' })
+      : null;
+
+    const conf = {
+      'digitar o nome da máquina filtra a lista':
+        !!buscar && JSON.stringify(buscar('spotac')) === JSON.stringify(['SpoTac-Serv']),
+      // "carrao" tem que achar "Dom Carrão" - e assim que se digita com pressa
+      'acha sem acento e sem caixa alta':
+        !!buscar && buscar('carrao').length === 2,
+      // o Master chega pelo IP que viu no card
+      'acha pelo IP local também':
+        !!buscar && JSON.stringify(buscar('192.168.0.109')) === JSON.stringify(['SpoTac-Serv']),
+      'duas palavras em qualquer ordem':
+        !!buscar && JSON.stringify(buscar('atm carrao')) === JSON.stringify(['DomCR-ATM01']),
+      'busca vazia mostra o parque inteiro':
+        !!buscar && buscar('').length === 3,
+      'busca que não acha nada devolve lista vazia':
+        !!buscar && buscar('zzz').length === 0,
+
+      // --- as travas que impedem reiniciar o que não se está vendo ---
+      'marcado e escondido pelo filtro é avisado na contagem':
+        /fora do filtro/.test(htmlB)
+        && /\[\.\.\.MANUT_MARCADOS\]\.filter\(k => !visiveis\.has\(k\)\)/.test(htmlB),
+      '"Marcar tudo" pega só o que está na tela':
+        /const lista = modo === 'nenhum' \? \[\] : manutVisiveis\(\);/.test(htmlB),
+      'o checkbox da unidade também respeita o filtro':
+        /manutVisiveis\(\)\.filter\(c => c\.codigo === codigo\)/.test(htmlB),
+      // "Limpar" no sentido seguro nao pode ser restringido pelo filtro
+      '"Limpar" continua limpando tudo, não só o visível':
+        /modo === 'nenhum' \? \[\]/.test(htmlB),
+      'abrir a janela zera a busca da vez anterior':
+        /MANUT_BUSCA = '';[\s\S]{0,120}manut-busca'\)\.value = ''/.test(htmlB),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okBuscaManut = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okBuscaManut = false; console.log('  erro: ' + e.message); }
+  if (!okBuscaManut) ruins += 1;
+  console.log(`${okBuscaManut ? '✓' : '✗'} NOC: busca na janela de manutenção, e o que está marcado fora do filtro é avisado`);
+
+  // ------------------------------------------------------------------
   // Duplicação de loja (parte 2): o chamado automático de bloqueio de senha
   // (criarChamadoBloqueio em auth.js) juntava TODAS as unidades do login
   // num único unidadeNome (ex: "Loja A, Loja B, Loja C") - isso nunca bate
