@@ -3465,6 +3465,10 @@ app.get('/api/formularios/tipos', requireSection('formularios'), (req, res) => {
     tipo, rotulo: m.rotulo, cabecalho: m.cabecalho, colunas: m.colunas,
     assinantes: m.assinantes, assinaturaPorLinha: !!m.assinaturaPorLinha,
     soAnexo: !!m.soAnexo, anexoObrigatorio: !!m.anexoObrigatorio,
+    // tipo que nasce SO de um ticket (Estorno): a tela nao oferece botao de
+    // criar em branco, senao o favorecido e a chave Pix voltam a ser
+    // digitados na mao - ver o comentario do tipo em formularios.js
+    somenteDeTicket: !!m.somenteDeTicket,
   })));
 });
 

@@ -8892,6 +8892,28 @@ setTimeout(async () => {
       'estorno PENDENTE não gera formulário (seria pagar antes de decidir)':
         cedoDemais.status === 400 && /APROVADO/.test(JSON.parse(cedoDemais.corpo).error || ''),
       'estorno aprovado gera o formulário': gerou.status === 200 && !!form.id,
+      // A ARMADILHA QUE O MASTER PEGOU: o Reembolso tem DOIS assinantes, e o
+      // formulário só vira ASSINADO quando TODOS assinam. Num estorno o
+      // "favorecido" é o CLIENTE (ou o titular do Pix, outra empresa) - gente
+      // de fora, que nunca vai assinar documento interno. Com um slot pra ele
+      // o formulário ficaria PENDENTE pra sempre. Assina UMA pessoa, de
+      // dentro: "alguém que se responsabiliza por esse estorno".
+      'o formulário nasce no tipo próprio de Estorno': detalhe.tipo === 'estorno',
+      'assina só o Responsável - ninguém de fora trava o documento':
+        Array.isArray(detalhe.assinaturas) && detalhe.assinaturas.length === 1
+        && detalhe.assinaturas[0].chave === 'responsavel'
+        && !detalhe.assinaturas.some((a) => a.chave === 'favorecido'),
+      'o cliente e o pedido ficam no papel, sem virar assinante':
+        detalhe.campos.cliente === 'Samila Batista Freire',
+      // um botão "Estorno" em branco na tela devolveria a digitação manual
+      // do Pix, que é o que este caminho existe pra evitar
+      'o Estorno não vira botão de criar em branco':
+        formsMod.TIPOS.estorno.somenteDeTicket === true
+        && /t\.somenteDeTicket/.test(require('fs').readFileSync(
+          require('path').join(__dirname, 'public', 'formularios.html'), 'utf8')),
+      'a tela diz ONDE o formulário de Estorno nasce':
+        /Categoria do ticket/.test(require('fs').readFileSync(
+          require('path').join(__dirname, 'public', 'formularios.html'), 'utf8')),
       // o titular do Pix e' quem RECEBE, e nao e' o cliente neste caso real
       'o favorecido é o titular do Pix, não quem comprou':
         detalhe.campos && detalhe.campos.favorecido === 'SF Comunicacao',
@@ -8901,6 +8923,8 @@ setTimeout(async () => {
       'a razão social vem do cadastro da unidade': detalhe.razaoSocial === 'Grande Fratello',
       'o valor e a data da venda viram a linha da despesa':
         Number(linha.valor) === 74 && linha.data === '2026-08-29',
+      'o motivo do estorno vai na linha':
+        /Erro de operação no caixa/.test(linha.descricao || ''),
       'o valor total do formulário é o valor a estornar': Number(detalhe.valorTotal) === 74,
       // mesmo numero: o formulario nao e um pedido novo, e o documento DESTE
       'o formulário nasce com o mesmo número do estorno':
@@ -8914,8 +8938,10 @@ setTimeout(async () => {
         deNovo.status === 400 && /já gerou/.test(JSON.parse(deNovo.corpo).error || ''),
       // cpf/agencia/conta nao existem no pedido de estorno: preencher com
       // qualquer coisa "pra nao ficar vazio" produz ordem de pagamento errada
+      // CPF nao existe no pedido de estorno: preencher "pra nao ficar vazio"
+      // (com o telefone, com a chave Pix) produz ordem de pagamento errada
       'o que o estorno não pergunta fica em branco, não inventado':
-        detalhe.campos.cpf === '' && detalhe.campos.agencia === '' && detalhe.campos.conta === '',
+        detalhe.campos.cpf === '',
       'a tela do estorno oferece o botão de criar o formulário':
         /gerarFormularioDoEstorno/.test(htmlCH) && /blocoFormularioDoEstorno/.test(htmlCH),
       // casar por CODIGO, nao por nome: os dois espacos de nome sao

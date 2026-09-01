@@ -340,9 +340,23 @@ let TRIAGEM_STATUS_ABERTO = null;
 
 function modelo(){ return TIPOS.find(t=>t.tipo===TIPO_ATUAL); }
 
+// "Novo formulário" só oferece o que dá pra criar do zero. O Estorno fica
+// de fora de propósito (somenteDeTicket): ele nasce do ticket de estorno
+// aprovado, que é de onde vêm favorecido, chave Pix, banco, valor e o
+// comprovante - um botão em branco aqui seria redigitar tudo na mão, que é
+// justamente onde o dinheiro sai pro nome errado. A dica abaixo diz onde
+// ele está, pra quem vier procurar (foi a primeira pergunta do Master).
 function renderTipos(){
-  document.getElementById('tipos').innerHTML = TIPOS.map(t=>
-    `<button type="button" class="tipo-card ${t.tipo===TIPO_ATUAL?'ativo':''}" onclick="escolherTipo('${t.tipo}')">${escapeHtml(t.rotulo)}</button>`).join('');
+  const criaveis = TIPOS.filter(t=>!t.somenteDeTicket);
+  const soDeTicket = TIPOS.filter(t=>t.somenteDeTicket);
+  const dica = soDeTicket.length
+    ? `<div style="flex-basis:100%;font-size:11.5px;color:var(--muted);margin-top:6px;">
+         ${soDeTicket.map(t=>escapeHtml(t.rotulo)).join(', ')}: não se cria em branco aqui - nasce do próprio ticket, em
+         <b>Central → Histórico</b>, abrindo o Estorno aprovado → <b>🔀 Categoria do ticket</b> → <b>Gerar formulário</b>.
+       </div>`
+    : '';
+  document.getElementById('tipos').innerHTML = criaveis.map(t=>
+    `<button type="button" class="tipo-card ${t.tipo===TIPO_ATUAL?'ativo':''}" onclick="escolherTipo('${t.tipo}')">${escapeHtml(t.rotulo)}</button>`).join('') + dica;
 }
 
 function escolherTipo(tipo){

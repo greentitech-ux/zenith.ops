@@ -225,6 +225,47 @@ const TIPOS = {
     obs: 'OBS.: Todos os comprovantes das despesas devem estar devidamente rubricados e anexados a este formulário.',
     preenchedorAssina: 'favorecido',
   },
+  // ESTORNO AO CLIENTE. Nasce SO de um ticket de estorno ja aprovado (ver
+  // gerarFormulario em refunds.js) - por isso `somenteDeTicket`: um botao
+  // "Estorno" em branco na tela seria redigitar na mao o favorecido e a
+  // chave Pix, que e exatamente o que este caminho existe pra evitar (e
+  // onde o dinheiro sai pro lugar errado).
+  //
+  // POR QUE NAO REUSAR O REEMBOLSO, que foi a primeira tentativa: o
+  // Reembolso tem DOIS assinantes, Favorecido e Responsavel, e um
+  // formulario so vira ASSINADO quando TODOS os slots tem assinatura (ver
+  // todasAssinadas em registrarAssinatura). Num estorno o "favorecido" e' o
+  // CLIENTE - ou o titular do Pix, que pode ser outra empresa - gente de
+  // fora, que nunca vai assinar documento interno. O formulario ficaria
+  // PENDENTE pra sempre. Aqui assina UMA pessoa, e ela e de dentro: quem se
+  // responsabiliza pelo estorno. Pedido do Master, nas palavras dele:
+  // "precisa de uma assinatura do Responsavel, alguem que se responsabiliza
+  // por esse estorno".
+  estorno: {
+    rotulo: 'Estorno ao cliente',
+    titulo: 'SOLICITAÇÃO DE ESTORNO AO CLIENTE',
+    somenteDeTicket: true,
+    cabecalho: [
+      { key: 'cnpj', label: 'CNPJ' },
+      // o favorecido do estorno e quem RECEBE o Pix, que nem sempre e quem
+      // comprou - por isso os dois nomes aparecem, em campos separados
+      { key: 'favorecido', label: 'FAVORECIDO (QUEM RECEBE)' },
+      { key: 'cpf', label: 'CPF/CNPJ DO FAVORECIDO' },
+      { key: 'banco', label: 'BANCO' },
+      { key: 'chavePix', label: 'CHAVE PIX' },
+      { key: 'cliente', label: 'CLIENTE' },
+      { key: 'pedido', label: 'PEDIDO' },
+    ],
+    colunas: [
+      { key: 'data', label: 'DATA DA VENDA', data: true },
+      { key: 'descricao', label: 'MOTIVO DO ESTORNO', larga: true },
+      { key: 'valor', label: 'VALOR A ESTORNAR (R$)', valor: true },
+    ],
+    totalRotulo: 'VALOR TOTAL (R$)',
+    assinantes: [{ papel: 'responsavel', rotulo: 'Responsável' }],
+    preenchedorAssina: 'responsavel',
+    obs: 'OBS.: O comprovante da venda enviado pelo cliente segue anexo. A devolução deve ser feita para a chave Pix informada acima.',
+  },
   // O único tipo que NÃO é um formulário de papel transcrito: aqui o
   // documento é o arquivo anexado (um boleto, em geral), e o que a gente
   // produz é esse mesmo arquivo com a assinatura CARIMBADA dentro dele -

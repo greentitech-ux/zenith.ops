@@ -409,7 +409,10 @@ async function gerarFormulario(id, dados, porEmail) {
       + '- abra o formulário existente em vez de criar outro.');
   }
   const d = dados || {};
-  const tipo = d.tipo || 'reembolso';
+  // 'estorno' e' o tipo proprio: UMA assinatura, a de quem se responsabiliza
+  // (ver o comentario do tipo em formularios.js). O Reembolso continua
+  // disponivel pra quem quiser o formulario com favorecido + responsavel.
+  const tipo = d.tipo || 'estorno';
   const unidade = String(d.unidade || '').trim();
   if (!unidade) throw new Error('Escolha a unidade do formulário (a razão social e o CNPJ saem do cadastro dela).');
 
@@ -434,6 +437,10 @@ async function gerarFormulario(id, dados, porEmail) {
     agencia: String(d.agencia || '').trim(),
     conta: String(d.conta || '').trim(),
     chavePix: String(d.chavePix || atual.pixChave || '').trim(),
+    // so o tipo 'estorno' tem esses dois no cabecalho; nos outros o
+    // montarConteudo descarta, entao mandar sempre nao suja nada
+    cliente: String(atual.nomeCliente || '').trim(),
+    pedido: String(atual.pedidoId || '').trim(),
     // tipos que nao tem tabela (assBoleto) leem valor/descricao do cabecalho
     descricao,
     valor: atual.valorEstornar,
