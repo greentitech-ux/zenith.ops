@@ -70,8 +70,10 @@
 
 <div id="sucesso" class="panel sucesso hidden">
   <div class="icone">✅</div>
-  <h2>Pedido recebido!</h2>
-  <p>Recebemos seu pedido de estorno. Nossa equipe vai avaliar e, se você informou telefone, pode ser contatado por lá.</p>
+  <h2>Pedido recebido</h2>
+  <p>Seus dados e o comprovante chegaram até a nossa equipe.</p>
+  <p><b>Em até 48 horas úteis</b> o estorno pode ser concluído automaticamente. Não sendo o caso, os dados que você enviou seguem para a análise do nosso financeiro, e a devolução é feita pelo sistema bancário na mesma forma de pagamento usada na compra.</p>
+  <p>Se precisarmos confirmar alguma informação, falamos com você pelo telefone informado.</p>
 </div>
 
 <form id="form-estorno" class="panel">
@@ -159,23 +161,31 @@
     </div>
   </div>
 
+  <!-- CAMPOS OBRIGATORIOS, e nao "opcional" como era. Estes dados nao sao
+       burocracia: sao exatamente o cabecalho do formulario de pagamento que
+       o financeiro assina (ver o tipo 'estorno' em formularios.js). O que o
+       cliente nao preenche aqui alguem teria que descobrir depois, por
+       telefone - ou o formulario nasce com campo vazio e a devolucao para. -->
   <div class="secao">
-    <div class="secao-titulo">Cliente</div>
-    <label>Nome do cliente</label>
-    <input type="text" id="nomeCliente">
-    <label>Telefone do cliente</label>
-    <input type="tel" id="telefoneCliente" placeholder="(11) 99999-9999">
+    <div class="secao-titulo">Seus dados</div>
+    <div class="ajuda">Precisamos deles para emitir a devolução no seu nome.</div>
+    <label>Nome completo *</label>
+    <input type="text" id="nomeCliente" required>
+    <label>CPF ou CNPJ *</label>
+    <input type="text" id="cpfCnpjCliente" placeholder="Somente números" required>
+    <label>Telefone com DDD *</label>
+    <input type="tel" id="telefoneCliente" placeholder="(11) 99999-9999" required>
   </div>
 
   <div class="secao">
-    <div class="secao-titulo">Dados para receber o estorno via Pix</div>
-    <div class="ajuda">Preencha se preferir receber o valor direto via Pix, em vez do estorno na maquininha (opcional).</div>
-    <label>Chave Pix</label>
-    <input type="text" id="pixChave" placeholder="CPF, e-mail, telefone ou chave aleatória">
-    <label>Nome do titular da conta</label>
-    <input type="text" id="pixNomeTitular">
-    <label>Banco</label>
-    <input type="text" id="pixBanco" placeholder="Ex: Nubank, Banco do Brasil...">
+    <div class="secao-titulo">Conta para receber o estorno</div>
+    <div class="ajuda">A devolução é feita para esta chave Pix. Confira com atenção: é para onde o dinheiro vai.</div>
+    <label>Chave Pix *</label>
+    <input type="text" id="pixChave" placeholder="CPF, e-mail, telefone ou chave aleatória" required>
+    <label>Nome do titular da conta *</label>
+    <input type="text" id="pixNomeTitular" placeholder="Quem recebe - pode ser diferente de quem comprou" required>
+    <label>Banco *</label>
+    <input type="text" id="pixBanco" placeholder="Ex: Nubank, Banco do Brasil..." required>
   </div>
 
   <div class="secao">
@@ -291,6 +301,7 @@ document.getElementById('form-estorno').addEventListener('submit', async (e)=>{
     dataVenda: document.getElementById('dataVenda').value,
     horaVenda: document.getElementById('horaVenda').value,
     nomeCliente: document.getElementById('nomeCliente').value,
+    cpfCnpjCliente: document.getElementById('cpfCnpjCliente').value,
     telefoneCliente: document.getElementById('telefoneCliente').value,
     pixChave: document.getElementById('pixChave').value,
     pixNomeTitular: document.getElementById('pixNomeTitular').value,

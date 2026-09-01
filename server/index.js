@@ -542,7 +542,7 @@ app.post('/api/refund-requests/publico', upload.array('anexos', 5), async (req, 
     const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
     const {
       unidade, motivoEstorno, motivoOutro, valorVenda, formaPagamento, bandeira, ultimos4,
-      dataVenda, horaVenda, valorEstornar, nomeCliente, telefoneCliente,
+      dataVenda, horaVenda, valorEstornar, nomeCliente, cpfCnpjCliente, telefoneCliente,
       pixChave, pixNomeTitular, pixBanco, observacao: observacaoCliente,
     } = payload;
 
@@ -557,7 +557,7 @@ app.post('/api/refund-requests/publico', upload.array('anexos', 5), async (req, 
 
     const registro = await refunds.create({
       origem: 'cliente', unidade, unidadeNome, motivoEstorno, motivoOutro, valorVenda, formaPagamento,
-      bandeira, ultimos4, dataVenda, horaVenda, valorEstornar, nomeCliente, telefoneCliente, anexos,
+      bandeira, ultimos4, dataVenda, horaVenda, valorEstornar, nomeCliente, cpfCnpjCliente, telefoneCliente, anexos,
       pixChave, pixNomeTitular, pixBanco, observacaoCliente,
     });
     broadcast('refund-requested', registro, 'monitor');
@@ -3436,8 +3436,18 @@ async function unidadesDeFormularioPara(req) {
   const liberadas = new Set(req.permissions?.unidades || []);
   const permitidas = [];
   for (const c of cadastros) {
-    if (!c.codigo || !liberadas.has(c.codigo)) continue;
-    if (!(await unidadesExtras.apareceEm(c.codigo, 'formularios'))) continue;
+    // QUALQUER uma das lojas do cadastro serve. Um CNPJ pode atender varias
+    // lojas (as tres "Aero" faturam por Grande Fratello) - com so o codigo
+    // principal valendo, o gerente das outras duas nao conseguia emitir
+    // formulario da propria empresa. A lista extra e digitada pelo Master no
+    // cadastro, entao isto so libera o que ele declarou.
+    const codigos = formulariosUnidades.codigosDe(c).filter((cod) => liberadas.has(cod));
+    if (!codigos.length) continue;
+    let apareceEmAlguma = false;
+    for (const cod of codigos) {
+      if (await unidadesExtras.apareceEm(cod, 'formularios')) { apareceEmAlguma = true; break; }
+    }
+    if (!apareceEmAlguma) continue;
     permitidas.push(c);
   }
   return permitidas;

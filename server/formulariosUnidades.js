@@ -138,7 +138,23 @@ async function obterPorUnidade(rotulo) {
 async function obterPorCodigo(codigo) {
   const alvo = limpar(codigo, 80);
   if (!alvo) return null;
-  return (await listar()).find((u) => u.codigo && u.codigo === alvo) || null;
+  return (await listar()).find((u) => codigosDe(u).includes(alvo)) || null;
+}
+
+// UM CNPJ, VARIAS LOJAS. As tres unidades "Aero" (Dom Praca Aero, Spo Praca
+// Aero e Dom Car Aero) faturam pelo MESMO CNPJ - Grande Fratello. Cada uma
+// tem o seu codigo de loja, mas o formulario de pagamento sai de uma empresa
+// so. Com um `codigo` unico por cadastro, duas delas nao achavam a empresa e
+// o seletor caia na primeira da lista - foi o que fez o formulario do
+// estorno nascer em "Big Brother" em vez de "Grande Fratello".
+//
+// `codigo` continua sendo o codigo principal e NAO muda de nome (secao 1 do
+// CLAUDE.md): `codigosExtras` so acrescenta as outras lojas que faturam pelo
+// mesmo CNPJ. Nao e uniao de codigos de unidade - cada loja continua com o
+// codigo dela em todo o resto do sistema; aqui e' so o cadastro dizendo por
+// qual empresa ela paga.
+function codigosDe(u) {
+  return [u && u.codigo, ...((u && u.codigosExtras) || [])].filter(Boolean);
 }
 
 // rótulo -> código da unidade de verdade, pra filtrar por permissão os
@@ -149,7 +165,7 @@ async function mapaRotuloParaCodigo() {
   return out;
 }
 
-async function validar({ unidade, razaoSocial, cnpj, codigo }, { ignorarId } = {}) {
+async function validar({ unidade, razaoSocial, cnpj, codigo, codigosExtras }, { ignorarId } = {}) {
   const unidadeOk = limpar(unidade, 80);
   const razaoOk = limpar(razaoSocial, 120);
   if (!unidadeOk) throw new Error('Informe o nome da unidade como deve aparecer no formulário.');
@@ -157,7 +173,17 @@ async function validar({ unidade, razaoSocial, cnpj, codigo }, { ignorarId } = {
   if (!cnpjValido(cnpj)) throw new Error('CNPJ inválido - confira os números (o dígito verificador não fechou).');
   const jaTem = (await listar()).some((u) => u.unidade === unidadeOk && u.id !== ignorarId);
   if (jaTem) throw new Error(`Já existe uma unidade de formulário chamada "${unidadeOk}".`);
-  return { unidade: unidadeOk, razaoSocial: razaoOk, cnpj: formatarCnpj(cnpj), codigo: limpar(codigo, 80) || null };
+  const principal = limpar(codigo, 80) || null;
+  // aceita lista ou texto separado por virgula (e o que a tela manda), sem
+  // repetir o principal e sem duplicata
+  const brutos = Array.isArray(codigosExtras)
+    ? codigosExtras
+    : String(codigosExtras || '').split(',');
+  const extras = [...new Set(brutos.map((c) => limpar(c, 80)).filter((c) => c && c !== principal))].slice(0, 20);
+  return {
+    unidade: unidadeOk, razaoSocial: razaoOk, cnpj: formatarCnpj(cnpj),
+    codigo: principal, codigosExtras: extras,
+  };
 }
 
 async function criar(dados, porEmail) {
@@ -197,6 +223,6 @@ async function alternarAtivo(id, ativo, porEmail) {
 }
 
 module.exports = {
-  SEMENTE, listar, listarAtivas, obterPorUnidade, obterPorCodigo, mapaRotuloParaCodigo,
+  SEMENTE, listar, listarAtivas, obterPorUnidade, obterPorCodigo, codigosDe, mapaRotuloParaCodigo,
   criar, atualizar, alternarAtivo, cnpjValido, formatarCnpj,
 };

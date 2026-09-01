@@ -312,8 +312,29 @@
         document.body.removeChild(a);
       });
       if (!ehCsv) {
-        corpo.innerHTML = '<iframe title="Relatório"></iframe>';
-        corpo.querySelector('iframe').src = blobUrl;
+        // CELULAR NAO MOSTRA PDF DENTRO DE IFRAME. O Chrome do Android nao
+        // tem leitor embutido: em vez da pagina, ele desenha um cartao cinza
+        // com o id do blob e um botao "Abrir" - parece que o app quebrou.
+        // navigator.pdfViewerEnabled diz exatamente isso (false no Android,
+        // true no desktop); onde a propriedade nao existe, o user-agent
+        // resolve. Sem essa checagem a tela de "ver antes de baixar" fica
+        // pior que nao ter tela nenhuma no aparelho onde a loja mais usa.
+        var mostraPdf = ('pdfViewerEnabled' in navigator)
+          ? navigator.pdfViewerEnabled
+          : !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+        if (mostraPdf) {
+          corpo.innerHTML = '<iframe title="Relatório"></iframe>';
+          corpo.querySelector('iframe').src = blobUrl;
+          return null;
+        }
+        corpo.innerHTML = '<div class="zrel-aviso">'
+          + 'Este navegador não abre PDF dentro da página. Toque em <b>Abrir o PDF</b> '
+          + 'para ver no leitor do aparelho, ou em <b>Baixar</b> para guardar o arquivo.'
+          + '<div style="margin-top:12px;"><button type="button" class="zrel-btn baixar" '
+          + 'data-abrir="1">Abrir o PDF</button></div></div>';
+        corpo.querySelector('[data-abrir]').addEventListener('click', function () {
+          window.open(blobUrl, '_blank');
+        });
         return null;
       }
       return d.blob.text().then(function (texto) {

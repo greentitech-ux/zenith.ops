@@ -35,7 +35,7 @@ const EXECUCAO_STATUSES = ['PENDENTE', 'EM_ANDAMENTO', 'FINALIZADO'];
 async function create({
   pedidoId, unidade, unidadeNome, observacao, origem,
   motivoEstorno, motivoOutro, valorVenda, formaPagamento, bandeira, ultimos4,
-  dataVenda, horaVenda, valorEstornar, nomeCliente, telefoneCliente, anexos,
+  dataVenda, horaVenda, valorEstornar, nomeCliente, cpfCnpjCliente, telefoneCliente, anexos,
   pixChave, pixNomeTitular, pixBanco, observacaoCliente,
   requestedById, requestedByEmail, direcionadoParaId, direcionadoParaEmail,
   numeroTicket, convertidoDeTipo, convertidoDeId, teste,
@@ -55,6 +55,18 @@ async function create({
     if (!dataVenda) throw new Error('Informe a data da venda.');
     if (valorEstornar == null || valorEstornar === '') throw new Error('Informe o valor a estornar.');
     if (!Array.isArray(anexos) || !anexos.length) throw new Error('Anexe o comprovante da maquininha.');
+    // Estes quatro sao o cabecalho do formulario de pagamento que o
+    // financeiro assina (tipo 'estorno' em formularios.js). Eram opcionais e
+    // por isso chegavam vazios - e ai alguem tinha que caçar o dado por
+    // telefone, ou o formulario nascia com campo em branco e a devolucao
+    // parava. O `required` do HTML nao e garantia: quem manda o POST direto
+    // passa por cima dele, entao a regra tem que viver aqui tambem.
+    if (!String(nomeCliente || '').trim()) throw new Error('Informe seu nome completo.');
+    if (!String(cpfCnpjCliente || '').trim()) throw new Error('Informe seu CPF ou CNPJ.');
+    if (!String(telefoneCliente || '').trim()) throw new Error('Informe um telefone com DDD.');
+    if (!String(pixChave || '').trim()) throw new Error('Informe a chave Pix que vai receber a devolução.');
+    if (!String(pixNomeTitular || '').trim()) throw new Error('Informe o nome do titular da conta que vai receber.');
+    if (!String(pixBanco || '').trim()) throw new Error('Informe o banco da conta que vai receber.');
   }
 
   const doc = refundsRef.doc();
@@ -97,6 +109,7 @@ async function create({
     horaVenda: horaVenda || null,
     valorEstornar: valorEstornar != null && valorEstornar !== '' ? Number(valorEstornar) || 0 : null,
     nomeCliente: nomeCliente ? String(nomeCliente).trim().slice(0, 120) : null,
+    cpfCnpjCliente: cpfCnpjCliente ? String(cpfCnpjCliente).trim().slice(0, 30) : null,
     telefoneCliente: telefoneCliente ? String(telefoneCliente).trim().slice(0, 30) : null,
     // dados pra devolver o dinheiro via Pix (alternativa ao estorno na propria
     // maquininha) - preenchidos pelo cliente no formulario publico, opcional
@@ -283,7 +296,7 @@ async function atualizarExecucaoComLink(id, link, execucaoStatus, { autorNome })
 // edicao direta pelo Master - poder de corrigir qualquer campo do pedido de
 // estorno (dado errado digitado pelo cliente, unidade errada, etc.),
 // independente do status. So mexe no que vier em `campos`.
-const CAMPOS_TEXTO = ['pedidoId', 'unidade', 'unidadeNome', 'observacao', 'motivoEstorno', 'motivoOutro', 'formaPagamento', 'bandeira', 'ultimos4', 'dataVenda', 'horaVenda', 'nomeCliente', 'telefoneCliente', 'pixChave', 'pixNomeTitular', 'pixBanco', 'observacaoCliente'];
+const CAMPOS_TEXTO = ['pedidoId', 'unidade', 'unidadeNome', 'observacao', 'motivoEstorno', 'motivoOutro', 'formaPagamento', 'bandeira', 'ultimos4', 'dataVenda', 'horaVenda', 'nomeCliente', 'cpfCnpjCliente', 'telefoneCliente', 'pixChave', 'pixNomeTitular', 'pixBanco', 'observacaoCliente'];
 const CAMPOS_NUMERICOS = ['valorVenda', 'valorEstornar'];
 async function update(id, campos) {
   const ref = refundsRef.doc(id);
@@ -432,7 +445,9 @@ async function gerarFormulario(id, dados, porEmail) {
     // isso. Vao em branco pro financeiro completar se precisar - preencher
     // com o telefone ou com a chave Pix "pra nao ficar vazio" produziria um
     // documento de pagamento com dado errado.
-    cpf: String(d.cpf || '').trim(),
+    // agora o pedido PERGUNTA (campo obrigatorio no formulario publico), entao
+    // o favorecido nasce identificado em vez de com o campo em branco
+    cpf: String(d.cpf || atual.cpfCnpjCliente || '').trim(),
     banco: String(d.banco || atual.pixBanco || '').trim(),
     agencia: String(d.agencia || '').trim(),
     conta: String(d.conta || '').trim(),

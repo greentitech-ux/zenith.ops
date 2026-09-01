@@ -220,6 +220,15 @@
         <select id="cad-codigo"></select>
         <span class="fi-sub">Quem tiver essa unidade liberada no acesso passa a ver esta opção. Sem vincular, só o Master enxerga.</span>
       </div>
+      <!-- UM CNPJ, VARIAS LOJAS. As tres unidades "Aero" faturam por Grande
+           Fratello: cada uma tem o seu codigo de loja, mas o pagamento sai
+           de uma empresa so. Sem esta lista, duas delas nao achavam a
+           empresa e o formulario de estorno nascia no CNPJ errado. -->
+      <div>
+        <label>Outras lojas que faturam por este mesmo CNPJ</label>
+        <select id="cad-codigos-extras" multiple size="6" style="height:auto;"></select>
+        <span class="fi-sub">Segure Ctrl (ou ⌘) pra marcar mais de uma. O estorno aberto por qualquer uma delas já vem com esta empresa escolhida, e o gerente delas passa a poder emitir formulário daqui.</span>
+      </div>
     </div>
     <div class="msg err hidden" id="cad-erro"></div>
     <div class="acoes-form">
@@ -630,6 +639,18 @@ async function abrirLinks(id){
     const d = await r.json();
     if(!r.ok) throw new Error(d.error||('erro '+r.status));
     const alvo = document.getElementById('links-'+id);
+    // O CARD PODE NAO ESTAR MAIS NA TELA. Assinar muda o status do
+    // formulario, e o filtro ativo ("Aguardando assinatura") deixa de
+    // mostrar quem acabou de ficar pronto - o card sai da lista no
+    // carregarLista() que roda antes daqui. Sem esta linha, quem assinou
+    // levava um "Cannot set properties of null" na cara com o trabalho JA
+    // FEITO, e ainda ficava sem saber se tinha dado certo.
+    //
+    // Ficou visivel agora por causa do Estorno: ele tem UMA assinatura so,
+    // entao a primeira ja completa o documento e tira o card do filtro. Nos
+    // tipos de duas assinaturas isso quase nunca acontecia, porque a
+    // primeira assinatura deixava o formulario pendente na mesma lista.
+    if(!alvo) return;
     alvo.innerHTML = d.assinaturas.map(a=>`
       <div class="ass-linha">
         <span class="rot">${a.assinado?'✅':'✍️'} ${escapeHtml(a.rotulo)}${a.nome?` · <span style="color:var(--muted);">${escapeHtml(a.nome)}</span>`:''}</span>
@@ -711,7 +732,10 @@ async function assSalvar(){
     const id = ASS.id;
     fecharAssinatura();
     await carregarLista();
-    await abrirLinks(id);
+    // documento completo nao tem mais link pra mandar pra ninguem - reabrir
+    // o painel de assinaturas so pra mostrar tudo assinado nao ajuda, e e'
+    // justamente o caso em que o card some do filtro
+    if(!d.completo) await abrirLinks(id);
     alert(d.completo
       ? 'Assinado! O documento está completo - baixe o PDF com a assinatura nele.'
       : 'Assinado! Ainda falta assinatura de outra pessoa.');
@@ -1177,8 +1201,10 @@ function renderCadastro(){
   el.innerHTML = CADASTRO.map(c=>{
     // sem vínculo = ninguém além do Master consegue usar. Fica dito na cara,
     // não escondido num tooltip - é o que faz o seletor da gerente ficar vazio
+    const extras = (c.codigosExtras || []).map(cod=>nomeDaUnidadeZenith(cod));
     const vinculo = c.codigo
       ? `<span style="color:var(--ok);">↔ ${escapeHtml(nomeDaUnidadeZenith(c.codigo))}</span>`
+        + (extras.length ? `<span style="color:var(--muted);"> + ${escapeHtml(extras.join(', '))}</span>` : '')
       : '<span style="color:var(--warn);">⚠ sem unidade vinculada — só o Master vê</span>';
     return `<div class="form-item${c.ativo===false?' cancelado':''}">
       <div class="fi-titulo">${escapeHtml(c.unidade)} ${c.ativo===false?'<span class="badge cancelado">inativa</span>':''}</div>
@@ -1201,6 +1227,12 @@ function abrirCadastro(id){
   document.getElementById('cad-cnpj').value = c ? c.cnpj : '';
   document.getElementById('cad-codigo').innerHTML = '<option value="">— sem vínculo (só o Master vê) —</option>' +
     UNIDADES_ZENITH.map(u=>`<option value="${escapeHtml(u.codigo)}"${c && String(c.codigo)===String(u.codigo)?' selected':''}>${escapeHtml(u.nome)}${u.empresa?' · '+escapeHtml(u.empresa):''}</option>`).join('');
+  // as mesmas opções, escolhidas de lista em vez de digitadas: código de
+  // loja errado aqui manda o formulário pro CNPJ errado, e digitar é
+  // justamente onde isso aconteceria
+  const extras = new Set(((c && c.codigosExtras) || []).map(String));
+  document.getElementById('cad-codigos-extras').innerHTML =
+    UNIDADES_ZENITH.map(u=>`<option value="${escapeHtml(u.codigo)}"${extras.has(String(u.codigo))?' selected':''}>${escapeHtml(u.nome)}</option>`).join('');
   document.getElementById('cad-erro').classList.add('hidden');
   document.getElementById('cad-overlay').classList.remove('hidden');
 }
@@ -1212,6 +1244,7 @@ async function salvarCadastro(){
     razaoSocial: document.getElementById('cad-razao').value,
     cnpj: document.getElementById('cad-cnpj').value,
     codigo: document.getElementById('cad-codigo').value || null,
+    codigosExtras: [...document.getElementById('cad-codigos-extras').selectedOptions].map(o=>o.value),
   };
   const url = EDITANDO_CADASTRO ? `/api/formularios/cadastro-unidades/${EDITANDO_CADASTRO}` : '/api/formularios/cadastro-unidades';
   try{

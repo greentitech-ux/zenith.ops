@@ -1828,12 +1828,13 @@ function blocoFormularioDoEstorno(c){
       <select id="fe-unidade"><option value="">carregando...</option></select>
       <label>Favorecido (quem recebe)</label>
       <input type="text" id="fe-favorecido" value="${escapeHtml(favorecido)}">
-      <label>CPF/CNPJ do favorecido <span style="color:var(--muted);font-weight:400;">(o pedido de estorno não pergunta isso)</span></label>
-      <input type="text" id="fe-cpf" placeholder="opcional">
+      <label>CPF/CNPJ do favorecido</label>
+      <input type="text" id="fe-cpf" value="${escapeHtml(c.cpfCnpjCliente||'')}" placeholder="pedidos antigos podem não ter">
       <div style="font-size:11.5px;color:var(--muted);margin-top:8px;">
-        Vão junto, do que o cliente já preencheu: chave Pix <b>${escapeHtml(c.pixChave||'—')}</b>,
-        banco <b>${escapeHtml(c.pixBanco||'—')}</b>, valor <b>${fmtMoney(c.valorEstornar||0)}</b>,
-        data da venda <b>${escapeHtml(c.dataVenda||'—')}</b> e o comprovante anexado.
+        Vão junto, do que o cliente já preencheu: CPF/CNPJ <b>${escapeHtml(c.cpfCnpjCliente||'—')}</b>,
+        chave Pix <b>${escapeHtml(c.pixChave||'—')}</b>, banco <b>${escapeHtml(c.pixBanco||'—')}</b>,
+        valor <b>${fmtMoney(c.valorEstornar||0)}</b>, data da venda <b>${escapeHtml(c.dataVenda||'—')}</b>
+        e o comprovante anexado.
       </div>
       <button type="button" class="btn-primary" style="margin-top:8px;" onclick="gerarFormularioDoEstorno()">Criar formulário</button>
     </div>`;
@@ -1856,8 +1857,18 @@ async function carregarUnidadesFormulario(c){
     sel.innerHTML = '<option value="">nenhuma unidade de formulário liberada pra você</option>';
     return;
   }
-  const sugerida = UNIDADES_FORMULARIO.find(u=>u.codigo && u.codigo === c.unidade);
-  sel.innerHTML = UNIDADES_FORMULARIO.map(u=>
+  // casa com o codigo principal OU com um dos extras: um CNPJ pode atender
+  // varias lojas (as tres "Aero" faturam por Grande Fratello). Sem os
+  // extras, duas delas nao achavam a empresa e o seletor caia na PRIMEIRA da
+  // lista - foi assim que o formulario do #11529 nasceu em "Big Brother".
+  const codigosDaUnidade = (u)=>[u.codigo, ...(u.codigosExtras||[])].filter(Boolean);
+  const sugerida = UNIDADES_FORMULARIO.find(u=>codigosDaUnidade(u).includes(c.unidade));
+  // Sem match, o seletor abre VAZIO em vez de na primeira da lista. Uma
+  // empresa errada escolhida sem querer manda o pagamento pra outro CNPJ, e
+  // "Big Brother" selecionado por acaso parece tao preenchido quanto o
+  // certo - o vazio obriga a escolher.
+  const vazio = sugerida ? '' : '<option value="" selected>— escolha a empresa —</option>';
+  sel.innerHTML = vazio + UNIDADES_FORMULARIO.map(u=>
     `<option value="${escapeHtml(u.unidade)}" ${sugerida && u.unidade===sugerida.unidade?'selected':''}>${escapeHtml(u.unidade)}${u.razaoSocial?` · ${escapeHtml(u.razaoSocial)}`:''}</option>`
   ).join('');
 }

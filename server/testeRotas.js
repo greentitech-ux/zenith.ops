@@ -6492,6 +6492,18 @@ setTimeout(async () => {
       'o Baixar sai do mesmo blob, não de uma segunda geração':
         /a\.href = blobUrl/.test(temaV) && (temaV.match(/fetch\(url\)/g) || []).length === 1,
       'o blob é liberado ao fechar': /revokeObjectURL/.test(temaV),
+      // O Chrome do Android nao tem leitor de PDF embutido: no iframe ele
+      // desenha um cartao cinza com o id do blob e um botao "Abrir", e a
+      // tela parece quebrada - foi o que o Master viu no celular. Onde nao
+      // da pra mostrar, a janela explica e oferece abrir no leitor do
+      // aparelho, em vez de fingir que mostrou.
+      // A assercao PRECISA amarrar o iframe ao teste: so exigir que as
+      // palavras existam no arquivo passava mesmo com o iframe voltando a
+      // ser incondicional - sabotagem confirmou.
+      'no celular, que não abre PDF em iframe, a tela explica em vez de quebrar':
+        /if \(mostraPdf\) \{[\s\S]{0,220}?iframe title="Relatório"/.test(temaV)
+        && /pdfViewerEnabled/.test(temaV)
+        && /Abrir o PDF/.test(temaV),
       'a cor sai do token (não quebra o tema Claro)':
         /background:var\(--accent,#b8ff3c\);color:#0b0d10/.test(temaV),
       'o erro do servidor aparece na tela, não um "falhou" genérico':
@@ -8844,11 +8856,25 @@ setTimeout(async () => {
     const refundsMod = require('/home/user/adyen-monitor/server/refunds.js');
     const uniForm = require('/home/user/adyen-monitor/server/formulariosUnidades.js');
 
-    // unidade de formulario ligada ao MESMO codigo que o estorno guarda
+    // UM CNPJ, TRES LOJAS: as unidades "Aero" faturam por Grande Fratello.
+    // O cadastro tem um codigo principal e as outras duas em codigosExtras -
+    // e' isso que faz o estorno de qualquer uma delas achar a empresa certa.
+    // Uma empresa "errada" tambem entra, e ANTES na lista, porque o defeito
+    // real foi o seletor cair na primeira opcao quando nao achava match.
     await postarJson('/api/formularios/cadastro-unidades', {
-      unidade: 'Spoleto Praça Aeroporto Recife', razaoSocial: 'Grande Fratello',
-      cnpj: '20182750000139', codigo: 'SPO_AERO_COD',
+      unidade: 'Big Brother - Recife', razaoSocial: 'Big Brother Serviços Combinados LTDA',
+      cnpj: '11222333000181', codigo: 'BIGBROTHER_COD',
     }, cabM);
+    // a Grande Fratello ja vem na semente do cadastro - aqui e' EDITAR, que
+    // e' exatamente o que o Master faz na tela pra marcar as outras lojas
+    const cadList = JSON.parse((await pedir('/api/formularios/cadastro-unidades', cabM)).corpo);
+    const aeroBase = cadList.find((u) => /Aeroporto Recife/.test(u.unidade) && /Fratello/i.test(u.razaoSocial));
+    const cadAero = await putJson(`/api/formularios/cadastro-unidades/${aeroBase.id}`, {
+      unidade: aeroBase.unidade, razaoSocial: aeroBase.razaoSocial, cnpj: aeroBase.cnpj,
+      codigo: 'DOM_PRACA_AERO', codigosExtras: ['SPO_AERO_COD', 'DOM_CAR_AERO'],
+    }, cabM);
+    const aero = cadAero.status === 200 ? JSON.parse(cadAero.corpo) : {};
+    if (cadAero.status !== 200) console.log('  DEBUG cadAero:', cadAero.status, cadAero.corpo.slice(0, 200));
 
     // origem 'cliente': e' o formulario publico que traz Pix, valor e nome -
     // a rota interna (/api/refund-requests) so aceita pedidoId/observacao.
@@ -8860,10 +8886,25 @@ setTimeout(async () => {
       motivoEstorno: 'Erro de operação no caixa',
       valorVenda: 74, valorEstornar: 74, formaPagamento: 'Pix na maquininha',
       bandeira: 'Pix', dataVenda: '2026-08-29', horaVenda: '09:48',
-      nomeCliente: 'Samila Batista Freire', telefoneCliente: '82999991670',
+      nomeCliente: 'Samila Batista Freire', cpfCnpjCliente: '123.456.789-00',
+      telefoneCliente: '82999991670',
       pixChave: '56779183000140', pixNomeTitular: 'SF Comunicacao', pixBanco: 'Inter',
       anexos: [{ nome: 'comprovante.jpeg', path: 'estornos/comprovante.jpeg', tipo: 'image/jpeg' }],
     });
+
+    const semCampo = async (falta) => {
+      const base = {
+        origem: 'cliente', unidade: 'SPO_AERO_COD', motivoEstorno: 'Erro de operação no caixa',
+        valorVenda: 74, valorEstornar: 74, formaPagamento: 'Pix na maquininha', bandeira: 'Pix',
+        dataVenda: '2026-08-29', nomeCliente: 'Teste', cpfCnpjCliente: '000', telefoneCliente: '81',
+        pixChave: 'x', pixNomeTitular: 'y', pixBanco: 'z',
+        anexos: [{ nome: 'a.jpg', path: 'p/a.jpg', tipo: 'image/jpeg' }],
+      };
+      delete base[falta];
+      try { await refundsMod.create(base); return null; } catch (e) { return e; }
+    };
+    const faltouCpf = await semCampo('cpfCnpjCliente');
+    const faltouPix = await semCampo('pixChave');
 
     // PENDENTE ainda nao vira formulario: seria mandar pagar antes de decidir
     const cedoDemais = await postarJson(`/api/refund-requests/${est.id}/formulario`,
@@ -8872,8 +8913,12 @@ setTimeout(async () => {
     await enviarJson('PATCH', `/api/refund-requests/${est.id}/status`, { status: 'APROVADO' }, cabM);
 
     const gerou = await postarJson(`/api/refund-requests/${est.id}/formulario`, {
-      unidade: 'Spoleto Praça Aeroporto Recife',
+      unidade: aeroBase.unidade,
     }, cabM);
+    // a loja do estorno (SPO_AERO_COD) e um codigo EXTRA do cadastro - o
+    // servidor tem que achar a empresa por ele, nao so pelo principal
+    const achouPeloExtra = await uniForm.obterPorCodigo('SPO_AERO_COD');
+    const achouPeloOutro = await uniForm.obterPorCodigo('DOM_CAR_AERO');
     const form = gerou.status === 200 ? JSON.parse(gerou.corpo) : {};
     const detalhe = form.id ? await formsMod.detalhar(form.id) : {};
     const linha = (detalhe.linhas || [])[0] || {};
@@ -8881,14 +8926,21 @@ setTimeout(async () => {
     // segunda tentativa tem que ser recusada - dois formularios de pagamento
     // pro mesmo estorno e risco de pagar duas vezes
     const deNovo = await postarJson(`/api/refund-requests/${est.id}/formulario`, {
-      unidade: 'Spoleto Praça Aeroporto Recife',
+      unidade: aeroBase.unidade,
     }, cabM);
 
     const estDepois = JSON.parse((await pedir(`/api/refund-requests`, cabM)).corpo)
       .find((r) => r.id === est.id) || {};
     const htmlCH = require('fs').readFileSync(require('path').join(__dirname, 'public', 'central-historico.html'), 'utf8');
+    const htmlForm = require('fs').readFileSync(require('path').join(__dirname, 'public', 'formularios.html'), 'utf8');
 
     const conf = {
+      // O formulario de pagamento carimba esses campos. Eram opcionais e
+      // chegavam vazios; o `required` do HTML nao vale pra quem posta
+      // direto, entao a regra tem que estar no servidor tambem.
+      'o pedido do cliente exige o que o formulário precisa':
+        faltouCpf instanceof Error && /CPF ou CNPJ/.test(faltouCpf.message)
+        && faltouPix instanceof Error && /chave Pix/.test(faltouPix.message),
       'estorno PENDENTE não gera formulário (seria pagar antes de decidir)':
         cedoDemais.status === 400 && /APROVADO/.test(JSON.parse(cedoDemais.corpo).error || ''),
       'estorno aprovado gera o formulário': gerou.status === 200 && !!form.id,
@@ -8921,6 +8973,24 @@ setTimeout(async () => {
         detalhe.campos.chavePix === '56779183000140' && detalhe.campos.banco === 'Inter',
       // razao social e CNPJ saem do CADASTRO da unidade, nao do navegador
       'a razão social vem do cadastro da unidade': detalhe.razaoSocial === 'Grande Fratello',
+      // AS TRES "AERO" SAO UM CNPJ SO. Antes o cadastro tinha UM codigo, entao
+      // duas das tres nao achavam a empresa e o seletor caia na primeira da
+      // lista - foi assim que o formulario do #11529 nasceu em "Big Brother".
+      'loja que fatura pelo mesmo CNPJ acha a empresa certa':
+        !!achouPeloExtra && achouPeloExtra.razaoSocial === 'Grande Fratello'
+        && !!achouPeloOutro && achouPeloOutro.razaoSocial === 'Grande Fratello',
+      'o cadastro guarda as outras lojas do mesmo CNPJ':
+        Array.isArray(aero.codigosExtras) && aero.codigosExtras.length === 2,
+      // sem match o seletor tem que abrir VAZIO: uma empresa escolhida por
+      // acaso parece tao preenchida quanto a certa, e manda o pagamento pro
+      // CNPJ errado
+      'sem match, o seletor não escolhe uma empresa por acaso':
+        /escolha a empresa/.test(require('fs').readFileSync(
+          require('path').join(__dirname, 'public', 'central-historico.html'), 'utf8')),
+      // o CPF agora e' perguntado no formulario publico, entao o favorecido
+      // nasce identificado
+      'o CPF/CNPJ do cliente vira o CPF do favorecido':
+        detalhe.campos.cpf === '123.456.789-00',
       'o valor e a data da venda viram a linha da despesa':
         Number(linha.valor) === 74 && linha.data === '2026-08-29',
       'o motivo do estorno vai na linha':
@@ -8938,16 +9008,27 @@ setTimeout(async () => {
         deNovo.status === 400 && /já gerou/.test(JSON.parse(deNovo.corpo).error || ''),
       // cpf/agencia/conta nao existem no pedido de estorno: preencher com
       // qualquer coisa "pra nao ficar vazio" produz ordem de pagamento errada
-      // CPF nao existe no pedido de estorno: preencher "pra nao ficar vazio"
-      // (com o telefone, com a chave Pix) produz ordem de pagamento errada
-      'o que o estorno não pergunta fica em branco, não inventado':
-        detalhe.campos.cpf === '',
+      // agencia/conta continuam sem ser perguntadas: preencher "pra nao ficar
+      // vazio" (com o telefone, com a chave Pix) produz ordem de pagamento
+      // errada, que e' pior que campo vazio
+      'o que o estorno não pergunta continua fora, não inventado':
+        detalhe.campos.agencia === undefined && detalhe.campos.conta === undefined,
+      // O ERRO QUE ELE VIU EM PRODUCAO: "Cannot set properties of null
+      // (setting 'innerHTML')" depois de assinar. abrirLinks() escrevia no
+      // card sem conferir se ele ainda estava na tela - e assinar muda o
+      // status, entao o filtro ativo tira o card da lista. Ficou visivel com
+      // o Estorno porque ele tem UMA assinatura: a primeira ja completa.
+      'assinar não pode estourar quando o card sai do filtro':
+        /const alvo = document\.getElementById\('links-'\+id\);[\s\S]{0,1200}?if\(!alvo\) return;/
+          .test(htmlForm),
+      'documento completo não tenta reabrir o painel de links':
+        /if\(!d\.completo\) await abrirLinks\(id\);/.test(htmlForm),
       'a tela do estorno oferece o botão de criar o formulário':
         /gerarFormularioDoEstorno/.test(htmlCH) && /blocoFormularioDoEstorno/.test(htmlCH),
       // casar por CODIGO, nao por nome: os dois espacos de nome sao
       // diferentes de proposito (secao 1 do CLAUDE.md)
       'o seletor sugere a unidade pelo código, não pelo nome':
-        /u\.codigo === c\.unidade/.test(htmlCH)
+        /codigosDaUnidade\(u\)\.includes\(c\.unidade\)/.test(htmlCH)
         && typeof uniForm.obterPorCodigo === 'function',
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);

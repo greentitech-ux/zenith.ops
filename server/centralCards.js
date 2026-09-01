@@ -27,6 +27,10 @@ function normalizarCard(tipo, r) {
         `Valor da venda: ${fmtMoneyServer(r.valorVenda)} · Valor a estornar: ${fmtMoneyServer(r.valorEstornar)}`,
         `Forma de pagamento: ${r.formaPagamento}${r.bandeira ? ' · ' + r.bandeira : ''}${r.ultimos4 ? ' final ' + r.ultimos4 : ''}`,
         `Venda em ${r.dataVenda}${r.horaVenda ? ' às ' + r.horaVenda : ''}`,
+        // CPF/CNPJ e telefone entram na descricao porque sao o que o
+        // formulario de pagamento carimba no favorecido - quem le o ticket
+        // pra decidir precisa ver o mesmo dado que vai pro documento
+        r.cpfCnpjCliente ? `CPF/CNPJ do cliente: ${r.cpfCnpjCliente}` : null,
         r.telefoneCliente ? `Telefone do cliente: ${r.telefoneCliente}` : null,
         (r.pixChave || r.pixNomeTitular || r.pixBanco)
           ? `Pix para devolução: ${r.pixChave || '(chave não informada)'}${r.pixNomeTitular ? ' · ' + r.pixNomeTitular : ''}${r.pixBanco ? ' · ' + r.pixBanco : ''}`
