@@ -159,7 +159,17 @@ function motivoDeBloqueio(usuarioId) {
 
 function resumoDoDia(dia) {
   const d = dias.get(dia || hojeISO());
-  if (!d) return { dia: dia || hojeISO(), chamadas: 0, leituras: 0, tokensEntrada: 0, tokensSaida: 0, custoUsd: 0, custoBrl: 0, porUsuario: {}, porUnidade: {}, porFluxo: {} };
+  // dia sem leitura devolve a MESMA forma de um dia cheio, inclusive cotacao
+  // e limite: quem consome nao pode ter que adivinhar a cotacao quando o dia
+  // esta zerado - a alternativa e a tela cravar um numero proprio, e ai as
+  // duas divergem no primeiro reajuste do cambio.
+  if (!d) {
+    return {
+      dia: dia || hojeISO(), chamadas: 0, leituras: 0, tokensEntrada: 0, tokensSaida: 0,
+      custoUsd: 0, custoBrl: 0, porUsuario: {}, porUnidade: {}, porFluxo: {},
+      cotacao: USD_BRL, limiteDiaUsuario: LIMITE_DIA_USUARIO,
+    };
+  }
   return { ...d, custoBrl: d.custoUsd * USD_BRL, cotacao: USD_BRL, limiteDiaUsuario: LIMITE_DIA_USUARIO };
 }
 

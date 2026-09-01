@@ -198,6 +198,20 @@
     <p class="err hidden" id="emp-err"></p>
   </div>
 
+  <!-- CUSTO DA LEITURA POR FOTO (ver server/ocrUso.js). O módulo media isso
+       desde sempre, mas o número só existia no log do Render e numa rota
+       crua - "o consumo está alto" não tinha onde ser olhado por quem
+       decide. Fica em Grupos porque é a página só-Master onde já se liga e
+       desliga a leitura por imagem de cada grupo. -->
+  <div class="panel">
+    <h2 style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+      <span>💸 Custo da leitura por foto</span>
+      <input type="date" id="ocr-dia" onchange="carregarUsoOcr()" style="width:auto;font-family:var(--mono);font-size:12px;padding:4px 8px;">
+    </h2>
+    <p style="font-size:11.5px;color:var(--muted);margin:4px 0 10px;">Quanto as leituras por imagem (relatório do PDV, nota fiscal do Estoque, documento do RH) custaram <b>no dia</b>, por fluxo, por loja e por pessoa. Mora só na memória do servidor: <b>reinício do Render zera</b> - o histórico de verdade é a linha <code>[ocr-uso]</code> no log.</p>
+    <div id="ocr-uso-corpo"><div style="font-size:11.5px;color:var(--muted);">carregando...</div></div>
+  </div>
+
   <!-- PEDIDO SEMANAL (ver server/pedidoSemanal.js): a cobrança é por REGRA -
        cada uma vale pra um grupo inteiro ou pras lojas escolhidas, com dia
        da semana próprio. Fica em Grupos porque é a página onde já se decide
@@ -1166,6 +1180,71 @@ async function excluirUnidadeExtra(id, nome, dinamica){
   await recarregarUnidades();
 }
 
+// ---------- CUSTO DA LEITURA POR FOTO (ver server/ocrUso.js) ----------
+// O resumo vem do servidor já somado por fluxo/unidade/usuário. Aqui não se
+// calcula custo nenhum: preço de token muda e ter duas tabelas (uma no
+// servidor, outra no navegador) é como elas divergem.
+function linhasUsoOcr(titulo, mapa, formatar){
+  const itens = Object.entries(mapa || {}).sort((a,b)=>(b[1].custoUsd||0)-(a[1].custoUsd||0));
+  if(!itens.length) return '';
+  return `<div style="margin-top:10px;">
+    <div style="font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">${escapeHtml(titulo)}</div>
+    ${itens.map(([chave, v])=>`<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px solid var(--line);">
+      <span>${formatar ? formatar(chave) : escapeHtml(chave)}</span>
+      <span style="font-family:var(--mono);white-space:nowrap;">${v.chamadas||0}× · ${fmtBrlOcr(v.custoUsd)}</span>
+    </div>`).join('')}
+  </div>`;
+}
+let OCR_COTACAO = 5.4;
+function fmtBrlOcr(usd){
+  const v = (Number(usd)||0) * OCR_COTACAO;
+  return 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+// o fluxo 'fechamento-desempate' e o caro (roda no modelo forte): quando
+// aparecer, tem que saltar aos olhos - foi por causa dele que o desempate
+// saiu por padrao
+function rotuloFluxoOcr(chave){
+  const nomes = {
+    fechamento: '📸 Fechamento (relatório do PDV)',
+    'fechamento-desempate': '⚠️ Fechamento · 3ª leitura (modelo forte)',
+    'nota-estoque': '🧾 Estoque (nota fiscal)',
+    'documento-rh': '🪪 RH (documento)',
+  };
+  const cor = chave === 'fechamento-desempate' ? 'color:var(--warn);font-weight:700;' : '';
+  return `<span style="${cor}">${escapeHtml(nomes[chave] || chave)}</span>`;
+}
+async function carregarUsoOcr(){
+  const el = document.getElementById('ocr-uso-corpo');
+  if(!el) return;
+  const dia = document.getElementById('ocr-dia').value;
+  const d = await fetch('/api/ocr/uso' + (dia ? `?dia=${encodeURIComponent(dia)}` : ''))
+    .then(r=>r.ok?r.json():null).catch(()=>null);
+  if(!d){ el.innerHTML = '<div style="font-size:11.5px;color:var(--muted);">não consegui carregar.</div>'; return; }
+  document.getElementById('ocr-dia').value = d.dia;
+  OCR_COTACAO = Number(d.cotacao) || OCR_COTACAO;
+  if(!d.chamadas){
+    el.innerHTML = `<div style="font-size:11.5px;color:var(--muted);">Nenhuma leitura por foto em ${escapeHtml(d.dia)}.</div>`;
+    return;
+  }
+  // o total vem primeiro porque e a resposta da pergunta que traz alguem
+  // aqui ("quanto isso esta custando?"); o detalhe existe pra sustentar
+  el.innerHTML = `
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;">
+      <div><div style="font-size:22px;font-weight:700;">${fmtBrlOcr(d.custoUsd)}</div>
+        <div style="font-size:10.5px;color:var(--muted);font-family:var(--mono);">no dia · US$ ${(Number(d.custoUsd)||0).toFixed(2)}</div></div>
+      <div><div style="font-size:16px;font-weight:700;">${d.leituras||0}</div>
+        <div style="font-size:10.5px;color:var(--muted);font-family:var(--mono);">cliques de leitura</div></div>
+      <div><div style="font-size:16px;font-weight:700;">${d.chamadas||0}</div>
+        <div style="font-size:10.5px;color:var(--muted);font-family:var(--mono);">chamadas à API</div></div>
+      <div><div style="font-size:16px;font-weight:700;">${((d.tokensEntrada||0)/1000).toFixed(1)}k</div>
+        <div style="font-size:10.5px;color:var(--muted);font-family:var(--mono);">tokens de entrada</div></div>
+    </div>
+    ${linhasUsoOcr('Por fluxo', d.porFluxo, rotuloFluxoOcr)}
+    ${linhasUsoOcr('Por loja', d.porUnidade)}
+    ${linhasUsoOcr('Por pessoa', d.porUsuario)}
+    <div style="font-size:11px;color:var(--muted);margin-top:10px;">Limite por pessoa por dia: <b>${d.limiteDiaUsuario ?? '—'}</b> leituras. Cotação usada: R$ ${OCR_COTACAO}.</div>`;
+}
+
 // ---------- PEDIDO SEMANAL (ver server/pedidoSemanal.js) ----------
 // Por REGRA, nao por config unica: fornecedor e dia de pedido mudam por rede
 // (Domino's na terca, Spoleto na quinta), e loja nova entra pela regra do
@@ -1309,6 +1388,7 @@ async function salvarRegraPedido(){
   const resp = await r.json().catch(()=>({}));
   if(!r.ok){ err.textContent = resp.error || 'Não foi possível salvar a regra.'; err.classList.remove('hidden'); return; }
   await carregarRegrasPedido();
+  await carregarUsoOcr();
 }
 
 async function excluirRegraPedido(i){

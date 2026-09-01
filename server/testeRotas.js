@@ -815,6 +815,55 @@ setTimeout(async () => {
   if (!okOcrBarato) ruins += 1;
   console.log(`${okOcrBarato ? '✓' : '✗'} Leitura por foto: Haiku nos três leitores e sem a 3ª chamada no modelo forte`);
 
+  // ------------------------------------------------------------------
+  // ONDE OLHAR O CUSTO. O ocrUso media desde sempre, mas o numero so existia
+  // no log do Render e numa rota crua - "o consumo esta alto" nao tinha onde
+  // ser olhado por quem decide. O Master perguntou "onde encontro o
+  // OCR-USO?" e a resposta honesta era "em lugar nenhum".
+  let okTelaUsoOcr = false;
+  try {
+    const cabO = { Authorization: 'Bearer ' + token };
+    const htmlG = require('fs').readFileSync(require('path').join(__dirname, 'public', 'grupos.html'), 'utf8');
+    const r = await pedir('/api/ocr/uso', cabO);
+    const d = r.status === 200 ? JSON.parse(r.corpo) : {};
+    const semToken = await pedir('/api/ocr/uso');
+
+    const conf = {
+      'a rota responde o resumo do dia':
+        r.status === 200 && typeof d.dia === 'string'
+        && d.porFluxo !== undefined && d.porUnidade !== undefined && d.porUsuario !== undefined,
+      'traz a cotação e o limite pra tela não inventar':
+        d.cotacao > 0 && d.limiteDiaUsuario !== undefined,
+      'é só do Master': semToken.status === 401 || semToken.status === 403,
+      'a tela de Grupos mostra o custo':
+        /carregarUsoOcr/.test(htmlG) && /\/api\/ocr\/uso/.test(htmlG),
+      'quebra por fluxo, por loja e por pessoa':
+        /d\.porFluxo/.test(htmlG) && /d\.porUnidade/.test(htmlG) && /d\.porUsuario/.test(htmlG),
+      // o desempate e o caro: quando aparecer tem que saltar aos olhos
+      // amarrado a FUNCAO: procurar var(--warn) no arquivo inteiro passava
+      // por causa de outro painel da mesma tela - sabotagem confirmou
+      'a 3ª leitura no modelo forte aparece destacada':
+        (() => {
+          const fn = /function rotuloFluxoOcr\(chave\)\{[\s\S]*?\n\}/.exec(htmlG);
+          return !!fn && /'fechamento-desempate'/.test(fn[0]) && /var\(--warn\)/.test(fn[0]);
+        })(),
+      // duas tabelas de preco (servidor e navegador) divergem no primeiro
+      // reajuste - a conta fica num lugar so
+      'a tela não recalcula preço, usa a cotação do servidor':
+        /OCR_COTACAO = Number\(d\.cotacao\)/.test(htmlG)
+        && !/entrada: *[0-9]/.test(htmlG),
+      // memoria: reinicio zera, e a tela tem que dizer isso em vez de
+      // parecer que o dia foi barato
+      'a tela avisa que reinício do Render zera o número':
+        /reinício do Render zera/.test(htmlG),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTelaUsoOcr = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okTelaUsoOcr = false; console.log('  erro: ' + e.message); }
+  if (!okTelaUsoOcr) ruins += 1;
+  console.log(`${okTelaUsoOcr ? '✓' : '✗'} Custo da leitura por foto: dá pra olhar na tela, por fluxo, loja e pessoa`);
+
   // e a leitura de fato roda duas vezes (fonte): sem isso o consenso é teatro
   let okDupla = false;
   try {
