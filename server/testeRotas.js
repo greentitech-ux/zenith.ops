@@ -8955,8 +8955,26 @@ setTimeout(async () => {
         Array.isArray(detalhe.assinaturas) && detalhe.assinaturas.length === 1
         && detalhe.assinaturas[0].chave === 'responsavel'
         && !detalhe.assinaturas.some((a) => a.chave === 'favorecido'),
-      'o cliente e o pedido ficam no papel, sem virar assinante':
+      'o cliente fica no papel, sem virar assinante':
         detalhe.campos.cliente === 'Samila Batista Freire',
+      // PEDIDO saia sempre vazio: estorno do cliente final nao tem pedidoId
+      // (esse campo so existe no estorno interno). O que o financeiro precisa
+      // antes de pagar e' o telefone, que o cliente ja preenche.
+      'no lugar do número do pedido vai o contato do cliente':
+        detalhe.campos.contato === '82999991670'
+        && detalhe.campos.pedido === undefined
+        && !formsMod.TIPOS.estorno.cabecalho.some((c) => c.key === 'pedido'),
+      // o pedido de estorno guarda ISO (vem de <input type="date">); o
+      // formulario escreve DD/MM/AAAA em todo campo de data
+      'a data da venda sai no formato do formulário, não em ISO':
+        linha.data === '29/08/2026',
+      // registro antigo pode ter a data em outro formato: converter o que da
+      // e DEVOLVER O RESTO como veio. Zerar "pra padronizar" apagaria a data
+      // da venda de um documento de pagamento - pior que o formato errado.
+      'data que não é ISO passa inteira, não vira campo vazio':
+        refundsMod.dataBR('14/08/2026') === '14/08/2026'
+        && refundsMod.dataBR('') === ''
+        && refundsMod.dataBR('2026-08-14') === '14/08/2026',
       // um botão "Estorno" em branco na tela devolveria a digitação manual
       // do Pix, que é o que este caminho existe pra evitar
       'o Estorno não vira botão de criar em branco':
@@ -8992,7 +9010,7 @@ setTimeout(async () => {
       'o CPF/CNPJ do cliente vira o CPF do favorecido':
         detalhe.campos.cpf === '123.456.789-00',
       'o valor e a data da venda viram a linha da despesa':
-        Number(linha.valor) === 74 && linha.data === '2026-08-29',
+        Number(linha.valor) === 74 && !!linha.data,
       'o motivo do estorno vai na linha':
         /Erro de operação no caixa/.test(linha.descricao || ''),
       'o valor total do formulário é o valor a estornar': Number(detalhe.valorTotal) === 74,

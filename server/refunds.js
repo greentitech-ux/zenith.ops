@@ -408,6 +408,15 @@ async function converterParaSolicitacao(id, novoTipo, dadosExtras, porEmail) {
 //
 // SO ESTORNO APROVADO. Um formulario de pagamento e uma ordem pra alguem
 // pagar; nascer de um pedido ainda pendente seria pagar antes de decidir.
+// 'AAAA-MM-DD' -> 'DD/MM/AAAA'. Quem ja estiver no formato do formulario
+// passa direto, e o que nao for data nenhuma volta como veio - registro
+// antigo nao pode virar campo vazio no documento.
+function dataBR(v) {
+  const t = String(v || '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : t;
+}
+
 async function gerarFormulario(id, dados, porEmail) {
   const formularios = require('./formularios');
   const ref = refundsRef.doc(id);
@@ -455,14 +464,19 @@ async function gerarFormulario(id, dados, porEmail) {
     // so o tipo 'estorno' tem esses dois no cabecalho; nos outros o
     // montarConteudo descarta, entao mandar sempre nao suja nada
     cliente: String(atual.nomeCliente || '').trim(),
-    pedido: String(atual.pedidoId || '').trim(),
+    contato: String(atual.telefoneCliente || '').trim(),
     // tipos que nao tem tabela (assBoleto) leem valor/descricao do cabecalho
     descricao,
     valor: atual.valorEstornar,
     vencimento: '',
   };
   const linhas = [{
-    data: atual.dataVenda || '',
+    // o formulario guarda data em DD/MM/AAAA (ver valorCampo em
+    // formularios.html - todo campo de data passa por isoParaBR antes de
+    // ser enviado). O pedido de estorno guarda em ISO, porque vem de um
+    // <input type="date">: sem converter, o PDF saia "2026-08-14" no meio
+    // de um documento que o resto do sistema escreve como 14/08/2026.
+    data: dataBR(atual.dataVenda),
     // coluna FORNECEDOR do Reembolso = onde a despesa aconteceu, e a venda
     // que esta sendo estornada aconteceu na loja (ver o comentario da
     // coluna em formularios.js)
@@ -498,7 +512,7 @@ async function gerarFormulario(id, dados, porEmail) {
 
 module.exports = {
   STATUSES, EXECUCAO_STATUSES, create, listAll, getOne, updateStatus, update, remove, marcarNotificacaoVista,
-  gerarFormulario,
+  gerarFormulario, dataBR,
   redirecionar, converterParaSolicitacao, atualizarExecucao, podeAgirComLink, gerarLinkAcao, revogarLinkAcao,
   buscarPorLinkAcao, decidirComLink, atualizarExecucaoComLink,
   invalidar: () => refundsCache.invalidar(),

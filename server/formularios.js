@@ -254,7 +254,12 @@ const TIPOS = {
       { key: 'banco', label: 'BANCO' },
       { key: 'chavePix', label: 'CHAVE PIX' },
       { key: 'cliente', label: 'CLIENTE' },
-      { key: 'pedido', label: 'PEDIDO' },
+      // CONTATO, e nao numero de pedido: estorno aberto pelo cliente final
+      // nao tem pedidoId (esse campo so existe no estorno interno), entao a
+      // linha saia sempre vazia no PDF. O telefone e' o que o financeiro
+      // precisa pra confirmar um dado antes de pagar - e o cliente ja
+      // preenche, agora obrigatorio.
+      { key: 'contato', label: 'CONTATO DO CLIENTE' },
     ],
     colunas: [
       { key: 'data', label: 'DATA DA VENDA', data: true },
