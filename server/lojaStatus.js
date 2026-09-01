@@ -416,7 +416,7 @@ const CAMPOS_DO_HEARTBEAT = [
   // heartbeat seguinte veria "mudou" e inventaria um reinício que não houve.
   // ('eventos' de propósito FORA desta lista: a varredura também escreve
   // nele, e preservar a cópia da memória apagaria o que ela gravou.)
-  'bootEm', 'link', 'linkEm', 'desligamentoInesperado',
+  'bootEm', 'link', 'linkEm', 'desligamentoInesperado', 'anydeskServico',
   // contador de falhas do proprio agente (ver registrarHeartbeat): so o
   // heartbeat escreve, e e' o que separa "a loja caiu" de "so o caminho ate
   // o servidor falhou" na hora que ela volta
@@ -681,6 +681,11 @@ async function heartbeat(codigo, posto, info, token) {
     }
   }
   if (dados.desligamentoInesperado !== undefined) patch.desligamentoInesperado = !!dados.desligamentoInesperado;
+  // estado do servico do AnyDesk (NOCZenith v21+). Lista fechada: o agente
+  // manda o Status do Windows, e o que nao for reconhecido nao vira
+  // degradacao - dado de fora nunca decide sozinho a cor do card.
+  const anydeskOk = sanitizarEstadoAnydesk(dados.anydeskServico);
+  if (anydeskOk) patch.anydeskServico = anydeskOk;
   if (linkNovo) {
     patch.link = linkNovo;
     patch.linkEm = Date.now();
@@ -791,6 +796,15 @@ async function heartbeat(codigo, posto, info, token) {
 
 // motivos que rebaixam uma máquina VIVA pra 'degradado'. Lista, não
 // booleano: o painel mostra o porquê, que é o que decide a ação.
+// Status que o Windows devolve pra um servico. Fora dessa lista vira null:
+// campo desconhecido nao pode pintar card nem "consertar" sozinho um
+// AnyDesk parado.
+const ESTADOS_SERVICO = ['Running', 'Stopped', 'Paused', 'StartPending', 'StopPending', 'PausePending', 'ContinuePending'];
+function sanitizarEstadoAnydesk(v) {
+  const t = String(v == null ? '' : v).trim();
+  return ESTADOS_SERVICO.includes(t) ? t : null;
+}
+
 function motivosDeDegradacao(doc) {
   const motivos = [];
   const link = doc.link || null;
@@ -798,6 +812,21 @@ function motivosDeDegradacao(doc) {
   if (link && link.tipo === 'wifi' && !link.ethernetCaida) motivos.push('só no Wi-Fi');
   if (doc.discoNivel === 'critico') motivos.push('disco crítico');
   else if (doc.discoNivel === 'atencao') motivos.push('disco em atenção');
+  // MAQUINA VIVA COM ACESSO REMOTO MORTO. O NOC sabia dizer que ela esta no
+  // ar e sabia avisar quando alguem SE CONECTA - mas nao que o AnyDesk tinha
+  // parado. O card ficava verde e isso so era descoberto na hora de precisar
+  // entrar (STC-Servidor: offline no AnyDesk, online no NOCZenith, Windows
+  // rodando normal).
+  //
+  // So degrada quando o servico EXISTE e nao esta rodando. Maquina sem
+  // AnyDesk manda null e nao entra aqui - a maioria das maquinas de loja nao
+  // tem, e pintar todas de amarelo por algo que nao existe ali seria o jeito
+  // mais rapido de a operacao parar de olhar pro amarelo.
+  // sanitiza na LEITURA tambem, nao so na escrita: o documento e antigo e
+  // pode ter qualquer coisa nesse campo, e "qualquer coisa" nao pode pintar
+  // o card de amarelo - isso e' o que o Master usa pra decidir onde olhar
+  const svcAnydesk = sanitizarEstadoAnydesk(doc.anydeskServico);
+  if (svcAnydesk && svcAnydesk !== 'Running') motivos.push('AnyDesk parado');
   return motivos;
 }
 
@@ -1066,6 +1095,10 @@ async function registrarTelemetria(codigo, posto, dados, token) {
       patch.eventos = eventos.slice(-EVENTOS_MAX);
     }
   }
+  // em maquina de atendimento quem bate o heartbeat e o navegador, entao a
+  // telemetria e o unico canal que o agente tem pra contar isso
+  const anydeskTelemetria = sanitizarEstadoAnydesk(dados && dados.anydeskServico);
+  if (anydeskTelemetria) patch.anydeskServico = anydeskTelemetria;
   const linkTelemetria = sanitizarLink(dados && dados.link);
   if (linkTelemetria) {
     patch.link = linkTelemetria;

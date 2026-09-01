@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 20;
+const VERSAO_VIGIA = 21;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -218,6 +218,30 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '    }',
     '  }',
     '  $script:JaAvisados = $vistosAgora',
+    '}',
+    '',
+    // ---- estado do servico do AnyDesk ----
+    // O NOC sabia dizer que a maquina esta VIVA e sabia avisar quando alguem
+    // se conecta por acesso remoto - mas nao sabia que o AnyDesk tinha
+    // PARADO. O card ficava verde com o acesso remoto morto, e isso so era
+    // descoberto na hora de precisar entrar (foi o caso da STC-Servidor:
+    // offline no AnyDesk, online no NOCZenith, Windows rodando normal).
+    //
+    // Leitura de contador do Windows, custa milissegundos. Procura por
+    // PADRAO pelo mesmo motivo do comando de reset: o nome do servico muda
+    // com a versao e o tipo de instalacao.
+    //
+    // NAO INSTALADO devolve null, nao "parado": a maioria das maquinas de
+    // loja nao tem AnyDesk, e dizer que o servico dessas caiu encheria o
+    // painel de amarelo por uma coisa que nao existe ali.
+    'function Medir-AnyDesk {',
+    '  try {',
+    '    $svc = @(Get-Service -ErrorAction SilentlyContinue |',
+    '      Where-Object { $_.Name -like "AnyDesk*" -or $_.DisplayName -like "AnyDesk*" })',
+    '    if (-not $svc) { return $null }',
+    '    if ($svc | Where-Object { $_.Status -eq "Running" }) { return "Running" }',
+    '    return "$($svc[0].Status)"',
+    '  } catch { return $null }',
     '}',
     '',
     '# ---- saude do HD ----------------------------------------------------',
@@ -499,6 +523,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '    # NOCZenith tem pra contar que a maquina reiniciou ou perdeu o cabo',
     '    if ($BootEm -ne $null) { $corpo.bootEm = $BootEm; $corpo.desligamentoInesperado = $DesligamentoInesperado }',
     '    try { $l = Medir-Link; if ($l) { $corpo.link = $l } } catch {}',
+    '    # em maquina de atendimento quem bate o heartbeat e o navegador, entao',
+    '    # a telemetria e o unico canal pra contar o estado do AnyDesk',
+    '    try { $a = Medir-AnyDesk; if ($a -ne $null) { $corpo.anydeskServico = $a } } catch {}',
     '    if ($corpo.Count -eq 0) { return }',
     '    # -Depth 5: sem isso o ConvertTo-Json (padrao 2) transforma a lista de',
     '    # discos/volumes em texto e o servidor recebe lixo',
@@ -899,6 +926,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '      # que deixa o servidor separar "reiniciou" de "so caiu a rede"',
     '      if ($BootEm -ne $null) { $corpo.bootEm = $BootEm; $corpo.desligamentoInesperado = $DesligamentoInesperado }',
     '      if ($Link -ne $null) { $corpo.link = $Link }',
+    '      if ($AnyDeskSvc -ne $null) { $corpo.anydeskServico = $AnyDeskSvc }',
     '      $corpo = $corpo | ConvertTo-Json -Depth 4',
     '      $cronometro = [Diagnostics.Stopwatch]::StartNew()',
     // UMA batida perdida virava 25s de silencio, e o NOC corta em 90s: tres
@@ -1007,7 +1035,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '    }',
     '    if ($resp -and $contador % 6 -eq 0) { Reportar-IpLocal }',
     '    # medido ANTES do proximo heartbeat, entao viaja na batida seguinte',
+    '    # o AnyDesk vai na mesma cadencia do link: os dois sao leitura barata',
+    '    # do que o Windows ja sabe, e viajam na batida seguinte',
     '    if ($contador -eq 1 -or $contador % $TicksParaLink -eq 0) {',
+    '      try { $AnyDeskSvc = Medir-AnyDesk } catch { $AnyDeskSvc = $null }',
     '      try { $Link = Medir-Link } catch { Escrever-Log "Falha ao medir o link: $($_.Exception.Message)" }',
     '    }',
     '    # saude do HD + varredura da rede local (ver nocMaquina.js). Vao numa',

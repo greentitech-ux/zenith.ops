@@ -9340,6 +9340,58 @@ setTimeout(async () => {
   console.log(`${okResetZebra ? '✓' : '✗'} NOC: reset da Zebra por ZPL, e SÓ nas que estão marcadas como Zebra`);
 
   // ------------------------------------------------------------------
+  // MAQUINA VIVA COM ACESSO REMOTO MORTO. O Master achou a STC-Servidor
+  // offline no AnyDesk e ONLINE no NOCZenith, com o Windows rodando normal
+  // na tela. O NOC sabia dizer que a maquina esta no ar e sabia avisar
+  // quando alguem SE CONECTA - mas nao que o servico do AnyDesk tinha
+  // parado. O card ficava verde, e isso so era descoberto na hora de
+  // precisar entrar.
+  let okAnydeskEstado = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const vg = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const psAd = vg.montarScriptVigia({ codigo: 'X', posto: 'Y', tipo: 'interno', agentToken: 'ab' });
+
+    const parado = ls.motivosDeDegradacao({ anydeskServico: 'Stopped' });
+    const rodando = ls.motivosDeDegradacao({ anydeskServico: 'Running' });
+    const semAnydesk = ls.motivosDeDegradacao({});
+    const lixo = ls.motivosDeDegradacao({ anydeskServico: 'sei la' });
+
+    // ponta a ponta: o agente manda no heartbeat e o card fica degradado
+    await ls.heartbeat('ADSTATUS', 'SRV', { userAgent: 'NOCZenith/1.0', anydeskServico: 'Stopped' });
+    const doc = (await ls.listar('ADSTATUS')).find((c) => c.posto === 'SRV') || {};
+
+    const conf = {
+      'AnyDesk parado degrada a máquina, mesmo ela estando no ar':
+        parado.includes('AnyDesk parado'),
+      'AnyDesk rodando não degrada nada': !rodando.length,
+      // a maioria das maquinas de loja nao tem AnyDesk: pintar todas de
+      // amarelo por algo que nao existe ali faria a operacao ignorar o amarelo
+      'máquina SEM AnyDesk não vira amarelo': !semAnydesk.length,
+      // dado que vem de fora nao decide sozinho a cor do card
+      'status desconhecido é ignorado, não vira degradação': !lixo.length,
+      'o heartbeat guarda o estado e o card fica degradado':
+        doc.anydeskServico === 'Stopped' && doc.estado === 'degradado'
+        && (doc.degradacao || []).includes('AnyDesk parado'),
+      'o agente mede o serviço e manda junto':
+        /function Medir-AnyDesk/.test(psAd) && /corpo\.anydeskServico = \$AnyDeskSvc/.test(psAd),
+      // nome do servico muda com a versao/instalacao - cravar um so faria a
+      // medicao "nao achar" em parte do parque
+      'procura o serviço por padrão, não por nome cravado':
+        /AnyDesk\*/.test(psAd) && /DisplayName -like/.test(psAd),
+      'não instalado devolve null, não "parado"':
+        /if \(-not \$svc\) \{ return \$null \}/.test(psAd),
+      // sem o bump nenhuma das 52 maquinas passa a reportar
+      'VERSAO_VIGIA subiu': vg.VERSAO_VIGIA >= 21,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAnydeskEstado = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okAnydeskEstado = false; console.log('  erro: ' + e.message); }
+  if (!okAnydeskEstado) ruins += 1;
+  console.log(`${okAnydeskEstado ? '✓' : '✗'} NOC: máquina no ar com o AnyDesk parado deixa de aparecer como tudo certo`);
+
+  // ------------------------------------------------------------------
   // Duplicação de loja (parte 2): o chamado automático de bloqueio de senha
   // (criarChamadoBloqueio em auth.js) juntava TODAS as unidades do login
   // num único unidadeNome (ex: "Loja A, Loja B, Loja C") - isso nunca bate
