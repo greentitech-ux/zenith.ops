@@ -1277,6 +1277,82 @@ const COMANDO_REINICIAR_ANYDESK = [
   '}',
 ].join('\n');
 
+// RESET DA ZEBRA POR ZPL, sem ir na loja. Pedido do Master: "o mesmo botao
+// do AnyDesk, mas que faz o reset da impressora Zebra pelo ZPL - o codigo
+// executaria de acordo com a impressora Zebra que esteja com a tag que foi
+// criada".
+//
+// A TAG E A TRAVA, e e a mesma de sempre: os IPs saem de
+// impressorasPraSondar(), que so devolve dispositivo com monitorar +
+// tipo 'impressora' + marca 'zebra'. Nao ha caminho pra um IP entrar aqui
+// sem o Master ter marcado a impressora como Zebra na tela - e mandar ZPL
+// numa Bematech faria ela IMPRIMIR "~JA~JR" num cupom, que e' exatamente o
+// defeito que ja aconteceu uma vez com o ~HS.
+//
+// O IP e' o UNICO pedaco variavel, e ele nao vem do navegador: vem do
+// cadastro do proprio servidor. Ainda assim passa por validacao estrita
+// antes de entrar na string do PowerShell - IP e' dado que o agente
+// reportou, e dado reportado nunca entra cru num comando.
+//
+// DOIS COMANDOS ZPL, nesta ordem:
+//   ~JA = Cancel All - descarta o que estiver preso na fila da impressora.
+//         Vem antes pra que o trabalho travado nao volte a imprimir depois.
+//   ~JR = Power On Reset - reinicia a impressora como se tivesse sido
+//         desligada na tomada. Ela cai da rede e leva ~30s pra voltar.
+// Por isso a resposta nao pode ser lida depois do ~JR: a conexao morre
+// junto. O comando espera e tenta reconectar, so pra dizer se ela voltou.
+const RESET_ZEBRA_MAX = 8;
+function ipValido(ip) {
+  const partes = String(ip || '').trim().split('.');
+  return partes.length === 4 && partes.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255);
+}
+function comandoResetZebra(impressoras) {
+  const ips = [...new Set((impressoras || []).map((i) => String((i && i.ip) || '').trim()))]
+    .filter(ipValido).slice(0, RESET_ZEBRA_MAX);
+  // sem Zebra marcada nao ha o que resetar - devolve null pra quem chamou
+  // recusar o alvo com motivo, em vez de mandar um comando que nao faz nada
+  if (!ips.length) return null;
+  const lista = ips.map((ip) => `'${ip}'`).join(',');
+  return [
+    `$alvos = @(${lista})`,
+    '$log = @()',
+    'function Zpl-Enviar($ip, $texto) {',
+    '  $cli = New-Object System.Net.Sockets.TcpClient',
+    '  try {',
+    '    $c = $cli.BeginConnect($ip, 9100, $null, $null)',
+    '    if (-not $c.AsyncWaitHandle.WaitOne(2000, $false)) { return "sem resposta na 9100" }',
+    '    $cli.EndConnect($c)',
+    '    $cli.SendTimeout = 2000',
+    '    $st = $cli.GetStream()',
+    '    $b = [System.Text.Encoding]::ASCII.GetBytes($texto)',
+    '    $st.Write($b, 0, $b.Length); $st.Flush()',
+    '    Start-Sleep -Milliseconds 300',
+    '    return $null',
+    '  } catch { return $_.Exception.Message } finally { try { $cli.Close() } catch {} }',
+    '}',
+    'foreach ($ip in $alvos) {',
+    '  $erro = Zpl-Enviar $ip "~JA"',
+    '  if ($erro) { $log += "${ip}: FALHOU - $erro"; continue }',
+    // o ~JR derruba a conexao: nao da pra confirmar aqui, so mais adiante
+    '  $erro = Zpl-Enviar $ip "~JR"',
+    '  if ($erro) { $log += "${ip}: fila limpa, mas o reset falhou - $erro" }',
+    '  else { $log += "${ip}: fila limpa e reset enviado" }',
+    '}',
+    '# a Zebra leva ~30s pra voltar; a espera fica FORA do laco pra nao',
+    '# multiplicar por impressora',
+    'Start-Sleep -Seconds 25',
+    'foreach ($ip in $alvos) {',
+    '  $cli = New-Object System.Net.Sockets.TcpClient',
+    '  try {',
+    '    $c = $cli.BeginConnect($ip, 9100, $null, $null)',
+    '    if ($c.AsyncWaitHandle.WaitOne(2500, $false)) { $cli.EndConnect($c); $log += "${ip}: voltou" }',
+    '    else { $log += "${ip}: ainda subindo" }',
+    '  } catch { $log += "${ip}: ainda subindo" } finally { try { $cli.Close() } catch {} }',
+    '}',
+    '$log -join " | "',
+  ].join('\n');
+}
+
 // janela de arrependimento: cancela um reinício que ainda está na contagem
 const COMANDO_ABORTAR_REINICIO = [
   'try { shutdown /a; "Reinicio abortado." } catch { "Nao havia reinicio em contagem." }',
@@ -1313,7 +1389,12 @@ async function enfileirarComandoEmAlvos(alvos, comando, opcoes) {
   const resultados = await Promise.all(escolhidos.map(async (doc) => {
     const base = { codigo: doc.codigo, posto: doc.posto, nome: doc.nome };
     try {
-      await enfileirarComando(doc.codigo, doc.posto, comando, opcoes);
+      // `comando` pode ser uma FUNCAO: o reset da Zebra muda de unidade pra
+      // unidade, porque leva os IPs das impressoras daquela loja. Continua
+      // sem aceitar texto de fora - quem chama passa uma funcao do codigo.
+      const texto = typeof comando === 'function' ? await comando(doc) : comando;
+      if (!texto) throw new Error('nenhuma impressora Zebra marcada nesta unidade');
+      await enfileirarComando(doc.codigo, doc.posto, texto, opcoes);
       if ((opcoes || {}).origem === 'manutencao-reiniciar') await marcarReinicioComandado(doc.codigo, doc.posto);
       return { ...base, ok: true };
     } catch (err) {
@@ -2081,6 +2162,7 @@ module.exports = {
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora,
   relatorioQuedas, quedasDeUmComputador,
   COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK,
+  comandoResetZebra,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
   saudeMaquinas,

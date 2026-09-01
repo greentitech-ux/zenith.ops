@@ -9249,6 +9249,97 @@ setTimeout(async () => {
   console.log(`${okBuscaManut ? '✓' : '✗'} NOC: busca na janela de manutenção, e o que está marcado fora do filtro é avisado`);
 
   // ------------------------------------------------------------------
+  // RESET DA ZEBRA POR ZPL, do mesmo modal. Pedido do Master: "o mesmo botao
+  // do AnyDesk, mas que faz o reset da impressora Zebra pelo ZPL - o codigo
+  // executaria de acordo com a impressora Zebra que esteja com a tag que foi
+  // criada".
+  //
+  // A TAG E A TRAVA. Os IPs saem de impressorasPraSondar(), que so devolve
+  // dispositivo com monitorar + tipo 'impressora' + marca 'zebra'. Mandar
+  // ZPL numa Bematech faria ela IMPRIMIR "~JA~JR" num cupom - e' o mesmo
+  // defeito que ja aconteceu com o ~HS, e este teste existe pra ele nao
+  // voltar por outra porta.
+  let okResetZebra = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const cabZ = { Authorization: 'Bearer ' + token };
+    const htmlZ = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+
+    const zebra = ls.comandoResetZebra([{ mac: 'aa', ip: '10.0.0.7' }, { mac: 'bb', ip: '10.0.0.8' }]) || '';
+    const semNenhuma = ls.comandoResetZebra([]);
+    const ipTorto = ls.comandoResetZebra([{ ip: "10.0.0.9'; Remove-Item C:\\ -Recurse; #" }]);
+
+    // maquina interna numa unidade COM uma Zebra marcada
+    const srvZ = await ls.cadastrarComputador('ZEBRATESTE', 'SrvZebra', 'interno');
+    await ls.heartbeat('ZEBRATESTE', srvZ.posto, { userAgent: 'NOCZenith/1.0' });
+    // a telemetria exige o token do agente (e a prova de que quem fala e a
+    // maquina certa) - o mesmo que a rota vigia.ps1 entrega
+    const tkZ = await ls.garantirAgentToken('ZEBRATESTE', srvZ.posto);
+    await ls.registrarTelemetria('ZEBRATESTE', srvZ.posto, {
+      dispositivos: [
+        { mac: '00:07:4d:aa:bb:cc', ip: '10.9.9.20', nome: 'ZebraLoja' },
+        { mac: '00:07:4d:dd:ee:ff', ip: '10.9.9.21', nome: 'BemaLoja' },
+      ],
+    }, tkZ);
+    await ls.definirApelidoDispositivo('ZEBRATESTE', '00:07:4d:aa:bb:cc', { apelido: 'Zebra', tipo: 'impressora', monitorar: true, marca: 'zebra' });
+    await ls.definirApelidoDispositivo('ZEBRATESTE', '00:07:4d:dd:ee:ff', { apelido: 'Bematech', tipo: 'impressora', monitorar: true, marca: 'bematech' });
+
+    const enviouZ = await postarJson('/api/loja-status/manutencao/reiniciar', {
+      alvos: [{ codigo: 'ZEBRATESTE', posto: srvZ.posto }], tarefa: 'zebra',
+      password: process.env.MASTER_PASSWORD,
+    }, cabZ);
+    const respZ = enviouZ.status === 200 ? JSON.parse(enviouZ.corpo) : {};
+    const docZ = (await ls.listar('ZEBRATESTE')).find((c) => c.posto === srvZ.posto) || {};
+    const naFilaZ = docZ.comandoPendenteId ? (DOCS.get(`lojaStatusComandos/${docZ.comandoPendenteId}`) || {}) : {};
+    const cmdZ = naFilaZ.comando || '';
+
+    const conf = {
+      'o comando manda ZPL na porta 9100': /9100/.test(zebra) && /~JR/.test(zebra),
+      // ~JA antes do ~JR: senao o trabalho travado volta a imprimir depois
+      'limpa a fila ANTES de reiniciar': zebra.indexOf('"~JA"') > 0
+        && zebra.indexOf('"~JA"') < zebra.indexOf('"~JR"'),
+      'não desliga nem reinicia o computador':
+        !/shutdown/i.test(zebra) && !/Restart-Service/.test(zebra),
+      // depois do ~JR a conexao morre - so da pra confirmar reconectando
+      'espera e confere se a impressora voltou':
+        /Start-Sleep -Seconds 25/.test(zebra) && /voltou/.test(zebra) && /ainda subindo/.test(zebra),
+      'sem Zebra marcada não gera comando nenhum': semNenhuma === null,
+      // IP e dado que o agente reportou: nunca entra cru numa string de
+      // PowerShell, mesmo vindo do proprio servidor
+      'IP inválido é descartado, não entra no comando': ipTorto === null,
+
+      // --- A TRAVA ---
+      'só a Zebra marcada entra; a Bematech fica de fora':
+        /10\.9\.9\.20/.test(cmdZ) && !/10\.9\.9\.21/.test(cmdZ),
+      'a rota enfileira o reset na máquina de verdade':
+        enviouZ.status === 200 && respZ.tarefa === 'zebra' && respZ.enfileirados === 1,
+      'o que foi pra fila é ZPL, não reinício de máquina':
+        /~JR/.test(cmdZ) && !/shutdown/i.test(cmdZ),
+      // unidade sem Zebra marcada tem que ser RECUSADA com motivo, e nao
+      // receber um comando que nao faz nada
+      'unidade sem Zebra marcada é recusada com motivo':
+        (await (async () => {
+          const semZ = await ls.cadastrarComputador('SEMZEBRA', 'SrvSemZebra', 'interno');
+          await ls.heartbeat('SEMZEBRA', semZ.posto, { userAgent: 'NOCZenith/1.0' });
+          const r = await postarJson('/api/loja-status/manutencao/reiniciar', {
+            alvos: [{ codigo: 'SEMZEBRA', posto: semZ.posto }], tarefa: 'zebra',
+            password: process.env.MASTER_PASSWORD,
+          }, cabZ);
+          const d = r.status === 200 ? JSON.parse(r.corpo) : {};
+          return d.enfileirados === 0 && /Zebra/i.test((d.recusados || [])[0]?.motivo || '');
+        })()),
+      'a tela tem o botão, e diz que o computador não é tocado':
+        /manutEnviar\('zebra'\)/.test(htmlZ) && /Resetar Zebra/.test(htmlZ)
+        && /computador NÃO é tocado/.test(htmlZ),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okResetZebra = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (envio ${enviouZ.status} ${enviouZ.corpo.slice(0, 140)})`);
+  } catch (e) { okResetZebra = false; console.log('  erro: ' + e.message); }
+  if (!okResetZebra) ruins += 1;
+  console.log(`${okResetZebra ? '✓' : '✗'} NOC: reset da Zebra por ZPL, e SÓ nas que estão marcadas como Zebra`);
+
+  // ------------------------------------------------------------------
   // Duplicação de loja (parte 2): o chamado automático de bloqueio de senha
   // (criarChamadoBloqueio em auth.js) juntava TODAS as unidades do login
   // num único unidadeNome (ex: "Loja A, Loja B, Loja C") - isso nunca bate

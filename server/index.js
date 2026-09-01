@@ -4225,6 +4225,11 @@ const EXECUTORES_QA = {
   'manutencao.reiniciar': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR, { origem: 'manutencao-reiniciar' }),
   'manutencao.abortarReinicio': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_ABORTAR_REINICIO, { origem: 'manutencao-abortar' }),
   'manutencao.reiniciarAnydesk': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_ANYDESK, { origem: 'manutencao-anydesk' }),
+  'manutencao.resetZebra': (p) => lojaStatus.enfileirarComandoEmAlvos(
+    p.alvos,
+    async (doc) => lojaStatus.comandoResetZebra(await lojaStatus.impressorasPraSondar(doc.codigo)),
+    { origem: 'manutencao-zebra' },
+  ),
   'formularios.editar': (p) => formularios.editar(p.id, { campos: p.campos, linhas: p.linhas, porEmail: p.porEmail }),
   'formularios.cancelar': (p) => formularios.cancelar(p.id, { motivo: p.motivo, porEmail: p.porEmail }),
   'formularios.reabrirAnexo': (p) => formularios.reabrirAnexo(p.id, { porEmail: p.porEmail }),
@@ -4462,7 +4467,7 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
     // e o jeito novo, porque agora sao TRES coisas e nao duas. Lista fechada:
     // o comando em si nunca vem de fora.
     const abortar = req.body.abortar === true;
-    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
+    const tarefa = abortar ? 'abortar' : (['reiniciar', 'abortar', 'anydesk', 'zebra'].includes(req.body.tarefa) ? req.body.tarefa : 'reiniciar');
     const TAREFAS = {
       reiniciar: { acao: 'manutencao.reiniciar', verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
       abortar: { acao: 'manutencao.abortarReinicio', verbo: 'Abortar reinício em', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
@@ -4470,6 +4475,16 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
       // caixa, ao contrario de reiniciar a maquina inteira por causa de um
       // servico so
       anydesk: { acao: 'manutencao.reiniciarAnydesk', verbo: 'Reiniciar o AnyDesk de', comando: lojaStatus.COMANDO_REINICIAR_ANYDESK, origem: 'manutencao-anydesk' },
+      // O comando aqui e uma FUNCAO porque muda de unidade pra unidade: leva
+      // os IPs das Zebras DAQUELA loja. Os IPs saem de impressorasPraSondar,
+      // que so devolve o que o Master marcou como impressora Zebra - e a
+      // mesma trava que impede o ZPL de chegar numa Bematech.
+      zebra: {
+        acao: 'manutencao.resetZebra',
+        verbo: 'Resetar as Zebras de',
+        comando: async (doc) => lojaStatus.comandoResetZebra(await lojaStatus.impressorasPraSondar(doc.codigo)),
+        origem: 'manutencao-zebra',
+      },
     };
     const t = TAREFAS[tarefa];
     if (!(await exigirSenhaDoMaster(req, res))) return;

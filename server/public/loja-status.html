@@ -590,6 +590,7 @@
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharManutencao()">Fechar</button>
       <button type="button" class="btn-ghost" id="manut-anydesk" onclick="manutEnviar('anydesk')" title="Reinicia só o serviço do AnyDesk, sem reiniciar o computador - leva segundos e não derruba o caixa">🖥️ Reiniciar o AnyDesk</button>
+      <button type="button" class="btn-ghost" id="manut-zebra" onclick="manutEnviar('zebra')" title="Limpa a fila e reinicia as impressoras Zebra marcadas na unidade, por ZPL - o computador não é tocado">🖨️ Resetar Zebra</button>
       <button type="button" class="btn-ghost" id="manut-abortar" onclick="manutEnviar('abortar')" title="Cancela um reinício que ainda está na contagem de 2 minutos">🛑 Abortar reinício</button>
       <button type="button" class="btn-primary" id="manut-confirmar" onclick="manutEnviar('reiniciar')">🔁 Reiniciar selecionados</button>
     </div>
@@ -1738,6 +1739,7 @@ function atualizarContagemManut(){
   document.getElementById('manut-confirmar').disabled = !n;
   document.getElementById('manut-abortar').disabled = !n;
   document.getElementById('manut-anydesk').disabled = !n;
+  document.getElementById('manut-zebra').disabled = !n;
 }
 
 // tarefa: 'reiniciar' (a maquina, com 2min de aviso), 'abortar' ou
@@ -1748,6 +1750,7 @@ const MANUT_TAREFAS = {
   reiniciar: { botao: 'manut-confirmar', rotulo: 'Reinício' },
   abortar: { botao: 'manut-abortar', rotulo: 'Abort' },
   anydesk: { botao: 'manut-anydesk', rotulo: 'Reinício do AnyDesk' },
+  zebra: { botao: 'manut-zebra', rotulo: 'Reset das Zebras' },
 };
 async function manutEnviar(tarefa){
   // chamada antiga passava booleano - mantido pra nada quebrar
@@ -1761,6 +1764,11 @@ async function manutEnviar(tarefa){
   const unidades = new Set(alvos.map(a => a.codigo)).size;
   if(tarefa === 'reiniciar'){
     if(!confirm(`Reiniciar ${alvos.length} computador(es) em ${unidades} unidade(s)?\n\nCada tela mostra um aviso de 2 minutos antes de reiniciar. Se errou o alvo, dá pra usar "Abortar reinício" dentro dessa janela.`)) return;
+  }
+  if(tarefa === 'zebra'){
+    // diz o que acontece com a IMPRESSORA e o que NAO acontece com o
+    // computador - e a duvida de quem clica
+    if(!confirm(`Resetar as impressoras Zebra marcadas em ${unidades} unidade(s)?\n\nA fila da impressora é descartada e ela reinicia (volta em ~30s). O computador NÃO é tocado.\n\nSó vai pras impressoras marcadas como Zebra no cadastro de dispositivos.`)) return;
   }
   if(tarefa === 'anydesk'){
     // confirmacao mais leve, e dizendo o que NAO acontece: a duvida de quem
