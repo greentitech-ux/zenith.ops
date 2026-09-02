@@ -977,54 +977,134 @@ setTimeout(async () => {
   console.log(`${okRemoverAss ? '✓' : '✗'} Formulários: só o Master remove uma assinatura, e só a dele - com rastro`);
 
   // ------------------------------------------------------------------
-  // COLAR PRINT COM CTRL+V NO CHAT. Pedido do Master: "tirar um print ou
-  // copiar uma imagem e colar no chat e aparecer a imagem". Quem descreve um
-  // problema tira print o tempo todo; obrigar a salvar em arquivo e depois
-  // procurar o 📎 e trabalho que nao precisa existir.
+  // COLAR PRINT COM CTRL+V EM TODOS OS CHATS. Pedido do Master, na segunda
+  // volta: "nao pegou em todos os chat ainda nao! preciso que seja em todos!
+  // os chats". A primeira entrega so cobria o widget do Beniboy.
+  //
+  // O que este teste protege: (1) a implementacao continua UMA SO, no
+  // tema.js - copia por tela e como o robo antigo virou duas copias
+  // divergentes; (2) ela esta ligada em CADA chat; (3) os chats que ganharam
+  // anexo agora mandam o arquivo de verdade, com o nome de campo que a rota
+  // espera; (4) quem RECEBE consegue ver o print, nao so quem mandou; (5) a
+  // janela do NOC, unica cuja outra ponta nao e navegador, avisa em vez de
+  // engolir o Ctrl+V em silencio.
   let okColarPrint = false;
   try {
-    const sc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'suporte-chat.js'), 'utf8');
-    const fn = /function ligarColarImagem\([\s\S]*?\n  \}/.exec(sc);
+    const fsC = require('fs');
+    const pathC = require('path');
+    const ler = (n) => fsC.readFileSync(pathC.join(__dirname, 'public', n), 'utf8');
+    const tema = ler('tema.js');
+    const sc = ler('suporte-chat.js');
+    const hist = ler('central-historico.html');
+    const manut = ler('manutencao.html');
+    const tec = ler('tecnico.html');
+    const beni = ler('beniboy.html');
+    const abast = ler('abastecimento.html');
+    const sol = ler('central-solucoes.html');
+    const tpub = ler('ticket-publico.html');
+    const noc = ler('loja-status.html');
+    const fn = /window\.colarImagemNoChat = function[\s\S]*?\n  \};/.exec(tema);
+
+    // print de verdade indo pelo chat PUBLICO do ticket e voltando pela rota
+    // nova (chat-foto-publico) - o unico caminho novo de servidor da entrega
+    DOCS.set('solicitacoes/cmpFoto', {
+      id: 'cmpFoto', tipo: 'compra', status: 'APROVADO', numeroTicket: 10777,
+      unidade: 'Milky Moo Tirol', titulo: 'Ticket com print no chat',
+      criadoEm: new Date().toISOString(), linkAcao: 'linkfoto1', linkAcaoRevogado: false,
+      comprada: false, anexos: [],
+    });
+    DOCS.set('solicitacoes/cmpOutro', {
+      id: 'cmpOutro', tipo: 'compra', status: 'APROVADO', numeroTicket: 10778,
+      unidade: 'Milky Moo Tirol', titulo: 'Outro ticket',
+      criadoEm: new Date().toISOString(), linkAcao: 'linkfoto2', linkAcaoRevogado: false,
+      comprada: false, anexos: [],
+    });
+    const pngPrint = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+    const mandouPrint = await postarMultipart('/api/central/compra/cmpFoto/chat-publico',
+      { payload: JSON.stringify({ link: 'linkfoto1', texto: '', autorNome: 'Valdenice' }) },
+      { nome: 'print-20260902-101500.png', tipo: 'image/png', buffer: pngPrint }, 'imagem');
+    const msgPrint = mandouPrint.status === 200 ? JSON.parse(mandouPrint.corpo) : {};
+    const idMsg = msgPrint.id || '';
+    const veFoto = await pedir(`/api/central/compra/cmpFoto/chat-foto-publico/${idMsg}?link=linkfoto1`);
+    const linkErrado = await pedir(`/api/central/compra/cmpFoto/chat-foto-publico/${idMsg}?link=naoehesse`);
+    // a mensagem e do cmpFoto: pedida pelo link do OUTRO ticket tem que ser
+    // recusada, senao um link qualquer abriria print de qualquer ticket
+    const outroTicket = await pedir(`/api/central/compra/cmpOutro/chat-foto-publico/${idMsg}?link=linkfoto2`);
+
     const conf = {
-      'o chat aceita colar imagem': !!fn && /addEventListener\('paste'/.test(fn[0]),
-      // o print entra no MESMO input do 📎: com estado paralelo, o dia em que
-      // alguem mexesse no envio quebraria metade dos anexos
-      'o print entra no mesmo input do 📎, não num caminho paralelo':
-        !!fn && /new DataTransfer\(\)/.test(fn[0]) && /inputEl\.files = dt\.files/.test(fn[0]),
-      // colar TEXTO nao pode ser interceptado
+      // 1. UMA implementacao so
+      'a implementação do colar é uma só, no tema.js (a única carregada pelas 53 páginas)':
+        !!fn && /addEventListener\('paste'/.test(fn[0])
+        && !/new DataTransfer\(\)/.test(sc)
+        && ![hist, manut, tec, beni, abast, sol, tpub].some((t) => /new DataTransfer\(\)/.test(t)),
+      // 2. mesmo input do botao de anexo
+      'o print entra no mesmo input do anexo, não num caminho paralelo':
+        !!fn && /new DataTransfer\(\)/.test(fn[0]) && /inputArquivo\.files = dt\.files/.test(fn[0]),
+      // 3. colar TEXTO nao pode ser interceptado
       'colar texto continua funcionando':
         !!fn && /if \(!arquivo\) return;/.test(fn[0])
-        && fn[0].indexOf('if (!arquivo) return;') < fn[0].indexOf('e.preventDefault()'),
-      // "aparecer a imagem" foi o pedido: o icone 📎->✅ sozinho e discreto
-      // demais, e a duvida "colou?" faz colar de novo e mandar duas
-      // tem que ser CHAMADA depois de colar, nao so existir no arquivo:
-      // sabotagem tirando todas as chamadas passava com a funcao definida
+        && fn[0].indexOf('if (!arquivo) return;') < fn[0].indexOf('ev.preventDefault()'),
+      // 4. e o 'change' que faz cada tela reagir com o codigo que ela ja tem
+      'a tela reage sozinha ao print (o helper dispara change no input do anexo)':
+        !!fn && /dispatchEvent\(new Event\('change'/.test(fn[0]),
+      // 5. "aparecer a imagem" foi o pedido
       'a imagem aparece antes de enviar':
-        !!fn && /mostrarPrevia\(inputEl, iconeEl\)/.test(fn[0])
-        && /function mostrarPrevia/.test(sc) && /URL\.createObjectURL/.test(sc)
-        && /szc-previa/.test(sc),
-      'dá pra tirar o anexo colado sem mandar':
-        /revokeObjectURL/.test(sc) && /limparAnexo\(inputEl, iconeEl\)/.test(sc),
-      // print do Windows vem sempre "image.png": quatro anexos com o mesmo
-      // nome numa conversa nao dizem qual e qual
-      'o arquivo colado ganha nome com data': !!fn && /print-\$\{carimbo\}/.test(fn[0]),
-      // o servidor recusa acima de 8MB (uploadChatAnexo) - avisar antes evita
-      // o upload inteiro pra levar erro no fim
+        !!fn && /desenharPrevia\(caixa, inputArquivo\)/.test(fn[0])
+        && /function desenharPrevia/.test(tema) && /URL\.createObjectURL/.test(tema),
+      'dá pra tirar o print colado sem mandar':
+        /revokeObjectURL/.test(tema) && /inputArquivo\.value = '';/.test(tema),
+      'o arquivo colado ganha nome com data':
+        !!fn && /nomeDePrint\(arquivo\.type\)/.test(fn[0]) && /'print-' \+ d\.getFullYear\(\)/.test(tema),
       'print grande demais é barrado antes de subir':
-        !!fn && /LIMITE_ANEXO_BYTES/.test(fn[0]) && /limite é 8 MB/.test(fn[0])
-        && /8 \* 1024 \* 1024/.test(sc),
-      // as DUAS pontas: quem abre o chamado e quem atende
-      'vale nos dois lados do chat (quem escreve e quem atende)':
-        (sc.match(/ligarColarImagem\(/g) || []).length >= 3,
-      'a prévia é amarrada ao input, não procurada no DOM':
-        /inputEl\._szcPrevia/.test(sc) && !/closest\('\.szc-linha-msg/.test(sc),
+        !!fn && /LIMITE_ANEXO_COLADO/.test(fn[0]) && /limite é 8 MB/.test(fn[0])
+        && /8 \* 1024 \* 1024/.test(tema),
+      // 6. TODOS os chats - o pedido literal desta volta
+      'ligado no chat do Beniboy (visitante, atendimento e primeira mensagem)':
+        (sc.match(/ligarColarImagem\(/g) || []).length >= 4,
+      'ligado no chat do card da Central': /colarImagemNoChat\('#d-chat-texto', '#d-chat-foto'\)/.test(hist),
+      'ligado no chat do chamado (Técnico e Manutenção)':
+        /colarImagemNoChat\('#chat-texto', '#chat-foto'/.test(manut)
+        && /colarImagemNoChat\('#chat-texto', '#chat-foto'/.test(tec),
+      'ligado na Central do Beniboy': /colarImagemNoChat\(`#d-texto-\$\{idAttr\}`/.test(beni),
+      'ligado na conversa do pedido (loja × carrinho)':
+        /colarImagemNoChat\('#conversa-input', '#conversa-anexo'/.test(abast),
+      'ligado na Central de Soluções': /colarImagemNoChat\('#d-texto', '#d-anexo'/.test(sol),
+      'ligado no chat do ticket público (quem está fora do sistema)':
+        /colarImagemNoChat\('#chat-texto', '#chat-anexo'/.test(tpub),
+      // 7. o chat que NAO tinha anexo agora manda o arquivo de verdade - e
+      // com o nome de campo que a rota espera (errado = print some calado)
+      'a Central do Beniboy manda o anexo (campo "anexo")':
+        /corpo\.append\('anexo', arquivo\)/.test(beni),
+      'a conversa do pedido manda o anexo (campo "anexo")':
+        /corpo\.append\('anexo', arquivo\)/.test(abast),
+      'a Central de Soluções manda no campo certo de cada back-end':
+        /corpo\.append\('anexo', arquivo\)/.test(sol) && /fd\.append\('imagem', arquivo\)/.test(sol),
+      'o ticket público manda o print junto do payload (campo "imagem")':
+        /fd\.append\('imagem', arquivo\)/.test(tpub) && /fd\.append\('payload'/.test(tpub),
+      // 8. quem RECEBE tem que ver a imagem, senao o print vira anexo cego
+      'quem recebe vê o print (Beniboy, pedido, Soluções e ticket público)':
+        /function anexoHtml\(chatId, m\)/.test(beni)
+        && /function anexoDaConversa\(pedidoId, m, i\)/.test(abast)
+        && /m\.anexoUrl \?/.test(sol)
+        && /function fotoDoChat\(messageId\)/.test(tpub),
+      // 9. o print sobe e volta de verdade pelo link publico
+      'print mandado pelo link público sobe e volta pra tela':
+        mandouPrint.status === 200 && !!idMsg && veFoto.status === 200,
+      'foto do chat público não abre com link errado': linkErrado.status === 404,
+      'link de um ticket não abre print de outro ticket': outroTicket.status === 404,
+      // 10. a janela do NOC: outra ponta e uma janela WinForms na loja, que
+      // so sabe mostrar texto. Antes o Ctrl+V nao fazia nada e ninguem sabia
+      'a janela do NOC avisa que print não vai, em vez de não fazer nada':
+        /function avisarPrintNaoVai/.test(noc) && /Print não vai por aqui/.test(noc)
+        && /getElementById\('msg-texto'\)\.addEventListener\('paste'/.test(noc)
+        && !/colarImagemNoChat/.test(noc),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okColarPrint = !falhas.length;
-    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (mandou ${mandouPrint.status}, vê ${veFoto.status}, errado ${linkErrado.status}, outro ${outroTicket.status})`);
   } catch (e) { okColarPrint = false; console.log('  erro: ' + e.message); }
   if (!okColarPrint) ruins += 1;
-  console.log(`${okColarPrint ? '✓' : '✗'} Chat: dá pra colar print com Ctrl+V, e a imagem aparece antes de enviar`);
+  console.log(`${okColarPrint ? '✓' : '✗'} Chat: Ctrl+V cola print em TODOS os chats, a imagem aparece antes de enviar e quem recebe vê`);
 
   // ------------------------------------------------------------------
   // ONDE OLHAR O CUSTO. O ocrUso media desde sempre, mas o numero so existia

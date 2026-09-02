@@ -631,6 +631,7 @@
       <span class="msg-dica"><b>Enter</b> envia · <b>Shift+Enter</b> quebra linha</span>
       <span class="msg-dica" id="msg-contador">0/500</span>
     </div>
+    <div class="msg hidden" id="msg-sem-print"></div>
     <div class="msg hidden" id="msg-modal-status"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharModalMensagem()">Fechar</button>
@@ -2380,12 +2381,34 @@ function teclaNaMensagem(ev){
   }
 }
 
+// COLAR PRINT AQUI NAO VAI. Esta e a UNICA caixa de mensagem do NoPulso cuja
+// outra ponta nao e um navegador: o texto sai daqui, viaja no heartbeat e e
+// desenhado pelo NOCZenith numa janela WinForms na area de trabalho da loja
+// (ver Iniciar-JanelaChat em vigiaScript.js), que so sabe mostrar TEXTO. Um
+// print colado aqui chegaria como nada na tela de quem precisa ver.
+//
+// Antes isso era um silencio: Ctrl+V nao colava nada e ninguem sabia por que.
+// Agora avisa e diz por onde mandar a imagem. Pra virar de verdade seria
+// preciso uma versao nova do agente nas 52 maquinas (VERSAO_VIGIA) sabendo
+// baixar e desenhar imagem - decisao do usuario, nao efeito colateral daqui.
+function avisarPrintNaoVai(){
+  const el = document.getElementById('msg-sem-print');
+  if(!el) return;
+  el.className = 'msg';
+  el.style.background = 'var(--warn-dim)';
+  el.style.color = 'var(--warn)';
+  el.innerHTML = '<b>Print não vai por aqui.</b> Esta janela aparece na tela do computador da loja pelo NOCZenith, que só mostra texto. Pra mandar imagem use o chat do chamado (Técnico/Manutenção), a Central ou o Beniboy.';
+  clearTimeout(avisarPrintNaoVai._t);
+  avisarPrintNaoVai._t = setTimeout(()=>{ el.classList.add('hidden'); }, 12000);
+}
+
 function abrirModalMensagem(codigo, posto, nomeComputador){
   MSG_DESTINOS = (codigo && posto) ? [{ codigo, posto }] : [];
   MSG_PICKER_ABERTO = false;
   document.getElementById('msg-picker').classList.add('hidden');
   document.getElementById('msg-picker-busca').value = '';
   document.getElementById('msg-texto').value = '';
+  document.getElementById('msg-sem-print').classList.add('hidden');
   document.getElementById('msg-modal-status').classList.add('hidden');
   atualizarContadorMensagem();
   atualizarAreaMensagem();
@@ -2818,6 +2841,15 @@ async function togglePushAcessoRemoto(){
     PUSH_AR = c.pushAcessoRemoto === true; pintarBtnPushAr();
   }catch(e){ alert('Erro ao salvar.'); }
 }
+
+// Ctrl+V com print na caixa de mensagem do NOC: avisa em vez de nao fazer
+// nada (ver avisarPrintNaoVai acima). Colar TEXTO segue normal.
+document.getElementById('msg-texto').addEventListener('paste', (e)=>{
+  const itens = (e.clipboardData && e.clipboardData.items) || [];
+  for(const it of itens){
+    if(it.kind === 'file' && /^image\//.test(it.type||'')){ e.preventDefault(); avisarPrintNaoVai(); return; }
+  }
+});
 
 boot();
 </script>

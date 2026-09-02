@@ -316,7 +316,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
 // terminam em "-publico"/"publico" ficam liberados; /api/central/:tipo/:id/chat
 // (sem sufixo) continua atras do login normal, entao o regex precisa ser
 // especifico pra nao vazar essa rota autenticada por engano
-const ROTA_TICKET_PUBLICO_RE = /^\/api\/central\/[^/]+\/[^/]+\/(publico|chat-publico|decidir-publico|execucao-publico|comprada-publico|comprovante-publico|anexo-publico\/\d+)$/;
+const ROTA_TICKET_PUBLICO_RE = /^\/api\/central\/[^/]+\/[^/]+\/(publico|chat-publico|chat-foto-publico\/[A-Za-z0-9_-]+|decidir-publico|execucao-publico|comprada-publico|comprovante-publico|anexo-publico\/\d+)$/;
 // script de vigia (roda fora do navegador, direto no Windows - ver
 // loja-status.html "Baixar vigia") reportando o IP da rede local: mesmo
 // motivo do heartbeat, precisa ser publica (a maquina nao tem sessao de
@@ -778,6 +778,20 @@ app.get('/api/central/:tipo/:id/chat-publico', async (req, res) => {
   const registro = await moduloTicket(req.params.tipo).buscarPorLinkAcao(req.params.id, req.query.link);
   if (!registro) return res.status(404).json({ error: 'Link inválido ou revogado.' });
   res.json(await centralChat.listByCard(req.params.tipo, req.params.id));
+});
+
+// print que o visitante mandou (ou recebeu) no chat do ticket. Publica pelo
+// MESMO link do ticket que ja libera ler as mensagens - a foto sem a rota
+// seria uma mensagem que so o lado de dentro consegue ver
+app.get('/api/central/:tipo/:id/chat-foto-publico/:messageId', async (req, res) => {
+  const registro = await moduloTicket(req.params.tipo).buscarPorLinkAcao(req.params.id, req.query.link);
+  if (!registro) return res.sendStatus(404);
+  const mensagem = await centralChat.getMessage(req.params.messageId);
+  // a mensagem precisa ser DESTE ticket: sem essa checagem o link de um
+  // ticket abriria a foto de qualquer outro
+  if (!mensagem || !mensagem.imagem) return res.sendStatus(404);
+  if (mensagem.tipo !== req.params.tipo || String(mensagem.cardId) !== String(req.params.id)) return res.sendStatus(404);
+  storage.streamArquivo(mensagem.imagem.path, mensagem.imagem.tipo, res);
 });
 
 app.post('/api/central/:tipo/:id/chat-publico', upload.single('imagem'), async (req, res) => {
@@ -10190,22 +10204,51 @@ app.post('/api/abastecimento/:id/preparo', auth.requireAuth, async (req, res) =>
 
 // conversa lateral do pedido (carrinho <-> loja). A ponta e derivada da
 // permissao de quem escreve; Master/Admin (que tem as duas) escolhe no body
-app.post('/api/abastecimento/:id/mensagem', auth.requireAuth, async (req, res) => {
+// uploadChatAnexo deixa passar requisicao SEM arquivo (e ate JSON puro),
+// entao o caminho antigo (so texto) continua exatamente como era - o print
+// colado com Ctrl+V so vira multipart quando existe
+app.post('/api/abastecimento/:id/mensagem', auth.requireAuth, uploadChatAnexo.single('anexo'), async (req, res) => {
   try {
     const pede = podePedirAbastecimento(req);
     const envia = podeEnviarAbastecimento(req);
     if (!pede && !envia) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
     const de = pede && !envia ? 'carrinho' : (envia && !pede ? 'loja' : (req.body.de === 'carrinho' ? 'carrinho' : 'loja'));
+    let anexo = null;
+    if (req.file) {
+      // MESMA validacao do anexo do chat de suporte: tipo/tamanho conferidos
+      // antes de qualquer coisa ir pro Storage
+      const validacao = segurancaChat.validarAnexo(req.file);
+      if (!validacao.ok) return res.status(400).json({ error: validacao.motivo });
+      const path = await storage.salvarArquivo(req.params.id, req.file, 'abastecimento-conversa');
+      anexo = { nome: req.file.originalname, path, tipo: req.file.mimetype || 'application/octet-stream', tamanho: req.file.size };
+    }
     const registro = await abastecimentoCarrinho.adicionarMensagem(req.params.id, {
       de,
       texto: req.body.texto,
       autorEmail: req.user.email,
       autorNome: req.user.username || req.user.email,
+      anexo,
     });
     broadcast('abastecimento-atualizado', { id: registro.id });
     res.json(registro);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// anexo de uma mensagem da conversa do pedido, endereçado pelo INDICE no
+// array (mesmo desenho do anexo do chat de suporte). Quem enxerga a conversa
+// enxerga o anexo: as duas pontas (loja e carrinho) passam pelo mesmo guard
+app.get('/api/abastecimento/:id/mensagem/:indice/anexo', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podePedirAbastecimento(req) && !podeEnviarAbastecimento(req)) return res.sendStatus(403);
+    const registro = await abastecimentoCarrinho.getOne(req.params.id);
+    if (!registro) return res.sendStatus(404);
+    const msg = (registro.mensagens || [])[Number(req.params.indice)];
+    if (!msg || !msg.anexo) return res.sendStatus(404);
+    storage.streamArquivo(msg.anexo.path, msg.anexo.tipo, res);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

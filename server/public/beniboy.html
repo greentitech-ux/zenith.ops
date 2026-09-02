@@ -542,11 +542,14 @@ function painelHtml(chat){
     if(codigoNoc) acoes.push(`<a class="btn-ghost" style="text-decoration:none;display:inline-flex;align-items:center;" href="/loja-status.html?unidade=${encodeURIComponent(codigoNoc)}" target="_blank" rel="noopener">🖥️ Ir para o NOC</a>`);
   }
 
-  const msgs = (chat.mensagens||[]).map(m=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'Beniboy':'Suporte'), texto: m.texto, em: m.em }));
+  // o INDICE da mensagem no array e o endereco do anexo na rota
+  // /api/suporte-chats/:id/anexo/:indice - por isso ele e preservado aqui
+  const msgs = (chat.mensagens||[]).map((m,i)=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'Beniboy':'Suporte'), texto: m.texto, em: m.em, anexo: m.anexo||null, indice: i }));
   const msgsHtml = msgs.length ? msgs.map(m=>`
       <div class="msg-item">
         <div class="m-cab"><span>${escapeHtml(m.de)}</span><span>${fmtDataHora(m.em)}</span></div>
         <div class="m-texto">${escapeHtml(m.texto)}</div>
+        ${anexoHtml(chat.id, m)}
       </div>`).join('') : '<div class="empty">Nenhuma mensagem ainda.</div>';
 
   const finalizado = chat.status === 'FINALIZADO';
@@ -590,11 +593,25 @@ function painelHtml(chat){
     <div class="painel-msgs" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">${msgsHtml}</div>
     ${finalizado
       ? '<div class="empty" style="padding:14px 0 0;">Conversa finalizada — mova pra uma coluna aberta se precisar reabrir.</div>'
-      : `<div style="display:flex;gap:6px;">
-          <input type="text" id="d-texto-${idAttr}" placeholder="Escrever uma resposta..." style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarResposta('${idAttr}');}">
+      : `<div id="d-previa-${idAttr}"></div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="text" id="d-texto-${idAttr}" placeholder="Escrever uma resposta... (Ctrl+V cola print)" style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarResposta('${idAttr}');}">
+          <label class="foto-btn" title="Anexar print, foto ou PDF" style="cursor:pointer;flex:none;"><span id="d-anexo-icone-${idAttr}">📎</span><input type="file" id="d-anexo-${idAttr}" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden onchange="document.getElementById('d-anexo-icone-${idAttr}').textContent = this.files[0] ? '✅' : '📎';"></label>
           <button type="button" class="btn-primary" onclick="enviarResposta('${idAttr}')">Enviar</button>
         </div>`}
   </div>`;
+}
+
+// anexo de uma mensagem da conversa. Imagem aparece embutida (clicavel, abre
+// em tamanho real); PDF vira link. Mesma rota que o widget usa do lado do
+// time (/api/suporte-chats/:id/anexo/:indice, atras do login)
+function anexoHtml(chatId, m){
+  if(!m.anexo) return '';
+  const url = `/api/suporte-chats/${encodeURIComponent(chatId)}/anexo/${m.indice}`;
+  if(/^image\//.test(m.anexo.tipo||'')){
+    return `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${escapeHtml(m.anexo.nome||'anexo')}" style="max-width:200px;max-height:200px;border-radius:8px;border:1px solid var(--line);margin-top:5px;display:block;"></a>`;
+  }
+  return `<a href="${url}" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px;display:inline-block;margin-top:4px;">📎 ${escapeHtml(m.anexo.nome||'arquivo')}</a>`;
 }
 
 function renderPaineis(){
@@ -607,18 +624,33 @@ function renderPaineis(){
   if(!PAINEIS_ABERTOS.length){ wrap.innerHTML = ''; return; }
   wrap.innerHTML = PAINEIS_ABERTOS.map(id=>painelHtml(ITENS.find(c=>c.id===id))).join('');
   wrap.querySelectorAll('.painel-msgs').forEach(el=>{ el.scrollTop = el.scrollHeight; });
+  // Ctrl+V cola o print na resposta - um por painel aberto. O innerHTML acima
+  // recria os campos, entao religar aqui e o certo (o helper do tema.js
+  // marca o campo pra nao ligar duas vezes no mesmo elemento)
+  if(window.colarImagemNoChat){
+    PAINEIS_ABERTOS.forEach(id=>{
+      const idAttr = CSS.escape(id);
+      window.colarImagemNoChat(`#d-texto-${idAttr}`, `#d-anexo-${idAttr}`, { previa: `#d-previa-${idAttr}` });
+    });
+  }
 }
 
 async function enviarResposta(id){
   const input = document.getElementById(`d-texto-${id}`);
   if(!input) return;
   const texto = input.value.trim();
-  if(!texto) return;
+  // com print colado da pra mandar so a imagem: o print E a mensagem
+  const arquivo = (document.getElementById(`d-anexo-${id}`)||{}).files?.[0] || null;
+  if(!texto && !arquivo) return;
   input.disabled = true;
   try{
-    const resp = await fetch(`/api/suporte-chats/${id}/responder`, {
-      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }),
-    });
+    // multipart so quando ha anexo - sem arquivo o corpo segue JSON, que e o
+    // caminho que a rota ja usava (ela aceita os dois)
+    const corpo = arquivo ? new FormData() : null;
+    if(corpo){ corpo.append('texto', texto); corpo.append('anexo', arquivo); }
+    const resp = await fetch(`/api/suporte-chats/${id}/responder`, corpo
+      ? { method:'POST', body: corpo }
+      : { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }) });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar mensagem.');
     await carregarLista();

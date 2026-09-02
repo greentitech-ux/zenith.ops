@@ -250,6 +250,7 @@
     <div class="bloco-sep">
       <label>💬 Chat do chamado</label>
       <div id="chat-msgs" style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+      <div id="chat-previa"></div>
       <div style="display:flex;gap:6px;align-items:center;">
         <input type="text" id="chat-texto" placeholder="mensagem pro chamado..." style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarChatChamado();}">
         <label class="foto-btn" title="anexar foto"><span id="chat-foto-icone">📷</span><input type="file" accept="image/*" hidden id="chat-foto" onchange="document.getElementById('chat-foto-icone').textContent = this.files[0] ? '✅' : '📷';"></label>
@@ -971,6 +972,12 @@ function iniciarStreamChamados(){
     es.addEventListener(evento, ()=>{ carregarChamados(); });
   });
 }
+
+// Ctrl+V cola o print direto no chat do chamado. A implementacao e uma so,
+// no tema.js (window.colarImagemNoChat): ela poe o arquivo no MESMO
+// <input type=file> do 📷 e dispara 'change', entao o icone troca sozinho.
+// A previa (#chat-previa) mostra o que vai junto antes de mandar.
+if(window.colarImagemNoChat) window.colarImagemNoChat('#chat-texto', '#chat-foto', { previa: '#chat-previa' });
 
 boot();
 </script>

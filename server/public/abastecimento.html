@@ -553,8 +553,10 @@
   </div>
   <div class="conversa-corpo" id="conversa-corpo"></div>
   <div class="conversa-atalhos" id="conversa-atalhos"></div>
+  <div id="conversa-previa" style="margin:0 12px;"></div>
   <div class="conversa-rodape">
-    <input type="text" id="conversa-input" maxlength="500" placeholder="escreva sua mensagem...">
+    <input type="text" id="conversa-input" maxlength="500" placeholder="escreva sua mensagem... (Ctrl+V cola print)">
+    <label title="Anexar print, foto ou PDF" style="cursor:pointer;font-size:18px;flex:none;"><span id="conversa-anexo-icone">📎</span><input type="file" id="conversa-anexo" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden onchange="document.getElementById('conversa-anexo-icone').textContent = this.files[0] ? '✅' : '📎';"></label>
     <button type="button" class="btn-abrir-chamado" id="conversa-enviar" onclick="enviarMensagemConversa()">➤</button>
   </div>
 </div>
@@ -2555,6 +2557,10 @@ function abrirConversa(pedidoId){
   document.getElementById('conversa-pedido').innerHTML = lista.map(r=>
     `<option value="${r.id}" ${r.id===CONVERSA_PEDIDO_ID?'selected':''}>Pedido ${fmtHora(r.criadoEm)} · ${escapeHtml(r.criadoPorNome||'')}${r.atendidoPorEnvioId?' · atendido':''}</option>`).join('');
   document.getElementById('conversa-painel').classList.remove('hidden');
+  // Ctrl+V cola o print na conversa do pedido (window.colarImagemNoChat vem do
+  // tema.js). O painel e fixo no HTML, entao ligar uma vez basta - o helper
+  // ignora a segunda chamada no mesmo campo
+  if(window.colarImagemNoChat) window.colarImagemNoChat('#conversa-input', '#conversa-anexo', { previa: '#conversa-previa' });
   renderConversa();
   atualizarChipConversa();
 }
@@ -2564,14 +2570,25 @@ function fecharConversa(){
   atualizarChipConversa();
 }
 
+// anexo da mensagem (print colado ou escolhido no 📎). O endereco e o INDICE
+// no array de mensagens - mesmo desenho do chat de suporte
+function anexoDaConversa(pedidoId, m, i){
+  if(!m || !m.anexo) return '';
+  const url = `/api/abastecimento/${encodeURIComponent(pedidoId)}/mensagem/${i}/anexo`;
+  if(/^image\//.test(m.anexo.tipo||'')){
+    return `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${escapeHtml(m.anexo.nome||'anexo')}" style="max-width:170px;max-height:170px;border-radius:8px;border:1px solid var(--line);margin-top:5px;display:block;"></a>`;
+  }
+  return `<a href="${url}" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px;display:block;margin-top:4px;">📎 ${escapeHtml(m.anexo.nome||'arquivo')}</a>`;
+}
+
 function renderConversa(){
   CONVERSA_PEDIDO_ID = document.getElementById('conversa-pedido').value || CONVERSA_PEDIDO_ID;
   const p = REGS.find(r=>r.id===CONVERSA_PEDIDO_ID);
   if(!p) return;
   const corpo = document.getElementById('conversa-corpo');
-  corpo.innerHTML = (p.mensagens||[]).map(m=>`
+  corpo.innerHTML = (p.mensagens||[]).map((m,i)=>`
     <div class="conversa-msg ${m.de==='loja'?'loja':'carrinho'}">
-      <span class="quem">${m.de==='loja'?'🏬 Loja':'🛒 Carrinho'}${m.autorNome?(' · '+escapeHtml(m.autorNome)):''} · ${fmtHora(m.em)}</span>${escapeHtml(m.texto)}
+      <span class="quem">${m.de==='loja'?'🏬 Loja':'🛒 Carrinho'}${m.autorNome?(' · '+escapeHtml(m.autorNome)):''} · ${fmtHora(m.em)}</span>${escapeHtml(m.texto)}${anexoDaConversa(p.id, m, i)}
     </div>`).join('') || '<div class="empty" style="padding:16px;">Sem mensagens ainda — use um atalho abaixo ou escreva.</div>';
   corpo.scrollTop = corpo.scrollHeight;
 
@@ -2627,14 +2644,24 @@ function atalhoConversa(tipo){
 async function enviarMensagemConversa(){
   const input = document.getElementById('conversa-input');
   const texto = input.value.trim();
-  if(!texto || !CONVERSA_PEDIDO_ID) return;
+  const campoAnexo = document.getElementById('conversa-anexo');
+  const arquivo = campoAnexo && campoAnexo.files[0] ? campoAnexo.files[0] : null;
+  // print sozinho vale como mensagem: mostrar a tela e, muitas vezes, dizer tudo
+  if((!texto && !arquivo) || !CONVERSA_PEDIDO_ID) return;
   const btn = document.getElementById('conversa-enviar');
   btn.disabled = true;
   try{
-    const resp = await fetch(`/api/abastecimento/${CONVERSA_PEDIDO_ID}/mensagem`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }) });
+    // multipart so quando ha anexo; sem arquivo o corpo continua JSON puro,
+    // exatamente como era antes
+    const corpo = arquivo ? new FormData() : null;
+    if(corpo){ corpo.append('texto', texto); corpo.append('anexo', arquivo); }
+    const resp = await fetch(`/api/abastecimento/${CONVERSA_PEDIDO_ID}/mensagem`, corpo
+      ? { method:'POST', body: corpo }
+      : { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }) });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar.');
     input.value = '';
+    if(campoAnexo){ campoAnexo.value = ''; campoAnexo.dispatchEvent(new Event('change', { bubbles: true })); }
     await carregar();
     renderConversa();
   }catch(err){ alert(err.message); }

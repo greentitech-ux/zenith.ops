@@ -126,8 +126,10 @@
       <h3 id="d-titulo"></h3>
       <div class="sub" id="d-sub"></div>
       <div id="d-msgs" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px;"></div>
-      <div id="d-rodape" style="display:flex;gap:6px;">
-        <input type="text" id="d-texto" placeholder="Escrever uma resposta..." style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarResposta();}">
+      <div id="d-previa"></div>
+      <div id="d-rodape" style="display:flex;gap:6px;align-items:center;">
+        <input type="text" id="d-texto" placeholder="Escrever uma resposta... (Ctrl+V cola print)" style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarResposta();}">
+        <label title="Anexar print ou foto" style="cursor:pointer;font-size:18px;flex:none;"><span id="d-anexo-icone">📎</span><input type="file" id="d-anexo" accept="image/*" hidden onchange="document.getElementById('d-anexo-icone').textContent = this.files[0] ? '✅' : '📎';"></label>
         <button type="button" class="btn-primary" id="d-btn-enviar" onclick="enviarResposta()">Enviar</button>
       </div>
       <div id="d-finalizado" class="empty hidden" style="padding:14px 0 0;">Conversa finalizada.</div>
@@ -213,6 +215,8 @@ async function abrirDetalhe(item){
   document.getElementById('d-sub').textContent = `${ORIGEM_LABEL[item.origem]||item.origem} · ${item.assunto}`;
   document.getElementById('d-msgs').innerHTML = '<div class="empty">carregando...</div>';
   document.getElementById('d-texto').value = '';
+  // Ctrl+V cola o print na resposta (helper unico no tema.js)
+  if(window.colarImagemNoChat) window.colarImagemNoChat('#d-texto', '#d-anexo', { previa: '#d-previa' });
   const finalizado = item.status === 'FINALIZADO';
   document.getElementById('d-rodape').classList.toggle('hidden', finalizado);
   document.getElementById('d-finalizado').classList.toggle('hidden', !finalizado);
@@ -226,7 +230,8 @@ async function carregarMensagensDetalhe(){
   try{
     if(DETALHE_ATUAL.origem === 'suporte'){
       const chat = await fetch(`/api/suporte-chats`).then(r=>r.json()).then(lista=>lista.find(c=>c.id===DETALHE_ATUAL.id));
-      msgs = (chat && chat.mensagens || []).map(m=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot ? '🤖 Beniboy' : 'Suporte'), texto: m.texto, em: m.em }));
+      // o anexo do chat de suporte e endereçado pelo INDICE da mensagem
+      msgs = (chat && chat.mensagens || []).map((m,i)=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot ? '🤖 Beniboy' : 'Suporte'), texto: m.texto, em: m.em, anexoUrl: m.anexo ? `/api/suporte-chats/${encodeURIComponent(DETALHE_ATUAL.id)}/anexo/${i}` : null }));
     } else {
       const lista = await fetch(`/api/central/${DETALHE_ATUAL.tipo}/${DETALHE_ATUAL.id}/chat`).then(r=>r.json());
       msgs = lista.map(m=>({ de: m.autorUsername || m.autorEmail || '', texto: m.texto, em: m.criadoEm, imagemId: m.imagem ? m.id : null }));
@@ -238,6 +243,7 @@ async function carregarMensagensDetalhe(){
       <div class="m-cab"><span>${escapeHtml(m.de)}</span><span>${fmtDataHora(m.em)}</span></div>
       ${m.texto ? `<div class="m-texto">${escapeHtml(m.texto)}</div>` : ''}
       ${m.imagemId ? `<a href="/api/central/chat/foto/${m.imagemId}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank"><img src="/api/central/chat/foto/${m.imagemId}?token=${encodeURIComponent(AUTH_TOKEN)}" style="max-width:160px;max-height:160px;border-radius:6px;margin-top:4px;display:block;"></a>` : ''}
+      ${m.anexoUrl ? `<a href="${m.anexoUrl}" target="_blank" rel="noopener"><img src="${m.anexoUrl}" alt="anexo" style="max-width:160px;max-height:160px;border-radius:6px;margin-top:4px;display:block;"></a>` : ''}
     </div>`).join('') : '<div class="empty">Nenhuma mensagem ainda.</div>';
   el.scrollTop = el.scrollHeight;
 }
@@ -246,23 +252,33 @@ async function enviarResposta(){
   if(!DETALHE_ATUAL) return;
   const input = document.getElementById('d-texto');
   const texto = input.value.trim();
-  if(!texto) return;
+  const campoAnexo = document.getElementById('d-anexo');
+  const arquivo = campoAnexo && campoAnexo.files[0] ? campoAnexo.files[0] : null;
+  // print colado sozinho ja e mensagem
+  if(!texto && !arquivo) return;
   const btn = document.getElementById('d-btn-enviar');
   btn.disabled = true;
   try{
     let resp;
+    // os dois back-ends aceitam arquivo, mas com nomes de campo DIFERENTES:
+    // o chat de suporte chama de "anexo", o da Central de "imagem". Mandar o
+    // nome errado faria o print sumir em silencio
     if(DETALHE_ATUAL.origem === 'suporte'){
-      resp = await fetch(`/api/suporte-chats/${DETALHE_ATUAL.id}/responder`, {
-        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }),
-      });
+      const corpo = arquivo ? new FormData() : null;
+      if(corpo){ corpo.append('texto', texto); corpo.append('anexo', arquivo); }
+      resp = await fetch(`/api/suporte-chats/${DETALHE_ATUAL.id}/responder`, corpo
+        ? { method:'POST', body: corpo }
+        : { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }) });
     } else {
       const fd = new FormData();
       fd.append('texto', texto);
+      if(arquivo) fd.append('imagem', arquivo);
       resp = await fetch(`/api/central/${DETALHE_ATUAL.tipo}/${DETALHE_ATUAL.id}/chat`, { method:'POST', body: fd });
     }
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar mensagem.');
     input.value = '';
+    if(campoAnexo){ campoAnexo.value = ''; campoAnexo.dispatchEvent(new Event('change', { bubbles: true })); }
     await carregarMensagensDetalhe();
     await carregarLista();
   }catch(err){ alert(err.message); }

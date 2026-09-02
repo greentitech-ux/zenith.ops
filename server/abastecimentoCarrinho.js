@@ -792,13 +792,15 @@ async function marcarPreparo(id, { email, nome }) {
 
 // conversa lateral do pedido: cada mensagem identifica a ponta (carrinho/
 // loja) e quem escreveu. So em PEDIDO, limite de tamanho e de mensagens
-async function adicionarMensagem(id, { de, texto, autorEmail, autorNome }) {
+async function adicionarMensagem(id, { de, texto, autorEmail, autorNome, anexo }) {
   const atual = await getOne(id);
   if (!atual) throw new Error('Registro não encontrado.');
   if (atual.tipo !== 'PEDIDO') throw new Error('A conversa fica no pedido.');
   if (atual.conversaEncerrada) throw new Error('Essa conversa foi encerrada pelo Master.');
   const textoLimpo = String(texto || '').trim().slice(0, 500);
-  if (!textoLimpo) throw new Error('Escreva a mensagem.');
+  // print colado sozinho vale como mensagem: mostrar a tela do problema e,
+  // muitas vezes, a mensagem inteira
+  if (!textoLimpo && !anexo) throw new Error('Escreva a mensagem ou anexe um arquivo.');
   const mensagens = atual.mensagens || [];
   if (mensagens.length >= 200) throw new Error('Essa conversa ficou muito longa.');
   const nova = {
@@ -807,6 +809,7 @@ async function adicionarMensagem(id, { de, texto, autorEmail, autorNome }) {
     autorEmail: autorEmail || null,
     autorNome: autorNome || null,
     em: new Date().toISOString(),
+    ...(anexo ? { anexo } : {}),
   };
   await COLLECTION.doc(id).update({ mensagens: [...mensagens, nova] });
   cache.invalidar();

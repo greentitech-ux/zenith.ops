@@ -143,7 +143,9 @@
     <label>Seu nome</label>
     <input type="text" id="chat-nome" placeholder="Como podemos te chamar" maxlength="80">
     <label>Mensagem</label>
-    <textarea id="chat-texto" placeholder="Escreva aqui..."></textarea>
+    <textarea id="chat-texto" placeholder="Escreva aqui... (Ctrl+V cola um print)"></textarea>
+    <div id="chat-previa"></div>
+    <label class="btn-ghost" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:8px;"><span id="chat-anexo-icone">📎</span> Anexar print ou foto<input type="file" id="chat-anexo" accept="image/*" hidden onchange="document.getElementById('chat-anexo-icone').textContent = this.files[0] ? '✅' : '📎';"></label>
     <button type="button" class="btn-primary" id="chat-enviar" onclick="enviarChat()">Enviar mensagem</button>
   </div>
 </div>
@@ -390,25 +392,42 @@ async function carregarChat(){
       return `<div class="chat-msg ${externo ? 'externo' : ''}">
         <div class="cm-autor"><span>${escapeHtml(m.autorUsername || m.autorEmail || 'Suporte')}</span><span>${fmtData(m.criadoEm)}</span></div>
         <div class="cm-texto">${escapeHtml(m.texto || '')}</div>
+        ${m.imagem ? `<a href="${fotoDoChat(m.id)}" target="_blank" rel="noopener"><img src="${fotoDoChat(m.id)}" alt="anexo" style="max-width:200px;max-height:200px;border-radius:8px;margin-top:5px;display:block;"></a>` : ''}
       </div>`;
     }).join('') || '<div style="font-size:12.5px;color:var(--muted);">Nenhuma mensagem ainda.</div>';
   }catch(e){ /* mantem a ultima lista carregada */ }
 }
 
+// a foto de uma mensagem sai pelo MESMO link do ticket que ja abre o chat
+function fotoDoChat(messageId){
+  return `/api/central/${encodeURIComponent(TIPO)}/${encodeURIComponent(TICKET)}/chat-foto-publico/${encodeURIComponent(messageId)}?link=${encodeURIComponent(LINK)}`;
+}
+
 async function enviarChat(){
   const texto = document.getElementById('chat-texto').value.trim();
-  if(!texto) return;
+  const campoAnexo = document.getElementById('chat-anexo');
+  const arquivo = campoAnexo && campoAnexo.files[0] ? campoAnexo.files[0] : null;
+  // print sozinho ja e mensagem: quase sempre a foto do problema diz tudo
+  if(!texto && !arquivo) return;
   const nome = document.getElementById('chat-nome').value.trim();
   salvarNome(nome);
   const btn = document.getElementById('chat-enviar');
   btn.disabled = true;
   try{
-    const resp = await fetch(`/api/central/${encodeURIComponent(TIPO)}/${encodeURIComponent(TICKET)}/chat-publico`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ link: LINK, texto, autorNome: nome || 'Visitante' }),
-    });
+    // com anexo o corpo vai multipart e os campos viajam dentro de "payload"
+    // (e o formato que a rota chat-publico espera); sem anexo segue JSON puro
+    const fd = arquivo ? new FormData() : null;
+    if(fd){
+      fd.append('payload', JSON.stringify({ link: LINK, texto, autorNome: nome || 'Visitante' }));
+      fd.append('imagem', arquivo);
+    }
+    const resp = await fetch(`/api/central/${encodeURIComponent(TIPO)}/${encodeURIComponent(TICKET)}/chat-publico`, fd
+      ? { method: 'POST', body: fd }
+      : { method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ link: LINK, texto, autorNome: nome || 'Visitante' }) });
     if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao enviar.');
     document.getElementById('chat-texto').value = '';
+    if(campoAnexo){ campoAnexo.value = ''; campoAnexo.dispatchEvent(new Event('change', { bubbles: true })); }
     await carregarChat();
   }catch(err){
     alert(err.message);
@@ -416,6 +435,9 @@ async function enviarChat(){
     btn.disabled = false;
   }
 }
+
+// Ctrl+V cola o print no chat do ticket (helper unico, no tema.js)
+if(window.colarImagemNoChat) window.colarImagemNoChat('#chat-texto', '#chat-anexo', { previa: '#chat-previa' });
 
 carregar();
 </script>

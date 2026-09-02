@@ -367,6 +367,145 @@
     });
   };
 
+
+  // ---- COLAR PRINT COM CTRL+V EM QUALQUER CHAT ----
+  // Pedido do usuario: "quero poder enviar imagens printadas quando eu apertar
+  // Ctrl+V ... em TODOS os chats". Quem descreve um problema tira print o
+  // tempo todo; obrigar a salvar em arquivo e depois procurar o 📎/📷 e
+  // trabalho que nao precisa existir.
+  //
+  // MORA NO tema.js DE PROPOSITO: e a unica coisa carregada pelas 53 paginas.
+  // O chat do NoPulso esta em sete lugares (widget do Beniboy, atendimento,
+  // Central, tecnico, manutencao, conversa do pedido e a janela do NOC) e
+  // cada um tem seu proprio desenho de rodape. Copiar esta funcao pra dentro
+  // de cada tela e exatamente como o robo antigo virou duas copias
+  // divergentes (ver CLAUDE.md secao 2).
+  //
+  // COMO FUNCIONA: o print entra no MESMO <input type=file> que o botao de
+  // anexo ja usa, via DataTransfer, e a funcao dispara um evento 'change'
+  // nele. Com isso o onchange que a tela JA TEM (trocar o icone, mostrar a
+  // previa, somar anexo) roda igualzinho ao caminho do botao - envio, icone e
+  // limpar continuam sendo um caminho so. Se a imagem colada virasse um
+  // estado paralelo, o dia em que alguem mexesse no envio quebraria metade
+  // dos anexos.
+  var LIMITE_ANEXO_COLADO = 8 * 1024 * 1024; // igual ao uploadChatAnexo do servidor
+
+  function nomeDePrint(tipo) {
+    // colado do Windows o arquivo vem sempre "image.png", e uma conversa com
+    // quatro anexos "image.png" nao diz qual e qual
+    var ext = String(tipo || '').split('/')[1] || 'png';
+    ext = ext.replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '') || 'png';
+    var d = new Date();
+    function p(n) { return String(n).padStart(2, '0'); }
+    return 'print-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate())
+      + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + '.' + ext;
+  }
+
+  function imagemDoClipboard(ev) {
+    var itens = (ev.clipboardData && ev.clipboardData.items) || [];
+    for (var i = 0; i < itens.length; i++) {
+      if (itens[i].kind === 'file' && /^image\//.test(itens[i].type || '')) {
+        return itens[i].getAsFile();
+      }
+    }
+    return null;
+  }
+
+  function estiloPrevia() {
+    if (document.getElementById('zpv-estilo')) return;
+    var st = document.createElement('style');
+    st.id = 'zpv-estilo';
+    st.textContent = ''
+      + '.zpv{display:none;align-items:center;gap:8px;padding:6px 8px;margin:0 0 6px;'
+      + 'border:1px solid var(--line,#2a2f3a);border-radius:8px;background:var(--panel2,rgba(127,127,127,.08));}'
+      + '.zpv.tem{display:flex;}'
+      + '.zpv img{width:44px;height:44px;object-fit:cover;border-radius:6px;flex-shrink:0;}'
+      + '.zpv-nome{flex:1;min-width:0;font-size:11.5px;opacity:.75;'
+      + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'
+      + '.zpv-tirar{background:none;border:0;color:var(--bad,#f85149);cursor:pointer;font-size:14px;padding:0 4px;}';
+    document.head.appendChild(st);
+  }
+
+  // previa embutida: quem passa `previa` ganha a miniatura + o ✕ sem escrever
+  // nada. O ✕ limpa o input e dispara 'change' de novo, entao o icone da tela
+  // volta sozinho ao estado "sem anexo".
+  function desenharPrevia(caixa, inputArquivo) {
+    var arq = inputArquivo.files && inputArquivo.files[0];
+    if (!arq) { caixa.classList.remove('tem'); caixa.innerHTML = ''; return; }
+    var ehImagem = /^image\//.test(arq.type || '');
+    var url = ehImagem ? URL.createObjectURL(arq) : '';
+    var img = document.createElement('img');
+    var nome = document.createElement('span');
+    var tirar = document.createElement('button');
+    caixa.innerHTML = '';
+    if (url) { img.src = url; img.alt = 'print colado'; caixa.appendChild(img); }
+    nome.className = 'zpv-nome';
+    nome.textContent = (arq.name || 'anexo') + ' · ' + Math.round(arq.size / 1024) + ' KB';
+    tirar.type = 'button';
+    tirar.className = 'zpv-tirar';
+    tirar.title = 'Tirar';
+    tirar.textContent = '✕';
+    tirar.addEventListener('click', function () {
+      if (url) URL.revokeObjectURL(url);
+      inputArquivo.value = '';
+      inputArquivo.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    caixa.appendChild(nome);
+    caixa.appendChild(tirar);
+    caixa.classList.add('tem');
+  }
+
+  // campoTexto: o <input>/<textarea> onde a pessoa digita a mensagem
+  // inputArquivo: o <input type=file> que o botao de anexo daquele chat usa
+  // opcoes.previa: elemento (ou seletor) que recebe a miniatura - opcional
+  // opcoes.aoColar(arquivo): pra tela que ja tem previa propria (widget)
+  // Devolve false quando nao deu pra ligar, pra ninguem achar que ligou.
+  window.colarImagemNoChat = function (campoTexto, inputArquivo, opcoes) {
+    var o = opcoes || {};
+    if (typeof campoTexto === 'string') campoTexto = document.querySelector(campoTexto);
+    if (typeof inputArquivo === 'string') inputArquivo = document.querySelector(inputArquivo);
+    if (!campoTexto || !inputArquivo) return false;
+    if (campoTexto.__zcColar) return true; // rechamada (tela que remonta o HTML)
+    campoTexto.__zcColar = true;
+
+    var caixa = typeof o.previa === 'string' ? document.querySelector(o.previa) : (o.previa || null);
+    if (caixa) {
+      estiloPrevia();
+      caixa.classList.add('zpv');
+      // a previa acompanha o input pelo 'change', entao ela vale tambem pro
+      // 📎: quem escolheu pelo seletor tambem merece ver o que vai junto
+      inputArquivo.addEventListener('change', function () { desenharPrevia(caixa, inputArquivo); });
+    }
+
+    campoTexto.addEventListener('paste', function (ev) {
+      var arquivo = imagemDoClipboard(ev);
+      // sem imagem na area de transferencia e colagem normal de TEXTO - nao
+      // pode ser interceptada
+      if (!arquivo) return;
+      ev.preventDefault();
+      if (arquivo.size > LIMITE_ANEXO_COLADO) {
+        alert('Esse print tem ' + Math.round(arquivo.size / 1024 / 1024)
+          + ' MB e o limite é 8 MB. Salve como JPG ou recorte só a parte que importa.');
+        return;
+      }
+      var comNome = new File([arquivo], nomeDePrint(arquivo.type), { type: arquivo.type });
+      try {
+        var dt = new DataTransfer();
+        dt.items.add(comNome);
+        inputArquivo.files = dt.files;
+      } catch (err) {
+        // navegador antigo sem DataTransfer: o botao de anexo continua indo
+        alert('Este navegador não deixa colar imagem. Use o botão de anexo pra escolher o arquivo.');
+        return;
+      }
+      // e o 'change' que faz a tela reagir (icone, previa, contador). Sem ele
+      // o arquivo iria junto no envio mas ninguem veria que tem print.
+      inputArquivo.dispatchEvent(new Event('change', { bubbles: true }));
+      if (typeof o.aoColar === 'function') o.aoColar(comNome);
+    });
+    return true;
+  };
+
   // ---- aviso de mudanca de endereco ----
   // Quem entra pelo endereco antigo (adyen-monitor.onrender.com) precisa
   // saber que o NoPulso mudou de casa - senao continua usando o velho pra

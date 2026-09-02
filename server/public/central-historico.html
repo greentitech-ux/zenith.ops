@@ -445,7 +445,7 @@
       </div>
       <div style="display:flex;gap:8px;">
         <input type="text" id="d-chat-texto" placeholder="Escrever uma mensagem..." style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarChat();}">
-        <label class="foto-btn" id="d-chat-foto-btn" title="Anexar foto">📷<input type="file" accept="image/*" capture="environment" hidden onchange="selecionarFotoChat(this.files[0])"></label>
+        <label class="foto-btn" id="d-chat-foto-btn" title="Anexar foto">📷<input type="file" id="d-chat-foto" accept="image/*" capture="environment" hidden onchange="selecionarFotoChat(this.files[0])"></label>
         <button type="button" class="btn-primary" style="flex:none;width:auto;margin-top:0;white-space:nowrap;" onclick="enviarChat()">Enviar</button>
       </div>
     </div>
@@ -2983,6 +2983,10 @@ document.getElementById('form-master-fechamento').addEventListener('submit', asy
 });
 
 async function boot(){
+  // Ctrl+V cola o print direto no chat do card (window.colarImagemNoChat vem
+  // do tema.js). O helper dispara 'change' no input, entao o
+  // selecionarFotoChat que ja existe roda igual ao caminho do 📷
+  if(window.colarImagemNoChat) window.colarImagemNoChat('#d-chat-texto', '#d-chat-foto');
   const res = await fetch('/api/me');
   if(!res.ok){ logout(); return; }
   ME = await res.json();

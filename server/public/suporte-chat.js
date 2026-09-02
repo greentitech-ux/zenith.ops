@@ -257,41 +257,14 @@
     });
   }
 
-  function ligarColarImagem(campoTexto, inputEl, iconeEl) {
-    if (!campoTexto || !inputEl) return;
-    campoTexto.addEventListener('paste', (e) => {
-      const itens = (e.clipboardData && e.clipboardData.items) || [];
-      let arquivo = null;
-      for (const it of itens) {
-        if (it.kind === 'file' && /^image\//.test(it.type || '')) { arquivo = it.getAsFile(); break; }
-      }
-      // sem imagem na area de transferencia e colagem normal de TEXTO - nao
-      // pode ser interceptada
-      if (!arquivo) return;
-      e.preventDefault();
-      if (arquivo.size > LIMITE_ANEXO_BYTES) {
-        alert(`Esse print tem ${Math.round(arquivo.size / 1024 / 1024)} MB e o limite é 8 MB. Salve como JPG ou recorte só a parte que importa.`);
-        return;
-      }
-      // nome com data: colado do Windows o arquivo vem sempre "image.png", e
-      // uma conversa com quatro anexos "image.png" nao diz qual e qual
-      const ext = (arquivo.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
-      const agora = new Date();
-      const carimbo = `${agora.getFullYear()}${String(agora.getMonth() + 1).padStart(2, '0')}${String(agora.getDate()).padStart(2, '0')}-${String(agora.getHours()).padStart(2, '0')}${String(agora.getMinutes()).padStart(2, '0')}${String(agora.getSeconds()).padStart(2, '0')}`;
-      const comNome = new File([arquivo], `print-${carimbo}.${ext}`, { type: arquivo.type });
-      try {
-        const dt = new DataTransfer();
-        dt.items.add(comNome);
-        inputEl.files = dt.files;
-      } catch (err) {
-        // navegador antigo sem DataTransfer: o 📎 continua funcionando
-        alert('Este navegador não deixa colar imagem. Use o 📎 pra escolher o arquivo.');
-        return;
-      }
-      iconeEl.textContent = '✅';
-      iconeEl.parentElement.classList.add('szc-anexo-tem');
-      mostrarPrevia(inputEl, iconeEl);
-    });
+  // COLAR PRINT COM CTRL+V. A implementacao mora no tema.js
+  // (window.colarImagemNoChat), que e carregado pelas 53 paginas - aqui so
+  // apontamos qual campo e qual input de anexo sao os deste chat. O helper
+  // dispara 'change' no input, entao o ligarBotaoAnexo acima ja troca o
+  // icone e desenha a previa sozinho: um caminho so pro 📎 e pro Ctrl+V.
+  function ligarColarImagem(campoTexto, inputEl) {
+    if (typeof window.colarImagemNoChat !== 'function') return false;
+    return window.colarImagemNoChat(campoTexto, inputEl);
   }
 
   const style = document.createElement('style');
@@ -350,7 +323,6 @@
   ligarColarImagem(
     panel.querySelector('#szc-nova-msg'),
     panel.querySelector('#szc-nova-anexo'),
-    panel.querySelector('#szc-anexo-icone'),
   );
 
   // as rotas do chat sao publicas e nunca respondem 401, entao da pra usar o
@@ -420,6 +392,9 @@
       corpo.querySelector('#szc-inicial-anexo-nome').textContent = arq ? arq.name : 'Anexar print, foto ou PDF';
       corpo.querySelector('#szc-inicial-anexo-label').classList.toggle('szc-anexo-tem', !!arq);
     });
+    // o print colado tambem vale na PRIMEIRA mensagem: e justamente ali que a
+    // pessoa esta descrevendo o problema pela primeira vez
+    ligarColarImagem(corpo.querySelector('#szc-texto'), inicialAnexo);
   }
 
   async function iniciarConversa() {
@@ -713,7 +688,6 @@
     ligarColarImagem(
       corpo.querySelector('#szc-atend-msg'),
       corpo.querySelector('#szc-atend-anexo'),
-      corpo.querySelector('#szc-atend-anexo-icone'),
     );
     atendMarcarVisto(chat);
     atendAtualizarBadge();
