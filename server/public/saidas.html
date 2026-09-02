@@ -586,11 +586,11 @@ function renderTudo(){
     const totalEntrada = entradas.reduce((s,e)=>s+(e.valor||0),0);
     document.getElementById('kpi-entrada').textContent = fmtMoney(totalEntrada);
     // Dinheiro em loja: o servidor manda a janela POR LOJA (desde a última
-    // sangria de cada uma, ver dinheiroEmLoja) e o card soma SÓ as lojas do
-    // filtro da tela - o MESMO recorte de Grupo/Loja que as colunas usam.
-    // Pedido do Master: "preciso que seja o valor de cada loja quando
-    // filtrado" - antes o total era fixo porque Grupo/Loja filtram em
-    // memória e nunca chegam ao servidor.
+    // sangria de cada uma até o "Até" do filtro, ver dinheiroEmLoja) e o card
+    // soma SÓ as lojas do filtro da tela - o MESMO recorte de Grupo/Loja que
+    // as colunas usam. Pedido do Master: "preciso que seja o valor de cada
+    // loja quando filtrado" - antes o total era fixo porque Grupo/Loja
+    // filtram em memória e nunca chegam ao servidor.
     const grupoSel = document.getElementById('f-grupo').value;
     const caixaDoFiltro = (CAIXA.porUnidade || []).filter(u =>
       (!grupoSel || u.grupo === grupoSel) && (SEL_UNIDADE.size === 0 || SEL_UNIDADE.has(u.unidade)));
@@ -604,6 +604,18 @@ function renderTudo(){
     // aqui mentiria - o traço diz "sem base", não "gaveta vazia"
     elSaldo.textContent = caixaComBase.length ? fmtMoney(saldo) : '—';
     elSaldo.classList.toggle('bad', caixaComBase.length > 0 && saldo < 0);
+    // DE QUANDO é o número, no title (passar o mouse). O card fica como o
+    // Master pediu - "apenas o valor e abaixo o nome", sem legenda -, mas
+    // agora ele acompanha o "Até" do filtro, e quem confere precisa poder
+    // checar a janela sem adivinhar. Fora do title, a data já está na tela:
+    // é o próprio campo "Até" logo acima.
+    // hoje em BRASÍLIA, não em UTC: depois das 21h o toISOString vira o dia
+    const hojeISO = isoLocal(agoraBrasilia());
+    const ateFiltro = CAIXA.ate || '';
+    document.getElementById('card-saldo').title = !caixaComBase.length
+      ? 'Nenhuma loja do filtro tem sangria lançada nem movimento - não há base pra medir.'
+      : `Dinheiro em loja ${!ateFiltro || ateFiltro >= hojeISO ? 'hoje' : 'em ' + fmtData(ateFiltro)}`
+        + ', contado desde a última sangria/depósito de cada loja.';
   }
 
   // o botao de mover em lote so existe quando ha o que mover (e so pro Master)

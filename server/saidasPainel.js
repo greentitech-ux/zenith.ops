@@ -295,11 +295,17 @@ function fimDoCiclo(sg) {
 // O maior fim de periodo, e nao o da sangria mais recente: e' ate' onde o
 // dinheiro comprovadamente ja saiu da gaveta. Duas sangrias lancadas fora de
 // ordem nao abrem buraco.
-function inicioDaJanela(sangriasDaUnidade, { ate, ignorarChave } = {}) {
+//
+// `ateCiclo` corta pelo FIM DO CICLO, nao pela data do lancamento: e' o que
+// responde "quanto tinha na gaveta EM tal dia". Uma retirada cujo ciclo fecha
+// depois do dia perguntado ainda nao tinha acontecido naquele dia - deixar ela
+// zerar a janela faria o passado aparecer sempre vazio.
+function inicioDaJanela(sangriasDaUnidade, { ate, ignorarChave, ateCiclo } = {}) {
   const anteriores = sangriasDaUnidade
     .filter((sg) => sg.chave !== ignorarChave && (!ate || (sg.data || '') <= ate))
     .map(fimDoCiclo)
     .filter(Boolean)
+    .filter((fim) => !ateCiclo || fim <= ateCiclo)
     .sort();
   return anteriores.length ? anteriores[anteriores.length - 1] : null;
 }
@@ -371,22 +377,35 @@ function recalcularDivergencias(itens, entradas) {
   return itens;
 }
 
-// DINHEIRO EM LOJA AGORA, pela mesma regua da conferencia: o que entrou menos
-// o que saiu DESDE A ULTIMA RETIRADA de cada unidade.
+// DINHEIRO EM LOJA NA DATA DO FILTRO, pela mesma regua da conferencia: o que
+// entrou menos o que saiu DESDE A ULTIMA RETIRADA de cada unidade, ate' o dia
+// perguntado.
 //
-// O card antes fazia "entrada do periodo - saidas do periodo - sangrias do
-// periodo", que nao e' dinheiro em loja: e' o saldo do FILTRO. Com o filtro no
-// mes, uma sangria do dia 2 que fechou o caixa de julho entra na conta contra
-// a entrada de agosto, e o numero deixa de significar o que o rotulo promete.
+// DUAS COISAS QUE ESTE CARD NAO E', e ja foi:
 //
-// Aqui a janela recomeca na ultima retirada de cada unidade, exatamente como
-// em inicioDaJanela. Nao depende do periodo filtrado de proposito - "quanto
-// tem na gaveta" e' estado de hoje, nao recorte de tela.
+// 1. Nao e' "entrada do periodo - saidas do periodo - sangrias do periodo".
+//    Isso e' o saldo do FILTRO, nao dinheiro em loja: com o filtro no mes, uma
+//    sangria do dia 2 que fechou o caixa de julho entrava contra a entrada de
+//    agosto e o numero deixava de significar o que o rotulo promete. Por isso
+//    a janela recomeca na ULTIMA RETIRADA, e nao no "De" do filtro.
 //
-// Devolve a conta ABERTA (desde/entrou/saiu) porque um numero sozinho aqui nao
-// da pra conferir: quando ele nao bate com a gaveta, o que resolve e' ver
-// desde quando o sistema esta contando e o que ele viu no meio.
-function dinheiroEmLoja(itens, entradas) {
+// 2. Nao e' mais "sempre hoje". Ignorar o filtro de data fazia o painel se
+//    contradizer: olhando agosto, as tres primeiras colunas falavam de agosto
+//    e o card falava de hoje - R$ 170,00 numa tela onde nada somava 170. Pior,
+//    afirmava um saldo que naquela data ainda nao existia (pedido do Master:
+//    "ele so existe a partir do dia que entrou o dinheiro e nao foi feita a
+//    sangria"). Agora `ate` fecha a janela no fim do periodo filtrado: sem
+//    filtro, e' hoje; com filtro em agosto, e' quanto tinha na gaveta em 31/08.
+//
+// O corte de retirada usa o FIM DO CICLO (ateCiclo): sangria lancada depois do
+// dia perguntado, mas declarando periodo que termina antes dele, ja tinha
+// tirado aquele dinheiro da conta daquele dia.
+//
+// Devolve a conta ABERTA (desde/ate/entrou/saiu) porque um numero sozinho aqui
+// nao da pra conferir: quando ele nao bate com a gaveta, o que resolve e' ver
+// de quando ate' quando o sistema contou e o que ele viu no meio.
+function dinheiroEmLoja(itens, entradas, { ate } = {}) {
+  const corte = ate && /^\d{4}-\d{2}-\d{2}$/.test(ate) ? ate : null;
   const porUnidade = new Map();
   const alvo = (u, nome, grupo) => {
     if (!porUnidade.has(u)) porUnidade.set(u, { unidade: u, unidadeNome: nome || u, grupo: grupo || null, entradas: [], saidas: [], sangrias: [] });
@@ -405,9 +424,9 @@ function dinheiroEmLoja(itens, entradas) {
   const linhas = [];
   let total = 0;
   for (const g of porUnidade.values()) {
-    const ultimaRetirada = inicioDaJanela(g.sangrias);
+    const ultimaRetirada = inicioDaJanela(g.sangrias, { ateCiclo: corte });
     const desde = comPiso(ultimaRetirada);
-    const naJanela = (x) => (x.data || '') > desde;
+    const naJanela = (x) => (x.data || '') > desde && (!corte || (x.data || '') <= corte);
     const somar = (lista) => lista.reduce((t, x) => t + (naJanela(x) ? (Number(x.valor) || 0) : 0), 0);
     const entrou = +somar(g.entradas).toFixed(2);
     const saiu = +somar(g.saidas).toFixed(2);
@@ -424,15 +443,17 @@ function dinheiroEmLoja(itens, entradas) {
     // O "desde sempre" que somou R$ 490 mil das lojas Bravo nao volta: o piso
     // corta tudo antes de 01/08/2026 por decisao explicita do Master.
     if (!ultimaRetirada && entrou <= 0 && saiu <= 0) {
-      linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, grupo: g.grupo, desde: null, semBase: true, entrou: null, saiu: null, valor: null });
+      linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, grupo: g.grupo, desde: null, ate: corte, semBase: true, entrou: null, saiu: null, valor: null });
       continue;
     }
     const valor = +(entrou - saiu).toFixed(2);
     total += valor;
-    linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, grupo: g.grupo, desde, semBase: false, entrou, saiu, valor });
+    linhas.push({ unidade: g.unidade, unidadeNome: g.unidadeNome, grupo: g.grupo, desde, ate: corte, semBase: false, entrou, saiu, valor });
   }
   linhas.sort((a, b) => String(a.unidadeNome || '').localeCompare(String(b.unidadeNome || ''), 'pt-BR'));
-  return { total: +total.toFixed(2), porUnidade: linhas };
+  // `ate` sobe junto pra tela poder dizer DE QUANDO e o numero. Um saldo de
+  // 31/08 com cara de saldo de hoje e' pior que nao mostrar nada
+  return { total: +total.toFixed(2), ate: corte, porUnidade: linhas };
 }
 
 // SALDO DE CAIXA DA UNIDADE - a conta que decide se a sangria bate.

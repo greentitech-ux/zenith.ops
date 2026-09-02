@@ -8575,6 +8575,27 @@ setTimeout(async () => {
     // 300 que entraram no dia 02 - nada do dia 01
     const linhaCaixaAntes = daUni(inicial2);
 
+    // ---- A GAVETA NA DATA DO FILTRO (pedido do Master: "o Dinheiro em Loja
+    // não está acompanhando o filtro de data ... se for ver o valor de 1 mês
+    // atrás ele continua aparecendo, e não é coerente - ele só existe a partir
+    // do dia que entrou o dinheiro e não foi feita a sangria").
+    //
+    // O card ignorava o período: olhando agosto, as três primeiras colunas
+    // falavam de agosto e ele falava de hoje. Agora o "Até" fecha a janela.
+    // O "De" continua sem efeito de propósito - a janela abre na última
+    // retirada, senão vira o saldo do filtro (o erro que este arquivo já pagou).
+    const emQuatroDeAgosto = JSON.parse((await pedir('/api/saidas-painel?inicio=2026-08-01&fim=2026-08-04', cabMaster)).corpo);
+    const antigaEm0408 = ((emQuatroDeAgosto.caixa || {}).porUnidade || []).find((u) => u.unidade === 'TESTE_SANGRIA_ANTIGA');
+    // outubro: a loja TESTE_EDITA_CAIXA ainda não tinha tido movimento nenhum
+    const emOutubro = JSON.parse((await pedir('/api/saidas-painel?inicio=2026-10-01&fim=2026-10-31', cabMaster)).corpo);
+    const caixaEmOutubro = ((emOutubro.caixa || {}).porUnidade || []).find((u) => u.unidade === UNI);
+    // filtro que COMEÇA depois da entrada: os 60 entraram em 05/08 e a última
+    // retirada é de junho. Se alguém "consertasse" fazendo a janela abrir no
+    // "De", esses 60 sumiriam da gaveta - e a loja apareceria zerada tendo
+    // dinheiro. Aqui o "De" é 06/08 e o valor tem que continuar 60.
+    const deDepoisDaEntrada = JSON.parse((await pedir('/api/saidas-painel?inicio=2026-08-06&fim=2026-08-31', cabMaster)).corpo);
+    const antigaDeDepois = ((deDepoisDaEntrada.caixa || {}).porUnidade || []).find((u) => u.unidade === 'TESTE_SANGRIA_ANTIGA');
+
     // ---- editar a ENTRADA do dia 02: 300 -> 200. O esperado da 2ª sangria
     // tem que cair junto, e a retirada de 300 vira SOBRA de 100.
     const rEditaEntrada = await enviarJson('PATCH', '/api/saidas-painel/entrada',
@@ -8660,6 +8681,24 @@ setTimeout(async () => {
       // ignorar tudo que veio antes dela
       'a janela ignora o que é anterior à última retirada (não é o saldo do mês)':
         !!linhaCaixaAntes && linhaCaixaAntes.desde === '2026-11-01' && cem(linhaCaixaAntes.entrou) === 30000,
+      // ---- o card acompanha o "Até" do filtro ----
+      // a mesma loja: 60 na gaveta hoje (entrada de 05/08), e R$ 0,00 em
+      // 04/08, porque naquele dia esse dinheiro ainda não tinha entrado
+      'olhando uma data passada, o card mostra a gaveta DAQUELE dia, não a de hoje':
+        !!antigaEm0408 && antigaEm0408.semBase === false && cem(antigaEm0408.valor) === 0
+        && !!linhaSangriaAntiga && cem(linhaSangriaAntiga.valor) === 6000,
+      // o pedido literal: um saldo de hoje não pode aparecer num mês em que
+      // a loja não tinha tido movimento nenhum
+      'loja sem nada lançado até a data do filtro não mostra saldo naquele período':
+        !!caixaEmOutubro && caixaEmOutubro.semBase === true && caixaEmOutubro.valor === null,
+      'a resposta diz ATÉ QUANDO contou (pra tela poder dizer de quando é o número)':
+        (comDuas.caixa || {}).ate === '2026-11-30' && (emQuatroDeAgosto.caixa || {}).ate === '2026-08-04',
+      // o "De" NÃO pode entrar na conta: a janela abre na última retirada.
+      // Com o filtro em novembro inteiro ou só no fim do mês, a gaveta é a
+      // mesma - se o "De" cortasse, o histórico da 2ª sangria sumiria
+      'o "De" do filtro continua sem efeito na gaveta (senão vira saldo do período)':
+        !!antigaDeDepois && antigaDeDepois.desde === '2026-07-31'
+        && cem(antigaDeDepois.entrou) === 6000 && cem(antigaDeDepois.valor) === 6000,
       // decisão do Master (27/08): "desconsidere meses para trás! seguiremos
       // com o mês de Agosto apenas pra frente". O R$ 490.806,62 não volta: o
       // que é anterior a 01/08/2026 nunca entra na conta da gaveta.
