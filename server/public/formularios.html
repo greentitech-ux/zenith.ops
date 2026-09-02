@@ -654,11 +654,34 @@ async function abrirLinks(id){
     alvo.innerHTML = d.assinaturas.map(a=>`
       <div class="ass-linha">
         <span class="rot">${a.assinado?'✅':'✍️'} ${escapeHtml(a.rotulo)}${a.nome?` · <span style="color:var(--muted);">${escapeHtml(a.nome)}</span>`:''}</span>
-        ${a.assinado ? `<span style="color:var(--ok);font-size:11.5px;">assinado ${fmtData(a.assinadoEm)}</span>` : `
+        ${a.assinado ? `<span style="color:var(--ok);font-size:11.5px;">assinado ${fmtData(a.assinadoEm)}</span>`
+          + (SOU_MASTER ? ` <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerAssinatura('${id}','${escapeHtml(a.chave)}','${escapeHtml(a.rotulo)}','${escapeHtml(a.nome||'')}')">🗑️ remover</button>` : '') : `
           <button type="button" class="btn-mini" onclick="abrirAssinatura('${id}','${tokenDoLink(a.link)}','${escapeHtml(a.rotulo)}')">✍️ Assinar aqui</button>
           <button type="button" class="btn-mini" onclick="copiar('${a.link}')">🔗 Copiar link</button>
           <button type="button" class="btn-mini" onclick="whatsapp('Assine o formulário aqui: '+'${a.link}')">💬 WhatsApp</button>`}
       </div>`).join('');
+  }catch(e){ alert(e.message); }
+}
+
+// Remover uma assinatura já coletada - só Master. O caso é a pessoa errada
+// ter assinado, ou o traço ter saído ilegível: o documento continua o mesmo,
+// o que está errado é UMA assinatura. Por isso derruba só esse slot, e não
+// todas como a edição de conteúdo faz.
+//
+// O aviso do link novo não é detalhe: quem assinou errado está com o link
+// antigo na mão, e ele para de funcionar aqui. Sem dizer isso, o Master
+// acha que basta remover e a pessoa certa assina sozinha.
+async function removerAssinatura(id, chave, rotulo, nome){
+  const quem = nome ? ` (assinada por ${nome})` : '';
+  if(!confirm(`Remover a assinatura de "${rotulo}"${quem}?\n\nO formulário volta a ficar PENDENTE e o link antigo dessa assinatura para de funcionar - um link novo é gerado, e você precisa mandá-lo pra pessoa certa.\n\nAs outras assinaturas continuam valendo.`)) return;
+  try{
+    const r = await fetch(`/api/formularios/${encodeURIComponent(id)}/assinatura/${encodeURIComponent(chave)}`, { method:'DELETE' });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || ('erro '+r.status));
+    if(d.pendenteAprovacao){ alert('Enviado pra aprovação do Master.'); return; }
+    await carregarLista();
+    await abrirLinks(id);
+    alert(`Assinatura de "${rotulo}" removida. Mande o link novo pra quem tem que assinar.`);
   }catch(e){ alert(e.message); }
 }
 

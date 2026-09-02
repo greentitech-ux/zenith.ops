@@ -3664,6 +3664,22 @@ app.post('/api/formularios/:id/depositante', requireSection('formularios'), asyn
 // Anexo em formulário JÁ criado, de qualquer tipo - Master-only, como o
 // Master pediu. Não confundir com /reabrir-anexo, que é o Ass. Boleto
 // TROCANDO o documento que vai ser assinado; aqui só se acrescenta.
+// REMOVER UMA ASSINATURA JA COLETADA - so Master (pedido dele: "preciso da
+// opcao de remover assinatura, mas so o master consegue fazer isso").
+// Cirurgico: derruba SO o slot pedido, com token novo (o link antigo morre),
+// e devolve o formulario pra PENDENTE. Fica registrado quem removeu - ver
+// removerAssinatura em formularios.js.
+app.delete('/api/formularios/:id/assinatura/:chave', auth.requireMaster, async (req, res) => {
+  try {
+    const resumoQa = `Remover a assinatura "${req.params.chave}" do formulário ${req.params.id}`;
+    if (await desviarSeQaMaster(req, res, 'formularios.removerAssinatura', resumoQa, { id: req.params.id, chave: req.params.chave, porEmail: req.user.email })) return;
+    const r = await formularios.removerAssinatura(req.params.id, req.params.chave, req.user.email);
+    res.json(formularioComLinks(r));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/formularios/:id/anexos', auth.requireMaster, uploadAnexosFormulario.array('anexos', MAX_ANEXOS_FORMULARIO), async (req, res) => {
   try {
     conferirTamanhoAnexos(req.files);
@@ -4226,6 +4242,7 @@ const EXECUTORES_QA = {
   'manutencao.abortarReinicio': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_ABORTAR_REINICIO, { origem: 'manutencao-abortar' }),
   'manutencao.reiniciarAnydesk': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REINICIAR_ANYDESK, { origem: 'manutencao-anydesk' }),
   'manutencao.destravarRede': (p) => lojaStatus.enfileirarComandoEmAlvos(p.alvos, lojaStatus.COMANDO_REDE_DESTRAVAR, { origem: 'manutencao-rede' }),
+  'formularios.removerAssinatura': (p) => formularios.removerAssinatura(p.id, p.chave, p.porEmail),
   'manutencao.resetZebra': (p) => lojaStatus.enfileirarComandoEmAlvos(
     p.alvos,
     async (doc) => lojaStatus.comandoResetZebra(await lojaStatus.impressorasPraSondar(doc.codigo)),

@@ -895,6 +895,88 @@ setTimeout(async () => {
   console.log(`${okPctOcr ? '✓' : '✗'} Leitura por foto: valor que não fecha com a % impressa é pego, e só ele`);
 
   // ------------------------------------------------------------------
+  // REMOVER UMA ASSINATURA JA COLETADA, so Master. Pedido dele: "preciso da
+  // opcao de remover assinatura, mas so o master consegue fazer isso". O
+  // caso e a pessoa errada ter assinado, ou o traco ter saido ilegivel.
+  let okRemoverAss = false;
+  try {
+    const forms = require('/home/user/adyen-monitor/server/formularios.js');
+    const cabF = { Authorization: 'Bearer ' + token };
+    const htmlF = require('fs').readFileSync(require('path').join(__dirname, 'public', 'formularios.html'), 'utf8');
+
+    const cad = JSON.parse((await pedir('/api/formularios/cadastro-unidades', cabF)).corpo)[0];
+    const criado = await forms.criar({
+      tipo: 'reembolso', unidade: cad.unidade,
+      campos: { favorecido: 'Erick Martins', cpf: '1', banco: 'b', agencia: '1', conta: '1', chavePix: 'x' },
+      linhas: [{ data: '28/08/2026', fornecedor: 'x', descricao: 'y', valor: 2000 }],
+      criadoPorEmail: 'm@t',
+    });
+    const slots = criado.assinaturas;
+    const assinar = async (chave) => {
+      const t = slots.find((a) => a.chave === chave).token;
+      return forms.assinar(criado.id, t, { nome: 'Erick', imagem: 'data:image/png;base64,AAA' });
+    };
+    await assinar('favorecido');
+    await assinar('responsavel');
+    const assinado = await forms.detalhar(criado.id);
+
+    const tokenAntes = assinado.assinaturas.find((a) => a.chave === 'favorecido').token;
+    // usuario COMUM, logado. Sem esta linha, tirar o requireMaster da rota
+    // passava batido: o app.use('/api', requireAuth) devolve 401 pra quem
+    // nao tem token nenhum, e o teste achava que era o gate de Master.
+    // Mesma armadilha que ja apareceu no relatorio de divergencias.
+    const senhaHashAss = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-ass-loja', {
+      passwordHash: senhaHashAss, role: 'user', active: true,
+      email: 'ass-loja@teste.local', username: 'assloja',
+      permissions: { sections: ['formularios'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabComum = { Authorization: 'Bearer ' + (await auth.login('ass-loja@teste.local', 'SenhaDeTeste!2026')).token };
+    const semSerMaster = await pedirJsonDelete(`/api/formularios/${criado.id}/assinatura/favorecido`, cabComum);
+    const removeu = await pedirJsonDelete(`/api/formularios/${criado.id}/assinatura/favorecido`, cabF);
+    const depois = await forms.detalhar(criado.id);
+    const fav = depois.assinaturas.find((a) => a.chave === 'favorecido');
+    const resp = depois.assinaturas.find((a) => a.chave === 'responsavel');
+    const doc = await forms.getOne(criado.id);
+    const deNovo = await pedirJsonDelete(`/api/formularios/${criado.id}/assinatura/favorecido`, cabF);
+
+    const conf = {
+      'as duas assinaturas deixam o formulário ASSINADO': assinado.status === 'ASSINADO',
+      'só o Master remove - usuário comum logado leva 403':
+        semSerMaster.status === 403,
+      'a assinatura pedida sai': removeu.status === 200 && fav.assinado === false && !fav.nome,
+      // derrubar as outras junto obrigaria a recolher assinatura de quem fez
+      // tudo certo - a edicao de CONTEUDO e que descarta todas, nao isto
+      'as outras continuam valendo':
+        resp.assinado === true && resp.nome === 'Erick',
+      'o formulário volta a PENDENTE': depois.status === 'PENDENTE',
+      // quem assinou errado esta com o link antigo na mao: mantendo o token,
+      // ela assina de novo no minuto seguinte
+      'o link antigo para de funcionar (token novo)':
+        fav.token && fav.token !== tokenAntes,
+      // assinatura e o que faz o documento valer: apagar sem rastro
+      // transformaria o formulario em algo que muda sozinho
+      'fica registrado quem removeu e quem tinha assinado':
+        Array.isArray(doc.historicoAssinaturas) && doc.historicoAssinaturas.length === 1
+        && doc.historicoAssinaturas[0].chave === 'favorecido'
+        && doc.historicoAssinaturas[0].nome === 'Erick'
+        && !!doc.historicoAssinaturas[0].removidoPorEmail,
+      'remover o que já foi removido é recusado com motivo':
+        deNovo.status === 400 && /ainda não foi coletada/.test(JSON.parse(deNovo.corpo).error || ''),
+      'a tela só mostra o botão pro Master':
+        /SOU_MASTER \? ` <button[^`]*removerAssinatura/.test(htmlF),
+      'e avisa que o link antigo morre':
+        /link antigo dessa assinatura para de funcionar/.test(htmlF),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okRemoverAss = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okRemoverAss = false; console.log('  erro: ' + e.message); }
+  if (!okRemoverAss) ruins += 1;
+  console.log(`${okRemoverAss ? '✓' : '✗'} Formulários: só o Master remove uma assinatura, e só a dele - com rastro`);
+
+  // ------------------------------------------------------------------
   // ONDE OLHAR O CUSTO. O ocrUso media desde sempre, mas o numero so existia
   // no log do Render e numa rota crua - "o consumo esta alto" nao tinha onde
   // ser olhado por quem decide. O Master perguntou "onde encontro o

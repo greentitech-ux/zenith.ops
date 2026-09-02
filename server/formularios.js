@@ -823,6 +823,62 @@ async function editar(id, { campos, linhas, porEmail } = {}) {
   return { ...(await detalhar(id)), assinaturasDescartadas: descartadas, semMudanca: false };
 }
 
+// REMOVER UMA ASSINATURA JA COLETADA (so Master). Pedido do Master: "preciso
+// da opcao de remover assinatura, mas so o master consegue fazer isso".
+//
+// POR QUE E' CIRURGICO e nao reaproveita o editarDireto: aquele descarta
+// TODAS as assinaturas, porque o CONTEUDO mudou e ninguem assinou o
+// documento novo. Aqui o documento continua o mesmo - o que esta errado e
+// UMA assinatura (assinou a pessoa errada, assinou sem querer, o traco saiu
+// ilegivel). Derrubar as outras junto obrigaria a recolher assinatura de
+// gente que fez tudo certo.
+//
+// O TOKEN E' TROCADO, e isso e de proposito: o motivo mais comum pra apagar
+// e' "quem assinou nao era pra ter assinado", e essa pessoa esta com o link
+// antigo na mao. Mantendo o token, ela assina de novo no minuto seguinte. O
+// link novo sai na tela, pra o Master mandar pra pessoa certa.
+//
+// E FICA REGISTRADO: assinatura e' o que faz o documento valer. Apagar sem
+// deixar rastro transformaria o formulario em algo que muda sozinho - o
+// historico guarda quem apagou, qual slot, e o nome/data de quem tinha
+// assinado.
+const HISTORICO_ASSINATURAS_MAX = 40;
+
+async function removerAssinatura(id, chave, porEmail) {
+  const r = await getOne(id);
+  if (!r) throw new Error('Formulário não encontrado.');
+  if (r.status === 'CANCELADO') throw new Error('Formulário cancelado - não há o que remover.');
+  const atual = (r.assinaturas || {})[chave];
+  if (!atual) throw new Error('Esse formulário não tem essa assinatura.');
+  if (!atual.imagem) throw new Error('Essa assinatura ainda não foi coletada - não há o que remover.');
+
+  const rotulo = rotuloDoSlot(r.tipo, chave, atual.rotulo);
+  const assinaturas = {
+    ...r.assinaturas,
+    [chave]: {
+      rotulo: atual.rotulo,
+      // token NOVO: o link antigo para de funcionar (ver o comentario acima)
+      token: crypto.randomBytes(18).toString('hex'),
+      nome: null, imagem: null, assinadoEm: null,
+    },
+  };
+  const historico = [...(r.historicoAssinaturas || []), {
+    acao: 'removida', chave, rotulo,
+    nome: atual.nome || null, assinadoEm: atual.assinadoEm || null,
+    removidoEm: new Date().toISOString(), removidoPorEmail: porEmail || null,
+  }].slice(-HISTORICO_ASSINATURAS_MAX);
+
+  await COLLECTION.doc(id).update({
+    assinaturas,
+    // volta pra PENDENTE sempre: faltando uma assinatura o documento nao
+    // esta mais assinado, mesmo que estivesse ha um segundo
+    status: 'PENDENTE',
+    historicoAssinaturas: historico,
+  });
+  cache.invalidar();
+  return { ...(await detalhar(id)), removida: { chave, rotulo, nome: atual.nome || null } };
+}
+
 // O caso mais comum na pratica, descrito pelo Master: "as vezes lanca
 // primeiro e depois a outra pessoa vai fazer o deposito e pega o comprovante
 // depois e assinaria". Na hora de lancar ninguem sabe ainda quem vai ao
@@ -1505,7 +1561,7 @@ module.exports = {
   pedirComprovanteDeposito, comprovanteObrigatorio, temDepositanteProprio,
   adicionarAnexos,
   criarParaPreenchimento, vistaPreenchimento, salvarPreenchimento, cancelarPreenchimento, marcarEnviadoPagamento,
-  reabrirAnexo,
+  reabrirAnexo, removerAssinatura,
   // mesma saida que parque.js expoe: quem escreve o documento por fora do
   // modulo (teste, restauracao de backup) precisa poder derrubar o cache de
   // 60s, senao a leitura seguinte devolve o estado velho
