@@ -977,6 +977,56 @@ setTimeout(async () => {
   console.log(`${okRemoverAss ? '✓' : '✗'} Formulários: só o Master remove uma assinatura, e só a dele - com rastro`);
 
   // ------------------------------------------------------------------
+  // COLAR PRINT COM CTRL+V NO CHAT. Pedido do Master: "tirar um print ou
+  // copiar uma imagem e colar no chat e aparecer a imagem". Quem descreve um
+  // problema tira print o tempo todo; obrigar a salvar em arquivo e depois
+  // procurar o 📎 e trabalho que nao precisa existir.
+  let okColarPrint = false;
+  try {
+    const sc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'suporte-chat.js'), 'utf8');
+    const fn = /function ligarColarImagem\([\s\S]*?\n  \}/.exec(sc);
+    const conf = {
+      'o chat aceita colar imagem': !!fn && /addEventListener\('paste'/.test(fn[0]),
+      // o print entra no MESMO input do 📎: com estado paralelo, o dia em que
+      // alguem mexesse no envio quebraria metade dos anexos
+      'o print entra no mesmo input do 📎, não num caminho paralelo':
+        !!fn && /new DataTransfer\(\)/.test(fn[0]) && /inputEl\.files = dt\.files/.test(fn[0]),
+      // colar TEXTO nao pode ser interceptado
+      'colar texto continua funcionando':
+        !!fn && /if \(!arquivo\) return;/.test(fn[0])
+        && fn[0].indexOf('if (!arquivo) return;') < fn[0].indexOf('e.preventDefault()'),
+      // "aparecer a imagem" foi o pedido: o icone 📎->✅ sozinho e discreto
+      // demais, e a duvida "colou?" faz colar de novo e mandar duas
+      // tem que ser CHAMADA depois de colar, nao so existir no arquivo:
+      // sabotagem tirando todas as chamadas passava com a funcao definida
+      'a imagem aparece antes de enviar':
+        !!fn && /mostrarPrevia\(inputEl, iconeEl\)/.test(fn[0])
+        && /function mostrarPrevia/.test(sc) && /URL\.createObjectURL/.test(sc)
+        && /szc-previa/.test(sc),
+      'dá pra tirar o anexo colado sem mandar':
+        /revokeObjectURL/.test(sc) && /limparAnexo\(inputEl, iconeEl\)/.test(sc),
+      // print do Windows vem sempre "image.png": quatro anexos com o mesmo
+      // nome numa conversa nao dizem qual e qual
+      'o arquivo colado ganha nome com data': !!fn && /print-\$\{carimbo\}/.test(fn[0]),
+      // o servidor recusa acima de 8MB (uploadChatAnexo) - avisar antes evita
+      // o upload inteiro pra levar erro no fim
+      'print grande demais é barrado antes de subir':
+        !!fn && /LIMITE_ANEXO_BYTES/.test(fn[0]) && /limite é 8 MB/.test(fn[0])
+        && /8 \* 1024 \* 1024/.test(sc),
+      // as DUAS pontas: quem abre o chamado e quem atende
+      'vale nos dois lados do chat (quem escreve e quem atende)':
+        (sc.match(/ligarColarImagem\(/g) || []).length >= 3,
+      'a prévia é amarrada ao input, não procurada no DOM':
+        /inputEl\._szcPrevia/.test(sc) && !/closest\('\.szc-linha-msg/.test(sc),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okColarPrint = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okColarPrint = false; console.log('  erro: ' + e.message); }
+  if (!okColarPrint) ruins += 1;
+  console.log(`${okColarPrint ? '✓' : '✗'} Chat: dá pra colar print com Ctrl+V, e a imagem aparece antes de enviar`);
+
+  // ------------------------------------------------------------------
   // ONDE OLHAR O CUSTO. O ocrUso media desde sempre, mas o numero so existia
   // no log do Render e numa rota crua - "o consumo esta alto" nao tinha onde
   // ser olhado por quem decide. O Master perguntou "onde encontro o
@@ -10686,7 +10736,11 @@ setTimeout(async () => {
   try {
     const src = require('fs').readFileSync(require('path').join(__dirname, 'public', 'suporte-chat.js'), 'utf8');
     const i = src.indexOf('function atendRenderConversa(chat, manterScroll) {');
-    const trecho = src.slice(i, i + 2500);
+    // até o começo da PRÓXIMA função, não uma janela de N caracteres: a
+    // janela fixa quebrava sozinha quando a função crescia (foi o que
+    // aconteceu ao entrar o colar-print), acusando um defeito que não existe
+    const fim = src.indexOf('\n  function ', i + 10);
+    const trecho = src.slice(i, fim > i ? fim : src.length);
     // o botao de PDF fica dentro do ramo verdadeiro do ternario ATEND.ehMaster
     // ? `...` : '<span></span>' - extrai só esse ramo (sem cruzar a crase de
     // fechamento) pra provar que o botao do Beniboy está FORA dele

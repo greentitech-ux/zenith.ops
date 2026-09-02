@@ -66,6 +66,16 @@
   .szc-anexo-abrir.szc-anexo-tem{border-style:solid;border-color:var(--accent,#b8ff3c);color:#e7ecf1;}
   .szc-anexo-abrir span:last-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .szc-msg img.szc-anexo-img{max-width:180px;max-height:180px;border-radius:8px;border:1px solid #232a33;margin-top:4px;display:block;}
+  /* previa do que vai junto. O icone 📎 -> ✅ sozinho e discreto demais pra
+     quem acabou de colar um print: sem VER a imagem, a duvida "colou?" faz
+     colar de novo e mandar duas */
+  .szc-previa{display:none;align-items:center;gap:8px;padding:6px 8px;margin:0 8px 6px;
+    border:1px solid var(--accent,#b8ff3c);border-radius:8px;background:#12161c;}
+  .szc-previa.tem{display:flex;}
+  .szc-previa img{width:44px;height:44px;object-fit:cover;border-radius:6px;flex-shrink:0;}
+  .szc-previa .szc-previa-nome{flex:1;min-width:0;font-size:11.5px;color:#8b949e;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .szc-previa button{background:none;border:0;color:#f85149;cursor:pointer;font-size:14px;padding:0 4px;}
   .szc-msg a.szc-anexo-arq{display:inline-block;margin-top:4px;color:var(--accent,#b8ff3c);font-size:12px;}
   /* avatar do Beniboy dentro do botao - o desenho e o batimento vem do
      tema.js (window.beniboySVG + a classe .beniboy), que ja e carregado por
@@ -198,16 +208,90 @@
   // alterna o icone do botao de anexo (📎 -> ✅) conforme um arquivo foi
   // escolhido ou nao - mesmo padrao ja usado em outras telas do NoPulso
   // (ex: tecnico.html)
-  function ligarBotaoAnexo(inputEl, iconeEl) {
+  function ligarBotaoAnexo(inputEl, iconeEl, previaEl) {
+    if (previaEl) inputEl._szcPrevia = previaEl;
     inputEl.addEventListener('change', () => {
       iconeEl.textContent = inputEl.files[0] ? '✅' : '📎';
       iconeEl.parentElement.classList.toggle('szc-anexo-tem', !!inputEl.files[0]);
+      // o 📎 ganha a mesma previa do colar: quem escolheu pelo seletor
+      // tambem merece ver o que vai junto antes de mandar
+      mostrarPrevia(inputEl, iconeEl);
     });
   }
   function limparAnexo(inputEl, iconeEl) {
     inputEl.value = '';
     iconeEl.textContent = '📎';
     iconeEl.parentElement.classList.remove('szc-anexo-tem');
+    const previa = inputEl._szcPrevia;
+    if (previa) { previa.classList.remove('tem'); previa.innerHTML = ''; }
+  }
+
+  // COLAR PRINT COM CTRL+V. Pedido do usuario: "tirar um print ou copiar uma
+  // imagem e colar no chat e aparecer a imagem". Quem esta descrevendo um
+  // problema tira print o tempo todo; obrigar a salvar em arquivo e depois
+  // procurar pelo 📎 e trabalho que nao precisa existir.
+  //
+  // O print entra no MESMO <input type=file> que o 📎 usa, via DataTransfer:
+  // com isso o envio, o icone e o limpar continuam sendo um caminho so. Se a
+  // imagem virasse um estado paralelo, o dia em que alguem mexesse no envio
+  // quebraria metade dos anexos.
+  const LIMITE_ANEXO_BYTES = 8 * 1024 * 1024; // igual ao uploadChatAnexo do servidor
+
+  function mostrarPrevia(inputEl, iconeEl) {
+    const arq = inputEl.files[0];
+    // a caixa da previa fica AMARRADA ao input quando o botao e ligado. Achar
+    // por closest()/parentElement dependeria do desenho do rodape continuar o
+    // mesmo pra sempre - e ele nao precisa continuar.
+    const caixa = inputEl._szcPrevia || null;
+    if (!caixa) return;
+    if (!arq) { caixa.classList.remove('tem'); caixa.innerHTML = ''; return; }
+    const ehImagem = /^image\//.test(arq.type || '');
+    const url = ehImagem ? URL.createObjectURL(arq) : null;
+    caixa.innerHTML = (url ? `<img alt="print colado" src="${url}">` : '<span>📎</span>')
+      + `<span class="szc-previa-nome">${esc(arq.name || 'anexo')} · ${Math.round(arq.size / 1024)} KB</span>`
+      + '<button type="button" title="Tirar">✕</button>';
+    caixa.classList.add('tem');
+    caixa.querySelector('button').addEventListener('click', () => {
+      if (url) URL.revokeObjectURL(url);
+      limparAnexo(inputEl, iconeEl);
+    });
+  }
+
+  function ligarColarImagem(campoTexto, inputEl, iconeEl) {
+    if (!campoTexto || !inputEl) return;
+    campoTexto.addEventListener('paste', (e) => {
+      const itens = (e.clipboardData && e.clipboardData.items) || [];
+      let arquivo = null;
+      for (const it of itens) {
+        if (it.kind === 'file' && /^image\//.test(it.type || '')) { arquivo = it.getAsFile(); break; }
+      }
+      // sem imagem na area de transferencia e colagem normal de TEXTO - nao
+      // pode ser interceptada
+      if (!arquivo) return;
+      e.preventDefault();
+      if (arquivo.size > LIMITE_ANEXO_BYTES) {
+        alert(`Esse print tem ${Math.round(arquivo.size / 1024 / 1024)} MB e o limite é 8 MB. Salve como JPG ou recorte só a parte que importa.`);
+        return;
+      }
+      // nome com data: colado do Windows o arquivo vem sempre "image.png", e
+      // uma conversa com quatro anexos "image.png" nao diz qual e qual
+      const ext = (arquivo.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      const agora = new Date();
+      const carimbo = `${agora.getFullYear()}${String(agora.getMonth() + 1).padStart(2, '0')}${String(agora.getDate()).padStart(2, '0')}-${String(agora.getHours()).padStart(2, '0')}${String(agora.getMinutes()).padStart(2, '0')}${String(agora.getSeconds()).padStart(2, '0')}`;
+      const comNome = new File([arquivo], `print-${carimbo}.${ext}`, { type: arquivo.type });
+      try {
+        const dt = new DataTransfer();
+        dt.items.add(comNome);
+        inputEl.files = dt.files;
+      } catch (err) {
+        // navegador antigo sem DataTransfer: o 📎 continua funcionando
+        alert('Este navegador não deixa colar imagem. Use o 📎 pra escolher o arquivo.');
+        return;
+      }
+      iconeEl.textContent = '✅';
+      iconeEl.parentElement.classList.add('szc-anexo-tem');
+      mostrarPrevia(inputEl, iconeEl);
+    });
   }
 
   const style = document.createElement('style');
@@ -242,6 +326,7 @@
         <button type="button" class="szc-x" title="Fechar">✕</button>
       </div>
       <div class="szc-corpo" id="szc-corpo"></div>
+      <div class="szc-previa" id="szc-previa-msg"></div>
       <div class="szc-rodape szc-hidden" id="szc-rodape">
         <label class="szc-anexo-btn" id="szc-anexo-label" title="Anexar foto ou PDF">
           <span id="szc-anexo-icone">📎</span>
@@ -256,7 +341,17 @@
 
   const corpo = panel.querySelector('#szc-corpo');
   const rodape = panel.querySelector('#szc-rodape');
-  ligarBotaoAnexo(panel.querySelector('#szc-nova-anexo'), panel.querySelector('#szc-anexo-icone'));
+  ligarBotaoAnexo(
+    panel.querySelector('#szc-nova-anexo'),
+    panel.querySelector('#szc-anexo-icone'),
+    panel.querySelector('#szc-previa-msg'),
+  );
+  // Ctrl+V com print na area de transferencia vira anexo (ver ligarColarImagem)
+  ligarColarImagem(
+    panel.querySelector('#szc-nova-msg'),
+    panel.querySelector('#szc-nova-anexo'),
+    panel.querySelector('#szc-anexo-icone'),
+  );
 
   // as rotas do chat sao publicas e nunca respondem 401, entao da pra usar o
   // fetch da pagina mesmo (nas telas logadas ele so acrescenta o Authorization,
@@ -596,6 +691,7 @@
         <span style="font-size:11px;color:#7d8896;">${esc(chat.nome)} · ${esc(chat.contato || '')}${chat.numeroTicket ? ' · Protocolo #' + chat.numeroTicket : ''}</span>
       </div>
       <div id="szc-atend-thread">${montarThreadHtml(chat)}</div>
+      <div class="szc-previa" id="szc-atend-previa" style="margin:0 0 6px;"></div>
       <div style="display:flex;gap:6px;">
         <label class="szc-anexo-btn" id="szc-atend-anexo-label" title="Anexar foto ou PDF">
           <span id="szc-atend-anexo-icone">📎</span>
@@ -608,7 +704,17 @@
         ${ATEND.ehMaster ? `<button type="button" class="szc-link" id="szc-atend-pdf">📄 baixar PDF da conversa</button>` : '<span></span>'}
         <button type="button" class="szc-link" id="szc-atend-beniboy">Central do Beniboy →</button>
       </div>`;
-    ligarBotaoAnexo(corpo.querySelector('#szc-atend-anexo'), corpo.querySelector('#szc-atend-anexo-icone'));
+    ligarBotaoAnexo(
+      corpo.querySelector('#szc-atend-anexo'),
+      corpo.querySelector('#szc-atend-anexo-icone'),
+      corpo.querySelector('#szc-atend-previa'),
+    );
+    // quem atende manda print o tempo todo (foi daqui que veio o pedido)
+    ligarColarImagem(
+      corpo.querySelector('#szc-atend-msg'),
+      corpo.querySelector('#szc-atend-anexo'),
+      corpo.querySelector('#szc-atend-anexo-icone'),
+    );
     atendMarcarVisto(chat);
     atendAtualizarBadge();
     corpo.querySelector('#szc-atend-voltar').addEventListener('click', () => {
