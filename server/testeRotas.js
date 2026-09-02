@@ -816,6 +816,85 @@ setTimeout(async () => {
   console.log(`${okOcrBarato ? '✓' : '✗'} Leitura por foto: Haiku nos três leitores e sem a 3ª chamada no modelo forte`);
 
   // ------------------------------------------------------------------
+  // UM DIGITO LIDO ERRADO. Caso real da Dominos Mauricio Nassau: o relatorio
+  // dizia "Delivery - Moto Especi 71,6% R$4.065,11" e a leitura preencheu
+  // 1065,11. Numero plausivel, entra no formulario calado, e so aparece
+  // quando alguem soma o mes.
+  //
+  // Mas o papel TRAZ a prova ao lado: 4.065,11 e 71,6% da soma; 1.065,11
+  // seria 39,8%. O modelo transcreve a %, o SERVIDOR faz a conta - mesma
+  // divisao de trabalho do conferirSomas, e sem custar chamada nenhuma.
+  let okPctOcr = false;
+  try {
+    const ocrP = require('/home/user/adyen-monitor/server/canaisVendaOcr.js');
+    // os numeros sao os do relatorio que ele mandou
+    const quadro = (motoEspeci) => ([{
+      titulo: 'Canais de venda',
+      totalValor: null,
+      partes: [
+        { chave: 'canal__carro', textoOrigem: 'Delivery - carro compa 0,0% R$0,00', valor: 0, percentual: 0 },
+        { chave: 'canal__moto', textoOrigem: 'Delivery - Moto Especi 71,6% R$4.065,11', valor: motoEspeci, percentual: 71.6 },
+        { chave: 'canal__carryout', textoOrigem: 'CarryOut 14,7% R$833,30', valor: 833.30, percentual: 14.7 },
+        { chave: 'canal__pickup', textoOrigem: 'Pick Up 0,0% R$0,00', valor: 0, percentual: 0 },
+        { chave: 'canal__loja', textoOrigem: 'Na loja 13,7% R$779,33', valor: 779.33, percentual: 13.7 },
+      ],
+    }]);
+    const errado = ocrP.conferirPercentuais(quadro(1065.11));
+    const certo = ocrP.conferirPercentuais(quadro(4065.11));
+    // DOIS QUADROS COLADOS num só: cada um tem a PRÓPRIA coluna de %, e as
+    // duas fecham 100% separadamente - juntas dão 200%. Os totais implícitos
+    // de um bloco não têm nada a ver com os do outro, então SEM a trava dos
+    // 100% todas as linhas viravam suspeitas de uma vez. É o falso positivo
+    // que a trava existe pra impedir, e o motivo dela não ser decoração.
+    const doisQuadros = ocrP.conferirPercentuais([{
+      titulo: 'dois quadros colados',
+      partes: [
+        { chave: 'a', valor: 600, percentual: 60 },
+        { chave: 'b', valor: 400, percentual: 40 },
+        { chave: 'c', valor: 7000, percentual: 70 },
+        { chave: 'd', valor: 3000, percentual: 30 },
+      ],
+    }]);
+    // faltou uma linha: as % nao fecham 100
+    const incompleto = ocrP.conferirPercentuais([{
+      titulo: 'x',
+      partes: [
+        { chave: 'a', valor: 100, percentual: 20 },
+        { chave: 'b', valor: 200, percentual: 40 },
+        { chave: 'c', valor: 150, percentual: 30 },
+      ],
+    }]);
+    const semPct = ocrP.conferirPercentuais([{ titulo: 'x', partes: [{ chave: 'a', valor: 10 }] }]);
+
+    const conf = {
+      'o valor com dígito errado é pego pela % impressa ao lado':
+        errado.length === 1 && errado[0].chaves.includes('canal__moto'),
+      // o ponto todo: so a linha errada sai do formulario. Sujar o quadro
+      // inteiro faria a pessoa redigitar 5 campos por causa de 1
+      'e SÓ ele é marcado, não o quadro inteiro':
+        errado[0].chaves.length === 1
+        && !errado[0].chaves.includes('canal__carryout')
+        && !errado[0].chaves.includes('canal__loja'),
+      // o motivo tem que dizer o que procurar na foto
+      'diz o valor que fecharia com a porcentagem':
+        Math.abs(errado[0].fora[0].esperado - 4065) < 40,
+      'leitura correta não vira suspeita': certo.length === 0,
+      // se faltou linha, a soma dos valores esta incompleta e TODA comparacao
+      // daria falso positivo - melhor nao conferir do que acusar errado
+      'quadro com % que não fecham 100% não é conferido': incompleto.length === 0,
+      'dois quadros colados não viram 4 falsos positivos': doisQuadros.length === 0,
+      'quadro sem porcentagem nenhuma é ignorado': semPct.length === 0,
+      'o prompt pede a % em campo separado do valor':
+        /"percentual": numero/.test(require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPctOcr = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (errado=${JSON.stringify(errado).slice(0, 200)})`);
+  } catch (e) { okPctOcr = false; console.log('  erro: ' + e.message); }
+  if (!okPctOcr) ruins += 1;
+  console.log(`${okPctOcr ? '✓' : '✗'} Leitura por foto: valor que não fecha com a % impressa é pego, e só ele`);
+
+  // ------------------------------------------------------------------
   // ONDE OLHAR O CUSTO. O ocrUso media desde sempre, mas o numero so existia
   // no log do Render e numa rota crua - "o consumo esta alto" nao tinha onde
   // ser olhado por quem decide. O Master perguntou "onde encontro o
