@@ -6059,8 +6059,13 @@ setTimeout(async () => {
       && /push\.notifyDispositivoOffline\(/.test(srcIdxDisp)
       && /t\.tipo === 'dispositivo-online'/.test(srcIdxDisp)
       && /push\.notifyDispositivoOnline\(/.test(srcIdxDisp);
+    // a fatia vai até a PRÓXIMA função, não um número fixo de caracteres:
+    // com 900 cravados, um comentário a mais dentro da função empurrava o
+    // gate pra fora da janela e o teste reprovava sem nada ter quebrado
     const iNotify = srcPushDisp.indexOf('async function notifyDispositivoOffline');
-    const okGateCritico = /podeReceberCritico\(sub\)/.test(srcPushDisp.slice(iNotify, iNotify + 900));
+    const fimNotify = srcPushDisp.indexOf('\nasync function ', iNotify + 10);
+    const corpoNotify = srcPushDisp.slice(iNotify, fimNotify > 0 ? fimNotify : undefined);
+    const okGateCritico = /podeReceberCritico\(sub\)/.test(corpoNotify);
 
     const conferencias = {
       'apelido legado (string) continua lendo certo, sem virar monitorado sozinho':
@@ -6237,6 +6242,124 @@ setTimeout(async () => {
     if (!okThreads) ruins += 1;
     console.log(`${okThreads ? '✓' : '✗'} Central de Alertas: oscilações da mesma máquina viram THREAD (mais novo à mostra, anteriores recolhidos): ${detalheThreads}`);
   }
+
+
+  // ---- CENTRAL DE ALERTAS: um card só por máquina, virando de caiu -> voltou ----
+  // Pedido do Master: "quando ela mostra que voltou, o alerta que caiu some,
+  // evitando ficar duplicando; caso não tenha sido marcado como atender ou
+  // abrir e ela volte a cair de novo, o alerta que voltou some e fica o de
+  // caiu... evitando duplicidades de cards gerando dados desnecessários".
+  //
+  // Antes, cada oscilação criava DOIS documentos. Uma Bematech piscando a
+  // tarde virava "+5 anteriores desta máquina" na tela dele - e cada card
+  // desses é documento no Firestore, que cobra por documento.
+  let okCicloAlerta = false;
+  try {
+    const ac = require(__dirname + '/alertasCentral.js');
+    const CICLO = 'noc-dispositivo-DOM_BESSA-AA:BB:CC:DD:EE:FF';
+    const doCiclo = () => [...DOCS.entries()]
+      .filter(([k, v]) => k.startsWith('alertasCentral/') && v && v.ciclo === CICLO)
+      .map(([, v]) => v);
+    const caiu = () => ac.registrarCiclo({
+      ciclo: CICLO, estado: 'caiu', tipo: 'noc-dispositivo-offline',
+      titulo: '🖨️ Impressora sem rede', resumo: 'Bematech01 · Dom Bessa sumiu da rede.',
+      url: '/loja-status.html', critico: true,
+    });
+    const voltou = () => ac.registrarCiclo({
+      ciclo: CICLO, estado: 'voltou', tipo: 'noc-dispositivo-online',
+      titulo: '🖨️ Voltou à rede', resumo: 'Bematech01 · Dom Bessa voltou a responder na rede.',
+      url: '/loja-status.html', critico: false,
+    });
+
+    const c1 = await caiu();
+    // a MESMA queda reavisada pela varredura não pode virar card novo
+    await caiu();
+    const depoisDaQueda = doCiclo();
+
+    // a queda aconteceu 10 min atrás: reescreve o caiuEm pra medir "ficou fora"
+    // sem depender do relógio do teste
+    const dezMinAtras = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    DOCS.set(`alertasCentral/${c1.id}`, { ...DOCS.get(`alertasCentral/${c1.id}`), caiuEm: dezMinAtras });
+
+    const v1 = await voltou();
+    const depoisDaVolta = doCiclo();
+
+    // caiu DE NOVO sem ninguém atender: o card de "voltou" some e volta o de queda
+    const c2 = await caiu();
+    const depoisDaRecaida = doCiclo();
+
+    // agora alguém atende: o ciclo fecha e o próximo evento abre card NOVO
+    await ac.atender(c2.id, 'master@teste.local');
+    const v2 = await voltou();
+    const depoisDeAtender = doCiclo();
+
+    // a linha que a tela mostra ("caiu 17:30 · voltou 17:40 · ficou fora 10min")
+    const htmlCa2 = require('fs').readFileSync(__dirname + '/public/central-alertas.html', 'utf8');
+    const mc = /\[CICLO-PURO-INICIO\][^\n]*\n([\s\S]*?)\/\/ \[CICLO-PURO-FIM\]/.exec(htmlCa2);
+    let partes = null;
+    let partesRecaida = null;
+    if (mc) {
+      const modC = new Function(mc[1] + '\nreturn { partesDoCiclo, fmtDuracao };')();
+      partes = modC.partesDoCiclo({
+        ciclo: CICLO, caiuEm: '2026-09-02T20:30:00.000Z', voltouEm: '2026-09-02T20:40:00.000Z',
+        foraMs: 10 * 60 * 1000, quedas: 1,
+      });
+      partesRecaida = modC.partesDoCiclo({ ciclo: CICLO, caiuEm: '2026-09-02T20:52:00.000Z', voltouEm: null, foraMs: null, quedas: 3 });
+    }
+
+    const srcPushC = require('fs').readFileSync(__dirname + '/push.js', 'utf8');
+    const conf = {
+      // 1. a queda repetida não gera card novo
+      'a mesma queda reavisada não vira card novo': depoisDaQueda.length === 1
+        && depoisDaQueda[0].estado === 'caiu' && depoisDaQueda[0].critico === true,
+      // 2. o pedido literal: quando mostra que voltou, o de caiu SOME
+      'quando volta, o card de queda vira o de volta - não nasce um segundo card':
+        depoisDaVolta.length === 1 && depoisDaVolta[0].id === c1.id
+        && depoisDaVolta[0].estado === 'voltou' && depoisDaVolta[0].critico === false,
+      // 3. caiu 17:30, voltou 17:40 -> 10 minutos fora
+      'o card guarda a hora que caiu, a hora que voltou e quanto ficou fora':
+        !!v1 && !!v1.caiuEm && !!v1.voltouEm
+        && Math.abs(v1.foraMs - 10 * 60 * 1000) < 5000,
+      // 4. caiu de novo sem atender: o "voltou" some, fica o de caiu
+      'cai de novo sem ninguém atender: o card de volta some e fica o de queda':
+        depoisDaRecaida.length === 1 && depoisDaRecaida[0].id === c1.id
+        && depoisDaRecaida[0].estado === 'caiu' && depoisDaRecaida[0].voltouEm === null
+        && depoisDaRecaida[0].quedas === 2,
+      // 5. atendido = ciclo fechado; o próximo evento abre card novo, senão
+      // atender a queda de ontem apagaria a de hoje
+      'depois de atendido o ciclo fecha e o próximo evento abre um card NOVO':
+        depoisDeAtender.length === 2 && v2.id !== c1.id
+        && depoisDeAtender.filter((x) => x.cicloAberto === CICLO).length === 1,
+      'o card atendido para de receber virada (cicloAberto zerado)':
+        (DOCS.get(`alertasCentral/${c1.id}`) || {}).cicloAberto === null
+        && !!(DOCS.get(`alertasCentral/${c1.id}`) || {}).atendidoEm,
+      // 6. a tela conta a história do ciclo, "do jeito que já mostra"
+      'a tela mostra caiu / voltou / ficou fora':
+        !!partes && partes.length === 3
+        && /^caiu \d{2}:\d{2}$/.test(partes[0]) && /^voltou \d{2}:\d{2}$/.test(partes[1])
+        && partes[2] === 'ficou fora 10min',
+      'depois de recair, a tela ainda diz que não é a primeira queda':
+        !!partesRecaida && partesRecaida.includes('3ª queda') && !partesRecaida.some((t) => /voltou|fora/.test(t)),
+      // 7. os TRÊS pares do NOC passam pelo ciclo (aparelho marcado, computador
+      // da loja e impressora que parou de imprimir)
+      'os três pares caiu/voltou do NOC usam o ciclo':
+        (srcPushC.match(/alertasCentral\.registrarCiclo\(/g) || []).length >= 6
+        && /estado: 'caiu', tipo: 'noc-dispositivo-offline'/.test(srcPushC)
+        && /estado: 'voltou', tipo: 'noc-dispositivo-online'/.test(srcPushC)
+        && /estado: 'voltou', tipo: 'noc-online'/.test(srcPushC)
+        && /estado: 'caiu', tipo: 'noc-impressora-problema'/.test(srcPushC)
+        && /estado: 'voltou', tipo: 'noc-impressora-normalizou'/.test(srcPushC),
+      // 8. a chave do thread na tela vem do ciclo (junta queda e volta da MESMA
+      // máquina), não do texto do resumo
+      'o agrupamento da tela usa o ciclo do servidor, não o texto do resumo':
+        /if\(a\.ciclo\) return 'ciclo\|' \+ a\.ciclo;/.test(htmlCa2),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okCicloAlerta = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (docs do ciclo: ${doCiclo().length}, partes: ${JSON.stringify(partes)})`);
+  } catch (e) { okCicloAlerta = false; console.log('  erro: ' + e.message); }
+  if (!okCicloAlerta) ruins += 1;
+  console.log(`${okCicloAlerta ? '✓' : '✗'} Central de Alertas: um card só por máquina, virando caiu → voltou (com hora e tempo fora)`);
 
   // ---- KPI's operacionais: exportar a matriz + ranking de ofensores ----
   // O que importa provar aqui: (1) o CSV/PDF sai com EXATAMENTE a matriz que

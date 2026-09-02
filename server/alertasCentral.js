@@ -72,9 +72,95 @@ async function registrar({ tipo, titulo, resumo, url, critico }) {
   return registro;
 }
 
+// ---------------------------------------------------------------------------
+// CICLO CAIU -> VOLTOU: UM CARD SO POR MAQUINA
+//
+// Pedido do Master: "quando ela mostra que voltou, o alerta que caiu some,
+// evitando ficar duplicando; caso nao tenha sido marcado como atender ou abrir
+// e ela volte a cair de novo, o alerta que voltou some e fica o de caiu, e
+// assim segue - evitando duplicidades de cards gerando dados desnecessarios".
+//
+// Antes, cada oscilacao criava DOIS documentos (a queda e a volta). Uma
+// impressora piscando a tarde inteira virava o paredao do print que ele
+// mandou: "+5 anteriores desta maquina" numa unica Bematech. E cada card
+// desses e' documento no Firestore, que cobra por documento (CLAUDE.md §3).
+//
+// Agora existe UM documento por ciclo. Enquanto ninguem atendeu (nem abriu -
+// abrir tambem atende, ver irPara na tela), o mesmo card VIRA de estado:
+// caiu -> voltou -> caiu -> ... O historico do ciclo fica no proprio card
+// (caiuEm, voltouEm, foraMs, quedas), que e' o que o Master pediu pra ver:
+// "caiu 17:30, voltou 17:40, total X minutos fora".
+//
+// Atendido = ciclo fechado: cicloAberto vira null e o proximo evento daquela
+// maquina comeca um card novo. Sem isso, atender uma queda de ontem apagaria
+// a queda de hoje.
+const ESTADOS_CICLO = new Set(['caiu', 'voltou']);
+
+// A BUSCA E' POR IGUALDADE NUM CAMPO SO (`cicloAberto`), de proposito: o
+// Firestore resolve isso com o indice de campo unico, que ja existe sozinho.
+// Um `where(ciclo) + where(aberto)` exigiria indice composto criado na mao no
+// console - e a rota morreria em producao ate' alguem lembrar de criar.
+async function cicloAbertoDe(ciclo) {
+  const snap = await COLLECTION.where('cicloAberto', '==', ciclo).limit(1).get();
+  return snap.docs.length ? snap.docs[0].data() : null;
+}
+
+async function registrarCiclo({ ciclo, estado, tipo, titulo, resumo, url, critico }) {
+  // sem ciclo/estado nao ha' o que parear - segue como alerta comum
+  if (!ciclo || !ESTADOS_CICLO.has(estado)) return registrar({ tipo, titulo, resumo, url, critico });
+  const agora = new Date().toISOString();
+  const aberto = await cicloAbertoDe(ciclo);
+
+  // MESMO estado repetido (a varredura reavisando a mesma queda): nao escreve
+  // nada. E' exatamente o "dado desnecessario" que o Master quer cortar.
+  if (aberto && aberto.estado === estado) return aberto;
+
+  if (aberto) {
+    const patch = {
+      tipo, titulo, resumo: resumo || null, url: url || '/', critico: !!critico, estado,
+      // criadoEm vira a hora do evento NOVO: o card sobe pra o topo da lista e
+      // o polling incremental (criadoEm > desde) enxerga a virada. Sem isso, a
+      // tela so veria a mudanca no proximo recarregamento completo.
+      criadoEm: agora,
+    };
+    if (estado === 'voltou') {
+      patch.voltouEm = agora;
+      patch.foraMs = aberto.caiuEm ? Math.max(0, Date.parse(agora) - Date.parse(aberto.caiuEm)) : null;
+    } else {
+      // caiu de novo antes de alguem atender: o "voltou" some e o card volta a
+      // ser o de queda. A contagem de quedas fica - some o card, nao o fato
+      patch.caiuEm = agora;
+      patch.voltouEm = null;
+      patch.foraMs = null;
+      patch.quedas = (Number(aberto.quedas) || 1) + 1;
+    }
+    await COLLECTION.doc(aberto.id).update(patch);
+    cache.invalidar();
+    invalidarIncremental();
+    return { ...aberto, ...patch };
+  }
+
+  const id = COLLECTION.doc().id;
+  const registro = {
+    id, tipo, titulo, resumo: resumo || null, url: url || '/', critico: !!critico,
+    criadoEm: agora, atendidoEm: null, atendidoPorEmail: null,
+    ciclo, cicloAberto: ciclo, estado,
+    caiuEm: estado === 'caiu' ? agora : null,
+    voltouEm: estado === 'voltou' ? agora : null,
+    foraMs: null,
+    quedas: estado === 'caiu' ? 1 : 0,
+  };
+  await COLLECTION.doc(id).set(registro);
+  cache.invalidar();
+  invalidarIncremental();
+  return registro;
+}
+
 async function atender(id, porEmail) {
   const ref = COLLECTION.doc(id);
-  const patch = { atendidoEm: new Date().toISOString(), atendidoPorEmail: porEmail || null };
+  // atender FECHA o ciclo: o proximo evento dessa maquina abre um card novo em
+  // vez de reescrever este, que a partir de agora e' registro do que foi visto
+  const patch = { atendidoEm: new Date().toISOString(), atendidoPorEmail: porEmail || null, cicloAberto: null };
   try {
     await ref.update(patch);
   } catch (err) {
@@ -90,4 +176,4 @@ async function atender(id, porEmail) {
   return snap.exists ? snap.data() : null;
 }
 
-module.exports = { listar, listarDesde, registrar, atender };
+module.exports = { listar, listarDesde, registrar, registrarCiclo, atender };

@@ -63,6 +63,11 @@
   .badge.ok{background:var(--ok-dim);color:var(--ok);}
   .resumo{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.4;}
   .meta{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:6px;}
+  /* a linha do ciclo: caiu / voltou / quanto ficou fora. Mesmo desenho do
+     registro de atividade do NOC, que ja mostra "ficou fora 10min" */
+  .ciclo{font-family:var(--mono);font-size:11px;margin-top:5px;display:flex;
+    flex-wrap:wrap;gap:4px 10px;color:var(--muted);}
+  .ciclo b{color:var(--text);font-weight:600;}
   .card-acoes{display:flex;flex-direction:column;gap:6px;flex:none;}
   .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
   .btn-ghost:hover{border-color:var(--accent);}
@@ -159,6 +164,41 @@ function formatarHorario(iso){
   return d.toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
 }
 
+// [CICLO-PURO-INICIO] - funções puras, sem DOM: a suíte extrai este trecho e
+// roda em Node (ver testeRotas.js) - não referencie nada de navegador aqui.
+function horaCurta(iso){
+  if(!iso) return '';
+  return new Date(iso).toLocaleString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+}
+// mesma régua do registro de atividade em loja-status.html - "do jeito que já
+// mostra", pedido do Master
+function fmtDuracao(ms){
+  const s = Math.max(0, Math.floor(ms/1000));
+  if(s < 60) return `${s}s`;
+  const min = Math.floor(s/60);
+  if(min < 60) return `${min}min`;
+  const h = Math.floor(min/60), m = min%60;
+  if(h < 24) return m ? `${h}h ${m}min` : `${h}h`;
+  const d = Math.floor(h/24);
+  return `${d}d ${h%24}h`;
+}
+// A HISTÓRIA DO CICLO NUM CARD SÓ. O alerta de queda e o de volta deixaram de
+// ser dois cards (ver registrarCiclo em alertasCentral.js): o mesmo card vira
+// de estado, e esta linha é o que sobrou pra contar o que aconteceu.
+// Card antigo (sem ciclo) não tem esses campos e continua sem a linha.
+function partesDoCiclo(a){
+  if(!a || !a.ciclo) return [];
+  const p = [];
+  if(a.caiuEm) p.push('caiu ' + horaCurta(a.caiuEm));
+  if(a.voltouEm) p.push('voltou ' + horaCurta(a.voltouEm));
+  if(a.foraMs != null) p.push('ficou fora ' + fmtDuracao(a.foraMs));
+  // caiu de novo antes de alguém atender: o card de "voltou" sumiu, mas o
+  // número de quedas fica - senão parece que foi a primeira vez
+  if((Number(a.quedas)||0) > 1) p.push(`${a.quedas}ª queda`);
+  return p;
+}
+// [CICLO-PURO-FIM]
+
 let FILTRO = 'pendentes';
 function mudarFiltro(f){
   FILTRO = f;
@@ -178,6 +218,10 @@ let ALERTAS = [];
 // este trecho e roda em Node (ver testeRotas.js) - não referencie nada de
 // navegador aqui dentro.
 function chaveThread(a){
+  // ciclo = identidade da máquina vinda do servidor (ver registrarCiclo). É
+  // melhor que o texto: junta a queda e a volta da MESMA máquina no mesmo
+  // thread, mesmo com tipos diferentes, e não depende do formato do resumo
+  if(a.ciclo) return 'ciclo|' + a.ciclo;
   // só os alertas do NOC repetem por máquina (offline/reconectou/acesso
   // remoto/reiniciar...) - os outros tipos seguem soltos, um card cada
   if(!/^noc-/.test(String(a.tipo||''))) return null;
@@ -219,6 +263,7 @@ function cardHtml(a){
         ${atendido ? '<span class="badge ok">Atendido</span>' : ''}
       </div>
       ${a.resumo ? `<div class="resumo">${escapeHtml(a.resumo)}</div>` : ''}
+      ${partesDoCiclo(a).length ? `<div class="ciclo">${partesDoCiclo(a).map(t=>`<span><b>${escapeHtml(t)}</b></span>`).join('')}</div>` : ''}
       <div class="meta">${info.rotulo} · ${formatarHorario(a.criadoEm)}${atendido ? ' · atendido por ' + escapeHtml(a.atendidoPorEmail || '') + ' às ' + formatarHorario(a.atendidoEm) : ''}</div>
       <!-- RODAPE-THREAD -->
     </div>

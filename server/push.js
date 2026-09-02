@@ -866,7 +866,8 @@ async function notifyLojaOffline(unidadeNome, codigo, computadorNome, posto, rei
     critical: true,
     url: '/loja-status.html',
   };
-  await alertasCentral.registrar({
+  await alertasCentral.registrarCiclo({
+    ciclo: dados.tag, estado: 'caiu',
     tipo: reiniciando ? 'noc-reiniciando' : 'noc-offline',
     titulo: dados.title, resumo: dados.body, url: dados.url, critico: !reiniciando,
   });
@@ -946,7 +947,10 @@ async function notifyDispositivoOffline(unidadeNome, codigo, apelido, tipoDispos
     tag: `noc-dispositivo-${codigo}-${mac}`,
     url: '/loja-status.html',
   };
-  await alertasCentral.registrar({ tipo: 'noc-dispositivo-offline', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
+  // `dados.tag` ja e' a identidade da maquina (codigo+mac) - e' o que faz o
+  // celular colapsar a notificacao. Reaproveitada como chave do ciclo: um card
+  // so por aparelho, virando de caiu pra voltou (ver registrarCiclo)
+  await alertasCentral.registrarCiclo({ ciclo: dados.tag, estado: 'caiu', tipo: 'noc-dispositivo-offline', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const payload = JSON.stringify(dados);
   const subs = await loadSubs();
@@ -979,7 +983,7 @@ async function notifyImpressoraProblema(unidadeNome, codigo, apelido, ip, mac, n
     tag: `noc-impressora-${codigo}-${mac}`,
     url: '/loja-status.html',
   };
-  await alertasCentral.registrar({ tipo: 'noc-impressora-problema', titulo: dados.title, resumo: dados.body, url: dados.url, critico });
+  await alertasCentral.registrarCiclo({ ciclo: dados.tag, estado: 'caiu', tipo: 'noc-impressora-problema', titulo: dados.title, resumo: dados.body, url: dados.url, critico });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const payload = JSON.stringify(dados);
   const subs = await loadSubs();
@@ -1006,7 +1010,7 @@ async function notifyImpressoraNormalizou(unidadeNome, codigo, apelido, ip, mac,
     tag: `noc-impressora-${codigo}-${mac}`,
     url: '/loja-status.html',
   };
-  await alertasCentral.registrar({ tipo: 'noc-impressora-normalizou', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  await alertasCentral.registrarCiclo({ ciclo: dados.tag, estado: 'voltou', tipo: 'noc-impressora-normalizou', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const payload = JSON.stringify(dados);
   const subs = await loadSubs();
@@ -1031,7 +1035,7 @@ async function notifyDispositivoOnline(unidadeNome, codigo, apelido, tipoDisposi
     tag: `noc-dispositivo-${codigo}-${mac}`,
     url: '/loja-status.html',
   };
-  await alertasCentral.registrar({ tipo: 'noc-dispositivo-online', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
+  await alertasCentral.registrarCiclo({ ciclo: dados.tag, estado: 'voltou', tipo: 'noc-dispositivo-online', titulo: dados.title, resumo: dados.body, url: dados.url, critico: false });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const payload = JSON.stringify(dados);
   const subs = await loadSubs();
@@ -1088,7 +1092,7 @@ async function notifyLojaVoltou(unidadeNome, codigo, computadorNome, posto, volt
     tag: `loja-status-${codigo}-${posto || 'principal'}`,
     url: '/loja-status.html',
   };
-  await alertasCentral.registrar({ tipo: 'noc-online', titulo: dados.title, resumo: dados.body, url: dados.url });
+  await alertasCentral.registrarCiclo({ ciclo: dados.tag, estado: 'voltou', tipo: 'noc-online', titulo: dados.title, resumo: dados.body, url: dados.url });
   if (!PUBLIC_KEY || !PRIVATE_KEY) return;
   const payload = JSON.stringify(dados);
   const subs = await loadSubs();
