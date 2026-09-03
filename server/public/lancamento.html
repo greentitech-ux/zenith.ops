@@ -885,7 +885,11 @@ async function comprimirVariasRelatorio(lista){
   return saida;
 }
 
+let UNIDADE_DA_LEITURA = null;
 function atualizarBotaoLerCanais(unidade){
+  // trocou de loja: o que foi lido era de OUTRA loja. Sem zerar aqui, a trava
+  // atravessaria a troca e a nova unidade nasceria sem direito a leitura
+  if(unidade !== UNIDADE_DA_LEITURA){ LIDOS_PELA_FOTO.clear(); UNIDADE_DA_LEITURA = unidade; }
   const grupo = grupoKpiDaUnidade(unidade);
   // basta ter campo cadastrado em UMA das tres frentes: tem relatorio que so
   // traz os canais, tem loja que so usa as formas de pagamento, e tem grupo
@@ -907,6 +911,18 @@ function nomesSelecionados(){
 function pintarSelecaoRelatorio(){
   const sel = document.getElementById('ler-canais-selecao');
   const btnLer = document.getElementById('btn-ler-canais');
+  // TRAVA: os campos principais já vieram, mais uma leitura só gastaria
+  // chamada (ver camposEssenciais abaixo). Não é erro - é a leitura ter
+  // terminado o trabalho dela, e a mensagem diz isso.
+  const btnEscolher = document.getElementById('btn-escolher-relatorio');
+  if(btnEscolher) btnEscolher.disabled = leituraEncerrada();
+  if(leituraEncerrada()){
+    sel.classList.remove('hidden');
+    sel.innerHTML = '<span style="color:var(--ok);">✔ Os campos principais já vieram da foto. '
+      + 'O que falta é KPI, que se digita à mão — outra leitura não traria mais nada e custa.</span>';
+    btnLer.disabled = true;
+    return;
+  }
   if(!ARQUIVOS_RELATORIO.length){
     sel.classList.add('hidden'); sel.innerHTML = '';
     btnLer.disabled = true;
@@ -916,6 +932,48 @@ function pintarSelecaoRelatorio(){
   sel.innerHTML = `<b>${ARQUIVOS_RELATORIO.length}</b> foto(s) escolhida(s): ${escapeHtml(nomesSelecionados())}`+
     ` — <a href="#" onclick="limparSelecaoRelatorio();return false;" style="color:var(--muted);">limpar</a>`;
   btnLer.disabled = false;
+}
+// ---- OS CAMPOS PRINCIPAIS, E A TRAVA DEPOIS DELES ----
+// Pedido do Master: "os campos principais que sempre tem que bater: Delivery -
+// Moto Especi, CarryOut, Pick Up, Na Loja, AdyenV2, Ifood, 99Food... após esses
+// serem lidos e os demais derem erro, não permitir mais que façam leitura de
+// imagem, evitando o consumo desnecessário. Dados de KPI's eles colocam a mão".
+//
+// Cada leitura é uma chamada de modelo que se paga. Depois que o DINHEIRO do
+// dia entrou, uma foto nova não traz mais nada que valha a chamada: o que
+// sobra é KPI, que se digita em segundos.
+//
+// A lista não é escrita aqui: sai do cadastro do Grupo. Canal e forma são
+// essenciais SEMPRE (são o dinheiro do dia), menos os marcados "digitado na
+// mão" - esses não saem no relatório do PDV, então esperar a foto trazer seria
+// esperar pra sempre. Entre os KPI's, só os que o Master marcou com "📸 a foto
+// precisa trazer" (na loja dele, o Valor Total Taxa de Entrega).
+//
+// O que conta como lido é o que a LEITURA devolveu, não a aparência do campo:
+// numa loja automática todos nascem cinza antes de qualquer foto, e pro Master
+// nenhum fica - os dois casos dariam a resposta errada se olhássemos a classe.
+const LIDOS_PELA_FOTO = new Set();
+function camposEssenciais(){
+  const grupo = grupoKpiDaUnidade(document.getElementById('f-unidade').value);
+  if(!grupo) return [];
+  const semManual = (lista, secao) => (lista||[])
+    .filter(k => k.manual !== true)
+    .map(k => ({ secao, campo: k.campo, label: k.label }));
+  return [
+    ...semManual(grupo.canaisVendaExtras, 'canal'),
+    ...semManual(grupo.formasPagamentoExtras, 'forma'),
+    ...(grupo.kpisExtras||[]).filter(k => k.essencial === true)
+      .map(k => ({ secao: 'kpi', campo: k.campo, label: k.label })),
+  ];
+}
+function essenciaisQueFaltam(){
+  return camposEssenciais().filter(e => !LIDOS_PELA_FOTO.has(`${e.secao}|${e.campo}`));
+}
+// grupo SEM canal/forma cadastrado não trava por vácuo: "nenhum essencial"
+// significaria "todos vieram" e a loja perderia a leitura sem nunca ter usado
+function leituraEncerrada(){
+  const essenciais = camposEssenciais();
+  return essenciais.length > 0 && essenciaisQueFaltam().length === 0;
 }
 function limparSelecaoRelatorio(){
   ARQUIVOS_RELATORIO = [];
@@ -1021,6 +1079,8 @@ async function realizarLeituraRelatorio(){
       // canal zerado no relatorio fica EM BRANCO, nao "0": em branco o campo
       // continua legivel de longe como "nao teve venda aqui", e o fechamento
       // trata vazio como zero do mesmo jeito
+      // zero TAMBEM e leitura: o campo foi lido e nao precisa de outra foto
+      LIDOS_PELA_FOTO.add(`${it.secao}|${it.campo}`);
       if(Number(it.valor) === 0){
         el.value=''; el.style.borderColor='';
         // vazio-porque-leu-zero e vazio-porque-nao-achou ficavam IDENTICOS na
@@ -1111,6 +1171,14 @@ async function realizarLeituraRelatorio(){
       partes.push(`<span style="color:var(--warn);">Sobrou no relatório sem campo correspondente: `
         + data.naoIdentificados.map(n=>`${escapeHtml(n.textoOrigem)} (${fmtMoney(n.valor)})`).join(', ')
         + `. Se isso é venda, peça pro Master cadastrar o campo em Grupos.</span>`);
+    }
+    // o que ainda separa a loja de parar de gastar leitura - ou o aviso de que
+    // acabou. Sem isso a trava apareceria do nada na tentativa seguinte
+    const faltamEssenciais = essenciaisQueFaltam();
+    if(camposEssenciais().length){
+      partes.push(faltamEssenciais.length
+        ? `<span style="color:var(--muted);">Ainda falta a foto trazer: ${faltamEssenciais.map(e=>escapeHtml(e.label)).join(', ')}.</span>`
+        : `<span style="color:var(--ok);">✔ Todos os campos principais vieram da foto — a leitura por imagem foi encerrada pra este lançamento. O que falta é KPI, digite à mão.</span>`);
     }
     if(data.data && data.data !== document.getElementById('f-data').value){
       partes.push(`<span style="color:var(--warn);">A data do relatório (${escapeHtml(data.data)}) é diferente da data escolhida acima — confira se é o relatório do dia certo.</span>`);

@@ -2046,6 +2046,15 @@ const CAMPOS_FIXOS = [
   {campo:'loja', label:'Loja'}, {campo:'adyen', label:'Maquininhas (cartão)'}, {campo:'ifood', label:'Ifood'},
   {campo:'food99', label:'99Food'}, {campo:'pix', label:'Pix'}, {campo:'pixCnpj', label:'Pix CNPJ'},
   {campo:'outros', label:'Outros'},
+  // AS DUAS PARCELAS QUE FALTAVAM. adyenPos e o ajuste dele no dia seguinte
+  // entram no Total Declarado (ver recomputarTotais em fechamentosLive.js) e
+  // não tinham coluna: somar as colunas visíveis dava um número e o Total
+  // Declarado mostrava outro. Foi o que fez o fechamento de São Miguel de
+  // 02/09 acusar diferença de -R$ 1.207,14 que ninguém achava na tela - era
+  // o ajuste, invisível. Coluna fixa só aparece quando alguma linha usa
+  // (ver colunasValores), então em loja sem Maquininha POS nada muda.
+  {campo:'adyenPos', label:'Maquininha POS (pós meia-noite)'},
+  {campo:'ajustePosAnterior', label:'Ajuste da Maquininha POS de ontem'},
 ];
 
 // ---------- colunas de valor unificadas por NOME ----------

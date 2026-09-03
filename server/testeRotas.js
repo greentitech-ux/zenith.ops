@@ -993,6 +993,145 @@ setTimeout(async () => {
   console.log(`${okResgateOcr ? '✓' : '✗'} Leitura por foto: valor impresso que ficou sem dono acha o campo certo pela unidade (R$ x contagem)`);
 
   // ------------------------------------------------------------------
+  // "NÃO EXISTE DIFERENÇA DE CAIXA" - a conta aberta no ticket. Reclamação do
+  // Master (02/09/2026): "foi relançado o fechamento já 2 vezes e continua
+  // dando diferença de caixa, porém não existe diferença de caixa".
+  //
+  // Relançar dava o mesmo número porque a conta é determinística. O que
+  // faltava era PODER VER de onde ela sai: o ticket dizia só "diferença de
+  // -R$ 1207,14", e um número sozinho não dá pra contestar nem pra corrigir.
+  let okContaAberta = false;
+  try {
+    const fl = require('/home/user/adyen-monitor/server/fechamentosLive.js');
+    // os campos da loja dele: canais e formas são todos EXTRAS do grupo
+    const defs = {
+      canais: [
+        { campo: 'moto', label: 'Delivery - Moto Especi' }, { campo: 'carro', label: 'Delivery - carro compa' },
+        { campo: 'carryout', label: 'CarryOut' }, { campo: 'pickup', label: 'Pick Up' }, { campo: 'naloja', label: 'Na Loja' },
+      ],
+      formas: [{ campo: 'adyenv2', label: 'AdyenV2' }, { campo: 'ifoodx', label: 'Ifood' }, { campo: 'food99x', label: '99Food' }],
+      kpis: [{ campo: 'taxa', label: 'Valor Total Taxa de Entrega', somaEm: 'faturamento' }],
+    };
+    const zerados = { delivery: 0, carryout: 0, pickup: 0, loja: 0, adyen: 0, adyenPos: 0, ajustePosAnterior: 0, ifood: 0, food99: 0, pix: 0, pixCnpj: 0, outros: 0 };
+    // dinheiro NÃO lançado: a venda entrou pelo canal e não foi declarada
+    const semDinheiro = {
+      ...zerados, entradaDinheiro: 0, faturamento: 2566.93, totalDeclarado: 1746.33, diferenca: -820.60,
+      canaisVendaExtras: { moto: 1954.23, carro: 0, carryout: 513.80, pickup: 98.90, naloja: 0 },
+      formasPagamentoExtras: { adyenv2: 289.60, ifoodx: 989.83, food99x: 466.90 },
+      kpisExtras: {},
+    };
+    const texto = fl.explicarDiferenca(semDinheiro, defs);
+    // o mesmo dia com o dinheiro lançado: fecha, e o aviso do dinheiro some
+    const comDinheiro = { ...semDinheiro, entradaDinheiro: 820.60, totalDeclarado: 2566.93, diferenca: 0 };
+    const textoOk = fl.explicarDiferenca(comDinheiro, defs);
+    // KPI que soma no faturamento tem que aparecer do lado dele
+    const comKpi = fl.explicarDiferenca({ ...semDinheiro, kpisExtras: { taxa: 120 } }, defs);
+
+    const conf = {
+      'a conta abre os dois lados, com o rótulo de cada parcela':
+        /Faturamento \(canais de venda\) R\$ 2566,93 =/.test(texto)
+        && /Delivery - Moto Especi R\$ 1954,23/.test(texto)
+        && /CarryOut R\$ 513,80/.test(texto)
+        && /Total declarado \(formas \+ dinheiro\) R\$ 1746,33 =/.test(texto)
+        && /AdyenV2 R\$ 289,60/.test(texto) && /99Food R\$ 466,90/.test(texto),
+      'diz a conta da diferença, não só o número':
+        /Diferença = declarado - faturamento = -R\$ 820,60/.test(texto),
+      // parcela zerada não entra: um fechamento de 20 campos viraria parede
+      'parcela zerada fica fora da lista': !/Delivery - carro compa/.test(texto) && !/Na Loja/.test(texto),
+      // a EXCEÇÃO: dinheiro zerado aparece sempre, porque é o buraco mais comum
+      'Entrada em dinheiro aparece mesmo zerada, e o aviso diz onde olhar':
+        /Entrada em dinheiro R\$ 0,00/.test(texto)
+        && /Entrada em dinheiro está zerada neste lançamento/.test(texto),
+      'com o dinheiro lançado a conta fecha e o aviso some':
+        /Diferença = declarado - faturamento = R\$ 0,00/.test(textoOk)
+        && !/está zerada neste lançamento/.test(textoOk),
+      'KPI que soma no faturamento entra do lado do faturamento':
+        /Valor Total Taxa de Entrega R\$ 120,00/.test(comKpi),
+      // sem isso o ticket continua sendo um número sozinho
+      'o ticket de Quebra de caixa leva a conta junto':
+        /observacao: `\$\{daLoja\}\$\{explicarDiferenca\(registro, defsExtras\)\}`/
+          .test(require('fs').readFileSync(__dirname + '/fechamentosLive.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okContaAberta = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}\n---\n${texto}\n---`);
+  } catch (e) { okContaAberta = false; console.log('  erro: ' + e.message); }
+  if (!okContaAberta) ruins += 1;
+  console.log(`${okContaAberta ? '✓' : '✗'} Quebra de caixa: o ticket mostra a conta aberta dos dois lados, não só a diferença`);
+
+  // ------------------------------------------------------------------
+  // DEPOIS DOS CAMPOS PRINCIPAIS, A LEITURA POR FOTO ENCERRA. Pedido do
+  // Master: "os campos principais que sempre tem que bater... após esses serem
+  // lidos e os demais derem erro, não permitir mais que façam leitura de
+  // imagem, evitando o consumo desnecessário. Dados de KPI's eles colocam a
+  // mão". Cada leitura é uma chamada de modelo que se paga.
+  let okTravaLeitura = false;
+  try {
+    const htmlL = require('fs').readFileSync(__dirname + '/public/lancamento.html', 'utf8');
+    const htmlG = require('fs').readFileSync(__dirname + '/public/grupos.html', 'utf8');
+    const srcG = require('fs').readFileSync(__dirname + '/grupos.js', 'utf8');
+    // o servidor precisa GRAVAR a marca, senão o Master marca e nada acontece
+    const gr = require('/home/user/adyen-monitor/server/grupos.js');
+    const salvo = JSON.parse((await postarJson('/api/grupos', {
+      nome: 'Grupo Trava Leitura',
+      unidades: ['AERO'],
+      kpisExtras: [
+        { label: 'Valor Total Taxa de Entrega', tipo: 'moeda', essencial: true },
+        { label: 'Lead Time', tipo: 'quantidade', essencial: false },
+      ],
+      canaisVendaExtras: [{ label: 'Delivery - Moto Especi' }, { label: 'CarryOut' }],
+      formasPagamentoExtras: [{ label: 'AdyenV2' }, { label: 'Pix CNPJ', manual: true }],
+    }, { Authorization: 'Bearer ' + token })).corpo);
+    const kpiTaxa = (salvo.kpisExtras || []).find((k) => k.label === 'Valor Total Taxa de Entrega');
+    const kpiLead = (salvo.kpisExtras || []).find((k) => k.label === 'Lead Time');
+
+    const conf = {
+      'a marca "a foto precisa trazer" é gravada por KPI':
+        !!kpiTaxa && kpiTaxa.essencial === true && !!kpiLead && kpiLead.essencial === false,
+      'o Master marca isso na tela de Grupos':
+        /kpi-essencial-checkbox/.test(htmlG) && /a foto precisa trazer este KPI/.test(htmlG),
+      'reabrir o grupo pra editar traz a marca de volta (senão ela se perde)':
+        /adicionarKpi\('e-kpis', k\.label, k\.tipo, null, null, k\.somaEm, null, k\.direcao, k\.origem, k\.essencial\)/.test(htmlG),
+      // canal e forma são o dinheiro do dia: essenciais sempre, sem depender
+      // de o Master marcar nada
+      'canal e forma são essenciais sempre, e o "digitado na mão" fica de fora':
+        /semManual\(grupo\.canaisVendaExtras, 'canal'\)/.test(htmlL)
+        && /semManual\(grupo\.formasPagamentoExtras, 'forma'\)/.test(htmlL)
+        && /\.filter\(k => k\.manual !== true\)/.test(htmlL),
+      'entre os KPI\'s, só entram os marcados':
+        /\(grupo\.kpisExtras\|\|\[\]\)\.filter\(k => k\.essencial === true\)/.test(htmlL),
+      // o ponto do pedido: depois que vieram, a tela para de aceitar foto
+      'com todos os essenciais lidos, o botão e o seletor de foto travam':
+        /function leituraEncerrada\(\)/.test(htmlL)
+        && /if\(leituraEncerrada\(\)\)\{[\s\S]{0,400}btnLer\.disabled = true;/.test(htmlL)
+        && /btnEscolher\.disabled = leituraEncerrada\(\)/.test(htmlL),
+      // o que conta como lido é o que a LEITURA devolveu: numa loja automática
+      // todo campo nasce cinza, e pro Master nenhum fica - olhar a classe CSS
+      // daria a resposta errada nos dois casos
+      'o que conta como lido é o que a leitura devolveu, não a cor do campo':
+        /LIDOS_PELA_FOTO\.add\(`\$\{it\.secao\}\|\$\{it\.campo\}`\)/.test(htmlL)
+        && /LIDOS_PELA_FOTO\.has\(`\$\{e\.secao\}\|\$\{e\.campo\}`\)/.test(htmlL),
+      // zero é leitura válida: campo lido como zero não pede outra foto
+      'campo lido como ZERO conta como lido':
+        /LIDOS_PELA_FOTO\.add\(`\$\{it\.secao\}\|\$\{it\.campo\}`\);\s*\n\s*if\(Number\(it\.valor\) === 0\)/.test(htmlL),
+      // grupo sem canal/forma cadastrado não pode travar por vácuo
+      'grupo sem campo essencial nenhum NÃO trava a leitura':
+        /essenciais\.length > 0 && essenciaisQueFaltam\(\)\.length === 0/.test(htmlL),
+      'trocar de loja recomeça a leitura':
+        /if\(unidade !== UNIDADE_DA_LEITURA\)\{ LIDOS_PELA_FOTO\.clear\(\)/.test(htmlL),
+      'a tela diz o que ainda falta pra encerrar, em vez de travar do nada':
+        /Ainda falta a foto trazer/.test(htmlL) && /a leitura por imagem foi encerrada/.test(htmlL),
+      'o servidor aceita o campo essencial': /if \(k\?\.essencial != null\) item\.essencial = !!k\.essencial;/.test(srcG),
+      'grupos.js exporta o que a rota usa': typeof gr.grupoDaUnidade === 'function',
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTravaLeitura = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (kpiTaxa=${JSON.stringify(kpiTaxa)})`);
+  } catch (e) { okTravaLeitura = false; console.log('  erro: ' + e.message); }
+  if (!okTravaLeitura) ruins += 1;
+  console.log(`${okTravaLeitura ? '✓' : '✗'} Lançamento: depois que os campos principais vieram da foto, a leitura por imagem encerra`);
+
+  // ------------------------------------------------------------------
   // REMOVER UMA ASSINATURA JA COLETADA, so Master. Pedido dele: "preciso da
   // opcao de remover assinatura, mas so o master consegue fazer isso". O
   // caso e a pessoa errada ter assinado, ou o traco ter saido ilegivel.
@@ -2481,6 +2620,81 @@ setTimeout(async () => {
   } catch (e) { okCustoAlertas = false; console.log('  erro: ' + e.message); }
   if (!okCustoAlertas) ruins += 1;
   console.log(`${okCustoAlertas ? '✓' : '✗'} Central de Alertas: polling incremental custa ~1 leitura por batida (era 300) e ainda mostra alerta novo`);
+
+  // ------------------------------------------------------------------
+  // O BUG DA "DIFERENÇA QUE NÃO EXISTE" (São Miguel, 02/09/2026). O Master
+  // somou o que estava na tela - Maquininhas 820,60 + Ifood 989,83 + 99Food
+  // 466,90 + AdyenV2 289,60 = 2.566,93, exatamente o Faturamento - e o sistema
+  // mostrava Total Declarado 1.359,79 e "diferença" de -1.207,14. Ele deletou
+  // e mandou relançar duas vezes: o mesmo número toda vez.
+  //
+  // Os 1.207,14 eram o desconto da Maquininha POS que o dia ANTERIOR tinha
+  // lançado - aplicado a qualquer grupo, mesmo sem a seção Maquininha POS
+  // ligada, e sem aparecer em coluna nenhuma. Determinístico: relançar lia o
+  // mesmo registro de ontem e chegava no mesmo desconto.
+  let okAjustePos = false;
+  try {
+    const cabP = { Authorization: 'Bearer ' + token };
+    // GRUPO SEM a seção Maquininha POS - o caso dele
+    await postarJson('/api/grupos', { nome: 'Grupo Sem POS', unidades: ['TESTE_POS_OFF'] }, cabP);
+    // ontem: a loja lançou 1.207,14 na Maquininha POS (herdado de planilha ou
+    // de uma configuração que foi desligada depois)
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: 'TESTE_POS_OFF', unidadeNome: 'Dom Sao Miguel (teste)', grupo: 'Grupo Sem POS', data: '2026-09-01',
+      campos: { delivery: 1000, adyen: 1000, adyenPos: 1207.14 },
+    }, cabP);
+    // hoje: os números exatos do fechamento dele
+    const hoje = JSON.parse((await postarJson('/api/fechamentos/lancar', {
+      unidade: 'TESTE_POS_OFF', unidadeNome: 'Dom Sao Miguel (teste)', grupo: 'Grupo Sem POS', data: '2026-09-02',
+      campos: {
+        delivery: 1954.23, carryout: 513.80, pickup: 98.90,
+        adyen: 820.60, ifood: 989.83, food99: 466.90, pix: 289.60,
+      },
+    }, cabP)).corpo);
+
+    // GRUPO COM a seção ligada: o desconto continua valendo - ele existe por
+    // um motivo real (a venda de D volta no lote de D+1) e não pode sumir
+    await postarJson('/api/grupos', { nome: 'Grupo Com POS', unidades: ['TESTE_POS_ON'], maquininhaPosHabilitado: true }, cabP);
+    await postarJson('/api/fechamentos/lancar', {
+      unidade: 'TESTE_POS_ON', unidadeNome: 'Loja Com POS', grupo: 'Grupo Com POS', data: '2026-09-01',
+      campos: { delivery: 1000, adyen: 1000, adyenPos: 1207.14 },
+    }, cabP);
+    const hojeComPos = JSON.parse((await postarJson('/api/fechamentos/lancar', {
+      unidade: 'TESTE_POS_ON', unidadeNome: 'Loja Com POS', grupo: 'Grupo Com POS', data: '2026-09-02',
+      campos: {
+        delivery: 1954.23, carryout: 513.80, pickup: 98.90,
+        adyen: 820.60, ifood: 989.83, food99: 466.90, pix: 289.60,
+      },
+    }, cabP)).corpo);
+
+    const htmlF = require('fs').readFileSync(__dirname + '/public/fechamentos.html', 'utf8');
+    const cem = (v) => Math.round(Number(v) * 100);
+    const conf = {
+      // o número dele, exatamente
+      'as parcelas somam o Faturamento': cem(hoje.faturamento) === 256693,
+      'sem a seção Maquininha POS, não há desconto nenhum': cem(hoje.ajustePosAnterior) === 0,
+      'o Total Declarado passa a bater com o que está na tela': cem(hoje.totalDeclarado) === 256693,
+      'a diferença de -R$ 1.207,14 some': cem(hoje.diferenca) === 0,
+      'e o ticket de Quebra de caixa não é aberto': !hoje.cardQuebraCaixa,
+      // a outra ponta: a feature real continua funcionando
+      'na loja que USA a Maquininha POS o desconto continua':
+        cem(hojeComPos.ajustePosAnterior) === -120714
+        && cem(hojeComPos.totalDeclarado) === 135979
+        && cem(hojeComPos.diferenca) === -120714,
+      // e agora dá pra VER: parcela invisível dentro do total era o que fazia
+      // a conta da tela não fechar com o número mostrado
+      'o ajuste ganhou coluna na tela de fechamentos':
+        /\{campo:'ajustePosAnterior', label:'Ajuste da Maquininha POS de ontem'\}/.test(htmlF)
+        && /\{campo:'adyenPos', label:'Maquininha POS \(pós meia-noite\)'\}/.test(htmlF),
+      'o ajuste ganhou rótulo (não sai mais como nome de campo do banco)':
+        /ajustePosAnterior: 'Ajuste da Maquininha POS de ontem'/.test(require('fs').readFileSync(__dirname + '/fechamentosLive.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAjustePos = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (hoje: fat=${hoje.faturamento} decl=${hoje.totalDeclarado} aj=${hoje.ajustePosAnterior} dif=${hoje.diferenca})`);
+  } catch (e) { okAjustePos = false; console.log('  erro: ' + e.message); }
+  if (!okAjustePos) ruins += 1;
+  console.log(`${okAjustePos ? '✓' : '✗'} Fechamento: desconto da Maquininha POS só existe em loja que usa POS - e aparece na tela`);
 
   // ------------------------------------------------------------------
   // Importacao do Grupo Bravo: a planilha permite MAIS DE UMA LINHA no mesmo

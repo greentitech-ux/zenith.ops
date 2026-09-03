@@ -36,6 +36,10 @@ const NOMES_CAMPOS_RESUMO = {
   ifood: 'Ifood', food99: '99Food', pix: 'Adyen', pixCnpj: 'Pix CNPJ', outros: 'Outros',
   totalSaida: 'Total de saída', faturamento: 'Faturamento total', totalDeclarado: 'Total declarado',
   quebra: 'Quebra de caixa', tc: 'TC', cancelados: 'Cancelados', entradaDinheiro: 'Entrada em dinheiro', deposito: 'Depósito',
+  // desconto automatico da venda pos-meia-noite que ONTEM ja lançou (ver
+  // ajustePosDoDiaAnterior). Sem rotulo ele saia como "ajustePosAnterior" -
+  // nome de campo do banco, que nao explica nada pra quem confere
+  ajustePosAnterior: 'Ajuste da Maquininha POS de ontem',
 };
 const CAMPOS_SEM_MOEDA = ['tc', 'cancelados'];
 function fmtDataBRResumo(d) {
@@ -47,6 +51,89 @@ function fmtValorResumo(campo, valor) {
   return CAMPOS_SEM_MOEDA.includes(campo) ? String(num(valor)) : fmtMoneyQuebra(num(valor));
 }
 
+
+
+// A CONTA ABERTA DA DIFERENCA. Reclamacao do Master (02/09/2026): "foi
+// relancado o fechamento ja 2 vezes e continua dando diferenca de caixa,
+// porem nao existe diferenca de caixa".
+//
+// Relancar dava o mesmo numero porque a conta e deterministica: os mesmos
+// campos entram, a mesma diferenca sai. O que faltava era PODER VER de onde
+// ela vem - o ticket dizia so "diferenca de -R$ 1207,14", e um numero sozinho
+// nao da pra contestar nem pra corrigir. Com as duas somas abertas, lado a
+// lado, o buraco aparece na hora: quase sempre e uma parcela que ninguem
+// lancou, nao um erro de calculo.
+//
+// Faturamento = canais de venda. Total declarado = formas de pagamento + o
+// dinheiro. Diferenca = declarado - faturamento (mesma conta de
+// recomputarTotais, so que escrita por extenso).
+//
+// So lista parcela com valor, senao um fechamento de 20 campos vira parede.
+// A EXCECAO e "Entrada em dinheiro": ela aparece SEMPRE, mesmo zerada, porque
+// dinheiro zerado com diferenca negativa e o caso mais comum de todos - a
+// venda em dinheiro entrou no faturamento pelo canal e nao foi declarada.
+const CANAIS_FIXOS = ['delivery', 'carryout', 'pickup', 'loja'];
+const FORMAS_FIXAS = ['adyen', 'adyenPos', 'ajustePosAnterior', 'ifood', 'food99', 'pix', 'pixCnpj', 'outros', 'entradaDinheiro'];
+
+function parcelasDe(registro, campos, extras, defs, { soDestinoCruzado } = {}) {
+  const out = [];
+  campos.forEach((c) => {
+    const v = num(registro[c]);
+    if (v || c === 'entradaDinheiro') out.push({ label: NOMES_CAMPOS_RESUMO[c] || c, valor: v });
+  });
+  const porCampo = new Map((defs || []).map((d) => [d.campo, d]));
+  Object.entries(extras || {}).forEach(([campo, valor]) => {
+    const def = porCampo.get(campo);
+    if (soDestinoCruzado && (!def || !def.tambemNoOutroTotal)) return;
+    const v = num(valor);
+    if (!v) return;
+    const sinal = def && def.operacao === 'subtrai' ? -1 : 1;
+    out.push({ label: (def && def.label) || campo, valor: sinal * v });
+  });
+  return out;
+}
+
+function linhaDaConta(rotulo, total, parcelas) {
+  const soma = parcelas.length
+    ? parcelas.map((p) => `${p.label} ${fmtMoneyQuebra(p.valor)}`).join(' + ')
+    : 'nenhuma parcela lançada';
+  return `${rotulo} ${fmtMoneyQuebra(total)} = ${soma}`;
+}
+
+function explicarDiferenca(registro, defsExtras) {
+  const canaisDefs = (defsExtras && defsExtras.canais) || [];
+  const formasDefs = (defsExtras && defsExtras.formas) || [];
+  const kpisDefs = (defsExtras && defsExtras.kpis) || [];
+  const kpisEm = (destino) => Object.entries(registro.kpisExtras || {})
+    .map(([campo, valor]) => ({ def: kpisDefs.find((d) => d.campo === campo), valor: num(valor) }))
+    .filter((x) => x.def && x.def.somaEm === destino && x.valor)
+    .map((x) => ({ label: x.def.label || x.def.campo, valor: x.valor }));
+
+  const doFaturamento = [
+    ...parcelasDe(registro, CANAIS_FIXOS, registro.canaisVendaExtras, canaisDefs),
+    ...parcelasDe(registro, [], registro.formasPagamentoExtras, formasDefs, { soDestinoCruzado: true }),
+    ...kpisEm('faturamento'),
+  ];
+  const doDeclarado = [
+    ...parcelasDe(registro, FORMAS_FIXAS, registro.formasPagamentoExtras, formasDefs),
+    ...parcelasDe(registro, [], registro.canaisVendaExtras, canaisDefs, { soDestinoCruzado: true }),
+    ...kpisEm('totalDeclarado'),
+  ];
+
+  const linhas = [
+    linhaDaConta('Faturamento (canais de venda)', num(registro.faturamento), doFaturamento),
+    linhaDaConta('Total declarado (formas + dinheiro)', num(registro.totalDeclarado), doDeclarado),
+    `Diferença = declarado - faturamento = ${fmtMoneyQuebra(num(registro.diferenca))}`,
+  ];
+  // o fato, e so o fato: quem le decide. Dizer "faltou lancar o dinheiro"
+  // seria afirmar o que nao da pra saber daqui - a loja pode nao ter vendido
+  // em dinheiro nenhum. Mas dinheiro zerado com diferenca negativa e o
+  // primeiro lugar pra olhar, e isso vale dizer.
+  if (!num(registro.entradaDinheiro) && num(registro.diferenca) < 0) {
+    linhas.push('Entrada em dinheiro está zerada neste lançamento - confira se houve venda em dinheiro no dia.');
+  }
+  return linhas.join('\n');
+}
 
 function docId(unidade, data) {
   return `${unidade}__${data}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
@@ -131,7 +218,33 @@ function somaKpisEm(mapaKpis, kpisDefs, destino) {
 // adyenPos que D já tinha lançado até então (ver diaAnterior acima); fica
 // guardado (não recalculado depois) - se D for corrigido mais tarde, a
 // correção de D+1 é manual (mesmo fluxo de qualquer outra correção do app).
+// O BUG (São Miguel, 02/09/2026): o Master somou o que estava na tela -
+// Maquininhas 820,60 + Ifood 989,83 + 99Food 466,90 + AdyenV2 289,60 =
+// 2.566,93, exatamente o Faturamento - e o sistema mostrava Total Declarado
+// 1.359,79, com "diferença" de -1.207,14. Os 1.207,14 eram ESTE ajuste: o
+// adyenPos que o dia anterior tinha lançado, descontado aqui sem aparecer em
+// coluna nenhuma. Relançar dava sempre o mesmo número porque o desconto é
+// calculado a partir do registro de ONTEM, que não mudava.
+//
+// Duas coisas estavam erradas, e as duas foram corrigidas:
+//
+// 1. O desconto era aplicado a QUALQUER grupo. Ele só faz sentido em loja que
+//    de fato usa a Maquininha POS pós-meia-noite (maquininhaPosHabilitado, ver
+//    grupos.js) - é lá que a venda de D volta a aparecer no lote de D+1. Em
+//    grupo sem essa seção, um adyenPos herdado (planilha antiga, configuração
+//    que foi desligada depois) virava desconto fantasma pra sempre.
+// 2. Ele não aparecia em lugar nenhum. Parcela invisível dentro do Total
+//    Declarado torna o fechamento impossível de conferir - quem soma a tela
+//    chega num número e o sistema mostra outro. Agora tem rótulo
+//    (NOMES_CAMPOS_RESUMO), coluna em fechamentos.html e linha na conta do
+//    ticket de Quebra de caixa.
+//
+// Fechamento JÁ lançado guarda o ajuste que tinha na criação (o valor é
+// congelado de propósito, ver acima) - não se reescreve dado antigo. Pra
+// limpar um lançamento afetado, relance ou corrija pela Central.
 async function ajustePosDoDiaAnterior(unidade, data) {
+  const grupo = await grupos.grupoDaUnidade(unidade);
+  if (!grupo || grupo.maquininhaPosHabilitado !== true) return 0;
   const ontem = await getOne(docId(unidade, diaAnterior(data)));
   return ontem ? -num(ontem.adyenPos) : 0;
 }
@@ -241,7 +354,8 @@ async function create({ unidade, unidadeNome, grupo, data, gerente, campos, kpis
   registro.kpisExtras = sanitizarMapaExtras(kpisExtras, tiposKpi);
   registro.canaisVendaExtras = sanitizarMapaExtras(canaisVendaExtras);
   registro.formasPagamentoExtras = sanitizarMapaExtras(formasPagamentoExtras);
-  recomputarTotais(registro, null, await defsExtrasDaUnidade(unidade));
+  const defsDoGrupo = await defsExtrasDaUnidade(unidade);
+  recomputarTotais(registro, null, defsDoGrupo);
   registro.observacao = observacao || null;
   registro.detalhesMaquinas = sanitizarItens(detalhesMaquinas);
   registro.detalhesMaquinasPos = sanitizarItens(detalhesMaquinasPos);
@@ -264,7 +378,7 @@ async function create({ unidade, unidadeNome, grupo, data, gerente, campos, kpis
   let cardQuebraCaixa = null;
   if (Math.abs(registro.diferenca) > LIMITE_QUEBRA_CAIXA) {
     try {
-      cardQuebraCaixa = await criarCardQuebraCaixa(registro);
+      cardQuebraCaixa = await criarCardQuebraCaixa(registro, defsDoGrupo);
     } catch (err) {
       console.error(`Falha ao criar ticket automático de Quebra de caixa (fechamento ${id}):`, err.message);
     }
@@ -277,14 +391,18 @@ async function create({ unidade, unidadeNome, grupo, data, gerente, campos, kpis
 // tanto na hora do lançamento (create() acima) quanto retroativamente
 // (backfillQuebraCaixa, pra pegar fechamentos lançados ANTES dessa feature
 // existir)
-async function criarCardQuebraCaixa(registro) {
+async function criarCardQuebraCaixa(registro, defsExtras) {
+  // a conta ABERTA vai junto da observacao da loja, nunca no lugar dela: o
+  // que o gerente escreveu e o que explica o dia; a conta e o que prova onde
+  // esta o buraco (ver explicarDiferenca)
+  const daLoja = registro.observacao ? `${registro.observacao}\n\n` : '';
   return solicitacoes.create({
     tipo: 'quebra-caixa',
     unidade: registro.unidade,
     unidadeNome: registro.unidadeNome,
     titulo: `Quebra de caixa · ${registro.unidadeNome} (${registro.data}) · diferença de ${fmtMoneyQuebra(registro.diferenca)}`,
     valorEstimado: registro.diferenca,
-    observacao: registro.observacao || 'Diferença detectada automaticamente no lançamento do fechamento - sem observação da loja.',
+    observacao: `${daLoja}${explicarDiferenca(registro, defsExtras)}`,
     fechamentoId: registro.id,
     criadoPorId: registro.criadoPorId,
     criadoPorEmail: registro.criadoPorEmail,
@@ -315,7 +433,9 @@ async function backfillQuebraCaixa(dataInicio, dataFim) {
     if (Math.abs(f.diferenca) <= LIMITE_QUEBRA_CAIXA) { resultado.semDiferencaRelevante++; continue; }
     if (fechamentosComCard.has(f.id)) { resultado.jaTinhaCard++; continue; }
     try {
-      const card = await criarCardQuebraCaixa(f);
+      // o backfill tambem manda a conta aberta - sem as defs do grupo os
+      // extras sairiam com o nome interno do campo em vez do rotulo
+      const card = await criarCardQuebraCaixa(f, await defsExtrasDaUnidade(f.unidade));
       resultado.cardsCriados.push(card);
     } catch (err) {
       resultado.erros.push({ fechamentoId: f.id, unidade: f.unidadeNome, data: f.data, erro: err.message });
@@ -997,6 +1117,7 @@ function invalidarCache() {
 }
 
 module.exports = {
+  explicarDiferenca,
   editarItemSaida, adicionarSaidaDireto,
   CAMPOS_NUMERICOS, create, listAll, listByUnidades, getOne, solicitarEdicao, listarEdicoes, getEdicao,
   decidirEdicao, editarDireto, moverFechamento, removerEdicao, remove, invalidarCache, marcarNotificacaoVistaEdicao, redirecionarEdicao,

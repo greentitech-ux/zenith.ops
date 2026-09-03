@@ -103,6 +103,14 @@ function sanitizarCamposExtras(lista) {
       // ficaria travado e vazio pra sempre - e ainda entraria na lista mandada
       // pro modelo, convidando a inventar um valor pra ele.
       if (k?.manual != null) item.manual = !!k.manual;
+      // KPI que a leitura por foto TEM que trazer. Pedido do Master: depois
+      // que os campos principais foram lidos, a tela para de aceitar foto
+      // nova (cada leitura custa chamada de modelo, e o resto ele digita).
+      // Canal e forma sao essenciais SEMPRE - sao o dinheiro do dia; entre os
+      // KPI's, so os marcados aqui, porque "essencial" muda de loja pra loja
+      // (na dele e o "Valor Total Taxa de Entrega"). Marcar por nome no
+      // codigo quebraria no dia em que alguem renomear o KPI (CLAUDE.md §1).
+      if (k?.essencial != null) item.essencial = !!k.essencial;
       // ORIGEM: de onde o valor do KPI vem. Hoje so 'remakesDoDia' - o total
       // de pizzas descartadas registradas no Carrinho naquele dia (ver
       // abastecimentoCarrinho.remakesDoDia).
