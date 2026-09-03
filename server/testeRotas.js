@@ -2767,6 +2767,114 @@ setTimeout(async () => {
   console.log(`${okTravasFech ? '✓' : '✗'} Fechamento: não salva com faturamento ou declarado zerado, e diferença acima de R$ 20 exige observação`);
 
   // ------------------------------------------------------------------
+  // DESCRIÇÃO COMPRIDA NO PDF DO FORMULÁRIO: quebra e a linha cresce. Pedido
+  // do Master (02/09/2026): "quando tiver descrição maior que o tamanho da
+  // coluna, que seja quebrada para baixo e aumente a altura da linha - não
+  // tem problema, mas que toda a descrição fique à mostra".
+  //
+  // Antes a célula tinha altura fixa (26) e `ellipsis: true`: no PDF dele
+  // saiu "Atendimento: 2 idas à unidade. Troca de 150 metros de cabeamento…"
+  // e o resto do serviço não ia no papel que vai pro banco.
+  let okDescricaoQuebra = false;
+  try {
+    const cabD = { Authorization: 'Bearer ' + token };
+    const formD = require('/home/user/adyen-monitor/server/formularios.js');
+    // a descrição real dele, completa - bem mais larga que a coluna
+    const DESC_LONGA = 'Atendimento: 2 idas à unidade. Troca de 150 metros de cabeamento de rede '
+      + 'categoria 6, crimpagem de 24 pontos, reorganização do rack, substituição de 3 '
+      + 'patch panels danificados e testes de certificação em todos os pontos entregues.';
+    const curto = await formD.criar({
+      tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
+      campos: { delivery: 100, entradaDinheiro: 100 },
+      linhas: [{ descricao: 'Serviço curto', valor: '600,00' }],
+      criadoPorEmail: 'teste@teste.local',
+    });
+    const longo = await formD.criar({
+      tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
+      campos: { delivery: 100, entradaDinheiro: 100 },
+      linhas: [{ descricao: DESC_LONGA, valor: '600,00' }],
+      criadoPorEmail: 'teste@teste.local',
+    });
+    // e o caso que a quebra de página passou a exigir: muitas linhas compridas
+    const muitas = await formD.criar({
+      tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
+      campos: { delivery: 100, entradaDinheiro: 100 },
+      linhas: Array.from({ length: 12 }, (_, i) => ({ descricao: `${i + 1}. ${DESC_LONGA}`, valor: '50,00' })),
+      criadoPorEmail: 'teste@teste.local',
+    });
+
+    const pdfCurto = await pedirBinario(`/api/formularios/${curto.id}/pdf`, cabD);
+    const pdfLongo = await pedirBinario(`/api/formularios/${longo.id}/pdf`, cabD);
+    const pdfMuitas = await pedirBinario(`/api/formularios/${muitas.id}/pdf`, cabD);
+    const txtLongo = pdfLongo.status === 200 ? textoDoPdf(pdfLongo.buffer) : '';
+    const semEspaco = (t) => String(t).replace(/\s+/g, '');
+    // conta páginas pelo próprio PDF - com 12 linhas compridas a tabela não
+    // cabe em uma folha, e sem a quebra o desenho sairia por baixo da margem
+    const paginas = (b) => (b ? (b.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length : 0);
+    const src = require('fs').readFileSync(__dirname + '/formularios.js', 'utf8');
+    const iTabela = src.indexOf('const alturaMinima =');
+    const trecho = iTabela < 0 ? '' : src.slice(iTabela, src.indexOf('// total', iTabela));
+
+    const conf = {
+      'os três PDFs saem válidos':
+        pdfCurto.status === 200 && pdfCurto.buffer.slice(0, 4).toString() === '%PDF'
+        && pdfLongo.status === 200 && pdfLongo.buffer.slice(0, 4).toString() === '%PDF'
+        && pdfMuitas.status === 200 && pdfMuitas.buffer.slice(0, 4).toString() === '%PDF',
+      // O PONTO: a descrição INTEIRA está no papel, do começo ao fim.
+      // A conferência é por PALAVRA e não por frase: cada linha quebrada é um
+      // BT/Tj próprio no PDF, com operadores de posição entre elas, então
+      // frase contígua não existe no stream nem quando o texto está todo lá.
+      // O que prova o corte é a ausência das palavras do FIM - com ellipsis
+      // só a primeira linha caberia, e "crimpagem" pra frente sumiria.
+      'a descrição inteira aparece no PDF, não cortada':
+        ['cabeamento', 'crimpagem', 'patch', 'panels', 'danificados', 'certificação', 'entregues']
+          .every((palavra) => txtLongo.includes(palavra)),
+      'e não sobrou reticência de corte no meio da descrição':
+        !/cabeamento[^A-Za-z]{0,4}(\.\.\.|…)/.test(txtLongo),
+      // a linha cresceu: o mesmo formulário com descrição curta é menor
+      'a linha cresce com o texto (o PDF longo é maior que o curto)':
+        pdfLongo.buffer.length > pdfCurto.buffer.length,
+      // 12 linhas compridas não cabem numa folha. Contar PÁGINA não bastava:
+      // o pdfkit abre folha sozinho quando o texto passa da margem, mas aí a
+      // GRADE (os retângulos) continua sendo desenhada fora da folha, e o que
+      // se vê é uma segunda página com texto solto. O que prova a quebra de
+      // verdade é o cabeçalho da tabela REPETIDO na folha nova.
+      'tabela que não cabe passa pra outra folha, com o cabeçalho repetido':
+        paginas(pdfMuitas.buffer) >= 2 && paginas(pdfCurto.buffer) === 1
+        && (textoDoPdf(pdfMuitas.buffer).match(/DESCRIÇÃO/g) || []).length >= 2
+        && (textoDoPdf(pdfCurto.buffer).match(/DESCRIÇÃO/g) || []).length === 1,
+      // sem isso o texto voltaria a ser cortado com "..."
+      'a célula da linha quebra e NÃO usa ellipsis':
+        /quebrar: true/.test(trecho) && /if \(opts\.quebrar\)/.test(trecho)
+        && !/celula\([\s\S]{0,200}ellipsis: true[\s\S]{0,80}alturaLinha/.test(trecho),
+      'a altura da linha sai da altura do TEXTO, não de um número fixo':
+        /doc\.heightOfString/.test(trecho)
+        && /Math\.max\(alturaMinima, Math\.ceil\(Math\.max\(0, \.\.\.alturas\)\) \+ 10\)/.test(trecho),
+      // com 3 linhas de texto, centralizar por (h-9)/2 jogaria o texto pra
+      // fora da célula - tem que centralizar pela altura real
+      'o texto de várias linhas é centralizado pela altura real dele':
+        /\(h - alt\) \/ 2/.test(src),
+      'o cabeçalho da tabela se repete na folha nova':
+        /if \(repetirCabecalho\) cabecalhoTabela\(\)/.test(src),
+      // a descrição também era cortada AO SALVAR (160 caracteres, sem
+      // maxlength na tela): quem escrevia o serviço inteiro perdia o resto em
+      // silêncio e só descobria olhando o PDF
+      'o texto da linha não é mais cortado em 160 caracteres ao salvar':
+        /const MAX_TEXTO_LINHA = 400;/.test(src) && /limpar\(\(l \|\| \{\}\)\[c\.key\], MAX_TEXTO_LINHA\)/.test(src)
+        && !/limpar\(\(l \|\| \{\}\)\[c\.key\], 160\)/.test(src),
+      'e a tela mostra o limite em vez de deixar o servidor cortar calado':
+        /maxlength="400" autocomplete="off"/.test(require('fs').readFileSync(__dirname + '/public/formularios.html', 'utf8')),
+      'a descrição de 230 caracteres sobrevive inteira no registro':
+        (longo.linhas[0].descricao || '').length === DESC_LONGA.length,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDescricaoQuebra = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (curto=${pdfCurto.buffer && pdfCurto.buffer.length}b/${paginas(pdfCurto.buffer)}p longo=${pdfLongo.buffer && pdfLongo.buffer.length}b muitas=${paginas(pdfMuitas.buffer)}p)`);
+  } catch (e) { okDescricaoQuebra = false; console.log('  erro: ' + e.message); }
+  if (!okDescricaoQuebra) ruins += 1;
+  console.log(`${okDescricaoQuebra ? '✓' : '✗'} Formulário: descrição comprida quebra em várias linhas e a linha cresce - nada é cortado`);
+
+  // ------------------------------------------------------------------
   // Importacao do Grupo Bravo: a planilha permite MAIS DE UMA LINHA no mesmo
   // dia pra mesma loja (sangria lançada à parte, turno partido). O
   // fechamentosLive.create() recusa a segunda ("Já existe um fechamento"),

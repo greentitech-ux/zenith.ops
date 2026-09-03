@@ -456,8 +456,11 @@ function addLinha(){
           + `<input type="date" data-col="${escapeHtml(c.key)}:de" autocomplete="off">`
           + `<label>${escapeHtml(c.label)} · até</label>`
           + `<input type="date" data-col="${escapeHtml(c.key)}:ate" autocomplete="off">`;
+        // maxlength IGUAL ao teto do servidor (MAX_TEXTO_LINHA em
+        // formularios.js): antes o campo aceitava qualquer tamanho e o
+        // servidor cortava em silêncio - a pessoa só descobria no PDF
         return `<label>${escapeHtml(c.label)}</label>`
-          + `<input type="${c.data?'date':'text'}" data-col="${escapeHtml(c.key)}" ${c.valor?'inputmode="decimal" placeholder="0,00" oninput="atualizarTotal()"':'autocomplete="off"'}>`;
+          + `<input type="${c.data?'date':'text'}" data-col="${escapeHtml(c.key)}" ${c.valor?'inputmode="decimal" placeholder="0,00" oninput="atualizarTotal()"':'maxlength="400" autocomplete="off"'}>`;
       }).join('');
   document.getElementById('tabela-corpo').appendChild(div);
   renumerarItens('tabela-corpo');

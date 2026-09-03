@@ -318,6 +318,14 @@ const UNIDADES_FORM = [
   { unidade: 'Grupo Bravo Empresarial', razaoSocial: 'MvPar', cnpj: '41.051.829/0001-09' },
 ];
 
+// TETO DO TEXTO DE UMA LINHA DA TABELA. Era 160 e cortava CALADO: quem
+// descrevia o serviço inteiro num campo sem maxlength perdia o que passava
+// disso, e só descobria olhando o PDF. Subiu junto com a quebra de linha no
+// PDF (a linha agora cresce e a tabela passa de folha quando precisa), que é
+// o que torna um texto desse tamanho legível no papel. A tela ganhou o
+// maxlength igual, pra o limite ser visível em vez de silencioso.
+const MAX_TEXTO_LINHA = 400;
+
 const MAX_LINHAS = 20;
 // PNG do canvas de assinatura fica em torno de 5-30KB; o cap é folga, não
 // meta - acima disso é foto/arquivo indevido, não um traço de caneta
@@ -448,7 +456,7 @@ function montarConteudo(modelo, cadastro, campos, linhas) {
     .map((l) => {
       const linha = {};
       modelo.colunas.forEach((c) => {
-        linha[c.key] = c.valor ? parseValor((l || {})[c.key]) : limpar((l || {})[c.key], 160);
+        linha[c.key] = c.valor ? parseValor((l || {})[c.key]) : limpar((l || {})[c.key], MAX_TEXTO_LINHA);
       });
       return linha;
     })
@@ -1451,25 +1459,75 @@ async function gerarPdf(r, res, opcoes) {
   const pesoTotal = colunas.reduce((s, c) => s + (fixas[c.valor ? 'valor' : c.key] ? 0 : (c.larga ? 2 : 1)), 0);
   const larguras = colunas.map((c) => fixas[c.valor ? 'valor' : c.key] || ((LARGURA - larguraFixa) / pesoTotal) * (c.larga ? 2 : 1));
 
-  const alturaLinha = modelo.assinaturaPorLinha ? 40 : 26;
+  const alturaMinima = modelo.assinaturaPorLinha ? 40 : 26;
+  const FONTE_CELULA = 8.5;
+  // altura que o texto OCUPA na largura da coluna, contando as linhas em que
+  // ele vai quebrar. E' o que permite a linha crescer em vez de cortar.
+  const alturaDoTexto = (texto, w) => {
+    doc.font('Helvetica').fontSize(FONTE_CELULA);
+    return doc.heightOfString(String(texto == null ? '' : texto), { width: w - 8 });
+  };
+  // DESCRICAO COMPRIDA QUEBRA E A LINHA CRESCE. Pedido do Master: "quando
+  // tiver descrição maior que o tamanho da coluna, que seja quebrada para
+  // baixo e aumente a altura da linha - não tem problema, mas que toda a
+  // descrição fique à mostra". Antes a célula tinha altura fixa e
+  // `ellipsis: true`: o texto era cortado com "..." e o resto do serviço
+  // simplesmente não ia no papel que vai pro banco.
+  //
+  // `opts.quebrar` liga isso: sem ellipsis, sem height (o pdfkit escreve
+  // quantas linhas precisar) e a altura da célula já vem calculada pra caber.
+  // Cabeçalho e total seguem com ellipsis - são rótulos curtos e fixos.
   const celula = (texto, x, yy, w, h, opts = {}) => {
     if (opts.fill) doc.rect(x, yy, w, h).fillAndStroke(opts.fill, BORDA);
     else doc.rect(x, yy, w, h).stroke(BORDA);
-    doc.font(opts.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(8.5).fillColor('#000')
-      .text(String(texto == null ? '' : texto), x + 4, yy + (opts.meio ? (h - 9) / 2 : 5), { width: w - 8, height: h - 8, ellipsis: true, align: opts.align || 'left' });
+    const txt = String(texto == null ? '' : texto);
+    doc.font(opts.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(FONTE_CELULA).fillColor('#000');
+    if (opts.quebrar) {
+      // centraliza pela altura REAL do texto: com (h-9)/2 um texto de 3
+      // linhas comecaria no meio da celula e vazaria pra fora dela
+      const alt = doc.heightOfString(txt, { width: w - 8 });
+      const topo = opts.meio ? yy + Math.max(4, (h - alt) / 2) : yy + 5;
+      doc.text(txt, x + 4, topo, { width: w - 8, align: opts.align || 'left' });
+      return;
+    }
+    doc.text(txt, x + 4, yy + (opts.meio ? (h - 9) / 2 : 5), { width: w - 8, height: h - 8, ellipsis: true, align: opts.align || 'left' });
   };
 
-  // cabeçalho da tabela
+  // cabeçalho da tabela - virou função porque agora ele se REPETE quando a
+  // tabela passa pra outra folha; sem repetir, a segunda folha traz valores
+  // em colunas sem nome
+  const cabecalhoTabela = () => {
+    let cx = X;
+    colunas.forEach((c, i) => {
+      doc.rect(cx, y, larguras[i], 22).fillAndStroke(AZUL_CLARO, BORDA);
+      doc.font('Helvetica-Bold').fontSize(8).fillColor('#000').text(c.label, cx + 3, y + 7, { width: larguras[i] - 6, align: 'center', height: 14, ellipsis: true });
+      cx += larguras[i];
+    });
+    y += 22;
+  };
+  // linha que cresce pode não caber na folha - antes isso não existia (altura
+  // fixa e poucas linhas), e sem tratar o desenho sairia por baixo da margem,
+  // invisível
+  const LIMITE_Y = doc.page.height - doc.page.margins.bottom;
+  const quebrarPaginaSePreciso = (altura, repetirCabecalho) => {
+    if (y + altura <= LIMITE_Y) return;
+    doc.addPage();
+    y = doc.page.margins.top;
+    if (repetirCabecalho) cabecalhoTabela();
+  };
+
   let x = X;
-  colunas.forEach((c, i) => {
-    doc.rect(x, y, larguras[i], 22).fillAndStroke(AZUL_CLARO, BORDA);
-    doc.font('Helvetica-Bold').fontSize(8).fillColor('#000').text(c.label, x + 3, y + 7, { width: larguras[i] - 6, align: 'center', height: 14, ellipsis: true });
-    x += larguras[i];
-  });
-  y += 22;
+  cabecalhoTabela();
 
   // linhas (com a assinatura do diarista dentro da célula, quando houver)
   r.linhas.forEach((l, idx) => {
+    // a linha toda tem a altura do texto MAIS ALTO dela: as células vizinhas
+    // acompanham, senão a grade fica com degrau
+    const alturas = colunas.map((c, i) => (c.key === '_assinatura'
+      ? 0
+      : alturaDoTexto(c.valor ? fmtMoney(l[c.key]) : l[c.key], larguras[i])));
+    const alturaLinha = Math.max(alturaMinima, Math.ceil(Math.max(0, ...alturas)) + 10);
+    quebrarPaginaSePreciso(alturaLinha, true);
     x = X;
     colunas.forEach((c, i) => {
       if (c.key === '_assinatura') {
@@ -1478,7 +1536,7 @@ async function gerarPdf(r, res, opcoes) {
         const buf = ass && ass.imagem ? imagemBuffer(ass.imagem) : null;
         if (buf) { try { doc.image(buf, x + 4, y + 3, { fit: [larguras[i] - 8, alturaLinha - 6], align: 'center', valign: 'center' }); } catch (e) { /* imagem corrompida não derruba o PDF */ } }
       } else {
-        celula(c.valor ? fmtMoney(l[c.key]) : l[c.key], x, y, larguras[i], alturaLinha, { meio: true, align: c.valor ? 'right' : 'left' });
+        celula(c.valor ? fmtMoney(l[c.key]) : l[c.key], x, y, larguras[i], alturaLinha, { meio: true, quebrar: true, align: c.valor ? 'right' : 'left' });
       }
       x += larguras[i];
     });
@@ -1489,6 +1547,7 @@ async function gerarPdf(r, res, opcoes) {
   const larguraValor = larguras[colunas.findIndex((c) => c.valor)];
   const larguraRotulo = 200;
   const xValor = X + larguras.slice(0, colunas.findIndex((c) => c.valor)).reduce((s, w) => s + w, 0);
+  quebrarPaginaSePreciso(24, false);
   celula(modelo.totalRotulo, xValor - larguraRotulo, y, larguraRotulo, 24, { bold: true, meio: true, align: 'right', fill: AZUL_CLARO });
   celula(fmtMoney(r.valorTotal), xValor, y, larguraValor, 24, { bold: true, meio: true, align: 'right', fill: AZUL_CLARO });
   y += 60;
@@ -1510,6 +1569,10 @@ async function gerarPdf(r, res, opcoes) {
   const posicoes = papeis.length === 1
     ? [X + (LARGURA - larguraBloco) / 2]
     : papeis.map((_, i) => X + 20 + i * ((LARGURA - 40 - larguraBloco) / (papeis.length - 1)));
+  // o bloco de assinatura ocupa da imagem (52 acima da linha) ao rodapé de
+  // obs/anexos - com a tabela crescendo, ele pode não caber mais na folha
+  const ALTURA_ASSINATURAS = 145;
+  quebrarPaginaSePreciso(40 + ALTURA_ASSINATURAS, false);
   const yAssin = Math.max(y + 40, 620);
   papeis.forEach((p, i) => {
     const bx = posicoes[i];
