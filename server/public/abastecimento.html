@@ -2574,9 +2574,11 @@ function fecharConversa(){
 // no array de mensagens - mesmo desenho do chat de suporte
 function anexoDaConversa(pedidoId, m, i){
   if(!m || !m.anexo) return '';
-  const url = `/api/abastecimento/${encodeURIComponent(pedidoId)}/mensagem/${i}/anexo`;
+  // token na query: <img>/<a> nao passam pelo wrapper de fetch que poe o
+  // header Authorization, entao sem isso a foto vem 401 e quebra
+  const url = `/api/abastecimento/${encodeURIComponent(pedidoId)}/mensagem/${i}/anexo?token=${encodeURIComponent(AUTH_TOKEN || '')}`;
   if(/^image\//.test(m.anexo.tipo||'')){
-    return `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${escapeHtml(m.anexo.nome||'anexo')}" style="max-width:170px;max-height:170px;border-radius:8px;border:1px solid var(--line);margin-top:5px;display:block;"></a>`;
+    return `<a href="${url}" target="_blank" rel="noopener" title="${escapeHtml(m.anexo.nome||'anexo')}"><img src="${url}" alt="📎 ${escapeHtml(m.anexo.nome||'anexo')} — toque pra abrir" style="max-width:170px;max-height:170px;border-radius:8px;border:1px solid var(--line);margin-top:5px;display:block;"></a>`;
   }
   return `<a href="${url}" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px;display:block;margin-top:4px;">📎 ${escapeHtml(m.anexo.nome||'arquivo')}</a>`;
 }

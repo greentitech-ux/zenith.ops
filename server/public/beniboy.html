@@ -607,9 +607,18 @@ function painelHtml(chat){
 // time (/api/suporte-chats/:id/anexo/:indice, atras do login)
 function anexoHtml(chatId, m){
   if(!m.anexo) return '';
-  const url = `/api/suporte-chats/${encodeURIComponent(chatId)}/anexo/${m.indice}`;
+  // O TOKEN VAI NA QUERY, NAO NO HEADER. <img src> e <a href> nao passam pelo
+  // wrapper de fetch que injeta o Authorization (ver window.fetch acima): o
+  // navegador faz uma requisicao crua. Sem o ?token= a rota responde
+  // {"error":"Autenticação necessária."} e a imagem quebra - o que a pessoa vê
+  // é o alt (o nome do arquivo) sublinhado, parecendo link estranho.
+  // Mesmo caminho que o suporte-chat.js já usa no atendimento.
+  const url = `/api/suporte-chats/${encodeURIComponent(chatId)}/anexo/${m.indice}?token=${encodeURIComponent(AUTH_TOKEN || '')}`;
   if(/^image\//.test(m.anexo.tipo||'')){
-    return `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${escapeHtml(m.anexo.nome||'anexo')}" style="max-width:200px;max-height:200px;border-radius:8px;border:1px solid var(--line);margin-top:5px;display:block;"></a>`;
+    // o alt e' o que aparece se a imagem nao carregar (storage fora, sessao
+    // expirada): "📎 nome - toque pra abrir" diz o que e', o nome cru do
+    // arquivo de celular (ex: 1788402526249442065470) nao diz nada
+    return `<a href="${url}" target="_blank" rel="noopener" title="${escapeHtml(m.anexo.nome||'anexo')}"><img src="${url}" alt="📎 ${escapeHtml(m.anexo.nome||'anexo')} — toque pra abrir" style="max-width:200px;max-height:200px;border-radius:8px;border:1px solid var(--line);margin-top:5px;display:block;"></a>`;
   }
   return `<a href="${url}" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px;display:inline-block;margin-top:4px;">📎 ${escapeHtml(m.anexo.nome||'arquivo')}</a>`;
 }

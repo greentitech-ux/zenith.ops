@@ -1087,6 +1087,26 @@ setTimeout(async () => {
         && /function anexoDaConversa\(pedidoId, m, i\)/.test(abast)
         && /m\.anexoUrl \?/.test(sol)
         && /function fotoDoChat\(messageId\)/.test(tpub),
+      // 8b. O TOKEN TEM QUE IR NA QUERY. <img src> e <a href> NAO passam pelo
+      // wrapper de window.fetch que injeta o header Authorization - o
+      // navegador faz uma requisicao crua. Sem ?token= a foto volta
+      // {"error":"Autenticação necessária."} e o que aparece na tela e o alt
+      // (o nome cru do arquivo do celular), parecendo texto quebrado.
+      // Foi exatamente o que quebrou na Central do Beniboy em producao.
+      'a foto do chat carrega o token na URL (img/href não mandam header)':
+        /\/anexo\/\$\{m\.indice\}\?token=\$\{encodeURIComponent\(AUTH_TOKEN/.test(beni)
+        && /\/anexo\?token=\$\{encodeURIComponent\(AUTH_TOKEN/.test(abast)
+        && /\/anexo\/\$\{i\}\?token=\$\{encodeURIComponent\(AUTH_TOKEN/.test(sol)
+        // nenhuma rota /api/ de imagem pode sair sem token nem sem link publico
+        && ![beni, abast, sol].some((t) => /src="\$\{url\}"/.test(t) && !/\?token=/.test(t)),
+      // o ticket publico nao tem sessao: quem autoriza la e o link do ticket
+      'no ticket público a foto vai pelo link do ticket, não por token de sessão':
+        /chat-foto-publico\/\$\{encodeURIComponent\(messageId\)\}\?link=/.test(tpub),
+      // imagem que nao carrega mostra o ALT: o nome cru de um arquivo de
+      // celular ("1788402526249442065470") nao diz que aquilo e um anexo
+      'imagem que não carrega diz que é anexo, em vez de mostrar só o nome cru':
+        /alt="📎 \$\{escapeHtml\(m\.anexo\.nome\|\|'anexo'\)\} — toque pra abrir"/.test(beni)
+        && /alt="📎 \$\{escapeHtml\(m\.anexo\.nome\|\|'anexo'\)\} — toque pra abrir"/.test(abast),
       // 9. o print sobe e volta de verdade pelo link publico
       'print mandado pelo link público sobe e volta pra tela':
         mandouPrint.status === 200 && !!idMsg && veFoto.status === 200,

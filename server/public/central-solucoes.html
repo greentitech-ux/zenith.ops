@@ -231,7 +231,7 @@ async function carregarMensagensDetalhe(){
     if(DETALHE_ATUAL.origem === 'suporte'){
       const chat = await fetch(`/api/suporte-chats`).then(r=>r.json()).then(lista=>lista.find(c=>c.id===DETALHE_ATUAL.id));
       // o anexo do chat de suporte e endereçado pelo INDICE da mensagem
-      msgs = (chat && chat.mensagens || []).map((m,i)=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot ? '🤖 Beniboy' : 'Suporte'), texto: m.texto, em: m.em, anexoUrl: m.anexo ? `/api/suporte-chats/${encodeURIComponent(DETALHE_ATUAL.id)}/anexo/${i}` : null }));
+      msgs = (chat && chat.mensagens || []).map((m,i)=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot ? '🤖 Beniboy' : 'Suporte'), texto: m.texto, em: m.em, anexoUrl: m.anexo ? `/api/suporte-chats/${encodeURIComponent(DETALHE_ATUAL.id)}/anexo/${i}?token=${encodeURIComponent(AUTH_TOKEN || '')}` : null }));
     } else {
       const lista = await fetch(`/api/central/${DETALHE_ATUAL.tipo}/${DETALHE_ATUAL.id}/chat`).then(r=>r.json());
       msgs = lista.map(m=>({ de: m.autorUsername || m.autorEmail || '', texto: m.texto, em: m.criadoEm, imagemId: m.imagem ? m.id : null }));
@@ -243,7 +243,7 @@ async function carregarMensagensDetalhe(){
       <div class="m-cab"><span>${escapeHtml(m.de)}</span><span>${fmtDataHora(m.em)}</span></div>
       ${m.texto ? `<div class="m-texto">${escapeHtml(m.texto)}</div>` : ''}
       ${m.imagemId ? `<a href="/api/central/chat/foto/${m.imagemId}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank"><img src="/api/central/chat/foto/${m.imagemId}?token=${encodeURIComponent(AUTH_TOKEN)}" style="max-width:160px;max-height:160px;border-radius:6px;margin-top:4px;display:block;"></a>` : ''}
-      ${m.anexoUrl ? `<a href="${m.anexoUrl}" target="_blank" rel="noopener"><img src="${m.anexoUrl}" alt="anexo" style="max-width:160px;max-height:160px;border-radius:6px;margin-top:4px;display:block;"></a>` : ''}
+      ${m.anexoUrl ? `<a href="${m.anexoUrl}" target="_blank" rel="noopener"><img src="${m.anexoUrl}" alt="📎 anexo — toque pra abrir" style="max-width:160px;max-height:160px;border-radius:6px;margin-top:4px;display:block;"></a>` : ''}
     </div>`).join('') : '<div class="empty">Nenhuma mensagem ainda.</div>';
   el.scrollTop = el.scrollHeight;
 }
