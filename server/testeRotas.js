@@ -895,6 +895,104 @@ setTimeout(async () => {
   console.log(`${okPctOcr ? '✓' : '✗'} Leitura por foto: valor que não fecha com a % impressa é pego, e só ele`);
 
   // ------------------------------------------------------------------
+  // O VALOR ESTÁ IMPRESSO NA FOTO E O CAMPO FICA VAZIO. Reclamação do Master
+  // (02/09/2026): "essa imagem com o Delivery - Moto Especi não foi lido,
+  // CarryOut não foi lido, assim não pode ficar".
+  //
+  // A causa não era a foto: o relatório imprime o MESMO nome duas vezes, em
+  // quadros de unidades diferentes - "Carry Out 0" (contagem de pedidos) e
+  // "CarryOut 19,2% R$437,25" (dinheiro). O modelo viu duas chaves plausíveis,
+  // obedeceu a regra de não chutar e mandou a linha de dinheiro pra
+  // "naoIdentificados"; o campo ficou vazio com o valor impresso ao lado, na
+  // própria tela. O Delivery nem sobrou: existia só dentro de "conferencias".
+  //
+  // O servidor agora fecha isso sozinho, sem chamada nova, e só quando não há
+  // ambiguidade: rótulo + UNIDADE (R$ x número seco) + o valor tem que ser um
+  // dos números em R$ da própria linha.
+  let okResgateOcr = false;
+  try {
+    const ocrR = require('/home/user/adyen-monitor/server/canaisVendaOcr.js');
+    // os campos cadastrados da loja dele: os canais em dinheiro e os KPI's de
+    // contagem com o MESMO nome - é essa colisão que travava a leitura
+    const faltando = [
+      { secao: 'canal', campo: 'delivery', label: 'Delivery', tipo: 'moeda' },
+      { secao: 'canal', campo: 'carryout', label: 'Carryout', tipo: 'moeda' },
+      { secao: 'canal', campo: 'pickup', label: 'Pick-Up', tipo: 'moeda' },
+      { secao: 'canal', campo: 'loja', label: 'Loja', tipo: 'moeda' },
+      { secao: 'kpi', campo: 'qtdCarryout', label: 'Carryout', tipo: 'quantidade' },
+      { secao: 'kpi', campo: 'tempoEntrega', label: 'Avg Delivery Time', tipo: 'tempo' },
+    ];
+    // as linhas exatas do relatório dele
+    const sobras = [
+      { textoOrigem: 'Delivery - carro compa 0,0% R$0,00', valor: 0 },
+      { textoOrigem: 'Delivery - Moto Especi 80,8% R$1.841,15', valor: 1841.15 },
+      { textoOrigem: 'CarryOut 19,2% R$437,25', valor: 437.25 },
+      { textoOrigem: 'Pick Up 0,0% R$0,00', valor: 0 },
+      { textoOrigem: 'Na loja 0,0% R$0,00', valor: 0 },
+      { textoOrigem: 'Carry Out 0', valor: 0 },
+      { textoOrigem: 'Avg Delivery Time (Calc) 21.45', valor: 21.45 },
+    ];
+    const r = ocrR.resgatarSobras(sobras, faltando);
+    const de = (secao, campo) => r.find((x) => x.secao === secao && x.campo === campo);
+
+    // a % nunca pode virar valor: se a leitura tivesse trazido 19.2 no lugar
+    // de 437.25, a linha diz R$437,25 e o resgate tem que recusar
+    const pctComoValor = ocrR.resgatarSobras(
+      [{ textoOrigem: 'CarryOut 19,2% R$437,25', valor: 19.2 }],
+      [{ secao: 'canal', campo: 'carryout', label: 'Carryout', tipo: 'moeda' }],
+    );
+    // duas variantes de Delivery COM valor: não dá pra escolher, fica pro gerente
+    const duasComValor = ocrR.resgatarSobras(
+      [{ textoOrigem: 'Delivery - carro compa 30,0% R$500,00', valor: 500 },
+       { textoOrigem: 'Delivery - Moto Especi 70,0% R$1.000,00', valor: 1000 }],
+      [{ secao: 'canal', campo: 'delivery', label: 'Delivery', tipo: 'moeda' }],
+    );
+    // campo já lido NÃO entra no resgate: quem chama só passa o que ficou vazio
+    const soVazios = ocrR.resgatarSobras(sobras, []);
+
+    const conf = {
+      // o pedido literal, os dois campos da reclamação
+      'Delivery - Moto Especi entra no campo Delivery':
+        !!de('canal', 'delivery') && Math.abs(de('canal', 'delivery').valor - 1841.15) < 0.011,
+      'CarryOut R$437,25 entra no campo Carryout':
+        !!de('canal', 'carryout') && Math.abs(de('canal', 'carryout').valor - 437.25) < 0.011,
+      // a linha de contagem tem o MESMO nome e não pode ir pro campo de dinheiro
+      'a linha de CONTAGEM "Carry Out 0" vai pro KPI de quantidade, não pro canal em R$':
+        !!de('kpi', 'qtdCarryout') && de('kpi', 'qtdCarryout').textoOrigem === 'Carry Out 0'
+        && de('canal', 'carryout').textoOrigem === 'CarryOut 19,2% R$437,25',
+      'Pick Up e Na loja zerados também são preenchidos (zero é informação)':
+        !!de('canal', 'pickup') && de('canal', 'pickup').valor === 0
+        && !!de('canal', 'loja') && de('canal', 'loja').valor === 0,
+      // "Delivery - carro compa" R$0,00 e "Delivery - Moto Especi" R$1.841,15
+      // disputam o mesmo campo: vale a que tem valor
+      'entre duas variantes do mesmo canal, vale a que tem valor':
+        de('canal', 'delivery').textoOrigem === 'Delivery - Moto Especi 80,8% R$1.841,15',
+      'se as DUAS variantes tiverem valor, não escolhe no chute': duasComValor.length === 0,
+      'a % impressa ao lado nunca vira o valor': pctComoValor.length === 0,
+      // campo de tempo/kg/texto fica fora: sem unidade impressa pra separar,
+      // casar por nome seria chute
+      'campo de tempo não é resgatado por nome':
+        !r.some((x) => x.campo === 'tempoEntrega'),
+      'sem campo vazio não resgata nada': soVazios.length === 0,
+      'o resgatado diz de qual linha veio (pra conferir num relance)':
+        r.every((x) => x.resgatado === true && !!x.textoOrigem),
+      // o prompt também precisa parar de tratar isso como ambiguidade
+      'o prompt diz que mesmo nome em duas seções não é ambiguidade':
+        /MESMO NOME EM DUAS SEÇÕES NÃO É AMBIGUIDADE/.test(require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8'))
+        && /NOME CORTADO OU COM SUFIXO CONTINUA SENDO O CAMPO/.test(require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8')),
+      // a tela precisa dizer de onde veio, senão o resgate vira preenchimento
+      // silencioso - exatamente o que a trava de rótulo existe pra evitar
+      'a tela mostra a linha de origem do campo resgatado':
+        /it\.resgatado/.test(require('fs').readFileSync(__dirname + '/public/lancamento.html', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okResgateOcr = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (resgatou: ${JSON.stringify(r).slice(0, 300)})`);
+  } catch (e) { okResgateOcr = false; console.log('  erro: ' + e.message); }
+  if (!okResgateOcr) ruins += 1;
+  console.log(`${okResgateOcr ? '✓' : '✗'} Leitura por foto: valor impresso que ficou sem dono acha o campo certo pela unidade (R$ x contagem)`);
+
+  // ------------------------------------------------------------------
   // REMOVER UMA ASSINATURA JA COLETADA, so Master. Pedido dele: "preciso da
   // opcao de remover assinatura, mas so o master consegue fazer isso". O
   // caso e a pessoa errada ter assinado, ou o traco ter saido ilegivel.

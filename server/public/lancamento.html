@@ -1008,9 +1008,16 @@ async function realizarLeituraRelatorio(){
         el.readOnly = true;
         el.classList.add('campo-automatico');
       }
-      el.title = IS_MASTER
-        ? 'Veio da foto do relatório — confira e edite se precisar.'
-        : 'Preenchido pela foto do relatório - não editável';
+      // campo RESGATADO: o valor estava impresso, mas a leitura não tinha
+      // casado ele com o campo (nome repetido em dois quadros, nome cortado
+      // na coluna). O servidor casou pelo rótulo + unidade (ver
+      // resgatarSobras em canaisVendaOcr.js). Dizer de qual linha veio é o
+      // que deixa conferir num relance, em vez de acreditar.
+      el.title = it.resgatado
+        ? `Veio da linha "${it.textoOrigem||'?'}" do relatório — confira e edite se precisar.`
+        : (IS_MASTER
+          ? 'Veio da foto do relatório — confira e edite se precisar.'
+          : 'Preenchido pela foto do relatório - não editável');
       // canal zerado no relatorio fica EM BRANCO, nao "0": em branco o campo
       // continua legivel de longe como "nao teve venda aqui", e o fechamento
       // trata vazio como zero do mesmo jeito

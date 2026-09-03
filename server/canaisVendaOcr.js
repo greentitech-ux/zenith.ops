@@ -141,6 +141,8 @@ Devolva SOMENTE um JSON válido, sem nenhum texto antes ou depois, exatamente ne
 
 Regras:
 - Só inclua em "campos" quando tiver bastante certeza de que a linha do relatório é aquela chave da lista. Nome parecido não basta se houver duas opções plausíveis - nesse caso mande pra "naoIdentificados". Um valor no campo errado é pior que um campo vazio: o campo vazio o gerente preenche olhando a foto, o valor errado ele só percebe se conferir tudo de novo.
+- MESMO NOME EM DUAS SEÇÕES NÃO É AMBIGUIDADE. O relatório costuma imprimir o mesmo canal DUAS vezes, em quadros diferentes e com unidades diferentes: uma como CONTAGEM de pedidos (número seco, ex: "Carry Out 0" no Resumo de Pedidos) e outra como DINHEIRO (ex: "CarryOut 19,2% R$437,25" no quadro de canais). Se a lista tem uma chave de canal/forma (dinheiro) e um KPI de quantidade com o mesmo nome, elas NÃO disputam entre si: a linha com R$ é da chave de canal/forma, a linha com número seco é do KPI de contagem. Só mande pra "naoIdentificados" quando as duas chaves candidatas forem da MESMA unidade.
+- NOME CORTADO OU COM SUFIXO CONTINUA SENDO O CAMPO. O relatório corta o nome na largura da coluna e acrescenta a variante: "Delivery - Moto Especi", "Delivery - carro compa", "Na loja". Se o nome cadastrado aparece inteiro dentro da linha, é aquele campo - não jogue pra "naoIdentificados" por causa do sufixo, do prefixo ou do corte.
 - Não confunda as duas seções: canal de venda é de ONDE veio a venda, forma de pagamento é COM O QUE o cliente pagou. A mesma venda aparece nas duas, então os dois blocos costumam somar o mesmo total - isso é esperado, não é erro nem duplicidade.
 - Não invente campo: se um campo da lista não aparece no relatório, simplesmente não o inclua no JSON (não mande com valor 0, porque 0 é uma informação diferente de "não apareceu"). Se ele aparece no relatório valendo 0,00 de verdade, aí sim mande 0.
 - "naoIdentificados" existe pra não perder dinheiro de vista: se o relatório mostra uma linha com valor que não casa com nenhuma chave cadastrada, ela vai pra lá e o gerente decide. É melhor mostrar "sobrou R$ 320 que não sei onde colocar" do que ignorar em silêncio.
@@ -392,6 +394,121 @@ const valoresIguais = (a, b) => (
     : Number(a) === Number(b)
 );
 
+// ------------------------------------------------ resgate do que sobrou
+//
+// O CASO (02/09/2026): o relatorio imprime o mesmo nome DUAS vezes, em quadros
+// diferentes e com unidades diferentes - "Carry Out 0" no Resumo de Pedidos
+// (CONTAGEM de pedidos) e "CarryOut 19,2% R$437,25" no quadro de canais
+// (DINHEIRO). O modelo viu duas chaves cadastradas plausiveis pro mesmo nome,
+// obedeceu a regra de nao chutar e mandou a linha de dinheiro pra
+// "naoIdentificados": o campo Carryout ficou VAZIO com o valor impresso na
+// propria tela, logo ao lado, em "sobrou no relatorio". O Delivery foi pior -
+// "Delivery - Moto Especi 80,8% R$1.841,15" so apareceu dentro de
+// "conferencias" e nao chegou nem a sobrar.
+//
+// O prompt ganhou as duas regras que faltavam, mas prompt e' pedido, nao
+// garantia. Aqui o servidor termina o trabalho de forma DETERMINISTICA, sem
+// chamada nova: pega as linhas que sobraram (naoIdentificados + parcelas de
+// quadro sem chave) e casa com os campos que ficaram VAZIOS - e so quando nao
+// resta ambiguidade nenhuma:
+//
+// - o rotulo do campo aparece na linha (o MESMO rotuloBateComOrigem que ja
+//   decide se um valor lido pelo modelo e confiavel);
+// - a UNIDADE bate: campo de dinheiro so aceita linha com R$, campo de
+//   contagem so aceita linha sem R$. E' isso que separa "Carry Out 0" de
+//   "CarryOut R$437,25" sem precisar adivinhar;
+// - o valor esta entre os numeros em R$ da propria linha - assim a % impressa
+//   ao lado ("19,2%") nunca vira valor;
+// - a linha serve a UM campo vazio so, e o campo tem UMA linha candidata. Duas
+//   variantes do mesmo canal ("Delivery - carro compa" R$0,00 e "Delivery -
+//   Moto Especi" R$1.841,15) sao o caso comum da loja: quando so uma tem
+//   valor, e' ela; se as duas tiverem, nao escolhe - fica pro gerente digitar,
+//   como ja era.
+//
+// So preenche campo VAZIO. Leitura que a conferencia recusou continua recusada:
+// o resgate existe pra nao perder valor impresso, nunca pra passar por cima de
+// uma trava.
+const TEM_REAIS = /r\$/i;
+
+function numerosEmReais(texto) {
+  const out = [];
+  const re = /r\$\s*(\d[\d.]*(?:,\d{1,2})?)/gi;
+  let m = re.exec(String(texto || ''));
+  while (m) {
+    const n = Number(m[1].replace(/\./g, '').replace(',', '.'));
+    if (Number.isFinite(n)) out.push(n);
+    m = re.exec(String(texto || ''));
+  }
+  return out;
+}
+
+// canal e forma sao sempre dinheiro; entre os KPI's, so o tipo moeda.
+// kg/tempo/texto ficam FORA do resgate de proposito: sem unidade impressa pra
+// separar, casar por nome viraria chute
+const ehCampoDeDinheiro = (def) => def.secao === 'canal' || def.secao === 'forma' || (def.secao === 'kpi' && def.tipo === 'moeda');
+const ehCampoDeContagem = (def) => def.secao === 'kpi' && def.tipo === 'quantidade';
+
+function resgatarSobras(sobras, faltando) {
+  const pares = [];
+  (faltando || []).forEach((def) => {
+    const dinheiro = ehCampoDeDinheiro(def);
+    const contagem = ehCampoDeContagem(def);
+    if (!dinheiro && !contagem) return;
+    (sobras || []).forEach((s) => {
+      if (!s || s.valor == null || !s.textoOrigem) return;
+      // a unidade e o que separa os dois quadros de mesmo nome
+      if (dinheiro !== TEM_REAIS.test(s.textoOrigem)) return;
+      if (!rotuloBateComOrigem(def.label, s.textoOrigem)) return;
+      if (valorDeTaxaEmCampoDeContagem(def.label, s.textoOrigem)) return;
+      if (dinheiro) {
+        const emReais = numerosEmReais(s.textoOrigem);
+        // linha com R$ impresso: o valor TEM que ser um desses numeros, senao
+        // o que veio foi a % do lado (ou a coluna vizinha)
+        if (emReais.length && !emReais.some((n) => Math.abs(n - s.valor) < TOLERANCIA_SOMA)) return;
+      }
+      pares.push({ def, sobra: s });
+    });
+  });
+
+  // linha que serve a mais de um campo vazio e ambigua: ninguem leva
+  const camposPorLinha = new Map();
+  pares.forEach((p) => {
+    const k = normalizarTexto(p.sobra.textoOrigem);
+    if (!camposPorLinha.has(k)) camposPorLinha.set(k, new Set());
+    camposPorLinha.get(k).add(chaveDe(p.def.secao, p.def.campo));
+  });
+
+  const porCampo = new Map();
+  pares.forEach((p) => {
+    const k = chaveDe(p.def.secao, p.def.campo);
+    if (!porCampo.has(k)) porCampo.set(k, []);
+    porCampo.get(k).push(p);
+  });
+
+  const resgatados = [];
+  for (const lista of porCampo.values()) {
+    const limpos = lista.filter((p) => camposPorLinha.get(normalizarTexto(p.sobra.textoOrigem)).size === 1);
+    if (!limpos.length) continue;
+    let escolhido = limpos[0];
+    if (limpos.length > 1) {
+      const valores = new Set(limpos.map((p) => Number(p.sobra.valor)));
+      // duas variantes que dizem a MESMA coisa (as duas zeradas, por exemplo):
+      // nao ha o que escolher, o numero e o mesmo
+      if (valores.size > 1) {
+        const comValor = limpos.filter((p) => Number(p.sobra.valor) !== 0);
+        if (comValor.length !== 1) continue;
+        escolhido = comValor[0];
+      }
+    }
+    resgatados.push({
+      secao: escolhido.def.secao, campo: escolhido.def.campo, label: escolhido.def.label,
+      valor: escolhido.sobra.valor, textoOrigem: escolhido.sobra.textoOrigem,
+      resgatado: true,
+    });
+  }
+  return resgatados;
+}
+
 function reconciliarLeituras(a, b) {
   const iA = new Map((a.itens || []).map((x) => [chaveDoItem(x), x]));
   const iB = new Map((b.itens || []).map((x) => [chaveDoItem(x), x]));
@@ -635,9 +752,33 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
     }
   }
 
-  const naoIdentificados = (Array.isArray(dados.naoIdentificados) ? dados.naoIdentificados : [])
+  const naoIdentificadosBruto = (Array.isArray(dados.naoIdentificados) ? dados.naoIdentificados : [])
     .map((n) => ({ textoOrigem: String((n && n.textoOrigem) || '').slice(0, 80), valor: numeroOuNull(n && n.valor) }))
     .filter((n) => n.textoOrigem && n.valor != null);
+
+  // RESGATE (ver resgatarSobras acima). As linhas com valor que ficaram sem
+  // dono sao de DUAS procedencias, e as duas contam: o que o modelo mandou pra
+  // "naoIdentificados" e as parcelas de quadro que ele transcreveu sem chave -
+  // foi por essa segunda porta que "Delivery - Moto Especi R$1.841,15" sumiu,
+  // porque a linha existia so dentro de "conferencias".
+  const partesSemChave = [];
+  (Array.isArray(dados.conferencias) ? dados.conferencias : []).forEach((b) => {
+    ((b && Array.isArray(b.partes)) ? b.partes : []).forEach((pt) => {
+      if (!pt || pt.chave) return;
+      partesSemChave.push({ textoOrigem: String(pt.textoOrigem || '').slice(0, 80), valor: numeroOuNull(pt.valor) });
+    });
+  });
+  const jaVi = new Set();
+  const sobras = [...naoIdentificadosBruto, ...partesSemChave.filter((pt) => pt.textoOrigem && pt.valor != null)]
+    .filter((sb) => { const k = normalizarTexto(sb.textoOrigem); if (jaVi.has(k)) return false; jaVi.add(k); return true; });
+  const faltandoBruto = todos.filter((c) => !vistos.has(chaveDe(c.secao, c.campo)));
+  const resgatados = resgatarSobras(sobras, faltandoBruto);
+  resgatados.forEach((r) => { itens.push(r); vistos.add(chaveDe(r.secao, r.campo)); });
+  // linha resgatada nao pode continuar aparecendo como "sobrou no relatorio":
+  // ela achou dono, e repetir viraria o mesmo dinheiro contado duas vezes na
+  // leitura de quem confere
+  const linhasUsadas = new Set(resgatados.map((r) => normalizarTexto(r.textoOrigem)));
+  const naoIdentificados = naoIdentificadosBruto.filter((n) => !linhasUsadas.has(normalizarTexto(n.textoOrigem)));
 
   return {
     data: /^\d{4}-\d{2}-\d{2}$/.test(dados.data) ? dados.data : null,
@@ -696,4 +837,4 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
   }
 }
 
-module.exports = { ativo, lerCanais, extrairJson, rotuloBateComOrigem, normalizarTexto, conferirSomas, conferirPercentuais, valorDeTaxaEmCampoDeContagem, reconciliarLeituras, desempatar, minutosOuNull, unidadeHintKpi };
+module.exports = { ativo, lerCanais, extrairJson, resgatarSobras, rotuloBateComOrigem, normalizarTexto, conferirSomas, conferirPercentuais, valorDeTaxaEmCampoDeContagem, reconciliarLeituras, desempatar, minutosOuNull, unidadeHintKpi };
