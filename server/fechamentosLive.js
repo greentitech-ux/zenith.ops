@@ -135,6 +135,42 @@ function explicarDiferenca(registro, defsExtras) {
   return linhas.join('\n');
 }
 
+// ------------------------------------------------ travas do lançamento
+//
+// Pedido do Master (02/09/2026): "como segurança, não permitir salvar se
+// faturamento ou declarado estiver zerado; também exigir uma observação se a
+// diferença for acima de 20 reais".
+//
+// As duas nascem do mesmo dia em que um fechamento fechou com R$ 1.207,14 de
+// diferença que ninguém sabia explicar. Zero num dos dois totais quase nunca é
+// um dia sem venda: é lançamento pela metade - a foto não trouxe o quadro, ou
+// alguém salvou antes de terminar. E diferença grande sem uma linha de
+// explicação vira um ticket que ninguém consegue decidir dias depois.
+//
+// O limite da OBSERVAÇÃO é separado do LIMITE_QUEBRA_CAIXA de propósito: entre
+// R$ 10 e R$ 20 o ticket nasce (alguém precisa olhar) mas ainda não se exige
+// texto; acima de R$ 20 a loja tem que dizer o que houve. São duas perguntas
+// diferentes e mudar uma não pode mexer na outra.
+const LIMITE_OBSERVACAO_OBRIGATORIA = 20;
+
+// Vale no LANÇAMENTO. As correções do Master (editarDireto/aprovarCorrecao)
+// ficam de fora: corrigir um fechamento quebrado às vezes passa por um estado
+// intermediário, e travar ali prenderia justamente quem está consertando.
+function exigirFechamentoConsistente(registro) {
+  const fat = num(registro.faturamento);
+  const dec = num(registro.totalDeclarado);
+  if (fat <= 0) {
+    throw new Error(`Faturamento em ${fmtMoneyQuebra(fat)} - confira os canais de venda antes de salvar. Fechamento com faturamento zerado não é lançado.`);
+  }
+  if (dec <= 0) {
+    throw new Error(`Total declarado em ${fmtMoneyQuebra(dec)} - confira as formas de pagamento e a entrada em dinheiro antes de salvar. Fechamento com declarado zerado não é lançado.`);
+  }
+  const dif = num(registro.diferenca);
+  if (Math.abs(dif) > LIMITE_OBSERVACAO_OBRIGATORIA && !String(registro.observacao || '').trim()) {
+    throw new Error(`A diferença é de ${fmtMoneyQuebra(dif)}, acima de ${fmtMoneyQuebra(LIMITE_OBSERVACAO_OBRIGATORIA)} - escreva na Observação o que explica essa diferença antes de salvar.`);
+  }
+}
+
 function docId(unidade, data) {
   return `${unidade}__${data}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
 }
@@ -357,6 +393,9 @@ async function create({ unidade, unidadeNome, grupo, data, gerente, campos, kpis
   const defsDoGrupo = await defsExtrasDaUnidade(unidade);
   recomputarTotais(registro, null, defsDoGrupo);
   registro.observacao = observacao || null;
+  // as travas rodam DEPOIS de recomputarTotais e da observacao: e o registro
+  // ja pronto que e conferido, nao o que o cliente mandou
+  exigirFechamentoConsistente(registro);
   registro.detalhesMaquinas = sanitizarItens(detalhesMaquinas);
   registro.detalhesMaquinasPos = sanitizarItens(detalhesMaquinasPos);
   registro.detalhesSaidas = sanitizarItens(detalhesSaidas);
@@ -1117,7 +1156,7 @@ function invalidarCache() {
 }
 
 module.exports = {
-  explicarDiferenca,
+  explicarDiferenca, exigirFechamentoConsistente, LIMITE_OBSERVACAO_OBRIGATORIA,
   editarItemSaida, adicionarSaidaDireto,
   CAMPOS_NUMERICOS, create, listAll, listByUnidades, getOne, solicitarEdicao, listarEdicoes, getEdicao,
   decidirEdicao, editarDireto, moverFechamento, removerEdicao, remove, invalidarCache, marcarNotificacaoVistaEdicao, redirecionarEdicao,

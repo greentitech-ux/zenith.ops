@@ -336,8 +336,9 @@
     </div>
 
     <div class="secao">
-      <label>Observação (opcional)</label>
+      <label id="label-observacao">Observação (opcional)</label>
       <textarea id="f-observacao" placeholder="qualquer detalhe do fechamento do dia"></textarea>
+      <div id="aviso-observacao" class="hidden" style="color:var(--warn);font-size:12.5px;margin-top:6px;"></div>
     </div>
 
     <div class="msg hidden" id="msg"></div>
@@ -618,6 +619,40 @@ function atualizarResumo(){
   const elDif = document.getElementById('resumo-diferenca');
   elDif.textContent = fmtMoney(dif);
   elDif.className = 'dif ' + (Math.abs(dif) < 0.01 ? 'ok' : 'bad');
+  pintarObservacaoObrigatoria(dif);
+}
+
+// TRAVAS DE SEGURANÇA DO LANÇAMENTO (as mesmas do servidor, ver
+// exigirFechamentoConsistente em fechamentosLive.js - lá é que elas valem de
+// verdade; aqui é pra pessoa ver ANTES de clicar, e não descobrir no erro).
+//
+// Pedido do Master: "como segurança, não permitir salvar se faturamento ou
+// declarado estiver zerado; também exigir uma observação se a diferença for
+// acima de 20 reais".
+const LIMITE_OBSERVACAO = 20;
+function pintarObservacaoObrigatoria(dif){
+  const precisa = Math.abs(dif) > LIMITE_OBSERVACAO;
+  const label = document.getElementById('label-observacao');
+  const aviso = document.getElementById('aviso-observacao');
+  if(!label || !aviso) return;
+  label.textContent = precisa ? 'Observação (obrigatória)' : 'Observação (opcional)';
+  aviso.classList.toggle('hidden', !precisa);
+  if(precisa){
+    aviso.textContent = `A diferença é de ${fmtMoney(dif)}, acima de ${fmtMoney(LIMITE_OBSERVACAO)}`
+      + ' — escreva aqui o que explica essa diferença. Sem isso o fechamento não é lançado.';
+  }
+}
+// devolve a mensagem do que impede o lançamento, ou null quando pode salvar.
+// O servidor confere de novo (e tem a última palavra: só ele conhece o
+// desconto da Maquininha POS do dia anterior) - isso aqui evita a ida e volta
+function travaDoLancamento(faturamento, totalDeclarado, observacao){
+  if(!(Number(faturamento) > 0)) return `Faturamento em ${fmtMoney(faturamento)} — confira os canais de venda antes de salvar.`;
+  if(!(Number(totalDeclarado) > 0)) return `Total declarado em ${fmtMoney(totalDeclarado)} — confira as formas de pagamento e a entrada em dinheiro antes de salvar.`;
+  const dif = +(Number(totalDeclarado) - Number(faturamento)).toFixed(2);
+  if(Math.abs(dif) > LIMITE_OBSERVACAO && !String(observacao||'').trim()){
+    return `A diferença é de ${fmtMoney(dif)}, acima de ${fmtMoney(LIMITE_OBSERVACAO)} — escreva na Observação o que explica essa diferença antes de salvar.`;
+  }
+  return null;
 }
 document.getElementById('f-entradaDinheiro').addEventListener('input', atualizarResumo);
 
@@ -1474,6 +1509,11 @@ document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
     const kpisDefsSubmit = defsExtrasAtual('kpisExtras');
     campos.faturamento = somaExtrasComSinal('canal-extra-input', canaisDefsSubmit) + somaExtrasComSinal('forma-extra-input', formasDefsSubmit, {soCruzado:true}) + somaKpisEm(kpisDefsSubmit, 'faturamento');
     campos.totalDeclarado = num(campos.adyen) + num(campos.adyenPos) + num(campos.entradaDinheiro) + somaExtrasComSinal('forma-extra-input', formasDefsSubmit) + somaExtrasComSinal('canal-extra-input', canaisDefsSubmit, {soCruzado:true}) + somaKpisEm(kpisDefsSubmit, 'totalDeclarado');
+
+    // trava ANTES de montar o envio: se for barrar, que barre sem subir foto
+    // de KPI nem esperar a resposta do servidor
+    const impedimento = travaDoLancamento(campos.faturamento, campos.totalDeclarado, document.getElementById('f-observacao').value);
+    if(impedimento) throw new Error(impedimento);
 
     const body = {
       unidade,

@@ -1501,7 +1501,7 @@ setTimeout(async () => {
     // a trava de verdade é no servidor: mandar a unidade na requisição, sem
     // passar pelo seletor, tem que tomar 403
     const forjado = await postarJson('/api/formularios', {
-      tipo: 'reembolso', unidade: 'Spoleto Shopping Recife', campos: {}, linhas: [],
+      tipo: 'reembolso', unidade: 'Spoleto Shopping Recife', campos: { delivery: 100, entradaDinheiro: 100 }, linhas: [],
     }, cab);
     const recusaForjado = forjado.status === 403 && /não tem acesso a essa unidade/i.test(forjado.corpo);
     const forjadoLink = await postarJson('/api/formularios/link-preenchimento', {
@@ -2035,7 +2035,7 @@ setTimeout(async () => {
   console.log(`${okMapaRh ? '✓' : '✗'} mesma unidade continua no seletor de RH: HTTP ${mapaRh.status} ${mapaRh.corpo.slice(0, 90)}`);
 
   const lancouFech = await postarJson('/api/fechamentos/lancar', {
-    unidade: 'MVPAR_TESTE', unidadeNome: 'MVPar Teste', data: '2026-08-18', gerente: 'Teste', campos: {},
+    unidade: 'MVPAR_TESTE', unidadeNome: 'MVPar Teste', data: '2026-08-18', gerente: 'Teste', campos: { delivery: 100, entradaDinheiro: 100 },
   }, { Authorization: 'Bearer ' + token });
   let okBloqueiaFech = false;
   try {
@@ -2050,7 +2050,7 @@ setTimeout(async () => {
   // req.user.username||req.user.email - antes era texto livre, sem vinculo
   // nenhum com quem estava logado de verdade ----
   const lancouComGerenteForjado = await postarJson('/api/fechamentos/lancar', {
-    unidade: '19855', unidadeNome: 'Dom Carrão', data: '2026-08-19', gerente: 'Nome Forjado Que Nao Deveria Valer', campos: {},
+    unidade: '19855', unidadeNome: 'Dom Carrão', data: '2026-08-19', gerente: 'Nome Forjado Que Nao Deveria Valer', campos: { delivery: 100, entradaDinheiro: 100 },
   }, { Authorization: 'Bearer ' + token });
   let okGerenteTravado = false;
   try {
@@ -2123,7 +2123,7 @@ setTimeout(async () => {
   console.log(`${okRestritas ? '✓' : '✗'} unidade fixa restrita aparece em unidades-restritas?area=fechamento (pra telas com base pré-populada removerem): HTTP ${restritas.status} ${restritas.corpo.slice(0, 90)}`);
 
   const lancouFixaRestrita = await postarJson('/api/fechamentos/lancar', {
-    unidade: '19821', unidadeNome: 'Dom Sao Miguel', data: '2026-08-18', gerente: 'Teste', campos: {},
+    unidade: '19821', unidadeNome: 'Dom Sao Miguel', data: '2026-08-18', gerente: 'Teste', campos: { delivery: 100, entradaDinheiro: 100 },
   }, { Authorization: 'Bearer ' + token });
   let okBloqueiaFixa = false;
   try {
@@ -2641,7 +2641,9 @@ setTimeout(async () => {
     // de uma configuração que foi desligada depois)
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_POS_OFF', unidadeNome: 'Dom Sao Miguel (teste)', grupo: 'Grupo Sem POS', data: '2026-09-01',
-      campos: { delivery: 1000, adyen: 1000, adyenPos: 1207.14 },
+      // balanceado de propósito: o que importa aqui é o adyenPos ficar
+      // gravado em ONTEM, não a diferença desse dia
+      campos: { delivery: 2207.14, adyen: 1000, adyenPos: 1207.14 },
     }, cabP);
     // hoje: os números exatos do fechamento dele
     const hoje = JSON.parse((await postarJson('/api/fechamentos/lancar', {
@@ -2657,7 +2659,7 @@ setTimeout(async () => {
     await postarJson('/api/grupos', { nome: 'Grupo Com POS', unidades: ['TESTE_POS_ON'], maquininhaPosHabilitado: true }, cabP);
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_POS_ON', unidadeNome: 'Loja Com POS', grupo: 'Grupo Com POS', data: '2026-09-01',
-      campos: { delivery: 1000, adyen: 1000, adyenPos: 1207.14 },
+      campos: { delivery: 2207.14, adyen: 1000, adyenPos: 1207.14 },
     }, cabP);
     const hojeComPos = JSON.parse((await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_POS_ON', unidadeNome: 'Loja Com POS', grupo: 'Grupo Com POS', data: '2026-09-02',
@@ -2665,6 +2667,9 @@ setTimeout(async () => {
         delivery: 1954.23, carryout: 513.80, pickup: 98.90,
         adyen: 820.60, ifood: 989.83, food99: 466.90, pix: 289.60,
       },
+      // aqui o desconto é LEGÍTIMO e a diferença é real: com a trava nova, um
+      // dia assim só é lançado com a explicação junto
+      observacao: 'Lote da Maquininha POS de ontem, descontado hoje.',
     }, cabP)).corpo);
 
     const htmlF = require('fs').readFileSync(__dirname + '/public/fechamentos.html', 'utf8');
@@ -2691,10 +2696,75 @@ setTimeout(async () => {
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okAjustePos = !falhas.length;
-    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (hoje: fat=${hoje.faturamento} decl=${hoje.totalDeclarado} aj=${hoje.ajustePosAnterior} dif=${hoje.diferenca})`);
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (sem POS: fat=${hoje.faturamento} decl=${hoje.totalDeclarado} aj=${hoje.ajustePosAnterior} dif=${hoje.diferenca} | com POS: aj=${hojeComPos.ajustePosAnterior} decl=${hojeComPos.totalDeclarado} dif=${hojeComPos.diferenca})`);
   } catch (e) { okAjustePos = false; console.log('  erro: ' + e.message); }
   if (!okAjustePos) ruins += 1;
   console.log(`${okAjustePos ? '✓' : '✗'} Fechamento: desconto da Maquininha POS só existe em loja que usa POS - e aparece na tela`);
+
+  // ------------------------------------------------------------------
+  // TRAVAS DE SEGURANÇA NO LANÇAMENTO. Pedido do Master (02/09/2026): "como
+  // segurança, não permitir salvar se faturamento ou declarado estiver
+  // zerado; também exigir uma observação se a diferença for acima de 20
+  // reais". As duas nascem do dia em que um fechamento fechou com R$ 1.207,14
+  // de diferença que ninguém sabia explicar.
+  let okTravasFech = false;
+  try {
+    const cabT = { Authorization: 'Bearer ' + token };
+    const base = { unidade: 'TESTE_TRAVA', unidadeNome: 'Loja Trava', grupo: 'ARCFOOD' };
+    const lancar = (data, campos, observacao) => postarJson('/api/fechamentos/lancar',
+      { ...base, data, campos, ...(observacao ? { observacao } : {}) }, cabT);
+    const erroDe = (r) => { try { return JSON.parse(r.corpo).error || ''; } catch (e) { return r.corpo; } };
+
+    // 1. faturamento zerado: só formas preenchidas
+    const semFaturamento = await lancar('2026-10-01', { adyen: 500, entradaDinheiro: 100 });
+    // 2. declarado zerado: só canais preenchidos
+    const semDeclarado = await lancar('2026-10-02', { delivery: 500 });
+    // 3. diferença acima de R$ 20 sem observação
+    const semObs = await lancar('2026-10-03', { delivery: 1000, adyen: 1100 });
+    // 4. a MESMA diferença, com observação: passa
+    const comObs = await lancar('2026-10-04', { delivery: 1000, adyen: 1100 }, 'Cliente pagou a mais e devolvemos amanhã.');
+    // 5. diferença DENTRO do limite (R$ 15) não exige observação - o ticket de
+    // quebra até nasce (limite dele é R$ 10), mas texto não é exigido
+    const difPequena = await lancar('2026-10-05', { delivery: 1000, adyen: 1015 });
+    // 6. observação só com espaço não vale como explicação
+    const obsVazia = await lancar('2026-10-06', { delivery: 1000, adyen: 1100 }, '   ');
+    // 7. o dia normal continua entrando sem atrito nenhum
+    const normal = await lancar('2026-10-07', { delivery: 1000, adyen: 1000 });
+
+    const htmlT = require('fs').readFileSync(__dirname + '/public/lancamento.html', 'utf8');
+    const cem = (v) => Math.round(Number(v) * 100);
+    const conf = {
+      'faturamento zerado é recusado, e a mensagem diz onde olhar':
+        semFaturamento.status === 400 && /Faturamento em R\$ 0,00/.test(erroDe(semFaturamento))
+        && /canais de venda/.test(erroDe(semFaturamento)),
+      'declarado zerado é recusado, e a mensagem diz onde olhar':
+        semDeclarado.status === 400 && /Total declarado em R\$ 0,00/.test(erroDe(semDeclarado))
+        && /formas de pagamento/.test(erroDe(semDeclarado)),
+      'diferença acima de R$ 20 sem observação é recusada, dizendo o valor':
+        semObs.status === 400 && /R\$ 100,00/.test(erroDe(semObs)) && /acima de R\$ 20,00/.test(erroDe(semObs)),
+      'a mesma diferença COM observação é lançada':
+        comObs.status === 200 && cem(JSON.parse(comObs.corpo).diferenca) === 10000,
+      // o limite da observação é separado do limite do ticket (R$ 10) de
+      // propósito: entre 10 e 20 alguém olha, mas não se exige texto
+      'diferença de R$ 15 passa sem observação (o limite do texto é 20, não o do ticket)':
+        difPequena.status === 200,
+      'observação só com espaço não conta como explicação': obsVazia.status === 400,
+      'o dia que fecha certo continua entrando sem atrito': normal.status === 200,
+      // a tela avisa ANTES do clique - descobrir a trava no erro do servidor
+      // é o mesmo trabalho feito duas vezes
+      'a tela exige o mesmo, antes de enviar (e sem subir foto à toa)':
+        /function travaDoLancamento\(faturamento, totalDeclarado, observacao\)/.test(htmlT)
+        && /if\(impedimento\) throw new Error\(impedimento\);/.test(htmlT)
+        && htmlT.indexOf('if(impedimento) throw new Error(impedimento);') < htmlT.indexOf("fd.append('payload'"),
+      'o rótulo da Observação deixa de dizer "opcional" quando ela passa a ser obrigatória':
+        /Observação \(obrigatória\)/.test(htmlT) && /function pintarObservacaoObrigatoria/.test(htmlT),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTravasFech = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (semFat=${semFaturamento.status} semDecl=${semDeclarado.status} semObs=${semObs.status} comObs=${comObs.status} peq=${difPequena.status} normal=${normal.status})`);
+  } catch (e) { okTravasFech = false; console.log('  erro: ' + e.message); }
+  if (!okTravasFech) ruins += 1;
+  console.log(`${okTravasFech ? '✓' : '✗'} Fechamento: não salva com faturamento ou declarado zerado, e diferença acima de R$ 20 exige observação`);
 
   // ------------------------------------------------------------------
   // Importacao do Grupo Bravo: a planilha permite MAIS DE UMA LINHA no mesmo
@@ -2709,7 +2779,7 @@ setTimeout(async () => {
     const bravoImport = require('/home/user/adyen-monitor/server/bravoImport.js');
     const linha = (extra) => ({
       unidade: 'Dom Bessa', unidadeNome: 'Dom Bessa', grupo: 'BRAVO', data: '2026-03-10',
-      gerente: '', campos: {}, canaisVendaExtras: {}, formasPagamentoExtras: {}, kpisExtras: {},
+      gerente: '', campos: { delivery: 100, entradaDinheiro: 100 }, canaisVendaExtras: {}, formasPagamentoExtras: {}, kpisExtras: {},
       observacao: null, detalhesMaquinas: [], detalhesSaidas: [],
       origemPlanilha: { sheetId: 'x', idLinha: 'l1' }, ...extra,
     });
@@ -3266,7 +3336,7 @@ setTimeout(async () => {
     // dia 05: o app tem o fechamento (é o "Dom Carrão" do PDF)
     await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Sangria Sumida', grupo: 'ARCFOOD', data: '2026-08-05',
-      campos: { entradaDinheiro: 107 },
+      campos: { delivery: 107, entradaDinheiro: 107 },
       detalhesSaidas: [{ descricao: 'oleo de soja', valor: 29.12 }, { descricao: 'copo descartavel', valor: 21.59 }],
     }, cabMaster);
     require('./fechamentos-snapshot.json').push(
@@ -4097,7 +4167,7 @@ setTimeout(async () => {
 
     // diárias: cada linha da tabela vira um slot próprio de assinatura
     const diarias = await postarJson('/api/formularios', {
-      tipo: 'diarias', unidade: "Domino's Bessa - João Pessoa", campos: {},
+      tipo: 'diarias', unidade: "Domino's Bessa - João Pessoa", campos: { delivery: 100, entradaDinheiro: 100 },
       linhas: [{ nome: 'Carlos', datas: '18 e 19/08', chavePix: 'c@x', banco: 'BB', valor: '120' }, { nome: 'Ana', datas: '19/08', chavePix: 'a@x', banco: 'Nubank', valor: '60' }],
     }, cab);
     const dDiarias = diarias.status === 200 ? JSON.parse(diarias.corpo) : {};
@@ -4112,7 +4182,7 @@ setTimeout(async () => {
       'o total soma a coluna de valor (pt-BR)': f.valorTotal === 237.72,
       'CNPJ e razão social vêm do cadastro fixo (ignora o que o navegador mandou)':
         f.campos && f.campos.cnpj === '59.449.391/0001-79' && f.razaoSocial === 'America Bessa',
-      'unidade fora do cadastro é recusada': (await postarJson('/api/formularios', { tipo: 'avulso', unidade: 'Loja Inventada', campos: {}, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }, cab)).status === 400,
+      'unidade fora do cadastro é recusada': (await postarJson('/api/formularios', { tipo: 'avulso', unidade: 'Loja Inventada', campos: { delivery: 100, entradaDinheiro: 100 }, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }, cab)).status === 400,
       'o link público mostra o formulário e o papel de quem abriu': vista.status === 200 && dVista.meuPapel === 'favorecido' && dVista.jaAssinei === false,
       'token errado é recusado': tokenErrado.status === 404,
       'as duas assinaturas completam o formulário': ass1.status === 200 && ass2.status === 200 && dAss2.completo === true,
@@ -4176,7 +4246,7 @@ setTimeout(async () => {
     }, null, 'anexos', cab);
     // arquivo que não é PDF nem imagem é barrado ANTES de tocar no storage
     const tipoRuim = await postarMultipart('/api/formularios', {
-      payload: JSON.stringify({ tipo: 'avulso', unidade: 'Spoleto Tacaruna', campos: {}, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }),
+      payload: JSON.stringify({ tipo: 'avulso', unidade: 'Spoleto Tacaruna', campos: { delivery: 100, entradaDinheiro: 100 }, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }),
     }, { nome: 'nota.txt', tipo: 'text/plain', buffer: Buffer.from('oi') }, 'anexos', cab);
 
     // rotas de anexo: índice inexistente e token errado caem em 404
@@ -4587,7 +4657,7 @@ setTimeout(async () => {
 
     const f1 = await form.criar({
       tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
-      campos: {}, linhas: [{ descricao: 'Serviço X', valor: '150,00' }],
+      campos: { delivery: 100, entradaDinheiro: 100 }, linhas: [{ descricao: 'Serviço X', valor: '150,00' }],
       criadoPorEmail: 'teste@teste.local',
     });
     // um ticket da Central logo depois: tem que ser o PRÓXIMO número, provando
@@ -4598,7 +4668,7 @@ setTimeout(async () => {
     });
     const f2 = await form.criar({
       tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
-      campos: {}, linhas: [{ descricao: 'Serviço Y', valor: '90,00' }],
+      campos: { delivery: 100, entradaDinheiro: 100 }, linhas: [{ descricao: 'Serviço Y', valor: '90,00' }],
       criadoPorEmail: 'teste@teste.local',
     });
 
@@ -4616,7 +4686,7 @@ setTimeout(async () => {
     // reaproveita em vez de tirar outro da fila
     const f3 = await form.criar({
       tipo: 'avulso', unidade: 'São Braz Ilha do Leite',
-      campos: {}, linhas: [{ descricao: 'Herdado', valor: '10,00' }],
+      campos: { delivery: 100, entradaDinheiro: 100 }, linhas: [{ descricao: 'Herdado', valor: '10,00' }],
       criadoPorEmail: 'teste@teste.local', numeroTicket: f1.numeroTicket,
     });
 
@@ -4683,7 +4753,7 @@ setTimeout(async () => {
     const reenvio = await postarJson(`/api/formularios-publico/preencher/${tk}`, {
       campos: { nome: 'Outro' }, linhas: [{ descricao: 'x', valor: '1,00' }],
     });
-    const vazio = await postarJson('/api/formularios-publico/preencher/' + tk, { campos: {}, linhas: [] });
+    const vazio = await postarJson('/api/formularios-publico/preencher/' + tk, { campos: { delivery: 100, entradaDinheiro: 100 }, linhas: [] });
 
     const conferencias = {
       'a unidade gera o link já com Ticket #': criado.status === 200 && Number.isFinite(d.numeroTicket) && !!tk,
@@ -4785,7 +4855,7 @@ setTimeout(async () => {
       tipo: 'diarias', unidade: 'Spoleto Tacaruna',
     }, cab)).corpo);
     const envioDiarias = await postarJson(`/api/formularios-publico/preencher/${linkDiarias.tokenPreenchimento}`, {
-      campos: {}, linhas: [{ nome: 'João', datas: '20/08', chavePix: 'joao@x.com', banco: 'Nubank', valor: '100,00' }],
+      campos: { delivery: 100, entradaDinheiro: 100 }, linhas: [{ nome: 'João', datas: '20/08', chavePix: 'joao@x.com', banco: 'Nubank', valor: '100,00' }],
     });
     const dDiarias = envioDiarias.status === 200 ? JSON.parse(envioDiarias.corpo) : {};
 
@@ -4947,7 +5017,7 @@ setTimeout(async () => {
     const depoisDoCancelamento = await pedir(`/api/formularios-publico/${f.id}?token=${tokenGerente}`);
     const assinarDepois = await postarJson(`/api/formularios-publico/${f.id}/assinar`, { token: tokenGerente, nome: 'Marcela', imagem: PNG });
     const dCancelado = await form.detalhar(f.id);
-    const editarCancelado = await putJson(`/api/formularios/${f.id}`, { campos: {}, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }, cab);
+    const editarCancelado = await putJson(`/api/formularios/${f.id}`, { campos: { delivery: 100, entradaDinheiro: 100 }, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }, cab);
     const pdfCancelado = await pedirBinario(`/api/formularios/${f.id}/pdf`, cab);
 
     const conferencias = {
@@ -8522,7 +8592,7 @@ setTimeout(async () => {
 
     const fech = await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_SAIDA_ARC', unidadeNome: 'Loja Teste ARC', grupo: 'ARCFOOD', data: '2026-08-20',
-      campos: { entradaDinheiro: 500 },
+      campos: { delivery: 500, entradaDinheiro: 500 },
       detalhesSaidas: [
         { descricao: 'Motoboy extra (painel saidas)', valor: 37.5 },
         { descricao: 'Compra de gelo (painel saidas)', valor: 12 },
@@ -8722,7 +8792,7 @@ setTimeout(async () => {
     // segura: ver o bloco de correcao de saida da planilha, mais abaixo.)
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_ENTRADA_DIA', unidadeNome: 'Loja Entrada Dia', grupo: 'ARCFOOD', data: '2026-10-05',
-      campos: { entradaDinheiro: 300 }, detalhesSaidas: [{ descricao: 'Saída do dia 05', valor: 40 }],
+      campos: { delivery: 300, entradaDinheiro: 300 }, detalhesSaidas: [{ descricao: 'Saída do dia 05', valor: 40 }],
     }, cabMaster);
     require('./fechamentos-snapshot.json').push({
       id: 'pl-entrada-dia-05', grupo: 'ARCFOOD', unidade: 'TESTE_ENTRADA_DIA', unidadeNome: 'Loja Entrada Dia',
@@ -8745,7 +8815,7 @@ setTimeout(async () => {
     // outro dia da mesma loja - tem que continuar sendo linha separada
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_ENTRADA_DIA', unidadeNome: 'Loja Entrada Dia', grupo: 'ARCFOOD', data: '2026-10-06',
-      campos: { entradaDinheiro: 90 },
+      campos: { delivery: 90, entradaDinheiro: 90 },
     }, cabMaster);
 
     const periodo = 'inicio=2026-10-05&fim=2026-10-07';
@@ -8937,7 +9007,7 @@ setTimeout(async () => {
     // dia 1: entra 1000, sai 100 -> sobra 900 pra sangrar
     const f1 = JSON.parse((await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-01',
-      campos: { entradaDinheiro: 1000 }, detalhesSaidas: [{ descricao: 'Motoboy', valor: 100 }],
+      campos: { delivery: 1000, entradaDinheiro: 1000 }, detalhesSaidas: [{ descricao: 'Motoboy', valor: 100 }],
     }, cabMaster)).corpo);
     const sg = JSON.parse((await postarJson('/api/sangrias', {
       unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-01',
@@ -8958,7 +9028,7 @@ setTimeout(async () => {
     // Dia 02: entram 300, não sai nada -> a 2ª sangria espera exatamente 300.
     const f2 = JSON.parse((await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Edita Caixa', grupo: 'ARCFOOD', data: '2026-11-02',
-      campos: { entradaDinheiro: 300 },
+      campos: { delivery: 300, entradaDinheiro: 300 },
     }, cabMaster)).corpo);
     const inicial2 = await ler();
     const sg2 = JSON.parse((await postarJson('/api/sangrias', {
@@ -8974,14 +9044,14 @@ setTimeout(async () => {
     // pode ressuscitar esse passado como gaveta
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_CAIXA_ANTIGO', unidadeNome: 'Loja Movimento Antigo', grupo: 'ARCFOOD', data: '2026-06-15',
-      campos: { entradaDinheiro: 800 }, detalhesSaidas: [{ descricao: 'Gás', valor: 50 }],
+      campos: { delivery: 800, entradaDinheiro: 800 }, detalhesSaidas: [{ descricao: 'Gás', valor: 50 }],
     }, cabMaster);
     // loja com sangria ANTIGA (junho) e entrada de julho: a janela NÃO pode
     // voltar até a sangria de junho (traria os 300 de julho) - ela abre no
     // piso e conta só os 60 de agosto
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_SANGRIA_ANTIGA', unidadeNome: 'Loja Sangria Antiga', grupo: 'ARCFOOD', data: '2026-07-10',
-      campos: { entradaDinheiro: 300 },
+      campos: { delivery: 300, entradaDinheiro: 300 },
     }, cabMaster);
     await postarJson('/api/sangrias', {
       unidade: 'TESTE_SANGRIA_ANTIGA', unidadeNome: 'Loja Sangria Antiga', grupo: 'ARCFOOD', data: '2026-06-20',
@@ -8990,7 +9060,7 @@ setTimeout(async () => {
     }, cabMaster);
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_SANGRIA_ANTIGA', unidadeNome: 'Loja Sangria Antiga', grupo: 'ARCFOOD', data: '2026-08-05',
-      campos: { entradaDinheiro: 60 },
+      campos: { delivery: 60, entradaDinheiro: 60 },
     }, cabMaster);
     // O CASO SAO MIGUEL (27/08): sangria lancada num dia, cobrindo o periodo
     // que terminou no dia ANTERIOR. O dinheiro que entrou no dia da retirada
@@ -8998,11 +9068,11 @@ setTimeout(async () => {
     // deixando em loja so o que entrou no dia - R$ 91".
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_SOBRA_DO_DIA', unidadeNome: 'Loja Sobra do Dia', grupo: 'ARCFOOD', data: '2026-08-25',
-      campos: { entradaDinheiro: 450 },
+      campos: { delivery: 450, entradaDinheiro: 450 },
     }, cabMaster);
     await postarJson('/api/fechamentos/lancar', {
       unidade: 'TESTE_SOBRA_DO_DIA', unidadeNome: 'Loja Sobra do Dia', grupo: 'ARCFOOD', data: '2026-08-26',
-      campos: { entradaDinheiro: 91 },
+      campos: { delivery: 91, entradaDinheiro: 91 },
     }, cabMaster);
     const sgSobra = JSON.parse((await postarJson('/api/sangrias', {
       unidade: 'TESTE_SOBRA_DO_DIA', unidadeNome: 'Loja Sobra do Dia', grupo: 'ARCFOOD', data: '2026-08-26',
@@ -10651,12 +10721,12 @@ setTimeout(async () => {
     // 2 dias de fechamento: entrou 1000, saiu 150 em saída avulsa
     await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-01',
-      campos: { entradaDinheiro: 600 },
+      campos: { delivery: 600, entradaDinheiro: 600 },
       detalhesSaidas: [{ descricao: 'Motoboy', valor: 50 }],
     }, cabMaster);
     await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-02',
-      campos: { entradaDinheiro: 400 },
+      campos: { delivery: 400, entradaDinheiro: 400 },
       detalhesSaidas: [{ descricao: 'Gelo', valor: 100 }],
     }, cabMaster);
 
@@ -10677,7 +10747,7 @@ setTimeout(async () => {
     // (02/09), entao a janela abre e o esperado passa a existir.
     await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-03',
-      campos: { entradaDinheiro: 300 }, detalhesSaidas: [],
+      campos: { delivery: 300, entradaDinheiro: 300 }, detalhesSaidas: [],
     }, cabMaster);
     const esperado2 = JSON.parse((await pedir(`/api/sangrias/esperado?unidade=${UNI}&ate=2026-09-03`, cabMaster)).corpo);
 
@@ -10699,7 +10769,7 @@ setTimeout(async () => {
     // mais um dia com entrada, pra abrir janela nova depois da retirada de 03/09
     await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Teste Caixa', grupo: 'ARCFOOD', data: '2026-09-04',
-      campos: { entradaDinheiro: 200 }, detalhesSaidas: [],
+      campos: { delivery: 200, entradaDinheiro: 200 }, detalhesSaidas: [],
     }, cabMaster);
 
     // agora com motivo, a divergencia salva e fica registrada: esperado 200
@@ -10780,7 +10850,7 @@ setTimeout(async () => {
 
     const fech = await postarJson('/api/fechamentos/lancar', {
       unidade: UNI, unidadeNome: 'Loja Edita Saída', grupo: 'ARCFOOD', data: '2026-09-10',
-      campos: { entradaDinheiro: 900, totalSaida: 230 },
+      campos: { delivery: 900, entradaDinheiro: 900, totalSaida: 230 },
       detalhesSaidas: [{ descricao: 'Uber com valor errado', valor: 200 }, { descricao: 'Gelo', valor: 30 }],
     }, cabMaster);
     const fechId = JSON.parse(fech.corpo).id;
@@ -11072,7 +11142,7 @@ setTimeout(async () => {
     const cabMaster = { Authorization: 'Bearer ' + token };
     const descLonga = 'uber para pegar nutella e ingredientes que faltaram de última hora pro bolo de aniversário da equipe';
     await postarJson('/api/fechamentos/lancar', {
-      unidade: 'TESTE_SAIDA_DESC', unidadeNome: 'Loja Teste Descrição', grupo: 'ARCFOOD', data: '2026-08-21', campos: {},
+      unidade: 'TESTE_SAIDA_DESC', unidadeNome: 'Loja Teste Descrição', grupo: 'ARCFOOD', data: '2026-08-21', campos: { delivery: 100, entradaDinheiro: 100 },
       detalhesSaidas: [{ descricao: descLonga, valor: 19 }],
     }, cabMaster);
     const pdfResp = await pedirBinario(`/api/saidas-painel/relatorio.pdf?inicio=2026-08-21&fim=2026-08-21&grupo=ARCFOOD`, cabMaster);
@@ -12002,6 +12072,10 @@ setTimeout(async () => {
     const criado = await fl.create({
       unidade: uni, unidadeNome: 'Teste 2 casas', data: '2026-08-21',
       campos: { adyen: somaTorta, pix: 0.1 + 0.2, delivery: 114.91, food99: 488 },
+      // os números aqui são o OBJETO do teste (reproduzem o float torto do
+      // print), então a diferença é grande de propósito - a observação é o
+      // que a trava nova exige nesse caso
+      observacao: 'Valores de teste do arredondamento.',
       criadoPorEmail: 'teste@teste.local',
     });
     const lido = await fl.getOne(criado.id);
