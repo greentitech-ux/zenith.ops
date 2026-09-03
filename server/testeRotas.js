@@ -9400,11 +9400,15 @@ setTimeout(async () => {
       id: 'UnidTCTeste__2026-08-01', unidade: 'UnidTCTeste', unidadeNome: 'Unidade TC Teste',
       grupo: 'ARCFOOD', data: '2026-08-01', faturamento: 1000, totalDeclarado: 1000, diferenca: 0,
       tc: 4, cancelados: 9, kpisExtras: {},
+      // pedido do Master: o comparativo por unidade passa a somar o dinheiro
+      // que passou pela gaveta - entrada e saída (107+64 = 171 / 30+25 = 55)
+      entradaDinheiro: 107, totalSaida: 30,
     });
     DOCS.set('fechamentosLive/UnidTCTeste__2026-08-02', {
       id: 'UnidTCTeste__2026-08-02', unidade: 'UnidTCTeste', unidadeNome: 'Unidade TC Teste',
       grupo: 'ARCFOOD', data: '2026-08-02', faturamento: 2000, totalDeclarado: 2000, diferenca: 0,
       tc: 0, cancelados: 0, kpisExtras: { total: 12 },
+      entradaDinheiro: 64, totalSaida: 25,
     });
     // DOCS.set grava direto no Firestore falso, por fora de grupos.js/
     // fechamentosLive.js - os caches deles (TTL de 5min/6h, ver createCache)
@@ -9426,6 +9430,17 @@ setTimeout(async () => {
       'TC total soma o campo legado (tc:4) com o KPI Extra "Total" do grupo (kpisExtras.total:12) = 16': /,16(\r?\n|,)/.test(r.corpo),
       'coluna Cancelados não existe mais no cabeçalho': !/Cancelados/i.test(r.corpo),
       'coluna TC total continua no cabeçalho': /TC total/.test(r.corpo),
+      // ENTRADA EM DINHEIRO E TOTAL DE SAÍDA no comparativo por unidade
+      // (pedido do Master). A tabela por DIA e o relatório de fechamentos já
+      // tinham as duas; este era o único lugar que não somava.
+      'as colunas Entrada em dinheiro e Total de saída existem no cabeçalho':
+        /Entrada em dinheiro/.test(r.corpo) && /Total de saída/.test(r.corpo),
+      'e somam os dias da unidade (107+64 = 171 de entrada, 30+25 = 55 de saída)':
+        /171,00/.test(r.corpo) && /55,00/.test(r.corpo),
+      // o relatório é dividido por rede: o SUBTOTAL de cada uma tem que somar
+      // as colunas novas também, senão a rede fecha sem esses dois números
+      'o subtotal da rede também soma as duas colunas':
+        (r.corpo.match(/171,00/g) || []).length >= 2 && (r.corpo.match(/55,00/g) || []).length >= 2,
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okTcComparativo = !falhas.length;
@@ -9443,6 +9458,20 @@ setTimeout(async () => {
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
     const conf = {
       'renderUnidadesTable não soma mais "cancelados"': !/c\.cancelados/.test(html),
+      // a tela tem que oferecer as MESMAS colunas do relatório - divergir aí
+      // faz a pessoa exportar e receber uma tabela diferente da que viu
+      // a asserção é DENTRO de opcoesColunasUnidades: a tabela principal tem
+      // linhas idênticas no seletor dela, então procurar o texto no arquivo
+      // inteiro passava mesmo com a coluna tirada do comparativo
+      'a tela do comparativo oferece e soma Entrada em dinheiro e Total de saída': (() => {
+        const i = html.indexOf('function opcoesColunasUnidades()');
+        const bloco = i < 0 ? '' : html.slice(i, html.indexOf('\n}', i));
+        return /\{key:'entradaDinheiro', label:'Entrada em dinheiro'\}/.test(bloco)
+          && /\{key:'totalSaida', label:'Total de saída'\}/.test(bloco)
+          && /c\.entradaDinheiro \+= Number\(r\.entradaDinheiro\|\|0\)/.test(html)
+          && /c\.totalSaida \+= Number\(r\.totalSaida\|\|0\)/.test(html)
+          && /entradaDinheiro: \(u,c\)=>/.test(html) && /totalSaida: \(u,c\)=>/.test(html);
+      })(),
       'renderUnidadesTable lê TC via valorTc(r, grupo), não r.tc direto': /c\.tc \+= valorTc\(r, grupoKpiDaUnidade\(r\.unidade\)\)/.test(html),
       'campoTcDoGrupo casa o KPI Extra por nome ("Total"), igual à unificação de Canais/Formas': /function campoTcDoGrupo\(grupo\)\{[\s\S]{0,300}chaveLabel\('Total'\)/.test(html),
       'cabeçalho fixo do HTML não tem mais <th>Cancelados</th>': !/<th>Cancelados<\/th>/.test(html),

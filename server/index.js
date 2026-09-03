@@ -5142,17 +5142,27 @@ function campoTcDoGrupo(grupo) {
 }
 
 function prepararFechamentosPorUnidade(rows, listaGrupos) {
+  // Entrada em dinheiro e Total de saída entram aqui por pedido do Master:
+  // o dinheiro que passou pela gaveta da unidade no período é o que decide
+  // sangria e conferência, e o comparativo por unidade era o único lugar que
+  // não somava isso (a tabela por DIA e o relatório de fechamentos já tinham
+  // as duas colunas). Vale nas duas redes: o relatório é dividido por rede
+  // (ver redes.agruparPorRede abaixo), com subtotal em cada uma.
   const colunas = [
     { key: 'rede', label: 'Rede' },
     { key: 'unidade', label: 'Unid.' }, { key: 'qtd', label: 'Fechamentos' }, { key: 'faturamento', label: 'Faturamento' },
-    { key: 'diferenca', label: 'Diferença' }, { key: 'tc', label: 'TC total' },
+    { key: 'diferenca', label: 'Diferença' },
+    { key: 'entradaDinheiro', label: 'Entrada em dinheiro' }, { key: 'totalSaida', label: 'Total de saída' },
+    { key: 'tc', label: 'TC total' },
   ];
   const grupoDe = (u) => (listaGrupos || []).find((g) => (g.unidades || []).includes(u)) || null;
   const porUnidade = {};
   rows.forEach((r) => {
-    const c = (porUnidade[r.unidade] ||= { codigo: r.unidade, nome: r.unidadeNome || r.unidade, qtd: 0, faturamento: 0, diferenca: 0, tc: 0 });
+    const c = (porUnidade[r.unidade] ||= { codigo: r.unidade, nome: r.unidadeNome || r.unidade, qtd: 0, faturamento: 0, diferenca: 0, entradaDinheiro: 0, totalSaida: 0, tc: 0 });
     const campoTc = campoTcDoGrupo(grupoDe(r.unidade));
     c.qtd++; c.faturamento += r.faturamento || 0; c.diferenca += r.diferenca || 0;
+    c.entradaDinheiro += Number(r.entradaDinheiro || 0);
+    c.totalSaida += Number(r.totalSaida || 0);
     c.tc += Number(r.tc || 0) + (campoTc ? Number((r.kpisExtras || {})[campoTc] || 0) : 0);
   });
   const agregados = Object.values(porUnidade);
@@ -5161,6 +5171,7 @@ function prepararFechamentosPorUnidade(rows, listaGrupos) {
   const comoLinha = (c, rede) => ({
     rede, unidade: c.nome, qtd: c.qtd,
     faturamento: reportUtil.fmtMoneyBR(c.faturamento), diferenca: reportUtil.fmtMoneyBR(c.diferenca),
+    entradaDinheiro: reportUtil.fmtMoneyBR(c.entradaDinheiro), totalSaida: reportUtil.fmtMoneyBR(c.totalSaida),
     tc: c.tc.toFixed(0),
   });
 
@@ -5176,16 +5187,18 @@ function prepararFechamentosPorUnidade(rows, listaGrupos) {
     });
     const soma = g.itens.reduce((acc, c) => ({
       qtd: acc.qtd + c.qtd, faturamento: acc.faturamento + c.faturamento, diferenca: acc.diferenca + c.diferenca,
+      entradaDinheiro: acc.entradaDinheiro + c.entradaDinheiro, totalSaida: acc.totalSaida + c.totalSaida,
       tc: acc.tc + c.tc,
-    }), { qtd: 0, faturamento: 0, diferenca: 0, tc: 0 });
+    }), { qtd: 0, faturamento: 0, diferenca: 0, entradaDinheiro: 0, totalSaida: 0, tc: 0 });
     linhas.push(comoLinha({ ...soma, nome: `SUBTOTAL (${g.itens.length} unidade(s))` }, g.nome));
   });
   // com uma rede so, o total geral repetiria o subtotal logo acima
   if (grupos.length > 1) {
     const geral = agregados.reduce((acc, c) => ({
       qtd: acc.qtd + c.qtd, faturamento: acc.faturamento + c.faturamento, diferenca: acc.diferenca + c.diferenca,
+      entradaDinheiro: acc.entradaDinheiro + c.entradaDinheiro, totalSaida: acc.totalSaida + c.totalSaida,
       tc: acc.tc + c.tc,
-    }), { qtd: 0, faturamento: 0, diferenca: 0, tc: 0 });
+    }), { qtd: 0, faturamento: 0, diferenca: 0, entradaDinheiro: 0, totalSaida: 0, tc: 0 });
     // consolidado em folha propria - no pe da ultima rede seria lido como
     // total daquela rede
     linhas.push({ ...comoLinha({ ...geral, nome: 'TOTAL GERAL' }, 'Consolidado'), _novaPagina: true });

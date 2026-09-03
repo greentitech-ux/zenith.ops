@@ -1918,6 +1918,11 @@ function opcoesColunasUnidades(){
     {key:'qtd', label:'Fechamentos'},
     {key:'faturamento', label:'Faturamento'},
     {key:'diferenca', label:'Diferença'},
+    // pedido do Master: o dinheiro que passou pela gaveta da unidade no
+    // período. MESMAS keys do relatório (prepararFechamentosPorUnidade em
+    // index.js) - tela e relatório não podem divergir em coluna
+    {key:'entradaDinheiro', label:'Entrada em dinheiro'},
+    {key:'totalSaida', label:'Total de saída'},
     {key:'tc', label:'TC total'},
   ];
 }
@@ -1929,10 +1934,12 @@ function renderUnidadesTable(rows){
   const refIso = document.getElementById('f-date-end').value;
   const porUnidade = {};
   rows.forEach(r=>{
-    const c = (porUnidade[r.unidade] ||= {qtd:0, faturamento:0, diferenca:0, tc:0});
+    const c = (porUnidade[r.unidade] ||= {qtd:0, faturamento:0, diferenca:0, entradaDinheiro:0, totalSaida:0, tc:0});
     c.qtd++;
     c.faturamento += r.faturamento||0;
     c.diferenca += r.diferenca||0;
+    c.entradaDinheiro += Number(r.entradaDinheiro||0);
+    c.totalSaida += Number(r.totalSaida||0);
     c.tc += valorTc(r, grupoKpiDaUnidade(r.unidade));
   });
   const linhas = Object.entries(porUnidade).sort((a,b)=>b[1].faturamento-a[1].faturamento);
@@ -1944,6 +1951,8 @@ function renderUnidadesTable(rows){
     qtd: (u,c)=>`<td class="valor">${c.qtd}</td>`,
     faturamento: (u,c)=>`<td class="valor">${fmtMoney(c.faturamento)}</td>`,
     diferenca: (u,c)=>{ const cor = c.diferenca<0?'var(--bad)':(c.diferenca>0?'var(--warn)':'var(--ok)'); return `<td class="valor" style="color:${cor}">${fmtMoney(c.diferenca)}</td>`; },
+    entradaDinheiro: (u,c)=>`<td class="valor">${fmtMoney(c.entradaDinheiro)}</td>`,
+    totalSaida: (u,c)=>`<td class="valor">${fmtMoney(c.totalSaida)}</td>`,
     tc: (u,c)=>`<td class="valor">${c.tc.toFixed(0)}</td>`,
   };
   document.getElementById('unidades-body').innerHTML = linhas.length ? linhas.map(([u,c])=>{
