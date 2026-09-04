@@ -98,6 +98,7 @@ const pedidoSemanal = require('./pedidoSemanal');
 const lojaStatus = require('./lojaStatus');
 const qaAprovacoes = require('./qaAprovacoes');
 const alertasCentral = require('./alertasCentral');
+const botIndicadores = require('./botIndicadores');
 const agenteAcoes = require('./agenteAcoes');
 const vigiaScript = require('./vigiaScript');
 const loginCustom = require('./loginCustom');
@@ -293,6 +294,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/refund-requests/publico',
   '/api/solicitacoes/publico',
   '/api/bot/solicitacoes',
+  '/api/bot/indicadores',
   '/decidir.html',
   '/api/solicitacoes/decidir-info',
   '/api/solicitacoes/decidir',
@@ -621,11 +623,15 @@ app.post('/api/solicitacoes/publico', upload.array('anexos', 4), async (req, res
 // entao o dano possivel de um token vazado e baixo - e trocar a env var
 // revoga na hora. ----------
 // devolve true se o token do robo confere; senao ja responde (404 sem env
-// var / 401 token errado) e devolve false - quem chama so faz `return`
-function exigirTokenBot(req, res) {
-  const esperado = process.env.BOT_API_TOKEN || '';
+// var / 401 token errado) e devolve false - quem chama so faz `return`.
+// `envVar` diz QUAL token protege a rota: cada robo tem o seu, de proposito
+// - o do robo de cobrancas (BOT_API_TOKEN) so cria solicitacao, e o do
+// assistente de leitura (BOT_LEITURA_TOKEN) so le. Um vazado nao vira o
+// outro.
+function exigirTokenBot(req, res, envVar = 'BOT_API_TOKEN') {
+  const esperado = process.env[envVar] || '';
   const recebido = String(req.headers['x-bot-token'] || '');
-  if (!esperado) { res.status(404).json({ error: 'Rota desativada (BOT_API_TOKEN não configurado).' }); return false; }
+  if (!esperado) { res.status(404).json({ error: `Rota desativada (${envVar} não configurado).` }); return false; }
   if (!recebido || !senhasIguais(recebido, esperado)) { res.status(401).json({ error: 'Token inválido.' }); return false; }
   return true;
 }
@@ -646,6 +652,75 @@ app.post('/api/bot/solicitacoes', async (req, res) => {
     res.json(registro);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- leitura de indicadores pro assistente do gestor de operacoes
+// (Claude, fora do app, na assinatura do gestor - NAO usa a API da
+// Anthropic; esta rota nao chama modelo nenhum). Token PROPRIO
+// (BOT_LEITURA_TOKEN), separado do robo de cobrancas: este le venda e
+// aquele so cria solicitacao, e um vazado nao serve pro outro.
+// SO LEITURA: fechamentos do periodo (padrao 7 dias ate ontem, ?dias= ate
+// 92), quem nao lancou ontem, quebras de caixa, pedido semanal, alertas da
+// Central em aberto e solicitacoes PENDENTE. Tudo sai dos MESMOS caches que
+// as telas usam (fechamentosLive, sangrias, saltiverso, alertasCentral,
+// solicitacoes) - nenhuma leitura nova no Firestore. Por padrao so as lojas
+// do Grupo Bravo (as 4 ARCFOOD de SP ficam de fora); ?grupo=todos inclui
+// tudo. ?compacto=1 tira as linhas de fechamento e encurta as listas (o
+// briefing diario so precisa dos agregados). Montagem em botIndicadores.js
+// (funcao pura, testavel sem servidor).
+//
+// Limite de frequencia: no maximo UMA chamada aceita por intervalo
+// (BOT_LEITURA_INTERVALO_MS, padrao 10 min); as demais levam 429 com
+// Retry-After. E o teto de custo em codigo: mesmo com o token vazado, ou
+// um script em loop, a rota nao consegue esquentar cache mais que 144x/dia
+// - e o uso previsto e 1x/dia, de manha. Contador em memoria, por
+// processo: zera no boot, o que e aceitavel (o boot em si ja e raro e
+// caro). ----------
+const BOT_LEITURA_INTERVALO_MS = Math.max(0, parseInt(process.env.BOT_LEITURA_INTERVALO_MS || '', 10) || 10 * 60 * 1000);
+let botLeituraUltimaEm = 0;
+app.get('/api/bot/indicadores', async (req, res) => {
+  if (!exigirTokenBot(req, res, 'BOT_LEITURA_TOKEN')) return;
+  const agora = Date.now();
+  const faltaMs = botLeituraUltimaEm + BOT_LEITURA_INTERVALO_MS - agora;
+  if (faltaMs > 0) {
+    const faltaS = Math.ceil(faltaMs / 1000);
+    res.set('Retry-After', String(faltaS));
+    return res.status(429).json({ error: `Limite de frequência: próxima leitura em ${faltaS}s.`, retryAfterSeconds: faltaS });
+  }
+  botLeituraUltimaEm = agora;
+  try {
+    const [lancados, sangriasLancadas, saltiversoLancado, extras, ctxPedido, alertas, todasSolicitacoes] = await Promise.all([
+      fechamentosLive.listAll(),
+      sangrias.listAll().then((l) => l.map(sangrias.comoFechamento)),
+      saltiversoFechamento.listAll().then((l) => l.map(saltiversoFechamento.comoFechamento)),
+      unidadesExtras.mapa().catch(() => ({})),
+      contextoPedidoSemanal(),
+      alertasCentral.listar().catch(() => []),
+      solicitacoes.listAll().catch(() => []),
+    ]);
+    const todos = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas, ...saltiversoLancado]);
+    const incluirTodos = String(req.query.grupo || '').toLowerCase() === 'todos';
+    const unidadesLoja = {};
+    Object.entries({ ...FECHAMENTO_UNIDADES_NOMES, ...extras }).forEach(([codigo, nome]) => {
+      if (codigo === 'Administrativa') return;
+      if (!incluirTodos && ARCFOOD_FECHAMENTO.has(codigo)) return;
+      unidadesLoja[codigo] = nome;
+    });
+    res.json(botIndicadores.montarIndicadores({
+      fechamentos: todos,
+      unidadesLoja,
+      pedidoSemanal: pedidoSemanal.statusDasUnidades(ctxPedido.base, ctxPedido),
+      alertas,
+      solicitacoes: todasSolicitacoes,
+      hoje: hojeBrasiliaISO(),
+      dias: req.query.dias,
+      compacto: ['1', 'true', 'sim'].includes(String(req.query.compacto || '').toLowerCase()),
+    }));
+  } catch (err) {
+    // erro nao "gasta" a vez: deixa tentar de novo em seguida
+    botLeituraUltimaEm = 0;
+    res.status(500).json({ error: err.message });
   }
 });
 
