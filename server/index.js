@@ -98,7 +98,6 @@ const pedidoSemanal = require('./pedidoSemanal');
 const lojaStatus = require('./lojaStatus');
 const qaAprovacoes = require('./qaAprovacoes');
 const alertasCentral = require('./alertasCentral');
-const botIndicadores = require('./botIndicadores');
 const agenteAcoes = require('./agenteAcoes');
 const vigiaScript = require('./vigiaScript');
 const loginCustom = require('./loginCustom');
@@ -294,7 +293,6 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/refund-requests/publico',
   '/api/solicitacoes/publico',
   '/api/bot/solicitacoes',
-  '/api/bot/indicadores',
   '/decidir.html',
   '/api/solicitacoes/decidir-info',
   '/api/solicitacoes/decidir',
@@ -648,51 +646,6 @@ app.post('/api/bot/solicitacoes', async (req, res) => {
     res.json(registro);
   } catch (err) {
     res.status(400).json({ error: err.message });
-  }
-});
-
-// ---------- leitura de indicadores pro assistente do gestor de operacoes
-// (Claude, fora do app) - mesmo token fixo do robo acima (BOT_API_TOKEN).
-// SO LEITURA: fechamentos do periodo (padrao 7 dias ate ontem, ?dias= ate
-// 92), quem nao lancou ontem, quebras de caixa, pedido semanal, alertas da
-// Central em aberto e solicitacoes PENDENTE. Tudo sai dos MESMOS caches que
-// as telas usam (fechamentosLive, sangrias, saltiverso, alertasCentral,
-// solicitacoes) - nenhuma leitura nova no Firestore. Por padrao so as lojas
-// do Grupo Bravo (as 4 ARCFOOD de SP ficam de fora); ?grupo=todos inclui
-// tudo. Montagem em botIndicadores.js (funcao pura, testavel sem servidor).
-// Um token vazado le numero de venda, entao trocar a env var revoga na
-// hora - igual ao robo de cobrancas. ----------
-app.get('/api/bot/indicadores', async (req, res) => {
-  if (!exigirTokenBot(req, res)) return;
-  try {
-    const [lancados, sangriasLancadas, saltiversoLancado, extras, ctxPedido, alertas, todasSolicitacoes] = await Promise.all([
-      fechamentosLive.listAll(),
-      sangrias.listAll().then((l) => l.map(sangrias.comoFechamento)),
-      saltiversoFechamento.listAll().then((l) => l.map(saltiversoFechamento.comoFechamento)),
-      unidadesExtras.mapa().catch(() => ({})),
-      contextoPedidoSemanal(),
-      alertasCentral.listar().catch(() => []),
-      solicitacoes.listAll().catch(() => []),
-    ]);
-    const todos = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas, ...saltiversoLancado]);
-    const incluirTodos = String(req.query.grupo || '').toLowerCase() === 'todos';
-    const unidadesLoja = {};
-    Object.entries({ ...FECHAMENTO_UNIDADES_NOMES, ...extras }).forEach(([codigo, nome]) => {
-      if (codigo === 'Administrativa') return;
-      if (!incluirTodos && ARCFOOD_FECHAMENTO.has(codigo)) return;
-      unidadesLoja[codigo] = nome;
-    });
-    res.json(botIndicadores.montarIndicadores({
-      fechamentos: todos,
-      unidadesLoja,
-      pedidoSemanal: pedidoSemanal.statusDasUnidades(ctxPedido.base, ctxPedido),
-      alertas,
-      solicitacoes: todasSolicitacoes,
-      hoje: hojeBrasiliaISO(),
-      dias: req.query.dias,
-    }));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
   }
 });
 
