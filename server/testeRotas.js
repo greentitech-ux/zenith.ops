@@ -12769,6 +12769,110 @@ setTimeout(async () => {
   if (!okDuplicadaExcluir) ruins += 1;
   console.log(`${okDuplicadaExcluir ? '✓' : '✗'} Unidades: dá pra apagar a duplicata ZERADA, e a que tem histórico é recusada`);
 
+  // ---- ROTA DO ASSISTENTE: GET /api/bot/indicadores ----
+  // Mesmo token do robo de cobrancas, mas LEITURA de venda: o que se exige
+  // aqui e (1) sem env var a rota nem existe, (2) token errado e 401,
+  // (3) com token certo sai o resumo, SEM as lojas ARCFOOD e sem a unidade
+  // Administrativa por padrao, e (4) a conta em si (periodo x anterior, quem
+  // nao lancou ontem, quebra relevante) esta certa - testada direto na
+  // funcao pura, com data fixa, pra nao depender do dia em que roda.
+  let okBotInd = false;
+  try {
+    const hojeBR = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const bi = require(__dirname + '/botIndicadores.js');
+    const ontemBR = bi.somarDiasISO(hojeBR, -1);
+
+    const envAntes = process.env.BOT_API_TOKEN;
+    delete process.env.BOT_API_TOKEN;
+    const semEnv = await pedir('/api/bot/indicadores', { 'x-bot-token': 'qualquer' });
+    process.env.BOT_API_TOKEN = 'token-bot-teste';
+    const tokenErrado = await pedir('/api/bot/indicadores', { 'x-bot-token': 'errado' });
+    const semToken = await pedir('/api/bot/indicadores');
+
+    // semeia um fechamento de ontem numa loja Bravo e outro numa ARCFOOD
+    DOCS.set('fechamentosLive/bot-caruaru', { id: 'bot-caruaru', unidade: 'Dominos Caruaru', unidadeNome: 'Dominos Caruaru', data: ontemBR, faturamento: 4321.5, quebra: -80, tc: 60 });
+    DOCS.set('fechamentosLive/bot-tatuape', { id: 'bot-tatuape', unidade: '19889', unidadeNome: 'Dom Tatuape', data: ontemBR, faturamento: 999 });
+    require(__dirname + '/fechamentosLive.js').invalidarCache();
+    const certo = await pedir('/api/bot/indicadores?dias=7', { 'x-bot-token': 'token-bot-teste' });
+    const todos = await pedir('/api/bot/indicadores?dias=7&grupo=todos', { 'x-bot-token': 'token-bot-teste' });
+    if (envAntes === undefined) delete process.env.BOT_API_TOKEN; else process.env.BOT_API_TOKEN = envAntes;
+
+    const d = certo.status === 200 ? JSON.parse(certo.corpo) : {};
+    const dTodos = todos.status === 200 ? JSON.parse(todos.corpo) : {};
+    const codigos = (d.unidades || []).map((u) => u.codigo);
+
+    // ---- a conta, na funcao pura, com calendario fixo
+    const puro = bi.montarIndicadores({
+      hoje: '2026-09-04', dias: 3,
+      unidadesLoja: { A: 'Loja A', B: 'Loja B' },
+      fechamentos: [
+        { unidade: 'A', unidadeNome: 'Loja A', data: '2026-09-03', faturamento: 100, quebra: -60, tc: 50 },
+        { unidade: 'A', unidadeNome: 'Loja A', data: '2026-09-02', faturamento: 100, quebra: 0, tc: 70 },
+        { unidade: 'A', unidadeNome: 'Loja A', data: '2026-09-01', faturamento: 100 },
+        { unidade: 'A', unidadeNome: 'Loja A', data: '2026-08-31', faturamento: 50 },   // periodo anterior (29-31/08)
+        { unidade: 'A', unidadeNome: 'Loja A', data: '2026-08-29', faturamento: 50 },
+        { unidade: 'A', unidadeNome: 'Loja A', data: '2026-08-28', faturamento: 9999 }, // fora dos dois periodos
+        { unidade: 'B', unidadeNome: 'Loja B', data: '2026-09-02', faturamento: 40 },
+        { unidade: 'Z', unidadeNome: 'Fora', data: '2026-09-03', faturamento: 5000 },   // unidade nao listada: ignorada
+        { unidade: 'A', unidadeNome: 'Loja A', data: '2026-09-04', faturamento: 777 },  // "hoje" nunca entra
+      ],
+      pedidoSemanal: [
+        { codigo: 'A', nome: 'Loja A', estado: 'feito', dataPedido: '2026-09-05', diasRestantes: 1, atraso: null, confirmacao: { confirmadoEm: 'x', porNome: 'Ger' } },
+        { codigo: 'B', nome: 'Loja B', estado: 'proximo', dataPedido: '2026-09-05', diasRestantes: 1, atraso: '2026-08-29' },
+        { codigo: 'Z', nome: 'Fora', estado: 'fora', dataPedido: '2026-09-05', diasRestantes: 1 },
+      ],
+      alertas: [
+        { id: 'a1', tipo: 'noc-offline', titulo: 'Loja offline', criadoEm: '2026-09-03T10:00:00Z', atendidoEm: null, critico: true },
+        { id: 'a2', tipo: 'noc-offline', titulo: 'Ja atendido', criadoEm: '2026-09-02T10:00:00Z', atendidoEm: '2026-09-02T11:00:00Z' },
+      ],
+      solicitacoes: [
+        { numeroTicket: 1, tipo: 'pagamento', status: 'PENDENTE', titulo: 'Luz', unidadeNome: 'Loja A', valorEstimado: '120.5', criadoEm: '2026-09-02T00:00:00Z' },
+        { numeroTicket: 2, tipo: 'compra', status: 'PENDENTE', titulo: 'Caixas', unidadeNome: 'Loja B', criadoEm: '2026-09-01T00:00:00Z' },
+        { numeroTicket: 3, tipo: 'pagamento', status: 'APROVADO', titulo: 'Agua', unidadeNome: 'Loja A', criadoEm: '2026-09-01T00:00:00Z' },
+      ],
+    });
+    const lojaA = (puro.porUnidade || []).find((u) => u.unidade === 'A') || {};
+
+    const conf = {
+      'sem BOT_API_TOKEN a rota responde 404 (desligada)': semEnv.status === 404,
+      'token errado é 401': tokenErrado.status === 401,
+      'sem header também é 401': semToken.status === 401,
+      'com o token certo responde 200 com o resumo': certo.status === 200 && d.resumo && Array.isArray(d.porUnidade) && Array.isArray(d.fechamentos),
+      'a rota é pública em relação ao Basic Auth do site (não pediu usuário/senha)': certo.status !== 401 || !/Basic/i.test(certo.corpo),
+      'por padrão as lojas ARCFOOD (SP) ficam de fora': codigos.length > 0 && !codigos.includes('19889') && !codigos.includes('19821'),
+      'e a unidade Administrativa também': !codigos.includes('Administrativa'),
+      'Caruaru está na lista': codigos.includes('Dominos Caruaru'),
+      'o fechamento semeado de ontem em Caruaru aparece': (d.fechamentos || []).some((f) => f.unidade === 'Dominos Caruaru' && f.data === ontemBR && f.faturamento === 4321.5),
+      'e o de Tatuapé (ARCFOOD) não': !(d.fechamentos || []).some((f) => f.unidade === '19889'),
+      'com ?grupo=todos o Tatuapé entra': (dTodos.unidades || []).some((u) => u.codigo === '19889') && (dTodos.fechamentos || []).some((f) => f.unidade === '19889'),
+      'o resumo diz quantas lojas lançaram ontem e lista quem faltou': d.resumo && d.resumo.lojasLancaramOntem >= 1 && Array.isArray(d.resumo.naoLancaramOntem) && !d.resumo.naoLancaramOntem.some((u) => u.unidade === 'Dominos Caruaru'),
+      'a quebra de R$ -80 de Caruaru entra como relevante': (d.quebrasRelevantes || []).some((q) => q.unidade === 'Dominos Caruaru' && q.quebra === -80),
+      'a resposta não vaza campos que não ajudam (email, caixaInicial)': (d.fechamentos || []).every((f) => f.email === undefined && f.caixaInicial === undefined),
+      // ---- funcao pura
+      'periodo de 3 dias termina ONTEM (03/09) e começa 01/09': puro.periodo.inicio === '2026-09-01' && puro.periodo.fim === '2026-09-03' && puro.ontem === '2026-09-03',
+      'periodo anterior é 29→31/08': puro.periodoAnterior.inicio === '2026-08-29' && puro.periodoAnterior.fim === '2026-08-31',
+      'faturamento do periodo soma só A e B dentro da janela (340)': puro.resumo.faturamentoPeriodo === 340,
+      'periodo anterior soma 100 e a variação dá +240%': puro.resumo.faturamentoPeriodoAnterior === 100 && puro.resumo.variacaoPct === 240,
+      'faturamento de ontem é 100 (só A lançou 03/09)': puro.resumo.faturamentoOntem === 100 && puro.resumo.lojasLancaramOntem === 1,
+      'Loja B aparece em quem não lançou ontem': puro.resumo.naoLancaramOntem.length === 1 && puro.resumo.naoLancaramOntem[0].unidade === 'B',
+      // TC e quantidade de pedidos: 50 + 70 = 120 pedidos em R$ 200 (so os dias com TC) = ticket medio R$ 1,67
+      'Loja A: 3 dias lançados, média 100, 120 pedidos, ticket médio 1,67, quebra -60': lojaA.diasLancados === 3 && lojaA.mediaDiaria === 100 && lojaA.pedidos === 120 && lojaA.ticketMedio === 1.67 && lojaA.quebra === -60,
+      'resumo soma os pedidos do período e de ontem (120 / 50)': puro.resumo.pedidosPeriodo === 120 && puro.resumo.pedidosOntem === 50,
+      'Loja A: comparativo por unidade (300 vs 100 = +200%)': lojaA.faturamentoPeriodoAnterior === 100 && lojaA.variacaoPct === 200,
+      'unidade fora da lista e o dia de hoje nunca entram': !puro.fechamentos.some((f) => f.unidade === 'Z' || f.data === '2026-09-04'),
+      'quebra de -60 entra como relevante, a de 0 não': puro.quebrasRelevantes.length === 1 && puro.quebrasRelevantes[0].quebra === -60,
+      'pedido semanal: 2 lojas, 1 feito, 1 atrasado, sem a unidade de fora': puro.pedidoSemanal.total === 2 && puro.pedidoSemanal.feitos === 1 && puro.pedidoSemanal.atrasados === 1,
+      'alertas: só o não atendido': puro.alertasCentral.abertos === 1 && puro.alertasCentral.lista[0].id === 'a1',
+      'solicitações: só PENDENTE, contadas por tipo, valor vira número': puro.solicitacoes.pendentes === 2 && puro.solicitacoes.porTipo.pagamento === 1 && puro.solicitacoes.porTipo.compra === 1 && puro.solicitacoes.lista[1].valorEstimado === 120.5,
+      '?dias= acima do teto (92) é cortado': bi.montarIndicadores({ hoje: '2026-09-04', dias: 500 }).periodo.dias === 92,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okBotInd = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okBotInd = false; console.log('  erro: ' + e.message); }
+  if (!okBotInd) ruins += 1;
+  console.log(`${okBotInd ? '✓' : '✗'} Bot: GET /api/bot/indicadores exige BOT_API_TOKEN, só lê, e a conta do período fecha`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
