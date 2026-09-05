@@ -490,7 +490,7 @@ const DIRECOES_KPI = [
   ['menor-melhor', 'Ruim quando SOBE'],
   ['maior-melhor', 'Ruim quando CAI'],
 ];
-function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, tambemInicial, somaEmInicial, manualInicial, direcaoInicial, origemInicial, essencialInicial){
+function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, tambemInicial, somaEmInicial, manualInicial, direcaoInicial, origemInicial, essencialInicial, ehTcInicial){
   const container = document.getElementById(containerId);
   const ehKpi = containerId.includes('kpis');
   const ehCanal = containerId.includes('canais');
@@ -517,6 +517,9 @@ function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, t
       </label>
       <label title="Canal e forma já são obrigatórios sempre. Marque aqui o KPI que a foto TAMBÉM precisa trazer (ex: Valor Total Taxa de Entrega): enquanto ele não vier, a loja pode tentar outra foto; depois que todos vierem, a tela para de aceitar foto nova e o resto é digitado.">
         <input type="checkbox" class="kpi-essencial-checkbox" ${essencialInicial?'checked':''}> 📸 a foto precisa trazer este KPI
+      </label>
+      <label title="Cada franquia chama a quantidade de pedidos de um jeito (Total, Quantidade de Pedidos, C Total Clientes). Marque aqui o KPI que é o TC desta franquia: é ele que vira 'TC total' no Comparativo por unidade, no relatório e nos indicadores do bot. Sem marca, o sistema reconhece esses três nomes.">
+        <input type="checkbox" class="kpi-ehtc-checkbox" ${ehTcInicial?'checked':''}> 🔢 este KPI é o TC (quantidade de pedidos/clientes)
       </label>
     </div>` : '';
   const somaEmKpi = ehKpi ? `<label class="linha-kpi-soma-em">Somar em
@@ -599,6 +602,8 @@ function lerKpis(containerId){
       } else {
         const chkEss = linha.querySelector('.kpi-essencial-checkbox');
         item.essencial = chkEss ? chkEss.checked : false;
+        const chkTc = linha.querySelector('.kpi-ehtc-checkbox');
+        item.ehTc = chkTc ? chkTc.checked : false;
       }
       return item;
     })
@@ -777,7 +782,7 @@ function abrirEdicaoGrupo(id){
   document.getElementById('e-formas').innerHTML = '';
   (g.formasPagamentoExtras||[]).forEach(k=>adicionarKpi('e-formas', k.label, null, k.operacao, k.tambemNoOutroTotal, null, k.manual));
   document.getElementById('e-kpis').innerHTML = '';
-  (g.kpisExtras||[]).forEach(k=>adicionarKpi('e-kpis', k.label, k.tipo, null, null, k.somaEm, null, k.direcao, k.origem, k.essencial));
+  (g.kpisExtras||[]).forEach(k=>adicionarKpi('e-kpis', k.label, k.tipo, null, null, k.somaEm, null, k.direcao, k.origem, k.essencial, k.ehTc));
   responsaveisChecksHtml('e-responsaveis', new Set(g.responsaveis||[]));
   document.getElementById('grupo-err').classList.add('hidden');
   grupoOverlay.classList.add('show');

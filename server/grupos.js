@@ -111,6 +111,12 @@ function sanitizarCamposExtras(lista) {
       // (na dele e o "Valor Total Taxa de Entrega"). Marcar por nome no
       // codigo quebraria no dia em que alguem renomear o KPI (CLAUDE.md §1).
       if (k?.essencial != null) item.essencial = !!k.essencial;
+      // TC = quantidade de pedidos/clientes da loja. Cada franquia chama de um
+      // jeito ("Total" nas Domino's, "C Total Clientes" na MilkyMoo,
+      // "Quantidade de Pedidos" na maioria) - a marca diz QUAL KPI e o TC
+      // sem depender do nome (CLAUDE.md §1: rotulo muda, identificador nao).
+      // Sem a marca, campoTcDoGrupo() cai nos tres nomes conhecidos.
+      if (k?.ehTc != null) item.ehTc = !!k.ehTc;
       // ORIGEM: de onde o valor do KPI vem. Hoje so 'remakesDoDia' - o total
       // de pizzas descartadas registradas no Carrinho naquele dia (ver
       // abastecimentoCarrinho.remakesDoDia).
@@ -286,4 +292,34 @@ async function ensureGrupoSaltiverso() {
 // invalidarCache exportado pro teste conseguir trocar os grupos em memoria
 // entre as conferencias (o cache e de 5 min - sem isto o teste media sempre
 // o mesmo estado e passava sem provar nada)
-module.exports = { list, create, update, remove, sanitizarCamposExtras, grupoDaUnidade, ensureGrupoSaltiverso, slugify, invalidarCache: gruposCache.invalidar };
+// ---------------------------------------------------------------------------
+// TC (quantidade de pedidos) - RESOLVEDOR UNICO
+//
+// O campo fixo `tc` da planilha nao e mais preenchido por lancamento do
+// sistema: o TC vive nos KPI's extras do grupo, com um nome diferente em cada
+// franquia. Ate aqui so "Total" era reconhecido (index.js e fechamentos.html,
+// cada um com a sua copia), e o bot lia so `f.tc` - MilkyMoo e as lojas com
+// "Quantidade de Pedidos" saiam com TC zero em toda tela e no e-mail.
+//
+// Ordem: a marca explicita (ehTc, na tela de Grupos) manda; sem marca, os
+// tres nomes que existem hoje. Quem mostra ou soma TC chama isto - uma regra,
+// tres consumidores (comparativo por unidade, relatorio CSV/PDF, bot).
+const NOMES_DE_TC = ['Total', 'Quantidade de Pedidos', 'C Total Clientes'];
+function chaveRotulo(label) {
+  return String(label || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+function campoTcDoGrupo(grupo) {
+  const kpis = (grupo && Array.isArray(grupo.kpisExtras)) ? grupo.kpisExtras : [];
+  const marcado = kpis.find((k) => k && k.ehTc === true);
+  if (marcado) return marcado.campo;
+  const alvos = new Set(NOMES_DE_TC.map(chaveRotulo));
+  const porNome = kpis.find((k) => k && alvos.has(chaveRotulo(k.label)));
+  return porNome ? porNome.campo : null;
+}
+// legado da planilha (f.tc) + KPI do grupo - mesma soma do valorTc da tela
+function tcDoFechamento(f, grupo) {
+  const campo = campoTcDoGrupo(grupo);
+  return Number((f && f.tc) || 0) + (campo ? Number(((f && f.kpisExtras) || {})[campo] || 0) : 0);
+}
+
+module.exports = { list, create, update, remove, sanitizarCamposExtras, grupoDaUnidade, ensureGrupoSaltiverso, slugify, invalidarCache: gruposCache.invalidar, campoTcDoGrupo, tcDoFechamento, NOMES_DE_TC };

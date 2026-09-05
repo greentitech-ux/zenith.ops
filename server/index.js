@@ -706,7 +706,7 @@ app.get('/api/bot/indicadores', async (req, res) => {
 // junta as fontes (todas cacheadas) e monta o objeto de indicadores - usado
 // pela rota acima e pelo e-mail diario abaixo, pra os dois sairem IGUAIS
 async function montarIndicadoresBot({ dias, compacto = false, incluirTodos = false } = {}) {
-  const [lancados, sangriasLancadas, saltiversoLancado, extras, ctxPedido, alertas, todasSolicitacoes] = await Promise.all([
+  const [lancados, sangriasLancadas, saltiversoLancado, extras, ctxPedido, alertas, todasSolicitacoes, listaGrupos] = await Promise.all([
     fechamentosLive.listAll(),
     sangrias.listAll().then((l) => l.map(sangrias.comoFechamento)),
     saltiversoFechamento.listAll().then((l) => l.map(saltiversoFechamento.comoFechamento)),
@@ -714,8 +714,15 @@ async function montarIndicadoresBot({ dias, compacto = false, incluirTodos = fal
     contextoPedidoSemanal(),
     alertasCentral.listar().catch(() => []),
     solicitacoes.listAll().catch(() => []),
+    grupos.list().catch(() => []),
   ]);
-  const todos = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas, ...saltiversoLancado]);
+  const mesclados = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas, ...saltiversoLancado]);
+  // TC: o bot le `f.tc`, mas o TC das lojas vive nos KPI's do grupo com um
+  // nome por franquia (ver grupos.campoTcDoGrupo). Resolve aqui, antes de
+  // entregar ao botIndicadores (que e puro e nao conhece grupo) - senao
+  // pedidos e ticket medio saem zerados pra MilkyMoo e "Quantidade de Pedidos"
+  const grupoDe = (u) => (listaGrupos || []).find((g) => (g.unidades || []).includes(u)) || null;
+  const todos = mesclados.map((f) => ({ ...f, tc: grupos.tcDoFechamento(f, grupoDe(f.unidade)) }));
   const unidadesLoja = {};
   Object.entries({ ...FECHAMENTO_UNIDADES_NOMES, ...extras }).forEach(([codigo, nome]) => {
     if (codigo === 'Administrativa') return;
@@ -5272,10 +5279,10 @@ async function montarRelatorioFechamentos(req) {
 // por nome (chaveLabel) usado pra unificar Canais/Formas na tela e no
 // relatorio principal - sem grupo, ou sem KPI com esse nome, cai so no
 // campo legado (fechamento antigo vindo de planilha).
+// a regra mora em grupos.js (marca ehTc, senao os nomes conhecidos) - esta
+// funcao so existe pra os chamadores antigos nao mudarem
 function campoTcDoGrupo(grupo) {
-  const alvo = fechamentosReport.chaveLabel('Total');
-  const k = grupo && (grupo.kpisExtras || []).find((x) => fechamentosReport.chaveLabel(x.label) === alvo);
-  return k ? k.campo : null;
+  return grupos.campoTcDoGrupo(grupo);
 }
 
 function prepararFechamentosPorUnidade(rows, listaGrupos) {

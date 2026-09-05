@@ -2098,9 +2098,17 @@ function valorColuna(d, col){
 // planilha nao e mais preenchido por lancamento do sistema, so por KPI's
 // Extras dinamico de /grupos.html). Mesmo casamento por nome (chaveLabel)
 // que colunasValores usa pra unificar Canais/Formas por baixo.
+// ESPELHO de grupos.campoTcDoGrupo (servidor): a marca "este KPI é o TC" da
+// tela de Grupos manda; sem marca, os nomes que as franquias usam hoje -
+// "Total" (Domino's), "Quantidade de Pedidos" (maioria), "C Total Clientes"
+// (MilkyMoo). Só "Total" era reconhecido, e as outras saíam com TC zero.
+const NOMES_DE_TC = ['Total', 'Quantidade de Pedidos', 'C Total Clientes'];
 function campoTcDoGrupo(grupo){
-  const alvo = chaveLabel('Total');
-  const k = grupo && (grupo.kpisExtras||[]).find(x=>chaveLabel(x.label)===alvo);
+  const kpis = grupo ? (grupo.kpisExtras||[]) : [];
+  const marcado = kpis.find(k=>k && k.ehTc===true);
+  if(marcado) return marcado.campo;
+  const alvos = new Set(NOMES_DE_TC.map(chaveLabel));
+  const k = kpis.find(x=>x && alvos.has(chaveLabel(x.label)));
   return k ? k.campo : null;
 }
 function valorTc(d, grupo){

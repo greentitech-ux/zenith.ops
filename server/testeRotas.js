@@ -1180,6 +1180,7 @@ setTimeout(async () => {
       unidades: ['AERO'],
       kpisExtras: [
         { label: 'Valor Total Taxa de Entrega', tipo: 'moeda', essencial: true },
+        { label: 'Quantidade de Pedidos', tipo: 'quantidade', ehTc: true },
         { label: 'Lead Time', tipo: 'quantidade', essencial: false },
       ],
       canaisVendaExtras: [{ label: 'Delivery - Moto Especi' }, { label: 'CarryOut' }],
@@ -1189,12 +1190,21 @@ setTimeout(async () => {
     const kpiLead = (salvo.kpisExtras || []).find((k) => k.label === 'Lead Time');
 
     const conf = {
+      'a marca "este KPI é o TC" é gravada por KPI e a tela oferece/reabre': (() => {
+        const kTc = (salvo.kpisExtras || []).find((k) => k.label === 'Quantidade de Pedidos');
+        return !!kTc && kTc.ehTc === true && kpiTaxa.ehTc === undefined
+          && /kpi-ehtc-checkbox/.test(htmlG) && /este KPI é o TC/.test(htmlG)
+          && /k\.direcao, k\.origem, k\.essencial, k\.ehTc\)/.test(htmlG)
+          && /if \(k\?\.ehTc != null\) item\.ehTc = !!k\.ehTc;/.test(srcG);
+      })(),
       'a marca "a foto precisa trazer" é gravada por KPI':
         !!kpiTaxa && kpiTaxa.essencial === true && !!kpiLead && kpiLead.essencial === false,
       'o Master marca isso na tela de Grupos':
         /kpi-essencial-checkbox/.test(htmlG) && /a foto precisa trazer este KPI/.test(htmlG),
+      // o ehTc entrou como ultimo argumento depois (ver teste do TC) - a
+      // asserção segue a chamada como ela e hoje
       'reabrir o grupo pra editar traz a marca de volta (senão ela se perde)':
-        /adicionarKpi\('e-kpis', k\.label, k\.tipo, null, null, k\.somaEm, null, k\.direcao, k\.origem, k\.essencial\)/.test(htmlG),
+        /adicionarKpi\('e-kpis', k\.label, k\.tipo, null, null, k\.somaEm, null, k\.direcao, k\.origem, k\.essencial, k\.ehTc\)/.test(htmlG),
       // canal e forma são o dinheiro do dia: essenciais sempre, sem depender
       // de o Master marcar nada
       'canal e forma são essenciais sempre, e o "digitado na mão" fica de fora':
@@ -9602,6 +9612,32 @@ setTimeout(async () => {
       ['pl-tc-1', 'Mooca', '01/08/2026', 'R$ 100,00', '7'],
     );
 
+    // TC com OUTROS nomes (pedido do Master: "na maioria dos grupos e
+    // Quantidade de Pedidos, nas Domino's Total, na MilkyMoo C Total
+    // Clientes - precisamos que o TC receba esses valores"). Antes so
+    // "Total" era reconhecido e estas duas saiam com TC zero.
+    DOCS.set('grupos/g-tc-milky', {
+      id: 'g-tc-milky', nome: 'Grupo TC MilkyMoo', unidades: ['UnidTCMilky'],
+      kpisExtras: [{ label: 'C Total Clientes', campo: 'cTotalClientes', tipo: 'quantidade' }],
+      canaisVendaExtras: [], formasPagamentoExtras: [],
+    });
+    DOCS.set('fechamentosLive/UnidTCMilky__2026-08-01', {
+      id: 'UnidTCMilky__2026-08-01', unidade: 'UnidTCMilky', unidadeNome: 'Unidade TC Milky',
+      grupo: 'g-tc-milky', data: '2026-08-01', faturamento: 500, totalDeclarado: 500, diferenca: 0,
+      tc: 0, kpisExtras: { cTotalClientes: 38 },
+    });
+    // KPI com nome que NENHUMA lista conhece, mas MARCADO como TC em Grupos:
+    // a marca manda - e a prova de que nao e so lista de nomes
+    DOCS.set('grupos/g-tc-marcado', {
+      id: 'g-tc-marcado', nome: 'Grupo TC marcado', unidades: ['UnidTCMarcado'],
+      kpisExtras: [{ label: 'Total', campo: 'total', tipo: 'quantidade' }, { label: 'Pedidos PDV', campo: 'pedidosPdv', tipo: 'quantidade', ehTc: true }],
+      canaisVendaExtras: [], formasPagamentoExtras: [],
+    });
+    DOCS.set('fechamentosLive/UnidTCMarcado__2026-08-01', {
+      id: 'UnidTCMarcado__2026-08-01', unidade: 'UnidTCMarcado', unidadeNome: 'Unidade TC Marcado',
+      grupo: 'g-tc-marcado', data: '2026-08-01', faturamento: 700, totalDeclarado: 700, diferenca: 0,
+      tc: 0, kpisExtras: { total: 999, pedidosPdv: 21 },
+    });
     DOCS.set('grupos/g-tc-teste', {
       id: 'g-tc-teste', nome: 'Grupo TC teste', unidades: ['UnidTCTeste'],
       kpisExtras: [{ label: 'Total', campo: 'total', tipo: 'quantidade' }],
@@ -9637,6 +9673,8 @@ setTimeout(async () => {
       '/api/fechamentos/relatorio-unidades.csv?unidades=UnidTCTeste&inicio=2026-08-01&fim=2026-08-02',
       token ? { Authorization: 'Bearer ' + token } : {},
     );
+    const rMilky = await pedir('/api/fechamentos/relatorio-unidades.csv?unidades=UnidTCMilky&inicio=2026-08-01&fim=2026-08-02', token ? { Authorization: 'Bearer ' + token } : {});
+    const rMarcado = await pedir('/api/fechamentos/relatorio-unidades.csv?unidades=UnidTCMarcado&inicio=2026-08-01&fim=2026-08-02', token ? { Authorization: 'Bearer ' + token } : {});
 
     const conferencias = {
       'linhaParaFechamento lê TC pela coluna "Quantidade de Pedidos" quando não tem "TC"': fechQtdPedidos.tc === 7,
@@ -9644,6 +9682,35 @@ setTimeout(async () => {
       'TC total soma o campo legado (tc:4) com o KPI Extra "Total" do grupo (kpisExtras.total:12) = 16': /,16(\r?\n|,)/.test(r.corpo),
       'coluna Cancelados não existe mais no cabeçalho': !/Cancelados/i.test(r.corpo),
       'coluna TC total continua no cabeçalho': /TC total/.test(r.corpo),
+      // ---- TC com outros nomes / marcado (ver DOCS acima). O CSV abaixo e
+      // so de UnidTCTeste; estes dois saem em leituras proprias
+      'MilkyMoo: "C Total Clientes" vira TC total (38)': (() => {
+        const linha = (rMilky.corpo || '').split(/\r?\n/).find((l) => /Unidade TC Milky/.test(l)) || '';
+        return rMilky.status === 200 && /,38(\r?\n|,|$)/.test(linha);
+      })(),
+      'KPI marcado como TC vence o "Total" do mesmo grupo (21, não 999)': (() => {
+        const linha = (rMarcado.corpo || '').split(/\r?\n/).find((l) => /Unidade TC Marcado/.test(l)) || '';
+        return rMarcado.status === 200 && /,21(\r?\n|,|$)/.test(linha) && !/,999(\r?\n|,|$)/.test(linha);
+      })(),
+      // o resolvedor e UM so, no servidor, e a tela espelha a mesma regra
+      'a regra do TC mora em grupos.js e index.js delega pra ela': (() => {
+        const g = require('/home/user/adyen-monitor/server/grupos.js');
+        const G = (k) => ({ kpisExtras: k });
+        const srcI = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+        return g.campoTcDoGrupo(G([{ campo: 'total', label: 'Total' }])) === 'total'
+          && g.campoTcDoGrupo(G([{ campo: 'qtd', label: 'Quantidade de Pedidos' }])) === 'qtd'
+          && g.campoTcDoGrupo(G([{ campo: 'ctc', label: 'C Total Clientes' }])) === 'ctc'
+          && g.campoTcDoGrupo(G([{ campo: 'total', label: 'Total' }, { campo: 'x', label: 'Pedidos PDV', ehTc: true }])) === 'x'
+          && g.campoTcDoGrupo(G([{ campo: 'lt', label: 'Lead Time' }])) === null
+          && g.tcDoFechamento({ tc: 4, kpisExtras: { ctc: 38 } }, G([{ campo: 'ctc', label: 'C Total Clientes' }])) === 42
+          && /return grupos\.campoTcDoGrupo\(grupo\);/.test(srcI);
+      })(),
+      'fechamentos.html espelha a regra (marca primeiro, depois os três nomes)': (() => {
+        const h = require('fs').readFileSync(__dirname + '/public/fechamentos.html', 'utf8');
+        const i = h.indexOf('function campoTcDoGrupo(grupo){'); const bloco = i < 0 ? '' : h.slice(i, h.indexOf('\n}', i));
+        return /k\.ehTc===true/.test(bloco) && /NOMES_DE_TC\.map\(chaveLabel\)/.test(bloco)
+          && /const NOMES_DE_TC = \['Total', 'Quantidade de Pedidos', 'C Total Clientes'\];/.test(h);
+      })(),
       // ENTRADA EM DINHEIRO E TOTAL DE SAÍDA no comparativo por unidade
       // (pedido do Master). A tabela por DIA e o relatório de fechamentos já
       // tinham as duas; este era o único lugar que não somava.
@@ -9687,7 +9754,12 @@ setTimeout(async () => {
           && /entradaDinheiro: \(u,c\)=>/.test(html) && /totalSaida: \(u,c\)=>/.test(html);
       })(),
       'renderUnidadesTable lê TC via valorTc(r, grupo), não r.tc direto': /c\.tc \+= valorTc\(r, grupoKpiDaUnidade\(r\.unidade\)\)/.test(html),
-      'campoTcDoGrupo casa o KPI Extra por nome ("Total"), igual à unificação de Canais/Formas': /function campoTcDoGrupo\(grupo\)\{[\s\S]{0,300}chaveLabel\('Total'\)/.test(html),
+      // "Total" deixou de ser o unico nome: a lista NOMES_DE_TC (Total,
+      // Quantidade de Pedidos, C Total Clientes) passa pelo MESMO chaveLabel
+      // da unificacao de Canais/Formas - e a marca ehTc vem antes dela
+      'campoTcDoGrupo casa o KPI Extra por nome (lista NOMES_DE_TC via chaveLabel), igual à unificação de Canais/Formas':
+        /function campoTcDoGrupo\(grupo\)\{[\s\S]{0,400}NOMES_DE_TC\.map\(chaveLabel\)/.test(html)
+        && /const NOMES_DE_TC = \['Total', 'Quantidade de Pedidos', 'C Total Clientes'\];/.test(html),
       'cabeçalho fixo do HTML não tem mais <th>Cancelados</th>': !/<th>Cancelados<\/th>/.test(html),
       'botão 🧩 Colunas do Comparativo por unidade existe': /abrirSeletorColunasUnidades\(\)/.test(html) && /Comparativo por unidade/.test(html),
       'seletor tem Salvar gravando no servidor (preferência própria, não a da tabela principal)':
@@ -12954,6 +13026,12 @@ setTimeout(async () => {
 
     // semeia um fechamento de ontem numa loja Bravo e outro numa ARCFOOD
     DOCS.set('fechamentosLive/bot-caruaru', { id: 'bot-caruaru', unidade: 'Dominos Caruaru', unidadeNome: 'Dominos Caruaru', data: ontemBR, faturamento: 4321.5, quebra: -80, tc: 60 });
+    // TC que vive no KPI do grupo, sem `tc` no registro (e assim que as lojas
+    // lancam hoje): o bot tem que somar 60 (ontem, legado) + 25 (anteontem,
+    // KPI "C Total Clientes") = 85 pedidos no periodo
+    DOCS.set('grupos/g-bot-caruaru', { id: 'g-bot-caruaru', nome: 'Grupo Bot Caruaru', unidades: ['Dominos Caruaru'], kpisExtras: [{ label: 'C Total Clientes', campo: 'cTotalClientes', tipo: 'quantidade' }], canaisVendaExtras: [], formasPagamentoExtras: [] });
+    DOCS.set('fechamentosLive/bot-caruaru-2', { id: 'bot-caruaru-2', unidade: 'Dominos Caruaru', unidadeNome: 'Dominos Caruaru', data: bi.somarDiasISO(ontemBR, -1), faturamento: 1000, kpisExtras: { cTotalClientes: 25 } });
+    require(__dirname + '/grupos.js').invalidarCache();
     DOCS.set('fechamentosLive/bot-tatuape', { id: 'bot-tatuape', unidade: '19889', unidadeNome: 'Dom Tatuape', data: ontemBR, faturamento: 999 });
     require(__dirname + '/fechamentosLive.js').invalidarCache();
     const cab = { 'x-bot-token': 'token-leitura-teste' };
@@ -13065,6 +13143,13 @@ setTimeout(async () => {
       'por padrão as lojas ARCFOOD (SP) ficam de fora': codigos.length > 0 && !codigos.includes('19889') && !codigos.includes('19821'),
       'e a unidade Administrativa também': !codigos.includes('Administrativa'),
       'Caruaru está na lista': codigos.includes('Dominos Caruaru'),
+      // o TC do KPI entra na conta do bot (pedido do Master): 60 legado + 25 do KPI
+      'o bot soma o TC que vive no KPI do grupo (60 + 25 = 85 pedidos)': (() => {
+        const u = (d.porUnidade || []).find((x) => x.unidade === 'Dominos Caruaru');
+        return !!u && u.pedidos === 85;
+      })(),
+      'e resolve isso ANTES de entregar ao botIndicadores, que continua puro':
+        /tc: grupos\.tcDoFechamento\(f, grupoDe\(f\.unidade\)\)/.test(require('fs').readFileSync(__dirname + '/index.js', 'utf8')),
       'o fechamento semeado de ontem em Caruaru aparece': (d.fechamentos || []).some((f) => f.unidade === 'Dominos Caruaru' && f.data === ontemBR && f.faturamento === 4321.5),
       'e o de Tatuapé (ARCFOOD) não': !(d.fechamentos || []).some((f) => f.unidade === '19889'),
       'com ?grupo=todos o Tatuapé entra': (dTodos.unidades || []).some((u) => u.codigo === '19889') && (dTodos.fechamentos || []).some((f) => f.unidade === '19889'),
