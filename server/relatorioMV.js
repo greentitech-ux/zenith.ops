@@ -712,4 +712,4 @@ async function iniciarAgendamento() {
   agendar(await getConfig());
 }
 
-module.exports = { enviarRelatorio, previewHtml, diagnostico, listarEnvios, iniciarAgendamento, montarDados, montarHtml, notificarCardMV, enviarCardsPorEmail, getConfig, salvarConfig, TIPOS_COM_ACAO_POR_EMAIL };
+module.exports = { enviarRelatorio, previewHtml, diagnostico, listarEnvios, iniciarAgendamento, montarDados, montarHtml, notificarCardMV, enviarCardsPorEmail, enviarComFallback, validarHoraEnvio, validarDiasSemana, validarEmail, validarEmailCopia, getConfig, salvarConfig, TIPOS_COM_ACAO_POR_EMAIL };

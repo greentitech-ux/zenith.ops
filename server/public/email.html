@@ -167,6 +167,60 @@
       Um ticket "é do usuário" de duas formas: quando ele foi diretamente atribuído a essa pessoa (campo "Direcionar para" na Central), ou quando o e-mail gravado no ticket bate com o e-mail atual dela - por isso trocar o e-mail aqui não quebra tickets antigos.
     </div>
   </div>
+
+  <!-- segunda seção: indicadores diários pro assistente do gestor (ver
+       briefingEmail.js). Mesma estrutura do relatório acima; o conteúdo é o
+       JSON de /api/bot/indicadores?compacto=1 + um cabeçalho legível -->
+  <div class="panel">
+    <h2>Indicadores diários por e-mail (assistente do gestor)</h2>
+    <div class="sub" id="intro-briefing">Todo dia, de madrugada, o NoPulso manda as vendas de ontem por loja, quem não lançou, quebras de caixa, pedido semanal, alertas e solicitações pendentes - com os dados completos embutidos pro assistente ler. Ligue, mude horário e destino aqui, sem variável de ambiente nem redeploy.</div>
+
+    <div class="dias-semana" style="margin-bottom:10px;">
+      <label><input type="checkbox" id="b-ativo"> Ligado</label>
+    </div>
+
+    <label>Horário de envio</label>
+    <div class="horario-linha">
+      <input type="time" id="b-horario">
+    </div>
+
+    <label>Dias da semana</label>
+    <div class="dias-semana" id="b-dias">
+      <label><input type="checkbox" value="0"> Dom</label>
+      <label><input type="checkbox" value="1"> Seg</label>
+      <label><input type="checkbox" value="2"> Ter</label>
+      <label><input type="checkbox" value="3"> Qua</label>
+      <label><input type="checkbox" value="4"> Qui</label>
+      <label><input type="checkbox" value="5"> Sex</label>
+      <label><input type="checkbox" value="6"> Sáb</label>
+    </div>
+
+    <label>E-mail que vai receber os indicadores</label>
+    <input type="email" id="b-email" placeholder="ex: greentitech@gmail.com">
+    <div class="sub" style="margin-top:-2px;">É a caixa que o assistente lê. Use a mesma conta do Gmail conectada a ele.</div>
+
+    <label>Em cópia (CC) - opcional</label>
+    <input type="text" id="b-copia" placeholder="ex: gestao.grupobravo@gmail.com">
+
+    <button type="button" class="btn-primary" id="b-btn-salvar" onclick="salvarBriefing()">💾 Salvar</button>
+    <div class="msg hidden" id="b-msg-salvar"></div>
+
+    <button type="button" class="btn-ghost" id="b-btn-preview" onclick="previsualizarBriefing()">👁️ Pré-visualizar agora</button>
+    <div class="msg hidden" id="b-msg-preview"></div>
+
+    <label style="margin-top:14px;">Enviar agora</label>
+    <div class="sub" style="margin-top:-2px;">Monta com os dados <b>deste momento</b> e manda - pra testar sem esperar a madrugada.</div>
+    <input type="text" id="b-reenviar-para" placeholder="Deixe em branco pra mandar pro destino configurado">
+    <button type="button" class="btn-ghost" id="b-btn-testar" onclick="enviarBriefingAgora()">📤 Enviar agora</button>
+    <div class="msg hidden" id="b-msg-testar"></div>
+
+    <label style="margin-top:14px;">Últimos envios</label>
+    <div id="b-lista-envios" class="envios"></div>
+
+    <div class="info-box">
+      O NoPulso só entrega o dado; quem escreve o briefing é o assistente, na assinatura do gestor - este e-mail não usa a API da Anthropic. O período é sempre de 7 dias terminando ONTEM (o fechamento é lançado quando a loja fecha).
+    </div>
+  </div>
 </div>
 
 <div class="modal-overlay hidden" id="preview-overlay" onclick="if(event.target===this) fecharPreview()">
@@ -378,6 +432,111 @@ function fecharPreview(){
   document.getElementById('preview-diag').classList.add('hidden');
 }
 
+// ---- indicadores diários (segunda seção) ----
+let BRIEFING_CONFIG = null;
+function diasMarcadosBriefing(){ return [...document.querySelectorAll('#b-dias input:checked')].map(el=>Number(el.value)); }
+function atualizarIntroBriefing(){
+  const ligado = document.getElementById('b-ativo').checked;
+  const hora = document.getElementById('b-horario').value || '06:30';
+  const dias = diasMarcadosBriefing().slice().sort();
+  const segASab = dias.length===6 && [1,2,3,4,5,6].every(d=>dias.includes(d));
+  const listaDias = segASab ? 'dia de segunda a sábado' : dias.map(d=>NOMES_DIAS[d]).join(', ');
+  document.getElementById('intro-briefing').textContent = ligado
+    ? `Todo ${listaDias} às ${hora}, o NoPulso manda as vendas de ontem por loja, quem não lançou, quebras de caixa, pedido semanal, alertas e solicitações pendentes - com os dados completos embutidos pro assistente ler.`
+    : 'DESLIGADO. Marque "Ligado", confira horário, dias e destino, e salve - o NoPulso passa a mandar os indicadores diários com os dados completos embutidos pro assistente ler.';
+}
+async function carregarConfigBriefing(){
+  BRIEFING_CONFIG = await fetch('/api/briefing-config').then(r=>r.json());
+  document.getElementById('b-ativo').checked = !!BRIEFING_CONFIG.ativo;
+  document.getElementById('b-email').value = BRIEFING_CONFIG.emailDestino || '';
+  document.getElementById('b-copia').value = BRIEFING_CONFIG.emailCopia || '';
+  document.getElementById('b-horario').value = BRIEFING_CONFIG.horaEnvio || '06:30';
+  const dias = BRIEFING_CONFIG.diasSemana && BRIEFING_CONFIG.diasSemana.length ? BRIEFING_CONFIG.diasSemana : [1,2,3,4,5,6];
+  document.querySelectorAll('#b-dias input').forEach(el=>{ el.checked = dias.includes(Number(el.value)); });
+  atualizarIntroBriefing();
+}
+async function salvarBriefing(){
+  const msg = document.getElementById('b-msg-salvar');
+  const btn = document.getElementById('b-btn-salvar');
+  msg.classList.add('hidden'); btn.disabled = true;
+  try{
+    const resp = await fetch('/api/briefing-config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      ativo: document.getElementById('b-ativo').checked,
+      emailDestino: document.getElementById('b-email').value,
+      emailCopia: document.getElementById('b-copia').value,
+      horaEnvio: document.getElementById('b-horario').value,
+      diasSemana: diasMarcadosBriefing(),
+    })});
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
+    BRIEFING_CONFIG = data;
+    atualizarIntroBriefing();
+    msg.textContent = data.ativo ? '✅ Salvo! Já vale pro próximo envio.' : '✅ Salvo - envio diário DESLIGADO.';
+    msg.className = 'msg ok'; msg.classList.remove('hidden');
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{ btn.disabled = false; }
+}
+function descreverEnvioBriefing(e){
+  return e.ate
+    ? `até ${escapeHtml(e.ate)} · ontem R$ ${Number(e.faturamentoOntem||0).toLocaleString('pt-BR',{minimumFractionDigits:2})} · ${e.lojasLancaramOntem} de ${e.lojasTotal} lojas lançaram`
+    : '';
+}
+async function enviarBriefingAgora(){
+  const msg = document.getElementById('b-msg-testar');
+  const btn = document.getElementById('b-btn-testar');
+  const para = document.getElementById('b-reenviar-para').value.trim();
+  msg.classList.add('hidden');
+  btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Enviando...';
+  try{
+    const resp = await fetch('/api/briefing/reenviar', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ para }) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao enviar.');
+    msg.innerHTML = `✅ Enviado pra <b>${escapeHtml(data.para)}</b> · ${descreverEnvioBriefing(data)}`;
+    msg.className = 'msg ok'; msg.classList.remove('hidden');
+    carregarEnviosBriefing();
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+    carregarEnviosBriefing();
+  }finally{ btn.disabled = false; btn.textContent = txt; }
+}
+async function carregarEnviosBriefing(){
+  const el = document.getElementById('b-lista-envios');
+  let lista = [];
+  try{ lista = await fetch('/api/briefing/envios?limite=10').then(r=>r.json()); }catch(e){ lista = []; }
+  if(!Array.isArray(lista) || !lista.length){
+    el.innerHTML = '<div class="envios-nenhum">Nenhum envio registrado ainda.</div>';
+    return;
+  }
+  el.innerHTML = lista.map(e=>{
+    const quando = new Date(e.em).toLocaleString('pt-BR', { timeZone:'America/Recife' });
+    const origem = e.origem === 'manual' ? 'envio manual' : 'automático';
+    const quem = e.porEmail ? ` por ${escapeHtml(e.porEmail)}` : '';
+    const corpo = e.ok ? descreverEnvioBriefing(e) : `<span class="falhou">falhou: ${escapeHtml(e.erro || 'erro desconhecido')}</span>`;
+    return `<div class="envio"><span class="quando">${escapeHtml(quando)}</span> · ${origem}${quem}<br>para <b>${escapeHtml(e.para || '—')}</b>${e.copia ? ` (cc ${escapeHtml(e.copia)})` : ''}<br>${corpo}</div>`;
+  }).join('');
+}
+async function previsualizarBriefing(){
+  const msg = document.getElementById('b-msg-preview');
+  const btn = document.getElementById('b-btn-preview');
+  msg.classList.add('hidden');
+  btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Gerando...';
+  try{
+    const resp = await fetch('/api/briefing/preview');
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao gerar pré-visualização.');
+    document.getElementById('preview-titulo').textContent = `Indicadores ${descreverEnvioBriefing(data).replace(/<[^>]+>/g,'')}`;
+    document.getElementById('preview-iframe').srcdoc = data.html;
+    document.getElementById('preview-diag').classList.add('hidden');
+    document.getElementById('preview-overlay').classList.remove('hidden');
+  }catch(err){
+    msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
+  }finally{ btn.disabled = false; btn.textContent = txt; }
+}
+document.getElementById('b-ativo').addEventListener('change', atualizarIntroBriefing);
+document.getElementById('b-horario').addEventListener('change', atualizarIntroBriefing);
+document.querySelectorAll('#b-dias input').forEach(el=>el.addEventListener('change', atualizarIntroBriefing));
+
 document.getElementById('f-usuario').addEventListener('change', atualizarStatusUsuario);
 document.getElementById('f-horario').addEventListener('change', atualizarIntroRelatorio);
 document.querySelectorAll('#f-dias input').forEach(el=>el.addEventListener('change', atualizarIntroRelatorio));
@@ -394,6 +553,8 @@ async function boot(){
   await carregarUsuarios();
   await carregarConfig();
   carregarEnvios();   // sem await: o histórico é apoio, não segura a tela
+  carregarConfigBriefing().catch((e) => console.error('briefing config:', e.message));
+  carregarEnviosBriefing();
 }
 boot();
 </script>

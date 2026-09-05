@@ -99,6 +99,7 @@ const lojaStatus = require('./lojaStatus');
 const qaAprovacoes = require('./qaAprovacoes');
 const alertasCentral = require('./alertasCentral');
 const botIndicadores = require('./botIndicadores');
+const briefingEmail = require('./briefingEmail');
 const agenteAcoes = require('./agenteAcoes');
 const vigiaScript = require('./vigiaScript');
 const loginCustom = require('./loginCustom');
@@ -690,37 +691,92 @@ app.get('/api/bot/indicadores', async (req, res) => {
   }
   botLeituraUltimaEm = agora;
   try {
-    const [lancados, sangriasLancadas, saltiversoLancado, extras, ctxPedido, alertas, todasSolicitacoes] = await Promise.all([
-      fechamentosLive.listAll(),
-      sangrias.listAll().then((l) => l.map(sangrias.comoFechamento)),
-      saltiversoFechamento.listAll().then((l) => l.map(saltiversoFechamento.comoFechamento)),
-      unidadesExtras.mapa().catch(() => ({})),
-      contextoPedidoSemanal(),
-      alertasCentral.listar().catch(() => []),
-      solicitacoes.listAll().catch(() => []),
-    ]);
-    const todos = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas, ...saltiversoLancado]);
-    const incluirTodos = String(req.query.grupo || '').toLowerCase() === 'todos';
-    const unidadesLoja = {};
-    Object.entries({ ...FECHAMENTO_UNIDADES_NOMES, ...extras }).forEach(([codigo, nome]) => {
-      if (codigo === 'Administrativa') return;
-      if (!incluirTodos && ARCFOOD_FECHAMENTO.has(codigo)) return;
-      unidadesLoja[codigo] = nome;
-    });
-    res.json(botIndicadores.montarIndicadores({
-      fechamentos: todos,
-      unidadesLoja,
-      pedidoSemanal: pedidoSemanal.statusDasUnidades(ctxPedido.base, ctxPedido),
-      alertas,
-      solicitacoes: todasSolicitacoes,
-      hoje: hojeBrasiliaISO(),
+    res.json(await montarIndicadoresBot({
       dias: req.query.dias,
       compacto: ['1', 'true', 'sim'].includes(String(req.query.compacto || '').toLowerCase()),
+      incluirTodos: String(req.query.grupo || '').toLowerCase() === 'todos',
     }));
   } catch (err) {
     // erro nao "gasta" a vez: deixa tentar de novo em seguida
     botLeituraUltimaEm = 0;
     res.status(500).json({ error: err.message });
+  }
+});
+
+// junta as fontes (todas cacheadas) e monta o objeto de indicadores - usado
+// pela rota acima e pelo e-mail diario abaixo, pra os dois sairem IGUAIS
+async function montarIndicadoresBot({ dias, compacto = false, incluirTodos = false } = {}) {
+  const [lancados, sangriasLancadas, saltiversoLancado, extras, ctxPedido, alertas, todasSolicitacoes] = await Promise.all([
+    fechamentosLive.listAll(),
+    sangrias.listAll().then((l) => l.map(sangrias.comoFechamento)),
+    saltiversoFechamento.listAll().then((l) => l.map(saltiversoFechamento.comoFechamento)),
+    unidadesExtras.mapa().catch(() => ({})),
+    contextoPedidoSemanal(),
+    alertasCentral.listar().catch(() => []),
+    solicitacoes.listAll().catch(() => []),
+  ]);
+  const todos = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas, ...saltiversoLancado]);
+  const unidadesLoja = {};
+  Object.entries({ ...FECHAMENTO_UNIDADES_NOMES, ...extras }).forEach(([codigo, nome]) => {
+    if (codigo === 'Administrativa') return;
+    if (!incluirTodos && ARCFOOD_FECHAMENTO.has(codigo)) return;
+    unidadesLoja[codigo] = nome;
+  });
+  return botIndicadores.montarIndicadores({
+    fechamentos: todos,
+    unidadesLoja,
+    pedidoSemanal: pedidoSemanal.statusDasUnidades(ctxPedido.base, ctxPedido),
+    alertas,
+    solicitacoes: todasSolicitacoes,
+    hoje: hojeBrasiliaISO(),
+    dias,
+    compacto,
+  });
+}
+
+// ---------- e-mail diario de indicadores (push, em vez de o assistente
+// puxar): o ambiente em nuvem do assistente nao alcanca o NoPulso por rede,
+// mas le a caixa do Gmail. Config (ligado, horario, dias, destino, copia) na
+// tela /email.html, segunda secao - mesma estrutura do relatorio MV, que
+// ficou ociosa quando ele foi descontinuado. Ver briefingEmail.js. So Master.
+// A montagem e a MESMA da rota GET acima (montarIndicadoresBot), entao o
+// e-mail e a rota nunca divergem. ----------
+app.get('/api/briefing-config', auth.requireMaster, async (req, res) => {
+  res.json(await briefingEmail.getConfig());
+});
+app.post('/api/briefing-config', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await briefingEmail.salvarConfig({
+      ativo: req.body.ativo,
+      emailDestino: req.body.emailDestino,
+      emailCopia: req.body.emailCopia,
+      horaEnvio: req.body.horaEnvio,
+      diasSemana: req.body.diasSemana,
+    }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.post('/api/briefing/reenviar', auth.requireMaster, async (req, res) => {
+  try {
+    const para = String(req.body?.para || '').trim();
+    res.json(await briefingEmail.enviar({ origem: 'manual', porEmail: req.user.email, paraOverride: para || null }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.get('/api/briefing/preview', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await briefingEmail.previewHtml());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.get('/api/briefing/envios', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await briefingEmail.listarEnvios(req.query.limite));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -13350,6 +13406,11 @@ function aquecerBoot(promessa, ms) {
     } else {
       console.warn('AVISO: RELATORIO_EMAIL_USER/RELATORIO_EMAIL_PASS não configurados - relatório diário do MV desativado.');
     }
+    // e-mail diario de indicadores (ver briefingEmail.js): agenda conforme a
+    // config salva na tela E-mail; desligado por padrao. Sobe mesmo sem
+    // credencial de e-mail - o envio e que vai reclamar, com o erro certo,
+    // e a tela mostra no historico
+    briefingEmail.iniciar({ montar: montarIndicadoresBot }).catch((err) => console.error('[briefing] erro ao agendar e-mail diário de indicadores:', err.message));
   });
 
   // Desligamento: grava o que ficou pendente das batidas de heartbeat.

@@ -207,4 +207,47 @@ function montarIndicadores({
   };
 }
 
-module.exports = { montarIndicadores, somarDiasISO, CAMPOS_FECHAMENTO, DIAS_PADRAO, DIAS_MAXIMO };
+function escaparHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function brl(v) {
+  return 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// E-mail diario com o MESMO JSON da rota, pra quem le por caixa de entrada
+// (o assistente do gestor le pelo Gmail; o ambiente dele nao alcanca o
+// NoPulso direto). Cabecalho legivel por humano + o JSON integral dentro de
+// <pre id="indicadores-json">, que e o que a maquina extrai. Nada aqui e
+// calculado de novo: e o objeto de montarIndicadores() serializado.
+function montarEmailHtml(ind) {
+  const r = ind.resumo || {};
+  const faltaram = (r.naoLancaramOntem || []).map((u) => u.unidadeNome).join(', ') || 'ninguém';
+  const linhas = (ind.porUnidade || []).slice(0, 20).map((u) =>
+    `<tr><td>${escaparHtml(u.unidadeNome)}</td><td align="right">${brl(u.faturamento)}</td><td align="right">${u.pedidos}</td><td align="right">${u.ticketMedio == null ? '—' : brl(u.ticketMedio)}</td><td align="right">${u.variacaoPct == null ? '—' : (u.variacaoPct > 0 ? '+' : '') + u.variacaoPct + '%'}</td></tr>`).join('');
+  const html = [
+    '<div style="font-family:Arial,sans-serif;font-size:14px;color:#111">',
+    `<h2 style="margin:0 0 8px">NoPulso · indicadores até ${escaparHtml(ind.ontem)}</h2>`,
+    `<p style="margin:0 0 12px">Período ${escaparHtml(ind.periodo.inicio)} a ${escaparHtml(ind.periodo.fim)} (${ind.periodo.dias} dias): <b>${brl(r.faturamentoPeriodo)}</b>`
+      + (r.variacaoPct == null ? '' : ` (${r.variacaoPct > 0 ? '+' : ''}${r.variacaoPct}% vs. período anterior)`)
+      + ` · ${r.pedidosPeriodo || 0} pedidos.<br>Ontem: <b>${brl(r.faturamentoOntem)}</b> · ${r.pedidosOntem || 0} pedidos · ${r.lojasLancaramOntem} de ${r.lojasTotal} lojas lançaram. Não lançaram: ${escaparHtml(faltaram)}.</p>`,
+    '<table cellpadding="4" style="border-collapse:collapse;font-size:13px"><tr><th align="left">Loja</th><th>Faturamento</th><th>Pedidos</th><th>Ticket médio</th><th>Var.</th></tr>',
+    linhas,
+    '</table>',
+    `<p style="margin:12px 0 4px;color:#555">Quebras ≥ R$ 50: ${(ind.quebrasRelevantes || []).length} · Pedido semanal atrasado: ${(ind.pedidoSemanal || {}).atrasados || 0} · Alertas abertos: ${(ind.alertasCentral || {}).abertos || 0} · Solicitações pendentes: ${(ind.solicitacoes || {}).pendentes || 0}</p>`,
+    '<p style="margin:16px 0 4px;color:#555">Dados completos (lidos pelo assistente):</p>',
+    `<pre id="indicadores-json" style="font-size:11px;white-space:pre-wrap;background:#f4f4f4;padding:8px">${escaparHtml(JSON.stringify(ind))}</pre>`,
+    '</div>',
+  ].join('\n');
+  return html;
+}
+
+// caminho inverso do montarEmailHtml: acha o JSON no HTML do e-mail
+function extrairJsonDoEmail(html) {
+  const m = /<pre id="indicadores-json"[^>]*>([\s\S]*?)<\/pre>/.exec(String(html || ''));
+  if (!m) return null;
+  const texto = m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  try { return JSON.parse(texto); } catch (e) { return null; }
+}
+
+module.exports = { montarIndicadores, montarEmailHtml, extrairJsonDoEmail, somarDiasISO, CAMPOS_FECHAMENTO, DIAS_PADRAO, DIAS_MAXIMO };

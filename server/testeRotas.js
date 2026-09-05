@@ -13027,6 +13027,21 @@ setTimeout(async () => {
       'mas os agregados são os mesmos (resumo e porUnidade iguais ao modo cheio)':
         JSON.stringify(dComp.resumo) === JSON.stringify(d.resumo) && JSON.stringify(dComp.porUnidade) === JSON.stringify(d.porUnidade),
       'o modo cheio se declara não-compacto': d.compacto === false,
+      // ---- e-mail diario
+      // as rotas do e-mail diario sao do Master (ver bloco proprio abaixo) -
+      // NAO ficam atras do token de leitura, entao ele continua abrindo UMA rota
+      'o HTML do e-mail carrega o JSON integral e ele volta idêntico (ida e volta)': (() => {
+        const html = bi.montarEmailHtml(puro);
+        const devolta = bi.extrairJsonDoEmail(html);
+        return /<pre id="indicadores-json"/.test(html) && JSON.stringify(devolta) === JSON.stringify(puro)
+          && /Loja A/.test(html) && /R\$/.test(html);
+      })(),
+      'texto com < > & dentro do dado não quebra o HTML nem o JSON de volta': (() => {
+        const perigoso = bi.montarIndicadores({ ...entradaPura, solicitacoes: [{ numeroTicket: 9, tipo: 'compra', status: 'PENDENTE', titulo: 'Caixa <grande> & "forte"', criadoEm: 'x' }] });
+        const html = bi.montarEmailHtml(perigoso);
+        return !/<grande>/.test(html) && JSON.stringify(bi.extrairJsonDoEmail(html)) === JSON.stringify(perigoso);
+      })(),
+      'HTML sem o bloco de JSON devolve null, não estoura': bi.extrairJsonDoEmail('<p>oi</p>') === null,
       'compacto (função pura): sem linhas, só pendências do pedido semanal, agregados iguais': (() => {
         const puroComp = bi.montarIndicadores({ ...entradaPura, compacto: true });
         return puroComp.fechamentos === undefined && puroComp.compacto === true
@@ -13080,6 +13095,55 @@ setTimeout(async () => {
   } catch (e) { okBotInd = false; console.log('  erro: ' + e.message); }
   if (!okBotInd) ruins += 1;
   console.log(`${okBotInd ? '✓' : '✗'} Bot: GET /api/bot/indicadores exige BOT_LEITURA_TOKEN, só lê, respeita o intervalo, e a conta do período fecha`);
+
+  // ---- E-MAIL DIÁRIO DE INDICADORES (briefingEmail.js, tela E-mail 2a seção) ----
+  // Config do Master, DESLIGADA por padrão (não existe destino padrão);
+  // salvar exige destino válido quando ligado; preview devolve o HTML com o
+  // JSON embutido igual ao da rota; enviar sem credencial de e-mail falha com
+  // erro claro E deixa rastro no histórico; nada disso é público.
+  let okBriefing = false;
+  try {
+    const cabMaster = { Authorization: 'Bearer ' + token };
+    const semLogin = await pedir('/api/briefing-config');
+    const cfg0 = await pedir('/api/briefing-config', cabMaster);
+    const c0 = cfg0.status === 200 ? JSON.parse(cfg0.corpo) : {};
+    const salvarSemDestino = await postarJson('/api/briefing-config', { ativo: true, emailDestino: '', horaEnvio: '06:30', diasSemana: [1, 2, 3, 4, 5, 6] }, cabMaster);
+    const salvarHoraRuim = await postarJson('/api/briefing-config', { ativo: true, emailDestino: 'gestor@teste.local', horaEnvio: '25:99', diasSemana: [1] }, cabMaster);
+    const salvarOk = await postarJson('/api/briefing-config', { ativo: true, emailDestino: 'gestor@teste.local', emailCopia: 'copia@teste.local', horaEnvio: '06:45', diasSemana: [1, 2, 3, 4, 5, 6] }, cabMaster);
+    const c1 = salvarOk.status === 200 ? JSON.parse(salvarOk.corpo) : {};
+    const cfg1 = await pedir('/api/briefing-config', cabMaster);
+    const c1relido = cfg1.status === 200 ? JSON.parse(cfg1.corpo) : {};
+    const preview = await pedir('/api/briefing/preview', cabMaster);
+    const pv = preview.status === 200 ? JSON.parse(preview.corpo) : {};
+    const bi = require(__dirname + '/botIndicadores.js');
+    const jsonDoPreview = pv.html ? bi.extrairJsonDoEmail(pv.html) : null;
+    // sem RELATORIO_EMAIL_USER/PASS nem Gmail OAuth na suite, o envio tem que
+    // falhar com o erro de configuracao - e registrar a falha
+    const envio = await postarJson('/api/briefing/reenviar', { para: 'eu@teste.local' }, cabMaster);
+    const envios = await pedir('/api/briefing/envios?limite=5', cabMaster);
+    const lista = envios.status === 200 ? JSON.parse(envios.corpo) : [];
+    const desligar = await postarJson('/api/briefing-config', { ativo: false, emailDestino: '', horaEnvio: '06:45', diasSemana: [1] }, cabMaster);
+    const c2 = desligar.status === 200 ? JSON.parse(desligar.corpo) : {};
+
+    const conf = {
+      'sem login a config não abre': semLogin.status === 401,
+      'começa DESLIGADA, sem destino, 06:30 seg-sáb': cfg0.status === 200 && c0.ativo === false && c0.emailDestino === '' && c0.horaEnvio === '06:30' && JSON.stringify(c0.diasSemana) === '[1,2,3,4,5,6]',
+      'ligar sem destino é recusado': salvarSemDestino.status === 400 && /e-mail/i.test(JSON.parse(salvarSemDestino.corpo).error || ''),
+      'hora inválida é recusada': salvarHoraRuim.status === 400,
+      'salvar ligado com destino válido responde a config nova': salvarOk.status === 200 && c1.ativo === true && c1.emailDestino === 'gestor@teste.local' && c1.emailCopia === 'copia@teste.local' && c1.horaEnvio === '06:45',
+      'e a releitura bate (cache invalidado ao salvar)': c1relido.ativo === true && c1relido.horaEnvio === '06:45',
+      'preview devolve o HTML com o JSON embutido e o resumo': preview.status === 200 && !!jsonDoPreview && jsonDoPreview.compacto === true && Array.isArray(jsonDoPreview.porUnidade) && typeof pv.ate === 'string' && pv.lojasTotal >= 1,
+      'o JSON do e-mail é o mesmo desenho da rota (sem ARCFOOD por padrão)': !!jsonDoPreview && !(jsonDoPreview.unidades || []).some((u) => u.codigo === '19889'),
+      'enviar sem credencial de e-mail falha com erro de configuração, não estoura': envio.status === 400 && /RELATORIO_EMAIL|Gmail|configurad/i.test(JSON.parse(envio.corpo).error || ''),
+      'e a falha fica no histórico, com destino e motivo': Array.isArray(lista) && lista.length >= 1 && lista[0].ok === false && lista[0].para === 'eu@teste.local' && !!lista[0].erro && lista[0].origem === 'manual',
+      'desligar com destino vazio é aceito e fica desligado': desligar.status === 200 && c2.ativo === false,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okBriefing = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (cfg0=${cfg0.status} salvar=${salvarOk.status} preview=${preview.status} envio=${envio.status} ${envio.corpo.slice(0, 120)})`);
+  } catch (e) { okBriefing = false; console.log('  erro: ' + e.message); }
+  if (!okBriefing) ruins += 1;
+  console.log(`${okBriefing ? '✓' : '✗'} E-mail diário de indicadores: config do Master, desligado por padrão, preview com JSON, envio sem credencial falha e registra`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
