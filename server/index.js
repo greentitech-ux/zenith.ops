@@ -741,10 +741,10 @@ async function montarIndicadoresBot({ dias, compacto = false, incluirTodos = fal
 // ficou ociosa quando ele foi descontinuado. Ver briefingEmail.js. So Master.
 // A montagem e a MESMA da rota GET acima (montarIndicadoresBot), entao o
 // e-mail e a rota nunca divergem. ----------
-app.get('/api/briefing-config', auth.requireMaster, async (req, res) => {
+app.get('/api/briefing-config', auth.requireAuth, auth.requireMaster, async (req, res) => {
   res.json(await briefingEmail.getConfig());
 });
-app.post('/api/briefing-config', auth.requireMaster, async (req, res) => {
+app.post('/api/briefing-config', auth.requireAuth, auth.requireMaster, async (req, res) => {
   try {
     res.json(await briefingEmail.salvarConfig({
       ativo: req.body.ativo,
@@ -757,7 +757,7 @@ app.post('/api/briefing-config', auth.requireMaster, async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
-app.post('/api/briefing/reenviar', auth.requireMaster, async (req, res) => {
+app.post('/api/briefing/reenviar', auth.requireAuth, auth.requireMaster, async (req, res) => {
   try {
     const para = String(req.body?.para || '').trim();
     res.json(await briefingEmail.enviar({ origem: 'manual', porEmail: req.user.email, paraOverride: para || null }));
@@ -765,14 +765,14 @@ app.post('/api/briefing/reenviar', auth.requireMaster, async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
-app.get('/api/briefing/preview', auth.requireMaster, async (req, res) => {
+app.get('/api/briefing/preview', auth.requireAuth, auth.requireMaster, async (req, res) => {
   try {
     res.json(await briefingEmail.previewHtml());
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
-app.get('/api/briefing/envios', auth.requireMaster, async (req, res) => {
+app.get('/api/briefing/envios', auth.requireAuth, auth.requireMaster, async (req, res) => {
   try {
     res.json(await briefingEmail.listarEnvios(req.query.limite));
   } catch (err) {
