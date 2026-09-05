@@ -53,6 +53,30 @@ const MODELO_DESEMPATE = process.env.OCR_MODELO_DESEMPATE || 'claude-opus-5';
 // devolve a 3a chamada sem deploy - mesmo espirito do PRE_AQUECER_CACHES.
 const DESEMPATE_LIGADO = process.env.OCR_DESEMPATE === '1';
 
+// LEITURA DUPLA DESLIGADA POR PADRAO. Decisao do Master (04/09/2026), com o
+// caso na mao: "a primeira leitura leu tudo certinho, aí ele não preencheu
+// porque segundo a mensagem a segunda não leu - prefiro tirar".
+//
+// A trava do consenso trocou de lado: ela nasceu pra pegar leitura INSTAVEL
+// (o Service Times Summary saiu deslocado uma linha e nenhuma outra trava
+// alcancou), mas com o Haiku a instabilidade virou regra em vez de excecao -
+// campo que a 1a leitura acertou ficava de fora porque a 2a nao viu, e o
+// gerente digitava 11 campos que ja estavam lidos. Trava que reprova o certo
+// com essa frequencia custa mais do que evita.
+//
+// O que segura o erro sem ela continua de pe, e e' deterministico: o rotulo
+// tem que aparecer na linha de origem (rotuloBateComOrigem), a soma do quadro
+// tem que fechar com o total impresso (conferirSomas), o valor tem que fechar
+// com a % impressa ao lado (conferirPercentuais) e taxa nao entra em campo de
+// contagem (valorDeTaxaEmCampoDeContagem).
+//
+// De quebra, corta metade do custo: uma chamada de modelo por clique.
+//
+// Fica atras de env em vez de ser apagada: OCR_LEITURA_DUPLA=1 devolve o
+// consenso sem deploy, se um dia o desalinhamento silencioso voltar a
+// aparecer - mesmo espirito do OCR_DESEMPATE acima.
+const LEITURA_DUPLA_LIGADA = process.env.OCR_LEITURA_DUPLA === '1';
+
 // A chave que vai pro modelo e prefixada pela secao ("canal." / "forma.")
 // porque os dois cadastros sao independentes e podem ter o mesmo campo: uma
 // loja com "AdyenV2" nos dois lugares mandaria o valor pro campo errado se a
@@ -811,6 +835,10 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
   // pra digitar, com as duas leituras a mostra. Custa duas chamadas por
   // clique, de proposito: um numero errado num KPI que a rede cobra vale
   // mais caro que a segunda chamada.
+  // desligada por padrao (ver LEITURA_DUPLA_LIGADA no topo): uma leitura so,
+  // e o que ela trouxer passa pelas travas deterministicas de sempre
+  if (!LEITURA_DUPLA_LIGADA) return umaLeitura();
+
   const [ra, rb] = await Promise.allSettled([umaLeitura(), umaLeitura()]);
   if (ra.status === 'rejected' && rb.status === 'rejected') throw ra.reason;
   // uma das duas falhou (rede, corte...): a que sobrou vale sozinha - sem

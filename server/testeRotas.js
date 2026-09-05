@@ -799,8 +799,31 @@ setTimeout(async () => {
         src.indexOf('if (!DESEMPATE_LIGADO) return consenso;')
           < src.indexOf('await umaLeitura(MODELO_DESEMPATE)'),
       // o dia em que as duas leituras batem nunca pagou a 3a - isso continua
-      'dia sem divergência continua com duas chamadas só':
+      // valendo pra quem religar a leitura dupla por env
+      'com a leitura dupla ligada, dia sem divergência não paga a 3ª':
         /if \(!pendentes\.length\) return consenso;/.test(src),
+      // ---- LEITURA DUPLA DESLIGADA (decisão do Master, 04/09): o consenso
+      // passou a reprovar campo que a 1ª leitura tinha acertado - "a primeira
+      // leu tudo certinho, aí ele não preencheu porque a segunda não leu".
+      // Uma chamada por clique, e o que ela traz passa pelas travas
+      // determinísticas de sempre (rótulo, soma, porcentagem, taxa).
+      'a leitura dupla não roda por padrão':
+        /const LEITURA_DUPLA_LIGADA = process\.env\.OCR_LEITURA_DUPLA === '1';/.test(src)
+        && /if \(!LEITURA_DUPLA_LIGADA\) return umaLeitura\(\);/.test(src),
+      // a guarda tem que vir ANTES do Promise.allSettled, senão a 2ª chamada
+      // é paga do mesmo jeito e só o resultado é descartado
+      'a 2ª chamada nem é feita, não é feita e descartada':
+        src.indexOf('if (!LEITURA_DUPLA_LIGADA) return umaLeitura();')
+          < src.indexOf('Promise.allSettled([umaLeitura(), umaLeitura()])'),
+      'dá pra religar a leitura dupla sem deploy, por env':
+        /process\.env\.OCR_LEITURA_DUPLA/.test(src),
+      // as travas que seguram o erro sem o consenso continuam de pé - sem
+      // elas, tirar a segunda leitura deixaria o campo errado entrar calado
+      'as travas determinísticas continuam valendo (rótulo, soma, %, taxa)':
+        /rotuloBateComOrigem\(def\.label, textoOrigem\)/.test(src)
+        && /conferirSomas\(dados\.conferencias\)/.test(src)
+        && /conferirPercentuais\(dados\.conferencias\)/.test(src)
+        && /valorDeTaxaEmCampoDeContagem\(def\.label, textoOrigem\)/.test(src),
       // trocar de modelo ou religar o desempate NAO pode exigir deploy
       'dá pra voltar sem deploy, por env':
         /process\.env\.OCR_MODELO/.test(src) && /process\.env\.OCR_DESEMPATE/.test(src)
