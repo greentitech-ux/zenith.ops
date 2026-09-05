@@ -47,13 +47,27 @@ function enxugarFechamento(f) {
   return o;
 }
 
+// quantidade de pedidos de UM fechamento. Duas fontes, nesta ordem:
+// 1. `tc` fixo (planilhas antigas: coluna "TC"/"Quantidade de Pedidos", ver
+//    sheetsSync.js) - NAO e ticket medio, e contagem;
+// 2. os KPIs extras do grupo marcados com `pedidos: true` na tela de Grupos
+//    (ver grupos.js sanitizarCamposExtras). Cada rede chama de um jeito
+//    ("Quantidade de Pedidos", "Total", "C Total Clientes"), por isso o
+//    vinculo e o marcador, nunca o nome. `kpiPedidosPorUnidade` e
+//    { codigoUnidade: ['campo', ...] } montado por quem chama.
+// Sem nenhuma das duas, o dia nao tem pedidos (0) e nao entra no ticket medio.
+function pedidosDoDia(f, kpiPedidosPorUnidade) {
+  if (Number(f.tc) > 0) return Number(f.tc);
+  const campos = (kpiPedidosPorUnidade || {})[f.unidade] || [];
+  const extras = f.kpisExtras || {};
+  return campos.reduce((s, campo) => s + (Number(extras[campo]) > 0 ? Number(extras[campo]) : 0), 0);
+}
+
 // agrega uma lista de fechamentos por unidade: total, dias lancados, media
-// por dia lancado, quebra acumulada, pedidos e cancelados.
-// `tc` no fechamento e "TC" = Quantidade de Pedidos (ver sheetsSync.js:
-// get('TC') ?? get('Quantidade de Pedidos')), NAO ticket medio. O ticket
-// medio sai daqui: faturamento / pedidos, so nos dias em que o TC foi
-// lancado (senao um dia sem TC puxaria a media pra baixo).
-function agregarPorUnidade(lista, nomesUnidades) {
+// por dia lancado, quebra acumulada, pedidos e cancelados. O ticket medio
+// sai daqui: faturamento / pedidos, so nos dias em que houve contagem de
+// pedidos (senao um dia sem TC puxaria a media pra baixo).
+function agregarPorUnidade(lista, nomesUnidades, kpiPedidosPorUnidade) {
   const porUnidade = new Map();
   lista.forEach((f) => {
     const chave = f.unidade;
@@ -71,7 +85,8 @@ function agregarPorUnidade(lista, nomesUnidades) {
     a.quebra += Number(f.quebra) || 0;
     a.cancelados += Number(f.cancelados) || 0;
     ['delivery', 'carryout', 'pickup', 'loja', 'ifood'].forEach((c) => { a[c] += Number(f[c]) || 0; });
-    if (Number(f.tc) > 0) { a.pedidos += Number(f.tc); a.faturamentoComTc += Number(f.faturamento) || 0; }
+    const pedidos = pedidosDoDia(f, kpiPedidosPorUnidade);
+    if (pedidos > 0) { a.pedidos += pedidos; a.faturamentoComTc += Number(f.faturamento) || 0; }
   });
   return [...porUnidade.values()].map((a) => ({
     unidade: a.unidade,
@@ -100,7 +115,7 @@ function agregarPorUnidade(lista, nomesUnidades) {
 // detalhe pede sem o parametro.
 function montarIndicadores({
   fechamentos = [], unidadesLoja = {}, pedidoSemanal = [], alertas = [], solicitacoes = [],
-  hoje, dias = DIAS_PADRAO, compacto = false, limiteAlertas, limiteSolicitacoes,
+  hoje, dias = DIAS_PADRAO, compacto = false, limiteAlertas, limiteSolicitacoes, kpiPedidosPorUnidade = {},
 }) {
   if (limiteAlertas == null) limiteAlertas = compacto ? 15 : 30;
   if (limiteSolicitacoes == null) limiteSolicitacoes = compacto ? 20 : 40;
@@ -117,8 +132,8 @@ function montarIndicadores({
   const doAnterior = soLojas.filter((f) => f.data >= inicioAnterior && f.data <= fimAnterior);
   const deOntem = doPeriodo.filter((f) => f.data === ontem);
 
-  const porUnidade = agregarPorUnidade(doPeriodo, unidadesLoja);
-  const anteriorPorUnidade = new Map(agregarPorUnidade(doAnterior, unidadesLoja).map((a) => [a.unidade, a]));
+  const porUnidade = agregarPorUnidade(doPeriodo, unidadesLoja, kpiPedidosPorUnidade);
+  const anteriorPorUnidade = new Map(agregarPorUnidade(doAnterior, unidadesLoja, kpiPedidosPorUnidade).map((a) => [a.unidade, a]));
   porUnidade.forEach((a) => {
     const ant = anteriorPorUnidade.get(a.unidade);
     a.faturamentoPeriodoAnterior = ant ? ant.faturamento : 0;
@@ -129,7 +144,18 @@ function montarIndicadores({
   const totalAnterior = arredondar(doAnterior.reduce((s, f) => s + (Number(f.faturamento) || 0), 0));
   const totalOntem = arredondar(deOntem.reduce((s, f) => s + (Number(f.faturamento) || 0), 0));
   const pedidosPeriodo = porUnidade.reduce((s, u) => s + u.pedidos, 0);
-  const pedidosOntem = deOntem.reduce((s, f) => s + (Number(f.tc) > 0 ? Number(f.tc) : 0), 0);
+  const pedidosOntem = deOntem.reduce((s, f) => s + pedidosDoDia(f, kpiPedidosPorUnidade), 0);
+  // ontem, loja a loja - o briefing precisa disso mesmo no modo compacto
+  // (e uma linha por loja, nao as 7x14 do periodo)
+  const ontemPorUnidade = deOntem.map((f) => {
+    const pedidos = pedidosDoDia(f, kpiPedidosPorUnidade);
+    return {
+      unidade: f.unidade, unidadeNome: unidadesLoja[f.unidade] || f.unidadeNome || f.unidade,
+      faturamento: arredondar(f.faturamento), pedidos,
+      ticketMedio: pedidos > 0 ? arredondar((Number(f.faturamento) || 0) / pedidos) : null,
+      quebra: arredondar(f.quebra), cancelados: arredondar(f.cancelados), gerente: f.gerente || null,
+    };
+  }).sort((x, y) => y.faturamento - x.faturamento);
 
   const lancaramOntem = new Set(deOntem.map((f) => f.unidade));
   const naoLancaramOntem = [...codigos]
@@ -192,6 +218,7 @@ function montarIndicadores({
       lojasTotal: codigos.size,
       naoLancaramOntem,
     },
+    ontemPorUnidade,
     porUnidade,
     quebrasRelevantes,
     fechamentos: compacto ? undefined : doPeriodo.map(enxugarFechamento).sort((x, y) => (y.data.localeCompare(x.data) || x.unidadeNome.localeCompare(y.unidadeNome, 'pt-BR'))),
@@ -231,6 +258,12 @@ function montarEmailHtml(ind) {
     `<p style="margin:0 0 12px">Período ${escaparHtml(ind.periodo.inicio)} a ${escaparHtml(ind.periodo.fim)} (${ind.periodo.dias} dias): <b>${brl(r.faturamentoPeriodo)}</b>`
       + (r.variacaoPct == null ? '' : ` (${r.variacaoPct > 0 ? '+' : ''}${r.variacaoPct}% vs. período anterior)`)
       + ` · ${r.pedidosPeriodo || 0} pedidos.<br>Ontem: <b>${brl(r.faturamentoOntem)}</b> · ${r.pedidosOntem || 0} pedidos · ${r.lojasLancaramOntem} de ${r.lojasTotal} lojas lançaram. Não lançaram: ${escaparHtml(faltaram)}.</p>`,
+    '<p style="margin:12px 0 4px"><b>Ontem, por loja</b></p>',
+    '<table cellpadding="4" style="border-collapse:collapse;font-size:13px"><tr><th align="left">Loja</th><th>Faturamento</th><th>Pedidos</th><th>Ticket médio</th><th>Quebra</th></tr>',
+    (ind.ontemPorUnidade || []).map((u) =>
+      `<tr><td>${escaparHtml(u.unidadeNome)}</td><td align="right">${brl(u.faturamento)}</td><td align="right">${u.pedidos}</td><td align="right">${u.ticketMedio == null ? '—' : brl(u.ticketMedio)}</td><td align="right">${u.quebra ? brl(u.quebra) : '—'}</td></tr>`).join(''),
+    '</table>',
+    `<p style="margin:12px 0 4px"><b>Período (${ind.periodo.dias} dias), por loja</b></p>`,
     '<table cellpadding="4" style="border-collapse:collapse;font-size:13px"><tr><th align="left">Loja</th><th>Faturamento</th><th>Pedidos</th><th>Ticket médio</th><th>Var.</th></tr>',
     linhas,
     '</table>',
@@ -250,4 +283,4 @@ function extrairJsonDoEmail(html) {
   try { return JSON.parse(texto); } catch (e) { return null; }
 }
 
-module.exports = { montarIndicadores, montarEmailHtml, extrairJsonDoEmail, somarDiasISO, CAMPOS_FECHAMENTO, DIAS_PADRAO, DIAS_MAXIMO };
+module.exports = { montarIndicadores, pedidosDoDia, montarEmailHtml, extrairJsonDoEmail, somarDiasISO, CAMPOS_FECHAMENTO, DIAS_PADRAO, DIAS_MAXIMO };

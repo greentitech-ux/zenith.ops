@@ -723,6 +723,16 @@ async function montarIndicadoresBot({ dias, compacto = false, incluirTodos = fal
   // pedidos e ticket medio saem zerados pra MilkyMoo e "Quantidade de Pedidos"
   const grupoDe = (u) => (listaGrupos || []).find((g) => (g.unidades || []).includes(u)) || null;
   const todos = mesclados.map((f) => ({ ...f, tc: grupos.tcDoFechamento(f, grupoDe(f.unidade)) }));
+  // qual KPI extra e "quantidade de pedidos" em cada unidade: o Master marca
+  // por KPI na tela de Grupos (kpisExtras[].pedidos / ehTc, ver grupos.js) -
+  // o nome varia por rede, o marcador nao. O botIndicadores recebe o mapa
+  // pra resolver sozinho o dia em que `tc` vier zerado.
+  const kpiPedidosPorUnidade = {};
+  (listaGrupos || []).forEach((g) => {
+    const campos = (g.kpisExtras || []).filter((k) => k && (k.pedidos === true || k.ehTc === true)).map((k) => k.campo);
+    if (!campos.length) return;
+    (g.unidades || []).forEach((u) => { kpiPedidosPorUnidade[u] = [...(kpiPedidosPorUnidade[u] || []), ...campos]; });
+  });
   const unidadesLoja = {};
   Object.entries({ ...FECHAMENTO_UNIDADES_NOMES, ...extras }).forEach(([codigo, nome]) => {
     if (codigo === 'Administrativa') return;
@@ -738,6 +748,7 @@ async function montarIndicadoresBot({ dias, compacto = false, incluirTodos = fal
     hoje: hojeBrasiliaISO(),
     dias,
     compacto,
+    kpiPedidosPorUnidade,
   });
 }
 

@@ -518,8 +518,8 @@ function adicionarKpi(containerId, valorInicial, tipoInicial, operacaoInicial, t
       <label title="Canal e forma já são obrigatórios sempre. Marque aqui o KPI que a foto TAMBÉM precisa trazer (ex: Valor Total Taxa de Entrega): enquanto ele não vier, a loja pode tentar outra foto; depois que todos vierem, a tela para de aceitar foto nova e o resto é digitado.">
         <input type="checkbox" class="kpi-essencial-checkbox" ${essencialInicial?'checked':''}> 📸 a foto precisa trazer este KPI
       </label>
-      <label title="Cada franquia chama a quantidade de pedidos de um jeito (Total, Quantidade de Pedidos, C Total Clientes). Marque aqui o KPI que é o TC desta franquia: é ele que vira 'TC total' no Comparativo por unidade, no relatório e nos indicadores do bot. Sem marca, o sistema reconhece esses três nomes.">
-        <input type="checkbox" class="kpi-ehtc-checkbox" ${ehTcInicial?'checked':''}> 🔢 este KPI é o TC (quantidade de pedidos/clientes)
+      <label title="Cada franquia chama a quantidade de pedidos de um jeito (Total, Quantidade de Pedidos, C Total Clientes). Marque aqui o KPI que é o TC desta franquia: é ele que vira 'TC total' no Comparativo por unidade e no relatório, e é ele que o briefing do assistente soma como pedidos do dia pra calcular o ticket médio (faturamento ÷ pedidos). Um por grupo. Sem marca, o sistema reconhece esses três nomes.">
+        <input type="checkbox" class="kpi-ehtc-checkbox" ${ehTcInicial?'checked':''}> 🔢 este KPI é o TC (quantidade de pedidos/clientes do dia)
       </label>
     </div>` : '';
   const somaEmKpi = ehKpi ? `<label class="linha-kpi-soma-em">Somar em
@@ -602,8 +602,11 @@ function lerKpis(containerId){
       } else {
         const chkEss = linha.querySelector('.kpi-essencial-checkbox');
         item.essencial = chkEss ? chkEss.checked : false;
+        // uma checkbox, duas grafias do mesmo marcador (ver grupos.js):
+        // ehTc pro Comparativo/relatorio, pedidos pros indicadores do bot
         const chkTc = linha.querySelector('.kpi-ehtc-checkbox');
         item.ehTc = chkTc ? chkTc.checked : false;
+        item.pedidos = item.ehTc;
       }
       return item;
     })

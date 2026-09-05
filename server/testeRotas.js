@@ -1192,10 +1192,15 @@ setTimeout(async () => {
     const conf = {
       'a marca "este KPI é o TC" é gravada por KPI e a tela oferece/reabre': (() => {
         const kTc = (salvo.kpisExtras || []).find((k) => k.label === 'Quantidade de Pedidos');
-        return !!kTc && kTc.ehTc === true && kpiTaxa.ehTc === undefined
+        // o marcador tem duas grafias (ehTc no Comparativo, pedidos no bot)
+        // e e' UM so: gravar uma tem que espelhar a outra, e quem nao marcou
+        // nada nao ganha nenhuma das duas
+        return !!kTc && kTc.ehTc === true && kTc.pedidos === true
+          && kpiTaxa.ehTc === undefined && kpiTaxa.pedidos === undefined
           && /kpi-ehtc-checkbox/.test(htmlG) && /este KPI é o TC/.test(htmlG)
+          && /item\.pedidos = item\.ehTc;/.test(htmlG)
           && /k\.direcao, k\.origem, k\.essencial, k\.ehTc\)/.test(htmlG)
-          && /if \(k\?\.ehTc != null\) item\.ehTc = !!k\.ehTc;/.test(srcG);
+          && /item\.ehTc = marca;\s*item\.pedidos = marca;/.test(srcG);
       })(),
       'a marca "a foto precisa trazer" é gravada por KPI':
         !!kpiTaxa && kpiTaxa.essencial === true && !!kpiLead && kpiLead.essencial === false,
@@ -9701,6 +9706,8 @@ setTimeout(async () => {
           && g.campoTcDoGrupo(G([{ campo: 'qtd', label: 'Quantidade de Pedidos' }])) === 'qtd'
           && g.campoTcDoGrupo(G([{ campo: 'ctc', label: 'C Total Clientes' }])) === 'ctc'
           && g.campoTcDoGrupo(G([{ campo: 'total', label: 'Total' }, { campo: 'x', label: 'Pedidos PDV', ehTc: true }])) === 'x'
+          // a grafia `pedidos` (marcador dos indicadores do bot) vale igual
+          && g.campoTcDoGrupo(G([{ campo: 'total', label: 'Total' }, { campo: 'y', label: 'Pedidos PDV', pedidos: true }])) === 'y'
           && g.campoTcDoGrupo(G([{ campo: 'lt', label: 'Lead Time' }])) === null
           && g.tcDoFechamento({ tc: 4, kpisExtras: { ctc: 38 } }, G([{ campo: 'ctc', label: 'C Total Clientes' }])) === 42
           && /return grupos\.campoTcDoGrupo\(grupo\);/.test(srcI);
@@ -13173,6 +13180,38 @@ setTimeout(async () => {
       'alertas: só o não atendido': puro.alertasCentral.abertos === 1 && puro.alertasCentral.lista[0].id === 'a1',
       'solicitações: só PENDENTE, contadas por tipo, valor vira número': puro.solicitacoes.pendentes === 2 && puro.solicitacoes.porTipo.pagamento === 1 && puro.solicitacoes.porTipo.compra === 1 && puro.solicitacoes.lista[1].valorEstimado === 120.5,
       '?dias= acima do teto (92) é cortado': bi.montarIndicadores({ hoje: '2026-09-04', dias: 500 }).periodo.dias === 92,
+      // ---- pedidos vindos do KPI marcado no grupo (tc zerado, como nas lojas Bravo)
+      'sem tc, os pedidos vêm do KPI marcado como "pedidos" no grupo, e o ticket médio sai dele': (() => {
+        const r = bi.montarIndicadores({
+          hoje: '2026-09-04', dias: 2, unidadesLoja: { D: 'Dom X', M: 'Milky Y', S: 'Spo Z' },
+          // D: Domino's chama de "total"; M: Milky Moo "cTotalClientes"; S: sem marcador -> 0
+          kpiPedidosPorUnidade: { D: ['total'], M: ['cTotalClientes'] },
+          fechamentos: [
+            { unidade: 'D', unidadeNome: 'Dom X', data: '2026-09-03', faturamento: 900, tc: 0, kpisExtras: { total: 10, remake: 2 } },
+            { unidade: 'D', unidadeNome: 'Dom X', data: '2026-09-02', faturamento: 600, kpisExtras: { total: '5' } },
+            { unidade: 'M', unidadeNome: 'Milky Y', data: '2026-09-03', faturamento: 200, kpisExtras: { cTotalClientes: 40, total: 999 } },
+            { unidade: 'S', unidadeNome: 'Spo Z', data: '2026-09-03', faturamento: 300, kpisExtras: { quantidadeDePedidos: 7 } },
+            // tc preenchido ganha do KPI (planilha antiga)
+            { unidade: 'S', unidadeNome: 'Spo Z', data: '2026-09-02', faturamento: 100, tc: 4, kpisExtras: { quantidadeDePedidos: 99 } },
+          ],
+        });
+        const D = r.porUnidade.find((u) => u.unidade === 'D'), M = r.porUnidade.find((u) => u.unidade === 'M'), S = r.porUnidade.find((u) => u.unidade === 'S');
+        const ontemD = (r.ontemPorUnidade || []).find((u) => u.unidade === 'D');
+        return D.pedidos === 15 && D.ticketMedio === 100            // (900+600)/15
+          && M.pedidos === 40 && M.ticketMedio === 5                 // so o KPI marcado, nao o "total" 999
+          && S.pedidos === 4 && S.ticketMedio === 25                 // tc do dia 02 vale; dia 03 sem marcador = 0 e fora da media
+          && r.resumo.pedidosPeriodo === 59 && r.resumo.pedidosOntem === 50
+          && !!ontemD && ontemD.faturamento === 900 && ontemD.pedidos === 10 && ontemD.ticketMedio === 90;
+      })(),
+      'ontemPorUnidade sai também no compacto (uma linha por loja que lançou)': (() => {
+        const c = bi.montarIndicadores({ ...entradaPura, compacto: true });
+        return Array.isArray(c.ontemPorUnidade) && c.ontemPorUnidade.length === 1 && c.ontemPorUnidade[0].unidade === 'A' && c.ontemPorUnidade[0].faturamento === 100;
+      })(),
+      'grupos.js guarda o marcador "pedidos" do KPI e ignora quem não mandou': (() => {
+        const g = require(__dirname + '/grupos.js');
+        const lista = g.sanitizarCamposExtras([{ label: 'Total', tipo: 'quantidade', pedidos: true }, { label: 'Remake', tipo: 'quantidade' }, { label: 'Taxa', tipo: 'moeda', pedidos: 'sim' }]);
+        return lista[0].pedidos === true && lista[1].pedidos === undefined && lista[2].pedidos === true;
+      })(),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okBotInd = !falhas.length;

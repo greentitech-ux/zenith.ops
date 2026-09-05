@@ -2105,7 +2105,7 @@ function valorColuna(d, col){
 const NOMES_DE_TC = ['Total', 'Quantidade de Pedidos', 'C Total Clientes'];
 function campoTcDoGrupo(grupo){
   const kpis = grupo ? (grupo.kpisExtras||[]) : [];
-  const marcado = kpis.find(k=>k && k.ehTc===true);
+  const marcado = kpis.find(k=>k && (k.ehTc===true || k.pedidos===true));
   if(marcado) return marcado.campo;
   const alvos = new Set(NOMES_DE_TC.map(chaveLabel));
   const k = kpis.find(x=>x && alvos.has(chaveLabel(x.label)));

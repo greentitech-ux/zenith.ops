@@ -116,7 +116,17 @@ function sanitizarCamposExtras(lista) {
       // "Quantidade de Pedidos" na maioria) - a marca diz QUAL KPI e o TC
       // sem depender do nome (CLAUDE.md §1: rotulo muda, identificador nao).
       // Sem a marca, campoTcDoGrupo() cai nos tres nomes conhecidos.
-      if (k?.ehTc != null) item.ehTc = !!k.ehTc;
+      //
+      // O marcador tem DUAS grafias e e' UM so: `ehTc` (Comparativo por
+      // unidade, relatorio) e `pedidos` (indicadores do assistente,
+      // botIndicadores.js). A tela de Grupos tem uma checkbox e grava os dois;
+      // aqui um espelha o outro, pra quem mandar so um deles nao deixar a
+      // outra ponta zerada.
+      if (k?.ehTc != null || k?.pedidos != null) {
+        const marca = !!k.ehTc || !!k.pedidos;
+        item.ehTc = marca;
+        item.pedidos = marca;
+      }
       // ORIGEM: de onde o valor do KPI vem. Hoje so 'remakesDoDia' - o total
       // de pizzas descartadas registradas no Carrinho naquele dia (ver
       // abastecimentoCarrinho.remakesDoDia).
@@ -310,7 +320,7 @@ function chaveRotulo(label) {
 }
 function campoTcDoGrupo(grupo) {
   const kpis = (grupo && Array.isArray(grupo.kpisExtras)) ? grupo.kpisExtras : [];
-  const marcado = kpis.find((k) => k && k.ehTc === true);
+  const marcado = kpis.find((k) => k && (k.ehTc === true || k.pedidos === true));
   if (marcado) return marcado.campo;
   const alvos = new Set(NOMES_DE_TC.map(chaveRotulo));
   const porNome = kpis.find((k) => k && alvos.has(chaveRotulo(k.label)));
