@@ -1019,6 +1019,83 @@ setTimeout(async () => {
   console.log(`${okResgateOcr ? '✓' : '✗'} Leitura por foto: valor impresso que ficou sem dono acha o campo certo pela unidade (R$ x contagem)`);
 
   // ------------------------------------------------------------------
+  // A LINHA É A PROVA. Reclamação do Master (04/09/2026): "me dê uma solução
+  // REAL, definitivamente, porque só piora - olha a leitura que foi
+  // realizada". Na tela dele "Delivery - Moto Especi 88,7% R$6.353,77" entrou
+  // como 85.353,77 - treze vezes o valor - e passou por todas as travas.
+  //
+  // O motivo: a trava da porcentagem só rodava em cima de `conferencias`, uma
+  // estrutura OPCIONAL que o modelo preenche se quiser. O Haiku não quis, e a
+  // rede de segurança nem foi acionada. Agora o servidor lê o R$ e a % da
+  // PRÓPRIA linha de origem de cada campo (que o prompt já exige) - sem
+  // depender de nada opcional e sem chamada nova.
+  let okPelaLinha = false;
+  try {
+    const ocrL = require('/home/user/adyen-monitor/server/canaisVendaOcr.js');
+    const it = (campo, texto, valor, secao = 'canal') => ({ secao, campo, label: campo, valor, textoOrigem: texto });
+    const relatorio = (moto, textoMoto) => [
+      it('moto', textoMoto, moto),
+      it('carryout', 'CarryOut 8,9% R$637,02', 637.02),
+      it('pickup', 'Pick Up 0,0% R$0,00', 0),
+      it('naloja', 'Na loja 2,4% R$173,70', 173.70),
+    ];
+    // caso 1 (o dele): o modelo copiou a linha CERTA e errou só a conversão
+    // do número - "6.353,77" virou 85353.77 no JSON
+    const c1 = ocrL.conferirPelaLinha(relatorio(85353.77, 'Delivery - Moto Especi 88,7% R$6.353,77'));
+    // caso 2: errou o dígito nos DOIS lugares (linha e valor iguais e errados)
+    // - só a % denuncia
+    const c2 = ocrL.conferirPelaLinha(relatorio(85353.77, 'Delivery - Moto Especi 88,7% R$85.353,77'));
+    // caso 3: leitura certa passa inteira
+    const c3 = ocrL.conferirPelaLinha(relatorio(6353.77, 'Delivery - Moto Especi 88,7% R$6.353,77'));
+    // caso 4: linha sem R$ nem % (quadro de contagem) não é conferida por aqui
+    const c4 = ocrL.conferirPelaLinha([it('pedidos', 'Delivery 25', 25, 'kpi'), it('dine', 'Dine In 0', 0, 'kpi')]);
+    // caso 5: % que não fecham 100 (faltou linha) não gera falso positivo
+    const c5 = ocrL.conferirPelaLinha([
+      it('a', 'A 60,0% R$600,00', 600), it('b', 'B 25,0% R$250,00', 250), it('c', 'C 5,0% R$50,00', 50),
+    ]);
+    // caso 6: seções diferentes não se misturam (canal e forma têm % próprias)
+    const c6 = ocrL.conferirPelaLinha([
+      ...relatorio(6353.77, 'Delivery - Moto Especi 88,7% R$6.353,77'),
+      it('adyen', 'AdyenV2 40,0% R$2.865,80', 2865.80, 'forma'), it('ifood', 'Ifood 50,0% R$3.582,25', 3582.25, 'forma'), it('food99', '99Food 10,0% R$716,44', 716.44, 'forma'),
+    ]);
+    const src = require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8');
+    const iGate = src.indexOf('const pelaLinha = conferirPelaLinha(itens);');
+
+    const conf = {
+      // o caso dele, com os números dele
+      'o 85.353,77 é barrado porque a linha diz R$6.353,77':
+        c1.reprovados.length === 1 && c1.reprovados[0].campo === 'moto'
+        && /não é o que está impresso na linha/.test(c1.reprovados[0].motivo) && /R\$ 6353,77/.test(c1.reprovados[0].motivo),
+      'e os outros três continuam preenchidos': c1.aprovados.length === 3 && !c1.aprovados.some((x) => x.campo === 'moto'),
+      // sem depender da linha estar certa: a % pega
+      'dígito errado nos dois lugares é barrado pela % (88,7% não fecha com 85 mil)':
+        c2.reprovados.length === 1 && c2.reprovados[0].campo === 'moto'
+        && /não fecha com os 88,7% impressos/.test(c2.reprovados[0].motivo)
+        && /perto de 6\d{3}(\.\d+)?/.test(c2.reprovados[0].motivo),
+      'leitura certa passa inteira, sem suspeito': c3.reprovados.length === 0 && c3.aprovados.length === 4,
+      'linha sem R$ nem % não é conferida por aqui (a régua dela é outra)': c4.reprovados.length === 0 && c4.aprovados.length === 2,
+      'porcentagens que não fecham 100% não viram falso positivo': c5.reprovados.length === 0,
+      'canal e forma são conferidos separados (cada seção fecha os próprios 100%)': c6.reprovados.length === 0 && c6.aprovados.length === 7,
+      // a trava roda em TODO campo, ANTES das conferências por quadro, e não
+      // depende de `conferencias`
+      'a trava roda sobre os campos, antes das conferências por quadro':
+        iGate > 0 && iGate < src.indexOf('const somasRuins = conferirSomas(dados.conferencias);'),
+      'quem reprova sai do formulário e vai pra digitação com o motivo':
+        /suspeitos\.push\(\.\.\.pelaLinha\.reprovados\);/.test(src),
+      // o prompt precisa mandar a linha COM o R$ e a %, senão não há prova
+      'o prompt exige R$ e % no textoOrigem, exatamente como impressos':
+        /os DOIS vão no textoOrigem, exatamente como impressos/.test(src)
+        && /Delivery - Moto Especi 88,7% R\$6\.353,77/.test(src),
+      'a % da linha é lida com vírgula ou ponto': ocrL.percentualNaLinha('X 88,7% R$1') === 88.7 && ocrL.percentualNaLinha('X 8.9% R$1') === 8.9 && ocrL.percentualNaLinha('X R$1') === null,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPelaLinha = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (c1=${JSON.stringify(c1.reprovados.map((r) => r.campo))} c2=${JSON.stringify(c2.reprovados.map((r) => r.motivo.slice(0, 80)))})`);
+  } catch (e) { okPelaLinha = false; console.log('  erro: ' + e.message); }
+  if (!okPelaLinha) ruins += 1;
+  console.log(`${okPelaLinha ? '✓' : '✗'} Leitura por foto: o valor tem que ser o R$ impresso na própria linha e fechar com a % ao lado - sem depender do modelo`);
+
+  // ------------------------------------------------------------------
   // "NÃO EXISTE DIFERENÇA DE CAIXA" - a conta aberta no ticket. Reclamação do
   // Master (02/09/2026): "foi relançado o fechamento já 2 vezes e continua
   // dando diferença de caixa, porém não existe diferença de caixa".
@@ -1438,15 +1515,18 @@ setTimeout(async () => {
   if (!okTelaUsoOcr) ruins += 1;
   console.log(`${okTelaUsoOcr ? '✓' : '✗'} Custo da leitura por foto: dá pra olhar na tela, por fluxo, loja e pessoa`);
 
-  // e a leitura de fato roda duas vezes (fonte): sem isso o consenso é teatro
+  // a leitura dupla é OPCIONAL (OCR_LEITURA_DUPLA=1, desligada por decisão do
+  // Master em 04/09): quando ligada, roda de fato duas vezes em paralelo e
+  // reconcilia - sem isso o consenso seria teatro. Por padrão é UMA chamada.
   let okDupla = false;
   try {
     const src = require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8');
     okDupla = /Promise\.allSettled\(\[umaLeitura\(\), umaLeitura\(\)\]\)/.test(src)
-      && /reconciliarLeituras\(ra\.value, rb\.value\)/.test(src);
+      && /reconciliarLeituras\(ra\.value, rb\.value\)/.test(src)
+      && /if \(!LEITURA_DUPLA_LIGADA\) return umaLeitura\(\);/.test(src);
   } catch (e) { okDupla = false; }
   if (!okDupla) ruins += 1;
-  console.log(`${okDupla ? '✓' : '✗'} Leitura por foto: a leitura roda DUAS vezes em paralelo antes de preencher`);
+  console.log(`${okDupla ? '✓' : '✗'} Leitura por foto: por padrão UMA chamada; com OCR_LEITURA_DUPLA=1 roda duas em paralelo e reconcilia`);
 
   // O fechamento completo (5 fotos: cartão, resumo de pedidos, service
   // times, taxa...) estourava o teto de resposta de 8000 tokens depois que a
@@ -1461,7 +1541,7 @@ setTimeout(async () => {
     const src = require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8');
     const m = src.match(/max_tokens:\s*(\d+)/);
     okTetoResposta = !!m && Number(m[1]) >= 32000
-      && /Mantenha CURTO: só o par nome\+valor/.test(src)          // textoOrigem enxuto
+      && /Mantenha CURTO: só aquela linha/.test(src)               // textoOrigem enxuto
       && /PELO MENOS UM campo da lista cadastrada/.test(src)        // conferencias só onde conferem algo
       && /No máximo 4 quadros/.test(src)
       && /stop_reason === 'max_tokens'/.test(src)                   // o último recurso continua explicado

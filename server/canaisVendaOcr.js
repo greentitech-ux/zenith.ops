@@ -175,7 +175,7 @@ Regras:
 - "conferencias": quando o relatório imprime um TOTAL com as parcelas dele logo acima (ex: o quadro "Resumo de Pedidos" imprime Delivery, Carry Out, Pick Up, Dine In, Cancelado, Retornado e depois "Total"), transcreva esse quadro aqui: o total e TODAS as parcelas dele, com o valor de cada uma, na ordem impressa. Inclua a parcela mesmo que valha 0 e mesmo que ela não seja um campo cadastrado (nesse caso "chave": null) - o servidor SOMA as parcelas e compara com o total pra saber se a leitura desalinhou. Só transcreva quadro em que o total impresso é de fato a soma das parcelas listadas; se for total de dinheiro de um quadro e as parcelas de outro, não invente relação, deixe "conferencias" vazio. TAMBÉM transcreva aqui o quadro que NÃO imprime total mas imprime a PARTICIPAÇÃO EM % de cada linha (ex: "Delivery - Moto Especi  71,6%  R$4.065,11"): nesse caso mande "totalValor": null e preencha "percentual" em cada parte com a % impressa daquela linha. Isso não contradiz a regra da porcentagem abaixo - o "valor" continua sendo só o dinheiro; o "percentual" vai num campo separado, e é com ele que o servidor confere se o valor foi lido certo. E só transcreva quadro que contém PELO MENOS UM campo da lista cadastrada — quadro sem nenhum campo cadastrado não confere nada, transcrever ele é só resposta maior. No máximo 4 quadros, e o "textoOrigem" das partes segue a mesma regra do curto.
 - LAYOUT EM DUAS COLUNAS: é comum o relatório imprimir DOIS pares "nome valor" lado a lado na mesma linha (ex: "Delivery 46    Delivery Agendado 1"). O valor de um nome é o número IMEDIATAMENTE à direita DELE — nunca o último número da linha, nunca o da coluna vizinha. Antes de responder, confira nome por nome: se o número que você ia mandar pertence ao nome do lado, você desalinhou as colunas.
 - ZERO NÃO SE PULA: linha que vale 0 é informação, e omitir ela desalinha tudo que vem depois. Se "Pick Up" está impresso valendo 0, mande 0 nesse campo — não deixe o 0 de fora e não passe pra ele o valor da linha de baixo.
-- "textoOrigem" tem que ser a linha REAL de onde o número saiu, copiada como está impressa, COM o nome junto (ex: "Dine In 6"). O servidor confere o nome do campo contra esse texto pra detectar troca de coluna, então textoOrigem que não bate com o campo faz a leitura ser recusada — copiar a linha certa é parte da resposta, não enfeite. Mantenha CURTO: só o par nome+valor daquela linha (máx ~50 caracteres), nunca a linha vizinha junto.
+- "textoOrigem" tem que ser a linha REAL de onde o número saiu, copiada como está impressa, COM o nome junto (ex: "Dine In 6"). Se a linha tem porcentagem e valor em R$, os DOIS vão no textoOrigem, exatamente como impressos, com vírgula e ponto do jeito que estão (ex: "Delivery - Moto Especi 88,7% R$6.353,77") — o servidor lê o R$ e a % dessa linha e confere o "valor" contra eles; um textoOrigem sem o R$ deixa o valor sem prova. O servidor também confere o nome do campo contra esse texto pra detectar troca de coluna, então textoOrigem que não bate com o campo faz a leitura ser recusada — copiar a linha certa e inteira é parte da resposta, não enfeite. Mantenha CURTO: só aquela linha (máx ~60 caracteres), nunca a linha vizinha junto.
 - PORCENTAGEM NUNCA É O VALOR. É comum a linha ter o nome, depois a participação em % e só então o valor em dinheiro (ex: "CarryOut 17,7% R$515,20" → o valor é 515.20, nunca 17.7). Em "campos", qualquer número acompanhado de "%" deve ser ignorado. A ÚNICA exceção é o "percentual" dentro de "conferencias", que existe justamente pra guardar essa % em campo separado.
 - DUAS LINHAS PARECIDAS: o mesmo canal pode aparecer em mais de uma linha, variantes do mesmo nome (ex: dois tipos de Delivery, um por tipo de entregador), e normalmente só uma delas é usada - a outra fica zerada o tempo todo. Quando duas linhas parecidas disputam a mesma chave da lista e só uma tem valor, mande a que tem valor. Se as duas tiverem valor, não escolha no chute: mande as duas pra "naoIdentificados" com o texto de origem de cada uma, pro gerente decidir.
 - IMPORTANTE: os números estão em formato brasileiro (ponto separa milhar, vírgula separa decimal - ex: "1.234,56"). Converta todo valor para o padrão JSON: só ponto decimal, sem separador de milhar (ex: 1234.56). Nunca escreva número com vírgula no JSON - isso quebra o formato.
@@ -418,6 +418,92 @@ const valoresIguais = (a, b) => (
     : Number(a) === Number(b)
 );
 
+
+// ------------------------------------------------ a LINHA e' a prova
+//
+// O CASO (04/09/2026): "Delivery - Moto Especi 88,7% R$6.353,77" entrou no
+// formulario como 85.353,77 - treze vezes o valor - e passou por TODAS as
+// travas. O rotulo batia (a linha diz "Delivery - Moto Especi"), o quadro nao
+// imprime total (a soma nao confere nada) e a trava da porcentagem, que
+// pegaria na hora, so roda em cima de `conferencias` - uma estrutura OPCIONAL
+// que o modelo preenche se quiser. O Haiku nao quis, e a rede de seguranca
+// nem foi acionada.
+//
+// A correcao muda de onde vem a prova: em vez de depender do que o modelo
+// transcreve numa estrutura a mais, o servidor le os numeros da PROPRIA linha
+// de origem de cada campo - que o prompt ja exige, com o nome e o valor como
+// impressos. Sao duas conferencias deterministicas, sem chamada nova:
+//
+// 1. O valor tem que ser o que esta impresso em R$ na linha. O modelo copia a
+//    linha como texto (o que ele faz bem) e converte o numero pra JSON (onde
+//    ele erra - e' ali que "6.353,77" vira 85353.77). Se os dois nao batem,
+//    o campo fica pra digitar, com os dois numeros a mostra.
+// 2. O valor tem que fechar com a % impressa ao lado, contra as outras linhas
+//    da MESMA secao - a mesma regua de conferirPercentuais, so que lida da
+//    linha em vez de esperada do modelo. Pega o caso em que ele errou o
+//    digito nos dois lugares (textoOrigem e valor iguais e errados): a % e'
+//    dois digitos e uma virgula, dificil de errar, e denuncia o valor.
+//
+// Nenhuma das duas corrige sozinha: um numero errado que entra calado e' o
+// pior desfecho, e um campo liberado pra digitar com o motivo escrito e' o
+// segundo melhor. So preenche sozinho o que passou pelas duas.
+function percentualNaLinha(texto) {
+  const m = /(\d{1,3}(?:[.,]\d{1,2})?)\s*%/.exec(String(texto || ''));
+  if (!m) return null;
+  const n = Number(m[1].replace(',', '.'));
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
+}
+
+function conferirPelaLinha(itens) {
+  const reprovados = [];
+  const aprovados = [];
+
+  // 1. valor x R$ impresso na propria linha
+  itens.forEach((it) => {
+    const emReais = numerosEmReais(it.textoOrigem);
+    if (emReais.length && !emReais.some((n) => Math.abs(n - Number(it.valor)) < TOLERANCIA_SOMA)) {
+      reprovados.push({
+        ...it,
+        motivo: `o número lido (${it.valor}) não é o que está impresso na linha "${it.textoOrigem}" (${emReais.map((n) => 'R$ ' + n.toFixed(2).replace('.', ',')).join(' / ')}). Confira na foto e digite.`,
+      });
+      return;
+    }
+    aprovados.push(it);
+  });
+
+  // 2. valor x % impressa, contra as outras linhas da mesma secao
+  const porSecao = new Map();
+  aprovados.forEach((it) => {
+    const pct = percentualNaLinha(it.textoOrigem);
+    if (pct == null) return;
+    if (!porSecao.has(it.secao)) porSecao.set(it.secao, []);
+    porSecao.get(it.secao).push({ it, pct, valor: Number(it.valor) || 0 });
+  });
+  const foraPelaPct = new Set();
+  for (const linhas of porSecao.values()) {
+    // mesma regua de conferirPercentuais: as % transcritas tem que fechar
+    // 100% (senao faltou linha e toda comparacao vira falso positivo), e
+    // participacao minuscula nao serve de referencia
+    const somaPct = linhas.reduce((t, l) => t + l.pct, 0);
+    if (Math.abs(somaPct - 100) > TOLERANCIA_PCT_TOTAL) continue;
+    const uteis = linhas.filter((l) => l.pct >= PCT_MINIMO_CONFIAVEL && l.valor > 0);
+    if (uteis.length < 3) continue;
+    const referencia = medianaDe(uteis.map((l) => (l.valor / l.pct) * 100));
+    if (!(referencia > 0)) continue;
+    uteis.forEach((l) => {
+      const meu = (l.valor / l.pct) * 100;
+      if (Math.abs(meu - referencia) / referencia <= TOLERANCIA_TOTAL_IMPLICITO) return;
+      const esperado = Math.round((referencia * l.pct) / 100 * 100) / 100;
+      foraPelaPct.add(l.it);
+      reprovados.push({
+        ...l.it,
+        motivo: `o valor lido (${l.valor}) não fecha com os ${String(l.pct).replace('.', ',')}% impressos ao lado `
+          + `- por essa participação ele deveria ser perto de ${esperado}. Confira na foto e digite.`,
+      });
+    });
+  }
+  return { aprovados: aprovados.filter((it) => !foraPelaPct.has(it)), reprovados };
+}
 // ------------------------------------------------ resgate do que sobrou
 //
 // O CASO (02/09/2026): o relatorio imprime o mesmo nome DUAS vezes, em quadros
@@ -743,6 +829,17 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
     else suspeitos.push(item);
   });
 
+  // a LINHA e' a prova (ver conferirPelaLinha): o valor tem que ser o R$
+  // impresso nela e fechar com a % ao lado. Roda em TODO campo, sem depender
+  // de o modelo ter transcrito `conferencias` - foi essa dependencia que
+  // deixou 85.353,77 entrar no lugar de 6.353,77
+  {
+    const pelaLinha = conferirPelaLinha(itens);
+    itens.length = 0;
+    itens.push(...pelaLinha.aprovados);
+    suspeitos.push(...pelaLinha.reprovados);
+  }
+
   // quadro cuja soma não bate com o total impresso: TODO campo dele vira
   // suspeito, mesmo o que passou na conferência de rótulo. Quando a conta não
   // fecha não dá pra dizer QUAL parcela está errada - só que uma está, e
@@ -865,4 +962,4 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
   }
 }
 
-module.exports = { ativo, lerCanais, extrairJson, resgatarSobras, rotuloBateComOrigem, normalizarTexto, conferirSomas, conferirPercentuais, valorDeTaxaEmCampoDeContagem, reconciliarLeituras, desempatar, minutosOuNull, unidadeHintKpi };
+module.exports = { ativo, lerCanais, extrairJson, resgatarSobras, conferirPelaLinha, percentualNaLinha, rotuloBateComOrigem, normalizarTexto, conferirSomas, conferirPercentuais, valorDeTaxaEmCampoDeContagem, reconciliarLeituras, desempatar, minutosOuNull, unidadeHintKpi };
