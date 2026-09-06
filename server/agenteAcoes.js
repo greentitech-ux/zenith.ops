@@ -33,6 +33,89 @@ const COLLECTION = db.collection('agenteAcoes');
 const CONTEXTO_REF = db.collection('agenteContexto').doc('principal');
 
 const TIPOS_ACAO = ['comando_maquina', 'acao_sistema'];
+
+// MODELOS de comando: acoes prontas que o Master usa como ponto de partida
+// na tela (NOC -> Acoes do agente -> "Comecar de um modelo"). Nao sao acoes
+// cadastradas - so preenchem o formulario; quem salva, com que nome e com
+// que aprovacao, continua sendo o Master. Pedido (06/09/2026): "quero fazer
+// uma limpa em todos os programas basicos do Windows que nao usamos no dia a
+// dia - Paint, Copilot, TeamViewer, Apresentacoes, AteraAgent, OneDrive,
+// Planilhas, Textos, YouTube". Dois modelos: o INVENTARIO (so le - roda
+// antes, pra saber o nome exato em cada maquina) e a LIMPEZA com essa lista.
+//
+// A limpeza roda como o usuario logado (ver vigiaScript.js): app da Loja,
+// atalho-app do Chrome e OneDrive saem sem Administrador; TeamViewer e
+// AteraAgent sao instalacao de maquina e ficam PULADOS quando o NOCZenith
+// nao e' admin - a saida diz isso, maquina por maquina. Mexe SO nos nomes da
+// lista: Chrome, Drive, Gmail e PDV nao aparecem aqui de proposito.
+// Teto do comando: 4000 caracteres (ver validarDados).
+const MODELO_INVENTARIO = `# Inventario de programas instalados (NoPulso) - so LE, nao muda nada.
+$k = 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
+$p = @(Get-ItemProperty $k -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and -not $_.SystemComponent } | Sort-Object DisplayName -Unique | ForEach-Object { '{0} | {1} | {2}' -f $_.DisplayName, $_.DisplayVersion, $_.Publisher })
+$a = @(Get-AppxPackage -ErrorAction SilentlyContinue | Where-Object { -not $_.IsFramework -and $_.SignatureKind -ne 'System' } | Sort-Object Name | ForEach-Object { '{0} | {1} | app da Loja' -f $_.Name, $_.Version })
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+"Administrador: $admin"; "PROGRAMAS ($($p.Count)):"; $p | Select-Object -First 300; ''; "APPS DA LOJA ($($a.Count)):"; $a | Select-Object -First 200`;
+
+const MODELO_LIMPEZA = `# Limpeza de programas basicos (NoPulso). Roda como o usuario logado.
+# Lista do Master (06/09/2026). Mexe SO nestes nomes; o resto da maquina fica como esta.
+$ErrorActionPreference = 'Continue'
+$R = New-Object System.Collections.Generic.List[string]
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+function Rodar-Desinstalador($s, $extra) {
+  if ($s -match '^\\s*"([^"]+)"\\s*(.*)$') { $exe = $Matches[1]; $a = $Matches[2] }
+  elseif ($s -match '^\\s*(\\S+)\\s*(.*)$') { $exe = $Matches[1]; $a = $Matches[2] } else { throw "desinstalador ilegivel: $s" }
+  $a = ("$a $extra").Trim()
+  if ($a) { Start-Process -FilePath $exe -ArgumentList $a -Wait -WindowStyle Hidden } else { Start-Process -FilePath $exe -Wait -WindowStyle Hidden }
+}
+# 1) apps da Loja do Windows (por usuario, sem Administrador): Paint e Copilot
+foreach ($n in 'Microsoft.Paint','Microsoft.MSPaint','Microsoft.Copilot','Microsoft.Windows.Ai.Copilot.Provider') {
+  $p = Get-AppxPackage -Name $n -ErrorAction SilentlyContinue
+  if (-not $p) { $R.Add("NAO TINHA: $n"); continue }
+  try { $p | Remove-AppxPackage -ErrorAction Stop; $R.Add("OK: $n (app da Loja)") } catch { $R.Add("FALHOU: $n - $($_.Exception.Message)") }
+}
+# 2) atalhos-app do Chrome (por usuario): Apresentacoes, Planilhas, Textos, YouTube
+$hkcu = Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue
+foreach ($n in 'Apresentações','Planilhas','Textos','YouTube') {
+  $e = @($hkcu | Where-Object { $_.DisplayName -eq $n -and $_.UninstallString -like '*chrome*' })
+  if (-not $e.Count) { $R.Add("NAO TINHA: $n (app do Chrome)"); continue }
+  foreach ($x in $e) { try { Rodar-Desinstalador $x.UninstallString ''; $R.Add("OK: $n (app do Chrome)") } catch { $R.Add("FALHOU: $n - $($_.Exception.Message)") } }
+}
+# 3) OneDrive (por usuario)
+Get-Process OneDrive -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+$od = @("$env:LOCALAPPDATA\\Microsoft\\OneDrive\\OneDriveSetup.exe","$env:SystemRoot\\SysWOW64\\OneDriveSetup.exe","$env:SystemRoot\\System32\\OneDriveSetup.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($od) { try { Start-Process -FilePath $od -ArgumentList '/uninstall' -Wait -WindowStyle Hidden; $R.Add('OK: Microsoft OneDrive') } catch { $R.Add("FALHOU: OneDrive - $($_.Exception.Message)") } } else { $R.Add('NAO TINHA: Microsoft OneDrive') }
+# 4) programas de maquina (precisam de Administrador): TeamViewer, AteraAgent
+$hklm = Get-ItemProperty 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue
+foreach ($n in 'TeamViewer','AteraAgent') {
+  $e = @($hklm | Where-Object { $_.DisplayName -like "$n*" -and $_.UninstallString })
+  if (-not $e.Count) { $R.Add("NAO TINHA: $n"); continue }
+  if (-not $admin) { $R.Add("PULADO: $n - precisa de Administrador (o NOCZenith roda como usuario comum nesta maquina)"); continue }
+  foreach ($x in $e) {
+    try {
+      if ($x.UninstallString -match 'msiexec') { Start-Process msiexec.exe -ArgumentList "/x $($x.PSChildName) /qn /norestart" -Wait }
+      else { Rodar-Desinstalador $x.UninstallString '/S /silent /verysilent /norestart' }
+      $R.Add("OK: $($x.DisplayName) $($x.DisplayVersion)")
+    } catch { $R.Add("FALHOU: $($x.DisplayName) - $($_.Exception.Message)") }
+  }
+}
+"Administrador: $admin"; $R -join "\`n"`;
+
+const MODELOS_COMANDO = [
+  {
+    id: 'inventario-programas',
+    nome: 'Inventário de programas instalados',
+    descricao: 'Só LÊ: lista os programas e apps da Loja instalados na máquina, com versão e fabricante, e diz se o NOCZenith está rodando como Administrador. Rode em massa antes de qualquer limpeza, pra saber o nome exato em cada máquina. Não muda nada.',
+    requerAprovacao: false,
+    comando: MODELO_INVENTARIO,
+  },
+  {
+    id: 'limpeza-programas-basicos',
+    nome: 'Limpeza: programas básicos que não usamos',
+    descricao: 'REMOVE da máquina: Paint, Copilot, os atalhos-app do Chrome (Apresentações, Planilhas, Textos, YouTube), Microsoft OneDrive, TeamViewer e AteraAgent. Só rode a mando do Master. TeamViewer e AteraAgent precisam de Administrador (sem isso ficam PULADOS na saída). AteraAgent é agente de gestão remota: se for o da própria equipe, NÃO remova. Rode o inventário antes.',
+    requerAprovacao: true,
+    comando: MODELO_LIMPEZA,
+  },
+];
 // lista fechada de propósito - o Master escolhe num <select>, nunca digita
 // código; adicionar uma nova ação de sistema exige alterar este arquivo
 const EXECUTORES_SISTEMA_VALIDOS = ['criar_usuario_zenith'];
@@ -176,7 +259,7 @@ async function executarAcaoDoAgente(acaoId, parametros) {
 }
 
 module.exports = {
-  TIPOS_ACAO, EXECUTORES_SISTEMA_VALIDOS,
+  TIPOS_ACAO, EXECUTORES_SISTEMA_VALIDOS, MODELOS_COMANDO, validarDados,
   listar, listarAtivas, obter, criar, atualizar, remover,
   obterContexto, salvarContexto, executarAcaoDoAgente,
 };

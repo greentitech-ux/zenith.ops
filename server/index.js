@@ -4557,6 +4557,12 @@ app.get('/api/agente/acoes', auth.requireMaster, async (req, res) => {
   res.json(await agenteAcoes.listar());
 });
 
+// modelos prontos pro formulario de acao (ver MODELOS_COMANDO em
+// agenteAcoes.js) - so leitura; virar acao de verdade passa pelo POST abaixo
+app.get('/api/agente/acoes/modelos', auth.requireMaster, (req, res) => {
+  res.json(agenteAcoes.MODELOS_COMANDO);
+});
+
 app.post('/api/agente/acoes', auth.requireMaster, async (req, res) => {
   try {
     if (await desviarSeQaMaster(req, res, 'agente.acoes.criar', `Nova ação do agente: ${req.body?.nome || ''}`, { ...req.body, criadoPorEmail: req.user.email })) return;

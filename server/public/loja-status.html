@@ -503,6 +503,10 @@
 <div class="overlay hidden" id="acao-overlay">
   <div class="modal">
     <h3 id="acao-modal-titulo">🤖 Nova ação</h3>
+    <div id="acao-modelo-wrap">
+      <label>Começar de um modelo <span style="color:var(--muted);font-weight:400;">(opcional - preenche o formulário, você revisa e salva)</span></label>
+      <select id="acao-modelo" onchange="aplicarModeloAcao()"><option value="">— em branco —</option></select>
+    </div>
     <label>Nome</label>
     <input type="text" id="acao-nome" maxlength="80" placeholder="Ex: Reiniciar spooler de impressão">
     <label>Quando/por que usar (é o que o Beniboy lê pra decidir)</label>
@@ -2617,8 +2621,35 @@ function onMudaTipoAcao(){
   document.getElementById('acao-campo-comando').classList.toggle('hidden', tipo !== 'comando_maquina');
   document.getElementById('acao-campo-sistema').classList.toggle('hidden', tipo !== 'acao_sistema');
 }
+// modelos prontos (GET /api/agente/acoes/modelos): carregados uma vez, so no
+// modal de NOVA acao. Escolher um preenche nome/descricao/comando/aprovacao -
+// o Master revisa e salva como acao normal
+let AGENTE_MODELOS = null;
+async function carregarModelosAcao(){
+  const sel = document.getElementById('acao-modelo');
+  if(!sel) return;
+  if(AGENTE_MODELOS === null){
+    try{ AGENTE_MODELOS = await (await fetch('/api/agente/acoes/modelos')).json(); }catch(e){ AGENTE_MODELOS = []; }
+    if(!Array.isArray(AGENTE_MODELOS)) AGENTE_MODELOS = [];
+    sel.innerHTML = '<option value="">— em branco —</option>' + AGENTE_MODELOS.map(m=>`<option value="${escapeHtml(m.id)}">${escapeHtml(m.nome)}</option>`).join('');
+  }
+  sel.value = '';
+}
+function aplicarModeloAcao(){
+  const id = document.getElementById('acao-modelo').value;
+  const m = (AGENTE_MODELOS||[]).find(x=>x.id===id);
+  if(!m) return;
+  document.getElementById('acao-nome').value = m.nome;
+  document.getElementById('acao-descricao').value = m.descricao;
+  document.querySelector('input[name=acao-tipo][value=comando_maquina]').checked = true;
+  document.getElementById('acao-comando').value = m.comando;
+  document.getElementById('acao-requer-aprovacao').checked = m.requerAprovacao !== false;
+  onMudaTipoAcao();
+}
 function abrirModalNovaAcao(){
   EDITANDO_ACAO_ID = null;
+  document.getElementById('acao-modelo-wrap').classList.remove('hidden');
+  carregarModelosAcao();
   document.getElementById('acao-modal-titulo').textContent = '🤖 Nova ação';
   document.getElementById('acao-nome').value = '';
   document.getElementById('acao-descricao').value = '';
@@ -2636,6 +2667,7 @@ function abrirModalEditarAcao(id){
   const a = AGENTE_ACOES.find(x => x.id === id);
   if(!a) return;
   EDITANDO_ACAO_ID = id;
+  document.getElementById('acao-modelo-wrap').classList.add('hidden');
   document.getElementById('acao-modal-titulo').textContent = '✏️ Editar ação';
   document.getElementById('acao-nome').value = a.nome;
   document.getElementById('acao-descricao').value = a.descricao;

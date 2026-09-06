@@ -10625,6 +10625,71 @@ setTimeout(async () => {
   console.log(`${okDiasSem ? '✓' : '✗'} Fechamentos: painel "Dias sem fechamento" lista unidade e data que faltou, até ontem, desde o primeiro lançamento da loja`);
 
   // ------------------------------------------------------------------
+  // MODELOS DE COMANDO DO AGENTE. Pedido do Master (06/09/2026): "quero fazer
+  // uma limpa em todos os programas basicos do Windows que nao usamos no dia
+  // a dia - Paint, Copilot, TeamViewer, Apresentacoes, AteraAgent, OneDrive,
+  // Planilhas, Textos, YouTube". O NOC ja tinha a fila de comandos e o "Rodar
+  // em massa"; faltava o comando pronto. Dois modelos (inventario, que so le,
+  // e a limpeza com essa lista) preenchem o formulario de acao - o Master
+  // revisa e salva. Regras que o teste segura: o comando cabe no teto de
+  // validarDados; a limpeza mexe SO na lista (nunca Chrome/Drive/Gmail);
+  // programa de maquina fica PULADO sem Administrador em vez de falhar
+  // calado; a tela oferece o seletor so na acao NOVA.
+  let okModelosAgente = false;
+  try {
+    const ag = require('/home/user/adyen-monitor/server/agenteAcoes.js');
+    const semLogin = await pedir('/api/agente/acoes/modelos');
+    const comMaster = await pedir('/api/agente/acoes/modelos', { Authorization: 'Bearer ' + token });
+    // usuario comum (com a secao 'suporte', que e a da pagina do NOC) NAO ve
+    // os modelos: comando de maquina e assunto de Master
+    DOCS.set('users/u-modelos-comum', {
+      passwordHash: require('bcryptjs').hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      email: 'modelos-comum@teste.local', username: 'modeloscomum',
+      permissions: { sections: ['suporte'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const comComum = await pedir('/api/agente/acoes/modelos', { Authorization: 'Bearer ' + (await auth.login('modelos-comum@teste.local', 'SenhaDeTeste!2026')).token });
+    const modelos = comMaster.status === 200 ? JSON.parse(comMaster.corpo) : [];
+    const limpeza = modelos.find((m) => m.id === 'limpeza-programas-basicos') || {};
+    const inventario = modelos.find((m) => m.id === 'inventario-programas') || {};
+    const cmd = String(limpeza.comando || '');
+    const pedidos = ['Microsoft.Paint', 'Microsoft.Copilot', 'TeamViewer', 'Apresentações', 'AteraAgent', 'OneDrive', 'Planilhas', 'Textos', 'YouTube'];
+    const validados = modelos.map((m) => { try { return ag.validarDados({ ...m, tipo: 'comando_maquina' }); } catch (e) { return null; } });
+    const htmlN = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const fnNova = /function abrirModalNovaAcao\(\)\{[\s\S]*?\n\}/.exec(htmlN);
+    const fnEdita = /function abrirModalEditarAcao\(id\)\{[\s\S]*?\n\}/.exec(htmlN);
+    const fnAplica = /function aplicarModeloAcao\(\)\{[\s\S]*?\n\}/.exec(htmlN);
+    const conf = {
+      'a rota é só do Master (sem login: 401; usuário comum do NOC: 403)': semLogin.status === 401 && comComum.status === 403 && comMaster.status === 200,
+      'há os dois modelos: inventário (só lê) e limpeza': !!inventario.comando && !!limpeza.comando,
+      'cada modelo passa na validação da ação e cabe inteiro no teto de 4000':
+        validados.every((v, i) => v && v.comando === modelos[i].comando) && modelos.every((m) => m.comando.length <= 4000),
+      'a limpeza cobre a lista do Master, nome por nome': pedidos.every((n) => cmd.includes(n)),
+      // o que NAO pode ser removido nunca aparece no comando
+      'a limpeza não encosta em Chrome, Drive, Gmail nem PDV': !/Google Chrome|Google Drive|Gmail|Bematech|Gcom|Gestor de Pedidos/i.test(cmd),
+      'programa de máquina fica PULADO sem Administrador, com o motivo na saída':
+        /IsInRole\(\[Security\.Principal\.WindowsBuiltInRole\]::Administrator\)/.test(cmd)
+        && /if \(-not \$admin\) \{ \$R\.Add\("PULADO: \$n - precisa de Administrador/.test(cmd),
+      'cada item devolve OK / NAO TINHA / FALHOU (a saída por máquina é a conferência)':
+        /"OK: /.test(cmd) && /"NAO TINHA: /.test(cmd) && /"FALHOU: /.test(cmd),
+      'a limpeza nasce exigindo aprovação; o inventário não': limpeza.requerAprovacao === true && inventario.requerAprovacao === false,
+      'o inventário só lê (nenhum Remove/Uninstall/Stop nele)': !/Remove-|Uninstall\b|Stop-Process|msiexec/.test(String(inventario.comando || '').replace(/Uninstall\\\*/g, '')),
+      // a tela
+      'o formulário de NOVA ação oferece o seletor de modelo; o de editar esconde':
+        /id="acao-modelo"/.test(htmlN) && !!fnNova && /carregarModelosAcao\(\)/.test(fnNova[0]) && /acao-modelo-wrap'\)\.classList\.remove\('hidden'\)/.test(fnNova[0])
+        && !!fnEdita && /acao-modelo-wrap'\)\.classList\.add\('hidden'\)/.test(fnEdita[0]),
+      'escolher o modelo preenche nome, descrição, comando e aprovação (o Master revisa e salva)':
+        !!fnAplica && /acao-nome'\)\.value = m\.nome/.test(fnAplica[0]) && /acao-comando'\)\.value = m\.comando/.test(fnAplica[0])
+        && /acao-requer-aprovacao'\)\.checked = m\.requerAprovacao !== false/.test(fnAplica[0]),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okModelosAgente = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (semLogin=${semLogin.status} master=${comMaster.status} n=${modelos.length})`);
+  } catch (e) { okModelosAgente = false; console.log('  erro: ' + e.message); }
+  if (!okModelosAgente) ruins += 1;
+  console.log(`${okModelosAgente ? '✓' : '✗'} NOC: modelos prontos de comando (inventário e limpeza de programas básicos) pro "Rodar em massa"`);
+
+  // ------------------------------------------------------------------
   // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o
   // AnyDesk cai, o acesso remoto some e a unica saida era reiniciar o
   // computador inteiro - o que derruba o caixa junto, por causa de um
