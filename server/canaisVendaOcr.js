@@ -310,6 +310,14 @@ function medianaDe(nums) {
   return ord.length % 2 ? ord[meio] : (ord[meio - 1] + ord[meio]) / 2;
 }
 
+// folga do total implicito (valor / %) de UMA linha: a base de 3% mais o que
+// o arredondamento da % impressa (uma decimal, +-0,05 ponto) mexe no total.
+// Em 88,7% e' quase nada; em 2,4% e' mais 2 pontos - sem isso a linha
+// pequena do relatorio viraria falso positivo (ver conferirPelaLinha)
+function folgaPelaPct(pct) {
+  return TOLERANCIA_TOTAL_IMPLICITO + (pct > 0 ? 0.05 / pct : 0);
+}
+
 function conferirPercentuais(conferencias) {
   const blocos = [];
   (Array.isArray(conferencias) ? conferencias : []).slice(0, 6).forEach((c) => {
@@ -471,7 +479,20 @@ function conferirPelaLinha(itens) {
     aprovados.push(it);
   });
 
-  // 2. valor x % impressa, contra as outras linhas da mesma secao
+  // 2. valor x % impressa, contra as outras linhas da mesma secao.
+  //
+  // Cada linha, SOZINHA, diz o total da secao (valor / % x 100). A conta nao
+  // depende de as outras linhas terem sido transcritas nem de as % somarem
+  // 100 - por isso NAO se exige mais a soma. Essa exigencia (herdada de
+  // conferirPercentuais) era uma porta de escape: bastava o modelo errar um
+  // digito numa % qualquer pra conferencia inteira ser pulada em todos os
+  // campos. O caso (05/09/2026): "CarryOut 17,0% R$1.873,99" entrou como
+  // 873,39 - total implicito de R$5.137 contra R$11.041 das linhas vizinhas -
+  // e passou.
+  //
+  // A folga leva em conta que a % e' impressa com UMA decimal: o valor real
+  // esta a +-0,05 ponto do impresso, e em 2,4% isso sozinho mexe 2% no total
+  // implicito. Sem essa folga a linha pequena viraria falso positivo.
   const porSecao = new Map();
   aprovados.forEach((it) => {
     const pct = percentualNaLinha(it.textoOrigem);
@@ -480,19 +501,38 @@ function conferirPelaLinha(itens) {
     porSecao.get(it.secao).push({ it, pct, valor: Number(it.valor) || 0 });
   });
   const foraPelaPct = new Set();
+  const reais = (n) => n.toFixed(2).replace('.', ',');
   for (const linhas of porSecao.values()) {
-    // mesma regua de conferirPercentuais: as % transcritas tem que fechar
-    // 100% (senao faltou linha e toda comparacao vira falso positivo), e
-    // participacao minuscula nao serve de referencia
-    const somaPct = linhas.reduce((t, l) => t + l.pct, 0);
-    if (Math.abs(somaPct - 100) > TOLERANCIA_PCT_TOTAL) continue;
-    const uteis = linhas.filter((l) => l.pct >= PCT_MINIMO_CONFIAVEL && l.valor > 0);
-    if (uteis.length < 3) continue;
-    const referencia = medianaDe(uteis.map((l) => (l.valor / l.pct) * 100));
+    // participacao minuscula nao serve de referencia (o arredondamento da %
+    // domina) e linha zerada nao diz total nenhum
+    const uteis = linhas
+      .filter((l) => l.pct >= PCT_MINIMO_CONFIAVEL && l.valor > 0)
+      .map((l) => ({ ...l, total: (l.valor / l.pct) * 100, folga: folgaPelaPct(l.pct) }));
+    if (uteis.length < 2) continue;
+    if (uteis.length === 2) {
+      // duas linhas que apontam totais diferentes: uma esta errada e nao da
+      // pra dizer qual. As duas vao pra digitacao - numero errado que entra
+      // calado e' pior que dois campos pra conferir na foto.
+      const [a, b] = uteis;
+      const ref = (a.total + b.total) / 2;
+      if (Math.abs(a.total - b.total) / ref <= Math.max(a.folga, b.folga)) continue;
+      uteis.forEach((l) => {
+        foraPelaPct.add(l.it);
+        reprovados.push({
+          ...l.it,
+          motivo: `as duas linhas com % desta parte do relatório apontam totais diferentes `
+            + `("${a.it.textoOrigem}" → R$ ${reais(a.total)}; "${b.it.textoOrigem}" → R$ ${reais(b.total)}) `
+            + '- uma delas foi lida errada e não dá pra dizer qual. Confira as duas na foto e digite.',
+        });
+      });
+      continue;
+    }
+    // tres ou mais: a mediana dos totais implicitos e' a referencia. Com uma
+    // linha errada, as certas concordam entre si e a mediana cai numa delas.
+    const referencia = medianaDe(uteis.map((l) => l.total));
     if (!(referencia > 0)) continue;
     uteis.forEach((l) => {
-      const meu = (l.valor / l.pct) * 100;
-      if (Math.abs(meu - referencia) / referencia <= TOLERANCIA_TOTAL_IMPLICITO) return;
+      if (Math.abs(l.total - referencia) / referencia <= l.folga) return;
       const esperado = Math.round((referencia * l.pct) / 100 * 100) / 100;
       foraPelaPct.add(l.it);
       reprovados.push({
@@ -894,12 +934,32 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
     .filter((sb) => { const k = normalizarTexto(sb.textoOrigem); if (jaVi.has(k)) return false; jaVi.add(k); return true; });
   const faltandoBruto = todos.filter((c) => !vistos.has(chaveDe(c.secao, c.campo)));
   const resgatados = resgatarSobras(sobras, faltandoBruto);
-  resgatados.forEach((r) => { itens.push(r); vistos.add(chaveDe(r.secao, r.campo)); });
+  // o resgatado passa pela MESMA prova da linha que os demais (R$ impresso e
+  // %), e JUNTO com eles - a % de uma linha so faz sentido contra as
+  // vizinhas. Ate aqui o resgate era uma porta lateral: entrava no
+  // formulario depois de conferirPelaLinha ter rodado, so com a checagem do
+  // R$ (que nao pega o digito errado copiado igual nos dois lugares).
+  {
+    const pelaLinha = conferirPelaLinha([...itens, ...resgatados]);
+    itens.length = 0;
+    itens.push(...pelaLinha.aprovados);
+    suspeitos.push(...pelaLinha.reprovados);
+  }
+  resgatados.forEach((r) => vistos.add(chaveDe(r.secao, r.campo)));
   // linha resgatada nao pode continuar aparecendo como "sobrou no relatorio":
   // ela achou dono, e repetir viraria o mesmo dinheiro contado duas vezes na
   // leitura de quem confere
   const linhasUsadas = new Set(resgatados.map((r) => normalizarTexto(r.textoOrigem)));
   const naoIdentificados = naoIdentificadosBruto.filter((n) => !linhasUsadas.has(normalizarTexto(n.textoOrigem)));
+
+  // uma linha de log por leitura, com o que entrou e o que foi barrado (campo,
+  // valor, linha de origem, motivo). E' o unico jeito de diagnosticar a
+  // leitura errada de ontem sem pedir print: qual trava deixou passar, e o
+  // que o modelo escreveu no textoOrigem
+  console.log('[ocr-leitura] unidade=%s aprovados=%s suspeitos=%s',
+    unidade || '-',
+    JSON.stringify(itens.map((i) => [i.campo, i.valor, i.textoOrigem, i.resgatado ? 'resgate' : ''])),
+    JSON.stringify(suspeitos.map((sp) => [sp.campo, sp.valor, sp.textoOrigem, String(sp.motivo || '').slice(0, 70)])));
 
   return {
     data: /^\d{4}-\d{2}-\d{2}$/.test(dados.data) ? dados.data : null,

@@ -1058,8 +1058,33 @@ setTimeout(async () => {
       ...relatorio(6353.77, 'Delivery - Moto Especi 88,7% R$6.353,77'),
       it('adyen', 'AdyenV2 40,0% R$2.865,80', 2865.80, 'forma'), it('ifood', 'Ifood 50,0% R$3.582,25', 3582.25, 'forma'), it('food99', '99Food 10,0% R$716,44', 716.44, 'forma'),
     ]);
+    // O CASO SEGUINTE (05/09/2026, "segue fazendo leitura errada"): a foto diz
+    // "CarryOut 17,0% R$1.873,99" e o formulário recebeu 873,39 - o modelo
+    // copiou o dígito errado igual nos dois lugares. Pela % o total implícito
+    // é R$5.137 contra R$11.041 das vizinhas: tinha que barrar.
+    const casoCarryout = (pctMoto) => [
+      it('moto', `Delivery - Moto Especi ${pctMoto}% R$6.227,01`, 6227.01),
+      it('carryout', 'CarryOut 17,0% R$873,39', 873.39),
+      it('pickup', 'Pick Up 0,0% R$0,00', 0),
+      it('naloja', 'Na loja 26,6% R$2.939,45', 2939.45),
+    ];
+    const c7 = ocrL.conferirPelaLinha(casoCarryout('56,4'));
+    // a porta de escape: uma % qualquer lida errada (58,4 em vez de 56,4)
+    // fazia as % não somarem 100 e a conferência inteira era pulada
+    const c8 = ocrL.conferirPelaLinha(casoCarryout('58,4'));
+    // só duas linhas com %: se discordam, as duas vão pra digitação (não dá
+    // pra dizer qual está errada); se concordam, nada acontece
+    const c9 = ocrL.conferirPelaLinha(casoCarryout('56,4').slice(0, 2));
+    const c9ok = ocrL.conferirPelaLinha([it('moto', 'Delivery 56,4% R$6.227,01', 6227.01), it('naloja', 'Na loja 26,6% R$2.939,45', 2939.45)]);
+    // a % é impressa com uma decimal: em 2,0% o arredondamento sozinho mexe
+    // 2,5% no total implícito - 4% de desvio passa, 8% não
+    const base = [it('a', 'A 50,0% R$5.000,00', 5000), it('b', 'B 30,0% R$3.000,00', 3000)];
+    const c10ok = ocrL.conferirPelaLinha([...base, it('c', 'C 2,0% R$208,00', 208)]);
+    const c10 = ocrL.conferirPelaLinha([...base, it('c', 'C 2,0% R$216,00', 216)]);
     const src = require('fs').readFileSync(__dirname + '/canaisVendaOcr.js', 'utf8');
     const iGate = src.indexOf('const pelaLinha = conferirPelaLinha(itens);');
+    const iResgate = src.indexOf('const resgatados = resgatarSobras(sobras, faltandoBruto);');
+    const iProvaResgate = src.indexOf('conferirPelaLinha([...itens, ...resgatados])');
 
     const conf = {
       // o caso dele, com os números dele
@@ -1087,10 +1112,30 @@ setTimeout(async () => {
         /os DOIS vão no textoOrigem, exatamente como impressos/.test(src)
         && /Delivery - Moto Especi 88,7% R\$6\.353,77/.test(src),
       'a % da linha é lida com vírgula ou ponto': ocrL.percentualNaLinha('X 88,7% R$1') === 88.7 && ocrL.percentualNaLinha('X 8.9% R$1') === 8.9 && ocrL.percentualNaLinha('X R$1') === null,
+      // o caso do CarryOut, com os números dele
+      'CarryOut 873,39 com 17,0% ao lado é barrado (deveria ser perto de 1.877), e os vizinhos ficam':
+        c7.reprovados.length === 1 && c7.reprovados[0].campo === 'carryout'
+        && /não fecha com os 17% impressos/.test(c7.reprovados[0].motivo) && /perto de 18[67]\d/.test(c7.reprovados[0].motivo)
+        && c7.aprovados.length === 3,
+      'uma % lida errada em OUTRA linha não desliga mais a conferência (as % não precisam somar 100)':
+        c8.reprovados.some((r) => r.campo === 'carryout') && !c8.reprovados.some((r) => r.campo === 'moto'),
+      'só duas linhas com % que discordam: as duas vão pra digitação, dizendo os dois totais':
+        c9.reprovados.length === 2
+        && c9.reprovados.every((r) => /apontam totais diferentes/.test(r.motivo) && /R\$ 11040,80/.test(r.motivo) && /R\$ 5137,59/.test(r.motivo))
+        && c9.aprovados.length === 0,
+      'só duas linhas que concordam passam': c9ok.reprovados.length === 0 && c9ok.aprovados.length === 2,
+      'a folga cresce com o arredondamento da % impressa (2,0%: 4% passa, 8% não)':
+        c10ok.reprovados.length === 0 && c10.reprovados.length === 1 && c10.reprovados[0].campo === 'c',
+      // o resgate era uma porta lateral: entrava depois da prova da linha
+      'o que o resgate devolve passa pela MESMA prova da linha, junto com os demais':
+        iResgate > 0 && iProvaResgate > iResgate
+        && /itens\.push\(\.\.\.pelaLinha\.aprovados\);\s*suspeitos\.push\(\.\.\.pelaLinha\.reprovados\);\s*\}\s*resgatados\.forEach\(\(r\) => vistos\.add/.test(src),
+      'cada leitura deixa no log o que entrou e o que foi barrado, com a linha de origem':
+        /console\.log\('\[ocr-leitura\] unidade=%s aprovados=%s suspeitos=%s'/.test(src),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okPelaLinha = !falhas.length;
-    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (c1=${JSON.stringify(c1.reprovados.map((r) => r.campo))} c2=${JSON.stringify(c2.reprovados.map((r) => r.motivo.slice(0, 80)))})`);
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (c1=${JSON.stringify(c1.reprovados.map((r) => r.campo))} c2=${JSON.stringify(c2.reprovados.map((r) => r.motivo.slice(0, 80)))} c7=${JSON.stringify(c7.reprovados.map((r) => r.campo))} c8=${JSON.stringify(c8.reprovados.map((r) => r.campo))} c9=${JSON.stringify(c9.reprovados.map((r) => r.motivo.slice(0, 160)))})`);
   } catch (e) { okPelaLinha = false; console.log('  erro: ' + e.message); }
   if (!okPelaLinha) ruins += 1;
   console.log(`${okPelaLinha ? '✓' : '✗'} Leitura por foto: o valor tem que ser o R$ impresso na própria linha e fechar com a % ao lado - sem depender do modelo`);
