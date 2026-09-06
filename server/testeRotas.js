@@ -10477,6 +10477,48 @@ setTimeout(async () => {
   console.log(`${okVariasCorrecoes ? '✓' : '✗'} Fechamentos: dá pra pedir outra correção com uma pendente - só o pedido igual (toque duplo) é recusado`);
 
   // ------------------------------------------------------------------
+  // DECIDIR NO PROPRIO CARD. Pedido do Master (06/09/2026): "onde tiver
+  // correcao para aprovar ou recusar aparecer a opcao ja ai, assim ajuda ser
+  // mais rapido". O card do fechamento no Historico dizia "correcao pendente"
+  // e a decisao ficava na aba Solicitacoes. Agora Master/Admin aprovam ou
+  // rejeitam no card, pela MESMA rota da aba, vendo o "de -> para" do pedido.
+  let okDecidirNoCard = false;
+  try {
+    const h = require('fs').readFileSync(require('path').join(__dirname, 'public', 'central-historico.html'), 'utf8');
+    const fnR = /function renderDecisaoCorrecaoNoCard\(e\)\{[\s\S]*?\n\}/.exec(h);
+    const fnD = /async function decidirCorrecaoNoCard\(edicaoId, status\)\{[\s\S]*?\n\}/.exec(h);
+    const fnP = /function edicoesFechamentoPendentes\(fechamentoId\)\{[\s\S]*?\n\}/.exec(h);
+    const iCard = h.indexOf('id="fech-card-${f.id}"');
+    const card = iCard < 0 ? '' : h.slice(iCard, h.indexOf('</div>`;', iCard));
+    const conf = {
+      'o card lista TODAS as correções pendentes do fechamento (pode haver mais de uma)':
+        !!fnP && /status==='PENDENTE'/.test(fnP[0]) && /const pendentes = edicoesFechamentoPendentes\(f\.id\)/.test(h),
+      // quem nao pode decidir nao ve botao que vai dar 403
+      'só Master/Admin veem os botões, um bloco por pendente':
+        /\(IS_MASTER\|\|IS_ADMIN\) && pendentes\.length \? pendentes\.map\(renderDecisaoCorrecaoNoCard\)\.join\(''\)/.test(card),
+      'o bloco mostra ticket, motivo e o "de → para" do pedido (resumoMudancas)':
+        !!fnR && /e\.resumoMudancas/.test(fnR[0]) && /e\.numeroTicket/.test(fnR[0]) && /ROTULO_CORRECAO\[e\.tipoCorrecao\]/.test(fnR[0]),
+      'tem Aprovar e Rejeitar, com campo de motivo da decisão':
+        !!fnR && /decidirCorrecaoNoCard\('\$\{id\}','APROVADO'\)/.test(fnR[0]) && /decidirCorrecaoNoCard\('\$\{id\}','REJEITADO'\)/.test(fnR[0])
+        && /id="corr-motivo-\$\{id\}"/.test(fnR[0]),
+      // mesma rota e mesmo payload da aba Solicitacoes - nada novo no servidor
+      'decide pela MESMA rota da aba (PATCH /api/fechamentos/edicoes/:id, status + motivoDecisao)':
+        !!fnD && /fetch\(`\/api\/fechamentos\/edicoes\/\$\{edicaoId\}`, \{ method:'PATCH'/.test(fnD[0])
+        && /JSON\.stringify\(\{ status, motivoDecisao/.test(fnD[0]),
+      'pede confirmação antes': !!fnD && /if\(!confirm\(pergunta\)\) return;/.test(fnD[0]),
+      'trava os botões enquanto o PATCH viaja (toque duplo)': !!fnD && /b\.disabled = true/.test(fnD[0]),
+      'depois recarrega a lista (o card sai de pendente)': !!fnD && /await carregarFechamentos\(\);/.test(fnD[0]),
+      'erro fica escrito no card, não some': !!fnD && /msg\.textContent = err\.message/.test(fnD[0]),
+      'a etiqueta conta quando há mais de uma': /pendentes\.length>1\?pendentes\.length\+' correções pendentes':'correção pendente'/.test(card),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDecidirNoCard = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDecidirNoCard = false; console.log('  erro: ' + e.message); }
+  if (!okDecidirNoCard) ruins += 1;
+  console.log(`${okDecidirNoCard ? '✓' : '✗'} Histórico: correção pendente se aprova ou rejeita no próprio card do fechamento (Master/Admin)`);
+
+  // ------------------------------------------------------------------
   // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o
   // AnyDesk cai, o acesso remoto some e a unica saida era reiniciar o
   // computador inteiro - o que derruba o caixa junto, por causa de um

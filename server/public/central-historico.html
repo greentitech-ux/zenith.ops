@@ -2666,6 +2666,57 @@ function irParaFechamentoPendente(data, fechamentoId){
 function edicaoFechamentoPendente(fechamentoId){
   return EDICOES_FECHAMENTO.find(e=>e.fechamentoId===fechamentoId && e.status==='PENDENTE');
 }
+// TODAS as pendentes do fechamento, mais antiga primeiro - desde 06/09 um
+// fechamento pode ter mais de uma correção na fila (ver solicitarEdicao)
+function edicoesFechamentoPendentes(fechamentoId){
+  return EDICOES_FECHAMENTO.filter(e=>e.fechamentoId===fechamentoId && e.status==='PENDENTE')
+    .sort((a,b)=>String(a.criadoEm||'').localeCompare(String(b.criadoEm||'')));
+}
+
+// DECIDIR NO PRÓPRIO CARD. Pedido do Master (06/09/2026): "onde tiver
+// correção para aprovar ou recusar, aparecer a opção já ali, assim ajuda a
+// ser mais rápido". Antes o card só dizia "correção pendente" e a decisão
+// ficava na aba Solicitações, dois cliques depois. Mesma rota da aba
+// (PATCH /api/fechamentos/edicoes/:id), mesma confirmação, mesmo campo de
+// motivo - só muda onde o botão está. Só Master/Admin veem (é quem a rota
+// deixa decidir). Mostra o que o pedido muda (resumoMudancas, "de → para")
+// pra decisão ser tomada olhando o número, não só o motivo.
+function renderDecisaoCorrecaoNoCard(e){
+  const resumo = (e.resumoMudancas||[]).map(l=>`<div style="font-family:var(--mono);font-size:11.5px;">${escapeHtml(l)}</div>`).join('');
+  const motivo = String(e.motivo||'').trim();
+  const id = escapeHtml(String(e.id));
+  return `<div id="corr-card-${id}" style="margin-top:8px;border:1px solid var(--warn);border-radius:8px;padding:8px 10px;background:var(--panel2);">
+    <div style="font-size:12px;"><b>${escapeHtml(ROTULO_CORRECAO[e.tipoCorrecao]||'correção')}</b>${e.numeroTicket?` · <span style="font-family:var(--mono);color:var(--muted);">#${escapeHtml(String(e.numeroTicket))}</span>`:''}${e.solicitadoPorEmail?` · <span class="sub">${escapeHtml(e.solicitadoPorEmail)}</span>`:''}</div>
+    ${motivo?`<div class="sub" style="margin-top:2px;">${escapeHtml(motivo)}</div>`:''}
+    ${resumo?`<div style="margin-top:4px;">${resumo}</div>`:''}
+    <input type="text" id="corr-motivo-${id}" placeholder="motivo da decisão (opcional)" maxlength="300" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:12px;box-sizing:border-box;">
+    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+      <button type="button" class="btn-primary" style="margin-top:0;font-size:12px;padding:6px 10px;background:var(--ok);" onclick="decidirCorrecaoNoCard('${id}','APROVADO')">✓ Aprovar</button>
+      <button type="button" class="btn-primary" style="margin-top:0;font-size:12px;padding:6px 10px;background:var(--bad);color:#fff;" onclick="decidirCorrecaoNoCard('${id}','REJEITADO')">✕ Rejeitar</button>
+    </div>
+    <p class="msg err hidden" id="corr-msg-${id}" style="margin:6px 0 0;"></p>
+  </div>`;
+}
+async function decidirCorrecaoNoCard(edicaoId, status){
+  const pergunta = status==='APROVADO' ? 'Aprovar essa correção? Ela é aplicada no fechamento na hora.' : 'Rejeitar essa correção?';
+  if(!confirm(pergunta)) return;
+  const caixa = document.getElementById('corr-card-'+edicaoId);
+  const msg = document.getElementById('corr-msg-'+edicaoId);
+  const inp = document.getElementById('corr-motivo-'+edicaoId);
+  // trava os botões enquanto o PATCH viaja - o mesmo toque duplo que
+  // duplicava pedidos duplicaria a decisão (a segunda voltaria "já decidido")
+  const botoes = caixa ? [...caixa.querySelectorAll('button')] : [];
+  botoes.forEach(b=>{ b.disabled = true; });
+  try{
+    const resp = await fetch(`/api/fechamentos/edicoes/${edicaoId}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status, motivoDecisao: inp ? inp.value : '' }) });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao decidir.');
+    await carregarFechamentos();
+  }catch(err){
+    if(msg){ msg.textContent = err.message; msg.classList.remove('hidden'); }
+    botoes.forEach(b=>{ b.disabled = false; });
+  }
+}
 function ultimaDecisaoFechamento(fechamentoId){
   return EDICOES_FECHAMENTO.filter(e=>e.fechamentoId===fechamentoId && e.status!=='PENDENTE').sort((a,b)=>(b.decididoEm||'').localeCompare(a.decididoEm||''))[0];
 }
@@ -2696,13 +2747,14 @@ function renderListaFechamentos(){
   el.style.maxHeight = ''; el.style.overflowY = '';
   if(!doDia.length){ el.innerHTML = `<div class="empty">Nenhum fechamento lançado em ${fmtData(dia)}.</div>`; return; }
   el.innerHTML = doDia.map(f=>{
-    const pendente = edicaoFechamentoPendente(f.id);
+    const pendentes = edicoesFechamentoPendentes(f.id);
+    const pendente = pendentes[0];
     const decidida = !pendente && ultimaDecisaoFechamento(f.id);
     return `
     <div class="card" id="fech-card-${f.id}">
       <div class="linha1">
         <span>${escapeHtml(f.unidadeNome||f.unidade)} · ${fmtData(f.data)}</span>
-        ${pendente?'<span class="badge PENDENTE">correção pendente</span>':''}
+        ${pendente?`<span class="badge PENDENTE">${pendentes.length>1?pendentes.length+' correções pendentes':'correção pendente'}</span>`:''}
         ${decidida?`<span class="badge ${decidida.status}">${decidida.status==='APROVADO'?'correção aprovada':'correção rejeitada'}</span>`:''}
       </div>
       <div class="sub">lançado em ${fmtDataHora(f.criadoEm)}${f.gerente?(' · '+escapeHtml(f.gerente)):''}</div>
@@ -2711,6 +2763,7 @@ function renderListaFechamentos(){
         <span>Declarado <b>${fmtMoney(f.totalDeclarado)}</b></span>
         <span>Diferença <b style="color:${Math.abs(f.diferenca)<0.01?'var(--ok)':'var(--bad)'}">${fmtMoney(f.diferenca)}</b></span>
       </div>
+      ${(IS_MASTER||IS_ADMIN) && pendentes.length ? pendentes.map(renderDecisaoCorrecaoNoCard).join('') : ''}
       ${IS_MASTER
         ? '<button type="button" class="link-btn" style="margin-top:8px;" onclick="abrirEditarMasterFechamento(\''+f.id+'\')">✎ Editar (Master)</button>'
         : '<button type="button" class="link-btn" style="margin-top:8px;" onclick="abrirEdicaoFechamento(\''+f.id+'\')">'+(pendente?'Pedir outra correção':'Pedir correção')+'</button>'}
