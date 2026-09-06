@@ -956,10 +956,17 @@ async function lerCanais({ arquivos, canais, formas, kpis, dica, unidade, usuari
   // valor, linha de origem, motivo). E' o unico jeito de diagnosticar a
   // leitura errada de ontem sem pedir print: qual trava deixou passar, e o
   // que o modelo escreveu no textoOrigem
-  console.log('[ocr-leitura] unidade=%s aprovados=%s suspeitos=%s',
+  // "sobrou" e "faltando" entram porque campo VAZIO tambem e' leitura errada
+  // (Dom Carrao 05/09: o Ifood ficou em branco e a diferenca foi de R$3 mil) -
+  // e o vazio so se explica vendo qual linha ficou sem dono e qual campo
+  // ficou sem linha
+  const faltandoLog = todos.filter((c) => !vistos.has(chaveDe(c.secao, c.campo))).map((c) => `${c.secao}:${c.campo}`);
+  console.log('[ocr-leitura] unidade=%s aprovados=%s suspeitos=%s sobrou=%s faltando=%s',
     unidade || '-',
     JSON.stringify(itens.map((i) => [i.campo, i.valor, i.textoOrigem, i.resgatado ? 'resgate' : ''])),
-    JSON.stringify(suspeitos.map((sp) => [sp.campo, sp.valor, sp.textoOrigem, String(sp.motivo || '').slice(0, 70)])));
+    JSON.stringify(suspeitos.map((sp) => [sp.campo, sp.valor, sp.textoOrigem, String(sp.motivo || '').slice(0, 70)])),
+    JSON.stringify(naoIdentificados.map((n) => [n.textoOrigem, n.valor])),
+    JSON.stringify(faltandoLog));
 
   return {
     data: /^\d{4}-\d{2}-\d{2}$/.test(dados.data) ? dados.data : null,

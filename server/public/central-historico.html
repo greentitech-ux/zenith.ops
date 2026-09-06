@@ -2713,7 +2713,7 @@ function renderListaFechamentos(){
       </div>
       ${IS_MASTER
         ? '<button type="button" class="link-btn" style="margin-top:8px;" onclick="abrirEditarMasterFechamento(\''+f.id+'\')">✎ Editar (Master)</button>'
-        : (pendente?'':'<button type="button" class="link-btn" style="margin-top:8px;" onclick="abrirEdicaoFechamento(\''+f.id+'\')">Pedir correção</button>')}
+        : '<button type="button" class="link-btn" style="margin-top:8px;" onclick="abrirEdicaoFechamento(\''+f.id+'\')">'+(pendente?'Pedir outra correção':'Pedir correção')+'</button>'}
     </div>`;
   }).join('');
   // 8 fechamentos a mostra; o resto fica abaixo, acessivel pelo scroll da

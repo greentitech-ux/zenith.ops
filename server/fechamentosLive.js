@@ -606,15 +606,6 @@ async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, mudancasC
   if (!atual) throw new Error('Fechamento não encontrado.');
   if (!motivo || !String(motivo).trim()) throw new Error('Descreva o motivo da correção.');
 
-  // 1 correcao pendente por fechamento: toque duplo no celular estava
-  // criando pedidos identicos na fila do Master (e agora um pedido so
-  // carrega quantos campos precisar - nao ha motivo pra fila dupla)
-  const pendenteSnap = await EDITS.where('fechamentoId', '==', fechamentoId).where('status', '==', 'PENDENTE').get();
-  if (!pendenteSnap.empty) {
-    const t = pendenteSnap.docs[0].data().numeroTicket;
-    throw new Error(`Já existe uma correção pendente pra esse lançamento${t ? ` (Ticket #${t})` : ''}. Aguarde a decisão do Master antes de pedir outra.`);
-  }
-
   const pedido = {
     id: null,
     // Ticket #10000 em diante, mesma sequencia global de refunds.js/
@@ -711,6 +702,22 @@ async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, mudancasC
 
   pedido.resumoMudancas = await montarResumoMudancas(pedido, atual);
 
+  // DUPLICATA, nao fila unica. Ate 05/09 valia "1 correcao pendente por
+  // fechamento": o toque duplo no celular criava pedidos identicos. So que a
+  // trava barrava tambem o pedido DIFERENTE - a loja descobria um segundo
+  // erro (leitura por foto errada em dois campos) e ficava presa ate o Master
+  // decidir o primeiro. Pedido do Master (06/09): pode pedir mais correcao
+  // com uma pendente. O que continua barrado e' o pedido IGUAL ao que ja
+  // esta na fila (mesmo tipo, mesmos campos, mesmos valores) - o toque
+  // duplo. Dois pendentes diferentes nao brigam: cada aprovacao aplica o
+  // proprio patch sobre o fechamento COMO ESTIVER na hora (ver decidirEdicao).
+  const assinatura = assinaturaDoPedido(pedido);
+  const pendenteSnap = await EDITS.where('fechamentoId', '==', fechamentoId).where('status', '==', 'PENDENTE').get();
+  const igual = pendenteSnap.docs.map((d) => d.data()).find((p) => assinaturaDoPedido(p) === assinatura);
+  if (igual) {
+    throw new Error(`Esse mesmo pedido já está na fila do Master${igual.numeroTicket ? ` (Ticket #${igual.numeroTicket})` : ''}. Pra corrigir outra coisa, mande um pedido com os campos novos.`);
+  }
+
   const ref = EDITS.doc();
   const agora = new Date().toISOString();
   pedido.id = ref.id;
@@ -719,6 +726,28 @@ async function solicitarEdicao({ fechamentoId, tipoCorrecao, mudancas, mudancasC
   await ref.set(pedido);
   edicoesCache.invalidar();
   return pedido;
+}
+
+// o que torna dois pedidos de correcao "o mesmo pedido": tipo e conteudo
+// (campos e valores), com as chaves em ordem pra {a,b} e {b,a} baterem.
+// Motivo, anexos e quem pediu ficam de fora de proposito - o toque duplo
+// manda o mesmo motivo, mas um pedido igual com motivo reescrito continua
+// sendo o mesmo pedido
+function assinaturaDoPedido(p) {
+  const canonico = (v) => {
+    if (Array.isArray(v)) return v.map(canonico);
+    if (v && typeof v === 'object') return Object.keys(v).sort().reduce((o, k) => { o[k] = canonico(v[k]); return o; }, {});
+    return v;
+  };
+  return JSON.stringify(canonico({
+    tipoCorrecao: p.tipoCorrecao || 'campo',
+    mudancas: p.mudancas || {},
+    mudancasCanais: p.mudancasCanais || {},
+    mudancasFormas: p.mudancasFormas || {},
+    mudancasKpis: p.mudancasKpis || {},
+    itemNovo: p.itemNovo || null,
+    novaData: p.novaData || null,
+  }));
 }
 
 // campos de texto (alem dos numericos) que o Master tambem pode corrigir

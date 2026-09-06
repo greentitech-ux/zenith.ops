@@ -1131,7 +1131,7 @@ setTimeout(async () => {
         iResgate > 0 && iProvaResgate > iResgate
         && /itens\.push\(\.\.\.pelaLinha\.aprovados\);\s*suspeitos\.push\(\.\.\.pelaLinha\.reprovados\);\s*\}\s*resgatados\.forEach\(\(r\) => vistos\.add/.test(src),
       'cada leitura deixa no log o que entrou e o que foi barrado, com a linha de origem':
-        /console\.log\('\[ocr-leitura\] unidade=%s aprovados=%s suspeitos=%s'/.test(src),
+        /console\.log\('\[ocr-leitura\] unidade=%s aprovados=%s suspeitos=%s sobrou=%s faltando=%s'/.test(src),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okPelaLinha = !falhas.length;
@@ -10412,6 +10412,69 @@ setTimeout(async () => {
   } catch (e) { okPendentesFech = false; console.log('  erro: ' + e.message); }
   if (!okPendentesFech) ruins += 1;
   console.log(`${okPendentesFech ? '✓' : '✗'} Fechamentos: a correção pendente aparece ANTES do seletor de dia, e leva pro dia dela`);
+
+  // ------------------------------------------------------------------
+  // MAIS DE UMA CORRECAO PENDENTE. Pedido do Master (06/09/2026): "preciso
+  // que seja permitido pedir mais correção mesmo que tenha alguma pendente".
+  // A trava "1 pendente por fechamento" nasceu pro toque duplo do celular,
+  // mas barrava tambem o pedido DIFERENTE - a loja achava o segundo erro e
+  // ficava presa ate o Master decidir o primeiro. Agora so o pedido IGUAL ao
+  // que ja esta na fila e recusado; dois diferentes entram, e cada aprovacao
+  // aplica o proprio patch sobre o fechamento como estiver na hora.
+  let okVariasCorrecoes = false;
+  try {
+    const fl = require('/home/user/adyen-monitor/server/fechamentosLive.js');
+    // o caso do Dom Carrao: leitura por foto deixou o Ifood de fora
+    DOCS.set('fechamentosLive/varias-corr-fech', {
+      id: 'varias-corr-fech', unidade: 'UnidVariasCorr', unidadeNome: 'Dom Varias', grupo: 'ARCFOOD', data: '2026-09-05',
+      delivery: 0, carryout: 0, pickup: 0, loja: 7117.30, adyen: 3970.06, ifood: 0, pix: 0, entradaDinheiro: 0,
+      faturamento: 7117.30, totalDeclarado: 3970.06, diferenca: -3147.24,
+    });
+    fl.invalidarCache();
+    const quem = { solicitadoPorId: 'u-loja', solicitadoPorEmail: 'loja@teste.local' };
+    const p1 = await fl.solicitarEdicao({ fechamentoId: 'varias-corr-fech', tipoCorrecao: 'campo', mudancas: { ifood: 3147.24 }, motivo: 'leitura do ifood faltando valor', ...quem });
+    // segundo pedido, DIFERENTE, com o primeiro ainda pendente: tem que entrar
+    let p2 = null, erro2 = null;
+    try { p2 = await fl.solicitarEdicao({ fechamentoId: 'varias-corr-fech', tipoCorrecao: 'campo', mudancas: { pix: 10 }, motivo: 'pix esquecido', ...quem }); } catch (e) { erro2 = e.message; }
+    // terceiro, IGUAL ao primeiro (toque duplo, motivo ate reescrito): recusado
+    let erro3 = null;
+    try { await fl.solicitarEdicao({ fechamentoId: 'varias-corr-fech', tipoCorrecao: 'campo', mudancas: { ifood: '3147.24' }, motivo: 'de novo', ...quem }); } catch (e) { erro3 = e.message; }
+    // o mesmo tipo com valor diferente NAO e duplicata (a loja corrigiu o proprio pedido)
+    let p4 = null;
+    try { p4 = await fl.solicitarEdicao({ fechamentoId: 'varias-corr-fech', tipoCorrecao: 'campo', mudancas: { ifood: 3200 }, motivo: 'era 3200', ...quem }); } catch (e) { p4 = null; }
+    // aprova os dois primeiros em sequencia: cada um aplica o seu patch
+    await fl.decidirEdicao(p1.id, 'APROVADO', { decididoPorEmail: 'master@teste.local' });
+    const aposP1 = await fl.getOne('varias-corr-fech');
+    if (p2) await fl.decidirEdicao(p2.id, 'APROVADO', { decididoPorEmail: 'master@teste.local' });
+    const aposP2 = await fl.getOne('varias-corr-fech');
+    const srcFL = require('fs').readFileSync(__dirname + '/fechamentosLive.js', 'utf8');
+    const htmlH = require('fs').readFileSync(require('path').join(__dirname, 'public', 'central-historico.html'), 'utf8');
+
+    const conf = {
+      'um segundo pedido DIFERENTE entra com o primeiro pendente': !!p2 && erro2 === null && p2.numeroTicket > p1.numeroTicket,
+      'o pedido IGUAL ao que já está na fila é recusado, dizendo o ticket':
+        !!erro3 && /Esse mesmo pedido já está na fila/.test(erro3) && new RegExp(`Ticket #${p1.numeroTicket}`).test(erro3),
+      'a mensagem antiga ("aguarde a decisão antes de pedir outra") saiu do código':
+        !/Aguarde a decisão do Master antes de pedir outra/.test(srcFL),
+      'mesmo campo com valor diferente não é duplicata (a loja corrigiu o próprio pedido)': !!p4 && p4.numeroTicket > p2.numeroTicket,
+      // a duplicata compara conteudo, nao motivo/quem pediu
+      'a assinatura do pedido é tipo + campos + valores, com chaves ordenadas':
+        /function assinaturaDoPedido\(p\)/.test(srcFL) && /Object\.keys\(v\)\.sort\(\)/.test(srcFL)
+        && /find\(\(p\) => assinaturaDoPedido\(p\) === assinatura\)/.test(srcFL),
+      // dois patches em sequencia, cada um sobre o fechamento como estiver
+      'aprovar o primeiro aplica o Ifood e a diferença zera': aposP1.ifood === 3147.24 && Math.abs(aposP1.totalDeclarado - 7117.30) < 0.011 && Math.abs(aposP1.diferenca) < 0.011,
+      'aprovar o segundo aplica o Pix SEM perder o Ifood': aposP2.ifood === 3147.24 && aposP2.pix === 10 && Math.abs(aposP2.totalDeclarado - 7127.30) < 0.011,
+      'o histórico do fechamento tem as duas aprovações': (aposP2.historico || []).length === 2,
+      // a tela: o botao continua la com pendente (antes sumia)
+      'no Histórico o botão "Pedir correção" continua com pendente, virando "Pedir outra correção"':
+        /\(pendente\?'Pedir outra correção':'Pedir correção'\)/.test(htmlH) && !/pendente\?'':'<button/.test(htmlH),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okVariasCorrecoes = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (erro2=${erro2} erro3=${erro3} aposP2=${JSON.stringify({ ifood: aposP2 && aposP2.ifood, pix: aposP2 && aposP2.pix, td: aposP2 && aposP2.totalDeclarado })})`);
+  } catch (e) { okVariasCorrecoes = false; console.log('  erro: ' + e.message); }
+  if (!okVariasCorrecoes) ruins += 1;
+  console.log(`${okVariasCorrecoes ? '✓' : '✗'} Fechamentos: dá pra pedir outra correção com uma pendente - só o pedido igual (toque duplo) é recusado`);
 
   // ------------------------------------------------------------------
   // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o
