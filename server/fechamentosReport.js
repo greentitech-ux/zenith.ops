@@ -259,8 +259,8 @@ function toCSV(colunas, linhas, secoes) {
 
 // larguras: cada coluna tem a sua (ver defs acima); quando o total passa da
 // area util do A4 paisagem (~761pt, ja descontadas as margens), todas
-// encolhem na mesma proporcao pra caber - com muitos canais/formas extras as
-// colunas ficam mais apertadas, mas nenhuma fica de fora
+// encolhem na mesma proporcao pra caber - ate um limite (ver
+// dividirEmPartes): alem dele a tabela e' partida em folhas.
 const AREA_UTIL_PT = 761;
 function largurasAjustadas(colunas) {
   const total = colunas.reduce((s, c) => s + (c.largura || 58), 0);
@@ -270,6 +270,40 @@ function largurasAjustadas(colunas) {
   return larg;
 }
 
+// PARTES. O caso (06/09/2026): o relatorio do Grupo Bravo saiu com 40+
+// colunas (canais, formas e KPIs extras de tres franquias) e o encolhimento
+// proporcional deixou cada coluna com ~9pt. O pdfkit quebra o que nao cabe
+// letra por letra: o cabecalho "DATA" virou D/A/T/A empilhado e todo valor
+// virou um "R" com o resto por cima - 14 folhas ilegiveis.
+//
+// Encolher tem limite: ate 25% acima da area util a tabela cabe numa folha
+// so, com fonte menor (comportamento de sempre). Alem disso as colunas sao
+// divididas em partes que cabem na folha, e cada parte repete as ANCORAS
+// (Data, Unidade, Responsavel) - sem elas a segunda folha e' uma tabela de
+// numeros sem dono. O relatorio inteiro (todas as redes, subtotais e o
+// consolidado) e' impresso parte por parte.
+const FOLGA_ENCOLHER = 1.25;
+const CHAVES_ANCORA = new Set(['data', 'unidadeNome', 'gerente']);
+function dividirEmPartes(colunas, areaUtil = AREA_UTIL_PT) {
+  const larguraDe = (c) => c.largura || 58;
+  const ancoras = colunas.filter((c) => CHAVES_ANCORA.has(c.key));
+  const demais = colunas.filter((c) => !CHAVES_ANCORA.has(c.key));
+  const teto = areaUtil * FOLGA_ENCOLHER;
+  const base = ancoras.reduce((s, c) => s + larguraDe(c), 0);
+  const partes = [];
+  let atual = [];
+  let soma = base;
+  demais.forEach((c) => {
+    if (atual.length && soma + larguraDe(c) > teto) {
+      partes.push([...ancoras, ...atual]);
+      atual = []; soma = base;
+    }
+    atual.push(c); soma += larguraDe(c);
+  });
+  if (atual.length || !partes.length) partes.push([...ancoras, ...atual]);
+  return partes;
+}
+
 function writePDF(res, { titulo, subtitulo, colunas, linhas, secoes, nomeArquivo }) {
   const doc = new PDFDocument({ margin: 36, size: 'A4', layout: 'landscape' });
   res.setHeader('Content-Type', 'application/pdf');
@@ -277,12 +311,23 @@ function writePDF(res, { titulo, subtitulo, colunas, linhas, secoes, nomeArquivo
   doc.pipe(res);
 
   const tableX = doc.page.margins.left;
-  const larg = largurasAjustadas(colunas);
-  const tableWidth = colunas.reduce((s, c) => s + larg[c.key], 0);
-  // quando as colunas encolheram pra caber (muitos canais/formas), a fonte
-  // encolhe junto - senao "R$ 1.771,94" nao cabe e vira "..."
-  const totalDesejado = colunas.reduce((s, c) => s + (c.largura || 58), 0);
-  const fonteTabela = totalDesejado > AREA_UTIL_PT ? Math.max(6, Math.floor(8 * AREA_UTIL_PT / totalDesejado)) : 8;
+  // a tabela e' impressa em PARTES de colunas (ver dividirEmPartes) - com
+  // poucas colunas e' uma parte so, e nada muda. Tudo abaixo (larguras,
+  // fonte, cabecalho, linha) le a parte ATUAL em P
+  const partes = dividirEmPartes(colunas);
+  function prepararParte(cols) {
+    const larg = largurasAjustadas(cols);
+    // quando as colunas encolheram pra caber (muitos canais/formas), a fonte
+    // encolhe junto - senao "R$ 1.771,94" nao cabe e vira "..."
+    const totalDesejado = cols.reduce((s, c) => s + (c.largura || 58), 0);
+    return {
+      cols,
+      larg,
+      tableWidth: cols.reduce((s, c) => s + larg[c.key], 0),
+      fonte: totalDesejado > AREA_UTIL_PT ? Math.max(6, Math.floor(8 * AREA_UTIL_PT / totalDesejado)) : 8,
+    };
+  }
+  let P = prepararParte(partes[0]);
 
   const totalFechamentos = linhas.length;
   const faturamentoTotal = linhas.reduce((s, l) => s + l.faturamento, 0);
@@ -312,14 +357,25 @@ function writePDF(res, { titulo, subtitulo, colunas, linhas, secoes, nomeArquivo
   }
 
   function linhaCabecalhoTabela(y) {
-    doc.rect(tableX, y, tableWidth, 20).fill('#eef1f4');
-    doc.fillColor('#333').fontSize(fonteTabela);
+    doc.rect(tableX, y, P.tableWidth, 20).fill('#eef1f4');
+    doc.fillColor('#333').fontSize(P.fonte);
     let x = tableX;
-    for (const c of colunas) {
-      doc.text(c.label.toUpperCase(), x + 4, y + 6, { width: larg[c.key] - 8 });
-      x += larg[c.key];
+    for (const c of P.cols) {
+      doc.text(c.label.toUpperCase(), x + 4, y + 6, { width: P.larg[c.key] - 8 });
+      x += P.larg[c.key];
     }
     return y + 20;
+  }
+
+  // titulo da parte: quais colunas estao nesta folha, e quantas partes ha -
+  // quem le a folha 3 precisa saber que existe a 1 (onde estao os totais)
+  function tituloParte(indice, y) {
+    if (partes.length < 2) return y;
+    const cols = partes[indice].filter((c) => !CHAVES_ANCORA.has(c.key));
+    const nomes = cols.length ? `${cols[0].label} … ${cols[cols.length - 1].label}` : '';
+    doc.fontSize(9).fillColor('#1b2733')
+      .text(`Parte ${indice + 1} de ${partes.length} · colunas ${nomes} (Data, Unidade e Responsável repetem em todas as partes)`, tableX, y, { width: AREA_UTIL_PT });
+    return y + 16;
   }
 
   const alturaLinha = 18;
@@ -330,73 +386,82 @@ function writePDF(res, { titulo, subtitulo, colunas, linhas, secoes, nomeArquivo
   function novaPagina() {
     doc.addPage();
     y = linhaCabecalhoTabela(doc.page.margins.top);
-    doc.fontSize(fonteTabela).fillColor('#222');
+    doc.fontSize(P.fonte).fillColor('#222');
   }
 
   // faixa com o nome da rede - e o que faz as duas operacoes se lerem
   // separadas de relance, sem precisar conferir unidade por unidade
   function faixaSecao(nome, qtd) {
     if (!cabeNaPagina(24 + alturaLinha)) novaPagina();  // faixa orfa no pe da pagina nao ajuda ninguem
-    doc.rect(tableX, y, tableWidth, 20).fill('#dfe6ee');
-    doc.fillColor('#1b2733').fontSize(Math.max(7, fonteTabela + 1))
-      .text(`${nome} · ${qtd} fechamento(s)`, tableX + 4, y + 6, { width: tableWidth - 8 });
-    doc.fontSize(fonteTabela).fillColor('#222');
+    doc.rect(tableX, y, P.tableWidth, 20).fill('#dfe6ee');
+    doc.fillColor('#1b2733').fontSize(Math.max(7, P.fonte + 1))
+      .text(`${nome} · ${qtd} fechamento(s)`, tableX + 4, y + 6, { width: P.tableWidth - 8 });
+    doc.fontSize(P.fonte).fillColor('#222');
     y += 20;
   }
 
   function linhaValores(linha, { negrito = false, fundo = null, rotulo = null } = {}) {
     if (!cabeNaPagina(alturaLinha)) novaPagina();
-    if (fundo) doc.rect(tableX, y, tableWidth, alturaLinha).fill(fundo);
-    doc.fillColor(negrito ? '#111' : '#222').fontSize(fonteTabela);
+    if (fundo) doc.rect(tableX, y, P.tableWidth, alturaLinha).fill(fundo);
+    doc.fillColor(negrito ? '#111' : '#222').fontSize(P.fonte);
     let x = tableX;
-    colunas.forEach((c, i) => {
+    P.cols.forEach((c, i) => {
       // no subtotal, a 1a coluna vira o rotulo e so as de dinheiro trazem
       // numero - repetir data/unidade numa linha de soma seria mentira
       const texto = rotulo != null
         ? (i === 0 ? rotulo : (c.moeda ? fmtMoney(linha[c.key] || 0) : ''))
         : String(formatarCelula(c, linha[c.key]) ?? '');
-      doc.text(texto, x + 4, y + 5, { width: larg[c.key] - 8, height: alturaLinha - 4, ellipsis: true });
-      x += larg[c.key];
+      doc.text(texto, x + 4, y + 5, { width: P.larg[c.key] - 8, height: alturaLinha - 4, ellipsis: true });
+      x += P.larg[c.key];
     });
-    doc.moveTo(tableX, y + alturaLinha).lineTo(tableX + tableWidth, y + alturaLinha)
+    doc.moveTo(tableX, y + alturaLinha).lineTo(tableX + P.tableWidth, y + alturaLinha)
       .strokeColor(negrito ? '#98a4b3' : '#ddd').lineWidth(negrito ? 1 : 0.5).stroke();
     y += alturaLinha;
   }
 
   cabecalhoPagina();
   y = resumo(90);
-  y = linhaCabecalhoTabela(y);
 
   if (!linhas.length) {
+    y = linhaCabecalhoTabela(y);
     doc.fontSize(10).fillColor('#888').text('Nenhum fechamento encontrado nesse período.', tableX, y + 12);
     doc.end();
     return;
   }
 
-  doc.fontSize(fonteTabela).fillColor('#222');
-  if (secoes && secoes.length) {
-    secoes.forEach((sec, i) => {
-      // cada rede comeca numa PAGINA nova: o relatorio e entregue por
-      // operacao (imprime/manda so as folhas do GBE, so as da ARCFOOD), e
-      // com as duas na mesma folha isso nao da pra fazer
-      if (i > 0) novaPagina();
-      faixaSecao(sec.nome, sec.qtd);
-      sec.linhas.forEach((l) => linhaValores(l));
-      linhaValores(sec.subtotal, { negrito: true, fundo: '#f4f7fa', rotulo: `SUBTOTAL ${sec.nome}` });
-    });
-    // com uma rede so, o total geral seria a repeticao literal do subtotal
-    if (secoes.length > 1) {
-      // consolidado tambem em folha propria - se ficasse no pe da ultima
-      // secao, seria lido como se fosse total da ARCFOOD
-      novaPagina();
-      faixaSecao('CONSOLIDADO · todas as redes', linhas.length);
-      linhaValores(somar(colunas, linhas), { negrito: true, fundo: '#e6ecf3', rotulo: 'TOTAL GERAL' });
+  // o relatorio inteiro sai uma vez por PARTE de colunas: a parte 1 comeca
+  // logo abaixo do resumo (como sempre foi); cada parte seguinte abre folha
+  // nova com o proprio titulo. Com uma parte so, e' o relatorio de sempre.
+  partes.forEach((parte, pi) => {
+    P = prepararParte(parte);
+    if (pi > 0) { doc.addPage(); y = doc.page.margins.top; }
+    y = tituloParte(pi, y);
+    y = linhaCabecalhoTabela(y);
+    doc.fontSize(P.fonte).fillColor('#222');
+    if (secoes && secoes.length) {
+      secoes.forEach((sec, i) => {
+        // cada rede comeca numa PAGINA nova: o relatorio e entregue por
+        // operacao (imprime/manda so as folhas do GBE, so as da ARCFOOD), e
+        // com as duas na mesma folha isso nao da pra fazer
+        if (i > 0) novaPagina();
+        faixaSecao(sec.nome, sec.qtd);
+        sec.linhas.forEach((l) => linhaValores(l));
+        linhaValores(sec.subtotal, { negrito: true, fundo: '#f4f7fa', rotulo: `SUBTOTAL ${sec.nome}` });
+      });
+      // com uma rede so, o total geral seria a repeticao literal do subtotal
+      if (secoes.length > 1) {
+        // consolidado tambem em folha propria - se ficasse no pe da ultima
+        // secao, seria lido como se fosse total da ARCFOOD
+        novaPagina();
+        faixaSecao('CONSOLIDADO · todas as redes', linhas.length);
+        linhaValores(somar(colunas, linhas), { negrito: true, fundo: '#e6ecf3', rotulo: 'TOTAL GERAL' });
+      }
+    } else {
+      linhas.forEach((l) => linhaValores(l));
     }
-  } else {
-    linhas.forEach((l) => linhaValores(l));
-  }
+  });
 
   doc.end();
 }
 
-module.exports = { slugify, chaveLabel, prepararRelatorio, dividirPorRede, somar, toCSV, writePDF };
+module.exports = { slugify, chaveLabel, prepararRelatorio, dividirPorRede, somar, toCSV, writePDF, dividirEmPartes, AREA_UTIL_PT, FOLGA_ENCOLHER };

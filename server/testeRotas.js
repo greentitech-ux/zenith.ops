@@ -10519,6 +10519,112 @@ setTimeout(async () => {
   console.log(`${okDecidirNoCard ? '✓' : '✗'} Histórico: correção pendente se aprova ou rejeita no próprio card do fechamento (Master/Admin)`);
 
   // ------------------------------------------------------------------
+  // PDF DO RELATORIO DE FECHAMENTOS EM PARTES. O caso (06/09/2026, "o que
+  // houve para dar esse erro na hora de exportar"): o Grupo Bravo tem 40+
+  // colunas (canais/formas/KPIs de tres franquias) e o encolhimento
+  // proporcional deixou cada coluna com ~9pt. O pdfkit quebra letra por
+  // letra: "DATA" virou D/A/T/A empilhado e todo valor virou um "R" com o
+  // resto por cima - 14 folhas ilegiveis. Agora encolhe ate 25% e, alem
+  // disso, parte a tabela em folhas, repetindo Data/Unidade/Responsavel.
+  let okPdfPartes = false;
+  try {
+    const rel = require('/home/user/adyen-monitor/server/fechamentosReport.js');
+    const cols = [
+      { key: 'data', label: 'Data', largura: 58 }, { key: 'unidadeNome', label: 'Unidade', largura: 58 },
+      { key: 'gerente', label: 'Responsável', largura: 46 }, { key: 'faturamento', label: 'Faturamento', moeda: true, largura: 64 },
+    ];
+    for (let i = 0; i < 41; i += 1) cols.push({ key: 'c' + i, label: 'Col ' + i, moeda: true, largura: 58 });
+    const partes = rel.dividirEmPartes(cols);
+    const teto = rel.AREA_UTIL_PT * rel.FOLGA_ENCOLHER;
+    const largura = (p) => p.reduce((t, c) => t + c.largura, 0);
+    const naoAncora = (p) => p.filter((c) => !['data', 'unidadeNome', 'gerente'].includes(c.key)).map((c) => c.key);
+    const todasNaoAncora = partes.flatMap(naoAncora);
+    // PDF de verdade, em memoria
+    const { PassThrough } = require('stream');
+    const st = new PassThrough(); st.setHeader = () => {};
+    const chunks = []; st.on('data', (c) => chunks.push(c));
+    const fim = new Promise((res) => st.on('end', res));
+    const linha = { _unidade: '19855', data: '2026-08-01', unidadeNome: 'Dom Carrão', gerente: 'gisele', faturamento: 100, totalDeclarado: 100, diferenca: 0 };
+    cols.forEach((c) => { if (c.moeda) linha[c.key] = 1234.56; });
+    const linhas = [linha];
+    rel.writePDF(st, { titulo: 'T', subtitulo: 'S', colunas: cols, linhas, secoes: [{ nome: 'ARCFOOD', qtd: 1, linhas, subtotal: rel.somar(cols, linhas) }] });
+    await fim;
+    const texto = textoDoPdf(Buffer.concat(chunks));
+    const conf = {
+      '45 colunas viram mais de uma parte, cada uma dentro do teto de largura': partes.length >= 3 && partes.every((p) => largura(p) <= teto),
+      'toda parte começa com Data, Unidade e Responsável': partes.every((p) => p[0].key === 'data' && p[1].key === 'unidadeNome' && p[2].key === 'gerente'),
+      'nenhuma coluna some nem repete entre as partes': todasNaoAncora.length === 42 && new Set(todasNaoAncora).size === 42,
+      'com poucas colunas continua uma parte só (o relatório de sempre)': rel.dividirEmPartes(cols.slice(0, 14)).length === 1,
+      // o PDF gerado: uma tabela por parte, cabecalho inteiro, subtotal em cada
+      'o PDF diz "Parte 1 de N" ... "Parte N de N"':
+        new RegExp(`Parte 1 de ${partes.length}`).test(texto) && new RegExp(`Parte ${partes.length} de ${partes.length}`).test(texto),
+      'o cabeçalho sai inteiro (FATURAMENTO), não letra por letra (D A T A)': /FATURAMENTO/.test(texto) && !/\bD A T A\b/.test(texto),
+      'cada parte repete a coluna Unidade e o subtotal':
+        (texto.match(/UNIDADE/g) || []).length >= partes.length && (texto.match(/SUBTOTAL/g) || []).length === partes.length,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPdfPartes = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (partes=${partes.length} larguras=${partes.map(largura)} Parte=${(texto.match(/Parte \d de \d/g) || []).join(',')})`);
+  } catch (e) { okPdfPartes = false; console.log('  erro: ' + e.message); }
+  if (!okPdfPartes) ruins += 1;
+  console.log(`${okPdfPartes ? '✓' : '✗'} Relatório de Fechamentos PDF: com muitas colunas a tabela sai em partes, repetindo Data/Unidade/Responsável`);
+
+  // ------------------------------------------------------------------
+  // DIAS SEM FECHAMENTO. Pedido do Master (06/09/2026): "quero ter um local
+  // que mostre o nome da Unidade e a data que nao teve fechamento". Painel
+  // na tela de Fechamentos, seguindo o filtro principal. A conta e' uma
+  // funcao PURA da tela (diasSemFechamento), extraida daqui e rodada em Node.
+  let okDiasSem = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+    const m = /function diasSemFechamento\(dados, codigos, inicio, fim, ultimoDia\)\{[\s\S]*?\n\}/.exec(html);
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const isoLocal = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    const UNIDADES_NOMES = { '19855': 'Dom Carrão', '19888': 'Dom Mooca', TIROL: 'Dom Tirol', NOVA: 'Loja Nova' };
+    // eslint-disable-next-line no-new-func
+    const fn = m ? new Function('isoLocal', 'UNIDADES_NOMES', `${m[0]}; return diasSemFechamento;`)(isoLocal, UNIDADES_NOMES) : null;
+    const dados = [
+      { unidade: '19855', data: '2026-09-01' }, { unidade: '19855', data: '2026-09-03' },
+      { unidade: '19888', data: '2026-09-02' }, { unidade: '19888', data: '2026-09-03' }, { unidade: '19888', data: '2026-09-04' },
+      { unidade: 'TIROL', data: '2026-09-03' }, { unidade: 'TIROL', data: '2026-09-04' },
+      { unidade: '19855', data: '2026-09-05' }, // "hoje" - nao pode contar nem a favor nem contra
+    ];
+    const cod = ['19855', '19888', 'TIROL', 'NOVA'];
+    const r1 = fn ? fn(dados, cod, '2026-09-01', '2026-09-10', '2026-09-04') : [];
+    const r2 = fn ? fn(dados, cod, '', '', '2026-09-04') : [];
+    const r3 = fn ? fn(dados, cod, '2026-09-01', '2026-09-02', '2026-09-04') : [];
+    const r4 = fn ? fn([...dados, { unidade: '19888', data: '2026-09-01' }], cod, '2026-08-25', '', '2026-09-04') : [];
+    const fnR = /function renderDiasSemFechamento\(\)\{[\s\S]*?\n\}/.exec(html);
+    const fnRender = /function render\(\)\{[\s\S]*?\n\}/.exec(html);
+    const conf = {
+      'Carrão faltou 02 e 04/09; Mooca e Tirol não faltaram nada desde o primeiro lançamento':
+        r1.length === 1 && r1[0].unidade === '19855' && r1[0].dias.join(',') === '2026-09-02,2026-09-04',
+      // loja que nunca lancou nao e "atrasada"
+      'loja sem nenhum fechamento fica de fora (Loja Nova)': !r1.some((x) => x.unidade === 'NOVA'),
+      // hoje ainda vai ser lancado
+      'nunca passa de ontem, mesmo com o filtro terminando depois': !r1[0].dias.some((d) => d > '2026-09-04'),
+      'sem período escolhido conta desde o primeiro fechamento de cada loja': r2.length === 1 && r2[0].dias.join(',') === '2026-09-02,2026-09-04',
+      'o "até" do filtro corta a lista': r3.length === 1 && r3[0].dias.join(',') === '2026-09-02',
+      // loja que abriu no meio do periodo nao deve os dias de antes
+      'período começando antes do primeiro fechamento da loja não cobra os dias anteriores':
+        r4.find((x) => x.unidade === '19888') === undefined || !r4.find((x) => x.unidade === '19888').dias.some((d) => d < '2026-09-01'),
+      'mais dias primeiro': (() => { const r = fn ? fn([{ unidade: 'TIROL', data: '2026-09-01' }, { unidade: '19855', data: '2026-09-01' }, { unidade: '19855', data: '2026-09-02' }], ['19855', 'TIROL'], '', '', '2026-09-04') : []; return r.length === 2 && r[0].unidade === 'TIROL' && r[0].dias.length === 3 && r[1].dias.length === 2; })(),
+      // a tela
+      'o painel existe na tela de Fechamentos, com contador': /id="sem-fech-lista"/.test(html) && /id="sem-fech-count"/.test(html) && /Dias sem fechamento/.test(html),
+      'segue o filtro principal (período, rede, unidades) e corta em ontem':
+        !!fnR && /ultimoDiaFechadoIso\(\)/.test(fnR[0]) && /SEL_UNIDADE\.size \? \[\.\.\.SEL_UNIDADE\] : codigosDoGrupo\(\)/.test(fnR[0])
+        && /f-date-start/.test(fnR[0]) && /f-date-end/.test(fnR[0]),
+      'render() atualiza o painel junto com o resto': !!fnRender && /renderDiasSemFechamento\(\);/.test(fnRender[0]),
+      'a lista mostra nome da unidade, quantos dias e as datas': !!fnR && /UNIDADES_NOMES\[x\.unidade\]\|\|x\.unidade/.test(fnR[0]) && /x\.dias\.map\(fmtData\)/.test(fnR[0]),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDiasSem = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (r1=${JSON.stringify(r1)} r2=${JSON.stringify(r2)} r4=${JSON.stringify(r4)})`);
+  } catch (e) { okDiasSem = false; console.log('  erro: ' + e.message); }
+  if (!okDiasSem) ruins += 1;
+  console.log(`${okDiasSem ? '✓' : '✗'} Fechamentos: painel "Dias sem fechamento" lista unidade e data que faltou, até ontem, desde o primeiro lançamento da loja`);
+
+  // ------------------------------------------------------------------
   // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o
   // AnyDesk cai, o acesso remoto some e a unica saida era reiniciar o
   // computador inteiro - o que derruba o caixa junto, por causa de um

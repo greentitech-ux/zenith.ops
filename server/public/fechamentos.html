@@ -344,6 +344,22 @@
   </div>
 </div>
 
+<!-- DIAS SEM FECHAMENTO. Pedido do Master (06/09/2026): "quero ter um local
+     que mostre o nome da Unidade e a data que não teve fechamento". Segue o
+     filtro principal (período, rede, unidades). Regras, todas no
+     diasSemFechamento() lá embaixo: só até ONTEM (o de hoje ainda vai ser
+     lançado); só loja que já lançou pelo menos um fechamento (loja que nunca
+     usou o sistema não é "atrasada", é ausente); e cada loja conta a partir
+     do PRIMEIRO fechamento dela (loja que abriu no meio do mês não deve os
+     dias de antes). -->
+<div class="panel">
+  <h2>
+    <div class="title-group"><span>📅 Dias sem fechamento</span><span class="n" id="sem-fech-count"></span></div>
+  </h2>
+  <div class="sub" id="sem-fech-sub" style="margin:-2px 0 10px;"></div>
+  <div id="sem-fech-lista"></div>
+</div>
+
 <div class="panel">
   <h2>
     <div class="title-group"><span>Fechamentos</span><span class="n" id="fechamentos-count"></span></div>
@@ -2942,6 +2958,65 @@ function renderChartAtual(){
   renderFaturamentoChart(chartRows, cr.start, cr.end);
 }
 
+// ---------- Dias sem fechamento ----------
+// Função PURA (sem DOM), pra ser testada em Node pelo testeRotas.js:
+//   dados    - todos os fechamentos carregados (qualquer período)
+//   codigos  - unidades que entram na conta (filtro principal já aplicado)
+//   inicio   - primeiro dia do período (ISO) ou vazio
+//   fim      - último dia (ISO); é cortado em `ultimoDia` (ontem)
+// Devolve [{ unidade, dias:[ISO...] }] só com quem tem dia faltando, mais
+// dias primeiro. Regras (ver o comentário do painel no HTML):
+//   1. só até `ultimoDia`;
+//   2. loja sem NENHUM fechamento no histórico fica de fora;
+//   3. cada loja conta a partir do primeiro fechamento dela.
+function diasSemFechamento(dados, codigos, inicio, fim, ultimoDia){
+  const lancou = new Set();
+  const primeiro = {};
+  (dados||[]).forEach(d=>{
+    if(!d || !d.unidade || !d.data) return;
+    lancou.add(`${d.unidade}|${d.data}`);
+    if(!primeiro[d.unidade] || d.data < primeiro[d.unidade]) primeiro[d.unidade] = d.data;
+  });
+  const ate = (fim && fim < ultimoDia) ? fim : ultimoDia;
+  const out = [];
+  (codigos||[]).forEach(u=>{
+    if(!primeiro[u]) return;
+    let de = inicio || primeiro[u];
+    if(de < primeiro[u]) de = primeiro[u];
+    if(!de || de > ate) return;
+    const dias = [];
+    const cur = new Date(de+'T00:00:00');
+    for(let iso=isoLocal(cur); iso<=ate; cur.setDate(cur.getDate()+1), iso=isoLocal(cur)){
+      if(!lancou.has(`${u}|${iso}`)) dias.push(iso);
+    }
+    if(dias.length) out.push({ unidade:u, dias });
+  });
+  return out.sort((a,b)=>b.dias.length-a.dias.length || (UNIDADES_NOMES[a.unidade]||a.unidade).localeCompare(UNIDADES_NOMES[b.unidade]||b.unidade,'pt-BR'));
+}
+
+function renderDiasSemFechamento(){
+  const el = document.getElementById('sem-fech-lista');
+  if(!el) return;
+  const inicio = document.getElementById('f-date-start').value;
+  const fim = document.getElementById('f-date-end').value;
+  const ultimo = ultimoDiaFechadoIso();
+  const codigos = SEL_UNIDADE.size ? [...SEL_UNIDADE] : codigosDoGrupo();
+  const lista = diasSemFechamento(DATA, codigos, inicio, fim, ultimo);
+  const totalDias = lista.reduce((s,x)=>s+x.dias.length, 0);
+  document.getElementById('sem-fech-count').textContent = totalDias ? `${totalDias} dia${totalDias>1?'s':''} · ${lista.length} unidade${lista.length>1?'s':''}` : '';
+  const ateTxt = fmtData((fim && fim < ultimo) ? fim : ultimo);
+  document.getElementById('sem-fech-sub').textContent =
+    `${inicio ? 'De '+fmtData(inicio)+' até' : 'Até'} ${ateTxt} (nunca conta o dia de hoje). Só entra loja que já lançou algum fechamento, contando a partir do primeiro lançamento dela.`;
+  if(!lista.length){ el.innerHTML = '<div class="empty" style="padding:6px 0;color:var(--muted);">Nenhum dia sem fechamento nesse período.</div>'; return; }
+  el.innerHTML = `<div class="tablewrap" style="max-height:340px;"><table>
+    <thead><tr><th>Unidade</th><th style="text-align:right;">Dias</th><th>Datas sem fechamento</th></tr></thead>
+    <tbody>${lista.map(x=>`<tr>
+      <td>${escapeHtml(UNIDADES_NOMES[x.unidade]||x.unidade)}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--bad);font-weight:700;">${x.dias.length}</td>
+      <td style="font-family:var(--mono);font-size:11.5px;">${x.dias.map(fmtData).join(' · ')}</td>
+    </tr>`).join('')}</tbody></table></div>`;
+}
+
 function render(){
   const rows = filtrar();
   renderKpis(rows);
@@ -2949,6 +3024,7 @@ function render(){
   renderChartAtual();
   // renderDiferencaChart(rows); // painel desativado, ver comentario acima da funcao
   renderUnidadesTable(rows);
+  renderDiasSemFechamento();
   renderTabela(rows);
 }
 
