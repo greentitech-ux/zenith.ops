@@ -10519,6 +10519,68 @@ setTimeout(async () => {
   console.log(`${okDecidirNoCard ? '✓' : '✗'} Histórico: correção pendente se aprova ou rejeita no próprio card do fechamento (Master/Admin)`);
 
   // ------------------------------------------------------------------
+  // PEDIR CORRECAO: SO O QUE FAZ PARTE DO FECHAMENTO DA UNIDADE. Pedido do
+  // Master (06/09/2026): "muitas opcoes que nao fazem parte do fechamento
+  // acabam confundindo; precisa ser so as que foram preenchidas ou as que
+  // poderiam ter sido preenchidas de cada unidade". A lista trazia 16 campos
+  // fixos pra todo mundo - 11 deles do schema da planilha antiga, que o
+  // formulario de lancamento nem tem. Agora: campo digitado entra se a secao
+  // esta ligada no grupo; campo da planilha so se tem valor; extras do grupo
+  // sempre (mais valor gravado em campo que o grupo nao tem mais).
+  let okCamposCorrigiveis = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'central-historico.html'), 'utf8');
+    const m = /function camposCorrigiveisFechamento\(f, g\)\{[\s\S]*?\n\}/.exec(html);
+    const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+    const NOMES = { caixaInicial: 'Caixa inicial', caixaFinal: 'Caixa final', entradaDinheiro: 'Entrada em dinheiro', deposito: 'Depósito', adyenPos: 'Maquininha POS 01', delivery: 'Delivery', carryout: 'Carryout', pickup: 'Pickup', loja: 'Loja', ifood: 'Ifood', food99: '99Food', pix: 'Adyen', pixCnpj: 'Pix CNPJ', outros: 'Outros', tc: 'TC', cancelados: 'Cancelados' };
+    // eslint-disable-next-line no-new-func
+    const fn = m ? new Function('num', 'NOMES_CAMPOS_FECHAMENTO', 'CAMPOS_CAIXA_FECHAMENTO', 'CAMPOS_PLANILHA_FECHAMENTO', 'CAMPOS_SEM_CIFRAO', `${m[0]}; return camposCorrigiveisFechamento;`)(
+      num, NOMES, ['caixaInicial', 'caixaFinal', 'entradaDinheiro', 'deposito'],
+      ['delivery', 'carryout', 'pickup', 'loja', 'ifood', 'food99', 'pix', 'pixCnpj', 'outros', 'tc', 'cancelados'], ['tc', 'cancelados']) : null;
+    const sels = (r) => r.map((x) => x.sel);
+    // A) Dom Carrao (ARCFOOD): canal/forma/KPI vem do grupo; Caixa e POS ligados
+    const gA = { caixaHabilitado: true, maquininhaPosHabilitado: true,
+      canaisVendaExtras: [{ campo: 'moto', label: 'Delivery - Moto Especi' }, { campo: 'carryoutx', label: 'CarryOut' }],
+      formasPagamentoExtras: [{ campo: 'adyenv2', label: 'AdyenV2' }, { campo: 'ifoodx', label: 'Ifood' }],
+      kpisExtras: [{ campo: 'taxa', label: 'Valor Total Taxa de Entrega', tipo: 'moeda' }, { campo: 'leadTime', label: 'Lead Time', tipo: 'tempo' }] };
+    const fA = { caixaInicial: 200, caixaFinal: 200, entradaDinheiro: 277, deposito: 277, adyenPos: 74.16, delivery: 0, ifood: 0, tc: 0, cancelados: 0,
+      canaisVendaExtras: { moto: 1000 }, formasPagamentoExtras: { adyenv2: 853.38 }, kpisExtras: { taxa: 10, leadTime: 95 } };
+    const rA = fn ? fn(fA, gA) : [];
+    // B) grupo sem Caixa e sem POS (tipo Saltiverso): so as formas do grupo...
+    const gB = { caixaHabilitado: false, maquininhasHabilitado: false, saidasHabilitado: false, formasPagamentoExtras: [{ campo: 'maquininha', label: 'Maquininha' }, { campo: 'dinheiro', label: 'Dinheiro' }] };
+    const rB = fn ? fn({ caixaInicial: 0, adyenPos: 0, formasPagamentoExtras: {} }, gB) : [];
+    // ...mas um valor gravado num campo de secao desligada nao pode sumir
+    const rB2 = fn ? fn({ caixaInicial: 50, formasPagamentoExtras: {} }, gB) : [];
+    // C) fechamento vindo da PLANILHA (sem grupo): os campos antigos COM valor entram
+    const rC = fn ? fn({ delivery: 611.2, carryout: 0, ifood: 382.96, tc: 40, caixaInicial: 0 }, null) : [];
+    // D) valor num campo que o grupo nao define mais entra pelo nome
+    const rD = fn ? fn({ formasPagamentoExtras: { antigo: 12 } }, { formasPagamentoExtras: [] }) : [];
+    const conf = {
+      'Dom Carrão vê só Caixa, POS e os canais/formas/KPI do grupo (10 opções, não 16 fixos + extras)':
+        rA.length === 10 && ['c:caixaInicial', 'c:caixaFinal', 'c:entradaDinheiro', 'c:deposito', 'c:adyenPos', 'cv:moto', 'cv:carryoutx', 'fp:adyenv2', 'fp:ifoodx', 'kpi:taxa'].every((s) => sels(rA).includes(s)),
+      'os 11 campos da planilha antiga NÃO aparecem quando estão zerados (Delivery, Ifood, TC, Cancelados...)':
+        !sels(rA).some((s) => ['c:delivery', 'c:carryout', 'c:pickup', 'c:loja', 'c:ifood', 'c:food99', 'c:pix', 'c:pixCnpj', 'c:outros', 'c:tc', 'c:cancelados'].includes(s)),
+      'KPI de tempo fica de fora (o input é numérico genérico)': !sels(rA).includes('kpi:leadTime'),
+      'canal do grupo entra mesmo zerado ("deixou de digitar" também é correção)': rA.find((x) => x.sel === 'cv:carryoutx').atual === 0,
+      'grupo sem Caixa nem POS mostra só as formas dele': sels(rB).join(',') === 'fp:maquininha,fp:dinheiro',
+      'valor gravado numa seção desligada não some da lista': sels(rB2).includes('c:caixaInicial') && rB2.find((x) => x.sel === 'c:caixaInicial').atual === 50,
+      'fechamento da planilha mostra os campos antigos COM valor, e TC sem cifrão':
+        sels(rC).includes('c:delivery') && sels(rC).includes('c:ifood') && sels(rC).includes('c:tc') && !sels(rC).includes('c:carryout')
+        && rC.find((x) => x.sel === 'c:tc').moeda === false && rC.find((x) => x.sel === 'c:delivery').secao === 'Planilha (campos antigos)',
+      'valor em campo que o grupo não tem mais entra pelo nome do campo': (() => { const x = rD.find((i) => i.sel === 'fp:antigo'); return !!x && x.label === 'antigo' && x.atual === 12 && x.secao === 'Formas de pagamento'; })(),
+      // a tela
+      'o <select> agrupa por seção e a lista velha (16 fixos pra todo mundo) saiu do código':
+        /<optgroup label="\$\{escapeHtml\(secao\)\}">/.test(html) && !/CAMPOS_DIGITADOS_FECHAMENTO/.test(html)
+        && /const itens = camposCorrigiveisFechamento\(f, g\);/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okCamposCorrigiveis = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (A=${JSON.stringify(sels(rA))} B=${JSON.stringify(sels(rB))} C=${JSON.stringify(sels(rC))})`);
+  } catch (e) { okCamposCorrigiveis = false; console.log('  erro: ' + e.message); }
+  if (!okCamposCorrigiveis) ruins += 1;
+  console.log(`${okCamposCorrigiveis ? '✓' : '✗'} Pedir correção: só os campos que fazem parte do fechamento da unidade (seção ligada no grupo, extras do grupo, planilha só com valor)`);
+
+  // ------------------------------------------------------------------
   // PDF DO RELATORIO DE FECHAMENTOS EM PARTES. O caso (06/09/2026, "o que
   // houve para dar esse erro na hora de exportar"): o Grupo Bravo tem 40+
   // colunas (canais/formas/KPIs de tres franquias) e o encolhimento

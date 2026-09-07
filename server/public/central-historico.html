@@ -2559,34 +2559,68 @@ const NOMES_CAMPOS_FECHAMENTO = { caixaInicial:'Caixa inicial', caixaFinal:'Caix
 // já têm os próprios grids dinâmicos por grupo, ver abrirEditarMasterFechamento)
 const CAMPOS_NUMERICOS_MASTER_FECHAMENTO = CAMPOS_NUMERICOS_FECHAMENTO.filter(c=>!['delivery','carryout','pickup','loja','ifood','food99','pix','pixCnpj','outros','tc','cancelados'].includes(c));
 
-// pedir correcao (loja): so o que foi DIGITADO no lançamento entra na lista
-// - inclusive o que ficou em branco/zerado ("deixou de digitar"). As somas
-// automáticas (Maquininhas total, Total de saída, Faturamento, Total
-// declarado, Quebra) ficam de fora: elas se recalculam sozinhas quando a
-// correção é aprovada, então não fazem sentido como alvo de correção
-const CAMPOS_DIGITADOS_FECHAMENTO = ['caixaInicial','caixaFinal','delivery','carryout','pickup','loja','adyenPos','ifood','food99','pix','pixCnpj','outros','entradaDinheiro','deposito','tc','cancelados'];
+// pedir correcao (loja): SO O QUE FAZ PARTE DO FECHAMENTO DESSA UNIDADE.
+// Pedido do Master (06/09/2026): "muitas opções que não fazem parte do
+// fechamento acabam confundindo; precisa ser só as que foram preenchidas ou
+// as que poderiam ter sido preenchidas do fechamento de cada unidade".
+// Antes a lista trazia os 16 campos fixos pra todo mundo - e Delivery,
+// Carryout, Pickup, Loja, Ifood, 99Food, Adyen, Pix CNPJ, Outros, TC e
+// Cancelados são do schema da PLANILHA antiga: o formulário de lançamento
+// (lancamento.html) nem tem esses campos; lá canal, forma e KPI vêm do grupo.
+//
+// Regra (camposCorrigiveisFechamento, função pura testada no testeRotas.js):
+//   1. campo digitado do formulário entra se a SEÇÃO dele está ligada no
+//      grupo: Caixa (caixa inicial/final, entrada em dinheiro, depósito) e
+//      Maquininha POS - "poderia ter sido preenchido";
+//   2. campo da planilha antiga só entra se tem valor no fechamento
+//      (lançamento importado) - "foi preenchido";
+//   3. canais/formas/KPI's do grupo entram sempre (são o formulário dessa
+//      loja); valor gravado num campo que o grupo não tem mais também entra,
+//      pelo nome do campo, pra não sumir dinheiro da lista.
+// As somas automáticas (Maquininhas total, Total de saída, Faturamento,
+// Total declarado, Quebra) continuam de fora: recalculam sozinhas na
+// aprovação.
+const CAMPOS_CAIXA_FECHAMENTO = ['caixaInicial','caixaFinal','entradaDinheiro','deposito'];
+const CAMPOS_PLANILHA_FECHAMENTO = ['delivery','carryout','pickup','loja','ifood','food99','pix','pixCnpj','outros','tc','cancelados'];
 const CAMPOS_SEM_CIFRAO = ['tc','cancelados'];
 function atualCampoFmt(campo, valor){ return CAMPOS_SEM_CIFRAO.includes(campo) ? String(num(valor)) : fmtMoney(num(valor)); }
+// devolve [{ sel, label, atual, moeda, secao }] - sel e' o value do <option>
+// (c: fixo, cv:/fp:/kpi: extras do grupo), secao agrupa no <optgroup>
+function camposCorrigiveisFechamento(f, g){
+  const out = [];
+  const caixaOk = !g || g.caixaHabilitado !== false;
+  const posOk = !!(g && g.maquininhaPosHabilitado === true);
+  CAMPOS_CAIXA_FECHAMENTO.forEach(c=>{
+    if(caixaOk || num(f[c]) !== 0) out.push({ sel:'c:'+c, label:NOMES_CAMPOS_FECHAMENTO[c], atual:num(f[c]), moeda:true, secao:'Caixa' });
+  });
+  if(posOk || num(f.adyenPos) !== 0) out.push({ sel:'c:adyenPos', label:NOMES_CAMPOS_FECHAMENTO.adyenPos, atual:num(f.adyenPos), moeda:true, secao:'Maquininha POS' });
+  const extras = (lista, mapa, pref, secao, filtro) => {
+    const defs = (lista||[]).filter(d=>!filtro || filtro(d));
+    defs.forEach(d=>out.push({ sel:pref+':'+d.campo, label:d.label||d.campo, atual:num((mapa||{})[d.campo]), moeda: pref!=='kpi' || d.tipo==='moeda', secao }));
+    // valor gravado num campo que o grupo nao define mais (renomeado/removido)
+    Object.entries(mapa||{}).forEach(([campo, v])=>{
+      if(num(v) !== 0 && !(lista||[]).some(d=>d.campo===campo)) out.push({ sel:pref+':'+campo, label:campo, atual:num(v), moeda: pref!=='kpi', secao });
+    });
+  };
+  extras(g?.canaisVendaExtras, f.canaisVendaExtras, 'cv', 'Canais de venda');
+  extras(g?.formasPagamentoExtras, f.formasPagamentoExtras, 'fp', 'Formas de pagamento');
+  // tempo fica de fora (junto com texto/arquivo): esse pedido usa 1 input
+  // numerico generico (#ef-valor) e "mm:ss" nao cabe nele - correcao de
+  // tempo passa pela edicao direta do Master, que tem input proprio por campo
+  extras(g?.kpisExtras, f.kpisExtras, 'kpi', "KPI's", k=>!['texto','arquivo','tempo'].includes(k.tipo||'quantidade'));
+  CAMPOS_PLANILHA_FECHAMENTO.forEach(c=>{
+    if(num(f[c]) !== 0) out.push({ sel:'c:'+c, label:NOMES_CAMPOS_FECHAMENTO[c], atual:num(f[c]), moeda:!CAMPOS_SEM_CIFRAO.includes(c), secao:'Planilha (campos antigos)' });
+  });
+  return out;
+}
 function opcoesCorrecaoFechamento(f){
   const g = grupoKpiDaUnidadeFechamento(f.unidade);
-  const fixos = CAMPOS_DIGITADOS_FECHAMENTO
-    .map(c=>`<option value="c:${c}">${NOMES_CAMPOS_FECHAMENTO[c]} (atual: ${atualCampoFmt(c, f[c])})</option>`).join('');
-  const canais = (g?.canaisVendaExtras||[])
-    .map(d=>`<option value="cv:${escapeHtml(d.campo)}">${escapeHtml(d.label||d.campo)} (atual: ${fmtMoney(num((f.canaisVendaExtras||{})[d.campo]))})</option>`).join('');
-  const formas = (g?.formasPagamentoExtras||[])
-    .map(d=>`<option value="fp:${escapeHtml(d.campo)}">${escapeHtml(d.label||d.campo)} (atual: ${fmtMoney(num((f.formasPagamentoExtras||{})[d.campo]))})</option>`).join('');
-  // tempo tambem fica de fora daqui (junto com texto/arquivo): esse pedido
-  // usa 1 input numerico generico (#ef-valor) compartilhado por qualquer
-  // campo escolhido, e "mm:ss" nao cabe nele - correcao de tempo passa pela
-  // edicao direta do Master (abrirEditarMasterFechamento), que tem input
-  // proprio por campo
-  const kpis = (g?.kpisExtras||[])
-    .filter(k=>!['texto','arquivo','tempo'].includes(k.tipo||'quantidade'))
-    .map(k=>`<option value="kpi:${escapeHtml(k.campo)}">${escapeHtml(k.label||k.campo)} (atual: ${(k.tipo==='moeda')?fmtMoney(num((f.kpisExtras||{})[k.campo])):num((f.kpisExtras||{})[k.campo])})</option>`).join('');
-  return fixos
-    + (canais?`<optgroup label="Canais de venda (grupo)">${canais}</optgroup>`:'')
-    + (formas?`<optgroup label="Formas de pagamento (grupo)">${formas}</optgroup>`:'')
-    + (kpis?`<optgroup label="KPI's (grupo)">${kpis}</optgroup>`:'');
+  const itens = camposCorrigiveisFechamento(f, g);
+  if(!itens.length) return '<option value="" disabled>Nenhum campo digitado neste fechamento</option>';
+  const porSecao = new Map();
+  itens.forEach(it=>{ if(!porSecao.has(it.secao)) porSecao.set(it.secao, []); porSecao.get(it.secao).push(it); });
+  const opt = it=>`<option value="${escapeHtml(it.sel)}">${escapeHtml(it.label)} (atual: ${it.moeda ? fmtMoney(it.atual) : String(it.atual)})</option>`;
+  return [...porSecao.entries()].map(([secao, lista])=>`<optgroup label="${escapeHtml(secao)}">${lista.map(opt).join('')}</optgroup>`).join('');
 }
 
 let MEUS_FECHAMENTOS = [];
