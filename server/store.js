@@ -243,6 +243,25 @@ const CHARGEBACK_STATUSES = [
 // de prazo) contam como "data do chargeback" pro filtro de periodo do painel
 const ABERTURA_CHARGEBACK_STATUSES = ['CHARGEBACK', 'NOTIFICATION_OF_CHARGEBACK'];
 
+// NOME que aparece no pedido (Monitor -> "Pedidos que mudaram de status",
+// relatorio, push). Pedido do Master (07/09/2026): "quando for PIX, aparecer
+// o nome do cliente - esta configurado pra aparecer o nome do cartao".
+//
+// Dois defeitos juntos deixavam o Pix como "DOM19911:": (1) o pedido nascia
+// com `cliente` = shopperReference, que em Pix sem e-mail e' so a conta da
+// Adyen + ":"; (2) a troca pelo nome so acontecia se `cliente` fosse igual a
+// `unidade + ":"` - mas `unidade` e' o nome normalizado ("Dominos
+// Garanhuns") e a referencia usa o codigo cru ("DOM19911"), entao nunca
+// batia e o nome nunca entrava, mesmo quando a Adyen mandava.
+//
+// Agora: cartao mostra o nome impresso no cartao (como sempre, e' o que a
+// planilha de referencia usa); Pix nao tem cartao, mostra o nome do cliente
+// (shopperName / pagador do Pix). A referencia da conta nunca vira nome.
+function ehPix(tx) { return /pix/i.test(String(tx.metodo || '')); }
+function nomeParaPedido(tx) {
+  return (ehPix(tx) ? (tx.nomeCliente || tx.cardHolder) : (tx.cardHolder || tx.nomeCliente)) || null;
+}
+
 function allOrders() {
   const all = load();
   const sorted = [...all].sort((a, b) => (a.dataHora || '').localeCompare(b.dataHora || ''));
@@ -253,7 +272,7 @@ function allOrders() {
       map.set(key, {
         pedidoId: key,
         unidade: tx.unidade,
-        cliente: tx.cardHolder || tx.shopperReference || null,
+        cliente: nomeParaPedido(tx),
         metodo: tx.metodo,
         last4: tx.last4,
         fraudeSuspeita: false,
@@ -276,8 +295,12 @@ function allOrders() {
     order.valor = tx.valor;
     order.fraudeSuspeita = order.fraudeSuspeita || !!tx.fraudeSuspeita;
     if (!order.last4 && tx.last4) order.last4 = tx.last4;
-    if ((!order.cliente || order.cliente === order.unidade + ':') && (tx.cardHolder || tx.nomeCliente)) {
-      order.cliente = tx.cardHolder || tx.nomeCliente;
+    // qualquer evento do pedido pode trazer o nome (a Adyen nem sempre repete
+    // no estorno); em Pix, o nome do cliente ganha do nome de cartao mesmo
+    // que este tenha chegado antes
+    const nomeEvento = nomeParaPedido(tx);
+    if (nomeEvento && (!order.cliente || (ehPix(tx) && tx.nomeCliente && order.cliente !== tx.nomeCliente))) {
+      order.cliente = nomeEvento;
     }
     if (tx.status === 'APROVADO' && !order.dataCompra) order.dataCompra = tx.dataHora;
     if (ABERTURA_CHARGEBACK_STATUSES.includes(tx.status) && !order.dataChargeback) order.dataChargeback = tx.dataHora;

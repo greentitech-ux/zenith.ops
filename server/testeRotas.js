@@ -10752,6 +10752,62 @@ setTimeout(async () => {
   console.log(`${okModelosAgente ? '✓' : '✗'} NOC: modelos prontos de comando (inventário e limpeza de programas básicos) pro "Rodar em massa"`);
 
   // ------------------------------------------------------------------
+  // PIX MOSTRA O NOME DO CLIENTE. Pedido do Master (07/09/2026): no Monitor,
+  // em "Pedidos que mudaram de status", o Pix saia como "pix · DOM19911: · —".
+  // Dois defeitos: o pedido nascia com cliente = shopperReference (conta da
+  // Adyen + ":"), e a troca pelo nome comparava com `unidade + ":"` - a
+  // unidade normalizada ("Dominos Garanhuns") nunca bate com o codigo cru
+  // ("DOM19911"), entao o nome nunca entrava. Agora Pix mostra o nome do
+  // cliente (shopperName / pagador do Pix), cartao continua com o nome do
+  // cartao, e a referencia da conta nunca vira nome.
+  let okPixNome = false;
+  try {
+    const nz = require('/home/user/adyen-monitor/server/normalize.js');
+    const agoraMs = Date.now();
+    const ev = (ref, i, extra) => ({
+      pspReference: `${ref}-${i}`, merchantReference: ref, eventCode: i === 0 ? 'AUTHORISATION' : 'REFUND',
+      status: i === 0 ? 'APROVADO' : 'ESTORNADO', unidade: 'Dominos Garanhuns', valor: 42, moeda: 'BRL',
+      dataHora: new Date(agoraMs + i * 1000).toISOString(), shopperReference: 'DOM19911:', last4: null, cardHolder: null, nomeCliente: null, ...extra,
+    });
+    // 1) Pix com nome na autorizacao, estorno sem nome (a Adyen nao repete)
+    store.addOrUpdate(ev('pix-nome-1', 0, { metodo: 'pix', nomeCliente: 'Joana Prestes' }));
+    store.addOrUpdate(ev('pix-nome-1', 1, { metodo: 'pix' }));
+    // 2) Pix cujo nome so veio no estorno
+    store.addOrUpdate(ev('pix-nome-2', 0, { metodo: 'pix' }));
+    store.addOrUpdate(ev('pix-nome-2', 1, { metodo: 'pix', nomeCliente: 'Carlos Meira' }));
+    // 3) Pix sem nome nenhum: "cliente desconhecido", nunca a conta da Adyen
+    store.addOrUpdate(ev('pix-nome-3', 0, { metodo: 'pix' }));
+    store.addOrUpdate(ev('pix-nome-3', 1, { metodo: 'pix' }));
+    // 4) cartao: continua o nome IMPRESSO no cartao (comportamento de sempre)
+    store.addOrUpdate(ev('cartao-nome-4', 0, { metodo: 'visa', cardHolder: 'MARIA S SILVA', nomeCliente: 'Maria Silva', last4: '1234' }));
+    store.addOrUpdate(ev('cartao-nome-4', 1, { metodo: 'visa', last4: '1234' }));
+    // 5) Pix que por acaso trouxe cardHolder tambem: o nome do cliente ganha
+    store.addOrUpdate(ev('pix-nome-5', 0, { metodo: 'pix', cardHolder: 'PIX', nomeCliente: 'Ana Souza' }));
+    store.addOrUpdate(ev('pix-nome-5', 1, { metodo: 'pix' }));
+    const pedido = (ref) => store.ordersChanged().find((o) => o.pedidoId === ref) || {};
+    // normalize: pagador do Pix no additionalData (chave "pix.*Name")
+    const nPix = nz.normalize({ pspReference: 'x', merchantReference: 'x', eventCode: 'AUTHORISATION', success: 'true', paymentMethod: 'pix', merchantAccountCode: 'DOM19911', amount: { value: 4200, currency: 'BRL' }, additionalData: { 'pix.payerName': 'Joana Prestes', shopperReference: 'DOM19911:' } });
+    const nCartao = nz.normalize({ pspReference: 'y', merchantReference: 'y', eventCode: 'AUTHORISATION', success: 'true', paymentMethod: 'visa', merchantAccountCode: 'DOM19911', amount: { value: 4200, currency: 'BRL' }, additionalData: { cardHolderName: 'MARIA S SILVA', shopperName: '[first name=Maria, infix=null, last name=Silva, gender=null]' } });
+    const srcStore = require('fs').readFileSync(__dirname + '/store.js', 'utf8');
+    const conf = {
+      'Pix: o card mostra o nome do cliente, não a conta da Adyen': pedido('pix-nome-1').cliente === 'Joana Prestes',
+      'Pix: nome que só veio no estorno também entra (antes ficava "DOM19911:" pra sempre)': pedido('pix-nome-2').cliente === 'Carlos Meira',
+      'Pix sem nome nenhum fica vazio (a tela diz "cliente desconhecido"), nunca "DOM19911:"': !pedido('pix-nome-3').cliente,
+      'cartão continua com o nome impresso no cartão': pedido('cartao-nome-4').cliente === 'MARIA S SILVA',
+      'em Pix o nome do cliente ganha do nome de cartão': pedido('pix-nome-5').cliente === 'Ana Souza',
+      'a referência da conta (shopperReference) não é mais usada como nome do pedido': !/cliente: tx\.cardHolder \|\| tx\.shopperReference/.test(srcStore) && !/order\.cliente === order\.unidade \+ ':'/.test(srcStore),
+      // o webhook: o nome do pagador do Pix (Include Pix Payer info) vira nomeCliente
+      'normalize lê o pagador do Pix no additionalData ("pix.payerName")': nPix.nomeCliente === 'Joana Prestes' && nPix.cardHolder === null,
+      'normalize do cartão não mudou (shopperName limpo, cardHolder impresso)': nCartao.nomeCliente === 'Maria Silva' && nCartao.cardHolder === 'MARIA S SILVA',
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPixNome = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (p1=${pedido('pix-nome-1').cliente} p2=${pedido('pix-nome-2').cliente} p3=${pedido('pix-nome-3').cliente} p4=${pedido('cartao-nome-4').cliente} p5=${pedido('pix-nome-5').cliente} nPix=${nPix.nomeCliente})`);
+  } catch (e) { okPixNome = false; console.log('  erro: ' + e.message); }
+  if (!okPixNome) ruins += 1;
+  console.log(`${okPixNome ? '✓' : '✗'} Monitor: pedido Pix que mudou de status mostra o nome do cliente (não a conta da Adyen nem o nome do cartão)`);
+
+  // ------------------------------------------------------------------
   // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o
   // AnyDesk cai, o acesso remoto some e a unica saida era reiniciar o
   // computador inteiro - o que derruba o caixa junto, por causa de um

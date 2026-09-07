@@ -85,6 +85,19 @@ function shopperName(additional) {
   return null;
 }
 
+// nome do PAGADOR do Pix. A Adyen so manda se "Include Pix Payer info" estiver
+// ligado nas configuracoes adicionais do webhook (Customer Area -> webhook ->
+// Additional settings -> Payment). A chave vem no namespace "pix." do
+// additionalData; como a grafia exata nao esta fixada na nossa integracao,
+// aceita qualquer chave "pix.*" que termine em name/nome (ex:
+// pix.payerName), sem depender de uma so
+function pixPagador(additional) {
+  for (const [k, v] of Object.entries(additional || {})) {
+    if (/^pix\..*(name|nome)$/i.test(k) && typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return null;
+}
+
 function normalize(item) {
   const additional = item.additionalData || {};
   const status = statusFromEvent(item);
@@ -105,7 +118,7 @@ function normalize(item) {
     last4: additional.cardSummary || null,
     bin: additional.cardBin || (additional.cardSummary ? null : null),
     cardHolder, // nome do cartao (impresso no cartao)
-    nomeCliente: shopperName(additional) || cardHolder, // nome do cliente que fez o pedido
+    nomeCliente: shopperName(additional) || pixPagador(additional) || cardHolder, // nome do cliente que fez o pedido
     shopperReference: additional.shopperReference || item.merchantAccountCode + ':' + (additional.shopperEmail || ''),
     unidade: normalizarCodigoUnidade(item.merchantAccountCode),
     dataHora: new Date().toISOString(), // Adyen nao manda timestamp do evento; usamos hora de recebimento
