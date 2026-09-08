@@ -4332,20 +4332,21 @@ setTimeout(async () => {
   console.log(`${okUnidMonitor ? '✓' : '✗'} Monitor: coluna UNID. mostra a loja mesmo com código unificado sem dígito`);
 
   // ------------------------------------------------------------------
-  // Central do Beniboy: assumir um atendimento apresenta o Suporte NoPulso
+  // Central do Beniboy: assumir um atendimento apresenta o Suporte
   // ao visitante (sem vazar nome/e-mail/papel de quem está atendendo) e
   // RESPONDER numa conversa aberta também assume (o responsável vira quem
   // escreveu). A saudação segue o horário de Brasília.
   let okAssumir = false;
   try {
     const sc = require('/home/user/adyen-monitor/server/suporteChat.js');
-    const chatNovo = await sc.criar({ nome: 'Letícia', contato: 'leticia@x.com', texto: 'não consigo acessar' });
+    const chatNovo = await sc.criar({ nome: 'Letícia', contato: 'leticia@x.com', texto: 'não consigo acessar', assunto: 'Acesso/Senha' });
 
     // assumir: o responsável é interno, mas o visitante vê a marca Suporte
     const aposMarcela = await sc.atualizarStatusAtendimento(chatNovo.id, {
       statusAtendimento: 'EM_ATENDIMENTO', autor: { id: 'u9', email: 'marcela@x', nome: 'Marcela' },
     });
-    const m1 = aposMarcela.mensagens[aposMarcela.mensagens.length - 1];
+    const m1 = aposMarcela.mensagens[aposMarcela.mensagens.length - 2];
+    const ticketM1 = aposMarcela.mensagens[aposMarcela.mensagens.length - 1];
     const qtdAposMarcela = aposMarcela.mensagens.length;
 
     // a MESMA pessoa mexendo de novo no card não repete a apresentação
@@ -4368,12 +4369,19 @@ setTimeout(async () => {
 
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'beniboy.html'), 'utf8');
     const conferencias = {
-      'apresentação com saudação + nome + Suporte NoPulso':
-        /^(Bom dia|Boa tarde|Boa noite|Boa madrugada), Letícia! O Suporte NoPulso seguirá com o seu atendimento\.$/.test(m1.texto)
+      'apresentação com saudação + nome + Suporte':
+        /^(Bom dia|Boa tarde|Boa noite|Boa madrugada), Letícia! O Suporte assumiu seu atendimento e acompanhará sua solicitação\.$/.test(m1.texto)
         && m1.de === 'suporte' && m1.automatica === true,
+      'ticket informado sem repetir a saudação':
+        ticketM1.texto === `Vamos verificar seu acesso e orientar os próximos passos. Seu protocolo é #${aposMarcela.numeroTicket}. Guarde este número para acompanhamento.`
+        && ticketM1.automatica === true,
+      'orientação do protocolo acompanha o tema':
+        sc.mensagemNumeroTicket(123, 'Computador/Sistema').startsWith('Vamos analisar o ocorrido e seguir com o atendimento técnico.')
+        && sc.mensagemNumeroTicket(123, 'Financeiro/Estorno').startsWith('Vamos conferir a situação informada e orientar a solução.')
+        && sc.mensagemNumeroTicket(123, 'tema desconhecido').startsWith('Vamos analisar sua solicitação e retornar com uma atualização.'),
       'assumir grava o responsável': aposMarcela.responsavel && aposMarcela.responsavel.email === 'marcela@x',
       'mesma pessoa de novo não repete a apresentação': repetido.mensagens.length === qtdAposMarcela,
-      'troca de responsável não vaza o nome interno': / O Suporte NoPulso seguirá com o seu atendimento\.$/.test(m2.texto) && !/Carlos|Marcela/.test(m2.texto),
+      'troca de responsável não vaza o nome interno': / O Suporte assumiu seu atendimento e acompanhará sua solicitação\.$/.test(m2.texto) && !/Carlos|Marcela/.test(m2.texto),
       'responder pela rota assume o atendimento': resp.status === 200 && final.responsavel && final.responsavel.email === process.env.MASTER_EMAIL,
       'a apresentação vem antes da resposta digitada':
         msgs[msgs.length - 1].texto === 'já estou verificando' && msgs[msgs.length - 2].automatica === true,
