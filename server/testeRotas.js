@@ -4332,17 +4332,16 @@ setTimeout(async () => {
   console.log(`${okUnidMonitor ? '✓' : '✗'} Monitor: coluna UNID. mostra a loja mesmo com código unificado sem dígito`);
 
   // ------------------------------------------------------------------
-  // Central do Beniboy: assumir um atendimento apresenta o atendente pro
-  // visitante ("[saudação], Sr./Sra. [solicitante]! O/A [atendente] irá
-  // seguir com o seu atendimento.") e RESPONDER numa conversa aberta também
-  // assume (o responsável vira quem escreveu). A saudação segue o horário
-  // de Brasília e o Sr./Sra. + O/A saem da heurística de gênero pelo nome.
+  // Central do Beniboy: assumir um atendimento apresenta o Suporte NoPulso
+  // ao visitante (sem vazar nome/e-mail/papel de quem está atendendo) e
+  // RESPONDER numa conversa aberta também assume (o responsável vira quem
+  // escreveu). A saudação segue o horário de Brasília.
   let okAssumir = false;
   try {
     const sc = require('/home/user/adyen-monitor/server/suporteChat.js');
     const chatNovo = await sc.criar({ nome: 'Letícia', contato: 'leticia@x.com', texto: 'não consigo acessar' });
 
-    // assumir com atendente mulher
+    // assumir: o responsável é interno, mas o visitante vê a marca Suporte
     const aposMarcela = await sc.atualizarStatusAtendimento(chatNovo.id, {
       statusAtendimento: 'EM_ATENDIMENTO', autor: { id: 'u9', email: 'marcela@x', nome: 'Marcela' },
     });
@@ -4354,7 +4353,7 @@ setTimeout(async () => {
       statusAtendimento: 'EM_ATENDIMENTO', autor: { id: 'u9', email: 'marcela@x', nome: 'Marcela' },
     });
 
-    // outro atendente (homem) assume por cima: nova apresentação com "O"
+    // outro atendente assume por cima: nova apresentação continua institucional
     const aposCarlos = await sc.atualizarStatusAtendimento(chatNovo.id, {
       statusAtendimento: 'EM_ATENDIMENTO', autor: { id: 'u10', email: 'carlos@x', nome: 'Carlos' },
     });
@@ -4369,16 +4368,15 @@ setTimeout(async () => {
 
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'beniboy.html'), 'utf8');
     const conferencias = {
-      'apresentação com saudação + Sra. + A [atendente]':
-        /^(Bom dia|Boa tarde|Boa noite|Boa madrugada), Sra\. Letícia! A Marcela irá seguir com o seu atendimento\.$/.test(m1.texto)
+      'apresentação com saudação + nome + Suporte NoPulso':
+        /^(Bom dia|Boa tarde|Boa noite|Boa madrugada), Letícia! O Suporte NoPulso seguirá com o seu atendimento\.$/.test(m1.texto)
         && m1.de === 'suporte' && m1.automatica === true,
       'assumir grava o responsável': aposMarcela.responsavel && aposMarcela.responsavel.email === 'marcela@x',
       'mesma pessoa de novo não repete a apresentação': repetido.mensagens.length === qtdAposMarcela,
-      'atendente homem sai com "O"': / O Carlos irá seguir com o seu atendimento\.$/.test(m2.texto),
+      'troca de responsável não vaza o nome interno': / O Suporte NoPulso seguirá com o seu atendimento\.$/.test(m2.texto) && !/Carlos|Marcela/.test(m2.texto),
       'responder pela rota assume o atendimento': resp.status === 200 && final.responsavel && final.responsavel.email === process.env.MASTER_EMAIL,
       'a apresentação vem antes da resposta digitada':
         msgs[msgs.length - 1].texto === 'já estou verificando' && msgs[msgs.length - 2].automatica === true,
-      'heurística de gênero cobre as exceções': sc.ehNomeFeminino('Isabel') && !sc.ehNomeFeminino('Luca') && !sc.ehNomeFeminino('Rafael') && sc.ehNomeFeminino('Ana'),
       'a tela tem o botão de assumir (mesmo com outro responsável)': /assumirAtendimento\(/.test(html) && /respEmail !== meuEmail/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
