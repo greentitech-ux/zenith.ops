@@ -10856,6 +10856,85 @@ setTimeout(async () => {
   console.log(`${okAnydeskSenha ? '✓' : '✗'} NOC: senha do AnyDesk em massa - o segredo só entra na entrega, nunca no catálogo, no histórico ou na saída`);
 
   // ------------------------------------------------------------------
+  // TRAVA DA MAQUININHA POS. Pedido do Master (07/09/2026): "adicionar uma
+  // trava pra lançamento de Maquininha POS - sempre que for lançar perguntar
+  // se está lançando correto, se for antes das 23:59 principalmente" e, no
+  // mesmo dia: "estão conseguindo deixar de lançar na maquininha e lançando na
+  // Maquininha POS, não está claro pra eles, precisamos dificultar".
+  //
+  // A POS 01 é só a venda feita DEPOIS da meia-noite, e o valor dela é
+  // descontado do fechamento do dia seguinte - lançar a venda de cartão do dia
+  // ali quebra DOIS fechamentos. Quatro freios: a seção não nasce mais com
+  // linha vazia, a explicação fica na seção, o aviso aparece ao digitar e a
+  // pergunta vem antes da confirmação geral. E a regra existe no SERVIDOR,
+  // porque tela se contorna.
+  let okTravaPos = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'lancamento.html'), 'utf8');
+    const m = /function avisosMaquininhaPos\(totalPos, totalCartao, data, hoje, hora\)\{[\s\S]*?\n\}/.exec(html);
+    const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+    const fmtMoney = (v) => 'R$ ' + (v || 0).toFixed(2);
+    const fmtDataBR = (iso) => { const p = String(iso || '').split('-'); return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : String(iso || ''); };
+    // eslint-disable-next-line no-new-func
+    const fn = m ? new Function('num', 'fmtMoney', 'fmtDataBR', `${m[0]}; return avisosMaquininhaPos;`)(num, fmtMoney, fmtDataBR) : null;
+    const ids = (r) => r.map((a) => a.id);
+    // fechando o dia 07 às 20:30 do próprio dia 07: a meia-noite não chegou
+    const cedo = fn ? fn(500, 800, '2026-09-07', '2026-09-07', '20:30') : [];
+    // o erro do Master: cartão zerado e tudo na POS, ainda de dia
+    const erro = fn ? fn(500, 0, '2026-09-07', '2026-09-07', '20:30') : [];
+    // caso LEGÍTIMO: 01:20 da madrugada do dia 08, fechando o dia 07
+    const madrugada = fn ? fn(500, 800, '2026-09-07', '2026-09-08', '01:20') : [];
+    // madrugada, mas com o cartão zerado: continua avisando
+    const madrugadaSemCartao = fn ? fn(500, 0, '2026-09-07', '2026-09-08', '01:20') : [];
+    const semPos = fn ? fn(0, 800, '2026-09-07', '2026-09-07', '20:30') : [];
+    // servidor: a mesma regra por onde TODO lançamento passa
+    const cabT = { Authorization: 'Bearer ' + token };
+    await postarJson('/api/grupos', { nome: 'Grupo Trava POS', unidades: ['TESTE_TRAVA_POS'], maquininhaPosHabilitado: true }, cabT);
+    const base = { unidade: 'TESTE_TRAVA_POS', unidadeNome: 'Loja Trava POS', grupo: 'Grupo Trava POS' };
+    const semObs = await postarJson('/api/fechamentos/lancar', { ...base, data: '2026-09-20', campos: { delivery: 500, adyen: 0, adyenPos: 500 } }, cabT);
+    const comObs = await postarJson('/api/fechamentos/lancar', { ...base, data: '2026-09-21', campos: { delivery: 500, adyen: 0, adyenPos: 500 }, observacao: 'Loja abriu só depois da meia-noite (evento).' }, cabT);
+    // data longe das outras de propósito: dia colado num que lançou POS ganha
+    // o desconto automático de ontem (ajustePosDoDiaAnterior) e zeraria o
+    // declarado - o que faria este caso falhar por outro motivo
+    const comCartao = await postarJson('/api/fechamentos/lancar', { ...base, data: '2026-09-25', campos: { delivery: 500, adyen: 300, adyenPos: 200 } }, cabT);
+    // a função INTEIRA, não a primeira linha dela: com um recorte curto, uma
+    // chamada reintroduzida na linha seguinte passava batido (a sabotagem
+    // provou isso)
+    const fnAplicar = /function aplicarSecoesGrupo\(unidade\)\{[\s\S]*?\n\}/.exec(html);
+    const fnResumo = /function atualizarResumo\(\)\{[\s\S]*?\n\}/.exec(html);
+    const iPergunta = html.indexOf('ATENÇÃO — MAQUININHA POS 01');
+    const iGeral = html.indexOf('Tem certeza que deseja finalizar esse fechamento');
+    const conf = {
+      'POS lançada com o cartão ZERADO é apontada pelo nome (é o erro que o Master viu)':
+        ids(erro).includes('sem-cartao') && /Maquininha \(cartão\) ZERADA/.test(erro.find((a) => a.id === 'sem-cartao').texto),
+      'POS lançada antes de a meia-noite chegar avisa a hora e a data': ids(cedo).join(',') === 'antes-da-meia-noite'
+        && /São 20:30 e a meia-noite do dia 07\/09\/2026/.test(cedo[0].texto),
+      // o caso legitimo nao pode virar aviso, senao a loja aprende a ignorar
+      'lançamento de madrugada (fechando ontem), com cartão lançado, NÃO avisa nada': madrugada.length === 0,
+      'de madrugada com o cartão zerado, o aviso do cartão continua': ids(madrugadaSemCartao).join(',') === 'sem-cartao',
+      'sem POS lançada não existe aviso nenhum': semPos.length === 0,
+      // a tela
+      'a seção POS não nasce mais com uma linha vazia convidando a digitar':
+        !!fnAplicar && !/adicionarMaquinaPos\(/.test(fnAplicar[0]) && /\+ Adicionar maquininha POS/.test(html),
+      'a explicação fica na própria seção (o que é POS e que desconta amanhã)':
+        /Só o que foi vendido DEPOIS da meia-noite/.test(html) && /descontado automaticamente no fechamento de amanhã/.test(html),
+      'o aviso aparece ao digitar (dentro do atualizarResumo), não só no envio':
+        !!fnResumo && /const avisosPos = avisosPosAgora\(\);/.test(fnResumo[0]) && /aviso-pos/.test(fnResumo[0]) && /id="aviso-pos"/.test(html),
+      'a pergunta da POS vem ANTES da confirmação geral': iPergunta > 0 && iGeral > 0 && iPergunta < iGeral,
+      // o servidor
+      'servidor recusa POS com cartão zerado e sem observação, dizendo o porquê':
+        semObs.status === 400 && /Maquininha POS 01 com R\$ 500,00 e Maquininha \(cartão\) zerada/.test(semObs.corpo) && /descontado do fechamento de amanhã/.test(semObs.corpo),
+      'com a Observação explicando, o lançamento passa (não bloqueia de vez)': comObs.status === 200,
+      'com o cartão lançado junto, passa sem observação nenhuma': comCartao.status === 200,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTravaPos = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (cedo=${JSON.stringify(ids(cedo))} erro=${JSON.stringify(ids(erro))} madrugada=${JSON.stringify(ids(madrugada))} semObs=${semObs.status} ${semObs.corpo.slice(0, 140)} comObs=${comObs.status} comCartao=${comCartao.status})`);
+  } catch (e) { okTravaPos = false; console.log('  erro: ' + e.message); }
+  if (!okTravaPos) ruins += 1;
+  console.log(`${okTravaPos ? '✓' : '✗'} Lançamento: Maquininha POS 01 avisa e pergunta antes de lançar, e o servidor recusa POS com o cartão zerado sem explicação`);
+
+  // ------------------------------------------------------------------
   // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o
   // AnyDesk cai, o acesso remoto some e a unica saida era reiniciar o
   // computador inteiro - o que derruba o caixa junto, por causa de um

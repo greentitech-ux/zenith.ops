@@ -115,6 +115,8 @@
   .caixa-janela{display:block!important;font-size:11px;color:var(--muted);line-height:1.45;margin-top:-2px;}
   .caixa-janela b{color:var(--text);font-weight:600;}
   .caixa-aviso{margin-top:8px;font-size:11.5px;line-height:1.4;color:var(--warn);}
+  .pos-explica{margin:0 0 8px;font-size:11.5px;line-height:1.45;color:var(--warn);background:var(--warn-dim);border-radius:7px;padding:8px 10px;}
+  .pos-aviso{margin:8px 0 0;font-size:12px;line-height:1.45;color:var(--bad);background:var(--bad-dim);border-radius:7px;padding:9px 10px;font-weight:600;}
   .msg.ok{background:var(--ok-dim);color:var(--ok);}
   .msg.err{background:var(--bad-dim);color:var(--bad);}
   .card{border-top:1px solid var(--line);padding:12px 0;}
@@ -303,9 +305,18 @@
       <button type="button" class="btn-add" onclick="adicionarMaquina()">+ Adicionar maquininha</button>
     </div>
 
+    <!-- MAQUININHA POS: a seção mais confundida da tela. Pedido do Master
+         (07/09/2026): "estão conseguindo deixar de lançar na maquininha e
+         lançando na Maquininha POS - não está claro pra eles, precisamos
+         dificultar". Três freios, do mais barato pro mais caro: (1) a seção
+         não nasce mais com uma linha vazia convidando a digitar - só o botão;
+         (2) a explicação fica na própria seção, não num título que ninguém lê;
+         (3) o aviso vermelho e a pergunta no envio (ver avisosMaquininhaPos). -->
     <div class="secao hidden" id="secao-maquininhas-pos">
       <div class="secao-titulo">Maquininha POS 01 (vendas após meia-noite) <span id="maq-pos-total" style="color:var(--text);"></span></div>
+      <div class="pos-explica">⚠️ <b>Só o que foi vendido DEPOIS da meia-noite.</b> A venda de cartão do dia inteiro vai em <b>Maquininha (cartão)</b>, na seção acima. O valor lançado aqui soma neste fechamento e é <b>descontado automaticamente no fechamento de amanhã</b> — se cair aqui por engano, o dia de amanhã fecha com diferença.</div>
       <div id="lista-maquinas-pos"></div>
+      <div id="aviso-pos" class="pos-aviso hidden"></div>
       <button type="button" class="btn-add" onclick="adicionarMaquinaPos()">+ Adicionar maquininha POS</button>
     </div>
 
@@ -575,9 +586,49 @@ async function carregarSangriaDoDia(){
   atualizarResumo();
 }
 
+// TRAVA DA MAQUININHA POS. Função PURA (sem DOM), pra ser conferida em Node
+// pelo testeRotas.js. Devolve a lista de avisos - vazia quando não há POS
+// lançada. Duas perguntas diferentes, e por isso dois avisos separados:
+//
+//  1. POS lançada e Maquininha (cartão) ZERADA: é o erro que o Master viu -
+//     a venda de cartão do dia inteiro digitada na seção de baixo. Loja que
+//     vendeu depois da meia-noite vendeu antes também; cartão zerado com POS
+//     preenchida praticamente não existe de verdade.
+//  2. POS lançada antes de a meia-noite chegar: se o fechamento é do dia que
+//     ainda está correndo (hoje), a venda "após meia-noite" desse dia ainda
+//     nem aconteceu - ela cai depois das 23:59, já no dia seguinte. Lançamento
+//     de madrugada (fechando ontem) é o caso legítimo e não avisa nada.
+function avisosMaquininhaPos(totalPos, totalCartao, data, hoje, hora){
+  const avisos = [];
+  if(num(totalPos) <= 0) return avisos;
+  if(num(totalCartao) <= 0){
+    avisos.push({ id:'sem-cartao', texto:`Você lançou ${fmtMoney(num(totalPos))} na Maquininha POS 01 e deixou Maquininha (cartão) ZERADA. A venda de cartão do dia vai em Maquininha (cartão); a POS 01 é só o que passou DEPOIS da meia-noite.` });
+  }
+  if(data && hoje && !(hoje > data)){
+    avisos.push({ id:'antes-da-meia-noite', texto:`São ${hora} e a meia-noite do dia ${fmtDataBR(data)} ainda não chegou - não existe venda "após meia-noite" pra esse fechamento. Confira se ${fmtMoney(num(totalPos))} não é da Maquininha (cartão).` });
+  }
+  return avisos;
+}
+function fmtDataBR(iso){ const p = String(iso||'').split('-'); return p.length===3 ? `${p[2]}/${p[1]}/${p[0]}` : String(iso||''); }
+function horaBrasilia(){ const a = agoraBrasilia(); return `${String(a.getHours()).padStart(2,'0')}:${String(a.getMinutes()).padStart(2,'0')}`; }
+function avisosPosAgora(){
+  return avisosMaquininhaPos(
+    MAQUINAS_POS.reduce((s,m)=>s+num(m.valor),0),
+    MAQUINAS.reduce((s,m)=>s+num(m.valor),0),
+    document.getElementById('f-data').value, hojeBrasilia(), horaBrasilia());
+}
+
 function atualizarResumo(){
   const somaMaquinas = MAQUINAS.reduce((s,m)=>s+num(m.valor),0);
   const somaMaquinasPos = MAQUINAS_POS.reduce((s,m)=>s+num(m.valor),0);
+  // aviso na hora de digitar: quem errou a seção vê antes de terminar o
+  // lançamento, não só na pergunta do envio
+  const avisosPos = avisosPosAgora();
+  const elAvisoPos = document.getElementById('aviso-pos');
+  if(elAvisoPos){
+    elAvisoPos.classList.toggle('hidden', !avisosPos.length);
+    elAvisoPos.innerHTML = avisosPos.map(a=>`<div>⛔ ${escapeHtml(a.texto)}</div>`).join('');
+  }
   const somaSangria = SANGRIA_DO_DIA.reduce((s,x)=>s+num(x.valor),0);
   const somaOutrasSaidas = SAIDAS.reduce((s,x)=>s+num(x.valor),0);
   document.getElementById('maq-total').textContent = somaMaquinas ? fmtMoney(somaMaquinas) : '';
@@ -1257,8 +1308,11 @@ function aplicarSecoesGrupo(unidade){
   // marcar explicitamente (poucas lojas vendem depois da meia-noite)
   const maquininhaPosOk = !!(grupo && grupo.maquininhaPosHabilitado === true);
   document.getElementById('secao-maquininhas-pos').classList.toggle('hidden', !maquininhaPosOk);
+  // ao contrario da Maquininha (cartao), a POS NAO nasce com uma linha vazia:
+  // linha ja criada convida a digitar, e era por ali que a venda do dia caia
+  // na secao errada (ver o comentario da secao no HTML). Quem precisa dela
+  // clica em "+ Adicionar maquininha POS"
   if(!maquininhaPosOk && MAQUINAS_POS.length){ MAQUINAS_POS = []; renderMaquinasPos(); }
-  else if(maquininhaPosOk && !MAQUINAS_POS.length){ adicionarMaquinaPos(); }
   else if(maquininhaPosOk){ renomearMaquinasPosAutomaticas(); }
   document.getElementById('resumo-maquinas-pos-linha').classList.toggle('hidden', !maquininhaPosOk);
 
@@ -1484,6 +1538,14 @@ document.getElementById('form-lancar').addEventListener('keydown', (ev)=>{
 
 document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
+  // a pergunta da Maquininha POS vem ANTES da confirmação geral, e nomeia o
+  // que está errado - "tem certeza?" genérico todo mundo confirma no
+  // automático (ver avisosMaquininhaPos)
+  const avisosPos = avisosPosAgora();
+  if(avisosPos.length){
+    const totalPos = MAQUINAS_POS.reduce((s,m)=>s+num(m.valor),0);
+    if(!confirm(`ATENÇÃO — MAQUININHA POS 01\n\n${avisosPos.map(a=>'• '+a.texto).join('\n\n')}\n\nEsse valor é DESCONTADO automaticamente do fechamento de amanhã. Se estiver no lugar errado, amanhã fecha com diferença.\n\nConfirma que ${fmtMoney(totalPos)} foi vendido DEPOIS da meia-noite?`)) return;
+  }
   if(!confirm('Tem certeza que deseja finalizar esse fechamento? Confira os valores antes de continuar - depois de lançado, qualquer correção precisa passar por aprovação do Master.')) return;
   const btn = document.getElementById('btn-enviar');
   const msg = document.getElementById('msg');

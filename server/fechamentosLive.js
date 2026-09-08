@@ -165,6 +165,19 @@ function exigirFechamentoConsistente(registro) {
   if (dec <= 0) {
     throw new Error(`Total declarado em ${fmtMoneyQuebra(dec)} - confira as formas de pagamento e a entrada em dinheiro antes de salvar. Fechamento com declarado zerado não é lançado.`);
   }
+  // Maquininha POS lançada com a Maquininha (cartão) ZERADA. Pedido do Master
+  // (07/09/2026): "estão conseguindo deixar de lançar na maquininha e lançando
+  // na Maquininha POS - precisamos dificultar". A tela já avisa e pergunta
+  // (ver avisosMaquininhaPos em lancamento.html), mas tela se contorna: a
+  // regra tem que existir aqui, que é por onde TODO lançamento passa.
+  //
+  // Não bloqueia de vez - exige a Observação, igual à diferença acima de R$ 20:
+  // loja que de fato só vendeu depois da meia-noite escreve a linha e lança,
+  // e o Master vê o motivo. Bloquear de vez prenderia um fechamento de
+  // madrugada sem ninguém pra liberar.
+  if (num(registro.adyenPos) > 0 && num(registro.adyen) <= 0 && !String(registro.observacao || '').trim()) {
+    throw new Error(`Maquininha POS 01 com ${fmtMoneyQuebra(num(registro.adyenPos))} e Maquininha (cartão) zerada. A venda de cartão do dia vai em Maquininha (cartão) - a POS 01 é só o que passou DEPOIS da meia-noite, e o valor dela é descontado do fechamento de amanhã. Se estiver certo mesmo, escreva na Observação o que explica o cartão zerado.`);
+  }
   const dif = num(registro.diferenca);
   if (Math.abs(dif) > LIMITE_OBSERVACAO_OBRIGATORIA && !String(registro.observacao || '').trim()) {
     throw new Error(`A diferença é de ${fmtMoneyQuebra(dif)}, acima de ${fmtMoneyQuebra(LIMITE_OBSERVACAO_OBRIGATORIA)} - escreva na Observação o que explica essa diferença antes de salvar.`);
