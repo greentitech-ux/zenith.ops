@@ -10956,8 +10956,11 @@ setTimeout(async () => {
     const venceu = fl.diasPendentesDeFechamento(fechs, U, '2026-09-07', 2);
     // 07/09 às 14h: continua cobrando o 06 (não some quando o dia avança)
     const tarde = fl.diasPendentesDeFechamento(fechs, U, '2026-09-07', 14);
-    // loja que nunca lançou nada: cobra só o último dia, não 7 dias
+    // unidade que NUNCA lançou nada não é cobrada: escritório (MVPar), loja
+    // que ainda vai abrir (Spo Shop Midway), unidade de outra área. Foi o
+    // primeiro erro que o Master viu no aviso (07/09/2026)
     const nova = fl.diasPendentesDeFechamento([], [{ codigo: 'N', nome: 'Loja Nova' }], '2026-09-07', 2);
+    const misto = fl.diasPendentesDeFechamento(fechs, [...U, { codigo: 'MVPAR', nome: 'MVPar' }], '2026-09-07', 2);
     // ninguém devendo
     const emDia = fl.diasPendentesDeFechamento(
       ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-06'].map((d) => ({ unidade: 'A', data: d })),
@@ -10967,6 +10970,7 @@ setTimeout(async () => {
     const rota = await pedir('/api/fechamentos/pendencias', { Authorization: 'Bearer ' + token });
     const semLogin = await pedir('/api/fechamentos/pendencias');
     const corpoRota = rota.status === 200 ? JSON.parse(rota.corpo) : {};
+    const srcIndex = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
     const tema = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tema.js'), 'utf8');
     const fnAviso = /function avisarFechamentoPendente\(\) \{[\s\S]*?\n  \}/.exec(tema);
     const htmlLanc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'lancamento.html'), 'utf8');
@@ -10979,9 +10983,19 @@ setTimeout(async () => {
       'os buracos dos dias anteriores também entram, mais recente primeiro':
         sels(venceu)[0] === 'A:2026-09-06' && sels(venceu).includes('A:2026-09-03') && sels(venceu).includes('B:2026-09-05'),
       'não cobra dia anterior ao primeiro lançamento da loja': !sels(venceu).some((s) => s.endsWith('2026-08-31')),
-      'loja que nunca lançou cobra só o último dia, não 7': nova.total === 1 && sels(nova).join(',') === 'N:2026-09-06',
+      'unidade que nunca lançou fechamento NÃO é cobrada (MVPar, loja que vai abrir)':
+        nova.total === 0 && !sels(misto).some((s) => s.startsWith('MVPAR:')) && sels(misto).includes('A:2026-09-06'),
       'loja em dia não gera pendência nenhuma': emDia.total === 0 && emDia.pendentes.length === 0,
       'a rota responde ao Master e recusa sem login': rota.status === 200 && Array.isArray(corpoRota.pendentes) && typeof corpoRota.total === 'number' && semLogin.status === 401,
+      // a rota tem que perguntar QUEM lança fechamento do mesmo jeito que a
+      // tela de lançamento pergunta (perfil da unidade, área 'fechamento'),
+      // e juntar a fonte do Saltiverso, que fecha por outra tela
+      'a rota respeita o perfil da unidade (área fechamento) e não inventa lista própria':
+        /filtrarMapaPorArea\(m, 'fechamento'\)/.test(srcIndex) && /codigosRestritosDe\('fechamento'\)/.test(srcIndex)
+        && /restritas\.forEach\(\(c\) => \{ delete nomes\[c\]; \}\)/.test(srcIndex),
+      'o Saltiverso entra pela fonte dele, senão apareceria devendo todo dia':
+        /saltiversoFechamento\.listAll\(\)\.then\(\(l\) => l\.map\(saltiversoFechamento\.comoFechamento\)\)/.test(srcIndex)
+        && /const todos = \[\.\.\.lancados, \.\.\.saltiverso\];/.test(srcIndex),
       // a tela: o aviso vive no tema.js porque e o unico arquivo das 53 telas
       'o aviso mora no tema.js (o único carregado por todas as telas)': !!fnAviso && /fetch\('\/api\/fechamentos\/pendencias'/.test(tema),
       'não aparece na própria tela de lançamento nem sem login':

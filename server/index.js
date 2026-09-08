@@ -5649,12 +5649,21 @@ app.get('/api/fechamentos/meus', requireSection('lancamento'), async (req, res) 
 // diasPendentesDeFechamento em fechamentosLive.js). Só leitura, e tudo que
 // consulta já é cacheado: essa rota é chamada a cada troca de tela.
 app.get('/api/fechamentos/pendencias', requireSection('lancamento'), async (req, res) => {
-  const [todos, extras] = await Promise.all([
+  // MESMO par de chamadas do lancamento.html: quem lança fechamento é quem o
+  // perfil da unidade deixa (área 'fechamento'). Sem isso o aviso cobrava a
+  // MVPar, que é escritório e não fecha caixa - foi o que o Master viu.
+  const [lancados, saltiverso, extras, restritas] = await Promise.all([
     fechamentosLive.listAll(),
-    unidadesExtras.mapa().catch(() => ({})),
+    saltiversoFechamento.listAll().then((l) => l.map(saltiversoFechamento.comoFechamento)).catch(() => []),
+    unidadesExtras.mapa().catch(() => ({})).then((m) => unidadesExtras.filtrarMapaPorArea(m, 'fechamento').catch(() => m)),
+    unidadesExtras.codigosRestritosDe('fechamento').catch(() => []),
   ]);
+  // o Saltiverso fecha por outra tela (saltiversoFechamento.js): sem juntar
+  // essa fonte ele apareceria devendo todo dia, mesmo tendo lançado
+  const todos = [...lancados, ...saltiverso];
   const nomes = { ...FECHAMENTO_UNIDADES_NOMES, ...extras };
   delete nomes.Administrativa; // unidade administrativa não lança fechamento
+  restritas.forEach((c) => { delete nomes[c]; });  // unidade fixa com perfil restrito
   // Master/Admin respondem pelo parque inteiro; quem lança vê só as suas
   const codigos = (req.isMaster || req.isAdmin) ? Object.keys(nomes) : (req.permissions.unidades || []);
   const unidades = codigos.filter((c) => nomes[c]).map((c) => ({ codigo: c, nome: nomes[c] }));

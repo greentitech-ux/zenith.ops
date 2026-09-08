@@ -239,14 +239,16 @@ function diasPendentesDeFechamento(fechamentos, unidades, hoje, hora, limite = 2
   (unidades || []).forEach((u) => {
     const codigo = u && (u.codigo || u);
     if (!codigo) return;
-    // loja que nunca lançou nada cobra SÓ o último dia: sem histórico não dá
-    // pra saber desde quando ela existe, e 7 dias de cobrança numa loja que
-    // acabou de abrir é mentira
+    // SÓ loja que já lançou alguma vez. Unidade que nunca lançou nada não é
+    // atrasada, é ausente: escritório (MVPar), loja que ainda vai abrir (Spo
+    // Shop Midway) ou unidade cadastrada pra outra coisa. Cobrar essas foi o
+    // primeiro que o Master viu no aviso, e um aviso que erra é o primeiro
+    // que a operação aprende a ignorar. Mesma regra do painel "Dias sem
+    // fechamento" - uma pergunta, uma resposta.
+    if (!primeiro[codigo]) return;
     let de = ultimo;
-    if (primeiro[codigo]) {
-      for (let i = 1; i < DIAS_PENDENCIA_FECHAMENTO; i += 1) de = diaAnterior(de);
-      if (de < primeiro[codigo]) de = primeiro[codigo];
-    }
+    for (let i = 1; i < DIAS_PENDENCIA_FECHAMENTO; i += 1) de = diaAnterior(de);
+    if (de < primeiro[codigo]) de = primeiro[codigo];
     for (let dia = de; dia <= ultimo; dia = diaSeguinte(dia)) {
       if (!lancou.has(`${codigo}|${dia}`)) pendentes.push({ unidade: codigo, unidadeNome: (u && u.nome) || codigo, data: dia });
     }
