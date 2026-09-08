@@ -1081,6 +1081,15 @@ const BORDA = '#8EA9C7';
 // ---------------------------------------------------------------
 const FAIXA_H = 74; // altura da faixa de assinatura no rodapé
 
+function dataHoraAssinatura(v) {
+  if (!v) return null;
+  const data = new Date(v);
+  if (Number.isNaN(data.getTime())) return null;
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short',
+  }).format(data);
+}
+
 function assinaturasAssinadas(r) {
   return Object.entries(r.assinaturas || {})
     .filter(([, a]) => a.imagem)
@@ -1097,10 +1106,15 @@ async function desenharFaixa(out, pagina, r, fonte, negrito, assinadas, comAssin
 
   const rodape = `NoPulso · ${r.unidade} · Ticket #${r.numeroTicket ?? '—'}`
     + (r.status === 'CANCELADO' ? ' · CANCELADO' : (assinadas.length ? '' : ' · AGUARDANDO ASSINATURA'));
-  pagina.drawText(rodape, { x: 14, y: 7, size: 7.5, font: fonte, color: rgb(0.25, 0.25, 0.25) });
+  // No boleto a faixa é a prova que acompanha o documento. O rodapé sobe
+  // quando há assinatura, deixando a data/hora livre ao lado da rubrica.
+  pagina.drawText(rodape, {
+    x: 14, y: comAssinatura ? alt - 9 : 7, size: 7.5, font: fonte, color: rgb(0.25, 0.25, 0.25),
+  });
 
   if (!comAssinatura || !assinadas.length) return;
   let x = 14;
+  const larguraBloco = Math.min(150, Math.max(105, (width - 28) / Math.max(assinadas.length, 1) - 10));
   for (const a of assinadas) {
     let img = null;
     try {
@@ -1108,13 +1122,15 @@ async function desenharFaixa(out, pagina, r, fonte, negrito, assinadas, comAssin
       img = /^data:image\/png/.test(a.imagem) ? await out.embedPng(bruto) : await out.embedJpg(bruto);
     } catch (e) { img = null; }
     if (img) {
-      const escala = Math.min(150 / img.width, 34 / img.height);
+      const escala = Math.min(larguraBloco / img.width, 34 / img.height);
       pagina.drawImage(img, { x, y: 26, width: img.width * escala, height: img.height * escala });
     }
-    pagina.drawLine({ start: { x, y: 24 }, end: { x: x + 150, y: 24 }, thickness: 0.6, color: rgb(0.3, 0.3, 0.3) });
-    pagina.drawText(`${a.rotulo}${a.nome ? ` · ${a.nome}` : ''}`, { x, y: 16, size: 7, font: negrito, color: rgb(0.1, 0.1, 0.1) });
-    x += 168;
-    if (x + 150 > width) break;
+    pagina.drawLine({ start: { x, y: 24 }, end: { x: x + larguraBloco, y: 24 }, thickness: 0.6, color: rgb(0.3, 0.3, 0.3) });
+    pagina.drawText(`${a.rotulo}${a.nome ? ` · ${a.nome}` : ''}`, { x, y: 16, size: 7, font: negrito, color: rgb(0.1, 0.1, 0.1), maxWidth: larguraBloco });
+    const quando = dataHoraAssinatura(a.assinadoEm);
+    if (quando) pagina.drawText(`Assinado em: ${quando}`, { x, y: 8, size: 6.5, font: fonte, color: rgb(0.25, 0.25, 0.25), maxWidth: larguraBloco });
+    x += larguraBloco + 10;
+    if (x + larguraBloco > width) break;
   }
 }
 

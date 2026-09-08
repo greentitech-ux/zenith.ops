@@ -7403,6 +7403,30 @@ app.patch('/api/rh/funcionarios/:id', auth.requireMaster, async (req, res) => {
   }
 });
 
+// Foto exibida na ficha de Extra/candidato. A troca é só do Master porque a
+// imagem identifica uma pessoa; o check-in original permanece como evidência.
+app.post('/api/rh/funcionarios/:id/foto-cadastro', auth.requireMaster, upload.single('foto'), async (req, res) => {
+  try {
+    const atual = await rh.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    if (!req.file || !String(req.file.mimetype || '').startsWith('image/')) return res.status(400).json({ error: 'Envie uma imagem para a foto de cadastro.' });
+    if (req.file.size > 10 * 1024 * 1024) return res.status(400).json({ error: 'A foto de cadastro deve ter no máximo 10 MB.' });
+    const path = await storage.salvarArquivo(req.params.id, req.file, 'rh-fotos-cadastro');
+    const registro = await rh.trocarFotoCadastro(req.params.id, { path, tipo: req.file.mimetype }, req.user.email);
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.get('/api/rh/funcionarios/:id/foto-cadastro', requireSection('rh'), async (req, res) => {
+  const atual = await rh.getOne(req.params.id);
+  if (!atual) return res.sendStatus(404);
+  if (!podeAcessarUnidadeRh(req, atual.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  if (!atual.fotoCadastro?.path) return res.sendStatus(404);
+  storage.streamArquivo(atual.fotoCadastro.path, atual.fotoCadastro.tipo, res);
+});
+
 // regenera o token do link de auto-atendimento (rh-colaborador.html) - pra
 // usar se o link vazar/for parar em grupo errado: quem tinha o link antigo
 // perde o acesso na hora, o gerente manda o novo pro colaborador

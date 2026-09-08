@@ -156,6 +156,10 @@ async function registrarEntrada({ funcionarioId, foto, localizacao, registradoPo
     atualizadoEm: agora,
   };
   await ref.set(registro);
+  // Extra e candidato em teste não têm foto de perfil no cadastro inicial.
+  // A primeira entrada aproveita a própria evidência de check-in; se já
+  // houver foto, a função não altera nada.
+  await rh.definirFotoCadastroDoPrimeiroCheckin(funcionarioId, foto);
   checkinCache.invalidar();
   return registro;
 }
