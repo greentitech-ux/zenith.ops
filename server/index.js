@@ -2009,7 +2009,8 @@ app.get('/api/stream', (req, res) => {
 // https://docs.adyen.com/development-resources/webhooks/verify-hmac-signatures/
 function hmacValid(item) {
   const key = HMAC_KEYS[item.merchantAccountCode] || LEGACY_HMAC_KEY;
-  if (!key) return true; // ATENCAO: sem chave configurada para essa conta, aceitamos tudo (só para testes locais)
+  // Falha fechada: uma conta sem chave não pode injetar transações no painel.
+  if (!key) return false;
   const a = item.additionalData || {};
   const sign = a['hmacSignature'];
   if (!sign) return false;
@@ -2027,7 +2028,9 @@ function hmacValid(item) {
   const signingString = fields.join(':');
   const keyBuf = Buffer.from(key, 'hex');
   const hmac = crypto.createHmac('sha256', keyBuf).update(signingString, 'utf8').digest('base64');
-  return hmac === sign;
+  const esperado = Buffer.from(hmac, 'utf8');
+  const recebido = Buffer.from(sign, 'utf8');
+  return esperado.length === recebido.length && crypto.timingSafeEqual(esperado, recebido);
 }
 
 // quando um cluster de identidade (fraudIdentity) e confirmado como fraude
@@ -13089,7 +13092,8 @@ function aquecerBoot(promessa, ms) {
 
     const contas = Object.keys(HMAC_KEYS);
     if (contas.length) console.log(`HMAC configurada para: ${contas.join(', ')}`);
-    else if (!LEGACY_HMAC_KEY) console.warn('AVISO: nenhuma ADYEN_HMAC_KEYS/ADYEN_HMAC_KEY configurada - assinatura nao esta sendo verificada.');
+    else if (LEGACY_HMAC_KEY) console.log('HMAC configurada pela variavel legada ADYEN_HMAC_KEY.');
+    else console.warn('AVISO: nenhuma HMAC configurada - webhooks da Adyen serao recusados por seguranca.');
 
     // relatorio periodico de transacoes (PDF+CSV) + limpeza do banco: gera o
     // retrato do periodo antes de apagar - so fica retido pra sempre quem
