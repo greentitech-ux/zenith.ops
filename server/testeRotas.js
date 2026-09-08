@@ -18,7 +18,20 @@
 // Aqui a requisicao passa pelo registro de rota, pelo middleware de auth e
 // pelo corpo do handler reais.
 const Module = require('module');
+const path = require('path');
 const origLoad = Module._load;
+const LEGACY_SERVER_DIR = '/home/user/adyen-monitor/server/';
+const origResolveFilename = Module._resolveFilename;
+
+// A suíte já foi executada em Linux, Windows e CI. Os requires históricos
+// ficaram com o caminho de uma máquina específica; traduzimos só esse prefixo
+// para a pasta real do teste, sem precisar acoplar o projeto ao sistema local.
+Module._resolveFilename = function (request, parent, isMain, options) {
+  const resolvido = typeof request === 'string' && request.startsWith(LEGACY_SERVER_DIR)
+    ? path.join(__dirname, request.slice(LEGACY_SERVER_DIR.length))
+    : request;
+  return origResolveFilename.call(this, resolvido, parent, isMain, options);
+};
 
 // ---- Firestore falso: qualquer método encadeia, toda leitura vem vazia ----
 const DOCS = new Map(); // caminho -> dados (o que o teste semear fica aqui)
@@ -383,6 +396,22 @@ setTimeout(async () => {
     ['/api/inventario/historico-contagens/relatorio.pdf?unidade=19821&inicio=2020-01-01&fim=2030-01-01', 'relatório de histórico de contagens - inventário (PDF)'],
   ];
   let ruins = 0;
+
+  // Sem chave configurada, o webhook não pode aceitar evento algum. O endpoint
+  // responde 200 para a Adyen não reenviar sem parar, mas o evento forjado
+  // precisa ser ignorado e jamais pode entrar no cache/banco.
+  const antesWebhookSemHmac = store.allTransactions().length;
+  const webhookSemHmac = await postarJson('/webhooks/adyen', {
+    notificationItems: [{ NotificationRequestItem: {
+      pspReference: 'TESTE_SEM_HMAC', merchantAccountCode: 'CONTA_DE_TESTE',
+      merchantReference: 'PEDIDO_TESTE_SEM_HMAC', amount: { value: 100, currency: 'BRL' },
+      eventCode: 'AUTHORISATION', success: 'true', additionalData: {},
+    } }],
+  });
+  const okWebhookSemHmac = webhookSemHmac.status === 200 && store.allTransactions().length === antesWebhookSemHmac;
+  if (!okWebhookSemHmac) ruins += 1;
+  console.log(`${okWebhookSemHmac ? '✓' : '✗'} Webhook Adyen sem HMAC é ignorado por padrão: HTTP ${webhookSemHmac.status}`);
+
   for (const [rota, nome] of casos) {
     const r = await pedir(rota, token ? { Authorization: 'Bearer ' + token } : {});
     // 401/403 = rota EXISTE e o gate rodou (o que importa aqui é não estourar
@@ -3539,7 +3568,7 @@ setTimeout(async () => {
       // e o cadeado só aparece quando existe campo travado - pro Master,
       // que nunca tem nenhum, a seção fica sem texto nenhum
       'o aviso do cadeado é condicionado a haver campo travado':
-        (html.match(/const aviso = algumTravado\n/g) || []).length === 2,
+        (html.match(/const aviso = algumTravado\r?\n/g) || []).length === 2,
       'IS_MASTER é definido no boot, antes de qualquer campo ser montado':
         html.indexOf('IS_MASTER = isMaster;') > 0 && html.indexOf('IS_MASTER = isMaster;') < html.indexOf('boot();'),
     };
@@ -6440,7 +6469,7 @@ setTimeout(async () => {
       // a rota exige token: abrir a URL no navegador devolve 401, entao a
       // tela E o unico caminho de verdade pro Master ver isso
       'a tela do NOC tem o painel que busca o relatorio': (() => {
-        const h = require('fs').readFileSync('/home/user/adyen-monitor/server/public/loja-status.html', 'utf8');
+        const h = require('fs').readFileSync(path.join(__dirname, 'public', 'loja-status.html'), 'utf8');
         return /id="quedas-panel"/.test(h)
           && /fetch\('\/api\/loja-status\/quedas\?dias=' \+/.test(h)
           && /function alternarPainelQuedas\(\)/.test(h)
@@ -6450,7 +6479,7 @@ setTimeout(async () => {
           && /piso, não teto/.test(h);
       })(),
       'o codigo pareia na ordem em vez de so somar duracaoMs':
-        /let aberta = null;/.test(require('fs').readFileSync('/home/user/adyen-monitor/server/lojaStatus.js', 'utf8')),
+        /let aberta = null;/.test(require('fs').readFileSync(path.join(__dirname, 'lojaStatus.js'), 'utf8')),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okRelQuedas = !falhas.length;
@@ -7564,6 +7593,9 @@ setTimeout(async () => {
     for (const arq of fsA.readdirSync(dirA).filter((f) => /\.(html|js)$/.test(f))) {
       const src = fsA.readFileSync(pathA.join(dirA, arq), 'utf8');
       src.split('\n').forEach((linha, i) => {
+        // Comentários podem citar a cor para explicar a regra; o teste só
+        // proíbe o valor usado como CSS/JS efetivo, que não acompanha o tema.
+        if (/^\s*\/\//.test(linha)) return;
         if (!linha.includes('#b8ff3c')) return;
         // tira o que e legitimo antes de procurar sobra
         const limpa = linha

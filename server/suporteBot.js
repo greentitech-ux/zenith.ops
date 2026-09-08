@@ -90,7 +90,7 @@ async function montarBlocoAgente(logado) {
   const listaAcoes = acoes.length
     ? acoes.map((a) => `- [${a.id}] ${a.nome}: ${a.descricao} (${a.requerAprovacao ? 'precisa de aprovação do Master' : 'executa direto, sem aprovação'})`).join('\n')
     : '(nenhuma ação cadastrada ainda)';
-  return `\n\n## NOC Zenith - ações que você pode executar (ferramenta executar_acao_agente)
+  return `\n\n## NOC-NoPulso - ações que você pode executar (ferramenta executar_acao_agente)
 Catálogo de ações cadastradas pelo Master (use o [id] exato ao chamar a ferramenta):
 ${listaAcoes}`;
 }
@@ -128,7 +128,7 @@ O NoPulso é o sistema interno de gestão do grupo (lojas Domino's, Spoleto, Mil
 - desbloquear_login: destrava um acesso bloqueado (3 senhas erradas) - login principal do NoPulso OU operador do Abastecimento do Carrinho, a ferramenta identifica sozinha qual é. Peça o nome de usuário ANTES de chamar. Por padrão mantém a MESMA senha - nunca invente nem envie senha nenhuma nessa primeira chamada. Se travar de novo: no login principal, PERGUNTE "você lembra da sua senha atual?" antes de chamar de novo com lembraSenha=true/false (só com false uma senha padrão é definida, e a pessoa é obrigada a cadastrar uma própria no próximo login); no operador do Abastecimento, a ferramenta já reseta pra uma senha nova sozinha - é só repassar a senha que ela devolver.${temFerramentaPedido ? `
 - consultar_pedido: consulta o status de UM pedido específico no Monitor (aprovado, recusado, estornado, fraude suspeita). Peça os 3 dados ANTES de chamar (uma pergunta por vez, o que faltar): o código da loja (IDPULSE, a mesma coluna "Unidade" do Fechamento), o nome do cliente e o valor do pedido. A busca já vem limitada às lojas que essa pessoa tem acesso - se não achar, pode ser de outra loja, não assuma fraude/erro. Nunca invente status; se a ferramenta não achar nada, diga isso e ofereça chamar_atendente. Se o status desse pedido mudar depois da sua resposta, a pessoa é avisada automaticamente - não precisa te perguntar de novo.` : `
 - Pedido estornado/fraude/aprovado no Monitor: você NÃO tem acesso a isso agora (só quem está logado com permissão de Monitor). Use chamar_atendente.`}${(logado && logado.isMaster) ? `
-- executar_acao_agente: executa uma ação do catálogo NOC Zenith (veja a lista mais abaixo). Use SÓ pra ações que estão nessa lista - nunca invente uma ação nem tente rodar algo fora do catálogo. Se a ação precisar de aprovação, avise que mandou pro Master aprovar; se não precisar, informe o resultado direto.` : ''}
+- executar_acao_agente: executa uma ação do catálogo NOC-NoPulso (veja a lista mais abaixo). Use SÓ pra ações que estão nessa lista - nunca invente uma ação nem tente rodar algo fora do catálogo. Se a ação precisar de aprovação, avise que mandou pro Master aprovar; se não precisar, informe o resultado direto.` : ''}
 
 ## Unidades válidas pra ticket (use exatamente um destes nomes; se a pessoa falar parecido, escolha o mais próximo; se não der pra saber, pergunte)
 ${unidades.map((u) => `- ${u}`).join('\n')}
@@ -244,7 +244,7 @@ const TOOL_CONSULTAR_PEDIDO = {
 // verdade, ver EXECUTORES_ACAO_SISTEMA/comando_maquina em agenteAcoes.js)
 const TOOL_EXECUTAR_ACAO_AGENTE = {
   name: 'executar_acao_agente',
-  description: 'Executa uma ação cadastrada no catálogo NOC Zenith (lista completa vem no prompt, com o [id] de cada uma). Use só pra ações que estão literalmente nessa lista - nunca invente uma ação. Se a ação precisar de "codigo"/"posto" (comando de máquina), pergunte qual computador antes de chamar.',
+  description: 'Executa uma ação cadastrada no catálogo NOC-NoPulso (lista completa vem no prompt, com o [id] de cada uma). Use só pra ações que estão literalmente nessa lista - nunca invente uma ação. Se a ação precisar de "codigo"/"posto" (comando de máquina), pergunte qual computador antes de chamar.',
   input_schema: {
     type: 'object',
     properties: {
@@ -484,7 +484,7 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     // antes de tocar em qualquer execucao real
     if (!chat.logado || !chat.logado.isMaster) return 'Sem acesso a essa ferramenta - chame um atendente.';
     const acao = await agenteAcoes.obter(input.acaoId);
-    if (!acao || !acao.ativo) return 'Essa ação não existe (ou foi desativada) no catálogo NOC Zenith - confira o [id] certo.';
+    if (!acao || !acao.ativo) return 'Essa ação não existe (ou foi desativada) no catálogo NOC-NoPulso - confira o [id] certo.';
     const resumo = String(input.resumo || acao.nome).slice(0, 300);
     if (acao.requerAprovacao) {
       await qaAprovacoes.criar({
@@ -494,7 +494,7 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
         criadoPorId: null,
         criadoPorEmail: 'Beniboy (agente)',
       });
-      return `Ação "${acao.nome}" preparada e enviada pra aprovação do Master (fica visível em NOC Zenith).`;
+      return `Ação "${acao.nome}" preparada e enviada pra aprovação do Master (fica visível em NOC-NoPulso).`;
     }
     try {
       const resultadoAcao = await agenteAcoes.executarAcaoDoAgente(input.acaoId, input.parametros || {});

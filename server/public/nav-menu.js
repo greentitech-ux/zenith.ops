@@ -64,7 +64,7 @@
       { id: 'nav-ifood', href: '/ifood.html', icone: '🍔', rotulo: 'iFood', secoes: ['ifood'] },
       // conectividade das lojas: e infra, encaixa melhor aqui do que em
       // Solicitacoes (onde estava) - mesmo publico do Beniboy
-      { id: 'nav-loja-status', href: '/loja-status.html', icone: '📡', rotulo: 'NOC Zenith', secoes: ['suporte'] },
+      { id: 'nav-loja-status', href: '/loja-status.html', icone: '📡', rotulo: 'NOC-NoPulso', secoes: ['suporte'] },
       { id: 'nav-noc-rede', href: '/noc-rede.html', icone: '📈', rotulo: 'Análise de Rede', secoes: ['suporte'] },
       { id: 'nav-noc-maquinas', href: '/noc-maquinas.html', icone: '💽', rotulo: 'Saúde das Máquinas', secoes: ['suporte'] },
     ] },
