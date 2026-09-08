@@ -11003,6 +11003,78 @@ setTimeout(async () => {
   console.log(`${okPendenciaFech ? '✓' : '✗'} Fechamento não lançado: aviso em qualquer tela depois das 2h, levando pra loja e o dia certos`);
 
   // ------------------------------------------------------------------
+  // FICHA DO FECHAMENTO. Pedido do Master (07/09/2026): "ao clicar na linha do
+  // fechamento ele abrir o fechamento no formato Forms com um visual bem
+  // intuitivo mostrando por seção - caixa inicial, final / entrada, depósito /
+  // e assim em diante". A tabela serve pra COMPARAR dias; pra ler UM dia ela
+  // obriga a rolar 40 colunas de lado. A montagem é função pura, conferida
+  // aqui, e segue a mesma regra do "Pedir correção": mostra o que a unidade
+  // realmente tem.
+  let okFichaFech = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+    const mFn = /function fichaFechamentoSecoes\(d, g\)\{[\s\S]*?\n\}/.exec(html);
+    const mLabel = /const LABEL_FICHA = \{[\s\S]*?\n\};/.exec(html);
+    const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+    // eslint-disable-next-line no-new-func
+    const fn = (mFn && mLabel) ? new Function('num', `${mLabel[0]}\n${mFn[0]}; return fichaFechamentoSecoes;`)(num) : null;
+    const d = {
+      id: 'x', unidade: '19855', data: '2026-09-07', caixaInicial: 200, caixaFinal: 200, entradaDinheiro: 277, deposito: 277,
+      adyen: 1290, adyenPos: 74.16, ifood: 0, faturamento: 2920.53, totalDeclarado: 1895.42, diferenca: -1025.11, totalSaida: 50, tc: 40,
+      canaisVendaExtras: { moto: 2598.93, carryoutx: 0, sumiu: 12 }, formasPagamentoExtras: { adyenv2: 83.70 }, kpisExtras: { taxa: 12 },
+      detalhesMaquinas: [{ descricao: 'Maquininha 1', valor: 1290 }], detalhesSaidas: [{ descricao: 'Uber', valor: 50 }],
+    };
+    const g = {
+      caixaHabilitado: true,
+      canaisVendaExtras: [{ campo: 'moto', label: 'Delivery - Moto Especi' }, { campo: 'carryoutx', label: 'CarryOut' }],
+      formasPagamentoExtras: [{ campo: 'adyenv2', label: 'AdyenV2' }],
+      kpisExtras: [{ campo: 'taxa', label: 'Taxa de entrega', tipo: 'moeda' }],
+    };
+    const secoes = fn ? fn(d, g) : [];
+    const sec = (id) => secoes.find((s) => s.id === id) || { itens: [] };
+    const rot = (id) => sec(id).itens.map((i) => i.label);
+    // grupo sem Caixa e sem nada gravado: a seção Caixa nem aparece
+    const semCaixa = fn ? fn({ faturamento: 10, totalDeclarado: 10, diferenca: 0, formasPagamentoExtras: {} }, { caixaHabilitado: false, formasPagamentoExtras: [{ campo: 'maq', label: 'Maquininha' }] }) : [];
+    const conf = {
+      'as seções saem na ordem da tela de lançamento, e só as que têm conteúdo':
+        secoes.map((s) => s.id).join(',') === 'caixa,canais,formas,maquinas,saidas,kpis,resultado',
+      'Caixa mostra inicial, final, entrada e depósito': rot('caixa').join(' · ') === 'Caixa inicial · Caixa final · Entrada em dinheiro · Depósito',
+      'Canais somam no Faturamento, com o rótulo do grupo e o canal zerado junto':
+        rot('canais').includes('Delivery - Moto Especi') && rot('canais').includes('CarryOut') && sec('canais').total.valor === 2920.53,
+      'Formas trazem Maquininhas, a POS e as formas do grupo, e fecham no Total declarado':
+        rot('formas').includes('Maquininhas (cartão)') && rot('formas').includes('Maquininha POS 01 (pós meia-noite)')
+        && rot('formas').includes('AdyenV2') && sec('formas').total.valor === 1895.42,
+      // campo fixo zerado nao polui a ficha, NAS DUAS seções (mesma regra do
+      // "Pedir correção") - o canal do GRUPO zerado continua aparecendo, que é
+      // outra coisa: ali o zero é resposta, aqui é campo que não existe
+      'campo fixo zerado do schema antigo não aparece (Ifood na forma, Delivery/Loja no canal)':
+        !rot('formas').includes('Ifood') && !rot('canais').includes('Delivery') && !rot('canais').includes('Loja (salão)')
+        && rot('canais').includes('CarryOut'),
+      'valor gravado em campo que o grupo não tem mais aparece marcado, e não some':
+        sec('canais').itens.some((i) => i.label === 'sumiu' && i.valor === 12 && i.foraDoGrupo === true),
+      'as maquininhas e as saídas aparecem uma a uma, com a descrição digitada':
+        rot('maquinas').join(',') === 'Maquininha 1' && rot('saidas').join(',') === 'Uber' && sec('saidas').total.valor === 50,
+      'o resultado do dia fecha a ficha, em destaque, com TC quando existe':
+        secoes[secoes.length - 1].id === 'resultado' && secoes[secoes.length - 1].destaque === true
+        && rot('resultado').join(',') === 'Faturamento,Total declarado,Diferença,TC (pedidos)',
+      'grupo sem Caixa não mostra a seção Caixa': !semCaixa.some((s) => s.id === 'caixa') && semCaixa.some((s) => s.id === 'formas'),
+      // a tela
+      'a linha da tabela abre a ficha, sem atropelar os botões de ação do Master':
+        /class="linha-ficha" onclick="if\(!event\.target\.closest\('\.acao-btn'\)\) abrirFichaFechamento\(/.test(html)
+        && /\.linha-ficha\{cursor:pointer;\}/.test(html),
+      'a ficha tem seu próprio modal e fecha pelo fundo e pelo botão':
+        /id="ficha-overlay"/.test(html) && /if\(event\.target===this\) fecharFichaFechamento\(\)/.test(html)
+        && /function fecharFichaFechamento\(\)/.test(html),
+      'contagem não leva cifrão na ficha (TC/Cancelados)': /const FICHA_SEM_CIFRAO = \['tc','cancelados'\];/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okFichaFech = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (secoes=${JSON.stringify(secoes.map((s) => s.id))} formas=${JSON.stringify(rot('formas'))} resultado=${JSON.stringify(rot('resultado'))})`);
+  } catch (e) { okFichaFech = false; console.log('  erro: ' + e.message); }
+  if (!okFichaFech) ruins += 1;
+  console.log(`${okFichaFech ? '✓' : '✗'} Fechamentos: clicar na linha abre a ficha do dia por seção (caixa, canais, formas, maquininhas, saídas, KPI's, resultado)`);
+
+  // ------------------------------------------------------------------
   // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o
   // AnyDesk cai, o acesso remoto some e a unica saida era reiniciar o
   // computador inteiro - o que derruba o caixa junto, por causa de um

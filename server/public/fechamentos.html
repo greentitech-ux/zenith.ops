@@ -167,6 +167,17 @@
   .acao-btn.excluir:hover{border-color:var(--bad);color:var(--bad);}
 
   .fech-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:3000;padding:20px;}
+  .linha-ficha{cursor:pointer;}
+  .linha-ficha:hover td{background:var(--panel2);}
+  .ficha-secao{border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:9px;background:var(--panel2);}
+  .ficha-secao.destaque{border-color:var(--accent);}
+  .ficha-secao-titulo{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px;}
+  .ficha-linha{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:3px 0;font-size:13px;}
+  .ficha-linha b{font-family:var(--mono);white-space:nowrap;}
+  .ficha-linha i{font-style:normal;font-size:10.5px;color:var(--muted);}
+  .ficha-linha.total{border-top:1px solid var(--line);margin-top:5px;padding-top:6px;font-weight:700;}
+  .ficha-linha.ruim b{color:var(--bad);}
+  .ficha-obs{font-size:12.5px;line-height:1.45;white-space:pre-wrap;}
   .fech-overlay.hidden{display:none!important;}
   .fech-modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:640px;max-height:88vh;overflow-y:auto;}
   .fech-modal h3{margin:0 0 4px;font-size:15px;}
@@ -400,6 +411,20 @@
      ?ocultas= pro backend), independentes entre si. O Salvar grava a
      escolha no SERVIDOR, por usuario (/api/preferencias) - ver
      carregarPreferenciaColunas -->
+<!-- FICHA DO FECHAMENTO: o mesmo lançamento lido por seção, na ordem da tela
+     de lançamento (ver fichaFechamentoSecoes). A tabela serve pra comparar
+     dias; pra ler UM dia ela obriga a rolar 40 colunas de lado. -->
+<div class="fech-overlay hidden" id="ficha-overlay" onclick="if(event.target===this) fecharFichaFechamento()">
+  <div class="fech-modal" style="max-width:560px;">
+    <h3 id="ficha-titulo"></h3>
+    <div class="sub" id="ficha-sub"></div>
+    <div id="ficha-corpo" style="margin:12px 0;max-height:64vh;overflow-y:auto;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button type="button" class="preset-btn" onclick="fecharFichaFechamento()">Fechar</button>
+    </div>
+  </div>
+</div>
+
 <div class="fech-overlay hidden" id="colunas-overlay">
   <div class="fech-modal" style="max-width:460px;">
     <h3>🧩 Colunas da tabela e dos relatórios</h3>
@@ -2287,6 +2312,103 @@ function ordenarPorColuna(key){
   renderFechamentos();
 }
 
+// ---------- ficha do fechamento (clicar na linha) ----------
+// Pedido do Master (07/09/2026): "ao clicar na linha do fechamento ele abrir
+// o fechamento no formato Forms com um visual bem intuitivo mostrando por
+// seção - caixa inicial, final / entrada, depósito / e assim em diante".
+//
+// A tabela é boa pra COMPARAR dias; ela é péssima pra LER um dia: 40 colunas
+// numa barra de rolagem horizontal. A ficha mostra o mesmo lançamento nas
+// seções em que ele foi digitado, na mesma ordem da tela de lançamento.
+//
+// Função PURA (sem DOM), conferida em Node pelo testeRotas.js. Mesma regra do
+// "Pedir correção": mostra o que a unidade REALMENTE tem - campo fixo só com
+// valor (schema antigo da planilha), canal/forma/KPI do grupo sempre (é o
+// formulário daquela loja), e valor gravado em campo que o grupo não define
+// mais aparece pelo nome do campo, pra dinheiro nenhum sumir da ficha.
+const LABEL_FICHA = {
+  caixaInicial:'Caixa inicial', caixaFinal:'Caixa final', entradaDinheiro:'Entrada em dinheiro', deposito:'Depósito',
+  delivery:'Delivery', carryout:'Carryout', pickup:'Pick-up', loja:'Loja (salão)',
+  adyen:'Maquininhas (cartão)', adyenPos:'Maquininha POS 01 (pós meia-noite)', ajustePosAnterior:'Ajuste da Maquininha POS de ontem',
+  ifood:'Ifood', food99:'99Food', pix:'Pix', pixCnpj:'Pix CNPJ', outros:'Outros',
+  totalSaida:'Total de saída', quebra:'Quebra de caixa', tc:'TC (pedidos)', cancelados:'Cancelados',
+};
+function fichaFechamentoSecoes(d, g){
+  const v = (c)=>num(d[c]);
+  const tem = (c)=>Math.abs(v(c))>0.001;
+  const item = (campo)=>({ campo, label: LABEL_FICHA[campo]||campo, valor: v(campo) });
+  const mapa = (origem)=>d[origem]||{};
+  // definições do grupo + o que está gravado fora delas (campo renomeado ou
+  // removido do grupo depois de o dia já ter sido lançado)
+  const extras = (origem, defs, pref)=>{
+    const lista = (defs||[]).map(x=>({ campo:pref+':'+x.campo, label:x.label||x.campo, valor:num(mapa(origem)[x.campo]), tipo:x.tipo }));
+    Object.entries(mapa(origem)).forEach(([k,val])=>{
+      if(num(val)!==0 && !(defs||[]).some(x=>x.campo===k)) lista.push({ campo:pref+':'+k, label:k, valor:num(val), foraDoGrupo:true });
+    });
+    return lista;
+  };
+  const secoes = [];
+
+  const caixaOn = !g || g.caixaHabilitado !== false;
+  const caixa = ['caixaInicial','caixaFinal','entradaDinheiro','deposito'].filter(c=>caixaOn || tem(c)).map(item);
+  if(caixa.length) secoes.push({ id:'caixa', titulo:'💵 Caixa', itens:caixa });
+
+  const canais = ['delivery','carryout','pickup','loja'].filter(tem).map(item)
+    .concat(extras('canaisVendaExtras', g&&g.canaisVendaExtras, 'canal'));
+  if(canais.length) secoes.push({ id:'canais', titulo:'🛒 Canais de venda', itens:canais, total:{ label:'Faturamento', valor:num(d.faturamento) } });
+
+  const formas = ['adyen','adyenPos','ajustePosAnterior','ifood','food99','pix','pixCnpj','outros'].filter(tem).map(item)
+    .concat(extras('formasPagamentoExtras', g&&g.formasPagamentoExtras, 'forma'));
+  if(formas.length) secoes.push({ id:'formas', titulo:'💳 Formas de pagamento', itens:formas, total:{ label:'Total declarado (formas + entrada em dinheiro)', valor:num(d.totalDeclarado) } });
+
+  const itens = (lista, rotulo)=>(lista||[]).filter(x=>x && (x.descricao || num(x.valor)))
+    .map((x,i)=>({ campo:rotulo+i, label:x.descricao||'(sem descrição)', valor:num(x.valor) }));
+  const maquinas = itens(d.detalhesMaquinas,'maq').concat(itens(d.detalhesMaquinasPos,'maqpos'));
+  if(maquinas.length) secoes.push({ id:'maquinas', titulo:'🧾 Maquininhas, uma a uma', itens:maquinas });
+
+  const saidas = itens(d.detalhesSaidas,'saida');
+  if(saidas.length || tem('totalSaida')) secoes.push({ id:'saidas', titulo:'📤 Saídas de caixa', itens:saidas, total:{ label:LABEL_FICHA.totalSaida, valor:v('totalSaida') } });
+
+  const kpis = extras('kpisExtras', g&&g.kpisExtras, 'kpi');
+  if(kpis.length) secoes.push({ id:'kpis', titulo:'📊 KPI\'s', itens:kpis });
+
+  const resultado = ['faturamento','totalDeclarado','diferenca'].map(c=>({ campo:c, label:{faturamento:'Faturamento',totalDeclarado:'Total declarado',diferenca:'Diferença'}[c], valor:num(d[c]) }));
+  ['quebra','tc','cancelados'].forEach(c=>{ if(tem(c)) resultado.push(item(c)); });
+  secoes.push({ id:'resultado', titulo:'✅ Resultado do dia', itens:resultado, destaque:true });
+  return secoes;
+}
+// campo de contagem não leva cifrão (mesma regra do "Pedir correção")
+const FICHA_SEM_CIFRAO = ['tc','cancelados'];
+function fichaValorFmt(it){
+  if(FICHA_SEM_CIFRAO.includes(it.campo) || it.tipo==='quantidade') return String(num(it.valor));
+  if(it.tipo==='texto' || it.tipo==='arquivo') return String(it.valor||'—');
+  return fmtMoney(num(it.valor));
+}
+function abrirFichaFechamento(id){
+  const d = (DATA||[]).find(x=>String(x.id)===String(id));
+  if(!d) return;
+  const g = grupoKpiDaUnidade(d.unidade);
+  const secoes = fichaFechamentoSecoes(d, g);
+  const corpo = secoes.map(s=>`
+    <div class="ficha-secao${s.destaque?' destaque':''}">
+      <div class="ficha-secao-titulo">${escapeHtml(s.titulo)}</div>
+      ${s.itens.map(it=>`<div class="ficha-linha${it.campo==='diferenca'&&Math.abs(num(it.valor))>=0.01?' ruim':''}">
+        <span>${escapeHtml(it.label)}${it.foraDoGrupo?' <i title="Campo que o grupo não tem mais - o valor continua gravado neste dia">(fora do grupo)</i>':''}</span>
+        <b>${escapeHtml(fichaValorFmt(it))}</b></div>`).join('')}
+      ${s.total?`<div class="ficha-linha total"><span>${escapeHtml(s.total.label)}</span><b>${fmtMoney(num(s.total.valor))}</b></div>`:''}
+    </div>`).join('');
+  const obs = String(d.observacao||d.obsDif||'').trim();
+  document.getElementById('ficha-titulo').textContent = `${UNIDADES_NOMES[d.unidade]||d.unidade} · ${fmtData(d.data)}`;
+  document.getElementById('ficha-sub').textContent = [
+    d.gerente ? 'Responsável: '+d.gerente : '',
+    d.criadoEm ? 'lançado em '+new Date(d.criadoEm).toLocaleString('pt-BR',{timeZone:FUSO_BR}) : '',
+    d.criadoPorEmail || '',
+  ].filter(Boolean).join(' · ');
+  document.getElementById('ficha-corpo').innerHTML = corpo + (obs?`<div class="ficha-secao"><div class="ficha-secao-titulo">📝 Observação</div><div class="ficha-obs">${escapeHtml(obs)}</div></div>`:'');
+  document.getElementById('ficha-overlay').classList.remove('hidden');
+}
+function fecharFichaFechamento(){ document.getElementById('ficha-overlay').classList.add('hidden'); }
+
 function tabelaFechamentosHtml(rows){
   const grupo = grupoKpiDaUnidade((rows[0]||{}).unidade);
   const colunasDeValor = colunasValores(rows, grupo);
@@ -2330,8 +2452,11 @@ function tabelaFechamentosHtml(rows){
       + `${rotulo}</th>`;
   }).join('') + (IS_MASTER ? '<th>Ações</th>' : '');
   const linhas = ordenarLinhas(rows, defs);
+  // a linha inteira abre a ficha (ver abrirFichaFechamento). O clique nos
+  // botões de ação do Master não pode abrir a ficha junto - por isso o guarda
+  // pelo .acao-btn, e não um handler só no <td> de dados
   const corpo = linhas.map(d=>
-    `<tr>${defs.map(c=>c.td(d)).join('')}${IS_MASTER ? `<td>${d.criadoPorId ? `
+    `<tr class="linha-ficha" onclick="if(!event.target.closest('.acao-btn')) abrirFichaFechamento('${escapeHtml(String(d.id||''))}')" title="Ver este fechamento por seção">${defs.map(c=>c.td(d)).join('')}${IS_MASTER ? `<td>${d.criadoPorId ? `
         <button type="button" class="acao-btn" title="Editar" onclick="abrirEdicaoFechamento('${d.id}')">✏️</button>
         <button type="button" class="acao-btn excluir" title="Excluir" onclick="excluirFechamento('${d.id}')">🗑️</button>
       ` : '<span class="sub" style="margin:0;" title="Não lançado pelo sistema - vem de importação/planilha, não pode ser editado aqui">—</span>'}</td>` : ''}</tr>`
