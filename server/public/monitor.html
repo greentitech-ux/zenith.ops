@@ -1428,7 +1428,7 @@ async function abrirAlertaLoja(pedidoId, unidade){
     const dados = await fetch('/api/monitor/loja-computadores?unidade='+encodeURIComponent(unidade||'')).then(r=>r.json());
     const computadores = dados.computadores || [];
     if(!computadores.length){
-      lista.innerHTML = '<div class="empty">Nenhum computador do NOC Zenith cadastrado pra essa loja ainda.</div>';
+      lista.innerHTML = '<div class="empty">Nenhum computador do NOC-NoPulso cadastrado pra essa loja ainda.</div>';
       return;
     }
     lista.innerHTML = `

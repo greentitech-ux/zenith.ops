@@ -76,7 +76,7 @@
   .pcard-slot{position:relative;min-width:0;}
   .pcard-slot.wide{grid-column:span 2;}
   .pcard-slot.full{grid-column:1 / -1;}
-  /* card full-width com chips (ex: NOC Zenith) - grid em vez de flex-wrap
+  /* card full-width com chips (ex: NOC-NoPulso) - grid em vez de flex-wrap
      puro, pra ficar organizado em colunas parelhas na largura toda, não só
      empilhando da esquerda pra direita */
   .pcard-slot.full .pestoque-chips{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));}
@@ -868,7 +868,7 @@ async function cardManutencao(){
   </div>`);
 }
 
-// card do NOC Zenith: mesma lógica de "online/offline" de loja-status.html
+// card do NOC-NoPulso: mesma lógica de "online/offline" de loja-status.html
 // (statusDe/computadoresReais lá) - so entram computadores DE VERDADE
 // (cadastrados, com nome), fantasma (heartbeat de posto nunca cadastrado)
 // fica de fora pra nao inflar os numeros. Unidade so aparece no chip se tem
@@ -990,10 +990,10 @@ async function cardNoc(){
   const acessosRecentes = NOC_COMPUTADORES_CACHE.filter(c=>c.ultimoAcessoRemotoEm && (agora - c.ultimoAcessoRemotoEm) < 24*60*60*1000).length;
 
   if(!NOC_COMPUTADORES_CACHE.length){
-    return pcardWrap('🖥️','NOC Zenith','/loja-status.html', `<div class="pcard-vazio">Nenhum computador cadastrado ainda.</div>`);
+    return pcardWrap('🖥️','NOC-NoPulso','/loja-status.html', `<div class="pcard-vazio">Nenhum computador cadastrado ainda.</div>`);
   }
 
-  return pcardWrap('🖥️','NOC Zenith','/loja-status.html', `
+  return pcardWrap('🖥️','NOC-NoPulso','/loja-status.html', `
     <div class="pstats-row">
       ${statRow('Computadores', NOC_COMPUTADORES_CACHE.length)}
       ${statRow('Online', online, 'ok')}

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>NOC Zenith · NoPulso</title>
+<title>NOC-NoPulso · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -324,7 +324,7 @@
   .msg-dica{font-family:var(--mono);font-size:9.5px;color:var(--muted);}
   .msg-dica b{color:var(--text);font-weight:600;}
 
-  /* ---- NOC Zenith: painel do agente (Master-only) ---- */
+  /* ---- NOC-NoPulso: painel do agente (Master-only) ---- */
   .agente-titulo{display:flex;align-items:center;gap:8px;margin:32px 0 4px;padding-top:20px;border-top:1px solid var(--line);}
   .agente-titulo h2{font-size:16px;}
   .agente-sub{font-size:12px;color:var(--muted);margin-bottom:18px;line-height:1.5;}
@@ -355,7 +355,7 @@
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
         <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
-        <h1>📡 NOC Zenith</h1>
+        <h1>📡 NOC-NoPulso</h1>
       </div>
     </div>
     <div class="header-nav">
@@ -2484,7 +2484,7 @@ function conectarStream(){
   }catch(e){ /* sem SSE, so atualiza no poll */ }
 }
 
-// ---------- NOC Zenith: painel do agente (ver agenteAcoes.js/suporteBot.js) - Master-only ----------
+// ---------- NOC-NoPulso: painel do agente (ver agenteAcoes.js/suporteBot.js) - Master-only ----------
 function formatarRelativo(iso){
   if(!iso) return '-';
   const ms = Date.now() - new Date(iso).getTime();
