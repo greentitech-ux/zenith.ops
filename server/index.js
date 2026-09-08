@@ -1755,7 +1755,14 @@ async function lerEGuardarDocumentoIdentidade(arquivosReq, unidade, digitados = 
   };
 }
 
-app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCount: 1 }, { name: 'documento', maxCount: 3 }]), async (req, res) => {
+function validarFotoCadastroArquivo(arquivo) {
+  if (!arquivo) return null;
+  if (!String(arquivo.mimetype || '').startsWith('image/')) return 'A foto de cadastro precisa ser uma imagem.';
+  if (arquivo.size > 10 * 1024 * 1024) return 'A foto de cadastro deve ter no máximo 10 MB.';
+  return null;
+}
+
+app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCount: 1 }, { name: 'documento', maxCount: 3 }, { name: 'fotoCadastro', maxCount: 1 }]), async (req, res) => {
   try {
     const { unidade, contato, cargoFuncao } = req.body;
     const tipoCadastro = req.body.tipoCadastro === 'candidato' ? 'candidato' : 'extra';
@@ -1777,12 +1784,20 @@ app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCoun
     const arquivoCurriculo = (req.files?.curriculo || [])[0];
     const erroCurriculo = validarTipoCurriculo(arquivoCurriculo);
     if (erroCurriculo) return res.status(400).json({ error: erroCurriculo });
+    const arquivoFotoCadastro = (req.files?.fotoCadastro || [])[0];
+    const erroFotoCadastro = validarFotoCadastroArquivo(arquivoFotoCadastro);
+    if (erroFotoCadastro) return res.status(400).json({ error: erroFotoCadastro });
     const faltaDoc = exigeDocumentoIdentidade(tipoCadastro, req.files?.documento, guardado);
     if (faltaDoc) return res.status(400).json({ error: faltaDoc });
     let curriculo = null;
     if (arquivoCurriculo) {
       const path = await storage.salvarArquivo(unidade, arquivoCurriculo, 'rh-curriculos');
       curriculo = { path, nomeOriginal: arquivoCurriculo.originalname, tipo: arquivoCurriculo.mimetype };
+    }
+    let fotoCadastro = null;
+    if (arquivoFotoCadastro) {
+      const path = await storage.salvarArquivo(unidade, arquivoFotoCadastro, 'rh-fotos-cadastro');
+      fotoCadastro = { path, tipo: arquivoFotoCadastro.mimetype, origem: 'cadastro', em: new Date().toISOString() };
     }
     // nome/nascimento/CPF vem da leitura do documento feita AQUI, nao do
     // que a tela mandou (ver lerEGuardarDocumentoIdentidade)
@@ -1793,7 +1808,7 @@ app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCoun
       ...(doc?.campos || {}),
       documentoIdentidade: doc?.anexo || null,
       leituraDocumento: doc?.leitura || null,
-      curriculo, cadastradoPorId: null, cadastradoPorEmail: 'Auto-cadastro (link público)',
+      curriculo, fotoCadastro, cadastradoPorId: null, cadastradoPorEmail: 'Auto-cadastro (link público)',
       precisaAprovacao: true,
     });
     // cadastro gravado: o token nao serve mais pra nada. Apagar aqui evita
@@ -7311,7 +7326,7 @@ function precisaAprovacaoCadastro(req) {
 
 app.post('/api/rh/ler-documento', requireSection('rh'), uploadDocumentoIdentidade.array('documento', 3), responderLeituraDocumento);
 
-app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'curriculo', maxCount: 1 }, { name: 'documento', maxCount: 3 }]), async (req, res) => {
+app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'curriculo', maxCount: 1 }, { name: 'documento', maxCount: 3 }, { name: 'fotoCadastro', maxCount: 1 }]), async (req, res) => {
   try {
     const { unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro } = req.body;
     // "1" ou "true" vindo de multipart/form-data (checkbox HTML manda string)
@@ -7331,10 +7346,18 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'c
     const arquivoCurriculo = (req.files?.curriculo || [])[0];
     const erroCurriculo = validarTipoCurriculo(arquivoCurriculo);
     if (erroCurriculo) return res.status(400).json({ error: erroCurriculo });
+    const arquivoFotoCadastro = (req.files?.fotoCadastro || [])[0];
+    const erroFotoCadastro = validarFotoCadastroArquivo(arquivoFotoCadastro);
+    if (erroFotoCadastro) return res.status(400).json({ error: erroFotoCadastro });
     let curriculo = null;
     if (arquivoCurriculo) {
       const path = await storage.salvarArquivo(unidade || 'geral', arquivoCurriculo, 'rh-curriculos');
       curriculo = { path, nomeOriginal: arquivoCurriculo.originalname, tipo: arquivoCurriculo.mimetype };
+    }
+    let fotoCadastro = null;
+    if (arquivoFotoCadastro) {
+      const path = await storage.salvarArquivo(unidade || 'geral', arquivoFotoCadastro, 'rh-fotos-cadastro');
+      fotoCadastro = { path, tipo: arquivoFotoCadastro.mimetype, origem: 'cadastro', em: new Date().toISOString() };
     }
     // Extra e Candidato so entram com documento, e os dados vem da leitura
     // dele. Efetivado (contratacao formal pelo RH) segue digitado - la o
@@ -7348,7 +7371,7 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'c
       ...(doc?.campos || {}),
       documentoIdentidade: doc?.anexo || null,
       leituraDocumento: doc?.leitura || null,
-      curriculo, cadastradoPorId: req.user.id, cadastradoPorEmail: req.user.email,
+      curriculo, fotoCadastro, cadastradoPorId: req.user.id, cadastradoPorEmail: req.user.email,
       precisaAprovacao: precisaAprovacaoCadastro(req),
     });
     broadcast('rh-funcionario-criado', registro, 'rh');
