@@ -10808,6 +10808,54 @@ setTimeout(async () => {
   console.log(`${okPixNome ? '✓' : '✗'} Monitor: pedido Pix que mudou de status mostra o nome do cliente (não a conta da Adyen nem o nome do cartão)`);
 
   // ------------------------------------------------------------------
+  // SENHA DO ANYDESK EM MASSA. Pedido do Master (07/09/2026): "colocar uma
+  // senha de acesso no AnyDesk de todos os computadores". Vai pelo "Rodar em
+  // massa" com um modelo de comando - mas a senha nao pode ficar no catalogo
+  // (Firestore, visivel na tela), no historico do comando, nem na saida. O
+  // comando carrega {{SEGREDO:ANYDESK_SENHA}} e o valor so entra na ENTREGA
+  // ao NOCZenith, lido do ambiente do Render, com lista fechada de nomes.
+  let okAnydeskSenha = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const ag = require('/home/user/adyen-monitor/server/agenteAcoes.js');
+    const srcLS = require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8');
+    const fnEntrega = /async function entregarComandoPendente\(codigo, posto\) \{[\s\S]*?\n\}/.exec(srcLS);
+    const fnEnfileira = /async function enfileirarComando\(codigo, posto, comando, opcoes\) \{[\s\S]*?\n\}/.exec(srcLS);
+    const modelo = ag.MODELOS_COMANDO.find((m) => m.id === 'anydesk-senha-acesso') || {};
+    const cmd = String(modelo.comando || '');
+    const tenta = (fn) => { try { return { ok: fn() }; } catch (e) { return { erro: e.message }; } };
+    const r1 = tenta(() => ls.substituirSegredos("$s = '{{SEGREDO:ANYDESK_SENHA}}'", { ANYDESK_SENHA: "ab'c" }));
+    const r2 = tenta(() => ls.substituirSegredos("x '{{SEGREDO:JWT_SECRET}}'", { JWT_SECRET: 'segredo-do-servidor', ANYDESK_SENHA: 'x' }));
+    const r3 = tenta(() => ls.substituirSegredos("x '{{SEGREDO:ANYDESK_SENHA}}'", {}));
+    const r4 = tenta(() => ls.substituirSegredos('sem marcador nenhum', {}));
+    const conf = {
+      'o marcador vira o valor da variável, escapado pra aspas simples do PowerShell': r1.ok === "$s = 'ab''c'",
+      'só nomes da lista fechada: {{SEGREDO:JWT_SECRET}} é recusado e o valor não vaza':
+        !!r2.erro && /não é permitido/.test(r2.erro) && !/segredo-do-servidor/.test(r2.erro),
+      'variável ausente no servidor: erro claro (o comando não é entregue)': !!r3.erro && /não está configurada/.test(r3.erro),
+      'comando sem marcador passa intacto': r4.ok === 'sem marcador nenhum',
+      // onde a troca acontece: na ENTREGA, nunca na fila (o historico guarda o marcador)
+      'a troca acontece na entrega ao NOCZenith, e erro marca o comando como erro e libera a máquina':
+        !!fnEntrega && /texto = substituirSegredos\(comando\.comando\)/.test(fnEntrega[0])
+        && /status: 'erro', erro: e\.message/.test(fnEntrega[0]) && /comandoPendenteId: null/.test(fnEntrega[0])
+        && /comando: texto \}/.test(fnEntrega[0]),
+      'o registro do comando (histórico) fica com o marcador, não com a senha': !!fnEnfileira && !/substituirSegredos/.test(fnEnfileira[0]),
+      // o modelo
+      'há o modelo "AnyDesk: definir senha de acesso", exigindo aprovação e válido':
+        !!modelo.comando && modelo.requerAprovacao === true && !!ag.validarDados({ ...modelo, tipo: 'comando_maquina' }),
+      'o modelo usa o marcador entre aspas simples (é onde o escape vale)': /\$senha = '\{\{SEGREDO:ANYDESK_SENHA\}\}'/.test(cmd),
+      'o modelo nunca imprime a senha; devolve só o AnyDesk ID':
+        !/"[^"\n]*\$senha[^"\n]*"/.test(cmd.replace(/if \(\$senha\.Length[^\n]*\n/, '')) && /AnyDesk ID: \$id/.test(cmd) && /--get-id/.test(cmd) && /--set-password/.test(cmd),
+      'sem Administrador fica PULADO; sem AnyDesk fica NAO TINHA': /PULADO: precisa de Administrador/.test(cmd) && /NAO TINHA: AnyDesk/.test(cmd),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAnydeskSenha = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (r1=${JSON.stringify(r1)} r2=${JSON.stringify(r2)} r3=${JSON.stringify(r3)})`);
+  } catch (e) { okAnydeskSenha = false; console.log('  erro: ' + e.message); }
+  if (!okAnydeskSenha) ruins += 1;
+  console.log(`${okAnydeskSenha ? '✓' : '✗'} NOC: senha do AnyDesk em massa - o segredo só entra na entrega, nunca no catálogo, no histórico ou na saída`);
+
+  // ------------------------------------------------------------------
   // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o
   // AnyDesk cai, o acesso remoto some e a unica saida era reiniciar o
   // computador inteiro - o que derruba o caixa junto, por causa de um

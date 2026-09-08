@@ -100,6 +100,27 @@ foreach ($n in 'TeamViewer','AteraAgent') {
 }
 "Administrador: $admin"; $R -join "\`n"`;
 
+// A senha NAO esta aqui: {{SEGREDO:ANYDESK_SENHA}} e' trocado pelo valor da
+// variavel de ambiente so na entrega ao NOCZenith (ver substituirSegredos em
+// lojaStatus.js). Fica entre aspas simples de proposito - e' assim que o
+// escape do valor e' feito. A saida devolve o AnyDesk ID, nunca a senha.
+const MODELO_ANYDESK_SENHA = `# AnyDesk: senha de acesso nao supervisionado (NoPulso). Precisa de Administrador.
+$senha = '{{SEGREDO:ANYDESK_SENHA}}'
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $admin) { "PULADO: precisa de Administrador (o NOCZenith roda como usuario comum nesta maquina)"; return }
+$exe = @("\${env:ProgramFiles(x86)}\\AnyDesk\\AnyDesk.exe", "$env:ProgramFiles\\AnyDesk\\AnyDesk.exe", "$env:ProgramData\\AnyDesk\\AnyDesk.exe") | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if (-not $exe) {
+  $u = Get-ItemProperty 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like 'AnyDesk*' -and $_.InstallLocation } | Select-Object -First 1
+  if ($u) { $c = Join-Path $u.InstallLocation 'AnyDesk.exe'; if (Test-Path $c) { $exe = $c } }
+}
+if (-not $exe) { "NAO TINHA: AnyDesk nao esta instalado nesta maquina"; return }
+if ($senha.Length -lt 12) { "FALHOU: a senha configurada tem menos de 12 caracteres - o AnyDesk recusa. Troque ANYDESK_SENHA no servidor."; return }
+$senha | & $exe --set-password 2>&1 | Out-Null
+Start-Sleep -Seconds 2
+$id = ((& $exe --get-id 2>&1) | Out-String).Trim()
+if (-not $id) { "FALHOU: o AnyDesk nao respondeu ao --get-id (servico parado?)"; return }
+"OK: senha de acesso definida · AnyDesk ID: $id"`;
+
 const MODELOS_COMANDO = [
   {
     id: 'inventario-programas',
@@ -114,6 +135,13 @@ const MODELOS_COMANDO = [
     descricao: 'REMOVE da máquina: Paint, Copilot, os atalhos-app do Chrome (Apresentações, Planilhas, Textos, YouTube), Microsoft OneDrive, TeamViewer e AteraAgent. Só rode a mando do Master. TeamViewer e AteraAgent precisam de Administrador (sem isso ficam PULADOS na saída). AteraAgent é agente de gestão remota: se for o da própria equipe, NÃO remova. Rode o inventário antes.',
     requerAprovacao: true,
     comando: MODELO_LIMPEZA,
+  },
+  {
+    id: 'anydesk-senha-acesso',
+    nome: 'AnyDesk: definir senha de acesso',
+    descricao: 'Define a senha de acesso não supervisionado do AnyDesk na máquina, com o valor da variável ANYDESK_SENHA do servidor (Render → Environment). A senha nunca aparece na ação, no histórico nem na saída: só o AnyDesk ID volta. Precisa de Administrador (sem isso fica PULADO). Máquina sem AnyDesk devolve NAO TINHA. Só rode a mando do Master.',
+    requerAprovacao: true,
+    comando: MODELO_ANYDESK_SENHA,
   },
 ];
 // lista fechada de propósito - o Master escolhe num <select>, nunca digita

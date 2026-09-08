@@ -1664,8 +1664,37 @@ async function entregarComandoPendente(codigo, posto) {
     if (!comandoSnap.exists) { tx.update(ref, { comandoPendenteId: null }); return null; }
     const comando = comandoSnap.data();
     if (comando.status !== 'pendente') return null;
+    // segredo entra SO aqui, na entrega: o registro do comando (o que o Master
+    // ve no historico) fica com o marcador, nunca com a senha
+    let texto;
+    try {
+      texto = substituirSegredos(comando.comando);
+    } catch (e) {
+      tx.update(comandoRef, { status: 'erro', erro: e.message, executadoEm: new Date().toISOString() });
+      tx.update(ref, { comandoPendenteId: null });
+      return null;
+    }
     tx.update(comandoRef, { status: 'entregue', entregueEm: new Date().toISOString() });
-    return { comandoId: comando.id, comando: comando.comando };
+    return { comandoId: comando.id, comando: texto };
+  });
+}
+
+// SEGREDO NO COMANDO. Pedido do Master (07/09/2026): "colocar uma senha de
+// acesso no AnyDesk de todos os computadores". A senha nao pode ficar no
+// catalogo de acoes (Firestore, visivel na tela), nem no registro do comando
+// (historico), nem na saida que a maquina devolve. Entao o comando carrega um
+// MARCADOR - {{SEGREDO:ANYDESK_SENHA}} - e o valor so e' colocado no texto no
+// momento da entrega ao NOCZenith (entregarComandoPendente), lido de uma
+// variavel de ambiente do Render. Lista fechada de nomes: um comando nao pode
+// pedir {{SEGREDO:JWT_SECRET}} e levar a chave do servidor. O valor e'
+// escapado pra ir dentro de aspas SIMPLES do PowerShell ('' = ').
+const SEGREDOS_PERMITIDOS = ['ANYDESK_SENHA'];
+function substituirSegredos(texto, env = process.env) {
+  return String(texto || '').replace(/\{\{SEGREDO:([A-Z0-9_]+)\}\}/g, (_, nome) => {
+    if (!SEGREDOS_PERMITIDOS.includes(nome)) throw new Error(`Segredo "${nome}" não é permitido em comando (só ${SEGREDOS_PERMITIDOS.join(', ')}).`);
+    const valor = env[nome];
+    if (!valor) throw new Error(`Variável ${nome} não está configurada no servidor (Render → Environment). O comando não foi entregue.`);
+    return String(valor).replace(/'/g, "''");
   });
 }
 
@@ -2283,6 +2312,7 @@ async function impressorasPraSondar(codigo) {
 }
 
 module.exports = {
+  substituirSegredos, SEGREDOS_PERMITIDOS,
   impressorasPraSondar,
   flushHeartbeatsPendentes,
   heartbeat, listar, listarResumo, detalhar, diagnosticoRede, cadastrarComputador, editarComputador, removerComputador, moverComputador,
