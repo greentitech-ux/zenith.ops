@@ -361,7 +361,7 @@
     <div class="header-nav">
       <span class="ultima-atualizacao" id="ultima-atualizacao"></span>
       <button class="back hidden" id="btn-manutencao" onclick="abrirManutencao()" title="Reiniciar computadores do parque - um, uma unidade inteira ou várias unidades">🔁 Reiniciar máquinas</button>
-      <button class="back hidden" id="btn-limpar-travados" onclick="limparTravados()" title="Manda todos os computadores fecharem processos travados do NOCZenith">🧹 Destravar lojas</button>
+      <button class="back hidden" id="btn-limpar-travados" onclick="limparTravados()" title="Manda todos os computadores fecharem processos travados do agente NOC-NoPulso">🧹 Destravar lojas</button>
       <!-- atalho pra central de HD/temperatura/reboot: o card daqui mostra o
            computador que voce ja escolheu; la e a frota inteira de uma vez -->
       <a class="back" href="/noc-maquinas.html" title="HD, temperatura e tempo ligado de todos os computadores">💽 Saúde das Máquinas</a>
@@ -394,7 +394,7 @@
       <div class="kpi-num" id="kpi-num-offline">0</div>
       <div class="kpi-label">🔴 Indisponível</div>
     </button>
-    <button type="button" class="kpi-card kpi-nunca" id="kpi-nunca" onclick="setFiltroStatus('nunca')" title="Cadastrado no parque mas o NOCZenith nunca foi instalado - nunca bateu uma vez sequer">
+    <button type="button" class="kpi-card kpi-nunca" id="kpi-nunca" onclick="setFiltroStatus('nunca')" title="Cadastrado no parque mas o agente NOC-NoPulso nunca foi instalado - nunca bateu uma vez sequer">
       <div class="kpi-num" id="kpi-num-nunca">0</div>
       <div class="kpi-label">⚪ Sem agente</div>
     </button>
@@ -455,7 +455,7 @@
     <button type="button" class="btn-notif" onclick="carregarRede()" title="Atualizar">🔄</button>
   </div>
   <div class="rede-sub">
-    Medido pelo próprio batimento que cada computador já manda a cada 25s — pior link primeiro. Onde o NOCZenith está instalado, o teste separa a <b>rede interna</b> (até o roteador da loja) do <b>link da operadora</b>, que é o que decide para quem abrir chamado. Nos computadores que reportam só pelo navegador aparece apenas a latência do sistema.
+    Medido pelo próprio batimento que cada computador já manda a cada 25s — pior link primeiro. Onde o NOC-NoPulso está instalado, o teste separa a <b>rede interna</b> (até o roteador da loja) do <b>link da operadora</b>, que é o que decide para quem abrir chamado. Nos computadores que reportam só pelo navegador aparece apenas a latência do sistema.
   </div>
   <div class="rede-resumo" id="rede-resumo"></div>
   <div class="rede-global hidden" id="rede-global"></div>
@@ -513,7 +513,7 @@
     <textarea id="acao-descricao" maxlength="600" placeholder="Ex: use quando o cliente disser que a impressora não imprime nada"></textarea>
     <label>O que essa ação faz</label>
     <div class="radio-tipo">
-      <label><input type="radio" name="acao-tipo" value="comando_maquina" checked onchange="onMudaTipoAcao()"><span><b>💻 Rodar comando no computador</b><small>PowerShell fixo, roda via NOCZenith num computador tipo interno</small></span></label>
+      <label><input type="radio" name="acao-tipo" value="comando_maquina" checked onchange="onMudaTipoAcao()"><span><b>💻 Rodar comando no computador</b><small>PowerShell fixo, roda via agente NOC-NoPulso num computador tipo interno</small></span></label>
       <label><input type="radio" name="acao-tipo" value="acao_sistema" onchange="onMudaTipoAcao()"><span><b>⚙️ Ação de sistema</b><small>uma função pronta do NoPulso - hoje só "criar usuário"</small></span></label>
     </div>
     <div id="acao-campo-comando">
@@ -568,7 +568,7 @@
   <div class="modal" style="max-width:640px;">
     <h3>🔁 Janela de Manutenção · reiniciar máquinas</h3>
     <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">
-      Só entra na lista computador <b>interno</b> com NOCZenith instalado - é quem sabe receber comando.
+      Só entra na lista computador <b>interno</b> com o agente NOC-NoPulso instalado - é quem sabe receber comando.
       Cada máquina pega o comando na próxima batida (até ~25s) e mostra um aviso de <b>2 minutos</b> na tela da loja antes de reiniciar.
       Máquina indisponível recebe quando voltar.
     </div>
@@ -863,7 +863,7 @@ function linkTexto(c){
 // máquina nunca instalada como máquina caída - eram as duas pintadas de
 // vermelho, e é o que fazia procurar problema de rede onde não havia.
 function textoDeEstado(c, status){
-  if(status === 'nunca') return 'sem agente · NOCZenith nunca instalado aqui';
+  if(status === 'nunca') return 'sem agente · NOC-NoPulso nunca instalado aqui';
   // tempoRelativo já devolve com o "há" ("há 2d") - repetir aqui dava "há há 2d"
   if(status === 'offline') return `indisponível · calada ${tempoRelativo(c.ultimoHeartbeatEm)}`;
   if(status === 'degradado') return `degradado · ${(c.degradacao||[]).join(' · ')}`;
@@ -1200,7 +1200,7 @@ function atualizarConteudoDetalhe(codigo, c){
     <button type="button" class="btn-mini" onclick="abrirModalMensagem('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">💬 Mensagem</button>
     <button type="button" class="btn-mini" onclick="copiarLinkComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🔗 Link</button>
     <button type="button" class="btn-mini ok" title="Copiar o comando de instalação pra colar no PowerShell da loja (contorna o bloqueio do Windows)" onclick="copiarComandoVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">📋 Copiar comando</button>
-    <button type="button" class="btn-mini" title="Baixar o arquivo NOCZenith.ps1 (jeito manual)" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️ Baixar</button>
+    <button type="button" class="btn-mini" title="Baixar o agente NOC-NoPulso (jeito manual)" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️ Baixar</button>
     <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️ Remover</button>
   `;
   document.getElementById('detalhe-comp-editar').onclick = () => {
@@ -1709,7 +1709,7 @@ function renderManutLista(){
   if(!lista.length){
     alvo.innerHTML = MANUT_BUSCA
       ? `<div class="empty">Nenhuma máquina com "${escapeHtml(MANUT_BUSCA)}". Apague a busca pra ver o parque inteiro.</div>`
-      : '<div class="empty">Nenhum computador interno com NOCZenith. Só esse tipo recebe comando.</div>';
+      : '<div class="empty">Nenhum computador interno com NOC-NoPulso. Só esse tipo recebe comando.</div>';
     atualizarContagemManut();
     return;
   }
@@ -1917,7 +1917,7 @@ function renderRede(dados){
     return;
   }
   if(!medidos.length){
-    document.getElementById('rede-lista').innerHTML = '<div class="rede-vazio">Nenhuma medição chegou ainda. Os computadores passam a reportar sozinhos assim que o NOCZenith se atualizar (leva até ~1h) ou assim que a tela da loja recarregar.</div>';
+    document.getElementById('rede-lista').innerHTML = '<div class="rede-vazio">Nenhuma medição chegou ainda. Os computadores passam a reportar sozinhos assim que o agente NOC-NoPulso se atualizar (leva até ~1h) ou assim que a tela da loja recarregar.</div>';
     return;
   }
 
@@ -2407,7 +2407,7 @@ function avisarPrintNaoVai(){
   el.className = 'msg';
   el.style.background = 'var(--warn-dim)';
   el.style.color = 'var(--warn)';
-  el.innerHTML = '<b>Print não vai por aqui.</b> Esta janela aparece na tela do computador da loja pelo NOCZenith, que só mostra texto. Pra mandar imagem use o chat do chamado (Técnico/Manutenção), a Central ou o Beniboy.';
+  el.innerHTML = '<b>Print não vai por aqui.</b> Esta janela aparece na tela do computador da loja pelo NOC-NoPulso, que só mostra texto. Pra mandar imagem use o chat do chamado (Técnico/Manutenção), a Central ou o Beniboy.';
   clearTimeout(avisarPrintNaoVai._t);
   avisarPrintNaoVai._t = setTimeout(()=>{ el.classList.add('hidden'); }, 12000);
 }
@@ -2616,7 +2616,7 @@ async function rodarAcaoConfirmar(){
     });
     const data = await res.json();
     if(!res.ok) throw new Error(data.error || 'Erro ao enfileirar o comando.');
-    st.textContent = data.mensagem || 'Comando enfileirado. Executa no próximo contato do NOCZenith (~25s).';
+    st.textContent = data.mensagem || 'Comando enfileirado. Executa no próximo contato do NOC-NoPulso (~25s).';
     st.className = 'msg ok'; st.classList.remove('hidden');
   }catch(err){ st.textContent = err.message; st.className = 'msg err'; st.classList.remove('hidden'); }
   finally{ btn.disabled = false; }

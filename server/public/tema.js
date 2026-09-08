@@ -35,6 +35,17 @@
     document.head.appendChild(css);
   })();
 
+  // Fundação compartilhada: foco visível, movimento reduzido, estados vazios
+  // e conforto de toque sem obrigar cada uma das 56 telas a duplicar CSS.
+  (function uiFoundation() {
+    if (document.getElementById('nopulso-ui-foundation')) return;
+    var css = document.createElement('link');
+    css.id = 'nopulso-ui-foundation';
+    css.rel = 'stylesheet';
+    css.href = '/ui-foundation.css';
+    document.head.appendChild(css);
+  })();
+
   // ---- destaque do nome da unidade (loja) em tickets/chamados ----
   // Pedido do usuario: em qualquer card ou detalhe de ticket/chamado que
   // mostra o nome da unidade, ele tem que se destacar do resto da linha
