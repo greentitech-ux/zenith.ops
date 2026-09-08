@@ -7180,6 +7180,13 @@ setTimeout(async () => {
         /function listaPendenciasKpi\(\)/.test(html)
         && /function exportarPendenciasCsv\(\)/.test(html)
         && /id="pendencias-kpi"/.test(html),
+      'a correção Calabress → Calabresa exige prévia e confirmação exclusiva do Master': (() => {
+        const api = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
+        const tela = require('fs').readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+        return /api\/fechamentos\/kpis\/calabresa\/migracao', auth\.requireMaster/.test(api)
+          && /MIGRAR CALABRESS/.test(api)
+          && /id="migracao-calabresa-panel"/.test(tela);
+      })(),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okKpiTotal = !falhas.length;
