@@ -96,6 +96,7 @@ const chaveDe = (secao, campo) => `${secao}.${campo}`;
 function unidadeHintKpi(tipo) {
   if (tipo === 'moeda') return ' (em R$)';
   if (tipo === 'kg') return ' (em Kg)';
+  if (tipo === 'percentual') return ' (em porcentagem, sem o símbolo %, ex: 12,5)';
   if (tipo === 'texto') return ' (texto livre - copie exatamente como está escrito no relatório, não precisa ser um número redondo)';
   // TEMPO: o relatorio do PDV imprime esses indicadores (Leg Time, Run Time,
   // Avg Delivery Time, Tempo de Atendimento/Producao/Espera, Saida de Loja

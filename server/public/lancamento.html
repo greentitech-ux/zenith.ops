@@ -817,7 +817,7 @@ function somaExtrasComSinal(classe, defs, { soCruzado } = {}){
 // dos indicadores Leg Time, Run Time, Avg Delivery Time, Tempo de
 // Atendimento/Produção/Espera e Saída de Loja (OTD). Arquivo fica de fora:
 // não é leitura de valor, é upload de anexo.
-function kpiOcrElegivel(k){ return ['quantidade','moeda','kg','texto','tempo'].includes(k.tipo||'quantidade'); }
+function kpiOcrElegivel(k){ return ['quantidade','moeda','kg','percentual','texto','tempo'].includes(k.tipo||'quantidade'); }
 function renderKpisExtras(unidade){
   const grupo = grupoKpiDaUnidade(unidade);
   const campos = grupo ? (grupo.kpisExtras||[]) : [];
@@ -865,7 +865,7 @@ function renderKpisExtras(unidade){
       return `<div><label>${escapeHtml(k.label)}${marca}</label><input type="text" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
     }
     const step = tipo === 'quantidade' ? '1' : (tipo === 'kg' ? '0.001' : '0.01');
-    const sufixo = tipo === 'kg' ? ' (Kg)' : (tipo === 'moeda' ? ' (R$)' : '');
+    const sufixo = tipo === 'kg' ? ' (kg)' : (tipo === 'moeda' ? ' (R$)' : (tipo === 'percentual' ? ' (%)' : (tipo === 'quantidade' ? ' (un.)' : '')));
     return `<div><label>${escapeHtml(k.label)}${sufixo}${marca}</label><input type="number" step="${step}" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
   }).join('');
   // KPI moeda com "somar em" (ver grupos.html) precisa recalcular o preview

@@ -456,6 +456,7 @@ const TIPOS_KPI = [
   ['moeda', 'R$ (valor em reais)'],
   ['kg', 'Peso (Kg)'],
   ['tempo', 'Tempo (min:seg)'],
+  ['percentual', 'Porcentagem (%)'],
   ['arquivo', 'Arquivo/Imagem (anexo)'],
   ['texto', 'Texto livre'],
 ];
@@ -662,7 +663,7 @@ function nomeUnidade(codigo){
   return u ? u.nome : codigo;
 }
 
-const SUFIXO_TIPO_KPI = { quantidade:'#', moeda:'R$', kg:'Kg', tempo:'⏱', arquivo:'📎', texto:'Abc' };
+const SUFIXO_TIPO_KPI = { quantidade:'un.', moeda:'R$', kg:'kg', tempo:'⏱', percentual:'%', arquivo:'📎', texto:'Abc' };
 const LABEL_SOMA_EM = { faturamento: 'Faturamento', totalDeclarado: 'Total Declarado' };
 function tagsExtras(lista){
   return `<div class="tags">${(lista||[]).map(k=>{

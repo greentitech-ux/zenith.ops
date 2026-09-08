@@ -58,6 +58,7 @@
   .preset{font-family:var(--mono);font-size:11.5px;padding:6px 12px;border-radius:16px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;}
   .preset.active{border-color:var(--accent);color:var(--accent);background:#132029;}
   .sub{color:var(--muted);font-size:11.5px;line-height:1.5;}
+  .unidade-kpi{font-family:var(--mono);font-size:10px;color:var(--accent2);font-weight:500;margin-left:5px;letter-spacing:.02em;}
 
   table{width:100%;border-collapse:collapse;font-size:12px;}
   th,td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;}
@@ -150,7 +151,7 @@
         <button type="button" class="preset" onclick="exportar('pdf')" title="Baixa a matriz do período em PDF, com os ofensores no topo">📄 PDF</button>
       </span>
     </h2>
-    <div class="sub" style="margin-bottom:10px;">Clique num KPI pra ver a evolução dele dia a dia no gráfico abaixo. <b>Tempo</b>, <b>OTD</b>, <b>Taxa</b> e <b>Média</b> são agregados por <b>média</b> do período; o resto por <b>soma</b> — a coluna diz qual foi usada.</div>
+    <div class="sub" style="margin-bottom:10px;">Cada indicador exibe sua unidade: <b>un.</b>, <b>R$</b>, <b>kg</b>, <b>⏱ tempo</b> ou <b>%</b>. Tempo e percentuais usam <b>média</b> no período; quantidades, valores e pesos usam <b>soma</b> — a coluna confirma a regra aplicada.</div>
     <div class="rolagem"><table id="matriz"></table></div>
   </div>
 
@@ -199,22 +200,54 @@ function escapeHtml(s){ const d=document.createElement('div'); d.textContent = s
 function fmtData(iso){ if(!iso) return '—'; const [y,m,d]=iso.split('-'); return `${d}/${m}`; }
 function isoDe(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 
-// KPI de tempo/percentual/média se agrega por MÉDIA; contagem, por SOMA.
-// Somar um tempo médio de 30 dias produziria um número sem significado
-// nenhum. O tipo cadastrado no grupo não serve pra decidir isso (esses KPI's
-// estão todos como "quantidade"), então vai pelo rótulo - e o seletor de
-// agregação existe justamente pra quando o palpite não servir.
-function agregaPorMedia(label){
-  return /time|tempo|otd|taxa|media|média|m[ée]dio/i.test(String(label||''));
+// A unidade cadastrada no Grupo é a fonte de verdade para leitura, formato e
+// agregação. O palpite pelo rótulo mantém os grupos antigos úteis até que o
+// Master escolha a unidade correta na tela de Grupos.
+function tipoKpi(def){ return String(def?.tipo || 'quantidade'); }
+function unidadeKpi(def){
+  return ({ quantidade:'un.', moeda:'R$', kg:'kg', tempo:'⏱', percentual:'%', arquivo:'📎', texto:'texto' })[tipoKpi(def)] || 'un.';
+}
+function rotuloKpi(def){
+  const label = String(def?.label || 'KPI');
+  const unidade = unidadeKpi(def);
+  return /\((?:R\$|kg|Kg|un\.|%|⏱|texto)\)/.test(label) ? label : `${label} (${unidade})`;
+}
+function agregaPorMedia(def){
+  const tipo = tipoKpi(def);
+  if(tipo === 'tempo' || tipo === 'percentual') return true;
+  return /time|tempo|otd|taxa|media|média|m[ée]dio/i.test(String(def?.label||''));
 }
 function modoAgregacao(def){
   const escolha = document.getElementById('f-agregacao').value;
   if(escolha !== 'auto') return escolha;
-  return agregaPorMedia(def.label) ? 'media' : 'soma';
+  return agregaPorMedia(def) ? 'media' : 'soma';
 }
-function fmtValor(v, modo){
+function fmtNumero(v, casas=0){ return Number(v).toLocaleString('pt-BR', { minimumFractionDigits:casas, maximumFractionDigits:casas }); }
+function fmtTempo(seg){
+  const total = Math.max(0, Math.round(Number(seg)||0));
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
+  return h ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${m}:${String(s).padStart(2,'0')}`;
+}
+function fmtValor(v, def, modo){
   if(v == null) return null;
-  return modo === 'media' ? v.toFixed(1) : String(Math.round(v));
+  const tipo = tipoKpi(def);
+  if(tipo === 'moeda') return `R$ ${fmtNumero(v, 2)}`;
+  if(tipo === 'kg') return `${fmtNumero(v, modo === 'media' ? 2 : 3)} kg`;
+  if(tipo === 'tempo') return `⏱ ${fmtTempo(v)}`;
+  if(tipo === 'percentual') return `${fmtNumero(v, 1)}%`;
+  return `${fmtNumero(v, modo === 'media' ? 1 : 0)} un.`;
+}
+// No eixo do gráfico cabe pouco texto; abrevia só ali, sem tirar a unidade.
+// Tabela, tooltip e exportação continuam exibindo o número completo.
+function fmtEixo(v, def){
+  const tipo = tipoKpi(def);
+  const n = Number(v) || 0;
+  if(tipo === 'tempo') return `⏱ ${fmtTempo(n)}`;
+  if(tipo === 'percentual') return `${fmtNumero(n, 1)}%`;
+  const curto = Math.abs(n) >= 1000 ? `${fmtNumero(n / 1000, 1)} mil` : fmtNumero(n, tipo === 'kg' ? 2 : 0);
+  if(tipo === 'moeda') return `R$ ${curto}`;
+  if(tipo === 'kg') return `${curto} kg`;
+  return `${curto} un.`;
 }
 
 // SÓ as lojas do grupo que ESTE acesso pode ver. Toda a tela (colunas da
@@ -259,9 +292,9 @@ function agregar(lista, modo){
 // soma as células já arredondadas - no modo média isso dá a média real
 // ponderada do grupo, não a média das médias por loja. Usado na tela e no
 // export (CSV/PDF), pra não ter dois jeitos de calcular o mesmo número.
-function totalLinha(porLoja, lojas, modo){
+function totalLinha(porLoja, lojas, def, modo){
   const todos = lojas.flatMap(u => porLoja[u]);
-  return fmtValor(agregar(todos, modo), modo);
+  return fmtValor(agregar(todos, modo), def, modo);
 }
 
 function renderMatriz(){
@@ -287,14 +320,14 @@ function renderMatriz(){
     const porLoja = valoresPorLoja(def.campo, linhas);
     const celulas = lojas.map(u => {
       const v = agregar(porLoja[u], modo);
-      const txt = fmtValor(v, modo);
+      const txt = fmtValor(v, def, modo);
       return `<td class="valor">${txt === null ? '<span class="vazio-cel">—</span>' : escapeHtml(txt)}</td>`;
     }).join('');
-    const txtTotal = totalLinha(porLoja, lojas, modo);
+    const txtTotal = totalLinha(porLoja, lojas, def, modo);
     const celTotal = `<td class="valor total-col">${txtTotal === null ? '<span class="vazio-cel">—</span>' : escapeHtml(txtTotal)}</td>`;
     const sel = KPI_SEL === def.campo ? ' sel' : '';
     return `<tr class="kpi-linha${sel}" onclick="escolherKpi('${escapeHtml(def.campo)}')">` +
-      `<td>${escapeHtml(def.label)}</td>` +
+      `<td>${escapeHtml(def.label)}<span class="unidade-kpi">${escapeHtml(unidadeKpi(def))}</span></td>` +
       `<td class="valor vazio-cel" style="font-size:10.5px;">${modo === 'media' ? 'média' : 'soma'}</td>` +
       celulas + celTotal + '</tr>';
   });
@@ -349,7 +382,7 @@ function calcularOfensores(){
     const desvio = Math.abs(pior.v - med) / Math.abs(med) * 100;
     if(!Number.isFinite(desvio) || desvio < 1) return;
     out.push({
-      campo: def.campo, kpi: def.label, loja: pior.loja, valor: pior.v,
+      campo: def.campo, kpi: def.label, def, loja: pior.loja, valor: pior.v,
       mediana: med, desvio, direcao, modo,
       acima: pior.v > med,
     });
@@ -389,7 +422,7 @@ function renderOfensores(){
       <div class="ofensor-barra"><i style="width:${larg.toFixed(1)}%;background:${cor};"></i></div>
       <div class="ofensor-pe">
         <span style="color:${CORES[o.loja]||'var(--muted)'};">■</span> ${escapeHtml(o.loja)}
-        · ${escapeHtml(fmtValor(o.valor, o.modo))} <span class="ofensor-med">(mediana ${escapeHtml(fmtValor(o.mediana, o.modo))})</span>
+        · ${escapeHtml(fmtValor(o.valor, o.def, o.modo))} <span class="ofensor-med">(mediana ${escapeHtml(fmtValor(o.mediana, o.def, o.modo))})</span>
       </div>
     </button>`;
   }).join('');
@@ -413,10 +446,10 @@ async function exportar(formato){
       const modo = modoAgregacao(def);
       const porLoja = valoresPorLoja(def.campo, linhas);
       return {
-        kpi: def.label,
+      kpi: rotuloKpi(def),
         agregacao: modo === 'media' ? 'média' : 'soma',
-        valores: lojas.map(u => fmtValor(agregar(porLoja[u], modo), modo) ?? ''),
-        total: totalLinha(porLoja, lojas, modo) ?? '',
+        valores: lojas.map(u => fmtValor(agregar(porLoja[u], modo), def, modo) ?? ''),
+        total: totalLinha(porLoja, lojas, def, modo) ?? '',
       };
     }),
     ofensores: (OFENSORES || []).slice(0, 3).map(o => ({
@@ -455,10 +488,10 @@ function renderTendencia(){
   const porLoja = valoresPorLoja(def.campo, linhas);
   const lojas = unidadesDoGrupo().filter(u => porLoja[u] && porLoja[u].length);
   const dias = [...new Set(linhas.map(f => f.data))].sort();
-  info.textContent = def.label;
+  info.textContent = rotuloKpi(def);
 
   if(!lojas.length || dias.length < 1){
-    alvo.innerHTML = `<div class="empty">Nenhuma loja preencheu <b>${escapeHtml(def.label)}</b> nesse período.</div>`;
+    alvo.innerHTML = `<div class="empty">Nenhuma loja preencheu <b>${escapeHtml(rotuloKpi(def))}</b> nesse período.</div>`;
     legenda.innerHTML = '';
     return;
   }
@@ -470,7 +503,7 @@ function renderTendencia(){
   const todos = lojas.flatMap(u => porLoja[u].map(x => x.valor));
   const maxV = Math.max(1, ...todos);
 
-  const W = Math.max(320, alvo.clientWidth || 900), H = 240, padL = 54, padR = 14, padT = 12, padB = 26;
+  const W = Math.max(320, alvo.clientWidth || 900), H = 240, padL = tipoKpi(def) === 'moeda' ? 76 : 64, padR = 14, padT = 12, padB = 26;
   const innerW = W - padL - padR, innerH = H - padT - padB;
   const n = dias.length;
   const xAt = (i) => padL + (n === 1 ? innerW/2 : innerW * i/(n-1));
@@ -479,7 +512,7 @@ function renderTendencia(){
   const grade = [0,.25,.5,.75,1].map(f => {
     const y = padT + innerH*(1-f);
     return `<line class="grid-line" x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}"/>` +
-      `<text class="eixo" x="${padL-8}" y="${(y+3).toFixed(1)}" text-anchor="end">${(maxV*f).toFixed(maxV<10?1:0)}</text>`;
+      `<text class="eixo" x="${padL-8}" y="${(y+3).toFixed(1)}" text-anchor="end">${escapeHtml(fmtEixo(maxV*f, def))}</text>`;
   }).join('');
 
   const passo = Math.max(1, Math.ceil(n/8));
@@ -498,7 +531,7 @@ function renderTendencia(){
   const cross = `<line class="crosshair" id="g-cross" x1="0" y1="${padT}" x2="0" y2="${H-padB}"/>`;
   alvo.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" style="display:block;">${grade}${rotulosX}${series}${cross}${hit}</svg>`;
 
-  ligarHover(alvo, { dias, lojas, porDia, xAt, padL, innerW, n, label: def.label });
+  ligarHover(alvo, { dias, lojas, porDia, xAt, padL, innerW, n, def });
 }
 
 // crosshair + tooltip: um gráfico HTML É interativo, então isso é padrão,
@@ -524,9 +557,9 @@ function ligarHover(alvo, ctx){
       .filter(x => x.v !== undefined)
       .sort((a,b) => b.v - a.v);
     const el = tip();
-    el.innerHTML = `<div class="tt-date">${fmtData(ctx.dias[i])} · ${escapeHtml(ctx.label)}</div>` +
+    el.innerHTML = `<div class="tt-date">${fmtData(ctx.dias[i])} · ${escapeHtml(rotuloKpi(ctx.def))}</div>` +
       (linhasTt.length ? linhasTt.map(r2 =>
-        `<div class="tt-row"><span class="tt-key"><i style="background:${CORES[r2.u]}"></i>${escapeHtml(r2.u)}</span><span class="tt-val">${r2.v.toFixed(maxDecimais(r2.v))}</span></div>`
+        `<div class="tt-row"><span class="tt-key"><i style="background:${CORES[r2.u]}"></i>${escapeHtml(r2.u)}</span><span class="tt-val">${escapeHtml(fmtValor(r2.v, ctx.def, 'media'))}</span></div>`
       ).join('') : '<div class="tt-row"><span class="tt-key">sem lançamento</span></div>');
     el.style.display = 'block';
     const larg = el.offsetWidth || 200;

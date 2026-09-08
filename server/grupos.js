@@ -39,7 +39,7 @@ function slugify(s) {
 // (grupo criado antes dessa feature). "tempo" guarda o valor em SEGUNDOS
 // (o Master digita min:seg em grupos.html/lancamento.html, ja convertido
 // antes de chegar aqui - ver sanitizarMapaExtras em fechamentosLive.js).
-const TIPOS_KPI_VALIDOS = new Set(['quantidade', 'moeda', 'kg', 'tempo', 'arquivo', 'texto']);
+const TIPOS_KPI_VALIDOS = new Set(['quantidade', 'moeda', 'kg', 'tempo', 'percentual', 'arquivo', 'texto']);
 
 // pra ONDE um KPI extra soma, alem de so ficar registrado - "nao" (padrao,
 // mesmo comportamento de sempre: so capta o dado, nunca some em nada) ou um
