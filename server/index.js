@@ -5581,7 +5581,7 @@ app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRela
     // igualzinho ao que acontece quando alguem digita a mao.
     //
     // Arquivo continua de fora: nao e' leitura de valor, e upload de anexo.
-    const kpisOcrElegiveis = (grupo.kpisExtras || []).filter((k) => ['quantidade', 'moeda', 'kg', 'texto', 'tempo'].includes(k.tipo || 'quantidade'));
+    const kpisOcrElegiveis = (grupo.kpisExtras || []).filter((k) => ['quantidade', 'moeda', 'kg', 'percentual', 'texto', 'tempo'].includes(k.tipo || 'quantidade'));
     // a dica e escrita pelo Master no cadastro do grupo: cada PDV imprime de
     // um jeito (ordem das linhas, coluna que vale) e isso nao cabe no codigo
     // sem virar um "if" por bandeira

@@ -2879,7 +2879,8 @@ function renderKpisEdicaoFechamento(grupo, mapaAtual, fechamentoId){
       return `<div><label>${escapeHtml(k.label)} (min:seg ou minutos)</label><input type="text" placeholder="9,66 ou 9:40" inputmode="decimal" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="tempo" class="ef-kpi-extra-input kpi-extra-tempo" value="${segundosParaTempo(atual)}"></div>`;
     }
     const step = tipo === 'quantidade' ? '1' : (tipo === 'kg' ? '0.001' : '0.01');
-    return `<div><label>${escapeHtml(k.label)}</label><input type="number" step="${step}" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="${tipo}" class="ef-kpi-extra-input" value="${num(atual)}"></div>`;
+    const sufixo = tipo === 'kg' ? ' (kg)' : (tipo === 'moeda' ? ' (R$)' : (tipo === 'percentual' ? ' (%)' : (tipo === 'quantidade' ? ' (un.)' : '')));
+    return `<div><label>${escapeHtml(k.label)}${sufixo}</label><input type="number" step="${step}" data-kpi-campo="${escapeHtml(k.campo)}" data-kpi-tipo="${tipo}" class="ef-kpi-extra-input" value="${num(atual)}"></div>`;
   }).join('');
   // liga a conferência do campo de tempo (aceita 9,66 e 9:40, e mostra na
   // tela o que entendeu) - ver public/kpi-tempo.js

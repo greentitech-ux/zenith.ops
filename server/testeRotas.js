@@ -3598,9 +3598,9 @@ setTimeout(async () => {
     const htmlLanc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'lancamento.html'), 'utf8');
     const iFill = htmlLanc.indexOf('el.value = it.valor;');
     const conferencias = {
-      'o servidor manda os KPI de tempo pro modelo': /\['quantidade', 'moeda', 'kg', 'texto', 'tempo'\]\.includes\(k\.tipo \|\| 'quantidade'\)/.test(srcIndex),
+      'o servidor manda os KPI de tempo pro modelo': /\['quantidade', 'moeda', 'kg', 'percentual', 'texto', 'tempo'\]\.includes\(k\.tipo \|\| 'quantidade'\)/.test(srcIndex),
       'arquivo continua FORA da leitura (é upload, não valor)': !/'arquivo'\]\.includes\(k\.tipo/.test(srcIndex),
-      'a tela também considera tempo elegível': /\['quantidade','moeda','kg','texto','tempo'\]\.includes\(k\.tipo\|\|'quantidade'\)/.test(htmlLanc),
+      'a tela também considera tempo elegível': /\['quantidade','moeda','kg','percentual','texto','tempo'\]\.includes\(k\.tipo\|\|'quantidade'\)/.test(htmlLanc),
       'o modelo é instruído a copiar minutos decimais, sem converter':
         /MINUTOS decimais/.test(ocr.unidadeHintKpi('tempo')) && /NÃO converta/.test(ocr.unidadeHintKpi('tempo')),
       'vírgula do relatório vira número (2,32 → 2.32)': ocr.minutosOuNull('2,32') === 2.32,
@@ -7166,14 +7166,14 @@ setTimeout(async () => {
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'kpis-operacionais.html'), 'utf8');
     const conf = {
       'existe uma função só pra calcular o Total, usada na tela E no export (não duas contas separadas)':
-        /function totalLinha\(porLoja, lojas, modo\)\{/.test(html)
-        && (html.match(/totalLinha\(porLoja, lojas, modo\)/g) || []).length >= 3, // a definição + os 2 usos
+        /function totalLinha\(porLoja, lojas, def, modo\)\{/.test(html)
+        && (html.match(/totalLinha\(porLoja, lojas, def, modo\)/g) || []).length >= 3, // a definição + os 2 usos
       'a função recombina TODOS os lançamentos das lojas antes de agregar (não soma médias já arredondadas)':
-        /const todos = lojas\.flatMap\(u => porLoja\[u\]\);\s*\n\s*return fmtValor\(agregar\(todos, modo\), modo\);/.test(html),
+        /const todos = lojas\.flatMap\(u => porLoja\[u\]\);\s*\n\s*return fmtValor\(agregar\(todos, modo\), def, modo\);/.test(html),
       'o cabeçalho da matriz ganha a coluna Total, no fim': /<th class="total-col">Total<\/th>/.test(html),
-      'a tela usa totalLinha pra preencher a célula da linha': /const txtTotal = totalLinha\(porLoja, lojas, modo\);/.test(html),
+      'a tela usa totalLinha pra preencher a célula da linha': /const txtTotal = totalLinha\(porLoja, lojas, def, modo\);/.test(html),
       'o export (CSV/PDF) manda o total calculado pela MESMA função, não recalcula na mão':
-        /total: totalLinha\(porLoja, lojas, modo\) \?\? ''/.test(html),
+        /total: totalLinha\(porLoja, lojas, def, modo\) \?\? ''/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okKpiTotal = !falhas.length;
