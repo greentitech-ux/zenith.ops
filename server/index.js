@@ -1315,6 +1315,7 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       // esta rota e PUBLICA, entao e tratado como dado hostil - quem sanitiza
       // e o redeDiagnostico.sanitizarAmostra, chamado la dentro.
       rede: req.body.rede,
+      tailscale: req.body.tailscale,
     }, token);
     res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens });
   } catch (err) {
@@ -1439,7 +1440,7 @@ app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', async (req, re
     let liberado = false;
     if (!tokenAtual) {
       liberado = true; // legado/migracao: computador ainda sem segredo
-    } else if (tokenReq && tokenReq === tokenAtual) {
+    } else if (lojaStatus.tokensBatem(tokenReq, tokenAtual)) {
       liberado = true; // autoatualizacao do proprio agente (prova o token)
     } else {
       // sessao de Master/Suporte (download manual pela loja-status.html)
@@ -1448,7 +1449,7 @@ app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', async (req, re
       const secoes = (user && user.permissions && user.permissions.sections) || [];
       liberado = !!user && (user.role === 'master' || user.isAdmin || secoes.includes('suporte'));
     }
-    if (!liberado) return res.status(403).type('text/plain').send('# Acesso negado. Baixe o NOCZenith pela tela NOC Zenith (logado como Master/Suporte).');
+    if (!liberado) return res.status(403).type('text/plain').send('# Acesso negado. Baixe o agente pela tela NOC-NoPulso (logado como Master/Suporte).');
     const agentToken = await lojaStatus.garantirAgentToken(codigo, posto);
     const conteudo = vigiaScript.montarScriptVigia({ codigo, posto, tipo, agentToken });
     res.type('text/plain').send(conteudo);

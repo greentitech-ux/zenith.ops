@@ -35,6 +35,7 @@
 // fica ligado o dia todo nessa tela e nao na de atendimento/login. Os tres
 // mandam heartbeat do mesmo jeito.
 const crypto = require('crypto');
+const net = require('net');
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
 const redeDiagnostico = require('./redeDiagnostico');
@@ -658,6 +659,13 @@ async function heartbeat(codigo, posto, info, token) {
     agenteFalhasSeguidas: falhasDeQuemBate(dados.rede),
   };
 
+  if (dados.tailscale !== undefined) {
+    const tailscale = sanitizarTailscale(dados.tailscale);
+    if (tailscale && !mesmoTailscale(tailscale, atual && atual.tailscale)) {
+      patch.tailscale = { ...tailscale, em: Date.now() };
+    }
+  }
+
   // ---- boot e link físico (NOCZenith v16+). Máquina com agente antigo não
   // manda nada disso: os campos ficam como estavam, e o painel mostra
   // "sem dado" em vez de inventar.
@@ -737,6 +745,7 @@ async function heartbeat(codigo, posto, info, token) {
     || patch.ip !== anterior.ip
     || patch.userAgent !== anterior.userAgent
     || patch.abertoDesde !== anterior.abertoDesde
+    || (patch.tailscale !== undefined && !mesmoTailscale(patch.tailscale, anterior.tailscale || null))
     || patch.redeHistorico !== undefined      // virada de dia da rede
     // reinício e mudança de link são eventos: não podem esperar o
     // PERSIST_MS, senão um restart do servidor apagaria o rastro
@@ -765,7 +774,7 @@ async function heartbeat(codigo, posto, info, token) {
   // leitura a reler as 52. Como o espelho acabou de ser atualizado na linha
   // acima com o que esta batida gravou, basta derrubar a LISTA derivada:
   // ela é recalculada a partir da memória, sem tocar no Firestore.
-  if (eventosNovos.length) cacheBase.invalidar();
+  if (eventosNovos.length || patch.tailscale !== undefined) cacheBase.invalidar();
   // token confere? (maquina legada sem token cadastrado nunca passa aqui -
   // recebe comando/chat vazios ate reinstalar o NOCZenith com o token assado)
   const tokenOk = !!(atual && atual.agentToken && tokensBatem(token, atual.agentToken));
@@ -803,6 +812,28 @@ const ESTADOS_SERVICO = ['Running', 'Stopped', 'Paused', 'StartPending', 'StopPe
 function sanitizarEstadoAnydesk(v) {
   const t = String(v == null ? '' : v).trim();
   return ESTADOS_SERVICO.includes(t) ? t : null;
+}
+
+// Tailscale é inventário de conexão, nunca uma fonte de autorização. A lista
+// fechada impede que o endpoint público grave objetos grandes/arbitrários no
+// Firestore. Dados ausentes permanecem ausentes para os agentes antigos.
+function sanitizarTailscale(bruto) {
+  if (!bruto || typeof bruto !== 'object') return null;
+  const estados = ['Running', 'Stopped', 'NeedsLogin', 'NoState', 'desconhecido', 'erro'];
+  const estado = String(bruto.estado || '').trim();
+  const ip = String(bruto.ip || '').trim();
+  return {
+    instalado: !!bruto.instalado,
+    estado: estados.includes(estado) ? estado : 'desconhecido',
+    ip: net.isIP(ip) ? ip : null,
+    nome: String(bruto.nome || '').trim().slice(0, 253) || null,
+    versao: String(bruto.versao || '').trim().slice(0, 40) || null,
+  };
+}
+function mesmoTailscale(a, b) {
+  if (!a || !b) return a === b;
+  return a.instalado === b.instalado && a.estado === b.estado && a.ip === b.ip
+    && a.nome === b.nome && a.versao === b.versao;
 }
 
 function motivosDeDegradacao(doc) {
@@ -2335,5 +2366,5 @@ module.exports = {
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
   saudeMaquinas,
-  garantirAgentToken, tokenDoComputador,
+  garantirAgentToken, tokenDoComputador, tokensBatem,
 };

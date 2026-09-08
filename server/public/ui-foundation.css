@@ -1,0 +1,63 @@
+/* Fundação visual NoPulso.
+ * Carregada pelo tema.js em todas as páginas: não altera dados, rotas ou
+ * comportamentos, apenas garante contraste, foco, estados e toque coerentes.
+ * As telas continuam donas de seus layouts específicos. */
+
+:root {
+  --focus-ring: var(--accent2, #5cc8ff);
+  --focus-ring-shadow: color-mix(in srgb, var(--focus-ring) 32%, transparent);
+  --surface-hover: color-mix(in srgb, var(--panel2, #181d24) 78%, var(--text, #eef3f7));
+  --surface-selected: color-mix(in srgb, var(--accent, #b8ff3c) 14%, var(--panel, #12161b));
+  --radius-control: 8px;
+  --radius-panel: 12px;
+}
+
+:root[data-tema="claro"] {
+  color-scheme: light;
+  --focus-ring: var(--accent2, #0d7ac2);
+  --surface-hover: color-mix(in srgb, var(--panel2, #edf1f5) 88%, var(--text, #17212b));
+  --surface-selected: color-mix(in srgb, var(--accent, #5b8c00) 13%, var(--panel, #ffffff));
+}
+
+* { -webkit-tap-highlight-color: transparent; }
+
+button, a, input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"]) {
+  outline: none;
+}
+
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible, summary:focus-visible, [role="button"]:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--focus-ring-shadow);
+}
+
+button, [role="button"] { touch-action: manipulation; }
+button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; opacity: .58; }
+button:not(:disabled):active, [role="button"]:active { transform: translateY(1px); }
+
+.empty, .vazio, .sem-dados, .loading, .carregando, .sem-permissao {
+  border-radius: var(--radius-panel);
+}
+
+.ui-scroll-x { overflow-x: auto; overscroll-behavior-x: contain; }
+.ui-scroll-x > table { min-width: max-content; }
+
+@media (max-width: 640px) {
+  button:not(.icon-btn):not(.close):not(.fechar),
+  input:not([type="checkbox"]):not([type="radio"]), select {
+    min-height: 40px;
+  }
+
+  .ui-scroll-x { margin-inline: -2px; padding-bottom: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}

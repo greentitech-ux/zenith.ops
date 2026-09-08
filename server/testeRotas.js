@@ -5721,6 +5721,11 @@ setTimeout(async () => {
     await bater({ bootEm: BOOT1, link: { tipo: 'ethernet', nome: 'Ethernet', mbps: 1000 } });
     const noCabo = await doc();
 
+    // O piloto Tailscale só inventaria o cliente local: nenhum segredo, peer
+    // ou configuração da VPN pode voltar pelo heartbeat público.
+    await bater({ tailscale: { instalado: true, estado: 'Running', ip: '100.64.12.34', nome: 'caixa02.arcfood.ts.net', versao: '1.90.0', segredo: 'nunca-gravar' } });
+    const tailscaleRegistrado = await doc();
+
     // 2) o cabo cai e ela segue viva pelo Wi-Fi: NÃO é queda, é degradação
     await bater({ bootEm: BOOT1, link: { tipo: 'wifi', nome: 'Wi-Fi', mbps: 130, ethernetCaida: true } });
     const noWifi = await doc();
@@ -5753,6 +5758,9 @@ setTimeout(async () => {
     const conferencias = {
       'no cabo = operacional, e o painel mostra a velocidade':
         noCabo.estado === 'operacional' && noCabo.link.tipo === 'ethernet' && noCabo.link.mbps === 1000,
+      'Tailscale é inventariado com campos fechados, sem aceitar dados extras':
+        tailscaleRegistrado.tailscale && tailscaleRegistrado.tailscale.estado === 'Running'
+        && tailscaleRegistrado.tailscale.ip === '100.64.12.34' && !('segredo' in tailscaleRegistrado.tailscale),
       'caiu a Ethernet mas segue no ar = DEGRADADO (não offline)':
         noWifi.online === true && noWifi.estado === 'degradado'
         && noWifi.degradacao.includes('Ethernet caída'),
