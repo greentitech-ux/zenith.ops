@@ -196,6 +196,66 @@ function diaAnterior(data) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function diaSeguinte(data) {
+  const d = new Date(data + 'T00:00:00');
+  d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// ------------------------------------------- fechamento que não foi lançado
+//
+// Pedido do Master (07/09/2026): "se o fechamento do dia não for lançado até
+// as 2h da manhã, sempre que acessar qualquer tela um PopUp ficar aparecendo
+// informando que falta lançar o fechamento do caixa, e ter a opção de clicar
+// e ser direcionado para fechar caixa".
+//
+// A conta mora AQUI, e não na tela, porque é a mesma pergunta do painel "Dias
+// sem fechamento" e do e-mail diário - e porque o aviso aparece em 53 telas,
+// que não podem ter 53 cópias da regra. Função PURA: recebe os fechamentos já
+// carregados (o cache do listAll) e a hora, e não toca no banco.
+//
+// QUANDO UM DIA VENCE: o fechamento do dia D é lançado na virada, e a tela de
+// lançamento já trata 00h-12h como sendo ainda o dia D (dataFechamentoBrasilia
+// em lancamento.html). Por isso a cobrança só começa às 2h da manhã do dia
+// seguinte: antes disso a loja ainda está fechando o caixa, e cobrar seria
+// ruído - o aviso que aparece cedo demais é o primeiro que a operação aprende
+// a ignorar.
+const HORA_COBRANCA_FECHAMENTO = 2;
+// olha 7 dias operacionais pra trás: o que interessa é o buraco recente, que
+// ainda dá pra reconstruir. Cobrar 3 meses de história vira uma lista que
+// ninguém lê - o histórico completo continua no painel "Dias sem fechamento".
+const DIAS_PENDENCIA_FECHAMENTO = 7;
+function diasPendentesDeFechamento(fechamentos, unidades, hoje, hora, limite = 20) {
+  // último dia operacional que já venceu (ver HORA_COBRANCA_FECHAMENTO)
+  const ultimo = Number(hora) >= HORA_COBRANCA_FECHAMENTO ? diaAnterior(hoje) : diaAnterior(diaAnterior(hoje));
+  const lancou = new Set();
+  const primeiro = {};
+  (fechamentos || []).forEach((f) => {
+    if (!f || !f.unidade || !f.data) return;
+    lancou.add(`${f.unidade}|${f.data}`);
+    if (!primeiro[f.unidade] || f.data < primeiro[f.unidade]) primeiro[f.unidade] = f.data;
+  });
+  const pendentes = [];
+  (unidades || []).forEach((u) => {
+    const codigo = u && (u.codigo || u);
+    if (!codigo) return;
+    // loja que nunca lançou nada cobra SÓ o último dia: sem histórico não dá
+    // pra saber desde quando ela existe, e 7 dias de cobrança numa loja que
+    // acabou de abrir é mentira
+    let de = ultimo;
+    if (primeiro[codigo]) {
+      for (let i = 1; i < DIAS_PENDENCIA_FECHAMENTO; i += 1) de = diaAnterior(de);
+      if (de < primeiro[codigo]) de = primeiro[codigo];
+    }
+    for (let dia = de; dia <= ultimo; dia = diaSeguinte(dia)) {
+      if (!lancou.has(`${codigo}|${dia}`)) pendentes.push({ unidade: codigo, unidadeNome: (u && u.nome) || codigo, data: dia });
+    }
+  });
+  // mais recente primeiro: é o que a loja precisa fazer agora
+  pendentes.sort((a, b) => b.data.localeCompare(a.data) || String(a.unidadeNome).localeCompare(String(b.unidadeNome), 'pt-BR'));
+  return { total: pendentes.length, pendentes: pendentes.slice(0, limite) };
+}
+
 const CAMPOS_NUMERICOS = [
   'caixaInicial', 'caixaFinal', 'delivery', 'carryout', 'pickup', 'loja',
   'adyen', 'ifood', 'food99', 'pix', 'pixCnpj', 'outros', 'totalSaida',
@@ -1198,6 +1258,7 @@ function invalidarCache() {
 }
 
 module.exports = {
+  diasPendentesDeFechamento, HORA_COBRANCA_FECHAMENTO, DIAS_PENDENCIA_FECHAMENTO,
   explicarDiferenca, exigirFechamentoConsistente, LIMITE_OBSERVACAO_OBRIGATORIA,
   editarItemSaida, adicionarSaidaDireto,
   CAMPOS_NUMERICOS, create, listAll, listByUnidades, getOne, solicitarEdicao, listarEdicoes, getEdicao,

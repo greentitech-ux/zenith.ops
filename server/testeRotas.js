@@ -10935,6 +10935,74 @@ setTimeout(async () => {
   console.log(`${okTravaPos ? '✓' : '✗'} Lançamento: Maquininha POS 01 avisa e pergunta antes de lançar, e o servidor recusa POS com o cartão zerado sem explicação`);
 
   // ------------------------------------------------------------------
+  // FECHAMENTO NÃO LANÇADO: AVISO EM QUALQUER TELA. Pedido do Master
+  // (07/09/2026): "se o fechamento do dia não for lançado até as 2h da manhã,
+  // sempre que acessar qualquer tela um PopUp ficar aparecendo informando que
+  // falta lançar o fechamento do caixa, e ter a opção de clicar e ser
+  // direcionado para fechar caixa". A regra é do SERVIDOR (uma conta, 53
+  // telas); o tema.js só mostra, porque é o único arquivo que todas carregam.
+  let okPendenciaFech = false;
+  try {
+    const fl = require('/home/user/adyen-monitor/server/fechamentosLive.js');
+    const U = [{ codigo: 'A', nome: 'Loja A' }, { codigo: 'B', nome: 'Loja B' }];
+    // A lançou até 05/09; B lançou até 06/09
+    const fechs = [
+      { unidade: 'A', data: '2026-09-01' }, { unidade: 'A', data: '2026-09-04' }, { unidade: 'A', data: '2026-09-05' },
+      { unidade: 'B', data: '2026-09-01' }, { unidade: 'B', data: '2026-09-06' },
+    ];
+    // 07/09 à 01h: o dia 06 ainda está sendo fechado - não cobra o 06
+    const cedo = fl.diasPendentesDeFechamento(fechs, U, '2026-09-07', 1);
+    // 07/09 às 02h: o dia 06 venceu
+    const venceu = fl.diasPendentesDeFechamento(fechs, U, '2026-09-07', 2);
+    // 07/09 às 14h: continua cobrando o 06 (não some quando o dia avança)
+    const tarde = fl.diasPendentesDeFechamento(fechs, U, '2026-09-07', 14);
+    // loja que nunca lançou nada: cobra só o último dia, não 7 dias
+    const nova = fl.diasPendentesDeFechamento([], [{ codigo: 'N', nome: 'Loja Nova' }], '2026-09-07', 2);
+    // ninguém devendo
+    const emDia = fl.diasPendentesDeFechamento(
+      ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-06'].map((d) => ({ unidade: 'A', data: d })),
+      [U[0]], '2026-09-07', 2);
+    const sels = (r) => r.pendentes.map((p) => `${p.unidade}:${p.data}`);
+    // a rota: quem lança vê só as unidades dele
+    const rota = await pedir('/api/fechamentos/pendencias', { Authorization: 'Bearer ' + token });
+    const semLogin = await pedir('/api/fechamentos/pendencias');
+    const corpoRota = rota.status === 200 ? JSON.parse(rota.corpo) : {};
+    const tema = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tema.js'), 'utf8');
+    const fnAviso = /function avisarFechamentoPendente\(\) \{[\s\S]*?\n  \}/.exec(tema);
+    const htmlLanc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'lancamento.html'), 'utf8');
+    const conf = {
+      'à 1h da manhã o dia de ontem ainda não é cobrado (a loja está fechando o caixa)':
+        !sels(cedo).includes('B:2026-09-06') && !sels(cedo).includes('A:2026-09-06'),
+      'às 2h o dia vence: a loja que não lançou aparece, a que lançou não':
+        sels(venceu).includes('A:2026-09-06') && !sels(venceu).includes('B:2026-09-06'),
+      'mais tarde no mesmo dia continua cobrando (não some quando o dia avança)': sels(tarde).includes('A:2026-09-06'),
+      'os buracos dos dias anteriores também entram, mais recente primeiro':
+        sels(venceu)[0] === 'A:2026-09-06' && sels(venceu).includes('A:2026-09-03') && sels(venceu).includes('B:2026-09-05'),
+      'não cobra dia anterior ao primeiro lançamento da loja': !sels(venceu).some((s) => s.endsWith('2026-08-31')),
+      'loja que nunca lançou cobra só o último dia, não 7': nova.total === 1 && sels(nova).join(',') === 'N:2026-09-06',
+      'loja em dia não gera pendência nenhuma': emDia.total === 0 && emDia.pendentes.length === 0,
+      'a rota responde ao Master e recusa sem login': rota.status === 200 && Array.isArray(corpoRota.pendentes) && typeof corpoRota.total === 'number' && semLogin.status === 401,
+      // a tela: o aviso vive no tema.js porque e o unico arquivo das 53 telas
+      'o aviso mora no tema.js (o único carregado por todas as telas)': !!fnAviso && /fetch\('\/api\/fechamentos\/pendencias'/.test(tema),
+      'não aparece na própria tela de lançamento nem sem login':
+        !!fnAviso && /location\.pathname === TELA_LANCAMENTO/.test(fnAviso[0]) && /localStorage\.getItem\('authToken'\)/.test(fnAviso[0]),
+      'clicar leva pra tela de lançar já na loja e no dia certos':
+        !!fnAviso && /TELA_LANCAMENTO \+ '\?unidade=' \+ item\.getAttribute\('data-unidade'\) \+ '&data=' \+ item\.getAttribute\('data-data'\)/.test(fnAviso[0])
+        && /const uq = q\.get\('unidade'\);/.test(htmlLanc) && /if\(uq && unidades\.includes\(uq\)\) selUnidade\.value = uq;/.test(htmlLanc),
+      'o "Agora não" vale só pra tela atual - na próxima o aviso volta':
+        !!fnAviso && /sessionStorage\.setItem\('nopulsoPendFechAdiado', location\.pathname\)/.test(fnAviso[0])
+        && /sessionStorage\.getItem\('nopulsoPendFechAdiado'\) === location\.pathname/.test(fnAviso[0]),
+      'a tela não repete a regra: quem decide o que está pendente é o servidor':
+        !/HORA_COBRANCA/.test(tema) && !/2h|>= 2\b/.test(String((fnAviso || [''])[0])),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPendenciaFech = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (cedo=${JSON.stringify(sels(cedo))} venceu=${JSON.stringify(sels(venceu))} nova=${JSON.stringify(sels(nova))} rota=${rota.status})`);
+  } catch (e) { okPendenciaFech = false; console.log('  erro: ' + e.message); }
+  if (!okPendenciaFech) ruins += 1;
+  console.log(`${okPendenciaFech ? '✓' : '✗'} Fechamento não lançado: aviso em qualquer tela depois das 2h, levando pra loja e o dia certos`);
+
+  // ------------------------------------------------------------------
   // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o
   // AnyDesk cai, o acesso remoto some e a unica saida era reiniciar o
   // computador inteiro - o que derruba o caixa junto, por causa de um

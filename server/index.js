@@ -5644,6 +5644,24 @@ app.get('/api/fechamentos/meus', requireSection('lancamento'), async (req, res) 
   res.json(await fechamentosLive.listByUnidades(req.permissions.unidades || []));
 });
 
+// dias operacionais que venceram sem fechamento nas unidades DESTE usuário -
+// alimenta o aviso que o tema.js mostra em qualquer tela (ver
+// diasPendentesDeFechamento em fechamentosLive.js). Só leitura, e tudo que
+// consulta já é cacheado: essa rota é chamada a cada troca de tela.
+app.get('/api/fechamentos/pendencias', requireSection('lancamento'), async (req, res) => {
+  const [todos, extras] = await Promise.all([
+    fechamentosLive.listAll(),
+    unidadesExtras.mapa().catch(() => ({})),
+  ]);
+  const nomes = { ...FECHAMENTO_UNIDADES_NOMES, ...extras };
+  delete nomes.Administrativa; // unidade administrativa não lança fechamento
+  // Master/Admin respondem pelo parque inteiro; quem lança vê só as suas
+  const codigos = (req.isMaster || req.isAdmin) ? Object.keys(nomes) : (req.permissions.unidades || []);
+  const unidades = codigos.filter((c) => nomes[c]).map((c) => ({ codigo: c, nome: nomes[c] }));
+  const hora = Number(new Intl.DateTimeFormat('en-US', { timeZone: FUSO_BR, hour: '2-digit', hour12: false }).format(new Date()));
+  res.json(fechamentosLive.diasPendentesDeFechamento(todos, unidades, hojeBrasiliaISO(), hora));
+});
+
 // ---------- grupos (franquias) - cada uma pode ter seus proprios KPI's
 // extras no fechamento (ver grupos.js). Leitura liberada pra quem lanca
 // fechamento (precisa saber quais campos extras preencher) ou corrige

@@ -1661,6 +1661,16 @@ async function boot(){
     selUnidade.innerHTML = opcoesUnidades(unidades);
     document.getElementById('f-data').value = dataFechamentoBrasilia();
     document.getElementById('f-data').max = dataFechamentoBrasilia();
+    // ?unidade=&data= : é por aqui que o aviso de fechamento não lançado (ver
+    // avisarFechamentoPendente em tema.js) cai na loja e no dia certos, em vez
+    // de largar a pessoa no formulário em branco pra ela procurar de novo. Só
+    // aceita unidade que ela realmente pode lançar (a lista já veio filtrada)
+    // e data dentro do limite do campo
+    const q = new URLSearchParams(location.search);
+    const uq = q.get('unidade');
+    const dq = q.get('data');
+    if(uq && unidades.includes(uq)) selUnidade.value = uq;
+    if(dq && /^\d{4}-\d{2}-\d{2}$/.test(dq) && dq <= dataFechamentoBrasilia()) document.getElementById('f-data').value = dq;
     adicionarMaquina();
     renderSaidas();
     aplicarFranquia(selUnidade.value);

@@ -726,7 +726,113 @@
     new MutationObserver(montarControles).observe(drawer, { childList: true });
   }
 
-  function iniciar() { montarControles(); vigiarDrawer(); avisarEnderecoNovo(); }
+  // ---- fechamento do caixa que não foi lançado: aviso em QUALQUER tela ----
+  //
+  // Pedido do Master (07/09/2026): "se o fechamento do dia não for lançado até
+  // as 2h da manhã, sempre que acessar qualquer tela um PopUp ficar aparecendo
+  // informando que falta lançar o fechamento do caixa, e ter a opção de clicar
+  // e ser direcionado para fechar caixa".
+  //
+  // Mora aqui porque este arquivo é o único carregado pelas 53 telas - o aviso
+  // tem que alcançar quem está no Estoque, no Chamado, em qualquer lugar. Quem
+  // decide o que está pendente é o SERVIDOR (ver diasPendentesDeFechamento em
+  // fechamentosLive.js): a tela não repete regra de negócio, só mostra.
+  //
+  // Não tem "não mostrar de novo": ele volta a cada tela, de propósito, até o
+  // fechamento ser lançado. O "Agora não" fecha só nesta tela.
+  var TELA_LANCAMENTO = '/lancamento.html';
+  var CACHE_PENDENCIA_MS = 60 * 1000;
+
+  function fmtDataAviso(iso) {
+    var p = String(iso || '').split('-');
+    return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : String(iso || '');
+  }
+
+  function pendenciasDeFechamento() {
+    // resposta guardada por 1 minuto: trocar de tela não pode virar uma
+    // chamada por clique (o aviso aparece igual, lendo o que já veio)
+    try {
+      var salvo = JSON.parse(sessionStorage.getItem('nopulsoPendFech') || 'null');
+      if (salvo && (Date.now() - salvo.em) < CACHE_PENDENCIA_MS) return Promise.resolve(salvo.dados);
+    } catch (e) { /* sem cache, busca */ }
+    var token;
+    try { token = localStorage.getItem('authToken'); } catch (e) { return Promise.resolve(null); }
+    return fetch('/api/fechamentos/pendencias', { headers: { Authorization: 'Bearer ' + token } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        try { sessionStorage.setItem('nopulsoPendFech', JSON.stringify({ em: Date.now(), dados: d })); } catch (e) {}
+        return d;
+      })
+      .catch(function () { return null; });
+  }
+
+  function avisarFechamentoPendente() {
+    if (location.pathname === TELA_LANCAMENTO) return;   // já está na tela de lançar
+    if (document.getElementById('nopulso-pend-fech')) return;
+    try {
+      if (!localStorage.getItem('authToken')) return;    // tela pública/login
+      if (sessionStorage.getItem('nopulsoPendFechAdiado') === location.pathname) return;
+    } catch (e) { return; }
+
+    pendenciasDeFechamento().then(function (d) {
+      var lista = (d && d.pendentes) || [];
+      if (!lista.length) return;
+      var total = (d && d.total) || lista.length;
+
+      var st = document.createElement('style');
+      st.textContent = [
+        '#nopulso-pend-fech{position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.62);',
+        'display:flex;align-items:center;justify-content:center;padding:16px;}',
+        '#nopulso-pend-fech .cx{background:var(--panel,#12151a);border:1px solid var(--warn,#ffb020);border-radius:12px;',
+        'max-width:440px;width:100%;padding:18px 18px 14px;color:var(--text,#e7ecf3);font-family:var(--sans,system-ui,sans-serif);',
+        'box-shadow:0 18px 50px rgba(0,0,0,.5);max-height:86vh;overflow-y:auto;}',
+        '#nopulso-pend-fech h3{margin:0 0 4px;font-size:16px;color:var(--warn,#ffb020);}',
+        '#nopulso-pend-fech .sub{margin:0 0 12px;font-size:12.5px;line-height:1.45;color:var(--muted,#93a1b3);}',
+        '#nopulso-pend-fech .item{display:block;width:100%;text-align:left;background:var(--panel2,#171b22);',
+        'border:1px solid var(--line,#232a34);border-radius:9px;padding:9px 11px;margin-bottom:7px;color:var(--text,#e7ecf3);',
+        'font-size:13px;cursor:pointer;font-family:inherit;}',
+        '#nopulso-pend-fech .item:hover{border-color:var(--accent,#b8ff3c);}',
+        '#nopulso-pend-fech .item b{display:block;font-size:13.5px;}',
+        '#nopulso-pend-fech .item span{font-family:var(--mono,monospace);font-size:11.5px;color:var(--muted,#93a1b3);}',
+        '#nopulso-pend-fech .mais{font-size:11.5px;color:var(--muted,#93a1b3);margin:2px 0 10px;}',
+        '#nopulso-pend-fech .acoes{display:flex;gap:8px;justify-content:flex-end;margin-top:10px;}',
+        '#nopulso-pend-fech .depois{background:none;border:1px solid var(--line,#232a34);color:var(--muted,#93a1b3);',
+        'border-radius:8px;padding:8px 12px;font-size:12.5px;cursor:pointer;font-family:inherit;}',
+      ].join('');
+      document.head.appendChild(st);
+
+      var cx = document.createElement('div');
+      cx.id = 'nopulso-pend-fech';
+      var titulo = total === 1 ? 'Falta lançar o fechamento do caixa' : total + ' fechamentos de caixa não lançados';
+      var itens = lista.map(function (p) {
+        return '<button type="button" class="item" data-unidade="' + encodeURIComponent(p.unidade) + '" data-data="' + encodeURIComponent(p.data) + '">'
+          + '<b>' + String(p.unidadeNome || p.unidade).replace(/</g, '&lt;') + '</b>'
+          + '<span>' + fmtDataAviso(p.data) + ' · toque para lançar</span></button>';
+      }).join('');
+      cx.innerHTML = '<div class="cx" role="dialog" aria-modal="true"><h3>⏰ ' + titulo + '</h3>'
+        + '<p class="sub">O dia já virou e esse caixa continua sem fechamento. Enquanto não for lançado, o faturamento do dia não entra em relatório nenhum.</p>'
+        + itens
+        + (total > lista.length ? '<div class="mais">e mais ' + (total - lista.length) + ' dia(s) — a lista completa fica em Fechamentos → Dias sem fechamento.</div>' : '')
+        + '<div class="acoes"><button type="button" class="depois">Agora não</button></div></div>';
+      document.body.appendChild(cx);
+
+      cx.addEventListener('click', function (e) {
+        var item = e.target.closest && e.target.closest('.item');
+        if (item) {
+          location.href = TELA_LANCAMENTO + '?unidade=' + item.getAttribute('data-unidade') + '&data=' + item.getAttribute('data-data');
+          return;
+        }
+        // "Agora não" e o clique fora fecham só nesta tela: na próxima o aviso
+        // volta, que é o pedido ("sempre que acessar qualquer tela")
+        if ((e.target.closest && e.target.closest('.depois')) || e.target === cx) {
+          try { sessionStorage.setItem('nopulsoPendFechAdiado', location.pathname); } catch (err) {}
+          cx.remove();
+        }
+      });
+    });
+  }
+
+  function iniciar() { montarControles(); vigiarDrawer(); avisarEnderecoNovo(); avisarFechamentoPendente(); }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);
   else iniciar();
