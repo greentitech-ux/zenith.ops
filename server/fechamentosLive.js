@@ -432,6 +432,24 @@ function sanitizarMapaExtras(obj, tipos) {
   return out;
 }
 
+// KPI vazio não é igual a KPI com valor zero. A sanitização numérica abaixo
+// transforma os dois em 0 para os cálculos do fechamento, então registramos a
+// pendência ANTES dela. Assim a gestão enxerga o que a loja deixou em branco,
+// sem tratar um "0" real como erro. KPI automático já vem de outra fonte e
+// não depende de digitação da loja.
+function kpisPendentesDoEnvio(kpisExtras, defs) {
+  const origem = kpisExtras && typeof kpisExtras === 'object' ? kpisExtras : {};
+  return (defs || []).filter((k) => {
+    if (!k || !k.campo || k.origem === 'remakesDoDia') return false;
+    const valor = origem[k.campo];
+    return valor == null || String(valor).trim() === '';
+  }).map((k) => ({
+    campo: String(k.campo).slice(0, 60),
+    label: String(k.label || k.campo).slice(0, 100),
+    tipo: String(k.tipo || 'quantidade').slice(0, 20),
+  }));
+}
+
 // resolve campo->tipo dos kpisExtras configurados pro grupo da unidade (ver
 // grupos.js) - usa o grupo REAL da unidade, nao o id que o cliente mandou no
 // payload, pra nao confiar em um "grupo" desatualizado/errado vindo do form
@@ -460,6 +478,11 @@ async function create({ unidade, unidadeNome, grupo, data, gerente, campos, kpis
   // criação, e guardado (nao e recalculado se ontem for corrigido depois)
   registro.ajustePosAnterior = await ajustePosDoDiaAnterior(unidade, data);
   const tiposKpi = await tiposKpiDaUnidade(unidade);
+  const grupoKpi = await grupos.grupoDaUnidade(unidade);
+  // Guarda a lista de campos que chegaram vazios para o aviso e o relatório.
+  // O mapa original ainda contém '' versus '0'; depois de sanitizado essa
+  // diferença deixa de existir e não pode mais ser inferida com segurança.
+  registro.kpisPendentes = kpisPendentesDoEnvio(kpisExtras, grupoKpi?.kpisExtras);
   registro.kpisExtras = sanitizarMapaExtras(kpisExtras, tiposKpi);
   registro.canaisVendaExtras = sanitizarMapaExtras(canaisVendaExtras);
   registro.formasPagamentoExtras = sanitizarMapaExtras(formasPagamentoExtras);

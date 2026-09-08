@@ -7174,6 +7174,12 @@ setTimeout(async () => {
       'a tela usa totalLinha pra preencher a célula da linha': /const txtTotal = totalLinha\(porLoja, lojas, def, modo\);/.test(html),
       'o export (CSV/PDF) manda o total calculado pela MESMA função, não recalcula na mão':
         /total: totalLinha\(porLoja, lojas, def, modo\) \?\? ''/.test(html),
+      'TM (ticket médio) é identificado como média, mesmo sendo um KPI monetário':
+        /\\btm\\b\|time\|tempo\|otd\|taxa/i.test(html),
+      'a tela mostra pendências de KPI por loja e exporta o relatório em CSV':
+        /function listaPendenciasKpi\(\)/.test(html)
+        && /function exportarPendenciasCsv\(\)/.test(html)
+        && /id="pendencias-kpi"/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okKpiTotal = !falhas.length;
