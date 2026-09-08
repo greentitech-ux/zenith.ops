@@ -304,6 +304,9 @@
       </div>
       <label>Currículo (PDF, obrigatório)</label>
       <input type="file" id="c-curriculo" accept="application/pdf" required>
+      <label>Foto de cadastro (opcional)</label>
+      <div class="sub" style="margin:-2px 0 6px;">Tire a foto agora, com a câmera frontal. Se pular, a primeira foto de check-in será usada automaticamente.</div>
+      <input type="file" id="c-foto-cadastro" accept="image/*" capture="user">
       <label style="display:flex;align-items:center;gap:6px;margin-top:12px;" class="hidden" id="wrap-sem-experiencia">
         <input type="checkbox" id="c-sem-experiencia" style="width:auto;margin:0;">
         <span style="font-family:var(--sans);color:var(--text);">Contratação sem período de experiência</span>
@@ -2268,6 +2271,8 @@ document.getElementById('form-cadastrar').addEventListener('submit', async (e)=>
     fd.append('tipoCadastro', TIPO_CADASTRO);
     if(TIPO_CADASTRO==='efetivado') fd.append('semExperiencia', document.getElementById('c-sem-experiencia').checked);
     fd.append('curriculo', arq);
+    const fotoCadastro = document.getElementById('c-foto-cadastro').files[0];
+    if(fotoCadastro) fd.append('fotoCadastro', fotoCadastro);
     const resp = await fetch('/api/rh/funcionarios', { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao cadastrar.');

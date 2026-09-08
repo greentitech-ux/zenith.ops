@@ -136,6 +136,10 @@
   <label>Currículo (PDF, obrigatório)</label>
   <input type="file" id="curriculo" accept="application/pdf,image/*" required>
 
+  <label>Foto de cadastro (opcional)</label>
+  <div class="ajuda">Tire sua foto agora, com calma. Se preferir pular, a primeira foto de check-in será usada automaticamente.</div>
+  <input type="file" id="foto-cadastro" accept="image/*" capture="user">
+
   <button type="submit" class="btn-primary" id="btn-enviar">Enviar cadastro</button>
   <div id="msg" class="msg hidden"></div>
 </form>
@@ -414,6 +418,8 @@ document.getElementById('curriculo').addEventListener('change', ()=>{
     fd.append('banco', document.getElementById('banco').value);
     fd.append('dataNascimento', document.getElementById('nascimento').value);
     fd.append('curriculo', await comprimirImagem(arquivo));
+    const fotoCadastro = document.getElementById('foto-cadastro').files[0];
+    if(fotoCadastro) fd.append('fotoCadastro', await comprimirImagem(fotoCadastro));
     // só o que foi liberado pra digitação vai no corpo; o resto o servidor
     // relê do documento
     CAMPOS_MANUAIS.forEach(campo=>{

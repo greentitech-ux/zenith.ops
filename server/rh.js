@@ -130,7 +130,7 @@ async function criar({
   curriculo, cadastradoPorId, cadastradoPorEmail, precisaAprovacao, exigirCurriculo = true,
   dataExamePeriodico, periodicidadeExameMeses, dataUltimasFerias,
   cpf, rg, nomeMae, documentoIdentidade, leituraDocumento, exigirDocumento = true,
-  chavePix, banco,
+  chavePix, banco, fotoCadastro,
 }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   const nomeOk = limpar(nome, 150);
@@ -186,6 +186,12 @@ async function criar({
     dataNascimento: validarDataOuNull(dataNascimento, 'Data de nascimento'),
     dataAdmissao: dataAdmissaoOk,
     curriculo: curriculo || null,
+    // Foto escolhida pela própria pessoa durante o cadastro. É opcional: se
+    // não vier, Extra/candidato recebe a primeira foto de check-in depois.
+    fotoCadastro: fotoCadastro && fotoCadastro.path ? {
+      path: String(fotoCadastro.path), tipo: String(fotoCadastro.tipo || 'image/jpeg'),
+      origem: 'cadastro', em: String(fotoCadastro.em || agora),
+    } : null,
     // dados lidos do documento de identidade (documentoIdentidadeOcr.js).
     // CPF ja chega aqui validado por digito verificador - o modulo devolve
     // null quando nao fecha, entao o que estiver gravado passou na conta.
