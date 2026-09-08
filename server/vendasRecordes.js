@@ -49,6 +49,11 @@ function somarDiasISO(dataISO, dias) {
   return dt.toISOString().slice(0, 10);
 }
 
+function diasNoMes(chaveMes) {
+  const [ano, mes] = String(chaveMes || '').split('-').map(Number);
+  return ano && mes ? new Date(Date.UTC(ano, mes, 0)).getUTCDate() : 0;
+}
+
 // agrupa os fechamentos por unidade+dia, somando faturamento de lançamentos
 // duplicados no mesmo dia (ex: fechamento + sangria do mesmo dia contam pro
 // dia, mas o dia so entra UMA vez no historico) - mesmo espirito do
@@ -97,11 +102,29 @@ function semanasDaUnidade(diasDaUnidade) {
   return [...porSemana.values()].filter((s) => s.dias >= DIAS_PARA_SEMANA_VALIDA);
 }
 
+// Mes tambem precisa ser comparavel: um mes ainda aberto (ou com dias sem
+// fechamento) nao pode disputar ranking com um mes inteiro. A regra e a mesma
+// da semana: so entram todos os dias de calendario daquele mes.
+function mesesDaUnidade(diasDaUnidade) {
+  const porMes = new Map();
+  diasDaUnidade.forEach((d) => {
+    const mes = String(d.data || '').slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(mes)) return;
+    const atual = porMes.get(mes) || { inicio: `${mes}-01`, fim: `${mes}-${String(diasNoMes(mes)).padStart(2, '0')}`, faturamento: 0, dias: 0 };
+    atual.faturamento += d.faturamento;
+    atual.dias += 1;
+    porMes.set(mes, atual);
+  });
+  return [...porMes.values()].filter((m) => m.dias >= diasNoMes(m.inicio.slice(0, 7)));
+}
+
 // recordes de UMA unidade a partir dos dias ja agrupados dela
 function recordesDaUnidade(unidade, unidadeNome, diasDaUnidade, hoje, janelaDias) {
   const { maior: diaMaior, menor: diaMenor } = extremos(diasDaUnidade, 'faturamento');
   const semanas = semanasDaUnidade(diasDaUnidade);
   const { maior: semanaMaior, menor: semanaMenor } = extremos(semanas, 'faturamento');
+  const meses = mesesDaUnidade(diasDaUnidade);
+  const { maior: mesMaior } = extremos(meses, 'faturamento');
 
   const recente = (dataFim) => dataFim != null && diasEntre(dataFim, hoje) <= janelaDias;
 
@@ -114,9 +137,22 @@ function recordesDaUnidade(unidade, unidadeNome, diasDaUnidade, hoje, janelaDias
     diaMenor: diaMenor ? { data: diaMenor.data, valor: diaMenor.faturamento } : null,
     semanaRecorde: semanaMaior ? { inicio: semanaMaior.inicio, fim: semanaMaior.fim, valor: semanaMaior.faturamento } : null,
     semanaMenor: semanaMenor ? { inicio: semanaMenor.inicio, fim: semanaMenor.fim, valor: semanaMenor.faturamento } : null,
+    mesRecorde: mesMaior ? { inicio: mesMaior.inicio, fim: mesMaior.fim, valor: mesMaior.faturamento } : null,
     diaRecordeRecente: !!diaMaior && recente(diaMaior.data),
     semanaRecordeRecente: !!semanaMaior && recente(semanaMaior.fim),
   };
+}
+
+// Ranking e sempre descendente: primeiro o maior faturamento. Em empate, o
+// periodo mais recente vem antes; se ainda empatar, o nome da loja estabiliza
+// a ordem para a tela nao ficar variando entre recargas.
+function topTres(itens, campoData) {
+  return (itens || [])
+    .filter((i) => Number(i.valor) > 0)
+    .sort((a, b) => Number(b.valor) - Number(a.valor)
+      || String(b[campoData] || '').localeCompare(String(a[campoData] || ''))
+      || String(a.unidadeNome || '').localeCompare(String(b.unidadeNome || ''), 'pt-BR'))
+    .slice(0, 3);
 }
 
 // o "geral": o melhor/pior dia e a melhor/pior semana OLHANDO TODAS AS
@@ -154,6 +190,12 @@ function montar(fechamentos, { hoje = hojeBrasiliaISO(), janelaDias = 30 } = {})
     const info = porUnidade.get(u.unidade);
     return semanasDaUnidade(info.dias).map((s) => ({ ...s, unidade: u.unidade, unidadeNome: u.unidadeNome }));
   });
+  const todosMeses = unidades.flatMap((u) => {
+    const info = porUnidade.get(u.unidade);
+    return mesesDaUnidade(info.dias).map((m) => ({ ...m, unidade: u.unidade, unidadeNome: u.unidadeNome, valor: m.faturamento }));
+  });
+  const todosDias = dias.map((d) => ({ ...d, valor: d.faturamento }));
+  const semanasComValor = todasSemanas.map((s) => ({ ...s, valor: s.faturamento }));
 
   // candidatos a plano de meta: quem bateu o recorde de DIA e/ou de SEMANA
   // dentro da janela - e a lista que responde "quem eu premio agora"
@@ -180,10 +222,15 @@ function montar(fechamentos, { hoje = hojeBrasiliaISO(), janelaDias = 30 } = {})
     geral: recordesGerais(dias, todasSemanas),
     unidades,
     candidatosMeta,
+    rankings: {
+      dias: topTres(todosDias, 'data'),
+      semanas: topTres(semanasComValor, 'fim'),
+      meses: topTres(todosMeses, 'fim'),
+    },
   };
 }
 
 module.exports = {
   DIAS_PARA_SEMANA_VALIDA, hojeBrasiliaISO, diasEntre, segundaDaSemana, somarDiasISO,
-  porDia, semanasDaUnidade, recordesDaUnidade, recordesGerais, montar,
+  porDia, semanasDaUnidade, mesesDaUnidade, diasNoMes, topTres, recordesDaUnidade, recordesGerais, montar,
 };

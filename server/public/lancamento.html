@@ -332,9 +332,10 @@
     </div>
 
     <div class="secao">
-      <div class="secao-titulo">KPI's<span class="chip-foto hidden" id="chip-foto-kpis"></span></div>
-      <div class="grid2 hidden" id="kpis-extras-container" style="margin-top:6px;"></div>
-      <div class="sub hidden" id="kpis-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
+       <div class="secao-titulo">KPI's<span class="chip-foto hidden" id="chip-foto-kpis"></span></div>
+       <div class="grid2 hidden" id="kpis-extras-container" style="margin-top:6px;"></div>
+       <div class="sub hidden" id="kpis-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
+       <div class="pos-aviso hidden" id="aviso-kpis-pendentes"></div>
       <div class="resumo">
         <div class="linha"><span>Soma maquininhas</span><b id="resumo-maquinas">R$ 0,00</b></div>
         <div class="linha hidden" id="resumo-maquinas-pos-linha"><span>Soma Maquininha POS 01</span><b id="resumo-maquinas-pos">R$ 0,00</b></div>
@@ -873,9 +874,12 @@ function renderKpisExtras(unidade){
   // fazem (ver renderExtrasGrupo) - antes disso nao precisava, KPI nunca
   // afetava nenhum total
   container.querySelectorAll('.kpi-extra-input').forEach(el=>el.addEventListener('input', atualizarResumo));
+  container.querySelectorAll('.kpi-extra-input,.kpi-extra-arquivo').forEach(el=>el.addEventListener('input', atualizarAvisoKpisPendentes));
+  container.querySelectorAll('.kpi-extra-arquivo').forEach(el=>el.addEventListener('change', atualizarAvisoKpisPendentes));
   // liga a conferência do campo de tempo (aceita 9,66 e 9:40, e mostra na
   // tela o que entendeu) - ver public/kpi-tempo.js
   window.ZenithKpiTempo.ligarTodos('.kpi-extra-tempo');
+  atualizarAvisoKpisPendentes();
 }
 // mm:ss (ou h:mm:ss) -> total de segundos, pra gravar como numero (mesmo
 // mapa kpisExtras dos outros tipos - ver sanitizarMapaExtras em
@@ -895,6 +899,32 @@ function lerKpisExtras(){
     out[el.dataset.extraCampo] = String(tempoParaSegundos(el.value));
   });
   return out;
+}
+// Campo em branco vira 0 nos cálculos financeiros, mas não pode parecer
+// preenchido no acompanhamento operacional. Aqui, e no servidor, 0 é válido;
+// só vazio de verdade entra como pendência. O valor 0 reconhecido pela foto
+// também vale (LIDOS_PELA_FOTO), mesmo ficando visualmente em branco.
+function kpisPendentesNoFormulario(){
+  const grupo = grupoKpiDaUnidade(document.getElementById('f-unidade').value);
+  return (grupo?.kpisExtras || []).filter(k=>{
+    if(!k || !k.campo || k.origem === 'remakesDoDia') return false;
+    if((k.tipo||'quantidade') === 'arquivo'){
+      const arq = document.querySelector(`.kpi-extra-arquivo[data-extra-campo="${CSS.escape(k.campo)}"]`);
+      return !(arq && arq.files && arq.files[0]);
+    }
+    const el = document.querySelector(`.kpi-extra-input[data-extra-campo="${CSS.escape(k.campo)}"]`);
+    if(!el) return false;
+    return !String(el.value||'').trim() && !LIDOS_PELA_FOTO.has(`kpi|${k.campo}`);
+  });
+}
+function atualizarAvisoKpisPendentes(){
+  const aviso = document.getElementById('aviso-kpis-pendentes');
+  if(!aviso) return;
+  const pendentes = kpisPendentesNoFormulario();
+  aviso.classList.toggle('hidden', !pendentes.length);
+  if(pendentes.length){
+    aviso.innerHTML = `⚠️ <b>${pendentes.length} KPI(s) ainda não preenchido(s):</b> ${pendentes.map(k=>escapeHtml(k.label)).join(', ')}. Ao finalizar assim, a pendência ficará visível para a loja e para a gestão.`;
+  }
 }
 // soma os KPI's (sempre tipo moeda - unico que pode ter somaEm != 'nao', ver
 // grupos.js) marcados pra somar em "destino" (Faturamento/Total Declarado) -
@@ -1546,6 +1576,8 @@ document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
     const totalPos = MAQUINAS_POS.reduce((s,m)=>s+num(m.valor),0);
     if(!confirm(`ATENÇÃO — MAQUININHA POS 01\n\n${avisosPos.map(a=>'• '+a.texto).join('\n\n')}\n\nEsse valor é DESCONTADO automaticamente do fechamento de amanhã. Se estiver no lugar errado, amanhã fecha com diferença.\n\nConfirma que ${fmtMoney(totalPos)} foi vendido DEPOIS da meia-noite?`)) return;
   }
+  const kpisPendentes = kpisPendentesNoFormulario();
+  if(kpisPendentes.length && !confirm(`ATENÇÃO — KPI'S NÃO PREENCHIDOS\n\nFalta informar: ${kpisPendentes.map(k=>k.label).join(', ')}.\n\nO fechamento pode ser enviado, mas essa pendência ficará registrada e aparecerá no relatório da loja e da gestão. Deseja finalizar mesmo assim?`)) return;
   if(!confirm('Tem certeza que deseja finalizar esse fechamento? Confira os valores antes de continuar - depois de lançado, qualquer correção precisa passar por aprovação do Master.')) return;
   const btn = document.getElementById('btn-enviar');
   const msg = document.getElementById('msg');

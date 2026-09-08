@@ -236,8 +236,9 @@ async function vincularChamado(id, chamadoId) {
 // ---- saudacao automatica de quem assume o atendimento ----
 // Pedido do usuario: ao assumir uma conversa (botao "Assumir atendimento"
 // ou simplesmente respondendo nela), o visitante recebe na hora uma
-// mensagem se apresentando: saudacao pelo horario de Brasilia + Sr./Sra.
-// pelo nome de quem pediu + O/A pelo nome de quem atende.
+// mensagem institucional de apresentação: saudação pelo horário de Brasília
+// + nome de quem pediu. O visitante conversa com "Suporte NoPulso", nunca
+// com o nome, e-mail ou papel interno de quem assumiu o caso.
 function saudacaoPorHorario(agora = new Date()) {
   const hora = Number(new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false }).format(agora));
   if (hora < 5) return 'Boa madrugada';
@@ -245,30 +246,9 @@ function saudacaoPorHorario(agora = new Date()) {
   if (hora < 18) return 'Boa tarde';
   return 'Boa noite';
 }
-// Heuristica de genero pelo PRIMEIRO nome: termina em "a" = feminino, com
-// listas de excecao pros nomes comuns que fogem da regra. E um palpite
-// (nao existe campo de genero em lugar nenhum) - erra pouco em nome
-// brasileiro e o formato foi pedido explicitamente assim.
-const NOMES_FEMININOS_SEM_A = new Set([
-  'isabel', 'raquel', 'rachel', 'ester', 'esther', 'beatriz', 'ines', 'miriam', 'mirian', 'carmen',
-  'ruth', 'edith', 'elisabeth', 'elizabeth', 'nicole', 'michele', 'michelle', 'denise', 'alice',
-  'clarice', 'berenice', 'simone', 'solange', 'ivone', 'marlene', 'irene', 'helen', 'ellen', 'karen',
-  'eliane', 'viviane', 'daniele', 'danielle', 'gabrielle', 'isabelle', 'ingrid', 'yasmin', 'iris',
-  'tais', 'thais', 'lais', 'kelly', 'emily', 'shirley', 'joice', 'joyce', 'rose', 'liz', 'cris',
-]);
-const NOMES_MASCULINOS_COM_A = new Set(['luca', 'nicola', 'juca', 'jonata', 'mustafa', 'josafa']);
-function ehNomeFeminino(nome) {
-  const primeiro = String(nome || '').trim().split(/[\s.]+/)[0]
-    .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-  if (!primeiro) return false;
-  if (NOMES_MASCULINOS_COM_A.has(primeiro)) return false;
-  if (NOMES_FEMININOS_SEM_A.has(primeiro)) return true;
-  return primeiro.endsWith('a');
-}
-function mensagemAssumir(nomeVisitante, nomeAtendente) {
-  const tratamento = ehNomeFeminino(nomeVisitante) ? 'Sra.' : 'Sr.';
-  const artigo = ehNomeFeminino(nomeAtendente) ? 'A' : 'O';
-  return `${saudacaoPorHorario()}, ${tratamento} ${String(nomeVisitante || '').trim() || 'cliente'}! ${artigo} ${String(nomeAtendente || '').trim()} irá seguir com o seu atendimento.`;
+function mensagemAssumir(nomeVisitante) {
+  const nome = String(nomeVisitante || '').trim() || 'cliente';
+  return `${saudacaoPorHorario()}, ${nome}! O Suporte NoPulso seguirá com o seu atendimento.`;
 }
 
 async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino, motivoSemSolucao, autor } = {}) {
@@ -311,7 +291,7 @@ async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino,
   if (assumiuNovo) {
     patch.mensagens = [...(chat.mensagens || []), {
       de: 'suporte', em: agora, autorEmail: autor.email || null, automatica: true,
-      texto: mensagemAssumir(chat.nome, autor.nome || autor.email),
+      texto: mensagemAssumir(chat.nome),
     }];
     // humano assumiu: o bot sai de cena daqui em diante (mesmo efeito de
     // uma resposta humana em adicionarMensagem)
