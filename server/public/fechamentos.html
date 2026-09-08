@@ -380,7 +380,7 @@
       <button type="button" class="preset-btn" onclick="baixarRelatorioFechamentos('pdf')">📄 Relatório PDF</button>
     </div>
   </h2>
-  <div class="controls" title="Filtro exclusivo desta tabela - a tabela obedece tanto este filtro quanto o filtro principal lá em cima">
+  <div class="controls" title="Filtro desta tabela: o que você escolher aqui MANDA (pode ser um período maior que o do filtro principal). Campo em branco ou 'Todos' segue o filtro principal lá de cima.">
     <div class="presets" id="fech-presets"></div>
     <div class="daterange">
       <input type="date" id="fech-date-inicio" title="Data inicial (exclusivo desta tabela)">
@@ -654,7 +654,8 @@ const LIMIAR_SMALL_MULTIPLES = 6; // acima disso, facet em vez de multi-linha
 const SEL_UNIDADE = new Set();
 // filtro exclusivo da tabela "Fechamentos" (presets/período/grupo/unidades
 // próprios, em paralelo ao filtro principal acima) - a tabela obedece aos
-// DOIS filtros ao mesmo tempo (interseção), ver renderTabela()
+// filtro PRÓPRIO desta tabela: o que estiver escolhido aqui manda; vazio
+// segue o filtro principal (ver filtrosEfetivosTabela/renderTabela)
 const SEL_UNIDADE_FECH = new Set();
 let UNIDADES_PERMITIDAS = null; // null = sem restrição (Master); senao, Set das unidades liberadas pro usuario
 let GRUPO_VISIVEL = { ARCFOOD:true, BRAVO:true }; // false quando o usuario nao tem nenhuma unidade do grupo
@@ -1284,7 +1285,7 @@ function setupPresets(){
     const range = calcularPreset(tipo, refIso);
     document.getElementById('f-date-start').value = range.inicio;
     document.getElementById('f-date-end').value = range.fim;
-    render();
+    renderEspelhando();   // último clique manda: a seção acompanha o de cima
   }
 
   cont.querySelectorAll('.preset-btn').forEach(btn=>{
@@ -1312,7 +1313,7 @@ function setupPresets(){
       presetAtivo = null;
       filtroDataAtivo = true;
       cont.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
-      render();
+      renderEspelhando();   // último clique manda (ver espelharPrincipalNaSecao)
     });
   });
 }
@@ -1358,16 +1359,42 @@ function criarMultiselectUnidade({wrapId, btnId, panelId, selSet, codigosFn, gru
   });
   renderPanel();
   document.getElementById(grupoElId).addEventListener('change', ()=>{ renderPanel(); onChange(); });
+  return renderPanel;   // pra redesenhar de fora (ver espelharPrincipalNaSecao)
 }
+
+// ÚLTIMO CLIQUE MANDA. Pedido do Master (07/09/2026): "sempre será respeitado
+// o último click - se o último click for trimestre no filtro de baixo ele
+// filtra; e se o de cima filtrar 1 semana depois, o de baixo acompanha".
+//
+// O filtro da seção já manda no que ele diz (ver filtrosEfetivosTabela). O que
+// faltava era o caminho de volta: mexer no filtro principal ESPELHA nele, e aí
+// a tabela segue o de cima - sem "quem ganha de quem", só quem falou por
+// último. Espelhar (em vez de limpar) é o que deixa a seção MOSTRAR o período
+// que está valendo, em vez de dois campos em branco.
+let redesenharUnidadesFech = null;
+function espelharPrincipalNaSecao(){
+  const v = (id)=>document.getElementById(id).value;
+  document.getElementById('fech-date-inicio').value = v('f-date-start');
+  document.getElementById('fech-date-fim').value = v('f-date-end');
+  document.getElementById('fech-grupo').value = v('f-grupo');
+  SEL_UNIDADE_FECH.clear();
+  SEL_UNIDADE.forEach(u=>SEL_UNIDADE_FECH.add(u));
+  const cont = document.getElementById('fech-presets');
+  // o preset aceso embaixo passa a ser o mesmo de cima - e nenhum quando lá
+  // em cima foi digitado um intervalo livre (presetAtivo = null)
+  if(cont) cont.querySelectorAll('.preset-btn').forEach(b=>b.classList.toggle('active', b.dataset.tipo===presetAtivo));
+  if(redesenharUnidadesFech) redesenharUnidadesFech();
+}
+function renderEspelhando(){ espelharPrincipalNaSecao(); render(); }
 
 function setupMultiselect(){
   criarMultiselectUnidade({
     wrapId:'ms-unidade', btnId:'ms-unidade-btn', panelId:'ms-unidade-panel',
-    selSet:SEL_UNIDADE, codigosFn:codigosDoGrupo, grupoElId:'f-grupo', onChange:render,
+    selSet:SEL_UNIDADE, codigosFn:codigosDoGrupo, grupoElId:'f-grupo', onChange:renderEspelhando,
   });
-  criarMultiselectUnidade({
+  redesenharUnidadesFech = criarMultiselectUnidade({
     wrapId:'ms-fech-unidade', btnId:'ms-fech-unidade-btn', panelId:'ms-fech-unidade-panel',
-    selSet:SEL_UNIDADE_FECH, codigosFn:codigosDoGrupoFech, grupoElId:'fech-grupo', onChange:()=>renderTabela(filtrar()),
+    selSet:SEL_UNIDADE_FECH, codigosFn:codigosDoGrupoFech, grupoElId:'fech-grupo', onChange:()=>renderTabela(),
   });
 }
 
@@ -1390,7 +1417,7 @@ function setupPresetsFech(){
     const range = calcularPreset(tipo, isoLocal(agoraBrasilia()));
     document.getElementById('fech-date-inicio').value = range.inicio;
     document.getElementById('fech-date-fim').value = range.fim;
-    renderTabela(filtrar());
+    renderTabela();
   }
   cont.querySelectorAll('.preset-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>aplicarPreset(btn.dataset.tipo, btn));
@@ -1399,7 +1426,7 @@ function setupPresetsFech(){
   ['fech-date-inicio','fech-date-fim'].forEach(id=>{
     document.getElementById(id).addEventListener('input', ()=>{
       cont.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
-      renderTabela(filtrar());
+      renderTabela();
     });
   });
 }
@@ -2045,16 +2072,32 @@ async function carregarPreferenciaColunasUnidades(){
   try{ localStorage.setItem('fechColunasUnidadesOcultas', JSON.stringify([...UNID_COLUNAS_OCULTAS])); }catch(e){}
 }
 
-// intervalo efetivo desta tabela: o periodo principal (f-date-start/f-date-end),
-// estreitado pelos campos opcionais "de"/"até" deste painel quando preenchidos
+// FILTRO EFETIVO DESTA TABELA. Bug relatado pelo Master (07/09/2026):
+// "quando o filtro da seção Fechamentos é usado ele não funciona se o filtro
+// superior não estiver sempre com um filtro à frente - quero filtrar o mês
+// inteiro na seção Fechamentos pra emitir 1 relatório e tenho que ir no
+// filtro principal primeiro pra colocar mês".
+//
+// A tabela cruzava os DOIS filtros (interseção), então o de baixo só
+// conseguia ESTREITAR o de cima: pedir 01/09→30/09 aqui com "Semana" lá em
+// cima devolvia a semana, calado. Um filtro que só sabe diminuir não é
+// filtro da seção, é um segundo limite escondido.
+//
+// Agora cada campo desta seção MANDA no que ele diz, e o que estiver em
+// branco (ou "Todos") cai no filtro principal - que continua sendo o padrão
+// da tela, já que esta seção nasce toda em branco (ver setupPresetsFech).
+function filtrosEfetivosTabela(){
+  const v = (id)=>document.getElementById(id).value;
+  return {
+    inicio: v('fech-date-inicio') || v('f-date-start'),
+    fim: v('fech-date-fim') || v('f-date-end'),
+    grupo: v('fech-grupo') || v('f-grupo'),
+    unidades: SEL_UNIDADE_FECH.size ? SEL_UNIDADE_FECH : SEL_UNIDADE,
+  };
+}
 function intervaloEfetivoTabela(){
-  let inicio = document.getElementById('f-date-start').value;
-  let fim = document.getElementById('f-date-end').value;
-  const inicioExtra = document.getElementById('fech-date-inicio').value;
-  const fimExtra = document.getElementById('fech-date-fim').value;
-  if(inicioExtra && (!inicio || inicioExtra>inicio)) inicio = inicioExtra;
-  if(fimExtra && (!fim || fimExtra<fim)) fim = fimExtra;
-  return {inicio, fim};
+  const f = filtrosEfetivosTabela();
+  return { inicio: f.inicio, fim: f.fim };
 }
 
 // colunas extras (Canais de venda / Formas de pagamento) que os grupos
@@ -2627,7 +2670,7 @@ function salvarColunas(){
   // limpar o cache) corre em segundo plano; se ela falhar, o aviso aparece
   // mas a escolha ja esta valendo aqui e no espelho local
   fecharSeletorColunas();
-  renderTabela(filtrar());
+  renderTabela();
   persistirColunas();
 }
 
@@ -2692,21 +2735,20 @@ function soltarColunaTabela(ev){
   ORDEM_COLUNAS = completa;
   COL_ARRASTADA = null;
   espelharColunasNoNavegador();
-  renderTabela(filtrar());
+  renderTabela();
   persistirColunas();
 }
 
-function renderTabela(rows){
-  // "rows" ja vem filtrado pelo filtro principal (periodo/grupo/unidades de
-  // cima); aqui aplicamos, POR CIMA, o filtro exclusivo desta tabela
-  // (presets/periodo/grupo/unidades proprios) - o resultado obedece aos DOIS
-  // filtros ao mesmo tempo (intersecao)
-  const {inicio, fim} = intervaloEfetivoTabela();
-  const grupoFech = document.getElementById('fech-grupo').value;
-  const filtradas = rows.filter(d=>
-    (!inicio || (d.data||'')>=inicio) && (!fim || (d.data||'')<=fim) &&
-    (!grupoFech || redeDaUnidade(d.unidade)===grupoFech) &&
-    (SEL_UNIDADE_FECH.size===0 || SEL_UNIDADE_FECH.has(d.unidade))
+function renderTabela(){
+  // parte do conjunto INTEIRO (DATA), não do que o filtro principal já
+  // recortou: é isso que deixa esta seção pedir um período maior que o de
+  // cima (ver filtrosEfetivosTabela). Campo em branco aqui cai no principal,
+  // então sem tocar nesta seção nada muda.
+  const f = filtrosEfetivosTabela();
+  const filtradas = (DATA||[]).filter(d=>
+    (!f.inicio || (d.data||'')>=f.inicio) && (!f.fim || (d.data||'')<=f.fim) &&
+    (!f.grupo || redeDaUnidade(d.unidade)===f.grupo) &&
+    (f.unidades.size===0 || f.unidades.has(d.unidade))
   );
   const ordenadas = [...filtradas].sort((a,b)=>(b.data||'').localeCompare(a.data||''));
   document.getElementById('fechamentos-count').textContent = ordenadas.length;
@@ -3150,17 +3192,18 @@ function render(){
   // renderDiferencaChart(rows); // painel desativado, ver comentario acima da funcao
   renderUnidadesTable(rows);
   renderDiasSemFechamento();
-  renderTabela(rows);
+  renderTabela();
 }
 
-// unidades que passam nos DOIS filtros ao mesmo tempo (principal ∩
-// exclusivo da tabela) - usado pro relatorio, ja que o backend so aceita
-// uma lista de unidades (nao dois grupos/multiselects separados pra cruzar)
+// unidades do filtro EFETIVO desta tabela (ver filtrosEfetivosTabela) - o
+// relatório sai exatamente com o que está na tela. Antes isto cruzava os dois
+// multiselects, e por isso escolher aqui uma loja que o filtro de cima não
+// tinha devolvia relatório vazio.
 function unidadesEfetivasParaRelatorio(){
-  const principal = SEL_UNIDADE.size ? [...SEL_UNIDADE] : codigosDoGrupo();
-  const local = SEL_UNIDADE_FECH.size ? [...SEL_UNIDADE_FECH] : codigosDoGrupoFech();
-  const setLocal = new Set(local);
-  return principal.filter(c=>setLocal.has(c));
+  const f = filtrosEfetivosTabela();
+  if(f.unidades.size) return [...f.unidades];
+  const base = f.grupo ? (GRUPOS[f.grupo]||[]) : Object.keys(UNIDADES_NOMES);
+  return UNIDADES_PERMITIDAS ? base.filter(c=>UNIDADES_PERMITIDAS.has(c)) : base;
 }
 
 // relatorio CSV/PDF do periodo/unidades que estiverem filtrados na tela

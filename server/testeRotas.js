@@ -11075,6 +11075,85 @@ setTimeout(async () => {
   console.log(`${okFichaFech ? '✓' : '✗'} Fechamentos: clicar na linha abre a ficha do dia por seção (caixa, canais, formas, maquininhas, saídas, KPI's, resultado)`);
 
   // ------------------------------------------------------------------
+  // FILTRO DA SEÇÃO FECHAMENTOS. Bug relatado pelo Master (07/09/2026):
+  // "quando o filtro da seção Fechamentos é usado ele não funciona se o filtro
+  // superior não estiver sempre com um filtro à frente - quero filtrar o mês
+  // inteiro na seção Fechamentos pra emitir 1 relatório e tenho que ir no
+  // filtro principal primeiro pra colocar mês".
+  //
+  // A tabela cruzava os DOIS filtros: o de baixo só conseguia ESTREITAR o de
+  // cima, então 01/09→30/09 embaixo com "Semana" em cima devolvia a semana,
+  // calado. Agora cada campo da seção manda no que ele diz; o que está em
+  // branco cai no filtro principal.
+  let okFiltroSecao = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+    const mFn = /function filtrosEfetivosTabela\(\)\{[\s\S]*?\n\}/.exec(html);
+    const mRender = /function renderTabela\(\)\{[\s\S]*?\n\}/.exec(html);
+    const mUnid = /function unidadesEfetivasParaRelatorio\(\)\{[\s\S]*?\n\}/.exec(html);
+    const mEspelho = /function espelharPrincipalNaSecao\(\)\{[\s\S]*?\n\}/.exec(html);
+    // DOM de mentira: só os 5 campos que o filtro lê
+    const campos = {};
+    const doc = { getElementById: (id) => ({ get value() { return campos[id] || ''; } }) };
+    // eslint-disable-next-line no-new-func
+    const fn = mFn ? new Function('document', 'SEL_UNIDADE_FECH', 'SEL_UNIDADE', `${mFn[0]}; return filtrosEfetivosTabela;`) : null;
+    const chamar = (vals, selFech, selPrinc) => {
+      Object.keys(campos).forEach((k) => delete campos[k]);
+      Object.assign(campos, vals);
+      return fn(doc, new Set(selFech || []), new Set(selPrinc || []))();
+    };
+    // o caso dele: mês inteiro embaixo, semana em cima
+    const mesInteiro = chamar({ 'f-date-start': '2026-09-06', 'f-date-end': '2026-09-12', 'fech-date-inicio': '2026-09-01', 'fech-date-fim': '2026-09-30' });
+    // seção em branco: segue o filtro principal (é como a tela nasce)
+    const emBranco = chamar({ 'f-date-start': '2026-09-06', 'f-date-end': '2026-09-12' });
+    // só o "de" preenchido embaixo: o "até" continua vindo de cima
+    const soDe = chamar({ 'f-date-start': '2026-09-06', 'f-date-end': '2026-09-12', 'fech-date-inicio': '2026-09-01' });
+    // grupo e unidades: o da seção manda, "Todos"/vazio cai no principal
+    const grupoSecao = chamar({ 'f-grupo': 'ARCFOOD', 'fech-grupo': 'BRAVO' });
+    const grupoHerdado = chamar({ 'f-grupo': 'ARCFOOD' });
+    const unidSecao = chamar({}, ['19888'], ['19855']);
+    const unidHerdada = chamar({}, [], ['19855']);
+    const conf = {
+      'mês inteiro na seção vale mesmo com a semana no filtro principal (o caso dele)':
+        mesInteiro.inicio === '2026-09-01' && mesInteiro.fim === '2026-09-30',
+      'seção em branco segue o filtro principal (como a tela nasce)': emBranco.inicio === '2026-09-06' && emBranco.fim === '2026-09-12',
+      'campo a campo: só o "de" preenchido embaixo mantém o "até" de cima': soDe.inicio === '2026-09-01' && soDe.fim === '2026-09-12',
+      'o grupo da seção manda; "Todos" cai no principal': grupoSecao.grupo === 'BRAVO' && grupoHerdado.grupo === 'ARCFOOD',
+      'as unidades da seção mandam; nenhuma escolhida cai nas do principal':
+        [...unidSecao.unidades].join(',') === '19888' && [...unidHerdada.unidades].join(',') === '19855',
+      // a tabela precisa partir do conjunto inteiro, senao o filtro de cima
+      // ja teria recortado antes e a secao continuaria so estreitando
+      'a tabela parte de DATA (o conjunto inteiro), não do que o filtro principal já recortou':
+        !!mRender && /\(DATA\|\|\[\]\)\.filter/.test(mRender[0]) && /const f = filtrosEfetivosTabela\(\);/.test(mRender[0])
+        && !/function renderTabela\(rows\)/.test(html),
+      'o relatório CSV/PDF sai com o mesmo filtro da tela (não cruza os dois multiselects)':
+        !!mUnid && /const f = filtrosEfetivosTabela\(\);/.test(mUnid[0]) && !/principal\.filter\(c=>setLocal\.has\(c\)\)/.test(html),
+      'o intervalo do relatório vem do mesmo lugar da tabela':
+        /function intervaloEfetivoTabela\(\)\{\s*const f = filtrosEfetivosTabela\(\);/.test(html),
+      // ÚLTIMO CLIQUE MANDA: mexer no filtro de cima espelha no de baixo, pra
+      // a seção acompanhar quando ele foi o último a mudar
+      'mexer no filtro principal espelha período, grupo e unidades na seção':
+        !!mEspelho && /fech-date-inicio'\)\.value = v\('f-date-start'\)/.test(mEspelho[0])
+        && /fech-date-fim'\)\.value = v\('f-date-end'\)/.test(mEspelho[0])
+        && /fech-grupo'\)\.value = v\('f-grupo'\)/.test(mEspelho[0])
+        && /SEL_UNIDADE_FECH\.clear\(\);\s*SEL_UNIDADE\.forEach/.test(mEspelho[0]),
+      'o preset aceso embaixo acompanha o de cima (e apaga no intervalo livre)':
+        !!mEspelho && /classList\.toggle\('active', b\.dataset\.tipo===presetAtivo\)/.test(mEspelho[0]),
+      'os três caminhos do filtro principal espelham: preset, data digitada e unidades/grupo':
+        (html.match(/renderEspelhando\(\)/g) || []).length >= 2 && /onChange:renderEspelhando/.test(html)
+        && /function renderEspelhando\(\)\{ espelharPrincipalNaSecao\(\); render\(\); \}/.test(html),
+      'a seção redesenha o próprio seletor de unidades depois do espelho':
+        /return renderPanel;/.test(html) && /redesenharUnidadesFech = criarMultiselectUnidade\(\{/.test(html)
+        && !!mEspelho && /if\(redesenharUnidadesFech\) redesenharUnidadesFech\(\);/.test(mEspelho[0]),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okFiltroSecao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (mes=${JSON.stringify(mesInteiro)} branco=${JSON.stringify(emBranco)} soDe=${JSON.stringify(soDe)})`);
+  } catch (e) { okFiltroSecao = false; console.log('  erro: ' + e.message); }
+  if (!okFiltroSecao) ruins += 1;
+  console.log(`${okFiltroSecao ? '✓' : '✗'} Fechamentos: vale o último clique - a seção pode pedir período maior que o principal, e mexer no principal a faz acompanhar`);
+
+  // ------------------------------------------------------------------
   // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o
   // AnyDesk cai, o acesso remoto some e a unica saida era reiniciar o
   // computador inteiro - o que derruba o caixa junto, por causa de um
