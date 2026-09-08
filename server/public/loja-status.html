@@ -1076,6 +1076,12 @@ function atualizarConteudoDetalhe(codigo, c){
   // que serve pra acesso remoto no dia a dia (pedido explicito do usuario)
   if(c.ipLocal) infoBits.push(`🏠 IP local: <b>${escapeHtml(c.ipLocal)}</b> <button type="button" class="btn-copiar-ip" title="Copiar IP local" onclick="copiarIpLocal('${escapeJs(c.ipLocal)}')">📋</button>`);
   if(c.ip) infoBits.push(`🌐 IP público: ${escapeHtml(c.ip)}`);
+  if(c.tailscale){
+    const t = c.tailscale;
+    const estado = t.instalado ? (t.estado === 'Running' ? '<b style="color:var(--ok);">conectado</b>' : `<b style="color:var(--warn,#e0a800);">${escapeHtml(t.estado||'desconhecido')}</b>`) : '<span style="color:var(--muted);">não instalado</span>';
+    const extras = [t.ip ? `IP ${escapeHtml(t.ip)}` : null, t.nome ? escapeHtml(t.nome) : null, t.versao ? `v${escapeHtml(t.versao)}` : null].filter(Boolean).join(' · ');
+    infoBits.push(`🔒 Tailscale: ${estado}${extras ? ` · <span style="font-size:11px;">${extras}</span>` : ''}`);
+  }
   const disp = resumoDispositivo(c.userAgent);
   if(disp) infoBits.push(`💻 ${escapeHtml(disp)}`);
   if(c.abertoDesde) infoBits.push(`⏱️ aberto ${escapeHtml(tempoRelativo(c.abertoDesde))}`);

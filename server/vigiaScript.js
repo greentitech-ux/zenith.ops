@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 22;
+const VERSAO_VIGIA = 23;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -883,6 +883,23 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '    $script:UltimoBeatOkEm = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
     '  } catch {}',
     '}',
+    '',
+    '# Inventário leve do Tailscale para o piloto do NOC-NoPulso. Não instala,',
+    '# não autentica e não altera a VPN: só consulta o cliente local se ele já',
+    '# existir. A consulta é espaçada para não pesar no heartbeat.',
+    '$Tailscale = $null',
+    '$ProximaLeituraTailscaleEm = 0',
+    'function Ler-Tailscale {',
+    '  try {',
+    '    $cmd = Get-Command tailscale.exe -ErrorAction SilentlyContinue',
+    '    if (-not $cmd) { return @{ instalado = $false } }',
+    '    $raw = & $cmd.Source status --json 2>$null',
+    '    if (-not $raw) { return @{ instalado = $true; estado = "desconhecido" } }',
+    '    $s = $raw | ConvertFrom-Json',
+    '    $ips = @($s.Self.TailscaleIPs)',
+    '    return @{ instalado = $true; estado = [string]$s.BackendState; ip = if ($ips.Count) { [string]$ips[0] } else { $null }; nome = [string]$s.Self.DNSName; versao = [string]$s.Version }',
+    '  } catch { return @{ instalado = $true; estado = "erro" } }',
+    '}',
     '# quanto tempo o tick pode ter comido antes de valer a pena bater de novo.',
     '# 45s = metade do limiar de 90s do NOC: sobra folga pra proxima batida',
     '# normal atrasar tambem sem a maquina piscar no painel.',
@@ -921,12 +938,14 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '      # nos 12 beats seguintes e pesaria 12x na media do dia.',
     '      $UltimaLatenciaMs = $null',
     '      $DiagRede = @{}',
+    '      if ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge $ProximaLeituraTailscaleEm) { $Tailscale = Ler-Tailscale; $ProximaLeituraTailscaleEm = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + (10 * 60 * 1000) }',
     '      $corpo = @{ unidade = "' + codigoTextoPS + '"; posto = "' + posto + '"; userAgent = "NOCZenith/1.0 (Windows NT; PowerShell)"; abertoDesde = $InicioScript; rede = $rede }',
     '      # boot vai em TODA batida (e uma variavel ja lida, custo zero) - e o',
     '      # que deixa o servidor separar "reiniciou" de "so caiu a rede"',
     '      if ($BootEm -ne $null) { $corpo.bootEm = $BootEm; $corpo.desligamentoInesperado = $DesligamentoInesperado }',
     '      if ($Link -ne $null) { $corpo.link = $Link }',
     '      if ($AnyDeskSvc -ne $null) { $corpo.anydeskServico = $AnyDeskSvc }',
+    '      if ($Tailscale -ne $null) { $corpo.tailscale = $Tailscale }',
     '      $corpo = $corpo | ConvertTo-Json -Depth 4',
     '      $cronometro = [Diagnostics.Stopwatch]::StartNew()',
     // UMA batida perdida virava 25s de silencio, e o NOC corta em 90s: tres
