@@ -33,6 +33,7 @@
   const MENU = [
     { itens: [
       { id: 'nav-painel', href: '/painel.html', icone: '🏠', rotulo: 'Painel' },
+      { id: 'nav-tarefas', href: '/tarefas.html', icone: '✅', rotulo: 'Meu Dia' },
     ] },
     { grupo: 'Operação diária', itens: [
       // /lancamento.html serve DUAS coisas: quem tem 'lancamento' cai no

@@ -237,7 +237,7 @@ async function vincularChamado(id, chamadoId) {
 // Pedido do usuario: ao assumir uma conversa (botao "Assumir atendimento"
 // ou simplesmente respondendo nela), o visitante recebe na hora uma
 // mensagem institucional de apresentação: saudação pelo horário de Brasília
-// + nome de quem pediu. O visitante conversa com "Suporte NoPulso", nunca
+// + nome de quem pediu. O visitante conversa com "Suporte", nunca
 // com o nome, e-mail ou papel interno de quem assumiu o caso.
 function saudacaoPorHorario(agora = new Date()) {
   const hora = Number(new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false }).format(agora));
@@ -248,7 +248,17 @@ function saudacaoPorHorario(agora = new Date()) {
 }
 function mensagemAssumir(nomeVisitante) {
   const nome = String(nomeVisitante || '').trim() || 'cliente';
-  return `${saudacaoPorHorario()}, ${nome}! O Suporte NoPulso seguirá com o seu atendimento.`;
+  return `${saudacaoPorHorario()}, ${nome}! O Suporte assumiu seu atendimento e acompanhará sua solicitação.`;
+}
+function mensagemNumeroTicket(numeroTicket, assunto) {
+  const orientacaoPorAssunto = {
+    'Computador/Sistema': 'Vamos analisar o ocorrido e seguir com o atendimento técnico.',
+    'Acesso/Senha': 'Vamos verificar seu acesso e orientar os próximos passos.',
+    'Financeiro/Estorno': 'Vamos conferir a situação informada e orientar a solução.',
+    Outro: 'Vamos analisar sua solicitação e retornar com uma atualização.',
+  };
+  const orientacao = orientacaoPorAssunto[assunto] || orientacaoPorAssunto.Outro;
+  return `${orientacao} Seu protocolo é #${numeroTicket}. Guarde este número para acompanhamento.`;
 }
 
 async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino, motivoSemSolucao, autor } = {}) {
@@ -289,10 +299,20 @@ async function atualizarStatusAtendimento(id, { statusAtendimento, nivelDestino,
     && chat.status === 'ABERTO'
     && (!chat.responsavel || chat.responsavel.email !== autor.email);
   if (assumiuNovo) {
-    patch.mensagens = [...(chat.mensagens || []), {
+    const mensagensAutomaticas = [{
       de: 'suporte', em: agora, autorEmail: autor.email || null, automatica: true,
       texto: mensagemAssumir(chat.nome),
     }];
+    // O número sai uma única vez, no primeiro atendimento humano. Como esta
+    // regra vive aqui, tanto o botão "Assumir" quanto responder direto seguem
+    // o mesmo roteiro, sem "Olá" repetindo a saudação anterior.
+    if (chat.statusAtendimento === 'PENDENTE' && chat.numeroTicket) {
+      mensagensAutomaticas.push({
+        de: 'suporte', em: agora, autorEmail: autor.email || null, automatica: true,
+        texto: mensagemNumeroTicket(chat.numeroTicket, chat.assunto),
+      });
+    }
+    patch.mensagens = [...(chat.mensagens || []), ...mensagensAutomaticas];
     // humano assumiu: o bot sai de cena daqui em diante (mesmo efeito de
     // uma resposta humana em adicionarMensagem)
     if (!chat.atendidoPorEmail) patch.atendidoPorEmail = autor.email || null;
@@ -587,5 +607,5 @@ module.exports = {
   criar, getOne, getPublico, getComToken, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll, ASSUNTOS,
   atualizarStatusAtendimento, marcarDesbloqueio, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
   listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna, estatisticas,
-  saudacaoPorHorario, ehNomeFeminino, mensagemAssumir,
+  saudacaoPorHorario, mensagemAssumir, mensagemNumeroTicket,
 };
