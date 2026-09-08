@@ -2009,6 +2009,16 @@ async function abrirDetalheFuncionario(id){
   const ck = CONTAGEM_CHECKINS[f.id]||{};
   const ckHtml = `<div class="sub">📸 ${ck.total||0} check-in${ck.total===1?'':'s'} no total · ${ck.semana||0} nesta semana</div>`;
 
+  // A foto vem da primeira entrada de Extra/candidato ou de uma troca manual
+  // do Master. O arquivo continua protegido pela mesma rota autenticada do RH.
+  const fotoCadastroUrl = `/api/rh/funcionarios/${encodeURIComponent(f.id)}/foto-cadastro?token=${encodeURIComponent(AUTH_TOKEN)}`;
+  const fotoCadastro = f.fotoCadastro
+    ? `<div style="display:flex;gap:10px;align-items:center;"><a href="${fotoCadastroUrl}" target="_blank" rel="noopener"><img src="${fotoCadastroUrl}" alt="Foto de cadastro de ${esc(f.nome)}" style="width:76px;height:76px;border-radius:10px;object-fit:cover;border:1px solid var(--line);"></a><div class="sub">${f.fotoCadastro.origem==='primeiro_checkin'?'📸 primeira foto de check-in':'📷 foto atualizada manualmente'}${f.fotoCadastro.em?` · ${fmtDataHora(f.fotoCadastro.em)}`:''}<br><a class="link-btn" href="${fotoCadastroUrl}" target="_blank" rel="noopener">abrir foto</a></div></div>`
+    : '<div class="sub" style="color:var(--muted)">a foto será incluída automaticamente no primeiro check-in.</div>';
+  const acaoTrocarFoto = IS_MASTER
+    ? `<label class="btn-secundario" style="display:inline-block;margin-top:8px;cursor:pointer;">📷 ${f.fotoCadastro?'trocar foto':'enviar foto'}<input type="file" accept="image/*" style="display:none" onchange="trocarFotoCadastro('${f.id}', this)"></label>`
+    : '';
+
   const curriculo = f.curriculo ? `<a class="link-btn" href="/api/rh/funcionarios/${f.id}/curriculo?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank" rel="noopener">📄 ver currículo</a>` : '<div class="sub" style="color:var(--muted)">sem currículo anexado.</div>';
 
   // o link de auto-atendimento entra aqui também: esta é a tela que a pessoa
@@ -2030,10 +2040,25 @@ async function abrirDetalheFuncionario(id){
     ${secao('🩺 Atestados', atestFinal)}
     ${secao('📋 Advertências', advsHtml)}
     ${secao('📸 Check-ins', ckHtml)}
+    ${secao('🖼️ Foto de cadastro', fotoCadastro + acaoTrocarFoto)}
     ${secao('🪪 Documento de identidade', docIdentidadeHtml(f))}
     ${secao('📄 Currículo', curriculo)}
     ${acoesHtml}
   `;
+}
+async function trocarFotoCadastro(id, input){
+  const foto = input && input.files && input.files[0];
+  if(!foto) return;
+  if(!foto.type.startsWith('image/')){ alert('Escolha uma imagem.'); input.value=''; return; }
+  if(foto.size > 10*1024*1024){ alert('A foto deve ter no máximo 10 MB.'); input.value=''; return; }
+  const fd = new FormData(); fd.append('foto', foto);
+  try{
+    const resp = await fetch(`/api/rh/funcionarios/${encodeURIComponent(id)}/foto-cadastro`, {method:'POST', body:fd});
+    const d = await resp.json();
+    if(!resp.ok) throw new Error(d.error||'Não foi possível trocar a foto.');
+    const pos = TODOS.findIndex(f=>f.id===id); if(pos>=0) TODOS[pos]=d;
+    abrirDetalheFuncionario(id);
+  }catch(err){ alert(err.message); input.value=''; }
 }
 function fecharDetalheFuncionario(){ document.getElementById('overlay-funcionario-detalhe').classList.add('hidden'); }
 

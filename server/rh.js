@@ -405,6 +405,43 @@ async function atualizar(id, patch) {
   return getOne(id);
 }
 
+// A primeira foto de entrada já é uma evidência operacional de identificação.
+// Para Extra e candidato em teste ela também vira a foto da ficha, apontando
+// para o mesmo arquivo do check-in (sem upload duplicado). Nunca substitui uma
+// foto que já exista, especialmente uma escolhida manualmente pelo Master.
+async function definirFotoCadastroDoPrimeiroCheckin(id, foto) {
+  if (!foto || !foto.path) return null;
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+  const atual = snap.data();
+  if (!['extra', 'candidato'].includes(atual.tipoCadastro) || atual.fotoCadastro) return atual;
+  const agora = new Date().toISOString();
+  const fotoCadastro = {
+    path: String(foto.path), tipo: String(foto.tipo || 'image/jpeg'),
+    origem: 'primeiro_checkin', em: agora,
+  };
+  await ref.update({ fotoCadastro, atualizadoEm: agora });
+  rhCache.invalidar();
+  return { ...atual, fotoCadastro, atualizadoEm: agora };
+}
+
+async function trocarFotoCadastro(id, foto, porEmail) {
+  if (!foto || !foto.path) throw new Error('Escolha uma imagem para a foto de cadastro.');
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  const atual = snap.data();
+  const agora = new Date().toISOString();
+  const fotoCadastro = {
+    path: String(foto.path), tipo: String(foto.tipo || 'image/jpeg'),
+    origem: 'troca_manual', em: agora, trocadoPorEmail: porEmail || null,
+  };
+  await ref.update({ fotoCadastro, atualizadoEm: agora });
+  rhCache.invalidar();
+  return { ...atual, fotoCadastro, atualizadoEm: agora };
+}
+
 // marca que essa pessoa (gerente/assistente de gerente, normalmente) NÃO
 // entra na divisão de colaboradores da Bonificação (ver
 // bonificacao.js/funcionariosAtivosDaUnidade) - ela já é remunerada pela
@@ -1100,7 +1137,7 @@ async function metricas() {
 module.exports = {
   DIAS_TESTE_ALERTA, TIPOS_CADASTRO, ALERTA_EXPERIENCIA_DIAS,
   DOCUMENTOS_TIPOS, DOCUMENTOS_OBRIGATORIOS, DOCUMENTOS_LABEL,
-  criar, listAll, listByUnidades, getOne, atualizar, remover, mesclarDuplicados,
+  criar, listAll, listByUnidades, getOne, atualizar, definirFotoCadastroDoPrimeiroCheckin, trocarFotoCadastro, remover, mesclarDuplicados,
   desligar, reativar, registrarExamePeriodico, adicionarDocumento, removerDocumento,
   situacaoLegal, tempoDeCasaMeses, tempoDeCasaTexto, alertasTrabalhistas, metricas,
   buscarPorToken, regenerarLink, atualizarExcluirBonificacao,
