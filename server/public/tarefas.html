@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Meu Dia · NoPulso</title><link rel="stylesheet" href="/style.css">
+<style>
+main{max-width:1040px;margin:0 auto;padding:24px 16px 56px}.topo{display:flex;justify-content:space-between;gap:16px;align-items:end;flex-wrap:wrap}.sub{color:var(--muted);font-size:12px}.resumo{display:flex;gap:8px;flex-wrap:wrap}.chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:7px 10px;font-size:12px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:22px}.coluna{background:var(--panel);border:1px solid var(--line);border-radius:12px;min-height:190px;padding:12px}.coluna h2{font-size:13px;margin:0 0 10px}.tarefa{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:11px;margin:8px 0}.tarefa b{font-size:13px;display:block}.meta{font-size:11px;color:var(--muted);margin-top:6px}.acoes{display:flex;gap:7px;margin-top:10px}.acoes button,.acoes a{font:inherit;font-size:12px;border-radius:7px;padding:7px 9px;text-decoration:none;cursor:pointer}.concluir{border:0;background:var(--accent);color:#101508;font-weight:700}.abrir{border:1px solid var(--line);color:var(--text)}.vazio{font-size:12px;color:var(--muted);padding:18px 2px}@media(max-width:720px){.grid{grid-template-columns:1fr}}
+</style></head><body>
+<button class="hamburger-btn" id="btn-menu" aria-label="Menu">☰</button><main>
+<div class="topo"><div><div class="sub" id="data"></div><h1 id="titulo">Meu Dia</h1><div class="sub">Tarefas pessoais e tickets atribuídos a você.</div></div><div class="resumo" id="resumo"></div></div>
+<div class="grid"><section class="coluna"><h2>Hoje</h2><div id="pendentes"></div></section><section class="coluna"><h2>Em andamento</h2><div id="andamento"></div></section><section class="coluna"><h2>Concluídas</h2><div id="concluidas"></div></section></div>
+</main><script src="/tema.js"></script><script>
+let AUTH_TOKEN = localStorage.getItem('authToken') || null;
+if(!AUTH_TOKEN){ location.href = '/'; }
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  if (typeof url === 'string' && url.startsWith('/api/') && AUTH_TOKEN) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + AUTH_TOKEN } };
+  }
+  return _rawFetch(url, opts).then((res) => { if (res.status === 401) { localStorage.removeItem('authToken'); location.href = '/'; } return res; });
+};
+const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+let tarefas=[];
+function card(t){const ticket=t.vinculo?.numeroTicket?`Ticket #${t.vinculo.numeroTicket}`:'Tarefa';const link=t.vinculo?.id?`/central-historico.html?tipo=${encodeURIComponent(t.vinculo.ticketTipo||'')}&id=${encodeURIComponent(t.vinculo.id)}`:'';return `<article class="tarefa"><b>${esc(t.titulo)}</b><div class="meta">${ticket}${t.unidadeNome?' · '+esc(t.unidadeNome):''}</div><div class="acoes">${t.status!=='CONCLUIDA'?`<button class="concluir" onclick="concluir('${t.id}')">✓ Concluir</button>`:''}${link?`<a class="abrir" href="${link}">Abrir ticket</a>`:''}</div></article>`}
+function preencher(id,lista){document.getElementById(id).innerHTML=lista.length?lista.map(card).join(''):'<div class="vazio">Nenhuma tarefa aqui.</div>'}
+function render(){const p=tarefas.filter(t=>t.status==='PENDENTE'),a=tarefas.filter(t=>t.status==='EM_ANDAMENTO'),c=tarefas.filter(t=>t.status==='CONCLUIDA');preencher('pendentes',p);preencher('andamento',a);preencher('concluidas',c);document.getElementById('resumo').innerHTML=`<span class="chip">${p.length+a.length} pendente(s)</span><span class="chip">${c.length} concluída(s)</span>`}
+async function carregar(){const [me,r]=await Promise.all([fetch('/api/me').then(x=>x.json()),fetch('/api/tarefas/minhas')]);if(!r.ok)throw new Error('Não foi possível carregar as tarefas.');tarefas=await r.json();document.getElementById('titulo').textContent=`Meu Dia${me.username?', '+me.username:''}`;document.getElementById('data').textContent=new Intl.DateTimeFormat('pt-BR',{dateStyle:'full'}).format(new Date());render()}
+async function concluir(id){if(!confirm('Concluir esta tarefa? O ticket vinculado aprovado será marcado como finalizado.'))return;const r=await fetch('/api/tarefas/'+encodeURIComponent(id)+'/concluir',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const d=await r.json();if(!r.ok){alert(d.error||'Não foi possível concluir.');return}await carregar()}
+carregar().catch(e=>alert(e.message));
+</script><script src="/recolher.js"></script><script src="/nav-menu.js"></script></body></html>

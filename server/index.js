@@ -47,6 +47,7 @@ const ifoodClient = require('./ifoodClient');
 const ifoodStore = require('./ifoodStore');
 const ifoodSync = require('./ifoodSync');
 const solicitacoes = require('./solicitacoes');
+const tarefas = require('./tarefas');
 const acessosPessoa = require('./acessosPessoa');
 const formularios = require('./formularios');
 const formulariosUnidades = require('./formulariosUnidades');
@@ -4245,6 +4246,7 @@ app.post('/api/refund-requests', requireSection('monitor'), async (req, res) => 
     });
     broadcast('refund-requested', registro, 'monitor');
     broadcast('refund-requested', registro, 'solicitacoes');
+    await sincronizarTarefasDoTicket(registro, 'estorno');
     push.notifySolicitacao(`Ticket #${registro.numeroTicket} · Pedido de estorno`, `${req.user.email} · ${unidade || ''}`, registro.id);
     notificarSeDirecionadoAoMV('estorno', registro);
     res.json(registro);
@@ -4279,6 +4281,7 @@ app.patch('/api/refund-requests/:id/direcionar', auth.requireMaster, async (req,
   try {
     if (tipoBloqueado(req, 'estorno')) return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
     const registro = await refunds.redirecionar(req.params.id, req.body);
+    await sincronizarTarefasDoTicket(registro, 'estorno');
     broadcast('refund-request-changed', registro, 'monitor');
     notificarSeDirecionadoAoMV('estorno', registro);
     res.json(registro);
@@ -9033,6 +9036,51 @@ app.get('/api/compras/acompanhamento', requireSection('solicitacoes'), async (re
   }
 });
 
+// ----- Meu Dia: tarefas pessoais e vínculo seguro com tickets -----
+// A sincronização é chamada nos dois caminhos que podem atribuir um ticket:
+// criação e redirecionamento. Ela só cria tarefa para Master ou quem possui
+// a seção Suporte; demais responsáveis continuam usando o fluxo normal.
+async function sincronizarTarefasDoTicket(ticket, tipo = 'solicitacao') {
+  return tarefas.sincronizarTicket(ticket, await users.list(), tipo);
+}
+
+app.get('/api/tarefas/minhas', auth.requireAuth, async (req, res) => {
+  try {
+    res.json(await tarefas.listarMinhas({ usuarioId: req.user.id, isMaster: req.isMaster }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/tarefas/:id/concluir', auth.requireAuth, async (req, res) => {
+  try {
+    const tarefa = await tarefas.getOne(req.params.id);
+    if (!tarefa) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    if (tarefa.responsavelId !== req.user.id && !req.isMaster) return res.status(403).json({ error: 'Essa tarefa pertence a outro responsável.' });
+    // Concluir tarefa NUNCA decide/aprova um ticket. Só encerra a execução
+    // depois de aprovado; adiantamentos mantêm a prestação de contas própria.
+    if (tarefa.vinculo?.tipo === 'solicitacao') {
+      const ticket = await solicitacoes.getOne(tarefa.vinculo.id);
+      if (!ticket) return res.status(404).json({ error: 'O ticket vinculado não foi encontrado.' });
+      if (ticket.status !== 'APROVADO') return res.status(409).json({ error: 'Esse ticket ainda precisa ser aprovado antes de concluir a tarefa.' });
+      if (ticket.tipo === 'adiantamento') return res.status(409).json({ error: 'Adiantamento só finaliza após a prestação de contas (nota e valor gasto).' });
+      if (ticket.execucaoStatus !== 'FINALIZADO') {
+        await solicitacoes.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.email });
+      }
+      broadcast('solicitacao-decidida', await solicitacoes.getOne(ticket.id), 'solicitacoes');
+    } else if (tarefa.vinculo?.tipo === 'estorno') {
+      const ticket = await refunds.getOne(tarefa.vinculo.id);
+      if (!ticket) return res.status(404).json({ error: 'O ticket vinculado não foi encontrado.' });
+      if (ticket.status !== 'APROVADO') return res.status(409).json({ error: 'Esse ticket ainda precisa ser aprovado antes de concluir a tarefa.' });
+      if (ticket.execucaoStatus !== 'FINALIZADO') await refunds.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.email });
+      broadcast('refund-request-changed', await refunds.getOne(ticket.id), 'monitor');
+    }
+    res.json(await tarefas.concluir(req.params.id, { usuarioId: req.user.id, isMaster: req.isMaster, observacao: req.body?.observacao }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // so que pra pedidos que nao tem uma secao propria ja existente. Aprovar um
 // pedido de Suporte de TI ja cria o Chamado (ver chamadosTI.js) ----------
 app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anexos', 4), async (req, res) => {
@@ -9072,6 +9120,7 @@ app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anex
       nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista,
     });
     broadcast('solicitacao-criada', registro, 'solicitacoes');
+    await sincronizarTarefasDoTicket(registro);
     push.notifySolicitacao(`Ticket #${registro.numeroTicket} · Nova solicitação`, `${req.user.email} · ${registro.titulo || tipo || ''}`, registro.id);
     notificarSeDirecionadoAoMV(registro.tipo, registro);
     res.json(registro);
@@ -9382,6 +9431,7 @@ app.patch('/api/solicitacoes/:id/direcionar', auth.requireMaster, async (req, re
     if (!atual) return res.status(404).json({ error: 'Solicitação não encontrada.' });
     if (tipoBloqueado(req, atual.tipo)) return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
     const registro = await solicitacoes.redirecionar(req.params.id, req.body);
+    await sincronizarTarefasDoTicket(registro);
     broadcast('solicitacao-decidida', registro, 'solicitacoes');
     notificarSeDirecionadoAoMV(registro.tipo, registro);
     res.json(registro);
