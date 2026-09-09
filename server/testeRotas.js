@@ -11227,6 +11227,81 @@ setTimeout(async () => {
   console.log(`${okFiltroSecao ? '✓' : '✗'} Fechamentos: vale o último clique - a seção pode pedir período maior que o principal, e mexer no principal a faz acompanhar`);
 
   // ------------------------------------------------------------------
+  // SESSÃO REMOTA x SERVIÇO CONECTADO. Pergunta do Master (09/09/2026):
+  // "conseguimos fazer com que esse tipo de conexão que não é uma pessoa se
+  // conectando de fato apareça quando realmente alguma conexão for
+  // estabelecida?". Ele viu 20 linhas de "Acesso remoto · TeamViewer" numa
+  // tarde, de 20 em 20 minutos, todas pra endereço da própria TeamViewer - era
+  // o serviço se anunciando pra nuvem, não gente entrando.
+  //
+  // Conexão TCP não separa os dois. Quem separa é o LOG DE SESSÃO da própria
+  // ferramenta, que só escreve quando alguém entra.
+  let okSessaoRemota = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const vg = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const cabS = { Authorization: 'Bearer ' + token };
+    await postarJson('/api/loja-status/SESSAO_TESTE/computadores', { nome: 'PC Sessao', tipo: 'interno' }, cabS);
+    const detalhe = async (u) => { const d = JSON.parse((await pedir(`/api/loja-status/${u}/computadores/principal/detalhe`, cabS)).corpo); return d; };
+    const rota = `/api/loja-status/SESSAO_TESTE/computadores/principal/acesso-remoto`;
+    // o batimento de nuvem: mesmo detalhe duas vezes seguidas vira UM evento
+    await postarJson(rota, { detalhe: 'TeamViewer (20.206.176.18:443)' }, {});
+    await postarJson(rota, { detalhe: 'TeamViewer (20.206.176.18:443)' }, {});
+    // uma sessão de verdade, vinda do log da ferramenta
+    await postarJson(rota, { detalhe: 'TeamViewer · Sidney · 08/09 22:31 ate 22:44', sessao: true }, {});
+    // e outra igualzinha logo depois: são dois acessos, não repetição
+    await postarJson(rota, { detalhe: 'TeamViewer · Sidney · 08/09 22:31 ate 22:44', sessao: true }, {});
+    // o caso que separa as duas travas: um batimento e, logo depois, uma
+    // SESSÃO com o MESMO texto. O filtro de repetição é só do batimento - se
+    // pegasse a sessão, o acesso de verdade sumiria por parecer com o ruído
+    await postarJson(rota, { detalhe: 'AnyDesk (203.0.113.5:7070)' }, {});
+    await postarJson(rota, { detalhe: 'AnyDesk (203.0.113.5:7070)', sessao: true }, {});
+    const det = await detalhe('SESSAO_TESTE');
+    const evs = (det.eventos || []).filter((e) => e.tipo === 'acesso-remoto' || e.tipo === 'sessao-remota');
+    const script = vg.montarScriptVigia({ codigo: '19821', posto: 'principal', tipo: 'interno', agentToken: 'tok' });
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const iSessao = script.indexOf('function Verificar-SessaoRemota');
+    const iConex = script.indexOf('function Verificar-AcessoRemoto');
+    const conf = {
+      'batimento de nuvem repetido continua virando um evento só': evs.filter((e) => e.tipo === 'acesso-remoto').length === 2,
+      'duas sessões iguais são dois eventos (dois acessos, não repetição)': evs.filter((e) => e.tipo === 'sessao-remota').length === 3,
+      'sessão com o mesmo texto de um batimento anterior NÃO é engolida pelo filtro de repetição':
+        evs[evs.length - 1].tipo === 'sessao-remota' && /AnyDesk/.test(evs[evs.length - 1].detalhe),
+      // carimbo próprio: o card sabe dizer quando foi a última SESSÃO, sem
+      // depender de vasculhar o histórico atrás dela no meio dos batimentos
+      'a sessão fica com o próprio carimbo no computador, sempre a mais recente':
+        !!det.ultimaSessaoRemotaEm && det.ultimaSessaoRemotaDetalhe === 'AnyDesk (203.0.113.5:7070)',
+      // o agente: le o log da ferramenta, e desliga o palpite so onde le
+      'o agente lê o Connections_incoming.txt do TeamViewer':
+        iSessao > 0 && /Connections_incoming\.txt/.test(script) && /Get-Content -Path \$tv -Tail 40/.test(script),
+      'o alerta por conexão é desligado só pra ferramenta cujo log é lido':
+        /\$FerramentasComLog\.Add\("TeamViewer"\)/.test(script) && /\$FerramentasComLog\.Add\("TeamViewer_Service"\)/.test(script)
+        && /if \(\$FerramentasComLog\.Contains\(\$nomeProc\)\) \{ continue \}/.test(script)
+        // AnyDesk continua no palpite de proposito: o trace muda entre versoes
+        && !/\$FerramentasComLog\.Add\("AnyDesk"\)/.test(script) && /ad_svc\.trace/.test(script),
+      'a primeira varredura só marca o que já estava no log (reinício não reporta sessão velha)':
+        /\$PrimeiraVarreduraSessao = \$true/.test(script) && /if \(\$PrimeiraVarreduraSessao\) \{ continue \}/.test(script)
+        && /\$script:PrimeiraVarreduraSessao = \$false/.test(script),
+      'o log é lido ANTES da checagem por conexão (senão a lista de exceção chega vazia)': iSessao > 0 && iSessao < iConex
+        && script.indexOf('try { Verificar-SessaoRemota }') < script.indexOf('try { Verificar-AcessoRemoto }'),
+      'a versão do vigia subiu, senão as 52 máquinas não baixam a versão nova': vg.VERSAO_VIGIA >= 23,
+      'o script continua começando com # NOCZenith (a trava do download)': script.startsWith('# NOCZenith'),
+      // o push: so sessao toca o celular do Master
+      'só a sessão vira push; o serviço conectado nunca mais toca o celular':
+        /if \(ehSessao && await lojaStatus\.pushAcessoRemotoAtivo\(\)\)/.test(srcIdx),
+      'a tela separa as duas linhas, e só a sessão é vermelha':
+        /ev\.tipo==='sessao-remota'/.test(html) && /🔓 Sessão remota/.test(html) && /ev-dot bad"><\/span><b>🔓 Sessão remota/.test(html)
+        && /<b>Serviço de acesso remoto ligado<\/b>/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okSessaoRemota = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (eventos=${JSON.stringify(evs.map((e) => e.tipo))})`);
+  } catch (e) { okSessaoRemota = false; console.log('  erro: ' + e.message); }
+  if (!okSessaoRemota) ruins += 1;
+  console.log(`${okSessaoRemota ? '✓' : '✗'} NOC: sessão remota (alguém entrou, lida do log da ferramenta) separada do serviço só conectado`);
+
+  // ------------------------------------------------------------------
   // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o
   // AnyDesk cai, o acesso remoto some e a unica saida era reiniciar o
   // computador inteiro - o que derruba o caixa junto, por causa de um

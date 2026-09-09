@@ -1242,7 +1242,28 @@ async function registrarTelemetria(codigo, posto, dados, token) {
 // Master (ver POST .../acesso-remoto em index.js + push.notifyAcessoRemotoDetectado),
 // disparado toda vez que essa funcao roda, nao so na primeira. "detalhe" e
 // texto livre tipo "AnyDesk (203.0.113.5:7070)", montado pelo proprio script
-async function registrarAcessoRemoto(codigo, posto, detalhe, token) {
+// SESSÃO x SERVIÇO CONECTADO. Pergunta do Master (09/09/2026): "conseguimos
+// fazer com que esse tipo de conexão que não é uma pessoa se conectando de
+// fato apareça quando realmente alguma conexão for estabelecida?".
+//
+// O que ele viu: 20 linhas de "Acesso remoto · TeamViewer" num fim de tarde,
+// de 20 em 20 minutos, todas pra 20.206.176.18:443 e 5938 - endereços da
+// própria TeamViewer. Não era ninguém entrando: era o serviço se anunciando
+// pra nuvem dele. A checagem antiga olha conexão TCP estabelecida, e serviço
+// parado e pessoa controlando a máquina parecem iguais por essa lente (foi
+// por isso que Splashtop/LogMeIn/GoToMyPC já tinham saído da lista).
+//
+// O sinal que separa os dois é o LOG DE SESSÃO da própria ferramenta, que só
+// escreve quando alguém entra de verdade - com quem, quando e por quanto
+// tempo (ver Verificar-SessaoRemota em vigiaScript.js). Então agora são dois
+// eventos diferentes:
+//   'sessao-remota'  alguém entrou (vem do log da ferramenta) - é o que
+//                    interessa, e o único que vira push
+//   'acesso-remoto'  o serviço está conectado à nuvem dele (conexão TCP) -
+//                    continua registrado, porque é assim que se descobre que
+//                    a máquina tem uma porta de acesso remoto aberta 24h
+const EVENTO_SESSAO_REMOTA = 'sessao-remota';
+async function registrarAcessoRemoto(codigo, posto, detalhe, token, ehSessao) {
   const id = docIdFor(codigo, posto);
   const limpo = String(detalhe || '').trim().slice(0, 200);
   if (!limpo) throw new Error('Detalhe do acesso remoto é obrigatório.');
@@ -1250,18 +1271,22 @@ async function registrarAcessoRemoto(codigo, posto, detalhe, token) {
   const atual = snap.exists ? snap.data() : null;
   exigirTokenSeTiver(atual, token);
   const agora = Date.now();
+  const tipo = ehSessao ? EVENTO_SESSAO_REMOTA : 'acesso-remoto';
   // registra no historico de atividades do computador (aparece no detalhe),
   // pra ficar auditavel mesmo com o push desligado. Nao repete o mesmo detalhe
   // se ja foi o ultimo evento em menos de 10min (evita encher com o mesmo
-  // batimento de nuvem da ferramenta)
+  // batimento de nuvem da ferramenta). Sessao NAO passa por esse filtro: duas
+  // entradas seguidas da mesma pessoa sao dois acessos, e sumir com o segundo
+  // seria esconder justamente o que se quer ver
   const eventosAtuais = (atual && atual.eventos) || [];
   const ultimo = eventosAtuais[eventosAtuais.length - 1];
-  const repetido = ultimo && ultimo.tipo === 'acesso-remoto' && ultimo.detalhe === limpo && (agora - ultimo.em) < 10 * 60 * 1000;
+  const repetido = !ehSessao && ultimo && ultimo.tipo === 'acesso-remoto' && ultimo.detalhe === limpo && (agora - ultimo.em) < 10 * 60 * 1000;
   const patch = { codigo, posto, ultimoAcessoRemotoEm: agora, ultimoAcessoRemotoDetalhe: limpo };
-  if (!repetido) patch.eventos = [...eventosAtuais, { tipo: 'acesso-remoto', em: agora, detalhe: limpo }].slice(-EVENTOS_MAX);
+  if (ehSessao) { patch.ultimaSessaoRemotaEm = agora; patch.ultimaSessaoRemotaDetalhe = limpo; }
+  if (!repetido) patch.eventos = [...eventosAtuais, { tipo, em: agora, detalhe: limpo }].slice(-EVENTOS_MAX);
   await COLLECTION.doc(id).set(patch, { merge: true });
   espelharEscrita(id, patch);
-  return { codigo, posto, nome: atual && atual.nome, ultimoAcessoRemotoDetalhe: limpo };
+  return { codigo, posto, nome: atual && atual.nome, ultimoAcessoRemotoDetalhe: limpo, ehSessao: !!ehSessao };
 }
 
 // enfileira um comando (ver agenteAcoes.js executarAcaoDoAgente) pro

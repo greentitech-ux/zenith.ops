@@ -1399,12 +1399,18 @@ app.post('/api/loja-status/:codigo/computadores/:posto/chat-responder', async (r
 app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (req, res) => {
   try {
     const token = req.headers['x-noc-token'] || req.body.token || null;
-    const registro = await lojaStatus.registrarAcessoRemoto(req.params.codigo, req.params.posto, req.body.detalhe, token);
+    const ehSessao = req.body.sessao === true || req.body.sessao === 'true';
+    const registro = await lojaStatus.registrarAcessoRemoto(req.params.codigo, req.params.posto, req.body.detalhe, token, ehSessao);
     // push do acesso remoto e OPT-IN (default desligado): as ferramentas que a
     // TI usa (AnyDesk/TeamViewer/DWService) mantem conexao 24h e enchiam o
     // Master de alerta falso. O evento fica registrado no historico do
     // computador de qualquer jeito; o push so sai se o Master ligar.
-    if (await lojaStatus.pushAcessoRemotoAtivo()) {
+    //
+    // Desde 09/09/2026 o agente sabe separar SESSAO (alguem entrou, lido do
+    // log da propria ferramenta) de servico conectado - e so a sessao vira
+    // push. O batimento de nuvem, que era o que enchia o Master, nunca mais
+    // toca o celular dele, mesmo com o toggle ligado.
+    if (ehSessao && await lojaStatus.pushAcessoRemotoAtivo()) {
       const mapa = await construirUnidadesMapa();
       push.notifyAcessoRemotoDetectado(mapa[req.params.codigo] || req.params.codigo, req.params.codigo, registro.nome, req.params.posto, req.body.detalhe)
         .catch((err) => console.error('Erro no push de acesso remoto:', err.message));

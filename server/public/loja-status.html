@@ -1283,8 +1283,18 @@ function linhaEvento(ev){
       : `registrado · <b>${escapeHtml(ev.para)}</b>`;
     return `<div class="ev-linha"><span class="ev-dot warn"></span><b>${qual}</b> ${texto} · ${fmtDataHora(ev.em)}</div>`;
   }
+  // SESSÃO = alguém entrou de verdade (lido do log da própria ferramenta, ver
+  // Verificar-SessaoRemota no vigiaScript.js). É o evento que interessa, e por
+  // isso é o único vermelho dos dois
+  if(ev.tipo==='sessao-remota'){
+    return `<div class="ev-linha"><span class="ev-dot bad"></span><b>🔓 Sessão remota</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+  }
+  // ...e isto é só o serviço conversando com a nuvem dele. Fica registrado
+  // porque é assim que se descobre que a máquina tem acesso remoto ligado 24h,
+  // mas não é ninguém entrando - o rótulo diz isso, senão as duas linhas se
+  // parecem e a de verdade se perde no meio
   if(ev.tipo==='acesso-remoto'){
-    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Acesso remoto</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Serviço de acesso remoto ligado</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
   }
   if(ev.tipo==='disco'){
     return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Disco piorou</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;

@@ -195,9 +195,98 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     ')',
     '$JaAvisados = New-Object System.Collections.Generic.HashSet[string]',
     '',
+    // ---- SESSAO DE VERDADE x SERVICO CONECTADO ----------------------------
+    // Pergunta do Master (09/09/2026): "conseguimos fazer com que esse tipo de
+    // conexao que nao e uma pessoa se conectando de fato apareca quando
+    // realmente alguma conexao for estabelecida?". Ele viu 20 linhas de
+    // "Acesso remoto · TeamViewer" numa tarde, de 20 em 20 minutos, todas pra
+    // endereco da propria TeamViewer: era o servico se anunciando pra nuvem
+    // dele, nao gente entrando.
+    //
+    // Conexao TCP estabelecida nao separa os dois - servico parado e pessoa
+    // controlando a maquina sao iguais por essa lente (foi por isso que
+    // Splashtop/LogMeIn/GoToMyPC ja tinham saido da lista). Quem separa e o
+    // LOG DE SESSAO da propria ferramenta, que so escreve quando alguem entra.
+    //
+    // TeamViewer: Connections_incoming.txt, uma linha por sessao de entrada
+    // ENCERRADA, separada por TAB - id, nome, inicio, fim, usuario, tipo,
+    // guid. Formato estavel ha anos. Como aqui a leitura e confiavel, o alerta
+    // de conexao do TeamViewer e DESLIGADO (ver $FerramentasComLog): some o
+    // ruido que ele reclamou.
+    //
+    // AnyDesk: le o ad_svc.trace atras da linha de sessao, mas o alerta de
+    // conexao dele CONTINUA - o formato do trace muda entre versoes, e
+    // desligar em cima de um parser que talvez nao case criaria ponto cego.
+    // Duplicar e' o erro barato aqui; nao ver ninguem entrando e' o caro.
+    '$SessoesVistas = New-Object System.Collections.Generic.HashSet[string]',
+    '$FerramentasComLog = New-Object System.Collections.Generic.HashSet[string]',
+    '$PrimeiraVarreduraSessao = $true',
+    '',
+    'function Achar-Arquivo($caminhos) {',
+    '  foreach ($p in $caminhos) { if ($p -and (Test-Path $p -ErrorAction SilentlyContinue)) { return $p } }',
+    '  return $null',
+    '}',
+    '',
+    'function Avisar-Sessao($detalhe) {',
+    '  try {',
+    '    $corpo = @{ detalhe = $detalhe; sessao = $true } | ConvertTo-Json',
+    '    Invoke-RestMethod -Uri $UrlAcessoRemoto -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $corpo -TimeoutSec 10 -ErrorAction SilentlyContinue | Out-Null',
+    '    Escrever-Log "Sessao remota registrada: $detalhe"',
+    '  } catch {}',
+    '}',
+    '',
+    'function Verificar-SessaoRemota {',
+    '  $FerramentasComLog.Clear()',
+    '  # ---- TeamViewer ----',
+    '  $tv = Achar-Arquivo @(',
+    '    "${env:ProgramFiles(x86)}\\TeamViewer\\Connections_incoming.txt",',
+    '    "$env:ProgramFiles\\TeamViewer\\Connections_incoming.txt",',
+    '    "$env:APPDATA\\TeamViewer\\Connections_incoming.txt"',
+    '  )',
+    '  if ($tv) {',
+    '    [void]$FerramentasComLog.Add("TeamViewer")',
+    '    [void]$FerramentasComLog.Add("TeamViewer_Service")',
+    '    try {',
+    '      foreach ($linha in @(Get-Content -Path $tv -Tail 40 -ErrorAction Stop)) {',
+    '        if (-not ("$linha").Trim()) { continue }',
+    '        # a chave e a LINHA inteira: o guid da sessao esta nela, entao',
+    '        # duas sessoes da mesma pessoa nunca colidem',
+    '        if (-not $SessoesVistas.Add("tv|$linha")) { continue }',
+    '        if ($PrimeiraVarreduraSessao) { continue }',
+    '        $c = ("$linha") -split "`t"',
+    '        $quem = if ($c.Count -ge 2 -and ("$($c[1])").Trim()) { ("$($c[1])").Trim() } else { ("$($c[0])").Trim() }',
+    '        $quando = if ($c.Count -ge 4) { "$($c[2]) ate $($c[3])" } else { "" }',
+    '        $usuario = if ($c.Count -ge 5 -and ("$($c[4])").Trim()) { " · entrou como $($c[4])" } else { "" }',
+    '        Avisar-Sessao ("TeamViewer · $quem" + $(if ($quando) { " · $quando" } else { "" }) + $usuario)',
+    '      }',
+    '    } catch { Escrever-Log "Falha ao ler o log do TeamViewer: $($_.Exception.Message)" }',
+    '  }',
+    '  # ---- AnyDesk (nao desliga o alerta de conexao, ver comentario acima) ----',
+    '  $ad = Achar-Arquivo @(',
+    '    "$env:ProgramData\\AnyDesk\\ad_svc.trace",',
+    '    "$env:APPDATA\\AnyDesk\\ad.trace"',
+    '  )',
+    '  if ($ad) {',
+    '    try {',
+    '      foreach ($linha in @(Get-Content -Path $ad -Tail 120 -ErrorAction Stop)) {',
+    '        if ("$linha" -notmatch "(?i)(incoming session|session started|accept request)") { continue }',
+    '        if (-not $SessoesVistas.Add("ad|$linha")) { continue }',
+    '        if ($PrimeiraVarreduraSessao) { continue }',
+    '        Avisar-Sessao ("AnyDesk · " + ("$linha").Trim().Substring(0, [Math]::Min(150, ("$linha").Trim().Length)))',
+    '      }',
+    '    } catch { Escrever-Log "Falha ao ler o log do AnyDesk: $($_.Exception.Message)" }',
+    '  }',
+    '  # a 1a varredura so MARCA o que ja estava no arquivo: sem isso, todo',
+    '  # reinicio do agente reportaria as ultimas 40 sessoes como novas',
+    '  $script:PrimeiraVarreduraSessao = $false',
+    '}',
+    '',
     'function Verificar-AcessoRemoto {',
     '  $vistosAgora = New-Object System.Collections.Generic.HashSet[string]',
     '  foreach ($nomeProc in $ProcessosAcessoRemoto) {',
+    '    # ferramenta cujo log de sessao a gente le nao precisa do palpite pela',
+    '    # conexao: quem manda ali e o log (ver Verificar-SessaoRemota)',
+    '    if ($FerramentasComLog.Contains($nomeProc)) { continue }',
     '    $procs = Get-Process -Name $nomeProc -ErrorAction SilentlyContinue',
     '    foreach ($p in $procs) {',
     '      $conexoes = Get-NetTCPConnection -State Established -OwningProcess $p.Id -ErrorAction SilentlyContinue',
@@ -1045,6 +1134,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '    # chamada extra so empilha atraso em cima do proximo heartbeat - e o',
     '    # heartbeat e a unica coisa que nao pode atrasar (limiar de 90s no NOC).',
     '    if ($resp) {',
+    '      try { Verificar-SessaoRemota } catch { Escrever-Log "Falha ao ler log de sessao: $($_.Exception.Message)" }',
     '      try { Verificar-AcessoRemoto } catch { Escrever-Log "Falha ao checar acesso remoto: $($_.Exception.Message)" }',
     '    }',
     '    $contador++',
@@ -1138,6 +1228,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     // bate o heartbeat e a pagina aberta no navegador, nao o PowerShell. Nao
     // existe $resp - guardar por ele deixaria tudo abaixo morto pra sempre,
     // inclusive o auto-update.
+    '    try { Verificar-SessaoRemota } catch { Escrever-Log "Falha ao ler log de sessao: $($_.Exception.Message)" }',
     '    try { Verificar-AcessoRemoto } catch { Escrever-Log "Falha ao checar acesso remoto: $($_.Exception.Message)" }',
     '    $contador++',
     '    if ($contador % $TicksParaVerificacaoPesada -eq 0) {',
