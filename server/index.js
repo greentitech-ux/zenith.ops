@@ -3276,10 +3276,62 @@ app.get('/api/loja-status', requireSection('suporte'), async (req, res) => {
 // leitura no Firestore.
 app.get('/api/loja-status/quedas', requireSection('suporte'), async (req, res) => {
   const [rel, mapa] = await Promise.all([
-    lojaStatus.relatorioQuedas({ dias: req.query.dias, periodo: req.query.periodo }),
+    lojaStatus.relatorioQuedas({ dias: req.query.dias, periodo: req.query.periodo, inicio: req.query.inicio, fim: req.query.fim }),
     construirUnidadesMapa(),
   ]);
-  res.json({ ...rel, unidades: rel.unidades.map((u) => ({ ...u, unidadeNome: mapa[u.codigo] || u.codigo })) });
+  res.json({ ...rel, unidades: rel.unidades.map((u) => ({ ...u, unidadeNome: mapa[u.codigo] || u.codigo, grupo: redes.redeDaUnidade(u.codigo) })) });
+});
+
+// PDF do mesmo recorte mostrado em Quedas de conexão. O filtro é repetido no
+// servidor (e não confiado ao navegador) para o arquivo continuar correto se
+// alguém abrir a URL diretamente.
+app.get('/api/loja-status/quedas/relatorio.pdf', requireSection('suporte'), async (req, res) => {
+  try {
+    const [rel, mapa] = await Promise.all([
+      lojaStatus.relatorioQuedas({ dias: req.query.dias, periodo: req.query.periodo, inicio: req.query.inicio, fim: req.query.fim }),
+      construirUnidadesMapa(),
+    ]);
+    const grupo = String(req.query.grupo || '');
+    const unidade = String(req.query.unidade || '');
+    const linhas = rel.unidades
+      .map((u) => ({ ...u, unidadeNome: mapa[u.codigo] || u.codigo, grupo: redes.redeDaUnidade(u.codigo) }))
+      .filter((u) => (!grupo || u.grupo === grupo) && (!unidade || u.codigo === unidade));
+    const totalQuedas = linhas.reduce((s, u) => s + u.quedas, 0);
+    const totalHoras = +(linhas.reduce((s, u) => s + u.horasFora, 0)).toFixed(1);
+    const periodoTexto = rel.periodo
+      ? `${reportUtil.fmtDataBR(rel.periodo.inicio)} a ${reportUtil.fmtDataBR(rel.periodo.fim)}`
+      : (rel.dias === 'hoje' ? 'Hoje' : rel.dias === 'ontem' ? 'Ontem' : `${rel.dias} dias`);
+    const grupoTexto = grupo ? (redes.NOME_DA_REDE[grupo] || grupo) : 'Todos os grupos';
+    const unidadeTexto = unidade ? (mapa[unidade] || unidade) : 'Todas as unidades';
+    const PDFDocument = require('pdfkit');
+    const doc = new PDFDocument({ margin: 38, size: 'A4', layout: 'landscape' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="nopulso-quedas-${rel.periodo ? `${rel.periodo.inicio}-a-${rel.periodo.fim}` : rel.dias}.pdf"`);
+    doc.pipe(res);
+    doc.fontSize(8).fillColor('#5b6470').text('NOPULSO · SOLUTIONS TI TECH · NOC', { characterSpacing: 1 });
+    doc.moveDown(.35);
+    doc.fontSize(17).fillColor('#111').text('Relatório de quedas de conexão');
+    doc.fontSize(9).fillColor('#555').text(`Período: ${periodoTexto}  ·  Grupo: ${grupoTexto}  ·  Unidade: ${unidadeTexto}`);
+    doc.text(`Gerado em ${reportUtil.agoraBrasiliaFmt()}  ·  ${totalQuedas} queda(s)  ·  ${String(totalHoras).replace('.', ',')}h fora`);
+    doc.moveDown(1);
+    const colunas = [38, 292, 384, 488, 596, 708];
+    const cab = ['UNIDADE', 'QUEDAS', 'CONFIRMADAS', 'OSCILAÇÕES', 'TEMPO FORA', 'MAIOR'];
+    doc.fontSize(8).fillColor('#5b6470'); cab.forEach((t, i) => doc.text(t, colunas[i], doc.y, { width: i ? 82 : 240, align: i ? 'right' : 'left' }));
+    doc.moveDown(.7); doc.strokeColor('#d6dbe0').moveTo(38, doc.y).lineTo(804, doc.y).stroke(); doc.moveDown(.45);
+    if (!linhas.length) doc.fontSize(11).fillColor('#444').text('Nenhuma queda encontrada para os filtros selecionados.');
+    linhas.forEach((u) => {
+      if (doc.y > 535) { doc.addPage(); }
+      const y = doc.y;
+      const tempo = u.horasFora >= 1 ? `${String(u.horasFora).replace('.', ',')}h` : `${Math.round(u.horasFora * 60)} min`;
+      const vals = [u.unidadeNome, u.quedas, u.confirmadas, u.oscilacoes, tempo, `${u.maiorMin} min`];
+      doc.fontSize(9).fillColor('#222'); vals.forEach((v, i) => doc.text(String(v), colunas[i], y, { width: i ? 82 : 240, align: i ? 'right' : 'left', ellipsis: i === 0 }));
+      doc.moveDown(1.45); doc.strokeColor('#e1e5e8').moveTo(38, doc.y).lineTo(804, doc.y).stroke(); doc.moveDown(.35);
+    });
+    doc.moveDown(.5); doc.fontSize(8).fillColor('#666').text('Confirmada: ficou fora tempo suficiente para alerta crítico. Oscilação: caiu e voltou em poucos minutos. Reinícios comandados e notebooks não entram no cálculo.');
+    doc.end();
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // detalhe completo de UM computador (eventos, aparelhos da rede, chat,
