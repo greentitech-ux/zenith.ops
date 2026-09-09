@@ -7,6 +7,7 @@ const db = require('./firestore');
 
 const COLLECTION = db.collection('tarefas');
 const STATUS_ABERTO = new Set(['PENDENTE', 'EM_ANDAMENTO']);
+const STATUS_EDITAVEIS = new Set(['PENDENTE', 'EM_ANDAMENTO']);
 
 function chaveTicket(ticketId, usuarioId, email) {
   const alvo = String(usuarioId || email || '').trim().toLowerCase();
@@ -65,6 +66,7 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
       vinculo: { chave: chaveBase, tipo, ticketTipo: ticket.tipo || tipo, id: ticket.id, numeroTicket: ticket.numeroTicket || null },
       unidade: ticket.unidade || null,
       unidadeNome: ticket.unidadeNome || null,
+      comentarios: [],
     };
     await ref.set(tarefa);
     alteradas.push(tarefa);
@@ -84,6 +86,49 @@ async function getOne(id) {
   return snap.exists ? snap.data() : null;
 }
 
+async function criar({ titulo, descricao, usuario }) {
+  const texto = String(titulo || '').trim().slice(0, 200);
+  if (!texto) throw new Error('Informe o título da tarefa.');
+  const ref = COLLECTION.doc();
+  const agora = new Date().toISOString();
+  const tarefa = {
+    id: ref.id, origem: 'manual', titulo: texto,
+    descricao: String(descricao || '').trim().slice(0, 2000),
+    prioridade: 'normal', status: 'PENDENTE',
+    responsavelId: usuario.id, responsavelEmail: usuario.email || null,
+    criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo: null,
+    unidade: null, unidadeNome: null,
+  };
+  await ref.set(tarefa);
+  return tarefa;
+}
+
+async function atualizarStatus(id, { usuarioId, isMaster, status }) {
+  if (!STATUS_EDITAVEIS.has(status)) throw new Error('Use a ação de concluir para finalizar uma tarefa.');
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (tarefa.responsavelId !== usuarioId && !isMaster) throw new Error('Essa tarefa pertence a outro responsável.');
+  if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Essa tarefa já foi encerrada.');
+  await ref.update({ status, atualizadoEm: new Date().toISOString() });
+  return getOne(id);
+}
+
+async function adicionarComentario(id, { usuario, isMaster, texto }) {
+  const corpo = String(texto || '').trim().slice(0, 2000);
+  if (!corpo) throw new Error('Escreva um comentário.');
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (tarefa.responsavelId !== usuario.id && !isMaster) throw new Error('Essa tarefa pertence a outro responsável.');
+  const agora = new Date().toISOString();
+  const comentario = { id: crypto.randomBytes(8).toString('hex'), texto: corpo, porId: usuario.id, porEmail: usuario.email || null, em: agora };
+  await ref.update({ comentarios: [...(tarefa.comentarios || []), comentario].slice(-100), atualizadoEm: agora });
+  return getOne(id);
+}
+
 async function concluir(id, { usuarioId, isMaster, observacao }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
@@ -96,4 +141,4 @@ async function concluir(id, { usuarioId, isMaster, observacao }) {
   return getOne(id);
 }
 
-module.exports = { sincronizarTicket, listarMinhas, getOne, concluir, podeReceberTicket };
+module.exports = { sincronizarTicket, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, concluir, podeReceberTicket };

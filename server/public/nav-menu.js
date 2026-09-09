@@ -52,7 +52,8 @@
       // quando ve o parametro, ver GRUPO_FIXO em fechamentos.html)
       { id: 'nav-fechamentos-arcfood', href: '/fechamentos.html?grupo=ARCFOOD', icone: '💰', rotulo: 'Fechamentos Arcfood', secoes: ['fechamentos'], redes: ['ARCFOOD'] },
       { id: 'nav-fechamentos-gbe', href: '/fechamentos.html?grupo=BRAVO', icone: '💰', rotulo: 'Fechamentos GBE', secoes: ['fechamentos'], redes: ['GBE'] },
-      { id: 'nav-kpis-operacionais', href: '/kpis-operacionais.html', icone: '⏱️', rotulo: "KPI's operacionais", secoes: ['fechamentos'] },
+      { id: 'nav-kpis-operacionais', href: '/kpis-operacionais.html', icone: "⏱️", rotulo: "KPI's operacionais", secoes: ['kpis'] },
+      { id: 'nav-formularios', href: '/formularios.html', icone: '🖊️', rotulo: 'Formulários', secoes: ['formularios'] },
       { id: 'nav-vendas-recordes', href: '/vendas-recordes.html', icone: '🏆', rotulo: 'Recordes de Venda', secoes: ['fechamentos'] },
       { id: 'nav-entregas', href: '/entregas.html', icone: '🛵', rotulo: 'Entregas', secoes: ['entregas'] },
       { id: 'nav-inventario', href: '/estoque.html', icone: '📦', rotulo: 'Estoque', secoes: ['inventario'] },
@@ -75,18 +76,16 @@
       { id: 'nav-central-solucoes', href: '/central-solucoes.html', icone: '💬', rotulo: 'Central de Soluções', secoes: ['central-solucoes'] },
     ] },
     { grupo: 'Solicitações', itens: [
-      { id: 'nav-solicitacoes', href: '/central.html', icone: '📋', rotulo: 'Central', secoes: ['solicitacoes'] },
       { id: 'nav-compras', href: '/compras.html', icone: '🛍️', rotulo: 'Acompanhar Compras', secoes: ['solicitacoes'] },
       // resumo pessoal (por status/unidade + meus abertos/concluidos) que
       // antes vivia dentro do Historico - separado em pagina propria porque
       // misturado com o quadro do Historico ficava bagunçado
       { id: 'nav-inicio-solicitacoes', href: '/central-inicio.html', icone: '📊', rotulo: 'Início', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
       // o Historico tambem serve pra quem RECEBE card atribuido
-      { id: 'nav-historico', href: '/central-historico.html', icone: '📜', rotulo: 'Histórico', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
+      { id: 'nav-historico', href: '/central-historico.html', icone: '📋', rotulo: 'Central de Solicitações', secoes: ['solicitacoes', 'manutencao', 'tecnico'] },
       { id: 'nav-tecnico', href: '/tecnico.html', icone: '🔧', rotulo: 'Chamados TI', secoes: ['tecnico', 'suporte'] },
       { id: 'nav-manutencao', href: '/manutencao.html', icone: '🛠️', rotulo: 'Manutenção', secoes: ['manutencao'] },
       { id: 'nav-ativos-ti', href: '/ativos-ti.html', icone: '🖥️', rotulo: 'Ativos de TI', secoes: ['ativos-ti'] },
-      { id: 'nav-formularios', href: '/formularios.html', icone: '🖊️', rotulo: 'Formulários', secoes: ['formularios'] },
     ] },
     { grupo: 'Saltiverso', itens: [
       { id: 'nav-parque-checkin', href: '/parque-checkin.html', icone: '🤸', rotulo: 'Check-in Parque', secoes: ['parque-checkin'] },

@@ -13,7 +13,7 @@ const sessions = require('./sessions');
 
 const usersRef = db.collection('users');
 
-const VALID_SECTIONS = ['monitor', 'disputas', 'cofre', 'fechamentos', 'lancamento', 'sangria', 'entregas', 'entregas-lancamento', 'ifood', 'solicitacoes', 'tecnico', 'suporte', 'manutencao', 'inventario', 'parque', 'parque-checkin', 'parque-loja', 'festas', 'abastecimento-carrinho', 'abastecimento-loja', 'ativos-ti', 'central-solucoes', 'rh', 'formularios', 'bonificacao'];
+const VALID_SECTIONS = ['monitor', 'disputas', 'cofre', 'fechamentos', 'kpis', 'lancamento', 'sangria', 'entregas', 'entregas-lancamento', 'ifood', 'solicitacoes', 'tecnico', 'suporte', 'manutencao', 'inventario', 'parque', 'parque-checkin', 'parque-loja', 'festas', 'abastecimento-carrinho', 'abastecimento-loja', 'ativos-ti', 'central-solucoes', 'rh', 'formularios', 'bonificacao'];
 
 // a qual vertical de negocio (empresas.TIPOS_NEGOCIO_VALIDOS) cada secao
 // pertence - usado pra nao mostrar (no checklist de permissoes e no menu)
@@ -25,7 +25,7 @@ const VALID_SECTIONS = ['monitor', 'disputas', 'cofre', 'fechamentos', 'lancamen
 // filtro de vertical mesmo estando em VALID_SECTIONS (falha "escondendo",
 // nao "vazando" - de proposito).
 const SECTION_VERTICAIS = {
-  monitor: ['alimentacao'], disputas: ['alimentacao'], fechamentos: ['alimentacao'],
+  monitor: ['alimentacao'], disputas: ['alimentacao'], fechamentos: ['alimentacao'], kpis: ['alimentacao'],
   lancamento: ['alimentacao'], sangria: ['alimentacao'], entregas: ['alimentacao'],
   'entregas-lancamento': ['alimentacao'], ifood: ['alimentacao'], inventario: ['alimentacao'],
   parque: ['alimentacao'], 'parque-checkin': ['alimentacao'], 'parque-loja': ['alimentacao'],
