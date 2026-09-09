@@ -11353,7 +11353,7 @@ setTimeout(async () => {
         /<div id="quedas-corpo" class="uni-grid quedas-corpo"><\/div>/.test(html)
         && !/id="quedas-corpo"[^>]*style=/.test(html),
       'a regra que fecha o painel alcança o corpo das Quedas':
-        /\.quedas-corpo\{display:block;\}/.test(html) && /\.uni-panel\.recolhido \.quedas-corpo\{display:none;\}/.test(html),
+        /\.uni-grid\.quedas-corpo\{display:block;min-width:0;\}/.test(html) && /\.uni-panel\.recolhido \.quedas-corpo\{display:none;\}/.test(html),
       // Hoje/Ontem: dia de calendario, com fim de janela no Ontem
       'Hoje traz só a queda de hoje': uni(dHoje).quedas === 1 && dHoje.dias === 'hoje',
       'Ontem traz só a queda de ontem, sem varrer o dia de hoje junto': uni(dOntem).quedas === 1 && dOntem.dias === 'ontem',
@@ -11371,6 +11371,10 @@ setTimeout(async () => {
         (html.match(/botoesPeriodoQuedas\(\)/g) || []).length >= 3,
       'a tela manda periodo= pra Hoje/Ontem e dias= pro resto':
         /periodoEscolhido === 'hoje' \|\| periodoEscolhido === 'ontem'[\s\S]{0,180}'periodo=' \+ periodoEscolhido[\s\S]{0,120}'dias=' \+ periodoEscolhido/.test(html),
+      'Unidade fica congelada e nome longo corta com reticências no celular':
+        /\.quedas-tab th:first-child,\.quedas-tab td:first-child\{position:sticky;left:0;/.test(html)
+        && /\.quedas-unidade-nome\{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\}/.test(html)
+        && /@media\(max-width:640px\)[\s\S]{0,800}width:132px;min-width:132px/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okQuedasPeriodo = !falhas.length;
