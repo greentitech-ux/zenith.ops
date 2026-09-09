@@ -611,7 +611,7 @@ function painelHtml(chat){
       : `<div id="d-previa-${idAttr}"></div>
         <div style="display:flex;gap:6px;align-items:center;">
           <input type="text" id="d-texto-${idAttr}" placeholder="Escrever uma resposta... (Ctrl+V cola print)" style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarResposta('${idAttr}');}">
-          <label class="foto-btn" title="Anexar print, foto ou PDF" style="cursor:pointer;flex:none;"><span id="d-anexo-icone-${idAttr}">📎</span><input type="file" id="d-anexo-${idAttr}" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden onchange="document.getElementById('d-anexo-icone-${idAttr}').textContent = this.files[0] ? '✅' : '📎';"></label>
+          <label class="foto-btn" title="Anexar print, foto ou PDF" style="cursor:pointer;flex:none;"><span id="d-anexo-icone-${idAttr}">📎</span><input type="file" id="d-anexo-${idAttr}" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden onchange="registrarAnexoResposta('${idAttr}', this)"></label>
           <button type="button" class="btn-primary" onclick="enviarResposta('${idAttr}')">Enviar</button>
         </div>`}
   </div>`;
@@ -638,7 +638,89 @@ function anexoHtml(chatId, m){
   return `<a href="${url}" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px;display:inline-block;margin-top:4px;">📎 ${escapeHtml(m.anexo.nome||'arquivo')}</a>`;
 }
 
+// O painel e' refeito quando chega um evento SSE/poll para trazer a resposta
+// nova. Sem este estado, o innerHTML abaixo recriava o input e apagava a
+// mensagem que o atendente ainda estava escrevendo. Guardamos tambem o
+// anexo, foco/cursor e leitura: chegar uma mensagem nunca deve interromper
+// quem esta atendendo (nem mandar quem leu algo antigo de volta para o fim).
+const RASCUNHOS_PAINEL_CHAT = new Map();
+const ROLAGEM_PAINEL_CHAT = new Map();
+
+function guardarEstadoPaineis(){
+  PAINEIS_ABERTOS.forEach(id=>{
+    const input = document.getElementById(`d-texto-${id}`);
+    const anexo = document.getElementById(`d-anexo-${id}`);
+    if(input){
+      const arquivo = (anexo && anexo.files && anexo.files[0])
+        || (RASCUNHOS_PAINEL_CHAT.get(id) || {}).arquivo || null;
+      const estado = {
+        texto: input.value,
+        arquivo,
+        inicio: input.selectionStart,
+        fim: input.selectionEnd,
+        focado: document.activeElement === input,
+      };
+      if(estado.texto || estado.arquivo || estado.focado) RASCUNHOS_PAINEL_CHAT.set(id, estado);
+      else RASCUNHOS_PAINEL_CHAT.delete(id);
+    }
+    const mensagens = document.querySelector(`.painel-conversa[data-painel-id="${CSS.escape(id)}"] .painel-msgs`);
+    if(mensagens){
+      const distanciaDoFim = mensagens.scrollHeight - mensagens.scrollTop - mensagens.clientHeight;
+      ROLAGEM_PAINEL_CHAT.set(id, { noFim: distanciaDoFim < 24, topo: mensagens.scrollTop });
+    }
+  });
+}
+
+function registrarAnexoResposta(id, campo){
+  const anterior = RASCUNHOS_PAINEL_CHAT.get(id) || {};
+  const arquivo = campo && campo.files && campo.files[0] ? campo.files[0] : null;
+  RASCUNHOS_PAINEL_CHAT.set(id, { ...anterior, arquivo });
+  const icone = document.getElementById(`d-anexo-icone-${id}`);
+  if(icone) icone.textContent = arquivo ? '✅' : '📎';
+}
+
+function limparRascunhoResposta(id){
+  RASCUNHOS_PAINEL_CHAT.delete(id);
+  ROLAGEM_PAINEL_CHAT.delete(id);
+}
+
+function restaurarEstadoPaineis(){
+  PAINEIS_ABERTOS.forEach(id=>{
+    const estado = RASCUNHOS_PAINEL_CHAT.get(id);
+    const input = document.getElementById(`d-texto-${id}`);
+    if(estado && input){
+      input.value = estado.texto || '';
+      const inicio = Math.min(Number.isInteger(estado.inicio) ? estado.inicio : input.value.length, input.value.length);
+      const fim = Math.min(Number.isInteger(estado.fim) ? estado.fim : inicio, input.value.length);
+      if(estado.focado){
+        input.focus();
+        try { input.setSelectionRange(inicio, fim); } catch(e) { /* campo pode estar desabilitado */ }
+      }
+      const icone = document.getElementById(`d-anexo-icone-${id}`);
+      if(icone && estado.arquivo) icone.textContent = '✅';
+      // Um <input type=file> novo nao aceita atribuir value por seguranca.
+      // DataTransfer devolve o proprio File escolhido/colado ao novo campo,
+      // mantendo a previa e permitindo enviar sem pedir para anexar de novo.
+      const campoAnexo = document.getElementById(`d-anexo-${id}`);
+      if(campoAnexo && estado.arquivo){
+        try {
+          const transferencia = new DataTransfer();
+          transferencia.items.add(estado.arquivo);
+          campoAnexo.files = transferencia.files;
+          campoAnexo.dispatchEvent(new Event('change', { bubbles:true }));
+        } catch(e) { /* o mapa continua guardando o arquivo para o envio */ }
+      }
+    }
+    const mensagens = document.querySelector(`.painel-conversa[data-painel-id="${CSS.escape(id)}"] .painel-msgs`);
+    const rolagem = ROLAGEM_PAINEL_CHAT.get(id);
+    if(mensagens){
+      mensagens.scrollTop = rolagem && !rolagem.noFim ? rolagem.topo : mensagens.scrollHeight;
+    }
+  });
+}
+
 function renderPaineis(){
+  guardarEstadoPaineis();
   // remove da lista qualquer conversa que sumiu (filtro, etc.)
   PAINEIS_ABERTOS = PAINEIS_ABERTOS.filter(id=>ITENS.some(c=>c.id===id));
   const outer = document.getElementById('paineis-outer');
@@ -647,7 +729,6 @@ function renderPaineis(){
   document.getElementById('paineis-count').textContent = PAINEIS_ABERTOS.length ? ` · ${PAINEIS_ABERTOS.length}` : '';
   if(!PAINEIS_ABERTOS.length){ wrap.innerHTML = ''; return; }
   wrap.innerHTML = PAINEIS_ABERTOS.map(id=>painelHtml(ITENS.find(c=>c.id===id))).join('');
-  wrap.querySelectorAll('.painel-msgs').forEach(el=>{ el.scrollTop = el.scrollHeight; });
   // Ctrl+V cola o print na resposta - um por painel aberto. O innerHTML acima
   // recria os campos, entao religar aqui e o certo (o helper do tema.js
   // marca o campo pra nao ligar duas vezes no mesmo elemento)
@@ -657,6 +738,7 @@ function renderPaineis(){
       window.colarImagemNoChat(`#d-texto-${idAttr}`, `#d-anexo-${idAttr}`, { previa: `#d-previa-${idAttr}` });
     });
   }
+  restaurarEstadoPaineis();
 }
 
 async function enviarResposta(id){
@@ -664,7 +746,8 @@ async function enviarResposta(id){
   if(!input) return;
   const texto = input.value.trim();
   // com print colado da pra mandar so a imagem: o print E a mensagem
-  const arquivo = (document.getElementById(`d-anexo-${id}`)||{}).files?.[0] || null;
+  const arquivo = (document.getElementById(`d-anexo-${id}`)||{}).files?.[0]
+    || (RASCUNHOS_PAINEL_CHAT.get(id) || {}).arquivo || null;
   if(!texto && !arquivo) return;
   input.disabled = true;
   try{
@@ -677,6 +760,9 @@ async function enviarResposta(id){
       : { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }) });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar mensagem.');
+    // a atualizacao seguinte re-renderiza o painel; limpar ANTES impede que
+    // a resposta que acabou de ser enviada reapareca como rascunho.
+    limparRascunhoResposta(id);
     await carregarLista();
   }catch(err){
     alert(err.message);
