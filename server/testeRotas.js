@@ -14363,6 +14363,64 @@ setTimeout(async () => {
   if (!okBriefing) ruins += 1;
   console.log(`${okBriefing ? '✓' : '✗'} E-mail diário de indicadores: config do Master, desligado por padrão, preview com JSON, envio sem credencial falha e registra`);
 
+  // ---- Meu Dia: ticket clicavel, previsao editavel e anexo com X ----
+  // O X do anexo apaga pelo ID do anexo, nao pela posicao: por indice, quem
+  // clicasse depois de outra pessoa ter anexado apagaria o arquivo errado.
+  let okMeuDia = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const criada = await postarJson('/api/tarefas', {
+      titulo: 'Conferir comprovante do fornecedor', dataInicio: '2026-09-10', dataEntrega: '2026-09-12',
+    }, cabMD);
+    const t0 = criada.status === 200 ? JSON.parse(criada.corpo) : {};
+
+    // previsao de conclusao editavel na propria tela
+    const adiar = await enviarJson('PATCH', `/api/tarefas/${t0.id}/datas`, { dataInicio: '2026-09-10', dataEntrega: '2026-09-20' }, cabMD);
+    const t1 = adiar.status === 200 ? JSON.parse(adiar.corpo) : {};
+    const invertida = await enviarJson('PATCH', `/api/tarefas/${t0.id}/datas`, { dataInicio: '2026-09-10', dataEntrega: '2026-09-01' }, cabMD);
+    const semPrazo = await enviarJson('PATCH', `/api/tarefas/${t0.id}/datas`, { dataInicio: '2026-09-10', dataEntrega: '' }, cabMD);
+    const t2 = semPrazo.status === 200 ? JSON.parse(semPrazo.corpo) : {};
+    const lixo = await enviarJson('PATCH', `/api/tarefas/${t0.id}/datas`, { dataInicio: '10/09/2026' }, cabMD);
+
+    // dois anexos: o X tem que tirar o certo mesmo com a lista mudando
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    const a1 = await postarMultipart(`/api/tarefas/${t0.id}/anexos`, {}, { nome: 'nota-1.png', tipo: 'image/png', buffer: png }, 'anexo', cabMD);
+    const a2 = await postarMultipart(`/api/tarefas/${t0.id}/anexos`, {}, { nome: 'nota-2.png', tipo: 'image/png', buffer: png }, 'anexo', cabMD);
+    const comDois = a2.status === 200 ? JSON.parse(a2.corpo) : { anexos: [] };
+    const primeiro = (comDois.anexos || [])[0] || {};
+    const segundo = (comDois.anexos || [])[1] || {};
+    const arquivoNoBucket = ARQUIVOS.has(segundo.path);
+    const removeu = await pedirJsonDelete(`/api/tarefas/${t0.id}/anexos/${segundo.id}`, cabMD);
+    const t3 = removeu.status === 200 ? JSON.parse(removeu.corpo) : { anexos: [] };
+    const deNovo = await pedirJsonDelete(`/api/tarefas/${t0.id}/anexos/${segundo.id}`, cabMD);
+
+    // tarefa encerrada nao muda mais de prazo
+    const fim = await postarJson(`/api/tarefas/${t0.id}/concluir`, {}, cabMD);
+    const depoisDeConcluir = await enviarJson('PATCH', `/api/tarefas/${t0.id}/datas`, { dataEntrega: '2026-10-01' }, cabMD);
+
+    const conf = {
+      'criar tarefa e adiar a previsão pela tela funciona': criada.status === 200 && adiar.status === 200 && t1.dataEntrega === '2026-09-20' && t1.dataInicio === '2026-09-10',
+      'previsão antes do início é recusada': invertida.status === 400 && /anterior/i.test(JSON.parse(invertida.corpo).error || ''),
+      'previsão em branco é aceita (tarefa sem prazo)': semPrazo.status === 200 && t2.dataEntrega === null,
+      'data fora do formato é recusada': lixo.status === 400,
+      'os dois anexos entram na tarefa, cada um com id próprio': a1.status === 200 && a2.status === 200 && (comDois.anexos || []).length === 2 && !!primeiro.id && !!segundo.id && primeiro.id !== segundo.id,
+      'o X apaga o anexo escolhido pelo id, não o da posição': removeu.status === 200 && (t3.anexos || []).length === 1 && t3.anexos[0].id === primeiro.id && t3.anexos[0].nome === 'nota-1.png',
+      'e o arquivo sai do Storage junto': arquivoNoBucket && !ARQUIVOS.has(segundo.path) && ARQUIVOS.has(primeiro.path),
+      'apagar o mesmo anexo duas vezes não estoura': deNovo.status === 400 && /não encontrado/i.test(JSON.parse(deNovo.corpo).error || ''),
+      'tarefa concluída não aceita mudança de prazo': fim.status === 200 && depoisDeConcluir.status === 400 && /encerrada/i.test(JSON.parse(depoisDeConcluir.corpo).error || ''),
+      'o número do ticket é link para a solicitação na Central': /linkTicket\(/.test(html) && /central-historico\.html\?ticket=\$\{encodeURIComponent\(numero\)\}/.test(html) && /onclick="event\.stopPropagation\(\)"/.test(html),
+      'o card e o detalhe usam o mesmo link (ninguém ficou com texto puro)': !/'Ticket #'\+/.test(html),
+      'a previsão de conclusão é campo de data ao lado do início': /id="DINI" type="date"/.test(html) && /id="DFIM" type="date" onchange="salvarDatas\(\)"/.test(html),
+      'nova tarefa tem campo de anexo e sobe o arquivo depois de criar': /id="FILENEW"/.test(html) && /for\(const f of PEND\)\{try\{await subirAnexo\(nova\.id,f\)\}/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMeuDia = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (criar=${criada.status} datas=${adiar.status} anexo=${a2.status} ${a2.corpo.slice(0, 90)} del=${removeu.status} ${removeu.corpo.slice(0, 90)})`);
+  } catch (e) { okMeuDia = false; console.log('  erro: ' + e.message); }
+  if (!okMeuDia) ruins += 1;
+  console.log(`${okMeuDia ? '✓' : '✗'} Meu Dia: ticket leva à solicitação, previsão editável na tela, X do anexo apaga pelo id e nova tarefa já aceita anexo`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

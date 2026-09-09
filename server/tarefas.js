@@ -160,6 +160,41 @@ async function adicionarAnexo(id, acesso, anexo) {
   return getOne(id);
 }
 
+// O X do anexo remove pelo ID do próprio anexo, não pela posição na lista:
+// entre desenhar a tela e o clique alguém pode ter anexado outra coisa, e por
+// índice o clique apagaria o arquivo errado.
+async function removerAnexo(id, acesso, anexoId) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeGerir(tarefa, acesso)) throw new Error('Você não pode remover anexo desta tarefa.');
+  const lista = tarefa.anexos || [];
+  const alvo = lista.find((a) => a && a.id === String(anexoId));
+  if (!alvo) throw new Error('Anexo não encontrado.');
+  const agora = new Date().toISOString();
+  await ref.update({ anexos: lista.filter((a) => a !== alvo), atualizadoEm: agora });
+  return { tarefa: await getOne(id), path: alvo.path || null };
+}
+
+// Data de início e previsão de conclusão são editáveis enquanto a tarefa está
+// aberta. Previsão vazia é válida (tarefa sem prazo); previsão antes do início
+// não é - viraria "previsão vencida" no mesmo instante em que foi salva.
+async function atualizarDatas(id, acesso, { dataInicio, dataEntrega } = {}) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeGerir(tarefa, acesso)) throw new Error('Você não pode alterar esta tarefa.');
+  if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Essa tarefa já foi encerrada.');
+  const dia = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
+  const inicio = dataInicio === undefined ? (tarefa.dataInicio || null) : dia(dataInicio);
+  const entrega = dataEntrega === undefined ? (tarefa.dataEntrega || null) : dia(dataEntrega);
+  if (dataInicio !== undefined && String(dataInicio || '').trim() && !inicio) throw new Error('Data de início inválida.');
+  if (dataEntrega !== undefined && String(dataEntrega || '').trim() && !entrega) throw new Error('Previsão de conclusão inválida.');
+  if (inicio && entrega && entrega < inicio) throw new Error('A previsão de conclusão não pode ser anterior à data de início.');
+  await ref.update({ dataInicio: inicio, dataEntrega: entrega, atualizadoEm: new Date().toISOString() });
+  return getOne(id);
+}
+
 async function arquivarQuebrasAutomaticas() {
   const snap = await COLLECTION.get();
   const agora = new Date().toISOString();
@@ -238,4 +273,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
   return resultado;
 }
 
-module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir };
+module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir };

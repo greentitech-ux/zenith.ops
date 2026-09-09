@@ -9205,6 +9205,31 @@ app.get('/api/tarefas/:id/anexos/:indice', auth.requireAuth, async (req, res) =>
   }
 });
 
+app.delete('/api/tarefas/:id/anexos/:anexoId', auth.requireAuth, async (req, res) => {
+  try {
+    const { tarefa, path } = await tarefas.removerAnexo(req.params.id, acessoDasTarefas(req), req.params.anexoId);
+    // o arquivo some depois do documento: se o storage falhar, sobra arquivo
+    // orfao (barato) em vez de anexo que a tela mostra e nao abre mais
+    if (path) await storage.apagarArquivo(path).catch(() => {});
+    broadcast('tarefas-atualizada', { id: tarefa.id, unidade: tarefa.unidade }, 'tarefas');
+    res.json(tarefa);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/tarefas/:id/datas', auth.requireAuth, async (req, res) => {
+  try {
+    const atualizada = await tarefas.atualizarDatas(req.params.id, acessoDasTarefas(req), {
+      dataInicio: req.body?.dataInicio, dataEntrega: req.body?.dataEntrega,
+    });
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.patch('/api/tarefas/status-lote', auth.requireAuth, async (req, res) => {
   try {
     const ids = [...new Set(Array.isArray(req.body?.ids) ? req.body.ids.map(String).filter(Boolean) : [])].slice(0, 50);
