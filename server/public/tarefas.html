@@ -131,8 +131,8 @@ function confirmarSenha(){const v=$('PWDIN').value;if(!v){$('PWDERR').textConten
 // que já sabe validar cada tipo (Central e Formulários), e aquela tela avisa
 // de volta o que nasceu. Recriar os dois formulários aqui seria uma segunda
 // versão das mesmas regras, que envelhece sozinha.
-function contexto2(destino){const p=new URLSearchParams({tarefa:O.id,titulo:tituloVisivel(O)});if(O.unidade)p.set('unidade',O.unidade);if(O.descricao)p.set('descricao',O.descricao);return destino+'?'+p.toString()}
-function virarSolicitacao(){location.href=contexto2('/central.html')}
+function contexto2(destino){const p=new URLSearchParams({tarefa:O.id,titulo:tituloVisivel(O)});if(O.unidade)p.set('unidade',O.unidade);if(O.descricao)p.set('descricao',O.descricao);return destino+(destino.includes('?')?'&':'?')+p.toString()}
+function virarSolicitacao(){location.href=contexto2('/central.html?nova=1')}
 function virarFormulario(){location.href=contexto2('/formularios.html')}
 function pintarGerou(){const g=O.gerou||[];$('GEROU').innerHTML=!g.length?'':'<b>Gerou:</b> '+g.map(x=>x.tipo==='formulario'
   ?`<a class="link-ticket" href="/formularios.html">📄 ${e(x.rotulo||'Formulário')}</a>`

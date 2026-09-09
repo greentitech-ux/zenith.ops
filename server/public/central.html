@@ -126,10 +126,10 @@
 <div class="panel hero">
   <div class="icone">📋</div>
   <h2 style="font-size:16px;">Lançar uma solicitação</h2>
-  <p>Estorno, compra, manutenção, suporte de TI ou ajuste de fechamento — escolha o tipo, preencha os dados e envie. Acompanhamento e aprovação ficam no Histórico.</p>
+  <p>Estorno, compra, manutenção, suporte de TI ou ajuste de fechamento — escolha o tipo, preencha os dados e envie. Acompanhamento e aprovação ficam na Central.</p>
   <div class="hero-acoes">
     <button type="button" class="btn-primary" style="margin-top:0;" onclick="abrirModalNova()">+ Nova solicitação</button>
-    <a class="back" href="/central-historico.html">📜 Ver histórico de solicitações</a>
+    <a class="back" href="/central-historico.html">📜 Voltar para a Central</a>
   </div>
 </div>
 
@@ -293,6 +293,12 @@
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
+// A Central é o Histórico. Esta rota existe apenas como painel de criação:
+// entrar nela sem pedir uma nova solicitação redireciona para a Central, sem
+// deixar uma tela intermediária vazia entre o botão e o formulário.
+const PARAMS_CENTRAL = new URLSearchParams(location.search);
+const ABRIR_NOVA_DIRETO = PARAMS_CENTRAL.get('nova') === '1' || PARAMS_CENTRAL.has('tarefa');
+if(!ABRIR_NOVA_DIRETO){ location.replace('/central-historico.html'); }
 
 const _rawFetch = window.fetch.bind(window);
 window.fetch = (url, opts = {}) => {
@@ -311,7 +317,7 @@ function abrirModalNova(){
   document.getElementById('sucesso-nova').classList.add('hidden');
   document.getElementById('overlay-nova').classList.remove('hidden');
 }
-function fecharModalNova(){ document.getElementById('overlay-nova').classList.add('hidden'); }
+function fecharModalNova(){ location.replace('/central-historico.html'); }
 function lancarOutra(){
   document.getElementById('sucesso-nova').classList.add('hidden');
   document.getElementById('form-nova').classList.remove('hidden');
@@ -673,6 +679,9 @@ async function boot(){
   montarSelectCampo();
   if(tiposDisponiveis.length) selecionarTipo(tiposDisponiveis[0][0]);
   prepararDeTarefa();
+  // O botão da Central chega aqui já no formulário, sem mostrar o antigo
+  // card "Lançar uma solicitação" como uma etapa extra.
+  if(ABRIR_NOVA_DIRETO) abrirModalNova();
 }
 
 // Chegou do Meu Dia ("Criar solicitação" numa tarefa): pré-preenche o que a
