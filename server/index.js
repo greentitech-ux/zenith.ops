@@ -9733,7 +9733,11 @@ function sanitizarMatrizKpi(body) {
   };
 }
 
-app.post('/api/kpis-operacionais/relatorio', requireSection('fechamentos'), async (req, res) => {
+function requireKpis(req, res, next) {
+  if (req.isMaster || req.isAdmin || auth.hasSection(req, 'kpis')) return next();
+  return res.status(403).json({ error: 'Você não tem acesso aos KPI\'s operacionais.' });
+}
+app.post('/api/kpis-operacionais/relatorio', requireKpis, async (req, res) => {
   try {
     const d = sanitizarMatrizKpi(req.body || {});
     if (!d.linhas.length) return res.status(400).json({ error: 'Nada pra exportar nesse período.' });
