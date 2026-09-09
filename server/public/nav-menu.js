@@ -28,6 +28,7 @@
   //   master:true  -> so role 'master'
   //   admin:true   -> master OU isAdmin
   //   secoes:[...] -> master/admin OU quem tem QUALQUER uma das secoes
+  //   gerenteOuSecoes:[...] -> idem, incluindo gerente da unidade
   //   (nada)       -> todo mundo logado
   // ---------------------------------------------------------------
   const MENU = [
@@ -76,6 +77,7 @@
       { id: 'nav-central-solucoes', href: '/central-solucoes.html', icone: '💬', rotulo: 'Central de Soluções', secoes: ['central-solucoes'] },
     ] },
     { grupo: 'Solicitações', itens: [
+      { id: 'nav-fornecedores', href: '/fornecedores.html', icone: '🏢', rotulo: 'Fornecedores', gerenteOuSecoes: ['fornecedores', 'solicitacoes'] },
       { id: 'nav-compras', href: '/compras.html', icone: '🛍️', rotulo: 'Acompanhar Compras', secoes: ['solicitacoes'] },
       // resumo pessoal (por status/unidade + meus abertos/concluidos) que
       // antes vivia dentro do Historico - separado em pagina propria porque
@@ -387,6 +389,7 @@
     if (it.admin) return isAdmin;
     if (!temVertical(me, it)) return false;
     if (!temRede(me, it)) return false;
+    if (it.gerenteOuSecoes) return isAdmin || /gerente/i.test(String(me.cargo || '')) || it.gerenteOuSecoes.some((s) => temSecao(me, s));
     if (it.secoes) return it.secoes.some((s) => temSecao(me, s));
     return true;
   }

@@ -48,6 +48,7 @@ const ifoodStore = require('./ifoodStore');
 const ifoodSync = require('./ifoodSync');
 const solicitacoes = require('./solicitacoes');
 const tarefas = require('./tarefas');
+const fornecedores = require('./fornecedores');
 const tarefaRelatorio = require('./tarefaRelatorio');
 const acessosPessoa = require('./acessosPessoa');
 const formularios = require('./formularios');
@@ -9163,6 +9164,86 @@ function podeCriarTarefaManual(req) {
   return req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo)
     || (req.permissions?.sections || []).includes('tarefas');
 }
+
+// Cadastro de fornecedores é um cofre operacional: Master/Admin e gerentes
+// somente podem tratar as unidades que já fazem parte do seu escopo.
+function podeGerirFornecedores(req) {
+  return req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo)
+    || (req.permissions?.sections || []).includes('fornecedores');
+}
+
+function unidadesFornecedorPermitidas(req) {
+  if (req.isMaster) return null;
+  return req.isAdmin ? (req.unidadesDaEmpresa || req.permissions?.unidades || []) : (req.permissions?.unidades || []);
+}
+
+async function fornecedorNoEscopo(req, id) {
+  const lista = await fornecedores.listar(unidadesFornecedorPermitidas(req));
+  return lista.find((fornecedor) => fornecedor.id === id) || null;
+}
+
+app.get('/api/fornecedores', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Cadastro de fornecedores exige perfil de gestão ou a seção Fornecedores.' });
+    res.json(await fornecedores.listar(unidadesFornecedorPermitidas(req)));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/fornecedores', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Sem permissão para cadastrar fornecedor.' });
+    const unidade = String(req.body?.unidade || '').trim();
+    const permitidas = unidadesFornecedorPermitidas(req);
+    if (!unidade || (permitidas && !permitidas.includes(unidade))) return res.status(403).json({ error: 'Escolha uma unidade do seu acesso.' });
+    const mapa = await construirUnidadesMapa();
+    res.status(201).json(await fornecedores.criar({ unidade, unidadeNome: mapa[unidade] || unidade, dados: req.body, por: req.user }));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.put('/api/fornecedores/:id', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Sem permissão para editar fornecedor.' });
+    if (!await fornecedorNoEscopo(req, req.params.id)) return res.status(404).json({ error: 'Fornecedor não encontrado no seu escopo.' });
+    res.json(await fornecedores.atualizar(req.params.id, req.body, req.user));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/fornecedores/:id/validar', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Sem permissão para validar fornecedor.' });
+    if (!await fornecedorNoEscopo(req, req.params.id)) return res.status(404).json({ error: 'Fornecedor não encontrado no seu escopo.' });
+    res.json(await fornecedores.validar(req.params.id, req.user));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/fornecedores/link', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Sem permissão para gerar link.' });
+    const unidade = String(req.body?.unidade || '').trim(), permitidas = unidadesFornecedorPermitidas(req);
+    if (!unidade || (permitidas && !permitidas.includes(unidade))) return res.status(403).json({ error: 'Escolha uma unidade do seu acesso.' });
+    const mapa = await construirUnidadesMapa();
+    const convite = await fornecedores.criarConvite({ unidade, unidadeNome: mapa[unidade] || unidade, por: req.user });
+    res.status(201).json({ ...convite, link: `${APP_BASE_URL}/fornecedor-cadastro.html?convite=${encodeURIComponent(convite.token)}` });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// O link público revela somente a unidade destinatária. Dados de fornecedores
+// entram como pendentes e nunca se tornam ativos sem conferência interna.
+app.get('/api/fornecedores/publico/:token', async (req, res) => {
+  const convite = await fornecedores.convite(req.params.token);
+  if (!convite) return res.status(404).json({ error: 'Link de cadastro inválido ou removido.' });
+  res.json({ unidade: convite.unidade, unidadeNome: convite.unidadeNome });
+});
+
+app.post('/api/fornecedores/publico/:token', async (req, res) => {
+  try {
+    const convite = await fornecedores.convite(req.params.token);
+    if (!convite) return res.status(404).json({ error: 'Link de cadastro inválido ou removido.' });
+    const criado = await fornecedores.criarPublico({ unidade: convite.unidade, unidadeNome: convite.unidadeNome, dados: req.body, convite });
+    await fornecedores.usarConvite(convite.token);
+    res.status(201).json({ id: criado.id, status: criado.status });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
 
 app.get('/api/tarefas/minhas', auth.requireAuth, async (req, res) => {
   try {
