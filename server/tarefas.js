@@ -152,7 +152,7 @@ function pessoasParaColaboradores(pessoas, responsavelId) {
     .map((p) => ({ id: p.id, nome: nomeUsuario(p) })).slice(0, 20);
 }
 
-async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null }) {
+async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false }) {
   const texto = String(titulo || '').trim().slice(0, 200);
   if (!texto) throw new Error('Informe o título da tarefa.');
   const ref = COLLECTION.doc();
@@ -166,6 +166,10 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
     id: ref.id, origem: vinculo ? 'ticket-manual' : 'manual', titulo: texto,
     descricao: String(descricao || '').trim().slice(0, 2000),
     prioridade: 'normal', status: statusInicial, dataInicio: inicio, dataEntrega: entrega,
+    // marca de REGISTRO: a situação já aconteceu e o que se quer é o
+    // documento, não um pedido. Não muda permissão nem fluxo - muda o que o
+    // PDF diz que ele é, e deixa filtrar "só ocorrências" na lista.
+    ehOcorrencia: !!ehOcorrencia,
     responsavelId: (responsavel || usuario).id, responsavelEmail: (responsavel || usuario).email || null, responsavelNome: nomeUsuario(responsavel || usuario),
     criadoPorId: usuario.id, criadoPorNome: nomeUsuario(usuario),
     criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo, anexos: [],

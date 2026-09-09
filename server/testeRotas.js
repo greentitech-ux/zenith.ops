@@ -14746,8 +14746,15 @@ setTimeout(async () => {
         const central = {};
         for (const m of bloco.matchAll(/'([a-z-]+)':\s*\{\s*label:'([^']+)'/g)) central[m[1]] = m[2];
         const meu = new Function(`${(html.match(/const TIPO_TICKET=\{[^;]*;/) || [''])[0]} return TIPO_TICKET;`)();
+        // o servidor tem a terceira cópia (ROTULO_TIPO_TICKET, usada no PDF
+        // consolidado) - as três têm que dizer a mesma coisa
+        const ix = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+        const doServidor = new Function(`${(ix.match(/const ROTULO_TIPO_TICKET = \{[\s\S]*?\n\};/) || [''])[0]} return ROTULO_TIPO_TICKET;`)();
         const chaves = Object.keys(central);
-        return chaves.length >= 10 && chaves.every((k) => meu[k] === central[k]) && Object.keys(meu).every((k) => central[k] === meu[k]);
+        return chaves.length >= 10
+          && chaves.every((k) => meu[k] === central[k] && doServidor[k] === central[k])
+          && Object.keys(meu).every((k) => central[k] === meu[k])
+          && Object.keys(doServidor).every((k) => central[k] === doServidor[k]);
       })(),
       'o detalhe do computador tem o botão Reiniciar, só pra máquina interna': /c\.tipo === 'interno' \? `<button[^`]*reiniciarDesteComputador/.test(ls),
       'e ele reusa a janela de manutenção (senha, aviso de 2 min e abortar)': /function reiniciarDesteComputador[\s\S]{0,400}abrirManutencao\(\)/.test(ls) && !/reiniciarDesteComputador[\s\S]{0,400}fetch\(/.test(ls),
@@ -14986,6 +14993,65 @@ setTimeout(async () => {
   } catch (e) { okDatas = false; console.log('  erro: ' + e.message); }
   if (!okDatas) ruins += 1;
   console.log(`${okDatas ? '✓' : '✗'} Meu Dia: tarefa de ticket carrega a data REAL do ticket, e a tarefa manual a data de agora`);
+
+  // ---- Meu Dia: PDF de ocorrência e relatório consolidado ----
+  // Nem toda situação vira solicitação ou formulário: às vezes só aconteceu e
+  // alguém precisa REGISTRAR. O PDF é o registro - vale fora do app.
+  let okPdfMD = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const oc = await postarJson('/api/tarefas', {
+      titulo: 'Queda de energia às 19h20', descricao: 'Loja ficou 40 minutos sem caixa. Gerador não entrou.',
+      unidade: 'DOM_19706', ehOcorrencia: true,
+    }, cabMD);
+    const ocorrencia = oc.status === 200 ? JSON.parse(oc.corpo) : {};
+    const comum = JSON.parse((await postarJson('/api/tarefas', { titulo: 'Conferir o malote', unidade: 'DOM_19706' }, cabMD)).corpo);
+
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    await postarMultipart(`/api/tarefas/${ocorrencia.id}/anexos`, {}, { nome: 'painel.png', tipo: 'image/png', buffer: png }, 'anexo', cabMD);
+    await postarJson(`/api/tarefas/${ocorrencia.id}/comentarios`, { texto: 'Energia voltou 20h05, caixa reaberto.' }, cabMD);
+
+    const verPdf = await pedirBinario(`/api/tarefas/${ocorrencia.id}/pdf`, cabMD);
+    const baixarPdf = await pedirBinario(`/api/tarefas/${ocorrencia.id}/pdf?baixar=1`, cabMD);
+    const textoOcorrencia = verPdf.status === 200 ? textoDoPdf(verPdf.buffer) : '';
+    const pdfComum = await pedirBinario(`/api/tarefas/${comum.id}/pdf`, cabMD);
+    const textoComum = pdfComum.status === 200 ? textoDoPdf(pdfComum.buffer) : '';
+
+    const cabForaP = { Authorization: 'Bearer ' + (await auth.login('eq-fora@teste.local', 'SenhaDeTeste!2026')).token };
+    const pdfDeFora = await pedirBinario(`/api/tarefas/${ocorrencia.id}/pdf`, cabForaP);
+
+    const rel = await postarBinario('/api/tarefas/relatorio', { ids: [ocorrencia.id, comum.id], filtro: 'Em aberto · Mooca' }, cabMD);
+    const textoRel = rel.status === 200 ? textoDoPdf(rel.buffer) : '';
+    const relVazio = await postarJson('/api/tarefas/relatorio', { ids: [] }, cabMD);
+    // pedir a tarefa de OUTRA pessoa não coloca ela no relatório: id que não
+    // existe qualquer implementação descarta, então o caso que importa é o id
+    // REAL de uma tarefa que quem pede não pode ver
+    const relIntruso = await postarJson('/api/tarefas/relatorio', { ids: [ocorrencia.id] }, cabForaP);
+
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const disp = (r) => String((r.headers && r.headers['content-disposition']) || '');
+
+    const conf = {
+      'a ocorrência nasce marcada como registro': oc.status === 200 && ocorrencia.ehOcorrencia === true && comum.ehOcorrencia === false,
+      'o PDF sai com o nome do documento certo': /Registro de Ocorrência/.test(textoOcorrencia) && /Registro de Tarefa/.test(textoComum) && !/Registro de Ocorrência/.test(textoComum),
+      'e traz o que aconteceu, quem registrou e o histórico': /Queda de energia/.test(textoOcorrencia) && /Gerador não entrou/.test(textoOcorrencia) && /Energia voltou 20h05/.test(textoOcorrencia),
+      'o anexo aparece pelo nome no documento': /painel\.png/.test(textoOcorrencia),
+      'abre pra conferir (inline) e só baixa quando se pede': /^inline;/.test(disp(verPdf)) && /^attachment;/.test(disp(baixarPdf)) && /filename="ocorrencia-/.test(disp(verPdf)),
+      'quem não participa da tarefa não gera o PDF dela': pdfDeFora.status === 404,
+      'o relatório da lista traz o resumo e a listagem': rel.status === 200 && /Relatório de Tarefas/.test(textoRel) && /por situação/i.test(textoRel) && /por unidade/i.test(textoRel) && /por tipo/i.test(textoRel) && /Conferir o malote/.test(textoRel),
+      'com o filtro escrito no cabeçalho (o número do PDF bate com o da tela)': /Em aberto · Mooca/.test(textoRel) && /2 tarefa\(s\)/.test(textoRel),
+      'e marca qual linha é ocorrência': /\[Ocorrência\]/.test(textoRel),
+      'tarefa real de outra pessoa não entra no relatório de quem pediu': relIntruso.status === 400 && /Nenhuma tarefa no filtro/i.test(JSON.parse(relIntruso.corpo).error || ''),
+      'relatório sem nenhuma tarefa é recusado com motivo': relVazio.status === 400 && /Nenhuma tarefa no filtro/i.test(JSON.parse(relVazio.corpo).error || ''),
+      'a tela deixa marcar ocorrência e filtrar só por elas': /id="OCOR"/.test(html) && /ehOcorrencia:\$\('OCOR'\)\.checked/.test(html) && /if\(v==='__ocorrencia'\)return !!t\.ehOcorrencia;/.test(html),
+      'e oferece ver antes de baixar nos dois PDFs': /onclick="pdfDaTarefa\(false\)">👁 Ver PDF</.test(html) && /onclick="pdfDaLista\(false\)">👁 Ver relatório do filtro</.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPdfMD = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (pdf=${verPdf.status} disp=${disp(verPdf)} rel=${rel.status} texto=${textoRel.slice(0, 160)})`);
+  } catch (e) { okPdfMD = false; console.log('  erro: ' + e.message); }
+  if (!okPdfMD) ruins += 1;
+  console.log(`${okPdfMD ? '✓' : '✗'} Meu Dia: PDF de ocorrência da tarefa e relatório consolidado do filtro, os dois abrindo pra conferir antes de baixar`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
