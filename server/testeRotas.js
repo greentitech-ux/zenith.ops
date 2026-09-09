@@ -14504,6 +14504,46 @@ setTimeout(async () => {
   if (!okFiltrosMD) ruins += 1;
   console.log(`${okFiltrosMD ? '✓' : '✗'} Meu Dia: filtros de situação/grupo/unidade/período com presets, e o seletor de cards só no modo Selecionar`);
 
+  // ---- seção "Meu Dia": a tag que libera CRIAR tarefa ----
+  // Sem a seção a pessoa continua entrando na tela e tocando o que recebeu;
+  // o que a tag libera é abrir tarefa nova em vez de só responder.
+  let okSecaoMD = false;
+  try {
+    const senhaMD = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-md-com', {
+      passwordHash: senhaMD, role: 'user', active: true, email: 'md-com@teste.local', username: 'mdcom',
+      permissions: { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    DOCS.set('users/u-md-sem', {
+      passwordHash: senhaMD, role: 'user', active: true, email: 'md-sem@teste.local', username: 'mdsem',
+      permissions: { sections: ['formularios'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabCom = { Authorization: 'Bearer ' + (await auth.login('md-com@teste.local', 'SenhaDeTeste!2026')).token };
+    const cabSem = { Authorization: 'Bearer ' + (await auth.login('md-sem@teste.local', 'SenhaDeTeste!2026')).token };
+    const criaCom = await postarJson('/api/tarefas', { titulo: 'Levar o extrato do dia' }, cabCom);
+    const criaSem = await postarJson('/api/tarefas', { titulo: 'Levar o extrato do dia' }, cabSem);
+    const ctxCom = await pedir('/api/tarefas/contexto', cabCom);
+    const ctxSem = await pedir('/api/tarefas/contexto', cabSem);
+    const minhasSem = await pedir('/api/tarefas/minhas', cabSem);
+    const users = require(__dirname + '/users.js');
+
+    const conf = {
+      "'tarefas' é seção válida e vale pra qualquer vertical": users.VALID_SECTIONS.includes('tarefas') && users.secoesDaVertical('alimentacao').includes('tarefas'),
+      'com a seção, o usuário comum cria tarefa': criaCom.status === 200 && JSON.parse(criaCom.corpo).titulo === 'Levar o extrato do dia',
+      'sem a seção, criar é recusado': criaSem.status === 403,
+      'o contexto avisa a tela quem pode criar': ctxCom.status === 200 && JSON.parse(ctxCom.corpo).podeCriar === true && ctxSem.status === 200 && JSON.parse(ctxSem.corpo).podeCriar === false,
+      'quem não tem a seção continua entrando na tela pra responder o que recebeu': minhasSem.status === 200,
+      'a seção aparece no checklist de permissões': /\['tarefas','Meu Dia \(criar tarefas próprias\)'\]/.test(require('fs').readFileSync(__dirname + '/public/usuarios.html', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okSecaoMD = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (com=${criaCom.status} ${criaCom.corpo.slice(0, 90)} sem=${criaSem.status} ${criaSem.corpo.slice(0, 90)})`);
+  } catch (e) { okSecaoMD = false; console.log('  erro: ' + e.message); }
+  if (!okSecaoMD) ruins += 1;
+  console.log(`${okSecaoMD ? '✓' : '✗'} Meu Dia: a seção libera criar tarefa própria; sem ela a pessoa só responde o que recebeu`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

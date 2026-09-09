@@ -9083,8 +9083,14 @@ function acessoDasTarefas(req) {
   return { usuario: req.user, isMaster: req.isMaster, isAdmin: req.isAdmin, unidades: escopoAdmin };
 }
 
+// A seção "Meu Dia" é a permissão de CRIAR tarefa própria. Sem ela a pessoa
+// continua entrando na tela e tocando as tarefas que recebeu - o que a seção
+// libera é abrir tarefa nova, em vez de só responder o que Master, Admin ou
+// gerente da unidade criou. Por isso o item do menu segue sem `secoes` em
+// nav-menu.js: esconder a tela deixaria a pessoa sem onde responder.
 function podeCriarTarefaManual(req) {
-  return req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo);
+  return req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo)
+    || (req.permissions?.sections || []).includes('tarefas');
 }
 
 app.get('/api/tarefas/minhas', auth.requireAuth, async (req, res) => {
@@ -9125,7 +9131,7 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
 
 app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
   try {
-    if (!podeCriarTarefaManual(req)) return res.status(403).json({ error: 'Somente Master, Admin ou Gerente pode criar tarefas.' });
+    if (!podeCriarTarefaManual(req)) return res.status(403).json({ error: 'Criar tarefa exige a seção Meu Dia, ou ser Master, Admin ou gerente da unidade.' });
     const acesso = acessoDasTarefas(req);
     const unidade = String(req.body?.unidade || '').trim() || null;
     if (unidade && !req.isMaster && !(acesso.unidades || []).includes(unidade)) {

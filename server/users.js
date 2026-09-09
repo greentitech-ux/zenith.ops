@@ -13,7 +13,7 @@ const sessions = require('./sessions');
 
 const usersRef = db.collection('users');
 
-const VALID_SECTIONS = ['monitor', 'disputas', 'cofre', 'fechamentos', 'kpis', 'lancamento', 'sangria', 'entregas', 'entregas-lancamento', 'ifood', 'solicitacoes', 'tecnico', 'suporte', 'manutencao', 'inventario', 'parque', 'parque-checkin', 'parque-loja', 'festas', 'abastecimento-carrinho', 'abastecimento-loja', 'ativos-ti', 'central-solucoes', 'rh', 'formularios', 'bonificacao'];
+const VALID_SECTIONS = ['monitor', 'disputas', 'cofre', 'fechamentos', 'kpis', 'lancamento', 'sangria', 'entregas', 'entregas-lancamento', 'ifood', 'solicitacoes', 'tecnico', 'suporte', 'manutencao', 'inventario', 'parque', 'parque-checkin', 'parque-loja', 'festas', 'abastecimento-carrinho', 'abastecimento-loja', 'ativos-ti', 'central-solucoes', 'rh', 'formularios', 'bonificacao', 'tarefas'];
 
 // a qual vertical de negocio (empresas.TIPOS_NEGOCIO_VALIDOS) cada secao
 // pertence - usado pra nao mostrar (no checklist de permissoes e no menu)
@@ -31,7 +31,7 @@ const SECTION_VERTICAIS = {
   parque: ['alimentacao'], 'parque-checkin': ['alimentacao'], 'parque-loja': ['alimentacao'],
   festas: ['alimentacao'], 'abastecimento-carrinho': ['alimentacao'], 'abastecimento-loja': ['alimentacao'],
   cofre: ['*'], solicitacoes: ['*'], tecnico: ['*'], suporte: ['*'], manutencao: ['*'],
-  'ativos-ti': ['*'], 'central-solucoes': ['*'], rh: ['*'], formularios: ['*'],
+  'ativos-ti': ['*'], 'central-solucoes': ['*'], rh: ['*'], formularios: ['*'], tarefas: ['*'],
 };
 function secoesDaVertical(tipoNegocio) {
   return Object.entries(SECTION_VERTICAIS)
