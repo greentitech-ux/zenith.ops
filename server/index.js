@@ -12717,6 +12717,26 @@ app.post('/api/suporte-chats/:id/gerar-chamado', auth.requireAuth, async (req, r
   }
 });
 
+function resumoChatParaTarefa(chat) {
+  const limite = 1750;
+  const limpo = (texto, max = 420) => String(texto || '').replace(/\s+/g, ' ').trim().slice(0, max);
+  const mensagens = Array.isArray(chat?.mensagens) ? chat.mensagens.filter((m) => limpo(m?.texto)) : [];
+  // A abertura explica o pedido; as últimas interações dizem onde ele parou.
+  // Juntas, dão ao responsável o contexto suficiente sem despejar o chat todo
+  // dentro da tarefa, que continuaria sendo a fonte oficial da conversa.
+  const selecionadas = mensagens.length > 5
+    ? [mensagens[0], ...mensagens.slice(-4)]
+    : mensagens;
+  const linhas = selecionadas.map((m) => `${m.de === 'visitante' ? 'Cliente' : (m.de === 'bot' ? 'Beniboy' : 'Suporte')}: ${limpo(m.texto)}`);
+  const cabecalho = [
+    `Conversa do Beniboy · Ticket #${chat.numeroTicket}`,
+    chat.assunto ? `Assunto: ${limpo(chat.assunto, 140)}` : '',
+    chat.nome ? `Cliente: ${limpo(chat.nome, 120)}` : '',
+    linhas.length ? 'Contexto da conversa:' : '',
+  ].filter(Boolean).join('\n');
+  return `${cabecalho}${linhas.length ? `\n${linhas.join('\n')}` : ''}`.slice(0, limite);
+}
+
 // O atendimento pode precisar de acompanhamento sem ainda ser um chamado
 // técnico. Esta ação cria uma tarefa no Meu Dia com o MESMO protocolo do
 // chat; assim Chat → Tarefa → Solicitação continua sendo um único assunto,
@@ -12734,10 +12754,9 @@ app.post('/api/suporte-chats/:id/gerar-tarefa', auth.requireAuth, async (req, re
     const mapa = await construirUnidadesMapa();
     const contexto = String(chat.lojaContexto || '').trim();
     const unidade = Object.keys(mapa).find((codigo) => String(mapa[codigo]).toLocaleLowerCase('pt-BR') === contexto.toLocaleLowerCase('pt-BR')) || null;
-    const primeiraMensagem = String(chat.mensagens?.find((m) => m.de === 'visitante')?.texto || '').trim();
     const tarefa = await tarefas.criar({
       titulo: `Chat · ${chat.nome || chat.assunto || 'Atendimento'}`,
-      descricao: `Protocolo #${chat.numeroTicket}${chat.assunto ? ` · ${chat.assunto}` : ''}${primeiraMensagem ? `\n\nSolicitação inicial: ${primeiraMensagem}` : ''}`,
+      descricao: resumoChatParaTarefa(chat),
       unidade, unidadeNome: unidade ? mapa[unidade] : null,
       usuario: req.user, responsavel: req.user,
       numeroTicket: chat.numeroTicket, origem: 'chat', origemChatId: chat.id,
