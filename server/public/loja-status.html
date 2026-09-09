@@ -1228,6 +1228,7 @@ function atualizarConteudoDetalhe(codigo, c){
     <button type="button" class="btn-mini" onclick="copiarLinkComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🔗 Link</button>
     <button type="button" class="btn-mini ok" title="Copiar o comando de instalação pra colar no PowerShell da loja (contorna o bloqueio do Windows)" onclick="copiarComandoVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">📋 Copiar comando</button>
     <button type="button" class="btn-mini" title="Baixar o agente NOC-NoPulso (jeito manual)" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️ Baixar</button>
+    ${c.tipo === 'interno' ? `<button type="button" class="btn-mini" style="color:var(--warn);" title="Reiniciar este computador - abre a janela de manutenção já com ele marcado" onclick="reiniciarDesteComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🔁 Reiniciar</button>` : ''}
     <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️ Remover</button>
   `;
   document.getElementById('detalhe-comp-editar').onclick = () => {
@@ -1755,6 +1756,22 @@ function abrirManutencao(){
   document.getElementById('manut-overlay').classList.remove('hidden');
 }
 function fecharManutencao(){ document.getElementById('manut-overlay').classList.add('hidden'); }
+
+// Reiniciar de dentro do detalhe abre a MESMA janela de manutenção, já com
+// essa máquina marcada e a busca preenchida pra ela aparecer sozinha na lista.
+// É de propósito não ter um caminho curto próprio: assim o reinício continua
+// passando pela senha mascarada, pelo aviso de 2 minutos na tela da loja e
+// pelo "Abortar reinício" - um botão que reinicia direto seria um segundo
+// caminho sem nenhuma dessas travas.
+function reiniciarDesteComputador(codigo, posto, nome){
+  fecharDetalheComputador();
+  abrirManutencao();
+  MANUT_MARCADOS = new Set([`${codigo}|${posto}`]);
+  MANUT_BUSCA = nome || posto;
+  document.getElementById('manut-busca').value = MANUT_BUSCA;
+  renderManutLista();
+  document.getElementById('manut-senha').focus();
+}
 
 // agrupado por unidade, com um checkbox no cabeçalho de cada uma - é isso
 // que dá "a unidade toda" e "várias unidades" sem inventar outra tela

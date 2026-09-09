@@ -9282,6 +9282,11 @@ app.patch('/api/tarefas/status-lote', auth.requireAuth, async (req, res) => {
     const ids = [...new Set(Array.isArray(req.body?.ids) ? req.body.ids.map(String).filter(Boolean) : [])].slice(0, 50);
     const status = String(req.body?.status || '');
     if (!ids.length) return res.status(400).json({ error: 'Selecione ao menos uma tarefa.' });
+    // concluir em lote é a mesma afirmação, vezes N - a senha vale igual
+    if (status === 'CONCLUIDA') {
+      if (!String(req.body?.password || '')) return res.status(400).json({ error: 'Confirme sua senha para concluir as tarefas.' });
+      if (!await auth.verifyPassword(req.user.id, req.body.password)) return res.status(400).json({ error: 'Senha incorreta.' });
+    }
     const acesso = acessoDasTarefas(req); const resultado = [];
     for (const id of ids) {
       try {
@@ -9348,6 +9353,13 @@ app.post('/api/tarefas/:id/concluir', auth.requireAuth, async (req, res) => {
     if (!tarefa) return res.status(404).json({ error: 'Tarefa não encontrada.' });
     const acesso = acessoDasTarefas(req);
     if (!tarefas.podeParticiparTarefa(tarefa, acesso)) return res.status(403).json({ error: 'Essa tarefa não está no seu escopo.' });
+    // Concluir é o registro de que a pessoa fez o serviço, e a máquina da loja
+    // é compartilhada - a senha diz QUEM está finalizando (mesma
+    // reautenticação do estorno e da sangria). 400 e não 401: o wrapper de
+    // fetch das páginas desloga em qualquer 401, e senha de confirmação errada
+    // não significa que a sessão está inválida.
+    if (!String(req.body?.password || '')) return res.status(400).json({ error: 'Confirme sua senha para concluir a tarefa.' });
+    if (!await auth.verifyPassword(req.user.id, req.body.password)) return res.status(400).json({ error: 'Senha incorreta.' });
     // Concluir tarefa NUNCA decide/aprova um ticket. Só encerra a execução
     // depois de aprovado; adiantamentos mantêm a prestação de contas própria.
     if (tarefa.vinculo?.tipo === 'solicitacao') {

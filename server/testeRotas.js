@@ -14396,7 +14396,7 @@ setTimeout(async () => {
     const deNovo = await pedirJsonDelete(`/api/tarefas/${t0.id}/anexos/${segundo.id}`, cabMD);
 
     // tarefa encerrada nao muda mais de prazo
-    const fim = await postarJson(`/api/tarefas/${t0.id}/concluir`, {}, cabMD);
+    const fim = await postarJson(`/api/tarefas/${t0.id}/concluir`, { password: process.env.MASTER_PASSWORD }, cabMD);
     const depoisDeConcluir = await enviarJson('PATCH', `/api/tarefas/${t0.id}/datas`, { dataEntrega: '2026-10-01' }, cabMD);
 
     const conf = {
@@ -14633,6 +14633,68 @@ setTimeout(async () => {
   } catch (e) { okEquipeMD = false; console.log('  erro: ' + e.message); }
   if (!okEquipeMD) ruins += 1;
   console.log(`${okEquipeMD ? '✓' : '✗'} Meu Dia: responsável é o dono e quem participa comenta/anexa/move status - prazo, equipe e remoção ficam com o dono`);
+
+  // ---- Meu Dia: o X do anexo e a senha pra concluir ----
+  // O X estava morto: o nome do arquivo ia pro onclick por JSON.stringify, que
+  // emite ASPAS DUPLAS dentro de um atributo delimitado por aspas duplas - o
+  // atributo fechava no meio e o onclick virava `tirarAnexo('id',`.
+  let okXeSenha = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const esc = new Function(`${(html.match(/e=x=>String\(x\?\?''\)\.replace\([\s\S]*?\}\[c\]\)\);/) || [''])[0].replace(/^e=/, 'const e=')} return e;`)();
+    const botaoAnexo = new Function('e', `${(html.match(/function botaoAnexo\(.*/) || [''])[0]}; return botaoAnexo;`)(esc);
+    // nome hostil de propósito: é exatamente o caso que quebrava o atributo
+    const marcacao = botaoAnexo({ id: 'a1b2c3', nome: 'nota "de \'compra\'".png' }, 0);
+    const onclicks = marcacao.match(/onclick="[^"]*"/g) || [];
+    const doX = onclicks.find((o) => o.includes('tirarAnexo')) || '';
+    const semNada = botaoAnexo({ nome: 'legado-sem-id.png' }, 0);
+
+    const t = await postarJson('/api/tarefas', { titulo: 'Fechar o caixa da noite' }, cabMD);
+    const alvo = t.status === 200 ? JSON.parse(t.corpo) : {};
+    const semSenha = await postarJson(`/api/tarefas/${alvo.id}/concluir`, {}, cabMD);
+    const senhaErrada = await postarJson(`/api/tarefas/${alvo.id}/concluir`, { password: 'nao-e-essa' }, cabMD);
+    const comSenha = await postarJson(`/api/tarefas/${alvo.id}/concluir`, { password: process.env.MASTER_PASSWORD }, cabMD);
+
+    const t2 = JSON.parse((await postarJson('/api/tarefas', { titulo: 'Conferir o cofre' }, cabMD)).corpo);
+    const loteSem = await enviarJson('PATCH', '/api/tarefas/status-lote', { ids: [t2.id], status: 'CONCLUIDA' }, cabMD);
+    // senha ERRADA é um caso à parte de senha AUSENTE: sem esta chamada, tirar
+    // a conferência do lote passaria batido (o vazio ainda seria recusado)
+    const loteErrada = await enviarJson('PATCH', '/api/tarefas/status-lote', { ids: [t2.id], status: 'CONCLUIDA', password: 'nao-e-essa' }, cabMD);
+    const loteCom = await enviarJson('PATCH', '/api/tarefas/status-lote', { ids: [t2.id], status: 'CONCLUIDA', password: process.env.MASTER_PASSWORD }, cabMD);
+    const loteOutroStatus = await enviarJson('PATCH', '/api/tarefas/status-lote', { ids: [t2.id], status: 'EM_ANDAMENTO' }, cabMD);
+
+    const ls = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+
+    const conf = {
+      'o X fecha o próprio atributo mesmo com aspas no nome do arquivo': /^onclick="tirarAnexo\('a1b2c3'\)"$/.test(doX),
+      'o nome do arquivo não entra no onclick (é de lá que vinham as aspas)': !doX.includes('nota') && !doX.includes('&quot;'),
+      'anexo antigo sem id não ganha X (não teria o que apagar)': !semNada.includes('tirarAnexo'),
+      'concluir sem senha é recusado': semSenha.status === 400 && /Confirme sua senha/i.test(JSON.parse(semSenha.corpo).error || ''),
+      'senha errada é recusada com 400, não 401 (401 desloga a tela)': senhaErrada.status === 400 && /Senha incorreta/i.test(JSON.parse(senhaErrada.corpo).error || ''),
+      'com a senha certa, conclui': comSenha.status === 200 && JSON.parse(comSenha.corpo).status === 'CONCLUIDA',
+      'concluir em lote também exige a senha, e confere se ela está certa': loteSem.status === 400 && /Confirme sua senha/i.test(JSON.parse(loteSem.corpo).error || '') && loteErrada.status === 400 && /Senha incorreta/i.test(JSON.parse(loteErrada.corpo).error || '') && loteCom.status === 200 && JSON.parse(loteCom.corpo).resultado[0].ok === true,
+      'mover o card sem concluir NÃO pede senha': loteOutroStatus.status === 200,
+      'a senha de concluir passa pelo campo mascarado, uma tarefa ou em lote': /id="PWDIN" type="password"/.test(html) && /async function concluir\(\)\{const senha=await pedirSenha\(/.test(html) && /status==='CONCLUIDA'\)\{senha=await pedirSenha\(/.test(html),
+      'o tipo do ticket aparece no card e no detalhe': /const tipoT=rotuloTicket\(x\.vinculo\)/.test(html) && /\$\{tipoT\?e\(tipoT\)\+' · ':''\}/.test(html) && /\(tipoT\?'<b>'\+e\(tipoT\)\+'<\/b> · ':''\)/.test(html),
+      'e o rótulo é o MESMO da Central (nenhum tipo inventado, nenhum faltando)': (() => {
+        const ch = require('fs').readFileSync(__dirname + '/public/central-historico.html', 'utf8');
+        const bloco = (ch.match(/const TIPOS_INFO = \{[\s\S]*?\n\};/) || [''])[0];
+        const central = {};
+        for (const m of bloco.matchAll(/'([a-z-]+)':\s*\{\s*label:'([^']+)'/g)) central[m[1]] = m[2];
+        const meu = new Function(`${(html.match(/const TIPO_TICKET=\{[^;]*;/) || [''])[0]} return TIPO_TICKET;`)();
+        const chaves = Object.keys(central);
+        return chaves.length >= 10 && chaves.every((k) => meu[k] === central[k]) && Object.keys(meu).every((k) => central[k] === meu[k]);
+      })(),
+      'o detalhe do computador tem o botão Reiniciar, só pra máquina interna': /c\.tipo === 'interno' \? `<button[^`]*reiniciarDesteComputador/.test(ls),
+      'e ele reusa a janela de manutenção (senha, aviso de 2 min e abortar)': /function reiniciarDesteComputador[\s\S]{0,400}abrirManutencao\(\)/.test(ls) && !/reiniciarDesteComputador[\s\S]{0,400}fetch\(/.test(ls),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okXeSenha = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (X=${doX} semSenha=${semSenha.status} ${semSenha.corpo.slice(0, 80)} lote=${loteSem.status} ${loteSem.corpo.slice(0, 80)})`);
+  } catch (e) { okXeSenha = false; console.log('  erro: ' + e.message); }
+  if (!okXeSenha) ruins += 1;
+  console.log(`${okXeSenha ? '✓' : '✗'} Meu Dia: o X do anexo fecha o próprio onclick, concluir pede senha (uma ou em lote) e o computador tem Reiniciar no detalhe`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
