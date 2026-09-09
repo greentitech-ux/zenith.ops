@@ -174,6 +174,14 @@ $('FILENEW').addEventListener('change',()=>{guardarPendentes($('FILENEW').files)
 // Ctrl+V cai no formulario aberto: tarefa nova guarda na fila, tarefa ja
 // existente sobe na hora
 document.addEventListener('paste',ev=>{if(!$('M').classList.contains('show'))return;const f=[...(ev.clipboardData?.files||[])][0];if(!f)return;ev.preventDefault();if(!$('NEW').hidden)return guardarPendentes([f]);if(O)anexar(f).catch(x=>alert(x.message))});
-montarPresets();Promise.all([contexto(),load()]).catch(x=>alert(x.message));
+montarPresets();Promise.all([contexto(),load()]).then(()=>{
+  // Link vindo do chat/Beniboy: abre o detalhe certo depois que a lista e o
+  // contexto já chegaram. Aceita Ticket # também para links compartilhados;
+  // o id é preferido pois é único mesmo quando o mesmo Ticket possui tarefa
+  // e chamado remoto.
+  const p=new URLSearchParams(location.search), id=p.get('tarefa'), ticket=p.get('ticket');
+  const alvo=id?L.find(t=>t.id===id):(ticket?L.find(t=>String(numeroDaTarefa(t))===String(ticket)):null);
+  if(alvo) openT(alvo.id);
+}).catch(x=>alert(x.message));
 </script><script src="/recolher.js"></script><script src="/nav-menu.js"></script>
 </body></html>

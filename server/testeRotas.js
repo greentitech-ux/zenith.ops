@@ -4401,6 +4401,7 @@ setTimeout(async () => {
       'chat gera tarefa com o mesmo protocolo, sem criar outro Ticket #': tarefaResp.status === 200 && tarefaChat.tarefa?.numeroTicket === chatNovo.numeroTicket && tarefaChat.tarefa?.origemChatId === chatNovo.id,
       'repetir a ação devolve a tarefa vinculada': tarefaRepetidaResp.status === 200 && tarefaRepetida.existente === true && tarefaRepetida.tarefa?.id === tarefaChat.tarefa?.id,
       'a Central mostra a ação Gerar tarefa': /function gerarTarefa\(id\)/.test(html) && /✅ Gerar tarefa/.test(html),
+      'Ticket # do chat vira link para a tarefa ou chamado': /const destinoPrincipal = chat\.chamadoId/.test(html) && /\/tarefas\.html\?tarefa=/.test(html) && /Ticket #\$\{escapeHtml\(chat\.numeroTicket\)\}/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okAssumir = !falhas.length;
