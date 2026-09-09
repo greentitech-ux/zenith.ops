@@ -9156,6 +9156,13 @@ const ROTULO_TIPO_TICKET = {
   adiantamento: 'Adiantamento',
 };
 
+// Suporte de TI é atendimento operacional: não aguarda aprovação financeira
+// para registrar que o trabalho foi resolvido (ex.: login desbloqueado). Os
+// demais tipos continuam exigindo aprovação antes de concluir a execução.
+function ticketPodeConcluirTarefa(ticket) {
+  return ticket?.tipo === 'suporte-ti' || ticket?.status === 'APROVADO';
+}
+
 function podeDistribuirTarefas(req) {
   return req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo);
 }
@@ -9599,7 +9606,7 @@ app.patch('/api/tarefas/status-lote', auth.requireAuth, async (req, res) => {
         if (status === 'CONCLUIDA') {
           if (tarefa.vinculo?.tipo === 'solicitacao') {
             const ticket = await solicitacoes.getOne(tarefa.vinculo.id);
-            if (!ticket || ticket.status !== 'APROVADO' || ticket.tipo === 'adiantamento') throw new Error('O ticket vinculado ainda não pode ser finalizado.');
+            if (!ticket || !ticketPodeConcluirTarefa(ticket) || ticket.tipo === 'adiantamento') throw new Error('O ticket vinculado ainda não pode ser finalizado.');
             if (ticket.execucaoStatus !== 'FINALIZADO') await solicitacoes.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.username || req.user.nome || 'Suporte' });
             await sincronizarTarefasDoTicket(await solicitacoes.getOne(ticket.id), 'solicitacao');
           } else if (tarefa.vinculo?.tipo === 'estorno') {
@@ -9669,7 +9676,7 @@ app.post('/api/tarefas/:id/concluir', auth.requireAuth, async (req, res) => {
     if (tarefa.vinculo?.tipo === 'solicitacao') {
       const ticket = await solicitacoes.getOne(tarefa.vinculo.id);
       if (!ticket) return res.status(404).json({ error: 'O ticket vinculado não foi encontrado.' });
-      if (ticket.status !== 'APROVADO') return res.status(409).json({ error: 'Esse ticket ainda precisa ser aprovado antes de concluir a tarefa.' });
+      if (!ticketPodeConcluirTarefa(ticket)) return res.status(409).json({ error: 'Esse ticket ainda precisa ser aprovado antes de concluir a tarefa.' });
       if (ticket.tipo === 'adiantamento') return res.status(409).json({ error: 'Adiantamento só finaliza após a prestação de contas (nota e valor gasto).' });
       if (ticket.execucaoStatus !== 'FINALIZADO') {
         await solicitacoes.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.username || req.user.nome || 'Suporte' });

@@ -862,4 +862,82 @@
     var el = e.target.closest && e.target.closest('input[type=date]');
     if (el && typeof el.showPicker === 'function') { try { el.showPicker(); } catch (_) {} }
   });
+
+  // ---- período "Mês": escolher um dia mantém o mês inteiro ----
+  // Todas as telas usam pares De/Até, mas cada uma nasceu com ids e handlers
+  // próprios. Esta camada comum preserva a intenção do atalho Mês: se o
+  // usuário escolhe 15/06, o filtro vira automaticamente 01/06 a 30/06;
+  // escolhendo um dia de outro mês, o período acompanha esse novo mês.
+  // O marcador no container continua valendo mesmo se o handler antigo da
+  // página redesenhar os botões ao receber a mudança de data.
+  var PARES_PERIODO_MES = [
+    { de: 'F-DE', ate: 'F-ATE', painel: '#PRESETS' },
+    { de: 'filtro-data-de', ate: 'filtro-data-ate', painel: '#presets-periodo-central' },
+    { de: 'filtro-data-de-lista', ate: 'filtro-data-ate-lista', painel: '#presets-periodo-lista' },
+    { de: 'filtro-data-de-tecnico', ate: 'filtro-data-ate-tecnico', painel: '#presets-periodo-tecnico' },
+    { de: 'f-date-start', ate: 'f-date-end', painel: '#presets' },
+    { de: 'f-data-de', ate: 'f-data-ate', painel: '#presets' },
+    { de: 'f-inicio', ate: 'f-fim', painel: '.filtros' },
+    { de: 'd-inicio', ate: 'd-fim', painel: '#d-presets' },
+    { de: 'h-inicio', ate: 'h-fim', painel: '#h-presets' }
+  ];
+
+  function parPeriodoMes(campo) {
+    if (!campo || !campo.id) return null;
+    return PARES_PERIODO_MES.find(function (p) { return p.de === campo.id || p.ate === campo.id; }) || null;
+  }
+  function painelDoPar(par) { return par && document.querySelector(par.painel); }
+  function botaoMes(painel) {
+    if (!painel) return null;
+    return Array.prototype.find.call(painel.querySelectorAll('button'), function (b) {
+      return String(b.dataset.tipo || b.dataset.preset || b.textContent || '').trim().toLocaleLowerCase('pt-BR') === 'mês'
+        || String(b.dataset.tipo || b.dataset.preset || '').toLocaleLowerCase('pt-BR') === 'mes';
+    }) || null;
+  }
+  function mesEstaAtivo(par) {
+    var painel = painelDoPar(par), botao = botaoMes(painel);
+    return !!(painel && (painel.dataset.zenithMesAtivo === '1' || (botao && botao.classList.contains('active'))));
+  }
+  function isoDoMes(data) {
+    var d = new Date(String(data) + 'T12:00:00');
+    if (Number.isNaN(d.getTime())) return null;
+    var y = d.getFullYear(), m = d.getMonth();
+    var f = function (n) { return String(n).padStart(2, '0'); };
+    return { de: y + '-' + f(m + 1) + '-01', ate: y + '-' + f(new Date(y, m + 1, 0).getDate()) };
+  }
+  function manterBotaoMes(par) {
+    var painel = painelDoPar(par);
+    if (!painel) return;
+    painel.dataset.zenithMesAtivo = '1';
+    // Alguns handlers removem .active para indicar intervalo manual. Aqui o
+    // intervalo não é manual: ele foi reencaixado no mês escolhido.
+    setTimeout(function () { var b = botaoMes(painel); if (b) b.classList.add('active'); }, 0);
+  }
+  document.addEventListener('click', function (e) {
+    var botao = e.target.closest && e.target.closest('button');
+    if (!botao) return;
+    var texto = String(botao.dataset.tipo || botao.dataset.preset || botao.textContent || '').trim().toLocaleLowerCase('pt-BR');
+    if (!['mes', 'mês', 'hoje', 'ontem', 'semana', '7dias', 'trimestre', 'todos', 'tudo'].includes(texto)) return;
+    PARES_PERIODO_MES.forEach(function (par) {
+      var painel = painelDoPar(par);
+      if (!painel || !painel.contains(botao)) return;
+      if (texto === 'mes' || texto === 'mês') painel.dataset.zenithMesAtivo = '1';
+      else delete painel.dataset.zenithMesAtivo;
+    });
+  }, true);
+  function ajustarMesAoEscolherData(e) {
+    var campo = e.target;
+    if (!campo || campo.type !== 'date' || campo.dataset.zenithAjustandoMes === '1') return;
+    var par = parPeriodoMes(campo);
+    if (!par || !mesEstaAtivo(par) || !campo.value) return;
+    var intervalo = isoDoMes(campo.value);
+    var de = document.getElementById(par.de), ate = document.getElementById(par.ate);
+    if (!intervalo || !de || !ate) return;
+    campo.dataset.zenithAjustandoMes = '1';
+    de.value = intervalo.de; ate.value = intervalo.ate;
+    manterBotaoMes(par);
+    setTimeout(function () { delete campo.dataset.zenithAjustandoMes; }, 0);
+  }
+  document.addEventListener('input', ajustarMesAoEscolherData, true);
+  document.addEventListener('change', ajustarMesAoEscolherData, true);
 })();
