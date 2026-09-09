@@ -21,6 +21,16 @@ function podeGerir(tarefa, acesso) {
   return !!acesso.isAdmin && !!tarefa.unidade && (acesso.unidades || []).includes(tarefa.unidade);
 }
 
+// Modelo do Asana: UM responsável (assignee, dono da entrega) e N participantes
+// (collaborators). Participante faz a tarefa ANDAR - comenta, anexa e mexe no
+// status. O que muda o combinado (prazo, quem participa) e o que destrói
+// (remover a tarefa) fica com o dono; anexo, cada um tira o seu. Sem essa
+// separação, "quem participa" viraria um segundo dono e o prazo mudaria sem
+// quem cobra ficar sabendo.
+function podeParticipar(tarefa, acesso) {
+  return podeGerir(tarefa, acesso) || (tarefa.colaboradoresIds || []).includes(acesso.usuario.id);
+}
+
 function podeArquivar(tarefa, acesso) {
   return !!acesso.isMaster || (!!acesso.isAdmin && tarefa.status === 'CONCLUIDA'
     && !!tarefa.unidade && (acesso.unidades || []).includes(tarefa.unidade));
@@ -104,7 +114,7 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
       unidade: ticket.unidade || null,
       unidadeNome: ticket.unidadeNome || null,
       comentarios: [],
-      dataInicio: agora.slice(0, 10), dataEntrega: null, anexos: [], colaboradores: [],
+      dataInicio: agora.slice(0, 10), dataEntrega: null, anexos: [], colaboradores: [], colaboradoresIds: [],
     };
     await ref.set(tarefa);
     alteradas.push(tarefa);
@@ -115,7 +125,10 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
 async function listarMinhas(acesso) {
   const snap = await COLLECTION.orderBy('atualizadoEm', 'desc').get();
   return snap.docs.map((d) => d.data())
-    .filter((tarefa) => tarefa.status !== 'ARQUIVADA' && podeGerir(tarefa, acesso))
+    .filter((tarefa) => tarefa.status !== 'ARQUIVADA' && podeParticipar(tarefa, acesso))
+    // podeGerir vai junto pra tela saber o que desabilitar (prazo, participantes,
+    // remover) sem ter que reimplementar a regra no navegador
+    .map((tarefa) => ({ ...tarefa, podeGerir: podeGerir(tarefa, acesso) }))
     .sort((a, b) => String(b.atualizadoEm).localeCompare(String(a.atualizadoEm)));
 }
 
@@ -124,7 +137,13 @@ async function getOne(id) {
   return snap.exists ? snap.data() : null;
 }
 
-async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, vinculo = null }) {
+function pessoasParaColaboradores(pessoas, responsavelId) {
+  const vistos = new Set([responsavelId]);
+  return (pessoas || []).filter((p) => p && p.id && !vistos.has(p.id) && vistos.add(p.id))
+    .map((p) => ({ id: p.id, nome: nomeUsuario(p) })).slice(0, 20);
+}
+
+async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null }) {
   const texto = String(titulo || '').trim().slice(0, 200);
   if (!texto) throw new Error('Informe o título da tarefa.');
   const ref = COLLECTION.doc();
@@ -133,13 +152,15 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
   const entrega = /^\d{4}-\d{2}-\d{2}$/.test(dataEntrega || '') ? dataEntrega : null;
   const hoje = agora.slice(0, 10);
   const statusInicial = entrega && entrega < hoje ? 'PENDENTE' : (entrega === hoje ? 'HOJE' : 'A_FAZER');
+  const equipe = pessoasParaColaboradores(colaboradores, (responsavel || usuario).id);
   const tarefa = {
     id: ref.id, origem: vinculo ? 'ticket-manual' : 'manual', titulo: texto,
     descricao: String(descricao || '').trim().slice(0, 2000),
     prioridade: 'normal', status: statusInicial, dataInicio: inicio, dataEntrega: entrega,
     responsavelId: (responsavel || usuario).id, responsavelEmail: (responsavel || usuario).email || null, responsavelNome: nomeUsuario(responsavel || usuario),
     criadoPorId: usuario.id, criadoPorNome: nomeUsuario(usuario),
-    criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo, anexos: [], colaboradores: [],
+    criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo, anexos: [],
+    colaboradores: equipe, colaboradoresIds: equipe.map((p) => p.id),
     unidade: unidade || null, unidadeNome: unidadeNome || unidade || null,
   };
   await ref.set(tarefa);
@@ -150,7 +171,7 @@ async function adicionarAnexo(id, acesso, anexo) {
   const ref = COLLECTION.doc(id); const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
   const tarefa = snap.data();
-  if (!podeGerir(tarefa, acesso)) throw new Error('Você não pode anexar nesta tarefa.');
+  if (!podeParticipar(tarefa, acesso)) throw new Error('Você não pode anexar nesta tarefa.');
   const item = {
     id: crypto.randomBytes(8).toString('hex'), nome: String(anexo.nome || 'print').slice(0, 160),
     path: anexo.path, tipo: anexo.tipo || 'application/octet-stream', tamanho: Number(anexo.tamanho || 0),
@@ -167,10 +188,11 @@ async function removerAnexo(id, acesso, anexoId) {
   const ref = COLLECTION.doc(id); const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
   const tarefa = snap.data();
-  if (!podeGerir(tarefa, acesso)) throw new Error('Você não pode remover anexo desta tarefa.');
+  if (!podeParticipar(tarefa, acesso)) throw new Error('Você não pode remover anexo desta tarefa.');
   const lista = tarefa.anexos || [];
   const alvo = lista.find((a) => a && a.id === String(anexoId));
   if (!alvo) throw new Error('Anexo não encontrado.');
+  if (!podeGerir(tarefa, acesso) && alvo.enviadoPorId !== acesso.usuario.id) throw new Error('Quem participa remove só o anexo que enviou.');
   const agora = new Date().toISOString();
   await ref.update({ anexos: lista.filter((a) => a !== alvo), atualizadoEm: agora });
   return { tarefa: await getOne(id), path: alvo.path || null };
@@ -212,7 +234,7 @@ async function atualizarStatus(id, acesso, status) {
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
   const tarefa = snap.data();
-  if (!podeGerir(tarefa, acesso)) throw new Error('Você não pode alterar esta tarefa.');
+  if (!podeParticipar(tarefa, acesso)) throw new Error('Você não pode alterar esta tarefa.');
   if (!STATUS_ABERTO.has(tarefa.status) && tarefa.status !== 'CONCLUIDA') throw new Error('Essa tarefa já foi encerrada.');
   const reaberta = tarefa.status === 'CONCLUIDA';
   await ref.update({ status, atualizadoEm: new Date().toISOString(), ...(reaberta ? { concluidaEm: null, concluidaPorId: null, concluidaPorNome: null, reabertaEm: new Date().toISOString(), reabertaPorNome: nomeUsuario(acesso.usuario) } : {}) });
@@ -226,7 +248,7 @@ async function adicionarComentario(id, { usuario, isMaster, isAdmin, unidades, t
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
   const tarefa = snap.data();
-  if (!podeGerir(tarefa, { usuario, isMaster, isAdmin, unidades })) throw new Error('Você não pode comentar nesta tarefa.');
+  if (!podeParticipar(tarefa, { usuario, isMaster, isAdmin, unidades })) throw new Error('Você não pode comentar nesta tarefa.');
   const agora = new Date().toISOString();
   const comentario = { id: crypto.randomBytes(8).toString('hex'), texto: corpo, porId: usuario.id, porNome: nomeUsuario(usuario), em: agora };
   await ref.update({ comentarios: [...(tarefa.comentarios || []), comentario].slice(-100), atualizadoEm: agora });
@@ -238,10 +260,23 @@ async function concluir(id, { usuario, isMaster, isAdmin, unidades, observacao }
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
   const tarefa = snap.data();
-  if (!podeGerir(tarefa, { usuario, isMaster, isAdmin, unidades })) throw new Error('Você não pode concluir esta tarefa.');
+  if (!podeParticipar(tarefa, { usuario, isMaster, isAdmin, unidades })) throw new Error('Você não pode concluir esta tarefa.');
   if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Essa tarefa já foi encerrada.');
   const agora = new Date().toISOString();
   await ref.update({ status: 'CONCLUIDA', concluidaEm: agora, concluidaPorId: usuario.id, concluidaPorNome: nomeUsuario(usuario), observacaoConclusao: String(observacao || '').trim().slice(0, 1000), atualizadoEm: agora });
+  return getOne(id);
+}
+
+// Trocar quem participa muda o combinado da tarefa - fica com o dono, igual
+// ao prazo. Participante que se auto-adicionasse entraria em tarefa de outra
+// unidade sem ninguém aprovar.
+async function definirColaboradores(id, acesso, pessoas) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeGerir(tarefa, acesso)) throw new Error('Só o responsável, quem criou ou o Admin muda quem participa.');
+  const equipe = pessoasParaColaboradores(pessoas, tarefa.responsavelId);
+  await ref.update({ colaboradores: equipe, colaboradoresIds: equipe.map((p) => p.id), atualizadoEm: new Date().toISOString() });
   return getOne(id);
 }
 
@@ -273,4 +308,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
   return resultado;
 }
 
-module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir };
+module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, definirColaboradores, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar };

@@ -14544,6 +14544,96 @@ setTimeout(async () => {
   if (!okSecaoMD) ruins += 1;
   console.log(`${okSecaoMD ? '✓' : '✗'} Meu Dia: a seção libera criar tarefa própria; sem ela a pessoa só responde o que recebeu`);
 
+  // ---- Meu Dia: responsável x quem participa (modelo do Asana) ----
+  // Participante faz a tarefa ANDAR (comenta, anexa, move o status). O que
+  // muda o combinado - prazo e quem participa - e o que destrói fica com o
+  // dono. Anexo, cada um tira o seu.
+  let okEquipeMD = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const senhaEQ = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    ['eq-dono', 'eq-part', 'eq-fora'].forEach((quem) => DOCS.set(`users/u-${quem}`, {
+      passwordHash: senhaEQ, role: 'user', active: true, email: `${quem}@teste.local`, username: quem,
+      permissions: { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    }));
+    // users.list() é cache de 60s (Firestore cobra por documento): sem passar
+    // por uma escrita de verdade, os três acessos novos não apareceriam nela
+    const usersMod = require(__dirname + '/users.js');
+    for (const quem of ['eq-dono', 'eq-part', 'eq-fora']) {
+      await usersMod.updatePermissions(`u-${quem}`, { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] });
+    }
+    const cabDono = { Authorization: 'Bearer ' + (await auth.login('eq-dono@teste.local', 'SenhaDeTeste!2026')).token };
+    const cabPart = { Authorization: 'Bearer ' + (await auth.login('eq-part@teste.local', 'SenhaDeTeste!2026')).token };
+    const cabFora = { Authorization: 'Bearer ' + (await auth.login('eq-fora@teste.local', 'SenhaDeTeste!2026')).token };
+
+    // o Master cria e põe o participante junto (só Master/Admin distribui)
+    const nasce = await postarJson('/api/tarefas', {
+      titulo: 'Conferir a nota do fornecedor', responsavelId: 'u-eq-dono',
+      colaboradoresIds: ['u-eq-part'], dataEntrega: '2026-09-30',
+    }, cabMD);
+    const tf = nasce.status === 200 ? JSON.parse(nasce.corpo) : {};
+
+    const vePart = await pedir('/api/tarefas/minhas', cabPart);
+    const veFora = await pedir('/api/tarefas/minhas', cabFora);
+    const listaPart = vePart.status === 200 ? JSON.parse(vePart.corpo) : [];
+    const listaFora = veFora.status === 200 ? JSON.parse(veFora.corpo) : [];
+    const cardDoPart = listaPart.find((x) => x.id === tf.id) || {};
+    const veDono = await pedir('/api/tarefas/minhas', cabDono);
+    const cardDoDono = (veDono.status === 200 ? JSON.parse(veDono.corpo) : []).find((x) => x.id === tf.id) || {};
+
+    // o que o participante PODE
+    const comenta = await postarJson(`/api/tarefas/${tf.id}/comentarios`, { texto: 'Nota conferida, falta o carimbo.' }, cabPart);
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    const anexaPart = await postarMultipart(`/api/tarefas/${tf.id}/anexos`, {}, { nome: 'nota-part.png', tipo: 'image/png', buffer: png }, 'anexo', cabPart);
+    const anexaDono = await postarMultipart(`/api/tarefas/${tf.id}/anexos`, {}, { nome: 'nota-dono.png', tipo: 'image/png', buffer: png }, 'anexo', cabDono);
+    const move = await enviarJson('PATCH', `/api/tarefas/${tf.id}/status`, { status: 'EM_ANDAMENTO' }, cabPart);
+    const comDois = anexaDono.status === 200 ? JSON.parse(anexaDono.corpo) : { anexos: [] };
+    const doPart = (comDois.anexos || []).find((a) => a.nome === 'nota-part.png') || {};
+    const doDono = (comDois.anexos || []).find((a) => a.nome === 'nota-dono.png') || {};
+
+    // o que o participante NÃO pode
+    const mudaPrazo = await enviarJson('PATCH', `/api/tarefas/${tf.id}/datas`, { dataEntrega: '2026-12-31' }, cabPart);
+    const mudaEquipe = await enviarJson('PATCH', `/api/tarefas/${tf.id}/colaboradores`, { colaboradoresIds: ['u-eq-fora'] }, cabPart);
+    // lista vazia não passa pela validação de quem entra, então é ela que
+    // chega no guarda do módulo - sem esse caso, o participante poderia
+    // simplesmente ESVAZIAR a equipe e ninguém pegaria
+    const esvazia = await enviarJson('PATCH', `/api/tarefas/${tf.id}/colaboradores`, { colaboradoresIds: [] }, cabPart);
+    const remove = await pedirJsonDelete(`/api/tarefas/${tf.id}`, cabPart);
+    const tiraDoOutro = await pedirJsonDelete(`/api/tarefas/${tf.id}/anexos/${doDono.id}`, cabPart);
+    const tiraOSeu = await pedirJsonDelete(`/api/tarefas/${tf.id}/anexos/${doPart.id}`, cabPart);
+
+    // quem não participa não enxerga nem toca
+    const comentaFora = await postarJson(`/api/tarefas/${tf.id}/comentarios`, { texto: 'oi' }, cabFora);
+    const anexaFora = await postarMultipart(`/api/tarefas/${tf.id}/anexos`, {}, { nome: 'x.png', tipo: 'image/png', buffer: png }, 'anexo', cabFora);
+
+    // o dono troca quem participa; o Master valida antes de gravar
+    const trocaEquipe = await enviarJson('PATCH', `/api/tarefas/${tf.id}/colaboradores`, { colaboradoresIds: ['u-eq-fora'] }, cabMD);
+    const t4 = trocaEquipe.status === 200 ? JSON.parse(trocaEquipe.corpo) : {};
+    const partSaiu = await postarJson(`/api/tarefas/${tf.id}/comentarios`, { texto: 'ainda posso?' }, cabPart);
+    const fantasma = await enviarJson('PATCH', `/api/tarefas/${tf.id}/colaboradores`, { colaboradoresIds: ['u-nao-existe'] }, cabMD);
+
+    const conf = {
+      'a tarefa nasce com responsável e participante separados': nasce.status === 200 && tf.responsavelId === 'u-eq-dono' && JSON.stringify(tf.colaboradoresIds) === '["u-eq-part"]',
+      'quem participa vê a tarefa no Meu Dia; quem não participa, não': vePart.status === 200 && !!cardDoPart.id && !listaFora.some((x) => x.id === tf.id),
+      'a tela sabe quem manda: podeGerir só pro dono': cardDoPart.podeGerir === false && cardDoDono.podeGerir === true,
+      'participante comenta, anexa e move o status': comenta.status === 200 && anexaPart.status === 200 && move.status === 200 && JSON.parse(move.corpo).status === 'EM_ANDAMENTO',
+      'participante NÃO muda o prazo': mudaPrazo.status === 400 && /não pode alterar/i.test(JSON.parse(mudaPrazo.corpo).error || ''),
+      'participante NÃO muda quem participa': mudaEquipe.status === 400 && /Somente Master ou Admin|responsável/i.test(JSON.parse(mudaEquipe.corpo).error || ''),
+      'participante NÃO esvazia a equipe': esvazia.status === 400 && /muda quem participa/i.test(JSON.parse(esvazia.corpo).error || ''),
+      'participante NÃO remove a tarefa': remove.status === 400 && /Somente o Master/i.test(JSON.parse(remove.corpo).error || ''),
+      'participante remove o anexo que ele mandou, não o dos outros': tiraDoOutro.status === 400 && /remove só o anexo que enviou/i.test(JSON.parse(tiraDoOutro.corpo).error || '') && tiraOSeu.status === 200,
+      'quem não participa não comenta nem anexa': comentaFora.status === 400 && anexaFora.status === 404,
+      'o dono troca quem participa e quem saiu perde o acesso': trocaEquipe.status === 200 && JSON.stringify(t4.colaboradoresIds) === '["u-eq-fora"]' && partSaiu.status === 400,
+      'participante inexistente é recusado antes de gravar': fantasma.status === 400 && /não encontrado|inativo/i.test(JSON.parse(fantasma.corpo).error || ''),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okEquipeMD = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (nasce=${nasce.status} ${nasce.corpo.slice(0, 90)} move=${move.status} prazo=${mudaPrazo.status} ${mudaPrazo.corpo.slice(0, 80)} anexoOutro=${tiraDoOutro.status} ${tiraDoOutro.corpo.slice(0, 80)})`);
+  } catch (e) { okEquipeMD = false; console.log('  erro: ' + e.message); }
+  if (!okEquipeMD) ruins += 1;
+  console.log(`${okEquipeMD ? '✓' : '✗'} Meu Dia: responsável é o dono e quem participa comenta/anexa/move status - prazo, equipe e remoção ficam com o dono`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

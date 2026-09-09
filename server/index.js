@@ -9151,10 +9151,12 @@ app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
       }
     }
     const mapa = unidade ? await construirUnidadesMapa() : {};
+    const participantes = await resolverColaboradores(req, acesso, req.body?.colaboradoresIds, unidade);
     const criada = await tarefas.criar({
       titulo: req.body?.titulo, descricao: req.body?.descricao,
       dataInicio: req.body?.dataInicio, dataEntrega: req.body?.dataEntrega,
       unidade, unidadeNome: unidade ? (mapa[unidade] || unidade) : null, usuario: req.user, responsavel,
+      colaboradores: participantes,
     });
     broadcast('tarefas-atualizada', { id: criada.id, unidade: criada.unidade }, 'tarefas');
     res.json(criada);
@@ -9192,7 +9194,7 @@ app.post('/api/tarefas/:id/anexos', auth.requireAuth, uploadTarefaAnexo.single('
       return res.status(400).json({ error: 'Anexe uma imagem (PNG, JPG ou WebP) ou PDF.' });
     }
     const tarefa = await tarefas.getOne(req.params.id);
-    if (!tarefa || !tarefas.podeGerirTarefa(tarefa, acessoDasTarefas(req))) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acessoDasTarefas(req))) return res.status(404).json({ error: 'Tarefa não encontrada.' });
     const caminho = await storage.salvarArquivo(req.params.id, file, 'tarefas');
     const atualizada = await tarefas.adicionarAnexo(req.params.id, acessoDasTarefas(req), { nome: file.originalname, path: caminho, tipo: file.mimetype, tamanho: file.size });
     broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
@@ -9205,7 +9207,7 @@ app.post('/api/tarefas/:id/anexos', auth.requireAuth, uploadTarefaAnexo.single('
 app.get('/api/tarefas/:id/anexos/:indice', auth.requireAuth, async (req, res) => {
   try {
     const tarefa = await tarefas.getOne(req.params.id);
-    if (!tarefa || !tarefas.podeGerirTarefa(tarefa, acessoDasTarefas(req))) return res.sendStatus(404);
+    if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acessoDasTarefas(req))) return res.sendStatus(404);
     const anexo = (tarefa.anexos || [])[Number(req.params.indice)];
     if (!anexo?.path) return res.sendStatus(404);
     return storage.streamArquivo(anexo.path, anexo.tipo, res);
@@ -9222,6 +9224,42 @@ app.delete('/api/tarefas/:id/anexos/:anexoId', auth.requireAuth, async (req, res
     if (path) await storage.apagarArquivo(path).catch(() => {});
     broadcast('tarefas-atualizada', { id: tarefa.id, unidade: tarefa.unidade }, 'tarefas');
     res.json(tarefa);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// quem pode entrar como participante é a MESMA regra do responsável: usuário
+// ativo, dentro do escopo de quem está criando e com acesso à unidade da
+// tarefa. Sem isso dava pra puxar alguém de outra franquia pra dentro do card.
+async function resolverColaboradores(req, acesso, ids, unidade) {
+  const pedidos = [...new Set((Array.isArray(ids) ? ids : []).map(String).filter(Boolean))].slice(0, 20);
+  if (!pedidos.length) return [];
+  if (!req.isMaster && !req.isAdmin) throw new Error('Somente Master ou Admin pode definir quem participa da tarefa.');
+  const todos = await users.list();
+  return pedidos.map((id) => {
+    const pessoa = todos.find((u) => u.id === id && u.active !== false);
+    if (!pessoa) throw new Error('Participante não encontrado ou inativo.');
+    const doPessoal = pessoa.role === 'master' ? [] : (pessoa.permissions?.unidades || []);
+    if (!req.isMaster && !doPessoal.some((codigo) => (acesso.unidades || []).includes(codigo))) {
+      throw new Error(`${pessoa.username || pessoa.nome || 'O participante'} não pertence a uma unidade do seu acesso.`);
+    }
+    if (unidade && pessoa.role !== 'master' && !doPessoal.includes(unidade)) {
+      throw new Error(`${pessoa.username || pessoa.nome || 'O participante'} não tem acesso à unidade selecionada.`);
+    }
+    return pessoa;
+  });
+}
+
+app.patch('/api/tarefas/:id/colaboradores', auth.requireAuth, async (req, res) => {
+  try {
+    const acesso = acessoDasTarefas(req);
+    const atual = await tarefas.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    const pessoas = await resolverColaboradores(req, acesso, req.body?.colaboradoresIds, atual.unidade);
+    const atualizada = await tarefas.definirColaboradores(req.params.id, acesso, pessoas);
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -9248,7 +9286,7 @@ app.patch('/api/tarefas/status-lote', auth.requireAuth, async (req, res) => {
     for (const id of ids) {
       try {
         const tarefa = await tarefas.getOne(id);
-        if (!tarefa || !tarefas.podeGerirTarefa(tarefa, acesso)) throw new Error('Sem acesso a esta tarefa.');
+        if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acesso)) throw new Error('Sem acesso a esta tarefa.');
         if (status === 'CONCLUIDA') {
           if (tarefa.vinculo?.tipo === 'solicitacao') {
             const ticket = await solicitacoes.getOne(tarefa.vinculo.id);
@@ -9276,7 +9314,7 @@ app.patch('/api/tarefas/:id/status', auth.requireAuth, async (req, res) => {
     const acesso = acessoDasTarefas(req);
     const anterior = await tarefas.getOne(req.params.id);
     if (!anterior) return res.status(404).json({ error: 'Tarefa não encontrada.' });
-    if (!tarefas.podeGerirTarefa(anterior, acesso)) return res.status(403).json({ error: 'Essa tarefa não está no seu escopo.' });
+    if (!tarefas.podeParticiparTarefa(anterior, acesso)) return res.status(403).json({ error: 'Essa tarefa não está no seu escopo.' });
     // Reabrir uma tarefa ligada a ticket também reabre sua execução; assim a
     // Central e o Meu Dia não ficam mostrando estados contraditórios.
     if (anterior.status === 'CONCLUIDA' && req.body?.status !== 'CONCLUIDA' && anterior.vinculo?.tipo === 'solicitacao') {
@@ -9309,7 +9347,7 @@ app.post('/api/tarefas/:id/concluir', auth.requireAuth, async (req, res) => {
     const tarefa = await tarefas.getOne(req.params.id);
     if (!tarefa) return res.status(404).json({ error: 'Tarefa não encontrada.' });
     const acesso = acessoDasTarefas(req);
-    if (!tarefas.podeGerirTarefa(tarefa, acesso)) return res.status(403).json({ error: 'Essa tarefa não está no seu escopo.' });
+    if (!tarefas.podeParticiparTarefa(tarefa, acesso)) return res.status(403).json({ error: 'Essa tarefa não está no seu escopo.' });
     // Concluir tarefa NUNCA decide/aprova um ticket. Só encerra a execução
     // depois de aprovado; adiantamentos mantêm a prestação de contas própria.
     if (tarefa.vinculo?.tipo === 'solicitacao') {
