@@ -33,12 +33,26 @@ const CODIGOS_ARCFOOD = new Set([
   'DOM__19821', 'DOM__19855', 'DOM___19888', 'DOM_19889',
 ]);
 
+// Em tarefas, chats e documentos a unidade chega pelo NOME bonito, e nao
+// pelo codigo da planilha/Adyen. Normalizar aqui evita que "Dom São Miguel"
+// caia por engano no Grupo Bravo apenas por ter acento ou o prefixo "Dom".
+const NOMES_ARCFOOD_NORMALIZADOS = new Set([
+  'sao miguel', 'dom sao miguel',
+  'carrao', 'dom carrao',
+  'mooca', 'dom mooca',
+  'tatuape', 'dom tatuape',
+]);
+function normalizarUnidade(texto) {
+  return String(texto == null ? '' : texto).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
 // unidade sem codigo nao tem rede - devolver GBE aqui faria lixo virar
 // linha do Grupo Bravo no relatorio
 function redeDaUnidade(codigo) {
   const c = String(codigo == null ? '' : codigo).trim();
   if (!c) return null;
-  return CODIGOS_ARCFOOD.has(c) ? ARCFOOD : GBE;
+  return CODIGOS_ARCFOOD.has(c) || NOMES_ARCFOOD_NORMALIZADOS.has(normalizarUnidade(c)) ? ARCFOOD : GBE;
 }
 
 const ehArcfood = (codigo) => redeDaUnidade(codigo) === ARCFOOD;

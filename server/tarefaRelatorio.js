@@ -14,7 +14,11 @@
 // PDF anexado entra so como NOME - pdfkit nao embute PDF dentro de PDF, e
 // rasterizar exigiria uma dependencia nova so pra isso.
 const PDFDocument = require('pdfkit');
+const path = require('path');
 const storage = require('./storage');
+const redes = require('./redes');
+
+const LOGO_GRUPO_BRAVO = path.join(__dirname, 'public', 'grupo-bravo.png');
 
 // Teto de fotos por documento: cada print pesa alguns MB e o PDF e montado em
 // memoria. O que passar vira uma linha de aviso, igual ao relatorio de
@@ -114,14 +118,36 @@ function abrir(res, nomeArquivo, inline = true) {
       doc.moveDown(0.3);
     });
   };
-  const cabecalho = (chapeu, tituloGrande, subtitulo, etiqueta) => {
-    doc.fontSize(8).fillColor('#5b6470').font('Helvetica-Bold').text('ZENITH OPS', x, doc.y, { continued: true, characterSpacing: 0.6 });
+  // A marca do cliente mora no documento da UNIDADE. Nao usamos uma imagem
+  // enviada em tempo de execucao: PDF precisa continuar abrindo daqui a anos
+  // e a marca institucional esta versionada junto do app.
+  const desenharMarca = (rede, topo) => {
+    const direita = x + largura;
+    if (rede === redes.ARCFOOD) {
+      const w = 64, h = 48, px = direita - w;
+      doc.roundedRect(px, topo, w, h, 8).fill('#2b2320');
+      doc.font('Helvetica-Bold').fontSize(15).fillColor('#faf7f2').text('ARC', px, topo + 8, { width: w, align: 'center', characterSpacing: 1 });
+      doc.rect(px + 14, topo + 28, w - 28, 2.5).fill('#e8a33d');
+      doc.font('Helvetica').fontSize(8.5).fillColor('#e8a33d').text('F O O D', px, topo + 33, { width: w, align: 'center', characterSpacing: .2 });
+      return;
+    }
+    if (rede === redes.GBE) {
+      try { doc.image(LOGO_GRUPO_BRAVO, direita - 94, topo, { fit: [94, 48], align: 'right', valign: 'center' }); } catch (e) { /* cabecalho textual continua legivel */ }
+    }
+  };
+  const cabecalho = (chapeu, tituloGrande, subtitulo, etiqueta, rede) => {
+    const topoMarca = doc.y;
+    desenharMarca(rede, topoMarca);
+    // Reserva a faixa da marca. Sem a largura explícita, um título grande
+    // poderia atravessar a logo no canto direito em vez de quebrar antes.
+    const larguraTexto = rede ? largura - 112 : largura;
+    doc.fontSize(8).fillColor('#5b6470').font('Helvetica-Bold').text('NOPULSO · SOLUTIONS TI TECH', x, doc.y, { continued: true, characterSpacing: 0.6 });
     doc.font('Helvetica').text(`  ·  ${chapeu || ''}`, { characterSpacing: 0.6 });
     doc.moveDown(0.4);
-    doc.fontSize(18).fillColor('#111').font('Helvetica-Bold').text(tituloGrande, x, doc.y);
-    if (subtitulo) doc.font('Helvetica').fontSize(11).fillColor('#444').text(subtitulo, x, doc.y, { width: largura });
+    doc.fontSize(18).fillColor('#111').font('Helvetica-Bold').text(tituloGrande, x, doc.y, { width: larguraTexto });
+    if (subtitulo) doc.font('Helvetica').fontSize(11).fillColor('#444').text(subtitulo, x, doc.y, { width: larguraTexto });
     doc.moveDown(0.5);
-    if (etiqueta) { doc.fontSize(9.5).fillColor('#5b6470').font('Helvetica').text(etiqueta, x, doc.y); doc.moveDown(0.5); }
+    if (etiqueta) { doc.fontSize(9.5).fillColor('#5b6470').font('Helvetica').text(etiqueta, x, doc.y, { width: larguraTexto }); doc.moveDown(0.5); }
     doc.rect(x, doc.y, largura, 2).fill('#111');
     doc.moveDown(0.6);
   };
@@ -145,6 +171,7 @@ function desenharOcorrencia(res, tarefa, { fichaCampos = [], fotos, geradoPor, n
   const p = abrir(res, nomeArquivo, inline);
   const { doc, x, largura } = p;
   const ehOcorrencia = !!tarefa.ehOcorrencia;
+  const redeDaTarefa = redes.redeDaUnidade(tarefa.unidade || tarefa.unidadeNome);
 
   p.cabecalho(
     tarefa.unidadeNome || tarefa.unidade || 'Sem unidade',
@@ -155,6 +182,7 @@ function desenharOcorrencia(res, tarefa, { fichaCampos = [], fotos, geradoPor, n
       STATUS_LABEL[tarefa.status] || tarefa.status,
       `Registrada em ${fmtDataHora(tarefa.criadaEm)}`,
     ].filter(Boolean).join('   ·   '),
+    redeDaTarefa,
   );
 
   p.titulo('Identificação');
