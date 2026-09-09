@@ -629,6 +629,7 @@ document.getElementById('form-nova').addEventListener('submit', async (ev)=>{
     ITENS_COMPRA = []; renderItensCompra();
     document.getElementById('form-nova').classList.add('hidden');
     document.getElementById('sucesso-nova').classList.remove('hidden');
+    await avisarTarefa(data);
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
   }finally{
@@ -671,6 +672,38 @@ async function boot(){
   ).join('');
   montarSelectCampo();
   if(tiposDisponiveis.length) selecionarTipo(tiposDisponiveis[0][0]);
+  prepararDeTarefa();
+}
+
+// Chegou do Meu Dia ("Criar solicitação" numa tarefa): pré-preenche o que a
+// tarefa já sabe e guarda de quem veio, pra avisar a tarefa quando o ticket
+// nascer. Só isso - o tipo, os campos obrigatórios e o envio continuam sendo
+// os desta tela.
+let TAREFA_ORIGEM = null;
+function prepararDeTarefa(){
+  const p = new URLSearchParams(location.search);
+  TAREFA_ORIGEM = p.get('tarefa');
+  if(!TAREFA_ORIGEM) return;
+  const unidade = p.get('unidade');
+  const sel = document.getElementById('f-unidade');
+  if(unidade && [...sel.options].some(o=>o.value===unidade)){ sel.value = unidade; carregarResponsaveis(); }
+  if(p.get('titulo')) document.getElementById('g-titulo').value = p.get('titulo');
+  if(p.get('descricao')) document.getElementById('g-observacao').value = p.get('descricao');
+  const aviso = document.createElement('div');
+  aviso.className = 'msg';
+  aviso.style.marginBottom = '10px';
+  aviso.innerHTML = `Aberta a partir da tarefa <b>${escapeHtml(p.get('titulo')||'do Meu Dia')}</b>. Quando esta solicitação for enviada, o Ticket volta a aparecer na tarefa. <a href="/tarefas.html" style="color:var(--accent);">voltar ao Meu Dia</a>`;
+  const form = document.getElementById('form-nova');
+  form.parentNode.insertBefore(aviso, form);
+}
+async function avisarTarefa(dados){
+  if(!TAREFA_ORIGEM) return;
+  try{
+    await fetch(`/api/tarefas/${TAREFA_ORIGEM}/gerou`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ tipo:'solicitacao', id: dados.id, numeroTicket: dados.numeroTicket, rotulo: (TIPOS_INFO[dados.tipo]||{}).label || dados.tipo }),
+    });
+  }catch(e){ /* o ticket já existe; o rastro na tarefa é o que falhou */ }
 }
 
 boot();

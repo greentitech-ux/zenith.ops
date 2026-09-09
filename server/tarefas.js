@@ -78,6 +78,8 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
   const alvoIds = new Set(alvos.map((u) => u.id));
   const existentes = await COLLECTION.where('vinculo.chave', '==', chaveBase).get();
   const agora = new Date().toISOString();
+  // a tarefa existe desde que o TICKET foi aberto, nao desde a sincronizacao
+  const nasceEm = /^\d{4}-\d{2}-\d{2}T/.test(String(ticket.criadoEm || '')) ? String(ticket.criadoEm) : agora;
   const alteradas = [];
 
   // Quem deixou de ser responsável não carrega um ticket antigo na fila.
@@ -94,8 +96,15 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
     const snap = await ref.get();
     if (snap.exists) {
       const atual = snap.data();
+      // conserta a data das tarefas que ja existem com a data da sincronizacao
+      // no lugar da data do ticket. NAO mexe em atualizadoEm nesse caso: a
+      // lista e ordenada por ele, e corrigir data nao e "movimento" da tarefa
+      const corrigeData = nasceEm !== atual.criadaEm || nasceEm.slice(0, 10) !== atual.dataInicio
+        ? { criadaEm: nasceEm, dataInicio: nasceEm.slice(0, 10) } : null;
       await ref.update({ titulo: ticket.titulo, prioridade: ticket.prioridade || 'normal', status: statusDoTicket(ticket), atualizadoEm: agora,
+        ...(corrigeData || {}),
         ...(statusDoTicket(ticket) === 'CONCLUIDA' && !atual.concluidaEm ? { concluidaEm: agora, concluidaPorNome: ticket.execucaoPorNome || 'Suporte' } : {}) });
+      if (corrigeData) alteradas.push({ ...atual, ...corrigeData });
       continue;
     }
     const tarefa = {
@@ -108,13 +117,13 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
        responsavelEmail: usuario.email || null,
        responsavelNome: nomeUsuario(usuario),
        criadoPorId: usuario.id, criadoPorNome: nomeUsuario(usuario),
-      criadaEm: agora,
+      criadaEm: nasceEm,
       atualizadoEm: agora,
       vinculo: { chave: chaveBase, tipo, ticketTipo: ticket.tipo || tipo, id: ticket.id, numeroTicket: ticket.numeroTicket || null },
       unidade: ticket.unidade || null,
       unidadeNome: ticket.unidadeNome || null,
       comentarios: [],
-      dataInicio: agora.slice(0, 10), dataEntrega: null, anexos: [], colaboradores: [], colaboradoresIds: [],
+      dataInicio: nasceEm.slice(0, 10), dataEntrega: null, anexos: [], colaboradores: [], colaboradoresIds: [],
     };
     await ref.set(tarefa);
     alteradas.push(tarefa);
@@ -280,6 +289,55 @@ async function definirColaboradores(id, acesso, pessoas) {
   return getOne(id);
 }
 
+// Trocar o responsável é redistribuir o serviço, não executar - fica com quem
+// distribui (Master, Admin, gerente) e com o próprio responsável, que pode
+// passar adiante o que não é dele. A validação de QUEM pode receber é a mesma
+// da criação, e roda na rota (index.js).
+async function definirResponsavel(id, acesso, pessoa) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeGerir(tarefa, acesso)) throw new Error('Só o responsável, quem criou ou o Admin troca o responsável.');
+  if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Essa tarefa já foi encerrada.');
+  if (!pessoa || !pessoa.id) throw new Error('Escolha quem fica responsável.');
+  // quem vira responsável sai da lista de participantes: acumular os dois
+  // papéis faria a mesma pessoa aparecer duas vezes na tela
+  const equipe = (tarefa.colaboradores || []).filter((p) => p.id !== pessoa.id);
+  await ref.update({
+    responsavelId: pessoa.id, responsavelEmail: pessoa.email || null, responsavelNome: nomeUsuario(pessoa),
+    colaboradores: equipe, colaboradoresIds: equipe.map((p) => p.id),
+    atualizadoEm: new Date().toISOString(),
+  });
+  return getOne(id);
+}
+
+// Uma tarefa iniciada pode virar um ticket ou um formulário. O documento em
+// si NÃO nasce aqui: nasce na tela que já sabe validar cada tipo (Central e
+// Formulários), e o que fica guardado na tarefa é só o RASTRO - o que ela
+// gerou, pra quem abrir a tarefa depois achar o documento.
+//
+// De propósito não mexe em `vinculo`: aquele campo é a chave de idempotência
+// da sincronização de ticket (vinculo.chave). Escrever nele aqui faria uma
+// sincronização futura adotar - e poder cancelar - uma tarefa que não nasceu
+// daquele ticket.
+async function registrarGerado(id, acesso, item) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeParticipar(tarefa, acesso)) throw new Error('Você não pode alterar esta tarefa.');
+  const tipo = ['solicitacao', 'estorno', 'formulario'].includes(item && item.tipo) ? item.tipo : null;
+  if (!tipo || !item.id) throw new Error('Documento gerado inválido.');
+  const registro = {
+    tipo, id: String(item.id).slice(0, 120),
+    numeroTicket: item.numeroTicket != null ? Number(item.numeroTicket) || null : null,
+    rotulo: String(item.rotulo || '').slice(0, 80) || null,
+    em: new Date().toISOString(), porNome: nomeUsuario(acesso.usuario),
+  };
+  const lista = (tarefa.gerou || []).filter((g) => !(g.tipo === registro.tipo && g.id === registro.id));
+  await ref.update({ gerou: [...lista, registro].slice(-10), atualizadoEm: registro.em });
+  return getOne(id);
+}
+
 async function arquivar(id, acesso) {
   const ref = COLLECTION.doc(id); const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
@@ -291,7 +349,10 @@ async function arquivar(id, acesso) {
 }
 
 async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuarios = [], forcar = false } = {}) {
-  const versao = 'tickets-v2';
+  // v3: passa a gravar a data REAL do ticket em criadaEm/dataInicio (antes era
+  // a data da sincronização). Versão nova = o Master consegue rodar de novo
+  // pra corrigir o que já está gravado, sem precisar de forcar.
+  const versao = 'tickets-v3';
   const ref = CONTROLE.doc(`retroativo-${versao}`);
   const anterior = await ref.get();
   if (anterior.exists && !forcar) return { executada: false, motivo: 'já sincronizado nesta versão', ...anterior.data() };
@@ -308,4 +369,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
   return resultado;
 }
 
-module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, definirColaboradores, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar };
+module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, definirColaboradores, definirResponsavel, registrarGerado, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar };

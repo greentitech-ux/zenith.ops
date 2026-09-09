@@ -14814,6 +14814,179 @@ setTimeout(async () => {
   if (!okFichaMD) ruins += 1;
   console.log(`${okFichaMD ? '✓' : '✗'} Meu Dia: a tarefa de estorno mostra cliente, valor e forma de pagamento lidos do ticket`);
 
+  // ---- Meu Dia: solicitante x responsável, e quem redistribui ----
+  // Na tarefa de ticket a tela só mostrava "Responsável", e quem pediu o
+  // serviço não aparecia em lugar nenhum. Distribuir (trocar responsável,
+  // chamar participante) é diferente de executar.
+  let okDistribuir = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const senhaD = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    const usersMod = require(__dirname + '/users.js');
+    ['dist-ger', 'dist-resp', 'dist-novo', 'dist-fora'].forEach((quem) => DOCS.set(`users/u-${quem}`, {
+      passwordHash: senhaD, role: 'user', active: true, email: `${quem}@teste.local`, username: quem,
+      permissions: { sections: ['tarefas'], unidades: ['DOM_19706'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    }));
+    for (const quem of ['dist-ger', 'dist-resp', 'dist-novo', 'dist-fora']) {
+      await usersMod.updatePermissions(`u-${quem}`, { sections: ['tarefas'], unidades: ['DOM_19706'], vaultSubgroups: [], tiposSolicitacao: [] });
+    }
+    await usersMod.updateCargo('u-dist-ger', 'gerente');
+    const cabGer = { Authorization: 'Bearer ' + (await auth.login('dist-ger@teste.local', 'SenhaDeTeste!2026')).token };
+    const cabResp = { Authorization: 'Bearer ' + (await auth.login('dist-resp@teste.local', 'SenhaDeTeste!2026')).token };
+    const cabForaD = { Authorization: 'Bearer ' + (await auth.login('dist-fora@teste.local', 'SenhaDeTeste!2026')).token };
+
+    const nasce = await postarJson('/api/tarefas', { titulo: 'Levar o depósito ao banco', unidade: 'DOM_19706', responsavelId: 'u-dist-resp' }, cabMD);
+    const tD = nasce.status === 200 ? JSON.parse(nasce.corpo) : {};
+
+    // o gerente distribui sem ser Master nem Admin
+    const ctxGer = await pedir('/api/tarefas/contexto', cabGer);
+    const ctxFora = await pedir('/api/tarefas/contexto', cabForaD);
+
+    // o próprio responsável chama alguém pra ajudar e passa a tarefa adiante
+    const chama = await enviarJson('PATCH', `/api/tarefas/${tD.id}/colaboradores`, { colaboradoresIds: ['u-dist-fora'] }, cabResp);
+    const passa = await enviarJson('PATCH', `/api/tarefas/${tD.id}/responsavel`, { responsavelId: 'u-dist-novo' }, cabResp);
+    const depois = passa.status === 200 ? JSON.parse(passa.corpo) : {};
+    // quem virou responsável não pode continuar na lista de participantes
+    const acumulou = await enviarJson('PATCH', `/api/tarefas/${tD.id}/responsavel`, { responsavelId: 'u-dist-fora' }, cabMD);
+    const semDuplicata = acumulou.status === 200 ? JSON.parse(acumulou.corpo) : {};
+    // o antigo responsável perdeu o comando
+    const tentaVoltar = await enviarJson('PATCH', `/api/tarefas/${tD.id}/responsavel`, { responsavelId: 'u-dist-resp' }, cabResp);
+    const fantasma = await enviarJson('PATCH', `/api/tarefas/${tD.id}/responsavel`, { responsavelId: 'u-nao-existe' }, cabMD);
+
+    // o solicitante do ticket aparece na ficha
+    const est2 = await postarJson('/api/refund-requests', {
+      pedidoId: 'PED-7722', unidade: 'DOM_19706', unidadeNome: 'Mooca',
+      observacao: 'Cobrança em duplicidade.', password: process.env.MASTER_PASSWORD,
+    }, cabMD);
+    const tk2 = est2.status === 200 ? JSON.parse(est2.corpo) : {};
+    const lista2 = JSON.parse((await pedir('/api/tarefas/minhas', cabMD)).corpo);
+    const tar2 = lista2.find((x) => x.vinculo && x.vinculo.id === tk2.id) || {};
+    const ficha2 = tar2.id ? await pedir(`/api/tarefas/${tar2.id}/ticket`, cabMD) : { status: 0, corpo: '{}' };
+    const campos2 = ficha2.status === 200 ? (JSON.parse(ficha2.corpo).campos || []) : [];
+    const solicitante = (campos2.find((c) => c.rotulo === 'Solicitante') || {}).valor;
+    const meMaster = JSON.parse((await pedir('/api/me', cabMD)).corpo);
+
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+
+    const conf = {
+      'gerente distribui sem ser Master nem Admin': ctxGer.status === 200 && JSON.parse(ctxGer.corpo).podeAtribuir === true,
+      'usuário comum não distribui': ctxFora.status === 200 && JSON.parse(ctxFora.corpo).podeAtribuir === false,
+      'o contexto diz quem é você, pra tela liberar o "trocar" da sua tarefa': JSON.parse(ctxGer.corpo).eu === 'u-dist-ger',
+      'o responsável chama participante na tarefa dele': chama.status === 200 && JSON.stringify(JSON.parse(chama.corpo).colaboradoresIds) === '["u-dist-fora"]',
+      'e passa a tarefa adiante': passa.status === 200 && depois.responsavelId === 'u-dist-novo' && depois.responsavelNome === 'dist-novo',
+      'quem vira responsável sai da lista de participantes (não aparece duas vezes)': acumulou.status === 200 && semDuplicata.responsavelId === 'u-dist-fora' && !(semDuplicata.colaboradoresIds || []).includes('u-dist-fora'),
+      'o responsável ANTIGO perde o comando junto com a tarefa': tentaVoltar.status === 403 && /Master, Admin, gerente ou o responsável/i.test(JSON.parse(tentaVoltar.corpo).error || ''),
+      'responsável inexistente é recusado': fantasma.status === 400,
+      'a ficha do ticket diz quem PEDIU o serviço': ficha2.status === 200 && !!solicitante && solicitante === (meMaster.username || meMaster.email),
+      'e o Solicitante vem antes do resto da ficha': (campos2[0] || {}).rotulo === 'Solicitante',
+      // o que importa é o USO no template: só a definição do botão não prova
+      // que ele é desenhado ao lado do responsável
+      'a tela mostra "trocar" ao lado do responsável, não só "alterar" nos participantes': /onclick="abrirResponsavel\(\)">trocar</.test(html) && /\$\{e\(O\.responsavelNome\|\|'Usuário'\)\}\$\{trocar\}/.test(html) && /const podeDistribuir=\(\)=>!!CTX\.podeAtribuir\|\|\(!!O&&O\.responsavelId===\(CTX\.eu\|\|''\)\)/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDistribuir = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (nasce=${nasce.status} chama=${chama.status} ${chama.corpo.slice(0, 80)} passa=${passa.status} ${passa.corpo.slice(0, 80)} solicitante=${solicitante})`);
+  } catch (e) { okDistribuir = false; console.log('  erro: ' + e.message); }
+  if (!okDistribuir) ruins += 1;
+  console.log(`${okDistribuir ? '✓' : '✗'} Meu Dia: a ficha diz quem SOLICITOU, e gerente ou o próprio responsável troca responsável e chama participante`);
+
+  // ---- Meu Dia: a tarefa vira solicitação ou formulário ----
+  // O documento NÃO nasce dentro do Meu Dia: nasce na tela que já sabe validar
+  // cada tipo, e o que fica na tarefa é o rastro. E `vinculo` não pode ser
+  // tocado - é a chave de idempotência da sincronização de ticket.
+  let okGerou = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const nova = JSON.parse((await postarJson('/api/tarefas', { titulo: 'ATM reiniciou sozinho', unidade: 'DOM_19706' }, cabMD)).corpo);
+
+    // o caminho real: a Central cria o ticket e avisa a tarefa
+    const tic = await postarJson('/api/solicitacoes', {
+      tipo: 'suporte-ti', unidade: 'DOM_19706', unidadeNome: 'Mooca', titulo: 'ATM reiniciou sozinho',
+      observacao: 'Aberto a partir da tarefa.',
+    }, cabMD);
+    const criado = tic.status === 200 ? JSON.parse(tic.corpo) : {};
+    const avisou = await postarJson(`/api/tarefas/${nova.id}/gerou`, { tipo: 'solicitacao', id: criado.id, numeroTicket: criado.numeroTicket, rotulo: 'Suporte de TI' }, cabMD);
+    const comRastro = avisou.status === 200 ? JSON.parse(avisou.corpo) : {};
+    const doForm = await postarJson(`/api/tarefas/${nova.id}/gerou`, { tipo: 'formulario', id: 'form-abc', rotulo: 'Depósito de Caixa' }, cabMD);
+    const comDois = doForm.status === 200 ? JSON.parse(doForm.corpo) : {};
+    // avisar duas vezes o MESMO documento não duplica a linha
+    const repetido = await postarJson(`/api/tarefas/${nova.id}/gerou`, { tipo: 'formulario', id: 'form-abc', rotulo: 'Depósito de Caixa' }, cabMD);
+    const semDuplicar = repetido.status === 200 ? JSON.parse(repetido.corpo) : {};
+    const lixo = await postarJson(`/api/tarefas/${nova.id}/gerou`, { tipo: 'qualquer', id: 'x' }, cabMD);
+    const semId = await postarJson(`/api/tarefas/${nova.id}/gerou`, { tipo: 'solicitacao' }, cabMD);
+    const cabForaG = { Authorization: 'Bearer ' + (await auth.login('eq-fora@teste.local', 'SenhaDeTeste!2026')).token };
+    const deFora = await postarJson(`/api/tarefas/${nova.id}/gerou`, { tipo: 'formulario', id: 'z' }, cabForaG);
+
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const ch = require('fs').readFileSync(__dirname + '/public/central.html', 'utf8');
+    const fh = require('fs').readFileSync(__dirname + '/public/formularios.html', 'utf8');
+
+    const conf = {
+      'a tarefa guarda o ticket que ela gerou, com número e rótulo': avisou.status === 200 && (comRastro.gerou || []).length === 1 && comRastro.gerou[0].numeroTicket === criado.numeroTicket && comRastro.gerou[0].rotulo === 'Suporte de TI',
+      'e o formulário entra junto, sem apagar o ticket': doForm.status === 200 && (comDois.gerou || []).length === 2,
+      'avisar o mesmo documento duas vezes não duplica a linha': repetido.status === 200 && (semDuplicar.gerou || []).length === 2,
+      'o vinculo NÃO é tocado (é a chave da sincronização de ticket)': !comDois.vinculo,
+      'tipo fora da lista e documento sem id são recusados': lixo.status === 400 && semId.status === 400,
+      'quem não participa da tarefa não escreve nela': deFora.status === 400,
+      'os dois botões só aparecem pra quem tem a seção': /\$\('BTNSOL'\)\.hidden=!CTX\.podeSolicitacao/.test(html) && /\$\('BTNFOR'\)\.hidden=!CTX\.podeFormulario/.test(html),
+      'e levam pras telas que já existem, com o contexto da tarefa': /function virarSolicitacao\(\)\{location\.href=contexto2\('\/central\.html'\)\}/.test(html) && /function virarFormulario\(\)\{location\.href=contexto2\('\/formularios\.html'\)\}/.test(html) && /new URLSearchParams\(\{tarefa:O\.id,titulo:tituloVisivel\(O\)\}\)/.test(html),
+      'a Central lê a tarefa da URL e avisa de volta quando o ticket nasce': /TAREFA_ORIGEM = p\.get\('tarefa'\)/.test(ch) && /await avisarTarefa\(data\);/.test(ch) && /tipo:'solicitacao', id: dados\.id, numeroTicket: dados\.numeroTicket/.test(ch),
+      'Formulários faz o mesmo, e lê o tipo ANTES de zerar TIPO_ATUAL': /await avisarTarefa\(d, TIPO_ATUAL\);\n    TIPO_ATUAL = null;/.test(fh),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okGerou = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (ticket=${tic.status} ${tic.corpo.slice(0, 90)} avisou=${avisou.status} ${avisou.corpo.slice(0, 90)})`);
+  } catch (e) { okGerou = false; console.log('  erro: ' + e.message); }
+  if (!okGerou) ruins += 1;
+  console.log(`${okGerou ? '✓' : '✗'} Meu Dia: a tarefa vira solicitação ou formulário nas telas que já existem, e guarda o rastro do que gerou`);
+
+  // ---- Meu Dia: a tarefa de ticket nasce na data do TICKET ----
+  // Gravar "agora" fazia toda tarefa antiga aparecer como criada hoje - e como
+  // dataRef() cai em dataInicio/criadaEm, os filtros de período mentiam junto.
+  let okDatas = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const tarefasMod = require(__dirname + '/tarefas.js');
+    const usersMod = require(__dirname + '/users.js');
+    const listaUsers = await usersMod.list();
+    const ticketVelho = {
+      id: 'tk-antigo-1', numeroTicket: 90001, tipo: 'suporte-ti', status: 'APROVADO',
+      titulo: 'Queda de links - substituição de chip 4g', unidade: 'DOM_19706', unidadeNome: 'Mooca',
+      criadoEm: '2026-03-04T13:22:05.000Z',
+    };
+    const criadas = await tarefasMod.sincronizarTicket(ticketVelho, listaUsers, 'solicitacao');
+    const nascida = criadas[0] || {};
+
+    // simula o estrago antigo: a data da sincronização gravada por cima
+    const doc = DOCS.get(`tarefas/${nascida.id}`);
+    DOCS.set(`tarefas/${nascida.id}`, { ...doc, criadaEm: '2026-09-09T00:41:49.000Z', dataInicio: '2026-09-09' });
+    const corrigidas = await tarefasMod.sincronizarTicket(ticketVelho, listaUsers, 'solicitacao');
+    const depois = DOCS.get(`tarefas/${nascida.id}`);
+
+    // a manual continua com a data de agora, que é verdade
+    const manual = JSON.parse((await postarJson('/api/tarefas', { titulo: 'Tarefa de hoje' }, cabMD)).corpo);
+    const hojeIso = new Date().toISOString().slice(0, 10);
+
+    // ticket sem data utilizável não pode virar "criada em undefined"
+    const semData = await tarefasMod.sincronizarTicket({ ...ticketVelho, id: 'tk-sem-data', numeroTicket: 90002, criadoEm: null }, listaUsers, 'solicitacao');
+    const semDataDoc = semData.length ? DOCS.get(`tarefas/${semData[0].id}`) : {};
+
+    const conf = {
+      'a tarefa nasce com a data do ticket, não a da sincronização': nascida.criadaEm === '2026-03-04T13:22:05.000Z' && nascida.dataInicio === '2026-03-04',
+      'tarefa já gravada com a data errada é corrigida na próxima sincronização': corrigidas.length === 1 && depois.criadaEm === '2026-03-04T13:22:05.000Z' && depois.dataInicio === '2026-03-04',
+      'e a correção não mexe na ordem da lista (atualizadoEm continua sendo movimento)': depois.atualizadoEm !== depois.criadaEm,
+      'tarefa manual continua nascendo com a data e hora de agora': manual.dataInicio === hojeIso && String(manual.criadaEm).slice(0, 10) === hojeIso,
+      'ticket sem data válida cai no agora, não em undefined': !!semDataDoc.criadaEm && /^\d{4}-\d{2}-\d{2}T/.test(semDataDoc.criadaEm),
+      'o retroativo ganhou versão nova, pra rodar de novo e consertar o que existe': /const versao = 'tickets-v3';/.test(require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDatas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (nascida=${nascida.criadaEm}/${nascida.dataInicio} depois=${depois && depois.criadaEm}/${depois && depois.dataInicio} corrigidas=${corrigidas.length})`);
+  } catch (e) { okDatas = false; console.log('  erro: ' + e.message); }
+  if (!okDatas) ruins += 1;
+  console.log(`${okDatas ? '✓' : '✗'} Meu Dia: tarefa de ticket carrega a data REAL do ticket, e a tarefa manual a data de agora`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
