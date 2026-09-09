@@ -940,4 +940,160 @@
   }
   document.addEventListener('input', ajustarMesAoEscolherData, true);
   document.addEventListener('change', ajustarMesAoEscolherData, true);
+
+  // ---- rascunhos de campos durante atualizacao da propria tela ----
+  // Muitas telas recebem polling/SSE, trocam status ou redesenham cards com
+  // innerHTML. Antes, isso recriava textarea/input/select e apagava o que a
+  // pessoa ja tinha digitado, lido pelo leitor ou anexado. Esta camada vive
+  // no arquivo comum de todas as paginas: preserva SOMENTE o que foi alterado
+  // pelo usuario e devolve o valor quando o mesmo campo nasce de novo.
+  //
+  // Rascunho e da pagina atual, nao e dado salvo: ao navegar para outra tela
+  // a proxima pagina limpa o rascunho da anterior. sessionStorage deixa uma
+  // atualizacao/reload da MESMA pagina recuperar texto, mas nunca senha,
+  // token ou campos hidden. Arquivos ficam em memoria (o browser nao permite
+  // serializar File), suficiente para qualquer redesenho sem sair da pagina.
+  (function protegerRascunhosDaTela() {
+    var PREFIXO = 'nopulso.rascunho.v1:';
+    var pagina = location.pathname + location.search;
+    var chavePagina = PREFIXO + pagina;
+    var rascunhos = new Map();
+    var arquivos = new Map();
+    var restauracaoPendente = false;
+
+    function campoElegivel(campo) {
+      if (!campo || campo.nodeType !== 1 || campo.dataset.zenithSemRascunho !== undefined) return false;
+      var tag = String(campo.tagName || '').toLowerCase();
+      if (!['input', 'textarea', 'select'].includes(tag) && !campo.isContentEditable) return false;
+      var tipo = String(campo.type || '').toLowerCase();
+      return !['hidden', 'password', 'submit', 'button', 'reset', 'image'].includes(tipo);
+    }
+    function identidade(campo) {
+      if (!campoElegivel(campo)) return null;
+      if (campo.id) return 'id:' + campo.id;
+      if (campo.name) {
+        var form = campo.form;
+        var dono = form && (form.id || form.name);
+        // Radio/checkbox do mesmo name precisam de identidade individual.
+        var extra = /^(radio|checkbox)$/i.test(campo.type || '') ? ':' + String(campo.value || '') : '';
+        return 'nome:' + (dono || 'pagina') + ':' + campo.name + extra;
+      }
+      return null;
+    }
+    function ler(campo) {
+      var tipo = String(campo.type || '').toLowerCase();
+      if (campo.isContentEditable) return { tipo: 'html', valor: campo.innerHTML };
+      if (tipo === 'checkbox' || tipo === 'radio') return { tipo: 'marcado', valor: !!campo.checked };
+      if (tipo === 'file') return { tipo: 'arquivo', valor: !!(campo.files && campo.files[0]) };
+      return { tipo: 'valor', valor: campo.value };
+    }
+    function gravarNoStorage() {
+      try {
+        var simples = {};
+        rascunhos.forEach(function (valor, chave) {
+          // Limite defensivo por campo: evita encher a sessao por colagem
+          // acidental de arquivo/texto gigante. O arquivo segue no Map.
+          if (typeof valor.valor === 'string' && valor.valor.length > 50000) return;
+          simples[chave] = valor;
+        });
+        sessionStorage.setItem(chavePagina, JSON.stringify(simples));
+      } catch (e) { /* armazenamento bloqueado/cheio: a memoria ainda vale */ }
+    }
+    function carregarDoStorage() {
+      try {
+        Object.keys(sessionStorage).forEach(function (k) {
+          if (k.indexOf(PREFIXO) === 0 && k !== chavePagina) sessionStorage.removeItem(k);
+        });
+        var salvo = JSON.parse(sessionStorage.getItem(chavePagina) || '{}');
+        Object.keys(salvo).forEach(function (k) {
+          var valor = salvo[k];
+          if (valor && ['valor', 'marcado', 'html'].includes(valor.tipo)) rascunhos.set(k, valor);
+        });
+      } catch (e) { /* segue sem persistencia entre reloads */ }
+    }
+    function guardarCampo(campo) {
+      var id = identidade(campo);
+      if (!id) return;
+      var estado = ler(campo);
+      if (estado.tipo === 'arquivo') {
+        var arq = campo.files && campo.files[0];
+        if (arq) arquivos.set(id, arq); else arquivos.delete(id);
+        rascunhos.set(id, estado);
+      } else {
+        rascunhos.set(id, estado);
+      }
+      gravarNoStorage();
+    }
+    function aplicarCampo(campo) {
+      var id = identidade(campo), estado = id && rascunhos.get(id);
+      if (!estado) return;
+      var tipo = String(campo.type || '').toLowerCase();
+      if (estado.tipo === 'html' && campo.isContentEditable) campo.innerHTML = estado.valor;
+      else if (estado.tipo === 'marcado' && (tipo === 'checkbox' || tipo === 'radio')) campo.checked = !!estado.valor;
+      else if (estado.tipo === 'valor' && !campo.isContentEditable && tipo !== 'file') campo.value = estado.valor;
+      else if (estado.tipo === 'arquivo' && tipo === 'file' && arquivos.has(id)) {
+        // DataTransfer fica CENTRALIZADO aqui (tema.js), igual a colagem de
+        // print: devolve o mesmo File ao input recriado sem abrir caminho
+        // paralelo nas dezenas de telas.
+        try {
+          var dt = new DataTransfer();
+          dt.items.add(arquivos.get(id));
+          campo.files = dt.files;
+          campo.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (e) { /* o arquivo continua guardado para a proxima troca */ }
+      }
+    }
+    function aplicarEm(no) {
+      if (!no || no.nodeType !== 1) return;
+      if (campoElegivel(no)) aplicarCampo(no);
+      if (no.querySelectorAll) no.querySelectorAll('input,textarea,select,[contenteditable="true"]').forEach(aplicarCampo);
+    }
+    function agendarRestauracao() {
+      if (restauracaoPendente) return;
+      restauracaoPendente = true;
+      requestAnimationFrame(function () {
+        restauracaoPendente = false;
+        document.querySelectorAll('input,textarea,select,[contenteditable="true"]').forEach(aplicarCampo);
+      });
+    }
+    function limparNo(no) {
+      if (!no || no.nodeType !== 1) return;
+      var todos = [];
+      if (campoElegivel(no)) todos.push(no);
+      if (no.querySelectorAll) todos = todos.concat(Array.prototype.slice.call(no.querySelectorAll('input,textarea,select,[contenteditable="true"]')));
+      todos.forEach(function (campo) {
+        var id = identidade(campo);
+        if (!id) return;
+        rascunhos.delete(id); arquivos.delete(id);
+      });
+      gravarNoStorage();
+    }
+
+    carregarDoStorage();
+    document.addEventListener('input', function (e) { guardarCampo(e.target); }, true);
+    document.addEventListener('change', function (e) { guardarCampo(e.target); }, true);
+    document.addEventListener('reset', function (e) { limparNo(e.target); }, true);
+    // Fechar/cancelar um modal descarta o rascunho daquela caixa, como sair
+    // da secao. Atualizacao de status nao passa por aqui e, portanto, nao o
+    // apaga. Telas com fechamento customizado tambem podem chamar esta API.
+    document.addEventListener('click', function (e) {
+      var botao = e.target.closest && e.target.closest('button,[role="button"]');
+      if (!botao) return;
+      var texto = String(botao.getAttribute('aria-label') || botao.textContent || '').trim().toLocaleLowerCase('pt-BR');
+      if (!/^(fechar|cancelar|×|x|✕)/.test(texto)) return;
+      var caixa = botao.closest('[role="dialog"],.modal,.overlay,.sheet-wrap,.painel-conversa');
+      if (caixa) limparNo(caixa);
+    }, true);
+    if (document.documentElement) {
+      new MutationObserver(function (mudancas) {
+        mudancas.forEach(function (m) { m.addedNodes.forEach(aplicarEm); });
+        agendarRestauracao();
+      }).observe(document.documentElement, { childList: true, subtree: true });
+    }
+    // Disponivel para fluxos que concluem/salvam e precisam limpar o que foi
+    // efetivamente persistido, sem depender de classe ou texto de botao.
+    window.zenithRascunhos = { limpar: limparNo, restaurar: agendarRestauracao };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', agendarRestauracao);
+    else agendarRestauracao();
+  })();
 })();
