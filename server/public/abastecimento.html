@@ -2662,6 +2662,7 @@ async function enviarMensagemConversa(){
       : { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }) });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar.');
+    window.zenithRascunhos?.limparCampoEnviado(input);
     input.value = '';
     if(campoAnexo){ campoAnexo.value = ''; campoAnexo.dispatchEvent(new Event('change', { bubbles: true })); }
     await carregar();

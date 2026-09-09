@@ -1913,6 +1913,7 @@ async function enviarMensagemAdvertencia(){
   if(!texto) return;
   const resp = await fetch(`/api/rh/advertencias/${ADVERTENCIA_ABERTA_ID}/mensagens`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }) });
   if(!resp.ok){ const d = await resp.json().catch(()=>({})); alert(d.error||'Erro ao enviar mensagem.'); return; }
+  window.zenithRascunhos?.limparCampoEnviado(el);
   el.value = '';
   await renderDetalheAdvertencia();
 }
