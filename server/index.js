@@ -9052,6 +9052,30 @@ app.get('/api/tarefas/minhas', auth.requireAuth, async (req, res) => {
   }
 });
 
+app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
+  try {
+    res.json(await tarefas.criar({ titulo: req.body?.titulo, descricao: req.body?.descricao, usuario: req.user }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/tarefas/:id/status', auth.requireAuth, async (req, res) => {
+  try {
+    res.json(await tarefas.atualizarStatus(req.params.id, { usuarioId: req.user.id, isMaster: req.isMaster, status: req.body?.status }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/tarefas/:id/comentarios', auth.requireAuth, async (req, res) => {
+  try {
+    res.json(await tarefas.adicionarComentario(req.params.id, { usuario: req.user, isMaster: req.isMaster, texto: req.body?.texto }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/tarefas/:id/concluir', auth.requireAuth, async (req, res) => {
   try {
     const tarefa = await tarefas.getOne(req.params.id);
