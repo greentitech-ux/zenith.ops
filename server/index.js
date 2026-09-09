@@ -48,6 +48,7 @@ const ifoodStore = require('./ifoodStore');
 const ifoodSync = require('./ifoodSync');
 const solicitacoes = require('./solicitacoes');
 const tarefas = require('./tarefas');
+const tarefaRelatorio = require('./tarefaRelatorio');
 const acessosPessoa = require('./acessosPessoa');
 const formularios = require('./formularios');
 const formulariosUnidades = require('./formulariosUnidades');
@@ -9088,6 +9089,20 @@ function acessoDasTarefas(req) {
 // libera é abrir tarefa nova, em vez de só responder o que Master, Admin ou
 // gerente da unidade criou. Por isso o item do menu segue sem `secoes` em
 // nav-menu.js: esconder a tela deixaria a pessoa sem onde responder.
+const ROTULO_TIPO_TICKET = {
+  estorno: 'Estorno',
+  'ajuste-fechamento': 'Ajuste de fechamento',
+  compra: 'Compra',
+  manutencao: 'Manutenção',
+  'suporte-ti': 'Suporte de TI',
+  pagamento: 'Pagamento',
+  nota: 'Nota',
+  'quebra-caixa': 'Quebra de caixa',
+  'desvio-estoque': 'Desvio de estoque',
+  'acesso-pessoa': 'Acesso de pessoa',
+  adiantamento: 'Adiantamento',
+};
+
 function podeDistribuirTarefas(req) {
   return req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo);
 }
@@ -9167,7 +9182,7 @@ app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
       titulo: req.body?.titulo, descricao: req.body?.descricao,
       dataInicio: req.body?.dataInicio, dataEntrega: req.body?.dataEntrega,
       unidade, unidadeNome: unidade ? (mapa[unidade] || unidade) : null, usuario: req.user, responsavel,
-      colaboradores: participantes,
+      colaboradores: participantes, ehOcorrencia: req.body?.ehOcorrencia === true,
     });
     broadcast('tarefas-atualizada', { id: criada.id, unidade: criada.unidade }, 'tarefas');
     res.json(criada);
@@ -9251,24 +9266,64 @@ function resumoDoTicket(t, tipoVinculo, nomeDoSolicitante) {
   return linhas.slice(0, 12);
 }
 
+// PDF de UMA tarefa (o "registro de ocorrência") e da LISTA filtrada. Os dois
+// abrem inline por padrão: dá pra CONFERIR antes de baixar, que é o que
+// alguém faz com um documento que vai virar registro. `?baixar=1` força o
+// download.
+async function fichaDoTicketDaTarefa(tarefa) {
+  if (!tarefa.vinculo?.id) return [];
+  const ticket = tarefa.vinculo.tipo === 'estorno'
+    ? await refunds.getOne(tarefa.vinculo.id)
+    : await solicitacoes.getOne(tarefa.vinculo.id);
+  if (!ticket) return [];
+  const quemPediuId = ticket.requestedById || ticket.criadoPorId || null;
+  const quemPediuEmail = String(ticket.requestedByEmail || ticket.criadoPorEmail || '').toLowerCase();
+  const pessoa = (quemPediuId || quemPediuEmail)
+    ? (await users.list()).find((u) => u.id === quemPediuId || String(u.email || '').toLowerCase() === quemPediuEmail)
+    : null;
+  return resumoDoTicket(ticket, tarefa.vinculo.tipo, pessoa ? (pessoa.username || pessoa.nome || pessoa.email) : (quemPediuEmail || null));
+}
+
+app.get('/api/tarefas/:id/pdf', auth.requireAuth, async (req, res) => {
+  try {
+    const tarefa = await tarefas.getOne(req.params.id);
+    if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acessoDasTarefas(req))) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    await tarefaRelatorio.gerarOcorrenciaPDF(res, tarefa, {
+      fichaCampos: await fichaDoTicketDaTarefa(tarefa),
+      geradoPor: req.user.username || req.user.email,
+      inline: req.query.baixar !== '1',
+    });
+  } catch (err) {
+    if (!res.headersSent) res.status(400).json({ error: err.message });
+  }
+});
+
+// A lista vem do SERVIDOR de novo, filtrada pelo acesso (listarMinhas), e só
+// então cruzada com os ids que a tela mandou: o documento não pode listar uma
+// tarefa que a pessoa não pode ver, mesmo que o navegador peça.
+app.post('/api/tarefas/relatorio', auth.requireAuth, async (req, res) => {
+  try {
+    const pedidos = new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(String).filter(Boolean));
+    if (!pedidos.size) return res.status(400).json({ error: 'Nenhuma tarefa no filtro para gerar o relatório.' });
+    const minhas = await tarefas.listarMinhas(acessoDasTarefas(req));
+    const lista = minhas.filter((t) => pedidos.has(t.id));
+    if (!lista.length) return res.status(400).json({ error: 'Nenhuma tarefa no filtro para gerar o relatório.' });
+    tarefaRelatorio.gerarConsolidadoPDF(res, lista, {
+      filtro: String(req.body?.filtro || '').slice(0, 200),
+      geradoPor: req.user.username || req.user.email,
+      rotuloTipo: (vinculo) => ROTULO_TIPO_TICKET[String((vinculo && (vinculo.ticketTipo || vinculo.tipo)) || '')] || '',
+      inline: true,
+    });
+  } catch (err) {
+    if (!res.headersSent) res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/tarefas/:id/ticket', auth.requireAuth, async (req, res) => {
   try {
     const tarefa = await tarefas.getOne(req.params.id);
     if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acessoDasTarefas(req))) return res.status(404).json({ error: 'Tarefa não encontrada.' });
-    if (!tarefa.vinculo?.id) return res.json({ campos: [] });
-    const ticket = tarefa.vinculo.tipo === 'estorno'
-      ? await refunds.getOne(tarefa.vinculo.id)
-      : await solicitacoes.getOne(tarefa.vinculo.id);
-    if (!ticket) return res.json({ campos: [] });
-    // o ticket guarda id/e-mail de quem pediu, não o nome - a lista de
-    // usuários já é cache (users.list), então resolver aqui não custa leitura
-    const quemPediuId = ticket.requestedById || ticket.criadoPorId || null;
-    const quemPediuEmail = String(ticket.requestedByEmail || ticket.criadoPorEmail || '').toLowerCase();
-    const pessoa = (quemPediuId || quemPediuEmail)
-      ? (await users.list()).find((u) => u.id === quemPediuId || String(u.email || '').toLowerCase() === quemPediuEmail)
-      : null;
-    const nomeDoSolicitante = pessoa ? (pessoa.username || pessoa.nome || pessoa.email) : (quemPediuEmail || null);
-    res.json({ campos: resumoDoTicket(ticket, tarefa.vinculo.tipo, nomeDoSolicitante) });
+    res.json({ campos: await fichaDoTicketDaTarefa(tarefa) });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
