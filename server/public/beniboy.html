@@ -513,6 +513,18 @@ function painelHtml(chat){
   const nivel = nivelDe(chat);
   const colInfo = COLUNAS.find(c=>c.key===statusAtual);
   const tickets = chat.ticketsVinculados || [];
+  // O protocolo é só referência enquanto a conversa está em triagem. Quando
+  // ele gera trabalho, passa a ser Ticket # clicável e leva para o documento
+  // que continua aquele mesmo assunto. Se houver os dois destinos, os atalhos
+  // explícitos evitam escolher no escuro entre tarefa e chamado.
+  const destinoPrincipal = chat.chamadoId
+    ? `/tecnico.html?ticket=${encodeURIComponent(chat.numeroTicket)}`
+    : (chat.tarefaId ? `/tarefas.html?tarefa=${encodeURIComponent(chat.tarefaId)}` : null);
+  const protocoloHtml = chat.numeroTicket
+    ? (destinoPrincipal
+      ? `<a href="${destinoPrincipal}" target="_blank" rel="noopener" style="color:var(--accent);font-weight:700;">Ticket #${escapeHtml(chat.numeroTicket)}</a>`
+      : `Protocolo #${escapeHtml(chat.numeroTicket)}`)
+    : '';
 
   const acoes = [];
   // "Assumir" aparece sempre que a conversa está aberta e AINDA NÃO é minha
@@ -568,7 +580,7 @@ function painelHtml(chat){
     <div class="painel-topo">
       <div style="min-width:0;">
         <h3>${escapeHtml(chat.nome || 'Visitante')}</h3>
-        <div class="sub">${chat.numeroTicket?'Protocolo #'+escapeHtml(chat.numeroTicket)+' · ':''}${escapeHtml(chat.contato||'')} · ${escapeHtml(chat.assunto||'Suporte geral')}${chat.lojaContexto?' · loja: '+escapeHtml(chat.lojaContexto):''} · N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}${chat.responsavel?' · 🙋 '+escapeHtml(chat.responsavel.nome||chat.responsavel.email||''):''}</div>
+        <div class="sub">${protocoloHtml?protocoloHtml+' · ':''}${escapeHtml(chat.contato||'')} · ${escapeHtml(chat.assunto||'Suporte geral')}${chat.lojaContexto?' · loja: '+escapeHtml(chat.lojaContexto):''} · N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}${chat.responsavel?' · 🙋 '+escapeHtml(chat.responsavel.nome||chat.responsavel.email||''):''}</div>
       </div>
       <span class="painel-fechar" title="Fechar" onclick="fecharPainel('${idAttr}')">✕</span>
     </div>
@@ -578,6 +590,7 @@ function painelHtml(chat){
       const destino = t.tipo === 'chamado-ti' ? '/tecnico.html' : '/central-historico.html';
       return `<a href="${destino}?ticket=${encodeURIComponent(t.numero)}" target="_blank" rel="noopener" style="color:var(--accent);">#${escapeHtml(t.numero)}</a>`;
     }).join(', ')}</div>` : ''}
+    ${(chat.tarefaId || chat.chamadoId) ? `<div class="d-tickets">↗ Abrir: ${chat.tarefaId ? `<a href="/tarefas.html?tarefa=${encodeURIComponent(chat.tarefaId)}" target="_blank" rel="noopener" style="color:var(--accent);">tarefa do Ticket #${escapeHtml(chat.numeroTicket)}</a>` : ''}${chat.tarefaId && chat.chamadoId ? ' · ' : ''}${chat.chamadoId ? `<a href="/tecnico.html?ticket=${encodeURIComponent(chat.numeroTicket)}" target="_blank" rel="noopener" style="color:var(--accent);">chamado remoto</a>` : ''}</div>` : ''}
     ${alertasSeg.length ? `<div class="d-alerta-seguranca"><details><summary>🛡️ ${alertasSeg.length} alerta(s) de segurança nessa conversa</summary>${alertasSeg.map(a=>`
       <div class="d-alerta-item">
         <b>${escapeHtml(a.motivo||'')}</b> · ${fmtDataHora(a.em)}<br>

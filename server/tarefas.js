@@ -5,6 +5,7 @@
 const crypto = require('crypto');
 const db = require('./firestore');
 const ticketCounter = require('./ticketCounter');
+const prioridades = require('./prioridades');
 
 const COLLECTION = db.collection('tarefas');
 const CONTROLE = db.collection('tarefasControle');
@@ -30,6 +31,11 @@ function podeGerir(tarefa, acesso) {
 // quem cobra ficar sabendo.
 function podeParticipar(tarefa, acesso) {
   return podeGerir(tarefa, acesso) || (tarefa.colaboradoresIds || []).includes(acesso.usuario.id);
+}
+
+function podeMoverStatus(tarefa, acesso) {
+  if (podeGerir(tarefa, acesso)) return true;
+  return !tarefa.participantesApenasAcompanham && (tarefa.colaboradoresIds || []).includes(acesso.usuario.id);
 }
 
 function podeArquivar(tarefa, acesso) {
@@ -156,7 +162,7 @@ function pessoasParaColaboradores(pessoas, responsavelId) {
     .map((p) => ({ id: p.id, nome: nomeUsuario(p) })).slice(0, 20);
 }
 
-async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null }) {
+async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false }) {
   const texto = String(titulo || '').trim().slice(0, 200);
   if (!texto) throw new Error('Informe o título da tarefa.');
   const ref = COLLECTION.doc();
@@ -170,12 +176,13 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
   // um ticket existente, herda esse mesmo número — não cria uma segunda
   // numeração para o mesmo assunto.
   const numeroTicket = numeroTicketInformado != null ? numeroTicketInformado : (vinculo?.numeroTicket != null ? vinculo.numeroTicket : await ticketCounter.proximoTicket());
+  const prioridadeFinal = prioridades.sanitizarPrioridade(prioridade);
   const tarefa = {
     id: ref.id, origem: origem || (vinculo ? 'ticket-manual' : 'manual'), titulo: texto,
     numeroTicket,
     origemChatId: origemChatId || null,
     descricao: String(descricao || '').trim().slice(0, 2000),
-    prioridade: 'normal', status: statusInicial, dataInicio: inicio, dataEntrega: entrega,
+    prioridade: prioridadeFinal, slaPrazo: prioridades.slaPrazo(prioridadeFinal, agora), status: statusInicial, dataInicio: inicio, dataEntrega: entrega,
     // marca de REGISTRO: a situação já aconteceu e o que se quer é o
     // documento, não um pedido. Não muda permissão nem fluxo - muda o que o
     // PDF diz que ele é, e deixa filtrar "só ocorrências" na lista.
@@ -183,7 +190,7 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
     responsavelId: (responsavel || usuario).id, responsavelEmail: (responsavel || usuario).email || null, responsavelNome: nomeUsuario(responsavel || usuario),
     criadoPorId: usuario.id, criadoPorNome: nomeUsuario(usuario),
     criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo, anexos: [],
-    colaboradores: equipe, colaboradoresIds: equipe.map((p) => p.id),
+    colaboradores: equipe, colaboradoresIds: equipe.map((p) => p.id), participantesApenasAcompanham: !!participantesApenasAcompanham,
     unidade: unidade || null, unidadeNome: unidadeNome || unidade || null,
   };
   await ref.set(tarefa);
@@ -257,7 +264,7 @@ async function atualizarStatus(id, acesso, status) {
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
   const tarefa = snap.data();
-  if (!podeParticipar(tarefa, acesso)) throw new Error('Você não pode alterar esta tarefa.');
+  if (!podeMoverStatus(tarefa, acesso)) throw new Error('Você acompanha esta tarefa: pode comentar e anexar, mas não alterar o status.');
   if (!STATUS_ABERTO.has(tarefa.status) && tarefa.status !== 'CONCLUIDA') throw new Error('Essa tarefa já foi encerrada.');
   const reaberta = tarefa.status === 'CONCLUIDA';
   await ref.update({ status, atualizadoEm: new Date().toISOString(), ...(reaberta ? { concluidaEm: null, concluidaPorId: null, concluidaPorNome: null, reabertaEm: new Date().toISOString(), reabertaPorNome: nomeUsuario(acesso.usuario) } : {}) });
@@ -283,7 +290,7 @@ async function concluir(id, { usuario, isMaster, isAdmin, unidades, observacao }
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
   const tarefa = snap.data();
-  if (!podeParticipar(tarefa, { usuario, isMaster, isAdmin, unidades })) throw new Error('Você não pode concluir esta tarefa.');
+  if (!podeMoverStatus(tarefa, { usuario, isMaster, isAdmin, unidades })) throw new Error('Você acompanha esta tarefa: pode comentar e anexar, mas não concluir.');
   if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Essa tarefa já foi encerrada.');
   const agora = new Date().toISOString();
   await ref.update({ status: 'CONCLUIDA', concluidaEm: agora, concluidaPorId: usuario.id, concluidaPorNome: nomeUsuario(usuario), observacaoConclusao: String(observacao || '').trim().slice(0, 1000), atualizadoEm: agora });
@@ -359,6 +366,26 @@ async function registrarGerado(id, acesso, item) {
   return getOne(id);
 }
 
+// A unidade de uma tarefa de chat pode ter sido inferida (ou não ter sido
+// informada pelo cliente). Só Master corrige esse dado, e a alteração vira um
+// comentário automático para a trilha de auditoria ficar visível na tarefa.
+async function atualizarUnidade(id, acesso, { unidade, unidadeNome } = {}) {
+  if (!acesso?.isMaster) throw new Error('Somente Master pode corrigir a unidade da tarefa.');
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data(), agora = new Date().toISOString();
+  const anterior = tarefa.unidadeNome || tarefa.unidade || 'Sem unidade';
+  const proxima = unidadeNome || unidade || 'Sem unidade';
+  if ((tarefa.unidade || null) === (unidade || null)) return tarefa;
+  const comentarios = [...(tarefa.comentarios || []), {
+    id: crypto.randomBytes(10).toString('hex'),
+    texto: `Auditoria: unidade alterada de “${anterior}” para “${proxima}”.`,
+    porId: acesso.usuario?.id || null, porNome: nomeUsuario(acesso.usuario), em: agora, sistema: true,
+  }];
+  await ref.update({ unidade: unidade || null, unidadeNome: unidadeNome || unidade || null, comentarios, atualizadoEm: agora });
+  return { ...tarefa, unidade: unidade || null, unidadeNome: unidadeNome || unidade || null, comentarios, atualizadoEm: agora };
+}
+
 async function prepararConversaoEmSolicitacao(id, acesso) {
   const ref = COLLECTION.doc(id); const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
@@ -409,4 +436,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
   return resultado;
 }
 
-module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar };
+module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };

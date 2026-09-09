@@ -48,6 +48,7 @@ const ifoodStore = require('./ifoodStore');
 const ifoodSync = require('./ifoodSync');
 const solicitacoes = require('./solicitacoes');
 const tarefas = require('./tarefas');
+const fornecedores = require('./fornecedores');
 const tarefaRelatorio = require('./tarefaRelatorio');
 const acessosPessoa = require('./acessosPessoa');
 const formularios = require('./formularios');
@@ -9164,6 +9165,86 @@ function podeCriarTarefaManual(req) {
     || (req.permissions?.sections || []).includes('tarefas');
 }
 
+// Cadastro de fornecedores é um cofre operacional: Master/Admin e gerentes
+// somente podem tratar as unidades que já fazem parte do seu escopo.
+function podeGerirFornecedores(req) {
+  return req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo)
+    || (req.permissions?.sections || []).includes('fornecedores');
+}
+
+function unidadesFornecedorPermitidas(req) {
+  if (req.isMaster) return null;
+  return req.isAdmin ? (req.unidadesDaEmpresa || req.permissions?.unidades || []) : (req.permissions?.unidades || []);
+}
+
+async function fornecedorNoEscopo(req, id) {
+  const lista = await fornecedores.listar(unidadesFornecedorPermitidas(req));
+  return lista.find((fornecedor) => fornecedor.id === id) || null;
+}
+
+app.get('/api/fornecedores', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Cadastro de fornecedores exige perfil de gestão ou a seção Fornecedores.' });
+    res.json(await fornecedores.listar(unidadesFornecedorPermitidas(req)));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/fornecedores', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Sem permissão para cadastrar fornecedor.' });
+    const unidade = String(req.body?.unidade || '').trim();
+    const permitidas = unidadesFornecedorPermitidas(req);
+    if (!unidade || (permitidas && !permitidas.includes(unidade))) return res.status(403).json({ error: 'Escolha uma unidade do seu acesso.' });
+    const mapa = await construirUnidadesMapa();
+    res.status(201).json(await fornecedores.criar({ unidade, unidadeNome: mapa[unidade] || unidade, dados: req.body, por: req.user }));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.put('/api/fornecedores/:id', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Sem permissão para editar fornecedor.' });
+    if (!await fornecedorNoEscopo(req, req.params.id)) return res.status(404).json({ error: 'Fornecedor não encontrado no seu escopo.' });
+    res.json(await fornecedores.atualizar(req.params.id, req.body, req.user));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/fornecedores/:id/validar', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Sem permissão para validar fornecedor.' });
+    if (!await fornecedorNoEscopo(req, req.params.id)) return res.status(404).json({ error: 'Fornecedor não encontrado no seu escopo.' });
+    res.json(await fornecedores.validar(req.params.id, req.user));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/fornecedores/link', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Sem permissão para gerar link.' });
+    const unidade = String(req.body?.unidade || '').trim(), permitidas = unidadesFornecedorPermitidas(req);
+    if (!unidade || (permitidas && !permitidas.includes(unidade))) return res.status(403).json({ error: 'Escolha uma unidade do seu acesso.' });
+    const mapa = await construirUnidadesMapa();
+    const convite = await fornecedores.criarConvite({ unidade, unidadeNome: mapa[unidade] || unidade, por: req.user });
+    res.status(201).json({ ...convite, link: `${APP_BASE_URL}/fornecedor-cadastro.html?convite=${encodeURIComponent(convite.token)}` });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// O link público revela somente a unidade destinatária. Dados de fornecedores
+// entram como pendentes e nunca se tornam ativos sem conferência interna.
+app.get('/api/fornecedores/publico/:token', async (req, res) => {
+  const convite = await fornecedores.convite(req.params.token);
+  if (!convite) return res.status(404).json({ error: 'Link de cadastro inválido ou removido.' });
+  res.json({ unidade: convite.unidade, unidadeNome: convite.unidadeNome });
+});
+
+app.post('/api/fornecedores/publico/:token', async (req, res) => {
+  try {
+    const convite = await fornecedores.convite(req.params.token);
+    if (!convite) return res.status(404).json({ error: 'Link de cadastro inválido ou removido.' });
+    const criado = await fornecedores.criarPublico({ unidade: convite.unidade, unidadeNome: convite.unidadeNome, dados: req.body, convite });
+    await fornecedores.usarConvite(convite.token);
+    res.status(201).json({ id: criado.id, status: criado.status });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.get('/api/tarefas/minhas', auth.requireAuth, async (req, res) => {
   try {
     res.json(await tarefas.listarMinhas(acessoDasTarefas(req)));
@@ -9201,6 +9282,7 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
       podeFormulario: req.isMaster || (req.permissions?.sections || []).includes('formularios'),
       podeAtribuir: podeDistribuirTarefas(req),
       podeCriar: podeCriarTarefaManual(req),
+      isMaster: req.isMaster,
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -9235,6 +9317,7 @@ app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
       dataInicio: req.body?.dataInicio, dataEntrega: req.body?.dataEntrega,
       unidade, unidadeNome: unidade ? (mapa[unidade] || unidade) : null, usuario: req.user, responsavel,
       colaboradores: participantes, ehOcorrencia: req.body?.ehOcorrencia === true,
+      prioridade: req.body?.prioridade, participantesApenasAcompanham: req.body?.participantesApenasAcompanham === true,
     });
     broadcast('tarefas-atualizada', { id: criada.id, unidade: criada.unidade }, 'tarefas');
     res.json(criada);
@@ -9477,6 +9560,20 @@ app.patch('/api/tarefas/:id/datas', auth.requireAuth, async (req, res) => {
     const atualizada = await tarefas.atualizarDatas(req.params.id, acessoDasTarefas(req), {
       dataInicio: req.body?.dataInicio, dataEntrega: req.body?.dataEntrega,
     });
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/tarefas/:id/unidade', auth.requireAuth, async (req, res) => {
+  try {
+    if (!req.isMaster) return res.status(403).json({ error: 'Somente Master pode corrigir a unidade da tarefa.' });
+    const unidade = String(req.body?.unidade || '').trim() || null;
+    const mapa = await construirUnidadesMapa();
+    if (unidade && !mapa[unidade]) return res.status(400).json({ error: 'Escolha uma unidade válida.' });
+    const atualizada = await tarefas.atualizarUnidade(req.params.id, acessoDasTarefas(req), { unidade, unidadeNome: unidade ? mapa[unidade] : null });
     broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
     res.json(atualizada);
   } catch (err) {
@@ -12635,6 +12732,26 @@ app.post('/api/suporte-chats/:id/gerar-chamado', auth.requireAuth, async (req, r
   }
 });
 
+function resumoChatParaTarefa(chat) {
+  const limite = 1750;
+  const limpo = (texto, max = 420) => String(texto || '').replace(/\s+/g, ' ').trim().slice(0, max);
+  const mensagens = Array.isArray(chat?.mensagens) ? chat.mensagens.filter((m) => limpo(m?.texto)) : [];
+  // A abertura explica o pedido; as últimas interações dizem onde ele parou.
+  // Juntas, dão ao responsável o contexto suficiente sem despejar o chat todo
+  // dentro da tarefa, que continuaria sendo a fonte oficial da conversa.
+  const selecionadas = mensagens.length > 5
+    ? [mensagens[0], ...mensagens.slice(-4)]
+    : mensagens;
+  const linhas = selecionadas.map((m) => `${m.de === 'visitante' ? 'Cliente' : (m.de === 'bot' ? 'Beniboy' : 'Suporte')}: ${limpo(m.texto)}`);
+  const cabecalho = [
+    `Conversa do Beniboy · Ticket #${chat.numeroTicket}`,
+    chat.assunto ? `Assunto: ${limpo(chat.assunto, 140)}` : '',
+    chat.nome ? `Cliente: ${limpo(chat.nome, 120)}` : '',
+    linhas.length ? 'Contexto da conversa:' : '',
+  ].filter(Boolean).join('\n');
+  return `${cabecalho}${linhas.length ? `\n${linhas.join('\n')}` : ''}`.slice(0, limite);
+}
+
 // O atendimento pode precisar de acompanhamento sem ainda ser um chamado
 // técnico. Esta ação cria uma tarefa no Meu Dia com o MESMO protocolo do
 // chat; assim Chat → Tarefa → Solicitação continua sendo um único assunto,
@@ -12652,10 +12769,9 @@ app.post('/api/suporte-chats/:id/gerar-tarefa', auth.requireAuth, async (req, re
     const mapa = await construirUnidadesMapa();
     const contexto = String(chat.lojaContexto || '').trim();
     const unidade = Object.keys(mapa).find((codigo) => String(mapa[codigo]).toLocaleLowerCase('pt-BR') === contexto.toLocaleLowerCase('pt-BR')) || null;
-    const primeiraMensagem = String(chat.mensagens?.find((m) => m.de === 'visitante')?.texto || '').trim();
     const tarefa = await tarefas.criar({
       titulo: `Chat · ${chat.nome || chat.assunto || 'Atendimento'}`,
-      descricao: `Protocolo #${chat.numeroTicket}${chat.assunto ? ` · ${chat.assunto}` : ''}${primeiraMensagem ? `\n\nSolicitação inicial: ${primeiraMensagem}` : ''}`,
+      descricao: resumoChatParaTarefa(chat),
       unidade, unidadeNome: unidade ? mapa[unidade] : null,
       usuario: req.user, responsavel: req.user,
       numeroTicket: chat.numeroTicket, origem: 'chat', origemChatId: chat.id,
