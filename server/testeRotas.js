@@ -4547,7 +4547,7 @@ setTimeout(async () => {
   // Formulários - memória de favorecido + anexos: preencher um Reembolso
   // com CPF grava o favorecido (nome + dados bancários); digitar o mesmo
   // CPF de novo devolve tudo pra tela preencher sozinha. A criação também
-  // aceita multipart com comprovantes (PDF/imagem, até 5) e as rotas de
+    // aceita multipart com comprovantes (PDF/imagem/ZIP, até 5) e as rotas de
   // anexo (logada e pública por token) respondem sem vazar por índice/token.
   let okFavorecido = false;
   try {
@@ -4569,10 +4569,13 @@ setTimeout(async () => {
     const viaMultipart = await postarMultipart('/api/formularios', {
       payload: JSON.stringify({ tipo: 'avulso', unidade: 'Spoleto Tacaruna', campos: { favorecido: 'X' }, linhas: [{ data: 'x', descricao: 'y', valor: '10' }] }),
     }, null, 'anexos', cab);
-    // arquivo que não é PDF nem imagem é barrado ANTES de tocar no storage
+    // arquivo que não é PDF, imagem nem ZIP é barrado ANTES de tocar no storage
     const tipoRuim = await postarMultipart('/api/formularios', {
       payload: JSON.stringify({ tipo: 'avulso', unidade: 'Spoleto Tacaruna', campos: { delivery: 100, entradaDinheiro: 100 }, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }),
     }, { nome: 'nota.txt', tipo: 'text/plain', buffer: Buffer.from('oi') }, 'anexos', cab);
+    const zipPermitido = await postarMultipart('/api/formularios', {
+      payload: JSON.stringify({ tipo: 'avulso', unidade: 'Spoleto Tacaruna', campos: { delivery: 100, entradaDinheiro: 100 }, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }),
+    }, { nome: 'evidencias.zip', tipo: 'application/zip', buffer: Buffer.from('PK\x03\x04') }, 'anexos', cab);
 
     // rotas de anexo: índice inexistente e token errado caem em 404
     const tokenAss = new URLSearchParams(String((fR.assinaturas.find((a) => a.chave === 'favorecido') || {}).link).split('?')[1]).get('t');
@@ -4590,7 +4593,8 @@ setTimeout(async () => {
       'a busca aceita o CPF com máscara': formatado.status === 200,
       'CPF nunca usado devolve 404': desconhecido.status === 404,
       'criar por multipart (sem arquivo) funciona': viaMultipart.status === 200,
-      'arquivo que não é PDF/imagem é recusado': tipoRuim.status === 400 && /PDF nem imagem/.test(tipoRuim.corpo),
+      'arquivo que não é PDF, imagem ou ZIP é recusado': tipoRuim.status === 400 && /PDF, imagem ou ZIP/.test(tipoRuim.corpo),
+      'arquivo ZIP é aceito como comprovante': zipPermitido.status === 200,
       'anexo com índice inexistente dá 404 (logado e público)': anexoForaDoIndice.status === 404 && anexoPublicoForaDoIndice.status === 404,
       'anexo público com token errado dá 404': anexoTokenErrado.status === 404,
       'a tela de formulários tem o campo de comprovantes e manda FormData':
@@ -15068,7 +15072,7 @@ setTimeout(async () => {
       'o PDF sai com o nome do documento certo': /Registro de Ocorrência/.test(textoOcorrencia) && /Registro de Tarefa/.test(textoComum) && !/Registro de Ocorrência/.test(textoComum),
       'e traz o que aconteceu, quem registrou e o histórico': /Queda de energia/.test(textoOcorrencia) && /Gerador não entrou/.test(textoOcorrencia) && /Energia voltou 20h05/.test(textoOcorrencia),
       'o anexo aparece pelo nome no documento': /painel\.png/.test(textoOcorrencia),
-      'abre pra conferir (inline) e só baixa quando se pede': /^inline;/.test(disp(verPdf)) && /^attachment;/.test(disp(baixarPdf)) && /filename="ocorrencia-/.test(disp(verPdf)),
+      'abre pra conferir (inline) e só baixa quando se pede, com nome identificável': /^inline;/.test(disp(verPdf)) && /^attachment;/.test(disp(baixarPdf)) && /filename="ocorrencia_.*_(ticket|registro)-.*_\d{4}-\d{2}-\d{2}_\d{4}\.pdf"/.test(disp(verPdf)),
       'quem não participa da tarefa não gera o PDF dela': pdfDeFora.status === 404,
       'o relatório da lista traz o resumo e a listagem': rel.status === 200 && /Relatório de Tarefas/.test(textoRel) && /por situação/i.test(textoRel) && /por unidade/i.test(textoRel) && /por tipo/i.test(textoRel) && /Conferir o malote/.test(textoRel),
       'com o filtro escrito no cabeçalho (o número do PDF bate com o da tela)': /Em aberto · Mooca/.test(textoRel) && /2 tarefa\(s\)/.test(textoRel),

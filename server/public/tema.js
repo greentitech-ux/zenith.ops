@@ -634,10 +634,24 @@
     '  --pedido:#c62828; --pedido-dim:#fde7e5;',
     '  --envio:#175fb4; --envio-dim:#e4edfb;',
     '}',
-    // paginas pintam o body com a var --bg, mas garante mesmo se alguma
-    // tiver a cor no proprio body
-    ':root[data-tema="claro"] body{background:var(--bg);color:var(--text);}',
-  ].join('\n');
+     // paginas pintam o body com a var --bg, mas garante mesmo se alguma
+     // tiver a cor no proprio body
+     ':root[data-tema="claro"] body{background:var(--bg);color:var(--text);}',
+     // O claro nao pode ser apenas o escuro invertido: cards brancos em cima
+     // de branco desapareciam, os blocos pareciam soltos e chips herdados
+     // com fundo #181d24 ficavam pesados. Estas regras mantem a hierarquia
+     // visual sem alterar o HTML nem a estrutura particular de cada tela.
+     ':root[data-tema="claro"]{--bg:#f3f6f8;--panel:#fff;--panel2:#f7f9fb;--line:#cbd5df;--text:#17212b;--muted:#526477;}',
+     ':root[data-tema="claro"] header{background:color-mix(in srgb,var(--panel) 92%,var(--bg));box-shadow:0 1px 0 rgba(23,33,43,.06),0 5px 14px rgba(23,33,43,.04);}',
+     ':root[data-tema="claro"] .panel,:root[data-tema="claro"] .col,:root[data-tema="claro"] .sheet,:root[data-tema="claro"] .dialog{box-shadow:0 2px 7px rgba(23,33,43,.055);}',
+     ':root[data-tema="claro"] .kcard,:root[data-tema="claro"] .task,:root[data-tema="claro"] .card,:root[data-tema="claro"] .status-toggle-btn{box-shadow:0 1px 3px rgba(23,33,43,.035);}',
+     ':root[data-tema="claro"] .status-toggle-btn.aberto,:root[data-tema="claro"] .tipo-filtro-btn.active,:root[data-tema="claro"] a.back.active{background:#f0f7df;border-color:#628d19;color:#456a00;}',
+     ':root[data-tema="claro"] .status-toggle-btn.aberto .stb-count{color:#456a00;}',
+     ':root[data-tema="claro"] .triagem-nota{background:#f5f8fb;border-color:#c8d3de;color:#44576a;}',
+     ':root[data-tema="claro"] .tipo-badge,:root[data-tema="claro"] span.tipo-badge[style*="background:#181d24"]{background:#e9eff4!important;color:#405367!important;border-color:#c7d2dc!important;}',
+     ':root[data-tema="claro"] .badge.PENDENTE{background:#fff3cf;color:#765300;}',
+     ':root[data-tema="claro"] .btn-notif,:root[data-tema="claro"] .hamburger-btn{background:#fff;box-shadow:0 1px 3px rgba(23,33,43,.06);}',
+   ].join('\n');
   document.head.appendChild(style);
 
   function aplicar() {
@@ -1095,5 +1109,31 @@
     window.zenithRascunhos = { limpar: limparNo, restaurar: agendarRestauracao };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', agendarRestauracao);
     else agendarRestauracao();
+  })();
+
+  // Todo campo de ANEXO que ja aceita PDF tambem aceita ZIP. Centralizar evita
+  // que uma tela nova fique com o seletor antigo enquanto o servidor ja pode
+  // receber o arquivo. Campos que so leem documento/foto continuam validados
+  // pelo fluxo de leitura; ZIP e' evidencia/arquivo, nao entrada de OCR.
+  (function liberarZipNosAnexos() {
+    function ajustar(campo) {
+      if (!campo || String(campo.type || '').toLowerCase() !== 'file') return;
+      var aceita = String(campo.getAttribute('accept') || '');
+      if (!/(application\/pdf|\.pdf)/i.test(aceita) || /(?:application\/zip|\.zip)/i.test(aceita)) return;
+      campo.setAttribute('accept', aceita.replace(/\s+$/g, '') + ',application/zip,.zip');
+    }
+    function ajustarNo(no) {
+      if (!no || no.nodeType !== 1) return;
+      ajustar(no);
+      if (no.querySelectorAll) no.querySelectorAll('input[type="file"]').forEach(ajustar);
+    }
+    function iniciarZip() {
+      document.querySelectorAll('input[type="file"]').forEach(ajustar);
+      new MutationObserver(function (mudancas) {
+        mudancas.forEach(function (m) { m.addedNodes.forEach(ajustarNo); });
+      }).observe(document.documentElement, { childList: true, subtree: true });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciarZip);
+    else iniciarZip();
   })();
 })();

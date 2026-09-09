@@ -147,11 +147,15 @@ async function baixarPdf(url, opcoes, baixar, nomeArquivo){
   const r = await fetch(url, opcoes);
   if(!r.ok){ let m='Não foi possível gerar o PDF.'; try{ m=(await r.json()).error||m }catch(x){} throw Error(m) }
   const u = URL.createObjectURL(await r.blob());
-  if(baixar){ const a=document.createElement('a'); a.href=u; a.download=nomeArquivo; document.body.appendChild(a); a.click(); a.remove() }
+  // O servidor conhece unidade, Ticket e data de criação. Nunca substituir
+  // esse nome por id técnico no navegador, senão a pasta Downloads perde o
+  // padrão dos documentos e vira "tarefa-abc123 (2).pdf".
+  const nomeDoServidor=(r.headers.get('Content-Disposition')||'').match(/filename="([^"]+)"/)?.[1]||nomeArquivo;
+  if(baixar){ const a=document.createElement('a'); a.href=u; a.download=nomeDoServidor; document.body.appendChild(a); a.click(); a.remove() }
   else if(!window.open(u,'_blank')) alert('O navegador bloqueou a aba do PDF. Libere os pop-ups desta página ou use "Baixar PDF".');
   setTimeout(()=>URL.revokeObjectURL(u), 60000);
 }
-function pdfDaTarefa(baixar){const nome=(O.ehOcorrencia?'ocorrencia':'tarefa')+'-'+O.id.slice(0,12)+'.pdf';baixarPdf('/api/tarefas/'+O.id+'/pdf'+(baixar?'?baixar=1':''),{},baixar,nome).catch(x=>alert(x.message))}
+function pdfDaTarefa(baixar){baixarPdf('/api/tarefas/'+O.id+'/pdf'+(baixar?'?baixar=1':''),{},baixar,'tarefa.pdf').catch(x=>alert(x.message))}
 // o relatório é do QUE ESTÁ NA TELA: manda os ids do filtro atual e a
 // descrição do filtro pro cabeçalho, pra o número do PDF bater com o da tela
 function descricaoDoFiltro(){const nome=id=>{const el=$(id);return el.options[el.selectedIndex]?el.options[el.selectedIndex].text:''};const p=[nome('F-SIT')];const g=$('F-GRUPO').value?nome('F-GRUPO'):'';if(g)p.push('grupo '+g);const u=$('F-UNI').value?nome('F-UNI'):'';if(u)p.push(u);const t=$('F-TIPO').value?nome('F-TIPO'):'';if(t)p.push(t);const de=$('F-DE').value,ate=$('F-ATE').value;if(de||ate)p.push(`${de?de.split('-').reverse().join('/'):'início'} a ${ate?ate.split('-').reverse().join('/'):'hoje'}`);return p.join(' · ')}

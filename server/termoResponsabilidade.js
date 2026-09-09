@@ -4,6 +4,7 @@
 // fisicamente pelo responsavel antes da entrada no parque. Layout retrato,
 // texto corrido, diferente do padrao de tabela de reportUtil.js.
 const PDFDocument = require('pdfkit');
+const { nomeArquivoRegistro } = require('./reportUtil');
 
 // ---------- identidade da operadora do parque - troque so aqui quando o
 // nome/CNPJ/endereco oficial mudar de novo ----------
@@ -124,8 +125,13 @@ const TEXTO_TERMO = `Estou ciente que o uso de meia antiderrapante é obrigatór
 
 function gerarTermoPDF(res, checkin) {
   const doc = new PDFDocument({ margin: 48, size: 'A4' });
+  const nomeArquivo = nomeArquivoRegistro('termo-responsabilidade', {
+    unidade: checkin.unidade || EMPRESA_NOME,
+    criadoEm: checkin.criadoEm || checkin.data,
+    id: checkin.id,
+  });
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="termo-${checkin.id}.pdf"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}.pdf"`);
   doc.pipe(res);
 
   const x = doc.page.margins.left;

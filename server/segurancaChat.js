@@ -31,7 +31,10 @@ function detectarConteudoSuspeito(texto) {
 // nenhum dos dois sozinho e confiavel: extensao pode mentir, mimetype
 // tambem e so o que o navegador declarou)
 const EXTENSOES_BLOQUEADAS = /\.(exe|bat|cmd|com|scr|msi|ps1|psm1|vbs|vbe|js|mjs|jse|wsf|wsh|jar|sh|bash|apk|dll|app|command|reg|hta|py|pyc|rb|pl|php)$/i;
-const MIME_PERMITIDOS = /^(image\/(jpeg|png|gif|webp|heic|heif)|application\/pdf)$/i;
+// ZIP e' permitido como EVIDENCIA/diagnostico compactado. Continua bloqueado
+// para qualquer extensao executavel e o servidor apenas armazena/entrega o
+// arquivo: nunca descompacta nem executa seu conteudo.
+const MIME_PERMITIDOS = /^(image\/(jpeg|png|gif|webp|heic|heif)|application\/(pdf|zip|x-zip-compressed|x-compressed))$/i;
 
 function validarAnexo(file) {
   const nome = String((file && file.originalname) || '');
@@ -39,7 +42,7 @@ function validarAnexo(file) {
     return { ok: false, motivo: `Tipo de arquivo não permitido (.${nome.split('.').pop()}).` };
   }
   if (!MIME_PERMITIDOS.test((file && file.mimetype) || '')) {
-    return { ok: false, motivo: 'Só é permitido enviar imagens ou PDF.' };
+    return { ok: false, motivo: 'Só é permitido enviar imagens, PDF ou ZIP.' };
   }
   return { ok: true };
 }
