@@ -3438,7 +3438,7 @@ function urlComputador(codigo, posto, tipo) {
 app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), async (req, res) => {
   try {
     if (!(await unidadesExtras.apareceEm(req.params.codigo, 'noc'))) return res.status(400).json({ error: 'Essa unidade não tem NOC habilitado.' });
-    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo);
+    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo, req.body.ehServidor, req.body.temGcom);
     const url = urlComputador(req.params.codigo, registro.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
@@ -3448,7 +3448,7 @@ app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), asy
 
 app.put('/api/loja-status/:codigo/computadores/:posto', requireSection('suporte'), async (req, res) => {
   try {
-    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook);
+    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook, req.body.ehServidor, req.body.temGcom);
     const url = urlComputador(req.params.codigo, req.params.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
@@ -9059,9 +9059,40 @@ async function sincronizarTarefasDoTicket(ticket, tipo = 'solicitacao') {
   return tarefas.sincronizarTicket(ticket, await users.list(), tipo);
 }
 
+function acessoDasTarefas(req) {
+  // Admin gere apenas a empresa a que pertence; gerente e demais usuários
+  // enxergam somente o que criaram ou receberam. O Master não tem limite.
+  const escopoAdmin = req.isAdmin ? (req.unidadesDaEmpresa || req.permissions?.unidades || []) : (req.permissions?.unidades || []);
+  return { usuario: req.user, isMaster: req.isMaster, isAdmin: req.isAdmin, unidades: escopoAdmin };
+}
+
 app.get('/api/tarefas/minhas', auth.requireAuth, async (req, res) => {
   try {
-    res.json(await tarefas.listarMinhas({ usuarioId: req.user.id, isMaster: req.isMaster }));
+    res.json(await tarefas.listarMinhas(acessoDasTarefas(req)));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
+  try {
+    const mapa = await construirUnidadesMapa();
+    const acesso = acessoDasTarefas(req);
+    const codigos = req.isMaster ? Object.keys(mapa) : (acesso.unidades || []);
+    // Só Master/Admin podem distribuir. A lista respeita unidade/empresa e
+    // expõe nome de usuário, nunca e-mail, para não criar identificação por
+    // dado de contato nem vazar pessoas de outro cliente.
+    let responsaveis = [req.user];
+    if (req.isMaster || req.isAdmin) {
+      const permitidas = new Set(codigos);
+      responsaveis = (await users.list()).filter((u) => u.active !== false && (req.isMaster
+        || (u.permissions?.unidades || []).some((unidade) => permitidas.has(unidade))));
+    }
+    res.json({
+      unidades: codigos.map((codigo) => ({ codigo, nome: mapa[codigo] || codigo })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+      responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário' })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+      podeAtribuir: req.isMaster || req.isAdmin,
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -9069,7 +9100,29 @@ app.get('/api/tarefas/minhas', auth.requireAuth, async (req, res) => {
 
 app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
   try {
-    res.json(await tarefas.criar({ titulo: req.body?.titulo, descricao: req.body?.descricao, usuario: req.user }));
+    const acesso = acessoDasTarefas(req);
+    const unidade = String(req.body?.unidade || '').trim() || null;
+    if (unidade && !req.isMaster && !(acesso.unidades || []).includes(unidade)) {
+      return res.status(403).json({ error: 'Você só pode criar tarefas para uma unidade do seu acesso.' });
+    }
+    let responsavel = req.user;
+    const responsavelId = String(req.body?.responsavelId || '').trim();
+    if (responsavelId && responsavelId !== req.user.id) {
+      if (!req.isMaster && !req.isAdmin) return res.status(403).json({ error: 'Somente Master ou Admin pode atribuir tarefas.' });
+      responsavel = (await users.list()).find((u) => u.id === responsavelId && u.active !== false);
+      if (!responsavel) return res.status(400).json({ error: 'Responsável não encontrado ou inativo.' });
+      if (!req.isMaster && !(responsavel.permissions?.unidades || []).some((codigo) => (acesso.unidades || []).includes(codigo))) {
+        return res.status(403).json({ error: 'O responsável não pertence a uma unidade do seu acesso.' });
+      }
+    }
+    const mapa = unidade ? await construirUnidadesMapa() : {};
+    const criada = await tarefas.criar({
+      titulo: req.body?.titulo, descricao: req.body?.descricao,
+      dataInicio: req.body?.dataInicio, dataEntrega: req.body?.dataEntrega,
+      unidade, unidadeNome: unidade ? (mapa[unidade] || unidade) : null, usuario: req.user, responsavel,
+    });
+    broadcast('tarefas-atualizada', { id: criada.id, unidade: criada.unidade }, 'tarefas');
+    res.json(criada);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -9077,7 +9130,22 @@ app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
 
 app.patch('/api/tarefas/:id/status', auth.requireAuth, async (req, res) => {
   try {
-    res.json(await tarefas.atualizarStatus(req.params.id, { usuarioId: req.user.id, isMaster: req.isMaster, status: req.body?.status }));
+    const acesso = acessoDasTarefas(req);
+    const anterior = await tarefas.getOne(req.params.id);
+    if (!anterior) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    if (!tarefas.podeGerirTarefa(anterior, acesso)) return res.status(403).json({ error: 'Essa tarefa não está no seu escopo.' });
+    // Reabrir uma tarefa ligada a ticket também reabre sua execução; assim a
+    // Central e o Meu Dia não ficam mostrando estados contraditórios.
+    if (anterior.status === 'CONCLUIDA' && req.body?.status !== 'CONCLUIDA' && anterior.vinculo?.tipo === 'solicitacao') {
+      const ticket = await solicitacoes.getOne(anterior.vinculo.id);
+      if (ticket?.execucaoStatus === 'FINALIZADO') await solicitacoes.atualizarExecucao(ticket.id, req.body?.status === 'PENDENTE' ? 'PENDENTE' : 'EM_ANDAMENTO', { porNome: req.user.username || req.user.nome || 'Suporte' });
+    } else if (anterior.status === 'CONCLUIDA' && req.body?.status !== 'CONCLUIDA' && anterior.vinculo?.tipo === 'estorno') {
+      const ticket = await refunds.getOne(anterior.vinculo.id);
+      if (ticket?.execucaoStatus === 'FINALIZADO') await refunds.atualizarExecucao(ticket.id, req.body?.status === 'PENDENTE' ? 'PENDENTE' : 'EM_ANDAMENTO', { porNome: req.user.username || req.user.nome || 'Suporte' });
+    }
+    const atualizada = await tarefas.atualizarStatus(req.params.id, acesso, req.body?.status);
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -9085,7 +9153,9 @@ app.patch('/api/tarefas/:id/status', auth.requireAuth, async (req, res) => {
 
 app.post('/api/tarefas/:id/comentarios', auth.requireAuth, async (req, res) => {
   try {
-    res.json(await tarefas.adicionarComentario(req.params.id, { usuario: req.user, isMaster: req.isMaster, texto: req.body?.texto }));
+    const atualizada = await tarefas.adicionarComentario(req.params.id, { ...acessoDasTarefas(req), texto: req.body?.texto });
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -9095,7 +9165,8 @@ app.post('/api/tarefas/:id/concluir', auth.requireAuth, async (req, res) => {
   try {
     const tarefa = await tarefas.getOne(req.params.id);
     if (!tarefa) return res.status(404).json({ error: 'Tarefa não encontrada.' });
-    if (tarefa.responsavelId !== req.user.id && !req.isMaster) return res.status(403).json({ error: 'Essa tarefa pertence a outro responsável.' });
+    const acesso = acessoDasTarefas(req);
+    if (!tarefas.podeGerirTarefa(tarefa, acesso)) return res.status(403).json({ error: 'Essa tarefa não está no seu escopo.' });
     // Concluir tarefa NUNCA decide/aprova um ticket. Só encerra a execução
     // depois de aprovado; adiantamentos mantêm a prestação de contas própria.
     if (tarefa.vinculo?.tipo === 'solicitacao') {
@@ -9104,17 +9175,50 @@ app.post('/api/tarefas/:id/concluir', auth.requireAuth, async (req, res) => {
       if (ticket.status !== 'APROVADO') return res.status(409).json({ error: 'Esse ticket ainda precisa ser aprovado antes de concluir a tarefa.' });
       if (ticket.tipo === 'adiantamento') return res.status(409).json({ error: 'Adiantamento só finaliza após a prestação de contas (nota e valor gasto).' });
       if (ticket.execucaoStatus !== 'FINALIZADO') {
-        await solicitacoes.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.email });
+        await solicitacoes.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.username || req.user.nome || 'Suporte' });
       }
-      broadcast('solicitacao-decidida', await solicitacoes.getOne(ticket.id), 'solicitacoes');
+      const atualizado = await solicitacoes.getOne(ticket.id);
+      await sincronizarTarefasDoTicket(atualizado, 'solicitacao');
+      broadcast('solicitacao-decidida', atualizado, 'solicitacoes');
     } else if (tarefa.vinculo?.tipo === 'estorno') {
       const ticket = await refunds.getOne(tarefa.vinculo.id);
       if (!ticket) return res.status(404).json({ error: 'O ticket vinculado não foi encontrado.' });
       if (ticket.status !== 'APROVADO') return res.status(409).json({ error: 'Esse ticket ainda precisa ser aprovado antes de concluir a tarefa.' });
-      if (ticket.execucaoStatus !== 'FINALIZADO') await refunds.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.email });
-      broadcast('refund-request-changed', await refunds.getOne(ticket.id), 'monitor');
+      if (ticket.execucaoStatus !== 'FINALIZADO') await refunds.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.username || req.user.nome || 'Suporte' });
+      const atualizado = await refunds.getOne(ticket.id);
+      await sincronizarTarefasDoTicket(atualizado, 'estorno');
+      broadcast('refund-request-changed', atualizado, 'monitor');
     }
-    res.json(await tarefas.concluir(req.params.id, { usuarioId: req.user.id, isMaster: req.isMaster, observacao: req.body?.observacao }));
+    const concluida = await tarefas.concluir(req.params.id, { ...acesso, observacao: req.body?.observacao });
+    broadcast('tarefas-atualizada', { id: concluida.id, unidade: concluida.unidade }, 'tarefas');
+    res.json(concluida);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Remoção preserva histórico: Master arquiva qualquer tarefa; Admin só pode
+// arquivar tarefa concluída da própria unidade. Nada é apagado fisicamente.
+app.delete('/api/tarefas/:id', auth.requireAuth, async (req, res) => {
+  try {
+    const arquivada = await tarefas.arquivar(req.params.id, acessoDasTarefas(req));
+    broadcast('tarefas-atualizada', { id: arquivada.id, unidade: arquivada.unidade }, 'tarefas');
+    res.json({ ok: true, tarefa: arquivada });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Reprocessamento idempotente para o acervo anterior ao Meu Dia. Útil se um
+// ticket antigo ganhou responsável de suporte depois da primeira migração.
+app.post('/api/tarefas/sincronizar-retroativo', auth.requireMaster, async (req, res) => {
+  try {
+    const resultado = await tarefas.sincronizarRetroativo({
+      solicitacoes: await solicitacoes.listAll(), estornos: await refunds.listAll(), usuarios: await users.list(),
+      forcar: req.body?.forcar === true,
+    });
+    broadcast('tarefas-atualizada', { retroativo: true }, 'tarefas');
+    res.json(resultado);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -13265,6 +13369,18 @@ function aquecerBoot(promessa, ms) {
     setInterval(() => {
       backup.rodarBackup().catch((err) => console.error('Erro no backup automático:', err.message));
     }, 24 * 60 * 60 * 1000);
+
+    // Migração única e idempotente do histórico: tickets já aprovados que
+    // ficaram abertos passam a aparecer no Meu Dia dos perfis operacionais.
+    // O marcador no Firestore impede que um deploy repita a varredura inteira.
+    tarefaDeBoot(async () => {
+      const resultado = await tarefas.sincronizarRetroativo({
+        solicitacoes: await solicitacoes.listAll(),
+        estornos: await refunds.listAll(),
+        usuarios: await users.list(),
+      });
+      if (resultado.executada) console.log(`Meu Dia: histórico sincronizado (${resultado.alteradas} tarefa(s) criada(s)).`);
+    }, 'sincronizar histórico de tickets no Meu Dia');
 
     // retencao do Abastecimento (decisao do Master 2026-08-09): registros
     // com mais de N dias (30 por padrao; env ABASTECIMENTO_RETENCAO_DIAS)
