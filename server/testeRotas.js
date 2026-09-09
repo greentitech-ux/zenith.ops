@@ -11888,9 +11888,10 @@ setTimeout(async () => {
     await new Promise((r) => setTimeout(r, 200));
     const ticket = [...DOCS.entries()]
       .filter(([k]) => k.startsWith('solicitacoes/')).map(([, v]) => v)
-      .find((t) => t.titulo === 'Login bloqueado: bloqmulti@teste.local');
+      .find((t) => t.titulo === 'Login bloqueado: bloqmulti');
     const conf = {
       'o chamado automático foi criado': !!ticket,
+      'o título do chamado usa o usuário, não expõe e-mail': !!ticket && !String(ticket.titulo || '').includes('@'),
       'unidadeNome NÃO junta as unidades (era o bug)': !!ticket && ticket.unidadeNome === 'Dominos Bessa',
       'unidade (código) é a primeira da lista, igual unidadeNome': !!ticket && ticket.unidade === 'Dominos Bessa',
       'a lista completa continua na observação, pra quem aprova ver todas as unidades':

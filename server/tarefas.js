@@ -60,6 +60,9 @@ function destinatarios(ticket, usuarios) {
 
 async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
   if (!ticket?.id) return [];
+  // Quebra de caixa é um alerta financeiro, não uma ordem de execução. Ela
+  // só entra no Meu Dia quando alguém usar a ação explícita “Criar tarefa”.
+  if (ticket.tipo === 'quebra-caixa') return [];
   const chaveBase = `${tipo}:${ticket.id}`;
   const alvos = destinatarios(ticket, usuarios);
   const alvoIds = new Set(alvos.map((u) => u.id));
@@ -121,7 +124,7 @@ async function getOne(id) {
   return snap.exists ? snap.data() : null;
 }
 
-async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel }) {
+async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, vinculo = null }) {
   const texto = String(titulo || '').trim().slice(0, 200);
   if (!texto) throw new Error('Informe o título da tarefa.');
   const ref = COLLECTION.doc();
@@ -131,16 +134,41 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
   const hoje = agora.slice(0, 10);
   const statusInicial = entrega && entrega < hoje ? 'PENDENTE' : (entrega === hoje ? 'HOJE' : 'A_FAZER');
   const tarefa = {
-    id: ref.id, origem: 'manual', titulo: texto,
+    id: ref.id, origem: vinculo ? 'ticket-manual' : 'manual', titulo: texto,
     descricao: String(descricao || '').trim().slice(0, 2000),
     prioridade: 'normal', status: statusInicial, dataInicio: inicio, dataEntrega: entrega,
     responsavelId: (responsavel || usuario).id, responsavelEmail: (responsavel || usuario).email || null, responsavelNome: nomeUsuario(responsavel || usuario),
     criadoPorId: usuario.id, criadoPorNome: nomeUsuario(usuario),
-    criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo: null, anexos: [], colaboradores: [],
+    criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo, anexos: [], colaboradores: [],
     unidade: unidade || null, unidadeNome: unidadeNome || unidade || null,
   };
   await ref.set(tarefa);
   return tarefa;
+}
+
+async function adicionarAnexo(id, acesso, anexo) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeGerir(tarefa, acesso)) throw new Error('Você não pode anexar nesta tarefa.');
+  const item = {
+    id: crypto.randomBytes(8).toString('hex'), nome: String(anexo.nome || 'print').slice(0, 160),
+    path: anexo.path, tipo: anexo.tipo || 'application/octet-stream', tamanho: Number(anexo.tamanho || 0),
+    enviadoEm: new Date().toISOString(), enviadoPorId: acesso.usuario.id, enviadoPorNome: nomeUsuario(acesso.usuario),
+  };
+  await ref.update({ anexos: [...(tarefa.anexos || []), item].slice(-20), atualizadoEm: item.enviadoEm });
+  return getOne(id);
+}
+
+async function arquivarQuebrasAutomaticas() {
+  const snap = await COLLECTION.get();
+  const agora = new Date().toISOString();
+  const alvos = snap.docs.filter((d) => {
+    const tarefa = d.data();
+    return tarefa.status !== 'ARQUIVADA' && tarefa.vinculo?.ticketTipo === 'quebra-caixa' && tarefa.origem === 'ticket';
+  });
+  await Promise.all(alvos.map((doc) => doc.ref.update({ status: 'ARQUIVADA', arquivadaEm: agora, arquivadaPorNome: 'Sistema', motivoArquivamento: 'Quebra de caixa não gera tarefa automaticamente.', atualizadoEm: agora })));
+  return alvos.length;
 }
 
 async function atualizarStatus(id, acesso, status) {
@@ -193,20 +221,21 @@ async function arquivar(id, acesso) {
 }
 
 async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuarios = [], forcar = false } = {}) {
-  const versao = 'tickets-v1';
+  const versao = 'tickets-v2';
   const ref = CONTROLE.doc(`retroativo-${versao}`);
   const anterior = await ref.get();
   if (anterior.exists && !forcar) return { executada: false, motivo: 'já sincronizado nesta versão', ...anterior.data() };
 
+  const quebrasArquivadas = await arquivarQuebrasAutomaticas();
   let alteradas = 0;
   for (const ticket of solicitacoes) alteradas += (await sincronizarTicket(ticket, usuarios, 'solicitacao')).length;
   for (const ticket of estornos) alteradas += (await sincronizarTicket(ticket, usuarios, 'estorno')).length;
   const resultado = {
     executada: true, versao, alteradas, solicitacoes: solicitacoes.length, estornos: estornos.length,
-    concluidaEm: new Date().toISOString(),
+    concluidaEm: new Date().toISOString(), quebrasArquivadas,
   };
   await ref.set(resultado);
   return resultado;
 }
 
-module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir };
+module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir };
