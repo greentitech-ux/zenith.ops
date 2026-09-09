@@ -6485,7 +6485,9 @@ setTimeout(async () => {
       'a tela do NOC tem o painel que busca o relatorio': (() => {
         const h = require('fs').readFileSync(path.join(__dirname, 'public', 'loja-status.html'), 'utf8');
         return /id="quedas-panel"/.test(h)
-          && /fetch\('\/api\/loja-status\/quedas\?dias=' \+/.test(h)
+          // a query passou a ser montada antes (dias= ou periodo=, ver os
+          // botões Hoje/Ontem) - o que importa aqui é a tela chamar a rota
+          && /fetch\('\/api\/loja-status\/quedas\?' \+ q\)/.test(h)
           && /function alternarPainelQuedas\(\)/.test(h)
           // so busca quando ABRE: relatorio de analise nao entra no poll de 30s
           && /if\(abriu && !QUEDAS_CARREGADO\) carregarQuedas\(\);/.test(h)
@@ -11300,6 +11302,74 @@ setTimeout(async () => {
   } catch (e) { okSessaoRemota = false; console.log('  erro: ' + e.message); }
   if (!okSessaoRemota) ruins += 1;
   console.log(`${okSessaoRemota ? '✓' : '✗'} NOC: sessão remota (alguém entrou, lida do log da ferramenta) separada do serviço só conectado`);
+
+  // ------------------------------------------------------------------
+  // QUEDAS DE CONEXÃO: RECOLHER E OS PERÍODOS Hoje/Ontem. Dois relatos do
+  // Master (09/09/2026): "quando clica em abrir ele carrega, mas quando clica
+  // para recolher ele não recolhe" e "adicionar o botão de Ontem e hoje".
+  //
+  // O bug era de cascata: o corpo do painel tinha style="display:block"
+  // CRAVADO no elemento, e estilo inline vence regra de folha - então
+  // `.uni-panel.recolhido .uni-grid{display:none}` nunca conseguia fechar.
+  //
+  // Hoje/Ontem não são "1 dia" da janela rolante: são dia de CALENDÁRIO da
+  // loja (meia-noite a meia-noite, fuso de Brasília), e Ontem precisa de fim
+  // de janela - sem ele, "Ontem" mostraria ontem mais o dia de hoje.
+  let okQuedasPeriodo = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const cabQ = { Authorization: 'Bearer ' + token };
+    // uma máquina com queda ONTEM e outra HOJE, na mesma unidade
+    const meiaNoiteHoje = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })).setHours(0, 0, 0, 0);
+    const ontemMs = meiaNoiteHoje - 6 * 60 * 60 * 1000;   // 18h de ontem
+    const hojeMs = meiaNoiteHoje + 6 * 60 * 60 * 1000;    // 6h de hoje
+    const evento = (quandoOff, quandoOn) => ([
+      { tipo: 'offline', em: quandoOff },
+      { tipo: 'online', em: quandoOn, duracaoMs: quandoOn - quandoOff },
+    ]);
+    DOCS.set('lojaStatus/QUEDAS_TESTE__pc1', {
+      codigo: 'QUEDAS_TESTE', posto: 'pc1', nome: 'PC 1', tipo: 'interno',
+      eventos: [...evento(ontemMs, ontemMs + 30 * 60000), ...evento(hojeMs, hojeMs + 45 * 60000)],
+    });
+    ls.descartarEspelhoTeste();
+    const pedirQ = async (qs) => JSON.parse((await pedir('/api/loja-status/quedas?' + qs, cabQ)).corpo);
+    const dHoje = await pedirQ('periodo=hoje');
+    const dOntem = await pedirQ('periodo=ontem');
+    const d7 = await pedirQ('dias=7');
+    const uni = (d) => (d.unidades || []).find((u) => u.codigo === 'QUEDAS_TESTE') || { quedas: 0 };
+    const fnBotoes = /function botoesPeriodoQuedas\(\)\{[\s\S]*?\n\}/.exec(html);
+    const conf = {
+      // o bug do recolher: o inline saiu e a regra de fechar existe
+      'o corpo do painel não tem mais display cravado no elemento (era o que impedia recolher)':
+        /<div id="quedas-corpo" class="uni-grid quedas-corpo"><\/div>/.test(html)
+        && !/id="quedas-corpo"[^>]*style=/.test(html),
+      'a regra que fecha o painel alcança o corpo das Quedas':
+        /\.quedas-corpo\{display:block;\}/.test(html) && /\.uni-panel\.recolhido \.quedas-corpo\{display:none;\}/.test(html),
+      // Hoje/Ontem: dia de calendario, com fim de janela no Ontem
+      'Hoje traz só a queda de hoje': uni(dHoje).quedas === 1 && dHoje.dias === 'hoje',
+      'Ontem traz só a queda de ontem, sem varrer o dia de hoje junto': uni(dOntem).quedas === 1 && dOntem.dias === 'ontem',
+      'os dois dias somados aparecem na janela de 7 dias': uni(d7).quedas === 2 && d7.dias === 7,
+      'o fim de janela existe de verdade no cálculo (não é só rótulo)':
+        /function quedasDeUmComputador\(doc, desde, ate = Infinity\)/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8'))
+        && /ev\.em > ate\) continue;/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8')),
+      '"fora agora" não aparece numa janela que já terminou (Ontem)':
+        /ate === Infinity && aberta/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8')),
+      // a tela
+      'os cinco períodos estão na tela, com Hoje e Ontem à frente':
+        !!fnBotoes && /carregarQuedas\('hoje'\)">Hoje/.test(fnBotoes[0]) && /carregarQuedas\('ontem'\)">Ontem/.test(fnBotoes[0])
+        && /carregarQuedas\(7\)/.test(fnBotoes[0]) && /carregarQuedas\(30\)/.test(fnBotoes[0]) && /carregarQuedas\(90\)/.test(fnBotoes[0]),
+      'os botões continuam na tela mesmo num período sem queda nenhuma':
+        (html.match(/botoesPeriodoQuedas\(\)/g) || []).length >= 3,
+      'a tela manda periodo= pra Hoje/Ontem e dias= pro resto':
+        /\(periodo === 'hoje' \|\| periodo === 'ontem'\)\s*\?\s*'periodo=' \+ periodo\s*:\s*'dias=' \+ \(periodo \|\| 30\)/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okQuedasPeriodo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (hoje=${uni(dHoje).quedas} ontem=${uni(dOntem).quedas} 7d=${uni(d7).quedas})`);
+  } catch (e) { okQuedasPeriodo = false; console.log('  erro: ' + e.message); }
+  if (!okQuedasPeriodo) ruins += 1;
+  console.log(`${okQuedasPeriodo ? '✓' : '✗'} NOC: painel de Quedas recolhe de novo, e ganhou Hoje/Ontem por dia de calendário`);
 
   // ------------------------------------------------------------------
   // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o

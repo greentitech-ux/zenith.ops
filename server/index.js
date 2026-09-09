@@ -3271,7 +3271,7 @@ app.get('/api/loja-status', requireSection('suporte'), async (req, res) => {
 // leitura no Firestore.
 app.get('/api/loja-status/quedas', requireSection('suporte'), async (req, res) => {
   const [rel, mapa] = await Promise.all([
-    lojaStatus.relatorioQuedas({ dias: req.query.dias }),
+    lojaStatus.relatorioQuedas({ dias: req.query.dias, periodo: req.query.periodo }),
     construirUnidadesMapa(),
   ]);
   res.json({ ...rel, unidades: rel.unidades.map((u) => ({ ...u, unidadeNome: mapa[u.codigo] || u.codigo })) });

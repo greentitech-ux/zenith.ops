@@ -2229,7 +2229,10 @@ async function varrerAlertas() {
 // existe no evento de abertura.
 const QUEDAS_JANELA_PADRAO_DIAS = 30;
 
-function quedasDeUmComputador(doc, desde) {
+// `ate` fecha a janela pelo outro lado. Só "Ontem" precisa disso: 7/30/90
+// dias e "Hoje" terminam agora, mas ontem termina à meia-noite de hoje -
+// sem esse limite, "Ontem" mostraria ontem MAIS o dia de hoje.
+function quedasDeUmComputador(doc, desde, ate = Infinity) {
   const fora = [];
   let aberta = null;
   for (const ev of doc.eventos || []) {
@@ -2241,24 +2244,48 @@ function quedasDeUmComputador(doc, desde) {
     // de ABERTURA, entao tem que sair daqui antes de zerar o par
     const link = (aberta && aberta.link) || null;
     aberta = null;
-    if (!ev.duracaoMs || ev.em < desde) continue;
+    if (!ev.duracaoMs || ev.em < desde || ev.em > ate) continue;
     fora.push({ inicio, fim: ev.em, ms: ev.duracaoMs, comandado, link });
   }
-  // queda que comecou e ainda nao fechou: a loja pode estar fora AGORA
-  const emAberto = aberta && aberta.em >= desde && aberta.motivo !== 'reinicio-comandado'
+  // queda que comecou e ainda nao fechou: a loja pode estar fora AGORA. Numa
+  // janela que ja terminou (Ontem), "fora agora" nao faz sentido - o que
+  // estiver aberto pertence ao dia de hoje
+  const emAberto = ate === Infinity && aberta && aberta.em >= desde && aberta.motivo !== 'reinicio-comandado'
     ? { inicio: aberta.em, ms: Date.now() - aberta.em }
     : null;
   return { fora, emAberto };
 }
 
+// início do dia em Brasília, N dias atrás (0 = hoje, 1 = ontem) - o painel
+// fala em "Hoje"/"Ontem", que é dia de calendário da loja, não janela
+// rolante de 24h contada de agora
+function meiaNoiteBrasilia(diasAtras = 0) {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(new Date());
+  const o = {};
+  p.forEach((x) => { if (x.type !== 'literal') o[x.type] = x.value; });
+  const d = new Date(`${o.year}-${o.month}-${o.day}T00:00:00-03:00`);
+  d.setDate(d.getDate() - diasAtras);
+  return d.getTime();
+}
+
 async function relatorioQuedas(opcoes) {
-  const dias = Math.max(1, Math.min(365, Number((opcoes || {}).dias) || QUEDAS_JANELA_PADRAO_DIAS));
-  const desde = Date.now() - dias * 24 * 60 * 60 * 1000;
+  const periodo = String((opcoes || {}).periodo || '');
+  // Hoje/Ontem são dias de calendário; o resto continua janela rolante
+  let desde;
+  let ate = Infinity;
+  let dias;
+  if (periodo === 'hoje') { desde = meiaNoiteBrasilia(0); dias = 'hoje'; }
+  else if (periodo === 'ontem') { desde = meiaNoiteBrasilia(1); ate = meiaNoiteBrasilia(0); dias = 'ontem'; }
+  else {
+    dias = Math.max(1, Math.min(365, Number((opcoes || {}).dias) || QUEDAS_JANELA_PADRAO_DIAS));
+    desde = Date.now() - dias * 24 * 60 * 60 * 1000;
+  }
   const docs = (await cache.cached()).map(semSegredo);
   const porUnidade = new Map();
   for (const doc of docs) {
     if (doc.ehNotebook) continue;
-    const { fora, emAberto } = quedasDeUmComputador(doc, desde);
+    const { fora, emAberto } = quedasDeUmComputador(doc, desde, ate);
     const reais = fora.filter((q) => !q.comandado);
     const u = porUnidade.get(doc.codigo) || {
       codigo: doc.codigo, computadores: 0, quedas: 0, foraMs: 0,
