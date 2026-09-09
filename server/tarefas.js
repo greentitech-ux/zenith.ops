@@ -302,6 +302,33 @@ async function definirResponsavel(id, acesso, pessoa) {
   return getOne(id);
 }
 
+// Uma tarefa iniciada pode virar um ticket ou um formulário. O documento em
+// si NÃO nasce aqui: nasce na tela que já sabe validar cada tipo (Central e
+// Formulários), e o que fica guardado na tarefa é só o RASTRO - o que ela
+// gerou, pra quem abrir a tarefa depois achar o documento.
+//
+// De propósito não mexe em `vinculo`: aquele campo é a chave de idempotência
+// da sincronização de ticket (vinculo.chave). Escrever nele aqui faria uma
+// sincronização futura adotar - e poder cancelar - uma tarefa que não nasceu
+// daquele ticket.
+async function registrarGerado(id, acesso, item) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeParticipar(tarefa, acesso)) throw new Error('Você não pode alterar esta tarefa.');
+  const tipo = ['solicitacao', 'estorno', 'formulario'].includes(item && item.tipo) ? item.tipo : null;
+  if (!tipo || !item.id) throw new Error('Documento gerado inválido.');
+  const registro = {
+    tipo, id: String(item.id).slice(0, 120),
+    numeroTicket: item.numeroTicket != null ? Number(item.numeroTicket) || null : null,
+    rotulo: String(item.rotulo || '').slice(0, 80) || null,
+    em: new Date().toISOString(), porNome: nomeUsuario(acesso.usuario),
+  };
+  const lista = (tarefa.gerou || []).filter((g) => !(g.tipo === registro.tipo && g.id === registro.id));
+  await ref.update({ gerou: [...lista, registro].slice(-10), atualizadoEm: registro.em });
+  return getOne(id);
+}
+
 async function arquivar(id, acesso) {
   const ref = COLLECTION.doc(id); const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
@@ -330,4 +357,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
   return resultado;
 }
 
-module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, definirColaboradores, definirResponsavel, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar };
+module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, definirColaboradores, definirResponsavel, registrarGerado, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar };

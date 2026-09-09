@@ -530,6 +530,7 @@ async function criar(){
     const d = await r.json();
     if(!r.ok) throw new Error(d.error || ('erro '+r.status));
     document.getElementById('editor').classList.add('hidden');
+    await avisarTarefa(d, TIPO_ATUAL);
     TIPO_ATUAL = null; renderTipos();
     await carregarLista();
     alert('Formulário criado! Os links de assinatura estão no card dele abaixo - mande cada link pra pessoa certa (WhatsApp).');
@@ -1184,6 +1185,35 @@ function toggleStatusTriagem(status){
   renderLista();
 }
 
+// Chegou do Meu Dia ("Criar formulário" numa tarefa): pré-seleciona a unidade
+// e guarda de quem veio, pra avisar a tarefa quando o formulário nascer. O
+// tipo, os campos e as assinaturas continuam sendo os desta tela - é ela que
+// sabe validar cada modelo.
+let TAREFA_ORIGEM = null;
+function prepararDeTarefa(){
+  const p = new URLSearchParams(location.search);
+  TAREFA_ORIGEM = p.get('tarefa');
+  if(!TAREFA_ORIGEM) return;
+  const unidade = p.get('unidade');
+  const sel = document.getElementById('f-unidade');
+  if(unidade && [...sel.options].some(o=>o.value===unidade)){ sel.value = unidade; atualizarUnidadeInfo(); }
+  const aviso = document.createElement('div');
+  aviso.className = 'msg';
+  aviso.style.margin = '10px 0';
+  aviso.innerHTML = `Aberto a partir da tarefa <b>${escapeHtml(p.get('titulo')||'do Meu Dia')}</b>. Escolha o modelo abaixo; quando o formulário for criado, ele volta a aparecer na tarefa. <a href="/tarefas.html" style="color:var(--accent);">voltar ao Meu Dia</a>`;
+  const tipos = document.getElementById('tipos');
+  if(tipos) tipos.parentNode.insertBefore(aviso, tipos);
+}
+async function avisarTarefa(criado, tipo){
+  if(!TAREFA_ORIGEM) return;
+  try{
+    await fetch(`/api/tarefas/${TAREFA_ORIGEM}/gerou`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ tipo:'formulario', id: criado.id, rotulo: (TIPOS[tipo]||{}).rotulo || tipo }),
+    });
+  }catch(e){ /* o formulário já existe; o rastro na tarefa é o que falhou */ }
+}
+
 async function carregarLista(){
   try{
     const r = await fetch('/api/formularios');
@@ -1328,6 +1358,7 @@ async function boot(){
   renderTipos();
   montarPresetsPeriodoLista();
   carregarLista();
+  prepararDeTarefa();
   if(SOU_MASTER){
     document.getElementById('painel-cadastro').classList.remove('hidden');
     carregarCadastro();

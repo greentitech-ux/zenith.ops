@@ -9128,6 +9128,10 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
       // a tela precisa saber QUEM é você pra liberar "trocar"/"alterar" na
       // tarefa de que você é responsável, sem reimplementar a regra no navegador
       eu: req.user.id,
+      // os botões "criar solicitação/formulário" levam pras telas da Central e
+      // de Formulários - sem a seção, o botão só levaria a um "sem acesso"
+      podeSolicitacao: req.isMaster || (req.permissions?.sections || []).includes('solicitacoes'),
+      podeFormulario: req.isMaster || (req.permissions?.sections || []).includes('formularios'),
       podeAtribuir: podeDistribuirTarefas(req),
       podeCriar: podeCriarTarefaManual(req),
     });
@@ -9324,6 +9328,16 @@ app.patch('/api/tarefas/:id/colaboradores', auth.requireAuth, async (req, res) =
     if (!atual) return res.status(404).json({ error: 'Tarefa não encontrada.' });
     const pessoas = await resolverColaboradores(req, acesso, req.body?.colaboradoresIds, atual.unidade, atual.responsavelId === req.user.id);
     const atualizada = await tarefas.definirColaboradores(req.params.id, acesso, pessoas);
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/tarefas/:id/gerou', auth.requireAuth, async (req, res) => {
+  try {
+    const atualizada = await tarefas.registrarGerado(req.params.id, acessoDasTarefas(req), req.body || {});
     broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
     res.json(atualizada);
   } catch (err) {
