@@ -9386,6 +9386,7 @@ app.patch('/api/solicitacoes/:id/status', auth.requireMasterOrAdmin, async (req,
       return res.status(400).json({ error: 'Escolha quem vai fazer a manutenção.' });
     }
     const registro = await solicitacoes.updateStatus(req.params.id, status, { motivoDecisao, decidedByEmail: req.user.email });
+    await sincronizarTarefasDoTicket(registro);
 
     let chamado = null;
     let desbloqueado = null;
@@ -9500,6 +9501,7 @@ app.patch('/api/solicitacoes/:id/execucao', auth.requireMasterOrAdmin, async (re
     if (!atual) return res.status(404).json({ error: 'Solicitação não encontrada.' });
     if (tipoBloqueado(req, atual.tipo)) return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
     const registro = await solicitacoes.atualizarExecucao(req.params.id, req.body.execucaoStatus, { porNome: req.user.email });
+    await sincronizarTarefasDoTicket(registro);
     broadcast('solicitacao-decidida', registro, 'solicitacoes');
     res.json(registro);
   } catch (err) {

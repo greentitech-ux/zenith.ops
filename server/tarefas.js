@@ -6,8 +6,15 @@ const crypto = require('crypto');
 const db = require('./firestore');
 
 const COLLECTION = db.collection('tarefas');
-const STATUS_ABERTO = new Set(['PENDENTE', 'EM_ANDAMENTO']);
-const STATUS_EDITAVEIS = new Set(['PENDENTE', 'EM_ANDAMENTO']);
+const STATUS_ABERTO = new Set(['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO']);
+const STATUS_EDITAVEIS = new Set(['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO']);
+const STATUS_TAREFA = [...STATUS_EDITAVEIS, 'CONCLUIDA', 'CANCELADA'];
+
+function statusDoTicket(ticket) {
+  if (ticket.status === 'APROVADO') return ticket.execucaoStatus === 'FINALIZADO' ? 'CONCLUIDA' : 'A_FAZER';
+  if (ticket.status === 'PENDENTE') return 'PENDENTE';
+  return 'CANCELADA';
+}
 
 function chaveTicket(ticketId, usuarioId, email) {
   const alvo = String(usuarioId || email || '').trim().toLowerCase();
@@ -23,6 +30,7 @@ function destinatarios(ticket, usuarios) {
     ? ticket.atribuidosIds : [ticket.direcionadoParaId].filter(Boolean);
   const emails = Array.isArray(ticket.atribuidosEmails) && ticket.atribuidosEmails.length
     ? ticket.atribuidosEmails : [ticket.direcionadoParaEmail].filter(Boolean);
+  if (!ids.length && !emails.length) return usuarios.filter((u) => u.role === 'master');
   return usuarios.filter((u) => podeReceberTicket(u)
     && (ids.includes(u.id) || emails.map((x) => String(x).toLowerCase()).includes(String(u.email || '').toLowerCase())));
 }
@@ -50,7 +58,8 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
     const snap = await ref.get();
     if (snap.exists) {
       const atual = snap.data();
-      if (STATUS_ABERTO.has(atual.status)) await ref.update({ titulo: ticket.titulo, prioridade: ticket.prioridade || 'normal', atualizadoEm: agora });
+      await ref.update({ titulo: ticket.titulo, prioridade: ticket.prioridade || 'normal', status: statusDoTicket(ticket), atualizadoEm: agora,
+        ...(statusDoTicket(ticket) === 'CONCLUIDA' && !atual.concluidaEm ? { concluidaEm: agora, concluidaPorEmail: ticket.execucaoPorNome || ticket.decidedByEmail || null } : {}) });
       continue;
     }
     const tarefa = {
@@ -58,7 +67,7 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
       origem: 'ticket',
       titulo: ticket.titulo || `Ticket #${ticket.numeroTicket || ''}`,
       prioridade: ticket.prioridade || 'normal',
-      status: 'PENDENTE',
+      status: statusDoTicket(ticket),
       responsavelId: usuario.id,
       responsavelEmail: usuario.email || null,
       criadaEm: agora,
@@ -67,6 +76,7 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
       unidade: ticket.unidade || null,
       unidadeNome: ticket.unidadeNome || null,
       comentarios: [],
+      dataInicio: agora.slice(0, 10), dataEntrega: null, anexos: [], colaboradores: [],
     };
     await ref.set(tarefa);
     alteradas.push(tarefa);
@@ -86,7 +96,7 @@ async function getOne(id) {
   return snap.exists ? snap.data() : null;
 }
 
-async function criar({ titulo, descricao, usuario }) {
+async function criar({ titulo, descricao, dataInicio, dataEntrega, colaboradores, usuario }) {
   const texto = String(titulo || '').trim().slice(0, 200);
   if (!texto) throw new Error('Informe o título da tarefa.');
   const ref = COLLECTION.doc();
@@ -94,9 +104,9 @@ async function criar({ titulo, descricao, usuario }) {
   const tarefa = {
     id: ref.id, origem: 'manual', titulo: texto,
     descricao: String(descricao || '').trim().slice(0, 2000),
-    prioridade: 'normal', status: 'PENDENTE',
+    prioridade: 'normal', status: 'PENDENTE', dataInicio: /^\d{4}-\d{2}-\d{2}$/.test(dataInicio || '') ? dataInicio : agora.slice(0, 10), dataEntrega: /^\d{4}-\d{2}-\d{2}$/.test(dataEntrega || '') ? dataEntrega : null,
     responsavelId: usuario.id, responsavelEmail: usuario.email || null,
-    criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo: null,
+    criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo: null, anexos: [], colaboradores: Array.isArray(colaboradores) ? colaboradores.slice(0, 10) : [],
     unidade: null, unidadeNome: null,
   };
   await ref.set(tarefa);
