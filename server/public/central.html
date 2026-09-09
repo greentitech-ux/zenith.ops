@@ -599,6 +599,7 @@ document.getElementById('form-nova').addEventListener('submit', async (ev)=>{
       const fd = new FormData();
       fd.append('payload', JSON.stringify({
         tipo: 'acesso-pessoa',
+        tarefaOrigemId: TAREFA_ORIGEM || null,
         unidade: document.getElementById('f-unidade').value,
         unidadeNome: UNIDADES_NOMES[document.getElementById('f-unidade').value] || document.getElementById('f-unidade').value,
         titulo: `${MOTIVO_ACESSO==='ferias'?'Férias':'Desligamento'} — ${nomePessoa}`,
@@ -613,6 +614,7 @@ document.getElementById('form-nova').addEventListener('submit', async (ev)=>{
       const fd = new FormData();
       fd.append('payload', JSON.stringify({
         tipo: TIPO_SELECIONADO,
+        tarefaOrigemId: TAREFA_ORIGEM || null,
         unidade: document.getElementById('f-unidade').value,
         unidadeNome: UNIDADES_NOMES[document.getElementById('f-unidade').value] || document.getElementById('f-unidade').value,
         titulo: document.getElementById('g-titulo').value,
@@ -693,6 +695,11 @@ function prepararDeTarefa(){
   const p = new URLSearchParams(location.search);
   TAREFA_ORIGEM = p.get('tarefa');
   if(!TAREFA_ORIGEM) return;
+  // Estorno e ajuste de fechamento dependem de dados próprios (pedido e
+  // fechamento). Uma tarefa vira os tipos genéricos da Central, que podem
+  // preservar seu protocolo, anexos e unidade sem inventar esses dados.
+  document.querySelectorAll('.tipo-btn[data-tipo="estorno"],.tipo-btn[data-tipo="ajuste-fechamento"]').forEach(b=>b.remove());
+  if(['estorno','ajuste-fechamento'].includes(TIPO_SELECIONADO)) selecionarTipo('compra');
   const unidade = p.get('unidade');
   const sel = document.getElementById('f-unidade');
   if(unidade && [...sel.options].some(o=>o.value===unidade)){ sel.value = unidade; carregarResponsaveis(); }
@@ -701,7 +708,7 @@ function prepararDeTarefa(){
   const aviso = document.createElement('div');
   aviso.className = 'msg';
   aviso.style.marginBottom = '10px';
-  aviso.innerHTML = `Aberta a partir da tarefa <b>${escapeHtml(p.get('titulo')||'do Meu Dia')}</b>. Quando esta solicitação for enviada, o Ticket volta a aparecer na tarefa. <a href="/tarefas.html" style="color:var(--accent);">voltar ao Meu Dia</a>`;
+  aviso.innerHTML = `Aberta a partir da tarefa <b>${escapeHtml(p.get('titulo')||'do Meu Dia')}</b>. Ela preservará o mesmo Ticket #, unidade e anexos da tarefa. <a href="/tarefas.html" style="color:var(--accent);">voltar ao Meu Dia</a>`;
   const form = document.getElementById('form-nova');
   form.parentNode.insertBefore(aviso, form);
 }

@@ -151,7 +151,7 @@ function desenharOcorrencia(res, tarefa, { fichaCampos = [], fotos, geradoPor, n
     ehOcorrencia ? 'Registro de Ocorrência' : 'Registro de Tarefa',
     tarefa.titulo || '(sem título)',
     [
-      tarefa.vinculo && tarefa.vinculo.numeroTicket != null ? `Ticket #${tarefa.vinculo.numeroTicket}` : null,
+      (tarefa.numeroTicket != null || tarefa.vinculo?.numeroTicket != null) ? `Ticket #${tarefa.numeroTicket ?? tarefa.vinculo.numeroTicket}` : null,
       STATUS_LABEL[tarefa.status] || tarefa.status,
       `Registrada em ${fmtDataHora(tarefa.criadaEm)}`,
     ].filter(Boolean).join('   ·   '),

@@ -14906,6 +14906,22 @@ setTimeout(async () => {
   try {
     const cabMD = { Authorization: 'Bearer ' + token };
     const nova = JSON.parse((await postarJson('/api/tarefas', { titulo: 'ATM reiniciou sozinho', unidade: 'DOM_19706' }, cabMD)).corpo);
+    const paraConverter = JSON.parse((await postarJson('/api/tarefas', { titulo: 'Impressora da cozinha sem etiqueta', unidade: 'DOM_19706' }, cabMD)).corpo);
+
+    // A tarefa já recebeu um protocolo global ao nascer. Ao virar uma
+    // solicitação, a Central deve aproveitar esse número — e reenvio não pode
+    // duplicar o ticket.
+    const conversao = await postarJson('/api/solicitacoes', {
+      tipo: 'suporte-ti', unidade: 'DOM_19706', unidadeNome: 'Mooca', titulo: paraConverter.titulo,
+      observacao: 'Convertida do Meu Dia.', tarefaOrigemId: paraConverter.id,
+    }, cabMD);
+    const ticketDaConversao = conversao.status === 200 ? JSON.parse(conversao.corpo) : {};
+    const conversaoRepetida = await postarJson('/api/solicitacoes', {
+      tipo: 'suporte-ti', unidade: 'DOM_19706', unidadeNome: 'Mooca', titulo: paraConverter.titulo,
+      observacao: 'Reenvio não pode duplicar.', tarefaOrigemId: paraConverter.id,
+    }, cabMD);
+    const ticketRepetido = conversaoRepetida.status === 200 ? JSON.parse(conversaoRepetida.corpo) : {};
+    const aposConversao = (JSON.parse((await pedir('/api/tarefas/minhas', cabMD)).corpo).find((t) => t.id === paraConverter.id)) || {};
 
     // o caminho real: a Central cria o ticket e avisa a tarefa
     const tic = await postarJson('/api/solicitacoes', {
@@ -14931,6 +14947,8 @@ setTimeout(async () => {
 
     const conf = {
       'a tarefa guarda o ticket que ela gerou, com número e rótulo': avisou.status === 200 && (comRastro.gerou || []).length === 1 && comRastro.gerou[0].numeroTicket === criado.numeroTicket && comRastro.gerou[0].rotulo === 'Suporte de TI',
+      'tarefa avulsa nasce com Ticket # e conversão preserva o mesmo número': nova.numeroTicket != null && ticketDaConversao.numeroTicket === paraConverter.numeroTicket && ticketDaConversao.origemTarefa?.id === paraConverter.id,
+      'reenvio da conversão devolve a mesma solicitação e tarefa fica vinculada': ticketRepetido.id === ticketDaConversao.id && aposConversao.solicitacaoId === ticketDaConversao.id,
       'e o formulário entra junto, sem apagar o ticket': doForm.status === 200 && (comDois.gerou || []).length === 2,
       'avisar o mesmo documento duas vezes não duplica a linha': repetido.status === 200 && (semDuplicar.gerou || []).length === 2,
       'o vinculo NÃO é tocado (é a chave da sincronização de ticket)': !comDois.vinculo,

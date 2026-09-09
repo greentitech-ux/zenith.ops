@@ -9629,7 +9629,7 @@ app.post('/api/tarefas/sincronizar-retroativo', auth.requireMaster, async (req, 
 app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anexos', 4), async (req, res) => {
   try {
     const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
-    const { tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, ehOrcamento, fornecedor, vencimento, direcionadoParaId, direcionadoParaEmail, prioridade, nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista } = payload;
+    const { tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, ehOrcamento, fornecedor, vencimento, direcionadoParaId, direcionadoParaEmail, prioridade, nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista, tarefaOrigemId } = payload;
     if (!req.isMaster && unidade && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
@@ -9647,7 +9647,31 @@ app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anex
         error: `${unidadeNome || unidade} só aceita solicitação de: ${(perfilUnidade.tiposSolicitacao || []).join(', ')}.`,
       });
     }
-    const anexos = [];
+    let origemTarefa = null;
+    let numeroTicketDaTarefa = null;
+    let anexosDaTarefa = [];
+    if (tarefaOrigemId) {
+      const preparada = await tarefas.prepararConversaoEmSolicitacao(String(tarefaOrigemId), acessoDasTarefas(req));
+      // Um reenvio depois de a Central já ter criado o ticket deve devolver o
+      // mesmo registro, nunca abrir outro com o mesmo assunto/protocolo.
+      if (preparada.jaTemSolicitacao) {
+        const existente = await solicitacoes.getOne(preparada.tarefa.solicitacaoId);
+        if (existente) return res.json(existente);
+        return res.status(409).json({ error: 'Esta tarefa já foi convertida; recarregue o Meu Dia para abrir a solicitação vinculada.' });
+      }
+      if (preparada.tarefa.unidade && unidade !== preparada.tarefa.unidade) {
+        return res.status(400).json({ error: 'A solicitação deve permanecer na mesma unidade da tarefa de origem.' });
+      }
+      numeroTicketDaTarefa = preparada.numeroTicket;
+      origemTarefa = {
+        id: preparada.tarefa.id, titulo: preparada.tarefa.titulo,
+        criadoPorNome: preparada.tarefa.criadoPorNome, criadaEm: preparada.tarefa.criadaEm,
+      };
+      anexosDaTarefa = (preparada.tarefa.anexos || []).map((a) => ({
+        nome: a.nome, path: a.path, tipo: a.tipo || 'application/octet-stream', origem: 'tarefa',
+      })).filter((a) => a.path);
+    }
+    const anexos = [...anexosDaTarefa];
     for (const file of req.files || []) {
       const path = await storage.salvarArquivo(unidade || 'geral', file, 'solicitacoes');
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype || 'application/octet-stream' });
@@ -9661,7 +9685,16 @@ app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anex
       prioridade,
       teste: req.isQaMaster || req.isQaUser,
       nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista,
+      numeroTicket: numeroTicketDaTarefa,
+      origemTarefa,
     });
+    if (tarefaOrigemId) {
+      await tarefas.registrarGerado(String(tarefaOrigemId), acessoDasTarefas(req), {
+        tipo: 'solicitacao', id: registro.id, numeroTicket: registro.numeroTicket,
+        rotulo: 'Solicitação na Central',
+      });
+      broadcast('tarefas-atualizada', { id: String(tarefaOrigemId), unidade: registro.unidade }, 'tarefas');
+    }
     broadcast('solicitacao-criada', registro, 'solicitacoes');
     await sincronizarTarefasDoTicket(registro);
     push.notifySolicitacao(`Ticket #${registro.numeroTicket} · Nova solicitação`, `${req.user.email} · ${registro.titulo || tipo || ''}`, registro.id);

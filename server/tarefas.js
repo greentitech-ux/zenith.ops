@@ -4,6 +4,7 @@
 // pendência. A tarefa nunca substitui as regras próprias do ticket.
 const crypto = require('crypto');
 const db = require('./firestore');
+const ticketCounter = require('./ticketCounter');
 
 const COLLECTION = db.collection('tarefas');
 const CONTROLE = db.collection('tarefasControle');
@@ -101,7 +102,7 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
       // lista e ordenada por ele, e corrigir data nao e "movimento" da tarefa
       const corrigeData = nasceEm !== atual.criadaEm || nasceEm.slice(0, 10) !== atual.dataInicio
         ? { criadaEm: nasceEm, dataInicio: nasceEm.slice(0, 10) } : null;
-      await ref.update({ titulo: ticket.titulo, prioridade: ticket.prioridade || 'normal', status: statusDoTicket(ticket), atualizadoEm: agora,
+      await ref.update({ titulo: ticket.titulo, numeroTicket: ticket.numeroTicket || atual.numeroTicket || null, prioridade: ticket.prioridade || 'normal', status: statusDoTicket(ticket), atualizadoEm: agora,
         ...(corrigeData || {}),
         ...(statusDoTicket(ticket) === 'CONCLUIDA' && !atual.concluidaEm ? { concluidaEm: agora, concluidaPorNome: ticket.execucaoPorNome || 'Suporte' } : {}) });
       if (corrigeData) alteradas.push({ ...atual, ...corrigeData });
@@ -111,6 +112,9 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
       id,
       origem: 'ticket',
       titulo: ticket.titulo || `Ticket #${ticket.numeroTicket || ''}`,
+      // A tarefa é a execução deste mesmo ticket; ela nunca consome outro
+      // número da sequência global.
+      numeroTicket: ticket.numeroTicket || null,
       prioridade: ticket.prioridade || 'normal',
       status: statusDoTicket(ticket),
       responsavelId: usuario.id,
@@ -162,8 +166,13 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
   const hoje = agora.slice(0, 10);
   const statusInicial = entrega && entrega < hoje ? 'PENDENTE' : (entrega === hoje ? 'HOJE' : 'A_FAZER');
   const equipe = pessoasParaColaboradores(colaboradores, (responsavel || usuario).id);
+  // Uma tarefa avulsa já nasce como um protocolo rastreável. Se ela veio de
+  // um ticket existente, herda esse mesmo número — não cria uma segunda
+  // numeração para o mesmo assunto.
+  const numeroTicket = vinculo?.numeroTicket != null ? vinculo.numeroTicket : await ticketCounter.proximoTicket();
   const tarefa = {
     id: ref.id, origem: vinculo ? 'ticket-manual' : 'manual', titulo: texto,
+    numeroTicket,
     descricao: String(descricao || '').trim().slice(0, 2000),
     prioridade: 'normal', status: statusInicial, dataInicio: inicio, dataEntrega: entrega,
     // marca de REGISTRO: a situação já aconteceu e o que se quer é o
@@ -338,8 +347,34 @@ async function registrarGerado(id, acesso, item) {
     em: new Date().toISOString(), porNome: nomeUsuario(acesso.usuario),
   };
   const lista = (tarefa.gerou || []).filter((g) => !(g.tipo === registro.tipo && g.id === registro.id));
-  await ref.update({ gerou: [...lista, registro].slice(-10), atualizadoEm: registro.em });
+  await ref.update({
+    gerou: [...lista, registro].slice(-10),
+    // Uma conversão de tarefa avulsa usa o seu protocolo de nascimento. A
+    // referência direta torna a operação idempotente e deixa claro que agora
+    // há uma solicitação na Central para o mesmo Ticket #.
+    ...(registro.tipo === 'solicitacao' ? { solicitacaoId: registro.id } : {}),
+    atualizadoEm: registro.em,
+  });
   return getOne(id);
+}
+
+async function prepararConversaoEmSolicitacao(id, acesso) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeParticipar(tarefa, acesso)) throw new Error('Você não pode converter esta tarefa.');
+  // Uma tarefa que já nasceu de ticket JÁ É parte daquele protocolo. Abrir
+  // outra solicitação a partir dela geraria um segundo número para o mesmo
+  // assunto; a tela deve abrir o ticket original, onde status/tipo evoluem
+  // mantendo o Ticket #.
+  if (tarefa.vinculo?.id) throw new Error('Esta tarefa já pertence ao Ticket #' + (tarefa.numeroTicket || tarefa.vinculo.numeroTicket) + '. Abra o ticket vinculado para mudar o tipo ou o andamento.');
+  if (tarefa.solicitacaoId) return { tarefa, numeroTicket: tarefa.numeroTicket || null, jaTemSolicitacao: true };
+  if (tarefa.numeroTicket != null) return { tarefa, numeroTicket: tarefa.numeroTicket, jaTemSolicitacao: false };
+  // Compatibilidade para tarefas antigas: a primeira conversão reserva o
+  // número que elas não receberam antes desta regra existir.
+  const numeroTicket = await ticketCounter.proximoTicket();
+  await ref.update({ numeroTicket, atualizadoEm: new Date().toISOString() });
+  return { tarefa: { ...tarefa, numeroTicket }, numeroTicket, jaTemSolicitacao: false };
 }
 
 async function arquivar(id, acesso) {
@@ -373,4 +408,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
   return resultado;
 }
 
-module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, definirColaboradores, definirResponsavel, registrarGerado, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar };
+module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar };
