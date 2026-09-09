@@ -9235,6 +9235,7 @@ app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
       dataInicio: req.body?.dataInicio, dataEntrega: req.body?.dataEntrega,
       unidade, unidadeNome: unidade ? (mapa[unidade] || unidade) : null, usuario: req.user, responsavel,
       colaboradores: participantes, ehOcorrencia: req.body?.ehOcorrencia === true,
+      prioridade: req.body?.prioridade, participantesApenasAcompanham: req.body?.participantesApenasAcompanham === true,
     });
     broadcast('tarefas-atualizada', { id: criada.id, unidade: criada.unidade }, 'tarefas');
     res.json(criada);
