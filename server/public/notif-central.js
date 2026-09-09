@@ -122,6 +122,7 @@
     .zn-notif .zn-corpo{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.4;}
     .zn-notif .zn-direcionado{font-size:11px;color:var(--accent);margin-top:6px;font-family:var(--mono);}
     .zn-notif button.zn-ok{margin-top:10px;width:100%;background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+    .zn-notif button.zn-tarefa{margin-top:10px;width:100%;background:#18331d;color:#d9ffc4;border:1px solid #5d8a2a;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
     @keyframes zn-notif-pulse{0%,100%{border-color:var(--warn);}50%{border-color:var(--accent);}}
     @keyframes zn-notif-in{from{opacity:0;transform:translateX(16px);}to{opacity:1;transform:translateX(0);}}
 
@@ -191,7 +192,8 @@
       <div class="zn-titulo">🔔 Nova solicitação</div>
       <div class="zn-corpo">${ICONES_TIPO[card.tipo] || '📋'} ${escapeHtml(LABELS_TIPO[card.tipo] || card.tipo)} · ${escapeHtml(card.unidadeNome || card.unidade || '—')}<br>${escapeHtml(card.titulo || '')}</div>
       ${(card.atribuidosEmails && card.atribuidosEmails.length) ? `<div class="zn-direcionado">👤 atribuído a ${escapeHtml(card.atribuidosEmails.join(', '))}</div>` : (card.direcionadoParaEmail ? `<div class="zn-direcionado">👤 direcionado a ${escapeHtml(card.direcionadoParaEmail)}</div>` : '')}
-      <button type="button" class="zn-ok">${soEncerra(card) ? '✓ Visto' : '👁️ Visualizar'}</button>
+       ${soEncerra(card) ? '<button type="button" class="zn-tarefa">＋ Criar tarefa</button>' : ''}
+       <button type="button" class="zn-ok">${soEncerra(card) ? '✓ Visto' : '👁️ Visualizar'}</button>
     `;
     // "Visualizar" faz as duas coisas: marca como vista E leva pro conteúdo.
     // Antes era só "já vi" - a pessoa tirava o alerta da tela e depois tinha
@@ -199,6 +201,20 @@
     el.querySelector('.zn-ok').addEventListener('click', () => {
       if (soEncerra(card)) { marcarVistoNotificacao(card.tipo, card.id); return; }
       abrirSolicitacao(card.tipo, card.id);
+    });
+    const criarTarefa = el.querySelector('.zn-tarefa');
+    if (criarTarefa) criarTarefa.addEventListener('click', async () => {
+      criarTarefa.disabled = true;
+      try {
+        const r = await fetch(`/api/tarefas/de-quebra/${encodeURIComponent(card.id)}`, { method: 'POST', headers: { Authorization: 'Bearer ' + AUTH_TOKEN } });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Não foi possível criar a tarefa.');
+        marcarVistoNotificacao(card.tipo, card.id);
+        alert('Tarefa criada no Meu Dia.');
+      } catch (err) {
+        criarTarefa.disabled = false;
+        alert(err.message || 'Não foi possível criar a tarefa.');
+      }
     });
     // arrastar pro lado só tira da tela (não marca como vista - ver
     // arrastarParaFechar lá em cima)

@@ -28,7 +28,7 @@ const ROBO_BLOQUEIO_EMAIL = 'robô de bloqueio (login)';
 // require tardio (nao no topo) so pra deixar bem explicito que e uma
 // dependencia "de efeito colateral" do login, nao do modulo em si -
 // solicitacoes.js nao depende de auth.js, entao nao ha ciclo real.
-function criarChamadoBloqueio(email, userId, unidadesUsuario) {
+function criarChamadoBloqueio(email, userId, unidadesUsuario, usuarioNome) {
   const solicitacoes = require('./solicitacoes');
   const unidades = Array.isArray(unidadesUsuario) ? unidadesUsuario.filter(Boolean) : [];
   const unidade = unidades[0] || 'geral';
@@ -43,15 +43,16 @@ function criarChamadoBloqueio(email, userId, unidadesUsuario) {
   const agora = new Intl.DateTimeFormat('pt-BR', {
     timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short',
   }).format(new Date());
+  const nome = String(usuarioNome || 'Usuário').trim().slice(0, 80) || 'Usuário';
   solicitacoes
     .create({
       tipo: 'suporte-ti',
       unidade,
       unidadeNome,
-      titulo: `Login bloqueado: ${email}`,
-      observacao: `Acesso bloqueado automaticamente após 3 tentativas de senha erradas seguidas.\n\nLogin: ${email}\nUnidade(s) vinculada(s): ${unidadesTexto}\nBloqueado em: ${agora}\n\nAo aprovar este ticket, o acesso é desbloqueado com a MESMA senha de sempre (a pessoa não precisa trocar nada). Se quiser pedir pra ela cadastrar uma senha nova mesmo assim, marque a opção "pedir pra atualizar a senha" ao aprovar.`,
+      titulo: `Login bloqueado: ${nome}`,
+      observacao: `Acesso de ${nome} bloqueado automaticamente após 3 tentativas de senha erradas seguidas.\n\nUnidade(s) vinculada(s): ${unidadesTexto}\nBloqueado em: ${agora}\n\nAo aprovar este ticket, o acesso é desbloqueado com a MESMA senha de sempre (a pessoa não precisa trocar nada). Se quiser pedir pra ela cadastrar uma senha nova mesmo assim, marque a opção "pedir pra atualizar a senha" ao aprovar.`,
       criadoPorId: userId,
-      criadoPorEmail: ROBO_BLOQUEIO_EMAIL,
+      criadoPorEmail: ROBO_BLOQUEIO_EMAIL, criadoPorNome: nome,
     })
     .catch((e) => console.error('Falha ao criar chamado automático de Suporte TI (bloqueio de senha):', e.message));
 }
@@ -153,7 +154,7 @@ async function login(identifier, password, contexto = {}) {
     const bloqueou = tentativas >= MAX_TENTATIVAS && user.role !== 'master';
     await doc.ref.update({ failedAttempts: tentativas, locked: bloqueou });
     if (bloqueou) {
-      criarChamadoBloqueio(user.email, doc.id, user.permissions?.unidades);
+      criarChamadoBloqueio(user.email, doc.id, user.permissions?.unidades, user.username || user.nome);
       throw new Error('Acesso bloqueado após 3 tentativas de senha erradas. Fale com o Master.');
     }
     throw new Error('Usuário/email ou senha inválidos.');

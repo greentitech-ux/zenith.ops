@@ -145,6 +145,10 @@ const uploadChatAnexo = multer({
   limits: { fileSize: 8 * 1024 * 1024, files: 1 },
 });
 
+// Print de tarefa: imagem/PDF, um por vez, suficiente para Ctrl+V sem abrir
+// uma porta de upload genérico grande no quadro pessoal.
+const uploadTarefaAnexo = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
+
 // foto/PDF da nota fiscal de recebimento (ver inventarioNotaOcr.js) - vai
 // pro Claude com visao, limite mais folgado que o do chat (nota as vezes vem
 // como PDF escaneado em resolucao alta) mas sem chegar nos 50MB do upload
@@ -9066,6 +9070,10 @@ function acessoDasTarefas(req) {
   return { usuario: req.user, isMaster: req.isMaster, isAdmin: req.isAdmin, unidades: escopoAdmin };
 }
 
+function podeCriarTarefaManual(req) {
+  return req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo);
+}
+
 app.get('/api/tarefas/minhas', auth.requireAuth, async (req, res) => {
   try {
     res.json(await tarefas.listarMinhas(acessoDasTarefas(req)));
@@ -9090,8 +9098,9 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
     }
     res.json({
       unidades: codigos.map((codigo) => ({ codigo, nome: mapa[codigo] || codigo })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
-      responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário' })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+      responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário', unidades: u.role === 'master' ? codigos : (u.permissions?.unidades || []) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
       podeAtribuir: req.isMaster || req.isAdmin,
+      podeCriar: podeCriarTarefaManual(req),
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -9100,6 +9109,7 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
 
 app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
   try {
+    if (!podeCriarTarefaManual(req)) return res.status(403).json({ error: 'Somente Master, Admin ou Gerente pode criar tarefas.' });
     const acesso = acessoDasTarefas(req);
     const unidade = String(req.body?.unidade || '').trim() || null;
     if (unidade && !req.isMaster && !(acesso.unidades || []).includes(unidade)) {
@@ -9114,6 +9124,9 @@ app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
       if (!req.isMaster && !(responsavel.permissions?.unidades || []).some((codigo) => (acesso.unidades || []).includes(codigo))) {
         return res.status(403).json({ error: 'O responsável não pertence a uma unidade do seu acesso.' });
       }
+      if (unidade && responsavel.role !== 'master' && !(responsavel.permissions?.unidades || []).includes(unidade)) {
+        return res.status(403).json({ error: 'O responsável não tem acesso à unidade selecionada.' });
+      }
     }
     const mapa = unidade ? await construirUnidadesMapa() : {};
     const criada = await tarefas.criar({
@@ -9126,6 +9139,89 @@ app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// Quebra de caixa não entra automaticamente no Meu Dia. Quando o responsável
+// decidir investigar, transforma o alerta específico em uma tarefa rastreável.
+app.post('/api/tarefas/de-quebra/:id', auth.requireAuth, async (req, res) => {
+  try {
+    if (!req.isMaster && !req.isAdmin) return res.status(403).json({ error: 'Somente Master ou Admin pode criar tarefa a partir de quebra de caixa.' });
+    const ticket = await solicitacoes.getOne(req.params.id);
+    if (!ticket || ticket.tipo !== 'quebra-caixa') return res.status(404).json({ error: 'Alerta de quebra de caixa não encontrado.' });
+    const acesso = acessoDasTarefas(req);
+    if (!req.isMaster && ticket.unidade && !(acesso.unidades || []).includes(ticket.unidade)) return res.status(403).json({ error: 'Essa unidade não está no seu acesso.' });
+    const criada = await tarefas.criar({
+      titulo: ticket.titulo, descricao: ticket.observacao || 'Investigar a divergência apontada no fechamento.',
+      unidade: ticket.unidade, unidadeNome: ticket.unidadeNome, usuario: req.user,
+      vinculo: { chave: `quebra-manual:${ticket.id}`, tipo: 'quebra-manual', ticketTipo: ticket.tipo, id: ticket.id, numeroTicket: ticket.numeroTicket || null },
+    });
+    broadcast('tarefas-atualizada', { id: criada.id, unidade: criada.unidade }, 'tarefas');
+    res.json(criada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/tarefas/:id/anexos', auth.requireAuth, uploadTarefaAnexo.single('anexo'), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'Envie um print ou PDF.' });
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.mimetype || '') && file.mimetype !== 'application/pdf') {
+      return res.status(400).json({ error: 'Anexe uma imagem (PNG, JPG ou WebP) ou PDF.' });
+    }
+    const tarefa = await tarefas.getOne(req.params.id);
+    if (!tarefa || !tarefas.podeGerirTarefa(tarefa, acessoDasTarefas(req))) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    const caminho = await storage.salvarArquivo(req.params.id, file, 'tarefas');
+    const atualizada = await tarefas.adicionarAnexo(req.params.id, acessoDasTarefas(req), { nome: file.originalname, path: caminho, tipo: file.mimetype, tamanho: file.size });
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/tarefas/:id/anexos/:indice', auth.requireAuth, async (req, res) => {
+  try {
+    const tarefa = await tarefas.getOne(req.params.id);
+    if (!tarefa || !tarefas.podeGerirTarefa(tarefa, acessoDasTarefas(req))) return res.sendStatus(404);
+    const anexo = (tarefa.anexos || [])[Number(req.params.indice)];
+    if (!anexo?.path) return res.sendStatus(404);
+    return storage.streamArquivo(anexo.path, anexo.tipo, res);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/tarefas/status-lote', auth.requireAuth, async (req, res) => {
+  try {
+    const ids = [...new Set(Array.isArray(req.body?.ids) ? req.body.ids.map(String).filter(Boolean) : [])].slice(0, 50);
+    const status = String(req.body?.status || '');
+    if (!ids.length) return res.status(400).json({ error: 'Selecione ao menos uma tarefa.' });
+    const acesso = acessoDasTarefas(req); const resultado = [];
+    for (const id of ids) {
+      try {
+        const tarefa = await tarefas.getOne(id);
+        if (!tarefa || !tarefas.podeGerirTarefa(tarefa, acesso)) throw new Error('Sem acesso a esta tarefa.');
+        if (status === 'CONCLUIDA') {
+          if (tarefa.vinculo?.tipo === 'solicitacao') {
+            const ticket = await solicitacoes.getOne(tarefa.vinculo.id);
+            if (!ticket || ticket.status !== 'APROVADO' || ticket.tipo === 'adiantamento') throw new Error('O ticket vinculado ainda não pode ser finalizado.');
+            if (ticket.execucaoStatus !== 'FINALIZADO') await solicitacoes.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.username || req.user.nome || 'Suporte' });
+            await sincronizarTarefasDoTicket(await solicitacoes.getOne(ticket.id), 'solicitacao');
+          } else if (tarefa.vinculo?.tipo === 'estorno') {
+            const ticket = await refunds.getOne(tarefa.vinculo.id);
+            if (!ticket || ticket.status !== 'APROVADO') throw new Error('O estorno vinculado ainda não pode ser finalizado.');
+            if (ticket.execucaoStatus !== 'FINALIZADO') await refunds.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.username || req.user.nome || 'Suporte' });
+            await sincronizarTarefasDoTicket(await refunds.getOne(ticket.id), 'estorno');
+          }
+          await tarefas.concluir(id, { ...acesso, observacao: 'Conclusão em lote.' });
+        } else await tarefas.atualizarStatus(id, acesso, status);
+        resultado.push({ id, ok: true });
+      } catch (err) { resultado.push({ id, ok: false, erro: err.message }); }
+    }
+    broadcast('tarefas-atualizada', { lote: true }, 'tarefas');
+    res.json({ resultado });
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.patch('/api/tarefas/:id/status', auth.requireAuth, async (req, res) => {
