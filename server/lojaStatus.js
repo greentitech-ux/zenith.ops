@@ -2375,6 +2375,14 @@ async function relatorioQuedas(opcoes) {
         confirmadas: duracoes.filter((ms) => ms >= CONFIRMACAO_QUEDA_MS).length,
         foraAgora: agrupadas.filter((e) => e.aberta).length,
         horasFora: +(foraMs / 3600000).toFixed(1), maiorMin: Math.round(Math.max(...duracoes, 0) / 60000),
+        // O resumo é suficiente para 7/30/90 dias. Para o filtro "Hoje" a
+        // tela usa esta trilha para mostrar exatamente quando a queda de link
+        // começou e terminou, sem recorrer ao histórico bruto da máquina.
+        eventos: agrupadas.map((e) => ({
+          inicio: e.inicio,
+          fim: Number.isFinite(e.fim) ? e.fim : null,
+          aberta: !!e.aberta,
+        })),
       };
     })
     .sort((a, b) => b.foraMs - a.foraMs);
