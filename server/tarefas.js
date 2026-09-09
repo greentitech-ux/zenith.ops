@@ -78,6 +78,8 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
   const alvoIds = new Set(alvos.map((u) => u.id));
   const existentes = await COLLECTION.where('vinculo.chave', '==', chaveBase).get();
   const agora = new Date().toISOString();
+  // a tarefa existe desde que o TICKET foi aberto, nao desde a sincronizacao
+  const nasceEm = /^\d{4}-\d{2}-\d{2}T/.test(String(ticket.criadoEm || '')) ? String(ticket.criadoEm) : agora;
   const alteradas = [];
 
   // Quem deixou de ser responsável não carrega um ticket antigo na fila.
@@ -94,8 +96,15 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
     const snap = await ref.get();
     if (snap.exists) {
       const atual = snap.data();
+      // conserta a data das tarefas que ja existem com a data da sincronizacao
+      // no lugar da data do ticket. NAO mexe em atualizadoEm nesse caso: a
+      // lista e ordenada por ele, e corrigir data nao e "movimento" da tarefa
+      const corrigeData = nasceEm !== atual.criadaEm || nasceEm.slice(0, 10) !== atual.dataInicio
+        ? { criadaEm: nasceEm, dataInicio: nasceEm.slice(0, 10) } : null;
       await ref.update({ titulo: ticket.titulo, prioridade: ticket.prioridade || 'normal', status: statusDoTicket(ticket), atualizadoEm: agora,
+        ...(corrigeData || {}),
         ...(statusDoTicket(ticket) === 'CONCLUIDA' && !atual.concluidaEm ? { concluidaEm: agora, concluidaPorNome: ticket.execucaoPorNome || 'Suporte' } : {}) });
+      if (corrigeData) alteradas.push({ ...atual, ...corrigeData });
       continue;
     }
     const tarefa = {
@@ -108,13 +117,13 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
        responsavelEmail: usuario.email || null,
        responsavelNome: nomeUsuario(usuario),
        criadoPorId: usuario.id, criadoPorNome: nomeUsuario(usuario),
-      criadaEm: agora,
+      criadaEm: nasceEm,
       atualizadoEm: agora,
       vinculo: { chave: chaveBase, tipo, ticketTipo: ticket.tipo || tipo, id: ticket.id, numeroTicket: ticket.numeroTicket || null },
       unidade: ticket.unidade || null,
       unidadeNome: ticket.unidadeNome || null,
       comentarios: [],
-      dataInicio: agora.slice(0, 10), dataEntrega: null, anexos: [], colaboradores: [], colaboradoresIds: [],
+      dataInicio: nasceEm.slice(0, 10), dataEntrega: null, anexos: [], colaboradores: [], colaboradoresIds: [],
     };
     await ref.set(tarefa);
     alteradas.push(tarefa);
@@ -340,7 +349,10 @@ async function arquivar(id, acesso) {
 }
 
 async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuarios = [], forcar = false } = {}) {
-  const versao = 'tickets-v2';
+  // v3: passa a gravar a data REAL do ticket em criadaEm/dataInicio (antes era
+  // a data da sincronização). Versão nova = o Master consegue rodar de novo
+  // pra corrigir o que já está gravado, sem precisar de forcar.
+  const versao = 'tickets-v3';
   const ref = CONTROLE.doc(`retroativo-${versao}`);
   const anterior = await ref.get();
   if (anterior.exists && !forcar) return { executada: false, motivo: 'já sincronizado nesta versão', ...anterior.data() };

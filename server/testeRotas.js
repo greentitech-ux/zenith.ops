@@ -14937,6 +14937,52 @@ setTimeout(async () => {
   if (!okGerou) ruins += 1;
   console.log(`${okGerou ? '✓' : '✗'} Meu Dia: a tarefa vira solicitação ou formulário nas telas que já existem, e guarda o rastro do que gerou`);
 
+  // ---- Meu Dia: a tarefa de ticket nasce na data do TICKET ----
+  // Gravar "agora" fazia toda tarefa antiga aparecer como criada hoje - e como
+  // dataRef() cai em dataInicio/criadaEm, os filtros de período mentiam junto.
+  let okDatas = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const tarefasMod = require(__dirname + '/tarefas.js');
+    const usersMod = require(__dirname + '/users.js');
+    const listaUsers = await usersMod.list();
+    const ticketVelho = {
+      id: 'tk-antigo-1', numeroTicket: 90001, tipo: 'suporte-ti', status: 'APROVADO',
+      titulo: 'Queda de links - substituição de chip 4g', unidade: 'DOM_19706', unidadeNome: 'Mooca',
+      criadoEm: '2026-03-04T13:22:05.000Z',
+    };
+    const criadas = await tarefasMod.sincronizarTicket(ticketVelho, listaUsers, 'solicitacao');
+    const nascida = criadas[0] || {};
+
+    // simula o estrago antigo: a data da sincronização gravada por cima
+    const doc = DOCS.get(`tarefas/${nascida.id}`);
+    DOCS.set(`tarefas/${nascida.id}`, { ...doc, criadaEm: '2026-09-09T00:41:49.000Z', dataInicio: '2026-09-09' });
+    const corrigidas = await tarefasMod.sincronizarTicket(ticketVelho, listaUsers, 'solicitacao');
+    const depois = DOCS.get(`tarefas/${nascida.id}`);
+
+    // a manual continua com a data de agora, que é verdade
+    const manual = JSON.parse((await postarJson('/api/tarefas', { titulo: 'Tarefa de hoje' }, cabMD)).corpo);
+    const hojeIso = new Date().toISOString().slice(0, 10);
+
+    // ticket sem data utilizável não pode virar "criada em undefined"
+    const semData = await tarefasMod.sincronizarTicket({ ...ticketVelho, id: 'tk-sem-data', numeroTicket: 90002, criadoEm: null }, listaUsers, 'solicitacao');
+    const semDataDoc = semData.length ? DOCS.get(`tarefas/${semData[0].id}`) : {};
+
+    const conf = {
+      'a tarefa nasce com a data do ticket, não a da sincronização': nascida.criadaEm === '2026-03-04T13:22:05.000Z' && nascida.dataInicio === '2026-03-04',
+      'tarefa já gravada com a data errada é corrigida na próxima sincronização': corrigidas.length === 1 && depois.criadaEm === '2026-03-04T13:22:05.000Z' && depois.dataInicio === '2026-03-04',
+      'e a correção não mexe na ordem da lista (atualizadoEm continua sendo movimento)': depois.atualizadoEm !== depois.criadaEm,
+      'tarefa manual continua nascendo com a data e hora de agora': manual.dataInicio === hojeIso && String(manual.criadaEm).slice(0, 10) === hojeIso,
+      'ticket sem data válida cai no agora, não em undefined': !!semDataDoc.criadaEm && /^\d{4}-\d{2}-\d{2}T/.test(semDataDoc.criadaEm),
+      'o retroativo ganhou versão nova, pra rodar de novo e consertar o que existe': /const versao = 'tickets-v3';/.test(require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDatas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (nascida=${nascida.criadaEm}/${nascida.dataInicio} depois=${depois && depois.criadaEm}/${depois && depois.dataInicio} corrigidas=${corrigidas.length})`);
+  } catch (e) { okDatas = false; console.log('  erro: ' + e.message); }
+  if (!okDatas) ruins += 1;
+  console.log(`${okDatas ? '✓' : '✗'} Meu Dia: tarefa de ticket carrega a data REAL do ticket, e a tarefa manual a data de agora`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
