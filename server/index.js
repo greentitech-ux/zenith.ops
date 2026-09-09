@@ -9282,6 +9282,7 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
       podeFormulario: req.isMaster || (req.permissions?.sections || []).includes('formularios'),
       podeAtribuir: podeDistribuirTarefas(req),
       podeCriar: podeCriarTarefaManual(req),
+      isMaster: req.isMaster,
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -9559,6 +9560,20 @@ app.patch('/api/tarefas/:id/datas', auth.requireAuth, async (req, res) => {
     const atualizada = await tarefas.atualizarDatas(req.params.id, acessoDasTarefas(req), {
       dataInicio: req.body?.dataInicio, dataEntrega: req.body?.dataEntrega,
     });
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/tarefas/:id/unidade', auth.requireAuth, async (req, res) => {
+  try {
+    if (!req.isMaster) return res.status(403).json({ error: 'Somente Master pode corrigir a unidade da tarefa.' });
+    const unidade = String(req.body?.unidade || '').trim() || null;
+    const mapa = await construirUnidadesMapa();
+    if (unidade && !mapa[unidade]) return res.status(400).json({ error: 'Escolha uma unidade válida.' });
+    const atualizada = await tarefas.atualizarUnidade(req.params.id, acessoDasTarefas(req), { unidade, unidadeNome: unidade ? mapa[unidade] : null });
     broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
     res.json(atualizada);
   } catch (err) {

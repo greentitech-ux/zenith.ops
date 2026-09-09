@@ -366,6 +366,26 @@ async function registrarGerado(id, acesso, item) {
   return getOne(id);
 }
 
+// A unidade de uma tarefa de chat pode ter sido inferida (ou não ter sido
+// informada pelo cliente). Só Master corrige esse dado, e a alteração vira um
+// comentário automático para a trilha de auditoria ficar visível na tarefa.
+async function atualizarUnidade(id, acesso, { unidade, unidadeNome } = {}) {
+  if (!acesso?.isMaster) throw new Error('Somente Master pode corrigir a unidade da tarefa.');
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data(), agora = new Date().toISOString();
+  const anterior = tarefa.unidadeNome || tarefa.unidade || 'Sem unidade';
+  const proxima = unidadeNome || unidade || 'Sem unidade';
+  if ((tarefa.unidade || null) === (unidade || null)) return tarefa;
+  const comentarios = [...(tarefa.comentarios || []), {
+    id: crypto.randomBytes(10).toString('hex'),
+    texto: `Auditoria: unidade alterada de “${anterior}” para “${proxima}”.`,
+    porId: acesso.usuario?.id || null, porNome: nomeUsuario(acesso.usuario), em: agora, sistema: true,
+  }];
+  await ref.update({ unidade: unidade || null, unidadeNome: unidadeNome || unidade || null, comentarios, atualizadoEm: agora });
+  return { ...tarefa, unidade: unidade || null, unidadeNome: unidadeNome || unidade || null, comentarios, atualizadoEm: agora };
+}
+
 async function prepararConversaoEmSolicitacao(id, acesso) {
   const ref = COLLECTION.doc(id); const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
@@ -416,4 +436,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
   return resultado;
 }
 
-module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
+module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
