@@ -108,6 +108,12 @@
   .btn-primary{background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
   .btn-primary:disabled{opacity:.5;cursor:default;}
   .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+  /* Mesmo padrão dos filtros do NOC: o período não pode cair no botão branco
+     nativo do navegador quando uma classe nova for usada na tela. */
+  .btn-secundario{appearance:none;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 11px;font:600 12px var(--sans);cursor:pointer;white-space:nowrap;transition:border-color .15s ease,background .15s ease,color .15s ease;}
+  .btn-secundario:hover{border-color:var(--accent);color:var(--accent);}
+  .btn-secundario.ativo{border-color:var(--accent);background:rgba(184,255,60,.11);color:var(--accent);}
+  .quedas-periodos{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:11px;border-top:1px solid var(--line);}
 
   /* ---- grid de equipamentos ---- */
   /* card compacto e clicavel (abre o detalhe) - so o essencial pra "bater o
@@ -1517,6 +1523,7 @@ function toggleFiltroUnidade(cod){
 // So busca quando o Master ABRE o painel: e relatorio de analise, nao
 // precisa entrar no poll de 30s da tela.
 let QUEDAS_CARREGADO = false;
+let QUEDAS_PERIODO = 30;
 function alternarPainelQuedas(){
   const p = document.getElementById('quedas-panel');
   const abriu = p.classList.toggle('recolhido') === false;
@@ -1528,25 +1535,28 @@ function fmtHoras(h){ return h >= 1 ? h.toFixed(1).replace('.', ',') + 'h' : Mat
 // período): sem isso, escolher "Ontem" num dia limpo trocava a tabela por um
 // texto e levava os botões junto - a pessoa ficava presa naquele período
 function botoesPeriodoQuedas(){
-  return `<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
-    <button type="button" class="btn-secundario" onclick="carregarQuedas('hoje')">Hoje</button>
-    <button type="button" class="btn-secundario" onclick="carregarQuedas('ontem')">Ontem</button>
-    <button type="button" class="btn-secundario" onclick="carregarQuedas(7)">7 dias</button>
-    <button type="button" class="btn-secundario" onclick="carregarQuedas(30)">30 dias</button>
-    <button type="button" class="btn-secundario" onclick="carregarQuedas(90)">90 dias</button>
+  const ativo = (v) => String(QUEDAS_PERIODO) === String(v) ? ' ativo' : '';
+  return `<div class="quedas-periodos" aria-label="Período do relatório de quedas">
+    <button type="button" class="btn-secundario${ativo('hoje')}" onclick="carregarQuedas('hoje')">Hoje</button>
+    <button type="button" class="btn-secundario${ativo('ontem')}" onclick="carregarQuedas('ontem')">Ontem</button>
+    <button type="button" class="btn-secundario${ativo(7)}" onclick="carregarQuedas(7)">7 dias</button>
+    <button type="button" class="btn-secundario${ativo(30)}" onclick="carregarQuedas(30)">30 dias</button>
+    <button type="button" class="btn-secundario${ativo(90)}" onclick="carregarQuedas(90)">90 dias</button>
   </div>`;
 }
 // aceita número de dias (janela rolante) ou 'hoje'/'ontem' (dia de calendário
 // da loja, fechado no fuso de Brasília pelo servidor - ver relatorioQuedas)
 async function carregarQuedas(periodo){
+  const periodoEscolhido = periodo == null ? 30 : periodo;
+  QUEDAS_PERIODO = periodoEscolhido;
   const corpo = document.getElementById('quedas-corpo');
   const sub = document.getElementById('quedas-sub');
   sub.textContent = 'carregando...';
-  corpo.innerHTML = '<div class="quedas-nota">Somando o histórico...</div>';
+  corpo.innerHTML = '<div class="quedas-nota">Somando o histórico...</div>' + botoesPeriodoQuedas();
   try{
-    const q = (periodo === 'hoje' || periodo === 'ontem')
-      ? 'periodo=' + periodo
-      : 'dias=' + (periodo || 30);
+    const q = (periodoEscolhido === 'hoje' || periodoEscolhido === 'ontem')
+      ? 'periodo=' + periodoEscolhido
+      : 'dias=' + periodoEscolhido;
     const r = await fetch('/api/loja-status/quedas?' + q);
     if(!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
@@ -1577,7 +1587,7 @@ async function carregarQuedas(periodo){
       ${botoesPeriodoQuedas()}`;
   }catch(e){
     sub.textContent = 'falhou';
-    corpo.innerHTML = '<div class="quedas-nota">Não consegui carregar (' + escapeHtml(e.message) + '). Tente de novo.</div>';
+    corpo.innerHTML = '<div class="quedas-nota">Não consegui carregar (' + escapeHtml(e.message) + '). Tente de novo.</div>' + botoesPeriodoQuedas();
   }
 }
 

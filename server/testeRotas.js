@@ -11370,7 +11370,7 @@ setTimeout(async () => {
       'os botões continuam na tela mesmo num período sem queda nenhuma':
         (html.match(/botoesPeriodoQuedas\(\)/g) || []).length >= 3,
       'a tela manda periodo= pra Hoje/Ontem e dias= pro resto':
-        /\(periodo === 'hoje' \|\| periodo === 'ontem'\)\s*\?\s*'periodo=' \+ periodo\s*:\s*'dias=' \+ \(periodo \|\| 30\)/.test(html),
+        /periodoEscolhido === 'hoje' \|\| periodoEscolhido === 'ontem'[\s\S]{0,180}'periodo=' \+ periodoEscolhido[\s\S]{0,120}'dias=' \+ periodoEscolhido/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okQuedasPeriodo = !falhas.length;
@@ -11676,6 +11676,18 @@ setTimeout(async () => {
     const naFilaZ = docZ.comandoPendenteId ? (DOCS.get(`lojaStatusComandos/${docZ.comandoPendenteId}`) || {}) : {};
     const cmdZ = naFilaZ.comando || '';
 
+    // Sinal complementar do agente tambem e presenca: se a telemetria ou a
+    // deteccao autenticada de acesso chega agora, o painel nao pode manter a
+    // maquina vermelha por um heartbeat persistido antigo.
+    const provaVida = await ls.cadastrarComputador('PROVAVIDA', 'SrvPresenca', 'interno');
+    const tkVida = await ls.garantirAgentToken('PROVAVIDA', provaVida.posto);
+    await ls.registrarTelemetria('PROVAVIDA', provaVida.posto, { uptimeHoras: 2 }, tkVida);
+    const aposTelemetria = (await ls.listar('PROVAVIDA')).find((c) => c.posto === provaVida.posto) || {};
+    const provaAcesso = await ls.cadastrarComputador('PROVAACESSO', 'SrvAcesso', 'interno');
+    const tkAcesso = await ls.garantirAgentToken('PROVAACESSO', provaAcesso.posto);
+    await ls.registrarAcessoRemoto('PROVAACESSO', provaAcesso.posto, 'AnyDesk (10.0.0.1:443)', tkAcesso);
+    const aposAcesso = (await ls.listar('PROVAACESSO')).find((c) => c.posto === provaAcesso.posto) || {};
+
     const conf = {
       'o comando manda ZPL na porta 9100': /9100/.test(zebra) && /~JR/.test(zebra),
       // ~JA antes do ~JR: senao o trabalho travado volta a imprimir depois
@@ -11698,6 +11710,10 @@ setTimeout(async () => {
         enviouZ.status === 200 && respZ.tarefa === 'zebra' && respZ.enfileirados === 1,
       'o que foi pra fila é ZPL, não reinício de máquina':
         /~JR/.test(cmdZ) && !/shutdown/i.test(cmdZ),
+      'telemetria autenticada recupera a presença da máquina':
+        aposTelemetria.ultimoHeartbeatEm > 0 && aposTelemetria.estado === 'operacional',
+      'acesso remoto autenticado recupera a presença da máquina':
+        aposAcesso.ultimoHeartbeatEm > 0 && aposAcesso.estado === 'operacional',
       // unidade sem Zebra marcada tem que ser RECUSADA com motivo, e nao
       // receber um comando que nao faz nada
       'unidade sem Zebra marcada é recusada com motivo':

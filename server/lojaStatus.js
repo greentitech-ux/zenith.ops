@@ -1098,7 +1098,12 @@ async function registrarTelemetria(codigo, posto, dados, token) {
   if (!atual) throw new Error('Computador não encontrado.');
   exigirTokenSeTiver(atual, token);
   const agora = Date.now();
-  const patch = {};
+  // Telemetria autenticada e prova de vida do NOCZenith. Sem isso, uma
+  // escrita atual de disco/rede podia coexistir com um ultimoHeartbeatEm
+  // antigo por causa do intervalo de persistencia do heartbeat e o painel
+  // mostrava falsamente "indisponível". Mantemos o mesmo campo que define o
+  // estado para que qualquer sinal válido do agente recupere a presença.
+  const patch = { ultimoHeartbeatEm: agora };
   let eventos = atual.eventos || [];
 
   const disco = nocMaquina.sanitizarDisco(dados && dados.disco);
@@ -1290,7 +1295,11 @@ async function registrarAcessoRemoto(codigo, posto, detalhe, token, ehSessao) {
   const eventosAtuais = (atual && atual.eventos) || [];
   const ultimo = eventosAtuais[eventosAtuais.length - 1];
   const repetido = !ehSessao && ultimo && ultimo.tipo === 'acesso-remoto' && ultimo.detalhe === limpo && (agora - ultimo.em) < 10 * 60 * 1000;
-  const patch = { codigo, posto, ultimoAcessoRemotoEm: agora, ultimoAcessoRemotoDetalhe: limpo };
+  // A checagem de acesso remoto só roda dentro do ciclo saudável do agente e
+  // o endpoint exige o token da máquina. Portanto também é um batimento
+  // válido: não deixar um acesso detectado agora ao lado de um status antigo
+  // de "calada" no painel.
+  const patch = { codigo, posto, ultimoHeartbeatEm: agora, ultimoAcessoRemotoEm: agora, ultimoAcessoRemotoDetalhe: limpo };
   if (ehSessao) { patch.ultimaSessaoRemotaEm = agora; patch.ultimaSessaoRemotaDetalhe = limpo; }
   if (!repetido) patch.eventos = [...eventosAtuais, { tipo, em: agora, detalhe: limpo }].slice(-EVENTOS_MAX);
   await COLLECTION.doc(id).set(patch, { merge: true });
