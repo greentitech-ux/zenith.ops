@@ -112,6 +112,26 @@
   tbody td{padding:6px 10px;border-bottom:1px solid #1a1f26;white-space:nowrap;}
   tbody tr:hover{background:var(--panel2);}
   .valor{font-family:var(--mono);font-variant-numeric:tabular-nums;}
+  .colocacao{font-family:var(--mono);color:var(--muted);width:38px;text-align:right;}
+  .colocacao .podio{color:var(--accent);}
+  /* COLUNA DA UNIDADE CONGELADA. Pedido do Master (09/09/2026): "congelar
+     sempre o nome da unidade; se preciso, quando for mobile, abreviar - mas
+     congelar a coluna unidade". Com 8 colunas a tabela rola de lado e, no
+     meio da rolagem, a linha vira uma fileira de números sem dono. A
+     colocação anda junto porque ela é o par do nome: "3º" sem a loja ao lado
+     também não diz nada. `background` obrigatório - célula sticky sem fundo
+     deixa o conteúdo passar por baixo. */
+  .tab-unidades th:nth-child(1),.tab-unidades td:nth-child(1){position:sticky;left:0;z-index:2;background:var(--panel);}
+  .tab-unidades th:nth-child(2),.tab-unidades td:nth-child(2){position:sticky;left:38px;z-index:2;background:var(--panel);}
+  .tab-unidades thead th:nth-child(1),.tab-unidades thead th:nth-child(2){z-index:3;}
+  /* a borda marca onde a parte congelada termina e a rolagem começa */
+  .tab-unidades th:nth-child(2),.tab-unidades td:nth-child(2){box-shadow:1px 0 0 var(--line);}
+  @media (max-width:640px){
+    /* no celular o nome inteiro comeria metade da tela: corta com reticências
+       e mantém o nome completo no title (toque longo mostra) */
+    .tab-unidades td:nth-child(2){max-width:112px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .tab-unidades td:nth-child(2) span{display:none;}
+  }
   .truncate{max-width:160px;overflow:hidden;text-overflow:ellipsis;}
   .tablewrap{max-height:360px;overflow:auto;}
   /* linha de total do grupo: fica colada no rodape enquanto as linhas rolam
@@ -312,6 +332,22 @@
       <option id="f-grupo-arcfood" value="ARCFOOD">ARCFOOD</option>
       <option id="f-grupo-bravo" value="BRAVO">Grupo Bravo (GBE)</option>
     </select>
+    <!-- DIA DA SEMANA. Pedido do Master (09/09/2026): "colocar um filtro por
+         dia da semana que eu possa selecionar o dia da semana e filtra todas
+         as datas daquele dia da semana". Serve pra comparar segunda com
+         segunda: o movimento de uma pizzaria não é o mesmo em terça e em
+         sábado, então média de período mistura coisas diferentes. Vale
+         DENTRO do período já filtrado - não substitui as datas, peneira. -->
+    <select id="f-dia-semana" onchange="render()" title="Mostra só as datas que caem nesse dia da semana, dentro do período filtrado">
+      <option value="">Todos os dias da semana</option>
+      <option value="1">Segunda</option>
+      <option value="2">Terça</option>
+      <option value="3">Quarta</option>
+      <option value="4">Quinta</option>
+      <option value="5">Sexta</option>
+      <option value="6">Sábado</option>
+      <option value="0">Domingo</option>
+    </select>
     <div class="multiselect" id="ms-unidade">
       <button type="button" class="multiselect-btn" id="ms-unidade-btn">Todas as unidades</button>
       <div class="multiselect-panel" id="ms-unidade-panel"></div>
@@ -362,8 +398,8 @@
     </div>
   </h2>
   <div class="tablewrap" style="max-height:none;overflow-x:auto;overflow-y:visible;">
-    <table>
-      <thead><tr id="unidades-thead"><th>Unid.</th><th>Previsão (mês)</th><th>Fechamentos</th><th>Faturamento</th><th>Diferença</th><th>TC total</th></tr></thead>
+    <table class="tab-unidades">
+      <thead><tr id="unidades-thead"><th>#</th><th>Unid.</th><th>Previsão (mês)</th><th>Fechamentos</th><th>Faturamento</th><th>Diferença</th><th>TC total</th></tr></thead>
       <tbody id="unidades-body"></tbody>
     </table>
   </div>
@@ -1497,13 +1533,28 @@ function setupPresetsFech(){
   });
 }
 
+// dia da semana de uma data AAAA-MM-DD, sem o fuso do navegador atrapalhar:
+// new Date('2026-09-07') é meia-noite UTC, que a oeste de Greenwich cai no
+// dia 6 e devolveria o dia da semana errado
+function diaSemanaDe(iso){
+  const p = String(iso||'').split('-');
+  if(p.length !== 3) return null;
+  return new Date(Number(p[0]), Number(p[1])-1, Number(p[2])).getDay();
+}
+// peneira do dia da semana - vale pros KPIs, gráficos, Comparativo e tabela,
+// porque todos passam por aqui ou por renderTabela (ver filtrosEfetivosTabela)
+function passaDiaSemana(d){
+  const alvo = document.getElementById('f-dia-semana').value;
+  return !alvo || String(diaSemanaDe(d.data)) === alvo;
+}
 function filtrarPorIntervalo(start, end){
   const grupo = document.getElementById('f-grupo').value;
   return DATA.filter(d=>
     (!grupo || redeDaUnidade(d.unidade)===grupo) &&
     (SEL_UNIDADE.size===0 || SEL_UNIDADE.has(d.unidade)) &&
     (!start || (d.data||'') >= start) &&
-    (!end || (d.data||'') <= end)
+    (!end || (d.data||'') <= end) &&
+    passaDiaSemana(d)
   );
 }
 function filtrar(){
@@ -2058,14 +2109,36 @@ function opcoesColunasUnidades(){
     {key:'entradaDinheiro', label:'Entrada em dinheiro'},
     {key:'totalSaida', label:'Total de saída'},
     {key:'tc', label:'TC total'},
+    // pedido do Master (09/09/2026): "coluna de porcentagem de crescimento ou
+    // queda no faturamento". Só na TELA - o relatório por unidade tem colunas
+    // fixas e não carrega essa (ver prepararFechamentosPorUnidade em index.js)
+    {key:'variacao', label:'Variação'},
   ];
 }
 let UNID_COLUNAS_OCULTAS = new Set();
 try{ UNID_COLUNAS_OCULTAS = new Set(JSON.parse(localStorage.getItem('fechColunasUnidadesOcultas')||'[]')); }catch(e){}
 function colVisivelUnidades(key){ return !UNID_COLUNAS_OCULTAS.has(key); }
 
+// faturamento de cada unidade no período ANTERIOR ao que está filtrado agora.
+// Reaproveita periodoAnterior(), a mesma função do painel "Comparação com
+// período anterior" - assim a variação da linha nunca discorda do painel de
+// cima. Usa o intervalo da PRÓPRIA tabela (não o do painel), senão a coluna
+// compararia semana enquanto a tabela mostra um dia. O filtro de dia da
+// semana entra dos dois lados: segunda compara com segunda.
+function faturamentoAnteriorPorUnidade(){
+  const inicio = document.getElementById('f-date-start').value;
+  const fim = document.getElementById('f-date-end').value;
+  if(!inicio || !fim) return null;
+  const ant = periodoAnterior(inicio, fim, presetAtivo || null);
+  if(!ant || !ant.inicio || !ant.fim) return null;
+  const mapa = {};
+  filtrarPorIntervalo(ant.inicio, ant.fim).forEach(r=>{ mapa[r.unidade] = (mapa[r.unidade]||0) + (r.faturamento||0); });
+  return { mapa, ant };
+}
+
 function renderUnidadesTable(rows){
   const refIso = document.getElementById('f-date-end').value;
+  const anterior = faturamentoAnteriorPorUnidade();
   const porUnidade = {};
   rows.forEach(r=>{
     const c = (porUnidade[r.unidade] ||= {qtd:0, faturamento:0, diferenca:0, entradaDinheiro:0, totalSaida:0, tc:0});
@@ -2079,7 +2152,13 @@ function renderUnidadesTable(rows){
   const linhas = Object.entries(porUnidade).sort((a,b)=>b[1].faturamento-a[1].faturamento);
   document.getElementById('unidades-count').textContent = linhas.length;
   const colunas = opcoesColunasUnidades().filter(o=>colVisivelUnidades(o.key));
-  document.getElementById('unidades-thead').innerHTML = '<th>Unid.</th>' + colunas.map(o=>`<th>${escapeHtml(o.label)}</th>`).join('');
+  // COLOCAÇÃO POR FATURAMENTO. Pedido do Master (09/09/2026): "marcar a
+  // posição no Comparativo por unidade - 1. colocado maior faturamento, 2.
+  // colocado...". A tabela já vinha ordenada por faturamento, mas ler a
+  // posição dependia de contar as linhas com o dedo. O número sai da MESMA
+  // ordenação da tabela, então nunca discorda dela.
+  document.getElementById('unidades-thead').innerHTML = '<th title="Colocação por faturamento no período filtrado">#</th><th>Unid.</th>'
+    + colunas.map(o=>`<th>${escapeHtml(o.label)}</th>`).join('');
   const celulas = {
     previsao: (u,c)=>{ const previsao = previsaoMensal(u, refIso); return `<td class="valor" style="color:var(--accent);">${previsao==null ? '—' : fmtMoney(previsao)}</td>`; },
     qtd: (u,c)=>`<td class="valor">${c.qtd}</td>`,
@@ -2088,19 +2167,35 @@ function renderUnidadesTable(rows){
     entradaDinheiro: (u,c)=>`<td class="valor">${fmtMoney(c.entradaDinheiro)}</td>`,
     totalSaida: (u,c)=>`<td class="valor">${fmtMoney(c.totalSaida)}</td>`,
     tc: (u,c)=>`<td class="valor">${c.tc.toFixed(0)}</td>`,
+    // "—" quando não há com o que comparar (loja que não faturou no período
+    // anterior). Dividir por zero daria ∞ ou 100% falso, e uma loja que abriu
+    // esta semana apareceria como o maior crescimento da rede
+    variacao: (u,c)=>{
+      const antes = anterior ? (anterior.mapa[u]||0) : 0;
+      if(!anterior || antes <= 0) return `<td class="valor" style="color:var(--muted);" title="Sem faturamento no período anterior - não dá pra comparar">—</td>`;
+      const pct = ((c.faturamento - antes)/antes)*100;
+      const cor = pct>0.05 ? 'var(--ok)' : (pct<-0.05 ? 'var(--bad)' : 'var(--muted)');
+      const seta = pct>0.05 ? '▲' : (pct<-0.05 ? '▼' : '=');
+      const titulo = `Período anterior (${fmtData(anterior.ant.inicio)} → ${fmtData(anterior.ant.fim)}): ${fmtMoney(antes)}`;
+      return `<td class="valor" style="color:${cor}" title="${escapeHtml(titulo)}">${seta} ${pct>0?'+':''}${pct.toFixed(1).replace('.',',')}%</td>`;
+    },
   };
-  document.getElementById('unidades-body').innerHTML = linhas.length ? linhas.map(([u,c])=>{
+  document.getElementById('unidades-body').innerHTML = linhas.length ? linhas.map(([u,c],i)=>{
     // so mostra um subtitulo quando ele agrega informacao de verdade (o
     // codigo IDPULSE, seja o proprio "u" quando ele ja e numerico - unidades
     // ARCFOOD - ou o apelido de UNIDADES_IDPULSE pras unidades do Grupo
     // Bravo que ja tem um numero conhecido) - nunca uma reescrita do mesmo
     // nome (ex: "Dom Tirol" / "Dominos Tirol"), que so duplicava a info
     const codigoIdpulse = UNIDADES_IDPULSE[u] || (/^\d+$/.test(u) ? u : null);
+    // pódio só nos três primeiros: com 13 lojas, destacar todas não destaca
+    // nenhuma. Da 4ª pra baixo o número continua lá, só não chama atenção
+    const podio = i < 3 ? ' class="podio"' : '';
     return `<tr>
-      <td>${escapeHtml(UNIDADES_NOMES[u]||u)}${codigoIdpulse ? ` <span style="color:var(--muted);font-family:var(--mono);font-size:10px;">${escapeHtml(codigoIdpulse)}</span>` : ''}</td>
+      <td class="colocacao"><b${podio}>${i+1}º</b></td>
+      <td title="${escapeHtml(UNIDADES_NOMES[u]||u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}${codigoIdpulse ? ` <span style="color:var(--muted);font-family:var(--mono);font-size:10px;">${escapeHtml(codigoIdpulse)}</span>` : ''}</td>
       ${colunas.map(o=>celulas[o.key](u,c)).join('')}
     </tr>`;
-  }).join('') : `<tr><td colspan="${1+colunas.length}" class="empty">Sem dados no período.</td></tr>`;
+  }).join('') : `<tr><td colspan="${2+colunas.length}" class="empty">Sem dados no período.</td></tr>`;
 }
 
 // ---------- seletor 🧩 Colunas do Comparativo por unidade ----------
@@ -2814,7 +2909,8 @@ function renderTabela(){
   const filtradas = (DATA||[]).filter(d=>
     (!f.inicio || (d.data||'')>=f.inicio) && (!f.fim || (d.data||'')<=f.fim) &&
     (!f.grupo || redeDaUnidade(d.unidade)===f.grupo) &&
-    (f.unidades.size===0 || f.unidades.has(d.unidade))
+    (f.unidades.size===0 || f.unidades.has(d.unidade)) &&
+    passaDiaSemana(d)
   );
   const ordenadas = [...filtradas].sort((a,b)=>(b.data||'').localeCompare(a.data||''));
   document.getElementById('fechamentos-count').textContent = ordenadas.length;
@@ -3288,6 +3384,10 @@ function baixarRelatorioFechamentosUnidades(formato){
   if(fim) params.set('fim', fim);
   if(grupo) params.set('grupo', grupo);
   if(unidades) params.set('unidades', unidades);
+  // o relatorio tem que sair com o MESMO recorte da tela: sem isto, filtrar
+  // "so as segundas" mostrava 4 dias e exportava 30
+  const diaSemana = document.getElementById('f-dia-semana').value;
+  if(diaSemana) params.set('diaSemana', diaSemana);
   verRelatorio(`/api/fechamentos/relatorio-unidades.${formato}?${params.toString()}`, `Fechamentos por unidade · ${formato.toUpperCase()}`);
 }
 
@@ -3298,6 +3398,8 @@ function baixarRelatorioFechamentos(formato){
   if(inicio) params.set('inicio', inicio);
   if(fim) params.set('fim', fim);
   if(unidades) params.set('unidades', unidades);
+  const diaSemana = document.getElementById('f-dia-semana').value;
+  if(diaSemana) params.set('diaSemana', diaSemana);
   // as colunas fora do relatorio tem check PROPRIO no seletor 🧩 Colunas
   // (independente do que esta visivel na tela) - a ordem, essa sim, e a
   // mesma da tabela

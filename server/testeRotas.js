@@ -11380,6 +11380,88 @@ setTimeout(async () => {
   console.log(`${okQuedasPeriodo ? '✓' : '✗'} NOC: painel de Quedas recolhe de novo, e ganhou Hoje/Ontem por dia de calendário`);
 
   // ------------------------------------------------------------------
+  // COMPARATIVO POR UNIDADE: colocação, variação e filtro por dia da semana.
+  // Pedidos do Master (09/09/2026): "marcar a posição no comparativo por
+  // unidade - 1. colocado maior faturamento, 2. colocado...", "colocar um
+  // filtro por dia da semana que eu possa selecionar o dia da semana e filtra
+  // todas as datas daquele dia da semana" e "coluna de porcentagem de
+  // crescimento ou queda no faturamento".
+  let okCompUnidade = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    // dia da semana sem o fuso atrapalhar: a função pura das duas pontas
+    const mDiaTela = /function diaSemanaDe\(iso\)\{[\s\S]*?\n\}/.exec(html);
+    const mDiaSrv = /function diaSemanaISO\(data\) \{[\s\S]*?\n\}/.exec(srcIdx);
+    // eslint-disable-next-line no-new-func
+    const diaTela = mDiaTela ? new Function(`${mDiaTela[0]}; return diaSemanaDe;`)() : null;
+    // eslint-disable-next-line no-new-func
+    const diaSrv = mDiaSrv ? new Function(`${mDiaSrv[0]}; return diaSemanaISO;`)() : null;
+    // a rota: só as segundas do período
+    const cabC = { Authorization: 'Bearer ' + token };
+    const semFiltro = await pedir('/api/fechamentos/relatorio.csv?inicio=2026-09-01&fim=2026-09-30', cabC);
+    const soSegunda = await pedir('/api/fechamentos/relatorio.csv?inicio=2026-09-01&fim=2026-09-30&diaSemana=1', cabC);
+    const datasDe = (csv) => [...String(csv).matchAll(/(\d{2})\/(\d{2})\/(\d{4})/g)].map((m) => `${m[3]}-${m[2]}-${m[1]}`);
+    const datasSeg = datasDe(soSegunda.corpo);
+    const fnUnid = /function renderUnidadesTable\(rows\)\{[\s\S]*?\n\}/.exec(html);
+    const fnAnt = /function faturamentoAnteriorPorUnidade\(\)\{[\s\S]*?\n\}/.exec(html);
+    const conf = {
+      // 07/09/2026 é segunda; 08 é terça. Sem o cálculo por partes, o fuso
+      // do processo jogaria a data pro dia anterior
+      // o processo do teste roda em UTC, onde `new Date('2026-09-07')` acerta
+      // o dia POR ACASO - a falha só aparece num fuso negativo, como o do
+      // Brasil. Por isso a guarda aqui é a FORMA: a data tem que ser montada
+      // por partes, nunca do ISO puro (a sabotagem provou que sem isso passa)
+      'dia da semana é calculado sem o fuso derrubar a data (tela e servidor iguais)':
+        !!diaTela && !!diaSrv && diaTela('2026-09-07') === 1 && diaSrv('2026-09-07') === 1
+        && diaTela('2026-09-06') === 0 && diaSrv('2026-09-06') === 0 && diaTela('') === null
+        && /return new Date\(Number\(p\[0\]\), Number\(p\[1\]\) - 1, Number\(p\[2\]\)\)\.getDay\(\);/.test(srcIdx)
+        && /return new Date\(Number\(p\[0\]\), Number\(p\[1\]\)-1, Number\(p\[2\]\)\)\.getDay\(\);/.test(html),
+      // coluna congelada: com 8 colunas a linha rola e vira número sem dono
+      'a coluna da unidade (e a colocação) fica congelada na rolagem lateral':
+        /\.tab-unidades th:nth-child\(1\),\.tab-unidades td:nth-child\(1\)\{position:sticky;left:0;/.test(html)
+        && /\.tab-unidades th:nth-child\(2\),\.tab-unidades td:nth-child\(2\)\{position:sticky;left:38px;/.test(html)
+        && /background:var\(--panel\);\}/.test(html) && /<table class="tab-unidades">/.test(html),
+      'no celular o nome é abreviado, mas o nome inteiro fica no title':
+        /@media \(max-width:640px\)\{[\s\S]{0,400}text-overflow:ellipsis/.test(html)
+        && /<td title="\$\{escapeHtml\(UNIDADES_NOMES\[u\]\|\|u\)\}">/.test(html),
+      'o relatório do servidor respeita o dia da semana pedido':
+        soSegunda.status === 200 && semFiltro.status === 200
+        && datasSeg.length > 0 && datasSeg.every((d) => diaSrv(d) === 1)
+        && datasDe(semFiltro.corpo).length > datasSeg.length,
+      'a tela manda o dia da semana pros dois relatórios (senão exporta o que não está na tela)':
+        (html.match(/params\.set\('diaSemana', diaSemana\)/g) || []).length === 2,
+      'a peneira do dia da semana vale nos KPIs/gráficos e também na tabela de baixo':
+        /function passaDiaSemana\(d\)\{/.test(html)
+        && /\(!end \|\| \(d\.data\|\|''\) <= end\) &&\s*passaDiaSemana\(d\)/.test(html)
+        && /\(f\.unidades\.size===0 \|\| f\.unidades\.has\(d\.unidade\)\) &&\s*passaDiaSemana\(d\)/.test(html),
+      // colocação
+      'a colocação sai da MESMA ordenação da tabela (nunca discorda dela)':
+        !!fnUnid && /linhas\.map\(\(\[u,c\],i\)=>/.test(fnUnid[0]) && /<td class="colocacao"><b\$\{podio\}>\$\{i\+1\}º<\/b><\/td>/.test(fnUnid[0])
+        && /sort\(\(a,b\)=>b\[1\]\.faturamento-a\[1\]\.faturamento\)/.test(fnUnid[0]),
+      'só os três primeiros ganham destaque (com 13 lojas, destacar todas não destaca nenhuma)':
+        !!fnUnid && /const podio = i < 3 \? ' class="podio"' : '';/.test(fnUnid[0]) && /\.colocacao \.podio\{color:var\(--accent\);\}/.test(html),
+      'a coluna nova entra no cabeçalho e no colspan do vazio':
+        /<th title="Colocação por faturamento no período filtrado">#<\/th><th>Unid\.<\/th>/.test(html)
+        && /colspan="\$\{2\+colunas\.length\}"/.test(fnUnid[0]),
+      // variação
+      'a variação reaproveita periodoAnterior (mesma conta do painel de cima)':
+        !!fnAnt && /periodoAnterior\(inicio, fim, presetAtivo \|\| null\)/.test(fnAnt[0])
+        && /filtrarPorIntervalo\(ant\.inicio, ant\.fim\)/.test(fnAnt[0]),
+      'usa o intervalo da própria tabela, não o do painel (senão compara semana com um dia)':
+        !!fnAnt && /getElementById\('f-date-start'\)\.value/.test(fnAnt[0]) && !/comparativoRange\(\)/.test(fnAnt[0]),
+      'loja sem faturamento no período anterior mostra "—", não crescimento infinito':
+        /if\(!anterior \|\| antes <= 0\) return `<td class="valor" style="color:var\(--muted\);" title="Sem faturamento no período anterior/.test(html),
+      'a variação é uma coluna do seletor 🧩 Colunas, como as outras': /\{key:'variacao', label:'Variação'\}/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okCompUnidade = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (seg=${datasSeg.length} todas=${datasDe(semFiltro.corpo).length} amostra=${JSON.stringify(datasSeg.slice(0, 4))})`);
+  } catch (e) { okCompUnidade = false; console.log('  erro: ' + e.message); }
+  if (!okCompUnidade) ruins += 1;
+  console.log(`${okCompUnidade ? '✓' : '✗'} Comparativo por unidade: colocação por faturamento, coluna de variação e filtro por dia da semana`);
+
+  // ------------------------------------------------------------------
   // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o
   // AnyDesk cai, o acesso remoto some e a unica saida era reiniciar o
   // computador inteiro - o que derruba o caixa junto, por causa de um

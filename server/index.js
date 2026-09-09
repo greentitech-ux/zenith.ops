@@ -5309,18 +5309,31 @@ app.post('/api/fechamentos/:grupo/enviar-planilha', auth.requireMaster, async (r
 // resolve qualquer corte extra da tabela antes de mandar inicio/fim - mais
 // grupo e unidades) - usado pelos relatorios de Fechamentos e de Comparativo
 // por unidade abaixo
+// dia da semana de AAAA-MM-DD sem depender do fuso do processo: new Date do
+// ISO puro é meia-noite UTC, e no Brasil isso cai no dia anterior
+function diaSemanaISO(data) {
+  const p = String(data || '').split('-');
+  if (p.length !== 3) return null;
+  return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2])).getDay();
+}
+
 async function fechamentosFiltrados(req) {
-  const { inicio, fim, grupo, unidades } = req.query;
+  const { inicio, fim, grupo, unidades, diaSemana } = req.query;
   const lancados = await fechamentosLive.listAll();
   const sangriasLancadas = (await sangrias.listAll()).map(sangrias.comoFechamento);
   const combinado = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas]);
   const permitido = auth.filterByUnidade(req, combinado);
   const unidadesSet = unidades ? new Set(String(unidades).split(',').filter(Boolean)) : null;
+  // peneira do dia da semana (ver o seletor em fechamentos.html) - o relatório
+  // tem que sair com o MESMO recorte da tela: filtrar "só as segundas" e
+  // exportar o mês inteiro seria pior que não ter o filtro
+  const alvoDia = /^[0-6]$/.test(String(diaSemana || '')) ? Number(diaSemana) : null;
   return permitido.filter((f) =>
     (!grupo || f.grupo === grupo) &&
     (!unidadesSet || unidadesSet.has(f.unidade)) &&
     (!inicio || (f.data || '') >= inicio) &&
-    (!fim || (f.data || '') <= fim)
+    (!fim || (f.data || '') <= fim) &&
+    (alvoDia === null || diaSemanaISO(f.data) === alvoDia)
   );
 }
 
