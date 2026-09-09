@@ -958,7 +958,7 @@ async function tokenDoComputador(codigo, posto) {
 // estavel (nunca muda, mesmo se o nome/tipo forem editados depois) que vira
 // parte do link/QR code fixado naquele computador (ver POST /api/loja-status/
 // :codigo/computadores em index.js, que devolve a URL pronta)
-async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom) {
+async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, medeQuedas) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador (ex: Caixa 1, PDV Entrega).');
   const posto = crypto.randomBytes(4).toString('hex');
@@ -967,7 +967,7 @@ async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom) {
     codigo, posto, nome: nomeOk, tipo: tipoValido(tipo), anydeskId: null,
     // Características operacionais declaradas no cadastro. Não inferimos pelo
     // nome: "Servidor" e "GCOM" precisam ser visíveis e confiáveis no NOC.
-    ehServidor: !!ehServidor, temGcom: !!temGcom,
+    ehServidor: !!ehServidor, temGcom: !!temGcom, medeQuedas: !!medeQuedas,
     criadoEm: Date.now(),
     ultimoHeartbeatEm: null, avisadoOffline: false, offlineDesde: null, mensagemPendente: null,
     ip: null, userAgent: null, abertoDesde: null, ipLocal: null, ipLocalEm: null,
@@ -983,7 +983,7 @@ async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom) {
 
 // edita nome e/ou tipo de um computador ja cadastrado - o "posto" (id do
 // link/QR) nunca muda, so o que aparece na tela e qual tela o link abre
-async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom) {
+async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom, medeQuedas) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador.');
   const id = docIdFor(codigo, posto);
@@ -997,6 +997,10 @@ async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServido
     ehNotebook: !!ehNotebook,
     ehServidor: !!ehServidor,
     temGcom: !!temGcom,
+    // Ponto de medição da unidade: só esta máquina entra no relatório de
+    // quedas. Pode haver mais de uma por redundância; o relatório consolida
+    // ocorrências simultâneas em uma única queda da loja.
+    medeQuedas: !!medeQuedas,
   };
   await COLLECTION.doc(id).update(registro);
   cache.invalidar();
@@ -2312,27 +2316,87 @@ async function relatorioQuedas(opcoes) {
   const docs = (await cache.cached()).map(semSegredo);
   const porUnidade = new Map();
   for (const doc of docs) {
+    // O retroativo não pode continuar somando PC a PC, nem pode ficar vazio
+    // até alguém editar todo o parque. Primeiro usamos os pontos marcados
+    // explicitamente; quando uma unidade ainda não tem nenhum, seus
+    // computadores fixos viram pontos automáticos de correlação. Notebook
+    // segue fora porque sai da rede da loja e geraria falso positivo.
     if (doc.ehNotebook) continue;
     const { fora, emAberto } = quedasDeUmComputador(doc, desde, ate);
     const reais = fora.filter((q) => !q.comandado);
-    const u = porUnidade.get(doc.codigo) || {
-      codigo: doc.codigo, computadores: 0, quedas: 0, foraMs: 0,
-      maiorMs: 0, oscilacoes: 0, confirmadas: 0, foraAgora: 0,
-    };
-    u.computadores += 1;
-    u.quedas += reais.length;
-    u.foraMs += reais.reduce((s, q) => s + q.ms, 0);
-    u.maiorMs = Math.max(u.maiorMs, ...reais.map((q) => q.ms), 0);
-    // oscilacao x queda de verdade: e a MESMA regra que decide se o push
-    // critico sai (CONFIRMACAO_QUEDA_MS). Separar importa: 30 piscadas de
-    // 40s nao pedem app offline; 3 quedas de 2h pedem.
-    u.oscilacoes += reais.filter((q) => q.ms < CONFIRMACAO_QUEDA_MS).length;
-    u.confirmadas += reais.filter((q) => q.ms >= CONFIRMACAO_QUEDA_MS).length;
-    if (emAberto) u.foraAgora += 1;
+    const u = porUnidade.get(doc.codigo) || { codigo: doc.codigo, pontos: new Map() };
+    const ponto = u.pontos.get(doc.posto) || { marcado: false, eventos: [] };
+    // Não soma PC por PC: cada ponto entra na correlação da unidade abaixo.
+    reais.forEach((q) => ponto.eventos.push({ inicio: q.inicio, fim: q.fim }));
+    // Infinity preserva que o ponto continua fora AGORA; só na apresentação
+    // ela vira Date.now(). Assim a interseção sabe reconhecer a queda aberta.
+    if (emAberto) ponto.eventos.push({ inicio: emAberto.inicio, fim: Infinity, aberta: true });
+    ponto.marcado = ponto.marcado || !!doc.medeQuedas;
+    u.pontos.set(doc.posto, ponto);
     porUnidade.set(doc.codigo, u);
   }
   const unidades = [...porUnidade.values()]
-    .map((u) => ({ ...u, horasFora: +(u.foraMs / 3600000).toFixed(1), maiorMin: Math.round(u.maiorMs / 60000) }))
+    .map((u) => {
+      const todosPontos = [...u.pontos.values()];
+      const pontosMarcados = todosPontos.filter((ponto) => ponto.marcado);
+      // Uma marcação é uma decisão operacional e sempre vence a inferência.
+      // Sem marcação, a correlação dos equipamentos fixos torna possível ler
+      // corretamente o histórico antigo imediatamente após o deploy.
+      const fonteMedicao = pontosMarcados.length ? 'marcados' : 'automatico';
+      const porPonto = (pontosMarcados.length ? pontosMarcados : todosPontos).map((ponto) => ponto.eventos
+        .sort((a, b) => a.inicio - b.inicio)
+        .reduce((acc, e) => {
+          const anterior = acc[acc.length - 1];
+          if (anterior && e.inicio <= anterior.fim) anterior.fim = Math.max(anterior.fim, e.fim);
+          else acc.push({ ...e });
+          return acc;
+        }, []));
+      const pontos = porPonto.length;
+      let agrupadas;
+      if (pontos === 1) {
+        // Um ponto serve como sinal operacional, mas não confirma sozinho que
+        // a causa foi o link; a tela deixa essa condição explícita.
+        agrupadas = porPonto[0];
+      } else {
+        // Interseção estrita: só é queda de LINK quando TODOS os pontos
+        // marcados estão fora no mesmo intervalo. 9 de 10 fora, por exemplo,
+        // vira falha de máquinas, nunca uma queda somada da unidade.
+        const bordas = [];
+        porPonto.forEach((intervalos, ponto) => intervalos.forEach((e) => {
+          bordas.push({ em: e.inicio, ponto, delta: 1 });
+          if (Number.isFinite(e.fim)) bordas.push({ em: e.fim, ponto, delta: -1 });
+        }));
+        bordas.sort((a, b) => a.em - b.em);
+        const fora = new Set(); agrupadas = []; let inicioComum = null;
+        for (let i = 0; i < bordas.length;) {
+          const em = bordas[i].em;
+          while (i < bordas.length && bordas[i].em === em) {
+            if (bordas[i].delta > 0) fora.add(bordas[i].ponto); else fora.delete(bordas[i].ponto);
+            i += 1;
+          }
+          if (fora.size === pontos && inicioComum === null) inicioComum = em;
+          if (fora.size < pontos && inicioComum !== null) { agrupadas.push({ inicio: inicioComum, fim: em }); inicioComum = null; }
+        }
+        if (inicioComum !== null) agrupadas.push({ inicio: inicioComum, fim: Infinity, aberta: true });
+      }
+      const duracoes = agrupadas.map((e) => Math.max(0, (Number.isFinite(e.fim) ? e.fim : Date.now()) - e.inicio));
+      const foraMs = duracoes.reduce((s, ms) => s + ms, 0);
+      return {
+        codigo: u.codigo, computadores: pontos, pontosMarcados: pontosMarcados.length, fonteMedicao, medicaoRedundante: pontos > 1, quedas: agrupadas.length, foraMs,
+        maiorMs: Math.max(...duracoes, 0), oscilacoes: duracoes.filter((ms) => ms < CONFIRMACAO_QUEDA_MS).length,
+        confirmadas: duracoes.filter((ms) => ms >= CONFIRMACAO_QUEDA_MS).length,
+        foraAgora: agrupadas.filter((e) => e.aberta).length,
+        horasFora: +(foraMs / 3600000).toFixed(1), maiorMin: Math.round(Math.max(...duracoes, 0) / 60000),
+        // O resumo é suficiente para 7/30/90 dias. Para o filtro "Hoje" a
+        // tela usa esta trilha para mostrar exatamente quando a queda de link
+        // começou e terminou, sem recorrer ao histórico bruto da máquina.
+        eventos: agrupadas.map((e) => ({
+          inicio: e.inicio,
+          fim: Number.isFinite(e.fim) ? e.fim : null,
+          aberta: !!e.aberta,
+        })),
+      };
+    })
     .sort((a, b) => b.foraMs - a.foraMs);
   return {
     dias,
@@ -2343,6 +2407,7 @@ async function relatorioQuedas(opcoes) {
     // oscila muito, queda antiga JA SAIU da lista. O numero e' piso, nao
     // teto - dizer isso na tela evita concluir "melhorou" de um corte.
     eventosMaximoPorComputador: EVENTOS_MAX,
+    totalPontosMedicao: unidades.reduce((s, u) => s + u.computadores, 0),
     totalQuedas: unidades.reduce((s, u) => s + u.quedas, 0),
     totalConfirmadas: unidades.reduce((s, u) => s + u.confirmadas, 0),
     totalHorasFora: +(unidades.reduce((s, u) => s + u.foraMs, 0) / 3600000).toFixed(1),

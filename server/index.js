@@ -3495,7 +3495,7 @@ function urlComputador(codigo, posto, tipo) {
 app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), async (req, res) => {
   try {
     if (!(await unidadesExtras.apareceEm(req.params.codigo, 'noc'))) return res.status(400).json({ error: 'Essa unidade não tem NOC habilitado.' });
-    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo, req.body.ehServidor, req.body.temGcom);
+    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas);
     const url = urlComputador(req.params.codigo, registro.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
@@ -3505,7 +3505,7 @@ app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), asy
 
 app.put('/api/loja-status/:codigo/computadores/:posto', requireSection('suporte'), async (req, res) => {
   try {
-    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook, req.body.ehServidor, req.body.temGcom);
+    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas);
     const url = urlComputador(req.params.codigo, req.params.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
@@ -9629,7 +9629,7 @@ app.post('/api/tarefas/sincronizar-retroativo', auth.requireMaster, async (req, 
 app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anexos', 4), async (req, res) => {
   try {
     const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
-    const { tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, ehOrcamento, fornecedor, vencimento, direcionadoParaId, direcionadoParaEmail, prioridade, nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista } = payload;
+    const { tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, ehOrcamento, fornecedor, vencimento, direcionadoParaId, direcionadoParaEmail, prioridade, nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista, tarefaOrigemId } = payload;
     if (!req.isMaster && unidade && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
@@ -9647,7 +9647,31 @@ app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anex
         error: `${unidadeNome || unidade} só aceita solicitação de: ${(perfilUnidade.tiposSolicitacao || []).join(', ')}.`,
       });
     }
-    const anexos = [];
+    let origemTarefa = null;
+    let numeroTicketDaTarefa = null;
+    let anexosDaTarefa = [];
+    if (tarefaOrigemId) {
+      const preparada = await tarefas.prepararConversaoEmSolicitacao(String(tarefaOrigemId), acessoDasTarefas(req));
+      // Um reenvio depois de a Central já ter criado o ticket deve devolver o
+      // mesmo registro, nunca abrir outro com o mesmo assunto/protocolo.
+      if (preparada.jaTemSolicitacao) {
+        const existente = await solicitacoes.getOne(preparada.tarefa.solicitacaoId);
+        if (existente) return res.json(existente);
+        return res.status(409).json({ error: 'Esta tarefa já foi convertida; recarregue o Meu Dia para abrir a solicitação vinculada.' });
+      }
+      if (preparada.tarefa.unidade && unidade !== preparada.tarefa.unidade) {
+        return res.status(400).json({ error: 'A solicitação deve permanecer na mesma unidade da tarefa de origem.' });
+      }
+      numeroTicketDaTarefa = preparada.numeroTicket;
+      origemTarefa = {
+        id: preparada.tarefa.id, titulo: preparada.tarefa.titulo,
+        criadoPorNome: preparada.tarefa.criadoPorNome, criadaEm: preparada.tarefa.criadaEm,
+      };
+      anexosDaTarefa = (preparada.tarefa.anexos || []).map((a) => ({
+        nome: a.nome, path: a.path, tipo: a.tipo || 'application/octet-stream', origem: 'tarefa',
+      })).filter((a) => a.path);
+    }
+    const anexos = [...anexosDaTarefa];
     for (const file of req.files || []) {
       const path = await storage.salvarArquivo(unidade || 'geral', file, 'solicitacoes');
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype || 'application/octet-stream' });
@@ -9661,7 +9685,16 @@ app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anex
       prioridade,
       teste: req.isQaMaster || req.isQaUser,
       nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista,
+      numeroTicket: numeroTicketDaTarefa,
+      origemTarefa,
     });
+    if (tarefaOrigemId) {
+      await tarefas.registrarGerado(String(tarefaOrigemId), acessoDasTarefas(req), {
+        tipo: 'solicitacao', id: registro.id, numeroTicket: registro.numeroTicket,
+        rotulo: 'Solicitação na Central',
+      });
+      broadcast('tarefas-atualizada', { id: String(tarefaOrigemId), unidade: registro.unidade }, 'tarefas');
+    }
     broadcast('solicitacao-criada', registro, 'solicitacoes');
     await sincronizarTarefasDoTicket(registro);
     push.notifySolicitacao(`Ticket #${registro.numeroTicket} · Nova solicitação`, `${req.user.email} · ${registro.titulo || tipo || ''}`, registro.id);
@@ -12597,6 +12630,40 @@ app.post('/api/suporte-chats/:id/gerar-chamado', auth.requireAuth, async (req, r
     broadcast('chamado-criado', { id: chamado.id }, 'tecnico');
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     res.json({ chamado });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// O atendimento pode precisar de acompanhamento sem ainda ser um chamado
+// técnico. Esta ação cria uma tarefa no Meu Dia com o MESMO protocolo do
+// chat; assim Chat → Tarefa → Solicitação continua sendo um único assunto,
+// sem furar ou repetir a sequência global de Ticket #.
+app.post('/api/suporte-chats/:id/gerar-tarefa', auth.requireAuth, async (req, res) => {
+  try {
+    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    const chat = await suporteChat.getOne(req.params.id);
+    if (!chat) return res.status(404).json({ error: 'Conversa não encontrada.' });
+    if (chat.tarefaId) {
+      const existente = await tarefas.getOne(chat.tarefaId);
+      if (existente) return res.json({ tarefa: existente, existente: true });
+      return res.status(409).json({ error: 'Esta conversa já possui uma tarefa vinculada; recarregue a Central.' });
+    }
+    const mapa = await construirUnidadesMapa();
+    const contexto = String(chat.lojaContexto || '').trim();
+    const unidade = Object.keys(mapa).find((codigo) => String(mapa[codigo]).toLocaleLowerCase('pt-BR') === contexto.toLocaleLowerCase('pt-BR')) || null;
+    const primeiraMensagem = String(chat.mensagens?.find((m) => m.de === 'visitante')?.texto || '').trim();
+    const tarefa = await tarefas.criar({
+      titulo: `Chat · ${chat.nome || chat.assunto || 'Atendimento'}`,
+      descricao: `Protocolo #${chat.numeroTicket}${chat.assunto ? ` · ${chat.assunto}` : ''}${primeiraMensagem ? `\n\nSolicitação inicial: ${primeiraMensagem}` : ''}`,
+      unidade, unidadeNome: unidade ? mapa[unidade] : null,
+      usuario: req.user, responsavel: req.user,
+      numeroTicket: chat.numeroTicket, origem: 'chat', origemChatId: chat.id,
+    });
+    await suporteChat.vincularTarefa(chat.id, tarefa.id);
+    broadcast('tarefas-atualizada', { id: tarefa.id, unidade: tarefa.unidade }, 'tarefas');
+    broadcast('suporte-chat', { id: chat.id }, 'suporte');
+    res.json({ tarefa, existente: false });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

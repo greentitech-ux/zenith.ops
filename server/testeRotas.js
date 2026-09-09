@@ -4371,6 +4371,10 @@ setTimeout(async () => {
     // responder pela rota também assume (Master escreve -> vira responsável,
     // com a apresentação ANTES da resposta digitada)
     const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const tarefaResp = await postarJson(`/api/suporte-chats/${chatNovo.id}/gerar-tarefa`, {}, cab);
+    const tarefaChat = tarefaResp.status === 200 ? JSON.parse(tarefaResp.corpo) : {};
+    const tarefaRepetidaResp = await postarJson(`/api/suporte-chats/${chatNovo.id}/gerar-tarefa`, {}, cab);
+    const tarefaRepetida = tarefaRepetidaResp.status === 200 ? JSON.parse(tarefaRepetidaResp.corpo) : {};
     const resp = await postarMultipart(`/api/suporte-chats/${chatNovo.id}/responder`, { texto: 'já estou verificando' }, null, 'anexo', cab);
     const final = await sc.getOne(chatNovo.id);
     const msgs = final.mensagens;
@@ -4394,6 +4398,9 @@ setTimeout(async () => {
       'a apresentação vem antes da resposta digitada':
         msgs[msgs.length - 1].texto === 'já estou verificando' && msgs[msgs.length - 2].automatica === true,
       'a tela tem o botão de assumir (mesmo com outro responsável)': /assumirAtendimento\(/.test(html) && /respEmail !== meuEmail/.test(html),
+      'chat gera tarefa com o mesmo protocolo, sem criar outro Ticket #': tarefaResp.status === 200 && tarefaChat.tarefa?.numeroTicket === chatNovo.numeroTicket && tarefaChat.tarefa?.origemChatId === chatNovo.id,
+      'repetir a ação devolve a tarefa vinculada': tarefaRepetidaResp.status === 200 && tarefaRepetida.existente === true && tarefaRepetida.tarefa?.id === tarefaChat.tarefa?.id,
+      'a Central mostra a ação Gerar tarefa': /function gerarTarefa\(id\)/.test(html) && /✅ Gerar tarefa/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okAssumir = !falhas.length;
@@ -6504,6 +6511,12 @@ setTimeout(async () => {
       })(),
       'o codigo pareia na ordem em vez de so somar duracaoMs':
         /let aberta = null;/.test(require('fs').readFileSync(path.join(__dirname, 'lojaStatus.js'), 'utf8')),
+      'retroativo usa todos os pontos fixos quando a unidade ainda não marcou os oficiais': (() => {
+        const fonte = require('fs').readFileSync(path.join(__dirname, 'lojaStatus.js'), 'utf8');
+        return /const fonteMedicao = pontosMarcados\.length \? 'marcados' : 'automatico'/.test(fonte)
+          && /pontosMarcados\.length \? pontosMarcados : todosPontos/.test(fonte)
+          && /if \(doc\.ehNotebook\) continue;/.test(fonte);
+      })(),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okRelQuedas = !falhas.length;
@@ -11338,7 +11351,7 @@ setTimeout(async () => {
     ]);
     DOCS.set('lojaStatus/QUEDAS_TESTE__pc1', {
       codigo: 'QUEDAS_TESTE', posto: 'pc1', nome: 'PC 1', tipo: 'interno',
-      eventos: [...evento(ontemMs, ontemMs + 30 * 60000), ...evento(hojeMs, hojeMs + 45 * 60000)],
+      medeQuedas: true, eventos: [...evento(ontemMs, ontemMs + 30 * 60000), ...evento(hojeMs, hojeMs + 45 * 60000)],
     });
     ls.descartarEspelhoTeste();
     const pedirQ = async (qs) => JSON.parse((await pedir('/api/loja-status/quedas?' + qs, cabQ)).corpo);
@@ -14906,6 +14919,22 @@ setTimeout(async () => {
   try {
     const cabMD = { Authorization: 'Bearer ' + token };
     const nova = JSON.parse((await postarJson('/api/tarefas', { titulo: 'ATM reiniciou sozinho', unidade: 'DOM_19706' }, cabMD)).corpo);
+    const paraConverter = JSON.parse((await postarJson('/api/tarefas', { titulo: 'Impressora da cozinha sem etiqueta', unidade: 'DOM_19706' }, cabMD)).corpo);
+
+    // A tarefa já recebeu um protocolo global ao nascer. Ao virar uma
+    // solicitação, a Central deve aproveitar esse número — e reenvio não pode
+    // duplicar o ticket.
+    const conversao = await postarJson('/api/solicitacoes', {
+      tipo: 'suporte-ti', unidade: 'DOM_19706', unidadeNome: 'Mooca', titulo: paraConverter.titulo,
+      observacao: 'Convertida do Meu Dia.', tarefaOrigemId: paraConverter.id,
+    }, cabMD);
+    const ticketDaConversao = conversao.status === 200 ? JSON.parse(conversao.corpo) : {};
+    const conversaoRepetida = await postarJson('/api/solicitacoes', {
+      tipo: 'suporte-ti', unidade: 'DOM_19706', unidadeNome: 'Mooca', titulo: paraConverter.titulo,
+      observacao: 'Reenvio não pode duplicar.', tarefaOrigemId: paraConverter.id,
+    }, cabMD);
+    const ticketRepetido = conversaoRepetida.status === 200 ? JSON.parse(conversaoRepetida.corpo) : {};
+    const aposConversao = (JSON.parse((await pedir('/api/tarefas/minhas', cabMD)).corpo).find((t) => t.id === paraConverter.id)) || {};
 
     // o caminho real: a Central cria o ticket e avisa a tarefa
     const tic = await postarJson('/api/solicitacoes', {
@@ -14931,6 +14960,8 @@ setTimeout(async () => {
 
     const conf = {
       'a tarefa guarda o ticket que ela gerou, com número e rótulo': avisou.status === 200 && (comRastro.gerou || []).length === 1 && comRastro.gerou[0].numeroTicket === criado.numeroTicket && comRastro.gerou[0].rotulo === 'Suporte de TI',
+      'tarefa avulsa nasce com Ticket # e conversão preserva o mesmo número': nova.numeroTicket != null && ticketDaConversao.numeroTicket === paraConverter.numeroTicket && ticketDaConversao.origemTarefa?.id === paraConverter.id,
+      'reenvio da conversão devolve a mesma solicitação e tarefa fica vinculada': ticketRepetido.id === ticketDaConversao.id && aposConversao.solicitacaoId === ticketDaConversao.id,
       'e o formulário entra junto, sem apagar o ticket': doForm.status === 200 && (comDois.gerou || []).length === 2,
       'avisar o mesmo documento duas vezes não duplica a linha': repetido.status === 200 && (semDuplicar.gerou || []).length === 2,
       'o vinculo NÃO é tocado (é a chave da sincronização de ticket)': !comDois.vinculo,

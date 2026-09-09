@@ -175,9 +175,18 @@
   .quedas-tab th:first-child,.quedas-tab td:first-child{position:sticky;left:0;z-index:1;width:210px;min-width:210px;max-width:210px;background:var(--panel);box-shadow:9px 0 10px -12px rgba(0,0,0,.9);}
   .quedas-tab th:first-child{z-index:2;}
   .quedas-unidade-nome{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .quedas-medicao{display:block;color:var(--muted);font:9px var(--mono);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .quedas-fora{display:block;color:var(--bad);font-size:10px;font-family:var(--mono);font-weight:500;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .quedas-tab tr.pior td{font-weight:700;}
   .quedas-nota{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.5;}
+  .quedas-eventos{margin-top:12px;border-top:1px solid var(--line);padding-top:11px;}
+  .quedas-eventos h4{margin:0 0 8px;font:11px var(--mono);letter-spacing:.06em;color:var(--muted);text-transform:uppercase;}
+  .quedas-eventos-lista{display:grid;gap:6px;max-height:260px;overflow:auto;padding-right:3px;}
+  .queda-evento{display:grid;grid-template-columns:minmax(140px,1fr) auto auto;gap:12px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:12px;}
+  .queda-evento-unidade{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .queda-evento-hora{font-family:var(--mono);color:var(--muted);white-space:nowrap;}
+  .queda-evento-status{font:10px var(--mono);color:var(--good);white-space:nowrap;}
+  .queda-evento-status.aberta{color:var(--bad);}
   .uni-card{background:var(--bg,#0f1115);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;text-align:left;font-family:inherit;color:inherit;transition:border-color .15s ease,background .15s ease;}
   .uni-card:hover{border-color:var(--accent);}
   .uni-card.ativo{border-color:var(--accent);background:rgba(184, 255, 60,.07);}
@@ -201,6 +210,8 @@
     .quedas-tab th,.quedas-tab td{padding-left:7px;padding-right:7px;}
     .quedas-tab th:first-child,.quedas-tab td:first-child{width:132px;min-width:132px;max-width:132px;}
     .quedas-fora{font-size:9px;}
+    .queda-evento{grid-template-columns:minmax(0,1fr) auto;gap:5px 9px;}
+    .queda-evento-hora{grid-column:1/-1;font-size:10px;}
     .quedas-periodos{gap:6px;}
     .quedas-periodos .btn-secundario{padding:8px 10px;}
     .quedas-filtros{grid-template-columns:1fr 1fr;}
@@ -712,6 +723,10 @@
       <input type="checkbox" id="novo-comp-gcom" style="margin-top:3px;">
       <span><b>🖥️ Possui GCOM</b><small style="display:block;color:var(--muted);">mostra o indicador GCOM no cartão da máquina</small></span>
     </label>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
+      <input type="checkbox" id="novo-comp-mede-quedas" style="margin-top:3px;">
+      <span><b>📉 Medir quedas da unidade</b><small style="display:block;color:var(--muted);">entra no relatório de internet da loja; duas máquinas marcadas ao mesmo tempo contam como uma única queda</small></span>
+    </label>
     <div class="msg hidden" id="novo-comp-status"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharModalNovoComputador()">Cancelar</button>
@@ -779,6 +794,10 @@
     <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
       <input type="checkbox" id="editar-comp-gcom" style="margin-top:3px;">
       <span><b>🖥️ Possui GCOM</b><small style="display:block;color:var(--muted);">mostra o indicador GCOM no cartão da máquina</small></span>
+    </label>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
+      <input type="checkbox" id="editar-comp-mede-quedas" style="margin-top:3px;">
+      <span><b>📉 Medir quedas da unidade</b><small style="display:block;color:var(--muted);">ponto de medição da internet da loja; várias máquinas podem ser marcadas, sem multiplicar uma queda real</small></span>
     </label>
     <div class="msg hidden" id="editar-comp-status"></div>
     <div class="modal-acoes">
@@ -1107,11 +1126,12 @@ function equipTileHtml(codigo, c){
     : `<span class="btn-anydesk btn-anydesk-off" title="Sem AnyDesk cadastrado">🖥️</span>`;
   const marcadorGcom = c.temGcom ? '<span class="btn-anydesk" title="Possui GCOM">G</span>' : '';
   const marcadorServidor = c.ehServidor ? '<span class="btn-anydesk" title="Servidor">🗄️</span>' : '';
+  const marcadorQuedas = c.medeQuedas ? '<span class="btn-anydesk" title="Ponto de medição de quedas da unidade">📉</span>' : '';
   return `<div class="equip-tile status-${status}" data-codigo="${escapeHtml(codigo)}" data-posto="${escapeHtml(c.posto)}" onclick="abrirDetalheComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">
     <div class="equip-tile-head">
       <span class="status-dot ${status}"></span>
       <span class="equip-tile-nome" title="${nomeOk}">${nomeOk}</span>
-      ${marcadorServidor}${marcadorGcom}${btnAnydesk}
+      ${marcadorServidor}${marcadorGcom}${marcadorQuedas}${btnAnydesk}
     </div>
     <div class="equip-tile-unidade" title="${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}">${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}</div>
     <div class="equip-tile-status ${status}">${statusTexto}</div>
@@ -1271,7 +1291,7 @@ function atualizarConteudoDetalhe(codigo, c){
   `;
   document.getElementById('detalhe-comp-editar').onclick = () => {
     fecharDetalheComputador();
-    abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook, !!c.ehServidor, !!c.temGcom);
+    abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook, !!c.ehServidor, !!c.temGcom, !!c.medeQuedas);
   };
 }
 
@@ -1619,6 +1639,27 @@ function cabecalhoQuedas(rotulo, campo){
   const seta = ativo ? (QUEDAS_ORDENACAO.direcao === 'desc' ? ' ↓' : ' ↑') : ' ↕';
   return `<button type="button" class="quedas-ordem${ativo?' ativo':''}" onclick="ordenarQuedas('${campo}')" title="Ordenar por ${rotulo}">${rotulo}<span>${seta}</span></button>`;
 }
+function horaQueda(timestamp){
+  return new Intl.DateTimeFormat('pt-BR',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit'}).format(new Date(timestamp));
+}
+function duracaoQueda(inicio, fim){
+  const minutos = Math.max(0, Math.round(((fim || Date.now()) - inicio) / 60000));
+  if(minutos < 60) return `${minutos} min`;
+  return `${Math.floor(minutos / 60)}h ${minutos % 60 ? `${minutos % 60}min` : ''}`.trim();
+}
+function detalhesQuedasHoje(unidades){
+  if(QUEDAS_DADOS?.dias !== 'hoje') return '';
+  const eventos = unidades.flatMap(u => (u.eventos || []).map(e => ({...e, unidade: u.unidadeNome || u.codigo})))
+    .sort((a,b) => b.inicio - a.inicio);
+  if(!eventos.length) return '';
+  const linhas = eventos.map(e => {
+    const unidade = escapeHtml(e.unidade);
+    const horario = `Caiu ${horaQueda(e.inicio)} · ${e.fim ? `voltou ${horaQueda(e.fim)}` : 'ainda fora'}`;
+    const status = e.fim ? `${duracaoQueda(e.inicio,e.fim)} fora` : `fora há ${duracaoQueda(e.inicio)}`;
+    return `<div class="queda-evento"><span class="queda-evento-unidade" title="${unidade}">${unidade}</span><span class="queda-evento-status${e.fim?'':' aberta'}">${e.fim ? '● normalizada' : '● em andamento'}</span><span class="queda-evento-hora">${horario} · ${status}</span></div>`;
+  }).join('');
+  return `<section class="quedas-eventos" aria-label="Horários das quedas de hoje"><h4>Horários das quedas de hoje</h4><div class="quedas-eventos-lista">${linhas}</div></section>`;
+}
 function renderQuedas(){
   const corpo = document.getElementById('quedas-corpo');
   const sub = document.getElementById('quedas-sub');
@@ -1635,14 +1676,17 @@ function renderQuedas(){
   const totalHoras = +(unidades.reduce((s,u)=>s+u.horasFora,0)).toFixed(1);
   sub.textContent = `${totalQuedas} queda(s) · ${String(totalHoras).replace('.', ',')}h fora · ${rotuloPeriodoQuedas(dados)}`;
   if(!unidades.length){
-    corpo.innerHTML = '<div class="quedas-nota">Nenhuma queda registrada para os filtros escolhidos.</div>' + filtrosQuedas() + botoesPeriodoQuedas();
+    const semPonto = !dados.totalPontosMedicao;
+    corpo.innerHTML = `<div class="quedas-nota">${semPonto ? '<b>Configure o primeiro ponto de medição.</b> Edite uma máquina da unidade e marque “📉 Medir quedas da unidade”. Você pode marcar mais de uma, sem multiplicar a mesma queda.' : 'Nenhuma queda registrada para os filtros escolhidos.'}</div>` + filtrosQuedas() + botoesPeriodoQuedas();
     return;
   }
   const linhas = unidades.map((u) => {
     const nome = escapeHtml(u.unidadeNome || u.codigo);
-    return `<tr><td title="${nome}"><span class="quedas-unidade-nome">${nome}</span>${u.foraAgora ? '<span class="quedas-fora">● fora agora</span>' : ''}</td><td>${u.quedas}</td><td>${u.confirmadas}</td><td>${u.oscilacoes}</td><td>${fmtHoras(u.horasFora)}</td><td>${u.maiorMin} min</td></tr>`;
+    const origem = u.fonteMedicao === 'automatico' ? 'automática (histórico)' : 'pontos marcados';
+    const medicao = u.medicaoRedundante ? `📉 ${u.computadores} pontos · correlação ${origem}` : `📉 1 ponto · sinal não redundante (${origem})`;
+    return `<tr><td title="${nome}"><span class="quedas-unidade-nome">${nome}</span><span class="quedas-medicao">${medicao}</span>${u.foraAgora ? '<span class="quedas-fora">● fora agora</span>' : ''}</td><td>${u.quedas}</td><td>${u.confirmadas}</td><td>${u.oscilacoes}</td><td>${fmtHoras(u.horasFora)}</td><td>${u.maiorMin} min</td></tr>`;
   }).join('');
-  corpo.innerHTML = `${filtrosQuedas()}<div class="quedas-wrap"><table class="quedas-tab"><thead><tr><th>${cabecalhoQuedas('Unidade','unidadeNome')}</th><th>${cabecalhoQuedas('Quedas','quedas')}</th><th>${cabecalhoQuedas('Confirmadas','confirmadas')}</th><th>${cabecalhoQuedas('Oscilações','oscilacoes')}</th><th>${cabecalhoQuedas('Tempo fora','horasFora')}</th><th>${cabecalhoQuedas('Maior','maiorMin')}</th></tr></thead><tbody>${linhas}</tbody></table></div><div class="quedas-nota"><b>Confirmada</b> = ficou fora tempo suficiente pra virar alerta crítico. <b>Oscilação</b> = caiu e voltou em poucos minutos — não pede app offline.<br>Não entram: reinício que o NOC mandou, e notebook (sai da loja e volta).<br>O histórico é limitado a ${dados.eventosMaximoPorComputador} eventos por computador — em máquina que oscila muito, queda antiga já saiu da lista. <b>O número é piso, não teto.</b></div>${botoesPeriodoQuedas()}`;
+  corpo.innerHTML = `${filtrosQuedas()}<div class="quedas-wrap"><table class="quedas-tab"><thead><tr><th>${cabecalhoQuedas('Unidade','unidadeNome')}</th><th>${cabecalhoQuedas('Quedas','quedas')}</th><th>${cabecalhoQuedas('Confirmadas','confirmadas')}</th><th>${cabecalhoQuedas('Oscilações','oscilacoes')}</th><th>${cabecalhoQuedas('Tempo fora','horasFora')}</th><th>${cabecalhoQuedas('Maior','maiorMin')}</th></tr></thead><tbody>${linhas}</tbody></table></div>${detalhesQuedasHoje(unidades)}<div class="quedas-nota"><b>Correlação automática (histórico)</b> usa todos os computadores fixos da unidade enquanto ninguém escolhe pontos oficiais; se um deles ficou online, não soma como queda de link. <b>Pontos marcados</b> substituem a inferência e são a configuração definitiva.<br><b>Confirmada</b> = ficou fora tempo suficiente pra virar alerta crítico. <b>Oscilação</b> = caiu e voltou em poucos minutos — não pede app offline.<br>Não entram: reinício que o NOC mandou, e notebook (sai da loja e volta).<br>O histórico é limitado a ${dados.eventosMaximoPorComputador} eventos por computador — em máquina que oscila muito, queda antiga já saiu da lista. <b>O número é piso, não teto.</b></div>${botoesPeriodoQuedas()}`;
 }
 function baixarRelatorioQuedas(){
   const p = new URLSearchParams();
@@ -2182,6 +2226,7 @@ function abrirModalNovoComputador(){
   document.getElementById('novo-comp-nome').value = '';
   document.getElementById('novo-comp-servidor').checked = false;
   document.getElementById('novo-comp-gcom').checked = false;
+  document.getElementById('novo-comp-mede-quedas').checked = false;
   document.querySelectorAll('input[name="novo-comp-tipo"]').forEach(r => { r.checked = (r.value === 'atendimento'); });
   document.getElementById('novo-comp-status').classList.add('hidden');
   document.getElementById('novo-comp-overlay').classList.remove('hidden');
@@ -2199,7 +2244,7 @@ async function salvarNovoComputador(){
   try{
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ nome, tipo, ehServidor: document.getElementById('novo-comp-servidor').checked, temGcom: document.getElementById('novo-comp-gcom').checked }),
+      body: JSON.stringify({ nome, tipo, ehServidor: document.getElementById('novo-comp-servidor').checked, temGcom: document.getElementById('novo-comp-gcom').checked, medeQuedas: document.getElementById('novo-comp-mede-quedas').checked }),
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao cadastrar.');
@@ -2286,10 +2331,11 @@ async function baixarVigia(codigo, posto, tipo){
 
 let EDITAR_COMP_CODIGO = null;
 let EDITAR_COMP_POSTO = null;
-function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydeskAtual, ehNotebook, ehServidor, temGcom){
+function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydeskAtual, ehNotebook, ehServidor, temGcom, medeQuedas){
   document.getElementById('editar-comp-notebook').checked = !!ehNotebook;
   document.getElementById('editar-comp-servidor').checked = !!ehServidor;
   document.getElementById('editar-comp-gcom').checked = !!temGcom;
+  document.getElementById('editar-comp-mede-quedas').checked = !!medeQuedas;
   EDITAR_COMP_CODIGO = codigo;
   EDITAR_COMP_POSTO = posto;
   document.getElementById('editar-comp-unidade').textContent = `${nomeAtual || posto} · atualmente em ${UNIDADES_NOMES[codigo] || codigo}`;
@@ -2330,7 +2376,7 @@ async function salvarEdicaoComputador(){
     }
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(EDITAR_COMP_CODIGO)}/computadores/${encodeURIComponent(EDITAR_COMP_POSTO)}`, {
       method: 'PUT', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ nome, tipo, ehNotebook: document.getElementById('editar-comp-notebook').checked, ehServidor: document.getElementById('editar-comp-servidor').checked, temGcom: document.getElementById('editar-comp-gcom').checked }),
+      body: JSON.stringify({ nome, tipo, ehNotebook: document.getElementById('editar-comp-notebook').checked, ehServidor: document.getElementById('editar-comp-servidor').checked, temGcom: document.getElementById('editar-comp-gcom').checked, medeQuedas: document.getElementById('editar-comp-mede-quedas').checked }),
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
