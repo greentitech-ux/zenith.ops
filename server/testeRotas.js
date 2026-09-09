@@ -14421,6 +14421,89 @@ setTimeout(async () => {
   if (!okMeuDia) ruins += 1;
   console.log(`${okMeuDia ? '✓' : '✗'} Meu Dia: ticket leva à solicitação, previsão editável na tela, X do anexo apaga pelo id e nova tarefa já aceita anexo`);
 
+  // ---- Meu Dia: filtros no mesmo desenho das outras telas + seleção por botão ----
+  // As funções de filtro saem do HTML e rodam aqui de verdade: o que precisa
+  // ser provado é o RECORTE (semana = segunda a domingo, mês = dia 1 ao
+  // último, "Tudo" = sem recorte), não que a string existe no arquivo.
+  let okFiltrosMD = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const trecho = (re) => (html.match(re) || [''])[0];
+    const isoFn = trecho(/const iso=d=>\{.*?\};/);
+    // ancora na função SEGUINTE, não no último return: ancorar no corpo faria
+    // a extração falhar junto com a sabotagem e o teste "pegaria" por engano
+    const calc = trecho(/function calcularPreset[\s\S]*?(?=\nfunction montarPresets)/);
+    const calcularPreset = new Function(`${isoFn}${calc}; return calcularPreset;`)();
+    // 2026-09-09 é uma quarta-feira
+    const semana = calcularPreset('semana', '2026-09-09');
+    const mes = calcularPreset('mes', '2026-09-09');
+    const ontem = calcularPreset('ontem', '2026-09-09');
+    const tudo = calcularPreset('tudo', '2026-09-09');
+
+    const campos = { 'F-SIT': 'abertas', 'F-GRUPO': '', 'F-UNI': '', 'F-DE': '', 'F-ATE': '' };
+    const cifrao = (id) => ({ value: campos[id] });
+    const monta = (nome) => new Function('$', 'CTX', 'dataRef', `${trecho(new RegExp('function ' + nome + '\\(.*'))}; return ${nome};`);
+    const dataRef = new Function(`${trecho(/function dataRef\(.*/)}; return dataRef;`)();
+    const passaData = monta('passaData')(cifrao, {}, dataRef);
+    const passaUnidade = monta('passaUnidade')(cifrao, { unidades: [{ codigo: '19821', grupo: 'ARCFOOD' }, { codigo: '9999', grupo: 'GBE' }] }, dataRef);
+    const passaSituacao = monta('passaSituacao')(cifrao, {}, dataRef);
+
+    const arc = { unidade: '19821', dataEntrega: '2026-09-09', status: 'A_FAZER' };
+    const gbe = { unidade: '9999', dataEntrega: '2026-09-09', status: 'A_FAZER' };
+    const pessoal = { unidade: null, dataEntrega: '2026-09-09', status: 'A_FAZER' };
+    const semDatas = { unidade: '9999', status: 'A_FAZER' };
+
+    const semRecorte = passaData(arc) && passaData(semDatas);
+    campos['F-DE'] = '2026-09-07'; campos['F-ATE'] = '2026-09-13';
+    const dentro = passaData(arc);
+    const foraPorFaltaDeData = !passaData(semDatas);
+    campos['F-DE'] = '2026-10-01'; campos['F-ATE'] = '2026-10-31';
+    const fora = !passaData(arc);
+    campos['F-DE'] = ''; campos['F-ATE'] = '';
+
+    campos['F-GRUPO'] = 'ARCFOOD';
+    const grupoFiltra = passaUnidade(arc) && !passaUnidade(gbe) && !passaUnidade(pessoal);
+    campos['F-GRUPO'] = ''; campos['F-UNI'] = '__pessoal';
+    const soPessoal = passaUnidade(pessoal) && !passaUnidade(arc);
+    campos['F-UNI'] = '9999';
+    const soUmaLoja = passaUnidade(gbe) && !passaUnidade(arc);
+    campos['F-UNI'] = '';
+
+    campos['F-SIT'] = 'abertas';
+    const abertas = passaSituacao(arc) && !passaSituacao({ status: 'CONCLUIDA' });
+    campos['F-SIT'] = 'concluidas';
+    const concluidas = !passaSituacao(arc) && passaSituacao({ status: 'CONCLUIDA' });
+    campos['F-SIT'] = 'todas';
+    const todas = passaSituacao(arc) && passaSituacao({ status: 'CONCLUIDA' });
+    campos['F-SIT'] = 'abertas';
+
+    const ctx = await pedir('/api/tarefas/contexto', cabMD);
+    const c = ctx.status === 200 ? JSON.parse(ctx.corpo) : {};
+
+    const conf = {
+      'preset Semana pega de segunda a domingo': semana.inicio === '2026-09-07' && semana.fim === '2026-09-13',
+      'preset Mês pega do dia 1 ao último dia': mes.inicio === '2026-09-01' && mes.fim === '2026-09-30',
+      'preset Ontem é um dia só': ontem.inicio === '2026-09-08' && ontem.fim === '2026-09-08',
+      'preset Tudo não recorta data nenhuma': tudo.inicio === '' && tudo.fim === '',
+      'sem De/Até tudo passa; com intervalo, o de fora cai': semRecorte && dentro && fora,
+      'tarefa sem data nenhuma some quando existe recorte (não vira sempre-visível)': foraPorFaltaDeData,
+      'Grupo filtra pela rede da unidade (e tarefa pessoal não entra em grupo)': grupoFiltra,
+      'Unidade "Tarefa pessoal" mostra só as sem unidade': soPessoal,
+      'Unidade escolhida mostra só aquela loja': soUmaLoja,
+      'Situação separa em aberto / concluídas / todas': abertas && concluidas && todas,
+      'o contexto entrega a rede de cada unidade e a lista de redes': ctx.status === 200 && Array.isArray(c.redes) && c.redes.some((r) => r.id === 'ARCFOOD') && (c.unidades || []).every((u) => u.grupo === 'ARCFOOD' || u.grupo === 'GBE'),
+      'mudar filtro redesenha em memória, não refaz o GET (Firestore cobra por documento)': /onchange="render\(\)"/.test(html) && !/onchange="load\(\)"/.test(html),
+      'o checkbox do card só aparece depois de clicar em Selecionar': /\.task-check\{display:none\}/.test(html) && /body\.sel-on \.task-check\{display:inline-block\}/.test(html) && /function alternarSelecao\(\)\{MODO_SEL=!MODO_SEL/.test(html),
+      'os 5 presets estão na tela': /\['tudo','Tudo'\],\['hoje','Hoje'\],\['ontem','Ontem'\],\['semana','Semana'\],\['mes','Mês'\]/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okFiltrosMD = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (semana=${JSON.stringify(semana)} mes=${JSON.stringify(mes)} ctx=${ctx.status})`);
+  } catch (e) { okFiltrosMD = false; console.log('  erro: ' + e.message); }
+  if (!okFiltrosMD) ruins += 1;
+  console.log(`${okFiltrosMD ? '✓' : '✗'} Meu Dia: filtros de situação/grupo/unidade/período com presets, e o seletor de cards só no modo Selecionar`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

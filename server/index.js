@@ -9110,7 +9110,10 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
         || (u.permissions?.unidades || []).some((unidade) => permitidas.has(unidade))));
     }
     res.json({
-      unidades: codigos.map((codigo) => ({ codigo, nome: mapa[codigo] || codigo })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+      // a rede de cada unidade vem de redes.js (a mesma regra do resto do app),
+      // pro filtro de Grupo do Meu Dia não precisar de uma lista fixa própria
+      unidades: codigos.map((codigo) => ({ codigo, nome: mapa[codigo] || codigo, grupo: redes.redeDaUnidade(codigo) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+      redes: redes.REDES,
       responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário', unidades: u.role === 'master' ? codigos : (u.permissions?.unidades || []) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
       podeAtribuir: req.isMaster || req.isAdmin,
       podeCriar: podeCriarTarefaManual(req),
