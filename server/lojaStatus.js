@@ -2316,22 +2316,34 @@ async function relatorioQuedas(opcoes) {
   const docs = (await cache.cached()).map(semSegredo);
   const porUnidade = new Map();
   for (const doc of docs) {
-    if (doc.ehNotebook || !doc.medeQuedas) continue;
+    // O retroativo não pode continuar somando PC a PC, nem pode ficar vazio
+    // até alguém editar todo o parque. Primeiro usamos os pontos marcados
+    // explicitamente; quando uma unidade ainda não tem nenhum, seus
+    // computadores fixos viram pontos automáticos de correlação. Notebook
+    // segue fora porque sai da rede da loja e geraria falso positivo.
+    if (doc.ehNotebook) continue;
     const { fora, emAberto } = quedasDeUmComputador(doc, desde, ate);
     const reais = fora.filter((q) => !q.comandado);
     const u = porUnidade.get(doc.codigo) || { codigo: doc.codigo, pontos: new Map() };
-    const eventosDoPonto = u.pontos.get(doc.posto) || [];
+    const ponto = u.pontos.get(doc.posto) || { marcado: false, eventos: [] };
     // Não soma PC por PC: cada ponto entra na correlação da unidade abaixo.
-    reais.forEach((q) => eventosDoPonto.push({ inicio: q.inicio, fim: q.fim }));
+    reais.forEach((q) => ponto.eventos.push({ inicio: q.inicio, fim: q.fim }));
     // Infinity preserva que o ponto continua fora AGORA; só na apresentação
     // ela vira Date.now(). Assim a interseção sabe reconhecer a queda aberta.
-    if (emAberto) eventosDoPonto.push({ inicio: emAberto.inicio, fim: Infinity, aberta: true });
-    u.pontos.set(doc.posto, eventosDoPonto);
+    if (emAberto) ponto.eventos.push({ inicio: emAberto.inicio, fim: Infinity, aberta: true });
+    ponto.marcado = ponto.marcado || !!doc.medeQuedas;
+    u.pontos.set(doc.posto, ponto);
     porUnidade.set(doc.codigo, u);
   }
   const unidades = [...porUnidade.values()]
     .map((u) => {
-      const porPonto = [...u.pontos.values()].map((eventos) => eventos
+      const todosPontos = [...u.pontos.values()];
+      const pontosMarcados = todosPontos.filter((ponto) => ponto.marcado);
+      // Uma marcação é uma decisão operacional e sempre vence a inferência.
+      // Sem marcação, a correlação dos equipamentos fixos torna possível ler
+      // corretamente o histórico antigo imediatamente após o deploy.
+      const fonteMedicao = pontosMarcados.length ? 'marcados' : 'automatico';
+      const porPonto = (pontosMarcados.length ? pontosMarcados : todosPontos).map((ponto) => ponto.eventos
         .sort((a, b) => a.inicio - b.inicio)
         .reduce((acc, e) => {
           const anterior = acc[acc.length - 1];
@@ -2370,7 +2382,7 @@ async function relatorioQuedas(opcoes) {
       const duracoes = agrupadas.map((e) => Math.max(0, (Number.isFinite(e.fim) ? e.fim : Date.now()) - e.inicio));
       const foraMs = duracoes.reduce((s, ms) => s + ms, 0);
       return {
-        codigo: u.codigo, computadores: pontos, medicaoRedundante: pontos > 1, quedas: agrupadas.length, foraMs,
+        codigo: u.codigo, computadores: pontos, pontosMarcados: pontosMarcados.length, fonteMedicao, medicaoRedundante: pontos > 1, quedas: agrupadas.length, foraMs,
         maiorMs: Math.max(...duracoes, 0), oscilacoes: duracoes.filter((ms) => ms < CONFIRMACAO_QUEDA_MS).length,
         confirmadas: duracoes.filter((ms) => ms >= CONFIRMACAO_QUEDA_MS).length,
         foraAgora: agrupadas.filter((e) => e.aberta).length,
@@ -2395,7 +2407,7 @@ async function relatorioQuedas(opcoes) {
     // oscila muito, queda antiga JA SAIU da lista. O numero e' piso, nao
     // teto - dizer isso na tela evita concluir "melhorou" de um corte.
     eventosMaximoPorComputador: EVENTOS_MAX,
-    totalPontosMedicao: docs.filter((d) => d.medeQuedas && !d.ehNotebook).length,
+    totalPontosMedicao: unidades.reduce((s, u) => s + u.computadores, 0),
     totalQuedas: unidades.reduce((s, u) => s + u.quedas, 0),
     totalConfirmadas: unidades.reduce((s, u) => s + u.confirmadas, 0),
     totalHorasFora: +(unidades.reduce((s, u) => s + u.foraMs, 0) / 3600000).toFixed(1),

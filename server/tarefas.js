@@ -156,7 +156,7 @@ function pessoasParaColaboradores(pessoas, responsavelId) {
     .map((p) => ({ id: p.id, nome: nomeUsuario(p) })).slice(0, 20);
 }
 
-async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false }) {
+async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null }) {
   const texto = String(titulo || '').trim().slice(0, 200);
   if (!texto) throw new Error('Informe o título da tarefa.');
   const ref = COLLECTION.doc();
@@ -169,10 +169,11 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
   // Uma tarefa avulsa já nasce como um protocolo rastreável. Se ela veio de
   // um ticket existente, herda esse mesmo número — não cria uma segunda
   // numeração para o mesmo assunto.
-  const numeroTicket = vinculo?.numeroTicket != null ? vinculo.numeroTicket : await ticketCounter.proximoTicket();
+  const numeroTicket = numeroTicketInformado != null ? numeroTicketInformado : (vinculo?.numeroTicket != null ? vinculo.numeroTicket : await ticketCounter.proximoTicket());
   const tarefa = {
-    id: ref.id, origem: vinculo ? 'ticket-manual' : 'manual', titulo: texto,
+    id: ref.id, origem: origem || (vinculo ? 'ticket-manual' : 'manual'), titulo: texto,
     numeroTicket,
+    origemChatId: origemChatId || null,
     descricao: String(descricao || '').trim().slice(0, 2000),
     prioridade: 'normal', status: statusInicial, dataInicio: inicio, dataEntrega: entrega,
     // marca de REGISTRO: a situação já aconteceu e o que se quer é o

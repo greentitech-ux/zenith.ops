@@ -4371,6 +4371,10 @@ setTimeout(async () => {
     // responder pela rota também assume (Master escreve -> vira responsável,
     // com a apresentação ANTES da resposta digitada)
     const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const tarefaResp = await postarJson(`/api/suporte-chats/${chatNovo.id}/gerar-tarefa`, {}, cab);
+    const tarefaChat = tarefaResp.status === 200 ? JSON.parse(tarefaResp.corpo) : {};
+    const tarefaRepetidaResp = await postarJson(`/api/suporte-chats/${chatNovo.id}/gerar-tarefa`, {}, cab);
+    const tarefaRepetida = tarefaRepetidaResp.status === 200 ? JSON.parse(tarefaRepetidaResp.corpo) : {};
     const resp = await postarMultipart(`/api/suporte-chats/${chatNovo.id}/responder`, { texto: 'já estou verificando' }, null, 'anexo', cab);
     const final = await sc.getOne(chatNovo.id);
     const msgs = final.mensagens;
@@ -4394,6 +4398,9 @@ setTimeout(async () => {
       'a apresentação vem antes da resposta digitada':
         msgs[msgs.length - 1].texto === 'já estou verificando' && msgs[msgs.length - 2].automatica === true,
       'a tela tem o botão de assumir (mesmo com outro responsável)': /assumirAtendimento\(/.test(html) && /respEmail !== meuEmail/.test(html),
+      'chat gera tarefa com o mesmo protocolo, sem criar outro Ticket #': tarefaResp.status === 200 && tarefaChat.tarefa?.numeroTicket === chatNovo.numeroTicket && tarefaChat.tarefa?.origemChatId === chatNovo.id,
+      'repetir a ação devolve a tarefa vinculada': tarefaRepetidaResp.status === 200 && tarefaRepetida.existente === true && tarefaRepetida.tarefa?.id === tarefaChat.tarefa?.id,
+      'a Central mostra a ação Gerar tarefa': /function gerarTarefa\(id\)/.test(html) && /✅ Gerar tarefa/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okAssumir = !falhas.length;
@@ -6504,6 +6511,12 @@ setTimeout(async () => {
       })(),
       'o codigo pareia na ordem em vez de so somar duracaoMs':
         /let aberta = null;/.test(require('fs').readFileSync(path.join(__dirname, 'lojaStatus.js'), 'utf8')),
+      'retroativo usa todos os pontos fixos quando a unidade ainda não marcou os oficiais': (() => {
+        const fonte = require('fs').readFileSync(path.join(__dirname, 'lojaStatus.js'), 'utf8');
+        return /const fonteMedicao = pontosMarcados\.length \? 'marcados' : 'automatico'/.test(fonte)
+          && /pontosMarcados\.length \? pontosMarcados : todosPontos/.test(fonte)
+          && /if \(doc\.ehNotebook\) continue;/.test(fonte);
+      })(),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okRelQuedas = !falhas.length;

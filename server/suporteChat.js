@@ -100,6 +100,7 @@ async function criar({ nome, contato, texto, assunto, logado, lojaContexto, anex
     botDesativado: false,
     logado: logado || null,
     chamadoId: null,
+    tarefaId: null,
     atendidoPorEmail: null,
     // triagem da Central do Beniboy (ver beniboy.html/atualizarStatusAtendimento) -
     // toda conversa nasce PENDENTE, nivel 1 (so o bot), sem responsavel
@@ -249,6 +250,15 @@ function saudacaoPorHorario(agora = new Date()) {
 function mensagemAssumir(nomeVisitante) {
   const nome = String(nomeVisitante || '').trim() || 'cliente';
   return `${saudacaoPorHorario()}, ${nome}! O Suporte assumiu seu atendimento e acompanhará sua solicitação.`;
+}
+
+async function vincularTarefa(id, tarefaId) {
+  const chat = await getOne(id);
+  if (!chat) throw new Error('Conversa não encontrada.');
+  if (chat.tarefaId && chat.tarefaId !== tarefaId) throw new Error('Essa conversa já tem uma tarefa vinculada.');
+  await COLLECTION.doc(id).update({ tarefaId, atualizadoEm: new Date().toISOString() });
+  chatsCache.invalidar();
+  return getOne(id);
 }
 function mensagemNumeroTicket(numeroTicket, assunto) {
   const orientacaoPorAssunto = {
@@ -604,7 +614,7 @@ async function finalizarOciosos() {
 }
 
 module.exports = {
-  criar, getOne, getPublico, getComToken, adicionarMensagem, finalizar, desativarBot, vincularChamado, listAll, ASSUNTOS,
+  criar, getOne, getPublico, getComToken, adicionarMensagem, finalizar, desativarBot, vincularChamado, vincularTarefa, listAll, ASSUNTOS,
   atualizarStatusAtendimento, marcarDesbloqueio, adicionarTicketVinculado, STATUS_ATENDIMENTO, finalizarOciosos,
   listarParaReforcarAlarme, marcarAlertaEnviado, registrarAlertaSeguranca, registrarNotaInterna, estatisticas,
   saudacaoPorHorario, mensagemAssumir, mensagemNumeroTicket,

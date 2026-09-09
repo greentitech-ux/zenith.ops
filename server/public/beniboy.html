@@ -533,6 +533,8 @@ function painelHtml(chat){
     acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">↩️ Reabrir</button>`);
   }
   if(!chat.chamadoId) acoes.push(`<button type="button" class="btn-ghost" onclick="gerarChamadoRemoto('${chat.id}')">🎫 Gerar chamado remoto</button>`);
+  if(!chat.tarefaId) acoes.push(`<button type="button" class="btn-ghost" onclick="gerarTarefa('${chat.id}')">✅ Gerar tarefa</button>`);
+  else acoes.push(`<a class="btn-ghost" style="text-decoration:none;display:inline-flex;align-items:center;" href="/tarefas.html">✅ Tarefa gerada</a>`);
   if(IS_MASTER) acoes.push(`<button type="button" class="btn-ghost" onclick="baixarPdfConversa('${chat.id}')">📄 Baixar PDF</button>`);
   // problema de Computador/Sistema numa loja já identificada e que já tem
   // computador com acesso remoto cadastrado no NOC - atalho direto em vez de
@@ -685,6 +687,22 @@ async function gerarChamadoRemoto(id){
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao gerar chamado.');
     await carregarLista();
+  }catch(err){ alert(err.message); }
+}
+
+// Nem todo atendimento precisa virar chamado técnico. Quando exige
+// acompanhamento, a tarefa nasce com o mesmo protocolo do chat, já atribuída
+// a quem está atendendo e com a unidade/contexto conhecidos pela conversa.
+async function gerarTarefa(id){
+  const chat = ITENS.find(c=>c.id===id);
+  if(!chat) return;
+  if(!confirm(`Gerar uma tarefa de acompanhamento para o Ticket #${chat.numeroTicket}? Ela ficará atribuída a você e usará o mesmo protocolo.`)) return;
+  try{
+    const resp = await fetch(`/api/suporte-chats/${id}/gerar-tarefa`, { method:'POST' });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao gerar tarefa.');
+    await carregarLista();
+    if(!data.existente) alert(`Tarefa criada no Meu Dia com o Ticket #${data.tarefa.numeroTicket}.`);
   }catch(err){ alert(err.message); }
 }
 

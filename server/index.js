@@ -12635,6 +12635,40 @@ app.post('/api/suporte-chats/:id/gerar-chamado', auth.requireAuth, async (req, r
   }
 });
 
+// O atendimento pode precisar de acompanhamento sem ainda ser um chamado
+// técnico. Esta ação cria uma tarefa no Meu Dia com o MESMO protocolo do
+// chat; assim Chat → Tarefa → Solicitação continua sendo um único assunto,
+// sem furar ou repetir a sequência global de Ticket #.
+app.post('/api/suporte-chats/:id/gerar-tarefa', auth.requireAuth, async (req, res) => {
+  try {
+    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    const chat = await suporteChat.getOne(req.params.id);
+    if (!chat) return res.status(404).json({ error: 'Conversa não encontrada.' });
+    if (chat.tarefaId) {
+      const existente = await tarefas.getOne(chat.tarefaId);
+      if (existente) return res.json({ tarefa: existente, existente: true });
+      return res.status(409).json({ error: 'Esta conversa já possui uma tarefa vinculada; recarregue a Central.' });
+    }
+    const mapa = await construirUnidadesMapa();
+    const contexto = String(chat.lojaContexto || '').trim();
+    const unidade = Object.keys(mapa).find((codigo) => String(mapa[codigo]).toLocaleLowerCase('pt-BR') === contexto.toLocaleLowerCase('pt-BR')) || null;
+    const primeiraMensagem = String(chat.mensagens?.find((m) => m.de === 'visitante')?.texto || '').trim();
+    const tarefa = await tarefas.criar({
+      titulo: `Chat · ${chat.nome || chat.assunto || 'Atendimento'}`,
+      descricao: `Protocolo #${chat.numeroTicket}${chat.assunto ? ` · ${chat.assunto}` : ''}${primeiraMensagem ? `\n\nSolicitação inicial: ${primeiraMensagem}` : ''}`,
+      unidade, unidadeNome: unidade ? mapa[unidade] : null,
+      usuario: req.user, responsavel: req.user,
+      numeroTicket: chat.numeroTicket, origem: 'chat', origemChatId: chat.id,
+    });
+    await suporteChat.vincularTarefa(chat.id, tarefa.id);
+    broadcast('tarefas-atualizada', { id: tarefa.id, unidade: tarefa.unidade }, 'tarefas');
+    broadcast('suporte-chat', { id: chat.id }, 'suporte');
+    res.json({ tarefa, existente: false });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // move o card no funil da Central do Beniboy (beniboy.html) - drag-and-drop
 // e botoes de acao rapida chamam essa mesma rota. nivelDestino so e exigido
 // pro status TRANSFERIDO (2=agente humano, 3=Master); motivoSemSolucao so
