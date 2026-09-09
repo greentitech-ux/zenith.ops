@@ -433,6 +433,9 @@ async function enviarMensagemDireta(){
       body: JSON.stringify({ userId, texto }),
     });
     if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao enviar.');
+    const campoTexto = document.getElementById('md-texto');
+    window.zenithRascunhos?.limparCampoEnviado(campoTexto);
+    campoTexto.value = '';
     status.textContent = '✅ Enviada!';
     status.style.background = 'var(--ok-dim)'; status.style.color = 'var(--ok)';
     status.style.display = 'block';
@@ -680,6 +683,8 @@ function registrarAnexoResposta(id, campo){
 }
 
 function limparRascunhoResposta(id){
+  const campo = document.getElementById(`d-texto-${id}`);
+  window.zenithRascunhos?.limparCampoEnviado(campo);
   RASCUNHOS_PAINEL_CHAT.delete(id);
   ROLAGEM_PAINEL_CHAT.delete(id);
 }

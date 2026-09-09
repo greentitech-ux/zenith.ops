@@ -15,9 +15,28 @@ function contatosValidos(lista) {
   })).filter((c) => c.nome || c.telefone || c.email).slice(0, 12);
 }
 
-function pagamentosValidos(lista, documentoEmpresa) {
+function pagamentosValidos(lista, documentoEmpresa, { permitirTipoPersonalizado = false } = {}) {
   return (Array.isArray(lista) ? lista : []).map((p) => {
-    const tipo = p?.tipo === 'transferencia' ? 'transferencia' : 'pix';
+    const tipo = texto(p?.tipo, 30).toLowerCase();
+    const tiposFixos = ['pix', 'transferencia', 'dinheiro', 'boleto'];
+    if (!tiposFixos.includes(tipo) && !(permitirTipoPersonalizado && tipo === 'outro')) {
+      throw new Error('Escolha uma forma de pagamento válida.');
+    }
+    // Dinheiro não tem favorecido, banco ou chave para registrar. Guardar
+    // campos vazios como se fossem conta bancária seria informação enganosa.
+    if (tipo === 'dinheiro') return { tipo, principal: !!p?.principal };
+    if (tipo === 'boleto') {
+      const diasVencimento = Number.parseInt(p?.diasVencimento, 10);
+      if (!Number.isInteger(diasVencimento) || diasVencimento < 1 || diasVencimento > 365) {
+        throw new Error('Para boleto informe o prazo de pagamento entre 1 e 365 dias.');
+      }
+      return { tipo, diasVencimento, principal: !!p?.principal };
+    }
+    if (tipo === 'outro') {
+      const tipoPersonalizado = texto(p?.tipoPersonalizado, 60);
+      if (!tipoPersonalizado) throw new Error('Informe o nome da forma de pagamento adicionada.');
+      return { tipo, tipoPersonalizado, principal: !!p?.principal };
+    }
     const beneficiario = texto(p?.beneficiario, 160);
     const documentoBeneficiario = soDigitos(p?.documentoBeneficiario || documentoEmpresa);
     if (!documentoEmpresa) throw new Error('Informe o CPF/CNPJ do fornecedor antes de cadastrar dados de pagamento.');
@@ -34,7 +53,7 @@ function pagamentosValidos(lista, documentoEmpresa) {
   }).slice(0, 8);
 }
 
-function normalizar(dados) {
+function normalizar(dados, opcoes = {}) {
   const razaoSocial = texto(dados?.razaoSocial, 180);
   const nomeFantasia = texto(dados?.nomeFantasia, 180);
   const documento = soDigitos(dados?.documento);
@@ -44,7 +63,7 @@ function normalizar(dados) {
   if (!contatos.length) throw new Error('Inclua ao menos um contato.');
   return {
     razaoSocial, nomeFantasia, documento, categoria: texto(dados?.categoria, 100),
-    contatos, pagamentos: pagamentosValidos(dados?.pagamentos, documento), observacao: texto(dados?.observacao, 1000),
+    contatos, pagamentos: pagamentosValidos(dados?.pagamentos, documento, opcoes), observacao: texto(dados?.observacao, 1000),
   };
 }
 
@@ -57,7 +76,7 @@ async function listar(unidades) {
 async function criar({ unidade, unidadeNome, dados, por }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   const doc = COLLECTION.doc(), agora = new Date().toISOString();
-  const registro = { id: doc.id, unidade, unidadeNome: unidadeNome || unidade, ...normalizar(dados),
+  const registro = { id: doc.id, unidade, unidadeNome: unidadeNome || unidade, ...normalizar(dados, { permitirTipoPersonalizado: por?.role === 'master' }),
     status: 'ATIVO', origem: 'interno', criadoEm: agora, atualizadoEm: agora,
     criadoPorNome: texto(por?.nome || por?.username || 'Usuário', 80), validadoPorNome: texto(por?.nome || por?.username || 'Usuário', 80), validadoEm: agora };
   await doc.set(registro); return registro;
@@ -74,8 +93,9 @@ async function criarPublico({ unidade, unidadeNome, dados, convite }) {
 async function atualizar(id, dados, por) {
   const ref = COLLECTION.doc(id), snap = await ref.get(); if (!snap.exists) throw new Error('Fornecedor não encontrado.');
   const atual = snap.data(), agora = new Date().toISOString();
-  await ref.update({ ...normalizar(dados), atualizadoEm: agora, atualizadoPorNome: texto(por?.nome || por?.username || 'Usuário', 80) });
-  return { ...atual, ...normalizar(dados), atualizadoEm: agora };
+  const dadosNormalizados = normalizar(dados, { permitirTipoPersonalizado: por?.role === 'master' });
+  await ref.update({ ...dadosNormalizados, atualizadoEm: agora, atualizadoPorNome: texto(por?.nome || por?.username || 'Usuário', 80) });
+  return { ...atual, ...dadosNormalizados, atualizadoEm: agora };
 }
 
 async function validar(id, por) {

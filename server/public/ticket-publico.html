@@ -426,7 +426,9 @@ async function enviarChat(){
       : { method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({ link: LINK, texto, autorNome: nome || 'Visitante' }) });
     if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao enviar.');
-    document.getElementById('chat-texto').value = '';
+    const campoTexto = document.getElementById('chat-texto');
+    window.zenithRascunhos?.limparCampoEnviado(campoTexto);
+    campoTexto.value = '';
     if(campoAnexo){ campoAnexo.value = ''; campoAnexo.dispatchEvent(new Event('change', { bubbles: true })); }
     await carregarChat();
   }catch(err){

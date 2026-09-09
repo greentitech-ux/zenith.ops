@@ -2197,8 +2197,6 @@ async function confirmarCriarAcesso(){
 let CHAT_ATUAL = [];
 let FOTO_CHAT = null;
 async function carregarChat(tipo, id){
-  document.getElementById('d-chat-texto').value = '';
-  removerFotoChat();
   try{
     CHAT_ATUAL = await fetch(`/api/central/${tipo}/${id}/chat`).then(r=>r.json());
   }catch(e){ CHAT_ATUAL = []; }
@@ -2245,6 +2243,9 @@ async function enviarChat(){
     const resp = await fetch(`/api/central/${DETALHE_ATUAL.tipo}/${DETALHE_ATUAL.id}/chat`, { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar mensagem.');
+    window.zenithRascunhos?.limparCampoEnviado(input);
+    input.value = '';
+    removerFotoChat();
     await carregarChat(DETALHE_ATUAL.tipo, DETALHE_ATUAL.id);
   }catch(err){ alert(err.message); }
 }

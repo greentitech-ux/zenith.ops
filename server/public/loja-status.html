@@ -2677,7 +2677,9 @@ async function enviarMensagemLoja(){
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar.');
-    document.getElementById('msg-texto').value = '';
+    const campoTexto = document.getElementById('msg-texto');
+    window.zenithRascunhos?.limparCampoEnviado(campoTexto);
+    campoTexto.value = '';
     atualizarContadorMensagem();
     const n = (data.enviados || []).length;
     const falhas = (data.falhas || []).length;
