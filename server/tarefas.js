@@ -280,6 +280,28 @@ async function definirColaboradores(id, acesso, pessoas) {
   return getOne(id);
 }
 
+// Trocar o responsável é redistribuir o serviço, não executar - fica com quem
+// distribui (Master, Admin, gerente) e com o próprio responsável, que pode
+// passar adiante o que não é dele. A validação de QUEM pode receber é a mesma
+// da criação, e roda na rota (index.js).
+async function definirResponsavel(id, acesso, pessoa) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeGerir(tarefa, acesso)) throw new Error('Só o responsável, quem criou ou o Admin troca o responsável.');
+  if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Essa tarefa já foi encerrada.');
+  if (!pessoa || !pessoa.id) throw new Error('Escolha quem fica responsável.');
+  // quem vira responsável sai da lista de participantes: acumular os dois
+  // papéis faria a mesma pessoa aparecer duas vezes na tela
+  const equipe = (tarefa.colaboradores || []).filter((p) => p.id !== pessoa.id);
+  await ref.update({
+    responsavelId: pessoa.id, responsavelEmail: pessoa.email || null, responsavelNome: nomeUsuario(pessoa),
+    colaboradores: equipe, colaboradoresIds: equipe.map((p) => p.id),
+    atualizadoEm: new Date().toISOString(),
+  });
+  return getOne(id);
+}
+
 async function arquivar(id, acesso) {
   const ref = COLLECTION.doc(id); const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
@@ -308,4 +330,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
   return resultado;
 }
 
-module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, definirColaboradores, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar };
+module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, definirColaboradores, definirResponsavel, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar };

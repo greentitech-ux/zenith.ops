@@ -9088,6 +9088,10 @@ function acessoDasTarefas(req) {
 // libera é abrir tarefa nova, em vez de só responder o que Master, Admin ou
 // gerente da unidade criou. Por isso o item do menu segue sem `secoes` em
 // nav-menu.js: esconder a tela deixaria a pessoa sem onde responder.
+function podeDistribuirTarefas(req) {
+  return req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo);
+}
+
 function podeCriarTarefaManual(req) {
   return req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo)
     || (req.permissions?.sections || []).includes('tarefas');
@@ -9121,7 +9125,10 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
       unidades: codigos.map((codigo) => ({ codigo, nome: mapa[codigo] || codigo, grupo: redes.redeDaUnidade(codigo) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
       redes: redes.REDES,
       responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário', unidades: u.role === 'master' ? codigos : (u.permissions?.unidades || []) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
-      podeAtribuir: req.isMaster || req.isAdmin,
+      // a tela precisa saber QUEM é você pra liberar "trocar"/"alterar" na
+      // tarefa de que você é responsável, sem reimplementar a regra no navegador
+      eu: req.user.id,
+      podeAtribuir: podeDistribuirTarefas(req),
       podeCriar: podeCriarTarefaManual(req),
     });
   } catch (err) {
@@ -9213,11 +9220,12 @@ app.post('/api/tarefas/:id/anexos', auth.requireAuth, uploadTarefaAnexo.single('
 // Rótulo e valor saem do ticket como estão (formaPagamento é a resposta do
 // próprio formulário: "Online", "Crédito à vista", "Débito", "Pix na
 // maquininha"...). Campo vazio não vira linha: linha com "—" só ocupa espaço.
-function resumoDoTicket(t, tipoVinculo) {
+function resumoDoTicket(t, tipoVinculo, nomeDoSolicitante) {
   const linhas = [];
   const põe = (rotulo, valor) => { if (valor != null && String(valor).trim() !== '') linhas.push({ rotulo, valor: String(valor) }); };
   const dinheiro = (v) => (v == null || v === '' ? null : (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
   const dia = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? String(d).split('-').reverse().join('/') : d || null);
+  põe('Solicitante', nomeDoSolicitante);
   if (tipoVinculo === 'estorno') {
     põe('Cliente', t.nomeCliente);
     põe('Valor a estornar', dinheiro(t.valorEstornar));
@@ -9248,7 +9256,15 @@ app.get('/api/tarefas/:id/ticket', auth.requireAuth, async (req, res) => {
       ? await refunds.getOne(tarefa.vinculo.id)
       : await solicitacoes.getOne(tarefa.vinculo.id);
     if (!ticket) return res.json({ campos: [] });
-    res.json({ campos: resumoDoTicket(ticket, tarefa.vinculo.tipo) });
+    // o ticket guarda id/e-mail de quem pediu, não o nome - a lista de
+    // usuários já é cache (users.list), então resolver aqui não custa leitura
+    const quemPediuId = ticket.requestedById || ticket.criadoPorId || null;
+    const quemPediuEmail = String(ticket.requestedByEmail || ticket.criadoPorEmail || '').toLowerCase();
+    const pessoa = (quemPediuId || quemPediuEmail)
+      ? (await users.list()).find((u) => u.id === quemPediuId || String(u.email || '').toLowerCase() === quemPediuEmail)
+      : null;
+    const nomeDoSolicitante = pessoa ? (pessoa.username || pessoa.nome || pessoa.email) : (quemPediuEmail || null);
+    res.json({ campos: resumoDoTicket(ticket, tarefa.vinculo.tipo, nomeDoSolicitante) });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -9282,10 +9298,10 @@ app.delete('/api/tarefas/:id/anexos/:anexoId', auth.requireAuth, async (req, res
 // quem pode entrar como participante é a MESMA regra do responsável: usuário
 // ativo, dentro do escopo de quem está criando e com acesso à unidade da
 // tarefa. Sem isso dava pra puxar alguém de outra franquia pra dentro do card.
-async function resolverColaboradores(req, acesso, ids, unidade) {
+async function resolverColaboradores(req, acesso, ids, unidade, podeResponsavel = false) {
   const pedidos = [...new Set((Array.isArray(ids) ? ids : []).map(String).filter(Boolean))].slice(0, 20);
   if (!pedidos.length) return [];
-  if (!req.isMaster && !req.isAdmin) throw new Error('Somente Master ou Admin pode definir quem participa da tarefa.');
+  if (!podeDistribuirTarefas(req) && !podeResponsavel) throw new Error('Somente Master, Admin, gerente ou o responsável pela tarefa define quem participa.');
   const todos = await users.list();
   return pedidos.map((id) => {
     const pessoa = todos.find((u) => u.id === id && u.active !== false);
@@ -9306,8 +9322,28 @@ app.patch('/api/tarefas/:id/colaboradores', auth.requireAuth, async (req, res) =
     const acesso = acessoDasTarefas(req);
     const atual = await tarefas.getOne(req.params.id);
     if (!atual) return res.status(404).json({ error: 'Tarefa não encontrada.' });
-    const pessoas = await resolverColaboradores(req, acesso, req.body?.colaboradoresIds, atual.unidade);
+    const pessoas = await resolverColaboradores(req, acesso, req.body?.colaboradoresIds, atual.unidade, atual.responsavelId === req.user.id);
     const atualizada = await tarefas.definirColaboradores(req.params.id, acesso, pessoas);
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/tarefas/:id/responsavel', auth.requireAuth, async (req, res) => {
+  try {
+    const acesso = acessoDasTarefas(req);
+    const atual = await tarefas.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    if (!podeDistribuirTarefas(req) && atual.responsavelId !== req.user.id) {
+      return res.status(403).json({ error: 'Somente Master, Admin, gerente ou o responsável atual troca o responsável.' });
+    }
+    // quem pode RECEBER é a mesma regra dos participantes: usuário ativo, no
+    // escopo de quem distribui e com acesso à unidade da tarefa
+    const [pessoa] = await resolverColaboradores(req, acesso, [req.body?.responsavelId], atual.unidade, atual.responsavelId === req.user.id);
+    if (!pessoa) return res.status(400).json({ error: 'Escolha quem fica responsável.' });
+    const atualizada = await tarefas.definirResponsavel(req.params.id, acesso, pessoa);
     broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
     res.json(atualizada);
   } catch (err) {
