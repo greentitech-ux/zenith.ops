@@ -674,9 +674,17 @@ setTimeout(async () => {
         partes: [parte('A 33,33', 33.33, 'k.a'), parte('B 33,33', 33.33, 'k.b'), parte('C 33,34', 33.34, 'k.c')],
       }]).length === 0,
       'diferença de verdade em dinheiro é pega': ocr.conferirSomas([{
-        titulo: 'x', totalValor: 100,
+        titulo: 'x', totalTexto: 'Total 100', totalValor: 100,
         partes: [parte('A 33,33', 33.33, 'k.a'), parte('B 33,33', 33.33, 'k.b')],
       }]).length === 1,
+      // O relatório Domino's imprime as faixas de pedidos e, abaixo, a MÉDIA
+      // "Avg. Orders per Dispatch". A média 1,25 não é total das faixas 24,
+      // 16 e 0; antes o servidor comparava 40 com 1,25 e bloqueava os três
+      // campos corretos para digitação manual.
+      'Orders Per Dispatch: média 1,25 não bloqueia Singles 24, Doubles 16 e Triples+ 0': ocr.conferirSomas([{
+        titulo: 'Orders Per Dispatch', totalTexto: 'Avg. Orders per Dispatch 1.25', totalValor: 1.25,
+        partes: [parte('In Singles 24 60.0%', 24, 'kpi.singles'), parte('In Doubles 16 40.0%', 16, 'kpi.doubles'), parte('In Triples+ 0 0.0%', 0, 'kpi.triples')],
+      }]).length === 0,
       // quadro que não prova nada não pode gerar aviso
       'quadro sem total não vira alarme': ocr.conferirSomas([{ titulo: 'x', partes: [parte('A 1', 1, 'k.a'), parte('B 2', 2, 'k.b')] }]).length === 0,
       'quadro com uma parcela só não vira alarme': ocr.conferirSomas([{ titulo: 'x', totalValor: 9, partes: [parte('A 1', 1, 'k.a')] }]).length === 0,
