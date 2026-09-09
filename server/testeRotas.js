@@ -11338,7 +11338,7 @@ setTimeout(async () => {
     ]);
     DOCS.set('lojaStatus/QUEDAS_TESTE__pc1', {
       codigo: 'QUEDAS_TESTE', posto: 'pc1', nome: 'PC 1', tipo: 'interno',
-      eventos: [...evento(ontemMs, ontemMs + 30 * 60000), ...evento(hojeMs, hojeMs + 45 * 60000)],
+      medeQuedas: true, eventos: [...evento(ontemMs, ontemMs + 30 * 60000), ...evento(hojeMs, hojeMs + 45 * 60000)],
     });
     ls.descartarEspelhoTeste();
     const pedirQ = async (qs) => JSON.parse((await pedir('/api/loja-status/quedas?' + qs, cabQ)).corpo);
