@@ -14441,13 +14441,16 @@ setTimeout(async () => {
     const ontem = calcularPreset('ontem', '2026-09-09');
     const tudo = calcularPreset('tudo', '2026-09-09');
 
-    const campos = { 'F-SIT': 'abertas', 'F-GRUPO': '', 'F-UNI': '', 'F-DE': '', 'F-ATE': '' };
+    const campos = { 'F-SIT': 'abertas', 'F-GRUPO': '', 'F-UNI': '', 'F-DE': '', 'F-ATE': '', 'F-TIPO': '' };
     const cifrao = (id) => ({ value: campos[id] });
-    const monta = (nome) => new Function('$', 'CTX', 'dataRef', `${trecho(new RegExp('function ' + nome + '\\(.*'))}; return ${nome};`);
+    const base = `${isoFn}${trecho(/const FUSO_BR='[^']*';/)}${trecho(/function agoraBrasilia\(\)\{.*/)}const hoje=()=>iso(agoraBrasilia());${trecho(/function faixa\(.*/)}`;
+    const faixa = new Function(`${base} return faixa;`)();
+    const monta = (nome) => new Function('$', 'CTX', 'dataRef', 'faixa', `${trecho(new RegExp('function ' + nome + '\\(.*'))}; return ${nome};`);
     const dataRef = new Function(`${trecho(/function dataRef\(.*/)}; return dataRef;`)();
-    const passaData = monta('passaData')(cifrao, {}, dataRef);
-    const passaUnidade = monta('passaUnidade')(cifrao, { unidades: [{ codigo: '19821', grupo: 'ARCFOOD' }, { codigo: '9999', grupo: 'GBE' }] }, dataRef);
-    const passaSituacao = monta('passaSituacao')(cifrao, {}, dataRef);
+    const passaData = monta('passaData')(cifrao, {}, dataRef, faixa);
+    const passaUnidade = monta('passaUnidade')(cifrao, { unidades: [{ codigo: '19821', grupo: 'ARCFOOD' }, { codigo: '9999', grupo: 'GBE' }] }, dataRef, faixa);
+    const passaSituacao = monta('passaSituacao')(cifrao, {}, dataRef, faixa);
+    const passaTipo = new Function('$', `${trecho(/const tipoDaTarefa=.*/)}${trecho(/function passaTipo\(.*/)}; return passaTipo;`)(cifrao);
 
     const arc = { unidade: '19821', dataEntrega: '2026-09-09', status: 'A_FAZER' };
     const gbe = { unidade: '9999', dataEntrega: '2026-09-09', status: 'A_FAZER' };
@@ -14476,7 +14479,42 @@ setTimeout(async () => {
     const concluidas = !passaSituacao(arc) && passaSituacao({ status: 'CONCLUIDA' });
     campos['F-SIT'] = 'todas';
     const todas = passaSituacao(arc) && passaSituacao({ status: 'CONCLUIDA' });
+    // "Pendentes" é a coluna do quadro: previsão vencida ou status PENDENTE
+    const vencida = { unidade: '9999', dataEntrega: '2020-01-01', status: 'A_FAZER' };
+    const futura = { unidade: '9999', dataEntrega: '2099-01-01', status: 'A_FAZER' };
+    campos['F-SIT'] = 'pendentes';
+    const soPendentes = passaSituacao(vencida) && !passaSituacao(futura) && !passaSituacao({ status: 'CONCLUIDA', dataEntrega: '2020-01-01' });
     campos['F-SIT'] = 'abertas';
+
+    const doEstorno = { vinculo: { ticketTipo: 'estorno' } };
+    const daCompra = { vinculo: { ticketTipo: 'compra' } };
+    const avulsa = { titulo: 'sem ticket' };
+    const tipoTudo = passaTipo(doEstorno) && passaTipo(avulsa);
+    campos['F-TIPO'] = 'estorno';
+    const soEstorno = passaTipo(doEstorno) && !passaTipo(daCompra) && !passaTipo(avulsa);
+    campos['F-TIPO'] = '__sem';
+    const soAvulsas = passaTipo(avulsa) && !passaTipo(doEstorno);
+    campos['F-TIPO'] = '';
+
+    // noFiltro é quem a tela chama de verdade: testar as quatro peças soltas
+    // não prova que ele CHAMA as quatro. Sem isto, tirar uma da composição
+    // deixaria o seletor virar enfeite sem a suíte notar.
+    const noFiltro = new Function('passaSituacao', 'passaData', 'passaUnidade', 'passaTipo',
+      `${trecho(/function noFiltro\(.*/)}; return noFiltro;`)(passaSituacao, passaData, passaUnidade, passaTipo);
+    const compra = { unidade: '9999', dataEntrega: '2026-09-09', status: 'A_FAZER', vinculo: { ticketTipo: 'compra' } };
+    const estorno = { unidade: '9999', dataEntrega: '2026-09-09', status: 'A_FAZER', vinculo: { ticketTipo: 'estorno' } };
+    campos['F-TIPO'] = 'estorno';
+    const compoeTipo = noFiltro(estorno) && !noFiltro(compra);
+    campos['F-TIPO'] = '';
+    campos['F-SIT'] = 'concluidas';
+    const compoeSituacao = !noFiltro(estorno);
+    campos['F-SIT'] = 'abertas';
+    campos['F-UNI'] = '19821';
+    const compoeUnidade = !noFiltro(estorno);
+    campos['F-UNI'] = '';
+    campos['F-DE'] = '2030-01-01'; campos['F-ATE'] = '2030-12-31';
+    const compoeData = !noFiltro(estorno);
+    campos['F-DE'] = ''; campos['F-ATE'] = '';
 
     const ctx = await pedir('/api/tarefas/contexto', cabMD);
     const c = ctx.status === 200 ? JSON.parse(ctx.corpo) : {};
@@ -14492,6 +14530,11 @@ setTimeout(async () => {
       'Unidade "Tarefa pessoal" mostra só as sem unidade': soPessoal,
       'Unidade escolhida mostra só aquela loja': soUmaLoja,
       'Situação separa em aberto / concluídas / todas': abertas && concluidas && todas,
+      'Situação "Pendentes" pega previsão vencida e ignora futura e concluída': soPendentes,
+      'Tipo filtra pela solicitação que gerou a tarefa': tipoTudo && soEstorno,
+      'Tipo "Sem ticket" mostra só a tarefa avulsa': soAvulsas,
+      'noFiltro junta os quatro filtros (nenhum vira enfeite)': compoeTipo && compoeSituacao && compoeUnidade && compoeData,
+      'o seletor de tipo só lista o que existe na lista carregada': /function montarTipos\(\)\{[\s\S]{0,400}?L\.forEach\(t=>\{const k=tipoDaTarefa\(t\);if\(k&&TIPO_TICKET\[k\]\)vistos\.set/.test(html),
       'o contexto entrega a rede de cada unidade e a lista de redes': ctx.status === 200 && Array.isArray(c.redes) && c.redes.some((r) => r.id === 'ARCFOOD') && (c.unidades || []).every((u) => u.grupo === 'ARCFOOD' || u.grupo === 'GBE'),
       'mudar filtro redesenha em memória, não refaz o GET (Firestore cobra por documento)': /onchange="render\(\)"/.test(html) && !/onchange="load\(\)"/.test(html),
       'o checkbox do card só aparece depois de clicar em Selecionar': /\.task-check\{display:none\}/.test(html) && /body\.sel-on \.task-check\{display:inline-block\}/.test(html) && /function alternarSelecao\(\)\{MODO_SEL=!MODO_SEL/.test(html),
@@ -14695,6 +14738,61 @@ setTimeout(async () => {
   } catch (e) { okXeSenha = false; console.log('  erro: ' + e.message); }
   if (!okXeSenha) ruins += 1;
   console.log(`${okXeSenha ? '✓' : '✗'} Meu Dia: o X do anexo fecha o próprio onclick, concluir pede senha (uma ou em lote) e o computador tem Reiniciar no detalhe`);
+
+  // ---- Meu Dia: a ficha do ticket dentro da tarefa ----
+  // Quem vai executar precisa saber QUEM é o cliente, QUANTO é e COMO foi
+  // pago, sem sair do Meu Dia. O dado é lido do ticket na hora, não copiado
+  // pra dentro da tarefa - cópia envelhece assim que o ticket muda.
+  let okFichaMD = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    // o caminho real: a loja abre o estorno com pedido + motivo, e o Master
+    // completa cliente/valor/forma na Central (o interno nasce sem esses três)
+    const est = await postarJson('/api/refund-requests', {
+      pedidoId: 'PED-9911', unidade: 'DOM_19706', unidadeNome: 'Mooca',
+      observacao: 'Cliente pagou duas vezes na maquininha.', password: process.env.MASTER_PASSWORD,
+    }, cabMD);
+    const tk = est.status === 200 ? JSON.parse(est.corpo) : {};
+    const completou = tk.id ? await enviarJson('PATCH', `/api/refund-requests/${tk.id}`, {
+      nomeCliente: 'Joana Prestes', valorEstornar: 187.5, valorVenda: 187.5,
+      formaPagamento: 'Pix na maquininha', dataVenda: '2026-09-01', horaVenda: '19:40',
+    }, cabMD) : { status: 0 };
+
+    // a tarefa do estorno nasce pela sincronização do ticket
+    const minhas = await pedir('/api/tarefas/minhas', cabMD);
+    const doEstorno = (minhas.status === 200 ? JSON.parse(minhas.corpo) : [])
+      .find((x) => x.vinculo && x.vinculo.tipo === 'estorno' && x.vinculo.id === tk.id) || {};
+    const ficha = doEstorno.id ? await pedir(`/api/tarefas/${doEstorno.id}/ticket`, cabMD) : { status: 0, corpo: '{}' };
+    const campos = ficha.status === 200 ? (JSON.parse(ficha.corpo).campos || []) : [];
+    const acha = (r) => (campos.find((c) => c.rotulo === r) || {}).valor;
+
+    // tarefa avulsa não tem ficha nenhuma - e não pode estourar por isso
+    const avulsa = JSON.parse((await postarJson('/api/tarefas', { titulo: 'Levar o malote' }, cabMD)).corpo);
+    const fichaAvulsa = await pedir(`/api/tarefas/${avulsa.id}/ticket`, cabMD);
+
+    // quem não participa da tarefa não lê a ficha do ticket por ela
+    const cabFora = { Authorization: 'Bearer ' + (await auth.login('eq-fora@teste.local', 'SenhaDeTeste!2026')).token };
+    const fichaDeFora = doEstorno.id ? await pedir(`/api/tarefas/${doEstorno.id}/ticket`, cabFora) : { status: 0 };
+
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+
+    const conf = {
+      'a tarefa do estorno traz a ficha do ticket': est.status === 200 && completou.status === 200 && ficha.status === 200 && campos.length >= 4,
+      'com o nome do cliente e o valor a estornar': acha('Cliente') === 'Joana Prestes' && acha('Valor a estornar') === (187.5).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+      'e a forma de pagamento como o formulário respondeu (nada traduzido)': acha('Forma de pagamento') === 'Pix na maquininha',
+      'a descrição do pedido vem junto': acha('Descrição') === 'Cliente pagou duas vezes na maquininha.',
+      'campo vazio não vira linha com travessão': !campos.some((c) => !String(c.valor || '').trim()) && acha('Valor da venda') !== undefined && acha('Motivo') === undefined,
+      'tarefa avulsa devolve ficha vazia em vez de estourar': fichaAvulsa.status === 200 && (JSON.parse(fichaAvulsa.corpo).campos || []).length === 0,
+      'quem não participa da tarefa não lê o ticket por ela': fichaDeFora.status === 404,
+      'a ficha é lida do ticket, não copiada pra dentro da tarefa': !Object.keys(doEstorno).includes('resumo') && /await fetch\('\/api\/tarefas\/'\+id\+'\/ticket'\)/.test(html),
+      'e só carrega depois da janela abrir (não segura o clique)': /\$\('M'\)\.classList\.add\('show'\);carregarFicha\(O\.id\)/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okFichaMD = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (estorno=${est.status} ${est.corpo.slice(0, 90)} tarefa=${doEstorno.id || '-'} ficha=${ficha.status} ${JSON.stringify(campos).slice(0, 200)})`);
+  } catch (e) { okFichaMD = false; console.log('  erro: ' + e.message); }
+  if (!okFichaMD) ruins += 1;
+  console.log(`${okFichaMD ? '✓' : '✗'} Meu Dia: a tarefa de estorno mostra cliente, valor e forma de pagamento lidos do ticket`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

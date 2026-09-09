@@ -9204,6 +9204,56 @@ app.post('/api/tarefas/:id/anexos', auth.requireAuth, uploadTarefaAnexo.single('
   }
 });
 
+// O que a pessoa precisa saber PRA FAZER o serviço, sem sair do Meu Dia:
+// quem é o cliente, quanto é e como foi pago. Nada disso é copiado pra dentro
+// da tarefa - fica no ticket e é lido na hora que o detalhe abre (1 documento,
+// só quando alguém abre). Copiar criaria uma segunda versão do dado, que
+// envelhece assim que o ticket muda.
+//
+// Rótulo e valor saem do ticket como estão (formaPagamento é a resposta do
+// próprio formulário: "Online", "Crédito à vista", "Débito", "Pix na
+// maquininha"...). Campo vazio não vira linha: linha com "—" só ocupa espaço.
+function resumoDoTicket(t, tipoVinculo) {
+  const linhas = [];
+  const põe = (rotulo, valor) => { if (valor != null && String(valor).trim() !== '') linhas.push({ rotulo, valor: String(valor) }); };
+  const dinheiro = (v) => (v == null || v === '' ? null : (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
+  const dia = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? String(d).split('-').reverse().join('/') : d || null);
+  if (tipoVinculo === 'estorno') {
+    põe('Cliente', t.nomeCliente);
+    põe('Valor a estornar', dinheiro(t.valorEstornar));
+    põe('Valor da venda', dinheiro(t.valorVenda));
+    põe('Forma de pagamento', [t.formaPagamento, t.bandeira, t.ultimos4 ? `final ${t.ultimos4}` : null].filter(Boolean).join(' · '));
+    põe('Motivo', t.motivoEstorno === 'Outro' ? t.motivoOutro : t.motivoEstorno);
+    põe('Pedido', t.pedidoId);
+    põe('Venda em', [dia(t.dataVenda), t.horaVenda].filter(Boolean).join(' '));
+    põe('Pedido por', t.origem === 'cliente' ? 'Cliente (formulário público)' : 'Loja');
+    põe('Descrição', t.observacao);
+  } else {
+    põe('Valor estimado', dinheiro(t.valorEstimado));
+    põe('Fornecedor', t.fornecedor);
+    põe('Vencimento', dia(t.vencimento));
+    põe('Itens', Array.isArray(t.itens) && t.itens.length ? `${t.itens.length} item(ns)` : null);
+    põe('Pessoa', t.nomePessoa);
+    põe('Descrição', t.observacao);
+  }
+  return linhas.slice(0, 12);
+}
+
+app.get('/api/tarefas/:id/ticket', auth.requireAuth, async (req, res) => {
+  try {
+    const tarefa = await tarefas.getOne(req.params.id);
+    if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acessoDasTarefas(req))) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    if (!tarefa.vinculo?.id) return res.json({ campos: [] });
+    const ticket = tarefa.vinculo.tipo === 'estorno'
+      ? await refunds.getOne(tarefa.vinculo.id)
+      : await solicitacoes.getOne(tarefa.vinculo.id);
+    if (!ticket) return res.json({ campos: [] });
+    res.json({ campos: resumoDoTicket(ticket, tarefa.vinculo.tipo) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.get('/api/tarefas/:id/anexos/:indice', auth.requireAuth, async (req, res) => {
   try {
     const tarefa = await tarefas.getOne(req.params.id);
