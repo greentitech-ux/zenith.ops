@@ -834,13 +834,13 @@ async function cardCentral(){
   const rows = await fetch('/api/central').then(r=>r.json());
   const pendentes = rows.filter(c=>c.status==='PENDENTE');
   if(!pendentes.length){
-    return pcardWrap('📋','Central de Solicitações','/central.html', `<div class="pcard-vazio">Nenhuma solicitação pendente. 🎉</div>`);
+    return pcardWrap('📋','Central de Solicitações','/central-historico.html', `<div class="pcard-vazio">Nenhuma solicitação pendente. 🎉</div>`);
   }
   const porTipo = {};
   pendentes.forEach(c=>{ porTipo[c.tipo] = (porTipo[c.tipo]||0) + 1; });
   const linhas = Object.entries(porTipo).sort((a,b)=>b[1]-a[1])
     .map(([tipo,qtd])=>`<div class="linha"><span>${escapeHtml(TIPOS_CENTRAL_LABEL[tipo]||tipo)}</span><b>${qtd}</b></div>`).join('');
-  return pcardWrap('📋','Central de Solicitações','/central.html', `
+  return pcardWrap('📋','Central de Solicitações','/central-historico.html', `
     <div class="pstats">${statRow('Pendentes', pendentes.length, 'warn')}</div>
     <div class="ptipos">${linhas}</div>
   `);

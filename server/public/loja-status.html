@@ -144,19 +144,29 @@
   .uni-panel.recolhido .uni-grid{display:none;}
   /* o corpo das Quedas é tabela, não grade de cards - mas a regra que
      recolhe mira .uni-grid, então ele mantém a classe e só troca o display */
-  .quedas-corpo{display:block;}
+  /* O corpo também tem .uni-grid para herdar o recolhimento do painel. A
+     especificidade dupla é intencional: impede que .uni-grid (declarada
+     abaixo) volte a transformá-lo em grid e deixe tabela, nota e filtros
+     espremidos lado a lado. */
+  .uni-grid.quedas-corpo{display:block;min-width:0;}
   .uni-panel.recolhido .quedas-corpo{display:none;}
   .uni-panel-sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);font-weight:400;text-transform:uppercase;letter-spacing:.04em;}
   .uni-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;}
   /* tabela de quedas: rolagem propria no celular, pra pagina nunca rolar
      de lado (a tela e usada no telefone) */
-  .quedas-wrap{overflow-x:auto;}
-  .quedas-tab{width:100%;border-collapse:collapse;font-size:12.5px;min-width:520px;}
+  .quedas-wrap{overflow-x:auto;max-width:100%;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;}
+  .quedas-tab{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:620px;}
   .quedas-tab th{text-align:right;font-family:var(--mono);font-size:10px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.04em;font-weight:400;padding:0 8px 8px;white-space:nowrap;}
   .quedas-tab th:first-child,.quedas-tab td:first-child{text-align:left;}
   .quedas-tab td{text-align:right;padding:7px 8px;border-top:1px solid var(--line);
     font-variant-numeric:tabular-nums;white-space:nowrap;}
+  /* Unidade é a âncora da leitura: continua à vista enquanto os indicadores
+     rolam horizontalmente. O fundo opaco evita os números passarem por baixo. */
+  .quedas-tab th:first-child,.quedas-tab td:first-child{position:sticky;left:0;z-index:1;width:210px;min-width:210px;max-width:210px;background:var(--panel);box-shadow:9px 0 10px -12px rgba(0,0,0,.9);}
+  .quedas-tab th:first-child{z-index:2;}
+  .quedas-unidade-nome{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .quedas-fora{display:block;color:var(--bad);font-size:10px;font-family:var(--mono);font-weight:500;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .quedas-tab tr.pior td{font-weight:700;}
   .quedas-nota{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.5;}
   .uni-card{background:var(--bg,#0f1115);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;text-align:left;font-family:inherit;color:inherit;transition:border-color .15s ease,background .15s ease;}
@@ -174,6 +184,17 @@
   .uni-bar .b-on{background:var(--ok);}
   .uni-bar .b-off{background:var(--bad);}
   .uni-bar .b-nv{background:var(--muted);opacity:.5;}
+  @media(max-width:640px){
+    .uni-panel{padding:13px 12px;}
+    .uni-panel-head{align-items:flex-start;}
+    .uni-panel-sub{max-width:44%;text-align:right;line-height:1.35;}
+    .quedas-tab{min-width:540px;font-size:12px;}
+    .quedas-tab th,.quedas-tab td{padding-left:7px;padding-right:7px;}
+    .quedas-tab th:first-child,.quedas-tab td:first-child{width:132px;min-width:132px;max-width:132px;}
+    .quedas-fora{font-size:9px;}
+    .quedas-periodos{gap:6px;}
+    .quedas-periodos .btn-secundario{padding:8px 10px;}
+  }
   .equip-tile{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:10px;padding:10px 11px;display:flex;flex-direction:column;gap:5px;cursor:pointer;transition:border-color .15s ease,background .15s ease;}
   .equip-tile:hover{border-color:var(--accent);background:var(--panel2);}
   .equip-tile.status-online{border-left-color:var(--ok);}
@@ -1572,10 +1593,13 @@ async function carregarQuedas(periodo){
         + botoesPeriodoQuedas();
       return;
     }
-    const linhas = comQueda.map((u, i) => `<tr class="${i === 0 ? 'pior' : ''}">
-      <td>${escapeHtml(u.unidadeNome || u.codigo)}${u.foraAgora ? ' <span style="color:var(--bad);">● fora agora</span>' : ''}</td>
+    const linhas = comQueda.map((u, i) => {
+      const nome = escapeHtml(u.unidadeNome || u.codigo);
+      return `<tr class="${i === 0 ? 'pior' : ''}">
+      <td title="${nome}"><span class="quedas-unidade-nome">${nome}</span>${u.foraAgora ? '<span class="quedas-fora">● fora agora</span>' : ''}</td>
       <td>${u.quedas}</td><td>${u.confirmadas}</td><td>${u.oscilacoes}</td>
-      <td>${fmtHoras(u.horasFora)}</td><td>${u.maiorMin} min</td></tr>`).join('');
+      <td>${fmtHoras(u.horasFora)}</td><td>${u.maiorMin} min</td></tr>`;
+    }).join('');
     corpo.innerHTML = `<div class="quedas-wrap"><table class="quedas-tab">
       <thead><tr><th>Unidade</th><th>Quedas</th><th>Confirmadas</th><th>Oscilações</th><th>Tempo fora</th><th>Maior</th></tr></thead>
       <tbody>${linhas}</tbody></table></div>
