@@ -958,13 +958,16 @@ async function tokenDoComputador(codigo, posto) {
 // estavel (nunca muda, mesmo se o nome/tipo forem editados depois) que vira
 // parte do link/QR code fixado naquele computador (ver POST /api/loja-status/
 // :codigo/computadores em index.js, que devolve a URL pronta)
-async function cadastrarComputador(codigo, nome, tipo) {
+async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador (ex: Caixa 1, PDV Entrega).');
   const posto = crypto.randomBytes(4).toString('hex');
   const id = docIdFor(codigo, posto);
   const registro = {
     codigo, posto, nome: nomeOk, tipo: tipoValido(tipo), anydeskId: null,
+    // Características operacionais declaradas no cadastro. Não inferimos pelo
+    // nome: "Servidor" e "GCOM" precisam ser visíveis e confiáveis no NOC.
+    ehServidor: !!ehServidor, temGcom: !!temGcom,
     criadoEm: Date.now(),
     ultimoHeartbeatEm: null, avisadoOffline: false, offlineDesde: null, mensagemPendente: null,
     ip: null, userAgent: null, abertoDesde: null, ipLocal: null, ipLocalEm: null,
@@ -980,7 +983,7 @@ async function cadastrarComputador(codigo, nome, tipo) {
 
 // edita nome e/ou tipo de um computador ja cadastrado - o "posto" (id do
 // link/QR) nunca muda, so o que aparece na tela e qual tela o link abre
-async function editarComputador(codigo, posto, nome, tipo, ehNotebook) {
+async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador.');
   const id = docIdFor(codigo, posto);
@@ -988,7 +991,13 @@ async function editarComputador(codigo, posto, nome, tipo, ehNotebook) {
   if (!snap.exists) throw new Error('Computador não encontrado.');
   // notebook hiberna/dorme fora de hora - a "queda" dele aparece no painel,
   // mas nunca vira push crítico (ver rodarVarreduraLojaStatus em index.js)
-  const registro = { nome: nomeOk, tipo: tipoValido(tipo), ehNotebook: !!ehNotebook };
+  const registro = {
+    nome: nomeOk,
+    tipo: tipoValido(tipo),
+    ehNotebook: !!ehNotebook,
+    ehServidor: !!ehServidor,
+    temGcom: !!temGcom,
+  };
   await COLLECTION.doc(id).update(registro);
   cache.invalidar();
   return { codigo, posto, ...registro };

@@ -6,9 +6,25 @@ const crypto = require('crypto');
 const db = require('./firestore');
 
 const COLLECTION = db.collection('tarefas');
+const CONTROLE = db.collection('tarefasControle');
 const STATUS_ABERTO = new Set(['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO']);
 const STATUS_EDITAVEIS = new Set(['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO']);
-const STATUS_TAREFA = [...STATUS_EDITAVEIS, 'CONCLUIDA', 'CANCELADA'];
+const STATUS_TAREFA = [...STATUS_EDITAVEIS, 'CONCLUIDA', 'CANCELADA', 'ARQUIVADA'];
+
+function nomeUsuario(usuario) {
+  return String(usuario?.nome || usuario?.name || usuario?.username || 'Usuário').trim().slice(0, 80);
+}
+
+function podeGerir(tarefa, acesso) {
+  if (acesso.isMaster) return true;
+  if (tarefa.responsavelId === acesso.usuario.id || tarefa.criadoPorId === acesso.usuario.id) return true;
+  return !!acesso.isAdmin && !!tarefa.unidade && (acesso.unidades || []).includes(tarefa.unidade);
+}
+
+function podeArquivar(tarefa, acesso) {
+  return !!acesso.isMaster || (!!acesso.isAdmin && tarefa.status === 'CONCLUIDA'
+    && !!tarefa.unidade && (acesso.unidades || []).includes(tarefa.unidade));
+}
 
 function statusDoTicket(ticket) {
   if (ticket.status === 'APROVADO') return ticket.execucaoStatus === 'FINALIZADO' ? 'CONCLUIDA' : 'A_FAZER';
@@ -22,7 +38,11 @@ function chaveTicket(ticketId, usuarioId, email) {
 }
 
 function podeReceberTicket(usuario) {
-  return !!usuario && (usuario.role === 'master' || (usuario.permissions?.sections || []).includes('suporte'));
+  if (!usuario) return false;
+  if (usuario.role === 'master') return true;
+  const secoes = usuario.permissions?.sections || [];
+  const cargo = String(usuario.cargo || '').toLowerCase();
+  return ['suporte', 'tecnico', 'manutencao'].some((tag) => secoes.includes(tag) || cargo === tag);
 }
 
 function destinatarios(ticket, usuarios) {
@@ -31,8 +51,11 @@ function destinatarios(ticket, usuarios) {
   const emails = Array.isArray(ticket.atribuidosEmails) && ticket.atribuidosEmails.length
     ? ticket.atribuidosEmails : [ticket.direcionadoParaEmail].filter(Boolean);
   if (!ids.length && !emails.length) return usuarios.filter((u) => u.role === 'master');
-  return usuarios.filter((u) => podeReceberTicket(u)
+  const elegiveis = usuarios.filter((u) => podeReceberTicket(u)
     && (ids.includes(u.id) || emails.map((x) => String(x).toLowerCase()).includes(String(u.email || '').toLowerCase())));
+  // Um ticket direcionado a alguém sem perfil operacional não desaparece da
+  // fila: o Master recebe a pendência para decidir se a delega.
+  return elegiveis.length ? elegiveis : usuarios.filter((u) => u.role === 'master');
 }
 
 async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
@@ -59,7 +82,7 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
     if (snap.exists) {
       const atual = snap.data();
       await ref.update({ titulo: ticket.titulo, prioridade: ticket.prioridade || 'normal', status: statusDoTicket(ticket), atualizadoEm: agora,
-        ...(statusDoTicket(ticket) === 'CONCLUIDA' && !atual.concluidaEm ? { concluidaEm: agora, concluidaPorEmail: ticket.execucaoPorNome || ticket.decidedByEmail || null } : {}) });
+        ...(statusDoTicket(ticket) === 'CONCLUIDA' && !atual.concluidaEm ? { concluidaEm: agora, concluidaPorNome: ticket.execucaoPorNome || 'Suporte' } : {}) });
       continue;
     }
     const tarefa = {
@@ -69,7 +92,9 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
       prioridade: ticket.prioridade || 'normal',
       status: statusDoTicket(ticket),
       responsavelId: usuario.id,
-      responsavelEmail: usuario.email || null,
+       responsavelEmail: usuario.email || null,
+       responsavelNome: nomeUsuario(usuario),
+       criadoPorId: usuario.id, criadoPorNome: nomeUsuario(usuario),
       criadaEm: agora,
       atualizadoEm: agora,
       vinculo: { chave: chaveBase, tipo, ticketTipo: ticket.tipo || tipo, id: ticket.id, numeroTicket: ticket.numeroTicket || null },
@@ -84,11 +109,11 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
   return alteradas;
 }
 
-async function listarMinhas({ usuarioId, isMaster }) {
-  const snap = isMaster
-    ? await COLLECTION.orderBy('atualizadoEm', 'desc').get()
-    : await COLLECTION.where('responsavelId', '==', usuarioId).get();
-  return snap.docs.map((d) => d.data()).sort((a, b) => String(b.atualizadoEm).localeCompare(String(a.atualizadoEm)));
+async function listarMinhas(acesso) {
+  const snap = await COLLECTION.orderBy('atualizadoEm', 'desc').get();
+  return snap.docs.map((d) => d.data())
+    .filter((tarefa) => tarefa.status !== 'ARQUIVADA' && podeGerir(tarefa, acesso))
+    .sort((a, b) => String(b.atualizadoEm).localeCompare(String(a.atualizadoEm)));
 }
 
 async function getOne(id) {
@@ -96,59 +121,92 @@ async function getOne(id) {
   return snap.exists ? snap.data() : null;
 }
 
-async function criar({ titulo, descricao, dataInicio, dataEntrega, colaboradores, usuario }) {
+async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel }) {
   const texto = String(titulo || '').trim().slice(0, 200);
   if (!texto) throw new Error('Informe o título da tarefa.');
   const ref = COLLECTION.doc();
   const agora = new Date().toISOString();
+  const inicio = /^\d{4}-\d{2}-\d{2}$/.test(dataInicio || '') ? dataInicio : agora.slice(0, 10);
+  const entrega = /^\d{4}-\d{2}-\d{2}$/.test(dataEntrega || '') ? dataEntrega : null;
+  const hoje = agora.slice(0, 10);
+  const statusInicial = entrega && entrega < hoje ? 'PENDENTE' : (entrega === hoje ? 'HOJE' : 'A_FAZER');
   const tarefa = {
     id: ref.id, origem: 'manual', titulo: texto,
     descricao: String(descricao || '').trim().slice(0, 2000),
-    prioridade: 'normal', status: 'PENDENTE', dataInicio: /^\d{4}-\d{2}-\d{2}$/.test(dataInicio || '') ? dataInicio : agora.slice(0, 10), dataEntrega: /^\d{4}-\d{2}-\d{2}$/.test(dataEntrega || '') ? dataEntrega : null,
-    responsavelId: usuario.id, responsavelEmail: usuario.email || null,
-    criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo: null, anexos: [], colaboradores: Array.isArray(colaboradores) ? colaboradores.slice(0, 10) : [],
-    unidade: null, unidadeNome: null,
+    prioridade: 'normal', status: statusInicial, dataInicio: inicio, dataEntrega: entrega,
+    responsavelId: (responsavel || usuario).id, responsavelEmail: (responsavel || usuario).email || null, responsavelNome: nomeUsuario(responsavel || usuario),
+    criadoPorId: usuario.id, criadoPorNome: nomeUsuario(usuario),
+    criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo: null, anexos: [], colaboradores: [],
+    unidade: unidade || null, unidadeNome: unidadeNome || unidade || null,
   };
   await ref.set(tarefa);
   return tarefa;
 }
 
-async function atualizarStatus(id, { usuarioId, isMaster, status }) {
+async function atualizarStatus(id, acesso, status) {
   if (!STATUS_EDITAVEIS.has(status)) throw new Error('Use a ação de concluir para finalizar uma tarefa.');
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
   const tarefa = snap.data();
-  if (tarefa.responsavelId !== usuarioId && !isMaster) throw new Error('Essa tarefa pertence a outro responsável.');
-  if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Essa tarefa já foi encerrada.');
-  await ref.update({ status, atualizadoEm: new Date().toISOString() });
+  if (!podeGerir(tarefa, acesso)) throw new Error('Você não pode alterar esta tarefa.');
+  if (!STATUS_ABERTO.has(tarefa.status) && tarefa.status !== 'CONCLUIDA') throw new Error('Essa tarefa já foi encerrada.');
+  const reaberta = tarefa.status === 'CONCLUIDA';
+  await ref.update({ status, atualizadoEm: new Date().toISOString(), ...(reaberta ? { concluidaEm: null, concluidaPorId: null, concluidaPorNome: null, reabertaEm: new Date().toISOString(), reabertaPorNome: nomeUsuario(acesso.usuario) } : {}) });
   return getOne(id);
 }
 
-async function adicionarComentario(id, { usuario, isMaster, texto }) {
+async function adicionarComentario(id, { usuario, isMaster, isAdmin, unidades, texto }) {
   const corpo = String(texto || '').trim().slice(0, 2000);
   if (!corpo) throw new Error('Escreva um comentário.');
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
   const tarefa = snap.data();
-  if (tarefa.responsavelId !== usuario.id && !isMaster) throw new Error('Essa tarefa pertence a outro responsável.');
+  if (!podeGerir(tarefa, { usuario, isMaster, isAdmin, unidades })) throw new Error('Você não pode comentar nesta tarefa.');
   const agora = new Date().toISOString();
-  const comentario = { id: crypto.randomBytes(8).toString('hex'), texto: corpo, porId: usuario.id, porEmail: usuario.email || null, em: agora };
+  const comentario = { id: crypto.randomBytes(8).toString('hex'), texto: corpo, porId: usuario.id, porNome: nomeUsuario(usuario), em: agora };
   await ref.update({ comentarios: [...(tarefa.comentarios || []), comentario].slice(-100), atualizadoEm: agora });
   return getOne(id);
 }
 
-async function concluir(id, { usuarioId, isMaster, observacao }) {
+async function concluir(id, { usuario, isMaster, isAdmin, unidades, observacao }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
   const tarefa = snap.data();
-  if (tarefa.responsavelId !== usuarioId && !isMaster) throw new Error('Essa tarefa pertence a outro responsável.');
+  if (!podeGerir(tarefa, { usuario, isMaster, isAdmin, unidades })) throw new Error('Você não pode concluir esta tarefa.');
   if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Essa tarefa já foi encerrada.');
   const agora = new Date().toISOString();
-  await ref.update({ status: 'CONCLUIDA', concluidaEm: agora, concluidaPorId: usuarioId, observacaoConclusao: String(observacao || '').trim().slice(0, 1000), atualizadoEm: agora });
+  await ref.update({ status: 'CONCLUIDA', concluidaEm: agora, concluidaPorId: usuario.id, concluidaPorNome: nomeUsuario(usuario), observacaoConclusao: String(observacao || '').trim().slice(0, 1000), atualizadoEm: agora });
   return getOne(id);
 }
 
-module.exports = { sincronizarTicket, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, concluir, podeReceberTicket };
+async function arquivar(id, acesso) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeArquivar(tarefa, acesso)) throw new Error('Somente o Master pode remover tarefas; Admin remove apenas concluídas da sua unidade.');
+  const agora = new Date().toISOString();
+  await ref.update({ status: 'ARQUIVADA', arquivadaEm: agora, arquivadaPorId: acesso.usuario.id, arquivadaPorNome: nomeUsuario(acesso.usuario), atualizadoEm: agora });
+  return getOne(id);
+}
+
+async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuarios = [], forcar = false } = {}) {
+  const versao = 'tickets-v1';
+  const ref = CONTROLE.doc(`retroativo-${versao}`);
+  const anterior = await ref.get();
+  if (anterior.exists && !forcar) return { executada: false, motivo: 'já sincronizado nesta versão', ...anterior.data() };
+
+  let alteradas = 0;
+  for (const ticket of solicitacoes) alteradas += (await sincronizarTicket(ticket, usuarios, 'solicitacao')).length;
+  for (const ticket of estornos) alteradas += (await sincronizarTicket(ticket, usuarios, 'estorno')).length;
+  const resultado = {
+    executada: true, versao, alteradas, solicitacoes: solicitacoes.length, estornos: estornos.length,
+    concluidaEm: new Date().toISOString(),
+  };
+  await ref.set(resultado);
+  return resultado;
+}
+
+module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir };
