@@ -113,6 +113,12 @@
   .btn-secundario{appearance:none;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 11px;font:600 12px var(--sans);cursor:pointer;white-space:nowrap;transition:border-color .15s ease,background .15s ease,color .15s ease;}
   .btn-secundario:hover{border-color:var(--accent);color:var(--accent);}
   .btn-secundario.ativo{border-color:var(--accent);background:rgba(184,255,60,.11);color:var(--accent);}
+  .quedas-filtros{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr)) auto;gap:10px;align-items:end;margin-top:12px;padding-top:11px;border-top:1px solid var(--line);}
+  .quedas-filtros label{display:grid;gap:5px;font:10px var(--mono);letter-spacing:.06em;color:var(--muted);text-transform:uppercase;}
+  .quedas-filtros select,.quedas-filtros input{width:100%;height:36px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:7px 9px;font:12px var(--sans);text-transform:none;letter-spacing:normal;}
+  .quedas-filtros input:focus,.quedas-filtros select:focus{outline:none;border-color:var(--accent);}
+  .quedas-intervalo{display:grid;grid-template-columns:repeat(2,minmax(132px,1fr));gap:8px;grid-column:span 2;}
+  .quedas-acoes{display:flex;gap:7px;flex-wrap:wrap;align-items:center;}
   .quedas-periodos{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:11px;border-top:1px solid var(--line);}
 
   /* ---- grid de equipamentos ---- */
@@ -159,6 +165,9 @@
   .quedas-tab th{text-align:right;font-family:var(--mono);font-size:10px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.04em;font-weight:400;padding:0 8px 8px;white-space:nowrap;}
   .quedas-tab th:first-child,.quedas-tab td:first-child{text-align:left;}
+  .quedas-ordem{appearance:none;border:0;background:none;color:var(--muted);font:inherit;text-transform:inherit;letter-spacing:inherit;padding:0;cursor:pointer;white-space:nowrap;}
+  .quedas-ordem:hover,.quedas-ordem.ativo{color:var(--accent);}
+  .quedas-ordem span{font-size:12px;letter-spacing:0;}
   .quedas-tab td{text-align:right;padding:7px 8px;border-top:1px solid var(--line);
     font-variant-numeric:tabular-nums;white-space:nowrap;}
   /* Unidade é a âncora da leitura: continua à vista enquanto os indicadores
@@ -194,6 +203,8 @@
     .quedas-fora{font-size:9px;}
     .quedas-periodos{gap:6px;}
     .quedas-periodos .btn-secundario{padding:8px 10px;}
+    .quedas-filtros{grid-template-columns:1fr 1fr;}
+    .quedas-intervalo{grid-column:1/-1;}
   }
   .equip-tile{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:10px;padding:10px 11px;display:flex;flex-direction:column;gap:5px;cursor:pointer;transition:border-color .15s ease,background .15s ease;}
   .equip-tile:hover{border-color:var(--accent);background:var(--panel2);}
@@ -1545,6 +1556,12 @@ function toggleFiltroUnidade(cod){
 // precisa entrar no poll de 30s da tela.
 let QUEDAS_CARREGADO = false;
 let QUEDAS_PERIODO = 30;
+let QUEDAS_DADOS = null;
+let QUEDAS_GRUPO = '';
+let QUEDAS_UNIDADE = '';
+let QUEDAS_DE = '';
+let QUEDAS_ATE = '';
+let QUEDAS_ORDENACAO = { campo: 'foraMs', direcao: 'desc' };
 function alternarPainelQuedas(){
   const p = document.getElementById('quedas-panel');
   const abriu = p.classList.toggle('recolhido') === false;
@@ -1555,6 +1572,21 @@ function fmtHoras(h){ return h >= 1 ? h.toFixed(1).replace('.', ',') + 'h' : Mat
 // os botões saem do mesmo lugar nos dois caminhos (com e sem queda no
 // período): sem isso, escolher "Ontem" num dia limpo trocava a tabela por um
 // texto e levava os botões junto - a pessoa ficava presa naquele período
+function rotuloPeriodoQuedas(d){
+  if(d?.periodo) return `${d.periodo.inicio.split('-').reverse().join('/')} a ${d.periodo.fim.split('-').reverse().join('/')}`;
+  return d?.dias === 'hoje' ? 'hoje' : d?.dias === 'ontem' ? 'ontem' : `${d?.dias || QUEDAS_PERIODO} dias`;
+}
+function opcaoQuedas(valor, texto, atual){ return `<option value="${escapeHtml(valor)}"${String(valor)===String(atual)?' selected':''}>${escapeHtml(texto)}</option>`; }
+function filtrosQuedas(){
+  const unidades = [...new Map((QUEDAS_DADOS?.unidades || []).map(u=>[u.codigo,u])).values()]
+    .sort((a,b)=>String(a.unidadeNome||a.codigo).localeCompare(String(b.unidadeNome||b.codigo),'pt-BR'));
+  return `<div class="quedas-filtros" aria-label="Filtros do relatório de quedas">
+    <label>Grupo<select id="quedas-grupo" onchange="filtrarQuedas()">${opcaoQuedas('','Todos os grupos',QUEDAS_GRUPO)}${opcaoQuedas('GBE','Grupo Bravo (GBE)',QUEDAS_GRUPO)}${opcaoQuedas('ARCFOOD','ARCFOOD',QUEDAS_GRUPO)}</select></label>
+    <label>Unidade<select id="quedas-unidade" onchange="filtrarQuedas()">${opcaoQuedas('','Todas as unidades',QUEDAS_UNIDADE)}${unidades.filter(u=>!QUEDAS_GRUPO||u.grupo===QUEDAS_GRUPO).map(u=>opcaoQuedas(u.codigo,u.unidadeNome||u.codigo,QUEDAS_UNIDADE)).join('')}</select></label>
+    <div class="quedas-intervalo"><label>De<input id="quedas-de" type="date" value="${escapeHtml(QUEDAS_DE)}"></label><label>Até<input id="quedas-ate" type="date" value="${escapeHtml(QUEDAS_ATE)}"></label></div>
+    <div class="quedas-acoes"><button type="button" class="btn-secundario" onclick="aplicarPeriodoQuedas()">Aplicar período</button><button type="button" class="btn-secundario" onclick="baixarRelatorioQuedas()">📄 PDF</button></div>
+  </div>`;
+}
 function botoesPeriodoQuedas(){
   const ativo = (v) => String(QUEDAS_PERIODO) === String(v) ? ' ativo' : '';
   return `<div class="quedas-periodos" aria-label="Período do relatório de quedas">
@@ -1564,6 +1596,62 @@ function botoesPeriodoQuedas(){
     <button type="button" class="btn-secundario${ativo(30)}" onclick="carregarQuedas(30)">30 dias</button>
     <button type="button" class="btn-secundario${ativo(90)}" onclick="carregarQuedas(90)">90 dias</button>
   </div>`;
+}
+function filtrarQuedas(){
+  QUEDAS_GRUPO = document.getElementById('quedas-grupo')?.value || '';
+  QUEDAS_UNIDADE = document.getElementById('quedas-unidade')?.value || '';
+  renderQuedas();
+}
+function aplicarPeriodoQuedas(){
+  QUEDAS_DE = document.getElementById('quedas-de')?.value || '';
+  QUEDAS_ATE = document.getElementById('quedas-ate')?.value || '';
+  if(!QUEDAS_DE || !QUEDAS_ATE || QUEDAS_DE > QUEDAS_ATE){ alert('Informe um período válido: De e Até.'); return; }
+  carregarQuedas('personalizado');
+}
+function ordenarQuedas(campo){
+  QUEDAS_ORDENACAO = QUEDAS_ORDENACAO.campo === campo
+    ? { campo, direcao: QUEDAS_ORDENACAO.direcao === 'desc' ? 'asc' : 'desc' }
+    : { campo, direcao: 'desc' };
+  renderQuedas();
+}
+function cabecalhoQuedas(rotulo, campo){
+  const ativo = QUEDAS_ORDENACAO.campo === campo;
+  const seta = ativo ? (QUEDAS_ORDENACAO.direcao === 'desc' ? ' ↓' : ' ↑') : ' ↕';
+  return `<button type="button" class="quedas-ordem${ativo?' ativo':''}" onclick="ordenarQuedas('${campo}')" title="Ordenar por ${rotulo}">${rotulo}<span>${seta}</span></button>`;
+}
+function renderQuedas(){
+  const corpo = document.getElementById('quedas-corpo');
+  const sub = document.getElementById('quedas-sub');
+  const dados = QUEDAS_DADOS;
+  if(!dados) return;
+  let unidades = (dados.unidades || []).filter(u => (!QUEDAS_GRUPO || u.grupo === QUEDAS_GRUPO) && (!QUEDAS_UNIDADE || u.codigo === QUEDAS_UNIDADE));
+  unidades = unidades.filter(u=>u.quedas > 0).sort((a,b)=>{
+    const aa = QUEDAS_ORDENACAO.campo === 'unidadeNome' ? String(a.unidadeNome||a.codigo) : Number(a[QUEDAS_ORDENACAO.campo] || 0);
+    const bb = QUEDAS_ORDENACAO.campo === 'unidadeNome' ? String(b.unidadeNome||b.codigo) : Number(b[QUEDAS_ORDENACAO.campo] || 0);
+    const resultado = typeof aa === 'string' ? aa.localeCompare(bb,'pt-BR') : aa-bb;
+    return QUEDAS_ORDENACAO.direcao === 'desc' ? -resultado : resultado;
+  });
+  const totalQuedas = unidades.reduce((s,u)=>s+u.quedas,0);
+  const totalHoras = +(unidades.reduce((s,u)=>s+u.horasFora,0)).toFixed(1);
+  sub.textContent = `${totalQuedas} queda(s) · ${String(totalHoras).replace('.', ',')}h fora · ${rotuloPeriodoQuedas(dados)}`;
+  if(!unidades.length){
+    corpo.innerHTML = '<div class="quedas-nota">Nenhuma queda registrada para os filtros escolhidos.</div>' + filtrosQuedas() + botoesPeriodoQuedas();
+    return;
+  }
+  const linhas = unidades.map((u) => {
+    const nome = escapeHtml(u.unidadeNome || u.codigo);
+    return `<tr><td title="${nome}"><span class="quedas-unidade-nome">${nome}</span>${u.foraAgora ? '<span class="quedas-fora">● fora agora</span>' : ''}</td><td>${u.quedas}</td><td>${u.confirmadas}</td><td>${u.oscilacoes}</td><td>${fmtHoras(u.horasFora)}</td><td>${u.maiorMin} min</td></tr>`;
+  }).join('');
+  corpo.innerHTML = `${filtrosQuedas()}<div class="quedas-wrap"><table class="quedas-tab"><thead><tr><th>${cabecalhoQuedas('Unidade','unidadeNome')}</th><th>${cabecalhoQuedas('Quedas','quedas')}</th><th>${cabecalhoQuedas('Confirmadas','confirmadas')}</th><th>${cabecalhoQuedas('Oscilações','oscilacoes')}</th><th>${cabecalhoQuedas('Tempo fora','horasFora')}</th><th>${cabecalhoQuedas('Maior','maiorMin')}</th></tr></thead><tbody>${linhas}</tbody></table></div><div class="quedas-nota"><b>Confirmada</b> = ficou fora tempo suficiente pra virar alerta crítico. <b>Oscilação</b> = caiu e voltou em poucos minutos — não pede app offline.<br>Não entram: reinício que o NOC mandou, e notebook (sai da loja e volta).<br>O histórico é limitado a ${dados.eventosMaximoPorComputador} eventos por computador — em máquina que oscila muito, queda antiga já saiu da lista. <b>O número é piso, não teto.</b></div>${botoesPeriodoQuedas()}`;
+}
+function baixarRelatorioQuedas(){
+  const p = new URLSearchParams();
+  if(QUEDAS_PERIODO === 'personalizado'){ p.set('inicio',QUEDAS_DE); p.set('fim',QUEDAS_ATE); }
+  else if(QUEDAS_PERIODO === 'hoje' || QUEDAS_PERIODO === 'ontem') p.set('periodo',QUEDAS_PERIODO);
+  else p.set('dias',QUEDAS_PERIODO);
+  if(QUEDAS_GRUPO) p.set('grupo',QUEDAS_GRUPO);
+  if(QUEDAS_UNIDADE) p.set('unidade',QUEDAS_UNIDADE);
+  window.open('/api/loja-status/quedas/relatorio.pdf?'+p.toString(), '_blank', 'noopener');
 }
 // aceita número de dias (janela rolante) ou 'hoje'/'ontem' (dia de calendário
 // da loja, fechado no fuso de Brasília pelo servidor - ver relatorioQuedas)
@@ -1575,40 +1663,16 @@ async function carregarQuedas(periodo){
   sub.textContent = 'carregando...';
   corpo.innerHTML = '<div class="quedas-nota">Somando o histórico...</div>' + botoesPeriodoQuedas();
   try{
-    const q = (periodoEscolhido === 'hoje' || periodoEscolhido === 'ontem')
-      ? 'periodo=' + periodoEscolhido
-      : 'dias=' + periodoEscolhido;
+    if(periodoEscolhido !== 'personalizado'){ QUEDAS_DE = ''; QUEDAS_ATE = ''; }
+    const q = periodoEscolhido === 'personalizado'
+      ? 'inicio=' + encodeURIComponent(QUEDAS_DE) + '&fim=' + encodeURIComponent(QUEDAS_ATE)
+      : (periodoEscolhido === 'hoje' || periodoEscolhido === 'ontem') ? 'periodo=' + periodoEscolhido : 'dias=' + periodoEscolhido;
     const r = await fetch('/api/loja-status/quedas?' + q);
     if(!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
     QUEDAS_CARREGADO = true;
-    const comQueda = (d.unidades || []).filter(u => u.quedas > 0);
-    // 'hoje'/'ontem' já são o rótulo; número vira "N dias"
-    const rotuloPeriodo = (d.dias === 'hoje' || d.dias === 'ontem') ? d.dias : `${d.dias} dias`;
-    sub.textContent = `${d.totalQuedas} queda(s) · ${String(d.totalHorasFora).replace('.', ',')}h fora · ${rotuloPeriodo}`;
-    if(!comQueda.length){
-      corpo.innerHTML = '<div class="quedas-nota">Nenhuma queda registrada '
-        + ((d.dias === 'hoje' || d.dias === 'ontem') ? d.dias : 'nesses ' + d.dias + ' dias')
-        + '. Nesse cenário, app offline não se paga.</div>'
-        + botoesPeriodoQuedas();
-      return;
-    }
-    const linhas = comQueda.map((u, i) => {
-      const nome = escapeHtml(u.unidadeNome || u.codigo);
-      return `<tr class="${i === 0 ? 'pior' : ''}">
-      <td title="${nome}"><span class="quedas-unidade-nome">${nome}</span>${u.foraAgora ? '<span class="quedas-fora">● fora agora</span>' : ''}</td>
-      <td>${u.quedas}</td><td>${u.confirmadas}</td><td>${u.oscilacoes}</td>
-      <td>${fmtHoras(u.horasFora)}</td><td>${u.maiorMin} min</td></tr>`;
-    }).join('');
-    corpo.innerHTML = `<div class="quedas-wrap"><table class="quedas-tab">
-      <thead><tr><th>Unidade</th><th>Quedas</th><th>Confirmadas</th><th>Oscilações</th><th>Tempo fora</th><th>Maior</th></tr></thead>
-      <tbody>${linhas}</tbody></table></div>
-      <div class="quedas-nota">
-        <b>Confirmada</b> = ficou fora tempo suficiente pra virar alerta crítico. <b>Oscilação</b> = caiu e voltou em poucos minutos — não pede app offline.<br>
-        Não entram: reinício que o NOC mandou, e notebook (sai da loja e volta).<br>
-        O histórico é limitado a ${d.eventosMaximoPorComputador} eventos por computador — em máquina que oscila muito, queda antiga já saiu da lista. <b>O número é piso, não teto.</b>
-      </div>
-      ${botoesPeriodoQuedas()}`;
+    QUEDAS_DADOS = d;
+    renderQuedas();
   }catch(e){
     sub.textContent = 'falhou';
     corpo.innerHTML = '<div class="quedas-nota">Não consegui carregar (' + escapeHtml(e.message) + '). Tente de novo.</div>' + botoesPeriodoQuedas();

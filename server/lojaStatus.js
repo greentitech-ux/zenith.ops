@@ -2278,13 +2278,32 @@ function meiaNoiteBrasilia(diasAtras = 0) {
   return d.getTime();
 }
 
+// Intervalo escolhido na tela (De/Até). Datas de calendário precisam abrir e
+// fechar no fuso da operação, não no UTC do servidor Render; caso contrário
+// uma queda perto da meia-noite apareceria no dia vizinho no relatório.
+function limiteDataBrasilia(iso, fimDoDia = false) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return null;
+  const d = new Date(`${iso}T${fimDoDia ? '23:59:59.999' : '00:00:00.000'}-03:00`);
+  return Number.isFinite(d.getTime()) ? d.getTime() : null;
+}
+
 async function relatorioQuedas(opcoes) {
   const periodo = String((opcoes || {}).periodo || '');
   // Hoje/Ontem são dias de calendário; o resto continua janela rolante
   let desde;
   let ate = Infinity;
   let dias;
-  if (periodo === 'hoje') { desde = meiaNoiteBrasilia(0); dias = 'hoje'; }
+  const inicioPersonalizado = String((opcoes || {}).inicio || '');
+  const fimPersonalizado = String((opcoes || {}).fim || '');
+  if (inicioPersonalizado || fimPersonalizado) {
+    if (!inicioPersonalizado || !fimPersonalizado || inicioPersonalizado > fimPersonalizado) {
+      throw new Error('Informe um período válido: De e Até.');
+    }
+    desde = limiteDataBrasilia(inicioPersonalizado);
+    ate = limiteDataBrasilia(fimPersonalizado, true);
+    if (desde === null || ate === null) throw new Error('Informe datas válidas para o período.');
+    dias = 'personalizado';
+  } else if (periodo === 'hoje') { desde = meiaNoiteBrasilia(0); dias = 'hoje'; }
   else if (periodo === 'ontem') { desde = meiaNoiteBrasilia(1); ate = meiaNoiteBrasilia(0); dias = 'ontem'; }
   else {
     dias = Math.max(1, Math.min(365, Number((opcoes || {}).dias) || QUEDAS_JANELA_PADRAO_DIAS));
@@ -2317,6 +2336,9 @@ async function relatorioQuedas(opcoes) {
     .sort((a, b) => b.foraMs - a.foraMs);
   return {
     dias,
+    periodo: inicioPersonalizado && fimPersonalizado
+      ? { inicio: inicioPersonalizado, fim: fimPersonalizado, rotulo: `${inicioPersonalizado} a ${fimPersonalizado}` }
+      : null,
     // o historico por computador e' capado em EVENTOS_MAX: numa maquina que
     // oscila muito, queda antiga JA SAIU da lista. O numero e' piso, nao
     // teto - dizer isso na tela evita concluir "melhorou" de um corte.
