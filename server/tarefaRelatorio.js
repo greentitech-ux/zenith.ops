@@ -137,7 +137,11 @@ function abrir(res, nomeArquivo, inline = true) {
     }
   };
   const cabecalho = (chapeu, tituloGrande, subtitulo, etiqueta, rede) => {
-    const topoMarca = doc.y;
+    // A marca fica dentro da faixa visual do cabeçalho: começa abaixo da
+    // identificação e termina com folga antes da linha preta. Antes ela
+    // encostava no topo da página, desalinhada do bloco que identifica a
+    // tarefa.
+    const topoMarca = doc.y + 52;
     desenharMarca(rede, topoMarca);
     // Reserva a faixa da marca. Sem a largura explícita, um título grande
     // poderia atravessar a logo no canto direito em vez de quebrar antes.
