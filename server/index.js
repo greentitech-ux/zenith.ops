@@ -1077,8 +1077,8 @@ app.post('/api/formularios-publico/preencher/:token', uploadAnexosFormulario.arr
     if (!vista) return res.status(404).json({ error: 'Link de preenchimento inválido.' });
     const anexos = [];
     for (const file of req.files || []) {
-      const tipoOk = /^image\//.test(file.mimetype || '') || file.mimetype === 'application/pdf';
-      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF nem imagem.` });
+      const tipoOk = /^image\//.test(file.mimetype || '') || ['application/pdf', 'application/zip', 'application/x-zip-compressed'].includes(file.mimetype);
+      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF, imagem ou ZIP.` });
       const path = await storage.salvarArquivo(vista.id, file, 'formularios');
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype });
     }
@@ -1105,8 +1105,8 @@ app.post('/api/formularios-publico/:id/assinar', uploadAnexosFormulario.array('a
     }
     const anexos = [];
     for (const file of req.files || []) {
-      const tipoOk = /^image\//.test(file.mimetype || '') || file.mimetype === 'application/pdf';
-      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF nem imagem.` });
+      const tipoOk = /^image\//.test(file.mimetype || '') || ['application/pdf', 'application/zip', 'application/x-zip-compressed'].includes(file.mimetype);
+      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF, imagem ou ZIP.` });
       const path = await storage.salvarArquivo(req.params.id, file, 'formularios');
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype });
     }
@@ -3822,8 +3822,8 @@ app.post('/api/formularios', requireSection('formularios'), uploadAnexosFormular
     if (recusa) return res.status(recusa.status).json({ error: recusa.error });
     const anexos = [];
     for (const file of req.files || []) {
-      const tipoOk = /^image\//.test(file.mimetype || '') || file.mimetype === 'application/pdf';
-      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF nem imagem.` });
+      const tipoOk = /^image\//.test(file.mimetype || '') || ['application/pdf', 'application/zip', 'application/x-zip-compressed'].includes(file.mimetype);
+      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF, imagem ou ZIP.` });
       const path = await storage.salvarArquivo(payload.unidade || 'geral', file, 'formularios');
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype });
     }
@@ -3938,8 +3938,8 @@ app.post('/api/formularios/:id/anexos', auth.requireMaster, uploadAnexosFormular
     conferirTamanhoAnexos(req.files);
     const anexos = [];
     for (const file of req.files || []) {
-      const tipoOk = /^image\//.test(file.mimetype || '') || file.mimetype === 'application/pdf';
-      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF nem imagem.` });
+      const tipoOk = /^image\//.test(file.mimetype || '') || ['application/pdf', 'application/zip', 'application/x-zip-compressed'].includes(file.mimetype);
+      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF, imagem ou ZIP.` });
       const path = await storage.salvarArquivo(req.params.id, file, 'formularios');
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype });
     }
@@ -9357,9 +9357,9 @@ app.post('/api/tarefas/de-quebra/:id', auth.requireAuth, async (req, res) => {
 app.post('/api/tarefas/:id/anexos', auth.requireAuth, uploadTarefaAnexo.single('anexo'), async (req, res) => {
   try {
     const file = req.file;
-    if (!file) return res.status(400).json({ error: 'Envie um print ou PDF.' });
-    if (!/^image\/(png|jpe?g|webp)$/i.test(file.mimetype || '') && file.mimetype !== 'application/pdf') {
-      return res.status(400).json({ error: 'Anexe uma imagem (PNG, JPG ou WebP) ou PDF.' });
+    if (!file) return res.status(400).json({ error: 'Envie uma imagem, PDF ou ZIP.' });
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.mimetype || '') && !['application/pdf', 'application/zip', 'application/x-zip-compressed'].includes(file.mimetype)) {
+      return res.status(400).json({ error: 'Anexe uma imagem (PNG, JPG ou WebP), PDF ou ZIP.' });
     }
     const tarefa = await tarefas.getOne(req.params.id);
     if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acessoDasTarefas(req))) return res.status(404).json({ error: 'Tarefa não encontrada.' });

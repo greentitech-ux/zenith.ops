@@ -17,6 +17,7 @@ const PDFDocument = require('pdfkit');
 const path = require('path');
 const storage = require('./storage');
 const redes = require('./redes');
+const { nomeArquivoRegistro } = require('./reportUtil');
 
 const LOGO_GRUPO_BRAVO = path.join(__dirname, 'public', 'grupo-bravo.png');
 
@@ -327,7 +328,12 @@ function desenharConsolidado(res, lista, { filtro = '', geradoPor, nomeArquivo, 
 
 async function gerarOcorrenciaPDF(res, tarefa, { fichaCampos, geradoPor, inline = true } = {}) {
   const fotos = await baixarFotos(tarefa.anexos);
-  const nome = `${tarefa.ehOcorrencia ? 'ocorrencia' : 'tarefa'}-${String(tarefa.id).slice(0, 12)}.pdf`;
+  const nome = `${nomeArquivoRegistro(tarefa.ehOcorrencia ? 'ocorrencia' : 'tarefa', {
+    unidade: tarefa.unidadeNome || tarefa.unidade,
+    ticket: tarefa.numeroTicket ?? tarefa.vinculo?.numeroTicket,
+    criadoEm: tarefa.criadaEm,
+    id: tarefa.id,
+  })}.pdf`;
   desenharOcorrencia(res, tarefa, { fichaCampos, fotos, geradoPor, nomeArquivo: nome, inline });
 }
 

@@ -185,7 +185,7 @@
       const blob = await r.blob();
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'conversa-suporte.pdf';
+      a.download = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'conversa-suporte.pdf';
       document.body.appendChild(a);
       a.click();
       a.remove();

@@ -7,7 +7,7 @@
 // forcar isso dentro do reportUtil.js genérico (que é para tabelas, não
 // para uma conversa de tamanho variável).
 const PDFDocument = require('pdfkit');
-const { fmtDataHoraBR, nomeArquivoComData } = require('./reportUtil');
+const { fmtDataHoraBR, nomeArquivoRegistro } = require('./reportUtil');
 
 function rotuloAutor(chat, m) {
   if (m.de === 'visitante') return chat.nome || 'Visitante';
@@ -17,7 +17,12 @@ function rotuloAutor(chat, m) {
 
 function gerarChatPDF(res, chat) {
   const doc = new PDFDocument({ margin: 48, size: 'A4' });
-  const nomeArquivo = nomeArquivoComData(`chat-suporte-${chat.numeroTicket || chat.id}`);
+  const nomeArquivo = nomeArquivoRegistro('conversa-suporte', {
+    unidade: chat.lojaContexto,
+    ticket: chat.numeroTicket,
+    criadoEm: chat.criadoEm,
+    id: chat.id,
+  });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}.pdf"`);
   doc.pipe(res);
