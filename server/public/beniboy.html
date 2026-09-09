@@ -698,18 +698,9 @@ function restaurarEstadoPaineis(){
       }
       const icone = document.getElementById(`d-anexo-icone-${id}`);
       if(icone && estado.arquivo) icone.textContent = '✅';
-      // Um <input type=file> novo nao aceita atribuir value por seguranca.
-      // DataTransfer devolve o proprio File escolhido/colado ao novo campo,
-      // mantendo a previa e permitindo enviar sem pedir para anexar de novo.
-      const campoAnexo = document.getElementById(`d-anexo-${id}`);
-      if(campoAnexo && estado.arquivo){
-        try {
-          const transferencia = new DataTransfer();
-          transferencia.items.add(estado.arquivo);
-          campoAnexo.files = transferencia.files;
-          campoAnexo.dispatchEvent(new Event('change', { bubbles:true }));
-        } catch(e) { /* o mapa continua guardando o arquivo para o envio */ }
-      }
+      // Por seguranca o navegador nao deixa preencher um <input type=file>
+      // recriado. O File fica no mapa acima e enviarResposta o usa; o ✅
+      // deixa claro que ele continua pendente para envio.
     }
     const mensagens = document.querySelector(`.painel-conversa[data-painel-id="${CSS.escape(id)}"] .painel-msgs`);
     const rolagem = ROLAGEM_PAINEL_CHAT.get(id);
