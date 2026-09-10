@@ -968,6 +968,17 @@ let ARQUIVOS_RELATORIO = [];
 const LADO_MAX_RELATORIO = 2000;
 const QUALIDADE_RELATORIO = 0.85;
 const JA_PEQUENA_RELATORIO = 1500000; // ~1,5 MB: nao vale mexer, so perderia nitidez
+// Em alguns navegadores/arquivos (principalmente fotos recebidas por WhatsApp),
+// createImageBitmap pode ficar pendente sem disparar erro. O arquivo original
+// ainda serve para a leitura: a preparação não pode prender a tela por isso.
+const PRAZO_PREPARO_FOTO_MS = 12000;
+function comPrazoPreparoRelatorio(promessa){
+  let timer;
+  return Promise.race([
+    Promise.resolve(promessa),
+    new Promise(resolve=>{ timer=setTimeout(()=>resolve(null), PRAZO_PREPARO_FOTO_MS); }),
+  ]).finally(()=>clearTimeout(timer));
+}
 function carregarViaImgRelatorio(file){
   return new Promise((ok, falha)=>{
     const url = URL.createObjectURL(file);
@@ -980,7 +991,13 @@ function carregarViaImgRelatorio(file){
 async function comprimirImagemRelatorio(file){
   if(!file || !/^image\//.test(file.type||'')) return file; // PDF sobe inteiro
   try{
-    const img = window.createImageBitmap ? await createImageBitmap(file) : await carregarViaImgRelatorio(file);
+    let img = window.createImageBitmap
+      ? await comPrazoPreparoRelatorio(createImageBitmap(file))
+      : await comPrazoPreparoRelatorio(carregarViaImgRelatorio(file));
+    // O decoder moderno pode falhar ou vencer o prazo sem que a imagem esteja
+    // corrompida. Tenta o <img> tradicional antes de desistir da compressão.
+    if(!img && window.createImageBitmap) img=await comPrazoPreparoRelatorio(carregarViaImgRelatorio(file));
+    if(!img || !img.width || !img.height) return file;
     const lado = Math.max(img.width, img.height);
     const escala = Math.min(1, LADO_MAX_RELATORIO / lado);
     if(escala === 1 && file.size <= JA_PEQUENA_RELATORIO) return file;
@@ -995,10 +1012,14 @@ async function comprimirImagemRelatorio(file){
     return file; // qualquer tropeço na compressão manda o original; nunca trava a leitura
   }
 }
-async function comprimirVariasRelatorio(lista){
-  const saida = [];
-  for(const f of lista) saida.push(await comprimirImagemRelatorio(f));
-  return saida;
+async function comprimirVariasRelatorio(lista, aoPreparar){
+  // Todas as fotos seguem de forma independente: uma que não pode ser reduzida
+  // volta como original e nunca impede as outras de aparecerem para leitura.
+  let concluidas = 0;
+  return Promise.all(lista.map(async f=>{
+    try{return await comprimirImagemRelatorio(f)}
+    finally{ concluidas += 1; if(aoPreparar) aoPreparar(concluidas, lista.length); }
+  }));
 }
 
 let UNIDADE_DA_LEITURA = null;
@@ -1112,10 +1133,21 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', async (
   // reduz ANTES de guardar - é o que sobe pro servidor quando clicar em
   // Realizar leitura, e reduzir aqui (uma vez) é mais rápido que deixar a
   // foto original de celular pesar a leitura toda vez que o botão for clicado
-  msg.innerHTML = `<span style="color:var(--muted);">Preparando ${arquivos.length > 1 ? 'as fotos' : 'a foto'}...</span>`;
-  ARQUIVOS_RELATORIO = await comprimirVariasRelatorio(arquivos);
-  pintarSelecaoRelatorio();
-  msg.innerHTML = `<span style="color:var(--muted);">Confira as fotos e clique em <b>Realizar leitura</b>. Nada foi enviado ainda.</span>`;
+  const atualizarProgresso = (prontas,total)=>{
+    msg.innerHTML = `<span style="color:var(--muted);">Preparando foto ${prontas} de ${total}...</span>`;
+  };
+  atualizarProgresso(0, arquivos.length);
+  try{
+    ARQUIVOS_RELATORIO = await comprimirVariasRelatorio(arquivos, atualizarProgresso);
+    pintarSelecaoRelatorio();
+    msg.innerHTML = `<span style="color:var(--muted);">${ARQUIVOS_RELATORIO.length} foto(s) pronta(s). Confira e clique em <b>Realizar leitura</b>. Nada foi enviado ainda.</span>`;
+  }catch(err){
+    // Última rede de segurança: os originais são melhores que deixar a pessoa
+    // sem ação. A leitura do servidor continua validando tipo e tamanho.
+    ARQUIVOS_RELATORIO = arquivos;
+    pintarSelecaoRelatorio();
+    msg.innerHTML = `<span style="color:var(--warn);">Não foi possível reduzir uma ou mais fotos; elas serão enviadas no formato original. Confira e clique em <b>Realizar leitura</b>.</span>`;
+  }
 });
 
 // Conta, POR SECAO, quantos campos estao travados pela foto AGORA - e nao
