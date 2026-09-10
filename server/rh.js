@@ -130,7 +130,7 @@ async function criar({
   curriculo, cadastradoPorId, cadastradoPorEmail, precisaAprovacao, exigirCurriculo = true,
   dataExamePeriodico, periodicidadeExameMeses, dataUltimasFerias,
   cpf, rg, nomeMae, documentoIdentidade, leituraDocumento, exigirDocumento = true,
-  chavePix, banco,
+  chavePix, banco, fotoCadastro,
 }) {
   if (!unidade) throw new Error('Unidade é obrigatória.');
   const nomeOk = limpar(nome, 150);
@@ -186,6 +186,12 @@ async function criar({
     dataNascimento: validarDataOuNull(dataNascimento, 'Data de nascimento'),
     dataAdmissao: dataAdmissaoOk,
     curriculo: curriculo || null,
+    // Foto escolhida pela própria pessoa durante o cadastro. É opcional: se
+    // não vier, Extra/candidato recebe a primeira foto de check-in depois.
+    fotoCadastro: fotoCadastro && fotoCadastro.path ? {
+      path: String(fotoCadastro.path), tipo: String(fotoCadastro.tipo || 'image/jpeg'),
+      origem: 'cadastro', em: String(fotoCadastro.em || agora),
+    } : null,
     // dados lidos do documento de identidade (documentoIdentidadeOcr.js).
     // CPF ja chega aqui validado por digito verificador - o modulo devolve
     // null quando nao fecha, entao o que estiver gravado passou na conta.
@@ -403,6 +409,43 @@ async function atualizar(id, patch) {
   await ref.update(merge);
   rhCache.invalidar();
   return getOne(id);
+}
+
+// A primeira foto de entrada já é uma evidência operacional de identificação.
+// Para Extra e candidato em teste ela também vira a foto da ficha, apontando
+// para o mesmo arquivo do check-in (sem upload duplicado). Nunca substitui uma
+// foto que já exista, especialmente uma escolhida manualmente pelo Master.
+async function definirFotoCadastroDoPrimeiroCheckin(id, foto) {
+  if (!foto || !foto.path) return null;
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+  const atual = snap.data();
+  if (!['extra', 'candidato'].includes(atual.tipoCadastro) || atual.fotoCadastro) return atual;
+  const agora = new Date().toISOString();
+  const fotoCadastro = {
+    path: String(foto.path), tipo: String(foto.tipo || 'image/jpeg'),
+    origem: 'primeiro_checkin', em: agora,
+  };
+  await ref.update({ fotoCadastro, atualizadoEm: agora });
+  rhCache.invalidar();
+  return { ...atual, fotoCadastro, atualizadoEm: agora };
+}
+
+async function trocarFotoCadastro(id, foto, porEmail) {
+  if (!foto || !foto.path) throw new Error('Escolha uma imagem para a foto de cadastro.');
+  const ref = COLLECTION.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Funcionário não encontrado.');
+  const atual = snap.data();
+  const agora = new Date().toISOString();
+  const fotoCadastro = {
+    path: String(foto.path), tipo: String(foto.tipo || 'image/jpeg'),
+    origem: 'troca_manual', em: agora, trocadoPorEmail: porEmail || null,
+  };
+  await ref.update({ fotoCadastro, atualizadoEm: agora });
+  rhCache.invalidar();
+  return { ...atual, fotoCadastro, atualizadoEm: agora };
 }
 
 // marca que essa pessoa (gerente/assistente de gerente, normalmente) NÃO
@@ -1100,7 +1143,7 @@ async function metricas() {
 module.exports = {
   DIAS_TESTE_ALERTA, TIPOS_CADASTRO, ALERTA_EXPERIENCIA_DIAS,
   DOCUMENTOS_TIPOS, DOCUMENTOS_OBRIGATORIOS, DOCUMENTOS_LABEL,
-  criar, listAll, listByUnidades, getOne, atualizar, remover, mesclarDuplicados,
+  criar, listAll, listByUnidades, getOne, atualizar, definirFotoCadastroDoPrimeiroCheckin, trocarFotoCadastro, remover, mesclarDuplicados,
   desligar, reativar, registrarExamePeriodico, adicionarDocumento, removerDocumento,
   situacaoLegal, tempoDeCasaMeses, tempoDeCasaTexto, alertasTrabalhistas, metricas,
   buscarPorToken, regenerarLink, atualizarExcluirBonificacao,

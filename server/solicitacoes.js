@@ -66,7 +66,7 @@ function sanitizarItens(lista) {
     .filter((item) => item.descricao);
 }
 
-async function create({ tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, anexos, ehOrcamento, fornecedor, vencimento, criadoPorId, criadoPorEmail, direcionadoParaId, direcionadoParaEmail, numeroTicket, convertidoDeTipo, convertidoDeId, fechamentoId, prioridade, teste, nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista }) {
+async function create({ tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, anexos, ehOrcamento, fornecedor, vencimento, criadoPorId, criadoPorEmail, direcionadoParaId, direcionadoParaEmail, numeroTicket, convertidoDeTipo, convertidoDeId, fechamentoId, prioridade, teste, nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista, origemTarefa }) {
   if (!TIPOS.includes(tipo)) throw new Error('Tipo de solicitação inválido.');
   if (!unidade) throw new Error('Unidade é obrigatória.');
   if (!titulo || !String(titulo).trim()) throw new Error('Descreva o que está sendo pedido.');
@@ -102,6 +102,15 @@ async function create({ tipo, unidade, unidadeNome, titulo, valorEstimado, obser
     // onde ele veio, pra poder "voltar" no historico
     convertidoDeTipo: convertidoDeTipo || null,
     convertidoDeId: convertidoDeId || null,
+    // Uma tarefa pode amadurecer e virar solicitação. Guardamos a origem
+    // para auditoria e para que reenvio/rede não crie um segundo pedido com o
+    // mesmo Ticket #; não copiamos os comentários privados da tarefa.
+    origemTarefa: origemTarefa && origemTarefa.id ? {
+      id: String(origemTarefa.id).slice(0, 120),
+      titulo: String(origemTarefa.titulo || '').slice(0, 200),
+      criadoPorNome: String(origemTarefa.criadoPorNome || '').slice(0, 80),
+      criadaEm: origemTarefa.criadaEm || null,
+    } : null,
     // preenchido quando ESSE ticket vira outro tipo/colecao (ver mudarTipo,
     // converterParaEstorno) - status vira 'CONVERTIDO' e esses dois campos
     // apontam pro registro que continua a historia do ticket

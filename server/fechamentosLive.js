@@ -239,21 +239,31 @@ function diasPendentesDeFechamento(fechamentos, unidades, hoje, hora, limite = 2
   (unidades || []).forEach((u) => {
     const codigo = u && (u.codigo || u);
     if (!codigo) return;
-    // loja que nunca lançou nada cobra SÓ o último dia: sem histórico não dá
-    // pra saber desde quando ela existe, e 7 dias de cobrança numa loja que
-    // acabou de abrir é mentira
+    // SÓ loja que já lançou alguma vez. Unidade que nunca lançou nada não é
+    // atrasada, é ausente: escritório (MVPar), loja que ainda vai abrir (Spo
+    // Shop Midway) ou unidade cadastrada pra outra coisa. Cobrar essas foi o
+    // primeiro que o Master viu no aviso, e um aviso que erra é o primeiro
+    // que a operação aprende a ignorar. Mesma regra do painel "Dias sem
+    // fechamento" - uma pergunta, uma resposta.
+    if (!primeiro[codigo]) return;
     let de = ultimo;
-    if (primeiro[codigo]) {
-      for (let i = 1; i < DIAS_PENDENCIA_FECHAMENTO; i += 1) de = diaAnterior(de);
-      if (de < primeiro[codigo]) de = primeiro[codigo];
-    }
+    for (let i = 1; i < DIAS_PENDENCIA_FECHAMENTO; i += 1) de = diaAnterior(de);
+    if (de < primeiro[codigo]) de = primeiro[codigo];
     for (let dia = de; dia <= ultimo; dia = diaSeguinte(dia)) {
       if (!lancou.has(`${codigo}|${dia}`)) pendentes.push({ unidade: codigo, unidadeNome: (u && u.nome) || codigo, data: dia });
     }
   });
   // mais recente primeiro: é o que a loja precisa fazer agora
   pendentes.sort((a, b) => b.data.localeCompare(a.data) || String(a.unidadeNome).localeCompare(String(b.unidadeNome), 'pt-BR'));
-  return { total: pendentes.length, pendentes: pendentes.slice(0, limite) };
+  // `chaves` vai COMPLETA, mesmo quando a lista é cortada pelo limite: é o que
+  // o "não avisar mais" do Master precisa pra dispensar tudo que está pendente
+  // agora - dispensar só o que coube na tela faria o aviso voltar na tela
+  // seguinte, parecendo que o botão não funcionou.
+  return {
+    total: pendentes.length,
+    pendentes: pendentes.slice(0, limite),
+    chaves: pendentes.map((p) => `${p.unidade}|${p.data}`),
+  };
 }
 
 const CAMPOS_NUMERICOS = [
@@ -432,6 +442,24 @@ function sanitizarMapaExtras(obj, tipos) {
   return out;
 }
 
+// KPI vazio não é igual a KPI com valor zero. A sanitização numérica abaixo
+// transforma os dois em 0 para os cálculos do fechamento, então registramos a
+// pendência ANTES dela. Assim a gestão enxerga o que a loja deixou em branco,
+// sem tratar um "0" real como erro. KPI automático já vem de outra fonte e
+// não depende de digitação da loja.
+function kpisPendentesDoEnvio(kpisExtras, defs) {
+  const origem = kpisExtras && typeof kpisExtras === 'object' ? kpisExtras : {};
+  return (defs || []).filter((k) => {
+    if (!k || !k.campo || k.origem === 'remakesDoDia') return false;
+    const valor = origem[k.campo];
+    return valor == null || String(valor).trim() === '';
+  }).map((k) => ({
+    campo: String(k.campo).slice(0, 60),
+    label: String(k.label || k.campo).slice(0, 100),
+    tipo: String(k.tipo || 'quantidade').slice(0, 20),
+  }));
+}
+
 // resolve campo->tipo dos kpisExtras configurados pro grupo da unidade (ver
 // grupos.js) - usa o grupo REAL da unidade, nao o id que o cliente mandou no
 // payload, pra nao confiar em um "grupo" desatualizado/errado vindo do form
@@ -460,6 +488,11 @@ async function create({ unidade, unidadeNome, grupo, data, gerente, campos, kpis
   // criação, e guardado (nao e recalculado se ontem for corrigido depois)
   registro.ajustePosAnterior = await ajustePosDoDiaAnterior(unidade, data);
   const tiposKpi = await tiposKpiDaUnidade(unidade);
+  const grupoKpi = await grupos.grupoDaUnidade(unidade);
+  // Guarda a lista de campos que chegaram vazios para o aviso e o relatório.
+  // O mapa original ainda contém '' versus '0'; depois de sanitizado essa
+  // diferença deixa de existir e não pode mais ser inferida com segurança.
+  registro.kpisPendentes = kpisPendentesDoEnvio(kpisExtras, grupoKpi?.kpisExtras);
   registro.kpisExtras = sanitizarMapaExtras(kpisExtras, tiposKpi);
   registro.canaisVendaExtras = sanitizarMapaExtras(canaisVendaExtras);
   registro.formasPagamentoExtras = sanitizarMapaExtras(formasPagamentoExtras);
@@ -553,6 +586,92 @@ async function backfillQuebraCaixa(dataInicio, dataFim) {
       resultado.erros.push({ fechamentoId: f.id, unidade: f.unidadeNome, data: f.data, erro: err.message });
     }
   }
+  return resultado;
+}
+
+// Migração pontual e auditável do KPI criado com erro de digitação. Não roda
+// no boot e não tenta adivinhar nomes semelhantes: a tela do Master mostra a
+// prévia e pede confirmação antes de qualquer documento mudar.
+const MIGRACAO_CALABRESA = Object.freeze({ origem: 'calabress', destino: 'calabresa' });
+function fechamentosComCalabress(todos) {
+  return (todos || []).filter((f) => Object.prototype.hasOwnProperty.call(f.kpisExtras || {}, MIGRACAO_CALABRESA.origem));
+}
+function resumoMigracaoCalabresa(todos) {
+  const afetados = fechamentosComCalabress(todos);
+  const soma = (campo) => afetados.reduce((total, f) => total + num((f.kpisExtras || {})[campo]), 0);
+  const comDestino = afetados.filter((f) => Object.prototype.hasOwnProperty.call(f.kpisExtras || {}, MIGRACAO_CALABRESA.destino));
+  return {
+    origem: MIGRACAO_CALABRESA.origem,
+    destino: MIGRACAO_CALABRESA.destino,
+    fechamentos: afetados.length,
+    valorOrigem: soma(MIGRACAO_CALABRESA.origem),
+    valorDestinoJaExistente: soma(MIGRACAO_CALABRESA.destino),
+    valorDestinoAposMigracao: soma(MIGRACAO_CALABRESA.origem) + soma(MIGRACAO_CALABRESA.destino),
+    comOsDoisCampos: comDestino.length,
+    exemplos: afetados.slice(0, 12).map((f) => ({
+      id: f.id, data: f.data, unidade: f.unidadeNome || f.unidade,
+      origem: num((f.kpisExtras || {})[MIGRACAO_CALABRESA.origem]),
+      destino: num((f.kpisExtras || {})[MIGRACAO_CALABRESA.destino]),
+    })),
+  };
+}
+async function gruposDaMigracaoCalabresa() {
+  const lista = await grupos.list();
+  const comOrigem = (lista || []).filter((g) => (g.kpisExtras || []).some((k) => k.campo === MIGRACAO_CALABRESA.origem));
+  return {
+    grupos: comOrigem.map((g) => ({ id: g.id, nome: g.nome, temDestino: (g.kpisExtras || []).some((k) => k.campo === MIGRACAO_CALABRESA.destino) })),
+    semDestino: comOrigem.filter((g) => !(g.kpisExtras || []).some((k) => k.campo === MIGRACAO_CALABRESA.destino)),
+  };
+}
+async function previaMigracaoCalabresa() {
+  const [todos, gruposAfetados] = await Promise.all([listAllUncached(), gruposDaMigracaoCalabresa()]);
+  return { ...resumoMigracaoCalabresa(todos), grupos: gruposAfetados.grupos, gruposSemDestino: gruposAfetados.semDestino.map((g) => g.nome) };
+}
+async function migrarCalabressParaCalabresa(editadoPorEmail) {
+  const todos = await listAllUncached();
+  const afetados = fechamentosComCalabress(todos);
+  const gruposAfetados = await gruposDaMigracaoCalabresa();
+  if (gruposAfetados.semDestino.length) {
+    throw new Error(`O grupo ${gruposAfetados.semDestino.map((g) => g.nome).join(', ')} não tem o KPI Calabresa de destino. Corrija o cadastro antes de migrar.`);
+  }
+  const resultado = { ...resumoMigracaoCalabresa(todos), migrados: 0, gruposCorrigidos: [], erros: [] };
+  for (const atual of afetados) {
+    try {
+      const antes = { ...(atual.kpisExtras || {}) };
+      const origem = num(antes[MIGRACAO_CALABRESA.origem]);
+      const destinoAnterior = num(antes[MIGRACAO_CALABRESA.destino]);
+      const depois = { ...antes, [MIGRACAO_CALABRESA.destino]: destinoAnterior + origem };
+      delete depois[MIGRACAO_CALABRESA.origem];
+      const pendentes = Array.isArray(atual.kpisPendentes)
+        ? atual.kpisPendentes.filter((p) => p && p.campo !== MIGRACAO_CALABRESA.origem && p.campo !== MIGRACAO_CALABRESA.destino)
+        : atual.kpisPendentes;
+      const historico = [...(atual.historico || []), {
+        em: new Date().toISOString(), por: editadoPorEmail,
+        motivo: 'Migração de KPI: Calabress → Calabresa',
+        valoresAnteriores: { kpisExtras: { [MIGRACAO_CALABRESA.origem]: origem, [MIGRACAO_CALABRESA.destino]: destinoAnterior } },
+        valoresNovos: { kpisExtras: { [MIGRACAO_CALABRESA.destino]: destinoAnterior + origem } },
+      }];
+      const patch = { kpisExtras: depois, historico, atualizadoEm: new Date().toISOString() };
+      if (Array.isArray(pendentes)) patch.kpisPendentes = pendentes;
+      await COLLECTION.doc(atual.id).update(patch);
+      resultado.migrados += 1;
+    } catch (err) {
+      resultado.erros.push({ fechamentoId: atual.id, unidade: atual.unidadeNome || atual.unidade, data: atual.data, erro: err.message });
+    }
+  }
+  // Depois de mover o histórico, remove o KPI incorreto do formulário. Sem
+  // isso a loja continuaria vendo duas linhas e poderia recriar o erro amanhã.
+  for (const grupo of gruposAfetados.grupos) {
+    try {
+      const atual = (await grupos.list()).find((g) => g.id === grupo.id);
+      if (!atual) throw new Error('Grupo não encontrado durante a atualização.');
+      await grupos.update(grupo.id, { kpisExtras: (atual.kpisExtras || []).filter((k) => k.campo !== MIGRACAO_CALABRESA.origem) });
+      resultado.gruposCorrigidos.push(grupo.nome);
+    } catch (err) {
+      resultado.erros.push({ grupo: grupo.nome, erro: `Histórico migrado, mas não consegui remover o KPI antigo do grupo: ${err.message}` });
+    }
+  }
+  fechamentosCache.invalidar();
   return resultado;
 }
 
@@ -1264,5 +1383,5 @@ module.exports = {
   CAMPOS_NUMERICOS, create, listAll, listByUnidades, getOne, solicitarEdicao, listarEdicoes, getEdicao,
   decidirEdicao, editarDireto, moverFechamento, removerEdicao, remove, invalidarCache, marcarNotificacaoVistaEdicao, redirecionarEdicao,
   suspenderInvalidacao, retomarInvalidacao,
-  backfillQuebraCaixa,
+  backfillQuebraCaixa, previaMigracaoCalabresa, migrarCalabressParaCalabresa,
 };

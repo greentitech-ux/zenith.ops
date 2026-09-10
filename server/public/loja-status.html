@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>NOC Zenith · NoPulso</title>
+<title>NOC-NoPulso · NoPulso</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -108,6 +108,18 @@
   .btn-primary{background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
   .btn-primary:disabled{opacity:.5;cursor:default;}
   .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+  /* Mesmo padrão dos filtros do NOC: o período não pode cair no botão branco
+     nativo do navegador quando uma classe nova for usada na tela. */
+  .btn-secundario{appearance:none;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 11px;font:600 12px var(--sans);cursor:pointer;white-space:nowrap;transition:border-color .15s ease,background .15s ease,color .15s ease;}
+  .btn-secundario:hover{border-color:var(--accent);color:var(--accent);}
+  .btn-secundario.ativo{border-color:var(--accent);background:rgba(184,255,60,.11);color:var(--accent);}
+  .quedas-filtros{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr)) auto;gap:10px;align-items:end;margin-top:12px;padding-top:11px;border-top:1px solid var(--line);}
+  .quedas-filtros label{display:grid;gap:5px;font:10px var(--mono);letter-spacing:.06em;color:var(--muted);text-transform:uppercase;}
+  .quedas-filtros select,.quedas-filtros input{width:100%;height:36px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:7px 9px;font:12px var(--sans);text-transform:none;letter-spacing:normal;}
+  .quedas-filtros input:focus,.quedas-filtros select:focus{outline:none;border-color:var(--accent);}
+  .quedas-intervalo{display:grid;grid-template-columns:repeat(2,minmax(132px,1fr));gap:8px;grid-column:span 2;}
+  .quedas-acoes{display:flex;gap:7px;flex-wrap:wrap;align-items:center;}
+  .quedas-periodos{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:11px;border-top:1px solid var(--line);}
 
   /* ---- grid de equipamentos ---- */
   /* card compacto e clicavel (abre o detalhe) - so o essencial pra "bater o
@@ -136,19 +148,45 @@
   .uni-panel.recolhido .uni-caret{transform:rotate(-90deg);}
   .uni-panel.recolhido .uni-panel-head{margin-bottom:0;}
   .uni-panel.recolhido .uni-grid{display:none;}
+  /* o corpo das Quedas é tabela, não grade de cards - mas a regra que
+     recolhe mira .uni-grid, então ele mantém a classe e só troca o display */
+  /* O corpo também tem .uni-grid para herdar o recolhimento do painel. A
+     especificidade dupla é intencional: impede que .uni-grid (declarada
+     abaixo) volte a transformá-lo em grid e deixe tabela, nota e filtros
+     espremidos lado a lado. */
+  .uni-grid.quedas-corpo{display:block;min-width:0;}
+  .uni-panel.recolhido .quedas-corpo{display:none;}
   .uni-panel-sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);font-weight:400;text-transform:uppercase;letter-spacing:.04em;}
   .uni-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;}
   /* tabela de quedas: rolagem propria no celular, pra pagina nunca rolar
      de lado (a tela e usada no telefone) */
-  .quedas-wrap{overflow-x:auto;}
-  .quedas-tab{width:100%;border-collapse:collapse;font-size:12.5px;min-width:520px;}
+  .quedas-wrap{overflow-x:auto;max-width:100%;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;}
+  .quedas-tab{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:620px;}
   .quedas-tab th{text-align:right;font-family:var(--mono);font-size:10px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.04em;font-weight:400;padding:0 8px 8px;white-space:nowrap;}
   .quedas-tab th:first-child,.quedas-tab td:first-child{text-align:left;}
+  .quedas-ordem{appearance:none;border:0;background:none;color:var(--muted);font:inherit;text-transform:inherit;letter-spacing:inherit;padding:0;cursor:pointer;white-space:nowrap;}
+  .quedas-ordem:hover,.quedas-ordem.ativo{color:var(--accent);}
+  .quedas-ordem span{font-size:12px;letter-spacing:0;}
   .quedas-tab td{text-align:right;padding:7px 8px;border-top:1px solid var(--line);
     font-variant-numeric:tabular-nums;white-space:nowrap;}
+  /* Unidade é a âncora da leitura: continua à vista enquanto os indicadores
+     rolam horizontalmente. O fundo opaco evita os números passarem por baixo. */
+  .quedas-tab th:first-child,.quedas-tab td:first-child{position:sticky;left:0;z-index:1;width:210px;min-width:210px;max-width:210px;background:var(--panel);box-shadow:9px 0 10px -12px rgba(0,0,0,.9);}
+  .quedas-tab th:first-child{z-index:2;}
+  .quedas-unidade-nome{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .quedas-medicao{display:block;color:var(--muted);font:9px var(--mono);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .quedas-fora{display:block;color:var(--bad);font-size:10px;font-family:var(--mono);font-weight:500;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .quedas-tab tr.pior td{font-weight:700;}
   .quedas-nota{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.5;}
+  .quedas-eventos{margin-top:12px;border-top:1px solid var(--line);padding-top:11px;}
+  .quedas-eventos h4{margin:0 0 8px;font:11px var(--mono);letter-spacing:.06em;color:var(--muted);text-transform:uppercase;}
+  .quedas-eventos-lista{display:grid;gap:6px;max-height:260px;overflow:auto;padding-right:3px;}
+  .queda-evento{display:grid;grid-template-columns:minmax(140px,1fr) auto auto;gap:12px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:12px;}
+  .queda-evento-unidade{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .queda-evento-hora{font-family:var(--mono);color:var(--muted);white-space:nowrap;}
+  .queda-evento-status{font:10px var(--mono);color:var(--good);white-space:nowrap;}
+  .queda-evento-status.aberta{color:var(--bad);}
   .uni-card{background:var(--bg,#0f1115);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;text-align:left;font-family:inherit;color:inherit;transition:border-color .15s ease,background .15s ease;}
   .uni-card:hover{border-color:var(--accent);}
   .uni-card.ativo{border-color:var(--accent);background:rgba(184, 255, 60,.07);}
@@ -164,6 +202,21 @@
   .uni-bar .b-on{background:var(--ok);}
   .uni-bar .b-off{background:var(--bad);}
   .uni-bar .b-nv{background:var(--muted);opacity:.5;}
+  @media(max-width:640px){
+    .uni-panel{padding:13px 12px;}
+    .uni-panel-head{align-items:flex-start;}
+    .uni-panel-sub{max-width:44%;text-align:right;line-height:1.35;}
+    .quedas-tab{min-width:540px;font-size:12px;}
+    .quedas-tab th,.quedas-tab td{padding-left:7px;padding-right:7px;}
+    .quedas-tab th:first-child,.quedas-tab td:first-child{width:132px;min-width:132px;max-width:132px;}
+    .quedas-fora{font-size:9px;}
+    .queda-evento{grid-template-columns:minmax(0,1fr) auto;gap:5px 9px;}
+    .queda-evento-hora{grid-column:1/-1;font-size:10px;}
+    .quedas-periodos{gap:6px;}
+    .quedas-periodos .btn-secundario{padding:8px 10px;}
+    .quedas-filtros{grid-template-columns:1fr 1fr;}
+    .quedas-intervalo{grid-column:1/-1;}
+  }
   .equip-tile{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:10px;padding:10px 11px;display:flex;flex-direction:column;gap:5px;cursor:pointer;transition:border-color .15s ease,background .15s ease;}
   .equip-tile:hover{border-color:var(--accent);background:var(--panel2);}
   .equip-tile.status-online{border-left-color:var(--ok);}
@@ -324,7 +377,7 @@
   .msg-dica{font-family:var(--mono);font-size:9.5px;color:var(--muted);}
   .msg-dica b{color:var(--text);font-weight:600;}
 
-  /* ---- NOC Zenith: painel do agente (Master-only) ---- */
+  /* ---- NOC-NoPulso: painel do agente (Master-only) ---- */
   .agente-titulo{display:flex;align-items:center;gap:8px;margin:32px 0 4px;padding-top:20px;border-top:1px solid var(--line);}
   .agente-titulo h2{font-size:16px;}
   .agente-sub{font-size:12px;color:var(--muted);margin-bottom:18px;line-height:1.5;}
@@ -355,13 +408,13 @@
       <button type="button" class="hamburger-btn" id="btn-menu" onclick="abrirMenu()" aria-label="Abrir menu" title="Menu">☰</button>
       <div style="min-width:0;">
         <div class="eyebrow">NoPulso · Solutions Ti Tech</div>
-        <h1>📡 NOC Zenith</h1>
+        <h1>📡 NOC-NoPulso</h1>
       </div>
     </div>
     <div class="header-nav">
       <span class="ultima-atualizacao" id="ultima-atualizacao"></span>
       <button class="back hidden" id="btn-manutencao" onclick="abrirManutencao()" title="Reiniciar computadores do parque - um, uma unidade inteira ou várias unidades">🔁 Reiniciar máquinas</button>
-      <button class="back hidden" id="btn-limpar-travados" onclick="limparTravados()" title="Manda todos os computadores fecharem processos travados do NOCZenith">🧹 Destravar lojas</button>
+      <button class="back hidden" id="btn-limpar-travados" onclick="limparTravados()" title="Manda todos os computadores fecharem processos travados do agente NOC-NoPulso">🧹 Destravar lojas</button>
       <!-- atalho pra central de HD/temperatura/reboot: o card daqui mostra o
            computador que voce ja escolheu; la e a frota inteira de uma vez -->
       <a class="back" href="/noc-maquinas.html" title="HD, temperatura e tempo ligado de todos os computadores">💽 Saúde das Máquinas</a>
@@ -394,7 +447,7 @@
       <div class="kpi-num" id="kpi-num-offline">0</div>
       <div class="kpi-label">🔴 Indisponível</div>
     </button>
-    <button type="button" class="kpi-card kpi-nunca" id="kpi-nunca" onclick="setFiltroStatus('nunca')" title="Cadastrado no parque mas o NOCZenith nunca foi instalado - nunca bateu uma vez sequer">
+    <button type="button" class="kpi-card kpi-nunca" id="kpi-nunca" onclick="setFiltroStatus('nunca')" title="Cadastrado no parque mas o agente NOC-NoPulso nunca foi instalado - nunca bateu uma vez sequer">
       <div class="kpi-num" id="kpi-num-nunca">0</div>
       <div class="kpi-label">⚪ Sem agente</div>
     </button>
@@ -418,7 +471,12 @@
       <span><span class="uni-caret">▾</span> 📉 Quedas de conexão</span>
       <span class="uni-panel-sub" id="quedas-sub">clique para carregar</span>
     </button>
-    <div id="quedas-corpo" class="uni-grid" style="display:block;"></div>
+    <!-- SEM style inline aqui. O `display:block` cravado no elemento vencia a
+         regra `.uni-panel.recolhido .uni-grid{display:none}` da folha de
+         estilo (inline sempre ganha), e por isso o painel abria mas NUNCA
+         recolhia. A classe .quedas-corpo faz o mesmo papel do block que
+         estava ali, e agora o .recolhido consegue fechar. -->
+    <div id="quedas-corpo" class="uni-grid quedas-corpo"></div>
   </div>
 
   <div class="filtro-bar">
@@ -455,7 +513,7 @@
     <button type="button" class="btn-notif" onclick="carregarRede()" title="Atualizar">🔄</button>
   </div>
   <div class="rede-sub">
-    Medido pelo próprio batimento que cada computador já manda a cada 25s — pior link primeiro. Onde o NOCZenith está instalado, o teste separa a <b>rede interna</b> (até o roteador da loja) do <b>link da operadora</b>, que é o que decide para quem abrir chamado. Nos computadores que reportam só pelo navegador aparece apenas a latência do sistema.
+    Medido pelo próprio batimento que cada computador já manda a cada 25s — pior link primeiro. Onde o NOC-NoPulso está instalado, o teste separa a <b>rede interna</b> (até o roteador da loja) do <b>link da operadora</b>, que é o que decide para quem abrir chamado. Nos computadores que reportam só pelo navegador aparece apenas a latência do sistema.
   </div>
   <div class="rede-resumo" id="rede-resumo"></div>
   <div class="rede-global hidden" id="rede-global"></div>
@@ -513,7 +571,7 @@
     <textarea id="acao-descricao" maxlength="600" placeholder="Ex: use quando o cliente disser que a impressora não imprime nada"></textarea>
     <label>O que essa ação faz</label>
     <div class="radio-tipo">
-      <label><input type="radio" name="acao-tipo" value="comando_maquina" checked onchange="onMudaTipoAcao()"><span><b>💻 Rodar comando no computador</b><small>PowerShell fixo, roda via NOCZenith num computador tipo interno</small></span></label>
+      <label><input type="radio" name="acao-tipo" value="comando_maquina" checked onchange="onMudaTipoAcao()"><span><b>💻 Rodar comando no computador</b><small>PowerShell fixo, roda via agente NOC-NoPulso num computador tipo interno</small></span></label>
       <label><input type="radio" name="acao-tipo" value="acao_sistema" onchange="onMudaTipoAcao()"><span><b>⚙️ Ação de sistema</b><small>uma função pronta do NoPulso - hoje só "criar usuário"</small></span></label>
     </div>
     <div id="acao-campo-comando">
@@ -568,7 +626,7 @@
   <div class="modal" style="max-width:640px;">
     <h3>🔁 Janela de Manutenção · reiniciar máquinas</h3>
     <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">
-      Só entra na lista computador <b>interno</b> com NOCZenith instalado - é quem sabe receber comando.
+      Só entra na lista computador <b>interno</b> com o agente NOC-NoPulso instalado - é quem sabe receber comando.
       Cada máquina pega o comando na próxima batida (até ~25s) e mostra um aviso de <b>2 minutos</b> na tela da loja antes de reiniciar.
       Máquina indisponível recebe quando voltar.
     </div>
@@ -657,6 +715,18 @@
       <label><input type="radio" name="novo-comp-tipo" value="interno"><span><b>🔒 Computador interno</b><small>tela normal de login do NoPulso - pra servidor/PC de escritório, só pro monitoramento</small></span></label>
       <label><input type="radio" name="novo-comp-tipo" value="abastecimento"><span><b>🛒 Abastecimento Carrinho</b><small>tela do Abastecimento (Dom Aeroporto) - pro tablet do carrinho/loja, com monitoramento</small></span></label>
     </div>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;cursor:pointer;">
+      <input type="checkbox" id="novo-comp-servidor" style="margin-top:3px;">
+      <span><b>🗄️ É servidor</b><small style="display:block;color:var(--muted);">identifica a máquina de servidor no parque monitorado</small></span>
+    </label>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
+      <input type="checkbox" id="novo-comp-gcom" style="margin-top:3px;">
+      <span><b>🖥️ Possui GCOM</b><small style="display:block;color:var(--muted);">mostra o indicador GCOM no cartão da máquina</small></span>
+    </label>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
+      <input type="checkbox" id="novo-comp-mede-quedas" style="margin-top:3px;">
+      <span><b>📉 Medir quedas da unidade</b><small style="display:block;color:var(--muted);">entra no relatório de internet da loja; duas máquinas marcadas ao mesmo tempo contam como uma única queda</small></span>
+    </label>
     <div class="msg hidden" id="novo-comp-status"></div>
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharModalNovoComputador()">Cancelar</button>
@@ -716,6 +786,18 @@
     <label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;cursor:pointer;">
       <input type="checkbox" id="editar-comp-notebook" style="margin-top:3px;">
       <span><b>💤 É notebook</b><small style="display:block;color:var(--muted);">hiberna/dorme fora de hora - as quedas dele aparecem no painel, mas nunca disparam o alerta sonoro/push</small></span>
+    </label>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
+      <input type="checkbox" id="editar-comp-servidor" style="margin-top:3px;">
+      <span><b>🗄️ É servidor</b><small style="display:block;color:var(--muted);">identifica a máquina de servidor no parque monitorado</small></span>
+    </label>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
+      <input type="checkbox" id="editar-comp-gcom" style="margin-top:3px;">
+      <span><b>🖥️ Possui GCOM</b><small style="display:block;color:var(--muted);">mostra o indicador GCOM no cartão da máquina</small></span>
+    </label>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;">
+      <input type="checkbox" id="editar-comp-mede-quedas" style="margin-top:3px;">
+      <span><b>📉 Medir quedas da unidade</b><small style="display:block;color:var(--muted);">ponto de medição da internet da loja; várias máquinas podem ser marcadas, sem multiplicar uma queda real</small></span>
     </label>
     <div class="msg hidden" id="editar-comp-status"></div>
     <div class="modal-acoes">
@@ -863,7 +945,7 @@ function linkTexto(c){
 // máquina nunca instalada como máquina caída - eram as duas pintadas de
 // vermelho, e é o que fazia procurar problema de rede onde não havia.
 function textoDeEstado(c, status){
-  if(status === 'nunca') return 'sem agente · NOCZenith nunca instalado aqui';
+  if(status === 'nunca') return 'sem agente · NOC-NoPulso nunca instalado aqui';
   // tempoRelativo já devolve com o "há" ("há 2d") - repetir aqui dava "há há 2d"
   if(status === 'offline') return `indisponível · calada ${tempoRelativo(c.ultimoHeartbeatEm)}`;
   if(status === 'degradado') return `degradado · ${(c.degradacao||[]).join(' · ')}`;
@@ -1042,11 +1124,14 @@ function equipTileHtml(codigo, c){
   const btnAnydesk = c.anydeskId
     ? `<a class="btn-anydesk" href="anydesk:${escapeHtml(c.anydeskId)}" title="Abrir no AnyDesk" onclick="event.stopPropagation()">🖥️</a>`
     : `<span class="btn-anydesk btn-anydesk-off" title="Sem AnyDesk cadastrado">🖥️</span>`;
+  const marcadorGcom = c.temGcom ? '<span class="btn-anydesk" title="Possui GCOM">G</span>' : '';
+  const marcadorServidor = c.ehServidor ? '<span class="btn-anydesk" title="Servidor">🗄️</span>' : '';
+  const marcadorQuedas = c.medeQuedas ? '<span class="btn-anydesk" title="Ponto de medição de quedas da unidade">📉</span>' : '';
   return `<div class="equip-tile status-${status}" data-codigo="${escapeHtml(codigo)}" data-posto="${escapeHtml(c.posto)}" onclick="abrirDetalheComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">
     <div class="equip-tile-head">
       <span class="status-dot ${status}"></span>
       <span class="equip-tile-nome" title="${nomeOk}">${nomeOk}</span>
-      ${btnAnydesk}
+      ${marcadorServidor}${marcadorGcom}${marcadorQuedas}${btnAnydesk}
     </div>
     <div class="equip-tile-unidade" title="${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}">${escapeHtml(UNIDADES_NOMES[codigo] || codigo)}</div>
     <div class="equip-tile-status ${status}">${statusTexto}</div>
@@ -1076,6 +1161,12 @@ function atualizarConteudoDetalhe(codigo, c){
   // que serve pra acesso remoto no dia a dia (pedido explicito do usuario)
   if(c.ipLocal) infoBits.push(`🏠 IP local: <b>${escapeHtml(c.ipLocal)}</b> <button type="button" class="btn-copiar-ip" title="Copiar IP local" onclick="copiarIpLocal('${escapeJs(c.ipLocal)}')">📋</button>`);
   if(c.ip) infoBits.push(`🌐 IP público: ${escapeHtml(c.ip)}`);
+  if(c.tailscale){
+    const t = c.tailscale;
+    const estado = t.instalado ? (t.estado === 'Running' ? '<b style="color:var(--ok);">conectado</b>' : `<b style="color:var(--warn,#e0a800);">${escapeHtml(t.estado||'desconhecido')}</b>`) : '<span style="color:var(--muted);">não instalado</span>';
+    const extras = [t.ip ? `IP ${escapeHtml(t.ip)}` : null, t.nome ? escapeHtml(t.nome) : null, t.versao ? `v${escapeHtml(t.versao)}` : null].filter(Boolean).join(' · ');
+    infoBits.push(`🔒 Tailscale: ${estado}${extras ? ` · <span style="font-size:11px;">${extras}</span>` : ''}`);
+  }
   const disp = resumoDispositivo(c.userAgent);
   if(disp) infoBits.push(`💻 ${escapeHtml(disp)}`);
   if(c.abertoDesde) infoBits.push(`⏱️ aberto ${escapeHtml(tempoRelativo(c.abertoDesde))}`);
@@ -1194,12 +1285,13 @@ function atualizarConteudoDetalhe(codigo, c){
     <button type="button" class="btn-mini" onclick="abrirModalMensagem('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">💬 Mensagem</button>
     <button type="button" class="btn-mini" onclick="copiarLinkComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🔗 Link</button>
     <button type="button" class="btn-mini ok" title="Copiar o comando de instalação pra colar no PowerShell da loja (contorna o bloqueio do Windows)" onclick="copiarComandoVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">📋 Copiar comando</button>
-    <button type="button" class="btn-mini" title="Baixar o arquivo NOCZenith.ps1 (jeito manual)" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️ Baixar</button>
+    <button type="button" class="btn-mini" title="Baixar o agente NOC-NoPulso (jeito manual)" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️ Baixar</button>
+    ${c.tipo === 'interno' ? `<button type="button" class="btn-mini" style="color:var(--warn);" title="Reiniciar este computador - abre a janela de manutenção já com ele marcado" onclick="reiniciarDesteComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🔁 Reiniciar</button>` : ''}
     <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️ Remover</button>
   `;
   document.getElementById('detalhe-comp-editar').onclick = () => {
     fecharDetalheComputador();
-    abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook);
+    abrirModalEditarComputador(codigo, c.posto, c.nome||'', c.tipo||'atendimento', c.anydeskId||'', !!c.ehNotebook, !!c.ehServidor, !!c.temGcom, !!c.medeQuedas);
   };
 }
 
@@ -1277,8 +1369,18 @@ function linhaEvento(ev){
       : `registrado · <b>${escapeHtml(ev.para)}</b>`;
     return `<div class="ev-linha"><span class="ev-dot warn"></span><b>${qual}</b> ${texto} · ${fmtDataHora(ev.em)}</div>`;
   }
+  // SESSÃO = alguém entrou de verdade (lido do log da própria ferramenta, ver
+  // Verificar-SessaoRemota no vigiaScript.js). É o evento que interessa, e por
+  // isso é o único vermelho dos dois
+  if(ev.tipo==='sessao-remota'){
+    return `<div class="ev-linha"><span class="ev-dot bad"></span><b>🔓 Sessão remota</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+  }
+  // ...e isto é só o serviço conversando com a nuvem dele. Fica registrado
+  // porque é assim que se descobre que a máquina tem acesso remoto ligado 24h,
+  // mas não é ninguém entrando - o rótulo diz isso, senão as duas linhas se
+  // parecem e a de verdade se perde no meio
   if(ev.tipo==='acesso-remoto'){
-    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Acesso remoto</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>Serviço de acesso remoto ligado</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
   }
   if(ev.tipo==='disco'){
     return `<div class="ev-linha"><span class="ev-dot bad"></span><b>Disco piorou</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
@@ -1473,6 +1575,13 @@ function toggleFiltroUnidade(cod){
 // So busca quando o Master ABRE o painel: e relatorio de analise, nao
 // precisa entrar no poll de 30s da tela.
 let QUEDAS_CARREGADO = false;
+let QUEDAS_PERIODO = 30;
+let QUEDAS_DADOS = null;
+let QUEDAS_GRUPO = '';
+let QUEDAS_UNIDADE = '';
+let QUEDAS_DE = '';
+let QUEDAS_ATE = '';
+let QUEDAS_ORDENACAO = { campo: 'foraMs', direcao: 'desc' };
 function alternarPainelQuedas(){
   const p = document.getElementById('quedas-panel');
   const abriu = p.classList.toggle('recolhido') === false;
@@ -1480,42 +1589,137 @@ function alternarPainelQuedas(){
   if(abriu && !QUEDAS_CARREGADO) carregarQuedas();
 }
 function fmtHoras(h){ return h >= 1 ? h.toFixed(1).replace('.', ',') + 'h' : Math.round(h * 60) + 'min'; }
-async function carregarQuedas(dias){
+// os botões saem do mesmo lugar nos dois caminhos (com e sem queda no
+// período): sem isso, escolher "Ontem" num dia limpo trocava a tabela por um
+// texto e levava os botões junto - a pessoa ficava presa naquele período
+function rotuloPeriodoQuedas(d){
+  if(d?.periodo) return `${d.periodo.inicio.split('-').reverse().join('/')} a ${d.periodo.fim.split('-').reverse().join('/')}`;
+  return d?.dias === 'hoje' ? 'hoje' : d?.dias === 'ontem' ? 'ontem' : `${d?.dias || QUEDAS_PERIODO} dias`;
+}
+function opcaoQuedas(valor, texto, atual){ return `<option value="${escapeHtml(valor)}"${String(valor)===String(atual)?' selected':''}>${escapeHtml(texto)}</option>`; }
+function filtrosQuedas(){
+  const unidades = [...new Map((QUEDAS_DADOS?.unidades || []).map(u=>[u.codigo,u])).values()]
+    .sort((a,b)=>String(a.unidadeNome||a.codigo).localeCompare(String(b.unidadeNome||b.codigo),'pt-BR'));
+  return `<div class="quedas-filtros" aria-label="Filtros do relatório de quedas">
+    <label>Grupo<select id="quedas-grupo" onchange="filtrarQuedas()">${opcaoQuedas('','Todos os grupos',QUEDAS_GRUPO)}${opcaoQuedas('GBE','Grupo Bravo (GBE)',QUEDAS_GRUPO)}${opcaoQuedas('ARCFOOD','ARCFOOD',QUEDAS_GRUPO)}</select></label>
+    <label>Unidade<select id="quedas-unidade" onchange="filtrarQuedas()">${opcaoQuedas('','Todas as unidades',QUEDAS_UNIDADE)}${unidades.filter(u=>!QUEDAS_GRUPO||u.grupo===QUEDAS_GRUPO).map(u=>opcaoQuedas(u.codigo,u.unidadeNome||u.codigo,QUEDAS_UNIDADE)).join('')}</select></label>
+    <div class="quedas-intervalo"><label>De<input id="quedas-de" type="date" value="${escapeHtml(QUEDAS_DE)}"></label><label>Até<input id="quedas-ate" type="date" value="${escapeHtml(QUEDAS_ATE)}"></label></div>
+    <div class="quedas-acoes"><button type="button" class="btn-secundario" onclick="aplicarPeriodoQuedas()">Aplicar período</button><button type="button" class="btn-secundario" onclick="baixarRelatorioQuedas()">📄 PDF</button></div>
+  </div>`;
+}
+function botoesPeriodoQuedas(){
+  const ativo = (v) => String(QUEDAS_PERIODO) === String(v) ? ' ativo' : '';
+  return `<div class="quedas-periodos" aria-label="Período do relatório de quedas">
+    <button type="button" class="btn-secundario${ativo('hoje')}" onclick="carregarQuedas('hoje')">Hoje</button>
+    <button type="button" class="btn-secundario${ativo('ontem')}" onclick="carregarQuedas('ontem')">Ontem</button>
+    <button type="button" class="btn-secundario${ativo(7)}" onclick="carregarQuedas(7)">7 dias</button>
+    <button type="button" class="btn-secundario${ativo(30)}" onclick="carregarQuedas(30)">30 dias</button>
+    <button type="button" class="btn-secundario${ativo(90)}" onclick="carregarQuedas(90)">90 dias</button>
+  </div>`;
+}
+function filtrarQuedas(){
+  QUEDAS_GRUPO = document.getElementById('quedas-grupo')?.value || '';
+  QUEDAS_UNIDADE = document.getElementById('quedas-unidade')?.value || '';
+  renderQuedas();
+}
+function aplicarPeriodoQuedas(){
+  QUEDAS_DE = document.getElementById('quedas-de')?.value || '';
+  QUEDAS_ATE = document.getElementById('quedas-ate')?.value || '';
+  if(!QUEDAS_DE || !QUEDAS_ATE || QUEDAS_DE > QUEDAS_ATE){ alert('Informe um período válido: De e Até.'); return; }
+  carregarQuedas('personalizado');
+}
+function ordenarQuedas(campo){
+  QUEDAS_ORDENACAO = QUEDAS_ORDENACAO.campo === campo
+    ? { campo, direcao: QUEDAS_ORDENACAO.direcao === 'desc' ? 'asc' : 'desc' }
+    : { campo, direcao: 'desc' };
+  renderQuedas();
+}
+function cabecalhoQuedas(rotulo, campo){
+  const ativo = QUEDAS_ORDENACAO.campo === campo;
+  const seta = ativo ? (QUEDAS_ORDENACAO.direcao === 'desc' ? ' ↓' : ' ↑') : ' ↕';
+  return `<button type="button" class="quedas-ordem${ativo?' ativo':''}" onclick="ordenarQuedas('${campo}')" title="Ordenar por ${rotulo}">${rotulo}<span>${seta}</span></button>`;
+}
+function horaQueda(timestamp){
+  return new Intl.DateTimeFormat('pt-BR',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit'}).format(new Date(timestamp));
+}
+function duracaoQueda(inicio, fim){
+  const minutos = Math.max(0, Math.round(((fim || Date.now()) - inicio) / 60000));
+  if(minutos < 60) return `${minutos} min`;
+  return `${Math.floor(minutos / 60)}h ${minutos % 60 ? `${minutos % 60}min` : ''}`.trim();
+}
+function detalhesQuedasHoje(unidades){
+  if(QUEDAS_DADOS?.dias !== 'hoje') return '';
+  const eventos = unidades.flatMap(u => (u.eventos || []).map(e => ({...e, unidade: u.unidadeNome || u.codigo})))
+    .sort((a,b) => b.inicio - a.inicio);
+  if(!eventos.length) return '';
+  const linhas = eventos.map(e => {
+    const unidade = escapeHtml(e.unidade);
+    const horario = `Caiu ${horaQueda(e.inicio)} · ${e.fim ? `voltou ${horaQueda(e.fim)}` : 'ainda fora'}`;
+    const status = e.fim ? `${duracaoQueda(e.inicio,e.fim)} fora` : `fora há ${duracaoQueda(e.inicio)}`;
+    return `<div class="queda-evento"><span class="queda-evento-unidade" title="${unidade}">${unidade}</span><span class="queda-evento-status${e.fim?'':' aberta'}">${e.fim ? '● normalizada' : '● em andamento'}</span><span class="queda-evento-hora">${horario} · ${status}</span></div>`;
+  }).join('');
+  return `<section class="quedas-eventos" aria-label="Horários das quedas de hoje"><h4>Horários das quedas de hoje</h4><div class="quedas-eventos-lista">${linhas}</div></section>`;
+}
+function renderQuedas(){
+  const corpo = document.getElementById('quedas-corpo');
+  const sub = document.getElementById('quedas-sub');
+  const dados = QUEDAS_DADOS;
+  if(!dados) return;
+  let unidades = (dados.unidades || []).filter(u => (!QUEDAS_GRUPO || u.grupo === QUEDAS_GRUPO) && (!QUEDAS_UNIDADE || u.codigo === QUEDAS_UNIDADE));
+  unidades = unidades.filter(u=>u.quedas > 0).sort((a,b)=>{
+    const aa = QUEDAS_ORDENACAO.campo === 'unidadeNome' ? String(a.unidadeNome||a.codigo) : Number(a[QUEDAS_ORDENACAO.campo] || 0);
+    const bb = QUEDAS_ORDENACAO.campo === 'unidadeNome' ? String(b.unidadeNome||b.codigo) : Number(b[QUEDAS_ORDENACAO.campo] || 0);
+    const resultado = typeof aa === 'string' ? aa.localeCompare(bb,'pt-BR') : aa-bb;
+    return QUEDAS_ORDENACAO.direcao === 'desc' ? -resultado : resultado;
+  });
+  const totalQuedas = unidades.reduce((s,u)=>s+u.quedas,0);
+  const totalHoras = +(unidades.reduce((s,u)=>s+u.horasFora,0)).toFixed(1);
+  sub.textContent = `${totalQuedas} queda(s) · ${String(totalHoras).replace('.', ',')}h fora · ${rotuloPeriodoQuedas(dados)}`;
+  if(!unidades.length){
+    const semPonto = !dados.totalPontosMedicao;
+    corpo.innerHTML = `<div class="quedas-nota">${semPonto ? '<b>Configure o primeiro ponto de medição.</b> Edite uma máquina da unidade e marque “📉 Medir quedas da unidade”. Você pode marcar mais de uma, sem multiplicar a mesma queda.' : 'Nenhuma queda registrada para os filtros escolhidos.'}</div>` + filtrosQuedas() + botoesPeriodoQuedas();
+    return;
+  }
+  const linhas = unidades.map((u) => {
+    const nome = escapeHtml(u.unidadeNome || u.codigo);
+    const origem = u.fonteMedicao === 'automatico' ? 'automática (histórico)' : 'pontos marcados';
+    const medicao = u.medicaoRedundante ? `📉 ${u.computadores} pontos · correlação ${origem}` : `📉 1 ponto · sinal não redundante (${origem})`;
+    return `<tr><td title="${nome}"><span class="quedas-unidade-nome">${nome}</span><span class="quedas-medicao">${medicao}</span>${u.foraAgora ? '<span class="quedas-fora">● fora agora</span>' : ''}</td><td>${u.quedas}</td><td>${u.confirmadas}</td><td>${u.oscilacoes}</td><td>${fmtHoras(u.horasFora)}</td><td>${u.maiorMin} min</td></tr>`;
+  }).join('');
+  corpo.innerHTML = `${filtrosQuedas()}<div class="quedas-wrap"><table class="quedas-tab"><thead><tr><th>${cabecalhoQuedas('Unidade','unidadeNome')}</th><th>${cabecalhoQuedas('Quedas','quedas')}</th><th>${cabecalhoQuedas('Confirmadas','confirmadas')}</th><th>${cabecalhoQuedas('Oscilações','oscilacoes')}</th><th>${cabecalhoQuedas('Tempo fora','horasFora')}</th><th>${cabecalhoQuedas('Maior','maiorMin')}</th></tr></thead><tbody>${linhas}</tbody></table></div>${detalhesQuedasHoje(unidades)}<div class="quedas-nota"><b>Correlação automática (histórico)</b> usa todos os computadores fixos da unidade enquanto ninguém escolhe pontos oficiais; se um deles ficou online, não soma como queda de link. <b>Pontos marcados</b> substituem a inferência e são a configuração definitiva.<br><b>Confirmada</b> = ficou fora tempo suficiente pra virar alerta crítico. <b>Oscilação</b> = caiu e voltou em poucos minutos — não pede app offline.<br>Não entram: reinício que o NOC mandou, e notebook (sai da loja e volta).<br>O histórico é limitado a ${dados.eventosMaximoPorComputador} eventos por computador — em máquina que oscila muito, queda antiga já saiu da lista. <b>O número é piso, não teto.</b></div>${botoesPeriodoQuedas()}`;
+}
+function baixarRelatorioQuedas(){
+  const p = new URLSearchParams();
+  if(QUEDAS_PERIODO === 'personalizado'){ p.set('inicio',QUEDAS_DE); p.set('fim',QUEDAS_ATE); }
+  else if(QUEDAS_PERIODO === 'hoje' || QUEDAS_PERIODO === 'ontem') p.set('periodo',QUEDAS_PERIODO);
+  else p.set('dias',QUEDAS_PERIODO);
+  if(QUEDAS_GRUPO) p.set('grupo',QUEDAS_GRUPO);
+  if(QUEDAS_UNIDADE) p.set('unidade',QUEDAS_UNIDADE);
+  window.open('/api/loja-status/quedas/relatorio.pdf?'+p.toString(), '_blank', 'noopener');
+}
+// aceita número de dias (janela rolante) ou 'hoje'/'ontem' (dia de calendário
+// da loja, fechado no fuso de Brasília pelo servidor - ver relatorioQuedas)
+async function carregarQuedas(periodo){
+  const periodoEscolhido = periodo == null ? 30 : periodo;
+  QUEDAS_PERIODO = periodoEscolhido;
   const corpo = document.getElementById('quedas-corpo');
   const sub = document.getElementById('quedas-sub');
   sub.textContent = 'carregando...';
-  corpo.innerHTML = '<div class="quedas-nota">Somando o histórico...</div>';
+  corpo.innerHTML = '<div class="quedas-nota">Somando o histórico...</div>' + botoesPeriodoQuedas();
   try{
-    const r = await fetch('/api/loja-status/quedas?dias=' + (dias || 30));
+    if(periodoEscolhido !== 'personalizado'){ QUEDAS_DE = ''; QUEDAS_ATE = ''; }
+    const q = periodoEscolhido === 'personalizado'
+      ? 'inicio=' + encodeURIComponent(QUEDAS_DE) + '&fim=' + encodeURIComponent(QUEDAS_ATE)
+      : (periodoEscolhido === 'hoje' || periodoEscolhido === 'ontem') ? 'periodo=' + periodoEscolhido : 'dias=' + periodoEscolhido;
+    const r = await fetch('/api/loja-status/quedas?' + q);
     if(!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
     QUEDAS_CARREGADO = true;
-    const comQueda = (d.unidades || []).filter(u => u.quedas > 0);
-    sub.textContent = `${d.totalQuedas} queda(s) · ${String(d.totalHorasFora).replace('.', ',')}h fora · ${d.dias} dias`;
-    if(!comQueda.length){
-      corpo.innerHTML = '<div class="quedas-nota">Nenhuma queda registrada nesses ' + d.dias + ' dias. Nesse cenário, app offline não se paga.</div>';
-      return;
-    }
-    const linhas = comQueda.map((u, i) => `<tr class="${i === 0 ? 'pior' : ''}">
-      <td>${escapeHtml(u.unidadeNome || u.codigo)}${u.foraAgora ? ' <span style="color:var(--bad);">● fora agora</span>' : ''}</td>
-      <td>${u.quedas}</td><td>${u.confirmadas}</td><td>${u.oscilacoes}</td>
-      <td>${fmtHoras(u.horasFora)}</td><td>${u.maiorMin} min</td></tr>`).join('');
-    corpo.innerHTML = `<div class="quedas-wrap"><table class="quedas-tab">
-      <thead><tr><th>Unidade</th><th>Quedas</th><th>Confirmadas</th><th>Oscilações</th><th>Tempo fora</th><th>Maior</th></tr></thead>
-      <tbody>${linhas}</tbody></table></div>
-      <div class="quedas-nota">
-        <b>Confirmada</b> = ficou fora tempo suficiente pra virar alerta crítico. <b>Oscilação</b> = caiu e voltou em poucos minutos — não pede app offline.<br>
-        Não entram: reinício que o NOC mandou, e notebook (sai da loja e volta).<br>
-        O histórico é limitado a ${d.eventosMaximoPorComputador} eventos por computador — em máquina que oscila muito, queda antiga já saiu da lista. <b>O número é piso, não teto.</b>
-      </div>
-      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
-        <button type="button" class="btn-secundario" onclick="carregarQuedas(7)">7 dias</button>
-        <button type="button" class="btn-secundario" onclick="carregarQuedas(30)">30 dias</button>
-        <button type="button" class="btn-secundario" onclick="carregarQuedas(90)">90 dias</button>
-      </div>`;
+    QUEDAS_DADOS = d;
+    renderQuedas();
   }catch(e){
     sub.textContent = 'falhou';
-    corpo.innerHTML = '<div class="quedas-nota">Não consegui carregar (' + escapeHtml(e.message) + '). Tente de novo.</div>';
+    corpo.innerHTML = '<div class="quedas-nota">Não consegui carregar (' + escapeHtml(e.message) + '). Tente de novo.</div>' + botoesPeriodoQuedas();
   }
 }
 
@@ -1695,6 +1899,22 @@ function abrirManutencao(){
 }
 function fecharManutencao(){ document.getElementById('manut-overlay').classList.add('hidden'); }
 
+// Reiniciar de dentro do detalhe abre a MESMA janela de manutenção, já com
+// essa máquina marcada e a busca preenchida pra ela aparecer sozinha na lista.
+// É de propósito não ter um caminho curto próprio: assim o reinício continua
+// passando pela senha mascarada, pelo aviso de 2 minutos na tela da loja e
+// pelo "Abortar reinício" - um botão que reinicia direto seria um segundo
+// caminho sem nenhuma dessas travas.
+function reiniciarDesteComputador(codigo, posto, nome){
+  fecharDetalheComputador();
+  abrirManutencao();
+  MANUT_MARCADOS = new Set([`${codigo}|${posto}`]);
+  MANUT_BUSCA = nome || posto;
+  document.getElementById('manut-busca').value = MANUT_BUSCA;
+  renderManutLista();
+  document.getElementById('manut-senha').focus();
+}
+
 // agrupado por unidade, com um checkbox no cabeçalho de cada uma - é isso
 // que dá "a unidade toda" e "várias unidades" sem inventar outra tela
 function renderManutLista(){
@@ -1703,7 +1923,7 @@ function renderManutLista(){
   if(!lista.length){
     alvo.innerHTML = MANUT_BUSCA
       ? `<div class="empty">Nenhuma máquina com "${escapeHtml(MANUT_BUSCA)}". Apague a busca pra ver o parque inteiro.</div>`
-      : '<div class="empty">Nenhum computador interno com NOCZenith. Só esse tipo recebe comando.</div>';
+      : '<div class="empty">Nenhum computador interno com NOC-NoPulso. Só esse tipo recebe comando.</div>';
     atualizarContagemManut();
     return;
   }
@@ -1911,7 +2131,7 @@ function renderRede(dados){
     return;
   }
   if(!medidos.length){
-    document.getElementById('rede-lista').innerHTML = '<div class="rede-vazio">Nenhuma medição chegou ainda. Os computadores passam a reportar sozinhos assim que o NOCZenith se atualizar (leva até ~1h) ou assim que a tela da loja recarregar.</div>';
+    document.getElementById('rede-lista').innerHTML = '<div class="rede-vazio">Nenhuma medição chegou ainda. Os computadores passam a reportar sozinhos assim que o agente NOC-NoPulso se atualizar (leva até ~1h) ou assim que a tela da loja recarregar.</div>';
     return;
   }
 
@@ -2004,6 +2224,9 @@ function abrirModalNovoComputador(){
   select.innerHTML = unidadesOrdenadas.map(u => `<option value="${escapeHtml(u.codigo)}">${escapeHtml(u.nome)}</option>`).join('');
   if(FILTRO_UNIDADE) select.value = FILTRO_UNIDADE;
   document.getElementById('novo-comp-nome').value = '';
+  document.getElementById('novo-comp-servidor').checked = false;
+  document.getElementById('novo-comp-gcom').checked = false;
+  document.getElementById('novo-comp-mede-quedas').checked = false;
   document.querySelectorAll('input[name="novo-comp-tipo"]').forEach(r => { r.checked = (r.value === 'atendimento'); });
   document.getElementById('novo-comp-status').classList.add('hidden');
   document.getElementById('novo-comp-overlay').classList.remove('hidden');
@@ -2021,7 +2244,7 @@ async function salvarNovoComputador(){
   try{
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ nome, tipo }),
+      body: JSON.stringify({ nome, tipo, ehServidor: document.getElementById('novo-comp-servidor').checked, temGcom: document.getElementById('novo-comp-gcom').checked, medeQuedas: document.getElementById('novo-comp-mede-quedas').checked }),
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao cadastrar.');
@@ -2108,8 +2331,11 @@ async function baixarVigia(codigo, posto, tipo){
 
 let EDITAR_COMP_CODIGO = null;
 let EDITAR_COMP_POSTO = null;
-function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydeskAtual, ehNotebook){
+function abrirModalEditarComputador(codigo, posto, nomeAtual, tipoAtual, anydeskAtual, ehNotebook, ehServidor, temGcom, medeQuedas){
   document.getElementById('editar-comp-notebook').checked = !!ehNotebook;
+  document.getElementById('editar-comp-servidor').checked = !!ehServidor;
+  document.getElementById('editar-comp-gcom').checked = !!temGcom;
+  document.getElementById('editar-comp-mede-quedas').checked = !!medeQuedas;
   EDITAR_COMP_CODIGO = codigo;
   EDITAR_COMP_POSTO = posto;
   document.getElementById('editar-comp-unidade').textContent = `${nomeAtual || posto} · atualmente em ${UNIDADES_NOMES[codigo] || codigo}`;
@@ -2150,7 +2376,7 @@ async function salvarEdicaoComputador(){
     }
     const resp = await fetch(`/api/loja-status/${encodeURIComponent(EDITAR_COMP_CODIGO)}/computadores/${encodeURIComponent(EDITAR_COMP_POSTO)}`, {
       method: 'PUT', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ nome, tipo, ehNotebook: document.getElementById('editar-comp-notebook').checked }),
+      body: JSON.stringify({ nome, tipo, ehNotebook: document.getElementById('editar-comp-notebook').checked, ehServidor: document.getElementById('editar-comp-servidor').checked, temGcom: document.getElementById('editar-comp-gcom').checked, medeQuedas: document.getElementById('editar-comp-mede-quedas').checked }),
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
@@ -2401,7 +2627,7 @@ function avisarPrintNaoVai(){
   el.className = 'msg';
   el.style.background = 'var(--warn-dim)';
   el.style.color = 'var(--warn)';
-  el.innerHTML = '<b>Print não vai por aqui.</b> Esta janela aparece na tela do computador da loja pelo NOCZenith, que só mostra texto. Pra mandar imagem use o chat do chamado (Técnico/Manutenção), a Central ou o Beniboy.';
+  el.innerHTML = '<b>Print não vai por aqui.</b> Esta janela aparece na tela do computador da loja pelo NOC-NoPulso, que só mostra texto. Pra mandar imagem use o chat do chamado (Técnico/Manutenção), a Central ou o Beniboy.';
   clearTimeout(avisarPrintNaoVai._t);
   avisarPrintNaoVai._t = setTimeout(()=>{ el.classList.add('hidden'); }, 12000);
 }
@@ -2451,7 +2677,9 @@ async function enviarMensagemLoja(){
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar.');
-    document.getElementById('msg-texto').value = '';
+    const campoTexto = document.getElementById('msg-texto');
+    window.zenithRascunhos?.limparCampoEnviado(campoTexto);
+    campoTexto.value = '';
     atualizarContadorMensagem();
     const n = (data.enviados || []).length;
     const falhas = (data.falhas || []).length;
@@ -2484,7 +2712,7 @@ function conectarStream(){
   }catch(e){ /* sem SSE, so atualiza no poll */ }
 }
 
-// ---------- NOC Zenith: painel do agente (ver agenteAcoes.js/suporteBot.js) - Master-only ----------
+// ---------- NOC-NoPulso: painel do agente (ver agenteAcoes.js/suporteBot.js) - Master-only ----------
 function formatarRelativo(iso){
   if(!iso) return '-';
   const ms = Date.now() - new Date(iso).getTime();
@@ -2610,7 +2838,7 @@ async function rodarAcaoConfirmar(){
     });
     const data = await res.json();
     if(!res.ok) throw new Error(data.error || 'Erro ao enfileirar o comando.');
-    st.textContent = data.mensagem || 'Comando enfileirado. Executa no próximo contato do NOCZenith (~25s).';
+    st.textContent = data.mensagem || 'Comando enfileirado. Executa no próximo contato do NOC-NoPulso (~25s).';
     st.className = 'msg ok'; st.classList.remove('hidden');
   }catch(err){ st.textContent = err.message; st.className = 'msg err'; st.classList.remove('hidden'); }
   finally{ btn.disabled = false; }

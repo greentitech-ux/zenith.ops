@@ -35,6 +35,17 @@
     document.head.appendChild(css);
   })();
 
+  // Fundação compartilhada: foco visível, movimento reduzido, estados vazios
+  // e conforto de toque sem obrigar cada uma das 56 telas a duplicar CSS.
+  (function uiFoundation() {
+    if (document.getElementById('nopulso-ui-foundation')) return;
+    var css = document.createElement('link');
+    css.id = 'nopulso-ui-foundation';
+    css.rel = 'stylesheet';
+    css.href = '/ui-foundation.css';
+    document.head.appendChild(css);
+  })();
+
   // ---- destaque do nome da unidade (loja) em tickets/chamados ----
   // Pedido do usuario: em qualquer card ou detalhe de ticket/chamado que
   // mostra o nome da unidade, ele tem que se destacar do resto da linha
@@ -623,10 +634,24 @@
     '  --pedido:#c62828; --pedido-dim:#fde7e5;',
     '  --envio:#175fb4; --envio-dim:#e4edfb;',
     '}',
-    // paginas pintam o body com a var --bg, mas garante mesmo se alguma
-    // tiver a cor no proprio body
-    ':root[data-tema="claro"] body{background:var(--bg);color:var(--text);}',
-  ].join('\n');
+     // paginas pintam o body com a var --bg, mas garante mesmo se alguma
+     // tiver a cor no proprio body
+     ':root[data-tema="claro"] body{background:var(--bg);color:var(--text);}',
+     // O claro nao pode ser apenas o escuro invertido: cards brancos em cima
+     // de branco desapareciam, os blocos pareciam soltos e chips herdados
+     // com fundo #181d24 ficavam pesados. Estas regras mantem a hierarquia
+     // visual sem alterar o HTML nem a estrutura particular de cada tela.
+     ':root[data-tema="claro"]{--bg:#f3f6f8;--panel:#fff;--panel2:#f7f9fb;--line:#cbd5df;--text:#17212b;--muted:#526477;}',
+     ':root[data-tema="claro"] header{background:color-mix(in srgb,var(--panel) 92%,var(--bg));box-shadow:0 1px 0 rgba(23,33,43,.06),0 5px 14px rgba(23,33,43,.04);}',
+     ':root[data-tema="claro"] .panel,:root[data-tema="claro"] .col,:root[data-tema="claro"] .sheet,:root[data-tema="claro"] .dialog{box-shadow:0 2px 7px rgba(23,33,43,.055);}',
+     ':root[data-tema="claro"] .kcard,:root[data-tema="claro"] .task,:root[data-tema="claro"] .card,:root[data-tema="claro"] .status-toggle-btn{box-shadow:0 1px 3px rgba(23,33,43,.035);}',
+     ':root[data-tema="claro"] .status-toggle-btn.aberto,:root[data-tema="claro"] .tipo-filtro-btn.active,:root[data-tema="claro"] a.back.active{background:#f0f7df;border-color:#628d19;color:#456a00;}',
+     ':root[data-tema="claro"] .status-toggle-btn.aberto .stb-count{color:#456a00;}',
+     ':root[data-tema="claro"] .triagem-nota{background:#f5f8fb;border-color:#c8d3de;color:#44576a;}',
+     ':root[data-tema="claro"] .tipo-badge,:root[data-tema="claro"] span.tipo-badge[style*="background:#181d24"]{background:#e9eff4!important;color:#405367!important;border-color:#c7d2dc!important;}',
+     ':root[data-tema="claro"] .badge.PENDENTE{background:#fff3cf;color:#765300;}',
+     ':root[data-tema="claro"] .btn-notif,:root[data-tema="claro"] .hamburger-btn{background:#fff;box-shadow:0 1px 3px rgba(23,33,43,.06);}',
+   ].join('\n');
   document.head.appendChild(style);
 
   function aplicar() {
@@ -738,10 +763,37 @@
   // decide o que está pendente é o SERVIDOR (ver diasPendentesDeFechamento em
   // fechamentosLive.js): a tela não repete regra de negócio, só mostra.
   //
-  // Não tem "não mostrar de novo": ele volta a cada tela, de propósito, até o
-  // fechamento ser lançado. O "Agora não" fecha só nesta tela.
+  // O "Agora não" fecha só nesta tela: na próxima o aviso volta, de propósito,
+  // até o fechamento ser lançado. Quem lança precisa ser cobrado.
+  //
+  // O X de "não avisar mais" é SÓ do Master (pedido dele, 09/09/2026), e por
+  // um motivo concreto: a loja tem uma pendência, o Master tem a soma do
+  // parque inteiro - o mesmo aviso que cobra uma pessoa atrapalha a outra. E
+  // ele dispensa o que está pendente AGORA, não o aviso pra sempre: dia novo
+  // sem fechamento volta a avisar. Um botão que silenciasse o alarme de vez
+  // seria a última vez que alguém veria um caixa em aberto.
   var TELA_LANCAMENTO = '/lancamento.html';
   var CACHE_PENDENCIA_MS = 60 * 1000;
+  var CHAVE_DISPENSA = 'nopulsoPendFechDispensadas';
+
+  function lerDispensadas() {
+    try { var v = JSON.parse(localStorage.getItem(CHAVE_DISPENSA) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+  }
+  function gravarDispensadas(chaves) {
+    try { localStorage.setItem(CHAVE_DISPENSA, JSON.stringify(chaves.slice(-400))); } catch (e) {}
+  }
+
+  // Decide o que o aviso mostra. Separada por ser a única regra desta parte que
+  // dá pra errar: o que já foi dispensado some, e o que já foi LANÇADO some da
+  // memória de dispensa - se aquele dia voltar a ficar em aberto, o aviso volta.
+  function pendenciasVisiveis(dados, dispensadas) {
+    var lista = (dados && dados.pendentes) || [];
+    var chaves = (dados && dados.chaves) || lista.map(function (p) { return p.unidade + '|' + p.data; });
+    var vivas = (dispensadas || []).filter(function (k) { return chaves.indexOf(k) >= 0; });
+    var visiveis = lista.filter(function (p) { return vivas.indexOf(p.unidade + '|' + p.data) < 0; });
+    var total = chaves.filter(function (k) { return vivas.indexOf(k) < 0; }).length;
+    return { visiveis: visiveis, total: total, chaves: chaves, dispensadas: vivas };
+  }
 
   function fmtDataAviso(iso) {
     var p = String(iso || '').split('-');
@@ -775,9 +827,11 @@
     } catch (e) { return; }
 
     pendenciasDeFechamento().then(function (d) {
-      var lista = (d && d.pendentes) || [];
-      if (!lista.length) return;
-      var total = (d && d.total) || lista.length;
+      var visao = pendenciasVisiveis(d, lerDispensadas());
+      gravarDispensadas(visao.dispensadas);   // poda o que já foi lançado
+      var lista = visao.visiveis;
+      var total = visao.total;
+      if (!lista.length || !total) return;
 
       var st = document.createElement('style');
       st.textContent = [
@@ -798,6 +852,11 @@
         '#nopulso-pend-fech .acoes{display:flex;gap:8px;justify-content:flex-end;margin-top:10px;}',
         '#nopulso-pend-fech .depois{background:none;border:1px solid var(--line,#232a34);color:var(--muted,#93a1b3);',
         'border-radius:8px;padding:8px 12px;font-size:12.5px;cursor:pointer;font-family:inherit;}',
+        '#nopulso-pend-fech .cx{position:relative;}',
+        '#nopulso-pend-fech .fechar{position:absolute;top:8px;right:9px;background:none;border:0;color:var(--muted,#93a1b3);',
+        'font-size:22px;line-height:1;cursor:pointer;font-family:inherit;padding:2px 6px;}',
+        '#nopulso-pend-fech .fechar:hover{color:var(--text,#e7ecf3);}',
+        '#nopulso-pend-fech h3{padding-right:26px;}',
       ].join('');
       document.head.appendChild(st);
 
@@ -809,7 +868,9 @@
           + '<b>' + String(p.unidadeNome || p.unidade).replace(/</g, '&lt;') + '</b>'
           + '<span>' + fmtDataAviso(p.data) + ' · toque para lançar</span></button>';
       }).join('');
-      cx.innerHTML = '<div class="cx" role="dialog" aria-modal="true"><h3>⏰ ' + titulo + '</h3>'
+      var botaoX = d && d.souMaster
+        ? '<button type="button" class="fechar" aria-label="Não avisar mais sobre estes" title="Não avisar mais sobre estes fechamentos">×</button>' : '';
+      cx.innerHTML = '<div class="cx" role="dialog" aria-modal="true">' + botaoX + '<h3>⏰ ' + titulo + '</h3>'
         + '<p class="sub">O dia já virou e esse caixa continua sem fechamento. Enquanto não for lançado, o faturamento do dia não entra em relatório nenhum.</p>'
         + itens
         + (total > lista.length ? '<div class="mais">e mais ' + (total - lista.length) + ' dia(s) — a lista completa fica em Fechamentos → Dias sem fechamento.</div>' : '')
@@ -817,6 +878,13 @@
       document.body.appendChild(cx);
 
       cx.addEventListener('click', function (e) {
+        // o X vem ANTES do item: ele é um botão dentro da mesma caixa, e
+        // testar o item primeiro engoliria o clique
+        if (e.target.closest && e.target.closest('.fechar')) {
+          gravarDispensadas(visao.dispensadas.concat(visao.chaves.filter(function (k) { return visao.dispensadas.indexOf(k) < 0; })));
+          cx.remove();
+          return;
+        }
         var item = e.target.closest && e.target.closest('.item');
         if (item) {
           location.href = TELA_LANCAMENTO + '?unidade=' + item.getAttribute('data-unidade') + '&data=' + item.getAttribute('data-data');
@@ -851,4 +919,271 @@
     var el = e.target.closest && e.target.closest('input[type=date]');
     if (el && typeof el.showPicker === 'function') { try { el.showPicker(); } catch (_) {} }
   });
+
+  // ---- período "Mês": escolher um dia mantém o mês inteiro ----
+  // Todas as telas usam pares De/Até, mas cada uma nasceu com ids e handlers
+  // próprios. Esta camada comum preserva a intenção do atalho Mês: se o
+  // usuário escolhe 15/06, o filtro vira automaticamente 01/06 a 30/06;
+  // escolhendo um dia de outro mês, o período acompanha esse novo mês.
+  // O marcador no container continua valendo mesmo se o handler antigo da
+  // página redesenhar os botões ao receber a mudança de data.
+  var PARES_PERIODO_MES = [
+    { de: 'F-DE', ate: 'F-ATE', painel: '#PRESETS' },
+    { de: 'filtro-data-de', ate: 'filtro-data-ate', painel: '#presets-periodo-central' },
+    { de: 'filtro-data-de-lista', ate: 'filtro-data-ate-lista', painel: '#presets-periodo-lista' },
+    { de: 'filtro-data-de-tecnico', ate: 'filtro-data-ate-tecnico', painel: '#presets-periodo-tecnico' },
+    { de: 'f-date-start', ate: 'f-date-end', painel: '#presets' },
+    { de: 'f-data-de', ate: 'f-data-ate', painel: '#presets' },
+    { de: 'f-inicio', ate: 'f-fim', painel: '.filtros' },
+    { de: 'd-inicio', ate: 'd-fim', painel: '#d-presets' },
+    { de: 'h-inicio', ate: 'h-fim', painel: '#h-presets' }
+  ];
+
+  function parPeriodoMes(campo) {
+    if (!campo || !campo.id) return null;
+    return PARES_PERIODO_MES.find(function (p) { return p.de === campo.id || p.ate === campo.id; }) || null;
+  }
+  function painelDoPar(par) { return par && document.querySelector(par.painel); }
+  function botaoMes(painel) {
+    if (!painel) return null;
+    return Array.prototype.find.call(painel.querySelectorAll('button'), function (b) {
+      return String(b.dataset.tipo || b.dataset.preset || b.textContent || '').trim().toLocaleLowerCase('pt-BR') === 'mês'
+        || String(b.dataset.tipo || b.dataset.preset || '').toLocaleLowerCase('pt-BR') === 'mes';
+    }) || null;
+  }
+  function mesEstaAtivo(par) {
+    var painel = painelDoPar(par), botao = botaoMes(painel);
+    return !!(painel && (painel.dataset.zenithMesAtivo === '1' || (botao && botao.classList.contains('active'))));
+  }
+  function isoDoMes(data) {
+    var d = new Date(String(data) + 'T12:00:00');
+    if (Number.isNaN(d.getTime())) return null;
+    var y = d.getFullYear(), m = d.getMonth();
+    var f = function (n) { return String(n).padStart(2, '0'); };
+    return { de: y + '-' + f(m + 1) + '-01', ate: y + '-' + f(new Date(y, m + 1, 0).getDate()) };
+  }
+  function manterBotaoMes(par) {
+    var painel = painelDoPar(par);
+    if (!painel) return;
+    painel.dataset.zenithMesAtivo = '1';
+    // Alguns handlers removem .active para indicar intervalo manual. Aqui o
+    // intervalo não é manual: ele foi reencaixado no mês escolhido.
+    setTimeout(function () { var b = botaoMes(painel); if (b) b.classList.add('active'); }, 0);
+  }
+  document.addEventListener('click', function (e) {
+    var botao = e.target.closest && e.target.closest('button');
+    if (!botao) return;
+    var texto = String(botao.dataset.tipo || botao.dataset.preset || botao.textContent || '').trim().toLocaleLowerCase('pt-BR');
+    if (!['mes', 'mês', 'hoje', 'ontem', 'semana', '7dias', 'trimestre', 'todos', 'tudo'].includes(texto)) return;
+    PARES_PERIODO_MES.forEach(function (par) {
+      var painel = painelDoPar(par);
+      if (!painel || !painel.contains(botao)) return;
+      if (texto === 'mes' || texto === 'mês') painel.dataset.zenithMesAtivo = '1';
+      else delete painel.dataset.zenithMesAtivo;
+    });
+  }, true);
+  function ajustarMesAoEscolherData(e) {
+    var campo = e.target;
+    if (!campo || campo.type !== 'date' || campo.dataset.zenithAjustandoMes === '1') return;
+    var par = parPeriodoMes(campo);
+    if (!par || !mesEstaAtivo(par) || !campo.value) return;
+    var intervalo = isoDoMes(campo.value);
+    var de = document.getElementById(par.de), ate = document.getElementById(par.ate);
+    if (!intervalo || !de || !ate) return;
+    campo.dataset.zenithAjustandoMes = '1';
+    de.value = intervalo.de; ate.value = intervalo.ate;
+    manterBotaoMes(par);
+    setTimeout(function () { delete campo.dataset.zenithAjustandoMes; }, 0);
+  }
+  document.addEventListener('input', ajustarMesAoEscolherData, true);
+  document.addEventListener('change', ajustarMesAoEscolherData, true);
+
+  // ---- rascunhos de campos durante atualizacao da propria tela ----
+  // Muitas telas recebem polling/SSE, trocam status ou redesenham cards com
+  // innerHTML. Antes, isso recriava textarea/input/select e apagava o que a
+  // pessoa ja tinha digitado, lido pelo leitor ou anexado. Esta camada vive
+  // no arquivo comum de todas as paginas: preserva SOMENTE o que foi alterado
+  // pelo usuario e devolve o valor quando o mesmo campo nasce de novo.
+  //
+  // Rascunho e da pagina atual, nao e dado salvo: ao navegar para outra tela
+  // a proxima pagina limpa o rascunho da anterior. sessionStorage deixa uma
+  // atualizacao/reload da MESMA pagina recuperar texto, mas nunca senha,
+  // token ou campos hidden. Arquivos ficam em memoria (o browser nao permite
+  // serializar File), suficiente para qualquer redesenho sem sair da pagina.
+  (function protegerRascunhosDaTela() {
+    var PREFIXO = 'nopulso.rascunho.v1:';
+    var pagina = location.pathname + location.search;
+    var chavePagina = PREFIXO + pagina;
+    var rascunhos = new Map();
+    var arquivos = new Map();
+    var restauracaoPendente = false;
+
+    function campoElegivel(campo) {
+      if (!campo || campo.nodeType !== 1 || campo.dataset.zenithSemRascunho !== undefined) return false;
+      var tag = String(campo.tagName || '').toLowerCase();
+      if (!['input', 'textarea', 'select'].includes(tag) && !campo.isContentEditable) return false;
+      var tipo = String(campo.type || '').toLowerCase();
+      return !['hidden', 'password', 'submit', 'button', 'reset', 'image'].includes(tipo);
+    }
+    function identidade(campo) {
+      if (!campoElegivel(campo)) return null;
+      if (campo.id) return 'id:' + campo.id;
+      if (campo.name) {
+        var form = campo.form;
+        var dono = form && (form.id || form.name);
+        // Radio/checkbox do mesmo name precisam de identidade individual.
+        var extra = /^(radio|checkbox)$/i.test(campo.type || '') ? ':' + String(campo.value || '') : '';
+        return 'nome:' + (dono || 'pagina') + ':' + campo.name + extra;
+      }
+      return null;
+    }
+    function ler(campo) {
+      var tipo = String(campo.type || '').toLowerCase();
+      if (campo.isContentEditable) return { tipo: 'html', valor: campo.innerHTML };
+      if (tipo === 'checkbox' || tipo === 'radio') return { tipo: 'marcado', valor: !!campo.checked };
+      if (tipo === 'file') return { tipo: 'arquivo', valor: !!(campo.files && campo.files[0]) };
+      return { tipo: 'valor', valor: campo.value };
+    }
+    function gravarNoStorage() {
+      try {
+        var simples = {};
+        rascunhos.forEach(function (valor, chave) {
+          // Limite defensivo por campo: evita encher a sessao por colagem
+          // acidental de arquivo/texto gigante. O arquivo segue no Map.
+          if (typeof valor.valor === 'string' && valor.valor.length > 50000) return;
+          simples[chave] = valor;
+        });
+        sessionStorage.setItem(chavePagina, JSON.stringify(simples));
+      } catch (e) { /* armazenamento bloqueado/cheio: a memoria ainda vale */ }
+    }
+    function carregarDoStorage() {
+      try {
+        Object.keys(sessionStorage).forEach(function (k) {
+          if (k.indexOf(PREFIXO) === 0 && k !== chavePagina) sessionStorage.removeItem(k);
+        });
+        var salvo = JSON.parse(sessionStorage.getItem(chavePagina) || '{}');
+        Object.keys(salvo).forEach(function (k) {
+          var valor = salvo[k];
+          if (valor && ['valor', 'marcado', 'html'].includes(valor.tipo)) rascunhos.set(k, valor);
+        });
+      } catch (e) { /* segue sem persistencia entre reloads */ }
+    }
+    function guardarCampo(campo) {
+      var id = identidade(campo);
+      if (!id) return;
+      var estado = ler(campo);
+      if (estado.tipo === 'arquivo') {
+        var arq = campo.files && campo.files[0];
+        if (arq) arquivos.set(id, arq); else arquivos.delete(id);
+        rascunhos.set(id, estado);
+      } else {
+        rascunhos.set(id, estado);
+      }
+      gravarNoStorage();
+    }
+    function aplicarCampo(campo) {
+      var id = identidade(campo), estado = id && rascunhos.get(id);
+      if (!estado) return;
+      var tipo = String(campo.type || '').toLowerCase();
+      if (estado.tipo === 'html' && campo.isContentEditable) campo.innerHTML = estado.valor;
+      else if (estado.tipo === 'marcado' && (tipo === 'checkbox' || tipo === 'radio')) campo.checked = !!estado.valor;
+      else if (estado.tipo === 'valor' && !campo.isContentEditable && tipo !== 'file') campo.value = estado.valor;
+      else if (estado.tipo === 'arquivo' && tipo === 'file' && arquivos.has(id)) {
+        // DataTransfer fica CENTRALIZADO aqui (tema.js), igual a colagem de
+        // print: devolve o mesmo File ao input recriado sem abrir caminho
+        // paralelo nas dezenas de telas.
+        try {
+          var dt = new DataTransfer();
+          dt.items.add(arquivos.get(id));
+          campo.files = dt.files;
+          campo.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (e) { /* o arquivo continua guardado para a proxima troca */ }
+      }
+    }
+    function aplicarEm(no) {
+      if (!no || no.nodeType !== 1) return;
+      if (campoElegivel(no)) aplicarCampo(no);
+      if (no.querySelectorAll) no.querySelectorAll('input,textarea,select,[contenteditable="true"]').forEach(aplicarCampo);
+    }
+    function agendarRestauracao() {
+      if (restauracaoPendente) return;
+      restauracaoPendente = true;
+      requestAnimationFrame(function () {
+        restauracaoPendente = false;
+        document.querySelectorAll('input,textarea,select,[contenteditable="true"]').forEach(aplicarCampo);
+      });
+    }
+    function limparNo(no) {
+      if (!no || no.nodeType !== 1) return;
+      var todos = [];
+      if (campoElegivel(no)) todos.push(no);
+      if (no.querySelectorAll) todos = todos.concat(Array.prototype.slice.call(no.querySelectorAll('input,textarea,select,[contenteditable="true"]')));
+      todos.forEach(function (campo) {
+        var id = identidade(campo);
+        if (!id) return;
+        rascunhos.delete(id); arquivos.delete(id);
+      });
+      gravarNoStorage();
+    }
+
+    carregarDoStorage();
+    document.addEventListener('input', function (e) { guardarCampo(e.target); }, true);
+    document.addEventListener('change', function (e) { guardarCampo(e.target); }, true);
+    document.addEventListener('reset', function (e) { limparNo(e.target); }, true);
+    // Fechar/cancelar um modal descarta o rascunho daquela caixa, como sair
+    // da secao. Atualizacao de status nao passa por aqui e, portanto, nao o
+    // apaga. Telas com fechamento customizado tambem podem chamar esta API.
+    document.addEventListener('click', function (e) {
+      var botao = e.target.closest && e.target.closest('button,[role="button"]');
+      if (!botao) return;
+      var texto = String(botao.getAttribute('aria-label') || botao.textContent || '').trim().toLocaleLowerCase('pt-BR');
+      if (!/^(fechar|cancelar|×|x|✕)/.test(texto)) return;
+      var caixa = botao.closest('[role="dialog"],.modal,.overlay,.sheet-wrap,.painel-conversa');
+      if (caixa) limparNo(caixa);
+    }, true);
+    if (document.documentElement) {
+      new MutationObserver(function (mudancas) {
+        mudancas.forEach(function (m) { m.addedNodes.forEach(aplicarEm); });
+        agendarRestauracao();
+      }).observe(document.documentElement, { childList: true, subtree: true });
+    }
+    // Disponivel para fluxos que concluem/salvam e precisam limpar o que foi
+    // efetivamente persistido, sem depender de classe ou texto de botao.
+    // Use depois de uma gravacao confirmada. A atualizacao normal continua
+    // preservando o texto, mas uma mensagem/comentario que ja foi enviado nao
+    // pode reaparecer como se ainda fosse um rascunho.
+    function limparCampoEnviado(campo) {
+      limparNo(campo);
+      if (campo && 'value' in campo) campo.value = '';
+    }
+    window.zenithRascunhos = { limpar: limparNo, limparCampoEnviado: limparCampoEnviado, restaurar: agendarRestauracao };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', agendarRestauracao);
+    else agendarRestauracao();
+  })();
+
+  // Todo campo de ANEXO que ja aceita PDF tambem aceita ZIP. Centralizar evita
+  // que uma tela nova fique com o seletor antigo enquanto o servidor ja pode
+  // receber o arquivo. Campos que so leem documento/foto continuam validados
+  // pelo fluxo de leitura; ZIP e' evidencia/arquivo, nao entrada de OCR.
+  (function liberarZipNosAnexos() {
+    function ajustar(campo) {
+      if (!campo || String(campo.type || '').toLowerCase() !== 'file') return;
+      var aceita = String(campo.getAttribute('accept') || '');
+      if (!/(application\/pdf|\.pdf)/i.test(aceita) || /(?:application\/zip|\.zip)/i.test(aceita)) return;
+      campo.setAttribute('accept', aceita.replace(/\s+$/g, '') + ',application/zip,.zip');
+    }
+    function ajustarNo(no) {
+      if (!no || no.nodeType !== 1) return;
+      ajustar(no);
+      if (no.querySelectorAll) no.querySelectorAll('input[type="file"]').forEach(ajustar);
+    }
+    function iniciarZip() {
+      document.querySelectorAll('input[type="file"]').forEach(ajustar);
+      new MutationObserver(function (mudancas) {
+        mudancas.forEach(function (m) { m.addedNodes.forEach(ajustarNo); });
+      }).observe(document.documentElement, { childList: true, subtree: true });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciarZip);
+    else iniciarZip();
+  })();
 })();

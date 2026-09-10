@@ -332,9 +332,10 @@
     </div>
 
     <div class="secao">
-      <div class="secao-titulo">KPI's<span class="chip-foto hidden" id="chip-foto-kpis"></span></div>
-      <div class="grid2 hidden" id="kpis-extras-container" style="margin-top:6px;"></div>
-      <div class="sub hidden" id="kpis-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
+       <div class="secao-titulo">KPI's<span class="chip-foto hidden" id="chip-foto-kpis"></span></div>
+       <div class="grid2 hidden" id="kpis-extras-container" style="margin-top:6px;"></div>
+       <div class="sub hidden" id="kpis-vazio">Nenhum campo configurado pra essa loja - peça pro Master configurar em Grupos.</div>
+       <div class="pos-aviso hidden" id="aviso-kpis-pendentes"></div>
       <div class="resumo">
         <div class="linha"><span>Soma maquininhas</span><b id="resumo-maquinas">R$ 0,00</b></div>
         <div class="linha hidden" id="resumo-maquinas-pos-linha"><span>Soma Maquininha POS 01</span><b id="resumo-maquinas-pos">R$ 0,00</b></div>
@@ -817,7 +818,7 @@ function somaExtrasComSinal(classe, defs, { soCruzado } = {}){
 // dos indicadores Leg Time, Run Time, Avg Delivery Time, Tempo de
 // Atendimento/Produção/Espera e Saída de Loja (OTD). Arquivo fica de fora:
 // não é leitura de valor, é upload de anexo.
-function kpiOcrElegivel(k){ return ['quantidade','moeda','kg','texto','tempo'].includes(k.tipo||'quantidade'); }
+function kpiOcrElegivel(k){ return ['quantidade','moeda','kg','percentual','texto','tempo'].includes(k.tipo||'quantidade'); }
 function renderKpisExtras(unidade){
   const grupo = grupoKpiDaUnidade(unidade);
   const campos = grupo ? (grupo.kpisExtras||[]) : [];
@@ -865,7 +866,7 @@ function renderKpisExtras(unidade){
       return `<div><label>${escapeHtml(k.label)}${marca}</label><input type="text" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
     }
     const step = tipo === 'quantidade' ? '1' : (tipo === 'kg' ? '0.001' : '0.01');
-    const sufixo = tipo === 'kg' ? ' (Kg)' : (tipo === 'moeda' ? ' (R$)' : '');
+    const sufixo = tipo === 'kg' ? ' (kg)' : (tipo === 'moeda' ? ' (R$)' : (tipo === 'percentual' ? ' (%)' : (tipo === 'quantidade' ? ' (un.)' : '')));
     return `<div><label>${escapeHtml(k.label)}${sufixo}${marca}</label><input type="number" step="${step}" inputmode="decimal" data-extra-campo="${escapeHtml(k.campo)}" class="kpi-extra-input${classeExtra}"${roAttr}></div>`;
   }).join('');
   // KPI moeda com "somar em" (ver grupos.html) precisa recalcular o preview
@@ -873,9 +874,12 @@ function renderKpisExtras(unidade){
   // fazem (ver renderExtrasGrupo) - antes disso nao precisava, KPI nunca
   // afetava nenhum total
   container.querySelectorAll('.kpi-extra-input').forEach(el=>el.addEventListener('input', atualizarResumo));
+  container.querySelectorAll('.kpi-extra-input,.kpi-extra-arquivo').forEach(el=>el.addEventListener('input', atualizarAvisoKpisPendentes));
+  container.querySelectorAll('.kpi-extra-arquivo').forEach(el=>el.addEventListener('change', atualizarAvisoKpisPendentes));
   // liga a conferência do campo de tempo (aceita 9,66 e 9:40, e mostra na
   // tela o que entendeu) - ver public/kpi-tempo.js
   window.ZenithKpiTempo.ligarTodos('.kpi-extra-tempo');
+  atualizarAvisoKpisPendentes();
 }
 // mm:ss (ou h:mm:ss) -> total de segundos, pra gravar como numero (mesmo
 // mapa kpisExtras dos outros tipos - ver sanitizarMapaExtras em
@@ -895,6 +899,32 @@ function lerKpisExtras(){
     out[el.dataset.extraCampo] = String(tempoParaSegundos(el.value));
   });
   return out;
+}
+// Campo em branco vira 0 nos cálculos financeiros, mas não pode parecer
+// preenchido no acompanhamento operacional. Aqui, e no servidor, 0 é válido;
+// só vazio de verdade entra como pendência. O valor 0 reconhecido pela foto
+// também vale (LIDOS_PELA_FOTO), mesmo ficando visualmente em branco.
+function kpisPendentesNoFormulario(){
+  const grupo = grupoKpiDaUnidade(document.getElementById('f-unidade').value);
+  return (grupo?.kpisExtras || []).filter(k=>{
+    if(!k || !k.campo || k.origem === 'remakesDoDia') return false;
+    if((k.tipo||'quantidade') === 'arquivo'){
+      const arq = document.querySelector(`.kpi-extra-arquivo[data-extra-campo="${CSS.escape(k.campo)}"]`);
+      return !(arq && arq.files && arq.files[0]);
+    }
+    const el = document.querySelector(`.kpi-extra-input[data-extra-campo="${CSS.escape(k.campo)}"]`);
+    if(!el) return false;
+    return !String(el.value||'').trim() && !LIDOS_PELA_FOTO.has(`kpi|${k.campo}`);
+  });
+}
+function atualizarAvisoKpisPendentes(){
+  const aviso = document.getElementById('aviso-kpis-pendentes');
+  if(!aviso) return;
+  const pendentes = kpisPendentesNoFormulario();
+  aviso.classList.toggle('hidden', !pendentes.length);
+  if(pendentes.length){
+    aviso.innerHTML = `⚠️ <b>${pendentes.length} KPI(s) ainda não preenchido(s):</b> ${pendentes.map(k=>escapeHtml(k.label)).join(', ')}. Ao finalizar assim, a pendência ficará visível para a loja e para a gestão.`;
+  }
 }
 // soma os KPI's (sempre tipo moeda - unico que pode ter somaEm != 'nao', ver
 // grupos.js) marcados pra somar em "destino" (Faturamento/Total Declarado) -
@@ -927,6 +957,9 @@ function renderCanaisExtras(unidade){
 // nao no proprio input) porque o input e limpo logo depois do change - senao
 // escolher a MESMA foto de novo, depois de um erro, nao dispara evento nenhum.
 let ARQUIVOS_RELATORIO = [];
+// Cada escolha recebe uma versão. Limpar ou escolher outro lote invalida a
+// preparação anterior, para ela nunca repor fotos que a pessoa acabou de tirar.
+let VERSAO_PREPARO_RELATORIO = 0;
 
 // Foto de relatório de PDV tirada de celular sai com 5-8 MB, e até 5 delas
 // numa leitura só - o que sobe pro servidor (e dali pro Claude) é o gargalo
@@ -938,6 +971,17 @@ let ARQUIVOS_RELATORIO = [];
 const LADO_MAX_RELATORIO = 2000;
 const QUALIDADE_RELATORIO = 0.85;
 const JA_PEQUENA_RELATORIO = 1500000; // ~1,5 MB: nao vale mexer, so perderia nitidez
+// Em alguns navegadores/arquivos (principalmente fotos recebidas por WhatsApp),
+// createImageBitmap pode ficar pendente sem disparar erro. O arquivo original
+// ainda serve para a leitura: a preparação não pode prender a tela por isso.
+const PRAZO_PREPARO_FOTO_MS = 12000;
+function comPrazoPreparoRelatorio(promessa){
+  let timer;
+  return Promise.race([
+    Promise.resolve(promessa),
+    new Promise(resolve=>{ timer=setTimeout(()=>resolve(null), PRAZO_PREPARO_FOTO_MS); }),
+  ]).finally(()=>clearTimeout(timer));
+}
 function carregarViaImgRelatorio(file){
   return new Promise((ok, falha)=>{
     const url = URL.createObjectURL(file);
@@ -949,8 +993,17 @@ function carregarViaImgRelatorio(file){
 }
 async function comprimirImagemRelatorio(file){
   if(!file || !/^image\//.test(file.type||'')) return file; // PDF sobe inteiro
+  // Capturas como as do relatório diário têm poucos KB. Não há ganho em abrir
+  // canvas para elas — e pular o decoder evita os travamentos vistos no Chrome.
+  if(file.size <= JA_PEQUENA_RELATORIO) return file;
   try{
-    const img = window.createImageBitmap ? await createImageBitmap(file) : await carregarViaImgRelatorio(file);
+    let img = window.createImageBitmap
+      ? await comPrazoPreparoRelatorio(createImageBitmap(file))
+      : await comPrazoPreparoRelatorio(carregarViaImgRelatorio(file));
+    // O decoder moderno pode falhar ou vencer o prazo sem que a imagem esteja
+    // corrompida. Tenta o <img> tradicional antes de desistir da compressão.
+    if(!img && window.createImageBitmap) img=await comPrazoPreparoRelatorio(carregarViaImgRelatorio(file));
+    if(!img || !img.width || !img.height) return file;
     const lado = Math.max(img.width, img.height);
     const escala = Math.min(1, LADO_MAX_RELATORIO / lado);
     if(escala === 1 && file.size <= JA_PEQUENA_RELATORIO) return file;
@@ -965,10 +1018,14 @@ async function comprimirImagemRelatorio(file){
     return file; // qualquer tropeço na compressão manda o original; nunca trava a leitura
   }
 }
-async function comprimirVariasRelatorio(lista){
-  const saida = [];
-  for(const f of lista) saida.push(await comprimirImagemRelatorio(f));
-  return saida;
+async function comprimirVariasRelatorio(lista, aoPreparar){
+  // Todas as fotos seguem de forma independente: uma que não pode ser reduzida
+  // volta como original e nunca impede as outras de aparecerem para leitura.
+  let concluidas = 0;
+  return Promise.all(lista.map(async f=>{
+    try{return await comprimirImagemRelatorio(f)}
+    finally{ concluidas += 1; if(aoPreparar) aoPreparar(concluidas, lista.length); }
+  }));
 }
 
 let UNIDADE_DA_LEITURA = null;
@@ -1016,7 +1073,8 @@ function pintarSelecaoRelatorio(){
   }
   sel.classList.remove('hidden');
   sel.innerHTML = `<b>${ARQUIVOS_RELATORIO.length}</b> foto(s) escolhida(s): ${escapeHtml(nomesSelecionados())}`+
-    ` — <a href="#" onclick="limparSelecaoRelatorio();return false;" style="color:var(--muted);">limpar</a>`;
+    ` — <button type="button" id="limpar-fotos-relatorio" class="link-btn" style="color:var(--muted);">limpar</button>`;
+  sel.querySelector('#limpar-fotos-relatorio').addEventListener('click', limparSelecaoRelatorio);
   btnLer.disabled = false;
 }
 // ---- OS CAMPOS PRINCIPAIS, E A TRAVA DEPOIS DELES ----
@@ -1062,6 +1120,7 @@ function leituraEncerrada(){
   return essenciais.length > 0 && essenciaisQueFaltam().length === 0;
 }
 function limparSelecaoRelatorio(){
+  VERSAO_PREPARO_RELATORIO += 1;
   ARQUIVOS_RELATORIO = [];
   pintarSelecaoRelatorio();
   esconderMsgLerCanais();
@@ -1071,6 +1130,7 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', async (
   const arquivos = Array.from(ev.target.files || []);
   ev.target.value = ''; // permite escolher a MESMA foto de novo depois de um erro
   if(!arquivos.length) return;
+  const versao = ++VERSAO_PREPARO_RELATORIO;
   const msg = document.getElementById('ler-canais-msg');
   msg.classList.remove('hidden');
   if(arquivos.length > MAX_FOTOS_RELATORIO){
@@ -1082,10 +1142,25 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', async (
   // reduz ANTES de guardar - é o que sobe pro servidor quando clicar em
   // Realizar leitura, e reduzir aqui (uma vez) é mais rápido que deixar a
   // foto original de celular pesar a leitura toda vez que o botão for clicado
-  msg.innerHTML = `<span style="color:var(--muted);">Preparando ${arquivos.length > 1 ? 'as fotos' : 'a foto'}...</span>`;
-  ARQUIVOS_RELATORIO = await comprimirVariasRelatorio(arquivos);
-  pintarSelecaoRelatorio();
-  msg.innerHTML = `<span style="color:var(--muted);">Confira as fotos e clique em <b>Realizar leitura</b>. Nada foi enviado ainda.</span>`;
+  const atualizarProgresso = (prontas,total)=>{
+    if(versao !== VERSAO_PREPARO_RELATORIO) return;
+    msg.innerHTML = `<span style="color:var(--muted);">Preparando foto ${prontas} de ${total}...</span>`;
+  };
+  atualizarProgresso(0, arquivos.length);
+  try{
+    const preparados = await comprimirVariasRelatorio(arquivos, atualizarProgresso);
+    if(versao !== VERSAO_PREPARO_RELATORIO) return;
+    ARQUIVOS_RELATORIO = preparados;
+    pintarSelecaoRelatorio();
+    msg.innerHTML = `<span style="color:var(--muted);">${ARQUIVOS_RELATORIO.length} foto(s) pronta(s). Confira e clique em <b>Realizar leitura</b>. Nada foi enviado ainda.</span>`;
+  }catch(err){
+    if(versao !== VERSAO_PREPARO_RELATORIO) return;
+    // Última rede de segurança: os originais são melhores que deixar a pessoa
+    // sem ação. A leitura do servidor continua validando tipo e tamanho.
+    ARQUIVOS_RELATORIO = arquivos;
+    pintarSelecaoRelatorio();
+    msg.innerHTML = `<span style="color:var(--warn);">Não foi possível reduzir uma ou mais fotos; elas serão enviadas no formato original. Confira e clique em <b>Realizar leitura</b>.</span>`;
+  }
 });
 
 // Conta, POR SECAO, quantos campos estao travados pela foto AGORA - e nao
@@ -1546,6 +1621,8 @@ document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
     const totalPos = MAQUINAS_POS.reduce((s,m)=>s+num(m.valor),0);
     if(!confirm(`ATENÇÃO — MAQUININHA POS 01\n\n${avisosPos.map(a=>'• '+a.texto).join('\n\n')}\n\nEsse valor é DESCONTADO automaticamente do fechamento de amanhã. Se estiver no lugar errado, amanhã fecha com diferença.\n\nConfirma que ${fmtMoney(totalPos)} foi vendido DEPOIS da meia-noite?`)) return;
   }
+  const kpisPendentes = kpisPendentesNoFormulario();
+  if(kpisPendentes.length && !confirm(`ATENÇÃO — KPI'S NÃO PREENCHIDOS\n\nFalta informar: ${kpisPendentes.map(k=>k.label).join(', ')}.\n\nO fechamento pode ser enviado, mas essa pendência ficará registrada e aparecerá no relatório da loja e da gestão. Deseja finalizar mesmo assim?`)) return;
   if(!confirm('Tem certeza que deseja finalizar esse fechamento? Confira os valores antes de continuar - depois de lançado, qualquer correção precisa passar por aprovação do Master.')) return;
   const btn = document.getElementById('btn-enviar');
   const msg = document.getElementById('msg');

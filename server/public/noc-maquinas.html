@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Saúde das Máquinas — NOC Zenith</title>
+<title>Saúde das Máquinas — NOC-NoPulso</title>
 <style>
   :root{
     --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
@@ -288,7 +288,7 @@ function cardHtml(c){
     ? `<details class="detalhe"><summary>detalhes do disco</summary>${discos}${outrosVolumes}${medidoEm}</details>` : '';
 
   const semMedicao = !c.temMedicao
-    ? `<div class="motivos"><div style="color:var(--muted);">o NOCZenith desse computador ainda não mandou medição — confira se o agente está instalado e atualizado.</div></div>` : '';
+    ? `<div class="motivos"><div style="color:var(--muted);">o NOC-NoPulso desse computador ainda não mandou medição — confira se o agente está instalado e atualizado.</div></div>` : '';
 
   return `<div class="card ${nivelCard}">
     <div class="card-topo">

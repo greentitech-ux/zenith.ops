@@ -1,0 +1,99 @@
+/* Fundação visual NoPulso.
+ * Carregada pelo tema.js em todas as páginas: não altera dados, rotas ou
+ * comportamentos, apenas garante contraste, foco, estados e toque coerentes.
+ * As telas continuam donas de seus layouts específicos. */
+
+:root {
+  --focus-ring: var(--accent2, #5cc8ff);
+  --focus-ring-shadow: color-mix(in srgb, var(--focus-ring) 32%, transparent);
+  --surface-hover: color-mix(in srgb, var(--panel2, #181d24) 78%, var(--text, #eef3f7));
+  --surface-selected: color-mix(in srgb, var(--accent, #b8ff3c) 14%, var(--panel, #12161b));
+  --radius-control: 8px;
+  --radius-panel: 12px;
+}
+
+:root[data-tema="claro"] {
+  color-scheme: light;
+  --focus-ring: var(--accent2, #0d7ac2);
+  --surface-hover: color-mix(in srgb, var(--panel2, #edf1f5) 88%, var(--text, #17212b));
+  --surface-selected: color-mix(in srgb, var(--accent, #5b8c00) 13%, var(--panel, #ffffff));
+}
+
+* { -webkit-tap-highlight-color: transparent; }
+
+/* Piso responsivo compartilhado ------------------------------------------------
+ * As telas do NoPulso têm layouts próprios, mas todas precisam obedecer a estas
+ * três regras: nada cria rolagem horizontal no documento, mídia nunca ultrapassa
+ * o card, e tabelas largas rolam dentro do seu próprio bloco. Assim preservamos
+ * a leitura rica do desktop sem cortar conteúdo em tablet/celular. */
+html, body { max-width: 100%; }
+img, svg, video, canvas { max-inline-size: 100%; height: auto; }
+input, select, textarea { max-inline-size: 100%; }
+
+.tablewrap, .table-wrap, .tabela-wrap, .table-scroll, .scroll-table {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tablewrap > table, .table-wrap > table, .tabela-wrap > table,
+.table-scroll > table, .scroll-table > table { min-width: max-content; }
+
+button, a, input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"]) {
+  outline: none;
+}
+
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible, summary:focus-visible, [role="button"]:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--focus-ring-shadow);
+}
+
+button, [role="button"] { touch-action: manipulation; }
+button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; opacity: .58; }
+button:not(:disabled):active, [role="button"]:active { transform: translateY(1px); }
+
+.empty, .vazio, .sem-dados, .loading, .carregando, .sem-permissao {
+  border-radius: var(--radius-panel);
+}
+
+.ui-scroll-x { overflow-x: auto; overscroll-behavior-x: contain; }
+.ui-scroll-x > table { min-width: max-content; }
+
+@media (max-width: 640px) {
+  /* área segura nas laterais e controles que não estouram o card */
+  body { overflow-x: clip; }
+
+  button:not(.icon-btn):not(.close):not(.fechar),
+  input:not([type="checkbox"]):not([type="radio"]), select {
+    min-height: 40px;
+  }
+
+  .ui-scroll-x { margin-inline: -2px; padding-bottom: 4px; }
+}
+
+/* Formulários operacionais repetem estes nomes em Técnico, Manutenção,
+ * Ativos e RH. Em telas muito estreitas a informação continua inteira em
+ * vez de os campos numéricos espremidos deixarem o botão de ação escapar. */
+@media (max-width: 420px) {
+  .grid2, .grid2-doc { grid-template-columns: 1fr !important; }
+
+  .linha-item, .f-item {
+    grid-template-columns: minmax(0, 1fr) minmax(56px, 72px) auto !important;
+  }
+
+  .linha-item-foto { flex-wrap: wrap; }
+  .linha-item-foto input[type="text"] { flex-basis: calc(100% - 42px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}

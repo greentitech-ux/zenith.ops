@@ -185,7 +185,7 @@
       const blob = await r.blob();
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'conversa-suporte.pdf';
+      a.download = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'conversa-suporte.pdf';
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -512,6 +512,7 @@
       if (arquivo) fd.append('anexo', arquivo);
       const r = await rawFetch(`/api/suporte-chat/${encodeURIComponent(salvo.id)}/mensagem`, { method: 'POST', body: fd });
       if (r.ok) {
+        window.zenithRascunhos?.limparCampoEnviado(input);
         input.value = '';
         limparAnexo(anexoInput, iconeAnexo);
         await carregarConversa();
@@ -1049,7 +1050,7 @@
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({ texto }),
       });
-      if (r.ok) { dmTexto.value = ''; await dmCarregar(); }
+      if (r.ok) { window.zenithRascunhos?.limparCampoEnviado(dmTexto); dmTexto.value = ''; await dmCarregar(); }
     } finally { btn.disabled = false; }
   }
   dmFundo.querySelector('.szc-dm-enviar').addEventListener('click', dmResponder);

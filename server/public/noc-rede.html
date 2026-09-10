@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Análise de Rede — NOC Zenith</title>
+<title>Análise de Rede — NOC-NoPulso</title>
 <style>
   :root{
     --bg:#0b0d10; --panel:#12161b; --panel2:#181d24; --line:#232a33;
@@ -133,7 +133,7 @@
   </div>
   <div class="header-nav">
     <span style="font-family:var(--mono);font-size:10px;color:var(--muted);" id="atualizado"></span>
-    <!-- o "← NOC Zenith" que ficava aqui virou a seta padrao ao lado do
+    <!-- o "← NOC-NoPulso" que ficava aqui virou a seta padrao ao lado do
          hamburguer, montada pelo nav-menu.js (mapa VOLTAR) -->
     <button class="back" onclick="carregar()">🔄 Atualizar</button>
   </div>
@@ -303,7 +303,7 @@ function render(){
     document.getElementById('legenda').classList.add('hidden');
     const v = document.getElementById('gr-vazio');
     v.classList.remove('hidden');
-    v.textContent = `Ainda não há medição nesta granularidade (${per.gran}). Os computadores começam a reportar sozinhos assim que o NOCZenith se atualizar (até ~1h) ou assim que a tela da loja recarregar — a série vai se formando a partir daí. ${per.retencao}`;
+    v.textContent = `Ainda não há medição nesta granularidade (${per.gran}). Os computadores começam a reportar sozinhos assim que o NOC-NoPulso se atualizar (até ~1h) ou assim que a tela da loja recarregar — a série vai se formando a partir daí. ${per.retencao}`;
     document.getElementById('mini-grid').innerHTML = '';
     return;
   }
@@ -351,7 +351,7 @@ function renderTiles(porComputador, frota){
       <div class="tile-sub">somando todos os computadores</div></div>
     <div class="tile"><div class="tile-rot">Sem medição</div>
       <div class="tile-val">${(DADOS.computadores||[]).filter(c=>c.nota===null).length}</div>
-      <div class="tile-sub">aguardando o NOCZenith atualizar</div></div>`;
+      <div class="tile-sub">aguardando o NOC-NoPulso atualizar</div></div>`;
 }
 
 function renderLinhas(rotulos, porComputador, frota){

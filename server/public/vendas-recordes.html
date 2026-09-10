@@ -47,17 +47,17 @@
   .filtro-topo{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;}
   .filtro-topo label{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
 
-  .geral-grid{display:grid;grid-template-columns:1fr;gap:10px;}
-  @media(min-width:640px){ .geral-grid{grid-template-columns:repeat(2,1fr);} }
-  .geral-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;}
-  .geral-card.alta{border-color:rgba(61,220,151,.35);}
-  .geral-card.baixa{border-color:rgba(255,92,92,.28);}
-  .geral-rotulo{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}
-  .geral-valor{font-size:22px;font-weight:700;letter-spacing:-.02em;margin-top:4px;}
-  .geral-valor.alta{color:var(--ok);}
-  .geral-valor.baixa{color:var(--bad);}
-  .geral-sub{font-size:12.5px;color:var(--text);margin-top:4px;}
-  .geral-data{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px;}
+  .ranking-grid{display:grid;grid-template-columns:1fr;gap:10px;}
+  @media(min-width:760px){ .ranking-grid{grid-template-columns:repeat(3,1fr);} }
+  .ranking-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  .ranking-titulo{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding:10px 11px;border-bottom:1px solid var(--line);}
+  .ranking-item{display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:7px;padding:10px 11px;border-top:1px solid var(--line);}
+  .ranking-item:first-of-type{border-top:0;}
+  .ranking-posicao{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--accent);}
+  .ranking-loja{font-size:12px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .ranking-periodo{font-family:var(--mono);font-size:9.5px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ranking-valor{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--ok);white-space:nowrap;}
+  .ranking-nota{font-size:11px;color:var(--muted);margin:10px 0 0;}
 
   .meta-card{background:var(--panel);border:1px solid rgba(61,220,151,.35);border-radius:12px;padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
   .meta-nome{font-size:13.5px;font-weight:700;}
@@ -127,24 +127,20 @@
 </div>
 
 <div class="panel">
-  <h2 id="geral-titulo">Recorde geral · todas as lojas</h2>
-  <div class="geral-grid" id="geral-grid"><div class="empty">carregando...</div></div>
-</div>
-
-<div class="panel" id="painel-meta">
-  <h2>🏆 Bateram recorde recentemente · candidatos a plano de meta</h2>
-  <div id="lista-meta"><div class="empty">carregando...</div></div>
+  <h2 id="geral-titulo">Top 3 vendas · todas as lojas</h2>
+  <div class="ranking-grid" id="geral-grid"><div class="empty">carregando...</div></div>
+  <div class="ranking-nota">Ranking por faturamento: maior valor sempre em primeiro. Semanas e meses só entram quando estão completos.</div>
 </div>
 
 <div class="panel">
-  <h2>Recordes por loja</h2>
+  <h2>Melhor resultado por loja · ordenado pelo melhor dia</h2>
   <div class="tablewrap"><table>
     <thead><tr>
+      <th>#</th>
       <th>Loja</th>
       <th>Maior venda · dia</th>
-      <th>Menor venda · dia</th>
       <th>Maior venda · semana</th>
-      <th>Menor venda · semana</th>
+      <th>Maior venda · mês</th>
     </tr></thead>
     <tbody id="tabela-unidades"></tbody>
   </table></div>
@@ -209,19 +205,18 @@ async function carregar(){
     UNIDADES_CARREGADAS = true;
   }
   renderGeral();
-  renderMeta();
   renderTabela();
 }
 
-function cardGeral(rotulo, item, tipo){
-  if(!item) return `<div class="geral-card ${tipo}"><div class="geral-rotulo">${rotulo}</div><div class="empty" style="padding:8px 0;">sem dados suficientes</div></div>`;
-  const semana = item.inicio != null;
-  return `<div class="geral-card ${tipo}">
-    <div class="geral-rotulo">${rotulo}</div>
-    <div class="geral-valor ${tipo}">${fmtMoney(item.valor)}</div>
-    <div class="geral-sub">${escapeHtml(item.unidadeNome)}</div>
-    <div class="geral-data">${semana ? fmtSemana(item) : fmtData(item.data)}</div>
-  </div>`;
+function fmtMes(item){ return item ? new Date(item.inicio + 'T12:00:00').toLocaleDateString('pt-BR',{month:'long',year:'numeric'}) : ''; }
+function rankingCard(titulo, itens, formato){
+  if(!itens || !itens.length) return `<div class="ranking-card"><div class="ranking-titulo">${titulo}</div><div class="empty" style="padding:14px;">sem dados suficientes</div></div>`;
+  return `<div class="ranking-card"><div class="ranking-titulo">${titulo}</div>${itens.map((item,i)=>`
+    <div class="ranking-item">
+      <div class="ranking-posicao">#${i+1}</div>
+      <div><div class="ranking-loja">${escapeHtml(item.unidadeNome)}</div><div class="ranking-periodo">${formato(item)}</div></div>
+      <div class="ranking-valor">${fmtMoney(item.valor)}</div>
+    </div>`).join('')}</div>`;
 }
 
 function tituloFiltroAtivo(){
@@ -233,35 +228,12 @@ function tituloFiltroAtivo(){
 }
 
 function renderGeral(){
-  const g = DADOS.geral;
-  document.getElementById('geral-titulo').textContent = 'Recorde geral · ' + tituloFiltroAtivo();
+  const rankings = DADOS.rankings || {};
+  document.getElementById('geral-titulo').textContent = 'Top 3 vendas · ' + tituloFiltroAtivo();
   document.getElementById('geral-grid').innerHTML =
-    cardGeral('Maior venda · um dia', g.diaRecorde, 'alta') +
-    cardGeral('Menor venda · um dia', g.diaMenor, 'baixa') +
-    cardGeral('Maior venda · uma semana', g.semanaRecorde, 'alta') +
-    cardGeral('Menor venda · uma semana', g.semanaMenor, 'baixa');
-}
-
-function renderMeta(){
-  const el = document.getElementById('lista-meta');
-  const janela = document.getElementById('f-janela').value;
-  if(!DADOS.candidatosMeta.length){
-    el.innerHTML = `<div class="empty">Nenhuma loja bateu recorde de dia ou de semana nos últimos ${janela} dias.</div>`;
-    return;
-  }
-  el.innerHTML = DADOS.candidatosMeta.map(c=>{
-    const partes = [];
-    if(c.diaRecorde) partes.push(`dia ${fmtData(c.diaRecorde.data)} · ${fmtMoney(c.diaRecorde.valor)}`);
-    if(c.semanaRecorde) partes.push(`semana ${fmtSemana(c.semanaRecorde)} · ${fmtMoney(c.semanaRecorde.valor)}`);
-    const rotuloMotivo = c.motivo === 'dia+semana' ? '🏆 dia + semana' : (c.motivo === 'dia' ? '🏆 dia' : '🏆 semana');
-    return `<div class="meta-card">
-      <div>
-        <div class="meta-nome">${escapeHtml(c.unidadeNome)}</div>
-        <div class="meta-detalhe">${partes.join(' · ')}</div>
-      </div>
-      <span class="badge">${rotuloMotivo}</span>
-    </div>`;
-  }).join('');
+    rankingCard('🏆 3 melhores dias', rankings.dias, item=>fmtData(item.data)) +
+    rankingCard('🏆 3 melhores semanas', rankings.semanas, item=>fmtSemana(item)) +
+    rankingCard('🏆 3 melhores meses', rankings.meses, item=>fmtMes(item));
 }
 
 function celulaDia(item, tipo){
@@ -279,13 +251,14 @@ function renderTabela(){
     corpo.innerHTML = '<tr><td colspan="5"><div class="empty">Nenhum fechamento no histórico.</div></td></tr>';
     return;
   }
-  corpo.innerHTML = DADOS.unidades.map(u=>`
+  const ranking = [...DADOS.unidades].sort((a,b)=>Number(b.diaRecorde?.valor||0)-Number(a.diaRecorde?.valor||0) || (a.unidadeNome||'').localeCompare(b.unidadeNome||'','pt-BR'));
+  corpo.innerHTML = ranking.map((u,index)=>`
     <tr>
+      <td class="sub">#${index+1}</td>
       <td class="unidade-nome">${escapeHtml(u.unidadeNome)}</td>
       <td>${celulaDia(u.diaRecorde,'alta')}${u.diaRecordeRecente?'<span class="tag-recente">recente</span>':''}</td>
-      <td>${celulaDia(u.diaMenor,'baixa')}</td>
       <td>${celulaSemana(u.semanaRecorde,'alta')}${u.semanaRecordeRecente?'<span class="tag-recente">recente</span>':''}</td>
-      <td>${celulaSemana(u.semanaMenor,'baixa')}</td>
+      <td>${u.mesRecorde ? `<div class="val alta">${fmtMoney(u.mesRecorde.valor)}</div><div class="sub">${fmtMes(u.mesRecorde)}</div>` : '<span class="sem-semana">sem mês completo</span>'}</td>
     </tr>
   `).join('');
 }

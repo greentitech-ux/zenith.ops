@@ -18,7 +18,20 @@
 // Aqui a requisicao passa pelo registro de rota, pelo middleware de auth e
 // pelo corpo do handler reais.
 const Module = require('module');
+const path = require('path');
 const origLoad = Module._load;
+const LEGACY_SERVER_DIR = '/home/user/adyen-monitor/server/';
+const origResolveFilename = Module._resolveFilename;
+
+// A suíte já foi executada em Linux, Windows e CI. Os requires históricos
+// ficaram com o caminho de uma máquina específica; traduzimos só esse prefixo
+// para a pasta real do teste, sem precisar acoplar o projeto ao sistema local.
+Module._resolveFilename = function (request, parent, isMain, options) {
+  const resolvido = typeof request === 'string' && request.startsWith(LEGACY_SERVER_DIR)
+    ? path.join(__dirname, request.slice(LEGACY_SERVER_DIR.length))
+    : request;
+  return origResolveFilename.call(this, resolvido, parent, isMain, options);
+};
 
 // ---- Firestore falso: qualquer método encadeia, toda leitura vem vazia ----
 const DOCS = new Map(); // caminho -> dados (o que o teste semear fica aqui)
@@ -383,6 +396,22 @@ setTimeout(async () => {
     ['/api/inventario/historico-contagens/relatorio.pdf?unidade=19821&inicio=2020-01-01&fim=2030-01-01', 'relatório de histórico de contagens - inventário (PDF)'],
   ];
   let ruins = 0;
+
+  // Sem chave configurada, o webhook não pode aceitar evento algum. O endpoint
+  // responde 200 para a Adyen não reenviar sem parar, mas o evento forjado
+  // precisa ser ignorado e jamais pode entrar no cache/banco.
+  const antesWebhookSemHmac = store.allTransactions().length;
+  const webhookSemHmac = await postarJson('/webhooks/adyen', {
+    notificationItems: [{ NotificationRequestItem: {
+      pspReference: 'TESTE_SEM_HMAC', merchantAccountCode: 'CONTA_DE_TESTE',
+      merchantReference: 'PEDIDO_TESTE_SEM_HMAC', amount: { value: 100, currency: 'BRL' },
+      eventCode: 'AUTHORISATION', success: 'true', additionalData: {},
+    } }],
+  });
+  const okWebhookSemHmac = webhookSemHmac.status === 200 && store.allTransactions().length === antesWebhookSemHmac;
+  if (!okWebhookSemHmac) ruins += 1;
+  console.log(`${okWebhookSemHmac ? '✓' : '✗'} Webhook Adyen sem HMAC é ignorado por padrão: HTTP ${webhookSemHmac.status}`);
+
   for (const [rota, nome] of casos) {
     const r = await pedir(rota, token ? { Authorization: 'Bearer ' + token } : {});
     // 401/403 = rota EXISTE e o gate rodou (o que importa aqui é não estourar
@@ -645,9 +674,17 @@ setTimeout(async () => {
         partes: [parte('A 33,33', 33.33, 'k.a'), parte('B 33,33', 33.33, 'k.b'), parte('C 33,34', 33.34, 'k.c')],
       }]).length === 0,
       'diferença de verdade em dinheiro é pega': ocr.conferirSomas([{
-        titulo: 'x', totalValor: 100,
+        titulo: 'x', totalTexto: 'Total 100', totalValor: 100,
         partes: [parte('A 33,33', 33.33, 'k.a'), parte('B 33,33', 33.33, 'k.b')],
       }]).length === 1,
+      // O relatório Domino's imprime as faixas de pedidos e, abaixo, a MÉDIA
+      // "Avg. Orders per Dispatch". A média 1,25 não é total das faixas 24,
+      // 16 e 0; antes o servidor comparava 40 com 1,25 e bloqueava os três
+      // campos corretos para digitação manual.
+      'Orders Per Dispatch: média 1,25 não bloqueia Singles 24, Doubles 16 e Triples+ 0': ocr.conferirSomas([{
+        titulo: 'Orders Per Dispatch', totalTexto: 'Avg. Orders per Dispatch 1.25', totalValor: 1.25,
+        partes: [parte('In Singles 24 60.0%', 24, 'kpi.singles'), parte('In Doubles 16 40.0%', 16, 'kpi.doubles'), parte('In Triples+ 0 0.0%', 0, 'kpi.triples')],
+      }]).length === 0,
       // quadro que não prova nada não pode gerar aviso
       'quadro sem total não vira alarme': ocr.conferirSomas([{ titulo: 'x', partes: [parte('A 1', 1, 'k.a'), parte('B 2', 2, 'k.b')] }]).length === 0,
       'quadro com uma parcela só não vira alarme': ocr.conferirSomas([{ titulo: 'x', totalValor: 9, partes: [parte('A 1', 1, 'k.a')] }]).length === 0,
@@ -3469,7 +3506,7 @@ setTimeout(async () => {
       'o listener de change NÃO chama fetch': !!listener && !/fetch\(/.test(listener),
       'o listener de change NÃO chama a leitura': !!listener && !/realizarLeituraRelatorio\(/.test(listener),
       'a leitura de verdade continua batendo na rota': /realizarLeituraRelatorio[\s\S]*?ler-canais/.test(html),
-      'dá pra limpar a seleção': /limparSelecaoRelatorio/.test(html),
+      'dá pra limpar a seleção e cancelar um preparo pendente': /id="limpar-fotos-relatorio"/.test(html) && /addEventListener\('click', limparSelecaoRelatorio\)/.test(html) && /VERSAO_PREPARO_RELATORIO \+= 1;/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okDoisPassosFoto = !falhas.length;
@@ -3494,7 +3531,10 @@ setTimeout(async () => {
       'existe a função de comprimir o lote de fotos escolhidas': /async function comprimirVariasRelatorio\(/.test(html),
       'PDF sobe inteiro (comprimir só mexe em imagem)': /function comprimirImagemRelatorio\([\s\S]{0,200}return file;.*PDF sobe inteiro/.test(html),
       'a compressão nunca trava a leitura por conta própria (qualquer erro devolve o arquivo original)': /catch\(e\)\{\s*\n\s*return file; \/\/ qualquer tropeço/.test(html),
-      'o listener de change chama a compressão antes de guardar o arquivo': !!listener && /ARQUIVOS_RELATORIO\s*=\s*await comprimirVariasRelatorio\(arquivos\)/.test(listener),
+      'cada foto tem prazo de preparo e uma travada não prende a tela': /const PRAZO_PREPARO_FOTO_MS = 12000;/.test(html) && /function comPrazoPreparoRelatorio\(/.test(html) && /if\(!img && window\.createImageBitmap\)/.test(html),
+      'foto pequena pula o decoder e fica disponível imediatamente': /if\(file\.size <= JA_PEQUENA_RELATORIO\) return file;/.test(html),
+      'o lote prepara as fotos de forma independente e informa o progresso': /return Promise\.all\(lista\.map\(async f=>/.test(html) && /Preparando foto \$\{prontas\} de \$\{total\}/.test(html),
+      'o listener de change chama a compressão antes de guardar o arquivo': !!listener && /const preparados\s*=\s*await comprimirVariasRelatorio\(arquivos, atualizarProgresso\)/.test(listener) && /ARQUIVOS_RELATORIO\s*=\s*preparados/.test(listener),
       'o listener continua recusando mais que o teto de fotos (a checagem não sumiu com a mudança)': !!listener && /arquivos\.length > MAX_FOTOS_RELATORIO/.test(listener),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
@@ -3539,7 +3579,7 @@ setTimeout(async () => {
       // e o cadeado só aparece quando existe campo travado - pro Master,
       // que nunca tem nenhum, a seção fica sem texto nenhum
       'o aviso do cadeado é condicionado a haver campo travado':
-        (html.match(/const aviso = algumTravado\n/g) || []).length === 2,
+        (html.match(/const aviso = algumTravado\r?\n/g) || []).length === 2,
       'IS_MASTER é definido no boot, antes de qualquer campo ser montado':
         html.indexOf('IS_MASTER = isMaster;') > 0 && html.indexOf('IS_MASTER = isMaster;') < html.indexOf('boot();'),
     };
@@ -3569,9 +3609,9 @@ setTimeout(async () => {
     const htmlLanc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'lancamento.html'), 'utf8');
     const iFill = htmlLanc.indexOf('el.value = it.valor;');
     const conferencias = {
-      'o servidor manda os KPI de tempo pro modelo': /\['quantidade', 'moeda', 'kg', 'texto', 'tempo'\]\.includes\(k\.tipo \|\| 'quantidade'\)/.test(srcIndex),
+      'o servidor manda os KPI de tempo pro modelo': /\['quantidade', 'moeda', 'kg', 'percentual', 'texto', 'tempo'\]\.includes\(k\.tipo \|\| 'quantidade'\)/.test(srcIndex),
       'arquivo continua FORA da leitura (é upload, não valor)': !/'arquivo'\]\.includes\(k\.tipo/.test(srcIndex),
-      'a tela também considera tempo elegível': /\['quantidade','moeda','kg','texto','tempo'\]\.includes\(k\.tipo\|\|'quantidade'\)/.test(htmlLanc),
+      'a tela também considera tempo elegível': /\['quantidade','moeda','kg','percentual','texto','tempo'\]\.includes\(k\.tipo\|\|'quantidade'\)/.test(htmlLanc),
       'o modelo é instruído a copiar minutos decimais, sem converter':
         /MINUTOS decimais/.test(ocr.unidadeHintKpi('tempo')) && /NÃO converta/.test(ocr.unidadeHintKpi('tempo')),
       'vírgula do relatório vira número (2,32 → 2.32)': ocr.minutosOuNull('2,32') === 2.32,
@@ -3923,7 +3963,7 @@ setTimeout(async () => {
     'rh-colaborador.html', 'solicitacao-publica.html', 'ticket-publico.html', 'assinar.html',
     // preencher.html: o solicitante preenche por um link, sem login - o
     // token de preenchimento na URL É a credencial (mesmo caso do assinar)
-    'preencher.html',
+    'preencher.html', 'fornecedor-cadastro.html',
   ];
   const dirPublico = require('path').join(__dirname, 'public');
   const semToken = require('fs').readdirSync(dirPublico)
@@ -4303,21 +4343,21 @@ setTimeout(async () => {
   console.log(`${okUnidMonitor ? '✓' : '✗'} Monitor: coluna UNID. mostra a loja mesmo com código unificado sem dígito`);
 
   // ------------------------------------------------------------------
-  // Central do Beniboy: assumir um atendimento apresenta o atendente pro
-  // visitante ("[saudação], Sr./Sra. [solicitante]! O/A [atendente] irá
-  // seguir com o seu atendimento.") e RESPONDER numa conversa aberta também
-  // assume (o responsável vira quem escreveu). A saudação segue o horário
-  // de Brasília e o Sr./Sra. + O/A saem da heurística de gênero pelo nome.
+  // Central do Beniboy: assumir um atendimento apresenta o Suporte
+  // ao visitante (sem vazar nome/e-mail/papel de quem está atendendo) e
+  // RESPONDER numa conversa aberta também assume (o responsável vira quem
+  // escreveu). A saudação segue o horário de Brasília.
   let okAssumir = false;
   try {
     const sc = require('/home/user/adyen-monitor/server/suporteChat.js');
-    const chatNovo = await sc.criar({ nome: 'Letícia', contato: 'leticia@x.com', texto: 'não consigo acessar' });
+    const chatNovo = await sc.criar({ nome: 'Letícia', contato: 'leticia@x.com', texto: 'não consigo acessar', assunto: 'Acesso/Senha' });
 
-    // assumir com atendente mulher
+    // assumir: o responsável é interno, mas o visitante vê a marca Suporte
     const aposMarcela = await sc.atualizarStatusAtendimento(chatNovo.id, {
       statusAtendimento: 'EM_ATENDIMENTO', autor: { id: 'u9', email: 'marcela@x', nome: 'Marcela' },
     });
-    const m1 = aposMarcela.mensagens[aposMarcela.mensagens.length - 1];
+    const m1 = aposMarcela.mensagens[aposMarcela.mensagens.length - 2];
+    const ticketM1 = aposMarcela.mensagens[aposMarcela.mensagens.length - 1];
     const qtdAposMarcela = aposMarcela.mensagens.length;
 
     // a MESMA pessoa mexendo de novo no card não repete a apresentação
@@ -4325,7 +4365,7 @@ setTimeout(async () => {
       statusAtendimento: 'EM_ATENDIMENTO', autor: { id: 'u9', email: 'marcela@x', nome: 'Marcela' },
     });
 
-    // outro atendente (homem) assume por cima: nova apresentação com "O"
+    // outro atendente assume por cima: nova apresentação continua institucional
     const aposCarlos = await sc.atualizarStatusAtendimento(chatNovo.id, {
       statusAtendimento: 'EM_ATENDIMENTO', autor: { id: 'u10', email: 'carlos@x', nome: 'Carlos' },
     });
@@ -4334,23 +4374,37 @@ setTimeout(async () => {
     // responder pela rota também assume (Master escreve -> vira responsável,
     // com a apresentação ANTES da resposta digitada)
     const cab = token ? { Authorization: 'Bearer ' + token } : {};
+    const tarefaResp = await postarJson(`/api/suporte-chats/${chatNovo.id}/gerar-tarefa`, {}, cab);
+    const tarefaChat = tarefaResp.status === 200 ? JSON.parse(tarefaResp.corpo) : {};
+    const tarefaRepetidaResp = await postarJson(`/api/suporte-chats/${chatNovo.id}/gerar-tarefa`, {}, cab);
+    const tarefaRepetida = tarefaRepetidaResp.status === 200 ? JSON.parse(tarefaRepetidaResp.corpo) : {};
     const resp = await postarMultipart(`/api/suporte-chats/${chatNovo.id}/responder`, { texto: 'já estou verificando' }, null, 'anexo', cab);
     const final = await sc.getOne(chatNovo.id);
     const msgs = final.mensagens;
 
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'beniboy.html'), 'utf8');
     const conferencias = {
-      'apresentação com saudação + Sra. + A [atendente]':
-        /^(Bom dia|Boa tarde|Boa noite|Boa madrugada), Sra\. Letícia! A Marcela irá seguir com o seu atendimento\.$/.test(m1.texto)
+      'apresentação com saudação + nome + Suporte':
+        /^(Bom dia|Boa tarde|Boa noite|Boa madrugada), Letícia! O Suporte assumiu seu atendimento e acompanhará sua solicitação\.$/.test(m1.texto)
         && m1.de === 'suporte' && m1.automatica === true,
+      'ticket informado sem repetir a saudação':
+        ticketM1.texto === `Vamos verificar seu acesso e orientar os próximos passos. Seu protocolo é #${aposMarcela.numeroTicket}. Guarde este número para acompanhamento.`
+        && ticketM1.automatica === true,
+      'orientação do protocolo acompanha o tema':
+        sc.mensagemNumeroTicket(123, 'Computador/Sistema').startsWith('Vamos analisar o ocorrido e seguir com o atendimento técnico.')
+        && sc.mensagemNumeroTicket(123, 'Financeiro/Estorno').startsWith('Vamos conferir a situação informada e orientar a solução.')
+        && sc.mensagemNumeroTicket(123, 'tema desconhecido').startsWith('Vamos analisar sua solicitação e retornar com uma atualização.'),
       'assumir grava o responsável': aposMarcela.responsavel && aposMarcela.responsavel.email === 'marcela@x',
       'mesma pessoa de novo não repete a apresentação': repetido.mensagens.length === qtdAposMarcela,
-      'atendente homem sai com "O"': / O Carlos irá seguir com o seu atendimento\.$/.test(m2.texto),
+      'troca de responsável não vaza o nome interno': / O Suporte assumiu seu atendimento e acompanhará sua solicitação\.$/.test(m2.texto) && !/Carlos|Marcela/.test(m2.texto),
       'responder pela rota assume o atendimento': resp.status === 200 && final.responsavel && final.responsavel.email === process.env.MASTER_EMAIL,
       'a apresentação vem antes da resposta digitada':
         msgs[msgs.length - 1].texto === 'já estou verificando' && msgs[msgs.length - 2].automatica === true,
-      'heurística de gênero cobre as exceções': sc.ehNomeFeminino('Isabel') && !sc.ehNomeFeminino('Luca') && !sc.ehNomeFeminino('Rafael') && sc.ehNomeFeminino('Ana'),
       'a tela tem o botão de assumir (mesmo com outro responsável)': /assumirAtendimento\(/.test(html) && /respEmail !== meuEmail/.test(html),
+      'chat gera tarefa com o mesmo protocolo, sem criar outro Ticket #': tarefaResp.status === 200 && tarefaChat.tarefa?.numeroTicket === chatNovo.numeroTicket && tarefaChat.tarefa?.origemChatId === chatNovo.id,
+      'repetir a ação devolve a tarefa vinculada': tarefaRepetidaResp.status === 200 && tarefaRepetida.existente === true && tarefaRepetida.tarefa?.id === tarefaChat.tarefa?.id,
+      'a Central mostra a ação Gerar tarefa': /function gerarTarefa\(id\)/.test(html) && /✅ Gerar tarefa/.test(html),
+      'Ticket # do chat vira link para a tarefa ou chamado': /const destinoPrincipal = chat\.chamadoId/.test(html) && /\/tarefas\.html\?tarefa=/.test(html) && /Ticket #\$\{escapeHtml\(chat\.numeroTicket\)\}/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okAssumir = !falhas.length;
@@ -4496,7 +4550,7 @@ setTimeout(async () => {
   // Formulários - memória de favorecido + anexos: preencher um Reembolso
   // com CPF grava o favorecido (nome + dados bancários); digitar o mesmo
   // CPF de novo devolve tudo pra tela preencher sozinha. A criação também
-  // aceita multipart com comprovantes (PDF/imagem, até 5) e as rotas de
+    // aceita multipart com comprovantes (PDF/imagem/ZIP, até 5) e as rotas de
   // anexo (logada e pública por token) respondem sem vazar por índice/token.
   let okFavorecido = false;
   try {
@@ -4518,10 +4572,13 @@ setTimeout(async () => {
     const viaMultipart = await postarMultipart('/api/formularios', {
       payload: JSON.stringify({ tipo: 'avulso', unidade: 'Spoleto Tacaruna', campos: { favorecido: 'X' }, linhas: [{ data: 'x', descricao: 'y', valor: '10' }] }),
     }, null, 'anexos', cab);
-    // arquivo que não é PDF nem imagem é barrado ANTES de tocar no storage
+    // arquivo que não é PDF, imagem nem ZIP é barrado ANTES de tocar no storage
     const tipoRuim = await postarMultipart('/api/formularios', {
       payload: JSON.stringify({ tipo: 'avulso', unidade: 'Spoleto Tacaruna', campos: { delivery: 100, entradaDinheiro: 100 }, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }),
     }, { nome: 'nota.txt', tipo: 'text/plain', buffer: Buffer.from('oi') }, 'anexos', cab);
+    const zipPermitido = await postarMultipart('/api/formularios', {
+      payload: JSON.stringify({ tipo: 'avulso', unidade: 'Spoleto Tacaruna', campos: { delivery: 100, entradaDinheiro: 100 }, linhas: [{ data: 'x', descricao: 'y', valor: '1' }] }),
+    }, { nome: 'evidencias.zip', tipo: 'application/zip', buffer: Buffer.from('PK\x03\x04') }, 'anexos', cab);
 
     // rotas de anexo: índice inexistente e token errado caem em 404
     const tokenAss = new URLSearchParams(String((fR.assinaturas.find((a) => a.chave === 'favorecido') || {}).link).split('?')[1]).get('t');
@@ -4539,7 +4596,8 @@ setTimeout(async () => {
       'a busca aceita o CPF com máscara': formatado.status === 200,
       'CPF nunca usado devolve 404': desconhecido.status === 404,
       'criar por multipart (sem arquivo) funciona': viaMultipart.status === 200,
-      'arquivo que não é PDF/imagem é recusado': tipoRuim.status === 400 && /PDF nem imagem/.test(tipoRuim.corpo),
+      'arquivo que não é PDF, imagem ou ZIP é recusado': tipoRuim.status === 400 && /PDF, imagem ou ZIP/.test(tipoRuim.corpo),
+      'arquivo ZIP é aceito como comprovante': zipPermitido.status === 200,
       'anexo com índice inexistente dá 404 (logado e público)': anexoForaDoIndice.status === 404 && anexoPublicoForaDoIndice.status === 404,
       'anexo público com token errado dá 404': anexoTokenErrado.status === 404,
       'a tela de formulários tem o campo de comprovantes e manda FormData':
@@ -5692,6 +5750,11 @@ setTimeout(async () => {
     await bater({ bootEm: BOOT1, link: { tipo: 'ethernet', nome: 'Ethernet', mbps: 1000 } });
     const noCabo = await doc();
 
+    // O piloto Tailscale só inventaria o cliente local: nenhum segredo, peer
+    // ou configuração da VPN pode voltar pelo heartbeat público.
+    await bater({ tailscale: { instalado: true, estado: 'Running', ip: '100.64.12.34', nome: 'caixa02.arcfood.ts.net', versao: '1.90.0', segredo: 'nunca-gravar' } });
+    const tailscaleRegistrado = await doc();
+
     // 2) o cabo cai e ela segue viva pelo Wi-Fi: NÃO é queda, é degradação
     await bater({ bootEm: BOOT1, link: { tipo: 'wifi', nome: 'Wi-Fi', mbps: 130, ethernetCaida: true } });
     const noWifi = await doc();
@@ -5724,6 +5787,9 @@ setTimeout(async () => {
     const conferencias = {
       'no cabo = operacional, e o painel mostra a velocidade':
         noCabo.estado === 'operacional' && noCabo.link.tipo === 'ethernet' && noCabo.link.mbps === 1000,
+      'Tailscale é inventariado com campos fechados, sem aceitar dados extras':
+        tailscaleRegistrado.tailscale && tailscaleRegistrado.tailscale.estado === 'Running'
+        && tailscaleRegistrado.tailscale.ip === '100.64.12.34' && !('segredo' in tailscaleRegistrado.tailscale),
       'caiu a Ethernet mas segue no ar = DEGRADADO (não offline)':
         noWifi.online === true && noWifi.estado === 'degradado'
         && noWifi.degradacao.includes('Ethernet caída'),
@@ -6440,9 +6506,11 @@ setTimeout(async () => {
       // a rota exige token: abrir a URL no navegador devolve 401, entao a
       // tela E o unico caminho de verdade pro Master ver isso
       'a tela do NOC tem o painel que busca o relatorio': (() => {
-        const h = require('fs').readFileSync('/home/user/adyen-monitor/server/public/loja-status.html', 'utf8');
+        const h = require('fs').readFileSync(path.join(__dirname, 'public', 'loja-status.html'), 'utf8');
         return /id="quedas-panel"/.test(h)
-          && /fetch\('\/api\/loja-status\/quedas\?dias=' \+/.test(h)
+          // a query passou a ser montada antes (dias= ou periodo=, ver os
+          // botões Hoje/Ontem) - o que importa aqui é a tela chamar a rota
+          && /fetch\('\/api\/loja-status\/quedas\?' \+ q\)/.test(h)
           && /function alternarPainelQuedas\(\)/.test(h)
           // so busca quando ABRE: relatorio de analise nao entra no poll de 30s
           && /if\(abriu && !QUEDAS_CARREGADO\) carregarQuedas\(\);/.test(h)
@@ -6450,7 +6518,13 @@ setTimeout(async () => {
           && /piso, não teto/.test(h);
       })(),
       'o codigo pareia na ordem em vez de so somar duracaoMs':
-        /let aberta = null;/.test(require('fs').readFileSync('/home/user/adyen-monitor/server/lojaStatus.js', 'utf8')),
+        /let aberta = null;/.test(require('fs').readFileSync(path.join(__dirname, 'lojaStatus.js'), 'utf8')),
+      'retroativo usa todos os pontos fixos quando a unidade ainda não marcou os oficiais': (() => {
+        const fonte = require('fs').readFileSync(path.join(__dirname, 'lojaStatus.js'), 'utf8');
+        return /const fonteMedicao = pontosMarcados\.length \? 'marcados' : 'automatico'/.test(fonte)
+          && /pontosMarcados\.length \? pontosMarcados : todosPontos/.test(fonte)
+          && /if \(doc\.ehNotebook\) continue;/.test(fonte);
+      })(),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okRelQuedas = !falhas.length;
@@ -7129,14 +7203,27 @@ setTimeout(async () => {
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'kpis-operacionais.html'), 'utf8');
     const conf = {
       'existe uma função só pra calcular o Total, usada na tela E no export (não duas contas separadas)':
-        /function totalLinha\(porLoja, lojas, modo\)\{/.test(html)
-        && (html.match(/totalLinha\(porLoja, lojas, modo\)/g) || []).length >= 3, // a definição + os 2 usos
+        /function totalLinha\(porLoja, lojas, def, modo\)\{/.test(html)
+        && (html.match(/totalLinha\(porLoja, lojas, def, modo\)/g) || []).length >= 3, // a definição + os 2 usos
       'a função recombina TODOS os lançamentos das lojas antes de agregar (não soma médias já arredondadas)':
-        /const todos = lojas\.flatMap\(u => porLoja\[u\]\);\s*\n\s*return fmtValor\(agregar\(todos, modo\), modo\);/.test(html),
+        /const todos = lojas\.flatMap\(u => porLoja\[u\]\);\s*\n\s*return fmtValor\(agregar\(todos, modo\), def, modo\);/.test(html),
       'o cabeçalho da matriz ganha a coluna Total, no fim': /<th class="total-col">Total<\/th>/.test(html),
-      'a tela usa totalLinha pra preencher a célula da linha': /const txtTotal = totalLinha\(porLoja, lojas, modo\);/.test(html),
+      'a tela usa totalLinha pra preencher a célula da linha': /const txtTotal = totalLinha\(porLoja, lojas, def, modo\);/.test(html),
       'o export (CSV/PDF) manda o total calculado pela MESMA função, não recalcula na mão':
-        /total: totalLinha\(porLoja, lojas, modo\) \?\? ''/.test(html),
+        /total: totalLinha\(porLoja, lojas, def, modo\) \?\? ''/.test(html),
+      'TM (ticket médio) é identificado como média, mesmo sendo um KPI monetário':
+        /\\btm\\b\|time\|tempo\|otd\|taxa/i.test(html),
+      'a tela mostra pendências de KPI por loja e exporta o relatório em CSV':
+        /function listaPendenciasKpi\(\)/.test(html)
+        && /function exportarPendenciasCsv\(\)/.test(html)
+        && /id="pendencias-kpi"/.test(html),
+      'a correção Calabress → Calabresa exige prévia e confirmação exclusiva do Master': (() => {
+        const api = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
+        const tela = require('fs').readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+        return /api\/fechamentos\/kpis\/calabresa\/migracao', auth\.requireMaster/.test(api)
+          && /MIGRAR CALABRESS/.test(api)
+          && /id="migracao-calabresa-panel"/.test(tela);
+      })(),
     };
     const falhas = Object.entries(conf).filter(([, ok]) => !ok).map(([n]) => n);
     okKpiTotal = !falhas.length;
@@ -7564,6 +7651,9 @@ setTimeout(async () => {
     for (const arq of fsA.readdirSync(dirA).filter((f) => /\.(html|js)$/.test(f))) {
       const src = fsA.readFileSync(pathA.join(dirA, arq), 'utf8');
       src.split('\n').forEach((linha, i) => {
+        // Comentários podem citar a cor para explicar a regra; o teste só
+        // proíbe o valor usado como CSS/JS efetivo, que não acompanha o tema.
+        if (/^\s*\/\//.test(linha)) return;
         if (!linha.includes('#b8ff3c')) return;
         // tira o que e legitimo antes de procurar sobra
         const limpa = linha
@@ -10956,8 +11046,11 @@ setTimeout(async () => {
     const venceu = fl.diasPendentesDeFechamento(fechs, U, '2026-09-07', 2);
     // 07/09 às 14h: continua cobrando o 06 (não some quando o dia avança)
     const tarde = fl.diasPendentesDeFechamento(fechs, U, '2026-09-07', 14);
-    // loja que nunca lançou nada: cobra só o último dia, não 7 dias
+    // unidade que NUNCA lançou nada não é cobrada: escritório (MVPar), loja
+    // que ainda vai abrir (Spo Shop Midway), unidade de outra área. Foi o
+    // primeiro erro que o Master viu no aviso (07/09/2026)
     const nova = fl.diasPendentesDeFechamento([], [{ codigo: 'N', nome: 'Loja Nova' }], '2026-09-07', 2);
+    const misto = fl.diasPendentesDeFechamento(fechs, [...U, { codigo: 'MVPAR', nome: 'MVPar' }], '2026-09-07', 2);
     // ninguém devendo
     const emDia = fl.diasPendentesDeFechamento(
       ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-06'].map((d) => ({ unidade: 'A', data: d })),
@@ -10967,6 +11060,7 @@ setTimeout(async () => {
     const rota = await pedir('/api/fechamentos/pendencias', { Authorization: 'Bearer ' + token });
     const semLogin = await pedir('/api/fechamentos/pendencias');
     const corpoRota = rota.status === 200 ? JSON.parse(rota.corpo) : {};
+    const srcIndex = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
     const tema = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tema.js'), 'utf8');
     const fnAviso = /function avisarFechamentoPendente\(\) \{[\s\S]*?\n  \}/.exec(tema);
     const htmlLanc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'lancamento.html'), 'utf8');
@@ -10979,9 +11073,19 @@ setTimeout(async () => {
       'os buracos dos dias anteriores também entram, mais recente primeiro':
         sels(venceu)[0] === 'A:2026-09-06' && sels(venceu).includes('A:2026-09-03') && sels(venceu).includes('B:2026-09-05'),
       'não cobra dia anterior ao primeiro lançamento da loja': !sels(venceu).some((s) => s.endsWith('2026-08-31')),
-      'loja que nunca lançou cobra só o último dia, não 7': nova.total === 1 && sels(nova).join(',') === 'N:2026-09-06',
+      'unidade que nunca lançou fechamento NÃO é cobrada (MVPar, loja que vai abrir)':
+        nova.total === 0 && !sels(misto).some((s) => s.startsWith('MVPAR:')) && sels(misto).includes('A:2026-09-06'),
       'loja em dia não gera pendência nenhuma': emDia.total === 0 && emDia.pendentes.length === 0,
       'a rota responde ao Master e recusa sem login': rota.status === 200 && Array.isArray(corpoRota.pendentes) && typeof corpoRota.total === 'number' && semLogin.status === 401,
+      // a rota tem que perguntar QUEM lança fechamento do mesmo jeito que a
+      // tela de lançamento pergunta (perfil da unidade, área 'fechamento'),
+      // e juntar a fonte do Saltiverso, que fecha por outra tela
+      'a rota respeita o perfil da unidade (área fechamento) e não inventa lista própria':
+        /filtrarMapaPorArea\(m, 'fechamento'\)/.test(srcIndex) && /codigosRestritosDe\('fechamento'\)/.test(srcIndex)
+        && /restritas\.forEach\(\(c\) => \{ delete nomes\[c\]; \}\)/.test(srcIndex),
+      'o Saltiverso entra pela fonte dele, senão apareceria devendo todo dia':
+        /saltiversoFechamento\.listAll\(\)\.then\(\(l\) => l\.map\(saltiversoFechamento\.comoFechamento\)\)/.test(srcIndex)
+        && /const todos = \[\.\.\.lancados, \.\.\.saltiverso\];/.test(srcIndex),
       // a tela: o aviso vive no tema.js porque e o unico arquivo das 53 telas
       'o aviso mora no tema.js (o único carregado por todas as telas)': !!fnAviso && /fetch\('\/api\/fechamentos\/pendencias'/.test(tema),
       'não aparece na própria tela de lançamento nem sem login':
@@ -11152,6 +11256,235 @@ setTimeout(async () => {
   } catch (e) { okFiltroSecao = false; console.log('  erro: ' + e.message); }
   if (!okFiltroSecao) ruins += 1;
   console.log(`${okFiltroSecao ? '✓' : '✗'} Fechamentos: vale o último clique - a seção pode pedir período maior que o principal, e mexer no principal a faz acompanhar`);
+
+  // ------------------------------------------------------------------
+  // SESSÃO REMOTA x SERVIÇO CONECTADO. Pergunta do Master (09/09/2026):
+  // "conseguimos fazer com que esse tipo de conexão que não é uma pessoa se
+  // conectando de fato apareça quando realmente alguma conexão for
+  // estabelecida?". Ele viu 20 linhas de "Acesso remoto · TeamViewer" numa
+  // tarde, de 20 em 20 minutos, todas pra endereço da própria TeamViewer - era
+  // o serviço se anunciando pra nuvem, não gente entrando.
+  //
+  // Conexão TCP não separa os dois. Quem separa é o LOG DE SESSÃO da própria
+  // ferramenta, que só escreve quando alguém entra.
+  let okSessaoRemota = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const vg = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const cabS = { Authorization: 'Bearer ' + token };
+    await postarJson('/api/loja-status/SESSAO_TESTE/computadores', { nome: 'PC Sessao', tipo: 'interno' }, cabS);
+    const detalhe = async (u) => { const d = JSON.parse((await pedir(`/api/loja-status/${u}/computadores/principal/detalhe`, cabS)).corpo); return d; };
+    const rota = `/api/loja-status/SESSAO_TESTE/computadores/principal/acesso-remoto`;
+    // o batimento de nuvem: mesmo detalhe duas vezes seguidas vira UM evento
+    await postarJson(rota, { detalhe: 'TeamViewer (20.206.176.18:443)' }, {});
+    await postarJson(rota, { detalhe: 'TeamViewer (20.206.176.18:443)' }, {});
+    // uma sessão de verdade, vinda do log da ferramenta
+    await postarJson(rota, { detalhe: 'TeamViewer · Sidney · 08/09 22:31 ate 22:44', sessao: true }, {});
+    // e outra igualzinha logo depois: são dois acessos, não repetição
+    await postarJson(rota, { detalhe: 'TeamViewer · Sidney · 08/09 22:31 ate 22:44', sessao: true }, {});
+    // o caso que separa as duas travas: um batimento e, logo depois, uma
+    // SESSÃO com o MESMO texto. O filtro de repetição é só do batimento - se
+    // pegasse a sessão, o acesso de verdade sumiria por parecer com o ruído
+    await postarJson(rota, { detalhe: 'AnyDesk (203.0.113.5:7070)' }, {});
+    await postarJson(rota, { detalhe: 'AnyDesk (203.0.113.5:7070)', sessao: true }, {});
+    const det = await detalhe('SESSAO_TESTE');
+    const evs = (det.eventos || []).filter((e) => e.tipo === 'acesso-remoto' || e.tipo === 'sessao-remota');
+    const script = vg.montarScriptVigia({ codigo: '19821', posto: 'principal', tipo: 'interno', agentToken: 'tok' });
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const iSessao = script.indexOf('function Verificar-SessaoRemota');
+    const iConex = script.indexOf('function Verificar-AcessoRemoto');
+    const conf = {
+      'batimento de nuvem repetido continua virando um evento só': evs.filter((e) => e.tipo === 'acesso-remoto').length === 2,
+      'duas sessões iguais são dois eventos (dois acessos, não repetição)': evs.filter((e) => e.tipo === 'sessao-remota').length === 3,
+      'sessão com o mesmo texto de um batimento anterior NÃO é engolida pelo filtro de repetição':
+        evs[evs.length - 1].tipo === 'sessao-remota' && /AnyDesk/.test(evs[evs.length - 1].detalhe),
+      // carimbo próprio: o card sabe dizer quando foi a última SESSÃO, sem
+      // depender de vasculhar o histórico atrás dela no meio dos batimentos
+      'a sessão fica com o próprio carimbo no computador, sempre a mais recente':
+        !!det.ultimaSessaoRemotaEm && det.ultimaSessaoRemotaDetalhe === 'AnyDesk (203.0.113.5:7070)',
+      // o agente: le o log da ferramenta, e desliga o palpite so onde le
+      'o agente lê o Connections_incoming.txt do TeamViewer':
+        iSessao > 0 && /Connections_incoming\.txt/.test(script) && /Get-Content -Path \$tv -Tail 40/.test(script),
+      'o alerta por conexão é desligado só pra ferramenta cujo log é lido':
+        /\$FerramentasComLog\.Add\("TeamViewer"\)/.test(script) && /\$FerramentasComLog\.Add\("TeamViewer_Service"\)/.test(script)
+        && /if \(\$FerramentasComLog\.Contains\(\$nomeProc\)\) \{ continue \}/.test(script)
+        // AnyDesk continua no palpite de proposito: o trace muda entre versoes
+        && !/\$FerramentasComLog\.Add\("AnyDesk"\)/.test(script) && /ad_svc\.trace/.test(script),
+      'a primeira varredura só marca o que já estava no log (reinício não reporta sessão velha)':
+        /\$PrimeiraVarreduraSessao = \$true/.test(script) && /if \(\$PrimeiraVarreduraSessao\) \{ continue \}/.test(script)
+        && /\$script:PrimeiraVarreduraSessao = \$false/.test(script),
+      'o log é lido ANTES da checagem por conexão (senão a lista de exceção chega vazia)': iSessao > 0 && iSessao < iConex
+        && script.indexOf('try { Verificar-SessaoRemota }') < script.indexOf('try { Verificar-AcessoRemoto }'),
+      'a versão do vigia subiu, senão as 52 máquinas não baixam a versão nova': vg.VERSAO_VIGIA >= 23,
+      'o script continua começando com # NOCZenith (a trava do download)': script.startsWith('# NOCZenith'),
+      // o push: so sessao toca o celular do Master
+      'só a sessão vira push; o serviço conectado nunca mais toca o celular':
+        /if \(ehSessao && await lojaStatus\.pushAcessoRemotoAtivo\(\)\)/.test(srcIdx),
+      'a tela separa as duas linhas, e só a sessão é vermelha':
+        /ev\.tipo==='sessao-remota'/.test(html) && /🔓 Sessão remota/.test(html) && /ev-dot bad"><\/span><b>🔓 Sessão remota/.test(html)
+        && /<b>Serviço de acesso remoto ligado<\/b>/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okSessaoRemota = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (eventos=${JSON.stringify(evs.map((e) => e.tipo))})`);
+  } catch (e) { okSessaoRemota = false; console.log('  erro: ' + e.message); }
+  if (!okSessaoRemota) ruins += 1;
+  console.log(`${okSessaoRemota ? '✓' : '✗'} NOC: sessão remota (alguém entrou, lida do log da ferramenta) separada do serviço só conectado`);
+
+  // ------------------------------------------------------------------
+  // QUEDAS DE CONEXÃO: RECOLHER E OS PERÍODOS Hoje/Ontem. Dois relatos do
+  // Master (09/09/2026): "quando clica em abrir ele carrega, mas quando clica
+  // para recolher ele não recolhe" e "adicionar o botão de Ontem e hoje".
+  //
+  // O bug era de cascata: o corpo do painel tinha style="display:block"
+  // CRAVADO no elemento, e estilo inline vence regra de folha - então
+  // `.uni-panel.recolhido .uni-grid{display:none}` nunca conseguia fechar.
+  //
+  // Hoje/Ontem não são "1 dia" da janela rolante: são dia de CALENDÁRIO da
+  // loja (meia-noite a meia-noite, fuso de Brasília), e Ontem precisa de fim
+  // de janela - sem ele, "Ontem" mostraria ontem mais o dia de hoje.
+  let okQuedasPeriodo = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const cabQ = { Authorization: 'Bearer ' + token };
+    // uma máquina com queda ONTEM e outra HOJE, na mesma unidade
+    const meiaNoiteHoje = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })).setHours(0, 0, 0, 0);
+    const ontemMs = meiaNoiteHoje - 6 * 60 * 60 * 1000;   // 18h de ontem
+    const hojeMs = meiaNoiteHoje + 6 * 60 * 60 * 1000;    // 6h de hoje
+    const evento = (quandoOff, quandoOn) => ([
+      { tipo: 'offline', em: quandoOff },
+      { tipo: 'online', em: quandoOn, duracaoMs: quandoOn - quandoOff },
+    ]);
+    DOCS.set('lojaStatus/QUEDAS_TESTE__pc1', {
+      codigo: 'QUEDAS_TESTE', posto: 'pc1', nome: 'PC 1', tipo: 'interno',
+      medeQuedas: true, eventos: [...evento(ontemMs, ontemMs + 30 * 60000), ...evento(hojeMs, hojeMs + 45 * 60000)],
+    });
+    ls.descartarEspelhoTeste();
+    const pedirQ = async (qs) => JSON.parse((await pedir('/api/loja-status/quedas?' + qs, cabQ)).corpo);
+    const dHoje = await pedirQ('periodo=hoje');
+    const dOntem = await pedirQ('periodo=ontem');
+    const d7 = await pedirQ('dias=7');
+    const uni = (d) => (d.unidades || []).find((u) => u.codigo === 'QUEDAS_TESTE') || { quedas: 0 };
+    const fnBotoes = /function botoesPeriodoQuedas\(\)\{[\s\S]*?\n\}/.exec(html);
+    const conf = {
+      // o bug do recolher: o inline saiu e a regra de fechar existe
+      'o corpo do painel não tem mais display cravado no elemento (era o que impedia recolher)':
+        /<div id="quedas-corpo" class="uni-grid quedas-corpo"><\/div>/.test(html)
+        && !/id="quedas-corpo"[^>]*style=/.test(html),
+      'a regra que fecha o painel alcança o corpo das Quedas':
+        /\.uni-grid\.quedas-corpo\{display:block;min-width:0;\}/.test(html) && /\.uni-panel\.recolhido \.quedas-corpo\{display:none;\}/.test(html),
+      // Hoje/Ontem: dia de calendario, com fim de janela no Ontem
+      'Hoje traz só a queda de hoje': uni(dHoje).quedas === 1 && dHoje.dias === 'hoje',
+      'Ontem traz só a queda de ontem, sem varrer o dia de hoje junto': uni(dOntem).quedas === 1 && dOntem.dias === 'ontem',
+      'os dois dias somados aparecem na janela de 7 dias': uni(d7).quedas === 2 && d7.dias === 7,
+      'o fim de janela existe de verdade no cálculo (não é só rótulo)':
+        /function quedasDeUmComputador\(doc, desde, ate = Infinity\)/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8'))
+        && /ev\.em > ate\) continue;/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8')),
+      '"fora agora" não aparece numa janela que já terminou (Ontem)':
+        /ate === Infinity && aberta/.test(require('fs').readFileSync(__dirname + '/lojaStatus.js', 'utf8')),
+      // a tela
+      'os cinco períodos estão na tela, com Hoje e Ontem à frente':
+        !!fnBotoes && /carregarQuedas\('hoje'\)">Hoje/.test(fnBotoes[0]) && /carregarQuedas\('ontem'\)">Ontem/.test(fnBotoes[0])
+        && /carregarQuedas\(7\)/.test(fnBotoes[0]) && /carregarQuedas\(30\)/.test(fnBotoes[0]) && /carregarQuedas\(90\)/.test(fnBotoes[0]),
+      'os botões continuam na tela mesmo num período sem queda nenhuma':
+        (html.match(/botoesPeriodoQuedas\(\)/g) || []).length >= 3,
+      'a tela manda periodo= pra Hoje/Ontem e dias= pro resto':
+        /periodoEscolhido === 'hoje' \|\| periodoEscolhido === 'ontem'[\s\S]{0,180}'periodo=' \+ periodoEscolhido[\s\S]{0,120}'dias=' \+ periodoEscolhido/.test(html),
+      'Unidade fica congelada e nome longo corta com reticências no celular':
+        /\.quedas-tab th:first-child,\.quedas-tab td:first-child\{position:sticky;left:0;/.test(html)
+        && /\.quedas-unidade-nome\{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\}/.test(html)
+        && /@media\(max-width:640px\)[\s\S]{0,800}width:132px;min-width:132px/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okQuedasPeriodo = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (hoje=${uni(dHoje).quedas} ontem=${uni(dOntem).quedas} 7d=${uni(d7).quedas})`);
+  } catch (e) { okQuedasPeriodo = false; console.log('  erro: ' + e.message); }
+  if (!okQuedasPeriodo) ruins += 1;
+  console.log(`${okQuedasPeriodo ? '✓' : '✗'} NOC: painel de Quedas recolhe de novo, e ganhou Hoje/Ontem por dia de calendário`);
+
+  // ------------------------------------------------------------------
+  // COMPARATIVO POR UNIDADE: colocação, variação e filtro por dia da semana.
+  // Pedidos do Master (09/09/2026): "marcar a posição no comparativo por
+  // unidade - 1. colocado maior faturamento, 2. colocado...", "colocar um
+  // filtro por dia da semana que eu possa selecionar o dia da semana e filtra
+  // todas as datas daquele dia da semana" e "coluna de porcentagem de
+  // crescimento ou queda no faturamento".
+  let okCompUnidade = false;
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+    const srcIdx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    // dia da semana sem o fuso atrapalhar: a função pura das duas pontas
+    const mDiaTela = /function diaSemanaDe\(iso\)\{[\s\S]*?\n\}/.exec(html);
+    const mDiaSrv = /function diaSemanaISO\(data\) \{[\s\S]*?\n\}/.exec(srcIdx);
+    // eslint-disable-next-line no-new-func
+    const diaTela = mDiaTela ? new Function(`${mDiaTela[0]}; return diaSemanaDe;`)() : null;
+    // eslint-disable-next-line no-new-func
+    const diaSrv = mDiaSrv ? new Function(`${mDiaSrv[0]}; return diaSemanaISO;`)() : null;
+    // a rota: só as segundas do período
+    const cabC = { Authorization: 'Bearer ' + token };
+    const semFiltro = await pedir('/api/fechamentos/relatorio.csv?inicio=2026-09-01&fim=2026-09-30', cabC);
+    const soSegunda = await pedir('/api/fechamentos/relatorio.csv?inicio=2026-09-01&fim=2026-09-30&diaSemana=1', cabC);
+    const datasDe = (csv) => [...String(csv).matchAll(/(\d{2})\/(\d{2})\/(\d{4})/g)].map((m) => `${m[3]}-${m[2]}-${m[1]}`);
+    const datasSeg = datasDe(soSegunda.corpo);
+    const fnUnid = /function renderUnidadesTable\(rows\)\{[\s\S]*?\n\}/.exec(html);
+    const fnAnt = /function faturamentoAnteriorPorUnidade\(\)\{[\s\S]*?\n\}/.exec(html);
+    const conf = {
+      // 07/09/2026 é segunda; 08 é terça. Sem o cálculo por partes, o fuso
+      // do processo jogaria a data pro dia anterior
+      // o processo do teste roda em UTC, onde `new Date('2026-09-07')` acerta
+      // o dia POR ACASO - a falha só aparece num fuso negativo, como o do
+      // Brasil. Por isso a guarda aqui é a FORMA: a data tem que ser montada
+      // por partes, nunca do ISO puro (a sabotagem provou que sem isso passa)
+      'dia da semana é calculado sem o fuso derrubar a data (tela e servidor iguais)':
+        !!diaTela && !!diaSrv && diaTela('2026-09-07') === 1 && diaSrv('2026-09-07') === 1
+        && diaTela('2026-09-06') === 0 && diaSrv('2026-09-06') === 0 && diaTela('') === null
+        && /return new Date\(Number\(p\[0\]\), Number\(p\[1\]\) - 1, Number\(p\[2\]\)\)\.getDay\(\);/.test(srcIdx)
+        && /return new Date\(Number\(p\[0\]\), Number\(p\[1\]\)-1, Number\(p\[2\]\)\)\.getDay\(\);/.test(html),
+      // coluna congelada: com 8 colunas a linha rola e vira número sem dono
+      'a coluna da unidade (e a colocação) fica congelada na rolagem lateral':
+        /\.tab-unidades th:nth-child\(1\),\.tab-unidades td:nth-child\(1\)\{position:sticky;left:0;/.test(html)
+        && /\.tab-unidades th:nth-child\(2\),\.tab-unidades td:nth-child\(2\)\{position:sticky;left:38px;/.test(html)
+        && /background:var\(--panel\);\}/.test(html) && /<table class="tab-unidades">/.test(html),
+      'no celular o nome é abreviado, mas o nome inteiro fica no title':
+        /@media \(max-width:640px\)\{[\s\S]{0,400}text-overflow:ellipsis/.test(html)
+        && /<td title="\$\{escapeHtml\(UNIDADES_NOMES\[u\]\|\|u\)\}">/.test(html),
+      'o relatório do servidor respeita o dia da semana pedido':
+        soSegunda.status === 200 && semFiltro.status === 200
+        && datasSeg.length > 0 && datasSeg.every((d) => diaSrv(d) === 1)
+        && datasDe(semFiltro.corpo).length > datasSeg.length,
+      'a tela manda o dia da semana pros dois relatórios (senão exporta o que não está na tela)':
+        (html.match(/params\.set\('diaSemana', diaSemana\)/g) || []).length === 2,
+      'a peneira do dia da semana vale nos KPIs/gráficos e também na tabela de baixo':
+        /function passaDiaSemana\(d\)\{/.test(html)
+        && /\(!end \|\| \(d\.data\|\|''\) <= end\) &&\s*passaDiaSemana\(d\)/.test(html)
+        && /\(f\.unidades\.size===0 \|\| f\.unidades\.has\(d\.unidade\)\) &&\s*passaDiaSemana\(d\)/.test(html),
+      // colocação
+      'a colocação sai da MESMA ordenação da tabela (nunca discorda dela)':
+        !!fnUnid && /linhas\.map\(\(\[u,c\],i\)=>/.test(fnUnid[0]) && /<td class="colocacao"><b\$\{podio\}>\$\{i\+1\}º<\/b><\/td>/.test(fnUnid[0])
+        && /sort\(\(a,b\)=>b\[1\]\.faturamento-a\[1\]\.faturamento\)/.test(fnUnid[0]),
+      'só os três primeiros ganham destaque (com 13 lojas, destacar todas não destaca nenhuma)':
+        !!fnUnid && /const podio = i < 3 \? ' class="podio"' : '';/.test(fnUnid[0]) && /\.colocacao \.podio\{color:var\(--accent\);\}/.test(html),
+      'a coluna nova entra no cabeçalho e no colspan do vazio':
+        /<th title="Colocação por faturamento no período filtrado">#<\/th><th>Unid\.<\/th>/.test(html)
+        && /colspan="\$\{2\+colunas\.length\}"/.test(fnUnid[0]),
+      // variação
+      'a variação reaproveita periodoAnterior (mesma conta do painel de cima)':
+        !!fnAnt && /periodoAnterior\(inicio, fim, presetAtivo \|\| null\)/.test(fnAnt[0])
+        && /filtrarPorIntervalo\(ant\.inicio, ant\.fim\)/.test(fnAnt[0]),
+      'usa o intervalo da própria tabela, não o do painel (senão compara semana com um dia)':
+        !!fnAnt && /getElementById\('f-date-start'\)\.value/.test(fnAnt[0]) && !/comparativoRange\(\)/.test(fnAnt[0]),
+      'loja sem faturamento no período anterior mostra "—", não crescimento infinito':
+        /if\(!anterior \|\| antes <= 0\) return `<td class="valor" style="color:var\(--muted\);" title="Sem faturamento no período anterior/.test(html),
+      'a variação é uma coluna do seletor 🧩 Colunas, como as outras': /\{key:'variacao', label:'Variação'\}/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okCompUnidade = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (seg=${datasSeg.length} todas=${datasDe(semFiltro.corpo).length} amostra=${JSON.stringify(datasSeg.slice(0, 4))})`);
+  } catch (e) { okCompUnidade = false; console.log('  erro: ' + e.message); }
+  if (!okCompUnidade) ruins += 1;
+  console.log(`${okCompUnidade ? '✓' : '✗'} Comparativo por unidade: colocação por faturamento, coluna de variação e filtro por dia da semana`);
 
   // ------------------------------------------------------------------
   // REINICIAR O ANYDESK SEM REINICIAR A MAQUINA. Pedido do Master: quando o
@@ -11368,6 +11701,18 @@ setTimeout(async () => {
     const naFilaZ = docZ.comandoPendenteId ? (DOCS.get(`lojaStatusComandos/${docZ.comandoPendenteId}`) || {}) : {};
     const cmdZ = naFilaZ.comando || '';
 
+    // Sinal complementar do agente tambem e presenca: se a telemetria ou a
+    // deteccao autenticada de acesso chega agora, o painel nao pode manter a
+    // maquina vermelha por um heartbeat persistido antigo.
+    const provaVida = await ls.cadastrarComputador('PROVAVIDA', 'SrvPresenca', 'interno');
+    const tkVida = await ls.garantirAgentToken('PROVAVIDA', provaVida.posto);
+    await ls.registrarTelemetria('PROVAVIDA', provaVida.posto, { uptimeHoras: 2 }, tkVida);
+    const aposTelemetria = (await ls.listar('PROVAVIDA')).find((c) => c.posto === provaVida.posto) || {};
+    const provaAcesso = await ls.cadastrarComputador('PROVAACESSO', 'SrvAcesso', 'interno');
+    const tkAcesso = await ls.garantirAgentToken('PROVAACESSO', provaAcesso.posto);
+    await ls.registrarAcessoRemoto('PROVAACESSO', provaAcesso.posto, 'AnyDesk (10.0.0.1:443)', tkAcesso);
+    const aposAcesso = (await ls.listar('PROVAACESSO')).find((c) => c.posto === provaAcesso.posto) || {};
+
     const conf = {
       'o comando manda ZPL na porta 9100': /9100/.test(zebra) && /~JR/.test(zebra),
       // ~JA antes do ~JR: senao o trabalho travado volta a imprimir depois
@@ -11390,6 +11735,10 @@ setTimeout(async () => {
         enviouZ.status === 200 && respZ.tarefa === 'zebra' && respZ.enfileirados === 1,
       'o que foi pra fila é ZPL, não reinício de máquina':
         /~JR/.test(cmdZ) && !/shutdown/i.test(cmdZ),
+      'telemetria autenticada recupera a presença da máquina':
+        aposTelemetria.ultimoHeartbeatEm > 0 && aposTelemetria.estado === 'operacional',
+      'acesso remoto autenticado recupera a presença da máquina':
+        aposAcesso.ultimoHeartbeatEm > 0 && aposAcesso.estado === 'operacional',
       // unidade sem Zebra marcada tem que ser RECUSADA com motivo, e nao
       // receber um comando que nao faz nada
       'unidade sem Zebra marcada é recusada com motivo':
@@ -11670,9 +12019,10 @@ setTimeout(async () => {
     await new Promise((r) => setTimeout(r, 200));
     const ticket = [...DOCS.entries()]
       .filter(([k]) => k.startsWith('solicitacoes/')).map(([, v]) => v)
-      .find((t) => t.titulo === 'Login bloqueado: bloqmulti@teste.local');
+      .find((t) => t.titulo === 'Login bloqueado: bloqmulti');
     const conf = {
       'o chamado automático foi criado': !!ticket,
+      'o título do chamado usa o usuário, não expõe e-mail': !!ticket && !String(ticket.titulo || '').includes('@'),
       'unidadeNome NÃO junta as unidades (era o bug)': !!ticket && ticket.unidadeNome === 'Dominos Bessa',
       'unidade (código) é a primeira da lista, igual unidadeNome': !!ticket && ticket.unidade === 'Dominos Bessa',
       'a lista completa continua na observação, pra quem aprova ver todas as unidades':
@@ -14053,6 +14403,753 @@ setTimeout(async () => {
   } catch (e) { okBriefing = false; console.log('  erro: ' + e.message); }
   if (!okBriefing) ruins += 1;
   console.log(`${okBriefing ? '✓' : '✗'} E-mail diário de indicadores: config do Master, desligado por padrão, preview com JSON, envio sem credencial falha e registra`);
+
+  // ---- Meu Dia: ticket clicavel, previsao editavel e anexo com X ----
+  // O X do anexo apaga pelo ID do anexo, nao pela posicao: por indice, quem
+  // clicasse depois de outra pessoa ter anexado apagaria o arquivo errado.
+  let okMeuDia = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const criada = await postarJson('/api/tarefas', {
+      titulo: 'Conferir comprovante do fornecedor', dataInicio: '2026-09-10', dataEntrega: '2026-09-12',
+    }, cabMD);
+    const t0 = criada.status === 200 ? JSON.parse(criada.corpo) : {};
+
+    // previsao de conclusao editavel na propria tela
+    const adiar = await enviarJson('PATCH', `/api/tarefas/${t0.id}/datas`, { dataInicio: '2026-09-10', dataEntrega: '2026-09-20' }, cabMD);
+    const t1 = adiar.status === 200 ? JSON.parse(adiar.corpo) : {};
+    const invertida = await enviarJson('PATCH', `/api/tarefas/${t0.id}/datas`, { dataInicio: '2026-09-10', dataEntrega: '2026-09-01' }, cabMD);
+    const semPrazo = await enviarJson('PATCH', `/api/tarefas/${t0.id}/datas`, { dataInicio: '2026-09-10', dataEntrega: '' }, cabMD);
+    const t2 = semPrazo.status === 200 ? JSON.parse(semPrazo.corpo) : {};
+    const lixo = await enviarJson('PATCH', `/api/tarefas/${t0.id}/datas`, { dataInicio: '10/09/2026' }, cabMD);
+
+    // dois anexos: o X tem que tirar o certo mesmo com a lista mudando
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    const a1 = await postarMultipart(`/api/tarefas/${t0.id}/anexos`, {}, { nome: 'nota-1.png', tipo: 'image/png', buffer: png }, 'anexo', cabMD);
+    const a2 = await postarMultipart(`/api/tarefas/${t0.id}/anexos`, {}, { nome: 'nota-2.png', tipo: 'image/png', buffer: png }, 'anexo', cabMD);
+    const comDois = a2.status === 200 ? JSON.parse(a2.corpo) : { anexos: [] };
+    const primeiro = (comDois.anexos || [])[0] || {};
+    const segundo = (comDois.anexos || [])[1] || {};
+    const arquivoNoBucket = ARQUIVOS.has(segundo.path);
+    const removeu = await pedirJsonDelete(`/api/tarefas/${t0.id}/anexos/${segundo.id}`, cabMD);
+    const t3 = removeu.status === 200 ? JSON.parse(removeu.corpo) : { anexos: [] };
+    const deNovo = await pedirJsonDelete(`/api/tarefas/${t0.id}/anexos/${segundo.id}`, cabMD);
+
+    // tarefa encerrada nao muda mais de prazo
+    const fim = await postarJson(`/api/tarefas/${t0.id}/concluir`, { password: process.env.MASTER_PASSWORD }, cabMD);
+    const depoisDeConcluir = await enviarJson('PATCH', `/api/tarefas/${t0.id}/datas`, { dataEntrega: '2026-10-01' }, cabMD);
+    const reabrir = await enviarJson('PATCH', `/api/tarefas/${t0.id}/status`, { status: 'EM_ANDAMENTO' }, cabMD);
+    const tarefaReaberta = reabrir.status === 200 ? JSON.parse(reabrir.corpo) : {};
+
+    const conf = {
+      'criar tarefa e adiar a previsão pela tela funciona': criada.status === 200 && adiar.status === 200 && t1.dataEntrega === '2026-09-20' && t1.dataInicio === '2026-09-10',
+      'previsão antes do início é recusada': invertida.status === 400 && /anterior/i.test(JSON.parse(invertida.corpo).error || ''),
+      'previsão em branco é aceita (tarefa sem prazo)': semPrazo.status === 200 && t2.dataEntrega === null,
+      'data fora do formato é recusada': lixo.status === 400,
+      'os dois anexos entram na tarefa, cada um com id próprio': a1.status === 200 && a2.status === 200 && (comDois.anexos || []).length === 2 && !!primeiro.id && !!segundo.id && primeiro.id !== segundo.id,
+      'o X apaga o anexo escolhido pelo id, não o da posição': removeu.status === 200 && (t3.anexos || []).length === 1 && t3.anexos[0].id === primeiro.id && t3.anexos[0].nome === 'nota-1.png',
+      'e o arquivo sai do Storage junto': arquivoNoBucket && !ARQUIVOS.has(segundo.path) && ARQUIVOS.has(primeiro.path),
+      'apagar o mesmo anexo duas vezes não estoura': deNovo.status === 400 && /não encontrado/i.test(JSON.parse(deNovo.corpo).error || ''),
+       'tarefa concluída não aceita mudança de prazo': fim.status === 200 && depoisDeConcluir.status === 400 && /encerrada/i.test(JSON.parse(depoisDeConcluir.corpo).error || ''),
+       'tarefa concluída é reaberta sem arquivar e registra a auditoria': reabrir.status === 200 && tarefaReaberta.status === 'EM_ANDAMENTO' && !!tarefaReaberta.reabertaEm && !!tarefaReaberta.reabertaPorNome,
+       'Meu Dia oferece Reabrir e não a remoção da tarefa concluída': /id="BTNREABRIR"[\s\S]*?onclick="reabrir\(\)"/.test(html) && /<h2>Reabertas/.test(html) && !/Remover concluída/.test(html),
+      'o número do ticket é link para a solicitação na Central': /linkTicket\(/.test(html) && /central-historico\.html\?ticket=\$\{encodeURIComponent\(numero\)\}/.test(html) && /onclick="event\.stopPropagation\(\)"/.test(html),
+      'o card e o detalhe usam o mesmo link (ninguém ficou com texto puro)': !/'Ticket #'\+/.test(html),
+      'a previsão de conclusão é campo de data ao lado do início': /id="DINI" type="date"/.test(html) && /id="DFIM" type="date" onchange="salvarDatas\(\)"/.test(html),
+      'nova tarefa tem campo de anexo e sobe o arquivo depois de criar': /id="FILENEW"/.test(html) && /for\(const f of PEND\)\{try\{await subirAnexo\(nova\.id,f\)\}/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMeuDia = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (criar=${criada.status} datas=${adiar.status} anexo=${a2.status} ${a2.corpo.slice(0, 90)} del=${removeu.status} ${removeu.corpo.slice(0, 90)})`);
+  } catch (e) { okMeuDia = false; console.log('  erro: ' + e.message); }
+  if (!okMeuDia) ruins += 1;
+  console.log(`${okMeuDia ? '✓' : '✗'} Meu Dia: ticket leva à solicitação, previsão editável na tela, X do anexo apaga pelo id e nova tarefa já aceita anexo`);
+
+  // ---- Meu Dia: filtros no mesmo desenho das outras telas + seleção por botão ----
+  // As funções de filtro saem do HTML e rodam aqui de verdade: o que precisa
+  // ser provado é o RECORTE (semana = segunda a domingo, mês = dia 1 ao
+  // último, "Tudo" = sem recorte), não que a string existe no arquivo.
+  let okFiltrosMD = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const trecho = (re) => (html.match(re) || [''])[0];
+    const isoFn = trecho(/const iso=d=>\{.*?\};/);
+    // ancora na função SEGUINTE, não no último return: ancorar no corpo faria
+    // a extração falhar junto com a sabotagem e o teste "pegaria" por engano
+    const calc = trecho(/function calcularPreset[\s\S]*?(?=\nfunction montarPresets)/);
+    const calcularPreset = new Function(`${isoFn}${calc}; return calcularPreset;`)();
+    // 2026-09-09 é uma quarta-feira
+    const semana = calcularPreset('semana', '2026-09-09');
+    const mes = calcularPreset('mes', '2026-09-09');
+    const ontem = calcularPreset('ontem', '2026-09-09');
+    const tudo = calcularPreset('tudo', '2026-09-09');
+
+    const campos = { 'F-SIT': 'abertas', 'F-GRUPO': '', 'F-UNI': '', 'F-DE': '', 'F-ATE': '', 'F-TIPO': '' };
+    const cifrao = (id) => ({ value: campos[id] });
+    const base = `${isoFn}${trecho(/const FUSO_BR='[^']*';/)}${trecho(/function agoraBrasilia\(\)\{.*/)}const hoje=()=>iso(agoraBrasilia());${trecho(/function faixa\(.*/)}`;
+    const faixa = new Function(`${base} return faixa;`)();
+    const monta = (nome) => new Function('$', 'CTX', 'dataRef', 'faixa', `${trecho(new RegExp('function ' + nome + '\\(.*'))}; return ${nome};`);
+    const dataRef = new Function(`${trecho(/function dataRef\(.*/)}; return dataRef;`)();
+    const passaData = monta('passaData')(cifrao, {}, dataRef, faixa);
+    const passaUnidade = monta('passaUnidade')(cifrao, { unidades: [{ codigo: '19821', grupo: 'ARCFOOD' }, { codigo: '9999', grupo: 'GBE' }] }, dataRef, faixa);
+    const passaSituacao = monta('passaSituacao')(cifrao, {}, dataRef, faixa);
+    const passaTipo = new Function('$', `${trecho(/const tipoDaTarefa=.*/)}${trecho(/function passaTipo\(.*/)}; return passaTipo;`)(cifrao);
+
+    const arc = { unidade: '19821', dataEntrega: '2026-09-09', status: 'A_FAZER' };
+    const gbe = { unidade: '9999', dataEntrega: '2026-09-09', status: 'A_FAZER' };
+    const pessoal = { unidade: null, dataEntrega: '2026-09-09', status: 'A_FAZER' };
+    const semDatas = { unidade: '9999', status: 'A_FAZER' };
+
+    const semRecorte = passaData(arc) && passaData(semDatas);
+    campos['F-DE'] = '2026-09-07'; campos['F-ATE'] = '2026-09-13';
+    const dentro = passaData(arc);
+    const foraPorFaltaDeData = !passaData(semDatas);
+    campos['F-DE'] = '2026-10-01'; campos['F-ATE'] = '2026-10-31';
+    const fora = !passaData(arc);
+    campos['F-DE'] = ''; campos['F-ATE'] = '';
+
+    campos['F-GRUPO'] = 'ARCFOOD';
+    const grupoFiltra = passaUnidade(arc) && !passaUnidade(gbe) && !passaUnidade(pessoal);
+    campos['F-GRUPO'] = ''; campos['F-UNI'] = '__pessoal';
+    const soPessoal = passaUnidade(pessoal) && !passaUnidade(arc);
+    campos['F-UNI'] = '9999';
+    const soUmaLoja = passaUnidade(gbe) && !passaUnidade(arc);
+    campos['F-UNI'] = '';
+
+    campos['F-SIT'] = 'abertas';
+    const abertas = passaSituacao(arc) && !passaSituacao({ status: 'CONCLUIDA' });
+    campos['F-SIT'] = 'concluidas';
+    const concluidas = !passaSituacao(arc) && passaSituacao({ status: 'CONCLUIDA' });
+    campos['F-SIT'] = 'todas';
+    const todas = passaSituacao(arc) && passaSituacao({ status: 'CONCLUIDA' });
+    // "Pendentes" é a coluna do quadro: previsão vencida ou status PENDENTE
+    const vencida = { unidade: '9999', dataEntrega: '2020-01-01', status: 'A_FAZER' };
+    const futura = { unidade: '9999', dataEntrega: '2099-01-01', status: 'A_FAZER' };
+    campos['F-SIT'] = 'pendentes';
+    const soPendentes = passaSituacao(vencida) && !passaSituacao(futura) && !passaSituacao({ status: 'CONCLUIDA', dataEntrega: '2020-01-01' });
+    campos['F-SIT'] = 'abertas';
+
+    const doEstorno = { vinculo: { ticketTipo: 'estorno' } };
+    const daCompra = { vinculo: { ticketTipo: 'compra' } };
+    const avulsa = { titulo: 'sem ticket' };
+    const tipoTudo = passaTipo(doEstorno) && passaTipo(avulsa);
+    campos['F-TIPO'] = 'estorno';
+    const soEstorno = passaTipo(doEstorno) && !passaTipo(daCompra) && !passaTipo(avulsa);
+    campos['F-TIPO'] = '__sem';
+    const soAvulsas = passaTipo(avulsa) && !passaTipo(doEstorno);
+    campos['F-TIPO'] = '';
+
+    // noFiltro é quem a tela chama de verdade: testar as quatro peças soltas
+    // não prova que ele CHAMA as quatro. Sem isto, tirar uma da composição
+    // deixaria o seletor virar enfeite sem a suíte notar.
+    const noFiltro = new Function('passaSituacao', 'passaData', 'passaUnidade', 'passaTipo',
+      `${trecho(/function noFiltro\(.*/)}; return noFiltro;`)(passaSituacao, passaData, passaUnidade, passaTipo);
+    const compra = { unidade: '9999', dataEntrega: '2026-09-09', status: 'A_FAZER', vinculo: { ticketTipo: 'compra' } };
+    const estorno = { unidade: '9999', dataEntrega: '2026-09-09', status: 'A_FAZER', vinculo: { ticketTipo: 'estorno' } };
+    campos['F-TIPO'] = 'estorno';
+    const compoeTipo = noFiltro(estorno) && !noFiltro(compra);
+    campos['F-TIPO'] = '';
+    campos['F-SIT'] = 'concluidas';
+    const compoeSituacao = !noFiltro(estorno);
+    campos['F-SIT'] = 'abertas';
+    campos['F-UNI'] = '19821';
+    const compoeUnidade = !noFiltro(estorno);
+    campos['F-UNI'] = '';
+    campos['F-DE'] = '2030-01-01'; campos['F-ATE'] = '2030-12-31';
+    const compoeData = !noFiltro(estorno);
+    campos['F-DE'] = ''; campos['F-ATE'] = '';
+
+    const ctx = await pedir('/api/tarefas/contexto', cabMD);
+    const c = ctx.status === 200 ? JSON.parse(ctx.corpo) : {};
+
+    const conf = {
+      'preset Semana pega de segunda a domingo': semana.inicio === '2026-09-07' && semana.fim === '2026-09-13',
+      'preset Mês pega do dia 1 ao último dia': mes.inicio === '2026-09-01' && mes.fim === '2026-09-30',
+      'preset Ontem é um dia só': ontem.inicio === '2026-09-08' && ontem.fim === '2026-09-08',
+      'preset Tudo não recorta data nenhuma': tudo.inicio === '' && tudo.fim === '',
+      'sem De/Até tudo passa; com intervalo, o de fora cai': semRecorte && dentro && fora,
+      'tarefa sem data nenhuma some quando existe recorte (não vira sempre-visível)': foraPorFaltaDeData,
+      'Grupo filtra pela rede da unidade (e tarefa pessoal não entra em grupo)': grupoFiltra,
+      'Unidade "Tarefa pessoal" mostra só as sem unidade': soPessoal,
+      'Unidade escolhida mostra só aquela loja': soUmaLoja,
+      'Situação separa em aberto / concluídas / todas': abertas && concluidas && todas,
+      'Situação "Pendentes" pega previsão vencida e ignora futura e concluída': soPendentes,
+      'Tipo filtra pela solicitação que gerou a tarefa': tipoTudo && soEstorno,
+      'Tipo "Sem ticket" mostra só a tarefa avulsa': soAvulsas,
+      'noFiltro junta os quatro filtros (nenhum vira enfeite)': compoeTipo && compoeSituacao && compoeUnidade && compoeData,
+      'o seletor de tipo só lista o que existe na lista carregada': /function montarTipos\(\)\{[\s\S]{0,400}?L\.forEach\(t=>\{const k=tipoDaTarefa\(t\);if\(k&&TIPO_TICKET\[k\]\)vistos\.set/.test(html),
+      'o contexto entrega a rede de cada unidade e a lista de redes': ctx.status === 200 && Array.isArray(c.redes) && c.redes.some((r) => r.id === 'ARCFOOD') && (c.unidades || []).every((u) => u.grupo === 'ARCFOOD' || u.grupo === 'GBE'),
+      'mudar filtro redesenha em memória, não refaz o GET (Firestore cobra por documento)': /onchange="render\(\)"/.test(html) && !/onchange="load\(\)"/.test(html),
+      'o checkbox do card só aparece depois de clicar em Selecionar': /\.task-check\{display:none\}/.test(html) && /body\.sel-on \.task-check\{display:inline-block\}/.test(html) && /function alternarSelecao\(\)\{MODO_SEL=!MODO_SEL/.test(html),
+      'os 5 presets estão na tela': /\['tudo','Tudo'\],\['hoje','Hoje'\],\['ontem','Ontem'\],\['semana','Semana'\],\['mes','Mês'\]/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okFiltrosMD = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (semana=${JSON.stringify(semana)} mes=${JSON.stringify(mes)} ctx=${ctx.status})`);
+  } catch (e) { okFiltrosMD = false; console.log('  erro: ' + e.message); }
+  if (!okFiltrosMD) ruins += 1;
+  console.log(`${okFiltrosMD ? '✓' : '✗'} Meu Dia: filtros de situação/grupo/unidade/período com presets, e o seletor de cards só no modo Selecionar`);
+
+  // ---- seção "Meu Dia": a tag que libera CRIAR tarefa ----
+  // Sem a seção a pessoa continua entrando na tela e tocando o que recebeu;
+  // o que a tag libera é abrir tarefa nova em vez de só responder.
+  let okSecaoMD = false;
+  try {
+    const senhaMD = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-md-com', {
+      passwordHash: senhaMD, role: 'user', active: true, email: 'md-com@teste.local', username: 'mdcom',
+      permissions: { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    DOCS.set('users/u-md-sem', {
+      passwordHash: senhaMD, role: 'user', active: true, email: 'md-sem@teste.local', username: 'mdsem',
+      permissions: { sections: ['formularios'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabCom = { Authorization: 'Bearer ' + (await auth.login('md-com@teste.local', 'SenhaDeTeste!2026')).token };
+    const cabSem = { Authorization: 'Bearer ' + (await auth.login('md-sem@teste.local', 'SenhaDeTeste!2026')).token };
+    const criaCom = await postarJson('/api/tarefas', { titulo: 'Levar o extrato do dia' }, cabCom);
+    const criaSem = await postarJson('/api/tarefas', { titulo: 'Levar o extrato do dia' }, cabSem);
+    const ctxCom = await pedir('/api/tarefas/contexto', cabCom);
+    const ctxSem = await pedir('/api/tarefas/contexto', cabSem);
+    const minhasSem = await pedir('/api/tarefas/minhas', cabSem);
+    const users = require(__dirname + '/users.js');
+
+    const conf = {
+      "'tarefas' é seção válida e vale pra qualquer vertical": users.VALID_SECTIONS.includes('tarefas') && users.secoesDaVertical('alimentacao').includes('tarefas'),
+      'com a seção, o usuário comum cria tarefa': criaCom.status === 200 && JSON.parse(criaCom.corpo).titulo === 'Levar o extrato do dia',
+      'sem a seção, criar é recusado': criaSem.status === 403,
+      'o contexto avisa a tela quem pode criar': ctxCom.status === 200 && JSON.parse(ctxCom.corpo).podeCriar === true && ctxSem.status === 200 && JSON.parse(ctxSem.corpo).podeCriar === false,
+      'quem não tem a seção continua entrando na tela pra responder o que recebeu': minhasSem.status === 200,
+      'a seção aparece no checklist de permissões': /\['tarefas','Meu Dia \(criar tarefas próprias\)'\]/.test(require('fs').readFileSync(__dirname + '/public/usuarios.html', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okSecaoMD = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (com=${criaCom.status} ${criaCom.corpo.slice(0, 90)} sem=${criaSem.status} ${criaSem.corpo.slice(0, 90)})`);
+  } catch (e) { okSecaoMD = false; console.log('  erro: ' + e.message); }
+  if (!okSecaoMD) ruins += 1;
+  console.log(`${okSecaoMD ? '✓' : '✗'} Meu Dia: a seção libera criar tarefa própria; sem ela a pessoa só responde o que recebeu`);
+
+  // ---- Meu Dia: responsável x quem participa (modelo do Asana) ----
+  // Participante faz a tarefa ANDAR (comenta, anexa, move o status). O que
+  // muda o combinado - prazo e quem participa - e o que destrói fica com o
+  // dono. Anexo, cada um tira o seu.
+  let okEquipeMD = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const senhaEQ = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    ['eq-dono', 'eq-part', 'eq-fora'].forEach((quem) => DOCS.set(`users/u-${quem}`, {
+      passwordHash: senhaEQ, role: 'user', active: true, email: `${quem}@teste.local`, username: quem,
+      permissions: { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    }));
+    // users.list() é cache de 60s (Firestore cobra por documento): sem passar
+    // por uma escrita de verdade, os três acessos novos não apareceriam nela
+    const usersMod = require(__dirname + '/users.js');
+    for (const quem of ['eq-dono', 'eq-part', 'eq-fora']) {
+      await usersMod.updatePermissions(`u-${quem}`, { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] });
+    }
+    const cabDono = { Authorization: 'Bearer ' + (await auth.login('eq-dono@teste.local', 'SenhaDeTeste!2026')).token };
+    const cabPart = { Authorization: 'Bearer ' + (await auth.login('eq-part@teste.local', 'SenhaDeTeste!2026')).token };
+    const cabFora = { Authorization: 'Bearer ' + (await auth.login('eq-fora@teste.local', 'SenhaDeTeste!2026')).token };
+
+    // o Master cria e põe o participante junto (só Master/Admin distribui)
+    const nasce = await postarJson('/api/tarefas', {
+      titulo: 'Conferir a nota do fornecedor', responsavelId: 'u-eq-dono',
+      colaboradoresIds: ['u-eq-part'], dataEntrega: '2026-09-30',
+    }, cabMD);
+    const tf = nasce.status === 200 ? JSON.parse(nasce.corpo) : {};
+
+    const vePart = await pedir('/api/tarefas/minhas', cabPart);
+    const veFora = await pedir('/api/tarefas/minhas', cabFora);
+    const listaPart = vePart.status === 200 ? JSON.parse(vePart.corpo) : [];
+    const listaFora = veFora.status === 200 ? JSON.parse(veFora.corpo) : [];
+    const cardDoPart = listaPart.find((x) => x.id === tf.id) || {};
+    const veDono = await pedir('/api/tarefas/minhas', cabDono);
+    const cardDoDono = (veDono.status === 200 ? JSON.parse(veDono.corpo) : []).find((x) => x.id === tf.id) || {};
+
+    // o que o participante PODE
+    const comenta = await postarJson(`/api/tarefas/${tf.id}/comentarios`, { texto: 'Nota conferida, falta o carimbo.' }, cabPart);
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    const anexaPart = await postarMultipart(`/api/tarefas/${tf.id}/anexos`, {}, { nome: 'nota-part.png', tipo: 'image/png', buffer: png }, 'anexo', cabPart);
+    const anexaDono = await postarMultipart(`/api/tarefas/${tf.id}/anexos`, {}, { nome: 'nota-dono.png', tipo: 'image/png', buffer: png }, 'anexo', cabDono);
+    const move = await enviarJson('PATCH', `/api/tarefas/${tf.id}/status`, { status: 'EM_ANDAMENTO' }, cabPart);
+    const comDois = anexaDono.status === 200 ? JSON.parse(anexaDono.corpo) : { anexos: [] };
+    const doPart = (comDois.anexos || []).find((a) => a.nome === 'nota-part.png') || {};
+    const doDono = (comDois.anexos || []).find((a) => a.nome === 'nota-dono.png') || {};
+
+    // o que o participante NÃO pode
+    const mudaPrazo = await enviarJson('PATCH', `/api/tarefas/${tf.id}/datas`, { dataEntrega: '2026-12-31' }, cabPart);
+    const mudaEquipe = await enviarJson('PATCH', `/api/tarefas/${tf.id}/colaboradores`, { colaboradoresIds: ['u-eq-fora'] }, cabPart);
+    // lista vazia não passa pela validação de quem entra, então é ela que
+    // chega no guarda do módulo - sem esse caso, o participante poderia
+    // simplesmente ESVAZIAR a equipe e ninguém pegaria
+    const esvazia = await enviarJson('PATCH', `/api/tarefas/${tf.id}/colaboradores`, { colaboradoresIds: [] }, cabPart);
+    const remove = await pedirJsonDelete(`/api/tarefas/${tf.id}`, cabPart);
+    const tiraDoOutro = await pedirJsonDelete(`/api/tarefas/${tf.id}/anexos/${doDono.id}`, cabPart);
+    const tiraOSeu = await pedirJsonDelete(`/api/tarefas/${tf.id}/anexos/${doPart.id}`, cabPart);
+
+    // quem não participa não enxerga nem toca
+    const comentaFora = await postarJson(`/api/tarefas/${tf.id}/comentarios`, { texto: 'oi' }, cabFora);
+    const anexaFora = await postarMultipart(`/api/tarefas/${tf.id}/anexos`, {}, { nome: 'x.png', tipo: 'image/png', buffer: png }, 'anexo', cabFora);
+
+    // o dono troca quem participa; o Master valida antes de gravar
+    const trocaEquipe = await enviarJson('PATCH', `/api/tarefas/${tf.id}/colaboradores`, { colaboradoresIds: ['u-eq-fora'] }, cabMD);
+    const t4 = trocaEquipe.status === 200 ? JSON.parse(trocaEquipe.corpo) : {};
+    const partSaiu = await postarJson(`/api/tarefas/${tf.id}/comentarios`, { texto: 'ainda posso?' }, cabPart);
+    const fantasma = await enviarJson('PATCH', `/api/tarefas/${tf.id}/colaboradores`, { colaboradoresIds: ['u-nao-existe'] }, cabMD);
+
+    const conf = {
+      'a tarefa nasce com responsável e participante separados': nasce.status === 200 && tf.responsavelId === 'u-eq-dono' && JSON.stringify(tf.colaboradoresIds) === '["u-eq-part"]',
+      'quem participa vê a tarefa no Meu Dia; quem não participa, não': vePart.status === 200 && !!cardDoPart.id && !listaFora.some((x) => x.id === tf.id),
+      'a tela sabe quem manda: podeGerir só pro dono': cardDoPart.podeGerir === false && cardDoDono.podeGerir === true,
+      'participante comenta, anexa e move o status': comenta.status === 200 && anexaPart.status === 200 && move.status === 200 && JSON.parse(move.corpo).status === 'EM_ANDAMENTO',
+      'participante NÃO muda o prazo': mudaPrazo.status === 400 && /não pode alterar/i.test(JSON.parse(mudaPrazo.corpo).error || ''),
+      'participante NÃO muda quem participa': mudaEquipe.status === 400 && /Somente Master ou Admin|responsável/i.test(JSON.parse(mudaEquipe.corpo).error || ''),
+      'participante NÃO esvazia a equipe': esvazia.status === 400 && /muda quem participa/i.test(JSON.parse(esvazia.corpo).error || ''),
+      'participante NÃO remove a tarefa': remove.status === 400 && /Somente o Master/i.test(JSON.parse(remove.corpo).error || ''),
+      'participante remove o anexo que ele mandou, não o dos outros': tiraDoOutro.status === 400 && /remove só o anexo que enviou/i.test(JSON.parse(tiraDoOutro.corpo).error || '') && tiraOSeu.status === 200,
+      'quem não participa não comenta nem anexa': comentaFora.status === 400 && anexaFora.status === 404,
+      'o dono troca quem participa e quem saiu perde o acesso': trocaEquipe.status === 200 && JSON.stringify(t4.colaboradoresIds) === '["u-eq-fora"]' && partSaiu.status === 400,
+      'participante inexistente é recusado antes de gravar': fantasma.status === 400 && /não encontrado|inativo/i.test(JSON.parse(fantasma.corpo).error || ''),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okEquipeMD = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (nasce=${nasce.status} ${nasce.corpo.slice(0, 90)} move=${move.status} prazo=${mudaPrazo.status} ${mudaPrazo.corpo.slice(0, 80)} anexoOutro=${tiraDoOutro.status} ${tiraDoOutro.corpo.slice(0, 80)})`);
+  } catch (e) { okEquipeMD = false; console.log('  erro: ' + e.message); }
+  if (!okEquipeMD) ruins += 1;
+  console.log(`${okEquipeMD ? '✓' : '✗'} Meu Dia: responsável é o dono e quem participa comenta/anexa/move status - prazo, equipe e remoção ficam com o dono`);
+
+  // ---- Meu Dia: o X do anexo e a senha pra concluir ----
+  // O X estava morto: o nome do arquivo ia pro onclick por JSON.stringify, que
+  // emite ASPAS DUPLAS dentro de um atributo delimitado por aspas duplas - o
+  // atributo fechava no meio e o onclick virava `tirarAnexo('id',`.
+  let okXeSenha = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const esc = new Function(`${(html.match(/e=x=>String\(x\?\?''\)\.replace\([\s\S]*?\}\[c\]\)\);/) || [''])[0].replace(/^e=/, 'const e=')} return e;`)();
+    const botaoAnexo = new Function('e', `${(html.match(/function botaoAnexo\(.*/) || [''])[0]}; return botaoAnexo;`)(esc);
+    // nome hostil de propósito: é exatamente o caso que quebrava o atributo
+    const marcacao = botaoAnexo({ id: 'a1b2c3', nome: 'nota "de \'compra\'".png' }, 0);
+    const onclicks = marcacao.match(/onclick="[^"]*"/g) || [];
+    const doX = onclicks.find((o) => o.includes('tirarAnexo')) || '';
+    const semNada = botaoAnexo({ nome: 'legado-sem-id.png' }, 0);
+
+    const t = await postarJson('/api/tarefas', { titulo: 'Fechar o caixa da noite' }, cabMD);
+    const alvo = t.status === 200 ? JSON.parse(t.corpo) : {};
+    const semSenha = await postarJson(`/api/tarefas/${alvo.id}/concluir`, {}, cabMD);
+    const senhaErrada = await postarJson(`/api/tarefas/${alvo.id}/concluir`, { password: 'nao-e-essa' }, cabMD);
+    const comSenha = await postarJson(`/api/tarefas/${alvo.id}/concluir`, { password: process.env.MASTER_PASSWORD }, cabMD);
+
+    const t2 = JSON.parse((await postarJson('/api/tarefas', { titulo: 'Conferir o cofre' }, cabMD)).corpo);
+    const loteSem = await enviarJson('PATCH', '/api/tarefas/status-lote', { ids: [t2.id], status: 'CONCLUIDA' }, cabMD);
+    // senha ERRADA é um caso à parte de senha AUSENTE: sem esta chamada, tirar
+    // a conferência do lote passaria batido (o vazio ainda seria recusado)
+    const loteErrada = await enviarJson('PATCH', '/api/tarefas/status-lote', { ids: [t2.id], status: 'CONCLUIDA', password: 'nao-e-essa' }, cabMD);
+    const loteCom = await enviarJson('PATCH', '/api/tarefas/status-lote', { ids: [t2.id], status: 'CONCLUIDA', password: process.env.MASTER_PASSWORD }, cabMD);
+    const loteOutroStatus = await enviarJson('PATCH', '/api/tarefas/status-lote', { ids: [t2.id], status: 'EM_ANDAMENTO' }, cabMD);
+
+    const ls = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+
+    const conf = {
+      'o X fecha o próprio atributo mesmo com aspas no nome do arquivo': /^onclick="tirarAnexo\('a1b2c3'\)"$/.test(doX),
+      'o nome do arquivo não entra no onclick (é de lá que vinham as aspas)': !doX.includes('nota') && !doX.includes('&quot;'),
+      'anexo antigo sem id não ganha X (não teria o que apagar)': !semNada.includes('tirarAnexo'),
+      'concluir sem senha é recusado': semSenha.status === 400 && /Confirme sua senha/i.test(JSON.parse(semSenha.corpo).error || ''),
+      'senha errada é recusada com 400, não 401 (401 desloga a tela)': senhaErrada.status === 400 && /Senha incorreta/i.test(JSON.parse(senhaErrada.corpo).error || ''),
+      'com a senha certa, conclui': comSenha.status === 200 && JSON.parse(comSenha.corpo).status === 'CONCLUIDA',
+      'concluir em lote também exige a senha, e confere se ela está certa': loteSem.status === 400 && /Confirme sua senha/i.test(JSON.parse(loteSem.corpo).error || '') && loteErrada.status === 400 && /Senha incorreta/i.test(JSON.parse(loteErrada.corpo).error || '') && loteCom.status === 200 && JSON.parse(loteCom.corpo).resultado[0].ok === true,
+      'mover o card sem concluir NÃO pede senha': loteOutroStatus.status === 200,
+      'a senha de concluir passa pelo campo mascarado, uma tarefa ou em lote': /id="PWDIN" type="password"/.test(html) && /async function concluir\(\)\{const senha=await pedirSenha\(/.test(html) && /status==='CONCLUIDA'\)\{senha=await pedirSenha\(/.test(html),
+      'o tipo do ticket aparece no card e no detalhe': /const tipoT=rotuloTicket\(x\.vinculo\)/.test(html) && /\$\{tipoT\?e\(tipoT\)\+' · ':''\}/.test(html) && /\(tipoT\?'<b>'\+e\(tipoT\)\+'<\/b> · ':''\)/.test(html),
+      'e o rótulo é o MESMO da Central (nenhum tipo inventado, nenhum faltando)': (() => {
+        const ch = require('fs').readFileSync(__dirname + '/public/central-historico.html', 'utf8');
+        const bloco = (ch.match(/const TIPOS_INFO = \{[\s\S]*?\n\};/) || [''])[0];
+        const central = {};
+        for (const m of bloco.matchAll(/'([a-z-]+)':\s*\{\s*label:'([^']+)'/g)) central[m[1]] = m[2];
+        const meu = new Function(`${(html.match(/const TIPO_TICKET=\{[^;]*;/) || [''])[0]} return TIPO_TICKET;`)();
+        // o servidor tem a terceira cópia (ROTULO_TIPO_TICKET, usada no PDF
+        // consolidado) - as três têm que dizer a mesma coisa
+        const ix = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+        const doServidor = new Function(`${(ix.match(/const ROTULO_TIPO_TICKET = \{[\s\S]*?\n\};/) || [''])[0]} return ROTULO_TIPO_TICKET;`)();
+        const chaves = Object.keys(central);
+        return chaves.length >= 10
+          && chaves.every((k) => meu[k] === central[k] && doServidor[k] === central[k])
+          && Object.keys(meu).every((k) => central[k] === meu[k])
+          && Object.keys(doServidor).every((k) => central[k] === doServidor[k]);
+      })(),
+      'o detalhe do computador tem o botão Reiniciar, só pra máquina interna': /c\.tipo === 'interno' \? `<button[^`]*reiniciarDesteComputador/.test(ls),
+      'e ele reusa a janela de manutenção (senha, aviso de 2 min e abortar)': /function reiniciarDesteComputador[\s\S]{0,400}abrirManutencao\(\)/.test(ls) && !/reiniciarDesteComputador[\s\S]{0,400}fetch\(/.test(ls),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okXeSenha = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (X=${doX} semSenha=${semSenha.status} ${semSenha.corpo.slice(0, 80)} lote=${loteSem.status} ${loteSem.corpo.slice(0, 80)})`);
+  } catch (e) { okXeSenha = false; console.log('  erro: ' + e.message); }
+  if (!okXeSenha) ruins += 1;
+  console.log(`${okXeSenha ? '✓' : '✗'} Meu Dia: o X do anexo fecha o próprio onclick, concluir pede senha (uma ou em lote) e o computador tem Reiniciar no detalhe`);
+
+  // ---- Meu Dia: a ficha do ticket dentro da tarefa ----
+  // Quem vai executar precisa saber QUEM é o cliente, QUANTO é e COMO foi
+  // pago, sem sair do Meu Dia. O dado é lido do ticket na hora, não copiado
+  // pra dentro da tarefa - cópia envelhece assim que o ticket muda.
+  let okFichaMD = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    // o caminho real: a loja abre o estorno com pedido + motivo, e o Master
+    // completa cliente/valor/forma na Central (o interno nasce sem esses três)
+    const est = await postarJson('/api/refund-requests', {
+      pedidoId: 'PED-9911', unidade: 'DOM_19706', unidadeNome: 'Mooca',
+      observacao: 'Cliente pagou duas vezes na maquininha.', password: process.env.MASTER_PASSWORD,
+    }, cabMD);
+    const tk = est.status === 200 ? JSON.parse(est.corpo) : {};
+    const completou = tk.id ? await enviarJson('PATCH', `/api/refund-requests/${tk.id}`, {
+      nomeCliente: 'Joana Prestes', valorEstornar: 187.5, valorVenda: 187.5,
+      formaPagamento: 'Pix na maquininha', dataVenda: '2026-09-01', horaVenda: '19:40',
+    }, cabMD) : { status: 0 };
+
+    // a tarefa do estorno nasce pela sincronização do ticket
+    const minhas = await pedir('/api/tarefas/minhas', cabMD);
+    const doEstorno = (minhas.status === 200 ? JSON.parse(minhas.corpo) : [])
+      .find((x) => x.vinculo && x.vinculo.tipo === 'estorno' && x.vinculo.id === tk.id) || {};
+    const ficha = doEstorno.id ? await pedir(`/api/tarefas/${doEstorno.id}/ticket`, cabMD) : { status: 0, corpo: '{}' };
+    const campos = ficha.status === 200 ? (JSON.parse(ficha.corpo).campos || []) : [];
+    const acha = (r) => (campos.find((c) => c.rotulo === r) || {}).valor;
+
+    // tarefa avulsa não tem ficha nenhuma - e não pode estourar por isso
+    const avulsa = JSON.parse((await postarJson('/api/tarefas', { titulo: 'Levar o malote' }, cabMD)).corpo);
+    const fichaAvulsa = await pedir(`/api/tarefas/${avulsa.id}/ticket`, cabMD);
+
+    // quem não participa da tarefa não lê a ficha do ticket por ela
+    const cabFora = { Authorization: 'Bearer ' + (await auth.login('eq-fora@teste.local', 'SenhaDeTeste!2026')).token };
+    const fichaDeFora = doEstorno.id ? await pedir(`/api/tarefas/${doEstorno.id}/ticket`, cabFora) : { status: 0 };
+
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+
+    const conf = {
+      'a tarefa do estorno traz a ficha do ticket': est.status === 200 && completou.status === 200 && ficha.status === 200 && campos.length >= 4,
+      'com o nome do cliente e o valor a estornar': acha('Cliente') === 'Joana Prestes' && acha('Valor a estornar') === (187.5).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+      'e a forma de pagamento como o formulário respondeu (nada traduzido)': acha('Forma de pagamento') === 'Pix na maquininha',
+      'a descrição do pedido vem junto': acha('Descrição') === 'Cliente pagou duas vezes na maquininha.',
+      'campo vazio não vira linha com travessão': !campos.some((c) => !String(c.valor || '').trim()) && acha('Valor da venda') !== undefined && acha('Motivo') === undefined,
+      'tarefa avulsa devolve ficha vazia em vez de estourar': fichaAvulsa.status === 200 && (JSON.parse(fichaAvulsa.corpo).campos || []).length === 0,
+      'quem não participa da tarefa não lê o ticket por ela': fichaDeFora.status === 404,
+      'a ficha é lida do ticket, não copiada pra dentro da tarefa': !Object.keys(doEstorno).includes('resumo') && /await fetch\('\/api\/tarefas\/'\+id\+'\/ticket'\)/.test(html),
+      'e só carrega depois da janela abrir (não segura o clique)': /\$\('M'\)\.classList\.add\('show'\);carregarFicha\(O\.id\)/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okFichaMD = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (estorno=${est.status} ${est.corpo.slice(0, 90)} tarefa=${doEstorno.id || '-'} ficha=${ficha.status} ${JSON.stringify(campos).slice(0, 200)})`);
+  } catch (e) { okFichaMD = false; console.log('  erro: ' + e.message); }
+  if (!okFichaMD) ruins += 1;
+  console.log(`${okFichaMD ? '✓' : '✗'} Meu Dia: a tarefa de estorno mostra cliente, valor e forma de pagamento lidos do ticket`);
+
+  // ---- Meu Dia: solicitante x responsável, e quem redistribui ----
+  // Na tarefa de ticket a tela só mostrava "Responsável", e quem pediu o
+  // serviço não aparecia em lugar nenhum. Distribuir (trocar responsável,
+  // chamar participante) é diferente de executar.
+  let okDistribuir = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const senhaD = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    const usersMod = require(__dirname + '/users.js');
+    ['dist-ger', 'dist-resp', 'dist-novo', 'dist-fora'].forEach((quem) => DOCS.set(`users/u-${quem}`, {
+      passwordHash: senhaD, role: 'user', active: true, email: `${quem}@teste.local`, username: quem,
+      permissions: { sections: ['tarefas'], unidades: ['DOM_19706'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    }));
+    for (const quem of ['dist-ger', 'dist-resp', 'dist-novo', 'dist-fora']) {
+      await usersMod.updatePermissions(`u-${quem}`, { sections: ['tarefas'], unidades: ['DOM_19706'], vaultSubgroups: [], tiposSolicitacao: [] });
+    }
+    await usersMod.updateCargo('u-dist-ger', 'gerente');
+    const cabGer = { Authorization: 'Bearer ' + (await auth.login('dist-ger@teste.local', 'SenhaDeTeste!2026')).token };
+    const cabResp = { Authorization: 'Bearer ' + (await auth.login('dist-resp@teste.local', 'SenhaDeTeste!2026')).token };
+    const cabForaD = { Authorization: 'Bearer ' + (await auth.login('dist-fora@teste.local', 'SenhaDeTeste!2026')).token };
+
+    const nasce = await postarJson('/api/tarefas', { titulo: 'Levar o depósito ao banco', unidade: 'DOM_19706', responsavelId: 'u-dist-resp' }, cabMD);
+    const tD = nasce.status === 200 ? JSON.parse(nasce.corpo) : {};
+
+    // o gerente distribui sem ser Master nem Admin
+    const ctxGer = await pedir('/api/tarefas/contexto', cabGer);
+    const ctxFora = await pedir('/api/tarefas/contexto', cabForaD);
+
+    // o próprio responsável chama alguém pra ajudar e passa a tarefa adiante
+    const chama = await enviarJson('PATCH', `/api/tarefas/${tD.id}/colaboradores`, { colaboradoresIds: ['u-dist-fora'] }, cabResp);
+    const passa = await enviarJson('PATCH', `/api/tarefas/${tD.id}/responsavel`, { responsavelId: 'u-dist-novo' }, cabResp);
+    const depois = passa.status === 200 ? JSON.parse(passa.corpo) : {};
+    // quem virou responsável não pode continuar na lista de participantes
+    const acumulou = await enviarJson('PATCH', `/api/tarefas/${tD.id}/responsavel`, { responsavelId: 'u-dist-fora' }, cabMD);
+    const semDuplicata = acumulou.status === 200 ? JSON.parse(acumulou.corpo) : {};
+    // o antigo responsável perdeu o comando
+    const tentaVoltar = await enviarJson('PATCH', `/api/tarefas/${tD.id}/responsavel`, { responsavelId: 'u-dist-resp' }, cabResp);
+    const fantasma = await enviarJson('PATCH', `/api/tarefas/${tD.id}/responsavel`, { responsavelId: 'u-nao-existe' }, cabMD);
+
+    // o solicitante do ticket aparece na ficha
+    const est2 = await postarJson('/api/refund-requests', {
+      pedidoId: 'PED-7722', unidade: 'DOM_19706', unidadeNome: 'Mooca',
+      observacao: 'Cobrança em duplicidade.', password: process.env.MASTER_PASSWORD,
+    }, cabMD);
+    const tk2 = est2.status === 200 ? JSON.parse(est2.corpo) : {};
+    const lista2 = JSON.parse((await pedir('/api/tarefas/minhas', cabMD)).corpo);
+    const tar2 = lista2.find((x) => x.vinculo && x.vinculo.id === tk2.id) || {};
+    const ficha2 = tar2.id ? await pedir(`/api/tarefas/${tar2.id}/ticket`, cabMD) : { status: 0, corpo: '{}' };
+    const campos2 = ficha2.status === 200 ? (JSON.parse(ficha2.corpo).campos || []) : [];
+    const solicitante = (campos2.find((c) => c.rotulo === 'Solicitante') || {}).valor;
+    const meMaster = JSON.parse((await pedir('/api/me', cabMD)).corpo);
+
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+
+    const conf = {
+      'gerente distribui sem ser Master nem Admin': ctxGer.status === 200 && JSON.parse(ctxGer.corpo).podeAtribuir === true,
+      'usuário comum não distribui': ctxFora.status === 200 && JSON.parse(ctxFora.corpo).podeAtribuir === false,
+      'o contexto diz quem é você, pra tela liberar o "trocar" da sua tarefa': JSON.parse(ctxGer.corpo).eu === 'u-dist-ger',
+      'o responsável chama participante na tarefa dele': chama.status === 200 && JSON.stringify(JSON.parse(chama.corpo).colaboradoresIds) === '["u-dist-fora"]',
+      'e passa a tarefa adiante': passa.status === 200 && depois.responsavelId === 'u-dist-novo' && depois.responsavelNome === 'dist-novo',
+      'quem vira responsável sai da lista de participantes (não aparece duas vezes)': acumulou.status === 200 && semDuplicata.responsavelId === 'u-dist-fora' && !(semDuplicata.colaboradoresIds || []).includes('u-dist-fora'),
+      'o responsável ANTIGO perde o comando junto com a tarefa': tentaVoltar.status === 403 && /Master, Admin, gerente ou o responsável/i.test(JSON.parse(tentaVoltar.corpo).error || ''),
+      'responsável inexistente é recusado': fantasma.status === 400,
+      'a ficha do ticket diz quem PEDIU o serviço': ficha2.status === 200 && !!solicitante && solicitante === (meMaster.username || meMaster.email),
+      'e o Solicitante vem antes do resto da ficha': (campos2[0] || {}).rotulo === 'Solicitante',
+      // o que importa é o USO no template: só a definição do botão não prova
+      // que ele é desenhado ao lado do responsável
+      'a tela mostra "trocar" ao lado do responsável, não só "alterar" nos participantes': /onclick="abrirResponsavel\(\)">trocar</.test(html) && /\$\{e\(O\.responsavelNome\|\|'Usuário'\)\}\$\{trocar\}/.test(html) && /const podeDistribuir=\(\)=>!!CTX\.podeAtribuir\|\|\(!!O&&O\.responsavelId===\(CTX\.eu\|\|''\)\)/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDistribuir = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (nasce=${nasce.status} chama=${chama.status} ${chama.corpo.slice(0, 80)} passa=${passa.status} ${passa.corpo.slice(0, 80)} solicitante=${solicitante})`);
+  } catch (e) { okDistribuir = false; console.log('  erro: ' + e.message); }
+  if (!okDistribuir) ruins += 1;
+  console.log(`${okDistribuir ? '✓' : '✗'} Meu Dia: a ficha diz quem SOLICITOU, e gerente ou o próprio responsável troca responsável e chama participante`);
+
+  // ---- Meu Dia: a tarefa vira solicitação ou formulário ----
+  // O documento NÃO nasce dentro do Meu Dia: nasce na tela que já sabe validar
+  // cada tipo, e o que fica na tarefa é o rastro. E `vinculo` não pode ser
+  // tocado - é a chave de idempotência da sincronização de ticket.
+  let okGerou = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const nova = JSON.parse((await postarJson('/api/tarefas', { titulo: 'ATM reiniciou sozinho', unidade: 'DOM_19706' }, cabMD)).corpo);
+    const paraConverter = JSON.parse((await postarJson('/api/tarefas', { titulo: 'Impressora da cozinha sem etiqueta', unidade: 'DOM_19706' }, cabMD)).corpo);
+
+    // A tarefa já recebeu um protocolo global ao nascer. Ao virar uma
+    // solicitação, a Central deve aproveitar esse número — e reenvio não pode
+    // duplicar o ticket.
+    const conversao = await postarJson('/api/solicitacoes', {
+      tipo: 'suporte-ti', unidade: 'DOM_19706', unidadeNome: 'Mooca', titulo: paraConverter.titulo,
+      observacao: 'Convertida do Meu Dia.', tarefaOrigemId: paraConverter.id,
+    }, cabMD);
+    const ticketDaConversao = conversao.status === 200 ? JSON.parse(conversao.corpo) : {};
+    const conversaoRepetida = await postarJson('/api/solicitacoes', {
+      tipo: 'suporte-ti', unidade: 'DOM_19706', unidadeNome: 'Mooca', titulo: paraConverter.titulo,
+      observacao: 'Reenvio não pode duplicar.', tarefaOrigemId: paraConverter.id,
+    }, cabMD);
+    const ticketRepetido = conversaoRepetida.status === 200 ? JSON.parse(conversaoRepetida.corpo) : {};
+    const aposConversao = (JSON.parse((await pedir('/api/tarefas/minhas', cabMD)).corpo).find((t) => t.id === paraConverter.id)) || {};
+
+    // o caminho real: a Central cria o ticket e avisa a tarefa
+    const tic = await postarJson('/api/solicitacoes', {
+      tipo: 'suporte-ti', unidade: 'DOM_19706', unidadeNome: 'Mooca', titulo: 'ATM reiniciou sozinho',
+      observacao: 'Aberto a partir da tarefa.',
+    }, cabMD);
+    const criado = tic.status === 200 ? JSON.parse(tic.corpo) : {};
+    const avisou = await postarJson(`/api/tarefas/${nova.id}/gerou`, { tipo: 'solicitacao', id: criado.id, numeroTicket: criado.numeroTicket, rotulo: 'Suporte de TI' }, cabMD);
+    const comRastro = avisou.status === 200 ? JSON.parse(avisou.corpo) : {};
+    const doForm = await postarJson(`/api/tarefas/${nova.id}/gerou`, { tipo: 'formulario', id: 'form-abc', rotulo: 'Depósito de Caixa' }, cabMD);
+    const comDois = doForm.status === 200 ? JSON.parse(doForm.corpo) : {};
+    // avisar duas vezes o MESMO documento não duplica a linha
+    const repetido = await postarJson(`/api/tarefas/${nova.id}/gerou`, { tipo: 'formulario', id: 'form-abc', rotulo: 'Depósito de Caixa' }, cabMD);
+    const semDuplicar = repetido.status === 200 ? JSON.parse(repetido.corpo) : {};
+    const lixo = await postarJson(`/api/tarefas/${nova.id}/gerou`, { tipo: 'qualquer', id: 'x' }, cabMD);
+    const semId = await postarJson(`/api/tarefas/${nova.id}/gerou`, { tipo: 'solicitacao' }, cabMD);
+    const cabForaG = { Authorization: 'Bearer ' + (await auth.login('eq-fora@teste.local', 'SenhaDeTeste!2026')).token };
+    const deFora = await postarJson(`/api/tarefas/${nova.id}/gerou`, { tipo: 'formulario', id: 'z' }, cabForaG);
+
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const ch = require('fs').readFileSync(__dirname + '/public/central.html', 'utf8');
+    const fh = require('fs').readFileSync(__dirname + '/public/formularios.html', 'utf8');
+
+    const conf = {
+      'a tarefa guarda o ticket que ela gerou, com número e rótulo': avisou.status === 200 && (comRastro.gerou || []).length === 1 && comRastro.gerou[0].numeroTicket === criado.numeroTicket && comRastro.gerou[0].rotulo === 'Suporte de TI',
+      'tarefa avulsa nasce com Ticket # e conversão preserva o mesmo número': nova.numeroTicket != null && ticketDaConversao.numeroTicket === paraConverter.numeroTicket && ticketDaConversao.origemTarefa?.id === paraConverter.id,
+      'reenvio da conversão devolve a mesma solicitação e tarefa fica vinculada': ticketRepetido.id === ticketDaConversao.id && aposConversao.solicitacaoId === ticketDaConversao.id,
+      'e o formulário entra junto, sem apagar o ticket': doForm.status === 200 && (comDois.gerou || []).length === 2,
+      'avisar o mesmo documento duas vezes não duplica a linha': repetido.status === 200 && (semDuplicar.gerou || []).length === 2,
+      'o vinculo NÃO é tocado (é a chave da sincronização de ticket)': !comDois.vinculo,
+      'tipo fora da lista e documento sem id são recusados': lixo.status === 400 && semId.status === 400,
+      'quem não participa da tarefa não escreve nela': deFora.status === 400,
+      'os dois botões só aparecem pra quem tem a seção': /\$\('BTNSOL'\)\.hidden=!CTX\.podeSolicitacao/.test(html) && /\$\('BTNFOR'\)\.hidden=!CTX\.podeFormulario/.test(html),
+      'e levam pras telas que já existem, com o contexto da tarefa': /function virarSolicitacao\(\)\{location\.href=contexto2\('\/central\.html\?nova=1'\)\}/.test(html) && /function virarFormulario\(\)\{location\.href=contexto2\('\/formularios\.html'\)\}/.test(html) && /new URLSearchParams\(\{tarefa:O\.id,titulo:tituloVisivel\(O\)\}\)/.test(html),
+      'a Central lê a tarefa da URL e avisa de volta quando o ticket nasce': /TAREFA_ORIGEM = p\.get\('tarefa'\)/.test(ch) && /await avisarTarefa\(data\);/.test(ch) && /tipo:'solicitacao', id: dados\.id, numeroTicket: dados\.numeroTicket/.test(ch),
+      'Formulários faz o mesmo, e lê o tipo ANTES de zerar TIPO_ATUAL': /await avisarTarefa\(d, TIPO_ATUAL\);\s*TIPO_ATUAL = null;/.test(fh),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okGerou = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (ticket=${tic.status} ${tic.corpo.slice(0, 90)} avisou=${avisou.status} ${avisou.corpo.slice(0, 90)})`);
+  } catch (e) { okGerou = false; console.log('  erro: ' + e.message); }
+  if (!okGerou) ruins += 1;
+  console.log(`${okGerou ? '✓' : '✗'} Meu Dia: a tarefa vira solicitação ou formulário nas telas que já existem, e guarda o rastro do que gerou`);
+
+  // ---- Meu Dia: a tarefa de ticket nasce na data do TICKET ----
+  // Gravar "agora" fazia toda tarefa antiga aparecer como criada hoje - e como
+  // dataRef() cai em dataInicio/criadaEm, os filtros de período mentiam junto.
+  let okDatas = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const tarefasMod = require(__dirname + '/tarefas.js');
+    const usersMod = require(__dirname + '/users.js');
+    const listaUsers = await usersMod.list();
+    const ticketVelho = {
+      id: 'tk-antigo-1', numeroTicket: 90001, tipo: 'suporte-ti', status: 'APROVADO',
+      titulo: 'Queda de links - substituição de chip 4g', unidade: 'DOM_19706', unidadeNome: 'Mooca',
+      criadoEm: '2026-03-04T13:22:05.000Z',
+    };
+    const criadas = await tarefasMod.sincronizarTicket(ticketVelho, listaUsers, 'solicitacao');
+    const nascida = criadas[0] || {};
+
+    // simula o estrago antigo: a data da sincronização gravada por cima
+    const doc = DOCS.get(`tarefas/${nascida.id}`);
+    DOCS.set(`tarefas/${nascida.id}`, { ...doc, criadaEm: '2026-09-09T00:41:49.000Z', dataInicio: '2026-09-09' });
+    const corrigidas = await tarefasMod.sincronizarTicket(ticketVelho, listaUsers, 'solicitacao');
+    const depois = DOCS.get(`tarefas/${nascida.id}`);
+
+    // a manual continua com a data de agora, que é verdade
+    const manual = JSON.parse((await postarJson('/api/tarefas', { titulo: 'Tarefa de hoje' }, cabMD)).corpo);
+    const hojeIso = new Date().toISOString().slice(0, 10);
+
+    // ticket sem data utilizável não pode virar "criada em undefined"
+    const semData = await tarefasMod.sincronizarTicket({ ...ticketVelho, id: 'tk-sem-data', numeroTicket: 90002, criadoEm: null }, listaUsers, 'solicitacao');
+    const semDataDoc = semData.length ? DOCS.get(`tarefas/${semData[0].id}`) : {};
+
+    const conf = {
+      'a tarefa nasce com a data do ticket, não a da sincronização': nascida.criadaEm === '2026-03-04T13:22:05.000Z' && nascida.dataInicio === '2026-03-04',
+      'tarefa já gravada com a data errada é corrigida na próxima sincronização': corrigidas.length === 1 && depois.criadaEm === '2026-03-04T13:22:05.000Z' && depois.dataInicio === '2026-03-04',
+      'e a correção não mexe na ordem da lista (atualizadoEm continua sendo movimento)': depois.atualizadoEm !== depois.criadaEm,
+      'tarefa manual continua nascendo com a data e hora de agora': manual.dataInicio === hojeIso && String(manual.criadaEm).slice(0, 10) === hojeIso,
+      'ticket sem data válida cai no agora, não em undefined': !!semDataDoc.criadaEm && /^\d{4}-\d{2}-\d{2}T/.test(semDataDoc.criadaEm),
+      'o retroativo ganhou versão nova, pra rodar de novo e consertar o que existe': /const versao = 'tickets-v3';/.test(require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDatas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (nascida=${nascida.criadaEm}/${nascida.dataInicio} depois=${depois && depois.criadaEm}/${depois && depois.dataInicio} corrigidas=${corrigidas.length})`);
+  } catch (e) { okDatas = false; console.log('  erro: ' + e.message); }
+  if (!okDatas) ruins += 1;
+  console.log(`${okDatas ? '✓' : '✗'} Meu Dia: tarefa de ticket carrega a data REAL do ticket, e a tarefa manual a data de agora`);
+
+  // ---- Meu Dia: PDF de ocorrência e relatório consolidado ----
+  // Nem toda situação vira solicitação ou formulário: às vezes só aconteceu e
+  // alguém precisa REGISTRAR. O PDF é o registro - vale fora do app.
+  let okPdfMD = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const oc = await postarJson('/api/tarefas', {
+      titulo: 'Queda de energia às 19h20', descricao: 'Loja ficou 40 minutos sem caixa. Gerador não entrou.',
+      unidade: 'DOM_19706', ehOcorrencia: true,
+    }, cabMD);
+    const ocorrencia = oc.status === 200 ? JSON.parse(oc.corpo) : {};
+    const comum = JSON.parse((await postarJson('/api/tarefas', { titulo: 'Conferir o malote', unidade: 'DOM_19706' }, cabMD)).corpo);
+
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+    await postarMultipart(`/api/tarefas/${ocorrencia.id}/anexos`, {}, { nome: 'painel.png', tipo: 'image/png', buffer: png }, 'anexo', cabMD);
+    await postarJson(`/api/tarefas/${ocorrencia.id}/comentarios`, { texto: 'Energia voltou 20h05, caixa reaberto.' }, cabMD);
+
+    const verPdf = await pedirBinario(`/api/tarefas/${ocorrencia.id}/pdf`, cabMD);
+    const baixarPdf = await pedirBinario(`/api/tarefas/${ocorrencia.id}/pdf?baixar=1`, cabMD);
+    const textoOcorrencia = verPdf.status === 200 ? textoDoPdf(verPdf.buffer) : '';
+    const pdfComum = await pedirBinario(`/api/tarefas/${comum.id}/pdf`, cabMD);
+    const textoComum = pdfComum.status === 200 ? textoDoPdf(pdfComum.buffer) : '';
+
+    const cabForaP = { Authorization: 'Bearer ' + (await auth.login('eq-fora@teste.local', 'SenhaDeTeste!2026')).token };
+    const pdfDeFora = await pedirBinario(`/api/tarefas/${ocorrencia.id}/pdf`, cabForaP);
+
+    const rel = await postarBinario('/api/tarefas/relatorio', { ids: [ocorrencia.id, comum.id], filtro: 'Em aberto · Mooca' }, cabMD);
+    const textoRel = rel.status === 200 ? textoDoPdf(rel.buffer) : '';
+    const relVazio = await postarJson('/api/tarefas/relatorio', { ids: [] }, cabMD);
+    // pedir a tarefa de OUTRA pessoa não coloca ela no relatório: id que não
+    // existe qualquer implementação descarta, então o caso que importa é o id
+    // REAL de uma tarefa que quem pede não pode ver
+    const relIntruso = await postarJson('/api/tarefas/relatorio', { ids: [ocorrencia.id] }, cabForaP);
+
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const disp = (r) => String((r.headers && r.headers['content-disposition']) || '');
+
+    const conf = {
+      'a ocorrência nasce marcada como registro': oc.status === 200 && ocorrencia.ehOcorrencia === true && comum.ehOcorrencia === false,
+      'o PDF sai com o nome do documento certo': /Registro de Ocorrência/.test(textoOcorrencia) && /Registro de Tarefa/.test(textoComum) && !/Registro de Ocorrência/.test(textoComum),
+      'e traz o que aconteceu, quem registrou e o histórico': /Queda de energia/.test(textoOcorrencia) && /Gerador não entrou/.test(textoOcorrencia) && /Energia voltou 20h05/.test(textoOcorrencia),
+      'o anexo aparece pelo nome no documento': /painel\.png/.test(textoOcorrencia),
+      'abre pra conferir (inline) e só baixa quando se pede, com nome identificável': /^inline;/.test(disp(verPdf)) && /^attachment;/.test(disp(baixarPdf)) && /filename="ocorrencia_.*_(ticket|registro)-.*_\d{4}-\d{2}-\d{2}_\d{4}\.pdf"/.test(disp(verPdf)),
+      'quem não participa da tarefa não gera o PDF dela': pdfDeFora.status === 404,
+      'o relatório da lista traz o resumo e a listagem': rel.status === 200 && /Relatório de Tarefas/.test(textoRel) && /por situação/i.test(textoRel) && /por unidade/i.test(textoRel) && /por tipo/i.test(textoRel) && /Conferir o malote/.test(textoRel),
+      'com o filtro escrito no cabeçalho (o número do PDF bate com o da tela)': /Em aberto · Mooca/.test(textoRel) && /2 tarefa\(s\)/.test(textoRel),
+      'e marca qual linha é ocorrência': /\[Ocorrência\]/.test(textoRel),
+      'tarefa real de outra pessoa não entra no relatório de quem pediu': relIntruso.status === 400 && /Nenhuma tarefa no filtro/i.test(JSON.parse(relIntruso.corpo).error || ''),
+      'relatório sem nenhuma tarefa é recusado com motivo': relVazio.status === 400 && /Nenhuma tarefa no filtro/i.test(JSON.parse(relVazio.corpo).error || ''),
+      'a tela deixa marcar ocorrência e filtrar só por elas': /id="OCOR"/.test(html) && /ehOcorrencia:\$\('OCOR'\)\.checked/.test(html) && /if\(v==='__ocorrencia'\)return !!t\.ehOcorrencia;/.test(html),
+      'e oferece ver antes de baixar nos dois PDFs': /onclick="pdfDaTarefa\(false\)">👁 Ver PDF</.test(html) && /onclick="pdfDaLista\(false\)">👁 Ver relatório do filtro</.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPdfMD = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (pdf=${verPdf.status} disp=${disp(verPdf)} rel=${rel.status} texto=${textoRel.slice(0, 160)})`);
+  } catch (e) { okPdfMD = false; console.log('  erro: ' + e.message); }
+  if (!okPdfMD) ruins += 1;
+  console.log(`${okPdfMD ? '✓' : '✗'} Meu Dia: PDF de ocorrência da tarefa e relatório consolidado do filtro, os dois abrindo pra conferir antes de baixar`);
+
+  // ---- Aviso de fechamento: o X de "não avisar mais", só do Master ----
+  // A loja tem uma pendência; o Master tem a soma do parque. O mesmo aviso que
+  // cobra uma pessoa atrapalha a outra - mas o X dispensa o que está pendente
+  // AGORA, não o alarme pra sempre.
+  let okXAviso = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const fl = require(__dirname + '/fechamentosLive.js');
+    const tema = require('fs').readFileSync(__dirname + '/public/tema.js', 'utf8');
+
+    // a lista é cortada no limite, mas as CHAVES têm que vir completas
+    const unidades = Array.from({ length: 4 }, (_, i) => ({ codigo: `U${i}`, nome: `Loja ${i}` }));
+    const jaLancou = unidades.map((u) => ({ unidade: u.codigo, data: '2026-09-01' }));
+    const calc = fl.diasPendentesDeFechamento(jaLancou, unidades, '2026-09-09', 5, 3);
+    const chavesCompletas = calc.chaves.length === calc.total && calc.pendentes.length === 3 && calc.total > 3;
+
+    const rota = await pedir('/api/fechamentos/pendencias', cabMD);
+    const corpo = rota.status === 200 ? JSON.parse(rota.corpo) : {};
+
+    // a decisão de mostrar sai do tema.js e roda aqui de verdade
+    const visiveis = new Function(`${(tema.match(/function pendenciasVisiveis\([\s\S]*?\n  \}/) || [''])[0]} return pendenciasVisiveis;`)();
+    const dados = {
+      pendentes: [{ unidade: 'A', data: '2026-09-08' }, { unidade: 'B', data: '2026-09-08' }],
+      total: 5, chaves: ['A|2026-09-08', 'B|2026-09-08', 'C|2026-09-07', 'C|2026-09-06', 'C|2026-09-05'],
+    };
+    const semDispensa = visiveis(dados, []);
+    const comUma = visiveis(dados, ['A|2026-09-08']);
+    const tudoDispensado = visiveis(dados, dados.chaves);
+    // dia lançado depois some da memória: se voltar a ficar em aberto, avisa
+    const podada = visiveis({ ...dados, chaves: ['A|2026-09-08'] }, ['A|2026-09-08', 'C|2026-09-07']);
+    // dia NOVO não é silenciado por uma dispensa antiga
+    const diaNovo = visiveis(
+      { pendentes: [{ unidade: 'A', data: '2026-09-09' }], total: 1, chaves: ['A|2026-09-09'] },
+      ['A|2026-09-08'],
+    );
+
+    const conf = {
+      'as chaves vêm completas, mesmo com a lista cortada pelo limite': chavesCompletas,
+      'a rota diz se quem pediu é o Master (sem precisar de /api/me nas 53 telas)': rota.status === 200 && corpo.souMaster === true && Array.isArray(corpo.chaves),
+      'sem dispensa, mostra tudo que o servidor mandou': semDispensa.visiveis.length === 2 && semDispensa.total === 5,
+      'o que foi dispensado some da lista e da contagem': comUma.visiveis.length === 1 && comUma.visiveis[0].unidade === 'B' && comUma.total === 4,
+      'dispensando tudo, o aviso não aparece': tudoDispensado.visiveis.length === 0 && tudoDispensado.total === 0,
+      'dia já lançado sai da memória de dispensa (se voltar a abrir, avisa de novo)': podada.dispensadas.length === 1 && podada.dispensadas[0] === 'A|2026-09-08',
+      'dia NOVO sem fechamento volta a avisar mesmo depois do X': diaNovo.visiveis.length === 1 && diaNovo.total === 1,
+      'o X só é desenhado pro Master': /d && d\.souMaster\s*\n\s*\? '<button type="button" class="fechar"/.test(tema),
+      'e o clique nele é testado ANTES do item (senão o item engole)': tema.indexOf("closest('.fechar')") < tema.indexOf("closest('.item')"),
+      '"Agora não" continua fechando só nesta tela': /sessionStorage\.setItem\('nopulsoPendFechAdiado', location\.pathname\)/.test(tema),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okXAviso = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (rota=${rota.status} total=${calc.total} chaves=${calc.chaves.length} lista=${calc.pendentes.length})`);
+  } catch (e) { okXAviso = false; console.log('  erro: ' + e.message); }
+  if (!okXAviso) ruins += 1;
+  console.log(`${okXAviso ? '✓' : '✗'} Aviso de fechamento: só o Master tem o X de não avisar mais, e ele dispensa o que está pendente agora - dia novo volta a avisar`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

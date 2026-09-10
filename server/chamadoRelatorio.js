@@ -12,6 +12,7 @@
 // login e morre se o arquivo mudar de lugar; o PDF tem que continuar valendo
 // como prova daqui a um ano, aberto por quem nao tem acesso ao NoPulso.
 const PDFDocument = require('pdfkit');
+const { nomeArquivoRegistro } = require('./reportUtil');
 const storage = require('./storage');
 
 // Teto de fotos por relatorio. Cada foto de celular pesa alguns MB e o PDF e
@@ -346,7 +347,12 @@ function gerarPDF(res, chamado, { fotos, geradoPor, nomeArquivo }) {
 // entrada unica: baixa as fotos (async) e so entao desenha (sincrono)
 async function gerarRelatorioPDF(res, chamado, { geradoPor } = {}) {
   const fotos = await baixarFotos(chamado);
-  const nomeArquivo = `atendimento-${chamado.numeroTicket ?? chamado.id}.pdf`;
+  const nomeArquivo = `${nomeArquivoRegistro('atendimento', {
+    unidade: chamado.unidadeNome || chamado.unidade,
+    ticket: chamado.numeroTicket,
+    criadoEm: chamado.criadoEm,
+    id: chamado.id,
+  })}.pdf`;
   gerarPDF(res, chamado, { fotos, geradoPor, nomeArquivo });
 }
 

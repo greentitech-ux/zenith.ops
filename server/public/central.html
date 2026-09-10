@@ -126,10 +126,10 @@
 <div class="panel hero">
   <div class="icone">📋</div>
   <h2 style="font-size:16px;">Lançar uma solicitação</h2>
-  <p>Estorno, compra, manutenção, suporte de TI ou ajuste de fechamento — escolha o tipo, preencha os dados e envie. Acompanhamento e aprovação ficam no Histórico.</p>
+  <p>Estorno, compra, manutenção, suporte de TI ou ajuste de fechamento — escolha o tipo, preencha os dados e envie. Acompanhamento e aprovação ficam na Central.</p>
   <div class="hero-acoes">
     <button type="button" class="btn-primary" style="margin-top:0;" onclick="abrirModalNova()">+ Nova solicitação</button>
-    <a class="back" href="/central-historico.html">📜 Ver histórico de solicitações</a>
+    <a class="back" href="/central-historico.html">📜 Voltar para a Central</a>
   </div>
 </div>
 
@@ -293,6 +293,12 @@
 <script>
 let AUTH_TOKEN = localStorage.getItem('authToken') || null;
 if(!AUTH_TOKEN){ location.href = '/'; }
+// A Central é o Histórico. Esta rota existe apenas como painel de criação:
+// entrar nela sem pedir uma nova solicitação redireciona para a Central, sem
+// deixar uma tela intermediária vazia entre o botão e o formulário.
+const PARAMS_CENTRAL = new URLSearchParams(location.search);
+const ABRIR_NOVA_DIRETO = PARAMS_CENTRAL.get('nova') === '1' || PARAMS_CENTRAL.has('tarefa');
+if(!ABRIR_NOVA_DIRETO){ location.replace('/central-historico.html'); }
 
 const _rawFetch = window.fetch.bind(window);
 window.fetch = (url, opts = {}) => {
@@ -311,7 +317,7 @@ function abrirModalNova(){
   document.getElementById('sucesso-nova').classList.add('hidden');
   document.getElementById('overlay-nova').classList.remove('hidden');
 }
-function fecharModalNova(){ document.getElementById('overlay-nova').classList.add('hidden'); }
+function fecharModalNova(){ location.replace('/central-historico.html'); }
 function lancarOutra(){
   document.getElementById('sucesso-nova').classList.add('hidden');
   document.getElementById('form-nova').classList.remove('hidden');
@@ -593,6 +599,7 @@ document.getElementById('form-nova').addEventListener('submit', async (ev)=>{
       const fd = new FormData();
       fd.append('payload', JSON.stringify({
         tipo: 'acesso-pessoa',
+        tarefaOrigemId: TAREFA_ORIGEM || null,
         unidade: document.getElementById('f-unidade').value,
         unidadeNome: UNIDADES_NOMES[document.getElementById('f-unidade').value] || document.getElementById('f-unidade').value,
         titulo: `${MOTIVO_ACESSO==='ferias'?'Férias':'Desligamento'} — ${nomePessoa}`,
@@ -607,6 +614,7 @@ document.getElementById('form-nova').addEventListener('submit', async (ev)=>{
       const fd = new FormData();
       fd.append('payload', JSON.stringify({
         tipo: TIPO_SELECIONADO,
+        tarefaOrigemId: TAREFA_ORIGEM || null,
         unidade: document.getElementById('f-unidade').value,
         unidadeNome: UNIDADES_NOMES[document.getElementById('f-unidade').value] || document.getElementById('f-unidade').value,
         titulo: document.getElementById('g-titulo').value,
@@ -629,6 +637,7 @@ document.getElementById('form-nova').addEventListener('submit', async (ev)=>{
     ITENS_COMPRA = []; renderItensCompra();
     document.getElementById('form-nova').classList.add('hidden');
     document.getElementById('sucesso-nova').classList.remove('hidden');
+    await avisarTarefa(data);
   }catch(err){
     msg.textContent = err.message; msg.className = 'msg err'; msg.classList.remove('hidden');
   }finally{
@@ -671,6 +680,46 @@ async function boot(){
   ).join('');
   montarSelectCampo();
   if(tiposDisponiveis.length) selecionarTipo(tiposDisponiveis[0][0]);
+  prepararDeTarefa();
+  // O botão da Central chega aqui já no formulário, sem mostrar o antigo
+  // card "Lançar uma solicitação" como uma etapa extra.
+  if(ABRIR_NOVA_DIRETO) abrirModalNova();
+}
+
+// Chegou do Meu Dia ("Criar solicitação" numa tarefa): pré-preenche o que a
+// tarefa já sabe e guarda de quem veio, pra avisar a tarefa quando o ticket
+// nascer. Só isso - o tipo, os campos obrigatórios e o envio continuam sendo
+// os desta tela.
+let TAREFA_ORIGEM = null;
+function prepararDeTarefa(){
+  const p = new URLSearchParams(location.search);
+  TAREFA_ORIGEM = p.get('tarefa');
+  if(!TAREFA_ORIGEM) return;
+  // Estorno e ajuste de fechamento dependem de dados próprios (pedido e
+  // fechamento). Uma tarefa vira os tipos genéricos da Central, que podem
+  // preservar seu protocolo, anexos e unidade sem inventar esses dados.
+  document.querySelectorAll('.tipo-btn[data-tipo="estorno"],.tipo-btn[data-tipo="ajuste-fechamento"]').forEach(b=>b.remove());
+  if(['estorno','ajuste-fechamento'].includes(TIPO_SELECIONADO)) selecionarTipo('compra');
+  const unidade = p.get('unidade');
+  const sel = document.getElementById('f-unidade');
+  if(unidade && [...sel.options].some(o=>o.value===unidade)){ sel.value = unidade; carregarResponsaveis(); }
+  if(p.get('titulo')) document.getElementById('g-titulo').value = p.get('titulo');
+  if(p.get('descricao')) document.getElementById('g-observacao').value = p.get('descricao');
+  const aviso = document.createElement('div');
+  aviso.className = 'msg';
+  aviso.style.marginBottom = '10px';
+  aviso.innerHTML = `Aberta a partir da tarefa <b>${escapeHtml(p.get('titulo')||'do Meu Dia')}</b>. Ela preservará o mesmo Ticket #, unidade e anexos da tarefa. <a href="/tarefas.html" style="color:var(--accent);">voltar ao Meu Dia</a>`;
+  const form = document.getElementById('form-nova');
+  form.parentNode.insertBefore(aviso, form);
+}
+async function avisarTarefa(dados){
+  if(!TAREFA_ORIGEM) return;
+  try{
+    await fetch(`/api/tarefas/${TAREFA_ORIGEM}/gerou`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ tipo:'solicitacao', id: dados.id, numeroTicket: dados.numeroTicket, rotulo: (TIPOS_INFO[dados.tipo]||{}).label || dados.tipo }),
+    });
+  }catch(e){ /* o ticket já existe; o rastro na tarefa é o que falhou */ }
 }
 
 boot();

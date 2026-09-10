@@ -76,7 +76,7 @@
   .pcard-slot{position:relative;min-width:0;}
   .pcard-slot.wide{grid-column:span 2;}
   .pcard-slot.full{grid-column:1 / -1;}
-  /* card full-width com chips (ex: NOC Zenith) - grid em vez de flex-wrap
+  /* card full-width com chips (ex: NOC-NoPulso) - grid em vez de flex-wrap
      puro, pra ficar organizado em colunas parelhas na largura toda, não só
      empilhando da esquerda pra direita */
   .pcard-slot.full .pestoque-chips{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));}
@@ -234,9 +234,12 @@
     .painel-saudacao .ps-relogio{font-size:21px;}
     .painel-skeleton .pskel{height:150px;}
   }
-  .notif-solicitacao-wrap{position:fixed;top:14px;right:14px;z-index:10000;display:flex;flex-direction:column;gap:10px;max-width:min(360px,calc(100vw - 28px));}
+  .notif-solicitacao-wrap{position:fixed;top:14px;right:14px;z-index:10000;display:flex;flex-direction:column;gap:10px;max-width:min(360px,calc(100vw - 28px));max-height:calc(100vh - 28px);overflow-y:auto;padding-right:2px;}
   .notif-solicitacao{background:var(--panel);border:2px solid var(--warn);border-radius:12px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,.55);animation:notif-in .18s ease,notif-pulse 1.6s ease-in-out infinite;}
+  .notif-solicitacao .ns-cabecalho{display:flex;align-items:center;justify-content:space-between;gap:10px;}
   .notif-solicitacao .ns-titulo{font-size:13px;font-weight:700;}
+  .notif-solicitacao button.ns-fechar{flex:none;width:28px;height:28px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);font-size:16px;line-height:1;cursor:pointer;font-family:var(--sans);}
+  .notif-solicitacao button.ns-fechar:hover{color:var(--text);border-color:var(--accent);}
   .notif-solicitacao .ns-corpo{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.4;}
   .notif-solicitacao .ns-direcionado{font-size:11px;color:var(--accent);margin-top:6px;font-family:var(--mono);}
   .notif-solicitacao button.ns-ok{margin-top:10px;width:100%;background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
@@ -524,7 +527,7 @@ function mostrarNotificacaoSolicitacao(card){
   el.className = 'notif-solicitacao';
   el.id = elId;
   el.innerHTML = `
-    <div class="ns-titulo">🔔 Nova solicitação</div>
+    <div class="ns-cabecalho"><div class="ns-titulo">🔔 Nova solicitação</div><button type="button" class="ns-fechar" title="Fechar alerta" aria-label="Fechar alerta">×</button></div>
     <div class="ns-corpo">${ICONES_TIPO_CENTRAL[card.tipo]||'📋'} ${escapeHtml(TIPOS_CENTRAL_LABEL[card.tipo]||card.tipo)} · ${escapeHtml(card.unidadeNome||card.unidade||'—')}<br>${escapeHtml(card.titulo||'')}</div>
     ${(card.atribuidosEmails && card.atribuidosEmails.length) ? `<div class="ns-direcionado">👤 atribuído a ${escapeHtml(card.atribuidosEmails.join(', '))}</div>` : (card.direcionadoParaEmail ? `<div class="ns-direcionado">👤 direcionado a ${escapeHtml(card.direcionadoParaEmail)}</div>` : '')}
     <button type="button" class="ns-ok">${soEncerra(card) ? '✓ Visto' : '👁️ Visualizar'}</button>
@@ -535,6 +538,10 @@ function mostrarNotificacaoSolicitacao(card){
     marcarVistoNotificacao(card.tipo, card.id);
     if(soEncerra(card)) return;
     location.href = `/central-historico.html?tipo=${encodeURIComponent(card.tipo)}&id=${encodeURIComponent(card.id)}`;
+  });
+  el.querySelector('.ns-fechar').addEventListener('click', (event)=>{
+    event.stopPropagation();
+    el.remove();
   });
   // arrastar pro lado só tira da tela, SEM marcar como vista (o alerta volta
   // na próxima visita, porque a solicitação continua pendente) - ver
@@ -834,13 +841,13 @@ async function cardCentral(){
   const rows = await fetch('/api/central').then(r=>r.json());
   const pendentes = rows.filter(c=>c.status==='PENDENTE');
   if(!pendentes.length){
-    return pcardWrap('📋','Central de Solicitações','/central.html', `<div class="pcard-vazio">Nenhuma solicitação pendente. 🎉</div>`);
+    return pcardWrap('📋','Central de Solicitações','/central-historico.html', `<div class="pcard-vazio">Nenhuma solicitação pendente. 🎉</div>`);
   }
   const porTipo = {};
   pendentes.forEach(c=>{ porTipo[c.tipo] = (porTipo[c.tipo]||0) + 1; });
   const linhas = Object.entries(porTipo).sort((a,b)=>b[1]-a[1])
     .map(([tipo,qtd])=>`<div class="linha"><span>${escapeHtml(TIPOS_CENTRAL_LABEL[tipo]||tipo)}</span><b>${qtd}</b></div>`).join('');
-  return pcardWrap('📋','Central de Solicitações','/central.html', `
+  return pcardWrap('📋','Central de Solicitações','/central-historico.html', `
     <div class="pstats">${statRow('Pendentes', pendentes.length, 'warn')}</div>
     <div class="ptipos">${linhas}</div>
   `);
@@ -868,7 +875,7 @@ async function cardManutencao(){
   </div>`);
 }
 
-// card do NOC Zenith: mesma lógica de "online/offline" de loja-status.html
+// card do NOC-NoPulso: mesma lógica de "online/offline" de loja-status.html
 // (statusDe/computadoresReais lá) - so entram computadores DE VERDADE
 // (cadastrados, com nome), fantasma (heartbeat de posto nunca cadastrado)
 // fica de fora pra nao inflar os numeros. Unidade so aparece no chip se tem
@@ -990,10 +997,10 @@ async function cardNoc(){
   const acessosRecentes = NOC_COMPUTADORES_CACHE.filter(c=>c.ultimoAcessoRemotoEm && (agora - c.ultimoAcessoRemotoEm) < 24*60*60*1000).length;
 
   if(!NOC_COMPUTADORES_CACHE.length){
-    return pcardWrap('🖥️','NOC Zenith','/loja-status.html', `<div class="pcard-vazio">Nenhum computador cadastrado ainda.</div>`);
+    return pcardWrap('🖥️','NOC-NoPulso','/loja-status.html', `<div class="pcard-vazio">Nenhum computador cadastrado ainda.</div>`);
   }
 
-  return pcardWrap('🖥️','NOC Zenith','/loja-status.html', `
+  return pcardWrap('🖥️','NOC-NoPulso','/loja-status.html', `
     <div class="pstats-row">
       ${statRow('Computadores', NOC_COMPUTADORES_CACHE.length)}
       ${statRow('Online', online, 'ok')}

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 260 260" role="img" aria-label="ARCFOOD">
+  <g transform="translate(130,130)">
+    <rect x="-130" y="-130" width="260" height="260" rx="34" fill="#2B2320"/>
+    <text x="0" y="-18" text-anchor="middle" font-family="Poppins, Arial, sans-serif" font-weight="700" font-size="80" fill="#FAF7F2" letter-spacing="4">ARC</text>
+    <rect x="-72" y="4" width="144" height="6" fill="#E8A33D"/>
+    <text x="0" y="66" text-anchor="middle" font-family="Poppins, Arial, sans-serif" font-weight="500" font-size="40" fill="#E8A33D" letter-spacing="10">FOOD</text>
+  </g>
+</svg>

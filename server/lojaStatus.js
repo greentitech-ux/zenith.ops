@@ -35,6 +35,7 @@
 // fica ligado o dia todo nessa tela e nao na de atendimento/login. Os tres
 // mandam heartbeat do mesmo jeito.
 const crypto = require('crypto');
+const net = require('net');
 const db = require('./firestore');
 const { createCache } = require('./liveCache');
 const redeDiagnostico = require('./redeDiagnostico');
@@ -658,6 +659,13 @@ async function heartbeat(codigo, posto, info, token) {
     agenteFalhasSeguidas: falhasDeQuemBate(dados.rede),
   };
 
+  if (dados.tailscale !== undefined) {
+    const tailscale = sanitizarTailscale(dados.tailscale);
+    if (tailscale && !mesmoTailscale(tailscale, atual && atual.tailscale)) {
+      patch.tailscale = { ...tailscale, em: Date.now() };
+    }
+  }
+
   // ---- boot e link físico (NOCZenith v16+). Máquina com agente antigo não
   // manda nada disso: os campos ficam como estavam, e o painel mostra
   // "sem dado" em vez de inventar.
@@ -737,6 +745,7 @@ async function heartbeat(codigo, posto, info, token) {
     || patch.ip !== anterior.ip
     || patch.userAgent !== anterior.userAgent
     || patch.abertoDesde !== anterior.abertoDesde
+    || (patch.tailscale !== undefined && !mesmoTailscale(patch.tailscale, anterior.tailscale || null))
     || patch.redeHistorico !== undefined      // virada de dia da rede
     // reinício e mudança de link são eventos: não podem esperar o
     // PERSIST_MS, senão um restart do servidor apagaria o rastro
@@ -765,7 +774,7 @@ async function heartbeat(codigo, posto, info, token) {
   // leitura a reler as 52. Como o espelho acabou de ser atualizado na linha
   // acima com o que esta batida gravou, basta derrubar a LISTA derivada:
   // ela é recalculada a partir da memória, sem tocar no Firestore.
-  if (eventosNovos.length) cacheBase.invalidar();
+  if (eventosNovos.length || patch.tailscale !== undefined) cacheBase.invalidar();
   // token confere? (maquina legada sem token cadastrado nunca passa aqui -
   // recebe comando/chat vazios ate reinstalar o NOCZenith com o token assado)
   const tokenOk = !!(atual && atual.agentToken && tokensBatem(token, atual.agentToken));
@@ -803,6 +812,28 @@ const ESTADOS_SERVICO = ['Running', 'Stopped', 'Paused', 'StartPending', 'StopPe
 function sanitizarEstadoAnydesk(v) {
   const t = String(v == null ? '' : v).trim();
   return ESTADOS_SERVICO.includes(t) ? t : null;
+}
+
+// Tailscale é inventário de conexão, nunca uma fonte de autorização. A lista
+// fechada impede que o endpoint público grave objetos grandes/arbitrários no
+// Firestore. Dados ausentes permanecem ausentes para os agentes antigos.
+function sanitizarTailscale(bruto) {
+  if (!bruto || typeof bruto !== 'object') return null;
+  const estados = ['Running', 'Stopped', 'NeedsLogin', 'NoState', 'desconhecido', 'erro'];
+  const estado = String(bruto.estado || '').trim();
+  const ip = String(bruto.ip || '').trim();
+  return {
+    instalado: !!bruto.instalado,
+    estado: estados.includes(estado) ? estado : 'desconhecido',
+    ip: net.isIP(ip) ? ip : null,
+    nome: String(bruto.nome || '').trim().slice(0, 253) || null,
+    versao: String(bruto.versao || '').trim().slice(0, 40) || null,
+  };
+}
+function mesmoTailscale(a, b) {
+  if (!a || !b) return a === b;
+  return a.instalado === b.instalado && a.estado === b.estado && a.ip === b.ip
+    && a.nome === b.nome && a.versao === b.versao;
 }
 
 function motivosDeDegradacao(doc) {
@@ -927,13 +958,16 @@ async function tokenDoComputador(codigo, posto) {
 // estavel (nunca muda, mesmo se o nome/tipo forem editados depois) que vira
 // parte do link/QR code fixado naquele computador (ver POST /api/loja-status/
 // :codigo/computadores em index.js, que devolve a URL pronta)
-async function cadastrarComputador(codigo, nome, tipo) {
+async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, medeQuedas) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador (ex: Caixa 1, PDV Entrega).');
   const posto = crypto.randomBytes(4).toString('hex');
   const id = docIdFor(codigo, posto);
   const registro = {
     codigo, posto, nome: nomeOk, tipo: tipoValido(tipo), anydeskId: null,
+    // Características operacionais declaradas no cadastro. Não inferimos pelo
+    // nome: "Servidor" e "GCOM" precisam ser visíveis e confiáveis no NOC.
+    ehServidor: !!ehServidor, temGcom: !!temGcom, medeQuedas: !!medeQuedas,
     criadoEm: Date.now(),
     ultimoHeartbeatEm: null, avisadoOffline: false, offlineDesde: null, mensagemPendente: null,
     ip: null, userAgent: null, abertoDesde: null, ipLocal: null, ipLocalEm: null,
@@ -949,7 +983,7 @@ async function cadastrarComputador(codigo, nome, tipo) {
 
 // edita nome e/ou tipo de um computador ja cadastrado - o "posto" (id do
 // link/QR) nunca muda, so o que aparece na tela e qual tela o link abre
-async function editarComputador(codigo, posto, nome, tipo, ehNotebook) {
+async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom, medeQuedas) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador.');
   const id = docIdFor(codigo, posto);
@@ -957,7 +991,17 @@ async function editarComputador(codigo, posto, nome, tipo, ehNotebook) {
   if (!snap.exists) throw new Error('Computador não encontrado.');
   // notebook hiberna/dorme fora de hora - a "queda" dele aparece no painel,
   // mas nunca vira push crítico (ver rodarVarreduraLojaStatus em index.js)
-  const registro = { nome: nomeOk, tipo: tipoValido(tipo), ehNotebook: !!ehNotebook };
+  const registro = {
+    nome: nomeOk,
+    tipo: tipoValido(tipo),
+    ehNotebook: !!ehNotebook,
+    ehServidor: !!ehServidor,
+    temGcom: !!temGcom,
+    // Ponto de medição da unidade: só esta máquina entra no relatório de
+    // quedas. Pode haver mais de uma por redundância; o relatório consolida
+    // ocorrências simultâneas em uma única queda da loja.
+    medeQuedas: !!medeQuedas,
+  };
   await COLLECTION.doc(id).update(registro);
   cache.invalidar();
   return { codigo, posto, ...registro };
@@ -1058,7 +1102,12 @@ async function registrarTelemetria(codigo, posto, dados, token) {
   if (!atual) throw new Error('Computador não encontrado.');
   exigirTokenSeTiver(atual, token);
   const agora = Date.now();
-  const patch = {};
+  // Telemetria autenticada e prova de vida do NOCZenith. Sem isso, uma
+  // escrita atual de disco/rede podia coexistir com um ultimoHeartbeatEm
+  // antigo por causa do intervalo de persistencia do heartbeat e o painel
+  // mostrava falsamente "indisponível". Mantemos o mesmo campo que define o
+  // estado para que qualquer sinal válido do agente recupere a presença.
+  const patch = { ultimoHeartbeatEm: agora };
   let eventos = atual.eventos || [];
 
   const disco = nocMaquina.sanitizarDisco(dados && dados.disco);
@@ -1211,7 +1260,28 @@ async function registrarTelemetria(codigo, posto, dados, token) {
 // Master (ver POST .../acesso-remoto em index.js + push.notifyAcessoRemotoDetectado),
 // disparado toda vez que essa funcao roda, nao so na primeira. "detalhe" e
 // texto livre tipo "AnyDesk (203.0.113.5:7070)", montado pelo proprio script
-async function registrarAcessoRemoto(codigo, posto, detalhe, token) {
+// SESSÃO x SERVIÇO CONECTADO. Pergunta do Master (09/09/2026): "conseguimos
+// fazer com que esse tipo de conexão que não é uma pessoa se conectando de
+// fato apareça quando realmente alguma conexão for estabelecida?".
+//
+// O que ele viu: 20 linhas de "Acesso remoto · TeamViewer" num fim de tarde,
+// de 20 em 20 minutos, todas pra 20.206.176.18:443 e 5938 - endereços da
+// própria TeamViewer. Não era ninguém entrando: era o serviço se anunciando
+// pra nuvem dele. A checagem antiga olha conexão TCP estabelecida, e serviço
+// parado e pessoa controlando a máquina parecem iguais por essa lente (foi
+// por isso que Splashtop/LogMeIn/GoToMyPC já tinham saído da lista).
+//
+// O sinal que separa os dois é o LOG DE SESSÃO da própria ferramenta, que só
+// escreve quando alguém entra de verdade - com quem, quando e por quanto
+// tempo (ver Verificar-SessaoRemota em vigiaScript.js). Então agora são dois
+// eventos diferentes:
+//   'sessao-remota'  alguém entrou (vem do log da ferramenta) - é o que
+//                    interessa, e o único que vira push
+//   'acesso-remoto'  o serviço está conectado à nuvem dele (conexão TCP) -
+//                    continua registrado, porque é assim que se descobre que
+//                    a máquina tem uma porta de acesso remoto aberta 24h
+const EVENTO_SESSAO_REMOTA = 'sessao-remota';
+async function registrarAcessoRemoto(codigo, posto, detalhe, token, ehSessao) {
   const id = docIdFor(codigo, posto);
   const limpo = String(detalhe || '').trim().slice(0, 200);
   if (!limpo) throw new Error('Detalhe do acesso remoto é obrigatório.');
@@ -1219,18 +1289,26 @@ async function registrarAcessoRemoto(codigo, posto, detalhe, token) {
   const atual = snap.exists ? snap.data() : null;
   exigirTokenSeTiver(atual, token);
   const agora = Date.now();
+  const tipo = ehSessao ? EVENTO_SESSAO_REMOTA : 'acesso-remoto';
   // registra no historico de atividades do computador (aparece no detalhe),
   // pra ficar auditavel mesmo com o push desligado. Nao repete o mesmo detalhe
   // se ja foi o ultimo evento em menos de 10min (evita encher com o mesmo
-  // batimento de nuvem da ferramenta)
+  // batimento de nuvem da ferramenta). Sessao NAO passa por esse filtro: duas
+  // entradas seguidas da mesma pessoa sao dois acessos, e sumir com o segundo
+  // seria esconder justamente o que se quer ver
   const eventosAtuais = (atual && atual.eventos) || [];
   const ultimo = eventosAtuais[eventosAtuais.length - 1];
-  const repetido = ultimo && ultimo.tipo === 'acesso-remoto' && ultimo.detalhe === limpo && (agora - ultimo.em) < 10 * 60 * 1000;
-  const patch = { codigo, posto, ultimoAcessoRemotoEm: agora, ultimoAcessoRemotoDetalhe: limpo };
-  if (!repetido) patch.eventos = [...eventosAtuais, { tipo: 'acesso-remoto', em: agora, detalhe: limpo }].slice(-EVENTOS_MAX);
+  const repetido = !ehSessao && ultimo && ultimo.tipo === 'acesso-remoto' && ultimo.detalhe === limpo && (agora - ultimo.em) < 10 * 60 * 1000;
+  // A checagem de acesso remoto só roda dentro do ciclo saudável do agente e
+  // o endpoint exige o token da máquina. Portanto também é um batimento
+  // válido: não deixar um acesso detectado agora ao lado de um status antigo
+  // de "calada" no painel.
+  const patch = { codigo, posto, ultimoHeartbeatEm: agora, ultimoAcessoRemotoEm: agora, ultimoAcessoRemotoDetalhe: limpo };
+  if (ehSessao) { patch.ultimaSessaoRemotaEm = agora; patch.ultimaSessaoRemotaDetalhe = limpo; }
+  if (!repetido) patch.eventos = [...eventosAtuais, { tipo, em: agora, detalhe: limpo }].slice(-EVENTOS_MAX);
   await COLLECTION.doc(id).set(patch, { merge: true });
   espelharEscrita(id, patch);
-  return { codigo, posto, nome: atual && atual.nome, ultimoAcessoRemotoDetalhe: limpo };
+  return { codigo, posto, nome: atual && atual.nome, ultimoAcessoRemotoDetalhe: limpo, ehSessao: !!ehSessao };
 }
 
 // enfileira um comando (ver agenteAcoes.js executarAcaoDoAgente) pro
@@ -2164,7 +2242,10 @@ async function varrerAlertas() {
 // existe no evento de abertura.
 const QUEDAS_JANELA_PADRAO_DIAS = 30;
 
-function quedasDeUmComputador(doc, desde) {
+// `ate` fecha a janela pelo outro lado. Só "Ontem" precisa disso: 7/30/90
+// dias e "Hoje" terminam agora, mas ontem termina à meia-noite de hoje -
+// sem esse limite, "Ontem" mostraria ontem MAIS o dia de hoje.
+function quedasDeUmComputador(doc, desde, ate = Infinity) {
   const fora = [];
   let aberta = null;
   for (const ev of doc.eventos || []) {
@@ -2176,50 +2257,157 @@ function quedasDeUmComputador(doc, desde) {
     // de ABERTURA, entao tem que sair daqui antes de zerar o par
     const link = (aberta && aberta.link) || null;
     aberta = null;
-    if (!ev.duracaoMs || ev.em < desde) continue;
+    if (!ev.duracaoMs || ev.em < desde || ev.em > ate) continue;
     fora.push({ inicio, fim: ev.em, ms: ev.duracaoMs, comandado, link });
   }
-  // queda que comecou e ainda nao fechou: a loja pode estar fora AGORA
-  const emAberto = aberta && aberta.em >= desde && aberta.motivo !== 'reinicio-comandado'
+  // queda que comecou e ainda nao fechou: a loja pode estar fora AGORA. Numa
+  // janela que ja terminou (Ontem), "fora agora" nao faz sentido - o que
+  // estiver aberto pertence ao dia de hoje
+  const emAberto = ate === Infinity && aberta && aberta.em >= desde && aberta.motivo !== 'reinicio-comandado'
     ? { inicio: aberta.em, ms: Date.now() - aberta.em }
     : null;
   return { fora, emAberto };
 }
 
+// início do dia em Brasília, N dias atrás (0 = hoje, 1 = ontem) - o painel
+// fala em "Hoje"/"Ontem", que é dia de calendário da loja, não janela
+// rolante de 24h contada de agora
+function meiaNoiteBrasilia(diasAtras = 0) {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(new Date());
+  const o = {};
+  p.forEach((x) => { if (x.type !== 'literal') o[x.type] = x.value; });
+  const d = new Date(`${o.year}-${o.month}-${o.day}T00:00:00-03:00`);
+  d.setDate(d.getDate() - diasAtras);
+  return d.getTime();
+}
+
+// Intervalo escolhido na tela (De/Até). Datas de calendário precisam abrir e
+// fechar no fuso da operação, não no UTC do servidor Render; caso contrário
+// uma queda perto da meia-noite apareceria no dia vizinho no relatório.
+function limiteDataBrasilia(iso, fimDoDia = false) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return null;
+  const d = new Date(`${iso}T${fimDoDia ? '23:59:59.999' : '00:00:00.000'}-03:00`);
+  return Number.isFinite(d.getTime()) ? d.getTime() : null;
+}
+
 async function relatorioQuedas(opcoes) {
-  const dias = Math.max(1, Math.min(365, Number((opcoes || {}).dias) || QUEDAS_JANELA_PADRAO_DIAS));
-  const desde = Date.now() - dias * 24 * 60 * 60 * 1000;
+  const periodo = String((opcoes || {}).periodo || '');
+  // Hoje/Ontem são dias de calendário; o resto continua janela rolante
+  let desde;
+  let ate = Infinity;
+  let dias;
+  const inicioPersonalizado = String((opcoes || {}).inicio || '');
+  const fimPersonalizado = String((opcoes || {}).fim || '');
+  if (inicioPersonalizado || fimPersonalizado) {
+    if (!inicioPersonalizado || !fimPersonalizado || inicioPersonalizado > fimPersonalizado) {
+      throw new Error('Informe um período válido: De e Até.');
+    }
+    desde = limiteDataBrasilia(inicioPersonalizado);
+    ate = limiteDataBrasilia(fimPersonalizado, true);
+    if (desde === null || ate === null) throw new Error('Informe datas válidas para o período.');
+    dias = 'personalizado';
+  } else if (periodo === 'hoje') { desde = meiaNoiteBrasilia(0); dias = 'hoje'; }
+  else if (periodo === 'ontem') { desde = meiaNoiteBrasilia(1); ate = meiaNoiteBrasilia(0); dias = 'ontem'; }
+  else {
+    dias = Math.max(1, Math.min(365, Number((opcoes || {}).dias) || QUEDAS_JANELA_PADRAO_DIAS));
+    desde = Date.now() - dias * 24 * 60 * 60 * 1000;
+  }
   const docs = (await cache.cached()).map(semSegredo);
   const porUnidade = new Map();
   for (const doc of docs) {
+    // O retroativo não pode continuar somando PC a PC, nem pode ficar vazio
+    // até alguém editar todo o parque. Primeiro usamos os pontos marcados
+    // explicitamente; quando uma unidade ainda não tem nenhum, seus
+    // computadores fixos viram pontos automáticos de correlação. Notebook
+    // segue fora porque sai da rede da loja e geraria falso positivo.
     if (doc.ehNotebook) continue;
-    const { fora, emAberto } = quedasDeUmComputador(doc, desde);
+    const { fora, emAberto } = quedasDeUmComputador(doc, desde, ate);
     const reais = fora.filter((q) => !q.comandado);
-    const u = porUnidade.get(doc.codigo) || {
-      codigo: doc.codigo, computadores: 0, quedas: 0, foraMs: 0,
-      maiorMs: 0, oscilacoes: 0, confirmadas: 0, foraAgora: 0,
-    };
-    u.computadores += 1;
-    u.quedas += reais.length;
-    u.foraMs += reais.reduce((s, q) => s + q.ms, 0);
-    u.maiorMs = Math.max(u.maiorMs, ...reais.map((q) => q.ms), 0);
-    // oscilacao x queda de verdade: e a MESMA regra que decide se o push
-    // critico sai (CONFIRMACAO_QUEDA_MS). Separar importa: 30 piscadas de
-    // 40s nao pedem app offline; 3 quedas de 2h pedem.
-    u.oscilacoes += reais.filter((q) => q.ms < CONFIRMACAO_QUEDA_MS).length;
-    u.confirmadas += reais.filter((q) => q.ms >= CONFIRMACAO_QUEDA_MS).length;
-    if (emAberto) u.foraAgora += 1;
+    const u = porUnidade.get(doc.codigo) || { codigo: doc.codigo, pontos: new Map() };
+    const ponto = u.pontos.get(doc.posto) || { marcado: false, eventos: [] };
+    // Não soma PC por PC: cada ponto entra na correlação da unidade abaixo.
+    reais.forEach((q) => ponto.eventos.push({ inicio: q.inicio, fim: q.fim }));
+    // Infinity preserva que o ponto continua fora AGORA; só na apresentação
+    // ela vira Date.now(). Assim a interseção sabe reconhecer a queda aberta.
+    if (emAberto) ponto.eventos.push({ inicio: emAberto.inicio, fim: Infinity, aberta: true });
+    ponto.marcado = ponto.marcado || !!doc.medeQuedas;
+    u.pontos.set(doc.posto, ponto);
     porUnidade.set(doc.codigo, u);
   }
   const unidades = [...porUnidade.values()]
-    .map((u) => ({ ...u, horasFora: +(u.foraMs / 3600000).toFixed(1), maiorMin: Math.round(u.maiorMs / 60000) }))
+    .map((u) => {
+      const todosPontos = [...u.pontos.values()];
+      const pontosMarcados = todosPontos.filter((ponto) => ponto.marcado);
+      // Uma marcação é uma decisão operacional e sempre vence a inferência.
+      // Sem marcação, a correlação dos equipamentos fixos torna possível ler
+      // corretamente o histórico antigo imediatamente após o deploy.
+      const fonteMedicao = pontosMarcados.length ? 'marcados' : 'automatico';
+      const porPonto = (pontosMarcados.length ? pontosMarcados : todosPontos).map((ponto) => ponto.eventos
+        .sort((a, b) => a.inicio - b.inicio)
+        .reduce((acc, e) => {
+          const anterior = acc[acc.length - 1];
+          if (anterior && e.inicio <= anterior.fim) anterior.fim = Math.max(anterior.fim, e.fim);
+          else acc.push({ ...e });
+          return acc;
+        }, []));
+      const pontos = porPonto.length;
+      let agrupadas;
+      if (pontos === 1) {
+        // Um ponto serve como sinal operacional, mas não confirma sozinho que
+        // a causa foi o link; a tela deixa essa condição explícita.
+        agrupadas = porPonto[0];
+      } else {
+        // Interseção estrita: só é queda de LINK quando TODOS os pontos
+        // marcados estão fora no mesmo intervalo. 9 de 10 fora, por exemplo,
+        // vira falha de máquinas, nunca uma queda somada da unidade.
+        const bordas = [];
+        porPonto.forEach((intervalos, ponto) => intervalos.forEach((e) => {
+          bordas.push({ em: e.inicio, ponto, delta: 1 });
+          if (Number.isFinite(e.fim)) bordas.push({ em: e.fim, ponto, delta: -1 });
+        }));
+        bordas.sort((a, b) => a.em - b.em);
+        const fora = new Set(); agrupadas = []; let inicioComum = null;
+        for (let i = 0; i < bordas.length;) {
+          const em = bordas[i].em;
+          while (i < bordas.length && bordas[i].em === em) {
+            if (bordas[i].delta > 0) fora.add(bordas[i].ponto); else fora.delete(bordas[i].ponto);
+            i += 1;
+          }
+          if (fora.size === pontos && inicioComum === null) inicioComum = em;
+          if (fora.size < pontos && inicioComum !== null) { agrupadas.push({ inicio: inicioComum, fim: em }); inicioComum = null; }
+        }
+        if (inicioComum !== null) agrupadas.push({ inicio: inicioComum, fim: Infinity, aberta: true });
+      }
+      const duracoes = agrupadas.map((e) => Math.max(0, (Number.isFinite(e.fim) ? e.fim : Date.now()) - e.inicio));
+      const foraMs = duracoes.reduce((s, ms) => s + ms, 0);
+      return {
+        codigo: u.codigo, computadores: pontos, pontosMarcados: pontosMarcados.length, fonteMedicao, medicaoRedundante: pontos > 1, quedas: agrupadas.length, foraMs,
+        maiorMs: Math.max(...duracoes, 0), oscilacoes: duracoes.filter((ms) => ms < CONFIRMACAO_QUEDA_MS).length,
+        confirmadas: duracoes.filter((ms) => ms >= CONFIRMACAO_QUEDA_MS).length,
+        foraAgora: agrupadas.filter((e) => e.aberta).length,
+        horasFora: +(foraMs / 3600000).toFixed(1), maiorMin: Math.round(Math.max(...duracoes, 0) / 60000),
+        // O resumo é suficiente para 7/30/90 dias. Para o filtro "Hoje" a
+        // tela usa esta trilha para mostrar exatamente quando a queda de link
+        // começou e terminou, sem recorrer ao histórico bruto da máquina.
+        eventos: agrupadas.map((e) => ({
+          inicio: e.inicio,
+          fim: Number.isFinite(e.fim) ? e.fim : null,
+          aberta: !!e.aberta,
+        })),
+      };
+    })
     .sort((a, b) => b.foraMs - a.foraMs);
   return {
     dias,
+    periodo: inicioPersonalizado && fimPersonalizado
+      ? { inicio: inicioPersonalizado, fim: fimPersonalizado, rotulo: `${inicioPersonalizado} a ${fimPersonalizado}` }
+      : null,
     // o historico por computador e' capado em EVENTOS_MAX: numa maquina que
     // oscila muito, queda antiga JA SAIU da lista. O numero e' piso, nao
     // teto - dizer isso na tela evita concluir "melhorou" de um corte.
     eventosMaximoPorComputador: EVENTOS_MAX,
+    totalPontosMedicao: unidades.reduce((s, u) => s + u.computadores, 0),
     totalQuedas: unidades.reduce((s, u) => s + u.quedas, 0),
     totalConfirmadas: unidades.reduce((s, u) => s + u.confirmadas, 0),
     totalHorasFora: +(unidades.reduce((s, u) => s + u.foraMs, 0) / 3600000).toFixed(1),
@@ -2335,5 +2523,5 @@ module.exports = {
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
   saudeMaquinas,
-  garantirAgentToken, tokenDoComputador,
+  garantirAgentToken, tokenDoComputador, tokensBatem,
 };

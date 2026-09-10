@@ -246,7 +246,7 @@ let FILTRO_DESBLOQUEIO = false;
 let PAINEIS_ABERTOS = []; // ids das conversas abertas agora, na ordem em que foram abertas - mais de uma ao mesmo tempo, ver renderPaineis()
 let DRAG_ID = null;
 let ACAO_PENDENTE = null; // {id, statusAlvo}
-// dados do NOC Zenith (ver loja-status.html) - só pra achar, quando o
+// dados do NOC-NoPulso (ver loja-status.html) - só pra achar, quando o
 // assunto for Computador/Sistema e a loja já foi identificada na conversa
 // (chat.lojaContexto), se essa loja tem computador com acesso remoto
 // cadastrado (anydeskId) - se tiver, o painel mostra um atalho direto pra
@@ -433,6 +433,9 @@ async function enviarMensagemDireta(){
       body: JSON.stringify({ userId, texto }),
     });
     if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao enviar.');
+    const campoTexto = document.getElementById('md-texto');
+    window.zenithRascunhos?.limparCampoEnviado(campoTexto);
+    campoTexto.value = '';
     status.textContent = '✅ Enviada!';
     status.style.background = 'var(--ok-dim)'; status.style.color = 'var(--ok)';
     status.style.display = 'block';
@@ -513,6 +516,18 @@ function painelHtml(chat){
   const nivel = nivelDe(chat);
   const colInfo = COLUNAS.find(c=>c.key===statusAtual);
   const tickets = chat.ticketsVinculados || [];
+  // O protocolo é só referência enquanto a conversa está em triagem. Quando
+  // ele gera trabalho, passa a ser Ticket # clicável e leva para o documento
+  // que continua aquele mesmo assunto. Se houver os dois destinos, os atalhos
+  // explícitos evitam escolher no escuro entre tarefa e chamado.
+  const destinoPrincipal = chat.chamadoId
+    ? `/tecnico.html?ticket=${encodeURIComponent(chat.numeroTicket)}`
+    : (chat.tarefaId ? `/tarefas.html?tarefa=${encodeURIComponent(chat.tarefaId)}` : null);
+  const protocoloHtml = chat.numeroTicket
+    ? (destinoPrincipal
+      ? `<a href="${destinoPrincipal}" target="_blank" rel="noopener" style="color:var(--accent);font-weight:700;">Ticket #${escapeHtml(chat.numeroTicket)}</a>`
+      : `Protocolo #${escapeHtml(chat.numeroTicket)}`)
+    : '';
 
   const acoes = [];
   // "Assumir" aparece sempre que a conversa está aberta e AINDA NÃO é minha
@@ -533,6 +548,8 @@ function painelHtml(chat){
     acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">↩️ Reabrir</button>`);
   }
   if(!chat.chamadoId) acoes.push(`<button type="button" class="btn-ghost" onclick="gerarChamadoRemoto('${chat.id}')">🎫 Gerar chamado remoto</button>`);
+  if(!chat.tarefaId) acoes.push(`<button type="button" class="btn-ghost" onclick="gerarTarefa('${chat.id}')">✅ Gerar tarefa</button>`);
+  else acoes.push(`<a class="btn-ghost" style="text-decoration:none;display:inline-flex;align-items:center;" href="/tarefas.html">✅ Tarefa gerada</a>`);
   if(IS_MASTER) acoes.push(`<button type="button" class="btn-ghost" onclick="baixarPdfConversa('${chat.id}')">📄 Baixar PDF</button>`);
   // problema de Computador/Sistema numa loja já identificada e que já tem
   // computador com acesso remoto cadastrado no NOC - atalho direto em vez de
@@ -566,7 +583,7 @@ function painelHtml(chat){
     <div class="painel-topo">
       <div style="min-width:0;">
         <h3>${escapeHtml(chat.nome || 'Visitante')}</h3>
-        <div class="sub">${chat.numeroTicket?'Protocolo #'+escapeHtml(chat.numeroTicket)+' · ':''}${escapeHtml(chat.contato||'')} · ${escapeHtml(chat.assunto||'Suporte geral')}${chat.lojaContexto?' · loja: '+escapeHtml(chat.lojaContexto):''} · N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}${chat.responsavel?' · 🙋 '+escapeHtml(chat.responsavel.nome||chat.responsavel.email||''):''}</div>
+        <div class="sub">${protocoloHtml?protocoloHtml+' · ':''}${escapeHtml(chat.contato||'')} · ${escapeHtml(chat.assunto||'Suporte geral')}${chat.lojaContexto?' · loja: '+escapeHtml(chat.lojaContexto):''} · N${nivel} · ${colInfo?colInfo.icone+' '+colInfo.label:statusAtual}${chat.responsavel?' · 🙋 '+escapeHtml(chat.responsavel.nome||chat.responsavel.email||''):''}</div>
       </div>
       <span class="painel-fechar" title="Fechar" onclick="fecharPainel('${idAttr}')">✕</span>
     </div>
@@ -576,6 +593,7 @@ function painelHtml(chat){
       const destino = t.tipo === 'chamado-ti' ? '/tecnico.html' : '/central-historico.html';
       return `<a href="${destino}?ticket=${encodeURIComponent(t.numero)}" target="_blank" rel="noopener" style="color:var(--accent);">#${escapeHtml(t.numero)}</a>`;
     }).join(', ')}</div>` : ''}
+    ${(chat.tarefaId || chat.chamadoId) ? `<div class="d-tickets">↗ Abrir: ${chat.tarefaId ? `<a href="/tarefas.html?tarefa=${encodeURIComponent(chat.tarefaId)}" target="_blank" rel="noopener" style="color:var(--accent);">tarefa do Ticket #${escapeHtml(chat.numeroTicket)}</a>` : ''}${chat.tarefaId && chat.chamadoId ? ' · ' : ''}${chat.chamadoId ? `<a href="/tecnico.html?ticket=${encodeURIComponent(chat.numeroTicket)}" target="_blank" rel="noopener" style="color:var(--accent);">chamado remoto</a>` : ''}</div>` : ''}
     ${alertasSeg.length ? `<div class="d-alerta-seguranca"><details><summary>🛡️ ${alertasSeg.length} alerta(s) de segurança nessa conversa</summary>${alertasSeg.map(a=>`
       <div class="d-alerta-item">
         <b>${escapeHtml(a.motivo||'')}</b> · ${fmtDataHora(a.em)}<br>
@@ -596,7 +614,7 @@ function painelHtml(chat){
       : `<div id="d-previa-${idAttr}"></div>
         <div style="display:flex;gap:6px;align-items:center;">
           <input type="text" id="d-texto-${idAttr}" placeholder="Escrever uma resposta... (Ctrl+V cola print)" style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();enviarResposta('${idAttr}');}">
-          <label class="foto-btn" title="Anexar print, foto ou PDF" style="cursor:pointer;flex:none;"><span id="d-anexo-icone-${idAttr}">📎</span><input type="file" id="d-anexo-${idAttr}" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden onchange="document.getElementById('d-anexo-icone-${idAttr}').textContent = this.files[0] ? '✅' : '📎';"></label>
+          <label class="foto-btn" title="Anexar print, foto ou PDF" style="cursor:pointer;flex:none;"><span id="d-anexo-icone-${idAttr}">📎</span><input type="file" id="d-anexo-${idAttr}" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf" hidden onchange="registrarAnexoResposta('${idAttr}', this)"></label>
           <button type="button" class="btn-primary" onclick="enviarResposta('${idAttr}')">Enviar</button>
         </div>`}
   </div>`;
@@ -623,7 +641,82 @@ function anexoHtml(chatId, m){
   return `<a href="${url}" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px;display:inline-block;margin-top:4px;">📎 ${escapeHtml(m.anexo.nome||'arquivo')}</a>`;
 }
 
+// O painel e' refeito quando chega um evento SSE/poll para trazer a resposta
+// nova. Sem este estado, o innerHTML abaixo recriava o input e apagava a
+// mensagem que o atendente ainda estava escrevendo. Guardamos tambem o
+// anexo, foco/cursor e leitura: chegar uma mensagem nunca deve interromper
+// quem esta atendendo (nem mandar quem leu algo antigo de volta para o fim).
+const RASCUNHOS_PAINEL_CHAT = new Map();
+const ROLAGEM_PAINEL_CHAT = new Map();
+
+function guardarEstadoPaineis(){
+  PAINEIS_ABERTOS.forEach(id=>{
+    const input = document.getElementById(`d-texto-${id}`);
+    const anexo = document.getElementById(`d-anexo-${id}`);
+    if(input){
+      const arquivo = (anexo && anexo.files && anexo.files[0])
+        || (RASCUNHOS_PAINEL_CHAT.get(id) || {}).arquivo || null;
+      const estado = {
+        texto: input.value,
+        arquivo,
+        inicio: input.selectionStart,
+        fim: input.selectionEnd,
+        focado: document.activeElement === input,
+      };
+      if(estado.texto || estado.arquivo || estado.focado) RASCUNHOS_PAINEL_CHAT.set(id, estado);
+      else RASCUNHOS_PAINEL_CHAT.delete(id);
+    }
+    const mensagens = document.querySelector(`.painel-conversa[data-painel-id="${CSS.escape(id)}"] .painel-msgs`);
+    if(mensagens){
+      const distanciaDoFim = mensagens.scrollHeight - mensagens.scrollTop - mensagens.clientHeight;
+      ROLAGEM_PAINEL_CHAT.set(id, { noFim: distanciaDoFim < 24, topo: mensagens.scrollTop });
+    }
+  });
+}
+
+function registrarAnexoResposta(id, campo){
+  const anterior = RASCUNHOS_PAINEL_CHAT.get(id) || {};
+  const arquivo = campo && campo.files && campo.files[0] ? campo.files[0] : null;
+  RASCUNHOS_PAINEL_CHAT.set(id, { ...anterior, arquivo });
+  const icone = document.getElementById(`d-anexo-icone-${id}`);
+  if(icone) icone.textContent = arquivo ? '✅' : '📎';
+}
+
+function limparRascunhoResposta(id){
+  const campo = document.getElementById(`d-texto-${id}`);
+  window.zenithRascunhos?.limparCampoEnviado(campo);
+  RASCUNHOS_PAINEL_CHAT.delete(id);
+  ROLAGEM_PAINEL_CHAT.delete(id);
+}
+
+function restaurarEstadoPaineis(){
+  PAINEIS_ABERTOS.forEach(id=>{
+    const estado = RASCUNHOS_PAINEL_CHAT.get(id);
+    const input = document.getElementById(`d-texto-${id}`);
+    if(estado && input){
+      input.value = estado.texto || '';
+      const inicio = Math.min(Number.isInteger(estado.inicio) ? estado.inicio : input.value.length, input.value.length);
+      const fim = Math.min(Number.isInteger(estado.fim) ? estado.fim : inicio, input.value.length);
+      if(estado.focado){
+        input.focus();
+        try { input.setSelectionRange(inicio, fim); } catch(e) { /* campo pode estar desabilitado */ }
+      }
+      const icone = document.getElementById(`d-anexo-icone-${id}`);
+      if(icone && estado.arquivo) icone.textContent = '✅';
+      // Por seguranca o navegador nao deixa preencher um <input type=file>
+      // recriado. O File fica no mapa acima e enviarResposta o usa; o ✅
+      // deixa claro que ele continua pendente para envio.
+    }
+    const mensagens = document.querySelector(`.painel-conversa[data-painel-id="${CSS.escape(id)}"] .painel-msgs`);
+    const rolagem = ROLAGEM_PAINEL_CHAT.get(id);
+    if(mensagens){
+      mensagens.scrollTop = rolagem && !rolagem.noFim ? rolagem.topo : mensagens.scrollHeight;
+    }
+  });
+}
+
 function renderPaineis(){
+  guardarEstadoPaineis();
   // remove da lista qualquer conversa que sumiu (filtro, etc.)
   PAINEIS_ABERTOS = PAINEIS_ABERTOS.filter(id=>ITENS.some(c=>c.id===id));
   const outer = document.getElementById('paineis-outer');
@@ -632,7 +725,6 @@ function renderPaineis(){
   document.getElementById('paineis-count').textContent = PAINEIS_ABERTOS.length ? ` · ${PAINEIS_ABERTOS.length}` : '';
   if(!PAINEIS_ABERTOS.length){ wrap.innerHTML = ''; return; }
   wrap.innerHTML = PAINEIS_ABERTOS.map(id=>painelHtml(ITENS.find(c=>c.id===id))).join('');
-  wrap.querySelectorAll('.painel-msgs').forEach(el=>{ el.scrollTop = el.scrollHeight; });
   // Ctrl+V cola o print na resposta - um por painel aberto. O innerHTML acima
   // recria os campos, entao religar aqui e o certo (o helper do tema.js
   // marca o campo pra nao ligar duas vezes no mesmo elemento)
@@ -642,6 +734,7 @@ function renderPaineis(){
       window.colarImagemNoChat(`#d-texto-${idAttr}`, `#d-anexo-${idAttr}`, { previa: `#d-previa-${idAttr}` });
     });
   }
+  restaurarEstadoPaineis();
 }
 
 async function enviarResposta(id){
@@ -649,7 +742,8 @@ async function enviarResposta(id){
   if(!input) return;
   const texto = input.value.trim();
   // com print colado da pra mandar so a imagem: o print E a mensagem
-  const arquivo = (document.getElementById(`d-anexo-${id}`)||{}).files?.[0] || null;
+  const arquivo = (document.getElementById(`d-anexo-${id}`)||{}).files?.[0]
+    || (RASCUNHOS_PAINEL_CHAT.get(id) || {}).arquivo || null;
   if(!texto && !arquivo) return;
   input.disabled = true;
   try{
@@ -662,6 +756,9 @@ async function enviarResposta(id){
       : { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto }) });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar mensagem.');
+    // a atualizacao seguinte re-renderiza o painel; limpar ANTES impede que
+    // a resposta que acabou de ser enviada reapareca como rascunho.
+    limparRascunhoResposta(id);
     await carregarLista();
   }catch(err){
     alert(err.message);
@@ -688,6 +785,22 @@ async function gerarChamadoRemoto(id){
   }catch(err){ alert(err.message); }
 }
 
+// Nem todo atendimento precisa virar chamado técnico. Quando exige
+// acompanhamento, a tarefa nasce com o mesmo protocolo do chat, já atribuída
+// a quem está atendendo e com a unidade/contexto conhecidos pela conversa.
+async function gerarTarefa(id){
+  const chat = ITENS.find(c=>c.id===id);
+  if(!chat) return;
+  if(!confirm(`Gerar uma tarefa de acompanhamento para o Ticket #${chat.numeroTicket}? Ela ficará atribuída a você e usará o mesmo protocolo.`)) return;
+  try{
+    const resp = await fetch(`/api/suporte-chats/${id}/gerar-tarefa`, { method:'POST' });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'Erro ao gerar tarefa.');
+    await carregarLista();
+    if(!data.existente) alert(`Tarefa criada no Meu Dia com o Ticket #${data.tarefa.numeroTicket}.`);
+  }catch(err){ alert(err.message); }
+}
+
 // baixa o PDF da conversa (rota autenticada - window.fetch ja injeta o
 // Authorization automaticamente, ver patch no topo do arquivo) - pedido
 // explicito do usuario: "preciso ter um botao de gerar pdf da conversa"
@@ -698,7 +811,7 @@ async function baixarPdfConversa(id){
     const blob = await resp.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'conversa-suporte.pdf';
+    a.download = (resp.headers.get('Content-Disposition')||'').match(/filename="([^"]+)"/)?.[1] || 'conversa-suporte.pdf';
     document.body.appendChild(a);
     a.click();
     a.remove();

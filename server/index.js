@@ -47,6 +47,9 @@ const ifoodClient = require('./ifoodClient');
 const ifoodStore = require('./ifoodStore');
 const ifoodSync = require('./ifoodSync');
 const solicitacoes = require('./solicitacoes');
+const tarefas = require('./tarefas');
+const fornecedores = require('./fornecedores');
+const tarefaRelatorio = require('./tarefaRelatorio');
 const acessosPessoa = require('./acessosPessoa');
 const formularios = require('./formularios');
 const formulariosUnidades = require('./formulariosUnidades');
@@ -143,6 +146,10 @@ const uploadChatAnexo = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024, files: 1 },
 });
+
+// Print de tarefa: imagem/PDF, um por vez, suficiente para Ctrl+V sem abrir
+// uma porta de upload genérico grande no quadro pessoal.
+const uploadTarefaAnexo = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
 
 // foto/PDF da nota fiscal de recebimento (ver inventarioNotaOcr.js) - vai
 // pro Claude com visao, limite mais folgado que o do chat (nota as vezes vem
@@ -1070,8 +1077,8 @@ app.post('/api/formularios-publico/preencher/:token', uploadAnexosFormulario.arr
     if (!vista) return res.status(404).json({ error: 'Link de preenchimento inválido.' });
     const anexos = [];
     for (const file of req.files || []) {
-      const tipoOk = /^image\//.test(file.mimetype || '') || file.mimetype === 'application/pdf';
-      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF nem imagem.` });
+      const tipoOk = /^image\//.test(file.mimetype || '') || ['application/pdf', 'application/zip', 'application/x-zip-compressed'].includes(file.mimetype);
+      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF, imagem ou ZIP.` });
       const path = await storage.salvarArquivo(vista.id, file, 'formularios');
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype });
     }
@@ -1098,8 +1105,8 @@ app.post('/api/formularios-publico/:id/assinar', uploadAnexosFormulario.array('a
     }
     const anexos = [];
     for (const file of req.files || []) {
-      const tipoOk = /^image\//.test(file.mimetype || '') || file.mimetype === 'application/pdf';
-      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF nem imagem.` });
+      const tipoOk = /^image\//.test(file.mimetype || '') || ['application/pdf', 'application/zip', 'application/x-zip-compressed'].includes(file.mimetype);
+      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF, imagem ou ZIP.` });
       const path = await storage.salvarArquivo(req.params.id, file, 'formularios');
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype });
     }
@@ -1315,6 +1322,7 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       // esta rota e PUBLICA, entao e tratado como dado hostil - quem sanitiza
       // e o redeDiagnostico.sanitizarAmostra, chamado la dentro.
       rede: req.body.rede,
+      tailscale: req.body.tailscale,
     }, token);
     res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens });
   } catch (err) {
@@ -1397,12 +1405,18 @@ app.post('/api/loja-status/:codigo/computadores/:posto/chat-responder', async (r
 app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (req, res) => {
   try {
     const token = req.headers['x-noc-token'] || req.body.token || null;
-    const registro = await lojaStatus.registrarAcessoRemoto(req.params.codigo, req.params.posto, req.body.detalhe, token);
+    const ehSessao = req.body.sessao === true || req.body.sessao === 'true';
+    const registro = await lojaStatus.registrarAcessoRemoto(req.params.codigo, req.params.posto, req.body.detalhe, token, ehSessao);
     // push do acesso remoto e OPT-IN (default desligado): as ferramentas que a
     // TI usa (AnyDesk/TeamViewer/DWService) mantem conexao 24h e enchiam o
     // Master de alerta falso. O evento fica registrado no historico do
     // computador de qualquer jeito; o push so sai se o Master ligar.
-    if (await lojaStatus.pushAcessoRemotoAtivo()) {
+    //
+    // Desde 09/09/2026 o agente sabe separar SESSAO (alguem entrou, lido do
+    // log da propria ferramenta) de servico conectado - e so a sessao vira
+    // push. O batimento de nuvem, que era o que enchia o Master, nunca mais
+    // toca o celular dele, mesmo com o toggle ligado.
+    if (ehSessao && await lojaStatus.pushAcessoRemotoAtivo()) {
       const mapa = await construirUnidadesMapa();
       push.notifyAcessoRemotoDetectado(mapa[req.params.codigo] || req.params.codigo, req.params.codigo, registro.nome, req.params.posto, req.body.detalhe)
         .catch((err) => console.error('Erro no push de acesso remoto:', err.message));
@@ -1439,7 +1453,7 @@ app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', async (req, re
     let liberado = false;
     if (!tokenAtual) {
       liberado = true; // legado/migracao: computador ainda sem segredo
-    } else if (tokenReq && tokenReq === tokenAtual) {
+    } else if (lojaStatus.tokensBatem(tokenReq, tokenAtual)) {
       liberado = true; // autoatualizacao do proprio agente (prova o token)
     } else {
       // sessao de Master/Suporte (download manual pela loja-status.html)
@@ -1448,7 +1462,7 @@ app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', async (req, re
       const secoes = (user && user.permissions && user.permissions.sections) || [];
       liberado = !!user && (user.role === 'master' || user.isAdmin || secoes.includes('suporte'));
     }
-    if (!liberado) return res.status(403).type('text/plain').send('# Acesso negado. Baixe o NOCZenith pela tela NOC Zenith (logado como Master/Suporte).');
+    if (!liberado) return res.status(403).type('text/plain').send('# Acesso negado. Baixe o agente pela tela NOC-NoPulso (logado como Master/Suporte).');
     const agentToken = await lojaStatus.garantirAgentToken(codigo, posto);
     const conteudo = vigiaScript.montarScriptVigia({ codigo, posto, tipo, agentToken });
     res.type('text/plain').send(conteudo);
@@ -1754,7 +1768,14 @@ async function lerEGuardarDocumentoIdentidade(arquivosReq, unidade, digitados = 
   };
 }
 
-app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCount: 1 }, { name: 'documento', maxCount: 3 }]), async (req, res) => {
+function validarFotoCadastroArquivo(arquivo) {
+  if (!arquivo) return null;
+  if (!String(arquivo.mimetype || '').startsWith('image/')) return 'A foto de cadastro precisa ser uma imagem.';
+  if (arquivo.size > 10 * 1024 * 1024) return 'A foto de cadastro deve ter no máximo 10 MB.';
+  return null;
+}
+
+app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCount: 1 }, { name: 'documento', maxCount: 3 }, { name: 'fotoCadastro', maxCount: 1 }]), async (req, res) => {
   try {
     const { unidade, contato, cargoFuncao } = req.body;
     const tipoCadastro = req.body.tipoCadastro === 'candidato' ? 'candidato' : 'extra';
@@ -1776,12 +1797,20 @@ app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCoun
     const arquivoCurriculo = (req.files?.curriculo || [])[0];
     const erroCurriculo = validarTipoCurriculo(arquivoCurriculo);
     if (erroCurriculo) return res.status(400).json({ error: erroCurriculo });
+    const arquivoFotoCadastro = (req.files?.fotoCadastro || [])[0];
+    const erroFotoCadastro = validarFotoCadastroArquivo(arquivoFotoCadastro);
+    if (erroFotoCadastro) return res.status(400).json({ error: erroFotoCadastro });
     const faltaDoc = exigeDocumentoIdentidade(tipoCadastro, req.files?.documento, guardado);
     if (faltaDoc) return res.status(400).json({ error: faltaDoc });
     let curriculo = null;
     if (arquivoCurriculo) {
       const path = await storage.salvarArquivo(unidade, arquivoCurriculo, 'rh-curriculos');
       curriculo = { path, nomeOriginal: arquivoCurriculo.originalname, tipo: arquivoCurriculo.mimetype };
+    }
+    let fotoCadastro = null;
+    if (arquivoFotoCadastro) {
+      const path = await storage.salvarArquivo(unidade, arquivoFotoCadastro, 'rh-fotos-cadastro');
+      fotoCadastro = { path, tipo: arquivoFotoCadastro.mimetype, origem: 'cadastro', em: new Date().toISOString() };
     }
     // nome/nascimento/CPF vem da leitura do documento feita AQUI, nao do
     // que a tela mandou (ver lerEGuardarDocumentoIdentidade)
@@ -1792,7 +1821,7 @@ app.post('/api/rh/cadastro-publico', upload.fields([{ name: 'curriculo', maxCoun
       ...(doc?.campos || {}),
       documentoIdentidade: doc?.anexo || null,
       leituraDocumento: doc?.leitura || null,
-      curriculo, cadastradoPorId: null, cadastradoPorEmail: 'Auto-cadastro (link público)',
+      curriculo, fotoCadastro, cadastradoPorId: null, cadastradoPorEmail: 'Auto-cadastro (link público)',
       precisaAprovacao: true,
     });
     // cadastro gravado: o token nao serve mais pra nada. Apagar aqui evita
@@ -2009,7 +2038,8 @@ app.get('/api/stream', (req, res) => {
 // https://docs.adyen.com/development-resources/webhooks/verify-hmac-signatures/
 function hmacValid(item) {
   const key = HMAC_KEYS[item.merchantAccountCode] || LEGACY_HMAC_KEY;
-  if (!key) return true; // ATENCAO: sem chave configurada para essa conta, aceitamos tudo (só para testes locais)
+  // Falha fechada: uma conta sem chave não pode injetar transações no painel.
+  if (!key) return false;
   const a = item.additionalData || {};
   const sign = a['hmacSignature'];
   if (!sign) return false;
@@ -2027,7 +2057,9 @@ function hmacValid(item) {
   const signingString = fields.join(':');
   const keyBuf = Buffer.from(key, 'hex');
   const hmac = crypto.createHmac('sha256', keyBuf).update(signingString, 'utf8').digest('base64');
-  return hmac === sign;
+  const esperado = Buffer.from(hmac, 'utf8');
+  const recebido = Buffer.from(sign, 'utf8');
+  return esperado.length === recebido.length && crypto.timingSafeEqual(esperado, recebido);
 }
 
 // quando um cluster de identidade (fraudIdentity) e confirmado como fraude
@@ -3245,10 +3277,62 @@ app.get('/api/loja-status', requireSection('suporte'), async (req, res) => {
 // leitura no Firestore.
 app.get('/api/loja-status/quedas', requireSection('suporte'), async (req, res) => {
   const [rel, mapa] = await Promise.all([
-    lojaStatus.relatorioQuedas({ dias: req.query.dias }),
+    lojaStatus.relatorioQuedas({ dias: req.query.dias, periodo: req.query.periodo, inicio: req.query.inicio, fim: req.query.fim }),
     construirUnidadesMapa(),
   ]);
-  res.json({ ...rel, unidades: rel.unidades.map((u) => ({ ...u, unidadeNome: mapa[u.codigo] || u.codigo })) });
+  res.json({ ...rel, unidades: rel.unidades.map((u) => ({ ...u, unidadeNome: mapa[u.codigo] || u.codigo, grupo: redes.redeDaUnidade(u.codigo) })) });
+});
+
+// PDF do mesmo recorte mostrado em Quedas de conexão. O filtro é repetido no
+// servidor (e não confiado ao navegador) para o arquivo continuar correto se
+// alguém abrir a URL diretamente.
+app.get('/api/loja-status/quedas/relatorio.pdf', requireSection('suporte'), async (req, res) => {
+  try {
+    const [rel, mapa] = await Promise.all([
+      lojaStatus.relatorioQuedas({ dias: req.query.dias, periodo: req.query.periodo, inicio: req.query.inicio, fim: req.query.fim }),
+      construirUnidadesMapa(),
+    ]);
+    const grupo = String(req.query.grupo || '');
+    const unidade = String(req.query.unidade || '');
+    const linhas = rel.unidades
+      .map((u) => ({ ...u, unidadeNome: mapa[u.codigo] || u.codigo, grupo: redes.redeDaUnidade(u.codigo) }))
+      .filter((u) => (!grupo || u.grupo === grupo) && (!unidade || u.codigo === unidade));
+    const totalQuedas = linhas.reduce((s, u) => s + u.quedas, 0);
+    const totalHoras = +(linhas.reduce((s, u) => s + u.horasFora, 0)).toFixed(1);
+    const periodoTexto = rel.periodo
+      ? `${reportUtil.fmtDataBR(rel.periodo.inicio)} a ${reportUtil.fmtDataBR(rel.periodo.fim)}`
+      : (rel.dias === 'hoje' ? 'Hoje' : rel.dias === 'ontem' ? 'Ontem' : `${rel.dias} dias`);
+    const grupoTexto = grupo ? (redes.NOME_DA_REDE[grupo] || grupo) : 'Todos os grupos';
+    const unidadeTexto = unidade ? (mapa[unidade] || unidade) : 'Todas as unidades';
+    const PDFDocument = require('pdfkit');
+    const doc = new PDFDocument({ margin: 38, size: 'A4', layout: 'landscape' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="nopulso-quedas-${rel.periodo ? `${rel.periodo.inicio}-a-${rel.periodo.fim}` : rel.dias}.pdf"`);
+    doc.pipe(res);
+    doc.fontSize(8).fillColor('#5b6470').text('NOPULSO · SOLUTIONS TI TECH · NOC', { characterSpacing: 1 });
+    doc.moveDown(.35);
+    doc.fontSize(17).fillColor('#111').text('Relatório de quedas de conexão');
+    doc.fontSize(9).fillColor('#555').text(`Período: ${periodoTexto}  ·  Grupo: ${grupoTexto}  ·  Unidade: ${unidadeTexto}`);
+    doc.text(`Gerado em ${reportUtil.agoraBrasiliaFmt()}  ·  ${totalQuedas} queda(s)  ·  ${String(totalHoras).replace('.', ',')}h fora`);
+    doc.moveDown(1);
+    const colunas = [38, 292, 384, 488, 596, 708];
+    const cab = ['UNIDADE', 'QUEDAS', 'CONFIRMADAS', 'OSCILAÇÕES', 'TEMPO FORA', 'MAIOR'];
+    doc.fontSize(8).fillColor('#5b6470'); cab.forEach((t, i) => doc.text(t, colunas[i], doc.y, { width: i ? 82 : 240, align: i ? 'right' : 'left' }));
+    doc.moveDown(.7); doc.strokeColor('#d6dbe0').moveTo(38, doc.y).lineTo(804, doc.y).stroke(); doc.moveDown(.45);
+    if (!linhas.length) doc.fontSize(11).fillColor('#444').text('Nenhuma queda encontrada para os filtros selecionados.');
+    linhas.forEach((u) => {
+      if (doc.y > 535) { doc.addPage(); }
+      const y = doc.y;
+      const tempo = u.horasFora >= 1 ? `${String(u.horasFora).replace('.', ',')}h` : `${Math.round(u.horasFora * 60)} min`;
+      const vals = [u.unidadeNome, u.quedas, u.confirmadas, u.oscilacoes, tempo, `${u.maiorMin} min`];
+      doc.fontSize(9).fillColor('#222'); vals.forEach((v, i) => doc.text(String(v), colunas[i], y, { width: i ? 82 : 240, align: i ? 'right' : 'left', ellipsis: i === 0 }));
+      doc.moveDown(1.45); doc.strokeColor('#e1e5e8').moveTo(38, doc.y).lineTo(804, doc.y).stroke(); doc.moveDown(.35);
+    });
+    doc.moveDown(.5); doc.fontSize(8).fillColor('#666').text('Confirmada: ficou fora tempo suficiente para alerta crítico. Oscilação: caiu e voltou em poucos minutos. Reinícios comandados e notebooks não entram no cálculo.');
+    doc.end();
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // detalhe completo de UM computador (eventos, aparelhos da rede, chat,
@@ -3412,7 +3496,7 @@ function urlComputador(codigo, posto, tipo) {
 app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), async (req, res) => {
   try {
     if (!(await unidadesExtras.apareceEm(req.params.codigo, 'noc'))) return res.status(400).json({ error: 'Essa unidade não tem NOC habilitado.' });
-    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo);
+    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas);
     const url = urlComputador(req.params.codigo, registro.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
@@ -3422,7 +3506,7 @@ app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), asy
 
 app.put('/api/loja-status/:codigo/computadores/:posto', requireSection('suporte'), async (req, res) => {
   try {
-    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook);
+    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas);
     const url = urlComputador(req.params.codigo, req.params.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
@@ -3738,8 +3822,8 @@ app.post('/api/formularios', requireSection('formularios'), uploadAnexosFormular
     if (recusa) return res.status(recusa.status).json({ error: recusa.error });
     const anexos = [];
     for (const file of req.files || []) {
-      const tipoOk = /^image\//.test(file.mimetype || '') || file.mimetype === 'application/pdf';
-      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF nem imagem.` });
+      const tipoOk = /^image\//.test(file.mimetype || '') || ['application/pdf', 'application/zip', 'application/x-zip-compressed'].includes(file.mimetype);
+      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF, imagem ou ZIP.` });
       const path = await storage.salvarArquivo(payload.unidade || 'geral', file, 'formularios');
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype });
     }
@@ -3854,8 +3938,8 @@ app.post('/api/formularios/:id/anexos', auth.requireMaster, uploadAnexosFormular
     conferirTamanhoAnexos(req.files);
     const anexos = [];
     for (const file of req.files || []) {
-      const tipoOk = /^image\//.test(file.mimetype || '') || file.mimetype === 'application/pdf';
-      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF nem imagem.` });
+      const tipoOk = /^image\//.test(file.mimetype || '') || ['application/pdf', 'application/zip', 'application/x-zip-compressed'].includes(file.mimetype);
+      if (!tipoOk) return res.status(400).json({ error: `Anexo "${file.originalname}" não é PDF, imagem ou ZIP.` });
       const path = await storage.salvarArquivo(req.params.id, file, 'formularios');
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype });
     }
@@ -4226,6 +4310,7 @@ app.post('/api/refund-requests', requireSection('monitor'), async (req, res) => 
     });
     broadcast('refund-requested', registro, 'monitor');
     broadcast('refund-requested', registro, 'solicitacoes');
+    await sincronizarTarefasDoTicket(registro, 'estorno');
     push.notifySolicitacao(`Ticket #${registro.numeroTicket} · Pedido de estorno`, `${req.user.email} · ${unidade || ''}`, registro.id);
     notificarSeDirecionadoAoMV('estorno', registro);
     res.json(registro);
@@ -4260,6 +4345,7 @@ app.patch('/api/refund-requests/:id/direcionar', auth.requireMaster, async (req,
   try {
     if (tipoBloqueado(req, 'estorno')) return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
     const registro = await refunds.redirecionar(req.params.id, req.body);
+    await sincronizarTarefasDoTicket(registro, 'estorno');
     broadcast('refund-request-changed', registro, 'monitor');
     notificarSeDirecionadoAoMV('estorno', registro);
     res.json(registro);
@@ -5196,6 +5282,29 @@ app.post('/api/fechamentos/quebra-caixa/backfill', auth.requireMaster, async (re
   }
 });
 
+// Correção pontual do KPI "Calabress" cadastrado com grafia errada. A prévia
+// não grava; a execução exige frase de confirmação e é exclusiva do Master.
+// O serviço conserva auditoria em cada fechamento e soma os dois campos se um
+// dia chegou a ter Calabress e Calabresa preenchidos juntos.
+app.get('/api/fechamentos/kpis/calabresa/migracao', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await fechamentosLive.previaMigracaoCalabresa());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.post('/api/fechamentos/kpis/calabresa/migracao', auth.requireMaster, async (req, res) => {
+  try {
+    if (String(req.body?.confirmacao || '').trim().toUpperCase() !== 'MIGRAR CALABRESS') {
+      return res.status(400).json({ error: 'Digite MIGRAR CALABRESS para confirmar a correção histórica.' });
+    }
+    const resultado = await fechamentosLive.migrarCalabressParaCalabresa(req.user.email);
+    res.json(resultado);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // data de ontem em Brasilia, formato YYYY-MM-DD (mesmo padrao ja usado em
 // parque.js/hojeBrasiliaISO, so que D-1)
 function ontemBrasiliaISO() {
@@ -5254,18 +5363,31 @@ app.post('/api/fechamentos/:grupo/enviar-planilha', auth.requireMaster, async (r
 // resolve qualquer corte extra da tabela antes de mandar inicio/fim - mais
 // grupo e unidades) - usado pelos relatorios de Fechamentos e de Comparativo
 // por unidade abaixo
+// dia da semana de AAAA-MM-DD sem depender do fuso do processo: new Date do
+// ISO puro é meia-noite UTC, e no Brasil isso cai no dia anterior
+function diaSemanaISO(data) {
+  const p = String(data || '').split('-');
+  if (p.length !== 3) return null;
+  return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2])).getDay();
+}
+
 async function fechamentosFiltrados(req) {
-  const { inicio, fim, grupo, unidades } = req.query;
+  const { inicio, fim, grupo, unidades, diaSemana } = req.query;
   const lancados = await fechamentosLive.listAll();
   const sangriasLancadas = (await sangrias.listAll()).map(sangrias.comoFechamento);
   const combinado = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas]);
   const permitido = auth.filterByUnidade(req, combinado);
   const unidadesSet = unidades ? new Set(String(unidades).split(',').filter(Boolean)) : null;
+  // peneira do dia da semana (ver o seletor em fechamentos.html) - o relatório
+  // tem que sair com o MESMO recorte da tela: filtrar "só as segundas" e
+  // exportar o mês inteiro seria pior que não ter o filtro
+  const alvoDia = /^[0-6]$/.test(String(diaSemana || '')) ? Number(diaSemana) : null;
   return permitido.filter((f) =>
     (!grupo || f.grupo === grupo) &&
     (!unidadesSet || unidadesSet.has(f.unidade)) &&
     (!inicio || (f.data || '') >= inicio) &&
-    (!fim || (f.data || '') <= fim)
+    (!fim || (f.data || '') <= fim) &&
+    (alvoDia === null || diaSemanaISO(f.data) === alvoDia)
   );
 }
 
@@ -5562,7 +5684,7 @@ app.post('/api/fechamentos/ler-canais', requireSection('lancamento'), uploadRela
     // igualzinho ao que acontece quando alguem digita a mao.
     //
     // Arquivo continua de fora: nao e' leitura de valor, e upload de anexo.
-    const kpisOcrElegiveis = (grupo.kpisExtras || []).filter((k) => ['quantidade', 'moeda', 'kg', 'texto', 'tempo'].includes(k.tipo || 'quantidade'));
+    const kpisOcrElegiveis = (grupo.kpisExtras || []).filter((k) => ['quantidade', 'moeda', 'kg', 'percentual', 'texto', 'tempo'].includes(k.tipo || 'quantidade'));
     // a dica e escrita pelo Master no cadastro do grupo: cada PDV imprime de
     // um jeito (ordem das linhas, coluna que vale) e isso nao cabe no codigo
     // sem virar um "if" por bandeira
@@ -5649,17 +5771,28 @@ app.get('/api/fechamentos/meus', requireSection('lancamento'), async (req, res) 
 // diasPendentesDeFechamento em fechamentosLive.js). Só leitura, e tudo que
 // consulta já é cacheado: essa rota é chamada a cada troca de tela.
 app.get('/api/fechamentos/pendencias', requireSection('lancamento'), async (req, res) => {
-  const [todos, extras] = await Promise.all([
+  // MESMO par de chamadas do lancamento.html: quem lança fechamento é quem o
+  // perfil da unidade deixa (área 'fechamento'). Sem isso o aviso cobrava a
+  // MVPar, que é escritório e não fecha caixa - foi o que o Master viu.
+  const [lancados, saltiverso, extras, restritas] = await Promise.all([
     fechamentosLive.listAll(),
-    unidadesExtras.mapa().catch(() => ({})),
+    saltiversoFechamento.listAll().then((l) => l.map(saltiversoFechamento.comoFechamento)).catch(() => []),
+    unidadesExtras.mapa().catch(() => ({})).then((m) => unidadesExtras.filtrarMapaPorArea(m, 'fechamento').catch(() => m)),
+    unidadesExtras.codigosRestritosDe('fechamento').catch(() => []),
   ]);
+  // o Saltiverso fecha por outra tela (saltiversoFechamento.js): sem juntar
+  // essa fonte ele apareceria devendo todo dia, mesmo tendo lançado
+  const todos = [...lancados, ...saltiverso];
   const nomes = { ...FECHAMENTO_UNIDADES_NOMES, ...extras };
   delete nomes.Administrativa; // unidade administrativa não lança fechamento
+  restritas.forEach((c) => { delete nomes[c]; });  // unidade fixa com perfil restrito
   // Master/Admin respondem pelo parque inteiro; quem lança vê só as suas
   const codigos = (req.isMaster || req.isAdmin) ? Object.keys(nomes) : (req.permissions.unidades || []);
   const unidades = codigos.filter((c) => nomes[c]).map((c) => ({ codigo: c, nome: nomes[c] }));
   const hora = Number(new Intl.DateTimeFormat('en-US', { timeZone: FUSO_BR, hour: '2-digit', hour12: false }).format(new Date()));
-  res.json(fechamentosLive.diasPendentesDeFechamento(todos, unidades, hojeBrasiliaISO(), hora));
+  // souMaster vai junto pro aviso saber se mostra o X de "não avisar mais" -
+  // sem isso o tema.js precisaria de uma chamada a /api/me nas 53 telas
+  res.json({ ...fechamentosLive.diasPendentesDeFechamento(todos, unidades, hojeBrasiliaISO(), hora), souMaster: !!req.isMaster });
 });
 
 // ---------- grupos (franquias) - cada uma pode ter seus proprios KPI's
@@ -7298,7 +7431,7 @@ function precisaAprovacaoCadastro(req) {
 
 app.post('/api/rh/ler-documento', requireSection('rh'), uploadDocumentoIdentidade.array('documento', 3), responderLeituraDocumento);
 
-app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'curriculo', maxCount: 1 }, { name: 'documento', maxCount: 3 }]), async (req, res) => {
+app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'curriculo', maxCount: 1 }, { name: 'documento', maxCount: 3 }, { name: 'fotoCadastro', maxCount: 1 }]), async (req, res) => {
   try {
     const { unidade, nome, contato, cargoFuncao, dataNascimento, dataAdmissao, tipoCadastro } = req.body;
     // "1" ou "true" vindo de multipart/form-data (checkbox HTML manda string)
@@ -7318,10 +7451,18 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'c
     const arquivoCurriculo = (req.files?.curriculo || [])[0];
     const erroCurriculo = validarTipoCurriculo(arquivoCurriculo);
     if (erroCurriculo) return res.status(400).json({ error: erroCurriculo });
+    const arquivoFotoCadastro = (req.files?.fotoCadastro || [])[0];
+    const erroFotoCadastro = validarFotoCadastroArquivo(arquivoFotoCadastro);
+    if (erroFotoCadastro) return res.status(400).json({ error: erroFotoCadastro });
     let curriculo = null;
     if (arquivoCurriculo) {
       const path = await storage.salvarArquivo(unidade || 'geral', arquivoCurriculo, 'rh-curriculos');
       curriculo = { path, nomeOriginal: arquivoCurriculo.originalname, tipo: arquivoCurriculo.mimetype };
+    }
+    let fotoCadastro = null;
+    if (arquivoFotoCadastro) {
+      const path = await storage.salvarArquivo(unidade || 'geral', arquivoFotoCadastro, 'rh-fotos-cadastro');
+      fotoCadastro = { path, tipo: arquivoFotoCadastro.mimetype, origem: 'cadastro', em: new Date().toISOString() };
     }
     // Extra e Candidato so entram com documento, e os dados vem da leitura
     // dele. Efetivado (contratacao formal pelo RH) segue digitado - la o
@@ -7335,7 +7476,7 @@ app.post('/api/rh/funcionarios', requireSection('rh'), upload.fields([{ name: 'c
       ...(doc?.campos || {}),
       documentoIdentidade: doc?.anexo || null,
       leituraDocumento: doc?.leitura || null,
-      curriculo, cadastradoPorId: req.user.id, cadastradoPorEmail: req.user.email,
+      curriculo, fotoCadastro, cadastradoPorId: req.user.id, cadastradoPorEmail: req.user.email,
       precisaAprovacao: precisaAprovacaoCadastro(req),
     });
     broadcast('rh-funcionario-criado', registro, 'rh');
@@ -7397,6 +7538,30 @@ app.patch('/api/rh/funcionarios/:id', auth.requireMaster, async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// Foto exibida na ficha de Extra/candidato. A troca é só do Master porque a
+// imagem identifica uma pessoa; o check-in original permanece como evidência.
+app.post('/api/rh/funcionarios/:id/foto-cadastro', auth.requireMaster, upload.single('foto'), async (req, res) => {
+  try {
+    const atual = await rh.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    if (!podeAcessarUnidadeRh(req, atual.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+    if (!req.file || !String(req.file.mimetype || '').startsWith('image/')) return res.status(400).json({ error: 'Envie uma imagem para a foto de cadastro.' });
+    if (req.file.size > 10 * 1024 * 1024) return res.status(400).json({ error: 'A foto de cadastro deve ter no máximo 10 MB.' });
+    const path = await storage.salvarArquivo(req.params.id, req.file, 'rh-fotos-cadastro');
+    const registro = await rh.trocarFotoCadastro(req.params.id, { path, tipo: req.file.mimetype }, req.user.email);
+    broadcast('rh-funcionario-atualizado', registro, 'rh');
+    res.json(registro);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.get('/api/rh/funcionarios/:id/foto-cadastro', requireSection('rh'), async (req, res) => {
+  const atual = await rh.getOne(req.params.id);
+  if (!atual) return res.sendStatus(404);
+  if (!podeAcessarUnidadeRh(req, atual.unidade)) return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  if (!atual.fotoCadastro?.path) return res.sendStatus(404);
+  storage.streamArquivo(atual.fotoCadastro.path, atual.fotoCadastro.tipo, res);
 });
 
 // regenera o token do link de auto-atendimento (rh-colaborador.html) - pra
@@ -8959,12 +9124,618 @@ app.get('/api/compras/acompanhamento', requireSection('solicitacoes'), async (re
   }
 });
 
+// ----- Meu Dia: tarefas pessoais e vínculo seguro com tickets -----
+// A sincronização é chamada nos dois caminhos que podem atribuir um ticket:
+// criação e redirecionamento. Ela só cria tarefa para Master ou quem possui
+// a seção Suporte; demais responsáveis continuam usando o fluxo normal.
+async function sincronizarTarefasDoTicket(ticket, tipo = 'solicitacao') {
+  return tarefas.sincronizarTicket(ticket, await users.list(), tipo);
+}
+
+function acessoDasTarefas(req) {
+  // Admin gere apenas a empresa a que pertence; gerente e demais usuários
+  // enxergam somente o que criaram ou receberam. O Master não tem limite.
+  const escopoAdmin = req.isAdmin ? (req.unidadesDaEmpresa || req.permissions?.unidades || []) : (req.permissions?.unidades || []);
+  return { usuario: req.user, isMaster: req.isMaster, isAdmin: req.isAdmin, unidades: escopoAdmin };
+}
+
+// A seção "Meu Dia" é a permissão de CRIAR tarefa própria. Sem ela a pessoa
+// continua entrando na tela e tocando as tarefas que recebeu - o que a seção
+// libera é abrir tarefa nova, em vez de só responder o que Master, Admin ou
+// gerente da unidade criou. Por isso o item do menu segue sem `secoes` em
+// nav-menu.js: esconder a tela deixaria a pessoa sem onde responder.
+const ROTULO_TIPO_TICKET = {
+  estorno: 'Estorno',
+  'ajuste-fechamento': 'Ajuste de fechamento',
+  compra: 'Compra',
+  manutencao: 'Manutenção',
+  'suporte-ti': 'Suporte de TI',
+  pagamento: 'Pagamento',
+  nota: 'Nota',
+  'quebra-caixa': 'Quebra de caixa',
+  'desvio-estoque': 'Desvio de estoque',
+  'acesso-pessoa': 'Acesso de pessoa',
+  adiantamento: 'Adiantamento',
+};
+
+// Suporte de TI é atendimento operacional: não aguarda aprovação financeira
+// para registrar que o trabalho foi resolvido (ex.: login desbloqueado). Os
+// demais tipos continuam exigindo aprovação antes de concluir a execução.
+function ticketPodeConcluirTarefa(ticket) {
+  return ticket?.tipo === 'suporte-ti' || ticket?.status === 'APROVADO';
+}
+
+function podeDistribuirTarefas(req) {
+  return req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo);
+}
+
+function podeCriarTarefaManual(req) {
+  return req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo)
+    || (req.permissions?.sections || []).includes('tarefas');
+}
+
+// Cadastro de fornecedores é um cofre operacional: Master/Admin e gerentes
+// somente podem tratar as unidades que já fazem parte do seu escopo.
+function podeGerirFornecedores(req) {
+  return req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo)
+    || (req.permissions?.sections || []).includes('fornecedores');
+}
+
+function unidadesFornecedorPermitidas(req) {
+  if (req.isMaster) return null;
+  return req.isAdmin ? (req.unidadesDaEmpresa || req.permissions?.unidades || []) : (req.permissions?.unidades || []);
+}
+
+async function fornecedorNoEscopo(req, id) {
+  const lista = await fornecedores.listar(unidadesFornecedorPermitidas(req));
+  return lista.find((fornecedor) => fornecedor.id === id) || null;
+}
+
+app.get('/api/fornecedores', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Cadastro de fornecedores exige perfil de gestão ou a seção Fornecedores.' });
+    res.json(await fornecedores.listar(unidadesFornecedorPermitidas(req)));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/fornecedores', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Sem permissão para cadastrar fornecedor.' });
+    const unidade = String(req.body?.unidade || '').trim();
+    const permitidas = unidadesFornecedorPermitidas(req);
+    if (!unidade || (permitidas && !permitidas.includes(unidade))) return res.status(403).json({ error: 'Escolha uma unidade do seu acesso.' });
+    const mapa = await construirUnidadesMapa();
+    res.status(201).json(await fornecedores.criar({ unidade, unidadeNome: mapa[unidade] || unidade, dados: req.body, por: req.user }));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.put('/api/fornecedores/:id', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Sem permissão para editar fornecedor.' });
+    if (!await fornecedorNoEscopo(req, req.params.id)) return res.status(404).json({ error: 'Fornecedor não encontrado no seu escopo.' });
+    res.json(await fornecedores.atualizar(req.params.id, req.body, req.user));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/fornecedores/:id/validar', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Sem permissão para validar fornecedor.' });
+    if (!await fornecedorNoEscopo(req, req.params.id)) return res.status(404).json({ error: 'Fornecedor não encontrado no seu escopo.' });
+    res.json(await fornecedores.validar(req.params.id, req.user));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/fornecedores/link', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeGerirFornecedores(req)) return res.status(403).json({ error: 'Sem permissão para gerar link.' });
+    const unidade = String(req.body?.unidade || '').trim(), permitidas = unidadesFornecedorPermitidas(req);
+    if (!unidade || (permitidas && !permitidas.includes(unidade))) return res.status(403).json({ error: 'Escolha uma unidade do seu acesso.' });
+    const mapa = await construirUnidadesMapa();
+    const convite = await fornecedores.criarConvite({ unidade, unidadeNome: mapa[unidade] || unidade, por: req.user });
+    res.status(201).json({ ...convite, link: `${APP_BASE_URL}/fornecedor-cadastro.html?convite=${encodeURIComponent(convite.token)}` });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// O link público revela somente a unidade destinatária. Dados de fornecedores
+// entram como pendentes e nunca se tornam ativos sem conferência interna.
+app.get('/api/fornecedores/publico/:token', async (req, res) => {
+  const convite = await fornecedores.convite(req.params.token);
+  if (!convite) return res.status(404).json({ error: 'Link de cadastro inválido ou removido.' });
+  res.json({ unidade: convite.unidade, unidadeNome: convite.unidadeNome });
+});
+
+app.post('/api/fornecedores/publico/:token', async (req, res) => {
+  try {
+    const convite = await fornecedores.convite(req.params.token);
+    if (!convite) return res.status(404).json({ error: 'Link de cadastro inválido ou removido.' });
+    const criado = await fornecedores.criarPublico({ unidade: convite.unidade, unidadeNome: convite.unidadeNome, dados: req.body, convite });
+    await fornecedores.usarConvite(convite.token);
+    res.status(201).json({ id: criado.id, status: criado.status });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.get('/api/tarefas/minhas', auth.requireAuth, async (req, res) => {
+  try {
+    res.json(await tarefas.listarMinhas(acessoDasTarefas(req)));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
+  try {
+    const mapa = await construirUnidadesMapa();
+    const acesso = acessoDasTarefas(req);
+    const codigos = req.isMaster ? Object.keys(mapa) : (acesso.unidades || []);
+    // Só Master/Admin podem distribuir. A lista respeita unidade/empresa e
+    // expõe nome de usuário, nunca e-mail, para não criar identificação por
+    // dado de contato nem vazar pessoas de outro cliente.
+    let responsaveis = [req.user];
+    if (req.isMaster || req.isAdmin) {
+      const permitidas = new Set(codigos);
+      responsaveis = (await users.list()).filter((u) => u.active !== false && (req.isMaster
+        || (u.permissions?.unidades || []).some((unidade) => permitidas.has(unidade))));
+    }
+    res.json({
+      // a rede de cada unidade vem de redes.js (a mesma regra do resto do app),
+      // pro filtro de Grupo do Meu Dia não precisar de uma lista fixa própria
+      unidades: codigos.map((codigo) => ({ codigo, nome: mapa[codigo] || codigo, grupo: redes.redeDaUnidade(codigo) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+      redes: redes.REDES,
+      responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário', unidades: u.role === 'master' ? codigos : (u.permissions?.unidades || []) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+      // a tela precisa saber QUEM é você pra liberar "trocar"/"alterar" na
+      // tarefa de que você é responsável, sem reimplementar a regra no navegador
+      eu: req.user.id,
+      // os botões "criar solicitação/formulário" levam pras telas da Central e
+      // de Formulários - sem a seção, o botão só levaria a um "sem acesso"
+      podeSolicitacao: req.isMaster || (req.permissions?.sections || []).includes('solicitacoes'),
+      podeFormulario: req.isMaster || (req.permissions?.sections || []).includes('formularios'),
+      podeAtribuir: podeDistribuirTarefas(req),
+      podeCriar: podeCriarTarefaManual(req),
+      isMaster: req.isMaster,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
+  try {
+    if (!podeCriarTarefaManual(req)) return res.status(403).json({ error: 'Criar tarefa exige a seção Meu Dia, ou ser Master, Admin ou gerente da unidade.' });
+    const acesso = acessoDasTarefas(req);
+    const unidade = String(req.body?.unidade || '').trim() || null;
+    if (unidade && !req.isMaster && !(acesso.unidades || []).includes(unidade)) {
+      return res.status(403).json({ error: 'Você só pode criar tarefas para uma unidade do seu acesso.' });
+    }
+    let responsavel = req.user;
+    const responsavelId = String(req.body?.responsavelId || '').trim();
+    if (responsavelId && responsavelId !== req.user.id) {
+      if (!req.isMaster && !req.isAdmin) return res.status(403).json({ error: 'Somente Master ou Admin pode atribuir tarefas.' });
+      responsavel = (await users.list()).find((u) => u.id === responsavelId && u.active !== false);
+      if (!responsavel) return res.status(400).json({ error: 'Responsável não encontrado ou inativo.' });
+      if (!req.isMaster && !(responsavel.permissions?.unidades || []).some((codigo) => (acesso.unidades || []).includes(codigo))) {
+        return res.status(403).json({ error: 'O responsável não pertence a uma unidade do seu acesso.' });
+      }
+      if (unidade && responsavel.role !== 'master' && !(responsavel.permissions?.unidades || []).includes(unidade)) {
+        return res.status(403).json({ error: 'O responsável não tem acesso à unidade selecionada.' });
+      }
+    }
+    const mapa = unidade ? await construirUnidadesMapa() : {};
+    const participantes = await resolverColaboradores(req, acesso, req.body?.colaboradoresIds, unidade);
+    const criada = await tarefas.criar({
+      titulo: req.body?.titulo, descricao: req.body?.descricao,
+      dataInicio: req.body?.dataInicio, dataEntrega: req.body?.dataEntrega,
+      unidade, unidadeNome: unidade ? (mapa[unidade] || unidade) : null, usuario: req.user, responsavel,
+      colaboradores: participantes, ehOcorrencia: req.body?.ehOcorrencia === true,
+      prioridade: req.body?.prioridade, participantesApenasAcompanham: req.body?.participantesApenasAcompanham === true,
+    });
+    broadcast('tarefas-atualizada', { id: criada.id, unidade: criada.unidade }, 'tarefas');
+    res.json(criada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Quebra de caixa não entra automaticamente no Meu Dia. Quando o responsável
+// decidir investigar, transforma o alerta específico em uma tarefa rastreável.
+app.post('/api/tarefas/de-quebra/:id', auth.requireAuth, async (req, res) => {
+  try {
+    if (!req.isMaster && !req.isAdmin) return res.status(403).json({ error: 'Somente Master ou Admin pode criar tarefa a partir de quebra de caixa.' });
+    const ticket = await solicitacoes.getOne(req.params.id);
+    if (!ticket || ticket.tipo !== 'quebra-caixa') return res.status(404).json({ error: 'Alerta de quebra de caixa não encontrado.' });
+    const acesso = acessoDasTarefas(req);
+    if (!req.isMaster && ticket.unidade && !(acesso.unidades || []).includes(ticket.unidade)) return res.status(403).json({ error: 'Essa unidade não está no seu acesso.' });
+    const criada = await tarefas.criar({
+      titulo: ticket.titulo, descricao: ticket.observacao || 'Investigar a divergência apontada no fechamento.',
+      unidade: ticket.unidade, unidadeNome: ticket.unidadeNome, usuario: req.user,
+      vinculo: { chave: `quebra-manual:${ticket.id}`, tipo: 'quebra-manual', ticketTipo: ticket.tipo, id: ticket.id, numeroTicket: ticket.numeroTicket || null },
+    });
+    broadcast('tarefas-atualizada', { id: criada.id, unidade: criada.unidade }, 'tarefas');
+    res.json(criada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/tarefas/:id/anexos', auth.requireAuth, uploadTarefaAnexo.single('anexo'), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'Envie uma imagem, PDF ou ZIP.' });
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.mimetype || '') && !['application/pdf', 'application/zip', 'application/x-zip-compressed'].includes(file.mimetype)) {
+      return res.status(400).json({ error: 'Anexe uma imagem (PNG, JPG ou WebP), PDF ou ZIP.' });
+    }
+    const tarefa = await tarefas.getOne(req.params.id);
+    if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acessoDasTarefas(req))) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    const caminho = await storage.salvarArquivo(req.params.id, file, 'tarefas');
+    const atualizada = await tarefas.adicionarAnexo(req.params.id, acessoDasTarefas(req), { nome: file.originalname, path: caminho, tipo: file.mimetype, tamanho: file.size });
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// O que a pessoa precisa saber PRA FAZER o serviço, sem sair do Meu Dia:
+// quem é o cliente, quanto é e como foi pago. Nada disso é copiado pra dentro
+// da tarefa - fica no ticket e é lido na hora que o detalhe abre (1 documento,
+// só quando alguém abre). Copiar criaria uma segunda versão do dado, que
+// envelhece assim que o ticket muda.
+//
+// Rótulo e valor saem do ticket como estão (formaPagamento é a resposta do
+// próprio formulário: "Online", "Crédito à vista", "Débito", "Pix na
+// maquininha"...). Campo vazio não vira linha: linha com "—" só ocupa espaço.
+function resumoDoTicket(t, tipoVinculo, nomeDoSolicitante) {
+  const linhas = [];
+  const põe = (rotulo, valor) => { if (valor != null && String(valor).trim() !== '') linhas.push({ rotulo, valor: String(valor) }); };
+  const dinheiro = (v) => (v == null || v === '' ? null : (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
+  const dia = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? String(d).split('-').reverse().join('/') : d || null);
+  põe('Solicitante', nomeDoSolicitante);
+  if (tipoVinculo === 'estorno') {
+    põe('Cliente', t.nomeCliente);
+    põe('Valor a estornar', dinheiro(t.valorEstornar));
+    põe('Valor da venda', dinheiro(t.valorVenda));
+    põe('Forma de pagamento', [t.formaPagamento, t.bandeira, t.ultimos4 ? `final ${t.ultimos4}` : null].filter(Boolean).join(' · '));
+    põe('Motivo', t.motivoEstorno === 'Outro' ? t.motivoOutro : t.motivoEstorno);
+    põe('Pedido', t.pedidoId);
+    põe('Venda em', [dia(t.dataVenda), t.horaVenda].filter(Boolean).join(' '));
+    põe('Pedido por', t.origem === 'cliente' ? 'Cliente (formulário público)' : 'Loja');
+    põe('Descrição', t.observacao);
+  } else {
+    põe('Valor estimado', dinheiro(t.valorEstimado));
+    põe('Fornecedor', t.fornecedor);
+    põe('Vencimento', dia(t.vencimento));
+    põe('Itens', Array.isArray(t.itens) && t.itens.length ? `${t.itens.length} item(ns)` : null);
+    põe('Pessoa', t.nomePessoa);
+    põe('Descrição', t.observacao);
+  }
+  return linhas.slice(0, 12);
+}
+
+// PDF de UMA tarefa (o "registro de ocorrência") e da LISTA filtrada. Os dois
+// abrem inline por padrão: dá pra CONFERIR antes de baixar, que é o que
+// alguém faz com um documento que vai virar registro. `?baixar=1` força o
+// download.
+async function fichaDoTicketDaTarefa(tarefa) {
+  if (!tarefa.vinculo?.id) return [];
+  const ticket = tarefa.vinculo.tipo === 'estorno'
+    ? await refunds.getOne(tarefa.vinculo.id)
+    : await solicitacoes.getOne(tarefa.vinculo.id);
+  if (!ticket) return [];
+  const quemPediuId = ticket.requestedById || ticket.criadoPorId || null;
+  const quemPediuEmail = String(ticket.requestedByEmail || ticket.criadoPorEmail || '').toLowerCase();
+  const pessoa = (quemPediuId || quemPediuEmail)
+    ? (await users.list()).find((u) => u.id === quemPediuId || String(u.email || '').toLowerCase() === quemPediuEmail)
+    : null;
+  return resumoDoTicket(ticket, tarefa.vinculo.tipo, pessoa ? (pessoa.username || pessoa.nome || pessoa.email) : (quemPediuEmail || null));
+}
+
+app.get('/api/tarefas/:id/pdf', auth.requireAuth, async (req, res) => {
+  try {
+    const tarefa = await tarefas.getOne(req.params.id);
+    if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acessoDasTarefas(req))) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    await tarefaRelatorio.gerarOcorrenciaPDF(res, tarefa, {
+      fichaCampos: await fichaDoTicketDaTarefa(tarefa),
+      geradoPor: req.user.username || req.user.email,
+      inline: req.query.baixar !== '1',
+    });
+  } catch (err) {
+    if (!res.headersSent) res.status(400).json({ error: err.message });
+  }
+});
+
+// A lista vem do SERVIDOR de novo, filtrada pelo acesso (listarMinhas), e só
+// então cruzada com os ids que a tela mandou: o documento não pode listar uma
+// tarefa que a pessoa não pode ver, mesmo que o navegador peça.
+app.post('/api/tarefas/relatorio', auth.requireAuth, async (req, res) => {
+  try {
+    const pedidos = new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(String).filter(Boolean));
+    if (!pedidos.size) return res.status(400).json({ error: 'Nenhuma tarefa no filtro para gerar o relatório.' });
+    const minhas = await tarefas.listarMinhas(acessoDasTarefas(req));
+    const lista = minhas.filter((t) => pedidos.has(t.id));
+    if (!lista.length) return res.status(400).json({ error: 'Nenhuma tarefa no filtro para gerar o relatório.' });
+    tarefaRelatorio.gerarConsolidadoPDF(res, lista, {
+      filtro: String(req.body?.filtro || '').slice(0, 200),
+      geradoPor: req.user.username || req.user.email,
+      rotuloTipo: (vinculo) => ROTULO_TIPO_TICKET[String((vinculo && (vinculo.ticketTipo || vinculo.tipo)) || '')] || '',
+      inline: true,
+    });
+  } catch (err) {
+    if (!res.headersSent) res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/tarefas/:id/ticket', auth.requireAuth, async (req, res) => {
+  try {
+    const tarefa = await tarefas.getOne(req.params.id);
+    if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acessoDasTarefas(req))) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    res.json({ campos: await fichaDoTicketDaTarefa(tarefa) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/tarefas/:id/anexos/:indice', auth.requireAuth, async (req, res) => {
+  try {
+    const tarefa = await tarefas.getOne(req.params.id);
+    if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acessoDasTarefas(req))) return res.sendStatus(404);
+    const anexo = (tarefa.anexos || [])[Number(req.params.indice)];
+    if (!anexo?.path) return res.sendStatus(404);
+    return storage.streamArquivo(anexo.path, anexo.tipo, res);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/tarefas/:id/anexos/:anexoId', auth.requireAuth, async (req, res) => {
+  try {
+    const { tarefa, path } = await tarefas.removerAnexo(req.params.id, acessoDasTarefas(req), req.params.anexoId);
+    // o arquivo some depois do documento: se o storage falhar, sobra arquivo
+    // orfao (barato) em vez de anexo que a tela mostra e nao abre mais
+    if (path) await storage.apagarArquivo(path).catch(() => {});
+    broadcast('tarefas-atualizada', { id: tarefa.id, unidade: tarefa.unidade }, 'tarefas');
+    res.json(tarefa);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// quem pode entrar como participante é a MESMA regra do responsável: usuário
+// ativo, dentro do escopo de quem está criando e com acesso à unidade da
+// tarefa. Sem isso dava pra puxar alguém de outra franquia pra dentro do card.
+async function resolverColaboradores(req, acesso, ids, unidade, podeResponsavel = false) {
+  const pedidos = [...new Set((Array.isArray(ids) ? ids : []).map(String).filter(Boolean))].slice(0, 20);
+  if (!pedidos.length) return [];
+  if (!podeDistribuirTarefas(req) && !podeResponsavel) throw new Error('Somente Master, Admin, gerente ou o responsável pela tarefa define quem participa.');
+  const todos = await users.list();
+  return pedidos.map((id) => {
+    const pessoa = todos.find((u) => u.id === id && u.active !== false);
+    if (!pessoa) throw new Error('Participante não encontrado ou inativo.');
+    const doPessoal = pessoa.role === 'master' ? [] : (pessoa.permissions?.unidades || []);
+    if (!req.isMaster && !doPessoal.some((codigo) => (acesso.unidades || []).includes(codigo))) {
+      throw new Error(`${pessoa.username || pessoa.nome || 'O participante'} não pertence a uma unidade do seu acesso.`);
+    }
+    if (unidade && pessoa.role !== 'master' && !doPessoal.includes(unidade)) {
+      throw new Error(`${pessoa.username || pessoa.nome || 'O participante'} não tem acesso à unidade selecionada.`);
+    }
+    return pessoa;
+  });
+}
+
+app.patch('/api/tarefas/:id/colaboradores', auth.requireAuth, async (req, res) => {
+  try {
+    const acesso = acessoDasTarefas(req);
+    const atual = await tarefas.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    const pessoas = await resolverColaboradores(req, acesso, req.body?.colaboradoresIds, atual.unidade, atual.responsavelId === req.user.id);
+    const atualizada = await tarefas.definirColaboradores(req.params.id, acesso, pessoas);
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/tarefas/:id/gerou', auth.requireAuth, async (req, res) => {
+  try {
+    const atualizada = await tarefas.registrarGerado(req.params.id, acessoDasTarefas(req), req.body || {});
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/tarefas/:id/responsavel', auth.requireAuth, async (req, res) => {
+  try {
+    const acesso = acessoDasTarefas(req);
+    const atual = await tarefas.getOne(req.params.id);
+    if (!atual) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    if (!podeDistribuirTarefas(req) && atual.responsavelId !== req.user.id) {
+      return res.status(403).json({ error: 'Somente Master, Admin, gerente ou o responsável atual troca o responsável.' });
+    }
+    // quem pode RECEBER é a mesma regra dos participantes: usuário ativo, no
+    // escopo de quem distribui e com acesso à unidade da tarefa
+    const [pessoa] = await resolverColaboradores(req, acesso, [req.body?.responsavelId], atual.unidade, atual.responsavelId === req.user.id);
+    if (!pessoa) return res.status(400).json({ error: 'Escolha quem fica responsável.' });
+    const atualizada = await tarefas.definirResponsavel(req.params.id, acesso, pessoa);
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/tarefas/:id/datas', auth.requireAuth, async (req, res) => {
+  try {
+    const atualizada = await tarefas.atualizarDatas(req.params.id, acessoDasTarefas(req), {
+      dataInicio: req.body?.dataInicio, dataEntrega: req.body?.dataEntrega,
+    });
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/tarefas/:id/unidade', auth.requireAuth, async (req, res) => {
+  try {
+    if (!req.isMaster) return res.status(403).json({ error: 'Somente Master pode corrigir a unidade da tarefa.' });
+    const unidade = String(req.body?.unidade || '').trim() || null;
+    const mapa = await construirUnidadesMapa();
+    if (unidade && !mapa[unidade]) return res.status(400).json({ error: 'Escolha uma unidade válida.' });
+    const atualizada = await tarefas.atualizarUnidade(req.params.id, acessoDasTarefas(req), { unidade, unidadeNome: unidade ? mapa[unidade] : null });
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/tarefas/status-lote', auth.requireAuth, async (req, res) => {
+  try {
+    const ids = [...new Set(Array.isArray(req.body?.ids) ? req.body.ids.map(String).filter(Boolean) : [])].slice(0, 50);
+    const status = String(req.body?.status || '');
+    if (!ids.length) return res.status(400).json({ error: 'Selecione ao menos uma tarefa.' });
+    // concluir em lote é a mesma afirmação, vezes N - a senha vale igual
+    if (status === 'CONCLUIDA') {
+      if (!String(req.body?.password || '')) return res.status(400).json({ error: 'Confirme sua senha para concluir as tarefas.' });
+      if (!await auth.verifyPassword(req.user.id, req.body.password)) return res.status(400).json({ error: 'Senha incorreta.' });
+    }
+    const acesso = acessoDasTarefas(req); const resultado = [];
+    for (const id of ids) {
+      try {
+        const tarefa = await tarefas.getOne(id);
+        if (!tarefa || !tarefas.podeParticiparTarefa(tarefa, acesso)) throw new Error('Sem acesso a esta tarefa.');
+        if (status === 'CONCLUIDA') {
+          if (tarefa.vinculo?.tipo === 'solicitacao') {
+            const ticket = await solicitacoes.getOne(tarefa.vinculo.id);
+            if (!ticket || !ticketPodeConcluirTarefa(ticket) || ticket.tipo === 'adiantamento') throw new Error('O ticket vinculado ainda não pode ser finalizado.');
+            if (ticket.execucaoStatus !== 'FINALIZADO') await solicitacoes.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.username || req.user.nome || 'Suporte' });
+            await sincronizarTarefasDoTicket(await solicitacoes.getOne(ticket.id), 'solicitacao');
+          } else if (tarefa.vinculo?.tipo === 'estorno') {
+            const ticket = await refunds.getOne(tarefa.vinculo.id);
+            if (!ticket || ticket.status !== 'APROVADO') throw new Error('O estorno vinculado ainda não pode ser finalizado.');
+            if (ticket.execucaoStatus !== 'FINALIZADO') await refunds.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.username || req.user.nome || 'Suporte' });
+            await sincronizarTarefasDoTicket(await refunds.getOne(ticket.id), 'estorno');
+          }
+          await tarefas.concluir(id, { ...acesso, observacao: 'Conclusão em lote.' });
+        } else await tarefas.atualizarStatus(id, acesso, status);
+        resultado.push({ id, ok: true });
+      } catch (err) { resultado.push({ id, ok: false, erro: err.message }); }
+    }
+    broadcast('tarefas-atualizada', { lote: true }, 'tarefas');
+    res.json({ resultado });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.patch('/api/tarefas/:id/status', auth.requireAuth, async (req, res) => {
+  try {
+    const acesso = acessoDasTarefas(req);
+    const anterior = await tarefas.getOne(req.params.id);
+    if (!anterior) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    if (!tarefas.podeParticiparTarefa(anterior, acesso)) return res.status(403).json({ error: 'Essa tarefa não está no seu escopo.' });
+    // Reabrir uma tarefa ligada a ticket também reabre sua execução; assim a
+    // Central e o Meu Dia não ficam mostrando estados contraditórios.
+    if (anterior.status === 'CONCLUIDA' && req.body?.status !== 'CONCLUIDA' && anterior.vinculo?.tipo === 'solicitacao') {
+      const ticket = await solicitacoes.getOne(anterior.vinculo.id);
+      if (ticket?.execucaoStatus === 'FINALIZADO') await solicitacoes.atualizarExecucao(ticket.id, req.body?.status === 'PENDENTE' ? 'PENDENTE' : 'EM_ANDAMENTO', { porNome: req.user.username || req.user.nome || 'Suporte' });
+    } else if (anterior.status === 'CONCLUIDA' && req.body?.status !== 'CONCLUIDA' && anterior.vinculo?.tipo === 'estorno') {
+      const ticket = await refunds.getOne(anterior.vinculo.id);
+      if (ticket?.execucaoStatus === 'FINALIZADO') await refunds.atualizarExecucao(ticket.id, req.body?.status === 'PENDENTE' ? 'PENDENTE' : 'EM_ANDAMENTO', { porNome: req.user.username || req.user.nome || 'Suporte' });
+    }
+    const atualizada = await tarefas.atualizarStatus(req.params.id, acesso, req.body?.status);
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/tarefas/:id/comentarios', auth.requireAuth, async (req, res) => {
+  try {
+    const atualizada = await tarefas.adicionarComentario(req.params.id, { ...acessoDasTarefas(req), texto: req.body?.texto });
+    broadcast('tarefas-atualizada', { id: atualizada.id, unidade: atualizada.unidade }, 'tarefas');
+    res.json(atualizada);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/tarefas/:id/concluir', auth.requireAuth, async (req, res) => {
+  try {
+    const tarefa = await tarefas.getOne(req.params.id);
+    if (!tarefa) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+    const acesso = acessoDasTarefas(req);
+    if (!tarefas.podeParticiparTarefa(tarefa, acesso)) return res.status(403).json({ error: 'Essa tarefa não está no seu escopo.' });
+    // Concluir é o registro de que a pessoa fez o serviço, e a máquina da loja
+    // é compartilhada - a senha diz QUEM está finalizando (mesma
+    // reautenticação do estorno e da sangria). 400 e não 401: o wrapper de
+    // fetch das páginas desloga em qualquer 401, e senha de confirmação errada
+    // não significa que a sessão está inválida.
+    if (!String(req.body?.password || '')) return res.status(400).json({ error: 'Confirme sua senha para concluir a tarefa.' });
+    if (!await auth.verifyPassword(req.user.id, req.body.password)) return res.status(400).json({ error: 'Senha incorreta.' });
+    // Concluir tarefa NUNCA decide/aprova um ticket. Só encerra a execução
+    // depois de aprovado; adiantamentos mantêm a prestação de contas própria.
+    if (tarefa.vinculo?.tipo === 'solicitacao') {
+      const ticket = await solicitacoes.getOne(tarefa.vinculo.id);
+      if (!ticket) return res.status(404).json({ error: 'O ticket vinculado não foi encontrado.' });
+      if (!ticketPodeConcluirTarefa(ticket)) return res.status(409).json({ error: 'Esse ticket ainda precisa ser aprovado antes de concluir a tarefa.' });
+      if (ticket.tipo === 'adiantamento') return res.status(409).json({ error: 'Adiantamento só finaliza após a prestação de contas (nota e valor gasto).' });
+      if (ticket.execucaoStatus !== 'FINALIZADO') {
+        await solicitacoes.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.username || req.user.nome || 'Suporte' });
+      }
+      const atualizado = await solicitacoes.getOne(ticket.id);
+      await sincronizarTarefasDoTicket(atualizado, 'solicitacao');
+      broadcast('solicitacao-decidida', atualizado, 'solicitacoes');
+    } else if (tarefa.vinculo?.tipo === 'estorno') {
+      const ticket = await refunds.getOne(tarefa.vinculo.id);
+      if (!ticket) return res.status(404).json({ error: 'O ticket vinculado não foi encontrado.' });
+      if (ticket.status !== 'APROVADO') return res.status(409).json({ error: 'Esse ticket ainda precisa ser aprovado antes de concluir a tarefa.' });
+      if (ticket.execucaoStatus !== 'FINALIZADO') await refunds.atualizarExecucao(ticket.id, 'FINALIZADO', { porNome: req.user.username || req.user.nome || 'Suporte' });
+      const atualizado = await refunds.getOne(ticket.id);
+      await sincronizarTarefasDoTicket(atualizado, 'estorno');
+      broadcast('refund-request-changed', atualizado, 'monitor');
+    }
+    const concluida = await tarefas.concluir(req.params.id, { ...acesso, observacao: req.body?.observacao });
+    broadcast('tarefas-atualizada', { id: concluida.id, unidade: concluida.unidade }, 'tarefas');
+    res.json(concluida);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Remoção preserva histórico: Master arquiva qualquer tarefa; Admin só pode
+// arquivar tarefa concluída da própria unidade. Nada é apagado fisicamente.
+app.delete('/api/tarefas/:id', auth.requireAuth, async (req, res) => {
+  try {
+    const arquivada = await tarefas.arquivar(req.params.id, acessoDasTarefas(req));
+    broadcast('tarefas-atualizada', { id: arquivada.id, unidade: arquivada.unidade }, 'tarefas');
+    res.json({ ok: true, tarefa: arquivada });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Reprocessamento idempotente para o acervo anterior ao Meu Dia. Útil se um
+// ticket antigo ganhou responsável de suporte depois da primeira migração.
+app.post('/api/tarefas/sincronizar-retroativo', auth.requireMaster, async (req, res) => {
+  try {
+    const resultado = await tarefas.sincronizarRetroativo({
+      solicitacoes: await solicitacoes.listAll(), estornos: await refunds.listAll(), usuarios: await users.list(),
+      forcar: req.body?.forcar === true,
+    });
+    broadcast('tarefas-atualizada', { retroativo: true }, 'tarefas');
+    res.json(resultado);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // so que pra pedidos que nao tem uma secao propria ja existente. Aprovar um
 // pedido de Suporte de TI ja cria o Chamado (ver chamadosTI.js) ----------
 app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anexos', 4), async (req, res) => {
   try {
     const payload = req.is('multipart/form-data') ? JSON.parse(req.body.payload || '{}') : req.body;
-    const { tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, ehOrcamento, fornecedor, vencimento, direcionadoParaId, direcionadoParaEmail, prioridade, nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista } = payload;
+    const { tipo, unidade, unidadeNome, titulo, valorEstimado, observacao, itens, ehOrcamento, fornecedor, vencimento, direcionadoParaId, direcionadoParaEmail, prioridade, nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista, tarefaOrigemId } = payload;
     if (!req.isMaster && unidade && !(req.permissions.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
     }
@@ -8982,7 +9753,31 @@ app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anex
         error: `${unidadeNome || unidade} só aceita solicitação de: ${(perfilUnidade.tiposSolicitacao || []).join(', ')}.`,
       });
     }
-    const anexos = [];
+    let origemTarefa = null;
+    let numeroTicketDaTarefa = null;
+    let anexosDaTarefa = [];
+    if (tarefaOrigemId) {
+      const preparada = await tarefas.prepararConversaoEmSolicitacao(String(tarefaOrigemId), acessoDasTarefas(req));
+      // Um reenvio depois de a Central já ter criado o ticket deve devolver o
+      // mesmo registro, nunca abrir outro com o mesmo assunto/protocolo.
+      if (preparada.jaTemSolicitacao) {
+        const existente = await solicitacoes.getOne(preparada.tarefa.solicitacaoId);
+        if (existente) return res.json(existente);
+        return res.status(409).json({ error: 'Esta tarefa já foi convertida; recarregue o Meu Dia para abrir a solicitação vinculada.' });
+      }
+      if (preparada.tarefa.unidade && unidade !== preparada.tarefa.unidade) {
+        return res.status(400).json({ error: 'A solicitação deve permanecer na mesma unidade da tarefa de origem.' });
+      }
+      numeroTicketDaTarefa = preparada.numeroTicket;
+      origemTarefa = {
+        id: preparada.tarefa.id, titulo: preparada.tarefa.titulo,
+        criadoPorNome: preparada.tarefa.criadoPorNome, criadaEm: preparada.tarefa.criadaEm,
+      };
+      anexosDaTarefa = (preparada.tarefa.anexos || []).map((a) => ({
+        nome: a.nome, path: a.path, tipo: a.tipo || 'application/octet-stream', origem: 'tarefa',
+      })).filter((a) => a.path);
+    }
+    const anexos = [...anexosDaTarefa];
     for (const file of req.files || []) {
       const path = await storage.salvarArquivo(unidade || 'geral', file, 'solicitacoes');
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype || 'application/octet-stream' });
@@ -8996,8 +9791,18 @@ app.post('/api/solicitacoes', requireSection('solicitacoes'), upload.array('anex
       prioridade,
       teste: req.isQaMaster || req.isQaUser,
       nomePessoa, motivoAcesso, dataEfetiva, dataRetornoPrevista,
+      numeroTicket: numeroTicketDaTarefa,
+      origemTarefa,
     });
+    if (tarefaOrigemId) {
+      await tarefas.registrarGerado(String(tarefaOrigemId), acessoDasTarefas(req), {
+        tipo: 'solicitacao', id: registro.id, numeroTicket: registro.numeroTicket,
+        rotulo: 'Solicitação na Central',
+      });
+      broadcast('tarefas-atualizada', { id: String(tarefaOrigemId), unidade: registro.unidade }, 'tarefas');
+    }
     broadcast('solicitacao-criada', registro, 'solicitacoes');
+    await sincronizarTarefasDoTicket(registro);
     push.notifySolicitacao(`Ticket #${registro.numeroTicket} · Nova solicitação`, `${req.user.email} · ${registro.titulo || tipo || ''}`, registro.id);
     notificarSeDirecionadoAoMV(registro.tipo, registro);
     res.json(registro);
@@ -9230,6 +10035,7 @@ app.patch('/api/solicitacoes/:id/status', auth.requireMasterOrAdmin, async (req,
       return res.status(400).json({ error: 'Escolha quem vai fazer a manutenção.' });
     }
     const registro = await solicitacoes.updateStatus(req.params.id, status, { motivoDecisao, decidedByEmail: req.user.email });
+    await sincronizarTarefasDoTicket(registro);
 
     let chamado = null;
     let desbloqueado = null;
@@ -9308,6 +10114,7 @@ app.patch('/api/solicitacoes/:id/direcionar', auth.requireMaster, async (req, re
     if (!atual) return res.status(404).json({ error: 'Solicitação não encontrada.' });
     if (tipoBloqueado(req, atual.tipo)) return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
     const registro = await solicitacoes.redirecionar(req.params.id, req.body);
+    await sincronizarTarefasDoTicket(registro);
     broadcast('solicitacao-decidida', registro, 'solicitacoes');
     notificarSeDirecionadoAoMV(registro.tipo, registro);
     res.json(registro);
@@ -9343,6 +10150,7 @@ app.patch('/api/solicitacoes/:id/execucao', auth.requireMasterOrAdmin, async (re
     if (!atual) return res.status(404).json({ error: 'Solicitação não encontrada.' });
     if (tipoBloqueado(req, atual.tipo)) return res.status(403).json({ error: 'Você não tem acesso a esse tipo de solicitação.' });
     const registro = await solicitacoes.atualizarExecucao(req.params.id, req.body.execucaoStatus, { porNome: req.user.email });
+    await sincronizarTarefasDoTicket(registro);
     broadcast('solicitacao-decidida', registro, 'solicitacoes');
     res.json(registro);
   } catch (err) {
@@ -9585,7 +10393,11 @@ function sanitizarMatrizKpi(body) {
   };
 }
 
-app.post('/api/kpis-operacionais/relatorio', requireSection('fechamentos'), async (req, res) => {
+function requireKpis(req, res, next) {
+  if (req.isMaster || req.isAdmin || auth.hasSection(req, 'kpis')) return next();
+  return res.status(403).json({ error: 'Você não tem acesso aos KPI\'s operacionais.' });
+}
+app.post('/api/kpis-operacionais/relatorio', requireKpis, async (req, res) => {
   try {
     const d = sanitizarMatrizKpi(req.body || {});
     if (!d.linhas.length) return res.status(400).json({ error: 'Nada pra exportar nesse período.' });
@@ -11929,6 +12741,59 @@ app.post('/api/suporte-chats/:id/gerar-chamado', auth.requireAuth, async (req, r
   }
 });
 
+function resumoChatParaTarefa(chat) {
+  const limite = 1750;
+  const limpo = (texto, max = 420) => String(texto || '').replace(/\s+/g, ' ').trim().slice(0, max);
+  const mensagens = Array.isArray(chat?.mensagens) ? chat.mensagens.filter((m) => limpo(m?.texto)) : [];
+  // A abertura explica o pedido; as últimas interações dizem onde ele parou.
+  // Juntas, dão ao responsável o contexto suficiente sem despejar o chat todo
+  // dentro da tarefa, que continuaria sendo a fonte oficial da conversa.
+  const selecionadas = mensagens.length > 5
+    ? [mensagens[0], ...mensagens.slice(-4)]
+    : mensagens;
+  const linhas = selecionadas.map((m) => `${m.de === 'visitante' ? 'Cliente' : (m.de === 'bot' ? 'Beniboy' : 'Suporte')}: ${limpo(m.texto)}`);
+  const cabecalho = [
+    `Conversa do Beniboy · Ticket #${chat.numeroTicket}`,
+    chat.assunto ? `Assunto: ${limpo(chat.assunto, 140)}` : '',
+    chat.nome ? `Cliente: ${limpo(chat.nome, 120)}` : '',
+    linhas.length ? 'Contexto da conversa:' : '',
+  ].filter(Boolean).join('\n');
+  return `${cabecalho}${linhas.length ? `\n${linhas.join('\n')}` : ''}`.slice(0, limite);
+}
+
+// O atendimento pode precisar de acompanhamento sem ainda ser um chamado
+// técnico. Esta ação cria uma tarefa no Meu Dia com o MESMO protocolo do
+// chat; assim Chat → Tarefa → Solicitação continua sendo um único assunto,
+// sem furar ou repetir a sequência global de Ticket #.
+app.post('/api/suporte-chats/:id/gerar-tarefa', auth.requireAuth, async (req, res) => {
+  try {
+    if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
+    const chat = await suporteChat.getOne(req.params.id);
+    if (!chat) return res.status(404).json({ error: 'Conversa não encontrada.' });
+    if (chat.tarefaId) {
+      const existente = await tarefas.getOne(chat.tarefaId);
+      if (existente) return res.json({ tarefa: existente, existente: true });
+      return res.status(409).json({ error: 'Esta conversa já possui uma tarefa vinculada; recarregue a Central.' });
+    }
+    const mapa = await construirUnidadesMapa();
+    const contexto = String(chat.lojaContexto || '').trim();
+    const unidade = Object.keys(mapa).find((codigo) => String(mapa[codigo]).toLocaleLowerCase('pt-BR') === contexto.toLocaleLowerCase('pt-BR')) || null;
+    const tarefa = await tarefas.criar({
+      titulo: `Chat · ${chat.nome || chat.assunto || 'Atendimento'}`,
+      descricao: resumoChatParaTarefa(chat),
+      unidade, unidadeNome: unidade ? mapa[unidade] : null,
+      usuario: req.user, responsavel: req.user,
+      numeroTicket: chat.numeroTicket, origem: 'chat', origemChatId: chat.id,
+    });
+    await suporteChat.vincularTarefa(chat.id, tarefa.id);
+    broadcast('tarefas-atualizada', { id: tarefa.id, unidade: tarefa.unidade }, 'tarefas');
+    broadcast('suporte-chat', { id: chat.id }, 'suporte');
+    res.json({ tarefa, existente: false });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // move o card no funil da Central do Beniboy (beniboy.html) - drag-and-drop
 // e botoes de acao rapida chamam essa mesma rota. nivelDestino so e exigido
 // pro status TRANSFERIDO (2=agente humano, 3=Master); motivoSemSolucao so
@@ -11937,23 +12802,12 @@ app.post('/api/suporte-chats/:id/status', auth.requireAuth, async (req, res) => 
   try {
     if (!ehTimeSuporte(req)) return res.status(403).json({ error: 'Você não tem acesso a essa área.' });
     const autor = { id: req.user.id, email: req.user.email, nome: req.user.username || req.user.email };
-    const antes = await suporteChat.getOne(req.params.id);
     let chat = await suporteChat.atualizarStatusAtendimento(req.params.id, {
       statusAtendimento: req.body.statusAtendimento,
       nivelDestino: req.body.nivelDestino,
       motivoSemSolucao: req.body.motivoSemSolucao,
       autor,
     });
-    // 1a vez que alguem assume a conversa (PENDENTE -> EM_ATENDIMENTO): avisa
-    // o numero do ticket pro visitante - pedido explicito do usuario: "o
-    // numero do ticket é informado assim que o setor inicia o atendimento"
-    if (antes && antes.statusAtendimento === 'PENDENTE' && req.body.statusAtendimento === 'EM_ATENDIMENTO' && chat.numeroTicket) {
-      chat = await suporteChat.adicionarMensagem(req.params.id, {
-        de: 'suporte',
-        texto: `Olá! Iremos agilizar seu atendimento. O número do seu ticket, caso precise, é #${chat.numeroTicket}.`,
-        autorEmail: autor.email,
-      });
-    }
     broadcast('suporte-chat', { id: chat.id }, 'suporte');
     const { token, ...resto } = chat;
     res.json(resto);
@@ -13089,7 +13943,8 @@ function aquecerBoot(promessa, ms) {
 
     const contas = Object.keys(HMAC_KEYS);
     if (contas.length) console.log(`HMAC configurada para: ${contas.join(', ')}`);
-    else if (!LEGACY_HMAC_KEY) console.warn('AVISO: nenhuma ADYEN_HMAC_KEYS/ADYEN_HMAC_KEY configurada - assinatura nao esta sendo verificada.');
+    else if (LEGACY_HMAC_KEY) console.log('HMAC configurada pela variavel legada ADYEN_HMAC_KEY.');
+    else console.warn('AVISO: nenhuma HMAC configurada - webhooks da Adyen serao recusados por seguranca.');
 
     // relatorio periodico de transacoes (PDF+CSV) + limpeza do banco: gera o
     // retrato do periodo antes de apagar - so fica retido pra sempre quem
@@ -13106,6 +13961,18 @@ function aquecerBoot(promessa, ms) {
     setInterval(() => {
       backup.rodarBackup().catch((err) => console.error('Erro no backup automático:', err.message));
     }, 24 * 60 * 60 * 1000);
+
+    // Migração única e idempotente do histórico: tickets já aprovados que
+    // ficaram abertos passam a aparecer no Meu Dia dos perfis operacionais.
+    // O marcador no Firestore impede que um deploy repita a varredura inteira.
+    tarefaDeBoot(async () => {
+      const resultado = await tarefas.sincronizarRetroativo({
+        solicitacoes: await solicitacoes.listAll(),
+        estornos: await refunds.listAll(),
+        usuarios: await users.list(),
+      });
+      if (resultado.executada) console.log(`Meu Dia: histórico sincronizado (${resultado.alteradas} tarefa(s) criada(s)).`);
+    }, 'sincronizar histórico de tickets no Meu Dia');
 
     // retencao do Abastecimento (decisao do Master 2026-08-09): registros
     // com mais de N dias (30 por padrao; env ABASTECIMENTO_RETENCAO_DIAS)

@@ -57,6 +57,27 @@ function nomeArquivoComData(base) {
   return `${slugify(base)}-${dataArquivo()}`;
 }
 
+// Documentos individuais precisam ser identificáveis fora do NoPulso. O
+// formato unico evita "conversa-suporte (3).pdf" e UUIDs impossiveis de
+// reconhecer na pasta Downloads:
+// tipo_unidade_ticket-ou-registro_aaaa-mm-dd_hhmm.pdf
+function dataHoraArquivo(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  const data = Number.isNaN(d.getTime()) ? new Date() : d;
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: FUSO_BR, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(data);
+  const o = {}; partes.forEach((p) => { if (p.type !== 'literal') o[p.type] = p.value; });
+  return `${o.year}-${o.month}-${o.day}_${o.hour}${o.minute}`;
+}
+function nomeArquivoRegistro(tipo, { unidade, ticket, criadoEm, id } = {}) {
+  const referencia = ticket != null && ticket !== ''
+    ? `ticket-${slugify(ticket, 'sem-numero')}`
+    : `registro-${slugify(String(id || 'sem-id').slice(0, 16), 'sem-id')}`;
+  return [slugify(tipo, 'documento'), slugify(unidade || 'sem-unidade'), referencia, dataHoraArquivo(criadoEm)].join('_');
+}
+
 function toCSV(colunas, linhas) {
   const escape = (v) => {
     let s = String(v ?? '');
@@ -176,4 +197,4 @@ function writePDF(res, { titulo, subtitulo, colunas, linhas, resumo, larguras, s
   doc.end();
 }
 
-module.exports = { slugify, toCSV, writePDF, fmtMoneyBR, fmtDataBR, fmtDataHoraBR, agoraBrasiliaFmt, dataArquivo, nomeArquivoComData };
+module.exports = { slugify, toCSV, writePDF, fmtMoneyBR, fmtDataBR, fmtDataHoraBR, agoraBrasiliaFmt, dataArquivo, dataHoraArquivo, nomeArquivoComData, nomeArquivoRegistro };

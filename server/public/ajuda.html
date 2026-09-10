@@ -416,7 +416,7 @@ const TOPICOS = [
     <p>Toda vez que o Beniboy resolve um login bloqueado (NoPulso ou operador do Abastecimento) sozinho, o card ganha a etiqueta <b>🔓 Desbloqueio</b> - use o filtro no topo da página pra ver só esses casos.</p>
     <div class="dica">Quem acessa: Master/Admin e quem tem a seção <b>Suporte</b>. Responder, mover e ver o histórico de mensagens funciona direto dali - não precisa ir em Chamados TI pra isso (mas gerar chamado técnico continua lá).</div>
   `},
-  { id:'loja-status', icone:'📡', secoes:['suporte'], titulo:'NOC Zenith (conectividade, Mensagem direta e Ações do agente)', corpo:`
+  { id:'loja-status', icone:'📡', secoes:['suporte'], titulo:'NOC-NoPulso (conectividade, Mensagem direta e Ações do agente)', corpo:`
     <p>Monitora se a internet/computador de cada loja está respondendo, no estilo de uma ferramenta de RMM (Atera etc), sem precisar instalar nenhum agente: a própria tela de <b>atendimento.html?unidade=&lt;código&gt;</b> (o mesmo link/QR code que a loja já usa pra falar com o Beniboy), deixada aberta numa aba, avisa o NoPulso a cada ~25 segundos que está viva.</p>
     <ul>
       <li>🟢 <b>Online</b> - recebeu sinal há pouco tempo.</li>
@@ -431,7 +431,7 @@ const TOPICOS = [
     <h3>🤖 Ações do Agente (Master)</h3>
     <p>No fim da página, só visível pra quem tem acesso Master, fica o painel que ensina o Beniboy a agir sozinho:</p>
     <ul>
-      <li><b>Catálogo de ações</b> - cada ação é ou um <b>comando PowerShell fixo</b> (roda num computador tipo interno através do NOCZenith instalado nele) ou uma <b>ação de sistema</b> pronta (hoje só "criar usuário do NoPulso"). O Beniboy nunca escreve o comando - ele só escolhe entre o que já está cadastrado aqui.</li>
+      <li><b>Catálogo de ações</b> - cada ação é ou um <b>comando PowerShell fixo</b> (roda num computador tipo interno através do NOC-NoPulso instalado nele) ou uma <b>ação de sistema</b> pronta (hoje só "criar usuário do NoPulso"). O Beniboy nunca escreve o comando - ele só escolhe entre o que já está cadastrado aqui.</li>
       <li><b>Contexto</b> - um texto livre pra orientar como ele deve se comportar (o que perguntar antes, quando resolver sozinho vs quando só te chamar).</li>
       <li><b>Aprovação</b> - por padrão toda ação que o Beniboy dispara fica esperando um Master aprovar (mesma fila de "Aprovações pendentes" de Usuários); desmarque "precisa de aprovação" numa ação só se ela for óbvia o bastante pra rodar direto.</li>
     </ul>
