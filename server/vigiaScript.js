@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 26;
+const VERSAO_VIGIA = 27;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -708,8 +708,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '$UrlChatResponder = "' + urlChatResponder + '"',
     '$UrlReportarIp = "' + urlReportarIp + '"',
     '$IntervaloSegundos = 25',
-    '# a cada ~144 ticks de 25s (~1h) confere se tem versao nova',
-    '$TicksParaVerificarAtualizacao = 144',
+    '# atualização em até ~2min: mudanças de recursos locais (como o print)',
+    '# precisam chegar rápido, e esta chamada é só um GET pequeno de versão.',
+    '$TicksParaVerificarAtualizacao = 5',
     '# a cada ~12 ticks de 25s (~5min) mede a rede (ping no roteador e na',
     '# internet). Espacado de proposito: o teste custa alguns segundos e o',
     '# que nao pode atrasar e o heartbeat.',
@@ -771,20 +772,24 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '        $form.FormBorderStyle = "None"; $form.StartPosition = "Manual"; $form.Bounds = $tela',
     '        $form.TopMost = $true; $form.ShowInTaskbar = $false; $form.BackColor = [System.Drawing.Color]::Black',
     '        $form.Opacity = 0.32; $form.Cursor = [System.Windows.Forms.Cursors]::Cross; $form.KeyPreview = $true',
-    '        $inicio = $null; $area = $null',
+    '        # O estado fica no próprio Form. Eventos WinForms rodam em escopos',
+    '        # separados; variáveis locais fariam o MouseMove perder o ponto',
+    '        # inicial e davam a impressão de que não era possível arrastar.',
+    '        $form.Tag = @{ inicio = $null; area = $null }',
     '        $instrucoes = New-Object System.Windows.Forms.Label',
     '        $instrucoes.AutoSize = $true; $instrucoes.Text = "  Arraste para selecionar a área do print  ·  Esc cancela  "',
     '        $instrucoes.BackColor = [System.Drawing.Color]::FromArgb(30, 36, 45); $instrucoes.ForeColor = [System.Drawing.Color]::White',
     '        $instrucoes.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)',
     '        $instrucoes.Location = New-Object System.Drawing.Point(14, 14); $form.Controls.Add($instrucoes)',
     '        $normalizar = { param($a, $b) New-Object System.Drawing.Rectangle([Math]::Min($a.X, $b.X), [Math]::Min($a.Y, $b.Y), [Math]::Abs($a.X - $b.X), [Math]::Abs($a.Y - $b.Y)) }',
-    '        $form.Add_MouseDown({ param($s, $e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { $inicio = $e.Location; $area = $null; $s.Invalidate() } })',
-    '        $form.Add_MouseMove({ param($s, $e) if ($inicio) { $area = & $normalizar $inicio $e.Location; $s.Invalidate() } })',
-    '        $form.Add_Paint({ param($s, $e) if ($area -and $area.Width -gt 0 -and $area.Height -gt 0) { $caneta = New-Object System.Drawing.Pen([System.Drawing.Color]::Lime, 2); $caneta.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dash; $e.Graphics.DrawRectangle($caneta, $area); $caneta.Dispose() } })',
-    '        $form.Add_MouseUp({ param($s, $e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left -and $inicio) { $area = & $normalizar $inicio $e.Location; if ($area.Width -ge 3 -and $area.Height -ge 3) { $s.Tag = $area; $s.DialogResult = [System.Windows.Forms.DialogResult]::OK }; $s.Close() } })',
-    '        $form.Add_KeyDown({ param($s, $e) if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { $s.Tag = $null; $s.Close() } })',
+    '        $form.Add_MouseDown({ param($s, $e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { $s.Tag.inicio = $e.Location; $s.Tag.area = $null; $s.Invalidate() } })',
+    '        $form.Add_MouseMove({ param($s, $e) if ($s.Tag.inicio) { $s.Tag.area = & $normalizar $s.Tag.inicio $e.Location; $s.Invalidate() } })',
+    '        $form.Add_Paint({ param($s, $e) $areaAtual = $s.Tag.area; if ($areaAtual -and $areaAtual.Width -gt 0 -and $areaAtual.Height -gt 0) { $caneta = New-Object System.Drawing.Pen([System.Drawing.Color]::Lime, 2); $caneta.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dash; $e.Graphics.DrawRectangle($caneta, $areaAtual); $caneta.Dispose() } })',
+    '        $form.Add_MouseUp({ param($s, $e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left -and $s.Tag.inicio) { $s.Tag.area = & $normalizar $s.Tag.inicio $e.Location; if ($s.Tag.area.Width -ge 3 -and $s.Tag.area.Height -ge 3) { $s.Tag.resultado = $s.Tag.area; $s.DialogResult = [System.Windows.Forms.DialogResult]::OK }; $s.Close() } })',
+    '        $form.Add_KeyDown({ param($s, $e) if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { $s.Tag.resultado = $null; $s.Close() } })',
+    '        $form.Add_Shown({ param($s, $e) $s.BringToFront(); $s.Activate() })',
     '        [void]$form.ShowDialog()',
-    '        $resultado = $form.Tag; $form.Dispose(); return $resultado',
+    '        $resultado = $form.Tag.resultado; $form.Dispose(); return $resultado',
     '      }',
     '      $atalhoAnterior = $false',
     '      while ($true) {',
@@ -1314,8 +1319,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     // trocou o "relogio" do loop pra dar mais rapidez no alerta de acesso
     // remoto sem mudar a frequencia das outras duas tarefas
     '$TicksParaVerificacaoPesada = 6',
-    '# a cada ~180 ticks de 20s (~1h) confere se tem versao nova',
-    '$TicksParaVerificarAtualizacao = 180',
+    '# atualização em até ~2min; o GET de versão é leve e não atrasa o NOC.',
+    '$TicksParaVerificarAtualizacao = 5',
     '# mesmas cadencias do tipo interno (~6h disco, ~1h rede), convertidas pro',
     '# tick de 20s deste loop',
     '$TicksParaDisco = 1080',
