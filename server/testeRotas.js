@@ -15348,9 +15348,15 @@ setTimeout(async () => {
       'nenhum tipo de máquina chama função que ele não define': orfas.length === 0,
       'o NoPulsoPrint existe nos DOIS tipos, não só no interno': print.interno && print.atendimento,
       'e o Ctrl+Q é armado nos dois': tipos.every((t) => /GetAsyncKeyState\(0x51\)/.test(scripts[t])),
+      // colar onde for: a IMAGEM (WhatsApp, Word) e o ARQUIVO (pasta, anexo de
+      // e-mail) vão juntos, e com persist=true - senão o conteúdo some quando o
+      // runspace morre
+      'a captura vai pra área de transferência como imagem E como arquivo': tipos.every((t) => /\$dados\.SetImage\(\$recorte\)/.test(scripts[t]) && /SetFileDropList\(\$lista\)/.test(scripts[t]) && /SetDataObject\(\$dados, \$true\)/.test(scripts[t])),
+      'copia ANTES de descartar a imagem (senão não teria o que copiar)': tipos.every((t) => scripts[t].indexOf('SetDataObject($dados') < scripts[t].indexOf('$recorte.Dispose()')),
+      'falha ao copiar não faz perder o arquivo já salvo': tipos.every((t) => /catch \{ Log-Print "Nao consegui copiar pra area de transferencia/.test(scripts[t])),
       'a falha de sincronizar o print não morre mais em catch vazio': !/try \{ Sincronizar-NoPulsoPrint \} catch \{\}/.test(require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8')),
       'o script continua começando com # NOCZenith (a trava do download)': tipos.every((t) => scripts[t].startsWith('# NOCZenith')),
-      'a versão subiu junto com a mudança no agente': vs.VERSAO_VIGIA >= 30,
+      'a versão subiu junto com a mudança no agente': vs.VERSAO_VIGIA >= 31,
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okAgenteFuncoes = !falhas.length;

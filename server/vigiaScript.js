@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 30;
+const VERSAO_VIGIA = 31;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -717,7 +717,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '        # inicial e davam a impressão de que não era possível arrastar.',
     '        $form.Tag = @{ inicio = $null; area = $null }',
     '        $instrucoes = New-Object System.Windows.Forms.Label',
-    '        $instrucoes.AutoSize = $true; $instrucoes.Text = "  Arraste para selecionar · bordas/cantos redimensionam · dentro move · Enter salva · Esc cancela  "',
+    '        $instrucoes.AutoSize = $true; $instrucoes.Text = "  Arraste para selecionar · bordas/cantos redimensionam · dentro move · Enter salva e copia · Esc cancela  "',
     '        $instrucoes.BackColor = [System.Drawing.Color]::FromArgb(30, 36, 45); $instrucoes.ForeColor = [System.Drawing.Color]::White',
     '        $instrucoes.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)',
     '        $instrucoes.Location = New-Object System.Drawing.Point(14, 14); $form.Controls.Add($instrucoes)',
@@ -759,9 +759,27 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '            New-Item -ItemType Directory -Path $pastaMes -Force | Out-Null',
     '            $arquivo = Join-Path $pastaMes ("NoPulsoPrint-" + (Get-Date -Format "yyyy-MM-dd_HH-mm-ss") + ".png")',
     '            $recorte.Save($arquivo, [System.Drawing.Imaging.ImageFormat]::Png)',
+    '            # Area de transferencia com os DOIS formatos: a IMAGEM (colar no',
+    '            # WhatsApp, no Word, num chamado) e o ARQUIVO (colar numa pasta ou',
+    '            # como anexo de e-mail). Sem isso a captura ficava so na pasta e',
+    '            # alguem tinha que ir cacar o arquivo pra usar.',
+    '            # $true = grava na area de transferencia de VERDADE (persiste depois',
+    '            # que este runspace morre); sem ele o conteudo some ao fechar.',
+    '            # Em try proprio: a area de transferencia pode estar presa por outro',
+    '            # programa, e isso nao pode fazer perder o arquivo que ja foi salvo.',
+    '            $copiou = $false',
+    '            try {',
+    '              $dados = New-Object System.Windows.Forms.DataObject',
+    '              $dados.SetImage($recorte)',
+    '              $lista = New-Object System.Collections.Specialized.StringCollection',
+    '              [void]$lista.Add($arquivo)',
+    '              $dados.SetFileDropList($lista)',
+    '              [System.Windows.Forms.Clipboard]::SetDataObject($dados, $true)',
+    '              $copiou = $true',
+    '            } catch { Log-Print "Nao consegui copiar pra area de transferencia: $($_.Exception.Message)" }',
     '            $recorte.Dispose()',
     '            try { [System.Media.SystemSounds]::Asterisk.Play() } catch {}',
-    '            Log-Print "Captura salva em $arquivo"',
+    '            Log-Print "Captura salva em $arquivo$(if ($copiou) { \' e copiada pra area de transferencia\' })"',
     '          } catch { Log-Print "Falha ao capturar: $($_.Exception.Message)" }',
     '        }',
     '        $atalhoAnterior = $atalho',
