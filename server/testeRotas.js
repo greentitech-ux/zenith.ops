@@ -3533,8 +3533,10 @@ setTimeout(async () => {
       'a compressão nunca trava a leitura por conta própria (qualquer erro devolve o arquivo original)': /catch\(e\)\{\s*\n\s*return file; \/\/ qualquer tropeço/.test(html),
       'cada foto tem prazo de preparo e uma travada não prende a tela': /const PRAZO_PREPARO_FOTO_MS = 12000;/.test(html) && /function comPrazoPreparoRelatorio\(/.test(html) && /if\(!img && window\.createImageBitmap\)/.test(html),
       'o lote prepara as fotos de forma independente e informa o progresso': /return Promise\.all\(lista\.map\(async f=>/.test(html) && /Preparando foto \$\{prontas\} de \$\{total\}/.test(html),
-      'o listener de change chama a compressão antes de guardar o arquivo': !!listener && /ARQUIVOS_RELATORIO\s*=\s*await comprimirVariasRelatorio\(arquivos, atualizarProgresso\)/.test(listener),
-      'o listener continua recusando mais que o teto de fotos (a checagem não sumiu com a mudança)': !!listener && /arquivos\.length > MAX_FOTOS_RELATORIO/.test(listener),
+      'o listener comprime antes de guardar, e SOMA em vez de trocar a seleção': !!listener && /const preparadas = await comprimirVariasRelatorio\(arquivos, atualizarProgresso\)/.test(listener) && /ARQUIVOS_RELATORIO = juntarFotosRelatorio\(ARQUIVOS_RELATORIO, preparadas, MAX_FOTOS_RELATORIO\)/.test(listener),
+      'o teto de fotos passa a valer pro TOTAL somado (3 + 3 não vira 6)': !!listener && /ARQUIVOS_RELATORIO\.length \+ arquivos\.length > MAX_FOTOS_RELATORIO/.test(listener),
+      'um lote antigo não sobrescreve o atual (versão de preparo)': !!listener && /const versao = \+\+VERSAO_PREPARO_RELATORIO;/.test(listener) && /if\(versao !== VERSAO_PREPARO_RELATORIO\) return;/.test(listener),
+      'foto pequena não passa pelo decoder (é onde a tela ficava parada)': /if\(file\.size <= JA_PEQUENA_RELATORIO\) return file;\n  try\{/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okComprimeFotoRelatorio = !falhas.length;
@@ -15149,6 +15151,40 @@ setTimeout(async () => {
   } catch (e) { okXAviso = false; console.log('  erro: ' + e.message); }
   if (!okXAviso) ruins += 1;
   console.log(`${okXAviso ? '✓' : '✗'} Aviso de fechamento: só o Master tem o X de não avisar mais, e ele dispensa o que está pendente agora - dia novo volta a avisar`);
+
+  // ---- Leitura por foto: escolher SOMA, não troca ----
+  // A tela mostrava "1 foto(s) escolhida(s)" mesmo escolhendo 5: seletor que
+  // devolve um arquivo por vez (galeria do celular, "Fotos" do Windows) fazia
+  // cada escolha SUBSTITUIR a anterior. Somando, o caminho funciona nos dois.
+  let okJuntarFotos = false;
+  try {
+    const html = require('fs').readFileSync(__dirname + '/public/lancamento.html', 'utf8');
+    const juntar = new Function(`${(html.match(/function juntarFotosRelatorio\([\s\S]*?\n\}/) || [''])[0]} return juntarFotosRelatorio;`)();
+    const f = (nome, tam) => ({ name: nome, size: tam });
+    const umPorVez = [f('a.jpg', 10), f('b.jpg', 20), f('c.jpg', 30)]
+      .reduce((acc, x) => juntar(acc, [x], 5), []);
+    const loteInteiro = juntar([], [f('a.jpg', 10), f('b.jpg', 20)], 5);
+    const repetida = juntar([f('a.jpg', 10)], [f('a.jpg', 10), f('b.jpg', 20)], 5);
+    const mesmoNomeOutroTamanho = juntar([f('a.jpg', 10)], [f('a.jpg', 99)], 5);
+    const estoura = juntar([f('a.jpg', 1), f('b.jpg', 2), f('c.jpg', 3)], [f('d.jpg', 4), f('e.jpg', 5), f('f.jpg', 6)], 5);
+    const semNada = juntar(undefined, undefined, 5);
+
+    const conf = {
+      'escolher uma por vez acumula (era isso que virava "1 foto")': umPorVez.length === 3 && umPorVez.map((x) => x.name).join(',') === 'a.jpg,b.jpg,c.jpg',
+      'escolher o lote inteiro de uma vez continua funcionando': loteInteiro.length === 2,
+      'a mesma foto escolhida duas vezes não entra duplicada': repetida.length === 2 && repetida.filter((x) => x.name === 'a.jpg').length === 1,
+      'mesmo nome com tamanho diferente é outra foto': mesmoNomeOutroTamanho.length === 2,
+      'o teto corta o excedente em vez de estourar a leitura': estoura.length === 5,
+      'lista vazia não quebra': Array.isArray(semNada) && semNada.length === 0,
+      '"limpar" invalida o preparo em curso (não repõe o que foi tirado)': /function limparSelecaoRelatorio\(\)\{\n  VERSAO_PREPARO_RELATORIO \+= 1;/.test(html),
+      'o erro de compressão também soma, em vez de trocar a seleção': /ARQUIVOS_RELATORIO = juntarFotosRelatorio\(ARQUIVOS_RELATORIO, arquivos, MAX_FOTOS_RELATORIO\)/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okJuntarFotos = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (umPorVez=${JSON.stringify(umPorVez.map((x) => x.name))} estoura=${estoura.length})`);
+  } catch (e) { okJuntarFotos = false; console.log('  erro: ' + e.message); }
+  if (!okJuntarFotos) ruins += 1;
+  console.log(`${okJuntarFotos ? '✓' : '✗'} Leitura por foto: escolher soma em vez de trocar - uma por vez ou o lote inteiro chegam nas 5`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

@@ -957,6 +957,26 @@ function renderCanaisExtras(unidade){
 // nao no proprio input) porque o input e limpo logo depois do change - senao
 // escolher a MESMA foto de novo, depois de um erro, nao dispara evento nenhum.
 let ARQUIVOS_RELATORIO = [];
+// Cada escolha ganha uma versao. Escolher outro lote (ou limpar) invalida o
+// preparo anterior, pra ele nunca repor foto que a pessoa acabou de trocar.
+let VERSAO_PREPARO_RELATORIO = 0;
+
+// Escolher SOMA ao que ja estava, em vez de trocar. Seletor que devolve um
+// arquivo por vez (galeria do celular, "Fotos" do Windows) deixava a pessoa
+// com 1 foto por mais que ela escolhesse 5, e um segundo lote podia apagar o
+// primeiro no meio do preparo. Repetida (mesmo nome e tamanho) nao entra duas
+// vezes; "limpar" continua sendo como se zera.
+function juntarFotosRelatorio(atuais, novas, maximo){
+  const juntas = (atuais || []).slice();
+  const chave = (f) => (f && f.name || '') + '|' + (f && f.size || 0);
+  const vistas = juntas.map(chave);
+  (novas || []).forEach(function (f) {
+    if (!f || vistas.indexOf(chave(f)) >= 0) return;
+    vistas.push(chave(f));
+    juntas.push(f);
+  });
+  return juntas.slice(0, maximo);
+}
 
 // Foto de relatório de PDV tirada de celular sai com 5-8 MB, e até 5 delas
 // numa leitura só - o que sobe pro servidor (e dali pro Claude) é o gargalo
@@ -990,6 +1010,10 @@ function carregarViaImgRelatorio(file){
 }
 async function comprimirImagemRelatorio(file){
   if(!file || !/^image\//.test(file.type||'')) return file; // PDF sobe inteiro
+  // Print de relatorio tem poucos KB. Nao ha ganho em abrir canvas pra ele - e
+  // e' justamente no decoder que a tela ficava parada em "Preparando foto...".
+  // A checagem de tamanho ja existia, mas so DEPOIS de decodificar: tarde.
+  if(file.size <= JA_PEQUENA_RELATORIO) return file;
   try{
     let img = window.createImageBitmap
       ? await comPrazoPreparoRelatorio(createImageBitmap(file))
@@ -1113,6 +1137,7 @@ function leituraEncerrada(){
   return essenciais.length > 0 && essenciaisQueFaltam().length === 0;
 }
 function limparSelecaoRelatorio(){
+  VERSAO_PREPARO_RELATORIO += 1;
   ARQUIVOS_RELATORIO = [];
   pintarSelecaoRelatorio();
   esconderMsgLerCanais();
@@ -1122,29 +1147,34 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', async (
   const arquivos = Array.from(ev.target.files || []);
   ev.target.value = ''; // permite escolher a MESMA foto de novo depois de um erro
   if(!arquivos.length) return;
+  const versao = ++VERSAO_PREPARO_RELATORIO;
   const msg = document.getElementById('ler-canais-msg');
   msg.classList.remove('hidden');
-  if(arquivos.length > MAX_FOTOS_RELATORIO){
-    ARQUIVOS_RELATORIO = [];
+  // o teto vale pro TOTAL: somando, 3 + 3 nao pode virar 6
+  if(ARQUIVOS_RELATORIO.length + arquivos.length > MAX_FOTOS_RELATORIO){
     pintarSelecaoRelatorio();
-    msg.innerHTML = `<span style="color:var(--bad);">Você escolheu ${arquivos.length} arquivos. Mande no máximo ${MAX_FOTOS_RELATORIO} por leitura.</span>`;
+    msg.innerHTML = `<span style="color:var(--bad);">Isso passaria de ${MAX_FOTOS_RELATORIO} fotos na leitura (você já tem ${ARQUIVOS_RELATORIO.length}). Use "limpar" pra recomeçar.</span>`;
     return;
   }
   // reduz ANTES de guardar - é o que sobe pro servidor quando clicar em
   // Realizar leitura, e reduzir aqui (uma vez) é mais rápido que deixar a
   // foto original de celular pesar a leitura toda vez que o botão for clicado
   const atualizarProgresso = (prontas,total)=>{
+    if(versao !== VERSAO_PREPARO_RELATORIO) return;
     msg.innerHTML = `<span style="color:var(--muted);">Preparando foto ${prontas} de ${total}...</span>`;
   };
   atualizarProgresso(0, arquivos.length);
   try{
-    ARQUIVOS_RELATORIO = await comprimirVariasRelatorio(arquivos, atualizarProgresso);
+    const preparadas = await comprimirVariasRelatorio(arquivos, atualizarProgresso);
+    if(versao !== VERSAO_PREPARO_RELATORIO) return;
+    ARQUIVOS_RELATORIO = juntarFotosRelatorio(ARQUIVOS_RELATORIO, preparadas, MAX_FOTOS_RELATORIO);
     pintarSelecaoRelatorio();
     msg.innerHTML = `<span style="color:var(--muted);">${ARQUIVOS_RELATORIO.length} foto(s) pronta(s). Confira e clique em <b>Realizar leitura</b>. Nada foi enviado ainda.</span>`;
   }catch(err){
+    if(versao !== VERSAO_PREPARO_RELATORIO) return;
     // Última rede de segurança: os originais são melhores que deixar a pessoa
     // sem ação. A leitura do servidor continua validando tipo e tamanho.
-    ARQUIVOS_RELATORIO = arquivos;
+    ARQUIVOS_RELATORIO = juntarFotosRelatorio(ARQUIVOS_RELATORIO, arquivos, MAX_FOTOS_RELATORIO);
     pintarSelecaoRelatorio();
     msg.innerHTML = `<span style="color:var(--warn);">Não foi possível reduzir uma ou mais fotos; elas serão enviadas no formato original. Confira e clique em <b>Realizar leitura</b>.</span>`;
   }
