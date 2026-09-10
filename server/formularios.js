@@ -15,7 +15,10 @@
 // sempre. O PDF é gerado sob demanda (nunca gravado), então uma assinatura
 // que chegar depois já aparece no próximo download.
 const crypto = require('crypto');
+const path = require('path');
 const PDFDocument = require('pdfkit');
+// mesmo arquivo que o login e o relatório de tarefa já usam - uma marca só
+const LOGO_GRUPO_BRAVO = path.join(__dirname, 'public', 'grupo-bravo.png');
 const db = require('./firestore');
 const formulariosUnidades = require('./formulariosUnidades');
 const { createCache } = require('./liveCache');
@@ -412,7 +415,7 @@ function rotuloDoSlot(tipo, chave, rotuloGravado) {
 
 function resumo(r) {
   const assinaturas = Object.entries(r.assinaturas || {}).map(([chave, a]) => ({
-    chave, rotulo: rotuloDoSlot(r.tipo, chave, a.rotulo), assinado: !!a.imagem, nome: a.nome || null, assinadoEm: a.assinadoEm || null,
+    chave, rotulo: rotuloDoSlot(r.tipo, chave, a.rotulo), assinado: !!a.imagem, nome: a.nome || null, assinadoEm: a.assinadoEm || null, dispositivo: (a.dispositivo && a.dispositivo.rotulo) || null,
   }));
   const { assinaturas: _, ...resto } = r;
   return { ...resto, assinaturas };
@@ -753,7 +756,27 @@ async function vistaPublica(id, token) {
 // de proposito: sao a mesma prova, e separar em dois passos deixaria o
 // formulario meio fechado - assinado, sem comprovante, e ninguem sabendo de
 // quem cobrar.
-async function assinar(id, token, { nome, imagem, anexos } = {}) {
+// De que aparelho a pessoa assinou. Sai do User-Agent que o navegador já
+// mandava na hora de assinar e que era descartado. Serve para conferência: a
+// assinatura feita com o dedo no celular sai com o traço mais solto que a
+// feita com mouse, e saber a origem tira a dúvida antes que ela vire
+// discussão. Só o TIPO e o sistema - nada que identifique o aparelho.
+function dispositivoDaAssinatura(userAgent) {
+  const ua = String(userAgent || '').trim();
+  if (!ua) return null;
+  // Android sem "Mobile" é tablet - é assim que o próprio Android se anuncia
+  const tablet = /iPad|Tablet|PlayBook|Silk/i.test(ua) || (/Android/i.test(ua) && !/Mobile/i.test(ua));
+  const celular = !tablet && /Mobi|iPhone|iPod|Windows Phone|Android/i.test(ua);
+  const sistema = /iPhone|iPad|iPod/i.test(ua) ? 'iOS'
+    : /Android/i.test(ua) ? 'Android'
+      : /Windows/i.test(ua) ? 'Windows'
+        : /Mac OS X|Macintosh/i.test(ua) ? 'macOS'
+          : /Linux|X11/i.test(ua) ? 'Linux' : null;
+  const tipo = tablet ? 'Tablet' : (celular ? 'Celular' : 'Computador');
+  return { tipo, sistema: sistema || null, rotulo: sistema ? `${tipo} (${sistema})` : tipo };
+}
+
+async function assinar(id, token, { nome, imagem, anexos, userAgent } = {}) {
   const r = await getOne(id);
   const chave = chaveDoToken(r, token);
   if (!chave) throw new Error('Link de assinatura inválido ou revogado.');
@@ -773,7 +796,7 @@ async function assinar(id, token, { nome, imagem, anexos } = {}) {
     throw new Error('Anexe o comprovante do depósito antes de assinar.');
   }
 
-  const assinaturas = { ...r.assinaturas, [chave]: { ...a, imagem: img, nome: limpar(nome, 80) || null, assinadoEm: new Date().toISOString() } };
+  const assinaturas = { ...r.assinaturas, [chave]: { ...a, imagem: img, nome: limpar(nome, 80) || null, assinadoEm: new Date().toISOString(), dispositivo: dispositivoDaAssinatura(userAgent) } };
   // faltando comprovante num deposito com depositante proprio, o formulario
   // NAO fecha mesmo com todas as assinaturas: e' o que impede seguir pro
   // pagamento sem a prova de que o dinheiro entrou no banco
@@ -1093,7 +1116,7 @@ function dataHoraAssinatura(v) {
 function assinaturasAssinadas(r) {
   return Object.entries(r.assinaturas || {})
     .filter(([, a]) => a.imagem)
-    .map(([chave, a]) => ({ chave, rotulo: rotuloDoSlot(r.tipo, chave, a.rotulo), nome: a.nome, assinadoEm: a.assinadoEm, imagem: a.imagem }));
+    .map(([chave, a]) => ({ chave, rotulo: rotuloDoSlot(r.tipo, chave, a.rotulo), nome: a.nome, assinadoEm: a.assinadoEm, imagem: a.imagem, dispositivo: a.dispositivo || null }));
 }
 
 async function desenharFaixa(out, pagina, r, fonte, negrito, assinadas, comAssinatura) {
@@ -1128,7 +1151,8 @@ async function desenharFaixa(out, pagina, r, fonte, negrito, assinadas, comAssin
     pagina.drawLine({ start: { x, y: 24 }, end: { x: x + larguraBloco, y: 24 }, thickness: 0.6, color: rgb(0.3, 0.3, 0.3) });
     pagina.drawText(`${a.rotulo}${a.nome ? ` · ${a.nome}` : ''}`, { x, y: 16, size: 7, font: negrito, color: rgb(0.1, 0.1, 0.1), maxWidth: larguraBloco });
     const quando = dataHoraAssinatura(a.assinadoEm);
-    if (quando) pagina.drawText(`Assinado em: ${quando}`, { x, y: 8, size: 6.5, font: fonte, color: rgb(0.25, 0.25, 0.25), maxWidth: larguraBloco });
+    const aparelho = a.dispositivo && a.dispositivo.rotulo ? ` · ${a.dispositivo.rotulo}` : '';
+    if (quando) pagina.drawText(`Assinado em: ${quando}${aparelho}`, { x, y: 8, size: 6.5, font: fonte, color: rgb(0.25, 0.25, 0.25), maxWidth: larguraBloco });
     x += larguraBloco + 10;
     if (x + larguraBloco > width) break;
   }
@@ -1438,9 +1462,21 @@ async function gerarPdf(r, res, opcoes) {
   const logoX = X + CAMPOS_W;
   doc.rect(logoX, y, LOGO_W, alturaHeader).stroke(AZUL_ESCURO);
   const cy = y + alturaHeader / 2;
-  doc.font('Helvetica').fontSize(7).fillColor('#8a8a8a').text('GRUPO', logoX, cy - 20, { width: LOGO_W, align: 'center', characterSpacing: 2 });
-  doc.font('Helvetica-Bold').fontSize(17).fillColor('#1a1a1a').text('BRAVO', logoX, cy - 11, { width: LOGO_W, align: 'center' });
-  doc.font('Helvetica').fontSize(6).fillColor('#8a8a8a').text('EMPRESARIAL', logoX, cy + 10, { width: LOGO_W, align: 'center', characterSpacing: 1.5 });
+  // A marca sai do ARQUIVO, não de texto em Helvetica: o "BRAVO" do logo tem
+  // o corte no B que fonte nenhuma reproduz, e o resultado impresso era uma
+  // imitação. O texto continua como reserva - se o arquivo faltar, um
+  // cabeçalho simples é melhor que um cabeçalho vazio.
+  let logoDesenhado = false;
+  try {
+    const larguraLogo = Math.min(LOGO_W - 14, 104);
+    doc.image(LOGO_GRUPO_BRAVO, logoX + (LOGO_W - larguraLogo) / 2, cy - 26, { fit: [larguraLogo, 52] });
+    logoDesenhado = true;
+  } catch (e) { /* cai no texto abaixo */ }
+  if (!logoDesenhado) {
+    doc.font('Helvetica').fontSize(7).fillColor('#8a8a8a').text('GRUPO', logoX, cy - 20, { width: LOGO_W, align: 'center', characterSpacing: 2 });
+    doc.font('Helvetica-Bold').fontSize(17).fillColor('#1a1a1a').text('BRAVO', logoX, cy - 11, { width: LOGO_W, align: 'center' });
+    doc.font('Helvetica').fontSize(6).fillColor('#8a8a8a').text('EMPRESARIAL', logoX, cy + 10, { width: LOGO_W, align: 'center', characterSpacing: 1.5 });
+  }
 
   y = ry + 10;
 
@@ -1598,6 +1634,11 @@ async function gerarPdf(r, res, opcoes) {
     doc.moveTo(bx, yAssin).lineTo(bx + larguraBloco, yAssin).lineWidth(0.8).stroke('#000');
     doc.font('Helvetica').fontSize(9).fillColor('#000').text(p.rotulo, bx, yAssin + 5, { width: larguraBloco, align: 'center' });
     if (ass && ass.nome) doc.fontSize(7.5).fillColor('#555').text(`${ass.nome}${ass.assinadoEm ? ' · ' + new Date(ass.assinadoEm).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : ''}`, bx, yAssin + 17, { width: larguraBloco, align: 'center' });
+    // linha própria: só aparece em quem assinou DEPOIS desta versão - papel
+    // antigo não tem o dado, e inventar de onde veio seria pior que omitir
+    if (ass && ass.dispositivo && ass.dispositivo.rotulo) {
+      doc.fontSize(6.5).fillColor('#777').text(`Assinado em ${ass.dispositivo.rotulo}`, bx, yAssin + 27, { width: larguraBloco, align: 'center' });
+    }
   });
 
   if (modelo.obs) {
@@ -1634,6 +1675,7 @@ async function gerarPdf(r, res, opcoes) {
 }
 
 module.exports = {
+  dispositivoDaAssinatura,
   MAX_ANEXOS,
   encaixeNaA4, TIPOS, UNIDADES_FORM, buscarFavorecido, criar, listar, detalhar, getOne, vistaPublica, assinar, editar, cancelar, remover, gerarPdf, chaveDoToken, parseValor,
   nomeArquivoPdf, beneficiarioDoFormulario,

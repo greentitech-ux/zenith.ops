@@ -1112,7 +1112,7 @@ app.post('/api/formularios-publico/:id/assinar', uploadAnexosFormulario.array('a
       const path = await storage.salvarArquivo(req.params.id, file, 'formularios');
       anexos.push({ nome: file.originalname, path, tipo: file.mimetype });
     }
-    const resultado = await formularios.assinar(req.params.id, corpo.token, { nome: corpo.nome, imagem: corpo.imagem, anexos });
+    const resultado = await formularios.assinar(req.params.id, corpo.token, { nome: corpo.nome, imagem: corpo.imagem, anexos, userAgent: req.headers['user-agent'] });
     broadcast('formulario-assinado', { id: req.params.id }, 'solicitacoes');
     res.json(resultado);
   } catch (err) {

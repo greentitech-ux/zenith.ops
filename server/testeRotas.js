@@ -15648,6 +15648,60 @@ setTimeout(async () => {
   if (!okBeniboyTodas) ruins += 1;
   console.log(`${okBeniboyTodas ? '✓' : '✗'} Beniboy em todas as telas: injetado pelo tema.js, sem depender da tag página a página`);
 
+  // Assinatura: de que aparelho veio, e a marca do grupo no papel gerado.
+  // O User-Agent já chegava no servidor na hora de assinar e era jogado fora.
+  // Guardá-lo resolve a dúvida que aparecia depois: assinatura feita com o
+  // dedo no celular sai mais solta que a de mouse, e sem a origem virava
+  // discussão. Só tipo e sistema - nada que identifique o aparelho.
+  let okAssinaturaAparelho = false;
+  try {
+    const fm = require(__dirname + '/formularios.js');
+    const dv = fm.dispositivoDaAssinatura;
+    const UA = {
+      iphone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+      android: 'Mozilla/5.0 (Linux; Android 14; SM-A546E) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+      tabletAndroid: 'Mozilla/5.0 (Linux; Android 13; SM-X200) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      ipad: 'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/604.1',
+      windows: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      mac: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+      linux: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    };
+    const fmSrc = require('fs').readFileSync(__dirname + '/formularios.js', 'utf8');
+    const idxSrc = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+
+    const conf = {
+      'iPhone é Celular, e não cai no macOS por causa do "like Mac OS X"': dv(UA.iphone).tipo === 'Celular' && dv(UA.iphone).sistema === 'iOS',
+      'Android com "Mobile" é Celular, e não cai no Linux do próprio UA': dv(UA.android).tipo === 'Celular' && dv(UA.android).sistema === 'Android',
+      'Android SEM "Mobile" é Tablet (é assim que o Android se anuncia)': dv(UA.tabletAndroid).tipo === 'Tablet' && dv(UA.tabletAndroid).sistema === 'Android',
+      'iPad é Tablet': dv(UA.ipad).tipo === 'Tablet' && dv(UA.ipad).sistema === 'iOS',
+      'Windows, macOS e Linux são Computador': dv(UA.windows).tipo === 'Computador' && dv(UA.windows).sistema === 'Windows'
+        && dv(UA.mac).tipo === 'Computador' && dv(UA.mac).sistema === 'macOS'
+        && dv(UA.linux).tipo === 'Computador' && dv(UA.linux).sistema === 'Linux',
+      'o rótulo junta tipo e sistema': dv(UA.android).rotulo === 'Celular (Android)' && dv(UA.windows).rotulo === 'Computador (Windows)',
+      'sem User-Agent não inventa aparelho': dv('') === null && dv(null) === null && dv(undefined) === null,
+      'a rota de assinar repassa o User-Agent (sem isso nada é gravado)':
+        /formularios\.assinar\([^)]*userAgent: req\.headers\['user-agent'\]/.test(idxSrc),
+      'a assinatura grava o aparelho junto do nome e da data':
+        /assinadoEm: new Date\(\)\.toISOString\(\), dispositivo: dispositivoDaAssinatura\(userAgent\)/.test(fmSrc),
+      'o PDF gerado mostra o aparelho embaixo da assinatura':
+        /Assinado em \$\{ass\.dispositivo\.rotulo\}/.test(fmSrc),
+      'o carimbo em PDF enviado também mostra': /Assinado em: \$\{quando\}\$\{aparelho\}/.test(fmSrc),
+      // papel assinado ANTES desta versão não tem o dado - a linha some, não mente
+      'assinatura antiga, sem o dado, não desenha a linha': /ass\.dispositivo && ass\.dispositivo\.rotulo/.test(fmSrc),
+      'o detalhe da tela expõe o aparelho': /dispositivo: \(a\.dispositivo && a\.dispositivo\.rotulo\) \|\| null/.test(fmSrc),
+      // a marca vem do arquivo, não de Helvetica imitando o wordmark
+      'a marca do grupo sai do PNG, não de texto': /doc\.image\(LOGO_GRUPO_BRAVO/.test(fmSrc)
+        && /const LOGO_GRUPO_BRAVO = path\.join\(__dirname, 'public', 'grupo-bravo\.png'\)/.test(fmSrc),
+      'o arquivo do logo existe de verdade': require('fs').existsSync(__dirname + '/public/grupo-bravo.png'),
+      'sem o arquivo, o texto volta como reserva (cabeçalho nunca fica vazio)': /if \(!logoDesenhado\) \{/.test(fmSrc),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAssinaturaAparelho = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okAssinaturaAparelho = false; console.log('  erro: ' + e.message); }
+  if (!okAssinaturaAparelho) ruins += 1;
+  console.log(`${okAssinaturaAparelho ? '✓' : '✗'} Assinatura: de que aparelho veio (celular/tablet/computador) e a marca do grupo vinda do PNG`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
