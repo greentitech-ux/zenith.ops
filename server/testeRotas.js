@@ -3531,7 +3531,9 @@ setTimeout(async () => {
       'existe a função de comprimir o lote de fotos escolhidas': /async function comprimirVariasRelatorio\(/.test(html),
       'PDF sobe inteiro (comprimir só mexe em imagem)': /function comprimirImagemRelatorio\([\s\S]{0,200}return file;.*PDF sobe inteiro/.test(html),
       'a compressão nunca trava a leitura por conta própria (qualquer erro devolve o arquivo original)': /catch\(e\)\{\s*\n\s*return file; \/\/ qualquer tropeço/.test(html),
-      'o listener de change chama a compressão antes de guardar o arquivo': !!listener && /ARQUIVOS_RELATORIO\s*=\s*await comprimirVariasRelatorio\(arquivos\)/.test(listener),
+      'cada foto tem prazo de preparo e uma travada não prende a tela': /const PRAZO_PREPARO_FOTO_MS = 12000;/.test(html) && /function comPrazoPreparoRelatorio\(/.test(html) && /if\(!img && window\.createImageBitmap\)/.test(html),
+      'o lote prepara as fotos de forma independente e informa o progresso': /return Promise\.all\(lista\.map\(async f=>/.test(html) && /Preparando foto \$\{prontas\} de \$\{total\}/.test(html),
+      'o listener de change chama a compressão antes de guardar o arquivo': !!listener && /ARQUIVOS_RELATORIO\s*=\s*await comprimirVariasRelatorio\(arquivos, atualizarProgresso\)/.test(listener),
       'o listener continua recusando mais que o teto de fotos (a checagem não sumiu com a mudança)': !!listener && /arquivos\.length > MAX_FOTOS_RELATORIO/.test(listener),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
