@@ -15476,30 +15476,27 @@ setTimeout(async () => {
     const desligou = await putJson('/api/users/u-print-sim/nopulso-print', { podeNoPulsoPrint: false }, cabMaster);
     const meDepois = JSON.parse((await pedir('/api/me', cabSim)).corpo);
 
-    const lib = await pedir('/vendor/html2canvas.min.js');
     const tema = require('fs').readFileSync(__dirname + '/public/tema.js', 'utf8');
     const usuarios = require('fs').readFileSync(__dirname + '/public/usuarios.html', 'utf8');
 
     const conf = {
       'o Master liga e desliga a marca por pessoa': ligou.status === 200 && meSim.podeNoPulsoPrint === true && desligou.status === 200 && meDepois.podeNoPulsoPrint === false,
-      'quem não tem a marca não recebe o botão': meNao.podeNoPulsoPrint === false
-        && /if \(!me \|\| !me\.podeNoPulsoPrint\) return;/.test(require('fs').readFileSync(__dirname + '/public/tema.js', 'utf8')),
       'o Master sempre pode': meMaster.podeNoPulsoPrint === true,
+      // o botão flutuante foi removido a pedido do Master: ele caía em
+      // right:14/bottom:14 com z-index 99998, exatamente em cima do lançador
+      // do Beniboy (.szc-btn, right:16/bottom:16, z-index 9000), e o tapava.
+      // No computador quem tira print é o Ctrl+Q do agente.
+      'o botão flutuante de print não existe em tela nenhuma':
+        !/nopulso-print-btn/.test(tema) && !/html2canvas/.test(tema) && !/montarBotaoPrint/.test(tema),
       'só o Master mexe na marca': semSerMaster.status === 401,
-      'a biblioteca é servida pelo PRÓPRIO app (loja tem rede restrita)': lib.status === 200 && /html2canvas 1\.4\.1/.test(lib.corpo) && /\/vendor\/html2canvas\.min\.js/.test(tema),
-      'e só carrega quando alguém toca no botão, não no boot das 53 telas': /function carregarLibPrint\(\)/.test(tema) && !/<script src="\/vendor\/html2canvas/.test(require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8')),
-      'o caminho até a galeria é o compartilhar com ARQUIVO': /navigator\.canShare\(\{ files: \[arquivo\] \}\)/.test(tema) && /navigator\.share\(\{ files: \[arquivo\] \}\)/.test(tema),
-      'com download como saída onde o compartilhar não existe': /a\.download = arquivo\.name/.test(tema),
-      'o botão e o aviso ficam FORA do print (são do app, não da tela)': /ignoreElements: function \(el\) \{ return el\.id === 'nopulso-print-btn' \|\| el\.id === 'nopulso-print-aviso'; \}/.test(tema),
-      'nada é enviado ao NoPulso (nenhum upload no caminho do print)': !/fetch\([^)]*print[^)]*\{[^}]*method\s*:\s*'POST'/i.test(tema),
       'a tag aparece no cadastro de Usuários': /id="\$\{prefixo\}-tag-print"/.test(usuarios) && /nopulso-print', \{method:'PUT'/.test(usuarios),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okPrintCelular = !falhas.length;
-    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (ligou=${ligou.status} me=${meSim.podeNoPulsoPrint} lib=${lib.status})`);
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (ligou=${ligou.status} me=${meSim.podeNoPulsoPrint})`);
   } catch (e) { okPrintCelular = false; console.log('  erro: ' + e.message); }
   if (!okPrintCelular) ruins += 1;
-  console.log(`${okPrintCelular ? '✓' : '✗'} NoPulsoPrint no celular: marca por pessoa, imagem da própria tela e caminho até a galeria pelo compartilhar`);
+  console.log(`${okPrintCelular ? '✓' : '✗'} NoPulsoPrint: a marca por pessoa continua sendo do Master - e o botão flutuante saiu do caminho do Beniboy`);
 
   // NoPulsoPrint estilo Lightshot: os pontos dos MEIOS das bordas já
   // redimensionavam (Modo-AreaPrint devolve n/s/e/w numa faixa de 9px), mas só
@@ -15560,6 +15557,48 @@ setTimeout(async () => {
   } catch (e) { okPrintLightshot = false; console.log('  erro: ' + e.message); }
   if (!okPrintLightshot) ruins += 1;
   console.log(`${okPrintLightshot ? '✓' : '✗'} NoPulsoPrint: alças nas quinas E nos meios, e Copiar sem gravar arquivo`);
+
+  // Beniboy em TODAS as telas. A tag <script src="/suporte-chat.js"> era colada
+  // página a página, e 15 das 59 tinham ficado sem - Meu Dia, os dois NOC, a
+  // Central de Soluções, Fornecedores, E-mail, Bonificação e as públicas.
+  // Agora quem injeta é o tema.js, o único arquivo que as 59 carregam: tela
+  // nova nasce com o Beniboy sem ninguém precisar lembrar da tag.
+  let okBeniboyTodas = false;
+  try {
+    const fsB = require('fs');
+    const pasta = __dirname + '/public';
+    const tema = fsB.readFileSync(pasta + '/tema.js', 'utf8');
+    const paginas = fsB.readdirSync(pasta).filter((f) => f.endsWith('.html'));
+    const lida = (f) => fsB.readFileSync(pasta + '/' + f, 'utf8');
+    // é por aqui que o Beniboy entra: página sem tema.js ficaria sem ele
+    const semTema = paginas.filter((f) => !/src=["']\/tema\.js["']/.test(lida(f)));
+    // as que dependem SÓ da injeção (não têm a tag no HTML)
+    const soPelaInjecao = paginas.filter((f) => !/suporte-chat\.js/.test(lida(f)));
+    const alarme = 'alerta-beniboy.html';
+
+    const conf = {
+      'as 59 telas carregam o tema.js (é por ele que o Beniboy entra)': paginas.length >= 59 && semTema.length === 0,
+      'o tema.js injeta o suporte-chat.js': /tag\.src = '\/suporte-chat\.js'/.test(tema) && /function montarBeniboy\(\)/.test(tema),
+      'a injeção roda no boot da página': /iniciar\(\) \{[^}]*montarBeniboy\(\);/.test(tema),
+      'onde a tag já existe não baixa de novo': /document\.querySelector\('script\[src\*="suporte-chat\.js"\]'\)/.test(tema),
+      'a tela de alarme fica de fora (ela JÁ é o Beniboy em tela cheia)':
+        /SEM_BENIBOY = \['\/alerta-beniboy\.html'\]/.test(tema) && /SEM_BENIBOY\.indexOf\(location\.pathname\) >= 0/.test(tema),
+      'as telas que estavam sem o Beniboy passam a receber pela injeção':
+        soPelaInjecao.includes('tarefas.html') && soPelaInjecao.includes('noc-maquinas.html')
+        && soPelaInjecao.includes('central-solucoes.html') && soPelaInjecao.includes('fornecedores.html'),
+      'nenhuma dessas ficou de fora por falta de tema.js':
+        soPelaInjecao.filter((f) => f !== alarme).every((f) => /src=["']\/tema\.js["']/.test(lida(f))),
+      // o widget desenha o próprio lançador; sem isso a injeção não bastaria
+      'o suporte-chat.js monta o próprio botão': /class="szc-btn"/.test(fsB.readFileSync(pasta + '/suporte-chat.js', 'utf8')),
+      // era ele que tapava o Beniboy - o canto tem que estar livre
+      'o canto do Beniboy não tem mais concorrente': !/nopulso-print-btn/.test(tema),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okBeniboyTodas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (sem tema: ${semTema.join(',') || 'nenhuma'})`);
+  } catch (e) { okBeniboyTodas = false; console.log('  erro: ' + e.message); }
+  if (!okBeniboyTodas) ruins += 1;
+  console.log(`${okBeniboyTodas ? '✓' : '✗'} Beniboy em todas as telas: injetado pelo tema.js, sem depender da tag página a página`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
