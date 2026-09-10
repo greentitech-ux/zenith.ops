@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 24;
+const VERSAO_VIGIA = 25;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -38,8 +38,9 @@ function paginaDoTipo(tipo) {
 // cadencia bem mais espacada (~1h), (2) checam se existe uma versao nova
 // do proprio script esperando (ver Verificar-Atualizacao) - se sim, baixa
 // o conteudo novo, sobrescreve o proprio arquivo e reinicia sozinho.
-function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
+function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
   const ehInterno = tipo === 'interno';
+  const noPulsoPrintInicial = !!noPulsoPrint;
   // segredo desse computador (ver lojaStatus.js) - vai assado no script e
   // volta no cabecalho X-NOC-Token em todo request pro servidor, provando
   // que quem fala e a maquina certa. Sem ele, o backend nao entrega comando/
@@ -64,6 +65,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
   const urlComandoResultado = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/comando-resultado`;
   const urlChatResponder = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/chat-responder`;
   const urlTelemetria = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/telemetria`;
+  const urlConfiguracaoAgente = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/configuracao-agente`;
   const urlVersao = `${APP_BASE_URL}/api/loja-status/vigia-versao`;
   const urlScriptProprio = `${APP_BASE_URL}/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/vigia.ps1?tipo=${encodeURIComponent(tipo)}`;
   const nomeTarefa = 'NOCZenith_' + posto;
@@ -132,6 +134,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '# como essa maquina. O NOCZenith se atualiza sozinho carregando o token.',
     '$AgentToken = "' + tokenSeguro + '"',
     '$CabecalhosAgente = @{ "X-NOC-Token" = $AgentToken }',
+    '$UrlConfiguracaoAgente = "' + urlConfiguracaoAgente + '"',
+    '$NoPulsoPrintAtivoInicial = $' + noPulsoPrintInicial,
     '',
     '# ---- log local (arquivo texto do lado do .ps1) - sem isso, todo erro',
     '# ficava mudo (-ErrorAction SilentlyContinue + catch {} em toda chamada de',
@@ -142,6 +146,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '# cresce sem parar. Trunca sozinho se passar de ~300KB, mantendo so o',
     '# final (mais recente e mais util pra debugar um problema atual).',
     '$CaminhoLog = Join-Path (Split-Path -Parent $PSCommandPath) "NOCZenith.log"',
+    '# O print é propositalmente LOCAL. A pasta por mês mantém o histórico\n# organizado e não envia imagens pelo NOC.',
+    '$PastaNoPulsoPrint = Join-Path ([Environment]::GetFolderPath("MyPictures")) "NoPulsoPrint"',
+    '$CaminhoNoPulsoPrintAtivo = Join-Path (Split-Path -Parent $PSCommandPath) "nopulso-print.ativo"',
+    'try { if ($NoPulsoPrintAtivoInicial) { "1" | Set-Content -Path $CaminhoNoPulsoPrintAtivo -Force } else { "0" | Set-Content -Path $CaminhoNoPulsoPrintAtivo -Force } } catch {}',
     'function Escrever-Log($mensagem) {',
     '  try {',
     '    if ((Test-Path $CaminhoLog) -and ((Get-Item $CaminhoLog).Length -gt 300KB)) {',
@@ -741,6 +749,73 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '$global:FilaChatEntrada = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))',
     '$global:FilaChatSaida = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))',
     '',
+    '# ---- NoPulsoPrint: Ctrl+Q captura a tela LOCAL quando o Master habilita',
+    '# este computador no cadastro. Não há upload, anexo nem envio por chat.',
+    'function Iniciar-NoPulsoPrint {',
+    '  if ($global:NoPulsoPrintPowerShell) { return }',
+    '  $rsPrint = [runspacefactory]::CreateRunspace()',
+    '  $rsPrint.ApartmentState = "STA"',
+    '  $rsPrint.ThreadOptions = "ReuseThread"',
+    '  $rsPrint.Open()',
+    '  $psPrint = [powershell]::Create()',
+    '  $psPrint.Runspace = $rsPrint',
+    '  [void]$psPrint.AddScript({',
+    '    param($CaminhoAtivo, $PastaBase, $CaminhoLogPrint)',
+    '    function Log-Print($m) { try { "$([DateTime]::Now.ToString(\'yyyy-MM-dd HH:mm:ss\')) - [print] $m" | Out-File -FilePath $CaminhoLogPrint -Append -Encoding UTF8 } catch {} }',
+    '    try {',
+    '      Add-Type -AssemblyName System.Windows.Forms',
+    '      Add-Type -AssemblyName System.Drawing',
+    '      Add-Type -TypeDefinition \'using System; using System.Runtime.InteropServices; public static class NoPulsoPrintTeclas { [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int tecla); }\' -ErrorAction SilentlyContinue',
+    '      $atalhoAnterior = $false',
+    '      while ($true) {',
+    '        $ativo = $false',
+    '        try { $ativo = (Test-Path $CaminhoAtivo) -and ((Get-Content $CaminhoAtivo -First 1 -ErrorAction Stop).Trim() -eq "1") } catch {}',
+    '        if (-not $ativo) { $atalhoAnterior = $false; Start-Sleep -Milliseconds 300; continue }',
+    '        $ctrl = (([NoPulsoPrintTeclas]::GetAsyncKeyState(0x11) -band 0x8000) -ne 0)',
+    '        $q = (([NoPulsoPrintTeclas]::GetAsyncKeyState(0x51) -band 0x8000) -ne 0)',
+    '        $atalho = $ctrl -and $q',
+    '        if ($atalho -and -not $atalhoAnterior) {',
+    '          try {',
+    '            $mes = Get-Date -Format "yyyy-MM"',
+    '            $pastaMes = Join-Path $PastaBase $mes',
+    '            New-Item -ItemType Directory -Path $pastaMes -Force | Out-Null',
+    '            $tela = [System.Windows.Forms.SystemInformation]::VirtualScreen',
+    '            $imagem = New-Object System.Drawing.Bitmap($tela.Width, $tela.Height)',
+    '            $grafico = [System.Drawing.Graphics]::FromImage($imagem)',
+    '            $grafico.CopyFromScreen($tela.Left, $tela.Top, 0, 0, $tela.Size)',
+    '            $arquivo = Join-Path $pastaMes ("NoPulsoPrint-" + (Get-Date -Format "yyyy-MM-dd_HH-mm-ss") + ".png")',
+    '            $imagem.Save($arquivo, [System.Drawing.Imaging.ImageFormat]::Png)',
+    '            $grafico.Dispose(); $imagem.Dispose()',
+    '            try { [System.Media.SystemSounds]::Asterisk.Play() } catch {}',
+    '            Log-Print "Captura salva em $arquivo"',
+    '          } catch { Log-Print "Falha ao capturar: $($_.Exception.Message)" }',
+    '        }',
+    '        $atalhoAnterior = $atalho',
+    '        Start-Sleep -Milliseconds 55',
+    '      }',
+    '    } catch { Log-Print "NoPulsoPrint não iniciou: $($_.Exception.Message)" }',
+    '  }).AddArgument($CaminhoNoPulsoPrintAtivo).AddArgument($PastaNoPulsoPrint).AddArgument($CaminhoLog)',
+    '  [void]$psPrint.BeginInvoke()',
+    '  $global:NoPulsoPrintPowerShell = $psPrint',
+    '  $global:NoPulsoPrintRunspace = $rsPrint',
+    '  Escrever-Log "NoPulsoPrint pronto (Ctrl+Q quando habilitado)."',
+    '}',
+    '',
+    'function Sincronizar-NoPulsoPrint {',
+    '  if ($Servico) { return }',
+    '  try {',
+    '    $configPrint = Invoke-RestMethod -Uri $UrlConfiguracaoAgente -Headers $CabecalhosAgente -TimeoutSec 10',
+    '    $valorPrint = if ($configPrint.noPulsoPrint) { "1" } else { "0" }',
+    '    $valorAnterior = try { (Get-Content $CaminhoNoPulsoPrintAtivo -First 1 -ErrorAction Stop).Trim() } catch { "" }',
+    '    $valorPrint | Set-Content -Path $CaminhoNoPulsoPrintAtivo -Force',
+    '    if ($configPrint.noPulsoPrint) { Iniciar-NoPulsoPrint }',
+    '    if ($valorPrint -ne $valorAnterior) {',
+    '      $estadoPrint = if ($valorPrint -eq "1") { "habilitado" } else { "desabilitado" }',
+    '      Escrever-Log "NoPulsoPrint $estadoPrint."',
+    '    }',
+    '  } catch { Escrever-Log "Falha ao sincronizar NoPulsoPrint: $($_.Exception.Message)" }',
+    '}',
+    '',
     'function Iniciar-JanelaChat {',
     '  $rs = [runspacefactory]::CreateRunspace()',
     '  $rs.ApartmentState = "STA"',
@@ -1020,7 +1095,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '  Reportar-IpLocal',
     '  # a instancia de boot roda como SYSTEM, sem sessao grafica - janela de',
     '  # chat so na instancia de login',
-    '  if (-not $Servico) { try { Iniciar-JanelaChat } catch { Escrever-Log "Falha ao abrir janela de chat: $($_.Exception.Message)" } }',
+    '  if (-not $Servico) {',
+    '    try { Sincronizar-NoPulsoPrint } catch {}',
+    '    try { Iniciar-JanelaChat } catch { Escrever-Log "Falha ao abrir janela de chat: $($_.Exception.Message)" }',
+    '  }',
     '  $EmEsperaServico = $false',
     '  $contador = 0',
     '  $FalhasSeguidasHeartbeat = 0',
@@ -1108,6 +1186,15 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '      }',
     '    }',
     '    if ($resp) {',
+    '      # O computador interno já recebe heartbeat pelo próprio agente; usa a',
+    '      # resposta para aplicar a opção do print imediatamente, sem reinstalar.',
+    '      if (-not $Servico -and $null -ne $resp.noPulsoPrint) {',
+    '        try {',
+    '          $valorPrint = if ($resp.noPulsoPrint) { "1" } else { "0" }',
+    '          $valorPrint | Set-Content -Path $CaminhoNoPulsoPrintAtivo -Force',
+    '          if ($resp.noPulsoPrint) { Iniciar-NoPulsoPrint }',
+    '        } catch {}',
+    '      }',
     '      if ($resp.comandoPendente) {',
     '        Escrever-Log "Comando recebido (id=$($resp.comandoPendente.comandoId))"',
     '        try {',
@@ -1241,6 +1328,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     'function Rodar-Loop {',
     '  Escrever-Log "NOCZenith iniciado (' + tipo + '$(if ($Servico) { ", instancia de boot" })) - versao $VersaoScript - ' + codigoTextoPS + '/' + posto + '"',
     '  Reportar-IpLocal',
+    '  if (-not $Servico) { try { Sincronizar-NoPulsoPrint } catch {} }',
     '  $EmEsperaServico = $false',
     '  $contador = 0',
     '  while ($true) {',
@@ -1252,6 +1340,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken }) {
     '    try { Verificar-SessaoRemota } catch { Escrever-Log "Falha ao ler log de sessao: $($_.Exception.Message)" }',
     '    try { Verificar-AcessoRemoto } catch { Escrever-Log "Falha ao checar acesso remoto: $($_.Exception.Message)" }',
     '    $contador++',
+    '    # Nos quiosques, quem bate o heartbeat é o navegador. A configuração',
+    '    # do agente é consultada aqui para o Ctrl+Q continuar independente dele.',
+    '    if (-not $Servico -and ($contador -eq 1 -or $contador % 5 -eq 0)) { try { Sincronizar-NoPulsoPrint } catch {} }',
     '    if ($contador % $TicksParaVerificacaoPesada -eq 0) {',
     '      # a instancia de boot (SYSTEM) nao gerencia janela: abrir navegador',
     '      # sem sessao grafica so acumularia processo fantasma na sessao 0',

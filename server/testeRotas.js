@@ -6932,7 +6932,7 @@ setTimeout(async () => {
       'auto-update repassa o -Servico (a de boot renasce como boot)':
         sInt.includes('if ($Servico) { $argsNovo += " -Servico" }'),
       'boot (SYSTEM) não abre janela de chat nem navegador':
-        sInt.includes('if (-not $Servico) { try { Iniciar-JanelaChat }') && sAt.includes('if (-not $Servico) {'),
+        sInt.includes('if (-not $Servico) {') && sInt.includes('Iniciar-JanelaChat') && sAt.includes('if (-not $Servico) {'),
       'blindagem vale também pro tipo atendimento':
         sAt.includes('-AtStartup') && sAt.includes('UiEstaAtiva'),
       'versão bumpada (sem bump, nenhum agente vivo atualiza)':
@@ -6941,6 +6941,11 @@ setTimeout(async () => {
         /como Administrador/.test(htmlNoc) && /alguém fizer login no Windows/.test(htmlNoc),
       'typo "calada há há" corrigido no card':
         !htmlNoc.includes('calada há ${'),
+      'NoPulsoPrint é opt-in, captura local Ctrl+Q e separa por mês':
+        vg.VERSAO_VIGIA >= 25
+        && sInt.includes('NoPulsoPrint-') && sInt.includes('GetAsyncKeyState(0x51)')
+        && sInt.includes('GetFolderPath("MyPictures")') && sInt.includes('Get-Date -Format "yyyy-MM"')
+        && sInt.includes('configuracao-agente') && htmlNoc.includes('novo-comp-nopulso-print'),
     };
     const errosVigia = Object.entries(confVigia).filter(([, ok]) => !ok).map(([k]) => k);
     if (errosVigia.length) ruins += 1;
