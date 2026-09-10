@@ -14726,7 +14726,7 @@ setTimeout(async () => {
       'participante remove o anexo que ele mandou, não o dos outros': tiraDoOutro.status === 400 && /remove só o anexo que enviou/i.test(JSON.parse(tiraDoOutro.corpo).error || '') && tiraOSeu.status === 200,
       'quem não participa não comenta nem anexa': comentaFora.status === 400 && anexaFora.status === 404,
       'o dono troca quem participa e quem saiu perde o acesso': trocaEquipe.status === 200 && JSON.stringify(t4.colaboradoresIds) === '["u-eq-fora"]' && partSaiu.status === 400,
-      'participante inexistente é recusado antes de gravar': fantasma.status === 400 && /não encontrado|inativo/i.test(JSON.parse(fantasma.corpo).error || ''),
+      'participante inexistente é recusado antes de gravar': fantasma.status === 400 && /não está no seu acesso|não encontrad|inativ/i.test(JSON.parse(fantasma.corpo).error || ''),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okEquipeMD = !falhas.length;
@@ -15239,6 +15239,76 @@ setTimeout(async () => {
   } catch (e) { okMarca = false; console.log('  erro: ' + e.message); }
   if (!okMarca) ruins += 1;
   console.log(`${okMarca ? '✓' : '✗'} Marca da unidade: o Master define no perfil, é diferente de rede, e não se deduz do nome`);
+
+  // ---- Meu Dia: quem cria nasce responsável, e quem ele alcança ----
+  // Antes só Master e Admin atribuíam, e o usuário de loja só se via na lista.
+  // Agora ele escolhe dentro do próprio acesso - e o Admin da empresa dele e o
+  // Master aparecem SEMPRE, que é por onde a loja escala o que não resolve.
+  let okElegiveis = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const usersMod = require(__dirname + '/users.js');
+    const senhaEL = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    // a empresa precisa EXISTIR de verdade: auth.js recorta as unidades do
+    // acesso pelas unidades da empresa, então um empresaId solto zeraria o
+    // escopo. Criada pelo próprio módulo, que já invalida o cache.
+    const empresasMod = require(__dirname + '/empresas.js');
+    const empTeste = await empresasMod.create({ nome: 'Empresa do teste ' + Date.now(), tipoNegocio: 'alimentacao', unidades: ['DOM_19706', '19855'] });
+    const gente = {
+      'el-loja': { unidades: ['DOM_19706'] },
+      'el-colega': { unidades: ['DOM_19706'] },
+      'el-outra': { unidades: ['19855'] },
+      'el-admin': { unidades: [], admin: true },
+      'el-inativo': { unidades: ['DOM_19706'], inativo: true },
+    };
+    for (const [quem, cfg] of Object.entries(gente)) {
+      DOCS.set(`users/u-${quem}`, {
+        passwordHash: senhaEL, role: 'user', active: !cfg.inativo, email: `${quem}@teste.local`, username: quem,
+        isAdmin: !!cfg.admin, empresaId: null,
+        permissions: { sections: ['tarefas'], unidades: cfg.unidades, vaultSubgroups: [], tiposSolicitacao: [] },
+        createdAt: new Date().toISOString(),
+      });
+      await usersMod.updatePermissions(`u-${quem}`, { sections: ['tarefas'], unidades: cfg.unidades, vaultSubgroups: [], tiposSolicitacao: [] });
+      if (cfg.admin || quem === 'el-loja' || quem === 'el-colega') await usersMod.updateEmpresa(`u-${quem}`, empTeste.id);
+    }
+    const cabLoja = { Authorization: 'Bearer ' + (await auth.login('el-loja@teste.local', 'SenhaDeTeste!2026')).token };
+
+    const ctx = await pedir('/api/tarefas/contexto', cabLoja);
+    const c = ctx.status === 200 ? JSON.parse(ctx.corpo) : {};
+    const ids = (c.responsaveis || []).map((r) => r.id);
+    const meMaster = JSON.parse((await pedir('/api/me', cabMD)).corpo);
+
+    // o usuário de loja abre tarefa no nome do colega da mesma unidade
+    const proColega = await postarJson('/api/tarefas', { titulo: 'Levar o malote', unidade: 'DOM_19706', responsavelId: 'u-el-colega', colaboradoresIds: ['u-el-admin'] }, cabLoja);
+    const t = proColega.status === 200 ? JSON.parse(proColega.corpo) : {};
+    // e não alcança quem é de outra unidade
+    const proEstranho = await postarJson('/api/tarefas', { titulo: 'x', unidade: 'DOM_19706', responsavelId: 'u-el-outra' }, cabLoja);
+    const inativo = await postarJson('/api/tarefas', { titulo: 'x', unidade: 'DOM_19706', colaboradoresIds: ['u-el-inativo'] }, cabLoja);
+    // sem escolher ninguém, quem cria é o responsável
+    const semEscolher = await postarJson('/api/tarefas', { titulo: 'Conferir o caixa', unidade: 'DOM_19706' }, cabLoja);
+    const tSem = semEscolher.status === 200 ? JSON.parse(semEscolher.corpo) : {};
+
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+
+    const conf = {
+      'o usuário de loja enxerga a si e o colega da mesma unidade': ctx.status === 200 && ids.includes('u-el-loja') && ids.includes('u-el-colega'),
+      'e NÃO enxerga quem é de outra unidade': !ids.includes('u-el-outra'),
+      'o Admin da empresa dele aparece sempre': ids.includes('u-el-admin'),
+      'o Master aparece sempre': ids.includes(meMaster.id),
+      'usuário inativo não entra na lista': !ids.includes('u-el-inativo'),
+      'ele abre tarefa no nome do colega (antes era só Master/Admin)': proColega.status === 200 && t.responsavelId === 'u-el-colega' && JSON.stringify(t.colaboradoresIds) === '["u-el-admin"]',
+      'mas não alcança quem está fora do acesso dele': proEstranho.status === 400 && /não está no seu acesso/i.test(JSON.parse(proEstranho.corpo).error || ''),
+      'nem consegue pôr um inativo como participante': inativo.status === 400,
+      'sem escolher ninguém, quem cria é o responsável': semEscolher.status === 200 && tSem.responsavelId === 'u-el-loja',
+      'a tela já abre com quem cria selecionado (e marcado "(você)")': /if\(lista\.some\(u=>u\.id===CTX\.eu\)\)\$\('RESP'\)\.value=CTX\.eu;/.test(html) && /u\.id===CTX\.eu\?' \(você\)':''/.test(html),
+      'o seletor de participantes não depende mais de podeAtribuir': /\$\('COLABROW'\)\.hidden=!lista\.length/.test(html) && !/\$\('COLABROW'\)\.hidden=!CTX\.podeAtribuir/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okElegiveis = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (ctx=${ctx.status} ids=${JSON.stringify(ids)} colega=${proColega.status} ${proColega.corpo.slice(0, 90)})`);
+  } catch (e) { okElegiveis = false; console.log('  erro: ' + e.message); }
+  if (!okElegiveis) ruins += 1;
+  console.log(`${okElegiveis ? '✓' : '✗'} Meu Dia: quem cria nasce responsável e escolhe dentro do próprio acesso - com o Admin da empresa e o Master sempre na lista`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

@@ -9177,6 +9177,42 @@ function ticketPodeConcluirTarefa(ticket) {
   return ticket?.tipo === 'suporte-ti' || ticket?.status === 'APROVADO';
 }
 
+// QUEM PODE RECEBER uma tarefa de quem está criando. Uma função só, usada pra
+// montar a lista da tela E pra validar o que voltou dela - se fossem duas
+// regras, a tela ofereceria gente que o servidor recusa.
+//
+// Regra do Master (10/09/2026), por papel de quem cria:
+// - usuário de loja: quem tem acesso a alguma unidade dele, mais o Admin da
+//   empresa dele e o Master, que aparecem SEMPRE - é por eles que a loja
+//   escala o que não resolve sozinha;
+// - Admin: qualquer um das unidades dele (o teto é a empresa, ver auth.js);
+// - Master: qualquer usuário ativo.
+//
+// Em todos os casos a pessoa que cria aparece, e é ela o responsável padrão.
+function elegiveisParaTarefa(req, todos) {
+  // o MESMO escopo que o resto do Meu Dia usa (acessoDasTarefas) - Admin pela
+  // empresa, quem lança pelas unidades marcadas no acesso dele
+  const minhas = new Set(acessoDasTarefas(req).unidades || []);
+  return (todos || []).filter((u) => {
+    if (u.active === false) return false;
+    if (u.id === req.user.id) return true;
+    if (req.isMaster) return true;
+    if (u.role === 'master') return true;
+    if (u.isAdmin && u.empresaId && u.empresaId === req.empresaId) return true;
+    return (u.permissions?.unidades || []).some((codigo) => minhas.has(codigo));
+  });
+}
+
+// Master e Admin da mesma empresa alcançam qualquer unidade que quem cria
+// enxerga - o escopo de quem cria já está preso à empresa dele (auth.js), então
+// não precisa de leitura extra pra confirmar.
+function alcancaUnidadeDaTarefa(req, pessoa, unidade) {
+  if (!unidade) return true;
+  if (pessoa.role === 'master') return true;
+  if (pessoa.isAdmin && pessoa.empresaId && pessoa.empresaId === req.empresaId) return true;
+  return (pessoa.permissions?.unidades || []).includes(unidade);
+}
+
 function podeDistribuirTarefas(req) {
   return req.isMaster || req.isAdmin || users.ehCargoGerente(req.user?.cargo);
 }
@@ -9282,12 +9318,9 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
     // Só Master/Admin podem distribuir. A lista respeita unidade/empresa e
     // expõe nome de usuário, nunca e-mail, para não criar identificação por
     // dado de contato nem vazar pessoas de outro cliente.
-    let responsaveis = [req.user];
-    if (req.isMaster || req.isAdmin) {
-      const permitidas = new Set(codigos);
-      responsaveis = (await users.list()).filter((u) => u.active !== false && (req.isMaster
-        || (u.permissions?.unidades || []).some((unidade) => permitidas.has(unidade))));
-    }
+    // a lista é a mesma que a validação usa (elegiveisParaTarefa) - quem
+    // aparece na tela é exatamente quem o servidor aceita
+    const responsaveis = elegiveisParaTarefa(req, await users.list());
     res.json({
       // a rede de cada unidade vem de redes.js (a mesma regra do resto do app),
       // pro filtro de Grupo do Meu Dia não precisar de uma lista fixa própria
@@ -9318,21 +9351,17 @@ app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
     if (unidade && !req.isMaster && !(acesso.unidades || []).includes(unidade)) {
       return res.status(403).json({ error: 'Você só pode criar tarefas para uma unidade do seu acesso.' });
     }
+    // quem cria é o responsável por padrão; se escolheu outra pessoa, ela passa
+    // pela MESMA validação dos participantes (uma regra só, não duas)
     let responsavel = req.user;
     const responsavelId = String(req.body?.responsavelId || '').trim();
     if (responsavelId && responsavelId !== req.user.id) {
-      if (!req.isMaster && !req.isAdmin) return res.status(403).json({ error: 'Somente Master ou Admin pode atribuir tarefas.' });
-      responsavel = (await users.list()).find((u) => u.id === responsavelId && u.active !== false);
-      if (!responsavel) return res.status(400).json({ error: 'Responsável não encontrado ou inativo.' });
-      if (!req.isMaster && !(responsavel.permissions?.unidades || []).some((codigo) => (acesso.unidades || []).includes(codigo))) {
-        return res.status(403).json({ error: 'O responsável não pertence a uma unidade do seu acesso.' });
-      }
-      if (unidade && responsavel.role !== 'master' && !(responsavel.permissions?.unidades || []).includes(unidade)) {
-        return res.status(403).json({ error: 'O responsável não tem acesso à unidade selecionada.' });
-      }
+      const [escolhido] = await resolverColaboradores(req, acesso, [responsavelId], unidade, false, true);
+      if (!escolhido) return res.status(400).json({ error: 'Responsável não encontrado ou inativo.' });
+      responsavel = escolhido;
     }
     const mapa = unidade ? await construirUnidadesMapa() : {};
-    const participantes = await resolverColaboradores(req, acesso, req.body?.colaboradoresIds, unidade);
+    const participantes = await resolverColaboradores(req, acesso, req.body?.colaboradoresIds, unidade, false, true);
     const criada = await tarefas.criar({
       titulo: req.body?.titulo, descricao: req.body?.descricao,
       dataInicio: req.body?.dataInicio, dataEntrega: req.body?.dataEntrega,
@@ -9513,20 +9542,19 @@ app.delete('/api/tarefas/:id/anexos/:anexoId', auth.requireAuth, async (req, res
 // quem pode entrar como participante é a MESMA regra do responsável: usuário
 // ativo, dentro do escopo de quem está criando e com acesso à unidade da
 // tarefa. Sem isso dava pra puxar alguém de outra franquia pra dentro do card.
-async function resolverColaboradores(req, acesso, ids, unidade, podeResponsavel = false) {
+async function resolverColaboradores(req, acesso, ids, unidade, podeResponsavel = false, naCriacao = false) {
   const pedidos = [...new Set((Array.isArray(ids) ? ids : []).map(String).filter(Boolean))].slice(0, 20);
   if (!pedidos.length) return [];
-  if (!podeDistribuirTarefas(req) && !podeResponsavel) throw new Error('Somente Master, Admin, gerente ou o responsável pela tarefa define quem participa.');
-  const todos = await users.list();
+  // Na CRIAÇÃO qualquer um que pode abrir tarefa também escolhe quem faz e
+  // quem participa - a lista já vem presa ao acesso dele. Mexer em tarefa que
+  // JÁ EXISTE continua sendo de quem distribui ou do responsável dela.
+  if (!naCriacao && !podeDistribuirTarefas(req) && !podeResponsavel) throw new Error('Somente Master, Admin, gerente ou o responsável pela tarefa define quem participa.');
+  const elegiveis = elegiveisParaTarefa(req, await users.list());
   return pedidos.map((id) => {
-    const pessoa = todos.find((u) => u.id === id && u.active !== false);
-    if (!pessoa) throw new Error('Participante não encontrado ou inativo.');
-    const doPessoal = pessoa.role === 'master' ? [] : (pessoa.permissions?.unidades || []);
-    if (!req.isMaster && !doPessoal.some((codigo) => (acesso.unidades || []).includes(codigo))) {
-      throw new Error(`${pessoa.username || pessoa.nome || 'O participante'} não pertence a uma unidade do seu acesso.`);
-    }
-    if (unidade && pessoa.role !== 'master' && !doPessoal.includes(unidade)) {
-      throw new Error(`${pessoa.username || pessoa.nome || 'O participante'} não tem acesso à unidade selecionada.`);
+    const pessoa = elegiveis.find((u) => u.id === id);
+    if (!pessoa) throw new Error('Essa pessoa não está no seu acesso (ou está inativa).');
+    if (!alcancaUnidadeDaTarefa(req, pessoa, unidade)) {
+      throw new Error(`${pessoa.username || pessoa.nome || 'A pessoa'} não tem acesso à unidade selecionada.`);
     }
     return pessoa;
   });
