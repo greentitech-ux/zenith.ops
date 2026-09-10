@@ -957,8 +957,8 @@ function renderCanaisExtras(unidade){
 // nao no proprio input) porque o input e limpo logo depois do change - senao
 // escolher a MESMA foto de novo, depois de um erro, nao dispara evento nenhum.
 let ARQUIVOS_RELATORIO = [];
-// Cada escolha ganha uma versao. Escolher outro lote (ou limpar) invalida o
-// preparo anterior, pra ele nunca repor foto que a pessoa acabou de trocar.
+// Cada escolha recebe uma versão. Limpar ou escolher outro lote invalida a
+// preparação anterior, para ela nunca repor fotos que a pessoa acabou de tirar.
 let VERSAO_PREPARO_RELATORIO = 0;
 
 // Escolher SOMA ao que ja estava, em vez de trocar. Seletor que devolve um
@@ -1010,9 +1010,9 @@ function carregarViaImgRelatorio(file){
 }
 async function comprimirImagemRelatorio(file){
   if(!file || !/^image\//.test(file.type||'')) return file; // PDF sobe inteiro
-  // Print de relatorio tem poucos KB. Nao ha ganho em abrir canvas pra ele - e
-  // e' justamente no decoder que a tela ficava parada em "Preparando foto...".
-  // A checagem de tamanho ja existia, mas so DEPOIS de decodificar: tarde.
+  // Capturas como as do relatório diário têm poucos KB. Não há ganho em abrir
+  // canvas para elas — e pular o decoder evita os travamentos vistos no Chrome.
+  // A checagem já existia, mas só DEPOIS de decodificar: tarde demais.
   if(file.size <= JA_PEQUENA_RELATORIO) return file;
   try{
     let img = window.createImageBitmap
@@ -1091,7 +1091,8 @@ function pintarSelecaoRelatorio(){
   }
   sel.classList.remove('hidden');
   sel.innerHTML = `<b>${ARQUIVOS_RELATORIO.length}</b> foto(s) escolhida(s): ${escapeHtml(nomesSelecionados())}`+
-    ` — <a href="#" onclick="limparSelecaoRelatorio();return false;" style="color:var(--muted);">limpar</a>`;
+    ` — <button type="button" id="limpar-fotos-relatorio" class="link-btn" style="color:var(--muted);">limpar</button>`;
+  sel.querySelector('#limpar-fotos-relatorio').addEventListener('click', limparSelecaoRelatorio);
   btnLer.disabled = false;
 }
 // ---- OS CAMPOS PRINCIPAIS, E A TRAVA DEPOIS DELES ----
@@ -1165,9 +1166,9 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', async (
   };
   atualizarProgresso(0, arquivos.length);
   try{
-    const preparadas = await comprimirVariasRelatorio(arquivos, atualizarProgresso);
+    const preparados = await comprimirVariasRelatorio(arquivos, atualizarProgresso);
     if(versao !== VERSAO_PREPARO_RELATORIO) return;
-    ARQUIVOS_RELATORIO = juntarFotosRelatorio(ARQUIVOS_RELATORIO, preparadas, MAX_FOTOS_RELATORIO);
+    ARQUIVOS_RELATORIO = juntarFotosRelatorio(ARQUIVOS_RELATORIO, preparados, MAX_FOTOS_RELATORIO);
     pintarSelecaoRelatorio();
     msg.innerHTML = `<span style="color:var(--muted);">${ARQUIVOS_RELATORIO.length} foto(s) pronta(s). Confira e clique em <b>Realizar leitura</b>. Nada foi enviado ainda.</span>`;
   }catch(err){

@@ -116,9 +116,12 @@
 
   const style = document.createElement('style');
   style.textContent = `
-    .zn-notif-wrap{position:fixed;top:14px;right:14px;z-index:100000;display:flex;flex-direction:column;gap:10px;max-width:min(360px,calc(100vw - 28px));}
+    .zn-notif-wrap{position:fixed;top:14px;right:14px;z-index:100000;display:flex;flex-direction:column;gap:10px;max-width:min(360px,calc(100vw - 28px));max-height:calc(100vh - 28px);overflow-y:auto;padding-right:2px;}
     .zn-notif{background:var(--panel);border:2px solid var(--warn);border-radius:12px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,.55);animation:zn-notif-in .18s ease,zn-notif-pulse 1.6s ease-in-out infinite;font-family:var(--sans);}
+    .zn-notif .zn-cabecalho{display:flex;align-items:center;justify-content:space-between;gap:10px;}
     .zn-notif .zn-titulo{font-size:13px;font-weight:700;color:var(--text);}
+    .zn-notif button.zn-fechar{flex:none;width:28px;height:28px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--muted);font-size:16px;line-height:1;cursor:pointer;font-family:var(--sans);}
+    .zn-notif button.zn-fechar:hover{color:var(--text);border-color:var(--accent);}
     .zn-notif .zn-corpo{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.4;}
     .zn-notif .zn-direcionado{font-size:11px;color:var(--accent);margin-top:6px;font-family:var(--mono);}
     .zn-notif button.zn-ok{margin-top:10px;width:100%;background:var(--accent);color:#0b0d10;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--sans);}
@@ -189,7 +192,7 @@
     el.className = 'zn-notif';
     el.id = elId;
     el.innerHTML = `
-      <div class="zn-titulo">🔔 Nova solicitação</div>
+      <div class="zn-cabecalho"><div class="zn-titulo">🔔 Nova solicitação</div><button type="button" class="zn-fechar" title="Fechar alerta" aria-label="Fechar alerta">×</button></div>
       <div class="zn-corpo">${ICONES_TIPO[card.tipo] || '📋'} ${escapeHtml(LABELS_TIPO[card.tipo] || card.tipo)} · ${escapeHtml(card.unidadeNome || card.unidade || '—')}<br>${escapeHtml(card.titulo || '')}</div>
       ${(card.atribuidosEmails && card.atribuidosEmails.length) ? `<div class="zn-direcionado">👤 atribuído a ${escapeHtml(card.atribuidosEmails.join(', '))}</div>` : (card.direcionadoParaEmail ? `<div class="zn-direcionado">👤 direcionado a ${escapeHtml(card.direcionadoParaEmail)}</div>` : '')}
        ${soEncerra(card) ? '<button type="button" class="zn-tarefa">＋ Criar tarefa</button>' : ''}
@@ -201,6 +204,12 @@
     el.querySelector('.zn-ok').addEventListener('click', () => {
       if (soEncerra(card)) { marcarVistoNotificacao(card.tipo, card.id); return; }
       abrirSolicitacao(card.tipo, card.id);
+    });
+    // Fechar só tira o aviso desta tela; não marca como visto nem altera o
+    // ticket. Assim quem está ocupado pode limpar a tela sem perder a pendência.
+    el.querySelector('.zn-fechar').addEventListener('click', (event) => {
+      event.stopPropagation();
+      el.remove();
     });
     const criarTarefa = el.querySelector('.zn-tarefa');
     if (criarTarefa) criarTarefa.addEventListener('click', async () => {

@@ -3506,7 +3506,7 @@ setTimeout(async () => {
       'o listener de change NÃO chama fetch': !!listener && !/fetch\(/.test(listener),
       'o listener de change NÃO chama a leitura': !!listener && !/realizarLeituraRelatorio\(/.test(listener),
       'a leitura de verdade continua batendo na rota': /realizarLeituraRelatorio[\s\S]*?ler-canais/.test(html),
-      'dá pra limpar a seleção': /limparSelecaoRelatorio/.test(html),
+      'dá pra limpar a seleção e cancelar um preparo pendente': /id="limpar-fotos-relatorio"/.test(html) && /addEventListener\('click', limparSelecaoRelatorio\)/.test(html) && /VERSAO_PREPARO_RELATORIO \+= 1;/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okDoisPassosFoto = !falhas.length;
@@ -3532,8 +3532,12 @@ setTimeout(async () => {
       'PDF sobe inteiro (comprimir só mexe em imagem)': /function comprimirImagemRelatorio\([\s\S]{0,200}return file;.*PDF sobe inteiro/.test(html),
       'a compressão nunca trava a leitura por conta própria (qualquer erro devolve o arquivo original)': /catch\(e\)\{\s*\n\s*return file; \/\/ qualquer tropeço/.test(html),
       'cada foto tem prazo de preparo e uma travada não prende a tela': /const PRAZO_PREPARO_FOTO_MS = 12000;/.test(html) && /function comPrazoPreparoRelatorio\(/.test(html) && /if\(!img && window\.createImageBitmap\)/.test(html),
+      'foto pequena pula o decoder e fica disponível imediatamente': /if\(file\.size <= JA_PEQUENA_RELATORIO\) return file;/.test(html),
       'o lote prepara as fotos de forma independente e informa o progresso': /return Promise\.all\(lista\.map\(async f=>/.test(html) && /Preparando foto \$\{prontas\} de \$\{total\}/.test(html),
-      'o listener comprime antes de guardar, e SOMA em vez de trocar a seleção': !!listener && /const preparadas = await comprimirVariasRelatorio\(arquivos, atualizarProgresso\)/.test(listener) && /ARQUIVOS_RELATORIO = juntarFotosRelatorio\(ARQUIVOS_RELATORIO, preparadas, MAX_FOTOS_RELATORIO\)/.test(listener),
+      // as duas assertivas viraram uma: o listener comprime E soma. A do Codex
+      // cravava `ARQUIVOS_RELATORIO = preparados` (substituir), que era
+      // justamente o que deixava 5 fotos virarem 1
+      'o listener comprime antes de guardar, e SOMA em vez de trocar a seleção': !!listener && /const preparados = await comprimirVariasRelatorio\(arquivos, atualizarProgresso\)/.test(listener) && /ARQUIVOS_RELATORIO = juntarFotosRelatorio\(ARQUIVOS_RELATORIO, preparados, MAX_FOTOS_RELATORIO\)/.test(listener),
       'o teto de fotos passa a valer pro TOTAL somado (3 + 3 não vira 6)': !!listener && /ARQUIVOS_RELATORIO\.length \+ arquivos\.length > MAX_FOTOS_RELATORIO/.test(listener),
       'um lote antigo não sobrescreve o atual (versão de preparo)': !!listener && /const versao = \+\+VERSAO_PREPARO_RELATORIO;/.test(listener) && /if\(versao !== VERSAO_PREPARO_RELATORIO\) return;/.test(listener),
       'foto pequena não passa pelo decoder (é onde a tela ficava parada)': /if\(file\.size <= JA_PEQUENA_RELATORIO\) return file;\n  try\{/.test(html),
