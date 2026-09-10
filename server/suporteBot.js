@@ -23,6 +23,7 @@ const pedidoWatch = require('./pedidoWatch');
 const users = require('./users');
 const abastecimentoCarrinho = require('./abastecimentoCarrinho');
 const agenteAcoes = require('./agenteAcoes');
+const lojaStatus = require('./lojaStatus');
 const qaAprovacoes = require('./qaAprovacoes');
 
 // senha padrao que o Beniboy define quando a pessoa NAO lembra a senha atual
@@ -256,9 +257,37 @@ const TOOL_EXECUTAR_ACAO_AGENTE = {
   },
 };
 
+// IMPRESSORA ZEBRA: as duas unicas acoes de hardware que o Beniboy faz pra
+// quem NAO e' Master. Diferente de executar_acao_agente, aqui ele nao escolhe
+// COMANDO nenhum - a primeira so LE o estado e a segunda so reinicia a Zebra da
+// loja de quem esta falando. E' um par de propósito: reiniciar sem ler antes e'
+// o erro que a gente quer evitar (tampa aberta nao se conserta reiniciando).
+const TOOL_ESTADO_IMPRESSORA = {
+  name: 'estado_impressora',
+  description: 'Le o estado ATUAL das impressoras Zebra da loja da pessoa (sem papel, cabeca/tampa aberta, sem ribbon, fila parada, pausada). SEMPRE use isto ANTES de resetar_impressora - reiniciar sem saber o estado nao resolve e tira a impressora do ar por ~30s. Se a pessoa tem acesso a mais de uma loja, peca qual antes.',
+  input_schema: {
+    type: 'object',
+    properties: { unidade: { type: 'string', description: 'Codigo da loja. So preencha se a pessoa tem acesso a mais de uma e ja disse qual.' } },
+    required: [],
+  },
+};
+const TOOL_RESETAR_IMPRESSORA = {
+  name: 'resetar_impressora',
+  description: 'Reinicia a impressora Zebra da loja da pessoa: descarta a fila presa e a impressora volta em ~30s. O COMPUTADOR nao e tocado. Resolve fila travada e impressora pausada. NAO resolve tampa/cabeca aberta, falta de papel nem ribbon acabado - nesses casos a propria ferramenta recusa e diz o que a pessoa tem que fazer na maquina. Chame estado_impressora antes.',
+  input_schema: {
+    type: 'object',
+    properties: { unidade: { type: 'string', description: 'Codigo da loja. So preencha se a pessoa tem acesso a mais de uma e ja disse qual.' } },
+    required: [],
+  },
+};
+
 function montarTools(logado) {
   const tools = (logado && logado.temMonitor) ? [...TOOLS_BASE, TOOL_CONSULTAR_PEDIDO] : [...TOOLS_BASE];
   if (logado && logado.isMaster) tools.push(TOOL_EXECUTAR_ACAO_AGENTE);
+  // quem tem loja no acesso resolve a propria impressora sem esperar humano
+  if (logado && ((logado.unidades || []).length || logado.isMaster)) {
+    tools.push(TOOL_ESTADO_IMPRESSORA, TOOL_RESETAR_IMPRESSORA);
+  }
   return tools;
 }
 
@@ -461,6 +490,66 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       aprovadoEm: o.dataCompra, estornadoEm: o.dataChargeback, fraudeSuspeita: !!o.fraudeSuspeita,
     })));
   }
+  // ---- impressora Zebra: ler o estado, e so entao reiniciar ----
+  // A unidade NUNCA vem so do que o modelo escreveu: e sempre cruzada com o
+  // acesso de quem esta falando. Pessoa de uma loja so alcanca a dela.
+  function unidadeDaConversa(pedida) {
+    const minhas = (chat.logado && chat.logado.unidades) || [];
+    const escolhida = String(pedida || '').trim();
+    if (escolhida) {
+      if (!chat.logado.isMaster && !minhas.includes(escolhida)) return { erro: 'Essa loja não está no acesso dessa pessoa. Pergunte de qual loja ela é.' };
+      return { unidade: escolhida };
+    }
+    if (minhas.length === 1) return { unidade: minhas[0] };
+    if (!minhas.length) return { erro: 'Essa pessoa não tem loja no acesso - não dá pra saber de qual impressora ela fala. Use chamar_atendente.' };
+    return { erro: `Essa pessoa tem acesso a mais de uma loja (${minhas.join(', ')}). Pergunte de qual loja é a impressora antes de continuar.` };
+  }
+
+  function descreverImpressora(i) {
+    const quando = i.em ? ` (medido ${new Date(i.em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })})` : '';
+    const nome = i.nome || i.ip || i.mac;
+    if (i.nivel === 'desconhecido') return `${nome}: não respondeu na última checagem${quando}. Pode estar desligada ou fora da rede.`;
+    if (i.nivel === 'ok') return `${nome}: sem problema apontado${quando}.`;
+    return `${nome}: ${i.motivos.join(' · ')}${quando}.`;
+  }
+
+  if (nome === 'estado_impressora') {
+    const alvo = unidadeDaConversa(input.unidade);
+    if (alvo.erro) return alvo.erro;
+    const lista = await lojaStatus.estadoImpressorasDaUnidade(alvo.unidade);
+    if (!lista.length) return 'Essa loja não tem impressora Zebra monitorada no cadastro. Não dá pra ler o estado nem reiniciar por aqui - use chamar_atendente.';
+    return lista.map(descreverImpressora).join('\n');
+  }
+
+  if (nome === 'resetar_impressora') {
+    const alvo = unidadeDaConversa(input.unidade);
+    if (alvo.erro) return alvo.erro;
+    const lista = await lojaStatus.estadoImpressorasDaUnidade(alvo.unidade);
+    if (!lista.length) return 'Essa loja não tem impressora Zebra monitorada no cadastro. Use chamar_atendente.';
+    // trava do pedido do Master: tampa aberta (e papel/ribbon) nao se conserta
+    // reiniciando - alguem tem que ir ate a impressora. Reiniciar aqui so
+    // tiraria ela do ar por 30s e devolveria o mesmo problema.
+    const naMao = lista
+      .map((i) => ({ i, motivos: lojaStatus.motivosQuePedemMao(i.motivos) }))
+      .filter((x) => x.motivos.length);
+    if (naMao.length) {
+      return 'NÃO reiniciei. ' + naMao.map((x) => `${x.i.nome || x.i.ip || x.i.mac}: ${x.motivos.join(' · ')}`).join('; ')
+        + '. Isso não se resolve reiniciando - peça pra pessoa resolver na própria impressora (fechar a tampa, repor papel ou ribbon)'
+        + ' e avisar quando terminar. Aí chame estado_impressora de novo e, se estiver liberado, resetar_impressora.';
+    }
+    const alvos = [...new Map(lista.map((i) => [`${i.computador.codigo}|${i.computador.posto}`, i.computador])).values()]
+      .map((c) => ({ codigo: c.codigo, posto: c.posto }));
+    const resultados = await lojaStatus.enfileirarComandoEmAlvos(
+      alvos,
+      async (doc) => lojaStatus.comandoResetZebra(await lojaStatus.impressorasPraSondar(doc.codigo)),
+      { acao: 'beniboy.resetarZebra', origem: 'beniboy-chat', porNome: 'Beniboy' },
+    );
+    const ok = (resultados || []).filter((x) => x.ok).length;
+    if (!ok) return 'Não consegui enviar o comando pra loja agora (o computador que fala com a impressora pode estar desligado). Use chamar_atendente.';
+    return `Reset enviado pra ${ok} computador(es) da loja. A impressora descarta a fila e volta em cerca de 30 segundos - o computador não é reiniciado.`
+      + ' Peça pra pessoa testar de novo em 1 minuto e, se continuar, chame um atendente.';
+  }
+
   if (nome === 'registrar_nota_interna') {
     const resumo = String(input.resumo || '').trim();
     if (!resumo) return 'Escreva o resumo da nota interna.';

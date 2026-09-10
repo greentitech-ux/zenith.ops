@@ -15501,6 +15501,55 @@ setTimeout(async () => {
   if (!okPrintCelular) ruins += 1;
   console.log(`${okPrintCelular ? '✓' : '✗'} NoPulsoPrint no celular: marca por pessoa, imagem da própria tela e caminho até a galeria pelo compartilhar`);
 
+  // ---- Beniboy resolve a impressora: ler o estado ANTES de reiniciar ----
+  // Pedido do Master (10/09/2026): saber a unidade exata, confirmar que é a
+  // Zebra, e se voltar TAMPA ABERTA avisar pra fechar em vez de reiniciar -
+  // reset não conserta tampa aberta, só tira a impressora do ar por 30s.
+  let okBeniboyImp = false;
+  try {
+    const ls = require(__dirname + '/lojaStatus.js');
+    const imp = require(__dirname + '/impressoraStatus.js');
+    const bot = require('fs').readFileSync(__dirname + '/suporteBot.js', 'utf8');
+
+    // os motivos que pedem mão são os que impressoraStatus.avaliar() produz -
+    // se alguém renomear lá, esta lista tem que acompanhar
+    const zebraTampaAberta = imp.avaliar({ cabecaAberta: 1, fila: 0 });
+    const zebraSemPapel = imp.avaliar({ papelAcabou: 1, fila: 0 });
+    const zebraFilaPresa = imp.avaliar({ fila: imp.FILA_LIMITE + 5 });
+    const zebraOk = imp.avaliar({ fila: 0 });
+
+    const pedeMao = {
+      tampa: ls.motivosQuePedemMao(zebraTampaAberta.motivos),
+      papel: ls.motivosQuePedemMao(zebraSemPapel.motivos),
+      fila: ls.motivosQuePedemMao(zebraFilaPresa.motivos),
+      ok: ls.motivosQuePedemMao(zebraOk.motivos),
+    };
+
+    const conf = {
+      'tampa aberta é caso de mão, não de reset': pedeMao.tampa.length === 1 && pedeMao.tampa[0] === 'Cabeça aberta',
+      'papel e ribbon também': pedeMao.papel.length === 1 && ls.MOTIVOS_QUE_PEDEM_MAO.includes('Sem ribbon'),
+      'fila presa NÃO é de mão (é exatamente o que o reset resolve)': pedeMao.fila.length === 0 && zebraFilaPresa.motivos.some((m) => /^Fila com \d+ trabalho/.test(m)),
+      'impressora sem problema não vira caso de mão': pedeMao.ok.length === 0 && zebraOk.nivel === 'ok',
+      'os motivos vêm do impressoraStatus, não de uma lista inventada': ls.MOTIVOS_QUE_PEDEM_MAO.every((m) => [
+        ...imp.avaliar({ cabecaAberta: 1 }).motivos,
+        ...imp.avaliar({ papelAcabou: 1 }).motivos,
+        ...imp.avaliar({ transferencia: 1, ribbonAcabou: 1 }).motivos,
+      ].includes(m)),
+      'o Beniboy tem as duas ferramentas, e ler vem antes de reiniciar': /name: 'estado_impressora'/.test(bot) && /name: 'resetar_impressora'/.test(bot) && /SEMPRE use isto ANTES de resetar_impressora/.test(bot),
+      'quem tem loja no acesso alcança as duas (não é só Master)': /if \(logado && \(\(logado\.unidades \|\| \[\]\)\.length \|\| logado\.isMaster\)\) \{\n    tools\.push\(TOOL_ESTADO_IMPRESSORA, TOOL_RESETAR_IMPRESSORA\);/.test(bot),
+      'a unidade é cruzada com o acesso, nunca aceita só o que o modelo escreveu': /if \(!chat\.logado\.isMaster && !minhas\.includes\(escolhida\)\) return \{ erro:/.test(bot),
+      'com mais de uma loja, ele pergunta antes de agir': /Pergunte de qual loja é a impressora antes de continuar/.test(bot),
+      'o reset recusa quando é caso de mão, e diz o que fazer': /if \(naMao\.length\) \{\n\s*return 'NÃO reiniciei\. '/.test(bot) && /fechar a tampa, repor papel ou ribbon/.test(bot) && /chame estado_impressora de novo/.test(bot),
+      'loja sem Zebra cadastrada não tenta nada': /não tem impressora Zebra monitorada no cadastro/.test(bot),
+      'o reset diz que o COMPUTADOR não é tocado': /o computador não é reiniciado/.test(bot),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okBeniboyImp = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (tampa=${JSON.stringify(zebraTampaAberta.motivos)} fila=${JSON.stringify(zebraFilaPresa.motivos)})`);
+  } catch (e) { okBeniboyImp = false; console.log('  erro: ' + e.message); }
+  if (!okBeniboyImp) ruins += 1;
+  console.log(`${okBeniboyImp ? '✓' : '✗'} Beniboy: lê o estado da Zebra antes de reiniciar - tampa aberta vira instrução, não reset`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

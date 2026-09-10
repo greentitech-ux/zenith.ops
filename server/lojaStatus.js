@@ -2501,6 +2501,51 @@ async function flushHeartbeatsPendentes() {
 // sem requisicao extra. So entra quem o Master marcou na tela como
 // tipo:'impressora' + monitorar:true: ninguem e sondado por padrao, e uma
 // impressora que ninguem marcou nunca recebe um pacote a mais.
+// Estado mais recente das Zebras de uma unidade, lido do espelho em memoria
+// (custo zero de leitura no Firestore - ver §3 do CLAUDE.md).
+//
+// Existe pro Beniboy decidir ANTES de reiniciar: tampa aberta, papel acabado ou
+// ribbon no fim nao se conserta reiniciando - alguem tem que ir ate a
+// impressora. Reiniciar nesses casos so tira ela do ar por ~30s e devolve o
+// mesmo problema, com a pessoa achando que o suporte tentou algo.
+//
+// Mesma trava de impressorasPraSondar: so entra o que o Master marcou como
+// impressora ZEBRA monitorada. Sem marca, nao aparece.
+async function estadoImpressorasDaUnidade(codigo) {
+  const daUnidade = (await getApelidos())[codigo] || {};
+  const espelho = [...(await garantirEspelho()).values()];
+  const vistos = new Set();
+  const out = [];
+  for (const doc of espelho) {
+    if (doc.codigo !== codigo) continue;
+    for (const [mac, est] of Object.entries(doc.impressoras || {})) {
+      if (vistos.has(mac)) continue;
+      const cad = normalizarEntradaApelido(daUnidade[mac]);
+      if (!cad.monitorar || cad.tipo !== 'impressora' || cad.marca !== 'zebra') continue;
+      vistos.add(mac);
+      out.push({
+        mac,
+        ip: (est && est.ip) || null,
+        nome: cad.apelido || null,
+        nivel: (est && est.nivel) || 'desconhecido',
+        motivos: (est && est.motivos) || [],
+        fila: est && est.fila != null ? est.fila : null,
+        em: (est && est.em) || null,
+        computador: { codigo: doc.codigo, posto: doc.posto, nome: doc.nome || null },
+      });
+    }
+  }
+  return out;
+}
+
+// motivos que NAO se resolvem com reset - a pessoa precisa ir ate a impressora.
+// Os textos sao os que impressoraStatus.avaliar() ja produz; nao invente outros
+// (§5 do CLAUDE.md: status vem do proprio codigo).
+const MOTIVOS_QUE_PEDEM_MAO = ['Cabeça aberta', 'Sem papel', 'Sem ribbon'];
+function motivosQuePedemMao(motivos) {
+  return (motivos || []).filter((m) => MOTIVOS_QUE_PEDEM_MAO.includes(m));
+}
+
 async function impressorasPraSondar(codigo) {
   const daUnidade = (await getApelidos())[codigo] || {};
   const marcados = new Set(
@@ -2542,6 +2587,7 @@ module.exports = {
   enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos,
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora,
   relatorioQuedas, quedasDeUmComputador,
+  estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
   COMANDO_LIMPAR_TRAVADOS, COMANDO_REINICIAR, COMANDO_ABORTAR_REINICIO, COMANDO_REINICIAR_ANYDESK,
   COMANDO_REDE_DESTRAVAR,
   comandoResetZebra,
