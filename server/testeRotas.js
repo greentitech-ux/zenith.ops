@@ -15093,6 +15093,61 @@ setTimeout(async () => {
   if (!okPdfMD) ruins += 1;
   console.log(`${okPdfMD ? '✓' : '✗'} Meu Dia: PDF de ocorrência da tarefa e relatório consolidado do filtro, os dois abrindo pra conferir antes de baixar`);
 
+  // ---- Aviso de fechamento: o X de "não avisar mais", só do Master ----
+  // A loja tem uma pendência; o Master tem a soma do parque. O mesmo aviso que
+  // cobra uma pessoa atrapalha a outra - mas o X dispensa o que está pendente
+  // AGORA, não o alarme pra sempre.
+  let okXAviso = false;
+  try {
+    const cabMD = { Authorization: 'Bearer ' + token };
+    const fl = require(__dirname + '/fechamentosLive.js');
+    const tema = require('fs').readFileSync(__dirname + '/public/tema.js', 'utf8');
+
+    // a lista é cortada no limite, mas as CHAVES têm que vir completas
+    const unidades = Array.from({ length: 4 }, (_, i) => ({ codigo: `U${i}`, nome: `Loja ${i}` }));
+    const jaLancou = unidades.map((u) => ({ unidade: u.codigo, data: '2026-09-01' }));
+    const calc = fl.diasPendentesDeFechamento(jaLancou, unidades, '2026-09-09', 5, 3);
+    const chavesCompletas = calc.chaves.length === calc.total && calc.pendentes.length === 3 && calc.total > 3;
+
+    const rota = await pedir('/api/fechamentos/pendencias', cabMD);
+    const corpo = rota.status === 200 ? JSON.parse(rota.corpo) : {};
+
+    // a decisão de mostrar sai do tema.js e roda aqui de verdade
+    const visiveis = new Function(`${(tema.match(/function pendenciasVisiveis\([\s\S]*?\n  \}/) || [''])[0]} return pendenciasVisiveis;`)();
+    const dados = {
+      pendentes: [{ unidade: 'A', data: '2026-09-08' }, { unidade: 'B', data: '2026-09-08' }],
+      total: 5, chaves: ['A|2026-09-08', 'B|2026-09-08', 'C|2026-09-07', 'C|2026-09-06', 'C|2026-09-05'],
+    };
+    const semDispensa = visiveis(dados, []);
+    const comUma = visiveis(dados, ['A|2026-09-08']);
+    const tudoDispensado = visiveis(dados, dados.chaves);
+    // dia lançado depois some da memória: se voltar a ficar em aberto, avisa
+    const podada = visiveis({ ...dados, chaves: ['A|2026-09-08'] }, ['A|2026-09-08', 'C|2026-09-07']);
+    // dia NOVO não é silenciado por uma dispensa antiga
+    const diaNovo = visiveis(
+      { pendentes: [{ unidade: 'A', data: '2026-09-09' }], total: 1, chaves: ['A|2026-09-09'] },
+      ['A|2026-09-08'],
+    );
+
+    const conf = {
+      'as chaves vêm completas, mesmo com a lista cortada pelo limite': chavesCompletas,
+      'a rota diz se quem pediu é o Master (sem precisar de /api/me nas 53 telas)': rota.status === 200 && corpo.souMaster === true && Array.isArray(corpo.chaves),
+      'sem dispensa, mostra tudo que o servidor mandou': semDispensa.visiveis.length === 2 && semDispensa.total === 5,
+      'o que foi dispensado some da lista e da contagem': comUma.visiveis.length === 1 && comUma.visiveis[0].unidade === 'B' && comUma.total === 4,
+      'dispensando tudo, o aviso não aparece': tudoDispensado.visiveis.length === 0 && tudoDispensado.total === 0,
+      'dia já lançado sai da memória de dispensa (se voltar a abrir, avisa de novo)': podada.dispensadas.length === 1 && podada.dispensadas[0] === 'A|2026-09-08',
+      'dia NOVO sem fechamento volta a avisar mesmo depois do X': diaNovo.visiveis.length === 1 && diaNovo.total === 1,
+      'o X só é desenhado pro Master': /d && d\.souMaster\s*\n\s*\? '<button type="button" class="fechar"/.test(tema),
+      'e o clique nele é testado ANTES do item (senão o item engole)': tema.indexOf("closest('.fechar')") < tema.indexOf("closest('.item')"),
+      '"Agora não" continua fechando só nesta tela': /sessionStorage\.setItem\('nopulsoPendFechAdiado', location\.pathname\)/.test(tema),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okXAviso = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (rota=${rota.status} total=${calc.total} chaves=${calc.chaves.length} lista=${calc.pendentes.length})`);
+  } catch (e) { okXAviso = false; console.log('  erro: ' + e.message); }
+  if (!okXAviso) ruins += 1;
+  console.log(`${okXAviso ? '✓' : '✗'} Aviso de fechamento: só o Master tem o X de não avisar mais, e ele dispensa o que está pendente agora - dia novo volta a avisar`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
