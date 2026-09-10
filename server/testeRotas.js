@@ -15310,6 +15310,55 @@ setTimeout(async () => {
   if (!okElegiveis) ruins += 1;
   console.log(`${okElegiveis ? '✓' : '✗'} Meu Dia: quem cria nasce responsável e escolhe dentro do próprio acesso - com o Admin da empresa e o Master sempre na lista`);
 
+  // ---- Agente: nenhuma função chamada sem estar definida, em NENHUM tipo ----
+  // O NoPulsoPrint nasceu quebrado na máquina de atendimento: as funções dele
+  // ficaram dentro do bloco do tipo "interno", mas o loop do outro tipo as
+  // CHAMAVA. Como a chamada estava num try/catch vazio, ela morria calada tick
+  // após tick e o Ctrl+Q simplesmente nunca funcionava lá.
+  let okAgenteFuncoes = false;
+  try {
+    const vs = require(__dirname + '/vigiaScript.js');
+    const tipos = ['interno', 'atendimento'];
+    const scripts = {};
+    tipos.forEach((tipo) => {
+      scripts[tipo] = vs.montarScriptVigia({ codigo: 'DOM_19706', posto: 'PC1', tipo, agentToken: 'tok', noPulsoPrint: true });
+    });
+    // todas as funções que o agente define em qualquer tipo
+    const nomes = new Set();
+    Object.values(scripts).forEach((txt) => {
+      for (const m of txt.matchAll(/^function ([A-Za-z]+-[A-Za-z]+)/gm)) nomes.add(m[1]);
+    });
+    const orfas = [];
+    tipos.forEach((tipo) => {
+      const txt = scripts[tipo];
+      nomes.forEach((nome) => {
+        const define = new RegExp(`^function ${nome}\\b`, 'm').test(txt);
+        // chamada = o nome aparece fora da linha que o define
+        const usos = (txt.match(new RegExp(`\\b${nome}\\b`, 'g')) || []).length;
+        if (!define && usos > 0) orfas.push(`${tipo}: ${nome}`);
+      });
+    });
+
+    const print = {
+      interno: /function Sincronizar-NoPulsoPrint/.test(scripts.interno),
+      atendimento: /function Sincronizar-NoPulsoPrint/.test(scripts.atendimento),
+    };
+
+    const conf = {
+      'nenhum tipo de máquina chama função que ele não define': orfas.length === 0,
+      'o NoPulsoPrint existe nos DOIS tipos, não só no interno': print.interno && print.atendimento,
+      'e o Ctrl+Q é armado nos dois': tipos.every((t) => /GetAsyncKeyState\(0x51\)/.test(scripts[t])),
+      'a falha de sincronizar o print não morre mais em catch vazio': !/try \{ Sincronizar-NoPulsoPrint \} catch \{\}/.test(require('fs').readFileSync(__dirname + '/vigiaScript.js', 'utf8')),
+      'o script continua começando com # NOCZenith (a trava do download)': tipos.every((t) => scripts[t].startsWith('# NOCZenith')),
+      'a versão subiu junto com a mudança no agente': vs.VERSAO_VIGIA >= 30,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAgenteFuncoes = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (órfãs: ${orfas.join(', ') || 'nenhuma'})`);
+  } catch (e) { okAgenteFuncoes = false; console.log('  erro: ' + e.message); }
+  if (!okAgenteFuncoes) ruins += 1;
+  console.log(`${okAgenteFuncoes ? '✓' : '✗'} Agente: nenhum tipo de máquina chama função que não define - e o NoPulsoPrint existe nos dois`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
