@@ -6950,7 +6950,7 @@ setTimeout(async () => {
         vg.VERSAO_VIGIA >= 29
         && sInt.includes('NoPulsoPrint-') && sInt.includes('GetAsyncKeyState(0x51)')
         && sInt.includes('GetFolderPath("MyPictures")') && sInt.includes('Get-Date -Format "yyyy-MM"')
-        && sInt.includes('Selecionar-AreaPrint') && sInt.includes('bordas/cantos redimensionam')
+        && sInt.includes('Selecionar-AreaPrint') && sInt.includes('quinas e dos meios redimensionam')
         && sInt.includes('$s.Tag.inicio') && sInt.includes('$form.Opacity = 0.32')
         && sInt.includes('Cursor-AreaPrint') && sInt.includes('Modo-AreaPrint') && sInt.includes('SizeNWSE') && sInt.includes('Salvar')
         && sInt.includes('configuracao-agente') && htmlNoc.includes('novo-comp-nopulso-print'),
@@ -15501,6 +15501,65 @@ setTimeout(async () => {
   if (!okPrintCelular) ruins += 1;
   console.log(`${okPrintCelular ? '✓' : '✗'} NoPulsoPrint no celular: marca por pessoa, imagem da própria tela e caminho até a galeria pelo compartilhar`);
 
+  // NoPulsoPrint estilo Lightshot: os pontos dos MEIOS das bordas já
+  // redimensionavam (Modo-AreaPrint devolve n/s/e/w numa faixa de 9px), mas só
+  // as QUINAS eram desenhadas - sem marcador ninguém descobria que dava pra
+  // pegar ali. E "Salvar" sempre gravava PNG: não havia copiar sem sujar a
+  // pasta. Aqui o script é GERADO e conferido, nos dois tipos de máquina.
+  let okPrintLightshot = false;
+  try {
+    const vgL = require(__dirname + '/vigiaScript.js');
+    const gerar = (tipo) => vgL.montarScriptVigia({ codigo: 'DOM_19706', posto: 'PC1', tipo, agentToken: 'tok', noPulsoPrint: true });
+    const psI = gerar('interno');
+    const psA = gerar('atendimento');
+    // as 8 alças: 4 quinas (já existiam) + 4 meios de borda (novos)
+    const alcas = (t) => {
+      const pintura = (t.match(/\$form\.Add_Paint\(\{[\s\S]*?\}\)\n/) || [''])[0];
+      // cada uma das 8 conferida SOZINHA: um (Top|Bottom) casaria com metade
+      // das alças presentes e deixaria passar a falta da outra
+      return {
+        total: (pintura.match(/New-Object System\.Drawing\.Point\(/g) || []).length,
+        quinas: (pintura.match(/New-Object System\.Drawing\.Point\(\$areaAtual\.(Left|Right),\$areaAtual\.(Top|Bottom)\)/g) || []).length,
+        meioTopo: /\$areaAtual\.Left\+\[int\]\(\$areaAtual\.Width\/2\),\$areaAtual\.Top\)/.test(pintura),
+        meioBase: /\$areaAtual\.Left\+\[int\]\(\$areaAtual\.Width\/2\),\$areaAtual\.Bottom\)/.test(pintura),
+        meioEsq: /\$areaAtual\.Left,\$areaAtual\.Top\+\[int\]\(\$areaAtual\.Height\/2\)\)/.test(pintura),
+        meioDir: /\$areaAtual\.Right,\$areaAtual\.Top\+\[int\]\(\$areaAtual\.Height\/2\)\)/.test(pintura),
+      };
+    };
+    const aI = alcas(psI);
+    // "Copiar" só chega ao disco se a ação for salvar
+    const copiaSemGravar = /\$arquivo = \$null[\s\S]{0,400}?if \(\$escolhaPrint\.acao -eq "salvar"\) \{[\s\S]{0,600}?\$recorte\.Save\(\$arquivo/.test(psI);
+    const dropListGuardada = /if \(\$arquivo\) \{[\s\S]{0,300}?SetFileDropList/.test(psI);
+
+    const conf = {
+      'VERSAO_VIGIA subiu (sem isso nenhuma das 52 máquinas baixa o script novo)': vgL.VERSAO_VIGIA >= 32,
+      'são 8 alças ao todo, nem uma a menos': aI.total === 8,
+      'as 4 quinas continuam desenhadas': aI.quinas === 4,
+      'a alça do meio de CIMA existe': aI.meioTopo,
+      'a alça do meio de BAIXO existe': aI.meioBase,
+      'a alça do meio da ESQUERDA existe': aI.meioEsq,
+      'a alça do meio da DIREITA existe': aI.meioDir,
+      'as 8 direções de redimensionar continuam existindo': /return "nw"/.test(psI) && /return "ne"/.test(psI)
+        && /return "sw"/.test(psI) && /return "se"/.test(psI) && /return "w"/.test(psI)
+        && /return "e"/.test(psI) && /return "n"/.test(psI) && /return "s"/.test(psI),
+      'arrastar por dentro continua movendo a seleção': /return "mover"/.test(psI),
+      'existe o botão Copiar, além de Salvar e Cancelar': /\$copiar\.Text="Copiar"/.test(psI)
+        && /AddRange\(@\(\$cancelar,\$copiar,\$salvar\)\)/.test(psI),
+      'Copiar NÃO grava arquivo; só Salvar grava': copiaSemGravar,
+      'sem arquivo não entra lista de arquivo na área de transferência': dropListGuardada,
+      'Ctrl+C copia e Enter salva': /\$e\.Control -and \$e\.KeyCode -eq \[System\.Windows\.Forms\.Keys\]::C[\s\S]{0,120}?\$s\.Tag\.acao="copiar"/.test(psI)
+        && /Keys\]::Enter[\s\S]{0,120}?\$s\.Tag\.acao="salvar"/.test(psI),
+      'a seleção devolve a área E a ação escolhida': /return @\{ area = \$resultado; acao = \$acaoPrint \}/.test(psI),
+      'a tela de instruções cita os pontos e o copiar': /pontos das quinas e dos meios/.test(psI) && /Ctrl\+C só copia/.test(psI),
+      'vale nos DOIS tipos de máquina, não só no interno': /\$copiar\.Text="Copiar"/.test(psA) && alcas(psA).total === 8,
+      'o script baixado continua começando com # NOCZenith (trava contra arquivo quebrado)': psI.startsWith('# NOCZenith'),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPrintLightshot = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okPrintLightshot = false; console.log('  erro: ' + e.message); }
+  if (!okPrintLightshot) ruins += 1;
+  console.log(`${okPrintLightshot ? '✓' : '✗'} NoPulsoPrint: alças nas quinas E nos meios, e Copiar sem gravar arquivo`);
   // ---- Beniboy resolve a impressora: ler o estado ANTES de reiniciar ----
   // Pedido do Master (10/09/2026): saber a unidade exata, confirmar que é a
   // Zebra, e se voltar TAMPA ABERTA avisar pra fechar em vez de reiniciar -
