@@ -14499,7 +14499,7 @@ setTimeout(async () => {
     const ontem = calcularPreset('ontem', '2026-09-09');
     const tudo = calcularPreset('tudo', '2026-09-09');
 
-    const campos = { 'F-SIT': 'abertas', 'F-GRUPO': '', 'F-UNI': '', 'F-DE': '', 'F-ATE': '', 'F-TIPO': '' };
+    const campos = { 'F-SIT': 'abertas', 'F-GRUPO': '', 'F-UNI': '', 'F-DE': '', 'F-ATE': '', 'F-TIPO': '', 'F-BUSCA': '' };
     const cifrao = (id) => ({ value: campos[id] });
     const base = `${isoFn}${trecho(/const FUSO_BR='[^']*';/)}${trecho(/function agoraBrasilia\(\)\{.*/)}const hoje=()=>iso(agoraBrasilia());${trecho(/function faixa\(.*/)}`;
     const faixa = new Function(`${base} return faixa;`)();
@@ -14554,11 +14554,13 @@ setTimeout(async () => {
     const soAvulsas = passaTipo(avulsa) && !passaTipo(doEstorno);
     campos['F-TIPO'] = '';
 
-    // noFiltro é quem a tela chama de verdade: testar as quatro peças soltas
-    // não prova que ele CHAMA as quatro. Sem isto, tirar uma da composição
-    // deixaria o seletor virar enfeite sem a suíte notar.
-    const noFiltro = new Function('passaSituacao', 'passaData', 'passaUnidade', 'passaTipo',
-      `${trecho(/function noFiltro\(.*/)}; return noFiltro;`)(passaSituacao, passaData, passaUnidade, passaTipo);
+    const passaBusca = new Function('$', 'faixa',
+      `${trecho(/const TIPO_TICKET=\{[^}]*\}/)};${trecho(/function tituloVisivel\(.*/)}${trecho(/const rotuloTicket=.*/)}${trecho(/function numeroDaTarefa\(.*/)}${trecho(/const SEM_ACENTO=.*/)}${trecho(/const COLUNA_LABEL=.*/)}${trecho(/function textoDaTarefa\(.*/)}${trecho(/function passaBusca\(.*/)}; return passaBusca;`)(cifrao, faixa);
+    // noFiltro é quem a tela chama de verdade: testar as cinco peças soltas
+    // não prova que ele CHAMA as cinco. Sem isto, tirar uma da composição
+    // deixaria o seletor (ou a busca) virar enfeite sem a suíte notar.
+    const noFiltro = new Function('passaSituacao', 'passaData', 'passaUnidade', 'passaTipo', 'passaBusca',
+      `${trecho(/function noFiltro\(.*/)}; return noFiltro;`)(passaSituacao, passaData, passaUnidade, passaTipo, passaBusca);
     const compra = { unidade: '9999', dataEntrega: '2026-09-09', status: 'A_FAZER', vinculo: { ticketTipo: 'compra' } };
     const estorno = { unidade: '9999', dataEntrega: '2026-09-09', status: 'A_FAZER', vinculo: { ticketTipo: 'estorno' } };
     campos['F-TIPO'] = 'estorno';
@@ -14573,6 +14575,9 @@ setTimeout(async () => {
     campos['F-DE'] = '2030-01-01'; campos['F-ATE'] = '2030-12-31';
     const compoeData = !noFiltro(estorno);
     campos['F-DE'] = ''; campos['F-ATE'] = '';
+    campos['F-BUSCA'] = 'impressora';
+    const compoeBusca = !noFiltro(estorno);
+    campos['F-BUSCA'] = '';
 
     const ctx = await pedir('/api/tarefas/contexto', cabMD);
     const c = ctx.status === 200 ? JSON.parse(ctx.corpo) : {};
@@ -14582,6 +14587,7 @@ setTimeout(async () => {
       'preset Mês pega do dia 1 ao último dia': mes.inicio === '2026-09-01' && mes.fim === '2026-09-30',
       'preset Ontem é um dia só': ontem.inicio === '2026-09-08' && ontem.fim === '2026-09-08',
       'preset Tudo não recorta data nenhuma': tudo.inicio === '' && tudo.fim === '',
+      'noFiltro() compõe as CINCO peças, busca inclusa': compoeBusca,
       'sem De/Até tudo passa; com intervalo, o de fora cai': semRecorte && dentro && fora,
       'tarefa sem data nenhuma some quando existe recorte (não vira sempre-visível)': foraPorFaltaDeData,
       'Grupo filtra pela rede da unidade (e tarefa pessoal não entra em grupo)': grupoFiltra,
@@ -15364,6 +15370,79 @@ setTimeout(async () => {
   } catch (e) { okAgenteFuncoes = false; console.log('  erro: ' + e.message); }
   if (!okAgenteFuncoes) ruins += 1;
   console.log(`${okAgenteFuncoes ? '✓' : '✗'} Agente: nenhum tipo de máquina chama função que não define - e o NoPulsoPrint existe nos dois`);
+
+  // Meu Dia: com 300+ cartoes no quadro, achar UM ticket exigia varrer coluna a
+  // coluna. O campo ao lado dos chips filtra a lista JA carregada (L) - em
+  // memoria, zero leitura no Firestore. Aqui a funcao real e extraida da tela e
+  // executada, entao o teste quebra se o alvo da busca mudar.
+  let okBuscaMeuDia = false;
+  try {
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const linha = (inicio) => (html.split('\n').find((l) => l.trim().startsWith(inicio)) || '').trim();
+    const buscar = new Function(`
+      let TERMO = '';
+      const $ = () => ({ value: TERMO });
+      const hoje = () => '2026-09-10';
+      ${(html.match(/const TIPO_TICKET=\{[^}]*\}/) || [''])[0]};
+      ${linha('function faixa(t){')}
+      ${linha('function tituloVisivel(x){')}
+      ${linha('const rotuloTicket=')}
+      ${linha('function numeroDaTarefa(t){')}
+      ${linha('const SEM_ACENTO=')}
+      ${linha('const COLUNA_LABEL=')}
+      ${linha('function textoDaTarefa(t){')}
+      ${linha('function passaBusca(t){')}
+      return (termo, lista) => { TERMO = termo; return lista.filter(passaBusca).map((t) => t.id); };
+    `)();
+
+    const t1 = {
+      id: 't1', numeroTicket: 4821, titulo: 'Trocar impressora', descricao: 'nao puxa papel',
+      unidadeNome: 'Mooca', criadoPorNome: 'Ana Souza', responsavelNome: 'Joao Pereira',
+      responsavelEmail: 'joao@lojas.com', vinculo: { ticketTipo: 'manutencao' },
+      status: 'A_FAZER', dataEntrega: '2026-09-30', colaboradores: [],
+    };
+    // titulo que a tela MASCARA (ver tituloVisivel): vira so "Login bloqueado"
+    const t2 = {
+      id: 't2', numeroTicket: 91, titulo: 'Login bloqueado: carlos@lojas.com',
+      unidadeNome: 'Tatuape', criadoPorNome: 'Bia Lima', responsavelNome: 'Ana Souza',
+      responsavelEmail: 'ana@lojas.com', vinculo: { ticketTipo: 'suporte-ti' },
+      status: 'CONCLUIDA', colaboradores: [],
+    };
+    const t3 = {
+      id: 't3', numeroTicket: 5000, titulo: 'Conferir estoque', unidadeNome: null,
+      criadoPorNome: 'Bia Lima', responsavelNome: 'Bia Lima', responsavelEmail: 'bia@lojas.com',
+      vinculo: null, status: 'EM_ANDAMENTO', colaboradores: [{ id: 'u9', nome: 'Carlos Dias' }],
+    };
+    const L = [t1, t2, t3];
+    const ids = (termo) => buscar(termo, L).join(',');
+
+    const conf = {
+      'busca vazia nao filtra nada': ids('') === 't1,t2,t3' && ids('   ') === 't1,t2,t3',
+      'acha pelo numero do ticket, com ou sem #': ids('4821') === 't1' && ids('#4821') === 't1',
+      'acha pelo e-mail do responsavel': ids('joao@lojas.com') === 't1',
+      'acha pelo nome de quem criou': ids('ana souza') === 't1,t2',
+      'acha pelo nome do colaborador': ids('carlos dias') === 't3',
+      'acha pela unidade': ids('mooca') === 't1',
+      'digitar sem acento acha o tipo acentuado (Manutencao -> Manutenção)': ids('manutencao') === 't1',
+      'acha pela COLUNA em que o cartao esta, nao so pelo codigo': ids('concluidas') === 't2' && ids('em andamento') === 't3',
+      'tarefa sem ticket e achavel por "avulsa"': ids('avulsa') === 't3',
+      'dois termos SOMAM (E, nao OU)': ids('ana mooca') === 't1' && ids('ana tatuape') === 't2',
+      'termo que nao existe devolve lista vazia': ids('inexistente') === '',
+      // a tela esconde esse e-mail no cartao; a busca nao pode ser o atalho que o revela
+      'e-mail mascarado no titulo NAO vira caminho de busca': ids('carlos@lojas.com') === '',
+      // sem isto o campo existe e nao filtra nada
+      'noFiltro() chama passaBusca()': /function noFiltro\(t\)\{return passaSituacao\(t\)&&passaData\(t\)&&passaUnidade\(t\)&&passaTipo\(t\)&&passaBusca\(t\)\}/.test(html),
+      'o campo fica na mesma linha dos chips de periodo': /<div class="filtro-linha"><div class="presets" id="PRESETS"><\/div>[\s\S]{0,80}id="BUSCA"/.test(html),
+      '"Limpar filtros" tambem zera a busca': /function limparFiltros\(\)\{[^\n]*\$\('F-BUSCA'\)\.value=''/.test(html),
+      'o relatorio do filtro registra o que foi buscado': /p\.push\('busca "'\+b\+'"'\)/.test(html),
+      'nenhum hex de acento cravado no campo novo': !/\.busca[^{]*\{[^}]*#b8ff3c/i.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okBuscaMeuDia = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okBuscaMeuDia = false; console.log('  erro: ' + e.message); }
+  if (!okBuscaMeuDia) ruins += 1;
+  console.log(`${okBuscaMeuDia ? '✓' : '✗'} Meu Dia: busca livre ao lado dos chips - ticket, pessoa, e-mail, unidade, tipo e a coluna do cartao`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
