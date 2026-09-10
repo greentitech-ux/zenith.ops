@@ -763,10 +763,37 @@
   // decide o que está pendente é o SERVIDOR (ver diasPendentesDeFechamento em
   // fechamentosLive.js): a tela não repete regra de negócio, só mostra.
   //
-  // Não tem "não mostrar de novo": ele volta a cada tela, de propósito, até o
-  // fechamento ser lançado. O "Agora não" fecha só nesta tela.
+  // O "Agora não" fecha só nesta tela: na próxima o aviso volta, de propósito,
+  // até o fechamento ser lançado. Quem lança precisa ser cobrado.
+  //
+  // O X de "não avisar mais" é SÓ do Master (pedido dele, 09/09/2026), e por
+  // um motivo concreto: a loja tem uma pendência, o Master tem a soma do
+  // parque inteiro - o mesmo aviso que cobra uma pessoa atrapalha a outra. E
+  // ele dispensa o que está pendente AGORA, não o aviso pra sempre: dia novo
+  // sem fechamento volta a avisar. Um botão que silenciasse o alarme de vez
+  // seria a última vez que alguém veria um caixa em aberto.
   var TELA_LANCAMENTO = '/lancamento.html';
   var CACHE_PENDENCIA_MS = 60 * 1000;
+  var CHAVE_DISPENSA = 'nopulsoPendFechDispensadas';
+
+  function lerDispensadas() {
+    try { var v = JSON.parse(localStorage.getItem(CHAVE_DISPENSA) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+  }
+  function gravarDispensadas(chaves) {
+    try { localStorage.setItem(CHAVE_DISPENSA, JSON.stringify(chaves.slice(-400))); } catch (e) {}
+  }
+
+  // Decide o que o aviso mostra. Separada por ser a única regra desta parte que
+  // dá pra errar: o que já foi dispensado some, e o que já foi LANÇADO some da
+  // memória de dispensa - se aquele dia voltar a ficar em aberto, o aviso volta.
+  function pendenciasVisiveis(dados, dispensadas) {
+    var lista = (dados && dados.pendentes) || [];
+    var chaves = (dados && dados.chaves) || lista.map(function (p) { return p.unidade + '|' + p.data; });
+    var vivas = (dispensadas || []).filter(function (k) { return chaves.indexOf(k) >= 0; });
+    var visiveis = lista.filter(function (p) { return vivas.indexOf(p.unidade + '|' + p.data) < 0; });
+    var total = chaves.filter(function (k) { return vivas.indexOf(k) < 0; }).length;
+    return { visiveis: visiveis, total: total, chaves: chaves, dispensadas: vivas };
+  }
 
   function fmtDataAviso(iso) {
     var p = String(iso || '').split('-');
@@ -800,9 +827,11 @@
     } catch (e) { return; }
 
     pendenciasDeFechamento().then(function (d) {
-      var lista = (d && d.pendentes) || [];
-      if (!lista.length) return;
-      var total = (d && d.total) || lista.length;
+      var visao = pendenciasVisiveis(d, lerDispensadas());
+      gravarDispensadas(visao.dispensadas);   // poda o que já foi lançado
+      var lista = visao.visiveis;
+      var total = visao.total;
+      if (!lista.length || !total) return;
 
       var st = document.createElement('style');
       st.textContent = [
@@ -823,6 +852,11 @@
         '#nopulso-pend-fech .acoes{display:flex;gap:8px;justify-content:flex-end;margin-top:10px;}',
         '#nopulso-pend-fech .depois{background:none;border:1px solid var(--line,#232a34);color:var(--muted,#93a1b3);',
         'border-radius:8px;padding:8px 12px;font-size:12.5px;cursor:pointer;font-family:inherit;}',
+        '#nopulso-pend-fech .cx{position:relative;}',
+        '#nopulso-pend-fech .fechar{position:absolute;top:8px;right:9px;background:none;border:0;color:var(--muted,#93a1b3);',
+        'font-size:22px;line-height:1;cursor:pointer;font-family:inherit;padding:2px 6px;}',
+        '#nopulso-pend-fech .fechar:hover{color:var(--text,#e7ecf3);}',
+        '#nopulso-pend-fech h3{padding-right:26px;}',
       ].join('');
       document.head.appendChild(st);
 
@@ -834,7 +868,9 @@
           + '<b>' + String(p.unidadeNome || p.unidade).replace(/</g, '&lt;') + '</b>'
           + '<span>' + fmtDataAviso(p.data) + ' · toque para lançar</span></button>';
       }).join('');
-      cx.innerHTML = '<div class="cx" role="dialog" aria-modal="true"><h3>⏰ ' + titulo + '</h3>'
+      var botaoX = d && d.souMaster
+        ? '<button type="button" class="fechar" aria-label="Não avisar mais sobre estes" title="Não avisar mais sobre estes fechamentos">×</button>' : '';
+      cx.innerHTML = '<div class="cx" role="dialog" aria-modal="true">' + botaoX + '<h3>⏰ ' + titulo + '</h3>'
         + '<p class="sub">O dia já virou e esse caixa continua sem fechamento. Enquanto não for lançado, o faturamento do dia não entra em relatório nenhum.</p>'
         + itens
         + (total > lista.length ? '<div class="mais">e mais ' + (total - lista.length) + ' dia(s) — a lista completa fica em Fechamentos → Dias sem fechamento.</div>' : '')
@@ -842,6 +878,13 @@
       document.body.appendChild(cx);
 
       cx.addEventListener('click', function (e) {
+        // o X vem ANTES do item: ele é um botão dentro da mesma caixa, e
+        // testar o item primeiro engoliria o clique
+        if (e.target.closest && e.target.closest('.fechar')) {
+          gravarDispensadas(visao.dispensadas.concat(visao.chaves.filter(function (k) { return visao.dispensadas.indexOf(k) < 0; })));
+          cx.remove();
+          return;
+        }
         var item = e.target.closest && e.target.closest('.item');
         if (item) {
           location.href = TELA_LANCAMENTO + '?unidade=' + item.getAttribute('data-unidade') + '&data=' + item.getAttribute('data-data');

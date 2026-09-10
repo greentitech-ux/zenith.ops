@@ -5790,7 +5790,9 @@ app.get('/api/fechamentos/pendencias', requireSection('lancamento'), async (req,
   const codigos = (req.isMaster || req.isAdmin) ? Object.keys(nomes) : (req.permissions.unidades || []);
   const unidades = codigos.filter((c) => nomes[c]).map((c) => ({ codigo: c, nome: nomes[c] }));
   const hora = Number(new Intl.DateTimeFormat('en-US', { timeZone: FUSO_BR, hour: '2-digit', hour12: false }).format(new Date()));
-  res.json(fechamentosLive.diasPendentesDeFechamento(todos, unidades, hojeBrasiliaISO(), hora));
+  // souMaster vai junto pro aviso saber se mostra o X de "não avisar mais" -
+  // sem isso o tema.js precisaria de uma chamada a /api/me nas 53 telas
+  res.json({ ...fechamentosLive.diasPendentesDeFechamento(todos, unidades, hojeBrasiliaISO(), hora), souMaster: !!req.isMaster });
 });
 
 // ---------- grupos (franquias) - cada uma pode ter seus proprios KPI's

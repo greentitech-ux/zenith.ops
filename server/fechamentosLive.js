@@ -255,7 +255,15 @@ function diasPendentesDeFechamento(fechamentos, unidades, hoje, hora, limite = 2
   });
   // mais recente primeiro: é o que a loja precisa fazer agora
   pendentes.sort((a, b) => b.data.localeCompare(a.data) || String(a.unidadeNome).localeCompare(String(b.unidadeNome), 'pt-BR'));
-  return { total: pendentes.length, pendentes: pendentes.slice(0, limite) };
+  // `chaves` vai COMPLETA, mesmo quando a lista é cortada pelo limite: é o que
+  // o "não avisar mais" do Master precisa pra dispensar tudo que está pendente
+  // agora - dispensar só o que coube na tela faria o aviso voltar na tela
+  // seguinte, parecendo que o botão não funcionou.
+  return {
+    total: pendentes.length,
+    pendentes: pendentes.slice(0, limite),
+    chaves: pendentes.map((p) => `${p.unidade}|${p.data}`),
+  };
 }
 
 const CAMPOS_NUMERICOS = [
