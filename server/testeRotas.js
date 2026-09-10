@@ -14436,6 +14436,8 @@ setTimeout(async () => {
     // tarefa encerrada nao muda mais de prazo
     const fim = await postarJson(`/api/tarefas/${t0.id}/concluir`, { password: process.env.MASTER_PASSWORD }, cabMD);
     const depoisDeConcluir = await enviarJson('PATCH', `/api/tarefas/${t0.id}/datas`, { dataEntrega: '2026-10-01' }, cabMD);
+    const reabrir = await enviarJson('PATCH', `/api/tarefas/${t0.id}/status`, { status: 'EM_ANDAMENTO' }, cabMD);
+    const tarefaReaberta = reabrir.status === 200 ? JSON.parse(reabrir.corpo) : {};
 
     const conf = {
       'criar tarefa e adiar a previsão pela tela funciona': criada.status === 200 && adiar.status === 200 && t1.dataEntrega === '2026-09-20' && t1.dataInicio === '2026-09-10',
@@ -14446,7 +14448,9 @@ setTimeout(async () => {
       'o X apaga o anexo escolhido pelo id, não o da posição': removeu.status === 200 && (t3.anexos || []).length === 1 && t3.anexos[0].id === primeiro.id && t3.anexos[0].nome === 'nota-1.png',
       'e o arquivo sai do Storage junto': arquivoNoBucket && !ARQUIVOS.has(segundo.path) && ARQUIVOS.has(primeiro.path),
       'apagar o mesmo anexo duas vezes não estoura': deNovo.status === 400 && /não encontrado/i.test(JSON.parse(deNovo.corpo).error || ''),
-      'tarefa concluída não aceita mudança de prazo': fim.status === 200 && depoisDeConcluir.status === 400 && /encerrada/i.test(JSON.parse(depoisDeConcluir.corpo).error || ''),
+       'tarefa concluída não aceita mudança de prazo': fim.status === 200 && depoisDeConcluir.status === 400 && /encerrada/i.test(JSON.parse(depoisDeConcluir.corpo).error || ''),
+       'tarefa concluída é reaberta sem arquivar e registra a auditoria': reabrir.status === 200 && tarefaReaberta.status === 'EM_ANDAMENTO' && !!tarefaReaberta.reabertaEm && !!tarefaReaberta.reabertaPorNome,
+       'Meu Dia oferece Reabrir e não a remoção da tarefa concluída': /id="BTNREABRIR"[\s\S]*?onclick="reabrir\(\)"/.test(html) && /<h2>Reabertas/.test(html) && !/Remover concluída/.test(html),
       'o número do ticket é link para a solicitação na Central': /linkTicket\(/.test(html) && /central-historico\.html\?ticket=\$\{encodeURIComponent\(numero\)\}/.test(html) && /onclick="event\.stopPropagation\(\)"/.test(html),
       'o card e o detalhe usam o mesmo link (ninguém ficou com texto puro)': !/'Ticket #'\+/.test(html),
       'a previsão de conclusão é campo de data ao lado do início': /id="DINI" type="date"/.test(html) && /id="DFIM" type="date" onchange="salvarDatas\(\)"/.test(html),
