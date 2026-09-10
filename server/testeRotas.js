@@ -15190,6 +15190,48 @@ setTimeout(async () => {
   if (!okJuntarFotos) ruins += 1;
   console.log(`${okJuntarFotos ? '✓' : '✗'} Leitura por foto: escolher soma em vez de trocar - uma por vez ou o lote inteiro chegam nas 5`);
 
+  // ---- Marca da unidade: a base da reunião por marca ----
+  // MARCA (Domino's, Spoleto) e REDE (ARCFOOD x GBE) são coisas diferentes e
+  // convivem. Marca NÃO se deduz do nome: "Spoleto Domino's Aeroporto Recife"
+  // tem as duas, e nome mal digitado tiraria a loja do relatório em silêncio.
+  let okMarca = false;
+  try {
+    const cabMaster = { Authorization: 'Bearer ' + token };
+    const un = require(__dirname + '/unidades.js');
+    const redes = require(__dirname + '/redes.js');
+
+    const salvou = await putJson('/api/meta/unidades/19855/perfil', { nome: 'Dom Carrão', marca: 'dominos' }, cabMaster);
+    const perfil = salvou.status === 200 ? JSON.parse(salvou.corpo) : {};
+    const inventada = await putJson('/api/meta/unidades/19889/perfil', { nome: 'Dom Tatuape', marca: 'burguer-king' }, cabMaster);
+    const semMarca = inventada.status === 200 ? JSON.parse(inventada.corpo) : {};
+    // mexer em OUTRA coisa do perfil não pode apagar a marca já definida
+    const soAreas = await putJson('/api/meta/unidades/19855/perfil', { nome: 'Dom Carrão', areas: ['fechamento'] }, cabMaster);
+    const depois = soAreas.status === 200 ? JSON.parse(soAreas.corpo) : {};
+    const limpou = await putJson('/api/meta/unidades/19855/perfil', { nome: 'Dom Carrão', marca: '' }, cabMaster);
+    const semNada = limpou.status === 200 ? JSON.parse(limpou.corpo) : {};
+    const semLogin = await putJson('/api/meta/unidades/19855/perfil', { marca: 'spoleto' }, {});
+
+    const grupos = require('fs').readFileSync(__dirname + '/public/grupos.html', 'utf8');
+    const daTela = new Function(`${(grupos.match(/const MARCAS_LABEL = \{[^;]*;/) || [''])[0]} return MARCAS_LABEL;`)();
+
+    const conf = {
+      'a marca fica gravada no perfil da unidade': salvou.status === 200 && perfil.marca === 'dominos',
+      'marca que não existe na lista vira "sem marca", não erro silencioso': inventada.status === 200 && semMarca.marca === null,
+      'salvar outra parte do perfil NÃO apaga a marca já definida': soAreas.status === 200 && depois.marca === 'dominos' && (depois.areas || []).includes('fechamento'),
+      'dá pra tirar a marca de propósito (volta pra sem marca)': limpou.status === 200 && semNada.marca === null,
+      'só o Master mexe no perfil': semLogin.status === 401,
+      'marca e rede continuam sendo coisas diferentes': redes.redeDaUnidade('19855') === 'ARCFOOD' && un.MARCAS_VALIDAS.includes('dominos') && !un.MARCAS_VALIDAS.includes('ARCFOOD'),
+      'a lista cobre as marcas que existem no parque': ['dominos', 'spoleto', 'milkymoo', 'saobraz', 'saltiverso'].every((m) => un.MARCAS_VALIDAS.includes(m)),
+      'os rótulos da tela são os MESMOS do servidor': Object.keys(un.MARCAS_LABEL).length === Object.keys(daTela).length && Object.keys(un.MARCAS_LABEL).every((k) => daTela[k] === un.MARCAS_LABEL[k]),
+      'a tela deixa escolher e limpar a marca, e mostra quem já tem': /id="up-marca"/.test(grupos) && /marca: document\.getElementById\('up-marca'\)\.value \|\| null/.test(grupos) && /— sem marca definida —/.test(grupos) && /perfil && perfil\.marca\) partes\.push/.test(grupos),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMarca = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (salvou=${salvou.status} ${salvou.corpo.slice(0, 110)} depois=${depois.marca})`);
+  } catch (e) { okMarca = false; console.log('  erro: ' + e.message); }
+  if (!okMarca) ruins += 1;
+  console.log(`${okMarca ? '✓' : '✗'} Marca da unidade: o Master define no perfil, é diferente de rede, e não se deduz do nome`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

@@ -3045,14 +3045,14 @@ app.patch('/api/meta/unidades-extras/:id', auth.requireMaster, async (req, res) 
   }
 });
 
-// perfil (areas/tiposSolicitacao) de QUALQUER unidade, fixa ou cadastrada em
+// perfil (areas/tiposSolicitacao/marca) de QUALQUER unidade, fixa ou cadastrada em
 // runtime - diferente das rotas acima (que so tratam registros da colecao
 // unidadesExtras pelo id), esta mexe pelo CODIGO, entao uma loja fixa (Adyen/
 // planilha, codigo que nunca muda) tambem pode ganhar o mesmo perfil que a
 // MVPar tem, sem precisar recriar nada (ver unidades.upsertPerfil)
 app.put('/api/meta/unidades/:codigo/perfil', auth.requireMaster, async (req, res) => {
   try {
-    const patch = { nome: req.body.nome, areas: req.body.areas, tiposSolicitacao: req.body.tiposSolicitacao, porEmail: req.user.email };
+    const patch = { nome: req.body.nome, areas: req.body.areas, tiposSolicitacao: req.body.tiposSolicitacao, marca: req.body.marca, porEmail: req.user.email };
     if (await desviarSeQaMaster(req, res, 'unidadesExtras.perfil', `Definir perfil da unidade ${req.params.codigo}`, { codigo: req.params.codigo, ...patch })) return;
     res.json(await invalidandoUnidadesMapa(unidadesExtras.upsertPerfil(req.params.codigo, patch)));
   } catch (err) {
@@ -4558,7 +4558,7 @@ const EXECUTORES_QA = {
   'unidadesExtras.criar': (p) => invalidandoUnidadesMapa(unidadesExtras.criar(p.dados, codigosUnidadesFixas())),
   'unidadesExtras.editar': (p) => invalidandoUnidadesMapa(unidadesExtras.atualizar(p.id, { nome: p.nome, areas: p.areas, tiposSolicitacao: p.tiposSolicitacao })),
   'unidadesExtras.excluir': (p) => invalidandoUnidadesMapa(unidadesExtras.remover(p.id)),
-  'unidadesExtras.perfil': (p) => invalidandoUnidadesMapa(unidadesExtras.upsertPerfil(p.codigo, { nome: p.nome, areas: p.areas, tiposSolicitacao: p.tiposSolicitacao, porEmail: p.porEmail })),
+  'unidadesExtras.perfil': (p) => invalidandoUnidadesMapa(unidadesExtras.upsertPerfil(p.codigo, { nome: p.nome, areas: p.areas, tiposSolicitacao: p.tiposSolicitacao, marca: p.marca, porEmail: p.porEmail })),
   'vaultGroups.criar': (p) => vaultGroups.create(p.name),
   'vaultGroups.editar': (p) => vaultGroups.rename(p.id, p.name),
   'vaultGroups.excluir': (p) => vaultGroups.remove(p.id),

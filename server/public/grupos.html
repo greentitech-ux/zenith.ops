@@ -313,6 +313,12 @@
     <input type="text" id="up-nome" required style="width:100%;margin:4px 0 12px;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;">
 
     <fieldset>
+      <legend>Marca</legend>
+      <p style="font-size:11px;color:var(--muted);margin:2px 0 8px;">De qual marca é essa loja. É por aqui que sai a reunião "só com os gerentes Domino's" - e não pelo nome da unidade, que não serve pra isso ("Spoleto Domino's Aeroporto Recife" tem as duas). Unidade administrativa fica sem marca.</p>
+      <select id="up-marca" style="width:100%;padding:8px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:12.5px;box-sizing:border-box;"></select>
+    </fieldset>
+
+    <fieldset style="margin-top:10px;">
       <legend>Onde essa unidade aparece</legend>
       <p style="font-size:11px;color:var(--muted);margin:2px 0 8px;">Marque só as áreas que valem pra essa unidade. Sem nenhuma marcada, ela continua aparecendo em tudo (padrão de sempre - use assim pra loja normal). Pra unidade administrativa (sem operação, tipo escritório), marque só as áreas que ela de fato usa.</p>
       <div style="display:flex;gap:10px;margin-bottom:6px;">
@@ -845,6 +851,10 @@ async function carregarGrupos(){
 // perfil de area/tipos de solicitacao aceitos (ver server/unidades.js) - caso
 // motivador: MVPar (holding/escritorio central) não tem fechamento/entregas/
 // estoque/parque, só solicitações (compra/manutenção/TI/pagamento/nota) + RH/NOC
+// MESMOS rótulos de MARCAS_LABEL em unidades.js - o testeRotas.js compara os
+// dois e reprova se divergirem, pra a tela não chamar de um jeito o que o
+// servidor guarda de outro
+const MARCAS_LABEL = { dominos:"Domino's", spoleto:'Spoleto', milkymoo:'Milky Moo', saobraz:'São Braz', saltiverso:'Saltiverso' };
 const AREAS_LABEL = { fechamento:'Fechamento', entregas:'Entregas', estoque:'Estoque', parque:'Parque', rh:'RH', noc:'NOC-NoPulso', solicitacoes:'Solicitações (Central)', monitor:'Monitor', formularios:'Formulários' };
 const TIPOS_SOLICITACAO_LABEL = { estorno:'Estorno', 'ajuste-fechamento':'Ajuste de fechamento', compra:'Compra', manutencao:'Manutenção', 'suporte-ti':'Suporte TI', pagamento:'Pagamento', nota:'Nota' };
 // TODAS as unidades (fixas + cadastradas em runtime), a mesma lista que já
@@ -916,6 +926,7 @@ function badgePerfil(perfil){
   const areas = (perfil && perfil.areas) || [], tipos = (perfil && perfil.tiposSolicitacao) || [];
   if(!areas.length && !tipos.length) return `<span style="color:var(--muted);font-size:10.5px;">sem restrição - aparece em tudo</span>`;
   const partes = [];
+  if(perfil && perfil.marca) partes.push(`marca: ${escapeHtml(MARCAS_LABEL[perfil.marca]||perfil.marca)}`);
   if(areas.length) partes.push(`restrita a: ${areas.map(a=>escapeHtml(AREAS_LABEL[a]||a)).join(', ')}`);
   if(tipos.length) partes.push(`tipos: ${tipos.map(t=>escapeHtml(TIPOS_SOLICITACAO_LABEL[t]||t)).join(', ')}`);
   return `<span style="color:var(--warn);font-size:10.5px;">${partes.join(' · ')}</span>`;
@@ -986,6 +997,9 @@ function abrirEdicaoUnidadeExtra(codigo){
   const nome = (base && base.nome) || (perfil && perfil.nome) || codigo;
   document.getElementById('unidade-perfil-title').textContent = 'Perfil da unidade · ' + nome;
   document.getElementById('up-nome').value = nome;
+  document.getElementById('up-marca').innerHTML = '<option value="">— sem marca definida —</option>'
+    + Object.entries(MARCAS_LABEL).map(([k,v])=>`<option value="${escapeHtml(k)}">${escapeHtml(v)}</option>`).join('');
+  document.getElementById('up-marca').value = (perfil && perfil.marca) || '';
   document.getElementById('up-areas').innerHTML = checksPerfilHtml('up-areas', AREAS_LABEL, perfil && perfil.areas);
   document.getElementById('up-tipos').innerHTML = checksPerfilHtml('up-tipos', TIPOS_SOLICITACAO_LABEL, perfil && perfil.tiposSolicitacao);
   document.getElementById('unidade-perfil-err').classList.add('hidden');
@@ -1000,6 +1014,7 @@ document.getElementById('unidade-perfil-form').addEventListener('submit', async 
     nome: document.getElementById('up-nome').value,
     areas: readChecked(document.getElementById('up-areas')),
     tiposSolicitacao: readChecked(document.getElementById('up-tipos')),
+    marca: document.getElementById('up-marca').value || null,
   };
   try{
     const resp = await fetch(`/api/meta/unidades/${encodeURIComponent(EDITANDO_UNIDADE_CODIGO)}/perfil`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });

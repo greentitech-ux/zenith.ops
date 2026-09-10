@@ -29,6 +29,28 @@ const COLLECTION = db.collection('unidadesExtras');
 const AREAS_VALIDAS = ['fechamento', 'entregas', 'estoque', 'parque', 'rh', 'noc', 'solicitacoes', 'monitor', 'formularios'];
 const TIPOS_SOLICITACAO_VALIDOS = ['estorno', 'ajuste-fechamento', 'compra', 'manutencao', 'suporte-ti', 'pagamento', 'nota', 'acesso-pessoa', 'adiantamento'];
 
+// A MARCA da loja - Domino's, Spoleto... Diferente de REDE (redes.js), que
+// diz de qual franquia a unidade é (ARCFOOD x GBE): as duas coisas existem e
+// não são a mesma. Uma reunião "só com os gerentes Domino's" precisa da marca;
+// um relatório por franquia precisa da rede.
+//
+// A lista sai do parque que existe hoje, não de suposição. Marca NÃO se deduz
+// do nome: "Spoleto Domino's Aeroporto Recife" tem as duas no nome, e um nome
+// mal digitado tiraria a loja do relatório sem ninguém perceber. Por isso é o
+// Master quem marca, uma vez, no perfil da unidade.
+//
+// UMA marca por unidade, não lista: "reunião dos gerentes Domino's" precisa
+// de uma resposta, não de duas. O caso da loja com duas marcas no nome se
+// resolve escolhendo a que manda na operação dela.
+const MARCAS_VALIDAS = ['dominos', 'spoleto', 'milkymoo', 'saobraz', 'saltiverso'];
+const MARCAS_LABEL = {
+  dominos: "Domino's", spoleto: 'Spoleto', milkymoo: 'Milky Moo',
+  saobraz: 'São Braz', saltiverso: 'Saltiverso',
+};
+// vazio = sem marca definida, e a tela mostra assim de propósito: loja nova
+// aparece em "sem marca" pro Master marcar, em vez de cair calada num grupo
+const marcaValida = (v) => (MARCAS_VALIDAS.includes(String(v || '')) ? String(v) : null);
+
 function sanitizarLista(entrada, validos) {
   if (!Array.isArray(entrada)) return [];
   const vistos = new Set();
@@ -174,7 +196,7 @@ async function atualizar(id, { nome, areas, tiposSolicitacao }, nomesReservados)
 // que ja pode estar gravado em fechamentos/RH/permissoes antigos. Por isso
 // NAO passa pelo check de codigosReservados de criar(): aqui a intencao e
 // exatamente anexar o perfil a um codigo que ja existe em outro lugar.
-async function upsertPerfil(codigo, { nome, areas, tiposSolicitacao, porEmail }) {
+async function upsertPerfil(codigo, { nome, areas, tiposSolicitacao, marca, porEmail }) {
   const codigoLimpo = String(codigo || '').trim().slice(0, 60);
   if (!codigoLimpo) throw new Error('Código da unidade inválido.');
   const existentes = await listAll();
@@ -187,6 +209,7 @@ async function upsertPerfil(codigo, { nome, areas, tiposSolicitacao, porEmail })
     nome: nomeLimpo,
     areas: listaVaziaOuValida(areas, AREAS_VALIDAS),
     tiposSolicitacao: listaVaziaOuValida(tiposSolicitacao, TIPOS_SOLICITACAO_VALIDOS),
+    marca: marca === undefined ? ((atual && atual.marca) || null) : marcaValida(marca),
     criadoPorEmail: (atual && atual.criadoPorEmail) || porEmail || null,
     criadoEm: (atual && atual.criadoEm) || agora,
     atualizadoEm: agora,
@@ -273,7 +296,7 @@ async function remover(id, contarRegistros) {
 }
 
 module.exports = {
-  AREAS_VALIDAS, TIPOS_SOLICITACAO_VALIDOS,
+  AREAS_VALIDAS, TIPOS_SOLICITACAO_VALIDOS, MARCAS_VALIDAS, MARCAS_LABEL, marcaValida,
   listAll, mapa, criar, atualizar, remover, upsertPerfil,
   nomeNormalizado, agruparPorNome, diagnosticarNomesRepetidos,
   perfil, apareceEm, aceitaTipo, filtrarMapaPorArea, codigosRestritosDe,
