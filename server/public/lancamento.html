@@ -957,6 +957,9 @@ function renderCanaisExtras(unidade){
 // nao no proprio input) porque o input e limpo logo depois do change - senao
 // escolher a MESMA foto de novo, depois de um erro, nao dispara evento nenhum.
 let ARQUIVOS_RELATORIO = [];
+// Cada escolha recebe uma versão. Limpar ou escolher outro lote invalida a
+// preparação anterior, para ela nunca repor fotos que a pessoa acabou de tirar.
+let VERSAO_PREPARO_RELATORIO = 0;
 
 // Foto de relatório de PDV tirada de celular sai com 5-8 MB, e até 5 delas
 // numa leitura só - o que sobe pro servidor (e dali pro Claude) é o gargalo
@@ -990,6 +993,9 @@ function carregarViaImgRelatorio(file){
 }
 async function comprimirImagemRelatorio(file){
   if(!file || !/^image\//.test(file.type||'')) return file; // PDF sobe inteiro
+  // Capturas como as do relatório diário têm poucos KB. Não há ganho em abrir
+  // canvas para elas — e pular o decoder evita os travamentos vistos no Chrome.
+  if(file.size <= JA_PEQUENA_RELATORIO) return file;
   try{
     let img = window.createImageBitmap
       ? await comPrazoPreparoRelatorio(createImageBitmap(file))
@@ -1067,7 +1073,8 @@ function pintarSelecaoRelatorio(){
   }
   sel.classList.remove('hidden');
   sel.innerHTML = `<b>${ARQUIVOS_RELATORIO.length}</b> foto(s) escolhida(s): ${escapeHtml(nomesSelecionados())}`+
-    ` — <a href="#" onclick="limparSelecaoRelatorio();return false;" style="color:var(--muted);">limpar</a>`;
+    ` — <button type="button" id="limpar-fotos-relatorio" class="link-btn" style="color:var(--muted);">limpar</button>`;
+  sel.querySelector('#limpar-fotos-relatorio').addEventListener('click', limparSelecaoRelatorio);
   btnLer.disabled = false;
 }
 // ---- OS CAMPOS PRINCIPAIS, E A TRAVA DEPOIS DELES ----
@@ -1113,6 +1120,7 @@ function leituraEncerrada(){
   return essenciais.length > 0 && essenciaisQueFaltam().length === 0;
 }
 function limparSelecaoRelatorio(){
+  VERSAO_PREPARO_RELATORIO += 1;
   ARQUIVOS_RELATORIO = [];
   pintarSelecaoRelatorio();
   esconderMsgLerCanais();
@@ -1122,6 +1130,7 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', async (
   const arquivos = Array.from(ev.target.files || []);
   ev.target.value = ''; // permite escolher a MESMA foto de novo depois de um erro
   if(!arquivos.length) return;
+  const versao = ++VERSAO_PREPARO_RELATORIO;
   const msg = document.getElementById('ler-canais-msg');
   msg.classList.remove('hidden');
   if(arquivos.length > MAX_FOTOS_RELATORIO){
@@ -1134,14 +1143,18 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', async (
   // Realizar leitura, e reduzir aqui (uma vez) é mais rápido que deixar a
   // foto original de celular pesar a leitura toda vez que o botão for clicado
   const atualizarProgresso = (prontas,total)=>{
+    if(versao !== VERSAO_PREPARO_RELATORIO) return;
     msg.innerHTML = `<span style="color:var(--muted);">Preparando foto ${prontas} de ${total}...</span>`;
   };
   atualizarProgresso(0, arquivos.length);
   try{
-    ARQUIVOS_RELATORIO = await comprimirVariasRelatorio(arquivos, atualizarProgresso);
+    const preparados = await comprimirVariasRelatorio(arquivos, atualizarProgresso);
+    if(versao !== VERSAO_PREPARO_RELATORIO) return;
+    ARQUIVOS_RELATORIO = preparados;
     pintarSelecaoRelatorio();
     msg.innerHTML = `<span style="color:var(--muted);">${ARQUIVOS_RELATORIO.length} foto(s) pronta(s). Confira e clique em <b>Realizar leitura</b>. Nada foi enviado ainda.</span>`;
   }catch(err){
+    if(versao !== VERSAO_PREPARO_RELATORIO) return;
     // Última rede de segurança: os originais são melhores que deixar a pessoa
     // sem ação. A leitura do servidor continua validando tipo e tamanho.
     ARQUIVOS_RELATORIO = arquivos;

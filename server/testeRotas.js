@@ -3506,7 +3506,7 @@ setTimeout(async () => {
       'o listener de change NÃO chama fetch': !!listener && !/fetch\(/.test(listener),
       'o listener de change NÃO chama a leitura': !!listener && !/realizarLeituraRelatorio\(/.test(listener),
       'a leitura de verdade continua batendo na rota': /realizarLeituraRelatorio[\s\S]*?ler-canais/.test(html),
-      'dá pra limpar a seleção': /limparSelecaoRelatorio/.test(html),
+      'dá pra limpar a seleção e cancelar um preparo pendente': /id="limpar-fotos-relatorio"/.test(html) && /addEventListener\('click', limparSelecaoRelatorio\)/.test(html) && /VERSAO_PREPARO_RELATORIO \+= 1;/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okDoisPassosFoto = !falhas.length;
@@ -3532,8 +3532,9 @@ setTimeout(async () => {
       'PDF sobe inteiro (comprimir só mexe em imagem)': /function comprimirImagemRelatorio\([\s\S]{0,200}return file;.*PDF sobe inteiro/.test(html),
       'a compressão nunca trava a leitura por conta própria (qualquer erro devolve o arquivo original)': /catch\(e\)\{\s*\n\s*return file; \/\/ qualquer tropeço/.test(html),
       'cada foto tem prazo de preparo e uma travada não prende a tela': /const PRAZO_PREPARO_FOTO_MS = 12000;/.test(html) && /function comPrazoPreparoRelatorio\(/.test(html) && /if\(!img && window\.createImageBitmap\)/.test(html),
+      'foto pequena pula o decoder e fica disponível imediatamente': /if\(file\.size <= JA_PEQUENA_RELATORIO\) return file;/.test(html),
       'o lote prepara as fotos de forma independente e informa o progresso': /return Promise\.all\(lista\.map\(async f=>/.test(html) && /Preparando foto \$\{prontas\} de \$\{total\}/.test(html),
-      'o listener de change chama a compressão antes de guardar o arquivo': !!listener && /ARQUIVOS_RELATORIO\s*=\s*await comprimirVariasRelatorio\(arquivos, atualizarProgresso\)/.test(listener),
+      'o listener de change chama a compressão antes de guardar o arquivo': !!listener && /const preparados\s*=\s*await comprimirVariasRelatorio\(arquivos, atualizarProgresso\)/.test(listener) && /ARQUIVOS_RELATORIO\s*=\s*preparados/.test(listener),
       'o listener continua recusando mais que o teto de fotos (a checagem não sumiu com a mudança)': !!listener && /arquivos\.length > MAX_FOTOS_RELATORIO/.test(listener),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
