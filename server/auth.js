@@ -283,6 +283,7 @@ function requireAuth(req, res, next) {
       req.podeCatalogoEstoque = !!user.podeCatalogoEstoque;
       req.podeCatalogoInsumos = !!user.podeCatalogoInsumos;
       req.podeCadastrarOperadores = !!user.podeCadastrarOperadores;
+      req.podeNoPulsoPrint = !!user.podeNoPulsoPrint;
       req.podeRhTodasUnidades = !!user.podeRhTodasUnidades;
       req.podeRhCadastrarEfetivado = !!user.podeRhCadastrarEfetivado;
       req.podeBonifVerValorTotal = !!user.podeBonifVerValorTotal;

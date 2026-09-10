@@ -900,7 +900,135 @@
     });
   }
 
-  function iniciar() { montarControles(); vigiarDrawer(); avisarEnderecoNovo(); avisarFechamentoPendente(); }
+  // ---- NoPulsoPrint no celular ----
+  //
+  // O navegador do celular NÃO consegue capturar a tela do aparelho: a API que
+  // faz isso (getDisplayMedia) só existe no desktop. O que ele consegue é
+  // desenhar A PRÓPRIA PÁGINA num canvas - e é isso que este botão faz.
+  //
+  // O arquivo NÃO sobe pro NoPulso. Ele vai pro menu de compartilhar do
+  // sistema (navigator.share com arquivo, que Android e iPhone suportam), e de
+  // lá a pessoa toca em "Salvar imagem"/"Salvar em Fotos" e a captura cai na
+  // GALERIA do aparelho. Onde o compartilhar com arquivo não existe, cai no
+  // download - que no Android também aparece na galeria.
+  //
+  // A biblioteca (html2canvas, MIT) é servida pelo PRÓPRIO app, como as fontes:
+  // loja tem rede restrita e CDN não é opção. São 196 KB, carregados só quando
+  // alguém toca no botão - nunca no boot das 53 telas.
+  var PRINT_LIB = '/vendor/html2canvas.min.js';
+  var carregandoLib = null;
+
+  function carregarLibPrint() {
+    if (window.html2canvas) return Promise.resolve(window.html2canvas);
+    if (carregandoLib) return carregandoLib;
+    carregandoLib = new Promise(function (ok, falha) {
+      var tag = document.createElement('script');
+      tag.src = PRINT_LIB;
+      tag.onload = function () { ok(window.html2canvas); };
+      tag.onerror = function () { carregandoLib = null; falha(new Error('não consegui carregar o gerador de imagem')); };
+      document.head.appendChild(tag);
+    });
+    return carregandoLib;
+  }
+
+  function nomeDoPrint() {
+    var d = new Date();
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return 'NoPulsoPrint-' + d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+      + '_' + p(d.getHours()) + '-' + p(d.getMinutes()) + '-' + p(d.getSeconds()) + '.png';
+  }
+
+  function avisoPrint(texto, erro) {
+    var el = document.getElementById('nopulso-print-aviso') || document.createElement('div');
+    el.id = 'nopulso-print-aviso';
+    el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:78px;z-index:100000;'
+      + 'background:var(--panel2,#171b22);border:1px solid ' + (erro ? 'var(--bad,#ff6b6b)' : 'var(--line,#232a34)')
+      + ';color:var(--text,#e7ecf3);padding:9px 14px;border-radius:9px;font:12.5px var(--sans,system-ui,sans-serif);'
+      + 'max-width:86vw;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.45);';
+    el.textContent = texto;
+    if (!el.parentNode) document.body.appendChild(el);
+    clearTimeout(el._t);
+    el._t = setTimeout(function () { if (el.parentNode) el.remove(); }, erro ? 6000 : 3200);
+  }
+
+  function capturarTela() {
+    var botao = document.getElementById('nopulso-print-btn');
+    if (botao) botao.disabled = true;
+    avisoPrint('Gerando a imagem...');
+    return carregarLibPrint().then(function (h2c) {
+      // o próprio botão e o aviso ficam de fora do PNG - eles são do app, não
+      // da tela que a pessoa quer mostrar
+      return h2c(document.body, {
+        backgroundColor: getComputedStyle(document.body).backgroundColor || '#0b0d10',
+        scale: Math.min(window.devicePixelRatio || 1, 2),
+        useCORS: true,
+        ignoreElements: function (el) { return el.id === 'nopulso-print-btn' || el.id === 'nopulso-print-aviso'; },
+      });
+    }).then(function (canvas) {
+      return new Promise(function (ok) { canvas.toBlob(ok, 'image/png'); });
+    }).then(function (blob) {
+      if (!blob) throw new Error('a imagem saiu vazia');
+      var arquivo = new File([blob], nomeDoPrint(), { type: 'image/png' });
+      // compartilhar com ARQUIVO é o único caminho que chega na galeria do
+      // aparelho; onde não existe, o download é o que sobra
+      if (navigator.canShare && navigator.canShare({ files: [arquivo] }) && navigator.share) {
+        return navigator.share({ files: [arquivo] })
+          .then(function () { avisoPrint('Pronto. Toque em "Salvar imagem" pra guardar na galeria.'); })
+          .catch(function (e) { if (e && e.name !== 'AbortError') throw e; });
+      }
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = arquivo.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+      avisoPrint('Imagem baixada. No Android ela aparece na galeria.');
+      return null;
+    }).catch(function (e) {
+      avisoPrint('Não consegui gerar o print: ' + ((e && e.message) || e), true);
+    }).then(function () {
+      if (botao) botao.disabled = false;
+    });
+  }
+
+  // a marca é POR PESSOA (users.podeNoPulsoPrint) - o Ctrl+Q do computador
+  // continua sendo por máquina. /api/me fica em cache de sessão pra não virar
+  // uma chamada por tela.
+  function meDaSessao() {
+    try {
+      var salvo = JSON.parse(sessionStorage.getItem('nopulsoMe') || 'null');
+      if (salvo && (Date.now() - salvo.em) < 5 * 60 * 1000) return Promise.resolve(salvo.dados);
+    } catch (e) { /* sem cache, busca */ }
+    var token;
+    try { token = localStorage.getItem('authToken'); } catch (e) { return Promise.resolve(null); }
+    if (!token) return Promise.resolve(null);
+    return fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        try { sessionStorage.setItem('nopulsoMe', JSON.stringify({ em: Date.now(), dados: d })); } catch (e) {}
+        return d;
+      })
+      .catch(function () { return null; });
+  }
+
+  function montarBotaoPrint() {
+    if (document.getElementById('nopulso-print-btn')) return;
+    meDaSessao().then(function (me) {
+      if (!me || !me.podeNoPulsoPrint) return;
+      var b = document.createElement('button');
+      b.id = 'nopulso-print-btn';
+      b.type = 'button';
+      b.title = 'Gerar uma imagem desta tela e salvar na galeria do aparelho';
+      b.setAttribute('aria-label', 'NoPulsoPrint');
+      b.textContent = '📸';
+      b.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:99998;width:46px;height:46px;'
+        + 'border-radius:50%;border:1px solid var(--line,#232a34);background:var(--panel2,#171b22);'
+        + 'color:var(--text,#e7ecf3);font-size:19px;cursor:pointer;box-shadow:0 8px 22px rgba(0,0,0,.45);';
+      b.addEventListener('click', capturarTela);
+      document.body.appendChild(b);
+    });
+  }
+
+  function iniciar() { montarControles(); vigiarDrawer(); avisarEnderecoNovo(); avisarFechamentoPendente(); montarBotaoPrint(); }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);
   else iniciar();

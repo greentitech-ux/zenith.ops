@@ -15444,6 +15444,63 @@ setTimeout(async () => {
   if (!okBuscaMeuDia) ruins += 1;
   console.log(`${okBuscaMeuDia ? '✓' : '✗'} Meu Dia: busca livre ao lado dos chips - ticket, pessoa, e-mail, unidade, tipo e a coluna do cartao`);
 
+  // ---- NoPulsoPrint no celular: marca por PESSOA e caminho até a galeria ----
+  // O navegador do celular não captura a tela do aparelho (getDisplayMedia é
+  // só desktop) - o que dá é desenhar a PRÓPRIA página. E o único caminho até a
+  // galeria é o compartilhar com ARQUIVO, que Android e iPhone suportam.
+  let okPrintCelular = false;
+  try {
+    const cabMaster = { Authorization: 'Bearer ' + token };
+    const usersMod = require(__dirname + '/users.js');
+    const senhaPR = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-print-sim', {
+      passwordHash: senhaPR, role: 'user', active: true, email: 'print-sim@teste.local', username: 'printsim',
+      permissions: { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    DOCS.set('users/u-print-nao', {
+      passwordHash: senhaPR, role: 'user', active: true, email: 'print-nao@teste.local', username: 'printnao',
+      permissions: { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    await usersMod.updatePermissions('u-print-sim', { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] });
+    await usersMod.updatePermissions('u-print-nao', { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] });
+
+    const ligou = await putJson('/api/users/u-print-sim/nopulso-print', { podeNoPulsoPrint: true }, cabMaster);
+    const semSerMaster = await putJson('/api/users/u-print-nao/nopulso-print', { podeNoPulsoPrint: true }, {});
+    const cabSim = { Authorization: 'Bearer ' + (await auth.login('print-sim@teste.local', 'SenhaDeTeste!2026')).token };
+    const cabNao = { Authorization: 'Bearer ' + (await auth.login('print-nao@teste.local', 'SenhaDeTeste!2026')).token };
+    const meSim = JSON.parse((await pedir('/api/me', cabSim)).corpo);
+    const meNao = JSON.parse((await pedir('/api/me', cabNao)).corpo);
+    const meMaster = JSON.parse((await pedir('/api/me', cabMaster)).corpo);
+    const desligou = await putJson('/api/users/u-print-sim/nopulso-print', { podeNoPulsoPrint: false }, cabMaster);
+    const meDepois = JSON.parse((await pedir('/api/me', cabSim)).corpo);
+
+    const lib = await pedir('/vendor/html2canvas.min.js');
+    const tema = require('fs').readFileSync(__dirname + '/public/tema.js', 'utf8');
+    const usuarios = require('fs').readFileSync(__dirname + '/public/usuarios.html', 'utf8');
+
+    const conf = {
+      'o Master liga e desliga a marca por pessoa': ligou.status === 200 && meSim.podeNoPulsoPrint === true && desligou.status === 200 && meDepois.podeNoPulsoPrint === false,
+      'quem não tem a marca não recebe o botão': meNao.podeNoPulsoPrint === false
+        && /if \(!me \|\| !me\.podeNoPulsoPrint\) return;/.test(require('fs').readFileSync(__dirname + '/public/tema.js', 'utf8')),
+      'o Master sempre pode': meMaster.podeNoPulsoPrint === true,
+      'só o Master mexe na marca': semSerMaster.status === 401,
+      'a biblioteca é servida pelo PRÓPRIO app (loja tem rede restrita)': lib.status === 200 && /html2canvas 1\.4\.1/.test(lib.corpo) && /\/vendor\/html2canvas\.min\.js/.test(tema),
+      'e só carrega quando alguém toca no botão, não no boot das 53 telas': /function carregarLibPrint\(\)/.test(tema) && !/<script src="\/vendor\/html2canvas/.test(require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8')),
+      'o caminho até a galeria é o compartilhar com ARQUIVO': /navigator\.canShare\(\{ files: \[arquivo\] \}\)/.test(tema) && /navigator\.share\(\{ files: \[arquivo\] \}\)/.test(tema),
+      'com download como saída onde o compartilhar não existe': /a\.download = arquivo\.name/.test(tema),
+      'o botão e o aviso ficam FORA do print (são do app, não da tela)': /ignoreElements: function \(el\) \{ return el\.id === 'nopulso-print-btn' \|\| el\.id === 'nopulso-print-aviso'; \}/.test(tema),
+      'nada é enviado ao NoPulso (nenhum upload no caminho do print)': !/fetch\([^)]*print[^)]*\{[^}]*method\s*:\s*'POST'/i.test(tema),
+      'a tag aparece no cadastro de Usuários': /id="\$\{prefixo\}-tag-print"/.test(usuarios) && /nopulso-print', \{method:'PUT'/.test(usuarios),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPrintCelular = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (ligou=${ligou.status} me=${meSim.podeNoPulsoPrint} lib=${lib.status})`);
+  } catch (e) { okPrintCelular = false; console.log('  erro: ' + e.message); }
+  if (!okPrintCelular) ruins += 1;
+  console.log(`${okPrintCelular ? '✓' : '✗'} NoPulsoPrint no celular: marca por pessoa, imagem da própria tela e caminho até a galeria pelo compartilhar`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

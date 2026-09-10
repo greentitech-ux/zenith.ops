@@ -1924,6 +1924,7 @@ app.get('/api/me', async (req, res) => {
     podeCatalogoEstoque: req.podeCatalogoEstoque,
     podeCatalogoInsumos: req.podeCatalogoInsumos,
     podeCadastrarOperadores: req.podeCadastrarOperadores,
+    podeNoPulsoPrint: req.isMaster || !!req.podeNoPulsoPrint,
     podeRhTodasUnidades: req.podeRhTodasUnidades,
     podeRhCadastrarEfetivado: req.podeRhCadastrarEfetivado,
     podeBonifVerValorTotal: req.podeBonifVerValorTotal,
@@ -4995,6 +4996,18 @@ app.put('/api/users/:id/sessao-longa', auth.requireMaster, async (req, res) => {
 // tag "cadastrar Operadores" do Abastecimento: quem tem ve o botao 👥 e
 // cadastra logins locais de balcao (ativar/desativar/remover/desbloquear
 // continuam so do Master)
+// tag "NoPulsoPrint" do celular: quem tem ve o botao de print dentro do app.
+// O atalho Ctrl+Q do computador continua sendo por MAQUINA (cadastro do
+// computador, ver lojaStatus.js) - as duas marcas convivem.
+app.put('/api/users/:id/nopulso-print', auth.requireMaster, async (req, res) => {
+  try {
+    if (await desviarSeQaMaster(req, res, 'usuarios.noPulsoPrint', `Editar permissão de NoPulsoPrint do acesso ${req.params.id}`, { id: req.params.id, valor: req.body.podeNoPulsoPrint })) return;
+    res.json(await users.updatePodeNoPulsoPrint(req.params.id, req.body.podeNoPulsoPrint));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.put('/api/users/:id/cadastrar-operadores', auth.requireMaster, async (req, res) => {
   try {
     if (await desviarSeQaMaster(req, res, 'usuarios.cadastrarOperadores', `Editar permissão de cadastrar Operadores do acesso ${req.params.id}`, { id: req.params.id, valor: req.body.podeCadastrarOperadores })) return;

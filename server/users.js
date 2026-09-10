@@ -430,6 +430,17 @@ async function updatePodeCatalogoInsumos(id, valor) {
 // tag "cadastrar Operadores" do Abastecimento do Carrinho: quem tem ve o
 // botao 👥 Operadores e CADASTRA logins locais de balcao (4 letras + 4
 // numeros). Ativar/desativar, remover e desbloquear continuam SO do Master
+async function updatePodeNoPulsoPrint(id, valor) {
+  const ref = usersRef.doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('Acesso não encontrado.');
+  if (snap.data().role === 'master') throw new Error('O acesso Master já pode tudo, não precisa dessa permissão.');
+  await ref.update({ podeNoPulsoPrint: !!valor });
+  invalidarUsuario(id);
+  usersCache.invalidar();
+  return toPublic(await ref.get());
+}
+
 async function updatePodeCadastrarOperadores(id, valor) {
   const ref = usersRef.doc(id);
   const snap = await ref.get();
@@ -591,6 +602,10 @@ function toPublic(doc) {
     podeCatalogoEstoque: data.role === 'master' ? null : !!data.podeCatalogoEstoque,
     podeCatalogoInsumos: data.role === 'master' ? null : !!data.podeCatalogoInsumos,
     podeCadastrarOperadores: data.role === 'master' ? null : !!data.podeCadastrarOperadores,
+    // NoPulsoPrint no celular: o atalho do computador é por MÁQUINA (cadastro
+    // do computador); celular não tem cadastro de máquina, então aqui é por
+    // PESSOA. As duas marcas convivem e não se substituem.
+    podeNoPulsoPrint: data.role === 'master' ? null : !!data.podeNoPulsoPrint,
     podeRhTodasUnidades: data.role === 'master' ? null : !!data.podeRhTodasUnidades,
     podeRhCadastrarEfetivado: data.role === 'master' ? null : !!data.podeRhCadastrarEfetivado,
     podeBonifVerValorTotal: data.role === 'master' ? null : !!data.podeBonifVerValorTotal,
@@ -738,6 +753,7 @@ module.exports = {
   updatePodeCatalogoEstoque,
   updatePodeCatalogoInsumos,
   updatePodeCadastrarOperadores,
+  updatePodeNoPulsoPrint,
   updatePodeRhTodasUnidades,
   updatePodeRhCadastrarEfetivado,
   updatePodeBonifVerValorTotal,

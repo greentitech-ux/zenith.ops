@@ -636,7 +636,7 @@ function caminhoSubgrupo(id){
 // Acoes marcar cada tag uma por uma ----------
 const CARGOS = [ ['','Sem cargo'], ['loja','🏬 Loja'], ['gerente','👔 Gerente'], ['assistente-gerente','🧑‍💼 Ass. Ger'], ['tecnico','🔧 Técnico'], ['suporte','🎧 Suporte'], ['manutencao','🛠️ Manutenção'], ['operador','👷 Operador'] ];
 function tagsFieldsetHtml(prefixo, tags){
-  tags = tags || { cargo:null, empresaId:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, podeRhTodasUnidades:false, podeRhCadastrarEfetivado:false, podeBonifVerValorTotal:false, podeBonifVerColaboradores:false, sessaoLonga:false, qaUser:false };
+  tags = tags || { cargo:null, empresaId:null, isAdmin:false, podeCatalogoEstoque:false, podeCatalogoInsumos:false, podeCadastrarOperadores:false, podeNoPulsoPrint:false, podeRhTodasUnidades:false, podeRhCadastrarEfetivado:false, podeBonifVerValorTotal:false, podeBonifVerColaboradores:false, sessaoLonga:false, qaUser:false };
   const cargoHtml = CARGOS.map(([v,l])=>{
     const marcado = (tags.cargo||'')===v;
     return `<label><input type="radio" name="${prefixo}-cargo" value="${v}" ${marcado?'checked':''}> ${l}</label>`;
@@ -658,6 +658,7 @@ function tagsFieldsetHtml(prefixo, tags){
       <label><input type="checkbox" id="${prefixo}-tag-catalogo-estoque" ${tags.podeCatalogoEstoque?'checked':''}> 📦 Catálogo do Estoque</label>
       <label><input type="checkbox" id="${prefixo}-tag-catalogo-insumos" ${tags.podeCatalogoInsumos?'checked':''}> 🥤 Insumos (Abastec. Carrinho)</label>
       <label><input type="checkbox" id="${prefixo}-tag-operadores" ${tags.podeCadastrarOperadores?'checked':''}> 👥 Operadores (Abastec. Carrinho)</label>
+      <label><input type="checkbox" id="${prefixo}-tag-print" ${tags.podeNoPulsoPrint?'checked':''}> 📸 NoPulsoPrint (botão de print no celular)</label>
       <label><input type="checkbox" id="${prefixo}-tag-rh-todas-unidades" ${tags.podeRhTodasUnidades?'checked':''}> 🧑‍💼 RH (todas as unidades)</label>
       <label><input type="checkbox" id="${prefixo}-tag-rh-cadastrar-efetivado" ${tags.podeRhCadastrarEfetivado?'checked':''}> 🧑‍💼 RH: pode cadastrar efetivado direto</label>
       <label title="Sem esta tag, quem tem a seção Bonificação vê só o próprio card - com ela, vê faturamento/pool/taxas por trás da conta"><input type="checkbox" id="${prefixo}-tag-bonif-valor-total" ${tags.podeBonifVerValorTotal?'checked':''}> 🏆 Bonificação: ver valor total</label>
@@ -674,6 +675,7 @@ function lerTagsForm(prefixo){
     podeCatalogoEstoque: document.getElementById(prefixo+'-tag-catalogo-estoque').checked,
     podeCatalogoInsumos: document.getElementById(prefixo+'-tag-catalogo-insumos').checked,
     podeCadastrarOperadores: document.getElementById(prefixo+'-tag-operadores').checked,
+    podeNoPulsoPrint: document.getElementById(prefixo+'-tag-print').checked,
     podeRhTodasUnidades: document.getElementById(prefixo+'-tag-rh-todas-unidades').checked,
     podeRhCadastrarEfetivado: document.getElementById(prefixo+'-tag-rh-cadastrar-efetivado').checked,
     podeBonifVerValorTotal: document.getElementById(prefixo+'-tag-bonif-valor-total').checked,
@@ -694,6 +696,7 @@ async function salvarTagsUsuario(id, tags){
     fetch('/api/users/'+id+'/catalogo-estoque', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeCatalogoEstoque: tags.podeCatalogoEstoque})}),
     fetch('/api/users/'+id+'/catalogo-insumos', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeCatalogoInsumos: tags.podeCatalogoInsumos})}),
     fetch('/api/users/'+id+'/cadastrar-operadores', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeCadastrarOperadores: tags.podeCadastrarOperadores})}),
+    fetch('/api/users/'+id+'/nopulso-print', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeNoPulsoPrint: tags.podeNoPulsoPrint})}),
     fetch('/api/users/'+id+'/rh-todas-unidades', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeRhTodasUnidades: tags.podeRhTodasUnidades})}),
     fetch('/api/users/'+id+'/rh-cadastrar-efetivado', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeRhCadastrarEfetivado: tags.podeRhCadastrarEfetivado})}),
     fetch('/api/users/'+id+'/bonif-ver-valor-total', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({podeBonifVerValorTotal: tags.podeBonifVerValorTotal})}),
