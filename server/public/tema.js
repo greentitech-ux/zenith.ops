@@ -1149,7 +1149,14 @@
     }
     // Disponivel para fluxos que concluem/salvam e precisam limpar o que foi
     // efetivamente persistido, sem depender de classe ou texto de botao.
-    window.zenithRascunhos = { limpar: limparNo, restaurar: agendarRestauracao };
+    // Use depois de uma gravacao confirmada. A atualizacao normal continua
+    // preservando o texto, mas uma mensagem/comentario que ja foi enviado nao
+    // pode reaparecer como se ainda fosse um rascunho.
+    function limparCampoEnviado(campo) {
+      limparNo(campo);
+      if (campo && 'value' in campo) campo.value = '';
+    }
+    window.zenithRascunhos = { limpar: limparNo, limparCampoEnviado: limparCampoEnviado, restaurar: agendarRestauracao };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', agendarRestauracao);
     else agendarRestauracao();
   })();

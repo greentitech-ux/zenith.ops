@@ -716,7 +716,9 @@ async function enviarChatChamado(){
     const resp = await fetch(`/api/central/chamado-manutencao/${DETALHE_ATUAL.id}/chat`, { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar mensagem.');
-    document.getElementById('chat-texto').value = '';
+    const campoTexto = document.getElementById('chat-texto');
+    window.zenithRascunhos?.limparCampoEnviado(campoTexto);
+    campoTexto.value = '';
     document.getElementById('chat-foto').value = '';
     document.getElementById('chat-foto-icone').textContent = '📷';
     await carregarChatChamado();

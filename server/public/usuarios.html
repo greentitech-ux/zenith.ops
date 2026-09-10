@@ -1195,6 +1195,9 @@ async function enviarMensagemDireta(){
       body: JSON.stringify({ userId: MENSAGEM_DIRETA_ID, texto }),
     });
     if(!resp.ok) throw new Error((await resp.json()).error || 'Erro ao enviar.');
+    const campoTexto = document.getElementById('mensagem-direta-texto');
+    window.zenithRascunhos?.limparCampoEnviado(campoTexto);
+    campoTexto.value = '';
     status.textContent = '✅ Enviada!';
     status.style.background = 'var(--ok-dim,#1c3a2e)'; status.style.color = 'var(--ok,#3ddc97)';
     status.style.display = 'block';
