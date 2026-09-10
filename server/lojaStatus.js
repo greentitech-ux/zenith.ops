@@ -800,7 +800,14 @@ async function heartbeat(codigo, posto, info, token) {
   // (ver `cache` acima) ja fica bem abaixo do LIMIAR_OFFLINE_MS (90s), entao
   // o status online/offline calculado por comOnline() nunca fica visivelmente
   // desatualizado mesmo sem invalidar na hora
-  return { mensagemPendente, comandoPendente, chatMensagens };
+  return {
+    mensagemPendente,
+    comandoPendente,
+    chatMensagens,
+    // Também vai no heartbeat para o agente interno aplicar a mudança sem
+    // precisar baixar/reinstalar o NOCZenith.
+    noPulsoPrint: !!(atual && atual.noPulsoPrint),
+  };
 }
 
 // motivos que rebaixam uma máquina VIVA pra 'degradado'. Lista, não
@@ -954,11 +961,26 @@ async function tokenDoComputador(codigo, posto) {
   return snap.exists ? (snap.data().agentToken || null) : null;
 }
 
+// Configuração mínima que o agente consulta com seu token. O print continua
+// exclusivamente local: esta rota só informa se o atalho está habilitado.
+async function configuracaoAgente(codigo, posto, token) {
+  const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
+  if (!snap.exists) throw new Error('Computador não encontrado.');
+  const atual = snap.data();
+  exigirTokenSeTiver(atual, token);
+  return !!atual.noPulsoPrint;
+}
+
+async function noPulsoPrintDoComputador(codigo, posto) {
+  const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
+  return snap.exists && !!snap.data().noPulsoPrint;
+}
+
 // Master cadastra um novo computador pra uma unidade - gera um id curto e
 // estavel (nunca muda, mesmo se o nome/tipo forem editados depois) que vira
 // parte do link/QR code fixado naquele computador (ver POST /api/loja-status/
 // :codigo/computadores em index.js, que devolve a URL pronta)
-async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, medeQuedas) {
+async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, medeQuedas, noPulsoPrint) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador (ex: Caixa 1, PDV Entrega).');
   const posto = crypto.randomBytes(4).toString('hex');
@@ -968,6 +990,8 @@ async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, mede
     // Características operacionais declaradas no cadastro. Não inferimos pelo
     // nome: "Servidor" e "GCOM" precisam ser visíveis e confiáveis no NOC.
     ehServidor: !!ehServidor, temGcom: !!temGcom, medeQuedas: !!medeQuedas,
+    // Captura local opt-in: o arquivo nunca passa pelo NoPulso nem pelo servidor.
+    noPulsoPrint: !!noPulsoPrint,
     criadoEm: Date.now(),
     ultimoHeartbeatEm: null, avisadoOffline: false, offlineDesde: null, mensagemPendente: null,
     ip: null, userAgent: null, abertoDesde: null, ipLocal: null, ipLocalEm: null,
@@ -983,7 +1007,7 @@ async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, mede
 
 // edita nome e/ou tipo de um computador ja cadastrado - o "posto" (id do
 // link/QR) nunca muda, so o que aparece na tela e qual tela o link abre
-async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom, medeQuedas) {
+async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador.');
   const id = docIdFor(codigo, posto);
@@ -1001,6 +1025,7 @@ async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServido
     // quedas. Pode haver mais de uma por redundância; o relatório consolida
     // ocorrências simultâneas em uma única queda da loja.
     medeQuedas: !!medeQuedas,
+    noPulsoPrint: !!noPulsoPrint,
   };
   await COLLECTION.doc(id).update(registro);
   cache.invalidar();
@@ -2523,5 +2548,5 @@ module.exports = {
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
   saudeMaquinas,
-  garantirAgentToken, tokenDoComputador, tokensBatem,
+  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador,
 };

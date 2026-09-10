@@ -332,6 +332,8 @@ const ROTA_TICKET_PUBLICO_RE = /^\/api\/central\/[^/]+\/[^/]+\/(publico|chat-pub
 // motivo do heartbeat, precisa ser publica (a maquina nao tem sessao de
 // usuario logado)
 const ROTA_LOJA_IP_LOCAL_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/ip-local$/;
+// Configuração local que o agente consulta com seu token; não expõe dados do computador.
+const ROTA_LOJA_CONFIG_AGENTE_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/configuracao-agente$/;
 // NOCZenith reporta o resultado de um comando do agente (ver
 // agenteAcoes.js/lojaStatus.js enfileirarComando) - mesmo motivo publico
 // do ip-local: quem chama e a maquina, sem sessao de usuario
@@ -358,7 +360,7 @@ function rotaPublicaSemDashboard(path) {
     || path.startsWith('/api/formularios-publico/')
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
     || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path)
-    || ROTA_LOJA_TELEMETRIA_RE.test(path);
+    || ROTA_LOJA_TELEMETRIA_RE.test(path) || ROTA_LOJA_CONFIG_AGENTE_RE.test(path);
 }
 if (DASHBOARD_USER && DASHBOARD_PASSWORD) {
   app.use((req, res, next) => {
@@ -1316,7 +1318,7 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
     // a entrega do comando/chat (ver lojaStatus.heartbeat); presenca/IP nao
     // dependem dele, pra maquina legada nao sumir do painel
     const token = req.headers['x-noc-token'] || req.body.token || null;
-    const { mensagemPendente, comandoPendente, chatMensagens } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
+    const { mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
       ip, userAgent: req.body.userAgent, abertoDesde: req.body.abertoDesde,
       // medicao de link (ver redeDiagnostico.js). Vem do agente/navegador e
       // esta rota e PUBLICA, entao e tratado como dado hostil - quem sanitiza
@@ -1324,7 +1326,7 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       rede: req.body.rede,
       tailscale: req.body.tailscale,
     }, token);
-    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens });
+    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -1436,6 +1438,15 @@ app.get('/api/loja-status/vigia-versao', (req, res) => {
   res.json({ versao: vigiaScript.VERSAO_VIGIA });
 });
 
+app.get('/api/loja-status/:codigo/computadores/:posto/configuracao-agente', async (req, res) => {
+  try {
+    const noPulsoPrint = await lojaStatus.configuracaoAgente(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null);
+    res.json({ noPulsoPrint });
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
 // o .ps1 CARREGA o segredo do computador (agentToken) assado dentro dele -
 // entao nao pode mais ser 100% publico como era. Libera pra: (1) sessao de
 // Master/Suporte (o botao "Baixar NOCZenith" manda o Bearer), OU (2) um
@@ -1464,7 +1475,8 @@ app.get('/api/loja-status/:codigo/computadores/:posto/vigia.ps1', async (req, re
     }
     if (!liberado) return res.status(403).type('text/plain').send('# Acesso negado. Baixe o agente pela tela NOC-NoPulso (logado como Master/Suporte).');
     const agentToken = await lojaStatus.garantirAgentToken(codigo, posto);
-    const conteudo = vigiaScript.montarScriptVigia({ codigo, posto, tipo, agentToken });
+    const noPulsoPrint = await lojaStatus.noPulsoPrintDoComputador(codigo, posto);
+    const conteudo = vigiaScript.montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint });
     res.type('text/plain').send(conteudo);
   } catch (err) {
     res.status(400).type('text/plain').send('# Erro ao gerar o script: ' + err.message);
@@ -3496,7 +3508,7 @@ function urlComputador(codigo, posto, tipo) {
 app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), async (req, res) => {
   try {
     if (!(await unidadesExtras.apareceEm(req.params.codigo, 'noc'))) return res.status(400).json({ error: 'Essa unidade não tem NOC habilitado.' });
-    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas);
+    const registro = await lojaStatus.cadastrarComputador(req.params.codigo, req.body.nome, req.body.tipo, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas, req.body.noPulsoPrint);
     const url = urlComputador(req.params.codigo, registro.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
@@ -3506,7 +3518,7 @@ app.post('/api/loja-status/:codigo/computadores', requireSection('suporte'), asy
 
 app.put('/api/loja-status/:codigo/computadores/:posto', requireSection('suporte'), async (req, res) => {
   try {
-    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas);
+    const registro = await lojaStatus.editarComputador(req.params.codigo, req.params.posto, req.body.nome, req.body.tipo, req.body.ehNotebook, req.body.ehServidor, req.body.temGcom, req.body.medeQuedas, req.body.noPulsoPrint);
     const url = urlComputador(req.params.codigo, req.params.posto, registro.tipo);
     res.json({ ...registro, url });
   } catch (err) {
