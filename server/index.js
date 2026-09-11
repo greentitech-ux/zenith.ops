@@ -9425,6 +9425,10 @@ app.post('/api/tarefas', auth.requireAuth, async (req, res) => {
       unidade, unidadeNome: unidade ? (mapa[unidade] || unidade) : null, usuario: req.user, responsavel,
       colaboradores: participantes, ehOcorrencia: req.body?.ehOcorrencia === true,
       prioridade: req.body?.prioridade, participantesApenasAcompanham: req.body?.participantesApenasAcompanham === true,
+      // reunião é a mesma tarefa com hora e link (ver camposDaReuniao) - a
+      // validação mora no módulo, não aqui, pra valer em qualquer chamador
+      ehReuniao: req.body?.ehReuniao === true, horaInicio: req.body?.horaInicio,
+      duracaoMin: req.body?.duracaoMin, linkReuniao: req.body?.linkReuniao, linkOrigem: req.body?.linkOrigem,
     });
     broadcast('tarefas-atualizada', { id: criada.id, unidade: criada.unidade }, 'tarefas');
     res.json(criada);

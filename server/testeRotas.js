@@ -15282,7 +15282,7 @@ setTimeout(async () => {
       'e marca qual linha é ocorrência': /\[Ocorrência\]/.test(textoRel),
       'tarefa real de outra pessoa não entra no relatório de quem pediu': relIntruso.status === 400 && /Nenhuma tarefa no filtro/i.test(JSON.parse(relIntruso.corpo).error || ''),
       'relatório sem nenhuma tarefa é recusado com motivo': relVazio.status === 400 && /Nenhuma tarefa no filtro/i.test(JSON.parse(relVazio.corpo).error || ''),
-      'a tela deixa marcar ocorrência e filtrar só por elas': /id="OCOR"/.test(html) && /ehOcorrencia:\$\('OCOR'\)\.checked/.test(html) && /if\(v==='__ocorrencia'\)return !!t\.ehOcorrencia;/.test(html),
+      'a tela deixa marcar ocorrência e filtrar só por elas': /id="OCOR"/.test(html) && /ehOcorrencia:MODO_REUNIAO\?false:\$\('OCOR'\)\.checked/.test(html) && /if\(v==='__ocorrencia'\)return !!t\.ehOcorrencia;/.test(html),
       'e oferece ver antes de baixar nos dois PDFs': /onclick="pdfDaTarefa\(false\)">👁 Ver PDF</.test(html) && /onclick="pdfDaLista\(false\)">👁 Ver relatório do filtro</.test(html),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
@@ -16159,6 +16159,66 @@ setTimeout(async () => {
   } catch (e) { okMarcasPrint = false; console.log('  erro: ' + e.message); }
   if (!okMarcasPrint) ruins += 1;
   console.log(`${okMarcasPrint ? '✓' : '✗'} NoPulsoPrint: marcar com seta, linha e caixa por cima da seleção (sem texto), com Ctrl+Z`);
+
+  // Reunião no Meu Dia: a MESMA tarefa com hora e link, seguindo o padrão do
+  // ehOcorrencia. Entidade separada duplicaria responsável, participantes,
+  // anexos, comentários, vínculo com ticket, PDF, filtros e busca - e um dia as
+  // duas divergiriam. Dois botões na tela, um formulário só com dois modos.
+  let okReuniao = false;
+  try {
+    const tf = require(__dirname + '/tarefas.js');
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const barrou = (arg) => { try { tf.camposDaReuniao(arg); return false; } catch (e) { return true; } };
+    const ger = tf.camposDaReuniao({ ehReuniao: true, horaInicio: '14:30', duracaoMin: 45 });
+    const col = tf.camposDaReuniao({ ehReuniao: true, horaInicio: '09:00', linkOrigem: 'colado', linkReuniao: 'https://meet.google.com/abc-defg-hij' });
+    const comum = tf.camposDaReuniao({ ehReuniao: false });
+
+    const conf = {
+      // ---- backend ----
+      'gerar link produz sala https e marca a origem': /^https:\/\/[^ ]+\/nopulso-[0-9a-f]{18}$/.test(ger.linkReuniao)
+        && ger.linkOrigem === 'gerado' && ger.horaInicio === '14:30' && ger.duracaoMin === 45,
+      // no Jitsi quem tem o link entra: sala derivada de título/unidade seria adivinhável
+      'cada reunião ganha uma sala DIFERENTE (nome não é adivinhável)':
+        tf.gerarLinkReuniao() !== tf.gerarLinkReuniao(),
+      'colar link preserva o que a pessoa colou, e a duração cai no padrão':
+        col.linkReuniao === 'https://meet.google.com/abc-defg-hij' && col.linkOrigem === 'colado' && col.duracaoMin === 60,
+      'tarefa comum não ganha nenhum campo de reunião':
+        comum.ehReuniao === false && comum.horaInicio === null && comum.linkReuniao === null && comum.linkOrigem === null,
+      'reunião sem hora, ou com hora inválida, é barrada':
+        barrou({ ehReuniao: true }) && barrou({ ehReuniao: true, horaInicio: '25:00' }) && barrou({ ehReuniao: true, horaInicio: '9h' }),
+      'link colado exige https e não aceita vazio':
+        barrou({ ehReuniao: true, horaInicio: '10:00', linkOrigem: 'colado', linkReuniao: 'http://x.com' })
+        && barrou({ ehReuniao: true, horaInicio: '10:00', linkOrigem: 'colado' }),
+      'duração fica dentro dos limites': tf.camposDaReuniao({ ehReuniao: true, horaInicio: '10:00', duracaoMin: 99999 }).duracaoMin === 600
+        && tf.camposDaReuniao({ ehReuniao: true, horaInicio: '10:00', duracaoMin: 1 }).duracaoMin === 5,
+      'a rota repassa os campos (sem isso nada chega ao módulo)':
+        /ehReuniao: req\.body\?\.ehReuniao === true, horaInicio: req\.body\?\.horaInicio/.test(idx)
+        && /duracaoMin: req\.body\?\.duracaoMin, linkReuniao: req\.body\?\.linkReuniao, linkOrigem: req\.body\?\.linkOrigem/.test(idx),
+      // ---- tela ----
+      'dois botões: criar tarefa e criar reunião': /id="CREATE" class="btn primary" onclick="novo\(\)"/.test(html)
+        && /id="CREATE_REUNIAO" class="btn" onclick="novaReuniao\(\)"/.test(html),
+      'um formulário só, dois modos': /function novaReuniao\(\)\{novo\(true\)\}/.test(html)
+        && /\$\('REUNIAO'\)\.hidden=!MODO_REUNIAO/.test(html)
+        && /\$\('BTCRIAR'\)\.textContent=MODO_REUNIAO\?'Criar reunião':'Criar tarefa'/.test(html),
+      'o campo de colar só aparece no modo colar': /\$\('LINKROW'\)\.hidden=\$\('LINKMODO'\)\.value!=='colado'/.test(html),
+      'reunião nunca é ocorrência (as duas marcas não se misturam)':
+        /ehOcorrencia:MODO_REUNIAO\?false:\$\('OCOR'\)\.checked/.test(html) && /\$\('OCORROW'\)\.hidden=MODO_REUNIAO/.test(html),
+      'a tela barra reunião sem hora ou sem dia antes de chamar a rota':
+        /if\(MODO_REUNIAO&&!\$\('HORA'\)\.value\)return alert/.test(html) && /if\(MODO_REUNIAO&&!\$\('DUE'\)\.value\)return alert/.test(html),
+      'o cartão mostra a hora e o Entrar, e o Entrar não abre a ficha':
+        /🎥 \$\{e\(x\.horaInicio\|\|''\)\}/.test(html) && /onclick="event\.stopPropagation\(\)">Entrar ↗<\/a>/.test(html),
+      // reunião das 9h embaixo de tarefa sem hora é como se perde reunião
+      'quem tem hora vem primeiro, em ordem de relógio':
+        /function porHora\(a,b\)/.test(html) && /\.sort\(porHora\)/.test(html),
+      'a busca acha por "reunião"': /t\.ehReuniao\?'Reunião '\+\(t\.horaInicio\|\|''\):''/.test(html),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okReuniao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okReuniao = false; console.log('  erro: ' + e.message); }
+  if (!okReuniao) ruins += 1;
+  console.log(`${okReuniao ? '✓' : '✗'} Meu Dia: criar reunião com hora, duração e link (gerado ou colado) - a mesma tarefa, dois botões`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

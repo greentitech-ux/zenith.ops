@@ -7,6 +7,44 @@ const db = require('./firestore');
 const ticketCounter = require('./ticketCounter');
 const prioridades = require('./prioridades');
 
+// ---------- reunião: a MESMA tarefa, com hora e link ----------
+// Segue o padrão de ehOcorrencia: uma marca que muda o que o cartão mostra e
+// deixa filtrar, sem mexer em permissão nem em fluxo. Entidade separada
+// duplicaria responsável, participantes, anexos, comentários, vínculo com
+// ticket, PDF, filtros e busca - e um dia as duas divergiriam.
+const HORA_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DURACAO_MIN = 5;
+const DURACAO_MAX = 600;
+// Sala Jitsi sob demanda: sem conta, sem credencial, sem custo. Trocável por
+// env se um dia houver instância própria.
+const REUNIAO_BASE_URL = (process.env.REUNIAO_BASE_URL || 'https://meet.jit.si').replace(/\/+$/, '');
+// Nome ALEATÓRIO, nunca derivado de título/unidade/data: no Jitsi quem tem o
+// link entra, e "reuniao-tirol-1109" é adivinhável. Mesmo crypto dos tokens de
+// assinatura. Por isso o link é credencial - não sai em PDF nem em relatório.
+function gerarLinkReuniao() {
+  return `${REUNIAO_BASE_URL}/nopulso-${crypto.randomBytes(9).toString('hex')}`;
+}
+function limparLinkColado(valor) {
+  const url = String(valor || '').trim().slice(0, 400);
+  if (!url) throw new Error('Cole o link da reunião, ou use "Gerar link".');
+  if (!/^https:\/\//i.test(url)) throw new Error('O link da reunião precisa começar com https://');
+  return url;
+}
+// devolve os campos da reunião já validados, ou os nulos de uma tarefa comum
+function camposDaReuniao({ ehReuniao, horaInicio, duracaoMin, linkReuniao, linkOrigem }) {
+  if (!ehReuniao) return { ehReuniao: false, horaInicio: null, duracaoMin: null, linkReuniao: null, linkOrigem: null };
+  const hora = String(horaInicio || '').trim();
+  if (!HORA_RE.test(hora)) throw new Error('Informe a hora da reunião no formato HH:MM.');
+  const bruta = parseInt(duracaoMin, 10);
+  const duracao = Math.min(DURACAO_MAX, Math.max(DURACAO_MIN, Number.isFinite(bruta) ? bruta : 60));
+  const colado = String(linkOrigem || '') === 'colado';
+  return {
+    ehReuniao: true, horaInicio: hora, duracaoMin: duracao,
+    linkReuniao: colado ? limparLinkColado(linkReuniao) : gerarLinkReuniao(),
+    linkOrigem: colado ? 'colado' : 'gerado',
+  };
+}
+
 const COLLECTION = db.collection('tarefas');
 const CONTROLE = db.collection('tarefasControle');
 const STATUS_ABERTO = new Set(['PENDENTE', 'A_FAZER', 'HOJE', 'EM_ANDAMENTO']);
@@ -162,7 +200,7 @@ function pessoasParaColaboradores(pessoas, responsavelId) {
     .map((p) => ({ id: p.id, nome: nomeUsuario(p) })).slice(0, 20);
 }
 
-async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false }) {
+async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unidadeNome, usuario, responsavel, colaboradores = [], vinculo = null, ehOcorrencia = false, ehReuniao = false, horaInicio = null, duracaoMin = null, linkReuniao = null, linkOrigem = null, numeroTicket: numeroTicketInformado = null, origem = null, origemChatId = null, prioridade, participantesApenasAcompanham = false }) {
   const texto = String(titulo || '').trim().slice(0, 200);
   if (!texto) throw new Error('Informe o título da tarefa.');
   const ref = COLLECTION.doc();
@@ -177,6 +215,9 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
   // numeração para o mesmo assunto.
   const numeroTicket = numeroTicketInformado != null ? numeroTicketInformado : (vinculo?.numeroTicket != null ? vinculo.numeroTicket : await ticketCounter.proximoTicket());
   const prioridadeFinal = prioridades.sanitizarPrioridade(prioridade);
+  // valida ANTES de gravar: reunião sem hora não é reunião, e link colado
+  // sem https não é link. Falhar aqui é melhor que gravar pela metade.
+  const reuniao = camposDaReuniao({ ehReuniao, horaInicio, duracaoMin, linkReuniao, linkOrigem });
   const tarefa = {
     id: ref.id, origem: origem || (vinculo ? 'ticket-manual' : 'manual'), titulo: texto,
     numeroTicket,
@@ -187,6 +228,8 @@ async function criar({ titulo, descricao, dataInicio, dataEntrega, unidade, unid
     // documento, não um pedido. Não muda permissão nem fluxo - muda o que o
     // PDF diz que ele é, e deixa filtrar "só ocorrências" na lista.
     ehOcorrencia: !!ehOcorrencia,
+    ehReuniao: reuniao.ehReuniao, horaInicio: reuniao.horaInicio, duracaoMin: reuniao.duracaoMin,
+    linkReuniao: reuniao.linkReuniao, linkOrigem: reuniao.linkOrigem,
     responsavelId: (responsavel || usuario).id, responsavelEmail: (responsavel || usuario).email || null, responsavelNome: nomeUsuario(responsavel || usuario),
     criadoPorId: usuario.id, criadoPorNome: nomeUsuario(usuario),
     criadaEm: agora, atualizadoEm: agora, comentarios: [], vinculo, anexos: [],
@@ -436,4 +479,5 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
   return resultado;
 }
 
-module.exports = { sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
+module.exports = {
+  camposDaReuniao, gerarLinkReuniao, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
