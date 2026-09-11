@@ -14721,7 +14721,9 @@ setTimeout(async () => {
     const dataRef = new Function(`${trecho(/function dataRef\(.*/)}; return dataRef;`)();
     const passaData = monta('passaData')(cifrao, {}, dataRef, faixa);
     const passaUnidade = monta('passaUnidade')(cifrao, { unidades: [{ codigo: '19821', grupo: 'ARCFOOD' }, { codigo: '9999', grupo: 'GBE' }] }, dataRef, faixa);
-    const passaSituacao = monta('passaSituacao')(cifrao, {}, dataRef, faixa);
+    // passaSituacao agora depende de concluidaHoje/diaBR (a tarefa concluída
+    // hoje continua visível em "Em aberto"), então vão junto no escopo
+    const passaSituacao = new Function('$', `${base}${trecho(/const diaBR=.*/)}${trecho(/function concluidaHoje\(.*/)}${trecho(/function passaSituacao\(.*/)}; return passaSituacao;`)(cifrao);
     const passaTipo = new Function('$', `${trecho(/const tipoDaTarefa=.*/)}${trecho(/function passaTipo\(.*/)}; return passaTipo;`)(cifrao);
 
     const arc = { unidade: '19821', dataEntrega: '2026-09-09', status: 'A_FAZER' };
@@ -14747,6 +14749,14 @@ setTimeout(async () => {
 
     campos['F-SIT'] = 'abertas';
     const abertas = passaSituacao(arc) && !passaSituacao({ status: 'CONCLUIDA' });
+    // O BUG: "Em aberto" escondia toda CONCLUIDA, então concluir fazia a tarefa
+    // sumir da tela em vez de cair na coluna "Concluídas" - que ficava sempre
+    // vazia. Quem foi concluída HOJE fica à vista; a de ontem, não.
+    const agoraBR = new Function(`${base} return agoraBrasilia;`)()();
+    const hojeBR = new Function(`${base} return hoje;`)()();
+    const concluidaAgora = { status: 'CONCLUIDA', concluidaEm: agoraBR.toISOString() };
+    const concluidaOntem = { status: 'CONCLUIDA', concluidaEm: new Date(agoraBR.getTime() - 36 * 3600e3).toISOString() };
+    const mostraRecemConcluida = passaSituacao(concluidaAgora) && !passaSituacao(concluidaOntem) && !!hojeBR;
     campos['F-SIT'] = 'concluidas';
     const concluidas = !passaSituacao(arc) && passaSituacao({ status: 'CONCLUIDA' });
     campos['F-SIT'] = 'todas';
@@ -14808,6 +14818,12 @@ setTimeout(async () => {
       'Unidade "Tarefa pessoal" mostra só as sem unidade': soPessoal,
       'Unidade escolhida mostra só aquela loja': soUmaLoja,
       'Situação separa em aberto / concluídas / todas': abertas && concluidas && todas,
+      // req() lança em 400: sem try/catch a senha errada virava rejeição
+      // silenciosa - a pessoa digitava, clicava e NADA acontecia na tela
+      'concluir em lote avisa quando dá erro, em vez de falhar calado':
+        /let r;try\{r=await req\('\/api\/tarefas\/status-lote'[\s\S]{0,90}?\}catch\(x\)\{return alert\(x\.message\)\}/.test(html)
+        && /const falhas=\(r\.resultado\|\|\[\]\)\.filter/.test(html),
+      'concluir não some da tela: a concluída HOJE fica em "Em aberto" (a de ontem, não)': mostraRecemConcluida,
       'Situação "Pendentes" pega previsão vencida e ignora futura e concluída': soPendentes,
       'Tipo filtra pela solicitação que gerou a tarefa': tipoTudo && soEstorno,
       'Tipo "Sem ticket" mostra só a tarefa avulsa': soAvulsas,
@@ -16300,15 +16316,20 @@ setTimeout(async () => {
   if (!okReuniao) ruins += 1;
   console.log(`${okReuniao ? '✓' : '✗'} Meu Dia: criar reunião com hora, duração e link (gerado ou colado) - a mesma tarefa, dois botões`);
 
-  // Painel calendário do Meu Dia: é SÓ TELA. Redesenha o L que já está na
-  // memória - zero leitura nova no Firestore - e parte do mesmo noFiltro do
-  // quadro, então filtro e busca valem no calendário sem código duplicado.
+  // Painel calendário do Meu Dia, em três recortes: Mês, Semana e Dia. É SÓ
+  // TELA - redesenha o L que já está na memória (zero leitura no Firestore) e
+  // parte do mesmo noFiltro do quadro, então filtro e busca valem aqui também.
+  //
+  // A grade de horas existe porque REUNIÃO tem hora de verdade. Tarefa comum
+  // não tem: vai na faixa "dia todo", em cima. Espalhar tarefa por horário
+  // inventado encheria a grade de um dado que o sistema não produz.
   let okCalendario = false;
   try {
     const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
-    const corpoPintar = (html.match(/function pintarCalendario\(vis\)\{[\s\S]*?\n\}/) || [''])[0];
-    const corpoArrastar = (html.match(/function ligarArrastarCal\(\)\{[\s\S]*?\n\}/) || [''])[0];
-    const cssCal = (html.match(/#CAL\{[\s\S]*?\.cal-sem-lista [^}]*\}/) || [''])[0];
+    const corpo = (nome) => (html.match(new RegExp('function ' + nome + '\\([^)]*\\)\\{[\\s\\S]*?\\n\\}')) || [''])[0];
+    const corpoPintar = corpo('pintarCalendario'), corpoMes = corpo('pintarMes'), corpoTempo = corpo('pintarTempo');
+    const corpoArrastar = corpo('ligarArrastarCal');
+    const cssCal = (html.match(/#CAL\{[\s\S]*?\.ct-vazio[^}]*\}/) || [''])[0];
 
     const conf = {
       'alternar quadro × calendário, e a escolha fica lembrada':
@@ -16320,9 +16341,49 @@ setTimeout(async () => {
       // [hidden] do navegador perde de .board{display:grid}: sem esta regra o
       // quadro fica desenhado atrás do calendário, e os dois aparecem juntos.
       'o quadro some de verdade ao abrir o calendário': /\.board\[hidden\]\{display:none\}/.test(html),
+
+      // ---- os três recortes ----
+      'três botões ao lado de Hoje: Dia, Semana e Mês':
+        /id="CM-dia" onclick="verModoCal\('dia'\)">Dia</.test(html)
+        && /id="CM-semana" onclick="verModoCal\('semana'\)">Semana</.test(html)
+        && /id="CM-mes" onclick="verModoCal\('mes'\)">Mês</.test(html),
+      'quem trabalha na Semana não volta pro Mês ao reabrir a tela':
+        /localStorage\.setItem\('meuDiaCalModo',m\)/.test(html)
+        && /localStorage\.getItem\('meuDiaCalModo'\)[\s\S]{0,120}verModoCal\(/.test(html),
+      'o Mês e a grade de horas nunca aparecem juntos':
+        /\$\('CAL-MES-BOX'\)\.hidden=CAL_MODO!=='mes'/.test(corpoPintar)
+        && /\$\('CAL-TEMPO'\)\.hidden=CAL_MODO==='mes'/.test(corpoPintar),
+      // ‹ › tem de andar o que está na tela - um mês no Mês, 7 dias na Semana
+      '‹ › andam o período que está na tela, e o dia 31 não pula fevereiro':
+        /if\(CAL_MODO==='mes'\)REF=isoDe\(new Date\(d\.getFullYear\(\),d\.getMonth\(\)\+passo,1\)\)/.test(html)
+        && /CAL_MODO==='semana'\?7\*passo:passo/.test(html),
+      'a Semana vai de domingo a sábado; o Dia é um dia só':
+        /if\(CAL_MODO==='dia'\)return \[isoDe\(d\)\]/.test(html)
+        && /d\.getDate\(\)-d\.getDay\(\)/.test(html) && /length:7/.test(html),
+
+      // ---- o que entra na grade de horas ----
+      'só entra na grade quem TEM hora: o resto vai na faixa "dia todo"':
+        /const temHora=t=>t\.ehReuniao&&minutosDe\(t\.horaInicio\)!==null/.test(html)
+        && /if\(!temHora\(t\)\)return semHora\.push\(t\)/.test(corpoTempo)
+        && /class="ct-todo-cel[\s\S]{0,80}semHora\.map\(itemCal\)/.test(corpoTempo),
+      // reunião das 6h ficaria escondida acima do topo de uma grade fixa
+      'a janela de horas cresce para caber reunião fora do horário comercial':
+        /hIni=Math\.min\(hIni,Math\.floor\(ini\/60\)\);hFim=Math\.max\(hFim,Math\.ceil\(fim\/60\)\)/.test(corpoTempo),
+      // duas reuniões às 14h é exatamente o caso que precisa ser visto
+      'reuniões sobrepostas dividem a largura em vez de uma cobrir a outra':
+        /function empilhar\(evs\)/.test(html)
+        && /ev\.col=i;ev\.de=grupo\.length/.test(html)
+        && /const larg=100\/ev\.de,esq=larg\*ev\.col/.test(corpoTempo),
+      'a linha do agora só aparece no dia de hoje':
+        /const agora=c\.dia===hj\?linhaAgora\(/.test(corpoTempo)
+        && /if\(pos<0\|\|pos>100\)return ''/.test(html),
+      // rolar de volta a cada atualização de 60s tiraria a tela da mão
+      'só rola até o "agora" quando o período muda, não a cada atualização':
+        /if\(ULTIMO_ROLO===chave\)return/.test(html),
+
+      // ---- o que já valia, e continua valendo ----
       'pinta pela PREVISÃO (dataEntrega), que é o dia da reunião e o prazo':
         /const d=t\.dataEntrega;/.test(corpoPintar) && !/t\.dataLimite|t\.criadoEm/.test(corpoPintar),
-      // sem a faixa de baixo, tarefa sem previsão sumiria da tela
       'quem não tem previsão vai para a faixa "Sem previsão", não some':
         /if\(!d\)\{semData\.push\(t\);return\}/.test(corpoPintar)
         && /\$\('CAL-SEM'\)\.hidden=!semData\.length/.test(corpoPintar)
@@ -16331,31 +16392,34 @@ setTimeout(async () => {
         /porDia\.forEach\(l=>l\.sort\(porHora\)\)/.test(corpoPintar) && /semData\.sort\(porHora\)/.test(corpoPintar),
       'a reunião aparece com a hora em destaque':
         /t\.ehReuniao&&t\.horaInicio\?`<b>\$\{e\(t\.horaInicio\)\}<\/b> `:''/.test(html),
-      // clicar no dia reusa De/Até em vez de inventar uma terceira tela
       'clicar no dia cai no filtro de período que já existe':
         /function verDia\(dia\)\{\s*\$\('F-DE'\)\.value=dia;\$\('F-ATE'\)\.value=dia;/.test(html)
         && /verVisao\('quadro'\)/.test(html),
-      'arrastar entre dias usa a rota de datas que já existe (nenhuma rota nova)':
+      // arrastar vale nos três: célula do mês, faixa "dia todo" e coluna de hora
+      'arrastar usa a rota de datas que já existe, nos três recortes':
         /req\('\/api\/tarefas\/'\+id\+'\/datas',\{dataEntrega:dia\},'PATCH'\)/.test(corpoArrastar)
+        && /querySelectorAll\('\[data-dia\]'\)/.test(corpoArrastar)
+        && /querySelectorAll\('\.cal-item,\.ct-ev'\)/.test(corpoArrastar)
         && !/\/api\/calendario/.test(html),
       'não solta requisição por arrastar para o mesmo dia':
         /if\(!t\|\|t\.dataEntrega===dia\)return/.test(corpoArrastar),
-      // desenhar o calendário não pode custar leitura: o Firestore cobra por
-      // documento devolvido e mudar de mês é coisa de um clique
-      'desenhar o mês não lê nada: mexe só no L que está na memória':
-        corpoPintar.length > 400 && !/req\(|load\(\)|fetch\(/.test(corpoPintar),
+      // o Firestore cobra por documento devolvido, e trocar de mês é um clique
+      'desenhar qualquer recorte não lê nada: mexe só no L que está na memória':
+        corpoPintar.length > 300 && corpoMes.length > 300 && corpoTempo.length > 600
+        && ![corpoPintar, corpoMes, corpoTempo].some((c) => /req\(|load\(\)|fetch\(/.test(c)),
       'o calendário parte do mesmo noFiltro do quadro (filtro e busca valem)':
         /const vis=L\.filter\(noFiltro\)[\s\S]*if\(VISAO==='calendario'\)pintarCalendario\(vis\)/.test(html),
-      // cor cravada escapa da troca de --accent que o tema Claro faz
+      // cor cravada escapa da troca de --accent que o tema Claro faz. #0b0d10 é
+      // a exceção da CLAUDE.md: texto POR CIMA do acento é sempre esse.
       'nenhuma cor de marca cravada no CSS do calendário':
-        cssCal.length > 600 && !/#b8ff3c|184,\s*255,\s*60/.test(cssCal),
+        cssCal.length > 2000 && !/#(?!0b0d10\b)[0-9a-f]{6}|184,\s*255,\s*60/i.test(cssCal),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okCalendario = !falhas.length;
     if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
   } catch (e) { okCalendario = false; console.log('  erro: ' + e.message); }
   if (!okCalendario) ruins += 1;
-  console.log(`${okCalendario ? '✓' : '✗'} Meu Dia: painel calendário por previsão, sem leitura nova e sem rota nova`);
+  console.log(`${okCalendario ? '✓' : '✗'} Meu Dia: calendário em Dia/Semana/Mês, sem leitura nova e sem rota nova`);
 
   // Barra de rolagem igual em todas as telas. O padrão do Chrome é larga,
   // clara e com setas nas pontas - sobre o fundo escuro vira uma faixa branca.
