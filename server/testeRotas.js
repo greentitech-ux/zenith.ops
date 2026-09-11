@@ -15653,15 +15653,17 @@ setTimeout(async () => {
       // superficie ganhou a captura do mouse - o teste segue o DESENHO, nao o
       // controle que por acaso o hospeda hoje
       const pintura = (t.match(/Add_Paint\(\{[\s\S]*?\}\)\n/) || [''])[0];
-      // cada uma das 8 conferida SOZINHA: um (Top|Bottom) casaria com metade
+      // cada uma exige a forma COM parenteses proprios: sem eles a virgula do
+      // New-Object engole a conta, vira Object[] e o Paint estoura (ver o teste
+      // da armadilha da virgula). Conferidas uma a uma: um (Top|Bottom) casaria
       // das alças presentes e deixaria passar a falta da outra
       return {
         total: (pintura.match(/New-Object System\.Drawing\.Point\(/g) || []).length,
         quinas: (pintura.match(/New-Object System\.Drawing\.Point\(\$areaAtual\.(Left|Right),\$areaAtual\.(Top|Bottom)\)/g) || []).length,
-        meioTopo: /\$areaAtual\.Left\+\[int\]\(\$areaAtual\.Width\/2\),\$areaAtual\.Top\)/.test(pintura),
-        meioBase: /\$areaAtual\.Left\+\[int\]\(\$areaAtual\.Width\/2\),\$areaAtual\.Bottom\)/.test(pintura),
-        meioEsq: /\$areaAtual\.Left,\$areaAtual\.Top\+\[int\]\(\$areaAtual\.Height\/2\)\)/.test(pintura),
-        meioDir: /\$areaAtual\.Right,\$areaAtual\.Top\+\[int\]\(\$areaAtual\.Height\/2\)\)/.test(pintura),
+        meioTopo: /\(\$areaAtual\.Left\+\[int\]\(\$areaAtual\.Width\/2\)\),\$areaAtual\.Top\)/.test(pintura),
+        meioBase: /\(\$areaAtual\.Left\+\[int\]\(\$areaAtual\.Width\/2\)\),\$areaAtual\.Bottom\)/.test(pintura),
+        meioEsq: /\$areaAtual\.Left,\(\$areaAtual\.Top\+\[int\]\(\$areaAtual\.Height\/2\)\)\)/.test(pintura),
+        meioDir: /\$areaAtual\.Right,\(\$areaAtual\.Top\+\[int\]\(\$areaAtual\.Height\/2\)\)\)/.test(pintura),
       };
     };
     const aI = alcas(psI);
@@ -15899,6 +15901,90 @@ setTimeout(async () => {
   } catch (e) { okPulsoPrint = false; console.log('  erro: ' + e.message); }
   if (!okPulsoPrint) ruins += 1;
   console.log(`${okPulsoPrint ? '✓' : '✗'} NoPulsoPrint: o NOC para de dizer "pronto" com o laço travado, e a seleção invisível não mata mais o Ctrl+Q`);
+
+  // A CAUSA de "o NoPulsoPrint não funciona": em New-Object Tipo(a,b) os
+  // parênteses NÃO são lista de argumentos de método - são expressão de array, e
+  // em PowerShell a vírgula tem precedência MAIOR que + e -. Sem parênteses
+  // próprios, "$x.A+1,$y.B" é lido como "$x.A + (1,$y.B)" = Object[], e a conta
+  // estoura com "[System.Object[]] não contém op_Subtraction".
+  //
+  // Estourava ao POSICIONAR o painel de botões, antes da janela aparecer: todo
+  // Ctrl+Q morria ali (o NOC mostrava "vistos=14 · capturas=0"). O defeito
+  // entrou junto com os botões Cancelar/Salvar e passou despercebido porque o
+  // parser não acusa - é erro de execução.
+  let okVirgulaNewObject = false;
+  try {
+    const vgV = require(__dirname + '/vigiaScript.js');
+    // fatia respeitando aninhamento de PARÊNTESES (colchete de tipo não aninha argumento)
+    const fatiarTopo = (txt) => {
+      const partes = []; let nivel = 0, atual = '';
+      for (const ch of txt) {
+        if (ch === '(') nivel++; else if (ch === ')') nivel--;
+        if (ch === ',' && nivel === 0) { partes.push(atual); atual = ''; continue; }
+        atual += ch;
+      }
+      partes.push(atual); return partes;
+    };
+    const corpoDosParenteses = (str, i) => {
+      let nivel = 0;
+      for (let j = i; j < str.length; j++) {
+        if (str[j] === '(') nivel++;
+        else if (str[j] === ')') { nivel--; if (nivel === 0) return str.slice(i + 1, j); }
+      }
+      return null;
+    };
+    // operando, operador, início de operando - não casa com Get-Date nem com -eq
+    const CONTA = /[)\]\w$]\s*[+\-]\s*[($\d[]/;
+    const suspeitos = (script) => {
+      const achados = []; const re = /New-Object\s+[\w.]+\s*\(/g; let m;
+      while ((m = re.exec(script))) {
+        const corpo = corpoDosParenteses(script, m.index + m[0].length - 1);
+        if (corpo === null) continue;
+        const frags = fatiarTopo(corpo);
+        if (frags.length < 2) continue;
+        for (const f of frags) {
+          let nivel = 0, topo = '';
+          for (const ch of f) { if (ch === '(') nivel++; else if (ch === ')') nivel--; topo += nivel === 0 ? ch : ' '; }
+          if (CONTA.test(topo)) achados.push((m[0] + corpo).replace(/\s+/g, ' ').slice(0, 110));
+        }
+      }
+      return achados;
+    };
+    const psI = vgV.montarScriptVigia({ codigo: 'DOM_19706', posto: 'PC1', tipo: 'interno', agentToken: 'tok', noPulsoPrint: true });
+    const psA = vgV.montarScriptVigia({ codigo: 'DOM_19706', posto: 'CX1', tipo: 'atendimento', agentToken: 'tok', noPulsoPrint: true });
+    const achI = suspeitos(psI);
+    const achA = suspeitos(psA);
+
+    const conf = {
+      'VERSAO_VIGIA subiu (sem isso a correção não chega nas 52 máquinas)': vgV.VERSAO_VIGIA >= 37,
+      'nenhum New-Object deixa conta solta entre vírgulas (interno)': achI.length === 0,
+      'nem na máquina de atendimento': achA.length === 0,
+      // as 3 linhas que estavam quebradas, agora com parênteses próprios
+      'o painel de botões é posicionado com cada conta entre parênteses':
+        /New-Object System\.Drawing\.Point\(\(\[Math\]::Max\(14,\[int\]\(\(\$form\.ClientSize\.Width-304\)\/2\)\)\),\(\$form\.ClientSize\.Height-56\)\)/.test(psI),
+      'arrastar para MOVER a seleção não estoura mais':
+        /New-Object System\.Drawing\.Rectangle\(\(\$base\.X\+\$p\.X-\$ini\.X\),\(\$base\.Y\+\$p\.Y-\$ini\.Y\),\$base\.Width,\$base\.Height\)/.test(psI),
+      'as 4 alças dos meios usam parênteses próprios':
+        /Point\(\(\$areaAtual\.Left\+\[int\]\(\$areaAtual\.Width\/2\)\),\$areaAtual\.Top\)/.test(psI)
+        && /Point\(\(\$areaAtual\.Left\+\[int\]\(\$areaAtual\.Width\/2\)\),\$areaAtual\.Bottom\)/.test(psI)
+        && /Point\(\$areaAtual\.Left,\(\$areaAtual\.Top\+\[int\]\(\$areaAtual\.Height\/2\)\)\)/.test(psI)
+        && /Point\(\$areaAtual\.Right,\(\$areaAtual\.Top\+\[int\]\(\$areaAtual\.Height\/2\)\)\)/.test(psI),
+      // o detector precisa saber acusar: se ele nunca acusa, não vale nada
+      'o detector acusa o padrão errado quando ele existe':
+        suspeitos('$x = New-Object System.Drawing.Point($a.X+1,$b.Y)').length === 1
+        && suspeitos('$x = New-Object System.Drawing.Point($a.X,$b.Y-3)').length === 1,
+      'e NÃO acusa argumento já protegido nem nome de cmdlet com hífen':
+        suspeitos('$x = New-Object System.Drawing.Point(($a.X+1),($b.Y-3))').length === 0
+        && suspeitos('$x = New-Object System.Drawing.Size(304,42)').length === 0
+        && suspeitos('$x = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)').length === 0,
+      'o script continua começando com # NOCZenith': psI.startsWith('# NOCZenith'),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okVirgulaNewObject = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}${achI.length ? ' | suspeitos: ' + achI.join(' ;; ') : ''}`);
+  } catch (e) { okVirgulaNewObject = false; console.log('  erro: ' + e.message); }
+  if (!okVirgulaNewObject) ruins += 1;
+  console.log(`${okVirgulaNewObject ? '✓' : '✗'} NoPulsoPrint: a armadilha da vírgula no New-Object (era ela que matava TODA captura)`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
