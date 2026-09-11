@@ -16220,6 +16220,63 @@ setTimeout(async () => {
   if (!okReuniao) ruins += 1;
   console.log(`${okReuniao ? '✓' : '✗'} Meu Dia: criar reunião com hora, duração e link (gerado ou colado) - a mesma tarefa, dois botões`);
 
+  // Painel calendário do Meu Dia: é SÓ TELA. Redesenha o L que já está na
+  // memória - zero leitura nova no Firestore - e parte do mesmo noFiltro do
+  // quadro, então filtro e busca valem no calendário sem código duplicado.
+  let okCalendario = false;
+  try {
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const corpoPintar = (html.match(/function pintarCalendario\(vis\)\{[\s\S]*?\n\}/) || [''])[0];
+    const corpoArrastar = (html.match(/function ligarArrastarCal\(\)\{[\s\S]*?\n\}/) || [''])[0];
+    const cssCal = (html.match(/#CAL\{[\s\S]*?\.cal-sem-lista [^}]*\}/) || [''])[0];
+
+    const conf = {
+      'alternar quadro × calendário, e a escolha fica lembrada':
+        /function verVisao\(v\)\{/.test(html)
+        && /document\.querySelector\('\.board'\)\.hidden=v!=='quadro'/.test(html)
+        && /\$\('CAL'\)\.hidden=v!=='calendario'/.test(html)
+        && /localStorage\.setItem\('meuDiaVisao',v\)/.test(html)
+        && /localStorage\.getItem\('meuDiaVisao'\)==='calendario'\)verVisao\('calendario'\)/.test(html),
+      // [hidden] do navegador perde de .board{display:grid}: sem esta regra o
+      // quadro fica desenhado atrás do calendário, e os dois aparecem juntos.
+      'o quadro some de verdade ao abrir o calendário': /\.board\[hidden\]\{display:none\}/.test(html),
+      'pinta pela PREVISÃO (dataEntrega), que é o dia da reunião e o prazo':
+        /const d=t\.dataEntrega;/.test(corpoPintar) && !/t\.dataLimite|t\.criadoEm/.test(corpoPintar),
+      // sem a faixa de baixo, tarefa sem previsão sumiria da tela
+      'quem não tem previsão vai para a faixa "Sem previsão", não some':
+        /if\(!d\)\{semData\.push\(t\);return\}/.test(corpoPintar)
+        && /\$\('CAL-SEM'\)\.hidden=!semData\.length/.test(corpoPintar)
+        && /CAL-SEM-LISTA'\)\.innerHTML=semData/.test(corpoPintar),
+      'reunião das 9h vem antes da das 14h, dentro do dia e na faixa':
+        /porDia\.forEach\(l=>l\.sort\(porHora\)\)/.test(corpoPintar) && /semData\.sort\(porHora\)/.test(corpoPintar),
+      'a reunião aparece com a hora em destaque':
+        /t\.ehReuniao&&t\.horaInicio\?`<b>\$\{e\(t\.horaInicio\)\}<\/b> `:''/.test(html),
+      // clicar no dia reusa De/Até em vez de inventar uma terceira tela
+      'clicar no dia cai no filtro de período que já existe':
+        /function verDia\(dia\)\{\s*\$\('F-DE'\)\.value=dia;\$\('F-ATE'\)\.value=dia;/.test(html)
+        && /verVisao\('quadro'\)/.test(html),
+      'arrastar entre dias usa a rota de datas que já existe (nenhuma rota nova)':
+        /req\('\/api\/tarefas\/'\+id\+'\/datas',\{dataEntrega:dia\},'PATCH'\)/.test(corpoArrastar)
+        && !/\/api\/calendario/.test(html),
+      'não solta requisição por arrastar para o mesmo dia':
+        /if\(!t\|\|t\.dataEntrega===dia\)return/.test(corpoArrastar),
+      // desenhar o calendário não pode custar leitura: o Firestore cobra por
+      // documento devolvido e mudar de mês é coisa de um clique
+      'desenhar o mês não lê nada: mexe só no L que está na memória':
+        corpoPintar.length > 400 && !/req\(|load\(\)|fetch\(/.test(corpoPintar),
+      'o calendário parte do mesmo noFiltro do quadro (filtro e busca valem)':
+        /const vis=L\.filter\(noFiltro\)[\s\S]*if\(VISAO==='calendario'\)pintarCalendario\(vis\)/.test(html),
+      // cor cravada escapa da troca de --accent que o tema Claro faz
+      'nenhuma cor de marca cravada no CSS do calendário':
+        cssCal.length > 600 && !/#b8ff3c|184,\s*255,\s*60/.test(cssCal),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okCalendario = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okCalendario = false; console.log('  erro: ' + e.message); }
+  if (!okCalendario) ruins += 1;
+  console.log(`${okCalendario ? '✓' : '✗'} Meu Dia: painel calendário por previsão, sem leitura nova e sem rota nova`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
