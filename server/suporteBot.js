@@ -311,6 +311,18 @@ function montarMensagens(chat) {
   return turnos;
 }
 
+// Quem assina o chamado que o Beniboy abriu. Só a sessão autenticada vale:
+// chat.logado é o snapshot de quem tinha token válido ao ABRIR a conversa
+// (ver /api/suporte-chat/iniciar). O campo `contato` NÃO serve - ele é
+// digitado no formulário do widget, então aceitá-lo deixaria um visitante
+// anônimo plantar um chamado na lista de outra pessoa só escrevendo o e-mail
+// dela. Sem sessão, o chamado segue sem dono, como era antes.
+function donoDoChat(chat, usuarios) {
+  const id = chat && chat.logado && chat.logado.id;
+  if (!id) return null;
+  return (usuarios || []).find((u) => u && u.id === id) || null;
+}
+
 async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdPulse, resolverUnidadePublica, linkEstornoCliente) {
   if (nome === 'criar_ticket') {
     const tipo = TIPOS_TICKET.includes(input.tipo) ? input.tipo : null;
@@ -322,6 +334,20 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       if (input.motivoAcesso === 'ferias' && !input.dataRetornoPrevista) return 'Erro: férias precisa da previsão de retorno (AAAA-MM-DD).';
     }
     const quem = [chat.nome, chat.contato].filter(Boolean).join(' · ');
+    // Quem pediu tem de enxergar o próprio chamado. podeVerCard (index.js)
+    // libera pelo criadoPorId, e gravar null aqui deixava o ticket invisível
+    // JUSTAMENTE para quem abriu: a pessoa pedia no chat, o Beniboy criava, e
+    // a Central dela mostrava 0 - parecia que nada tinha acontecido.
+    //
+    // Só a sessão autenticada vale como identidade: chat.logado é o snapshot
+    // de quem tinha token válido ao ABRIR a conversa. O `contato` não serve -
+    // ele é DIGITADO no formulário do widget, então aceitá-lo deixaria um
+    // visitante anônimo plantar um chamado na lista de outra pessoa só
+    // escrevendo o e-mail dela.
+    //
+    // users.list() é cacheado (60s, liveCache) - não é leitura nova por ticket,
+    // e nem chega a ser chamado quando a conversa é de visitante anônimo.
+    const dono = chat.logado && chat.logado.id ? donoDoChat(chat, await users.list()) : null;
     // titulo de acesso-pessoa nasce sozinho (mesmo padrao do formulario da
     // Central) - nao depende do modelo escrever certo
     const titulo = tipo === 'acesso-pessoa'
@@ -335,8 +361,8 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
       observacao: [String(input.descricao || '').trim(), `Aberto pelo Beniboy (chat de suporte)${quem ? ' — ' + quem : ''}.`].filter(Boolean).join('\n\n'),
       itens: [], anexos: [], ehOrcamento: false,
       prioridade: input.prioridade,
-      criadoPorId: null,
-      criadoPorEmail: `Beniboy (chat de suporte)${quem ? ' — ' + quem : ''}`,
+      criadoPorId: dono ? dono.id : null,
+      criadoPorEmail: dono ? (dono.email || dono.username) : `Beniboy (chat de suporte)${quem ? ' — ' + quem : ''}`,
       direcionadoParaId: null, direcionadoParaEmail: null,
       nomePessoa: tipo === 'acesso-pessoa' ? String(input.nomePessoa).trim() : undefined,
       motivoAcesso: tipo === 'acesso-pessoa' ? input.motivoAcesso : undefined,
@@ -689,4 +715,4 @@ async function responderConversa(chatId, { unidades = [], resolverUnidadesPorIdP
   }
 }
 
-module.exports = { ativo, responderConversa, MODELO };
+module.exports = { ativo, responderConversa, MODELO, donoDoChat };

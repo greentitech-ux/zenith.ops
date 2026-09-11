@@ -695,6 +695,32 @@
   ].join('\n');
   document.head.appendChild(barras);
 
+  // ---- botão de fechar de painel/ficha ----
+  //
+  // Pedido do Master: "quero que os botões de fechar sejam todos desse estilo,
+  // para telas como essa; popup mantém como está". O estilo é o ✕ redondo que
+  // já fecha a ficha do ticket na Central.
+  //
+  // Ele existia em 15 telas - com o CSS COPIADO 15 vezes, e já divergindo:
+  // 14 cópias tinham a regra de :hover, uma não. Agora sai daqui, como as
+  // barras de rolagem e o Beniboy.
+  //
+  // Duas classes, um desenho só:
+  //   .sheet-fechar-flutuante - solto na quina da ficha (o que já existia)
+  //   .zenith-fechar          - dentro de uma linha de cabeçalho
+  // Popup, toast e menu ficam de fora de propósito: o ✕ de 32px na quina de
+  // um aviso de canto de tela seria maior que o próprio aviso.
+  var fechar = document.createElement('style');
+  fechar.id = 'zenith-fechar';
+  fechar.textContent = [
+    '.sheet-fechar-flutuante,.zenith-fechar{width:32px;height:32px;flex:none;padding:0;border-radius:50%;',
+    '  background:var(--panel2,#181d24);border:1px solid var(--line,#27313b);color:var(--muted,#8c99a7);',
+    '  font-size:16px;line-height:1;font-family:inherit;display:flex;align-items:center;justify-content:center;cursor:pointer;}',
+    '.sheet-fechar-flutuante{position:absolute;top:-14px;right:-6px;box-shadow:0 2px 10px rgba(0,0,0,.5);z-index:5;}',
+    '.sheet-fechar-flutuante:hover,.zenith-fechar:hover{color:var(--text,#e7ecf1);border-color:var(--accent,#b8ff3c);}',
+  ].join('\n');
+  document.head.appendChild(fechar);
+
   function aplicar() {
     document.documentElement.setAttribute('data-tema', temaAtual());
     // zoom escala texto E espacamentos (tudo em px nas paginas) - e o
