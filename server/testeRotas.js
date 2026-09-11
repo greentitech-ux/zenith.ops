@@ -14953,7 +14953,26 @@ setTimeout(async () => {
     const htmlT = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
     const notif = require('fs').readFileSync(__dirname + '/public/notif-central.js', 'utf8');
     const vr = require('fs').readFileSync(__dirname + '/public/vendas-recordes.html', 'utf8');
+    // montar() precisa carregar o grupo de cada unidade pra tela decidir sozinha
+    // se mostra o seletor de Grupo (quem só tem loja de uma rede não precisa dele)
+    const vrMod = require('./vendasRecordes');
+    const recFake = vrMod.montar([
+      { unidade: 'A1', unidadeNome: 'Loja A', grupo: 'ARCFOOD', data: '2026-09-01', faturamento: 1000 },
+      { unidade: 'B1', unidadeNome: 'Loja B', grupo: 'BRAVO', data: '2026-09-01', faturamento: 2000 },
+    ]);
+    const grupoDe = (cod) => (recFake.unidades.find((u) => u.unidade === cod) || {}).grupo;
     const conf = {
+      'recordes: cada unidade sai com o grupo (pra tela decidir o seletor de Grupo)':
+        grupoDe('A1') === 'ARCFOOD' && grupoDe('B1') === 'BRAVO',
+      // 1 loja só: já vem escolhida no filtro (a opção "Todas" não ajuda)
+      'recordes: com 1 loja só ela já vem escolhida no filtro':
+        /if\(lista\.length===1 && !atual\)\{ sel\.value = lista\[0\]\.unidade; \}/.test(vr),
+      // Grupo só pra quem opera 2+ redes; some pra quem tem loja de uma rede só
+      'recordes: Grupo só aparece pra quem tem loja de 2+ redes':
+        /const gruposDistintos = new Set\(lista\.map\(u=>u\.grupo\)\.filter\(Boolean\)\);/.test(vr)
+        && /const mostraGrupo = gruposDistintos\.size >= 2;/.test(vr)
+        && /getElementById\('f-grupo-label'\)\.classList\.toggle\('hidden', !mostraGrupo\)/.test(vr)
+        && /getElementById\('f-grupo'\)\.classList\.toggle\('hidden', !mostraGrupo\)/.test(vr),
       // estorno não tem campo "titulo": o update do sync mandava titulo:undefined
       // e o Firestore recusava (quebrava concluir tarefa de estorno)
       'sync-update guarda o título (estorno sem título não estoura no Firestore)':

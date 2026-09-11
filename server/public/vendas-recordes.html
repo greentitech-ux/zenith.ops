@@ -114,7 +114,7 @@
     <option value="60">60 dias atrás</option>
     <option value="90">90 dias atrás</option>
   </select>
-  <label for="f-grupo">Grupo</label>
+  <label for="f-grupo" id="f-grupo-label">Grupo</label>
   <select id="f-grupo">
     <option value="">Todos</option>
     <option value="ARCFOOD">ARCFOOD</option>
@@ -185,7 +185,18 @@ function popularUnidades(unidades){
   const atual = sel.value;
   const lista = [...(unidades||[])].sort((a,b)=>(a.unidadeNome||'').localeCompare(b.unidadeNome||'','pt-BR'));
   sel.innerHTML = '<option value="">Todas</option>' + lista.map(u=>`<option value="${escapeHtml(u.unidade)}">${escapeHtml(u.unidadeNome)}</option>`).join('');
-  sel.value = atual;
+
+  // 1 loja só: já vem escolhida (a opção "Todas" não ajuda quem só tem uma).
+  if(lista.length===1 && !atual){ sel.value = lista[0].unidade; }
+  else { sel.value = atual; }
+
+  // Grupo só faz sentido pra quem tem loja de MAIS DE UMA rede. Quem opera uma
+  // rede só nunca vai filtrar por grupo — esconde o seletor pra não confundir.
+  const gruposDistintos = new Set(lista.map(u=>u.grupo).filter(Boolean));
+  const mostraGrupo = gruposDistintos.size >= 2;
+  document.getElementById('f-grupo-label').classList.toggle('hidden', !mostraGrupo);
+  document.getElementById('f-grupo').classList.toggle('hidden', !mostraGrupo);
+  if(!mostraGrupo){ document.getElementById('f-grupo').value = ''; }
 }
 
 async function carregar(){
