@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 38;
+const VERSAO_VIGIA = 39;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -38,6 +38,23 @@ function paginaDoTipo(tipo) {
 // cadencia bem mais espacada (~1h), (2) checam se existe uma versao nova
 // do proprio script esperando (ver Verificar-Atualizacao) - se sim, baixa
 // o conteudo novo, sobrescreve o proprio arquivo e reinicia sozinho.
+// Unidade curta para o NOME DO ARQUIVO da captura - so isso. Nao e' codigo de
+// unidade, nao volta pro servidor e nao entra em nenhuma comparacao: e' rotulo
+// de arquivo, para o print ser reconhecivel na pasta sem abrir. O codigo de
+// verdade (ver normalizarCodigoUnidade) continua intocado.
+// "Dominos Tirol" -> "Tirol" | "DOM_19706" -> "19706" | "19821" -> "19821"
+function unidadeCurtaParaArquivo(codigo) {
+  // ordem importa: sem acento primeiro, depois o prefixo INTEIRO, e so entao
+  // "DOM_" exigindo o separador. Com /^DOM[_ -]?/ opcional, "Dominos Tirol"
+  // virava "inosTirol" - o padrao comia o "Dom" da propria palavra.
+  const limpo = String(codigo || '')
+    .normalize('NFD').replace(/\p{Diacritic}/gu, '')
+    .replace(/^Dominos?\s+/i, '')
+    .replace(/^DOM[_-]/i, '')
+    .replace(/[^A-Za-z0-9]+/g, '');
+  return limpo.slice(0, 12) || 'Unidade';
+}
+
 function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
   const ehInterno = tipo === 'interno';
   const noPulsoPrintInicial = !!noPulsoPrint;
@@ -151,6 +168,8 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '# O print é propositalmente LOCAL. A pasta por mês mantém o histórico\n# organizado e não envia imagens pelo NOC.',
     '$PastaNoPulsoPrint = Join-Path ([Environment]::GetFolderPath("MyPictures")) "NoPulsoPrint"',
     '$CaminhoNoPulsoPrintAtivo = Join-Path (Split-Path -Parent $PSCommandPath) "nopulso-print.ativo"',
+    // rotulo curto da unidade no nome do arquivo da captura (ver unidadeCurtaParaArquivo)
+    '$UnidadeCurtaPrint = "' + unidadeCurtaParaArquivo(codigo) + '"',
     '# o runspace do print grava aqui POR QUE morreu - o script principal le e manda pro NOC',
     '$CaminhoNoPulsoPrintErro = Join-Path (Split-Path -Parent $PSCommandPath) "nopulso-print.erro"',
     '# gatilho SEM teclado: o botao "Capturar agora" do NOC deixa este arquivo',
@@ -840,13 +859,24 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '              $mes = Get-Date -Format "yyyy-MM"',
     '              $pastaMes = Join-Path $PastaBase $mes',
     '              New-Item -ItemType Directory -Path $pastaMes -Force | Out-Null',
-    '              $nomePadrao = "NoPulsoPrint-" + (Get-Date -Format "yyyy-MM-dd_HH-mm-ss") + ".png"',
+    '              # Pedido do Master: nome curto e reconhecivel - dia, mes, hora e',
+    '              # a unidade. A pasta ja separa o mes; o mes no nome faz o arquivo',
+    '              # continuar se explicando depois de sair dela (anexado num chamado,',
+    '              # mandado por WhatsApp). Ex.: "10-09 18h42 Tirol.png"',
+    '              $nomePadrao = (Get-Date -Format "dd-MM HH\'h\'mm") + " " + $UnidadeCurtaPrint + ".png"',
     '              # pergunta UMA vez: pasta padrao (Imagens\\NoPulsoPrint\\AAAA-MM) ou',
     '              # escolher outro lugar. Sim=padrao, Nao=escolher, Cancelar=nao salva',
     '              # (mas a captura ja foi pra area de transferencia, entao nao se perde).',
     '              $ondeSalvar = [System.Windows.Forms.MessageBox]::Show("Salvar onde?`\n`\nSim = pasta padrao (Imagens\\NoPulsoPrint)`\nNao = escolher outro local", "NoPulsoPrint", [System.Windows.Forms.MessageBoxButtons]::YesNoCancel, [System.Windows.Forms.MessageBoxIcon]::Question)',
     '              if ($ondeSalvar -eq [System.Windows.Forms.DialogResult]::Yes) {',
     '                $arquivo = Join-Path $pastaMes $nomePadrao',
+    '                # o nome so tem minuto: duas capturas seguidas cairiam no mesmo',
+    '                # arquivo e a primeira sumiria sem aviso. Numera em vez de perder.',
+    '                if (Test-Path $arquivo) {',
+    '                  $semExt = [System.IO.Path]::GetFileNameWithoutExtension($nomePadrao)',
+    '                  $n = 2',
+    '                  while (Test-Path $arquivo) { $arquivo = Join-Path $pastaMes ($semExt + " (" + $n + ").png"); $n++ }',
+    '                }',
     '              } elseif ($ondeSalvar -eq [System.Windows.Forms.DialogResult]::No) {',
     '                $sfd = New-Object System.Windows.Forms.SaveFileDialog',
     '                $sfd.Filter = "Imagem PNG (*.png)|*.png"; $sfd.FileName = $nomePadrao; $sfd.InitialDirectory = $pastaMes; $sfd.Title = "Salvar captura NoPulsoPrint"',

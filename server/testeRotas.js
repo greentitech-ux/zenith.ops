@@ -6964,7 +6964,7 @@ setTimeout(async () => {
         !htmlNoc.includes('calada há ${'),
       'NoPulsoPrint é opt-in, captura local Ctrl+Q e separa por mês':
         vg.VERSAO_VIGIA >= 34
-        && sInt.includes('NoPulsoPrint-') && sInt.includes('GetAsyncKeyState(0x51)')
+        && sInt.includes('"NoPulsoPrint"') && sInt.includes('GetAsyncKeyState(0x51)')
         && sInt.includes('GetFolderPath("MyPictures")') && sInt.includes('Get-Date -Format "yyyy-MM"')
         && sInt.includes('Selecionar-AreaPrint') && sInt.includes('quinas e dos meios redimensionam')
         && sInt.includes('$s.Tag.inicio') && sInt.includes('$form.Opacity = 0.32')
@@ -15700,7 +15700,10 @@ setTimeout(async () => {
     // (v38) o bloco "salvar" cresceu com o MessageBox padrão/outro-local + SaveFileDialog,
     // por isso a janela até o Save é maior; o que a asserção protege continua sendo:
     // arquivo começa null e o Save só acontece dentro do ramo "salvar"
-    const copiaSemGravar = /\$arquivo = \$null[\s\S]{0,400}?if \(\$escolhaPrint\.acao -eq "salvar"\) \{[\s\S]{0,2000}?\$recorte\.Save\(\$arquivo/.test(psI);
+    // janela larga: entre a guarda e o Save entraram o MessageBox de "salvar onde"
+    // e o anti-colisao de nome. O que o teste prova e' a ORDEM - o Save so existe
+    // DENTRO do if da acao "salvar".
+    const copiaSemGravar = /\$arquivo = \$null[\s\S]{0,900}?if \(\$escolhaPrint\.acao -eq "salvar"\) \{[\s\S]{0,3500}?\$recorte\.Save\(\$arquivo/.test(psI);
     const dropListGuardada = /if \(\$arquivo\) \{[\s\S]{0,300}?SetFileDropList/.test(psI);
 
     const conf = {
@@ -16017,6 +16020,69 @@ setTimeout(async () => {
   } catch (e) { okVirgulaNewObject = false; console.log('  erro: ' + e.message); }
   if (!okVirgulaNewObject) ruins += 1;
   console.log(`${okVirgulaNewObject ? '✓' : '✗'} NoPulsoPrint: a armadilha da vírgula no New-Object (era ela que matava TODA captura)`);
+
+  // O erro de leitura vinha da ENTRADA, não do modelo: os logs mostram imagens
+  // de 3 a 25 KB chegando ao OCR - foto de monitor, não captura de tela. A tela
+  // só aceitava "escolher arquivo", então o caminho natural era fotografar o
+  // PC com o celular. Ctrl+V fecha esse caminho: o NoPulsoPrint já deixa a
+  // captura na área de transferência, e agora ela entra direto.
+  let okColarRelatorio = false;
+  try {
+    const fsC = require('fs');
+    const lanc = fsC.readFileSync(__dirname + '/public/lancamento.html', 'utf8');
+    const vgC = require(__dirname + '/vigiaScript.js');
+    const gerar = (codigo) => vgC.montarScriptVigia({ codigo, posto: 'PC1', tipo: 'interno', agentToken: 'tok', noPulsoPrint: true });
+    const curta = (codigo) => (gerar(codigo).match(/\$UnidadeCurtaPrint = "([^"]*)"/) || [])[1];
+    const psI = gerar('Dominos Tirol');
+    const psA = vgC.montarScriptVigia({ codigo: 'Dominos Tirol', posto: 'CX1', tipo: 'atendimento', agentToken: 'tok', noPulsoPrint: true });
+
+    const conf = {
+      // ---- colar na tela de leitura ----
+      'escolher arquivo e colar usam a MESMA função (nada duplicado)':
+        /async function receberFotosRelatorio\(arquivos\)\{/.test(lanc)
+        && /addEventListener\('change', \(ev\)=>\{[\s\S]{0,240}?receberFotosRelatorio\(arquivos\)/.test(lanc)
+        && /addEventListener\('paste'[\s\S]{0,1400}?receberFotosRelatorio\(arquivos\)/.test(lanc),
+      // o input é .hidden SEMPRE (quem aparece é o botão) - olhar ele daria falso em toda colagem
+      // amarrado AO HANDLER: "ler-canais-wrap" aparece em outros pontos do
+      // arquivo, entao procurar a string solta passava mesmo com a guarda errada
+      'a guarda DO COLAR olha o WRAP, não o input que é sempre hidden':
+        /addEventListener\('paste'[\s\S]{0,800}?getElementById\('ler-canais-wrap'\)[\s\S]{0,200}?wrap\.classList\.contains\('hidden'\)\) return;/.test(lanc)
+        && !/painel\.closest\('\.hidden'\)/.test(lanc),
+      'colar texto não é engolido (só imagem é interceptada)':
+        /if\(!arquivos\.length\) return;\s*\/\/ colar texto segue funcionando normalmente/.test(lanc),
+      'cobre o navegador que só expõe clipboardData.items': /it\.kind==='file' && \/\^image\\\//.test(lanc),
+      // ---- captura de tela não vira JPEG ----
+      'PNG é preservado: JPEG destrói o traço fino do dígito':
+        /const ehCaptura = \/\^image\\\/png\$\/i\.test\(file\.type\|\|''\)/.test(lanc)
+        && /const tipoSaida = ehCaptura \? 'image\/png' : 'image\/jpeg'/.test(lanc)
+        && /c\.toBlob\(r, tipoSaida, ehCaptura \? undefined : QUALIDADE_RELATORIO\)/.test(lanc)
+        && /const ext = ehCaptura \? '\.png' : '\.jpg'/.test(lanc),
+      // ---- nome do arquivo da captura ----
+      'VERSAO_VIGIA subiu (sem isso o nome novo não chega nas 52 máquinas)': vgC.VERSAO_VIGIA >= 39,
+      'o nome é DD-MM HHhMM Unidade': /\$nomePadrao = \(Get-Date -Format "dd-MM HH'h'mm"\) \+ " " \+ \$UnidadeCurtaPrint \+ "\.png"/.test(psI),
+      'continua caindo na pasta do MÊS': /\$mes = Get-Date -Format "yyyy-MM"/.test(psI)
+        && /\$pastaMes = Join-Path \$PastaBase \$mes/.test(psI),
+      // sem isto a 2ª captura do mesmo minuto apagaria a 1ª, em silêncio
+      'duas capturas no mesmo minuto não se sobrescrevem':
+        /while \(Test-Path \$arquivo\) \{ \$arquivo = Join-Path \$pastaMes \(\$semExt \+ " \(" \+ \$n \+ "\)\.png"\); \$n\+\+ \}/.test(psI),
+      // ---- a abreviação ----
+      // /^DOM[_ -]?/ com separador OPCIONAL comia o "Dom" de "Dominos": virava "inosTirol"
+      'o prefixo Dominos sai inteiro, sem comer a palavra': curta('Dominos Tirol') === 'Tirol'
+        && curta('Dominos Caruaru') === 'Caruaru' && curta('Dominos Bessa') === 'Bessa',
+      'acento não atrapalha': curta('Dominós Garanhuns') === 'Garanhuns',
+      'DOM_ com separador sai; código puro fica': curta('DOM_19706') === '19706' && curta('19821') === '19821',
+      'nome comprido é cortado, não gera arquivo gigante': curta('Dominos Campina Grande').length <= 12
+        && curta('Dominos Campina Grande') === 'CampinaGrand',
+      'sem unidade não gera nome quebrado': curta('') === 'Unidade',
+      'vale nos DOIS tipos de máquina': /\$UnidadeCurtaPrint = "Tirol"/.test(psA),
+      'o script continua começando com # NOCZenith': psI.startsWith('# NOCZenith'),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okColarRelatorio = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okColarRelatorio = false; console.log('  erro: ' + e.message); }
+  if (!okColarRelatorio) ruins += 1;
+  console.log(`${okColarRelatorio ? '✓' : '✗'} Leitura por foto: Ctrl+V do NoPulsoPrint entra sem virar JPEG, e a captura salva como "DD-MM HHhMM Unidade"`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

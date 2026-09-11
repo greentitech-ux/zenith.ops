@@ -1061,9 +1061,16 @@ async function comprimirImagemRelatorio(file){
     c.width = Math.round(img.width * escala);
     c.height = Math.round(img.height * escala);
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    const blob = await new Promise(r=>c.toBlob(r, 'image/jpeg', QUALIDADE_RELATORIO));
+    // PNG e' captura de TELA, nao foto: o texto e' nitido e o JPEG destroi
+    // justamente o traco fino do digito (o "ringing" em volta do numero). Um
+    // print re-encodado em JPEG e' a diferenca entre ler 3.168,56 e chutar.
+    // Reduz o tamanho se precisar, mas devolve PNG.
+    const ehCaptura = /^image\/png$/i.test(file.type||'');
+    const tipoSaida = ehCaptura ? 'image/png' : 'image/jpeg';
+    const blob = await new Promise(r=>c.toBlob(r, tipoSaida, ehCaptura ? undefined : QUALIDADE_RELATORIO));
     if(!blob || blob.size >= file.size) return file; // se nao melhorou, fica o original
-    return new File([blob], String(file.name||'foto').replace(/\.[^.]+$/,'') + '.jpg', { type:'image/jpeg' });
+    const ext = ehCaptura ? '.png' : '.jpg';
+    return new File([blob], String(file.name||'foto').replace(/\.[^.]+$/,'') + ext, { type: tipoSaida });
   }catch(e){
     return file; // qualquer tropeço na compressão manda o original; nunca trava a leitura
   }
@@ -1176,9 +1183,10 @@ function limparSelecaoRelatorio(){
   esconderMsgLerCanais();
 }
 
-document.getElementById('ler-canais-arquivo').addEventListener('change', async (ev)=>{
-  const arquivos = Array.from(ev.target.files || []);
-  ev.target.value = ''; // permite escolher a MESMA foto de novo depois de um erro
+// Uma entrada so para os dois caminhos (escolher arquivo e colar). Duplicar
+// isto seria duplicar o teto de fotos, o preparo e as mensagens - e um dia os
+// dois divergiriam.
+async function receberFotosRelatorio(arquivos){
   if(!arquivos.length) return;
   const versao = ++VERSAO_PREPARO_RELATORIO;
   const msg = document.getElementById('ler-canais-msg');
@@ -1211,6 +1219,37 @@ document.getElementById('ler-canais-arquivo').addEventListener('change', async (
     pintarSelecaoRelatorio();
     msg.innerHTML = `<span style="color:var(--warn);">Não foi possível reduzir uma ou mais fotos; elas serão enviadas no formato original. Confira e clique em <b>Realizar leitura</b>.</span>`;
   }
+}
+
+document.getElementById('ler-canais-arquivo').addEventListener('change', (ev)=>{
+  const arquivos = Array.from(ev.target.files || []);
+  ev.target.value = ''; // permite escolher a MESMA foto de novo depois de um erro
+  receberFotosRelatorio(arquivos);
+});
+
+// Ctrl+V, igual ao que Meu Dia ja faz nas tarefas. É o que fecha o caminho do
+// NoPulsoPrint: Ctrl+Q recorta o relatorio NA TELA e deixa a imagem na area de
+// transferencia; aqui ela entra sem passar por foto de monitor. A diferenca na
+// leitura e' o texto renderizado em vez de vidro, brilho e angulo - e e' de
+// onde vinha a maior parte do erro de OCR.
+document.addEventListener('paste', (ev)=>{
+  // o wrap e' quem ganha/perde o .hidden ao abrir o painel. NAO da pra olhar o
+  // proprio input: ele e' .hidden SEMPRE (quem aparece e' o botao), e a guarda
+  // daria falso em toda colagem.
+  const wrap = document.getElementById('ler-canais-wrap');
+  if(!wrap || wrap.classList.contains('hidden')) return;
+  // .files traz o print da area de transferencia como File pronto (mesmo
+  // caminho do Meu Dia); .items cobre navegador que so expoe o item
+  let arquivos = Array.from((ev.clipboardData && ev.clipboardData.files) || []);
+  if(!arquivos.length && ev.clipboardData){
+    arquivos = Array.from(ev.clipboardData.items || [])
+      .filter(it=>it.kind==='file' && /^image\//.test(it.type||''))
+      .map(it=>it.getAsFile()).filter(Boolean);
+  }
+  arquivos = arquivos.filter(f=>/^image\//.test(f.type||''));
+  if(!arquivos.length) return;   // colar texto segue funcionando normalmente
+  ev.preventDefault();
+  receberFotosRelatorio(arquivos);
 });
 
 // Conta, POR SECAO, quantos campos estao travados pela foto AGORA - e nao
