@@ -177,7 +177,7 @@ async function listUncached() {
 const gruposCache = createCache(listUncached, 5 * 60 * 1000);
 const list = gruposCache.cached;
 
-async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado, lerCanaisPorImagem, dicaLeituraCanais, quebraHabilitada }) {
+async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado, lerCanaisPorImagem, dicaLeituraCanais, quebraHabilitada, digitacaoManualLiberada }) {
   const nomeLimpo = String(nome || '').trim();
   if (!nomeLimpo) throw new Error('Informe o nome do grupo.');
   const ref = COLLECTION.doc();
@@ -200,6 +200,11 @@ async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPag
     // formato do relatorio muda de PDV pra PDV, entao cada loja precisa ser
     // testada antes de confiar no numero que sai da foto.
     lerCanaisPorImagem: lerCanaisPorImagem === true,
+    // Master liberou digitar na mao: a foto continua disponivel como atalho,
+    // mas os campos que ela preenche deixam de ficar travados na loja. Pra
+    // quando a leitura nao esta pegando o relatorio e a loja precisa lancar
+    // mesmo assim. Nasce DESLIGADO: a trava e a regra, isto e a excecao.
+    digitacaoManualLiberada: digitacaoManualLiberada === true,
     dicaLeituraCanais: sanitizarDicaLeitura(dicaLeituraCanais),
     caixaHabilitado: caixaHabilitado !== false,
     maquininhasHabilitado: maquininhasHabilitado !== false,
@@ -225,7 +230,7 @@ async function create({ nome, unidades, kpisExtras, canaisVendaExtras, formasPag
   return registro;
 }
 
-async function update(id, { nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado, lerCanaisPorImagem, dicaLeituraCanais, quebraHabilitada }) {
+async function update(id, { nome, unidades, kpisExtras, canaisVendaExtras, formasPagamentoExtras, responsaveis, caixaHabilitado, maquininhasHabilitado, maquininhaPrefixo, maquininhaPosHabilitado, maquininhaPosPrefixo, saidasHabilitado, lerCanaisPorImagem, dicaLeituraCanais, quebraHabilitada, digitacaoManualLiberada }) {
   const ref = COLLECTION.doc(id);
   const snap = await ref.get();
   if (!snap.exists) throw new Error('Grupo não encontrado.');
@@ -241,6 +246,7 @@ async function update(id, { nome, unidades, kpisExtras, canaisVendaExtras, forma
   if (formasPagamentoExtras != null) patch.formasPagamentoExtras = sanitizarCamposExtras(formasPagamentoExtras);
   if (responsaveis != null) patch.responsaveis = Array.isArray(responsaveis) ? responsaveis.map(String) : [];
   if (lerCanaisPorImagem != null) patch.lerCanaisPorImagem = lerCanaisPorImagem === true;
+  if (digitacaoManualLiberada != null) patch.digitacaoManualLiberada = digitacaoManualLiberada === true;
   if (dicaLeituraCanais != null) patch.dicaLeituraCanais = sanitizarDicaLeitura(dicaLeituraCanais);
   if (caixaHabilitado != null) patch.caixaHabilitado = caixaHabilitado !== false;
   if (maquininhasHabilitado != null) patch.maquininhasHabilitado = maquininhasHabilitado !== false;

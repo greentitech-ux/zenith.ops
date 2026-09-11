@@ -334,6 +334,9 @@ const ROTA_TICKET_PUBLICO_RE = /^\/api\/central\/[^/]+\/[^/]+\/(publico|chat-pub
 const ROTA_LOJA_IP_LOCAL_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/ip-local$/;
 // Configuração local que o agente consulta com seu token; não expõe dados do computador.
 const ROTA_LOJA_CONFIG_AGENTE_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/configuracao-agente$/;
+// O agente conta versao e estado do NoPulsoPrint (ver Reportar-EstadoAgente no
+// vigiaScript.js) - mesmo motivo publico do ip-local: quem chama e a maquina
+const ROTA_LOJA_ESTADO_AGENTE_RE = /^\/api\/loja-status\/[^/]+\/computadores\/[^/]+\/estado-agente$/;
 // NOCZenith reporta o resultado de um comando do agente (ver
 // agenteAcoes.js/lojaStatus.js enfileirarComando) - mesmo motivo publico
 // do ip-local: quem chama e a maquina, sem sessao de usuario
@@ -360,7 +363,8 @@ function rotaPublicaSemDashboard(path) {
     || path.startsWith('/api/formularios-publico/')
     || ROTA_TICKET_PUBLICO_RE.test(path) || ROTA_LOJA_IP_LOCAL_RE.test(path) || ROTA_LOJA_COMANDO_RESULTADO_RE.test(path)
     || ROTA_LOJA_ACESSO_REMOTO_RE.test(path) || ROTA_LOJA_VIGIA_SCRIPT_RE.test(path) || ROTA_LOJA_CHAT_RESPONDER_RE.test(path)
-    || ROTA_LOJA_TELEMETRIA_RE.test(path) || ROTA_LOJA_CONFIG_AGENTE_RE.test(path);
+    || ROTA_LOJA_TELEMETRIA_RE.test(path) || ROTA_LOJA_CONFIG_AGENTE_RE.test(path)
+    || ROTA_LOJA_ESTADO_AGENTE_RE.test(path);
 }
 if (DASHBOARD_USER && DASHBOARD_PASSWORD) {
   app.use((req, res, next) => {
@@ -1436,6 +1440,19 @@ app.post('/api/loja-status/:codigo/computadores/:posto/acesso-remoto', async (re
 // autoatualizacao baixar e sobrescrever o proprio arquivo ----------
 app.get('/api/loja-status/vigia-versao', (req, res) => {
   res.json({ versao: vigiaScript.VERSAO_VIGIA });
+});
+
+// o agente (instancia de login) reporta a versao que roda DE FATO e em que pe
+// esta o Ctrl+Q - "pronto", "falhou: <motivo>", "desligado no cadastro". E o
+// que o card do NOC mostra; sem isso nao havia como saber se a maquina baixou
+// a versao nova nem por que o print nao respondia
+app.post('/api/loja-status/:codigo/computadores/:posto/estado-agente', async (req, res) => {
+  try {
+    const token = req.headers['x-noc-token'] || req.body.token || null;
+    res.json(await lojaStatus.reportarEstadoAgente(req.params.codigo, req.params.posto, { versao: req.body.versao, noPulsoPrint: req.body.noPulsoPrint }, token));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.get('/api/loja-status/:codigo/computadores/:posto/configuracao-agente', async (req, res) => {

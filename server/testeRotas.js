@@ -3569,11 +3569,11 @@ setTimeout(async () => {
     const iLeitura = html.indexOf('async function realizarLeituraRelatorio(');
     const blocoLeitura = html.slice(iLeitura, iLeitura + 4000);
     const conferencias = {
-      'Canais/Formas: o travamento exclui o Master': /const travar = \(k\) => automatico && !IS_MASTER && k\.manual !== true;/.test(blocoCanais),
-      // [^;]* no fim: outras condicoes podem entrar (ex.: KPI de origem
-      // automatica, que nao segue a regra da foto) - o que este teste protege
-      // e' o !IS_MASTER continuar la
-      "KPI's extras: o travamento exclui o Master": /const travar = \(k\) => automatico && !IS_MASTER && kpiOcrElegivel\(k\) && k\.manual !== true[^;]*;/.test(blocoKpi),
+      // [^;]* no meio e no fim: outras condicoes podem entrar (a liberacao de
+      // digitacao manual do grupo, o KPI de origem automatica...) - o que este
+      // teste protege e' o !IS_MASTER continuar la, logo depois do automatico
+      'Canais/Formas: o travamento exclui o Master': /const travar = \(k\) => automatico && !IS_MASTER && [^;]*k\.manual !== true;/.test(blocoCanais),
+      "KPI's extras: o travamento exclui o Master": /const travar = \(k\) => automatico && !IS_MASTER && [^;]*kpiOcrElegivel\(k\) && k\.manual !== true[^;]*;/.test(blocoKpi),
       'depois da leitura o campo NÃO é retravado pro Master': /if\(!IS_MASTER\)\{[\s\S]{0,160}el\.readOnly = true;[\s\S]{0,120}campo-automatico/.test(blocoLeitura),
       'a foto continua PREENCHENDO o campo do Master (só não trava)': /el\.value = it\.valor;/.test(blocoLeitura),
       // o aviso "🔓 Master: ..." saiu da tela a pedido do Master ("remover
@@ -6958,6 +6958,105 @@ setTimeout(async () => {
     const errosVigia = Object.entries(confVigia).filter(([, ok]) => !ok).map(([k]) => k);
     if (errosVigia.length) ruins += 1;
     console.log(`${errosVigia.length ? '✗' : '✓'} NOC: NOCZenith blindado contra reinício (tarefa de boot SYSTEM + cedência + sem limite de 72h)${errosVigia.length ? ' - FALHOU: ' + errosVigia.join(' | ') : ''}`);
+  }
+
+  // ---- NOCZenith conta em que pé está: versão real + estado do NoPulsoPrint ----
+  // Três rodadas de "o Ctrl+Q não funciona" sem ter como enxergar a máquina.
+  // O agente agora reporta a versão que roda DE FATO e o estado do print
+  // ("pronto" / "falhou: <motivo>" / "desligado no cadastro"), e o card do
+  // NOC mostra. E um runspace morto deixa de ser silêncio permanente com o
+  // log jurando "pronto": Estado-NoPulsoPrint solta o global e o Iniciar
+  // recria na volta seguinte - com o motivo no log e no NOC.
+  {
+    const vg = require('./vigiaScript.js');
+    const ls = require('./lojaStatus');
+    const htmlNoc = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const fonteIndex = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const scripts = ['interno', 'atendimento', 'caixa', 'quiosque'].map((tipo) => vg.montarScriptVigia({ codigo: 'DomCG', posto: 'P' + tipo, tipo, agentToken: 'ab12', noPulsoPrint: true }));
+    const UNI = 'TESTE_ESTADO_AGENTE';
+    await ls.cadastrarComputador(UNI, 'PDV-ESTADO', 'caixa');
+    const posto = (await ls.listar()).find((c) => c.codigo === UNI && c.nome === 'PDV-ESTADO').posto;
+    const tk = await ls.garantirAgentToken(UNI, posto);
+    const rota = `/api/loja-status/${UNI}/computadores/${posto}/estado-agente`;
+    // sem sessão de usuário, só com o token da máquina - como o agente chama
+    const ok1 = await postarJson(rota, { versao: 33, noPulsoPrint: 'falhou: System.Drawing não carregou' }, { 'x-noc-token': tk });
+    const errado = await postarJson(rota, { versao: 33, noPulsoPrint: 'pronto' }, { 'x-noc-token': 'nao-e-esse' });
+    const semToken = await postarJson(rota, { versao: 33, noPulsoPrint: 'pronto' }, {});
+    const doc = (await ls.listar()).find((c) => c.codigo === UNI && c.posto === posto);
+    const confEstado = {
+      'rota aceita o token da máquina sem sessão': ok1.status === 200,
+      // a lista de rotas publicas so e consultada quando o dashboard tem senha
+      // (DASHBOARD_USER) - a suite roda sem, entao a sabotagem de tirar a rota
+      // da lista passava por HTTP. Conferido no fonte, como as outras rotas
+      // do agente: sem isto, em producao o agente leva 401 e nunca reporta
+      'rota está na lista pública do dashboard com senha': /ROTA_LOJA_ESTADO_AGENTE_RE\.test\(path\)/.test(fonteIndex)
+        && /function rotaPublicaSemDashboard\([\s\S]*?ROTA_LOJA_ESTADO_AGENTE_RE\.test\(path\)[\s\S]*?\n\}/.test(fonteIndex),
+      'interno: o heartbeat passa pela MESMA regra (estado + recria + reporta), não chama Iniciar direto': scripts[0].includes('try { Aplicar-NoPulsoPrint ([bool]$resp.noPulsoPrint) }')
+        && !scripts[0].includes('if ($resp.noPulsoPrint) { Iniciar-NoPulsoPrint }') && scripts.every((s) => s.includes('function Aplicar-NoPulsoPrint') && s.includes('Aplicar-NoPulsoPrint ([bool]$configPrint.noPulsoPrint)')),
+      'token errado é recusado': errado.status >= 400,
+      'sem token é recusado (máquina tem segredo)': semToken.status >= 400,
+      'grava versão, estado e quando': !!doc && doc.agenteVersao === 33 && doc.agenteNoPulsoPrint === 'falhou: System.Drawing não carregou' && Number.isFinite(doc.agenteEstadoEm),
+      'token errado NÃO sobrescreve': !!doc && doc.agenteNoPulsoPrint !== 'pronto',
+      'versão bumpada (33): sem isso nenhum agente baixa o Estado-NoPulsoPrint': vg.VERSAO_VIGIA >= 33,
+      'todo tipo de máquina define e usa Estado-NoPulsoPrint + Reportar-EstadoAgente': scripts.every((s) =>
+        s.includes('function Estado-NoPulsoPrint') && s.includes('function Reportar-EstadoAgente')
+        && s.includes('Reportar-EstadoAgente $estadoPrint') && (s.match(/\$estadoPrint = Estado-NoPulsoPrint/g) || []).length >= 2
+        && s.includes('/estado-agente"')),
+      'runspace morto é solto pra ser recriado, e o motivo vai pro log': scripts.every((s) =>
+        s.includes('$global:NoPulsoPrintPowerShell = $null') && s.includes('return "falhou: $motivo"') && s.includes('NoPulsoPrint caiu: $motivo')),
+      '"pronto" só depois de conferir o runspace (o log antigo mentia)': scripts.every((s) =>
+        !s.includes('NoPulsoPrint pronto (Ctrl+Q') && s.includes('if ($estadoPrint -ne "pronto") { Start-Sleep -Milliseconds 1500; $estadoPrint = Estado-NoPulsoPrint }')),
+      'runspace grava POR QUE morreu e o script principal lê': scripts.every((s) =>
+        s.includes('.AddArgument($CaminhoNoPulsoPrintErro)') && s.includes('Set-Content -Path $CaminhoErro -Force') && s.includes('Test-Path $CaminhoNoPulsoPrintErro')),
+      'motivo sai da InnerException mais funda, não do embrulho': scripts.every((s) => s.includes('while ($ex.InnerException) { $ex = $ex.InnerException }')),
+      'só reporta quando muda (custo Firestore)': scripts.every((s) => s.includes('$global:UltimoEstadoAgenteReportado -eq $chave')),
+      'desligado no cadastro é dito como tal': scripts.every((s) => s.includes('$estadoPrint = "desligado no cadastro"')),
+      // a condicao EXATA, nao so as palavras: 'if(false){' em volta do bloco
+      // deixava tudo isso dentro do arquivo e o teste passava
+      'card do NOC mostra versão e estado com cor de gravidade': htmlNoc.includes('if(c.agenteVersao || c.agenteNoPulsoPrint){')
+        && htmlNoc.includes("startsWith('falhou')") && htmlNoc.includes('infoBits.push(`🤖 NOCZenith${'),
+    };
+    const errosEstado = Object.entries(confEstado).filter(([, ok]) => !ok).map(([k]) => k);
+    if (errosEstado.length) ruins += 1;
+    console.log(`${errosEstado.length ? '✗' : '✓'} NOC: NOCZenith reporta versão real e estado do NoPulsoPrint, e recria runspace morto${errosEstado.length ? ' - FALHOU: ' + errosEstado.join(' | ') : ''}`);
+  }
+
+  // ---- Fechamento: "Liberar digitação manual" no grupo ----
+  // A leitura por foto não estava pegando o relatório e a loja ficava com os
+  // campos travados, sem conseguir lançar. O Master liga no grupo e os campos
+  // que a foto preenche voltam a aceitar digitação - a foto continua como
+  // atalho. Nasce desligado: a trava é a regra, isto é a exceção.
+  {
+    const fs = require('fs');
+    const cabM = { Authorization: 'Bearer ' + token };
+    const criado = await postarJson('/api/grupos', { nome: 'Grupo Digitação Manual', unidades: ['TESTE_DIG_MANUAL'], lerCanaisPorImagem: true, digitacaoManualLiberada: true }, cabM);
+    const g = criado.status === 200 ? JSON.parse(criado.corpo) : null;
+    const lido = async (id) => { const r = await pedir('/api/grupos', cabM); return (r.status === 200 ? JSON.parse(r.corpo) : []).find((x) => x.id === id) || null; };
+    const ligado = g ? await lido(g.id) : null;
+    const semCampo = g ? await putJson(`/api/grupos/${g.id}`, { nome: 'Grupo Digitação Manual' }, cabM) : { status: 0 };
+    const aindaLigado = g ? await lido(g.id) : null;
+    const desligar = g ? await putJson(`/api/grupos/${g.id}`, { digitacaoManualLiberada: false }, cabM) : { status: 0 };
+    const desligado = g ? await lido(g.id) : null;
+    const semFlag = await postarJson('/api/grupos', { nome: 'Grupo Sem Flag', unidades: ['TESTE_DIG_MANUAL2'] }, cabM);
+    const gSem = semFlag.status === 200 ? JSON.parse(semFlag.corpo) : null;
+    const nasce = gSem ? await lido(gSem.id) : null;
+    const htmlL = fs.readFileSync(__dirname + '/public/lancamento.html', 'utf8');
+    const htmlG = fs.readFileSync(__dirname + '/public/grupos.html', 'utf8');
+    const confDig = {
+      'cria com a flag ligada e a lista devolve': criado.status === 200 && !!ligado && ligado.digitacaoManualLiberada === true,
+      'editar sem mandar a flag preserva': semCampo.status === 200 && !!aindaLigado && aindaLigado.digitacaoManualLiberada === true,
+      'desliga': desligar.status === 200 && !!desligado && desligado.digitacaoManualLiberada === false,
+      'nasce desligado': !!nasce && nasce.digitacaoManualLiberada === false,
+      'lançamento: as DUAS travas (Canais/Formas e KPIs) respeitam a flag': (htmlL.match(/!digitacaoManualLiberada\(unidade\)/g) || []).length === 2
+        && htmlL.includes('function digitacaoManualLiberada(unidade)') && htmlL.includes('grupo.digitacaoManualLiberada === true'),
+      'Master continua sem trava': htmlL.includes('automatico && !IS_MASTER && !digitacaoManualLiberada(unidade)'),
+      'grupos.html: caixa em criar e editar, enviada nos dois e preenchida ao abrir': htmlG.includes('id="c-digitacao-manual"') && htmlG.includes('id="e-digitacao-manual"')
+        && (htmlG.match(/digitacaoManualLiberada: document\.getElementById\('[ce]-digitacao-manual'\)\.checked/g) || []).length === 2
+        && htmlG.includes("document.getElementById('e-digitacao-manual').checked = g.digitacaoManualLiberada === true"),
+    };
+    const errosDig = Object.entries(confDig).filter(([, ok]) => !ok).map(([k]) => k);
+    if (errosDig.length) ruins += 1;
+    console.log(`${errosDig.length ? '✗' : '✓'} Fechamento: "Liberar digitação manual" no grupo destrava os campos da foto${errosDig.length ? ' - FALHOU: ' + errosDig.join(' | ') : ''}`);
   }
 
   // ---- CENTRAL DE ALERTAS: threads por máquina (como as fraudes do Monitor) ----

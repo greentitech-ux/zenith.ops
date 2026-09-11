@@ -743,7 +743,7 @@ function renderExtrasGrupo(unidade, chaveGrupo, containerId, vazioId, classe){
   // lancado. A trava existe pra loja, que nao deve reescrever o relatorio do
   // PDV; o Master ja edita fechamento lancado pela Central, entao trava-lo
   // aqui so atrasava o mesmo resultado.
-  const travar = (k) => automatico && !IS_MASTER && k.manual !== true;
+  const travar = (k) => automatico && !IS_MASTER && !digitacaoManualLiberada(unidade) && k.manual !== true;
   const algumTravado = campos.some(travar);
   // unico texto que sobrou nesta secao, e so quando ha campo travado: sem
   // ele o campo cinza que nao aceita digitacao parece defeito. Pro Master
@@ -766,6 +766,14 @@ function renderExtrasGrupo(unidade, chaveGrupo, containerId, vazioId, classe){
 function leituraPorFoto(unidade){
   const grupo = grupoKpiDaUnidade(unidade);
   return !!grupo && grupo.lerCanaisDisponivel === true;
+}
+// Master liberou digitar na mao neste grupo (grupos.html, "Liberar digitação
+// manual"): a leitura por foto continua disponivel, mas os campos que ela
+// preenche deixam de ficar travados. Pra quando a leitura nao esta pegando o
+// relatorio e a loja precisa lancar mesmo assim.
+function digitacaoManualLiberada(unidade){
+  const grupo = grupoKpiDaUnidade(unidade);
+  return !!grupo && grupo.digitacaoManualLiberada === true;
 }
 function lerExtrasGrupo(classe){
   const out = {};
@@ -830,7 +838,7 @@ function renderKpisExtras(unidade){
   // automatica trava so os KPI's que a foto realmente pode ler
   const automatico = leituraPorFoto(unidade);
   // mesma regra do bloco acima: Master digita sempre, sem esperar leitura
-  const travar = (k) => automatico && !IS_MASTER && kpiOcrElegivel(k) && k.manual !== true && k.origem !== 'remakesDoDia';
+  const travar = (k) => automatico && !IS_MASTER && !digitacaoManualLiberada(unidade) && kpiOcrElegivel(k) && k.manual !== true && k.origem !== 'remakesDoDia';
   const algumTravado = campos.some(travar);
   // mesmo criterio do bloco de Canais/Formas: so o aviso do cadeado fica, e
   // so quando ha campo travado de verdade

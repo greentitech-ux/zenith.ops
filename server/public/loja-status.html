@@ -1169,6 +1169,13 @@ function atualizarConteudoDetalhe(codigo, c){
   // que serve pra acesso remoto no dia a dia (pedido explicito do usuario)
   if(c.ipLocal) infoBits.push(`🏠 IP local: <b>${escapeHtml(c.ipLocal)}</b> <button type="button" class="btn-copiar-ip" title="Copiar IP local" onclick="copiarIpLocal('${escapeJs(c.ipLocal)}')">📋</button>`);
   if(c.ip) infoBits.push(`🌐 IP público: ${escapeHtml(c.ip)}`);
+  // o agente conta em que pé está (ver Reportar-EstadoAgente no vigiaScript):
+  // a versão que roda DE FATO nessa máquina e por que o Ctrl+Q responde ou não
+  if(c.agenteVersao || c.agenteNoPulsoPrint){
+    const print = c.agenteNoPulsoPrint || '';
+    const corPrint = print === 'pronto' ? 'var(--ok)' : (print.startsWith('falhou') ? 'var(--bad)' : 'var(--muted)');
+    infoBits.push(`🤖 NOCZenith${c.agenteVersao ? ` v${escapeHtml(String(c.agenteVersao))}` : ''}${print ? ` · 📸 NoPulsoPrint: <b style="color:${corPrint};">${escapeHtml(print)}</b>` : ''}${c.agenteEstadoEm ? ` <span style="color:var(--muted);font-size:11px;">(${escapeHtml(tempoRelativo(c.agenteEstadoEm))})</span>` : ''}`);
+  }
   if(c.tailscale){
     const t = c.tailscale;
     const estado = t.instalado ? (t.estado === 'Running' ? '<b style="color:var(--ok);">conectado</b>' : `<b style="color:var(--warn,#e0a800);">${escapeHtml(t.estado||'desconhecido')}</b>`) : '<span style="color:var(--muted);">não instalado</span>';

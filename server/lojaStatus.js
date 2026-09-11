@@ -971,6 +971,27 @@ async function configuracaoAgente(codigo, posto, token) {
   return !!atual.noPulsoPrint;
 }
 
+// O agente conta em que pe esta (ver Reportar-EstadoAgente no vigiaScript.js):
+// versao do script que roda de fato e o estado do NoPulsoPrint. O agente so
+// manda quando muda, entao isto escreve pouco - mas escreve pelo caminho do
+// espelho, como o ip-local, pra nao derrubar o cache dos 52 documentos.
+async function reportarEstadoAgente(codigo, posto, { versao, noPulsoPrint }, token) {
+  const id = docIdFor(codigo, posto);
+  const snap = await COLLECTION.doc(id).get();
+  if (!snap.exists) throw new Error('Computador não encontrado.');
+  const atual = snap.data();
+  exigirTokenSeTiver(atual, token);
+  const versaoNum = Number(versao);
+  const patch = {
+    agenteVersao: Number.isFinite(versaoNum) && versaoNum > 0 ? versaoNum : null,
+    agenteNoPulsoPrint: String(noPulsoPrint || '').trim().slice(0, 200) || null,
+    agenteEstadoEm: Date.now(),
+  };
+  await COLLECTION.doc(id).set(patch, { merge: true });
+  espelharEscrita(id, patch);
+  return { codigo, posto, ...patch };
+}
+
 async function noPulsoPrintDoComputador(codigo, posto) {
   const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
   return snap.exists && !!snap.data().noPulsoPrint;
@@ -2594,5 +2615,5 @@ module.exports = {
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
   saudeMaquinas,
-  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador,
+  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, reportarEstadoAgente,
 };
