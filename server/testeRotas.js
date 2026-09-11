@@ -6966,9 +6966,9 @@ setTimeout(async () => {
         vg.VERSAO_VIGIA >= 34
         && sInt.includes('"NoPulsoPrint"') && sInt.includes('GetAsyncKeyState(0x51)')
         && sInt.includes('GetFolderPath("MyPictures")') && sInt.includes('Get-Date -Format "yyyy-MM"')
-        && sInt.includes('Selecionar-AreaPrint') && sInt.includes('quinas e dos meios redimensionam')
+        && sInt.includes('Selecionar-AreaPrint') && sInt.includes('alças redimensionam')
         && sInt.includes('$s.Tag.inicio') && sInt.includes('$form.Opacity = 0.32')
-        && sInt.includes('Cursor-AreaPrint') && sInt.includes('Modo-AreaPrint') && sInt.includes('SizeNWSE') && sInt.includes('Salvar')
+        && sInt.includes('Cursor-AreaPrint') && sInt.includes('Modo-AreaPrint') && sInt.includes('SizeNWSE') && sInt.includes('Botao-Print "Salvar"')
         && sInt.includes('$superficie.Add_MouseDown') && sInt.includes('$superficie.Add_MouseMove')
         && sInt.includes('configuracao-agente') && htmlNoc.includes('novo-comp-nopulso-print'),
     };
@@ -15728,15 +15728,20 @@ setTimeout(async () => {
         && /return "sw"/.test(psI) && /return "se"/.test(psI) && /return "w"/.test(psI)
         && /return "e"/.test(psI) && /return "n"/.test(psI) && /return "s"/.test(psI),
       'arrastar por dentro continua movendo a seleção': /return "mover"/.test(psI),
-      'existe o botão Copiar, além de Salvar e Cancelar': /\$copiar\.Text="Copiar"/.test(psI)
-        && /AddRange\(@\(\$cancelar,\$copiar,\$salvar\)\)/.test(psI),
+      // a barra virou Seta/Linha/Caixa + Copiar + Salvar + X: "Cancelar" escrito
+      // deu lugar ao X, e os botoes passaram a nascer do helper Botao-Print
+      'a barra tem as 3 ferramentas, Copiar, Salvar e o X': /Botao-Print "Copiar" 92/.test(psI)
+        && /Botao-Print "Salvar" 92/.test(psI) && /Botao-Print "X" 32/.test(psI)
+        && /AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$copiar,\$salvar,\$fechar\)\)/.test(psI)
+        && !/\$cancelar/.test(psI),
       'Copiar NÃO grava arquivo; só Salvar grava': copiaSemGravar,
       'sem arquivo não entra lista de arquivo na área de transferência': dropListGuardada,
       'Ctrl+C copia e Enter salva': /\$e\.Control -and \$e\.KeyCode -eq \[System\.Windows\.Forms\.Keys\]::C[\s\S]{0,120}?\$s\.Tag\.acao="copiar"/.test(psI)
         && /Keys\]::Enter[\s\S]{0,120}?\$s\.Tag\.acao="salvar"/.test(psI),
-      'a seleção devolve a área E a ação escolhida': /return @\{ area = \$resultado; acao = \$acaoPrint \}/.test(psI),
-      'a tela de instruções cita os pontos e o copiar': /pontos das quinas e dos meios/.test(psI) && /Ctrl\+C só copia/.test(psI),
-      'vale nos DOIS tipos de máquina, não só no interno': /\$copiar\.Text="Copiar"/.test(psA) && alcas(psA).total === 8,
+      'a seleção devolve a área, a ação E as marcas': /return @\{ area = \$resultado; acao = \$acaoPrint; marcas = \$marcasPrint \}/.test(psI),
+      'a tela de instruções cita as alças, as marcas e o desfazer': /alças redimensionam/.test(psI)
+        && /Seta\/Linha\/Caixa marcam por cima/.test(psI) && /Ctrl\+Z desfaz/.test(psI) && /Ctrl\+C só copia/.test(psI),
+      'vale nos DOIS tipos de máquina, não só no interno': /Botao-Print "Copiar" 92/.test(psA) && alcas(psA).total === 8,
       'o script baixado continua começando com # NOCZenith (trava contra arquivo quebrado)': psI.startsWith('# NOCZenith'),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
@@ -16006,7 +16011,7 @@ setTimeout(async () => {
       'nem na máquina de atendimento': achA.length === 0,
       // as 3 linhas que estavam quebradas, agora com parênteses próprios
       'o painel de botões é posicionado com cada conta entre parênteses':
-        /New-Object System\.Drawing\.Point\(\(\[Math\]::Max\(14,\[int\]\(\(\$form\.ClientSize\.Width-304\)\/2\)\)\),\(\$form\.ClientSize\.Height-56\)\)/.test(psI),
+        /New-Object System\.Drawing\.Point\(\(\[Math\]::Max\(14,\[int\]\(\(\$form\.ClientSize\.Width-410\)\/2\)\)\),\(\$form\.ClientSize\.Height-56\)\)/.test(psI),
       'arrastar para MOVER a seleção não estoura mais':
         /New-Object System\.Drawing\.Rectangle\(\(\$base\.X\+\$p\.X-\$ini\.X\),\(\$base\.Y\+\$p\.Y-\$ini\.Y\),\$base\.Width,\$base\.Height\)/.test(psI),
       'as 4 alças dos meios usam parênteses próprios':
@@ -16093,6 +16098,55 @@ setTimeout(async () => {
   } catch (e) { okColarRelatorio = false; console.log('  erro: ' + e.message); }
   if (!okColarRelatorio) ruins += 1;
   console.log(`${okColarRelatorio ? '✓' : '✗'} Leitura por foto: Ctrl+V do NoPulsoPrint entra sem virar JPEG, e a captura salva como "DD-MM HHhMM Unidade"`);
+
+  // Marcação por cima da seleção: seta, linha e caixa. SEM texto - pedido
+  // explícito do Master ("tudo menos texto"), e é a parte cara: caixa de edição
+  // no lugar do clique, foco, cursor, e o texto virando pixel no PNG.
+  let okMarcasPrint = false;
+  try {
+    const vgM = require(__dirname + '/vigiaScript.js');
+    const g = (tipo) => vgM.montarScriptVigia({ codigo: 'Dominos Tirol', posto: 'P1', tipo, agentToken: 'tok', noPulsoPrint: true });
+    const psI = g('interno');
+    const psA = g('atendimento');
+
+    const conf = {
+      'VERSAO_VIGIA subiu (sem isso a marcação não chega nas 52 máquinas)': vgM.VERSAO_VIGIA >= 40,
+      'as 3 ferramentas existem na barra': /Botao-Print "Seta" 52/.test(psI)
+        && /Botao-Print "Linha" 52/.test(psI) && /Botao-Print "Caixa" 52/.test(psI),
+      // o Master pediu "tudo menos texto" - se aparecer ferramenta de texto, foi engano
+      'NÃO existe ferramenta de texto': !/Botao-Print "Texto"/.test(psI) && !/ferramenta = "texto"/.test(psI),
+      'o estado nasce em seleção, com a lista de marcas pronta':
+        /ferramenta = "selecao"; marcas = \(New-Object System\.Collections\.ArrayList\); marcaAtual = \$null/.test(psI),
+      // com ferramenta ativa o arrastar NÃO pode mexer na área já escolhida
+      'com ferramenta ativa, arrastar desenha e NÃO redimensiona a seleção':
+        /if \(\$s\.Tag\.ferramenta -ne "selecao"\) \{ \$s\.Tag\.marcaAtual = @\{ tipo = \$s\.Tag\.ferramenta;[\s\S]{0,120}?\$s\.Capture = \$true; return \}/.test(psI),
+      'arrastar atualiza a marca em curso': /if \(\$s\.Tag\.marcaAtual\) \{ \$s\.Tag\.marcaAtual\.x2 = \$e\.X; \$s\.Tag\.marcaAtual\.y2 = \$e\.Y; \$s\.Invalidate\(\); return \}/.test(psI),
+      'soltar o botão grava a marca na lista': /if \(\$s\.Tag\.marcaAtual\) \{ \[void\]\$s\.Tag\.marcas\.Add\(\$s\.Tag\.marcaAtual\); \$s\.Tag\.marcaAtual = \$null;/.test(psI),
+      'a prévia desenha o que já foi marcado e a marca em curso':
+        /Desenhar-Marcas \$e\.Graphics \$s\.Tag\.marcas 0 0; if \(\$s\.Tag\.marcaAtual\) \{ Desenhar-Marcas \$e\.Graphics @\(\$s\.Tag\.marcaAtual\) 0 0 \}/.test(psI),
+      'Ctrl+Z desfaz a última marca': /Keys\]::Z\)\{\$e\.SuppressKeyPress=\$true;if\(\$s\.Tag\.marcas\.Count -gt 0\)\{\$s\.Tag\.marcas\.RemoveAt\(\$s\.Tag\.marcas\.Count-1\);\$s\.Invalidate\(\)\};return\}/.test(psI),
+      'clicar na ferramenta ATIVA volta para a seleção (senão não dá pra reajustar a área)':
+        /if \(\$janela\.Tag\.ferramenta -eq \$qual\) \{ \$janela\.Tag\.ferramenta = "selecao" \}/.test(psI),
+      // o que a pessoa vê tem de ser o que ela salva
+      'as marcas entram no PNG, não só na tela':
+        /\$gMarcas = \[System\.Drawing\.Graphics\]::FromImage\(\$recorte\)/.test(psI)
+        && /Desenhar-Marcas \$gMarcas \$escolhaPrint\.marcas \(-\$escolhaPrint\.area\.X\) \(-\$escolhaPrint\.area\.Y\)/.test(psI),
+      'um desenhista só serve a tela e o PNG (dois divergiriam)':
+        (psI.match(/function Desenhar-Marcas/g) || []).length === 1,
+      'a seta tem ponta e a caixa normaliza o arrasto ao contrário':
+        /\$caneta\.EndCap = \[System\.Drawing\.Drawing2D\.LineCap\]::ArrowAnchor/.test(psI)
+        && /\$rx = \[Math\]::Min\(\$x1, \$x2\); \$ry = \[Math\]::Min\(\$y1, \$y2\)/.test(psI),
+      'caixa de tamanho zero não vira desenho degenerado': /if \(\$rw -gt 0 -and \$rh -gt 0\) \{ \$g\.DrawRectangle/.test(psI),
+      'o X fecha sem salvar': /\$fechar\.Add_Click\(\{param\(\$botao,\$e\);\$janela=\$botao\.Parent\.Parent;\$janela\.Tag\.resultado=\$null;\$janela\.Hide\(\);\$janela\.Close\(\)\}\)/.test(psI),
+      'vale nos DOIS tipos de máquina': /Botao-Print "Seta" 52/.test(psA) && /function Desenhar-Marcas/.test(psA),
+      'o script continua começando com # NOCZenith': psI.startsWith('# NOCZenith'),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMarcasPrint = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okMarcasPrint = false; console.log('  erro: ' + e.message); }
+  if (!okMarcasPrint) ruins += 1;
+  console.log(`${okMarcasPrint ? '✓' : '✗'} NoPulsoPrint: marcar com seta, linha e caixa por cima da seleção (sem texto), com Ctrl+Z`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
