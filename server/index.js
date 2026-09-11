@@ -9816,6 +9816,41 @@ app.delete('/api/tarefas/:id', auth.requireAuth, async (req, res) => {
   }
 });
 
+// Cancelar: quem mexe no status pode; some do quadro de todo mundo e só o
+// Master vê na coluna Cancelados.
+app.post('/api/tarefas/:id/cancelar', auth.requireAuth, async (req, res) => {
+  try {
+    const t = await tarefas.cancelar(req.params.id, acessoDasTarefas(req), req.body?.motivo);
+    broadcast('tarefas-atualizada', { id: t.id, unidade: t.unidade }, 'tarefas');
+    res.json({ ok: true, tarefa: t });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Pedir exclusão: quem não é Master não apaga direto - deixa o pedido pro
+// Master decidir (o DELETE acima só arquiva pra quem podeArquivar, ex. Master).
+app.post('/api/tarefas/:id/pedir-delecao', auth.requireAuth, async (req, res) => {
+  try {
+    const t = await tarefas.pedirDelecao(req.params.id, acessoDasTarefas(req), req.body?.motivo);
+    broadcast('tarefas-atualizada', { id: t.id, unidade: t.unidade }, 'tarefas');
+    res.json({ ok: true, tarefa: t });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Master aprova (arquiva) ou recusa (limpa o pedido) a exclusão pedida.
+app.post('/api/tarefas/:id/delecao', auth.requireAuth, async (req, res) => {
+  try {
+    const t = await tarefas.resolverDelecao(req.params.id, acessoDasTarefas(req), req.body?.aprovar === true);
+    broadcast('tarefas-atualizada', { id: t.id, unidade: t.unidade }, 'tarefas');
+    res.json({ ok: true, tarefa: t });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Reprocessamento idempotente para o acervo anterior ao Meu Dia. Útil se um
 // ticket antigo ganhou responsável de suporte depois da primeira migração.
 app.post('/api/tarefas/sincronizar-retroativo', auth.requireMaster, async (req, res) => {

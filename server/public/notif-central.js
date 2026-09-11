@@ -184,8 +184,24 @@
   const TIPOS_ALERTA_SO_ENCERRA = ['quebra-caixa'];
   const soEncerra = (c) => TIPOS_ALERTA_SO_ENCERRA.indexOf(c && c.tipo) !== -1;
 
+  // Dispensa LOCAL (fechar no X ou arrastar): o Master pediu que, fechado, o
+  // aviso não volte a aparecer ao atualizar a página. Não marca como visto no
+  // servidor - o ticket segue PENDENTE na Central; só o popup para de insistir
+  // neste navegador. Guardado por tipo:id, com poda de 30 dias pra não crescer.
+  const CHAVE_NOTIF_DISP = 'nopulsoNotifDispensadas';
+  function lerNotifDisp() { try { return JSON.parse(localStorage.getItem(CHAVE_NOTIF_DISP) || '{}') || {}; } catch (e) { return {}; } }
+  function chaveNotif(card) { return card.tipo + ':' + card.id; }
+  function notifDispensada(card) { return !!lerNotifDisp()[chaveNotif(card)]; }
+  function dispensarNotif(card) {
+    const m = lerNotifDisp(); m[chaveNotif(card)] = Date.now();
+    const limite = Date.now() - 30 * 864e5;
+    for (const k in m) { if (m[k] < limite) delete m[k]; }
+    try { localStorage.setItem(CHAVE_NOTIF_DISP, JSON.stringify(m)); } catch (e) { /* storage cheio/bloqueado */ }
+  }
+
   function mostrarNotificacaoSolicitacao(card) {
     if (card.notificacaoVista) return;
+    if (notifDispensada(card)) return;
     const elId = 'zn-notif-' + card.tipo + '-' + card.id;
     if (document.getElementById(elId)) return;
     const el = document.createElement('div');
@@ -209,6 +225,7 @@
     // ticket. Assim quem está ocupado pode limpar a tela sem perder a pendência.
     el.querySelector('.zn-fechar').addEventListener('click', (event) => {
       event.stopPropagation();
+      dispensarNotif(card);
       el.remove();
     });
     const criarTarefa = el.querySelector('.zn-tarefa');
@@ -225,9 +242,9 @@
         alert(err.message || 'Não foi possível criar a tarefa.');
       }
     });
-    // arrastar pro lado só tira da tela (não marca como vista - ver
-    // arrastarParaFechar lá em cima)
-    arrastarParaFechar(el);
+    // arrastar pro lado fecha como o X: dispensa local (não some a pendência
+    // no servidor, só o popup para de voltar neste navegador)
+    arrastarParaFechar(el, () => dispensarNotif(card));
     wrap.appendChild(el);
     tocarSomSolicitacao();
   }

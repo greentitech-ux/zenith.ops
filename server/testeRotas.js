@@ -14881,6 +14881,132 @@ setTimeout(async () => {
   if (!okSecaoMD) ruins += 1;
   console.log(`${okSecaoMD ? '✓' : '✗'} Meu Dia: a seção libera criar tarefa própria; sem ela a pessoa só responde o que recebeu`);
 
+  // ---- Meu Dia: cancelar (qualquer um) x excluir (só Master, ou pedido + aprovação) ----
+  let okCancDel = false;
+  try {
+    const cabM = { Authorization: 'Bearer ' + token };
+    const senhaCD = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-cd', {
+      passwordHash: senhaCD, role: 'user', active: true, email: 'cd@teste.local', username: 'cduser',
+      permissions: { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabU = { Authorization: 'Bearer ' + (await auth.login('cd@teste.local', 'SenhaDeTeste!2026')).token };
+    const idDe = (r) => (r.status === 200 ? JSON.parse(r.corpo).id : null);
+    const minhas = async (cab) => { const r = JSON.parse((await pedir('/api/tarefas/minhas', cab)).corpo); return Array.isArray(r) ? r : (r.tarefas || []); };
+    const acha = (lista, id) => (lista || []).find((t) => t.id === id) || null;
+
+    // 1) usuário comum CANCELA a própria tarefa (é o criador -> pode mover status)
+    const tCanc = idDe(await postarJson('/api/tarefas', { titulo: 'Tarefa a cancelar' }, cabU));
+    const cancelou = await postarJson('/api/tarefas/' + tCanc + '/cancelar', { motivo: 'nao vale mais' }, cabU);
+    const listaU = await minhas(cabU);
+    const listaM = await minhas(cabM);
+
+    // 2) EXCLUIR: comum não apaga direto, deixa PEDIDO; Master recusa e depois aprova
+    const tDel = idDe(await postarJson('/api/tarefas', { titulo: 'Tarefa a excluir' }, cabU));
+    const pediu = await postarJson('/api/tarefas/' + tDel + '/pedir-delecao', { motivo: 'duplicada' }, cabU);
+    const comPedido = acha(await minhas(cabU), tDel);
+    const comumTentaResolver = await postarJson('/api/tarefas/' + tDel + '/delecao', { aprovar: true }, cabU);
+    const recusou = await postarJson('/api/tarefas/' + tDel + '/delecao', { aprovar: false }, cabM);
+    const depoisRecusa = acha(await minhas(cabU), tDel);
+    await postarJson('/api/tarefas/' + tDel + '/pedir-delecao', { motivo: 'duplicada' }, cabU);
+    const aprovou = await postarJson('/api/tarefas/' + tDel + '/delecao', { aprovar: true }, cabM);
+    const sumiuU = acha(await minhas(cabU), tDel);
+    const sumiuM = acha(await minhas(cabM), tDel);
+
+    // 3) Master exclui direto (DELETE arquiva)
+    const tDir = idDe(await postarJson('/api/tarefas', { titulo: 'Master apaga direto' }, cabM));
+    const apagou = await pedirJsonDelete('/api/tarefas/' + tDir, cabM);
+    const sumiuDir = acha(await minhas(cabM), tDir);
+
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const conf = {
+      'qualquer um (aqui o criador comum) cancela a própria tarefa': cancelou.status === 200 && JSON.parse(cancelou.corpo).tarefa.status === 'CANCELADA',
+      'cancelada some da lista de quem não é Master': !acha(listaU, tCanc),
+      'só o Master vê a cancelada (coluna Cancelados)': !!acha(listaM, tCanc) && acha(listaM, tCanc).status === 'CANCELADA',
+      'comum não exclui direto: vira PEDIDO de exclusão': pediu.status === 200 && !!(comPedido && comPedido.delecaoSolicitada) && comPedido.delecaoSolicitada.porNome === 'cduser',
+      'comum não pode aprovar/recusar exclusão (só o Master)': comumTentaResolver.status >= 400,
+      'Master RECUSA: limpa o pedido e a tarefa continua viva': recusou.status === 200 && !!depoisRecusa && !depoisRecusa.delecaoSolicitada && depoisRecusa.status !== 'ARQUIVADA',
+      'Master APROVA: arquiva e some de todas as listas': aprovou.status === 200 && JSON.parse(aprovou.corpo).tarefa.status === 'ARQUIVADA' && !sumiuU && !sumiuM,
+      'Master exclui direto pelo DELETE (arquiva)': apagou.status === 200 && !sumiuDir,
+      'listarMinhas esconde CANCELADA de quem não é Master (na fonte)': /tarefa\.status !== 'CANCELADA' \|\| acesso\.isMaster/.test(require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8')),
+      'a tela tem botão Cancelar e Excluir/Pedir exclusão': /id="BTNCANCEL"[^>]*onclick="cancelarTarefa\(\)"/.test(html) && /id="BTNDEL"[^>]*onclick="excluirTarefa\(\)"/.test(html) && /CTX\.isMaster\?'🗑 Excluir':'🗑 Pedir exclusão'/.test(html),
+      'a coluna Cancelados existe e só aparece pro Master': /id="COLX"[^>]*hidden><h2>Cancelados/.test(html) && /\$\('COLX'\)\.hidden=!CTX\.isMaster/.test(html) && /if\(t\.status==='CANCELADA'\)return'X'/.test(html),
+      'o X de fechar fica fixo no topo do modal (sticky, não some no scroll)': /\.dialog>\.row:first-child\{position:sticky;top:0/.test(html),
+      'fechar zera O e TODA reabertura checa O (o popup não volta ao atualizar o card)':
+        /function fechar\(\)\{\$\('M'\)\.classList\.remove\('show'\);O=null\}/.test(html)
+        && (html.match(/openT\(O\.id\)/g) || []).length > 0
+        && (html.match(/openT\(O\.id\)/g) || []).length === (html.match(/if\(O\)openT\(O\.id\)/g) || []).length,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okCancDel = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (cancelar=${cancelou.status} pedir=${pediu.status} comumResolve=${comumTentaResolver.status} recusa=${recusou.status} aprova=${aprovou.status})`);
+  } catch (e) { okCancDel = false; console.log('  erro: ' + e.message); }
+  if (!okCancDel) ruins += 1;
+  console.log(`${okCancDel ? '✓' : '✗'} Meu Dia: cancelar (qualquer um) x excluir (só Master, ou pedido + aprovação), e coluna Cancelados só do Master`);
+
+  // ---- correções pontuais: título do estorno no concluir, X circular, e o
+  // aviso da Central que não volta ao atualizar depois de fechado no X ----
+  let okFixes = false;
+  try {
+    const tjSrc = require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8');
+    const htmlT = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const notif = require('fs').readFileSync(__dirname + '/public/notif-central.js', 'utf8');
+    const vr = require('fs').readFileSync(__dirname + '/public/vendas-recordes.html', 'utf8');
+    // montar() precisa carregar o grupo de cada unidade pra tela decidir sozinha
+    // se mostra o seletor de Grupo (quem só tem loja de uma rede não precisa dele)
+    const vrMod = require('./vendasRecordes');
+    const recFake = vrMod.montar([
+      { unidade: 'A1', unidadeNome: 'Loja A', grupo: 'ARCFOOD', data: '2026-09-01', faturamento: 1000 },
+      { unidade: 'B1', unidadeNome: 'Loja B', grupo: 'BRAVO', data: '2026-09-01', faturamento: 2000 },
+    ]);
+    const grupoDe = (cod) => (recFake.unidades.find((u) => u.unidade === cod) || {}).grupo;
+    const conf = {
+      'recordes: cada unidade sai com o grupo (pra tela decidir o seletor de Grupo)':
+        grupoDe('A1') === 'ARCFOOD' && grupoDe('B1') === 'BRAVO',
+      // 1 loja só: já vem escolhida no filtro (a opção "Todas" não ajuda)
+      'recordes: com 1 loja só ela já vem escolhida no filtro':
+        /if\(lista\.length===1 && !atual\)\{ sel\.value = lista\[0\]\.unidade; \}/.test(vr),
+      // Grupo só pra quem opera 2+ redes; some pra quem tem loja de uma rede só
+      'recordes: Grupo só aparece pra quem tem loja de 2+ redes':
+        /const gruposDistintos = new Set\(lista\.map\(u=>u\.grupo\)\.filter\(Boolean\)\);/.test(vr)
+        && /const mostraGrupo = gruposDistintos\.size >= 2;/.test(vr)
+        && /getElementById\('f-grupo-label'\)\.classList\.toggle\('hidden', !mostraGrupo\)/.test(vr)
+        && /getElementById\('f-grupo'\)\.classList\.toggle\('hidden', !mostraGrupo\)/.test(vr),
+      // estorno não tem campo "titulo": o update do sync mandava titulo:undefined
+      // e o Firestore recusava (quebrava concluir tarefa de estorno)
+      'sync-update guarda o título (estorno sem título não estoura no Firestore)':
+        /titulo: ticket\.titulo \|\| atual\.titulo \|\| \('Ticket #' \+ \(ticket\.numeroTicket \|\| ''\)\)/.test(tjSrc)
+        && !/update\(\{ titulo: ticket\.titulo, numeroTicket/.test(tjSrc),
+      'o X do modal é um botão redondo no canto (como nas outras telas)':
+        /\.close\{[^}]*border-radius:50%/.test(htmlT),
+      'o topo sticky ficou leve (sem a barra pesada que sobrepunha o conteúdo)':
+        /\.dialog>\.row:first-child\{position:sticky;top:0;z-index:5;background:var\(--panel\);padding-bottom:10px\}/.test(htmlT)
+        && !/\.dialog>\.row:first-child\{[^}]*border-bottom:1px solid var\(--line\)\}/.test(htmlT),
+      // fechar o aviso no X persiste local: não volta ao atualizar a página
+      'aviso da Central: fechar no X dispensa e não reabre no refresh':
+        /function dispensarNotif\(card\)/.test(notif)
+        && /localStorage\.setItem\(CHAVE_NOTIF_DISP/.test(notif)
+        && /if \(notifDispensada\(card\)\) return;/.test(notif)
+        && /\.zn-fechar'\)\.addEventListener\('click', \(event\) => \{[\s\S]{0,120}?dispensarNotif\(card\);/.test(notif),
+      'dispensar NÃO marca como visto (a pendência segue na Central)':
+        /function dispensarNotif\(card\) \{[\s\S]{0,400}?localStorage\.setItem\(CHAVE_NOTIF_DISP/.test(notif)
+        && !/function dispensarNotif\(card\) \{[\s\S]{0,400}?marcarVistoNotificacao/.test(notif),
+      'arrastar pro lado dispensa igual ao X': /arrastarParaFechar\(el, \(\) => dispensarNotif\(card\)\)/.test(notif),
+      // recordes: dia único mostra o nome do dia da semana (segunda, terça...)
+      'recordes: o dia vem com o nome do dia da semana': /const DIAS_SEMANA=\['domingo','segunda','terça','quarta','quinta','sexta','sábado'\]/.test(vr)
+        && /function fmtDataDia\(iso\)\{ const n=nomeDia\(iso\); return fmtData\(iso\)\+\(n\?' · '\+n:''\); \}/.test(vr)
+        && /rankings\.dias, item=>fmtDataDia\(item\.data\)/.test(vr)
+        && /<div class="sub">\$\{fmtDataDia\(item\.data\)\}<\/div>/.test(vr),
+      'recordes: o cálculo do dia da semana usa T12:00:00 (não pula de fuso)': /function nomeDia\(iso\)\{ if\(!iso\) return ''; const d=new Date\(iso\+'T12:00:00'\); return isNaN\(d\)\?'':DIAS_SEMANA\[d\.getDay\(\)\]; \}/.test(vr),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okFixes = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okFixes = false; console.log('  erro: ' + e.message); }
+  if (!okFixes) ruins += 1;
+  console.log(`${okFixes ? '✓' : '✗'} Fixes: título do estorno no concluir, X redondo, topo leve, e aviso fechado não volta no refresh`);
+
   // ---- Meu Dia: responsável x quem participa (modelo do Asana) ----
   // Participante faz a tarefa ANDAR (comenta, anexa, move o status). O que
   // muda o combinado - prazo e quem participa - e o que destrói fica com o

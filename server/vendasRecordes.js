@@ -60,15 +60,15 @@ function diasNoMes(chaveMes) {
 // mesclarLancamentosDoMesmoDia que ja roda antes disso em index.js, so que
 // aqui e so a soma que interessa pro recorde, nao o registro inteiro
 function porDia(fechamentos) {
-  const mapa = new Map(); // "unidade|data" -> { unidade, unidadeNome, data, faturamento }
+  const mapa = new Map(); // "unidade|data" -> { unidade, unidadeNome, grupo, data, faturamento }
   (fechamentos || []).forEach((f) => {
     const data = soData(f.data);
     if (!f.unidade || !data) return;
     const chave = `${f.unidade}|${data}`;
     const atual = mapa.get(chave);
     const faturamento = Number(f.faturamento) || 0;
-    if (atual) atual.faturamento += faturamento;
-    else mapa.set(chave, { unidade: f.unidade, unidadeNome: f.unidadeNome || f.unidade, data, faturamento });
+    if (atual) { atual.faturamento += faturamento; if (!atual.grupo && f.grupo) atual.grupo = f.grupo; }
+    else mapa.set(chave, { unidade: f.unidade, unidadeNome: f.unidadeNome || f.unidade, grupo: f.grupo || null, data, faturamento });
   });
   return [...mapa.values()];
 }
@@ -178,12 +178,16 @@ function montar(fechamentos, { hoje = hojeBrasiliaISO(), janelaDias = 30 } = {})
   const dias = porDia(fechamentos);
   const porUnidade = new Map();
   dias.forEach((d) => {
-    if (!porUnidade.has(d.unidade)) porUnidade.set(d.unidade, { unidadeNome: d.unidadeNome, dias: [] });
-    porUnidade.get(d.unidade).dias.push(d);
+    if (!porUnidade.has(d.unidade)) porUnidade.set(d.unidade, { unidadeNome: d.unidadeNome, grupo: d.grupo || null, dias: [] });
+    const info = porUnidade.get(d.unidade);
+    if (!info.grupo && d.grupo) info.grupo = d.grupo;
+    info.dias.push(d);
   });
 
+  // grupo por unidade vai junto pra tela decidir sozinha se mostra o seletor de
+  // Grupo: quem só tem loja de uma rede não precisa dele (ver vendas-recordes.html)
   const unidades = [...porUnidade.entries()]
-    .map(([unidade, info]) => recordesDaUnidade(unidade, info.unidadeNome, info.dias, hoje, janelaDias))
+    .map(([unidade, info]) => ({ ...recordesDaUnidade(unidade, info.unidadeNome, info.dias, hoje, janelaDias), grupo: info.grupo }))
     .sort((a, b) => (a.unidadeNome || '').localeCompare(b.unidadeNome || ''));
 
   const todasSemanas = unidades.flatMap((u) => {
