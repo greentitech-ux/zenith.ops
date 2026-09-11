@@ -167,6 +167,11 @@ function fecharMenu(){}
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtMoney(v){ return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function fmtData(iso){ if(!iso) return '—'; const [y,m,d]=iso.split('-'); return `${d}/${m}/${y}`; }
+// Dia da semana por extenso: pro Master saber na hora se o recorde caiu num
+// sábado ou numa segunda. T12:00:00 evita o pulo de fuso (a data é YYYY-MM-DD).
+const DIAS_SEMANA=['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
+function nomeDia(iso){ if(!iso) return ''; const d=new Date(iso+'T12:00:00'); return isNaN(d)?'':DIAS_SEMANA[d.getDay()]; }
+function fmtDataDia(iso){ const n=nomeDia(iso); return fmtData(iso)+(n?' · '+n:''); }
 function fmtSemana(s){ return s ? `${fmtData(s.inicio)} a ${fmtData(s.fim)}` : ''; }
 
 let DADOS = null;
@@ -231,14 +236,14 @@ function renderGeral(){
   const rankings = DADOS.rankings || {};
   document.getElementById('geral-titulo').textContent = 'Top 3 vendas · ' + tituloFiltroAtivo();
   document.getElementById('geral-grid').innerHTML =
-    rankingCard('🏆 3 melhores dias', rankings.dias, item=>fmtData(item.data)) +
+    rankingCard('🏆 3 melhores dias', rankings.dias, item=>fmtDataDia(item.data)) +
     rankingCard('🏆 3 melhores semanas', rankings.semanas, item=>fmtSemana(item)) +
     rankingCard('🏆 3 melhores meses', rankings.meses, item=>fmtMes(item));
 }
 
 function celulaDia(item, tipo){
   if(!item) return '<span class="sem-semana">—</span>';
-  return `<div class="val ${tipo}">${fmtMoney(item.valor)}</div><div class="sub">${fmtData(item.data)}</div>`;
+  return `<div class="val ${tipo}">${fmtMoney(item.valor)}</div><div class="sub">${fmtDataDia(item.data)}</div>`;
 }
 function celulaSemana(item, tipo){
   if(!item) return '<span class="sem-semana">sem semana completa</span>';

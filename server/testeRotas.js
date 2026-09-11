@@ -14952,6 +14952,7 @@ setTimeout(async () => {
     const tjSrc = require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8');
     const htmlT = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
     const notif = require('fs').readFileSync(__dirname + '/public/notif-central.js', 'utf8');
+    const vr = require('fs').readFileSync(__dirname + '/public/vendas-recordes.html', 'utf8');
     const conf = {
       // estorno não tem campo "titulo": o update do sync mandava titulo:undefined
       // e o Firestore recusava (quebrava concluir tarefa de estorno)
@@ -14973,6 +14974,12 @@ setTimeout(async () => {
         /function dispensarNotif\(card\) \{[\s\S]{0,400}?localStorage\.setItem\(CHAVE_NOTIF_DISP/.test(notif)
         && !/function dispensarNotif\(card\) \{[\s\S]{0,400}?marcarVistoNotificacao/.test(notif),
       'arrastar pro lado dispensa igual ao X': /arrastarParaFechar\(el, \(\) => dispensarNotif\(card\)\)/.test(notif),
+      // recordes: dia único mostra o nome do dia da semana (segunda, terça...)
+      'recordes: o dia vem com o nome do dia da semana': /const DIAS_SEMANA=\['domingo','segunda','terça','quarta','quinta','sexta','sábado'\]/.test(vr)
+        && /function fmtDataDia\(iso\)\{ const n=nomeDia\(iso\); return fmtData\(iso\)\+\(n\?' · '\+n:''\); \}/.test(vr)
+        && /rankings\.dias, item=>fmtDataDia\(item\.data\)/.test(vr)
+        && /<div class="sub">\$\{fmtDataDia\(item\.data\)\}<\/div>/.test(vr),
+      'recordes: o cálculo do dia da semana usa T12:00:00 (não pula de fuso)': /function nomeDia\(iso\)\{ if\(!iso\) return ''; const d=new Date\(iso\+'T12:00:00'\); return isNaN\(d\)\?'':DIAS_SEMANA\[d\.getDay\(\)\]; \}/.test(vr),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okFixes = !falhas.length;
