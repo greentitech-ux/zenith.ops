@@ -15611,7 +15611,10 @@ setTimeout(async () => {
     const psA = gerar('atendimento');
     // as 8 alças: 4 quinas (já existiam) + 4 meios de borda (novos)
     const alcas = (t) => {
-      const pintura = (t.match(/\$form\.Add_Paint\(\{[\s\S]*?\}\)\n/) || [''])[0];
+      // o desenho migrou de $form.Add_Paint para $superficie.Add_Paint quando a
+      // superficie ganhou a captura do mouse - o teste segue o DESENHO, nao o
+      // controle que por acaso o hospeda hoje
+      const pintura = (t.match(/Add_Paint\(\{[\s\S]*?\}\)\n/) || [''])[0];
       // cada uma das 8 conferida SOZINHA: um (Top|Bottom) casaria com metade
       // das alças presentes e deixaria passar a falta da outra
       return {
@@ -15801,6 +15804,60 @@ setTimeout(async () => {
   } catch (e) { okAssinaturaAparelho = false; console.log('  erro: ' + e.message); }
   if (!okAssinaturaAparelho) ruins += 1;
   console.log(`${okAssinaturaAparelho ? '✓' : '✗'} Assinatura: de que aparelho veio (celular/tablet/computador) e a marca do grupo vinda do PNG`);
+
+  // NoPulsoPrint parava de responder e TODO diagnóstico dizia "pronto". O
+  // motivo: "pronto" saía de $ps.InvocationStateInfo.State -eq "Running", que é
+  // o estado do OBJETO PowerShell - e ele segue Running com o laço do teclado
+  // preso dentro do ShowDialog da seleção. Janela aberta onde ninguém vê
+  // (monitor desconectado, sessão remota) = Ctrl+Q morto para sempre, sem sinal.
+  let okPulsoPrint = false;
+  try {
+    const vgP = require(__dirname + '/vigiaScript.js');
+    const ps = vgP.montarScriptVigia({ codigo: 'DOM_19706', posto: 'PC1', tipo: 'interno', agentToken: 'tok', noPulsoPrint: true });
+    const psAt = vgP.montarScriptVigia({ codigo: 'DOM_19706', posto: 'CX1', tipo: 'atendimento', agentToken: 'tok', noPulsoPrint: true });
+
+    const conf = {
+      'VERSAO_VIGIA subiu (sem isso nada chega nas 52 máquinas)': vgP.VERSAO_VIGIA >= 35,
+      // 1) prova de vida do laço
+      'o laço bate pulso a cada volta, ANTES de qualquer guarda':
+        /\$Pulso\.ultimoPulso = Get-Date[\s\S]{0,400}?\$ativo = \$false/.test(ps),
+      'o pulso chega ao runspace como argumento': /param\(\$CaminhoAtivo, \$PastaBase, \$CaminhoLogPrint, \$CaminhoErro, \$Pulso\)/.test(ps)
+        && /AddArgument\(\$global:NoPulsoPrintEstado\)/.test(ps),
+      'o estado compartilhado é sincronizado (outro runspace escreve nele)':
+        /\$global:NoPulsoPrintEstado = \[hashtable\]::Synchronized\(@\{ ultimoPulso = \$null; selecaoAbertaEm = \$null \}\)/.test(ps),
+      // 2) "pronto" deixa de ser só o estado do objeto
+      '"pronto" agora exige pulso recente, não só runspace Running':
+        /if \(\$st\.selecaoAbertaEm\) \{ return "selecao aberta ha /.test(ps)
+        && /if \(\$paradoHa -ge 15\) \{ return "travado ha \$\{paradoHa\}s" \}/.test(ps),
+      'seleção aberta é reportada como tal, não como "pronto"': /\$Pulso\.selecaoAbertaEm = Get-Date/.test(ps)
+        && /\$Pulso\.selecaoAbertaEm = \$null/.test(ps),
+      // 3) janela invisível deixa de matar o atalho em definitivo
+      'a seleção se fecha sozinha após 60s sem interação':
+        /if \(\$j\.Tag\.ocioso -ge 60\) \{ \$s\.Stop\(\); \$j\.Tag\.resultado = \$null; \$j\.Tag\.expirou = \$true; \$j\.Close\(\) \}/.test(ps),
+      // a superficie e Dock=Fill e cobre o form: preso no form, o reset nunca
+      // dispararia e a selecao fecharia na cara de quem esta usando
+      'o reset do ocioso fica na SUPERFÍCIE, que é quem recebe o mouse':
+        /\$superficie\.Add_MouseMove\(\{ param\(\$s, \$e\) \$s\.Tag\.ocioso = 0 \}\)/.test(ps)
+        && /\$superficie\.Add_MouseDown\(\{ param\(\$s, \$e\) \$s\.Tag\.ocioso = 0 \}\)/.test(ps)
+        && /\$form\.Add_KeyDown\(\{ param\(\$s, \$e\) \$s\.Tag\.ocioso = 0 \}\)/.test(ps)
+        && !/\$form\.Add_MouseMove\(\{ param\(\$s, \$e\) \$s\.Tag\.ocioso = 0 \}\)/.test(ps),
+      'quando expira, o log diz que a janela abriu fora da vista': /a janela abriu fora da sua vista/.test(ps),
+      // 4) o que separa "tecla não chegou" de "janela não apareceu"
+      'o atalho detectado é registrado ANTES de abrir a janela':
+        /Log-Print "Ctrl\+Q detectado - abrindo a selecao\."[\s\S]{0,200}?\$Pulso\.selecaoAbertaEm = Get-Date/.test(ps),
+      // 5) borda de subida não depende mais do fim do laço
+      'a borda de subida é resolvida antes do bloco (havia um continue que a pulava)':
+        /\$disparar = \$atalho -and -not \$atalhoAnterior\r?\n\s*\$atalhoAnterior = \$atalho/.test(ps)
+        && !/\$atalhoAnterior = \$atalho\r?\n\s*Start-Sleep -Milliseconds 55/.test(ps),
+      'vale nos DOIS tipos de máquina': /\$Pulso\.ultimoPulso = Get-Date/.test(psAt) && /ocioso -ge 60/.test(psAt),
+      'o script baixado continua começando com # NOCZenith': ps.startsWith('# NOCZenith'),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPulsoPrint = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okPulsoPrint = false; console.log('  erro: ' + e.message); }
+  if (!okPulsoPrint) ruins += 1;
+  console.log(`${okPulsoPrint ? '✓' : '✗'} NoPulsoPrint: o NOC para de dizer "pronto" com o laço travado, e a seleção invisível não mata mais o Ctrl+Q`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
