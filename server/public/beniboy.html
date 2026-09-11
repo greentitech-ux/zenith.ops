@@ -98,7 +98,12 @@
   .sheet .sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:12px;}
   .sheet-fechar-flutuante{position:absolute;top:-14px;right:-6px;width:32px;height:32px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);color:var(--muted);font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.5);cursor:pointer;z-index:5;}
   .sheet-fechar-flutuante:hover{color:var(--text);border-color:var(--accent);}
-  .msg-item{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;}
+  .msg-item{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;max-width:85%;align-self:flex-start;}
+  /* visitante à esquerda, suporte/Beniboy à direita, com fundos diferentes pra
+     bater o olho e ver de quem é cada mensagem (WhatsApp/Lightshot-style) */
+  .msg-item.msg-vis{align-self:flex-start;border-left:3px solid var(--line);}
+  .msg-item.msg-eu{align-self:flex-end;background:var(--panel);border-right:3px solid var(--accent);}
+  .msg-item.msg-eu .m-cab{flex-direction:row-reverse;}
   .msg-item .m-cab{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:11px;color:var(--muted);}
   .msg-item .m-texto{white-space:pre-wrap;margin-top:2px;}
   .d-acoes{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
@@ -252,6 +257,7 @@ let ACAO_PENDENTE = null; // {id, statusAlvo}
 // cadastrado (anydeskId) - se tiver, o painel mostra um atalho direto pra
 // tela do NOC daquele computador, em vez do atendente precisar ir procurar
 // na mão qual loja é e se ela tem acesso remoto configurado
+const ASSUNTOS_NOC = ['Computador/Sistema', 'Acesso/Senha'];
 let NOC_UNIDADES = [];
 let NOC_COMPUTADORES = [];
 
@@ -554,16 +560,24 @@ function painelHtml(chat){
   // problema de Computador/Sistema numa loja já identificada e que já tem
   // computador com acesso remoto cadastrado no NOC - atalho direto em vez de
   // precisar ir procurar na mão qual loja é e se ela tem acesso remoto
-  if(chat.assunto==='Computador/Sistema'){
+  // Sistema/máquina que pode precisar de acesso (Computador/Sistema e Acesso/
+  // Senha): o atalho pro NOC aparece SEMPRE. Com a loja identificada e com
+  // acesso remoto, vai direto pra ela; sem saber a loja, pergunta qual é -
+  // sem a unidade não dá pra olhar a máquina certa.
+  if(ASSUNTOS_NOC.includes(chat.assunto)){
     const codigoNoc = unidadeComAcessoRemoto(chat.lojaContexto);
-    if(codigoNoc) acoes.push(`<a class="btn-ghost" style="text-decoration:none;display:inline-flex;align-items:center;" href="/loja-status.html?unidade=${encodeURIComponent(codigoNoc)}" target="_blank" rel="noopener">🖥️ Ir para o NOC</a>`);
+    if(codigoNoc){
+      acoes.push(`<a class="btn-ghost" style="text-decoration:none;display:inline-flex;align-items:center;" href="/loja-status.html?unidade=${encodeURIComponent(codigoNoc)}" target="_blank" rel="noopener">🖥️ Ir para o NOC</a>`);
+    } else {
+      acoes.push(`<button type="button" class="btn-ghost" data-loja="${escapeHtml(chat.lojaContexto||'')}" onclick="abrirNocDaConversa(this.dataset.loja)">🖥️ Ir para o NOC</button>`);
+    }
   }
 
   // o INDICE da mensagem no array e o endereco do anexo na rota
   // /api/suporte-chats/:id/anexo/:indice - por isso ele e preservado aqui
-  const msgs = (chat.mensagens||[]).map((m,i)=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'Beniboy':'Suporte'), texto: m.texto, em: m.em, anexo: m.anexo||null, indice: i }));
+  const msgs = (chat.mensagens||[]).map((m,i)=>({ de: m.de==='visitante' ? (chat.nome||'Visitante') : (m.bot?'Beniboy':'Suporte'), eu: m.de!=='visitante', texto: m.texto, em: m.em, anexo: m.anexo||null, indice: i }));
   const msgsHtml = msgs.length ? msgs.map(m=>`
-      <div class="msg-item">
+      <div class="msg-item ${m.eu?'msg-eu':'msg-vis'}">
         <div class="m-cab"><span>${escapeHtml(m.de)}</span><span>${fmtDataHora(m.em)}</span></div>
         <div class="m-texto">${escapeHtml(m.texto)}</div>
         ${anexoHtml(chat.id, m)}
@@ -843,6 +857,22 @@ async function carregarNoc(){
 // cadastro) E tiver pelo menos um computador no NOC com AnyDesk cadastrado -
 // null nos dois outros casos (não identificada, ou identificada mas sem
 // acesso remoto configurado ainda)
+// Abre o NOC da unidade da conversa. Se a loja não foi identificada (ou não
+// tem acesso remoto cadastrado), pergunta qual é - a unidade decide qual
+// máquina olhar, então nunca seguimos sem ela.
+function abrirNocDaConversa(lojaContexto){
+  let codigo = unidadeComAcessoRemoto(lojaContexto);
+  if(!codigo){
+    const digitado = prompt('Qual unidade? (nome da loja no NOC)', lojaContexto||'');
+    if(digitado===null) return;
+    const termo = digitado.trim();
+    if(!termo){ window.open('/loja-status.html','_blank','noopener'); return; }
+    const porNome = NOC_UNIDADES.find(x=>String(x.nome||'').toLowerCase()===termo.toLowerCase());
+    codigo = porNome ? porNome.codigo : termo;
+  }
+  window.open('/loja-status.html?unidade='+encodeURIComponent(codigo),'_blank','noopener');
+}
+
 function unidadeComAcessoRemoto(nomeLoja){
   if(!nomeLoja) return null;
   const u = NOC_UNIDADES.find(x=>x.nome===nomeLoja);

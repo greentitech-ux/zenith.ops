@@ -4404,6 +4404,7 @@ setTimeout(async () => {
     const msgs = final.mensagens;
 
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'beniboy.html'), 'utf8');
+    const widgetSrc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'suporte-chat.js'), 'utf8');
     const conferencias = {
       'apresentação com saudação + nome + Suporte':
         /^(Bom dia|Boa tarde|Boa noite|Boa madrugada), Letícia! O Suporte assumiu seu atendimento e acompanhará sua solicitação\.$/.test(m1.texto)
@@ -4425,6 +4426,27 @@ setTimeout(async () => {
       'chat gera tarefa com o mesmo protocolo, sem criar outro Ticket #': tarefaResp.status === 200 && tarefaChat.tarefa?.numeroTicket === chatNovo.numeroTicket && tarefaChat.tarefa?.origemChatId === chatNovo.id,
       'repetir a ação devolve a tarefa vinculada': tarefaRepetidaResp.status === 200 && tarefaRepetida.existente === true && tarefaRepetida.tarefa?.id === tarefaChat.tarefa?.id,
       'a Central mostra a ação Gerar tarefa': /function gerarTarefa\(id\)/.test(html) && /✅ Gerar tarefa/.test(html),
+      // NOC: atalho pra sistema E acesso/senha, e pergunta a unidade quando não sabe
+      'NOC: atalho aparece pra Computador/Sistema E Acesso/Senha (não só um)':
+        /const ASSUNTOS_NOC = \['Computador\/Sistema', 'Acesso\/Senha'\]/.test(html)
+        && /if\(ASSUNTOS_NOC\.includes\(chat\.assunto\)\)\{/.test(html)
+        && !/if\(chat\.assunto==='Computador\/Sistema'\)\{/.test(html),
+      'NOC: sem a loja identificada, pergunta qual unidade em vez de esconder o botão':
+        /onclick="abrirNocDaConversa\(this\.dataset\.loja\)"/.test(html)
+        && /function abrirNocDaConversa/.test(html)
+        && /prompt\('Qual unidade\?/.test(html),
+      // chat: suporte/Beniboy à direita, visitante à esquerda, fundos diferentes
+      'chat da Central: quem responde vai pra direita e o visitante pra esquerda, com fundos distintos':
+        /eu: m\.de!=='visitante'/.test(html)
+        && /class="msg-item \$\{m\.eu\?'msg-eu':'msg-vis'\}"/.test(html)
+        && /\.msg-item\.msg-eu\{align-self:flex-end;background:var\(--panel\);border-right:3px solid var\(--accent\)/.test(html)
+        && /\.msg-item\.msg-vis\{align-self:flex-start/.test(html),
+      // widget: o texto sai da caixa ao enviar (bug do input que não limpava)
+      'widget: o operador limpa o campo NA HORA do envio (não fica texto escrito)':
+        /if \(!texto && !arquivo\) return;[\s\S]{0,400}?input\.value = '';[\s\S]{0,80}?anexoInput\.value = '';/.test(widgetSrc),
+      'widget: caixas de mensagem compactas (menos espaço vazio)':
+        /\.szc-corpo\{padding:10px 12px;[^}]*gap:5px;\}/.test(widgetSrc)
+        && /\.szc-msg\{max-width:85%;padding:6px 9px;/.test(widgetSrc),
       'Ticket # do chat vira link para a tarefa ou chamado': /const destinoPrincipal = chat\.chamadoId/.test(html) && /\/tarefas\.html\?tarefa=/.test(html) && /Ticket #\$\{escapeHtml\(chat\.numeroTicket\)\}/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
