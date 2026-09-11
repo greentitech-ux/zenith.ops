@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Meu Dia · NoPulso</title><script src="/tema.js"></script>
   <style>
-    :root{--bg:#0b0d10;--panel:#12161b;--panel2:#181d24;--line:#27313b;--text:#e7ecf1;--muted:#8c99a7;--accent:#b8ff3c;--ok:#3ddc97;--warn:#ffbd59;--bad:#ff6b6b;--sans:Arial,sans-serif;--mono:ui-monospace,monospace}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px var(--sans)}main{max-width:1540px;margin:auto;padding:24px 16px}.hamburger-btn{position:fixed;top:12px;left:12px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px;z-index:3}.top{margin-left:42px;display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap}h1{margin:4px 0;font-size:27px}.meta{color:var(--muted);font-size:12px;line-height:1.4}.btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:8px;padding:9px 12px;font-weight:700;cursor:pointer;font:inherit}.btn:hover{border-color:var(--accent)}.primary{background:var(--accent);color:#111;border:0}.danger{color:var(--bad)}.filters{display:grid;grid-template-columns:minmax(135px,.8fr) minmax(135px,.8fr) minmax(175px,1.1fr) minmax(190px,1.25fr) minmax(286px,1.6fr) auto;gap:12px;align-items:end;background:linear-gradient(110deg,var(--panel),#11171d);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:18px}.filter-field{display:grid;gap:5px;min-width:0}.filter-label{font:10px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.09em}.filters select,.filters input{margin:0;height:39px;padding:8px 34px 8px 10px}.filter-dates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;min-width:286px}.summary{align-self:end;border-left:1px solid var(--line);padding:11px 0 11px 12px;font:12px var(--mono);color:var(--muted);white-space:nowrap}.board[hidden]{display:none}.board{display:grid;grid-template-columns:repeat(7,minmax(210px,1fr));gap:12px;margin-top:18px;overflow:auto;padding-bottom:6px}.col{background:var(--panel);border:1px solid var(--line);border-radius:12px;min-height:285px;padding:11px}.col h2{font-size:13px;margin:2px 0 12px}.col>div{max-height:510px;overflow-y:auto;padding-right:3px}.count{color:var(--muted);font:11px var(--mono)}.task{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px;margin:8px 0;cursor:pointer;transition:border-color .15s}.task:hover{border-color:var(--accent)}.task b{display:block;line-height:1.3;overflow-wrap:anywhere}.task .meta{margin-top:5px;overflow-wrap:anywhere}.task-contexto{color:var(--muted);font-size:12px;line-height:1.35;margin-top:7px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-line}.task-top{display:flex;gap:7px;align-items:start}.task-check{width:auto;margin:2px 0 0;flex:none;accent-color:var(--accent)}.tag{display:inline-block;margin-top:7px;padding:2px 6px;border-radius:999px;background:rgba(184,255,60,.14);color:var(--accent);font:10px var(--mono)}.late{color:var(--bad)}.empty{color:var(--muted);font-size:12px;padding:14px 2px}.bulk{display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}.bulk.show{display:flex}.presets{display:flex;gap:4px;flex-wrap:wrap;margin-top:10px}.preset-btn{font-family:var(--mono);font-size:10.5px;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer}.preset-btn:hover{color:var(--text);border-color:var(--accent)}.preset-btn.active{color:#0b0d10;background:var(--accent);border-color:var(--accent);font-weight:600}.filtro-linha{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}.filtro-linha .presets{margin-top:0}.busca{position:relative;display:flex;align-items:center;flex:1 1 250px;min-width:190px;max-width:430px}.busca-lupa{position:absolute;left:8px;font-size:11px;line-height:1;pointer-events:none;opacity:.75}.busca input{width:100%;margin:0;height:29px;padding:5px 26px 5px 26px;border-radius:6px;background:var(--panel2);font:12px var(--sans)}.busca input::placeholder{color:var(--muted)}.busca input:focus{outline:none;border-color:var(--accent)}.busca input::-webkit-search-cancel-button,.busca input::-webkit-search-decoration{-webkit-appearance:none;appearance:none}.busca-x{position:absolute;right:5px;display:none;border:0;background:none;color:var(--muted);cursor:pointer;font:16px/1 var(--sans);padding:2px 4px}.busca.tem-texto .busca-x{display:block}.busca-x:hover{color:var(--accent)}.visao{display:flex;gap:4px}.visao-btn{font-family:var(--mono);font-size:10.5px;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer}.visao-btn:hover{color:var(--text);border-color:var(--accent)}.visao-btn.active{color:#0b0d10;background:var(--accent);border-color:var(--accent);font-weight:600}#CAL{margin-top:18px}.cal-topo{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}.cal-mes{font-weight:700;font-size:15px;min-width:170px}.cal-grade{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}.cal-cab{font:10px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.09em;text-align:center;padding:4px 0}.cal-dia{background:var(--panel);border:1px solid var(--line);border-radius:9px;min-height:104px;padding:6px;display:flex;flex-direction:column;gap:3px}.cal-dia.fora{opacity:.42}.cal-dia.hoje{border-color:var(--accent)}.cal-dia.alvo{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}.cal-num{font:11px var(--mono);color:var(--muted);display:flex;justify-content:space-between;align-items:center}.cal-dia.hoje .cal-num{color:var(--accent);font-weight:700}.cal-item{font-size:11px;line-height:1.25;padding:3px 5px;border-radius:5px;background:var(--panel2);border-left:3px solid var(--muted);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cal-item:hover{border-color:var(--accent);background:var(--bg)}.cal-item.p{border-left-color:var(--bad)}.cal-item.h{border-left-color:var(--accent)}.cal-item.a{border-left-color:var(--warn)}.cal-item.c{border-left-color:var(--ok);opacity:.62}.cal-item b{font-weight:700}.cal-mais{font:10px var(--mono);color:var(--muted);cursor:pointer;padding:1px 5px}.cal-mais:hover{color:var(--accent)}.cal-sem{margin-top:12px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px}.cal-sem h3{margin:0 0 8px;font-size:12px}.cal-sem-lista{display:flex;gap:6px;flex-wrap:wrap}.cal-sem-lista .cal-item{max-width:230px}@media(max-width:700px){.cal-grade{gap:3px}.cal-dia{min-height:72px;padding:4px}.cal-item{font-size:10px}}.task-check{display:none}body.sel-on .task-check{display:inline-block}.ficha{border:1px solid var(--line);border-radius:9px;padding:10px;margin:10px 0;display:grid;gap:7px}.ficha-linha{display:flex;justify-content:space-between;gap:14px;font-size:12px;line-height:1.4}.ficha-linha span{color:var(--muted);flex:none}.ficha-linha b{text-align:right;overflow-wrap:anywhere}.checklist{max-height:132px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;margin:6px 0 12px;display:grid;gap:6px}.checklist label{display:flex;gap:8px;align-items:center;font-size:12px;cursor:pointer}.checklist input{width:auto;margin:0;accent-color:var(--accent)}.link-btn{border:0;background:none;color:var(--muted);text-decoration:underline;cursor:pointer;font:inherit;padding:0}.link-btn:hover{color:var(--accent)}.modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;padding:15px;z-index:9}.modal.show{display:flex}.dialog{width:min(700px,100%);max-height:90vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}.row{display:flex;justify-content:space-between;align-items:center;gap:10px}.close{border:0;background:none;color:var(--muted);font-size:22px;cursor:pointer}input,textarea,select{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;margin:6px 0 12px;font:inherit}textarea{resize:vertical}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.comment{border-bottom:1px solid var(--line);padding:9px 0}.actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.info{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px;margin:10px 0;line-height:1.55}.descricao{white-space:pre-line;margin:10px 0;padding:11px;border-left:3px solid var(--accent);background:rgba(184,255,60,.06);line-height:1.5}.descricao b{display:block;margin-bottom:5px}.anexos{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0}.anexos a{color:var(--accent);font-size:12px}.anexo-item{display:inline-flex;align-items:center;gap:0}.anexo-item .btn{border-top-right-radius:0;border-bottom-right-radius:0}.anexo-x{border-left:0;border-top-left-radius:0;border-bottom-left-radius:0;padding:9px 10px;font-weight:900}.anexo-nome{border:1px solid var(--line);border-right:0;border-radius:8px 0 0 8px;padding:9px 12px;font-size:12px;background:var(--panel2)}.link-ticket{color:var(--accent);font-weight:700;text-decoration:none;border-bottom:1px dotted var(--accent)}.link-ticket:hover{border-bottom-style:solid}.drop{border:1px dashed var(--line);border-radius:8px;padding:10px;color:var(--muted);font-size:12px;margin:10px 0;cursor:pointer}@media(max-width:1180px){.filters{grid-template-columns:repeat(3,minmax(0,1fr))}.filter-dates{grid-column:span 2}.summary{border-left:0;border-top:1px solid var(--line);padding:9px 0 0}}@media(max-width:700px){main{padding:18px 12px}.grid2{grid-template-columns:1fr}.filters{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.filter-dates{grid-column:1/-1}.summary{grid-column:1/-1;width:100%}}@media(max-width:390px){.filters{grid-template-columns:1fr}.filter-dates{grid-template-columns:repeat(2,minmax(0,1fr));min-width:0}}
+    :root{--bg:#0b0d10;--panel:#12161b;--panel2:#181d24;--line:#27313b;--text:#e7ecf1;--muted:#8c99a7;--accent:#b8ff3c;--ok:#3ddc97;--warn:#ffbd59;--bad:#ff6b6b;--sans:Arial,sans-serif;--mono:ui-monospace,monospace}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px var(--sans)}main{max-width:1540px;margin:auto;padding:24px 16px}.hamburger-btn{position:fixed;top:12px;left:12px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px;z-index:3}.top{margin-left:42px;display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap}h1{margin:4px 0;font-size:27px}.meta{color:var(--muted);font-size:12px;line-height:1.4}.btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:8px;padding:9px 12px;font-weight:700;cursor:pointer;font:inherit}.btn:hover{border-color:var(--accent)}.primary{background:var(--accent);color:#111;border:0}.danger{color:var(--bad)}.filters{display:grid;grid-template-columns:minmax(135px,.8fr) minmax(135px,.8fr) minmax(175px,1.1fr) minmax(190px,1.25fr) minmax(286px,1.6fr) auto;gap:12px;align-items:end;background:linear-gradient(110deg,var(--panel),#11171d);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:18px}.filter-field{display:grid;gap:5px;min-width:0}.filter-label{font:10px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.09em}.filters select,.filters input{margin:0;height:39px;padding:8px 34px 8px 10px}.filter-dates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;min-width:286px}.summary{align-self:end;border-left:1px solid var(--line);padding:11px 0 11px 12px;font:12px var(--mono);color:var(--muted);white-space:nowrap}.board[hidden]{display:none}.board{display:grid;grid-template-columns:repeat(7,minmax(210px,1fr));gap:12px;margin-top:18px;overflow:auto;padding-bottom:6px}.col{background:var(--panel);border:1px solid var(--line);border-radius:12px;min-height:285px;padding:11px}.col h2{font-size:13px;margin:2px 0 12px}.col>div{max-height:510px;overflow-y:auto;padding-right:3px}.count{color:var(--muted);font:11px var(--mono)}.task{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px;margin:8px 0;cursor:pointer;transition:border-color .15s}.task:hover{border-color:var(--accent)}.task b{display:block;line-height:1.3;overflow-wrap:anywhere}.task .meta{margin-top:5px;overflow-wrap:anywhere}.task-contexto{color:var(--muted);font-size:12px;line-height:1.35;margin-top:7px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-line}.task-top{display:flex;gap:7px;align-items:start}.task-check{width:auto;margin:2px 0 0;flex:none;accent-color:var(--accent)}.tag{display:inline-block;margin-top:7px;padding:2px 6px;border-radius:999px;background:rgba(184,255,60,.14);color:var(--accent);font:10px var(--mono)}.late{color:var(--bad)}.empty{color:var(--muted);font-size:12px;padding:14px 2px}.bulk{display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}.bulk.show{display:flex}.presets{display:flex;gap:4px;flex-wrap:wrap;margin-top:10px}.preset-btn{font-family:var(--mono);font-size:10.5px;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer}.preset-btn:hover{color:var(--text);border-color:var(--accent)}.preset-btn.active{color:#0b0d10;background:var(--accent);border-color:var(--accent);font-weight:600}.filtro-linha{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}.filtro-linha .presets{margin-top:0}.busca{position:relative;display:flex;align-items:center;flex:1 1 250px;min-width:190px;max-width:430px}.busca-lupa{position:absolute;left:8px;font-size:11px;line-height:1;pointer-events:none;opacity:.75}.busca input{width:100%;margin:0;height:29px;padding:5px 26px 5px 26px;border-radius:6px;background:var(--panel2);font:12px var(--sans)}.busca input::placeholder{color:var(--muted)}.busca input:focus{outline:none;border-color:var(--accent)}.busca input::-webkit-search-cancel-button,.busca input::-webkit-search-decoration{-webkit-appearance:none;appearance:none}.busca-x{position:absolute;right:5px;display:none;border:0;background:none;color:var(--muted);cursor:pointer;font:16px/1 var(--sans);padding:2px 4px}.busca.tem-texto .busca-x{display:block}.busca-x:hover{color:var(--accent)}.visao{display:flex;gap:4px}.visao-btn{font-family:var(--mono);font-size:10.5px;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer}.visao-btn:hover{color:var(--text);border-color:var(--accent)}.visao-btn.active{color:#0b0d10;background:var(--accent);border-color:var(--accent);font-weight:600}#CAL{margin-top:18px}.cal-topo{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}.cal-mes{font-weight:700;font-size:15px;min-width:170px}.cal-grade{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}.cal-cab{font:10px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.09em;text-align:center;padding:4px 0}.cal-dia{background:var(--panel);border:1px solid var(--line);border-radius:9px;min-height:104px;padding:6px;display:flex;flex-direction:column;gap:3px}.cal-dia.fora{opacity:.42}.cal-dia.hoje{border-color:var(--accent)}.cal-dia.alvo{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}.cal-num{font:11px var(--mono);color:var(--muted);display:flex;justify-content:space-between;align-items:center}.cal-dia.hoje .cal-num{color:var(--accent);font-weight:700}.cal-item{font-size:11px;line-height:1.25;padding:3px 5px;border-radius:5px;background:var(--panel2);border-left:3px solid var(--muted);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cal-item:hover{border-color:var(--accent);background:var(--bg)}.cal-item.p{border-left-color:var(--bad)}.cal-item.h{border-left-color:var(--accent)}.cal-item.a{border-left-color:var(--warn)}.cal-item.c{border-left-color:var(--ok);opacity:.62}.cal-item b{font-weight:700}.cal-mais{font:10px var(--mono);color:var(--muted);cursor:pointer;padding:1px 5px}.cal-mais:hover{color:var(--accent)}.cal-sem{margin-top:12px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px}.cal-sem h3{margin:0 0 8px;font-size:12px}.cal-sem-lista{display:flex;gap:6px;flex-wrap:wrap}.cal-sem-lista .cal-item{max-width:230px}#CAL-TEMPO{--ct-h:46px;--ct-n:14;--ct-cols:7;--ct-canal:54px;border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}.ct-cab,.ct-todo,.ct-rolo{display:grid;grid-template-columns:var(--ct-canal) repeat(var(--ct-cols),minmax(0,1fr))}.ct-cab{border-bottom:1px solid var(--line)}.ct-cab-cel{text-align:center;padding:7px 2px 8px;border-left:1px solid var(--line)}.ct-cab-dia{font:10px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.09em}.ct-cab-num{font-size:19px;font-weight:700;line-height:1.35;margin-top:2px}.ct-cab-cel.hoje .ct-cab-dia{color:var(--accent)}.ct-cab-cel.hoje .ct-cab-num{display:inline-block;min-width:31px;border-radius:999px;background:var(--accent);color:#0b0d10}.ct-canal{font:9px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:end;justify-content:center;text-align:center;line-height:1.3;padding:0 4px 8px;overflow:hidden}.ct-todo .ct-canal{align-items:center;padding:4px}.ct-todo{border-bottom:1px solid var(--line);background:var(--panel2)}.ct-todo-cel{min-height:34px;padding:4px;display:flex;flex-direction:column;gap:3px;border-left:1px solid var(--line)}.ct-todo-vazio{min-height:34px}.ct-rolo{max-height:58vh;overflow-y:auto;position:relative}.ct-horas{display:flex;flex-direction:column}.ct-hora{height:var(--ct-h);flex:none;font:10px var(--mono);color:var(--muted);text-align:right;padding-right:7px;transform:translateY(-6px)}.ct-cols{grid-column:2/-1;display:grid;grid-template-columns:repeat(var(--ct-cols),minmax(0,1fr))}.ct-col{position:relative;height:calc(var(--ct-n) * var(--ct-h));border-left:1px solid var(--line);background:repeating-linear-gradient(to bottom,transparent 0,transparent calc(var(--ct-h) - 1px),var(--line) calc(var(--ct-h) - 1px),var(--line) var(--ct-h))}.ct-col.hoje{background-color:color-mix(in srgb,var(--accent) 5%,transparent)}.ct-ev{position:absolute;border-radius:6px;background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);padding:2px 6px;font-size:11px;line-height:1.25;overflow:hidden;cursor:pointer;box-sizing:border-box}.ct-ev:hover{border-color:var(--accent)}.ct-ev b{display:block;font-weight:700}.ct-ev.curto{display:flex;gap:5px;align-items:baseline;padding-top:1px}.ct-ev.curto b{display:inline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ct-ev.curto small{flex:none}.ct-ev small{color:var(--muted)}.ct-ev.c{border-left-color:var(--ok);opacity:.62}.ct-ev.p{border-left-color:var(--bad)}.ct-agora{position:absolute;left:0;right:0;border-top:2px solid var(--accent);z-index:3;pointer-events:none}.ct-agora::before{content:"";position:absolute;left:-4px;top:-5px;width:8px;height:8px;border-radius:50%;background:var(--accent)}.ct-vazio{padding:16px 12px;color:var(--muted);font-size:12px}@media(max-width:700px){#CAL-TEMPO{--ct-canal:42px;--ct-h:40px}.ct-cab-num{font-size:16px}.ct-ev{font-size:10px;padding:1px 4px}}@media(max-width:700px){.cal-grade{gap:3px}.cal-dia{min-height:72px;padding:4px}.cal-item{font-size:10px}}.task-check{display:none}body.sel-on .task-check{display:inline-block}.ficha{border:1px solid var(--line);border-radius:9px;padding:10px;margin:10px 0;display:grid;gap:7px}.ficha-linha{display:flex;justify-content:space-between;gap:14px;font-size:12px;line-height:1.4}.ficha-linha span{color:var(--muted);flex:none}.ficha-linha b{text-align:right;overflow-wrap:anywhere}.checklist{max-height:132px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;margin:6px 0 12px;display:grid;gap:6px}.checklist label{display:flex;gap:8px;align-items:center;font-size:12px;cursor:pointer}.checklist input{width:auto;margin:0;accent-color:var(--accent)}.link-btn{border:0;background:none;color:var(--muted);text-decoration:underline;cursor:pointer;font:inherit;padding:0}.link-btn:hover{color:var(--accent)}.modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;padding:15px;z-index:9}.modal.show{display:flex}.dialog{width:min(700px,100%);max-height:90vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}.row{display:flex;justify-content:space-between;align-items:center;gap:10px}.close{border:0;background:none;color:var(--muted);font-size:22px;cursor:pointer}input,textarea,select{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;margin:6px 0 12px;font:inherit}textarea{resize:vertical}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.comment{border-bottom:1px solid var(--line);padding:9px 0}.actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.info{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px;margin:10px 0;line-height:1.55}.descricao{white-space:pre-line;margin:10px 0;padding:11px;border-left:3px solid var(--accent);background:rgba(184,255,60,.06);line-height:1.5}.descricao b{display:block;margin-bottom:5px}.anexos{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0}.anexos a{color:var(--accent);font-size:12px}.anexo-item{display:inline-flex;align-items:center;gap:0}.anexo-item .btn{border-top-right-radius:0;border-bottom-right-radius:0}.anexo-x{border-left:0;border-top-left-radius:0;border-bottom-left-radius:0;padding:9px 10px;font-weight:900}.anexo-nome{border:1px solid var(--line);border-right:0;border-radius:8px 0 0 8px;padding:9px 12px;font-size:12px;background:var(--panel2)}.link-ticket{color:var(--accent);font-weight:700;text-decoration:none;border-bottom:1px dotted var(--accent)}.link-ticket:hover{border-bottom-style:solid}.drop{border:1px dashed var(--line);border-radius:8px;padding:10px;color:var(--muted);font-size:12px;margin:10px 0;cursor:pointer}@media(max-width:1180px){.filters{grid-template-columns:repeat(3,minmax(0,1fr))}.filter-dates{grid-column:span 2}.summary{border-left:0;border-top:1px solid var(--line);padding:9px 0 0}}@media(max-width:700px){main{padding:18px 12px}.grid2{grid-template-columns:1fr}.filters{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.filter-dates{grid-column:1/-1}.summary{grid-column:1/-1;width:100%}}@media(max-width:390px){.filters{grid-template-columns:1fr}.filter-dates{grid-template-columns:repeat(2,minmax(0,1fr));min-width:0}}
   </style>
 </head>
 <body>
@@ -24,14 +24,26 @@
     </div>
     <div id="CAL" hidden>
       <div class="cal-topo">
-        <button type="button" class="btn" onclick="mudarMes(-1)" aria-label="Mês anterior">‹</button>
+        <button type="button" class="btn" onclick="mudarPeriodo(-1)" aria-label="Período anterior">‹</button>
         <span id="CAL-MES" class="cal-mes"></span>
-        <button type="button" class="btn" onclick="mudarMes(1)" aria-label="Próximo mês">›</button>
-        <button type="button" class="btn" onclick="mudarMes(0)">Hoje</button>
+        <button type="button" class="btn" onclick="mudarPeriodo(1)" aria-label="Próximo período">›</button>
+        <button type="button" class="btn" onclick="mudarPeriodo(0)">Hoje</button>
+        <span class="visao" role="group" aria-label="Ver por">
+          <button type="button" class="visao-btn" id="CM-dia" onclick="verModoCal('dia')">Dia</button>
+          <button type="button" class="visao-btn" id="CM-semana" onclick="verModoCal('semana')">Semana</button>
+          <button type="button" class="visao-btn" id="CM-mes" onclick="verModoCal('mes')">Mês</button>
+        </span>
         <span id="CAL-RESUMO" class="meta"></span>
       </div>
-      <div class="cal-grade" id="CAL-CAB"></div>
-      <div class="cal-grade" id="CAL-GRADE"></div>
+      <div id="CAL-MES-BOX">
+        <div class="cal-grade" id="CAL-CAB"></div>
+        <div class="cal-grade" id="CAL-GRADE"></div>
+      </div>
+      <div id="CAL-TEMPO" hidden>
+        <div class="ct-cab" id="CT-CAB"></div>
+        <div class="ct-todo" id="CT-TODO"></div>
+        <div class="ct-rolo" id="CT-ROLO"><div class="ct-horas" id="CT-HORAS"></div><div class="ct-cols" id="CT-COLS"></div></div>
+      </div>
       <div class="cal-sem" id="CAL-SEM" hidden><h3>Sem previsão <span id="CAL-SEM-N" class="count"></span></h3><div class="cal-sem-lista" id="CAL-SEM-LISTA"></div></div>
     </div>
   </main>
@@ -69,7 +81,15 @@ function aoMudarData(){presetAtivo=null;document.querySelectorAll('#PRESETS .pre
 function aoMudarGrupo(){montarUnidades();render()}
 function limparFiltros(){$('F-SIT').value='abertas';$('F-GRUPO').value='';$('F-TIPO').value='';$('F-BUSCA').value='';$('BUSCA').classList.remove('tem-texto');montarUnidades();aplicarPreset('tudo')}
 function montarUnidades(){const g=$('F-GRUPO').value,atual=$('F-UNI').value;const lista=((CTX.unidades)||[]).filter(u=>!g||u.grupo===g);$('F-UNI').innerHTML='<option value="">Todas</option><option value="__pessoal">Tarefa pessoal (sem unidade)</option>'+lista.map(u=>`<option value="${e(u.codigo)}">${e(u.nome)}</option>`).join('');$('F-UNI').value=lista.some(u=>u.codigo===atual)||atual==='__pessoal'?atual:''}
-function passaSituacao(t){const v=$('F-SIT').value;if(v==='abertas')return t.status!=='CONCLUIDA';if(v==='pendentes')return faixa(t)==='P';if(v==='concluidas')return t.status==='CONCLUIDA';return true}
+// A coluna "Concluídas" existia, mas o filtro padrão ("Em aberto") a esvaziava:
+// concluir fazia a tarefa SUMIR da tela em vez de mudar de coluna, e não havia
+// como saber se tinha dado certo. Quem foi concluída HOJE continua à vista - é
+// a confirmação - e sai sozinha amanhã, sem a coluna crescer para sempre.
+// concluidaEm é UTC; o dia tem de ser lido no fuso de Brasília, senão tudo que
+// for concluído depois das 21h cai no dia seguinte e some na hora.
+const diaBR=ts=>{try{return new Intl.DateTimeFormat('en-CA',{timeZone:FUSO_BR,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(ts))}catch(e){return String(ts||'').slice(0,10)}};
+function concluidaHoje(t){return t.status==='CONCLUIDA'&&!!t.concluidaEm&&diaBR(t.concluidaEm)===hoje()}
+function passaSituacao(t){const v=$('F-SIT').value;if(v==='abertas')return t.status!=='CONCLUIDA'||concluidaHoje(t);if(v==='pendentes')return faixa(t)==='P';if(v==='concluidas')return t.status==='CONCLUIDA';return true}
 // tipo do ticket que gerou a tarefa (ver TIPO_TICKET) - tarefa avulsa nao tem
 const tipoDaTarefa=t=>String((t.vinculo&&(t.vinculo.ticketTipo||t.vinculo.tipo))||'');
 function passaTipo(t){const v=$('F-TIPO').value;if(!v)return true;if(v==='__ocorrencia')return !!t.ehOcorrencia;if(v==='__sem')return !t.vinculo;return tipoDaTarefa(t)===v}
@@ -141,9 +161,17 @@ function porHora(a,b){const ha=a.horaInicio||'',hb=b.horaInicio||'';if(ha&&hb)re
 // também o dia da reunião. Quem não tem previsão não some - vai para a faixa
 // "Sem previsão" embaixo, senão o calendário esconderia tarefa de verdade.
 let VISAO='quadro';
-let MES_REF=null;   // {a, m} - null = mês de hoje
+// Três recortes do mesmo calendário. Mês é a visão geral; Semana e Dia usam
+// grade de horas, porque REUNIÃO tem hora de verdade. Tarefa comum não tem
+// hora nenhuma - ela vai na faixa "o dia todo", em cima. Espalhar tarefa por
+// horário inventado encheria a grade de um dado que o sistema não produz.
+let CAL_MODO='mes';
+let REF=null;       // 'YYYY-MM-DD' âncora do período; null = hoje
+let ULTIMO_ROLO=''; // só rola até o "agora" quando o período muda, não a cada
+                    // redesenho de 60s - senão a tela pula sozinha na mão
 const DIAS_SEMANA=['dom','seg','ter','qua','qui','sex','sáb'];
 const CLASSE_FAIXA={P:'p',H:'h',A:'a',C:'c',R:'a',F:'',U:''};
+const HORA_MIN_PADRAO=7,HORA_MAX_PADRAO=20;
 
 function verVisao(v){
   VISAO=v;
@@ -154,16 +182,50 @@ function verVisao(v){
   try{localStorage.setItem('meuDiaVisao',v)}catch(e){}
   render();
 }
-function mudarMes(passo){
-  if(passo===0){MES_REF=null;return render()}
-  const base=MES_REF||mesDeHoje();
-  const d=new Date(base.a,base.m+passo,1);
-  MES_REF={a:d.getFullYear(),m:d.getMonth()};
+function verModoCal(m){
+  CAL_MODO=m;ULTIMO_ROLO='';
+  ['dia','semana','mes'].forEach(k=>$('CM-'+k).classList.toggle('active',k===m));
+  try{localStorage.setItem('meuDiaCalModo',m)}catch(e){}
   render();
 }
-function mesDeHoje(){const h=hoje().split('-');return {a:Number(h[0]),m:Number(h[1])-1}}
 const iso2=n=>String(n).padStart(2,'0');
 const chaveDia=(a,m,d)=>`${a}-${iso2(m+1)}-${iso2(d)}`;
+const dataDe=txt=>{const p=String(txt).split('-');return new Date(Number(p[0]),Number(p[1])-1,Number(p[2]))};
+const isoDe=d=>chaveDia(d.getFullYear(),d.getMonth(),d.getDate());
+const refDia=()=>REF||hoje();
+
+// ‹ › andam um mês, uma semana ou um dia - o que estiver na tela
+function mudarPeriodo(passo){
+  if(passo===0){REF=null;ULTIMO_ROLO='';return render()}
+  const d=dataDe(refDia());
+  // no mês a âncora vai pro dia 1: somar mês a partir do dia 31 pularia
+  // fevereiro inteiro
+  if(CAL_MODO==='mes')REF=isoDe(new Date(d.getFullYear(),d.getMonth()+passo,1));
+  else REF=isoDe(new Date(d.getFullYear(),d.getMonth(),d.getDate()+(CAL_MODO==='semana'?7*passo:passo)));
+  ULTIMO_ROLO='';
+  render();
+}
+
+// os dias que o período cobre, em ordem
+function diasDoPeriodo(){
+  const d=dataDe(refDia());
+  if(CAL_MODO==='dia')return [isoDe(d)];
+  const ini=new Date(d.getFullYear(),d.getMonth(),d.getDate()-d.getDay());
+  return Array.from({length:7},(_,i)=>isoDe(new Date(ini.getFullYear(),ini.getMonth(),ini.getDate()+i)));
+}
+const maiuscula=t=>t.charAt(0).toUpperCase()+t.slice(1);
+function tituloDoPeriodo(){
+  const d=dataDe(refDia());
+  if(CAL_MODO==='mes')return maiuscula(d.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}));
+  if(CAL_MODO==='dia')return maiuscula(d.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'}));
+  const dias=diasDoPeriodo(),a=dataDe(dias[0]),b=dataDe(dias[6]);
+  const mesmoMes=a.getMonth()===b.getMonth();
+  const fim=b.toLocaleDateString('pt-BR',{day:'numeric',month:'long',year:'numeric'});
+  return `${a.getDate()}${mesmoMes?'':' de '+a.toLocaleDateString('pt-BR',{month:'short'}).replace('.','')} – ${fim}`;
+}
+
+const minutosDe=h=>{const m=/^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(h||''));return m?Number(m[1])*60+Number(m[2]):null};
+const temHora=t=>t.ehReuniao&&minutosDe(t.horaInicio)!==null;
 
 function itemCal(t){
   const cls=CLASSE_FAIXA[faixa(t)]||'';
@@ -173,11 +235,9 @@ function itemCal(t){
 }
 
 function pintarCalendario(vis){
-  const ref=MES_REF||mesDeHoje();
-  const primeiro=new Date(ref.a,ref.m,1);
-  const nome=primeiro.toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
-  $('CAL-MES').textContent=nome.charAt(0).toUpperCase()+nome.slice(1);
-  $('CAL-CAB').innerHTML=DIAS_SEMANA.map(d=>`<div class="cal-cab">${d}</div>`).join('');
+  $('CAL-MES').textContent=tituloDoPeriodo();
+  $('CAL-MES-BOX').hidden=CAL_MODO!=='mes';
+  $('CAL-TEMPO').hidden=CAL_MODO==='mes';
 
   // agrupa por dia de PREVISÃO; sem previsão vai pra faixa de baixo
   const porDia=new Map(); const semData=[];
@@ -189,13 +249,28 @@ function pintarCalendario(vis){
   });
   porDia.forEach(l=>l.sort(porHora));
 
+  const noPeriodo=CAL_MODO==='mes'?pintarMes(porDia):pintarTempo(porDia);
+  const rotulo=CAL_MODO==='mes'?'no mês':(CAL_MODO==='semana'?'na semana':'no dia');
+  $('CAL-RESUMO').textContent=`${noPeriodo} ${rotulo} · ${semData.length} sem previsão`;
+
+  semData.sort(porHora);
+  $('CAL-SEM').hidden=!semData.length;
+  $('CAL-SEM-N').textContent=semData.length?`(${semData.length})`:'';
+  $('CAL-SEM-LISTA').innerHTML=semData.slice(0,40).map(itemCal).join('');
+  ligarArrastarCal();
+}
+
+function pintarMes(porDia){
+  const d0=dataDe(refDia()),ano=d0.getFullYear(),mes=d0.getMonth();
+  $('CAL-CAB').innerHTML=DIAS_SEMANA.map(d=>`<div class="cal-cab">${d}</div>`).join('');
   // a grade começa no domingo da semana do dia 1 e fecha semanas inteiras
-  const inicio=new Date(ref.a,ref.m,1-primeiro.getDay());
+  const primeiro=new Date(ano,mes,1);
+  const inicio=new Date(ano,mes,1-primeiro.getDay());
   const hj=hoje(); const celulas=[]; let noMes=0;
   for(let i=0;i<42;i++){
     const d=new Date(inicio.getFullYear(),inicio.getMonth(),inicio.getDate()+i);
-    const chave=chaveDia(d.getFullYear(),d.getMonth(),d.getDate());
-    const fora=d.getMonth()!==ref.m;
+    const chave=isoDe(d);
+    const fora=d.getMonth()!==mes;
     const doDia=porDia.get(chave)||[];
     if(!fora)noMes+=doDia.length;
     const visiveis=doDia.slice(0,3);
@@ -205,16 +280,97 @@ function pintarCalendario(vis){
       +visiveis.map(itemCal).join('')
       +(resto>0?`<div class="cal-mais" onclick="verDia('${chave}')">+${resto} no dia</div>`:'')
       +`</div>`);
-    if(i>=34&&d.getMonth()!==ref.m&&d.getDay()===6)break;   // não desenha semana inteira fora do mês
+    if(i>=34&&d.getMonth()!==mes&&d.getDay()===6)break;   // não desenha semana inteira fora do mês
   }
   $('CAL-GRADE').innerHTML=celulas.join('');
-  $('CAL-RESUMO').textContent=`${noMes} no mês · ${semData.length} sem previsão`;
+  return noMes;
+}
 
-  semData.sort(porHora);
-  $('CAL-SEM').hidden=!semData.length;
-  $('CAL-SEM-N').textContent=semData.length?`(${semData.length})`:'';
-  $('CAL-SEM-LISTA').innerHTML=semData.slice(0,40).map(itemCal).join('');
-  ligarArrastarCal();
+// Reuniões que se sobrepõem dividem a largura da coluna, em vez de uma cobrir
+// a outra - duas reuniões às 14h são exatamente o caso que precisa ser visto.
+function empilhar(evs){
+  let grupo=[],fimGrupo=-1;
+  const fechar=()=>{grupo.forEach((ev,i)=>{ev.col=i;ev.de=grupo.length});grupo=[];fimGrupo=-1};
+  evs.forEach(ev=>{
+    if(grupo.length&&ev.ini>=fimGrupo)fechar();
+    grupo.push(ev);fimGrupo=Math.max(fimGrupo,ev.fim);
+  });
+  if(grupo.length)fechar();
+  return evs;
+}
+
+function pintarTempo(porDia){
+  const dias=diasDoPeriodo(),hj=hoje();
+  const box=$('CAL-TEMPO');
+  box.style.setProperty('--ct-cols',String(dias.length));
+
+  // a janela de horas cresce para caber reunião fora do horário comercial:
+  // reunião das 6h não pode ficar escondida acima do topo da grade
+  let hIni=HORA_MIN_PADRAO,hFim=HORA_MAX_PADRAO,total=0;
+  const porColuna=dias.map(dia=>{
+    const doDia=porDia.get(dia)||[];total+=doDia.length;
+    const comHora=[],semHora=[];
+    doDia.forEach(t=>{
+      if(!temHora(t))return semHora.push(t);
+      const ini=minutosDe(t.horaInicio),fim=ini+Math.max(15,Number(t.duracaoMin)||60);
+      hIni=Math.min(hIni,Math.floor(ini/60));hFim=Math.max(hFim,Math.ceil(fim/60));
+      comHora.push({t,ini,fim});
+    });
+    return {dia,comHora:empilhar(comHora.sort((a,b)=>a.ini-b.ini)),semHora};
+  });
+  hIni=Math.max(0,hIni);hFim=Math.min(24,Math.max(hFim,hIni+1));
+  const nHoras=hFim-hIni;
+  box.style.setProperty('--ct-n',String(nHoras));
+
+  $('CT-CAB').innerHTML='<div class="ct-canal">'+'h'+'</div>'
+    +dias.map(dia=>{const d=dataDe(dia);return `<div class="ct-cab-cel${dia===hj?' hoje':''}">`
+      +`<div class="ct-cab-dia">${DIAS_SEMANA[d.getDay()]}</div><div class="ct-cab-num">${d.getDate()}</div></div>`}).join('');
+
+  $('CT-TODO').innerHTML='<div class="ct-canal" title="tarefas sem hora marcada">dia todo</div>'
+    +porColuna.map(c=>`<div class="ct-todo-cel${c.semHora.length?'':' ct-todo-vazio'}" data-dia="${c.dia}">${c.semHora.map(itemCal).join('')}</div>`).join('');
+
+  $('CT-HORAS').innerHTML=Array.from({length:nHoras},(_,i)=>`<div class="ct-hora">${iso2(hIni+i)}:00</div>`).join('');
+
+  const alturaDe=min=>((min-hIni*60)/60)*100/nHoras;
+  $('CT-COLS').innerHTML=porColuna.map(c=>{
+    const evs=c.comHora.map(ev=>{
+      const topo=alturaDe(ev.ini),alt=Math.max(2.2,alturaDe(ev.fim)-topo);
+      const larg=100/ev.de,esq=larg*ev.col;
+      const cls=CLASSE_FAIXA[faixa(ev.t)]||'';
+      // bloco baixo não cabe título e hora empilhados: vira uma linha só
+      const curto=(ev.fim-ev.ini)<=35?' curto':'';
+      return `<div class="ct-ev ${cls}${curto}" draggable="true" data-id="${e(ev.t.id)}" onclick="openT('${e(ev.t.id)}')"`
+        +` title="${e(ev.t.horaInicio)} · ${e(tituloVisivel(ev.t))}"`
+        +` style="top:${topo.toFixed(3)}%;height:${alt.toFixed(3)}%;left:calc(${esq}% + 3px);width:calc(${larg}% - 6px)">`
+        +`<b>${e(tituloVisivel(ev.t))}</b><small>${e(ev.t.horaInicio)}${ev.t.duracaoMin?' · '+ev.t.duracaoMin+'min':''}</small></div>`;
+    }).join('');
+    const agora=c.dia===hj?linhaAgora(hIni,nHoras):'';
+    return `<div class="ct-col${c.dia===hj?' hoje':''}" data-dia="${c.dia}">${evs}${agora}</div>`;
+  }).join('');
+
+  rolarAteAgora(hIni,nHoras,dias);
+  return total;
+}
+
+function linhaAgora(hIni,nHoras){
+  const n=agoraBrasilia(),min=n.getHours()*60+n.getMinutes();
+  const pos=((min-hIni*60)/60)*100/nHoras;
+  if(pos<0||pos>100)return '';
+  return `<div class="ct-agora" style="top:${pos.toFixed(3)}%"></div>`;
+}
+// abre na altura do "agora" (ou no começo do expediente) só quando o período
+// muda - rolar de volta a cada atualização automática tiraria a tela da mão
+function rolarAteAgora(hIni,nHoras,dias){
+  const chave=CAL_MODO+'|'+dias[0]+'|'+nHoras;
+  if(ULTIMO_ROLO===chave)return;
+  ULTIMO_ROLO=chave;
+  const rolo=$('CT-ROLO');
+  requestAnimationFrame(()=>{
+    const n=agoraBrasilia();
+    const alvo=dias.indexOf(hoje())>=0?n.getHours()+n.getMinutes()/60:HORA_MIN_PADRAO;
+    const px=rolo.scrollHeight*((Math.max(hIni,alvo-1)-hIni)/nHoras);
+    rolo.scrollTop=Math.max(0,Math.min(px,rolo.scrollHeight-rolo.clientHeight));
+  });
 }
 
 // Abre o dia usando o filtro de período que JÁ existe - em vez de inventar uma
@@ -229,11 +385,11 @@ function verDia(dia){
 // Nada de rota nova: mover no calendário é a mesma edição do campo da ficha.
 let ARRASTANDO=null;
 function ligarArrastarCal(){
-  $('CAL').querySelectorAll('.cal-item').forEach(el=>{
+  $('CAL').querySelectorAll('.cal-item,.ct-ev').forEach(el=>{
     el.addEventListener('dragstart',ev=>{ARRASTANDO=el.dataset.id;ev.dataTransfer.effectAllowed='move'});
     el.addEventListener('dragend',()=>{ARRASTANDO=null;$('CAL').querySelectorAll('.alvo').forEach(c=>c.classList.remove('alvo'))});
   });
-  $('CAL').querySelectorAll('.cal-dia').forEach(cel=>{
+  $('CAL').querySelectorAll('[data-dia]').forEach(cel=>{
     cel.addEventListener('dragover',ev=>{if(!ARRASTANDO)return;ev.preventDefault();cel.classList.add('alvo')});
     cel.addEventListener('dragleave',()=>cel.classList.remove('alvo'));
     cel.addEventListener('drop',async ev=>{
@@ -327,7 +483,7 @@ async function coment(){const campo=$('TXT');if(!campo.value.trim())return;await
 async function verAnexo(i){const r=await fetch('/api/tarefas/'+O.id+'/anexos/'+i);if(!r.ok)throw Error('Não foi possível abrir o anexo.');const u=URL.createObjectURL(await r.blob());window.open(u,'_blank')}
 let MODO_SEL=false;
 function alternarSelecao(){MODO_SEL=!MODO_SEL;if(!MODO_SEL)S.clear();document.body.classList.toggle('sel-on',MODO_SEL);$('BULK').classList.toggle('show',MODO_SEL);$('SELMODE').classList.toggle('primary',MODO_SEL);$('SELMODE').textContent=MODO_SEL?'✕ Sair da seleção':'☑ Selecionar';$('SEL').textContent=S.size+' selecionada(s)';render()}
-function selecionar(id,marcado){marcado?S.add(id):S.delete(id);$('SEL').textContent=S.size+' selecionada(s)'}function limparSelecao(){S.clear();$('SEL').textContent='0 selecionada(s)';render()}async function lote(status){if(!S.size)return;let senha=null;if(status==='CONCLUIDA'){senha=await pedirSenha('Finalizar '+S.size+' tarefa(s) selecionada(s). Sua senha registra quem concluiu.');if(!senha)return}const r=await req('/api/tarefas/status-lote',{ids:[...S],status,password:senha},'PATCH');const falhas=r.resultado.filter(x=>!x.ok);S.clear();$('SEL').textContent='0 selecionada(s)';await load();if(falhas.length){const detalhes=falhas.map(x=>{const t=L.find(i=>i.id===x.id);return '• '+tituloVisivel(t||'Tarefa')+': '+(x.erro||'não foi possível alterar')}).join('\n');alert(falhas.length+' tarefa(s) não puderam ser alteradas:\n\n'+detalhes)}}
+function selecionar(id,marcado){marcado?S.add(id):S.delete(id);$('SEL').textContent=S.size+' selecionada(s)'}function limparSelecao(){S.clear();$('SEL').textContent='0 selecionada(s)';render()}async function lote(status){if(!S.size)return;let senha=null;if(status==='CONCLUIDA'){senha=await pedirSenha('Finalizar '+S.size+' tarefa(s) selecionada(s). Sua senha registra quem concluiu.');if(!senha)return}let r;try{r=await req('/api/tarefas/status-lote',{ids:[...S],status,password:senha},'PATCH')}catch(x){return alert(x.message)}const falhas=(r.resultado||[]).filter(x=>!x.ok);S.clear();$('SEL').textContent='0 selecionada(s)';await load();if(falhas.length){const detalhes=falhas.map(x=>{const t=L.find(i=>i.id===x.id);return '• '+tituloVisivel(t||'Tarefa')+': '+(x.erro||'não foi possível alterar')}).join('\n');alert(falhas.length+' tarefa(s) não puderam ser alteradas:\n\n'+detalhes)}}
 let PEND=[];const LIMITE_ANEXO=10*1024*1024;
 async function subirAnexo(id,file){const f=new FormData();f.append('anexo',file,file.name||'print.png');const r=await fetch('/api/tarefas/'+id+'/anexos',{method:'POST',body:f}),d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Não foi possível enviar o anexo.');return d}
 async function anexar(file){if(!O||!file)return;await subirAnexo(O.id,file);await load();openT(O.id)}
@@ -342,6 +498,9 @@ document.addEventListener('paste',ev=>{if(!$('M').classList.contains('show'))ret
 montarPresets();
 // a visão escolhida é preferência da PESSOA, não estado do sistema - fica no
 // navegador, como o tema e a aba lembrada da Central já fazem
+// o modo do calendário é lembrado junto com a visão: quem trabalha na Semana
+// não quer voltar pro Mês toda vez que abre o Meu Dia
+try{const m=localStorage.getItem('meuDiaCalModo');verModoCal(['dia','semana','mes'].indexOf(m)>=0?m:'mes')}catch(e){verModoCal('mes')}
 try{if(localStorage.getItem('meuDiaVisao')==='calendario')verVisao('calendario')}catch(e){}
 Promise.all([contexto(),load()]).then(()=>{
   // Link vindo do chat/Beniboy: abre o detalhe certo depois que a lista e o
