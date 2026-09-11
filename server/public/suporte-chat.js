@@ -33,6 +33,7 @@
   .szc-x{background:none;border:none;color:#7d8896;font-size:16px;cursor:pointer;padding:2px 6px;}
   .szc-x:hover{color:#e7ecf1;}
   .szc-corpo{padding:10px 12px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:5px;}
+  #szc-atend-thread{display:flex;flex-direction:column;gap:5px;}
   .szc-label{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:#7d8896;margin:2px 0 -4px;}
   .szc-input,.szc-textarea{width:100%;box-sizing:border-box;background:#181d24;border:1px solid #232a33;color:#e7ecf1;
     border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;}

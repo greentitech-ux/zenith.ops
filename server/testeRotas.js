@@ -7005,7 +7005,7 @@ setTimeout(async () => {
         && sInt.includes('GetFolderPath("MyPictures")') && sInt.includes('Get-Date -Format "yyyy-MM"')
         && sInt.includes('Selecionar-AreaPrint') && sInt.includes('alças redimensionam')
         && sInt.includes('$s.Tag.inicio') && sInt.includes('$form.Opacity = 1.0') && sInt.includes('$e.Graphics.DrawImageUnscaled($s.Tag.captura, 0, 0)')
-        && sInt.includes('Cursor-AreaPrint') && sInt.includes('Modo-AreaPrint') && sInt.includes('SizeNWSE') && sInt.includes('Botao-Print "Salvar"')
+        && sInt.includes('Cursor-AreaPrint') && sInt.includes('Modo-AreaPrint') && sInt.includes('SizeNWSE') && sInt.includes('$salvar = Botao-Print')
         && sInt.includes('$superficie.Add_MouseDown') && sInt.includes('$superficie.Add_MouseMove')
         && sInt.includes('configuracao-agente') && htmlNoc.includes('novo-comp-nopulso-print'),
     };
@@ -15909,9 +15909,9 @@ setTimeout(async () => {
       'arrastar por dentro continua movendo a seleção': /return "mover"/.test(psI),
       // a barra virou Seta/Linha/Caixa + Copiar + Salvar + X: "Cancelar" escrito
       // deu lugar ao X, e os botoes passaram a nascer do helper Botao-Print
-      'a barra tem as 3 ferramentas, Copiar, Salvar e o X': /Botao-Print "Copiar" 92/.test(psI)
-        && /Botao-Print "Salvar" 92/.test(psI) && /Botao-Print "X" 32/.test(psI)
-        && /AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$btAfinar,\$btEngrossar,\$btCor,\$copiar,\$salvar,\$fechar\)\)/.test(psI)
+      'a barra tem as 3 ferramentas, Copiar, Salvar e o X': /\$copiar = Botao-Print \$\(if \(\$TemIcones\)/.test(psI)
+        && /\$salvar = Botao-Print \$\(if \(\$TemIcones\)/.test(psI) && /\$fechar = Botao-Print \$\(if \(\$TemIcones\) \{ \[char\]0xE711 \} else \{ "X" \}\) 30/.test(psI)
+        && /AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$fio1,\$btAfinar,\$lblGrossura,\$btEngrossar,\$btCor,\$fio2,\$copiar,\$salvar,\$fio3,\$fechar\)\)/.test(psI)
         && !/\$cancelar/.test(psI),
       'Copiar NÃO grava arquivo; só Salvar grava': copiaSemGravar,
       'sem arquivo não entra lista de arquivo na área de transferência': dropListGuardada,
@@ -15920,7 +15920,7 @@ setTimeout(async () => {
       'a seleção devolve a área, a ação E as marcas': /return @\{ area = \$resultado; acao = \$acaoPrint; marcas = \$marcasPrint \}/.test(psI),
       'a tela de instruções cita as alças, as marcas e o desfazer': /alças redimensionam/.test(psI)
         && /Seta\/Linha\/Caixa marcam por cima/.test(psI) && /Ctrl\+Z desfaz/.test(psI) && /Ctrl\+C só copia/.test(psI),
-      'vale nos DOIS tipos de máquina, não só no interno': /Botao-Print "Copiar" 92/.test(psA) && alcas(psA).total === 8,
+      'vale nos DOIS tipos de máquina, não só no interno': /\$copiar = Botao-Print \$\(if \(\$TemIcones\)/.test(psA) && alcas(psA).total === 8,
       'o script baixado continua começando com # NOCZenith (trava contra arquivo quebrado)': psI.startsWith('# NOCZenith'),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
@@ -16290,11 +16290,11 @@ setTimeout(async () => {
 
     const conf = {
       'VERSAO_VIGIA subiu (sem isso a marcação não chega nas 52 máquinas)': vgM.VERSAO_VIGIA >= 40,
-      'as 3 ferramentas existem na barra, agora como ÍCONES (não mais texto)': /Botao-Print \(\[char\]0x2196\) 52/.test(psI)
-        && /Botao-Print \(\[char\]0x2571\) 52/.test(psI) && /Botao-Print \(\[char\]0x25AD\) 52/.test(psI)
+      'as 3 ferramentas existem na barra, agora como ÍCONES (não mais texto)': /Botao-Print \(\[char\]0x2196\) 30/.test(psI)
+        && /Botao-Print \(\[char\]0x2571\) 30/.test(psI) && /Botao-Print \(\[char\]0x25AD\) 30/.test(psI)
         && !/Botao-Print "Seta"/.test(psI),
-      'a ferramenta ativa fica destacada (Gold) e as inativas num tom neutro escuro - só uma acende': /\$par\[0\]\.BackColor = \[System\.Drawing\.Color\]::Gold; \$par\[0\]\.ForeColor = \[System\.Drawing\.Color\]::Black/.test(psI)
-        && /\$par\[0\]\.BackColor = \[System\.Drawing\.Color\]::FromArgb\(70, 78, 90\)/.test(psI)
+      'a ferramenta ativa acende no limão da marca e as inativas somem no fundo - só uma acende': /\$par\[0\]\.BackColor = \[System\.Drawing\.Color\]::FromArgb\(184, 255, 60\); \$par\[0\]\.ForeColor = \[System\.Drawing\.Color\]::FromArgb\(11, 13, 16\)/.test(psI)
+        && /\$par\[0\]\.BackColor = \[System\.Drawing\.Color\]::FromArgb\(18, 22, 28\)/.test(psI)
         && /& \$form\.Tag\.pintarFerramenta \$form/.test(psI)
         && !/UseVisualStyleBackColor/.test(psI),
       // o Master pediu "tudo menos texto" - se aparecer ferramenta de texto, foi engano
@@ -16326,7 +16326,7 @@ setTimeout(async () => {
         && /\$rx = \[Math\]::Min\(\$x1, \$x2\); \$ry = \[Math\]::Min\(\$y1, \$y2\)/.test(psI),
       'caixa de tamanho zero não vira desenho degenerado': /if \(\$rw -gt 0 -and \$rh -gt 0\) \{ \$g\.DrawRectangle/.test(psI),
       'o X fecha sem salvar': /\$fechar\.Add_Click\(\{param\(\$botao,\$e\);\$janela=\$botao\.Parent\.Parent;\$janela\.Tag\.resultado=\$null;\$janela\.Hide\(\);\$janela\.Close\(\)\}\)/.test(psI),
-      'vale nos DOIS tipos de máquina': /Botao-Print \(\[char\]0x2196\) 52/.test(psA) && /function Desenhar-Marcas/.test(psA),
+      'vale nos DOIS tipos de máquina': /Botao-Print \(\[char\]0x2196\) 30/.test(psA) && /function Desenhar-Marcas/.test(psA),
       'o script continua começando com # NOCZenith': psI.startsWith('# NOCZenith'),
       // ---- v41: a barra ESTAVA escondida atrás da superfície Dock=Fill (z-order),
       // por isso "não aparecia"; e agora cola na seleção como no Lightshot ----
@@ -16351,7 +16351,7 @@ setTimeout(async () => {
         && /\$caneta = New-Object System\.Drawing\.Pen\(\$corDaMarca, \$grossuraDaMarca\)/.test(psI)
         && !/New-Object System\.Drawing\.Pen\(\[System\.Drawing\.Color\]::Red, 3\)/.test(psI),
       'afinar e engrossar clampam (1..12) e a barra tem os botões - / + / Cor':
-        /Botao-Print "-" 30/.test(psI) && /Botao-Print "\+" 30/.test(psI) && /Botao-Print "Cor" 44/.test(psI)
+        /Botao-Print \(\[char\]0x2212\) 26/.test(psI) && /Botao-Print "\+" 26/.test(psI) && /\$btCor = Botao-Print "" 26/.test(psI)
         && /\$j\.Tag\.grossuraMarca = \[Math\]::Max\(1, \[int\]\$j\.Tag\.grossuraMarca - 1\)/.test(psI)
         && /\$j\.Tag\.grossuraMarca = \[Math\]::Min\(12, \[int\]\$j\.Tag\.grossuraMarca \+ 1\)/.test(psI),
       'o botão Cor abre o seletor e guarda a cor pros próximos traços':
@@ -16686,6 +16686,13 @@ setTimeout(async () => {
         /\.szc-msg\{max-width:85%/.test(css)
         && /\.szc-msg\.visitante\{align-self:flex-end/.test(css)
         && /\.szc-msg\.suporte\{align-self:flex-start/.test(css),
+      // No atendimento as mensagens ficam dentro de #szc-atend-thread. Ele era
+      // um DIV comum: align-self e gap NÃO valem dentro de um bloco, então tudo
+      // encostava na esquerda ocupando a linha inteira, sem respiro - 2 ou 3
+      // falas já pediam rolagem. Precisa do mesmo flex do corpo.
+      'no atendimento também: um de cada lado, e não uma pilha coladas':
+        /#szc-atend-thread\{display:flex;flex-direction:column;gap:5px;\}/.test(w)
+        && /<div id="szc-atend-thread">\$\{montarThreadHtml\(chat\)\}<\/div>/.test(w),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okBalaoChat = !falhas.length;
@@ -16788,6 +16795,67 @@ setTimeout(async () => {
   } catch (e) { okChatMaquina = false; console.log('  erro: ' + e.message); }
   if (!okChatMaquina) ruins += 1;
   console.log(`${okChatMaquina ? '✓' : '✗'} Chat da máquina: a fala fica embaixo do nome, do mesmo lado`);
+
+  // Barra de marcação do NoPulsoPrint no estilo Lightshot: só ícone, botão
+  // quadrado sem relevo nem borda, grupos separados por um fio, e a ferramenta
+  // ativa acendendo no limão da marca (antes era Gold - não é cor do NoPulso e
+  // ficava parecida com o cinza do inativo).
+  let okBarraPrint = false;
+  try {
+    const v = require(__dirname + '/vigiaScript.js');
+    const ps = v.montarScriptVigia({ codigo: '19821', posto: 'principal', tipo: 'interno', agentToken: 'a'.repeat(32) });
+    const barra = (ps.match(/# Barra de marcacao no estilo Lightshot[\s\S]*?Controls\.AddRange/) || [''])[0];
+
+    const conf = {
+      'a barra existe e é montada de uma vez só': barra.length > 1500
+        && /\$acoes\.Controls\.AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$fio1,\$btAfinar,\$lblGrossura,\$btEngrossar,\$btCor,\$fio2,\$copiar,\$salvar,\$fio3,\$fechar\)\)/.test(ps),
+      'botão plano, sem borda e sem o cinza do Windows':
+        /\$b\.FlatStyle = \[System\.Windows\.Forms\.FlatStyle\]::Flat/.test(barra)
+        && /\$b\.FlatAppearance\.BorderSize = 0/.test(barra)
+        && /\$b\.BackColor = \$script:CorBarra/.test(barra),
+      'o fundo da barra é o mesmo dos botões (senão o "sem borda" apareceria)':
+        /\$acoes\.BackColor=\[System\.Drawing\.Color\]::FromArgb\(18,22,28\)/.test(ps)
+        && /\$script:CorBarra = \[System\.Drawing\.Color\]::FromArgb\(18, 22, 28\)/.test(barra),
+      'três grupos separados por fio: ferramenta · traço · ação':
+        (barra.match(/Fio-Print/g) || []).length >= 4,
+      // Gold não é cor do NoPulso e ficava parecida com o cinza do inativo
+      'a ferramenta ativa acende no limão da marca, e só uma por vez':
+        /pintarFerramenta[\s\S]{0,400}FromArgb\(184, 255, 60\)[\s\S]{0,120}FromArgb\(11, 13, 16\)/.test(ps)
+        && !/::Gold/.test(ps),
+      'a cor do traço é a PRÓPRIA cor no botão, sem a palavra "Cor"':
+        /\$btCor = Botao-Print "" 26/.test(barra)
+        && /\$btCor\.BackColor = \$form\.Tag\.corMarca/.test(barra),
+      // antes apertava-se +/- sem saber em quanto a espessura estava
+      'a espessura aparece em número, e o número acompanha o +/-':
+        /\$lblGrossura\.Text = \[string\]\$form\.Tag\.grossuraMarca/.test(barra)
+        && (ps.match(/\$j\.Tag\.lblGrossura\.Text = \[string\]\$j\.Tag\.grossuraMarca/g) || []).length === 2,
+      // botão com quadradinho vazio seria pior que a palavra
+      'ícone do Windows 10 com volta pra texto se a fonte não existir':
+        /New-Object System\.Drawing\.FontFamily\("Segoe MDL2 Assets"\)/.test(barra)
+        && /if \(\$TemIcones\) \{ \[char\]0xE8C8 \} else \{ "Copiar" \}/.test(barra)
+        && /if \(\$TemIcones\) \{ \[char\]0xE74E \} else \{ "Salvar" \}/.test(barra),
+      'Salvar é a única ação no acento (é a principal)':
+        /\$salvar\.BackColor = \[System\.Drawing\.Color\]::FromArgb\(184, 255, 60\)/.test(barra)
+        && !/\$copiar\.BackColor/.test(barra),
+      'todo botão tem dica ao passar o mouse': /\$script:DicasBarra\.SetToolTip\(\$b, \$dica\)/.test(barra),
+      // Botao-Print e Fio-Print são definidas DENTRO de Selecionar-AreaPrint:
+      // sem $script: o cursor de posição seria local e TODO botão cairia em x=0
+      'o cursor de posição é compartilhado pelas duas funções aninhadas':
+        /\$script:px = 6/.test(barra)
+        && /\$b\.Location = New-Object System\.Drawing\.Point\(\$script:px, 5\)/.test(barra)
+        && /\$script:px \+= \$largura \+ 2/.test(barra)
+        && !/(?<!script:)\$px\b/.test(barra),
+      'a barra encolhe/cresce com o que coube nela (nada de largura fixa)':
+        /\$acoes\.Size = New-Object System\.Drawing\.Size\(\(\$script:px \+ 4\), 40\)/.test(barra),
+      'a versão subiu junto (sem isso nenhuma das 52 máquinas baixa o novo)':
+        v.VERSAO_VIGIA >= 48 && ps.includes('$VersaoScript = ' + v.VERSAO_VIGIA + '\n'),
+    };
+    const falhas = Object.entries(conf).filter(([, v2]) => !v2).map(([n]) => n);
+    okBarraPrint = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okBarraPrint = false; console.log('  erro: ' + e.message); }
+  if (!okBarraPrint) ruins += 1;
+  console.log(`${okBarraPrint ? '✓' : '✗'} NoPulsoPrint: barra de marcação limpa, só ícone, no estilo Lightshot`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
