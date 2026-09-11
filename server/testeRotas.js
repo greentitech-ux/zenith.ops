@@ -16310,6 +16310,58 @@ setTimeout(async () => {
   if (!okCalendario) ruins += 1;
   console.log(`${okCalendario ? '✓' : '✗'} Meu Dia: painel calendário por previsão, sem leitura nova e sem rota nova`);
 
+  // Barra de rolagem igual em todas as telas. O padrão do Chrome é larga,
+  // clara e com setas nas pontas - sobre o fundo escuro vira uma faixa branca.
+  // O desenho do Meu Dia (fina, arredondada, invisível até o mouse entrar)
+  // virou o padrão, e mora no tema.js pela mesma razão do Beniboy: cópia por
+  // página diverge - já houve três desenhos diferentes soltos ao mesmo tempo.
+  let okBarras = false;
+  try {
+    const fs = require('fs');
+    const tema = fs.readFileSync(__dirname + '/public/tema.js', 'utf8');
+    const bloco = (tema.match(/var barras = document\.createElement\('style'\);[\s\S]*?document\.head\.appendChild\(barras\);/) || [''])[0];
+
+    // qualquer outro arquivo servido que volte a declarar barra por conta própria
+    const outros = fs.readdirSync(__dirname + '/public')
+      .filter((f) => (f.endsWith('.html') || f.endsWith('.js')) && f !== 'tema.js')
+      .filter((f) => /scrollbar-width|scrollbar-color|::-webkit-scrollbar/.test(fs.readFileSync(__dirname + '/public/' + f, 'utf8')));
+
+    const conf = {
+      'o desenho existe e sai de um lugar só': bloco.length > 300
+        && /barras\.id = 'zenith-barras'/.test(bloco),
+      'fina e invisível em repouso': /\*\{scrollbar-width:thin;scrollbar-color:transparent transparent;\}/.test(bloco)
+        && /::-webkit-scrollbar\{width:6px;height:6px;\}/.test(bloco)
+        && /::-webkit-scrollbar-thumb\{background:transparent;border-radius:999px;\}/.test(bloco),
+      // ter de acertar 6px invisíveis com o mouse seria pior que a barra branca
+      'aparece com o mouse no bloco inteiro, não só em cima da barra':
+        /\*:hover\{scrollbar-color:var\(--line[^)]*\) transparent;\}/.test(bloco)
+        && /:hover::-webkit-scrollbar-thumb\{background:var\(--line/.test(bloco),
+      'realça sob o dedo': /::-webkit-scrollbar-thumb:hover\{background:var\(--muted/.test(bloco),
+      'sem trilho e sem as setinhas das pontas': /::-webkit-scrollbar-track\{background:transparent;\}/.test(bloco)
+        && /::-webkit-scrollbar-button\{display:none;\}/.test(bloco),
+      // cor cravada aqui ficaria escura sobre branco em 59 telas de uma vez
+      'a cor vem do token, então o tema Claro troca junto':
+        !/#(?!27313b\b|8c99a7\b)[0-9a-f]{6}/i.test(bloco)
+        && (bloco.match(/var\(--(line|muted)/g) || []).length >= 3,
+      // no <head>, junto com o tema - dentro de um DOMContentLoaded a barra
+      // larga apareceria por um instante em cada troca de tela
+      'injetado já no <head>, sem esperar a página montar':
+        // no nível do arquivo, com a indentação do módulo - e nada de função
+        // ou listener entre montar o estilo e pendurá-lo: dentro de um
+        // DOMContentLoaded a barra larga piscaria a cada troca de tela
+        /\n  document\.head\.appendChild\(barras\);\n/.test(tema)
+        && !/function|addEventListener/.test(bloco.slice(bloco.indexOf(".join('"), bloco.indexOf('appendChild(barras)')))
+        && tema.indexOf('appendChild(barras)') < tema.indexOf('function montarControles'),
+      'nenhuma outra tela declara barra por conta própria (era isso que divergia)':
+        outros.length === 0 || `sobrou em: ${outros.join(', ')}`,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true).map(([n, v]) => (typeof v === 'string' ? `${n} (${v})` : n));
+    okBarras = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okBarras = false; console.log('  erro: ' + e.message); }
+  if (!okBarras) ruins += 1;
+  console.log(`${okBarras ? '✓' : '✗'} Barra de rolagem: o desenho do Meu Dia em todas as telas, de um arquivo só`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
