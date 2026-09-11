@@ -32,7 +32,7 @@
   .szc-head .szc-sub{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;color:#7d8896;margin-top:2px;}
   .szc-x{background:none;border:none;color:#7d8896;font-size:16px;cursor:pointer;padding:2px 6px;}
   .szc-x:hover{color:#e7ecf1;}
-  .szc-corpo{padding:12px 14px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px;}
+  .szc-corpo{padding:10px 12px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:5px;}
   .szc-label{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:#7d8896;margin:2px 0 -4px;}
   .szc-input,.szc-textarea{width:100%;box-sizing:border-box;background:#181d24;border:1px solid #232a33;color:#e7ecf1;
     border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;}
@@ -40,11 +40,11 @@
   .szc-textarea{resize:vertical;min-height:56px;}
   .szc-enviar{background:var(--accent,#b8ff3c);color:#0b0d10;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;}
   .szc-enviar:disabled{opacity:.5;cursor:default;}
-  .szc-msg{max-width:85%;padding:8px 10px;border-radius:10px;font-size:12.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word;}
+  .szc-msg{max-width:85%;padding:6px 9px;border-radius:9px;font-size:12.5px;line-height:1.4;white-space:pre-wrap;word-break:break-word;}
   .szc-msg.visitante{align-self:flex-end;background:#12303a;color:#cfeeff;border:1px solid rgba(184, 255, 60,.25);}
   .szc-msg.suporte{align-self:flex-start;background:#181d24;border:1px solid #232a33;}
   .szc-msg .szc-quem{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:#7d8896;display:block;}
-  .szc-msg .szc-quando{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;color:#5a6472;display:block;margin-bottom:4px;}
+  .szc-msg .szc-quando{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;color:#5a6472;display:block;margin-bottom:2px;}
   .szc-rodape{padding:10px 12px;border-top:1px solid #232a33;display:flex;gap:6px;}
   .szc-rodape .szc-input{flex:1;}
   .szc-aviso{font-size:11.5px;color:#7d8896;text-align:center;}
@@ -717,6 +717,14 @@
       const texto = input.value.trim();
       const arquivo = anexoInput.files[0];
       if (!texto && !arquivo) return;
+      // limpa JA - antes o campo so esvaziava no re-render de sucesso, e se o
+      // update ao vivo (que nao recria o input, de proposito) chegasse junto, a
+      // mensagem ia mas o texto ficava escrito na caixa. Limpar aqui resolve em
+      // qualquer caminho; a previa do anexo tambem sai.
+      input.value = '';
+      anexoInput.value = '';
+      const previaEl = corpo.querySelector('#szc-atend-previa');
+      if (previaEl) { previaEl.classList.remove('tem'); previaEl.innerHTML = ''; }
       const b = corpo.querySelector('#szc-atend-enviar');
       b.disabled = true;
       try {
@@ -1113,7 +1121,15 @@
       // a MESMA pessoa silenciou/atendeu em outro aparelho (celular x
       // computador) - as abas do mesmo navegador já foram avisadas na hora
       // pelo BroadcastChannel; este evento cobre o resto
-      es.addEventListener('alarme-silenciado', () => { pararAlarmeBeniboy(); });
+      es.addEventListener('alarme-silenciado', () => {
+        // cala TUDO desta pessoa nesta tela: o overlay do widget E a sirene da
+        // página de alarme cheia (alerta-beniboy.html), que registra o próprio
+        // parador no ZenithAlarmeSync. Antes só o overlay do widget parava, e a
+        // sirene da tela de alarme continuava tocando quando o silêncio vinha
+        // de outro aparelho.
+        pararAlarmeBeniboy();
+        if (window.ZenithAlarmeSync && window.ZenithAlarmeSync.aplicarSilencioRemoto) window.ZenithAlarmeSync.aplicarSilencioRemoto();
+      });
       es.addEventListener('pedido-status-mudou', (e) => { mostrarPopupPedido(JSON.parse(e.data)); });
       // chegou mensagem direta: recarrega as conversas (o texto de verdade
       // esta gravado, o evento e so o gatilho) e mostra o convite pra abrir

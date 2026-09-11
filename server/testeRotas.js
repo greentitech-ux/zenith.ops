@@ -4404,6 +4404,10 @@ setTimeout(async () => {
     const msgs = final.mensagens;
 
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'beniboy.html'), 'utf8');
+    const widgetSrc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'suporte-chat.js'), 'utf8');
+    const alarmeSync = require('fs').readFileSync(require('path').join(__dirname, 'public', 'alarme-sync.js'), 'utf8');
+    const alertaHtml = require('fs').readFileSync(require('path').join(__dirname, 'public', 'alerta-beniboy.html'), 'utf8');
+    const fonteIdx = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
     const conferencias = {
       'apresentação com saudação + nome + Suporte':
         /^(Bom dia|Boa tarde|Boa noite|Boa madrugada), Letícia! O Suporte assumiu seu atendimento e acompanhará sua solicitação\.$/.test(m1.texto)
@@ -4425,6 +4429,39 @@ setTimeout(async () => {
       'chat gera tarefa com o mesmo protocolo, sem criar outro Ticket #': tarefaResp.status === 200 && tarefaChat.tarefa?.numeroTicket === chatNovo.numeroTicket && tarefaChat.tarefa?.origemChatId === chatNovo.id,
       'repetir a ação devolve a tarefa vinculada': tarefaRepetidaResp.status === 200 && tarefaRepetida.existente === true && tarefaRepetida.tarefa?.id === tarefaChat.tarefa?.id,
       'a Central mostra a ação Gerar tarefa': /function gerarTarefa\(id\)/.test(html) && /✅ Gerar tarefa/.test(html),
+      // NOC: atalho pra sistema E acesso/senha, e pergunta a unidade quando não sabe
+      'NOC: atalho aparece pra Computador/Sistema E Acesso/Senha (não só um)':
+        /const ASSUNTOS_NOC = \['Computador\/Sistema', 'Acesso\/Senha'\]/.test(html)
+        && /if\(ASSUNTOS_NOC\.includes\(chat\.assunto\)\)\{/.test(html)
+        && !/if\(chat\.assunto==='Computador\/Sistema'\)\{/.test(html),
+      'NOC: sem a loja identificada, pergunta qual unidade em vez de esconder o botão':
+        /onclick="abrirNocDaConversa\(this\.dataset\.loja\)"/.test(html)
+        && /function abrirNocDaConversa/.test(html)
+        && /prompt\('Qual unidade\?/.test(html),
+      // chat: suporte/Beniboy à direita, visitante à esquerda, fundos diferentes
+      'chat da Central: quem responde vai pra direita e o visitante pra esquerda, com fundos distintos':
+        /eu: m\.de!=='visitante'/.test(html)
+        && /class="msg-item \$\{m\.eu\?'msg-eu':'msg-vis'\}"/.test(html)
+        && /\.msg-item\.msg-eu\{align-self:flex-end;background:var\(--panel\);border-right:3px solid var\(--accent\)/.test(html)
+        && /\.msg-item\.msg-vis\{align-self:flex-start/.test(html),
+      // widget: o texto sai da caixa ao enviar (bug do input que não limpava)
+      'widget: o operador limpa o campo NA HORA do envio (não fica texto escrito)':
+        /if \(!texto && !arquivo\) return;[\s\S]{0,400}?input\.value = '';[\s\S]{0,80}?anexoInput\.value = '';/.test(widgetSrc),
+      'widget: caixas de mensagem compactas (menos espaço vazio)':
+        /\.szc-corpo\{padding:10px 12px;[^}]*gap:5px;\}/.test(widgetSrc)
+        && /\.szc-msg\{max-width:85%;padding:6px 9px;/.test(widgetSrc),
+      // silenciar numa tela (celular ou PC) cala TODAS as telas daquele usuário
+      'alarme: silenciar dispara TODOS os paradores locais (widget + página de alarme cheia)':
+        /function aplicarSilencioRemoto\(\) \{\s*ouvintes\.forEach\(\(cb\) => \{ try \{ cb\(\); \} catch/.test(alarmeSync)
+        && /window\.ZenithAlarmeSync = \{ identificar, aoSilenciar, silenciar, aplicarSilencioRemoto \}/.test(alarmeSync),
+      'alarme: o SSE "alarme-silenciado" chama aplicarSilencioRemoto (não só o overlay do widget)':
+        /es\.addEventListener\('alarme-silenciado'/.test(widgetSrc)
+        && /pararAlarmeBeniboy\(\);\s*if \(window\.ZenithAlarmeSync && window\.ZenithAlarmeSync\.aplicarSilencioRemoto\) window\.ZenithAlarmeSync\.aplicarSilencioRemoto\(\);/.test(widgetSrc),
+      'alarme: o servidor repassa o silêncio POR USUÁRIO (uma conta não cala a outra)':
+        /app\.post\('\/api\/alarme\/silenciado'/.test(fonteIdx)
+        && /broadcastParaUsuario\(req\.user\.id, 'alarme-silenciado'/.test(fonteIdx),
+      'alarme: a página de alarme cheia registra a própria sirene como parador (então o SSE a cala)':
+        /window\.ZenithAlarmeSync\.aoSilenciar\(pararAlarme\)/.test(alertaHtml),
       'Ticket # do chat vira link para a tarefa ou chamado': /const destinoPrincipal = chat\.chamadoId/.test(html) && /\/tarefas\.html\?tarefa=/.test(html) && /Ticket #\$\{escapeHtml\(chat\.numeroTicket\)\}/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
@@ -6967,7 +7004,7 @@ setTimeout(async () => {
         && sInt.includes('"NoPulsoPrint"') && sInt.includes('GetAsyncKeyState(0x51)')
         && sInt.includes('GetFolderPath("MyPictures")') && sInt.includes('Get-Date -Format "yyyy-MM"')
         && sInt.includes('Selecionar-AreaPrint') && sInt.includes('alças redimensionam')
-        && sInt.includes('$s.Tag.inicio') && sInt.includes('$form.Opacity = 1.0') && sInt.includes('$form.BackgroundImage = $captura')
+        && sInt.includes('$s.Tag.inicio') && sInt.includes('$form.Opacity = 1.0') && sInt.includes('$e.Graphics.DrawImageUnscaled($s.Tag.captura, 0, 0)')
         && sInt.includes('Cursor-AreaPrint') && sInt.includes('Modo-AreaPrint') && sInt.includes('SizeNWSE') && sInt.includes('Botao-Print "Salvar"')
         && sInt.includes('$superficie.Add_MouseDown') && sInt.includes('$superficie.Add_MouseMove')
         && sInt.includes('configuracao-agente') && htmlNoc.includes('novo-comp-nopulso-print'),
@@ -16154,8 +16191,12 @@ setTimeout(async () => {
         && /Desenhar-Marcas \$gMarcas \$escolhaPrint\.marcas \(-\$escolhaPrint\.area\.X\) \(-\$escolhaPrint\.area\.Y\)/.test(psI),
       'um desenhista só serve a tela e o PNG (dois divergiriam)':
         (psI.match(/function Desenhar-Marcas/g) || []).length === 1,
-      'a seta tem ponta e a caixa normaliza o arrasto ao contrário':
-        /\$caneta\.EndCap = \[System\.Drawing\.Drawing2D\.LineCap\]::ArrowAnchor/.test(psI)
+      'a seta tem ponta EVIDENTE desenhada à mão (2 farpas grossas), e a caixa normaliza o arrasto ao contrário':
+        vgM.VERSAO_VIGIA >= 45
+        && /\$ang = \[Math\]::Atan2\(\$y2 - \$y1, \$x2 - \$x1\)/.test(psI)
+        && /\$farpa = \[Math\]::Max\(16, \[int\]\$grossuraDaMarca \* 5\)/.test(psI)
+        && (psI.match(/\$g\.DrawLine\(\$caneta, \[int\]\$x2, \[int\]\$y2, \$f/g) || []).length === 2
+        && !/LineCap\]::ArrowAnchor/.test(psI)
         && /\$rx = \[Math\]::Min\(\$x1, \$x2\); \$ry = \[Math\]::Min\(\$y1, \$y2\)/.test(psI),
       'caixa de tamanho zero não vira desenho degenerado': /if \(\$rw -gt 0 -and \$rh -gt 0\) \{ \$g\.DrawRectangle/.test(psI),
       'o X fecha sem salvar': /\$fechar\.Add_Click\(\{param\(\$botao,\$e\);\$janela=\$botao\.Parent\.Parent;\$janela\.Tag\.resultado=\$null;\$janela\.Hide\(\);\$janela\.Close\(\)\}\)/.test(psI),
@@ -16192,11 +16233,17 @@ setTimeout(async () => {
         && /\$j\.Tag\.corMarca = \$dlg\.Color; \$b\.BackColor = \$dlg\.Color/.test(psI),
       // ---- v44: congela a tela durante a seleção (o vídeo não corre mais por baixo) ----
       'v44 (sem subir, o congelamento não chega às máquinas)': vgM.VERSAO_VIGIA >= 44,
-      'a janela é opaca com o snapshot congelado de fundo (não mais Opacity 0.32 deixando o vivo vazar)':
+      'a janela é opaca e o snapshot é PINTADO no Paint (não via BackgroundImage, que dava cortina preta)':
         /function Selecionar-AreaPrint\(\$tela, \$captura\)/.test(psI)
-        && /\$form\.Opacity = 1\.0; \$form\.BackgroundImage = \$captura; \$form\.BackgroundImageLayout = "None"/.test(psI)
+        && /\$form\.Opacity = 1\.0; \$form\.Cursor/.test(psI)
+        && !/\$form\.BackgroundImage = \$captura/.test(psI)
         && !/\$form\.Opacity = 0\.32/.test(psI)
         && /\$escolhaPrint = Selecionar-AreaPrint \$tela \$imagem/.test(psI),
+      'v46: painel OPACO (fim da cortina preta) + double-buffer (sem piscar) + snapshot no Paint':
+        vgM.VERSAO_VIGIA >= 46
+        && /\$superficie\.BackColor = \[System\.Drawing\.Color\]::Black/.test(psI)
+        && /GetProperty\("DoubleBuffered", \[System\.Reflection\.BindingFlags\]"Instance,NonPublic"\)\.SetValue\(\$superficie, \$true/.test(psI)
+        && /\$superficie\.Add_Paint\(\{ param\(\$s, \$e\) if \(\$s\.Tag\.captura\) \{ \$e\.Graphics\.DrawImageUnscaled\(\$s\.Tag\.captura, 0, 0\) \}/.test(psI),
       'a seleção escurece o resto e ACENDE só a área (redesenha o snapshot ali)':
         /New-Object System\.Drawing\.SolidBrush\(\[System\.Drawing\.Color\]::FromArgb\(120, 0, 0, 0\)\); \$e\.Graphics\.FillRectangle\(\$sombra, \$s\.ClientRectangle\)/.test(psI)
         && /\$e\.Graphics\.DrawImage\(\$s\.Tag\.captura, \$areaAtual, \$areaAtual, \[System\.Drawing\.GraphicsUnit\]::Pixel\)/.test(psI)
