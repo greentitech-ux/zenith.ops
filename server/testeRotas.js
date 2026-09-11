@@ -16140,6 +16140,18 @@ setTimeout(async () => {
       'o X fecha sem salvar': /\$fechar\.Add_Click\(\{param\(\$botao,\$e\);\$janela=\$botao\.Parent\.Parent;\$janela\.Tag\.resultado=\$null;\$janela\.Hide\(\);\$janela\.Close\(\)\}\)/.test(psI),
       'vale nos DOIS tipos de máquina': /Botao-Print "Seta" 52/.test(psA) && /function Desenhar-Marcas/.test(psA),
       'o script continua começando com # NOCZenith': psI.startsWith('# NOCZenith'),
+      // ---- v41: a barra ESTAVA escondida atrás da superfície Dock=Fill (z-order),
+      // por isso "não aparecia"; e agora cola na seleção como no Lightshot ----
+      'v41 (sem subir, a barra visível não chega às máquinas)': vgM.VERSAO_VIGIA >= 41,
+      'a superfície vai pro fundo e a barra/instruções pra frente (senão ficam escondidas)':
+        /\$superficie\.SendToBack\(\); \$instrucoes\.BringToFront\(\); \$acoes\.BringToFront\(\)/.test(psI)
+        && /\$superficie\.SendToBack\(\)/.test(psA),
+      'a barra nasce escondida e cola na seleção (não fica no rodapé da tela)':
+        /\$acoes\.Visible = \$false; \$form\.Tag\.barra = \$acoes/.test(psI)
+        && /\$form\.Tag\.posBarra = \{/.test(psI)
+        && /\$by = \$a\.Bottom \+ 8; if \(\$by \+ \$bar\.Height \+ 8 -gt \$ch\) \{ \$by = \$a\.Top - \$bar\.Height - 8 \}/.test(psI),
+      'soltar o mouse reposiciona a barra na seleção (nos dois ramos do MouseUp)':
+        (psI.match(/& \$s\.Parent\.Tag\.posBarra \$s\.Parent/g) || []).length >= 2,
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okMarcasPrint = !falhas.length;
