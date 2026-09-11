@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 41;
+const VERSAO_VIGIA = 42;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -809,22 +809,30 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '        # linha e caixa resolvem o caso de uso (apontar e circundar) sem a',
     '        # caixa de edicao, que seria a parte cara e fragil.',
     '        function Botao-Print($texto, $largura, $x) { $b = New-Object System.Windows.Forms.Button; $b.Text = $texto; $b.Size = New-Object System.Drawing.Size($largura,30); $b.Location = New-Object System.Drawing.Point($x,6); return $b }',
-    '        $btSeta = Botao-Print "Seta" 52 7',
-    '        $btLinha = Botao-Print "Linha" 52 63',
-    '        $btCaixa = Botao-Print "Caixa" 52 119',
+    '        # ICONES no lugar dos nomes (pedido do Master, estilo Lightshot). Glyphs',
+    '        # do bloco BMP que a Segoe UI renderiza: seta, linha diagonal, retangulo.',
+    '        # O texto de instrucao la em cima continua dizendo o que cada um faz.',
+    '        $btSeta = Botao-Print ([char]0x2196) 52 7',
+    '        $btLinha = Botao-Print ([char]0x2571) 52 63',
+    '        $btCaixa = Botao-Print ([char]0x25AD) 52 119',
+    '        foreach ($bt in @($btSeta, $btLinha, $btCaixa)) { $bt.Font = New-Object System.Drawing.Font("Segoe UI", 13) }',
     '        $copiar = Botao-Print "Copiar" 92 179',
     '        $salvar = Botao-Print "Salvar" 92 275',
     '        $fechar = Botao-Print "X" 32 371',
     '        $salvar.BackColor=[System.Drawing.Color]::GreenYellow',
     '        # clicar na ferramenta ATIVA volta pra selecao - sem isso nao havia',
     '        # como reajustar a area depois de marcar, so cancelando tudo',
-    '        $form.Tag.pintarFerramenta = { param($j) foreach ($par in @(@($j.Tag.btSeta,"seta"), @($j.Tag.btLinha,"linha"), @($j.Tag.btCaixa,"retangulo"))) { if ($j.Tag.ferramenta -eq $par[1]) { $par[0].BackColor = [System.Drawing.Color]::Gold } else { $par[0].UseVisualStyleBackColor = $true } } }',
+    '        # ativo salta aos olhos (Gold + texto preto); inativo fica num tom neutro',
+    '        # escuro (nao a cor padrao do Windows, que ficava PARECIDA com o Gold e dava',
+    '        # a impressao de que todos estavam ligados). So um acende por vez.',
+    '        $form.Tag.pintarFerramenta = { param($j) foreach ($par in @(@($j.Tag.btSeta,"seta"), @($j.Tag.btLinha,"linha"), @($j.Tag.btCaixa,"retangulo"))) { if ($j.Tag.ferramenta -eq $par[1]) { $par[0].BackColor = [System.Drawing.Color]::Gold; $par[0].ForeColor = [System.Drawing.Color]::Black } else { $par[0].BackColor = [System.Drawing.Color]::FromArgb(70, 78, 90); $par[0].ForeColor = [System.Drawing.Color]::White } } }',
     '        $form.Tag.btSeta = $btSeta; $form.Tag.btLinha = $btLinha; $form.Tag.btCaixa = $btCaixa',
     '        $trocaFerramenta = { param($botao, $qual) $janela = $botao.Parent.Parent; if ($janela.Tag.ferramenta -eq $qual) { $janela.Tag.ferramenta = "selecao" } else { $janela.Tag.ferramenta = $qual }; & $janela.Tag.pintarFerramenta $janela; $janela.Tag.ocioso = 0 }',
     '        $btSeta.Add_Click({ param($b, $e) & $b.Parent.Parent.Tag.trocaFerramenta $b "seta" })',
     '        $btLinha.Add_Click({ param($b, $e) & $b.Parent.Parent.Tag.trocaFerramenta $b "linha" })',
     '        $btCaixa.Add_Click({ param($b, $e) & $b.Parent.Parent.Tag.trocaFerramenta $b "retangulo" })',
     '        $form.Tag.trocaFerramenta = $trocaFerramenta',
+    '        & $form.Tag.pintarFerramenta $form',
     '        $fechar.Add_Click({param($botao,$e);$janela=$botao.Parent.Parent;$janela.Tag.resultado=$null;$janela.Hide();$janela.Close()})',
     '        $copiar.Add_Click({param($botao,$e);$janela=$botao.Parent.Parent;if($janela.Tag.area -and $janela.Tag.area.Width -ge 3 -and $janela.Tag.area.Height -ge 3){$janela.Tag.acao="copiar";$janela.Tag.resultado=$janela.Tag.area;$janela.DialogResult=[System.Windows.Forms.DialogResult]::OK;$janela.Hide();$janela.Close()}})',
     '        $salvar.Add_Click({param($botao,$e);$janela=$botao.Parent.Parent;if($janela.Tag.area -and $janela.Tag.area.Width -ge 3 -and $janela.Tag.area.Height -ge 3){$janela.Tag.acao="salvar";$janela.Tag.resultado=$janela.Tag.area;$janela.DialogResult=[System.Windows.Forms.DialogResult]::OK;$janela.Hide();$janela.Close()}})',

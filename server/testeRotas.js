@@ -16111,8 +16111,13 @@ setTimeout(async () => {
 
     const conf = {
       'VERSAO_VIGIA subiu (sem isso a marcação não chega nas 52 máquinas)': vgM.VERSAO_VIGIA >= 40,
-      'as 3 ferramentas existem na barra': /Botao-Print "Seta" 52/.test(psI)
-        && /Botao-Print "Linha" 52/.test(psI) && /Botao-Print "Caixa" 52/.test(psI),
+      'as 3 ferramentas existem na barra, agora como ÍCONES (não mais texto)': /Botao-Print \(\[char\]0x2196\) 52/.test(psI)
+        && /Botao-Print \(\[char\]0x2571\) 52/.test(psI) && /Botao-Print \(\[char\]0x25AD\) 52/.test(psI)
+        && !/Botao-Print "Seta"/.test(psI),
+      'a ferramenta ativa fica destacada (Gold) e as inativas num tom neutro escuro - só uma acende': /\$par\[0\]\.BackColor = \[System\.Drawing\.Color\]::Gold; \$par\[0\]\.ForeColor = \[System\.Drawing\.Color\]::Black/.test(psI)
+        && /\$par\[0\]\.BackColor = \[System\.Drawing\.Color\]::FromArgb\(70, 78, 90\)/.test(psI)
+        && /& \$form\.Tag\.pintarFerramenta \$form/.test(psI)
+        && !/UseVisualStyleBackColor/.test(psI),
       // o Master pediu "tudo menos texto" - se aparecer ferramenta de texto, foi engano
       'NÃO existe ferramenta de texto': !/Botao-Print "Texto"/.test(psI) && !/ferramenta = "texto"/.test(psI),
       'o estado nasce em seleção, com a lista de marcas pronta':
@@ -16138,7 +16143,7 @@ setTimeout(async () => {
         && /\$rx = \[Math\]::Min\(\$x1, \$x2\); \$ry = \[Math\]::Min\(\$y1, \$y2\)/.test(psI),
       'caixa de tamanho zero não vira desenho degenerado': /if \(\$rw -gt 0 -and \$rh -gt 0\) \{ \$g\.DrawRectangle/.test(psI),
       'o X fecha sem salvar': /\$fechar\.Add_Click\(\{param\(\$botao,\$e\);\$janela=\$botao\.Parent\.Parent;\$janela\.Tag\.resultado=\$null;\$janela\.Hide\(\);\$janela\.Close\(\)\}\)/.test(psI),
-      'vale nos DOIS tipos de máquina': /Botao-Print "Seta" 52/.test(psA) && /function Desenhar-Marcas/.test(psA),
+      'vale nos DOIS tipos de máquina': /Botao-Print \(\[char\]0x2196\) 52/.test(psA) && /function Desenhar-Marcas/.test(psA),
       'o script continua começando com # NOCZenith': psI.startsWith('# NOCZenith'),
       // ---- v41: a barra ESTAVA escondida atrás da superfície Dock=Fill (z-order),
       // por isso "não aparecia"; e agora cola na seleção como no Lightshot ----
