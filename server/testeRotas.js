@@ -16748,6 +16748,47 @@ setTimeout(async () => {
   if (!okFechar) ruins += 1;
   console.log(`${okFechar ? '✓' : '✗'} Fechar: o mesmo ✕ redondo em toda ficha/painel, de um arquivo só`);
 
+  // Chat da máquina de loja (janela do NOCZenith): o texto tem de ficar ABAIXO
+  // do nome, do mesmo lado dele. No RichTextBox, SelectionAlignment vale para o
+  // PARÁGRAFO inteiro onde está o cursor - e depois de AppendText($texto) o
+  // cursor fica DENTRO do parágrafo do texto, porque não há quebra depois dele.
+  // Resetar o alinhamento ali empurrava a mensagem de volta pra esquerda: o
+  // nome ficava à direita (tem quebra própria) e o texto embaixo, do outro lado.
+  let okChatMaquina = false;
+  try {
+    const v = require(__dirname + '/vigiaScript.js');
+    const ps = v.montarScriptVigia({ codigo: '19821', posto: 'principal', tipo: 'interno', agentToken: 'a'.repeat(32) });
+    const bloco = (ps.match(/function Adicionar-MensagemChat[\s\S]*?\n    \}/) || [''])[0];
+    const depoisDoTexto = bloco.slice(bloco.indexOf('$historico.AppendText([string]$texto)'));
+
+    const conf = {
+      'o bloco do chat existe': bloco.length > 400
+        && /\$historico\.AppendText\(\[string\]\$texto\)/.test(bloco),
+      'quem fala define o lado uma vez, antes de escrever':
+        /\$alinhamento = if \(\$ehSuporte\) \{ \[System\.Windows\.Forms\.HorizontalAlignment\]::Left \} else \{ \[System\.Windows\.Forms\.HorizontalAlignment\]::Right \}/.test(bloco)
+        && bloco.indexOf('$historico.SelectionAlignment = $alinhamento') < bloco.indexOf('] $titulo'),
+      // ESTA é a regressão: alinhar depois do texto reescreve o parágrafo dele
+      'o alinhamento NÃO é mexido depois do texto (era o que separava nome e fala)':
+        !/SelectionAlignment/.test(depoisDoTexto),
+      'nome e texto saem no mesmo append, nessa ordem':
+        bloco.indexOf('] $titulo') < bloco.indexOf('AppendText([string]$texto)'),
+      // o título termina em quebra: é o que põe a fala na linha de baixo
+      'o nome termina em quebra de linha, então a fala cai embaixo dele':
+        /\$titulo" \+ \[Environment\]::NewLine\)/.test(bloco),
+      // o fundo do balão é por caractere (não retroage), então este reset pode
+      // e deve continuar - sem ele o espaço entre mensagens ficaria colorido
+      'o fundo volta ao normal depois da fala':
+        /\$historico\.SelectionBackColor = \$historico\.BackColor/.test(depoisDoTexto),
+      'a versão subiu junto (sem isso nenhuma das 52 máquinas baixa o novo)':
+        v.VERSAO_VIGIA >= 47 && ps.includes('$VersaoScript = ' + v.VERSAO_VIGIA + '\n'),
+    };
+    const falhas = Object.entries(conf).filter(([, v2]) => !v2).map(([n]) => n);
+    okChatMaquina = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okChatMaquina = false; console.log('  erro: ' + e.message); }
+  if (!okChatMaquina) ruins += 1;
+  console.log(`${okChatMaquina ? '✓' : '✗'} Chat da máquina: a fala fica embaixo do nome, do mesmo lado`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 46;
+const VERSAO_VIGIA = 47;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1297,7 +1297,6 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '      $historico.SelectionFont = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)',
     '      $historico.AppendText([string]$texto)',
     '      $historico.SelectionBackColor = $historico.BackColor',
-    '      $historico.SelectionAlignment = [System.Windows.Forms.HorizontalAlignment]::Left',
     '      $historico.ScrollToCaret()',
     '    }',
     '',
