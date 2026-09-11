@@ -6967,7 +6967,7 @@ setTimeout(async () => {
         && sInt.includes('"NoPulsoPrint"') && sInt.includes('GetAsyncKeyState(0x51)')
         && sInt.includes('GetFolderPath("MyPictures")') && sInt.includes('Get-Date -Format "yyyy-MM"')
         && sInt.includes('Selecionar-AreaPrint') && sInt.includes('alças redimensionam')
-        && sInt.includes('$s.Tag.inicio') && sInt.includes('$form.Opacity = 0.32')
+        && sInt.includes('$s.Tag.inicio') && sInt.includes('$form.Opacity = 1.0') && sInt.includes('$form.BackgroundImage = $captura')
         && sInt.includes('Cursor-AreaPrint') && sInt.includes('Modo-AreaPrint') && sInt.includes('SizeNWSE') && sInt.includes('Botao-Print "Salvar"')
         && sInt.includes('$superficie.Add_MouseDown') && sInt.includes('$superficie.Add_MouseMove')
         && sInt.includes('configuracao-agente') && htmlNoc.includes('novo-comp-nopulso-print'),
@@ -16174,6 +16174,17 @@ setTimeout(async () => {
       'o botão Cor abre o seletor e guarda a cor pros próximos traços':
         /\$dlg = New-Object System\.Windows\.Forms\.ColorDialog/.test(psI)
         && /\$j\.Tag\.corMarca = \$dlg\.Color; \$b\.BackColor = \$dlg\.Color/.test(psI),
+      // ---- v44: congela a tela durante a seleção (o vídeo não corre mais por baixo) ----
+      'v44 (sem subir, o congelamento não chega às máquinas)': vgM.VERSAO_VIGIA >= 44,
+      'a janela é opaca com o snapshot congelado de fundo (não mais Opacity 0.32 deixando o vivo vazar)':
+        /function Selecionar-AreaPrint\(\$tela, \$captura\)/.test(psI)
+        && /\$form\.Opacity = 1\.0; \$form\.BackgroundImage = \$captura; \$form\.BackgroundImageLayout = "None"/.test(psI)
+        && !/\$form\.Opacity = 0\.32/.test(psI)
+        && /\$escolhaPrint = Selecionar-AreaPrint \$tela \$imagem/.test(psI),
+      'a seleção escurece o resto e ACENDE só a área (redesenha o snapshot ali)':
+        /New-Object System\.Drawing\.SolidBrush\(\[System\.Drawing\.Color\]::FromArgb\(120, 0, 0, 0\)\); \$e\.Graphics\.FillRectangle\(\$sombra, \$s\.ClientRectangle\)/.test(psI)
+        && /\$e\.Graphics\.DrawImage\(\$s\.Tag\.captura, \$areaAtual, \$areaAtual, \[System\.Drawing\.GraphicsUnit\]::Pixel\)/.test(psI)
+        && /captura = \$captura \}/.test(psI),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okMarcasPrint = !falhas.length;
