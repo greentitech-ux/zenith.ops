@@ -7032,6 +7032,19 @@ setTimeout(async () => {
       'captura que falha zera "seleção aberta" (senão o NOC mente pra sempre)': scripts.every((s) =>
         s.includes('} catch { try { $Pulso.selecaoAbertaEm = $null; $Pulso.erro = "erro: " + $_.Exception.Message } catch {}; Log-Print "Falha ao capturar')),
       'card: botão "Capturar agora" só em máquina com o check, chama a rota': htmlNoc.includes("${c.noPulsoPrint ? `<button") && htmlNoc.includes('capturarAgora(') && htmlNoc.includes('/capturar-agora`, { method: \'POST\' }'),
+      // ---- v38: DPI (recorte alinhado + botões visíveis), névoa fecha na hora, salvar com escolha ----
+      'v38 (sem subir, ninguém baixa o alinhamento nem o salvar-com-escolha)': vg.VERSAO_VIGIA >= 38,
+      'thread do print fica DPI-aware: recorte para de descalibrar e os botões aparecem em tela escalada': scripts.every((s) =>
+        s.includes('SetThreadDpiAwarenessContext([IntPtr](-4))') && s.includes('SetProcessDPIAware')
+        && /SetThreadDpiAwarenessContext[\s\S]{0,200}?catch \{ try \{ \[void\]\[NoPulsoPrintTeclas\]::SetProcessDPIAware\(\)/.test(s)),
+      'névoa some NA HORA: Hide antes de Close no Ctrl+C, Enter, Esc e nos 3 botões': scripts.every((s) =>
+        (s.match(/\$s\.Hide\(\);\$s\.Close\(\)/g) || []).length >= 3
+        && (s.match(/\$janela\.Hide\(\);\$janela\.Close\(\)/g) || []).length >= 3
+        && s.includes('$e.SuppressKeyPress=$true')),
+      'Salvar pergunta pasta padrão ou outro local (MessageBox + SaveFileDialog)': scripts.every((s) =>
+        s.includes('MessageBoxButtons]::YesNoCancel') && s.includes('New-Object System.Windows.Forms.SaveFileDialog')
+        && s.includes('DialogResult]::Yes') && s.includes('$arquivo = $sfd.FileName')
+        && s.includes('if ($arquivo) { $recorte.Save($arquivo')),
     };
     // ---- "Capturar agora" de ponta a ponta: Master pede -> agente recebe UMA
     // vez (configuracao-agente e heartbeat) -> some ----
@@ -15668,7 +15681,10 @@ setTimeout(async () => {
     };
     const aI = alcas(psI);
     // "Copiar" só chega ao disco se a ação for salvar
-    const copiaSemGravar = /\$arquivo = \$null[\s\S]{0,400}?if \(\$escolhaPrint\.acao -eq "salvar"\) \{[\s\S]{0,600}?\$recorte\.Save\(\$arquivo/.test(psI);
+    // (v38) o bloco "salvar" cresceu com o MessageBox padrão/outro-local + SaveFileDialog,
+    // por isso a janela até o Save é maior; o que a asserção protege continua sendo:
+    // arquivo começa null e o Save só acontece dentro do ramo "salvar"
+    const copiaSemGravar = /\$arquivo = \$null[\s\S]{0,400}?if \(\$escolhaPrint\.acao -eq "salvar"\) \{[\s\S]{0,2000}?\$recorte\.Save\(\$arquivo/.test(psI);
     const dropListGuardada = /if \(\$arquivo\) \{[\s\S]{0,300}?SetFileDropList/.test(psI);
 
     const conf = {

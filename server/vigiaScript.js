@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 37;
+const VERSAO_VIGIA = 38;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -718,7 +718,14 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '    try {',
     '      Add-Type -AssemblyName System.Windows.Forms',
     '      Add-Type -AssemblyName System.Drawing',
-    '      Add-Type -TypeDefinition \'using System; using System.Runtime.InteropServices; public static class NoPulsoPrintTeclas { [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int tecla); }\' -ErrorAction SilentlyContinue',
+    '      Add-Type -TypeDefinition \'using System; using System.Runtime.InteropServices; public static class NoPulsoPrintTeclas { [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int tecla); [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c); [DllImport("user32.dll")] public static extern bool SetProcessDPIAware(); }\' -ErrorAction SilentlyContinue',
+    '      # SEM isto, numa tela com escala != 100% (Windows a 125%/150%), o mouse',
+    '      # fala em pixel logico e o CopyFromScreen pega pixel fisico: o recorte sai',
+    '      # deslocado/borrado e os botoes (posicionados por ClientSize) caem fora da',
+    '      # tela - por isso so o Ctrl+C respondia. -4 = PER_MONITOR_AWARE_V2, por',
+    '      # THREAD (nao mexe no resto do processo, so nas janelas desta thread do',
+    '      # print). Se o Windows for velho demais pro contexto, cai no modo processo.',
+    '      try { [void][NoPulsoPrintTeclas]::SetThreadDpiAwarenessContext([IntPtr](-4)) } catch { try { [void][NoPulsoPrintTeclas]::SetProcessDPIAware() } catch {} }',
     '      # ARMADILHA: em New-Object Tipo(a,b), os parenteses NAO sao lista de',
     '      # argumentos de metodo - sao expressao de array, e a virgula tem',
     '      # precedencia MAIOR que + e -. Sem envolver cada conta em parenteses,',
@@ -753,11 +760,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '        $superficie.Add_Paint({ param($s, $e) $areaAtual=$s.Tag.area; if($areaAtual -and $areaAtual.Width -gt 0 -and $areaAtual.Height -gt 0){$caneta=New-Object System.Drawing.Pen([System.Drawing.Color]::Lime,2);$caneta.DashStyle=[System.Drawing.Drawing2D.DashStyle]::Dash;$e.Graphics.DrawRectangle($caneta,$areaAtual);$caneta.Dispose();foreach($p in @((New-Object System.Drawing.Point($areaAtual.Left,$areaAtual.Top)),(New-Object System.Drawing.Point($areaAtual.Right,$areaAtual.Top)),(New-Object System.Drawing.Point($areaAtual.Left,$areaAtual.Bottom)),(New-Object System.Drawing.Point($areaAtual.Right,$areaAtual.Bottom)),(New-Object System.Drawing.Point(($areaAtual.Left+[int]($areaAtual.Width/2)),$areaAtual.Top)),(New-Object System.Drawing.Point(($areaAtual.Left+[int]($areaAtual.Width/2)),$areaAtual.Bottom)),(New-Object System.Drawing.Point($areaAtual.Left,($areaAtual.Top+[int]($areaAtual.Height/2)))),(New-Object System.Drawing.Point($areaAtual.Right,($areaAtual.Top+[int]($areaAtual.Height/2)))))){$e.Graphics.FillRectangle([System.Drawing.Brushes]::White,$p.X-4,$p.Y-4,8,8)};$fonte=New-Object System.Drawing.Font("Segoe UI",9,[System.Drawing.FontStyle]::Bold);$e.Graphics.DrawString("$($areaAtual.Width) × $($areaAtual.Height)",$fonte,[System.Drawing.Brushes]::White,$areaAtual.Left+6,$areaAtual.Top+6);$fonte.Dispose()}})',
     '        $superficie.Add_MouseUp({ param($s, $e) if($e.Button -eq [System.Windows.Forms.MouseButtons]::Left){$s.Tag.inicio=$null;$s.Tag.areaInicio=$null;$s.Tag.modo=$null;$s.Capture=$false;$s.Invalidate()} })',
     '        $acoes=New-Object System.Windows.Forms.Panel; $acoes.Size=New-Object System.Drawing.Size(304,42); $acoes.BackColor=[System.Drawing.Color]::FromArgb(30,36,45); $acoes.Location=New-Object System.Drawing.Point(([Math]::Max(14,[int](($form.ClientSize.Width-304)/2))),($form.ClientSize.Height-56))',
-    '        $cancelar=New-Object System.Windows.Forms.Button; $cancelar.Text="Cancelar"; $cancelar.Size=New-Object System.Drawing.Size(92,30); $cancelar.Location=New-Object System.Drawing.Point(7,6); $cancelar.Add_Click({param($botao,$e);$janela=$botao.Parent.Parent;$janela.Tag.resultado=$null;$janela.Close()})',
-    '        $salvar=New-Object System.Windows.Forms.Button; $salvar.Text="Salvar"; $salvar.Size=New-Object System.Drawing.Size(92,30); $salvar.Location=New-Object System.Drawing.Point(205,6); $salvar.BackColor=[System.Drawing.Color]::GreenYellow; $salvar.Add_Click({param($botao,$e);$janela=$botao.Parent.Parent;if($janela.Tag.area -and $janela.Tag.area.Width -ge 3 -and $janela.Tag.area.Height -ge 3){$janela.Tag.acao="salvar";$janela.Tag.resultado=$janela.Tag.area;$janela.DialogResult=[System.Windows.Forms.DialogResult]::OK;$janela.Close()}})',
-    '        $copiar=New-Object System.Windows.Forms.Button; $copiar.Text="Copiar"; $copiar.Size=New-Object System.Drawing.Size(92,30); $copiar.Location=New-Object System.Drawing.Point(106,6); $copiar.Add_Click({param($botao,$e);$janela=$botao.Parent.Parent;if($janela.Tag.area -and $janela.Tag.area.Width -ge 3 -and $janela.Tag.area.Height -ge 3){$janela.Tag.acao="copiar";$janela.Tag.resultado=$janela.Tag.area;$janela.DialogResult=[System.Windows.Forms.DialogResult]::OK;$janela.Close()}})',
+    '        $cancelar=New-Object System.Windows.Forms.Button; $cancelar.Text="Cancelar"; $cancelar.Size=New-Object System.Drawing.Size(92,30); $cancelar.Location=New-Object System.Drawing.Point(7,6); $cancelar.Add_Click({param($botao,$e);$janela=$botao.Parent.Parent;$janela.Tag.resultado=$null;$janela.Hide();$janela.Close()})',
+    '        $salvar=New-Object System.Windows.Forms.Button; $salvar.Text="Salvar"; $salvar.Size=New-Object System.Drawing.Size(92,30); $salvar.Location=New-Object System.Drawing.Point(205,6); $salvar.BackColor=[System.Drawing.Color]::GreenYellow; $salvar.Add_Click({param($botao,$e);$janela=$botao.Parent.Parent;if($janela.Tag.area -and $janela.Tag.area.Width -ge 3 -and $janela.Tag.area.Height -ge 3){$janela.Tag.acao="salvar";$janela.Tag.resultado=$janela.Tag.area;$janela.DialogResult=[System.Windows.Forms.DialogResult]::OK;$janela.Hide();$janela.Close()}})',
+    '        $copiar=New-Object System.Windows.Forms.Button; $copiar.Text="Copiar"; $copiar.Size=New-Object System.Drawing.Size(92,30); $copiar.Location=New-Object System.Drawing.Point(106,6); $copiar.Add_Click({param($botao,$e);$janela=$botao.Parent.Parent;if($janela.Tag.area -and $janela.Tag.area.Width -ge 3 -and $janela.Tag.area.Height -ge 3){$janela.Tag.acao="copiar";$janela.Tag.resultado=$janela.Tag.area;$janela.DialogResult=[System.Windows.Forms.DialogResult]::OK;$janela.Hide();$janela.Close()}})',
     '        $acoes.Controls.AddRange(@($cancelar,$copiar,$salvar));$form.Controls.Add($acoes)',
-    '        $form.Add_KeyDown({ param($s, $e) if($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape){$s.Tag.resultado=$null;$s.Close();return};if($e.Control -and $e.KeyCode -eq [System.Windows.Forms.Keys]::C -and $s.Tag.area){$s.Tag.acao="copiar";$s.Tag.resultado=$s.Tag.area;$s.DialogResult=[System.Windows.Forms.DialogResult]::OK;$s.Close();return};if($e.KeyCode -eq [System.Windows.Forms.Keys]::Enter -and $s.Tag.area){$s.Tag.acao="salvar";$s.Tag.resultado=$s.Tag.area;$s.DialogResult=[System.Windows.Forms.DialogResult]::OK;$s.Close();return};if($s.Tag.area){$passo=if($e.Shift){10}else{1};switch($e.KeyCode){Left{$s.Tag.area.X-=$passo};Right{$s.Tag.area.X+=$passo};Up{$s.Tag.area.Y-=$passo};Down{$s.Tag.area.Y+=$passo};default{return}};$s.Invalidate();$e.Handled=$true} })',
+    '        $form.Add_KeyDown({ param($s, $e) if($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape){$e.SuppressKeyPress=$true;$s.Tag.resultado=$null;$s.Hide();$s.Close();return};if($e.Control -and $e.KeyCode -eq [System.Windows.Forms.Keys]::C -and $s.Tag.area){$e.SuppressKeyPress=$true;$s.Tag.acao="copiar";$s.Tag.resultado=$s.Tag.area;$s.DialogResult=[System.Windows.Forms.DialogResult]::OK;$s.Hide();$s.Close();return};if($e.KeyCode -eq [System.Windows.Forms.Keys]::Enter -and $s.Tag.area){$e.SuppressKeyPress=$true;$s.Tag.acao="salvar";$s.Tag.resultado=$s.Tag.area;$s.DialogResult=[System.Windows.Forms.DialogResult]::OK;$s.Hide();$s.Close();return};if($s.Tag.area){$passo=if($e.Shift){10}else{1};switch($e.KeyCode){Left{$s.Tag.area.X-=$passo};Right{$s.Tag.area.X+=$passo};Up{$s.Tag.area.Y-=$passo};Down{$s.Tag.area.Y+=$passo};default{return}};$s.Invalidate();$e.Handled=$true} })',
     '        $form.Add_Shown({ param($s, $e) $s.BringToFront(); $s.Activate() })',
     '        # Se a janela abrir onde ninguem ve (monitor desconectado, sessao',
     '        # remota, resolucao trocada), o ShowDialog prendia o laco do teclado',
@@ -833,8 +840,19 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '              $mes = Get-Date -Format "yyyy-MM"',
     '              $pastaMes = Join-Path $PastaBase $mes',
     '              New-Item -ItemType Directory -Path $pastaMes -Force | Out-Null',
-    '              $arquivo = Join-Path $pastaMes ("NoPulsoPrint-" + (Get-Date -Format "yyyy-MM-dd_HH-mm-ss") + ".png")',
-    '              $recorte.Save($arquivo, [System.Drawing.Imaging.ImageFormat]::Png)',
+    '              $nomePadrao = "NoPulsoPrint-" + (Get-Date -Format "yyyy-MM-dd_HH-mm-ss") + ".png"',
+    '              # pergunta UMA vez: pasta padrao (Imagens\\NoPulsoPrint\\AAAA-MM) ou',
+    '              # escolher outro lugar. Sim=padrao, Nao=escolher, Cancelar=nao salva',
+    '              # (mas a captura ja foi pra area de transferencia, entao nao se perde).',
+    '              $ondeSalvar = [System.Windows.Forms.MessageBox]::Show("Salvar onde?`\n`\nSim = pasta padrao (Imagens\\NoPulsoPrint)`\nNao = escolher outro local", "NoPulsoPrint", [System.Windows.Forms.MessageBoxButtons]::YesNoCancel, [System.Windows.Forms.MessageBoxIcon]::Question)',
+    '              if ($ondeSalvar -eq [System.Windows.Forms.DialogResult]::Yes) {',
+    '                $arquivo = Join-Path $pastaMes $nomePadrao',
+    '              } elseif ($ondeSalvar -eq [System.Windows.Forms.DialogResult]::No) {',
+    '                $sfd = New-Object System.Windows.Forms.SaveFileDialog',
+    '                $sfd.Filter = "Imagem PNG (*.png)|*.png"; $sfd.FileName = $nomePadrao; $sfd.InitialDirectory = $pastaMes; $sfd.Title = "Salvar captura NoPulsoPrint"',
+    '                if ($sfd.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $arquivo = $sfd.FileName }',
+    '              }',
+    '              if ($arquivo) { $recorte.Save($arquivo, [System.Drawing.Imaging.ImageFormat]::Png) }',
     '            }',
     '            # Area de transferencia com os DOIS formatos: a IMAGEM (colar no',
     '            # WhatsApp, no Word, num chamado) e o ARQUIVO (colar numa pasta ou',
