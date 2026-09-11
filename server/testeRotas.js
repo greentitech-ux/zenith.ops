@@ -16160,8 +16160,12 @@ setTimeout(async () => {
         && /Desenhar-Marcas \$gMarcas \$escolhaPrint\.marcas \(-\$escolhaPrint\.area\.X\) \(-\$escolhaPrint\.area\.Y\)/.test(psI),
       'um desenhista só serve a tela e o PNG (dois divergiriam)':
         (psI.match(/function Desenhar-Marcas/g) || []).length === 1,
-      'a seta tem ponta e a caixa normaliza o arrasto ao contrário':
-        /\$caneta\.EndCap = \[System\.Drawing\.Drawing2D\.LineCap\]::ArrowAnchor/.test(psI)
+      'a seta tem ponta EVIDENTE desenhada à mão (2 farpas grossas), e a caixa normaliza o arrasto ao contrário':
+        vgM.VERSAO_VIGIA >= 45
+        && /\$ang = \[Math\]::Atan2\(\$y2 - \$y1, \$x2 - \$x1\)/.test(psI)
+        && /\$farpa = \[Math\]::Max\(16, \[int\]\$grossuraDaMarca \* 5\)/.test(psI)
+        && (psI.match(/\$g\.DrawLine\(\$caneta, \[int\]\$x2, \[int\]\$y2, \$f/g) || []).length === 2
+        && !/LineCap\]::ArrowAnchor/.test(psI)
         && /\$rx = \[Math\]::Min\(\$x1, \$x2\); \$ry = \[Math\]::Min\(\$y1, \$y2\)/.test(psI),
       'caixa de tamanho zero não vira desenho degenerado': /if \(\$rw -gt 0 -and \$rh -gt 0\) \{ \$g\.DrawRectangle/.test(psI),
       'o X fecha sem salvar': /\$fechar\.Add_Click\(\{param\(\$botao,\$e\);\$janela=\$botao\.Parent\.Parent;\$janela\.Tag\.resultado=\$null;\$janela\.Hide\(\);\$janela\.Close\(\)\}\)/.test(psI),

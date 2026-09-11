@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 44;
+const VERSAO_VIGIA = 45;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -768,8 +768,18 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '          $caneta = New-Object System.Drawing.Pen($corDaMarca, $grossuraDaMarca)',
     '          $caneta.StartCap = [System.Drawing.Drawing2D.LineCap]::Round',
     '          if ($m.tipo -eq "seta") {',
-    '            $caneta.EndCap = [System.Drawing.Drawing2D.LineCap]::ArrowAnchor',
+    '            # cabeca desenhada A MAO: o ArrowAnchor embutido fica pequeno e some',
+    '            # em traco fino. Aqui a ponta e duas farpas grossas (ponta arredondada)',
+    '            # que crescem com a espessura - seta evidente, no estilo pedido.',
+    '            $caneta.EndCap = [System.Drawing.Drawing2D.LineCap]::Round',
     '            $g.DrawLine($caneta, $x1, $y1, $x2, $y2)',
+    '            $ang = [Math]::Atan2($y2 - $y1, $x2 - $x1)',
+    '            $farpa = [Math]::Max(16, [int]$grossuraDaMarca * 5)',
+    '            $abertura = 0.5',
+    '            $fx1 = [int]($x2 - $farpa * [Math]::Cos($ang - $abertura)); $fy1 = [int]($y2 - $farpa * [Math]::Sin($ang - $abertura))',
+    '            $fx2 = [int]($x2 - $farpa * [Math]::Cos($ang + $abertura)); $fy2 = [int]($y2 - $farpa * [Math]::Sin($ang + $abertura))',
+    '            $g.DrawLine($caneta, [int]$x2, [int]$y2, $fx1, $fy1)',
+    '            $g.DrawLine($caneta, [int]$x2, [int]$y2, $fx2, $fy2)',
     '          } elseif ($m.tipo -eq "linha") {',
     '            $caneta.EndCap = [System.Drawing.Drawing2D.LineCap]::Round',
     '            $g.DrawLine($caneta, $x1, $y1, $x2, $y2)',
