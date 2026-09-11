@@ -6947,12 +6947,13 @@ setTimeout(async () => {
       'typo "calada há há" corrigido no card':
         !htmlNoc.includes('calada há ${'),
       'NoPulsoPrint é opt-in, captura local Ctrl+Q e separa por mês':
-        vg.VERSAO_VIGIA >= 29
+        vg.VERSAO_VIGIA >= 34
         && sInt.includes('NoPulsoPrint-') && sInt.includes('GetAsyncKeyState(0x51)')
         && sInt.includes('GetFolderPath("MyPictures")') && sInt.includes('Get-Date -Format "yyyy-MM"')
         && sInt.includes('Selecionar-AreaPrint') && sInt.includes('quinas e dos meios redimensionam')
         && sInt.includes('$s.Tag.inicio') && sInt.includes('$form.Opacity = 0.32')
         && sInt.includes('Cursor-AreaPrint') && sInt.includes('Modo-AreaPrint') && sInt.includes('SizeNWSE') && sInt.includes('Salvar')
+        && sInt.includes('$superficie.Add_MouseDown') && sInt.includes('$superficie.Add_MouseMove')
         && sInt.includes('configuracao-agente') && htmlNoc.includes('novo-comp-nopulso-print'),
     };
     const errosVigia = Object.entries(confVigia).filter(([, ok]) => !ok).map(([k]) => k);
