@@ -1409,12 +1409,26 @@ function setupPresets(){
   document.getElementById('f-date-end').value = ontemIso;
 
   ['f-date-start','f-date-end'].forEach(id=>{
-    document.getElementById(id).addEventListener('input', ()=>{
-      // edicao manual = intervalo livre (permite qualquer intervalo, inclusive
-      // um unico dia): desativa o preset em vez de re-snapar pro periodo cheio
-      presetAtivo = null;
+    // 'change' (não 'input'): re-snapa só quando a data está inteira/confirmada,
+    // senão o preset brigaria com quem ainda está digitando o ano.
+    document.getElementById(id).addEventListener('change', ()=>{
       filtroDataAtivo = true;
-      cont.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
+      if(presetAtivo){
+        // preset GRUDADO: digitar uma data com Semana/Mês/Trimestre aceso
+        // re-snapa pro bloco daquela data (é assim que se navega mês a mês,
+        // semana a semana), mantendo o preset aceso. "Ontem" vira o próprio
+        // dia digitado (navegação dia a dia). Sem isto o Mês ficava travado no
+        // mês corrente e nunca dava pra ver um mês anterior.
+        const ref = document.getElementById(id).value;
+        if(ref){
+          const range = presetAtivo==='ontem' ? {inicio:ref, fim:ref} : calcularPreset(presetAtivo, ref);
+          document.getElementById('f-date-start').value = range.inicio;
+          document.getElementById('f-date-end').value = range.fim;
+        }
+      }else{
+        // sem preset aceso: intervalo livre, do jeito que a pessoa digitou
+        cont.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
+      }
       renderEspelhando();   // último clique manda (ver espelharPrincipalNaSecao)
     });
   });
@@ -1526,8 +1540,20 @@ function setupPresetsFech(){
   });
 
   ['fech-date-inicio','fech-date-fim'].forEach(id=>{
-    document.getElementById(id).addEventListener('input', ()=>{
-      cont.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
+    document.getElementById(id).addEventListener('change', ()=>{
+      // mesmo comportamento do filtro de cima: com um preset aceso, digitar
+      // uma data navega bloco a bloco (mês a mês); sem preset, intervalo livre
+      const aceso = cont.querySelector('.preset-btn.active');
+      if(aceso){
+        const ref = document.getElementById(id).value;
+        if(ref){
+          const range = aceso.dataset.tipo==='ontem' ? {inicio:ref, fim:ref} : calcularPreset(aceso.dataset.tipo, ref);
+          document.getElementById('fech-date-inicio').value = range.inicio;
+          document.getElementById('fech-date-fim').value = range.fim;
+        }
+      }else{
+        cont.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
+      }
       renderTabela();
     });
   });

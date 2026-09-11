@@ -15007,6 +15007,59 @@ setTimeout(async () => {
   if (!okFixes) ruins += 1;
   console.log(`${okFixes ? '✓' : '✗'} Fixes: título do estorno no concluir, X redondo, topo leve, e aviso fechado não volta no refresh`);
 
+  // ---- 3 correções: anexo some após criar, filtro Mês navega mês a mês, e
+  // tag de cargo (nome · Suporte/Gerente/...) ao lado do participante ----
+  let okTresBugs = false;
+  try {
+    const formHtml = require('fs').readFileSync(__dirname + '/public/formularios.html', 'utf8');
+    const fechHtml = require('fs').readFileSync(__dirname + '/public/fechamentos.html', 'utf8');
+    const tarefasHtml = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const idxSrc = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    // calcularPreset da tela de Fechamentos, pra provar a navegação mês a mês
+    // (isoLocal usa template com ${}, então extraio a LINHA inteira, não [^}]*)
+    const pad2Fn = (/function pad2\(n\)\{[^\n]*\}/.exec(fechHtml) || [''])[0];
+    const isoLocalFn = (/function isoLocal\(d\)\{[^\n]*\n/.exec(fechHtml) || [''])[0];
+    const calcFn = (/function calcularPreset\(tipo, refIso\)\{[\s\S]*?\n\}/.exec(fechHtml) || [''])[0];
+    // eslint-disable-next-line no-new-func
+    const calcularPreset = (pad2Fn && isoLocalFn && calcFn)
+      ? new Function(`${pad2Fn}${isoLocalFn}${calcFn}; return calcularPreset;`)() : null;
+    const mesFev = calcularPreset ? calcularPreset('mes', '2026-02-15') : null;
+    const mesJan = calcularPreset ? calcularPreset('mes', '2026-01-20') : null;
+    // contexto do Meu Dia: cada responsável leva o cargo pra tela marcar a tag
+    const ctx = await pedir('/api/tarefas/contexto', { Authorization: 'Bearer ' + token });
+    let ctxJson = {}; try { ctxJson = JSON.parse(ctx.corpo); } catch (e) { /* fica {} */ }
+    const resps = Array.isArray(ctxJson.responsaveis) ? ctxJson.responsaveis : [];
+    const conf = {
+      // 1) o anexo escolhido some assim que o formulário nasce - antes ficava
+      // preso e reaparecia no próximo formulário, sem sair nem no ✕
+      'formulário: o anexo some depois de criar (some entre esconder o editor e avisar a tarefa)':
+        /editor'\)\.classList\.add\('hidden'\);[\s\S]{0,320}?document\.getElementById\('f-anexos'\)\.value = '';\s*\n\s*limparAnexos\(\);[\s\S]{0,140}?await avisarTarefa/.test(formHtml),
+      // 2) navegar mês a mês: digitar 15/02 com "Mês" aceso vira 01→28/02
+      'fechamento: com Mês aceso, digitar uma data navega pro mês inteiro dela (mês a mês)':
+        !!mesFev && mesFev.inicio === '2026-02-01' && mesFev.fim === '2026-02-28'
+        && !!mesJan && mesJan.inicio === '2026-01-01' && mesJan.fim === '2026-01-31'
+        && /const range = presetAtivo==='ontem' \? \{inicio:ref, fim:ref\} : calcularPreset\(presetAtivo, ref\);/.test(fechHtml)
+        && /const range = aceso\.dataset\.tipo==='ontem' \? \{inicio:ref, fim:ref\} : calcularPreset\(aceso\.dataset\.tipo, ref\);/.test(fechHtml)
+        // o handler antigo (que APAGAVA o preset em toda edição) não pode voltar
+        && !/edicao manual = intervalo livre \(permite qualquer intervalo/.test(fechHtml),
+      // 3) tag de cargo: servidor leva o cargo; tela marca "nome · Cargo"
+      'contexto do Meu Dia leva o cargo de cada responsável':
+        ctx.status === 200 && (resps.length === 0 || resps.every((u) => 'cargo' in u))
+        && /cargo: u\.role === 'master' \? null : \(u\.cargo \|\| null\)/.test(idxSrc),
+      'Meu Dia: tag de cargo ao lado do nome (vocabulário de /usuarios.html) com o "·" centralizado':
+        /const CARGO_TAG=\{loja:'Loja',gerente:'Gerente','assistente-gerente':'Assistente',tecnico:'Técnico',suporte:'Suporte',manutencao:'Manutenção',operador:'Operador'\}/.test(tarefasHtml)
+        && /\.cargo-tag::before\{content:"·";margin:0 6px/.test(tarefasHtml)
+        // as DUAS listas de participante (criar e "alterar") ganham a tag
+        && (tarefasHtml.match(/<span>\$\{e\(u\.nome\)\}\$\{tagCargo\(u\)\}<\/span>/g) || []).length >= 2
+        && /\$\{tagCargoTexto\(u\)\}<\/option>/.test(tarefasHtml),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okTresBugs = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (resps=${resps.length} fev=${JSON.stringify(mesFev)})`);
+  } catch (e) { okTresBugs = false; console.log('  erro: ' + e.message); }
+  if (!okTresBugs) ruins += 1;
+  console.log(`${okTresBugs ? '✓' : '✗'} Correções: anexo some após criar o formulário, filtro Mês navega mês a mês, e tag de cargo no participante`);
+
   // ---- Meu Dia: responsável x quem participa (modelo do Asana) ----
   // Participante faz a tarefa ANDAR (comenta, anexa, move o status). O que
   // muda o combinado - prazo e quem participa - e o que destrói fica com o

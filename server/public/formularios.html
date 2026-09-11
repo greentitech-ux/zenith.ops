@@ -530,6 +530,11 @@ async function criar(){
     const d = await r.json();
     if(!r.ok) throw new Error(d.error || ('erro '+r.status));
     document.getElementById('editor').classList.add('hidden');
+    // o formulário nasceu: os anexos já subiram junto, então a lista escolhida
+    // some AGORA. Sem isso ela sobrevivia à criação e reaparecia presa no
+    // próximo formulário (até de outro tipo), sem sair nem no ✕.
+    document.getElementById('f-anexos').value = '';
+    limparAnexos();
     await avisarTarefa(d, TIPO_ATUAL);
     TIPO_ATUAL = null; renderTipos();
     await carregarLista();
