@@ -6967,7 +6967,7 @@ setTimeout(async () => {
         && sInt.includes('"NoPulsoPrint"') && sInt.includes('GetAsyncKeyState(0x51)')
         && sInt.includes('GetFolderPath("MyPictures")') && sInt.includes('Get-Date -Format "yyyy-MM"')
         && sInt.includes('Selecionar-AreaPrint') && sInt.includes('alças redimensionam')
-        && sInt.includes('$s.Tag.inicio') && sInt.includes('$form.Opacity = 0.32')
+        && sInt.includes('$s.Tag.inicio') && sInt.includes('$form.Opacity = 1.0') && sInt.includes('$form.BackgroundImage = $captura')
         && sInt.includes('Cursor-AreaPrint') && sInt.includes('Modo-AreaPrint') && sInt.includes('SizeNWSE') && sInt.includes('Botao-Print "Salvar"')
         && sInt.includes('$superficie.Add_MouseDown') && sInt.includes('$superficie.Add_MouseMove')
         && sInt.includes('configuracao-agente') && htmlNoc.includes('novo-comp-nopulso-print'),
@@ -15732,7 +15732,7 @@ setTimeout(async () => {
       // deu lugar ao X, e os botoes passaram a nascer do helper Botao-Print
       'a barra tem as 3 ferramentas, Copiar, Salvar e o X': /Botao-Print "Copiar" 92/.test(psI)
         && /Botao-Print "Salvar" 92/.test(psI) && /Botao-Print "X" 32/.test(psI)
-        && /AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$copiar,\$salvar,\$fechar\)\)/.test(psI)
+        && /AddRange\(@\(\$btSeta,\$btLinha,\$btCaixa,\$btAfinar,\$btEngrossar,\$btCor,\$copiar,\$salvar,\$fechar\)\)/.test(psI)
         && !/\$cancelar/.test(psI),
       'Copiar NÃO grava arquivo; só Salvar grava': copiaSemGravar,
       'sem arquivo não entra lista de arquivo na área de transferência': dropListGuardada,
@@ -16111,8 +16111,13 @@ setTimeout(async () => {
 
     const conf = {
       'VERSAO_VIGIA subiu (sem isso a marcação não chega nas 52 máquinas)': vgM.VERSAO_VIGIA >= 40,
-      'as 3 ferramentas existem na barra': /Botao-Print "Seta" 52/.test(psI)
-        && /Botao-Print "Linha" 52/.test(psI) && /Botao-Print "Caixa" 52/.test(psI),
+      'as 3 ferramentas existem na barra, agora como ÍCONES (não mais texto)': /Botao-Print \(\[char\]0x2196\) 52/.test(psI)
+        && /Botao-Print \(\[char\]0x2571\) 52/.test(psI) && /Botao-Print \(\[char\]0x25AD\) 52/.test(psI)
+        && !/Botao-Print "Seta"/.test(psI),
+      'a ferramenta ativa fica destacada (Gold) e as inativas num tom neutro escuro - só uma acende': /\$par\[0\]\.BackColor = \[System\.Drawing\.Color\]::Gold; \$par\[0\]\.ForeColor = \[System\.Drawing\.Color\]::Black/.test(psI)
+        && /\$par\[0\]\.BackColor = \[System\.Drawing\.Color\]::FromArgb\(70, 78, 90\)/.test(psI)
+        && /& \$form\.Tag\.pintarFerramenta \$form/.test(psI)
+        && !/UseVisualStyleBackColor/.test(psI),
       // o Master pediu "tudo menos texto" - se aparecer ferramenta de texto, foi engano
       'NÃO existe ferramenta de texto': !/Botao-Print "Texto"/.test(psI) && !/ferramenta = "texto"/.test(psI),
       'o estado nasce em seleção, com a lista de marcas pronta':
@@ -16138,7 +16143,7 @@ setTimeout(async () => {
         && /\$rx = \[Math\]::Min\(\$x1, \$x2\); \$ry = \[Math\]::Min\(\$y1, \$y2\)/.test(psI),
       'caixa de tamanho zero não vira desenho degenerado': /if \(\$rw -gt 0 -and \$rh -gt 0\) \{ \$g\.DrawRectangle/.test(psI),
       'o X fecha sem salvar': /\$fechar\.Add_Click\(\{param\(\$botao,\$e\);\$janela=\$botao\.Parent\.Parent;\$janela\.Tag\.resultado=\$null;\$janela\.Hide\(\);\$janela\.Close\(\)\}\)/.test(psI),
-      'vale nos DOIS tipos de máquina': /Botao-Print "Seta" 52/.test(psA) && /function Desenhar-Marcas/.test(psA),
+      'vale nos DOIS tipos de máquina': /Botao-Print \(\[char\]0x2196\) 52/.test(psA) && /function Desenhar-Marcas/.test(psA),
       'o script continua começando com # NOCZenith': psI.startsWith('# NOCZenith'),
       // ---- v41: a barra ESTAVA escondida atrás da superfície Dock=Fill (z-order),
       // por isso "não aparecia"; e agora cola na seleção como no Lightshot ----
@@ -16152,6 +16157,34 @@ setTimeout(async () => {
         && /\$by = \$a\.Bottom \+ 8; if \(\$by \+ \$bar\.Height \+ 8 -gt \$ch\) \{ \$by = \$a\.Top - \$bar\.Height - 8 \}/.test(psI),
       'soltar o mouse reposiciona a barra na seleção (nos dois ramos do MouseUp)':
         (psI.match(/& \$s\.Parent\.Tag\.posBarra \$s\.Parent/g) || []).length >= 2,
+      // ---- v43: cada marca tem COR e ESPESSURA próprias; botões - / + / Cor ----
+      'v43 (sem subir, cor/espessura não chegam às máquinas)': vgM.VERSAO_VIGIA >= 43,
+      'o traço nasce com a cor e a espessura atuais (não mais Red/3 fixo)':
+        /\$s\.Tag\.marcaAtual = @\{ tipo = \$s\.Tag\.ferramenta;[\s\S]{0,120}?cor = \$s\.Tag\.corMarca; grossura = \$s\.Tag\.grossuraMarca \}/.test(psI)
+        && /corMarca = \[System\.Drawing\.Color\]::Red; grossuraMarca = 3/.test(psI),
+      'o desenhista usa a cor/espessura DE CADA marca (com reserva), não uma caneta fixa':
+        /\$corDaMarca = if \(\$m\.cor\) \{ \$m\.cor \} else \{ \[System\.Drawing\.Color\]::Red \}/.test(psI)
+        && /\$grossuraDaMarca = if \(\$m\.grossura\) \{ \[int\]\$m\.grossura \} else \{ 3 \}/.test(psI)
+        && /\$caneta = New-Object System\.Drawing\.Pen\(\$corDaMarca, \$grossuraDaMarca\)/.test(psI)
+        && !/New-Object System\.Drawing\.Pen\(\[System\.Drawing\.Color\]::Red, 3\)/.test(psI),
+      'afinar e engrossar clampam (1..12) e a barra tem os botões - / + / Cor':
+        /Botao-Print "-" 30/.test(psI) && /Botao-Print "\+" 30/.test(psI) && /Botao-Print "Cor" 44/.test(psI)
+        && /\$j\.Tag\.grossuraMarca = \[Math\]::Max\(1, \[int\]\$j\.Tag\.grossuraMarca - 1\)/.test(psI)
+        && /\$j\.Tag\.grossuraMarca = \[Math\]::Min\(12, \[int\]\$j\.Tag\.grossuraMarca \+ 1\)/.test(psI),
+      'o botão Cor abre o seletor e guarda a cor pros próximos traços':
+        /\$dlg = New-Object System\.Windows\.Forms\.ColorDialog/.test(psI)
+        && /\$j\.Tag\.corMarca = \$dlg\.Color; \$b\.BackColor = \$dlg\.Color/.test(psI),
+      // ---- v44: congela a tela durante a seleção (o vídeo não corre mais por baixo) ----
+      'v44 (sem subir, o congelamento não chega às máquinas)': vgM.VERSAO_VIGIA >= 44,
+      'a janela é opaca com o snapshot congelado de fundo (não mais Opacity 0.32 deixando o vivo vazar)':
+        /function Selecionar-AreaPrint\(\$tela, \$captura\)/.test(psI)
+        && /\$form\.Opacity = 1\.0; \$form\.BackgroundImage = \$captura; \$form\.BackgroundImageLayout = "None"/.test(psI)
+        && !/\$form\.Opacity = 0\.32/.test(psI)
+        && /\$escolhaPrint = Selecionar-AreaPrint \$tela \$imagem/.test(psI),
+      'a seleção escurece o resto e ACENDE só a área (redesenha o snapshot ali)':
+        /New-Object System\.Drawing\.SolidBrush\(\[System\.Drawing\.Color\]::FromArgb\(120, 0, 0, 0\)\); \$e\.Graphics\.FillRectangle\(\$sombra, \$s\.ClientRectangle\)/.test(psI)
+        && /\$e\.Graphics\.DrawImage\(\$s\.Tag\.captura, \$areaAtual, \$areaAtual, \[System\.Drawing\.GraphicsUnit\]::Pixel\)/.test(psI)
+        && /captura = \$captura \}/.test(psI),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okMarcasPrint = !falhas.length;
