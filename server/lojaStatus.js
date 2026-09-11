@@ -718,6 +718,10 @@ async function heartbeat(codigo, posto, info, token) {
   // entre a leitura e esta escrita, o null apagava a mensagem que nunca
   // chegou a ser mostrada.
   if (mensagemPendente) patch.mensagemPendente = null;
+  // "Capturar agora" (ver pedirCaptura) - one-shot igual a mensagem: entregue
+  // nesta batida e apagado junto, forcando a gravacao
+  const capturarAgora = capturaPendente(atual);
+  if (atual && atual.noPulsoPrintCapturarEm) patch.noPulsoPrintCapturarEm = null;
 
   // IP publico mudou (ou apareceu pela primeira vez): entra no historico. A
   // mudanca de ip ja forca gravacao imediata (ver mudouAlgoQueImporta), entao
@@ -741,6 +745,7 @@ async function heartbeat(codigo, posto, info, token) {
   // gravacao nao atrasa a deteccao de queda enquanto o processo vive.
   const anterior = atual || {};
   const mudouAlgoQueImporta = mensagemPendente
+    || patch.noPulsoPrintCapturarEm === null  // gatilho de captura consumido
     || !anterior.ultimoHeartbeatEm            // primeira batida deste posto
     || patch.ip !== anterior.ip
     || patch.userAgent !== anterior.userAgent
@@ -807,6 +812,7 @@ async function heartbeat(codigo, posto, info, token) {
     // Também vai no heartbeat para o agente interno aplicar a mudança sem
     // precisar baixar/reinstalar o NOCZenith.
     noPulsoPrint: !!(atual && atual.noPulsoPrint),
+    capturarAgora,
   };
 }
 
@@ -968,7 +974,32 @@ async function configuracaoAgente(codigo, posto, token) {
   if (!snap.exists) throw new Error('Computador não encontrado.');
   const atual = snap.data();
   exigirTokenSeTiver(atual, token);
-  return !!atual.noPulsoPrint;
+  // "Capturar agora" e one-shot: entregue uma vez, apagado na hora. Os tipos
+  // que nao batem heartbeat pelo agente (caixa, quiosque...) so tem esta
+  // rota - por isso o gatilho viaja aqui e nao pela fila de comandos, que
+  // so o interno recebe.
+  const capturarAgora = capturaPendente(atual);
+  if (atual.noPulsoPrintCapturarEm) await gravarEEspelhar(codigo, posto, { noPulsoPrintCapturarEm: null });
+  return { noPulsoPrint: !!atual.noPulsoPrint, capturarAgora };
+}
+
+// pedido de captura do Master vale 5 minutos: tempo de sobra pro agente
+// buscar (interno ~25s, os outros ate ~2min) sem deixar um pedido velho
+// abrir o overlay do nada dias depois
+const CAPTURA_VALE_MS = 5 * 60 * 1000;
+function capturaPendente(atual) {
+  return !!(atual && atual.noPulsoPrintCapturarEm && Date.now() - atual.noPulsoPrintCapturarEm < CAPTURA_VALE_MS);
+}
+
+// Master aperta "📸 Capturar agora" no card: o agente abre o overlay de
+// selecao na tela da loja na proxima consulta, sem depender do Ctrl+Q. E
+// tambem a prova dos nove: overlay abrindo pelo botao e nao pelo atalho =
+// a tecla nao esta chegando (teste remoto, integridade, layout).
+async function pedirCaptura(codigo, posto) {
+  const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
+  if (!snap.exists) throw new Error('Computador não encontrado.');
+  await gravarEEspelhar(codigo, posto, { noPulsoPrintCapturarEm: Date.now() });
+  return { codigo, posto, pedidoEm: Date.now() };
 }
 
 // O agente conta em que pe esta (ver Reportar-EstadoAgente no vigiaScript.js):
@@ -2615,5 +2646,5 @@ module.exports = {
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
   saudeMaquinas,
-  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, reportarEstadoAgente,
+  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, reportarEstadoAgente, pedirCaptura,
 };

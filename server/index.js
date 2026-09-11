@@ -1322,7 +1322,7 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
     // a entrega do comando/chat (ver lojaStatus.heartbeat); presenca/IP nao
     // dependem dele, pra maquina legada nao sumir do painel
     const token = req.headers['x-noc-token'] || req.body.token || null;
-    const { mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
+    const { mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora } = await lojaStatus.heartbeat(req.body.unidade, req.body.posto, {
       ip, userAgent: req.body.userAgent, abertoDesde: req.body.abertoDesde,
       // medicao de link (ver redeDiagnostico.js). Vem do agente/navegador e
       // esta rota e PUBLICA, entao e tratado como dado hostil - quem sanitiza
@@ -1330,7 +1330,7 @@ app.post('/api/loja-status/heartbeat', async (req, res) => {
       rede: req.body.rede,
       tailscale: req.body.tailscale,
     }, token);
-    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint });
+    res.json({ ok: true, mensagemPendente, comandoPendente, chatMensagens, noPulsoPrint, capturarAgora });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -1457,8 +1457,7 @@ app.post('/api/loja-status/:codigo/computadores/:posto/estado-agente', async (re
 
 app.get('/api/loja-status/:codigo/computadores/:posto/configuracao-agente', async (req, res) => {
   try {
-    const noPulsoPrint = await lojaStatus.configuracaoAgente(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null);
-    res.json({ noPulsoPrint });
+    res.json(await lojaStatus.configuracaoAgente(req.params.codigo, req.params.posto, req.headers['x-noc-token'] || null));
   } catch (err) {
     res.status(403).json({ error: err.message });
   }
@@ -3565,6 +3564,19 @@ app.put('/api/loja-status/:codigo/computadores/:posto/unidade', requireSection('
 app.put('/api/loja-status/:codigo/computadores/:posto/anydesk', requireSection('suporte'), async (req, res) => {
   try {
     res.json(await lojaStatus.definirAnydeskId(req.params.codigo, req.params.posto, req.body.anydeskId));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Master pede uma captura na tela da loja sem depender do Ctrl+Q (ver
+// pedirCaptura em lojaStatus.js). Chega pelo heartbeat (interno) ou pela
+// configuracao-agente (demais tipos) - one-shot, vale 5 minutos. Fica AQUI,
+// depois do middleware de sessao: la em cima, junto das rotas publicas do
+// agente, req.user ainda nao existe e o requireMaster barrava ate o Master.
+app.post('/api/loja-status/:codigo/computadores/:posto/capturar-agora', auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await lojaStatus.pedirCaptura(req.params.codigo, req.params.posto));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

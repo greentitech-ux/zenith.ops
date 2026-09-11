@@ -1301,6 +1301,7 @@ function atualizarConteudoDetalhe(codigo, c){
     <button type="button" class="btn-mini" onclick="copiarLinkComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🔗 Link</button>
     <button type="button" class="btn-mini ok" title="Copiar o comando de instalação pra colar no PowerShell da loja (contorna o bloqueio do Windows)" onclick="copiarComandoVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">📋 Copiar comando</button>
     <button type="button" class="btn-mini" title="Baixar o agente NOC-NoPulso (jeito manual)" onclick="baixarVigia('${escapeJs(codigo)}','${escapeJs(c.posto)}','${c.tipo||'atendimento'}')">🛡️ Baixar</button>
+    ${c.noPulsoPrint ? `<button type="button" class="btn-mini" title="Abre a seleção de captura na tela DESTA máquina sem depender do Ctrl+Q - a máquina pega o pedido na próxima consulta (interno ~25s, demais até ~2 min)" onclick="capturarAgora('${escapeJs(codigo)}','${escapeJs(c.posto)}')">📸 Capturar agora</button>` : ''}
     ${c.tipo === 'interno' ? `<button type="button" class="btn-mini" style="color:var(--warn);" title="Reiniciar este computador - abre a janela de manutenção já com ele marcado" onclick="reiniciarDesteComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🔁 Reiniciar</button>` : ''}
     <button type="button" class="btn-mini" style="color:var(--bad);" onclick="removerComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}','${nomeJs}')">🗑️ Remover</button>
   `;
@@ -2419,6 +2420,18 @@ async function salvarEdicaoComputador(){
   }
 }
 
+// "Capturar agora": gatilho sem teclado pro NoPulsoPrint (ver pedirCaptura no
+// lojaStatus.js). Serve pra tirar o print pela loja e, principalmente, pra
+// separar as causas: overlay abrindo pelo botão e não pelo Ctrl+Q = a tecla
+// não está chegando nessa máquina.
+async function capturarAgora(codigo, posto){
+  try{
+    const resp = await fetch(`/api/loja-status/${encodeURIComponent(codigo)}/computadores/${encodeURIComponent(posto)}/capturar-agora`, { method: 'POST' });
+    const d = await resp.json().catch(()=>({}));
+    if(!resp.ok) throw new Error(d.error || `HTTP ${resp.status}`);
+    alert('Pedido enviado. A seleção de captura abre na tela dessa máquina na próxima consulta do agente (interno ~25s, demais até ~2 min). Se abrir pelo botão e não pelo Ctrl+Q, o problema é a tecla não chegar.');
+  }catch(e){ alert(e.message); }
+}
 async function removerComputador(codigo, posto, nome){
   if(!confirm(`Remover o computador "${nome || posto}"? O AnyDesk cadastrado some e o link atual desse computador para de funcionar.`)) return;
   try{

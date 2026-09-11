@@ -6992,7 +6992,7 @@ setTimeout(async () => {
       // do agente: sem isto, em producao o agente leva 401 e nunca reporta
       'rota está na lista pública do dashboard com senha': /ROTA_LOJA_ESTADO_AGENTE_RE\.test\(path\)/.test(fonteIndex)
         && /function rotaPublicaSemDashboard\([\s\S]*?ROTA_LOJA_ESTADO_AGENTE_RE\.test\(path\)[\s\S]*?\n\}/.test(fonteIndex),
-      'interno: o heartbeat passa pela MESMA regra (estado + recria + reporta), não chama Iniciar direto': scripts[0].includes('try { Aplicar-NoPulsoPrint ([bool]$resp.noPulsoPrint) }')
+      'interno: o heartbeat passa pela MESMA regra (estado + recria + reporta), não chama Iniciar direto': scripts[0].includes('try { Aplicar-NoPulsoPrint ([bool]$resp.noPulsoPrint) ([bool]$resp.capturarAgora) }')
         && !scripts[0].includes('if ($resp.noPulsoPrint) { Iniciar-NoPulsoPrint }') && scripts.every((s) => s.includes('function Aplicar-NoPulsoPrint') && s.includes('Aplicar-NoPulsoPrint ([bool]$configPrint.noPulsoPrint)')),
       'token errado é recusado': errado.status >= 400,
       'sem token é recusado (máquina tem segredo)': semToken.status >= 400,
@@ -7016,7 +7016,48 @@ setTimeout(async () => {
       // deixava tudo isso dentro do arquivo e o teste passava
       'card do NOC mostra versão e estado com cor de gravidade': htmlNoc.includes('if(c.agenteVersao || c.agenteNoPulsoPrint){')
         && htmlNoc.includes("startsWith('falhou')") && htmlNoc.includes('infoBits.push(`🤖 NOCZenith${'),
+      // ---- v35: sinais vitais, gatilho sem teclado, cão de guarda ----
+      'v35: o loop bate a cada 5s (ativo, Ctrl+Q vistos, capturas) e o script principal lê': vg.VERSAO_VIGIA >= 35 && scripts.every((s) =>
+        s.includes('function Pulsar-Print($ativoAgora)') && s.includes('ctrl+q vistos=$vistosCtrlQ|capturas=$capturasFeitas')
+        && s.includes('.AddArgument($CaminhoNoPulsoPrintPulso).AddArgument($CaminhoNoPulsoPrintGatilho)')
+        && s.includes('param($CaminhoAtivo, $PastaBase, $CaminhoLogPrint, $CaminhoErro, $CaminhoPulso, $CaminhoGatilho)')
+        && s.includes('return "pronto · $resumo"') && s.includes('if (-not $pulso) { return "pronto (loop ainda sem batimento)" }')),
+      'v35: Ctrl+Q é contado ao chegar, e a captura ao sair': scripts.every((s) =>
+        s.includes('if ($disparou) { $vistosCtrlQ++; Log-Print "Ctrl+Q recebido." }') && s.includes('$capturasFeitas++')),
+      'v35: gatilho sem teclado vale mesmo com o cadastro desligado': scripts.every((s) =>
+        s.includes('Remove-Item $CaminhoGatilho -Force -ErrorAction Stop; $gatilho = $true') && s.includes('if (-not $ativo -and -not $gatilho) {')
+        && s.includes('if ($disparou -or $gatilho) {') && s.includes('"1" | Set-Content -Path $CaminhoNoPulsoPrintGatilho -Force')
+        && s.includes('([bool]$configPrint.noPulsoPrint) ([bool]$configPrint.capturarAgora)')),
+      'v35: interno recebe o gatilho pelo heartbeat': scripts[0].includes('([bool]$resp.noPulsoPrint) ([bool]$resp.capturarAgora)'),
+      'v35: batimento parado com runspace vivo = janela presa -> derruba pra recriar': scripts.every((s) =>
+        s.includes('if ($idade -gt 45) {') && /if \(\$idade -gt 45\) \{\n\s+try \{ \$ps\.Stop\(\) \}[\s\S]{0,400}\$global:NoPulsoPrintPowerShell = \$null/.test(s)
+        && s.includes('return "travado ha ${idade}s (janela de selecao presa?) · $resumo"')),
+      'v35: cancelar a seleção não reabre com o Ctrl+Q ainda pressionado': scripts.every((s) =>
+        s.includes('$imagem.Dispose(); $atalhoAnterior = $atalho; Log-Print "Selecao cancelada."; continue') && !s.includes('$imagem.Dispose(); continue }')),
+      'card: botão "Capturar agora" só em máquina com o check, chama a rota': htmlNoc.includes("${c.noPulsoPrint ? `<button") && htmlNoc.includes('capturarAgora(') && htmlNoc.includes('/capturar-agora`, { method: \'POST\' }'),
     };
+    // ---- "Capturar agora" de ponta a ponta: Master pede -> agente recebe UMA
+    // vez (configuracao-agente e heartbeat) -> some ----
+    const cabMaster = { Authorization: 'Bearer ' + token };
+    const rotaCfg = `/api/loja-status/${UNI}/computadores/${posto}/configuracao-agente`;
+    const antes = JSON.parse((await pedir(rotaCfg, { 'x-noc-token': tk })).corpo);
+    const pedido = await postarJson(`/api/loja-status/${UNI}/computadores/${posto}/capturar-agora`, {}, cabMaster);
+    // usuario LOGADO que nao e Master: sem sessao nenhuma o requireAuth global
+    // ja barra com 401, e tirar o requireMaster da rota passava despercebido
+    let tokenGerente = null;
+    try { tokenGerente = (await auth.login('gerente-teste@teste.local', 'SenhaDeTeste!2026')).token; } catch {}
+    const semMaster = await postarJson(`/api/loja-status/${UNI}/computadores/${posto}/capturar-agora`, {}, tokenGerente ? { Authorization: 'Bearer ' + tokenGerente } : {});
+    const primeira = JSON.parse((await pedir(rotaCfg, { 'x-noc-token': tk })).corpo);
+    const segunda = JSON.parse((await pedir(rotaCfg, { 'x-noc-token': tk })).corpo);
+    await postarJson(`/api/loja-status/${UNI}/computadores/${posto}/capturar-agora`, {}, cabMaster);
+    const beat1 = await ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0' }, tk);
+    const beat2 = await ls.heartbeat(UNI, posto, { userAgent: 'NOCZenith/1.0' }, tk);
+    Object.assign(confEstado, {
+      ['capturar-agora: só Master - gerente logado leva 403 (Master HTTP ' + pedido.status + ' / gerente HTTP ' + semMaster.status + ')']: pedido.status === 200 && !!tokenGerente && semMaster.status === 403,
+      'configuracao-agente: sem pedido -> false; com pedido -> true UMA vez; depois some': antes.capturarAgora === false && antes.noPulsoPrint === false
+        && primeira.capturarAgora === true && segunda.capturarAgora === false,
+      'heartbeat (interno): entrega o gatilho UMA vez e some': beat1.capturarAgora === true && beat2.capturarAgora === false,
+    });
     const errosEstado = Object.entries(confEstado).filter(([, ok]) => !ok).map(([k]) => k);
     if (errosEstado.length) ruins += 1;
     console.log(`${errosEstado.length ? '✗' : '✓'} NOC: NOCZenith reporta versão real e estado do NoPulsoPrint, e recria runspace morto${errosEstado.length ? ' - FALHOU: ' + errosEstado.join(' | ') : ''}`);
@@ -15611,7 +15652,9 @@ setTimeout(async () => {
     const psA = gerar('atendimento');
     // as 8 alças: 4 quinas (já existiam) + 4 meios de borda (novos)
     const alcas = (t) => {
-      const pintura = (t.match(/\$form\.Add_Paint\(\{[\s\S]*?\}\)\n/) || [''])[0];
+      // o desenho pode estar no Form ou na superfície de captura do mouse
+      // (v34 moveu pra $superficie) - o que se confere é QUEM pinta ter as 8
+      const pintura = (t.match(/\$(?:form|superficie)\.Add_Paint\(\{[\s\S]*?\}\)\n/) || [''])[0];
       // cada uma das 8 conferida SOZINHA: um (Top|Bottom) casaria com metade
       // das alças presentes e deixaria passar a falta da outra
       return {
