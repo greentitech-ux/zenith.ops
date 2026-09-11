@@ -182,7 +182,7 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
 async function listarMinhas(acesso) {
   const snap = await COLLECTION.orderBy('atualizadoEm', 'desc').get();
   return snap.docs.map((d) => d.data())
-    .filter((tarefa) => tarefa.status !== 'ARQUIVADA' && podeParticipar(tarefa, acesso))
+    .filter((tarefa) => tarefa.status !== 'ARQUIVADA' && (tarefa.status !== 'CANCELADA' || acesso.isMaster) && podeParticipar(tarefa, acesso))
     // podeGerir vai junto pra tela saber o que desabilitar (prazo, participantes,
     // remover) sem ter que reimplementar a regra no navegador
     .map((tarefa) => ({ ...tarefa, podeGerir: podeGerir(tarefa, acesso) }))
@@ -448,6 +448,51 @@ async function prepararConversaoEmSolicitacao(id, acesso) {
   return { tarefa: { ...tarefa, numeroTicket }, numeroTicket, jaTemSolicitacao: false };
 }
 
+// CANCELAR: qualquer um que mexe no status da tarefa pode cancelar (Asana
+// deixa quem participa arquivar/cancelar). Vira status CANCELADA - some do
+// quadro de todo mundo e só o Master vê na coluna Cancelados (ver listarMinhas
+// e a tela). Diferente de EXCLUIR (arquivar), que apaga do fluxo de vez.
+async function cancelar(id, acesso, motivo) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeMoverStatus(tarefa, acesso)) throw new Error('Você acompanha esta tarefa: não pode cancelá-la.');
+  if (!STATUS_ABERTO.has(tarefa.status)) throw new Error('Só dá pra cancelar tarefa em aberto.');
+  const agora = new Date().toISOString();
+  await ref.update({ status: 'CANCELADA', canceladaEm: agora, canceladaPorId: acesso.usuario.id, canceladaPorNome: nomeUsuario(acesso.usuario), motivoCancelamento: String(motivo || '').trim().slice(0, 300) || null, atualizadoEm: agora });
+  return getOne(id);
+}
+
+// PEDIR EXCLUSÃO: quem não é Master não apaga direto - deixa um pedido pro
+// Master aprovar ou recusar. Excluir apaga do fluxo (arquiva), então passa
+// pelo dono do painel.
+async function pedirDelecao(id, acesso, motivo) {
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!podeMoverStatus(tarefa, acesso)) throw new Error('Você acompanha esta tarefa: não pode pedir exclusão.');
+  const agora = new Date().toISOString();
+  await ref.update({ delecaoSolicitada: { porId: acesso.usuario.id, porNome: nomeUsuario(acesso.usuario), em: agora, motivo: String(motivo || '').trim().slice(0, 300) || null }, atualizadoEm: agora });
+  return getOne(id);
+}
+
+// MASTER decide o pedido de exclusão: aprovar arquiva (some do fluxo);
+// recusar limpa o pedido e a tarefa segue viva.
+async function resolverDelecao(id, acesso, aprovar) {
+  if (!acesso.isMaster) throw new Error('Somente o Master decide a exclusão.');
+  const ref = COLLECTION.doc(id); const snap = await ref.get();
+  if (!snap.exists) throw new Error('Tarefa não encontrada.');
+  const tarefa = snap.data();
+  if (!tarefa.delecaoSolicitada) throw new Error('Não há pedido de exclusão nesta tarefa.');
+  const agora = new Date().toISOString();
+  if (aprovar) {
+    await ref.update({ status: 'ARQUIVADA', arquivadaEm: agora, arquivadaPorId: acesso.usuario.id, arquivadaPorNome: nomeUsuario(acesso.usuario), motivoArquivamento: 'Exclusão aprovada pelo Master (pedida por ' + (tarefa.delecaoSolicitada.porNome || 'usuário') + ').', delecaoSolicitada: null, atualizadoEm: agora });
+  } else {
+    await ref.update({ delecaoSolicitada: null, delecaoRecusadaEm: agora, delecaoRecusadaPorNome: nomeUsuario(acesso.usuario), atualizadoEm: agora });
+  }
+  return getOne(id);
+}
+
 async function arquivar(id, acesso) {
   const ref = COLLECTION.doc(id); const snap = await ref.get();
   if (!snap.exists) throw new Error('Tarefa não encontrada.');
@@ -480,4 +525,4 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
 }
 
 module.exports = {
-  camposDaReuniao, gerarLinkReuniao, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };
+  camposDaReuniao, gerarLinkReuniao, sincronizarTicket, sincronizarRetroativo, listarMinhas, getOne, criar, atualizarStatus, adicionarComentario, adicionarAnexo, removerAnexo, atualizarDatas, cancelar, pedirDelecao, resolverDelecao, atualizarUnidade, definirColaboradores, definirResponsavel, registrarGerado, prepararConversaoEmSolicitacao, concluir, arquivar, podeReceberTicket, podeGerirTarefa: podeGerir, podeParticiparTarefa: podeParticipar, podeMoverStatusTarefa: podeMoverStatus };

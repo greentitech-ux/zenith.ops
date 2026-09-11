@@ -14865,6 +14865,70 @@ setTimeout(async () => {
   if (!okSecaoMD) ruins += 1;
   console.log(`${okSecaoMD ? '✓' : '✗'} Meu Dia: a seção libera criar tarefa própria; sem ela a pessoa só responde o que recebeu`);
 
+  // ---- Meu Dia: cancelar (qualquer um) x excluir (só Master, ou pedido + aprovação) ----
+  let okCancDel = false;
+  try {
+    const cabM = { Authorization: 'Bearer ' + token };
+    const senhaCD = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-cd', {
+      passwordHash: senhaCD, role: 'user', active: true, email: 'cd@teste.local', username: 'cduser',
+      permissions: { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabU = { Authorization: 'Bearer ' + (await auth.login('cd@teste.local', 'SenhaDeTeste!2026')).token };
+    const idDe = (r) => (r.status === 200 ? JSON.parse(r.corpo).id : null);
+    const minhas = async (cab) => { const r = JSON.parse((await pedir('/api/tarefas/minhas', cab)).corpo); return Array.isArray(r) ? r : (r.tarefas || []); };
+    const acha = (lista, id) => (lista || []).find((t) => t.id === id) || null;
+
+    // 1) usuário comum CANCELA a própria tarefa (é o criador -> pode mover status)
+    const tCanc = idDe(await postarJson('/api/tarefas', { titulo: 'Tarefa a cancelar' }, cabU));
+    const cancelou = await postarJson('/api/tarefas/' + tCanc + '/cancelar', { motivo: 'nao vale mais' }, cabU);
+    const listaU = await minhas(cabU);
+    const listaM = await minhas(cabM);
+
+    // 2) EXCLUIR: comum não apaga direto, deixa PEDIDO; Master recusa e depois aprova
+    const tDel = idDe(await postarJson('/api/tarefas', { titulo: 'Tarefa a excluir' }, cabU));
+    const pediu = await postarJson('/api/tarefas/' + tDel + '/pedir-delecao', { motivo: 'duplicada' }, cabU);
+    const comPedido = acha(await minhas(cabU), tDel);
+    const comumTentaResolver = await postarJson('/api/tarefas/' + tDel + '/delecao', { aprovar: true }, cabU);
+    const recusou = await postarJson('/api/tarefas/' + tDel + '/delecao', { aprovar: false }, cabM);
+    const depoisRecusa = acha(await minhas(cabU), tDel);
+    await postarJson('/api/tarefas/' + tDel + '/pedir-delecao', { motivo: 'duplicada' }, cabU);
+    const aprovou = await postarJson('/api/tarefas/' + tDel + '/delecao', { aprovar: true }, cabM);
+    const sumiuU = acha(await minhas(cabU), tDel);
+    const sumiuM = acha(await minhas(cabM), tDel);
+
+    // 3) Master exclui direto (DELETE arquiva)
+    const tDir = idDe(await postarJson('/api/tarefas', { titulo: 'Master apaga direto' }, cabM));
+    const apagou = await pedirJsonDelete('/api/tarefas/' + tDir, cabM);
+    const sumiuDir = acha(await minhas(cabM), tDir);
+
+    const html = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const conf = {
+      'qualquer um (aqui o criador comum) cancela a própria tarefa': cancelou.status === 200 && JSON.parse(cancelou.corpo).tarefa.status === 'CANCELADA',
+      'cancelada some da lista de quem não é Master': !acha(listaU, tCanc),
+      'só o Master vê a cancelada (coluna Cancelados)': !!acha(listaM, tCanc) && acha(listaM, tCanc).status === 'CANCELADA',
+      'comum não exclui direto: vira PEDIDO de exclusão': pediu.status === 200 && !!(comPedido && comPedido.delecaoSolicitada) && comPedido.delecaoSolicitada.porNome === 'cduser',
+      'comum não pode aprovar/recusar exclusão (só o Master)': comumTentaResolver.status >= 400,
+      'Master RECUSA: limpa o pedido e a tarefa continua viva': recusou.status === 200 && !!depoisRecusa && !depoisRecusa.delecaoSolicitada && depoisRecusa.status !== 'ARQUIVADA',
+      'Master APROVA: arquiva e some de todas as listas': aprovou.status === 200 && JSON.parse(aprovou.corpo).tarefa.status === 'ARQUIVADA' && !sumiuU && !sumiuM,
+      'Master exclui direto pelo DELETE (arquiva)': apagou.status === 200 && !sumiuDir,
+      'listarMinhas esconde CANCELADA de quem não é Master (na fonte)': /tarefa\.status !== 'CANCELADA' \|\| acesso\.isMaster/.test(require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8')),
+      'a tela tem botão Cancelar e Excluir/Pedir exclusão': /id="BTNCANCEL"[^>]*onclick="cancelarTarefa\(\)"/.test(html) && /id="BTNDEL"[^>]*onclick="excluirTarefa\(\)"/.test(html) && /CTX\.isMaster\?'🗑 Excluir':'🗑 Pedir exclusão'/.test(html),
+      'a coluna Cancelados existe e só aparece pro Master': /id="COLX"[^>]*hidden><h2>Cancelados/.test(html) && /\$\('COLX'\)\.hidden=!CTX\.isMaster/.test(html) && /if\(t\.status==='CANCELADA'\)return'X'/.test(html),
+      'o X de fechar fica fixo no topo do modal (sticky, não some no scroll)': /\.dialog>\.row:first-child\{position:sticky;top:0/.test(html),
+      'fechar zera O e TODA reabertura checa O (o popup não volta ao atualizar o card)':
+        /function fechar\(\)\{\$\('M'\)\.classList\.remove\('show'\);O=null\}/.test(html)
+        && (html.match(/openT\(O\.id\)/g) || []).length > 0
+        && (html.match(/openT\(O\.id\)/g) || []).length === (html.match(/if\(O\)openT\(O\.id\)/g) || []).length,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okCancDel = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (cancelar=${cancelou.status} pedir=${pediu.status} comumResolve=${comumTentaResolver.status} recusa=${recusou.status} aprova=${aprovou.status})`);
+  } catch (e) { okCancDel = false; console.log('  erro: ' + e.message); }
+  if (!okCancDel) ruins += 1;
+  console.log(`${okCancDel ? '✓' : '✗'} Meu Dia: cancelar (qualquer um) x excluir (só Master, ou pedido + aprovação), e coluna Cancelados só do Master`);
+
   // ---- Meu Dia: responsável x quem participa (modelo do Asana) ----
   // Participante faz a tarefa ANDAR (comenta, anexa, move o status). O que
   // muda o combinado - prazo e quem participa - e o que destrói fica com o
