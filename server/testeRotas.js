@@ -4405,6 +4405,9 @@ setTimeout(async () => {
 
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'beniboy.html'), 'utf8');
     const widgetSrc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'suporte-chat.js'), 'utf8');
+    const alarmeSync = require('fs').readFileSync(require('path').join(__dirname, 'public', 'alarme-sync.js'), 'utf8');
+    const alertaHtml = require('fs').readFileSync(require('path').join(__dirname, 'public', 'alerta-beniboy.html'), 'utf8');
+    const fonteIdx = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
     const conferencias = {
       'apresentação com saudação + nome + Suporte':
         /^(Bom dia|Boa tarde|Boa noite|Boa madrugada), Letícia! O Suporte assumiu seu atendimento e acompanhará sua solicitação\.$/.test(m1.texto)
@@ -4447,6 +4450,18 @@ setTimeout(async () => {
       'widget: caixas de mensagem compactas (menos espaço vazio)':
         /\.szc-corpo\{padding:10px 12px;[^}]*gap:5px;\}/.test(widgetSrc)
         && /\.szc-msg\{max-width:85%;padding:6px 9px;/.test(widgetSrc),
+      // silenciar numa tela (celular ou PC) cala TODAS as telas daquele usuário
+      'alarme: silenciar dispara TODOS os paradores locais (widget + página de alarme cheia)':
+        /function aplicarSilencioRemoto\(\) \{\s*ouvintes\.forEach\(\(cb\) => \{ try \{ cb\(\); \} catch/.test(alarmeSync)
+        && /window\.ZenithAlarmeSync = \{ identificar, aoSilenciar, silenciar, aplicarSilencioRemoto \}/.test(alarmeSync),
+      'alarme: o SSE "alarme-silenciado" chama aplicarSilencioRemoto (não só o overlay do widget)':
+        /es\.addEventListener\('alarme-silenciado'/.test(widgetSrc)
+        && /pararAlarmeBeniboy\(\);\s*if \(window\.ZenithAlarmeSync && window\.ZenithAlarmeSync\.aplicarSilencioRemoto\) window\.ZenithAlarmeSync\.aplicarSilencioRemoto\(\);/.test(widgetSrc),
+      'alarme: o servidor repassa o silêncio POR USUÁRIO (uma conta não cala a outra)':
+        /app\.post\('\/api\/alarme\/silenciado'/.test(fonteIdx)
+        && /broadcastParaUsuario\(req\.user\.id, 'alarme-silenciado'/.test(fonteIdx),
+      'alarme: a página de alarme cheia registra a própria sirene como parador (então o SSE a cala)':
+        /window\.ZenithAlarmeSync\.aoSilenciar\(pararAlarme\)/.test(alertaHtml),
       'Ticket # do chat vira link para a tarefa ou chamado': /const destinoPrincipal = chat\.chamadoId/.test(html) && /\/tarefas\.html\?tarefa=/.test(html) && /Ticket #\$\{escapeHtml\(chat\.numeroTicket\)\}/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);

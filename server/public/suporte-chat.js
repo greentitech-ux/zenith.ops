@@ -1121,7 +1121,15 @@
       // a MESMA pessoa silenciou/atendeu em outro aparelho (celular x
       // computador) - as abas do mesmo navegador já foram avisadas na hora
       // pelo BroadcastChannel; este evento cobre o resto
-      es.addEventListener('alarme-silenciado', () => { pararAlarmeBeniboy(); });
+      es.addEventListener('alarme-silenciado', () => {
+        // cala TUDO desta pessoa nesta tela: o overlay do widget E a sirene da
+        // página de alarme cheia (alerta-beniboy.html), que registra o próprio
+        // parador no ZenithAlarmeSync. Antes só o overlay do widget parava, e a
+        // sirene da tela de alarme continuava tocando quando o silêncio vinha
+        // de outro aparelho.
+        pararAlarmeBeniboy();
+        if (window.ZenithAlarmeSync && window.ZenithAlarmeSync.aplicarSilencioRemoto) window.ZenithAlarmeSync.aplicarSilencioRemoto();
+      });
       es.addEventListener('pedido-status-mudou', (e) => { mostrarPopupPedido(JSON.parse(e.data)); });
       // chegou mensagem direta: recarrega as conversas (o texto de verdade
       // esta gravado, o evento e so o gatilho) e mostra o convite pra abrir

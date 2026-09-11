@@ -33,6 +33,15 @@
   function identificar(id) { identidade = id || null; }
   function aoSilenciar(cb) { if (typeof cb === 'function') ouvintes.push(cb); }
 
+  // O servidor mandou (por SSE) que a MESMA pessoa silenciou em OUTRO aparelho.
+  // Aqui só disparamos os paradores locais (widget E página de alarme cheia) -
+  // sem BroadcastChannel/POST, porque o SSE já chegou nesta aba por conta
+  // própria e propagar de novo geraria eco. É isto que faz o silêncio de um
+  // aparelho calar TODAS as telas do usuário, não só o overlay do widget.
+  function aplicarSilencioRemoto() {
+    ouvintes.forEach((cb) => { try { cb(); } catch (e) { /* um ouvinte quebrado não trava os outros */ } });
+  }
+
   function receber(msg) {
     if (!msg || msg.tipo !== TIPO) return;
     // so cala se veio do MESMO acesso. Quando um dos lados nao sabe quem e
@@ -69,5 +78,5 @@
     } catch (e) { /* ignora */ }
   }
 
-  window.ZenithAlarmeSync = { identificar, aoSilenciar, silenciar };
+  window.ZenithAlarmeSync = { identificar, aoSilenciar, silenciar, aplicarSilencioRemoto };
 })();
