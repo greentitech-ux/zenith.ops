@@ -16599,6 +16599,155 @@ setTimeout(async () => {
   if (!okBarras) ruins += 1;
   console.log(`${okBarras ? '✓' : '✗'} Barra de rolagem: o desenho do Meu Dia em todas as telas, de um arquivo só`);
 
+  // Chamado aberto pelo Beniboy tem de aparecer para QUEM PEDIU. O bot gravava
+  // criadoPorId: null e punha a identidade real dentro de um rótulo de texto
+  // ("Beniboy (chat de suporte) — elaine · elaine@..."), mas podeVerCard libera
+  // pelo criadoPorId - então o ticket existia, o Master via, e a Central de
+  // quem pediu mostrava 0. A pessoa pedia no chat e parecia que nada acontecia.
+  let okDonoChamado = false;
+  try {
+    const bot = require(__dirname + '/suporteBot.js');
+    const fonte = require('fs').readFileSync(__dirname + '/suporteBot.js', 'utf8');
+    const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const usuarios = [
+      { id: 'u1', email: 'elaine@grupobravoempresarial.com', username: 'elaine' },
+      { id: 'u2', email: 'outro@grupobravoempresarial.com', username: 'outro' },
+    ];
+    const logada = bot.donoDoChat({ logado: { id: 'u1' }, contato: 'elaine@grupobravoempresarial.com' }, usuarios);
+    // o contato é DIGITADO no widget: sem sessão ele não pode virar identidade
+    const anonimaComEmailDeOutro = bot.donoDoChat({ logado: null, contato: 'elaine@grupobravoempresarial.com' }, usuarios);
+
+    const conf = {
+      'quem estava logado ao abrir a conversa vira o dono do chamado':
+        !!logada && logada.id === 'u1',
+      // senão qualquer visitante planta um chamado na lista de outra pessoa
+      // só escrevendo o e-mail dela no formulário do widget
+      'digitar o e-mail de outra pessoa NÃO dá a ela o chamado':
+        anonimaComEmailDeOutro === null,
+      'visitante anônimo continua sem dono, como era antes':
+        bot.donoDoChat({ logado: null }, usuarios) === null
+        && bot.donoDoChat({ logado: {} }, usuarios) === null
+        && bot.donoDoChat(null, usuarios) === null,
+      'usuário que não existe mais não quebra nem inventa dono':
+        bot.donoDoChat({ logado: { id: 'sumiu' } }, usuarios) === null
+        && bot.donoDoChat({ logado: { id: 'u1' } }, null) === null,
+      'o ticket nasce com esse dono (sem isso a regra acima não vale de nada)':
+        /criadoPorId: dono \? dono\.id : null/.test(fonte)
+        && /criadoPorEmail: dono \? \(dono\.email \|\| dono\.username\)/.test(fonte),
+      // é o criadoPorId que abre o cadeado - se mudar, este teste tem de cair
+      'é por criadoPorId que a Central libera quem pediu':
+        /function podeVerCard\(req, card\) \{[\s\S]{0,400}?card\.criadoPorId === req\.user\.id/.test(idx),
+      // a origem não pode sumir: quem olha o card precisa saber que veio do chat
+      'continua registrado que foi o Beniboy que abriu':
+        /Aberto pelo Beniboy \(chat de suporte\)/.test(fonte),
+      // users.list() é cacheado; chamar fora do caminho com sessão seria
+      // leitura à toa em toda conversa anônima
+      'só consulta a lista de usuários quando há sessão':
+        /chat\.logado && chat\.logado\.id \? donoDoChat\(chat, await users\.list\(\)\) : null/.test(fonte),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDonoChamado = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDonoChamado = false; console.log('  erro: ' + e.message); }
+  if (!okDonoChamado) ruins += 1;
+  console.log(`${okDonoChamado ? '✓' : '✗'} Beniboy: o chamado que ele abre aparece para quem pediu (e só para quem provou ser ela)`);
+
+  // Balão do chat: o do Beniboy tinha 78px de altura para UMA frase de uma
+  // linha - 32 deles só da linha do avatar, que entrava em tamanho 32px dentro
+  // de um texto de 9,5px, e mais uma linha só para a hora. Medido no navegador
+  // depois: 50px, com o cabeçalho inteiro numa linha só.
+  let okBalaoChat = false;
+  try {
+    const w = require('fs').readFileSync(__dirname + '/public/suporte-chat.js', 'utf8');
+    const css = (w.match(/\.szc-msg\{[\s\S]*?\.szc-msg \.szc-quando\{[^}]*\}/) || [''])[0];
+
+    const conf = {
+      'quem e quando na MESMA linha, acima do texto - nos DOIS templates':
+        (w.match(/<div class="szc-cab"><span class="szc-quem">/g) || []).length === 2
+        && !/<\/span><span class="szc-quando">\$\{fmtQuando\(m\.em\)\}<\/span>\$\{esc\(m\.texto\)\}/.test(w)
+        && /\.szc-msg \.szc-cab\{margin-bottom:2px;line-height:1\.3;\}/.test(css),
+      'o avatar entra do tamanho de texto, não em 32px':
+        /\.szc-msg \.szc-quem svg\{width:13px;height:13px;/.test(css)
+        && !/beniboySVG\(32\)/.test(w),
+      // flex-wrap fazia o Chrome medir a largura máxima pelo MAIOR item (balão
+      // estreito, cabeçalho em duas linhas); nowrap cortava "assistente virtua"
+      'o cabeçalho não é flex: com flex ele ou quebra em duas linhas ou corta':
+        !/\.szc-msg \.szc-cab\{[^}]*display:flex/.test(css)
+        && !/\.szc-msg \.szc-cab\{[^}]*nowrap/.test(css),
+      // repetido em toda fala, o rótulo passava a ditar a largura do balão
+      '"assistente virtual" aparece UMA vez, na primeira fala do Beniboy':
+        /let jaApresentou = false;/.test(w)
+        && /jaApresentou \? 'Beniboy' : 'Beniboy · assistente virtual'/.test(w)
+        && /if \(m\.de !== 'visitante' && m\.bot\) jaApresentou = true;/.test(w),
+      // a divulgação de que não é humano não pode simplesmente sumir
+      'mas a divulgação de que é assistente continua existindo':
+        /Beniboy · assistente virtual/.test(w),
+      'o balão continua encolhendo até o conteúdo':
+        /\.szc-msg\{max-width:85%/.test(css)
+        && /\.szc-msg\.visitante\{align-self:flex-end/.test(css)
+        && /\.szc-msg\.suporte\{align-self:flex-start/.test(css),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okBalaoChat = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okBalaoChat = false; console.log('  erro: ' + e.message); }
+  if (!okBalaoChat) ruins += 1;
+  console.log(`${okBalaoChat ? '✓' : '✗'} Chat: o balão do Beniboy encolheu de 78px para 50px, cabeçalho numa linha só`);
+
+  // Botão de fechar de painel/ficha: o ✕ redondo que já fechava a ficha do
+  // ticket na Central passa a ser o mesmo em todas as telas desse tipo. O CSS
+  // estava COPIADO em 15 páginas e já divergia - 14 tinham a regra de :hover,
+  // uma não. Popup, toast e menu ficam de fora de propósito: um ✕ de 32px na
+  // quina de um aviso de canto de tela seria maior que o próprio aviso.
+  let okFechar = false;
+  try {
+    const fs = require('fs');
+    const tema = fs.readFileSync(__dirname + '/public/tema.js', 'utf8');
+    const bloco = (tema.match(/var fechar = document\.createElement\('style'\);[\s\S]*?document\.head\.appendChild\(fechar\);/) || [''])[0];
+    const outros = fs.readdirSync(__dirname + '/public')
+      .filter((f) => (f.endsWith('.html') || f.endsWith('.js')) && f !== 'tema.js')
+      .filter((f) => /\.(sheet-fechar-flutuante|zenith-fechar)[^{]*\{/.test(fs.readFileSync(__dirname + '/public/' + f, 'utf8')));
+    const usam = fs.readdirSync(__dirname + '/public')
+      .filter((f) => f.endsWith('.html'))
+      .filter((f) => /class="(sheet-fechar-flutuante|zenith-fechar)"/.test(fs.readFileSync(__dirname + '/public/' + f, 'utf8')));
+
+    const conf = {
+      'o desenho existe e sai de um lugar só': bloco.length > 300
+        && /fechar\.id = 'zenith-fechar'/.test(bloco),
+      'redondo, 32px, com o mesmo fundo e borda das outras telas':
+        /\.sheet-fechar-flutuante,\.zenith-fechar\{width:32px;height:32px;/.test(bloco)
+        && /border-radius:50%;/.test(bloco)
+        && /background:var\(--panel2/.test(bloco) && /border:1px solid var\(--line/.test(bloco),
+      // duas posições, um desenho: solto na quina da ficha, ou dentro de
+      // uma linha de cabeçalho (é o caso do painel de conversa do Beniboy)
+      'duas posições, o mesmo desenho':
+        /\.sheet-fechar-flutuante\{position:absolute;top:-14px;right:-6px;/.test(bloco)
+        && !/\.zenith-fechar\{position:absolute/.test(bloco),
+      // era a regra que faltava numa das 15 cópias
+      'o hover vale para os dois, e acende no acento':
+        /\.sheet-fechar-flutuante:hover,\.zenith-fechar:hover\{color:var\(--text[^)]*\);border-color:var\(--accent/.test(bloco),
+      'a cor vem do token, então o tema Claro troca junto':
+        !/#(?!181d24\b|27313b\b|8c99a7\b|e7ecf1\b|b8ff3c\b)[0-9a-f]{6}/i.test(bloco)
+        && (bloco.match(/var\(--/g) || []).length >= 5,
+      'injetado já no <head>, sem esperar a página montar':
+        /\n  document\.head\.appendChild\(fechar\);\n/.test(tema)
+        && tema.indexOf('appendChild(fechar)') < tema.indexOf('function montarControles'),
+      // era isto que divergia: 15 cópias do mesmo CSS, uma delas sem o hover
+      'nenhuma tela declara esse botão por conta própria':
+        outros.length === 0 || `sobrou em: ${outros.join(', ')}`,
+      'e as telas continuam usando a classe (não ficou CSS órfão)':
+        usam.length >= 13 || `só ${usam.length} telas usam`,
+      'o painel de conversa da Central usa o mesmo ✕, sem estilo próprio':
+        /<span class="zenith-fechar" title="Fechar" onclick="fecharPainel\(/.test(fs.readFileSync(__dirname + '/public/beniboy.html', 'utf8'))
+        && !/painel-fechar/.test(fs.readFileSync(__dirname + '/public/beniboy.html', 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true).map(([n, v]) => (typeof v === 'string' ? `${n} (${v})` : n));
+    okFechar = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okFechar = false; console.log('  erro: ' + e.message); }
+  if (!okFechar) ruins += 1;
+  console.log(`${okFechar ? '✓' : '✗'} Fechar: o mesmo ✕ redondo em toda ficha/painel, de um arquivo só`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
