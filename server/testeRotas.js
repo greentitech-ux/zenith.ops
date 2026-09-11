@@ -7053,6 +7053,16 @@ setTimeout(async () => {
       'thread do print fica DPI-aware: recorte para de descalibrar e os botões aparecem em tela escalada': scripts.every((s) =>
         s.includes('SetThreadDpiAwarenessContext([IntPtr](-4))') && s.includes('SetProcessDPIAware')
         && /SetThreadDpiAwarenessContext[\s\S]{0,200}?catch \{ try \{ \[void\]\[NoPulsoPrintTeclas\]::SetProcessDPIAware\(\)/.test(s)),
+      // ORDEM, não só presença: declarar DPI DEPOIS de ler a geometria não vale
+      // nada - as medidas já vieram em pixel lógico e o recorte volta a sair
+      // deslocado. Sem esta asserção, um refactor reintroduz "marca aqui, tira
+      // dali" com a suíte verde.
+      'o DPI é declarado ANTES de qualquer leitura de tela (VirtualScreen e CopyFromScreen)': scripts.every((s) => {
+        const dpi = s.indexOf('SetThreadDpiAwarenessContext([IntPtr](-4))');
+        const tela = s.indexOf('SystemInformation]::VirtualScreen');
+        const copia = s.indexOf('$grafico.CopyFromScreen(');
+        return dpi > 0 && tela > dpi && copia > dpi;
+      }),
       'névoa some NA HORA: Hide antes de Close no Ctrl+C, Enter, Esc e nos 3 botões': scripts.every((s) =>
         (s.match(/\$s\.Hide\(\);\$s\.Close\(\)/g) || []).length >= 3
         && (s.match(/\$janela\.Hide\(\);\$janela\.Close\(\)/g) || []).length >= 3
