@@ -43,8 +43,14 @@
   .szc-msg{max-width:85%;padding:6px 9px;border-radius:9px;font-size:12.5px;line-height:1.4;white-space:pre-wrap;word-break:break-word;}
   .szc-msg.visitante{align-self:flex-end;background:#12303a;color:#cfeeff;border:1px solid rgba(184, 255, 60,.25);}
   .szc-msg.suporte{align-self:flex-start;background:#181d24;border:1px solid #232a33;}
-  .szc-msg .szc-quem{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:#7d8896;display:block;}
-  .szc-msg .szc-quando{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;color:#5a6472;display:block;margin-bottom:2px;}
+  /* quem e quando cabem na MESMA linha. Empilhados, o balão do Beniboy
+     ficava com 78px de altura para uma frase de uma linha - 32 deles só da
+     linha do avatar, que entrava em tamanho 32px dentro de um texto de
+     9,5px. O balão tem de encolher até o conteúdo, não o contrário. */
+  .szc-msg .szc-cab{margin-bottom:2px;line-height:1.3;}
+  .szc-msg .szc-quem{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;color:#7d8896;}
+  .szc-msg .szc-quem svg{width:13px;height:13px;vertical-align:-2px;margin-right:3px;}
+  .szc-msg .szc-quando{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;color:#5a6472;margin-left:6px;}
   .szc-rodape{padding:10px 12px;border-top:1px solid #232a33;display:flex;gap:6px;}
   .szc-rodape .szc-input{flex:1;}
   .szc-aviso{font-size:11.5px;color:#7d8896;text-align:center;}
@@ -451,12 +457,19 @@
       : '';
     // m.bot = resposta do Beniboy (assistente automático) - identificado
     // pra pessoa saber que ainda não é um humano falando
+    // "· assistente virtual" é a divulgação de que ainda não é um humano: vale
+    // UMA vez, na primeira fala do Beniboy. Repetida em toda mensagem, ela
+    // passa a ditar a largura do balão - uma frase curta ficava num balão de
+    // 274px porque o rótulo era mais comprido que o texto.
+    let jaApresentou = false;
     corpo.innerHTML = protocoloTag + ((chat.mensagens || []).map((m, i) => {
       const anexoUrl = m.anexo && salvo ? `/api/suporte-chat/${encodeURIComponent(salvo.id)}/anexo/${i}?token=${encodeURIComponent(salvo.token)}` : '';
-      return `
+      const html = `
       <div class="szc-msg ${m.de === 'visitante' ? 'visitante' : 'suporte'}">
-        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Você') : (m.bot ? (window.beniboySVG ? window.beniboySVG(32) : '') + 'Beniboy · assistente virtual' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}${anexoHtml(m.anexo, anexoUrl)}
+        <div class="szc-cab"><span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Você') : (m.bot ? (window.beniboySVG ? window.beniboySVG(14) : '') + (jaApresentou ? 'Beniboy' : 'Beniboy · assistente virtual') : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span></div>${esc(m.texto)}${anexoHtml(m.anexo, anexoUrl)}
       </div>`;
+      if (m.de !== 'visitante' && m.bot) jaApresentou = true;
+      return html;
     }).join('') || '<div class="szc-aviso">Sem mensagens ainda.</div>');
     const pdfBtn = corpo.querySelector('#szc-pdf');
     if (pdfBtn) {
@@ -648,7 +661,7 @@
       const anexoUrl = m.anexo ? `/api/suporte-chats/${encodeURIComponent(chat.id)}/anexo/${i}?token=${encodeURIComponent(localStorage.getItem('authToken') || '')}` : '';
       return `
       <div class="szc-msg ${m.de === 'visitante' ? 'suporte' : 'visitante'}">
-        <span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Visitante') : (m.bot ? '🤖 Beniboy (bot)' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span>${esc(m.texto)}${anexoHtml(m.anexo, anexoUrl)}
+        <div class="szc-cab"><span class="szc-quem">${m.de === 'visitante' ? esc(chat.nome || 'Visitante') : (m.bot ? '🤖 Beniboy (bot)' : 'Suporte')}</span><span class="szc-quando">${fmtQuando(m.em)}</span></div>${esc(m.texto)}${anexoHtml(m.anexo, anexoUrl)}
       </div>`;
     }).join('');
   }
