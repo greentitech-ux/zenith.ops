@@ -1384,4 +1384,5 @@ module.exports = {
   decidirEdicao, editarDireto, moverFechamento, removerEdicao, remove, invalidarCache, marcarNotificacaoVistaEdicao, redirecionarEdicao,
   suspenderInvalidacao, retomarInvalidacao,
   backfillQuebraCaixa, previaMigracaoCalabresa, migrarCalabressParaCalabresa,
+  ajustePosDoDiaAnterior,
 };

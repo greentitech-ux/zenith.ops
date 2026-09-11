@@ -339,6 +339,7 @@
       <div class="resumo">
         <div class="linha"><span>Soma maquininhas</span><b id="resumo-maquinas">R$ 0,00</b></div>
         <div class="linha hidden" id="resumo-maquinas-pos-linha"><span>Soma Maquininha POS 01</span><b id="resumo-maquinas-pos">R$ 0,00</b></div>
+        <div class="linha hidden" id="resumo-ajuste-pos-linha"><span>Ajuste da Maquininha POS de ontem</span><b id="resumo-ajuste-pos">R$ 0,00</b></div>
         <div class="linha"><span>Sangria/Depósito do dia (automática)</span><b id="resumo-sangria">R$ 0,00</b></div>
         <div class="linha"><span>Soma outras saídas</span><b id="resumo-saidas">R$ 0,00</b></div>
         <div class="linha"><span>Faturamento total</span><b id="resumo-faturamento">R$ 0,00</b></div>
@@ -418,6 +419,10 @@ async function mesclarUnidadesExtras(){
 }
 function grupoDaUnidade(u){ return ARCFOOD_UNIDADES[u] ? 'ARCFOOD' : 'BRAVO'; }
 
+// desconto automatico do POS pos-meia-noite de ONTEM (ver ajustePosDoDiaAnterior
+// no servidor). Vem por fetch quando unidade+data mudam; entra na previa do Total
+// declarado exatamente como o servidor faz no lancar. <= 0.
+let AJUSTE_POS_ONTEM = 0;
 const CAMPOS_NUMERICOS = ['caixaInicial','caixaFinal','delivery','carryout','pickup','loja','adyen','adyenPos','ifood','food99','pix','pixCnpj','outros','totalSaida','faturamento','totalDeclarado','quebra','tc','cancelados','entradaDinheiro','deposito'];
 
 let ME = null;
@@ -567,6 +572,20 @@ async function carregarRemakesDoDia(){
 }
 
 // ---------- sangria do dia (leitura automática, ver carregarSangriaDoDia) ----------
+// Busca o desconto do POS de ontem pra MOSTRAR na previa (o servidor ja aplica
+// no lancar de qualquer jeito). So chama quando a secao Maquininha POS esta
+// ligada pra essa unidade - senao seria leitura a toa. Devolve 0 se nao usa POS.
+async function carregarAjustePosOntem(){
+  const unidade = document.getElementById('f-unidade').value;
+  const data = document.getElementById('f-data').value;
+  const posLigado = !document.getElementById('secao-maquininhas-pos').classList.contains('hidden');
+  if(!unidade || !data || !posLigado){ AJUSTE_POS_ONTEM = 0; atualizarResumo(); return; }
+  try{
+    const r = await fetch(`/api/fechamentos/ajuste-pos-anterior?unidade=${encodeURIComponent(unidade)}&data=${encodeURIComponent(data)}`).then(x=>x.ok?x.json():null);
+    AJUSTE_POS_ONTEM = r ? num(r.ajuste) : 0;
+  }catch(e){ AJUSTE_POS_ONTEM = 0; }
+  atualizarResumo();
+}
 async function carregarSangriaDoDia(){
   const unidade = document.getElementById('f-unidade').value;
   const data = document.getElementById('f-data').value;
@@ -639,6 +658,11 @@ function atualizarResumo(){
   document.getElementById('resumo-maquinas').textContent = fmtMoney(somaMaquinas);
   document.getElementById('resumo-maquinas-pos-linha').classList.toggle('hidden', document.getElementById('secao-maquininhas-pos').classList.contains('hidden'));
   document.getElementById('resumo-maquinas-pos').textContent = fmtMoney(somaMaquinasPos);
+  // ajuste do POS de ontem: so aparece quando ha valor (loja que usa POS e teve
+  // pos-meia-noite ontem). Mesmo rotulo do fechamento salvo (fechamentosLive.js).
+  const posLigadoResumo = !document.getElementById('secao-maquininhas-pos').classList.contains('hidden');
+  document.getElementById('resumo-ajuste-pos-linha').classList.toggle('hidden', !(posLigadoResumo && Math.abs(AJUSTE_POS_ONTEM) >= 0.01));
+  document.getElementById('resumo-ajuste-pos').textContent = fmtMoney(AJUSTE_POS_ONTEM);
   document.getElementById('resumo-sangria').textContent = fmtMoney(somaSangria);
   document.getElementById('resumo-saidas').textContent = fmtMoney(somaOutrasSaidas);
 
@@ -659,7 +683,7 @@ function atualizarResumo(){
     + somaKpisEm(kpisDefs, 'faturamento')
   ).toFixed(2);
   const totalDeclarado = +(
-    somaMaquinas + somaMaquinasPos + g('f-entradaDinheiro')
+    somaMaquinas + somaMaquinasPos + AJUSTE_POS_ONTEM + g('f-entradaDinheiro')
     + somaExtrasComSinal('forma-extra-input', formasDefs)
     + somaExtrasComSinal('canal-extra-input', canaisDefs, {soCruzado:true})
     + somaKpisEm(kpisDefs, 'totalDeclarado')
@@ -1427,8 +1451,8 @@ function aplicarFranquia(unidade){
   aplicarSecoesGrupo(unidade);
   atualizarResumo();
 }
-document.getElementById('f-unidade').addEventListener('change', (ev)=>{ aplicarFranquia(ev.target.value); carregarSangriaDoDia(); carregarRemakesDoDia(); });
-document.getElementById('f-data').addEventListener('input', ()=>{ carregarSangriaDoDia(); carregarRemakesDoDia(); });
+document.getElementById('f-unidade').addEventListener('change', (ev)=>{ aplicarFranquia(ev.target.value); carregarSangriaDoDia(); carregarRemakesDoDia(); carregarAjustePosOntem(); });
+document.getElementById('f-data').addEventListener('input', ()=>{ carregarSangriaDoDia(); carregarRemakesDoDia(); carregarAjustePosOntem(); });
 
 // ---------- sangria (retirada de caixa) registrada em campo - separado do
 // fechamento em si, soma automatico no fechamento do dia (server junta na
@@ -1779,6 +1803,7 @@ async function boot(){
     aplicarFranquia(selUnidade.value);
     await carregarSangriaDoDia();
     await carregarRemakesDoDia();
+    await carregarAjustePosOntem();
   }
 
   if(podeSangria){

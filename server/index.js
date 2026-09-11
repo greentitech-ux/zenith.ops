@@ -5288,6 +5288,21 @@ app.get('/api/fechamentos', requireSection('fechamentos'), async (req, res) => {
   res.json(auth.filterByUnidade(req, combinado));
 });
 
+// Desconto automatico da Maquininha POS do dia ANTERIOR (ver
+// ajustePosDoDiaAnterior em fechamentosLive.js) - o servidor ja calcula e
+// grava isso no lancar; esta rota so DEVOLVE o numero pra tela de lancamento
+// poder mostrar na previa (antes so aparecia depois de salvar, e o Master via
+// o POS de ontem "zerado" na hora de lancar). Leitura de 1 documento (o dia
+// anterior), so quando a unidade usa POS pos-meia-noite - devolve 0 se nao usa.
+app.get('/api/fechamentos/ajuste-pos-anterior', requireSection('lancamento'), async (req, res) => {
+  const { unidade, data } = req.query;
+  if (!unidade || !data) return res.status(400).json({ error: 'unidade e data são obrigatórios.' });
+  if (!req.isMaster && !(req.permissions.unidades || []).includes(unidade)) {
+    return res.status(403).json({ error: 'Você não tem acesso a essa unidade.' });
+  }
+  res.json({ ajuste: await fechamentosLive.ajustePosDoDiaAnterior(unidade, data) });
+});
+
 // registro CRU (sem mesclar com sangria/planilha) de um fechamento - usado
 // pela edicao direta do Master, pra nunca editar em cima de um valor que ja
 // vem somado com a sangria do dia (ver sangrias.js/comoFechamento)

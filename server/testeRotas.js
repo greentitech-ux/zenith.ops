@@ -2875,6 +2875,14 @@ setTimeout(async () => {
       observacao: 'Lote da Maquininha POS de ontem, descontado hoje.',
     }, cabP)).corpo);
 
+    // NOVO: a rota que a TELA DE LANÇAMENTO usa pra mostrar o ajuste do POS de
+    // ontem na prévia (antes o Master via zerado até salvar). Reusa o MESMO
+    // ajustePosDoDiaAnterior do servidor - não recalcula nada por fora.
+    const rotaAj = (u, d) => `/api/fechamentos/ajuste-pos-anterior?unidade=${u}&data=${d}`;
+    const ajComPos = JSON.parse((await pedir(rotaAj('TESTE_POS_ON', '2026-09-02'), cabP)).corpo);
+    const ajSemPos = JSON.parse((await pedir(rotaAj('TESTE_POS_OFF', '2026-09-02'), cabP)).corpo);
+    const ajSemData = await pedir('/api/fechamentos/ajuste-pos-anterior?unidade=TESTE_POS_ON', cabP);
+    const htmlL = require('fs').readFileSync(__dirname + '/public/lancamento.html', 'utf8');
     const htmlF = require('fs').readFileSync(__dirname + '/public/fechamentos.html', 'utf8');
     const cem = (v) => Math.round(Number(v) * 100);
     const conf = {
@@ -2896,6 +2904,14 @@ setTimeout(async () => {
         && /\{campo:'adyenPos', label:'Maquininha POS \(pós meia-noite\)'\}/.test(htmlF),
       'o ajuste ganhou rótulo (não sai mais como nome de campo do banco)':
         /ajustePosAnterior: 'Ajuste da Maquininha POS de ontem'/.test(require('fs').readFileSync(__dirname + '/fechamentosLive.js', 'utf8')),
+      // NOVO: o POS de ontem para de "aparecer zerado" na hora de lançar
+      'a rota do ajuste devolve -(POS de ontem) na loja que usa POS': cem(ajComPos.ajuste) === -120714,
+      'a rota do ajuste devolve 0 em loja sem POS (nada a mostrar)': cem(ajSemPos.ajuste) === 0,
+      'a rota do ajuste exige unidade E data': ajSemData.status === 400,
+      'a tela de lançamento busca e SOMA o ajuste do POS de ontem na prévia': htmlL.includes('let AJUSTE_POS_ONTEM = 0')
+        && htmlL.includes('async function carregarAjustePosOntem()') && htmlL.includes('/api/fechamentos/ajuste-pos-anterior?unidade=')
+        && /somaMaquinas \+ somaMaquinasPos \+ AJUSTE_POS_ONTEM \+/.test(htmlL)
+        && htmlL.includes('id="resumo-ajuste-pos-linha"') && (htmlL.match(/carregarAjustePosOntem\(\)/g) || []).length >= 3,
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okAjustePos = !falhas.length;
