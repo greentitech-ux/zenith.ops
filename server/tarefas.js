@@ -146,7 +146,7 @@ async function sincronizarTicket(ticket, usuarios, tipo = 'solicitacao') {
       // lista e ordenada por ele, e corrigir data nao e "movimento" da tarefa
       const corrigeData = nasceEm !== atual.criadaEm || nasceEm.slice(0, 10) !== atual.dataInicio
         ? { criadaEm: nasceEm, dataInicio: nasceEm.slice(0, 10) } : null;
-      await ref.update({ titulo: ticket.titulo, numeroTicket: ticket.numeroTicket || atual.numeroTicket || null, prioridade: ticket.prioridade || 'normal', status: statusDoTicket(ticket), atualizadoEm: agora,
+      await ref.update({ titulo: ticket.titulo || atual.titulo || ('Ticket #' + (ticket.numeroTicket || '')), numeroTicket: ticket.numeroTicket || atual.numeroTicket || null, prioridade: ticket.prioridade || 'normal', status: statusDoTicket(ticket), atualizadoEm: agora,
         ...(corrigeData || {}),
         ...(statusDoTicket(ticket) === 'CONCLUIDA' && !atual.concluidaEm ? { concluidaEm: agora, concluidaPorNome: ticket.execucaoPorNome || 'Suporte' } : {}) });
       if (corrigeData) alteradas.push({ ...atual, ...corrigeData });

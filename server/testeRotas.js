@@ -14945,6 +14945,42 @@ setTimeout(async () => {
   if (!okCancDel) ruins += 1;
   console.log(`${okCancDel ? '✓' : '✗'} Meu Dia: cancelar (qualquer um) x excluir (só Master, ou pedido + aprovação), e coluna Cancelados só do Master`);
 
+  // ---- correções pontuais: título do estorno no concluir, X circular, e o
+  // aviso da Central que não volta ao atualizar depois de fechado no X ----
+  let okFixes = false;
+  try {
+    const tjSrc = require('fs').readFileSync(__dirname + '/tarefas.js', 'utf8');
+    const htmlT = require('fs').readFileSync(__dirname + '/public/tarefas.html', 'utf8');
+    const notif = require('fs').readFileSync(__dirname + '/public/notif-central.js', 'utf8');
+    const conf = {
+      // estorno não tem campo "titulo": o update do sync mandava titulo:undefined
+      // e o Firestore recusava (quebrava concluir tarefa de estorno)
+      'sync-update guarda o título (estorno sem título não estoura no Firestore)':
+        /titulo: ticket\.titulo \|\| atual\.titulo \|\| \('Ticket #' \+ \(ticket\.numeroTicket \|\| ''\)\)/.test(tjSrc)
+        && !/update\(\{ titulo: ticket\.titulo, numeroTicket/.test(tjSrc),
+      'o X do modal é um botão redondo no canto (como nas outras telas)':
+        /\.close\{[^}]*border-radius:50%/.test(htmlT),
+      'o topo sticky ficou leve (sem a barra pesada que sobrepunha o conteúdo)':
+        /\.dialog>\.row:first-child\{position:sticky;top:0;z-index:5;background:var\(--panel\);padding-bottom:10px\}/.test(htmlT)
+        && !/\.dialog>\.row:first-child\{[^}]*border-bottom:1px solid var\(--line\)\}/.test(htmlT),
+      // fechar o aviso no X persiste local: não volta ao atualizar a página
+      'aviso da Central: fechar no X dispensa e não reabre no refresh':
+        /function dispensarNotif\(card\)/.test(notif)
+        && /localStorage\.setItem\(CHAVE_NOTIF_DISP/.test(notif)
+        && /if \(notifDispensada\(card\)\) return;/.test(notif)
+        && /\.zn-fechar'\)\.addEventListener\('click', \(event\) => \{[\s\S]{0,120}?dispensarNotif\(card\);/.test(notif),
+      'dispensar NÃO marca como visto (a pendência segue na Central)':
+        /function dispensarNotif\(card\) \{[\s\S]{0,400}?localStorage\.setItem\(CHAVE_NOTIF_DISP/.test(notif)
+        && !/function dispensarNotif\(card\) \{[\s\S]{0,400}?marcarVistoNotificacao/.test(notif),
+      'arrastar pro lado dispensa igual ao X': /arrastarParaFechar\(el, \(\) => dispensarNotif\(card\)\)/.test(notif),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okFixes = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okFixes = false; console.log('  erro: ' + e.message); }
+  if (!okFixes) ruins += 1;
+  console.log(`${okFixes ? '✓' : '✗'} Fixes: título do estorno no concluir, X redondo, topo leve, e aviso fechado não volta no refresh`);
+
   // ---- Meu Dia: responsável x quem participa (modelo do Asana) ----
   // Participante faz a tarefa ANDAR (comenta, anexa, move o status). O que
   // muda o combinado - prazo e quem participa - e o que destrói fica com o
