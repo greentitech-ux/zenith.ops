@@ -204,8 +204,6 @@
       .nmz-fechar:hover{ color:var(--text,#e7ecf1); border-color:var(--accent,#b8ff3c); }
 
       .nmz-corpo{ flex:1 1 auto; overflow-y:auto; padding:8px; }
-      .nmz-corpo::-webkit-scrollbar{ width:8px; }
-      .nmz-corpo::-webkit-scrollbar-thumb{ background:var(--line,#232a33); border-radius:8px; }
 
       .nmz-grupo{
         display:flex; align-items:center; justify-content:space-between;

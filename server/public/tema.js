@@ -654,6 +654,47 @@
    ].join('\n');
   document.head.appendChild(style);
 
+  // ---- barra de rolagem: a mesma em TODAS as telas ----
+  //
+  // Pedido do Master: "quero que todos os scroll sejam como o scroll que
+  // atualizamos para Meu Dia - Tarefas fica otimo".
+  //
+  // O padrão do Chrome no Windows/Linux é uma barra larga e clara, com setas
+  // nas pontas - sobre o fundo escuro do app ela vira uma faixa branca que
+  // pesa mais que o conteúdo (aparecia assim na Central do Beniboy, no cartão
+  // da máquina no NOC e em cada janela de conversa). O desenho do Meu Dia é o
+  // contrário: fina, arredondada, invisível em repouso, e só aparece quando o
+  // mouse entra no bloco que rola.
+  //
+  // Fica AQUI, e não em cada página, pela mesma razão do Beniboy: cópia por
+  // página diverge. Já havia três desenhos diferentes soltos - 6px no Meu Dia,
+  // 8px sempre sólida no menu ☰, e só "thin" na Central e nos Formulários.
+  // Tela nova nasce com a barra certa sem ninguém lembrar de nada.
+  //
+  // Cor pelo token: --line em repouso, --muted sob o dedo. No tema Claro os
+  // dois trocam sozinhos junto com o resto; cor cravada aqui ficaria escura
+  // sobre branco em 59 telas de uma vez.
+  //
+  // O seletor é `*` de propósito (especificidade 0): qualquer página que já
+  // tenha regra própria continua ganhando, nada quebra por causa desta.
+  var barras = document.createElement('style');
+  barras.id = 'zenith-barras';
+  barras.textContent = [
+    '*{scrollbar-width:thin;scrollbar-color:transparent transparent;}',
+    // :hover pega o container inteiro, não só o pixel da barra - senão a
+    // pessoa teria de acertar 6px invisíveis para a barra aparecer
+    '*:hover{scrollbar-color:var(--line,#27313b) transparent;}',
+    '::-webkit-scrollbar{width:6px;height:6px;}',
+    '::-webkit-scrollbar-track{background:transparent;}',
+    '::-webkit-scrollbar-corner{background:transparent;}',
+    // as setinhas das pontas são metade da largura daquela faixa branca
+    '::-webkit-scrollbar-button{display:none;}',
+    '::-webkit-scrollbar-thumb{background:transparent;border-radius:999px;}',
+    ':hover::-webkit-scrollbar-thumb{background:var(--line,#27313b);}',
+    '::-webkit-scrollbar-thumb:hover{background:var(--muted,#8c99a7);}',
+  ].join('\n');
+  document.head.appendChild(barras);
+
   function aplicar() {
     document.documentElement.setAttribute('data-tema', temaAtual());
     // zoom escala texto E espacamentos (tudo em px nas paginas) - e o
