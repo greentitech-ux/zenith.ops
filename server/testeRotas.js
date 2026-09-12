@@ -120,7 +120,12 @@ const fakeDb = {
   // transação, então com set() vazio todo mundo lia 10000 e o teste não
   // conseguia enxergar número repetido nem sequência quebrada.
   runTransaction: async (fn) => fn({
-    get: async (r) => snapDoc(r.path || ''),
+    // tx.get aceita DOC e CONSULTA. Era só doc: uma consulta (sem .path)
+    // virava snapDoc('') - um snapshot de documento, sem .empty - e todo
+    // `if (!existing.empty)` dava "já existe". users.create nunca conseguia
+    // criar ninguém no fake, e o teste do agente (criar usuário copiando de
+    // um modelo) só via "Já existe um acesso com esse email".
+    get: async (r) => (r && r.path === undefined && typeof r.get === 'function' ? r.get() : snapDoc((r && r.path) || '')),
     set: (r, d, o) => { const c = r.path || ''; DOCS.set(c, o && o.merge ? { ...(DOCS.get(c) || {}), ...d } : d); },
     update: (r, d) => { const c = r.path || ''; DOCS.set(c, { ...(DOCS.get(c) || {}), ...d }); },
     delete: (r) => { DOCS.delete(r.path || ''); },
@@ -370,6 +375,11 @@ setTimeout(async () => {
       somaSinal: 0, amostrasSinal: 0, minSinal: null, conexao: 'cabo',
     },
   });
+  // máquina do teste do agente "braços do Master" (noc_comando), semeada AQUI
+  // porque lojaStatus lê do espelho em memória montado no boot - um DOCS.set
+  // no meio da suíte não entra nele. Tem agentToken de propósito: a AERO
+  // acima não tem, e o enfileirar recusa ("reinstalar o NOCZenith").
+  DOCS.set('lojaStatus/BRAC__PC01', { codigo: 'BRAC', posto: 'PC01', nome: 'Bracos-PC01', tipo: 'interno', agentToken: 'tok-bracos', ultimoHeartbeatEm: Date.now(), eventos: [] });
 
   const casos = [
     ['/api/abastecimento/sugestao-envio', 'sugestão de pré-envio'],
@@ -11070,6 +11080,117 @@ setTimeout(async () => {
   console.log(`${okModelosAgente ? '✓' : '✗'} NOC: modelos prontos de comando (inventário e limpeza de programas básicos) pro "Rodar em massa"`);
 
   // ------------------------------------------------------------------
+  // "BRAÇOS" DO MASTER (12/09/2026): "quero um agente que faça o que eu
+  // preciso, rápido, por baixo, poucas frases - ele mostra como vai ficar e
+  // eu aprovo". O Agente (Beniboy + catálogo + fila QA) já existia; faltavam
+  // as ações. Cada executor novo chama a MESMA função que a tela chama, em
+  // nome do MASTER que pediu (porId gravado pelo servidor, nunca pelo modelo).
+  // O que se exige: cada ação executa de verdade contra o Firestore falso;
+  // sem porId ou com porId de usuário comum, recusa; o suporteBot sobrescreve
+  // o porId com chat.logado.id; e a tela do NOC oferece as ações novas.
+  let okBracos = false;
+  try {
+    const ag = require('/home/user/adyen-monitor/server/agenteAcoes.js');
+    const tf = require('/home/user/adyen-monitor/server/tarefas.js');
+    const sc = require('/home/user/adyen-monitor/server/suporteChat.js');
+    const masterLogin = await auth.login(process.env.MASTER_EMAIL, process.env.MASTER_PASSWORD);
+    const masterId = masterLogin.user.id;
+    const acessoMaster = { usuario: { id: masterId, email: process.env.MASTER_EMAIL }, isMaster: true, isAdmin: false, unidades: [] };
+    const hashB = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-bracos-alvo', {
+      passwordHash: hashB, role: 'user', active: true, locked: true, failedAttempts: 5,
+      email: 'bracos-alvo@teste.local', username: 'bracosalvo',
+      permissions: { sections: ['suporte', 'tarefas'], unidades: ['AERO'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    DOCS.set('users/u-bracos-comum', {
+      passwordHash: hashB, role: 'user', active: true,
+      email: 'bracos-comum@teste.local', username: 'bracoscomum',
+      permissions: { sections: ['tarefas'], unidades: [], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const registrar = (executorSistema) => ag.criar({
+      nome: `Ação ${executorSistema}`, descricao: `teste de ${executorSistema}`, tipo: 'acao_sistema',
+      executorSistema, requerAprovacao: false, ativo: true, criadoPorEmail: process.env.MASTER_EMAIL,
+    });
+    const acoes = {};
+    for (const ex of ['criar_tarefa', 'marcar_reuniao', 'concluir_tarefa', 'cancelar_tarefa', 'desbloquear_usuario', 'resetar_senha_usuario', 'criar_usuario_copiando', 'responder_chat', 'noc_comando']) {
+      acoes[ex] = await registrar(ex);
+    }
+    const roda = (ex, parametros) => ag.executarAcaoDoAgente(acoes[ex].id, { porId: masterId, ...parametros });
+    const tentar = async (fn) => { try { return { ok: true, valor: await fn() }; } catch (e) { return { ok: false, erro: e.message }; } };
+
+    const r1 = await tentar(() => roda('criar_tarefa', { titulo: 'Braços: verificar rede da Ilha', descricao: 'teste', unidade: 'AERO', unidadeNome: 'Dom Aeroporto', prioridade: 'alta' }));
+    const r2 = await tentar(() => roda('marcar_reuniao', { titulo: 'Braços: reunião de alinhamento', dataEntrega: '2026-12-15', horaInicio: '10:00', duracaoMin: 30 }));
+    const minhas = await tf.listarMinhas(acessoMaster);
+    const tarefaCriada = minhas.find((t) => t.titulo === 'Braços: verificar rede da Ilha') || null;
+    const reuniao = minhas.find((t) => t.titulo === 'Braços: reunião de alinhamento') || null;
+    const r3 = tarefaCriada ? await tentar(() => roda('concluir_tarefa', { tarefaId: tarefaCriada.id, observacao: 'feito' })) : { ok: false, erro: 'sem tarefa' };
+    const r4 = reuniao ? await tentar(() => roda('cancelar_tarefa', { tarefaId: reuniao.id, motivo: 'remarcada' })) : { ok: false, erro: 'sem reunião' };
+    const concluida = tarefaCriada ? await tf.getOne(tarefaCriada.id) : null;
+    const cancelada = reuniao ? await tf.getOne(reuniao.id) : null;
+    const r5 = await tentar(() => roda('desbloquear_usuario', { usuario: 'bracos-alvo@teste.local', pedirTrocaSenha: false }));
+    const alvoDepois = DOCS.get('users/u-bracos-alvo') || {};
+    const r6 = await tentar(() => roda('resetar_senha_usuario', { usuario: 'bracosalvo' }));
+    const senhaNova = ((r6.valor || '').match(/Senha temporária: (\S+)/) || [])[1] || '';
+    const loginComSenhaNova = senhaNova ? await tentar(() => auth.login('bracos-alvo@teste.local', senhaNova)) : { ok: false };
+    const r7 = await tentar(() => roda('criar_usuario_copiando', { modelo: 'bracosalvo', email: 'bracos-novo@teste.local', username: 'bracosnovo' }));
+    const novoCriado = [...DOCS.entries()].map(([k, v]) => ({ k, v })).find((e) => e.k.startsWith('users/') && e.v && e.v.email === 'bracos-novo@teste.local');
+    const chat = await sc.criar({ nome: 'Loja Teste', contato: 'loja@teste.local', texto: 'A máquina travou', assunto: 'Computador/Sistema' });
+    const r8 = await tentar(() => roda('responder_chat', { chatId: chat.id, texto: 'Já estou olhando a máquina.' }));
+    const chatDepois = await sc.getOne(chat.id);
+    const ultimaMsg = (chatDepois && chatDepois.mensagens || []).slice(-1)[0] || {};
+    // BRAC/PC01 é semeada no boot (ver semente junto da AERO/ATM01), com
+    // agentToken - a AERO não tem e o enfileirar recusa; aqui o que se testa
+    // é o executor, não a trava do token
+    const r9 = await tentar(() => roda('noc_comando', { tarefa: 'reiniciar', alvos: [{ codigo: 'BRAC', posto: 'PC01' }] }));
+    // segurança: sem dono e dono que não é Master
+    const semDono = await tentar(() => ag.executarAcaoDoAgente(acoes.criar_tarefa.id, { titulo: 'x' }));
+    const comumId = 'u-bracos-comum';
+    const comum = await tentar(() => ag.executarAcaoDoAgente(acoes.criar_tarefa.id, { porId: comumId, titulo: 'x' }));
+    const tarefaRuim = await tentar(() => roda('noc_comando', { tarefa: 'formatar', alvos: [{ codigo: 'AERO', posto: 'ATM01' }] }));
+
+    const srcBot = require('fs').readFileSync(__dirname + '/suporteBot.js', 'utf8');
+    const srcAg = require('fs').readFileSync(__dirname + '/agenteAcoes.js', 'utf8');
+    const htmlNoc = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const conf = {
+      'criar_tarefa: nasce no Meu Dia, com origem "agente", no nome do Master':
+        r1.ok && !!tarefaCriada && tarefaCriada.origem === 'agente' && tarefaCriada.responsavelId === masterId && tarefaCriada.prioridade === 'alta' && tarefaCriada.unidadeNome === 'Dom Aeroporto',
+      'marcar_reuniao: vira tarefa de reunião com hora, duração e link gerado':
+        r2.ok && !!reuniao && reuniao.ehReuniao === true && reuniao.horaInicio === '10:00' && reuniao.duracaoMin === 30 && !!reuniao.linkReuniao,
+      'concluir_tarefa: a tarefa fica CONCLUIDA': r3.ok && !!concluida && concluida.status === 'CONCLUIDA',
+      'cancelar_tarefa: a reunião fica CANCELADA': r4.ok && !!cancelada && cancelada.status === 'CANCELADA',
+      'desbloquear_usuario: acha por e-mail e destrava': r5.ok && alvoDepois.locked === false,
+      'resetar_senha_usuario: acha por username, gera senha e ela funciona no login':
+        r6.ok && !!senhaNova && loginComSenhaNova.ok && !!(loginComSenhaNova.valor || {}).token,
+      'criar_usuario_copiando: nasce copiando as permissões do modelo':
+        r7.ok && !!novoCriado && JSON.stringify((novoCriado.v.permissions || {}).sections) === JSON.stringify(['suporte', 'tarefas']),
+      'responder_chat: a mensagem sai como Suporte, assinada pelo Master':
+        r8.ok && ultimaMsg.de === 'suporte' && ultimaMsg.texto === 'Já estou olhando a máquina.' && ultimaMsg.autorEmail === process.env.MASTER_EMAIL,
+      'noc_comando: enfileira o reinício no computador certo': r9.ok && /1 enfileirado\(s\) de 1/.test(r9.valor || ''),
+      'noc_comando: tarefa fora da lista fechada é recusada': !tarefaRuim.ok && /inválida/.test(tarefaRuim.erro || ''),
+      // segurança
+      'sem porId a ação não roda (ação sem dono)': !semDono.ok && /sem dono/i.test(semDono.erro || ''),
+      'porId de usuário comum é recusado (só Master)': !comum.ok && /Só um Master/.test(comum.erro || ''),
+      'o suporteBot grava o porId do Master da conversa (sobrescreve o que o modelo mandar)':
+        /const parametros = \{ \.\.\.\(input\.parametros \|\| \{\}\), porId: chat\.logado\.id \};/.test(srcBot)
+        && /criadoPorId: chat\.logado\.id,/.test(srcBot)
+        && !/criadoPorEmail: 'Beniboy \(agente\)'/.test(srcBot),
+      'o prompt do Beniboy diz quais parâmetros coletar por ação de sistema':
+        /agenteAcoes\.PARAMETROS_EXECUTOR\[a\.executorSistema\]/.test(srcBot)
+        && ['criar_tarefa', 'marcar_reuniao', 'concluir_tarefa', 'cancelar_tarefa', 'desbloquear_usuario', 'resetar_senha_usuario', 'criar_usuario_copiando', 'responder_chat', 'noc_comando'].every((k) => !!ag.PARAMETROS_EXECUTOR[k] && ag.EXECUTORES_SISTEMA_VALIDOS.includes(k)),
+      'a tela do NOC oferece as ações novas no seletor':
+        ['criar_tarefa', 'marcar_reuniao', 'concluir_tarefa', 'cancelar_tarefa', 'desbloquear_usuario', 'resetar_senha_usuario', 'criar_usuario_copiando', 'responder_chat', 'noc_comando'].every((k) => htmlNoc.includes(`<option value="${k}">`)),
+      'o ator é relido na execução e tem que ser Master ativo': /if \(usuario\.role !== 'master'\) throw new Error/.test(srcAg) && /usuario\.active === false/.test(srcAg),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okBracos = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (r1=${r1.ok ? 'ok' : r1.erro} r2=${r2.ok ? 'ok' : r2.erro} r3=${r3.ok ? 'ok' : r3.erro} r5=${r5.ok ? 'ok' : r5.erro} r6=${r6.ok ? 'ok' : r6.erro} r7=${r7.ok ? 'ok' : r7.erro} r8=${r8.ok ? 'ok' : r8.erro} r9=${r9.ok ? r9.valor : r9.erro})`);
+  } catch (e) { okBracos = false; console.log('  erro: ' + e.message); }
+  if (!okBracos) ruins += 1;
+  console.log(`${okBracos ? '✓' : '✗'} Agente "braços do Master": 9 ações de sistema executam em nome do Master que pediu, e recusam quem não é`);
+
+  // ------------------------------------------------------------------
   // PIX MOSTRA O NOME DO CLIENTE. Pedido do Master (07/09/2026): no Monitor,
   // em "Pedidos que mudaram de status", o Pix saia como "pix · DOM19911: · —".
   // Dois defeitos: o pedido nascia com cliente = shopperReference (conta da
@@ -14754,9 +14875,15 @@ setTimeout(async () => {
     // sumir da tela em vez de cair na coluna "Concluídas" - que ficava sempre
     // vazia. Quem foi concluída HOJE fica à vista; a de ontem, não.
     const hojeBR = new Function(`${base} return hoje;`)()();
-    const agoraReal = Date.now();
-    const concluidaAgora = { status: 'CONCLUIDA', concluidaEm: new Date(agoraReal).toISOString() };
-    const concluidaOntem = { status: 'CONCLUIDA', concluidaEm: new Date(agoraReal - 36 * 3600e3).toISOString() };
+    // instantes REAIS (Date.now), não agoraBR.toISOString(): agoraBR é o Date
+    // "falso" cujos getters locais já são o relógio de Brasília - passar ele
+    // por toISOString() rotula esse horário como UTC e sai 3h adiantado.
+    // Entre 00h e 03h de Brasília isso jogava a "concluída agora" pra ontem e
+    // o teste falhava sozinho, sem ninguém mexer em nada (visto em 12/09).
+    // concluidaHoje() compara diaBR(instante real) com hoje() - só bate certo
+    // com um instante de verdade.
+    const concluidaAgora = { status: 'CONCLUIDA', concluidaEm: new Date().toISOString() };
+    const concluidaOntem = { status: 'CONCLUIDA', concluidaEm: new Date(Date.now() - 36 * 3600e3).toISOString() };
     const mostraRecemConcluida = passaSituacao(concluidaAgora) && !passaSituacao(concluidaOntem) && !!hojeBR;
     campos['F-SIT'] = 'concluidas';
     const concluidas = !passaSituacao(arc) && passaSituacao({ status: 'CONCLUIDA' });

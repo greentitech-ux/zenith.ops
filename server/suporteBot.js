@@ -88,8 +88,16 @@ async function montarBlocoConhecimento() {
 async function montarBlocoAgente(logado) {
   if (!logado || !logado.isMaster) return '';
   const acoes = await agenteAcoes.listarAtivas();
+  // ação de sistema leva junto QUAIS parâmetros coletar (PARAMETROS_EXECUTOR)
+  // - sem isso o modelo chutava o nome do campo e a ação falhava só na hora
+  // de executar, depois de o Master já ter aprovado
   const listaAcoes = acoes.length
-    ? acoes.map((a) => `- [${a.id}] ${a.nome}: ${a.descricao} (${a.requerAprovacao ? 'precisa de aprovação do Master' : 'executa direto, sem aprovação'})`).join('\n')
+    ? acoes.map((a) => {
+      const params = a.tipo === 'acao_sistema' && agenteAcoes.PARAMETROS_EXECUTOR[a.executorSistema]
+        ? ` Parâmetros: ${agenteAcoes.PARAMETROS_EXECUTOR[a.executorSistema]}.`
+        : '';
+      return `- [${a.id}] ${a.nome}: ${a.descricao} (${a.requerAprovacao ? 'precisa de aprovação do Master' : 'executa direto, sem aprovação'}).${params}`;
+    }).join('\n')
     : '(nenhuma ação cadastrada ainda)';
   return `\n\n## NOC-NoPulso - ações que você pode executar (ferramenta executar_acao_agente)
 Catálogo de ações cadastradas pelo Master (use o [id] exato ao chamar a ferramenta):
@@ -601,18 +609,23 @@ async function executarTool(nome, input, chat, resultado, resolverUnidadesPorIdP
     const acao = await agenteAcoes.obter(input.acaoId);
     if (!acao || !acao.ativo) return 'Essa ação não existe (ou foi desativada) no catálogo NOC-NoPulso - confira o [id] certo.';
     const resumo = String(input.resumo || acao.nome).slice(0, 300);
+    // quem age é o MASTER da conversa, gravado pelo SERVIDOR: sobrescreve o
+    // que o modelo mandar em porId, pra ação de sistema nunca sair no nome de
+    // outra pessoa (ver resolverAtor em agenteAcoes.js). Vai junto no payload
+    // da fila, então sobrevive até a aprovação e a um restart.
+    const parametros = { ...(input.parametros || {}), porId: chat.logado.id };
     if (acao.requerAprovacao) {
       await qaAprovacoes.criar({
         tipo: 'agente.executarAcao',
         resumo,
-        payload: { acaoId: input.acaoId, parametros: input.parametros || {} },
-        criadoPorId: null,
-        criadoPorEmail: 'Beniboy (agente)',
+        payload: { acaoId: input.acaoId, parametros },
+        criadoPorId: chat.logado.id,
+        criadoPorEmail: `${chat.logado.username} (via Beniboy)`,
       });
       return `Ação "${acao.nome}" preparada e enviada pra aprovação do Master (fica visível em NOC-NoPulso).`;
     }
     try {
-      const resultadoAcao = await agenteAcoes.executarAcaoDoAgente(input.acaoId, input.parametros || {});
+      const resultadoAcao = await agenteAcoes.executarAcaoDoAgente(input.acaoId, parametros);
       return `Ação "${acao.nome}" executada: ${resultadoAcao}`;
     } catch (err) {
       return `Erro ao executar "${acao.nome}": ${err.message}`;
