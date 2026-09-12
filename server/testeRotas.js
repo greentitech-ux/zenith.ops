@@ -11841,6 +11841,146 @@ setTimeout(async () => {
   console.log(`${okSemHtml ? '✓' : '✗'} Link sem ".html": /atendimento abre igual, o endereço antigo continua, e o cliente não cai no muro de senha`);
 
   // ------------------------------------------------------------------
+  // CONCILIAÇÃO PWR/iFood x DECLARADO (pedido do Master, 13/09/2026: "se o
+  // gerente colocar que vendeu 10 mil mas vendeu 12, essa conciliação vai
+  // mostrar" - e o briefing DENTRO do NoPulso). Ver conciliacao.js.
+  //
+  // O que este bloco segura: a entrada e' pelo token do robo e recusa loja
+  // que nao existe; a comparacao e' do servidor com a regra do Master
+  // (tolerancia em R$ E em %, PWR com/sem iFood); mandar o mesmo dia de novo
+  // sobrescreve em vez de duplicar; divergencia vira alerta + tarefa pro
+  // GERENTE DA LOJA (ou pro Master, se a loja nao tem gerente cadastrado) e
+  // NUNCA e' cobrada duas vezes; o e-mail do briefing traz o bloco; a rota
+  // esta' na lista publica e o relogio e' ligado no boot.
+  let okConc = false;
+  try {
+    const conc = require('/home/user/adyen-monitor/server/conciliacao.js');
+    const fs = require('fs');
+    const fonteIdx = fs.readFileSync(__dirname + '/index.js', 'utf8');
+    const envBotAntes = process.env.BOT_VENDAS_TOKEN;
+    process.env.BOT_VENDAS_TOKEN = 'token-robo-conc';
+    const cabBot = { 'x-bot-token': 'token-robo-conc' };
+    const cabM = { Authorization: 'Bearer ' + token };
+    const ontem = conc.somarDiasISO(hoje, -1);
+    // gerente da Bessa (tag + unidade no acesso); a Tatuape nao tem gerente
+    DOCS.set('users/u-ger-conc', {
+      passwordHash: require('bcryptjs').hashSync('SenhaDeTeste!2026', 4), role: 'user', active: true,
+      email: 'gerente-bessa@teste.local', username: 'gerentebessa', cargo: 'gerente',
+      permissions: { sections: ['lancamento'], unidades: ['Dominos Bessa'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    // a lista de usuarios e' cacheada (60s): sem invalidar, a cobranca nao acha o gerente recem-semeado
+    require('/home/user/adyen-monitor/server/users.js').invalidar();
+    // o gerente da Bessa declarou 10 mil (e R$ 800 de iFood); a Tatuape 1 mil;
+    // a Mooca 5.020 - e o PWR vai dizer 12 mil, 3 mil e 5 mil
+    DOCS.set('fechamentosLive/f-conc-bessa', { id: 'f-conc-bessa', unidade: 'Dominos Bessa', unidadeNome: 'Dom Bessa', data: ontem, faturamento: 10000, ifood: 800, gerente: 'Fulano da Bessa' });
+    DOCS.set('fechamentosLive/f-conc-tat', { id: 'f-conc-tat', unidade: '19889', unidadeNome: 'Dom Tatuape', data: ontem, faturamento: 1000, ifood: 0 });
+    DOCS.set('fechamentosLive/f-conc-moo', { id: 'f-conc-moo', unidade: '19888', unidadeNome: 'Dom Mooca', data: ontem, faturamento: 5020, ifood: 0 });
+    // o cache dos fechamentos tem TTL de 6h: sem invalidar, o briefing nao ve o que acabou de ser semeado
+    require('/home/user/adyen-monitor/server/fechamentosLive.js').invalidarCache();
+    const lote = { registros: [
+      { unidade: 'Dominos Bessa', data: ontem, fonte: 'pwr', total: 12000, pedidos: 310 },
+      { unidade: 'Dominos Bessa', data: ontem, fonte: 'ifood', total: 820 },
+      { unidade: '19889', data: ontem, fonte: 'pwr', total: 3000 },
+      { unidade: '19888', data: ontem, fonte: 'pwr', total: 5000 },
+      { unidade: 'LOJA_QUE_NAO_EXISTE', data: ontem, fonte: 'pwr', total: 1 },
+      { unidade: '19888', data: ontem, fonte: 'xyz', total: 1 },
+      { unidade: '19888', data: conc.somarDiasISO(hoje, 1), fonte: 'pwr', total: 1 },
+    ] };
+    const semToken = await postarJson('/api/bot/vendas-registro', lote, {});
+    const envio = await postarJson('/api/bot/vendas-registro', lote, cabBot);
+    const envioJ = envio.status === 200 ? JSON.parse(envio.corpo) : {};
+    const docsRegistro = () => [...DOCS.keys()].filter((k) => k.startsWith('vendasRegistro/'));
+    const antesReenvio = docsRegistro().length;
+    // portal corrigiu D+1: reenvio do MESMO dia sobrescreve, nao duplica
+    const reenvio = await postarJson('/api/bot/vendas-registro', { unidade: 'Dominos Bessa', data: ontem, fonte: 'pwr', total: 12100 }, cabBot);
+    const depoisReenvio = docsRegistro().length;
+
+    const resultado = await pedir('/api/conciliacao', cabM);
+    const c = resultado.status === 200 ? JSON.parse(resultado.corpo) : { itens: [], resumo: {} };
+    const item = (u, f) => (c.itens || []).find((i) => i.unidade === u && i.fonte === f) || {};
+    const preview = await pedir('/api/briefing/preview', cabM);
+    const htmlPrev = preview.status === 200 ? (JSON.parse(preview.corpo).html || preview.corpo) : '';
+
+    // regra pura: PWR sem iFood soma o iFood registrado; tolerancia em %
+    const base = { unidadesLoja: { X: 'Loja X' }, inicio: '2026-09-01', fim: '2026-09-30' };
+    const semIfood = conc.conciliar({ ...base, config: { pwrIncluiIfood: false },
+      fechamentos: [{ unidade: 'X', data: '2026-09-10', faturamento: 10000, ifood: 800 }],
+      registros: [{ id: 'a', unidade: 'X', data: '2026-09-10', fonte: 'pwr', total: 9200 }, { id: 'b', unidade: 'X', data: '2026-09-10', fonte: 'ifood', total: 800 }] });
+    const faltaIfood = conc.conciliar({ ...base, config: { pwrIncluiIfood: false },
+      fechamentos: [{ unidade: 'X', data: '2026-09-10', faturamento: 10000, ifood: 800 }],
+      registros: [{ id: 'a', unidade: 'X', data: '2026-09-10', fonte: 'pwr', total: 9200 }] });
+    const pctOk = conc.conciliar({ ...base, config: { toleranciaReais: 50, toleranciaPct: 1 },
+      fechamentos: [{ unidade: 'X', data: '2026-09-10', faturamento: 100900 }],
+      registros: [{ id: 'a', unidade: 'X', data: '2026-09-10', fonte: 'pwr', total: 100000 }] });
+    const pctFora = conc.conciliar({ ...base, config: { toleranciaReais: 50, toleranciaPct: 0.5 },
+      fechamentos: [{ unidade: 'X', data: '2026-09-10', faturamento: 100900 }],
+      registros: [{ id: 'a', unidade: 'X', data: '2026-09-10', fonte: 'pwr', total: 100000 }] });
+
+    // a cobranca: 2 divergencias (Bessa e Tatuape); Mooca esta' dentro dos R$ 50
+    const cobra1 = await postarJson('/api/conciliacao/cobrar', {}, cabM);
+    const cob1 = cobra1.status === 200 ? JSON.parse(cobra1.corpo).cobrancas || [] : [];
+    const cobra2 = await postarJson('/api/conciliacao/cobrar', {}, cabM);
+    const cob2 = cobra2.status === 200 ? JSON.parse(cobra2.corpo).cobrancas || [] : [];
+    const tarefasConc = [...DOCS.entries()].filter(([k, v]) => k.startsWith('tarefas/') && v.origem === 'conciliacao').map(([, v]) => v);
+    const alertasConc = [...DOCS.entries()].filter(([k, v]) => k.startsWith('alertasCentral/') && v.tipo === 'conciliacao-divergente').map(([, v]) => v);
+    const tBessa = tarefasConc.find((t) => t.unidade === 'Dominos Bessa') || {};
+    const tTat = tarefasConc.find((t) => t.unidade === '19889') || {};
+    const regBessa = DOCS.get(`vendasRegistro/${'Dominos Bessa'.replace(/[^A-Za-z0-9_.-]/g, '_')}__${ontem}__pwr`) || {};
+
+    // config: o Master muda a regra sem deploy, e a rota devolve o que salvou
+    const cfgSalva = await postarJson('/api/conciliacao-config', { toleranciaReais: 100, toleranciaPct: 2, pwrIncluiIfood: false, horaCobranca: '09:15' }, cabM);
+    const cfgLida = await pedir('/api/conciliacao-config', cabM);
+    const cfgJ = cfgLida.status === 200 ? JSON.parse(cfgLida.corpo) : {};
+    await postarJson('/api/conciliacao-config', conc.CONFIG_PADRAO, cabM);
+    const cfgComum = await postarJson('/api/conciliacao-config', { toleranciaReais: 1 }, { Authorization: 'Bearer ' + (await auth.login('gerente-bessa@teste.local', 'SenhaDeTeste!2026')).token });
+
+    const conf = {
+      'sem o token a entrada é recusada, e é um token PRÓPRIO (o do robô de cobranças não abre esta rota)':
+        semToken.status === 401 && /exigirTokenBot\(req, res, 'BOT_VENDAS_TOKEN'\)/.test(fonteIdx),
+      'o lote entra numa chamada só, e cada registro inválido é recusado com o motivo (loja inexistente, fonte, data futura)':
+        envio.status === 200 && envioJ.gravados === 4 && (envioJ.recusados || []).length === 3
+        && envioJ.recusados.some((r) => /unidade desconhecida/.test(r.motivo))
+        && envioJ.recusados.some((r) => /fonte inválida/.test(r.motivo))
+        && envioJ.recusados.some((r) => /futuro/.test(r.motivo)),
+      'reenviar o mesmo dia SOBRESCREVE (o portal corrige D+1), não duplica':
+        reenvio.status === 200 && depoisReenvio === antesReenvio && antesReenvio === 4,
+      'Bessa: declarou 10 mil, PWR 12.100 → divergente, com a diferença e o gerente do fechamento':
+        item('Dominos Bessa', 'pwr').status === 'divergente' && item('Dominos Bessa', 'pwr').diferenca === -2100
+        && item('Dominos Bessa', 'pwr').gerente === 'Fulano da Bessa' && (c.resumo || {}).divergentes === 2,
+      'Bessa iFood: R$ 20 de diferença fica dentro dos R$ 50 → ok': item('Dominos Bessa', 'ifood').status === 'ok',
+      'Mooca: R$ 20 de diferença no PWR → ok (não vira cobrança)': item('19888', 'pwr').status === 'ok',
+      'PWR sem iFood: o esperado é PWR + iFood registrado; sem o iFood registrado não compara':
+        semIfood.itens.find((i) => i.fonte === 'pwr').registro === 10000 && semIfood.itens.find((i) => i.fonte === 'pwr').status === 'ok'
+        && faltaIfood.itens.find((i) => i.fonte === 'pwr').status === 'sem-registro' && /iFood/.test(faltaIfood.itens.find((i) => i.fonte === 'pwr').motivo || ''),
+      'tolerância em %: 900 em 100 mil passa com 1% e reprova com 0,5%':
+        pctOk.itens[0].status === 'ok' && pctFora.itens[0].status === 'divergente',
+      'divergência vira tarefa pro GERENTE DA LOJA, prioridade alta, com o texto do fato':
+        cob1.length === 2 && tBessa.responsavelId === 'u-ger-conc' && tBessa.prioridade === 'alta'
+        && /declarou R\$ 10\.000,00, PWR R\$ 12\.100,00 \(R\$ 2\.100,00 a menos\)/.test(tBessa.titulo || ''),
+      'loja sem gerente cadastrado: a tarefa fica com o Master': tTat.responsavelEmail === 'master@teste.local',
+      'e vira alerta crítico na Central': alertasConc.length === 2 && alertasConc.every((a) => a.critico === true),
+      'a mesma divergência NUNCA é cobrada duas vezes (o registro fica marcado)':
+        cob2.length === 0 && !!regBessa.cobradoEm && regBessa.tarefaNumero === tBessa.numeroTicket && tarefasConc.length === 2,
+      'o e-mail do briefing traz o bloco de conciliação com a divergência':
+        /Conciliação PWR\/iFood × declarado/.test(htmlPrev) && /DIVERGENTE/.test(htmlPrev) && /Dom Bessa/.test(htmlPrev),
+      'o Master muda a regra sem deploy (e usuário comum não)':
+        cfgSalva.status === 200 && cfgJ.toleranciaReais === 100 && cfgJ.toleranciaPct === 2 && cfgJ.pwrIncluiIfood === false && cfgJ.horaCobranca === '09:15'
+        && cfgComum.status === 403,
+      'a entrada do robô está na lista pública (senão o muro de senha barra o Cowork)':
+        /'\/api\/bot\/vendas-registro',/.test(fonteIdx),
+      'o relógio da cobrança é ligado no boot, com a MESMA montagem do briefing':
+        /conciliacao\.iniciar\(\{ montar: montarIndicadoresBot, hoje: hojeBrasiliaISO \}\)/.test(fonteIdx),
+    };
+    if (envBotAntes === undefined) delete process.env.BOT_VENDAS_TOKEN; else process.env.BOT_VENDAS_TOKEN = envBotAntes;
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okConc = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (envio=${envio.status} ${envio.corpo.slice(0, 200)} conc=${resultado.status} itens=${JSON.stringify((c.itens || []).map((i) => [i.unidade, i.fonte, i.status, i.declarado, i.registro]))} cob1=${cobra1.status} ${cobra1.corpo.slice(0, 160)} preview=${preview.status})`);
+  } catch (e) { okConc = false; console.log('  erro: ' + e.stack); }
+  if (!okConc) ruins += 1;
+  console.log(`${okConc ? '✓' : '✗'} Conciliação PWR/iFood × declarado: entra pelo robô, compara no servidor, e a divergência vira tarefa pro gerente (uma vez só)`);
+
+  // ------------------------------------------------------------------
   // APOSENTAR O ENDERECO ANTIGO (pedido 12/09/2026: "preciso extinguir esse
   // adyen-monitor, aposentar de vez"). O CLAUDE.md §4 diz que o dominio velho
   // NUNCA pode ser desligado - e o motivo e concreto: o agente so descobre que

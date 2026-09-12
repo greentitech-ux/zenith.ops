@@ -103,6 +103,7 @@ const qaAprovacoes = require('./qaAprovacoes');
 const alertasCentral = require('./alertasCentral');
 const botIndicadores = require('./botIndicadores');
 const briefingEmail = require('./briefingEmail');
+const conciliacao = require('./conciliacao');
 const agenteAcoes = require('./agenteAcoes');
 const vigiaScript = require('./vigiaScript');
 const loginCustom = require('./loginCustom');
@@ -303,6 +304,7 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/solicitacoes/publico',
   '/api/bot/solicitacoes',
   '/api/bot/indicadores',
+  '/api/bot/vendas-registro',
   '/decidir.html',
   '/api/solicitacoes/decidir-info',
   '/api/solicitacoes/decidir',
@@ -733,10 +735,67 @@ app.get('/api/bot/indicadores', async (req, res) => {
   }
 });
 
+// ---------- CONCILIAÇÃO PWR/iFood x declarado (ver conciliacao.js) ----------
+//
+// Entrada do numero que veio de FORA: o Cowork entra no portal do PWR e do
+// iFood as 8:30, le o total de ontem por loja e manda TUDO numa chamada so.
+// Mesmo desenho do robo de cobrancas (header x-bot-token, so cria, nunca le
+// nem decide), mas com token PROPRIO (BOT_VENDAS_TOKEN): a regra da casa e'
+// que cada token abre UMA rota - um vazado daqui nao cria solicitacao nem le
+// venda nenhuma. Loja que nao existe e RECUSADA, nunca criada.
+async function unidadesQueFechamCaixa() {
+  const extras = await unidadesExtras.mapa().catch(() => ({}));
+  const out = {};
+  Object.entries({ ...FECHAMENTO_UNIDADES_NOMES, ...extras }).forEach(([codigo, nome]) => {
+    if (codigo !== 'Administrativa') out[codigo] = nome;
+  });
+  return out;
+}
+app.post('/api/bot/vendas-registro', async (req, res) => {
+  if (!exigirTokenBot(req, res, 'BOT_VENDAS_TOKEN')) return;
+  try {
+    const corpo = req.body || {};
+    const registros = Array.isArray(corpo.registros) ? corpo.registros : [corpo];
+    const r = await conciliacao.registrar({ registros, unidadesConhecidas: await unidadesQueFechamCaixa(), hoje: hojeBrasiliaISO(), origem: 'bot-vendas' });
+    if (!r.gravados.length) return res.status(400).json({ error: 'Nenhum registro válido.', recusados: r.recusados });
+    console.log(`[conciliacao] ${r.gravados.length} registro(s) de venda recebido(s)${r.recusados.length ? `, ${r.recusados.length} recusado(s)` : ''}: ${r.gravados.map((g) => `${g.unidade} ${g.data} ${g.fonte} ${g.total}`).join(' · ')}`);
+    res.json({ ok: true, gravados: r.gravados.length, recusados: r.recusados });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+// o resultado, pra tela e pro Beni: e o MESMO bloco que vai no e-mail
+app.get('/api/conciliacao', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  try {
+    const ind = await montarIndicadoresBot({ compacto: String(req.query.compacto || '') === '1', incluirTodos: true });
+    res.json(ind.conciliacao);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+app.get('/api/conciliacao-config', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  res.json(await conciliacao.getConfig());
+});
+app.post('/api/conciliacao-config', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  try {
+    res.json(await conciliacao.salvarConfig(req.body || {}, req.user.email));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+// "cobrar agora": o mesmo que o relogio das 8:45 faz, sem esperar por ele
+app.post('/api/conciliacao/cobrar', auth.requireAuth, auth.requireMaster, async (req, res) => {
+  try {
+    res.json({ ok: true, cobrancas: await conciliacao.rodarCobranca(`manual por ${req.user.email}`) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // junta as fontes (todas cacheadas) e monta o objeto de indicadores - usado
 // pela rota acima e pelo e-mail diario abaixo, pra os dois sairem IGUAIS
 async function montarIndicadoresBot({ dias, compacto = false, incluirTodos = false } = {}) {
-  const [lancados, sangriasLancadas, saltiversoLancado, extras, ctxPedido, alertas, todasSolicitacoes, listaGrupos] = await Promise.all([
+  const [lancados, sangriasLancadas, saltiversoLancado, extras, ctxPedido, alertas, todasSolicitacoes, listaGrupos, registrosVenda, configConciliacao] = await Promise.all([
     fechamentosLive.listAll(),
     sangrias.listAll().then((l) => l.map(sangrias.comoFechamento)),
     saltiversoFechamento.listAll().then((l) => l.map(saltiversoFechamento.comoFechamento)),
@@ -745,6 +804,10 @@ async function montarIndicadoresBot({ dias, compacto = false, incluirTodos = fal
     alertasCentral.listar().catch(() => []),
     solicitacoes.listAll().catch(() => []),
     grupos.list().catch(() => []),
+    // PWR/iFood registrados de fora (ver conciliacao.js) - lista cacheada,
+    // uma leitura por briefing, mesmo custo das outras fontes acima
+    conciliacao.listarRegistros().catch(() => []),
+    conciliacao.getConfig().catch(() => conciliacao.CONFIG_PADRAO),
   ]);
   const mesclados = sheetsSync.mesclarLancamentosDoMesmoDia([...fechamentosData, ...lancados, ...sangriasLancadas, ...saltiversoLancado]);
   // TC: o bot le `f.tc`, mas o TC das lojas vive nos KPI's do grupo com um
@@ -769,9 +832,18 @@ async function montarIndicadoresBot({ dias, compacto = false, incluirTodos = fal
     if (!incluirTodos && ARCFOOD_FECHAMENTO.has(codigo)) return;
     unidadesLoja[codigo] = nome;
   });
+  // a conciliacao olha uma janela propria (ontem e os 2 dias antes), nao o
+  // periodo do briefing: registro que chega atrasado ainda e comparado, e o
+  // mes inteiro nao e reaberto toda manha
+  const hojeConc = hojeBrasiliaISO();
+  const conciliado = conciliacao.conciliar({
+    fechamentos: todos, registros: registrosVenda, unidadesLoja, config: configConciliacao,
+    inicio: conciliacao.somarDiasISO(hojeConc, -conciliacao.DIAS_JANELA), fim: conciliacao.somarDiasISO(hojeConc, -1),
+  });
   return botIndicadores.montarIndicadores({
     fechamentos: todos,
     unidadesLoja,
+    conciliacao: conciliado,
     pedidoSemanal: pedidoSemanal.statusDasUnidades(ctxPedido.base, ctxPedido),
     alertas,
     solicitacoes: todasSolicitacoes,
@@ -14684,6 +14756,9 @@ function aquecerBoot(promessa, ms) {
     // credencial de e-mail - o envio e que vai reclamar, com o erro certo,
     // e a tela mostra no historico
     briefingEmail.iniciar({ montar: montarIndicadoresBot }).catch((err) => console.error('[briefing] erro ao agendar e-mail diário de indicadores:', err.message));
+    // cobranca automatica da conciliacao (divergencia PWR/iFood vira tarefa
+    // pro gerente) - mesmo relogio, mesma montagem do briefing
+    conciliacao.iniciar({ montar: montarIndicadoresBot, hoje: hojeBrasiliaISO }).catch((err) => console.error('[conciliacao] erro ao agendar cobrança:', err.message));
   });
 
   // Desligamento: grava o que ficou pendente das batidas de heartbeat.

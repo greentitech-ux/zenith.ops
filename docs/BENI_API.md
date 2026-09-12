@@ -186,6 +186,53 @@ Qualquer `GET` autenticado. Os mais úteis:
 | Política da máquina (papel de parede, USB, instalação, alerta) | `PUT /api/loja-status/:codigo/computadores/:posto/politica` |
 | Aprovar/rejeitar a fila | `POST /api/qa-aprovacoes/:id/aprovar` · `/rejeitar` |
 
+### 3.1 A rotina das 8:30 — PWR e iFood entram no NoPulso
+
+Decisão do Master (13/09/2026): a conciliação **"declarou 10 mil, vendeu 12"**
+é feita **dentro do NoPulso**, não num chat. O seu papel nela é um só, e
+pequeno: **entregar o número**. Você não compara, não cruza, não decide.
+
+Todo dia às **8:30**, numa sessão nova:
+
+1. Entre no portal do **PWR** (Domino's) e no do **iFood** com o acesso que o
+   Master deu a você — **acesso próprio do robô, nunca o dele**.
+2. Leia o **total de vendas de ONTEM, por loja**, em cada um.
+3. Mande **tudo numa chamada só**:
+
+```bash
+curl -X POST https://www.nopulso.com.br/api/bot/vendas-registro \
+  -H "x-bot-token: $BOT_VENDAS_TOKEN" -H "Content-Type: application/json" \
+  -d '{"registros":[
+    {"unidade":"Dominos Bessa","data":"2026-09-12","fonte":"pwr","total":12000.00,"pedidos":310},
+    {"unidade":"Dominos Bessa","data":"2026-09-12","fonte":"ifood","total":820.00},
+    {"unidade":"19888","data":"2026-09-12","fonte":"pwr","total":5000.00}
+  ]}'
+```
+
+- `unidade` é o **código** da loja, o mesmo da coluna "Unidade" do Fechamento
+  (`19888`, `Dominos Bessa`) — nunca o nome bonito. Código que o NoPulso não
+  conhece é **recusado, não criado**; a resposta diz qual e por quê.
+- `fonte` é `pwr` ou `ifood`. `data` é o dia de negócio, `AAAA-MM-DD`, nunca
+  no futuro. `total` em reais, número. `pedidos` é opcional.
+- **Token próprio**: `BOT_VENDAS_TOKEN`, no header `x-bot-token`. Não é o
+  seu token de Master, e não é o do robô de cobranças — cada token abre uma
+  rota só. Vem do ambiente, como o outro (§1.1).
+- Mandar o mesmo dia de novo **sobrescreve** (o portal corrige em D+1). Pode
+  reenviar sem medo; não duplica nada.
+
+A resposta é `{"ok":true,"gravados":N,"recusados":[...]}`. Se `gravados`
+vier menor que o que você mandou, leia `recusados` e conserte o código da
+loja — não invente outro.
+
+**O que acontece depois, sem você:** o servidor compara com o que o gerente
+declarou no fechamento (`faturamento` × PWR, `ifood` × iFood), dentro da
+tolerância que o Master definiu; o resultado vai pro briefing (o e-mail e o
+`GET /api/bot/indicadores`, bloco `conciliacao`); às 8:45 toda divergência
+vira **alerta na Central e tarefa pro gerente da loja**, uma vez só. Você pode
+ler o resultado em `GET /api/conciliacao` (Master), mudar a regra em
+`GET`/`POST /api/conciliacao-config`, e disparar a cobrança fora de hora em
+`POST /api/conciliacao/cobrar` — mas o normal é não precisar de nada disso.
+
 ## 4. O que você NÃO PODE — o servidor fecha a porta
 
 Estas rotas pedem a **senha do Master** no corpo (`password`), e você não tem
