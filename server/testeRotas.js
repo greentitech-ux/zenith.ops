@@ -11747,9 +11747,16 @@ setTimeout(async () => {
         return /\$MASTER_API_TOKEN/.test(s11)
           && /Nunca peça o token no chat/.test(s11)
           && /Nunca aceite se oferecerem/.test(s11)
-          // e diz o que fazer quando não achar, em vez de deixar ele inventar
-          && /Não encontrei `MASTER_API_TOKEN` no meu ambiente/.test(s11)
-          && /queimado/.test(s11);
+          // e diz o que fazer quando não achar, em vez de deixar ele inventar:
+          // uma resposta pronta que RECUSA o valor pelo chat
+          && /não me mande o valor por aqui/i.test(s11)
+          && /queimado/.test(s11)
+          // o outro jeito de ligar (API credential no ambiente do Cowork, com
+          // o proxy grudando o header): aí ele chama SEM header e funciona.
+          // Sem esta ordem ele conclui "não tenho token" numa sessão que já
+          // estava autenticada, e vai pedir o valor por nada.
+          && /Chame SEM header nenhum/.test(s11)
+          && /API credential/.test(s11);
       })(),
       // o curl do print saiu com adyen-monitor.onrender.com; o endereço é o
       // nopulso.com.br, e o documento tem que deixar isso sem margem
