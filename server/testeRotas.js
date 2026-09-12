@@ -2895,9 +2895,29 @@ setTimeout(async () => {
     const htmlL = require('fs').readFileSync(__dirname + '/public/lancamento.html', 'utf8');
     const htmlF = require('fs').readFileSync(__dirname + '/public/fechamentos.html', 'utf8');
     const cem = (v) => Math.round(Number(v) * 100);
+    // NOVO (12/09): o Master corrige o ajuste do POS na edição direta. Caso
+    // real: a loja lançou a maquininha comum no campo do POS em 01/09 e o
+    // 02/09 nasceu com -R$ 1.207,14 de desconto errado - e o ajuste é
+    // calculado UMA vez na criação, não se refaz sozinho. Zerar aqui tem que
+    // refazer o Total Declarado e a diferença junto.
+    const corrigidoResp = await enviarJson('PATCH', `/api/fechamentos/${hojeComPos.id}/editar-direto`, {
+      mudancas: { ajustePosAnterior: 0 }, motivo: 'loja lançou a maquininha comum no campo do POS',
+    }, cabP);
+    const corrigido = corrigidoResp.status === 200 ? JSON.parse(corrigidoResp.corpo) : {};
+    const srcLive = require('fs').readFileSync(__dirname + '/fechamentosLive.js', 'utf8');
     const conf = {
       // o número dele, exatamente
       'as parcelas somam o Faturamento': cem(hoje.faturamento) === 256693,
+      // o Master zera o ajuste errado e os totais se refazem
+      'Master zera o "Ajuste do POS de ontem" na edição direta (era ignorado pelo servidor)':
+        corrigidoResp.status === 200 && cem(corrigido.ajustePosAnterior) === 0,
+      'zerar o ajuste refaz o Total Declarado e a diferença (não fica o número velho)':
+        cem(corrigido.totalDeclarado) === 256693 && cem(corrigido.diferenca) === 0,
+      'o formulário de edição do Master tem o campo do ajuste':
+        /id="ef-ajustePosAnterior"/.test(htmlF)
+        && /const CAMPOS_EDICAO_FECHAMENTO = \[[^\]]*'ajustePosAnterior'[^\]]*\];/.test(htmlF),
+      'o servidor aceita o campo na edição direta (CAMPOS_NUMERICOS)':
+        /const CAMPOS_NUMERICOS = \[[\s\S]*?'ajustePosAnterior',[\s\S]*?\];/.test(srcLive),
       'sem a seção Maquininha POS, não há desconto nenhum': cem(hoje.ajustePosAnterior) === 0,
       'o Total Declarado passa a bater com o que está na tela': cem(hoje.totalDeclarado) === 256693,
       'a diferença de -R$ 1.207,14 some': cem(hoje.diferenca) === 0,
@@ -2925,7 +2945,7 @@ setTimeout(async () => {
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okAjustePos = !falhas.length;
-    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (sem POS: fat=${hoje.faturamento} decl=${hoje.totalDeclarado} aj=${hoje.ajustePosAnterior} dif=${hoje.diferenca} | com POS: aj=${hojeComPos.ajustePosAnterior} decl=${hojeComPos.totalDeclarado} dif=${hojeComPos.diferenca})`);
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (sem POS: fat=${hoje.faturamento} decl=${hoje.totalDeclarado} aj=${hoje.ajustePosAnterior} dif=${hoje.diferenca} | com POS: aj=${hojeComPos.ajustePosAnterior} decl=${hojeComPos.totalDeclarado} dif=${hojeComPos.diferenca} | corrigido: st=${corrigidoResp.status} aj=${corrigido.ajustePosAnterior} decl=${corrigido.totalDeclarado} dif=${corrigido.diferenca})`);
   } catch (e) { okAjustePos = false; console.log('  erro: ' + e.message); }
   if (!okAjustePos) ruins += 1;
   console.log(`${okAjustePos ? '✓' : '✗'} Fechamento: desconto da Maquininha POS só existe em loja que usa POS - e aparece na tela`);
