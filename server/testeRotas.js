@@ -4428,7 +4428,8 @@ setTimeout(async () => {
       'a tela tem o botão de assumir (mesmo com outro responsável)': /assumirAtendimento\(/.test(html) && /respEmail !== meuEmail/.test(html),
       'chat gera tarefa com o mesmo protocolo, sem criar outro Ticket #': tarefaResp.status === 200 && tarefaChat.tarefa?.numeroTicket === chatNovo.numeroTicket && tarefaChat.tarefa?.origemChatId === chatNovo.id,
       'repetir a ação devolve a tarefa vinculada': tarefaRepetidaResp.status === 200 && tarefaRepetida.existente === true && tarefaRepetida.tarefa?.id === tarefaChat.tarefa?.id,
-      'a Central mostra a ação Gerar tarefa': /function gerarTarefa\(id\)/.test(html) && /✅ Gerar tarefa/.test(html),
+      'a Central mostra a ação Gerar tarefa': /function gerarTarefa\(id\)/.test(html)
+        && /data-dica="Gerar tarefa" aria-label="Gerar tarefa"/.test(html),
       // NOC: atalho pra sistema E acesso/senha, e pergunta a unidade quando não sabe
       'NOC: atalho aparece pra Computador/Sistema E Acesso/Senha (não só um)':
         /const ASSUNTOS_NOC = \['Computador\/Sistema', 'Acesso\/Senha'\]/.test(html)
@@ -17073,6 +17074,142 @@ setTimeout(async () => {
   } catch (e) { okAutofill = false; console.log('  erro: ' + e.message); }
   if (!okAutofill) ruins += 1;
   console.log(`${okAutofill ? '✓' : '✗'} Senha: o navegador não preenche mais sozinho - só o login pede a senha salva`);
+
+  // Caixas de marcar iguais em todas as telas. Eram 159 espalhadas e só 9
+  // arquivos definiam a cor - na MESMA janela apareciam uma limão e uma roxa.
+  // O tamanho errado vinha de regra global de página (loja-status.html tem
+  // input{width:100%;height:36px}, feita pros campos de texto, que a caixa
+  // herdava junto). Medido no navegador depois: 13x13 nativo em todas.
+  let okChecks = false;
+  try {
+    const fs = require('fs');
+    const tema = fs.readFileSync(__dirname + '/public/tema.js', 'utf8');
+    const bloco = (tema.match(/var checks = document\.createElement\('style'\);[\s\S]*?document\.head\.appendChild\(checks\);/) || [''])[0];
+
+    const conf = {
+      'o desenho existe e sai de um lugar só': bloco.length > 200
+        && /checks\.id = 'zenith-checks'/.test(bloco),
+      'cobre caixa de marcar E botão de opção':
+        /input\[type=checkbox\],input\[type=radio\]\{/.test(bloco),
+      'a cor vem do token, então o tema Claro troca junto':
+        /accent-color:var\(--accent,#b8ff3c\)/.test(bloco)
+        && !/#(?!b8ff3c\b)[0-9a-f]{6}/i.test(bloco),
+      // width:100% de regra global esticava a caixa; auto devolve o nativo
+      'desfaz o tamanho que a página impõe aos campos de texto':
+        /width:auto;height:auto;min-height:0;flex:none;/.test(bloco),
+      'e desfaz também a borda/fundo de campo de texto':
+        /padding:0;border:0;background:none;border-radius:0/.test(bloco),
+      'injetado já no <head>, sem esperar a página montar':
+        /\n  document\.head\.appendChild\(checks\);\n/.test(tema)
+        && tema.indexOf('appendChild(checks)') < tema.indexOf('function montarControles'),
+      'caixa desabilitada se comporta como desabilitada':
+        /input\[type=checkbox\]:disabled,input\[type=radio\]:disabled\{cursor:default;opacity:\.55;\}/.test(bloco),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okChecks = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okChecks = false; console.log('  erro: ' + e.message); }
+  if (!okChecks) ruins += 1;
+  console.log(`${okChecks ? '✓' : '✗'} Caixas de marcar: as mesmas em todas as telas, de um arquivo só`);
+
+  // Balão de dica e botão só-ícone. A fileira de ações do painel de conversa
+  // quebrava em 3 linhas; agora são 8 botões de 34px numa linha só (medido:
+  // 394px), e o nome aparece num balão ABAIXO do ícone ao passar o mouse.
+  let okDicas = false;
+  try {
+    const fs = require('fs');
+    const tema = fs.readFileSync(__dirname + '/public/tema.js', 'utf8');
+    const ben = fs.readFileSync(__dirname + '/public/beniboy.html', 'utf8');
+    const bloco = (tema.match(/var dicas = document\.createElement\('style'\);[\s\S]*?document\.head\.appendChild\(dicas\);/) || [''])[0];
+
+    const conf = {
+      'o balão existe e sai de um lugar só': bloco.length > 500
+        && /dicas\.id = 'zenith-dicas'/.test(bloco),
+      'o nome vem do próprio atributo, não de um texto repetido':
+        /\[data-dica\]::after\{content:attr\(data-dica\)/.test(bloco),
+      'aparece ABAIXO do ícone, centralizado': /top:calc\(100% \+ 7px\);left:50%;/.test(bloco),
+      // absolute + pointer-events:none: não empurra nada nem rouba o clique
+      'não empurra layout nem atrapalha o clique':
+        /position:absolute/.test(bloco)
+        && /\[data-dica\]::after\{[\s\S]{0,600}?pointer-events:none/.test(bloco)
+        && /\[data-dica\]::before\{[\s\S]{0,300}?pointer-events:none/.test(bloco),
+      'some por completo quando não é hover (não fica ocupando espaço)':
+        /opacity:0;visibility:hidden/.test(bloco)
+        && /\[data-dica\]:hover::after,\[data-dica\]:focus-visible::after\{opacity:1;visibility:visible/.test(bloco),
+      // quem navega por teclado também precisa saber o que o ícone faz
+      'teclado também vê a dica': /:focus-visible::after/.test(bloco) && /:focus-visible::before/.test(bloco),
+      // em tela de toque não há hover: balão preso depois do toque atrapalha
+      'em tela de toque o balão não aparece': /@media \(hover:none\)\{\[data-dica\]::after/.test(bloco),
+      'respeita quem pediu menos animação': /@media \(prefers-reduced-motion:reduce\)/.test(bloco),
+      'toda cor está dentro de var(--token,…), nenhuma solta':
+        !/#[0-9a-f]{6}/i.test(bloco.replace(/var\(--[a-z0-9-]+,\s*#[0-9a-f]{6}\)/gi, ''))
+        && (bloco.match(/var\(--/g) || []).length >= 8,
+      'o botão só-ícone é quadrado e sem relevo':
+        /\.btn-icone\{width:34px;height:34px;/.test(bloco) && /\.btn-icone:hover\{border-color:var\(--accent/.test(bloco),
+
+      // ---- aplicado no painel de conversa ----
+      'as ações viraram ícone, e NENHUMA perdeu o nome':
+        (() => {
+          const todos = ben.match(/class="btn-icone[^"]*"[^>]*>/g) || [];
+          const comNome = todos.filter((t) => /data-dica="([^"]+)"/.test(t) && /aria-label="([^"]+)"/.test(t));
+          return todos.length >= 8 && comNome.length === todos.length;
+        })(),
+      // o nome do balão e o do leitor de tela saem do MESMO rótulo: não têm
+      // como divergir, que é o risco real de botão só-ícone
+      'balão e leitor de tela dizem a mesma coisa':
+        !/data-dica="([^"]*)" aria-label="(?!\1")/.test(ben),
+      'não sobrou botão de texto na fileira de ações':
+        !/btn-ghost[^>]*>(🙋|🔀|✅|⛔|↩️|🎫|📄|🖥️)/.test(ben),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDicas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDicas = false; console.log('  erro: ' + e.message); }
+  if (!okDicas) ruins += 1;
+  console.log(`${okDicas ? '✓' : '✗'} Ações do Beniboy: 8 ícones numa linha, com o nome em balão no hover`);
+
+  // Mensagem direta: seletor de unidade ao lado do nome. Escolher a loja deixa
+  // na lista só quem trabalha nela. Filtro NA TELA - a rota usuarios-alvo já
+  // devolve as unidades de cada pessoa, então não custa leitura nova.
+  let okMsgUnidade = false;
+  try {
+    const fs = require('fs');
+    const ben = fs.readFileSync(__dirname + '/public/beniboy.html', 'utf8');
+    const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const pintar = (ben.match(/function pintarUsuariosMensagem\(\)\{[\s\S]*?\n\}/) || [''])[0];
+    const montar = (ben.match(/function montarUnidadesMensagem\(\)\{[\s\S]*?\n\}/) || [''])[0];
+
+    const conf = {
+      'o seletor fica À DIREITA do nome, na mesma linha':
+        /<select id="md-usuario"[^>]*><\/select>\s*\n\s*<select id="md-unidade"/.test(ben)
+        && /display:flex;gap:8px;margin-bottom:10px;align-items:stretch;/.test(ben),
+      'escolher a unidade repinta a lista de pessoas':
+        /id="md-unidade" onchange="pintarUsuariosMensagem\(\)"/.test(ben),
+      'a rota já manda as unidades de cada pessoa (por isso o filtro é local)':
+        /unidades: \(u\.permissions && u\.permissions\.unidades\) \|\| null/.test(idx),
+      'o filtro não faz chamada nova': pintar.length > 200 && !/fetch\(/.test(pintar),
+      // quem enxerga o sistema inteiro pertence a qualquer loja
+      'quem não tem unidade (Master/Admin) aparece em qualquer loja':
+        /!uni \|\| !u\.unidades \|\| !u\.unidades\.length \|\| u\.unidades\.includes\(uni\)/.test(pintar),
+      // oferecer loja sem ninguém dentro só renderia lista vazia
+      'as opções saem das unidades das PESSOAS, não do cadastro inteiro':
+        /\[\.\.\.new Set\(\(USUARIOS_MENSAGEM\|\|\[\]\)\.flatMap\(u=>u\.unidades\|\|\[\]\)\)\]/.test(montar),
+      'mostra o nome da loja, e cai no código se não souber o nome':
+        /\(NOC_UNIDADES\.find\(x=>String\(x\.codigo\)===String\(c\)\)\|\|\{\}\)\.nome \|\| c/.test(montar),
+      // trocar de unidade não pode trocar o destinatário sem a pessoa ver
+      'quem estava escolhido continua escolhido, se ainda estiver na lista':
+        /if\(escolhido && lista\.some\(u=>u\.id===escolhido\)\) sel\.value = escolhido;/.test(pintar),
+      'unidade sem ninguém diz isso, em vez de lista vazia':
+        /Ninguém nessa unidade/.test(pintar),
+      'nome e e-mail vão escapados (vêm de cadastro de gente)':
+        /escapeHtml\(u\.username\|\|u\.email\)/.test(pintar) && /escapeHtml\(u\.id\)/.test(pintar),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMsgUnidade = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okMsgUnidade = false; console.log('  erro: ' + e.message); }
+  if (!okMsgUnidade) ruins += 1;
+  console.log(`${okMsgUnidade ? '✓' : '✗'} Mensagem direta: filtrar por unidade ao lado do nome, sem leitura nova`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
