@@ -2007,6 +2007,11 @@ function requireAnySection(...sections) {
 // descartar o evento pra quem tem permissions.unidades vazio/diferente
 const sseClients = new Set();
 function broadcast(event, data, section) {
+  // A LEITURA esconde registro de unidade restrita a area Monitor; o push ao
+  // vivo nao escondia. Dava exatamente isto: o pedido aparecia na hora e SUMIA
+  // no refresh - o pior tipo de tela, a que mostra e depois desmente. Os dois
+  // caminhos tem de obedecer a MESMA regra, seja ela qual for.
+  if (section === 'monitor' && data && data.unidade && RESTRITOS_MONITOR.has(data.unidade)) return;
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const client of sseClients) {
     if (!client.isMaster) {
@@ -2365,10 +2370,31 @@ app.post('/webhooks/adyen', async (req, res) => {
 // da Adyen e nunca pode ser recusada (perderia o dado). O gate certo e na
 // LEITURA - a unidade so some das listas, o webhook continua gravando
 // normalmente
+// Espelho SINCRONO dos codigos restritos a area Monitor. broadcast() e
+// sincrono e roda a cada webhook da Adyen - consultar o cadastro ali seria
+// uma leitura por transacao. Fica sempre atualizado porque filtrarPorAreaMonitor
+// roda em toda leitura da tela.
+let RESTRITOS_MONITOR = new Set();
+let ULTIMO_AVISO_AREA = 0;
+
 async function filtrarPorAreaMonitor(lista) {
   const restritos = new Set(await unidadesExtras.codigosRestritosDe('monitor'));
+  RESTRITOS_MONITOR = restritos;
   if (!restritos.size) return lista;
-  return lista.filter((item) => !restritos.has(item.unidade));
+  const visiveis = lista.filter((item) => !restritos.has(item.unidade));
+  // Sumico silencioso e o que fez isso virar investigacao: a transacao existia,
+  // estava autenticada e gravada, e a tela simplesmente nao a mostrava. Agora
+  // fica no log qual unidade foi escondida e quantas linhas (no maximo de 5 em
+  // 5 min - a tela recarrega sozinha e encheria o log).
+  const escondidas = lista.length - visiveis.length;
+  if (escondidas && Date.now() - ULTIMO_AVISO_AREA > 5 * 60 * 1000) {
+    ULTIMO_AVISO_AREA = Date.now();
+    const porUnidade = {};
+    lista.forEach((i) => { if (restritos.has(i.unidade)) porUnidade[i.unidade] = (porUnidade[i.unidade] || 0) + 1; });
+    console.warn(`Monitor: ${escondidas} registro(s) escondido(s) pelo filtro de area`,
+      `- unidade(s) sem "monitor" marcado no perfil:`, JSON.stringify(porUnidade));
+  }
+  return visiveis;
 }
 
 app.get('/api/transactions', requireSection('monitor'), async (req, res) => {

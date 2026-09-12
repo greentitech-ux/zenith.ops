@@ -205,14 +205,14 @@
     </div>
     <div class="hidden" id="s-motivo-bloco">
       <label id="s-motivo-label">Motivo da divergência</label>
-      <input type="text" id="s-motivo" maxlength="300" placeholder="ex: faltou lançar o fechamento de ontem / erro de troco">
+      <input type="text" id="s-motivo" autocomplete="off" maxlength="300" placeholder="ex: faltou lançar o fechamento de ontem / erro de troco">
     </div>
     <label>Nome de quem depositou</label>
-    <input type="text" id="s-nome-depositante" placeholder="ex: João (gerente)" required>
+    <input type="text" id="s-nome-depositante" autocomplete="off" placeholder="ex: João (gerente)" required>
     <label>Observação (opcional)</label>
-    <input type="text" id="s-descricao" placeholder="ex: retirada na visita da tarde">
+    <input type="text" id="s-descricao" autocomplete="off" placeholder="ex: retirada na visita da tarde">
     <label>Confirme sua senha</label>
-    <input type="password" id="s-password" required autocomplete="current-password">
+    <input type="password" id="s-password" required autocomplete="new-password">
     <div class="msg hidden" id="msg-sangria"></div>
     <button class="btn-primary" type="submit" id="btn-sangria">Registrar sangria/depósito</button>
   </form>

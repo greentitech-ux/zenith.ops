@@ -721,6 +721,82 @@
   ].join('\n');
   document.head.appendChild(fechar);
 
+  // ---- caixas de marcar: as mesmas em todas as telas ----
+  //
+  // Pedido do Master: "deixar os checks todos padrão".
+  //
+  // Eram 159 caixas espalhadas e SÓ 9 arquivos definiam a cor - o resto ficava
+  // no azul/roxo do navegador, então na mesma janela apareciam uma limão e uma
+  // roxa, uma do tamanho certo e outra esticada.
+  //
+  // O tamanho errado vinha de regra global de página: loja-status.html tem
+  // input{width:100%;height:36px}, feita pros campos de texto, que a caixa de
+  // marcar herdava junto. input[type=checkbox] tem especificidade maior que
+  // input, então desfaz isso sem a página precisar saber.
+  //
+  // width/height auto (e não um número): devolve o tamanho NATIVO do sistema,
+  // que é o que a pessoa reconhece como caixa de marcar - cravar 16px mudaria
+  // o que hoje já está certo.
+  var checks = document.createElement('style');
+  checks.id = 'zenith-checks';
+  checks.textContent = [
+    'input[type=checkbox],input[type=radio]{',
+    '  accent-color:var(--accent,#b8ff3c);',
+    '  width:auto;height:auto;min-height:0;flex:none;',
+    '  padding:0;border:0;background:none;border-radius:0;cursor:pointer;}',
+    'input[type=checkbox]:disabled,input[type=radio]:disabled{cursor:default;opacity:.55;}',
+  ].join('\n');
+  document.head.appendChild(checks);
+
+  // ---- balão de dica (data-dica) e botão só-ícone (.btn-icone) ----
+  //
+  // Pedido do Master: a fileira de ações quebrava em 3 linhas; encolher pra
+  // uma linha só, e "ao passar o mouse mostra o nome ABAIXO do ícone, como um
+  // balão - algo que não fique feio nem atrapalhando".
+  //
+  // CSS puro, via ::after/::before: não tem JS, não tem nó a mais no DOM e
+  // NÃO empurra layout (o balão é absolute, fora do fluxo). O title nativo
+  // não serve: demora ~1s, aparece onde o mouse está e não dá pra desenhar.
+  //
+  // Só em elemento que aceita ::after - botão, link, span. Em <input> os
+  // pseudo-elementos não existem, então ali continua o title.
+  //
+  // :focus-visible junto do :hover: quem navega por teclado também precisa
+  // saber o que o ícone faz, senão o botão só-ícone vira adivinhação.
+  var dicas = document.createElement('style');
+  dicas.id = 'zenith-dicas';
+  dicas.textContent = [
+    '[data-dica]{position:relative;}',
+    '[data-dica]::after{content:attr(data-dica);position:absolute;top:calc(100% + 7px);left:50%;',
+    '  transform:translateX(-50%) translateY(-3px);background:var(--panel2,#181d24);color:var(--text,#e7ecf1);',
+    '  border:1px solid var(--line,#27313b);border-radius:7px;padding:4px 9px;',
+    '  font:11px/1.3 var(--sans,Arial,sans-serif);font-weight:600;white-space:nowrap;letter-spacing:normal;text-transform:none;',
+    '  pointer-events:none;opacity:0;visibility:hidden;z-index:60;',
+    '  box-shadow:0 4px 14px rgba(0,0,0,.45);transition:opacity .12s ease,transform .12s ease;}',
+    // a setinha que liga o balão ao ícone
+    '[data-dica]::before{content:"";position:absolute;top:calc(100% + 2px);left:50%;transform:translateX(-50%);',
+    '  border:5px solid transparent;border-bottom-color:var(--line,#27313b);',
+    '  pointer-events:none;opacity:0;visibility:hidden;z-index:61;transition:opacity .12s ease;}',
+    '[data-dica]:hover::after,[data-dica]:focus-visible::after{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0);}',
+    '[data-dica]:hover::before,[data-dica]:focus-visible::before{opacity:1;visibility:visible;}',
+    // balão que nasceria fora da tela pela direita ancora pela borda
+    '[data-dica][data-dica-fim]::after{left:auto;right:0;transform:translateX(0) translateY(-3px);}',
+    '[data-dica][data-dica-fim]:hover::after,[data-dica][data-dica-fim]:focus-visible::after{transform:translateX(0) translateY(0);}',
+    '@media (prefers-reduced-motion:reduce){[data-dica]::after,[data-dica]::before{transition:none;}}',
+    // o balão depende de hover: em tela de toque não existe, e um balão preso
+    // depois do toque atrapalharia mais do que ajuda
+    '@media (hover:none){[data-dica]::after,[data-dica]::before{display:none;}}',
+    // botão só-ícone: mesma família do ✕ de fechar, quadrado e sem relevo
+    '.btn-icone{width:34px;height:34px;flex:none;padding:0;border-radius:8px;',
+    '  background:var(--panel2,#181d24);border:1px solid var(--line,#27313b);color:var(--text,#e7ecf1);',
+    '  font-size:15px;line-height:1;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;',
+    '  cursor:pointer;text-decoration:none;}',
+    '.btn-icone:hover{border-color:var(--accent,#b8ff3c);}',
+    '.btn-icone:disabled{opacity:.5;cursor:default;}',
+    '.btn-icone.perigo:hover{border-color:var(--bad,#ff6b6b);}',
+  ].join('\n');
+  document.head.appendChild(dicas);
+
   function aplicar() {
     document.documentElement.setAttribute('data-tema', temaAtual());
     // zoom escala texto E espacamentos (tudo em px nas paginas) - e o

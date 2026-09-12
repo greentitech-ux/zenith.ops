@@ -4438,7 +4438,8 @@ setTimeout(async () => {
       'a tela tem o botão de assumir (mesmo com outro responsável)': /assumirAtendimento\(/.test(html) && /respEmail !== meuEmail/.test(html),
       'chat gera tarefa com o mesmo protocolo, sem criar outro Ticket #': tarefaResp.status === 200 && tarefaChat.tarefa?.numeroTicket === chatNovo.numeroTicket && tarefaChat.tarefa?.origemChatId === chatNovo.id,
       'repetir a ação devolve a tarefa vinculada': tarefaRepetidaResp.status === 200 && tarefaRepetida.existente === true && tarefaRepetida.tarefa?.id === tarefaChat.tarefa?.id,
-      'a Central mostra a ação Gerar tarefa': /function gerarTarefa\(id\)/.test(html) && /✅ Gerar tarefa/.test(html),
+      'a Central mostra a ação Gerar tarefa': /function gerarTarefa\(id\)/.test(html)
+        && /data-dica="Gerar tarefa" aria-label="Gerar tarefa"/.test(html),
       // NOC: atalho pra sistema E acesso/senha, e pergunta a unidade quando não sabe
       'NOC: atalho aparece pra Computador/Sistema E Acesso/Senha (não só um)':
         /const ASSUNTOS_NOC = \['Computador\/Sistema', 'Acesso\/Senha'\]/.test(html)
@@ -17068,6 +17069,275 @@ setTimeout(async () => {
   } catch (e) { okBarraPrint = false; console.log('  erro: ' + e.message); }
   if (!okBarraPrint) ruins += 1;
   console.log(`${okBarraPrint ? '✓' : '✗'} NoPulsoPrint: barra de marcação limpa, só ícone, no estilo Lightshot`);
+
+  // Por que as transações da Adyen da ARCFOOD sumiam do Monitor.
+  //
+  // A cadeia: normalize.js grava unidade = normalizarCodigoUnidade(merchant),
+  // e o mapa manda os 4 códigos ARCFOOD pros códigos NUMÉRICOS do Fechamento
+  // (19888, 19889, 19821, 19855) enquanto os 5 do GBE vão pra "Dominos ...".
+  // Só a ARCFOOD cai no MESMO espaço de código que o cadastro de unidades
+  // usa - então só ela pode ser pega por codigosRestritosDe('monitor'), que
+  // apaga do Monitor toda unidade cujo perfil tem áreas marcadas SEM Monitor.
+  // Áreas vazias = aparece em todas; basta marcar uma para as outras saírem.
+  let okSumicoArcfood = false;
+  try {
+    const mig = require(__dirname + '/migracaoUnidades.js');
+    const un = require(__dirname + '/unidades.js');
+    const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const norm = require('fs').readFileSync(__dirname + '/normalize.js', 'utf8');
+    const gru = require('fs').readFileSync(__dirname + '/public/grupos.html', 'utf8');
+    const n = mig.normalizarCodigoUnidade;
+
+    const conf = {
+      // é ISTO que explica "só a ARCFOOD": os dois grupos caem em espaços
+      // de código diferentes depois da normalização
+      'ARCFOOD vai pro código numérico do Fechamento; GBE vai pra "Dominos ..."':
+        n('DOM___19888') === '19888' && n('DOM_19889') === '19889'
+        && n('DOM__19821') === '19821' && n('DOM__19855') === '19855'
+        && n('DOM_19706') === 'Dominos Bessa' && n('DOM19940') === 'Dominos Tirol',
+      'a transação da Adyen nasce já com o código normalizado':
+        /unidade: normalizarCodigoUnidade\(item\.merchantAccountCode\)/.test(norm),
+      // o filtro que apaga a linha, sem avisar ninguém
+      'o Monitor descarta toda transação de unidade restrita à área':
+        /const restritos = new Set\(await unidadesExtras\.codigosRestritosDe\('monitor'\)\);/.test(idx)
+        && /const visiveis = lista\.filter\(\(item\) => !restritos\.has\(item\.unidade\)\);/.test(idx),
+      'e isso vale para transações, pedidos e chargebacks':
+        (idx.match(/filtrarPorAreaMonitor\(auth\.filterByUnidade\(req,/g) || []).length >= 3,
+      // áreas vazias = aparece em todas; marcar UMA tira todas as outras
+      'marcar uma área sozinha esconde a unidade de todas as demais':
+        /if \(!u \|\| !Array\.isArray\(u\.areas\) \|\| !u\.areas\.length\) return true;/.test(require('fs').readFileSync(__dirname + '/unidades.js', 'utf8'))
+        && /!u\.areas\.includes\(area\)/.test(require('fs').readFileSync(__dirname + '/unidades.js', 'utf8')),
+      // "Monitor" é só mais um check numa lista de nove, e é o menos óbvio:
+      // ninguém pensa em transação da Adyen como "área" de uma loja
+      'a tela de perfil oferece Monitor junto das outras áreas':
+        /monitor:'Monitor'/.test(gru) && /areas: readChecked\(document\.getElementById\('up-areas'\)\)/.test(gru),
+
+      // ---- o bug de verdade, corrigido aqui ----
+      // o upsert grava o registro INTEIRO (.set, não merge)
+      'trocar só a marca NÃO apaga mais as áreas da unidade':
+        (() => {
+          const f = un.upsertPerfil.toString();
+          return /areas: areas === undefined \? \(\(atual && atual\.areas\) \|\| \[\]\) :/.test(f)
+            && /tiposSolicitacao: tiposSolicitacao === undefined/.test(f)
+            && /marca: marca === undefined \? \(\(atual && atual\.marca\) \|\| null\) :/.test(f);
+        })(),
+      'quem MANDA a lista continua mandando (inclusive pra limpar)':
+        /listaVaziaOuValida\(areas, AREAS_VALIDAS\)/.test(un.upsertPerfil.toString())
+        && /listaVaziaOuValida\(tiposSolicitacao, TIPOS_SOLICITACAO_VALIDOS\)/.test(un.upsertPerfil.toString()),
+      'a ação de agente passa pelo mesmo upsert (mesma proteção)':
+        /'unidadesExtras\.perfil': \(p\) => invalidandoUnidadesMapa\(unidadesExtras\.upsertPerfil\(/.test(idx),
+
+      // ---- o que fazia o pedido APARECER e depois SUMIR ----
+      // A leitura escondia a unidade restrita; o push ao vivo não. O pedido
+      // entrava na tela pelo SSE e desaparecia no refresh - a tela mostrava e
+      // depois desmentia. Os dois caminhos têm de obedecer à MESMA regra.
+      'o push ao vivo obedece ao mesmo filtro de área que a leitura':
+        /if \(section === 'monitor' && data && data\.unidade && RESTRITOS_MONITOR\.has\(data\.unidade\)\) return;/.test(idx),
+      'o espelho usado pelo push é síncrono e se atualiza a cada leitura':
+        /let RESTRITOS_MONITOR = new Set\(\);/.test(idx)
+        && /RESTRITOS_MONITOR = restritos;/.test(idx),
+      // some sem log nenhum foi o que transformou isto numa investigação
+      'esconder registro deixa rastro no log, com a unidade e quantos':
+        /Monitor: \$\{escondidas\} registro\(s\) escondido\(s\) pelo filtro de area/.test(idx)
+        && /ULTIMO_AVISO_AREA/.test(idx),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n2]) => n2);
+    okSumicoArcfood = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okSumicoArcfood = false; console.log('  erro: ' + e.message); }
+  if (!okSumicoArcfood) ruins += 1;
+  console.log(`${okSumicoArcfood ? '✓' : '✗'} Monitor: por que a ARCFOOD some (área) e o perfil que não apaga mais as áreas`);
+
+  // Preenchimento automático: o navegador despejava a senha salva (e o
+  // histórico de formulário) em campo que ninguém clicou. A causa era o
+  // autocomplete="current-password" em campo que NÃO é login - isso é um
+  // convite explícito pro gerenciador preencher sozinho.
+  //
+  // "Confirme sua senha pra autorizar ESTA ação" pede new-password: desliga o
+  // preenchimento e mantém a SUGESTÃO (o cadeado continua lá pra quem clicar).
+  let okAutofill = false;
+  try {
+    const fs = require('fs');
+    const dir = __dirname + '/public';
+    const arquivos = fs.readdirSync(dir).filter((f) => f.endsWith('.html') || f.endsWith('.js'));
+    const campos = [];
+    arquivos.forEach((f) => {
+      const txt = fs.readFileSync(dir + '/' + f, 'utf8');
+      (txt.match(/<input[^>]*type="password"[^>]*>/g) || []).forEach((tag) => {
+        const id = (tag.match(/id="([^"]*)"/) || [])[1] || '(sem id)';
+        const ac = (tag.match(/autocomplete="([^"]*)"/) || [])[1] || null;
+        campos.push({ arquivo: f, id, ac });
+      });
+    });
+    const semAutocomplete = campos.filter((c) => !c.ac);
+    // só o login de verdade pode pedir a senha salva
+    const pedemSenhaSalva = campos.filter((c) => c.ac === 'current-password');
+    const soOLogin = pedemSenhaSalva.length === 1
+      && pedemSenhaSalva[0].arquivo === 'index.html' && pedemSenhaSalva[0].id === 'auth-password';
+
+    const conf = {
+      'todo campo de senha declara o que o navegador pode fazer':
+        semAutocomplete.length === 0 || `sem autocomplete: ${semAutocomplete.map((c) => c.arquivo + '#' + c.id).join(', ')}`,
+      // ESTA é a regressão: um "confirme sua senha" marcado como login
+      'só o login pede a senha salva; confirmação de ação, nunca':
+        soOLogin || `pedem senha salva: ${pedemSenhaSalva.map((c) => c.arquivo + '#' + c.id).join(', ') || 'nenhum'}`,
+      'os campos de confirmar ação estão todos desligados do preenchimento':
+        ['central.html', 'grupos.html', 'lancamento.html', 'loja-status.html', 'monitor.html', 'tarefas.html']
+          .every((f) => campos.some((c) => c.arquivo === f && (c.ac === 'new-password' || c.ac === 'off'))),
+      'e mais de um campo existe de fato (o teste não passa por lista vazia)':
+        campos.length >= 15,
+      // o histórico de formulário do Chrome enchia campo de texto pelo rótulo
+      // (foi assim que "solutions" caiu na Observação da sangria)
+      'os campos de texto da sangria não são mais preenchidos sozinhos':
+        (() => {
+          const l = fs.readFileSync(dir + '/lancamento.html', 'utf8');
+          return /id="s-descricao" autocomplete="off"/.test(l)
+            && /id="s-nome-depositante" autocomplete="off"/.test(l)
+            && /id="s-motivo" autocomplete="off"/.test(l);
+        })(),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true).map(([n, v]) => (typeof v === 'string' ? `${n} (${v})` : n));
+    okAutofill = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okAutofill = false; console.log('  erro: ' + e.message); }
+  if (!okAutofill) ruins += 1;
+  console.log(`${okAutofill ? '✓' : '✗'} Senha: o navegador não preenche mais sozinho - só o login pede a senha salva`);
+
+  // Caixas de marcar iguais em todas as telas. Eram 159 espalhadas e só 9
+  // arquivos definiam a cor - na MESMA janela apareciam uma limão e uma roxa.
+  // O tamanho errado vinha de regra global de página (loja-status.html tem
+  // input{width:100%;height:36px}, feita pros campos de texto, que a caixa
+  // herdava junto). Medido no navegador depois: 13x13 nativo em todas.
+  let okChecks = false;
+  try {
+    const fs = require('fs');
+    const tema = fs.readFileSync(__dirname + '/public/tema.js', 'utf8');
+    const bloco = (tema.match(/var checks = document\.createElement\('style'\);[\s\S]*?document\.head\.appendChild\(checks\);/) || [''])[0];
+
+    const conf = {
+      'o desenho existe e sai de um lugar só': bloco.length > 200
+        && /checks\.id = 'zenith-checks'/.test(bloco),
+      'cobre caixa de marcar E botão de opção':
+        /input\[type=checkbox\],input\[type=radio\]\{/.test(bloco),
+      'a cor vem do token, então o tema Claro troca junto':
+        /accent-color:var\(--accent,#b8ff3c\)/.test(bloco)
+        && !/#(?!b8ff3c\b)[0-9a-f]{6}/i.test(bloco),
+      // width:100% de regra global esticava a caixa; auto devolve o nativo
+      'desfaz o tamanho que a página impõe aos campos de texto':
+        /width:auto;height:auto;min-height:0;flex:none;/.test(bloco),
+      'e desfaz também a borda/fundo de campo de texto':
+        /padding:0;border:0;background:none;border-radius:0/.test(bloco),
+      'injetado já no <head>, sem esperar a página montar':
+        /\n  document\.head\.appendChild\(checks\);\n/.test(tema)
+        && tema.indexOf('appendChild(checks)') < tema.indexOf('function montarControles'),
+      'caixa desabilitada se comporta como desabilitada':
+        /input\[type=checkbox\]:disabled,input\[type=radio\]:disabled\{cursor:default;opacity:\.55;\}/.test(bloco),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okChecks = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okChecks = false; console.log('  erro: ' + e.message); }
+  if (!okChecks) ruins += 1;
+  console.log(`${okChecks ? '✓' : '✗'} Caixas de marcar: as mesmas em todas as telas, de um arquivo só`);
+
+  // Balão de dica e botão só-ícone. A fileira de ações do painel de conversa
+  // quebrava em 3 linhas; agora são 8 botões de 34px numa linha só (medido:
+  // 394px), e o nome aparece num balão ABAIXO do ícone ao passar o mouse.
+  let okDicas = false;
+  try {
+    const fs = require('fs');
+    const tema = fs.readFileSync(__dirname + '/public/tema.js', 'utf8');
+    const ben = fs.readFileSync(__dirname + '/public/beniboy.html', 'utf8');
+    const bloco = (tema.match(/var dicas = document\.createElement\('style'\);[\s\S]*?document\.head\.appendChild\(dicas\);/) || [''])[0];
+
+    const conf = {
+      'o balão existe e sai de um lugar só': bloco.length > 500
+        && /dicas\.id = 'zenith-dicas'/.test(bloco),
+      'o nome vem do próprio atributo, não de um texto repetido':
+        /\[data-dica\]::after\{content:attr\(data-dica\)/.test(bloco),
+      'aparece ABAIXO do ícone, centralizado': /top:calc\(100% \+ 7px\);left:50%;/.test(bloco),
+      // absolute + pointer-events:none: não empurra nada nem rouba o clique
+      'não empurra layout nem atrapalha o clique':
+        /position:absolute/.test(bloco)
+        && /\[data-dica\]::after\{[\s\S]{0,600}?pointer-events:none/.test(bloco)
+        && /\[data-dica\]::before\{[\s\S]{0,300}?pointer-events:none/.test(bloco),
+      'some por completo quando não é hover (não fica ocupando espaço)':
+        /opacity:0;visibility:hidden/.test(bloco)
+        && /\[data-dica\]:hover::after,\[data-dica\]:focus-visible::after\{opacity:1;visibility:visible/.test(bloco),
+      // quem navega por teclado também precisa saber o que o ícone faz
+      'teclado também vê a dica': /:focus-visible::after/.test(bloco) && /:focus-visible::before/.test(bloco),
+      // em tela de toque não há hover: balão preso depois do toque atrapalha
+      'em tela de toque o balão não aparece': /@media \(hover:none\)\{\[data-dica\]::after/.test(bloco),
+      'respeita quem pediu menos animação': /@media \(prefers-reduced-motion:reduce\)/.test(bloco),
+      'toda cor está dentro de var(--token,…), nenhuma solta':
+        !/#[0-9a-f]{6}/i.test(bloco.replace(/var\(--[a-z0-9-]+,\s*#[0-9a-f]{6}\)/gi, ''))
+        && (bloco.match(/var\(--/g) || []).length >= 8,
+      'o botão só-ícone é quadrado e sem relevo':
+        /\.btn-icone\{width:34px;height:34px;/.test(bloco) && /\.btn-icone:hover\{border-color:var\(--accent/.test(bloco),
+
+      // ---- aplicado no painel de conversa ----
+      'as ações viraram ícone, e NENHUMA perdeu o nome':
+        (() => {
+          const todos = ben.match(/class="btn-icone[^"]*"[^>]*>/g) || [];
+          const comNome = todos.filter((t) => /data-dica="([^"]+)"/.test(t) && /aria-label="([^"]+)"/.test(t));
+          return todos.length >= 8 && comNome.length === todos.length;
+        })(),
+      // o nome do balão e o do leitor de tela saem do MESMO rótulo: não têm
+      // como divergir, que é o risco real de botão só-ícone
+      'balão e leitor de tela dizem a mesma coisa':
+        !/data-dica="([^"]*)" aria-label="(?!\1")/.test(ben),
+      'não sobrou botão de texto na fileira de ações':
+        !/btn-ghost[^>]*>(🙋|🔀|✅|⛔|↩️|🎫|📄|🖥️)/.test(ben),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okDicas = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okDicas = false; console.log('  erro: ' + e.message); }
+  if (!okDicas) ruins += 1;
+  console.log(`${okDicas ? '✓' : '✗'} Ações do Beniboy: 8 ícones numa linha, com o nome em balão no hover`);
+
+  // Mensagem direta: seletor de unidade ao lado do nome. Escolher a loja deixa
+  // na lista só quem trabalha nela. Filtro NA TELA - a rota usuarios-alvo já
+  // devolve as unidades de cada pessoa, então não custa leitura nova.
+  let okMsgUnidade = false;
+  try {
+    const fs = require('fs');
+    const ben = fs.readFileSync(__dirname + '/public/beniboy.html', 'utf8');
+    const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const pintar = (ben.match(/function pintarUsuariosMensagem\(\)\{[\s\S]*?\n\}/) || [''])[0];
+    const montar = (ben.match(/function montarUnidadesMensagem\(\)\{[\s\S]*?\n\}/) || [''])[0];
+
+    const conf = {
+      'o seletor fica À DIREITA do nome, na mesma linha':
+        /<select id="md-usuario"[^>]*><\/select>\s*\n\s*<select id="md-unidade"/.test(ben)
+        && /display:flex;gap:8px;margin-bottom:10px;align-items:stretch;/.test(ben),
+      'escolher a unidade repinta a lista de pessoas':
+        /id="md-unidade" onchange="pintarUsuariosMensagem\(\)"/.test(ben),
+      'a rota já manda as unidades de cada pessoa (por isso o filtro é local)':
+        /unidades: \(u\.permissions && u\.permissions\.unidades\) \|\| null/.test(idx),
+      'o filtro não faz chamada nova': pintar.length > 200 && !/fetch\(/.test(pintar),
+      // quem enxerga o sistema inteiro pertence a qualquer loja
+      'quem não tem unidade (Master/Admin) aparece em qualquer loja':
+        /!uni \|\| !u\.unidades \|\| !u\.unidades\.length \|\| u\.unidades\.includes\(uni\)/.test(pintar),
+      // oferecer loja sem ninguém dentro só renderia lista vazia
+      'as opções saem das unidades das PESSOAS, não do cadastro inteiro':
+        /\[\.\.\.new Set\(\(USUARIOS_MENSAGEM\|\|\[\]\)\.flatMap\(u=>u\.unidades\|\|\[\]\)\)\]/.test(montar),
+      'mostra o nome da loja, e cai no código se não souber o nome':
+        /\(NOC_UNIDADES\.find\(x=>String\(x\.codigo\)===String\(c\)\)\|\|\{\}\)\.nome \|\| c/.test(montar),
+      // trocar de unidade não pode trocar o destinatário sem a pessoa ver
+      'quem estava escolhido continua escolhido, se ainda estiver na lista':
+        /if\(escolhido && lista\.some\(u=>u\.id===escolhido\)\) sel\.value = escolhido;/.test(pintar),
+      'unidade sem ninguém diz isso, em vez de lista vazia':
+        /Ninguém nessa unidade/.test(pintar),
+      'nome e e-mail vão escapados (vêm de cadastro de gente)':
+        /escapeHtml\(u\.username\|\|u\.email\)/.test(pintar) && /escapeHtml\(u\.id\)/.test(pintar),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMsgUnidade = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okMsgUnidade = false; console.log('  erro: ' + e.message); }
+  if (!okMsgUnidade) ruins += 1;
+  console.log(`${okMsgUnidade ? '✓' : '✗'} Mensagem direta: filtrar por unidade ao lado do nome, sem leitura nova`);
 
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);

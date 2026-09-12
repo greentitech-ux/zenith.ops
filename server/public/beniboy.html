@@ -108,7 +108,7 @@
      balão encolhe até o conteúdo. */
   .msg-item .m-cab{display:flex;justify-content:flex-start;align-items:baseline;gap:8px;font-size:11px;color:var(--muted);flex-wrap:wrap;}
   .msg-item .m-texto{white-space:pre-wrap;margin-top:2px;}
-  .d-acoes{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+  .d-acoes{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
   .d-tickets{font-size:11.5px;color:var(--muted);margin-bottom:8px;}
   /* alertas de seguranca dessa conversa (texto tipo comando/script ou upload
      bloqueado - ver segurancaChat.js/index.js) - so Master ve, pedido
@@ -207,7 +207,10 @@
     <div class="sheet">
       <h3>💬 Mensagem direta</h3>
       <div class="sub">Avisa alguém logado - aparece na hora se ela estiver com o NoPulso aberto, ou por notificação se estiver com o app fechado.</div>
-      <select id="md-usuario" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;margin-bottom:10px;"></select>
+      <div style="display:flex;gap:8px;margin-bottom:10px;align-items:stretch;">
+        <select id="md-usuario" style="flex:1 1 60%;min-width:0;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;"></select>
+        <select id="md-unidade" onchange="pintarUsuariosMensagem()" aria-label="Filtrar por unidade" style="flex:0 1 38%;min-width:0;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;"></select>
+      </div>
       <textarea id="md-texto" maxlength="500" placeholder="Escreva o aviso..." style="width:100%;min-height:90px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
       <div id="md-status" style="font-size:12px;padding:8px 10px;border-radius:8px;margin-top:10px;display:none;"></div>
       <div style="display:flex;gap:8px;margin-top:14px;">
@@ -427,13 +430,48 @@ async function abrirMensagemDireta(){
     try{
       USUARIOS_MENSAGEM = await fetch('/api/mensagens/usuarios-alvo').then(r=>r.ok?r.json():[]);
     }catch(e){ USUARIOS_MENSAGEM = []; }
-    sel.innerHTML = USUARIOS_MENSAGEM
-      .sort((a,b)=>(a.username||a.email).localeCompare(b.username||b.email,'pt-BR'))
-      .map(u=>`<option value="${u.id}">${(u.username||u.email)}${u.username?' · '+u.email:''}</option>`).join('');
   }
+  if(!NOC_UNIDADES.length){
+    try{ NOC_UNIDADES = await fetch('/api/meta/unidades-publico').then(r=>r.ok?r.json():[]); }catch(e){}
+  }
+  montarUnidadesMensagem();
+  pintarUsuariosMensagem();
   document.getElementById('md-texto').value = '';
   document.getElementById('md-status').style.display = 'none';
   document.getElementById('overlay-mensagem-direta').classList.remove('hidden');
+}
+// Seletor de unidade ao lado do nome: escolher a loja deixa na lista só quem
+// trabalha nela. O filtro é NA TELA - a rota de usuários-alvo já devolve as
+// unidades de cada pessoa, então não custa nenhuma leitura nova.
+//
+// As opções saem das unidades que as PESSOAS têm, não do cadastro inteiro:
+// oferecer loja sem ninguém dentro só renderia lista vazia. O nome bonito vem
+// do NOC_UNIDADES que a tela já carregou; sem ele, mostra o próprio código.
+function montarUnidadesMensagem(){
+  const nomeDe = c => (NOC_UNIDADES.find(x=>String(x.codigo)===String(c))||{}).nome || c;
+  const codigos = [...new Set((USUARIOS_MENSAGEM||[]).flatMap(u=>u.unidades||[]))];
+  const opcoes = codigos.map(c=>({codigo:c, nome:nomeDe(c)}))
+    .sort((a,b)=>String(a.nome).localeCompare(String(b.nome),'pt-BR'));
+  const sel = document.getElementById('md-unidade');
+  const antes = sel.value;
+  sel.innerHTML = '<option value="">Todas as unidades</option>'
+    + opcoes.map(o=>`<option value="${escapeHtml(String(o.codigo))}">${escapeHtml(String(o.nome))}</option>`).join('');
+  if(antes) sel.value = antes;
+}
+function pintarUsuariosMensagem(){
+  const sel = document.getElementById('md-usuario');
+  const uni = document.getElementById('md-unidade').value;
+  const escolhido = sel.value;
+  // quem NÃO tem lista de unidades enxerga o sistema inteiro (Master/Admin):
+  // essa pessoa pertence a qualquer loja, então continua aparecendo sempre
+  const lista = (USUARIOS_MENSAGEM||[]).filter(u=>!uni || !u.unidades || !u.unidades.length || u.unidades.includes(uni));
+  sel.innerHTML = lista
+    .sort((a,b)=>(a.username||a.email).localeCompare(b.username||b.email,'pt-BR'))
+    .map(u=>`<option value="${escapeHtml(u.id)}">${escapeHtml(u.username||u.email)}${u.username?' · '+escapeHtml(u.email):''}</option>`).join('')
+    || '<option value="">Ninguém nessa unidade</option>';
+  // trocar de unidade não pode trocar o destinatário sem a pessoa perceber: se
+  // quem estava escolhido continua na lista, ele segue escolhido
+  if(escolhido && lista.some(u=>u.id===escolhido)) sel.value = escolhido;
 }
 function fecharMensagemDireta(){ document.getElementById('overlay-mensagem-direta').classList.add('hidden'); }
 async function enviarMensagemDireta(){
@@ -555,19 +593,22 @@ function painelHtml(chat){
   const respEmail = (chat.responsavel && chat.responsavel.email) || '';
   const naoTerminal = statusAtual!=='RESOLVIDO' && statusAtual!=='SEM_SOLUCAO';
   if(naoTerminal && respEmail !== meuEmail){
-    acoes.push(`<button type="button" class="btn-ghost" onclick="assumirAtendimento('${chat.id}')">🙋 Assumir atendimento</button>`);
+    // Só o ícone, tudo numa linha (pedido do Master). O nome não some: vira
+    // balão no hover (data-dica, ver tema.js) e aria-label pro leitor de tela,
+    // os dois vindos do MESMO rótulo - não tem como divergir.
+    acoes.push(`<button type="button" class="btn-icone" data-dica="Assumir atendimento" aria-label="Assumir atendimento" onclick="assumirAtendimento('${chat.id}')">🙋</button>`);
   }
   if(statusAtual!=='RESOLVIDO' && statusAtual!=='SEM_SOLUCAO'){
-    acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','TRANSFERIDO')">🔀 Transferir</button>`);
-    acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','RESOLVIDO')">✅ Marcar resolvido</button>`);
-    acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','SEM_SOLUCAO')">⛔ Sem solução</button>`);
+    acoes.push(`<button type="button" class="btn-icone" data-dica="Transferir" aria-label="Transferir" onclick="iniciarTransicao('${chat.id}','TRANSFERIDO')">🔀</button>`);
+    acoes.push(`<button type="button" class="btn-icone" data-dica="Marcar resolvido" aria-label="Marcar resolvido" onclick="iniciarTransicao('${chat.id}','RESOLVIDO')">✅</button>`);
+    acoes.push(`<button type="button" class="btn-icone perigo" data-dica="Sem solução" aria-label="Sem solução" onclick="iniciarTransicao('${chat.id}','SEM_SOLUCAO')">⛔</button>`);
   } else {
-    acoes.push(`<button type="button" class="btn-ghost" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">↩️ Reabrir</button>`);
+    acoes.push(`<button type="button" class="btn-icone" data-dica="Reabrir" aria-label="Reabrir" onclick="iniciarTransicao('${chat.id}','EM_ATENDIMENTO')">↩️</button>`);
   }
-  if(!chat.chamadoId) acoes.push(`<button type="button" class="btn-ghost" onclick="gerarChamadoRemoto('${chat.id}')">🎫 Gerar chamado remoto</button>`);
-  if(!chat.tarefaId) acoes.push(`<button type="button" class="btn-ghost" onclick="gerarTarefa('${chat.id}')">✅ Gerar tarefa</button>`);
-  else acoes.push(`<a class="btn-ghost" style="text-decoration:none;display:inline-flex;align-items:center;" href="/tarefas.html">✅ Tarefa gerada</a>`);
-  if(IS_MASTER) acoes.push(`<button type="button" class="btn-ghost" onclick="baixarPdfConversa('${chat.id}')">📄 Baixar PDF</button>`);
+  if(!chat.chamadoId) acoes.push(`<button type="button" class="btn-icone" data-dica="Gerar chamado remoto" aria-label="Gerar chamado remoto" onclick="gerarChamadoRemoto('${chat.id}')">🎫</button>`);
+  if(!chat.tarefaId) acoes.push(`<button type="button" class="btn-icone" data-dica="Gerar tarefa" aria-label="Gerar tarefa" onclick="gerarTarefa('${chat.id}')">📝</button>`);
+  else acoes.push(`<a class="btn-icone" data-dica="Tarefa gerada - abrir o Meu Dia" aria-label="Tarefa gerada - abrir o Meu Dia" href="/tarefas.html">📝</a>`);
+  if(IS_MASTER) acoes.push(`<button type="button" class="btn-icone" data-dica="Baixar PDF da conversa" aria-label="Baixar PDF da conversa" onclick="baixarPdfConversa('${chat.id}')">📄</button>`);
   // problema de Computador/Sistema numa loja já identificada e que já tem
   // computador com acesso remoto cadastrado no NOC - atalho direto em vez de
   // precisar ir procurar na mão qual loja é e se ela tem acesso remoto
@@ -578,9 +619,9 @@ function painelHtml(chat){
   if(ASSUNTOS_NOC.includes(chat.assunto)){
     const codigoNoc = unidadeComAcessoRemoto(chat.lojaContexto);
     if(codigoNoc){
-      acoes.push(`<a class="btn-ghost" style="text-decoration:none;display:inline-flex;align-items:center;" href="/loja-status.html?unidade=${encodeURIComponent(codigoNoc)}" target="_blank" rel="noopener">🖥️ Ir para o NOC</a>`);
+      acoes.push(`<a class="btn-icone" data-dica="Ir para o NOC" aria-label="Ir para o NOC" href="/loja-status.html?unidade=${encodeURIComponent(codigoNoc)}" target="_blank" rel="noopener">🖥️</a>`);
     } else {
-      acoes.push(`<button type="button" class="btn-ghost" data-loja="${escapeHtml(chat.lojaContexto||'')}" onclick="abrirNocDaConversa(this.dataset.loja)">🖥️ Ir para o NOC</button>`);
+      acoes.push(`<button type="button" class="btn-icone" data-dica="Ir para o NOC" aria-label="Ir para o NOC" data-loja="${escapeHtml(chat.lojaContexto||'')}" onclick="abrirNocDaConversa(this.dataset.loja)">🖥️</button>`);
     }
   }
 
