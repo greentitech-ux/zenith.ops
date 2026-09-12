@@ -207,8 +207,16 @@ async function upsertPerfil(codigo, { nome, areas, tiposSolicitacao, marca, porE
     id: atual ? atual.id : COLLECTION.doc().id,
     codigo: codigoLimpo,
     nome: nomeLimpo,
-    areas: listaVaziaOuValida(areas, AREAS_VALIDAS),
-    tiposSolicitacao: listaVaziaOuValida(tiposSolicitacao, TIPOS_SOLICITACAO_VALIDOS),
+    // Campo que NAO veio na chamada nao esta sendo apagado - e so nao esta
+    // sendo mexido. O marca ja fazia isso; areas e tiposSolicitacao nao, e
+    // como este upsert grava o registro INTEIRO (.set, nao merge), quem
+    // quisesse trocar so a marca zerava a restricao de area da unidade sem
+    // ninguem pedir. Vale pros dois caminhos: a tela de Grupos e a acao de
+    // agente 'unidadesExtras.perfil'.
+    areas: areas === undefined ? ((atual && atual.areas) || []) : listaVaziaOuValida(areas, AREAS_VALIDAS),
+    tiposSolicitacao: tiposSolicitacao === undefined
+      ? ((atual && atual.tiposSolicitacao) || [])
+      : listaVaziaOuValida(tiposSolicitacao, TIPOS_SOLICITACAO_VALIDOS),
     marca: marca === undefined ? ((atual && atual.marca) || null) : marcaValida(marca),
     criadoPorEmail: (atual && atual.criadoPorEmail) || porEmail || null,
     criadoEm: (atual && atual.criadoEm) || agora,

@@ -16941,6 +16941,70 @@ setTimeout(async () => {
   if (!okBarraPrint) ruins += 1;
   console.log(`${okBarraPrint ? '✓' : '✗'} NoPulsoPrint: barra de marcação limpa, só ícone, no estilo Lightshot`);
 
+  // Por que as transações da Adyen da ARCFOOD sumiam do Monitor.
+  //
+  // A cadeia: normalize.js grava unidade = normalizarCodigoUnidade(merchant),
+  // e o mapa manda os 4 códigos ARCFOOD pros códigos NUMÉRICOS do Fechamento
+  // (19888, 19889, 19821, 19855) enquanto os 5 do GBE vão pra "Dominos ...".
+  // Só a ARCFOOD cai no MESMO espaço de código que o cadastro de unidades
+  // usa - então só ela pode ser pega por codigosRestritosDe('monitor'), que
+  // apaga do Monitor toda unidade cujo perfil tem áreas marcadas SEM Monitor.
+  // Áreas vazias = aparece em todas; basta marcar uma para as outras saírem.
+  let okSumicoArcfood = false;
+  try {
+    const mig = require(__dirname + '/migracaoUnidades.js');
+    const un = require(__dirname + '/unidades.js');
+    const idx = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const norm = require('fs').readFileSync(__dirname + '/normalize.js', 'utf8');
+    const gru = require('fs').readFileSync(__dirname + '/public/grupos.html', 'utf8');
+    const n = mig.normalizarCodigoUnidade;
+
+    const conf = {
+      // é ISTO que explica "só a ARCFOOD": os dois grupos caem em espaços
+      // de código diferentes depois da normalização
+      'ARCFOOD vai pro código numérico do Fechamento; GBE vai pra "Dominos ..."':
+        n('DOM___19888') === '19888' && n('DOM_19889') === '19889'
+        && n('DOM__19821') === '19821' && n('DOM__19855') === '19855'
+        && n('DOM_19706') === 'Dominos Bessa' && n('DOM19940') === 'Dominos Tirol',
+      'a transação da Adyen nasce já com o código normalizado':
+        /unidade: normalizarCodigoUnidade\(item\.merchantAccountCode\)/.test(norm),
+      // o filtro que apaga a linha, sem avisar ninguém
+      'o Monitor descarta toda transação de unidade restrita à área':
+        /const restritos = new Set\(await unidadesExtras\.codigosRestritosDe\('monitor'\)\);/.test(idx)
+        && /return lista\.filter\(\(item\) => !restritos\.has\(item\.unidade\)\);/.test(idx),
+      'e isso vale para transações, pedidos e chargebacks':
+        (idx.match(/filtrarPorAreaMonitor\(auth\.filterByUnidade\(req,/g) || []).length >= 3,
+      // áreas vazias = aparece em todas; marcar UMA tira todas as outras
+      'marcar uma área sozinha esconde a unidade de todas as demais':
+        /if \(!u \|\| !Array\.isArray\(u\.areas\) \|\| !u\.areas\.length\) return true;/.test(require('fs').readFileSync(__dirname + '/unidades.js', 'utf8'))
+        && /!u\.areas\.includes\(area\)/.test(require('fs').readFileSync(__dirname + '/unidades.js', 'utf8')),
+      // "Monitor" é só mais um check numa lista de nove, e é o menos óbvio:
+      // ninguém pensa em transação da Adyen como "área" de uma loja
+      'a tela de perfil oferece Monitor junto das outras áreas':
+        /monitor:'Monitor'/.test(gru) && /areas: readChecked\(document\.getElementById\('up-areas'\)\)/.test(gru),
+
+      // ---- o bug de verdade, corrigido aqui ----
+      // o upsert grava o registro INTEIRO (.set, não merge)
+      'trocar só a marca NÃO apaga mais as áreas da unidade':
+        (() => {
+          const f = un.upsertPerfil.toString();
+          return /areas: areas === undefined \? \(\(atual && atual\.areas\) \|\| \[\]\) :/.test(f)
+            && /tiposSolicitacao: tiposSolicitacao === undefined/.test(f)
+            && /marca: marca === undefined \? \(\(atual && atual\.marca\) \|\| null\) :/.test(f);
+        })(),
+      'quem MANDA a lista continua mandando (inclusive pra limpar)':
+        /listaVaziaOuValida\(areas, AREAS_VALIDAS\)/.test(un.upsertPerfil.toString())
+        && /listaVaziaOuValida\(tiposSolicitacao, TIPOS_SOLICITACAO_VALIDOS\)/.test(un.upsertPerfil.toString()),
+      'a ação de agente passa pelo mesmo upsert (mesma proteção)':
+        /'unidadesExtras\.perfil': \(p\) => invalidandoUnidadesMapa\(unidadesExtras\.upsertPerfil\(/.test(idx),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n2]) => n2);
+    okSumicoArcfood = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okSumicoArcfood = false; console.log('  erro: ' + e.message); }
+  if (!okSumicoArcfood) ruins += 1;
+  console.log(`${okSumicoArcfood ? '✓' : '✗'} Monitor: por que a ARCFOOD some (área) e o perfil que não apaga mais as áreas`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
