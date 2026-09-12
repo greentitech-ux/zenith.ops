@@ -19023,6 +19023,44 @@ setTimeout(async () => {
   if (!okTextoFica) ruins += 1;
   console.log(`${okTextoFica ? '✓' : '✗'} Texto digitado não some quando a ficha se redesenha - e a ficha da tarefa perdeu a faixa do topo (pastilha + ✕ flutuante)`);
 
+  // ---- varredura visual: a rede de segurança das telas existe e está documentada ----
+  //
+  // Pedido do Master, depois de uma sequência de "style que quebra, passa por
+  // cima, não funciona": "tem alguma sugestão pra melhorar?". A resposta foi
+  // o varreduraVisual.js - este teste não o executa (leva minutos e precisa
+  // do Chromium); garante que ele continua fazendo as quatro checagens que
+  // foram verificadas por sabotagem, e que a regra de uso está no CLAUDE.md.
+  let okVarredura = false;
+  try {
+    const vv = require('fs').readFileSync(require('path').join(__dirname, 'varreduraVisual.js'), 'utf8');
+    const claude = require('fs').readFileSync(require('path').join(__dirname, '..', 'CLAUDE.md'), 'utf8');
+    const conf = {
+      'abre cada tela em celular E desktop':
+        /nome: 'celular', width: 390/.test(vv) && /nome: 'desktop', width: 1280/.test(vv),
+      'acusa erro de JS, rolagem horizontal, fora da tela e sobreposição':
+        /pg\.on\('pageerror'/.test(vv) && /rolagemHorizontal = document\.documentElement\.scrollWidth > W \+ 1/.test(vv)
+        && /foraDaTela\+\+/.test(vv) && /sobrepostos\+\+/.test(vv),
+      // tabela/quadro com rolagem PRÓPRIA pode ser mais largo que a tela
+      'caixa com rolagem própria e filho de drawer/painel fixo não contam como fora da tela':
+        /if \(dentroDeRolagem\(el\) \|\| dentroDeFlutuante\(el\)\) continue;/.test(vv),
+      // o erro sem a linha obriga a abrir o navegador na mao pra descobrir de onde veio
+      'o erro de JS vem com a linha do arquivo': /\[linha \$\{m\[1\]\}/.test(vv),
+      'compara com a referência e marca o que mudou':
+        /if \(r\.pct > LIMIAR_DIFF \|\| r\.tamanhoMudou\)/.test(vv) && /--aceitar/.test(vv),
+      'lê o PNG que o Chromium gera (RGB) e o RGBA':
+        /corTipo !== 2 && corTipo !== 6/.test(vv),
+      'monta a prancha, problema primeiro': /prancha\.html/.test(vv) && /const ordem = \(l\) =>/.test(vv),
+      'sai com erro quando há problema': /process\.exit\(problemas \? 1 :/.test(vv),
+      'a regra de uso está no CLAUDE.md (antes e depois de mexer em arquivo compartilhado)':
+        /node varreduraVisual\.js --aceitar/.test(claude) && /prancha vai junto na entrega/.test(claude),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okVarredura = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okVarredura = false; console.log('  erro: ' + e.message); }
+  if (!okVarredura) ruins += 1;
+  console.log(`${okVarredura ? '✓' : '✗'} Varredura visual: as 59 telas em celular e desktop, com as quatro checagens e a prancha`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

@@ -88,6 +88,33 @@ reais. **Roda antes de qualquer deploy.** Se ela falhar, não sobe.
 
 ---
 
+### Varredura visual (a rede de segurança das telas)
+
+O `testeRotas.js` prova que uma regra está no arquivo; não prova que ficou
+certa nas 59 telas. Para isso existe o `varreduraVisual.js`:
+
+```bash
+cd server && node varreduraVisual.js --aceitar     # antes de mexer: grava a referência
+cd server && node varreduraVisual.js               # depois: compara e monta a prancha
+cd server && node varreduraVisual.js --so tarefas,monitor   # só algumas telas (~3s cada)
+```
+
+Ele sobe um servidor estático com API falsa (como o testeRotas), abre cada
+tela no Chromium em celular (390px) e desktop (1280px) e acusa, por
+geometria: erro de JS, rolagem horizontal da página, elemento fora da tela
+(fora de caixa com rolagem própria) e dois irmãos de uma faixa flex/grid se
+cobrindo. Depois tira a foto e compara com a referência — a prancha
+`docs/varredura/prancha.html` mostra referência, agora e o que mudou (em
+vermelho), problema primeiro. Sai com erro se alguma tela tiver problema;
+`--estrito` também se alguma mudou de aparência.
+
+As fotos ficam fora do git (`docs/varredura/`): a referência é local, grave
+antes de começar. Precisa do Playwright com Chromium (`npm i -g playwright
+&& npx playwright install chromium`); `CHROMIUM_PATH` aponta outro binário.
+
+Verificado por sabotagem: sobreposição plantada, cor trocada, `throw` na
+carga e div de 2000px — as quatro acusadas.
+
 ## Como subir para produção agora
 
 O auto-deploy está **desligado** (`autoDeploy: false` no `render.yaml`).

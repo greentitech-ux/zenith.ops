@@ -3,3 +3,6 @@ node_modules/
 .env.local
 server/data/*.json
 !server/data/.gitkeep
+
+# fotos da varredura visual (MBs, mudam a cada commit) - referencia e local
+docs/varredura/
