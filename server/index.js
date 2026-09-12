@@ -9383,7 +9383,9 @@ app.get('/api/tarefas/contexto', auth.requireAuth, async (req, res) => {
       // pro filtro de Grupo do Meu Dia não precisar de uma lista fixa própria
       unidades: codigos.map((codigo) => ({ codigo, nome: mapa[codigo] || codigo, grupo: redes.redeDaUnidade(codigo) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
       redes: redes.REDES,
-      responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário', unidades: u.role === 'master' ? codigos : (u.permissions?.unidades || []) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
+      // cargo vai junto pra tela marcar a tag ao lado do nome (nome · Suporte/
+      // Gerente/...): mesma tag de /usuarios.html, sem inventar rótulo novo
+      responsaveis: responsaveis.map((u) => ({ id: u.id, nome: u.username || u.nome || 'Usuário', cargo: u.role === 'master' ? null : (u.cargo || null), unidades: u.role === 'master' ? codigos : (u.permissions?.unidades || []) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')),
       // a tela precisa saber QUEM é você pra liberar "trocar"/"alterar" na
       // tarefa de que você é responsável, sem reimplementar a regra no navegador
       eu: req.user.id,
@@ -12347,7 +12349,7 @@ app.get('/api/abastecimento/divergencias/relatorio-escrito.pdf', auth.requireMas
     res.setHeader('Content-Disposition', `attachment; filename="carrinho-relatorio-desvios-${inicio}-a-${fim}.pdf"`);
     doc.pipe(res);
 
-    doc.fontSize(8).fillColor('#5b6470').text('SOLUTIONS TI TECH · ZENITH OPS', { characterSpacing: 1 });
+    doc.fontSize(8).fillColor('#5b6470').text('SOLUTIONS TI TECH · NoPulso', { characterSpacing: 1 });
     doc.moveDown(0.3);
     doc.fontSize(16).fillColor('#111').text('Relatório de ajustes e desvios — Relatórios do Carrinho');
     doc.fontSize(9).fillColor('#666').text(`Período ${reportUtil.fmtDataBR(inicio)} a ${reportUtil.fmtDataBR(fim)} · gerado em ${reportUtil.agoraBrasiliaFmt()}`);

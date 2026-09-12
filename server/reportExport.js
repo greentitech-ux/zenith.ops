@@ -81,7 +81,7 @@ function gerarPDFBuffer({ titulo, subtitulo, resumo, transacoes }) {
     const tableX = doc.page.margins.left;
     const tableWidth = COLUNAS.reduce((s, c) => s + LARGURAS[c.key], 0);
 
-    doc.fontSize(8).fillColor('#5b6470').text('SOLUTIONS TI TECH · ZENITH OPS · RELATÓRIO DE TRANSAÇÕES', tableX, 30, { characterSpacing: 1 });
+    doc.fontSize(8).fillColor('#5b6470').text('SOLUTIONS TI TECH · NoPulso · RELATÓRIO DE TRANSAÇÕES', tableX, 30, { characterSpacing: 1 });
     doc.fontSize(16).fillColor('#111').text(titulo, tableX, 42);
     doc.fontSize(9).fillColor('#666').text(subtitulo, tableX, 64);
 

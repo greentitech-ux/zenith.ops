@@ -77,7 +77,7 @@ function writePDF(res, { titulo, subtitulo, colunas, linhas, nomeArquivo, resumo
   const tableWidth = colunas.reduce((s, c) => s + c.largura, 0);
 
   function cabecalhoPagina() {
-    doc.fontSize(8).fillColor('#5b6470').text('SOLUTIONS TI TECH · ZENITH OPS · RELATÓRIO DE MONITORAMENTO', tableX, 30, { characterSpacing: 1 });
+    doc.fontSize(8).fillColor('#5b6470').text('SOLUTIONS TI TECH · NoPulso · RELATÓRIO DE MONITORAMENTO', tableX, 30, { characterSpacing: 1 });
     doc.fontSize(16).fillColor('#111').text(titulo, tableX, 42);
     doc.fontSize(9).fillColor('#666').text(subtitulo, tableX, 64);
   }
