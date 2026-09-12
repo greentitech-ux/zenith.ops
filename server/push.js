@@ -1154,6 +1154,36 @@ async function notifyProgramaNovo(unidadeNome, codigo, computadorNome, posto, no
   }
 }
 
+// o outro lado do mesmo alerta: o programa que ESTAVA na maquina e nao esta
+// mais (ver programasSumidos em lojaStatus.js). Pedido do Master junto com o
+// de instalacao - "inclusive quero tambem ser avisado quando desinstalado".
+// Mesma urgencia: desinstalar o antivirus ou o agente de backup de um caixa e
+// tao suspeito quanto instalar coisa nova.
+async function notifyProgramaSumido(unidadeNome, codigo, computadorNome, posto, sumidos) {
+  const prefixo = computadorNome ? `${computadorNome} · ` : '';
+  const lista = (sumidos || []).slice(0, 3).join(' · ');
+  const resto = (sumidos || []).length > 3 ? ` (+${sumidos.length - 3})` : '';
+  const dados = {
+    title: '🗑️ Programa desinstalado',
+    body: `${prefixo}${unidadeNome || codigo} · ${lista}${resto}`,
+    tag: `programa-sumido-${codigo}-${posto || 'principal'}-${Date.now()}`,
+    critical: true,
+    url: '/loja-status.html',
+  };
+  await alertasCentral.registrar({ tipo: 'noc-programa-sumido', titulo: dados.title, resumo: dados.body, url: dados.url, critico: true });
+  if (!PUBLIC_KEY || !PRIVATE_KEY) return;
+  const payload = JSON.stringify(dados);
+  const subs = await loadSubs();
+  for (const sub of subs) {
+    if (!podeReceberAcessoRemoto(sub)) continue;
+    try {
+      await webpush.sendNotification(sub, payload, { urgency: 'high' });
+    } catch (err) {
+      if (err.statusCode === 404 || err.statusCode === 410) await removeSubscription(sub.endpoint);
+    }
+  }
+}
+
 async function notifyAcessoRemotoDetectado(unidadeNome, codigo, computadorNome, posto, detalhe) {
   const prefixo = computadorNome ? `${computadorNome} · ` : '';
   const dados = {
@@ -1231,6 +1261,7 @@ async function notifyFechamentoLancado(registro, { exceptUserId } = {}) {
 
 module.exports = {
   notifyProgramaNovo,
+  notifyProgramaSumido,
   addSubscription, migrarSubscricao, removeSubscription, notify, notifyRaw, notifySolicitacao, notifyAbastecimento,
   notifyBeniboyEscalonamento, notifyUsuario, notifyParquePcdCortesiaLimite, notifyParqueTermoPendente, notifyRhTesteVencido,
   notifyRhAprovacaoPendente, notifyRhAdvertenciaPendente, notifyRhAdvertenciaPrazoVencido,

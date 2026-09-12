@@ -11545,6 +11545,87 @@ setTimeout(async () => {
   console.log(`${okPolitica ? '✓' : '✗'} Política da máquina: papel de parede, pendrive, instalação com Administrador e alerta de programa novo`);
 
   // ------------------------------------------------------------------
+  // "INCLUSIVE QUERO TAMBEM SER AVISADO QUANDO DESINSTALADO" (Master,
+  // 12/09/2026). O mesmo diff ao contrario, na MESMA chave (alertarInstalacao):
+  // ele nao pediu um segundo botao, pediu que o alerta que ja existe cubra os
+  // dois lados. O que este bloco segura:
+  //   1) sumico vira alerta, evento e linha propria no registro;
+  //   2) leitura TRUNCADA nao vira "desinstalaram 40 programas" - e, mais
+  //      importante, nao apaga a base (senao o proximo tick alerta os 40 como
+  //      instalacao nova, pra sempre);
+  //   3) a trava tem piso: faxina pequena de verdade continua avisando;
+  //   4) o inventario nao roda na instancia de BOOT - SYSTEM tem outro HKCU,
+  //      e era essa a origem do falso sumico em massa.
+  let okDesinstalado = false;
+  try {
+    const cabD = { 'x-noc-token': 'tokdes' };
+    const rotaD = '/api/loja-status/DES/computadores/PC1/programas';
+    DOCS.set('lojaStatus/DES__PC1', {
+      codigo: 'DES', posto: 'PC1', nome: 'Loja Desinstala', tipo: 'interno', agentToken: 'tokdes',
+      ultimoHeartbeatEm: Date.now(), eventos: [], politica: { alertarInstalacao: true },
+      programas: ['Google Chrome', 'Adobe Reader', 'Avast Antivirus', 'NOCZenith', '7-Zip', 'Notepad++'],
+    });
+    // faxina de verdade: 3 de 6 saem (abaixo do piso de 10) - tem que avisar
+    const some = await postarJson(rotaD, { programas: ['Google Chrome', 'Adobe Reader', 'Notepad++'] }, cabD);
+    const docDes = DOCS.get('lojaStatus/DES__PC1') || {};
+
+    // leitura truncada: 12 de 20 somem de uma vez (piso E proporcao batidos)
+    const vinte = Array.from({ length: 20 }, (_, i) => 'Programa ' + (i + 1));
+    DOCS.set('lojaStatus/DES2__PC1', {
+      codigo: 'DES2', posto: 'PC1', nome: 'Leitura ruim', tipo: 'interno', agentToken: 'tok3',
+      ultimoHeartbeatEm: Date.now(), eventos: [], politica: { alertarInstalacao: true }, programas: vinte,
+    });
+    const truncada = await postarJson('/api/loja-status/DES2/computadores/PC1/programas', { programas: vinte.slice(0, 8) }, { 'x-noc-token': 'tok3' });
+    const docTrunc = DOCS.get('lojaStatus/DES2__PC1') || {};
+
+    // com a chave DESLIGADA nao sai aviso de sumico (mas a lista e guardada,
+    // pra existir base de comparacao no dia em que ele ligar)
+    DOCS.set('lojaStatus/DES3__PC1', {
+      codigo: 'DES3', posto: 'PC1', nome: 'Sem alerta', tipo: 'interno', agentToken: 'tok4',
+      ultimoHeartbeatEm: Date.now(), eventos: [], politica: { alertarInstalacao: false },
+      programas: ['A', 'B', 'C'],
+    });
+    const desligado = await postarJson('/api/loja-status/DES3/computadores/PC1/programas', { programas: ['A'] }, { 'x-noc-token': 'tok4' });
+    const docDesl = DOCS.get('lojaStatus/DES3__PC1') || {};
+
+    const psD = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const scriptD = psD.montarScriptVigia({ codigo: 'DES', posto: 'PC1', tipo: 'interno', agentToken: 'tokdes' });
+    const htmlD = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const pushD = require('fs').readFileSync(__dirname + '/push.js', 'utf8');
+
+    const confD = {
+      'desinstalação é detectada e vira alerta, campo e evento na máquina':
+        some.status === 200 && JSON.parse(some.corpo).sumidos === 3
+        && docDes.ultimoProgramaSumidoDetalhe === 'Avast Antivirus · NOCZenith · 7-Zip'
+        && (docDes.eventos || []).some((e) => e.tipo === 'programa-sumido')
+        && docDes.programas.length === 3,
+      'leitura truncada NÃO vira alerta de desinstalação em massa':
+        truncada.status === 200 && JSON.parse(truncada.corpo).sumidos === 0
+        && !docTrunc.ultimoProgramaSumidoEm,
+      'leitura truncada NÃO apaga a base (senão o próximo tick alerta os 12 como instalação nova)':
+        docTrunc.programas.length === 20,
+      'com o alerta desligado o sumiço não avisa, mas a lista é guardada':
+        desligado.status === 200 && JSON.parse(desligado.corpo).sumidos === 0
+        && !docDesl.ultimoProgramaSumidoEm && docDesl.programas.length === 1,
+      'instalado e desinstalado têm linha PRÓPRIA no registro (não caem no "Voltou")':
+        /ev\.tipo==='programa-novo'/.test(htmlD) && /ev\.tipo==='programa-sumido'/.test(htmlD)
+        && /Programa desinstalado/.test(htmlD),
+      'o push de desinstalação existe e é crítico como o de instalação':
+        /async function notifyProgramaSumido\(/.test(pushD) && /noc-programa-sumido/.test(pushD)
+        && /notifyProgramaSumido,/.test(pushD),
+      'o inventário NÃO roda na instância de boot (SYSTEM tem outro HKCU - era a origem do falso sumiço)':
+        /function Inventariar-Programas \{\n  if \(\$Servico\) \{ return \}/.test(scriptD),
+      'VERSAO_VIGIA subiu (sem isso nenhuma das 52 máquinas para de mandar inventário pelo SYSTEM)':
+        psD.VERSAO_VIGIA >= 52,
+    };
+    const falhasD = Object.entries(confD).filter(([, v]) => !v).map(([n]) => n);
+    okDesinstalado = !falhasD.length;
+    if (falhasD.length) console.log(`  falhou em: ${falhasD.join(' · ')} (some=${some.corpo} trunc=${truncada.corpo} progTrunc=${docTrunc.programas.length} desl=${desligado.corpo})`);
+  } catch (e) { okDesinstalado = false; console.log('  erro: ' + e.message); }
+  if (!okDesinstalado) ruins += 1;
+  console.log(`${okDesinstalado ? '✓' : '✗'} Programa DESINSTALADO também avisa — e leitura truncada não vira alerta falso`);
+
+  // ------------------------------------------------------------------
   // TOKEN DE API DO MASTER (pedido 12/09/2026: "só quem usará sou eu esse
   // Token Global, em um chat no Cowork"). O desenho NAO e o da especificacao
   // (um BOT_ACAO_TOKEN com regras proprias por rota): o token resolve pro

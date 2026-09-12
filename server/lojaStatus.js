@@ -1002,11 +1002,32 @@ async function definirPolitica(codigo, posto, entrada) {
 }
 
 // programas instalados: o agente manda a lista, o servidor guarda e diz o que
-// e NOVO em relacao a ultima. A comparacao mora aqui (e nao na maquina) pra
-// um agente adulterado nao conseguir esconder o que instalou.
+// mudou em relacao a ultima - o que APARECEU (instalaram) e o que SUMIU
+// (desinstalaram). A comparacao mora aqui (e nao na maquina) pra um agente
+// adulterado nao conseguir esconder nem o que instalou nem o que apagou.
 function programasNovos(anteriores, atuais) {
   const antes = new Set((anteriores || []).map((x) => String(x)));
   return (atuais || []).map((x) => String(x)).filter((x) => x && !antes.has(x));
+}
+// o mesmo diff ao contrario: quem estava na lista anterior e nao esta mais
+function programasSumidos(anteriores, atuais) {
+  return programasNovos(atuais, anteriores);
+}
+
+// Leitura truncada NAO e desinstalacao. O inventario le tres chaves do
+// registro (duas HKLM + uma HKCU); se a HKCU nao vier - hive de outro
+// usuario, chave sem permissao, registro ocupado - a lista encolhe de uma vez
+// sem ninguem ter apagado nada. Sem esta trava o Master receberia "40
+// programas desinstalados" e, na leitura seguinte, "40 programas instalados",
+// pra sempre.
+//
+// O corte tem piso E proporcao: sumir 3 de 6 e faxina de verdade e tem que
+// avisar; sumir 40 de 78 de uma vez nao e faxina, e leitura ruim.
+const SUMICO_SUSPEITO_MIN = 10;
+function leituraSuspeita(anteriores, sumidos) {
+  const antes = (anteriores || []).length;
+  const fora = (sumidos || []).length;
+  return fora >= SUMICO_SUSPEITO_MIN && fora * 2 > antes;
 }
 
 async function registrarProgramas(codigo, posto, lista, token) {
@@ -1025,16 +1046,37 @@ async function registrarProgramas(codigo, posto, lista, token) {
   // jeito, pra quando ele ligar ja existir base de comparacao
   const alerta = !!(atual.politica && atual.politica.alertarInstalacao);
   const novos = (primeira || !alerta) ? [] : programasNovos(atual.programas, limpa);
+  const sumidos = primeira ? [] : programasSumidos(atual.programas, limpa);
+  const nome = atual.nome || `${codigo}/${posto}`;
+  // lista encolheu demais de uma vez: guarda a lista ANTERIOR (nao grava
+  // nada) pra base de comparacao continuar inteira. Gravar a truncada
+  // trocaria um alerta falso de desinstalacao por um alerta falso de
+  // instalacao na leitura seguinte.
+  if (leituraSuspeita(atual.programas, sumidos)) {
+    return { novos: [], sumidos: [], nome, primeira, suspeita: sumidos.length };
+  }
   const agora = Date.now();
   const patch = { programas: limpa, programasEm: agora };
+  const eventos = [...(atual.eventos || [])];
   if (novos.length) {
     const evento = { tipo: 'programa-novo', em: agora, detalhe: novos.slice(0, 10).join(' · ') };
-    patch.eventos = [...(atual.eventos || []), evento].slice(-EVENTOS_MAX);
+    eventos.push(evento);
     patch.ultimoProgramaNovoEm = agora;
     patch.ultimoProgramaNovoDetalhe = evento.detalhe;
   }
+  // desinstalacao entra na MESMA linha do tempo e so avisa com a chave
+  // ligada, igual a instalacao: pra quem olha o Registro de atividades, "o
+  // que saiu" conta tanto quanto "o que entrou"
+  const sumidosAlerta = alerta ? sumidos : [];
+  if (sumidosAlerta.length) {
+    const evento = { tipo: 'programa-sumido', em: agora, detalhe: sumidosAlerta.slice(0, 10).join(' · ') };
+    eventos.push(evento);
+    patch.ultimoProgramaSumidoEm = agora;
+    patch.ultimoProgramaSumidoDetalhe = evento.detalhe;
+  }
+  if (novos.length || sumidosAlerta.length) patch.eventos = eventos.slice(-EVENTOS_MAX);
   await gravarEEspelhar(codigo, posto, patch);
-  return { novos, nome: atual.nome || `${codigo}/${posto}`, primeira };
+  return { novos, sumidos: sumidosAlerta, nome, primeira };
 }
 
 async function configuracaoAgente(codigo, posto, token) {
@@ -2981,7 +3023,7 @@ module.exports = {
   comandoResetZebra,
   ESTADOS, estadoDe, motivosDeDegradacao,
   marcarComandoExecutado, registrarAcessoRemoto, responderChat, registrarTelemetria,
-  sanitizarPolitica, definirPolitica, programasNovos, registrarProgramas,
+  sanitizarPolitica, definirPolitica, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,
   garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, reportarEstadoAgente, pedirCaptura,

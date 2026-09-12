@@ -1471,17 +1471,29 @@ app.get('/api/loja-status/:codigo/computadores/:posto/configuracao-agente', asyn
 });
 
 // o agente reporta os programas instalados; o servidor compara com a ultima
-// lista e alerta o Master no que for NOVO (a comparacao nunca fica na maquina)
+// lista e alerta o Master no que APARECEU e no que SUMIU (a comparacao nunca
+// fica na maquina). Uma leitura truncada nao vira alerta nem apaga a base -
+// ver leituraSuspeita no lojaStatus.js.
 app.post('/api/loja-status/:codigo/computadores/:posto/programas', async (req, res) => {
   try {
     const r = await lojaStatus.registrarProgramas(req.params.codigo, req.params.posto, req.body.programas, req.headers['x-noc-token'] || null);
-    if (r.novos && r.novos.length) {
+    const onde = `${req.params.codigo}/${req.params.posto}`;
+    if (r.suspeita) console.log(`[NOC] inventario de programas ignorado em ${onde}: ${r.suspeita} sumiram de uma vez (leitura truncada)`);
+    if ((r.novos && r.novos.length) || (r.sumidos && r.sumidos.length)) {
       const mapa = await construirUnidadesMapa();
-      console.log(`[NOC] programa novo em ${req.params.codigo}/${req.params.posto}: ${r.novos.join(' · ')}`);
-      push.notifyProgramaNovo(mapa[req.params.codigo] || req.params.codigo, req.params.codigo, r.nome, req.params.posto, r.novos)
-        .catch((err) => console.error('Erro no push de programa novo:', err.message));
+      const unidade = mapa[req.params.codigo] || req.params.codigo;
+      if (r.novos && r.novos.length) {
+        console.log(`[NOC] programa novo em ${onde}: ${r.novos.join(' · ')}`);
+        push.notifyProgramaNovo(unidade, req.params.codigo, r.nome, req.params.posto, r.novos)
+          .catch((err) => console.error('Erro no push de programa novo:', err.message));
+      }
+      if (r.sumidos && r.sumidos.length) {
+        console.log(`[NOC] programa desinstalado em ${onde}: ${r.sumidos.join(' · ')}`);
+        push.notifyProgramaSumido(unidade, req.params.codigo, r.nome, req.params.posto, r.sumidos)
+          .catch((err) => console.error('Erro no push de programa desinstalado:', err.message));
+      }
     }
-    res.json({ ok: true, novos: (r.novos || []).length });
+    res.json({ ok: true, novos: (r.novos || []).length, sumidos: (r.sumidos || []).length });
   } catch (err) {
     res.status(403).json({ error: err.message });
   }

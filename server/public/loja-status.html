@@ -1596,6 +1596,17 @@ function linhaEvento(ev){
   if(ev.tipo==='reinicio-diario-config'){
     return `<div class="ev-linha"><span class="ev-dot"></span><b>⏰ Agendamento alterado</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
   }
+  // instalou / desinstalou (ver registrarProgramas no lojaStatus.js). Sem
+  // estas duas linhas os dois eventos caíam no fim desta função e apareciam
+  // como "Voltou" - o mesmo erro do reinício automático logo acima.
+  // Desinstalar é vermelho e instalar é amarelo de propósito: programa que
+  // some (antivírus, backup, o próprio agente) some porque alguém apagou.
+  if(ev.tipo==='programa-novo'){
+    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>📦 Programa instalado</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+  }
+  if(ev.tipo==='programa-sumido'){
+    return `<div class="ev-linha"><span class="ev-dot bad"></span><b>🗑️ Programa desinstalado</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+  }
   const fora = ev.duracaoMs!=null ? ` · ficou fora ${fmtDuracao(ev.duracaoMs)}` : '';
   // O QUE REALMENTE ACONTECEU no silêncio (ver varrerAlertas em
   // lojaStatus.js). Sem isto, "ficou fora 5min" numa máquina em que alguém
@@ -2765,21 +2776,24 @@ const POLITICA_ITENS = [
   { campo:'papelDeParedeAtivo', rotulo:'🖼️ Papel de parede da rede', ajuda:'Aplica a imagem enviada abaixo na área de trabalho desta máquina.' },
   { campo:'bloquearUsbStorage', rotulo:'🔌 Bloquear pendrive / HD externo', ajuda:'Só armazenamento USB. Pin pad, impressora térmica, Zebra, leitor e teclado/mouse continuam funcionando.' },
   { campo:'bloquearInstalacao', rotulo:'🔒 Instalar exige Administrador', ajuda:'O Windows nega a elevação pedida por usuário comum. Atualização de Chrome/PDV (serviço já elevado) não passa por aí.' },
-  { campo:'alertarInstalacao', rotulo:'📦 Avisar quando instalarem algo', ajuda:'A máquina manda a lista de programas e você recebe alerta do que for novo.' },
+  { campo:'alertarInstalacao', rotulo:'📦 Avisar quando instalarem ou desinstalarem algo', ajuda:'A máquina manda a lista de programas e você recebe alerta do que entrou e do que saiu.' },
 ];
 function renderPoliticaComputador(codigo, c){
   const el = document.getElementById('detalhe-comp-politica');
+  // painel opcional: se um dia ele sair do HTML, a ficha continua abrindo
+  if(!el) return;
   el.classList.toggle('hidden', !IS_MASTER);
   if(!IS_MASTER) return;
   const pol = c.politica || {};
   const aviso = c.tipo === 'interno' ? '' : '<div style="font-size:11px;color:var(--warn);margin-top:6px;">Pendrive e instalação precisam de Administrador na máquina - quem aplica é a tarefa de boot do NOCZenith.</div>';
   const novo = c.ultimoProgramaNovoEm ? `<div style="font-size:11.5px;color:var(--warn);margin-top:8px;">📦 Programa novo visto: <b>${escapeHtml(c.ultimoProgramaNovoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoProgramaNovoEm))}</div>` : '';
+  const sumiu = c.ultimoProgramaSumidoEm ? `<div style="font-size:11.5px;color:var(--bad);margin-top:8px;">🗑️ Programa desinstalado: <b>${escapeHtml(c.ultimoProgramaSumidoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoProgramaSumidoEm))}</div>` : '';
   el.innerHTML = `<div style="font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Política desta máquina</div>
     ${POLITICA_ITENS.map(i=>`<label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;cursor:pointer;">
       <input type="checkbox" data-pol="${i.campo}" ${pol[i.campo]?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);">
       <span style="font-size:12.5px;">${i.rotulo}<small style="display:block;color:var(--muted);">${i.ajuda}</small></span>
     </label>`).join('')}
-    ${aviso}${novo}
+    ${aviso}${novo}${sumiu}
     <button type="button" class="btn-mini ok" style="margin-top:8px;" onclick="salvarPoliticaComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">Salvar política</button>
     <div class="msg hidden" id="msg-politica" style="margin-top:6px;"></div>`;
 }

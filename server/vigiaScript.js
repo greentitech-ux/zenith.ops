@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 51;
+const VERSAO_VIGIA = 52;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -1322,6 +1322,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '# o Master no que for NOVO. A comparacao NUNCA fica aqui: agente adulterado',
     '# nao consegue esconder o que instalou.',
     'function Inventariar-Programas {',
+    // So a instancia de LOGIN inventaria. A de boot roda como SYSTEM, e o
+    // HKCU dela e outro hive: a lista voltaria sem os programas instalados
+    // "so pra mim" e o servidor leria isso como desinstalacao em massa - e
+    // como reinstalacao no proximo tick do usuario, pra sempre.
+    '  if ($Servico) { return }',
     '  try {',
     '    $chaves = @("HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*")',
     '    $nomes = @(Get-ItemProperty $chaves -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and -not $_.SystemComponent } | ForEach-Object { "$($_.DisplayName)" } | Sort-Object -Unique)',
