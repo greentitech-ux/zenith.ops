@@ -18197,6 +18197,160 @@ setTimeout(async () => {
   if (!okReinicioDiario) ruins += 1;
   console.log(`${okReinicioDiario ? '✓' : '✗'} NOC: reinício automático (dias da semana, hora por dia e tolerância, na janela de manutenção)`);
 
+  // ---- ficha da máquina: push em array que não existe naquela função ----
+  //
+  // Relato do Master, do celular: "não consigo abrir o painel das máquinas
+  // online, só consegui abrir da máquina que está offline".
+  //
+  // Era `linhas.push(...)` na linha da RAM dentro de atualizarConteudoDetalhe,
+  // onde o array chama infoBits. `linhas` existe em OUTRAS funções do mesmo
+  // arquivo, então nem o olho nem o node --check pegavam - e o erro só
+  // estourava quando a máquina JÁ TINHA a RAM medida, ou seja, nas que estão
+  // no ar. O ReferenceError subia ANTES do classList.remove('hidden'), e a
+  // ficha simplesmente não abria. A única que abria era a que estava fora e
+  // ainda não tinha medida de RAM.
+  //
+  // Por isso o teste não procura essa linha: procura a CLASSE do erro em
+  // todas as telas. Para cada função de topo, todo `algo.push(` tem de ter
+  // `algo` declarado DENTRO dela (const/let/var, parâmetro, ou `algo = [`).
+  // Hoje o app inteiro passa com zero suspeitos.
+  //
+  // Se um dia apontar pra uma função que legitimamente empurra num array de
+  // um escopo externo, o certo é olhar o caso - não afrouxar a regra.
+  let okPushOrfao = false;
+  try {
+    const fs9 = require('fs');
+    const path9 = require('path');
+    const dir9 = path9.join(__dirname, 'public');
+    const declaradosEm = (texto) => new Set([
+      ...[...texto.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
+      // pega o 2º nome de "const a=[],b=[]" e o "p=[]" de "const x=1, p=[]"
+      ...[...texto.matchAll(/[,;(\s]([A-Za-z_$][\w$]*)\s*=\s*\[/g)].map((m) => m[1]),
+    ]);
+    const orfaosDe = (src) => {
+      const achados = [];
+      const posicoes = [];
+      const re = /\nfunction\s+([A-Za-z_$][\w$]*)\s*\(/g;
+      let m;
+      while ((m = re.exec(src))) posicoes.push([m.index, m[1]]);
+      posicoes.forEach(([i, nome], k) => {
+        const corpo = src.slice(i, k + 1 < posicoes.length ? posicoes[k + 1][0] : src.length);
+        const dentro = declaradosEm(corpo);
+        ((corpo.match(/^\nfunction\s+[\w$]+\s*\(([^)]*)\)/) || [, ''])[1])
+          .split(',').map((x) => x.trim().split(/[=\s]/)[0]).filter(Boolean)
+          .forEach((param) => dentro.add(param));
+        [...corpo.matchAll(/(?:^|[^\w.$])([a-z][\w$]*)\.push\(/g)].map((x) => x[1])
+          .forEach((alvo) => { if (!dentro.has(alvo)) achados.push(`${nome} → ${alvo}`); });
+      });
+      return [...new Set(achados)];
+    };
+    const suspeitos = [];
+    for (const arq of fs9.readdirSync(dir9).filter((f) => /\.(html|js)$/.test(f))) {
+      orfaosDe(fs9.readFileSync(path9.join(dir9, arq), 'utf8'))
+        .forEach((o) => suspeitos.push(`${arq}: ${o}`));
+    }
+    const noc = fs9.readFileSync(path9.join(dir9, 'loja-status.html'), 'utf8');
+    const conf = {
+      'nenhuma tela empurra num array que não existe naquela função':
+        suspeitos.length === 0 || (console.log(`  suspeitos: ${suspeitos.join(' · ')}`), false),
+      // a própria linha que quebrou, pra não voltar em silêncio
+      'a RAM entra no mesmo array do resto da ficha (infoBits)':
+        /if\(c\.ram && c\.ram\.totalGb != null\)\{\s*\n\s*infoBits\.push\(`🧠 <b>RAM:<\/b>/.test(noc),
+      // a ordem importa: a ficha só aparece DEPOIS de montada, então qualquer
+      // erro ao montar significa "cliquei e não aconteceu nada"
+      'a ficha é montada antes de ser mostrada (por isso um erro ali some com ela)':
+        /atualizarConteudoDetalhe\(codigo, compComDetalhe\(c\)\);\s*\n\s*document\.getElementById\('detalhe-comp-overlay'\)\.classList\.remove\('hidden'\);/.test(noc),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPushOrfao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okPushOrfao = false; console.log('  erro: ' + e.message); }
+  if (!okPushOrfao) ruins += 1;
+  console.log(`${okPushOrfao ? '✓' : '✗'} Ficha da máquina: push em array que não existe (era isso que travava o card das máquinas no ar)`);
+
+  // ---- "Limpar filtros" onde houver período ----
+  //
+  // Pedido do Master: "onde tiver filtros de período precisamos ter um botão
+  // de limpar filtro, porque os filtros estão ficando preso e isso atrapalha".
+  //
+  // Por que ficavam presos (medido no navegador, não suposto): o
+  // guarda-rascunho do tema.js grava TODO campo alterado no sessionStorage e
+  // devolve no carregamento seguinte, por cima do padrão que a própria tela
+  // montou. No Monitor: abre em "hoje", filtra 01/08-31/08, recarrega e volta
+  // 01/08-31/08; apagando só o rascunho, volta "hoje".
+  //
+  // O que este teste protege:
+  //   1. o botão nasce de UM arquivo (tema.js), achando sozinho o par de
+  //      datas - 31 telas têm campo de data; editar na mão não se mantém.
+  //   2. o par é achado pelos ids REAIS do app (F-DE/F-ATE, DINI/DFIM,
+  //      f-date-start/f-date-end...), e campo de data solto não vira filtro.
+  //   3. campo de data dentro de FORMULÁRIO ou MODAL não ganha botão: ali a
+  //      data é campo da ficha ("Previsão de conclusão" da tarefa, "Período
+  //      do depósito" da sangria), e limpar jogaria o trabalho fora.
+  //   4. limpar apaga o rascunho DAQUELA faixa, não o da tela toda.
+  let okLimparFiltros = false;
+  try {
+    const tema = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tema.js'), 'utf8');
+    // idsDoFim e' pura (so texto): da pra arrancar do arquivo e rodar aqui,
+    // sem navegador. E' o miolo da descoberta do par.
+    const fonte = (tema.match(/var FIM_DO_PAR = [\s\S]*?\n  \}\n/) || [''])[0];
+    // eslint-disable-next-line no-new-func
+    const idsDoFim = new Function(`${fonte}; return idsDoFim;`)();
+    const acha = (id, alvo) => idsDoFim(id).includes(alvo);
+
+    const conf = {
+      // 1. de um arquivo só, e nenhuma tela com cópia na mão
+      'o botão sai do tema.js, que é o arquivo que todas as telas carregam':
+        /botao\.className = 'zenith-limpar-filtros';/.test(tema) && /botao\.textContent = '✕ Limpar filtros';/.test(tema),
+      'nenhuma tela tem uma cópia própria do botão': (() => {
+        const fs8 = require('fs');
+        const p8 = require('path');
+        const dir = p8.join(__dirname, 'public');
+        return !fs8.readdirSync(dir).filter((f) => f !== 'tema.js' && /\.(html|js)$/.test(f))
+          .some((f) => /zenith-limpar-filtros/.test(fs8.readFileSync(p8.join(dir, f), 'utf8')));
+      })(),
+      // 2. os pares de verdade do app
+      'acha o par pelos ids que o app usa mesmo':
+        acha('F-DE', 'F-ATE') && acha('f-de', 'f-ate')
+        && acha('f-date-start', 'f-date-end')
+        && acha('filtro-data-de', 'filtro-data-ate')
+        && acha('quedas-de', 'quedas-ate')
+        && acha('h-inicio', 'h-fim') && acha('comp-inicio', 'comp-fim')
+        && acha('s-periodo-inicio', 's-periodo-fim')
+        && acha('fech-date-inicio', 'fech-date-fim'),
+      // o "de" no MEIO do id também conta - senão a Central e os Formulários,
+      // que sufixam a tela no id, ficavam de fora
+      'o par vale com o id sufixado pela tela':
+        acha('filtro-data-de-lista', 'filtro-data-ate-lista')
+        && acha('filtro-data-de-tecnico', 'filtro-data-ate-tecnico'),
+      'e grudado, sem separador (DINI → DFIM)': acha('DINI', 'DFIM'),
+      // data que não forma par não é filtro: é campo de ficha
+      'data solta não vira filtro':
+        !idsDoFim('nascimento').length && !idsDoFim('vencimento').length
+        && !idsDoFim('ocr-dia').length && !idsDoFim('dataVenda').length
+        && !idsDoFim('desl-data').length && !idsDoFim('comprada-entrega').length,
+      // 3. o portão que separa filtro de campo de ficha
+      'formulário e modal ficam de fora (lá a data é campo, não filtro)':
+        /var CAIXA_DE_EDICAO = 'form,dialog,\[role="dialog"\],\.modal,\.dialog,\.overlay';/.test(tema)
+        && /if \(ehCampoDeFicha\(inicio\)\) return;/.test(tema),
+      // 4. limpa a FAIXA, não a tela toda - um formulário meio preenchido ao
+      // lado não pode ir junto
+      'limpa só o rascunho daquela faixa de filtros':
+        /window\.zenithRascunhos\.limpar\(faixa\)/.test(tema)
+        && !/zenithRascunhos\.limpar\(document\.body\)/.test(tema),
+      'e recarrega, que é como cada tela volta ao padrão dela':
+        /limpar\(faixa\); \} catch \(_\) \{\}\s*\n\s*location\.reload\(\);/.test(tema),
+      // telas montam o filtro junto com os dados: plantar uma vez só não pega
+      'acompanha o DOM (tela que monta o filtro depois do boot também ganha)':
+        /new MutationObserver\(function \(\) \{[\s\S]{0,200}plantarLimparFiltros\(\);/.test(tema),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okLimparFiltros = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okLimparFiltros = false; console.log('  erro: ' + e.message); }
+  if (!okLimparFiltros) ruins += 1;
+  console.log(`${okLimparFiltros ? '✓' : '✗'} Limpar filtros: um botão em toda faixa de período, de um arquivo só (o filtro parava preso no rascunho)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
