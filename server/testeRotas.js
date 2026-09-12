@@ -11396,6 +11396,51 @@ setTimeout(async () => {
   console.log(`${okAtivosTI ? '✓' : '✗'} Ativos de TI: Master edita o inventário (soma/tira ativo) e o técnico pede correção pra ele aprovar`);
 
   // ------------------------------------------------------------------
+  // KPI COM A UNIDADE CERTA NA FICHA (print do Master, 12/09/2026: "os KPIs
+  // estao totalmente distorcidos, nao tem nada a ver com a realidade"). A
+  // ficha do fechamento so sabia formatar quantidade/texto: todo o resto caia
+  // em fmtMoney, entao Run Time / Leg Time / ADT / OTD - que sao TEMPO em
+  // SEGUNDOS (ver kpi-tempo.js) - saiam como "R$ 1.201,00". Numero certo,
+  // unidade errada. Aqui a funcao de verdade da tela e EXECUTADA com os
+  // numeros do print. Junto: o botao de editar dentro da ficha.
+  let okKpiFicha = false;
+  try {
+    const fsK = require('fs');
+    const htmlK = fsK.readFileSync(__dirname + '/public/fechamentos.html', 'utf8');
+    const ktK = fsK.readFileSync(__dirname + '/public/kpi-tempo.js', 'utf8');
+    const pega = (re) => (htmlK.match(re) || [''])[0];
+    const pecas = pega(/function num\(v\)\{[^\n]*\n/) + pega(/function fmtMoney\(v\)\{[^\n]*\n/)
+      + pega(/const FICHA_SEM_CIFRAO = \[[^\]]*\];/) + pega(/function segundosParaTempo\(seg\)\{[\s\S]*?\n\}/)
+      + pega(/function fichaValorFmt\(it\)\{[\s\S]*?\n\}/);
+    // eslint-disable-next-line no-new-func
+    const fmtK = new Function('window', `${ktK};${pecas}; return fichaValorFmt;`)({});
+    const v = (tipo, valor) => fmtK({ campo: 'kpi:x', label: 'x', tipo, valor });
+    const conf = {
+      // os quatro do print, com os segundos que estavam gravados
+      'KPI de TEMPO sai em MINUTOS E SEGUNDOS escritos, não em R$ (Run Time 1201s = 20 min 01 s)':
+        v('tempo', 1201) === '20 min 01 s' && v('tempo', 170) === '2 min 50 s'
+        && v('tempo', 1163) === '19 min 23 s' && v('tempo', 622) === '10 min 22 s',
+      'tempo não preenchido continua "—" (não vira 0:00 nem R$ 0,00)': v('tempo', 0) === '—',
+      'kg e percentual ganham a unidade deles (mesmos sufixos do lançamento)':
+        v('kg', 12.5) === '12,500 kg' && v('percentual', 3.25) === '3,25 %',
+      'moeda e quantidade seguem como eram': v('moeda', 150) === 'R$ 150,00' && v('quantidade', 62) === '62',
+      // nenhum tipo conhecido pode cair no cifrão por engano
+      'nenhum tipo de KPI sobra caindo em R$ por engano':
+        !['tempo', 'kg', 'percentual', 'quantidade', 'texto', 'arquivo'].some((t) => /^R\$/.test(v(t, 7))),
+      // botão de editar na ficha, com a MESMA regra do lápis da tabela
+      'a ficha do fechamento tem botão de Editar (só Master, e só o que o sistema lançou)':
+        /id="ficha-editar"[^>]*onclick="editarDaFicha\(\)"/.test(htmlK)
+        && /function editarDaFicha\(\)\{[\s\S]{0,200}?fecharFichaFechamento\(\);\s*abrirEdicaoFechamento\(id\);/.test(htmlK)
+        && /btnEd\.classList\.toggle\('hidden', !\(IS_MASTER && d\.criadoPorId\)\);/.test(htmlK),
+    };
+    const falhas = Object.entries(conf).filter(([, v2]) => !v2).map(([n]) => n);
+    okKpiFicha = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (1201=${v('tempo', 1201)} 0=${v('tempo', 0)} kg=${v('kg', 12.5)} pct=${v('percentual', 3.25)})`);
+  } catch (e) { okKpiFicha = false; console.log('  erro: ' + e.message); }
+  if (!okKpiFicha) ruins += 1;
+  console.log(`${okKpiFicha ? '✓' : '✗'} Ficha do fechamento: KPI sai na unidade dele (tempo em min:seg, não R$) e dá pra editar dali`);
+
+  // ------------------------------------------------------------------
   // O APP "NoPulso" NAS LOJAS (pedido do Master, 12/09/2026): "no Chrome tem a
   // opcao de instalar e fica com esse App - quero do mesmo jeito ao instalar,
   // e se tiver o app antigo Zenith Ops, remover". O mesmo comando de
