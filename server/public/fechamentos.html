@@ -114,6 +114,18 @@
   .valor{font-family:var(--mono);font-variant-numeric:tabular-nums;}
   .colocacao{font-family:var(--mono);color:var(--muted);width:38px;text-align:right;}
   .colocacao .podio{color:var(--accent);}
+  /* LINHA QUE ABRE. Pedido do Master: "ao clicar na linha do fechamento ele
+     apareça o faturamento do dia, porcentagem que subiu ou desceu e mostrar
+     o VALOR que está sendo comparado, não só a porcentagem". O contra-quanto
+     já existia, mas só no title do navegador - que no celular não aparece. */
+  .linha-uni{cursor:pointer;}
+  .linha-uni .abre-fecha{color:var(--muted);font-family:var(--mono);font-size:9px;margin-left:6px;}
+  .uni-detalhe > td{background:var(--panel2);border-bottom:1px solid var(--line);padding:10px 12px;white-space:normal;}
+  .uni-detalhe-grid{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;}
+  .uni-detalhe-item{min-width:0;}
+  .uni-detalhe-rot{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:3px;}
+  .uni-detalhe-val{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:14px;font-weight:700;}
+  .uni-detalhe-sub{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px;}
   /* COLUNA DA UNIDADE CONGELADA. Pedido do Master (09/09/2026): "congelar
      sempre o nome da unidade; se preciso, quando for mobile, abreviar - mas
      congelar a coluna unidade". Com 8 colunas a tabela rola de lado e, no
@@ -2145,7 +2157,89 @@ function faturamentoAnteriorPorUnidade(){
   return { mapa, ant };
 }
 
+// ---- detalhe da linha do Comparativo por unidade ----
+//
+// Pedido do Master: "ao clicar na linha do fechamento ele apareça o
+// faturamento do dia, porcentagem que subiu ou desceu e mostrar o VALOR que
+// está sendo comparado, não só a porcentagem".
+//
+// O contra-quanto JÁ era calculado - estava no title da célula de Variação,
+// que no celular nunca aparece (não existe hover) e no computador é uma dica
+// nativa que some. Aqui ele fica na tela, ao lado do número que ele explica.
+//
+// Nada de número novo: faturamento e período anterior saem dos MESMOS
+// `c.faturamento` e `anterior.mapa[u]` que a coluna de Variação usa, então o
+// detalhe nunca discorda da linha.
+let UNI_ABERTAS = new Set();
+function ligarCliqueUnidades(){
+  const corpo = document.getElementById('unidades-body');
+  if(!corpo || corpo.dataset.cliqueLigado) return;
+  corpo.dataset.cliqueLigado = '1';
+  const alvoDe = (e)=>{ const tr = e.target.closest && e.target.closest('tr.linha-uni'); return tr && tr.dataset.uni; };
+  corpo.addEventListener('click', (e)=>{ const u = alvoDe(e); if(u) alternarDetalheUnidade(u); });
+  corpo.addEventListener('keydown', (e)=>{
+    if(e.key !== 'Enter' && e.key !== ' ') return;
+    const u = alvoDe(e);
+    if(!u) return;
+    e.preventDefault();
+    alternarDetalheUnidade(u);
+  });
+}
+function alternarDetalheUnidade(u){
+  const linha = document.querySelector(`#unidades-body tr.linha-uni[data-uni="${CSS.escape(u)}"]`);
+  const det = document.querySelector(`#unidades-body tr.uni-detalhe[data-uni-detalhe="${CSS.escape(u)}"]`);
+  if(!det) return;
+  const abrir = det.classList.contains('hidden');
+  det.classList.toggle('hidden', !abrir);
+  // o conjunto sobrevive ao próximo render (troca de filtro, poll): quem
+  // abriu uma unidade não a perde porque a tabela se redesenhou
+  if(abrir) UNI_ABERTAS.add(u); else UNI_ABERTAS.delete(u);
+  if(linha){
+    linha.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+    const seta = linha.querySelector('.abre-fecha');
+    if(seta) seta.textContent = abrir ? '▲' : '▼';
+  }
+}
+function detalheUnidadeHtml(u, c, anterior){
+  const inicio = document.getElementById('f-date-start').value;
+  const fim = document.getElementById('f-date-end').value;
+  // "do dia" quando o filtro é um dia só; "no período" quando é um intervalo.
+  // Chamar de "do dia" um intervalo de 30 dias seria rótulo mentindo.
+  const umDia = inicio && fim && inicio === fim;
+  const rotuloAtual = umDia ? `Faturamento do dia (${fmtData(inicio)})` : `Faturamento no período (${fmtData(inicio)} → ${fmtData(fim)})`;
+  const partes = [`<div class="uni-detalhe-item">
+      <div class="uni-detalhe-rot">${escapeHtml(rotuloAtual)}</div>
+      <div class="uni-detalhe-val">${fmtMoney(c.faturamento)}</div>
+      <div class="uni-detalhe-sub">${c.qtd} fechamento(s)</div>
+    </div>`];
+  const antes = anterior ? (anterior.mapa[u]||0) : 0;
+  if(!anterior || antes <= 0){
+    partes.push(`<div class="uni-detalhe-item">
+      <div class="uni-detalhe-rot">Comparado com</div>
+      <div class="uni-detalhe-val" style="color:var(--muted);">—</div>
+      <div class="uni-detalhe-sub">Sem faturamento no período anterior — não dá pra comparar.</div>
+    </div>`);
+    return `<div class="uni-detalhe-grid">${partes.join('')}</div>`;
+  }
+  const delta = c.faturamento - antes;
+  const pct = (delta/antes)*100;
+  const cor = pct>0.05 ? 'var(--ok)' : (pct<-0.05 ? 'var(--bad)' : 'var(--muted)');
+  const seta = pct>0.05 ? '▲' : (pct<-0.05 ? '▼' : '=');
+  partes.push(`<div class="uni-detalhe-item">
+      <div class="uni-detalhe-rot">Comparado com (${escapeHtml(fmtData(anterior.ant.inicio))} → ${escapeHtml(fmtData(anterior.ant.fim))})</div>
+      <div class="uni-detalhe-val">${fmtMoney(antes)}</div>
+      <div class="uni-detalhe-sub">período anterior de mesmo tamanho</div>
+    </div>`);
+  partes.push(`<div class="uni-detalhe-item">
+      <div class="uni-detalhe-rot">Variação</div>
+      <div class="uni-detalhe-val" style="color:${cor};">${seta} ${pct>0?'+':''}${pct.toFixed(1).replace('.',',')}%</div>
+      <div class="uni-detalhe-sub" style="color:${cor};">${delta>0?'+':''}${fmtMoney(delta)}</div>
+    </div>`);
+  return `<div class="uni-detalhe-grid">${partes.join('')}</div>`;
+}
+
 function renderUnidadesTable(rows){
+  ligarCliqueUnidades();
   const refIso = document.getElementById('f-date-end').value;
   const anterior = faturamentoAnteriorPorUnidade();
   const porUnidade = {};
@@ -2199,10 +2293,14 @@ function renderUnidadesTable(rows){
     // pódio só nos três primeiros: com 13 lojas, destacar todas não destaca
     // nenhuma. Da 4ª pra baixo o número continua lá, só não chama atenção
     const podio = i < 3 ? ' class="podio"' : '';
-    return `<tr>
+    const aberta = UNI_ABERTAS.has(u);
+    return `<tr class="linha-uni" data-uni="${escapeHtml(u)}" role="button" tabindex="0" aria-expanded="${aberta?'true':'false'}">
       <td class="colocacao"><b${podio}>${i+1}º</b></td>
-      <td title="${escapeHtml(UNIDADES_NOMES[u]||u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}${codigoIdpulse ? ` <span style="color:var(--muted);font-family:var(--mono);font-size:10px;">${escapeHtml(codigoIdpulse)}</span>` : ''}</td>
+      <td title="${escapeHtml(UNIDADES_NOMES[u]||u)}">${escapeHtml(UNIDADES_NOMES[u]||u)}${codigoIdpulse ? ` <span style="color:var(--muted);font-family:var(--mono);font-size:10px;">${escapeHtml(codigoIdpulse)}</span>` : ''}<span class="abre-fecha">${aberta?'▲':'▼'}</span></td>
       ${colunas.map(o=>celulas[o.key](u,c)).join('')}
+    </tr>
+    <tr class="uni-detalhe${aberta?'':' hidden'}" data-uni-detalhe="${escapeHtml(u)}">
+      <td colspan="${2+colunas.length}">${detalheUnidadeHtml(u, c, anterior)}</td>
     </tr>`;
   }).join('') : `<tr><td colspan="${2+colunas.length}" class="empty">Sem dados no período.</td></tr>`;
 }

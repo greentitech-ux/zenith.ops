@@ -18429,6 +18429,92 @@ setTimeout(async () => {
   if (!okDica) ruins += 1;
   console.log(`${okDica ? '✓' : '✗'} Balão de dica: flutuante, não cortado por painel com rolagem - e a ficha da máquina virou só-ícone`);
 
+  // ---- Comparativo por unidade: a linha abre e mostra CONTRA QUANTO ----
+  //
+  // Pedido do Master: "ao clicar na linha do fechamento ele apareça o
+  // faturamento do dia, porcentagem que subiu ou desceu e mostrar o VALOR que
+  // está sendo comparado, não só a porcentagem".
+  //
+  // O contra-quanto já era calculado - só que morava no title da célula de
+  // Variação, que no celular nunca aparece (não existe hover). Agora fica na
+  // tela, ao lado do número que ele explica.
+  //
+  // A trava que importa: o detalhe tem de sair dos MESMOS números da coluna
+  // (c.faturamento e anterior.mapa[u]). Se um dia alguém recalcular ali
+  // dentro, o painel passa a discordar de si mesmo - e é em cima dele que a
+  // operação decide.
+  let okLinhaUnidade = false;
+  try {
+    const fech = require('fs').readFileSync(require('path').join(__dirname, 'public', 'fechamentos.html'), 'utf8');
+    const lanc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'lancamento.html'), 'utf8');
+    const detalhe = (fech.match(/function detalheUnidadeHtml\(u, c, anterior\)\{[\s\S]*?\n\}/) || [''])[0];
+
+    const conf = {
+      'a linha do Comparativo abre e fecha':
+        /class="linha-uni" data-uni=/.test(fech)
+        && /function alternarDetalheUnidade\(u\)\{/.test(fech)
+        && /det\.classList\.toggle\('hidden', !abrir\)/.test(fech),
+      // teclado e leitor de tela: linha clicável que só responde ao mouse é
+      // um botão escondido
+      'dá pra abrir pelo teclado, e o estado é anunciado':
+        /role="button" tabindex="0" aria-expanded=/.test(fech)
+        && /if\(e\.key !== 'Enter' && e\.key !== ' '\) return;/.test(fech),
+      // o código da unidade tem espaço ("Dominos X") e a tela não tem
+      // escapeJs: por isso o clique é delegado, não interpolado no onclick
+      'o clique é delegado no tbody (o código da unidade não vai pra dentro de um onclick)':
+        /corpo\.addEventListener\('click'/.test(fech) && !/escapeJs/.test(fech),
+      'ligado uma vez só, mesmo com a tabela se redesenhando':
+        /if\(!corpo \|\| corpo\.dataset\.cliqueLigado\) return;/.test(fech),
+      // ESTE é o pedido: o valor comparado, não só a porcentagem
+      'mostra o VALOR comparado, com o período dele':
+        /Comparado com \(\$\{escapeHtml\(fmtData\(anterior\.ant\.inicio\)\)\} → \$\{escapeHtml\(fmtData\(anterior\.ant\.fim\)\)\}\)/.test(detalhe)
+        && /fmtMoney\(antes\)/.test(detalhe),
+      'mostra a variação em % E em reais':
+        /const delta = c\.faturamento - antes;/.test(detalhe)
+        && /const pct = \(delta\/antes\)\*100;/.test(detalhe)
+        && /\$\{delta>0\?'\+':''\}\$\{fmtMoney\(delta\)\}/.test(detalhe),
+      // os números saem da mesma fonte da coluna de Variação
+      'usa os mesmos números da coluna, não recalcula nada':
+        /const antes = anterior \? \(anterior\.mapa\[u\]\|\|0\) : 0;/.test(detalhe)
+        && /fmtMoney\(c\.faturamento\)/.test(detalhe),
+      // rótulo que mente é pior que rótulo nenhum: "do dia" só quando é um dia
+      'só chama de "do dia" quando o filtro é um dia só':
+        /const umDia = inicio && fim && inicio === fim;/.test(detalhe)
+        && /umDia \? `Faturamento do dia/.test(detalhe),
+      'loja sem período anterior diz isso, em vez de inventar 100%':
+        /if\(!anterior \|\| antes <= 0\)\{/.test(detalhe)
+        && /Sem faturamento no período anterior/.test(detalhe),
+      'o que está aberto sobrevive ao próximo render':
+        /let UNI_ABERTAS = new Set\(\);/.test(fech)
+        && /const aberta = UNI_ABERTAS\.has\(u\);/.test(fech),
+
+      // ---- formulário de fechamento: sem recolher, menos a sangria ----
+      //
+      // Pedido do Master: "o estilo Recolher está sendo um problema no
+      // formulário de Fechamento, quando precisa se ter total atenção melhor
+      // deixar todos expandidos. Remover todos do fechamento exceto o da
+      // SANGRIA, porque ajuda a diminuir a tela e sangria é só 2x por semana".
+      'no lançamento, só a sangria continua recolhível': (() => {
+        const secoes = lanc.match(/<div class="secao[^"]*"[^>]*>\s*\n\s*<div class="secao-titulo">[^<]*/g) || [];
+        const comTitulo = secoes.filter((b) => /secao-titulo/.test(b));
+        const recolhiveis = comTitulo.filter((b) => !/data-recolher="nao"/.test(b));
+        return comTitulo.length >= 8
+          && recolhiveis.length === 1
+          && /Saída de dinheiro \(sangria\/depósito\)/.test(recolhiveis[0]);
+      })(),
+      // o opt-out é o que o próprio recolher.js oferece - nada de gambiarra
+      // por CSS escondendo a seta
+      'usa o desligamento que o recolher.js já tem':
+        /data-recolher="nao"/.test(lanc)
+        && /sec\.dataset\.recolher === 'nao'/.test(require('fs').readFileSync(require('path').join(__dirname, 'public', 'recolher.js'), 'utf8')),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okLinhaUnidade = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okLinhaUnidade = false; console.log('  erro: ' + e.message); }
+  if (!okLinhaUnidade) ruins += 1;
+  console.log(`${okLinhaUnidade ? '✓' : '✗'} Comparativo por unidade: a linha abre e diz contra quanto - e o formulário de fechamento só recolhe a sangria`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
