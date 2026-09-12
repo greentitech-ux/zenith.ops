@@ -11981,6 +11981,77 @@ setTimeout(async () => {
   console.log(`${okConc ? '✓' : '✗'} Conciliação PWR/iFood × declarado: entra pelo robô, compara no servidor, e a divergência vira tarefa pro gerente (uma vez só)`);
 
   // ------------------------------------------------------------------
+  // NOCZenith NO WINDOWS SERVER 2012 R2 (o BOS do Pulse da 19855 - e' onde a
+  // Zebra fica). Print do Master, 12/09: o comando de instalacao morria em
+  // "Nao foi possivel criar um canal seguro para SSL/TLS". O .NET dessa
+  // maquina nao tenta TLS 1.2 sozinho, e o nopulso.com.br so aceita 1.2+. E
+  // tem PowerShell 4 / .NET 4.5: [DateTimeOffset]::new e ToUnixTimeMilliseconds
+  // nao existem la - o script instalado na mao pararia no primeiro tick.
+  //
+  // REGRA DO MASTER: "nao mexer no que ja funciona; se for fazer, faz uma
+  // versao especifica pra nao quebrar a que esta ok". Entao a primeira
+  // asserçao deste bloco e' que o script PADRAO nao ganhou nada - nem TLS,
+  // nem relogio novo - e a VERSAO_VIGIA nao subiu (ninguem reinstala). A
+  // versao de Windows antigo so sai pra maquina MARCADA na ficha, e a marca
+  // vale pro comando de instalacao, pro download e pra autoatualizacao.
+  //
+  // O pwsh daqui e' o 7, entao "parse OK" nao prova compatibilidade; a prova
+  // e' no fonte gerado.
+  let okServer2012 = false;
+  try {
+    const vg = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const fs = require('fs');
+    const tipos = ['interno', 'atendimento', 'abastecimento'];
+    const padrao = tipos.map((tipo) => vg.montarScriptVigia({ codigo: '19855', posto: 'BOS', tipo, agentToken: 'abc' }));
+    const antigo = tipos.map((tipo) => vg.montarScriptVigia({ codigo: '19855', posto: 'BOS', tipo, agentToken: 'abc', windowsAntigo: true }));
+    const decod = (cmd) => Buffer.from(cmd.split(' ').pop(), 'base64').toString('utf16le');
+    const cmdPadrao = decod(vg.montarComandoInstalacao({ codigo: '19855', posto: 'BOS', tipo: 'interno', agentToken: 'abc' }));
+    const cmdAntigo = decod(vg.montarComandoInstalacao({ codigo: '19855', posto: 'BOS', tipo: 'interno', agentToken: 'abc', windowsAntigo: true }));
+    const TLS = /\[Net\.ServicePointManager\]::SecurityProtocol\s*=\s*\[Net\.ServicePointManager\]::SecurityProtocol -bor 3072/;
+    const tlsAntesDoRest = (src) => TLS.test(src) && src.search(TLS) < src.indexOf('Invoke-RestMethod');
+
+    // pela porta: a marca na ficha muda o comando, o download e a autoatualizacao
+    const cabM = { Authorization: 'Bearer ' + token };
+    DOCS.set('lojaStatus/19855__BOS', { codigo: '19855', posto: 'BOS', nome: 'BOS Pulse', tipo: 'interno', agentToken: 'tokbos', ultimoHeartbeatEm: Date.now(), eventos: [] });
+    const marcou = await enviarJson('PUT', '/api/loja-status/19855/computadores/BOS', { nome: 'BOS Pulse', tipo: 'interno', ehServidor: true, windowsAntigo: true }, cabM);
+    const cmdRota = await pedir('/api/loja-status/19855/computadores/BOS/comando-instalacao?tipo=interno', cabM);
+    const cmdRotaDecod = cmdRota.status === 200 ? decod(JSON.parse(cmdRota.corpo).comando) : '';
+    // autoatualizacao: o proprio agente baixa com o token dele, sem sessao
+    const psAuto = await pedir('/api/loja-status/19855/computadores/BOS/vigia.ps1?tipo=interno', { 'x-noc-token': 'tokbos' });
+    // e a maquina do bloco de politica (POL/PC1), SEM a marca, continua no padrao
+    const psPadraoRota = await pedir('/api/loja-status/POL/computadores/PC1/vigia.ps1?tipo=interno', { 'x-noc-token': 'tokpol' });
+    const htmlNoc = fs.readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+
+    const conf = {
+      'o script PADRAO não mudou: sem TLS forçado, sem relógio novo (as 52 máquinas seguem como estão)':
+        padrao.every((s) => !/SecurityProtocol|Agora-Ms|Ms-De/.test(s)) && !/SecurityProtocol/.test(cmdPadrao),
+      'e a VERSAO_VIGIA NÃO subiu por causa disto (ninguém reinstala nada)': vg.VERSAO_VIGIA === 52,
+      'Windows antigo: o comando de instalação liga TLS 1.2 ANTES de baixar o script': tlsAntesDoRest(cmdAntigo),
+      'Windows antigo: os 3 tipos de script ligam TLS 1.2 antes da primeira chamada': antigo.every(tlsAntesDoRest),
+      'e SOMA ao que já estava ligado (-bor), não substitui': antigo.every((s) => !/SecurityProtocol\s*=\s*3072\b/.test(s)),
+      'nada de [DateTimeOffset]::new nem ToUnixTimeMilliseconds sobra na versão antiga (PowerShell 4 / .NET 4.5 não tem)':
+        antigo.every((s) => !/::new\(/.test(s) && !/ToUnixTimeMilliseconds/.test(s)),
+      'o relógio em ms é um só, definido antes de ser usado':
+        antigo.every((s) => /function Agora-Ms \{/.test(s) && s.indexOf('function Agora-Ms') < s.indexOf('(Agora-Ms)') && /function Ms-De\(\[DateTime\]\$d\)/.test(s)),
+      'a versão antiga continua começando com # NOCZenith (a trava contra arquivo quebrado)': antigo.every((s) => s.startsWith('# NOCZenith')),
+      'a marca na ficha vale pro comando de instalação': marcou.status === 200 && tlsAntesDoRest(cmdRotaDecod),
+      'e pra autoatualização (o agente baixa com o token dele e recebe a versão certa)':
+        psAuto.status === 200 && tlsAntesDoRest(psAuto.corpo) && /function Agora-Ms/.test(psAuto.corpo),
+      'máquina sem a marca continua recebendo o padrão pela mesma rota':
+        psPadraoRota.status === 200 && !/SecurityProtocol|Agora-Ms/.test(psPadraoRota.corpo),
+      'a ficha da máquina tem a caixa "Windows antigo" e manda a marca pro servidor':
+        /id="editar-comp-windows-antigo"/.test(htmlNoc) && /id="novo-comp-windows-antigo"/.test(htmlNoc)
+        && /windowsAntigo: document\.getElementById\('editar-comp-windows-antigo'\)\.checked/.test(htmlNoc)
+        && /!!c\.windowsAntigo\)/.test(htmlNoc),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okServer2012 = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (marcou=${marcou.status} cmd=${cmdRota.status} auto=${psAuto.status} padrao=${psPadraoRota.status})`);
+  } catch (e) { okServer2012 = false; console.log('  erro: ' + e.message); }
+  if (!okServer2012) ruins += 1;
+  console.log(`${okServer2012 ? '✓' : '✗'} NOCZenith no Windows Server 2012 R2: versão específica pra máquina marcada (TLS 1.2 e sem PowerShell 5), e o padrão das outras intacto`);
+
+  // ------------------------------------------------------------------
   // APOSENTAR O ENDERECO ANTIGO (pedido 12/09/2026: "preciso extinguir esse
   // adyen-monitor, aposentar de vez"). O CLAUDE.md §4 diz que o dominio velho
   // NUNCA pode ser desligado - e o motivo e concreto: o agente so descobre que

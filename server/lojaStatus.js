@@ -1168,11 +1168,20 @@ async function noPulsoPrintDoComputador(codigo, posto) {
   return snap.exists && !!snap.data().noPulsoPrint;
 }
 
+// "Windows antigo" (Server 2012 R2 / 7 / 8): o agente desta maquina sai na
+// versao especifica (ver adaptarParaWindowsAntigo no vigiaScript.js). Lido
+// pela rota vigia.ps1 e pelo comando de instalacao - a autoatualizacao
+// continua na versao certa sem a maquina precisar saber de nada.
+async function windowsAntigoDoComputador(codigo, posto) {
+  const snap = await COLLECTION.doc(docIdFor(codigo, posto)).get();
+  return snap.exists && !!snap.data().windowsAntigo;
+}
+
 // Master cadastra um novo computador pra uma unidade - gera um id curto e
 // estavel (nunca muda, mesmo se o nome/tipo forem editados depois) que vira
 // parte do link/QR code fixado naquele computador (ver POST /api/loja-status/
 // :codigo/computadores em index.js, que devolve a URL pronta)
-async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, medeQuedas, noPulsoPrint) {
+async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador (ex: Caixa 1, PDV Entrega).');
   const posto = crypto.randomBytes(4).toString('hex');
@@ -1184,6 +1193,8 @@ async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, mede
     ehServidor: !!ehServidor, temGcom: !!temGcom, medeQuedas: !!medeQuedas,
     // Captura local opt-in: o arquivo nunca passa pelo NoPulso nem pelo servidor.
     noPulsoPrint: !!noPulsoPrint,
+    // Server 2012 R2 / 7 / 8: agente na versao especifica (ver vigiaScript.js)
+    windowsAntigo: !!windowsAntigo,
     criadoEm: Date.now(),
     ultimoHeartbeatEm: null, avisadoOffline: false, offlineDesde: null, mensagemPendente: null,
     ip: null, userAgent: null, abertoDesde: null, ipLocal: null, ipLocalEm: null,
@@ -1199,7 +1210,7 @@ async function cadastrarComputador(codigo, nome, tipo, ehServidor, temGcom, mede
 
 // edita nome e/ou tipo de um computador ja cadastrado - o "posto" (id do
 // link/QR) nunca muda, so o que aparece na tela e qual tela o link abre
-async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint) {
+async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServidor, temGcom, medeQuedas, noPulsoPrint, windowsAntigo) {
   const nomeOk = String(nome || '').trim().slice(0, 60);
   if (!nomeOk) throw new Error('Dê um nome pro computador.');
   const id = docIdFor(codigo, posto);
@@ -1218,6 +1229,7 @@ async function editarComputador(codigo, posto, nome, tipo, ehNotebook, ehServido
     // ocorrências simultâneas em uma única queda da loja.
     medeQuedas: !!medeQuedas,
     noPulsoPrint: !!noPulsoPrint,
+    windowsAntigo: !!windowsAntigo,
   };
   await COLLECTION.doc(id).update(registro);
   cache.invalidar();
@@ -3074,5 +3086,5 @@ module.exports = {
   sanitizarPolitica, definirPolitica, programasNovos, programasSumidos, leituraSuspeita, registrarProgramas,
   resumoEnderecoAgentes,
   saudeMaquinas,
-  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, reportarEstadoAgente, pedirCaptura,
+  garantirAgentToken, tokenDoComputador, tokensBatem, configuracaoAgente, noPulsoPrintDoComputador, windowsAntigoDoComputador, reportarEstadoAgente, pedirCaptura,
 };

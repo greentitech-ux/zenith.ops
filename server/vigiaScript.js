@@ -55,7 +55,55 @@ function unidadeCurtaParaArquivo(codigo) {
   return limpo.slice(0, 12) || 'Unidade';
 }
 
-function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
+// VERSAO ESPECIFICA PRA WINDOWS ANTIGO (Server 2012 R2 / 7 / 8) - o BOS do
+// Pulse da 19855. Regra do Master: "nao mexer no que ja funciona; se for
+// fazer, faz uma versao especifica pra nao quebrar a que esta ok". Entao o
+// script PADRAO sai identico ao de sempre (nem a VERSAO_VIGIA sobe), e so a
+// maquina marcada na ficha ("Windows antigo") passa por esta transformacao,
+// feita EM CIMA do texto pronto:
+//
+//   1) TLS 1.2: o .NET dessas maquinas nao tenta TLS 1.2 sozinho e o
+//      nopulso.com.br so aceita 1.2+ - toda chamada morria em "Nao foi
+//      possivel criar um canal seguro para SSL/TLS" (erro real da 19855).
+//      3072 = Tls12, em numero porque o nome do enum nao existe em .NET
+//      antigo; -bor SOMA ao que ja estava ligado, nao tira nada.
+//   2) Relogio em ms: [DateTimeOffset]::new e ToUnixTimeMilliseconds so
+//      existem no PowerShell 5 / .NET 4.6 - la o script pararia no primeiro
+//      tick. Viram Agora-Ms / Ms-De, definidos logo depois do param().
+//
+// Se sobrar qualquer API de PS5 depois da troca, ESTOURA aqui em vez de
+// mandar pra maquina um script que morre em silencio.
+function adaptarParaWindowsAntigo(texto) {
+  const marca = 'param([switch]$Loop, [switch]$Servico)';
+  if (!texto.includes(marca)) throw new Error('Script sem o param() esperado - a versao de Windows antigo nao tem onde entrar.');
+  const bloco = [
+    marca,
+    '',
+    '# ===== VERSAO PRA WINDOWS ANTIGO (Server 2012 R2 / Windows 7 / 8) =====',
+    '# Marcada na ficha desta maquina no NOC. As outras maquinas NAO passam por',
+    '# aqui: o script delas e identico ao de sempre.',
+    '#',
+    '# 1) TLS 1.2 obrigatorio. O .NET destas maquinas nao tenta TLS 1.2 sozinho',
+    '#    e o NoPulso so aceita 1.2 pra cima. 3072 = Tls12 (numero porque o nome',
+    '#    do enum nao existe em .NET antigo); -bor soma ao que ja estava ligado.',
+    'try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 } catch {}',
+    '#',
+    '# 2) Relogio em ms compativel com PowerShell 4 / .NET 4.5: no script padrao',
+    '#    usa o DateTimeOffset do PowerShell 5, que nao existe aqui.',
+    '$script:EpocaUnix = New-Object DateTime 1970, 1, 1, 0, 0, 0, ([DateTimeKind]::Utc)',
+    'function Agora-Ms { return [int64]([DateTime]::UtcNow - $script:EpocaUnix).TotalMilliseconds }',
+    'function Ms-De([DateTime]$d) { return [int64]($d.ToUniversalTime() - $script:EpocaUnix).TotalMilliseconds }',
+    '# ===== fim do bloco de Windows antigo =====',
+  ].join('\n');
+  let out = texto.replace(marca, bloco);
+  out = out.split('[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()').join('(Agora-Ms)');
+  out = out.replace('[int64]([DateTimeOffset]::new($b.ToUniversalTime(), [TimeSpan]::Zero).ToUnixTimeMilliseconds())', '(Ms-De $b)');
+  out = out.replace('[int64]([DateTimeOffset]::new($ev.TimeCreated.ToUniversalTime(), [TimeSpan]::Zero).ToUnixTimeMilliseconds())', '(Ms-De $ev.TimeCreated)');
+  if (/::new\(|ToUnixTimeMilliseconds/.test(out)) throw new Error('Sobrou API de PowerShell 5 no script de Windows antigo - ajuste adaptarParaWindowsAntigo.');
+  return out;
+}
+
+function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint, windowsAntigo }) {
   const ehInterno = tipo === 'interno';
   const noPulsoPrintInicial = !!noPulsoPrint;
   // segredo desse computador (ver lojaStatus.js) - vai assado no script e
@@ -2043,7 +2091,9 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '',
   ];
 
-  return [...linhasComuns, ...(ehInterno ? linhasLoopInterno : linhasLoopOutros), ...linhasFinal].join('\n');
+  const texto = [...linhasComuns, ...(ehInterno ? linhasLoopInterno : linhasLoopOutros), ...linhasFinal].join('\n');
+  // so a maquina marcada; o padrao sai exatamente como sempre saiu
+  return windowsAntigo ? adaptarParaWindowsAntigo(texto) : texto;
 }
 
 // comando de UMA LINHA pra colar no PowerShell da loja (botao "Copiar comando"
@@ -2054,7 +2104,7 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
 // pelo navegador). O X-NOC-Token autentica na rota mesmo em reinstalacao (quando
 // o computador ja tem segredo). Depois roda o arquivo (& $f), que se instala
 // como tarefa agendada apontando pra essa mesma pasta fixa.
-function montarComandoInstalacao({ codigo, posto, tipo, agentToken }) {
+function montarComandoInstalacao({ codigo, posto, tipo, agentToken, windowsAntigo }) {
   const token = String(agentToken || '').replace(/[^a-f0-9]/gi, '');
   // encodeURIComponent NAO escapa o apostrofo ('), e a URL entra dentro de uma
   // string PowerShell de ASPAS SIMPLES ('...') abaixo - entao um codigo com
@@ -2067,6 +2117,9 @@ function montarComandoInstalacao({ codigo, posto, tipo, agentToken }) {
   // Controle de Aplicativo Inteligente nao bloqueia - e roda de la)
   const script = [
     "$ErrorActionPreference='Stop'",
+    // Windows antigo: TLS 1.2 ANTES do download - a 19855 morria aqui, antes
+    // de baixar qualquer coisa (ver adaptarParaWindowsAntigo). Padrao: nada.
+    ...(windowsAntigo ? ['try{[Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor 3072}catch{}'] : []),
     "$d=Join-Path $env:LOCALAPPDATA 'NOCZenith'",
     'New-Item -ItemType Directory -Path $d -Force|Out-Null',
     "$f=Join-Path $d 'NOCZenith.ps1'",
@@ -2083,4 +2136,4 @@ function montarComandoInstalacao({ codigo, posto, tipo, agentToken }) {
   return `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64}`;
 }
 
-module.exports = { montarScriptVigia, montarComandoInstalacao, VERSAO_VIGIA };
+module.exports = { montarScriptVigia, montarComandoInstalacao, adaptarParaWindowsAntigo, VERSAO_VIGIA };
