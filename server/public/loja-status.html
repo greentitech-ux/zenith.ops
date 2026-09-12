@@ -1369,10 +1369,16 @@ function atualizarConteudoDetalhe(codigo, c){
     infoBits.push(`💽 disco: <b style="color:${cor};">${rotulo}</b> · medido ${escapeHtml(tempoRelativo(c.disco.em))}`
       + (discos?`<br>${discos}`:'') + (volumes?`<br>${volumes}`:'') + motivos);
   }
-  // regra da casa: reiniciar 1x por semana (ver UPTIME_REINICIAR_DIAS)
+  // infoBits, e NAO `linhas`: `linhas` nao existe nesta funcao. A chamada
+  // estourava ReferenceError ANTES do classList.remove('hidden') la embaixo,
+  // e a ficha simplesmente nao abria - so nas maquinas que JA tinham a RAM
+  // medida, que sao as que estao no ar. Era esse o "clico na maquina e nao
+  // acontece nada" no celular: a unica que abria era a que estava fora e
+  // ainda nao tinha medida de RAM.
   if(c.ram && c.ram.totalGb != null){
-    linhas.push(`🧠 <b>RAM:</b> ${c.ram.totalGb} GB${c.ram.livreGb != null ? ` <span class="sub">· ${c.ram.livreGb} GB livres</span>` : ''}${c.ramMedidaEm ? ` <span class="sub">· medido ${formatarRelativo(c.ramMedidaEm)}</span>` : ''}`);
+    infoBits.push(`🧠 <b>RAM:</b> ${c.ram.totalGb} GB${c.ram.livreGb != null ? ` <span class="sub">· ${c.ram.livreGb} GB livres</span>` : ''}${c.ramMedidaEm ? ` <span class="sub">· medido ${formatarRelativo(c.ramMedidaEm)}</span>` : ''}`);
   }
+  // regra da casa: reiniciar 1x por semana (ver UPTIME_REINICIAR_DIAS)
   if(c.uptimeHoras != null){
     const dias = Math.floor(c.uptimeHoras/24);
     const precisa = dias >= 7;

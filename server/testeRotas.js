@@ -18136,6 +18136,77 @@ setTimeout(async () => {
   if (!okReinicioDiario) ruins += 1;
   console.log(`${okReinicioDiario ? '✓' : '✗'} NOC: reinício automático (dias da semana, hora por dia e tolerância, na janela de manutenção)`);
 
+  // ---- ficha da máquina: push em array que não existe naquela função ----
+  //
+  // Relato do Master, do celular: "não consigo abrir o painel das máquinas
+  // online, só consegui abrir da máquina que está offline".
+  //
+  // Era `linhas.push(...)` na linha da RAM dentro de atualizarConteudoDetalhe,
+  // onde o array chama infoBits. `linhas` existe em OUTRAS funções do mesmo
+  // arquivo, então nem o olho nem o node --check pegavam - e o erro só
+  // estourava quando a máquina JÁ TINHA a RAM medida, ou seja, nas que estão
+  // no ar. O ReferenceError subia ANTES do classList.remove('hidden'), e a
+  // ficha simplesmente não abria. A única que abria era a que estava fora e
+  // ainda não tinha medida de RAM.
+  //
+  // Por isso o teste não procura essa linha: procura a CLASSE do erro em
+  // todas as telas. Para cada função de topo, todo `algo.push(` tem de ter
+  // `algo` declarado DENTRO dela (const/let/var, parâmetro, ou `algo = [`).
+  // Hoje o app inteiro passa com zero suspeitos.
+  //
+  // Se um dia apontar pra uma função que legitimamente empurra num array de
+  // um escopo externo, o certo é olhar o caso - não afrouxar a regra.
+  let okPushOrfao = false;
+  try {
+    const fs9 = require('fs');
+    const path9 = require('path');
+    const dir9 = path9.join(__dirname, 'public');
+    const declaradosEm = (texto) => new Set([
+      ...[...texto.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
+      // pega o 2º nome de "const a=[],b=[]" e o "p=[]" de "const x=1, p=[]"
+      ...[...texto.matchAll(/[,;(\s]([A-Za-z_$][\w$]*)\s*=\s*\[/g)].map((m) => m[1]),
+    ]);
+    const orfaosDe = (src) => {
+      const achados = [];
+      const posicoes = [];
+      const re = /\nfunction\s+([A-Za-z_$][\w$]*)\s*\(/g;
+      let m;
+      while ((m = re.exec(src))) posicoes.push([m.index, m[1]]);
+      posicoes.forEach(([i, nome], k) => {
+        const corpo = src.slice(i, k + 1 < posicoes.length ? posicoes[k + 1][0] : src.length);
+        const dentro = declaradosEm(corpo);
+        ((corpo.match(/^\nfunction\s+[\w$]+\s*\(([^)]*)\)/) || [, ''])[1])
+          .split(',').map((x) => x.trim().split(/[=\s]/)[0]).filter(Boolean)
+          .forEach((param) => dentro.add(param));
+        [...corpo.matchAll(/(?:^|[^\w.$])([a-z][\w$]*)\.push\(/g)].map((x) => x[1])
+          .forEach((alvo) => { if (!dentro.has(alvo)) achados.push(`${nome} → ${alvo}`); });
+      });
+      return [...new Set(achados)];
+    };
+    const suspeitos = [];
+    for (const arq of fs9.readdirSync(dir9).filter((f) => /\.(html|js)$/.test(f))) {
+      orfaosDe(fs9.readFileSync(path9.join(dir9, arq), 'utf8'))
+        .forEach((o) => suspeitos.push(`${arq}: ${o}`));
+    }
+    const noc = fs9.readFileSync(path9.join(dir9, 'loja-status.html'), 'utf8');
+    const conf = {
+      'nenhuma tela empurra num array que não existe naquela função':
+        suspeitos.length === 0 || (console.log(`  suspeitos: ${suspeitos.join(' · ')}`), false),
+      // a própria linha que quebrou, pra não voltar em silêncio
+      'a RAM entra no mesmo array do resto da ficha (infoBits)':
+        /if\(c\.ram && c\.ram\.totalGb != null\)\{\s*\n\s*infoBits\.push\(`🧠 <b>RAM:<\/b>/.test(noc),
+      // a ordem importa: a ficha só aparece DEPOIS de montada, então qualquer
+      // erro ao montar significa "cliquei e não aconteceu nada"
+      'a ficha é montada antes de ser mostrada (por isso um erro ali some com ela)':
+        /atualizarConteudoDetalhe\(codigo, compComDetalhe\(c\)\);\s*\n\s*document\.getElementById\('detalhe-comp-overlay'\)\.classList\.remove\('hidden'\);/.test(noc),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okPushOrfao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okPushOrfao = false; console.log('  erro: ' + e.message); }
+  if (!okPushOrfao) ruins += 1;
+  console.log(`${okPushOrfao ? '✓' : '✗'} Ficha da máquina: push em array que não existe (era isso que travava o card das máquinas no ar)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
