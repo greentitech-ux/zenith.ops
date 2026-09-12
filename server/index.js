@@ -316,6 +316,18 @@ const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([
   '/api/loja-status/vigia-versao',
   '/assinar.html',
 ]);
+// A MESMA lista vale SEM o ".html": `/atendimento` e `/atendimento.html`
+// servem a mesma pagina (ver o `extensions` do express.static la embaixo).
+// Sem isto, o cliente que recebe o link curto bate no muro de senha do
+// dashboard - que e' exatamente o bug que este bloco inteiro existe pra
+// evitar, so que pela porta nova.
+//
+// DERIVADO da propria lista, nao escrito a mao: pagina publica nova entra nos
+// dois enderecos sozinha, e nao tem como uma versao ficar liberada e a outra
+// nao.
+for (const rota of [...ROTAS_PUBLICAS_SEM_DASHBOARD]) {
+  if (rota.endsWith('.html')) ROTAS_PUBLICAS_SEM_DASHBOARD.add(rota.slice(0, -'.html'.length));
+}
 // o chat de suporte do site tem rotas com id dinamico (/api/suporte-chat/:id
 // e /api/suporte-chat/:id/mensagem) - liberadas por prefixo. So o lado
 // PUBLICO (singular "suporte-chat/"); o lado do atendimento e
@@ -14162,7 +14174,14 @@ app.post('/api/ifood/sincronizar', auth.requireMaster, async (req, res) => {
   res.json(status);
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
+// `extensions: ['html']` faz /atendimento servir atendimento.html - o link que
+// vai pro cliente para de ter cara de arquivo. Vale pras 59 telas.
+//
+// O endereco COM .html continua respondendo igual, e NAO redireciona: link
+// que ja foi mandado pra cliente, favorito de gente da operacao e o endereco
+// que o NOCZenith abre na maquina de loja (ver montarScriptVigia) tem que
+// continuar valendo exatamente como esta. Os dois enderecos, mesma pagina.
+app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 
 // ROTA DE API QUE NAO EXISTE RESPONDE JSON, nao a pagina 404 do Express.
 // Todo lugar do app faz `await resp.json()` na resposta - com HTML no corpo,

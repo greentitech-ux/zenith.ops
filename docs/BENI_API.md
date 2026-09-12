@@ -29,11 +29,23 @@ curl -H "Authorization: Bearer $MASTER_API_TOKEN" \
   https://www.nopulso.com.br/api/loja-status
 ```
 
+**Com o `www.`, sempre.** `nopulso.com.br` sem o `www` é **outro host** pro
+filtro de rede do seu ambiente e pra credencial de API — mesmo apontando pro
+mesmo lugar no fim. Chamar sem o `www` dá **403 de rede**, e 403 de rede se
+parece com bloqueio de permissão: você vai concluir que não tem acesso quando
+só errou o endereço.
+
 > `adyen-monitor.onrender.com` também responde e **nunca pode ser desligado** —
 > é por ele que os 52 agentes das lojas descobrem que existe versão nova. Mas
 > ele não é pra você: é o endereço antigo, e usar ele nas suas chamadas só
 > atrapalha a medição de quem já migrou. Se você se pegar montando um comando
 > com `onrender.com`, está errado.
+
+**Antes de concluir qualquer coisa sobre um 403, confira o endereço que você
+mandou.** Só depois fale em bloqueio — e, se for bloqueio mesmo, é do
+**ambiente do Cowork**, não de política da organização: não existe lista de
+domínios no nível da organização, cada ambiente tem a sua. Peça a liberação em
+**Acesso à rede → Personalizado**, no ⚙ do ambiente.
 
 - **Mínimo de 32 caracteres** — token curto desliga a porta inteira e avisa no
   boot.
