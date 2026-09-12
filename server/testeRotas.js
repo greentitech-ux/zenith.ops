@@ -11785,6 +11785,57 @@ setTimeout(async () => {
   console.log(`${okDocBeni ? '✓' : '✗'} Documentação do Beni: nenhuma rota inventada, e toda trava de senha avisada`);
 
   // ------------------------------------------------------------------
+  // LINK SEM ".html" (pedido do Master: "para clientes e atendimento sem
+  // acesso - www.nopulso.com.br/atendimento.html - como podemos tirar esse
+  // html?"). /atendimento serve a mesma pagina, e o endereco COM .html
+  // continua valendo: tem link ja na mao de cliente, favorito da operacao, e
+  // e' o endereco que o NOCZenith abre na maquina de loja.
+  //
+  // A parte que quebra em producao e NAO aparece aqui por HTTP: o muro de
+  // senha do dashboard so e' instalado quando DASHBOARD_PASSWORD existe, e a
+  // suite roda sem. Se `/atendimento` nao estiver na lista publica, o cliente
+  // recebe um pedido de usuario e senha que ele nao tem - o mesmo bug que
+  // aquela lista existe pra evitar, entrando pela porta nova. Por isso a
+  // lista e' AVALIADA de verdade, do fonte: o Set e o laco que deriva as
+  // versoes sem .html sao executados aqui.
+  let okSemHtml = false;
+  try {
+    const fonte = require('fs').readFileSync(__dirname + '/index.js', 'utf8');
+    const ini = fonte.indexOf('const ROTAS_PUBLICAS_SEM_DASHBOARD = new Set([');
+    const fim = fonte.indexOf("ROTAS_PUBLICAS_SEM_DASHBOARD.add(rota.slice(0, -'.html'.length));\n}", ini);
+    const trecho = fim > ini ? fonte.slice(ini, fim + 80) : '';
+    // roda o codigo DE VERDADE (o Set e o laco), nao uma descricao dele
+    const publicas = trecho ? new Function(`${trecho}\nreturn ROTAS_PUBLICAS_SEM_DASHBOARD;`)() : new Set();
+    const htmlsPublicos = [...publicas].filter((r) => r.endsWith('.html'));
+    const semGemeo = htmlsPublicos.filter((r) => !publicas.has(r.slice(0, -5)));
+
+    const comHtml = await pedir('/atendimento.html');
+    const semHtml = await pedir('/atendimento');
+    const interna = await pedir('/loja-status');
+
+    const conf = {
+      '/atendimento abre a mesma página que /atendimento.html':
+        semHtml.status === 200 && comHtml.status === 200 && semHtml.corpo === comHtml.corpo
+        && /<title>/i.test(semHtml.corpo),
+      'o endereço COM .html continua valendo (não redireciona)':
+        comHtml.status === 200,
+      'vale pras telas internas também (o mesmo express.static)':
+        interna.status === 200 && /<title>/i.test(interna.corpo),
+      'toda página pública é pública nos DOIS endereços (senão o cliente cai no muro de senha)':
+        (htmlsPublicos.length >= 7 && semGemeo.length === 0) || `sem o par sem .html: ${semGemeo.join(', ') || 'lista vazia - o trecho não foi avaliado'}`,
+      'e o atalho não abriu tela interna: /loja-status NÃO virou página pública':
+        !publicas.has('/loja-status') && !publicas.has('/loja-status.html'),
+      'o static serve sem extensão de propósito (é o que faz /atendimento existir)':
+        /express\.static\(path\.join\(__dirname, 'public'\), \{ extensions: \['html'\] \}\)/.test(fonte),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => v !== true).map(([n, v]) => (typeof v === 'string' ? `${n} (${v})` : n));
+    okSemHtml = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (sem=${semHtml.status} com=${comHtml.status} publicas=${publicas.size})`);
+  } catch (e) { okSemHtml = false; console.log('  erro: ' + e.message); }
+  if (!okSemHtml) ruins += 1;
+  console.log(`${okSemHtml ? '✓' : '✗'} Link sem ".html": /atendimento abre igual, o endereço antigo continua, e o cliente não cai no muro de senha`);
+
+  // ------------------------------------------------------------------
   // APOSENTAR O ENDERECO ANTIGO (pedido 12/09/2026: "preciso extinguir esse
   // adyen-monitor, aposentar de vez"). O CLAUDE.md §4 diz que o dominio velho
   // NUNCA pode ser desligado - e o motivo e concreto: o agente so descobre que
