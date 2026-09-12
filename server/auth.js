@@ -5,6 +5,7 @@
 // email+senha (bcrypt) com token JWT - isso fica por DENTRO do Basic Auth
 // que ja protege o site inteiro (veja index.js), como uma segunda camada
 // que sabe "quem" esta acessando, nao so "que tem a senha do site".
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('./firestore');
@@ -245,11 +246,67 @@ async function usuarioOpcionalDoToken(token) {
 // exige um token valido (via header Authorization: Bearer, ou ?token= na
 // query - usado pelo EventSource do SSE, que nao manda headers custom) e
 // carrega o usuario/permissoes atual em req.user
+// ---- TOKEN DE API DO MASTER (pedido de 12/09/2026) ----
+// Um token pessoal pro PROPRIO Master chamar a API de fora do navegador (o
+// caso dele: um chat no Cowork). Ele NAO e um caminho de permissao paralelo:
+// resolve pro usuario Master de verdade e segue pelo MESMO aplicarUsuarioNoReq
+// da sessao. Consequencia pratica: nenhuma checagem de rota muda, e tudo que
+// ele fizer ja fica auditado no nome do Master, como se ele tivesse clicado.
+//
+// Por que nao o desenho da especificacao (um BOT_ACAO_TOKEN com regras
+// proprias por rota): dois sistemas de permissao lado a lado divergem, e o que
+// diverge vira brecha. Aqui so existe UM.
+//
+// Trava de forca: token curto e recusado NA LARGADA (e nao no meio de uma
+// requisicao), pra ninguem ligar isso com "123" e achar que esta protegido.
+const MASTER_API_TOKEN_MIN = 32;
+function tokenDeApiConfigurado() {
+  const t = String(process.env.MASTER_API_TOKEN || '');
+  return t.length >= MASTER_API_TOKEN_MIN ? t : null;
+}
+if (String(process.env.MASTER_API_TOKEN || '').trim() && !tokenDeApiConfigurado()) {
+  console.warn(`AVISO: MASTER_API_TOKEN tem menos de ${MASTER_API_TOKEN_MIN} caracteres - token de API DESLIGADO. Gere um forte (openssl rand -hex 32).`);
+}
+// comparacao em tempo constante: comparar string com === vaza, pelo tempo,
+// quantos caracteres do inicio bateram
+function ehTokenDeApiDoMaster(token) {
+  const esperado = tokenDeApiConfigurado();
+  if (!esperado || !token) return false;
+  const a = Buffer.from(String(token));
+  const b = Buffer.from(esperado);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+async function masterDoToken() {
+  const email = (process.env.MASTER_EMAIL || '').trim().toLowerCase();
+  const snap = email
+    ? await usersRef.where('email', '==', email).limit(1).get()
+    : await usersRef.where('role', '==', 'master').limit(1).get();
+  if (snap.empty) return null;
+  const doc = snap.docs[0];
+  return { id: doc.id, ...doc.data() };
+}
+
 function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
   const [scheme, headerToken] = header.split(' ');
   const token = (scheme === 'Bearer' && headerToken) || req.query.token;
   if (!token) return res.status(401).json({ error: 'Autenticação necessária.' });
+
+  // token de API: vira o proprio Master, sem sessao (nao ha navegador aqui)
+  if (ehTokenDeApiDoMaster(token)) {
+    masterDoToken()
+      .then(async (user) => {
+        if (!user || user.active === false) return res.status(401).json({ error: 'Acesso Master indisponível.' });
+        await aplicarUsuarioNoReq(req, user, null);
+        req.viaApiToken = true;
+        // deixa rastro de TODA chamada feita pelo token - o token e uma chave
+        // de casa: se vazar, o log e como se percebe
+        console.log(`[api-token] ${req.method} ${req.originalUrl || req.url}`);
+        next();
+      })
+      .catch(next);
+    return;
+  }
 
   let payload;
   try {
@@ -268,8 +325,19 @@ function requireAuth(req, res, next) {
         return res.status(401).json({ error: mensagemHorarioPermitido(user.horarioPermitido) });
       }
       if (payload.sid) sessions.tocar(payload.sid);
+      await aplicarUsuarioNoReq(req, user, payload.sid || null);
+      next();
+    })
+    .catch(next);
+}
+
+// Preenche o req a partir do usuario. Uma funcao so, usada pela sessao do
+// navegador E pelo token de API: se amanha nascer uma permissao nova, ela
+// vale nos dois caminhos no mesmo commit - dois trechos parecidos so esperam
+// a hora de divergir, e divergencia aqui e furo de permissao.
+async function aplicarUsuarioNoReq(req, user, sid) {
       req.user = user;
-      req.sid = payload.sid || null;
+      req.sid = sid;
       req.isMaster = user.role === 'master';
       req.isAdmin = !!user.isAdmin;
       // QA Master: mesmo req.isMaster=true de um Master de verdade (100% de
@@ -310,9 +378,6 @@ function requireAuth(req, res, next) {
           unidades: (req.permissions.unidades || []).filter((u) => permitidas.has(u)),
         };
       }
-      next();
-    })
-    .catch(next);
 }
 
 // so deixa passar quem e Master - usado nas rotas de gestao de usuarios
@@ -437,6 +502,8 @@ module.exports = {
   usuarioOpcionalDoToken,
   requireAuth,
   requireMaster,
+  ehTokenDeApiDoMaster,
+  tokenDeApiConfigurado,
   requireMasterOrAdmin,
   requireMasterOuCatalogoEstoque,
   hasSection,
