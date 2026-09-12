@@ -1174,10 +1174,18 @@ function leituraEncerrada(){
   const essenciais = camposEssenciais();
   return essenciais.length > 0 && essenciaisQueFaltam().length === 0;
 }
-function limparSelecaoRelatorio(){
+// Descarta as fotos escolhidas (estado + tela), SEM mexer na mensagem da
+// leitura. É o que a leitura bem-sucedida chama: a foto já cumpriu o papel
+// dela, então some sozinha - mas o "✔ Lido às..." com o resumo do que foi
+// preenchido tem que continuar na tela, senão a pessoa não sabe o que conferir.
+function descartarFotosRelatorio(){
   VERSAO_PREPARO_RELATORIO += 1;
   ARQUIVOS_RELATORIO = [];
   pintarSelecaoRelatorio();
+}
+// o "limpar" clicado pela pessoa: descarta E esconde a mensagem (recomeço)
+function limparSelecaoRelatorio(){
+  descartarFotosRelatorio();
   esconderMsgLerCanais();
 }
 
@@ -1432,6 +1440,9 @@ async function realizarLeituraRelatorio(){
       partes.push(`<span style="color:var(--warn);">A data do relatório (${escapeHtml(data.data)}) é diferente da data escolhida acima — confira se é o relatório do dia certo.</span>`);
     }
     msg.innerHTML = partes.join('<br>');
+    // leu: as fotos somem sozinhas (pedido do Master, 12/09). Só no SUCESSO -
+    // no catch a seleção fica, pra tentar de novo sem reescolher as fotos.
+    descartarFotosRelatorio();
   }catch(err){
     msg.innerHTML = `<span style="color:var(--bad);">${escapeHtml(err.message)}</span>`;
   }finally{

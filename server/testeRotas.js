@@ -3594,6 +3594,9 @@ setTimeout(async () => {
     const blocoKpi = html.slice(iKpi, iKpi + 2000);
     const iLeitura = html.indexOf('async function realizarLeituraRelatorio(');
     const blocoLeitura = html.slice(iLeitura, iLeitura + 4000);
+    // a função inteira (até a próxima function): o fim dela - sucesso, catch,
+    // finally - fica além dos 4000 chars da janela acima
+    const blocoLeituraInteiro = html.slice(iLeitura, html.indexOf('function lerCanaisExtras(', iLeitura));
     const conferencias = {
       // [^;]* no meio e no fim: outras condicoes podem entrar (a liberacao de
       // digitacao manual do grupo, o KPI de origem automatica...) - o que este
@@ -3613,6 +3616,18 @@ setTimeout(async () => {
         (html.match(/const aviso = algumTravado\r?\n/g) || []).length === 2,
       'IS_MASTER é definido no boot, antes de qualquer campo ser montado':
         html.indexOf('IS_MASTER = isMaster;') > 0 && html.indexOf('IS_MASTER = isMaster;') < html.indexOf('boot();'),
+      // AS FOTOS SOMEM SOZINHAS DEPOIS DA LEITURA (pedido do Master, 12/09):
+      // no SUCESSO a seleção é descartada, mas a mensagem "✔ Lido às..." com
+      // o resumo fica na tela; no ERRO a seleção continua (tenta de novo sem
+      // reescolher). O "limpar" clicado continua escondendo a mensagem.
+      'leitura OK: as fotos somem sozinhas, logo depois da mensagem de resultado':
+        /msg\.innerHTML = partes\.join\('<br>'\);[\s\S]{0,260}?descartarFotosRelatorio\(\);[\s\S]{0,40}?\}catch\(err\)\{/.test(blocoLeituraInteiro),
+      'leitura com ERRO não descarta as fotos (dá pra tentar de novo)':
+        !/\}catch\(err\)\{[\s\S]{0,200}?(descartarFotosRelatorio|limparSelecaoRelatorio)\(\)/.test(blocoLeituraInteiro),
+      'descartar zera a seleção SEM esconder a mensagem da leitura':
+        /function descartarFotosRelatorio\(\)\{\s*VERSAO_PREPARO_RELATORIO \+= 1;\s*ARQUIVOS_RELATORIO = \[\];\s*pintarSelecaoRelatorio\(\);\s*\}/.test(html),
+      'o "limpar" da pessoa continua escondendo a mensagem (recomeço)':
+        /function limparSelecaoRelatorio\(\)\{\s*descartarFotosRelatorio\(\);\s*esconderMsgLerCanais\(\);\s*\}/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okMasterDigitaSemLeitura = !falhas.length;
@@ -15762,7 +15777,12 @@ setTimeout(async () => {
       'mesmo nome com tamanho diferente é outra foto': mesmoNomeOutroTamanho.length === 2,
       'o teto corta o excedente em vez de estourar a leitura': estoura.length === 5,
       'lista vazia não quebra': Array.isArray(semNada) && semNada.length === 0,
-      '"limpar" invalida o preparo em curso (não repõe o que foi tirado)': /function limparSelecaoRelatorio\(\)\{\n  VERSAO_PREPARO_RELATORIO \+= 1;/.test(html),
+      // o "limpar" passou a delegar pro descartarFotosRelatorio (que a leitura
+      // bem-sucedida também chama) - o que se protege segue igual: limpar
+      // invalida o preparo em curso
+      '"limpar" invalida o preparo em curso (não repõe o que foi tirado)':
+        /function limparSelecaoRelatorio\(\)\{\s*descartarFotosRelatorio\(\);/.test(html)
+        && /function descartarFotosRelatorio\(\)\{\s*VERSAO_PREPARO_RELATORIO \+= 1;/.test(html),
       'o erro de compressão também soma, em vez de trocar a seleção': /ARQUIVOS_RELATORIO = juntarFotosRelatorio\(ARQUIVOS_RELATORIO, arquivos, MAX_FOTOS_RELATORIO\)/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
