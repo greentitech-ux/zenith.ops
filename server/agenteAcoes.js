@@ -28,6 +28,10 @@ const db = require('./firestore');
 const { createCache } = require('./liveCache');
 const users = require('./users');
 const lojaStatus = require('./lojaStatus');
+const auth = require('./auth');
+const tarefas = require('./tarefas');
+const suporteChat = require('./suporteChat');
+const prioridades = require('./prioridades');
 
 const COLLECTION = db.collection('agenteAcoes');
 const CONTEXTO_REF = db.collection('agenteContexto').doc('principal');
@@ -146,7 +150,31 @@ const MODELOS_COMANDO = [
 ];
 // lista fechada de propósito - o Master escolhe num <select>, nunca digita
 // código; adicionar uma nova ação de sistema exige alterar este arquivo
-const EXECUTORES_SISTEMA_VALIDOS = ['criar_usuario_zenith'];
+const EXECUTORES_SISTEMA_VALIDOS = [
+  'criar_usuario_zenith',
+  // "braços" do Master (12/09/2026): o que ele faria na mão, o Beniboy faz
+  // por baixo em poucas frases - propõe, o Master aprova na fila, executa.
+  // Cada um chama a MESMA função que a tela chama; nada de rota nova.
+  'criar_tarefa', 'marcar_reuniao', 'concluir_tarefa', 'cancelar_tarefa',
+  'desbloquear_usuario', 'resetar_senha_usuario', 'criar_usuario_copiando',
+  'responder_chat', 'noc_comando',
+];
+
+// O que o Beniboy precisa coletar antes de chamar cada ação de sistema -
+// vai pro system prompt (ver montarBlocoAgente em suporteBot.js). Sem isso
+// ele chutava o nome do campo e a ação falhava só na hora de executar.
+const PARAMETROS_EXECUTOR = {
+  criar_usuario_zenith: 'email, username, permissions (objeto de permissões)',
+  criar_tarefa: 'titulo (obrigatório), descricao, unidade (código) e unidadeNome, prioridade (baixa|media|alta|critica), dataEntrega (AAAA-MM-DD), responsavelEmail (opcional - padrão: o próprio Master)',
+  marcar_reuniao: 'titulo (assunto), dataEntrega (dia, AAAA-MM-DD), horaInicio (HH:MM), duracaoMin (15|30|60|90|120), linkReuniao (opcional - sem ele o link é gerado), unidade/unidadeNome (opcional)',
+  concluir_tarefa: 'tarefaId (o id da tarefa - se não souber, peça o título e confirme qual é), observacao (opcional)',
+  cancelar_tarefa: 'tarefaId, motivo',
+  desbloquear_usuario: 'usuario (e-mail ou username do acesso bloqueado), pedirTrocaSenha (true|false)',
+  resetar_senha_usuario: 'usuario (e-mail ou username) - a senha nova é gerada aqui e aparece no resultado pro Master repassar',
+  criar_usuario_copiando: 'modelo (e-mail ou username do usuário de referência, não pode ser Master), email e username do acesso novo - a senha é gerada aqui',
+  responder_chat: 'chatId (id da conversa do suporte), texto (a mensagem, que sai como Suporte)',
+  noc_comando: 'tarefa (reiniciar|abortar|anydesk|zebra|rede) e alvos (lista de {codigo, posto} dos computadores tipo interno)',
+};
 
 async function listUncached() {
   const snap = await COLLECTION.orderBy('nome').get();
@@ -262,8 +290,155 @@ async function criarUsuarioZenith(params) {
   return `Usuário criado: ${criado.email} (username: ${criado.username || '-'}). Senha temporária: ${senha} (precisa trocar no primeiro login) - repasse pra pessoa por fora do app.`;
 }
 
+// ---- quem está agindo ----
+// Toda ação de sistema roda em nome do MASTER que pediu no chat - nunca "do
+// bot". O `porId` é gravado pelo servidor (ver executar_acao_agente em
+// suporteBot.js, que sobrescreve o que o modelo mandar com chat.logado.id),
+// então o modelo não consegue apontar outra pessoa. A pessoa é relida aqui
+// na hora de executar (pode ter passado tempo entre pedir e aprovar) e tem
+// que continuar sendo Master e ativa. O `acesso` que sai daqui é o MESMO
+// objeto que acessoDasTarefas(req) monta pras rotas - uma regra só.
+async function resolverAtor(params) {
+  const id = String((params || {}).porId || '').trim();
+  if (!id) throw new Error('Ação sem dono: faltou quem pediu (porId).');
+  const usuario = await auth.getUserById(id);
+  if (!usuario || usuario.active === false) throw new Error('Quem pediu a ação não está mais ativo.');
+  if (usuario.role !== 'master') throw new Error('Só um Master pode executar ações de sistema pelo agente.');
+  return { usuario: { id, ...usuario }, acesso: { usuario: { id, ...usuario }, isMaster: true, isAdmin: false, unidades: [] } };
+}
+
+async function usuarioPorIdentificador(valor, rotulo) {
+  const achado = await users.findByIdentifier(valor);
+  if (!achado) throw new Error(`${rotulo} não encontrado: ${valor}`);
+  return achado;
+}
+
+const soData = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
+
+async function criarTarefa(params) {
+  const p = params || {};
+  const { usuario } = await resolverAtor(p);
+  const responsavel = p.responsavelEmail ? await usuarioPorIdentificador(p.responsavelEmail, 'Responsável') : usuario;
+  const unidade = String(p.unidade || '').trim() || null;
+  const criada = await tarefas.criar({
+    titulo: p.titulo, descricao: p.descricao,
+    dataInicio: soData(p.dataInicio), dataEntrega: soData(p.dataEntrega),
+    unidade, unidadeNome: unidade ? (String(p.unidadeNome || '').trim() || unidade) : null,
+    usuario, responsavel, prioridade: prioridades.sanitizarPrioridade(p.prioridade),
+    origem: 'agente',
+  });
+  return `Tarefa criada: #${criada.numeroTicket} "${criada.titulo}" (${criada.unidadeNome || 'pessoal'}, prioridade ${criada.prioridade}, responsável ${responsavel.username || responsavel.email}).`;
+}
+
+async function marcarReuniao(params) {
+  const p = params || {};
+  const { usuario } = await resolverAtor(p);
+  const dia = soData(p.dataEntrega);
+  if (!dia) throw new Error('Diga o dia da reunião (AAAA-MM-DD).');
+  const unidade = String(p.unidade || '').trim() || null;
+  const colado = String(p.linkReuniao || '').trim();
+  const criada = await tarefas.criar({
+    titulo: p.titulo, descricao: p.descricao, dataInicio: dia, dataEntrega: dia,
+    unidade, unidadeNome: unidade ? (String(p.unidadeNome || '').trim() || unidade) : null,
+    usuario, responsavel: usuario, prioridade: prioridades.sanitizarPrioridade(p.prioridade),
+    ehReuniao: true, horaInicio: p.horaInicio, duracaoMin: p.duracaoMin,
+    linkOrigem: colado ? 'colado' : 'gerado', linkReuniao: colado || null,
+    origem: 'agente',
+  });
+  return `Reunião marcada: "${criada.titulo}" em ${dia} às ${criada.horaInicio} (${criada.duracaoMin} min). Link: ${criada.linkReuniao || '(gerado na tarefa)'}.`;
+}
+
+async function concluirTarefa(params) {
+  const p = params || {};
+  const { acesso } = await resolverAtor(p);
+  const id = String(p.tarefaId || '').trim();
+  if (!id) throw new Error('Diga qual tarefa concluir (tarefaId).');
+  const feita = await tarefas.concluir(id, { ...acesso, observacao: p.observacao });
+  return `Tarefa #${feita.numeroTicket} "${feita.titulo}" concluída.`;
+}
+
+async function cancelarTarefa(params) {
+  const p = params || {};
+  const { acesso } = await resolverAtor(p);
+  const id = String(p.tarefaId || '').trim();
+  if (!id) throw new Error('Diga qual tarefa cancelar (tarefaId).');
+  const cancelada = await tarefas.cancelar(id, acesso, p.motivo);
+  return `Tarefa #${cancelada.numeroTicket} "${cancelada.titulo}" cancelada.`;
+}
+
+async function desbloquearUsuario(params) {
+  const p = params || {};
+  await resolverAtor(p);
+  const alvo = await usuarioPorIdentificador(p.usuario, 'Acesso');
+  await users.desbloquear(alvo.id, { pedirTrocaSenha: p.pedirTrocaSenha === true, viaBot: true });
+  return `Acesso ${alvo.email} desbloqueado${p.pedirTrocaSenha === true ? ' (vai trocar a senha no próximo login)' : ''}.`;
+}
+
+async function resetarSenhaUsuario(params) {
+  const p = params || {};
+  await resolverAtor(p);
+  const alvo = await usuarioPorIdentificador(p.usuario, 'Acesso');
+  if (alvo.role === 'master') throw new Error('Senha de Master não se reseta pelo agente.');
+  const senha = gerarSenhaAleatoria();
+  await users.resetPassword(alvo.id, senha);
+  return `Senha de ${alvo.email} resetada. Senha temporária: ${senha} (troca no primeiro login) - repasse pra pessoa por fora do app.`;
+}
+
+async function criarUsuarioCopiando(params) {
+  const p = params || {};
+  await resolverAtor(p);
+  const modelo = await usuarioPorIdentificador(p.modelo, 'Usuário-modelo');
+  const senha = gerarSenhaAleatoria();
+  const r = await users.criarCopiandoDe({ modeloId: modelo.id, email: p.email, username: p.username, senha });
+  return `Usuário criado: ${r.usuario.email} (username: ${r.usuario.username || '-'}), copiando as permissões de ${r.copiadoDe.username || r.copiadoDe.email}. Senha temporária: ${senha} (troca no primeiro login) - repasse por fora do app.`;
+}
+
+async function responderChat(params) {
+  const p = params || {};
+  const { usuario } = await resolverAtor(p);
+  const id = String(p.chatId || '').trim();
+  if (!id) throw new Error('Diga qual conversa responder (chatId).');
+  await suporteChat.adicionarMensagem(id, { de: 'suporte', texto: p.texto, autorEmail: usuario.email });
+  return `Mensagem enviada como Suporte na conversa ${id}.`;
+}
+
+// mesma lista fechada da rota /api/loja-status/manutencao/reiniciar: o
+// comando em si nunca vem de fora, só o NOME da tarefa
+const TAREFAS_NOC = {
+  reiniciar: { verbo: 'Reiniciar', comando: lojaStatus.COMANDO_REINICIAR, origem: 'manutencao-reiniciar' },
+  abortar: { verbo: 'Abortar o reinício de', comando: lojaStatus.COMANDO_ABORTAR_REINICIO, origem: 'manutencao-abortar' },
+  anydesk: { verbo: 'Reiniciar o AnyDesk de', comando: lojaStatus.COMANDO_REINICIAR_ANYDESK, origem: 'manutencao-anydesk' },
+  rede: { verbo: 'Destravar a rede de', comando: lojaStatus.COMANDO_REDE_DESTRAVAR, origem: 'manutencao-rede' },
+  zebra: { verbo: 'Resetar as Zebras de', comando: async (doc) => lojaStatus.comandoResetZebra(await lojaStatus.impressorasPraSondar(doc.codigo)), origem: 'manutencao-zebra' },
+};
+
+async function nocComando(params) {
+  const p = params || {};
+  await resolverAtor(p);
+  const t = TAREFAS_NOC[String(p.tarefa || '')];
+  if (!t) throw new Error('Tarefa do NOC inválida - use reiniciar, abortar, anydesk, zebra ou rede.');
+  const alvos = Array.isArray(p.alvos) ? p.alvos.filter((a) => a && a.codigo && a.posto) : [];
+  if (!alvos.length) throw new Error('Diga quais computadores (lista de {codigo, posto}).');
+  if (alvos.length > 200) throw new Error('Muitos alvos de uma vez - divida em lotes.');
+  const resultados = await lojaStatus.enfileirarComandoEmAlvos(alvos, t.comando, { origem: t.origem });
+  const ok = resultados.filter((r) => r.ok).length;
+  // quem NÃO entrou diz por quê (sem agentToken, já tem comando pendente...)
+  // - senão "0 de 1" vira adivinhação
+  const falhas = resultados.filter((r) => !r.ok && r.motivo).map((r) => `${r.codigo}/${r.posto}: ${r.motivo}`);
+  return `${t.verbo} ${alvos.length} computador(es): ${ok} enfileirado(s) de ${resultados.length} encontrado(s) - executa no próximo contato do NOCZenith.${falhas.length ? ' Não entrou: ' + falhas.join(' · ') : ''}`;
+}
+
 const EXECUTORES_SISTEMA = {
   criar_usuario_zenith: criarUsuarioZenith,
+  criar_tarefa: criarTarefa,
+  marcar_reuniao: marcarReuniao,
+  concluir_tarefa: concluirTarefa,
+  cancelar_tarefa: cancelarTarefa,
+  desbloquear_usuario: desbloquearUsuario,
+  resetar_senha_usuario: resetarSenhaUsuario,
+  criar_usuario_copiando: criarUsuarioCopiando,
+  responder_chat: responderChat,
+  noc_comando: nocComando,
 };
 
 // dispatcher genérico - chamado tanto pela aprovação (EXECUTORES_QA em
@@ -287,7 +462,7 @@ async function executarAcaoDoAgente(acaoId, parametros) {
 }
 
 module.exports = {
-  TIPOS_ACAO, EXECUTORES_SISTEMA_VALIDOS, MODELOS_COMANDO, validarDados,
+  TIPOS_ACAO, EXECUTORES_SISTEMA_VALIDOS, PARAMETROS_EXECUTOR, MODELOS_COMANDO, validarDados,
   listar, listarAtivas, obter, criar, atualizar, remover,
   obterContexto, salvarContexto, executarAcaoDoAgente,
 };
