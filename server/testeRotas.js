@@ -15374,6 +15374,19 @@ setTimeout(async () => {
       'Meu Dia: ação recusada recarrega do servidor e reabre o card FRESCO (ou fecha se sumiu)':
         /async function reabrirFresco\(id\)\{await load\(\);const ainda=L\.find\(x=>x\.id===id\);if\(ainda\)openT\(id\);else fechar\(\)\}/.test(htmlT)
         && (htmlT.match(/catch\(x\)\{alert\(x\.message\);if\(O\)await reabrirFresco\(O\.id\)\}/g) || []).length >= 2,
+      // OS 3 BOTOES DO TOPO NA MESMA LINHA (pedido do Master, 12/09/2026):
+      // no celular o "Criar reuniao" caia pra segunda linha porque o span era
+      // flex-wrap:wrap. Agora nao quebra - encolhe junto nos dois breakpoints.
+      // Medido no Chromium com o CSS real: 360px -> 87+89+102 = 287/360 numa
+      // linha; com o wrap antigo, 334/400 em DUAS linhas.
+      'Meu Dia: Selecionar / Criar tarefa / Criar reunião ficam na MESMA linha':
+        /<span class="top-acoes"><button id="SELMODE"/.test(htmlT)
+        && !/<span style="display:flex;gap:8px;flex-wrap:wrap"><button id="SELMODE"/.test(htmlT)
+        && /\.top-acoes\{display:flex;gap:8px;flex-wrap:nowrap;align-items:center\}/.test(htmlT)
+        && /\.top-acoes \.btn\{white-space:nowrap;flex:0 0 auto\}/.test(htmlT),
+      'Meu Dia: no celular os 3 botões ENCOLHEM em vez de quebrar (dois breakpoints)':
+        /@media\(max-width:700px\)\{\.top-acoes\{gap:6px\}\.top-acoes \.btn\{font-size:12\.5px;padding:8px 10px\}/.test(htmlT)
+        && /@media\(max-width:390px\)\{\.top-acoes\{gap:5px\}\.top-acoes \.btn\{font-size:11\.5px;padding:7px 8px\}/.test(htmlT),
       'o X do modal é um botão redondo no canto (como nas outras telas)':
         /\.close\{[^}]*border-radius:50%/.test(htmlT),
       'o topo sticky ficou leve (sem a barra pesada que sobrepunha o conteúdo)':
