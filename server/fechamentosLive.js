@@ -596,92 +596,6 @@ async function backfillQuebraCaixa(dataInicio, dataFim) {
   return resultado;
 }
 
-// Migração pontual e auditável do KPI criado com erro de digitação. Não roda
-// no boot e não tenta adivinhar nomes semelhantes: a tela do Master mostra a
-// prévia e pede confirmação antes de qualquer documento mudar.
-const MIGRACAO_CALABRESA = Object.freeze({ origem: 'calabress', destino: 'calabresa' });
-function fechamentosComCalabress(todos) {
-  return (todos || []).filter((f) => Object.prototype.hasOwnProperty.call(f.kpisExtras || {}, MIGRACAO_CALABRESA.origem));
-}
-function resumoMigracaoCalabresa(todos) {
-  const afetados = fechamentosComCalabress(todos);
-  const soma = (campo) => afetados.reduce((total, f) => total + num((f.kpisExtras || {})[campo]), 0);
-  const comDestino = afetados.filter((f) => Object.prototype.hasOwnProperty.call(f.kpisExtras || {}, MIGRACAO_CALABRESA.destino));
-  return {
-    origem: MIGRACAO_CALABRESA.origem,
-    destino: MIGRACAO_CALABRESA.destino,
-    fechamentos: afetados.length,
-    valorOrigem: soma(MIGRACAO_CALABRESA.origem),
-    valorDestinoJaExistente: soma(MIGRACAO_CALABRESA.destino),
-    valorDestinoAposMigracao: soma(MIGRACAO_CALABRESA.origem) + soma(MIGRACAO_CALABRESA.destino),
-    comOsDoisCampos: comDestino.length,
-    exemplos: afetados.slice(0, 12).map((f) => ({
-      id: f.id, data: f.data, unidade: f.unidadeNome || f.unidade,
-      origem: num((f.kpisExtras || {})[MIGRACAO_CALABRESA.origem]),
-      destino: num((f.kpisExtras || {})[MIGRACAO_CALABRESA.destino]),
-    })),
-  };
-}
-async function gruposDaMigracaoCalabresa() {
-  const lista = await grupos.list();
-  const comOrigem = (lista || []).filter((g) => (g.kpisExtras || []).some((k) => k.campo === MIGRACAO_CALABRESA.origem));
-  return {
-    grupos: comOrigem.map((g) => ({ id: g.id, nome: g.nome, temDestino: (g.kpisExtras || []).some((k) => k.campo === MIGRACAO_CALABRESA.destino) })),
-    semDestino: comOrigem.filter((g) => !(g.kpisExtras || []).some((k) => k.campo === MIGRACAO_CALABRESA.destino)),
-  };
-}
-async function previaMigracaoCalabresa() {
-  const [todos, gruposAfetados] = await Promise.all([listAllUncached(), gruposDaMigracaoCalabresa()]);
-  return { ...resumoMigracaoCalabresa(todos), grupos: gruposAfetados.grupos, gruposSemDestino: gruposAfetados.semDestino.map((g) => g.nome) };
-}
-async function migrarCalabressParaCalabresa(editadoPorEmail) {
-  const todos = await listAllUncached();
-  const afetados = fechamentosComCalabress(todos);
-  const gruposAfetados = await gruposDaMigracaoCalabresa();
-  if (gruposAfetados.semDestino.length) {
-    throw new Error(`O grupo ${gruposAfetados.semDestino.map((g) => g.nome).join(', ')} não tem o KPI Calabresa de destino. Corrija o cadastro antes de migrar.`);
-  }
-  const resultado = { ...resumoMigracaoCalabresa(todos), migrados: 0, gruposCorrigidos: [], erros: [] };
-  for (const atual of afetados) {
-    try {
-      const antes = { ...(atual.kpisExtras || {}) };
-      const origem = num(antes[MIGRACAO_CALABRESA.origem]);
-      const destinoAnterior = num(antes[MIGRACAO_CALABRESA.destino]);
-      const depois = { ...antes, [MIGRACAO_CALABRESA.destino]: destinoAnterior + origem };
-      delete depois[MIGRACAO_CALABRESA.origem];
-      const pendentes = Array.isArray(atual.kpisPendentes)
-        ? atual.kpisPendentes.filter((p) => p && p.campo !== MIGRACAO_CALABRESA.origem && p.campo !== MIGRACAO_CALABRESA.destino)
-        : atual.kpisPendentes;
-      const historico = [...(atual.historico || []), {
-        em: new Date().toISOString(), por: editadoPorEmail,
-        motivo: 'Migração de KPI: Calabress → Calabresa',
-        valoresAnteriores: { kpisExtras: { [MIGRACAO_CALABRESA.origem]: origem, [MIGRACAO_CALABRESA.destino]: destinoAnterior } },
-        valoresNovos: { kpisExtras: { [MIGRACAO_CALABRESA.destino]: destinoAnterior + origem } },
-      }];
-      const patch = { kpisExtras: depois, historico, atualizadoEm: new Date().toISOString() };
-      if (Array.isArray(pendentes)) patch.kpisPendentes = pendentes;
-      await COLLECTION.doc(atual.id).update(patch);
-      resultado.migrados += 1;
-    } catch (err) {
-      resultado.erros.push({ fechamentoId: atual.id, unidade: atual.unidadeNome || atual.unidade, data: atual.data, erro: err.message });
-    }
-  }
-  // Depois de mover o histórico, remove o KPI incorreto do formulário. Sem
-  // isso a loja continuaria vendo duas linhas e poderia recriar o erro amanhã.
-  for (const grupo of gruposAfetados.grupos) {
-    try {
-      const atual = (await grupos.list()).find((g) => g.id === grupo.id);
-      if (!atual) throw new Error('Grupo não encontrado durante a atualização.');
-      await grupos.update(grupo.id, { kpisExtras: (atual.kpisExtras || []).filter((k) => k.campo !== MIGRACAO_CALABRESA.origem) });
-      resultado.gruposCorrigidos.push(grupo.nome);
-    } catch (err) {
-      resultado.erros.push({ grupo: grupo.nome, erro: `Histórico migrado, mas não consegui remover o KPI antigo do grupo: ${err.message}` });
-    }
-  }
-  fechamentosCache.invalidar();
-  return resultado;
-}
-
 async function listAllUncached() {
   const snap = await COLLECTION.orderBy('data', 'desc').get();
   return snap.docs.map((d) => d.data());
@@ -1391,6 +1305,6 @@ module.exports = {
   CAMPOS_NUMERICOS, create, listAll, listByUnidades, getOne, solicitarEdicao, listarEdicoes, getEdicao,
   decidirEdicao, editarDireto, moverFechamento, removerEdicao, remove, invalidarCache, marcarNotificacaoVistaEdicao, redirecionarEdicao,
   suspenderInvalidacao, retomarInvalidacao,
-  backfillQuebraCaixa, previaMigracaoCalabresa, migrarCalabressParaCalabresa,
+  backfillQuebraCaixa,
   ajustePosDoDiaAnterior,
 };
