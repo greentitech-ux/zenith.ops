@@ -16971,7 +16971,7 @@ setTimeout(async () => {
       // o filtro que apaga a linha, sem avisar ninguém
       'o Monitor descarta toda transação de unidade restrita à área':
         /const restritos = new Set\(await unidadesExtras\.codigosRestritosDe\('monitor'\)\);/.test(idx)
-        && /return lista\.filter\(\(item\) => !restritos\.has\(item\.unidade\)\);/.test(idx),
+        && /const visiveis = lista\.filter\(\(item\) => !restritos\.has\(item\.unidade\)\);/.test(idx),
       'e isso vale para transações, pedidos e chargebacks':
         (idx.match(/filtrarPorAreaMonitor\(auth\.filterByUnidade\(req,/g) || []).length >= 3,
       // áreas vazias = aparece em todas; marcar UMA tira todas as outras
@@ -16997,6 +16997,20 @@ setTimeout(async () => {
         && /listaVaziaOuValida\(tiposSolicitacao, TIPOS_SOLICITACAO_VALIDOS\)/.test(un.upsertPerfil.toString()),
       'a ação de agente passa pelo mesmo upsert (mesma proteção)':
         /'unidadesExtras\.perfil': \(p\) => invalidandoUnidadesMapa\(unidadesExtras\.upsertPerfil\(/.test(idx),
+
+      // ---- o que fazia o pedido APARECER e depois SUMIR ----
+      // A leitura escondia a unidade restrita; o push ao vivo não. O pedido
+      // entrava na tela pelo SSE e desaparecia no refresh - a tela mostrava e
+      // depois desmentia. Os dois caminhos têm de obedecer à MESMA regra.
+      'o push ao vivo obedece ao mesmo filtro de área que a leitura':
+        /if \(section === 'monitor' && data && data\.unidade && RESTRITOS_MONITOR\.has\(data\.unidade\)\) return;/.test(idx),
+      'o espelho usado pelo push é síncrono e se atualiza a cada leitura':
+        /let RESTRITOS_MONITOR = new Set\(\);/.test(idx)
+        && /RESTRITOS_MONITOR = restritos;/.test(idx),
+      // some sem log nenhum foi o que transformou isto numa investigação
+      'esconder registro deixa rastro no log, com a unidade e quantos':
+        /Monitor: \$\{escondidas\} registro\(s\) escondido\(s\) pelo filtro de area/.test(idx)
+        && /ULTIMO_AVISO_AREA/.test(idx),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n2]) => n2);
     okSumicoArcfood = !falhas.length;
