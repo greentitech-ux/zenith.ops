@@ -129,6 +129,12 @@ próprias por rota). Ele resolve pro **usuário Master de verdade** e segue pelo
 | Sem sessão (`sid` nulo) | Não vira sessão de navegador nem aparece em "sessões ativas" |
 | Log de toda chamada | `[api-token] MÉTODO /rota` — o valor do token **nunca** vai pro log |
 
+**O manual do Beni está em `docs/BENI_API.md`** — o que ele pode, o que o
+servidor fecha na cara dele (as rotas que pedem a senha do Master), o que ele
+não deve fazer mesmo podendo, e o custo de leitura. É esse arquivo que o
+agente lê; ele é testado contra o `index.js` pela suíte, pra não citar rota
+que não existe nem prometer trava que o código não tem.
+
 **O risco, dito com todas as letras:** quem tiver esse valor **é** o Master —
 pode aprovar, editar e excluir tudo. Trate como a sua senha. Não cole em
 mensagem, print ou issue. Se desconfiar de vazamento, troque a variável no
