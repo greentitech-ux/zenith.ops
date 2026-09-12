@@ -4450,6 +4450,7 @@ setTimeout(async () => {
 
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'beniboy.html'), 'utf8');
     const widgetSrc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'suporte-chat.js'), 'utf8');
+    const htmlCH = require('fs').readFileSync(__dirname + '/public/central-historico.html', 'utf8');
     const alarmeSync = require('fs').readFileSync(require('path').join(__dirname, 'public', 'alarme-sync.js'), 'utf8');
     const alertaHtml = require('fs').readFileSync(require('path').join(__dirname, 'public', 'alerta-beniboy.html'), 'utf8');
     const fonteIdx = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
@@ -4490,6 +4491,15 @@ setTimeout(async () => {
         && /class="msg-item \$\{m\.eu\?'msg-eu':'msg-vis'\}"/.test(html)
         && /\.msg-item\.msg-eu\{align-self:flex-end;background:var\(--panel\);border-right:3px solid var\(--accent\)/.test(html)
         && /\.msg-item\.msg-vis\{align-self:flex-start/.test(html),
+      // TODOS os chats no padrão (pedido 12/09): o chat do ticket da Central
+      // estava fora - tudo à esquerda, mesmo fundo. Minha mensagem à direita
+      // (por id do autor), as dos outros à esquerda, mesmas classes/tokens.
+      'chat do ticket (Central → Histórico) segue o mesmo padrão: eu à direita, os outros à esquerda':
+        /const eu = !!ME && \(\(m\.autorId && m\.autorId===ME\.id\)/.test(htmlCH)
+        && /class="msg-item \$\{eu\?'msg-eu':'msg-vis'\}"/.test(htmlCH)
+        && /\.msg-item\.msg-eu\{align-self:flex-end;background:var\(--panel\);border-right:3px solid var\(--accent\)/.test(htmlCH)
+        && /\.msg-item\.msg-vis\{align-self:flex-start/.test(htmlCH)
+        && /\.msg-item \.m-cab\{display:flex;justify-content:flex-start/.test(htmlCH),
       // widget: o texto sai da caixa ao enviar (bug do input que não limpava)
       'widget: o operador limpa o campo NA HORA do envio (não fica texto escrito)':
         /if \(!texto && !arquivo\) return;[\s\S]{0,400}?input\.value = '';[\s\S]{0,80}?anexoInput\.value = '';/.test(widgetSrc),

@@ -196,6 +196,15 @@
   .sla-bar-track{background:var(--bg);border:1px solid var(--line);border-radius:5px;height:6px;overflow:hidden;margin-top:4px;}
   .sla-bar-fill{height:100%;}
   .tipo-filtro-btn .tf-counts b{font-weight:600;}
+  /* CHAT DO TICKET no MESMO padrão dos outros chats (beniboy.html / widget):
+     quem escreve (eu) à direita com fundo/borda de destaque, os outros à
+     esquerda; nome e hora na mesma linha; balão encolhe até o conteúdo. */
+  .msg-item{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;max-width:85%;align-self:flex-start;}
+  .msg-item.msg-vis{align-self:flex-start;border-left:3px solid var(--line);}
+  .msg-item.msg-eu{align-self:flex-end;background:var(--panel);border-right:3px solid var(--accent);}
+  .msg-item.msg-eu .m-cab{flex-direction:row-reverse;}
+  .msg-item .m-cab{display:flex;justify-content:flex-start;align-items:baseline;gap:8px;font-size:11px;color:var(--muted);flex-wrap:wrap;}
+  .msg-item .m-texto{white-space:pre-wrap;margin-top:2px;}
 </style>
 <script src="/tema.js"></script>
 </head>
@@ -2206,15 +2215,19 @@ async function carregarChat(tipo, id){
 function renderChatLista(){
   const el = document.getElementById('d-chat-lista');
   el.innerHTML = (CHAT_ATUAL && CHAT_ATUAL.length)
-    ? CHAT_ATUAL.map(m=>`
-      <div style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-          <div style="font-size:11px;color:var(--muted);">${escapeHtml(m.autorUsername||m.autorEmail||'')} · ${fmtDataHora(m.criadoEm)}</div>
+    ? CHAT_ATUAL.map(m=>{
+      // padrão dos chats: a MINHA mensagem vai pra direita (msg-eu), a dos
+      // outros pra esquerda (msg-vis) - por id do autor, com e-mail de reserva
+      const eu = !!ME && ((m.autorId && m.autorId===ME.id) || (!m.autorId && m.autorEmail && m.autorEmail===ME.email));
+      return `
+      <div class="msg-item ${eu?'msg-eu':'msg-vis'}">
+        <div class="m-cab">
+          <span>${escapeHtml(m.autorUsername||m.autorEmail||'')} · ${fmtDataHora(m.criadoEm)}</span>
           ${IS_MASTER ? `<button type="button" class="link-btn" style="color:var(--bad);flex:none;" title="Excluir mensagem" onclick="excluirMensagemChat('${m.id}')">🗑️</button>` : ''}
         </div>
-        ${m.texto ? `<div style="white-space:pre-wrap;">${escapeHtml(m.texto)}</div>` : ''}
+        ${m.texto ? `<div class="m-texto">${escapeHtml(m.texto)}</div>` : ''}
         ${m.imagem ? `<a href="/api/central/chat/foto/${m.id}?token=${encodeURIComponent(AUTH_TOKEN)}" target="_blank"><img src="/api/central/chat/foto/${m.id}?token=${encodeURIComponent(AUTH_TOKEN)}" style="max-width:160px;max-height:160px;border-radius:6px;margin-top:4px;display:block;"></a>` : ''}
-      </div>`).join('')
+      </div>`;}).join('')
     : '<div style="color:var(--muted);font-size:12px;">Nenhuma mensagem ainda.</div>';
   el.scrollTop = el.scrollHeight;
 }
