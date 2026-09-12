@@ -4863,13 +4863,14 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
   }
 });
 
-// REINICIO DIARIO AUTOMATICO (Master). Pedido do Master: "escolho qual
-// reinicia todos os dias as 4h".
+// REINICIO AUTOMATICO PROGRAMADO (Master). Pedido do Master: "escolho qual
+// reinicia todos os dias as 4h" e, depois, "horario pode variar" - dia da
+// semana escolhido, hora diferente por dia e tolerancia.
 //
 // Mesma forma da janela de manutencao: uma lista de {codigo, posto} e a
-// senha do Master. O comando NAO vem de fora - quem dispara e a varredura
-// do servidor, com o COMANDO_REINICIAR fixo no codigo, com os mesmos 2
-// minutos de aviso na tela da loja.
+// senha do Master. O comando NAO vem de fora - quem dispara e o timer do
+// servidor, com o COMANDO_REINICIAR fixo no codigo, com os mesmos 2 minutos
+// de aviso na tela da loja.
 //
 // A senha so e exigida pra LIGAR: desligar um reinicio automatico e sempre
 // a operacao segura, e travar isso atras da senha so atrapalharia quem
@@ -4879,19 +4880,25 @@ app.post('/api/loja-status/reinicio-diario', auth.requireMaster, async (req, res
     const alvos = Array.isArray(req.body.alvos) ? req.body.alvos : [];
     if (!alvos.length) return res.status(400).json({ error: 'Escolha pelo menos um computador.' });
     if (alvos.length > 200) return res.status(400).json({ error: 'Muitos alvos de uma vez - divida em lotes.' });
-    const hora = req.body.hora === null || req.body.hora === '' ? null : req.body.hora;
-    if (hora !== null && !lojaStatus.horaDiariaValida(hora)) {
-      return res.status(400).json({ error: 'Horário inválido - use HH:MM, de 00:00 a 23:59.' });
-    }
-    if (hora !== null && !(await exigirSenhaDoMaster(req, res))) return;
-    const resultados = await lojaStatus.definirReinicioDiario(alvos, hora, req.user.email);
+    // `semanal` e o mapa dia -> 'HH:MM' (ou null no dia que nao reinicia).
+    // Nulo/vazio = desligar.
+    let plano = null;
+    let tolerancia = lojaStatus.REINICIO_TOLERANCIA_PADRAO_MIN;
+    try {
+      plano = lojaStatus.planoSemanalValido(req.body.semanal);
+      tolerancia = lojaStatus.toleranciaValida(req.body.tolerancia);
+    } catch (e) { return res.status(400).json({ error: e.message }); }
+    if (plano && !(await exigirSenhaDoMaster(req, res))) return;
+    const resultados = await lojaStatus.definirReinicioDiario(alvos, plano, tolerancia, req.user.email);
     const ok = resultados.filter((r) => r.ok);
-    console.log(`[NOC] ${req.user.email} ${hora ? `agendou reinício diário às ${hora}` : 'desligou o reinício diário'} em ${ok.length}/${resultados.length} máquina(s)`);
+    console.log(`[NOC] ${req.user.email} ${plano ? `agendou reinício automático (${lojaStatus.resumoDoPlano(plano)}, tolerância ${tolerancia} min)` : 'desligou o reinício automático'} em ${ok.length}/${resultados.length} máquina(s)`);
     res.json({
       total: resultados.length,
       aplicados: ok.length,
       recusados: resultados.filter((r) => !r.ok),
-      hora,
+      semanal: plano,
+      tolerancia,
+      resumo: lojaStatus.resumoDoPlano(plano),
     });
   } catch (err) {
     res.status(400).json({ error: err.message });

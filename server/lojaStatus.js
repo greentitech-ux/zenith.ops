@@ -1706,36 +1706,91 @@ async function enfileirarComandoEmAlvos(alvos, comando, opcoes) {
 }
 
 // ---------------------------------------------------------------------
-// REINICIO DIARIO AUTOMATICO
+// REINICIO AUTOMATICO PROGRAMADO
 //
 // Pedido do Master: "local para configurar um horario para reiniciar o
 // computador de forma automatica - escolho qual reinicia todos os dias as
-// 4h". A politica da casa ja era reiniciar 1x por semana (ver avaliarUptime
-// em nocMaquina.js), mas na mao: alguem tinha de abrir a janela de
-// manutencao e marcar.
+// 4h", e depois "horario pode variar": dia da semana escolhido, hora
+// diferente por dia e tolerancia no horario.
+//
+// Por isso o plano e SEMANAL, e nao "uma hora": reinicioSemanal e um mapa
+// dia -> 'HH:MM' (ou null, que significa "nesse dia nao reinicia"). Um so
+// campo cobre as tres coisas - "todo dia as 4h" e o mapa com os 7 iguais,
+// "so de segunda a sexta" e o mapa com sabado e domingo em null, e "domingo
+// as 3h" e um valor diferente num dia so. Dois campos (um pra hora, outro
+// pros dias) dariam duas fontes de verdade pro mesmo agendamento.
 //
 // QUEM DISPARA e o servidor, num timer de 1 minuto (ver index.js). Ele le o
 // ESPELHO em memoria, entao perguntar "tem alguem marcado pra agora?" a cada
-// minuto NAO custa leitura no Firestore. So quando uma maquina bate o horario
-// e que ha escrita - a mesma que o reinicio manual ja fazia.
+// minuto NAO custa leitura no Firestore. So quando uma maquina bate o
+// horario e que ha escrita - a mesma que o reinicio manual ja fazia.
 //
-// A HORA E O DIA SAO DE BRASILIA. O servidor roda em UTC: "todos os dias as
-// 4h" cravado em UTC vira 1h da manha aqui, e muda de novo no horario de
-// verao do outro lado. Por isso tudo passa por agoraBrasilia().
+// A HORA, O DIA E O DIA DA SEMANA SAO DE BRASILIA. O servidor roda em UTC:
+// "4h" cravado em UTC vira 1h da manha aqui, e "domingo" vira sabado pra
+// qualquer horario antes das 21h. Por isso tudo passa por agoraBrasilia().
 //
-// JANELA de 6 minutos: o timer pode atrasar (deploy, uma volta mais lenta) e,
-// sem folga, um minuto perdido pulava a noite inteira.
+// TOLERANCIA e ate quanto tempo depois da hora marcada ainda vale reiniciar.
+// Ela existe porque o disparo depende do servidor estar de pe naquele
+// minuto: um deploy ou um reinicio do servico as 4h em ponto, sem folga,
+// pulava a noite inteira em silencio. O padrao de 6 min cobre um deploy;
+// quem quiser cobrir uma queda mais longa sobe pra 30, 60 ou 120.
 //
-// TRAVA por ocorrencia ("dia|hora"), e nao so por dia: dentro da janela de 6
-// minutos a maquina reiniciaria de novo a cada volta da varredura. Guardar a
-// HORA junto faz a troca de horario valer no mesmo dia - mudou de 04:00 pra
-// 22:00 as 10h da manha, reinicia hoje as 22:00, sem precisar zerar nada na
-// mao.
-const REINICIO_DIARIO_JANELA_MIN = 6;
+// TRAVA por ocorrencia ("dia|hora"), e nao por dia: dentro da tolerancia a
+// maquina reiniciaria de novo a cada volta do timer. Guardar a HORA junto faz
+// a troca de horario valer no mesmo dia - mudou de 04:00 pra 22:00 as 10h da
+// manha, reinicia hoje as 22:00, sem precisar zerar nada na mao.
+const DIAS_SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+const REINICIO_TOLERANCIA_PADRAO_MIN = 6;
+const REINICIO_TOLERANCIA_MAX_MIN = 240;
 const REINICIO_DIARIO_ORIGEM = 'reinicio-diario';
 const HORA_DIARIA_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 function horaDiariaValida(v) { return typeof v === 'string' && HORA_DIARIA_RE.test(v); }
 function minutosDaHora(hhmm) { const [h, m] = String(hhmm).split(':'); return (Number(h) * 60) + Number(m); }
+
+// normaliza o que vem da tela: so os 7 dias conhecidos, so 'HH:MM' valido,
+// e devolve null se nao sobrou nenhum dia (que e o mesmo que desligar).
+// Hora invalida em QUALQUER dia derruba o plano inteiro em vez de gravar
+// meio agendamento: metade dos dias valendo e metade nao e pior do que
+// recusar e dizer por que.
+function planoSemanalValido(entrada) {
+  if (!entrada || typeof entrada !== 'object') return null;
+  const plano = {};
+  let algum = false;
+  for (const dia of DIAS_SEMANA) {
+    const v = entrada[dia];
+    if (v === undefined || v === null || v === '') { plano[dia] = null; continue; }
+    if (!horaDiariaValida(v)) throw new Error('Horário inválido - use HH:MM, de 00:00 a 23:59.');
+    plano[dia] = v;
+    algum = true;
+  }
+  return algum ? plano : null;
+}
+
+// COMPAT de leitura (nao migracao): a primeira versao deste recurso guardava
+// UMA hora em reinicioDiario, valendo pra todo dia. Se um documento ainda
+// estiver assim, ele e lido como os 7 dias naquela hora. Quem grava sempre
+// grava o plano semanal - ninguem reescreve documento antigo por conta.
+function planoSemanalDe(doc) {
+  if (doc && doc.reinicioSemanal && typeof doc.reinicioSemanal === 'object') return doc.reinicioSemanal;
+  if (doc && horaDiariaValida(doc.reinicioDiario)) {
+    return DIAS_SEMANA.reduce((acc, d) => { acc[d] = doc.reinicioDiario; return acc; }, {});
+  }
+  return null;
+}
+function toleranciaDe(doc) {
+  const n = Number(doc && doc.reinicioTolerancia);
+  if (!Number.isFinite(n) || n < 1) return REINICIO_TOLERANCIA_PADRAO_MIN;
+  return Math.min(Math.round(n), REINICIO_TOLERANCIA_MAX_MIN);
+}
+function toleranciaValida(v) {
+  if (v === undefined || v === null || v === '') return REINICIO_TOLERANCIA_PADRAO_MIN;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 1 || n > REINICIO_TOLERANCIA_MAX_MIN) {
+    throw new Error(`Tolerância inválida - use de 1 a ${REINICIO_TOLERANCIA_MAX_MIN} minutos.`);
+  }
+  return Math.round(n);
+}
+
 function agoraBrasilia(ms) {
   const partes = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Sao_Paulo',
@@ -1743,9 +1798,13 @@ function agoraBrasilia(ms) {
     hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
   }).formatToParts(new Date(ms == null ? Date.now() : ms))
     .reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  const dia = `${partes.year}-${partes.month}-${partes.day}`;
   return {
-    dia: `${partes.year}-${partes.month}-${partes.day}`,
+    dia,
     minutos: (Number(partes.hour) * 60) + Number(partes.minute),
+    // dia da semana a partir da DATA de Brasilia, ao meio-dia UTC: nao passa
+    // perto de nenhuma virada, entao nunca escorrega um dia
+    diaSemana: new Date(`${dia}T12:00:00Z`).getUTCDay(),
   };
 }
 function diaAnterior(dia) {
@@ -1755,41 +1814,75 @@ function diaAnterior(dia) {
 }
 
 // A ocorrencia que esta acontecendo AGORA pra um computador marcado, ou null.
-// Devolve a chave "dia|hora" que vai pra trava - e ela que sabe a diferenca
-// entre "as 23:58 de ontem, atrasado 3 min" e "as 23:58 de hoje, que ainda
-// nem chegou". Sem isso, um horario perto da meia-noite nunca disparava:
-// passada a virada, a conta do dia dava negativa e caia fora da janela.
+// Devolve a chave "dia|hora" que vai pra trava.
+//
+// Olha DUAS candidatas, a de hoje e a de ontem, porque um horario perto da
+// meia-noite (ou uma tolerancia grande) atravessa a virada do dia: as 00:10
+// de segunda, o que esta atrasado 12 min e o agendamento de DOMINGO as
+// 23:58 - e o dia da semana a consultar e o de ontem, nao o de hoje.
 function ocorrenciaDoReinicioDiario(doc, ms) {
-  if (!doc || doc.tipo !== 'interno' || !horaDiariaValida(doc.reinicioDiario)) return null;
+  if (!doc || doc.tipo !== 'interno') return null;
+  const plano = planoSemanalDe(doc);
+  if (!plano) return null;
+  const tolerancia = toleranciaDe(doc);
   const agora = agoraBrasilia(ms);
-  const atrasoHoje = agora.minutos - minutosDaHora(doc.reinicioDiario);
-  const atraso = atrasoHoje >= 0 ? atrasoHoje : atrasoHoje + (24 * 60);
-  const dia = atrasoHoje >= 0 ? agora.dia : diaAnterior(agora.dia);
-  if (atraso >= REINICIO_DIARIO_JANELA_MIN) return null;
-  const chave = `${dia}|${doc.reinicioDiario}`;
-  return doc.reinicioDiarioUltima === chave ? null : chave;
+  const candidatas = [
+    { dia: agora.dia, hora: plano[DIAS_SEMANA[agora.diaSemana]], base: agora.minutos },
+    { dia: diaAnterior(agora.dia), hora: plano[DIAS_SEMANA[(agora.diaSemana + 6) % 7]], base: agora.minutos + (24 * 60) },
+  ];
+  for (const c of candidatas) {
+    if (!horaDiariaValida(c.hora)) continue;
+    const atraso = c.base - minutosDaHora(c.hora);
+    if (atraso < 0 || atraso >= tolerancia) continue;
+    const chave = `${c.dia}|${c.hora}`;
+    if (doc.reinicioDiarioUltima === chave) continue;
+    return chave;
+  }
+  return null;
+}
+
+// resumo curto pro historico e pros logs ("seg, ter, qua, qui, sex às 04:00"
+// / "dom às 03:00 · seg a sex às 04:00")
+const DIAS_ROTULO = { dom: 'dom', seg: 'seg', ter: 'ter', qua: 'qua', qui: 'qui', sex: 'sex', sab: 'sáb' };
+function resumoDoPlano(plano) {
+  if (!plano) return 'desligado';
+  const porHora = new Map();
+  for (const dia of DIAS_SEMANA) {
+    const h = plano[dia];
+    if (!horaDiariaValida(h)) continue;
+    if (!porHora.has(h)) porHora.set(h, []);
+    porHora.get(h).push(DIAS_ROTULO[dia]);
+  }
+  if (!porHora.size) return 'desligado';
+  return [...porHora.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([h, dias]) => `${dias.length === 7 ? 'todo dia' : dias.join(', ')} às ${h}`)
+    .join(' · ');
 }
 
 // liga/desliga em LOTE (a tela manda a lista marcada). Espelha o formato de
 // enfileirarComandoEmAlvos de proposito: alvo que nao e computador interno
 // volta recusado, com o motivo, em vez de sumir em silencio.
-async function definirReinicioDiario(alvos, hora, porEmail) {
-  if (hora !== null && !horaDiariaValida(hora)) {
-    throw new Error('Horário inválido - use HH:MM, de 00:00 a 23:59.');
-  }
+async function definirReinicioDiario(alvos, semanal, tolerancia, porEmail) {
+  const plano = planoSemanalValido(semanal);
+  const tol = toleranciaValida(tolerancia);
   const docs = await listUncached();
   const querido = new Set((alvos || []).map((a) => `${a.codigo}|${a.posto}`));
   const escolhidos = docs.filter((d) => d.tipo === 'interno' && querido.has(`${d.codigo}|${d.posto}`));
   const feitos = [];
   for (const doc of escolhidos) {
     const em = Date.now();
-    // fica no historico do computador: quem ligou, quando e pra que hora.
+    // fica no historico do computador: quem ligou, quando e pra quando.
     // Uma maquina que reinicia sozinha as 4h sem rastro vira chamado de TI.
-    const detalhe = hora
-      ? `reinício automático ligado: todos os dias às ${hora} (${porEmail || '—'})`
+    const detalhe = plano
+      ? `reinício automático: ${resumoDoPlano(plano)} (tolerância ${tol} min, por ${porEmail || '—'})`
       : `reinício automático desligado (${porEmail || '—'})`;
     await gravarEEspelhar(doc.codigo, doc.posto, {
-      reinicioDiario: hora,
+      reinicioSemanal: plano,
+      // zera o campo da primeira versao: com os dois gravados, um documento
+      // antigo continuaria valendo por baixo do plano novo
+      reinicioDiario: null,
+      reinicioTolerancia: plano ? tol : null,
       reinicioDiarioPorEmail: porEmail || null,
       reinicioDiarioEm: em,
       eventos: [...(doc.eventos || []), { tipo: 'reinicio-diario-config', em, detalhe }].slice(-EVENTOS_MAX),
@@ -1811,35 +1904,35 @@ async function marcarOcorrenciaFeita(doc, chave, detalhe) {
   });
 }
 
-// Roda no timer de 1 minuto. Em serie de proposito: sao poucas
-// maquinas por minuto e cada enfileirarComando ja faz 3 idas ao Firestore -
-// disparar o parque inteiro em paralelo as 4h nao ganha nada e so concentra
-// escrita.
+// Roda no timer de 1 minuto. Em serie de proposito: sao poucas maquinas por
+// minuto e cada enfileirarComando ja faz 3 idas ao Firestore - disparar o
+// parque inteiro em paralelo as 4h nao ganha nada e so concentra escrita.
 async function varrerReinicioDiario(ms) {
   const docs = await listUncached();
   const feitos = [];
   for (const doc of docs) {
     const chave = ocorrenciaDoReinicioDiario(doc, ms);
     if (!chave) continue;
-    const detalhe = `reinício automático das ${doc.reinicioDiario}`;
+    const hora = chave.split('|')[1];
+    const detalhe = `reinício automático das ${hora}`;
     try {
       await enfileirarComando(doc.codigo, doc.posto, COMANDO_REINICIAR, { origem: REINICIO_DIARIO_ORIGEM });
       // o NOC precisa saber que o sumico da maquina foi ELE que pediu - senao
       // o push de queda afirma "verifique a internet da loja" as 4h da manha
       await marcarReinicioComandado(doc.codigo, doc.posto);
       await marcarOcorrenciaFeita(doc, chave, detalhe);
-      feitos.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, hora: doc.reinicioDiario });
+      feitos.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, hora });
     } catch (err) {
       // ja tem comando na fila: a maquina ja vai reiniciar por outro caminho.
-      // Marcar evita a varredura insistir a cada minuto da janela.
+      // Marcar evita o timer insistir a cada minuto da tolerancia.
       if (/comando pendente/i.test(err.message || '')) {
         await marcarOcorrenciaFeita(doc, chave, `${detalhe} - já havia comando na fila`);
         continue;
       }
-      // qualquer outra falha fica SEM marcar: sobram minutos de janela pra
+      // qualquer outra falha fica SEM marcar: sobra o resto da tolerancia pra
       // tentar de novo, e depois disso o dia passa (melhor do que insistir
       // pra sempre numa maquina que nao aceita comando)
-      console.error(`[NOC] reinício diário de ${doc.nome || doc.posto} falhou: ${err.message}`);
+      console.error(`[NOC] reinício automático de ${doc.nome || doc.posto} falhou: ${err.message}`);
     }
   }
   return feitos;
@@ -2780,7 +2873,8 @@ module.exports = {
   descartarEspelhoTeste: () => { espelho = null; espelhoEm = 0; cache.invalidar(); },
   enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos,
   definirReinicioDiario, varrerReinicioDiario, ocorrenciaDoReinicioDiario,
-  horaDiariaValida, REINICIO_DIARIO_JANELA_MIN, REINICIO_DIARIO_ORIGEM,
+  planoSemanalValido, planoSemanalDe, resumoDoPlano, toleranciaDe, toleranciaValida,
+  horaDiariaValida, DIAS_SEMANA, REINICIO_TOLERANCIA_PADRAO_MIN, REINICIO_TOLERANCIA_MAX_MIN, REINICIO_DIARIO_ORIGEM,
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora,
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,
