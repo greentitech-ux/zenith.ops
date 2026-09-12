@@ -17638,6 +17638,46 @@ setTimeout(async () => {
       'o painel de conversa da Central usa o mesmo ✕, sem estilo próprio':
         /<span class="zenith-fechar" title="Fechar" onclick="fecharPainel\(/.test(fs.readFileSync(__dirname + '/public/beniboy.html', 'utf8'))
         && !/painel-fechar/.test(fs.readFileSync(__dirname + '/public/beniboy.html', 'utf8')),
+
+      // ---- os 8 painéis do NOC (pedido do Master: "falta o botão redondo
+      // com x para fechar passando do card flutuante no cantinho superior
+      // direito, passando um pouco como em outros cards") ----
+      //
+      // A ARMADILHA aqui é a mesma que já cortou o balão de dica: .modal tem
+      // overflow-y:auto, e um filho em top:-14px é CORTADO por ela. Por isso o
+      // ✕ mora na .sheet-wrap (que não rola) e o .modal fica dentro - mesmo
+      // desenho .sheet-wrap/.sheet da Central e do Beniboy. Se alguém mover o
+      // ✕ pra dentro do .modal, ele some pela metade e ninguém nota até a
+      // loja reclamar.
+      'todo painel do NOC tem o ✕ redondo, e ele fica FORA da caixa que rola': (() => {
+        const noc = fs.readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+        const ids = ['acao-overlay', 'rodar-acao-overlay', 'manut-overlay', 'msg-overlay',
+          'novo-comp-overlay', 'disp-overlay', 'editar-comp-overlay', 'detalhe-comp-overlay'];
+        const faltam = ids.filter((id) => {
+          const i = noc.indexOf(`id="${id}">`);
+          if (i < 0) return true;
+          const trecho = noc.slice(i, i + 400);
+          // ordem importa: sheet-wrap, depois o ✕, e só então o .modal
+          const w = trecho.indexOf('class="sheet-wrap"');
+          const x = trecho.indexOf('class="sheet-fechar-flutuante"');
+          const m = trecho.indexOf('class="modal');
+          return !(w >= 0 && x > w && m > x);
+        });
+        return faltam.length === 0 || `sem ✕ fora da rolagem: ${faltam.join(', ')}`;
+      })(),
+      'a caixa que ancora o ✕ existe no CSS do NOC (senão ele cai no canto da tela)': (() => {
+        const noc = fs.readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+        return /\.sheet-wrap\{position:relative;width:100%/.test(noc)
+          && /\.sheet-wrap > \.modal\{max-width:none;\}/.test(noc);
+      })(),
+      // dois ✕ no mesmo cabeçalho é ruído: o da quina já fica sempre visível
+      // porque mora fora da rolagem
+      'a ficha da máquina não tem dois ✕': (() => {
+        const noc = fs.readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+        const i = noc.indexOf('id="detalhe-comp-overlay">');
+        const ficha = noc.slice(i, noc.indexOf('id="detalhe-comp-politica"', i));
+        return (ficha.match(/>✕</g) || []).length === 1;
+      })(),
     };
     const falhas = Object.entries(conf).filter(([, v]) => v !== true).map(([n, v]) => (typeof v === 'string' ? `${n} (${v})` : n));
     okFechar = !falhas.length;
@@ -17925,6 +17965,10 @@ setTimeout(async () => {
   try {
     const fs = require('fs');
     const tema = fs.readFileSync(__dirname + '/public/tema.js', 'utf8');
+    // so o que RODA: os comentarios abaixo explicam o bug do (hover:none) e
+    // citam a consulta pelo nome - se o teste olhar o arquivo cru, ele passa
+    // com a consulta de volta no lugar
+    const temaCodigo = tema.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
     const ben = fs.readFileSync(__dirname + '/public/beniboy.html', 'utf8');
     const bloco = (tema.match(/var dicas = document\.createElement\('style'\);[\s\S]*?document\.head\.appendChild\(dicas\);/) || [''])[0];
 
@@ -17945,9 +17989,24 @@ setTimeout(async () => {
       // quem navega por teclado também precisa saber o que o ícone faz
       'teclado também vê a dica':
         /document\.addEventListener\('focusin'/.test(tema) && /document\.addEventListener\('focusout'/.test(tema),
-      // em tela de toque não há hover: balão preso depois do toque atrapalha
-      'em tela de toque o balão não aparece':
-        /function ehToque\(\)/.test(tema) && /\(hover:none\)/.test(tema) && /if \(ehToque\(\)\) return;/.test(tema),
+      // QUEM está hoverando AGORA, não o que o aparelho diz que é.
+      //
+      // Isto aqui já foi `/function ehToque\(\)/ && /\(hover:none\)/` - o teste
+      // descrevia a implementação em vez da regra, e por isso passou verdinho
+      // enquanto o Master não via balão nenhum a tela inteira: o PC dele tem
+      // tela de toque, o Windows respondia "(hover:none)" pelo ponteiro
+      // primário e o mouse de verdade ficava de fora. Agora a asserção é a
+      // regra: dedo não, mouse e caneta sim - e a consulta ao aparelho não
+      // pode voltar.
+      'o balão segue o PONTEIRO (dedo não, mouse e caneta sim), não o tipo de aparelho':
+        /if \(e && e\.pointerType === 'touch'\) return;/.test(temaCodigo)
+        && !/hover:none/.test(temaCodigo) && !/ehToque/.test(temaCodigo),
+      'o hover escuta pointerover (com mouseover de reserva em navegador sem PointerEvent)':
+        /document\.addEventListener\('pointerover', entrou, true\)/.test(temaCodigo)
+        && /window\.PointerEvent/.test(temaCodigo)
+        && /document\.addEventListener\('mouseover', entrou, true\)/.test(temaCodigo),
+      'só foco de TECLADO mostra (clique e toque também focam - era isso que prendia o balão)':
+        /matches\(':focus-visible'\)/.test(temaCodigo),
       'respeita quem pediu menos animação': /@media \(prefers-reduced-motion:reduce\)/.test(bloco),
       'toda cor está dentro de var(--token,…), nenhuma solta':
         !/#[0-9a-f]{6}/i.test(bloco.replace(/var\(--[a-z0-9-]+,\s*#[0-9a-f]{6}\)/gi, ''))
@@ -18509,6 +18568,10 @@ setTimeout(async () => {
   let okDica = false;
   try {
     const tema = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tema.js'), 'utf8');
+    // so o que RODA: o comentario do tema.js cita `(hover:none)` pelo nome
+    // pra explicar o bug - olhando o arquivo cru, o teste passaria com a
+    // consulta de volta no lugar
+    const temaCodigo = tema.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
     const noc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
     const beni = require('fs').readFileSync(require('path').join(__dirname, 'public', 'beniboy.html'), 'utf8');
     // a fileira de ações da ficha da máquina
@@ -18542,8 +18605,9 @@ setTimeout(async () => {
         /window\.addEventListener\('scroll', esconder, true\)/.test(tema)
         && /document\.addEventListener\('click', esconder, true\)/.test(tema)
         && /window\.addEventListener\('resize', esconder\)/.test(tema),
-      'em tela de toque não aparece (lá não existe hover)':
-        /function ehToque\(\)/.test(tema) && /if \(ehToque\(\)\) return;/.test(tema),
+      'um toque de dedo não deixa balão preso na tela':
+        /if \(e && e\.pointerType === 'touch'\) return;/.test(temaCodigo)
+        && /matches\(':focus-visible'\)/.test(temaCodigo),
       // ---- a ficha da máquina, do jeito do chat da Central ----
       'a ficha da máquina virou só-ícone, sem sobrar botão com texto':
         !!acoes && icones.length >= 8 && !/btn-mini/.test(acoes),

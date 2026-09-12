@@ -315,6 +315,13 @@
      vem depois. */
   #disp-overlay{z-index:60;}
   .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto;}
+  /* O ✕ redondo flutuante (desenho no tema.js) precisa de uma caixa que NÃO
+     role: o .modal tem overflow-y:auto e cortaria um filho em top:-14px,
+     exatamente como a caixa com rolagem cortava o balão de dica. A caixa só
+     ancora - quem rola continua sendo o .modal de dentro. Mesmo padrão
+     .sheet-wrap/.sheet da Central e do Beniboy. */
+  .sheet-wrap{position:relative;width:100%;max-width:420px;}
+  .sheet-wrap > .modal{max-width:none;}
   .modal-msg{max-width:580px;}
   .modal-msg .hidden{display:none!important;}
   .modal h3{margin:0 0 4px;font-size:15px;}
@@ -586,6 +593,8 @@
 </div>
 
 <div class="overlay hidden" id="acao-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharModalAcao()">✕</span>
   <div class="modal">
     <h3 id="acao-modal-titulo">🤖 Nova ação</h3>
     <div id="acao-modelo-wrap">
@@ -628,9 +637,12 @@
       <button type="button" class="btn-primary" id="acao-modal-salvar" onclick="salvarAcao()">Salvar</button>
     </div>
   </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="rodar-acao-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharRodarAcao()">✕</span>
   <div class="modal">
     <h3>▶️ Rodar ação num computador</h3>
     <div class="sub" id="rodar-acao-nome" style="margin-bottom:8px;"></div>
@@ -652,6 +664,7 @@
       <button type="button" class="btn-primary" id="rodar-acao-btn" onclick="rodarAcaoConfirmar()">▶️ Rodar aqui</button>
     </div>
   </div>
+  </div>
 </div>
 
 <!-- Janela de Manutenção: reinício em massa do parque. O alvo é montado
@@ -659,7 +672,9 @@
      servidor; o COMANDO em si é fixo lá (ver COMANDO_REINICIAR) - a tela
      nunca manda texto de comando. -->
 <div class="overlay hidden" id="manut-overlay">
-  <div class="modal" style="max-width:640px;">
+  <div class="sheet-wrap" style="max-width:640px;">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharManutencao()">✕</span>
+  <div class="modal">
     <h3>🔁 Janela de Manutenção · reiniciar máquinas</h3>
     <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">
       Só entra na lista computador <b>interno</b> com o agente NOC-NoPulso instalado - é quem sabe receber comando.
@@ -732,9 +747,12 @@
       <button type="button" class="btn-primary" id="manut-confirmar" onclick="manutEnviar('reiniciar')">🔁 Reiniciar selecionados</button>
     </div>
   </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="msg-overlay">
+  <div class="sheet-wrap" style="max-width:580px;">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharModalMensagem()">✕</span>
   <div class="modal modal-msg">
     <h3>💬 Mensagem</h3>
     <div class="sub" id="msg-modal-loja"></div>
@@ -774,9 +792,12 @@
       <button type="button" class="btn-primary" id="msg-modal-enviar" onclick="enviarMensagemLoja()">Enviar</button>
     </div>
   </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="novo-comp-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharModalNovoComputador()">✕</span>
   <div class="modal">
     <h3>🖥️ Novo computador</h3>
     <label>Unidade</label>
@@ -811,9 +832,12 @@
       <button type="button" class="btn-primary" id="novo-comp-salvar" onclick="salvarNovoComputador()">Cadastrar</button>
     </div>
   </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="disp-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharModalDispositivo()">✕</span>
   <div class="modal">
     <h3>📡 Aparelho da rede</h3>
     <div class="sub" id="disp-modal-mac"></div>
@@ -843,9 +867,12 @@
       <button type="button" class="btn-primary" id="disp-salvar" onclick="salvarDispositivo()">Salvar</button>
     </div>
   </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="editar-comp-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharModalEditarComputador()">✕</span>
   <div class="modal">
     <h3>✏️ Editar computador</h3>
     <div class="sub" id="editar-comp-unidade"></div>
@@ -887,19 +914,22 @@
       <button type="button" class="btn-primary" id="editar-comp-salvar" onclick="salvarEdicaoComputador()">Salvar</button>
     </div>
   </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="detalhe-comp-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharDetalheComputador()">✕</span>
   <div class="modal">
     <!-- cabecalho GRUDADO no topo enquanto o conteudo rola (o modal e longo:
-         disco, rede, aparelhos...) - o ✕ de fechar fica SEMPRE visivel, sem
-         precisar rolar ate o "Fechar" la embaixo. As margens negativas
+         disco, rede, aparelhos...) para o nome da maquina nao sumir de vista.
+         O ✕ nao fica aqui: ele e' o redondo da quina, que mora FORA da caixa
+         com rolagem e por isso ja esta sempre visivel. As margens negativas
          cancelam o padding do .modal pra barra cobrir a largura/topo inteiros -->
     <div style="display:flex;align-items:center;gap:8px;position:sticky;top:-20px;z-index:2;background:var(--panel);margin:-20px -20px 10px;padding:16px 20px 10px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;">
       <span class="status-dot" id="detalhe-comp-dot"></span>
       <h3 id="detalhe-comp-nome" style="margin:0;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></h3>
       <button type="button" class="icon-btn" title="Editar" id="detalhe-comp-editar">✏️</button>
-      <button type="button" class="icon-btn" title="Fechar" onclick="fecharDetalheComputador()">✕</button>
     </div>
     <div class="sub" id="detalhe-comp-sub"></div>
     <div class="equip-tile-status" id="detalhe-comp-status" style="margin-bottom:12px;"></div>
@@ -910,6 +940,7 @@
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharDetalheComputador()">Fechar</button>
     </div>
+  </div>
   </div>
 </div>
 
