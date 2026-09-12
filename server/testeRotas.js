@@ -15213,10 +15213,56 @@ setTimeout(async () => {
       'fechamento: com Mês aceso, digitar uma data navega pro mês inteiro dela (mês a mês)':
         !!mesFev && mesFev.inicio === '2026-02-01' && mesFev.fim === '2026-02-28'
         && !!mesJan && mesJan.inicio === '2026-01-01' && mesJan.fim === '2026-01-31'
-        && /const range = presetAtivo==='ontem' \? \{inicio:ref, fim:ref\} : calcularPreset\(presetAtivo, ref\);/.test(fechHtml)
-        && /const range = aceso\.dataset\.tipo==='ontem' \? \{inicio:ref, fim:ref\} : calcularPreset\(aceso\.dataset\.tipo, ref\);/.test(fechHtml)
+        && /const range = presetAtivo==='ontem' \? \{inicio:ref, fim:ref\} : calcularPreset\(presetAtivo, base\);/.test(fechHtml)
+        && /const range = aceso\.dataset\.tipo==='ontem' \? \{inicio:base, fim:base\} : calcularPreset\(aceso\.dataset\.tipo, base\);/.test(fechHtml)
         // o handler antigo (que APAGAVA o preset em toda edição) não pode voltar
         && !/edicao manual = intervalo livre \(permite qualquer intervalo/.test(fechHtml),
+      // VÍDEO DO MASTER (12/09): três defeitos juntos no filtro de Fechamentos.
+      // (1) "até" em branco ia cru pro gráfico -> "Sem dados no período" com a
+      //     tabela mostrando 134 linhas. Agora intervaloEfetivo() completa o
+      //     que falta: fim vazio = último dia fechado; início vazio = 30 dias
+      //     antes; invertido, troca.
+      'fechamento: "até" em branco vale "até ontem" e "de" em branco vale 30 dias antes (nunca "Sem dados" por campo vazio)':
+        (() => {
+          const pad2Fn = (/function pad2\(n\)\{[^\n]*\}/.exec(fechHtml) || [''])[0];
+          const isoLocalFn = (/function isoLocal\(d\)\{[^\n]*\n/.exec(fechHtml) || [''])[0];
+          const fuso = (/const FUSO_BR = '[^']*';/.exec(fechHtml) || [''])[0];
+          const agoraFn = (/function agoraBrasilia\(\)\{[\s\S]*?\n\}/.exec(fechHtml) || [''])[0];
+          const ultimoFn = (/function ultimoDiaFechadoIso\(\)\{[\s\S]*?\n\}/.exec(fechHtml) || [''])[0];
+          const efetivoFn = (/function intervaloEfetivo\(\)\{[\s\S]*?\n\}/.exec(fechHtml) || [''])[0];
+          if (!(pad2Fn && isoLocalFn && fuso && agoraFn && ultimoFn && efetivoFn)) return false;
+          const campos = {};
+          const doc = { getElementById: (id) => ({ value: campos[id] || '' }) };
+          // eslint-disable-next-line no-new-func
+          const fns = new Function('document', `${pad2Fn}${isoLocalFn}${fuso}${agoraFn}${ultimoFn}${efetivoFn}; return { intervaloEfetivo, ultimoDiaFechadoIso };`)(doc);
+          const ontem = fns.ultimoDiaFechadoIso();
+          campos['f-date-start'] = '2026-04-01'; campos['f-date-end'] = '';
+          const semFim = fns.intervaloEfetivo();
+          campos['f-date-start'] = ''; campos['f-date-end'] = '2026-04-30';
+          const semInicio = fns.intervaloEfetivo();
+          campos['f-date-start'] = '2026-04-30'; campos['f-date-end'] = '2026-04-01';
+          const invertido = fns.intervaloEfetivo();
+          return semFim.start === '2026-04-01' && semFim.end === ontem
+            && semInicio.end === '2026-04-30' && semInicio.start === '2026-04-01'
+            && invertido.start === '2026-04-01' && invertido.end === '2026-04-30';
+        })(),
+      'fechamento: gráfico E KPIs/tabelas leem o MESMO intervalo efetivo (os painéis não discordam mais)':
+        /function chartRange\(\)\{\s*if\(filtroDataAtivo\)\{\s*return intervaloEfetivo\(\);/.test(fechHtml)
+        && /function filtrar\(\)\{\s*const r = intervaloEfetivo\(\);\s*return filtrarPorIntervalo\(r\.start, r\.end\);/.test(fechHtml),
+      // (2) digitando pelo teclado o Chrome não dispara 'change' até sair do
+      //     campo: o filtro só reagia depois - agora escuta input E change
+      'fechamento: os campos de data reagem a input E change (digitar pelo teclado já filtra)':
+        /\['input','change'\]\.forEach\(ev=>document\.getElementById\(id\)\.addEventListener\(ev, \(\)=>aoMudarData\(id\)\)\)/.test(fechHtml)
+        && /\['input','change'\]\.forEach\(ev=>document\.getElementById\(id\)\.addEventListener\(ev, \(\)=>\{/.test(fechHtml),
+      // (3) campo de data focado não repinta valor gravado por código: o
+      //     preset "não mudava as datas" na tela. Solta o foco antes de gravar.
+      'fechamento: solta o foco do campo de data antes de gravar valor por código (preset e re-snap)':
+        /function soltarFocoDeData\(\)\{[\s\S]{0,200}?el\.type === 'date'[\s\S]{0,60}?el\.blur\(\);/.test(fechHtml)
+        && /soltarFocoDeData\(\);\s*\/\/ senão o campo focado fica mostrando o valor velho\s*document\.getElementById\('f-date-start'\)\.value = range\.inicio;/.test(fechHtml)
+        && (fechHtml.match(/soltarFocoDeData\(\);/g) || []).length >= 3,
+      // campo limpo com preset aceso re-snapa pelo OUTRO campo (nunca meio período aceso)
+      'fechamento: limpar um campo com preset aceso re-snapa pelo outro campo':
+        /const base = ref \|\| outro;\s*if\(!base\) return;/.test(fechHtml),
       // 3) tag de cargo: servidor leva o cargo; tela marca "nome · Cargo"
       'contexto do Meu Dia leva o cargo de cada responsável':
         ctx.status === 200 && (resps.length === 0 || resps.every((u) => 'cargo' in u))

@@ -1297,9 +1297,23 @@ let presetAtivo = null;
 // intervalo. So volta a false num reload completo (botao Atualizar).
 let filtroDataAtivo = false;
 
+// O que os campos de data QUEREM dizer, mesmo pela metade. "até" em branco
+// (ex.: "Limpar" no calendário) = até o último dia fechado (ontem); "de" em
+// branco = 30 dias antes do fim. Antes, "até" vazio ia cru pro gráfico, que
+// não tinha dia nenhum pra desenhar e mostrava "Sem dados no período"
+// enquanto a tabela (que trata vazio como "sem teto") mostrava 134 linhas -
+// os painéis discordavam da mesma tela (vídeo do Master, 12/09).
+function intervaloEfetivo(){
+  let start = document.getElementById('f-date-start').value;
+  let end = document.getElementById('f-date-end').value;
+  if(!end) end = ultimoDiaFechadoIso();
+  if(!start){ const d = new Date(end+'T00:00:00'); d.setDate(d.getDate()-29); start = isoLocal(d); }
+  if(start > end){ const t = start; start = end; end = t; }
+  return { start, end };
+}
 function chartRange(){
   if(filtroDataAtivo){
-    return { start: document.getElementById('f-date-start').value, end: document.getElementById('f-date-end').value };
+    return intervaloEfetivo();
   }
   const fim = agoraBrasilia(); fim.setDate(fim.getDate()-1); // ontem
   const inicio = new Date(fim); inicio.setDate(inicio.getDate()-29); // ultimos 30 dias, terminando ontem
@@ -1322,6 +1336,7 @@ function setupPresets(){
     cont.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
     if(btn) btn.classList.add('active');
     const range = calcularPreset(tipo, refIso);
+    soltarFocoDeData();   // senão o campo focado fica mostrando o valor velho
     document.getElementById('f-date-start').value = range.inicio;
     document.getElementById('f-date-end').value = range.fim;
     renderEspelhando();   // último clique manda: a seção acompanha o de cima
@@ -1345,30 +1360,57 @@ function setupPresets(){
   document.getElementById('f-date-start').value = ontemIso;
   document.getElementById('f-date-end').value = ontemIso;
 
+  // input E change, com uma função só: digitando pelo teclado o Chrome não
+  // dispara 'change' até sair do campo (era isso que deixava "até" vazio e o
+  // gráfico em "Sem dados" enquanto o Master digitava - vídeo de 12/09), e o
+  // calendário dispara os dois. Valor incompleto ('' enquanto digita) é
+  // ignorado; o mesmo valor chegando duas vezes só desenha uma.
+  let ultimoAplicado = '';
+  function aoMudarData(id){
+    const campo = document.getElementById(id);
+    const ref = campo.value;
+    const outro = document.getElementById(id==='f-date-start' ? 'f-date-end' : 'f-date-start').value;
+    if(!ref && !presetAtivo && !outro) return;   // os dois vazios no meio da digitação: espera
+    filtroDataAtivo = true;
+    if(presetAtivo){
+      // preset GRUDADO: digitar uma data com Semana/Mês/Trimestre aceso
+      // re-snapa pro bloco daquela data (é assim que se navega mês a mês,
+      // semana a semana), mantendo o preset aceso. "Ontem" vira o próprio
+      // dia digitado (navegação dia a dia). Sem isto o Mês ficava travado no
+      // mês corrente e nunca dava pra ver um mês anterior.
+      // Campo limpo (botão "Limpar" do calendário) com preset aceso: re-snapa
+      // pelo OUTRO campo - nunca fica meio período com o botão aceso.
+      const base = ref || outro;
+      if(!base) return;
+      const range = presetAtivo==='ontem' ? {inicio:ref, fim:ref} : calcularPreset(presetAtivo, base);
+      if(presetAtivo==='ontem' && !ref){ range.inicio = outro; range.fim = outro; }
+      const chave = presetAtivo+'|'+range.inicio+'|'+range.fim;
+      if(chave === ultimoAplicado) return;
+      ultimoAplicado = chave;
+      soltarFocoDeData();
+      document.getElementById('f-date-start').value = range.inicio;
+      document.getElementById('f-date-end').value = range.fim;
+    }else{
+      // sem preset aceso: intervalo livre, do jeito que a pessoa digitou
+      // (um lado em branco vale "até ontem"/"30 dias antes", ver intervaloEfetivo)
+      cont.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
+      const chave = 'livre|'+document.getElementById('f-date-start').value+'|'+document.getElementById('f-date-end').value;
+      if(chave === ultimoAplicado) return;
+      ultimoAplicado = chave;
+    }
+    renderEspelhando();   // último clique manda (ver espelharPrincipalNaSecao)
+  }
   ['f-date-start','f-date-end'].forEach(id=>{
-    // 'change' (não 'input'): re-snapa só quando a data está inteira/confirmada,
-    // senão o preset brigaria com quem ainda está digitando o ano.
-    document.getElementById(id).addEventListener('change', ()=>{
-      filtroDataAtivo = true;
-      if(presetAtivo){
-        // preset GRUDADO: digitar uma data com Semana/Mês/Trimestre aceso
-        // re-snapa pro bloco daquela data (é assim que se navega mês a mês,
-        // semana a semana), mantendo o preset aceso. "Ontem" vira o próprio
-        // dia digitado (navegação dia a dia). Sem isto o Mês ficava travado no
-        // mês corrente e nunca dava pra ver um mês anterior.
-        const ref = document.getElementById(id).value;
-        if(ref){
-          const range = presetAtivo==='ontem' ? {inicio:ref, fim:ref} : calcularPreset(presetAtivo, ref);
-          document.getElementById('f-date-start').value = range.inicio;
-          document.getElementById('f-date-end').value = range.fim;
-        }
-      }else{
-        // sem preset aceso: intervalo livre, do jeito que a pessoa digitou
-        cont.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
-      }
-      renderEspelhando();   // último clique manda (ver espelharPrincipalNaSecao)
-    });
+    ['input','change'].forEach(ev=>document.getElementById(id).addEventListener(ev, ()=>aoMudarData(id)));
   });
+}
+// tira o foco de um campo de data antes de gravar valor nele por código: com o
+// campo focado no meio de uma edição, o Chrome segue mostrando o que a pessoa
+// digitou e o valor gravado só aparece depois do blur - na tela parecia que
+// "o preset não mudou as datas" (vídeo do Master, 12/09)
+function soltarFocoDeData(){
+  const el = document.activeElement;
+  if(el && el.tagName === 'INPUT' && el.type === 'date' && typeof el.blur === 'function') el.blur();
 }
 
 // generico pra montar um multiselect de unidades - usado tanto pro filtro
@@ -1477,22 +1519,24 @@ function setupPresetsFech(){
   });
 
   ['fech-date-inicio','fech-date-fim'].forEach(id=>{
-    document.getElementById(id).addEventListener('change', ()=>{
+    ['input','change'].forEach(ev=>document.getElementById(id).addEventListener(ev, ()=>{
       // mesmo comportamento do filtro de cima: com um preset aceso, digitar
       // uma data navega bloco a bloco (mês a mês); sem preset, intervalo livre
       const aceso = cont.querySelector('.preset-btn.active');
+      const ref = document.getElementById(id).value;
       if(aceso){
-        const ref = document.getElementById(id).value;
-        if(ref){
-          const range = aceso.dataset.tipo==='ontem' ? {inicio:ref, fim:ref} : calcularPreset(aceso.dataset.tipo, ref);
-          document.getElementById('fech-date-inicio').value = range.inicio;
-          document.getElementById('fech-date-fim').value = range.fim;
-        }
+        const outro = document.getElementById(id==='fech-date-inicio' ? 'fech-date-fim' : 'fech-date-inicio').value;
+        const base = ref || outro;
+        if(!base) return;
+        const range = aceso.dataset.tipo==='ontem' ? {inicio:base, fim:base} : calcularPreset(aceso.dataset.tipo, base);
+        soltarFocoDeData();
+        document.getElementById('fech-date-inicio').value = range.inicio;
+        document.getElementById('fech-date-fim').value = range.fim;
       }else{
         cont.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
       }
       renderTabela();
-    });
+    }));
   });
 }
 
@@ -1521,7 +1565,8 @@ function filtrarPorIntervalo(start, end){
   );
 }
 function filtrar(){
-  return filtrarPorIntervalo(document.getElementById('f-date-start').value, document.getElementById('f-date-end').value);
+  const r = intervaloEfetivo();
+  return filtrarPorIntervalo(r.start, r.end);
 }
 
 // ---- Comparação com período anterior, por unidade - da pra enxergar
