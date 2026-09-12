@@ -1332,6 +1332,168 @@
     else agendarRestauracao();
   })();
 
+  // ---- "Limpar filtros" onde houver período ----
+  //
+  // Pedido do Master: "onde tiver filtros de periodo precisamos ter um botao
+  // de limpar filtro, porque os filtros estao ficando preso e isso atrapalha".
+  //
+  // POR QUE FICAVAM PRESOS: e' o guarda-rascunho logo acima. Ele existe pra
+  // uma tela que recebe polling/SSE nao apagar o que a pessoa ja digitou -
+  // e faz isso muito bem. So que ele nao distingue "texto que eu estava
+  // escrevendo" de "filtro de periodo": o valor fica no sessionStorage e volta
+  // no proximo carregamento, POR CIMA do padrao que a propria tela acabou de
+  // montar. Medido no Monitor: a tela abre em "hoje", voce filtra 01/08-31/08,
+  // recarrega e volta 01/08-31/08; apagando so o rascunho, volta "hoje".
+  //
+  // POR QUE UM BOTAO, e nao tirar o filtro do rascunho: durante o poll de 30s
+  // o filtro TEM de sobreviver - perder o periodo escolhido no meio de uma
+  // conferencia seria pior que o problema. O que faltava era a saida.
+  //
+  // O botao apaga o rascunho DAQUELA faixa de filtros (nao o da tela inteira:
+  // um formulario meio preenchido ao lado nao pode ir junto) e recarrega, pra
+  // a tela voltar exatamente como ela abre - cada tela monta o proprio padrao
+  // no boot, entao recarregar e' a unica definicao de "limpo" que vale nas 59.
+  //
+  // ACHA SOZINHO onde colocar, pelo par de campos de data: nao da pra editar
+  // 31 telas na mao e manter isso vivo. O par e' descoberto pelo ID - de/ate,
+  // inicio/fim, start/end, ini/fim - que e' a convencao ja usada no app
+  // inteiro (F-DE/F-ATE, f-date-start/f-date-end, DINI/DFIM, quedas-de/
+  // quedas-ate...). Campo de data solto (nascimento, vencimento, data do
+  // evento) nao forma par e nao ganha botao - nao e' filtro.
+  var FIM_DO_PAR = [['de', 'ate'], ['inicio', 'fim'], ['ini', 'fim'], ['start', 'end'], ['inicial', 'final']];
+
+  // Dado o id do campo INICIAL, devolve os ids possiveis do campo FINAL.
+  // Puro de proposito (so texto): e' o que o testeRotas.js consegue extrair
+  // e rodar sozinho, sem navegador.
+  function idsDoFim(id) {
+    var saida = [];
+    if (!id) return saida;
+    FIM_DO_PAR.forEach(function (par) {
+      var comeco = par[0], fim = par[1];
+      // como segmento inteiro: f-data-de -> f-data-ate, filtro-data-de-lista
+      // -> filtro-data-ate-lista (o "de" no meio tambem conta)
+      var seg = new RegExp('(^|[-_])' + comeco + '([-_]|$)', 'i');
+      if (seg.test(id)) {
+        saida.push(id.replace(seg, function (todo, a, b) {
+          return a + (todo.slice(a.length, todo.length - b.length) === comeco.toUpperCase() ? fim.toUpperCase() : fim) + b;
+        }));
+      }
+      // grudado no fim, sem separador: DINI -> DFIM
+      var cauda = new RegExp(comeco + '$', 'i');
+      if (cauda.test(id)) {
+        saida.push(id.replace(cauda, function (achado) {
+          return achado === comeco.toUpperCase() ? fim.toUpperCase() : fim;
+        }));
+      }
+    });
+    return saida.filter(function (v, i, a) { return v !== id && a.indexOf(v) === i; });
+  }
+
+  // FILTRO x CAMPO DE FICHA. Duas datas lado a lado tambem aparecem DENTRO de
+  // formulario e de modal - e ali elas nao filtram nada, sao campo do
+  // registro: "Data de inicio / Previsao de conclusao" da tarefa, o "Periodo
+  // do deposito" da sangria. Um "Limpar filtros" no meio de um formulario
+  // meio preenchido seria um botao que joga o trabalho fora.
+  //
+  // A linha e' estrutural, nao adivinhacao de nome: formulario e caixa que
+  // abre por cima ficam de fora; painel e ficha lateral (.sheet-wrap, onde
+  // mora o relatorio de chamados da Central) continuam valendo, porque ali as
+  // datas filtram mesmo.
+  var CAIXA_DE_EDICAO = 'form,dialog,[role="dialog"],.modal,.dialog,.overlay';
+  function ehCampoDeFicha(el) { return !!(el && el.closest && el.closest(CAIXA_DE_EDICAO)); }
+
+  function ehData(el) { return el && el.tagName === 'INPUT' && String(el.type).toLowerCase() === 'date'; }
+  function controlesDe(el) { return el ? el.querySelectorAll('input,select,textarea') : []; }
+
+  // Onde o botao entra e o que ele limpa: sobe do par ate achar a FAIXA de
+  // filtros - o primeiro ancestral que tem algum outro campo alem das duas
+  // datas (o status, a unidade, a busca). E' essa faixa que a pessoa chama de
+  // "os filtros". Se nao houver (a tela so filtra por periodo), fica no
+  // proprio bloco das datas.
+  function faixaDeFiltros(inicio, fim) {
+    var no = fim.parentElement;
+    var ultimo = null;
+    while (no && no !== document.body) {
+      if (no.contains(inicio)) {
+        ultimo = no;
+        var campos = controlesDe(no).length;
+        // mais que isso nao e' uma faixa de filtro, e' a tela inteira
+        if (campos > 40) break;
+        if (campos > 2) return no;
+      }
+      no = no.parentElement;
+    }
+    return ultimo;
+  }
+
+  function montarBotaoLimpar(faixa) {
+    var botao = document.createElement('button');
+    botao.type = 'button';
+    botao.className = 'zenith-limpar-filtros';
+    botao.textContent = '✕ Limpar filtros';
+    botao.title = 'Volta esta tela ao período e aos filtros com que ela abre';
+    botao.addEventListener('click', function () {
+      try { if (window.zenithRascunhos) window.zenithRascunhos.limpar(faixa); } catch (_) {}
+      location.reload();
+    });
+    return botao;
+  }
+
+  function plantarLimparFiltros() {
+    var vistos = [];
+    Array.prototype.forEach.call(document.querySelectorAll('input[type=date][id]'), function (inicio) {
+      if (ehCampoDeFicha(inicio)) return;
+      var fim = null;
+      idsDoFim(inicio.id).some(function (idFim) {
+        var alvo = document.getElementById(idFim);
+        if (ehData(alvo) && alvo !== inicio) { fim = alvo; return true; }
+        return false;
+      });
+      if (!fim) return;
+      var faixa = faixaDeFiltros(inicio, fim);
+      if (!faixa || vistos.indexOf(faixa) !== -1) return;
+      if (faixa.querySelector('.zenith-limpar-filtros')) return;
+      vistos.push(faixa);
+      // depois do bloco que segura as duas datas, quando esse bloco so tem
+      // elas (o "01/08 até 31/08" do Monitor): o botao encosta no periodo em
+      // vez de cair no fim da faixa inteira
+      var caixa = fim.parentElement;
+      if (caixa && caixa !== faixa && caixa.contains(inicio) && controlesDe(caixa).length === 2) {
+        caixa.parentElement.insertBefore(montarBotaoLimpar(faixa), caixa.nextSibling);
+      } else {
+        fim.parentElement.insertBefore(montarBotaoLimpar(faixa), fim.nextSibling);
+      }
+    });
+  }
+
+  var estiloLimpar = document.createElement('style');
+  estiloLimpar.id = 'zenith-limpar-filtros';
+  estiloLimpar.textContent = [
+    '.zenith-limpar-filtros{flex:none;padding:8px 11px;border-radius:8px;',
+    '  background:var(--panel2,#181d24);border:1px solid var(--line,#27313b);color:var(--muted,#8c99a7);',
+    '  font:12px/1 var(--sans,Arial,sans-serif);font-weight:600;cursor:pointer;white-space:nowrap;',
+    '  align-self:center;}',
+    '.zenith-limpar-filtros:hover{color:var(--text,#e7ecf1);border-color:var(--accent,#b8ff3c);}',
+  ].join('\n');
+  document.head.appendChild(estiloLimpar);
+
+  // As faixas de filtro de boa parte das telas so existem depois do boot
+  // (a tela monta o filtro junto com os dados), por isso nao basta rodar uma
+  // vez: acompanha o DOM e planta onde aparecer par novo.
+  function iniciarLimparFiltros() {
+    plantarLimparFiltros();
+    if (!document.documentElement) return;
+    var pendente = false;
+    new MutationObserver(function () {
+      if (pendente) return;
+      pendente = true;
+      requestAnimationFrame(function () { pendente = false; plantarLimparFiltros(); });
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciarLimparFiltros);
+  else iniciarLimparFiltros();
+  window.zenithFiltros = { idsDoFim: idsDoFim, plantar: plantarLimparFiltros };
+
   // Todo campo de ANEXO que ja aceita PDF tambem aceita ZIP. Centralizar evita
   // que uma tela nova fique com o seletor antigo enquanto o servidor ja pode
   // receber o arquivo. Campos que so leem documento/foto continuam validados
