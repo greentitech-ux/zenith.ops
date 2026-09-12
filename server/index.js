@@ -11127,6 +11127,64 @@ app.post('/api/ativos-ti', requireSection('ativos-ti'), async (req, res) => {
   }
 });
 
+// EDITAR o inventario atual (somar/tirar ativo) - Master e Admin fazem
+// direto; o tecnico manda pela fila de correcao abaixo. Mesma divisao do
+// fechamento: quem opera pede, quem responde pelo dado decide.
+app.patch('/api/ativos-ti/:id', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    const registro = await ativosTI.editar(req.params.id, {
+      areas: req.body.areas,
+      observacao: req.body.observacao,
+      motivo: req.body.motivo,
+      editadoPorEmail: req.user.email,
+      editadoPorNome: req.user.username || req.user.email,
+    });
+    broadcast('ativos-ti-atualizado', { id: registro.id });
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// o tecnico que esteve na loja PEDE a correcao (nada muda ate o Master decidir)
+app.post('/api/ativos-ti/:id/solicitar-edicao', requireSection('ativos-ti'), async (req, res) => {
+  try {
+    const registro = await ativosTI.solicitarEdicao({
+      vistoriaId: req.params.id,
+      areas: req.body.areas,
+      observacao: req.body.observacao,
+      motivo: req.body.motivo,
+      solicitadoPorId: req.user.id,
+      solicitadoPorEmail: req.user.email,
+      solicitadoPorNome: req.user.username || req.user.email,
+    });
+    broadcast('ativos-ti-atualizado', { id: req.params.id, pedido: registro.id });
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// fila: o Master/Admin ve todos; o tecnico acompanha os proprios pedidos
+app.get('/api/ativos-ti/edicoes', requireSection('ativos-ti'), async (req, res) => {
+  const todas = await ativosTI.listarEdicoes();
+  if (req.isMaster || req.isAdmin) return res.json(todas);
+  res.json(todas.filter((e) => e.solicitadoPorId === req.user.id));
+});
+
+app.patch('/api/ativos-ti/edicoes/:id', auth.requireMasterOrAdmin, async (req, res) => {
+  try {
+    const registro = await ativosTI.decidirEdicao(req.params.id, req.body.status, {
+      decididoPorEmail: req.user.email,
+      motivoDecisao: req.body.motivoDecisao,
+    });
+    broadcast('ativos-ti-atualizado', { id: registro.vistoriaId, pedido: registro.id });
+    res.json(registro);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.delete('/api/ativos-ti/:id', auth.requireMaster, async (req, res) => {
   try {
     await ativosTI.remover(req.params.id);

@@ -11295,6 +11295,107 @@ setTimeout(async () => {
   console.log(`${okEncerrados ? '✓' : '✗'} Meu Dia: ticket encerrado leva a tarefa pra Concluidos (Login bloqueado aprovado, decisao por e-mail, prestacao de contas)`);
 
   // ------------------------------------------------------------------
+  // ATIVOS DE TI: EDITAR o inventario (somar/tirar ativo) e a FILA de correcao
+  // (pedido do Master, 12/09/2026: "precisamos editar para adicionar/remover
+  // itens ativos, tec pode solicitar edicao"). Antes so dava pra criar uma
+  // vistoria NOVA - trocar um pin pad queimado obrigava a redigitar os 41
+  // ativos da loja. Agora: Master/Admin edita a vistoria atual no lugar (com
+  // linha no historico dizendo o que mudou); o tecnico da secao 'ativos-ti'
+  // PEDE a correcao e nada muda ate o Master decidir. Status do vocabulario
+  // que ja existe: PENDENTE / APROVADO / REJEITADO.
+  let okAtivosTI = false;
+  try {
+    const cabA = { Authorization: 'Bearer ' + token };
+    const hashA = require('bcryptjs').hashSync('SenhaDeTeste!2026', 4);
+    DOCS.set('users/u-tec-ativos', {
+      passwordHash: hashA, role: 'user', active: true, email: 'tec-ativos@teste.local', username: 'tecativos',
+      permissions: { sections: ['ativos-ti'], unidades: ['AERO'], vaultSubgroups: [], tiposSolicitacao: [] },
+      createdAt: new Date().toISOString(),
+    });
+    const cabTec = { Authorization: 'Bearer ' + (await auth.login('tec-ativos@teste.local', 'SenhaDeTeste!2026')).token };
+    const criada = JSON.parse((await postarJson('/api/ativos-ti', {
+      unidade: 'ATV1', unidadeNome: 'Loja Ativos', observacao: 'primeira',
+      areas: [{ nome: 'Loja', itens: [{ descricao: 'Monitor', quantidade: 6 }, { descricao: 'Pin pad', quantidade: 5 }] }],
+    }, cabA)).corpo);
+    // Master edita: tira 1 pin pad (queimado) e soma 1 impressora
+    const editado = await enviarJson('PATCH', `/api/ativos-ti/${criada.id}`, {
+      areas: [{ nome: 'Loja', itens: [{ descricao: 'Monitor', quantidade: 6 }, { descricao: 'Pin pad', quantidade: 4 }, { descricao: 'Impressora térmica', quantidade: 1 }] }],
+      motivo: 'pin pad queimado trocado',
+    }, cabA);
+    const dep = editado.status === 200 ? JSON.parse(editado.corpo) : {};
+    const hist = (dep.historico || [])[0] || {};
+    // 2a edicao: o historico tem que SOMAR (guardar a linha anterior), nao trocar
+    const editado2 = await enviarJson('PATCH', `/api/ativos-ti/${criada.id}`, {
+      areas: [{ nome: 'Loja', itens: [{ descricao: 'Monitor', quantidade: 7 }, { descricao: 'Pin pad', quantidade: 4 }, { descricao: 'Impressora térmica', quantidade: 1 }] }],
+      motivo: 'chegou 1 monitor novo',
+    }, cabA);
+    const dep2 = editado2.status === 200 ? JSON.parse(editado2.corpo) : {};
+    const hist2 = dep2.historico || [];
+    const tiposMud = (hist.mudancas || []).map((m) => `${m.tipo}:${m.item}:${m.de}>${m.para}`).sort();
+    // tecnico NAO edita direto, mas PEDE
+    const tecTentou = await enviarJson('PATCH', `/api/ativos-ti/${criada.id}`, { areas: dep.areas, motivo: 'x' }, cabTec);
+    const semMotivo = await postarJson(`/api/ativos-ti/${criada.id}/solicitar-edicao`, { areas: dep.areas }, cabTec);
+    const areasPedido = [{ nome: 'Loja', itens: [{ descricao: 'Monitor', quantidade: 6 }, { descricao: 'Pin pad', quantidade: 4 }] }];
+    const pedido = await postarJson(`/api/ativos-ti/${criada.id}/solicitar-edicao`, { areas: areasPedido, motivo: 'impressora térmica saiu da loja' }, cabTec);
+    const pedidoJson = pedido.status === 200 ? JSON.parse(pedido.corpo) : {};
+    const duplicado = await postarJson(`/api/ativos-ti/${criada.id}/solicitar-edicao`, { areas: areasPedido, motivo: 'de novo' }, cabTec);
+    const semMudanca = await postarJson(`/api/ativos-ti/${criada.id}/solicitar-edicao`, { areas: dep2.areas, motivo: 'igual' }, cabA);
+    // nada mudou na vistoria enquanto o pedido esta PENDENTE
+    const antesDecisao = (await pedir('/api/ativos-ti', cabA)).corpo;
+    const vistoriaAntes = JSON.parse(antesDecisao).find((v) => v.id === criada.id) || {};
+    // o tecnico so enxerga os proprios pedidos - pra isso a fila tem que ter
+    // pedido de OUTRA pessoa tambem, senao o filtro passaria despercebido
+    const outra = JSON.parse((await postarJson('/api/ativos-ti', {
+      unidade: 'ATV2', unidadeNome: 'Outra Loja', areas: [{ nome: 'Loja', itens: [{ descricao: 'TV', quantidade: 2 }] }],
+    }, cabA)).corpo);
+    const pedidoDoMaster = await postarJson(`/api/ativos-ti/${outra.id}/solicitar-edicao`, {
+      areas: [{ nome: 'Loja', itens: [{ descricao: 'TV', quantidade: 3 }] }], motivo: 'pedido de outra pessoa',
+    }, cabA);
+    const filaTec = JSON.parse((await pedir('/api/ativos-ti/edicoes', cabTec)).corpo);
+    const filaMaster = JSON.parse((await pedir('/api/ativos-ti/edicoes', cabA)).corpo);
+    // Master aprova: aplica de verdade
+    const decidiu = await enviarJson('PATCH', `/api/ativos-ti/edicoes/${pedidoJson.id}`, { status: 'APROVADO' }, cabA);
+    const vistoriaDepois = JSON.parse((await pedir('/api/ativos-ti', cabA)).corpo).find((v) => v.id === criada.id) || {};
+    const redecidir = await enviarJson('PATCH', `/api/ativos-ti/edicoes/${pedidoJson.id}`, { status: 'REJEITADO' }, cabA);
+    const htmlA = require('fs').readFileSync(__dirname + '/public/ativos-ti.html', 'utf8');
+    const conf = {
+      'Master edita a vistoria atual: soma, tira e recalcula o total':
+        editado.status === 200 && dep.totalAtivos === 11
+        && JSON.stringify(tiposMud) === JSON.stringify(['adicionado:Loja · Impressora térmica:null>1', 'quantidade:Loja · Pin pad:5>4']),
+      'a edição deixa quem/quando/por que no histórico da própria vistoria':
+        hist.motivo === 'pin pad queimado trocado' && !!hist.em && hist.porEmail === process.env.MASTER_EMAIL,
+      'o histórico ACUMULA (a edição nova não apaga a anterior)':
+        editado2.status === 200 && hist2.length === 2
+        && hist2[0].motivo === 'pin pad queimado trocado' && hist2[1].motivo === 'chegou 1 monitor novo',
+      'técnico NÃO edita direto (403) mas PODE pedir correção': tecTentou.status === 403 && pedido.status === 200 && pedidoJson.status === 'PENDENTE',
+      'pedido sem motivo é recusado': semMotivo.status === 400 && /motivo/i.test(semMotivo.corpo),
+      'pedido que não muda nada é recusado': semMudanca.status === 400 && /Nada mudou/.test(semMudanca.corpo),
+      'só 1 pedido pendente por vistoria': duplicado.status === 400 && /pendente/i.test(duplicado.corpo),
+      'o pedido mostra o de → para de cada item (o Master decide vendo o que muda)':
+        (pedidoJson.mudancas || []).some((m) => m.tipo === 'removido' && m.item === 'Loja · Impressora térmica' && m.de === 1 && m.para === null),
+      'enquanto PENDENTE nada muda na vistoria': vistoriaAntes.totalAtivos === 12,
+      'o técnico só enxerga os próprios pedidos (o Master vê os dois)':
+        pedidoDoMaster.status === 200
+        && Array.isArray(filaTec) && filaTec.length === 1 && filaTec[0].solicitadoPorId === 'u-tec-ativos'
+        && Array.isArray(filaMaster) && filaMaster.length === 2,
+      'aprovar APLICA a correção na vistoria': decidiu.status === 200 && vistoriaDepois.totalAtivos === 10
+        && !(vistoriaDepois.areas[0].itens || []).some((i) => i.descricao === 'Impressora térmica'),
+      'pedido já decidido não decide de novo': redecidir.status === 400 && /já foi decidido/.test(redecidir.corpo),
+      // tela: o mesmo formulário serve pros dois caminhos, e o rótulo diz qual é
+      'a tela reaproveita o formulário e troca o destino conforme quem está editando':
+        /let EDITANDO_ID = null;/.test(htmlA) && /function abrirEdicaoInventario\(\)/.test(htmlA)
+        && /alvo = `\/api\/ativos-ti\/\$\{EDITANDO_ID\}`; metodo = 'PATCH';/.test(htmlA)
+        && /alvo = `\/api\/ativos-ti\/\$\{EDITANDO_ID\}\/solicitar-edicao`;/.test(htmlA)
+        && /PODE_EDITAR_DIRETO \? '✏️ Editar inventário \(somar\/tirar ativo\)' : '✏️ Pedir correção do inventário'/.test(htmlA),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okAtivosTI = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (edit=${editado.status} total=${dep.totalAtivos} mud=${JSON.stringify(tiposMud)} tec=${tecTentou.status} ped=${pedido.status} dup=${duplicado.status} dec=${decidiu.status} depois=${vistoriaDepois.totalAtivos} hist=${hist2.length} filaTec=${filaTec.length} filaMaster=${filaMaster.length})`);
+  } catch (e) { okAtivosTI = false; console.log('  erro: ' + e.message); }
+  if (!okAtivosTI) ruins += 1;
+  console.log(`${okAtivosTI ? '✓' : '✗'} Ativos de TI: Master edita o inventário (soma/tira ativo) e o técnico pede correção pra ele aprovar`);
+
+  // ------------------------------------------------------------------
   // O APP "NoPulso" NAS LOJAS (pedido do Master, 12/09/2026): "no Chrome tem a
   // opcao de instalar e fica com esse App - quero do mesmo jeito ao instalar,
   // e se tiver o app antigo Zenith Ops, remover". O mesmo comando de
