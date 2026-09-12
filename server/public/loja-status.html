@@ -498,7 +498,7 @@
     <select id="filtro-unidade" onchange="onFiltroUnidade()">
       <option value="">Todas as unidades</option>
     </select>
-    <button type="button" class="btn-secundario hidden" id="btn-push-ar" onclick="togglePushAcessoRemoto()" title="Ligar/desligar o alerta no celular quando o vigia detecta acesso remoto (AnyDesk/TeamViewer/etc). Fica sempre no histórico do computador.">🔔 Alerta acesso remoto: …</button>
+    <button type="button" class="btn-secundario hidden" id="btn-push-ar" onclick="togglePushAcessoRemoto()" title="Ligar/desligar o alerta no celular quando o NOC-NoPulso detecta acesso remoto (AnyDesk/TeamViewer/etc). Fica sempre no histórico do computador.">🔔 Alerta acesso remoto: …</button>
     <button type="button" class="btn-primary" onclick="abrirModalNovoComputador()">➕ Computador</button>
   </div>
 
@@ -2407,7 +2407,7 @@ async function manutEnviar(tarefa){
 // Confirma antes porque encerra processo em maquina de loja, e avisa que nao
 // e instantaneo: cada uma so pega o comando na proxima batida (ate ~25s).
 async function limparTravados(){
-  if(!confirm('Mandar TODOS os computadores fecharem processos travados do NOCZenith?\n\nCada máquina executa na próxima batida (até ~25s). O vigia que está saudável continua rodando — só os processos órfãos são encerrados.')) return;
+  if(!confirm('Mandar TODOS os computadores fecharem processos travados do NOCZenith?\n\nCada máquina executa na próxima batida (até ~25s). O agente NOC-NoPulso que está saudável continua rodando — só os processos órfãos são encerrados.')) return;
   const b = document.getElementById('btn-limpar-travados');
   b.disabled = true; b.textContent = '⏳ Enviando...';
   try{
