@@ -1271,6 +1271,9 @@ async function lerNotaFiscal(){
     const res = await fetch('/api/inventario/recebimentos/ler-nota', { method:'POST', body: fd });
     const data = await res.json();
     if(!res.ok) throw new Error(data.error||'Não consegui ler essa nota.');
+    // enviado: zera o input E o rascunho do tema.js, que senao devolvia o
+    // File ao input no proximo redesenho e ele ia junto outra vez
+    window.zenithRascunhos?.limparAnexoEnviado(document.getElementById('rn-arquivo'));
     RASCUNHO_NOTA = data;
     document.getElementById('rn-data').value = data.data || '';
     document.getElementById('rn-fornecedor').value = data.fornecedor || '';

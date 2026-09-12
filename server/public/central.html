@@ -632,6 +632,9 @@ document.getElementById('form-nova').addEventListener('submit', async (ev)=>{
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar solicitação.');
     document.getElementById('form-nova').reset();
+    // enviado: zera o input E o rascunho do tema.js (senao o File voltava
+    // ao input num redesenho e ia junto de novo)
+    window.zenithRascunhos?.limparAnexoEnviado(anexosInput);
     ITENS_COMPRA = []; renderItensCompra();
     document.getElementById('form-nova').classList.add('hidden');
     document.getElementById('sucesso-nova').classList.remove('hidden');

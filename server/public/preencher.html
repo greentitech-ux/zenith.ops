@@ -338,6 +338,9 @@ document.getElementById('btn-enviar').addEventListener('click', async ()=>{
     }
     const d = await r.json();
     if(!r.ok){ avisar(d.error||'Não consegui enviar.'); return; }
+    // enviado: zera o input E o rascunho do tema.js (senao o File voltava
+    // ao input num redesenho e ia junto de novo)
+    window.zenithRascunhos?.limparAnexoEnviado(document.getElementById('f-anexo'));
     document.getElementById('form-area').style.display='none';
     // MODELO.preenchedorAssina + d.meuToken juntos = quem preencheu é a
     // mesma pessoa que assina esse papel - segue direto pro quadro de

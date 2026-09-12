@@ -235,6 +235,9 @@ async function enviarLogo(){
     const resp = await fetch('/api/login-custom/logos', { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Não consegui enviar.');
+    // enviado: zera o input E o rascunho do tema.js, que senao devolvia o
+    // File ao input no proximo redesenho e ele ia junto outra vez
+    window.zenithRascunhos?.limparAnexoEnviado(input);
     CONFIG_ATUAL = data;
     renderLogos(data.logos);
     document.getElementById('f-logo-nome').value = '';
@@ -303,6 +306,9 @@ async function enviarFundo(){
     const resp = await fetch('/api/login-custom/fundo', { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar a imagem.');
+    // enviado: zera o input E o rascunho do tema.js, que senao devolvia o
+    // File ao input no proximo redesenho e ele ia junto outra vez
+    window.zenithRascunhos?.limparAnexoEnviado(input);
     CONFIG_ATUAL = data;
     renderFundoPreview(true);
     msg.textContent = '✅ Fundo atualizado!'; msg.className = 'msg ok'; msg.classList.remove('hidden');

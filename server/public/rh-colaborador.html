@@ -173,7 +173,13 @@ function tirarFotoEEnviar(){
   const input = document.getElementById('input-foto');
   input.value = '';
   input.onchange = () => {
-    if(input.files[0]) enviarPonto(input.files[0]);
+    const foto = input.files[0];
+    if(!foto) return;
+    // apaga o rascunho ANTES de registrar: sem isso o tema.js devolvia a foto
+    // ao input num redesenho qualquer, o onchange disparava sozinho e batia
+    // um segundo ponto que ninguem pediu
+    window.zenithRascunhos?.limparAnexoEnviado(input);
+    enviarPonto(foto);
   };
   input.click();
 }

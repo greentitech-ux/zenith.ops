@@ -435,6 +435,9 @@ document.getElementById('curriculo').addEventListener('change', ()=>{
     LINK_TOKEN = data.linkToken;
     document.getElementById('suc-texto').textContent = `${data.nome}, seu cadastro foi registrado e está aguardando aprovação do RH.`;
     document.getElementById('form-cadastro').classList.add('hidden');
+    // enviado: zera os inputs E o rascunho do tema.js (senao o currículo e a
+    // foto voltavam ao campo num redesenho e iam junto num segundo envio)
+    ['curriculo','foto-cadastro'].forEach(id=>window.zenithRascunhos?.limparAnexoEnviado(document.getElementById(id)));
     document.getElementById('sucesso').classList.remove('hidden');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }catch(err){

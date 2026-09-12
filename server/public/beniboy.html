@@ -751,6 +751,11 @@ function registrarAnexoResposta(id, campo){
 function limparRascunhoResposta(id){
   const campo = document.getElementById(`d-texto-${id}`);
   window.zenithRascunhos?.limparCampoEnviado(campo);
+  // o print que ACABOU de ser enviado não pode continuar pendurado no input:
+  // o guarda-rascunho do tema.js também guarda ARQUIVO e devolve ele ao input
+  // recriado no render seguinte - a prévia voltava e o próximo ENTER mandava
+  // o mesmo print de novo pro cliente.
+  window.zenithRascunhos?.limparAnexoEnviado(document.getElementById(`d-anexo-${id}`));
   RASCUNHOS_PAINEL_CHAT.delete(id);
   ROLAGEM_PAINEL_CHAT.delete(id);
 }

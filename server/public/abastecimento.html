@@ -2662,7 +2662,7 @@ async function enviarMensagemConversa(){
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar.');
     window.zenithRascunhos?.limparCampoEnviado(input);
     input.value = '';
-    if(campoAnexo){ campoAnexo.value = ''; campoAnexo.dispatchEvent(new Event('change', { bubbles: true })); }
+    window.zenithRascunhos?.limparAnexoEnviado(campoAnexo);
     await carregar();
     renderConversa();
   }catch(err){ alert(err.message); }

@@ -570,6 +570,9 @@ async function enviarAnexoDepois(input){
     const r = await fetch(`/api/formularios/${encodeURIComponent(id)}/anexos`, { method:'POST', body: fd });
     const d = await r.json();
     if(!r.ok) throw new Error(d.error || ('erro '+r.status));
+    // enviado: zera o input E o rascunho do tema.js (senao o File voltava
+    // ao input num redesenho e ia junto de novo)
+    window.zenithRascunhos?.limparAnexoEnviado(input);
     await carregarLista();
     alert(`${arquivos.length} anexo(s) adicionado(s). Já entram no PDF - as assinaturas já colhidas continuam valendo.`);
   }catch(e){ alert(e.message); }

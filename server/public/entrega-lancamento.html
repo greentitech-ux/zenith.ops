@@ -587,6 +587,9 @@ document.getElementById('form-lancar').addEventListener('submit', async (ev)=>{
     const res = await fetch('/api/entregas/lancar', { method:'POST', body: form });
     const data = await res.json();
     if(!res.ok) throw new Error(data.error||'erro ao lançar');
+    // enviado: zera o input E o rascunho do tema.js, que senao devolvia o
+    // File ao input no proximo redesenho e ele ia junto outra vez
+    window.zenithRascunhos?.limparAnexoEnviado(document.getElementById('f-etiqueta'));
     msg.textContent = 'Entrega lançada com sucesso.'; msg.className = 'msg ok';
     resetarForm();
     await carregar();

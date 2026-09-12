@@ -892,7 +892,9 @@ document.getElementById('dispute-form').addEventListener('submit', async (e)=>{
     document.getElementById('dispute-nome').value = '';
     document.getElementById('dispute-telefone').value = '';
     document.getElementById('dispute-notas').value = '';
-    document.getElementById('dispute-anexos').value = '';
+    // limparAnexoEnviado, e nao so `.value=''`: o rascunho do tema.js
+    // devolvia os arquivos ao input e eles iam junto no proximo registro
+    window.zenithRascunhos?.limparAnexoEnviado(document.getElementById('dispute-anexos'));
     await carregarHistoricoDisputas(DISPUTE_PEDIDO.pedidoId);
   } catch(err) {
     alert(err.message);

@@ -3390,6 +3390,9 @@ async function salvarEdicaoFechamento(){
     }
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro ao salvar.');
+    // enviado: zera o input E o rascunho do tema.js, que senao devolvia o
+    // File ao input no proximo redesenho e ele ia junto outra vez
+    arquivosKpi.forEach(el=>window.zenithRascunhos?.limparAnexoEnviado(el));
     fecharEdicaoFechamento();
     await carregar();
   }catch(err){

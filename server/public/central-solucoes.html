@@ -277,7 +277,7 @@ async function enviarResposta(){
     if(!resp.ok) throw new Error(data.error || 'Erro ao enviar mensagem.');
     window.zenithRascunhos?.limparCampoEnviado(input);
     input.value = '';
-    if(campoAnexo){ campoAnexo.value = ''; campoAnexo.dispatchEvent(new Event('change', { bubbles: true })); }
+    window.zenithRascunhos?.limparAnexoEnviado(campoAnexo);
     await carregarMensagensDetalhe();
     await carregarLista();
   }catch(err){ alert(err.message); }

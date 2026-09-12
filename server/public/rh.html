@@ -1891,6 +1891,10 @@ async function anexarDocumentoAdvertencia(){
   const resp = await fetch(`/api/rh/advertencias/${ADVERTENCIA_ABERTA_ID}/documento`, { method:'POST', body: fd });
   const data = await resp.json();
   if(!resp.ok){ alert(data.error||'Erro ao anexar.'); return; }
+  // o arquivo ja foi enviado: limparAnexoEnviado zera o input E apaga o
+  // rascunho do tema.js, que senao devolveria o File ao input no redesenho
+  // logo abaixo - e ele iria junto de novo no proximo anexo
+  window.zenithRascunhos?.limparAnexoEnviado(input);
   await carregarAdvertencias();
   await renderDetalheAdvertencia();
 }
@@ -1902,6 +1906,10 @@ async function enviarAssinadoAdvertencia(){
   const resp = await fetch(`/api/rh/advertencias/${ADVERTENCIA_ABERTA_ID}/assinado`, { method:'POST', body: fd });
   const data = await resp.json();
   if(!resp.ok){ alert(data.error||'Erro ao enviar.'); return; }
+  // o arquivo ja foi enviado: limparAnexoEnviado zera o input E apaga o
+  // rascunho do tema.js, que senao devolveria o File ao input no redesenho
+  // logo abaixo - e ele iria junto de novo no proximo anexo
+  window.zenithRascunhos?.limparAnexoEnviado(input);
   await carregarAdvertencias();
   await renderDetalheAdvertencia();
 }

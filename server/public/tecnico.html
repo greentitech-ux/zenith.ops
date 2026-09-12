@@ -1008,6 +1008,9 @@ async function salvarCobranca(enviar){
     const resp = await fetch(`/api/chamados/${DETALHE_ATUAL.id}/cobranca`, { method:'POST', body: fd });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error || 'Erro na cobrança.');
+    // enviado: zera o input E o rascunho do tema.js (senao o boleto voltava
+    // e ia junto na cobranca do proximo chamado)
+    window.zenithRascunhos?.limparAnexoEnviado(document.getElementById('cb-boleto'));
     await carregarChamados();
     if(enviar){
       alert(`Cobrança enviada! Ticket de Pagamento #${data.numeroTicket} criado na Central — mesma numeração do chamado.`);
@@ -1067,7 +1070,10 @@ async function enviarChatChamado(){
     const campoTexto = document.getElementById('chat-texto');
     window.zenithRascunhos?.limparCampoEnviado(campoTexto);
     campoTexto.value = '';
-    document.getElementById('chat-foto').value = '';
+    // limparAnexoEnviado, e nao so `.value = ''`: o guarda-rascunho do tema.js
+    // guarda o File e devolve ele ao input no proximo redesenho do chat - a
+    // foto voltava e ia junto na mensagem seguinte
+    window.zenithRascunhos?.limparAnexoEnviado(document.getElementById('chat-foto'));
     document.getElementById('chat-foto-icone').textContent = '📷';
     await carregarChatChamado();
   }catch(err){ erroDetalhe(err.message); }
