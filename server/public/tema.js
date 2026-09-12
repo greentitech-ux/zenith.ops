@@ -821,10 +821,6 @@
     var balao = null;
     var alvoAtual = null;
 
-    function ehToque() {
-      try { return window.matchMedia && window.matchMedia('(hover:none)').matches; }
-      catch (_) { return false; }
-    }
     function garantirBalao() {
       if (balao && balao.isConnected) return balao;
       balao = document.createElement('div');
@@ -866,8 +862,23 @@
       balao.style.setProperty('--seta-x', Math.round(centro - x) + 'px');
     }
 
+    // QUEM DECIDE E O PONTEIRO QUE ESTA EM CIMA AGORA, nao uma pergunta
+    // sobre o aparelho.
+    //
+    // Aqui tinha um `if (ehToque()) return`, com `matchMedia('(hover:none)')`.
+    // Essa consulta responde pelo ponteiro PRIMARIO do aparelho: num
+    // computador com tela de toque - que e' o caso do PC do Master e das
+    // maquinas de loja - o Windows responde "toque", e o mouse de verdade
+    // ficava sem balao no app inteiro. A borda do icone acendia (isso e'
+    // :hover do CSS, nao passa por aqui) e o nome nunca vinha. Segurando o
+    // clique aparecia, porque ai quem mostrava era o caminho do FOCO, que
+    // nao tinha esse `if`.
+    //
+    // pointerType diz quem esta hoverando NESTE evento: mouse e caneta tem
+    // balao, dedo nao - e isso vale igual num aparelho que so tem mouse,
+    // num que so tem toque e num que tem os dois.
     function entrou(e) {
-      if (ehToque()) return;
+      if (e && e.pointerType === 'touch') return;
       var alvo = e.target && e.target.closest && e.target.closest('[data-dica]');
       if (!alvo || alvo === alvoAtual) return;
       mostrar(alvo);
@@ -876,13 +887,23 @@
       var alvo = e.target && e.target.closest && e.target.closest('[data-dica]');
       if (alvo && alvo === alvoAtual) esconder();
     }
-    document.addEventListener('mouseover', entrou, true);
-    document.addEventListener('mouseout', saiu, true);
+    if (window.PointerEvent) {
+      document.addEventListener('pointerover', entrou, true);
+      document.addEventListener('pointerout', saiu, true);
+    } else {
+      // navegador sem PointerEvent nao tem toque pra atrapalhar
+      document.addEventListener('mouseover', entrou, true);
+      document.addEventListener('mouseout', saiu, true);
+    }
     // teclado: :focus-visible nao existe como evento, entao mostra no foco e
-    // some quando o foco sai
+    // some quando o foco sai. So foco de TECLADO: clique e toque tambem
+    // focam o botao, e era assim que o balao ficava preso na tela depois de
+    // um toque no celular - o oposto do que este balao deveria fazer.
     document.addEventListener('focusin', function (e) {
       var alvo = e.target && e.target.closest && e.target.closest('[data-dica]');
-      if (alvo) mostrar(alvo);
+      if (!alvo) return;
+      try { if (!alvo.matches(':focus-visible')) return; } catch (_) { /* navegador antigo: mostra */ }
+      mostrar(alvo);
     }, true);
     document.addEventListener('focusout', saiu, true);
     // qualquer coisa que mova a tela ou troque o conteudo tira o balao: um

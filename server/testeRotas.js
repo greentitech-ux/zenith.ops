@@ -11545,6 +11545,87 @@ setTimeout(async () => {
   console.log(`${okPolitica ? '✓' : '✗'} Política da máquina: papel de parede, pendrive, instalação com Administrador e alerta de programa novo`);
 
   // ------------------------------------------------------------------
+  // "INCLUSIVE QUERO TAMBEM SER AVISADO QUANDO DESINSTALADO" (Master,
+  // 12/09/2026). O mesmo diff ao contrario, na MESMA chave (alertarInstalacao):
+  // ele nao pediu um segundo botao, pediu que o alerta que ja existe cubra os
+  // dois lados. O que este bloco segura:
+  //   1) sumico vira alerta, evento e linha propria no registro;
+  //   2) leitura TRUNCADA nao vira "desinstalaram 40 programas" - e, mais
+  //      importante, nao apaga a base (senao o proximo tick alerta os 40 como
+  //      instalacao nova, pra sempre);
+  //   3) a trava tem piso: faxina pequena de verdade continua avisando;
+  //   4) o inventario nao roda na instancia de BOOT - SYSTEM tem outro HKCU,
+  //      e era essa a origem do falso sumico em massa.
+  let okDesinstalado = false;
+  try {
+    const cabD = { 'x-noc-token': 'tokdes' };
+    const rotaD = '/api/loja-status/DES/computadores/PC1/programas';
+    DOCS.set('lojaStatus/DES__PC1', {
+      codigo: 'DES', posto: 'PC1', nome: 'Loja Desinstala', tipo: 'interno', agentToken: 'tokdes',
+      ultimoHeartbeatEm: Date.now(), eventos: [], politica: { alertarInstalacao: true },
+      programas: ['Google Chrome', 'Adobe Reader', 'Avast Antivirus', 'NOCZenith', '7-Zip', 'Notepad++'],
+    });
+    // faxina de verdade: 3 de 6 saem (abaixo do piso de 10) - tem que avisar
+    const some = await postarJson(rotaD, { programas: ['Google Chrome', 'Adobe Reader', 'Notepad++'] }, cabD);
+    const docDes = DOCS.get('lojaStatus/DES__PC1') || {};
+
+    // leitura truncada: 12 de 20 somem de uma vez (piso E proporcao batidos)
+    const vinte = Array.from({ length: 20 }, (_, i) => 'Programa ' + (i + 1));
+    DOCS.set('lojaStatus/DES2__PC1', {
+      codigo: 'DES2', posto: 'PC1', nome: 'Leitura ruim', tipo: 'interno', agentToken: 'tok3',
+      ultimoHeartbeatEm: Date.now(), eventos: [], politica: { alertarInstalacao: true }, programas: vinte,
+    });
+    const truncada = await postarJson('/api/loja-status/DES2/computadores/PC1/programas', { programas: vinte.slice(0, 8) }, { 'x-noc-token': 'tok3' });
+    const docTrunc = DOCS.get('lojaStatus/DES2__PC1') || {};
+
+    // com a chave DESLIGADA nao sai aviso de sumico (mas a lista e guardada,
+    // pra existir base de comparacao no dia em que ele ligar)
+    DOCS.set('lojaStatus/DES3__PC1', {
+      codigo: 'DES3', posto: 'PC1', nome: 'Sem alerta', tipo: 'interno', agentToken: 'tok4',
+      ultimoHeartbeatEm: Date.now(), eventos: [], politica: { alertarInstalacao: false },
+      programas: ['A', 'B', 'C'],
+    });
+    const desligado = await postarJson('/api/loja-status/DES3/computadores/PC1/programas', { programas: ['A'] }, { 'x-noc-token': 'tok4' });
+    const docDesl = DOCS.get('lojaStatus/DES3__PC1') || {};
+
+    const psD = require('/home/user/adyen-monitor/server/vigiaScript.js');
+    const scriptD = psD.montarScriptVigia({ codigo: 'DES', posto: 'PC1', tipo: 'interno', agentToken: 'tokdes' });
+    const htmlD = require('fs').readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+    const pushD = require('fs').readFileSync(__dirname + '/push.js', 'utf8');
+
+    const confD = {
+      'desinstalação é detectada e vira alerta, campo e evento na máquina':
+        some.status === 200 && JSON.parse(some.corpo).sumidos === 3
+        && docDes.ultimoProgramaSumidoDetalhe === 'Avast Antivirus · NOCZenith · 7-Zip'
+        && (docDes.eventos || []).some((e) => e.tipo === 'programa-sumido')
+        && docDes.programas.length === 3,
+      'leitura truncada NÃO vira alerta de desinstalação em massa':
+        truncada.status === 200 && JSON.parse(truncada.corpo).sumidos === 0
+        && !docTrunc.ultimoProgramaSumidoEm,
+      'leitura truncada NÃO apaga a base (senão o próximo tick alerta os 12 como instalação nova)':
+        docTrunc.programas.length === 20,
+      'com o alerta desligado o sumiço não avisa, mas a lista é guardada':
+        desligado.status === 200 && JSON.parse(desligado.corpo).sumidos === 0
+        && !docDesl.ultimoProgramaSumidoEm && docDesl.programas.length === 1,
+      'instalado e desinstalado têm linha PRÓPRIA no registro (não caem no "Voltou")':
+        /ev\.tipo==='programa-novo'/.test(htmlD) && /ev\.tipo==='programa-sumido'/.test(htmlD)
+        && /Programa desinstalado/.test(htmlD),
+      'o push de desinstalação existe e é crítico como o de instalação':
+        /async function notifyProgramaSumido\(/.test(pushD) && /noc-programa-sumido/.test(pushD)
+        && /notifyProgramaSumido,/.test(pushD),
+      'o inventário NÃO roda na instância de boot (SYSTEM tem outro HKCU - era a origem do falso sumiço)':
+        /function Inventariar-Programas \{\n  if \(\$Servico\) \{ return \}/.test(scriptD),
+      'VERSAO_VIGIA subiu (sem isso nenhuma das 52 máquinas para de mandar inventário pelo SYSTEM)':
+        psD.VERSAO_VIGIA >= 52,
+    };
+    const falhasD = Object.entries(confD).filter(([, v]) => !v).map(([n]) => n);
+    okDesinstalado = !falhasD.length;
+    if (falhasD.length) console.log(`  falhou em: ${falhasD.join(' · ')} (some=${some.corpo} trunc=${truncada.corpo} progTrunc=${docTrunc.programas.length} desl=${desligado.corpo})`);
+  } catch (e) { okDesinstalado = false; console.log('  erro: ' + e.message); }
+  if (!okDesinstalado) ruins += 1;
+  console.log(`${okDesinstalado ? '✓' : '✗'} Programa DESINSTALADO também avisa — e leitura truncada não vira alerta falso`);
+
+  // ------------------------------------------------------------------
   // TOKEN DE API DO MASTER (pedido 12/09/2026: "só quem usará sou eu esse
   // Token Global, em um chat no Cowork"). O desenho NAO e o da especificacao
   // (um BOT_ACAO_TOKEN com regras proprias por rota): o token resolve pro
@@ -11601,6 +11682,65 @@ setTimeout(async () => {
   } catch (e) { okApiToken = false; console.log('  erro: ' + e.message); }
   if (!okApiToken) ruins += 1;
   console.log(`${okApiToken ? '✓' : '✗'} Token de API do Master: entra como ele mesmo, pelo MESMO caminho de permissão da sessão`);
+
+  // ------------------------------------------------------------------
+  // APOSENTAR O ENDERECO ANTIGO (pedido 12/09/2026: "preciso extinguir esse
+  // adyen-monitor, aposentar de vez"). O CLAUDE.md §4 diz que o dominio velho
+  // NUNCA pode ser desligado - e o motivo e concreto: o agente so descobre que
+  // existe versao nova pelo endereco assado no PROPRIO script. Desligar com uma
+  // maquina ainda apontando pra la deixa ELA orfa pra sempre.
+  // Isso nao e um "nunca" eterno, e um "nunca ENQUANTO houver pendente" - mas
+  // ate agora nao dava pra saber quantas eram. Agora da: o agente (v51+) diz
+  // por qual endereco fala, e o servidor conta. podeAposentar so fica true com
+  // ZERO pendentes; versao antiga (que nem sabe reportar) conta como PENDENTE,
+  // que e o lado seguro do erro.
+  let okMigracao = false;
+  try {
+    const ls = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const OFICIAL = 'https://www.nopulso.com.br';
+    const docs = [
+      { codigo: 'A', posto: 'P1', nome: 'Migrada', agentToken: 't', agenteEndereco: OFICIAL, agenteVersao: 51 },
+      { codigo: 'B', posto: 'P1', nome: 'Barra no fim', agentToken: 't', agenteEndereco: OFICIAL + '/', agenteVersao: 51 },
+      { codigo: 'C', posto: 'P1', nome: 'Ainda no velho', agentToken: 't', agenteEndereco: 'https://adyen-monitor.onrender.com', agenteVersao: 51 },
+      { codigo: 'D', posto: 'P1', nome: 'Versao antiga', agentToken: 't', agenteVersao: 48 },
+      { codigo: 'E', posto: 'P1', nome: 'Sem agente', agenteVersao: null },
+    ];
+    const r = ls.resumoEnderecoAgentes(docs, OFICIAL);
+    const soMigradas = ls.resumoEnderecoAgentes(docs.filter((d) => ['A', 'B'].includes(d.codigo)), OFICIAL);
+    const semOficial = ls.resumoEnderecoAgentes(docs, '');
+    // o caso que de fato distingue: NADA pendente e NENHUM endereço oficial.
+    // Só "pendentes === 0" diria "pode aposentar" aqui - e desligar o domínio
+    // velho sem ter pra onde apontar é o pior desfecho possível.
+    const vazioSemOficial = ls.resumoEnderecoAgentes([], '');
+    const vazioComOficial = ls.resumoEnderecoAgentes([], OFICIAL);
+    // rota: só o Master
+    const rotaComum = await pedir('/api/loja-status/migracao-endereco', { Authorization: 'Bearer ' + (await auth.login('pol-comum@teste.local', 'SenhaDeTeste!2026')).token });
+    const rotaMaster = await pedir('/api/loja-status/migracao-endereco', { Authorization: 'Bearer ' + token });
+    const psMig = require('/home/user/adyen-monitor/server/vigiaScript.js').montarScriptVigia({ codigo: 'X', posto: 'P', tipo: 'interno', agentToken: 't' });
+    const conf = {
+      'computador SEM agente não entra na conta (não há o que migrar nele)': r.total === 4,
+      'máquina no endereço oficial conta como migrada, com ou sem barra no fim': r.migradas === 2,
+      'quem ainda fala com o endereço antigo aparece na lista de pendentes':
+        r.pendentes.some((p) => p.codigo === 'C' && /adyen-monitor/.test(p.endereco || '')),
+      'versão antiga (que nem sabe reportar) conta como PENDENTE - o lado seguro do erro':
+        r.pendentes.some((p) => p.codigo === 'D' && !p.endereco),
+      'podeAposentar só fica true com ZERO pendentes':
+        r.podeAposentar === false && soMigradas.podeAposentar === true && soMigradas.pendentes.length === 0,
+      'sem endereço oficial configurado, NUNCA libera aposentar (nem com o parque vazio)':
+        semOficial.podeAposentar === false && vazioSemOficial.podeAposentar === false
+        && vazioComOficial.podeAposentar === true,
+      'o agente v51+ diz por qual endereço fala (e a dedup considera isso)':
+        /\$EnderecoBase = "/.test(psMig)
+        && /endereco = \$EnderecoBase/.test(psMig)
+        && /\$chave = "\$VersaoScript\|\$estadoPrint\|\$EnderecoBase"/.test(psMig),
+      'a rota do resumo é só do Master': rotaComum.status === 403 && rotaMaster.status === 200,
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okMigracao = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (${JSON.stringify(r)})`);
+  } catch (e) { okMigracao = false; console.log('  erro: ' + e.message); }
+  if (!okMigracao) ruins += 1;
+  console.log(`${okMigracao ? '✓' : '✗'} Aposentar o endereço antigo: o agente diz por onde fala, e só libera com ZERO máquinas pendentes`);
 
   // ------------------------------------------------------------------
   // O APP "NoPulso" NAS LOJAS (pedido do Master, 12/09/2026): "no Chrome tem a
@@ -17498,6 +17638,46 @@ setTimeout(async () => {
       'o painel de conversa da Central usa o mesmo ✕, sem estilo próprio':
         /<span class="zenith-fechar" title="Fechar" onclick="fecharPainel\(/.test(fs.readFileSync(__dirname + '/public/beniboy.html', 'utf8'))
         && !/painel-fechar/.test(fs.readFileSync(__dirname + '/public/beniboy.html', 'utf8')),
+
+      // ---- os 8 painéis do NOC (pedido do Master: "falta o botão redondo
+      // com x para fechar passando do card flutuante no cantinho superior
+      // direito, passando um pouco como em outros cards") ----
+      //
+      // A ARMADILHA aqui é a mesma que já cortou o balão de dica: .modal tem
+      // overflow-y:auto, e um filho em top:-14px é CORTADO por ela. Por isso o
+      // ✕ mora na .sheet-wrap (que não rola) e o .modal fica dentro - mesmo
+      // desenho .sheet-wrap/.sheet da Central e do Beniboy. Se alguém mover o
+      // ✕ pra dentro do .modal, ele some pela metade e ninguém nota até a
+      // loja reclamar.
+      'todo painel do NOC tem o ✕ redondo, e ele fica FORA da caixa que rola': (() => {
+        const noc = fs.readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+        const ids = ['acao-overlay', 'rodar-acao-overlay', 'manut-overlay', 'msg-overlay',
+          'novo-comp-overlay', 'disp-overlay', 'editar-comp-overlay', 'detalhe-comp-overlay'];
+        const faltam = ids.filter((id) => {
+          const i = noc.indexOf(`id="${id}">`);
+          if (i < 0) return true;
+          const trecho = noc.slice(i, i + 400);
+          // ordem importa: sheet-wrap, depois o ✕, e só então o .modal
+          const w = trecho.indexOf('class="sheet-wrap"');
+          const x = trecho.indexOf('class="sheet-fechar-flutuante"');
+          const m = trecho.indexOf('class="modal');
+          return !(w >= 0 && x > w && m > x);
+        });
+        return faltam.length === 0 || `sem ✕ fora da rolagem: ${faltam.join(', ')}`;
+      })(),
+      'a caixa que ancora o ✕ existe no CSS do NOC (senão ele cai no canto da tela)': (() => {
+        const noc = fs.readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+        return /\.sheet-wrap\{position:relative;width:100%/.test(noc)
+          && /\.sheet-wrap > \.modal\{max-width:none;\}/.test(noc);
+      })(),
+      // dois ✕ no mesmo cabeçalho é ruído: o da quina já fica sempre visível
+      // porque mora fora da rolagem
+      'a ficha da máquina não tem dois ✕': (() => {
+        const noc = fs.readFileSync(__dirname + '/public/loja-status.html', 'utf8');
+        const i = noc.indexOf('id="detalhe-comp-overlay">');
+        const ficha = noc.slice(i, noc.indexOf('id="detalhe-comp-politica"', i));
+        return (ficha.match(/>✕</g) || []).length === 1;
+      })(),
     };
     const falhas = Object.entries(conf).filter(([, v]) => v !== true).map(([n, v]) => (typeof v === 'string' ? `${n} (${v})` : n));
     okFechar = !falhas.length;
@@ -17785,6 +17965,10 @@ setTimeout(async () => {
   try {
     const fs = require('fs');
     const tema = fs.readFileSync(__dirname + '/public/tema.js', 'utf8');
+    // so o que RODA: os comentarios abaixo explicam o bug do (hover:none) e
+    // citam a consulta pelo nome - se o teste olhar o arquivo cru, ele passa
+    // com a consulta de volta no lugar
+    const temaCodigo = tema.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
     const ben = fs.readFileSync(__dirname + '/public/beniboy.html', 'utf8');
     const bloco = (tema.match(/var dicas = document\.createElement\('style'\);[\s\S]*?document\.head\.appendChild\(dicas\);/) || [''])[0];
 
@@ -17805,9 +17989,24 @@ setTimeout(async () => {
       // quem navega por teclado também precisa saber o que o ícone faz
       'teclado também vê a dica':
         /document\.addEventListener\('focusin'/.test(tema) && /document\.addEventListener\('focusout'/.test(tema),
-      // em tela de toque não há hover: balão preso depois do toque atrapalha
-      'em tela de toque o balão não aparece':
-        /function ehToque\(\)/.test(tema) && /\(hover:none\)/.test(tema) && /if \(ehToque\(\)\) return;/.test(tema),
+      // QUEM está hoverando AGORA, não o que o aparelho diz que é.
+      //
+      // Isto aqui já foi `/function ehToque\(\)/ && /\(hover:none\)/` - o teste
+      // descrevia a implementação em vez da regra, e por isso passou verdinho
+      // enquanto o Master não via balão nenhum a tela inteira: o PC dele tem
+      // tela de toque, o Windows respondia "(hover:none)" pelo ponteiro
+      // primário e o mouse de verdade ficava de fora. Agora a asserção é a
+      // regra: dedo não, mouse e caneta sim - e a consulta ao aparelho não
+      // pode voltar.
+      'o balão segue o PONTEIRO (dedo não, mouse e caneta sim), não o tipo de aparelho':
+        /if \(e && e\.pointerType === 'touch'\) return;/.test(temaCodigo)
+        && !/hover:none/.test(temaCodigo) && !/ehToque/.test(temaCodigo),
+      'o hover escuta pointerover (com mouseover de reserva em navegador sem PointerEvent)':
+        /document\.addEventListener\('pointerover', entrou, true\)/.test(temaCodigo)
+        && /window\.PointerEvent/.test(temaCodigo)
+        && /document\.addEventListener\('mouseover', entrou, true\)/.test(temaCodigo),
+      'só foco de TECLADO mostra (clique e toque também focam - era isso que prendia o balão)':
+        /matches\(':focus-visible'\)/.test(temaCodigo),
       'respeita quem pediu menos animação': /@media \(prefers-reduced-motion:reduce\)/.test(bloco),
       'toda cor está dentro de var(--token,…), nenhuma solta':
         !/#[0-9a-f]{6}/i.test(bloco.replace(/var\(--[a-z0-9-]+,\s*#[0-9a-f]{6}\)/gi, ''))
@@ -18369,6 +18568,10 @@ setTimeout(async () => {
   let okDica = false;
   try {
     const tema = require('fs').readFileSync(require('path').join(__dirname, 'public', 'tema.js'), 'utf8');
+    // so o que RODA: o comentario do tema.js cita `(hover:none)` pelo nome
+    // pra explicar o bug - olhando o arquivo cru, o teste passaria com a
+    // consulta de volta no lugar
+    const temaCodigo = tema.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
     const noc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
     const beni = require('fs').readFileSync(require('path').join(__dirname, 'public', 'beniboy.html'), 'utf8');
     // a fileira de ações da ficha da máquina
@@ -18402,8 +18605,9 @@ setTimeout(async () => {
         /window\.addEventListener\('scroll', esconder, true\)/.test(tema)
         && /document\.addEventListener\('click', esconder, true\)/.test(tema)
         && /window\.addEventListener\('resize', esconder\)/.test(tema),
-      'em tela de toque não aparece (lá não existe hover)':
-        /function ehToque\(\)/.test(tema) && /if \(ehToque\(\)\) return;/.test(tema),
+      'um toque de dedo não deixa balão preso na tela':
+        /if \(e && e\.pointerType === 'touch'\) return;/.test(temaCodigo)
+        && /matches\(':focus-visible'\)/.test(temaCodigo),
       // ---- a ficha da máquina, do jeito do chat da Central ----
       'a ficha da máquina virou só-ícone, sem sobrar botão com texto':
         !!acoes && icones.length >= 8 && !/btn-mini/.test(acoes),

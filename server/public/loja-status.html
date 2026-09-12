@@ -315,6 +315,13 @@
      vem depois. */
   #disp-overlay{z-index:60;}
   .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto;}
+  /* O ✕ redondo flutuante (desenho no tema.js) precisa de uma caixa que NÃO
+     role: o .modal tem overflow-y:auto e cortaria um filho em top:-14px,
+     exatamente como a caixa com rolagem cortava o balão de dica. A caixa só
+     ancora - quem rola continua sendo o .modal de dentro. Mesmo padrão
+     .sheet-wrap/.sheet da Central e do Beniboy. */
+  .sheet-wrap{position:relative;width:100%;max-width:420px;}
+  .sheet-wrap > .modal{max-width:none;}
   .modal-msg{max-width:580px;}
   .modal-msg .hidden{display:none!important;}
   .modal h3{margin:0 0 4px;font-size:15px;}
@@ -528,6 +535,14 @@
 </div>
 
 <div id="agente-root" class="hidden">
+  <!-- QUEM AINDA FALA COM O ENDERECO ANTIGO. E o que decide se da pra
+       aposentar o dominio velho: enquanto houver pendente, desligar deixa
+       aquela maquina orfa (ver CLAUDE.md §4) -->
+  <div class="agente-titulo"><h2>🌐 Migração de endereço</h2></div>
+  <div class="agente-sub">
+    O agente só descobre que existe versão nova pelo endereço que está assado no próprio script dele. Por isso o endereço antigo <b>não pode ser desligado</b> enquanto alguma máquina ainda falar com ele — ela ficaria órfã pra sempre. Aqui você vê quantas faltam.
+  </div>
+  <div id="migracao-endereco" style="margin-bottom:18px;"></div>
   <!-- papel de parede do parque: UMA imagem pra rede toda; cada computador
        decide se aplica, na política do card dele -->
   <div class="agente-titulo"><h2>🖼️ Papel de parede do parque</h2></div>
@@ -578,6 +593,8 @@
 </div>
 
 <div class="overlay hidden" id="acao-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharModalAcao()">✕</span>
   <div class="modal">
     <h3 id="acao-modal-titulo">🤖 Nova ação</h3>
     <div id="acao-modelo-wrap">
@@ -620,9 +637,12 @@
       <button type="button" class="btn-primary" id="acao-modal-salvar" onclick="salvarAcao()">Salvar</button>
     </div>
   </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="rodar-acao-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharRodarAcao()">✕</span>
   <div class="modal">
     <h3>▶️ Rodar ação num computador</h3>
     <div class="sub" id="rodar-acao-nome" style="margin-bottom:8px;"></div>
@@ -644,6 +664,7 @@
       <button type="button" class="btn-primary" id="rodar-acao-btn" onclick="rodarAcaoConfirmar()">▶️ Rodar aqui</button>
     </div>
   </div>
+  </div>
 </div>
 
 <!-- Janela de Manutenção: reinício em massa do parque. O alvo é montado
@@ -651,7 +672,9 @@
      servidor; o COMANDO em si é fixo lá (ver COMANDO_REINICIAR) - a tela
      nunca manda texto de comando. -->
 <div class="overlay hidden" id="manut-overlay">
-  <div class="modal" style="max-width:640px;">
+  <div class="sheet-wrap" style="max-width:640px;">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharManutencao()">✕</span>
+  <div class="modal">
     <h3>🔁 Janela de Manutenção · reiniciar máquinas</h3>
     <div class="sub" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;">
       Só entra na lista computador <b>interno</b> com o agente NOC-NoPulso instalado - é quem sabe receber comando.
@@ -724,9 +747,12 @@
       <button type="button" class="btn-primary" id="manut-confirmar" onclick="manutEnviar('reiniciar')">🔁 Reiniciar selecionados</button>
     </div>
   </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="msg-overlay">
+  <div class="sheet-wrap" style="max-width:580px;">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharModalMensagem()">✕</span>
   <div class="modal modal-msg">
     <h3>💬 Mensagem</h3>
     <div class="sub" id="msg-modal-loja"></div>
@@ -766,9 +792,12 @@
       <button type="button" class="btn-primary" id="msg-modal-enviar" onclick="enviarMensagemLoja()">Enviar</button>
     </div>
   </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="novo-comp-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharModalNovoComputador()">✕</span>
   <div class="modal">
     <h3>🖥️ Novo computador</h3>
     <label>Unidade</label>
@@ -803,9 +832,12 @@
       <button type="button" class="btn-primary" id="novo-comp-salvar" onclick="salvarNovoComputador()">Cadastrar</button>
     </div>
   </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="disp-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharModalDispositivo()">✕</span>
   <div class="modal">
     <h3>📡 Aparelho da rede</h3>
     <div class="sub" id="disp-modal-mac"></div>
@@ -835,9 +867,12 @@
       <button type="button" class="btn-primary" id="disp-salvar" onclick="salvarDispositivo()">Salvar</button>
     </div>
   </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="editar-comp-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharModalEditarComputador()">✕</span>
   <div class="modal">
     <h3>✏️ Editar computador</h3>
     <div class="sub" id="editar-comp-unidade"></div>
@@ -879,19 +914,22 @@
       <button type="button" class="btn-primary" id="editar-comp-salvar" onclick="salvarEdicaoComputador()">Salvar</button>
     </div>
   </div>
+  </div>
 </div>
 
 <div class="overlay hidden" id="detalhe-comp-overlay">
+  <div class="sheet-wrap">
+    <span class="sheet-fechar-flutuante" title="Fechar" onclick="fecharDetalheComputador()">✕</span>
   <div class="modal">
     <!-- cabecalho GRUDADO no topo enquanto o conteudo rola (o modal e longo:
-         disco, rede, aparelhos...) - o ✕ de fechar fica SEMPRE visivel, sem
-         precisar rolar ate o "Fechar" la embaixo. As margens negativas
+         disco, rede, aparelhos...) para o nome da maquina nao sumir de vista.
+         O ✕ nao fica aqui: ele e' o redondo da quina, que mora FORA da caixa
+         com rolagem e por isso ja esta sempre visivel. As margens negativas
          cancelam o padding do .modal pra barra cobrir a largura/topo inteiros -->
     <div style="display:flex;align-items:center;gap:8px;position:sticky;top:-20px;z-index:2;background:var(--panel);margin:-20px -20px 10px;padding:16px 20px 10px;border-bottom:1px solid var(--line);border-radius:14px 14px 0 0;">
       <span class="status-dot" id="detalhe-comp-dot"></span>
       <h3 id="detalhe-comp-nome" style="margin:0;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></h3>
       <button type="button" class="icon-btn" title="Editar" id="detalhe-comp-editar">✏️</button>
-      <button type="button" class="icon-btn" title="Fechar" onclick="fecharDetalheComputador()">✕</button>
     </div>
     <div class="sub" id="detalhe-comp-sub"></div>
     <div class="equip-tile-status" id="detalhe-comp-status" style="margin-bottom:12px;"></div>
@@ -902,6 +940,7 @@
     <div class="modal-acoes">
       <button type="button" class="btn-ghost" onclick="fecharDetalheComputador()">Fechar</button>
     </div>
+  </div>
   </div>
 </div>
 
@@ -1587,6 +1626,17 @@ function linhaEvento(ev){
   }
   if(ev.tipo==='reinicio-diario-config'){
     return `<div class="ev-linha"><span class="ev-dot"></span><b>⏰ Agendamento alterado</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+  }
+  // instalou / desinstalou (ver registrarProgramas no lojaStatus.js). Sem
+  // estas duas linhas os dois eventos caíam no fim desta função e apareciam
+  // como "Voltou" - o mesmo erro do reinício automático logo acima.
+  // Desinstalar é vermelho e instalar é amarelo de propósito: programa que
+  // some (antivírus, backup, o próprio agente) some porque alguém apagou.
+  if(ev.tipo==='programa-novo'){
+    return `<div class="ev-linha"><span class="ev-dot warn"></span><b>📦 Programa instalado</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
+  }
+  if(ev.tipo==='programa-sumido'){
+    return `<div class="ev-linha"><span class="ev-dot bad"></span><b>🗑️ Programa desinstalado</b> · ${fmtDataHora(ev.em)}${ev.detalhe?` · ${escapeHtml(ev.detalhe)}`:''}</div>`;
   }
   const fora = ev.duracaoMs!=null ? ` · ficou fora ${fmtDuracao(ev.duracaoMs)}` : '';
   // O QUE REALMENTE ACONTECEU no silêncio (ver varrerAlertas em
@@ -2711,6 +2761,24 @@ async function salvarEdicaoComputador(){
   }
 }
 
+async function carregarMigracaoEndereco(){
+  const el = document.getElementById('migracao-endereco');
+  if(!el) return;
+  try{
+    const r = await fetch('/api/loja-status/migracao-endereco');
+    if(!r.ok) return;
+    const d = await r.json();
+    const cor = d.podeAposentar ? 'var(--ok)' : 'var(--warn)';
+    const lista = (d.pendentes||[]).map(p=>`<div style="font-size:11.5px;color:var(--muted);">• ${escapeHtml(p.nome||'')} — ${p.endereco?escapeHtml(p.endereco):`sem reportar (agente v${p.versao||'?'}, anterior à 51)`}</div>`).join('');
+    el.innerHTML = `<div style="border:1px solid ${cor};border-radius:10px;padding:12px;">
+      <div style="font-size:13px;"><b style="color:${cor};">${d.migradas} de ${d.total}</b> já falam pelo endereço oficial <b>${escapeHtml(d.oficial||'(não configurado)')}</b>.</div>
+      ${d.podeAposentar
+        ? '<div style="font-size:12.5px;color:var(--ok);margin-top:6px;">✅ Nenhuma máquina pendente — dá pra aposentar o endereço antigo com segurança.</div>'
+        : `<div style="font-size:12.5px;color:var(--warn);margin-top:6px;">⚠️ ${(d.pendentes||[]).length} máquina(s) ainda não confirmaram. <b>Não desligue o endereço antigo agora.</b></div>${lista}`}
+    </div>`;
+  }catch(e){ /* o painel some em vez de quebrar a tela */ }
+}
+
 async function enviarPapelDeParede(){
   const input = document.getElementById('pp-arquivo');
   const msg = document.getElementById('msg-pp');
@@ -2741,21 +2809,24 @@ const POLITICA_ITENS = [
   { campo:'papelDeParedeAtivo', rotulo:'🖼️ Papel de parede da rede', ajuda:'Aplica a imagem enviada abaixo na área de trabalho desta máquina.' },
   { campo:'bloquearUsbStorage', rotulo:'🔌 Bloquear pendrive / HD externo', ajuda:'Só armazenamento USB. Pin pad, impressora térmica, Zebra, leitor e teclado/mouse continuam funcionando.' },
   { campo:'bloquearInstalacao', rotulo:'🔒 Instalar exige Administrador', ajuda:'O Windows nega a elevação pedida por usuário comum. Atualização de Chrome/PDV (serviço já elevado) não passa por aí.' },
-  { campo:'alertarInstalacao', rotulo:'📦 Avisar quando instalarem algo', ajuda:'A máquina manda a lista de programas e você recebe alerta do que for novo.' },
+  { campo:'alertarInstalacao', rotulo:'📦 Avisar quando instalarem ou desinstalarem algo', ajuda:'A máquina manda a lista de programas e você recebe alerta do que entrou e do que saiu.' },
 ];
 function renderPoliticaComputador(codigo, c){
   const el = document.getElementById('detalhe-comp-politica');
+  // painel opcional: se um dia ele sair do HTML, a ficha continua abrindo
+  if(!el) return;
   el.classList.toggle('hidden', !IS_MASTER);
   if(!IS_MASTER) return;
   const pol = c.politica || {};
   const aviso = c.tipo === 'interno' ? '' : '<div style="font-size:11px;color:var(--warn);margin-top:6px;">Pendrive e instalação precisam de Administrador na máquina - quem aplica é a tarefa de boot do NOCZenith.</div>';
   const novo = c.ultimoProgramaNovoEm ? `<div style="font-size:11.5px;color:var(--warn);margin-top:8px;">📦 Programa novo visto: <b>${escapeHtml(c.ultimoProgramaNovoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoProgramaNovoEm))}</div>` : '';
+  const sumiu = c.ultimoProgramaSumidoEm ? `<div style="font-size:11.5px;color:var(--bad);margin-top:8px;">🗑️ Programa desinstalado: <b>${escapeHtml(c.ultimoProgramaSumidoDetalhe||'')}</b> · ${escapeHtml(tempoRelativo(c.ultimoProgramaSumidoEm))}</div>` : '';
   el.innerHTML = `<div style="font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Política desta máquina</div>
     ${POLITICA_ITENS.map(i=>`<label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;cursor:pointer;">
       <input type="checkbox" data-pol="${i.campo}" ${pol[i.campo]?'checked':''} style="width:auto;margin-top:3px;accent-color:var(--accent);">
       <span style="font-size:12.5px;">${i.rotulo}<small style="display:block;color:var(--muted);">${i.ajuda}</small></span>
     </label>`).join('')}
-    ${aviso}${novo}
+    ${aviso}${novo}${sumiu}
     <button type="button" class="btn-mini ok" style="margin-top:8px;" onclick="salvarPoliticaComputador('${escapeJs(codigo)}','${escapeJs(c.posto)}')">Salvar política</button>
     <div class="msg hidden" id="msg-politica" style="margin-top:6px;"></div>`;
 }
@@ -3452,6 +3523,7 @@ async function boot(){
     document.getElementById('btn-manutencao').classList.remove('hidden');
     document.getElementById('btn-push-ar').classList.remove('hidden');
     carregarConfigPushAr();
+    carregarMigracaoEndereco();
     await carregarAgente();
   }
   conectarStream();

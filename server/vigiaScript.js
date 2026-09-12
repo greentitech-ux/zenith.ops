@@ -13,7 +13,7 @@
 // Esquecer de bumpar significa que a mudanca nunca chega nos computadores
 // que ja tem o vigia rodando (so nos que forem instalados do zero depois
 // do deploy).
-const VERSAO_VIGIA = 50;
+const VERSAO_VIGIA = 52;
 
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://adyen-monitor.onrender.com').replace(/\/+$/, '');
 
@@ -235,6 +235,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '# (o carimbo envelhece), a de boot reassume em ate 2 ticks - a maquina',
     '# nunca fica muda, logada ou nao.',
     '$CaminhoFlagUi = Join-Path (Split-Path -Parent $PSCommandPath) "ui-ativa.flag"',
+    '# endereco que ESTE script usa (assado nele no download). E o que permite',
+    '# saber quantas maquinas ainda falam com o endereco antigo - sem isso,',
+    '# aposentar o dominio velho seria aposta, nao decisao (ver CLAUDE.md §4).',
+    '$EnderecoBase = "' + APP_BASE_URL + '"',
     '$UrlProgramas = "' + urlProgramas + '"',
     '$UrlPapelDeParede = "' + urlPapelDeParede + '"',
     '$CaminhoPolitica = Join-Path (Split-Path -Parent $PSCommandPath) "politica-aplicada.txt"',
@@ -1199,10 +1203,10 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '# quando muda: cada envio e 1 leitura + 1 escrita no Firestore, e o estado',
     '# quase nunca muda - sem a trava seriam ~45 mil escritas por dia no parque.',
     'function Reportar-EstadoAgente($estadoPrint) {',
-    '  $chave = "$VersaoScript|$estadoPrint"',
+    '  $chave = "$VersaoScript|$estadoPrint|$EnderecoBase"',
     '  if ($global:UltimoEstadoAgenteReportado -eq $chave) { return }',
     '  try {',
-    '    $corpoEstado = @{ versao = $VersaoScript; noPulsoPrint = "$estadoPrint" } | ConvertTo-Json -Compress',
+    '    $corpoEstado = @{ versao = $VersaoScript; noPulsoPrint = "$estadoPrint"; endereco = $EnderecoBase } | ConvertTo-Json -Compress',
     '    Invoke-RestMethod -Uri $UrlEstadoAgente -Method Post -ContentType "application/json; charset=utf-8" -Headers $CabecalhosAgente -Body $corpoEstado -TimeoutSec 10 | Out-Null',
     '    $global:UltimoEstadoAgenteReportado = $chave',
     '  } catch { Escrever-Log "Falha ao reportar estado do agente: $($_.Exception.Message)" }',
@@ -1318,6 +1322,11 @@ function montarScriptVigia({ codigo, posto, tipo, agentToken, noPulsoPrint }) {
     '# o Master no que for NOVO. A comparacao NUNCA fica aqui: agente adulterado',
     '# nao consegue esconder o que instalou.',
     'function Inventariar-Programas {',
+    // So a instancia de LOGIN inventaria. A de boot roda como SYSTEM, e o
+    // HKCU dela e outro hive: a lista voltaria sem os programas instalados
+    // "so pra mim" e o servidor leria isso como desinstalacao em massa - e
+    // como reinstalacao no proximo tick do usuario, pra sempre.
+    '  if ($Servico) { return }',
     '  try {',
     '    $chaves = @("HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*")',
     '    $nomes = @(Get-ItemProperty $chaves -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and -not $_.SystemComponent } | ForEach-Object { "$($_.DisplayName)" } | Sort-Object -Unique)',
