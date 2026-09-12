@@ -853,6 +853,8 @@ app.post('/api/solicitacoes/decidir', upload.single('comprovante'), async (req, 
       acao, motivoDecisao, comprovante, decididoPorEmail: configRelatorio.emailDestino,
     });
     broadcast('solicitacao-decidida', atualizado, 'solicitacoes');
+    // decidido pelo link do e-mail tambem move a tarefa do Meu Dia (era so na tela)
+    await sincronizarTarefasDoTicket(atualizado);
     res.json({ ok: true, numeroTicket: atualizado.numeroTicket, status: atualizado.status });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1374,7 +1376,7 @@ app.post('/api/loja-status/:codigo/computadores/:posto/telemetria', async (req, 
   try {
     const token = req.headers['x-noc-token'] || req.body.token || null;
     const r = await lojaStatus.registrarTelemetria(req.params.codigo, req.params.posto, {
-      disco: req.body.disco, dispositivos: req.body.dispositivos, uptimeHoras: req.body.uptimeHoras,
+      disco: req.body.disco, ram: req.body.ram, dispositivos: req.body.dispositivos, uptimeHoras: req.body.uptimeHoras,
       statusImpressoras: req.body.statusImpressoras,
     }, token);
     // a RESPOSTA leva quais impressoras aquele agente deve sondar no proximo
@@ -10039,6 +10041,7 @@ app.patch('/api/solicitacoes/:id/prestacao-contas', auth.requireMasterOrAdmin, u
       comprovante,
       registradoPorEmail: req.user.email,
     });
+    await sincronizarTarefasDoTicket(registro); // prestacao de contas encerra o adiantamento: tarefa vai pra Concluidos
     broadcast('solicitacao-decidida', registro, 'solicitacoes');
     res.json(registro);
   } catch (err) {
@@ -10190,6 +10193,13 @@ app.patch('/api/solicitacoes/:id/status', auth.requireMasterOrAdmin, async (req,
           // ticket) e que tambem forca trocar no proximo login
           await users.desbloquear(atual.criadoPorId, { pedirTrocaSenha: !!req.body.pedirTrocaSenha });
           desbloqueado = true;
+          // destravou = terminou: o ticket fecha (execucao FINALIZADO) e a tarefa do
+          // Meu Dia vai pra Concluidos junto (pedido 12/09) - sem isto ficava em
+          // "A fazer" com o ticket ja resolvido
+          try {
+            const finalizado = await solicitacoes.atualizarExecucao(req.params.id, 'FINALIZADO', { porNome: req.user.username || req.user.email });
+            await sincronizarTarefasDoTicket(finalizado);
+          } catch (e) { console.error('Login bloqueado: nao consegui finalizar o ticket apos destravar:', e.message); }
           // avisa a pessoa na hora - mesma frase do pop-up de quem aprovou
           avisarLoginDesbloqueado(atual.criadoPorId, { porId: req.user.id, porEmail: req.user.email, pedirTrocaSenha: !!req.body.pedirTrocaSenha });
         } catch (e) {

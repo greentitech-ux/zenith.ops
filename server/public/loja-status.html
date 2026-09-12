@@ -1120,6 +1120,10 @@ function metricasTileHtml(c){
   const temp = ((c.disco && c.disco.discos) || []).reduce((max, d) => (
     d.temperaturaC != null && (max == null || d.temperaturaC > max) ? d.temperaturaC : max), null);
   if(temp != null) bits.push(`<span class="m-chip ${temp >= 60 ? 'alerta' : ''}" title="temperatura do disco">🌡️ ${temp}°</span>`);
+  if(c.ram && c.ram.totalGb != null){
+    const livre = c.ram.livreGb != null ? ` · ${c.ram.livreGb} GB livres` : '';
+    bits.push(`<span class="m-chip ${c.ram.totalGb < 4 ? 'alerta' : ''}" title="memória RAM instalada${livre}">🧠 ${c.ram.totalGb} GB</span>`);
+  }
   if(c.uptimeHoras != null){
     const dias = Math.floor(c.uptimeHoras / 24);
     const rotulo = dias >= 1 ? `${dias}d` : `${Math.round(c.uptimeHoras)}h`;
@@ -1226,6 +1230,9 @@ function atualizarConteudoDetalhe(codigo, c){
       + (discos?`<br>${discos}`:'') + (volumes?`<br>${volumes}`:'') + motivos);
   }
   // regra da casa: reiniciar 1x por semana (ver UPTIME_REINICIAR_DIAS)
+  if(c.ram && c.ram.totalGb != null){
+    linhas.push(`🧠 <b>RAM:</b> ${c.ram.totalGb} GB${c.ram.livreGb != null ? ` <span class="sub">· ${c.ram.livreGb} GB livres</span>` : ''}${c.ramMedidaEm ? ` <span class="sub">· medido ${formatarRelativo(c.ramMedidaEm)}</span>` : ''}`);
+  }
   if(c.uptimeHoras != null){
     const dias = Math.floor(c.uptimeHoras/24);
     const precisa = dias >= 7;

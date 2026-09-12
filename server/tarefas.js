@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const db = require('./firestore');
 const ticketCounter = require('./ticketCounter');
 const prioridades = require('./prioridades');
+const auth = require('./auth');
 
 // ---------- reunião: a MESMA tarefa, com hora e link ----------
 // Segue o padrão de ehOcorrencia: uma marca que muda o que o cartão mostra e
@@ -81,8 +82,16 @@ function podeArquivar(tarefa, acesso) {
     && !!tarefa.unidade && (acesso.unidades || []).includes(tarefa.unidade));
 }
 
+// Ticket automatico de "Login bloqueado" (ver auth.criarChamadoBloqueio):
+// APROVAR ja destrava a conta na mesma hora - e a conclusao, nao ha execucao
+// depois. Sem isto a tarefa ficava em "A fazer" pra sempre com o ticket
+// encerrado (pedido do Master, 12/09: "todos que tiverem com status
+// encerrado precisa estar em Concluidos").
+function ehTicketDeBloqueio(ticket) {
+  return !!ticket && ticket.tipo === 'suporte-ti' && ticket.criadoPorEmail === auth.ROBO_BLOQUEIO_EMAIL;
+}
 function statusDoTicket(ticket) {
-  if (ticket.status === 'APROVADO') return ticket.execucaoStatus === 'FINALIZADO' ? 'CONCLUIDA' : 'A_FAZER';
+  if (ticket.status === 'APROVADO') return (ticket.execucaoStatus === 'FINALIZADO' || ehTicketDeBloqueio(ticket)) ? 'CONCLUIDA' : 'A_FAZER';
   if (ticket.status === 'PENDENTE') return 'PENDENTE';
   return 'CANCELADA';
 }
@@ -507,7 +516,9 @@ async function sincronizarRetroativo({ solicitacoes = [], estornos = [], usuario
   // v3: passa a gravar a data REAL do ticket em criadaEm/dataInicio (antes era
   // a data da sincronização). Versão nova = o Master consegue rodar de novo
   // pra corrigir o que já está gravado, sem precisar de forcar.
-  const versao = 'tickets-v3';
+  // v4 (12/09/2026): ticket de Login bloqueado aprovado passa a ser CONCLUIDA
+  // (ver ehTicketDeBloqueio) - versao nova refaz o historico uma vez no boot
+  const versao = 'tickets-v4';
   const ref = CONTROLE.doc(`retroativo-${versao}`);
   const anterior = await ref.get();
   if (anterior.exists && !forcar) return { executada: false, motivo: 'já sincronizado nesta versão', ...anterior.data() };
