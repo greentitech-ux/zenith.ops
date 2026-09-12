@@ -17824,6 +17824,137 @@ setTimeout(async () => {
   if (!okAnydeskToque) ruins += 1;
   console.log(`${okAnydeskToque ? '✓' : '✗'} NOC no celular: tocar no 🖥️ do card abre a máquina (o "anydesk:" não tem quem atenda ali)`);
 
+  // ---- NOC: reinício automático diário ----
+  //
+  // Pedido do Master: "local para configurar um horário para reiniciar o
+  // computador de forma automática - escolho qual reinicia todos os dias às
+  // 4h".
+  //
+  // O que este teste protege, em ordem de gravidade:
+  //   1. a HORA é de Brasília. O servidor roda em UTC: cravar "4h" lá vira
+  //      1h da manhã aqui - reinício de máquina de loja na hora errada.
+  //   2. NÃO reinicia duas vezes. A janela é de 6 min e o timer bate de
+  //      minuto em minuto: sem a trava por ocorrência, a máquina levaria 6
+  //      reinícios seguidos às 4h.
+  //   3. trocar o horário vale HOJE. A trava guarda "dia|hora", não só o
+  //      dia - senão mudar de 04:00 pra 22:00 de manhã só valeria amanhã.
+  //   4. ligar pede a senha do Master; desligar, não.
+  let okReinicioDiario = false;
+  try {
+    const ls5 = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const cab5 = { Authorization: 'Bearer ' + token };
+    const htmlRD = require('fs').readFileSync(require('path').join(__dirname, 'public', 'loja-status.html'), 'utf8');
+    const idxRD = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
+    const oc = ls5.ocorrenciaDoReinicioDiario;
+    const interno = (extra) => ({ codigo: 'RD', posto: 'p', tipo: 'interno', reinicioDiario: '04:00', ...extra });
+    // 2026-09-12 04:02 em Brasília = 07:02 UTC (BRT é UTC-3, sem horário de verão)
+    const AS_0402 = Date.UTC(2026, 8, 12, 7, 2);
+    const AS_0358 = Date.UTC(2026, 8, 12, 6, 58);
+    const AS_0408 = Date.UTC(2026, 8, 12, 7, 8);
+
+    // a máquina de verdade, pra ver o comando entrar na fila
+    const pcRD = await ls5.cadastrarComputador('RDTESTE', 'PcNoite', 'interno');
+    await ls5.heartbeat('RDTESTE', pcRD.posto, { userAgent: 'NOCZenith/1.0' });
+    const semSenha = await postarJson('/api/loja-status/reinicio-diario', {
+      alvos: [{ codigo: 'RDTESTE', posto: pcRD.posto }], hora: '04:00',
+    }, cab5);
+    const comSenha = await postarJson('/api/loja-status/reinicio-diario', {
+      alvos: [{ codigo: 'RDTESTE', posto: pcRD.posto }], hora: '04:00', password: process.env.MASTER_PASSWORD,
+    }, cab5);
+    const horaRuim = await postarJson('/api/loja-status/reinicio-diario', {
+      alvos: [{ codigo: 'RDTESTE', posto: pcRD.posto }], hora: '25:00', password: process.env.MASTER_PASSWORD,
+    }, cab5);
+    const gravado = (await ls5.listar()).find((c) => c.codigo === 'RDTESTE' && c.posto === pcRD.posto) || {};
+    // a lista do painel é o RESUMO (campos pesados saem) - se reinicioDiario
+    // caísse junto, o ⏰ nunca apareceria no card
+    const noResumo = (await ls5.listarResumo()).find((c) => c.codigo === 'RDTESTE' && c.posto === pcRD.posto) || {};
+
+    // dispara de verdade e confere que NÃO dispara de novo na mesma janela
+    const disparou = await ls5.varrerReinicioDiario(AS_0402);
+    const depois = (await ls5.listar()).find((c) => c.codigo === 'RDTESTE' && c.posto === pcRD.posto) || {};
+    const naFilaRD = depois.comandoPendenteId ? (DOCS.get(`lojaStatusComandos/${depois.comandoPendenteId}`) || {}) : {};
+    const deNovo = await ls5.varrerReinicioDiario(AS_0402 + 60 * 1000);
+
+    const desligar = await postarJson('/api/loja-status/reinicio-diario', {
+      alvos: [{ codigo: 'RDTESTE', posto: pcRD.posto }], hora: null,
+    }, cab5);
+    const desligado = (await ls5.listar()).find((c) => c.codigo === 'RDTESTE' && c.posto === pcRD.posto) || {};
+
+    const conf = {
+      // 1. a hora é de Brasília, e a janela é de 6 min
+      'às 04:02 de Brasília uma máquina marcada pras 04:00 entra':
+        oc(interno(), AS_0402) === '2026-09-12|04:00',
+      'às 03:58 ainda não': oc(interno(), AS_0358) === null,
+      'às 04:08 já passou da janela': oc(interno(), AS_0408) === null,
+      // 2. não reinicia duas vezes na mesma janela
+      'quem já reiniciou nessa ocorrência não entra de novo':
+        oc(interno({ reinicioDiarioUltima: '2026-09-12|04:00' }), AS_0402) === null,
+      'e a varredura repetida no minuto seguinte não manda nada':
+        disparou.length === 1 && deNovo.length === 0,
+      // 3. trocar o horário vale hoje mesmo
+      'trocar de 04:00 pra 22:00 vale no mesmo dia':
+        oc({ codigo: 'RD', posto: 'p', tipo: 'interno', reinicioDiario: '22:00', reinicioDiarioUltima: '2026-09-12|04:00' },
+          Date.UTC(2026, 8, 13, 1, 1)) === '2026-09-12|22:00',
+      // meia-noite: a ocorrência é de ONTEM, não de hoje - sem isso um
+      // horário perto da virada nunca disparava
+      'horário perto da meia-noite dispara depois da virada do dia':
+        oc({ codigo: 'RD', posto: 'p', tipo: 'interno', reinicioDiario: '23:58' },
+          Date.UTC(2026, 8, 13, 3, 1)) === '2026-09-12|23:58',
+      // só computador interno com agente recebe comando - o mesmo portão do
+      // reinício manual
+      'máquina de atendimento não entra': oc(interno({ tipo: 'atendimento' }), AS_0402) === null,
+      'hora inválida não entra':
+        oc(interno({ reinicioDiario: '4:00' }), AS_0402) === null
+        && oc(interno({ reinicioDiario: '25:00' }), AS_0402) === null
+        && oc(interno({ reinicioDiario: '' }), AS_0402) === null,
+      // 4. ligar pede senha; desligar não
+      'ligar sem a senha do Master é recusado': semSenha.status === 400,
+      'com a senha, grava o horário': comSenha.status === 200 && gravado.reinicioDiario === '04:00',
+      'horário inválido é recusado': horaRuim.status === 400,
+      'desligar não pede senha': desligar.status === 200 && desligado.reinicioDiario === null,
+      // o comando é o MESMO do reinício manual (2 min de aviso na tela da
+      // loja); a rota nunca recebe comando de fora
+      'manda o comando fixo de reinício, com os 2 minutos de aviso':
+        /shutdown \/r \/t 120/.test(naFilaRD.comando || '') && naFilaRD.origem === 'reinicio-diario'
+        && !/req\.body\.comando/.test(idxRD.slice(idxRD.indexOf("app.post('/api/loja-status/reinicio-diario'"), idxRD.indexOf("app.post('/api/loja-status/reinicio-diario'") + 1800)),
+      // o NOC tem de saber que foi ELE quem pediu: senão o push de queda
+      // afirma "verifique a internet da loja" às 4h da manhã
+      'marca que o reinício foi comandado por nós': !!depois.reinicioComandadoEm,
+      'deixa rastro no histórico da máquina':
+        (depois.eventos || []).some((e) => e.tipo === 'reinicio-diario')
+        && (depois.eventos || []).some((e) => e.tipo === 'reinicio-diario-config'),
+      // um evento sem linha própria cai no fim de linhaEvento() e aparece
+      // como "Voltou" - registro que diz o contrário do que aconteceu
+      'os dois eventos novos têm linha própria na tela (não viram "Voltou")':
+        /ev\.tipo==='reinicio-diario'/.test(htmlRD) && /ev\.tipo==='reinicio-diario-config'/.test(htmlRD),
+      // o horário tem de chegar ao painel: o ⏰ no card é o que evita o
+      // chamado de "o computador reiniciou sozinho de madrugada"
+      'o horário viaja no resumo do painel': noResumo.reinicioDiario === '04:00',
+      'e aparece no card e no detalhe':
+        /if\(c\.reinicioDiario\) bits\.push/.test(htmlRD) && /Reinício automático: <b>todos os dias às/.test(htmlRD),
+      // configurar é na janela de manutenção, que já resolve "quais máquinas"
+      'dá pra configurar na janela de manutenção, com os selecionados':
+        /id="manut-hora"/.test(htmlRD) && /manutAgendar\('ligar'\)/.test(htmlRD) && /manutAgendar\('desligar'\)/.test(htmlRD),
+      // e a janela tem de ser USÁVEL no celular, que é de onde o Master
+      // configura: 6 botões numa linha de 390px se sobrepunham e o último
+      // saía da tela, e o campo de senha era uma caixa branca no escuro
+      'a janela de manutenção funciona no celular (botões quebram linha)':
+        /\.modal-acoes\{display:flex;flex-wrap:wrap;/.test(htmlRD),
+      'e o campo de senha não é mais uma caixa branca no modal escuro':
+        /\.modal input\[type=text\],\.modal input\[type=password\],\.modal select\{/.test(htmlRD),
+      // o timer não pode pegar carona no NOC_VARREDURA_MS: aquele é
+      // afrouxável por variável de ambiente, e horário marcado não pode
+      // depender de quanto o alarme de queda foi afrouxado
+      'o timer do reinício é próprio, de 1 min, e não o da varredura':
+        /setInterval\(\(\) => \{\s*rodarReinicioDiario\(\)[\s\S]{0,160}?\}, 60 \* 1000\);/.test(idxRD),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okReinicioDiario = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okReinicioDiario = false; console.log('  erro: ' + e.message); }
+  if (!okReinicioDiario) ruins += 1;
+  console.log(`${okReinicioDiario ? '✓' : '✗'} NOC: reinício automático diário (escolhe quais máquinas e a hora, na janela de manutenção)`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);

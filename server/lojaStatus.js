@@ -1705,6 +1705,146 @@ async function enfileirarComandoEmAlvos(alvos, comando, opcoes) {
   return [...resultados, ...naoElegiveis];
 }
 
+// ---------------------------------------------------------------------
+// REINICIO DIARIO AUTOMATICO
+//
+// Pedido do Master: "local para configurar um horario para reiniciar o
+// computador de forma automatica - escolho qual reinicia todos os dias as
+// 4h". A politica da casa ja era reiniciar 1x por semana (ver avaliarUptime
+// em nocMaquina.js), mas na mao: alguem tinha de abrir a janela de
+// manutencao e marcar.
+//
+// QUEM DISPARA e o servidor, num timer de 1 minuto (ver index.js). Ele le o
+// ESPELHO em memoria, entao perguntar "tem alguem marcado pra agora?" a cada
+// minuto NAO custa leitura no Firestore. So quando uma maquina bate o horario
+// e que ha escrita - a mesma que o reinicio manual ja fazia.
+//
+// A HORA E O DIA SAO DE BRASILIA. O servidor roda em UTC: "todos os dias as
+// 4h" cravado em UTC vira 1h da manha aqui, e muda de novo no horario de
+// verao do outro lado. Por isso tudo passa por agoraBrasilia().
+//
+// JANELA de 6 minutos: o timer pode atrasar (deploy, uma volta mais lenta) e,
+// sem folga, um minuto perdido pulava a noite inteira.
+//
+// TRAVA por ocorrencia ("dia|hora"), e nao so por dia: dentro da janela de 6
+// minutos a maquina reiniciaria de novo a cada volta da varredura. Guardar a
+// HORA junto faz a troca de horario valer no mesmo dia - mudou de 04:00 pra
+// 22:00 as 10h da manha, reinicia hoje as 22:00, sem precisar zerar nada na
+// mao.
+const REINICIO_DIARIO_JANELA_MIN = 6;
+const REINICIO_DIARIO_ORIGEM = 'reinicio-diario';
+const HORA_DIARIA_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+function horaDiariaValida(v) { return typeof v === 'string' && HORA_DIARIA_RE.test(v); }
+function minutosDaHora(hhmm) { const [h, m] = String(hhmm).split(':'); return (Number(h) * 60) + Number(m); }
+function agoraBrasilia(ms) {
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(ms == null ? Date.now() : ms))
+    .reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  return {
+    dia: `${partes.year}-${partes.month}-${partes.day}`,
+    minutos: (Number(partes.hour) * 60) + Number(partes.minute),
+  };
+}
+function diaAnterior(dia) {
+  const d = new Date(`${dia}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+// A ocorrencia que esta acontecendo AGORA pra um computador marcado, ou null.
+// Devolve a chave "dia|hora" que vai pra trava - e ela que sabe a diferenca
+// entre "as 23:58 de ontem, atrasado 3 min" e "as 23:58 de hoje, que ainda
+// nem chegou". Sem isso, um horario perto da meia-noite nunca disparava:
+// passada a virada, a conta do dia dava negativa e caia fora da janela.
+function ocorrenciaDoReinicioDiario(doc, ms) {
+  if (!doc || doc.tipo !== 'interno' || !horaDiariaValida(doc.reinicioDiario)) return null;
+  const agora = agoraBrasilia(ms);
+  const atrasoHoje = agora.minutos - minutosDaHora(doc.reinicioDiario);
+  const atraso = atrasoHoje >= 0 ? atrasoHoje : atrasoHoje + (24 * 60);
+  const dia = atrasoHoje >= 0 ? agora.dia : diaAnterior(agora.dia);
+  if (atraso >= REINICIO_DIARIO_JANELA_MIN) return null;
+  const chave = `${dia}|${doc.reinicioDiario}`;
+  return doc.reinicioDiarioUltima === chave ? null : chave;
+}
+
+// liga/desliga em LOTE (a tela manda a lista marcada). Espelha o formato de
+// enfileirarComandoEmAlvos de proposito: alvo que nao e computador interno
+// volta recusado, com o motivo, em vez de sumir em silencio.
+async function definirReinicioDiario(alvos, hora, porEmail) {
+  if (hora !== null && !horaDiariaValida(hora)) {
+    throw new Error('Horário inválido - use HH:MM, de 00:00 a 23:59.');
+  }
+  const docs = await listUncached();
+  const querido = new Set((alvos || []).map((a) => `${a.codigo}|${a.posto}`));
+  const escolhidos = docs.filter((d) => d.tipo === 'interno' && querido.has(`${d.codigo}|${d.posto}`));
+  const feitos = [];
+  for (const doc of escolhidos) {
+    const em = Date.now();
+    // fica no historico do computador: quem ligou, quando e pra que hora.
+    // Uma maquina que reinicia sozinha as 4h sem rastro vira chamado de TI.
+    const detalhe = hora
+      ? `reinício automático ligado: todos os dias às ${hora} (${porEmail || '—'})`
+      : `reinício automático desligado (${porEmail || '—'})`;
+    await gravarEEspelhar(doc.codigo, doc.posto, {
+      reinicioDiario: hora,
+      reinicioDiarioPorEmail: porEmail || null,
+      reinicioDiarioEm: em,
+      eventos: [...(doc.eventos || []), { tipo: 'reinicio-diario-config', em, detalhe }].slice(-EVENTOS_MAX),
+    });
+    feitos.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, ok: true });
+  }
+  const naoElegiveis = (alvos || [])
+    .filter((a) => !escolhidos.some((d) => d.codigo === a.codigo && d.posto === a.posto))
+    .map((a) => ({ ...a, ok: false, motivo: 'não é um computador interno com NOCZenith' }));
+  return [...feitos, ...naoElegiveis];
+}
+
+async function marcarOcorrenciaFeita(doc, chave, detalhe) {
+  const em = Date.now();
+  await gravarEEspelhar(doc.codigo, doc.posto, {
+    reinicioDiarioUltima: chave,
+    reinicioDiarioUltimoEm: em,
+    eventos: [...(doc.eventos || []), { tipo: REINICIO_DIARIO_ORIGEM, em, detalhe }].slice(-EVENTOS_MAX),
+  });
+}
+
+// Roda no timer de 1 minuto. Em serie de proposito: sao poucas
+// maquinas por minuto e cada enfileirarComando ja faz 3 idas ao Firestore -
+// disparar o parque inteiro em paralelo as 4h nao ganha nada e so concentra
+// escrita.
+async function varrerReinicioDiario(ms) {
+  const docs = await listUncached();
+  const feitos = [];
+  for (const doc of docs) {
+    const chave = ocorrenciaDoReinicioDiario(doc, ms);
+    if (!chave) continue;
+    const detalhe = `reinício automático das ${doc.reinicioDiario}`;
+    try {
+      await enfileirarComando(doc.codigo, doc.posto, COMANDO_REINICIAR, { origem: REINICIO_DIARIO_ORIGEM });
+      // o NOC precisa saber que o sumico da maquina foi ELE que pediu - senao
+      // o push de queda afirma "verifique a internet da loja" as 4h da manha
+      await marcarReinicioComandado(doc.codigo, doc.posto);
+      await marcarOcorrenciaFeita(doc, chave, detalhe);
+      feitos.push({ codigo: doc.codigo, posto: doc.posto, nome: doc.nome, hora: doc.reinicioDiario });
+    } catch (err) {
+      // ja tem comando na fila: a maquina ja vai reiniciar por outro caminho.
+      // Marcar evita a varredura insistir a cada minuto da janela.
+      if (/comando pendente/i.test(err.message || '')) {
+        await marcarOcorrenciaFeita(doc, chave, `${detalhe} - já havia comando na fila`);
+        continue;
+      }
+      // qualquer outra falha fica SEM marcar: sobram minutos de janela pra
+      // tentar de novo, e depois disso o dia passa (melhor do que insistir
+      // pra sempre numa maquina que nao aceita comando)
+      console.error(`[NOC] reinício diário de ${doc.nome || doc.posto} falhou: ${err.message}`);
+    }
+  }
+  return feitos;
+}
+
 // Dispara o MESMO comando pra todos os computadores 'interno' de uma vez.
 // Não recebe o comando de fora: quem chama escolhe entre os comandos fixos
 // acima. Abrir isso pra texto livre seria criar um "executar qualquer coisa
@@ -2639,6 +2779,8 @@ module.exports = {
   // que é como se simula uma máquina que saiu do ar.
   descartarEspelhoTeste: () => { espelho = null; espelhoEm = 0; cache.invalidar(); },
   enfileirarComando, enfileirarComandoEmTodos, enfileirarComandoEmAlvos,
+  definirReinicioDiario, varrerReinicioDiario, ocorrenciaDoReinicioDiario,
+  horaDiariaValida, REINICIO_DIARIO_JANELA_MIN, REINICIO_DIARIO_ORIGEM,
   PLACEHOLDER_IP_IMPRESSORA, resolverIpImpressora,
   relatorioQuedas, quedasDeUmComputador,
   estadoImpressorasDaUnidade, motivosQuePedemMao, MOTIVOS_QUE_PEDEM_MAO,

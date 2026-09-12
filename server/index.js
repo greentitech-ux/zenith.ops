@@ -4863,6 +4863,41 @@ app.post('/api/loja-status/manutencao/reiniciar', auth.requireMaster, async (req
   }
 });
 
+// REINICIO DIARIO AUTOMATICO (Master). Pedido do Master: "escolho qual
+// reinicia todos os dias as 4h".
+//
+// Mesma forma da janela de manutencao: uma lista de {codigo, posto} e a
+// senha do Master. O comando NAO vem de fora - quem dispara e a varredura
+// do servidor, com o COMANDO_REINICIAR fixo no codigo, com os mesmos 2
+// minutos de aviso na tela da loja.
+//
+// A senha so e exigida pra LIGAR: desligar um reinicio automatico e sempre
+// a operacao segura, e travar isso atras da senha so atrapalharia quem
+// precisa parar o agendamento as pressas.
+app.post('/api/loja-status/reinicio-diario', auth.requireMaster, async (req, res) => {
+  try {
+    const alvos = Array.isArray(req.body.alvos) ? req.body.alvos : [];
+    if (!alvos.length) return res.status(400).json({ error: 'Escolha pelo menos um computador.' });
+    if (alvos.length > 200) return res.status(400).json({ error: 'Muitos alvos de uma vez - divida em lotes.' });
+    const hora = req.body.hora === null || req.body.hora === '' ? null : req.body.hora;
+    if (hora !== null && !lojaStatus.horaDiariaValida(hora)) {
+      return res.status(400).json({ error: 'Horário inválido - use HH:MM, de 00:00 a 23:59.' });
+    }
+    if (hora !== null && !(await exigirSenhaDoMaster(req, res))) return;
+    const resultados = await lojaStatus.definirReinicioDiario(alvos, hora, req.user.email);
+    const ok = resultados.filter((r) => r.ok);
+    console.log(`[NOC] ${req.user.email} ${hora ? `agendou reinício diário às ${hora}` : 'desligou o reinício diário'} em ${ok.length}/${resultados.length} máquina(s)`);
+    res.json({
+      total: resultados.length,
+      aplicados: ok.length,
+      recusados: resultados.filter((r) => !r.ok),
+      hora,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // config do NOC (Master): hoje so o toggle do push de acesso remoto
 app.get('/api/loja-status/config', auth.requireMaster, async (req, res) => {
   res.json(await lojaStatus.getConfig());
@@ -14312,6 +14347,16 @@ function aquecerBoot(promessa, ms) {
     // Suporte (push+SSE), no espirito de alerta de RMM (Atera etc) que o
     // usuario pediu. Roda a cada 1min - o limiar de 90s ja da folga suficiente
     // pra nao confundir jitter de rede com queda de verdade.
+    // REINICIO DIARIO AUTOMATICO: quem marcou horario na janela de manutencao
+    // (ver POST /api/loja-status/reinicio-diario). Le o MESMO espelho em
+    // memoria da varredura de alertas - checar de minuto em minuto nao custa
+    // leitura no Firestore; so o disparo custa.
+    const rodarReinicioDiario = async () => {
+      const feitos = await lojaStatus.varrerReinicioDiario();
+      for (const m of feitos) {
+        console.log(`[NOC] reinício automático das ${m.hora} enfileirado em ${m.nome || m.posto} (${m.codigo})`);
+      }
+    };
     const rodarVarreduraLojaStatus = async () => {
       const transicoes = await lojaStatus.varrerAlertas();
       if (!transicoes.length) return;
@@ -14413,6 +14458,16 @@ function aquecerBoot(promessa, ms) {
     setInterval(() => {
       rodarVarreduraLojaStatus().catch((err) => console.error('Erro na varredura de conectividade das lojas:', err.message));
     }, VARREDURA_MS);
+
+    // O reinício diário tem timer PRÓPRIO, de 1 min, e não pega carona no
+    // de cima: aquele é ajustável por NOC_VARREDURA_MS (hoje 2min, e pode
+    // subir), e um horário marcado não pode depender de quanto o alarme de
+    // queda foi afrouxado. Não custa leitura: lê o mesmo espelho em memória
+    // (ver varrerReinicioDiario em lojaStatus.js).
+    rodarReinicioDiario().catch((err) => console.error('Erro no reinício diário do NOC:', err.message));
+    setInterval(() => {
+      rodarReinicioDiario().catch((err) => console.error('Erro no reinício diário do NOC:', err.message));
+    }, 60 * 1000);
 
     // reforco do alarme critico do Beniboy (ver reforcarAlarmesBeniboy) -
     // roda a cada 15s, so repete de fato quem passou de REALERTA_MS (30s)
