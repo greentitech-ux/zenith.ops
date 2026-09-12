@@ -2895,9 +2895,29 @@ setTimeout(async () => {
     const htmlL = require('fs').readFileSync(__dirname + '/public/lancamento.html', 'utf8');
     const htmlF = require('fs').readFileSync(__dirname + '/public/fechamentos.html', 'utf8');
     const cem = (v) => Math.round(Number(v) * 100);
+    // NOVO (12/09): o Master corrige o ajuste do POS na edição direta. Caso
+    // real: a loja lançou a maquininha comum no campo do POS em 01/09 e o
+    // 02/09 nasceu com -R$ 1.207,14 de desconto errado - e o ajuste é
+    // calculado UMA vez na criação, não se refaz sozinho. Zerar aqui tem que
+    // refazer o Total Declarado e a diferença junto.
+    const corrigidoResp = await enviarJson('PATCH', `/api/fechamentos/${hojeComPos.id}/editar-direto`, {
+      mudancas: { ajustePosAnterior: 0 }, motivo: 'loja lançou a maquininha comum no campo do POS',
+    }, cabP);
+    const corrigido = corrigidoResp.status === 200 ? JSON.parse(corrigidoResp.corpo) : {};
+    const srcLive = require('fs').readFileSync(__dirname + '/fechamentosLive.js', 'utf8');
     const conf = {
       // o número dele, exatamente
       'as parcelas somam o Faturamento': cem(hoje.faturamento) === 256693,
+      // o Master zera o ajuste errado e os totais se refazem
+      'Master zera o "Ajuste do POS de ontem" na edição direta (era ignorado pelo servidor)':
+        corrigidoResp.status === 200 && cem(corrigido.ajustePosAnterior) === 0,
+      'zerar o ajuste refaz o Total Declarado e a diferença (não fica o número velho)':
+        cem(corrigido.totalDeclarado) === 256693 && cem(corrigido.diferenca) === 0,
+      'o formulário de edição do Master tem o campo do ajuste':
+        /id="ef-ajustePosAnterior"/.test(htmlF)
+        && /const CAMPOS_EDICAO_FECHAMENTO = \[[^\]]*'ajustePosAnterior'[^\]]*\];/.test(htmlF),
+      'o servidor aceita o campo na edição direta (CAMPOS_NUMERICOS)':
+        /const CAMPOS_NUMERICOS = \[[\s\S]*?'ajustePosAnterior',[\s\S]*?\];/.test(srcLive),
       'sem a seção Maquininha POS, não há desconto nenhum': cem(hoje.ajustePosAnterior) === 0,
       'o Total Declarado passa a bater com o que está na tela': cem(hoje.totalDeclarado) === 256693,
       'a diferença de -R$ 1.207,14 some': cem(hoje.diferenca) === 0,
@@ -2925,7 +2945,7 @@ setTimeout(async () => {
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
     okAjustePos = !falhas.length;
-    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (sem POS: fat=${hoje.faturamento} decl=${hoje.totalDeclarado} aj=${hoje.ajustePosAnterior} dif=${hoje.diferenca} | com POS: aj=${hojeComPos.ajustePosAnterior} decl=${hojeComPos.totalDeclarado} dif=${hojeComPos.diferenca})`);
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')} (sem POS: fat=${hoje.faturamento} decl=${hoje.totalDeclarado} aj=${hoje.ajustePosAnterior} dif=${hoje.diferenca} | com POS: aj=${hojeComPos.ajustePosAnterior} decl=${hojeComPos.totalDeclarado} dif=${hojeComPos.diferenca} | corrigido: st=${corrigidoResp.status} aj=${corrigido.ajustePosAnterior} decl=${corrigido.totalDeclarado} dif=${corrigido.diferenca})`);
   } catch (e) { okAjustePos = false; console.log('  erro: ' + e.message); }
   if (!okAjustePos) ruins += 1;
   console.log(`${okAjustePos ? '✓' : '✗'} Fechamento: desconto da Maquininha POS só existe em loja que usa POS - e aparece na tela`);
@@ -3594,6 +3614,9 @@ setTimeout(async () => {
     const blocoKpi = html.slice(iKpi, iKpi + 2000);
     const iLeitura = html.indexOf('async function realizarLeituraRelatorio(');
     const blocoLeitura = html.slice(iLeitura, iLeitura + 4000);
+    // a função inteira (até a próxima function): o fim dela - sucesso, catch,
+    // finally - fica além dos 4000 chars da janela acima
+    const blocoLeituraInteiro = html.slice(iLeitura, html.indexOf('function lerCanaisExtras(', iLeitura));
     const conferencias = {
       // [^;]* no meio e no fim: outras condicoes podem entrar (a liberacao de
       // digitacao manual do grupo, o KPI de origem automatica...) - o que este
@@ -3613,6 +3636,18 @@ setTimeout(async () => {
         (html.match(/const aviso = algumTravado\r?\n/g) || []).length === 2,
       'IS_MASTER é definido no boot, antes de qualquer campo ser montado':
         html.indexOf('IS_MASTER = isMaster;') > 0 && html.indexOf('IS_MASTER = isMaster;') < html.indexOf('boot();'),
+      // AS FOTOS SOMEM SOZINHAS DEPOIS DA LEITURA (pedido do Master, 12/09):
+      // no SUCESSO a seleção é descartada, mas a mensagem "✔ Lido às..." com
+      // o resumo fica na tela; no ERRO a seleção continua (tenta de novo sem
+      // reescolher). O "limpar" clicado continua escondendo a mensagem.
+      'leitura OK: as fotos somem sozinhas, logo depois da mensagem de resultado':
+        /msg\.innerHTML = partes\.join\('<br>'\);[\s\S]{0,260}?descartarFotosRelatorio\(\);[\s\S]{0,40}?\}catch\(err\)\{/.test(blocoLeituraInteiro),
+      'leitura com ERRO não descarta as fotos (dá pra tentar de novo)':
+        !/\}catch\(err\)\{[\s\S]{0,200}?(descartarFotosRelatorio|limparSelecaoRelatorio)\(\)/.test(blocoLeituraInteiro),
+      'descartar zera a seleção SEM esconder a mensagem da leitura':
+        /function descartarFotosRelatorio\(\)\{\s*VERSAO_PREPARO_RELATORIO \+= 1;\s*ARQUIVOS_RELATORIO = \[\];\s*pintarSelecaoRelatorio\(\);\s*\}/.test(html),
+      'o "limpar" da pessoa continua escondendo a mensagem (recomeço)':
+        /function limparSelecaoRelatorio\(\)\{\s*descartarFotosRelatorio\(\);\s*esconderMsgLerCanais\(\);\s*\}/.test(html),
     };
     const falhas = Object.entries(conferencias).filter(([, ok]) => !ok).map(([n]) => n);
     okMasterDigitaSemLeitura = !falhas.length;
@@ -4415,6 +4450,7 @@ setTimeout(async () => {
 
     const html = require('fs').readFileSync(require('path').join(__dirname, 'public', 'beniboy.html'), 'utf8');
     const widgetSrc = require('fs').readFileSync(require('path').join(__dirname, 'public', 'suporte-chat.js'), 'utf8');
+    const htmlCH = require('fs').readFileSync(__dirname + '/public/central-historico.html', 'utf8');
     const alarmeSync = require('fs').readFileSync(require('path').join(__dirname, 'public', 'alarme-sync.js'), 'utf8');
     const alertaHtml = require('fs').readFileSync(require('path').join(__dirname, 'public', 'alerta-beniboy.html'), 'utf8');
     const fonteIdx = require('fs').readFileSync(require('path').join(__dirname, 'index.js'), 'utf8');
@@ -4455,6 +4491,15 @@ setTimeout(async () => {
         && /class="msg-item \$\{m\.eu\?'msg-eu':'msg-vis'\}"/.test(html)
         && /\.msg-item\.msg-eu\{align-self:flex-end;background:var\(--panel\);border-right:3px solid var\(--accent\)/.test(html)
         && /\.msg-item\.msg-vis\{align-self:flex-start/.test(html),
+      // TODOS os chats no padrão (pedido 12/09): o chat do ticket da Central
+      // estava fora - tudo à esquerda, mesmo fundo. Minha mensagem à direita
+      // (por id do autor), as dos outros à esquerda, mesmas classes/tokens.
+      'chat do ticket (Central → Histórico) segue o mesmo padrão: eu à direita, os outros à esquerda':
+        /const eu = !!ME && \(\(m\.autorId && m\.autorId===ME\.id\)/.test(htmlCH)
+        && /class="msg-item \$\{eu\?'msg-eu':'msg-vis'\}"/.test(htmlCH)
+        && /\.msg-item\.msg-eu\{align-self:flex-end;background:var\(--panel\);border-right:3px solid var\(--accent\)/.test(htmlCH)
+        && /\.msg-item\.msg-vis\{align-self:flex-start/.test(htmlCH)
+        && /\.msg-item \.m-cab\{display:flex;justify-content:flex-start/.test(htmlCH),
       // widget: o texto sai da caixa ao enviar (bug do input que não limpava)
       'widget: o operador limpa o campo NA HORA do envio (não fica texto escrito)':
         /if \(!texto && !arquivo\) return;[\s\S]{0,400}?input\.value = '';[\s\S]{0,80}?anexoInput\.value = '';/.test(widgetSrc),
@@ -15764,7 +15809,12 @@ setTimeout(async () => {
       'mesmo nome com tamanho diferente é outra foto': mesmoNomeOutroTamanho.length === 2,
       'o teto corta o excedente em vez de estourar a leitura': estoura.length === 5,
       'lista vazia não quebra': Array.isArray(semNada) && semNada.length === 0,
-      '"limpar" invalida o preparo em curso (não repõe o que foi tirado)': /function limparSelecaoRelatorio\(\)\{\n  VERSAO_PREPARO_RELATORIO \+= 1;/.test(html),
+      // o "limpar" passou a delegar pro descartarFotosRelatorio (que a leitura
+      // bem-sucedida também chama) - o que se protege segue igual: limpar
+      // invalida o preparo em curso
+      '"limpar" invalida o preparo em curso (não repõe o que foi tirado)':
+        /function limparSelecaoRelatorio\(\)\{\s*descartarFotosRelatorio\(\);/.test(html)
+        && /function descartarFotosRelatorio\(\)\{\s*VERSAO_PREPARO_RELATORIO \+= 1;/.test(html),
       'o erro de compressão também soma, em vez de trocar a seleção': /ARQUIVOS_RELATORIO = juntarFotosRelatorio\(ARQUIVOS_RELATORIO, arquivos, MAX_FOTOS_RELATORIO\)/.test(html),
     };
     const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);

@@ -522,6 +522,7 @@
     <div class="fech-grid">
       <div><label>Maquininhas (cartão)</label><input type="number" step="0.01" id="ef-adyen"></div>
       <div><label>Maquininha POS 01 (pós meia-noite)</label><input type="number" step="0.01" id="ef-adyenPos"></div>
+      <div><label>Ajuste da Maquininha POS de ontem</label><input type="number" step="0.01" id="ef-ajustePosAnterior" title="Desconto automático do POS lançado no dia anterior. Só o Master corrige aqui (ex.: a loja lançou a maquininha comum no campo do POS por engano)."></div>
     </div>
     <div class="fech-grid hidden" id="ef-formas-extras"></div>
     <div class="fech-msg hidden" id="ef-formas-vazio">Nenhum campo configurado pra essa loja - configure em Grupos.</div>
@@ -2955,7 +2956,7 @@ function renderTabela(){
 // .../Outros, TC, Cancelados) nao existem mais - cada loja so tem os campos
 // que o grupo dela define em /grupos.html (ver lancamento.html, mesma
 // logica). So sobra aqui o que nao faz parte dessas 3 secoes.
-const CAMPOS_EDICAO_FECHAMENTO = ['caixaInicial','caixaFinal','adyen','adyenPos','totalSaida','quebra','entradaDinheiro','deposito'];
+const CAMPOS_EDICAO_FECHAMENTO = ['caixaInicial','caixaFinal','adyen','adyenPos','ajustePosAnterior','totalSaida','quebra','entradaDinheiro','deposito'];
 let FECHAMENTO_EDITANDO_ID = null;
 let FECHAMENTO_EDITANDO_ORIG = null; // { unidade, data } originais, pra detectar mudança (mover)
 // grupos (franquias) cadastrados em /grupos.html - cada loja so mostra os

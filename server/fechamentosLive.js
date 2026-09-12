@@ -271,6 +271,13 @@ const CAMPOS_NUMERICOS = [
   'adyen', 'ifood', 'food99', 'pix', 'pixCnpj', 'outros', 'totalSaida',
   'faturamento', 'totalDeclarado', 'quebra', 'tc', 'cancelados',
   'entradaDinheiro', 'deposito', 'adyenPos',
+  // o desconto do POS de ontem é calculado UMA vez na criação (ver
+  // ajustePosDoDiaAnterior) e não se refaz sozinho - quando a loja lança a
+  // maquininha comum no campo do POS por engano, o dia seguinte fica com um
+  // desconto errado pra sempre. Editável pelo Master na edição direta, e só
+  // por ela (pedido de 12/09: "preciso ter acesso como MASTER a editar esse
+  // ajuste"). recomputarTotais refaz totalDeclarado/diferença em cima dele.
+  'ajustePosAnterior',
 ];
 
 // Dinheiro tem 2 casas. Sem arredondar aqui, a soma feita na tela (ponto
@@ -645,7 +652,8 @@ async function getOne(id) {
 // que já existe, não substitui. 'maquininhaPos' segue o mesmo esquema, mas
 // pro fechamento SEGUINTE (se já existir) o desconto automático não é
 // refeito - foi calculado uma vez na criação dele (ver ajustePosAnterior);
-// se precisar, o Master corrige o dia seguinte manualmente também.
+// se precisar, o Master corrige o dia seguinte na edição direta (Fechamentos
+// -> editar -> "Ajuste da Maquininha POS de ontem", ver CAMPOS_NUMERICOS).
 const TIPOS_ITEM_NOVO = ['maquininha', 'maquininhaPos', 'saida'];
 
 // monta as linhas "de -> para" de um pedido a partir do fechamento ATUAL: o
