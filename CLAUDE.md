@@ -257,6 +257,25 @@ que o `node --check` não pega.
 `node --check` não lê `.html`: extraia o `<script>` inline e cheque o
 bloco isolado.
 
+### Varredura visual (obrigatória em mudança de arquivo compartilhado)
+
+O `testeRotas.js` prova que a regra está no arquivo; não prova que ficou
+certa nas 59 telas. Mexeu em `tema.js`, `nav-menu.js`, `suporte-chat.js`,
+`recolher.js` ou em CSS que várias telas usam:
+
+```bash
+cd server && node varreduraVisual.js --aceitar   # ANTES de mexer: grava a referência
+# ...mexe...
+cd server && node varreduraVisual.js             # DEPOIS: compara e monta a prancha
+```
+
+Ele abre todas as telas no Chromium (celular e desktop), acusa erro de JS,
+rolagem horizontal, elemento fora da tela e controles se sobrepondo, e monta
+`docs/varredura/prancha.html` com antes/depois e o que mudou marcado. **A
+prancha vai junto na entrega** — quem lê bate o olho em 1 minuto. Sai com
+erro se alguma tela tiver problema; com `--estrito`, também se alguma mudou
+de aparência sem você esperar.
+
 Teste novo tem que ser **verificado por sabotagem** — quebre de propósito
 o que ele deveria pegar e confirme que ele reprova. Teste que passa dos
 dois jeitos não é teste.
