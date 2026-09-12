@@ -19073,6 +19073,68 @@ setTimeout(async () => {
   if (!okVarredura) ruins += 1;
   console.log(`${okVarredura ? '✓' : '✗'} Varredura visual: as 59 telas em celular e desktop, com as quatro checagens e a prancha`);
 
+  // ---- a hora do log da ferramenta vem em UTC ----
+  //
+  // Pergunta do Master, olhando o alarme vermelho: "por que a hora que mostra
+  // é diferente da hora real?". O alarme trazia "2026-09-12 21:56:32" com o
+  // relógio dele em 18:56 — 3h, exatamente o fuso de Brasília.
+  //
+  // A hora não era nossa: o agente manda a LINHA CRUA do ad_svc.trace e o
+  // AnyDesk grava esse arquivo em UTC. O nosso carimbo (evento.em) sempre
+  // esteve certo; quem mentia era o texto colado ao lado — e no alarme, onde
+  // só o texto aparece, não havia como perceber.
+  //
+  // A trava aqui é a escolha se VERIFICAR sozinha: das duas leituras da mesma
+  // marca (UTC ou hora de Brasília), vale a que cair mais perto do instante
+  // em que detectamos. Linha que já venha local não pode mudar — senão o
+  // conserto vira o próximo defeito.
+  let okHoraLog = false;
+  try {
+    const ls9 = require('/home/user/adyen-monitor/server/lojaStatus.js');
+    const vig9 = require('fs').readFileSync(require('path').join(__dirname, 'vigiaScript.js'), 'utf8');
+    const f = ls9.horaDoLogEmBrasilia;
+    // 12/09/2026 21:56:35 UTC = 18:56:35 em Brasília (é quando detectamos)
+    const agora = Date.UTC(2026, 8, 12, 21, 56, 35);
+    const cru = 'AnyDesk · info 2026-09-12 21:56:32.419 gsvc 3252 5448 13 anynet.any_socket - Accept request from 1571958005 (via relay).';
+
+    const conf = {
+      // o caso do Master, nominalmente
+      'a marca em UTC vira hora de Brasília':
+        f(cru, agora) === 'AnyDesk · info 2026-09-12 18:56:32.419 gsvc 3252 5448 13 anynet.any_socket - Accept request from 1571958005 (via relay).',
+      // o conserto não pode estragar o que já estava certo
+      'linha que já vem em hora local fica intacta':
+        f('x info 2026-09-12 18:56:32.419 y', agora) === 'x info 2026-09-12 18:56:32.419 y',
+      // Brasilia ja teve horario de verao (UTC-2 ate 2019). Cravar "-3h" no
+      // codigo passa despercebido hoje e reescreveria a hora errada se o
+      // horario de verao voltar: aqui a linha ja local de janeiro/2018
+      // viraria 11:00. O fuso tem de ser PERGUNTADO, nao cravado.
+      'no horario de verao (UTC-2) o fuso e perguntado, nao cravado':
+        f('x info 2018-01-15 10:00:00 y', Date.UTC(2018, 0, 15, 12, 0, 0)) === 'x info 2018-01-15 10:00:00 y',
+      'linha sem marca de hora fica intacta':
+        f('TeamViewer · Fulano entrou como Administrador', agora) === 'TeamViewer · Fulano entrou como Administrador',
+      // 01:10 UTC do dia 13 é 22:10 do dia 12 - a DATA tem de voltar junto
+      'a data acompanha quando a conversão atravessa a meia-noite':
+        f('x info 2026-09-13 01:10:00 y', Date.UTC(2026, 8, 13, 1, 10, 5)) === 'x info 2026-09-12 22:10:00 y',
+      // o resto da linha é evidência: não pode ser reescrito nem cortado
+      'só a marca de hora muda; o resto da linha é evidência e fica igual':
+        f(cru, agora).replace('18:56:32', '21:56:32') === cru,
+      // a conversão acontece ao GRAVAR: assim o alarme (que só mostra o texto)
+      // e o histórico contam a mesma coisa, sem atualizar os 52 agentes
+      'a conversão é feita ao gravar o acesso remoto':
+        /const limpo = horaDoLogEmBrasilia\(String\(detalhe \|\| ''\)\.trim\(\), Date\.now\(\)\)/
+          .test(require('fs').readFileSync(require('path').join(__dirname, 'lojaStatus.js'), 'utf8')),
+      // e o agente segue mandando a linha crua - mexer nele custaria bump de
+      // VERSAO_VIGIA e 52 máquinas baixando de novo
+      'o agente continua mandando a linha crua (nada de atualizar 52 máquinas por isso)':
+        /Avisar-Sessao \("AnyDesk · " \+ \("\$linha"\)\.Trim\(\)/.test(vig9),
+    };
+    const falhas = Object.entries(conf).filter(([, v]) => !v).map(([n]) => n);
+    okHoraLog = !falhas.length;
+    if (falhas.length) console.log(`  falhou em: ${falhas.join(' · ')}`);
+  } catch (e) { okHoraLog = false; console.log('  erro: ' + e.message); }
+  if (!okHoraLog) ruins += 1;
+  console.log(`${okHoraLog ? '✓' : '✗'} Acesso remoto: a hora do log do AnyDesk (UTC) vira hora de Brasília antes de virar alarme`);
+
   console.log(ruins ? `\n${ruins} rota(s) com problema` : '\nTodas as rotas responderam sem estourar.');
   process.exit(ruins ? 1 : 0);
 }, 2500);
