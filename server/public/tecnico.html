@@ -681,6 +681,12 @@ function canvasToBlob(canvasId){
   return new Promise(resolve=>document.getElementById(canvasId).toBlob(resolve, 'image/png'));
 }
 
+// DETALHE_ZERADO_PARA: de qual registro sao os textos que estao nas caixas.
+// abrirDetalhe() tambem e' chamado como REFRESH do mesmo registro (depois de
+// evoluir nivel, mudar prioridade, anexar...) e zerava as caixas toda vez -
+// quem ja tinha escrito perdia o texto. So zera quando o registro aberto e'
+// OUTRO.
+let DETALHE_ZERADO_PARA = null;
 function abrirDetalhe(id){
   const c = CHAMADOS.find(x=>x.id===id);
   if(!c) return;
@@ -697,7 +703,8 @@ function abrirDetalhe(id){
   // presencial segue o fluxo classico check-in -> checkout
   const podeConcluirRemoto = ehRemoto && (c.status==='ABERTO' || c.status==='INICIADO') && (c.tecnicoId===ME.id || IS_MASTER || ME.isAdmin);
   document.getElementById('bloco-remoto').classList.toggle('hidden', !podeConcluirRemoto);
-  if(podeConcluirRemoto) document.getElementById('r-observacao').value = '';
+  const trocouRegistro = DETALHE_ZERADO_PARA !== id; DETALHE_ZERADO_PARA = id;
+  if(podeConcluirRemoto && trocouRegistro) document.getElementById('r-observacao').value = '';
 
   // triagem N1 -> N2: quem esta com o chamado (ou gestor) evolui - so
   // aparece em N1, some depois de evoluir (o botao de escalar assume)
@@ -711,7 +718,7 @@ function abrirDetalhe(id){
   const podeEscalar = ehRemoto && c.status==='ABERTO' && nivelDe(c)==='N2' && PODE_ATENDER_CHATS;
   document.getElementById('bloco-escalar').classList.toggle('hidden', !podeEscalar);
   if(podeEscalar){
-    document.getElementById('esc-motivo').value = '';
+    if(trocouRegistro) document.getElementById('esc-motivo').value = '';
     carregarResponsaveisEscalar();
   }
 
@@ -731,7 +738,7 @@ function abrirDetalhe(id){
     document.getElementById('c-iniciado-em').textContent = `Check-in feito em ${fmtDataHora(c.iniciadoEm)}`;
     PECAS = []; renderPecas();
     ITENS_DEPOIS = []; renderItensDepois();
-    document.getElementById('c-observacao').value = '';
+    if(trocouRegistro) document.getElementById('c-observacao').value = '';
     document.getElementById('c-assinatura-nome').value = '';
     initSignaturePad('c-assinatura-canvas');
     limparAssinatura('c-assinatura-canvas');

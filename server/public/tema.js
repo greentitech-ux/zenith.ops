@@ -1424,8 +1424,16 @@
     document.addEventListener('click', function (e) {
       var botao = e.target.closest && e.target.closest('button,[role="button"]');
       if (!botao) return;
-      var texto = String(botao.getAttribute('aria-label') || botao.textContent || '').trim().toLocaleLowerCase('pt-BR');
-      if (!/^(fechar|cancelar|×|x|✕)/.test(texto)) return;
+      var rotulo = String(botao.getAttribute('aria-label') || botao.getAttribute('title') || '').trim().toLocaleLowerCase('pt-BR');
+      var texto = String(botao.textContent || '').trim().toLocaleLowerCase('pt-BR');
+      // Botao de UMA letra (×, x, ✕) so conta como "fechar a caixa" se o
+      // rotulo dele disser isso. O × do chip de anexo ("Remover anexo") e o ×
+      // de tirar a previa do print tambem sao um glifo so - e apagavam TODOS
+      // os rascunhos do modal: quem ja tinha escrito o comentario, colava o
+      // print e tirava um anexo repetido perdia o texto no proximo redesenho.
+      var glifo = /^[×x✕]$/.test(texto);
+      var ehFechar = /^(fechar|cancelar)/.test(rotulo) || (!glifo && /^(fechar|cancelar)/.test(texto));
+      if (!ehFechar) return;
       var caixa = botao.closest('[role="dialog"],.modal,.overlay,.sheet-wrap,.painel-conversa');
       if (caixa) limparNo(caixa);
     }, true);
@@ -1572,7 +1580,42 @@
     return botao;
   }
 
+  // Tela que JA tem o proprio "Limpar filtros" (o Meu Dia tem, como link
+  // embaixo dos presets) nao ganha um segundo: dois botoes com o mesmo nome
+  // na mesma faixa e' pior que nenhum. Compara o texto, nao a classe -
+  // cada tela desenhou o dela de um jeito.
+  function paginaJaTemLimpar() {
+    return Array.prototype.some.call(document.querySelectorAll('button,a'), function (el) {
+      if (el.classList.contains('zenith-limpar-filtros')) return false;
+      var t = String(el.textContent || '').replace(/[✕×x]/gi, '').trim().toLocaleLowerCase('pt-BR');
+      return t === 'limpar filtros' || t === 'limpar filtro';
+    });
+  }
+
+  // O botao entra AO LADO do campo, nunca DENTRO da coluna dele. Muitas telas
+  // embrulham cada campo num <label class="filter-field"> com o rotulo em
+  // cima (De / Ate); cair ali dentro empurrava o campo pra cima e o botao
+  // ficava pendurado embaixo, torto - foi assim que quebrou no Meu Dia.
+  function pontoDeInsercao(inicio, fim, faixa) {
+    var caixa = fim.parentElement;
+    // bloco que segura as DUAS datas e so elas ("01/08 ate 31/08"): depois dele
+    if (caixa && caixa !== faixa && caixa.contains(inicio) && controlesDe(caixa).length === 2) return caixa;
+    // coluna de UM campo so (label + input): depois da coluna, nao dentro
+    while (caixa && caixa !== faixa && controlesDe(caixa).length === 1) {
+      if (caixa.parentElement === faixa || caixa.tagName === 'LABEL') return caixa;
+      caixa = caixa.parentElement;
+    }
+    // o grupo das datas (De + Ate em colunas separadas): depois do grupo
+    var grupo = fim.parentElement;
+    while (grupo && grupo !== faixa) {
+      if (grupo.contains(inicio) && controlesDe(grupo).length === 2) return grupo;
+      grupo = grupo.parentElement;
+    }
+    return fim;
+  }
+
   function plantarLimparFiltros() {
+    if (paginaJaTemLimpar()) return;
     var vistos = [];
     Array.prototype.forEach.call(document.querySelectorAll('input[type=date][id]'), function (inicio) {
       if (ehCampoDeFicha(inicio)) return;
@@ -1587,15 +1630,8 @@
       if (!faixa || vistos.indexOf(faixa) !== -1) return;
       if (faixa.querySelector('.zenith-limpar-filtros')) return;
       vistos.push(faixa);
-      // depois do bloco que segura as duas datas, quando esse bloco so tem
-      // elas (o "01/08 até 31/08" do Monitor): o botao encosta no periodo em
-      // vez de cair no fim da faixa inteira
-      var caixa = fim.parentElement;
-      if (caixa && caixa !== faixa && caixa.contains(inicio) && controlesDe(caixa).length === 2) {
-        caixa.parentElement.insertBefore(montarBotaoLimpar(faixa), caixa.nextSibling);
-      } else {
-        fim.parentElement.insertBefore(montarBotaoLimpar(faixa), fim.nextSibling);
-      }
+      var apos = pontoDeInsercao(inicio, fim, faixa);
+      apos.parentElement.insertBefore(montarBotaoLimpar(faixa), apos.nextSibling);
     });
   }
 
